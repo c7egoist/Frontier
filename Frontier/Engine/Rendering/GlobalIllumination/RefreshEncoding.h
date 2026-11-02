@@ -60,6 +60,7 @@ constexpr uint32_t StratifiedSun  = 2u;
 constexpr uint32_t PenumbraFilter = 4u;
 constexpr uint32_t MirrorFilter   = 8u;
 constexpr uint32_t MirrorTrace    = 16u;
+constexpr uint32_t PenumbraNarrow = 32u;   // [-] measurement only: the penumbra filter at half its radius
 } // namespace RefinementBit
 
 // 📝 Inputs owned by systems outside the port (HMI brightness word, fire light, environment block, elapsed time):

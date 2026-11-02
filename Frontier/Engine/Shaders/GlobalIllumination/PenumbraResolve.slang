@@ -73,7 +73,8 @@ void ResolvePenumbra(uint3 Invocation : SV_DispatchThreadID)
     // ② penumbra half-width over the pixel footprint
     let Position = ReconstructWorldPosition(float2(Pixel) + 0.5, Depth);
     let Footprint = max(length(ReconstructWorldPosition(float2(Pixel) + float2(1.5, 0.5), Depth) - Position), 1.0e-4);
-    let Radius = clamp(BlockerTravel / float(Occluded) * PenumbraTangent / Footprint, 0.75, 8.0);
+    let RadiusScale = SelectBranch(1.0, 0.5, RefinementEnabled(Refresh, RefinementPenumbraNarrow));
+    let Radius = clamp(BlockerTravel / float(Occluded) * PenumbraTangent * RadiusScale / Footprint, 0.75, 8.0);
     let Normal = DecodeOctahedral(LoadTexel(SurfaceAttributes, Pixel, 0).xy);
     let PlaneTolerance = 0.02 * ResolveViewDepth(Position) + 0.01;
 

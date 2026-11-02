@@ -8,8 +8,9 @@
 // 📝 Usage: RayTracedLightingCapture <GlobalIllumination shaders> <Environment shaders> <ProvingGround> <CelestialMaps> <out>
 //    <view[,view…]> <variant[,variant…]> [warm refreshes] [measured refreshes] [indirect 0|1] [width] [height]. Time is frozen so
 //    nothing but the estimators changes between refreshes; each variant starts from a cleared history. Measure whole multiples of
-//    the antialiasing's 16-refresh jitter cycle so every mean covers the same sub-pixel offsets; the Reference variant measures
-//    three times as many. Views and variants: the tables below.
+//    the antialiasing's 16-refresh jitter cycle so every mean covers the same sub-pixel offsets. The Reference variant, when
+//    listed, runs first and measures twice as many; every later refresh is then compared with its mean. Views and variants: the
+//    tables below.
 #include "Frontier/Engine/Rendering/SceneViewport/SceneViewport.h"
 #include "stb_image_write.h"
 #include <algorithm>
@@ -48,6 +49,7 @@ struct VariantSpecification
     uint32_t    Refinements;
     bool        RayTracedShadows;
     bool        VarianceFilter;
+    uint32_t    Inspection = 0;   // [-] the demo's inspection view: 1 direct light only, 5 specular reflection only
 };
 namespace R = RefinementBit;
 const VariantSpecification Variants[] = {
@@ -57,10 +59,16 @@ const VariantSpecification Variants[] = {
     {"SolarDisc", R::SolarDisc, true, true},
     {"StratifiedSun", R::SolarDisc | R::StratifiedSun, true, true},
     {"PenumbraFilter", R::SolarDisc | R::StratifiedSun | R::PenumbraFilter, true, true},
+    {"PenumbraNarrow", R::SolarDisc | R::StratifiedSun | R::PenumbraFilter | R::PenumbraNarrow, true, true},
     {"MirrorFilter", R::SolarDisc | R::MirrorFilter, true, true},
     {"MirrorTrace", R::SolarDisc | R::MirrorFilter | R::MirrorTrace, true, true},
     {"Refined", R::SolarDisc | R::StratifiedSun | R::PenumbraFilter | R::MirrorFilter | R::MirrorTrace, true, true},
     {"Reference", R::SolarDisc | R::StratifiedSun | R::MirrorFilter | R::MirrorTrace, true, true},   // unbiased and sharp
+    // 📝 Where fireflies come from: the direct term alone and the specular reflection alone, before and after the solar disc.
+    {"DemoDirect", 0u, true, true, 1u},
+    {"DemoSpecular", 0u, true, true, 5u},
+    {"SolarDiscDirect", R::SolarDisc, true, true, 1u},
+    {"SolarDiscSpecular", R::SolarDisc, true, true, 5u},
 };
 
 double DisplayLuminance(const uint8_t* Texel)
@@ -94,10 +102,15 @@ struct Measurement
 {
     std::string         Variant{};
     double              Fireflies = 0.0;        // [-] per refresh, measured region
+    double              VisibleErrors = 0.0;    // [-] per refresh: region pixels over 12 levels of luminance from the reference mean
+    double              FrameRms = 0.0;         // [levels] luminance RMS of a single refresh from the reference mean, region
+    double              TransitionFrameRms = 0.0;   // [levels] the same over the transition pixels
+    double              TransitionNoise = 0.0;  // [levels] temporal standard deviation, transition mean
+    double              TransitionBias = 0.0;   // [levels] RMS of the variant's mean from the reference mean, transitions
     double              RefreshSeconds = 0.0;   // [s] mean
     std::map<std::string, double> Stages{};     // [ms] mean per refresh
-    std::vector<double> Mean{};                 // [8-bit levels] per channel
-    std::vector<double> Deviation{};            // [8-bit levels] temporal standard deviation per channel
+    std::vector<double> Mean{};                 // [levels] luminance per pixel
+    std::vector<double> Deviation{};            // [levels] temporal standard deviation of luminance per pixel
 };
 } // namespace
 
@@ -176,15 +189,25 @@ int main(int ArgumentCount, char** Arguments)
         }
         const std::array<int, 4> Region = {View->Region[0] * static_cast<int>(Width) / 480, View->Region[1] * static_cast<int>(Height) / 270,
                                            View->Region[2] * static_cast<int>(Width) / 480, View->Region[3] * static_cast<int>(Height) / 270};
-        auto Inside = [&](size_t Pixel) {
+        const size_t PixelCount = static_cast<size_t>(Width) * Height;
+        std::vector<uint8_t> InRegion(PixelCount, 0u);
+        for (size_t Pixel = 0; Pixel < PixelCount; ++Pixel)
+        {
             const int X = static_cast<int>(Pixel % Width), Y = static_cast<int>(Pixel / Width);
-            return X >= Region[0] && X < Region[2] && Y >= Region[1] && Y < Region[3];
-        };
+            InRegion[Pixel] = X >= Region[0] && X < Region[2] && Y >= Region[1] && Y < Region[3] ? 1u : 0u;
+        }
         ViewportCamera Camera;
         Camera.Position = View->Position;
         Camera.Target   = View->Target;
+
+        // 📝 The reference runs first; every other variant's refreshes are then measured against its mean.
+        std::vector<std::string> Order = VariantNames;
+        const auto ReferenceAt = std::find(Order.begin(), Order.end(), std::string("Reference"));
+        if (ReferenceAt != Order.end()) std::rotate(Order.begin(), ReferenceAt, ReferenceAt + 1);
+        std::vector<double> ReferenceLuma;
+        std::vector<uint8_t> Transition(PixelCount, 0u);
         std::vector<Measurement> Results;
-        for (const std::string& VariantName : VariantNames)
+        for (const std::string& VariantName : Order)
         {
             const VariantSpecification* Variant = nullptr;
             for (const VariantSpecification& Candidate : Variants)
@@ -194,21 +217,26 @@ int main(int ArgumentCount, char** Arguments)
                 std::printf("unknown variant %s\n", VariantName.c_str());
                 return 2;
             }
+            const bool IsReference = VariantName == "Reference";
             Host.Settings.VarianceFilter = Variant->VarianceFilter;
-            Host.Settings.Indirect       = Indirect;
             Host.PriorValid              = false;   // 📝 a cleared history: the temporal reuse restarts, the antialiasing takes the refresh
             Viewport.ToggleAdjustment = [Variant, Indirect](RefreshToggles& Toggles) {
                 Toggles.RayTracedShadows = Variant->RayTracedShadows;
                 Toggles.Indirect         = Indirect;
             };
             ViewportRendering Rendering;
-            Rendering.Refinements = Variant->Refinements;
+            Rendering.Refinements        = Variant->Refinements;
+            Rendering.Inspection         = Variant->Inspection;
+            Rendering.GlobalIllumination = Indirect;   // 📝 the viewport sets the host's indirect switch from this every refresh
             Measurement Result;
             Result.Variant = Variant->Name;
-            std::vector<double> Sum(static_cast<size_t>(Width) * Height * 3, 0.0), Square(Sum.size(), 0.0);
+            std::vector<double> Sum(PixelCount, 0.0), Square(PixelCount, 0.0);
             std::vector<uint8_t> Rgba;
             StageTotals.clear();
-            const uint32_t Count = Measured * (std::string(Variant->Name) == "Reference" ? 3u : 1u);
+            double RegionSquare = 0.0, TransitionSquare = 0.0;
+            const uint32_t TransitionCount = static_cast<uint32_t>(std::count(Transition.begin(), Transition.end(), 1u));
+            const uint32_t RegionCount     = static_cast<uint32_t>(std::count(InRegion.begin(), InRegion.end(), 1u));
+            const uint32_t Count = Measured * (IsReference ? 2u : 1u);
             for (uint32_t Refresh = 0; Refresh < Warm + Count; ++Refresh)
             {
                 Measuring = Refresh >= Warm;
@@ -227,97 +255,95 @@ int main(int ArgumentCount, char** Arguments)
                     return 1;
                 }
                 Result.Fireflies += static_cast<double>(CountFireflies(Rgba, Width, Height, Region)) / Count;
-                for (size_t Pixel = 0; Pixel < static_cast<size_t>(Width) * Height; ++Pixel)
-                    for (int Channel = 0; Channel < 3; ++Channel)
-                    {
-                        const double Level = Rgba[Pixel * 4 + Channel];
-                        Sum[Pixel * 3 + Channel] += Level;
-                        Square[Pixel * 3 + Channel] += Level * Level;
-                    }
+                uint32_t Visible = 0;
+                for (size_t Pixel = 0; Pixel < PixelCount; ++Pixel)
+                {
+                    const double Luma = 255.0 * DisplayLuminance(&Rgba[Pixel * 4]);
+                    Sum[Pixel] += Luma;
+                    Square[Pixel] += Luma * Luma;
+                    if (ReferenceLuma.empty() || !InRegion[Pixel]) continue;
+                    const double Error = Luma - ReferenceLuma[Pixel];
+                    RegionSquare += Error * Error;
+                    if (Transition[Pixel]) TransitionSquare += Error * Error;
+                    if (std::abs(Error) > 12.0) ++Visible;
+                }
+                Result.VisibleErrors += static_cast<double>(Visible) / Count;
             }
             Measuring = false;
             for (const auto& [Stage, Total] : StageTotals) Result.Stages[Stage] = Total / Count;
-            Result.Mean.resize(Sum.size());
-            Result.Deviation.resize(Sum.size());
-            for (size_t Index = 0; Index < Sum.size(); ++Index)
+            Result.Mean.resize(PixelCount);
+            Result.Deviation.resize(PixelCount);
+            for (size_t Pixel = 0; Pixel < PixelCount; ++Pixel)
             {
-                Result.Mean[Index]      = Sum[Index] / Count;
-                Result.Deviation[Index] = std::sqrt(std::max(0.0, Square[Index] / Count - Result.Mean[Index] * Result.Mean[Index]));
+                Result.Mean[Pixel]      = Sum[Pixel] / Count;
+                Result.Deviation[Pixel] = std::sqrt(std::max(0.0, Square[Pixel] / Count - Result.Mean[Pixel] * Result.Mean[Pixel]));
             }
+            if (IsReference)
+            {
+                // 📝 Transitions: pixels whose 9×9 neighbourhood in the reference spans over 24 levels and whose own luminance lies in
+                //    the middle 80 % of that span — penumbrae and reflected edges rather than the flat sides of an edge.
+                ReferenceLuma = Result.Mean;
+                for (int Y = 4; Y < static_cast<int>(Height) - 4; ++Y)
+                    for (int X = 4; X < static_cast<int>(Width) - 4; ++X)
+                    {
+                        double Low = 1e9, High = -1e9;
+                        for (int DY = -4; DY <= 4; ++DY)
+                            for (int DX = -4; DX <= 4; ++DX)
+                            {
+                                const double L = ReferenceLuma[static_cast<size_t>(Y + DY) * Width + X + DX];
+                                Low = std::min(Low, L);
+                                High = std::max(High, L);
+                            }
+                        const size_t Pixel = static_cast<size_t>(Y) * Width + X;
+                        const double Share = (ReferenceLuma[Pixel] - Low) / std::max(1e-6, High - Low);
+                        Transition[Pixel] = InRegion[Pixel] && High - Low > 24.0 && Share > 0.1 && Share < 0.9 ? 1u : 0u;
+                    }
+                // 📝 The reference against its own mean: its noise.
+                double Own = 0.0, OwnTransition = 0.0;
+                for (size_t Pixel = 0; Pixel < PixelCount; ++Pixel)
+                {
+                    if (!InRegion[Pixel]) continue;
+                    Own += Result.Deviation[Pixel] * Result.Deviation[Pixel];
+                    if (Transition[Pixel]) OwnTransition += Result.Deviation[Pixel] * Result.Deviation[Pixel];
+                }
+                const uint32_t Transitions = static_cast<uint32_t>(std::count(Transition.begin(), Transition.end(), 1u));
+                Result.FrameRms           = std::sqrt(Own / std::max(1u, RegionCount));
+                Result.TransitionFrameRms = std::sqrt(OwnTransition / std::max(1u, Transitions));
+            }
+            else
+            {
+                Result.FrameRms           = std::sqrt(RegionSquare / std::max(1.0, static_cast<double>(RegionCount) * Count));
+                Result.TransitionFrameRms = std::sqrt(TransitionSquare / std::max(1.0, static_cast<double>(TransitionCount) * Count));
+            }
+            double NoiseSum = 0.0, BiasSquare = 0.0;
+            uint32_t Transitions = 0;
+            for (size_t Pixel = 0; Pixel < PixelCount && !ReferenceLuma.empty(); ++Pixel)
+            {
+                if (!Transition[Pixel]) continue;
+                NoiseSum += Result.Deviation[Pixel];
+                const double Bias = Result.Mean[Pixel] - ReferenceLuma[Pixel];
+                BiasSquare += Bias * Bias;
+                ++Transitions;
+            }
+            Result.TransitionNoise = NoiseSum / std::max(1u, Transitions);
+            Result.TransitionBias  = std::sqrt(BiasSquare / std::max(1u, Transitions));
             // 📝 The last refresh and the mean over the measured refreshes.
             const std::string Stem = (OutFolder / (std::string(View->Name) + "-" + Variant->Name)).string();
             stbi_write_png((Stem + ".png").c_str(), static_cast<int>(Width), static_cast<int>(Height), 4, Rgba.data(), static_cast<int>(Width * 4));
-            std::vector<uint8_t> MeanRgba(static_cast<size_t>(Width) * Height * 4, 255u);
-            for (size_t Pixel = 0; Pixel < static_cast<size_t>(Width) * Height; ++Pixel)
-                for (int Channel = 0; Channel < 3; ++Channel)
-                    MeanRgba[Pixel * 4 + Channel] = static_cast<uint8_t>(std::clamp(Result.Mean[Pixel * 3 + Channel] + 0.5, 0.0, 255.0));
-            stbi_write_png((Stem + "-Mean.png").c_str(), static_cast<int>(Width), static_cast<int>(Height), 4, MeanRgba.data(), static_cast<int>(Width * 4));
-            std::printf("%s/%s: fireflies %.1f per refresh, refresh %.3f s\n", View->Name, Variant->Name, Result.Fireflies, Result.RefreshSeconds);
+            std::printf("%s/%s: fireflies %.1f, visible errors %.0f per refresh, refresh %.3f s\n", View->Name, Variant->Name, Result.Fireflies,
+                        Result.VisibleErrors, Result.RefreshSeconds);
             for (const auto& [Stage, Milliseconds] : Result.Stages) std::printf("    stage %-28s %9.1f ms\n", Stage.c_str(), Milliseconds);
             Results.push_back(std::move(Result));
         }
-
-        // 📝 Edges: pixels whose 5×5 neighbourhood in the reference mean spans more than 24 levels of luminance (shadow edges,
-        //    reflected detail); noise and distance are reported over the measured region and over its edges.
-        const Measurement* Reference = nullptr;
+        std::printf("\n%s (%u transition pixels of %u in the measured region)\n"
+                    "| Variant | Fireflies / refresh | Visible errors / refresh | Refresh RMS | Transition RMS | Transition noise | Transition bias | Refresh [s] |\n"
+                    "|---|---:|---:|---:|---:|---:|---:|---:|\n",
+                    View->Name, static_cast<unsigned>(std::count(Transition.begin(), Transition.end(), 1u)),
+                    static_cast<unsigned>(std::count(InRegion.begin(), InRegion.end(), 1u)));
         for (const Measurement& Result : Results)
-            if (Result.Variant == "Reference") Reference = &Result;
-        std::vector<uint8_t> Edge(static_cast<size_t>(Width) * Height, 0u);
-        if (Reference)
-        {
-            auto Luminance = [&](int X, int Y) {
-                const size_t Index = (static_cast<size_t>(Y) * Width + X) * 3;
-                return 0.2126 * Reference->Mean[Index] + 0.7152 * Reference->Mean[Index + 1] + 0.0722 * Reference->Mean[Index + 2];
-            };
-            for (int Y = 2; Y < static_cast<int>(Height) - 2; ++Y)
-                for (int X = 2; X < static_cast<int>(Width) - 2; ++X)
-                {
-                    double Low = 1e9, High = -1e9;
-                    for (int DY = -2; DY <= 2; ++DY)
-                        for (int DX = -2; DX <= 2; ++DX)
-                        {
-                            const double L = Luminance(X + DX, Y + DY);
-                            Low = std::min(Low, L);
-                            High = std::max(High, L);
-                        }
-                    Edge[static_cast<size_t>(Y) * Width + X] = High - Low > 24.0 ? 1u : 0u;
-                }
-        }
-        std::printf("\n%s\n| Variant | Fireflies / refresh | Noise [levels] | Edge noise | RMS from reference | Edge RMS | Refresh [s] |\n"
-                    "|---|---:|---:|---:|---:|---:|---:|\n",
-                    View->Name);
-        for (Measurement& Result : Results)
-        {
-            double NoiseSum = 0.0, EdgeNoiseSum = 0.0, SquareSum = 0.0, EdgeSquareSum = 0.0;
-            uint32_t Count = 0, EdgeCount = 0;
-            for (size_t Index = 0; Index < Result.Mean.size(); ++Index)
-            {
-                const size_t Pixel = Index / 3;
-                if (!Inside(Pixel)) continue;
-                const double Difference = Reference ? Result.Mean[Index] - Reference->Mean[Index] : 0.0;
-                NoiseSum += Result.Deviation[Index];
-                SquareSum += Difference * Difference;
-                ++Count;
-                if (Edge[Pixel])
-                {
-                    EdgeNoiseSum += Result.Deviation[Index];
-                    EdgeSquareSum += Difference * Difference;
-                    ++EdgeCount;
-                }
-            }
-            auto Format = [](double Number, bool Present) {
-                char Text[32];
-                std::snprintf(Text, sizeof(Text), Present ? "%.2f" : "-", Number);
-                return std::string(Text);
-            };
-            std::printf("| %s | %.1f | %.2f | %s | %s | %s | %.3f |\n", Result.Variant.c_str(), Result.Fireflies, NoiseSum / std::max(1u, Count),
-                        Format(EdgeNoiseSum / std::max(1u, EdgeCount), EdgeCount > 0).c_str(),
-                        Format(std::sqrt(SquareSum / std::max(1u, Count)), Reference != nullptr).c_str(),
-                        Format(std::sqrt(EdgeSquareSum / std::max(1u, EdgeCount)), Reference != nullptr && EdgeCount > 0).c_str(), Result.RefreshSeconds);
-        }
-        std::printf("(%u edge pixels of %u in the measured region)\n\n",
-                    static_cast<unsigned>(std::count(Edge.begin(), Edge.end(), 1u)),
-                    static_cast<unsigned>((Region[2] - Region[0]) * (Region[3] - Region[1])));
+            std::printf("| %s | %.1f | %.0f | %.2f | %.2f | %.2f | %.2f | %.3f |\n", Result.Variant.c_str(), Result.Fireflies, Result.VisibleErrors,
+                        Result.FrameRms, Result.TransitionFrameRms, Result.TransitionNoise, Result.TransitionBias, Result.RefreshSeconds);
+        std::printf("\n");
     }
     return 0;
 }

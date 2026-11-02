@@ -75,6 +75,7 @@ static const uint RefinementStratifiedSun   = 2u;    // [-] sun-disc samples str
 static const uint RefinementPenumbraFilter  = 4u;    // [-] ray-traced sun visibility filtered across its penumbra
 static const uint RefinementMirrorFilter    = 8u;    // [-] smooth surfaces take the unfiltered reflection, rough ones the variance filter
 static const uint RefinementMirrorTrace     = 16u;   // [-] smooth surfaces traced at screen resolution
+static const uint RefinementPenumbraNarrow  = 32u;   // [-] measurement only: the penumbra filter at half its radius
 
 bool RefinementEnabled(RefreshConstants Refresh, uint Bit)
 {
