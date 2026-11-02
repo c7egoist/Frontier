@@ -21,6 +21,7 @@ import {
 } from '../src/erosion/rock-calving.js';
 import { buildGrassTuftMesh, MAX_GRASS_TUFTS } from '../src/erosion/grass-system.js';
 import {
+  DERIVED_FABRICS,
   DERIVED_PALETTES,
   LAYER_CATEGORIES,
   LAYER_OPERATION_SPECS,
@@ -796,6 +797,12 @@ test('Bottom-to-top Terrain Stack Pipeline shaders, uniform bindings, and non-co
     assert.ok(Array.isArray(spec.reads) && Array.isArray(spec.writes) && spec.writes.length > 0);
   }
   assert.equal(Object.keys(DERIVED_PALETTES).length, 10, 'All 10 regional geological MATERIAL_THEMES live separately from the layer stack');
+  for (const [id, palette] of Object.entries(DERIVED_PALETTES)) {
+    assert.equal(palette.label, MATERIAL_THEMES[id].label, `Palette ${id} must expose a real label, not undefined`);
+  }
+  for (const [id, fabric] of Object.entries(DERIVED_FABRICS)) {
+    assert.equal(fabric.label, ROCK_FABRIC_MODES[id].label, `Fabric ${id} must expose a real label, not undefined`);
+  }
 
   // Verify all 19 canonical EROSION_LANDSCAPES recipes plus the curated
   // Utah and standalone spline-authoring manual stacks build valid
@@ -1758,6 +1765,30 @@ test('Chemical weathering is a terrain-wide simulation layer with multiple react
   for (const key of ['chemRate', 'chemRust', 'chemHydrolysis', 'chemDissolution', 'chemSalt', 'chemVarnish', 'chemCopper']) {
     assert.ok(uiSrc.includes(`key: '${key}'`), `Inspector missing ${key} slider`);
   }
+});
+
+test('Terrain shadow and desert varnish do not collapse into black texel artifacts', () => {
+  const frag = Shaders.TERRAIN_RENDER_FRAG;
+  const shadowFn = frag.slice(
+    frag.indexOf('float sampleTerrainShadow'),
+    frag.indexOf('void main()')
+  );
+  assert.ok(shadowFn.includes('surfaceNormal'), 'terrain shadow ray must be normal-biased');
+  assert.ok(shadowFn.includes('normalBias') && shadowFn.includes('slopeTan'),
+    'shadow bias must grow on steep heightfield cells');
+  assert.ok(shadowFn.includes('horizonSlope') && shadowFn.includes('penumbra'),
+    'terrain shadowing must use a soft horizon-angle comparison');
+  assert.ok(!shadowFn.includes('if (diff < 0.0) return 0.14'),
+    'a single grazing height texel must not binary-collapse a fragment to near-black');
+  assert.ok(frag.includes('sampleTerrainShadow(vUv, max(vWorldPos.y, hC), L, bedNormal, span, res)'),
+    'shadow ray must start on the rasterized surface, not only the bilinear height sample');
+
+  assert.ok(Shaders.CHEM_WEATHER_FRAG.includes('broadSlope'),
+    'desert varnish must require a sustained face, not one-cell slope noise');
+  assert.ok(frag.includes('varnishColC') && frag.includes('rockFace * 0.58'),
+    'desert varnish must remain a translucent film over the underlying rock');
+  assert.ok(!frag.includes('vec3(0.075, 0.055, 0.040)'),
+    'the old opaque near-black varnish constant must not return');
 });
 
 test('Simulation seasons trigger solo/simultaneously and mineral strata feed water-borne stains', () => {

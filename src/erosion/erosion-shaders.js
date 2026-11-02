@@ -2418,6 +2418,18 @@ void main() {
     (tU.r + tU.g + tU.b) - (tD.r + tD.g + tD.b)
   ) / (2.0 * cellSize);
   float slope = length(grad);
+  // A second, 8-cell-wide slope estimate for slow surface coatings. The
+  // one-cell slope is intentionally reactive for erosion, but using it alone
+  // for desert varnish turns heightfield texel noise into isolated black
+  // blotches; varnish should form on sustained rock faces.
+  vec4 tR4 = texelFetch(uTerrainTex, ivec2(min(maxI, c.x + 4), c.y), 0);
+  vec4 tL4 = texelFetch(uTerrainTex, ivec2(max(0, c.x - 4), c.y), 0);
+  vec4 tU4 = texelFetch(uTerrainTex, ivec2(c.x, min(maxI, c.y + 4)), 0);
+  vec4 tD4 = texelFetch(uTerrainTex, ivec2(c.x, max(0, c.y - 4)), 0);
+  float broadSlope = length(vec2(
+    (tR4.r + tR4.g + tR4.b) - (tL4.r + tL4.g + tL4.b),
+    (tU4.r + tU4.g + tU4.b) - (tD4.r + tD4.g + tD4.b)
+  ) / (8.0 * cellSize));
 
   float discharge = max(vel.a, 0.0) * uChemFlowScale;
   float melt = max(snowC.b, 0.0) + max(snowC.a, 0.0);
@@ -2534,7 +2546,9 @@ void main() {
   // Dominant surface coating: almost immobile desert varnish accretes very
   // slowly on dry, steep, exposed rock; copper patina needs moist Cu veins.
   float dryness = (1.0 - clamp(moisture, 0.0, 1.0)) * clamp(uChemEnv.w + evapF * 0.38, 0.05, 1.35);
-  float varnishDrive = uChemRates.w * dryness * exposed * smoothstep(0.30, 0.95, slope);
+  float varnishDrive = uChemRates.w * dryness * exposed
+    * smoothstep(0.34, 1.00, broadSlope)
+    * (0.35 + 0.65 * smoothstep(0.25, 0.90, slope));
   varnishAmt = chemGrow(varnishAmt, varnishDrive * 0.006, dt);
 
   float patinaDrive = uChemEnv.x * veinCu * damp * warmth * rockAccess * fracture * exposed;
@@ -2737,25 +2751,45 @@ uniform float uHasCaves;
 
 ${COMMON_GEOLOGY_GLSL}
 
-float sampleTerrainShadow(vec2 startUv, float startH, vec3 sunDir, float span, float res) {
-  float stepLenWorld = length(sunDir.xz);
-  if (stepLenWorld < 1e-4) return 1.0;
+float sampleTerrainShadow(vec2 startUv, float startH, vec3 sunDir, vec3 surfaceNormal, float span, float res) {
+  float horizLen = length(sunDir.xz);
+  if (horizLen < 1e-4) return 1.0;
 
-  float shadow = 1.0;
-  float t = (span / res) * 1.4;
-  vec2 marchDir = sunDir.xz / stepLenWorld;
-  for (int i = 0; i < 18; i++) {
-    vec2 suv = startUv + marchDir * (t / span);
+  float cellSize = span / max(res, 1.0);
+  vec2 marchDir = sunDir.xz / horizLen;
+  float sunSlope = sunDir.y / horizLen;
+
+  // Normal/tangent bias is essential on a displaced heightfield. The old
+  // ray started only 0.18 m above a bilinear height sample, while the
+  // rasterized surface inside a grid quad is two triangles; on steep,
+  // saddle-shaped cells that height can differ by metres from the triangle
+  // being shaded. The first uphill texel therefore intersected the ray and
+  // the old binary diff<0 branch painted isolated near-black cell/triangle
+  // shards (shadow acne) on otherwise lit slopes. Offset the ray origin off
+  // the actual surface along its normal, by an amount that grows with slope.
+  float slopeTan = length(surfaceNormal.xz) / max(surfaceNormal.y, 0.15);
+  float normalBias = cellSize * clamp(0.85 + 1.20 * slopeTan, 0.85, 3.40);
+  vec2 rayUv = startUv + surfaceNormal.xz * (normalBias / max(span, 1.0));
+  float rayStartH = startH + surfaceNormal.y * normalBias;
+
+  // Horizon-angle shadow: retain the largest occluder slope along the ray,
+  // then compare it with the sun slope through a finite penumbra. A single
+  // grazing texel no longer collapses the whole fragment to the shadow floor.
+  float horizonSlope = -1.0e5;
+  float t = max(cellSize * 1.90, normalBias * 0.72);
+  for (int i = 0; i < 20; i++) {
+    vec2 suv = rayUv + marchDir * (t / span);
     if (suv.x <= 0.0 || suv.x >= 1.0 || suv.y <= 0.0 || suv.y >= 1.0) break;
     vec4 st = sampleGridBilinear(uTerrainTex, suv, res);
     float sh = st.r + st.g + st.b;
-    float rayH = startH + (sunDir.y / stepLenWorld) * t;
-    float diff = rayH - sh;
-    if (diff < 0.0) return 0.14;
-    shadow = min(shadow, clamp(3.2 * diff / max(t * 0.18, 0.5), 0.14, 1.0));
-    t *= 1.24;
+    horizonSlope = max(horizonSlope, (sh - rayStartH) / max(t, cellSize));
+    if (t > span * 0.72) break;
+    t = t * 1.22 + cellSize * 0.18;
   }
-  return shadow;
+
+  float penumbra = clamp(0.10 + 0.22 * abs(sunSlope), 0.10, 0.30);
+  float visibility = 1.0 - smoothstep(sunSlope - penumbra, sunSlope + penumbra, horizonSlope);
+  return mix(0.20, 1.0, visibility);
 }
 
 void main() {
@@ -2987,8 +3021,13 @@ void main() {
     vec3 patinaColC = mix(vec3(0.11, 0.42, 0.33), vec3(0.07, 0.24, 0.48), smoothstep(0.35, 0.95, patinaAmtC));
     surfaceAlbedo = mix(surfaceAlbedo, patinaColC,
       smoothstep(0.05, 0.65, patinaAmtC) * (0.30 + 0.70 * rockFace) * 0.88);
-    surfaceAlbedo = mix(surfaceAlbedo, vec3(0.075, 0.055, 0.040),
-      smoothstep(0.15, 0.82, varnishAmtC) * rockFace * 0.82);
+    // Desert varnish is a thin manganese/iron film, not a hole in the mesh:
+    // retain part of the underlying lithology and cap its opacity. Painting
+    // saturated cells at 82% of an almost-black constant made one-texel
+    // chemical patches read as rendering artifacts on bright desert slopes.
+    vec3 varnishColC = mix(surfaceAlbedo * vec3(0.62, 0.52, 0.46), vec3(0.145, 0.095, 0.070), 0.55);
+    surfaceAlbedo = mix(surfaceAlbedo, varnishColC,
+      smoothstep(0.18, 0.88, varnishAmtC) * rockFace * 0.58);
     surfaceAlbedo = mix(surfaceAlbedo, vec3(0.88, 0.87, 0.82),
       smoothstep(0.12, 0.75, saltAmtC) * 0.86);
   }
@@ -3093,7 +3132,7 @@ void main() {
 
   vec3 L = safeNorm3(uSunDir, vec3(0.4, 0.8, 0.4));
   vec3 V = safeNorm3(uCameraPos - vWorldPos, vec3(0.0, 1.0, 0.0));
-  float shadow = isSideSkirt ? 0.65 : sampleTerrainShadow(vUv, hC + 0.18, L, span, res);
+  float shadow = isSideSkirt ? 0.65 : sampleTerrainShadow(vUv, max(vWorldPos.y, hC), L, bedNormal, span, res);
   float ndotl = max(0.0, dot(bedNormal, L));
 
   // Warm Oren-Nayar backscatter + golden backlit rim-sheen on desert sand dunes!

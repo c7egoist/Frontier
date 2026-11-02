@@ -124,7 +124,7 @@ for (const [k, theme] of Object.entries(MATERIAL_THEMES)) {
   const id = Number(k);
   DERIVED_PALETTES[id] = {
     id,
-    label: theme.name,
+    label: theme.label,
     subtitle: theme.subtitle,
   };
 }
@@ -134,7 +134,7 @@ for (const [k, fab] of Object.entries(ROCK_FABRIC_MODES)) {
   const id = Number(k);
   DERIVED_FABRICS[id] = {
     id,
-    label: fab.name,
+    label: fab.label,
   };
 }
 
