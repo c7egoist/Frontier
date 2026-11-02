@@ -23,14 +23,19 @@ import { buildGrassTuftMesh, MAX_GRASS_TUFTS } from '../src/erosion/grass-system
 import {
   DERIVED_FABRICS,
   DERIVED_PALETTES,
+  ENVIRONMENT_LAYER_NAME,
+  ENVIRONMENT_LAYER_TYPE,
   LAYER_CATEGORIES,
   LAYER_OPERATION_SPECS,
   SCULPT_BLEND_MODES,
   SPLINE_LANDFORM_MODES,
   SPLINE_MODES,
   TERRAIN_STACK_PRESETS,
+  createEnvironmentLayer,
   createStackLayer,
+  ensureEnvironmentLayer,
 } from '../src/erosion/terrain-stack-presets.js';
+import { TerrainStackPipeline } from '../src/erosion/terrain-stack-pipeline.js';
 import { SdfCaveSystem } from '../src/erosion/sdf-cave-mesher.js';
 import {
   azimuthForWindFromBearing,
@@ -778,10 +783,11 @@ test('Bottom-to-top Terrain Stack Pipeline shaders, uniform bindings, and non-co
   }
   assert.ok(verified >= 45, `Expected >= 45 verified pipeline GPU uniform bindings, got ${verified}`);
 
-  // Verify 17 composable operations across all 5 categories, and ZERO colour/material/biome layers!
+  // Verify 17 composable terrain operations plus the one locked Environment
+  // system layer, across all 6 categories, and ZERO colour/material layers.
   const specKeys = Object.keys(LAYER_OPERATION_SPECS);
-  assert.equal(specKeys.length, 17);
-  for (const catKey of ['landform', 'simulation', 'spline', 'rocks', 'vegetation']) {
+  assert.equal(specKeys.length, 18);
+  for (const catKey of ['environment', 'landform', 'simulation', 'spline', 'rocks', 'vegetation']) {
     assert.ok(LAYER_CATEGORIES[catKey], `Missing category ${catKey}`);
     assert.ok(specKeys.some((k) => LAYER_OPERATION_SPECS[k].category === catKey), `No operation in category ${catKey}`);
   }
@@ -818,8 +824,19 @@ test('Bottom-to-top Terrain Stack Pipeline shaders, uniform bindings, and non-co
     const expectedRelief = isManualRecipe ? stackPreset.expectedRelief : (orig.defaults.relief ?? DEFAULT_EROSION_PARAMS.relief);
     const stack = TERRAIN_STACK_PRESETS[pk].layers();
     assert.ok(stack.length >= 3, `Preset ${pk} must populate a multi-stage editable stack`);
-    const bottomLayer = stack[stack.length - 1];
-    assert.equal(bottomLayer.type, 'base-landform', `Bottom layer of ${pk} must be base-landform (evaluated first)`);
+    const environmentLayers = stack.filter((layer) => layer.type === ENVIRONMENT_LAYER_TYPE);
+    assert.equal(environmentLayers.length, 1, `Preset ${pk} must contain exactly one Environment layer`);
+    const lastLayer = stack[stack.length - 1];
+    assert.equal(lastLayer, environmentLayers[0], `Environment must be the locked last row of ${pk}`);
+    assert.equal(lastLayer.name, ENVIRONMENT_LAYER_NAME, `Preset ${pk} Environment name is canonical`);
+    assert.equal(lastLayer.enabled, true, `Preset ${pk} Environment cannot be muted`);
+    assert.equal(lastLayer.locked, true, `Preset ${pk} Environment is locked`);
+    assert.equal(lastLayer.mask.enabled, false, `Preset ${pk} Environment cannot be masked`);
+    assert.equal(lastLayer.params.sunAzimuth, stackPreset.sunAzimuth, `Preset ${pk} Environment owns the preset sun azimuth`);
+    assert.equal(lastLayer.params.sunElevation, stackPreset.sunElevation, `Preset ${pk} Environment owns the preset sun elevation`);
+
+    const bottomLayer = stack[stack.length - 2];
+    assert.equal(bottomLayer.type, 'base-landform', `Final terrain layer of ${pk} must be base-landform (evaluated first, immediately above Environment)`);
     assert.equal(bottomLayer.params.archetype, expectedType, `Preset ${pk} must use exact INIT_TERRAIN_FRAG terrainType ${expectedType}`);
     assert.equal(bottomLayer.params.seed, 4029, `Preset ${pk} must preserve default seed 4029`);
     assert.equal(bottomLayer.params.relief, expectedRelief, `Preset ${pk} must preserve exact relief`);
@@ -827,6 +844,181 @@ test('Bottom-to-top Terrain Stack Pipeline shaders, uniform bindings, and non-co
       assert.ok(l.id && l.type && l.params && typeof l.enabled === 'boolean');
     }
   }
+});
+
+test('Environment owns the Sun as one locked last layer and cannot be added elsewhere', () => {
+  const spec = LAYER_OPERATION_SPECS[ENVIRONMENT_LAYER_TYPE];
+  assert.ok(spec, 'Environment operation spec exists');
+  assert.equal(ENVIRONMENT_LAYER_NAME, 'Environment');
+  assert.equal(spec.defaultName, ENVIRONMENT_LAYER_NAME);
+  assert.equal(spec.category, 'environment');
+  assert.equal(spec.glyph, 'sun');
+  assert.equal(spec.systemLayer, true);
+  assert.equal(spec.singleton, true);
+  assert.equal(spec.addable, false, 'Environment must not be offered as an addable layer');
+  assert.equal(spec.lockedPosition, 'last');
+  assert.deepEqual(spec.reads, ['Sun Azimuth', 'Sun Elevation']);
+  assert.deepEqual(spec.writes, ['Sun Direction']);
+  assert.equal(LAYER_CATEGORIES.environment.color, '#ffd166');
+
+  // Direct construction cannot smuggle in a renamed, muted, unlocked or
+  // masked Environment layer.
+  const canonical = createStackLayer(ENVIRONMENT_LAYER_TYPE, {
+    name: 'Loose Sun',
+    enabled: false,
+    locked: false,
+    mask: { enabled: true },
+    params: { sunAzimuth: 101, sunElevation: 44 },
+  });
+  assert.equal(canonical.name, ENVIRONMENT_LAYER_NAME);
+  assert.equal(canonical.enabled, true);
+  assert.equal(canonical.locked, true);
+  assert.equal(canonical.mask.enabled, false);
+  assert.deepEqual(canonical.params, { sunAzimuth: 101, sunElevation: 44 });
+
+  // Normalization keeps the first Environment, discards duplicates, pins it
+  // to the final row, repairs system flags, and lets its own sun values win.
+  const malformed = createStackLayer(ENVIRONMENT_LAYER_TYPE, {
+    params: { sunAzimuth: 101, sunElevation: 44 },
+  });
+  malformed.name = 'Sun copy';
+  malformed.enabled = false;
+  malformed.locked = false;
+  malformed.mask.enabled = true;
+  const duplicate = createEnvironmentLayer({ sunAzimuth: 1, sunElevation: 9 });
+  const helperBase = createStackLayer('base-landform', { locked: true });
+  const normalized = ensureEnvironmentLayer(
+    [malformed, helperBase, duplicate],
+    { sunAzimuth: -44, sunElevation: 66 }
+  );
+  assert.equal(normalized.length, 2, 'Duplicate Environment layers are discarded');
+  assert.equal(normalized[0], helperBase);
+  assert.equal(normalized[1], malformed, 'The first Environment survives and is moved last');
+  assert.equal(malformed.name, ENVIRONMENT_LAYER_NAME);
+  assert.equal(malformed.enabled, true);
+  assert.equal(malformed.locked, true);
+  assert.equal(malformed.mask.enabled, false);
+  assert.deepEqual(malformed.params, { sunAzimuth: 101, sunElevation: 44 });
+
+  const makePipelineHarness = (layers) => {
+    const harness = Object.create(TerrainStackPipeline.prototype);
+    harness.layers = layers;
+    harness.selectedLayerId = layers[0]?.id || null;
+    harness.engine = { params: { sunAzimuth: 11, sunElevation: 22 } };
+    harness.sculptStore = new Map();
+    harness.gl = { deleteTexture() {}, deleteFramebuffer() {} };
+    harness.evalCount = 0;
+    harness.evaluateStack = function evaluateStackStub() { this.evalCount += 1; };
+    harness._getOrCreateSculptEntry = () => {};
+    return harness;
+  };
+
+  const ridge = createStackLayer('mountain-ridges');
+  const base = createStackLayer('base-landform', { locked: true });
+  const environment = createEnvironmentLayer({ sunAzimuth: 73, sunElevation: 31 });
+  const pipeline = makePipelineHarness([ridge, base, environment]);
+  pipeline.selectedLayerId = environment.id;
+
+  // Requesting Environment through the normal add API selects the existing
+  // singleton; it cannot create a second copy or place one elsewhere.
+  assert.equal(pipeline.addLayer(ENVIRONMENT_LAYER_TYPE), environment);
+  assert.equal(pipeline.layers.length, 3);
+  assert.equal(pipeline.layers.filter((layer) => layer.type === ENVIRONMENT_LAYER_TYPE).length, 1);
+  assert.equal(pipeline.evalCount, 0, 'Selecting the Environment singleton does not rebuild terrain');
+
+  // Adding with Environment selected inserts above it, never below it.
+  const added = pipeline.addLayer('mountain-ridges');
+  assert.equal(pipeline.layers[pipeline.layers.length - 2], added);
+  assert.equal(pipeline.layers[pipeline.layers.length - 1], environment);
+  assert.equal(pipeline.evalCount, 1);
+
+  // Duplicate/delete/move protections are enforced by the pipeline itself,
+  // not merely hidden by the UI.
+  const countBeforeGuards = pipeline.layers.length;
+  assert.equal(pipeline.duplicateLayer(environment.id), null);
+  assert.equal(pipeline.duplicateLayer(base.id), null, 'Legacy locked layers remain duplicate-safe');
+  assert.equal(pipeline.deleteLayer(environment.id), false);
+  assert.equal(pipeline.moveLayer(pipeline.layers.length - 1, 0), false);
+  assert.equal(pipeline.layers.length, countBeforeGuards);
+  assert.equal(pipeline.layers[pipeline.layers.length - 1], environment);
+
+  // A move targeted below Environment clamps to immediately above it.
+  assert.equal(pipeline.moveLayer(0, 999), true);
+  assert.equal(pipeline.layers[pipeline.layers.length - 2], ridge);
+  assert.equal(pipeline.layers[pipeline.layers.length - 1], environment);
+
+  // Preserve the older locked-layer contract: Base is delete/duplicate-safe
+  // but can still be arrow-reordered above Environment.
+  const baseIdx = pipeline.layers.indexOf(base);
+  assert.equal(pipeline.moveLayer(baseIdx, baseIdx + 1), true);
+  assert.equal(pipeline.layers[pipeline.layers.length - 1], environment);
+
+  // If a malformed/restored stack selected a duplicate Environment, the
+  // pipeline remaps selection to the surviving singleton instead of leaving
+  // the Inspector attached to a discarded layer id.
+  const survivingEnvironment = createEnvironmentLayer({ sunAzimuth: 12, sunElevation: 34 });
+  const selectedDuplicate = createEnvironmentLayer({ sunAzimuth: 56, sunElevation: 18 });
+  const duplicatePipeline = makePipelineHarness([
+    survivingEnvironment,
+    createStackLayer('base-landform', { locked: true }),
+    selectedDuplicate,
+  ]);
+  duplicatePipeline.selectedLayerId = selectedDuplicate.id;
+  assert.equal(duplicatePipeline.getEnvironmentLayer(), survivingEnvironment);
+  assert.equal(duplicatePipeline.selectedLayerId, survivingEnvironment.id);
+  assert.equal(duplicatePipeline.layers[duplicatePipeline.layers.length - 1], survivingEnvironment);
+
+  // Sun changes are clamped and applied directly to render state without a
+  // terrain evaluation (and therefore without the stack-edit auto-pause).
+  environment.params.sunAzimuth = 999;
+  environment.params.sunElevation = -50;
+  const evalBeforeSun = pipeline.evalCount;
+  assert.equal(pipeline.applyLiveEnvironmentLayerParams(environment), true);
+  assert.equal(pipeline.engine.params.sunAzimuth, 180);
+  assert.equal(pipeline.engine.params.sunElevation, 4);
+  assert.equal(environment.params.sunAzimuth, 180);
+  assert.equal(environment.params.sunElevation, 4);
+  assert.equal(pipeline.evalCount, evalBeforeSun);
+  assert.deepEqual(pipeline.simulationProcessesForLayer(environment), [], 'Environment is not a simulation season');
+
+  // UI contract: yellow Lucide Sun/Lock glyphs, live schema, no Add-menu or
+  // duplicate generic Sun sliders, and a squared locked-last Outliner row.
+  const uiSrc = fs.readFileSync(new URL('../src/erosion/layer-stack-ui.js', import.meta.url), 'utf8');
+  const pipeSrc = fs.readFileSync(new URL('../src/erosion/terrain-stack-pipeline.js', import.meta.url), 'utf8');
+  const cssSrc = fs.readFileSync(new URL('../src/app/style.css', import.meta.url), 'utf8');
+  const htmlSrc = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  for (const token of [
+    'sun: lucideIcon(Sun)',
+    'lock: lucideIcon(Lock, 16)',
+    "[ENVIRONMENT_LAYER_TYPE]: '#ffd166'",
+    "key: 'sunAzimuth'",
+    "key: 'sunElevation'",
+    'liveParam: true',
+    's.addable !== false',
+    'environment locked-last',
+    "stepLabel = environmentLayer ? 'LAST'",
+    'Locked · Last layer',
+    'applyLiveEnvironmentLayerParams(layer)',
+    'Sun direction lives on the locked Environment layer',
+  ]) {
+    assert.ok(uiSrc.includes(token), `Environment UI wiring missing ${token}`);
+  }
+  assert.ok(!uiSrc.includes('tp-slider-sun-az') && !uiSrc.includes('tp-slider-sun-el'),
+    'Generic shading card must not duplicate the Environment Sun sliders');
+  assert.ok(!uiSrc.includes('tp-out-sun-az') && !uiSrc.includes('tp-out-sun-el'),
+    'Generic Sun outputs must not remain as a second source of truth');
+
+  const envBranch = pipeSrc.indexOf('if (layer.type === ENVIRONMENT_LAYER_TYPE)');
+  const baseBranch = pipeSrc.indexOf("} else if (layer.type === 'base-landform')");
+  assert.ok(envBranch > -1 && baseBranch > envBranch,
+    'Pipeline handles Environment as lighting state before the Base terrain pass');
+
+  assert.ok(/\.tp-layer-row\.environment\.locked-last \{[^}]*border-radius: 0;/s.test(cssSrc),
+    'Environment remains a squared layer-stack entry');
+  assert.ok(/\.tp-lock-chip \{[^}]*border-radius: 999px;/s.test(cssSrc),
+    'Environment lock chip stays rounded like the surrounding controls');
+  assert.ok(htmlSrc.includes('BOTTOM — BASE FIRST · ENVIRONMENT LAST (LOCKED)'),
+    'Outliner footer explains Base terrain order and locked Environment last');
 });
 
 test('Bottom-to-top layer order genuinely changes terrain output and 3D SDF Cave mesher carves volumetric overhangs', () => {
@@ -1896,8 +2088,8 @@ test('Wind erosion is its own turbulent layer and Utah stack has Rain + Wind onl
   const utahStack = utah.layers();
   assert.deepEqual(
     utahStack.map((l) => l.type),
-    ['wind-erosion', 'hydraulic-erosion', 'stratigraphic-beds', 'base-landform'],
-    'Utah stack must contain only Wind + Rain simulations above strata/base'
+    ['wind-erosion', 'hydraulic-erosion', 'stratigraphic-beds', 'base-landform', ENVIRONMENT_LAYER_TYPE],
+    'Utah stack must contain only Wind + Rain simulations above strata/base, followed by locked Environment'
   );
   assert.ok(!utahStack.some((l) => ['aeolian-glacial', 'thermal-talus', 'rock-placement', 'chemical-weathering'].includes(l.type)));
   assert.ok(utahStack[0].params.bakeSteps === 0 && utahStack[0].params.windTurbulence >= 0.7, 'Utah wind is live-first and turbulent/natural, not ruler-straight');

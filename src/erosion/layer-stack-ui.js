@@ -12,6 +12,8 @@ import {
   COMBINE_MODES,
   DERIVED_FABRICS,
   DERIVED_PALETTES,
+  ENVIRONMENT_LAYER_NAME,
+  ENVIRONMENT_LAYER_TYPE,
   LAYER_CATEGORIES,
   LAYER_OPERATION_SPECS,
   SCULPT_BLEND_MODES,
@@ -44,6 +46,7 @@ import {
   FlaskConical,
   Gem,
   Layers,
+  Lock,
   Mountain,
   MountainSnow,
   MoveHorizontal,
@@ -53,6 +56,7 @@ import {
   Snowflake,
   Spline,
   Sprout,
+  Sun,
   Triangle,
   Wind,
 } from 'lucide';
@@ -84,6 +88,8 @@ const SVG_ICONS = {
   spline: lucideIcon(Spline),
   boulders: lucideIcon(Gem),
   grass: lucideIcon(Sprout),
+  sun: lucideIcon(Sun),
+  lock: lucideIcon(Lock, 16),
   eyeOpen: lucideIcon(Eye, 16),
   eyeClosed: lucideIcon(EyeOff, 16),
   mask: lucideIcon(Contrast, 16),
@@ -111,6 +117,7 @@ const LAYER_ICON_COLORS = {
   'spline-landform': '#818cf8',
   'rock-placement': '#d6a05a',
   'vegetation-placement': '#6ee76a',
+  [ENVIRONMENT_LAYER_TYPE]: '#ffd166',
 };
 
 function layerIconColor(type, cat) {
@@ -118,7 +125,7 @@ function layerIconColor(type, cat) {
 }
 
 const OP_DESCRIPTIONS = {
-  'base-landform': 'Constructs foundational bedrock elevation and base rock competency at the bottom of the stack.',
+  'base-landform': 'Constructs foundational bedrock elevation and base rock competency as the first terrain pass, immediately above the locked Environment layer.',
   'mountain-ridges': 'Adds, subtracts, or blends procedural ridges, plateaus, fault escarpments, dunes, or craters.',
   'stratigraphic-beds': 'Carves dipping sedimentary bed benches and differential hardness, and gives those beds a chemical orientation (iron / copper / carbonate / salt horizons) for water-borne staining.',
   'rock-stacks': 'Synthesizes Slate-style tiered, leaning boulder tors and mushroom caprock columns.',
@@ -135,6 +142,7 @@ const OP_DESCRIPTIONS = {
   'spline-landform': 'New parameterized smooth spline: add a mountain ridge, subtract a canyon, grade a directed river or road, or bore an SDF tunnel completely through terrain.',
   'rock-placement': 'Distributes gravity-settled 3D loose boulders across cliff toes and crowns (distinct from bedrock landforms).',
   'vegetation-placement': 'Instantiates up to 44,000 real 3D multi-blade grass tufts masked by slope, elevation, snow, and water.',
+  [ENVIRONMENT_LAYER_TYPE]: 'The locked final stack layer. It owns the scene sun direction used for lighting and shadows; it is not a terrain-generating or erosion pass.',
 };
 
 // Complete Inspector Control Schema per Layer Type (1:1 aligned with canonical generators & conservative physics)
@@ -412,10 +420,30 @@ const INSPECTOR_SCHEMAS = {
     ],
     hasSeed: true,
   },
+  [ENVIRONMENT_LAYER_TYPE]: {
+    selects: [],
+    sliders: [
+      { key: 'sunAzimuth', label: 'Sun Azimuth', min: -180, max: 180, step: 1, fmt: (v) => `${Math.round(v)}°`, liveParam: true },
+      { key: 'sunElevation', label: 'Sun Elevation', min: 4, max: 85, step: 1, fmt: (v) => `${Math.round(v)}°`, liveParam: true },
+    ],
+    hasSeed: false,
+    liveOnly: true,
+  },
 };
 
 function isSplineAuthoringLayer(layer) {
   return layer?.type === 'spline-feature' || layer?.type === 'spline-landform';
+}
+
+function isEnvironmentLayer(layer) {
+  return layer?.type === ENVIRONMENT_LAYER_TYPE;
+}
+
+function isPositionLockedLayer(layer, spec = LAYER_OPERATION_SPECS[layer?.type]) {
+  // Deliberately narrower than the legacy `locked` flag: Base/Spline layers
+  // are delete/duplicate/drag-safe but retain arrow reordering. Environment
+  // alone is locked to a stack position.
+  return Boolean(spec?.systemLayer || spec?.lockedPosition);
 }
 
 function summarizeLayer(layer) {
@@ -594,7 +622,7 @@ export class ErosionLayerStackUI {
     let html = '';
     for (const g of groups) {
       const specs = Object.values(LAYER_OPERATION_SPECS).filter(
-        (s) => s.category === g.id && s.type !== 'base-landform'
+        (s) => s.category === g.id && s.type !== 'base-landform' && s.addable !== false
       );
       if (!specs.length) continue;
       html += `<div class="tp-menu-group"><div class="tp-menu-heading">${g.title}</div>`;
@@ -641,10 +669,11 @@ export class ErosionLayerStackUI {
 
   updateSceneCaption() {
     if (!this.elSceneCaption) return;
-    const enabledCount = this.pipeline.layers.filter((l) => l.enabled).length;
+    const terrainLayers = this.pipeline.layers.filter((layer) => !isEnvironmentLayer(layer));
+    const enabledCount = terrainLayers.filter((layer) => layer.enabled).length;
     const caveTris = Math.round(this.pipeline.caveSystem.vertexCount / 3);
     this.elSceneCaption.textContent =
-      `${enabledCount}/${this.pipeline.layers.length} passes · ${this.pipeline.lastEvalMs.toFixed(1)} ms` +
+      `${enabledCount}/${terrainLayers.length} passes · ${this.pipeline.lastEvalMs.toFixed(1)} ms` +
       (caveTris > 0 ? ` · ${caveTris.toLocaleString()} cave tris` : '');
   }
 
@@ -749,6 +778,10 @@ export class ErosionLayerStackUI {
     const layers = this.pipeline.layers;
     const visCount = layers.filter((l) => l.enabled).length;
     const hidCount = layers.length - visCount;
+    const lastTerrainIdx = layers.reduce(
+      (last, layer, layerIdx) => (isEnvironmentLayer(layer) ? last : layerIdx),
+      -1,
+    );
 
     if (this.elCountBadge) this.elCountBadge.textContent = String(layers.length);
     if (this.elStatVisible) this.elStatVisible.textContent = String(visCount);
@@ -770,37 +803,49 @@ export class ErosionLayerStackUI {
       }
 
       const isSelected = layer.id === this.pipeline.selectedLayerId;
-      const evalOrderNum = layers.length - idx; // 1 = bottom foundation, N = top final pass
+      const environmentLayer = isEnvironmentLayer(layer);
+      const positionLocked = isPositionLockedLayer(layer, spec);
+      // Environment is render state, not a terrain evaluation pass, so it
+      // does not consume a numbered step. Terrain keeps 1 = bottom/base.
+      const evalOrderNum = layers.slice(idx).filter((candidate) => !isEnvironmentLayer(candidate)).length;
+      const stepLabel = environmentLayer ? 'LAST' : `#${evalOrderNum}`;
       const iconSvg = SVG_ICONS[spec.glyph] || SVG_ICONS.mountain;
-      const hasMask = layer.mask && layer.mask.enabled;
-      const supportsMask = layer.type !== 'base-landform';
+      const hasMask = !environmentLayer && layer.mask && layer.mask.enabled;
+      const supportsMask = !environmentLayer && layer.type !== 'base-landform';
+      const canMoveDown = !positionLocked && idx < lastTerrainIdx;
 
       html += `
         <div class="tp-layer-item-wrap" data-layer-id="${layer.id}" data-idx="${idx}">
-          <div class="tp-layer-row ${isSelected ? 'selected' : ''} ${layer.enabled ? '' : 'muted'}"
-               draggable="${layer.locked ? 'false' : 'true'}"
+          <div class="tp-layer-row ${isSelected ? 'selected' : ''} ${layer.enabled ? '' : 'muted'} ${environmentLayer ? 'environment locked-last' : ''}"
+               draggable="${layer.locked || positionLocked ? 'false' : 'true'}"
                data-select-id="${layer.id}" data-idx="${idx}">
-            <span class="tp-drag-grip" title="Drag to reorder pipeline stage (Bottom → Top)">⋮⋮</span>
+            <span class="tp-drag-grip ${positionLocked ? 'locked' : ''}" title="${positionLocked ? 'Environment is locked as the last layer' : 'Drag to reorder pipeline stage (Bottom → Top)'}">${positionLocked ? SVG_ICONS.lock : '⋮⋮'}</span>
             <span class="tp-layer-icon" data-layer-type="${layer.type}" style="--cat-accent:${layerIconColor(layer.type, cat)}">
               ${iconSvg}
             </span>
             <div class="tp-layer-meta">
               <div class="tp-layer-title-line">
                 <span class="tp-layer-name">${this._esc(layer.name)}</span>
-                <span class="tp-step-pill" title="Evaluated at step #${evalOrderNum} from bottom">#${evalOrderNum}</span>
+                <span class="tp-step-pill ${environmentLayer ? 'locked-last' : ''}" title="${environmentLayer ? 'Locked last layer — lighting only, not a terrain pass' : `Evaluated at step #${evalOrderNum} from bottom`}">${stepLabel}</span>
               </div>
               <div class="tp-layer-sub">${this._esc(summary)}</div>
             </div>
-            <span class="tp-layer-status ${layer.enabled ? 'on' : 'off'}" title="${layer.enabled ? 'Pass active' : 'Pass muted'}">${SVG_ICONS.check}</span>
+            <span class="tp-layer-status ${environmentLayer ? 'locked' : (layer.enabled ? 'on' : 'off')}" title="${environmentLayer ? 'Locked last layer' : (layer.enabled ? 'Pass active' : 'Pass muted')}">${environmentLayer ? SVG_ICONS.lock : SVG_ICONS.check}</span>
             <div class="tp-layer-controls">
               ${
-                supportsMask
-                  ? `<button type="button" class="tp-icon-btn ${hasMask ? 'mask-on' : ''}" data-toggle-mask="${layer.id}" title="${hasMask ? 'Disable B&W spatial mask' : 'Add B&W spatial mask'}">${SVG_ICONS.mask}</button>`
-                  : ''
+                environmentLayer
+                  ? `<span class="tp-lock-chip" title="Environment is always on and locked as the last layer">${SVG_ICONS.lock}<span>Locked</span></span>`
+                  : `
+                    ${
+                      supportsMask
+                        ? `<button type="button" class="tp-icon-btn ${hasMask ? 'mask-on' : ''}" data-toggle-mask="${layer.id}" title="${hasMask ? 'Disable B&W spatial mask' : 'Add B&W spatial mask'}">${SVG_ICONS.mask}</button>`
+                        : ''
+                    }
+                    <button type="button" class="tp-icon-btn ${layer.enabled ? 'vis-on' : 'vis-off'}" data-toggle-vis="${layer.id}" title="${layer.enabled ? 'Mute pass' : 'Enable pass'}">
+                      ${layer.enabled ? SVG_ICONS.eyeOpen : SVG_ICONS.eyeClosed}
+                    </button>
+                  `
               }
-              <button type="button" class="tp-icon-btn ${layer.enabled ? 'vis-on' : 'vis-off'}" data-toggle-vis="${layer.id}" title="${layer.enabled ? 'Mute pass' : 'Enable pass'}">
-                ${layer.enabled ? SVG_ICONS.eyeOpen : SVG_ICONS.eyeClosed}
-              </button>
             </div>
           </div>
           ${
@@ -814,12 +859,16 @@ export class ErosionLayerStackUI {
           }
           ${
             isSelected
-              ? `<div class="tp-layer-actions">
-                   <button type="button" data-move-up="${idx}" ${idx === 0 ? 'disabled' : ''} title="Move later in pipeline (up)">↑ Up</button>
-                   <button type="button" data-move-down="${idx}" ${idx >= layers.length - 1 ? 'disabled' : ''} title="Move earlier in pipeline (down)">↓ Down</button>
-                   ${!layer.locked ? `<button type="button" data-dup="${layer.id}" title="Duplicate layer">Duplicate</button>` : ''}
-                   ${!layer.locked ? `<button type="button" class="danger" data-del="${layer.id}" title="Delete layer">Delete</button>` : '<span class="tp-locked-tag">Foundation</span>'}
-                 </div>`
+              ? (environmentLayer
+                ? `<div class="tp-layer-actions environment-locked">
+                     <span class="tp-locked-tag">${SVG_ICONS.lock} Locked · Last layer</span>
+                   </div>`
+                : `<div class="tp-layer-actions">
+                     <button type="button" data-move-up="${idx}" ${idx === 0 ? 'disabled' : ''} title="Move later in pipeline (up)">↑ Up</button>
+                     <button type="button" data-move-down="${idx}" ${canMoveDown ? '' : 'disabled'} title="${canMoveDown ? 'Move earlier in pipeline (down)' : 'Environment is locked below this layer'}">↓ Down</button>
+                     ${!layer.locked ? `<button type="button" data-dup="${layer.id}" title="Duplicate layer">Duplicate</button>` : ''}
+                     ${!layer.locked ? `<button type="button" class="danger" data-del="${layer.id}" title="Delete layer">Delete</button>` : '<span class="tp-locked-tag">Foundation</span>'}
+                   </div>`)
               : ''
           }
         </div>
@@ -850,6 +899,12 @@ export class ErosionLayerStackUI {
 
       // HTML5 Drag-and-Drop Reordering
       row.addEventListener('dragstart', (e) => {
+        const sourceLayer = this.pipeline.layers[Number(row.dataset.idx)];
+        if (!sourceLayer || isPositionLockedLayer(sourceLayer)) {
+          e.preventDefault();
+          this.dragFromIdx = null;
+          return;
+        }
         this.dragFromIdx = Number(row.dataset.idx);
         row.classList.add('dragging');
         e.dataTransfer.effectAllowed = 'move';
@@ -881,7 +936,7 @@ export class ErosionLayerStackUI {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         const l = this.pipeline.layers.find((x) => x.id === btn.dataset.toggleVis);
-        if (!l) return;
+        if (!l || isEnvironmentLayer(l)) return;
         l.enabled = !l.enabled;
         this.pipeline.evaluateStack({ reseedPlacements: true });
         this.renderAll();
@@ -892,7 +947,7 @@ export class ErosionLayerStackUI {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         const l = this.pipeline.layers.find((x) => x.id === btn.dataset.toggleMask);
-        if (!l || !l.mask) return;
+        if (!l || !l.mask || isEnvironmentLayer(l)) return;
         l.mask.enabled = !l.mask.enabled;
         this.pipeline.selectedLayerId = l.id;
         this.pipeline.evaluateStack({ reseedPlacements: false });
@@ -954,7 +1009,12 @@ export class ErosionLayerStackUI {
 
     const layers = this.pipeline.layers;
     const idx = layers.indexOf(layer);
-    const stepNum = layers.length - idx;
+    const environmentLayer = isEnvironmentLayer(layer);
+    const terrainLayerCount = layers.filter((candidate) => !isEnvironmentLayer(candidate)).length;
+    const stepNum = layers.slice(idx).filter((candidate) => !isEnvironmentLayer(candidate)).length;
+    const positionLabel = environmentLayer
+      ? 'Locked last · below Base Landform'
+      : `Step #${stepNum} of ${terrainLayerCount}`;
     const spec = LAYER_OPERATION_SPECS[layer.type] || LAYER_OPERATION_SPECS['mountain-ridges'];
     const cat = LAYER_CATEGORIES[spec.category] || LAYER_CATEGORIES.landform;
     const iconColor = layerIconColor(layer.type, cat);
@@ -962,12 +1022,16 @@ export class ErosionLayerStackUI {
     const iconSvg = SVG_ICONS[spec.glyph] || SVG_ICONS.mountain;
     const specLabel = spec.defaultName || layer.type;
     const specDesc = OP_DESCRIPTIONS[layer.type] || '';
-    const supportsMask = layer.type !== 'base-landform';
+    const supportsMask = !environmentLayer && layer.type !== 'base-landform';
 
     const readsBadges = (spec.reads.length ? spec.reads : ['domain XZ']).map((r) => `<span class="tp-io-pill read">R: ${r}</span>`).join('');
     const writesBadges = spec.writes.map((w) => `<span class="tp-io-pill write">W: ${w}</span>`).join('');
 
     let controlsHtml = '';
+    if (environmentLayer) {
+      controlsHtml += `
+        <p class="tp-card-note tp-environment-lock-note">${SVG_ICONS.lock}<span><strong>Locked as the last layer.</strong> Environment cannot be added, duplicated, moved, muted, masked or deleted elsewhere. Sun changes update lighting live and do not rebuild or pause the terrain simulation.</span></p>`;
+    }
     for (const sel of schema.selects) {
       const curVal = layer.params[sel.key] ?? 0;
       controlsHtml += `
@@ -1173,11 +1237,9 @@ export class ErosionLayerStackUI {
         </section>`;
     }
 
-    // Global Derived Surface Shading & Sun Card (explicitly separate from Layer Stack!)
-    const sunAz = this.engine.params.sunAzimuth ?? 48;
-    const sunEl = this.engine.params.sunElevation ?? 28;
-    const sunAzPct = (((sunAz + 180) / 360) * 100).toFixed(1);
-    const sunElPct = (((sunEl - 4) / 81) * 100).toFixed(1);
+    // Global Derived Surface Shading card. Sun direction is intentionally
+    // absent here: the locked final Environment layer is its single source
+    // of truth, so the two controls can never drift apart.
     const curFab = this.pipeline.fabricMode ?? 0;
     const fabOpts = Object.values(DERIVED_FABRICS)
       .map((f) => `<option value="${f.id}" ${Number(curFab) === f.id ? 'selected' : ''}>${f.label}</option>`)
@@ -1186,27 +1248,13 @@ export class ErosionLayerStackUI {
     const shadingCardHtml = `
       <details class="tp-property-card tp-collapsible-card" id="tp-shading-card" ${this.shadingCardOpen ? 'open' : ''}>
         <summary class="tp-card-summary">
-          <span class="tp-card-summary-title"><i style="background:#82939e"></i>Derived Surface Shading &amp; Sun</span>
+          <span class="tp-card-summary-title"><i style="background:#82939e"></i>Derived Surface Shading</span>
           <span class="tp-card-chevron" aria-hidden="true">▾</span>
         </summary>
-        <p class="tp-card-note">Global viewport shading from AO, height, hardness, sediment and flow — independent of the selected layer.</p>
+        <p class="tp-card-note">Global viewport shading from AO, height, hardness, sediment and flow — independent of the selected layer. Sun direction lives on the locked Environment layer at the end of the stack.</p>
         <div class="tp-control-row">
           <div class="tp-control-label"><span>Rock Micro-Fabric</span></div>
           <select class="tp-select" id="tp-select-fabric">${fabOpts}</select>
-        </div>
-        <div class="tp-control-row">
-          <div class="tp-control-label"><span>Sun Azimuth</span></div>
-          <div class="tp-amount" style="--fill:${sunAzPct}%">
-            <input type="range" min="-180" max="180" step="1" value="${sunAz}" id="tp-slider-sun-az" />
-            <output id="tp-out-sun-az">${Math.round(sunAz)}°</output>
-          </div>
-        </div>
-        <div class="tp-control-row">
-          <div class="tp-control-label"><span>Sun Elevation</span></div>
-          <div class="tp-amount" style="--fill:${sunElPct}%">
-            <input type="range" min="4" max="85" step="1" value="${sunEl}" id="tp-slider-sun-el" />
-            <output id="tp-out-sun-el">${Math.round(sunEl)}°</output>
-          </div>
         </div>
         <label class="tp-check-row">
           <input type="checkbox" id="tp-chk-show-water" ${this.engine.params.showWater !== false ? 'checked' : ''} />
@@ -1232,7 +1280,7 @@ export class ErosionLayerStackUI {
         <i>/</i>
         <span>${cat.label}</span>
         <i>›</i>
-        <span>Step #${stepNum} of ${layers.length}</span>
+        <span>${positionLabel}</span>
       </div>
 
       <div class="tp-inspector-identity">
@@ -1241,7 +1289,7 @@ export class ErosionLayerStackUI {
         </div>
         <div class="tp-identity-copy">
           <span class="tp-eyebrow" style="color:${iconColor}">${cat.eyebrow || cat.label.toUpperCase()}</span>
-          <input type="text" class="tp-identity-title-input" id="tp-input-layer-name" value="${this._esc(layer.name)}" />
+          <input type="text" class="tp-identity-title-input ${environmentLayer ? 'locked' : ''}" id="tp-input-layer-name" value="${this._esc(environmentLayer ? ENVIRONMENT_LAYER_NAME : layer.name)}" ${environmentLayer ? 'readonly aria-readonly="true" title="Environment is a locked system layer"' : ''} />
           <p class="tp-identity-desc">${specDesc}</p>
         </div>
       </div>
@@ -1267,6 +1315,12 @@ export class ErosionLayerStackUI {
     const nameInput = document.getElementById('tp-input-layer-name');
     if (nameInput) {
       nameInput.addEventListener('change', () => {
+        if (environmentLayer) {
+          layer.name = ENVIRONMENT_LAYER_NAME;
+          nameInput.value = ENVIRONMENT_LAYER_NAME;
+          this.renderStackList();
+          return;
+        }
         layer.name = nameInput.value.trim() || specLabel;
         this.renderStackList();
       });
@@ -1278,9 +1332,14 @@ export class ErosionLayerStackUI {
         layer.params[key] = Number(sel.value);
         // Wind direction regime is a live season setting: changing it must
         // not rebuild (and erase) the terrain already eroded this season.
-        const isLiveWindSelect = layer.type === 'wind-erosion' && key === 'windShiftMode';
-        if (!(isLiveWindSelect && this.pipeline.applyLiveWindLayerParams(layer))) {
-          this.pipeline.evaluateStack({ reseedPlacements: true });
+        // Environment is likewise live render state, never a stack rebuild.
+        if (environmentLayer) {
+          this.pipeline.applyLiveEnvironmentLayerParams(layer);
+        } else {
+          const isLiveWindSelect = layer.type === 'wind-erosion' && key === 'windShiftMode';
+          if (!(isLiveWindSelect && this.pipeline.applyLiveWindLayerParams(layer))) {
+            this.pipeline.evaluateStack({ reseedPlacements: true });
+          }
         }
         this._windFieldBuiltAt = 0;
         this.renderStackList();
@@ -1300,6 +1359,15 @@ export class ErosionLayerStackUI {
         if (out && slDef) out.textContent = slDef.fmt(v);
         const pct = ((v - Number(inp.min)) / Math.max(1e-6, Number(inp.max) - Number(inp.min))) * 100;
         inp.parentElement.style.setProperty('--fill', `${pct.toFixed(1)}%`);
+        const isLiveEnvironmentParam = environmentLayer && Boolean(slDef?.liveParam || schema.liveOnly);
+        if (isLiveEnvironmentParam) {
+          this.pipeline.applyLiveEnvironmentLayerParams(layer);
+          if (out && slDef) out.textContent = slDef.fmt(layer.params[key]);
+          const summaryEl = this.elList?.querySelector(`[data-layer-id="${layer.id}"] .tp-layer-sub`);
+          if (summaryEl) summaryEl.textContent = summarizeLayer(layer);
+          this.updateSceneCaption();
+          return;
+        }
         const isLiveWindParam = layer.type === 'wind-erosion' && key !== 'bakeSteps';
         if (!(isLiveWindParam && this.pipeline.applyLiveWindLayerParams(layer))) {
           this.pipeline.evaluateStack({
@@ -1310,6 +1378,13 @@ export class ErosionLayerStackUI {
         this.updateSceneCaption();
       });
       inp.addEventListener('change', () => {
+        const isLiveEnvironmentParam = environmentLayer && Boolean(slDef?.liveParam || schema.liveOnly);
+        if (isLiveEnvironmentParam) {
+          this.pipeline.applyLiveEnvironmentLayerParams(layer);
+          this.renderStackList();
+          this.updateSceneCaption();
+          return;
+        }
         const isLiveWindParam = layer.type === 'wind-erosion' && key !== 'bakeSteps';
         if (isLiveWindParam && this.pipeline.applyLiveWindLayerParams(layer)) {
           this.renderStackList();
@@ -1575,32 +1650,13 @@ export class ErosionLayerStackUI {
       });
     }
 
-    // Fabric, Sun, Water & Particle bindings
+    // Fabric, Water & Particle bindings. Sun controls are bound through the
+    // Environment layer's live parameter sliders above.
     const selFab = document.getElementById('tp-select-fabric');
     if (selFab) {
       selFab.addEventListener('change', () => {
         this.pipeline.fabricMode = Number(selFab.value);
         this.engine.params.fabricMode = this.pipeline.fabricMode;
-      });
-    }
-    const slAz = document.getElementById('tp-slider-sun-az');
-    const outAz = document.getElementById('tp-out-sun-az');
-    if (slAz) {
-      slAz.addEventListener('input', () => {
-        const v = Number(slAz.value);
-        this.engine.params.sunAzimuth = v;
-        if (outAz) outAz.textContent = `${Math.round(v)}°`;
-        slAz.parentElement.style.setProperty('--fill', `${(((v + 180) / 360) * 100).toFixed(1)}%`);
-      });
-    }
-    const slEl = document.getElementById('tp-slider-sun-el');
-    const outEl = document.getElementById('tp-out-sun-el');
-    if (slEl) {
-      slEl.addEventListener('input', () => {
-        const v = Number(slEl.value);
-        this.engine.params.sunElevation = v;
-        if (outEl) outEl.textContent = `${Math.round(v)}°`;
-        slEl.parentElement.style.setProperty('--fill', `${(((v - 4) / 81) * 100).toFixed(1)}%`);
       });
     }
     const chkWater = document.getElementById('tp-chk-show-water');

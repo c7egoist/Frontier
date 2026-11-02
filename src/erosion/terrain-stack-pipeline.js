@@ -23,8 +23,10 @@ import {
 } from './pipeline-shaders.js';
 import { SdfCaveSystem } from './sdf-cave-mesher.js';
 import {
+  ENVIRONMENT_LAYER_TYPE,
   TERRAIN_STACK_PRESETS,
   createStackLayer,
+  ensureEnvironmentLayer,
 } from './terrain-stack-presets.js';
 
 const PART_TEX_W = 256;
@@ -295,8 +297,15 @@ export class TerrainStackPipeline {
     this.sculptStore.clear();
 
     this.layers = preset.layers();
-    // Select Base Landform or top meaningful layer
-    this.selectedLayerId = this.layers[0]?.id || null;
+    this._ensureEnvironmentLayer({
+      sunAzimuth: ep.sunAzimuth,
+      sunElevation: ep.sunElevation,
+    });
+    // Select the top meaningful terrain layer, never the locked final
+    // Environment row just because a malformed stack contained only it.
+    this.selectedLayerId = this.layers.find((layer) => layer.type !== ENVIRONMENT_LAYER_TYPE)?.id
+      || this.layers[0]?.id
+      || null;
     const selectedProcesses = this.simulationProcessesForLayer(this.getSelectedLayer());
     if (selectedProcesses.length && this.simPlaybackMode === 'solo') {
       this.simSoloProcess = selectedProcesses[0];
@@ -305,11 +314,67 @@ export class TerrainStackPipeline {
     this.engine.camera.target[1] = (ep.relief || 168) * 0.30;
   }
 
+  _ensureEnvironmentLayer(sunDefaults = {}) {
+    const ep = this.engine?.params || {};
+    const selectedWasEnvironment = Array.isArray(this.layers)
+      && this.layers.find((layer) => layer?.id === this.selectedLayerId)?.type === ENVIRONMENT_LAYER_TYPE;
+    this.layers = ensureEnvironmentLayer(this.layers, {
+      sunAzimuth: sunDefaults.sunAzimuth ?? ep.sunAzimuth,
+      sunElevation: sunDefaults.sunElevation ?? ep.sunElevation,
+    });
+    const environment = this.layers[this.layers.length - 1] || null;
+    // If normalization discarded a selected duplicate, keep the Inspector
+    // attached to the surviving canonical Environment layer.
+    if (selectedWasEnvironment && environment) this.selectedLayerId = environment.id;
+    return environment;
+  }
+
+  getEnvironmentLayer() {
+    return this._ensureEnvironmentLayer();
+  }
+
+  /**
+   * Apply Environment sun angles directly to the render state. Lighting is
+   * not a terrain operation, so moving the sun neither rebuilds the stack
+   * nor pauses a live simulation season.
+   */
+  applyLiveEnvironmentLayerParams(layer) {
+    if (!layer || layer.type !== ENVIRONMENT_LAYER_TYPE) return false;
+    const environment = this._ensureEnvironmentLayer({
+      sunAzimuth: this.engine.params.sunAzimuth,
+      sunElevation: this.engine.params.sunElevation,
+    });
+    if (!environment || environment.id !== layer.id) return false;
+    const p = environment.params || {};
+    const ep = this.engine.params;
+    const az = Number(p.sunAzimuth);
+    const el = Number(p.sunElevation);
+    ep.sunAzimuth = Number.isFinite(az)
+      ? Math.max(-180, Math.min(180, az))
+      : DEFAULT_EROSION_PARAMS.sunAzimuth;
+    ep.sunElevation = Number.isFinite(el)
+      ? Math.max(4, Math.min(85, el))
+      : DEFAULT_EROSION_PARAMS.sunElevation;
+    environment.params.sunAzimuth = ep.sunAzimuth;
+    environment.params.sunElevation = ep.sunElevation;
+    return true;
+  }
+
   addLayer(type, overrides = {}) {
+    this._ensureEnvironmentLayer();
+    if (type === ENVIRONMENT_LAYER_TYPE) {
+      const environment = this.layers[this.layers.length - 1];
+      this.selectedLayerId = environment?.id || this.selectedLayerId;
+      return environment || null;
+    }
     const newLayer = createStackLayer(type, overrides);
     const selIdx = this.layers.findIndex((l) => l.id === this.selectedLayerId);
-    const insertAt = selIdx >= 0 ? selIdx : 0;
+    const environmentIdx = this.layers.length - 1;
+    const insertAt = selIdx >= 0
+      ? Math.min(selIdx, environmentIdx)
+      : 0;
     this.layers.splice(insertAt, 0, newLayer);
+    this._ensureEnvironmentLayer();
     this.selectedLayerId = newLayer.id;
     if (type === 'sculpt-layer') {
       this._getOrCreateSculptEntry(newLayer.id);
@@ -319,9 +384,11 @@ export class TerrainStackPipeline {
   }
 
   duplicateLayer(layerId) {
+    this._ensureEnvironmentLayer();
     const idx = this.layers.findIndex((l) => l.id === layerId);
     if (idx < 0) return null;
     const src = this.layers[idx];
+    if (src.locked || src.type === ENVIRONMENT_LAYER_TYPE) return null;
     const copy = createStackLayer(src.type, {
       name: `${src.name} copy`,
       enabled: src.enabled,
@@ -329,16 +396,19 @@ export class TerrainStackPipeline {
       params: structuredClone(src.params),
     });
     this.layers.splice(idx, 0, copy);
+    this._ensureEnvironmentLayer();
     this.selectedLayerId = copy.id;
     this.evaluateStack({ reseedPlacements: true });
     return copy;
   }
 
   deleteLayer(layerId) {
+    this._ensureEnvironmentLayer();
     if (this.layers.length <= 1) return false;
     const idx = this.layers.findIndex((l) => l.id === layerId);
-    if (idx < 0 || this.layers[idx].locked) return false;
+    if (idx < 0 || this.layers[idx].locked || this.layers[idx].type === ENVIRONMENT_LAYER_TYPE) return false;
     this.layers.splice(idx, 1);
+    this._ensureEnvironmentLayer();
     const sc = this.sculptStore.get(layerId);
     if (sc) {
       for (const t of sc.tex) this.gl.deleteTexture(t);
@@ -346,19 +416,33 @@ export class TerrainStackPipeline {
       this.sculptStore.delete(layerId);
     }
     if (this.selectedLayerId === layerId) {
-      this.selectedLayerId = this.layers[Math.min(idx, this.layers.length - 1)]?.id || null;
+      const fallbackIdx = Math.min(idx, this.layers.length - 1);
+      this.selectedLayerId = this.layers[fallbackIdx]?.type === ENVIRONMENT_LAYER_TYPE && fallbackIdx > 0
+        ? this.layers[fallbackIdx - 1]?.id
+        : this.layers[fallbackIdx]?.id || null;
     }
     this.evaluateStack({ reseedPlacements: true });
     return true;
   }
 
   moveLayer(fromIdx, toIdx) {
-    if (fromIdx < 0 || fromIdx >= this.layers.length) return;
-    const clamped = Math.max(0, Math.min(this.layers.length - 1, toIdx));
-    if (fromIdx === clamped) return;
+    this._ensureEnvironmentLayer();
+    if (fromIdx < 0 || fromIdx >= this.layers.length) return false;
+    const movedCandidate = this.layers[fromIdx];
+    // Preserve the existing `locked` contract (delete/duplicate/drag-safe,
+    // but arrow-reorderable for Base/Spline layers). Only Environment has a
+    // position lock and refuses every move.
+    if (!movedCandidate || movedCandidate.type === ENVIRONMENT_LAYER_TYPE) return false;
+    // Environment is pinned to the final slot; ordinary layers may move
+    // anywhere above it but never below it.
+    const maxIdx = Math.max(0, this.layers.length - 2);
+    const clamped = Math.max(0, Math.min(maxIdx, toIdx));
+    if (fromIdx === clamped) return false;
     const [moved] = this.layers.splice(fromIdx, 1);
     this.layers.splice(clamped, 0, moved);
+    this._ensureEnvironmentLayer();
     this.evaluateStack({ reseedPlacements: true });
+    return true;
   }
 
   getSelectedLayer() {
@@ -761,6 +845,12 @@ export class TerrainStackPipeline {
     const gl = this.gl;
     const R = this.R;
     const ep = this.engine.params;
+    // Every evaluatable stack—including restored snapshots and stacks built
+    // by external callers—gets the same locked Environment singleton last.
+    this._ensureEnvironmentLayer({
+      sunAzimuth: ep.sunAzimuth,
+      sunElevation: ep.sunElevation,
+    });
     const span = ep.worldSpan;
     const maxRelief = this._maxReliefEstimate();
 
@@ -869,7 +959,12 @@ export class TerrainStackPipeline {
       if (!layer.enabled) continue;
       const p = layer.params;
 
-      if (layer.type === 'base-landform') {
+      if (layer.type === ENVIRONMENT_LAYER_TYPE) {
+        // Environment is render state, not a GPU terrain operation. Its
+        // final-row position makes the Outliner explicit without adding a
+        // pass or invalidating placements when the sun moves.
+        this.applyLiveEnvironmentLayerParams(layer);
+      } else if (layer.type === 'base-landform') {
         ep.relief = p.relief ?? DEFAULT_EROSION_PARAMS.relief;
         ep.roughness = p.roughness ?? DEFAULT_EROSION_PARAMS.roughness;
         ep.seed = p.seed ?? DEFAULT_EROSION_PARAMS.seed;

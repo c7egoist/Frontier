@@ -4117,3 +4117,106 @@ summary:focus-visible {
 .status-toast {
   border-radius: 999px;
 }
+
+/* Locked Environment layer: a squared Outliner entry like every stack item,
+   but visually pinned as render-state rather than a movable terrain pass.
+   Its small chips remain rounded; only the row itself stays rectangular. */
+.tp-layer-row.environment.locked-last {
+  border-color: rgba(255, 209, 102, 0.34);
+  border-radius: 0;
+  background: linear-gradient(90deg, rgba(255, 209, 102, 0.055), #121214 42%);
+  cursor: default;
+}
+
+.tp-layer-row.environment.locked-last:hover {
+  border-color: rgba(255, 209, 102, 0.48);
+  background: linear-gradient(90deg, rgba(255, 209, 102, 0.08), #17171a 42%);
+}
+
+.tp-layer-row.environment.locked-last.drop-target {
+  border-color: rgba(255, 209, 102, 0.72);
+  box-shadow: 0 -2px 0 #ffd166;
+}
+
+.tp-drag-grip.locked {
+  display: inline-grid;
+  place-items: center;
+  color: #ffd166;
+  cursor: not-allowed;
+}
+
+.tp-drag-grip.locked svg {
+  width: 13px;
+  height: 13px;
+}
+
+.tp-step-pill.locked-last {
+  border: 1px solid rgba(255, 209, 102, 0.34);
+  border-radius: 999px;
+  background: rgba(255, 209, 102, 0.1);
+  color: #ffe1a1;
+  letter-spacing: 0.08em;
+}
+
+.tp-layer-status.locked {
+  background: transparent;
+  color: #ffd166;
+}
+
+.tp-layer-status.locked svg {
+  width: 14px;
+  height: 14px;
+}
+
+.tp-lock-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 7px;
+  border: 1px solid rgba(255, 209, 102, 0.32);
+  border-radius: 999px;
+  background: rgba(255, 209, 102, 0.08);
+  color: #ffe1a1;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.tp-lock-chip svg,
+.tp-layer-actions .tp-locked-tag svg {
+  width: 11px;
+  height: 11px;
+}
+
+.tp-layer-actions.environment-locked .tp-locked-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 0;
+  color: #ffe1a1;
+}
+
+.tp-identity-title-input.locked {
+  color: #ffe1a1;
+  cursor: default;
+}
+
+.tp-environment-lock-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  border: 1px solid rgba(255, 209, 102, 0.28);
+  border-radius: 12px;
+  background: rgba(255, 209, 102, 0.07);
+  padding: 9px 10px;
+}
+
+.tp-environment-lock-note > svg {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: #ffd166;
+}

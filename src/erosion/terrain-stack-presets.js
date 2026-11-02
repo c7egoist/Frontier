@@ -4,8 +4,10 @@
  * Unifies the 19 battle-tested geological generators, parameters, and seeds (`seed: 4029`)
  * from `erosion-presets.js` with a true bottom-to-top composable Layer Stack pipeline:
  *   - Newest / final operations sit at the TOP of the UI (index 0) and evaluate LAST.
- *   - Base landform sits at the BOTTOM of the UI (index length - 1) and evaluates FIRST.
- *   - Surface palette, rock fabric, view modes, sun angles, and particle display stay
+ *   - Base landform is the last terrain operation in the UI and evaluates FIRST.
+ *   - One locked Environment system layer is pinned after it as the final
+ *     Outliner row. It owns only the sun angles and performs no terrain pass.
+ *   - Surface palette, rock fabric, view modes, and particle display stay
  *     separate from the Layer Stack (zero fake colour/biome layers in the stack).
  */
 
@@ -23,7 +25,16 @@ export function nextLayerId(prefix = 'lyr') {
   return `${prefix}-${layerUidCounter++}`;
 }
 
+export const ENVIRONMENT_LAYER_TYPE = 'environment-sun';
+export const ENVIRONMENT_LAYER_NAME = 'Environment';
+
 export const LAYER_CATEGORIES = {
+  environment: {
+    id: 'environment',
+    label: 'Environment',
+    eyebrow: 'ENVIRONMENT / SUN — LOCKED LAST LAYER',
+    color: '#ffd166',
+  },
   landform: {
     id: 'landform',
     label: 'Landform & SDF',
@@ -536,19 +547,45 @@ export const LAYER_OPERATION_SPECS = {
       seed: DEFAULT_EROSION_PARAMS.seed,
     },
   },
+
+  [ENVIRONMENT_LAYER_TYPE]: {
+    type: ENVIRONMENT_LAYER_TYPE,
+    category: 'environment',
+    defaultName: ENVIRONMENT_LAYER_NAME,
+    glyph: 'sun',
+    // System singleton: pipeline/UI code must never offer this in the Add
+    // menu, duplicate it, delete it, mute it, mask it, or move another
+    // layer below it. It is not a terrain-generation or erosion pass.
+    systemLayer: true,
+    singleton: true,
+    addable: false,
+    lockedPosition: 'last',
+    reads: ['Sun Azimuth', 'Sun Elevation'],
+    writes: ['Sun Direction'],
+    summary: (p) => `Sun · ${Math.round(p.sunAzimuth ?? DEFAULT_EROSION_PARAMS.sunAzimuth)}° az · ${Math.round(p.sunElevation ?? DEFAULT_EROSION_PARAMS.sunElevation)}° el · locked`,
+    defaults: {
+      sunAzimuth: DEFAULT_EROSION_PARAMS.sunAzimuth,
+      sunElevation: DEFAULT_EROSION_PARAMS.sunElevation,
+    },
+  },
 };
 
 export function createStackLayer(type, overrides = {}) {
   const spec = LAYER_OPERATION_SPECS[type];
   if (!spec) throw new Error(`Unknown terrain layer operation: ${type}`);
   const { name, enabled = true, locked = false, mask, params = {}, ...restParams } = overrides;
+  const isEnvironment = type === ENVIRONMENT_LAYER_TYPE;
   return {
     id: nextLayerId(type.slice(0, 4)),
     type,
-    name: name || spec.defaultName,
-    enabled,
-    locked,
-    mask: { ...DEFAULT_LAYER_MASK, ...(mask || {}) },
+    name: isEnvironment ? ENVIRONMENT_LAYER_NAME : (name || spec.defaultName),
+    enabled: isEnvironment ? true : enabled,
+    locked: isEnvironment ? true : locked,
+    mask: {
+      ...DEFAULT_LAYER_MASK,
+      ...(mask || {}),
+      ...(isEnvironment ? { enabled: false } : {}),
+    },
     params: {
       ...structuredClone(spec.defaults),
       ...structuredClone(restParams),
@@ -557,9 +594,55 @@ export function createStackLayer(type, overrides = {}) {
   };
 }
 
+export function createEnvironmentLayer(overrides = {}) {
+  const params = { ...(overrides.params || {}) };
+  if (Number.isFinite(Number(overrides.sunAzimuth))) params.sunAzimuth = Number(overrides.sunAzimuth);
+  if (Number.isFinite(Number(overrides.sunElevation))) params.sunElevation = Number(overrides.sunElevation);
+  return createStackLayer(ENVIRONMENT_LAYER_TYPE, {
+    name: ENVIRONMENT_LAYER_NAME,
+    enabled: true,
+    locked: true,
+    mask: { enabled: false },
+    params,
+  });
+}
+
+/**
+ * Return a stack containing exactly one canonical Environment layer, pinned
+ * as the final (last) row. Existing Environment sun values win over caller
+ * defaults, which makes this safe for preset loads, restored snapshots and
+ * ordinary stack mutations.
+ */
+export function ensureEnvironmentLayer(layers = [], sunDefaults = {}) {
+  const source = Array.isArray(layers) ? layers : [];
+  const existing = source.find((layer) => layer?.type === ENVIRONMENT_LAYER_TYPE);
+  const rest = source.filter((layer) => layer?.type !== ENVIRONMENT_LAYER_TYPE);
+  const environment = existing || createEnvironmentLayer(sunDefaults);
+  const defaults = LAYER_OPERATION_SPECS[ENVIRONMENT_LAYER_TYPE].defaults;
+  const cleanSunDefaults = {};
+  if (Number.isFinite(Number(sunDefaults.sunAzimuth))) cleanSunDefaults.sunAzimuth = Number(sunDefaults.sunAzimuth);
+  if (Number.isFinite(Number(sunDefaults.sunElevation))) cleanSunDefaults.sunElevation = Number(sunDefaults.sunElevation);
+
+  environment.name = ENVIRONMENT_LAYER_NAME;
+  environment.enabled = true;
+  environment.locked = true;
+  environment.mask = {
+    ...structuredClone(DEFAULT_LAYER_MASK),
+    ...(environment.mask || {}),
+    enabled: false,
+  };
+  environment.params = {
+    ...structuredClone(defaults),
+    ...cleanSunDefaults,
+    ...(environment.params || {}),
+  };
+  return [...rest, environment];
+}
+
 /**
  * Decomposes any of the 19 canonical `EROSION_LANDSCAPES` (`erosion-presets.js`) into its exact
- * bottom-to-top editable Layer Stack (index 0 = TOP / evaluated LAST, last index = BOTTOM / evaluated FIRST)
+ * bottom-to-top editable Layer Stack (index 0 = TOP / evaluated LAST; Base is
+ * the first terrain pass and the locked Environment row follows it last)
  * while preserving 100% identical generator parameters, seed (`4029`), and simulation behavior!
  */
 function buildStackRecipeFromLandscape(landscapeId) {
@@ -746,6 +829,13 @@ function buildStackRecipeFromLandscape(landscapeId) {
     })
   );
 
+  // 8. Locked Environment singleton: always the final Outliner row. It
+  // carries this preset's exact sun angles but performs no terrain pass.
+  layers.push(createEnvironmentLayer({
+    sunAzimuth: d.sunAzimuth ?? DEFAULT_EROSION_PARAMS.sunAzimuth,
+    sunElevation: d.sunElevation ?? DEFAULT_EROSION_PARAMS.sunElevation,
+  }));
+
   return {
     id: preset.id,
     name: preset.name,
@@ -838,6 +928,7 @@ function buildUtahWindRainRecipe() {
       relief: 158,
       roughness: 0.68,
     }),
+    createEnvironmentLayer({ sunAzimuth: 55, sunElevation: 24 }),
   ];
   return {
     manualRecipe: true,
@@ -972,6 +1063,7 @@ function buildSplineCanyonRiverRecipe() {
       relief: 132,
       roughness: 0.58,
     }),
+    createEnvironmentLayer({ sunAzimuth: 52, sunElevation: 25 }),
   ];
   return {
     manualRecipe: true,
@@ -1069,6 +1161,7 @@ function buildSplineRoadTunnelRecipe() {
       relief: 172,
       roughness: 0.72,
     }),
+    createEnvironmentLayer({ sunAzimuth: 48, sunElevation: 24 }),
   ];
   return {
     manualRecipe: true,
