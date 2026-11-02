@@ -968,9 +968,10 @@ export class GpuErosionEngine {
 
     const rawSum = rain + snow + wind + rock;
     const sum = Math.max(1e-4, rawSum);
-    // Slow weather regime: the large-scale wind dwells in a sector and then
-    // changes sector (variable wind rose / fronts / equal full rose). Local
-    // gust wander and terrain wrap in the shaders act around this vector.
+    // Slow weather regime: the large-scale wind persists through a sector
+    // spell, then veers/backs smoothly through intervening bearings into
+    // the next spell (variable wind rose / fronts / equal full rose). Local
+    // moving gusts and terrain wrap in the shaders act around this vector.
     const windCycles = windCyclesAtStep(p, this.stepCount || 0);
     const effectiveWindAzimuth = effectiveWindAzimuthAtStep(p, this.stepCount || 0);
     const azRad = (effectiveWindAzimuth * Math.PI) / 180;
@@ -1619,6 +1620,11 @@ export class GpuErosionEngine {
       );
       gl.uniform4fv(gl.getUniformLocation(this.progTerrainIntegrate, 'uWindErodeA'), windErosion.a);
       gl.uniform4fv(gl.getUniformLocation(this.progTerrainIntegrate, 'uWindErodeB'), windErosion.b);
+      gl.uniform2f(
+        gl.getUniformLocation(this.progTerrainIntegrate, 'uWindPhase'),
+        this.stepCount || 0,
+        climate.windCycles || 0
+      );
 
       const chemOn = p.simChemicalPlaying === false ? 0.0 : 1.0;
       gl.uniform4f(

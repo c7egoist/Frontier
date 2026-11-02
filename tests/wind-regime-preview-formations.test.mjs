@@ -13,7 +13,9 @@ import {
   normalizeWindAzimuthDeg,
   normalizeWindShiftMode,
   sampleWindDirectionSequenceDeg,
+  windAngleDeltaDeg,
   windDirectionScheduleDeg,
+  windDirectionTimelineDeg,
   windRoseWeightsDeg,
   windShiftModeValue,
 } from '../src/erosion/wind-regime.js';
@@ -142,7 +144,7 @@ function macroBounds(macro) {
   };
 }
 
-test('Shared wind regimes dwell in sectors instead of sweeping like a windscreen wiper', () => {
+test('Shared wind regimes dwell in weather spells and veer smoothly instead of sweeping or jumping', () => {
   assert.equal(normalizeWindShiftMode(0), 'fixed');
   assert.equal(normalizeWindShiftMode(1), 'variable');
   assert.equal(normalizeWindShiftMode('seasonal_swing'), 'variable', 'legacy swing settings migrate to the variable wind rose');
@@ -163,23 +165,61 @@ test('Shared wind regimes dwell in sectors instead of sweeping like a windscreen
     seed: 4029,
   };
   const schedule = windDirectionScheduleDeg(variable, 0);
-  assert.equal(schedule.length, 32, 'one variable weather pattern contains many short direction episodes');
+  assert.equal(schedule.length, 32, 'one variable weather pattern contains many quota units that consolidate into spells');
 
-  // Every scheduled entry is held for its whole dwell slice; it does not
-  // continuously lean from one extreme to the other between samples.
-  for (let episode = 0; episode < schedule.length; episode++) {
-    const early = effectiveWindAzimuthDeg(variable, (episode + 0.2) / schedule.length);
-    const late = effectiveWindAzimuthDeg(variable, (episode + 0.8) / schedule.length);
-    assert.equal(early, late, `episode ${episode} must dwell at one bearing`);
-    assert.equal(early, normalizeWindAzimuthDeg(35 + schedule[episode]));
+  // The schedule is only the quota/anchor plan. Realized wind dwells in
+  // merged weather spells, then follows finite transition segments through
+  // every intermediate bearing; it must never teleport across the compass.
+  const timeline = windDirectionTimelineDeg(variable, 0);
+  assert.ok(timeline.some((segment) => segment.kind === 'dwell'), 'weather spells must dwell');
+  assert.ok(timeline.some((segment) => segment.kind === 'transition'), 'sector changes need transition segments');
+  const dwellFraction = timeline
+    .filter((segment) => segment.kind === 'dwell')
+    .reduce((sum, segment) => sum + segment.end - segment.start, 0);
+  assert.ok(dwellFraction >= 0.40 && dwellFraction <= 0.65,
+    `wind should mostly dwell without turning constantly (dwell fraction ${dwellFraction})`);
+  for (const segment of timeline.filter((entry) => entry.kind === 'dwell')) {
+    const span = segment.end - segment.start;
+    const early = effectiveWindAzimuthDeg(variable, segment.start + span * 0.25);
+    const late = effectiveWindAzimuthDeg(variable, segment.start + span * 0.75);
+    assert.ok(angularJumpDeg(early, late) < 1e-9, 'samples inside one weather spell hold one bearing');
+  }
+  for (const segment of timeline.filter((entry) => entry.kind === 'transition' && Math.abs(entry.deltaDeg) >= 85)) {
+    const midOffset = relativeAzimuthDeg(effectiveWindAzimuthDeg(variable, (segment.start + segment.end) / 2), 35);
+    const expectedMid = relativeAzimuthDeg(normalizeWindAzimuthDeg(segment.fromOffsetDeg + segment.deltaDeg / 2), 0);
+    assert.ok(Math.abs(windAngleDeltaDeg(midOffset, expectedMid)) < 1e-6,
+      'a large frontal change passes through its intermediate bearing');
   }
 
-  // Episode-to-episode changes include real weather jumps to widely
-  // separated sectors, not just a smooth left-right-left oscillation.
-  const episodeAzimuths = schedule.map((offset) => normalizeWindAzimuthDeg(35 + offset));
-  const largeJumps = episodeAzimuths.slice(1)
-    .filter((deg, i) => angularJumpDeg(episodeAzimuths[i], deg) >= 90).length;
-  assert.ok(largeJumps >= 4, `variable weather should sometimes jump across the compass (${largeJumps} large jumps)`);
+  // Sample a 720-step weather-pattern cycle densely. Even a near-opposite
+  // change is spread over many simulation steps, while the path still
+  // reaches widely separated sectors rather than oscillating sinusoidally.
+  let previous = effectiveWindAzimuthDeg(variable, 0);
+  let maxStepTurnDeg = 0;
+  const denseOffsets = [];
+  for (let step = 1; step <= 1440; step++) {
+    const azimuth = effectiveWindAzimuthAtStep({ ...variable, windShiftPeriod: 720 }, step);
+    maxStepTurnDeg = Math.max(maxStepTurnDeg, angularJumpDeg(previous, azimuth));
+    previous = azimuth;
+    if (step <= 720) denseOffsets.push(relativeAzimuthDeg(azimuth, 35));
+  }
+  assert.ok(maxStepTurnDeg < 8, `no abrupt compass jump in one simulation step (${maxStepTurnDeg}° max)`);
+  let shortPrevious = effectiveWindAzimuthAtStep({ ...variable, windShiftPeriod: 30 }, 0);
+  let shortMaxTurnDeg = 0;
+  for (let step = 1; step <= 240; step++) {
+    const azimuth = effectiveWindAzimuthAtStep({ ...variable, windShiftPeriod: 30 }, step);
+    shortMaxTurnDeg = Math.max(shortMaxTurnDeg, angularJumpDeg(shortPrevious, azimuth));
+    shortPrevious = azimuth;
+  }
+  assert.ok(shortMaxTurnDeg < 20,
+    `even a legacy 30-step period is clamped so frontal turns take multiple steps (${shortMaxTurnDeg}° max)`);
+  const denseCounts = sectorCountsForOffsets(denseOffsets);
+  assert.ok(denseCounts.every((count) => count > 0), `realized smooth path reaches every sector (${denseCounts})`);
+  assert.equal(denseCounts[4], Math.max(...denseCounts), 'prevailing sector still dominates realized time');
+  assert.ok(Math.abs(denseCounts[3] - denseCounts[5]) <= 35,
+    `realized ±45° time stays broadly balanced (${denseCounts})`);
+  assert.ok(Math.abs(denseCounts[2] - denseCounts[6]) <= 25,
+    `realized ±90° time stays broadly balanced (${denseCounts})`);
   assert.notDeepEqual(
     [0, 0.25, 0.5, 0.75, 1].map((c) => Math.round(effectiveWindAzimuthDeg(variable, c))),
     [35, 95, 35, -25, 35],
@@ -201,9 +241,12 @@ test('Shared wind regimes dwell in sectors instead of sweeping like a windscreen
   assert.ok(counts[3] > counts[2] && counts[2] > counts[1],
     `adjacent sectors should be more frequent than side/rear sectors (${counts})`);
   assert.ok(counts[0] >= 1, 'even the opposite sector occurs occasionally');
-  const firstHalfCounts = sectorCountsForOffsets(schedule.slice(0, 16));
-  assert.ok(firstHalfCounts.every((count) => count > 0),
-    `rare sectors are spread through a cycle, not postponed to its end (${firstHalfCounts})`);
+  const firstHalfTrajectoryCounts = sectorCountsForOffsets(denseOffsets.slice(0, 360));
+  assert.ok(firstHalfTrajectoryCounts.every((count) => count > 0),
+    `the realized smooth path reaches rare sectors in the first half-cycle (${firstHalfTrajectoryCounts})`);
+  const earlyAnchorCounts = sectorCountsForOffsets(schedule.slice(0, 20));
+  assert.ok(earlyAnchorCounts.every((count) => count > 0),
+    `rare sector spells are spread through a cycle, not postponed to its end (${earlyAnchorCounts})`);
 
   // The ideal weights carry the same symmetry before integer quotas.
   const weights = windRoseWeightsDeg(variable);
@@ -219,17 +262,17 @@ test('Shared wind regimes dwell in sectors instead of sweeping like a windscreen
   assert.ok(narrowWeights[0].weight < weights[0].weight && weights[0].weight < broadWeights[0].weight,
     'increasing spread should give rear/opposite sectors more time');
 
-  // Legacy user settings get exactly the new episode schedule.
+  // Legacy user settings get exactly the new weather-spell schedule.
   assert.deepEqual(
     windDirectionScheduleDeg({ ...variable, windShiftMode: 'oscillate' }, 0),
     schedule
   );
 
-  // Reporting samples actual dwell episodes across both cycles.
+  // Reporting samples actual weather-spell and frontal-transition centres.
   const reported = sampleWindDirectionSequenceDeg(variable, 2, 17);
   assert.equal(reported.length, 17);
   assert.ok(new Set(reported.map((deg) => sectorIndexForRelativeDeg(relativeAzimuthDeg(deg, 35)))).size >= 6,
-    `reported episodes should span several sectors (${reported})`);
+    `reported direction path should span several sectors (${reported})`);
 
   const fronts = {
     windAzimuth: 35,
@@ -242,13 +285,19 @@ test('Shared wind regimes dwell in sectors instead of sweeping like a windscreen
   assert.deepEqual([...frontSchedule].sort((a, b) => a - b), [-80, -40, 0, 40, 80]);
   assert.notDeepEqual(frontSchedule, [-80, -40, 0, 40, 80], 'fronts must not sweep monotonically across the compass');
   assert.notDeepEqual(frontSchedule, [80, 40, 0, -40, -80], 'fronts must not sweep monotonically back across the compass');
-  for (let episode = 0; episode < frontSchedule.length; episode++) {
-    assert.equal(
-      effectiveWindAzimuthDeg(fronts, (episode + 0.2) / frontSchedule.length),
-      effectiveWindAzimuthDeg(fronts, (episode + 0.8) / frontSchedule.length),
-      'each front sector also dwells'
-    );
+  const frontTimeline = windDirectionTimelineDeg(fronts, 0);
+  const frontDwellFraction = frontTimeline
+    .filter((segment) => segment.kind === 'dwell')
+    .reduce((sum, segment) => sum + segment.end - segment.start, 0);
+  assert.ok(frontDwellFraction >= 0.60, `weather fronts mostly dwell (${frontDwellFraction})`);
+  let frontPrevious = effectiveWindAzimuthDeg(fronts, 0);
+  let frontMaxTurnDeg = 0;
+  for (let step = 1; step <= 720; step++) {
+    const azimuth = effectiveWindAzimuthAtStep({ ...fronts, windShiftPeriod: 720 }, step);
+    frontMaxTurnDeg = Math.max(frontMaxTurnDeg, angularJumpDeg(frontPrevious, azimuth));
+    frontPrevious = azimuth;
   }
+  assert.ok(frontMaxTurnDeg < 6, `front passages also veer continuously (${frontMaxTurnDeg}° max/step)`);
 
   const rose = { windAzimuth: 35, windShiftMode: 'rotate', seed: 4029 };
   const roseSchedule = windDirectionScheduleDeg(rose, 0);
@@ -260,12 +309,13 @@ test('Shared wind regimes dwell in sectors instead of sweeping like a windscreen
     'full-rose mode must not behave like a clock hand'
   );
 
-  const stepped = { ...variable, windShiftPeriod: 200 };
-  assert.equal(effectiveWindAzimuthAtStep(stepped, 0), effectiveWindAzimuthAtStep(stepped, 5),
-    'Terrain holds the first sector for multiple simulation steps');
-  assert.notEqual(effectiveWindAzimuthAtStep(stepped, 5), effectiveWindAzimuthAtStep(stepped, 7),
-    'Terrain then changes to the next scheduled sector');
-  assert.match(describeWindRegime(stepped), /variable wind rose.*spread 60°/);
+  const stepped = { ...variable, windShiftPeriod: 720 };
+  const firstDwell = timeline.find((segment) => segment.kind === 'dwell');
+  const dwellStepA = Math.floor((firstDwell.start + (firstDwell.end - firstDwell.start) * 0.25) * 720);
+  const dwellStepB = Math.floor((firstDwell.start + (firstDwell.end - firstDwell.start) * 0.75) * 720);
+  assert.equal(effectiveWindAzimuthAtStep(stepped, dwellStepA), effectiveWindAzimuthAtStep(stepped, dwellStepB),
+    'Terrain holds one weather spell for multiple simulation steps');
+  assert.match(describeWindRegime(stepped), /variable wind rose.*smooth frontal transitions.*spread 60°/);
 });
 
 test('Terrain defaults and Utah expose moving prevailing wind, and GPU climate follows step count', () => {
@@ -278,7 +328,7 @@ test('Terrain defaults and Utah expose moving prevailing wind, and GPU climate f
   assert.ok(utahWind, 'Utah must retain its dedicated Wind layer');
   assert.equal(utahWind.params.windShiftMode, 2);
   assert.equal(utahWind.params.windShiftRange, 70);
-  assert.equal(utahWind.params.windShiftPeriod, 220);
+  assert.equal(utahWind.params.windShiftPeriod, 720);
   assert.deepEqual(
     utahLayers.filter((layer) => ['wind-erosion', 'hydraulic-erosion'].includes(layer.type)).map((l) => l.type).sort(),
     ['hydraulic-erosion', 'wind-erosion'],
@@ -293,43 +343,62 @@ test('Terrain defaults and Utah expose moving prevailing wind, and GPU climate f
     windSpeed: 0.8,
     windShiftMode: 1,
     windShiftRange: 70,
-    windShiftPeriod: 100,
+    windShiftPeriod: 720,
     snowfallRate: 0,
     snowline: 0.5,
     glacierStrength: 0,
   };
-  engine.stepCount = 0;
+  const engineTimeline = windDirectionTimelineDeg(engine.params, 0);
+  const firstDwell = engineTimeline.find((segment) => segment.kind === 'dwell');
+  const laterDwell = engineTimeline.find((segment) => segment.kind === 'dwell'
+    && angularJumpDeg(segment.fromOffsetDeg, firstDwell.fromOffsetDeg) > 35);
+  const stepInSegment = (segment, fraction) => Math.floor(
+    (segment.start + (segment.end - segment.start) * fraction) * 720
+  );
+  const startStep = stepInSegment(firstDwell, 0.25);
+  engine.stepCount = startStep;
   const atStart = engine._getClimateUniforms();
-  engine.stepCount = 2;
+  engine.stepCount = stepInSegment(firstDwell, 0.75);
   const stillFirstDwell = engine._getClimateUniforms();
-  engine.stepCount = 4;
+  engine.stepCount = stepInSegment(laterDwell, 0.5);
   const nextDwell = engine._getClimateUniforms();
 
-  assert.equal(atStart.windAzimuthDeg, effectiveWindAzimuthAtStep(engine.params, 0));
+  assert.equal(atStart.windAzimuthDeg, effectiveWindAzimuthAtStep(engine.params, startStep));
   assert.equal(stillFirstDwell.windAzimuthDeg, atStart.windAzimuthDeg,
-    'GPU erosion holds a sector for its dwell instead of changing every step');
+    'GPU erosion holds a weather spell instead of changing every step');
   assert.notEqual(nextDwell.windAzimuthDeg, atStart.windAzimuthDeg,
-    'GPU erosion then moves to the next weather sector');
+    'GPU erosion then veers into another weather spell');
   assert.ok(Math.abs(nextDwell.windVec[0] - atStart.windVec[0]) > 0.1 ||
     Math.abs(nextDwell.windVec[1] - atStart.windVec[1]) > 0.1,
-  'the actual GPU wind vector follows the sector change');
+  'the actual GPU wind vector follows the smooth sector change');
 
-  // Over four complete 100-step weather patterns the realized Terrain-step
-  // distribution is prevailing-dominated and left/right balanced.
-  const terrainAzimuths = [];
-  for (let step = 0; step < 400; step++) {
-    engine.stepCount = step;
-    terrainAzimuths.push(engine._getClimateUniforms().windAzimuthDeg);
+  // Between those spells the GPU azimuth is continuous at simulation-step
+  // resolution: no north-to-south teleport can hide between dwell samples.
+  let previousAzimuth = effectiveWindAzimuthAtStep(engine.params, 0);
+  let maxTerrainTurnDeg = 0;
+  const terrainAzimuths = [previousAzimuth];
+  for (let step = 1; step < 1440; step++) {
+    const azimuth = effectiveWindAzimuthAtStep(engine.params, step);
+    maxTerrainTurnDeg = Math.max(maxTerrainTurnDeg, angularJumpDeg(previousAzimuth, azimuth));
+    previousAzimuth = azimuth;
+    terrainAzimuths.push(azimuth);
   }
+  assert.ok(maxTerrainTurnDeg < 8, `Terrain wind turns smoothly (${maxTerrainTurnDeg}° max/step)`);
+
+  // Over two complete weather patterns the realized Terrain-step
+  // distribution is prevailing-dominated and broadly left/right balanced.
   const terrainCounts = sectorCountsForAzimuths(terrainAzimuths, 20);
   assert.equal(terrainCounts[4], Math.max(...terrainCounts), `prevailing sector dominates Terrain steps (${terrainCounts})`);
   assert.ok(terrainCounts.every((count) => count > 0), `Terrain visits all sectors (${terrainCounts})`);
-  assert.ok(Math.abs(terrainCounts[3] - terrainCounts[5]) <= 4, `±45° Terrain dwells are balanced (${terrainCounts})`);
-  assert.ok(Math.abs(terrainCounts[2] - terrainCounts[6]) <= 2, `±90° Terrain dwells are balanced (${terrainCounts})`);
-  assert.ok(Math.abs(terrainCounts[1] - terrainCounts[7]) <= 2, `±135° Terrain dwells are balanced (${terrainCounts})`);
+  assert.ok(Math.abs(terrainCounts[3] - terrainCounts[5]) / terrainAzimuths.length <= 0.035,
+    `±45° Terrain time is balanced (${terrainCounts})`);
+  assert.ok(Math.abs(terrainCounts[2] - terrainCounts[6]) / terrainAzimuths.length <= 0.030,
+    `±90° Terrain time is balanced (${terrainCounts})`);
+  assert.ok(Math.abs(terrainCounts[1] - terrainCounts[7]) / terrainAzimuths.length <= 0.030,
+    `±135° Terrain time is balanced (${terrainCounts})`);
 });
 
-test('Rock SDF wind dwells through equal full-rose sectors and abrades more than one face', () => {
+test('Rock SDF wind veers smoothly through equal-quota full-rose sectors and abrades more than one face', () => {
   const make = () => makeDenseSdf(roundedBoxSdf(2, 1.2, 2, 1.15, 0.95, 1.15, 0.05), 64, 40, 64, 0.0625);
   const fresh = make();
 
@@ -369,14 +438,14 @@ test('Rock SDF wind dwells through equal full-rose sectors and abrades more than
   const rotatingFaces = faceMeanPhiDelta(fresh, rotatingSdf);
   assert.equal(rotating.directionMode, 'rotate');
   assert.equal(rotating.directionCycles, 1);
-  assert.equal(rotating.directionSamplesDeg.length, 16, 'reports all sixteen full-rose dwell episodes');
+  assert.equal(rotating.directionSamplesDeg.length, 17, 'reports weather-spell and transition centres along the full-rose path');
   assert.ok(new Set(rotating.directionSamplesDeg.map((deg) => sectorIndexForRelativeDeg(deg))).size === 8,
-    `full-rose episodes cover all sectors (${rotating.directionSamplesDeg})`);
+    `full-rose direction path covers all sectors (${rotating.directionSamplesDeg})`);
   assert.equal(rotating.directionSectorCounts.reduce((sum, count) => sum + count, 0), 900);
-  assert.ok(rotating.directionSectorCounts.every((count) => count >= 100 && count <= 125),
-    `full-rose particles are distributed equally across sectors (${rotating.directionSectorCounts})`);
-  assert.ok(Math.abs(rotating.directionSectorCounts[3] - rotating.directionSectorCounts[5]) <= 3);
-  assert.ok(Math.abs(rotating.directionSectorCounts[2] - rotating.directionSectorCounts[6]) <= 3);
+  assert.ok(rotating.directionSectorCounts.every((count) => count >= 70 && count <= 165),
+    `full-rose particles remain broadly distributed across sectors (${rotating.directionSectorCounts})`);
+  assert.ok(Math.abs(rotating.directionSectorCounts[3] - rotating.directionSectorCounts[5]) <= 45);
+  assert.ok(Math.abs(rotating.directionSectorCounts[2] - rotating.directionSectorCounts[6]) <= 45);
   assert.ok(rotating.erodedVolume > 0);
   const recededFaces = Object.values(rotatingFaces).filter((v) => v > 0.00012).length;
   assert.ok(recededFaces >= 3, `full-rose wind must engage at least three faces (${JSON.stringify(rotatingFaces)})`);
@@ -415,12 +484,12 @@ test('SDF suite emits ordered watchable checkpoints without changing its final p
   }
   assert.ok(frames.some((f) => f.process === 'wind'));
   assert.equal(stats.wind.directionMode, 'variable', 'legacy oscillate input is migrated, not replayed as a sine');
-  // Reports are actual scheduled dwell episodes, and the particle-sector
+  // Reports are actual weather-spell/transition centres, and the particle
   // counts prove the finite bake realized the intended balanced wind rose.
   assert.equal(stats.wind.directionSamplesDeg.length, 17);
   assert.ok(new Set(stats.wind.directionSamplesDeg.map((deg) =>
     sectorIndexForRelativeDeg(relativeAzimuthDeg(deg, 15)))).size >= 6,
-  `reported bake episodes span several sectors (${stats.wind.directionSamplesDeg})`);
+  `reported bake direction path spans several sectors (${stats.wind.directionSamplesDeg})`);
   assert.deepEqual(stats.wind.directionSectorOffsetsDeg, SECTOR_CENTRES_DEG);
   assert.equal(stats.wind.directionSectorCounts.reduce((sum, count) => sum + count, 0), 240);
   assert.ok(stats.wind.directionSectorCounts.every((count) => count > 0),
@@ -429,8 +498,8 @@ test('SDF suite emits ordered watchable checkpoints without changing its final p
     `prevailing sector dominates the finite bake (${stats.wind.directionSectorCounts})`);
   assert.ok(Math.abs(stats.wind.directionSectorCounts[3] - stats.wind.directionSectorCounts[5]) <= 4,
     `±45° particle shares are balanced (${stats.wind.directionSectorCounts})`);
-  assert.ok(Math.abs(stats.wind.directionSectorCounts[2] - stats.wind.directionSectorCounts[6]) <= 2,
-    `±90° particle shares are balanced (${stats.wind.directionSectorCounts})`);
+  assert.ok(Math.abs(stats.wind.directionSectorCounts[2] - stats.wind.directionSectorCounts[6]) <= 12,
+    `±90° particle shares stay within five percentage points over a finite smooth bake (${stats.wind.directionSectorCounts})`);
   approx(stats.wind.directionSectorShares.reduce((sum, share) => sum + share, 0), 1, 0.002);
 });
 
@@ -461,10 +530,10 @@ test('Rock generator live preview frames are separate finite snapshots and final
   assert.equal(result.stats.sdfErosion.previewFrames, frames.length);
   assert.equal(result.stats.sdfErosion.previewError, null);
   assert.equal(result.stats.sdfErosion.wind.directionMode, 'rotate');
-  assert.equal(result.stats.sdfErosion.wind.directionSamplesDeg.length, 16);
+  assert.equal(result.stats.sdfErosion.wind.directionSamplesDeg.length, 17);
   assert.equal(result.stats.sdfErosion.wind.directionSectorCounts.reduce((sum, count) => sum + count, 0), 260);
-  assert.ok(result.stats.sdfErosion.wind.directionSectorCounts.every((count) => count >= 25 && count <= 40),
-    `generator forwards the equal-sector realization (${result.stats.sdfErosion.wind.directionSectorCounts})`);
+  assert.ok(result.stats.sdfErosion.wind.directionSectorCounts.every((count) => count >= 18 && count <= 52),
+    `generator forwards the broad equal-quota smooth-path realization (${result.stats.sdfErosion.wind.directionSectorCounts})`);
   assert.equal(frames[0].fraction, 0);
   assert.equal(frames.at(-1).fraction, 1);
 
@@ -584,7 +653,7 @@ test('Terrain and Rock UIs, worker and CLI expose sector-dwell wind plus user-co
 
   assert.ok(html.includes('id="select-wind-shift-mode"'));
   assert.ok(html.includes('value="variable" selected'));
-  assert.ok(html.includes('Variable wind rose (prevailing + changing sectors)'));
+  assert.ok(html.includes('Variable wind rose (prevailing + smooth sector shifts)'));
   assert.ok(!html.includes('Seasonal swing around prevailing wind'));
   assert.ok(html.includes('id="chk-live-erosion-preview"'));
   assert.ok(html.includes('Watch erosion live'));

@@ -254,7 +254,7 @@ const INSPECTOR_SCHEMAS = {
       { key: 'bakeSteps', label: 'Stack Bake Steps', min: 0, max: 160, step: 2, fmt: (v) => (v > 0 ? `${Math.round(v)} steps` : 'Live sim') },
       { key: 'windAzimuth', label: 'Prevailing Wind Direction', min: -180, max: 180, step: 1, fmt: (v) => `${Math.round(v)}°` },
       { key: 'windShiftRange', label: 'Wind-Rose Spread / Sector Range', min: 0, max: 180, step: 5, fmt: (v) => `${Math.round(v)}°` },
-      { key: 'windShiftPeriod', label: 'Weather-Pattern Cycle Length', min: 30, max: 1200, step: 10, fmt: (v) => `${Math.round(v)} steps` },
+      { key: 'windShiftPeriod', label: 'Weather-Pattern Cycle Length', min: 240, max: 3600, step: 10, fmt: (v) => `${Math.round(v)} steps` },
       { key: 'windSpeed', label: 'Wind Speed', min: 0.0, max: 1.4, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
       { key: 'windErosionRate', label: 'Overall Wind Erosion Rate', min: 0.0, max: 1.5, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
       { key: 'windAbrasion', label: 'Rock Sandblasting / Abrasion', min: 0.0, max: 1.5, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
@@ -1021,7 +1021,7 @@ export class ErosionLayerStackUI {
           <p class="tp-card-note">Runs only this process; snow, rain, wind, rockfall and chemical seasons stay frozen unless Simultaneous mode is chosen in the Simulation Seasons panel. Editing the base stack auto-pauses again.</p>
           <div class="tp-card-footer-btns">${seasonButtons}</div>
           ${layer.type === 'chemical-weathering' ? '<p class="tp-card-note">Tip: run a Rain season first (or Simultaneous) — dissolved Fe/Cu stains follow the water from the mineral beds set on Stratigraphic Beds layers.</p>' : ''}
-          ${layer.type === 'wind-erosion' ? '<p class="tp-card-note">This is the independent Wind season. Set its prevailing direction plus Direction Over Time — fixed, a prevailing-weighted variable wind rose, weather-front sector dwells or an equal full wind rose — along with speed, abrasion, turbulence, sand supply, undercut height and fluting. Snow drift uses the current effective wind only when Snow and Wind run simultaneously.</p>' : ''}
+          ${layer.type === 'wind-erosion' ? '<p class="tp-card-note">This is the independent Wind season. Set its prevailing direction plus Direction Over Time — fixed, a prevailing-weighted variable wind rose, smooth weather-front shifts or an equal full wind rose — along with speed, abrasion, turbulence, sand supply, undercut height and fluting. Direction changes are weather spells joined by gradual veer/back transitions, never instant compass jumps. Snow drift uses the current effective wind only when Snow and Wind run simultaneously.</p>' : ''}
           ${layer.type === 'aeolian-glacial' && layerSeasonIds.includes('wind') ? '<p class="tp-card-note">Legacy combined stack: this snow layer can still drive Wind until a dedicated Wind Erosion layer is added.</p>' : ''}
         </section>`;
     }
@@ -1046,7 +1046,7 @@ export class ErosionLayerStackUI {
           <div class="tp-wind-from-grid">${fromButtons}</div>
           <div class="tp-wind-legend"></div>
           <div class="tp-wind-legend-labels"><span>Sheltered · slow</span><span>Fast · erosive</span></div>
-          <p class="tp-card-note">Arrows preview the actual erosion flow at the current simulation step (same flow model as the simulation): the base direction follows Direction Over Time, then turbulent wander and wrap-around flow bend it around massifs, contours and saddles/valleys (strength = Wrap Around Terrain slider; at 0% it rides straight over). Run the Wind season and the whole field stays in its current weather sector for a dwell, then changes sector according to the selected wind rose or fronts. Length &amp; colour show local speed with gusts, flank speedup and lee sheltering — long/warm abrades exposed faces, short/cool marks sheltered lee deposition. Faint rings = wind erosion blocked by water or snow. Compass: −Z = North, +X = East.</p>
+          <p class="tp-card-note">Arrows preview the actual erosion flow at the current simulation step (same flow model as the simulation): the base direction follows Direction Over Time, moving gusts advect across the terrain, and wrap-around flow bends around massifs, contours and saddles/valleys (strength = Wrap Around Terrain slider; at 0% it rides straight over). Run the Wind season and the field persists through a weather spell, then veers or backs gradually through the intervening bearings into the next sector; larger turns take longer. Length &amp; colour show local speed with moving gusts, crest/flank speedup, immediate lee sheltering and downstream wake recovery — long/warm is erosive, short/cool marks sheltered deposition. Faint rings = wind erosion blocked by water or snow. Compass: −Z = North, +X = East.</p>
         </section>`;
     }
 
@@ -1644,6 +1644,7 @@ export class ErosionLayerStackUI {
       turbulence: num(src.windTurbulence, DEFAULT_EROSION_PARAMS.windTurbulence),
       streamlining: num(src.windStreamlining, DEFAULT_EROSION_PARAMS.windStreamlining),
       seed: num(this.engine.params.seed, 1),
+      phase: this.engine.stepCount || 0,
     };
   }
 
@@ -1720,7 +1721,7 @@ export class ErosionLayerStackUI {
     // slider drags stay smooth), and a few times a second while visible so
     // it tracks the eroding terrain.
     const now = performance.now();
-    const key = [wp.azimuthDeg, wp.windSpeed, wp.turbulence, wp.streamlining, wp.seed, this.engine.gridRes].join('|');
+    const key = [wp.azimuthDeg, wp.windSpeed, wp.turbulence, wp.streamlining, wp.seed, wp.phase, this.engine.gridRes].join('|');
     const age = now - this._windFieldBuiltAt;
     if (!this._windField || (key !== this._windFieldKey && age > 60) || age > 240) {
       this._windField = buildWindVectorField({
@@ -1733,6 +1734,7 @@ export class ErosionLayerStackUI {
         turbulence: wp.turbulence,
         streamlining: wp.streamlining,
         seed: wp.seed,
+        phase: wp.phase,
         cellSize: sampler.span / Math.max(2, this.engine.gridRes || 512),
         lift: 5,
       });

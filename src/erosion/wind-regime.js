@@ -2,14 +2,17 @@
  * Time-varying prevailing-wind regimes shared by Terrain Studio and the
  * Rock & Cliff Studio SDF bake.
  *
- * Real erosive wind does not sweep left/right like a windscreen wiper. A
- * weather pattern normally dwells in one compass sector for a while, then
- * veers or jumps to another sector: east for a spell, north-east next, then
- * perhaps south or north, while one prevailing sector still receives the
- * largest share over geologic time. This module therefore schedules
- * direction as a sequence of sector dwell episodes, not as a sine wave.
+ * Real erosive wind does not sweep left/right like a windscreen wiper, but
+ * it also does not teleport from north to south between two time steps. A
+ * synoptic weather pattern persists in one compass sector for a spell;
+ * when a front or a new pressure pattern arrives, the surface wind veers
+ * or backs through the intervening bearings over a finite transition.
+ * This module therefore schedules a continuous direction trajectory:
+ * quota-balanced weather spells joined by smooth frontal transitions whose
+ * duration grows with the angular change. It is neither a sine wave nor a
+ * sequence of instantaneous sector jumps.
  *
- * The quota of episodes assigned to each sector is balanced inside every
+ * The quota of spell units assigned to each sector is balanced inside every
  * weather-pattern cycle. That matters for finite simulations and offline
  * bakes: a purely random sequence could spend most of a short run on one
  * side by chance, whereas the quota schedule realizes the intended wind
@@ -18,13 +21,15 @@
  * Modes are stored numerically in Terrain layer params (the inspector's
  * generic select contract) and as readable strings in Rock params/CLI:
  *   0 / "fixed"    one prevailing direction (legacy behaviour)
- *   1 / "variable" prevailing-weighted wind rose: changing sector dwells
- *                  over the full compass, with the prevailing sector most
- *                  frequent and left/right sector pairs balanced
- *   2 / "sectors"  weather fronts dwelling in sectors across ±range, in a
- *                  changing (non-sweeping) order
- *   3 / "rotate"   full wind rose: all eight sectors receive equal dwell
- *                  quotas, again as changing episodes rather than a clock
+ *   1 / "variable" prevailing-weighted wind rose: persistent weather spells
+ *                  over the full compass, smoothly veering/backing between
+ *                  sectors, with the prevailing sector most frequent and
+ *                  left/right sector pairs balanced
+ *   2 / "sectors"  weather fronts across ±range: each sector anchors a spell
+ *                  and frontal transitions blend through intermediate
+ *                  bearings instead of jumping
+ *   3 / "rotate"   full wind rose: all eight sectors receive equal spell
+ *                  quotas, joined by the same smooth frontal transitions
  *
  * Legacy "oscillate" / "swing" values migrate to "variable". The old
  * sinusoidal wiper is intentionally no longer exposed.
@@ -32,9 +37,9 @@
 
 export const WIND_SHIFT_MODES = Object.freeze([
   Object.freeze({ value: 0, id: 'fixed', label: 'Fixed prevailing wind' }),
-  Object.freeze({ value: 1, id: 'variable', label: 'Variable wind rose (prevailing + changing sectors)' }),
-  Object.freeze({ value: 2, id: 'sectors', label: 'Weather fronts (changing sectors)' }),
-  Object.freeze({ value: 3, id: 'rotate', label: 'Full wind rose (all sectors, changing dwells)' }),
+  Object.freeze({ value: 1, id: 'variable', label: 'Variable wind rose (prevailing + smooth sector shifts)' }),
+  Object.freeze({ value: 2, id: 'sectors', label: 'Weather fronts (smooth veer/back between sectors)' }),
+  Object.freeze({ value: 3, id: 'rotate', label: 'Full wind rose (all sectors, smooth shifts)' }),
 ]);
 
 const MODE_ALIASES = new Map([
@@ -103,6 +108,39 @@ export function normalizeWindAzimuthDeg(value) {
   if (deg > 180) deg -= 360;
   if (deg < -180) deg += 360;
   return deg === 0 ? 0 : deg;
+}
+
+/** Shortest signed turn from one bearing to another, in -180..180 degrees. */
+export function windAngleDeltaDeg(fromDeg, toDeg) {
+  return normalizeWindAzimuthDeg(finite(toDeg, 0) - finite(fromDeg, 0));
+}
+
+function circularDistanceDeg(a, b) {
+  return Math.abs(windAngleDeltaDeg(a, b));
+}
+
+function smootherstep01(value) {
+  const t = clamp(finite(value, 0), 0, 1);
+  return t * t * t * (t * (t * 6 - 15) + 10);
+}
+
+function transitionStrength(params = {}) {
+  return clamp(finite(
+    params.windShiftTransition ?? params.windTransition ?? params.shiftTransition,
+    0.55
+  ), 0, 1);
+}
+
+function transitionUnitsForDelta(deltaDeg, params = {}, totalScheduleUnits = 32) {
+  const steps45 = Math.max(1, Math.ceil(Math.abs(deltaDeg) / 45));
+  const scale = 0.45 + 1.65 * transitionStrength(params);
+  // A quota unit is not the same physical duration in every mode: the
+  // variable rose has 32 units/cycle, while a fronts schedule may have
+  // only five spell anchors/cycle. Express a frontal turn first as a
+  // fraction of the whole weather-pattern cycle (roughly 3% per 45° at
+  // the default strength), then convert back to this schedule's units.
+  const cycleFraction = (0.012 + 0.020 * steps45) * scale;
+  return cycleFraction * Math.max(1, finite(totalScheduleUnits, 32));
 }
 
 function prevailingAzimuthDeg(params = {}) {
@@ -233,51 +271,70 @@ function allocateEqualCounts(count, episodes) {
   return counts;
 }
 
-function sequenceFromCounts(offsets, counts, seed, cycleIndex, jitterDeg) {
+function sequenceFromCounts(offsets, counts, seed, cycleIndex, jitterDeg, localityScale = 1) {
   const selected = new Array(counts.length).fill(0);
   const total = counts.reduce((sum, value) => sum + value, 0);
   const sequence = [];
+  const locality = clamp(finite(localityScale, 1), 0, 1.5);
   let previousOffset = null;
+  let previousIndex = -1;
+  let previousJitter = 0;
+  let runIndex = -1;
 
   for (let position = 0; position < total; position++) {
-    let candidates = offsets
+    const candidates = offsets
       .map((offset, index) => ({ offset, index }))
       .filter(({ index }) => selected[index] < counts[index]);
-    const nonRepeating = candidates.filter(({ offset }) => offset !== previousOffset);
-    if (nonRepeating.length) candidates = nonRepeating;
 
-    // Fair-deficit ordering: at every prefix of the weather pattern, pick
-    // the sector furthest behind its ideal cumulative share. Frequent
-    // sectors therefore recur evenly, while one-episode rear/opposite
-    // sectors land near the middle instead of all being postponed to the
-    // end. This makes even a partial Terrain bake or short Rock bake have
-    // approximately the intended sector mix. A small deterministic hash
-    // only breaks ties / changes side order by cycle.
+    // Fair-deficit ordering keeps every prefix close to the intended wind
+    // rose. On top of that, a persistence/locality term models a real
+    // pressure pattern: staying in the same sector is most likely, moving
+    // to a neighbouring sector is next most likely, and a direct jump to a
+    // distant sector is penalized. The timeline below still blends any
+    // remaining large anchor change over time, so the realized direction
+    // never teleports. A small deterministic hash only breaks ties and
+    // changes side order by cycle.
     candidates.sort((a, b) => {
-      const idealA = counts[a.index] * (position + 1) / total;
-      const idealB = counts[b.index] * (position + 1) / total;
-      const scoreA = idealA - selected[a.index] + unitHash(seed, cycleIndex, position, a.offset) * 0.08;
-      const scoreB = idealB - selected[b.index] + unitHash(seed, cycleIndex, position, b.offset) * 0.08;
-      return scoreB - scoreA;
+      const score = (candidate) => {
+        const ideal = counts[candidate.index] * (position + 1) / total;
+        let localityScore = 0;
+        if (previousOffset !== null) {
+          const distance = circularDistanceDeg(candidate.offset, previousOffset);
+          if (distance <= 0.01) localityScore = 1.55;
+          else if (distance <= 45.01) localityScore = 0.55;
+          else if (distance <= 90.01) localityScore = 0.0;
+          else localityScore = -1.15 * (distance - 90) / 90;
+          localityScore *= locality;
+        }
+        return ideal - selected[candidate.index]
+          + localityScore
+          + unitHash(seed, cycleIndex, position, candidate.offset) * 0.08;
+      };
+      return score(b) - score(a);
     });
     const chosen = candidates[0];
     selected[chosen.index]++;
 
-    const globalEpisode = cycleIndex * total + position;
-    const jitter = jitterDeg > 0
-      ? (unitHash(seed ^ 0x5f3759df, globalEpisode, chosen.offset, 0x27d4) * 2 - 1) * jitterDeg
-      : 0;
-    sequence.push(chosen.offset + jitter);
+    if (chosen.index !== previousIndex) {
+      runIndex++;
+      const globalRun = cycleIndex * Math.max(total, 1) + runIndex;
+      previousJitter = jitterDeg > 0
+        ? (unitHash(seed ^ 0x5f3759df, globalRun, chosen.offset, 0x27d4) * 2 - 1) * jitterDeg
+        : 0;
+    }
+    sequence.push(chosen.offset + previousJitter);
     previousOffset = chosen.offset;
+    previousIndex = chosen.index;
   }
   return sequence;
 }
 
 /**
  * Direction offsets (degrees relative to prevailing) for one complete
- * weather-pattern cycle. The returned sequence is a dwell schedule: step
- * through its entries in order, holding each one for an equal slice of the
- * cycle. This is the core replacement for the former sinusoidal swing.
+ * weather-pattern cycle. The returned sequence is the quota-unit anchor
+ * schedule from which `windDirectionTimelineDeg` builds weather spells
+ * and smooth frontal transitions. Consecutive equal entries are one longer
+ * persistent spell, not separate instantaneous episodes.
  */
 export function windDirectionScheduleDeg(params = {}, cycleIndex = 0) {
   const mode = normalizeWindShiftMode(params.windShiftMode ?? params.windDirectionMode ?? params.shiftMode);
@@ -299,26 +356,111 @@ export function windDirectionScheduleDeg(params = {}, cycleIndex = 0) {
     const count = sectorCount(params);
     const offsets = Array.from({ length: count }, (_, index) =>
       count === 1 ? 0 : -range + (2 * range * index) / (count - 1));
-    // Fronts arrive in a seeded, non-monotonic order. Sorting by a stable
-    // per-cycle hash gives every sector exactly one dwell per cycle without
-    // sweeping from one extreme to the other like a scanner.
+    // Front anchors arrive in a seeded, non-monotonic order. Sorting by a
+    // stable per-cycle hash gives every sector exactly one spell anchor per
+    // cycle; the timeline blends between those anchors through the
+    // intervening bearings rather than jumping or scanning monotonically.
     return offsets
       .map((offset, index) => ({ offset, key: unitHash(seed, cycle, index, 0x51f7) }))
       .sort((a, b) => a.key - b.key)
       .map(({ offset }) => offset);
   }
 
-  // Full wind rose: equal quotas in all eight sectors, interleaved as
-  // changing dwell episodes rather than a continuous rotating vector.
+  // Full wind rose: equal quotas in all eight sectors. A weaker locality
+  // term keeps this mode from degenerating into a regular clock-like march
+  // around the compass; the timeline transitions provide the smoothness.
   const episodes = episodesPerCycle(params, 16);
   const counts = allocateEqualCounts(ROSE_OFFSETS_DEG.length, episodes);
-  return sequenceFromCounts(ROSE_OFFSETS_DEG, counts, seed, cycle, 5);
+  return sequenceFromCounts(ROSE_OFFSETS_DEG, counts, seed, cycle, 5, 0.18);
+}
+
+/**
+ * Continuous direction timeline for one weather-pattern cycle.
+ *
+ * Consecutive quota units in the same sector are compressed into one
+ * persistent `dwell` segment. Between spells, a `transition` segment turns
+ * along the shortest circular arc; its relative duration increases with
+ * the angular change (about one quota unit per 45° at the default frontal
+ * transition strength, plus a small base duration). The final transition
+ * aims at the next cycle's first spell, so the trajectory is continuous
+ * across cycle boundaries as well. Segment start/end values are fractions
+ * of this cycle, after normalizing dwell + transition durations.
+ */
+export function windDirectionTimelineDeg(params = {}, cycleIndex = 0) {
+  const mode = normalizeWindShiftMode(params.windShiftMode ?? params.windDirectionMode ?? params.shiftMode);
+  const range = shiftRangeDeg(params);
+  const cycle = Math.round(finite(cycleIndex, 0));
+  if (mode === 'fixed' || (mode !== 'rotate' && range <= 0)) {
+    return [Object.freeze({
+      kind: 'dwell', start: 0, end: 1, durationUnits: 1,
+      fromOffsetDeg: 0, toOffsetDeg: 0, deltaDeg: 0,
+    })];
+  }
+
+  const schedule = windDirectionScheduleDeg(params, cycle);
+  const runs = [];
+  for (const offsetDeg of schedule) {
+    const last = runs[runs.length - 1];
+    if (last && Math.abs(windAngleDeltaDeg(last.offsetDeg, offsetDeg)) <= 1e-9) {
+      last.units++;
+    } else {
+      runs.push({ offsetDeg, units: 1 });
+    }
+  }
+
+  const seed = regimeSeed(params);
+  const transitionAfterRun = runs.map((run, runIndex) => {
+    const nextOffsetDeg = runIndex + 1 < runs.length
+      ? runs[runIndex + 1].offsetDeg
+      : (windDirectionScheduleDeg(params, cycle + 1)[0] || 0);
+    let deltaDeg = windAngleDeltaDeg(run.offsetDeg, nextOffsetDeg);
+    if (Math.abs(Math.abs(deltaDeg) - 180) <= 1e-9) {
+      // An exactly-opposite turn has two equally short arcs. Alternate the
+      // veer/back side deterministically instead of always rotating the
+      // transition through the same side of the compass.
+      deltaDeg = unitHash(seed, cycle, runIndex, 0x6d2b) < 0.5 ? -180 : 180;
+    }
+    if (Math.abs(deltaDeg) <= 1e-9) return null;
+    return {
+      kind: 'transition',
+      durationUnits: transitionUnitsForDelta(deltaDeg, params, schedule.length),
+      fromOffsetDeg: run.offsetDeg,
+      // Keep the unwrapped end here: a turn through +/-180 must pass
+      // through the intervening bearings, then normalize on output.
+      toOffsetDeg: run.offsetDeg + deltaDeg,
+      deltaDeg,
+    };
+  });
+
+  const dwellUnits = runs.map((run) => run.units);
+
+  const rawSegments = [];
+  runs.forEach((run, runIndex) => {
+    rawSegments.push({
+      kind: 'dwell',
+      durationUnits: dwellUnits[runIndex],
+      fromOffsetDeg: run.offsetDeg,
+      toOffsetDeg: run.offsetDeg,
+      deltaDeg: 0,
+    });
+    if (transitionAfterRun[runIndex]) rawSegments.push(transitionAfterRun[runIndex]);
+  });
+
+  const totalUnits = rawSegments.reduce((sum, segment) => sum + segment.durationUnits, 0) || 1;
+  let cursor = 0;
+  return rawSegments.map((segment, index) => {
+    const start = cursor / totalUnits;
+    cursor += segment.durationUnits;
+    const end = index === rawSegments.length - 1 ? 1 : cursor / totalUnits;
+    return Object.freeze({ ...segment, start, end });
+  });
 }
 
 /**
  * Direction offset (degrees) added to the prevailing azimuth after
- * `cycles` complete weather-pattern cycles. Fractional cycles select the
- * dwell episode active at that point in the pattern.
+ * `cycles` complete weather-pattern cycles. Fractional cycles sample the
+ * continuous spell/transition trajectory, using a quintic smootherstep so
+ * the turn rate eases in and out at both ends of a frontal transition.
  */
 export function windShiftOffsetDeg(params = {}, cycles = 0) {
   const mode = normalizeWindShiftMode(params.windShiftMode ?? params.windDirectionMode ?? params.shiftMode);
@@ -327,10 +469,12 @@ export function windShiftOffsetDeg(params = {}, cycles = 0) {
 
   const c = finite(cycles, 0);
   const cycleIndex = Math.floor(c);
-  const fraction = c - cycleIndex;
-  const schedule = windDirectionScheduleDeg(params, cycleIndex);
-  const episode = clamp(Math.floor(fraction * schedule.length), 0, schedule.length - 1);
-  return schedule[episode] || 0;
+  const fraction = clamp(c - cycleIndex, 0, 1);
+  const timeline = windDirectionTimelineDeg(params, cycleIndex);
+  const segment = timeline.find((entry) => fraction < entry.end) || timeline[timeline.length - 1];
+  if (!segment || segment.kind === 'dwell') return segment?.fromOffsetDeg || 0;
+  const local = (fraction - segment.start) / Math.max(1e-9, segment.end - segment.start);
+  return segment.fromOffsetDeg + segment.deltaDeg * smootherstep01(local);
 }
 
 /** Effective azimuth (degrees, direction blown TOWARD) after `cycles`. */
@@ -339,10 +483,11 @@ export function effectiveWindAzimuthDeg(params = {}, cycles = 0) {
 }
 
 /**
- * Episode-centre azimuths across a bake/simulation span, bounded for HUD
- * and CLI reporting. Unlike evenly spaced time samples, these are actual
- * scheduled dwell directions, so the report shows the changing sectors the
- * erosion really used.
+ * Actual trajectory azimuths across a bake/simulation span, bounded for
+ * HUD and CLI reporting. Samples are taken at weather-spell centres and at
+ * frontal-transition midpoints, so the report shows both the sectors where
+ * the wind dwells and the intermediate bearings it really erodes through
+ * while veering/backing between them.
  */
 export function sampleWindDirectionSequenceDeg(params = {}, totalCycles = 1, maxSamples = 17) {
   const mode = normalizeWindShiftMode(params.windShiftMode ?? params.windDirectionMode ?? params.shiftMode);
@@ -354,11 +499,11 @@ export function sampleWindDirectionSequenceDeg(params = {}, totalCycles = 1, max
   const all = [];
   const wholeCycles = Math.ceil(cycles);
   for (let cycleIndex = 0; cycleIndex < wholeCycles; cycleIndex++) {
-    const schedule = windDirectionScheduleDeg(params, cycleIndex);
-    for (let episode = 0; episode < schedule.length; episode++) {
-      const centre = cycleIndex + (episode + 0.5) / schedule.length;
+    const timeline = windDirectionTimelineDeg(params, cycleIndex);
+    for (const segment of timeline) {
+      const centre = cycleIndex + (segment.start + segment.end) * 0.5;
       if (centre <= cycles + 1e-9) {
-        all.push(normalizeWindAzimuthDeg(prevailing + schedule[episode]));
+        all.push(effectiveWindAzimuthDeg(params, centre));
       }
     }
   }
@@ -368,13 +513,21 @@ export function sampleWindDirectionSequenceDeg(params = {}, totalCycles = 1, max
     all[Math.round((index * (all.length - 1)) / (cap - 1))]);
 }
 
+function windShiftPeriodSteps(params = {}) {
+  // A full weather pattern contains multiple spells and frontal turns.
+  // Enforce a minimum period in step-sampled simulations so even a legacy
+  // or user-entered very short value cannot compress a large veer/back
+  // into one or two steps and recreate an apparent compass teleport.
+  return clamp(
+    finite(params.windShiftPeriod ?? params.windShiftPeriodSteps ?? params.shiftPeriodSteps, 720),
+    240,
+    36000
+  );
+}
+
 /** Weather-pattern cycles elapsed at a Terrain simulation step. */
 export function windCyclesAtStep(params = {}, step = 0) {
-  const period = Math.max(
-    1,
-    finite(params.windShiftPeriod ?? params.windShiftPeriodSteps ?? params.shiftPeriodSteps, 240)
-  );
-  return Math.max(0, finite(step, 0)) / period;
+  return Math.max(0, finite(step, 0)) / windShiftPeriodSteps(params);
 }
 
 export function effectiveWindAzimuthAtStep(params = {}, step = 0) {
@@ -385,12 +538,9 @@ export function effectiveWindAzimuthAtStep(params = {}, step = 0) {
 export function describeWindRegime(params = {}) {
   const mode = normalizeWindShiftMode(params.windShiftMode ?? params.windDirectionMode ?? params.shiftMode);
   const range = Math.round(shiftRangeDeg(params));
-  const period = Math.round(Math.max(
-    1,
-    finite(params.windShiftPeriod ?? params.windShiftPeriodSteps ?? params.shiftPeriodSteps, 240)
-  ));
+  const period = Math.round(windShiftPeriodSteps(params));
   if (mode === 'fixed') return 'fixed prevailing direction';
-  if (mode === 'variable') return `variable wind rose · prevailing-weighted changing sectors · spread ${range}° · ${period} steps/weather pattern`;
-  if (mode === 'sectors') return `${sectorCount(params)} weather-front sectors across ±${range}° · changing dwells · ${period} steps/weather pattern`;
-  return `full wind rose · all-sector changing dwells · ${period} steps/weather pattern`;
+  if (mode === 'variable') return `variable wind rose · prevailing-weighted weather spells · smooth frontal transitions · spread ${range}° · ${period} steps/weather pattern`;
+  if (mode === 'sectors') return `${sectorCount(params)} weather-front sectors across ±${range}° · smooth veer/back transitions · ${period} steps/weather pattern`;
+  return `full wind rose · all-sector weather spells · smooth frontal transitions · ${period} steps/weather pattern`;
 }

@@ -409,9 +409,9 @@
               <span>Wind Direction Over Time</span>
               <select id="select-wind-shift-mode">
                 <option value="fixed">Fixed prevailing wind</option>
-                <option value="variable" selected>Variable wind rose (prevailing + changing sectors)</option>
-                <option value="sectors">Weather fronts (each sector dwells once per cycle)</option>
-                <option value="rotate">Full wind rose (all sectors equally)</option>
+                <option value="variable" selected>Variable wind rose (prevailing + smooth sector shifts)</option>
+                <option value="sectors">Weather fronts (smooth veer/back between sectors)</option>
+                <option value="rotate">Full wind rose (all sectors, smooth shifts)</option>
               </select>
             </label>
             <div class="toggle-grid" style="margin:8px 0;">
@@ -419,7 +419,7 @@
             </div>
             <p class="export-note" id="sdf-erosion-readout">The generated placement mesh is voxelized into a true signed-distance field, eroded in 3D, contoured again, and only then QEM-baked. World scale and grounded Y=0 are preserved. Enable Watch erosion live to see staged SDF checkpoints in the viewport while the final bake continues.</p>
             <div id="sliders-erosion"></div>
-            <p class="export-note">Set every process yourself above. Terrain Studio’s laws are adapted to overhangs and undersides: capacity-limited rain, gusting wrap-around wind saltation whose weather system dwells in one sector, then changes to another while the chosen prevailing sector remains most common, repose-gated talus, freeze–thaw wedging, and wet-path chemical dissolution. All share hardness, sharp-edge and thin-span protection — incision, not melting. Live frames are previews only; export always uses the completed final mesh.</p>
+            <p class="export-note">Set every process yourself above. Terrain Studio’s laws are adapted to overhangs and undersides: capacity-limited rain, gusting wrap-around wind saltation whose weather system persists in one sector, then veers or backs smoothly through intervening bearings to another while the chosen prevailing sector remains most common, repose-gated talus, freeze–thaw wedging, and wet-path chemical dissolution. All share hardness, sharp-edge and thin-span protection — incision, not melting. Live frames are previews only; export always uses the completed final mesh.</p>
           </section>
 
           <section class="panel-section">

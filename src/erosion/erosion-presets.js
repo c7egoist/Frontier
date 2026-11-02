@@ -766,13 +766,14 @@ export const DEFAULT_EROSION_PARAMS = {
   glacierStrength: 0.74,  // Glacial ice U-valley plucking & moraine bulldozing
   windSpeed: 0.58,        // Aeolian saltation & snow-drift speed
   windAzimuth: 35,        // Prevailing wind direction (degrees, blown toward)
-  // Slow directional regime: weather systems dwell in one sector, then
-  // change to another. The prevailing sector remains most common while
-  // neighbouring/side/opposite sectors receive controlled shares.
+  // Slow directional regime: weather systems persist in one sector, then
+  // veer/back smoothly through intervening bearings to the next spell. The
+  // prevailing sector remains most common while neighbouring/side/opposite
+  // sectors receive controlled shares.
   // 0=fixed, 1=variable wind rose, 2=weather-front sectors, 3=full wind rose.
   windShiftMode: 1,
   windShiftRange: 55,     // wind-rose spread (mode 1) / sector half-range (mode 2)
-  windShiftPeriod: 240,   // simulation steps per weather-pattern cycle
+  windShiftPeriod: 720,   // simulation steps per weather-pattern cycle
   // Dedicated Wind Erosion layer controls. The old model used one fixed
   // direction everywhere, which ruled straight grooves across mountains.
   // These add turbulent/gusting local flow, terrain deflection and lee

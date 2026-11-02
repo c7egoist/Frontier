@@ -106,7 +106,7 @@ if (opts.lods) {
       .map((key) => `${key} ${suite[key].erodedM3}m3`);
     console.log(`        SDF erosion (${suite.source}): ${parts.join(' | ')} | ${suite.elapsedMs}ms`);
     if (suite.wind?.directionMode) {
-      console.log(`        wind regime: ${suite.wind.directionMode} | episodes ${(suite.wind.directionSamplesDeg || []).join('° -> ')}°`);
+      console.log(`        wind regime: ${suite.wind.directionMode} | direction path ${(suite.wind.directionSamplesDeg || []).join('° -> ')}°`);
       if (suite.wind.directionSectorOffsetsDeg?.length && suite.wind.directionSectorShares?.length) {
         const mix = suite.wind.directionSectorOffsetsDeg
           .map((off, i) => `${off > 0 ? '+' : ''}${off}° ${(100 * suite.wind.directionSectorShares[i]).toFixed(1)}%`)

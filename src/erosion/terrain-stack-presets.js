@@ -782,11 +782,11 @@ function buildUtahWindRainRecipe() {
       windSpeed: 0.92,
       windAzimuth: 32,
       // Desert fronts do not sandblast from one bearing forever: each
-      // weather cycle dwells in every sector either side of the mean, in a
-      // seeded non-linear order rather than sweeping across the compass.
+      // weather cycle anchors spells in every sector either side of the
+      // mean and veers/backs smoothly through the bearings in between.
       windShiftMode: 2,
       windShiftRange: 70,
-      windShiftPeriod: 220,
+      windShiftPeriod: 720,
       dryAeolianMode: 0.90,
       windErosionRate: 1.05,
       windAbrasion: 1.08,

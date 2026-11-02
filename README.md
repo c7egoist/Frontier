@@ -144,24 +144,33 @@ npm run generate -- --archetype sedimentary-cliff --seed 4029 --lods --out expor
   undercut height, wrap-around streamlining and vertical fluting. The
   prevailing direction itself can also change through geologic time
   (`src/erosion/wind-regime.js`), but not as a sinusoidal windscreen-wiper
-  sweep. **Fixed** keeps one bearing. **Variable wind rose** dwells in one
-  of eight compass sectors, then changes to another in a deterministic
-  seeded sequence; the chosen prevailing sector receives the largest share,
-  adjacent sectors receive the next-largest shares, and side/rear/opposite
-  sectors still occur. Left and right sector pairs are quota-balanced.
-  **Weather fronts** dwell once in each configured sector per cycle in a
-  non-linear seeded order, and **Full wind rose** gives all eight sectors
-  equal dwell shares. Terrain uniforms are recomputed every substep, so
-  long bakes and stack replays really do spend the scheduled time in those
-  sectors; local gust wander and obstacle wrap then act around the current
-  effective direction. Utah defaults to five front sectors across ±70° over
-  220 steps. Local
+  sweep. **Fixed** keeps one bearing. **Variable wind rose** dwells in
+  prevailing-weighted weather spells in a deterministic seeded sequence,
+  then veers or backs smoothly through every intermediate bearing; larger
+  turns take longer, so it never jumps from north to south between steps.
+  The chosen prevailing sector receives the largest quota, adjacent sectors
+  receive the next-largest quotas, and side/rear/opposite sectors still
+  occur. Left and right sector pairs are quota-balanced. **Weather fronts**
+  dwell once in each configured sector per cycle in a non-linear seeded
+  order, with the same finite frontal transitions, and **Full wind rose**
+  gives all eight sectors equal quotas. Terrain uniforms are recomputed
+  every substep, so long bakes and stack replays really do spend time in
+  those spells and along the intervening transition bearings; moving gust
+  wander and obstacle wrap then act around the current effective direction.
+  Utah defaults to five front sectors across ±70° over 720 steps. Local
   flow genuinely wraps around terrain — a multi-scale obstacle gradient
   blocks the into-hill wind component, so flow splits around massifs,
   follows contours, speeds along flanks and funnels through saddles and
-  valley axes (Wrap slider at 0% restores straight over-the-top flow) — and
-  is sheltered in lee wakes. Abrasion acts along those wrapped streamlines
-  (tangential flank/valley-wall sandblasting and flow-aligned fluting), not
+  valley axes (Wrap slider at 0% restores straight over-the-top flow).
+  Streamline compression accelerates it over stoss slopes and convex
+  crests; the immediate lee is a separated, depositional wake, while flow
+  farther downwind reattaches and regains exposure. Saltation now follows
+  aeolian threshold/fetch behaviour: entrainment requires excess shear
+  above a slope-dependent threshold, sand load grows over fetch and lags
+  capacity changes across an 8–30 m saturation length, and erosion versus
+  deposition follows the resulting upwind-to-local flux change. Abrasion
+  acts along those wrapped streamlines (tangential flank/valley-wall
+  sandblasting, reattached-wake abrasion and flow-aligned fluting), not
   only on head-on faces, so the carved pattern tracks the debug flow field,
   while soft/fractured
   strata abrade faster than hard caprock — replacing ruler-straight mountain
@@ -169,8 +178,9 @@ npm run generate -- --archetype sedimentary-cliff --seed 4029 --lods --out expor
   can be changed between seasons without rebuilding the already-eroded
   terrain. The layer's **Wind Flow Debug** card previews exactly where the
   wind will go before you run it: a toggleable vector field over the terrain
-  (same flow model as the simulation — prevailing vector, turbulent gust
-  wander, wrap-around terrain flow and lee sheltering) where arrow direction is the
+  (same flow model as the simulation — prevailing vector, downwind-moving
+  turbulent gusts, wrap-around terrain flow, stoss/crest speedup, lee
+  separation and downwind reattachment) where arrow direction is the
   local flow and arrow length/colour is local speed (long/warm = exposed,
   erosive; short/cool = sheltered deposition; faint rings = blocked by
   water/snow). A live readout translates the azimuth slider into compass
@@ -232,10 +242,10 @@ npm run generate -- --archetype sedimentary-cliff --seed 4029 --lods --out expor
   dissolution (the existing Fe/Cu stain pass remains the colour layer). All
   share geological hardness, convex-edge protection, thin-span protection
   and per-node carve caps before Dual Contouring. Rock wind uses the same
-  sector-dwell regimes as Terrain: each saltation grain keeps its episode
-  bearing for its short life while later grains belong to other weather
-  episodes over the bake. The HUD and CLI report both the realized episode
-  sequence and the actual particle share in all eight sectors, making a
+  smooth weather-spell regimes as Terrain: each saltation grain keeps its
+  current bearing for its short life while later grains sample later dwells
+  and frontal transitions over the bake. The HUD and CLI report both the
+  realized direction path and the actual particle share in all eight sectors, making a
   left/right bias visible instead of hiding it in an average. Rock & Cliff
   Studio exposes prevailing azimuth, regime, wind-rose spread/sector range
   and weather cycles over the bake alongside its rain/wind/thermal/cryo/chemical
@@ -292,10 +302,10 @@ npm run generate -- --archetype sedimentary-cliff --seed 4029 --lods --out expor
   header **Focus** button hides both side docks to give the 3D viewport the
   full workspace.
 
-Verification: `npm test` — 52/52 pass (includes `tests/rain-erosion.test.mjs`,
+Verification: `npm test` — 57/57 pass (includes `tests/rain-erosion.test.mjs`,
 `tests/mesh-sdf-erosion.test.mjs` for mesh→SDF sign/distance/resolution,
 directional wind, the full 3D erosion suite and grounded placement export,
-`tests/wind-regime-preview-formations.test.mjs` for shifting prevailing
+`tests/wind-regime-preview-formations.test.mjs` for smooth shifting prevailing
 wind, multi-face Rock wind abrasion, watchable SDF preview frames and the
 five named formation fixes,
 a static GLSL declaration-before-use scope check over every shader (the mock

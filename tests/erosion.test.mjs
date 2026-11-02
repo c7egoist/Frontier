@@ -2127,7 +2127,7 @@ test('Spline control points are editable in full 3D: gizmo axes, numeric X/Z/Y e
   assert.ok(mixed.maxY > flat.maxY + 25, `One raised point must locally lift the bore (mixed roof ${mixed.maxY.toFixed(1)} m)`);
 });
 
-test('Wind erosion debug vector field mirrors the GPU flow model (direction, gusts, deflection, lee shelter)', () => {
+test('Wind erosion debug vector field mirrors the GPU flow model (moving gusts, crest speedup, lee reattachment)', () => {
   // Compass semantics: windAzimuth is the direction the wind blows TOWARD in
   // XZ (dir = (cos, sin)); with North = -Z and East = +X, azimuth 0 blows
   // toward East, i.e. it is a wind FROM the West.
@@ -2166,6 +2166,15 @@ test('Wind erosion debug vector field mirrors the GPU flow model (direction, gus
   }
   const speeds = field.arrows.map((a) => a.speed);
   assert.ok(Math.max(...speeds) > Math.min(...speeds) * 1.2, 'Spatial gust bands still vary speed at zero turbulence');
+
+  // Those gust bands are weather features advected downwind, not permanent
+  // fast/slow corridors painted onto fixed terrain cells.
+  const gustPhaseSpeeds = [0, 400, 900, 1600].map((phase) => sampleWindVector(
+    { azimuthDeg: 30, windSpeed: 0.58, turbulence: 0.65, streamlining: 0, seed: 7, cellSize: 1, phase },
+    37, -61, flat
+  ).speed);
+  assert.ok(Math.max(...gustPhaseSpeeds) - Math.min(...gustPhaseSpeeds) > 0.05,
+    `gust phase must move speed bands across a fixed point (${gustPhaseSpeeds})`);
 
   // Turbulence bends directions away from the prevailing vector.
   const turbulent = sampleWindVector(
@@ -2211,11 +2220,30 @@ test('Wind erosion debug vector field mirrors the GPU flow model (direction, gus
   // wrapped wind, and particle erosion decisions made against the wrapped
   // direction (previously the un-wrapped gust vector).
   assert.ok((erosionShaderSrc.match(/tangentialSlope/g) || []).length >= 4, 'Tangential streamline abrasion present in both wind passes');
-  assert.ok(erosionShaderSrc.includes('slopeAlongW > -0.25'), 'Abrasion gate admits tangential (contour-streaming) flow, not only head-on faces');
+  assert.ok(erosionShaderSrc.includes('float abrasionGate = max('), 'Terrain abrasion uses an explicit head-on/reattached-flow gate');
+  assert.ok(erosionShaderSrc.includes('leeReattachment * smoothstep(0.08, 0.65, tangentialSlope)'),
+    'Abrasion can resume on tangential slopes after lee-wake reattachment');
   assert.ok(erosionShaderSrc.includes('dot(worldXZ, localPerp)'), 'Wind flutes align to the wrapped local wind');
   assert.ok(!erosionShaderSrc.includes('dot(grad, gustWindDir)'), 'Particle stoss/lee decisions no longer use the un-wrapped gust vector');
   assert.ok(erosionShaderSrc.includes('dot(grad, terrainDeflectedWind)'), 'Particle stoss/lee decisions use the wrapped wind');
   assert.ok(erosionShaderSrc.includes('terrainDeflectedWind * 0.88'), 'Saltation steering follows the wrapped wind with only mild downslope dilution');
+
+  // Researched aeolian transport controls: gusts advect with simulation
+  // phase, entrainment requires excess shear above a slope-dependent
+  // threshold, and flux relaxes over a finite fetch/saturation length.
+  for (const token of [
+    'uniform vec2 uWindPhase',
+    'float gustPhase = uWindPhase.x',
+    'float thresholdShear',
+    'float excessShear',
+    'float saturationLengthM = mix(8.0, 30.0',
+    'float fetchFactor = 1.0 - exp(',
+    'float qSaltation = mix(qSatUp, qSatHere, saturationResponse)',
+    'float crestSpeedup = clamp(',
+    'float separatedWake',
+    'float leeReattachment',
+    'if (r2.z < 0.20)',
+  ]) assert.ok(erosionShaderSrc.includes(token), `Aeolian shader missing researched transport token: ${token}`);
 
   // Lee sheltering: just downwind of a ridge the flow is much weaker than on
   // the windward side — this is where the debug arrows turn short/cool.
@@ -2223,9 +2251,28 @@ test('Wind erosion debug vector field mirrors the GPU flow model (direction, gus
   const p = { azimuthDeg: 0, windSpeed: 0.8, turbulence: 0, streamlining: 0.8, seed: 3, cellSize: 1 };
   const lee = sampleWindVector(p, 30, 0, ridge);
   const stoss = sampleWindVector(p, -30, 0, ridge);
+  const reattached = sampleWindVector(p, 90, 0, ridge);
   assert.ok(stoss.exposure > 0.95, `Windward side is fully exposed, got ${stoss.exposure}`);
-  assert.ok(lee.exposure < 0.45, `Lee side is sheltered, got exposure ${lee.exposure}`);
+  assert.ok(stoss.crestSpeedup > 1.05, `Streamline compression accelerates flow up the stoss slope (${stoss.crestSpeedup})`);
+  assert.ok(lee.exposure < 0.45, `Immediate lee is sheltered by flow separation, got exposure ${lee.exposure}`);
+  assert.ok(lee.separatedWake > 0.45, `Immediate lee is identified as a separated wake (${lee.separatedWake})`);
   assert.ok(lee.speed < stoss.speed * 0.6, `Lee speed collapses vs windward (${lee.speed.toFixed(2)} vs ${stoss.speed.toFixed(2)})`);
+  assert.ok(reattached.reattachment > 0.15, `Wake begins reattaching farther downwind (${reattached.reattachment})`);
+  assert.ok(reattached.exposure > lee.exposure + 0.25,
+    `Exposure recovers after reattachment (${reattached.exposure} vs immediate lee ${lee.exposure})`);
+  assert.ok(reattached.speed > lee.speed * 1.35,
+    `Recovered wake regains erosive speed (${reattached.speed} vs immediate lee ${lee.speed})`);
+
+  // A later opposite weather spell reverses which flank is stoss and which
+  // is lee; combined with the smooth multi-sector regime, erosion is not
+  // permanently locked to one terrain aspect.
+  const reverseP = { ...p, azimuthDeg: 180 };
+  const eastUnderEastWind = sampleWindVector(reverseP, 30, 0, ridge);
+  const westUnderEastWind = sampleWindVector(reverseP, -30, 0, ridge);
+  assert.ok(eastUnderEastWind.exposure > 0.95 && eastUnderEastWind.crestSpeedup > 1.05,
+    'Opposite spell makes the former lee flank an exposed, accelerating stoss slope');
+  assert.ok(westUnderEastWind.exposure < 0.45,
+    'Opposite spell correspondingly shelters the former stoss flank');
 
   // Water/snow gate dims arrows where wind erosion cannot act.
   const gated = buildWindVectorField({

@@ -322,7 +322,7 @@ function updateRockHud(stats) {
             `${off > 0 ? '+' : ''}${off}° ${Math.round((wind.directionSectorShares[i] || 0) * 100)}%`).join(' · ')}.`
         : '';
       readout.textContent +=
-        ` Wind direction episodes over the bake (${wind.directionMode}, ${wind.directionCycles} weather cycle(s)): ` +
+        ` Wind direction path over the bake (${wind.directionMode}, ${wind.directionCycles} weather cycle(s); spells + smooth transitions): ` +
         `${wind.directionSamplesDeg.map((deg) => `${Math.round(deg)}°`).join(' → ')}.${sectorMix}`;
     }
     if (stats.sdfErosion?.previewFrames > 0) {

@@ -314,9 +314,9 @@ export function erodeSdfWithWind(sdf, options = {}) {
   stats.directionMode = shiftMode;
   stats.directionRangeDeg = clamp(Number(windRegime.windShiftRange) || 0, 0, 180);
   stats.directionCycles = shiftCycles;
-  // Report actual scheduled dwell-episode directions, not arbitrary time
-  // samples. This makes the HUD/CLI sequence match the changing sectors
-  // used by the particles below.
+  // Report actual weather-spell centres and frontal-transition midpoints.
+  // This makes the HUD/CLI path match the continuous directions used by
+  // the particles below, including bearings eroded through during a shift.
   stats.directionSamplesDeg = sampleWindDirectionSequenceDeg(windRegime, shiftCycles, 17)
     .map((deg) => Number(deg.toFixed(2)));
   // Actual particle-time distribution in eight sectors relative to the
@@ -361,8 +361,8 @@ export function erodeSdfWithWind(sdf, options = {}) {
 
     // Particle index is geologic time in an offline bake: later grains
     // belong to later weather. A grain keeps one regime direction for its
-    // short saltation life, while thousands of grains realize the sector
-    // dwell quotas of the variable/front/full wind rose across the bake.
+    // short saltation life, while thousands of grains sample the continuous
+    // weather-spell/frontal-transition trajectory across the bake.
     const regimeFraction = particleCount > 1 ? pIdx / (particleCount - 1) : 0;
     const particleAzimuthDeg = effectiveWindAzimuthDeg(windRegime, regimeFraction * shiftCycles);
     let relativeAzimuthDeg = normalizeWindAzimuthDeg(particleAzimuthDeg - prevailingAzimuthDeg);

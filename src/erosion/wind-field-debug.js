@@ -3,13 +3,14 @@
  *
  * The aeolian erosion in `erosion-shaders.js` (terrain integrator) does not
  * blow along one compass vector: the prevailing wind is bent by seeded
- * turbulent gust wander, wraps around massifs and channels through valleys
- * (multi-scale obstacle deflection), and is slowed in multi-distance lee
- * shelter behind ridges. That makes the erosion hard to
- * predict from the azimuth slider alone, so this module reproduces the same
- * flow model on the CPU (same noise, scales and formulas) to draw a debug
- * vector field over the terrain: arrow direction = local flow direction,
- * arrow length/colour = local flow speed including gusts and lee sheltering.
+ * turbulent gusts that advect downwind, wraps around massifs and channels
+ * through valleys (multi-scale obstacle deflection), accelerates over
+ * stoss slopes and crests, separates in immediate lee wakes, and recovers
+ * farther downwind as the boundary layer reattaches. That makes the erosion
+ * hard to predict from the azimuth slider alone, so this module reproduces
+ * the same flow model on the CPU (same noise, scales and formulas) to draw
+ * a debug vector field over the terrain: arrow direction = local flow
+ * direction, arrow length/colour = local flow speed.
  *
  * Compass convention (stated in the UI legend): world -Z is North and +X is
  * East. The engine's `windAzimuth` parameter is the mathematical angle of the
@@ -129,11 +130,12 @@ const norm2 = (x, z, fbX, fbZ) => {
 
 /**
  * Sample the erosion flow at one world position, mirroring the integrator:
- * prevailing vector -> seeded turbulent gust wander -> cross-slope terrain
- * deflection -> gust speed -> multi-distance lee sheltering.
+ * prevailing vector -> downwind-advecting gust wander -> terrain wrap ->
+ * crest speedup -> multi-distance lee separation and wake reattachment.
  *
  * @param {{azimuthDeg:number, windSpeed:number, turbulence:number,
- *          streamlining:number, seed:number, cellSize:number}} p
+ *          streamlining:number, seed:number, cellSize:number,
+ *          phase?:number, step?:number}} p
  * @param {number} wx world X (m)
  * @param {number} wz world Z (m)
  * @param {(x:number, z:number) => number} heightAt total surface height (m)
@@ -149,13 +151,30 @@ export function sampleWindVector(p, wx, wz, heightAt) {
   const streamlining = clamp(Number(p.streamlining) || 0, 0, 1);
   const cellSize = Math.max(0.05, Number(p.cellSize) || 1);
 
-  const gustNoiseA = fbm2D(wx * 0.018 + seed * 0.011, wz * 0.018 - seed * 0.007, 3, 0.55);
-  const gustNoiseB = fbm2D(wx * 0.047 + 23.7 - seed * 0.005, wz * 0.047 + seed * 0.009, 2, 0.50);
+  const phase = Number(p.phase ?? p.step ?? p.timeSteps) || 0;
+  const gustNoiseA = fbm2D(
+    wx * 0.018 + seed * 0.011 - baseX * phase * 0.006,
+    wz * 0.018 - seed * 0.007 - baseZ * phase * 0.006,
+    3, 0.55
+  );
+  const gustNoiseB = fbm2D(
+    wx * 0.047 + 23.7 - seed * 0.005 - baseX * phase * 0.009 + perpX * phase * 0.0015,
+    wz * 0.047 + seed * 0.009 - baseZ * phase * 0.009 + perpZ * phase * 0.0015,
+    2, 0.50
+  );
   const wander = ((gustNoiseA - 0.5) * 1.45 + (gustNoiseB - 0.5) * 0.55) * turbulence;
   let [lx, lz] = norm2(baseX + perpX * wander, baseZ + perpZ * wander, baseX, baseZ);
   const gust = 0.60 + 0.85 * smoothstep(0.25, 0.85, gustNoiseA);
 
   const hC = heightAt(wx, wz);
+  const hR = heightAt(wx + cellSize, wz);
+  const hL = heightAt(wx - cellSize, wz);
+  const hU = heightAt(wx, wz + cellSize);
+  const hD = heightAt(wx, wz - cellSize);
+  const gradX = (hR - hL) / (2 * cellSize);
+  const gradZ = (hU - hD) / (2 * cellSize);
+  const avgNeighbourH = 0.25 * (hR + hL + hU + hD);
+  const convexity = clamp((hC - avgNeighbourH) / cellSize * 0.18, -0.4, 1.2);
 
   // Wrap-around terrain flow (identical to the shaders): a smoothed
   // multi-scale obstacle gradient (±6 / ±16 cells) progressively blocks the
@@ -185,18 +204,52 @@ export function sampleWindVector(p, wx, wz, heightAt) {
     }
   }
 
-  // Multi-distance upwind shelter (3 / 9 / 20 cells upwind, as in shader).
+  const slopeAlong = gradX * lx + gradZ * lz;
+  const broadSlopeAlong = ogX * lx + ogZ * lz;
+  const crestSpeedup = clamp(
+    1.0 + 0.48 * broadSlopeAlong
+      + 0.38 * Math.max(convexity, 0)
+      + 0.18 * smoothstep(0.10, 0.85, slopeAlong),
+    0.68, 1.85
+  );
+
+  // Multi-distance upwind shelter plus downwind lee-drop geometry, as in
+  // the shader. The near/far shelter difference identifies the band where
+  // a separated wake has travelled far enough to reattach.
   const shelterAt = (cells) => (heightAt(wx - lx * cells * cellSize, wz - lz * cells * cellSize) - hC) / Math.max(cells * cellSize, 0.001) - 0.22;
-  const shelterSlope = Math.max(shelterAt(3), shelterAt(9), shelterAt(20));
+  const shelterNearSlope = shelterAt(3);
+  const shelterMidSlope = shelterAt(9);
+  const shelterFarSlope = shelterAt(20);
+  const shelterSlope = Math.max(shelterNearSlope, shelterMidSlope, shelterFarSlope);
+  const leeDropAt = (cells) => (hC - heightAt(wx + lx * cells * cellSize, wz + lz * cells * cellSize)) / Math.max(cells * cellSize, 0.001) - 0.20;
+  const leeDropSlope = Math.max(leeDropAt(1.35), leeDropAt(9), leeDropAt(20));
   const shadow = smoothstep(0.02, 0.38, shelterSlope) * (0.30 + 0.70 * streamlining);
-  const exposure = 1.0 - 0.82 * shadow;
+  const separation = smoothstep(0.02, 0.42, leeDropSlope)
+    * smoothstep(0.08, 0.55, -slopeAlong)
+    * (0.35 + 0.65 * streamlining);
+  const separatedWake = clamp(Math.max(shadow, separation), 0, 1);
+  const wakeRecovery = 1.0 - smoothstep(0.05, 0.45, leeDropSlope);
+  const shelterNear = smoothstep(0.02, 0.38, shelterNearSlope);
+  const shelterFar = smoothstep(0.02, 0.38, Math.max(shelterMidSlope, shelterFarSlope));
+  const reattachment = clamp(shelterFar - shelterNear, 0, 1)
+    * wakeRecovery
+    * smoothstep(-0.90, -0.05, slopeAlong)
+    * (1.0 - smoothstep(0.05, 0.35, slopeAlong))
+    * (0.35 + 0.65 * streamlining);
+  const exposure = clamp(1.0 - 0.82 * separatedWake + 0.48 * reattachment, 0.12, 1.12);
 
   // Engine speed uniform when the wind season plays: 0.25 + 0.95 * speed.
-  // Continuity: flow bent around terrain speeds up along flanks / gaps.
+  // Continuity: flow bent around terrain speeds up along flanks / gaps,
+  // and streamline compression speeds it over stoss slopes and crests.
   const baseSpeed = 0.25 + 0.95 * clamp(Number(p.windSpeed) || 0, 0, 1);
-  const speed = baseSpeed * gust * exposure * (1 + 0.55 * wrapDeflect);
+  const speed = baseSpeed * gust * exposure * crestSpeedup * (1 + 0.55 * wrapDeflect);
 
-  return { dirX: lx, dirZ: lz, speed, gust, exposure, shadow, baseSpeed, wrapDeflect, height: hC };
+  return {
+    dirX: lx, dirZ: lz, speed, gust, exposure, shadow,
+    separation, separatedWake, reattachment, crestSpeedup,
+    slopeAlong, broadSlopeAlong, phase,
+    baseSpeed, wrapDeflect, height: hC,
+  };
 }
 
 /** Reference maximum of `speed` (full speed slider, peak gust, unsheltered, flank speedup). */
@@ -247,6 +300,7 @@ export function buildWindVectorField(opts) {
     streamlining = 0.55,
     seed = 1,
     cellSize = 1,
+    phase = 0,
     lift = 5,
   } = opts || {};
   const arrows = [];
@@ -255,7 +309,7 @@ export function buildWindVectorField(opts) {
   const n = Math.max(5, Math.min(33, Math.round(divisions)));
   const extent = span * 0.47;
   const spacing = (extent * 2) / (n - 1);
-  const params = { azimuthDeg, windSpeed, turbulence, streamlining, seed, cellSize };
+  const params = { azimuthDeg, windSpeed, turbulence, streamlining, seed, cellSize, phase };
 
   for (let j = 0; j < n; j++) {
     for (let i = 0; i < n; i++) {
@@ -284,6 +338,9 @@ export function buildWindVectorField(opts) {
         speedNorm,
         exposure: v.exposure,
         shadow: v.shadow,
+        separation: v.separation,
+        reattachment: v.reattachment,
+        crestSpeedup: v.crestSpeedup,
         wrapDeflect: v.wrapDeflect,
         active,
       });

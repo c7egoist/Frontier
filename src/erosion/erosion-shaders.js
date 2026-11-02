@@ -901,9 +901,13 @@ void spawnNewDrop(
   }
 
   if (species == SP_WIND) {
-    // Saltating sand spawns both along the upwind margin AND across windward sand sheets & outcrops!
+    // External saltation influx enters at the upwind margin, but most
+    // grains are entrained from erodible surfaces throughout the domain.
+    // Spawning nearly half the population at one edge over-weighted that
+    // side of the terrain; a smaller boundary influx plus distributed
+    // entrainment matches fetch development across the whole field.
     vec2 windDir = safeNorm2(uWindParams.xy, vec2(1.0, 0.0));
-    if (r2.z < 0.45) {
+    if (r2.z < 0.20) {
       xz = -windDir * halfSpan * 0.98 + vec2(-windDir.y, windDir.x) * (r1.x * 2.0 - 1.0) * halfSpan;
     } else {
       xz = (r1.xy * 2.0 - 1.0) * halfSpan;
@@ -1105,8 +1109,10 @@ void main() {
 
   vec2 windDir = safeNorm2(uWindParams.xy, vec2(1.0, 0.0));
   vec2 windPerp = vec2(-windDir.y, windDir.x);
-  float gustNoiseA = fbm2D(posAge.xz * 0.018 + vec2(uSeed * 0.011, uDomain.w * 0.006), 3, 0.55);
-  float gustNoiseB = fbm2D(posAge.xz * 0.043 + vec2(-uSeed * 0.007, 19.7 - uDomain.w * 0.004), 2, 0.50);
+  // Advect the gust pattern downwind instead of leaving permanent fast /
+  // slow corridors welded to the same terrain cells.
+  float gustNoiseA = fbm2D(posAge.xz * 0.018 + vec2(uSeed * 0.011, -uSeed * 0.007) - windDir * (uDomain.w * 0.006), 3, 0.55);
+  float gustNoiseB = fbm2D(posAge.xz * 0.043 + vec2(23.7 - uSeed * 0.007, uSeed * 0.009) - windDir * (uDomain.w * 0.009) + windPerp * (uDomain.w * 0.0015), 2, 0.50);
   float windWander = ((gustNoiseA - 0.5) * 1.45 + (gustNoiseB - 0.5) * 0.55) * uWindErodeA.z;
   vec2 gustWindDir = safeNorm2(windDir + windPerp * windWander, windDir);
   float windGust = 0.62 + 0.80 * smoothstep(0.25, 0.85, gustNoiseA);
@@ -1592,6 +1598,7 @@ uniform vec4 uHydrology;      // (iceMeltRate, headwaterFlow, lakeRetention, dry
 uniform vec4 uWindField;      // (windDirX, windDirZ, windSpeed, erosionStrength)
 uniform vec4 uWindErodeA;      // (abrasion rate, lee deposition, turbulence, curtain height)
 uniform vec4 uWindErodeB;      // (sand supply, fluting, streamlining, deflation)
+uniform vec2 uWindPhase;       // (simulation step for advecting gusts, weather-pattern cycles)
 uniform vec4 uChemInt;        // (dissolution, salt bursting, hydrolysis conversion, master rate)
 uniform float uBrushStrength;
 uniform float uSeed;
@@ -1840,8 +1847,20 @@ void main() {
   if (uWindField.z > 0.03 && water < 0.015 && snowDepth < 0.04 && c.x > 1 && c.x < maxI - 1 && c.y > 1 && c.y < maxI - 1) {
     vec2 baseWindDir = safeNorm2(uWindField.xy, vec2(1.0, 0.0));
     vec2 windPerp = vec2(-baseWindDir.y, baseWindDir.x);
-    float gustNoiseA = fbm2D(worldXZ * 0.018 + vec2(uSeed * 0.011, -uSeed * 0.007), 3, 0.55);
-    float gustNoiseB = fbm2D(worldXZ * 0.047 + vec2(23.7 - uSeed * 0.005, uSeed * 0.009), 2, 0.50);
+    // Gust fronts move. The previous integrator sampled this FBM at fixed
+    // world coordinates forever, so the same patches were always the fast,
+    // erosive corridors and the same patches were always calm; advecting
+    // both octaves downwind makes gust exposure sweep across the terrain.
+    float gustPhase = uWindPhase.x;
+    float gustNoiseA = fbm2D(
+      worldXZ * 0.018 + vec2(uSeed * 0.011, -uSeed * 0.007) - baseWindDir * (gustPhase * 0.006),
+      3, 0.55
+    );
+    float gustNoiseB = fbm2D(
+      worldXZ * 0.047 + vec2(23.7 - uSeed * 0.005, uSeed * 0.009)
+        - baseWindDir * (gustPhase * 0.009) + windPerp * (gustPhase * 0.0015),
+      2, 0.50
+    );
     vec2 localWind = safeNorm2(
       baseWindDir + windPerp * (((gustNoiseA - 0.5) * 1.45 + (gustNoiseB - 0.5) * 0.55) * uWindErodeA.z),
       baseWindDir
@@ -1856,6 +1875,12 @@ void main() {
       (aR.r + aR.g + aR.b) - (aL.r + aL.g + aL.b),
       (aU.r + aU.g + aU.b) - (aD.r + aD.g + aD.b)
     ) / (2.0 * cellSize);
+    float hHereWind = bedrock + coarse + fine;
+    float avgNeighbourH = 0.25 * (
+      (aR.r + aR.g + aR.b) + (aL.r + aL.g + aL.b) +
+      (aU.r + aU.g + aU.b) + (aD.r + aD.g + aD.b)
+    );
+    float convexityW = clamp((hHereWind - avgNeighbourH) / max(cellSize, 0.001) * 0.18, -0.4, 1.2);
 
     // Wrap-around terrain flow: a smoothed multi-scale obstacle gradient
     // (hill/valley scale, not single-cell noise) progressively blocks the
@@ -1890,8 +1915,19 @@ void main() {
     }
     float wrapDeflect = 1.0 - dot(windBeforeWrap, localWind);
     float slopeAlongW = dot(hGrad, localWind);
-    // Continuity: flow bent around terrain speeds up along flanks / through gaps.
-    float wPow = uWindField.z * (0.55 + 0.45 * uHydrology.w) * windGust * (1.0 + 0.55 * wrapDeflect);
+    float broadSlopeAlongW = dot(obstacleGrad, localWind);
+    float tangentialSlopeW = clamp(length(hGrad) - abs(slopeAlongW), 0.0, 1.2);
+    // Continuity + topographic speedup: streamlines compress as flow climbs
+    // a stoss slope and are fastest near convex crests, then expand into the
+    // lee. Flow bent around terrain also speeds along flanks and gaps.
+    float crestSpeedup = clamp(
+      1.0 + 0.48 * broadSlopeAlongW
+          + 0.38 * max(convexityW, 0.0)
+          + 0.18 * smoothstep(0.10, 0.85, slopeAlongW),
+      0.68, 1.85
+    );
+    float wPow = uWindField.z * (0.55 + 0.45 * uHydrology.w) * windGust
+               * crestSpeedup * (1.0 + 0.55 * wrapDeflect);
 
     vec2 upUv = clamp(vUv - localWind * (1.35 / uIntParams.x), vec2(0.002), vec2(0.998));
     vec2 dnUv = clamp(vUv + localWind * (1.35 / uIntParams.x), vec2(0.002), vec2(0.998));
@@ -1904,36 +1940,107 @@ void main() {
     float upSlopeW = (hHere - hUp) / (1.35 * cellSize);
     float dnSlopeW = (hDn - hHere) / (1.35 * cellSize);
 
-    // Multi-distance upwind shelter: a higher ridge a few cells to a few
-    // tens of metres upwind puts this cell in a separated lee wake, where
-    // abrasion collapses and airborne sand preferentially settles.
+    // Multi-distance upwind shelter plus downwind separation geometry. A
+    // higher ridge a few cells to a few tens of metres upwind puts this
+    // cell in a separated lee wake, but the wake is not permanent: farther
+    // downwind, after the steep lee drop relaxes, the boundary layer
+    // reattaches and deflation/tangential transport resumes. Treating every
+    // lee-facing cell as inert made wind work look one-sided.
     vec4 tShelter1 = sampleGridBilinear(uTerrainTex, clamp(vUv - localWind * (3.0 / uIntParams.x), vec2(0.002), vec2(0.998)), uIntParams.x);
     vec4 tShelter2 = sampleGridBilinear(uTerrainTex, clamp(vUv - localWind * (9.0 / uIntParams.x), vec2(0.002), vec2(0.998)), uIntParams.x);
     vec4 tShelter3 = sampleGridBilinear(uTerrainTex, clamp(vUv - localWind * (20.0 / uIntParams.x), vec2(0.002), vec2(0.998)), uIntParams.x);
+    vec4 tFetchFar = sampleGridBilinear(uTerrainTex, clamp(vUv - localWind * (40.0 / uIntParams.x), vec2(0.002), vec2(0.998)), uIntParams.x);
+    vec4 tDown2 = sampleGridBilinear(uTerrainTex, clamp(vUv + localWind * (9.0 / uIntParams.x), vec2(0.002), vec2(0.998)), uIntParams.x);
+    vec4 tDown3 = sampleGridBilinear(uTerrainTex, clamp(vUv + localWind * (20.0 / uIntParams.x), vec2(0.002), vec2(0.998)), uIntParams.x);
     float hShelter1 = tShelter1.r + tShelter1.g + tShelter1.b;
     float hShelter2 = tShelter2.r + tShelter2.g + tShelter2.b;
     float hShelter3 = tShelter3.r + tShelter3.g + tShelter3.b;
-    float shelterSlope = max(
-      (hShelter1 - hHere) / max(3.0 * cellSize, 0.001) - 0.22,
+    float hDown2 = tDown2.r + tDown2.g + tDown2.b;
+    float hDown3 = tDown3.r + tDown3.g + tDown3.b;
+    float shelterNearSlope = (hShelter1 - hHere) / max(3.0 * cellSize, 0.001) - 0.22;
+    float shelterMidSlope = (hShelter2 - hHere) / max(9.0 * cellSize, 0.001) - 0.22;
+    float shelterFarSlope = (hShelter3 - hHere) / max(20.0 * cellSize, 0.001) - 0.22;
+    float shelterSlope = max(shelterNearSlope, max(shelterMidSlope, shelterFarSlope));
+    float leeDropSlope = max(
+      (hHere - hDn) / max(1.35 * cellSize, 0.001) - 0.20,
       max(
-        (hShelter2 - hHere) / max(9.0 * cellSize, 0.001) - 0.22,
-        (hShelter3 - hHere) / max(20.0 * cellSize, 0.001) - 0.22
+        (hHere - hDown2) / max(9.0 * cellSize, 0.001) - 0.20,
+        (hHere - hDown3) / max(20.0 * cellSize, 0.001) - 0.20
       )
     );
     float windShadow = smoothstep(0.02, 0.38, shelterSlope) * (0.30 + 0.70 * uWindErodeB.z);
-    float windExposure = 1.0 - 0.82 * windShadow;
+    float flowSeparation = smoothstep(0.02, 0.42, leeDropSlope)
+                         * smoothstep(0.08, 0.55, -slopeAlongW)
+                         * (0.35 + 0.65 * uWindErodeB.z);
+    float separatedWake = clamp(max(windShadow, flowSeparation), 0.0, 1.0);
+    float wakeRecovery = 1.0 - smoothstep(0.05, 0.45, leeDropSlope);
+    float shelterNear = smoothstep(0.02, 0.38, shelterNearSlope);
+    float shelterFar = smoothstep(0.02, 0.38, max(shelterMidSlope, shelterFarSlope));
+    float leeReattachment = clamp(shelterFar - shelterNear, 0.0, 1.0)
+                          * wakeRecovery
+                          * smoothstep(-0.90, -0.05, slopeAlongW)
+                          * (1.0 - smoothstep(0.05, 0.35, slopeAlongW))
+                          * (0.35 + 0.65 * uWindErodeB.z);
+    float windExposure = clamp(1.0 - 0.82 * separatedWake + 0.48 * leeReattachment, 0.12, 1.12);
 
-    // Sauermann/Werner stoss emission and lee deposition, now driven by the
-    // local gust direction and separated pickup/deposition settings.
+    // Threshold shear: saltation is not proportional to wind speed from
+    // zero. Entrainment starts only where the local shear proxy exceeds a
+    // slope-dependent threshold (harder upslope, easier downslope). This
+    // is the Bagnold/Kok excess-shear form q ~ (u*^2 - u*th^2).
+    float localShear = wPow * windExposure;
+    float thresholdShear = (0.20 + 0.16 * (1.0 - clamp(uWindErodeB.x, 0.0, 1.2)))
+                         * clamp(1.0 + 0.45 * slopeAlongW, 0.55, 1.75);
+    float excessShear = clamp(
+      (localShear * localShear - thresholdShear * thresholdShear)
+        / max(1.0 - thresholdShear * thresholdShear, 0.25),
+      0.0, 1.75
+    );
+    float entrainmentGate = clamp(excessShear * 2.4, 0.0, 1.35);
+
+    // Fetch and saturation length: an external saltation stream entering a
+    // new surface needs distance to load up, and the airborne flux lags
+    // changes in local capacity. Approximate both with the distance to the
+    // upwind domain edge plus an exponentially weighted memory of fine
+    // sediment sampled along the incoming streamline.
+    float fetchCells = 1.0e5;
+    if (localWind.x > 1e-4) fetchCells = min(fetchCells, vUv.x * uIntParams.x / localWind.x);
+    else if (localWind.x < -1e-4) fetchCells = min(fetchCells, (1.0 - vUv.x) * uIntParams.x / -localWind.x);
+    if (localWind.y > 1e-4) fetchCells = min(fetchCells, vUv.y * uIntParams.x / localWind.y);
+    else if (localWind.y < -1e-4) fetchCells = min(fetchCells, (1.0 - vUv.y) * uIntParams.x / -localWind.y);
+    float saturationLengthM = mix(8.0, 30.0, clamp(wPow / 1.4, 0.0, 1.0));
+    float fetchFactor = 1.0 - exp(-max(fetchCells, 0.0) * cellSize / saturationLengthM);
+    float fetchSand = clamp(
+      0.34 * smoothstep(0.01, 0.30, tUp.b)
+      + 0.25 * smoothstep(0.01, 0.30, tShelter1.b)
+      + 0.18 * smoothstep(0.01, 0.30, tShelter2.b)
+      + 0.13 * smoothstep(0.01, 0.30, tShelter3.b)
+      + 0.10 * smoothstep(0.01, 0.30, tFetchFar.b),
+      0.0, 1.0
+    );
+    float saltationLoad = clamp(
+      (0.16 + 0.84 * clamp(uWindErodeB.x, 0.0, 1.2)) * fetchFactor + fetchSand * 0.75,
+      0.0, 1.55
+    );
+    float saturationResponse = 1.0 - exp(-(1.35 * cellSize) / saturationLengthM);
+
+    // Exner-style flux balance with saturation lag. qSaltation is the
+    // actual flux leaving this cell after relaxing from the upwind flux
+    // toward local capacity over the saturation length; when it falls
+    // downwind (crest to lee) the difference deposits, and when it rises
+    // (stoss acceleration / reattachment) the difference entrains.
     float emitUp = smoothstep(-0.14, 0.32, upSlopeW) * min(tUp.b, 0.40);
     float emitHere = smoothstep(-0.14, 0.32, dnSlopeW) * min(fine, 0.40);
+    float qSatUp = emitUp * (0.35 + 0.65 * fetchFactor);
+    float qSatHere = emitHere;
+    float qSaltation = mix(qSatUp, qSatHere, saturationResponse);
     float saltFluxRate = 0.08 * wPow * wPow * dt * (0.30 + uWindErodeB.x);
-    float sandIn = min(tUp.b * 0.16, emitUp * saltFluxRate)
+    float sandIn = min(tUp.b * 0.16, qSatUp * saltFluxRate)
                  * (0.25 + uWindErodeA.y)
-                 * (1.0 + windShadow * uWindErodeA.y);
-    float sandOut = min(fine * 0.16, emitHere * saltFluxRate)
+                 * (1.0 + separatedWake * uWindErodeA.y);
+    float sandOut = min(fine * 0.16, qSaltation * saltFluxRate)
                   * (0.25 + uWindErodeB.w)
-                  * windExposure;
+                  * windExposure
+                  * entrainmentGate;
     fine = max(0.0, fine + sandIn - sandOut);
 
     // Differential rock abrasion: soft/fractured strata and warped vertical
@@ -1943,18 +2050,18 @@ void main() {
     // where the wrapped flow streams ALONG a steep flank or valley wall,
     // saltating sand still sandblasts it, so grooves track the streamlines
     // around terrain instead of only pitting head-on faces.
-    if (uWindErodeA.x > 0.001 && slopeAlongW > -0.25) {
+    float tangentialSlope = tangentialSlopeW;
+    float abrasionGate = max(
+      smoothstep(-0.25, 0.05, slopeAlongW),
+      leeReattachment * smoothstep(0.08, 0.65, tangentialSlope)
+    );
+    if (uWindErodeA.x > 0.001 && abrasionGate > 0.01 && excessShear > 0.001) {
       float wHard = evalRockHardness3D(vec3(worldXZ.x, bedrock, worldXZ.y), uHardnessParams, uStrataOrient, uSeed);
       float sandShield = 1.0 - smoothstep(0.06, 0.45, fine);
-      float avgNeighbourH = 0.25 * (
-        (aR.r + aR.g + aR.b) + (aL.r + aL.g + aL.b) +
-        (aU.r + aU.g + aU.b) + (aD.r + aD.g + aD.b)
-      );
-      float convexityW = clamp((hHere - avgNeighbourH) / max(cellSize, 0.001) * 0.18, -0.4, 1.2);
-      float tangentialSlope = clamp(length(hGrad) - abs(slopeAlongW), 0.0, 1.2);
       float faceExposure = clamp(
         0.18 + 0.95 * smoothstep(0.03, 0.75, slopeAlongW)
              + 0.85 * smoothstep(0.05, 0.80, tangentialSlope) * (0.35 + 0.65 * uWindErodeB.z)
+             + 0.55 * leeReattachment * smoothstep(0.08, 0.70, tangentialSlope)
              + 0.35 * max(convexityW, 0.0),
         0.0, 1.65
       );
@@ -1979,9 +2086,10 @@ void main() {
       float fluteGate = mix(1.0, 0.42 + 1.35 * smoothstep(0.42, 0.90, fluteNoise), uWindErodeB.y);
 
       float localSand = smoothstep(0.01, 0.25, tUp.b + aL.b + aR.b + aU.b + aD.b);
-      float sandSupply = clamp((0.18 + 0.95 * uWindErodeB.x) * 0.55 + localSand * 0.65, 0.0, 1.60);
+      float sandSupply = clamp(saltationLoad * 0.78 + localSand * 0.34, 0.0, 1.60);
       float hardnessResist = 0.22 + 2.70 * wHard * wHard;
-      float abrade = wPow * uWindErodeA.x * faceExposure * windExposure * sandShield
+      float abrasiveShear = sqrt(excessShear);
+      float abrade = abrasiveShear * abrasionGate * uWindErodeA.x * faceExposure * windExposure * sandShield
                    * saltationCurtain * fluteGate * sandSupply * armour
                    * 0.020 * dt / hardnessResist;
       float rockLoss = min(max(0.0, bedrock - 1.0), abrade);
