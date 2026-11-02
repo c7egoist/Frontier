@@ -348,16 +348,22 @@ bool FogInspector::ConstructLocal(ControlColumn &Page)
     BeginLocalCard(Page, "Lighting");
     Changed |= SliderRow::Construct(Page, "LocalFogAnisotropy", "Anisotropy g", Parameters.PhaseAnisotropy, 0, 0.95f, 0.01f, "");
     Changed |= Tile("LocalFogSelfShadow", "Self-shadowing", Parameters.SelfShadow, "Sun");
-    constexpr const char *Qualities[] = {"Draft", "Balanced", "High"};
-    constexpr uint32_t    Samples[]   = {16, 28, 48};
-    int                   Quality     = Parameters.LocalSamples <= 16 ? 0 : Parameters.LocalSamples >= 48 ? 2 : 1;
-    if (SelectRow::Construct(Page, "LocalFogSteps", "Quality", Qualities, 3, Quality))
+    constexpr const char *Qualities[] = {"16", "32", "64", "128"};
+    constexpr uint32_t    Samples[]   = {16, 32, 64, 128};
+    int                   Current     = -1;
+    for (int Index = 0; Index < 4; ++Index)
+        if (Parameters.LocalSamples == Samples[Index]) Current = Index;
+    const int Quality = PresetStrip::Construct(Page, "LocalFogQuality", Qualities, 4, Current);
+    if (Quality >= 0)
     {
         Parameters.LocalSamples = Samples[Quality];
         Changed                 = true;
     }
-    CaptionText::Construct(Page, "The bounded medium is authored and saved. Native local-fog rendering is not connected; no lit volume or "
-                                 "sample-count claim is made here.");
+    Changed |= SliderRow::ConstructInteger(Page, "LocalFogSteps", "Ray-march samples", Parameters.LocalSamples, 8, 128, "samples");
+    CaptionText::Construct(Page, "Bounded native ray marching with geometry-depth clipping, shape falloff, spatial noise and sun "
+                                 "self-shadowing. Enabled local volumes share the highest requested fog sample budget.");
+    if (const auto Readout = InspectorRuntime::Instance().QueryEnvironmentAccess().Rendering; Readout && Readout->Ready)
+        CaptionText::Construct(Page, ("Actual native fog integration: " + std::to_string(Readout->FogMarchSamples) + " samples").c_str());
     Page.EndCard();
     BeginLocalCard(Page, "Wind Field");
     CaptionText::Construct(Page, "Shared force field · edit Force, Steadiness, Shear and Driving in Forcefield → Wind. This medium keeps "

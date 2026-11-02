@@ -245,6 +245,8 @@ struct AerodynamicParticle
 class ForceFieldSpace
 {
   public:
+    void ConfigureEnabled(bool Enabled) noexcept { Enabled_ = Enabled; }
+    [[nodiscard]] bool QueryEnabled() const noexcept { return Enabled_; }
     void SetWindProfile(const PlanetaryWindProfile& Profile) noexcept { Wind_ = Profile; }
     [[nodiscard]] const PlanetaryWindProfile& WindProfile() const noexcept { return Wind_; }
 
@@ -301,6 +303,7 @@ class ForceFieldSpace
     uint32_t AppendGpuForceRecords(std::vector<std::array<float, 4>>& OutFloat4Table) const;
 
   private:
+    bool Enabled_ = true;
     PlanetaryWindProfile           Wind_{};
     double                         GroundPlaneYMeters_ = 0.0;
     double                         ElapsedSeconds_     = 0.0;

@@ -288,6 +288,7 @@ bool ForceFieldSpace::ReleaseTrigger(ForceSourceHandle Handle) noexcept
 
 void ForceFieldSpace::Step(double DeltaSeconds) noexcept
 {
+    if (!Enabled_) return;
     const double Dt = std::max(0.0, DeltaSeconds);
     ElapsedSeconds_ += Dt;
 
@@ -350,6 +351,7 @@ SpatialVector ForceFieldSpace::SampleStep(SpatialVector WorldPointMeters) const 
 
 SpatialVector ForceFieldSpace::SampleSwirl(SpatialVector WorldPointMeters) const noexcept
 {
+    if (!Enabled_) return {};
     if (Wind_.SwirlStrength <= 1.0e-5 || Wind_.SpeedMetersPerSecond <= 1.0e-5)
     {
         return {};
@@ -382,6 +384,7 @@ SpatialVector ForceFieldSpace::SampleSwirl(SpatialVector WorldPointMeters) const
 
 ForceFieldSample ForceFieldSpace::EvaluateStepSample(SpatialVector WorldPointMeters, bool IncludeCurlSwirl) const noexcept
 {
+    if (!Enabled_) return {};
     ForceFieldSample Out{};
 
     // 1. Base Ekman altitude-sheared wind + coherent multi-frequency gust wave (trig-only fast path)
@@ -862,6 +865,7 @@ void ForceFieldSpace::StepParticles(std::span<AerodynamicParticle> Particles, do
 
 uint32_t ForceFieldSpace::AppendGpuForceRecords(std::vector<std::array<float, 4>>& OutFloat4Table) const
 {
+    if (!Enabled_) return 0;
     uint32_t Written = 0u;
     for (const ActiveForceSource& Source : Sources_)
     {

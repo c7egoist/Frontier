@@ -9,6 +9,7 @@
 #include "Frontier/Engine/Rendering/GlobalIllumination/IlluminationHost.h"
 
 #include "Engine/Scene/EngineConfigurations.h"
+#include "Engine/Scene/EnvironmentDiagnostics.h"
 
 #include <array>
 #include <filesystem>
@@ -30,6 +31,18 @@ namespace Frontier::GlobalIllumination
 
 // 📝 The environment records of an editor level (Engine/Scene/EngineConfigurations.h); a disabled record switches its effect off.
 //    Directions follow the illumination world: z up, azimuth counter-clockwise from +X east (the demo's convention).
+struct LocalCloudEnvironment
+{
+    uint64_t Token = 0;
+    CloudConfiguration Parameters{};
+};
+
+struct LocalFogEnvironment
+{
+    uint64_t Token = 0;
+    FogConfiguration Parameters{};
+};
+
 struct SceneEnvironment
 {
     SolarConfiguration        Solar{};
@@ -40,6 +53,11 @@ struct SceneEnvironment
     MoonConfiguration         Moons{};
     FogConfiguration          Fog{};
     WindConfiguration         Wind{};
+    ForceFieldConfiguration   Forces{};
+    std::vector<LocalCloudEnvironment> LocalClouds;
+    std::vector<LocalFogEnvironment> LocalFogVolumes;
+    uint64_t AtmosphereToken = 0;
+    uint64_t CloudToken = 0;
     std::array<PlanetConfiguration, 4> Planets = ResolveDefaultPlanets();   // [-] one per Body: Venus, Jupiter, Mars, Saturn
     double                    ElapsedSeconds = 0.0;   // [s] advects clouds, twinkles stars, turns the sky
 };
@@ -93,9 +111,20 @@ class EnvironmentOverlay
 
     // 🔍 The overlaid radiance of the last refresh as linear RGBA floats in the refresh's units (what present tone-maps).
     bool ReadOverlaidRadiance(std::vector<float>& OutLinearRgba);
+    [[nodiscard]] std::shared_ptr<const EnvironmentRenderReadout> QueryReadout() const noexcept { return Readout_; }
+
 
   private:
     struct PlanetaryStore;
+    void PublishEnvironmentReadout(const SceneEnvironment& Environment);
+    std::shared_ptr<EnvironmentRenderReadout> Readout_;
+    std::shared_ptr<AtmosphereBakeReadout> BakeReadout_;
+    uint64_t LastBakeRequest_ = 0;
+    uint64_t LastBakeToken_ = 0;
+    uint64_t LastBakeMedium_ = 0;
+    uint64_t LastBakeSky_ = 0;
+    double LastBakeTime_ = -1;
+
     bool ReconstructTargets(IlluminationHost& Host, uint32_t Width, uint32_t Height);
     void ResolveRealm(const IlluminationHost& Host, const SceneEnvironment& Environment, const CameraPose& Camera, double Latitude, double Longitude);
     void AdjustLight(const IlluminationHost& Host, const SceneEnvironment& Environment, double Latitude, LightSolution& Light);

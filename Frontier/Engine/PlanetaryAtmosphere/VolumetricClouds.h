@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <algorithm>
 
 namespace Frontier
 {
@@ -51,7 +52,18 @@ class VolumetricClouds
     bool ReadbackShadowLayer(VulkanComputeExchange& Exchange, uint32_t RealmIndex, std::vector<float>& OutRgba);
     bool ReadbackReconstructedLayer(VulkanComputeExchange& Exchange, std::vector<float>& OutRgba);
 
+    void ConfigureResolution(uint32_t Percent) noexcept
+    {
+        const uint32_t Next = std::clamp(Percent, 25u, 100u);
+        if (Next != ResolutionPercent_) HasTemporalHistory_ = false;
+        ResolutionPercent_ = Next;
+    }
+    void InvalidateHistory() noexcept { HasTemporalHistory_ = false; }
+    [[nodiscard]] std::array<uint32_t, 2> QueryTraceExtent() const noexcept { return TraceExtent_; }
+
   private:
+    uint32_t ResolutionPercent_ = 100;
+    std::array<uint32_t, 2> TraceExtent_{};
     ComputeProgramSlot   ShadowProgram_{};
     ComputeProgramSlot   TraceProgram_{};
     ComputeProgramSlot   ReconstructProgram_{};

@@ -366,7 +366,7 @@ PackedEnsemblePayload PackEnsemblePayload(const PlanetaryRealmEnsemble& Ensemble
                                   static_cast<float>(Cloud.Slab.DensityScale)});
             CloudSlots.push_back({static_cast<float>(Cloud.WorleyErosionStrength),
                                   static_cast<float>(Cloud.Slab.ExtinctionPerM),
-                                  0.92f,
+                                  static_cast<float>(std::clamp(Cloud.ScatteringAlbedo, 0.0, 1.0)),
                                   static_cast<float>(Cloud.Slab.PhaseG)});
             CloudSlots.push_back({static_cast<float>(Cloud.BackscatterPhaseG),
                                   static_cast<float>(static_cast<uint32_t>(Cloud.HeightProfile)),
@@ -377,7 +377,20 @@ PackedEnsemblePayload PackEnsemblePayload(const PlanetaryRealmEnsemble& Ensemble
                                   BoxHalf[1],
                                   BoxHalf[2],
                                   static_cast<float>(Cloud.Slab.WindXMps) * Realm.CloudWindSeconds});
-            CloudSlots.push_back({static_cast<float>(std::clamp(Cloud.SilverLiningWeight, 0.0, 0.8)), 0.0f, 0.0f, 0.0f});
+            CloudSlots.push_back({static_cast<float>(std::clamp(Cloud.SilverLiningWeight, 0.0, 0.8)),
+                static_cast<float>(std::clamp(Cloud.ViewSamples, 8u, 192u)),
+                static_cast<float>(std::min(Cloud.ShadowSamples, 12u)), 0.0f});
+            SpatialVector Offset = Cloud.WindDisplacementM;
+            if (Cloud.FollowField && !Cloud.DisplacementReady)
+            {
+                const auto Flow = Realm.ForceField.SampleStep(Cloud.BoxCenterM);
+                const auto Swirl = Realm.ForceField.SampleSwirl(Cloud.BoxCenterM);
+                const double Time = Realm.ForceField.ElapsedSeconds();
+                Offset = {(Flow.X + Swirl.X) * Time, (Flow.Y + Swirl.Y) * Time, (Flow.Z + Swirl.Z) * Time};
+            }
+            CloudSlots.push_back({static_cast<float>(Cloud.BoundsShape), static_cast<float>(Cloud.FeatureScaleMetres),
+                static_cast<float>(Cloud.AnvilShaping), (Cloud.FollowField || Cloud.DisplacementReady) ? 1.0f : 0.0f});
+            CloudSlots.push_back({static_cast<float>(Offset.X), static_cast<float>(Offset.Y), static_cast<float>(Offset.Z), 0.0f});
         }
 
         const uint32_t FogBoxFirst = static_cast<uint32_t>(FogBoxSlots.size() / kFogBoxRecordFloat4Stride);
@@ -392,6 +405,22 @@ PackedEnsemblePayload PackEnsemblePayload(const PlanetaryRealmEnsemble& Ensemble
                                    Freq,
                                    static_cast<float>(FogVol.PhaseAsymmetryG),
                                    static_cast<float>(FogVol.BoxEdgeFalloffM)});
+            FogBoxSlots.push_back({static_cast<float>(FogVol.ScatteringTint.R), static_cast<float>(FogVol.ScatteringTint.G),
+                static_cast<float>(FogVol.ScatteringTint.B), static_cast<float>(FogVol.HeightFalloffM)});
+            FogBoxSlots.push_back({static_cast<float>(FogVol.BoundsShape), FogVol.SelfShadow ? 1.0f : 0.0f, 0.0f, 0.0f});
+            SpatialVector Offset = FogVol.DisplacementReady ? FogVol.WindDisplacementM : SpatialVector{
+                FogVol.WindVelocityMps.X * FogVol.WindTimeS,
+                FogVol.WindVelocityMps.Y * FogVol.WindTimeS,
+                FogVol.WindVelocityMps.Z * FogVol.WindTimeS};
+            if (FogVol.FollowField && !FogVol.DisplacementReady)
+            {
+                const auto Flow = Realm.ForceField.SampleStep(FogVol.BoxCenterM);
+                const auto Swirl = Realm.ForceField.SampleSwirl(FogVol.BoxCenterM);
+                const double Time = Realm.ForceField.ElapsedSeconds();
+                Offset = {(Flow.X + Swirl.X) * Time, (Flow.Y + Swirl.Y) * Time, (Flow.Z + Swirl.Z) * Time};
+            }
+            FogBoxSlots.push_back({static_cast<float>(Offset.X), static_cast<float>(Offset.Y), static_cast<float>(Offset.Z),
+                static_cast<float>(FogVol.Seed & 0xFFFFFFu)});
         }
 
         const uint32_t LumFirst = static_cast<uint32_t>(LuminaireSlots.size() / kLuminaireRecordFloat4Stride);
@@ -542,7 +571,7 @@ PackedEnsemblePayload PackEnsemblePayload(const PlanetaryRealmEnsemble& Ensemble
         const uint32_t ForceCount = Realm.ForceField.AppendGpuForceRecords(ForceSourceSlots);
         const auto&    WindProf   = Realm.ForceField.WindProfile();
         const float    HasSources = (ForceCount > 0u) ? 1.0f : 0.0f;
-        const float    EffWindSpd = (Realm.ForceField.ElapsedSeconds() > 0.0 || HasSources > 0.0f)
+        const float    EffWindSpd = (Realm.ForceField.QueryEnabled() && (Realm.ForceField.ElapsedSeconds() > 0.0 || HasSources > 0.0f))
                                         ? static_cast<float>(WindProf.SpeedMetersPerSecond)
                                         : 0.0f;
         const float    EffWindSec = (Realm.ForceField.ElapsedSeconds() > 0.0)
@@ -753,6 +782,8 @@ bool PlanetarySubmissionSequence::ExecuteFrame(VulkanComputeExchange&        Exc
                                                const PlanetaryRealmEnsemble& Ensemble,
                                                const PlanetaryCameraView&    CameraView)
 {
+    Clouds_.ConfigureResolution(CameraView.CloudResolutionPercent);
+    Fog_.ConfigureSamples(CameraView.FogMarchSamples);
     const uint32_t W = std::max(1u, CameraView.ViewportWidth);
     const uint32_t H = std::max(1u, CameraView.ViewportHeight);
 
@@ -780,7 +811,7 @@ bool PlanetarySubmissionSequence::ExecuteFrame(VulkanComputeExchange&        Exc
     Revisions.reserve(Ensemble.Realms.size());
     for (const PlanetaryRealm& Realm : Ensemble.Realms)
     {
-        Revisions.push_back({Realm.AtmosphereRevision, Realm.SkyViewRevision});
+        Revisions.push_back({Realm.AtmosphereRevision, Realm.SkyViewRevision, Realm.AtmosphereSamples, Realm.MultipleScattering});
     }
 
     // 1. Dirty-gated per-realm Transmittance (256x64xR), Multi-Scattering (32x32xR), and AtmosphereProjection (192x108xR) LUTs
@@ -866,7 +897,7 @@ bool PlanetarySubmissionSequence::ExecuteSkyAndShadows(VulkanComputeExchange&   
     Revisions.reserve(Ensemble.Realms.size());
     for (const PlanetaryRealm& Realm : Ensemble.Realms)
     {
-        Revisions.push_back({Realm.AtmosphereRevision, Realm.SkyViewRevision});
+        Revisions.push_back({Realm.AtmosphereRevision, Realm.SkyViewRevision, Realm.AtmosphereSamples, Realm.MultipleScattering});
     }
     SkyAndShadowsReady_ = AtmosphereLuts_.Execute(Exchange, EnsembleSpan_, Revisions) &&
                           Clouds_.ExecuteShadowProjections(Exchange, EnsembleSpan_, AtmosphereLuts_,
@@ -878,6 +909,8 @@ bool PlanetarySubmissionSequence::ExecuteOverVisibility(VulkanComputeExchange&  
                                                         const PlanetaryRealmEnsemble& Ensemble,
                                                         const PlanetaryCameraView&    CameraView)
 {
+    Clouds_.ConfigureResolution(CameraView.CloudResolutionPercent);
+    Fog_.ConfigureSamples(CameraView.FogMarchSamples);
     const uint32_t W = std::max(1u, CameraView.ViewportWidth);
     const uint32_t H = std::max(1u, CameraView.ViewportHeight);
     if (Visibility_.VisibilityArray().Width != W || Visibility_.VisibilityArray().Height != H || HdrFrameTarget_.Width != W ||

@@ -257,7 +257,7 @@ void ValidatePersistence(const std::filesystem::path &Project, const std::filesy
     SceneWorld  World;
     std::string Diagnostic;
     if (!World.LoadStartupLevelFromProject(Project, &Diagnostic)) throw std::runtime_error(Diagnostic);
-    for (const char *Category : {"Clouds", "Wind", "Fog", "AerialFog", "Lightning", "Stars", "OpticalFlare", "Moons"})
+    for (const char *Category : {"Clouds", "Wind", "ForceField", "Atmosphere", "Fog", "AerialFog", "Lightning", "Stars", "OpticalFlare", "Moons"})
     {
         auto *Entry = World.FindFirstByType(Category);
         if (!Entry) throw std::runtime_error(std::string("Missing record ") + Category);
@@ -286,7 +286,7 @@ void ValidatePersistence(const std::filesystem::path &Project, const std::filesy
     Verify(Reloaded.LoadLevelSpace(Scratch / "Environment.levelspace", &Diagnostic) &&
                Reloaded.QueryRecordCount() == World.QueryRecordCount(),
            "Complete environment level reloaded");
-    for (const char *Category : {"Clouds", "Wind", "Fog", "AerialFog", "Lightning", "Stars", "OpticalFlare", "Moons"})
+    for (const char *Category : {"Clouds", "Wind", "ForceField", "Atmosphere", "Fog", "AerialFog", "Lightning", "Stars", "OpticalFlare", "Moons"})
     {
         toml::table Before, After;
         World.FindFirstByType(Category)->SerializeConfiguration(Before);
@@ -447,6 +447,7 @@ void ValidateInspectors(InterfaceCapture &Capture, const std::filesystem::path &
     SolarConfiguration        Sun;
     OpticalFlareConfiguration Flare;
     AtmosphereConfiguration   Atmosphere;
+    ForceFieldConfiguration Forces;
     EnvironmentEditAccess     Access;
     Access.Clouds      = &Clouds;
     Access.LocalCloud  = &LocalCloud;
@@ -457,6 +458,8 @@ void ValidateInspectors(InterfaceCapture &Capture, const std::filesystem::path &
     Access.Solar       = &Sun;
     Access.CameraReady = true;
     Access.ViewExtent  = {1920, 1080};
+    Access.Atmosphere = &Atmosphere;
+    Access.Forces = &Forces;
     InspectorRuntime::Instance().ConfigureEnvironmentAccess(Access);
     CloudInspector                                   CloudPage(Clouds), LocalCloudPage(LocalCloud);
     WindInspector                                    WindPage(Wind);
@@ -467,9 +470,11 @@ void ValidateInspectors(InterfaceCapture &Capture, const std::filesystem::path &
     OpticalFlareInspector                            FlarePage(Flare);
     SolarInspector                                   SunPage(Sun);
     AtmosphereInspector                              AtmospherePage(Atmosphere);
+    ForceFieldInspector ForcePage(Forces);
     const std::pair<const char *, RecordInspector *> Pages[] = {{"Cloud", &CloudPage},
                                                                 {"LocalCloud", &LocalCloudPage},
                                                                 {"Wind", &WindPage},
+                                                                {"ForceField", &ForcePage},
                                                                 {"Fog", &FogPage},
                                                                 {"AerialFog", &AerialFogPage},
                                                                 {"LocalFog", &LocalFogPage},
@@ -535,6 +540,19 @@ void ValidateInspectors(InterfaceCapture &Capture, const std::filesystem::path &
     InspectorRuntime::Instance().ConfigureEnvironmentAccess(Access);
     Capture.Construct([&] { LocalFogPage.ConstructInspector(); }, Capture.ResolveId({"PlaceLocalFog"}), true);
     Verify(LocalFog.Revision == PlacementRevision, "Camera-dependent placement is disabled without camera access");
+    AtmospherePage.ConfigureSection(3);
+    const auto BakeSerial = Atmosphere.BakeRequested;
+    Capture.Construct([&] { AtmospherePage.ConstructInspector(); },Capture.ResolveId({"AtmosphereInspectorPage", "##BakeAtmosphere"}),true);
+    Verify(Atmosphere.BakeRequested == BakeSerial,"Bake button is disabled without a live viewport");
+    auto Available = std::make_shared<EnvironmentRenderReadout>();
+    Available->Ready = true;
+    Access.Rendering = Available;
+    Access.Atmosphere = &Atmosphere;
+    InspectorRuntime::Instance().ConfigureEnvironmentAccess(Access);
+    Capture.Construct([&] { AtmospherePage.ConstructInspector(); });
+    Capture.Construct([&] { AtmospherePage.ConstructInspector(); },Capture.ResolveId({"AtmosphereInspectorPage", "##BakeAtmosphere"}),true);
+    Verify(Atmosphere.BakeRequested == BakeSerial + 1,"Bake button queues an actual command serial");
+    Verify(!Atmosphere.BakedAvailable,"Bake button does not fabricate completion before GPU acknowledgement");
     InspectorRuntime::Instance().ConfigureEnvironmentAccess({});
     Capture.Width = 320;
     Capture.Capture(MoonPage, Output / "Moon-Narrow.png");

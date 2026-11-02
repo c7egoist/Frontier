@@ -7,6 +7,7 @@
 
 #include "AtmosphereScattering.slang"
 #include "ForceField.slang"
+#include "VolumeBounds.slang"
 
 float EvaluateTroposphericEnvelope(uint ProfileId, float HeightFraction)
 {
@@ -46,13 +47,16 @@ float EvaluateCloudExtinctionAtPoint(StructuredBuffer<float4> Ensemble,
     float4 C3 = Ensemble[CloudOffset + 3u]; // BoxCenterXYZ, EdgeSoftnessM
     float4 C4 = Ensemble[CloudOffset + 4u]; // BoxHalfXYZ, WindOffsetX
 
-    float3 AdvectedMeters     = PointMeters + float3(C4.w, 0.0f, 0.38f * C4.w);
-    float  FunnelCondensation = 0.0f;
-    float  WallCollarBoost    = 0.0f;
+    float4 C6 = Ensemble[CloudOffset + 6u]; // Bounds shape, feature scale metres, anvil, integrated displacement
+    float3 Offset = Ensemble[CloudOffset + 7u].xyz;
+    float3 AdvectedMeters = C6.w > 0.5f ? PointMeters - Offset : PointMeters + float3(C4.w, 0.0f, 0.38f * C4.w);
+    float FunnelCondensation = 0.0f;
+    float WallCollarBoost = 0.0f;
     if (C2.w <= 0.5f)
     {
-        EvaluateForceFieldCloudDomain(
-            Ensemble, RealmId, PointMeters, AdvectedMeters, FunnelCondensation, WallCollarBoost);
+        float3 DomainPoint = AdvectedMeters;
+        EvaluateForceFieldCloudDomain(Ensemble, RealmId, PointMeters, DomainPoint, FunnelCondensation, WallCollarBoost);
+        if (C6.w <= 0.5f) AdvectedMeters = DomainPoint;
     }
 
     float HeightFraction = 0.0f;
@@ -62,19 +66,12 @@ float EvaluateCloudExtinctionAtPoint(StructuredBuffer<float4> Ensemble,
     if (C2.w > 0.5f)
     {
         float3 LocalPos = PointMeters - C3.xyz;
-        float3 HalfSpan = max(C4.xyz, float3(1.0e-2f));
-        if (abs(LocalPos.x) >= HalfSpan.x || abs(LocalPos.y) >= HalfSpan.y || abs(LocalPos.z) >= HalfSpan.z)
-        {
-            return 0.0f;
-        }
-        float SoftEdge = max(C3.w, 1.0e-2f);
-        float MaskX    = saturate((HalfSpan.x - abs(LocalPos.x)) / SoftEdge);
-        float MaskY    = saturate((HalfSpan.y - abs(LocalPos.y)) / SoftEdge);
-        float MaskZ    = saturate((HalfSpan.z - abs(LocalPos.z)) / SoftEdge);
-        BoxEnvelope    = MaskX * MaskX * (3.0f - 2.0f * MaskX) *
-                         MaskY * MaskY * (3.0f - 2.0f * MaskY) *
-                         MaskZ * MaskZ * (3.0f - 2.0f * MaskZ);
-        HeightFraction = saturate((LocalPos.y + HalfSpan.y) / (2.0f * HalfSpan.y));
+        uint Shape = uint(C6.x + 0.5f);
+        float3 HalfSpan = ResolveVolumeHalfExtent(C4.xyz, Shape);
+        BoxEnvelope = EvaluateVolumeEnvelope(LocalPos, HalfSpan, Shape, C3.w);
+        if (BoxEnvelope <= 0.0f) return 0.0f;
+        HeightFraction = Shape == 3u ? saturate(LocalPos.y / HalfSpan.y) :
+            saturate((LocalPos.y + HalfSpan.y) / (2.0f * HalfSpan.y));
         InsideMainSlab = true;
     }
     else if (C0.y > 0.0f && PointMeters.y >= C0.x && PointMeters.y <= C0.x + C0.y)
@@ -88,6 +85,7 @@ float EvaluateCloudExtinctionAtPoint(StructuredBuffer<float4> Ensemble,
     {
         uint  ProfileId = uint(max(0.0f, C2.y) + 0.5f);
         float Envelope  = EvaluateTroposphericEnvelope(ProfileId, HeightFraction);
+        if (ProfileId == 3u) Envelope *= 1.0f + saturate(C6.z) * HeightFraction * 0.5f;
         if (WallCollarBoost > 0.0f)
         {
             Envelope = max(Envelope, saturate(WallCollarBoost * (1.0f - 0.65f * HeightFraction)));
@@ -95,6 +93,7 @@ float EvaluateCloudExtinctionAtPoint(StructuredBuffer<float4> Ensemble,
         if (Envelope > 1.0e-5f && BoxEnvelope > 1.0e-5f)
         {
             float  SpatialFreq = (C2.w > 0.5f) ? (1.8f / max(max(C4.x, C4.z), 4.0f)) : 1.15e-3f;
+            if (C6.y > 0.0f) SpatialFreq = 1.0f / max(1.0f, C6.y);
             float3 SampleCoord = AdvectedMeters * float3(SpatialFreq, SpatialFreq * 1.45f, SpatialFreq);
 
             float MacroFbm    = FbmRotated3D(SampleCoord, 4, 17u);

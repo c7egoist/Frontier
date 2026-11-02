@@ -23,9 +23,10 @@ void TraceVolumetricCloudsMain(uint3 Tid : SV_DispatchThreadID)
         return;
     }
 
-    float4 Vis1      = VisibilityImage[uint3(Tid.xy, 1u)];
-    float4 Vis2      = VisibilityImage[uint3(Tid.xy, 2u)];
-    float3 GlassTint = VisibilityImage[uint3(Tid.xy, 3u)].rgb;
+    uint2 FullPixel = uint2(min((float2(Tid.xy) + 0.5f) * Push.Tuning.xy / Push.Tuning.zw, Push.Tuning.xy - 1.0f));
+    float4 Vis1      = VisibilityImage[uint3(FullPixel, 1u)];
+    float4 Vis2      = VisibilityImage[uint3(FullPixel, 2u)];
+    float3 GlassTint = VisibilityImage[uint3(FullPixel, 3u)].rgb;
     uint   RealmId   = uint(Vis1.w + 0.5f);
     float3 RayOrigin = Vis1.xyz;
     float3 RayDir    = SafeNormalize(Vis2.xyz);
@@ -113,13 +114,8 @@ void TraceVolumetricCloudsMain(uint3 Tid : SV_DispatchThreadID)
             }
             else if (IsLocalBox)
             {
-                float3 InvDir = 1.0f / select(abs(RayDir) > 1.0e-6f, RayDir, float3(1.0e-6f));
-                float3 T0v    = (C3.xyz - C4.xyz - RayOrigin) * InvDir;
-                float3 T1v    = (C3.xyz + C4.xyz - RayOrigin) * InvDir;
-                float3 TMin   = min(T0v, T1v);
-                float3 TMax   = max(T0v, T1v);
-                NearT         = max(0.0f, max(TMin.x, max(TMin.y, TMin.z)));
-                FarT          = min(MaxDistM, min(TMax.x, min(TMax.y, TMax.z)));
+                uint Shape = uint(Ensemble[CloudOffset + 6u].x + 0.5f);
+                if (!IntersectVolumeBounds(RayOrigin, RayDir, C3.xyz, C4.xyz, Shape, MaxDistM, NearT, FarT)) continue;
             }
             else if (C0.y > 0.0f)
             {
@@ -146,7 +142,7 @@ void TraceVolumetricCloudsMain(uint3 Tid : SV_DispatchThreadID)
                 continue;
             }
 
-            int   MarchSteps    = IsLocalBox ? 14 : (MarchingVortexFunnel ? 24 : 22);
+            int   MarchSteps    = MarchingVortexFunnel ? max(24, int(C5.y)) : clamp(int(C5.y), 8, 192);
             float Δs            = (FarT - NearT) / float(MarchSteps);
             float ShadowStepRef = IsLocalBox ? 3.5f : (MarchingVortexFunnel ? 8.0f : 48.0f);
             float DistanceFade  = IsLocalBox ? 1.0f : saturate(1.0f - NearT / 18000.0f);
@@ -181,8 +177,7 @@ void TraceVolumetricCloudsMain(uint3 Tid : SV_DispatchThreadID)
                     }
 
                     float τSolar = 0.0f;
-                    [unroll]
-                    for (int Sub = 0; Sub < 4; ++Sub)
+                    for (int Sub = 0; Sub < min(int(C5.z), 12); ++Sub)
                     {
                         float  StepLength = ShadowStepRef * float(1 << Sub);
                         float3 ShadowPos  = SamplePos + SolarDirection * StepLength;
@@ -224,33 +219,35 @@ void ReconstructVolumetricCloudsMain(uint3 Tid : SV_DispatchThreadID)
         return;
     }
 
-    uint   CenterRealm = uint(VisibilityImage[uint3(Tid.xy, 1u)].w + 0.5f);
-    float  CenterRevZ  = VisibilityImage[uint3(Tid.xy, 0u)].w;
-    float4 CenterCloud = CloudWorkTarget[uint3(Tid.xy, 0u)];
-
-    float4 Accum     = float4(0.0f);
-    float  WeightSum = 0.0f;
-    for (int Dy = -1; Dy <= 1; ++Dy)
+    uint CenterRealm = uint(VisibilityImage[uint3(Tid.xy, 1u)].w + 0.5f);
+    float CenterRevZ = VisibilityImage[uint3(Tid.xy, 0u)].w;
+    int2 TraceMaximum = int2(Push.Tuning.zw) - 1;
+    float2 TracePoint = (float2(Tid.xy) + 0.5f) * Push.Tuning.zw / Push.Tuning.xy - 0.5f;
+    int2 Lower = int2(floor(TracePoint));
+    float2 Fraction = frac(TracePoint);
+    int2 Nearest = clamp(int2(floor(TracePoint + 0.5f)), int2(0), TraceMaximum);
+    float4 CenterCloud = CloudWorkTarget[uint3(uint2(Nearest), 0u)];
+    bool FullResolution = all(Push.Tuning.xy == Push.Tuning.zw);
+    float4 Accum = float4(0.0f);
+    float WeightSum = 0.0f;
+    for (int Dy = FullResolution ? -1 : 0; Dy <= 1; ++Dy)
     {
-        int Py = clamp(int(Tid.y) + Dy, 0, int(Push.Counts.y) - 1);
-        for (int Dx = -1; Dx <= 1; ++Dx)
+        for (int Dx = FullResolution ? -1 : 0; Dx <= 1; ++Dx)
         {
-            int   Px            = clamp(int(Tid.x) + Dx, 0, int(Push.Counts.x) - 1);
-            uint3 NeighborCoord = uint3(uint(Px), uint(Py), 0u);
-            uint  NeighborRealm = uint(VisibilityImage[uint3(NeighborCoord.xy, 1u)].w + 0.5f);
-            if (NeighborRealm != CenterRealm)
-            {
-                continue;
-            }
-            float NeighborRevZ = VisibilityImage[uint3(NeighborCoord.xy, 0u)].w;
-            float DepthWeight  = exp(-abs(NeighborRevZ - CenterRevZ) * 120.0f);
-            float SpatialW     = (Dx == 0 && Dy == 0) ? 1.0f : ((Dx == 0 || Dy == 0) ? 0.6f : 0.36f);
-            float TotalWeight  = SpatialW * DepthWeight;
-            Accum     += CloudWorkTarget[NeighborCoord] * TotalWeight;
-            WeightSum += TotalWeight;
+            int2 TracePixel = clamp((FullResolution ? int2(Tid.xy) : Lower) + int2(Dx, Dy), int2(0), TraceMaximum);
+            uint2 ScenePixel = uint2(min((float2(TracePixel) + 0.5f) * Push.Tuning.xy / Push.Tuning.zw, Push.Tuning.xy - 1.0f));
+            uint NeighborRealm = uint(VisibilityImage[uint3(ScenePixel, 1u)].w + 0.5f);
+            if (NeighborRealm != CenterRealm) continue;
+            float NeighborRevZ = VisibilityImage[uint3(ScenePixel, 0u)].w;
+            float DepthWeight = exp(-abs(NeighborRevZ - CenterRevZ) * 120.0f);
+            float Spatial = FullResolution ? ((Dx == 0 && Dy == 0) ? 1.0f : ((Dx == 0 || Dy == 0) ? 0.6f : 0.36f)) :
+                (Dx == 0 ? 1.0f - Fraction.x : Fraction.x) * (Dy == 0 ? 1.0f - Fraction.y : Fraction.y);
+            float Weight = Spatial * DepthWeight;
+            Accum += CloudWorkTarget[uint3(uint2(TracePixel), 0u)] * Weight;
+            WeightSum += Weight;
         }
     }
-    float4 Filtered = (WeightSum > 0.0f) ? (Accum / WeightSum) : CenterCloud;
+    float4 Filtered = WeightSum > 1.0e-8f ? Accum / WeightSum : float4(0.0f, 0.0f, 0.0f, 1.0f);
 
     if (Push.Counts.w != 0u)
     {

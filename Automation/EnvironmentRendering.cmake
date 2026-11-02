@@ -16,6 +16,7 @@ add_library(FrontierEnvironmentRendering STATIC
     Frontier/Engine/GeometricRaster/VisibilityProjection.cpp
     Frontier/Engine/GeometricRaster/PreviewRaster.cpp
     Frontier/Engine/PhysicalDynamics/ForceField.cpp
+    Frontier/Engine/PhysicalDynamics/AtmosphericFlow.cpp
     Frontier/Engine/PlanetaryAtmosphere/AtmosphereScattering.cpp
     Frontier/Engine/PlanetaryAtmosphere/AstronomicalEphemeris.cpp
     Frontier/Engine/PlanetaryAtmosphere/AtmosphereProjection.cpp
@@ -72,6 +73,7 @@ set(FRONTIER_ENV_COMMON_SLANG
     "${FRONTIER_ENV_SHADER_SRC}/ForceField.slang"
     "${FRONTIER_ENV_SHADER_SRC}/AtmosphereScattering.slang"
     "${FRONTIER_ENV_SHADER_SRC}/CloudSynthesis.slang"
+    "${FRONTIER_ENV_SHADER_SRC}/VolumeBounds.slang"
     "${FRONTIER_ENV_SHADER_SRC}/VolumeDistanceSampling.slang"
     "${FRONTIER_ENV_SHADER_SRC}/BoundingVolumeSearch.slang")
 

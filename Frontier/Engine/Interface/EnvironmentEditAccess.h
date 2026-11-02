@@ -6,6 +6,7 @@
 #pragma once
 
 #include "Engine/Scene/EngineConfigurations.h"
+#include "Engine/Scene/EnvironmentDiagnostics.h"
 
 #include <array>
 
@@ -18,6 +19,9 @@ namespace Frontier
 
 struct EnvironmentEditAccess
 {
+    AtmosphereConfiguration* Atmosphere = nullptr;
+    ForceFieldConfiguration* Forces = nullptr;
+    std::shared_ptr<const EnvironmentRenderReadout> Rendering;
     SolarConfiguration                  *Solar      = nullptr;
     CloudConfiguration                  *Clouds     = nullptr;
     CloudConfiguration                  *LocalCloud = nullptr;

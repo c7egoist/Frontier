@@ -49,19 +49,31 @@ Studio material archives, which the Scene Viewport does not read.
 
 ## Environment controls in this build
 
-The native inspector now includes the remaining VehicleHMI controls: Clouds/local cloud, Wind, Height Fog,
-Atmospheric Fog, local fog, Lightning, Stars, four-slot Moon authoring and Lens Flare. Atmospheric Fog is its own
-Scene Directory entry. The original Sun and Atmosphere pages are retained.
+The native inspector includes Clouds/local cloud, Wind, Height Fog, Atmospheric Fog, local fog, Lightning, Stars,
+four-slot Moon authoring and Lens Flare. The original Sun and Atmosphere pages are retained.
 
-- Tabs, editable slider figures, keyboard/Shift-arrow diagrams, camera placement, catalogues and cross-record actions
-  use native C++ controls. Changes are saved in the level container with the existing Save level / Ctrl+S action.
-- Lens Flare **Export HDR** opens a path-entry modal and writes a 640 × 280 linear RGB PFM. It refuses an existing
-  filename.
-- The reference diagrams are not scene captures. Disabled controls explain missing native support; local media,
-  lightning execution/audio, four-body Moon rendering and custom flare layers are not newly connected to the renderer.
-- Native CPU checks pass, but this package has not been launched on Windows here. It is unsigned and not
-  antivirus-scanned.
-  Full visual parity across panel widths still needs acceptance review.
+- **Local volumes:** Local Cloud and Local Volumetric Fog start disabled in the default scene. Select one and press
+  Place in front of camera, or enable it. Both now render natively. The creation menu also offers Local Cloud and
+Local Fog.
+- **Force Field:** Wind is its own contributor under the Force Field record. Enable Show world vectors and place the
+  inspection region ahead of the camera. Arrows display evaluated velocity in m/s, with an explicit X-ray overlay.
+- **Wind:** direction, gust, shear, veer and curl drive native density advection. Follow wind is independent per medium;
+  stopping Wind or unlinking a medium retains its accumulated position. Tree bending is not a registered consumer.
+- **Fog:** box, ellipsoid, sphere and hemisphere/dome bounds, density falloff, spatial noise and sun self-shadowing
+  work.
+  March samples can be tuned, including 16/32/64/128. Enabled local fog volumes share the highest requested budget.
+- **Clouds:** view samples, sun-shadow taps and trace-resolution percentage affect actual native rendering. Shared
+  cloud quality is authored on the global Cloud record, including when that global layer is disabled.
+- **Atmosphere baking:** press Bake atmosphere with the viewport running. Actual GPU tables and the inputs used to
+  build them appear below. Use baked settings freezes those coefficients; edits stay separate until rebake. Disabling
+  the switch returns to live settings. Save level / Ctrl+S persists the coefficients; GPU images regenerate on reload.
+- **Lens Flare export:** Export HDR writes a 640 × 280 linear RGB PFM through a path-entry modal; existing files are
+  refused.
+- Lightning execution/audio, four-body Moon rendering, custom flare layers and unconnected artistic shadow controls
+  remain labelled unavailable or reference-only. No fake GPU timings are displayed.
+
+The code was checked on native Linux software Vulkan. The Windows binary was cross-built, not launched here.
+It is unsigned and not antivirus-scanned. See the repository's `Exhibits/LocalMedia/` for native images and results.
 
 ## What you are looking at
 

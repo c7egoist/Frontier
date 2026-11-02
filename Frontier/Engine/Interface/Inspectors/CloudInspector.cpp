@@ -25,7 +25,7 @@ namespace
 
 constexpr const char *Formations[] = {"Stratus", "Stratocumulus", "Cumulus", "Cumulonimbus", "Altostratus", "Cirrus"};
 constexpr const char *BudgetPending =
-    "The selected PlanetaryAtmosphere renderer has a fixed sampling budget. This demo control is not connected.";
+    "The projected cloud-shadow map retains fixed softness and sampling. This artistic shadow control is not connected.";
 
 std::string Figure(const char *Format, double Quantity)
 {
@@ -299,9 +299,8 @@ bool CloudInspector::ConstructFormation(ControlColumn &Page)
     CaptionText::Construct(Page, Clipped
                                      ? "Ceiling limited · only the effective layer depth appears in the diagnostic."
                                      : "Altitude is world Z, not height above terrain. Profile is a density envelope, not a lit render.");
-    CaptionText::Construct(
-        Page,
-        "Formation, ceiling, scale, anvil and erosion edit the demo diagnostic. Native cloud noise retains its fixed Cumulus profile.");
+    CaptionText::Construct(Page, "Formation, ceiling, scale, erosion and lighting now drive the native cloud volume. This atlas remains an "
+                                 "isolated density reference, not a camera capture.");
     Page.EndCard();
     if (DisclosureRow::Construct(Page, "LayerDisclosure", "Layer stack editor ↗", LayerExpanded))
     {
@@ -350,14 +349,10 @@ bool CloudInspector::ConstructFormation(ControlColumn &Page)
         Page.EndCard();
     }
     Page.BeginCard(CloudCard(), "Light response", "04 / SCATTER");
-    Changed |= SliderRow::Construct(Page, "CloudAnisotropy", "Forward scattering", Parameters.PhaseAnisotropy, -0.8f, 0.8f, 0.01f, "g", 1,
-                                    false, "Native forward scattering is not exposed by the scene adapter.");
-    Changed |= SliderRow::Construct(Page, "CloudAbsorption", "Light absorption", Parameters.LightAbsorption, 0, 1, 0.01f, "%", 100, false,
-                                    "The native cloud optical medium has no separate demo absorption multiplier.");
-    Changed |= SliderRow::Construct(Page, "CloudPowder", "Powder response", Parameters.PowderResponse, 0, 1, 0.01f, "%", 100, false,
-                                    "Native powder response is not exposed by the scene adapter.");
-    Changed |= SliderRow::ConstructInteger(Page, "CloudLightSteps", "Sun-shadow taps", Parameters.LightSamples, 0, 4, "taps", false,
-                                           BudgetPending);
+    Changed |= SliderRow::Construct(Page, "CloudAnisotropy", "Forward scattering", Parameters.PhaseAnisotropy, -0.8f, 0.8f, 0.01f, "g");
+    Changed |= SliderRow::Construct(Page, "CloudAbsorption", "Light absorption", Parameters.LightAbsorption, 0, 1, 0.01f, "%", 100);
+    Changed |= SliderRow::Construct(Page, "CloudPowder", "Powder response", Parameters.PowderResponse, 0, 1, 0.01f, "%", 100);
+    Changed |= SliderRow::ConstructInteger(Page, "CloudLightSteps", "Sun-shadow taps", Parameters.LightSamples, 0, 4, "taps");
     Page.EndCard();
     return Changed;
 }
@@ -373,19 +368,19 @@ bool CloudInspector::ConstructRendering(ControlColumn &Page)
         auto *Global    = InspectorRuntime::Instance().QueryEnvironmentAccess().Clouds;
         auto &Rendering = Global ? *Global : Parameters;
         Page.BeginCard(LocalCard(), "Cloud rendering · resolution & budget", nullptr);
-        SliderRow::ConstructInteger(Page, "CloudResolution", "Cloud resolution", Rendering.ResolutionPercent, 25, 100, "% / axis", false,
-                                    BudgetPending);
+        bool Changed =
+            SliderRow::ConstructInteger(Page, "CloudResolution", "Cloud resolution", Rendering.ResolutionPercent, 25, 100, "% / axis");
         ReadoutBlock::Construct(Page, "",
                                 Figure("%.1f%% pixels", Rendering.ResolutionPercent * Rendering.ResolutionPercent / 100.0).c_str(), "");
         CaptionText::Construct(Page, "Shared sky/local target scale · 50% width × 50% height ≈ 25% of full-resolution pixels. Reference "
-                                     "only; native sampling remains fixed.");
-        SliderRow::ConstructInteger(Page, "CloudSteps", "Sky base samples", Rendering.SkySamples, 8, 64, "samples", false, BudgetPending);
-        SliderRow::ConstructInteger(Page, "CloudLocalSteps", "Local base samples", Rendering.LocalSamples, 8, 64, "samples", false,
-                                    BudgetPending);
-        CaptionText::Construct(Page, "GPU timestamps and effective sample counts are unavailable on this adapter.");
+                                     "uses a lower-resolution native ray trace with depth-aware reconstruction.");
+        Changed |= SliderRow::ConstructInteger(Page, "CloudSteps", "Sky base samples", Rendering.SkySamples, 8, 128, "samples");
+        Changed |= SliderRow::ConstructInteger(Page, "CloudLocalSteps", "Local base samples", Rendering.LocalSamples, 8, 128, "samples");
+        CaptionText::Construct(
+            Page, "Sampling and resolution control the native trace. GPU timestamps are not exposed; no timing is fabricated.");
         Page.EndCard();
         Page.BeginCard(LocalCard(), "Cloud shadows", nullptr);
-        const bool Changed = Shadows(Page, Rendering);
+        Changed |= Shadows(Page, Rendering);
         Page.EndCard();
         if (Changed && Global) Global->AdvanceRevision();
         return Changed && Global == nullptr;
@@ -393,7 +388,7 @@ bool CloudInspector::ConstructRendering(ControlColumn &Page)
     Page.BeginCard(CloudCard(), "Render footprint", "05 / BUDGET");
     const MetricTile Metrics[] = {
         {"Full-frame pixel share", Figure("%.1f", Parameters.ResolutionPercent * Parameters.ResolutionPercent / 100.0), "%"},
-        {"Complete layer ray", std::to_string(EnvironmentReadings::CloudSamples(Parameters)), "samples"}};
+        {"View samples", std::to_string(Parameters.SkySamples), "samples"}};
     MetricTiles::Construct(Page, Metrics, 2);
     auto        Pen   = DiagramCanvas::Begin(Page, "ResolutionDiagram", Page.QueryWidth() / Page.QueryScale(), 135, 15, 15);
     const float Width = Page.QueryWidth() / Page.QueryScale(), Fraction = Parameters.ResolutionPercent / 100.0f;
@@ -405,18 +400,22 @@ bool CloudInspector::ConstructRendering(ControlColumn &Page)
     Pen.Rect({0, 135 * (1 - Fraction)}, {Width * Fraction, 135 * Fraction}, ResolveCssColour(0xD5E6A51A), 9);
     Pen.Text({Width * Fraction * 0.5f, 135 - 135 * Fraction * 0.5f}, Figure("%.0f%% / axis", Parameters.ResolutionPercent).c_str(),
              ResolveCssColour(0xD5E6A5FF), 9);
-    bool Changed = SliderRow::ConstructInteger(Page, "CloudResolution", "Cloud resolution", Parameters.ResolutionPercent, 25, 100,
-                                               "% / axis", false, BudgetPending);
-    Changed |=
-        SliderRow::ConstructInteger(Page, "CloudSteps", "Sky base samples", Parameters.SkySamples, 8, 64, "samples", false, BudgetPending);
-    Changed |= SliderRow::ConstructInteger(Page, "CloudLocalSteps", "Local base samples", Parameters.LocalSamples, 8, 64, "samples", false,
-                                           BudgetPending);
-    CaptionText::Construct(Page, "Demo budget reference · pixel share is calculated from resolution, not a performance prediction. Native "
-                                 "sampling is fixed; these controls are unavailable.");
+    bool Changed =
+        SliderRow::ConstructInteger(Page, "CloudResolution", "Cloud resolution", Parameters.ResolutionPercent, 25, 100, "% / axis");
+    Changed |= SliderRow::ConstructInteger(Page, "CloudSteps", "Sky base samples", Parameters.SkySamples, 8, 128, "samples");
+    Changed |= SliderRow::ConstructInteger(Page, "CloudLocalSteps", "Local base samples", Parameters.LocalSamples, 8, 128, "samples");
+    CaptionText::Construct(Page, "Pixel share describes trace samples, not a frame-time or memory prediction. View samples and sun-shadow "
+                                 "taps control integration quality.");
     Page.EndCard();
     Page.BeginCard(CloudCard(), "Ground shadow field", "06 / OCCLUSION");
     Changed |= Shadows(Page, Parameters);
     Page.EndCard();
+    if (const auto Readout = InspectorRuntime::Instance().QueryEnvironmentAccess().Rendering; Readout && Readout->Ready)
+    {
+        CaptionText::Construct(Page, ("Actual native cloud trace: " + std::to_string(Readout->CloudTraceExtent[0]) + " × " +
+                                      std::to_string(Readout->CloudTraceExtent[1]) + " pixels")
+                                         .c_str());
+    }
     return Changed;
 }
 
@@ -425,8 +424,8 @@ bool CloudInspector::ConstructWeather(ControlColumn &Page)
     Page.BeginCard(CloudCard(), "Connected atmosphere", "07 / FORCEFIELD");
     bool Changed = ToggleRow::Construct(Page, "CloudFollowWind", "Follow shared wind", Parameters.FollowWind);
     if (NextButton::Construct(Page, "OpenWind", "Open Wind ForceField   ↗")) InspectorRuntime::Instance().RequestSelection("Wind");
-    CaptionText::Construct(Page, "This layer keeps its own authored follow switch. Native shared-wind routing is not connected; the global "
-                                 "layer retains its legacy X drift.");
+    CaptionText::Construct(Page, "This layer keeps its own follow switch. The same evaluated Force Field drives density advection and the "
+                                 "world-vector display; bounds remain fixed.");
     const auto &Access = InspectorRuntime::Instance().QueryEnvironmentAccess();
     if (NextButton::Construct(Page, "PlaceLocalCloud", "Place a local cloud   ↗", Access.LocalCloud && Access.CameraReady,
                               "Requires a local-cloud record and a viewport camera."))
@@ -530,22 +529,24 @@ bool CloudInspector::ConstructLocal(ControlColumn &Page)
     Page.EndCard();
     Page.BeginCard(LocalCard(), "Density & light response", nullptr);
     Changed |= SliderRow::Construct(Page, "LocalCloudDetail", "Edge erosion", Parameters.EdgeErosion, 0, 1, 0.01f, "");
-    constexpr const char *Shapes[]          = {"Ellipsoid", "Box"};
+    constexpr const char *Shapes[]          = {"Ellipsoid", "Box", "Sphere", "Dome"};
     constexpr const char *LocalFormations[] = {"Stratiform", "Cumuliform", "Wispy"};
     int                   Shape = static_cast<int>(Parameters.BoundsShape), Formation = static_cast<int>(Parameters.LocalFormation);
-    Changed |= SelectRow::Construct(Page, "LocalCloudShape", "Shape", Shapes, 2, Shape);
+    Changed |= SelectRow::Construct(Page, "LocalCloudShape", "Shape", Shapes, 4, Shape);
     Changed |= SelectRow::Construct(Page, "LocalCloudForm", "Formation", LocalFormations, 3, Formation);
     Parameters.BoundsShape    = Shape;
     Parameters.LocalFormation = Formation;
     Changed |= SliderRow::Construct(Page, "LocalCloudSoftness", "Edge softness", Parameters.EdgeSoftness, 0.05f, 1, 0.01f, "");
-    auto *Global   = InspectorRuntime::Instance().QueryEnvironmentAccess().Clouds;
-    auto &Lighting = Global ? *Global : Parameters;
-    SliderRow::ConstructInteger(Page, "CloudLightSteps", "Sun-shadow taps", Lighting.LightSamples, 0, 4, "taps", false, BudgetPending);
-    SliderRow::Construct(Page, "CloudAbsorption", "Light absorption", Lighting.LightAbsorption, 0, 1, .01f, "", 1, false, BudgetPending);
-    SliderRow::Construct(Page, "CloudPowder", "Powder response", Lighting.PowderResponse, 0, 1, .01f, "", 1, false, BudgetPending);
+    auto *Global          = InspectorRuntime::Instance().QueryEnvironmentAccess().Clouds;
+    auto &Lighting        = Global ? *Global : Parameters;
+    bool  LightingChanged = SliderRow::ConstructInteger(Page, "CloudLightSteps", "Sun-shadow taps", Lighting.LightSamples, 0, 4, "taps");
+    LightingChanged |= SliderRow::Construct(Page, "CloudAbsorption", "Light absorption", Lighting.LightAbsorption, 0, 1, .01f, "");
+    LightingChanged |= SliderRow::Construct(Page, "CloudPowder", "Powder response", Lighting.PowderResponse, 0, 1, .01f, "");
+    if (LightingChanged && Global) Global->AdvanceRevision();
+    Changed |= LightingChanged && !Global;
     Page.EndCard();
-    CaptionText::Construct(
-        Page, "The local volume is authored and saved. Its demo diagnostic is live; native local-cloud rendering is not connected.");
+    CaptionText::Construct(Page, "The bounded volume renders natively. Follow wind advects its density through fixed bounds; camera "
+                                 "placement and presets enable the volume.");
     Changed |= ConstructRendering(Page);
     if (auto *Lightning = InspectorRuntime::Instance().QueryEnvironmentAccess().Lightning)
         LightningInspector::ConstructControls(Page, *Lightning);

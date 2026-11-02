@@ -160,28 +160,37 @@ struct OpticalFlareConfiguration : RevisionCounter
     float PreviewPosition[2]     = {0.28f, 0.43f};
 };
 
-struct AtmosphereConfiguration : RevisionCounter
+struct AtmosphereOpticalConfiguration
 {
-    bool  Enabled               = true;
-    float RayleighScattering    = 1.0f;
-    float MieTurbidity          = 2.4f;
-    float MieAnisotropyG        = 0.80f;
-    float OzoneAbsorptionScale  = 1.0f;
-    float PlanetRadiusKm        = 6360.0f;
+    friend bool operator==(const AtmosphereOpticalConfiguration&, const AtmosphereOpticalConfiguration&) = default;
+    float RayleighScattering = 1.0f;
+    float MieTurbidity = 2.4f;
+    float MieAnisotropyG = 0.80f;
+    float OzoneAbsorptionScale = 1.0f;
+    float PlanetRadiusKm = 6360.0f;
     float AtmosphereThicknessKm = 80.0f;
-    bool  MultiScatteringLut    = true;
-    bool  AerialPerspective     = true;
-    // 📝 The demo's remaining Atmosphere page keys (EnvironmentSettings.js defaults).
-    float RayleighHeightMetres  = 8000.0f;                // [m] RayleighHeight, 1000..16000
-    float MieHeightMetres       = 1200.0f;                // [m] MieHeight, 500..8000
-    float GroundAlbedo[3]       = {0.3f, 0.3f, 0.3f};     // [linear] GroundAlbedo
-    float SkyTint[3]            = {1.0f, 1.0f, 1.0f};     // [linear] SkyTint
-    float SkyScale              = 1.0f;                   // [-] SkyScale, 0..3
-    float HorizonGlow           = 1.0f;                   // [-] HorizonGlow, 0..3
-    float WhiteLine             = 1.0f;                   // [-] WhiteLine, 0..3
-    bool  LineAtCivilOnly       = true;                   // LineAtCivilOnly
-    bool  AirMass               = true;                   // AirMass: the sun attenuated by the air
-    uint32_t TierSamples        = 40;                     // [-] TierSamples, 8..64
+    float RayleighHeightMetres = 8000.0f;
+    float MieHeightMetres = 1200.0f;
+    float GroundAlbedo[3] = {0.3f,0.3f,0.3f};
+    float HorizonGlow = 1.0f;
+    bool MultiScatteringLut = true;
+    uint32_t TierSamples = 40;
+};
+
+struct AtmosphereConfiguration : RevisionCounter, AtmosphereOpticalConfiguration
+{
+    bool Enabled = true;
+    bool AerialPerspective = true;
+    float SkyTint[3] = {1.0f,1.0f,1.0f};
+    float SkyScale = 1.0f;
+    float WhiteLine = 1.0f;
+    bool LineAtCivilOnly = true;
+    bool AirMass = true;
+    bool UseBaked = false;
+    bool BakedAvailable = false;
+    AtmosphereOpticalConfiguration Baked{};
+    uint64_t BakeAcknowledged = 0;
+    uint64_t BakeRequested = 0; // [-] transient command serial; acknowledged only after a successful GPU readback
 };
 
 struct CloudConfiguration : RevisionCounter
@@ -361,6 +370,17 @@ struct LightningConfiguration : RevisionCounter
     float FlashRadiusMetres      = 1800.0f;
 };
 
+struct ForceFieldConfiguration : RevisionCounter
+{
+    bool Enabled = true;
+    bool Visualize = false;
+    float CentreMetres[3] = {-20.0f,0.0f,8.0f};
+    float HalfExtentsMetres[3] = {20.0f,20.0f,8.0f};
+    uint32_t GridResolution = 5;
+    float ArrowSeconds = 0.5f; // [s] velocity multiplied by this time gives the world-space arrow length
+    bool IncludeTurbulence = true;
+};
+
 struct WindConfiguration : RevisionCounter
 {
     bool  Enabled              = true;
@@ -373,6 +393,8 @@ struct WindConfiguration : RevisionCounter
     bool  AdvectPlumes         = true;
     bool  AdvectParticles      = true;
     // 📝 Relative gust strength is separate from the earlier absolute GustAmplitude [m/s].
+    float GustFrequencyHz = 0.085f;
+    float TurbulenceScaleMetres = 95.0f;
     float GustStrength           = 0.25f;
     float ShearPerKilometre      = 0.15f;
     float VeerDegreesPerKilometre = 8.0f;

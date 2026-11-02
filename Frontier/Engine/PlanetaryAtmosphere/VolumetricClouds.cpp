@@ -15,7 +15,7 @@ namespace
 struct PushHeader
 {
     uint32_t Counts[4];
-    float    Tuning[4];
+    std::array<float, 4> Tuning;
 };
 } // namespace
 
@@ -126,7 +126,11 @@ bool VolumetricClouds::ExecuteTraceAndReconstruct(VulkanComputeExchange&      Ex
         HasTemporalHistory_ = false;
     }
 
-    const PushHeader TracePush{{ViewportWidth, ViewportHeight, FrameIndex, 0u}, {0.0f, 0.0f, 0.0f, 0.0f}};
+    TraceExtent_ = {std::max(1u, (ViewportWidth * ResolutionPercent_ + 99) / 100),
+                    std::max(1u, (ViewportHeight * ResolutionPercent_ + 99) / 100)};
+    const std::array<float, 4> Tuning = {static_cast<float>(ViewportWidth), static_cast<float>(ViewportHeight),
+        static_cast<float>(TraceExtent_[0]), static_cast<float>(TraceExtent_[1])};
+    const PushHeader TracePush{{TraceExtent_[0], TraceExtent_[1], FrameIndex, 0u}, Tuning};
     const std::array<ComputeDescriptorArgument, 5> Args{{
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, &EnsembleSpan, nullptr},
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, nullptr, &AtmosphereLuts.TransmittanceArray()},
@@ -138,15 +142,15 @@ bool VolumetricClouds::ExecuteTraceAndReconstruct(VulkanComputeExchange&      Ex
                                   Args,
                                   &TracePush,
                                   sizeof(TracePush),
-                                  (ViewportWidth + 7u) / 8u,
-                                  (ViewportHeight + 7u) / 8u,
+                                  (TraceExtent_[0] + 7u) / 8u,
+                                  (TraceExtent_[1] + 7u) / 8u,
                                   1u))
     {
         return false;
     }
 
     const uint32_t   UseHistory = (HasTemporalHistory_ && FrameIndex > 0u) ? 1u : 0u;
-    const PushHeader ReconPush{{ViewportWidth, ViewportHeight, FrameIndex, UseHistory}, {0.0f, 0.0f, 0.0f, 0.0f}};
+    const PushHeader ReconPush{{ViewportWidth, ViewportHeight, FrameIndex, UseHistory}, Tuning};
     if (!Exchange.DispatchCompute(ReconstructProgram_,
                                   Args,
                                   &ReconPush,

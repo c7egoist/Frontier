@@ -8,6 +8,9 @@
 #include "Engine/Diagnostics/BuildConfiguration.h"
 #include "Engine/Interface/InspectorRuntime.h"
 #include "Engine/Scene/EngineConfigurations.h"
+#if defined(FRONTIER_WITH_INTERFACE_SDK)
+#include "Engine/Interface/Controls/RasterPlate.h"
+#endif
 
 namespace Frontier
 {
@@ -45,6 +48,7 @@ class AtmosphereInspector final : public RecordInspector
     bool ConstructMedium(ControlColumn& Page);
     bool ConstructLightResponse(ControlColumn& Page);
     bool ConstructBaking(ControlColumn& Page);
+    void RefreshBakedImages();
 
     AtmosphereConfiguration& Parameters;
     int                      ActivePane    = 0;
@@ -52,6 +56,12 @@ class AtmosphereInspector final : public RecordInspector
     int                      ScaleRibbon   = 0;         // the comparator's selected ribbon: 0 Rayleigh, 1 Mie
     bool                     HorizonOpen   = false;     // the Horizon shaping drawer
     int                      BakedView     = 0;         // the Baked atmosphere card's view tab
+#if defined(FRONTIER_WITH_INTERFACE_SDK)
+    std::array<RasterPlate,4> BakeViews;
+    RasterPlate SkyPlate, TransmittancePlate, MultiplePlate;
+    uint64_t UploadedGeneration = 0;
+    uint64_t UploadedSource = 0;
+#endif
     bool                     LookupsOpen   = false;     // the GPU lookup tables drawer
 };
 

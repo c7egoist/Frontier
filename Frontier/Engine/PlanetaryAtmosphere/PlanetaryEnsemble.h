@@ -35,8 +35,8 @@ inline constexpr uint32_t kRealmRecordFloat4Stride      = 18u;
 inline constexpr uint32_t kSunRecordFloat4Stride        = 6u;
 inline constexpr uint32_t kMoonRecordFloat4Stride       = 5u;
 inline constexpr uint32_t kPlanetRecordFloat4Stride    = 6u;
-inline constexpr uint32_t kCloudRecordFloat4Stride     = 6u;
-inline constexpr uint32_t kFogBoxRecordFloat4Stride    = 3u;
+inline constexpr uint32_t kCloudRecordFloat4Stride     = 8u;
+inline constexpr uint32_t kFogBoxRecordFloat4Stride    = 6u;
 inline constexpr uint32_t kLuminaireRecordFloat4Stride = 3u;
 inline constexpr uint32_t kLightningRecordFloat4Stride = 3u;
 inline constexpr uint32_t kFacetRecordFloat4Stride     = 3u;
@@ -119,6 +119,8 @@ struct PlanetaryRealm
     float                       CloudShadowHalfSpanM    = 1200.0f;
     float                       CloudWindSeconds        = 0.0f;
     ForceFieldSpace             ForceField{};
+    uint32_t AtmosphereSamples = 40;
+    bool MultipleScattering = true;
 
     std::vector<RealmSolarSource>        Suns{};
     std::vector<LunarBodyDescriptor>     Moons{};
@@ -146,6 +148,8 @@ struct PlanetaryCameraView
     uint32_t             FrameIndex       = 0u;
     uint32_t             ViewportWidth    = 960u;
     uint32_t             ViewportHeight   = 540u;
+    uint32_t             CloudResolutionPercent = 100;
+    uint32_t             FogMarchSamples = 36;
 };
 
 struct PlanetaryRealmEnsemble

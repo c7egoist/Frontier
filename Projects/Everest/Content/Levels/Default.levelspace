@@ -212,9 +212,23 @@ strikes_per_minute = 4.0
 auto_discharge = false
 
 [[records]]
+identity = "rec_force_field"
+type = "ForceField"
+name = "Force Field"
+[records.configuration]
+enabled = true
+visualize = false
+include_turbulence = true
+centre_metres = [-20.0, 0.0, 8.0]
+half_extents_metres = [20.0, 20.0, 8.0]
+grid_resolution = 5
+arrow_seconds = 0.5
+
+[[records]]
 identity = "rec_wind"
 type = "Wind"
 name = "Wind"
+parent = "rec_force_field"
 [records.configuration]
 enabled = true
 direction_deg = 45.0

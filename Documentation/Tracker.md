@@ -1051,5 +1051,19 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
   Fog wind reversal produces zero image difference; zero velocity still drifts (mean RGB difference 0.00092608).
   Heterogeneity already changes radiance (0.000686922). The GPU fog shader uses a hard-coded drift vector.
   Atmosphere's Bake button ignores its return, and viewport snapshots omit the local cloud/fog records.
-- **Status:** implementation and acceptance checks in progress. Baseline is not a passing local-media test.
-  Evidence: `Exhibits/LocalMedia/Results/Before/`; no claims yet for repaired coupling, shapes, baking or world vectors.
+- **Implemented and verified:** native local cloud/fog collection and rendering; integrated receiver displacement;
+  field-driven wind, four bounded shapes, falloff, heterogeneity, self-shadowing, real ray-sample budgets and reduced
+  cloud trace resolution. Added Force Field parent/inspector and world-space velocity vectors; Wind stays separate.
+  Atmosphere Bake now dispatches real GPU tables, exposes readbacks and their input settings, freezes/rebakes the
+  selected snapshot, and saves baked coefficients with the level. Added explicit local-medium creation registrations.
+- **Acceptance:** native Vulkan local-media exhibit passes; reversal affects fog/clouds, zero velocity is stationary,
+  64 samples converge better than 32 against 128, and 25% cloud resolution dispatches 64 × 40 for a 256 × 160 view.
+  Real Everest/GPU baking/receiver/vector integration: **78 checks passed**. Native inspector interaction regression:
+  **327 assertions, zero failures**. Editor and Shipping regressions pass (30-record default level, 33 page captures).
+  Solar occlusion, all existing force triggers, camera flight and stored shader archive regressions pass.
+- **Windows:** Release x64 cross-build succeeds; interactive Windows/hardware-GPU validation remains unrun.
+  Baking persists coefficients and regenerates GPU textures on reload; it is not an offline cubemap export.
+  Vectors are labelled X-ray velocities in m/s, not Newton forces. No vegetation consumer or new per-source authoring
+  interfaces are claimed. Artistic shadow controls that remain unsupported stay disabled.
+- **Evidence:** [LocalMedia](../Exhibits/LocalMedia/README.md), with baseline failures, repaired native captures,
+  editor screenshots, source/image manifests and reproduction commands. No GitHub Actions were run.

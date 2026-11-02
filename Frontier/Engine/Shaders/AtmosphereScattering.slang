@@ -247,7 +247,7 @@ void BakeTransmittanceLutMain(uint3 Tid : SV_DispatchThreadID)
         return;
     }
 
-    const int kSteps = 40;
+    const int kSteps = Push.Tuning.x > 0.0f ? clamp(int(Push.Tuning.x),8,64) : 40;
     float     Δs     = ExitLen / float(kSteps);
     float3    τ      = float3(0.0f);
     for (int Step = 0; Step < kSteps; ++Step)
@@ -269,6 +269,11 @@ void BakeMultiScatterLutMain(uint3 Tid : SV_DispatchThreadID)
 {
     if (Tid.x >= Push.Counts.x || Tid.y >= Push.Counts.y)
     {
+        return;
+    }
+    if (Push.Tuning.y < 0.5f)
+    {
+        OutputLut[uint3(Tid.xy, Push.Counts.z)] = float4(0.0f,0.0f,0.0f,1.0f);
         return;
     }
     uint   RealmId      = Push.Counts.z;

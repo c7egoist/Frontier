@@ -78,38 +78,28 @@ float EvaluateLocalFogBoxExtinction(StructuredBuffer<float4> Ens,
                                     out float                OutAlbedo,
                                     out float                Out𝑔)
 {
-    float4 F0 = Ens[FogOffset + 0u]; // CenterXYZ, RefDensity
-    float4 F1 = Ens[FogOffset + 1u]; // HalfXYZ, ScatterAlbedo
-    float4 F2 = Ens[FogOffset + 2u]; // NoiseAmp, NoiseFreq, PhaseG, EdgeSoftnessM
+    float4 F0 = Ens[FogOffset + 0u];
+    float4 F1 = Ens[FogOffset + 1u];
+    float4 F2 = Ens[FogOffset + 2u];
+    float4 F3 = Ens[FogOffset + 3u];
+    uint Shape = uint(Ens[FogOffset + 4u].x + 0.5f);
+    float4 Motion = Ens[FogOffset + 5u];
     OutAlbedo = F1.w;
-    Out𝑔      = F2.z;
-
-    if (F0.w <= 0.0f)
-    {
-        return 0.0f;
-    }
-    float3 RelPos   = PointMeters - F0.xyz;
-    float3 HalfSpan = max(F1.xyz, float3(1.0e-3f));
-    if (abs(RelPos.x) >= HalfSpan.x || abs(RelPos.y) >= HalfSpan.y || abs(RelPos.z) >= HalfSpan.z)
-    {
-        return 0.0f;
-    }
-    float SoftEdge = max(F2.w, 1.0e-3f);
-    float MaskX    = saturate((HalfSpan.x - abs(RelPos.x)) / SoftEdge);
-    float MaskY    = saturate((HalfSpan.y - abs(RelPos.y)) / SoftEdge);
-    float MaskZ    = saturate((HalfSpan.z - abs(RelPos.z)) / SoftEdge);
-    float Envelope = MaskX * MaskX * (3.0f - 2.0f * MaskX) *
-                     MaskY * MaskY * (3.0f - 2.0f * MaskY) *
-                     MaskZ * MaskZ * (3.0f - 2.0f * MaskZ);
-
+    Out𝑔 = F2.z;
+    if (F0.w <= 0.0f) return 0.0f;
+    float3 HalfSpan = ResolveVolumeHalfExtent(F1.xyz, Shape);
+    float Envelope = EvaluateVolumeEnvelope(PointMeters - F0.xyz, HalfSpan, Shape, F2.w);
+    if (Envelope <= 0.0f) return 0.0f;
     float Modulation = 1.0f;
     if (F2.x > 0.0f && F2.y > 0.0f)
     {
-        float3 Advected = (PointMeters - float3(1.4f * TimeSeconds, 0.25f * TimeSeconds, 0.6f * TimeSeconds)) * F2.y;
-        float  NoiseVal = FbmRotated3D(Advected, 3, 409u);
-        Modulation      = max(0.0f, 1.0f + F2.x * (2.0f * NoiseVal - 1.0f));
+        float3 Advected = (PointMeters - Motion.xyz) * F2.y;
+        float Noise = FbmRotated3D(Advected, 3, uint(Motion.w + 0.5f));
+        Modulation = max(0.0f, 1.0f + F2.x * (2.0f * Noise - 1.0f));
     }
-    return F0.w * Envelope * Modulation;
+    float Lower = F0.y - (Shape == 3u ? 0.0f : HalfSpan.y);
+    float HeightTerm = F3.w > 0.0f ? exp(-max(PointMeters.y - Lower, 0.0f) / max(F3.w, 0.5f)) : 1.0f;
+    return F0.w * Envelope * Modulation * HeightTerm;
 }
 
 float PointSegmentDistSq(float3 Point, float3 SegStart, float3 SegEnd)
@@ -189,7 +179,27 @@ void IntegrateFogSpaceMain(uint3 Tid : SV_DispatchThreadID)
     }
 
     float DefaultSpan = (ForceCount > 0u) ? 520.0f : 120.0f;
-    float MaxMarchM   = IsSky ? ((ForceCount > 0u) ? 520.0f : 64.0f) : min(HitDistM, DefaultSpan);
+    float Limit = IsSky ? 45000.0f : HitDistM;
+    float MaxMarchM = min(Limit, IsSky ? ((ForceCount > 0u) ? 520.0f : 64.0f) : DefaultSpan);
+    float MinMarchM = 0.0f;
+    float LocalNear = Limit;
+    float LocalFar = 0.0f;
+    for (uint Index = 0u; Index < FogBoxCount; ++Index)
+    {
+        uint Offset = FogBoxTable + (FogBoxFirst + Index) * kFogBoxStride;
+        float Near, Far;
+        if (IntersectVolumeBounds(RayOrigin, RayDir, Ensemble[Offset].xyz, Ensemble[Offset + 1u].xyz,
+            uint(Ensemble[Offset + 4u].x + 0.5f), Limit, Near, Far))
+        {
+            LocalNear = min(LocalNear, Near);
+            LocalFar = max(LocalFar, Far);
+        }
+    }
+    if (LocalFar > LocalNear)
+    {
+        MaxMarchM = max(MaxMarchM, LocalFar);
+        if (Hf0.x <= 0.0f && ForceCount == 0u) { MinMarchM = LocalNear; MaxMarchM = LocalFar; }
+    }
     if (Hf0.x <= 0.0f && FogBoxCount == 0u && ForceCount == 0u)
     {
         HdrFrame[uint3(Tid.xy, 0u)] = float4(SurfaceHdr, 1.0f);
@@ -197,7 +207,7 @@ void IntegrateFogSpaceMain(uint3 Tid : SV_DispatchThreadID)
     }
 
     // 2. Quadratic froxel volumetric fog integration (height fog + local 3D fog boxes + ForceField dust/debris + shafts + emitters)
-    const int kSlices       = 36;
+    const int kSlices       = clamp(int(Push.Tuning.x), 8, 192);
     float     Jitter        = frac(52.9829189f * frac(0.06711056f * float(Tid.x) + 0.00583715f * float(Tid.y)));
     float     Transmittance = 1.0f;
     float3    InScatter     = float3(0.0f);
@@ -206,15 +216,15 @@ void IntegrateFogSpaceMain(uint3 Tid : SV_DispatchThreadID)
     {
         float U0 = float(Slice) / float(kSlices);
         float U1 = float(Slice + 1) / float(kSlices);
-        float T0 = MaxMarchM * (U0 * U0);
-        float T1 = MaxMarchM * (U1 * U1);
+        float T0 = MinMarchM + (MaxMarchM - MinMarchM) * (U0 * U0);
+        float T1 = MinMarchM + (MaxMarchM - MinMarchM) * (U1 * U1);
         float Δs = T1 - T0;
         if (Δs <= 1.0e-5f)
         {
             continue;
         }
         float  UMid      = (float(Slice) + Jitter) / float(kSlices);
-        float  TMid      = MaxMarchM * (UMid * UMid);
+        float  TMid      = MinMarchM + (MaxMarchM - MinMarchM) * (UMid * UMid);
         float3 SamplePos = RayOrigin + RayDir * TMid;
 
         float  σHeight     = (TMid >= Hf1.x) ? FogHeightDensityAtY(Hf0, SamplePos.y) : 0.0f;
@@ -231,7 +241,7 @@ void IntegrateFogSpaceMain(uint3 Tid : SV_DispatchThreadID)
             if (σBox > 0.0f)
             {
                 σExt        += σBox;
-                σScatterRgb += float3(σBox * BoxAlbedo);
+                σScatterRgb += σBox * BoxAlbedo * Ensemble[FogBoxTable + (FogBoxFirst + FIdx) * kFogBoxStride + 3u].rgb;
                 σScatterSum += σBox * BoxAlbedo;
                 Weighted𝑔   += σBox * BoxAlbedo * Box𝑔;
             }
@@ -293,7 +303,23 @@ void IntegrateFogSpaceMain(uint3 Tid : SV_DispatchThreadID)
             float3 AtmoTr  = SampleTransmittanceLutArray(
                 TransLut, RealmId, R0.x, R0.y, R0.x + max(R0.z, 1.0e-3f), SolarDirection.y);
             float  Phase   = HenyeyGreensteinValue(dot(RayDir, SolarDirection), 𝑔Mean);
-            Luminance     += SolarIrradiance * AtmoTr * (CloudTr * Phase);
+            float LocalOpticalDepth = 0.0f;
+            for (uint Medium = 0u; Medium < FogBoxCount; ++Medium)
+            {
+                uint Offset = FogBoxTable + (FogBoxFirst + Medium) * kFogBoxStride;
+                if (Ensemble[Offset + 4u].y < 0.5f) continue;
+                float Near, Far;
+                if (!IntersectVolumeBounds(SamplePos, SolarDirection, Ensemble[Offset].xyz, Ensemble[Offset + 1u].xyz,
+                    uint(Ensemble[Offset + 4u].x + 0.5f), 45000.0f, Near, Far)) continue;
+                float Step = (Far - Near) / 4.0f;
+                for (uint Tap = 0u; Tap < 4u; ++Tap)
+                {
+                    float Albedo, PhaseG;
+                    LocalOpticalDepth += EvaluateLocalFogBoxExtinction(Ensemble, Offset,
+                        SamplePos + SolarDirection * (Near + (float(Tap) + 0.5f) * Step), TimeSeconds, Albedo, PhaseG) * Step;
+                }
+            }
+            Luminance += SolarIrradiance * AtmoTr * (CloudTr * Phase * exp(-LocalOpticalDepth));
             if (DustFraction > 0.0f)
             {
                 // Multi-scattered overcast storm skylight + warm ground bounce illuminating lofted ochre dust/debris
@@ -378,6 +404,6 @@ void IntegrateFogSpaceMain(uint3 Tid : SV_DispatchThreadID)
         Transmittance *= TailTr;
     }
 
-    Transmittance = max(Transmittance, 1.0f - saturate(Hf0.w));
+    Transmittance = FogBoxCount > 0u ? saturate(Transmittance) : max(Transmittance, 1.0f - saturate(Hf0.w));
     HdrFrame[uint3(Tid.xy, 0u)] = float4(SurfaceHdr * Transmittance + InScatter * GlassTint, 1.0f);
 }

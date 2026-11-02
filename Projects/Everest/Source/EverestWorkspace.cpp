@@ -11,6 +11,7 @@
 #if FRONTIER_EDITOR && defined(FRONTIER_WITH_INTERFACE_SDK)
 #include "EverestSceneViewport.h"
 
+#include "Engine/Interface/Controls/WorldVectorOverlay.h"
 #include "Engine/Interface/InspectorControls.h"
 #include "Engine/Interface/InspectorRuntime.h"
 #include "Engine/Interface/LogStreamPanelRegistration.h"
@@ -58,6 +59,12 @@ constexpr float  NotchBandHeight = 18.0f;   // [px] the Control Centre notch tab
 void PublishRenderReadouts(Frontier::SceneWorld& World, const SceneViewportReadout& Readout)
 {
     if (!Readout.Presenting) return;
+    if (Readout.Environment && Readout.Environment->AtmosphereBake)
+    {
+        const auto& Bake = *Readout.Environment->AtmosphereBake;
+        auto* Entry = dynamic_cast<Frontier::AtmosphereRecord*>(World.FindFirstByType("Atmosphere"));
+        if (Entry) (void)Frontier::ConfirmAtmosphereBake(Entry->AccessConfiguration(),Entry->QueryToken().Value,Bake);
+    }
     auto Publish = [&World](const char* Type, const std::string& Text) {
         Frontier::SceneRecordBase* Entry = World.FindFirstByType(Type);
         if (Entry == nullptr) return;
@@ -502,11 +509,16 @@ void EverestWorkspace::ConstructInterface(double DeltaSeconds)
 
     Frontier::EnvironmentEditAccess Access;
     Access.ViewExtent    = LastReadout.ScreenExtent;
+    Access.Rendering = LastReadout.Environment;
     Access.CameraReady   = true;
     Access.CameraEye     = Flight.Position;
     Access.CameraForward = Flight.ResolveForward();
     if (auto* Entry = dynamic_cast<Frontier::SolarRecord*>(QuerySceneWorld().FindFirstByType("Solar")))
         Access.Solar = &Entry->AccessConfiguration();
+    if (auto* Entry = dynamic_cast<Frontier::AtmosphereRecord*>(QuerySceneWorld().FindFirstByType("Atmosphere")))
+        Access.Atmosphere = &Entry->AccessConfiguration();
+    if (auto* Entry = dynamic_cast<Frontier::ForceFieldRecord*>(QuerySceneWorld().FindFirstByType("ForceField")))
+        Access.Forces = &Entry->AccessConfiguration();
     if (auto* Entry = dynamic_cast<Frontier::WindRecord*>(QuerySceneWorld().FindFirstByType("Wind")))
         Access.Wind = &Entry->AccessConfiguration();
     if (auto* Entry = dynamic_cast<Frontier::LightningRecord*>(QuerySceneWorld().FindFirstByType("Lightning")))
@@ -790,6 +802,22 @@ void EverestWorkspace::ConstructViewportSurface()
     if (Image.Texture != 0)
     {
         DrawList->AddImage(static_cast<ImTextureID>(Image.Texture), StageMin, Max);
+        const auto* Field = dynamic_cast<const Frontier::ForceFieldRecord*>(QuerySceneWorld().FindFirstByType("ForceField"));
+        if (Field && Field->QueryConfiguration().Visualize && !Overlays.CleanView && LastReadout.Environment)
+        {
+            Frontier::WorldVectorView Projection;
+            Projection.Eye = Flight.Position;
+            Projection.Forward = Flight.ResolveForward();
+            const double Horizontal = std::hypot(Projection.Forward[0],Projection.Forward[1]);
+            Projection.Right = {Projection.Forward[1] / Horizontal,-Projection.Forward[0] / Horizontal,0};
+            Projection.Up = {-Projection.Forward[0] * Projection.Forward[2] / Horizontal,
+                -Projection.Forward[1] * Projection.Forward[2] / Horizontal,Horizontal};
+            Projection.VerticalFieldOfView = Flight.ResolveFieldOfView();
+            Frontier::WorldVectorOverlay::Construct(DrawList,StageMin,{W,H-BarH},Projection,
+                LastReadout.Environment->Vectors,Field->QueryConfiguration().ArrowSeconds,Scale);
+            DrawList->AddText({StageMin.x + 12 * Scale,StageMin.y + 12 * Scale},IM_COL32(160,220,236,230),
+                "Atmospheric flow / m/s / X-ray vectors");
+        }
     }
     else
     {

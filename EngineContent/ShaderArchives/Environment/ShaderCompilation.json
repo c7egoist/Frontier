@@ -10,11 +10,11 @@
     },
     {
       "file": "BakeMultiScatterLut.spv",
-      "spirv_sha256": "4665de518f31cc37bc9911bf354bef51572fee2863597af182235be678889c47"
+      "spirv_sha256": "a4481f7c7b2747f5816e308bb4726de2b8f20f3a34b8a708b2b1405eb28c361f"
     },
     {
       "file": "BakeTransmittanceLut.spv",
-      "spirv_sha256": "2a10a32637aedaf5fcc4be8be4cd9c2a959c8f09f5385933be3b685a31c349d6"
+      "spirv_sha256": "651d21317799c155ffbdd9d7a7bc99c4b07973d5a5b9f76a106446534c4e5c0f"
     },
     {
       "file": "BinPreviewTiles.spv",
@@ -34,11 +34,11 @@
     },
     {
       "file": "IntegrateFogSpace.spv",
-      "spirv_sha256": "86e3cd6f2385bfce5beaf1e537a10be531442f67f0f55dc432758ab8f50482b7"
+      "spirv_sha256": "ec6e57034671801a2ea75b364ea9f2dfea21ca9a76775c62f5e4aad597440fca"
     },
     {
       "file": "ProjectCloudShadow.spv",
-      "spirv_sha256": "cd2714c45176903392c5a375212751433b3202d80a8d34980157854cf492c725"
+      "spirv_sha256": "fe96ca5e40bd0184d472013f4e380131a7b69410aff1a01ae1925822981507b6"
     },
     {
       "file": "ProjectPreviewShadow.spv",
@@ -50,11 +50,11 @@
     },
     {
       "file": "RasterizeVisibilityProjection.spv",
-      "spirv_sha256": "69715a854a7d172189be8e1f782287bf5f8e540db41d1fb833fc954448e857c9"
+      "spirv_sha256": "cccb32b92ff7941b36e0a06e158810f412c93ef914bb069ffab1fcf895291843"
     },
     {
       "file": "ReconstructVolumetricClouds.spv",
-      "spirv_sha256": "71cd471d1b1a3090eb7b9df91584f7178cebab2d032274e962867d32fe420ea2"
+      "spirv_sha256": "8a02110d1ae0108ef484358fe46012f59d488e241403aec663f19da8120cbb62"
     },
     {
       "file": "ResolvePreviewView.spv",
@@ -62,7 +62,7 @@
     },
     {
       "file": "TraceVolumetricClouds.spv",
-      "spirv_sha256": "1f93e4d7c0fad35ddfb634fd99f477c66f48858ca42cd4b34b0cbe634e2870df"
+      "spirv_sha256": "0f7d26e1f1421adc8c9a3e65a58ae88d7f4d4c363cf040fcf9911c83b03fd61e"
     }
   ],
   "sources": [
@@ -72,7 +72,7 @@
     },
     {
       "file": "Frontier/Engine/Shaders/AtmosphereScattering.slang",
-      "sha256": "eb3127d1fb45fa87dc206ab944ab2038da252a4753a32a7a1e5badfdf137fd94"
+      "sha256": "4cd326863c1ef55a190d105aee46c36514de2d109cddc8b5875f8ed291e2449a"
     },
     {
       "file": "Frontier/Engine/Shaders/CloudShadowProjection.slang",
@@ -80,11 +80,11 @@
     },
     {
       "file": "Frontier/Engine/Shaders/CloudSynthesis.slang",
-      "sha256": "6b51156c7e793befb97ef8b647b49f5fa62038a8d781b970e9c65d2d8ff3dff0"
+      "sha256": "eefdaf05609d50cb775579b695b505f0820d34ee807aafd6cfd895a82118f462"
     },
     {
       "file": "Frontier/Engine/Shaders/FogSpace.slang",
-      "sha256": "4ae6fa093dd8cd3edc2b55e2bef07acdfaa54ca9b8cc651085ed8e26e6c9479f"
+      "sha256": "d64c6bae333cffbf365478d3a35a4ef351224b4f9e02342df101384efa09d086"
     },
     {
       "file": "Frontier/Engine/Shaders/ForceField.slang",
@@ -100,7 +100,7 @@
     },
     {
       "file": "Frontier/Engine/Shaders/PlanetaryRecords.slang",
-      "sha256": "ab0c3720e85eb76b85b8067fcdadceb2b2b25acc618f5df2554e3a23cb78bae4"
+      "sha256": "5db05ae14c534b6ed12f8bb0bb825315c48bb6b21eea14cd19a0777aa8e9718e"
     },
     {
       "file": "Frontier/Engine/Shaders/PreviewRaster.slang",
@@ -111,12 +111,16 @@
       "sha256": "2255bbe82ec4ab1d27c8ad67b9ef9cec84893b72faf006c3a5421f1059a88c2e"
     },
     {
+      "file": "Frontier/Engine/Shaders/VolumeBounds.slang",
+      "sha256": "4021836b16c375e18f8fd71626268c6669d555075369cb975dc416e50f4227d4"
+    },
+    {
       "file": "Frontier/Engine/Shaders/VolumeDistanceSampling.slang",
       "sha256": "f2e9a323b6e0f6dfcbd98ede2463e82cf8276feb8e6e1d687c9724966b7e5761"
     },
     {
       "file": "Frontier/Engine/Shaders/VolumetricClouds.slang",
-      "sha256": "25d03ddb7b1fc15deb85c75f6ea7600c360789552f3158264f6fcec6defccac6"
+      "sha256": "c7998b42f4d089a02215162a41f7ca00abe036550009b50e0c85ef32afebc241"
     }
   ]
 }

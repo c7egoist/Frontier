@@ -23,6 +23,8 @@ struct AtmosphereRealmRevision
 {
     uint64_t AtmosphereRevision = 1u;
     uint64_t SkyViewRevision    = 1u;
+    uint32_t IntegrationSamples = 40;
+    bool MultipleScattering = true;
 };
 
 class AtmosphereProjection
@@ -57,6 +59,8 @@ class AtmosphereProjection
     DeviceImageArraySlot  SkyViewArray_{};
     std::vector<uint64_t> BakedAtmosphereRevisions_{};
     std::vector<uint64_t> BakedSkyViewRevisions_{};
+    std::vector<uint32_t> BakedSampling_{};
+    std::vector<bool> BakedMultiple_{};
     uint32_t              LastAtmosphereBakedCount_ = 0u;
     uint32_t              LastSkyViewBakedCount_    = 0u;
 };

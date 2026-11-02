@@ -151,12 +151,17 @@ double CloudDensityReference::Evaluate(const CloudConfiguration &Cloud, const st
     {
         std::array<double, 3> Normal{};
         for (size_t Axis = 0; Axis < 3; ++Axis)
-            Normal[Axis] = (Position[Axis] - Cloud.CentreMetres[Axis]) / std::max(1.0f, Cloud.HalfExtentsMetres[Axis]);
-        const double Margin = 1.0 - (Cloud.BoundsShape ? std::max({std::abs(Normal[0]), std::abs(Normal[1]), std::abs(Normal[2])})
-                                                       : std::hypot(Normal[0], Normal[1], Normal[2]));
+        {
+            const double Half = Cloud.BoundsShape == 2 || (Cloud.BoundsShape == 3 && Axis != 2) ?
+                Cloud.HalfExtentsMetres[0] : Cloud.HalfExtentsMetres[Axis];
+            Normal[Axis] = (Position[Axis] - Cloud.CentreMetres[Axis]) / std::max(1.0,Half);
+        }
+        double Margin = 1.0 - (Cloud.BoundsShape == 1 ? std::max({std::abs(Normal[0]), std::abs(Normal[1]), std::abs(Normal[2])}) :
+            std::hypot(Normal[0],Normal[1],Normal[2]));
+        if (Cloud.BoundsShape == 3) Margin = std::min(Margin,Normal[2]);
         const double Mask   = Smooth(0.0, std::max(0.05, static_cast<double>(Cloud.EdgeSoftness)), Margin);
         if (Mask <= 0.0) return 0.0;
-        const double Height  = Clamp(Normal[2] * 0.5 + 0.5);
+        const double Height  = Clamp(Cloud.BoundsShape == 3 ? Normal[2] : Normal[2] * 0.5 + 0.5);
         double       Profile = Smooth(0.0, 0.1, Height) * (1.0 - Smooth(0.75, 1.0, Height));
         if (Cloud.LocalFormation == 1) Profile = Smooth(0.0, 0.08, Height) * (1.0 - Smooth(0.4, 1.0, Height)) * 1.15;
         if (Cloud.LocalFormation == 2) Profile = Smooth(0.0, 0.3, Height) * (1.0 - Smooth(0.6, 1.0, Height)) * 0.6;
@@ -198,15 +203,16 @@ void CloudDensityReference::ConstructImages(const CloudConfiguration &Cloud,
     Top.resize(Width * Height * 4);
     Side.resize(Width * Height * 4);
     const bool   Local = Cloud.LocalVolume;
-    const double Low   = Local ? Cloud.CentreMetres[2] - Cloud.HalfExtentsMetres[2] : Cloud.BaseAltitudeMetres;
-    const double High  = Local ? Cloud.CentreMetres[2] + Cloud.HalfExtentsMetres[2]
+    const double HalfZ = Cloud.BoundsShape == 2 ? Cloud.HalfExtentsMetres[0] : Cloud.HalfExtentsMetres[2];
+    const double Low   = Local ? Cloud.CentreMetres[2] - (Cloud.BoundsShape == 3 ? 0 : HalfZ) : Cloud.BaseAltitudeMetres;
+    const double High  = Local ? Cloud.CentreMetres[2] + HalfZ
                                : std::min<double>(Cloud.CeilingMetres, Cloud.BaseAltitudeMetres + Cloud.LayerThicknessMetres);
     Aspect             = std::max(0.1, Aspect);
     for (int Row = 0; Row < Height; ++Row)
         for (int Column = 0; Column < Width; ++Column)
         {
             const double Along = (Column + 0.5) / Width, Across = (Row + 0.5) / Height;
-            const double Half      = Local ? std::max<double>(Cloud.HalfExtentsMetres[0], Cloud.HalfExtentsMetres[1] * Aspect) : 3000.0;
+            const double Half      = Local ? std::max<double>(Cloud.HalfExtentsMetres[0], (Cloud.BoundsShape >= 2 ? Cloud.HalfExtentsMetres[0] : Cloud.HalfExtentsMetres[1]) * Aspect) : 3000.0;
             const double PositionX = Local ? Cloud.CentreMetres[0] + (Along * 2 - 1) * Half : (Along - 0.5) * 6000;
             const double PositionY = Local ? Cloud.CentreMetres[1] + (1 - Across * 2) * Half / Aspect : (0.5 - Across) * 6000 / Aspect;
             double       Average   = 0.0;

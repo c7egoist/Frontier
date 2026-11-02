@@ -7,6 +7,9 @@
 #include "EnvironmentOverlay.h"
 
 #include "Engine/PlanetaryAtmosphere/PlanetaryEnsemble.h"
+#include "Engine/PhysicalDynamics/AtmosphericFlow.h"
+#include <unordered_map>
+#include <unordered_set>
 
 #include <algorithm>
 #include <cmath>
@@ -144,6 +147,13 @@ double ResolveEnvironmentRadianceScale(const SceneEnvironment& Environment) noex
 
 struct EnvironmentOverlay::PlanetaryStore
 {
+    struct Motion
+    {
+        std::array<double, 3> Offset{};
+    };
+    std::unordered_map<uint64_t, Motion> Motions;
+    double PreviousTime = -1;
+
     PlanetarySubmissionSequence Sequence{};
     PlanetaryRealmEnsemble      Ensemble{};
     PlanetaryCameraView         View{};
@@ -434,6 +444,8 @@ void EnvironmentOverlay::ResolveRealm(const IlluminationHost& Host, const SceneE
     // ① atmosphere: the level's scattering scales on the Earth reference (turbidity 2.4 ≙ the reference aerosol load)
     const AtmosphereParameters Air = ResolveAtmosphereParameters(S);
     R.Atmosphere              = Air;
+    R.AtmosphereSamples = std::clamp(S.Atmosphere.TierSamples,8u,64u);
+    R.MultipleScattering = S.Atmosphere.MultiScatteringLut;
     R.ObserverAltitudeKm      = ObserverAltitudeKm;
     R.GroundPlaneY            = 0.0f;
     R.EnableAerialPerspective = S.Atmosphere.Enabled && S.Atmosphere.AerialPerspective;
@@ -516,21 +528,70 @@ void EnvironmentOverlay::ResolveRealm(const IlluminationHost& Host, const SceneE
         }
     }
 
-    // ⑤ one planetary cloud slab advected by the wind
-    R.CloudVolumes.clear();
-    R.CloudWindSeconds = (S.Wind.Enabled && S.Wind.AdvectClouds) ? static_cast<float>(S.ElapsedSeconds) : 0.0f;
-    if (S.Clouds.Enabled)
+    // 📝 Advection moves density coordinates, not the authored volume. Velocity changes never multiply a new speed
+    //    by the entire scene age: each receiver retains an integrated displacement under its record token.
+    if (Planetary_->PreviousTime > S.ElapsedSeconds) Planetary_->Motions.clear();
+    const double Delta = Planetary_->PreviousTime < 0 ? 0 : std::clamp(S.ElapsedSeconds - Planetary_->PreviousTime, 0.0, 1.0);
+    Planetary_->PreviousTime = S.ElapsedSeconds;
+    ConfigureAtmosphericFlow(R.ForceField, S.Forces, S.Wind, S.ElapsedSeconds);
+    std::unordered_set<uint64_t> Receivers;
+    auto Advect = [&](uint64_t Token, const float Centre[3], bool Enabled, bool Follow, double Independent)
     {
-        CloudVolumeProfile Slab;
-        Slab.Domain              = CloudVolumeDomain::PlanetarySlab;
-        Slab.HeightProfile       = TroposphericCloudProfile::Cumulus;
-        Slab.Slab.LowerHeightM   = std::max(50.0f, S.Clouds.BaseAltitudeMetres);
-        Slab.Slab.TopHeightM     = Slab.Slab.LowerHeightM + std::max(50.0f, S.Clouds.LayerThicknessMetres);
-        Slab.Slab.Coverage       = std::clamp(S.Clouds.Coverage, 0.0f, 1.0f);
-        Slab.Slab.DensityScale   = std::max(0.0f, S.Clouds.ExtinctionDensity / 0.85f);
-        Slab.Slab.WindXMps       = S.Clouds.WindDriftSpeed;
-        Slab.SilverLiningWeight  = 0.2 * std::clamp(S.Clouds.SilverLiningPower / 0.72f, 0.0f, 2.0f);   // 0.72 ≙ 0.2
-        R.CloudVolumes.push_back(Slab);
+        Receivers.insert(Token);
+        auto& Motion = Planetary_->Motions[Token];
+        auto Velocity = Follow ? EvaluateWorldFlow(R.ForceField, {Centre[0], Centre[1], Centre[2]}, S.Forces.IncludeTurbulence) :
+            std::array<double,3>{Independent,0,0};
+        for (size_t Axis = 0; Axis < 3; ++Axis)
+        {
+            if (!std::isfinite(Velocity[Axis])) Velocity[Axis] = 0;
+            if (Enabled) Motion.Offset[Axis] += Velocity[Axis] * Delta;
+        }
+        return ToSpatial(ProjectEnvironmentAxes(Motion.Offset));
+    };
+    auto CloudProfile = [&](const CloudConfiguration& Settings, uint64_t Token)
+    {
+        CloudVolumeProfile Cloud;
+        Cloud.Domain = Settings.LocalVolume ? CloudVolumeDomain::BoundedLocalBox : CloudVolumeDomain::PlanetarySlab;
+        Cloud.HeightProfile = static_cast<TroposphericCloudProfile>(Settings.LocalVolume ?
+            (Settings.LocalFormation == 0 ? 0 : Settings.LocalFormation == 2 ? 5 : 2) : std::min(5u, Settings.Formation));
+        Cloud.Slab.LowerHeightM = std::max(50.0f, Settings.BaseAltitudeMetres);
+        Cloud.Slab.TopHeightM = std::max(Cloud.Slab.LowerHeightM,
+            std::min<double>(Settings.CeilingMetres, Cloud.Slab.LowerHeightM + std::max(0.0f, Settings.LayerThicknessMetres)));
+        Cloud.Slab.Coverage = std::clamp(Settings.Coverage, 0.0f, 1.0f);
+        Cloud.Slab.DensityScale = std::max(0.0f, Settings.ExtinctionDensity / 0.85f);
+        Cloud.Slab.WindXMps = Cloud.Slab.WindYMps = 0;
+        Cloud.Slab.PhaseG = std::clamp(Settings.PhaseAnisotropy, -0.8f, 0.8f);
+        Cloud.SilverLiningWeight = .2 * std::clamp(Settings.SilverLiningPower / .72f, 0.0f, 2.0f);
+        Cloud.PowderStrength = std::clamp(Settings.PowderResponse, 0.0f, 1.0f);
+        Cloud.ScatteringAlbedo = 1 - std::clamp(Settings.LightAbsorption, 0.0f, 1.0f);
+        Cloud.WorleyErosionStrength = std::clamp(Settings.EdgeErosion, 0.0f, 1.0f);
+        Cloud.AnvilShaping = std::clamp(Settings.AnvilShaping, 0.0f, 1.0f);
+        Cloud.BoundsShape = static_cast<VolumeShape>(std::min(3u, Settings.BoundsShape));
+        Cloud.BoxCenterM = ToSpatial(ProjectEnvironmentAxes({Settings.CentreMetres[0],Settings.CentreMetres[1],Settings.CentreMetres[2]}));
+        Cloud.BoxHalfExtentsM = {std::max(1.0f,Settings.HalfExtentsMetres[0]),std::max(1.0f,Settings.HalfExtentsMetres[2]),std::max(1.0f,Settings.HalfExtentsMetres[1])};
+        Cloud.BoxEdgeFalloffM = std::max(.01f, Settings.EdgeSoftness) * std::min({Cloud.BoxHalfExtentsM.X,Cloud.BoxHalfExtentsM.Y,Cloud.BoxHalfExtentsM.Z});
+        Cloud.FeatureScaleMetres = Settings.LocalVolume ? std::clamp<double>(Settings.LocalFeatureMetres,2,200) : std::clamp<double>(Settings.FeatureScale,.2,3) / .00115;
+        Cloud.ViewSamples = std::clamp(Settings.LocalVolume ? (S.CloudToken ? S.Clouds.LocalSamples : Settings.LocalSamples) : Settings.SkySamples,8u,192u);
+        Cloud.ShadowSamples = std::min(12u,Settings.LocalVolume && S.CloudToken ? S.Clouds.LightSamples : Settings.LightSamples);
+        if (Settings.LocalVolume && S.CloudToken)
+        {
+            Cloud.ScatteringAlbedo = 1 - std::clamp(S.Clouds.LightAbsorption,0.0f,1.0f);
+            Cloud.PowderStrength = std::clamp(S.Clouds.PowderResponse,0.0f,1.0f);
+        }
+        float Centre[3] = {Settings.CentreMetres[0],Settings.CentreMetres[1],Settings.CentreMetres[2]};
+        if (!Settings.LocalVolume) { Centre[0] = 0; Centre[1] = 0; Centre[2] = static_cast<float>((Cloud.Slab.LowerHeightM + Cloud.Slab.TopHeightM) * .5); }
+        Cloud.WindDisplacementM = Advect(Token,Centre,Settings.Enabled,Settings.FollowWind && S.Wind.AdvectClouds,0);
+        Cloud.DisplacementReady = true;
+        return Cloud;
+    };
+    R.CloudVolumes.clear();
+    R.CloudWindSeconds = 0;
+    const auto GlobalCloud = CloudProfile(S.Clouds,S.CloudToken);
+    if (S.Clouds.Enabled) R.CloudVolumes.push_back(GlobalCloud);
+    for (const auto& Local : S.LocalClouds)
+    {
+        const auto Volume = CloudProfile(Local.Parameters,Local.Token);
+        if (Local.Parameters.Enabled) R.CloudVolumes.push_back(Volume);
     }
 
     // ⑥ analytic height fog, lit by the scene's own street and lamp-post luminaires
@@ -540,8 +601,31 @@ void EnvironmentOverlay::ResolveRealm(const IlluminationHost& Host, const SceneE
     R.HeightFog.FalloffHeightM   = 1.0 / std::max(1.0e-3f, S.Fog.HeightFalloff);
     R.HeightFogPhaseG            = std::clamp(S.Fog.PhaseAnisotropy, -0.9f, 0.9f);
     R.LocalFogVolumes.clear();
+    for (const auto& Local : S.LocalFogVolumes)
+    {
+        const auto& Settings = Local.Parameters;
+        LocalFogVolumeProfile Volume;
+        Volume.BoundsShape = static_cast<VolumeShape>(std::min(3u,Settings.BoundsShape));
+        Volume.BoxCenterM = ToSpatial(ProjectEnvironmentAxes({Settings.CentreMetres[0],Settings.CentreMetres[1],Settings.CentreMetres[2]}));
+        Volume.BoxHalfExtentsM = {std::max(.5f,Settings.HalfExtentsMetres[0]),std::max(.5f,Settings.HalfExtentsMetres[2]),std::max(.5f,Settings.HalfExtentsMetres[1])};
+        Volume.BoxEdgeFalloffM = std::max(.02f,Settings.EdgeSoftness) * std::min({Volume.BoxHalfExtentsM.X,Volume.BoxHalfExtentsM.Y,Volume.BoxHalfExtentsM.Z});
+        Volume.ExtinctionPerM = std::clamp(Settings.LocalDensity,0.0f,2.0f);
+        Volume.ScatteringAlbedo = 1 - std::clamp(Settings.Absorption,0.0f,1.0f);
+        Volume.ScatteringTint = {Settings.Albedo[0],Settings.Albedo[1],Settings.Albedo[2]};
+        Volume.PhaseAsymmetryG = std::clamp(Settings.PhaseAnisotropy,0.0f,.95f);
+        Volume.HeightFalloffM = Settings.DensityFalloff ? Volume.BoxHalfExtentsM.Y * 2 : 0;
+        Volume.VerticalAxis = 1;
+        Volume.NoiseScaleM = std::clamp(Settings.NoiseScaleMetres,.5f,30.0f);
+        Volume.NoiseModulation = std::clamp(Settings.Heterogeneity,0.0f,1.0f);
+        Volume.SelfShadow = Settings.SelfShadow;
+        Volume.WindDisplacementM = Advect(Local.Token,Settings.CentreMetres,Settings.Enabled,Settings.FollowWind,Settings.IndependentWindMps);
+        Volume.DisplacementReady = true;
+        if (Settings.Enabled) R.LocalFogVolumes.push_back(Volume);
+    }
+    for (auto At = Planetary_->Motions.begin(); At != Planetary_->Motions.end();)
+        if (!Receivers.contains(At->first)) At = Planetary_->Motions.erase(At); else ++At;
     R.Luminaires.clear();
-    if (S.Fog.Enabled && S.Fog.BaseDensity > 0.0f)
+    if ((S.Fog.Enabled && S.Fog.BaseDensity > 0.0f) || !R.LocalFogVolumes.empty())
     {
         for (const LuminaireProfile& Lamp : Host.Luminaires.Luminaires)
         {
@@ -577,6 +661,10 @@ void EnvironmentOverlay::ResolveRealm(const IlluminationHost& Host, const SceneE
     Medium = HashScalar(Medium, Air.RayleighScaleHeightKm);
     Medium = HashScalar(Medium, Air.MieScaleHeightKm);
     Medium = HashScalar(Medium, Air.GroundAlbedo);
+    Medium = HashScalar(Medium,S.Atmosphere.BakeRequested);
+    Medium = HashScalar(Medium,S.AtmosphereToken);
+    Medium = HashScalar(Medium,R.AtmosphereSamples);
+    Medium = HashScalar(Medium,R.MultipleScattering);
     uint64_t Sky = Medium;
     for (const RealmSolarSource& Sun : R.Suns)
     {
@@ -602,11 +690,97 @@ void EnvironmentOverlay::ResolveRealm(const IlluminationHost& Host, const SceneE
     View.FrameIndex       = RefreshIndex_;
     View.ViewportWidth    = Host.ScreenExtent[0];
     View.ViewportHeight   = Host.ScreenExtent[1];
+    View.CloudResolutionPercent = std::clamp(S.Clouds.ResolutionPercent,25u,100u);
+    if (!S.CloudToken)
+    {
+        View.CloudResolutionPercent = 25;
+        for (const auto& Local : S.LocalClouds) if (Local.Parameters.Enabled)
+            View.CloudResolutionPercent = std::max(View.CloudResolutionPercent,std::clamp(Local.Parameters.ResolutionPercent,25u,100u));
+    }
+    View.FogMarchSamples = R.LocalFogVolumes.empty() ? 36 : 8;
+    for (const auto& Local : S.LocalFogVolumes) if (Local.Parameters.Enabled)
+        View.FogMarchSamples = std::max(View.FogMarchSamples,std::clamp(Local.Parameters.LocalSamples,8u,192u));
 }
 
-bool EnvironmentOverlay::PrepareInterlude(IlluminationHost& Host, const SceneEnvironment& Environment, const CameraPose& Camera, double Latitude,
+void EnvironmentOverlay::PublishEnvironmentReadout(const SceneEnvironment& Settings)
+{
+    const auto& Realm = Planetary_->Ensemble.Realms[0];
+    auto Result = std::make_shared<EnvironmentRenderReadout>();
+    Result->Ready = true;
+    for (const auto& [Token, Motion] : Planetary_->Motions) Result->ReceiverMotion.push_back({Token,Motion.Offset});
+    Result->Refresh = RefreshIndex_;
+    Result->LocalClouds = static_cast<uint32_t>(std::count_if(Realm.CloudVolumes.begin(),Realm.CloudVolumes.end(),
+        [](const CloudVolumeProfile& Volume) { return Volume.Domain == CloudVolumeDomain::BoundedLocalBox; }));
+    Result->LocalFogVolumes = static_cast<uint32_t>(Realm.LocalFogVolumes.size());
+    Result->CloudTraceExtent = Planetary_->Sequence.Clouds().QueryTraceExtent();
+    Result->FogMarchSamples = Planetary_->View.FogMarchSamples;
+    const auto& Eye = Planetary_->View.PositionMeters;
+    Result->WindAtCamera = EvaluateWorldFlow(Realm.ForceField,{Eye[0],-Eye[2],Eye[1]},Settings.Forces.IncludeTurbulence);
+    if (Settings.Forces.Enabled && Settings.Wind.Enabled) Result->Contributions.emplace_back("Wind · ambient flow + gust + shear + curl");
+    constexpr const char* SourceNames[] = {"None","Vortex column","Traveling gust front","Radial microburst","Localized gust puff",
+        "Aerodynamic wake","Thermal updraft","Directional jet","Spherical impulse"};
+    if (Settings.Forces.Enabled)
+        for (const auto& Source : Realm.ForceField.ActiveSources())
+            Result->Contributions.emplace_back(SourceNames[std::min<uint32_t>(8,static_cast<uint32_t>(Source.Kind))]);
+    if (Settings.Forces.Visualize)
+    {
+        const uint32_t Edge = std::clamp(Settings.Forces.GridResolution,3u,8u);
+        for (uint32_t Z = 0; Z < Edge; ++Z)
+            for (uint32_t Y = 0; Y < Edge; ++Y)
+                for (uint32_t X = 0; X < Edge; ++X)
+                {
+                    const uint32_t Coordinate[] = {X,Y,Z};
+                    FieldVectorSample Sample;
+                    for (size_t Axis = 0; Axis < 3; ++Axis)
+                        Sample.Position[Axis] = Settings.Forces.CentreMetres[Axis] +
+                            (double(Coordinate[Axis]) / (Edge - 1) * 2 - 1) * Settings.Forces.HalfExtentsMetres[Axis];
+                    Sample.Velocity = EvaluateWorldFlow(Realm.ForceField,Sample.Position,Settings.Forces.IncludeTurbulence);
+                    Result->Vectors.push_back(Sample);
+                }
+    }
+    const bool NewRequest = Settings.Atmosphere.BakeRequested != LastBakeRequest_ || Settings.AtmosphereToken != LastBakeToken_;
+    const bool MediumChanged = Realm.AtmosphereRevision != LastBakeMedium_;
+    const bool SkyChanged = Realm.SkyViewRevision != LastBakeSky_ && Settings.ElapsedSeconds - LastBakeTime_ >= .5;
+    if (!BakeReadout_ || !BakeReadout_->Ready || NewRequest || MediumChanged || SkyChanged)
+    {
+        auto Bake = std::make_shared<AtmosphereBakeReadout>();
+        Bake->SourceRecord = Settings.AtmosphereToken;
+        Bake->RequestSerial = Settings.Atmosphere.BakeRequested;
+        Bake->Generation = BakeReadout_ ? BakeReadout_->Generation + 1 : 1;
+        Bake->Inputs = Settings.Atmosphere;
+        if (!Realm.Suns.empty()) Bake->SolarDirection = Realm.Suns[0].DirectionUnit;
+        auto& Projection = Planetary_->Sequence.AtmosphereLuts();
+        Bake->Ready = Projection.ReadbackTransmittanceLayer(Environment_,0,Bake->Transmittance) &&
+            Projection.ReadbackMultiScatteringLayer(Environment_,0,Bake->MultipleScattering) &&
+            Projection.ReadbackSkyViewLayer(Environment_,0,Bake->SkyView);
+        Bake->Ready = Bake->Ready && Bake->Transmittance.size() == 256u * 64u * 4u &&
+            Bake->MultipleScattering.size() == 32u * 32u * 4u && Bake->SkyView.size() == 192u * 108u * 4u;
+        for (const auto* Pixels : {&Bake->Transmittance,&Bake->MultipleScattering,&Bake->SkyView})
+            for (float Channel : *Pixels) if (!std::isfinite(Channel)) Bake->Ready = false;
+        if (Bake->Ready)
+        {
+            LastBakeRequest_ = Bake->RequestSerial;
+            LastBakeToken_ = Bake->SourceRecord;
+            LastBakeMedium_ = Realm.AtmosphereRevision;
+            LastBakeSky_ = Realm.SkyViewRevision;
+            LastBakeTime_ = Settings.ElapsedSeconds;
+            Bake->Diagnostic = "GPU bake/readback ready";
+        }
+        else Bake->Diagnostic = "GPU lookup readback failed; no baked snapshot acknowledged";
+        BakeReadout_ = std::move(Bake);
+    }
+    Result->AtmosphereBake = BakeReadout_;
+    Readout_ = std::move(Result);
+}
+
+bool EnvironmentOverlay::PrepareInterlude(IlluminationHost& Host, const SceneEnvironment& Authored, const CameraPose& Camera, double Latitude,
                                           double Longitude, bool LightScene, RefreshInterlude& OutInterlude, std::string* OutDiagnostic)
 {
+    SceneEnvironment Environment = Authored;
+    const bool Requested = Authored.Atmosphere.BakeRequested != LastBakeRequest_ || Authored.AtmosphereToken != LastBakeToken_;
+    if (Authored.Atmosphere.UseBaked && Authored.Atmosphere.BakedAvailable && !(Requested && Authored.Atmosphere.BakeRequested > 0))
+        static_cast<AtmosphereOpticalConfiguration&>(Environment.Atmosphere) = Authored.Atmosphere.Baked;
+
     if (!Constructed_ || !ReconstructTargets(Host, Host.ScreenExtent[0], Host.ScreenExtent[1]))
     {
         if (OutDiagnostic != nullptr) *OutDiagnostic = "environment targets unavailable";
@@ -652,7 +826,9 @@ bool EnvironmentOverlay::PrepareInterlude(IlluminationHost& Host, const SceneEnv
         if (!LightScene) ResolveRealm(Host, Environment, Camera, Latitude, Longitude);
         ConfigureFogShadow(Host, Environment);
         ++RefreshIndex_;
-        return Planetary_->Sequence.ExecuteOverVisibility(Environment_, Planetary_->Ensemble, Planetary_->View);
+        if (!Planetary_->Sequence.ExecuteOverVisibility(Environment_, Planetary_->Ensemble, Planetary_->View)) return false;
+        PublishEnvironmentReadout(Environment);
+        return true;
     };
     OutInterlude.AntialiasSource = RadianceView_;
     return true;

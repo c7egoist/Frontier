@@ -98,3 +98,12 @@ ExternalPackages/
 
 ContentDirectory resolves bundled content from the executable independently of the launch working directory.
 The font catalogue has a native TOML form; JSON remains only an automation/report interchange.
+
+
+## Local media and atmospheric field integration (2026-11-02)
+
+`Exhibits/LocalMedia/` retains native Vulkan wind/noise/shape/quality checks and real Everest baking/vector captures.
+`Frontier/Engine/PhysicalDynamics/AtmosphericFlow` maps scene Wind coefficients onto the existing force-field solver.
+`Frontier/Engine/PlanetaryAtmosphere/VolumeBounds.h` and its Slang counterpart own finite-volume envelopes.
+`Frontier/Engine/Scene/EnvironmentDiagnostics.h` carries owned LUT/field readouts without exposing device resources to UI.
+The user's functional-baking/local-media request expands the previous selective UI-only boundary for these integrations.

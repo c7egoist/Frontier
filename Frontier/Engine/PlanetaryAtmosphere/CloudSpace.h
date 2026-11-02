@@ -11,6 +11,7 @@
 
 #include "Engine/PlanetaryAtmosphere/AtmosphereScattering.h"
 #include "Engine/Rendering/ClusterNesting.h"
+#include "Engine/PlanetaryAtmosphere/VolumeBounds.h"
 
 #include <array>
 #include <cstddef>
@@ -87,6 +88,16 @@ struct CloudVolumeProfile
     double                   PowderStrength        = 0.85;
     double                   MultiScatterStrength  = 0.55;
     double                   SilverLiningWeight    = 0.2;     // [0..0.8] share of single scattering in the g 0.9 forward lobe
+    VolumeShape              BoundsShape          = VolumeShape::Box;
+    double                   FeatureScaleMetres   = 0.0;   // [m] 0 retains the existing procedural frequency
+    double                   AnvilShaping         = 0.5;
+    double                   ScatteringAlbedo      = 0.97;
+    uint32_t                 ViewSamples           = 32;
+    uint32_t                 ShadowSamples         = 4;
+    bool                     FollowField           = false;
+    bool                     DisplacementReady     = false;
+    SpatialVector            WindDisplacementM{};           // [m] integrated density-domain offset, never a bounds translation
+
 };
 
 struct CloudSolarBeam

@@ -222,32 +222,29 @@ double EvaluateLocalFogExtinction(const LocalFogVolumeProfile& Volume, SpatialVe
     {
         return 0.0;
     }
-    const double Dx = std::abs(PointMeters.X - Volume.BoxCenterM.X);
-    const double Dy = std::abs(PointMeters.Y - Volume.BoxCenterM.Y);
-    const double Dz = std::abs(PointMeters.Z - Volume.BoxCenterM.Z);
-    if (Dx > Volume.BoxHalfExtentsM.X || Dy > Volume.BoxHalfExtentsM.Y || Dz > Volume.BoxHalfExtentsM.Z)
-    {
-        return 0.0;
-    }
-    const double Soft       = std::max(Volume.BoxEdgeFalloffM, 0.25);
-    const double Fx         = FogSmooth((Volume.BoxHalfExtentsM.X - Dx) / Soft);
-    const double Fy         = FogSmooth((Volume.BoxHalfExtentsM.Y - Dy) / Soft);
-    const double Fz         = FogSmooth((Volume.BoxHalfExtentsM.Z - Dz) / Soft);
-    const double LowerZ     = Volume.BoxCenterM.Z - Volume.BoxHalfExtentsM.Z;
-    const double HeightTerm = std::exp(-std::max(PointMeters.Z - LowerZ, 0.0) / std::max(Volume.HeightFalloffM, 0.5));
+    const double Envelope = EvaluateVolumeEnvelope(PointMeters, Volume.BoxCenterM, Volume.BoxHalfExtentsM,
+        Volume.BoundsShape, Volume.BoxEdgeFalloffM, Volume.VerticalAxis);
+    if (Envelope <= 0) return 0;
+    const std::array<double, 3> Point = {PointMeters.X, PointMeters.Y, PointMeters.Z};
+    const std::array<double, 3> Centre = {Volume.BoxCenterM.X, Volume.BoxCenterM.Y, Volume.BoxCenterM.Z};
+    const std::array<double, 3> Half = {Volume.BoxHalfExtentsM.X, Volume.BoxHalfExtentsM.Y, Volume.BoxHalfExtentsM.Z};
+    const uint32_t Axis = std::min(Volume.VerticalAxis, 2u);
+    const double Lower = Centre[Axis] - (Volume.BoundsShape == VolumeShape::Hemisphere ? 0 : Half[Axis]);
+    const double HeightTerm = Volume.HeightFalloffM > 0 ?
+        std::exp(-std::max(Point[Axis] - Lower, 0.0) / std::max(Volume.HeightFalloffM, 0.5)) : 1;
 
     double NoiseFactor = 1.0;
     if (Volume.NoiseModulation > 0.0)
     {
         const double Scale = std::max(Volume.NoiseScaleM, 0.5);
         const SpatialVector Advected{
-            (PointMeters.X + Volume.WindVelocityMps.X * Volume.WindTimeS) / Scale,
-            (PointMeters.Y + Volume.WindVelocityMps.Y * Volume.WindTimeS) / Scale,
-            (PointMeters.Z + Volume.WindVelocityMps.Z * Volume.WindTimeS) / Scale};
+            (PointMeters.X - (Volume.DisplacementReady ? Volume.WindDisplacementM.X : Volume.WindVelocityMps.X * Volume.WindTimeS)) / Scale,
+            (PointMeters.Y - (Volume.DisplacementReady ? Volume.WindDisplacementM.Y : Volume.WindVelocityMps.Y * Volume.WindTimeS)) / Scale,
+            (PointMeters.Z - (Volume.DisplacementReady ? Volume.WindDisplacementM.Z : Volume.WindVelocityMps.Z * Volume.WindTimeS)) / Scale};
         const double Sample = FogFbm3D(Advected, Volume.Seed);
         NoiseFactor         = std::max(0.0, (1.0 - Volume.NoiseModulation) + 1.85 * Volume.NoiseModulation * Sample);
     }
-    return Volume.ExtinctionPerM * Fx * Fy * Fz * HeightTerm * NoiseFactor;
+    return Volume.ExtinctionPerM * Envelope * HeightTerm * NoiseFactor;
 }
 
 FogRadianceIntegral EvaluateUnifiedVolumetricFog(
@@ -591,7 +588,7 @@ bool FogSpace::Execute(VulkanComputeExchange&      Exchange,
                        uint32_t                    ViewportHeight,
                        const FogSceneShadow*       SceneShadow)
 {
-    const PushHeader Push{{ViewportWidth, ViewportHeight, 0u, 0u}, {0.0f, 0.0f, 0.0f, 0.0f}};
+    const PushHeader Push{{ViewportWidth, ViewportHeight, 0u, 0u}, {static_cast<float>(MarchSamples_), 0.0f, 0.0f, 0.0f}};
     // 📝 Without scene cascades the shader sees control x = 0 and never samples the stand-in depth (the cloud shadow map).
     const bool Shadowed = SceneShadow != nullptr && SceneShadow->Frame != nullptr && SceneShadow->Depth != nullptr &&
                           SceneShadow->Frame->Handle != VK_NULL_HANDLE && SceneShadow->Depth->ArrayView != VK_NULL_HANDLE;

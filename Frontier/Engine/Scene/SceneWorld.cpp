@@ -84,6 +84,38 @@ void ReadFloat3(const toml::table& InTable, std::string_view Key, float OutValue
     }
 }
 
+void WriteAtmosphereOptics(toml::table& Table, const AtmosphereOpticalConfiguration& Optical)
+{
+    Table.insert_or_assign("rayleigh",double(Optical.RayleighScattering));
+    Table.insert_or_assign("mie_turbidity",double(Optical.MieTurbidity));
+    Table.insert_or_assign("mie_g",double(Optical.MieAnisotropyG));
+    Table.insert_or_assign("ozone",double(Optical.OzoneAbsorptionScale));
+    Table.insert_or_assign("planet_radius_km",double(Optical.PlanetRadiusKm));
+    Table.insert_or_assign("atmosphere_thickness_km",double(Optical.AtmosphereThicknessKm));
+    Table.insert_or_assign("rayleigh_height_m",double(Optical.RayleighHeightMetres));
+    Table.insert_or_assign("mie_height_m",double(Optical.MieHeightMetres));
+    WriteFloat3(Table,"ground_albedo",Optical.GroundAlbedo);
+    Table.insert_or_assign("horizon_glow",double(Optical.HorizonGlow));
+    Table.insert_or_assign("multiple_scattering",Optical.MultiScatteringLut);
+    Table.insert_or_assign("tier_samples",int64_t(Optical.TierSamples));
+}
+
+void ReadAtmosphereOptics(const toml::table& Table, AtmosphereOpticalConfiguration& Optical)
+{
+    Optical.RayleighScattering = ReadFloat(Table,"rayleigh",Optical.RayleighScattering);
+    Optical.MieTurbidity = ReadFloat(Table,"mie_turbidity",Optical.MieTurbidity);
+    Optical.MieAnisotropyG = ReadFloat(Table,"mie_g",Optical.MieAnisotropyG);
+    Optical.OzoneAbsorptionScale = ReadFloat(Table,"ozone",Optical.OzoneAbsorptionScale);
+    Optical.PlanetRadiusKm = ReadFloat(Table,"planet_radius_km",Optical.PlanetRadiusKm);
+    Optical.AtmosphereThicknessKm = ReadFloat(Table,"atmosphere_thickness_km",Optical.AtmosphereThicknessKm);
+    Optical.RayleighHeightMetres = ReadFloat(Table,"rayleigh_height_m",Optical.RayleighHeightMetres);
+    Optical.MieHeightMetres = ReadFloat(Table,"mie_height_m",Optical.MieHeightMetres);
+    ReadFloat3(Table,"ground_albedo",Optical.GroundAlbedo);
+    Optical.HorizonGlow = ReadFloat(Table,"horizon_glow",Optical.HorizonGlow);
+    Optical.MultiScatteringLut = ReadBool(Table,"multiple_scattering",Optical.MultiScatteringLut);
+    Optical.TierSamples = ReadUint32(Table,"tier_samples",Optical.TierSamples);
+}
+
 void SerializeSpatialSubtable(toml::table& OutTable, const SpatialConfiguration& Spatial)
 {
     WriteFloat3(OutTable, "position_m", Spatial.PositionMetres);
@@ -489,6 +521,16 @@ void OpticalFlareRecord::DeserializeConfiguration(const toml::table& InTable)
 template <>
 void AtmosphereRecord::SerializeConfiguration(toml::table& OutTable) const
 {
+    WriteAtmosphereOptics(OutTable,Parameters);
+    OutTable.insert_or_assign("aerial_perspective",Parameters.AerialPerspective);
+    OutTable.insert_or_assign("use_baked",Parameters.UseBaked);
+    if (Parameters.BakedAvailable)
+    {
+        toml::table Baked;
+        WriteAtmosphereOptics(Baked,Parameters.Baked);
+        OutTable.insert_or_assign("baked",std::move(Baked));
+    }
+
     OutTable.insert_or_assign("enabled", Parameters.Enabled);
     OutTable.insert_or_assign("rayleigh", static_cast<double>(Parameters.RayleighScattering));
     OutTable.insert_or_assign("mie_turbidity", static_cast<double>(Parameters.MieTurbidity));
@@ -510,6 +552,15 @@ void AtmosphereRecord::SerializeConfiguration(toml::table& OutTable) const
 template <>
 void AtmosphereRecord::DeserializeConfiguration(const toml::table& InTable)
 {
+    ReadAtmosphereOptics(InTable,Parameters);
+    Parameters.AerialPerspective = ReadBool(InTable,"aerial_perspective",Parameters.AerialPerspective);
+    Parameters.UseBaked = ReadBool(InTable,"use_baked",Parameters.UseBaked);
+    if (const auto* Baked = InTable["baked"].as_table())
+    {
+        ReadAtmosphereOptics(*Baked,Parameters.Baked);
+        Parameters.BakedAvailable = true;
+    }
+
     Parameters.Enabled              = ReadBool(InTable, "enabled", Parameters.Enabled);
     Parameters.RayleighScattering   = ReadFloat(InTable, "rayleigh", Parameters.RayleighScattering);
     Parameters.MieTurbidity         = ReadFloat(InTable, "mie_turbidity", Parameters.MieTurbidity);
@@ -853,6 +904,32 @@ void LightningRecord::DeserializeConfiguration(const toml::table& InTable)
 }
 
 template <>
+void ForceFieldRecord::SerializeConfiguration(toml::table& Table) const
+{
+    Table.insert_or_assign("enabled",Parameters.Enabled);
+    Table.insert_or_assign("visualize",Parameters.Visualize);
+    Table.insert_or_assign("include_turbulence",Parameters.IncludeTurbulence);
+    Table.insert_or_assign("grid_resolution",int64_t(Parameters.GridResolution));
+    Table.insert_or_assign("arrow_seconds",double(Parameters.ArrowSeconds));
+    WriteFloat3(Table,"centre_metres",Parameters.CentreMetres);
+    WriteFloat3(Table,"half_extents_metres",Parameters.HalfExtentsMetres);
+}
+
+template <>
+void ForceFieldRecord::DeserializeConfiguration(const toml::table& Table)
+{
+    Parameters.Enabled = ReadBool(Table,"enabled",Parameters.Enabled);
+    Parameters.Visualize = ReadBool(Table,"visualize",Parameters.Visualize);
+    Parameters.IncludeTurbulence = ReadBool(Table,"include_turbulence",Parameters.IncludeTurbulence);
+    Parameters.GridResolution = std::clamp(ReadUint32(Table,"grid_resolution",Parameters.GridResolution),3u,8u);
+    Parameters.ArrowSeconds = std::clamp(ReadFloat(Table,"arrow_seconds",Parameters.ArrowSeconds),.05f,2.0f);
+    ReadFloat3(Table,"centre_metres",Parameters.CentreMetres);
+    ReadFloat3(Table,"half_extents_metres",Parameters.HalfExtentsMetres);
+    for (float& Half : Parameters.HalfExtentsMetres) Half = std::clamp(Half,1.0f,1000.0f);
+    Parameters.AdvanceRevision();
+}
+
+template <>
 void WindRecord::SerializeConfiguration(toml::table& OutTable) const
 {
     OutTable.insert_or_assign("enabled", Parameters.Enabled);
@@ -864,6 +941,8 @@ void WindRecord::SerializeConfiguration(toml::table& OutTable) const
     OutTable.insert_or_assign("advect_clouds", Parameters.AdvectClouds);
     OutTable.insert_or_assign("advect_plumes", Parameters.AdvectPlumes);
     OutTable.insert_or_assign("advect_particles", Parameters.AdvectParticles);
+    OutTable.insert_or_assign("gust_frequency_hz",double(Parameters.GustFrequencyHz));
+    OutTable.insert_or_assign("turbulence_scale_metres",double(Parameters.TurbulenceScaleMetres));
     OutTable.insert_or_assign("gust_strength", static_cast<double>(Parameters.GustStrength));
     OutTable.insert_or_assign("shear_per_kilometre", static_cast<double>(Parameters.ShearPerKilometre));
     OutTable.insert_or_assign("veer_degrees_per_kilometre", static_cast<double>(Parameters.VeerDegreesPerKilometre));
@@ -881,6 +960,8 @@ void WindRecord::DeserializeConfiguration(const toml::table& InTable)
     Parameters.AdvectClouds = ReadBool(InTable, "advect_clouds", Parameters.AdvectClouds);
     Parameters.AdvectPlumes = ReadBool(InTable, "advect_plumes", Parameters.AdvectPlumes);
     Parameters.AdvectParticles = ReadBool(InTable, "advect_particles", Parameters.AdvectParticles);
+    Parameters.GustFrequencyHz = ReadFloat(InTable,"gust_frequency_hz",Parameters.GustFrequencyHz);
+    Parameters.TurbulenceScaleMetres = ReadFloat(InTable,"turbulence_scale_metres",Parameters.TurbulenceScaleMetres);
     Parameters.GustStrength = ReadFloat(InTable, "gust_strength", Parameters.GustStrength);
     Parameters.ShearPerKilometre = ReadFloat(InTable, "shear_per_kilometre", Parameters.ShearPerKilometre);
     Parameters.VeerDegreesPerKilometre = ReadFloat(InTable, "veer_degrees_per_kilometre", Parameters.VeerDegreesPerKilometre);
@@ -1172,6 +1253,20 @@ void SceneWorld::RegisterNativeEngineTypes()
     RegisterSimple.operator()<AtmosphereRecord>("Atmosphere", "Environment · Atmosphere", RecordClassification::Environment, "NativeAtmosphere", "Environment",
                                                 "#99aafa");
     RegisterSimple.operator()<CloudRecord>("Clouds", "Environment · Clouds", RecordClassification::Environment, "NativeClouds", "Environment", "#99aafa");
+    RegisterType({"LocalCloud", "Environment · Local Cloud", RecordClassification::Environment,
+        [](std::string Name) -> std::unique_ptr<SceneRecordBase>
+        {
+            auto Entry = std::make_unique<CloudRecord>(RecordClassification::Environment,"Clouds",std::move(Name),"NativeLocalCloud","Environment","#99aafa");
+            Entry->AccessConfiguration().LocalVolume = true;
+            return Entry;
+        }});
+    RegisterType({"LocalFog", "Environment · Local Fog", RecordClassification::Environment,
+        [](std::string Name) -> std::unique_ptr<SceneRecordBase>
+        {
+            auto Entry = std::make_unique<FogRecord>(RecordClassification::Environment,"Fog",std::move(Name),"NativeLocalFog","Environment","#99aafa");
+            Entry->AccessConfiguration().LocalVolume = true;
+            return Entry;
+        }});
     RegisterSimple.operator()<StarRecord>("Stars", "Environment · Stars", RecordClassification::Environment, "NativeStars", "Environment", "#99aafa");
     RegisterSimple.operator()<MoonRecord>("Moons", "Environment · Moons", RecordClassification::Environment, "NativeMoon", "Environment", "#99aafa");
     RegisterSimple.operator()<PlanetRecord>("Planet", "Environment · Planet", RecordClassification::Environment, "Orbit", "Environment", "#99aafa");
@@ -1186,6 +1281,8 @@ void SceneWorld::RegisterNativeEngineTypes()
         }});
     RegisterSimple.operator()<LightningRecord>("Lightning", "Environment · Lightning", RecordClassification::Illumination, "Sparkles", "Environment",
                                                "#a6c7ff");
+    RegisterSimple.operator()<ForceFieldRecord>("ForceField", "Forcefield · Atmospheric Field", RecordClassification::Environment,
+        "Wind", "Forcefield", "#a7f3d0");
     RegisterSimple.operator()<WindRecord>("Wind", "Environment · Wind Field", RecordClassification::Environment, "Wind", "Forcefield", "#a7f3d0");
 
     // Render Engine & Continuum Solver Types

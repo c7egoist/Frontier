@@ -70,6 +70,8 @@ void AtmosphereProjection::Shutdown(VulkanComputeExchange& Exchange) noexcept
     Exchange.ReleaseProgram(TransmittanceProgram_);
     BakedAtmosphereRevisions_.clear();
     BakedSkyViewRevisions_.clear();
+    BakedSampling_.clear();
+    BakedMultiple_.clear();
 }
 
 bool AtmosphereProjection::Execute(VulkanComputeExchange&                   Exchange,
@@ -87,6 +89,8 @@ bool AtmosphereProjection::Execute(VulkanComputeExchange&                   Exch
         }
         BakedAtmosphereRevisions_.assign(RealmCount, 0u);
         BakedSkyViewRevisions_.assign(RealmCount, 0u);
+        BakedSampling_.assign(RealmCount,0);
+        BakedMultiple_.assign(RealmCount,false);
     }
 
     LastAtmosphereBakedCount_ = 0u;
@@ -95,13 +99,14 @@ bool AtmosphereProjection::Execute(VulkanComputeExchange&                   Exch
     for (size_t RealmIdx = 0u; RealmIdx < RealmRevisions.size(); ++RealmIdx)
     {
         const AtmosphereRealmRevision& Revision  = RealmRevisions[RealmIdx];
-        const bool                     AtmoDirty = (BakedAtmosphereRevisions_[RealmIdx] != Revision.AtmosphereRevision);
+        const bool AtmoDirty = BakedAtmosphereRevisions_[RealmIdx] != Revision.AtmosphereRevision ||
+            BakedSampling_[RealmIdx] != Revision.IntegrationSamples || BakedMultiple_[RealmIdx] != Revision.MultipleScattering;
         const bool                     SkyDirty  = AtmoDirty || (BakedSkyViewRevisions_[RealmIdx] != Revision.SkyViewRevision);
 
         if (AtmoDirty)
         {
             PushHeader Push{{kTransmittanceLutWidth, kTransmittanceLutHeight, static_cast<uint32_t>(RealmIdx), 0u},
-                            {0.0f, 0.0f, 0.0f, 0.0f}};
+                            {static_cast<float>(std::clamp(Revision.IntegrationSamples,8u,64u)), Revision.MultipleScattering ? 1.0f : 0.0f, 0.0f, 0.0f}};
             const std::array<ComputeDescriptorArgument, 4> TransArgs{{
                 {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, &EnsembleSpan, nullptr},
                 {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, nullptr, &MultiScatteringArray_},
@@ -139,13 +144,15 @@ bool AtmosphereProjection::Execute(VulkanComputeExchange&                   Exch
             }
 
             BakedAtmosphereRevisions_[RealmIdx] = Revision.AtmosphereRevision;
+            BakedSampling_[RealmIdx] = Revision.IntegrationSamples;
+            BakedMultiple_[RealmIdx] = Revision.MultipleScattering;
             ++LastAtmosphereBakedCount_;
         }
 
         if (SkyDirty)
         {
             PushHeader Push{{kSkyViewLutWidth, kSkyViewLutHeight, static_cast<uint32_t>(RealmIdx), 0u},
-                            {0.0f, 0.0f, 0.0f, 0.0f}};
+                            {static_cast<float>(std::clamp(Revision.IntegrationSamples,8u,64u)), Revision.MultipleScattering ? 1.0f : 0.0f, 0.0f, 0.0f}};
             const std::array<ComputeDescriptorArgument, 4> SkyArgs{{
                 {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, &EnsembleSpan, nullptr},
                 {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, nullptr, &TransmittanceArray_},

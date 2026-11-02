@@ -111,6 +111,23 @@ Frontier::GlobalIllumination::SceneEnvironment ResolveSceneEnvironment(const Fro
     ReadConfiguration<Frontier::MoonRecord>(World, "Moons", Environment.Moons);
     ReadGlobalConfiguration<Frontier::FogRecord>(World, "Fog", Environment.Fog);
     ReadConfiguration<Frontier::WindRecord>(World, "Wind", Environment.Wind);
+    if (const auto Entries = World.FindAllByType("ForceField"); !Entries.empty())
+        if (const auto* Entry = dynamic_cast<const Frontier::ForceFieldRecord*>(Entries.front())) Environment.Forces = Entry->QueryConfiguration();
+    if (const auto Entries = World.FindAllByType("Atmosphere"); !Entries.empty()) Environment.AtmosphereToken = Entries.front()->QueryToken().Value;
+    for (const auto* Entry : World.FindAllByType("Clouds"))
+    {
+        const auto* Cloud = dynamic_cast<const Frontier::CloudRecord*>(Entry);
+        if (!Cloud) continue;
+        if (Cloud->QueryConfiguration().LocalVolume)
+            Environment.LocalClouds.push_back({Entry->QueryToken().Value, Cloud->QueryConfiguration()});
+        else if (!Environment.CloudToken) Environment.CloudToken = Entry->QueryToken().Value;
+    }
+    for (const auto* Entry : World.FindAllByType("Fog"))
+    {
+        const auto* Fog = dynamic_cast<const Frontier::FogRecord*>(Entry);
+        if (Fog && Fog->QueryConfiguration().LocalVolume)
+            Environment.LocalFogVolumes.push_back({Entry->QueryToken().Value, Fog->QueryConfiguration()});
+    }
     // 📝 Each planet entry drives the body it names; a level without planet entries keeps the four default planets.
     const std::vector<const Frontier::SceneRecordBase*> Planets = World.FindAllByType("Planet");
     if (!Planets.empty())
@@ -232,6 +249,7 @@ SceneViewportRefresh EverestSceneViewport::Render(const SceneViewportRequest& Re
     }
     const double Milliseconds = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - Start).count();
     RefreshMilliseconds_      = RefreshMilliseconds_ <= 0.0 ? Milliseconds : RefreshMilliseconds_ * 0.9 + Milliseconds * 0.1;
+    if (auto* Overlay = Viewport_->AccessOverlay()) Outcome.Readout.Environment = Overlay->QueryReadout();
     Outcome.View   = Viewport_->QueryPresentedView();
     Outcome.Extent = Viewport_->QueryScreenExtent();
     char Status[160];

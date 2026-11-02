@@ -142,6 +142,7 @@ add_library(FrontierSceneEditorUI STATIC
     Frontier/Engine/Interface/Controls/RasterPlate.cpp
         Frontier/Engine/Interface/Controls/ActionRow.cpp
         Frontier/Engine/Interface/Controls/AxisFields.cpp
+    Frontier/Engine/Interface/Controls/WorldVectorOverlay.cpp
     Frontier/Engine/Interface/Controls/SectionHeading.cpp
     Frontier/Engine/Interface/Controls/DisclosureRow.cpp
     Frontier/Engine/Interface/Controls/SwitchRow.cpp
@@ -174,6 +175,7 @@ add_library(FrontierSceneEditorUI STATIC
     Frontier/Engine/Interface/Inspectors/OpticalReference.cpp
     Frontier/Engine/Interface/Inspectors/OpticalFlareInspector.cpp
     Frontier/Engine/Interface/Inspectors/AtmosphereInspector.cpp
+    Frontier/Engine/Interface/Inspectors/AtmosphereBakeImages.cpp
     Frontier/Engine/Interface/Inspectors/CloudDensityReference.cpp
     Frontier/Engine/Interface/Inspectors/CloudInspector.cpp
     Frontier/Engine/Interface/Inspectors/StarCatalogueReference.cpp
@@ -184,6 +186,7 @@ add_library(FrontierSceneEditorUI STATIC
     Frontier/Engine/Interface/Inspectors/FogInspector.cpp
     Frontier/Engine/Interface/Inspectors/LightningInspector.cpp
     Frontier/Engine/Interface/Inspectors/WindInspector.cpp
+    Frontier/Engine/Interface/Inspectors/ForceFieldInspector.cpp
     Frontier/Engine/Interface/Inspectors/FluidPlumeInspector.cpp
     Frontier/Engine/Interface/Inspectors/FractureInspector.cpp
     Frontier/Engine/Interface/Inspectors/ParticleInspector.cpp
@@ -194,7 +197,7 @@ target_include_directories(FrontierSceneEditorUI PUBLIC
     "${CMAKE_SOURCE_DIR}/Frontier")
 target_compile_definitions(FrontierSceneEditorUI PUBLIC FRONTIER_WITH_INTERFACE_SDK=1 FRONTIER_EDITOR_PROFILE=1 FRONTIER_EDITOR=1)
 target_include_directories(FrontierSceneEditorUI PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
-target_link_libraries(FrontierSceneEditorUI PUBLIC FrontierEditorUI Threads::Threads PRIVATE FrontierSurfaceRasterization)
+target_link_libraries(FrontierSceneEditorUI PUBLIC FrontierEditorUI Threads::Threads PRIVATE FrontierSurfaceRasterization FrontierEnvironmentRendering)
 
 include(Automation/StageProjectContent.cmake)
 
@@ -621,6 +624,16 @@ if(BUILD_TESTING)
     target_link_libraries(InterfaceValidation PRIVATE FrontierEditorUI)
     add_test(NAME InterfaceValidation COMMAND InterfaceValidation
         "${CMAKE_SOURCE_DIR}/EngineContent/Icons" "${CMAKE_BINARY_DIR}/evidence")
+
+    add_executable(SceneMediaValidation
+        Exhibits/LocalMedia/Code/SceneMediaValidation.cpp
+        Engine/Render/StbImageWriteImplementation.cpp)
+    target_include_directories(SceneMediaValidation PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
+    target_link_libraries(SceneMediaValidation PRIVATE EverestProjectEditor)
+    add_test(NAME SceneMediaValidation COMMAND SceneMediaValidation
+        "${CMAKE_SOURCE_DIR}/EngineContent" "${CMAKE_SOURCE_DIR}/Projects/Everest"
+        "${CMAKE_BINARY_DIR}/ShaderArchives" "${CMAKE_BINARY_DIR}/scene-media-exhibits")
+    set_tests_properties(SceneMediaValidation PROPERTIES RUN_SERIAL TRUE WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
     add_executable(EnvironmentInspectorValidation
         Exhibits/EnvironmentInspectors/Code/EnvironmentInspectorValidation.cpp

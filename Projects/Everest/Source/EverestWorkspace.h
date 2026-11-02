@@ -19,6 +19,8 @@ struct ImVec2;
 #include "UI/Editor/ControlCentrePanel.h"
 #endif
 
+#include "Engine/Scene/EnvironmentDiagnostics.h"
+
 #include <array>
 #include <cstdint>
 #include <filesystem>
@@ -46,6 +48,7 @@ struct SceneViewportRequest
 // 📝 What the host's renderer reports for the viewport bar, readout and status strip (the demo's PresentMeasurements).
 struct SceneViewportReadout
 {
+    std::shared_ptr<const Frontier::EnvironmentRenderReadout> Environment;
     bool                    Presenting          = false;     // [-] an image is live
     std::string             Adapter{};                       // [-] GPU name
     std::string             Quality{};                       // [-] low / medium / high

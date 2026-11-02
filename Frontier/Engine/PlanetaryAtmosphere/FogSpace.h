@@ -76,6 +76,13 @@ struct LocalFogVolumeProfile
     SpatialVector WindVelocityMps  = {2.0, 0.8, 0.2};
     double        WindTimeS        = 0.0;
     uint64_t      Seed             = 77;
+    VolumeShape   BoundsShape = VolumeShape::Box;
+    uint32_t      VerticalAxis = 2; // [axis] CPU profile convention; native GPU volumes are converted to Y up
+    bool          SelfShadow = false;
+    bool          FollowField = false;
+    bool          DisplacementReady = false;
+    SpatialVector WindDisplacementM{};
+
 };
 
 struct PhotometricFogLuminaire
@@ -198,7 +205,11 @@ class FogSpace
                  uint32_t                    ViewportHeight,
                  const FogSceneShadow*       SceneShadow = nullptr);
 
+    void ConfigureSamples(uint32_t Samples) noexcept { MarchSamples_ = std::clamp(Samples, 8u, 192u); }
+    [[nodiscard]] uint32_t QuerySamples() const noexcept { return MarchSamples_; }
+
   private:
+    uint32_t MarchSamples_ = 36;
     ComputeProgramSlot Program_{};
     DeviceMemorySpan   AbsentSceneShadow_{};   // [-] control x = 0: no scene cascades
 };
