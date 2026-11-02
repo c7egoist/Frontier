@@ -18,9 +18,9 @@ install is required. `npm start` runs the same server.
 
 | Mode | Field | What is visualised |
 |---|---|---|
-| Wind | Directional boundary flow + curl-noise turbulence + terrain lift | 3D streaklines above the heightfield, terrain deflection, vertical speed profile |
-| Force | Attractors, repulsors, and vortices with local-support falloff | GPU particle streaks, vector glyphs, streamlines, equipotential slice |
-| Terrain | Downhill heightfield gradient + flow accumulation | Surface flow streaks, channel rain, vegetation blades, water plane |
+| Wind | Directional flow + curl turbulence + terrain lift | 3D streaklines, terrain deflection, speed profile |
+| Force | Attractors, repulsors, vortices, local falloff | GPU streaks, glyphs, streamlines, potential slice |
+| Terrain | Downhill gradient + flow accumulation | Surface flow, rain, vegetation, water plane |
 
 All three modes share the same particle state, slice, and glyph infrastructure. The active field
 function is selected by a single `uMode` uniform, so switching modes does not rebuild the GPU
