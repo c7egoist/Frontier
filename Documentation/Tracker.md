@@ -1011,3 +1011,28 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
 - **Download:** `Binaries/FrontierSceneViewport-Windows-x64.zip` from `e7c55447` (Zig 0.13.0, no uncommitted changes,
   Surface 18 / GlobalIllumination 33 / Environment 15), 22.3 MiB, SHA-256
   `e8081a26463e68f57d7e75c71134324e5422723c363cc471e4e0f94c6fe2d57f`.
+
+
+## Remaining VehicleHMI environment controls (2026-11-02, arena/8b705b7d-frontier)
+
+- **Source:** continued from `streamlinkinbox/Frontier` branch `arena/88b72faa-frontier`, tip `a1771e9b`.
+  Demo source pinned to `SultanAladin/Frontier` revision `6afb6f00b5f25c45f7cda92c7da65b64845768f3`.
+- **Implemented in C++:** Clouds/global-local, Wind, Height Fog, a separately selectable Atmospheric Fog record,
+  local fog, Lightning, Stars, four Moon authoring slots, and Lens Flare. Preserved the Sun/Atmosphere pages.
+  Added native controls, catalogue/surface/optical/density references, configuration persistence, and HDR PFM export.
+  The default Everest level has 29 records. Renderer-only features remain disabled or explicitly reference-only;
+  no new scene-renderer implementation is included.
+- **Verified:** Linux Debug build; `EnvironmentInspectorValidation` **319 assertions, zero failures**;
+  `EverestInterfaceValidation` and `EverestShippingValidation`; 114 numerical cases from actual pinned JS;
+  37 native inspector PNGs, 32 production-workspace environment captures, and 28 original-demo browser captures.
+  Tests include TOML/disk round trips, malformed content, input/revisions, context retirement and async destruction.
+- **Windows package:** Release x64 cross-build with Zig 0.13.0 succeeds. ZIP integrity and all 901 manifest hashes
+  verified, including the exact executable, aerial record and SLAT catalogue. Stored shaders remain 18/33/15.
+  `Binaries/FrontierSceneViewport-Windows-x64.zip`, 23,781,967 bytes; SHA-256
+  `a89cd05cdac3d28e55ed5e4b9783a24b71bb663a94511e3b7d633cd8e57e75df`.
+  Built from the imported tip plus working-tree edits; `Package.json` states that explicitly.
+- **Still pending:** exhaustive 1:1 visual acceptance across tabs and widths; Windows interaction and hardware GPU
+  validation. Captures are genuine C++ draw output, not a pixel-parity certificate. Package is unsigned and not
+  antivirus-scanned. Renderer extensions and Jolt were not undertaken.
+- **Evidence/reproduction:** [EnvironmentInspectors](../Exhibits/EnvironmentInspectors/README.md), including native
+  images, source/native comparisons, source/image manifests, and the retained verification report.

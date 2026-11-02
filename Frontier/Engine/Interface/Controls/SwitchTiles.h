@@ -31,13 +31,15 @@ struct SwitchTile
     bool        Pending        = false;
     bool        PendingReading = false;   // the demo's default reading while pending
     const char* Tooltip        = nullptr;
+    const char* Symbol         = nullptr;
 };
 
 class SwitchTiles
 {
   public:
     // 📝 Columns: 3 (or 2 for .ne-sun-quick below its breakpoint); true when a switch flipped.
-    static bool Construct(ControlColumn& Column, const char* Id, const SwitchTile* Tiles, int Count, int Columns);
+    static bool Construct(ControlColumn& Column, const char* Id, const SwitchTile* Tiles, int Count, int Columns,
+                          float MarginTop = 12.0f, float MarginBottom = 16.0f, bool Compact = false);
 };
 
 } // namespace Frontier

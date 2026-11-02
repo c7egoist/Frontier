@@ -9,8 +9,14 @@
 #include "Engine/Interface/InspectorRuntime.h"
 #include "Engine/Scene/EngineConfigurations.h"
 
+#if FRONTIER_EDITOR && defined(FRONTIER_WITH_INTERFACE_SDK)
+#include "Engine/Interface/Controls/RasterPlate.h"
+#endif
+
 namespace Frontier
 {
+
+class ControlColumn;
 
 #if FRONTIER_EDITOR
 
@@ -21,23 +27,68 @@ namespace Frontier
 class CloudInspector final : public RecordInspector
 {
   public:
-    explicit CloudInspector(CloudConfiguration& InParameters) noexcept : Parameters(InParameters) {}
+    explicit CloudInspector(CloudConfiguration &InParameters) noexcept : Parameters(InParameters) {}
 
-    [[nodiscard]] const char* QueryEyebrowText() const noexcept override
+    [[nodiscard]] const char *QueryEyebrowText() const noexcept override
     {
         return Parameters.LocalVolume ? "ENVIRONMENT · LOCAL CLOUD" : "ENVIRONMENT · CLOUDS";
     }
-    [[nodiscard]] const char* QuerySectionNote() const noexcept override { return "3D Perlin-Worley raymarch"; }
-    [[nodiscard]] bool        QueryToggleSupported() const noexcept override { return true; }
-    [[nodiscard]] bool        QueryToggleEnabled() const noexcept override { return Parameters.Enabled; }
-    void                      ConfigureToggle(bool Enabled) override { Parameters.Enabled = Enabled; Parameters.AdvanceRevision(); }
-    [[nodiscard]] uint64_t    QueryRevision() const noexcept override { return Parameters.Revision; }
-    void                      EnumerateSwitches(std::vector<InspectorSwitchEntry>& OutSwitches) override;
+    [[nodiscard]] const char *QuerySectionNote() const noexcept override
+    {
+        return "3D Perlin-Worley raymarch";
+    }
+    [[nodiscard]] bool QueryToggleSupported() const noexcept override
+    {
+        return true;
+    }
+    [[nodiscard]] bool QueryToggleEnabled() const noexcept override
+    {
+        return Parameters.Enabled;
+    }
+    void ConfigureToggle(bool Enabled) override
+    {
+        Parameters.Enabled = Enabled;
+        Parameters.AdvanceRevision();
+    }
+    [[nodiscard]] uint64_t QueryRevision() const noexcept override
+    {
+        return Parameters.Revision;
+    }
+    [[nodiscard]] bool QueryOccupiesColumn() const noexcept override
+    {
+        return true;
+    }
+    [[nodiscard]] int QuerySectionCount() const noexcept override
+    {
+        return Parameters.LocalVolume ? 0 : 4;
+    }
+    void ConfigureSection(int Section) noexcept override
+    {
+        ActivePane = std::clamp(Section, 0, 3);
+    }
+    void                      EnumerateSwitches(std::vector<InspectorSwitchEntry> &OutSwitches) override;
     void                      ConstructInspector() override;
-    [[nodiscard]] const char* QueryDirectoryGlyph() const noexcept override { return Parameters.LocalVolume ? "NativeLocalCloud" : "NativeClouds"; }
+    [[nodiscard]] const char *QueryDirectoryGlyph() const noexcept override
+    {
+        return Parameters.LocalVolume ? "NativeLocalCloud" : "NativeClouds";
+    }
 
   private:
-    CloudConfiguration& Parameters;
+    bool ConstructOverview(ControlColumn &Page);
+    bool ConstructFormation(ControlColumn &Page);
+    bool ConstructRendering(ControlColumn &Page);
+    bool ConstructWeather(ControlColumn &Page);
+    bool ConstructLocal(ControlColumn &Page);
+    void RefreshDensity(double Aspect);
+
+    CloudConfiguration &Parameters;
+    int                 ActivePane    = 0;
+    bool                LayerExpanded = false;
+#if defined(FRONTIER_WITH_INTERFACE_SDK)
+    RasterPlate            TopDensity;
+    RasterPlate            SideDensity;
+    std::array<double, 24> DensityQuery{};
+#endif
 };
 
 #endif // FRONTIER_EDITOR

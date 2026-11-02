@@ -8,6 +8,7 @@
 
 #include "Engine/Interface/Controls/DiagramPen.h"
 #include "Engine/Interface/Controls/GlyphRun.h"
+#include "Engine/Interface/Controls/GlyphSymbol.h"
 #include "Engine/Interface/InspectorControls.h"
 
 #include <imgui_internal.h>
@@ -37,10 +38,10 @@ ControlColumn::ControlColumn(const ControlTheme& InTheme, const EditorTypefaces&
     const ImVec2 WindowMax(WindowMin.x + ImGui::GetWindowWidth(), WindowMin.y + ImGui::GetWindowHeight());
     DrawList->AddRectFilled(WindowMin, WindowMax, Theme.PageFill);
     const ImVec2 Start = ImGui::GetCursorScreenPos();
-    Left               = Start.x + PagePadding * Scale;
-    Width              = std::max(120.0f * Scale, ImGui::GetContentRegionAvail().x - 2.0f * PagePadding * Scale);
+    Left               = Start.x + Theme.PaddingSide * Scale;
+    Width              = std::max(120.0f * Scale, ImGui::GetContentRegionAvail().x - 2.0f * Theme.PaddingSide * Scale);
     PageWidth          = Width;
-    Cursor             = Start.y + PagePadding * Scale;
+    Cursor             = Start.y + Theme.PaddingTop * Scale;
     Lowest             = Cursor;
 }
 
@@ -56,8 +57,8 @@ ImVec2 ControlColumn::Space(float CssHeight, float MarginTop, float MarginBottom
 
 void ControlColumn::Finalize()
 {
-    const float Bottom = Cursor + (PendingMargin + PagePadding) * Scale;
-    ImGui::SetCursorScreenPos(ImVec2(Left - PagePadding * Scale, Bottom));
+    const float Bottom = Cursor + (PendingMargin + Theme.PaddingSide) * Scale;
+    ImGui::SetCursorScreenPos(ImVec2(Left - Theme.PaddingSide * Scale, Bottom));
     ImGui::Dummy(ImVec2(1.0f, 1.0f));
 }
 
@@ -97,10 +98,12 @@ void ControlColumn::BeginCard(const CardLook& Look, const char* Heading, const c
     if (Heading != nullptr || Index != nullptr)
     {
         // 📝 .co-card-heading: 12 px, space-between, margin-bottom 14 px; .co-index 8px/1.8, letter-spacing 1 px.
-        const ImVec2 HeadingTop = Space(12.0f * 1.4f, 0.0f, 14.0f);
+        const ImVec2 HeadingTop = Space(12.0f * 1.4f, 0.0f, Look.HeadingMargin);
         if (Heading != nullptr)
         {
-            (void)GlyphRun::Construct(*this, Faces.Regular, 12.0f * S, ImVec2(HeadingTop.x, GlyphRun::ResolveBaseline(HeadingTop.y, 12.0f * S, 1.4f)), Theme.CardHeading,
+            if (Look.HeadingGlyph != nullptr)
+                GlyphSymbol::Construct(DrawList, Look.HeadingGlyph, {HeadingTop.x, HeadingTop.y}, 17 * S, 1.5f, Theme.Accent);
+            (void)GlyphRun::Construct(*this, Faces.Regular, 12.0f * S, ImVec2(HeadingTop.x + (Look.HeadingGlyph ? 27 : 0) * S, GlyphRun::ResolveBaseline(HeadingTop.y, 12.0f * S, 1.4f)), Theme.CardHeading,
                                     Heading, -0.1f * S);
         }
         if (Index != nullptr)
@@ -159,13 +162,13 @@ void ControlColumn::EndCard()
         if (Look.FillEnd != 0)
         {
             // 📝 linear-gradient(125deg, Fill, FillEnd 65%): the gradient line through the centre at 125° (0° = up).
-            const float  Angle = 125.0f * PiSingle / 180.0f;
+            const float  Angle = Look.GradientDegrees * PiSingle / 180.0f;
             const ImVec2 Direction(std::sin(Angle), -std::cos(Angle));
             const ImVec2 Size(Max.x - Min.x, Max.y - Min.y);
             const float  Length = std::fabs(Size.x * Direction.x) + std::fabs(Size.y * Direction.y);
             const ImVec2 Centre(0.5f * (Min.x + Max.x), 0.5f * (Min.y + Max.y));
             const ImVec2 From(Centre.x - Direction.x * 0.5f * Length, Centre.y - Direction.y * 0.5f * Length);
-            const ImVec2 To(From.x + Direction.x * 0.65f * Length, From.y + Direction.y * 0.65f * Length);
+            const ImVec2 To(From.x + Direction.x * Look.GradientStop * Length, From.y + Direction.y * Look.GradientStop * Length);
             ImGui::ShadeVertsLinearColorGradientKeepAlpha(DrawList, VertexStart, DrawList->VtxBuffer.Size, From, To, Look.Fill, Look.FillEnd);
         }
     }

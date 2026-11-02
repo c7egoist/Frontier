@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <limits>
 #include <unordered_map>
 
 namespace Frontier
@@ -22,14 +23,9 @@ namespace
 
 float ReadFloat(const toml::table& Table, std::string_view Key, float Fallback)
 {
-    if (const auto Value = Table[Key].value<double>())
-    {
-        return static_cast<float>(*Value);
-    }
-    if (const auto IntVal = Table[Key].value<int64_t>())
-    {
-        return static_cast<float>(*IntVal);
-    }
+    const auto Quantity = Table[Key].value<double>();
+    if (Quantity && std::isfinite(*Quantity) && std::abs(*Quantity) <= std::numeric_limits<float>::max())
+        return static_cast<float>(*Quantity);
     return Fallback;
 }
 
@@ -37,7 +33,7 @@ uint32_t ReadUint32(const toml::table& Table, std::string_view Key, uint32_t Fal
 {
     if (const auto IntVal = Table[Key].value<int64_t>())
     {
-        return static_cast<uint32_t>(std::max<int64_t>(0, *IntVal));
+        return static_cast<uint32_t>(std::clamp<int64_t>(*IntVal, 0, std::numeric_limits<uint32_t>::max()));
     }
     return Fallback;
 }
@@ -46,7 +42,8 @@ int ReadInt(const toml::table& Table, std::string_view Key, int Fallback)
 {
     if (const auto IntVal = Table[Key].value<int64_t>())
     {
-        return static_cast<int>(*IntVal);
+        if (*IntVal >= std::numeric_limits<int>::min() && *IntVal <= std::numeric_limits<int>::max())
+            return static_cast<int>(*IntVal);
     }
     return Fallback;
 }
@@ -75,7 +72,7 @@ void ReadFloat3(const toml::table& InTable, std::string_view Key, float OutValue
     {
         for (size_t Index = 0; Index < 3 && Index < Array->size(); ++Index)
         {
-            if (const auto Val = (*Array)[Index].value<double>())
+            if (const auto Val = (*Array)[Index].value<double>(); Val && std::isfinite(*Val) && std::abs(*Val) <= std::numeric_limits<float>::max())
             {
                 OutValues[Index] = static_cast<float>(*Val);
             }
@@ -440,6 +437,25 @@ void OpticalFlareRecord::SerializeConfiguration(toml::table& OutTable) const
     OutTable.insert_or_assign("enabled", Parameters.Enabled);
     OutTable.insert_or_assign("intensity", static_cast<double>(Parameters.Intensity));
     OutTable.insert_or_assign("aperture_blades", static_cast<int64_t>(Parameters.ApertureBladeCount));
+    OutTable.insert_or_assign("luminance_threshold", static_cast<double>(Parameters.LuminanceThreshold));
+    OutTable.insert_or_assign("halo_radius", static_cast<double>(Parameters.HaloRadius));
+    OutTable.insert_or_assign("chromatic_dispersion", static_cast<double>(Parameters.ChromaticDispersion));
+    OutTable.insert_or_assign("anamorphic_streak", Parameters.AnamorphicStreak);
+    OutTable.insert_or_assign("diffraction_starburst", Parameters.DiffractionStarburst);
+    OutTable.insert_or_assign("preset", static_cast<int64_t>(Parameters.Preset));
+    OutTable.insert_or_assign("spread", static_cast<double>(Parameters.Spread));
+    OutTable.insert_or_assign("ghost_count", static_cast<int64_t>(Parameters.GhostCount));
+    OutTable.insert_or_assign("ghost_brightness", static_cast<double>(Parameters.GhostBrightness));
+    OutTable.insert_or_assign("ghost_shape", static_cast<int64_t>(Parameters.GhostShape));
+    OutTable.insert_or_assign("ghost_spacing", static_cast<double>(Parameters.GhostSpacing));
+    OutTable.insert_or_assign("halo_width", static_cast<double>(Parameters.HaloWidth));
+    OutTable.insert_or_assign("halo_brightness", static_cast<double>(Parameters.HaloBrightness));
+    OutTable.insert_or_assign("streak_strength", static_cast<double>(Parameters.StreakStrength));
+    OutTable.insert_or_assign("rotation_degrees", static_cast<double>(Parameters.RotationDegrees));
+    OutTable.insert_or_assign("ray_count", static_cast<int64_t>(Parameters.RayCount));
+    OutTable.insert_or_assign("warm_streak", Parameters.WarmStreak);
+    OutTable.insert_or_assign("preview_position_x", static_cast<double>(Parameters.PreviewPosition[0]));
+    OutTable.insert_or_assign("preview_position_y", static_cast<double>(Parameters.PreviewPosition[1]));
 }
 
 template <>
@@ -448,6 +464,25 @@ void OpticalFlareRecord::DeserializeConfiguration(const toml::table& InTable)
     Parameters.Enabled            = ReadBool(InTable, "enabled", Parameters.Enabled);
     Parameters.Intensity          = ReadFloat(InTable, "intensity", Parameters.Intensity);
     Parameters.ApertureBladeCount = ReadUint32(InTable, "aperture_blades", Parameters.ApertureBladeCount);
+    Parameters.LuminanceThreshold = ReadFloat(InTable, "luminance_threshold", Parameters.LuminanceThreshold);
+    Parameters.HaloRadius = ReadFloat(InTable, "halo_radius", Parameters.HaloRadius);
+    Parameters.ChromaticDispersion = ReadFloat(InTable, "chromatic_dispersion", Parameters.ChromaticDispersion);
+    Parameters.AnamorphicStreak = ReadBool(InTable, "anamorphic_streak", Parameters.AnamorphicStreak);
+    Parameters.DiffractionStarburst = ReadBool(InTable, "diffraction_starburst", Parameters.DiffractionStarburst);
+    Parameters.Preset = ReadUint32(InTable, "preset", Parameters.Preset);
+    Parameters.Spread = ReadFloat(InTable, "spread", Parameters.Spread);
+    Parameters.GhostCount = ReadUint32(InTable, "ghost_count", Parameters.GhostCount);
+    Parameters.GhostBrightness = ReadFloat(InTable, "ghost_brightness", Parameters.GhostBrightness);
+    Parameters.GhostShape = ReadUint32(InTable, "ghost_shape", Parameters.GhostShape);
+    Parameters.GhostSpacing = ReadFloat(InTable, "ghost_spacing", Parameters.GhostSpacing);
+    Parameters.HaloWidth = ReadFloat(InTable, "halo_width", Parameters.HaloWidth);
+    Parameters.HaloBrightness = ReadFloat(InTable, "halo_brightness", Parameters.HaloBrightness);
+    Parameters.StreakStrength = ReadFloat(InTable, "streak_strength", Parameters.StreakStrength);
+    Parameters.RotationDegrees = ReadFloat(InTable, "rotation_degrees", Parameters.RotationDegrees);
+    Parameters.RayCount = ReadUint32(InTable, "ray_count", Parameters.RayCount);
+    Parameters.WarmStreak = ReadBool(InTable, "warm_streak", Parameters.WarmStreak);
+    Parameters.PreviewPosition[0] = ReadFloat(InTable, "preview_position_x", Parameters.PreviewPosition[0]);
+    Parameters.PreviewPosition[1] = ReadFloat(InTable, "preview_position_y", Parameters.PreviewPosition[1]);
     Parameters.AdvanceRevision();
 }
 
@@ -502,6 +537,34 @@ void CloudRecord::SerializeConfiguration(toml::table& OutTable) const
     OutTable.insert_or_assign("coverage", static_cast<double>(Parameters.Coverage));
     OutTable.insert_or_assign("base_altitude_m", static_cast<double>(Parameters.BaseAltitudeMetres));
     OutTable.insert_or_assign("thickness_m", static_cast<double>(Parameters.LayerThicknessMetres));
+    OutTable.insert_or_assign("density", static_cast<double>(Parameters.ExtinctionDensity));
+    OutTable.insert_or_assign("drift_mps", static_cast<double>(Parameters.WindDriftSpeed));
+    OutTable.insert_or_assign("silver_lining", static_cast<double>(Parameters.SilverLiningPower));
+    OutTable.insert_or_assign("temporal_reprojection", Parameters.TemporalReprojection);
+    OutTable.insert_or_assign("cast_shadows", Parameters.CastGroundShadows);
+    OutTable.insert_or_assign("formation", static_cast<int64_t>(Parameters.Formation));
+    OutTable.insert_or_assign("ceiling_metres", static_cast<double>(Parameters.CeilingMetres));
+    OutTable.insert_or_assign("feature_scale", static_cast<double>(Parameters.FeatureScale));
+    OutTable.insert_or_assign("anvil_shaping", static_cast<double>(Parameters.AnvilShaping));
+    OutTable.insert_or_assign("edge_erosion", static_cast<double>(Parameters.EdgeErosion));
+    OutTable.insert_or_assign("phase_anisotropy", static_cast<double>(Parameters.PhaseAnisotropy));
+    OutTable.insert_or_assign("light_absorption", static_cast<double>(Parameters.LightAbsorption));
+    OutTable.insert_or_assign("powder_response", static_cast<double>(Parameters.PowderResponse));
+    OutTable.insert_or_assign("light_samples", static_cast<int64_t>(Parameters.LightSamples));
+    OutTable.insert_or_assign("resolution_percent", static_cast<int64_t>(Parameters.ResolutionPercent));
+    OutTable.insert_or_assign("sky_samples", static_cast<int64_t>(Parameters.SkySamples));
+    OutTable.insert_or_assign("local_samples", static_cast<int64_t>(Parameters.LocalSamples));
+    OutTable.insert_or_assign("shadow_strength", static_cast<double>(Parameters.ShadowStrength));
+    OutTable.insert_or_assign("shadow_softness_metres", static_cast<double>(Parameters.ShadowSoftnessMetres));
+    OutTable.insert_or_assign("shadow_span_metres", static_cast<double>(Parameters.ShadowSpanMetres));
+    OutTable.insert_or_assign("shadow_samples", static_cast<int64_t>(Parameters.ShadowSamples));
+    OutTable.insert_or_assign("follow_wind", Parameters.FollowWind);
+    OutTable.insert_or_assign("bounds_shape", static_cast<int64_t>(Parameters.BoundsShape));
+    OutTable.insert_or_assign("local_formation", static_cast<int64_t>(Parameters.LocalFormation));
+    OutTable.insert_or_assign("edge_softness", static_cast<double>(Parameters.EdgeSoftness));
+    OutTable.insert_or_assign("local_feature_metres", static_cast<double>(Parameters.LocalFeatureMetres));
+    WriteFloat3(OutTable, "centre_metres", Parameters.CentreMetres);
+    WriteFloat3(OutTable, "half_extents_metres", Parameters.HalfExtentsMetres);
 }
 
 template <>
@@ -512,6 +575,34 @@ void CloudRecord::DeserializeConfiguration(const toml::table& InTable)
     Parameters.Coverage             = ReadFloat(InTable, "coverage", Parameters.Coverage);
     Parameters.BaseAltitudeMetres   = ReadFloat(InTable, "base_altitude_m", Parameters.BaseAltitudeMetres);
     Parameters.LayerThicknessMetres = ReadFloat(InTable, "thickness_m", Parameters.LayerThicknessMetres);
+    Parameters.ExtinctionDensity = ReadFloat(InTable, "density", Parameters.ExtinctionDensity);
+    Parameters.WindDriftSpeed = ReadFloat(InTable, "drift_mps", Parameters.WindDriftSpeed);
+    Parameters.SilverLiningPower = ReadFloat(InTable, "silver_lining", Parameters.SilverLiningPower);
+    Parameters.TemporalReprojection = ReadBool(InTable, "temporal_reprojection", Parameters.TemporalReprojection);
+    Parameters.CastGroundShadows = ReadBool(InTable, "cast_shadows", Parameters.CastGroundShadows);
+    Parameters.Formation = ReadUint32(InTable, "formation", Parameters.Formation);
+    Parameters.CeilingMetres = ReadFloat(InTable, "ceiling_metres", Parameters.CeilingMetres);
+    Parameters.FeatureScale = ReadFloat(InTable, "feature_scale", Parameters.FeatureScale);
+    Parameters.AnvilShaping = ReadFloat(InTable, "anvil_shaping", Parameters.AnvilShaping);
+    Parameters.EdgeErosion = ReadFloat(InTable, "edge_erosion", Parameters.EdgeErosion);
+    Parameters.PhaseAnisotropy = ReadFloat(InTable, "phase_anisotropy", Parameters.PhaseAnisotropy);
+    Parameters.LightAbsorption = ReadFloat(InTable, "light_absorption", Parameters.LightAbsorption);
+    Parameters.PowderResponse = ReadFloat(InTable, "powder_response", Parameters.PowderResponse);
+    Parameters.LightSamples = ReadUint32(InTable, "light_samples", Parameters.LightSamples);
+    Parameters.ResolutionPercent = ReadUint32(InTable, "resolution_percent", Parameters.ResolutionPercent);
+    Parameters.SkySamples = ReadUint32(InTable, "sky_samples", Parameters.SkySamples);
+    Parameters.LocalSamples = ReadUint32(InTable, "local_samples", Parameters.LocalSamples);
+    Parameters.ShadowStrength = ReadFloat(InTable, "shadow_strength", Parameters.ShadowStrength);
+    Parameters.ShadowSoftnessMetres = ReadFloat(InTable, "shadow_softness_metres", Parameters.ShadowSoftnessMetres);
+    Parameters.ShadowSpanMetres = ReadFloat(InTable, "shadow_span_metres", Parameters.ShadowSpanMetres);
+    Parameters.ShadowSamples = ReadUint32(InTable, "shadow_samples", Parameters.ShadowSamples);
+    Parameters.FollowWind = ReadBool(InTable, "follow_wind", Parameters.FollowWind);
+    Parameters.BoundsShape = ReadUint32(InTable, "bounds_shape", Parameters.BoundsShape);
+    Parameters.LocalFormation = ReadUint32(InTable, "local_formation", Parameters.LocalFormation);
+    Parameters.EdgeSoftness = ReadFloat(InTable, "edge_softness", Parameters.EdgeSoftness);
+    Parameters.LocalFeatureMetres = ReadFloat(InTable, "local_feature_metres", Parameters.LocalFeatureMetres);
+    ReadFloat3(InTable, "centre_metres", Parameters.CentreMetres);
+    ReadFloat3(InTable, "half_extents_metres", Parameters.HalfExtentsMetres);
     Parameters.AdvanceRevision();
 }
 
@@ -521,6 +612,15 @@ void StarRecord::SerializeConfiguration(toml::table& OutTable) const
     OutTable.insert_or_assign("enabled", Parameters.Enabled);
     OutTable.insert_or_assign("hipparcos_count", static_cast<int64_t>(Parameters.HipparcosCount));
     OutTable.insert_or_assign("magnitude_gain", static_cast<double>(Parameters.MagnitudeGain));
+    OutTable.insert_or_assign("milky_way", static_cast<double>(Parameters.MilkyWayLuminance));
+    OutTable.insert_or_assign("sidereal_speed", static_cast<double>(Parameters.SiderealSpeed));
+    OutTable.insert_or_assign("twinkle_depth", static_cast<double>(Parameters.AtmosphericScintillate));
+    OutTable.insert_or_assign("limiting_magnitude", static_cast<double>(Parameters.LimitingMagnitude));
+    OutTable.insert_or_assign("point_size", static_cast<double>(Parameters.PointSize));
+    OutTable.insert_or_assign("halo_gain", static_cast<double>(Parameters.HaloGain));
+    OutTable.insert_or_assign("rotation_degrees", static_cast<double>(Parameters.RotationDegrees));
+    OutTable.insert_or_assign("scintillation_enabled", Parameters.ScintillationEnabled);
+    OutTable.insert_or_assign("scintillation_rate_hz", static_cast<double>(Parameters.ScintillationRateHz));
 }
 
 template <>
@@ -529,6 +629,15 @@ void StarRecord::DeserializeConfiguration(const toml::table& InTable)
     Parameters.Enabled        = ReadBool(InTable, "enabled", Parameters.Enabled);
     Parameters.HipparcosCount = ReadUint32(InTable, "hipparcos_count", Parameters.HipparcosCount);
     Parameters.MagnitudeGain  = ReadFloat(InTable, "magnitude_gain", Parameters.MagnitudeGain);
+    Parameters.MilkyWayLuminance = ReadFloat(InTable, "milky_way", Parameters.MilkyWayLuminance);
+    Parameters.SiderealSpeed = ReadFloat(InTable, "sidereal_speed", Parameters.SiderealSpeed);
+    Parameters.AtmosphericScintillate = ReadFloat(InTable, "twinkle_depth", Parameters.AtmosphericScintillate);
+    Parameters.LimitingMagnitude = ReadFloat(InTable, "limiting_magnitude", Parameters.LimitingMagnitude);
+    Parameters.PointSize = ReadFloat(InTable, "point_size", Parameters.PointSize);
+    Parameters.HaloGain = ReadFloat(InTable, "halo_gain", Parameters.HaloGain);
+    Parameters.RotationDegrees = ReadFloat(InTable, "rotation_degrees", Parameters.RotationDegrees);
+    Parameters.ScintillationEnabled = ReadBool(InTable, "scintillation_enabled", Parameters.ScintillationEnabled);
+    Parameters.ScintillationRateHz = ReadFloat(InTable, "scintillation_rate_hz", Parameters.ScintillationRateHz);
     Parameters.AdvanceRevision();
 }
 
@@ -537,15 +646,70 @@ void MoonRecord::SerializeConfiguration(toml::table& OutTable) const
 {
     OutTable.insert_or_assign("enabled", Parameters.Enabled);
     OutTable.insert_or_assign("primary_phase", static_cast<double>(Parameters.PrimaryPhase));
+    OutTable.insert_or_assign("primary_orbit_degrees", static_cast<double>(Parameters.PrimaryOrbitDegrees));
+    OutTable.insert_or_assign("primary_albedo", static_cast<double>(Parameters.PrimaryAlbedo));
     OutTable.insert_or_assign("secondary_enabled", Parameters.SecondaryMoonEnabled);
+    OutTable.insert_or_assign("secondary_orbit_degrees", static_cast<double>(Parameters.SecondaryOrbitDegrees));
+    OutTable.insert_or_assign("earthshine", static_cast<double>(Parameters.EarthshineLuminance));
+    OutTable.insert_or_assign("illuminate_scene", Parameters.IlluminateScene);
+    OutTable.insert_or_assign("light_power", static_cast<double>(Parameters.LightPower));
+    toml::array Instances;
+    for (const auto& Moon : Parameters.Instances)
+    {
+        toml::table Entry;
+        Entry.insert_or_assign("visible", Moon.Visible);
+        Entry.insert_or_assign("follow_sky", Moon.FollowSky);
+        Entry.insert_or_assign("body", static_cast<int64_t>(Moon.Body));
+        Entry.insert_or_assign("phase_days", static_cast<double>(Moon.PhaseDays));
+        Entry.insert_or_assign("azimuth_degrees", static_cast<double>(Moon.AzimuthDegrees));
+        Entry.insert_or_assign("elevation_degrees", static_cast<double>(Moon.ElevationDegrees));
+        Entry.insert_or_assign("roll_degrees", static_cast<double>(Moon.RollDegrees));
+        Entry.insert_or_assign("pitch_degrees", static_cast<double>(Moon.PitchDegrees));
+        Entry.insert_or_assign("spin_degrees", static_cast<double>(Moon.SpinDegrees));
+        Entry.insert_or_assign("angular_diameter_degrees", static_cast<double>(Moon.AngularDiameterDegrees));
+        Entry.insert_or_assign("brightness", static_cast<double>(Moon.Brightness));
+        Entry.insert_or_assign("glow", static_cast<double>(Moon.Glow));
+        Instances.push_back(std::move(Entry));
+    }
+    OutTable.insert_or_assign("instances", std::move(Instances));
 }
 
 template <>
 void MoonRecord::DeserializeConfiguration(const toml::table& InTable)
 {
-    Parameters.Enabled              = ReadBool(InTable, "enabled", Parameters.Enabled);
-    Parameters.PrimaryPhase         = ReadFloat(InTable, "primary_phase", Parameters.PrimaryPhase);
+    Parameters.Enabled = ReadBool(InTable, "enabled", Parameters.Enabled);
+    Parameters.PrimaryPhase = ReadFloat(InTable, "primary_phase", Parameters.PrimaryPhase);
+    Parameters.PrimaryOrbitDegrees = ReadFloat(InTable, "primary_orbit_degrees", Parameters.PrimaryOrbitDegrees);
+    Parameters.PrimaryAlbedo = ReadFloat(InTable, "primary_albedo", Parameters.PrimaryAlbedo);
     Parameters.SecondaryMoonEnabled = ReadBool(InTable, "secondary_enabled", Parameters.SecondaryMoonEnabled);
+    Parameters.SecondaryOrbitDegrees = ReadFloat(InTable, "secondary_orbit_degrees", Parameters.SecondaryOrbitDegrees);
+    Parameters.EarthshineLuminance = ReadFloat(InTable, "earthshine", Parameters.EarthshineLuminance);
+    Parameters.IlluminateScene = ReadBool(InTable, "illuminate_scene", Parameters.IlluminateScene);
+    Parameters.LightPower = std::clamp(ReadFloat(InTable, "light_power", Parameters.LightPower), 0.0f, 5.0f);
+    Parameters.Instances[0].Visible = Parameters.Enabled;
+    Parameters.Instances[0].PhaseDays = std::clamp(Parameters.PrimaryPhase, 0.0f, 1.0f) * 29.53f;
+    Parameters.Instances[1].Visible = Parameters.SecondaryMoonEnabled;
+    if (const auto* Instances = InTable["instances"].as_array())
+    {
+        for (size_t Index = 0; Index < std::min(Instances->size(), Parameters.Instances.size()); ++Index)
+        {
+            const auto* Entry = (*Instances)[Index].as_table();
+            if (Entry == nullptr) continue;
+            auto& Moon = Parameters.Instances[Index];
+            Moon.Visible = ReadBool(*Entry, "visible", Moon.Visible);
+            Moon.FollowSky = ReadBool(*Entry, "follow_sky", Moon.FollowSky);
+            Moon.Body = std::min(5u, ReadUint32(*Entry, "body", Moon.Body));
+            Moon.PhaseDays = std::clamp(ReadFloat(*Entry, "phase_days", Moon.PhaseDays), 0.0f, 29.53f);
+            Moon.AzimuthDegrees = std::clamp(ReadFloat(*Entry, "azimuth_degrees", Moon.AzimuthDegrees), -180.0f, 180.0f);
+            Moon.ElevationDegrees = std::clamp(ReadFloat(*Entry, "elevation_degrees", Moon.ElevationDegrees), -90.0f, 90.0f);
+            Moon.RollDegrees = std::clamp(ReadFloat(*Entry, "roll_degrees", Moon.RollDegrees), -180.0f, 180.0f);
+            Moon.PitchDegrees = std::clamp(ReadFloat(*Entry, "pitch_degrees", Moon.PitchDegrees), -180.0f, 180.0f);
+            Moon.SpinDegrees = std::clamp(ReadFloat(*Entry, "spin_degrees", Moon.SpinDegrees), -180.0f, 180.0f);
+            Moon.AngularDiameterDegrees = std::clamp(ReadFloat(*Entry, "angular_diameter_degrees", Moon.AngularDiameterDegrees), 0.1f, 180.0f);
+            Moon.Brightness = std::clamp(ReadFloat(*Entry, "brightness", Moon.Brightness), 0.0f, 5.0f);
+            Moon.Glow = std::clamp(ReadFloat(*Entry, "glow", Moon.Glow), 0.0f, 3.0f);
+        }
+    }
     Parameters.AdvanceRevision();
 }
 
@@ -575,19 +739,71 @@ void PlanetRecord::DeserializeConfiguration(const toml::table& InTable)
 template <>
 void FogRecord::SerializeConfiguration(toml::table& OutTable) const
 {
+    OutTable.insert_or_assign("aerial_only", Parameters.AerialOnly);
     OutTable.insert_or_assign("enabled", Parameters.Enabled);
     OutTable.insert_or_assign("local_volume", Parameters.LocalVolume);
     OutTable.insert_or_assign("base_density", static_cast<double>(Parameters.BaseDensity));
     OutTable.insert_or_assign("height_falloff", static_cast<double>(Parameters.HeightFalloff));
+    OutTable.insert_or_assign("base_altitude_m", static_cast<double>(Parameters.BaseAltitudeMetres));
+    OutTable.insert_or_assign("anisotropy", static_cast<double>(Parameters.PhaseAnisotropy));
+    OutTable.insert_or_assign("start_distance_m", static_cast<double>(Parameters.StartDistanceMetres));
+    OutTable.insert_or_assign("froxel_grid", Parameters.VolumetricFroxelGrid);
+    OutTable.insert_or_assign("ray_shadows", Parameters.ReceiveRayShadow);
+    WriteFloat3(OutTable, "tint_linear", Parameters.TintLinear);
+    OutTable.insert_or_assign("sun_scatter", static_cast<double>(Parameters.SunScatter));
+    OutTable.insert_or_assign("aerial_enabled", Parameters.AerialEnabled);
+    OutTable.insert_or_assign("aerial_density", static_cast<double>(Parameters.AerialDensity));
+    OutTable.insert_or_assign("aerial_start_metres", static_cast<double>(Parameters.AerialStartMetres));
+    OutTable.insert_or_assign("aerial_mie_blend", static_cast<double>(Parameters.AerialMieBlend));
+    OutTable.insert_or_assign("bounds_shape", static_cast<int64_t>(Parameters.BoundsShape));
+    WriteFloat3(OutTable, "centre_metres", Parameters.CentreMetres);
+    WriteFloat3(OutTable, "half_extents_metres", Parameters.HalfExtentsMetres);
+    OutTable.insert_or_assign("density_falloff", Parameters.DensityFalloff);
+    OutTable.insert_or_assign("edge_softness", static_cast<double>(Parameters.EdgeSoftness));
+    OutTable.insert_or_assign("local_density", static_cast<double>(Parameters.LocalDensity));
+    OutTable.insert_or_assign("heterogeneity", static_cast<double>(Parameters.Heterogeneity));
+    OutTable.insert_or_assign("noise_scale_metres", static_cast<double>(Parameters.NoiseScaleMetres));
+    OutTable.insert_or_assign("independent_wind_mps", static_cast<double>(Parameters.IndependentWindMps));
+    OutTable.insert_or_assign("follow_wind", Parameters.FollowWind);
+    WriteFloat3(OutTable, "albedo", Parameters.Albedo);
+    OutTable.insert_or_assign("absorption", static_cast<double>(Parameters.Absorption));
+    OutTable.insert_or_assign("self_shadow", Parameters.SelfShadow);
+    OutTable.insert_or_assign("local_samples", static_cast<int64_t>(Parameters.LocalSamples));
 }
 
 template <>
 void FogRecord::DeserializeConfiguration(const toml::table& InTable)
 {
+    Parameters.AerialOnly = ReadBool(InTable, "aerial_only", Parameters.AerialOnly);
     Parameters.Enabled       = ReadBool(InTable, "enabled", Parameters.Enabled);
     Parameters.LocalVolume   = ReadBool(InTable, "local_volume", Parameters.LocalVolume);
     Parameters.BaseDensity   = ReadFloat(InTable, "base_density", Parameters.BaseDensity);
     Parameters.HeightFalloff = ReadFloat(InTable, "height_falloff", Parameters.HeightFalloff);
+    Parameters.BaseAltitudeMetres = ReadFloat(InTable, "base_altitude_m", Parameters.BaseAltitudeMetres);
+    Parameters.PhaseAnisotropy = ReadFloat(InTable, "anisotropy", Parameters.PhaseAnisotropy);
+    Parameters.StartDistanceMetres = ReadFloat(InTable, "start_distance_m", Parameters.StartDistanceMetres);
+    Parameters.VolumetricFroxelGrid = ReadBool(InTable, "froxel_grid", Parameters.VolumetricFroxelGrid);
+    Parameters.ReceiveRayShadow = ReadBool(InTable, "ray_shadows", Parameters.ReceiveRayShadow);
+    ReadFloat3(InTable, "tint_linear", Parameters.TintLinear);
+    Parameters.SunScatter = ReadFloat(InTable, "sun_scatter", Parameters.SunScatter);
+    Parameters.AerialEnabled = ReadBool(InTable, "aerial_enabled", Parameters.AerialEnabled);
+    Parameters.AerialDensity = ReadFloat(InTable, "aerial_density", Parameters.AerialDensity);
+    Parameters.AerialStartMetres = ReadFloat(InTable, "aerial_start_metres", Parameters.AerialStartMetres);
+    Parameters.AerialMieBlend = ReadFloat(InTable, "aerial_mie_blend", Parameters.AerialMieBlend);
+    Parameters.BoundsShape = ReadUint32(InTable, "bounds_shape", Parameters.BoundsShape);
+    ReadFloat3(InTable, "centre_metres", Parameters.CentreMetres);
+    ReadFloat3(InTable, "half_extents_metres", Parameters.HalfExtentsMetres);
+    Parameters.DensityFalloff = ReadBool(InTable, "density_falloff", Parameters.DensityFalloff);
+    Parameters.EdgeSoftness = ReadFloat(InTable, "edge_softness", Parameters.EdgeSoftness);
+    Parameters.LocalDensity = ReadFloat(InTable, "local_density", Parameters.LocalDensity);
+    Parameters.Heterogeneity = ReadFloat(InTable, "heterogeneity", Parameters.Heterogeneity);
+    Parameters.NoiseScaleMetres = ReadFloat(InTable, "noise_scale_metres", Parameters.NoiseScaleMetres);
+    Parameters.IndependentWindMps = ReadFloat(InTable, "independent_wind_mps", Parameters.IndependentWindMps);
+    Parameters.FollowWind = ReadBool(InTable, "follow_wind", Parameters.FollowWind);
+    ReadFloat3(InTable, "albedo", Parameters.Albedo);
+    Parameters.Absorption = ReadFloat(InTable, "absorption", Parameters.Absorption);
+    Parameters.SelfShadow = ReadBool(InTable, "self_shadow", Parameters.SelfShadow);
+    Parameters.LocalSamples = ReadUint32(InTable, "local_samples", Parameters.LocalSamples);
     Parameters.AdvanceRevision();
 }
 
@@ -597,6 +813,20 @@ void LightningRecord::SerializeConfiguration(toml::table& OutTable) const
     OutTable.insert_or_assign("enabled", Parameters.Enabled);
     OutTable.insert_or_assign("strikes_per_minute", static_cast<double>(Parameters.StrikesPerMinute));
     OutTable.insert_or_assign("auto_discharge", Parameters.AutoStormDischarge);
+    OutTable.insert_or_assign("branching_factor", static_cast<double>(Parameters.BranchingFactor));
+    OutTable.insert_or_assign("peak_current_ka", static_cast<double>(Parameters.PeakCurrentKiloamps));
+    OutTable.insert_or_assign("cloud_sheet_luminance", static_cast<double>(Parameters.CloudSheetLuminance));
+    OutTable.insert_or_assign("acoustic_shockwave", Parameters.AcousticShockwave);
+    OutTable.insert_or_assign("triggered_strike_count", static_cast<int64_t>(Parameters.TriggeredStrikeCount));
+    OutTable.insert_or_assign("discharge", static_cast<int64_t>(Parameters.Discharge));
+    OutTable.insert_or_assign("cloud_source", static_cast<int64_t>(Parameters.CloudSource));
+    OutTable.insert_or_assign("distance_metres", static_cast<double>(Parameters.DistanceMetres));
+    OutTable.insert_or_assign("minimum_interval_seconds", static_cast<double>(Parameters.MinimumIntervalSeconds));
+    OutTable.insert_or_assign("maximum_interval_seconds", static_cast<double>(Parameters.MaximumIntervalSeconds));
+    OutTable.insert_or_assign("channel_span_metres", static_cast<double>(Parameters.ChannelSpanMetres));
+    OutTable.insert_or_assign("bolt_brightness", static_cast<double>(Parameters.BoltBrightness));
+    OutTable.insert_or_assign("cloud_flash_strength", static_cast<double>(Parameters.CloudFlashStrength));
+    OutTable.insert_or_assign("flash_radius_metres", static_cast<double>(Parameters.FlashRadiusMetres));
 }
 
 template <>
@@ -605,6 +835,20 @@ void LightningRecord::DeserializeConfiguration(const toml::table& InTable)
     Parameters.Enabled            = ReadBool(InTable, "enabled", Parameters.Enabled);
     Parameters.StrikesPerMinute   = ReadFloat(InTable, "strikes_per_minute", Parameters.StrikesPerMinute);
     Parameters.AutoStormDischarge = ReadBool(InTable, "auto_discharge", Parameters.AutoStormDischarge);
+    Parameters.BranchingFactor = ReadFloat(InTable, "branching_factor", Parameters.BranchingFactor);
+    Parameters.PeakCurrentKiloamps = ReadFloat(InTable, "peak_current_ka", Parameters.PeakCurrentKiloamps);
+    Parameters.CloudSheetLuminance = ReadFloat(InTable, "cloud_sheet_luminance", Parameters.CloudSheetLuminance);
+    Parameters.AcousticShockwave = ReadBool(InTable, "acoustic_shockwave", Parameters.AcousticShockwave);
+    Parameters.TriggeredStrikeCount = ReadUint32(InTable, "triggered_strike_count", Parameters.TriggeredStrikeCount);
+    Parameters.Discharge = ReadUint32(InTable, "discharge", Parameters.Discharge);
+    Parameters.CloudSource = ReadUint32(InTable, "cloud_source", Parameters.CloudSource);
+    Parameters.DistanceMetres = ReadFloat(InTable, "distance_metres", Parameters.DistanceMetres);
+    Parameters.MinimumIntervalSeconds = ReadFloat(InTable, "minimum_interval_seconds", Parameters.MinimumIntervalSeconds);
+    Parameters.MaximumIntervalSeconds = ReadFloat(InTable, "maximum_interval_seconds", Parameters.MaximumIntervalSeconds);
+    Parameters.ChannelSpanMetres = ReadFloat(InTable, "channel_span_metres", Parameters.ChannelSpanMetres);
+    Parameters.BoltBrightness = ReadFloat(InTable, "bolt_brightness", Parameters.BoltBrightness);
+    Parameters.CloudFlashStrength = ReadFloat(InTable, "cloud_flash_strength", Parameters.CloudFlashStrength);
+    Parameters.FlashRadiusMetres = ReadFloat(InTable, "flash_radius_metres", Parameters.FlashRadiusMetres);
     Parameters.AdvanceRevision();
 }
 
@@ -615,6 +859,14 @@ void WindRecord::SerializeConfiguration(toml::table& OutTable) const
     OutTable.insert_or_assign("direction_deg", static_cast<double>(Parameters.DirectionDegrees));
     OutTable.insert_or_assign("speed_mps", static_cast<double>(Parameters.SpeedMetresPerSecond));
     OutTable.insert_or_assign("turbulence", static_cast<double>(Parameters.CurlNoiseTurbulence));
+    OutTable.insert_or_assign("gust_amplitude", static_cast<double>(Parameters.GustAmplitude));
+    OutTable.insert_or_assign("curl_frequency_hz", static_cast<double>(Parameters.CurlFrequencyHz));
+    OutTable.insert_or_assign("advect_clouds", Parameters.AdvectClouds);
+    OutTable.insert_or_assign("advect_plumes", Parameters.AdvectPlumes);
+    OutTable.insert_or_assign("advect_particles", Parameters.AdvectParticles);
+    OutTable.insert_or_assign("gust_strength", static_cast<double>(Parameters.GustStrength));
+    OutTable.insert_or_assign("shear_per_kilometre", static_cast<double>(Parameters.ShearPerKilometre));
+    OutTable.insert_or_assign("veer_degrees_per_kilometre", static_cast<double>(Parameters.VeerDegreesPerKilometre));
 }
 
 template <>
@@ -624,6 +876,14 @@ void WindRecord::DeserializeConfiguration(const toml::table& InTable)
     Parameters.DirectionDegrees     = ReadFloat(InTable, "direction_deg", Parameters.DirectionDegrees);
     Parameters.SpeedMetresPerSecond = ReadFloat(InTable, "speed_mps", Parameters.SpeedMetresPerSecond);
     Parameters.CurlNoiseTurbulence  = ReadFloat(InTable, "turbulence", Parameters.CurlNoiseTurbulence);
+    Parameters.GustAmplitude = ReadFloat(InTable, "gust_amplitude", Parameters.GustAmplitude);
+    Parameters.CurlFrequencyHz = ReadFloat(InTable, "curl_frequency_hz", Parameters.CurlFrequencyHz);
+    Parameters.AdvectClouds = ReadBool(InTable, "advect_clouds", Parameters.AdvectClouds);
+    Parameters.AdvectPlumes = ReadBool(InTable, "advect_plumes", Parameters.AdvectPlumes);
+    Parameters.AdvectParticles = ReadBool(InTable, "advect_particles", Parameters.AdvectParticles);
+    Parameters.GustStrength = ReadFloat(InTable, "gust_strength", Parameters.GustStrength);
+    Parameters.ShearPerKilometre = ReadFloat(InTable, "shear_per_kilometre", Parameters.ShearPerKilometre);
+    Parameters.VeerDegreesPerKilometre = ReadFloat(InTable, "veer_degrees_per_kilometre", Parameters.VeerDegreesPerKilometre);
     Parameters.AdvanceRevision();
 }
 
@@ -916,6 +1176,14 @@ void SceneWorld::RegisterNativeEngineTypes()
     RegisterSimple.operator()<MoonRecord>("Moons", "Environment · Moons", RecordClassification::Environment, "NativeMoon", "Environment", "#99aafa");
     RegisterSimple.operator()<PlanetRecord>("Planet", "Environment · Planet", RecordClassification::Environment, "Orbit", "Environment", "#99aafa");
     RegisterSimple.operator()<FogRecord>("Fog", "Environment · Fog", RecordClassification::Environment, "NativeFog", "Environment", "#99aafa");
+    RegisterType({"AerialFog", "Environment · Atmospheric Fog", RecordClassification::Environment,
+        [](std::string Name) -> std::unique_ptr<SceneRecordBase>
+        {
+            auto Entry = std::make_unique<FogRecord>(RecordClassification::Environment, "AerialFog", std::move(Name),
+                "NativeFog", "Environment", "#99aafa");
+            Entry->AccessConfiguration().AerialOnly = true;
+            return Entry;
+        }});
     RegisterSimple.operator()<LightningRecord>("Lightning", "Environment · Lightning", RecordClassification::Illumination, "Sparkles", "Environment",
                                                "#a6c7ff");
     RegisterSimple.operator()<WindRecord>("Wind", "Environment · Wind Field", RecordClassification::Environment, "Wind", "Forcefield", "#a7f3d0");

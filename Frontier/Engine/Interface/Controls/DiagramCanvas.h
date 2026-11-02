@@ -19,6 +19,8 @@ class ControlColumn;
 // 📝 What the pointer did on an interactive diagram this frame, in logical coordinates (the demo's Drag event).
 struct DiagramDrag
 {
+    ImGuiKey Key = ImGuiKey_None;
+    float    Step = 1.0f;
     bool   Engaged = false;   // the pointer is held on the diagram
     bool   Start   = false;   // pressed this frame
     ImVec2 Point   = ImVec2(0.0f, 0.0f);

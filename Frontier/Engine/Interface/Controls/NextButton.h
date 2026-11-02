@@ -18,7 +18,7 @@ class ControlColumn;
 class NextButton
 {
   public:
-    static bool Construct(ControlColumn& Column, const char* Id, const char* Label);
+    static bool Construct(ControlColumn& Column, const char* Id, const char* Label, bool Enabled = true, const char* Tooltip = nullptr);
 };
 
 } // namespace Frontier

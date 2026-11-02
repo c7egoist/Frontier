@@ -5,7 +5,6 @@
 
 #pragma once
 
-
 namespace Frontier
 {
 
@@ -19,8 +18,13 @@ class PageHeading
 {
   public:
     // 📝 True when the pill was pressed; a null ActionLabel leaves the pill out.
-    static bool Construct(ControlColumn& Column, const char* Id, const char* Eyebrow, const char* Title, const char* ActionLabel,
-                          const char* Subtitle, const char* ActionTooltip = nullptr);
+    static bool Construct(ControlColumn &Column,
+                          const char    *Id,
+                          const char    *Eyebrow,
+                          const char    *Title,
+                          const char    *ActionLabel,
+                          const char    *Subtitle,
+                          const char    *ActionTooltip = nullptr);
 };
 
 } // namespace Frontier

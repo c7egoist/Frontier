@@ -54,6 +54,7 @@ constexpr float  NotchBandHeight = 18.0f;   // [px] the Control Centre notch tab
 
 // 📝 The demo's Render entity readouts (InspectorPages.js Meta): renderer and grade, TLAS instances (or the clipmap edge),
 //    surface cards and geometry clusters, published on the records' Outliner rows.
+#if FRONTIER_EDITOR
 void PublishRenderReadouts(Frontier::SceneWorld& World, const SceneViewportReadout& Readout)
 {
     if (!Readout.Presenting) return;
@@ -70,6 +71,8 @@ void PublishRenderReadouts(Frontier::SceneWorld& World, const SceneViewportReado
     Publish("SurfaceCards", std::to_string(Readout.SurfaceCards));
     Publish("PolygonClusters", std::to_string(Readout.GeometryClusters) + " clusters");
 }
+
+#endif
 
 // 📝 Unreal Engine 5 editor viewport constants (FEditorViewportClient, FCameraControllerConfig, ULevelEditorViewportSettings
 //    defaults), in metres where Unreal counts centimetres.
@@ -345,6 +348,7 @@ EverestWorkspace::~EverestWorkspace()
 {
 #if FRONTIER_EDITOR && defined(FRONTIER_WITH_INTERFACE_SDK)
     ReleasePointerConstraint();
+    Frontier::InspectorRuntime::Instance().ConfigureEnvironmentAccess({});
 #endif
 }
 
@@ -496,16 +500,105 @@ void EverestWorkspace::ConstructInterface(double DeltaSeconds)
 
     ServiceDynamicSceneRequests();
 
+    Frontier::EnvironmentEditAccess Access;
+    Access.ViewExtent    = LastReadout.ScreenExtent;
+    Access.CameraReady   = true;
+    Access.CameraEye     = Flight.Position;
+    Access.CameraForward = Flight.ResolveForward();
+    if (auto* Entry = dynamic_cast<Frontier::SolarRecord*>(QuerySceneWorld().FindFirstByType("Solar")))
+        Access.Solar = &Entry->AccessConfiguration();
+    if (auto* Entry = dynamic_cast<Frontier::WindRecord*>(QuerySceneWorld().FindFirstByType("Wind")))
+        Access.Wind = &Entry->AccessConfiguration();
+    if (auto* Entry = dynamic_cast<Frontier::LightningRecord*>(QuerySceneWorld().FindFirstByType("Lightning")))
+        Access.Lightning = &Entry->AccessConfiguration();
+    for (auto* Entry : QuerySceneWorld().FindAllByType("Clouds"))
+    {
+        auto* Cloud = dynamic_cast<Frontier::CloudRecord*>(QuerySceneWorld().FindRecord(Entry->QueryToken()));
+        if (Cloud == nullptr) continue;
+        auto& Destination = Cloud->QueryConfiguration().LocalVolume ? Access.LocalCloud : Access.Clouds;
+        if (Destination == nullptr) Destination = &Cloud->AccessConfiguration();
+    }
+    for (auto* Entry : QuerySceneWorld().FindAllByType("Fog"))
+    {
+        auto* Fog = dynamic_cast<Frontier::FogRecord*>(QuerySceneWorld().FindRecord(Entry->QueryToken()));
+        if (Fog == nullptr) continue;
+        auto& Destination = Fog->QueryConfiguration().LocalVolume ? Access.LocalFog : Access.Fog;
+        if (Destination == nullptr) Destination = &Fog->AccessConfiguration();
+    }
+
     // 📝 The day clock (the demo's AdvanceCelestial) moves the level's sun before anything reads it this frame.
     if (auto* Solar = dynamic_cast<Frontier::SolarRecord*>(QuerySceneWorld().FindFirstByType("Solar")))
     {
         (void)AdvanceSolarDay(Solar->AccessConfiguration(), DeltaSeconds);
         Frontier::InspectorRuntime::Instance().PublishSolarElevation(Solar->QueryConfiguration().ElevationDegrees);
     }
+    for (const auto* Entry : QuerySceneWorld().FindAllByType("Planet"))
+    {
+        if (auto* Planet = dynamic_cast<Frontier::PlanetRecord*>(QuerySceneWorld().FindRecord(Entry->QueryToken())))
+        {
+            const auto Body = Planet->QueryConfiguration().Body;
+            if (Body < Access.Planets.size() && Access.Planets[Body] == nullptr)
+                Access.Planets[Body] = &Planet->AccessConfiguration();
+        }
+    }
+    if (Access.Solar != nullptr)
+    try
+    {
+        Frontier::GlobalIllumination::EnvironmentSettings Settings;
+        Settings.SkyDate = Access.Solar->CalendarDate;
+        Settings.Latitude = Access.Solar->LatitudeDegrees;
+        Settings.Longitude = Access.Solar->LongitudeDegrees;
+        Settings.TimeZone = Access.Solar->UtcOffsetHours;
+        Settings.SunTime = Access.Solar->LocalSolarHours;
+        const auto Solution = Frontier::GlobalIllumination::SolveCelestial(Settings);
+        Access.CelestialReady = true;
+        Access.LunarPlacement = {Solution.Moon.Azimuth, Solution.Moon.Elevation, Solution.MoonPhase};
+        for (size_t Body = 0; Body < Access.PlanetPlacements.size(); ++Body)
+            Access.PlanetPlacements[Body] = {Solution.Planets[Body].Azimuth, Solution.Planets[Body].Elevation};
+        for (const auto* Entry : QuerySceneWorld().FindAllByType("Moons"))
+        {
+            auto* Moons = dynamic_cast<Frontier::MoonRecord*>(QuerySceneWorld().FindRecord(Entry->QueryToken()));
+            if (Moons == nullptr) continue;
+            auto& Configuration = Moons->AccessConfiguration();
+            bool Changed = false;
+            for (auto& Moon : Configuration.Instances)
+            {
+                if (!Moon.FollowSky) continue;
+                const float Azimuth = static_cast<float>(std::fmod(Solution.Moon.Azimuth + 540.0, 360.0) - 180.0);
+                const float Elevation = static_cast<float>(Solution.Moon.Elevation);
+                const float Age = static_cast<float>(Solution.MoonPhase);
+                Changed |= Moon.AzimuthDegrees != Azimuth || Moon.ElevationDegrees != Elevation || Moon.PhaseDays != Age;
+                Moon.AzimuthDegrees = Azimuth;
+                Moon.ElevationDegrees = Elevation;
+                Moon.PhaseDays = Age;
+            }
+            if (Changed) Configuration.AdvanceRevision();
+        }
+    }
+    catch (const std::exception&)
+    {
+        Access.CelestialReady = false;
+    }
+    Frontier::InspectorRuntime::Instance().ConfigureEnvironmentAccess(Access);
     // 📝 A page's "Open … ↗" selects the first record of the type it names.
     if (const std::string Requested = Frontier::InspectorRuntime::Instance().ConsumeSelectionRequest(); !Requested.empty())
     {
-        if (Frontier::SceneRecordBase* Target = QuerySceneWorld().FindFirstByType(Requested))
+        Frontier::SceneRecordBase* Target = QuerySceneWorld().FindFirstByType(Requested);
+        if (Requested == "LocalCloud" || Requested == "LocalFog")
+        {
+            for (auto* Candidate : QuerySceneWorld().FindAllByType(Requested == "LocalCloud" ? "Clouds" : "Fog"))
+            {
+                const auto* Cloud = dynamic_cast<const Frontier::CloudRecord*>(Candidate);
+                const auto* Fog   = dynamic_cast<const Frontier::FogRecord*>(Candidate);
+                if ((Cloud != nullptr && Cloud->QueryConfiguration().LocalVolume) ||
+                    (Fog != nullptr && Fog->QueryConfiguration().LocalVolume))
+                {
+                    Target = QuerySceneWorld().FindRecord(Candidate->QueryToken());
+                    break;
+                }
+            }
+        }
+        if (Target != nullptr)
         {
             OutlinerPanel.Select(Target->QueryToken());
         }

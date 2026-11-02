@@ -7,6 +7,7 @@
 
 #include "Engine/Interface/Controls/ControlColumn.h"
 #include "Engine/Interface/Controls/GlyphRun.h"
+#include "Engine/Interface/Controls/GlyphSymbol.h"
 #include "Engine/Interface/InspectorControls.h"
 
 #include <imgui_internal.h>
@@ -58,7 +59,8 @@ void RasterizeTileGlyph(ImDrawList* DrawList, TileGlyph Glyph, ImVec2 Min, float
 //                                                    SWITCH TILES
 //------------------------------------------------------------------------------------------------------------------------
 
-bool SwitchTiles::Construct(ControlColumn& Column, const char* Id, const SwitchTile* Tiles, int Count, int Columns)
+bool SwitchTiles::Construct(ControlColumn& Column, const char* Id, const SwitchTile* Tiles, int Count, int Columns,
+                            float MarginTop, float MarginBottom, bool Compact)
 {
     const EditorTypefaces& Faces    = Column.QueryFaces();
     ImDrawList* const      DrawList = Column.QueryDrawList();
@@ -70,10 +72,10 @@ bool SwitchTiles::Construct(ControlColumn& Column, const char* Id, const SwitchT
     const float S       = Scale;
     const int   Across  = std::max(1, Columns);
     const int   Rows    = (Count + Across - 1) / Across;
-    const float Gap     = 9.0f * S;
-    const float Tall    = 106.0f;
-    const ImVec2 Top    = Column.Space(Tall * static_cast<float>(Rows) + 9.0f * static_cast<float>(Rows - 1), 12.0f, 16.0f);
-    const float TileWide = (Width - Gap * static_cast<float>(Across - 1)) / static_cast<float>(Across);
+    const float Gap     = (Compact ? 12.0f : 9.0f) * S;
+    const float Tall    = Compact ? 65.0f : 106.0f;
+    const ImVec2 Top    = Column.Space(Tall * static_cast<float>(Rows) + 9.0f * static_cast<float>(Rows - 1), MarginTop, MarginBottom);
+    const float TileWide = std::min(Compact ? 132.0f * S : Width, (Width - Gap * static_cast<float>(Across - 1)) / static_cast<float>(Across));
     bool        Flipped  = false;
     ImGui::PushID(Id);
     for (int Index = 0; Index < Count; ++Index)
@@ -88,7 +90,7 @@ bool SwitchTiles::Construct(ControlColumn& Column, const char* Id, const SwitchT
         ImGui::SetCursorScreenPos(Min);
         ImGui::PushID(Index);
         if (!Live) ImGui::BeginDisabled();
-        if (ImGui::InvisibleButton("##Tile", ImVec2(TileWide, Tall * S)) && Live)
+        if (ImGui::InvisibleButton("##Tile", ImVec2(TileWide, Tall * S), ImGuiButtonFlags_EnableNav) && Live)
         {
             *Tile.Target = !*Tile.Target;
             Flipped      = true;
@@ -101,14 +103,19 @@ bool SwitchTiles::Construct(ControlColumn& Column, const char* Id, const SwitchT
         DrawList->AddRectFilled(Min, Max, FadeColour(Hovered ? ResolveCssColour(0x303030FF) : ResolveCssColour(0x202020FF), Fade), 16.0f * S);
         DrawList->AddRect(Min, Max, FadeColour(Hovered ? ResolveCssColour(0x777777FF) : (Lit ? ResolveCssColour(0x323232FF) : ResolveCssColour(0x493232FF)), Fade),
                           16.0f * S, ImDrawFlags_None, S);
-        const ImVec2 Disc(0.5f * (Min.x + Max.x), Min.y + (1.0f + 13.0f + 15.5f) * S);
-        DrawList->AddCircleFilled(Disc, 15.5f * S, FadeColour(Lit ? ResolveCssColour(0x69C884FF) : ResolveCssColour(0xCC7673FF), Fade), 40);
-        RasterizeTileGlyph(DrawList, Tile.Glyph, ImVec2(Disc.x - 9.0f * S, Disc.y - 9.0f * S), 18.0f * S,
-                           FadeColour(Lit ? ResolveCssColour(0x16321EFF) : ResolveCssColour(0x371D1CFF), Fade));
-        const float CaptionTop  = Min.y + (1.0f + 13.0f + 31.0f + 3.0f + 8.0f) * S;
+        const ImVec2 Disc(0.5f * (Min.x + Max.x), Min.y + (Compact ? 22.5f : 29.5f) * S);
+        if (!Compact) DrawList->AddCircleFilled(Disc, 15.5f * S,
+            FadeColour(Lit ? ResolveCssColour(0x69C884FF) : ResolveCssColour(0xCC7673FF), Fade), 40);
+        const ImU32 SymbolInk = FadeColour(Compact ? (Lit ? ResolveCssColour(0x83CF9EFF) : ResolveCssColour(0xDD8989FF)) :
+            (Lit ? ResolveCssColour(0x16321EFF) : ResolveCssColour(0x371D1CFF)), Fade);
+        if (Tile.Symbol != nullptr)
+            GlyphSymbol::Construct(DrawList, Tile.Symbol, {Disc.x - 9 * S, Disc.y - 9 * S}, 18 * S, 1.5f, SymbolInk);
+        else RasterizeTileGlyph(DrawList, Tile.Glyph, {Disc.x - 9 * S, Disc.y - 9 * S}, 18 * S, SymbolInk);
+        const float CaptionTop = Min.y + (Compact ? 38.0f : 56.0f) * S;
         const float CaptionWide = GlyphRun::Measure(Column, Faces.Regular, 10.0f * S, Tile.Caption);
         (void)GlyphRun::Construct(Column, Faces.Regular, 10.0f * S, ImVec2(Disc.x - 0.5f * CaptionWide, CaptionTop + GlyphRun::EmAscent * 10.0f * S),
                                 FadeColour(ResolveCssColour(0xC8C8C8FF), Fade), Tile.Caption);
+        if (Compact) continue;
         const char* Reading     = Tile.Target == nullptr && !Tile.Pending ? "UNAVAILABLE" : (Lit ? "ON" : "OFF");
         const float ReadingTop  = CaptionTop + (10.0f * GlyphRun::EmPixelHeight + 8.0f) * S;
         const float ReadingWide = GlyphRun::Measure(Column, Faces.Regular, 8.0f * S, Reading, 0.3f * S);

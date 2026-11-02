@@ -40,7 +40,7 @@ bool ToggleRow::Construct(ControlColumn& Column, const char* Id, const char* Lab
     ImGui::PushID(Id);
     ImGui::SetCursorScreenPos(Top);
     if (!Enabled) ImGui::BeginDisabled();
-    if (ImGui::InvisibleButton("##Toggle", ImVec2(Width, Tall * S)) && Enabled)
+    if (ImGui::InvisibleButton("##Toggle", ImVec2(Width, Tall * S), ImGuiButtonFlags_EnableNav) && Enabled)
     {
         InOutEnabled = !InOutEnabled;
         Flipped      = true;

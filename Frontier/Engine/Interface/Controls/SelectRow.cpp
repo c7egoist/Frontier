@@ -38,12 +38,23 @@ bool SelectRow::Construct(ControlColumn& Column, const char* Id, const char* Lab
     const float  Fade = Enabled ? 1.0f : 0.45f;
     (void)GlyphRun::Construct(Column, Faces.Regular, 10.0f * S, ImVec2(Top.x, GlyphRun::ResolveBaseline(Top.y, 10.0f * S, 1.6f)), FadeColour(Theme.ControlLabel, Fade), Label);
     const ImVec2 FieldMin(Top.x, Top.y + 25.0f * S);
-    const ImVec2 FieldMax(Top.x + Width, FieldMin.y + 32.0f * S);
+    return ConstructAt(Column, Id, FieldMin, Width, Options, Count, InOutIndex, Enabled, Tooltip);
+}
+
+bool SelectRow::ConstructAt(ControlColumn& Column, const char* Id, ImVec2 FieldMin, float Width,
+                           const char* const* Options, int Count, int& InOutIndex, bool Enabled, const char* Tooltip)
+{
+    const auto& Theme = Column.QueryTheme();
+    const auto& Faces = Column.QueryFaces();
+    auto* DrawList = Column.QueryDrawList();
+    const float S = Column.QueryScale();
+    const float Fade = Enabled ? 1.0f : 0.45f;
+    const ImVec2 FieldMax(FieldMin.x + Width, FieldMin.y + 32.0f * S);
     bool         Changed = false;
     ImGui::PushID(Id);
     ImGui::SetCursorScreenPos(FieldMin);
     if (!Enabled) ImGui::BeginDisabled();
-    if (ImGui::InvisibleButton("##Select", ImVec2(Width, 32.0f * S)) && Enabled) ImGui::OpenPopup("##SelectOptions");
+    if (ImGui::InvisibleButton("##Select", ImVec2(Width, 32.0f * S), ImGuiButtonFlags_EnableNav) && Enabled) ImGui::OpenPopup("##SelectOptions");
     if (!Enabled) ImGui::EndDisabled();
     ControlColumn::ConstructTooltip(Tooltip);
     DrawList->AddRectFilled(FieldMin, FieldMax, FadeColour(Theme.SelectFill, Fade), 12.0f * S);

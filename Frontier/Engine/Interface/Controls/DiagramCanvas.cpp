@@ -30,9 +30,18 @@ DiagramPen DiagramCanvas::Begin(ControlColumn& Column, const char* Id, float Log
         *Drag = DiagramDrag{};
         ImGui::SetCursorScreenPos(Top);
         ImGui::SetNextItemAllowOverlap();
-        ImGui::InvisibleButton(Id, ImVec2(Width, LogicalHeight * PenScale));
+        ImGui::InvisibleButton(Id, ImVec2(Width, LogicalHeight * PenScale), ImGuiButtonFlags_EnableNav);
         ControlColumn::ConstructTooltip(Tooltip);
-        if (ImGui::IsItemActive())
+        if (ImGui::IsItemFocused())
+        {
+            Drag->Step = ImGui::GetIO().KeyShift ? 10.0f : 1.0f;
+            for (ImGuiKey Key : {ImGuiKey_LeftArrow, ImGuiKey_RightArrow, ImGuiKey_UpArrow,
+                                ImGuiKey_DownArrow, ImGuiKey_Home, ImGuiKey_End})
+            {
+                if (ImGui::IsKeyPressed(Key)) Drag->Key = Key;
+            }
+        }
+        if (ImGui::IsItemActive() && ImGui::IsMouseDown(ImGuiMouseButton_Left))
         {
             const ImGuiIO& IO = ImGui::GetIO();
             Drag->Engaged     = true;

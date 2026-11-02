@@ -7,6 +7,9 @@
 
 #pragma once
 
+#include "Engine/Interface/Controls/ActionRow.h"
+#include "Engine/Interface/Controls/AxisFields.h"
+
 #include "Engine/Interface/Controls/ControlTheme.h"
 #include "Engine/Interface/Controls/ControlColumn.h"
 #include "Engine/Interface/Controls/GlyphRun.h"
@@ -27,3 +30,7 @@
 #include "Engine/Interface/Controls/TintRow.h"
 #include "Engine/Interface/Controls/CaptionText.h"
 #include "Engine/Interface/Controls/FooterRow.h"
+
+#include "Engine/Interface/Controls/SectionHeading.h"
+#include "Engine/Interface/Controls/DisclosureRow.h"
+#include "Engine/Interface/Controls/SwitchRow.h"

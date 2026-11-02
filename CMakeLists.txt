@@ -139,6 +139,12 @@ add_library(FrontierSceneEditorUI STATIC
     Frontier/Engine/Interface/Controls/DiagramPen.cpp
     Frontier/Engine/Interface/Controls/DiagramCanvas.cpp
     Frontier/Engine/Interface/Controls/PageHeading.cpp
+    Frontier/Engine/Interface/Controls/RasterPlate.cpp
+        Frontier/Engine/Interface/Controls/ActionRow.cpp
+        Frontier/Engine/Interface/Controls/AxisFields.cpp
+    Frontier/Engine/Interface/Controls/SectionHeading.cpp
+    Frontier/Engine/Interface/Controls/DisclosureRow.cpp
+    Frontier/Engine/Interface/Controls/SwitchRow.cpp
     Frontier/Engine/Interface/Controls/TabStrip.cpp
     Frontier/Engine/Interface/Controls/ReadoutBlock.cpp
     Frontier/Engine/Interface/Controls/TagPill.cpp
@@ -165,10 +171,14 @@ add_library(FrontierSceneEditorUI STATIC
     Frontier/Engine/Interface/Inspectors/SurfaceCardInspector.cpp
     Frontier/Engine/Interface/Inspectors/PolygonClusterInspector.cpp
     Frontier/Engine/Interface/Inspectors/SolarInspector.cpp
+    Frontier/Engine/Interface/Inspectors/OpticalReference.cpp
     Frontier/Engine/Interface/Inspectors/OpticalFlareInspector.cpp
     Frontier/Engine/Interface/Inspectors/AtmosphereInspector.cpp
+    Frontier/Engine/Interface/Inspectors/CloudDensityReference.cpp
     Frontier/Engine/Interface/Inspectors/CloudInspector.cpp
+    Frontier/Engine/Interface/Inspectors/StarCatalogueReference.cpp
     Frontier/Engine/Interface/Inspectors/StarInspector.cpp
+    Frontier/Engine/Interface/Inspectors/LunarSurfaceReference.cpp
     Frontier/Engine/Interface/Inspectors/MoonInspector.cpp
     Frontier/Engine/Interface/Inspectors/PlanetInspector.cpp
     Frontier/Engine/Interface/Inspectors/FogInspector.cpp
@@ -183,7 +193,8 @@ target_include_directories(FrontierSceneEditorUI PUBLIC
     "${CMAKE_SOURCE_DIR}"
     "${CMAKE_SOURCE_DIR}/Frontier")
 target_compile_definitions(FrontierSceneEditorUI PUBLIC FRONTIER_WITH_INTERFACE_SDK=1 FRONTIER_EDITOR_PROFILE=1 FRONTIER_EDITOR=1)
-target_link_libraries(FrontierSceneEditorUI PUBLIC FrontierEditorUI Threads::Threads)
+target_include_directories(FrontierSceneEditorUI PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
+target_link_libraries(FrontierSceneEditorUI PUBLIC FrontierEditorUI Threads::Threads PRIVATE FrontierSurfaceRasterization)
 
 include(Automation/StageProjectContent.cmake)
 
@@ -610,6 +621,18 @@ if(BUILD_TESTING)
     target_link_libraries(InterfaceValidation PRIVATE FrontierEditorUI)
     add_test(NAME InterfaceValidation COMMAND InterfaceValidation
         "${CMAKE_SOURCE_DIR}/EngineContent/Icons" "${CMAKE_BINARY_DIR}/evidence")
+
+    add_executable(EnvironmentInspectorValidation
+        Exhibits/EnvironmentInspectors/Code/EnvironmentInspectorValidation.cpp
+        Engine/Render/StbImageWriteImplementation.cpp)
+    target_include_directories(EnvironmentInspectorValidation PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
+    target_link_libraries(EnvironmentInspectorValidation PRIVATE EverestProjectEditor)
+    add_test(NAME EnvironmentInspectorValidation COMMAND EnvironmentInspectorValidation
+        "${CMAKE_SOURCE_DIR}/EngineContent"
+        "${CMAKE_SOURCE_DIR}/Projects/Everest"
+        "${CMAKE_BINARY_DIR}/environment-inspector-exhibits"
+        "${CMAKE_SOURCE_DIR}/Exhibits/EnvironmentInspectors/Results/ReferenceExpectations.tsv")
+    set_tests_properties(EnvironmentInspectorValidation PROPERTIES WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}" TIMEOUT 240)
 
     add_executable(EverestInterfaceValidation
         Exhibits/EverestInterface/Code/EverestInterfaceValidation.cpp

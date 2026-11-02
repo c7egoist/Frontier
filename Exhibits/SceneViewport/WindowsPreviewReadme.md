@@ -41,15 +41,33 @@ Studio material archives, which the Scene Viewport does not read.
      position and the GPU.
 5. Select the level's environment records in the Scene Directory and edit them in the Inspector:
    `Solar`, `OpticalFlare`, `Atmosphere` (with the four `Planet` entries under it: Venus, Jupiter, Mars, Saturn),
-   `Clouds`, `Stars`, `Moons`, `Fog`, `Wind` and `RenderPipeline`.
+   `Clouds` (global/local), `Stars`, `Moons`, `Fog` (height/local), `AerialFog`, `Lightning`, `Wind` and
+   `RenderPipeline`.
    - `RenderPipeline` quality tier 0/1/2 selects the demo's `low`/`medium`/`high` grade.
    - The hardware ray query (RTX) tier selects the ReSTIR path tracer. Turning it off selects the distance-field GI
      (GTX path). Changing a tier rebuilds the viewport.
 
+## Environment controls in this build
+
+The native inspector now includes the remaining VehicleHMI controls: Clouds/local cloud, Wind, Height Fog,
+Atmospheric Fog, local fog, Lightning, Stars, four-slot Moon authoring and Lens Flare. Atmospheric Fog is its own
+Scene Directory entry. The original Sun and Atmosphere pages are retained.
+
+- Tabs, editable slider figures, keyboard/Shift-arrow diagrams, camera placement, catalogues and cross-record actions
+  use native C++ controls. Changes are saved in the level container with the existing Save level / Ctrl+S action.
+- Lens Flare **Export HDR** opens a path-entry modal and writes a 640 × 280 linear RGB PFM. It refuses an existing
+  filename.
+- The reference diagrams are not scene captures. Disabled controls explain missing native support; local media,
+  lightning execution/audio, four-body Moon rendering and custom flare layers are not newly connected to the renderer.
+- Native CPU checks pass, but this package has not been launched on Windows here. It is unsigned and not
+  antivirus-scanned.
+  Full visual parity across panel widths still needs acceptance review.
+
 ## What you are looking at
 
 - The 1:1 C++/Vulkan/Slang port of the VehicleHMI demo's ReSTIR GI renders the demo's proving ground, without the car.
-- The PlanetaryAtmosphere environment is drawn over it: atmosphere, sun, lens flare, volumetric clouds, height fog lit by
+- The PlanetaryAtmosphere environment is drawn over it: atmosphere, sun, lens flare, volumetric clouds, height fog lit
+  by
   the street lamps, moons, planets and Hipparcos stars.
 - The environment also lights the scene. Its sun, filtered through its air, is the key light, and Luna and Ember take
   over at night. Its sky lights every bounce and reflection, its clouds shade the ground, and the buildings and posts

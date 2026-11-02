@@ -9,6 +9,7 @@
 #include "Engine/Scene/RecordToken.h"
 #include "Engine/Scene/SceneDirectory.h"
 #include "Engine/Scene/SolarPlacement.h"
+#include "Engine/Interface/EnvironmentEditAccess.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -111,6 +112,9 @@ class InspectorRuntime
     void                                     RegisterSolarPlacementSolver(SolarPlacementSolver Solver) noexcept;
     [[nodiscard]] SolarPlacementSolver       QuerySolarPlacementSolver() const noexcept;
 
+    void ConfigureEnvironmentAccess(const EnvironmentEditAccess& Access) noexcept { EnvironmentAccess = Access; }
+    [[nodiscard]] const EnvironmentEditAccess& QueryEnvironmentAccess() const noexcept { return EnvironmentAccess; }
+
     // 📝 The level's sun elevation, published by the workspace each frame for pages on other records (the Atmosphere
     //    page's transmission dial reads the demo's S.SunElevation).
     void                PublishSolarElevation(float Degrees) noexcept { SolarElevation = Degrees; }
@@ -137,6 +141,7 @@ class InspectorRuntime
     std::string          PendingSelectionType{};
     SolarPlacementSolver SolarSolver    = nullptr;
     float                InterfaceScale = 1.0f;
+    EnvironmentEditAccess EnvironmentAccess{};
     float                SolarElevation = 38.0f;   // [°]
 };
 

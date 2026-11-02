@@ -191,6 +191,18 @@ base_density = 0.012
 height_falloff = 0.14
 
 [[records]]
+identity = "rec_aerial_fog"
+type = "AerialFog"
+name = "Atmospheric Fog"
+[records.configuration]
+enabled = true
+aerial_only = true
+aerial_enabled = true
+aerial_density = 0.00004
+aerial_start_metres = 500.0
+aerial_mie_blend = 0.5
+
+[[records]]
 identity = "rec_lightning"
 type = "Lightning"
 name = "Lightning & thunder"

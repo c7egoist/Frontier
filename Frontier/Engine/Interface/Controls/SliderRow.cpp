@@ -67,12 +67,19 @@ bool SliderRow::Construct(ControlColumn& Column, const char* Id, const char* Lab
     // 📝 .co-slider (narrow): border-top 1 px, padding 11 px 0 9 px; head (label 11 px, figure light 18 px + unit 9 px) 24 px,
     //    margin-bottom 10 px; the 14 px accent track filled to --slider-fill; a 17 px accent thumb in a 3 px ring.
     const float  S     = Scale;
-    const ImVec2 Top   = Column.Space(1.0f + 11.0f + 24.0f + 10.0f + 14.0f + 9.0f, 0.0f, 0.0f);
+    const bool Capsule = Theme.CapsuleSliders;
+    const float PaddingTop = Capsule ? 0.0f : 12.0f;
+    const float HeadGap    = Capsule ? 12.0f : 10.0f;
+    const float TrackHeight = Capsule ? 22.0f : 14.0f;
+    const float ThumbRadius = Capsule ? 10.0f : 8.5f;
+    const float FigureSize  = Capsule ? 11.0f : 18.0f;
+    const float UnitSize    = Capsule ? 10.0f : 9.0f;
+    const ImVec2 Top   = Column.Space(PaddingTop + 24.0f + HeadGap + TrackHeight + (Capsule ? 0.0f : 9.0f), Theme.SliderMargin);
     const float  Fade  = Enabled ? 1.0f : 0.45f;
     bool         Moved = false;
     DrawList->AddLine(ImVec2(Top.x, Top.y + 0.5f * S), ImVec2(Top.x + Width, Top.y + 0.5f * S), Theme.SliderRule, S);
 
-    const float HeadTop = Top.y + 12.0f * S;
+    const float HeadTop = Top.y + PaddingTop * S;
     (void)GlyphRun::Construct(Column, Faces.Regular, 11.0f * S, ImVec2(Top.x, GlyphRun::ResolveBaseline(HeadTop + 0.5f * (24.0f - 11.0f * 1.4f) * S, 11.0f * S, 1.4f)),
                             FadeColour(Theme.ControlLabel, Fade), Label);
 
@@ -80,23 +87,24 @@ bool SliderRow::Construct(ControlColumn& Column, const char* Id, const char* Lab
     const int   Digits     = ResolveSliderDigits(Minimum * DisplayScale, Step * DisplayScale);
     char        Figure[48] = {};
     std::snprintf(Figure, sizeof(Figure), "%.*f", Digits, static_cast<double>(Quantity * DisplayScale));
-    const float UnitWide   = GlyphRun::Measure(Column, Faces.Regular, 9.0f * S, Unit);
-    const float FigureWide = GlyphRun::Measure(Column, Faces.Light, 18.0f * S, Figure);
+    const float UnitWide   = GlyphRun::Measure(Column, Faces.Regular, UnitSize * S, Unit);
+    const float FigureWide = GlyphRun::Measure(Column, Faces.Light, FigureSize * S, Figure);
     const float PillRight  = Top.x + Width - 5.0f * S;
     const float UnitLeft   = PillRight - UnitWide;
     const float FigureLeft = UnitLeft - (Unit != nullptr && Unit[0] != '\0' ? 4.0f * S : 0.0f) - FigureWide;
-    const float Baseline   = HeadTop + 0.5f * (24.0f * S - GlyphRun::EmPixelHeight * 18.0f * S) + GlyphRun::EmAscent * 18.0f * S;
+    const float Baseline   = HeadTop + 0.5f * (24.0f * S - GlyphRun::EmPixelHeight * FigureSize * S) + GlyphRun::EmAscent * FigureSize * S;
 
     ImGui::PushID(Id);
     const ImGuiID FigureId = ImGui::GetID("##Figure");
     const ImVec2  FigureMin(PillRight - std::max(78.0f * S, UnitWide + FigureWide + 12.0f * S), HeadTop);
     const ImVec2  FigureMax(PillRight + 4.0f * S, HeadTop + 24.0f * S);
+    if (Capsule) DrawList->AddRectFilled(FigureMin, FigureMax, Theme.SliderCapsule, 20.0f * S);
     if (!Enabled) ImGui::BeginDisabled();
     bool Typing = ImGui::TempInputIsActive(FigureId);
     if (!Typing)
     {
         ImGui::SetCursorScreenPos(FigureMin);
-        if (ImGui::InvisibleButton("##Figure", ImVec2(FigureMax.x - FigureMin.x, FigureMax.y - FigureMin.y)) && Enabled)
+        if (ImGui::InvisibleButton("##Figure", ImVec2(FigureMax.x - FigureMin.x, FigureMax.y - FigureMin.y), ImGuiButtonFlags_EnableNav) && Enabled)
         {
             Typing = true;
         }
@@ -105,18 +113,19 @@ bool SliderRow::Construct(ControlColumn& Column, const char* Id, const char* Lab
     if (Typing && Enabled)
     {
         float Display        = Quantity * DisplayScale;
-        float DisplayMinimum = Minimum * DisplayScale;
-        float DisplayMaximum = Maximum * DisplayScale;
         char  Format[16]     = {};
         std::snprintf(Format, sizeof(Format), "%%.%df", Digits);
         ImGui::PushStyleColor(ImGuiCol_FrameBg, ResolveCssColour(0x00000000));
         ImGui::PushStyleColor(ImGuiCol_Text, Theme.SliderNumber);
         ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 9.0f * S);
-        if (ImGui::TempInputScalar(ImRect(FigureMin, FigureMax), FigureId, "##FigureEntry", ImGuiDataType_Float, &Display, Format, &DisplayMinimum,
-                                   &DisplayMaximum))
+        if (ImGui::TempInputScalar(ImRect(FigureMin, FigureMax), FigureId, "##FigureEntry", ImGuiDataType_Float, &Display, Format, nullptr, nullptr))
         {
-            Quantity = SnapSliderSetting(Display / DisplayScale, Minimum, Maximum, Step);
-            Moved    = true;
+            if (std::isfinite(Display) && DisplayScale > 0.0f)
+            {
+                const float Next = SnapSliderSetting(Display / DisplayScale, Minimum, Maximum, Step);
+                Moved = Next != Quantity;
+                Quantity = Next;
+            }
         }
         ImGui::PopStyleVar();
         ImGui::PopStyleColor(2);
@@ -124,21 +133,21 @@ bool SliderRow::Construct(ControlColumn& Column, const char* Id, const char* Lab
     }
     else
     {
-        (void)GlyphRun::Construct(Column, Faces.Light, 18.0f * S, ImVec2(FigureLeft, Baseline), FadeColour(Theme.SliderNumber, Fade), Figure);
+        (void)GlyphRun::Construct(Column, Faces.Light, FigureSize * S, ImVec2(FigureLeft, Baseline), FadeColour(Theme.SliderNumber, Fade), Figure);
     }
-    (void)GlyphRun::Construct(Column, Faces.Regular, 9.0f * S, ImVec2(UnitLeft, Baseline), FadeColour(Theme.SliderUnit, Fade), Unit);
+    (void)GlyphRun::Construct(Column, Faces.Regular, UnitSize * S, ImVec2(UnitLeft, Baseline), FadeColour(Theme.SliderUnit, Fade), Unit);
 
     // 📝 The track: full width, 14 px; the thumb centre runs from 8.5 px to width − 8.5 px.
-    const float  TrackTop = HeadTop + (24.0f + 10.0f) * S;
+    const float  TrackTop = HeadTop + (24.0f + HeadGap) * S;
     const ImVec2 TrackMin(Top.x, TrackTop);
-    const ImVec2 TrackMax(Top.x + Width, TrackTop + 14.0f * S);
+    const ImVec2 TrackMax(Top.x + Width, TrackTop + TrackHeight * S);
     ImGui::SetCursorScreenPos(ImVec2(TrackMin.x, TrackMin.y - 3.0f * S));
-    ImGui::InvisibleButton("##Track", ImVec2(Width, 20.0f * S));
+    ImGui::InvisibleButton("##Track", ImVec2(Width, (TrackHeight + 6.0f) * S), ImGuiButtonFlags_EnableNav);
     ControlColumn::ConstructTooltip(Tooltip);
-    const float Travel = std::max(1.0f, Width - 17.0f * S);
-    if (Enabled && ImGui::IsItemActive() && Maximum > Minimum)
+    const float Travel = std::max(1.0f, Width - 2.0f * ThumbRadius * S);
+    if (Enabled && ImGui::IsItemActive() && ImGui::IsMouseDown(ImGuiMouseButton_Left) && Maximum > Minimum)
     {
-        const float Fraction = std::clamp((ImGui::GetIO().MousePos.x - (TrackMin.x + 8.5f * S)) / Travel, 0.0f, 1.0f);
+        const float Fraction = std::clamp((ImGui::GetIO().MousePos.x - (TrackMin.x + ThumbRadius * S)) / Travel, 0.0f, 1.0f);
         const float Snapped  = SnapSliderSetting(Minimum + Fraction * (Maximum - Minimum), Minimum, Maximum, Step);
         if (Snapped != Quantity)
         {
@@ -146,21 +155,37 @@ bool SliderRow::Construct(ControlColumn& Column, const char* Id, const char* Lab
             Moved    = true;
         }
     }
+    if (Enabled && ImGui::IsItemFocused())
+    {
+        float Next = Quantity;
+        const float Increment = Step * (ImGui::GetIO().KeyShift ? 10.0f : 1.0f);
+        if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow) || ImGui::IsKeyPressed(ImGuiKey_DownArrow)) Next -= Increment;
+        if (ImGui::IsKeyPressed(ImGuiKey_RightArrow) || ImGui::IsKeyPressed(ImGuiKey_UpArrow)) Next += Increment;
+        if (ImGui::IsKeyPressed(ImGuiKey_Home)) Next = Minimum;
+        if (ImGui::IsKeyPressed(ImGuiKey_End)) Next = Maximum;
+        Next = SnapSliderSetting(Next, Minimum, Maximum, Step);
+        if (Next != Quantity) { Quantity = Next; Moved = true; }
+    }
     if (!Enabled) ImGui::EndDisabled();
     ImGui::PopID();
 
     const float Fill  = Maximum > Minimum ? std::clamp((Quantity - Minimum) / (Maximum - Minimum), 0.0f, 1.0f) : 0.0f;
     const float Split = TrackMin.x + Fill * Width;
-    DrawList->AddRectFilled(TrackMin, TrackMax, FadeColour(Theme.SliderEmpty, Fade), 7.0f * S);
+    DrawList->AddRectFilled(TrackMin, TrackMax, FadeColour(Theme.SliderEmpty, Fade), 11.0f * S);
     if (Split > TrackMin.x + 0.5f)
     {
         DrawList->PushClipRect(TrackMin, ImVec2(Split, TrackMax.y), true);
-        DrawList->AddRectFilled(TrackMin, TrackMax, FadeColour(Theme.Accent, Fade), 7.0f * S);
+        DrawList->AddRectFilled(TrackMin, TrackMax, FadeColour(Capsule ? ResolveCssColour(0x555650FF) : Theme.Accent, Fade), 11.0f * S);
         DrawList->PopClipRect();
     }
-    const ImVec2 Thumb(TrackMin.x + 8.5f * S + Fill * Travel, TrackMin.y + 7.0f * S);
+    const ImVec2 Thumb(TrackMin.x + ThumbRadius * S + Fill * Travel, TrackMin.y + 0.5f * TrackHeight * S);
+    if (Capsule)
+    {
+        DrawList->AddCircleFilled(Thumb, ThumbRadius * S, FadeColour(ResolveCssColour(0xE2E4D8FF), Fade), 32);
+        return Moved;
+    }
     DrawList->AddCircleFilled(Thumb, 9.5f * S, FadeColour(Theme.ThumbHalo, Fade), 32);
-    DrawList->AddCircleFilled(Thumb, 8.5f * S, FadeColour(Theme.ThumbRing, Fade), 32);
+    DrawList->AddCircleFilled(Thumb, ThumbRadius * S, FadeColour(Theme.ThumbRing, Fade), 32);
     DrawList->AddCircleFilled(Thumb, 5.5f * S, FadeColour(Theme.Accent, Fade), 32);
     return Moved;
 }

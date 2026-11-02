@@ -145,6 +145,19 @@ struct OpticalFlareConfiguration : RevisionCounter
     float    ChromaticDispersion  = 0.18f;
     bool     AnamorphicStreak     = true;
     bool     DiffractionStarburst = true;
+    uint32_t Preset              = 0;       // [-] Cinematic, Anamorphic, Starburst, Halo, Custom layers
+    float Spread                 = 1.0f;
+    uint32_t GhostCount          = 6;
+    float GhostBrightness        = 0.3f;
+    uint32_t GhostShape          = 6;
+    float GhostSpacing           = 1.0f;
+    float HaloWidth              = 0.025f;
+    float HaloBrightness         = 0.2f;
+    float StreakStrength         = 0.3f;
+    float RotationDegrees        = 0.0f;
+    uint32_t RayCount            = 6;
+    bool WarmStreak              = false;
+    float PreviewPosition[2]     = {0.28f, 0.43f};
 };
 
 struct AtmosphereConfiguration : RevisionCounter
@@ -183,6 +196,30 @@ struct CloudConfiguration : RevisionCounter
     float SilverLiningPower    = 0.72f;
     bool  TemporalReprojection = true;
     bool  CastGroundShadows    = true;
+    // 📝 VehicleHMI formation, sampling and bounded-volume controls. Units match the demo.
+    uint32_t Formation           = 2;
+    float CeilingMetres          = 14000.0f;
+    float FeatureScale           = 1.0f;
+    float AnvilShaping           = 0.5f;
+    float EdgeErosion            = 0.3f;
+    float PhaseAnisotropy        = 0.35f;
+    float LightAbsorption        = 0.15f;
+    float PowderResponse         = 0.45f;
+    uint32_t LightSamples        = 2;
+    uint32_t ResolutionPercent   = 35;
+    uint32_t SkySamples          = 12;
+    uint32_t LocalSamples        = 16;
+    float ShadowStrength         = 0.65f;
+    float ShadowSoftnessMetres   = 35.0f;
+    float ShadowSpanMetres       = 6000.0f;
+    uint32_t ShadowSamples       = 6;
+    bool FollowWind              = true;
+    uint32_t BoundsShape         = 0;
+    uint32_t LocalFormation      = 1;
+    float EdgeSoftness           = 0.5f;
+    float LocalFeatureMetres     = 30.0f;
+    float CentreMetres[3]        = {0.0f, 0.0f, 400.0f};
+    float HalfExtentsMetres[3]   = {300.0f, 300.0f, 150.0f};
 };
 
 struct StarConfiguration : RevisionCounter
@@ -193,6 +230,28 @@ struct StarConfiguration : RevisionCounter
     float    MilkyWayLuminance      = 0.55f;
     float    SiderealSpeed          = 1.0f;
     float    AtmosphericScintillate = 0.35f;
+    float LimitingMagnitude      = 6.0f;
+    float PointSize              = 1.0f;
+    float HaloGain               = 1.0f;
+    float RotationDegrees        = 0.0f;
+    bool ScintillationEnabled    = true;
+    float ScintillationRateHz     = 1.0f;
+};
+
+struct MoonInstanceConfiguration
+{
+    bool Visible = false;
+    bool FollowSky = false;
+    uint32_t Body = 0;
+    float PhaseDays = 14.765f;
+    float AzimuthDegrees = -8.0f;
+    float ElevationDegrees = 38.0f;
+    float RollDegrees = 0.0f;
+    float PitchDegrees = 0.0f;
+    float SpinDegrees = 0.0f;
+    float AngularDiameterDegrees = 25.0f;
+    float Brightness = 1.0f;
+    float Glow = 0.2f;
 };
 
 struct MoonConfiguration : RevisionCounter
@@ -204,6 +263,18 @@ struct MoonConfiguration : RevisionCounter
     bool  SecondaryMoonEnabled  = true;
     float SecondaryOrbitDegrees = 64.0f;
     float EarthshineLuminance   = 0.22f;
+    bool IlluminateScene = true;
+    float LightPower = 1.0f;
+    std::array<MoonInstanceConfiguration, 4> Instances = []
+    {
+        std::array<MoonInstanceConfiguration, 4> Bodies{};
+        Bodies[0].Visible = true;
+        Bodies[0].PhaseDays = 0.68f * 29.53f;
+        Bodies[1].Visible = true;
+        Bodies[1].Body = 1;
+        Bodies[1].AngularDiameterDegrees = 1.6f;
+        return Bodies;
+    }();
 };
 
 // 📝 One planet of the sky, each its own Scene Directory entry. Body picks the demo's orbital solution it follows (0 Venus,
@@ -237,6 +308,7 @@ inline constexpr std::array<const char*, 4> PlanetBodyNames = {"Venus", "Jupiter
 
 struct FogConfiguration : RevisionCounter
 {
+    bool  AerialOnly = false;
     bool  Enabled             = true;
     bool  LocalVolume         = false;
     float BaseDensity         = 0.014f;
@@ -246,6 +318,26 @@ struct FogConfiguration : RevisionCounter
     float StartDistanceMetres = 8.0f;
     bool  VolumetricFroxelGrid = true;
     bool  ReceiveRayShadow    = true;
+    float TintLinear[3]          = {0.52f, 0.62f, 0.69f};
+    float SunScatter             = 0.5f;
+    bool AerialEnabled           = true;
+    float AerialDensity          = 0.00004f;
+    float AerialStartMetres       = 100.0f;
+    float AerialMieBlend          = 0.5f;
+    uint32_t BoundsShape         = 0;
+    float CentreMetres[3]        = {30.0f, 0.0f, 2.5f};
+    float HalfExtentsMetres[3]   = {18.0f, 18.0f, 4.0f};
+    bool DensityFalloff          = true;
+    float EdgeSoftness           = 0.45f;
+    float LocalDensity           = 0.35f;
+    float Heterogeneity          = 0.75f;
+    float NoiseScaleMetres       = 5.0f;
+    float IndependentWindMps     = 0.8f;
+    bool FollowWind              = true;
+    float Albedo[3]              = {0.72f, 0.8f, 0.9f};
+    float Absorption             = 0.08f;
+    bool SelfShadow              = true;
+    uint32_t LocalSamples        = 28;
 };
 
 struct LightningConfiguration : RevisionCounter
@@ -258,6 +350,15 @@ struct LightningConfiguration : RevisionCounter
     bool     AutoStormDischarge   = false;
     bool     AcousticShockwave    = true;
     uint32_t TriggeredStrikeCount = 0;
+    uint32_t Discharge           = 0;
+    uint32_t CloudSource         = 0;
+    float DistanceMetres         = 1800.0f;
+    float MinimumIntervalSeconds = 6.0f;
+    float MaximumIntervalSeconds = 15.0f;
+    float ChannelSpanMetres      = 2400.0f;
+    float BoltBrightness         = 1.0f;
+    float CloudFlashStrength     = 1.0f;
+    float FlashRadiusMetres      = 1800.0f;
 };
 
 struct WindConfiguration : RevisionCounter
@@ -271,6 +372,10 @@ struct WindConfiguration : RevisionCounter
     bool  AdvectClouds         = true;
     bool  AdvectPlumes         = true;
     bool  AdvectParticles      = true;
+    // 📝 Relative gust strength is separate from the earlier absolute GustAmplitude [m/s].
+    float GustStrength           = 0.25f;
+    float ShearPerKilometre      = 0.15f;
+    float VeerDegreesPerKilometre = 8.0f;
 };
 
 //------------------------------------------------------------------------------------------------------------------------

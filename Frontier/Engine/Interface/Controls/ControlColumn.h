@@ -26,8 +26,12 @@ struct EditorTypefaces;
 //    optional radial glow ("radial-gradient(ellipse at X% Y%, Glow, transparent Extent)"), border, radius, padding.
 struct CardLook
 {
+    const char* HeadingGlyph = nullptr;
+    float HeadingMargin = 14.0f;
     ImU32  Fill         = 0;                    // 0: transparent
     ImU32  FillEnd      = 0;                    // 0: flat fill
+    float  GradientDegrees = 125.0f;
+    float  GradientStop    = 0.65f;
     ImU32  Glow         = 0;                    // 0: no radial glow
     ImVec2 GlowCentre   = ImVec2(0.5f, 0.5f);   // [-] ellipse centre as a fraction of the card
     float  GlowExtent   = 0.7f;                 // [-] the transparent stop along the farthest-corner ellipse
