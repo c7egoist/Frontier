@@ -58,6 +58,12 @@ import {
   windSpeedColor,
 } from './wind-field-debug.js';
 import {
+  CLIMATE_REGIMES,
+  formatLatitude,
+  normalizeSeasonalClimateParams,
+  seasonalClimateAt,
+} from './seasonal-climate.js';
+import {
   WIND_SHIFT_MODES,
   describeWindRegime,
   effectiveWindAzimuthAtStep,
@@ -170,7 +176,7 @@ const OP_DESCRIPTIONS = {
   'spline-landform': 'New parameterized smooth spline: add a mountain ridge, subtract a canyon, grade a directed river or road, or bore an SDF tunnel completely through terrain.',
   'rock-placement': 'Distributes gravity-settled 3D loose boulders across cliff toes and crowns (distinct from bedrock landforms).',
   'vegetation-placement': 'Instantiates up to 44,000 real 3D multi-blade grass tufts masked by slope, elevation, snow, and water.',
-  [ENVIRONMENT_LAYER_TYPE]: 'The locked final stack layer. It owns the scene sun direction used for lighting and shadows; it is not a terrain-generating or erosion pass.',
+  [ENVIRONMENT_LAYER_TYPE]: 'The locked final stack layer. It owns scene sun direction plus the global location-based seasonal climate: signed latitude/hemisphere, climate regime, calendar pacing, simulated run length and year-to-year variability. It is live state, not a terrain-generating pass, and it never enables a paused Rain/Snow/Wind/Chemical process by itself.',
 };
 
 const pctFmt = (v) => `${Math.round(v * 100)}%`;
@@ -229,8 +235,8 @@ const SNOW_EFFECT_PARAM_CONTROLS = {
     { key: 'marginRate', label: 'Legacy Margin Rate', min: 0, max: 2, step: 0.05, fmt: (v) => `${Number(v).toFixed(2)}×` },
   ],
   'snowmelt-runoff': [
-    { key: 'cyclePeriodSteps', label: 'Cold → Warm/Dry Cycle Period', min: 16, max: 720, step: 2, fmt: (v) => `${Math.round(v)} steps` },
-    { key: 'cyclePhase', label: 'Cycle Start Phase (0 cold · 0.5 warm)', min: 0, max: 1, step: 0.01, fmt: (v) => `${Math.round(v * 100)}%` },
+    { key: 'cyclePeriodSteps', label: 'Fallback Cycle Period (Seasonal Climate Off)', min: 16, max: 720, step: 2, fmt: (v) => `${Math.round(v)} steps` },
+    { key: 'cyclePhase', label: 'Fallback Start Phase (0 cold · 0.5 warm)', min: 0, max: 1, step: 0.01, fmt: (v) => `${Math.round(v * 100)}%` },
     { key: 'warmMeltBoost', label: 'Warm-Phase Melt Boost', min: 0, max: 4, step: 0.05, fmt: (v) => `${Number(v).toFixed(2)}×` },
     { key: 'runoffErosion', label: 'Meltwater Channel Cutting', min: 0, max: 2, step: 0.05, fmt: (v) => `${Number(v).toFixed(2)}×` },
     { key: 'sedimentCapacity', label: 'Meltwater Sediment Capacity', min: 0, max: 2, step: 0.05, fmt: (v) => `${Number(v).toFixed(2)}×` },
@@ -528,10 +534,31 @@ const INSPECTOR_SCHEMAS = {
     hasSeed: true,
   },
   [ENVIRONMENT_LAYER_TYPE]: {
-    selects: [],
+    selects: [
+      {
+        key: 'seasonalClimateMode',
+        label: 'Seasonal Climate',
+        options: [
+          { value: 1, label: 'Location seasons — latitude + climate regime' },
+          { value: 0, label: 'Off — constant annual forcing' },
+        ],
+      },
+      {
+        key: 'climateRegime',
+        label: 'Climate Regime / Location Type',
+        options: CLIMATE_REGIMES.map((regime) => ({ value: regime.code, label: regime.label })),
+      },
+    ],
     sliders: [
       { key: 'sunAzimuth', label: 'Sun Azimuth', min: -180, max: 180, step: 1, fmt: (v) => `${Math.round(v)}°`, liveParam: true },
       { key: 'sunElevation', label: 'Sun Elevation', min: 4, max: 85, step: 1, fmt: (v) => `${Math.round(v)}°`, liveParam: true },
+      { key: 'climateLatitudeDeg', label: 'Latitude (negative = Southern Hemisphere)', min: -82, max: 82, step: 0.5, fmt: (v) => formatLatitude(v), liveParam: true },
+      { key: 'climateStartDayOfYear', label: 'Simulation Start Day of Year', min: 1, max: 365, step: 1, fmt: (v) => `Day ${Math.round(v)} / 365`, liveParam: true },
+      { key: 'climateStepsPerYear', label: 'Simulation Steps per Climate Year', min: 24, max: 1460, step: 12, fmt: (v) => `${Math.round(v)} steps/yr`, liveParam: true },
+      { key: 'climateYearsToSimulate', label: 'Years per Simulate Run (0 = continuous)', min: 0, max: 100, step: 1, fmt: (v) => (Number(v) <= 0 ? 'Continuous' : `${Math.round(v)} years`), liveParam: true },
+      { key: 'climateInterannualVariability', label: 'Year-to-Year Wet/Dry + Warm/Cold Variation', min: 0, max: 1, step: 0.02, fmt: pctFmt, liveParam: true },
+      { key: 'climatePrecipitationScale', label: 'Seasonal Precipitation Scale', min: 0, max: 3, step: 0.05, fmt: (v) => `${Number(v).toFixed(2)}×`, liveParam: true },
+      { key: 'climateTemperatureOffsetC', label: 'Location Temperature Offset (Altitude / Local Adjustment)', min: -15, max: 15, step: 0.25, fmt: (v) => `${Number(v) > 0 ? '+' : ''}${Number(v).toFixed(1)}°C`, liveParam: true },
     ],
     hasSeed: false,
     liveOnly: true,
@@ -805,6 +832,11 @@ export class ErosionLayerStackUI {
     const masterLabel = state.running
       ? '⏸ Pause simulation'
       : (state.mode === 'solo' ? `▶ Simulate ${solo ? solo.short : 'season'} only` : '▶ Simulate enabled seasons');
+    const climateState = state.climate?.climate || null;
+    const climateRun = state.climate?.run || null;
+    const climateLine = climateState?.enabled
+      ? `Climate Year ${climateState.year} · ${climateState.monthName} ${climateState.dayOfMonth} · ${climateState.seasonName} · ${climateState.regime.label} · ${formatLatitude(climateState.params.climateLatitudeDeg)}${climateRun?.targetYears > 0 ? ` · ${climateRun.runElapsedYears.toFixed(1)}/${climateRun.targetYears} yr this run` : ' · continuous'}`
+      : 'Seasonal climate off — enabled processes use constant annual forcing.';
 
     const chips = state.processes.map((proc) => {
       const armed = state.mode === 'solo' ? proc.solo : proc.enabled;
@@ -828,13 +860,14 @@ export class ErosionLayerStackUI {
         <span class="tp-sim-live-dot ${state.running ? 'running' : ''}" title="${state.running ? 'Simulation running' : 'Simulation paused'}"></span>
       </div>
       <div class="tp-sim-status ${state.running ? 'running' : ''}">${this._esc(status)}</div>
+      <div class="tp-sim-note">${this._esc(climateLine)}</div>
       <div class="tp-sim-modes" role="group" aria-label="Simulation playback mode">
         <button type="button" data-sim-mode="solo" class="${state.mode === 'solo' ? 'active' : ''}" title="Run exactly one season at a time: snow, then rain, then wind, then chemical">One at a time</button>
         <button type="button" data-sim-mode="all" class="${state.mode === 'all' ? 'active' : ''}" title="Run every armed season together">Simultaneous</button>
       </div>
       <div class="tp-sim-chips">${chips}</div>
       <button type="button" class="tp-sim-master" data-sim-master="1">${masterLabel}</button>
-      <div class="tp-sim-note">Stack edits auto-pause. Chemical transport follows Rain or Simultaneous flow.</div>
+      <div class="tp-sim-note">Stack edits auto-pause. The location calendar advances only during live steps; Environment sets latitude, regime, steps/year and run length.</div>
     `;
 
     this.elSimPanel.querySelectorAll('[data-sim-mode]').forEach((btn) => {
@@ -1192,13 +1225,66 @@ export class ErosionLayerStackUI {
     }
   }
 
+  _seasonalClimateCardHtml(layer, iconColor) {
+    const params = normalizeSeasonalClimateParams(layer.params);
+    const elapsedYears = Math.max(0, Number(this.engine?.climateElapsedYears) || 0);
+    const seed = Number(this.engine?.params?.seed) || 4029;
+    const state = seasonalClimateAt(params, elapsedYears, seed);
+    const engineRun = typeof this.engine?.getSeasonalClimateRunState === 'function'
+      ? this.engine.getSeasonalClimateRunState(state)
+      : null;
+    const runStart = Math.max(0, Number(this.engine?.climateRunStartYears) || 0);
+    const run = engineRun || {
+      runElapsedYears: Math.max(0, elapsedYears - runStart),
+      targetYears: params.climateYearsToSimulate,
+      progress: params.climateYearsToSimulate > 0
+        ? Math.max(0, Math.min(1, Math.max(0, elapsedYears - runStart) / params.climateYearsToSimulate))
+        : 0,
+      complete: false,
+    };
+    const substeps = Math.max(1, Number(this.engine?.params?.substepsPerFrame) || 2);
+    const secondsPerYear = params.climateStepsPerYear / (60 * substeps);
+    const runSeconds = run.targetYears > 0 ? secondsPerYear * run.targetYears : 0;
+    const hemisphereText = state.hemisphere === 'south'
+      ? 'Southern hemisphere — seasons shifted six months'
+      : state.hemisphere === 'north'
+        ? 'Northern hemisphere'
+        : 'Equatorial — weak temperature season, wet/dry timing dominates';
+    const runText = !state.enabled
+      ? 'Seasonal climate off'
+      : run.targetYears > 0
+        ? `${run.runElapsedYears.toFixed(2)} / ${run.targetYears} years · ${Math.round(run.progress * 100)}%`
+        : `${elapsedYears.toFixed(2)} years elapsed · continuous`;
+    const precipText = `${Math.round(state.referenceAnnualPrecipMm)} mm/yr`;
+    const snowText = `${state.referenceAnnualSnowMmSWE < 10 ? state.referenceAnnualSnowMmSWE.toFixed(1) : Math.round(state.referenceAnnualSnowMmSWE)} mm snow-water/yr`;
+    return `
+      <section class="tp-property-card tp-seasonal-climate-card">
+        <h2><i style="background:${iconColor}"></i><span>Location Seasonal Climate</span></h2>
+        <p class="tp-card-note"><strong>${this._esc(state.regime.label)}.</strong> ${this._esc(state.regime.description)} Latitude reverses the calendar in the southern hemisphere and weakens the temperature swing near the equator. Rain/Snow/Wind/Chemical layers still own their annual magnitudes and play/pause gates; this climate decides when precipitation falls, whether it is rain or snow, when pore water freezes, when snow melts and how fast water evaporates.</p>
+        <div class="tp-frost-diagnostics">
+          <div><span>Climate calendar</span><strong>Year ${state.year} · ${this._esc(state.monthName)} ${state.dayOfMonth}</strong><small>${this._esc(state.seasonName)} · ${this._esc(hemisphereText)}</small></div>
+          <div><span>Reference temperature</span><strong>${state.temperatureC.toFixed(1)}°C · night ${state.nightMinC.toFixed(1)}°C</strong><small>noon sun ${state.noonSunElevationDeg.toFixed(0)}° at this latitude/date; terrain altitude and aspect still modify snow/frost locally</small></div>
+          <div><span>Precipitation now</span><strong>Rain ${state.rainMultiplier.toFixed(2)}× · Snow ${state.snowMultiplier.toFixed(2)}×</strong><small>${state.stormPulse ? 'short storm pulse active' : 'background/dry-spell forcing'} · total precipitation ${state.precipitationMultiplier.toFixed(2)}×</small></div>
+          <div><span>Melt & drying</span><strong>Melt ${state.meltMultiplier.toFixed(2)}× · Evap ${state.evaporationMultiplier.toFixed(2)}×</strong><small>valley snow retention ${Math.round(state.lowElevationRetention * 100)}%; melt only uses water already stored as snow/ice</small></div>
+          <div><span>Frost & moisture</span><strong>Frost ${state.frostMultiplier.toFixed(2)}× · Moisture ${state.moistureMultiplier.toFixed(2)}×</strong><small>climate normal ≈ ${state.frostNightsPerYear} frost nights/yr; with a frost-capable Snow layer (even at zero snowfall), a dry high desert can freeze existing pore water without building a snowpack</small></div>
+          <div><span>Climate normal</span><strong>${precipText} · ${snowText}</strong><small>regime reference before the individual Rain/Snow layer magnitudes; ${formatLatitude(params.climateLatitudeDeg)}</small></div>
+          <div><span>Simulated run</span><strong>${this._esc(runText)}</strong><small>${params.climateStepsPerYear} steps/yr ≈ ${secondsPerYear.toFixed(1)} sec/yr at ${substeps} substeps/frame${runSeconds ? ` · about ${runSeconds.toFixed(0)} sec for this run` : ''}</small></div>
+          <div><span>Year character</span><strong>${state.enabled ? `${state.temperatureAnomalyC >= 0 ? '+' : ''}${state.temperatureAnomalyC.toFixed(1)}°C · precip ${(state.wetAnomaly ?? 1).toFixed(2)}×` : 'constant'}</strong><small>deterministic wet/dry and warm/cold variation makes each simulated year related, not identical</small></div>
+        </div>
+        <p class="tp-card-note">Examples: a hot arid desert normal is only ~35 mm/yr with almost no snow and rare storm pulses; a semi-arid high desert has sparse rain/snow but cold clear nights, so—when a frost effect layer is present—existing water can freeze in rock pores. Environment never adds that process to a Wind+Rain-only stack by itself. Set Years per Simulate Run to 20 and the live simulation auto-pauses after twenty location years; stack bakes do not consume calendar time.</p>
+      </section>`;
+  }
+
   _snowFrostCardHtml(layer, iconColor) {
     const effects = this._snowEffectsForInspector(layer);
     const frost = normalizeFrostParams(layer.params);
     Object.assign(layer.params, frost);
     const selected = effects.find((effect) => effect.id === this.selectedSnowEffectId) || effects[0] || null;
     const derived = deriveSnowEffectWeights(effects);
-    const meltCycle = snowmeltCycleAtStep(derived, this.engine.cryoStepCount ?? this.engine.stepCount ?? 0);
+    const seasonalClimate = typeof this.engine._getSeasonalClimate === 'function'
+      ? this.engine._getSeasonalClimate()
+      : seasonalClimateAt(this.engine.params || {}, this.engine.climateElapsedYears || 0, this.engine.params?.seed || 4029);
+    const meltCycle = snowmeltCycleAtStep(derived, this.engine.cryoStepCount ?? this.engine.stepCount ?? 0, seasonalClimate);
     const annual = estimateAnnualFrostWindow(frost, 0.35);
     const cellSizeM = (this.engine.params.worldSpan || 500) / Math.max(32, this.engine.gridRes || this.pipeline.R || 256);
     const visibleMm = visibleCrackThresholdMm(cellSizeM, frost.frostVisibleCrackMm);
@@ -1291,7 +1377,7 @@ export class ErosionLayerStackUI {
     return `
       <section class="tp-property-card tp-snow-frost-card">
         <h2><i style="background:${iconColor}"></i><span>Frost Cracking, Pitting & Snow Effect Stack</span></h2>
-        <p class="tp-card-note"><strong>Why old Snow could bury summits:</strong> it converted snowy bedrock to sediment immediately in the same cell. Frost debris is real, but real ice-lens damage needs water, a thermal gradient and time. This model stores hairline cracks invisibly, releases pits only after both thresholds below are crossed, then exports loosened debris through creep, meltwash, avalanches and subglacial till. Snowfall now lands across the storm field at every elevation; the Snowline slider is the long-term melt-equilibrium line, so cold-phase valley snow can persist and later become erosive snowmelt runoff without Rain being enabled.</p>
+        <p class="tp-card-note"><strong>Why old Snow could bury summits:</strong> it converted snowy bedrock to sediment immediately in the same cell. Frost debris is real, but real ice-lens damage needs water, a thermal gradient and time. This model stores hairline cracks invisibly, releases pits only after both thresholds below are crossed, then exports loosened debris through creep, meltwash, avalanches and subglacial till. Snowfall lands across the storm field at every elevation; the Snowline slider is the long-term melt-equilibrium line. The locked Environment layer's latitude/regime calendar now supplies winter accumulation, valley retention, frost moisture and warm-season finite melt, so stored snow can become erosive runoff without Rain being enabled.</p>
         <label class="tp-field-row">
           <span>Snow Effect Preset</span>
           <select class="tp-select" id="tp-snow-effect-preset">${presetOptions}</select>
@@ -1308,7 +1394,7 @@ export class ErosionLayerStackUI {
           <div><span>Saturation efficacy</span><strong>${Math.round(annual.saturationEfficacy * 100)}%</strong><small>peak at ${Math.round(frost.frostSaturationPeak * 100)}% pore saturation</small></div>
           <div><span>Visible crack gate</span><strong>${visibleMm.toFixed(1)} mm</strong><small>= max(requested ${frost.frostVisibleCrackMm.toFixed(1)} mm, ${(cellSizeM * 8).toFixed(1)} mm at ${cellSizeM.toFixed(2)} m cells)</small></div>
           <div><span>Damage gate</span><strong>${Math.round(frost.frostDamageThreshold * 100)}%</strong><small>below this, natural view and geometry stay unchanged</small></div>
-          <div><span>Snowmelt cycle</span><strong>${meltCycle.active ? `${Math.round(meltCycle.phase * 100)}% · ${meltCycle.season < 0 ? 'cold accumulation' : 'warm/dry melt'}` : 'not in stack'}</strong><small>${meltCycle.active ? `snowfall ${meltCycle.snowfallMultiplier.toFixed(2)}× · melt ${meltCycle.meltMultiplier.toFixed(2)}× · valley retention ${Math.round(meltCycle.lowElevationRetention * 100)}%` : 'add Seasonal snowmelt cycle & runoff erosion to enable it'}</small></div>
+          <div><span>Location snow season</span><strong>${meltCycle.climateDriven ? `Year ${seasonalClimate.year} · ${seasonalClimate.monthName} ${seasonalClimate.dayOfMonth} · ${seasonalClimate.seasonName}` : (meltCycle.active ? `${Math.round(meltCycle.phase * 100)}% · ${meltCycle.season < 0 ? 'cold accumulation' : 'warm/dry melt'}` : 'seasonal climate off')}</strong><small>${meltCycle.climateDriven ? `${seasonalClimate.regime.label} · snowfall ${meltCycle.snowfallMultiplier.toFixed(2)}× · melt ${meltCycle.meltMultiplier.toFixed(2)}× · valley retention ${Math.round(meltCycle.lowElevationRetention * 100)}% · runoff effect ${meltCycle.active ? 'on' : 'off'}` : (meltCycle.active ? `fallback cycle · snowfall ${meltCycle.snowfallMultiplier.toFixed(2)}× · melt ${meltCycle.meltMultiplier.toFixed(2)}× · valley retention ${Math.round(meltCycle.lowElevationRetention * 100)}%` : 'enable Location seasons on Environment, or add the snowmelt-runoff effect for the fallback cycle')}</small></div>
         </div>
         <div class="tp-frost-weight-row">${weightChips}</div>
         <details class="tp-frost-globals" open>
@@ -1808,7 +1894,7 @@ export class ErosionLayerStackUI {
     let controlsHtml = '';
     if (environmentLayer) {
       controlsHtml += `
-        <p class="tp-card-note tp-environment-lock-note">${SVG_ICONS.lock}<span><strong>Locked as the last layer.</strong> Environment cannot be added, duplicated, moved, muted, masked or deleted elsewhere. Sun changes update lighting live and do not rebuild or pause the terrain simulation.</span></p>`;
+        <p class="tp-card-note tp-environment-lock-note">${SVG_ICONS.lock}<span><strong>Locked as the last layer.</strong> Environment cannot be added, duplicated, moved, muted, masked or deleted elsewhere. Sun and seasonal-climate changes update live state without rebuilding or erasing terrain; the climate calendar advances only while a simulation process is running.</span></p>`;
     }
     for (const sel of schema.selects) {
       const curVal = layer.params[sel.key] ?? 0;
@@ -1909,6 +1995,7 @@ export class ErosionLayerStackUI {
         </section>`;
     }
 
+    const seasonalClimateCardHtml = environmentLayer ? this._seasonalClimateCardHtml(layer, iconColor) : '';
     const snowFrostCardHtml = layer.type === 'aeolian-glacial' ? this._snowFrostCardHtml(layer, iconColor) : '';
     const strataColumnCardHtml = layer.type === 'stratigraphic-beds' ? this._strataColumnCardHtml(layer, iconColor) : '';
 
@@ -2086,6 +2173,7 @@ export class ErosionLayerStackUI {
       </section>
 
       ${authoringCardHtml}
+      ${seasonalClimateCardHtml}
       ${snowFrostCardHtml}
       ${strataColumnCardHtml}
       ${simCardHtml}
@@ -2129,6 +2217,10 @@ export class ErosionLayerStackUI {
         this.updateSplineGizmoOverlay();
         this.updateWindDebugOverlay();
         this.updateSceneCaption();
+        if (environmentLayer) {
+          this.renderInspector();
+          this.renderSimulationPanel();
+        }
       });
     });
 
@@ -2166,6 +2258,8 @@ export class ErosionLayerStackUI {
           this.pipeline.applyLiveEnvironmentLayerParams(layer);
           this.renderStackList();
           this.updateSceneCaption();
+          this.renderInspector();
+          this.renderSimulationPanel();
           return;
         }
         const isLiveWindParam = layer.type === 'wind-erosion' && key !== 'bakeSteps';

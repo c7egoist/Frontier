@@ -80,6 +80,15 @@ import {
   sampleStrataColumn,
   strataColumnThickness,
 } from '../src/erosion/stratigraphic-column.js';
+import {
+  CLIMATE_REGIMES,
+  DEFAULT_SEASONAL_CLIMATE_PARAMS,
+  climateDefaultsForLandscape,
+  climateRegimeFor,
+  formatLatitude,
+  normalizeSeasonalClimateParams,
+  seasonalClimateAt,
+} from '../src/erosion/seasonal-climate.js';
 import { checkGlslScopes } from './glsl-scope-check.mjs';
 
 const ALL_SHADER_EXPORTS = [
@@ -883,8 +892,8 @@ test('Environment owns the Sun as one locked last layer and cannot be added else
   assert.equal(spec.singleton, true);
   assert.equal(spec.addable, false, 'Environment must not be offered as an addable layer');
   assert.equal(spec.lockedPosition, 'last');
-  assert.deepEqual(spec.reads, ['Sun Azimuth', 'Sun Elevation']);
-  assert.deepEqual(spec.writes, ['Sun Direction']);
+  assert.deepEqual(spec.reads, ['Sun Azimuth', 'Sun Elevation', 'Latitude', 'Climate Regime']);
+  assert.deepEqual(spec.writes, ['Sun Direction', 'Seasonal Climate']);
   assert.equal(LAYER_CATEGORIES.environment.color, '#ffd166');
 
   // Direct construction cannot smuggle in a renamed, muted, unlocked or
@@ -900,7 +909,7 @@ test('Environment owns the Sun as one locked last layer and cannot be added else
   assert.equal(canonical.enabled, true);
   assert.equal(canonical.locked, true);
   assert.equal(canonical.mask.enabled, false);
-  assert.deepEqual(canonical.params, { sunAzimuth: 101, sunElevation: 44 });
+  assert.deepEqual(canonical.params, { sunAzimuth: 101, sunElevation: 44, ...DEFAULT_SEASONAL_CLIMATE_PARAMS });
 
   // Normalization keeps the first Environment, discards duplicates, pins it
   // to the final row, repairs system flags, and lets its own sun values win.
@@ -924,7 +933,7 @@ test('Environment owns the Sun as one locked last layer and cannot be added else
   assert.equal(malformed.enabled, true);
   assert.equal(malformed.locked, true);
   assert.equal(malformed.mask.enabled, false);
-  assert.deepEqual(malformed.params, { sunAzimuth: 101, sunElevation: 44 });
+  assert.deepEqual(malformed.params, { sunAzimuth: 101, sunElevation: 44, ...DEFAULT_SEASONAL_CLIMATE_PARAMS });
 
   const makePipelineHarness = (layers) => {
     const harness = Object.create(TerrainStackPipeline.prototype);
@@ -998,12 +1007,19 @@ test('Environment owns the Sun as one locked last layer and cannot be added else
   // terrain evaluation (and therefore without the stack-edit auto-pause).
   environment.params.sunAzimuth = 999;
   environment.params.sunElevation = -50;
+  environment.params.climateRegime = 4;
+  environment.params.climateLatitudeDeg = -120;
+  environment.params.climateYearsToSimulate = 20;
   const evalBeforeSun = pipeline.evalCount;
   assert.equal(pipeline.applyLiveEnvironmentLayerParams(environment), true);
   assert.equal(pipeline.engine.params.sunAzimuth, 180);
   assert.equal(pipeline.engine.params.sunElevation, 4);
   assert.equal(environment.params.sunAzimuth, 180);
   assert.equal(environment.params.sunElevation, 4);
+  assert.equal(pipeline.engine.params.climateRegime, 4);
+  assert.equal(pipeline.engine.params.climateLatitudeDeg, -82, 'Latitude is normalised when copied live to the engine');
+  assert.equal(environment.params.climateLatitudeDeg, -82);
+  assert.equal(pipeline.engine.params.climateYearsToSimulate, 20);
   assert.equal(pipeline.evalCount, evalBeforeSun);
   assert.deepEqual(pipeline.simulationProcessesForLayer(environment), [], 'Environment is not a simulation season');
 
@@ -1045,6 +1061,210 @@ test('Environment owns the Sun as one locked last layer and cannot be added else
     'Environment lock chip stays rounded like the surrounding controls');
   assert.ok(htmlSrc.includes('BOTTOM — BASE FIRST · ENVIRONMENT LAST (LOCKED)'),
     'Outliner footer explains Base terrain order and locked Environment last');
+});
+
+test('Location seasonal climate reverses hemispheres, separates desert rain/snow/frost, and auto-stops after simulated years', () => {
+  const at = (params, startDay, elapsedYears = 0) => seasonalClimateAt({
+    seasonalClimateMode: 1,
+    climateStartDayOfYear: startDay,
+    ...params,
+  }, elapsedYears, 4029);
+
+  assert.equal(CLIMATE_REGIMES.length, 9);
+  assert.equal(DEFAULT_SEASONAL_CLIMATE_PARAMS.climateStepsPerYear, 240);
+  assert.equal(DEFAULT_SEASONAL_CLIMATE_PARAMS.climateYearsToSimulate, 20);
+  assert.equal(formatLatitude(-13), '13°S');
+  assert.deepEqual(
+    normalizeSeasonalClimateParams({ climateLatitudeDeg: 999, climateStepsPerYear: 1, climateYearsToSimulate: 999 }),
+    {
+      ...DEFAULT_SEASONAL_CLIMATE_PARAMS,
+      climateLatitudeDeg: 82,
+      climateStepsPerYear: 24,
+      climateYearsToSimulate: 250,
+    },
+  );
+
+  const northJan = at({ climateRegime: climateRegimeFor('alpine-continental').code, climateLatitudeDeg: 46 }, 15);
+  const northJul = at({ climateRegime: climateRegimeFor('alpine-continental').code, climateLatitudeDeg: 46 }, 197);
+  const southJan = at({ climateRegime: climateRegimeFor('alpine-continental').code, climateLatitudeDeg: -46 }, 15);
+  const southJul = at({ climateRegime: climateRegimeFor('alpine-continental').code, climateLatitudeDeg: -46 }, 197);
+  assert.equal(northJan.seasonName, 'Winter');
+  assert.equal(southJan.seasonName, 'Summer');
+  assert.ok(northJul.temperatureC > northJan.temperatureC + 15);
+  assert.ok(southJan.temperatureC > southJul.temperatureC + 15);
+  assert.ok(northJan.snowMultiplier > northJul.snowMultiplier * 10);
+  assert.ok(southJul.snowMultiplier > southJan.snowMultiplier * 10);
+  assert.ok(northJul.meltMultiplier > northJan.meltMultiplier + 1);
+
+  const equator = at({ climateRegime: climateRegimeFor('tropical-highland').code, climateLatitudeDeg: 0 }, 15);
+  assert.ok(equator.temperatureAmplitudeScale < 0.3, 'Equatorial temperature seasonality is strongly damped');
+  assert.ok(['Wet season', 'Dry season'].includes(equator.seasonName));
+
+  const medWinter = at({ climateRegime: climateRegimeFor('mediterranean').code, climateLatitudeDeg: 38 }, 15);
+  const medSummer = at({ climateRegime: climateRegimeFor('mediterranean').code, climateLatitudeDeg: 38 }, 197);
+  assert.ok(medWinter.rainMultiplier > medSummer.rainMultiplier * 8, 'Mediterranean rain is winter-dominant');
+  const monsoonWinter = at({ climateRegime: climateRegimeFor('monsoon').code, climateLatitudeDeg: 25 }, 15);
+  const monsoonSummer = at({ climateRegime: climateRegimeFor('monsoon').code, climateLatitudeDeg: 25 }, 197);
+  assert.ok(monsoonSummer.rainMultiplier > monsoonWinter.rainMultiplier * 8, 'Monsoon rain is warm-season dominant');
+
+  const hotDesert = at({ climateRegime: climateRegimeFor('arid-desert').code, climateLatitudeDeg: 24 }, 15);
+  assert.equal(Math.round(hotDesert.referenceAnnualPrecipMm), 35, 'Hot desert normal is only a few tens of millimetres per year');
+  assert.ok(hotDesert.referenceAnnualSnowMmSWE < 1, 'Hot desert snow-water normal is below one millimetre');
+  assert.ok(hotDesert.snowMultiplier < 0.01 && hotDesert.precipitationMultiplier < 0.1);
+  const highDesert = at({ climateRegime: climateRegimeFor('semi-arid-high-desert').code, climateLatitudeDeg: 39 }, 15);
+  assert.ok(highDesert.nightMinC < -5 && highDesert.frostMultiplier > 1,
+    'High-desert winter nights freeze existing pore water');
+  assert.ok(highDesert.precipitationMultiplier < 0.2 && highDesert.snowMultiplier < 0.1,
+    'High-desert frost does not require or manufacture a deep snowpack');
+
+  const yearCharacters = new Set([0, 1, 2, 3, 4].map((year) => at(
+    { climateRegime: 0, climateLatitudeDeg: 46 },
+    15,
+    year,
+  ).temperatureAnomalyC.toFixed(2)));
+  assert.ok(yearCharacters.size > 1, 'Consecutive simulated years have deterministic warm/cold variation');
+
+  assert.equal(climateDefaultsForLandscape('namib-erg-dunes').climateLatitudeDeg, -23);
+  assert.equal(climateRegimeFor(climateDefaultsForLandscape('namib-erg-dunes').climateRegime).id, 'arid-desert');
+  assert.equal(climateRegimeFor(climateDefaultsForLandscape('icelandic-highlands').climateRegime).id, 'subarctic-continental');
+  for (const preset of Object.values(TERRAIN_STACK_PRESETS)) {
+    const stack = preset.layers();
+    const environment = stack.find((layer) => layer.type === ENVIRONMENT_LAYER_TYPE);
+    for (const key of Object.keys(DEFAULT_SEASONAL_CLIMATE_PARAMS)) {
+      assert.ok(Number.isFinite(Number(environment.params[key])), `${preset.id} Environment missing ${key}`);
+    }
+  }
+  const sahara = TERRAIN_STACK_PRESETS['sahara-tassili-erg'].layers();
+  assert.equal(climateRegimeFor(sahara.at(-1).params.climateRegime).id, 'arid-desert');
+  assert.ok(!sahara.some((layer) => layer.type === 'aeolian-glacial'), 'Desert climate must not invent a Snow layer');
+  const utah = TERRAIN_STACK_PRESETS['utah-wind-rain-canyon'].layers();
+  assert.equal(climateRegimeFor(utah.at(-1).params.climateRegime).id, 'semi-arid-high-desert');
+  assert.ok(!utah.some((layer) => ['aeolian-glacial', 'chemical-weathering', 'thermal-talus'].includes(layer.type)),
+    'Utah remains Wind + Rain only under its high-desert climate');
+  const rainbow = TERRAIN_STACK_PRESETS['frost-pitted-rainbow-range'].layers();
+  assert.equal(rainbow.at(-1).params.climateLatitudeDeg, -13);
+  assert.equal(climateRegimeFor(rainbow.at(-1).params.climateRegime).id, 'tropical-highland');
+
+  const climateDrivenJan = snowmeltCycleAtStep([], 9999, northJan);
+  const climateDrivenJul = snowmeltCycleAtStep([], 0, northJul);
+  assert.equal(climateDrivenJan.climateDriven, true);
+  assert.ok(climateDrivenJan.snowfallMultiplier > climateDrivenJul.snowfallMultiplier);
+  assert.ok(climateDrivenJul.meltMultiplier > climateDrivenJan.meltMultiplier);
+
+  const engine = Object.create(GpuErosionEngine.prototype);
+  engine.stepCount = 0;
+  engine.cryoStepCount = 0;
+  engine.climateElapsedYears = 0;
+  engine.climateRunStartYears = 0;
+  engine.climateRunActive = false;
+  engine.climateRunCompleted = false;
+  engine._seasonalClimateSuppressed = false;
+  engine.telemetry = {};
+  engine.params = {
+    ...DEFAULT_EROSION_PARAMS,
+    emitterMode: 'all-weather',
+    seasonalClimateMode: 1,
+    climateRegime: 0,
+    climateLatitudeDeg: 46,
+    climateStartDayOfYear: 15,
+    climateStepsPerYear: 240,
+    climateYearsToSimulate: 20,
+    rainIntensity: 1,
+    snowfallRate: 0.8,
+    simHydraulicPlaying: true,
+    simCryoPlaying: true,
+    simWindPlaying: true,
+    simRockfallPlaying: false,
+    simChemicalPlaying: true,
+  };
+  const winterUniforms = engine._getClimateUniforms();
+  assert.equal(winterUniforms.speciesVec[0], 0, 'Deep alpine winter precipitation is not emitted as rain');
+  assert.ok(winterUniforms.speciesVec[1] > 0.1 && winterUniforms.snowVec[1] > 0.5);
+  engine.climateElapsedYears = 0.5;
+  const summerUniforms = engine._getClimateUniforms();
+  assert.equal(summerUniforms.speciesVec[1], 0, 'Trace summer snow flakes are cut before species normalisation');
+  assert.ok(summerUniforms.snowVec[1] > 0 && summerUniforms.snowVec[1] < 0.05,
+    'A trace of high-altitude Eulerian snowfall can remain without rendering a valley snowstorm');
+  assert.ok(summerUniforms.effectiveRainIntensity > 0.2 && summerUniforms.meltCycle.meltMultiplier > winterUniforms.meltCycle.meltMultiplier);
+
+  engine.params.simHydraulicPlaying = false;
+  const summerSnowSolo = engine._getClimateUniforms();
+  assert.equal(summerSnowSolo.effectiveRainIntensity, 0, 'Seasonal climate cannot re-enable paused Hydraulic rain');
+  assert.equal(summerSnowSolo.speciesVec[0], 0);
+  assert.equal(engine._getSpeciesVisUniform()[1], 0, 'No fake visible snowfall remains during the warm dry phase');
+
+  engine.params = {
+    ...engine.params,
+    emitterMode: 'sky-rain',
+    climateRegime: climateRegimeFor('semi-arid-high-desert').code,
+    climateLatitudeDeg: 39,
+    rainIntensity: DEFAULT_EROSION_PARAMS.rainIntensity,
+    snowfallRate: 0,
+    simHydraulicPlaying: true,
+    simCryoPlaying: false,
+    simWindPlaying: false,
+  };
+  engine.climateElapsedYears = 0;
+  assert.deepEqual(engine._getClimateUniforms().speciesVec, [0, 0, 0, 0],
+    'A high-desert dry spell is below the visible-rain cutoff instead of becoming a normalised storm');
+  assert.equal(engine._getSpeciesVisUniform()[0], 0);
+
+  engine._seasonalClimateSuppressed = true;
+  const suppressed = engine._getSeasonalClimate();
+  assert.equal(suppressed.enabled, false, 'Stack bakes use annual-neutral seasonal forcing');
+  assert.equal(suppressed.rainMultiplier, 1);
+  assert.equal(suppressed.snowMultiplier, 1);
+  engine._seasonalClimateSuppressed = false;
+
+  engine.params = {
+    ...engine.params,
+    climateRegime: 0,
+    climateLatitudeDeg: 46,
+    climateStepsPerYear: 240,
+    climateYearsToSimulate: 20,
+  };
+  engine.resetSeasonalClimateClock();
+  engine.beginSeasonalClimateRun();
+  for (let i = 0; i < 240; i++) engine._advanceSeasonalClimateClock();
+  engine.beginSeasonalClimateRun();
+  assert.equal(engine.climateRunStartYears, 0, 'Resuming a paused run does not restart its year target');
+  let advanced = 240;
+  let completion = null;
+  while (advanced <= 4802) {
+    completion = engine._advanceSeasonalClimateClock();
+    advanced += 1;
+    if (completion.completedNow) break;
+  }
+  assert.ok(completion?.completedNow, 'Twenty-year climate run reports completion');
+  assert.ok(Math.abs(engine.climateElapsedYears - 20) < 0.01, `Expected ~20 years, got ${engine.climateElapsedYears}`);
+  assert.equal(engine.getSeasonalClimateRunState().complete, true);
+  const completedElapsed = engine.climateElapsedYears;
+  engine._advanceSeasonalClimateClock();
+  assert.equal(engine.climateElapsedYears, completedElapsed, 'A completed run does not keep consuming years');
+  engine.beginSeasonalClimateRun();
+  assert.equal(engine.getSeasonalClimateRunState().progress, 0, 'Starting after completion begins a fresh run from the current date');
+
+  const inspector = Object.create(ErosionLayerStackUI.prototype);
+  inspector.engine = engine;
+  const climateHtml = inspector._seasonalClimateCardHtml(sahara.at(-1), '#ffd166');
+  assert.ok(climateHtml.includes('Hot arid desert') && climateHtml.includes('35 mm/yr'));
+  assert.ok(climateHtml.includes('Climate calendar') && climateHtml.includes('Simulated run'));
+
+  const engineSrc = fs.readFileSync(new URL('../src/erosion/gpu-erosion-engine.js', import.meta.url), 'utf8');
+  const pipelineSrc = fs.readFileSync(new URL('../src/erosion/terrain-stack-pipeline.js', import.meta.url), 'utf8');
+  const uiSrc = fs.readFileSync(new URL('../src/erosion/layer-stack-ui.js', import.meta.url), 'utf8');
+  const mainSrc = fs.readFileSync(new URL('../src/app/main.js', import.meta.url), 'utf8');
+  const htmlSrc = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  for (const token of ['_advanceSeasonalClimateClock', 'suppressSeasonalClimate', 'climate.effectiveRainIntensity', 'climate.effectiveEvaporation', 'Seasonal climate run complete']) {
+    assert.ok(engineSrc.includes(token), `Engine seasonal-climate wiring missing ${token}`);
+  }
+  for (const token of ['beginSeasonalClimateRun', 'resetSeasonalClimateClock', '_seasonalClimateSuppressed = true', 'climateDefaultsForLandscape']) {
+    assert.ok(pipelineSrc.includes(token), `Pipeline seasonal-climate wiring missing ${token}`);
+  }
+  for (const token of ["key: 'seasonalClimateMode'", "key: 'climateRegime'", "key: 'climateLatitudeDeg'", "key: 'climateYearsToSimulate'", 'Location Seasonal Climate']) {
+    assert.ok(uiSrc.includes(token), `Environment Inspector missing ${token}`);
+  }
+  assert.ok(mainSrc.includes('er-stat-climate') && htmlSrc.includes('id="er-stat-climate"'));
 });
 
 test('Bottom-to-top layer order genuinely changes terrain output and 3D SDF Cave mesher carves volumetric overhangs', () => {
@@ -2833,7 +3053,7 @@ test('Snow frost cracks incubate below terrain resolution before thresholded pit
   const showcaseLayers = TERRAIN_STACK_PRESETS['frost-pitted-rainbow-range'].layers();
   const snowHtml = inspector._snowFrostCardHtml(showcaseLayers.find((layer) => layer.type === 'aeolian-glacial'), '#a8e6ff');
   assert.ok(snowHtml.includes('Segregation window') && snowHtml.includes('data-snow-effect-param'));
-  assert.ok(snowHtml.includes('Snowmelt runoff') && snowHtml.includes('Snowmelt cycle'), 'Snow Inspector exposes the valley-snow / melt-cycle state');
+  assert.ok(snowHtml.includes('Snowmelt runoff') && snowHtml.includes('Location snow season') && snowHtml.includes('Year 1'), 'Snow Inspector exposes the location-calendar valley-snow / melt state');
   assert.ok(inspector.selectedSnowEffectId, 'Snow Inspector selects an effect for editing');
 
   // An explicitly emptied custom stack is snowpack-only. It must not be

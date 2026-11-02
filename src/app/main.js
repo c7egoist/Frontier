@@ -150,6 +150,7 @@ function ensureRockViewport() {
 function updateErosionHud(tel) {
   const elGrid = document.getElementById('er-stat-grid');
   const elSteps = document.getElementById('er-stat-steps');
+  const elClimate = document.getElementById('er-stat-climate');
   const elEval = document.getElementById('er-stat-eval');
   const elCaves = document.getElementById('er-stat-caves');
   const elCut = document.getElementById('er-stat-cut');
@@ -159,6 +160,19 @@ function updateErosionHud(tel) {
 
   if (elGrid) elGrid.textContent = `${tel.gridRes ?? erosionEngine?.gridRes ?? initialTerrainResolution}²`;
   if (elSteps) elSteps.textContent = String(tel.layerCount ?? tel.steps ?? 0);
+  if (elClimate) {
+    const season = String(tel.climateSeason || 'Seasonal climate off').toUpperCase();
+    elClimate.textContent = tel.climateSeason && tel.climateSeason !== 'Seasonal climate off'
+      ? `YEAR ${tel.climateYear ?? 1} · ${season}`
+      : 'OFF';
+    const target = Number(tel.climateTargetYears) || 0;
+    elClimate.title = [
+      tel.climateRegime,
+      tel.climateDate,
+      Number.isFinite(Number(tel.climateTemperatureC)) ? `${Number(tel.climateTemperatureC).toFixed(1)}°C reference` : '',
+      target > 0 ? `${(Number(tel.climateRunElapsedYears) || 0).toFixed(1)} / ${target} years this run` : 'continuous climate run',
+    ].filter(Boolean).join(' · ');
+  }
   if (elEval) elEval.textContent = `${(tel.evalMs ?? 0).toFixed(1)} ms`;
   if (elCaves) elCaves.textContent = `${(tel.caveTris ?? 0).toLocaleString()} tris`;
   if (elCut) elCut.textContent = `${(tel.coarseSedM3 ?? 0).toLocaleString()} m³`;

@@ -48,6 +48,10 @@ import {
   normalizeStrataColumn,
   packStrataColumnUniforms,
 } from './stratigraphic-column.js';
+import {
+  climateDefaultsForLandscape,
+  seasonalClimateAt,
+} from './seasonal-climate.js';
 
 const PART_TEX_W = 256;
 const PART_TEX_H = 128; // 256 * 128 = 32,768 GPU particle slots
@@ -228,6 +232,11 @@ export class GpuErosionEngine {
     this.playing = true;   // Whether simulation steps advance each frame
     this.stepCount = 0;
     this.cryoStepCount = 0;
+    this.climateElapsedYears = 0;
+    this.climateRunStartYears = 0;
+    this.climateRunActive = false;
+    this.climateRunCompleted = false;
+    this._seasonalClimateSuppressed = false;
     this.startTimeMs = performance.now();
     this.fps = 60;
     this._fpsFrames = 0;
@@ -243,6 +252,12 @@ export class GpuErosionEngine {
       waterVolumeM3: 0,
       boulders: 0,
       fps: 60,
+      climateYear: 1,
+      climateSeason: 'Seasonal climate off',
+      climateDate: '',
+      climateElapsedYears: 0,
+      climateTargetYears: 0,
+      climateRunProgress: 0,
     };
 
     // Camera state (Unreal WASD + Q/E Free-Fly + RMB Free-Look + LMB Orbit)
@@ -960,6 +975,122 @@ export class GpuErosionEngine {
     gl.uniform4fv(gl.getUniformLocation(program, 'uStrataBedsC[0]'), packed.bedsC);
   }
 
+  /**
+   * Current location climate. During terrain-stack bakes the pipeline sets
+   * `_seasonalClimateSuppressed`, returning annual-neutral forcing so a bake
+   * cannot consume calendar years or depend on the live playback date.
+   */
+  _getSeasonalClimate(elapsedYears = this.climateElapsedYears || 0) {
+    const state = seasonalClimateAt(this.params, elapsedYears, this.params.seed);
+    if (!state.enabled || !this._seasonalClimateSuppressed) return state;
+    return {
+      ...state,
+      enabled: false,
+      suppressedForBake: true,
+      seasonName: 'Stack bake · annual neutral',
+      warmth: 0,
+      astronomicalWarmth: 0,
+      temperatureAnomalyC: 0,
+      temperatureAmplitudeScale: 1,
+      precipitationMultiplier: 1,
+      rainMultiplier: 1,
+      snowMultiplier: 1,
+      meltMultiplier: 1,
+      frostMultiplier: 1,
+      moistureMultiplier: 1,
+      evaporationMultiplier: 1,
+      windMultiplier: 1,
+      lowElevationRetention: 0.34,
+      stormPulse: false,
+    };
+  }
+
+  getSeasonalClimateRunState(state = this._getSeasonalClimate()) {
+    const targetYears = Math.max(0, Number(state.params.climateYearsToSimulate) || 0);
+    const runStartYears = Math.max(0, Number(this.climateRunStartYears) || 0);
+    const runElapsedYears = Math.max(0, state.elapsedYears - runStartYears);
+    const complete = state.enabled && targetYears > 0 && (this.climateRunCompleted || runElapsedYears >= targetYears - 1e-9);
+    return {
+      enabled: state.enabled,
+      elapsedYears: state.elapsedYears,
+      runStartYears,
+      runElapsedYears,
+      targetYears,
+      targetElapsedYears: targetYears > 0 ? runStartYears + targetYears : Infinity,
+      remainingYears: targetYears > 0 ? Math.max(0, targetYears - runElapsedYears) : Infinity,
+      progress: targetYears > 0 ? Math.max(0, Math.min(1, runElapsedYears / targetYears)) : 0,
+      active: Boolean(state.enabled && this.climateRunActive && !complete),
+      complete,
+    };
+  }
+
+  getSeasonalClimateState() {
+    const climate = this._getSeasonalClimate();
+    return { climate, run: this.getSeasonalClimateRunState(climate) };
+  }
+
+  resetSeasonalClimateClock() {
+    this.climateElapsedYears = 0;
+    this.climateRunStartYears = 0;
+    this.climateRunActive = false;
+    this.climateRunCompleted = false;
+    this._syncSeasonalClimateTelemetry();
+    return this.getSeasonalClimateState();
+  }
+
+  beginSeasonalClimateRun() {
+    const state = this._getSeasonalClimate();
+    if (!state.enabled) {
+      this.climateRunActive = false;
+      return this.getSeasonalClimateState();
+    }
+    const run = this.getSeasonalClimateRunState(state);
+    if (!this.climateRunActive || run.complete) {
+      this.climateRunStartYears = state.elapsedYears;
+      this.climateRunCompleted = false;
+    }
+    this.climateRunActive = true;
+    this._syncSeasonalClimateTelemetry(state);
+    return this.getSeasonalClimateState();
+  }
+
+  _advanceSeasonalClimateClock() {
+    const before = this._getSeasonalClimate();
+    if (!before.enabled) return { climate: before, completedNow: false };
+    if (!this.climateRunActive) {
+      const run = this.getSeasonalClimateRunState(before);
+      if (run.complete) return { climate: before, completedNow: false };
+      this.climateRunActive = true;
+    }
+    const stepsPerYear = Math.max(1, before.params.climateStepsPerYear || 240);
+    this.climateElapsedYears = Math.max(0, (this.climateElapsedYears || 0) + 1 / stepsPerYear);
+    const climate = this._getSeasonalClimate();
+    const run = this.getSeasonalClimateRunState(climate);
+    const completedNow = Boolean(run.complete && !this.climateRunCompleted);
+    if (run.complete) {
+      this.climateRunCompleted = true;
+      this.climateRunActive = false;
+    }
+    return { climate, run, completedNow };
+  }
+
+  _syncSeasonalClimateTelemetry(state = this._getSeasonalClimate()) {
+    if (!this.telemetry) return state;
+    const run = this.getSeasonalClimateRunState(state);
+    this.telemetry.climateYear = state.year;
+    this.telemetry.climateSeason = state.seasonName;
+    this.telemetry.climateDate = `${state.monthName} ${state.dayOfMonth}`;
+    this.telemetry.climateElapsedYears = state.elapsedYears;
+    this.telemetry.climateRunElapsedYears = run.runElapsedYears;
+    this.telemetry.climateTargetYears = run.targetYears;
+    this.telemetry.climateRunProgress = run.progress;
+    this.telemetry.climateRunComplete = run.complete;
+    this.telemetry.climateRegime = state.regime.label;
+    this.telemetry.climateLatitudeDeg = state.params.climateLatitudeDeg;
+    this.telemetry.climateTemperatureC = state.temperatureC;
+    return state;
+  }
+
   /** Normalised Snow effect-stack weights + physical frost controls. */
   _getFrostUniforms() {
     const p = this.params;
@@ -968,7 +1099,20 @@ export class GpuErosionEngine {
     const w = derived.weights;
     const ep = derived.params;
     const cryoPlaying = p.simCryoPlaying !== false;
-    const meltCycle = snowmeltCycleAtStep(derived, this.cryoStepCount || 0);
+    const seasonalClimate = this._getSeasonalClimate();
+    const meltCycle = snowmeltCycleAtStep(derived, this.cryoStepCount || 0, seasonalClimate);
+    const seasonalFrostYears = seasonalClimate.enabled
+      ? Math.max(0, Math.min(12, frost.frostYearsPerStep * (0.30 + 0.70 * seasonalClimate.frostMultiplier)))
+      : frost.frostYearsPerStep;
+    const seasonalFrostMoisture = seasonalClimate.enabled
+      ? Math.max(0, Math.min(1, frost.frostMoisture * seasonalClimate.moistureMultiplier))
+      : frost.frostMoisture;
+    const seasonalFrostMean = seasonalClimate.enabled
+      ? frost.frostMeanTempC + seasonalClimate.temperatureAnomalyC
+      : frost.frostMeanTempC;
+    const seasonalFrostAmplitude = seasonalClimate.enabled
+      ? frost.frostSeasonalAmplitudeC * seasonalClimate.temperatureAmplitudeScale
+      : frost.frostSeasonalAmplitudeC;
     const active = cryoPlaying && derived.anyDamage;
     const sunAz = ((Number(p.sunAzimuth) || 0) * Math.PI) / 180;
     const sunEl = ((Number(p.sunElevation) || 28) * Math.PI) / 180;
@@ -976,14 +1120,15 @@ export class GpuErosionEngine {
     return {
       frost,
       derived,
+      seasonalClimate,
       meltCycle,
       meltCycleVec: meltCycle.vec,
       active,
       anyWeathering: cryoPlaying && derived.anyWeathering,
       anyTransport: cryoPlaying && derived.anyTransport,
       domain: [this.gridRes, p.worldSpan / this.gridRes, p.worldSpan, this.stepCount || 0],
-      climateA: [frost.frostMeanTempC, frost.frostSeasonalAmplitudeC, frost.frostYearsPerStep, frost.frostCrackDepthM],
-      climateB: [frost.frostThermalDiffusivity, frost.frostMoisture, frost.frostSaturationPeak, frost.frostSnowInsulationM],
+      climateA: [seasonalFrostMean, seasonalFrostAmplitude, seasonalFrostYears, frost.frostCrackDepthM],
+      climateB: [frost.frostThermalDiffusivity, seasonalFrostMoisture, frost.frostSaturationPeak, frost.frostSnowInsulationM],
       effectsA: [w.segregation, w.volumetric, w.nivation, w.legacy],
       effectsB: [w.frostCreep, w.avalanche, w.glacierPlucking, active ? 1 : 0],
       release: [frost.frostDamageThreshold, frost.frostVisibleCrackMm, frost.frostPitDepthM, frost.frostPitScaleCells],
@@ -997,7 +1142,7 @@ export class GpuErosionEngine {
       integrateD: [cryoPlaying ? w.snowmelt : 0, ep.runoffErosion, ep.sedimentCapacity, ep.infiltration],
       talusA: [p.simRockfallPlaying === false ? 0 : 1, cryoPlaying ? w.frostCreep : 0, cryoPlaying ? w.avalanche : 0, cryoPlaying ? w.glacierPlucking : 0],
       talusB: [ep.creepRate, ep.creepMinSlope, ep.coarseMobility, ep.avalancheEntrainment],
-      talusC: [frost.frostYearsPerStep, ep.avalancheSlope, ep.meltwashExport, cryoPlaying && derived.anyTransport ? 1 : 0],
+      talusC: [seasonalFrostYears, ep.avalancheSlope, ep.meltwashExport, cryoPlaying && derived.anyTransport ? 1 : 0],
       talusD: [cryoPlaying ? w.snowmelt : 0, ep.sedimentCapacity, ep.runoffErosion, meltCycle.meltMultiplier],
     };
   }
@@ -1078,13 +1223,20 @@ export class GpuErosionEngine {
   /** Per-species particle visibility for PARTICLE_RENDER_VERT (rain, snow, wind sand, rockfall). */
   _getSpeciesVisUniform() {
     const p = this.params;
+    const seasonalClimate = this._getSeasonalClimate();
+    const rainWeather = !seasonalClimate.enabled
+      || (Number(p.rainIntensity) || 0) * seasonalClimate.rainMultiplier >= 0.12;
+    const snowWeather = !seasonalClimate.enabled
+      || (Number(p.snowfallRate) || 0) * seasonalClimate.snowMultiplier >= 0.05;
     // Visibility toggles and season gates are separate controls, but a
     // frozen season's particles should not remain visible as if its weather
     // were still falling. Snow-only therefore hides rain/wind/rockfall
-    // particles even before the step shader recycles their slots.
+    // particles even before the step shader recycles their slots. The same
+    // cutoff prevents a trace of arid-climate precipitation from rendering
+    // as a full particle storm after species normalisation.
     return [
-      p.showRain === false || p.simHydraulicPlaying === false ? 0.0 : 1.0,
-      p.showSnow === false || p.simCryoPlaying === false ? 0.0 : 1.0,
+      p.showRain === false || p.simHydraulicPlaying === false || !rainWeather ? 0.0 : 1.0,
+      p.showSnow === false || p.simCryoPlaying === false || !snowWeather ? 0.0 : 1.0,
       p.simWindPlaying === false ? 0.0 : 1.0,
       p.simRockfallPlaying === false ? 0.0 : 1.0,
     ];
@@ -1157,12 +1309,23 @@ export class GpuErosionEngine {
     // glacial-blizzard emitter label alone must not create precipitation.
     if (clamp01(p.snowfallRate) <= 0.001) snow = 0.0;
 
-    // One shared cold/warm phase drives visible flakes, Eulerian snowfall,
-    // low-elevation retention and finite melt. Applying it here prevents the
-    // particle system from snowing at full rate during the warm/dry phase.
+    // One shared location/season phase drives visible precipitation,
+    // Eulerian snowfall, low-elevation retention and finite melt. Applying
+    // it here prevents particle snow at full rate during summer and prevents
+    // winter precipitation in an alpine climate from appearing as rain.
+    const seasonalClimate = this._getSeasonalClimate();
     const snowDerived = deriveSnowEffectWeights(normalizeSnowEffects(p.snowEffects, p.snowEffectPreset));
-    const meltCycle = snowmeltCycleAtStep(snowDerived, this.cryoStepCount || 0);
+    const meltCycle = snowmeltCycleAtStep(snowDerived, this.cryoStepCount || 0, seasonalClimate);
     if (p.simCryoPlaying !== false) snow *= meltCycle.snowfallMultiplier;
+    if (seasonalClimate.enabled) {
+      if (p.simHydraulicPlaying !== false) rain *= seasonalClimate.rainMultiplier;
+      if (p.simWindPlaying !== false) wind *= 0.35 + 0.65 * seasonalClimate.windMultiplier;
+      // Species weights are normalised below. Without an absolute cutoff a
+      // trace precipitation multiplier in a desert dry spell could become a
+      // 100%-visible rain/snow storm simply because it is the only process.
+      if ((Number(p.rainIntensity) || 0) * seasonalClimate.rainMultiplier < 0.12) rain = 0.0;
+      if (clamp01(p.snowfallRate) * meltCycle.snowfallMultiplier < 0.05) snow = 0.0;
+    }
 
     const rawSum = rain + snow + wind + rock;
     const sum = Math.max(1e-4, rawSum);
@@ -1173,14 +1336,32 @@ export class GpuErosionEngine {
     const windCycles = windCyclesAtStep(p, this.stepCount || 0);
     const effectiveWindAzimuth = effectiveWindAzimuthAtStep(p, this.stepCount || 0);
     const azRad = (effectiveWindAzimuth * Math.PI) / 180;
-    const windMag = 0.35 + 0.65 * clamp01(p.windSpeed);
-    const activeWind = p.simWindPlaying === false ? 0.0 : clamp01(p.windSpeed);
-    const activeSnow = p.simCryoPlaying === false ? 0.0 : clamp01(clamp01(p.snowfallRate) * meltCycle.snowfallMultiplier);
+    const activeWind = p.simWindPlaying === false
+      ? 0.0
+      : clamp01(clamp01(p.windSpeed) * (seasonalClimate.enabled ? 0.45 + 0.55 * seasonalClimate.windMultiplier : 1));
+    const windMag = 0.35 + 0.65 * activeWind;
+    let activeSnow = p.simCryoPlaying === false ? 0.0 : clamp01(clamp01(p.snowfallRate) * meltCycle.snowfallMultiplier);
+    // Keep a much lower Eulerian cutoff than the visible-flake cutoff: a
+    // warm valley reference temperature can still mean a trace of wet-season
+    // snow on the highest terrain, where the Cryo shader's altitude
+    // retention/melt lapse confines it. Desert snow propensity remains far
+    // below this floor unless a Snow layer deliberately supplies snowfall.
+    if (seasonalClimate.enabled && activeSnow < 0.004) activeSnow = 0.0;
+    const effectiveRainIntensity = p.simHydraulicPlaying === false
+      ? 0.0
+      : Math.max(0, Math.min(4, (Number(p.rainIntensity) || 0) * (seasonalClimate.enabled ? seasonalClimate.rainMultiplier : 1)));
+    const effectiveEvaporation = (p.simHydraulicPlaying === false && p.simCryoPlaying === false)
+      ? 0.0
+      : Math.max(0, Math.min(1, (Number(p.evaporation) || 0) * (seasonalClimate.enabled ? seasonalClimate.evaporationMultiplier : 1)));
     return {
       anySimActive: rawSum > 1e-4 || p.simHydraulicPlaying !== false || p.simCryoPlaying !== false || p.simWindPlaying !== false || p.simRockfallPlaying !== false || p.simChemicalPlaying !== false,
       anyParticleSpecies: rawSum > 1e-4,
       speciesVec: rawSum > 1e-4 ? [rain / sum, snow / sum, wind / sum, rock / sum] : [0, 0, 0, 0],
       snowVec: [p.snowline, activeSnow, p.simCryoPlaying === false ? 0.0 : clamp01(p.glacierStrength), 0.35 + 0.9 * activeSnow],
+      seasonalClimate,
+      effectiveRainIntensity,
+      effectiveEvaporation,
+      effectiveWindSpeed: activeWind,
       meltCycle,
       meltCycleVec: meltCycle.vec,
       windVec: [Math.cos(azRad) * windMag, Math.sin(azRad) * windMag, p.simWindPlaying === false ? 0.0 : (0.25 + 0.95 * activeWind), 0.35 + 0.65 * activeWind],
@@ -1206,10 +1387,15 @@ export class GpuErosionEngine {
     const active = p.simWindPlaying === false ? 0.0 : 1.0;
     const gustiness = clamp(p.windGustiness, 0, 1, DEFAULT_EROSION_PARAMS.windGustiness);
     const gustPhase = 1.0 + gustiness * 0.38 * Math.sin((this.stepCount || 0) * 0.17 + (p.seed || 0) * 0.001);
+    const seasonalClimate = this._getSeasonalClimate();
+    const seasonalWind = seasonalClimate.enabled
+      ? Math.max(0.12, Math.min(1.65, 0.45 + 0.55 * seasonalClimate.windMultiplier))
+      : 1;
     const abrasion = active
       * clamp(p.windErosionRate, 0, 1.5, DEFAULT_EROSION_PARAMS.windErosionRate)
       * clamp(p.windAbrasion, 0, 1.5, DEFAULT_EROSION_PARAMS.windAbrasion)
-      * gustPhase;
+      * gustPhase
+      * seasonalWind;
     return {
       a: [
         Math.max(0, Math.min(2.4, abrasion)),
@@ -1247,6 +1433,7 @@ export class GpuErosionEngine {
     };
     const vegDefaults = getVegetationDefaultsForLandscape(preset.id);
     Object.assign(this.params, DEFAULT_EROSION_PARAMS, vegDefaults, preset.defaults, keep);
+    Object.assign(this.params, climateDefaultsForLandscape(preset.id));
     this.params.proceduralModifiers = [];
     this.params.snowEffects = createSnowEffectPreset(DEFAULT_EROSION_PARAMS.snowEffectPreset).effects;
     this.params.strataBeds = createStrataColumnPreset(DEFAULT_EROSION_PARAMS.strataColumnPreset);
@@ -1270,6 +1457,7 @@ export class GpuErosionEngine {
     const gl = this.gl;
     const R = this.gridRes;
     const p = this.params;
+    this.resetSeasonalClimateClock();
     const preset = EROSION_LANDSCAPES[p.landscape] || EROSION_LANDSCAPES['layered-plateau'];
 
     gl.disable(gl.DEPTH_TEST);
@@ -1404,6 +1592,7 @@ export class GpuErosionEngine {
 
     this.stepCount = 0;
     this.cryoStepCount = 0;
+    this.resetSeasonalClimateClock();
     this._obstBuiltStep = -999; // force obstacle rebuild for the new landscape
     this.telemetry.steps = 0;
     this.telemetry.erodedVolumeM3 = 0;
@@ -1522,14 +1711,21 @@ export class GpuErosionEngine {
       return Number.isFinite(n) ? Math.max(0, n) : 0;
     };
     const master = this._themeCode() === 7 ? 0 : rate(p.chemRate, DEFAULT_EROSION_PARAMS.chemRate);
+    const seasonalClimate = this._getSeasonalClimate();
+    const wetScale = seasonalClimate.enabled
+      ? Math.max(0.12, Math.min(1.8, 0.35 + 0.65 * seasonalClimate.moistureMultiplier))
+      : 1;
+    const dryScale = seasonalClimate.enabled
+      ? Math.max(0.18, Math.min(2.2, 0.45 + 0.55 * seasonalClimate.evaporationMultiplier))
+      : 1;
     return {
       master,
-      rust: master * rate(p.chemRust, DEFAULT_EROSION_PARAMS.chemRust),
-      hydrolysis: master * rate(p.chemHydrolysis, DEFAULT_EROSION_PARAMS.chemHydrolysis),
-      dissolution: master * rate(p.chemDissolution, DEFAULT_EROSION_PARAMS.chemDissolution),
-      salt: master * rate(p.chemSalt, DEFAULT_EROSION_PARAMS.chemSalt),
-      varnish: master * rate(p.chemVarnish, DEFAULT_EROSION_PARAMS.chemVarnish),
-      copper: master * rate(p.chemCopper, DEFAULT_EROSION_PARAMS.chemCopper),
+      rust: master * rate(p.chemRust, DEFAULT_EROSION_PARAMS.chemRust) * wetScale,
+      hydrolysis: master * rate(p.chemHydrolysis, DEFAULT_EROSION_PARAMS.chemHydrolysis) * wetScale,
+      dissolution: master * rate(p.chemDissolution, DEFAULT_EROSION_PARAMS.chemDissolution) * wetScale,
+      salt: master * rate(p.chemSalt, DEFAULT_EROSION_PARAMS.chemSalt) * dryScale,
+      varnish: master * rate(p.chemVarnish, DEFAULT_EROSION_PARAMS.chemVarnish) * dryScale,
+      copper: master * rate(p.chemCopper, DEFAULT_EROSION_PARAMS.chemCopper) * wetScale,
     };
   }
 
@@ -1671,6 +1867,10 @@ export class GpuErosionEngine {
     const cellSize = p.worldSpan / R;
     const activeCount = Math.min(MAX_GPU_PARTICLES, Math.max(1024, Math.floor(p.particleCount)));
     const emitter = EMITTER_MODES[p.emitterMode] || EMITTER_MODES['sky-rain'];
+    const suppressSeasonalClimate = opts.skipTelemetry === true || opts.suppressSeasonalClimate === true;
+    const previousSeasonalSuppressed = this._seasonalClimateSuppressed;
+    this._seasonalClimateSuppressed = suppressSeasonalClimate;
+    let seasonalRunCompleted = false;
     const { hardnessVec, strataVec } = this._getHardnessUniforms();
     const chemRates = this._chemRates();
 
@@ -1717,7 +1917,7 @@ export class GpuErosionEngine {
         gl.uniform4f(
           gl.getUniformLocation(this.progParticleStep, 'uRainEmitter'),
           p.cloudHeight,
-          p.simHydraulicPlaying === false ? 0.0 : p.rainIntensity,
+          climate.effectiveRainIntensity,
           emitter.code,
           activeCount
         );
@@ -1737,7 +1937,7 @@ export class GpuErosionEngine {
         );
         gl.uniform4f(
           gl.getUniformLocation(this.progParticleStep, 'uLifeEvap'),
-          p.evaporation,
+          climate.effectiveEvaporation,
           p.gravity,
           38.0,
           p.simHydraulicPlaying === false ? 0.0 : p.pipeFlowBlend
@@ -1816,7 +2016,7 @@ export class GpuErosionEngine {
       this._bindTex(this.progTerrainIntegrate, 'uChemTex', this.chemTex[this.chemIdx], 5);
       this._bindTex(this.progTerrainIntegrate, 'uFrostTex', this.frostTex[this.frostIdx], 6);
 
-      gl.uniform4f(gl.getUniformLocation(this.progTerrainIntegrate, 'uIntParams'), R, cellSize, dt, p.simHydraulicPlaying === false ? 0.0 : p.evaporation);
+      gl.uniform4f(gl.getUniformLocation(this.progTerrainIntegrate, 'uIntParams'), R, cellSize, dt, climate.effectiveEvaporation);
       gl.uniform4f(
         gl.getUniformLocation(this.progTerrainIntegrate, 'uPipeErode'),
         p.simHydraulicPlaying === false ? 0.0 : p.pipeFlowBlend,
@@ -1846,7 +2046,7 @@ export class GpuErosionEngine {
         gl.getUniformLocation(this.progTerrainIntegrate, 'uWindField'),
         climate.windVec[0],
         climate.windVec[1],
-        p.simWindPlaying === false ? 0.0 : (p.windSpeed ?? 0.0),
+        climate.effectiveWindSpeed,
         p.erosionStrength ?? 0.70
       );
       gl.uniform4fv(gl.getUniformLocation(this.progTerrainIntegrate, 'uWindErodeA'), windErosion.a);
@@ -1940,7 +2140,7 @@ export class GpuErosionEngine {
           gl.getUniformLocation(this.progSnowCryo, 'uWindCryo'),
           climate.windVec[0],
           climate.windVec[1],
-          p.simWindPlaying === false ? 0.0 : (p.windSpeed ?? 0.0),
+          climate.effectiveWindSpeed,
           this.stepCount * dt
         );
         gl.uniform1f(gl.getUniformLocation(this.progSnowCryo, 'uIceMeltRate'), p.iceMeltRate ?? 0.22);
@@ -1961,12 +2161,32 @@ export class GpuErosionEngine {
       if (p.simChemicalPlaying !== false) {
         this._runChemPass(dt, 1.0);
       }
+
+      if (!suppressSeasonalClimate) {
+        const advanced = this._advanceSeasonalClimateClock();
+        if (advanced.completedNow) {
+          seasonalRunCompleted = true;
+          break;
+        }
+      }
     }
 
+    this._seasonalClimateSuppressed = previousSeasonalSuppressed;
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.bindVertexArray(null);
 
     if (opts.skipTelemetry) return;
+
+    this._syncSeasonalClimateTelemetry();
+    if (seasonalRunCompleted) {
+      const { climate, run } = this.getSeasonalClimateState();
+      const yearsLabel = Number.isInteger(run.targetYears) ? String(run.targetYears) : run.targetYears.toFixed(1);
+      if (this.pipeline && typeof this.pipeline.pauseSimulation === 'function') {
+        this.pipeline.pauseSimulation(`Seasonal climate run complete — ${yearsLabel} years simulated · Year ${climate.year} ${climate.monthName} ${climate.dayOfMonth}`);
+      } else {
+        this.playing = false;
+      }
+    }
 
     if (this.stepCount % 36 === 0) {
       this._sampleTelemetry();
@@ -1979,7 +2199,7 @@ export class GpuErosionEngine {
         this.telemetry.evalMs = Number(this.pipeline.lastEvalMs.toFixed(1));
         this.telemetry.caveTris = Math.round(this.pipeline.caveSystem.vertexCount / 3);
       }
-      if (this.onTelemetry && this.stepCount % 8 === 0) this.onTelemetry(this.telemetry);
+      if (this.onTelemetry && (seasonalRunCompleted || this.stepCount % 8 === 0)) this.onTelemetry(this.telemetry);
     }
   }
 
@@ -2126,6 +2346,7 @@ export class GpuErosionEngine {
     this.telemetry.waterVolumeM3 = Math.round(sumWater * cellAreaSample);
     this.telemetry.boulders = this.rockCalving.rocks.length;
     this.telemetry.fps = this.fps;
+    this._syncSeasonalClimateTelemetry();
     if (this.pipeline) {
       this.telemetry.layerCount = this.pipeline.layers.length;
       this.telemetry.evalMs = Number(this.pipeline.lastEvalMs.toFixed(1));

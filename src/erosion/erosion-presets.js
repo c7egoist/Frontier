@@ -4,6 +4,7 @@
  */
 
 import { DEFAULT_FROST_PARAMS } from './frost-weathering.js';
+import { DEFAULT_SEASONAL_CLIMATE_PARAMS } from './seasonal-climate.js';
 
 export const EROSION_LANDSCAPES = {
   'icelandic-highlands': {
@@ -761,6 +762,12 @@ export const DEFAULT_EROSION_PARAMS = {
   gravity: 9.81,
   particleInertia: 0.28,
   evaporation: 0.14,
+
+  // Global location-based seasonal climate. Signed latitude supplies the
+  // hemisphere; the regime supplies wet/dry timing, rain-versus-snow phase,
+  // night frost, melt and evaporation. Individual Rain/Snow layers still own
+  // their annual magnitudes and play/pause gates.
+  ...DEFAULT_SEASONAL_CLIMATE_PARAMS,
 
   // Glacial, Wind & Rockfall Particle Controls
   snowline: 0.42,         // Normalized elevation of freezing snowline [0.15 .. 1.0]

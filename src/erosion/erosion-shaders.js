@@ -2405,7 +2405,7 @@ void main() {
   // ==========================================================================
   // 1. FULL-DOMAIN OROGRAPHIC SNOWFALL
   // ==========================================================================
-  if (uClimate.y > 0.01) {
+  if (uClimate.y > 0.003) {
     // Moving storm bands determine where precipitation is actually falling.
     // Elevation no longer zeroes that input: it only interpolates between
     // the cycle's low-elevation retention and full high-elevation survival.

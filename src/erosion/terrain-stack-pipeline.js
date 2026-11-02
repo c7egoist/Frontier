@@ -39,6 +39,11 @@ import {
   normalizeStrataColumn,
   strataColumnThickness,
 } from './stratigraphic-column.js';
+import {
+  DEFAULT_SEASONAL_CLIMATE_PARAMS,
+  climateDefaultsForLandscape,
+  normalizeSeasonalClimateParams,
+} from './seasonal-climate.js';
 
 const PART_TEX_W = 256;
 const PART_TEX_H = 128;
@@ -313,6 +318,7 @@ export class TerrainStackPipeline {
     ep.pipeFlowBlend = preset.pipeFlowBlend ?? DEFAULT_EROSION_PARAMS.pipeFlowBlend;
     ep.sunAzimuth = preset.sunAzimuth ?? DEFAULT_EROSION_PARAMS.sunAzimuth;
     ep.sunElevation = preset.sunElevation ?? DEFAULT_EROSION_PARAMS.sunElevation;
+    Object.assign(ep, climateDefaultsForLandscape(preset.id));
     ep.showWater = preset.showWater ?? true;
     ep.showParticles = preset.showParticles ?? true;
 
@@ -345,9 +351,15 @@ export class TerrainStackPipeline {
     const ep = this.engine?.params || {};
     const selectedWasEnvironment = Array.isArray(this.layers)
       && this.layers.find((layer) => layer?.id === this.selectedLayerId)?.type === ENVIRONMENT_LAYER_TYPE;
+    const seasonalDefaults = {};
+    for (const key of Object.keys(DEFAULT_SEASONAL_CLIMATE_PARAMS)) {
+      const value = sunDefaults[key] ?? sunDefaults.params?.[key] ?? ep[key];
+      if (Number.isFinite(Number(value))) seasonalDefaults[key] = Number(value);
+    }
     this.layers = ensureEnvironmentLayer(this.layers, {
       sunAzimuth: sunDefaults.sunAzimuth ?? ep.sunAzimuth,
       sunElevation: sunDefaults.sunElevation ?? ep.sunElevation,
+      ...seasonalDefaults,
     });
     const environment = this.layers[this.layers.length - 1] || null;
     // If normalization discarded a selected duplicate, keep the Inspector
@@ -361,15 +373,16 @@ export class TerrainStackPipeline {
   }
 
   /**
-   * Apply Environment sun angles directly to the render state. Lighting is
-   * not a terrain operation, so moving the sun neither rebuilds the stack
-   * nor pauses a live simulation season.
+   * Apply Environment sun angles and seasonal-climate location directly to
+   * live render/simulation state. Environment is not a terrain operation,
+   * so changing it neither rebuilds the stack nor erases the terrain.
    */
   applyLiveEnvironmentLayerParams(layer) {
     if (!layer || layer.type !== ENVIRONMENT_LAYER_TYPE) return false;
     const environment = this._ensureEnvironmentLayer({
       sunAzimuth: this.engine.params.sunAzimuth,
       sunElevation: this.engine.params.sunElevation,
+      ...normalizeSeasonalClimateParams(this.engine.params),
     });
     if (!environment || environment.id !== layer.id) return false;
     const p = environment.params || {};
@@ -384,6 +397,12 @@ export class TerrainStackPipeline {
       : DEFAULT_EROSION_PARAMS.sunElevation;
     environment.params.sunAzimuth = ep.sunAzimuth;
     environment.params.sunElevation = ep.sunElevation;
+    const seasonal = normalizeSeasonalClimateParams(p);
+    Object.assign(ep, seasonal);
+    Object.assign(environment.params, seasonal);
+    if (typeof this.engine._syncSeasonalClimateTelemetry === 'function') {
+      this.engine._syncSeasonalClimateTelemetry();
+    }
     return true;
   }
 
@@ -607,6 +626,9 @@ export class TerrainStackPipeline {
       soloProcess: this.simSoloProcess,
       autoPaused: Boolean(this.simAutoPaused),
       pauseReason: this.simPauseReason || '',
+      climate: typeof this.engine.getSeasonalClimateState === 'function'
+        ? this.engine.getSeasonalClimateState()
+        : null,
       processes: SIM_PROCESS_DEFS.map((def) => ({
         ...def,
         available: Boolean(avail[def.id]),
@@ -626,6 +648,9 @@ export class TerrainStackPipeline {
     this.liveSimRunning = true;
     this.simAutoPaused = false;
     this.simPauseReason = '';
+    if (typeof this.engine.beginSeasonalClimateRun === 'function') {
+      this.engine.beginSeasonalClimateRun();
+    }
     return this._applySimulationPlayback(true);
   }
 
@@ -904,6 +929,11 @@ export class TerrainStackPipeline {
     const gl = this.gl;
     const R = this.R;
     const ep = this.engine.params;
+    const previousSeasonalSuppressed = this.engine._seasonalClimateSuppressed;
+    // Stack evaluation and its fixed bake passes are not elapsed live time:
+    // use annual-neutral climate forcing inside the bake, then restart the
+    // location calendar at the Environment layer's configured start date.
+    this.engine._seasonalClimateSuppressed = true;
     // Every evaluatable stack—including restored snapshots and stacks built
     // by external callers—gets the same locked Environment singleton last.
     this._ensureEnvironmentLayer({
@@ -1012,6 +1042,10 @@ export class TerrainStackPipeline {
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     this.engine.partIdx = 0;
     this.engine.stepCount = 0;
+    this.engine.cryoStepCount = 0;
+    if (typeof this.engine.resetSeasonalClimateClock === 'function') {
+      this.engine.resetSeasonalClimateClock();
+    }
 
     const activeCaveLayers = [];
     const activeSculptCaveStrokes = [];
@@ -1025,9 +1059,9 @@ export class TerrainStackPipeline {
       const p = layer.params;
 
       if (layer.type === ENVIRONMENT_LAYER_TYPE) {
-        // Environment is render state, not a GPU terrain operation. Its
-        // final-row position makes the Outliner explicit without adding a
-        // pass or invalidating placements when the sun moves.
+        // Environment is live scene/climate state, not a GPU terrain
+        // operation. Its final-row position makes the Outliner explicit
+        // without adding a pass or invalidating placements when it changes.
         this.applyLiveEnvironmentLayerParams(layer);
       } else if (layer.type === 'base-landform') {
         ep.relief = p.relief ?? DEFAULT_EROSION_PARAMS.relief;
@@ -1457,6 +1491,7 @@ export class TerrainStackPipeline {
     }
 
     gl.bindVertexArray(null);
+    this.engine._seasonalClimateSuppressed = previousSeasonalSuppressed;
     // Evaluation used the sim flags as bake/availability scratch; publish the
     // user's actual season selection (solo or simultaneous) for live ticking.
     this._applySimulationPlayback(false);
@@ -1483,6 +1518,9 @@ export class TerrainStackPipeline {
     this.engine.telemetry.evalMs = Number(this.lastEvalMs.toFixed(1));
     this.engine.telemetry.layerCount = this.layers.length;
     this.engine.telemetry.caveTris = Math.round(this.caveSystem.vertexCount / 3);
+    if (typeof this.engine._syncSeasonalClimateTelemetry === 'function') {
+      this.engine._syncSeasonalClimateTelemetry();
+    }
     if (this.engine.onTelemetry) this.engine.onTelemetry(this.engine.telemetry);
   }
 

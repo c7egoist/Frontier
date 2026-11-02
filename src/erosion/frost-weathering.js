@@ -129,7 +129,7 @@ export const SNOW_EFFECT_TYPES = Object.freeze({
     short: 'Snowmelt',
     color: '#38bdf8',
     description:
-      'A cold-to-warm snow cycle. During the cold phase snowfall can be retained well below the long-term snowline, including valley floors and drifted hollows. During the warm/dry phase that stored snow and ice melt; the resulting shallow-water runoff cuts channels, entrain fines/coarse debris and deposits them downslope. No rain particles or rainfall are switched on.',
+      'Finite snowmelt runoff erosion. The locked Environment layer normally supplies the location calendar: cold-season snowfall is retained below the long-term snowline, then warm-season snow/ice melt becomes shallow-water runoff that cuts channels and moves debris. If Location seasons are off, the fallback cold-to-warm cycle below is used. No rain particles or rainfall are switched on.',
     defaults: Object.freeze({
       cyclePeriodSteps: 180,
       cyclePhase: 0.16,
@@ -503,21 +503,48 @@ export function deriveSnowEffectWeights(effectsInput) {
 }
 
 /**
- * Cold-accumulation / warm-dry-melt cycle used by the snowmelt-runoff effect.
+ * Cold-accumulation / warm-dry-melt cycle used by the snow pack.
  *
  * Phase 0 is the coldest point and phase 0.5 the warmest. The returned
  * low-elevation retention is deliberately non-zero even without the effect:
  * the snowline is a long-term melt-equilibrium line, not a physical switch
- * that prevents falling snow from landing in valleys. With the effect active,
- * cold phases retain most low snow; warm phases suppress new snowfall and
- * amplify finite snow/ice melt into runoff.
+ * that prevents falling snow from landing in valleys. When the global
+ * location-based seasonal climate is enabled it supplies the phase, snowfall,
+ * retention and finite melt directly; the snowmelt-runoff effect then only
+ * adds its runoff-erosion emphasis. The independent step cycle below remains
+ * the fallback when seasonal climate is switched off.
  */
-export function snowmeltCycleAtStep(derivedOrEffects, stepCount = 0) {
+export function snowmeltCycleAtStep(derivedOrEffects, stepCount = 0, seasonalClimate = null) {
   const derived = derivedOrEffects && derivedOrEffects.weights && derivedOrEffects.params
     ? derivedOrEffects
     : deriveSnowEffectWeights(derivedOrEffects);
   const weight = clamp(derived.weights.snowmelt, 0, 2.5, 0);
   const active = weight > 0.001;
+  if (seasonalClimate && seasonalClimate.enabled) {
+    const season = clamp(seasonalClimate.warmth, -1, 1, 0);
+    const warm = smoothstep(-0.12, 0.88, season);
+    const cold = 1 - smoothstep(-0.82, 0.35, season);
+    const snowfallMultiplier = clamp(seasonalClimate.snowMultiplier, 0, 2.6, 1);
+    const runoffBoost = active
+      ? 0.72 + 0.28 * clamp(derived.params.warmMeltBoost, 0, 3, 1.65) * clamp(weight, 0, 1.8, 0)
+      : 1;
+    const meltMultiplier = clamp((Number(seasonalClimate.meltMultiplier) || 1) * runoffBoost, 0.02, 4.6, 1);
+    const lowElevationRetention = clamp(seasonalClimate.lowElevationRetention, 0.05, 0.95, 0.34);
+    const phase = ((Number(seasonalClimate.phaseFromColdest) || 0) % 1 + 1) % 1;
+    return {
+      active,
+      weight,
+      phase,
+      season,
+      warm,
+      cold,
+      snowfallMultiplier,
+      meltMultiplier,
+      lowElevationRetention,
+      climateDriven: true,
+      vec: [snowfallMultiplier, meltMultiplier, lowElevationRetention, season],
+    };
+  }
   const period = clamp(derived.params.cyclePeriodSteps, 16, 720, 180);
   const phaseRaw = (Number(stepCount) || 0) / period + clamp(derived.params.cyclePhase, 0, 1, 0.16);
   const phase = ((phaseRaw % 1) + 1) % 1;
@@ -546,6 +573,7 @@ export function snowmeltCycleAtStep(derivedOrEffects, stepCount = 0) {
     snowfallMultiplier,
     meltMultiplier,
     lowElevationRetention,
+    climateDriven: false,
     vec: [snowfallMultiplier, meltMultiplier, lowElevationRetention, season],
   };
 }

@@ -6,7 +6,8 @@
  *   - Newest / final operations sit at the TOP of the UI (index 0) and evaluate LAST.
  *   - Base landform is the last terrain operation in the UI and evaluates FIRST.
  *   - One locked Environment system layer is pinned after it as the final
- *     Outliner row. It owns only the sun angles and performs no terrain pass.
+ *     Outliner row. It owns the sun angles and global location/seasonal
+ *     climate state, but performs no terrain-generation pass of its own.
  *   - Surface palette, rock fabric, view modes, and particle display stay
  *     separate from the Layer Stack (zero fake colour/biome layers in the stack).
  */
@@ -27,6 +28,13 @@ import {
   createStrataColumnPreset,
   summarizeStrataColumn,
 } from './stratigraphic-column.js';
+import {
+  DEFAULT_SEASONAL_CLIMATE_PARAMS,
+  climateDefaultsForLandscape,
+  climateRegimeFor,
+  formatLatitude,
+  normalizeSeasonalClimateParams,
+} from './seasonal-climate.js';
 
 let layerUidCounter = 1;
 
@@ -41,7 +49,7 @@ export const LAYER_CATEGORIES = {
   environment: {
     id: 'environment',
     label: 'Environment',
-    eyebrow: 'ENVIRONMENT / SUN — LOCKED LAST LAYER',
+    eyebrow: 'ENVIRONMENT / SUN + SEASONAL CLIMATE — LOCKED LAST LAYER',
     color: '#ffd166',
   },
   landform: {
@@ -579,12 +587,20 @@ export const LAYER_OPERATION_SPECS = {
     singleton: true,
     addable: false,
     lockedPosition: 'last',
-    reads: ['Sun Azimuth', 'Sun Elevation'],
-    writes: ['Sun Direction'],
-    summary: (p) => `Sun · ${Math.round(p.sunAzimuth ?? DEFAULT_EROSION_PARAMS.sunAzimuth)}° az · ${Math.round(p.sunElevation ?? DEFAULT_EROSION_PARAMS.sunElevation)}° el · locked`,
+    reads: ['Sun Azimuth', 'Sun Elevation', 'Latitude', 'Climate Regime'],
+    writes: ['Sun Direction', 'Seasonal Climate'],
+    summary: (p) => {
+      const climate = normalizeSeasonalClimateParams(p);
+      const sun = `Sun ${Math.round(p.sunAzimuth ?? DEFAULT_EROSION_PARAMS.sunAzimuth)}°/${Math.round(p.sunElevation ?? DEFAULT_EROSION_PARAMS.sunElevation)}°`;
+      if (!climate.seasonalClimateMode) return `${sun} · seasons off · locked`;
+      const regime = climateRegimeFor(climate.climateRegime).label.split(' /')[0];
+      const run = climate.climateYearsToSimulate > 0 ? `${Math.round(climate.climateYearsToSimulate)} yr` : 'continuous';
+      return `${sun} · ${regime} · ${formatLatitude(climate.climateLatitudeDeg)} · ${run} · locked`;
+    },
     defaults: {
       sunAzimuth: DEFAULT_EROSION_PARAMS.sunAzimuth,
       sunElevation: DEFAULT_EROSION_PARAMS.sunElevation,
+      ...DEFAULT_SEASONAL_CLIMATE_PARAMS,
     },
   },
 };
@@ -617,6 +633,10 @@ export function createEnvironmentLayer(overrides = {}) {
   const params = { ...(overrides.params || {}) };
   if (Number.isFinite(Number(overrides.sunAzimuth))) params.sunAzimuth = Number(overrides.sunAzimuth);
   if (Number.isFinite(Number(overrides.sunElevation))) params.sunElevation = Number(overrides.sunElevation);
+  for (const key of Object.keys(DEFAULT_SEASONAL_CLIMATE_PARAMS)) {
+    if (Number.isFinite(Number(overrides[key]))) params[key] = Number(overrides[key]);
+  }
+  Object.assign(params, normalizeSeasonalClimateParams(params));
   return createStackLayer(ENVIRONMENT_LAYER_TYPE, {
     name: ENVIRONMENT_LAYER_NAME,
     enabled: true,
@@ -638,9 +658,15 @@ export function ensureEnvironmentLayer(layers = [], sunDefaults = {}) {
   const rest = source.filter((layer) => layer?.type !== ENVIRONMENT_LAYER_TYPE);
   const environment = existing || createEnvironmentLayer(sunDefaults);
   const defaults = LAYER_OPERATION_SPECS[ENVIRONMENT_LAYER_TYPE].defaults;
+  const defaultSource = sunDefaults?.params && typeof sunDefaults.params === 'object'
+    ? { ...sunDefaults, ...sunDefaults.params }
+    : (sunDefaults || {});
   const cleanSunDefaults = {};
-  if (Number.isFinite(Number(sunDefaults.sunAzimuth))) cleanSunDefaults.sunAzimuth = Number(sunDefaults.sunAzimuth);
-  if (Number.isFinite(Number(sunDefaults.sunElevation))) cleanSunDefaults.sunElevation = Number(sunDefaults.sunElevation);
+  if (Number.isFinite(Number(defaultSource.sunAzimuth))) cleanSunDefaults.sunAzimuth = Number(defaultSource.sunAzimuth);
+  if (Number.isFinite(Number(defaultSource.sunElevation))) cleanSunDefaults.sunElevation = Number(defaultSource.sunElevation);
+  if (Object.keys(DEFAULT_SEASONAL_CLIMATE_PARAMS).some((key) => Number.isFinite(Number(defaultSource[key])))) {
+    Object.assign(cleanSunDefaults, normalizeSeasonalClimateParams(defaultSource));
+  }
 
   environment.name = ENVIRONMENT_LAYER_NAME;
   environment.enabled = true;
@@ -655,6 +681,7 @@ export function ensureEnvironmentLayer(layers = [], sunDefaults = {}) {
     ...cleanSunDefaults,
     ...(environment.params || {}),
   };
+  Object.assign(environment.params, normalizeSeasonalClimateParams(environment.params));
   return [...rest, environment];
 }
 
@@ -849,10 +876,12 @@ function buildStackRecipeFromLandscape(landscapeId) {
   );
 
   // 8. Locked Environment singleton: always the final Outliner row. It
-  // carries this preset's exact sun angles but performs no terrain pass.
+  // carries this preset's exact sun angles and geographic seasonal climate,
+  // but performs no terrain pass of its own.
   layers.push(createEnvironmentLayer({
     sunAzimuth: d.sunAzimuth ?? DEFAULT_EROSION_PARAMS.sunAzimuth,
     sunElevation: d.sunElevation ?? DEFAULT_EROSION_PARAMS.sunElevation,
+    params: climateDefaultsForLandscape(landscapeId),
   }));
 
   return {
@@ -947,7 +976,7 @@ function buildUtahWindRainRecipe() {
       relief: 158,
       roughness: 0.68,
     }),
-    createEnvironmentLayer({ sunAzimuth: 55, sunElevation: 24 }),
+    createEnvironmentLayer({ sunAzimuth: 55, sunElevation: 24, params: climateDefaultsForLandscape('utah-wind-rain-canyon') }),
   ];
   return {
     manualRecipe: true,
@@ -1082,7 +1111,7 @@ function buildSplineCanyonRiverRecipe() {
       relief: 132,
       roughness: 0.58,
     }),
-    createEnvironmentLayer({ sunAzimuth: 52, sunElevation: 25 }),
+    createEnvironmentLayer({ sunAzimuth: 52, sunElevation: 25, params: climateDefaultsForLandscape('spline-canyon-river-test') }),
   ];
   return {
     manualRecipe: true,
@@ -1180,7 +1209,7 @@ function buildSplineRoadTunnelRecipe() {
       relief: 172,
       roughness: 0.72,
     }),
-    createEnvironmentLayer({ sunAzimuth: 48, sunElevation: 24 }),
+    createEnvironmentLayer({ sunAzimuth: 48, sunElevation: 24, params: climateDefaultsForLandscape('spline-road-tunnel-test') }),
   ];
   return {
     manualRecipe: true,
@@ -1300,7 +1329,7 @@ function buildFrostPittedRainbowRangeRecipe() {
       relief: 215,
       roughness: 0.70,
     }),
-    createEnvironmentLayer({ sunAzimuth: 46, sunElevation: 25 }),
+    createEnvironmentLayer({ sunAzimuth: 46, sunElevation: 25, params: climateDefaultsForLandscape('frost-pitted-rainbow-range') }),
   ];
   return {
     manualRecipe: true,
@@ -1413,7 +1442,7 @@ function buildNivationCirqueStrataRecipe() {
       relief: 178,
       roughness: 0.66,
     }),
-    createEnvironmentLayer({ sunAzimuth: 38, sunElevation: 23 }),
+    createEnvironmentLayer({ sunAzimuth: 38, sunElevation: 23, params: climateDefaultsForLandscape('nivation-cirque-strata') }),
   ];
   return {
     manualRecipe: true,
