@@ -333,6 +333,20 @@ int main()
         {
             EverestSpace = std::make_unique<Everest::EverestWorkspace>(*Appearance, Requested.parent_path());
             EverestSpace->EvaluateReturnToBrowser = [&]() { ReturnRequested = true; };
+            // 📝 Unreal-style camera drags: the pointer is hidden and held in the window that shows the viewport, with raw
+            //    motion where the platform offers it; GLFW returns it to where the drag began. Only windows ImGui still owns
+            //    are touched (a docked-out viewport window may have closed).
+            EverestSpace->ConstrainPointer = [](void *PlatformWindow, bool ConstraintEnabled)
+            {
+                bool Owned = false;
+                for (const ImGuiViewport *Viewport : ImGui::GetPlatformIO().Viewports)
+                    Owned = Owned || Viewport->PlatformHandle == PlatformWindow;
+                if (!Owned) return;
+                GLFWwindow *Target = static_cast<GLFWwindow *>(PlatformWindow);
+                if (glfwRawMouseMotionSupported())
+                    glfwSetInputMode(Target, GLFW_RAW_MOUSE_MOTION, ConstraintEnabled ? GLFW_TRUE : GLFW_FALSE);
+                glfwSetInputMode(Target, GLFW_CURSOR, ConstraintEnabled ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
+            };
             EverestSpace->PresentSceneViewport = [&](const Everest::SceneViewportRequest &Request)
             {
                 Everest::SceneViewportImage Image;

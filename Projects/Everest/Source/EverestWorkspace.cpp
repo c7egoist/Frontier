@@ -54,11 +54,202 @@ float MeasureLabelWidth(ImFont* Font, float Size, const char* Text) noexcept
 //                                                    VIEWPORT CAMERA
 //------------------------------------------------------------------------------------------------------------------------
 
-std::array<double, 3> SceneViewportOrbit::ResolvePosition() const noexcept
+namespace
 {
-    constexpr double Radians = 3.14159265358979323846 / 180.0;
-    const double     Planar  = std::cos(Pitch * Radians) * Distance;
-    return {Focus[0] + Planar * std::cos(Yaw * Radians), Focus[1] + Planar * std::sin(Yaw * Radians), Focus[2] + std::sin(Pitch * Radians) * Distance};
+
+constexpr double DegreesToRadian = 3.14159265358979323846 / 180.0;
+
+// 📝 Unreal Engine 5 editor viewport constants (FEditorViewportClient, FCameraControllerConfig, ULevelEditorViewportSettings
+//    defaults), in metres where Unreal counts centimetres.
+constexpr double MouseSensitivity        = 0.2;      // [°/px] MouseSensitivty: look, orbit and the left-drag turn
+constexpr double DragMetresPerPixel      = 0.01;     // [m/px] at speed 1: drags move 1 cm per pixel (Drag *= CameraSpeed)
+constexpr double FlightAcceleration      = 200.0;    // [m/s²] MovementAccelerationRate 20000 cm/s²
+constexpr double FlightDamping           = 10.0;     // [1/s] MovementVelocityDampingAmount: 20 m/s at speed 1
+constexpr double FieldOfViewAcceleration = 1200.0;   // [°/s²] FOVAccelerationRate
+constexpr double FieldOfViewDamping      = 10.0;     // [1/s] FOVVelocityDampingAmount, also the recoil rate
+constexpr double WheelDollyMetres        = 0.96;     // [m] per notch: GetCameraSpeed(MouseScrollCameraSpeed 5) = 3 × 32 cm
+constexpr double ShiftBoost              = 2.0;      // [-] CameraBoost while Shift is held
+constexpr double ElevationLimit          = 89.5;     // [°] short of the pole, where a z-up look-at degenerates
+constexpr double OrbitDollyRate          = 0.004;    // [1/px] Alt + right drag: pivot distance × e^(−rate · (Δx + Δy))
+constexpr double OrbitTrackRate          = 0.0016;   // [1/px] Alt + middle drag: pivot distance × rate per pixel
+
+} // namespace
+
+std::array<double, 3> SceneViewportFlight::ResolveForward() const noexcept
+{
+    const double θ = Heading * DegreesToRadian;
+    const double φ = Elevation * DegreesToRadian;
+    return {std::cos(φ) * std::cos(θ), std::cos(φ) * std::sin(θ), std::sin(φ)};
+}
+
+// 📝 Screen right of the renderer's view (ConstructViewTransform: Right = Forward × Up, z up). The former orbit camera used
+//    Up × Forward here, which is why A and D moved the wrong way.
+std::array<double, 3> SceneViewportFlight::ResolveLateral() const noexcept
+{
+    const double θ = Heading * DegreesToRadian;
+    return {std::sin(θ), -std::cos(θ), 0.0};
+}
+
+std::array<double, 3> SceneViewportFlight::ResolveTarget() const noexcept
+{
+    const std::array<double, 3> Forward = ResolveForward();
+    return {Position[0] + Forward[0] * PivotDistance, Position[1] + Forward[1] * PivotDistance, Position[2] + Forward[2] * PivotDistance};
+}
+
+double SceneViewportFlight::ResolveFieldOfView() const noexcept
+{
+    return std::clamp(VerticalFieldOfView / DegreesToRadian + FieldOfViewOffset, 5.0, 140.0) * DegreesToRadian;
+}
+
+double SceneViewportFlight::ResolveSpeed(int Setting) noexcept
+{
+    constexpr std::array<double, 8> Speeds = {0.03125, 0.09375, 0.33, 1.0, 3.0, 8.0, 16.0, 32.0};
+    return Speeds[static_cast<size_t>(std::clamp(Setting, 1, 8) - 1)];
+}
+
+void IntegrateSceneViewportFlight(SceneViewportFlight& Flight, const SceneViewportPointer& Pointer, double DeltaSeconds)
+{
+    const double Δt     = std::clamp(DeltaSeconds, 0.0, 0.1);
+    const double Speed  = SceneViewportFlight::ResolveSpeed(Flight.SpeedSetting);
+    const double Δx     = Pointer.MotionPixels[0];
+    const double Δy     = Pointer.MotionPixels[1];
+    const bool   Flying = Pointer.Active && Pointer.RightDown && !Pointer.LeftDown && !Pointer.AltDown;
+    auto Translate = [&Flight](const std::array<double, 3>& Axis, double Metres) {
+        for (int Component = 0; Component < 3; ++Component) Flight.Position[Component] += Axis[Component] * Metres;
+    };
+    auto Turn = [&Flight](double HeadingDegrees, double ElevationDegrees) {
+        Flight.Heading   = std::remainder(Flight.Heading + HeadingDegrees, 360.0);
+        Flight.Elevation = std::clamp(Flight.Elevation + ElevationDegrees, -ElevationLimit, ElevationLimit);
+    };
+    auto ResolveUpward = [&Flight]() {
+        const std::array<double, 3> Forward = Flight.ResolveForward();
+        const std::array<double, 3> Lateral = Flight.ResolveLateral();
+        return std::array<double, 3>{Lateral[1] * Forward[2] - Lateral[2] * Forward[1], Lateral[2] * Forward[0] - Lateral[0] * Forward[2],
+                                     Lateral[0] * Forward[1] - Lateral[1] * Forward[0]};
+    };
+
+    // ① drags (Unreal's ConvertMovementToDragRot and orbit modes): pointer right turns right, pointer up looks up
+    if (Pointer.Active && Pointer.AltDown && (Pointer.LeftDown || Pointer.RightDown || Pointer.MiddleDown))
+    {
+        const std::array<double, 3> Pivot = Flight.ResolveTarget();
+        if (Pointer.LeftDown)
+        {
+            // 📝 Alt + left: orbit the pivot.
+            Turn(-Δx * MouseSensitivity, -Δy * MouseSensitivity);
+        }
+        else if (Pointer.RightDown)
+        {
+            // 📝 Alt + right: dolly toward the pivot (pointer right or down) or away from it.
+            Flight.PivotDistance = std::clamp(Flight.PivotDistance * std::exp(-OrbitDollyRate * (Δx + Δy)), 0.25, 5000.0);
+        }
+        if (Pointer.MiddleDown && !Pointer.LeftDown && !Pointer.RightDown)
+        {
+            // 📝 Alt + middle: track the camera and its pivot with the pointer, in the view plane.
+            const double Metres = OrbitTrackRate * Flight.PivotDistance;
+            Translate(Flight.ResolveLateral(), Δx * Metres);
+            Translate(ResolveUpward(), -Δy * Metres);
+        }
+        else
+        {
+            const std::array<double, 3> Forward = Flight.ResolveForward();
+            for (int Component = 0; Component < 3; ++Component) Flight.Position[Component] = Pivot[Component] - Forward[Component] * Flight.PivotDistance;
+        }
+    }
+    else if (Pointer.Active && (Pointer.MiddleDown || (Pointer.LeftDown && Pointer.RightDown)))
+    {
+        // 📝 Middle, or left + right: move right/left and up/down (world z) with the pointer, without turning.
+        Translate(Flight.ResolveLateral(), Δx * DragMetresPerPixel * Speed);
+        Translate({0.0, 0.0, 1.0}, -Δy * DragMetresPerPixel * Speed);
+    }
+    else if (Pointer.Active && Pointer.LeftDown)
+    {
+        // 📝 Left: forward/back over the ground plane (pointer up = forward) and turn left/right.
+        const double θ = Flight.Heading * DegreesToRadian;
+        Translate({std::cos(θ), std::sin(θ), 0.0}, -Δy * DragMetresPerPixel * Speed);
+        Turn(-Δx * MouseSensitivity, 0.0);
+    }
+    else if (Flying)
+    {
+        // 📝 Right: look around in place.
+        Turn(-Δx * MouseSensitivity, -Δy * MouseSensitivity);
+    }
+
+    // ② the wheel: camera speed while flying (whole notches), else one dolly step along the view per notch
+    if (Flying || (Pointer.Hovered && !Pointer.Active))
+    {
+        Flight.WheelRemainder += Pointer.WheelNotches;
+        const double Notches = std::trunc(Flight.WheelRemainder);
+        Flight.WheelRemainder -= Notches;
+        if (Flying)
+        {
+            Flight.SpeedSetting = std::clamp(Flight.SpeedSetting + static_cast<int>(Notches), 1, 8);
+        }
+        else if (Notches != 0.0)
+        {
+            const double Metres = Notches * WheelDollyMetres;
+            Translate(Flight.ResolveForward(), Metres);
+            Flight.PivotDistance = std::max(1.0, Flight.PivotDistance - Metres);
+        }
+    }
+    else
+    {
+        Flight.WheelRemainder = 0.0;
+    }
+
+    // ③ flight: W/S along the view, D/A along screen right, E/Q along world z, R/F along the view's up; Shift doubles
+    //    the speed. Velocity approaches Unreal's terminal speed (acceleration ÷ damping) with damping's time constant,
+    //    independent of the tick length, and decays the same way once the keys or the right button are released.
+    std::array<double, 3> Thrust = {0.0, 0.0, 0.0};
+    if (Flying)
+    {
+        const std::array<double, 3> Forward = Flight.ResolveForward();
+        const std::array<double, 3> Lateral = Flight.ResolveLateral();
+        const std::array<double, 3> Upward  = ResolveUpward();
+        const auto&                 Keys    = Pointer.FlightKeys;
+        const double Along    = (Keys[0] ? 1.0 : 0.0) - (Keys[1] ? 1.0 : 0.0);
+        const double Across   = (Keys[3] ? 1.0 : 0.0) - (Keys[2] ? 1.0 : 0.0);
+        const double Vertical = (Keys[4] ? 1.0 : 0.0) - (Keys[5] ? 1.0 : 0.0);
+        const double Local    = (Keys[6] ? 1.0 : 0.0) - (Keys[7] ? 1.0 : 0.0);
+        for (int Component = 0; Component < 3; ++Component)
+        {
+            Thrust[Component] = Forward[Component] * Along + Lateral[Component] * Across + Upward[Component] * Local + (Component == 2 ? Vertical : 0.0);
+        }
+    }
+    const double TerminalScale = FlightAcceleration / FlightDamping * Speed * (Pointer.ShiftDown ? ShiftBoost : 1.0);
+    const double Decay         = std::exp(-FlightDamping * Δt);
+    for (int Component = 0; Component < 3; ++Component)
+    {
+        const double Terminal       = Thrust[Component] * TerminalScale;
+        const double Previous       = Flight.Velocity[Component];
+        Flight.Velocity[Component]  = Terminal + (Previous - Terminal) * Decay;
+        // 📝 Exact displacement of the exponential approach over the tick.
+        Flight.Position[Component] += Terminal * Δt + (Previous - Terminal) * (1.0 - Decay) / FlightDamping;
+        if (std::fabs(Flight.Velocity[Component]) < 1.0e-4 && Terminal == 0.0) Flight.Velocity[Component] = 0.0;
+    }
+
+    // ④ Z widens and C narrows the field of view while flying; it recoils to rest once the flight ends (Unreal's FOV recoil)
+    if (Flying)
+    {
+        const double Impulse      = (Pointer.FlightKeys[8] ? 1.0 : 0.0) - (Pointer.FlightKeys[9] ? 1.0 : 0.0);
+        const double TerminalRate = Impulse * FieldOfViewAcceleration / FieldOfViewDamping;
+        Flight.FieldOfViewRate    = TerminalRate + (Flight.FieldOfViewRate - TerminalRate) * std::exp(-FieldOfViewDamping * Δt);
+        const double RestDegrees  = Flight.VerticalFieldOfView / DegreesToRadian;
+        Flight.FieldOfViewOffset  = std::clamp(Flight.FieldOfViewOffset + Flight.FieldOfViewRate * Δt, 5.0 - RestDegrees, 140.0 - RestDegrees);
+    }
+    else
+    {
+        Flight.FieldOfViewRate    = 0.0;
+        Flight.FieldOfViewOffset *= std::exp(-FieldOfViewDamping * Δt);
+        if (std::fabs(Flight.FieldOfViewOffset) < 0.01) Flight.FieldOfViewOffset = 0.0;
+    }
+
+    // ⑤ F frames the level's default view again (the viewport has no selection to focus); the speed setting stays
+    if (Pointer.RecentrePress)
+    {
+        const int SpeedSetting = Flight.SpeedSetting;
+        Flight                 = SceneViewportFlight{};
+        Flight.SpeedSetting    = SpeedSetting;
+    }
 }
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -116,7 +307,12 @@ EverestWorkspace::EverestWorkspace(std::filesystem::path ProjectRootPath)
 
 #endif
 
-EverestWorkspace::~EverestWorkspace() = default;
+EverestWorkspace::~EverestWorkspace()
+{
+#if FRONTIER_EDITOR && defined(FRONTIER_WITH_INTERFACE_SDK)
+    ReleasePointerConstraint();
+#endif
+}
 
 void EverestWorkspace::InitializeWorld()
 {
@@ -424,43 +620,75 @@ void EverestWorkspace::ConstructTopToolbar(float Scale)
 
 void EverestWorkspace::IntegrateViewportCamera(bool Hovered, bool Active, double DeltaSeconds)
 {
-    // 📝 Right drag orbits, middle drag pans, the wheel dollies; W/A/S/D/Q/E fly while the right button is held; F recentres.
-    const ImGuiIO& IO     = ImGui::GetIO();
-    constexpr double Radians = 3.14159265358979323846 / 180.0;
-    const double Yaw = Orbit.Yaw * Radians, Pitch = Orbit.Pitch * Radians;
-    const std::array<double, 3> Forward = {-std::cos(Pitch) * std::cos(Yaw), -std::cos(Pitch) * std::sin(Yaw), -std::sin(Pitch)};
-    const std::array<double, 3> Right   = {std::sin(Yaw), -std::cos(Yaw), 0.0};
-    const std::array<double, 3> Up      = {Right[1] * Forward[2] - Right[2] * Forward[1], Right[2] * Forward[0] - Right[0] * Forward[2],
-                                           Right[0] * Forward[1] - Right[1] * Forward[0]};
-    auto Move = [this](const std::array<double, 3>& Axis, double Amount) {
-        for (int Component = 0; Component < 3; ++Component) Orbit.Focus[Component] += Axis[Component] * Amount;
-    };
-    if (Active && ImGui::IsMouseDown(ImGuiMouseButton_Right))
+    // 📝 Unreal Engine's perspective viewport navigation (IntegrateSceneViewportFlight); this reads one tick of ImGui input.
+    //    Called right after the viewport's invisible button, so SetItemKeyOwner claims keys for that button.
+    const ImGuiIO&       IO = ImGui::GetIO();
+    SceneViewportPointer Pointer;
+    Pointer.Hovered      = Hovered;
+    Pointer.Active       = Active;
+    Pointer.LeftDown     = ImGui::IsMouseDown(ImGuiMouseButton_Left);
+    Pointer.RightDown    = ImGui::IsMouseDown(ImGuiMouseButton_Right);
+    Pointer.MiddleDown   = ImGui::IsMouseDown(ImGuiMouseButton_Middle);
+    Pointer.AltDown      = IO.KeyAlt;
+    Pointer.ShiftDown    = IO.KeyShift;
+    Pointer.MotionPixels = {static_cast<double>(IO.MouseDelta.x), static_cast<double>(IO.MouseDelta.y)};
+    Pointer.WheelNotches = (Hovered || Active) ? static_cast<double>(IO.MouseWheel) : 0.0;
+
+    // 📝 Unreal's keys per flight axis: forward, back, left, right, up and down (world z), up and down (view), widen, narrow.
+    static constexpr std::array<std::array<ImGuiKey, 3>, 10> FlightKeyTable = {{
+        {ImGuiKey_W, ImGuiKey_UpArrow, ImGuiKey_Keypad8},
+        {ImGuiKey_S, ImGuiKey_DownArrow, ImGuiKey_Keypad2},
+        {ImGuiKey_A, ImGuiKey_LeftArrow, ImGuiKey_Keypad4},
+        {ImGuiKey_D, ImGuiKey_RightArrow, ImGuiKey_Keypad6},
+        {ImGuiKey_E, ImGuiKey_PageUp, ImGuiKey_Keypad9},
+        {ImGuiKey_Q, ImGuiKey_PageDown, ImGuiKey_Keypad7},
+        {ImGuiKey_R, ImGuiKey_None, ImGuiKey_None},
+        {ImGuiKey_F, ImGuiKey_None, ImGuiKey_None},
+        {ImGuiKey_Z, ImGuiKey_Keypad1, ImGuiKey_None},
+        {ImGuiKey_C, ImGuiKey_Keypad3, ImGuiKey_None},
+    }};
+    // 📝 The wheel never scrolls the panel under the viewport; during a camera drag the viewport also owns the flight keys,
+    //    so keyboard navigation leaves the arrows and page keys alone.
+    (void)ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY);
+    const bool Dragging = Active && (Pointer.LeftDown || Pointer.RightDown || Pointer.MiddleDown);
+    for (size_t Axis = 0; Axis < FlightKeyTable.size(); ++Axis)
     {
-        Orbit.Yaw   = std::fmod(Orbit.Yaw - IO.MouseDelta.x * 0.25, 360.0);
-        Orbit.Pitch = std::clamp(Orbit.Pitch + IO.MouseDelta.y * 0.25, -85.0, 85.0);
-        const double Speed = std::max(2.0, Orbit.Distance * 0.6) * DeltaSeconds * (ImGui::IsKeyDown(ImGuiKey_LeftShift) ? 4.0 : 1.0);
-        if (ImGui::IsKeyDown(ImGuiKey_W)) Move(Forward, Speed);
-        if (ImGui::IsKeyDown(ImGuiKey_S)) Move(Forward, -Speed);
-        if (ImGui::IsKeyDown(ImGuiKey_D)) Move(Right, Speed);
-        if (ImGui::IsKeyDown(ImGuiKey_A)) Move(Right, -Speed);
-        if (ImGui::IsKeyDown(ImGuiKey_E)) Move({0.0, 0.0, 1.0}, Speed);
-        if (ImGui::IsKeyDown(ImGuiKey_Q)) Move({0.0, 0.0, 1.0}, -Speed);
+        for (const ImGuiKey Key : FlightKeyTable[Axis])
+        {
+            if (Key == ImGuiKey_None) continue;
+            if (Dragging) (void)ImGui::SetItemKeyOwner(Key);
+            Pointer.FlightKeys[Axis] = Pointer.FlightKeys[Axis] || ImGui::IsKeyDown(Key);
+        }
     }
-    if (Active && ImGui::IsMouseDown(ImGuiMouseButton_Middle))
+    Pointer.RecentrePress = Hovered && !Pointer.RightDown && ImGui::IsKeyPressed(ImGuiKey_F, false);
+
+    // ⚠️ The first tick after the lock may carry the platform's recentring jump; its motion is dropped.
+    if (ConstraintSettleTicks > 0)
     {
-        const double Pan = Orbit.Distance * 0.0016;
-        Move(Right, -IO.MouseDelta.x * Pan);
-        Move(Up, IO.MouseDelta.y * Pan);
+        Pointer.MotionPixels = {0.0, 0.0};
+        --ConstraintSettleTicks;
     }
-    if (Hovered && IO.MouseWheel != 0.0f)
+    // 📝 Unreal hides and holds the pointer during camera drags and puts it back where the drag began.
+    const ImGuiViewport* WindowViewport = ImGui::GetWindowViewport();
+    void* const          PlatformWindow = WindowViewport != nullptr ? WindowViewport->PlatformHandle : nullptr;
+    if (Dragging && ConstrainedWindow == nullptr && ConstrainPointer && PlatformWindow != nullptr)
     {
-        Orbit.Distance = std::clamp(Orbit.Distance * std::pow(0.88, static_cast<double>(IO.MouseWheel)), 1.5, 900.0);
+        ConstrainPointer(PlatformWindow, true);
+        ConstrainedWindow     = PlatformWindow;
+        ConstraintSettleTicks = 1;
     }
-    if (Hovered && ImGui::IsKeyPressed(ImGuiKey_F, false) && !ImGui::IsMouseDown(ImGuiMouseButton_Right))
+    else if (!Dragging && ConstrainedWindow != nullptr)
     {
-        Orbit = SceneViewportOrbit{};
+        ReleasePointerConstraint();
     }
+
+    IntegrateSceneViewportFlight(Flight, Pointer, DeltaSeconds);
+}
+
+void EverestWorkspace::ReleasePointerConstraint()
+{
+    if (ConstrainedWindow != nullptr && ConstrainPointer) ConstrainPointer(ConstrainedWindow, false);
+    ConstrainedWindow = nullptr;
 }
 
 void EverestWorkspace::ConstructViewportSurface()
@@ -488,9 +716,9 @@ void EverestWorkspace::ConstructViewportSurface()
         Request.PanelWidth          = W;
         Request.PanelHeight         = H;
         Request.PixelDensity        = ImGui::GetWindowViewport() != nullptr ? ImGui::GetWindowViewport()->FramebufferScale.y : 1.0f;
-        Request.CameraPosition      = Orbit.ResolvePosition();
-        Request.CameraTarget        = Orbit.Focus;
-        Request.VerticalFieldOfView = Orbit.VerticalFieldOfView;
+        Request.CameraPosition      = Flight.Position;
+        Request.CameraTarget        = Flight.ResolveTarget();
+        Request.VerticalFieldOfView = Flight.ResolveFieldOfView();
         Request.DeltaSeconds        = ViewportDeltaSeconds;
         Image = PresentSceneViewport(Request);
     }
@@ -507,7 +735,8 @@ void EverestWorkspace::ConstructViewportSurface()
     char OverlayLine[192]{};
     if (!Image.Status.empty())
     {
-        std::snprintf(OverlayLine, sizeof(OverlayLine), "%s  |  SIM: %.1f s", Image.Status.c_str(), ElapsedSeconds);
+        std::snprintf(OverlayLine, sizeof(OverlayLine), "%s  |  SIM: %.1f s  |  CAMERA SPEED %d", Image.Status.c_str(), ElapsedSeconds,
+                      Flight.SpeedSetting);
     }
     else
     {

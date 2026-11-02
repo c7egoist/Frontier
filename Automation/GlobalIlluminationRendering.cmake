@@ -144,6 +144,12 @@ if(BUILD_TESTING)
     target_include_directories(SceneViewportValidation PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
     target_link_libraries(SceneViewportValidation PRIVATE FrontierSceneViewport)
 
+    # 📝 The viewport's Unreal-style camera against the renderer's own view basis (no device) — Exhibits/SceneViewport/README.md.
+    add_executable(SceneViewportFlightValidation
+        Exhibits/SceneViewport/Code/SceneViewportFlightValidation.cpp)
+    target_link_libraries(SceneViewportFlightValidation PRIVATE EverestProjectRuntime FrontierGlobalIllumination)
+    add_test(NAME SceneViewportFlightValidation COMMAND SceneViewportFlightValidation)
+
     # 📝 Parity validation against a reference capture of the original demo (Exhibits/RestirGiParity/README.md).
     add_executable(RestirGiParityValidation
         Exhibits/RestirGiParity/Code/RestirGiParityValidation.cpp

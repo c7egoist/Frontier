@@ -47,17 +47,49 @@ struct SceneViewportImage
     std::string Status{};      // [-] one line drawn over the viewport (renderer, extent, bring-up or failure)
 };
 
-// 📝 Orbit camera of the viewport: yaw/pitch/distance around a focus point, z up.
-struct SceneViewportOrbit
+// 📝 Free camera of the viewport, navigated as Unreal Engine's perspective viewport (z up, metres): a position, the view's
+//    heading and elevation, the flight velocity W/A/S/D/Q/E/R/F accelerate, Unreal's eight camera speed settings, the Z/C
+//    field-of-view zoom that recoils once the right button is released, and the pivot that Alt orbits and dollies around.
+//    The default is the former orbit view: focus (−10, 6, 3), 65.88 m away at yaw −142.43°, pitch 5.23°.
+struct SceneViewportFlight
 {
-    std::array<double, 3> Focus               = {-10.0, 6.0, 3.0};    // [m]
-    double                Yaw                 = -142.43;              // [°] of the camera offset, counter-clockwise from +X
-    double                Pitch               = 5.23;                 // [°]
-    double                Distance            = 65.88;                // [m]
-    double                VerticalFieldOfView = 1.0471975511965976;   // [rad]
+    std::array<double, 3> Position            = {-61.9997, -34.0018, 9.0052};   // [m] z-up world of the scene
+    double                Heading             = 37.57;                          // [°] view direction, counter-clockwise from +X
+    double                Elevation           = -5.23;                          // [°] view direction above the horizon
+    double                PivotDistance       = 65.88;                          // [m] Alt orbit and dolly pivot ahead of the view
+    double                VerticalFieldOfView = 1.0471975511965976;             // [rad] at rest
+    double                FieldOfViewOffset   = 0.0;                            // [°] Z/C zoom while flying
+    double                FieldOfViewRate     = 0.0;                            // [°/s]
+    std::array<double, 3> Velocity            = {0.0, 0.0, 0.0};                // [m/s] flight velocity
+    int                   SpeedSetting        = 4;                              // [1-8] Unreal camera speed setting
+    double                WheelRemainder      = 0.0;                            // [-] partial wheel notches (touchpads)
 
-    [[nodiscard]] std::array<double, 3> ResolvePosition() const noexcept;
+    [[nodiscard]] std::array<double, 3> ResolveForward() const noexcept;
+    [[nodiscard]] std::array<double, 3> ResolveLateral() const noexcept;
+    [[nodiscard]] std::array<double, 3> ResolveTarget() const noexcept;
+    [[nodiscard]] double                ResolveFieldOfView() const noexcept;
+    // 📝 Unreal's GetCameraSpeed table for settings 1–8 (0.03125 … 32; 1 at the default setting 4).
+    [[nodiscard]] static double         ResolveSpeed(int Setting) noexcept;
 };
+
+// 📝 One interface tick of pointer and keyboard input over the viewport, as the camera reads it (ImGui conventions: y down).
+struct SceneViewportPointer
+{
+    bool                  Hovered       = false;        // [-] the pointer is over the viewport image
+    bool                  Active        = false;        // [-] a drag that began on the viewport is still held
+    bool                  LeftDown      = false;        // [-]
+    bool                  RightDown     = false;        // [-]
+    bool                  MiddleDown    = false;        // [-]
+    bool                  AltDown       = false;        // [-]
+    bool                  ShiftDown     = false;        // [-]
+    std::array<double, 2> MotionPixels  = {0.0, 0.0};   // [px] pointer motion, +x right, +y down
+    double                WheelNotches  = 0.0;          // [-] +away from the user
+    std::array<bool, 10>  FlightKeys    = {};           // [-] forward, back, left, right, up, down, view up, view down, widen, narrow
+    bool                  RecentrePress = false;        // [-] F pressed (without the right button)
+};
+
+// 📝 Advances the viewport camera by one tick of input: Unreal Engine's perspective viewport navigation.
+void IntegrateSceneViewportFlight(SceneViewportFlight& Flight, const SceneViewportPointer& Pointer, double DeltaSeconds);
 
 class EverestWorkspace
 {
@@ -82,7 +114,11 @@ class EverestWorkspace
     std::function<void()> EvaluateReturnToBrowser;
     // 📝 Set by the host application when it can render the scene; the viewport falls back to its schematic without it.
     std::function<SceneViewportImage(const SceneViewportRequest&)> PresentSceneViewport;
-    [[nodiscard]] SceneViewportOrbit&       AccessViewportOrbit() noexcept { return Orbit; }
+    // 📝 Set by the host application: hides the pointer and locks it to the platform window (an ImGuiViewport's
+    //    PlatformHandle) while a camera drag lasts, so the view turns without the pointer meeting the screen edge; the
+    //    pointer returns where the drag began. Without it the pointer stays visible and free.
+    std::function<void(void* PlatformWindow, bool ConstraintEnabled)> ConstrainPointer;
+    [[nodiscard]] SceneViewportFlight&      AccessViewportFlight() noexcept { return Flight; }
 
     [[nodiscard]] Frontier::SceneDirectoryPanel& QueryOutliner() noexcept { return OutlinerPanel; }
     [[nodiscard]] Frontier::SceneInspectorPanel& QueryInspector() noexcept { return InspectorPanel; }
@@ -108,6 +144,7 @@ class EverestWorkspace
     void ConstructViewportSurface();
     void ConstructViewportSchematic(ImDrawList* DrawList, const ImVec2& Min, const ImVec2& Max);
     void IntegrateViewportCamera(bool Hovered, bool Active, double DeltaSeconds);
+    void ReleasePointerConstraint();
 
     Frontier::ControlCentrePanel& Centre;
     Frontier::PanelDockspace      Dockspace;
@@ -115,8 +152,10 @@ class EverestWorkspace
     Frontier::SceneInspectorPanel InspectorPanel;
     Frontier::LogStreamPanel      LogPanel;
     uint64_t                      ObservedLayoutRevision = 0;
-    SceneViewportOrbit            Orbit{};
+    SceneViewportFlight           Flight{};
     double                        ViewportDeltaSeconds   = 0.0;
+    void*                         ConstrainedWindow      = nullptr;   // [-] platform window holding the pointer, or null
+    int                           ConstraintSettleTicks  = 0;         // [-] ticks whose motion is dropped after a lock
 #endif
 
     std::filesystem::path ProjectRoot;

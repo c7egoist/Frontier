@@ -81,7 +81,7 @@ VulkanPresentation (Vulkan 1.3 + dynamicRendering, scalar layouts, draw paramete
    │  QueryDeviceAccess() → VulkanDeviceAccess
    ├─ DeviceExchange::AttachDevice          illumination port     ─┐  one VkDevice, one queue, the editor's thread
    └─ VulkanComputeExchange::AttachDevice   PlanetaryAtmosphere   ─┘
-EverestWorkspace::ConstructViewportSurface   orbit (RMB) · pan (MMB) · dolly (wheel) · fly (RMB + WASD/QE) · F recentres
+EverestWorkspace::ConstructViewportSurface   Unreal Engine viewport navigation (IntegrateSceneViewportFlight; see Camera)
    └─ PresentSceneViewport(request) → EverestSceneViewport::Render(request, level records)
         └─ SceneViewport::Refresh
              ① AdvanceCelestial → ResolveLight → AdjustLight* → light-change relighting (10° / 30 %) → EncodeEnvironment
@@ -228,6 +228,41 @@ following:
 - no transfer was rejected and no submission failed (`DeviceExchange::Faults`).
 
 The tenth argument `demo` renders the same scenarios with the demo's own light inputs (Option A off).
+
+## Camera
+
+The viewport navigates like Unreal Engine's perspective viewport (`SceneViewportFlight`,
+`IntegrateSceneViewportFlight` in `Projects/Everest/Source/EverestWorkspace.cpp`; the controls table is in
+`WindowsPreviewReadme.md`). It replaced an orbit camera whose right vector was `Up × Forward`. The renderer's screen
+right is `Forward × Up` (`ConstructViewTransform`), so A and D moved the wrong way.
+
+| Unreal Engine 5 setting (editor defaults)              | Here                                                  |
+|--------------------------------------------------------|-------------------------------------------------------|
+| `MouseSensitivty` 0.2                                  | 0.2° per pixel: look, orbit, left-drag turn           |
+| `CameraSpeed` 4 of 8, `GetCameraSpeed` 0.03125 … 32    | same table; right button + wheel steps it             |
+| `MovementAccelerationRate` 20000, damping 10           | 20 m/s at speed 1, reached with a 0.1 s time constant |
+| `CameraBoost` 2 with Shift                             | Shift doubles the flight speed                        |
+| drags: `Drag *= CameraSpeed` (1 unit per pixel)        | 1 cm per pixel at speed 1                             |
+| wheel: `GetCameraSpeed(MouseScrollCameraSpeed 5) × 32` | 0.96 m per notch                                      |
+| Z/C field of view with recoil once flight input stops  | same; the view returns to 60° vertical                |
+
+During a camera drag the host hides the pointer and locks it to the window that shows the viewport
+(`GLFW_CURSOR_DISABLED`, raw motion when available), as Unreal does. GLFW puts the pointer back where the drag began.
+The viewport also owns the wheel and, while dragging, the flight keys, so keyboard navigation of the panels does not
+move on the arrow keys. F returns to the level's starting view, because the viewport has no selection to focus.
+
+`Code/SceneViewportFlightValidation.cpp` (CTest `SceneViewportFlightValidation`, 19 checks) drives the camera with
+synthetic input and reads directions from the renderer's own view basis:
+
+- D moves along screen right and A along screen left, purely sideways, at 5 headings × 4 elevations;
+- W flies into the screen (pitch included), E rises along world z and R along the screen's up;
+- terminal speeds are 20 m/s at setting 4, 40 m/s with Shift, 640 m/s at 8 and 0.625 m/s at 1;
+- released flight settles within 0.5 s, and W without the right button does nothing;
+- the wheel steps the speed 1–8 while flying and dollies 0.96 m otherwise;
+- right drag right and down turns the view right and down; left drag up moves 1 m forward per 100 px;
+- middle drag moves the camera right and up with the pointer;
+- Alt orbits and dollies about a fixed pivot and tracks camera and pivot together;
+- Z widens the view and it recoils after release, and F frames the starting view and keeps the speed.
 
 ## Build and run it yourself (Windows)
 

@@ -896,3 +896,23 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
   - the moon phase. The drawn disc follows the sun–moon geometry, while the `Moons` record's phase sets Luna's light.
     For the record to drive the disc, either the moon shader gets a phase input or Luna's position follows from the
     phase. The owner decides.
+
+## Unreal-style viewport camera; first slice of the VehicleHMI demo UI (2026-11-02, branch arena/88b72faa-frontier)
+
+- **Reported:** the `24ef36a1` download works on the owner's RX 9060 XT. Asked for: the viewport camera as Unreal Engine's
+  WASD camera (A and D were inverted); then a proper UI, porting the VehicleHMI demo's UI 1:1, with
+  SultanAladin/Frontier `e7a0aaf2` as the helper (its `Frontier/Projects/Project-VehicleHmiDemo/Contract` UI inventory
+  and the demo `index.html`).
+- **Camera:** `SceneViewportOrbit` → `SceneViewportFlight` + `IntegrateSceneViewportFlight`
+  (`Projects/Everest/Source/EverestWorkspace.{h,cpp}`).
+  - *Cause of the inversion.* The orbit camera's right vector was `Up × Forward`; the renderer's screen right is
+    `Forward × Up` (`ConstructViewTransform`).
+  - *Bindings and constants* are Unreal Engine 5's editor defaults (Epic's viewport-controls page; `MouseSensitivty` 0.2,
+    `CameraSpeed` 4 of 8 with the 0.03125 … 32 table, acceleration 20000 cm/s² with damping 10, Shift boost 2, drags
+    `× CameraSpeed`, wheel `GetCameraSpeed(5) × 32` cm, Z/C field of view with recoil).
+  - *Pointer:* `EverestWorkspace::ConstrainPointer`, set by `WindowsFrontier.cpp`, hides and locks the pointer to the
+    window that shows the viewport during a camera drag (`GLFW_CURSOR_DISABLED`, raw motion); GLFW returns it.
+  - *Keys:* the viewport owns the wheel and, while dragging, the flight keys (`SetItemKeyOwner`), so keyboard
+    navigation (`NavEnableKeyboard`) does not move on the arrows.
+  - `SceneViewportFlightValidation` (new CTest, 19 checks, 0 failing): directions are read from the renderer's view
+    basis; D/A are screen right/left at 5 headings × 4 elevations.

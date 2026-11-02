@@ -13,12 +13,24 @@ Studio material archives, which the Scene Viewport does not read.
    status line until the first image is ready.
    - To skip the browser, run `Frontier.exe Projects\Everest\Everest.projectspace`, or drop the `.projectspace` file
      on `Frontier.exe`.
-3. Camera controls:
-   - right mouse drag: orbit;
-   - middle mouse drag: pan;
-   - mouse wheel: dolly;
-   - hold the right mouse button and use W/A/S/D/Q/E: fly;
-   - F: recentre.
+3. Camera controls, as in Unreal Engine's perspective viewport. The pointer hides during a drag and comes back
+   where the drag began.
+
+   | Input                                  | Camera                                                          |
+   |----------------------------------------|-----------------------------------------------------------------|
+   | hold right button, move the mouse      | look around in place                                            |
+   | hold right button + W / S              | fly forward / back (also ↑ / ↓, numpad 8 / 2)                   |
+   | hold right button + A / D              | fly left / right (also ← / →, numpad 4 / 6)                     |
+   | hold right button + E / Q              | up / down in the world (also Page Up / Page Down, numpad 9 / 7) |
+   | hold right button + R / F              | up / down along the view                                        |
+   | hold right button + Z / C              | widen / narrow the field of view; it returns on release         |
+   | hold right button + mouse wheel        | camera speed 1–8 (shown in the viewport's status line)          |
+   | Shift while flying                     | twice the speed                                                 |
+   | hold left button, move the mouse       | forward / back over the ground and turn                         |
+   | middle button, or left + right buttons | move sideways and up / down without turning                     |
+   | mouse wheel                            | step forward / back (0.96 m per notch)                          |
+   | Alt + left / right / middle drag       | orbit / dolly / track around a pivot ahead of the camera        |
+   | F                                      | back to the level's starting view                               |
 4. Select the level's environment records in the Scene Directory and edit them in the Inspector:
    `Solar`, `OpticalFlare`, `Atmosphere` (with the four `Planet` entries under it: Venus, Jupiter, Mars, Saturn),
    `Clouds`, `Stars`, `Moons`, `Fog`, `Wind` and `RenderPipeline`.
