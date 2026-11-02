@@ -836,7 +836,9 @@ void VerifyGpuPipelineAndRenderExhibits(const std::filesystem::path& RepoRoot,
         SunCloud.BoxEdgeFalloffM     = 2.0;
         SunCloud.Slab.Coverage       = 0.95;
         SunCloud.Slab.DensityScale   = 1.4;
-        SunCloud.Slab.ExtinctionPerM = 0.06;
+        // 📝 A quarter of the former 0.06: the flare dims as the disc does, by the cloud transmittance to the fourth power
+        //    (ResolveSolarDiscTransmittance), so the same partial attenuation takes a quarter of the optical depth.
+        SunCloud.Slab.ExtinctionPerM = 0.015;
         R.CloudVolumes.push_back(SunCloud);
         Cam.FrameIndex = 0u;
         REQUIRE_ENV(Sequence.ExecuteFrame(Exchange, FlareTest, Cam) &&

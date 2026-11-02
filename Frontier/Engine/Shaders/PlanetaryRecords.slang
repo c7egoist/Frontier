@@ -11,7 +11,7 @@ static const uint kRealmStride       = 18u;
 static const uint kSunStride         = 6u;
 static const uint kMoonStride        = 5u;
 static const uint kPlanetStride      = 6u;
-static const uint kCloudStride       = 5u;
+static const uint kCloudStride       = 6u;
 static const uint kFogBoxStride      = 3u;
 static const uint kLuminaireStride   = 3u;
 static const uint kLightningStride   = 3u;
@@ -95,6 +95,20 @@ float HenyeyGreensteinValue(float cosθ, float 𝑔)
     float 𝑔Sq   = 𝑔 * 𝑔;
     float Denom = max(1.0f + 𝑔Sq - 2.0f * 𝑔 * cosθ, 1.0e-4f);
     return (1.0f - 𝑔Sq) / (4.0f * π * Denom * sqrt(Denom));
+}
+
+// 📝 The droplets' sharp forward lobe (their diffraction peak): a cloud between the observer and the sun glows along its thin
+//    parts — the silver lining. VolumetricClouds blends it into the single-scattering phase by the record's silver-lining weight.
+static const float kSilverLiningG = 0.9f;
+
+// 📝 The solar disc seen through a cloud. Its direct beam leaves the cloud as that forward glow, so the sharp disc fades as the
+//    cloud's transmittance to the fourth power: hidden behind any cloud thicker than τ ≈ 1.5 instead of shining through at 1 %.
+//    The cloud composite and the flare's visibility share it, so the flare dims exactly as the disc does.
+float ResolveSolarDiscTransmittance(float CloudTransmittance)
+{
+    float Transmittance = saturate(CloudTransmittance);
+    float Squared       = Transmittance * Transmittance;
+    return Squared * Squared;
 }
 
 //------------------------------------------------------------------------------------------------------------------------

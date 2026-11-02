@@ -86,6 +86,7 @@ struct CloudVolumeProfile
     double                   BackscatterPhaseG     = -0.28;
     double                   PowderStrength        = 0.85;
     double                   MultiScatterStrength  = 0.55;
+    double                   SilverLiningWeight    = 0.2;     // [0..0.8] share of single scattering in the g 0.9 forward lobe
 };
 
 struct CloudSolarBeam

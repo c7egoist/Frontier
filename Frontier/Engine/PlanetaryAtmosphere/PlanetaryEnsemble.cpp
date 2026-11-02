@@ -377,6 +377,7 @@ PackedEnsemblePayload PackEnsemblePayload(const PlanetaryRealmEnsemble& Ensemble
                                   BoxHalf[1],
                                   BoxHalf[2],
                                   static_cast<float>(Cloud.Slab.WindXMps) * Realm.CloudWindSeconds});
+            CloudSlots.push_back({static_cast<float>(std::clamp(Cloud.SilverLiningWeight, 0.0, 0.8)), 0.0f, 0.0f, 0.0f});
         }
 
         const uint32_t FogBoxFirst = static_cast<uint32_t>(FogBoxSlots.size() / kFogBoxRecordFloat4Stride);

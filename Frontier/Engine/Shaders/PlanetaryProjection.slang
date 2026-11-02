@@ -286,10 +286,12 @@ void RasterizePlanetaryProjectionMain(uint3 Tid : SV_DispatchThreadID)
         return;
     }
 
+    // 📝 Alpha carries the solar discs' share of the pixel to ReconstructVolumetricCloudsMain (which writes 1 back): a cloud
+    //    hides the disc faster than the sky behind it. Surfaces carry none.
     float4 Vis0 = VisibilityImage[uint3(Tid.xy, 0u)];
     if (Vis0.w > 0.0f)
     {
-        HdrFrame[uint3(Tid.xy, 0u)] = float4(Vis0.rgb, 1.0f);
+        HdrFrame[uint3(Tid.xy, 0u)] = float4(Vis0.rgb, 0.0f);
         return;
     }
 
@@ -537,7 +539,8 @@ void RasterizePlanetaryProjectionMain(uint3 Tid : SV_DispatchThreadID)
         ExoRadiance = ExoRadiance * (1.0f - Coverage) + LitSurface * Coverage;
     }
 
-    // 6. Finite-pixel limb-darkened multi-sun discs
+    // 6. Finite-pixel limb-darkened multi-sun discs (kept apart: the clouds attenuate them as ResolveSolarDiscTransmittance)
+    float3 SolarDiscs = float3(0.0f);
     for (uint SunIdx = 0u; SunIdx < SunCount; ++SunIdx)
     {
         uint   SunOffset      = SunSlotOffset(Ensemble, SunFirst + SunIdx);
@@ -553,10 +556,13 @@ void RasterizePlanetaryProjectionMain(uint3 Tid : SV_DispatchThreadID)
             float ρNorm    = min(θSeparation / θSolarRadius, 0.999f);
             float μ        = sqrt(max(0.0f, 1.0f - ρNorm * ρNorm));
             float Limb     = (1.0f - S1.w * (1.0f - μ)) / max(1.0f - S1.w / 3.0f, 1.0e-3f);
-            ExoRadiance   += S1.xyz * (18.0f * Limb * Coverage);
+            SolarDiscs    += S1.xyz * (18.0f * Limb * Coverage);
         }
     }
 
-    float3 TotalSky = (SkyScattering + ExoRadiance * SkyTrans) * GlassTint;
-    HdrFrame[uint3(Tid.xy, 0u)] = float4(min(TotalSky, float3(60000.0f)), 1.0f);
+    float3       TotalSky  = min((SkyScattering + (ExoRadiance + SolarDiscs) * SkyTrans) * GlassTint, float3(60000.0f));
+    const float3 Weights   = float3(0.2126f, 0.7152f, 0.0722f);
+    float        SkyLuma   = dot(TotalSky, Weights);
+    float        DiscShare = SkyLuma > 1.0e-6f ? saturate(dot(SolarDiscs * SkyTrans * GlassTint, Weights) / SkyLuma) : 0.0f;
+    HdrFrame[uint3(Tid.xy, 0u)] = float4(TotalSky, DiscShare);
 }

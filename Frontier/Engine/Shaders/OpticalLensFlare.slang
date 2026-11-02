@@ -60,7 +60,7 @@ void EvaluateFlareVisibilityMain(uint3 Tid : SV_DispatchThreadID)
         uint   PixRealm   = uint(VisibilityImage[uint3(Pix, 1u)].w + 0.5f);
         float4 Glass4     = VisibilityImage[uint3(Pix, 3u)];
         int    PixPortal  = int(Glass4.w + 0.5f) - 1;
-        float  CloudTrans = CloudWorkArray[uint3(Pix, 1u)].w;
+        float  CloudTrans = ResolveSolarDiscTransmittance(CloudWorkArray[uint3(Pix, 1u)].w);
 
         bool RealmMatch  = (PixRealm == SrcRealm);
         bool PortalMatch = (PortalReq < 0) ? (PixPortal < 0) : (PixPortal == PortalReq);

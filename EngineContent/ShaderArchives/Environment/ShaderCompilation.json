@@ -30,7 +30,7 @@
     },
     {
       "file": "EvaluateFlareVisibility.spv",
-      "spirv_sha256": "01c30dfab5d92537d58dbbc81df3fe3c45ecfdb2dd6d55862bf519f6f9d44636"
+      "spirv_sha256": "33c1b44e22ca6ca1c8145ad1cc844e6b8e254365c393912cbd68733d1a0a0ad1"
     },
     {
       "file": "IntegrateFogSpace.spv",
@@ -38,7 +38,7 @@
     },
     {
       "file": "ProjectCloudShadow.spv",
-      "spirv_sha256": "371348a66ab98a9192d156c349e471680025ab921713b5b4df2f3b6a1ce8512b"
+      "spirv_sha256": "cd2714c45176903392c5a375212751433b3202d80a8d34980157854cf492c725"
     },
     {
       "file": "ProjectPreviewShadow.spv",
@@ -46,15 +46,15 @@
     },
     {
       "file": "RasterizePlanetaryProjection.spv",
-      "spirv_sha256": "a000f761242876ca56404f773decb2ed3b04bd088c4cc3fe2993fa0f3a0b2772"
+      "spirv_sha256": "1165ea30d7dc280718d36ea41af7f8ec9ef8e3be0a2c7c466703a79af1458d8a"
     },
     {
       "file": "RasterizeVisibilityProjection.spv",
-      "spirv_sha256": "9b3d9393e8690f1bd627858e2c41f7592dd7911c7bf595ac5dfa9b1f93c236bd"
+      "spirv_sha256": "69715a854a7d172189be8e1f782287bf5f8e540db41d1fb833fc954448e857c9"
     },
     {
       "file": "ReconstructVolumetricClouds.spv",
-      "spirv_sha256": "9f4e451ea5c1f096e8fbc7573568e66ef3b08b984dfccc8a95398381852dbbaa"
+      "spirv_sha256": "71cd471d1b1a3090eb7b9df91584f7178cebab2d032274e962867d32fe420ea2"
     },
     {
       "file": "ResolvePreviewView.spv",
@@ -62,7 +62,7 @@
     },
     {
       "file": "TraceVolumetricClouds.spv",
-      "spirv_sha256": "50596e36db8a35225f31777bb418af53bc57ae968942f475123c413f8745596f"
+      "spirv_sha256": "1f93e4d7c0fad35ddfb634fd99f477c66f48858ca42cd4b34b0cbe634e2870df"
     }
   ],
   "sources": [
@@ -92,15 +92,15 @@
     },
     {
       "file": "Frontier/Engine/Shaders/OpticalLensFlare.slang",
-      "sha256": "8e9af564bb3a21fa748e7848197ee82073e5ef682aec7a1e5c2f9836b5b8b3c0"
+      "sha256": "f7297592c30f963b545094382488d85c9a9bc109ad8c24bd3c639a4075f63677"
     },
     {
       "file": "Frontier/Engine/Shaders/PlanetaryProjection.slang",
-      "sha256": "e9b294b4e54ce853a2d0d1fdab1c4b4e4e5df0214e20d748d1d0f56b11cd6d4a"
+      "sha256": "180a2ce48eda00eff56286d6ae08c46382b0c0d48ff276cac5b46a523f0551c5"
     },
     {
       "file": "Frontier/Engine/Shaders/PlanetaryRecords.slang",
-      "sha256": "6047fbc521239e7dae28c350b2acba708c9087efffa2fb89a3d14c4b1f33892d"
+      "sha256": "ab0c3720e85eb76b85b8067fcdadceb2b2b25acc618f5df2554e3a23cb78bae4"
     },
     {
       "file": "Frontier/Engine/Shaders/PreviewRaster.slang",
@@ -116,7 +116,7 @@
     },
     {
       "file": "Frontier/Engine/Shaders/VolumetricClouds.slang",
-      "sha256": "caaa5d1d247f2d3cba6ade1f54e2b3899749974aaff0b50698ce769eb74d8bc8"
+      "sha256": "25d03ddb7b1fc15deb85c75f6ea7600c360789552f3158264f6fcec6defccac6"
     }
   ]
 }

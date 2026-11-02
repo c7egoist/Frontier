@@ -76,6 +76,7 @@ void TraceVolumetricCloudsMain(uint3 Tid : SV_DispatchThreadID)
             float4 C2          = Ensemble[CloudOffset + 2u];
             float4 C3          = Ensemble[CloudOffset + 3u];
             float4 C4          = Ensemble[CloudOffset + 4u];
+            float4 C5          = Ensemble[CloudOffset + 5u];
             bool   IsLocalBox  = (C2.w > 0.5f);
             if (DomainOrder >= 0 && ((DomainOrder == 0) != IsLocalBox))
             {
@@ -188,9 +189,12 @@ void TraceVolumetricCloudsMain(uint3 Tid : SV_DispatchThreadID)
                         τSolar           += EvaluateCloudExtinctionAtPoint(Ensemble, RealmId, CloudOffset, ShadowPos) * StepLength;
                     }
 
+                    // 📝 Lit from behind: the sharp forward lobe (C5.x of the energy) makes the thin parts of a cloud near the sun
+                    //    glow, and the powder darkening of sunlit edges only applies looking away from the sun, where it is seen.
                     float  cosθ   = dot(RayDir, SolarDirection);
                     float  Phase0 = lerp(HenyeyGreensteinValue(cosθ, 𝑔Backscatter), HenyeyGreensteinValue(cosθ, 𝑔Forward), 0.72f);
-                    float  Powder = 1.0f - 0.55f * PowderStrength * exp(-2.0f * τSolar);
+                    Phase0        = lerp(Phase0, HenyeyGreensteinValue(cosθ, kSilverLiningG), saturate(C5.x));
+                    float  Powder = 1.0f - 0.55f * PowderStrength * exp(-2.0f * τSolar) * saturate(0.5f - 0.5f * cosθ);
                     float3 AtmoTr = SampleTransmittanceLutArray(
                         TransLut, RealmId, R0.x, R0.y, R0.x + max(SamplePos.y * 1.0e-3f, 1.0e-3f), SolarDirection.y);
 
@@ -259,7 +263,11 @@ void ReconstructVolumetricCloudsMain(uint3 Tid : SV_DispatchThreadID)
 
     CloudWorkTarget[uint3(Tid.xy, 1u)] = Filtered;
 
-    float3 InitialHdr                  = HdrFrameTarget[uint3(Tid.xy, 0u)].rgb;
-    float3 Blended                     = InitialHdr * Filtered.w + Filtered.rgb;
+    // 📝 The dome's alpha is the solar discs' share of the pixel: that share fades as ResolveSolarDiscTransmittance, the sky as
+    //    the cloud's transmittance.
+    float4 InitialHdr                  = HdrFrameTarget[uint3(Tid.xy, 0u)];
+    float  DiscShare                   = saturate(InitialHdr.a);
+    float  Attenuation                 = lerp(Filtered.w, ResolveSolarDiscTransmittance(Filtered.w), DiscShare);
+    float3 Blended                     = InitialHdr.rgb * Attenuation + Filtered.rgb;
     HdrFrameTarget[uint3(Tid.xy, 0u)]  = float4(Blended, 1.0f);
 }

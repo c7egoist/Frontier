@@ -522,7 +522,7 @@ void EnvironmentOverlay::ResolveRealm(const IlluminationHost& Host, const SceneE
         Slab.Slab.Coverage       = std::clamp(S.Clouds.Coverage, 0.0f, 1.0f);
         Slab.Slab.DensityScale   = std::max(0.0f, S.Clouds.ExtinctionDensity / 0.85f);
         Slab.Slab.WindXMps       = S.Clouds.WindDriftSpeed;
-        Slab.PowderStrength      = 0.85 * std::clamp(S.Clouds.SilverLiningPower / 0.72f, 0.0f, 2.0f);
+        Slab.SilverLiningWeight  = 0.2 * std::clamp(S.Clouds.SilverLiningPower / 0.72f, 0.0f, 2.0f);   // 0.72 ≙ 0.2
         R.CloudVolumes.push_back(Slab);
     }
 

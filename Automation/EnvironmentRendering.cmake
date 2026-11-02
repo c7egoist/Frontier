@@ -144,6 +144,21 @@ if(BUILD_TESTING)
         "${CMAKE_BINARY_DIR}/environment-realm-exhibits")
     set_tests_properties(EnvironmentRealmValidation PROPERTIES RUN_SERIAL TRUE)
 
+    # 📝 The sun behind the clouds: a dense cloud hides the disc, a cloud beside the sun is lit from behind.
+    add_executable(SolarOcclusionValidation
+        Exhibits/EnvironmentRealm/Code/SolarOcclusionValidation.cpp
+        Engine/Render/StbImageWriteImplementation.cpp)
+    target_include_directories(SolarOcclusionValidation PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
+    target_link_libraries(SolarOcclusionValidation PRIVATE FrontierEnvironmentRendering)
+    if(TARGET FrontierEnvironmentShaders)
+        add_dependencies(SolarOcclusionValidation FrontierEnvironmentShaders)
+    endif()
+    add_test(NAME SolarOcclusionValidation COMMAND SolarOcclusionValidation
+        "${CMAKE_SOURCE_DIR}"
+        "${FRONTIER_ENV_SHADER_OUT}"
+        "${CMAKE_BINARY_DIR}/solar-occlusion-exhibits")
+    set_tests_properties(SolarOcclusionValidation PROPERTIES RUN_SERIAL TRUE)
+
     add_executable(ForceFieldTriggerValidation
         Exhibits/EnvironmentRealm/Code/ForceFieldTriggerValidation.cpp
         Engine/Render/StbImageWriteImplementation.cpp)

@@ -254,6 +254,35 @@ the whole image, and over silhouettes only.
   here (noise), and the pass is about 0.1–0.2 ms at 1080p on a GPU. It does not explain a frame-rate difference between
   TAA on and off.
 
+## The sun behind the clouds
+
+Before 2026-11-02 the solar disc showed through clouds. The clouds attenuated it by their transmittance, but the march
+stops at a transmittance of 1 %, and the disc is about 180 times brighter than the sky around it. So the disc stayed
+visible through any cloud, and a cloud edge across the sun looked like the sun in front of it. The powder term also
+darkened the sunlit thin parts of clouds in every direction, which removed the bright rim of a cloud lit from behind.
+
+Now:
+
+- **The disc is occluded.** `PlanetaryProjection.slang` passes the discs' share of each sky pixel to the cloud composite
+  (in alpha). The composite attenuates that share by the cloud transmittance to the fourth power
+  (`ResolveSolarDiscTransmittance`). The disc's direct beam leaves the cloud as forward-scattered glow, so the sharp
+  disc is hidden behind any cloud thicker than an optical depth of about 1.5. The flare's visibility uses the same
+  function, so the flare dims exactly as the disc does.
+- **Clouds are lit from behind.** Single scattering blends in the droplets' sharp forward lobe (Henyey–Greenstein g 0.9,
+  20 % at the default Silver Lining 0.72), so the thin parts of a cloud near the sun glow. The powder darkening only
+  applies when looking away from the sun. The Clouds record's Silver Lining drives that lobe; before, it drove the
+  powder darkening, which is the opposite effect.
+
+`Exhibits/EnvironmentRealm/Code/SolarOcclusionValidation.cpp` (CTest) measures it on SwiftShader: the Everest sun (38°
+up, azimuth 132°) and a dense cumulus box.
+
+| | before | after |
+|---|---|---|
+| ① disc behind the cloud ÷ the cloud around it | 1.61 (disc visible) | 1.03 (hidden) |
+| ② cloud beside the sun ÷ the same cloud with the sun behind the camera | 1.89 | 2.58 |
+
+It requires ① below 1.5 and ② above 2.2. It also renders the Everest cloud deck looking into the sun for inspection.
+
 ## Checks
 
 `Code/SceneViewportValidation.cpp` (log: `Results/SceneViewportValidation.txt`, 18 checks, 0 failing) checks the
