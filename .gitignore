@@ -1,0 +1,18 @@
+node_modules
+dist
+dist-ssr
+*.local
+.DS_Store
+.vite
+*.log
+
+# local QA artifacts
+scripts/.smoke-bundle.mjs
+scripts/.audit*
+shots/
+
+*.tsbuildinfo
+
+# QA artifacts
+preview.png
+shots/
