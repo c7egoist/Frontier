@@ -42,3 +42,9 @@ RESULTS-RECOMMENDATION
   most when the car returns.
 - ReSTIR's path vertices shade the sun through the same next-event estimate as the reflection hits, so 🌞 `SolarDisc`
   also removes highlight spikes from indirect light.
+- 🐞 **With indirect GI off, the RTX reflections vanish.** The glossy variance filter's temporal step, its wavelet and
+  its screen upsample all take their validity guide from the ReSTIR temporal pass (`ReservoirTemporal` writes
+  `GuideViews`). Without indirect light that pass does not run, the guide goes stale, and every half-resolution
+  reflection texel is treated as invalid (zero). This is inherited from the demo's structure. A fix is to write the
+  guide when indirect light is off (a guide-only entry of `ReservoirTemporal`), or to give the glossy filter a guide of
+  its own. 🔍 `MirrorTrace` is unaffected because it writes the screen directly.

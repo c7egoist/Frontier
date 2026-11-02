@@ -38,7 +38,7 @@
     },
     {
       "file": "DirectRadiance.IntegrateDirectRadiance.spv",
-      "spirv_sha256": "b1e15d38ccaebb59e57bba64ebf5132be5b9e911c1e052be9fce74d356537438"
+      "spirv_sha256": "f2f5732037b3b95883d90f390c2cb031fd5bdd46a21551caf7f7695bc421674f"
     },
     {
       "file": "DisplayAntialias.IntegrateAntialias.spv",
@@ -58,7 +58,7 @@
     },
     {
       "file": "DisplayRecombination.ResolveRecombination.spv",
-      "spirv_sha256": "7086d9488fe6f02aa86e5dfed81a92828db64c8b4f7c8f21cb7576a5643ed3d1"
+      "spirv_sha256": "18ce10892b5fd7f79638de18cd4fbeddf0cae2c266187aaecb4cabbd9955bb26"
     },
     {
       "file": "DistanceTransfer.TransferDistance.spv",
@@ -94,11 +94,11 @@
     },
     {
       "file": "PenumbraResolve.ResolvePenumbra.spv",
-      "spirv_sha256": "99327d61a2373275066b6bac857eb48fc7cfb8090c028535dbdfdcce1154ded4"
+      "spirv_sha256": "f9fd71cfa400458ff6a5271689cd34fd2c522698f738cfb0cd461edc1f17c88e"
     },
     {
       "file": "ReflectionTrace.TraverseMirrorReflection.spv",
-      "spirv_sha256": "6b5712573579f4603de272c001f9b21de4d31afe0218a2b346c3e4744e244479"
+      "spirv_sha256": "ec0133bc51005b3f22b69783e74a8c238a1d3b3fd6d4c2843a22a87f1767c0e6"
     },
     {
       "file": "ReflectionTrace.TraverseReflection.spv",
@@ -220,7 +220,7 @@
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/DirectRadiance.slang",
-      "sha256": "a784c884828d9f15d9cec9db44ae117651a0a538a6abd835781f3bcf7bd875da"
+      "sha256": "17c12242d9344c9ff4ee42ad3a43df2d2793265e43b2196126e4f8c0dd39710b"
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/DiscrepancySequence.slang",
@@ -240,7 +240,7 @@
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/DisplayRecombination.slang",
-      "sha256": "5e7d1aa48a0a3ceeca2ed9c4bf67f0470b06e899d3121a0d0787c66fce500bfb"
+      "sha256": "f060297fda5ded44d7cdeea93f237283ed7a316aee01208b87bfc61a3bbcb584"
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/DistanceLayouts.slang",
@@ -308,7 +308,7 @@
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/PenumbraResolve.slang",
-      "sha256": "fb69e315b2e7f862e9103b40716541f7ab49b552eef1213256f121923952887f"
+      "sha256": "10e063b3ae327c7b919b49a2d992697f543ae94fdf0553434fb4f8eea6e46dc0"
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/RayIntersection.slang",
@@ -316,7 +316,7 @@
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/ReflectionTrace.slang",
-      "sha256": "534ae0acb3961c404b8e596b511af4a6fcb5fb75a211d959512a580ef2bffbba"
+      "sha256": "bc5d6ba49a6d9cce615a7d52d5c1356ccaad1eccb0d0169e0415da057aff767b"
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/RefreshDescriptor.slang",
@@ -336,7 +336,7 @@
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/SceneLayouts.slang",
-      "sha256": "38ec57559b8734bd6d26391fa6ce3a94f55351c61f94023202fc9f09b2a0c649"
+      "sha256": "041d323d3c7f62fec9a47f0c3f0969c505be5ceea46d5de546c5872d6cca0579"
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/ShadowRaster.slang",

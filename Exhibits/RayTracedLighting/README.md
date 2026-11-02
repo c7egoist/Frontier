@@ -57,3 +57,69 @@ submission, and `DeviceExchange::SubmissionTiming` names each stage's cost.
 
 The sun sits at 38° elevation and 132° azimuth with 98 klx; the clouds cover 42 %. All captures used 480×270 at the
 low grade, on SwiftShader on a 2-CPU Linux sandbox (2026-11-02).
+
+## Results — sun shadows
+
+Each view was compared with a converged reference of its own (`ShadowReference`: 64 stratified sun rays per pixel, the
+reflections unchanged), with indirect light off so the reservoirs' own noise does not mask the shadows. *Visible
+errors* counts pixels per refresh more than 12 luminance levels from the converged image. *Transition* figures cover
+the penumbra and edge pixels only.
+
+| View | Variant | Visible errors / refresh | Transition RMS | Temporal noise | Mean error (bias) | Shadow stages |
+|---|---|---:|---:|---:|---:|---:|
+| `PenumbraNear` (9,740 transition px) | 🟥 Demo (1 RT ray) | 928 | 7.11 | 1.93 | 6.32 | 610 ms |
+| | 🟩 Cascades (GTX) | 1,601 | 10.65 | 1.03 | 10.45 | 337 ms |
+| | 🌗 PenumbraFilter, full radius | 1,023 | 6.32 | 1.34 | 5.95 | 546 + 37 ms |
+| | 🌗 **PenumbraFilter, half radius** | **615** | **5.69** | **1.30** | **5.29** | 540 + 36 ms |
+| `TowerShadow` (4,210 transition px) | 🟥 Demo | 903 | 8.21 | 2.59 | 7.17 | 442 ms |
+| | 🟩 Cascades | 2,246 | 21.35 | 1.82 | 20.77 | 288 ms |
+| | 🌗 PenumbraFilter, full radius | 999 | 7.48 | 1.75 | 6.73 | 485 + 35 ms |
+| | 🌗 **PenumbraFilter, half radius** | **673** | **6.61** | **1.83** | **5.73** | 456 + 34 ms |
+
+Luminance levels are 8-bit display steps. Shadow stages are the direct radiance stage plus the penumbra resolve; the
+direct stage itself varies about ±10 % between runs. The filter variants include `SolarDisc` and `StratifiedSun`.
+
+- The half radius (filter disc = a quarter of the penumbra width) beats the full radius on every measure. A disc as
+  wide as the penumbra blurs the true profile, and at its edges that costs more than it saves in noise. The half radius
+  became the option's only setting.
+- Against the demo it removes a third of the visible errors near the pole and a quarter at the tower. It lowers the
+  per-refresh error by a fifth and the flicker by 30 %, keeps contact hardening where an occluder meets the ground, and
+  adds 34–37 ms of SwiftShader time to a 7.5–8 s refresh (about 0.4 %).
+- The cascades are the cleanest in time (lowest noise) but furthest from the true shadow: a fixed blur with no
+  contact hardening, and at the tower's distance the shadow map's resolution moves whole edges (mean error 21 levels).
+  "Clean" there means wrong but stable.
+- `StratifiedSun` on its own did not change the demo's figures in a first pass with a noisier reference (840 against
+  766 visible errors). The per-pixel R2 walk is already stratified over time; spatial stratification pays off only
+  under the filter, which averages across pixels.
+
+## Results — reflections
+
+Measured with indirect light **on**: the glossy variance filter and its upsample take their validity guide from the
+ReSTIR pass, so with indirect light off every half-resolution reflection is dropped (see the report, §5). The
+reference (`MirrorReference`) traces every reflective pixel 16 times at screen resolution and takes it unfiltered;
+figures cover the pane's and the cone's regions only.
+
+| View | Variant | Visible errors / refresh | Refresh RMS | Transition RMS | Temporal noise | Mean error (bias) | Reflection stages |
+|---|---|---:|---:|---:|---:|---:|---:|
+| `PaneNear` (roughness 0.04, 17,664 px) | 🟥 Demo | 57 | 2.70 | 4.98 | 1.31 | 4.55 | 188 + 59 ms |
+| | ⬜ Unfiltered (variance filters off) | 65 | 2.51 | 4.76 | 1.80 | 4.15 | 191 + 13 ms |
+| | 🌞 SolarDisc | 51 | 2.75 | 5.00 | 1.33 | 4.55 | 179 + 59 ms |
+| | 🪞 **MirrorFilter** | **37** | **1.58** | 4.42 | 1.33 | 4.00 | 191 + 59 + **13** ms |
+| | 🔍 MirrorTrace | 35 | 1.36 | 3.65 | 1.30 | 3.04 | 212 + 67 + **561** ms |
+| `ConesNear` (roughness 0.22, 11,264 px) | 🟥 Demo | 339 | 5.50 | 10.33 | 1.95 | 9.92 | — |
+| | ⬜ Unfiltered | 423 | 6.49 | 11.29 | 2.72 | 10.67 | — |
+| | 🌞 SolarDisc | 419 | 6.51 | 11.26 | 1.84 | 10.90 | — |
+
+Reflection stages are the half-resolution trace plus the glossy variance filter, plus the mirror stage where present.
+
+- On the mirror-smooth pane, 🪞 `MirrorFilter` takes 41 % off the per-refresh error and a third off the visible errors.
+  It shows the mirrored barriers as sharp as the converged image, with no added flicker, for a 13 ms upsample (0.6 % of
+  the illumination stages). 🔍 `MirrorTrace` halves the error but costs 561 ms here, three times the whole
+  half-resolution reflection trace, because the pane covers 13 % of the screen and each of its pixels traces a two-bounce
+  path with next-event estimation.
+- Switching the variance filters off (the owner's "without the blur") sharpens the pane only slightly and adds 37 %
+  more flicker. The images show why: the pane fills with coloured grain.
+- The cone (roughness 0.22) is meant to keep the variance filter: its lobe blurs the reflection physically. Without the
+  filter its flicker rises 40 %. Every variant there sits 10–11 levels from the converged image, because all of them
+  trace the cone at half resolution. The small spread follows the order of the runs (the surface cards keep relighting
+  while indirect light is on), not the options.

@@ -100,7 +100,7 @@
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/SceneLayouts.slang",
-      "sha256": "38ec57559b8734bd6d26391fa6ce3a94f55351c61f94023202fc9f09b2a0c649"
+      "sha256": "041d323d3c7f62fec9a47f0c3f0969c505be5ceea46d5de546c5872d6cca0579"
     },
     {
       "file": "Frontier/Engine/Shaders/VirtualizedGeometry/ClusterDebugFallback.slang",

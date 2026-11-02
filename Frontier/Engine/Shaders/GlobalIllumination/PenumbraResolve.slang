@@ -10,7 +10,7 @@
 
 // 📝 The sun subtends a cone of half-angle θ ≈ 0.0047 rad, so a receiver d metres past its occluder lies in a penumbra of half-width
 //    d·tan θ. ① A 5×5 search (stride growing with the screen height) finds the blocker travel the direct pass stored and exits where
-//    every verdict agrees — most pixels. ② That half-width over the pixel footprint gives the filter radius, 0.75–8 px. ③ Sixteen taps
+//    every verdict agrees — most pixels. ② Half that half-width over the pixel footprint gives the filter radius, 0.75–8 px. ③ Sixteen taps
 //    on a Vogel disc, weighted by the receiver plane and normal, average the verdicts; with RefinementStratifiedSun each 4×4 block
 //    already covers the disc, so the average converges in one refresh. ④ The direct radiance changes by sun × (filtered − own verdict).
 
@@ -23,8 +23,11 @@
   [[vk::binding(3, 0)]] Texture2D<float4>          PenumbraSignal;
   [[vk::binding(4, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4>        DirectTarget;
 
-static const float PenumbraTangent = 0.0047;   // [-] tan θ of the sun's angular radius (RayIntersection.slang SolarAngularRadius)
-static const uint  PenumbraTaps    = 16u;
+static const float PenumbraTangent     = 0.0047;   // [-] tan θ of the sun's angular radius (RayIntersection.slang SolarAngularRadius)
+static const uint  PenumbraTaps        = 16u;
+// 📝 The filter disc's radius as a share of the penumbra half-width d·tan θ: 0.5 (a quarter of the penumbra) measured closer to the
+//    converged shadow than 1.0, whose disc as wide as the penumbra blurs its profile (Exhibits/RayTracedLighting).
+static const float PenumbraRadiusShare = 0.5;
 
 [shader("compute")]
 [numthreads(8, 8, 1)]
@@ -73,8 +76,7 @@ void ResolvePenumbra(uint3 Invocation : SV_DispatchThreadID)
     // ② penumbra half-width over the pixel footprint
     let Position = ReconstructWorldPosition(float2(Pixel) + 0.5, Depth);
     let Footprint = max(length(ReconstructWorldPosition(float2(Pixel) + float2(1.5, 0.5), Depth) - Position), 1.0e-4);
-    let RadiusScale = SelectBranch(1.0, 0.5, RefinementEnabled(Refresh, RefinementPenumbraNarrow));
-    let Radius = clamp(BlockerTravel / float(Occluded) * PenumbraTangent * RadiusScale / Footprint, 0.75, 8.0);
+    let Radius = clamp(BlockerTravel / float(Occluded) * PenumbraTangent * PenumbraRadiusShare / Footprint, 0.75, 8.0);
     let Normal = DecodeOctahedral(LoadTexel(SurfaceAttributes, Pixel, 0).xy);
     let PlaneTolerance = 0.02 * ResolveViewDepth(Position) + 0.01;
 

@@ -41,6 +41,8 @@ const ViewSpecification Views[] = {
     {"ConesNear", {-31.07, 16.39, 0.8}, {-30.0, 15.2, 0.3}, {196, 68, 284, 196}},
     {"PenumbraNear", {-3.0, -4.5, 2.5}, {-5.8, -1.0, 0.0}, {0, 0, 480, 270}},
     {"TowerShadow", {-37.0, -13.0, 4.0}, {-46.0, -20.0, 0.0}, {0, 100, 480, 270}},
+    // 📝 The pane mirrors the sun: the view ray (0.527, 0.586, 0.616) reflects off its −x face toward the sun at 38° / 132°.
+    {"PaneSunGlint", {4.72, -27.93, 0.3}, {6.0, -26.5, 1.8}, {150, 60, 330, 210}},
 };
 
 struct VariantSpecification
@@ -59,7 +61,6 @@ const VariantSpecification Variants[] = {
     {"SolarDisc", R::SolarDisc, true, true},
     {"StratifiedSun", R::SolarDisc | R::StratifiedSun, true, true},
     {"PenumbraFilter", R::SolarDisc | R::StratifiedSun | R::PenumbraFilter, true, true},
-    {"PenumbraNarrow", R::SolarDisc | R::StratifiedSun | R::PenumbraFilter | R::PenumbraNarrow, true, true},
     {"MirrorFilter", R::SolarDisc | R::MirrorFilter, true, true},
     {"MirrorTrace", R::SolarDisc | R::MirrorFilter | R::MirrorTrace, true, true},
     {"Refined", R::SolarDisc | R::StratifiedSun | R::PenumbraFilter | R::MirrorFilter | R::MirrorTrace, true, true},
@@ -72,6 +73,11 @@ const VariantSpecification Variants[] = {
     {"DemoSpecular", 0u, true, true, 5u},
     {"SolarDiscDirect", R::SolarDisc, true, true, 1u},
     {"SolarDiscSpecular", R::SolarDisc, true, true, 5u},
+    // 📝 Where the grain without the variance filters comes from: the diffuse term and the specular term, filters on and off.
+    {"DemoDiffuse", 0u, true, true, 2u},
+    {"UnfilteredDiffuse", 0u, true, false, 2u},
+    {"UnfilteredSpecular", 0u, true, false, 5u},
+    {"MirrorFilterSpecular", R::SolarDisc | R::MirrorFilter, true, true, 5u},
 };
 
 double DisplayLuminance(const uint8_t* Texel)
