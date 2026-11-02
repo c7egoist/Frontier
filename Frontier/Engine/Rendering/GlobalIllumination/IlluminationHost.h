@@ -97,15 +97,16 @@ struct RefreshInputs
     std::optional<Transform> VehicleTransform{};      // [-] body transform when a vehicle carries beams
 };
 
-// 📝 Splits a refresh between resolve and present so outside work can run on the same queue: AfterResolve appends
-//    commands after the resolve (same submission), Execute runs after that submission completed, BeforePresent opens the
-//    present submission, and PresentSource (when set) replaces the radiance the present raster reads.
+// 📝 Outside work drawn into the refresh (the environment overlay): AfterRecombination records right after the recombination,
+//    Execute runs once that submission is in, BeforeAntialias records ahead of the temporal antialiasing, and AntialiasSource
+//    (optional) is the radiance the antialiasing integrates with its history instead of the recombined image. The overlay is
+//    drawn with this refresh's jittered depth and rays, so it must be antialiased with the image it is drawn on.
 struct RefreshInterlude
 {
-    std::function<void(CommandSequence&, uint32_t Parity)> AfterResolve{};
+    std::function<void(CommandSequence&, uint32_t Parity)> AfterRecombination{};
     std::function<bool()>                                  Execute{};
-    std::function<void(CommandSequence&, uint32_t Parity)> BeforePresent{};
-    std::shared_ptr<DeviceTextureView>                     PresentSource{};
+    std::function<void(CommandSequence&, uint32_t Parity)> BeforeAntialias{};
+    std::shared_ptr<DeviceTextureView>                     AntialiasSource{};
 
     // 📝 Outside light inputs (all optional; unset, the refresh keeps the demo's own): AdjustLight sees the resolved light before
     //    anything is derived from it, BeforeRecording runs once the refresh's writes are staged (outside work the refresh will

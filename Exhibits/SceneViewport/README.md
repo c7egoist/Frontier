@@ -110,9 +110,10 @@ EverestWorkspace::ConstructViewportSurface   Unreal Engine viewport navigation (
              ② sky view → ProjectEnvironmentSky (the environment's sky over the port's sky view)
                         → ProjectCloudShadow (its cloud shadow map → the port's projected cloud shadows)
                distance union, shadow cascades, card lighting, surface, direct, ReSTIR GI, reflection, SVGF, resolve
-             ③ EnvironmentVisibility: resolved radiance × scale + reversed depth + rays → the environment's 4 layers
+             ③ EnvironmentVisibility: recombined radiance × scale + reversed depth + rays → the environment's 4 layers
              ── submit ──  PlanetaryAtmosphere: dome · clouds · fog (sun shafts through the port's sun cascades) · flare
-             ④ RestoreEnvironmentRadiance → the port's DisplayPresent tone-maps the overlaid image → full dependency
+             ④ RestoreEnvironmentRadiance → the port's DisplayAntialias integrates the overlaid image with its history
+               → DisplayExposure meters the recombined image → DisplayPresent tone-maps → full dependency
    ImGui_ImplVulkan_AddTexture(presented view, GENERAL) → AddImage over the panel
 ```
 
@@ -221,6 +222,37 @@ compiled archives are also stored in `EngineContent/ShaderArchives/{GlobalIllumi
   the build compiled a set with the compiler that stored it (pinned slangc; for `Surface`, the slang-loader WASM by its
   SHA-256), the test also requires the compiled and stored SPIR-V to be byte-identical. Recompiling from scratch
   reproduced all 46 GlobalIllumination and Environment archives byte for byte, and the 18 Surface archives likewise.
+
+## Temporal antialiasing
+
+The demo's TAA and its 16-frame Halton jitter are ported 1:1 (`DisplayAntialias.slang`). The PlanetaryAtmosphere overlay
+is not part of the demo, and until 2026-11-02 it was drawn after the antialiasing: on the antialiased image, but with
+this refresh's jittered depth and jittered rays (`EnvironmentVisibility.slang` reconstructs both through the jittered
+view projection). So with TAA on, the sky, the sun and every silhouette against them moved with the jitter and were
+never resolved. That was the edge shimmer seen with TAA on. With TAA off there is no jitter, so nothing moved.
+
+Now the overlay is drawn on the recombined image, before the antialiasing, and `DisplayAntialias` integrates the
+overlaid image with its history, as it integrates the demo's own sky (`RefreshInterlude::AntialiasSource`). Exposure
+meters the recombined image, so the overlay does not move it. Without the overlay, the refresh keeps the demo's own
+resolve.
+
+Measured on the Everest level (a still camera, a frozen clock, 288 × 162, the low tier, 12 refreshes after 6 warm-up
+refreshes, SwiftShader). *Frame Δ* is the mean absolute change between consecutive presented frames (8-bit levels): over
+the whole image, and over silhouettes only.
+
+| | TAA off | TAA on |
+|---|---|---|
+| refresh, before | 4,909 ms | 5,070 ms |
+| frame Δ, before (whole / silhouettes) | 0.217 / 1.222 | 6.725 / 8.404 |
+| refresh, after | 4,987 ms | 4,866 ms |
+| frame Δ, after (whole / silhouettes) | 0.217 / 1.222 | 6.238 / 3.832 |
+
+- Silhouette shimmer with TAA on dropped by 54 %. TAA off is unchanged.
+- The rest of the whole-image Δ is SwiftShader's own: asphalt and grass flip between two luminance levels (about 133 and
+  147) with TAA on. The owner's AMD captures do not show it.
+- Cost: the antialiasing pass is 9 taps and one bilinear history fetch. TAA on and off measured within 3 % of each other
+  here (noise), and the pass is about 0.1–0.2 ms at 1080p on a GPU. It does not explain a frame-rate difference between
+  TAA on and off.
 
 ## Checks
 

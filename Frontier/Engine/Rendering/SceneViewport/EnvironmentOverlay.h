@@ -110,7 +110,7 @@ class EnvironmentOverlay
     std::shared_ptr<DescriptorLayout>  ImportLayout_{};
     std::shared_ptr<DeviceRegion>      ImportRegion_{};
     std::shared_ptr<DeviceProgram>     ImportProgram_{}, RestoreProgram_{};
-    std::array<std::shared_ptr<DescriptorGroup>, 2> ImportGroups_{};
+    std::shared_ptr<DescriptorGroup>   ImportGroup_{};
     std::shared_ptr<DeviceTexture>     VisibilityTexture_{}, RadianceTexture_{};
     std::shared_ptr<DeviceTextureView> RadianceView_{};
     std::array<uint32_t, 2>            TargetExtent_     = {0, 0};   // [px] environment targets the borrowed views describe

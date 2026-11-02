@@ -37,9 +37,13 @@ class DisplayProjection
                           const VarianceIntegrator& Diffuse, const VarianceIntegrator& Glossy, const SurfaceCardDepot& Cards,
                           const DisplayNeutralResources& Neutral);
     void RecordResolve(CommandSequence& Sequence, uint32_t Parity);
-    // 📝 Source (optional) replaces the resolved radiance the present raster tone-maps, e.g. the environment overlaid on the refresh.
+    // 📝 The resolve in two halves, for a layer drawn between them (the environment overlay): the recombination, then the
+    //    temporal antialiasing of Source (the overlaid image; null = the recombined image) and the eye adaptation. The
+    //    adaptation meters the recombined image, so the overlay leaves the exposure where the demo puts it.
+    void RecordRecombination(CommandSequence& Sequence);
+    void RecordAntialias(CommandSequence& Sequence, uint32_t Parity, const std::shared_ptr<DeviceTextureView>& Source);
     void RecordPresent(CommandSequence& Sequence, uint32_t Parity, const std::shared_ptr<DeviceTextureView>& Target,
-                       const std::shared_ptr<DescriptorGroup>& DistanceGroup, const std::shared_ptr<DeviceTextureView>& Source = nullptr);
+                       const std::shared_ptr<DescriptorGroup>& DistanceGroup);
 
     std::array<uint32_t, 2>                           ScreenExtent{0, 0};
     std::shared_ptr<DeviceTexture>                    RecombinedTexture{}, InspectionTexture{}, PostTexture{};
@@ -55,9 +59,9 @@ class DisplayProjection
     std::shared_ptr<DeviceRegion>     RefreshRegion_{}, MaterialRegion_{}, OccupantRegion_{};
     std::shared_ptr<DescriptorLayout> RecombineLayout_{}, AntialiasLayout_{}, ExposureLayout_{}, PresentLayout_{};
     std::shared_ptr<DeviceProgram>    RecombineProgram_{}, AntialiasProgram_{}, ExposureProgram_{}, PresentProgram_{};
-    std::shared_ptr<DescriptorGroup>  RecombineGroup_{};
-    std::array<std::shared_ptr<DescriptorGroup>, 2> AntialiasGroups_{}, ExposureGroups_{}, PresentGroups_{}, SourcePresentGroups_{};
-    std::shared_ptr<DeviceTextureView>              PresentSource_{};
+    std::shared_ptr<DescriptorGroup>  RecombineGroup_{}, RecombinedExposureGroup_{};
+    std::array<std::shared_ptr<DescriptorGroup>, 2> AntialiasGroups_{}, ExposureGroups_{}, PresentGroups_{}, SourceAntialiasGroups_{};
+    std::shared_ptr<DeviceTextureView>              AntialiasSource_{};
     std::shared_ptr<DeviceTexture>    FlareVisibilityTexture_{}, FlareImageTexture_{}, FlareTransmissionTexture_{}, IdleSmokeTexture_{};
 };
 

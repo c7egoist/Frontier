@@ -170,7 +170,7 @@ bool EnvironmentOverlay::ReadOverlaidRadiance(std::vector<float>& OutLinearRgba)
 EnvironmentOverlay::~EnvironmentOverlay()
 {
     // 📝 The borrowed views go first; the images belong to the environment exchange.
-    ImportGroups_ = {};
+    ImportGroup_.reset();
     RadianceView_.reset();
     VisibilityTexture_.reset();
     RadianceTexture_.reset();
@@ -365,9 +365,9 @@ bool EnvironmentOverlay::ReconstructTargets(IlluminationHost& Host, uint32_t Wid
 {
     // 📝 Identity by extent and generation, not by handle: a released handle value may come back for the next image.
     const std::array<uint32_t, 2> Extent = {Width, Height};
-    if (Extent == TargetExtent_ && Host.ScreenGeneration == ScreenGeneration_ && ImportGroups_[0]) return true;
+    if (Extent == TargetExtent_ && Host.ScreenGeneration == ScreenGeneration_ && ImportGroup_) return true;
     // 📝 The borrowed views go before the environment replaces the images they describe.
-    ImportGroups_ = {};
+    ImportGroup_.reset();
     RadianceView_.reset();
     VisibilityTexture_.reset();
     RadianceTexture_.reset();
@@ -403,16 +403,16 @@ bool EnvironmentOverlay::ReconstructTargets(IlluminationHost& Host, uint32_t Wid
     Single.Dimension    = ViewDimension::Planar;
     Single.DimensionSet = true;
     RadianceView_ = Exchange_.ConstructView(RadianceTexture_, Single);
-    for (uint32_t Parity = 0; Parity < 2; ++Parity)
-    {
-        ImportGroups_[Parity] = Exchange_.ConstructDescriptorGroup(
-            ImportLayout_, {Host.RefreshRegion, Host.Display->ResolvedViews[Parity], Host.Surface->DepthView, LayerViews[0], LayerViews[1], LayerViews[2], LayerViews[3],
-                            ImportRegion_, RadianceView_},
-            "Environment visibility");
-    }
+    // 📝 The recombined refresh, before its temporal antialiasing: the environment is drawn with this refresh's jittered depth and
+    //    rays (EnvironmentVisibility.slang reconstructs them through the jittered view projection), and the antialiasing then
+    //    integrates the overlaid image with its history, as it integrates the demo's own sky.
+    ImportGroup_ = Exchange_.ConstructDescriptorGroup(
+        ImportLayout_, {Host.RefreshRegion, Host.Display->RecombinedView, Host.Surface->DepthView, LayerViews[0], LayerViews[1],
+                        LayerViews[2], LayerViews[3], ImportRegion_, RadianceView_},
+        "Environment visibility");
     TargetExtent_     = Extent;
     ScreenGeneration_ = Host.ScreenGeneration;
-    return RadianceView_ && ImportGroups_[0] && ImportGroups_[1];
+    return RadianceView_ && ImportGroup_;
 }
 
 void EnvironmentOverlay::ResolveRealm(const IlluminationHost& Host, const SceneEnvironment& S, const CameraPose& Camera, double Latitude, double Longitude)
@@ -607,14 +607,14 @@ bool EnvironmentOverlay::PrepareInterlude(IlluminationHost& Host, const SceneEnv
     const float Profile[4] = {static_cast<float>(RadianceScale_), 0.0f, 0.0f, 0.0f};
     Exchange_.WriteRegion(ImportRegion_, 0, Profile, sizeof(Profile));
     const uint32_t GroupsX = (Host.ScreenExtent[0] + 7) / 8, GroupsY = (Host.ScreenExtent[1] + 7) / 8;
-    OutInterlude.AfterResolve = [this, GroupsX, GroupsY](CommandSequence& Sequence, uint32_t Parity) {
+    OutInterlude.AfterRecombination = [this, GroupsX, GroupsY](CommandSequence& Sequence, uint32_t) {
         Sequence.BindProgram(ImportProgram_);
-        Sequence.BindGroup(0, ImportGroups_[Parity]);
+        Sequence.BindGroup(0, ImportGroup_);
         Sequence.Dispatch(GroupsX, GroupsY);
     };
-    OutInterlude.BeforePresent = [this, GroupsX, GroupsY](CommandSequence& Sequence, uint32_t Parity) {
+    OutInterlude.BeforeAntialias = [this, GroupsX, GroupsY](CommandSequence& Sequence, uint32_t) {
         Sequence.BindProgram(RestoreProgram_);
-        Sequence.BindGroup(0, ImportGroups_[Parity]);
+        Sequence.BindGroup(0, ImportGroup_);
         Sequence.Dispatch(GroupsX, GroupsY);
     };
     if (LightScene)
@@ -644,7 +644,7 @@ bool EnvironmentOverlay::PrepareInterlude(IlluminationHost& Host, const SceneEnv
         ++RefreshIndex_;
         return Planetary_->Sequence.ExecuteOverVisibility(Environment_, Planetary_->Ensemble, Planetary_->View);
     };
-    OutInterlude.PresentSource = RadianceView_;
+    OutInterlude.AntialiasSource = RadianceView_;
     return true;
 }
 

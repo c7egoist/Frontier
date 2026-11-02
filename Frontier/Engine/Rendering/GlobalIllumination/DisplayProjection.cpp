@@ -103,8 +103,9 @@ void DisplayProjection::ConstructTargets(std::array<uint32_t, 2> Extent, const S
                                                                                       FlareImage, LinearClamp, Neutral.CloudColour, Neutral.CloudGuide, Surface.DepthView,
                                                                                       FlareTransmission, Neutral.CloudParams, Neutral.Lightning});
     }
-    SourcePresentGroups_ = {};
-    PresentSource_.reset();
+    RecombinedExposureGroup_ = Exchange_.ConstructDescriptorGroup(ExposureLayout_, {RefreshRegion_, RecombinedView, AdaptationRegion});
+    SourceAntialiasGroups_   = {};
+    AntialiasSource_.reset();
 }
 
 // 📝 Recombination, then temporal antialiasing, then the eye-adaptation reduction (cabin overlays and sparks are not ported).
@@ -122,24 +123,42 @@ void DisplayProjection::RecordResolve(CommandSequence& Sequence, uint32_t Parity
     Sequence.Dispatch(1);
 }
 
-void DisplayProjection::RecordPresent(CommandSequence& Sequence, uint32_t Parity, const std::shared_ptr<DeviceTextureView>& Target,
-                                      const std::shared_ptr<DescriptorGroup>& DistanceGroup, const std::shared_ptr<DeviceTextureView>& Source)
+void DisplayProjection::RecordRecombination(CommandSequence& Sequence)
 {
-    if (Source && Source != PresentSource_)
+    Sequence.BindProgram(RecombineProgram_);
+    Sequence.BindGroup(0, RecombineGroup_);
+    Sequence.Dispatch((ScreenExtent[0] + 7) / 8, (ScreenExtent[1] + 7) / 8);
+}
+
+void DisplayProjection::RecordAntialias(CommandSequence& Sequence, uint32_t Parity, const std::shared_ptr<DeviceTextureView>& Source)
+{
+    if (Source && Source != AntialiasSource_)
     {
-        // 📝 Same bindings as the resolved present groups, slot 1 swapped for the supplied radiance.
+        // 📝 Same bindings as the antialias groups, slot 1 (the radiance integrated with the history) swapped for the supplied one.
         for (uint32_t Slot = 0; Slot < 2; ++Slot)
         {
-            std::vector<DescriptorResource> Resources = PresentGroups_[Slot]->Resources;
+            std::vector<DescriptorResource> Resources = AntialiasGroups_[Slot]->Resources;
             Resources[1] = DescriptorResource(Source);
-            SourcePresentGroups_[Slot] = Exchange_.ConstructDescriptorGroup(PresentLayout_, Resources, "Display present (supplied radiance)");
+            SourceAntialiasGroups_[Slot] =
+                Exchange_.ConstructDescriptorGroup(AntialiasLayout_, Resources, "Display antialias (supplied radiance)");
         }
-        PresentSource_ = Source;
+        AntialiasSource_ = Source;
     }
+    Sequence.BindProgram(AntialiasProgram_);
+    Sequence.BindGroup(0, Source ? SourceAntialiasGroups_[Parity] : AntialiasGroups_[Parity]);
+    Sequence.Dispatch((ScreenExtent[0] + 7) / 8, (ScreenExtent[1] + 7) / 8);
+    Sequence.BindProgram(ExposureProgram_);
+    Sequence.BindGroup(0, RecombinedExposureGroup_);
+    Sequence.Dispatch(1);
+}
+
+void DisplayProjection::RecordPresent(CommandSequence& Sequence, uint32_t Parity, const std::shared_ptr<DeviceTextureView>& Target,
+                                      const std::shared_ptr<DescriptorGroup>& DistanceGroup)
+{
     const std::array<ColorAttachment, 1> Colors = {{{Target, LoadOperation::Clear, {0.0f, 0.0f, 0.0f, 1.0f}}}};
     Sequence.BeginRaster(Colors, nullptr, "Display present");
     Sequence.BindProgram(PresentProgram_);
-    Sequence.BindGroup(0, Source ? SourcePresentGroups_[Parity] : PresentGroups_[Parity]);
+    Sequence.BindGroup(0, PresentGroups_[Parity]);
     Sequence.BindGroup(1, DistanceGroup);
     Sequence.Draw(3);
     Sequence.EndRaster();

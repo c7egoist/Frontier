@@ -408,17 +408,18 @@ bool IlluminationHost::AdvanceRefresh(const RefreshInputs* Inputs, const Refresh
         Resampling->RecordReflection(Begin("reflection trace"), Distance->MarchGroup, SamplingGroup, RayTracing->MarchGroup);
         Glossy->Record(Begin("glossy variance filter"), Parity, Settings.VarianceFilter);
     }
-    Display->RecordResolve(Begin("resolve"), Parity);
     if (Interlude == nullptr)
     {
+        Display->RecordResolve(Begin("resolve"), Parity);
         Display->RecordPresent(Begin("present"), Parity, CaptureView, Distance->MarchGroup);
         if (!SubmitSeries()) return false;
     }
     else
     {
-        // 📝 Resolve → outside work on the same queue → present; the trailing dependency orders later submissions (the
-        //    editor interface sampling the presented image) after the present raster.
-        if (Interlude->AfterResolve) Interlude->AfterResolve(Begin("environment import"), Parity);
+        // 📝 Recombination → outside work on the same queue → its temporal antialiasing → present. The trailing dependency
+        //    orders later submissions (the editor interface sampling the presented image) after the present raster.
+        Display->RecordRecombination(Begin("recombination"));
+        if (Interlude->AfterRecombination) Interlude->AfterRecombination(Begin("environment import"), Parity);
         if (!SubmitSeries()) return false;
         Exchange.LabelSubmissions("refresh " + std::to_string(RefreshIndex) + ": environment overlay");
         if (Interlude->Execute && !Interlude->Execute())
@@ -426,9 +427,10 @@ bool IlluminationHost::AdvanceRefresh(const RefreshInputs* Inputs, const Refresh
             if (OutDiagnostic != nullptr && OutDiagnostic->empty()) *OutDiagnostic = "refresh interlude failed";
             return false;
         }
-        CommandSequence& Presentation = Begin("present");
-        if (Interlude->BeforePresent) Interlude->BeforePresent(Presentation, Parity);
-        Display->RecordPresent(Presentation, Parity, CaptureView, Distance->MarchGroup, Interlude->PresentSource);
+        CommandSequence& Presentation = Begin("antialias and present");
+        if (Interlude->BeforeAntialias) Interlude->BeforeAntialias(Presentation, Parity);
+        Display->RecordAntialias(Presentation, Parity, Interlude->AntialiasSource);
+        Display->RecordPresent(Presentation, Parity, CaptureView, Distance->MarchGroup);
         Presentation.OrderAfterEarlierWork();
         if (!SubmitSeries()) return false;
     }
