@@ -1123,3 +1123,24 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
 - **Fast Blinn:** no such switch exists in this branch, `5ec53579` or the demo. `BlinnRenderer` (CPU) lives in
   egoistm1inbox `9ce908bc` and is only called by a validation suite; `PreviewRaster` (gradient sky, GGX) runs only in
   `Exhibits/ClusterDiagnostic`. Proposed as a small Editor/Development-only viewport renderer.
+
+## Virtualized geometry port, improvements I1–I5, analytic illumination (2026-11-02, arena/88b72faa-frontier)
+
+- **Requested:** the demo's virtualized geometry ported 1:1 into a `VirtualizedGeometry` folder, then the five
+  improvements each measured before and after, and the fast Blinn preview under a technical name. No controls yet.
+- **Port** (`Frontier/Engine/Rendering/VirtualizedGeometry/`, `Shaders/VirtualizedGeometry/`): builder, CPU runtime,
+  visibility resolve, GPU host and 6 Slang units. Parity: 10 surfaces bit-exact (`NestingParityValidation`), the
+  demo's 22 tests (`VirtualizedGeometryValidation`), and the takeover in the editor's viewport with every page resident
+  after 4 refreshes and a mean difference of 0.013–0.017 against the lossless clusters. Buffer index 10–14 show real
+  cluster data.
+- **Improvements:** I1 6452 → 10 indirect calls and 0.631 → 0.003 ms recording per refresh, same clusters drawn. I2
+  builds at import, a 1.25 MB `.nestingspace` loaded in 2.9 ms. I3's claimed error equals the measured one at the
+  coarsest tier (demo 9–15×). I4 takes the cliff's coarsest needles 217 → 0 (9.38 → 1.43 %); I5 takes the glass
+  sphere's coarsest level 20.8 → 3.06 %.
+- **AnalyticIllumination** (`Frontier/Engine/Rendering/AnalyticIllumination/`): sun shadow map, Lambert and
+  Blinn-Phong, hemisphere fill and gradient sky from the level's Sun. On SwiftShader it refreshes in 0.065 s against
+  the GI's 9.534 s. Selected by the levelspace key `analytic_illumination`, Editor/Development only.
+- **Findings** (`Documentation/Plans/Ongoing/VirtualizedGeometry.md` §8): the refined archive holds 1613 records
+  against the demo nesting's 650, because adjacency-only grouping keeps about 142 disconnected props apart. The demo's
+  cull uses a single-level Hi-Z. The `drawIndirectCount` path is unexercised on SwiftShader, which lacks it.
+- **Commits:** `7b06560 af1e898 c2afd72 3970b6a 8dddb3c d39bf03 c7d7f8c 1d5f1d7` and this documentation commit.

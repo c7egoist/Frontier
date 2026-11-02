@@ -1,7 +1,9 @@
 # Virtualized geometry (Nanite-like) — report and port plan
 
-Status: **report only** (2026-11-02, branch `arena/88b72faa-frontier` fast-forwarded to `arena/8b705b7d-frontier`
-`650e631`). No engine code changed. Measurements: `Exhibits/VirtualizedGeometry/`.
+Status: **ported and improved** (2026-11-02, branch `arena/88b72faa-frontier`). P1–P6 are done with bit-exact
+parity, I1–I5 are done and measured, and the fast preview exists as `AnalyticIllumination`. See §8 for the outcome.
+Sections 1–7 are the report that preceded the port (`650e631`); their "today" describes the branch before it.
+Measurements: `Exhibits/VirtualizedGeometry/` and `Exhibits/AnalyticIllumination/`.
 
 ## 1. Verdict
 
@@ -120,3 +122,40 @@ The demo's own renderer choice is RTX (default) or GTX (`?renderer=gtx`); it has
 is a small, separate task: an Editor/Development-only viewport renderer (Blinn-Phong + hemisphere fill + one
 shadow map + gradient sky lit by the level's Sun), selected from Render settings and the viewport menu, with
 GI, clouds and fog skipped.
+
+## 8. Outcome (2026-11-02)
+
+The owner asked for the 1:1 port in a `VirtualizedGeometry` folder, the five improvements each measured before and
+after, and the fast preview under a technical name, with no controls yet.
+
+| Step | State | Where | Evidence |
+|---|---|---|---|
+| P1 🧱 build | ✅ bit-exact on 10 surfaces | `Rendering/VirtualizedGeometry/NestingConstruction` | `NestingParityValidation` CTest |
+| P2 ⚙️ CPU runtime | ✅ the demo's 22 tests | `NestingSelection`, `VisibilityResolve` | `VirtualizedGeometryValidation` CTest |
+| P3 🖥️ GPU | ✅ takeover of eligible static sets as `?hierarchy=1` does | `NestingProjection`, `Shaders/VirtualizedGeometry/` (6 units) | `VirtualizedGeometryCapture` |
+| P4 🔍 inspection | ✅ Buffer index 10–14 show real cluster data | `MaterialResolve` entries, `ClusterDebugFallback` | 5 views, each > 8 colours |
+| P5 💾 streaming | ✅ every page resident after 4 refreshes | the slot arena in `NestingProjection` | capture |
+| P6 🧪 exhibit | ✅ | `Exhibits/VirtualizedGeometry/` | README |
+| I1 ⚡ one call per phase and class | ✅ 6452 → 10 indirect calls, 0.631 → 0.003 ms recording per refresh | `NestingProjection`, two `…Compacted` cull entries, `DeviceExchange` | capture, cluster identities identical |
+| I2 🧵 build at import | ✅ 1.25 MB `.nestingspace`, loaded in 2.9 ms; the editor never builds | `NestingArchive`, `NestingArchiveExport` | `NestingArchiveValidation` CTest |
+| I3 📐 measured deviation | ✅ claimed = measured at the coarsest tier (demo 9–15×) | `NestingConstruction` | `NestingRefinementMeasure` |
+| I4 🔺 needle guard | ✅ cliff coarsest 217 → 0 needles, 9.38 → 1.43 % | `NestingConstruction` | same |
+| I5 🪟 class borders | ✅ glass sphere coarsest 20.8 → 3.06 %, 25 → 3 clusters | `NestingConstruction` | same |
+| Fast preview | ✅ `AnalyticIllumination`, levelspace key `analytic_illumination`, 146× faster than the GI on SwiftShader | `Rendering/AnalyticIllumination/`, `Shaders/AnalyticIllumination/` | `AnalyticIlluminationCapture` |
+
+Decisions taken under §5.3: the port replaces nothing yet. The former C++ tier build (🅲) and `PreviewRaster` remain
+for their exhibits, and `ClusterNesting` / `VisibilityCull` remain for `SpatialVector`. The editor loads the refined
+archive (I3+I4+I5); `virtualized_geometry` stays off by default, as in the demo.
+
+Open findings, not fixed:
+
+1. The proving ground's set is about 142 disconnected props. Adjacency-only grouping leaves each prop its own cluster
+   on every tier, so the refined build ends in tiers of about 142 clusters that barely reduce (194 → 146 triangles over
+   the last four tiers). It holds 1613 records against the demo nesting's 650, though it reaches 146 coarsest triangles
+   against 1952. With I1 the extra records cost only cull threads. Proximity grouping, or a minimum-yield stop, is the
+   next candidate (`Results/NestingSurvey.txt`).
+2. The demo's cull binds a single-level Hi-Z, so its 4-corner test is not conservative and the downsample chain is
+   unused. Ported 1:1; a mip-selecting test is a candidate fix.
+3. SwiftShader offers `multiDrawIndirect` but not `drawIndirectCount`, so the count path ran only through review and
+   compilation here. Desktop GPUs take that path, and it needs a check on a real device.
+

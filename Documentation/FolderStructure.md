@@ -29,9 +29,11 @@ Frontier/
 │       ├── PlanetaryAtmosphere/ # AtmosphereScattering, AstronomicalEphemeris, SkyProjection, PlanetaryProjection,
 │       │                        # CloudSpace, VolumetricClouds, FogSpace, OpticalLensFlare, PlanetaryEnsemble, WeatherEffects
 │       ├── Rendering/         # SubmissionOrder, BarrierDerivation, TransientTargetAtlas, environment/inspection units
+│       │   ├── AnalyticIllumination/ # Editor/Development closed-form renderer (sun shadow map, Blinn-Phong, sky)
 │       │   ├── GlobalIllumination/ # 1:1 port of the VehicleHMI ReSTIR GI renderer (distance field, cards, BVH, ReSTIR, SVGF)
-│       │   └── SceneViewport/      # SceneViewport + EnvironmentOverlay: the GI refresh with PlanetaryAtmosphere over it
-│       └── Shaders/           # Slang 2026 SPIR-V 1.3 compute & raster shaders (GlobalIllumination/ holds the port's units)
+│       │   ├── SceneViewport/      # SceneViewport + EnvironmentOverlay: the GI refresh with PlanetaryAtmosphere over it
+│       │   └── VirtualizedGeometry/ # 1:1 port of the VehicleHMI cluster nesting (build, cut, GPU cull, pages) + I1-I5
+│       └── Shaders/           # Slang 2026 SPIR-V 1.3 compute & raster shaders, one folder per renderer above
 ├── UI/
 │   └── Editor/                # Lifecycle-owned production editor UI
 ├── Projects/
@@ -118,8 +120,16 @@ they no longer populate the default editor scene. Planet rendering descriptors a
 Panel-local footer support lives in the existing `PanelDockspace` registration. The removed distance-slice UI/shader
 has no replacement implementation; its uniform slot is reserved for compatibility with the remaining encoding.
 
-## Virtualized geometry evidence (2026-11-02)
+## Virtualized geometry and analytic illumination (2026-11-02)
 
-`Exhibits/VirtualizedGeometry/` measures the VehicleHMI demo's cluster-DAG builder against the branch's C++ tier build
-on the demo's own corpus (standalone CMake target plus Node.js scripts; nothing renders). The report and the port plan
-live in `Documentation/Plans/Ongoing/VirtualizedGeometry.md`.
+`Frontier/Engine/Rendering/VirtualizedGeometry/` is the 1:1 port of the VehicleHMI demo's cluster nesting (library
+`FrontierVirtualizedGeometry`; the GPU host `NestingProjection` compiles into `FrontierGlobalIllumination`). Its Slang
+units live in `Frontier/Engine/Shaders/VirtualizedGeometry/` and its stored archives in
+`EngineContent/ShaderArchives/VirtualizedGeometry/`. The import step stores each scene's nestings beside its facet space
+(`EngineContent/EnvironmentArchives/ProvingGround/ProvingGround.nestingspace`).
+`Exhibits/VirtualizedGeometry/` retains the parity, test, refinement, archive and GPU capture evidence, plus the
+earlier builder comparison. The report and plan live in `Documentation/Plans/Ongoing/VirtualizedGeometry.md`.
+
+`Frontier/Engine/Rendering/AnalyticIllumination/` is the editor's fast closed-form renderer (library
+`FrontierAnalyticIllumination`, Slang units in `Frontier/Engine/Shaders/AnalyticIllumination/`, archive set
+`AnalyticIllumination`). `Exhibits/AnalyticIllumination/` retains its offscreen capture against the global illumination.

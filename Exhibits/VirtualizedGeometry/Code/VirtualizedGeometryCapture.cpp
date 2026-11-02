@@ -42,6 +42,14 @@ double MeanAbsoluteDifference(const std::vector<uint8_t>& A, const std::vector<u
     return Sum / std::max<size_t>(1, A.size() / 4 * 3) / 255.0;
 }
 
+uint32_t CountDifferingPixels(const std::vector<uint8_t>& A, const std::vector<uint8_t>& B)
+{
+    uint32_t Count = 0;
+    for (size_t Index = 0; Index + 3 < A.size() && Index + 3 < B.size(); Index += 4)
+        if (A[Index] != B[Index] || A[Index + 1] != B[Index + 1] || A[Index + 2] != B[Index + 2]) ++Count;
+    return Count;
+}
+
 uint32_t CountDistinctColours(const std::vector<uint8_t>& Rgba)
 {
     std::vector<uint32_t> Colours;
@@ -148,21 +156,32 @@ int main(int ArgumentCount, char** Arguments)
                 Reference.MeanSeconds, Settled.MeanSeconds / std::max(1e-9, Reference.MeanSeconds));
     ReportCheck(Difference < 0.05, "the virtualized surface matches the lossless one within 5 % mean difference", std::to_string(Difference));
 
-    // ③ I1 before and after on the same resident pages and camera: the demo's one indirect command per cluster record
+    // ③ I1 before and after on the same resident pages and camera, against the demo's one indirect command per cluster record. The
+    //    lit image is temporal and stochastic (reservoir seeds, jitter, cloud drift), so equality is checked on the cluster identity
+    //    view without jitter; the lit images are compared against the noise floor of two I1 refreshes apart.
+    ViewportRendering Identities = Virtualized;
+    Identities.Inspection           = 10;
+    Identities.TemporalAntiAliasing = false;
+    const Capture IdentitiesCompacted = Run(Identities, 2, "IdentitiesI1");
     Projection->CompactCommands = false;
+    const Capture IdentitiesPerRecord = Run(Identities, 2, "IdentitiesPerRecord");
     const Capture PerRecord = Run(Virtualized, Refreshes, "VirtualizedPerRecord");
     const uint32_t PerRecordCommands = Projection->RecordedCommands();
     Projection->CompactCommands = true;
+    const Capture Again = Run(Virtualized, 2, "VirtualizedAgain");
     std::printf("cluster commands, demo: %u indirect calls per refresh, %.3f ms recording them, refresh %.3f s\n", PerRecordCommands,
                 PerRecord.RecordedMilliseconds, PerRecord.MeanSeconds);
     std::printf("cluster commands, I1:   %u indirect calls per refresh, %.3f ms recording them, refresh %.3f s (%s)\n", SettledCommands,
                 Settled.RecordedMilliseconds, Settled.MeanSeconds,
                 Compacted ? "one call per phase and class" : "the device offers neither drawIndirectCount nor multiDrawIndirect");
-    const double CommandDifference = MeanAbsoluteDifference(PerRecord.Rgba, Settled.Rgba);
-    std::printf("I1 vs demo commands: mean absolute difference %.6f\n", CommandDifference);
+    const uint32_t IdentityPixels = CountDifferingPixels(IdentitiesCompacted.Rgba, IdentitiesPerRecord.Rgba);
+    const double   LitDifference  = MeanAbsoluteDifference(PerRecord.Rgba, Settled.Rgba);
+    const double   NoiseFloor     = MeanAbsoluteDifference(Again.Rgba, Settled.Rgba);
+    std::printf("I1 vs demo commands: %u of %u cluster identity pixels differ; lit images %.6f apart, I1 against itself later %.6f\n",
+                IdentityPixels, Width * Height, LitDifference, NoiseFloor);
     ReportCheck(!Compacted || SettledCommands < PerRecordCommands, "I1 records fewer indirect calls than one per cluster record",
                 std::to_string(SettledCommands) + " vs " + std::to_string(PerRecordCommands));
-    ReportCheck(CommandDifference < 0.002, "I1 draws the same image as the per-record commands", std::to_string(CommandDifference));
+    ReportCheck(IdentityPixels == 0, "I1 draws exactly the clusters of the per-record commands", std::to_string(IdentityPixels) + " pixels differ");
 
     // ③ the five cluster inspection modes
     const char* const Names[] = {"ClusterIdentities", "ClusterResolve", "ClusterHiZ", "ClusterGlassLayers", "ClusterTiers"};
