@@ -608,8 +608,15 @@ bool AtmosphereInspector::ConstructMedium(ControlColumn& Page)
         DiagramDrag      Drag;
         const DiagramPen Pen = DiagramCanvas::Begin(Page, "##ScaleHeights", 640.0f, 430.0f, 15.0f, 12.0f, &Drag,
                                                     "Scale height comparator \xC2\xB7 drag left for Rayleigh or right for Mie");
-        Pen.Rect(ImVec2(0.0f, 0.0f), ImVec2(300.0f, 430.0f), ResolveCssColour(0x92BBA305));
-        Pen.Rect(ImVec2(340.0f, 0.0f), ImVec2(300.0f, 430.0f), ResolveCssColour(0xD4B77F05));
+        // linear-gradient(90deg, #92bba308, transparent 47%, transparent 53%, #d4b77f08)
+        {
+            ImDrawList* const Panes = Pen.QueryDrawList();
+            const ImU32 Clear = IM_COL32(0, 0, 0, 0);
+            Panes->AddRectFilledMultiColor(Pen.QueryScreen(ImVec2(0.0f, 0.0f)), Pen.QueryScreen(ImVec2(300.8f, 430.0f)),
+                                           ResolveCssColour(0x92BBA308), Clear, Clear, ResolveCssColour(0x92BBA308));
+            Panes->AddRectFilledMultiColor(Pen.QueryScreen(ImVec2(339.2f, 0.0f)), Pen.QueryScreen(ImVec2(640.0f, 430.0f)), Clear,
+                                           ResolveCssColour(0xD4B77F08), ResolveCssColour(0xD4B77F08), Clear);
+        }
         constexpr float Bottom = 350.0f, Top = 55.0f, Height = Bottom - Top;
         auto Y = [&](float Metres) { return Bottom - Metres / 20000.0f * Height; };
         for (const float Km : {0.0f, 5.0f, 10.0f, 15.0f, 20.0f})
@@ -641,12 +648,16 @@ bool AtmosphereInspector::ConstructMedium(ControlColumn& Page)
                 const DensityProfile D        = ResolveDensity(Parameters, Altitude);
                 Points.push_back(ImVec2(Entry.Centre + Entry.Sign * (Entry.Key == 0 ? D.Rayleigh : D.Mie) * 235.0f, Y(Altitude)));
             }
-            // The ribbon: from the axis foot along the curve to the axis top (a fan of strips between the axis and the curve).
+            // The ribbon (moveTo the axis foot, the curve, lineTo the axis top, fill): strips between the axis and the curve,
+            //    without fill antialiasing so adjacent strips meet without seams.
+            const ImDrawListFlags Flags = Ink->Flags;
+            Ink->Flags &= ~ImDrawListFlags_AntiAliasedFill;
             for (size_t Index = 1; Index < Points.size(); ++Index)
             {
                 Ink->AddQuadFilled(Pen.QueryScreen(ImVec2(Entry.Centre, Points[Index - 1].y)), Pen.QueryScreen(Points[Index - 1]),
                                    Pen.QueryScreen(Points[Index]), Pen.QueryScreen(ImVec2(Entry.Centre, Points[Index].y)), ResolveCssColour(Entry.Fill));
             }
+            Ink->Flags = Flags;
             Pen.Path(Points, ResolveCssColour(Entry.Colour), 2.5f);
             Pen.Line(ImVec2(Entry.Centre, Top), ImVec2(Entry.Centre, Bottom), ResolveCssColour(0xB0C6AA35), 1.0f);
             const float Row    = Y(Entry.Height);
