@@ -27,6 +27,7 @@ class ShaderInterchange
     void ConfigureConstants(std::vector<SpecializationConstant> Constants) { Constants_ = std::move(Constants); }
     [[nodiscard]] const std::vector<SpecializationConstant>& Constants() const noexcept { return Constants_; }
     [[nodiscard]] std::string QuerySpirvPath(const std::string& Unit, const std::string& Entry) const;
+    [[nodiscard]] const std::filesystem::path& SpirvFolder() const noexcept { return SpirvFolder_; }
 
     std::shared_ptr<DeviceProgram> ConstructComputeProgram(const std::string& Unit, const std::string& Entry,
                                                            std::vector<std::shared_ptr<DescriptorLayout>> Layouts);

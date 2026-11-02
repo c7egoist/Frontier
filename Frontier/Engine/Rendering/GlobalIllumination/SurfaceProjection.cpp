@@ -217,6 +217,8 @@ void SurfaceProjection::ConstructPrograms(const std::shared_ptr<DeviceRegion>& R
     RasterProgram_ = Shaders_.ConstructRasterProgram("SurfaceRaster", Raster);
     Clusters = std::make_unique<ClusteredGeometry>(Exchange_, Shaders_);
     Clusters->ConstructPrograms(RefreshRegion, OccupantRegion);
+    if (!Virtualized) Virtualized = std::make_unique<VirtualizedGeometry::NestingProjection>(Exchange_, Shaders_);
+    Virtualized->ConstructPrograms(RefreshRegion, OccupantRegion);
     const std::vector<DescriptorSlot> DirectSlots = {{D::Uniform}, {D::StorageRead}, {D::Texture2D}, {D::TextureDepth2D}, {D::TextureDepth2DLayered},
                                                      {D::SamplerComparison}, {D::Uniform}, {D::Texture2D}, {D::Sampler},
                                                      {D::StorageTexture2D, TextureFormat::Rgba16Float}, {D::StorageRead}, {D::Uniform}, {D::Texture2D}, {D::Sampler}};
@@ -245,6 +247,7 @@ void SurfaceProjection::ConstructTargets(uint32_t Width, uint32_t Height, const 
     AttributeView = Exchange_.ConstructView(AttributeTexture);
     MotionView    = Exchange_.ConstructView(MotionTexture);
     DirectView    = Exchange_.ConstructView(DirectTexture);
+    if (Virtualized) Virtualized->ConstructTargets(Width, Height);
     DirectGroup_ = Exchange_.ConstructDescriptorGroup(DirectLayout_, {RefreshRegion_, MaterialRegion_, AttributeView, DepthView, Inputs.ShadowLayered,
                                                                       Inputs.ShadowComparison, Inputs.ShadowReceiver, Inputs.SkyView, Inputs.SkySampler,
                                                                       DirectView, Inputs.LuminaireRegion, Inputs.CloudShadowParams, Inputs.CloudShadowView,
@@ -254,43 +257,87 @@ void SurfaceProjection::ConstructTargets(uint32_t Width, uint32_t Height, const 
 void SurfaceProjection::RecordSurface(CommandSequence& Sequence, const SceneStructure& Scene, const std::shared_ptr<DeviceRegion>& VertexRegion)
 {
     Clusters->Prepare(Scene);
+    // 📝 The virtualized takeover must never take the refresh down with it: any failure inside Prepare (descriptor groups, the nesting
+    //    build, …) disables it and the lossless-cluster path renders the refresh instead.
+    VirtualizedGeometry::NestingProjection* Takeover = nullptr;
+    try
+    {
+        Takeover = Virtualized ? Virtualized->Prepare(Scene) : nullptr;
+    }
+    catch (const std::exception& Error)
+    {
+        Exchange_.RecordFault(std::string("virtualized geometry prepare failed; virtualized path disabled: ") + Error.what());
+        if (Virtualized) Virtualized->Enabled = false;
+    }
+    const bool VirtualActive = Takeover != nullptr && Takeover->HasRecords();
     if (ClusteredEnabled) Clusters->RecordCull(Sequence);
-    const std::array<ColorAttachment, 2> Colors = {{{AttributeView, LoadOperation::Clear, {0, 0, 0, 0}}, {MotionView, LoadOperation::Clear, {0, 0, 0, 0}}}};
-    const DepthAttachment Depth{DepthView, LoadOperation::Clear, 0.0f};
-    Sequence.BeginRaster(Colors, &Depth, "Surface projection");
-    Sequence.BindProgram(RasterProgram_);
-    Sequence.BindGroup(0, RasterGroup_);
-    Sequence.BindVertexRegion(0, VertexRegion);
-    if (ClusteredEnabled)
-    {
-        Sequence.BindIndexRegion(Clusters->Indices);
-        for (const ClusteredGeometry::ClusterDraw& Draw : Clusters->Draws)
+    if (VirtualActive) Virtualized->RecordCullPhase1(Sequence);
+    auto BeginRaster = [&](const std::string& Label, bool Clear) {
+        const LoadOperation Load = Clear ? LoadOperation::Clear : LoadOperation::Load;
+        const std::array<ColorAttachment, 2> Colors = {{{AttributeView, Load, {0, 0, 0, 0}}, {MotionView, Load, {0, 0, 0, 0}}}};
+        const DepthAttachment Depth{DepthView, Load, 0.0f};
+        Sequence.BeginRaster(Colors, &Depth, Label);
+    };
+    // 📝 The lossless-cluster fallback runs and clusters plus, for the virtualized path, one phase of cluster commands.
+    auto RecordRuns = [&](uint32_t Phase) {
+        Sequence.BindProgram(RasterProgram_);
+        Sequence.BindGroup(0, RasterGroup_);
+        Sequence.BindVertexRegion(0, VertexRegion);
+        if (Phase == 2)
         {
-            if (Draw.Run)
+            if (VirtualActive) Virtualized->RecordClusters(Sequence, Clusters->Instances, 2);
+            return;
+        }
+        if (ClusteredEnabled)
+        {
+            Sequence.BindIndexRegion(Clusters->Indices);
+            for (const ClusteredGeometry::ClusterDraw& Draw : Clusters->Draws)
             {
-                Sequence.BindVertexRegion(0, VertexRegion);
-                Sequence.BindVertexRegion(1, Clusters->Instances);
-                const FacetSet& Set = Scene.FacetSets[Draw.RunEntry.FacetSet];
-                Sequence.Draw(Set.VertexCount, Draw.RunEntry.Count, Set.FirstVertex, Draw.RunEntry.First);
-            }
-            else
-            {
-                Sequence.BindVertexRegion(0, VertexRegion);
-                Sequence.BindVertexRegion(1, Clusters->Instances, static_cast<VkDeviceSize>(Draw.Occupant) * 4);
-                Sequence.DrawIndexedIndirect(Clusters->Commands, static_cast<VkDeviceSize>(Draw.Cluster) * 20);
+                if (Draw.Run)
+                {
+                    Sequence.BindVertexRegion(0, VertexRegion);
+                    Sequence.BindVertexRegion(1, Clusters->Instances);
+                    const FacetSet& Set = Scene.FacetSets[Draw.RunEntry.FacetSet];
+                    Sequence.Draw(Set.VertexCount, Draw.RunEntry.Count, Set.FirstVertex, Draw.RunEntry.First);
+                }
+                else if (!VirtualActive || !Virtualized->OwnsOccupant(Draw.Occupant))
+                {
+                    Sequence.BindVertexRegion(0, VertexRegion);
+                    Sequence.BindVertexRegion(1, Clusters->Instances, static_cast<VkDeviceSize>(Draw.Occupant) * 4);
+                    Sequence.DrawIndexedIndirect(Clusters->Commands, static_cast<VkDeviceSize>(Draw.Cluster) * 20);
+                }
             }
         }
-    }
-    else
-    {
-        Sequence.BindVertexRegion(1, Clusters->Instances);
-        for (const DrawRun& Run : Scene.DrawRuns)
+        else
         {
-            const FacetSet& Set = Scene.FacetSets[Run.FacetSet];
-            Sequence.Draw(Set.VertexCount, Run.Count, Set.FirstVertex, Run.First);
+            Sequence.BindVertexRegion(1, Clusters->Instances);
+            for (const DrawRun& Run : Scene.DrawRuns)
+            {
+                const FacetSet& Set = Scene.FacetSets[Run.FacetSet];
+                Sequence.Draw(Set.VertexCount, Run.Count, Set.FirstVertex, Run.First);
+            }
         }
+        if (VirtualActive && Phase) Virtualized->RecordClusters(Sequence, Clusters->Instances, Phase);
+    };
+    if (!VirtualActive)
+    {
+        BeginRaster("Surface projection", true);
+        RecordRuns(0);
+        Sequence.EndRaster();
+        return;
     }
+    // 📝 Two-phase occlusion: phase-1 cut clusters (tested against the previous refresh's Hi-Z), rebuild the pyramid from their
+    //    depth, then phase 2 adds clusters that were occluded last refresh but are visible now.
+    BeginRaster("Surface projection (virtualized phase 1)", true);
+    RecordRuns(1);
     Sequence.EndRaster();
+    Virtualized->RecordHiZ(Sequence, DepthView);
+    Virtualized->RecordCullPhase2(Sequence);
+    BeginRaster("Surface projection (virtualized phase 2)", false);
+    RecordRuns(2);
+    Sequence.EndRaster();
+    // 📝 Visibility raster, deferred material resolve and two-layer refraction gather from the same indirect commands.
+    Virtualized->RecordVisibilityResolve(Sequence, RasterGroup_, Clusters->Instances);
 }
 
 void SurfaceProjection::RecordDirect(CommandSequence& Sequence, const std::shared_ptr<DescriptorGroup>& DistanceGroup,

@@ -17,6 +17,68 @@ elseif(MSVC)
     target_compile_options(FrontierVirtualizedGeometry PRIVATE /fp:precise)
 endif()
 
+# 📝 The set's Slang units include the illumination port's refresh profile and intrinsics (Shaders/GlobalIllumination), so they
+#    compile with the same pinned compiler; without it the editor uses EngineContent/ShaderArchives/VirtualizedGeometry.
+find_program(FRONTIER_GLOBAL_ILLUMINATION_SLANGC
+    NAMES slangc
+    PATHS "${CMAKE_SOURCE_DIR}/ExternalPackages/VulkanCompute/Slang/slangtorch/bin"
+    NO_DEFAULT_PATH)
+set(FRONTIER_VIRTUALIZED_GEOMETRY_SHADER_SRC "${CMAKE_SOURCE_DIR}/Frontier/Engine/Shaders/VirtualizedGeometry")
+set(FRONTIER_VIRTUALIZED_GEOMETRY_SHADER_OUT "${CMAKE_BINARY_DIR}/ShaderArchives/VirtualizedGeometry")
+file(GLOB FRONTIER_VIRTUALIZED_GEOMETRY_SLANG_SOURCES CONFIGURE_DEPENDS "${FRONTIER_VIRTUALIZED_GEOMETRY_SHADER_SRC}/*.slang"
+     "${CMAKE_SOURCE_DIR}/Frontier/Engine/Shaders/GlobalIllumination/*.slang")
+
+# Unit:Entry:Stage — one SPIR-V file per entry point, <Unit>.<Entry>.spv.
+set(FRONTIER_VIRTUALIZED_GEOMETRY_ENTRIES
+    "VirtualizedGeometryCull:SelectAndCullPhase1:compute"
+    "VirtualizedGeometryCull:CullPhase2Disoccluded:compute"
+    "HiZPyramid:SeedHiZFromDepth:compute"
+    "HiZDownsample:DownsampleHiZMip:compute"
+    "VisibilityRaster:VisibilityVertex:vertex"
+    "VisibilityRaster:VisibilityFragment:fragment"
+    "VisibilityRaster:VisibilityGlassFragment:fragment"
+    "VisibilityRaster:VisibilityGlassBackFragment:fragment"
+    "MaterialResolve:ResolveOpaqueVisibility:compute"
+    "MaterialResolve:ResolveRefractionGather:compute"
+    "MaterialResolve:DebugVisibilityIds:compute"
+    "MaterialResolve:DebugGlassLayers:compute"
+    "MaterialResolve:DebugCopyResolved:compute"
+    "MaterialResolve:DebugHiZView:compute"
+    "MaterialResolve:DebugLodLevels:compute"
+    "ClusterDebugFallback:DebugUnavailable:compute"
+    "ClusterDebugFallback:DebugFailed:compute"
+    "ClusterDebugFallback:DebugNoGeometry:compute")
+
+set(FRONTIER_VIRTUALIZED_GEOMETRY_SPV_OUTPUTS)
+if(FRONTIER_GLOBAL_ILLUMINATION_SLANGC)
+    foreach(ENTRY_SPEC IN LISTS FRONTIER_VIRTUALIZED_GEOMETRY_ENTRIES)
+        string(REPLACE ":" ";" ENTRY_PARTS "${ENTRY_SPEC}")
+        list(GET ENTRY_PARTS 0 ENTRY_UNIT)
+        list(GET ENTRY_PARTS 1 ENTRY_NAME)
+        list(GET ENTRY_PARTS 2 ENTRY_STAGE)
+        set(ENTRY_SPV "${FRONTIER_VIRTUALIZED_GEOMETRY_SHADER_OUT}/${ENTRY_UNIT}.${ENTRY_NAME}.spv")
+        list(APPEND FRONTIER_VIRTUALIZED_GEOMETRY_SPV_OUTPUTS "${ENTRY_SPV}")
+        add_custom_command(
+            OUTPUT "${ENTRY_SPV}"
+            COMMAND "${CMAKE_COMMAND}" -E make_directory "${FRONTIER_VIRTUALIZED_GEOMETRY_SHADER_OUT}"
+            COMMAND "${FRONTIER_GLOBAL_ILLUMINATION_SLANGC}" "${FRONTIER_VIRTUALIZED_GEOMETRY_SHADER_SRC}/${ENTRY_UNIT}.slang"
+                -I "${FRONTIER_VIRTUALIZED_GEOMETRY_SHADER_SRC}"
+                -I "${CMAKE_SOURCE_DIR}/Frontier/Engine/Shaders/GlobalIllumination"
+                -entry "${ENTRY_NAME}"
+                -stage "${ENTRY_STAGE}"
+                -target spirv
+                -profile spirv_1_3
+                -emit-spirv-directly
+                -matrix-layout-row-major
+                -fvk-use-entrypoint-name
+                -O0
+                -o "${ENTRY_SPV}"
+            DEPENDS ${FRONTIER_VIRTUALIZED_GEOMETRY_SLANG_SOURCES}
+            VERBATIM)
+    endforeach()
+    add_custom_target(FrontierVirtualizedGeometryShaders ALL DEPENDS ${FRONTIER_VIRTUALIZED_GEOMETRY_SPV_OUTPUTS})
+endif()
+
 if(BUILD_TESTING)
     # 📝 Every corpus surface rebuilt from the demo's own soup must hash to the demo builder's digests
     #    (Exhibits/VirtualizedGeometry/README.md).
@@ -40,4 +102,11 @@ if(BUILD_TESTING)
         FRONTIER_VIRTUALIZED_GEOMETRY_EXHIBIT="${CMAKE_SOURCE_DIR}/Exhibits/VirtualizedGeometry")
     target_link_libraries(VirtualizedGeometryValidation PRIVATE FrontierVirtualizedGeometry)
     add_test(NAME VirtualizedGeometryValidation COMMAND VirtualizedGeometryValidation)
+
+    # 📝 The GPU takeover in the editor's scene viewport, offscreen (needs a Vulkan device; Exhibits/VirtualizedGeometry/README.md).
+    add_executable(VirtualizedGeometryCapture
+        Exhibits/VirtualizedGeometry/Code/VirtualizedGeometryCapture.cpp
+        Engine/Render/StbImageWriteImplementation.cpp)
+    target_include_directories(VirtualizedGeometryCapture PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
+    target_link_libraries(VirtualizedGeometryCapture PRIVATE FrontierSceneViewport)
 endif()

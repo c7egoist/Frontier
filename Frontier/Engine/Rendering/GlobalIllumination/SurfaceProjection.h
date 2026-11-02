@@ -7,6 +7,7 @@
 
 #include "SceneStructure.h"
 #include "ShaderInterchange.h"
+#include "Rendering/VirtualizedGeometry/NestingProjection.h"
 
 #include <map>
 
@@ -96,6 +97,8 @@ class SurfaceProjection
     std::shared_ptr<DeviceTexture>     DepthTexture{}, AttributeTexture{}, MotionTexture{}, DirectTexture{};
     std::shared_ptr<DeviceTextureView> DepthView{}, AttributeView{}, MotionView{}, DirectView{};
     std::unique_ptr<ClusteredGeometry> Clusters{};
+    // 📝 The demo's Surface.Virtualized: the cluster nesting takeover of eligible static sets (inert unless enabled).
+    std::unique_ptr<VirtualizedGeometry::NestingProjection> Virtualized{};
 
   private:
     DeviceExchange&                   Exchange_;

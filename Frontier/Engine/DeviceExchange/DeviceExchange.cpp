@@ -130,6 +130,7 @@ VkFormat TranslateTextureFormat(TextureFormat Format) noexcept
         case TextureFormat::Rgba8UnormSrgb: return VK_FORMAT_R8G8B8A8_SRGB;
         case TextureFormat::R8Unorm:        return VK_FORMAT_R8_UNORM;
         case TextureFormat::R32Uint:        return VK_FORMAT_R32_UINT;
+        case TextureFormat::Rg32Uint:       return VK_FORMAT_R32G32_UINT;
         case TextureFormat::Depth32Float:   return VK_FORMAT_D32_SFLOAT;
     }
     return VK_FORMAT_UNDEFINED;
@@ -148,6 +149,7 @@ uint32_t QueryTexelBytes(TextureFormat Format) noexcept
         case TextureFormat::Rgba8UnormSrgb: return 4u;
         case TextureFormat::R8Unorm:        return 1u;
         case TextureFormat::R32Uint:        return 4u;
+        case TextureFormat::Rg32Uint:       return 8u;
         case TextureFormat::Depth32Float:   return 4u;
     }
     return 0u;

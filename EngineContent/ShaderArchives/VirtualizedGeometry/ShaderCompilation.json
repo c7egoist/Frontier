@@ -1,0 +1,122 @@
+{
+  "format": 1,
+  "set": "VirtualizedGeometry",
+  "compiler": "slangc 2026.14.1",
+  "refresh": "python Automation/StoreShaderArchives.py --build <build> --compiler <slangc or slang-wasm.js> --sets VirtualizedGeometry",
+  "entries": [
+    {
+      "file": "ClusterDebugFallback.DebugFailed.spv",
+      "spirv_sha256": "46408fe583cbc173c9318adb2876e5a5c610f85f4321afcbd9d082ac8aa2d81f"
+    },
+    {
+      "file": "ClusterDebugFallback.DebugNoGeometry.spv",
+      "spirv_sha256": "93cd6aa9b89ffffda91c9a63683fb391a98025afa29bc004b6110e037031f57d"
+    },
+    {
+      "file": "ClusterDebugFallback.DebugUnavailable.spv",
+      "spirv_sha256": "6d7b4c8c553250ca6608abe9064b3a6aed8f6700f1f1afcd375605605c38ed2b"
+    },
+    {
+      "file": "HiZDownsample.DownsampleHiZMip.spv",
+      "spirv_sha256": "47bd995a239fb0e47bacad982d8481c0b21056b0f489891d128c8f52f5b8421a"
+    },
+    {
+      "file": "HiZPyramid.SeedHiZFromDepth.spv",
+      "spirv_sha256": "46f4b864fa24c6254371c80d75f5210ce8e2dc345dce9e9fc7ba48925da5fd06"
+    },
+    {
+      "file": "MaterialResolve.DebugCopyResolved.spv",
+      "spirv_sha256": "36cb9a2a1ccc4e2e1d17e9b062f2245e875c2725fb0e304746fc586f7adc1e32"
+    },
+    {
+      "file": "MaterialResolve.DebugGlassLayers.spv",
+      "spirv_sha256": "86a8e7e4b9de68ceb783ba93d151614692a5eb221de8aad6bfc5ff0b95c7599d"
+    },
+    {
+      "file": "MaterialResolve.DebugHiZView.spv",
+      "spirv_sha256": "9691d6fb1dea153c7b0874f648bae4e891839646b39dab828d5b74b736c9050c"
+    },
+    {
+      "file": "MaterialResolve.DebugLodLevels.spv",
+      "spirv_sha256": "939d821e1778b28c79a443736918432d0da3e005f5527a29ee2ef2df10ed87b8"
+    },
+    {
+      "file": "MaterialResolve.DebugVisibilityIds.spv",
+      "spirv_sha256": "dafe5780cc3c16fe4743fb0cfd1040f35623599fc90eff38e2e00dc479699225"
+    },
+    {
+      "file": "MaterialResolve.ResolveOpaqueVisibility.spv",
+      "spirv_sha256": "385ee6e3fe0ecba1d7327e2b56784621bb9402dcdd3b1ca0fe2db99585e24d8e"
+    },
+    {
+      "file": "MaterialResolve.ResolveRefractionGather.spv",
+      "spirv_sha256": "65daf066073799eea2562bb152edcdeb0538569ef27777e68a1039cb47e71b69"
+    },
+    {
+      "file": "VirtualizedGeometryCull.CullPhase2Disoccluded.spv",
+      "spirv_sha256": "dc26e5bfec79fc3883a1e2d817e4a4850d63855676d0d0be8594460955b67973"
+    },
+    {
+      "file": "VirtualizedGeometryCull.SelectAndCullPhase1.spv",
+      "spirv_sha256": "d3987d58fa691edfb714ca54d119caa327953fa7e50d6027bffc2af1e5561c77"
+    },
+    {
+      "file": "VisibilityRaster.VisibilityFragment.spv",
+      "spirv_sha256": "c3ae1a3cb230e66f78bbc861844214f91b5cf3fc733f84055e1d585a6df42a4e"
+    },
+    {
+      "file": "VisibilityRaster.VisibilityGlassBackFragment.spv",
+      "spirv_sha256": "a391309f9b9e6e76343accd792c923bba61a92d667584b969fe3132c93e2925e"
+    },
+    {
+      "file": "VisibilityRaster.VisibilityGlassFragment.spv",
+      "spirv_sha256": "f885babec49cd4cdeb92a922eb48dd8da756577c5792011a2c14c0cfa0d6c813"
+    },
+    {
+      "file": "VisibilityRaster.VisibilityVertex.spv",
+      "spirv_sha256": "cf9b57bbf0724294dc2a28270ba50f4f479b5485c16c232619569ab79295f454"
+    }
+  ],
+  "sources": [
+    {
+      "file": "Frontier/Engine/Shaders/GlobalIllumination/HostConstants.slang",
+      "sha256": "e7db94f4ed7070df8437a5462c47a95ddabf41c3498825c44675364fd631b3f1"
+    },
+    {
+      "file": "Frontier/Engine/Shaders/GlobalIllumination/IntrinsicParity.slang",
+      "sha256": "8073ff213243e2548ab7d7bc96fda2406ce9931f4e63279f624672beb5ca2c84"
+    },
+    {
+      "file": "Frontier/Engine/Shaders/GlobalIllumination/RefreshDescriptor.slang",
+      "sha256": "6250336931a7ca865cefb85beb450482f57e1d7f6c0b6c110b15008d6da85a5a"
+    },
+    {
+      "file": "Frontier/Engine/Shaders/GlobalIllumination/SceneLayouts.slang",
+      "sha256": "4bf1c6507cec129065a93ada9e6c984fabdea120b7bb6f2e4cb806a79470fec5"
+    },
+    {
+      "file": "Frontier/Engine/Shaders/VirtualizedGeometry/ClusterDebugFallback.slang",
+      "sha256": "64e9e9994de926d6d12d02ad628e4e5fdfa080837d879b657e42fe2a93a7261a"
+    },
+    {
+      "file": "Frontier/Engine/Shaders/VirtualizedGeometry/HiZDownsample.slang",
+      "sha256": "300e53e6f35826a0bef57d26d42425b9db8a22ef77e0f4161cc592f4e41b7031"
+    },
+    {
+      "file": "Frontier/Engine/Shaders/VirtualizedGeometry/HiZPyramid.slang",
+      "sha256": "d1f09112905a09b87f1f8464707075f947f173904c011c70b4fe8941b15bb2bb"
+    },
+    {
+      "file": "Frontier/Engine/Shaders/VirtualizedGeometry/MaterialResolve.slang",
+      "sha256": "0bc1ade09d592fb28de6968c46f6bc397e2824d9941888a72d557fa9583bdab2"
+    },
+    {
+      "file": "Frontier/Engine/Shaders/VirtualizedGeometry/VirtualizedGeometryCull.slang",
+      "sha256": "1d200da59e2f69533ff436752603f15890a00432cc52ac9d1f64cc2fa2b56de5"
+    },
+    {
+      "file": "Frontier/Engine/Shaders/VirtualizedGeometry/VisibilityRaster.slang",
+      "sha256": "a957b5a1d16c5163d566aebd8068df2b440fe720206e9c3b05c67ab6eed345f4"
+    }
+  ]
+}

@@ -17,9 +17,14 @@ import sys
 RepositoryRoot = Path(__file__).resolve().parents[1]
 StoredRoot     = RepositoryRoot / 'EngineContent/ShaderArchives'
 
-# 📝 Folder of each set's Slang units, and the units its entries compile (None: every unit of the folder).
+# 📝 Folder of each set's Slang units, the units its entries compile (None: every unit of the folder) and, optionally, further
+#    folders its includes resolve in.
 ArchiveSets = {
     'GlobalIllumination': ('Frontier/Engine/Shaders/GlobalIllumination', None),
+    # 📝 The virtualized geometry units include the illumination port's refresh profile and intrinsics.
+    'VirtualizedGeometry': ('Frontier/Engine/Shaders/VirtualizedGeometry',
+                            ['VirtualizedGeometryCull', 'HiZPyramid', 'HiZDownsample', 'VisibilityRaster', 'MaterialResolve',
+                             'ClusterDebugFallback'], ['Frontier/Engine/Shaders/GlobalIllumination']),
     'Environment': ('Frontier/Engine/Shaders', ['AtmosphereScattering', 'AtmosphereProjection', 'VisibilityProjection',
                                                  'PlanetaryProjection', 'CloudShadowProjection', 'VolumetricClouds', 'FogSpace',
                                                  'OpticalLensFlare', 'PreviewRaster']),
@@ -37,19 +42,20 @@ def Digest(Filename):
 
 
 def ResolveSources(Set):
-    Folder, Units = ArchiveSets[Set]
-    Folder = RepositoryRoot / Folder
+    Folder, Units, *Further = ArchiveSets[Set]
+    Folders = [RepositoryRoot / Folder] + [RepositoryRoot / Extra for Extra in (Further[0] if Further else [])]
     if Units is None:
-        return sorted(Folder.glob('*.slang'))
-    # 📝 The include/import closure of the compiled units.
-    Pending, Found = [Folder / (Unit + '.slang') for Unit in Units], set()
+        return sorted(Folders[0].glob('*.slang'))
+    # 📝 The include/import closure of the compiled units, each include resolved in the first folder that holds it.
+    Pending, Found = [Folders[0] / (Unit + '.slang') for Unit in Units], set()
     while Pending:
         Unit = Pending.pop()
         if Unit in Found or not Unit.is_file():
             continue
         Found.add(Unit)
         for Included, Imported in IncludePattern.findall(Unit.read_text(encoding='utf-8')):
-            Pending.append(Folder / (Included if Included else Imported.replace('.', '/') + '.slang'))
+            Relative = Included if Included else Imported.replace('.', '/') + '.slang'
+            Pending.append(next((Candidate / Relative for Candidate in Folders if (Candidate / Relative).is_file()), Folders[0] / Relative))
     return sorted(Found)
 
 

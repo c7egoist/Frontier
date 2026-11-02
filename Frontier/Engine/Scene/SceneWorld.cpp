@@ -335,6 +335,8 @@ void RenderPipelineRecord::SerializeConfiguration(toml::table& OutTable) const
     OutTable.insert_or_assign("bloom_intensity", static_cast<double>(Parameters.BloomIntensity));
     OutTable.insert_or_assign("global_illumination", Parameters.GlobalIllumination);
     OutTable.insert_or_assign("temporal_aa", Parameters.TemporalAntiAliasing);
+    OutTable.insert_or_assign("virtualized_geometry", Parameters.VirtualizedGeometry);
+    OutTable.insert_or_assign("virtualized_stream_slots", static_cast<int64_t>(Parameters.VirtualizedStreamSlots));
 }
 
 template <>
@@ -348,6 +350,8 @@ void RenderPipelineRecord::DeserializeConfiguration(const toml::table& InTable)
     Parameters.BloomIntensity         = ReadFloat(InTable, "bloom_intensity", Parameters.BloomIntensity);
     Parameters.GlobalIllumination     = ReadBool(InTable, "global_illumination", Parameters.GlobalIllumination);
     Parameters.TemporalAntiAliasing   = ReadBool(InTable, "temporal_aa", Parameters.TemporalAntiAliasing);
+    Parameters.VirtualizedGeometry    = ReadBool(InTable, "virtualized_geometry", Parameters.VirtualizedGeometry);
+    Parameters.VirtualizedStreamSlots = std::max(0, ReadInt(InTable, "virtualized_stream_slots", Parameters.VirtualizedStreamSlots));
     Parameters.AdvanceRevision();
 }
 

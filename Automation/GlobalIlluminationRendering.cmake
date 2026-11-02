@@ -23,7 +23,8 @@ add_library(FrontierGlobalIllumination STATIC
     Frontier/Engine/Rendering/GlobalIllumination/RefreshEncoding.cpp
     Frontier/Engine/Rendering/GlobalIllumination/EnvironmentEncoding.cpp
     Frontier/Engine/Rendering/GlobalIllumination/LuminaireRegister.cpp
-    Frontier/Engine/Rendering/GlobalIllumination/IlluminationHost.cpp)
+    Frontier/Engine/Rendering/GlobalIllumination/IlluminationHost.cpp
+    Frontier/Engine/Rendering/VirtualizedGeometry/NestingProjection.cpp)
 
 target_include_directories(FrontierGlobalIllumination PUBLIC
     "${CMAKE_SOURCE_DIR}"
@@ -31,7 +32,7 @@ target_include_directories(FrontierGlobalIllumination PUBLIC
     "${CMAKE_SOURCE_DIR}/ExternalPackages/vulkan-headers/include")
 target_compile_definitions(FrontierGlobalIllumination PUBLIC VK_NO_PROTOTYPES)
 target_compile_features(FrontierGlobalIllumination PUBLIC cxx_std_20)
-target_link_libraries(FrontierGlobalIllumination PUBLIC ${CMAKE_DL_LIBS} Threads::Threads)
+target_link_libraries(FrontierGlobalIllumination PUBLIC ${CMAKE_DL_LIBS} Threads::Threads FrontierVirtualizedGeometry)
 
 # 📝 Only the pinned compiler (Automation/PrepareVulkanCompute.py) rebuilds these units by default, so every build presents the
 #    SPIR-V the parity validation measured. Without it the editor uses the stored archives in
@@ -123,11 +124,14 @@ endif()
 if(TARGET FrontierEnvironmentShaders)
     add_dependencies(FrontierSceneViewport FrontierEnvironmentShaders)
 endif()
+if(TARGET FrontierVirtualizedGeometryShaders)
+    add_dependencies(FrontierSceneViewport FrontierVirtualizedGeometryShaders)
+endif()
 
 # 📝 The editor loads EngineContent/ShaderArchives/{GlobalIllumination,Environment} beside Frontier.exe. The stored archives arrive
 #    with the EngineContent copy; a set this build compiled replaces its stored copy afterwards.
 if(TARGET Frontier)
-    foreach(SCENE_SHADERS GlobalIllumination Environment)
+    foreach(SCENE_SHADERS GlobalIllumination Environment VirtualizedGeometry)
         if(TARGET Frontier${SCENE_SHADERS}Shaders)
             add_dependencies(Frontier Frontier${SCENE_SHADERS}Shaders)
             add_custom_command(TARGET Frontier POST_BUILD COMMAND "${CMAKE_COMMAND}" -E copy_directory
@@ -167,7 +171,7 @@ if(BUILD_TESTING)
     #    output is not compared.
     set(FRONTIER_PINNED_SLANG "${CMAKE_SOURCE_DIR}/ExternalPackages/VulkanCompute/Slang/")
     set(FRONTIER_COMPARED_SHADER_SETS)
-    foreach(SCENE_SHADERS GlobalIllumination Environment)
+    foreach(SCENE_SHADERS GlobalIllumination Environment VirtualizedGeometry)
         if(SCENE_SHADERS STREQUAL "Environment")
             set(SCENE_SLANGC "${FRONTIER_ENV_SLANGC}")
         else()
@@ -188,5 +192,5 @@ if(BUILD_TESTING)
         endif()
     endif()
     add_test(NAME StoredShaderArchiveValidation COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/Automation/StoreShaderArchives.py"
-        --verify --sets GlobalIllumination Environment Surface --build "${CMAKE_BINARY_DIR}" --compare ${FRONTIER_COMPARED_SHADER_SETS})
+        --verify --sets GlobalIllumination Environment VirtualizedGeometry Surface --build "${CMAKE_BINARY_DIR}" --compare ${FRONTIER_COMPARED_SHADER_SETS})
 endif()

@@ -408,6 +408,12 @@ bool IlluminationHost::AdvanceRefresh(const RefreshInputs* Inputs, const Refresh
         Resampling->RecordReflection(Begin("reflection trace"), Distance->MarchGroup, SamplingGroup, RayTracing->MarchGroup);
         Glossy->Record(Begin("glossy variance filter"), Parity, Settings.VarianceFilter);
     }
+    // 📝 Cluster inspection modes 10-14 come from the virtualized geometry's own targets; selecting one activates it on demand and,
+    //    while activation is pending or no set is eligible, a checker fallback marks the inspection target instead of black.
+    if (Inputs != nullptr && Inputs->Toggles.Inspection >= 10 && Surface->Virtualized)
+        Surface->Virtualized->RecordInspectionView(Begin("cluster inspection"), Display->InspectionView, Inputs->Toggles.Inspection);
+    else if (Surface->Virtualized)
+        Surface->Virtualized->DismissInspectionStatus();
     if (Interlude == nullptr)
     {
         Display->RecordResolve(Begin("resolve"), Parity);

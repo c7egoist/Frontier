@@ -52,6 +52,8 @@ struct ViewportRendering
     bool     TemporalAntiAliasing = true;
     double   ExposureCompensation = 0.0;     // [EV]
     uint32_t Inspection           = 0;       // [-] the demo's inspection view 0–14 (RefreshToggles::Inspection)
+    bool     VirtualizedGeometry  = false;   // [-] the cluster nesting takeover (the demo's ?hierarchy=1)
+    uint32_t VirtualizedStreamSlots = 0;     // [-] arena slots the pages stream through (0: one per page)
 };
 
 // 📝 What the refresh ran with, for the viewport's readout (the demo's PresentMeasurements).
@@ -115,6 +117,7 @@ class SceneViewport
     std::unique_ptr<DeviceExchange>        Exchange_{};
     std::unique_ptr<VulkanComputeExchange> Environment_{};
     std::unique_ptr<IlluminationHost>      Host_{};
+    bool                                   VirtualizedConfigured_ = false;   // [-] last levelspace value of the cluster takeover
     std::unique_ptr<EnvironmentOverlay>    Overlay_{};
     std::shared_ptr<DeviceTextureView>     PresentedView_{};
     std::string                            Adapter_{};

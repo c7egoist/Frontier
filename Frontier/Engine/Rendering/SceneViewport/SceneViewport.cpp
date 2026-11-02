@@ -217,6 +217,14 @@ bool SceneViewport::Refresh(const ViewportCamera& Camera, const SceneEnvironment
     Inputs.Toggles.RayTracing           = Configuration_.RayTracing;
     Inputs.Toggles.Inspection           = std::min<uint32_t>(Rendering.Inspection, 14u);
     Host_->Settings.Indirect            = Rendering.GlobalIllumination;
+    // 📝 The levelspace key raises the takeover and lowers it again; an inspection mode that activated it keeps it, as in the demo.
+    if (Host_->Surface && Host_->Surface->Virtualized)
+    {
+        VirtualizedGeometry::NestingProjection& Virtualized = *Host_->Surface->Virtualized;
+        if (Rendering.VirtualizedGeometry != VirtualizedConfigured_) Virtualized.Enabled = Rendering.VirtualizedGeometry;
+        VirtualizedConfigured_   = Rendering.VirtualizedGeometry;
+        Virtualized.StreamSlots  = Rendering.VirtualizedStreamSlots;
+    }
     // 📝 Idle inputs of the parts outside the port, as the demo writes them with no cabin and nothing burning; bit 0 of the
     //    presentation word carries only exposure/scale metadata.
     Inputs.External.ElapsedSeconds = ElapsedSeconds_;

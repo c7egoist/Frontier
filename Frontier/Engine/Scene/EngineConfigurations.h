@@ -66,6 +66,9 @@ struct RenderPipelineConfiguration : RevisionCounter
     bool  GlobalIllumination     = true;
     bool  ScreenSpaceReflections = true;
     bool  AcesFilmicTonemap      = true;
+    // 📝 The demo's ?hierarchy=1 and ?streampages: the cluster nesting takeover of eligible static sets (levelspace keys, no controls).
+    bool  VirtualizedGeometry    = false;
+    int   VirtualizedStreamSlots = 0;      // 0: one arena slot per page
 };
 
 struct DistanceFieldConfiguration : RevisionCounter
