@@ -5,15 +5,25 @@ name = "Everest — Default Scene"
 [[records]]
 identity = "rec_diagnostics"
 type = "Diagnostics"
-name = "Frame Diagnostics"
+name = "Diagnostics"
 [records.configuration]
 timing_overlay = true
 memory_overlay = false
 
 [[records]]
+identity = "rec_clusters"
+type = "PolygonClusters"
+name = "Geometry clusters"
+[records.configuration]
+enabled = true
+hierarchy_depth = 6
+max_cluster_triangles = 128
+hiz_culling = true
+
+[[records]]
 identity = "rec_pipeline"
 type = "RenderPipeline"
-name = "Render Pipeline"
+name = "Render settings"
 [records.configuration]
 enabled = true
 hardware_ray_query = true
@@ -27,8 +37,7 @@ temporal_aa = true
 [[records]]
 identity = "rec_sdf"
 type = "DistanceField"
-name = "4-Cascade SDF Clipmap"
-parent = "rec_pipeline"
+name = "BVH & distance field"
 [records.configuration]
 enabled = true
 cascade0_m = 16.0
@@ -40,8 +49,7 @@ max_cone_steps = 48
 [[records]]
 identity = "rec_cards"
 type = "SurfaceCards"
-name = "Surface Card Atlas"
-parent = "rec_pipeline"
+name = "Surface cache"
 [records.configuration]
 enabled = true
 atlas_px = 1024
@@ -49,20 +57,9 @@ bounce_gain = 1.15
 cards_per_object = 6
 
 [[records]]
-identity = "rec_clusters"
-type = "PolygonClusters"
-name = "Polygon Cluster Hierarchy"
-parent = "rec_pipeline"
-[records.configuration]
-enabled = true
-hierarchy_depth = 6
-max_cluster_triangles = 128
-hiz_culling = true
-
-[[records]]
 identity = "rec_solar"
 type = "Solar"
-name = "Primary Directional Sun"
+name = "Sun"
 [records.configuration]
 enabled = true
 elevation_deg = 38.0
@@ -73,7 +70,7 @@ kelvin = 5778.0
 [[records]]
 identity = "rec_flare"
 type = "OpticalFlare"
-name = "Aperture Optical Flare"
+name = "Lens Flare"
 parent = "rec_solar"
 [records.configuration]
 enabled = true
@@ -81,20 +78,9 @@ intensity = 0.62
 aperture_blades = 7
 
 [[records]]
-identity = "rec_atmosphere"
-type = "Atmosphere"
-name = "Sky Atmosphere"
-[records.configuration]
-enabled = true
-rayleigh = 1.0
-mie_turbidity = 2.3
-ozone = 1.0
-
-[[records]]
 identity = "rec_clouds"
 type = "Clouds"
-name = "Volumetric Cloud Layer"
-parent = "rec_atmosphere"
+name = "Clouds"
 [records.configuration]
 enabled = true
 local_volume = false
@@ -103,10 +89,35 @@ base_altitude_m = 1750.0
 thickness_m = 1350.0
 
 [[records]]
+identity = "rec_local_cloud"
+type = "Clouds"
+name = "Local Cloud"
+[records.configuration]
+enabled = false
+local_volume = true
+
+[[records]]
+identity = "rec_local_fog"
+type = "Fog"
+name = "Local Volumetric Fog"
+[records.configuration]
+enabled = false
+local_volume = true
+
+[[records]]
+identity = "rec_atmosphere"
+type = "Atmosphere"
+name = "Atmosphere"
+[records.configuration]
+enabled = true
+rayleigh = 1.0
+mie_turbidity = 2.3
+ozone = 1.0
+
+[[records]]
 identity = "rec_stars"
 type = "Stars"
-name = "Hipparcos Starfield"
-parent = "rec_atmosphere"
+name = "Stars"
 [records.configuration]
 enabled = true
 hipparcos_count = 5000
@@ -115,8 +126,7 @@ magnitude_gain = 1.15
 [[records]]
 identity = "rec_moons"
 type = "Moons"
-name = "Orbital Satellites"
-parent = "rec_atmosphere"
+name = "Moons"
 [records.configuration]
 enabled = true
 primary_phase = 0.68
@@ -126,7 +136,6 @@ secondary_enabled = true
 identity = "rec_planet_venus"
 type = "Planet"
 name = "Venus"
-parent = "rec_atmosphere"
 [records.configuration]
 enabled = true
 body = 0
@@ -139,7 +148,6 @@ atmosphere_shell = true
 identity = "rec_planet_jupiter"
 type = "Planet"
 name = "Jupiter"
-parent = "rec_atmosphere"
 [records.configuration]
 enabled = true
 body = 1
@@ -152,7 +160,6 @@ atmosphere_shell = false
 identity = "rec_planet_mars"
 type = "Planet"
 name = "Mars"
-parent = "rec_atmosphere"
 [records.configuration]
 enabled = true
 body = 2
@@ -165,7 +172,6 @@ atmosphere_shell = false
 identity = "rec_planet_saturn"
 type = "Planet"
 name = "Saturn"
-parent = "rec_atmosphere"
 [records.configuration]
 enabled = true
 body = 3
@@ -177,8 +183,7 @@ atmosphere_shell = false
 [[records]]
 identity = "rec_fog"
 type = "Fog"
-name = "Froxel Scattering Fog"
-parent = "rec_atmosphere"
+name = "Height Fog"
 [records.configuration]
 enabled = true
 local_volume = false
@@ -188,8 +193,7 @@ height_falloff = 0.14
 [[records]]
 identity = "rec_lightning"
 type = "Lightning"
-name = "Dielectric Discharge"
-parent = "rec_atmosphere"
+name = "Lightning & thunder"
 [records.configuration]
 enabled = true
 strikes_per_minute = 4.0
@@ -198,7 +202,7 @@ auto_discharge = false
 [[records]]
 identity = "rec_wind"
 type = "Wind"
-name = "Curl-Noise Wind Field"
+name = "Wind"
 [records.configuration]
 enabled = true
 direction_deg = 45.0

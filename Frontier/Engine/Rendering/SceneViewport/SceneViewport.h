@@ -67,6 +67,9 @@ struct ViewportStatistics
     uint32_t                TlasInstances     = 0;        // [-] active instances of the software TLAS
     uint32_t                TlasEntries       = 0;        // [-] TLAS entries in use
     uint32_t                BlasTriangles     = 0;        // [-] static BLAS triangles
+    uint32_t                ClipResolution    = 0;        // [voxels] distance clipmap edge (the grade's ClipResolution)
+    uint32_t                SurfaceCards      = 0;        // [-] surface cards in the depot
+    uint32_t                GeometryClusters  = 0;        // [-] cluster candidates the surface raster culls
 };
 
 class SceneViewport

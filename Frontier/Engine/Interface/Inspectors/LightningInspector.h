@@ -9,6 +9,8 @@
 #include "Engine/Interface/InspectorRuntime.h"
 #include "Engine/Scene/EngineConfigurations.h"
 
+#include <string>
+
 namespace Frontier
 {
 
@@ -31,6 +33,8 @@ class LightningInspector final : public RecordInspector
     [[nodiscard]] uint64_t    QueryRevision() const noexcept override { return Parameters.Revision; }
     void                      EnumerateSwitches(std::vector<InspectorSwitchEntry>& OutSwitches) override;
     void                      ConstructInspector() override;
+    // 📝 The demo's Lightning entity: Meta "<strikes> strikes" (no storm runs in the editor yet, so none have struck).
+    [[nodiscard]] std::string QueryDirectoryReadout() const override { return "0 strikes"; }
 
   private:
     LightningConfiguration& Parameters;

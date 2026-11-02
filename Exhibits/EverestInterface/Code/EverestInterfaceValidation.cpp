@@ -161,7 +161,7 @@ int main(int ArgumentCount, char** Arguments)
         // -------------------------------------------------------------------------------------------------------------
         Everest::EverestWorkspace Workspace(*Centre, LaunchedPath.parent_path());
         SceneWorld&               World = Workspace.QuerySceneWorld();
-        Require(World.QueryRecordCount() == 26, "Expected 26 records in Projects/Everest/Content/Levels/Default.levelspace.");
+        Require(World.QueryRecordCount() == 28, "Expected 28 records in Projects/Everest/Content/Levels/Default.levelspace.");
         // 📝 Each planet of the sky is its own Scene Directory entry (Venus, Jupiter, Mars, Saturn), beside the starfield and moons.
         Require(World.FindAllByType("Planet").size() == 4 && World.FindFirstByType("Stars") && World.FindFirstByType("Moons"),
                 "Expected four Planet entries beside the Stars and Moons entries.");
@@ -254,11 +254,11 @@ int main(int ArgumentCount, char** Arguments)
         // Exhibit 06: Dynamic scene mutation via Outliner + ControlCentrePanel Appearance & Settings modal
         Workspace.QueryOutliner().RequestConstructRecord("ChemicalVessel");
         RenderFrames(2);
-        Require(World.QueryRecordCount() == 27, "Dynamic RequestConstructRecord('ChemicalVessel') failed.");
+        Require(World.QueryRecordCount() == 29, "Dynamic RequestConstructRecord('ChemicalVessel') failed.");
         const RecordToken AddedToken = Workspace.QueryOutliner().QuerySelected();
         Workspace.QueryOutliner().RequestDeleteRecord(AddedToken);
         RenderFrames(2);
-        Require(World.QueryRecordCount() == 26, "Dynamic RequestDeleteRecord failed.");
+        Require(World.QueryRecordCount() == 28, "Dynamic RequestDeleteRecord failed.");
 
         Centre->ActivateSettingsPage(ControlCentrePageCategory::Appearance);
         RenderFrames(36);

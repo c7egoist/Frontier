@@ -56,6 +56,11 @@ class RecordInspector
     // 📝 A page's section tabs (the demo's Overview / Daylight / …): how many there are, and which one shows.
     [[nodiscard]] virtual int         QuerySectionCount() const noexcept                    { return 0; }
     virtual void                      ConfigureSection(int Section) noexcept                { (void)Section; }
+    // 📝 The Outliner row (the demo's entity Meta, Glyph and State): a readout such as "38°" or "1/4", the glyph when the
+    //    configuration decides it (a local cloud's artwork), and the state dot (live, warm, or standby grey).
+    [[nodiscard]] virtual std::string                QueryDirectoryReadout() const                 { return {}; }
+    [[nodiscard]] virtual const char*                QueryDirectoryGlyph() const noexcept          { return nullptr; }
+    [[nodiscard]] virtual RecordOperationalCondition QueryDirectoryCondition() const noexcept      { return RecordOperationalCondition::Live; }
     virtual void                      ConstructInspector()                                  = 0;
 };
 

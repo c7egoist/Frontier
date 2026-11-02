@@ -34,6 +34,7 @@ class FogInspector final : public RecordInspector
     [[nodiscard]] uint64_t    QueryRevision() const noexcept override { return Parameters.Revision; }
     void                      EnumerateSwitches(std::vector<InspectorSwitchEntry>& OutSwitches) override;
     void                      ConstructInspector() override;
+    [[nodiscard]] const char* QueryDirectoryGlyph() const noexcept override { return Parameters.LocalVolume ? "NativeLocalFog" : "NativeFog"; }
 
   private:
     FogConfiguration& Parameters;

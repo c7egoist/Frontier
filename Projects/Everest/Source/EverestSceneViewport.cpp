@@ -34,6 +34,23 @@ void ReadConfiguration(const Frontier::SceneWorld& World, const char* Type, Conf
     else Target.Enabled = false;
 }
 
+// 📝 The level-wide medium of a type whose entries can also be bounded volumes (Clouds, Fog): the first entry that is not
+//    a local volume. Local volumes (Local Cloud, Local Volumetric Fog) have no renderer here yet.
+template <typename EntryType, typename Configuration>
+void ReadGlobalConfiguration(const Frontier::SceneWorld& World, const char* Type, Configuration& Target)
+{
+    for (const Frontier::SceneRecordBase* Entry : World.FindAllByType(Type))
+    {
+        const auto* Typed = dynamic_cast<const EntryType*>(Entry);
+        if (Typed != nullptr && !Typed->QueryConfiguration().LocalVolume)
+        {
+            Target = Typed->QueryConfiguration();
+            return;
+        }
+    }
+    Target.Enabled = false;
+}
+
 std::filesystem::path ResolveArchive(const std::filesystem::path& ProjectRoot, const char* Archive)
 {
     // 📝 The project's staged import first, the engine's tracked archive as the fallback (unstaged checkouts).
@@ -89,10 +106,10 @@ Frontier::GlobalIllumination::SceneEnvironment ResolveSceneEnvironment(const Fro
     ReadConfiguration<Frontier::SolarRecord>(World, "Solar", Environment.Solar);
     ReadConfiguration<Frontier::OpticalFlareRecord>(World, "OpticalFlare", Environment.Flare);
     ReadConfiguration<Frontier::AtmosphereRecord>(World, "Atmosphere", Environment.Atmosphere);
-    ReadConfiguration<Frontier::CloudRecord>(World, "Clouds", Environment.Clouds);
+    ReadGlobalConfiguration<Frontier::CloudRecord>(World, "Clouds", Environment.Clouds);
     ReadConfiguration<Frontier::StarRecord>(World, "Stars", Environment.Stars);
     ReadConfiguration<Frontier::MoonRecord>(World, "Moons", Environment.Moons);
-    ReadConfiguration<Frontier::FogRecord>(World, "Fog", Environment.Fog);
+    ReadGlobalConfiguration<Frontier::FogRecord>(World, "Fog", Environment.Fog);
     ReadConfiguration<Frontier::WindRecord>(World, "Wind", Environment.Wind);
     // 📝 Each planet entry drives the body it names; a level without planet entries keeps the four default planets.
     const std::vector<const Frontier::SceneRecordBase*> Planets = World.FindAllByType("Planet");
@@ -244,6 +261,11 @@ SceneViewportRefresh EverestSceneViewport::Render(const SceneViewportRequest& Re
     Outcome.Readout.ScreenExtent        = Statistics.ScreenExtent;
     Outcome.Readout.TraceExtent         = Statistics.TraceExtent;
     Outcome.Readout.RefreshMilliseconds = RefreshMilliseconds_;
+    Outcome.Readout.RayTracing          = Statistics.RayTracing;
+    Outcome.Readout.TlasInstances       = Statistics.TlasInstances;
+    Outcome.Readout.ClipResolution      = Statistics.ClipResolution;
+    Outcome.Readout.SurfaceCards        = Statistics.SurfaceCards;
+    Outcome.Readout.GeometryClusters    = Statistics.GeometryClusters;
     return Outcome;
 }
 

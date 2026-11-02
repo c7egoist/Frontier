@@ -39,6 +39,12 @@ class SolarInspector final : public RecordInspector
     void                      ConfigureSection(int Section) noexcept override { ActivePane = Section < 0 ? 0 : (Section > 3 ? 3 : Section); }
     void                      EnumerateSwitches(std::vector<InspectorSwitchEntry>& OutSwitches) override;
     void                      ConstructInspector() override;
+    // 📝 The demo's Sun entity: Meta "38°", State live above the horizon, warm below it.
+    [[nodiscard]] std::string QueryDirectoryReadout() const override;
+    [[nodiscard]] RecordOperationalCondition QueryDirectoryCondition() const noexcept override
+    {
+        return Parameters.ElevationDegrees > 0.0f ? RecordOperationalCondition::Live : RecordOperationalCondition::Warm;
+    }
 
   private:
     // 📝 SolarDayData: the elevation every quarter hour for one date and place, with its 0° crossings.

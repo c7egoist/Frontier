@@ -236,8 +236,11 @@ ViewportStatistics SceneViewport::QueryStatistics() const noexcept
     Statistics.InitialCandidates = Toggles.InitialCandidates;
     if (Host_)
     {
-        Statistics.ScreenExtent = Host_->ScreenExtent;
-        Statistics.TraceExtent  = Host_->TraceExtent;
+        Statistics.ScreenExtent   = Host_->ScreenExtent;
+        Statistics.TraceExtent    = Host_->TraceExtent;
+        Statistics.ClipResolution = Host_->Grade.ClipResolution;
+        if (Host_->Cards) Statistics.SurfaceCards = static_cast<uint32_t>(Host_->Cards->Cards.size());
+        if (Host_->Surface && Host_->Surface->Clusters) Statistics.GeometryClusters = Host_->Surface->Clusters->CandidateCount;
         if (Host_->RayTracing)
         {
             Statistics.TlasInstances = Host_->RayTracing->ActiveInstances;

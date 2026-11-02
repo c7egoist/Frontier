@@ -247,11 +247,13 @@ void SceneRecordBase::AssignParentToken(RecordToken ParentToken)
 
 void SceneRecordBase::ConfigureEditorPresentation(const char* GlyphIdentifier,
                                                   const char* GroupName,
-                                                  const char* SubtitleCategory)
+                                                  const char* SubtitleCategory,
+                                                  const char* AccentHex)
 {
     (void)GlyphIdentifier;
     (void)GroupName;
     (void)SubtitleCategory;
+    (void)AccentHex;
 #if FRONTIER_EDITOR
     SceneDirectoryMetadata Meta = SceneDirectory::Instance().QueryMetadata(Token());
     if (GlyphIdentifier != nullptr && GlyphIdentifier[0] != '\0')
@@ -265,6 +267,10 @@ void SceneRecordBase::ConfigureEditorPresentation(const char* GlyphIdentifier,
     if (SubtitleCategory != nullptr && SubtitleCategory[0] != '\0')
     {
         Meta.SubtitleCategory = SubtitleCategory;
+    }
+    if (AccentHex != nullptr && AccentHex[0] != '\0')
+    {
+        Meta.AccentHex = AccentHex;
     }
     SceneDirectory::Instance().ConfigureMetadata(Token(), std::move(Meta));
 #endif
@@ -659,7 +665,7 @@ void ParticleRecord::DeserializeConfiguration(const toml::table& InTable)
 SpatialNodeRecord::SpatialNodeRecord(std::string InDisplayName)
     : SceneRecordBase(RecordClassification::Geometry, "SpatialNode", std::move(InDisplayName))
 {
-    ConfigureEditorPresentation("Compass", "SCENE OBJECTS", "SpatialNode");
+    ConfigureEditorPresentation("Target", "Scene objects", "SpatialNode", "#a8bbeb");
 #if FRONTIER_EDITOR
     InspectorRuntime::Instance().BindInspector(QueryToken(), std::make_unique<SpatialInspector>(Spatial));
 #endif
@@ -678,7 +684,7 @@ void SpatialNodeRecord::DeserializeConfiguration(const toml::table& InTable)
 RigidBodyRecord::RigidBodyRecord(std::string InDisplayName)
     : SceneRecordBase(RecordClassification::Geometry, "RigidBody", std::move(InDisplayName))
 {
-    ConfigureEditorPresentation("Box", "SCENE OBJECTS", "RigidBody");
+    ConfigureEditorPresentation("Box", "Scene objects", "RigidBody", "#a8bbeb");
 #if FRONTIER_EDITOR
     InspectorRuntime::Instance().BindInspector(QueryToken(), std::make_unique<SpatialInspector>(Spatial));
     InspectorRuntime::Instance().AttachInspector(QueryToken(), std::make_unique<PhysicsInspector>(Physics));
@@ -727,7 +733,7 @@ void RigidBodyRecord::StepSimulation(float DeltaSeconds)
 ThermalBodyRecord::ThermalBodyRecord(std::string InDisplayName)
     : SceneRecordBase(RecordClassification::Physics, "ThermalBody", std::move(InDisplayName))
 {
-    ConfigureEditorPresentation("Flame", "SIMULATION", "ThermalBody");
+    ConfigureEditorPresentation("Thermometer", "Simulation", "ThermalBody", "#e8833a");
 #if FRONTIER_EDITOR
     InspectorRuntime::Instance().BindInspector(QueryToken(), std::make_unique<SpatialInspector>(Spatial));
     InspectorRuntime::Instance().AttachInspector(QueryToken(), std::make_unique<PhysicsInspector>(Physics));
@@ -767,7 +773,7 @@ void ThermalBodyRecord::StepSimulation(float DeltaSeconds)
 ChemicalVesselRecord::ChemicalVesselRecord(std::string InDisplayName)
     : SceneRecordBase(RecordClassification::Physics, "ChemicalVessel", std::move(InDisplayName))
 {
-    ConfigureEditorPresentation("FlaskConical", "SIMULATION", "ChemicalVessel");
+    ConfigureEditorPresentation("Droplets", "Simulation", "ChemicalVessel", "#e8833a");
 #if FRONTIER_EDITOR
     InspectorRuntime::Instance().BindInspector(QueryToken(), std::make_unique<SpatialInspector>(Spatial));
     InspectorRuntime::Instance().AttachInspector(QueryToken(), std::make_unique<ThermalInspector>(Thermal));
@@ -851,13 +857,14 @@ void SceneWorld::RegisterNativeEngineTypes()
                                                       const char*          CategoryLabel,
                                                       RecordClassification Classification,
                                                       const char*          IconName,
-                                                      const char*          GroupName) {
+                                                      const char*          GroupName,
+                                                      const char*          AccentHex) {
         RegisterType({
             TypeId,
             CategoryLabel,
             Classification,
-            [Classification, TypeId, IconName, GroupName](std::string DisplayName) -> std::unique_ptr<SceneRecordBase> {
-                return std::make_unique<RecordType>(Classification, TypeId, std::move(DisplayName), IconName, GroupName);
+            [Classification, TypeId, IconName, GroupName, AccentHex](std::string DisplayName) -> std::unique_ptr<SceneRecordBase> {
+                return std::make_unique<RecordType>(Classification, TypeId, std::move(DisplayName), IconName, GroupName, AccentHex);
             },
         });
     };
@@ -872,27 +879,35 @@ void SceneWorld::RegisterNativeEngineTypes()
     RegisterType({"ChemicalVessel", "Chemistry · Reaction Vessel", RecordClassification::Physics,
                   [](std::string Name) { return std::make_unique<ChemicalVesselRecord>(std::move(Name)); }});
 
+    // 📝 Glyphs, groups and colours as the demo's entity list gives them (InspectorPages.js ConstructEntities,
+    //    EnvironmentInspector.js EnvironmentEntries): Native* names are the environment artwork, the rest lucide strokes.
     // Environment Types
-    RegisterSimple.operator()<SolarRecord>("Solar", "Environment · Solar", RecordClassification::Illumination, "Sun", "ENVIRONMENT");
-    RegisterSimple.operator()<OpticalFlareRecord>("OpticalFlare", "Environment · Optical Flare", RecordClassification::Illumination, "Sparkles", "ENVIRONMENT");
-    RegisterSimple.operator()<AtmosphereRecord>("Atmosphere", "Environment · Atmosphere", RecordClassification::Environment, "Globe", "ENVIRONMENT");
-    RegisterSimple.operator()<CloudRecord>("Clouds", "Environment · Clouds", RecordClassification::Environment, "Cloud", "ENVIRONMENT");
-    RegisterSimple.operator()<StarRecord>("Stars", "Environment · Stars", RecordClassification::Environment, "Star", "ENVIRONMENT");
-    RegisterSimple.operator()<MoonRecord>("Moons", "Environment · Moons", RecordClassification::Environment, "Moon", "ENVIRONMENT");
-    RegisterSimple.operator()<PlanetRecord>("Planet", "Environment · Planet", RecordClassification::Environment, "Planet", "ENVIRONMENT");
-    RegisterSimple.operator()<FogRecord>("Fog", "Environment · Fog", RecordClassification::Environment, "CloudFog", "ENVIRONMENT");
-    RegisterSimple.operator()<LightningRecord>("Lightning", "Environment · Lightning", RecordClassification::Illumination, "Zap", "ENVIRONMENT");
-    RegisterSimple.operator()<WindRecord>("Wind", "Environment · Wind Field", RecordClassification::Environment, "Wind", "ENVIRONMENT");
+    RegisterSimple.operator()<SolarRecord>("Solar", "Environment · Solar", RecordClassification::Illumination, "NativeSun", "Environment", "#e8c27a");
+    RegisterSimple.operator()<OpticalFlareRecord>("OpticalFlare", "Environment · Optical Flare", RecordClassification::Illumination, "NativeFlare", "Environment",
+                                                  "#99aafa");
+    RegisterSimple.operator()<AtmosphereRecord>("Atmosphere", "Environment · Atmosphere", RecordClassification::Environment, "NativeAtmosphere", "Environment",
+                                                "#99aafa");
+    RegisterSimple.operator()<CloudRecord>("Clouds", "Environment · Clouds", RecordClassification::Environment, "NativeClouds", "Environment", "#99aafa");
+    RegisterSimple.operator()<StarRecord>("Stars", "Environment · Stars", RecordClassification::Environment, "NativeStars", "Environment", "#99aafa");
+    RegisterSimple.operator()<MoonRecord>("Moons", "Environment · Moons", RecordClassification::Environment, "NativeMoon", "Environment", "#99aafa");
+    RegisterSimple.operator()<PlanetRecord>("Planet", "Environment · Planet", RecordClassification::Environment, "Orbit", "Environment", "#99aafa");
+    RegisterSimple.operator()<FogRecord>("Fog", "Environment · Fog", RecordClassification::Environment, "NativeFog", "Environment", "#99aafa");
+    RegisterSimple.operator()<LightningRecord>("Lightning", "Environment · Lightning", RecordClassification::Illumination, "Sparkles", "Environment",
+                                               "#a6c7ff");
+    RegisterSimple.operator()<WindRecord>("Wind", "Environment · Wind Field", RecordClassification::Environment, "Wind", "Forcefield", "#a7f3d0");
 
     // Render Engine & Continuum Solver Types
-    RegisterSimple.operator()<DiagnosticsRecord>("Diagnostics", "Render · Diagnostics", RecordClassification::Interface, "Gauge", "RENDER ENGINE");
-    RegisterSimple.operator()<RenderPipelineRecord>("RenderPipeline", "Render · Pipeline", RecordClassification::Illumination, "Sliders", "RENDER ENGINE");
-    RegisterSimple.operator()<DistanceFieldRecord>("DistanceField", "Render · Distance Field", RecordClassification::Geometry, "Layers", "RENDER ENGINE");
-    RegisterSimple.operator()<SurfaceCardRecord>("SurfaceCards", "Render · Surface Cards", RecordClassification::Illumination, "Grid", "RENDER ENGINE");
-    RegisterSimple.operator()<PolygonClusterRecord>("PolygonClusters", "Render · Polygon Clusters", RecordClassification::Geometry, "Boxes", "RENDER ENGINE");
-    RegisterSimple.operator()<FluidPlumeRecord>("FluidPlume", "Solver · Fluid Plume", RecordClassification::Physics, "Flame", "SOLVERS");
-    RegisterSimple.operator()<FractureRecord>("Fracture", "Solver · Voronoi Fracture", RecordClassification::Physics, "Hammer", "SOLVERS");
-    RegisterSimple.operator()<ParticleRecord>("Particles", "Solver · GPU Particles", RecordClassification::Physics, "Sparkles", "SOLVERS");
+    RegisterSimple.operator()<DiagnosticsRecord>("Diagnostics", "Render · Diagnostics", RecordClassification::Interface, "Activity", "Render", "#69dfa5");
+    RegisterSimple.operator()<RenderPipelineRecord>("RenderPipeline", "Render · Pipeline", RecordClassification::Illumination, "Monitor", "Render", "#9fb4d6");
+    RegisterSimple.operator()<DistanceFieldRecord>("DistanceField", "Render · Distance Field", RecordClassification::Geometry, "GridLattice", "Render",
+                                                   "#9fb4d6");
+    RegisterSimple.operator()<SurfaceCardRecord>("SurfaceCards", "Render · Surface Cards", RecordClassification::Illumination, "LayoutGrid", "Render",
+                                                 "#9fb4d6");
+    RegisterSimple.operator()<PolygonClusterRecord>("PolygonClusters", "Render · Polygon Clusters", RecordClassification::Geometry, "Layers", "Render",
+                                                    "#78aaff");
+    RegisterSimple.operator()<FluidPlumeRecord>("FluidPlume", "Solver · Fluid Plume", RecordClassification::Physics, "Flame", "Solvers", "#e8833a");
+    RegisterSimple.operator()<FractureRecord>("Fracture", "Solver · Voronoi Fracture", RecordClassification::Physics, "Hammer", "Solvers", "#8fb3a4");
+    RegisterSimple.operator()<ParticleRecord>("Particles", "Solver · GPU Particles", RecordClassification::Physics, "Sparkles", "Solvers", "#b494f4");
 }
 
 RecordToken SceneWorld::ConstructRecord(std::string_view TypeIdentifier,

@@ -42,8 +42,8 @@ int main(int ArgumentCount, char** Arguments)
         Everest::EverestWorkspace Workspace(EverestRoot);
         Frontier::SceneWorld&     World = Workspace.QuerySceneWorld();
 
-        Require(World.QueryRecordCount() == 26, "Expected 26 dynamic records from Default.levelspace in Shipping.");
-        Require(Frontier::RecordStore::Instance().QueryCount() == 26, "RecordStore count mismatch in Shipping.");
+        Require(World.QueryRecordCount() == 28, "Expected 28 dynamic records from Default.levelspace in Shipping.");
+        Require(Frontier::RecordStore::Instance().QueryCount() == 28, "RecordStore count mismatch in Shipping.");
         // 📝 The four planets of the sky are records of their own (Venus, Jupiter, Mars, Saturn), as in the editor.
         Require(World.FindAllByType("Planet").size() == 4, "Expected four Planet records in Shipping.");
         Require(Workspace.QueryActiveLevelPath().extension() == ".levelspace", "Active level must carry .levelspace extension.");
@@ -79,8 +79,8 @@ int main(int ArgumentCount, char** Arguments)
 
         // Dynamic creation, deletion, and .levelspace round-trip in Shipping.
         const Frontier::RecordToken AddedNode = World.ConstructRecord("SpatialNode", "Temporary Frame");
-        Require(AddedNode.IsValid() && World.QueryRecordCount() == 27, "Dynamic SpatialNode construction failed.");
-        Require(World.DestroyRecord(AddedNode) && World.QueryRecordCount() == 26, "Dynamic SpatialNode destruction failed.");
+        Require(AddedNode.IsValid() && World.QueryRecordCount() == 29, "Dynamic SpatialNode construction failed.");
+        Require(World.DestroyRecord(AddedNode) && World.QueryRecordCount() == 28, "Dynamic SpatialNode destruction failed.");
 
         std::string ErrorDiag;
         const std::filesystem::path BadExtPath = std::filesystem::temp_directory_path() / "InvalidFormat.wrong";
@@ -91,7 +91,7 @@ int main(int ArgumentCount, char** Arguments)
         Frontier::SceneWorld Reloaded;
         Everest::RegisterEverestSimulationTypes(Reloaded);
         Require(Reloaded.LoadLevelSpace(RoundTripPath, &ErrorDiag), "LoadLevelSpace failed in Shipping.");
-        Require(Reloaded.QueryRecordCount() == 26, "Reloaded .levelspace record count mismatch.");
+        Require(Reloaded.QueryRecordCount() == 28, "Reloaded .levelspace record count mismatch.");
         bool SaturnRinged = false;
         const std::vector<const Frontier::SceneRecordBase*> Planets = Reloaded.FindAllByType("Planet");
         for (const Frontier::SceneRecordBase* Entry : Planets)
@@ -104,7 +104,7 @@ int main(int ArgumentCount, char** Arguments)
         Require(Planets.size() == 4 && SaturnRinged, "Planet records did not survive the .levelspace round trip.");
         std::filesystem::remove(RoundTripPath);
 
-        std::cout << "[EverestShippingValidation] Passed (FRONTIER_EDITOR=0, 26 .levelspace records, physics+thermal+chemical verified).\n";
+        std::cout << "[EverestShippingValidation] Passed (FRONTIER_EDITOR=0, 28 .levelspace records, physics+thermal+chemical verified).\n";
         return 0;
     }
     catch (const std::exception& Error)

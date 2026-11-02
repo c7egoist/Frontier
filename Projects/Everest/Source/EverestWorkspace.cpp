@@ -64,6 +64,25 @@ namespace
 
 constexpr double DegreesToRadian = 3.14159265358979323846 / 180.0;
 
+// 📝 The demo's Render entity readouts (InspectorPages.js Meta): renderer and grade, TLAS instances (or the clipmap edge),
+//    surface cards and geometry clusters, published on the records' Outliner rows.
+void PublishRenderReadouts(Frontier::SceneWorld& World, const SceneViewportReadout& Readout)
+{
+    if (!Readout.Presenting) return;
+    auto Publish = [&World](const char* Type, const std::string& Text) {
+        Frontier::SceneRecordBase* Entry = World.FindFirstByType(Type);
+        if (Entry == nullptr) return;
+        Frontier::SceneDirectoryMetadata Meta = Frontier::SceneDirectory::Instance().QueryMetadata(Entry->QueryToken());
+        if (Meta.LiveMetadata == Text) return;
+        Meta.LiveMetadata = Text;
+        (void)Frontier::SceneDirectory::Instance().ConfigureMetadata(Entry->QueryToken(), std::move(Meta));
+    };
+    Publish("RenderPipeline", std::string(Readout.RayTracing ? "RTX \xC2\xB7 PT" : "GTX \xC2\xB7 SDF") + " \xC2\xB7 " + Readout.Quality);
+    Publish("DistanceField", Readout.RayTracing ? std::to_string(Readout.TlasInstances) + " TLAS" : std::to_string(Readout.ClipResolution) + "\xC2\xB3");
+    Publish("SurfaceCards", std::to_string(Readout.SurfaceCards));
+    Publish("PolygonClusters", std::to_string(Readout.GeometryClusters) + " clusters");
+}
+
 // 📝 Unreal Engine 5 editor viewport constants (FEditorViewportClient, FCameraControllerConfig, ULevelEditorViewportSettings
 //    defaults), in metres where Unreal counts centimetres.
 constexpr double MouseSensitivity        = 0.2;      // [°/px] MouseSensitivty: look, orbit and the left-drag turn
@@ -783,6 +802,7 @@ void EverestWorkspace::ConstructViewportSurface()
         Request.DistanceSlice       = Overlays.DistanceSliceVisible && !Overlays.CleanView;
         Image       = PresentSceneViewport(Request);
         LastReadout = Image.Readout;
+        PublishRenderReadouts(QuerySceneWorld(), LastReadout);
     }
     if (Image.Texture != 0)
     {

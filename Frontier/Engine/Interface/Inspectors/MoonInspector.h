@@ -9,6 +9,8 @@
 #include "Engine/Interface/InspectorRuntime.h"
 #include "Engine/Scene/EngineConfigurations.h"
 
+#include <string>
+
 namespace Frontier
 {
 
@@ -31,6 +33,11 @@ class MoonInspector final : public RecordInspector
     [[nodiscard]] uint64_t    QueryRevision() const noexcept override { return Parameters.Revision; }
     void                      EnumerateSwitches(std::vector<InspectorSwitchEntry>& OutSwitches) override;
     void                      ConstructInspector() override;
+    // 📝 The demo's Moons entity: Meta "<lit bodies>/4".
+    [[nodiscard]] std::string QueryDirectoryReadout() const override
+    {
+        return std::to_string(1 + (Parameters.SecondaryMoonEnabled ? 1 : 0)) + "/4";
+    }
 
   private:
     MoonConfiguration& Parameters;

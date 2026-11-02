@@ -84,7 +84,7 @@ HarmonicOscillatorRecord::HarmonicOscillatorRecord(std::string InDisplayName)
     Physics.Mass.MassKilograms          = 4.5f;
     Physics.Mass.DensityKgPerCubicMetre = 7850.0f;
     Physics.Mass.SyncVolumeFromMassAndDensity();
-    ConfigureEditorPresentation("Activity", "PROJECT SIMULATION", "HarmonicOscillator");
+    ConfigureEditorPresentation("Activity", "Project simulation", "HarmonicOscillator", "#69dfa5");
 #if FRONTIER_EDITOR
     Frontier::InspectorRuntime::Instance().BindInspector(QueryToken(), std::make_unique<Frontier::SpatialInspector>(Spatial));
     Frontier::InspectorRuntime::Instance().AttachInspector(QueryToken(), std::make_unique<Frontier::PhysicsInspector>(Physics));

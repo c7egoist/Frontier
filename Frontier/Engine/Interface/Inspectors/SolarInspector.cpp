@@ -241,6 +241,14 @@ void SolarInspector::EnumerateSwitches(std::vector<InspectorSwitchEntry>& OutSwi
     OutSwitches.push_back({"Light Shafts", "Froxel shafts", &Parameters.VolumetricLightShaft});
 }
 
+std::string SolarInspector::QueryDirectoryReadout() const
+{
+    // 📝 InspectorPages.js: `${S.SunElevation.toFixed(0)}°`.
+    char Readout[24] = {};
+    std::snprintf(Readout, sizeof(Readout), "%.0f\xC2\xB0", static_cast<double>(Parameters.ElevationDegrees));
+    return Readout;
+}
+
 void SolarInspector::ConstructInspector()
 {
     const ControlTheme Theme = ControlTheme::ResolveSolar();
@@ -688,6 +696,7 @@ void SolarInspector::ConstructInspector()
 namespace Frontier
 {
 void SolarInspector::EnumerateSwitches(std::vector<InspectorSwitchEntry>&) {}
+std::string SolarInspector::QueryDirectoryReadout() const { return {}; }
 void SolarInspector::ConstructInspector() {}
 void SolarInspector::ResolveDayPath() {}
 } // namespace Frontier

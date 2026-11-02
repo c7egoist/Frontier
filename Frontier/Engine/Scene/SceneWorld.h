@@ -50,7 +50,8 @@ class SceneRecordBase : public RecordEntry
     void AssignParentToken(RecordToken ParentToken);
     void ConfigureEditorPresentation(const char* GlyphIdentifier,
                                      const char* GroupName        = "",
-                                     const char* SubtitleCategory = "");
+                                     const char* SubtitleCategory = "",
+                                     const char* AccentHex        = "");
 
     virtual void SerializeConfiguration(toml::table& OutTable) const = 0;
     virtual void DeserializeConfiguration(const toml::table& InTable) = 0;
@@ -74,10 +75,11 @@ class TypedSceneRecord final : public SceneRecordBase
                      std::string_view     InTypeIdentifier,
                      std::string          InDisplayName,
                      const char*          InIconIdentifier,
-                     const char*          InGroupName = "")
+                     const char*          InGroupName = "",
+                     const char*          InAccentHex = "")
         : SceneRecordBase(InClassification, InTypeIdentifier, std::move(InDisplayName))
     {
-        ConfigureEditorPresentation(InIconIdentifier, InGroupName, InTypeIdentifier.data());
+        ConfigureEditorPresentation(InIconIdentifier, InGroupName, InTypeIdentifier.data(), InAccentHex);
 #if FRONTIER_EDITOR
         if constexpr (!std::is_void_v<InspectorType>)
         {
