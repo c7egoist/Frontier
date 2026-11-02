@@ -150,6 +150,12 @@ ControlTheme ControlTheme::ResolveAtmosphere() noexcept
 {
     // 📝 AtmosphereInspector.css over CloudInspector.css.
     ControlTheme Theme = ResolveCloud();
+    Theme.PageFill         = ResolveCssColour(0x151815FF);   // .atmosphere-observatory background-color
+    Theme.Ink              = ResolveCssColour(0xE8EAE0FF);   // --co-ink
+    Theme.Muted            = ResolveCssColour(0x989E8FFF);   // --co-muted
+    Theme.Accent           = ResolveCssColour(0xD6E3A6FF);   // --co-accent
+    Theme.SliderNumber     = Theme.Ink;
+    Theme.SliderUnit       = Theme.Muted;
     Theme.Eyebrow          = ResolveCssColour(0x8C9783FF);
     Theme.Subtitle         = ResolveCssColour(0x9AA38FFF);
     Theme.ModeFill         = ResolveCssColour(0xD6E3A60C);

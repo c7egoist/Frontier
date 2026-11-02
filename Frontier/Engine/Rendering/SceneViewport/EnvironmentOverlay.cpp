@@ -74,6 +74,11 @@ AtmosphereParameters ResolveAtmosphereParameters(const SceneEnvironment& S)
         Air.MiePhaseG = std::clamp(static_cast<double>(S.Atmosphere.MieAnisotropyG), -0.95, 0.95);
         const double Ozone = std::max(0.0, static_cast<double>(S.Atmosphere.OzoneAbsorptionScale));
         Air.OzoneAbsorption = {Air.OzoneAbsorption.R * Ozone, Air.OzoneAbsorption.G * Ozone, Air.OzoneAbsorption.B * Ozone};
+        // 📝 The page's scale heights and ground albedo (the environment's scalar albedo: the RGB well's luminance).
+        Air.RayleighScaleHeightKm = std::clamp(static_cast<double>(S.Atmosphere.RayleighHeightMetres), 1000.0, 16000.0) / 1000.0;
+        Air.MieScaleHeightKm      = std::clamp(static_cast<double>(S.Atmosphere.MieHeightMetres), 500.0, 8000.0) / 1000.0;
+        Air.GroundAlbedo          = std::clamp(0.2126 * S.Atmosphere.GroundAlbedo[0] + 0.7152 * S.Atmosphere.GroundAlbedo[1] +
+                                                   0.0722 * S.Atmosphere.GroundAlbedo[2], 0.0, 1.0);
         Air.GroundRadiusKm = std::max(100.0, static_cast<double>(S.Atmosphere.PlanetRadiusKm));
         Air.TopRadiusKm    = Air.GroundRadiusKm + std::max(1.0, static_cast<double>(S.Atmosphere.AtmosphereThicknessKm));
     }
@@ -238,7 +243,8 @@ void EnvironmentOverlay::AdjustLight(const IlluminationHost& Host, const SceneEn
     const double               E    = Host.Settings.SolarIlluminance;
 
     // ① the sun through the environment's air, replacing the demo's own 64-step air mass (same sun, same fade)
-    const Vector3 Sun = ResolveAirTransmittance(Air, Light.SunDirection);
+    //    (the Atmosphere page's "Apply air-mass attenuation" off: the sun arrives unattenuated, as the demo's AirMass false)
+    const Vector3 Sun = S.Atmosphere.AirMass ? ResolveAirTransmittance(Air, Light.SunDirection) : Vector3{1.0, 1.0, 1.0};
     for (int Channel = 0; Channel < 3; ++Channel) Light.SolarIlluminance[Channel] = Sun[Channel] * Tint[Channel] * E * Light.SunVisible;
     if (Light.Source == "Sun") Light.Illuminance = Light.SolarIlluminance;
 
@@ -431,6 +437,7 @@ void EnvironmentOverlay::ResolveRealm(const IlluminationHost& Host, const SceneE
     R.ObserverAltitudeKm      = ObserverAltitudeKm;
     R.GroundPlaneY            = 0.0f;
     R.EnableAerialPerspective = S.Atmosphere.Enabled && S.Atmosphere.AerialPerspective;
+    R.TwilightStrength        = 1.15f * std::clamp(S.Atmosphere.HorizonGlow, 0.0f, 3.0f);   // the page's Horizon glow
 
     // ② the sun the illumination refresh just resolved, at the top of the atmosphere, in the environment's radiometric scale
     R.Suns.clear();
@@ -567,6 +574,9 @@ void EnvironmentOverlay::ResolveRealm(const IlluminationHost& Host, const SceneE
     Medium = HashScalar(Medium, Air.MiePhaseG);
     Medium = HashScalar(Medium, Air.OzoneAbsorption);
     Medium = HashScalar(Medium, R.ObserverAltitudeKm);
+    Medium = HashScalar(Medium, Air.RayleighScaleHeightKm);
+    Medium = HashScalar(Medium, Air.MieScaleHeightKm);
+    Medium = HashScalar(Medium, Air.GroundAlbedo);
     uint64_t Sky = Medium;
     for (const RealmSolarSource& Sun : R.Suns)
     {

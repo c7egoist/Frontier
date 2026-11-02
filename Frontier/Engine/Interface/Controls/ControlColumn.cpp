@@ -88,8 +88,9 @@ void ControlColumn::BeginCard(const CardLook& Look, const char* Heading, const c
 
     const float Border = (Look.Border != 0 || Look.TopRule != 0) ? 1.0f : 0.0f;
     const float Sides  = (Look.Border != 0 ? 1.0f : 0.0f) + Look.PaddingSide;
-    Left += Sides * S;
-    Width -= 2.0f * Sides * S;
+    const float Rule   = Look.LeftRule != 0 ? Look.LeftRuleWidth : 0.0f;
+    Left += (Sides + Rule) * S;
+    Width -= (2.0f * Sides + Rule) * S;
     Cursor        = Top.y + (Border + Look.PaddingTop) * S;
     PendingMargin = 0.0f;
 
@@ -109,6 +110,21 @@ void ControlColumn::BeginCard(const CardLook& Look, const char* Heading, const c
                                     Theme.Index, Index, 1.0f * S);
         }
     }
+}
+
+void ControlColumn::PushIndent(float LeftCss, float RightCss)
+{
+    Indents.push_back(ImVec2(Left, Width));
+    Left += LeftCss * Scale;
+    Width = std::max(1.0f, Width - (LeftCss + RightCss) * Scale);
+}
+
+void ControlColumn::PopIndent()
+{
+    if (Indents.empty()) return;
+    Left  = Indents.back().x;
+    Width = Indents.back().y;
+    Indents.pop_back();
 }
 
 ImVec2 ControlColumn::QueryCardOrigin() const noexcept
@@ -139,7 +155,7 @@ void ControlColumn::EndCard()
     if (Look.Fill != 0)
     {
         const int VertexStart = DrawList->VtxBuffer.Size;
-        DrawList->AddRectFilled(Min, Max, Look.Fill, Rounding);
+        DrawList->AddRectFilled(Min, Max, Look.Fill, Rounding, Look.Corners);
         if (Look.FillEnd != 0)
         {
             // 📝 linear-gradient(125deg, Fill, FillEnd 65%): the gradient line through the centre at 125° (0° = up).
@@ -173,6 +189,10 @@ void ControlColumn::EndCard()
     else if (Look.TopRule != 0)
     {
         DrawList->AddLine(ImVec2(Min.x, Min.y + 0.5f * S), ImVec2(Max.x, Min.y + 0.5f * S), Look.TopRule, S);
+    }
+    if (Look.LeftRule != 0)
+    {
+        DrawList->AddRectFilled(Min, ImVec2(Min.x + Look.LeftRuleWidth * S, Max.y), Look.LeftRule);
     }
     DrawList->ChannelsMerge();
 

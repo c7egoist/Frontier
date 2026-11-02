@@ -175,6 +175,15 @@ void SceneViewport::ResolveSky(const SceneEnvironment& S)
     Sky.Atmosphere.Mie      = std::max(0.0, (static_cast<double>(S.Atmosphere.MieTurbidity) - 1.0) / 1.4);
     Sky.Atmosphere.Ozone    = std::max(0.0f, S.Atmosphere.OzoneAbsorptionScale);
     Sky.Atmosphere.MieG     = std::clamp(static_cast<double>(S.Atmosphere.MieAnisotropyG), -0.95, 0.95);
+    // 📝 The rest of the demo's Atmosphere page keys, as the port's own integrator reads them.
+    Sky.Atmosphere.RayleighHeight     = std::clamp(static_cast<double>(S.Atmosphere.RayleighHeightMetres), 1000.0, 16000.0);
+    Sky.Atmosphere.MieHeight          = std::clamp(static_cast<double>(S.Atmosphere.MieHeightMetres), 500.0, 8000.0);
+    Sky.Atmosphere.GroundAlbedo       = {S.Atmosphere.GroundAlbedo[0], S.Atmosphere.GroundAlbedo[1], S.Atmosphere.GroundAlbedo[2]};
+    Sky.Atmosphere.SkyTint            = {S.Atmosphere.SkyTint[0], S.Atmosphere.SkyTint[1], S.Atmosphere.SkyTint[2]};
+    Sky.Atmosphere.HorizonGlow        = std::clamp(static_cast<double>(S.Atmosphere.HorizonGlow), 0.0, 3.0);
+    Sky.Atmosphere.MultipleScattering = S.Atmosphere.MultiScatteringLut;
+    Sky.Atmosphere.AirMass            = S.Atmosphere.AirMass;
+    Sky.Atmosphere.TierSamples        = std::clamp(static_cast<double>(S.Atmosphere.TierSamples), 8.0, 64.0);
 }
 
 bool SceneViewport::Refresh(const ViewportCamera& Camera, const SceneEnvironment& Environment, const ViewportRendering& Rendering, double DeltaSeconds,

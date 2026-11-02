@@ -1,7 +1,7 @@
 /*==========================================================================================================================================
                                                            ATMOSPHEREINSPECTOR.H
 ==========================================================================================================================================*/
-// 🧩 AtmosphereConfiguration: Rayleigh, Mie and ozone scattering.
+// 🧩 The demo's Atmosphere page (AtmosphereInspectorDashboard.js + AtmosphereInspector.css) on the level's AtmosphereConfiguration.
 
 #pragma once
 
@@ -14,10 +14,15 @@ namespace Frontier
 
 #if FRONTIER_EDITOR
 
+class ControlColumn;
+
 //------------------------------------------------------------------------------------------------------------------------
 //                                                    ATMOSPHERE INSPECTOR
 //------------------------------------------------------------------------------------------------------------------------
 
+// 📝 The demo's Atmosphere page, occupying the whole Inspector column: Overview (the density scan, coefficients, the sky-view
+//    capture, the medium recipe), Medium (scale heights, constituents, phase), Light response (transmission, sky & surface,
+//    horizon shaping, integration) and Baking.
 class AtmosphereInspector final : public RecordInspector
 {
   public:
@@ -29,11 +34,25 @@ class AtmosphereInspector final : public RecordInspector
     [[nodiscard]] bool        QueryToggleEnabled() const noexcept override { return Parameters.Enabled; }
     void                      ConfigureToggle(bool Enabled) override { Parameters.Enabled = Enabled; Parameters.AdvanceRevision(); }
     [[nodiscard]] uint64_t    QueryRevision() const noexcept override { return Parameters.Revision; }
+    [[nodiscard]] bool        QueryOccupiesColumn() const noexcept override { return true; }
+    [[nodiscard]] int         QuerySectionCount() const noexcept override { return 4; }
+    void                      ConfigureSection(int Section) noexcept override { ActivePane = Section < 0 ? 0 : (Section > 3 ? 3 : Section); }
     void                      EnumerateSwitches(std::vector<InspectorSwitchEntry>& OutSwitches) override;
     void                      ConstructInspector() override;
 
   private:
+    bool ConstructOverview(ControlColumn& Page);
+    bool ConstructMedium(ControlColumn& Page);
+    bool ConstructLightResponse(ControlColumn& Page);
+    bool ConstructBaking(ControlColumn& Page);
+
     AtmosphereConfiguration& Parameters;
+    int                      ActivePane    = 0;
+    float                    ProbeAltitude = 8000.0f;   // [m] the density scan's diagnostic probe (AtmosphereColumnInstrument.js)
+    int                      ScaleRibbon   = 0;         // the comparator's selected ribbon: 0 Rayleigh, 1 Mie
+    bool                     HorizonOpen   = false;     // the Horizon shaping drawer
+    int                      BakedView     = 0;         // the Baked atmosphere card's view tab
+    bool                     LookupsOpen   = false;     // the GPU lookup tables drawer
 };
 
 #endif // FRONTIER_EDITOR

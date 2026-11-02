@@ -158,6 +158,17 @@ struct AtmosphereConfiguration : RevisionCounter
     float AtmosphereThicknessKm = 80.0f;
     bool  MultiScatteringLut    = true;
     bool  AerialPerspective     = true;
+    // 📝 The demo's remaining Atmosphere page keys (EnvironmentSettings.js defaults).
+    float RayleighHeightMetres  = 8000.0f;                // [m] RayleighHeight, 1000..16000
+    float MieHeightMetres       = 1200.0f;                // [m] MieHeight, 500..8000
+    float GroundAlbedo[3]       = {0.3f, 0.3f, 0.3f};     // [linear] GroundAlbedo
+    float SkyTint[3]            = {1.0f, 1.0f, 1.0f};     // [linear] SkyTint
+    float SkyScale              = 1.0f;                   // [-] SkyScale, 0..3
+    float HorizonGlow           = 1.0f;                   // [-] HorizonGlow, 0..3
+    float WhiteLine             = 1.0f;                   // [-] WhiteLine, 0..3
+    bool  LineAtCivilOnly       = true;                   // LineAtCivilOnly
+    bool  AirMass               = true;                   // AirMass: the sun attenuated by the air
+    uint32_t TierSamples        = 40;                     // [-] TierSamples, 8..64
 };
 
 struct CloudConfiguration : RevisionCounter

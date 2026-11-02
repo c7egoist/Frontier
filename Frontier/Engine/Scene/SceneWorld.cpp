@@ -458,6 +458,18 @@ void AtmosphereRecord::SerializeConfiguration(toml::table& OutTable) const
     OutTable.insert_or_assign("rayleigh", static_cast<double>(Parameters.RayleighScattering));
     OutTable.insert_or_assign("mie_turbidity", static_cast<double>(Parameters.MieTurbidity));
     OutTable.insert_or_assign("ozone", static_cast<double>(Parameters.OzoneAbsorptionScale));
+    OutTable.insert_or_assign("mie_g", static_cast<double>(Parameters.MieAnisotropyG));
+    OutTable.insert_or_assign("rayleigh_height_m", static_cast<double>(Parameters.RayleighHeightMetres));
+    OutTable.insert_or_assign("mie_height_m", static_cast<double>(Parameters.MieHeightMetres));
+    WriteFloat3(OutTable, "ground_albedo", Parameters.GroundAlbedo);
+    WriteFloat3(OutTable, "sky_tint", Parameters.SkyTint);
+    OutTable.insert_or_assign("sky_scale", static_cast<double>(Parameters.SkyScale));
+    OutTable.insert_or_assign("horizon_glow", static_cast<double>(Parameters.HorizonGlow));
+    OutTable.insert_or_assign("white_line", static_cast<double>(Parameters.WhiteLine));
+    OutTable.insert_or_assign("line_at_civil_only", Parameters.LineAtCivilOnly);
+    OutTable.insert_or_assign("air_mass", Parameters.AirMass);
+    OutTable.insert_or_assign("multiple_scattering", Parameters.MultiScatteringLut);
+    OutTable.insert_or_assign("tier_samples", static_cast<int64_t>(Parameters.TierSamples));
 }
 
 template <>
@@ -467,6 +479,18 @@ void AtmosphereRecord::DeserializeConfiguration(const toml::table& InTable)
     Parameters.RayleighScattering   = ReadFloat(InTable, "rayleigh", Parameters.RayleighScattering);
     Parameters.MieTurbidity         = ReadFloat(InTable, "mie_turbidity", Parameters.MieTurbidity);
     Parameters.OzoneAbsorptionScale = ReadFloat(InTable, "ozone", Parameters.OzoneAbsorptionScale);
+    Parameters.MieAnisotropyG       = ReadFloat(InTable, "mie_g", Parameters.MieAnisotropyG);
+    Parameters.RayleighHeightMetres = ReadFloat(InTable, "rayleigh_height_m", Parameters.RayleighHeightMetres);
+    Parameters.MieHeightMetres      = ReadFloat(InTable, "mie_height_m", Parameters.MieHeightMetres);
+    ReadFloat3(InTable, "ground_albedo", Parameters.GroundAlbedo);
+    ReadFloat3(InTable, "sky_tint", Parameters.SkyTint);
+    Parameters.SkyScale             = ReadFloat(InTable, "sky_scale", Parameters.SkyScale);
+    Parameters.HorizonGlow          = ReadFloat(InTable, "horizon_glow", Parameters.HorizonGlow);
+    Parameters.WhiteLine            = ReadFloat(InTable, "white_line", Parameters.WhiteLine);
+    Parameters.LineAtCivilOnly      = ReadBool(InTable, "line_at_civil_only", Parameters.LineAtCivilOnly);
+    Parameters.AirMass              = ReadBool(InTable, "air_mass", Parameters.AirMass);
+    Parameters.MultiScatteringLut   = ReadBool(InTable, "multiple_scattering", Parameters.MultiScatteringLut);
+    Parameters.TierSamples          = ReadUint32(InTable, "tier_samples", Parameters.TierSamples);
     Parameters.AdvanceRevision();
 }
 

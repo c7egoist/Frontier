@@ -500,6 +500,7 @@ void EverestWorkspace::ConstructInterface(double DeltaSeconds)
     if (auto* Solar = dynamic_cast<Frontier::SolarRecord*>(QuerySceneWorld().FindFirstByType("Solar")))
     {
         (void)AdvanceSolarDay(Solar->AccessConfiguration(), DeltaSeconds);
+        Frontier::InspectorRuntime::Instance().PublishSolarElevation(Solar->QueryConfiguration().ElevationDegrees);
     }
     // 📝 A page's "Open … ↗" selects the first record of the type it names.
     if (const std::string Requested = Frontier::InspectorRuntime::Instance().ConsumeSelectionRequest(); !Requested.empty())

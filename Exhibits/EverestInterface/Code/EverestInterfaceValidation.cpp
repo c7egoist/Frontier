@@ -226,7 +226,7 @@ int main(int ArgumentCount, char** Arguments)
 
         // Exhibit 08: the demo's environment Inspector pages, one capture per section tab (InspectorPages ported 1:1).
         int PageCaptures = 0;
-        for (const char* Type : {"Solar"})
+        for (const char* Type : {"Solar", "Atmosphere"})
         {
             SceneRecordBase* PageEntry = World.FindFirstByType(Type);
             Require(PageEntry != nullptr, "Expected every environment page's record in Everest SceneWorld.");

@@ -111,6 +111,11 @@ class InspectorRuntime
     void                                     RegisterSolarPlacementSolver(SolarPlacementSolver Solver) noexcept;
     [[nodiscard]] SolarPlacementSolver       QuerySolarPlacementSolver() const noexcept;
 
+    // 📝 The level's sun elevation, published by the workspace each frame for pages on other records (the Atmosphere
+    //    page's transmission dial reads the demo's S.SunElevation).
+    void                PublishSolarElevation(float Degrees) noexcept { SolarElevation = Degrees; }
+    [[nodiscard]] float QuerySolarElevation() const noexcept { return SolarElevation; }
+
   private:
     friend class RecordEntry;
 
@@ -132,6 +137,7 @@ class InspectorRuntime
     std::string          PendingSelectionType{};
     SolarPlacementSolver SolarSolver    = nullptr;
     float                InterfaceScale = 1.0f;
+    float                SolarElevation = 38.0f;   // [°]
 };
 
 } // namespace Frontier

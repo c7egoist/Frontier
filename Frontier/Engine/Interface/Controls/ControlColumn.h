@@ -39,6 +39,9 @@ struct CardLook
     float  PaddingBottom  = 18.0f;                // [px]
     float  MarginTop    = 0.0f;                 // [px]
     float  MarginBottom   = 12.0f;                // [px]
+    ImDrawFlags Corners = ImDrawFlags_RoundCornersAll;   // the rounded corners (border-radius: 0 R R 0 → right only)
+    ImU32  LeftRule     = 0;                    // a left border only (border-left), drawn over the fill
+    float  LeftRuleWidth = 2.0f;                // [px]
 };
 
 class ControlColumn
@@ -70,6 +73,10 @@ class ControlColumn
     // 📝 The hover tooltip of the last item (a pending control names the native field it waits for).
     static void ConstructTooltip(const char* Tooltip);
 
+    // 📝 Narrows the column by CSS pixels on each side (a block laid out beside a fixed element) until PopIndent.
+    void PushIndent(float LeftCss, float RightCss = 0.0f);
+    void PopIndent();
+
   private:
     struct CardScope
     {
@@ -90,6 +97,7 @@ class ControlColumn
     float                  PendingMargin = 0.0f;
     float                  Lowest        = 0.0f;
     std::vector<CardScope> Cards{};
+    std::vector<ImVec2>    Indents{};   // [screen px] the Left and Width each PushIndent replaced
 };
 
 } // namespace Frontier
