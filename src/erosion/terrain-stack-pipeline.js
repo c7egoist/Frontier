@@ -28,6 +28,17 @@ import {
   createStackLayer,
   ensureEnvironmentLayer,
 } from './terrain-stack-presets.js';
+import {
+  DEFAULT_FROST_PARAMS,
+  createSnowEffectPreset,
+  deriveSnowEffectWeights,
+  normalizeFrostParams,
+  normalizeSnowEffects,
+} from './frost-weathering.js';
+import {
+  normalizeStrataColumn,
+  strataColumnThickness,
+} from './stratigraphic-column.js';
 
 const PART_TEX_W = 256;
 const PART_TEX_H = 128;
@@ -101,6 +112,22 @@ const MASK_MODE_CODE = {
   noise: 5,
 };
 
+const SNOW_LIVE_SCALARS = [
+  'snowEffectPreset',
+  ...Object.keys(DEFAULT_FROST_PARAMS),
+];
+
+function snowEffectsForLayer(layer) {
+  // An explicit array is authoritative even when empty: deleting every
+  // effect (or editing a snowpack-only stack into "custom") must not
+  // resurrect the balanced preset. Only pre-feature layers with no array
+  // at all fall back to their named preset.
+  if (Array.isArray(layer?.params?.snowEffects)) {
+    return normalizeSnowEffects(layer.params.snowEffects);
+  }
+  return createSnowEffectPreset(layer?.params?.snowEffectPreset ?? DEFAULT_EROSION_PARAMS.snowEffectPreset).effects;
+}
+
 export const SIM_PROCESS_DEFS = [
   { id: 'hydraulic', flag: 'simHydraulicPlaying', label: 'Rain & runoff', short: 'Rain', layerTypes: ['hydraulic-erosion'] },
   { id: 'cryo', flag: 'simCryoPlaying', label: 'Snow & glaciers', short: 'Snow', layerTypes: ['aeolian-glacial'] },
@@ -121,7 +148,7 @@ export class TerrainStackPipeline {
     this.projectTitle = initPreset.name;
     this.paletteId = initPreset.palette ?? 1;
     this.fabricMode = initPreset.fabricMode ?? 0;
-    this.shadingMode = 0; // 0=Derived Geology, 1=AO & Protrusions, 2=Hardness, 3=Flow, 4=Sedimentation, 5=Active Mask B&W, 6=Clay, 7=Cryosphere, 8=Hydrology
+    this.shadingMode = 0; // 0=Derived Geology, 1=AO & Protrusions, 2=Hardness, 3=Flow, 4=Sedimentation, 5=Active Mask B&W, 6=Clay, 7=Cryosphere, 8=Hydrology, 9=Mineral, 10=Frost damage
     this.authorTool = 'navigate'; // 'navigate' | 'sculpt-add' | 'sculpt-remove' | 'sculpt-smooth' | 'cave-carve' | 'cave-fill' | 'spline-edit'
     this.layers = [];
     this.selectedLayerId = null;
@@ -480,7 +507,11 @@ export class TerrainStackPipeline {
       } else if (layer.type === 'wind-erosion') {
         if ((p.windSpeed ?? 0) > 0.03 && (p.windErosionRate ?? DEFAULT_EROSION_PARAMS.windErosionRate) > 0.001) avail.wind = true;
       } else if (layer.type === 'aeolian-glacial') {
-        if ((p.snowfallRate ?? 0) > 0.015 || (p.glacierStrength ?? 0) > 0.015) avail.cryo = true;
+        const frostWeights = deriveSnowEffectWeights(snowEffectsForLayer(layer)).weights;
+        const frostActive = (frostWeights.segregation + frostWeights.volumetric
+          + frostWeights.nivation + frostWeights.frostCreep + frostWeights.avalanche
+          + frostWeights.glacierPlucking + frostWeights.legacy) > 0.001;
+        if ((p.snowfallRate ?? 0) > 0.015 || (p.glacierStrength ?? 0) > 0.015 || frostActive) avail.cryo = true;
         // Legacy combined stacks may still drive wind from the snow layer,
         // but a dedicated Wind Erosion layer is the sole wind authority.
         if (!hasDedicatedWind && (p.windSpeed ?? 0) > 0.03) avail.wind = true;
@@ -512,6 +543,31 @@ export class TerrainStackPipeline {
     ];
     for (const key of keys) ep[key] = p[key] ?? DEFAULT_EROSION_PARAMS[key];
     ep.simWindPlaying = ep.windSpeed > 0.03 && ep.windErosionRate > 0.001;
+    this.pauseSimulationForEdit(reason);
+    this._applySimulationPlayback(true);
+    return true;
+  }
+
+  /**
+   * Applies Snow/frost effect-stack edits to the live engine without
+   * rebuilding terrain or clearing accumulated sub-resolution cracks.
+   * Only the topmost enabled Snow layer is the live authority (layers[0]
+   * side first), matching the Wind authority rule. Snowpack amount and
+   * bake count are deliberately NOT live: they rebuild/seeds on evaluate.
+   */
+  applyLiveSnowLayerParams(layer, reason = 'Snow / frost settings changed') {
+    if (!layer || layer.type !== 'aeolian-glacial' || !layer.enabled) return false;
+    const authority = this.layers.find((l) => l.enabled && l.type === 'aeolian-glacial');
+    if (!authority || authority.id !== layer.id) return false;
+    const ep = this.engine.params;
+    const p = layer.params || {};
+    for (const key of SNOW_LIVE_SCALARS) {
+      if (Object.prototype.hasOwnProperty.call(p, key)) ep[key] = p[key];
+      else if (Object.prototype.hasOwnProperty.call(DEFAULT_EROSION_PARAMS, key)) ep[key] = DEFAULT_EROSION_PARAMS[key];
+      else if (Object.prototype.hasOwnProperty.call(DEFAULT_FROST_PARAMS, key)) ep[key] = DEFAULT_FROST_PARAMS[key];
+    }
+    Object.assign(ep, normalizeFrostParams(ep));
+    ep.snowEffects = snowEffectsForLayer(layer);
     this.pauseSimulationForEdit(reason);
     this._applySimulationPlayback(true);
     return true;
@@ -757,6 +813,9 @@ export class TerrainStackPipeline {
     gl.uniform4fv(gl.getUniformLocation(this.progStackOp, 'uParam3'), u3);
     gl.uniform4fv(gl.getUniformLocation(this.progStackOp, 'uMaskCfg1'), cfg1);
     gl.uniform4fv(gl.getUniformLocation(this.progStackOp, 'uMaskCfg2'), cfg2);
+    // No-ops safely on programs without the uniforms (mock links return null
+    // locations). opKind 2 consumes this for real variable-bed benching.
+    this.engine._bindStrataColumnUniforms(this.progStackOp);
 
     if (opKind === 6 || opKind === 7) {
       const pts = Array.isArray(layer.params.points) ? layer.params.points : [];
@@ -896,6 +955,12 @@ export class TerrainStackPipeline {
     ep.windCurtainHeight = DEFAULT_EROSION_PARAMS.windCurtainHeight;
     ep.windStreamlining = DEFAULT_EROSION_PARAMS.windStreamlining;
     ep.windFluting = DEFAULT_EROSION_PARAMS.windFluting;
+    // Authored stratigraphy/frost are opt-in stack state. Reset them before
+    // the bottom-up walk so deleting/disabling those layers actually removes
+    // the measured section and cannot leave damage acting invisibly.
+    ep.strataColumnEnabled = false;
+    ep.snowEffects = [];
+    this.engine._clearFrostWeathering();
 
     gl.disable(gl.DEPTH_TEST);
     gl.disable(gl.BLEND);
@@ -990,6 +1055,15 @@ export class TerrainStackPipeline {
         ep.strataDip = p.strataDip ?? DEFAULT_EROSION_PARAMS.strataDip;
         ep.strataStrike = p.strataStrike ?? DEFAULT_EROSION_PARAMS.strataStrike;
         ep.faultWeakness = p.faultWeakness ?? DEFAULT_EROSION_PARAMS.faultWeakness;
+        // Authored measured section: bottom->top non-repeating beds. The last
+        // evaluated (topmost) enabled section owns live hardness/mineral/frost
+        // lookup, while each stratigraphic layer still accumulates its bake.
+        ep.strataColumnEnabled = (p.strataColumnEnabled ?? DEFAULT_EROSION_PARAMS.strataColumnEnabled) !== false;
+        ep.strataColumnPreset = p.strataColumnPreset ?? DEFAULT_EROSION_PARAMS.strataColumnPreset;
+        ep.strataColumnBaseM = p.strataColumnBaseM ?? DEFAULT_EROSION_PARAMS.strataColumnBaseM;
+        ep.strataColumnColorStrength = p.strataColumnColorStrength ?? DEFAULT_EROSION_PARAMS.strataColumnColorStrength;
+        ep.strataBeds = Array.isArray(p.strataBeds) ? normalizeStrataColumn(p.strataBeds) : [];
+        if (!ep.strataBeds.length) ep.strataColumnEnabled = false;
 
         const terrace = p.terraceCarve ?? 0.0;
         const overhang = p.ledgeOverhang ?? 0.0;
@@ -1000,7 +1074,7 @@ export class TerrainStackPipeline {
             layer,
             [ep.strataFreq, terrace, ep.strataStrength, ep.strataDip],
             [ep.strataStrike, 0.25, overhang, p.opacity ?? 1.0],
-            [p.seed ?? ep.seed, 0, 0, 0],
+            [p.seed ?? ep.seed, ep.strataColumnEnabled ? 1 : 0, ep.strataColumnBaseM ?? 0, strataColumnThickness(ep.strataBeds)],
             maxRelief
           );
         }
@@ -1256,6 +1330,13 @@ export class TerrainStackPipeline {
         ep.snowfallRate = p.snowfallRate ?? 0.0;
         ep.glacierStrength = p.glacierStrength ?? 0.0;
         ep.iceMeltRate = p.iceMeltRate ?? DEFAULT_EROSION_PARAMS.iceMeltRate;
+        // Snow owns a real effect stack (segregation / freeze-thaw / nivation
+        // / creep / avalanche / plucking / explicit legacy), plus global
+        // climate/saturation/release scalars. Clone-normalise it so engine
+        // runs can never mutate the document layer by accident.
+        ep.snowEffects = snowEffectsForLayer(layer);
+        Object.assign(ep, normalizeFrostParams(p));
+        ep.snowEffectPreset = p.snowEffectPreset ?? DEFAULT_EROSION_PARAMS.snowEffectPreset;
         if (!this._hasDedicatedWindLayer()) {
           ep.windSpeed = p.windSpeed ?? 0.0;
           ep.windAzimuth = p.windAzimuth ?? DEFAULT_EROSION_PARAMS.windAzimuth;
@@ -1270,6 +1351,10 @@ export class TerrainStackPipeline {
 
         // Seed snowpack & valley glaciers (`progInitSnow`) on the terrain constructed up to this stage!
         this.engine.seedInitialSnow();
+        // Seed only SUB-RESOLUTION frost damage/cracks + pore saturation.
+        // No geometry changes here: visible pitting waits for thresholded
+        // detached material during simulation steps.
+        this.engine.seedFrostWeathering();
 
         const bakePasses = Math.max(0, Math.min(64, Math.round((p.bakePasses ?? 0) * (fastPreview ? 0.5 : 1.0))));
         if (bakePasses > 0) {
@@ -1428,6 +1513,7 @@ export class TerrainStackPipeline {
       case 7: return 5; // Cryosphere (Snow & Glacier Ice)
       case 8: return 6; // 2.5D Hydrology & Basins
       case 9: return 9; // Mineral Strata & Dissolved Stain
+      case 10: return 10; // Frost damage / sub-resolution cracks (diagnostic only)
       default: return 0;
     }
   }
@@ -1497,6 +1583,7 @@ export class TerrainStackPipeline {
     this.engine._bindTex(this.engine.progTerrainRender, 'uMaskPreviewTex', this.maskTex, 6);
     this.engine._bindTex(this.engine.progTerrainRender, 'uChemTex', this.engine.chemTex[this.engine.chemIdx], 7);
     this.engine._bindTex(this.engine.progTerrainRender, 'uMineralTex', this.engine.mineralTex[this.engine.mineralIdx], 8);
+    this.engine._bindTex(this.engine.progTerrainRender, 'uFrostTex', this.engine.frostTex[this.engine.frostIdx], 9);
 
     gl.uniformMatrix4fv(gl.getUniformLocation(this.engine.progTerrainRender, 'uViewProj'), false, viewProj);
     gl.uniform3fv(gl.getUniformLocation(this.engine.progTerrainRender, 'uCameraPos'), eye);
@@ -1511,6 +1598,7 @@ export class TerrainStackPipeline {
     gl.uniform4fv(gl.getUniformLocation(this.engine.progTerrainRender, 'uLayerVis'), layerVisVec);
     gl.uniform4fv(gl.getUniformLocation(this.engine.progTerrainRender, 'uHardnessParams'), hardnessVec);
     gl.uniform4fv(gl.getUniformLocation(this.engine.progTerrainRender, 'uStrataOrient'), strataVec);
+    this.engine._bindStrataColumnUniforms(this.engine.progTerrainRender);
 
     const sel = this.getSelectedLayer();
     const isSculptTool = this.authorTool.startsWith('sculpt-') || this.authorTool.startsWith('cave-');
@@ -1579,6 +1667,7 @@ export class TerrainStackPipeline {
       gl.uniform4fv(gl.getUniformLocation(this.engine.progRockInstance, 'uLayerVis'), layerVisVec);
       gl.uniform4fv(gl.getUniformLocation(this.engine.progRockInstance, 'uHardnessParams'), hardnessVec);
       gl.uniform4fv(gl.getUniformLocation(this.engine.progRockInstance, 'uStrataOrient'), strataVec);
+      this.engine._bindStrataColumnUniforms(this.engine.progRockInstance);
       gl.uniform4fv(gl.getUniformLocation(this.engine.progRockInstance, 'uClimate'), climate.snowVec);
       gl.uniform1i(gl.getUniformLocation(this.engine.progRockInstance, 'uViewMode'), viewCode === 8 ? 0 : viewCode);
       gl.uniform1i(gl.getUniformLocation(this.engine.progRockInstance, 'uMaterialTheme'), this.engine._themeCode());

@@ -4220,3 +4220,428 @@ summary:focus-visible {
   margin-top: 1px;
   color: #ffd166;
 }
+
+/* Snow frost research model + authored geological-column editors.
+   These are Inspector controls, so they stay rounded; only real Outliner
+   layer-stack entries remain squared. */
+.tp-text-input {
+  width: 100%;
+  min-width: 0;
+  height: 27px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.24);
+  color: #f0f5f1;
+  padding: 0 10px;
+  font-size: 11px;
+  outline: none;
+}
+
+.tp-text-input:focus {
+  border-color: rgba(125, 211, 252, 0.62);
+  box-shadow: 0 0 0 2px rgba(125, 211, 252, 0.12);
+}
+
+.tp-frost-diagnostics,
+.tp-bed-derived-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.tp-frost-diagnostics > div,
+.tp-bed-derived-grid > div {
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 13px;
+  background: rgba(0, 0, 0, 0.18);
+  padding: 7px 8px;
+}
+
+.tp-frost-diagnostics span,
+.tp-bed-derived-grid span {
+  display: block;
+  color: #8fa298;
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.tp-frost-diagnostics strong,
+.tp-bed-derived-grid strong {
+  display: block;
+  margin-top: 2px;
+  color: #eaf7ff;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.tp-frost-diagnostics small {
+  display: block;
+  margin-top: 2px;
+  color: #7f8d84;
+  font-size: 8.8px;
+  line-height: 1.3;
+}
+
+.tp-frost-weight-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.tp-frost-weight-chip {
+  border: 1px solid rgba(125, 211, 252, 0.28);
+  border-radius: 999px;
+  background: rgba(125, 211, 252, 0.09);
+  color: #c9ecff;
+  padding: 3px 7px;
+  font-size: 9px;
+  font-weight: 650;
+}
+
+.tp-frost-weight-chip.muted {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  color: #9aa79e;
+}
+
+.tp-frost-globals {
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  padding-top: 8px;
+}
+
+.tp-frost-globals > summary {
+  cursor: pointer;
+  color: #dff3ff;
+  font-size: 11px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.tp-frost-globals > .tp-control-row + .tp-control-row {
+  margin-top: 7px;
+}
+
+.tp-effect-add-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.tp-snow-effect-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.tp-snow-effect-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 13px;
+  background: rgba(0, 0, 0, 0.16);
+  padding: 5px;
+}
+
+.tp-snow-effect-row.selected {
+  border-color: rgba(125, 211, 252, 0.48);
+  background: rgba(125, 211, 252, 0.08);
+}
+
+.tp-snow-effect-row.disabled {
+  opacity: 0.58;
+}
+
+.tp-effect-main {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: #edf4ef;
+  cursor: pointer;
+  padding: 3px 4px;
+  text-align: left;
+}
+
+.tp-effect-main:hover {
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.tp-effect-dot {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.07);
+}
+
+.tp-effect-dot.large {
+  width: 13px;
+  height: 13px;
+}
+
+.tp-effect-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.tp-effect-copy strong {
+  overflow: hidden;
+  font-size: 10.5px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tp-effect-copy small,
+.tp-selected-effect-head small,
+.tp-selected-bed-head small {
+  color: #85948a;
+  font-size: 8.8px;
+  line-height: 1.25;
+}
+
+.tp-effect-enable {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #aebbb2;
+  font-size: 9px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.tp-effect-enable input {
+  accent-color: #7dd3fc;
+}
+
+.tp-effect-row-actions {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.tp-effect-row-actions button {
+  width: 22px;
+  height: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.035);
+  color: #cbd8cf;
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  padding: 0;
+}
+
+.tp-effect-row-actions button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.09);
+  color: #fff;
+}
+
+.tp-effect-row-actions button.danger:hover:not(:disabled) {
+  border-color: rgba(253, 164, 175, 0.55);
+  color: #fecdd3;
+}
+
+.tp-effect-row-actions button:disabled {
+  opacity: 0.28;
+  cursor: default;
+}
+
+.tp-selected-effect-panel,
+.tp-selected-bed-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.025);
+  padding: 10px;
+}
+
+.tp-selected-effect-head,
+.tp-selected-bed-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tp-selected-effect-head > div,
+.tp-selected-bed-head > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.tp-selected-effect-head strong,
+.tp-selected-bed-head strong {
+  color: #f1f7f2;
+  font-size: 11.5px;
+}
+
+.tp-empty-inline {
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  color: #8d9b91;
+  padding: 9px;
+  font-size: 10px;
+  text-align: center;
+}
+
+.tp-strata-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.tp-strata-summary > span {
+  border: 1px solid rgba(232, 208, 106, 0.24);
+  border-radius: 999px;
+  background: rgba(232, 208, 106, 0.07);
+  color: #e9dfbd;
+  padding: 3px 7px;
+  font-size: 9px;
+}
+
+.tp-strata-column-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  color: #829187;
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.tp-strata-column {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.2);
+  padding: 5px;
+}
+
+.tp-strata-column.inactive {
+  opacity: 0.52;
+  filter: saturate(0.55);
+}
+
+.tp-strata-bed-row {
+  width: 100%;
+  min-height: 20px;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid rgba(0, 0, 0, 0.22);
+  border-radius: 8px;
+  background: var(--bed-color);
+  color: var(--bed-text);
+  cursor: pointer;
+  padding: 3px 7px;
+  text-align: left;
+}
+
+.tp-strata-bed-row:hover {
+  filter: brightness(1.07);
+}
+
+.tp-strata-bed-row.selected {
+  outline: 2px solid rgba(255, 255, 255, 0.88);
+  outline-offset: -2px;
+  box-shadow: 0 0 0 3px rgba(232, 208, 106, 0.32);
+}
+
+.tp-bed-order {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.22);
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.tp-bed-name {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 10px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tp-bed-meta {
+  font-size: 9px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.82;
+  white-space: nowrap;
+}
+
+.tp-bed-swatch {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 50%;
+}
+
+.tp-bed-color-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 92px;
+  align-items: end;
+  gap: 7px;
+}
+
+.tp-bed-color-row label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #c3ccc5;
+  font-size: 10.5px;
+}
+
+.tp-bed-color-row input[type="color"] {
+  width: 48px;
+  height: 27px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.22);
+  padding: 2px;
+  cursor: pointer;
+}
+
+@media (max-width: 760px) {
+  .tp-frost-diagnostics,
+  .tp-bed-derived-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .tp-snow-effect-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .tp-effect-row-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+  }
+}

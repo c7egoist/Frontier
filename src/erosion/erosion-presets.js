@@ -3,6 +3,8 @@
  * GPU Particle Erosion, Glaciation & Sedimentation Studio.
  */
 
+import { DEFAULT_FROST_PARAMS } from './frost-weathering.js';
+
 export const EROSION_LANDSCAPES = {
   'icelandic-highlands': {
     id: 'icelandic-highlands',
@@ -764,6 +766,12 @@ export const DEFAULT_EROSION_PARAMS = {
   snowline: 0.42,         // Normalized elevation of freezing snowline [0.15 .. 1.0]
   snowfallRate: 0.82,     // Blizzard snow accumulation intensity
   glacierStrength: 0.74,  // Glacial ice U-valley plucking & moraine bulldozing
+  // Snow now owns an ordered, stackable process list (segregation ice,
+  // volumetric freeze-thaw, nivation, frost creep, avalanche scour and
+  // glacier plucking). The array itself is authored on the Snow layer; these
+  // are the shared physical climate / sub-resolution crack controls.
+  snowEffectPreset: 'research-balanced',
+  ...DEFAULT_FROST_PARAMS,
   windSpeed: 0.58,        // Aeolian saltation & snow-drift speed
   windAzimuth: 35,        // Prevailing wind direction (degrees, blown toward)
   // Slow directional regime: weather systems persist in one sector, then
@@ -807,6 +815,14 @@ export const DEFAULT_EROSION_PARAMS = {
   strataDip: 8.0,
   strataStrike: 22.0,
   faultWeakness: 0.64,
+  // Optional authored measured section. When enabled on a Stratigraphic
+  // Beds layer, its ordered bottom-to-top beds replace the legacy periodic
+  // sine hardness/colour cycle; outside the section the bottom/top bed is
+  // clamped rather than repeated.
+  strataColumnEnabled: false,
+  strataColumnPreset: 'rainbow-andes',
+  strataColumnBaseM: 0.0,
+  strataColumnColorStrength: 0.88,
 
   // Detachment, Transport & Sedimentation Controls
   erosionStrength: 0.70,

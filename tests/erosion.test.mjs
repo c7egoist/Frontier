@@ -55,6 +55,30 @@ import {
 import { ErosionLayerStackUI } from '../src/erosion/layer-stack-ui.js';
 import * as Shaders from '../src/erosion/erosion-shaders.js';
 import * as PipelineShaders from '../src/erosion/pipeline-shaders.js';
+import {
+  DEFAULT_FROST_PARAMS,
+  SNOW_EFFECT_PRESETS,
+  SNOW_EFFECT_TYPES,
+  advanceFrostState,
+  createSnowEffect,
+  createSnowEffectPreset,
+  deriveSnowEffectWeights,
+  estimateAnnualFrostWindow,
+  normalizeFrostParams,
+  normalizeSnowEffects,
+  visibleCrackThresholdMm,
+} from '../src/erosion/frost-weathering.js';
+import {
+  MAX_STRATA_BEDS,
+  STRATA_COLUMN_PRESETS,
+  STRATA_LITHOLOGIES,
+  createStrataColumnPreset,
+  deriveBedProperties,
+  normalizeStrataColumn,
+  packStrataColumnUniforms,
+  sampleStrataColumn,
+  strataColumnThickness,
+} from '../src/erosion/stratigraphic-column.js';
 import { checkGlslScopes } from './glsl-scope-check.mjs';
 
 const ALL_SHADER_EXPORTS = [
@@ -68,6 +92,7 @@ const ALL_SHADER_EXPORTS = [
   'WATER_FLUX_FRAG',
   'TERRAIN_INTEGRATE_FRAG',
   'SNOW_CRYO_FRAG',
+  'FROST_DAMAGE_FRAG',
   'THERMAL_TALUS_FRAG',
   'CHEM_WEATHER_FRAG',
   'TERRAIN_RENDER_VERT',
@@ -811,10 +836,10 @@ test('Bottom-to-top Terrain Stack Pipeline shaders, uniform bindings, and non-co
   }
 
   // Verify all 19 canonical EROSION_LANDSCAPES recipes plus the curated
-  // Utah and standalone spline-authoring manual stacks build valid
-  // bottom-up stacks anchored by base-landform.
+  // Utah, standalone spline-authoring and frost/strata manual stacks build
+  // valid bottom-up stacks anchored by base-landform.
   const presetKeys = Object.keys(TERRAIN_STACK_PRESETS);
-  assert.equal(presetKeys.length, 22);
+  assert.equal(presetKeys.length, 24);
   for (const pk of presetKeys) {
     const stackPreset = TERRAIN_STACK_PRESETS[pk];
     const isManualRecipe = stackPreset.manualRecipe === true;
@@ -1924,13 +1949,13 @@ test('Chemical weathering is a terrain-wide simulation layer with multiple react
   }
   assert.equal(DEFAULT_EROSION_PARAMS.simChemicalPlaying, true);
 
+  const manualChemicalShowcases = new Set(['frost-pitted-rainbow-range', 'nivation-cirque-strata']);
   for (const [presetId, preset] of Object.entries(TERRAIN_STACK_PRESETS)) {
     const chemLayers = preset.layers().filter((l) => l.type === 'chemical-weathering');
-    assert.equal(
-      chemLayers.length,
-      presetId === 'lunar-mare-craters' || preset.manualRecipe ? 0 : 1,
-      `${presetId} chemical layer count`
-    );
+    const expected = manualChemicalShowcases.has(presetId)
+      ? 1
+      : (presetId === 'lunar-mare-craters' || preset.manualRecipe ? 0 : 1);
+    assert.equal(chemLayers.length, expected, `${presetId} chemical layer count`);
   }
 
   // Distinct reaction families live in the persistent terrain state pass.
@@ -2606,4 +2631,257 @@ test('Terrain resolution is a safe boot-time quality option and the redesigned U
     'Camera framing controls live in the viewport header');
   assert.ok(htmlSrc.includes('>Outliner</h1>') && htmlSrc.includes('id="tp-left-tab-label">Outliner<'),
     'Left dock is the Outliner, matching the Exhibits editor');
+});
+
+test('Snow frost cracks incubate below terrain resolution before thresholded pitting releases debris', () => {
+  assert.equal(Object.keys(SNOW_EFFECT_TYPES).length, 7);
+  assert.equal(Object.keys(SNOW_EFFECT_PRESETS).length, 7);
+  assert.deepEqual(normalizeFrostParams({}), normalizeFrostParams(DEFAULT_FROST_PARAMS));
+
+  const balanced = createSnowEffectPreset('research-balanced');
+  const balancedWeights = deriveSnowEffectWeights(balanced.effects);
+  assert.ok(balancedWeights.weights.segregation > 0 && balancedWeights.weights.frostCreep > 0);
+  assert.equal(balancedWeights.weights.legacy, 0, 'Research presets must not secretly use instant in-place conversion');
+  assert.equal(createSnowEffectPreset('snowpack-only').effects.length, 0);
+  assert.ok(deriveSnowEffectWeights(createSnowEffectPreset('legacy-instant').effects).weights.legacy > 0);
+
+  // Duplicates of one process add (capped), and per-process parameters are
+  // intensity-weighted rather than the last entry silently replacing the rest.
+  const stacked = deriveSnowEffectWeights([
+    createSnowEffect('segregation-ice', { intensity: 1.5, windowLowC: -10, windowHighC: -4 }),
+    createSnowEffect('segregation-ice', { intensity: 1.5, windowLowC: -6, windowHighC: -2 }),
+    createSnowEffect('frost-creep-solifluction', { enabled: false, intensity: 2 }),
+  ]);
+  assert.equal(stacked.weights.segregation, 2.5);
+  assert.equal(stacked.params.windowLowC, -8);
+  assert.equal(stacked.params.windowHighC, -3);
+  assert.equal(stacked.weights.frostCreep, 0);
+
+  const duplicateIds = normalizeSnowEffects([
+    createSnowEffect('segregation-ice', { id: 'same:id' }),
+    createSnowEffect('frost-creep-solifluction', { id: 'same:id' }),
+  ]);
+  assert.equal(new Set(duplicateIds.map((effect) => effect.id)).size, 2, 'Restored duplicate Snow-effect ids are made unique');
+  assert.ok(duplicateIds.every((effect) => !effect.id.includes(':')), 'Snow-effect ids stay dataset-safe');
+
+  // A visible aperture is resolution-aware: a 1 m cell cannot honestly show
+  // a requested 2 mm crack, while the stored state can still carry it.
+  assert.equal(visibleCrackThresholdMm(1, 2), 8);
+  assert.equal(visibleCrackThresholdMm(0.5, 12), 12);
+
+  const showcaseParams = {
+    ...createSnowEffectPreset('segregation-pitting').globals,
+    frostYearsPerStep: 2.6,
+    frostInitialDamage: 0.42,
+  };
+  const env = {
+    snowDepthM: 0.35,
+    meltM: 0.12,
+    slope: 0.45,
+    sedimentM: 0.01,
+    elevationNorm: 0.78,
+    snowlineNorm: 0.38,
+    snowMargin: 0.8,
+    hollow: 0.4,
+    cellSizeM: 1,
+  };
+  const porousFracturedSandstone = { hardness: 0.48, porosity: 0.22, fracture: 0.72, clay: 0.18 };
+  let state = { damage: 0.08, crackMm: 0.04, saturation: 0.72, detachedM: 0 };
+  let firstReleaseStep = -1;
+  let cumulativeRelease = 0;
+  for (let step = 0; step < 240; step++) {
+    state = advanceFrostState(state, env, showcaseParams, createSnowEffectPreset('segregation-pitting').effects, porousFracturedSandstone);
+    assert.ok(Number.isFinite(state.damage) && Number.isFinite(state.crackMm) && Number.isFinite(state.detachedM));
+    if (state.detachedM > 0 && firstReleaseStep < 0) firstReleaseStep = step;
+    cumulativeRelease += state.detachedM;
+  }
+  assert.ok(firstReleaseStep > 2, `Pitting must incubate before release, got first release at step ${firstReleaseStep}`);
+  assert.ok(cumulativeRelease > 0.02 && cumulativeRelease < 2, `Showcase release should be finite and visible, got ${cumulativeRelease}`);
+
+  // Dry pores and hard, tight, unfractured rock are strongly protected.
+  let dryState = { damage: 0.08, crackMm: 0.04, saturation: 0.1, detachedM: 0 };
+  for (let step = 0; step < 80; step++) {
+    dryState = advanceFrostState(
+      dryState,
+      { ...env, meltM: 0, snowDepthM: 0.05 },
+      { ...showcaseParams, frostMoisture: 0.04 },
+      createSnowEffectPreset('segregation-pitting').effects,
+      { hardness: 0.9, porosity: 0.015, fracture: 0.08, clay: 0.02 },
+    );
+  }
+  assert.ok(dryState.damage < state.damage && dryState.detachedM === 0, 'Dry crystalline rock must not frost-pit like wet fractured sandstone');
+
+  // Deep snow is insulation, not a universal frost accelerator.
+  const exposedDiagnostic = estimateAnnualFrostWindow(showcaseParams, 0.03);
+  const insulatedDiagnostic = estimateAnnualFrostWindow(showcaseParams, 1.2);
+  assert.ok(insulatedDiagnostic.amplitudeC < exposedDiagnostic.amplitudeC * 0.65);
+  assert.ok(insulatedDiagnostic.meanC > exposedDiagnostic.meanC);
+
+  // GPU contract: a persistent RGBA frost state, thresholded A-channel
+  // release consumed by Integrate, and separate pairwise export in Talus.
+  for (const token of ['layout(location = 0) out vec4 outFrost', 'uFrostRelease', 'visibleThresholdMm', 'detachedM']) {
+    assert.ok(Shaders.FROST_DAMAGE_FRAG.includes(token), `Frost damage shader missing ${token}`);
+  }
+  for (const token of ['uniform sampler2D uFrostTex', 'frostC.a', 'debrisRetention', 'legacyRate']) {
+    assert.ok(Shaders.TERRAIN_INTEGRATE_FRAG.includes(token), `Integrate frost contract missing ${token}`);
+  }
+  for (const token of ['creepDrive', 'avalancheDrive', 'tillDrive', 'uFrostTalusA']) {
+    assert.ok(Shaders.THERMAL_TALUS_FRAG.includes(token), `Talus frost export missing ${token}`);
+  }
+  const engineSrc = fs.readFileSync(new URL('../src/erosion/gpu-erosion-engine.js', import.meta.url), 'utf8');
+  const pipelineSrc = fs.readFileSync(new URL('../src/erosion/terrain-stack-pipeline.js', import.meta.url), 'utf8');
+  const uiSrc = fs.readFileSync(new URL('../src/erosion/layer-stack-ui.js', import.meta.url), 'utf8');
+  for (const token of ['progFrostDamage', 'frostTex', 'fboFrost', 'seedFrostWeathering', "'uFrostTex', this.frostTex[this.frostIdx], 9"]) {
+    assert.ok(engineSrc.includes(token), `Engine frost wiring missing ${token}`);
+  }
+  for (const token of ['applyLiveSnowLayerParams', 'seedFrostWeathering()', "case 10: return 10", "'uFrostTex', this.engine.frostTex[this.engine.frostIdx], 9"]) {
+    assert.ok(pipelineSrc.includes(token), `Pipeline frost wiring missing ${token}`);
+  }
+  for (const token of ['FROST_GLOBAL_CONTROLS', 'data-snow-effect-param', 'tp-btn-apply-snow-preset', 'tp-btn-frost-diagnostic']) {
+    assert.ok(uiSrc.includes(token), `Snow Inspector missing ${token}`);
+  }
+
+  // Exercise the real Inspector HTML builder, not only source markers: a
+  // showcase Snow layer must render its stacked process controls and select
+  // an editable effect without needing a browser DOM.
+  const inspector = Object.create(ErosionLayerStackUI.prototype);
+  inspector.selectedSnowEffectId = null;
+  inspector.selectedStrataBedId = null;
+  inspector.engine = { params: { worldSpan: 500 }, gridRes: 512 };
+  inspector.pipeline = { R: 512, shadingMode: 0 };
+  const showcaseLayers = TERRAIN_STACK_PRESETS['frost-pitted-rainbow-range'].layers();
+  const snowHtml = inspector._snowFrostCardHtml(showcaseLayers.find((layer) => layer.type === 'aeolian-glacial'), '#a8e6ff');
+  assert.ok(snowHtml.includes('Segregation window') && snowHtml.includes('data-snow-effect-param'));
+  assert.ok(inspector.selectedSnowEffectId, 'Snow Inspector selects an effect for editing');
+
+  // An explicitly emptied custom stack is snowpack-only. It must not be
+  // mistaken for a pre-feature layer and resurrect the balanced preset,
+  // while a frost-only stack can still make the Cryo season available.
+  const availabilityHarness = Object.create(TerrainStackPipeline.prototype);
+  const availabilitySnow = showcaseLayers.find((layer) => layer.type === 'aeolian-glacial');
+  availabilityHarness.layers = [availabilitySnow];
+  availabilityHarness.paletteId = 1;
+  Object.assign(availabilitySnow.params, {
+    snowfallRate: 0,
+    glacierStrength: 0,
+    windSpeed: 0,
+    snowEffectPreset: 'custom',
+    snowEffects: [],
+  });
+  assert.equal(availabilityHarness._computeSimAvailability().cryo, false);
+  availabilitySnow.params.snowEffects = [createSnowEffect('segregation-ice')];
+  assert.equal(availabilityHarness._computeSimAvailability().cryo, true);
+});
+
+test('Authored stratigraphic columns are non-repeating chemical beds with composition-derived properties', () => {
+  assert.equal(MAX_STRATA_BEDS, 16);
+  assert.equal(Object.keys(STRATA_LITHOLOGIES).length, 12);
+  assert.deepEqual(
+    Object.fromEntries(Object.entries(STRATA_COLUMN_PRESETS).map(([id]) => [id, createStrataColumnPreset(id).length])),
+    {
+      'rainbow-andes': 14,
+      'grand-canyon': 11,
+      'alpine-limestone-shale': 11,
+      'painted-desert': 13,
+    },
+  );
+
+  const rainbow = createStrataColumnPreset('rainbow-andes');
+  assert.equal(Math.round(strataColumnThickness(rainbow)), 200);
+  assert.ok(new Set(rainbow.map((bed) => bed.color)).size >= 12, 'Rainbow column needs many distinct bed hues');
+  assert.ok(new Set(rainbow.map((bed) => bed.thicknessM)).size >= 10, 'Bed thickness must genuinely vary');
+  assert.ok(rainbow.some((bed) => bed.copper >= 0.2) && rainbow.some((bed) => bed.carbonate >= 0.85));
+
+  // Coordinates outside a measured section clamp to the end beds. They never
+  // wrap around to repeat the colour/chemistry sequence up a taller peak.
+  assert.equal(sampleStrataColumn(rainbow, -500).index, 0);
+  assert.equal(sampleStrataColumn(rainbow, 500).index, rainbow.length - 1);
+  assert.equal(sampleStrataColumn(rainbow, 500).aboveColumn, true);
+  assert.notEqual(
+    sampleStrataColumn(rainbow, strataColumnThickness(rainbow) + 5).bed.id,
+    sampleStrataColumn(rainbow, 5).bed.id,
+  );
+
+  const shale = deriveBedProperties(rainbow.find((bed) => bed.lithology === 'shale'));
+  const dolomite = deriveBedProperties(rainbow.find((bed) => bed.lithology === 'dolomite'));
+  assert.ok(shale.frostSusceptibility > dolomite.frostSusceptibility, 'Weak fractured clay-rich beds should frost-crack faster');
+  assert.ok(dolomite.solubility > shale.solubility, 'Carbonate chemistry should raise dissolution susceptibility');
+  assert.ok(shale.pluckingSusceptibility > dolomite.pluckingSusceptibility, 'Thin/jointed weak beds should pluck preferentially');
+
+  const packed = packStrataColumnUniforms(rainbow, { enabled: true, baseM: -10, colorStrength: 0.96 });
+  assert.deepEqual([...packed.meta].slice(0, 3), [1, 14, -10]);
+  assert.ok(Math.abs(packed.meta[3] - 0.96) < 1e-6);
+  assert.equal(packed.bedsA.length, MAX_STRATA_BEDS * 4);
+  assert.ok(Math.abs(packed.bedsA[3 * 4 + 3] - 0.78) < 1e-6, 'Fourth packed bed carries its authored fracture value');
+  assert.ok(Math.abs(packed.bedsA[13 * 4] - 200) < 1e-5, 'Cumulative top reaches the measured-section total');
+  assert.ok(Math.abs(packed.bedsB[6 * 4 + 2] - 0.94) < 1e-6, 'Packed carbonate remains tied to its exact bed');
+
+  // Normalisation is the document boundary: no more than 16 beds, finite
+  // physical/chemical fields, and stable hex colours survive serialisation.
+  const normalised = normalizeStrataColumn(Array.from({ length: 24 }, (_, i) => ({
+    id: 'duplicate:bed',
+    lithology: i % 2 ? 'shale' : 'sandstone',
+    name: `Bed ${i}`,
+    thicknessM: 2 + i,
+    color: '#A4634F',
+    iron: 4,
+    porosity: -2,
+  })));
+  assert.equal(normalised.length, MAX_STRATA_BEDS);
+  assert.equal(new Set(normalised.map((bed) => bed.id)).size, MAX_STRATA_BEDS, 'Restored duplicate bed ids are made unique');
+  assert.ok(normalised.every((bed) => bed.iron <= 1 && bed.porosity >= 0.003 && /^#[0-9a-f]{6}$/.test(bed.color)));
+
+  // Shared GPU geology + every consumer binds the same packed column.
+  for (const token of ['uStrataColumnMeta', 'uStrataBedsA[16]', 'uStrataBedsC[16]', 'strataBedIndexAt']) {
+    assert.ok(Shaders.COMMON_GEOLOGY_GLSL.includes(token), `Common geology missing ${token}`);
+  }
+  assert.ok(Shaders.TERRAIN_RENDER_FRAG.includes('bedColour') && Shaders.TERRAIN_RENDER_FRAG.includes('renderBedIdx'));
+  assert.ok(Shaders.TERRAIN_INTEGRATE_FRAG.includes('chemBedIdx')
+    && Shaders.TERRAIN_INTEGRATE_FRAG.includes('bedComp.z * 1.05')
+    && Shaders.TERRAIN_INTEGRATE_FRAG.includes('hydrolysisSusceptibility'),
+    'Authored carbonate/salt/clay composition must drive chemical geomorphology');
+  assert.ok(Shaders.CHEM_WEATHER_FRAG.includes('authoredChemBedIdx')
+    && Shaders.CHEM_WEATHER_FRAG.includes('hydrolysisMineralFactor'),
+    'Authored bed fracture/porosity/clay must drive reaction-state growth');
+  assert.ok(PipelineShaders.STACK_OP_FRAG.includes('strataBedBottomM') && PipelineShaders.STACK_OP_FRAG.includes('strataBedThicknessM'));
+  const engineSrc = fs.readFileSync(new URL('../src/erosion/gpu-erosion-engine.js', import.meta.url), 'utf8');
+  const pipelineSrc = fs.readFileSync(new URL('../src/erosion/terrain-stack-pipeline.js', import.meta.url), 'utf8');
+  const uiSrc = fs.readFileSync(new URL('../src/erosion/layer-stack-ui.js', import.meta.url), 'utf8');
+  assert.ok((engineSrc.match(/_bindStrataColumnUniforms\(/g) || []).length >= 10, 'Engine must bind authored beds into all geology consumers');
+  assert.ok(pipelineSrc.includes('_bindStrataColumnUniforms(this.progStackOp)'));
+  for (const token of ['STRATA_BED_CONTROLS', 'data-strata-bed-param', 'tp-btn-apply-strata-preset', 'data-strata-bed-color']) {
+    assert.ok(uiSrc.includes(token), `Strata Inspector missing ${token}`);
+  }
+
+  // Exercise the real geological-column builder as well as its source
+  // markers, including youngest-bed selection and derived property readouts.
+  const inspector = Object.create(ErosionLayerStackUI.prototype);
+  inspector.selectedSnowEffectId = null;
+  inspector.selectedStrataBedId = null;
+  inspector.engine = { params: { worldSpan: 500 }, gridRes: 512 };
+  inspector.pipeline = { R: 512, shadingMode: 0 };
+  const showcaseLayers = TERRAIN_STACK_PRESETS['frost-pitted-rainbow-range'].layers();
+  const strataHtml = inspector._strataColumnCardHtml(showcaseLayers.find((layer) => layer.type === 'stratigraphic-beds'), '#e8d06a');
+  assert.ok(strataHtml.includes('data-strata-bed-param') && strataHtml.includes('Frost susceptibility'));
+  assert.ok(inspector.selectedStrataBedId, 'Strata Inspector selects a bed for editing');
+
+  // The two isolated showcase terrains exercise every new system without
+  // changing Utah's Wind+Rain-only contract or Environment's last position.
+  for (const [presetId, bedCount, snowPreset] of [
+    ['frost-pitted-rainbow-range', 14, 'segregation-pitting'],
+    ['nivation-cirque-strata', 11, 'nivation-cirque'],
+  ]) {
+    const stack = TERRAIN_STACK_PRESETS[presetId].layers();
+    const strata = stack.filter((layer) => layer.type === 'stratigraphic-beds');
+    const snow = stack.filter((layer) => layer.type === 'aeolian-glacial');
+    assert.equal(strata.length, 1, `${presetId} strata count`);
+    assert.equal(strata[0].params.strataColumnEnabled, true);
+    assert.equal(strata[0].params.strataBeds.length, bedCount);
+    assert.equal(snow.length, 1, `${presetId} snow count`);
+    assert.equal(snow[0].params.snowEffectPreset, snowPreset);
+    assert.equal(snow[0].params.snowEffects.length, 6);
+    assert.ok(deriveSnowEffectWeights(snow[0].params.snowEffects).weights.legacy === 0);
+    assert.equal(stack[stack.length - 1].type, ENVIRONMENT_LAYER_TYPE);
+    assert.equal(stack[stack.length - 2].params.seed, 4029);
+  }
 });

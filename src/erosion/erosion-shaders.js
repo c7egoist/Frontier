@@ -115,6 +115,48 @@ vec4 sampleGridBilinear(sampler2D tex, vec2 uv, float res) {
   return mix(mix(c00, c10, f.x), mix(c01, c11, f.x), f.y);
 }
 
+// Authored measured-section uniforms. They default to zero/disabled in
+// every legacy program, so including COMMON_GEOLOGY_GLSL never changes an
+// old terrain unless a Stratigraphic Beds layer explicitly enables a
+// column. A=(cumulative top m, hardness, porosity, fracture),
+// B=(Fe, Cu, carbonate, salt), C=(linear RGB, clay).
+uniform vec4 uStrataColumnMeta; // (enabled, bed count, base m, colour strength)
+uniform vec4 uStrataBedsA[16];
+uniform vec4 uStrataBedsB[16];
+uniform vec4 uStrataBedsC[16];
+
+float strataColumnCoord(vec3 worldPos, vec4 strataOrient, float seedOff) {
+  vec2 sHoriz = worldPos.xz / max(strataOrient.w, 1.0);
+  float acrossStrike = worldPos.x * strataOrient.x + worldPos.z * strataOrient.y;
+  float warp = (fbm2D(sHoriz * 2.2 + seedOff, 3, 0.55) - 0.5) * 14.0;
+  return worldPos.y + acrossStrike * strataOrient.z + warp;
+}
+
+int strataBedIndexAt(float stratY) {
+  int count = int(clamp(uStrataColumnMeta.y, 0.0, 16.0) + 0.5);
+  if (uStrataColumnMeta.x < 0.5 || count <= 0) return -1;
+  float localM = stratY - uStrataColumnMeta.z;
+  if (localM <= 0.0) return 0;
+  for (int i = 0; i < 16; i++) {
+    if (i >= count) break;
+    if (localM <= uStrataBedsA[i].x) return i;
+  }
+  // Deliberately clamp to the youngest authored bed. A measured section is
+  // a one-way sequence; it must never modulo-repeat just because a dipping
+  // coordinate or summit rises above the authored top.
+  return count - 1;
+}
+
+float strataBedBottomM(int bedIdx) {
+  if (bedIdx <= 0) return 0.0;
+  return uStrataBedsA[bedIdx - 1].x;
+}
+
+float strataBedThicknessM(int bedIdx) {
+  if (bedIdx < 0) return 1.0;
+  return max(0.05, uStrataBedsA[bedIdx].x - strataBedBottomM(bedIdx));
+}
+
 /**
  * Evaluates 3D Geological Bedrock Hardness in [0.04, 0.99] at world position (wx, wy, wz).
  * uHardnessParams = (baseHardness, strataStrength, strataFreq, faultWeakness)
@@ -138,6 +180,38 @@ float evalRockHardness3D(vec3 worldPos, vec4 uHardnessParams, vec4 uStrataOrient
   float stratHard = mix(0.10, 0.96, 0.72 * squareLedge + 0.28 * minorRib);
 
   float h = mix(baseH, mix(baseH * 0.35 + 0.05, min(0.98, baseH * 0.55 + 0.46), stratHard), strataStr);
+  int authoredBedIdx = strataBedIndexAt(stratY);
+  if (authoredBedIdx >= 0) {
+    int bedCount = int(clamp(uStrataColumnMeta.y, 1.0, 16.0) + 0.5);
+    float localM = stratY - uStrataColumnMeta.z;
+    float bedHardness = uStrataBedsA[authoredBedIdx].y;
+    float bedFracture = uStrataBedsA[authoredBedIdx].w;
+    float contactBlendM = 0.45;
+    // Bedding contacts are real discontinuities, but a half-metre numerical
+    // transition avoids one-texel hardness aliasing on shallow dips.
+    if (authoredBedIdx + 1 < bedCount) {
+      float distToTop = uStrataBedsA[authoredBedIdx].x - localM;
+      if (distToTop < contactBlendM) {
+        bedHardness = mix(
+          bedHardness,
+          uStrataBedsA[authoredBedIdx + 1].y,
+          0.5 * (1.0 - clamp(distToTop / contactBlendM, 0.0, 1.0))
+        );
+      }
+    }
+    if (authoredBedIdx > 0) {
+      float distFromBottom = localM - strataBedBottomM(authoredBedIdx);
+      if (distFromBottom < contactBlendM) {
+        bedHardness = mix(
+          uStrataBedsA[authoredBedIdx - 1].y,
+          bedHardness,
+          0.5 + 0.5 * clamp(distFromBottom / contactBlendM, 0.0, 1.0)
+        );
+      }
+    }
+    h = mix(baseH, bedHardness, strataStr);
+    faultWeak *= 0.45 + 0.90 * bedFracture;
+  }
 
   if (faultWeak > 0.01) {
     vec2 fp = worldPos.xz * 0.011 + vec2(seedOff * 0.37, -seedOff * 0.23);
@@ -1587,6 +1661,7 @@ uniform sampler2D uFluxTex;
 uniform sampler2D uSnowTex;
 uniform sampler2D uRockObstacleTex;
 uniform sampler2D uChemTex; // R rust, G salt, B varnish(+) / copper patina(-), A hydrolysis alteration
+uniform sampler2D uFrostTex; // R damage, G crack mm, B saturation, A detached m this step
 
 uniform vec4 uIntParams;      // (gridRes, cellSize, dt, evaporation)
 uniform vec4 uPipeErode;      // (pipeFlowBlend, erosionStrength, rockHardness, worldSpan)
@@ -1600,6 +1675,9 @@ uniform vec4 uWindErodeA;      // (abrasion rate, lee deposition, turbulence, cu
 uniform vec4 uWindErodeB;      // (sand supply, fluting, streamlining, deflation)
 uniform vec2 uWindPhase;       // (simulation step for advecting gusts, weather-pattern cycles)
 uniform vec4 uChemInt;        // (dissolution, salt bursting, hydrolysis conversion, master rate)
+uniform vec4 uFrostIntA;      // (legacy, avalanche, glacier, frost active)
+uniform vec4 uFrostIntB;      // (debris retention, avalanche slope, avalanche scour, legacy retention)
+uniform vec4 uFrostIntC;      // (glacier plucking, glacier abrasion, joint sensitivity, legacy margin rate)
 uniform float uBrushStrength;
 uniform float uSeed;
 
@@ -1638,7 +1716,7 @@ void main() {
   // season is active (rain itself, snow/glacier melt, or chemical transport).
   // In Wind/Rockfall-only seasons the old flux field must not keep silently
   // moving rivers in the background.
-  float cryoActiveGate = step(0.001, uClimate.y + uClimate.z);
+  float cryoActiveGate = max(step(0.001, uClimate.y + uClimate.z), clamp(uFrostIntA.w, 0.0, 1.0));
   float waterRoutingGate = max(step(0.01, uPipeErode.x), max(cryoActiveGate, step(0.001, uChemInt.w)));
   dWaterPipe *= waterRoutingGate;
   flowVel *= waterRoutingGate;
@@ -1719,6 +1797,7 @@ void main() {
   // CRYOSPHERE COUPLING: GLACIER ABRASION, PLUCKING & SNOWMELT FEEDING THE RUNOFF
   // ==========================================================================
   vec4 snowC = texelFetch(uSnowTex, c, 0);
+  vec4 frostC = texelFetch(uFrostTex, c, 0);
   float snowDepth = max(0.0, snowC.r);
   float iceDepth = max(0.0, snowC.g);
 
@@ -1746,6 +1825,34 @@ void main() {
     float shallowChem = clamp(1.15 - sedDepthChem * 0.45, 0.0, 1.0);
     float wetChem = clamp(water * 4.0 + discharge * 0.65 + meltWater * 6.0, 0.0, 1.25);
     float solubility = clamp(1.18 - chemHardness + chemC.a * 0.65, 0.05, 1.7);
+    float hydrolysisSusceptibility = clamp(1.20 - chemHardness, 0.05, 1.4);
+    float saltSusceptibility = clamp(1.25 - chemHardness, 0.05, 1.5);
+    float effectiveSalt = chemC.g;
+    int chemBedIdx = strataBedIndexAt(strataColumnCoord(vec3(worldXZ.x, bedrock, worldXZ.y), uStrataOrient, uSeed));
+    if (chemBedIdx >= 0) {
+      // An authored bed's chemistry, not softness alone, determines which
+      // reaction can actually remove it: carbonate/evaporite dissolves,
+      // clay- and Fe-bearing porous beds hydrolyse, and saline porous beds
+      // are vulnerable to crystallisation pressure. Legacy periodic strata
+      // retain the old hardness proxy above.
+      vec4 bedComp = clamp(uStrataBedsB[chemBedIdx], vec4(0.0), vec4(1.0));
+      float bedPorosityChem = clamp(uStrataBedsA[chemBedIdx].z, 0.0, 0.55);
+      float bedFractureChem = clamp(uStrataBedsA[chemBedIdx].w, 0.0, 1.0);
+      float bedClayChem = clamp(uStrataBedsC[chemBedIdx].w, 0.0, 1.0);
+      solubility = clamp(
+        0.08 + bedComp.z * 1.05 + bedComp.w * 0.82 + bedPorosityChem * 0.35
+          - chemHardness * 0.12 + chemC.a * 0.20,
+        0.04, 1.85);
+      hydrolysisSusceptibility = clamp(
+        0.12 + bedClayChem * 0.72 + bedComp.x * 0.22
+          + bedPorosityChem * 0.65 + bedFractureChem * 0.18,
+        0.04, 1.45);
+      saltSusceptibility = clamp(
+        0.12 + bedPorosityChem * 1.05 + bedFractureChem * 0.35
+          + bedClayChem * 0.18 - chemHardness * 0.25,
+        0.04, 1.50);
+      effectiveSalt = clamp(max(chemC.g, bedComp.w * (0.25 + 0.75 * min(wetChem, 1.0))), 0.0, 1.0);
+    }
     float rockAvailable = max(bedrock - 1.0, 0.0);
 
     float dissolution = min(rockAvailable,
@@ -1755,14 +1862,14 @@ void main() {
     rockAvailable = max(bedrock - 1.0, 0.0);
 
     float hydrolysis = min(rockAvailable,
-      uChemInt.z * wetChem * chemC.a * shallowChem * clamp(1.20 - chemHardness, 0.05, 1.4) * 0.00032 * dt);
+      uChemInt.z * wetChem * chemC.a * shallowChem * hydrolysisSusceptibility * 0.00032 * dt);
     hydrolysis *= armour;
     bedrock -= hydrolysis;
     fine += hydrolysis * 0.78;
     rockAvailable = max(bedrock - 1.0, 0.0);
 
     float saltCrumble = min(rockAvailable,
-      uChemInt.y * chemC.g * chemC.g * exposedChem * clamp(1.25 - chemHardness, 0.05, 1.5) * 0.00045 * dt);
+      uChemInt.y * effectiveSalt * effectiveSalt * exposedChem * saltSusceptibility * 0.00045 * dt);
     saltCrumble *= armour;
     bedrock -= saltCrumble;
     fine += saltCrumble * 0.68;
@@ -1799,9 +1906,15 @@ void main() {
   }
 
   // ==========================================================================
-  // SNOW EROSION: NIVATION FROST-WEDGING, AVALANCHE COULOIR SCOUR & GLACIER GRINDING
+  // SNOW / FROST EROSION
+  // Research path: FROST_DAMAGE_FRAG has already accumulated invisible
+  // microcracks and only reports frostC.a after crack aperture + damage are
+  // representable at this grid resolution. That detached equivalent becomes
+  // clustered pits/spalls here. The old instant conversion is available only
+  // through the explicit Legacy snow effect; avalanche scour and glacier
+  // plucking/abrasion are separate stackable effects.
   // ==========================================================================
-  if ((snowDepth > 0.025 || iceDepth > 0.02) && c.x > 0 && c.x < maxI && c.y > 0 && c.y < maxI) {
+  if ((snowDepth > 0.025 || iceDepth > 0.02 || frostC.a > 0.0005) && c.x > 0 && c.x < maxI && c.y > 0 && c.y < maxI) {
     vec4 gR = texelFetch(uTerrainTex, ivec2(c.x + 1, c.y), 0);
     vec4 gL = texelFetch(uTerrainTex, ivec2(c.x - 1, c.y), 0);
     vec4 gU = texelFetch(uTerrainTex, ivec2(c.x, c.y + 1), 0);
@@ -1812,28 +1925,80 @@ void main() {
     ) / (2.0 * cellSize);
     float cryoSlope = length(gSurf);
     float cryoHardness = evalRockHardness3D(vec3(worldXZ.x, bedrock, worldXZ.y), uHardnessParams, uStrataOrient, uSeed);
-    cryoHardness = clamp(cryoHardness * (1.0 - 0.55 * chemC.a) + chemC.r * 0.10, 0.04, 0.99);
+    float frostDamage = clamp(frostC.r, 0.0, 1.2);
+    cryoHardness = clamp(
+      cryoHardness * (1.0 - 0.55 * chemC.a) * (1.0 - 0.42 * clamp(frostDamage, 0.0, 1.0)) + chemC.r * 0.10,
+      0.04, 0.99);
 
-    // 1. Glacier basal plucking & abrasion carves flat-floored U-shaped troughs & moraines
-    if (iceDepth > 0.02) {
-      float grind = clamp(iceDepth * (0.04 + cryoSlope * cryoSlope) * 0.52, 0.0, 0.055) * uClimate.z * dt;
-      float pluck = min(max(0.0, bedrock - 1.0), grind / (0.25 + 2.2 * cryoHardness));
-      bedrock = max(1.0, bedrock - pluck);
-      fine += pluck * 0.52;
-      coarse += pluck * 0.48;
+    int cryoBedIdx = strataBedIndexAt(strataColumnCoord(vec3(worldXZ.x, bedrock, worldXZ.y), uStrataOrient, uSeed));
+    float bedFracture = clamp(mix(0.22, 0.92, uHardnessParams.w) * (1.08 - cryoHardness * 0.55), 0.03, 1.0);
+    float bedClay = clamp(chemC.a * 0.85 + (1.0 - cryoHardness) * 0.25, 0.0, 1.0);
+    float bedThickness = 18.0;
+    if (cryoBedIdx >= 0) {
+      bedFracture = uStrataBedsA[cryoBedIdx].w;
+      bedClay = clamp(uStrataBedsC[cryoBedIdx].w + chemC.a * 0.35, 0.0, 1.0);
+      bedThickness = strataBedThicknessM(cryoBedIdx);
+    }
+    float frostCoarseShare = clamp(0.22 + 0.58 * bedFracture - 0.34 * bedClay, 0.06, 0.88);
+    float debrisRetention = clamp(uFrostIntB.x, 0.0, 1.0);
+
+    // 1. Thresholded frost pitting/spalling. Below threshold frostC.a is
+    // exactly zero, so millimetre cracks remain data, not fake geometry.
+    if (frostC.a > 0.0005 && uFrostIntA.w > 0.5) {
+      float frostSpall = min(max(0.0, bedrock - 1.0), max(frostC.a, 0.0) * armour);
+      bedrock = max(1.0, bedrock - frostSpall);
+      float retainedCoarse = frostSpall * debrisRetention * frostCoarseShare;
+      float mobileMaterial = frostSpall * (1.0 - debrisRetention);
+      float mobileCoarse = mobileMaterial * frostCoarseShare * 0.35;
+      coarse += retainedCoarse + mobileCoarse;
+      fine += max(0.0, frostSpall - retainedCoarse - mobileCoarse);
     }
 
-    // 2. Periglacial nivation & freeze-thaw frost-shattering + avalanche couloir scour!
-    if (snowDepth > 0.025) {
-      // Freeze-thaw peaks near snowpatch margins & steep cirque headwalls
+    // 2. Glacier plucking vs abrasion. Thin, fractured and frost-damaged
+    // beds pluck into coarse blocks; thick hard beds abrade toward fines.
+    if (iceDepth > 0.02 && uFrostIntA.z > 0.001) {
+      float thinBedFactor = 1.0 - clamp(bedThickness / 28.0, 0.0, 1.0);
+      float jointFactor = clamp(
+        0.35 + bedFracture * uFrostIntC.z + frostDamage * 0.75 + thinBedFactor * 0.35 * uFrostIntC.z,
+        0.10, 2.2);
+      float pluckDrive = uFrostIntC.x * jointFactor;
+      float abrasionDrive = max(uFrostIntC.y, 0.001);
+      float glacierDrive = 0.35 + 0.65 * max(pluckDrive, abrasionDrive);
+      float grind = clamp(iceDepth * (0.04 + cryoSlope * cryoSlope) * 0.52, 0.0, 0.055)
+                  * uClimate.z * uFrostIntA.z * glacierDrive * dt;
+      float glacierCut = min(max(0.0, bedrock - 1.0), grind / (0.25 + 2.2 * cryoHardness));
+      glacierCut *= armour;
+      bedrock = max(1.0, bedrock - glacierCut);
+      float pluckShare = clamp(pluckDrive / max(pluckDrive + abrasionDrive, 0.001), 0.0, 1.0);
+      float glacierCoarseShare = clamp(0.08 + pluckShare * 0.72, 0.05, 0.88);
+      coarse += glacierCut * glacierCoarseShare * (0.35 + 0.65 * debrisRetention);
+      fine += glacierCut * (1.0 - glacierCoarseShare * (0.35 + 0.65 * debrisRetention));
+    }
+
+    // 3. Optional legacy instant nivation + separate avalanche bedrock
+    // scour. With the research presets legacy=0; snow by itself no longer
+    // manufactures local sediment on every step.
+    if (snowDepth > 0.025 && (uFrostIntA.x > 0.001 || uFrostIntA.y > 0.001)) {
       float marginFreezeThaw = exp(-sq((snowDepth - 0.38) * 1.9)) * (0.35 + 0.65 * smoothstep(0.25, 0.95, cryoSlope));
-      float couloirAvalanche = smoothstep(0.10, 0.65, snowDepth) * smoothstep(0.58, 1.35, cryoSlope);
-      float snowCutRate = (marginFreezeThaw * 0.0085 + couloirAvalanche * 0.015)
+      float couloirAvalanche = smoothstep(0.10, 0.65, snowDepth)
+                             * smoothstep(uFrostIntB.y, uFrostIntB.y + 0.77, cryoSlope);
+      float legacyRate = marginFreezeThaw * 0.0085 * uFrostIntA.x * uFrostIntC.w;
+      float avalancheRate = couloirAvalanche * 0.015 * uFrostIntA.y * uFrostIntB.z;
+      float snowCutRate = (legacyRate + avalancheRate)
                         * (0.30 + 0.70 * uClimate.y) * uWindField.w * dt * cryoActiveGate / (0.28 + 2.1 * cryoHardness);
-      float snowCut = min(max(0.0, bedrock - 1.0), snowCutRate);
+      float snowCut = min(max(0.0, bedrock - 1.0), snowCutRate) * armour;
       bedrock = max(1.0, bedrock - snowCut);
-      coarse += snowCut * 0.68;
-      fine += snowCut * 0.32;
+      float legacyShare = legacyRate / max(legacyRate + avalancheRate, 1e-6);
+      float snowRetention = mix(0.22 + 0.45 * debrisRetention, clamp(uFrostIntB.w, 0.0, 1.0), legacyShare);
+      float snowCoarse = snowCut * mix(0.42, 0.68, snowRetention);
+      coarse += snowCoarse;
+      fine += max(0.0, snowCut - snowCoarse);
+
+      // Avalanches first mobilise the loose mantle; paired transport in the
+      // talus/frost-creep pass then moves it off the steep source slope.
+      float mobilised = min(coarse, couloirAvalanche * uFrostIntA.y * coarse * 0.18 * dt);
+      coarse -= mobilised;
+      fine += mobilised;
     }
   }
 
@@ -2296,6 +2461,223 @@ void main() {
 `;
 
 // =============================================================================
+// FROST DAMAGE / SUB-RESOLUTION CRACK STATE
+//   R = cumulative microcrack / excess-porosity damage (0..1.2)
+//   G = representative crack aperture in millimetres (stored long before it
+//       can be represented by a heightfield cell)
+//   B = near-surface pore-water saturation (0..1)
+//   A = detached bedrock equivalent in metres, produced only when damage
+//       and crack aperture cross the active resolution's release threshold
+// TERRAIN_INTEGRATE consumes A as clustered pits/spalls in the same step.
+// =============================================================================
+export const FROST_DAMAGE_FRAG = `#version 300 es
+${GLSL_PRECISION_HEADER}
+in vec2 vUv;
+layout(location = 0) out vec4 outFrost;
+
+uniform sampler2D uTerrainTex;
+uniform sampler2D uSnowTex;
+uniform sampler2D uFrostTex;
+uniform sampler2D uChemTex;
+
+uniform vec4 uFrostDomain;      // (gridRes, cellSize m, worldSpan m, step)
+uniform vec4 uFrostClimateA;    // (mean C at snowline, seasonal amplitude C, years/step, crack depth m)
+uniform vec4 uFrostClimateB;    // (diffusivity x1e-6, base moisture, saturation peak, snow insulation m)
+uniform vec4 uFrostEffectsA;    // (segregation, volumetric, nivation, legacy)
+uniform vec4 uFrostEffectsB;    // (frost creep, avalanche, glacier, active)
+uniform vec4 uFrostRelease;     // (damage threshold, visible crack mm, pit depth m, pit scale cells)
+uniform vec4 uFrostEffectParamsA; // (window low C, window high C, gradient sensitivity, cycle sensitivity)
+uniform vec4 uFrostEffectParamsB; // (vol saturation floor, diurnal amp C, optimal snow m, snow width m)
+uniform vec4 uFrostEffectParamsC; // (initial damage, initialise flag, debris retention, crack-depth scale)
+uniform vec4 uFrostSun;         // (sun dir X, sun dir Z, elevation factor, unused)
+uniform vec4 uClimate;          // (snowline, snowfall, glacier, melt)
+uniform vec4 uHardnessParams;
+uniform vec4 uStrataOrient;
+uniform float uSeed;
+
+${COMMON_GEOLOGY_GLSL}
+
+float frostWindow(float tempC, float lowC, float highC) {
+  return smoothstep(lowC - 1.4, lowC + 0.7, tempC)
+       * (1.0 - smoothstep(highC - 0.7, highC + 1.4, tempC));
+}
+
+float frostSaturationEff(float saturation, float peak, float volumetricMode) {
+  float s = clamp(saturation, 0.0, 1.0);
+  float volumetric = smoothstep(0.45, 0.86, s);
+  float dryGate = smoothstep(max(0.05, peak - 0.38), max(0.12, peak - 0.07), s);
+  float flooded = 1.0 - 0.38 * smoothstep(min(0.98, peak + 0.10), 0.995, s);
+  return mix(dryGate * flooded, volumetric, clamp(volumetricMode, 0.0, 1.0));
+}
+
+float frostTempAtDepth(float meanC, float amplitudeC, float phaseYears, float depthM, float skinDepthM) {
+  float skin = max(skinDepthM, 0.05);
+  float atten = exp(-max(depthM, 0.0) / skin);
+  return meanC + amplitudeC * atten * sin(6.2831853 * phaseYears - depthM / skin);
+}
+
+void main() {
+  ivec2 c = ivec2(gl_FragCoord.xy);
+  int maxI = int(uFrostDomain.x) - 1;
+  float cellSize = max(uFrostDomain.y, 0.01);
+  float years = max(uFrostClimateA.z, 0.0);
+  bool initialise = uFrostEffectParamsC.y > 0.5;
+
+  vec4 tC = texelFetch(uTerrainTex, c, 0);
+  vec4 tR = texelFetch(uTerrainTex, ivec2(min(maxI, c.x + 1), c.y), 0);
+  vec4 tL = texelFetch(uTerrainTex, ivec2(max(0, c.x - 1), c.y), 0);
+  vec4 tU = texelFetch(uTerrainTex, ivec2(c.x, min(maxI, c.y + 1)), 0);
+  vec4 tD = texelFetch(uTerrainTex, ivec2(c.x, max(0, c.y - 1)), 0);
+  vec4 sC = texelFetch(uSnowTex, c, 0);
+  vec4 sR = texelFetch(uSnowTex, ivec2(min(maxI, c.x + 1), c.y), 0);
+  vec4 sL = texelFetch(uSnowTex, ivec2(max(0, c.x - 1), c.y), 0);
+  vec4 sU = texelFetch(uSnowTex, ivec2(c.x, min(maxI, c.y + 1)), 0);
+  vec4 sD = texelFetch(uSnowTex, ivec2(c.x, max(0, c.y - 1)), 0);
+  vec4 prev = texelFetch(uFrostTex, c, 0);
+  vec4 chem = texelFetch(uChemTex, c, 0);
+
+  float hC = tC.r + tC.g + tC.b;
+  float hR = tR.r + tR.g + tR.b;
+  float hL = tL.r + tL.g + tL.b;
+  float hU = tU.r + tU.g + tU.b;
+  float hD = tD.r + tD.g + tD.b;
+  vec2 grad = vec2(hR - hL, hU - hD) / (2.0 * cellSize);
+  float slope = length(grad);
+  float hollow = clamp(((hR + hL + hU + hD) * 0.25 - hC) / max(cellSize * 0.85, 0.05), 0.0, 1.0);
+
+  float snowDepth = max(sC.r, 0.0);
+  float iceDepth = max(sC.g, 0.0);
+  float melt = max(sC.b, 0.0) + max(sC.a, 0.0);
+  vec2 snowGrad = vec2(sR.r - sL.r, sU.r - sD.r) / (2.0 * cellSize);
+  float snowMin = min(min(sR.r, sL.r), min(sU.r, sD.r));
+  float snowMax = max(max(sR.r, sL.r), max(sU.r, sD.r));
+  float snowContrast = (snowMax - snowMin) / max(0.08, snowMax + snowDepth);
+  float snowMargin = clamp(max(length(snowGrad) * cellSize * 2.4, snowContrast * 0.85), 0.0, 1.0);
+
+  vec2 worldXZ = (vUv - 0.5) * uFrostDomain.z;
+  float hardness = evalRockHardness3D(vec3(worldXZ.x, tC.r, worldXZ.y), uHardnessParams, uStrataOrient, uSeed);
+  float stratY = strataColumnCoord(vec3(worldXZ.x, tC.r, worldXZ.y), uStrataOrient, uSeed);
+  int bedIdx = strataBedIndexAt(stratY);
+  float porosity = mix(0.035, 0.30, 1.0 - hardness) * (0.85 + 0.45 * uHardnessParams.w);
+  float fracture = clamp(mix(0.22, 0.92, uHardnessParams.w) * (1.08 - hardness * 0.55), 0.03, 1.0);
+  float clay = clamp(chem.a * 0.85 + (1.0 - hardness) * 0.25, 0.0, 1.0);
+  if (bedIdx >= 0) {
+    porosity = uStrataBedsA[bedIdx].z;
+    fracture = uStrataBedsA[bedIdx].w;
+    clay = clamp(uStrataBedsC[bedIdx].w + chem.a * 0.35, 0.0, 1.0);
+  }
+  float effectiveHardness = clamp(hardness * (1.0 - 0.48 * chem.a) + chem.r * 0.06, 0.04, 0.99);
+  float sedimentM = max(tC.g + tC.b, 0.0);
+
+  float saturationTarget = clamp(
+    uFrostClimateB.y * 0.72
+      + min(0.28, melt * 0.90 + tC.a * 0.65)
+      + min(0.18, snowDepth * 0.12)
+      + min(0.14, sedimentM * 0.16) * (0.45 + clay)
+      - min(0.22, slope * 0.10),
+    0.0, 1.0);
+  float prevSaturation = initialise ? saturationTarget : clamp(prev.b, 0.0, 1.0);
+  float saturation = prevSaturation + (saturationTarget - prevSaturation) * (1.0 - exp(-max(years, 0.02) * 0.55));
+
+  float reliefScale = max(uStrataOrient.w, 1.0);
+  float elevN = hC / reliefScale;
+  vec3 surfaceNormal = safeNorm3(vec3(-grad.x, 1.0, -grad.y), vec3(0.0, 1.0, 0.0));
+  float solarFace = clamp(dot(surfaceNormal.xz, safeNorm2(uFrostSun.xy, vec2(1.0, 0.0))) * 1.7, -1.0, 1.0);
+  float localMean = uFrostClimateA.x + (uClimate.x - elevN) * 20.0
+                  + solarFace * uFrostSun.z * 1.15 * smoothstep(0.05, 0.85, slope);
+  float insulation = exp(-snowDepth / max(uFrostClimateB.w, 0.03));
+  float groundMean = localMean + (1.0 - insulation) * max(-1.5 - localMean, 0.0) * 0.45;
+  float seasonalAmp = uFrostClimateA.y * (0.12 + 0.88 * insulation) * (1.0 + solarFace * 0.16);
+
+  float annualSkin = sqrt(max(uFrostClimateB.x, 0.02) * 10.05);
+  float dailySkin = max(annualSkin * 0.0523, 0.035);
+  float crackDepth = clamp(uFrostClimateA.w * uFrostEffectParamsC.w, 0.02, 4.0);
+  float segregationIndex = 0.0;
+  float zeroCrossIndex = 0.0;
+  for (int i = 0; i < 4; i++) {
+    float phase = fract(uFrostDomain.w * max(years, 0.001) + (float(i) + 0.5) * 0.25);
+    float surfaceTemp = groundMean + seasonalAmp * sin(6.2831853 * phase);
+    float depthTemp = frostTempAtDepth(groundMean, seasonalAmp, phase, crackDepth, annualSkin);
+    float thermalGradient = abs(surfaceTemp - depthTemp) / max(crackDepth, 0.08);
+    float gradientFactor = thermalGradient / (thermalGradient + 4.0 / max(uFrostEffectParamsA.z, 0.05));
+    float warmSource = 0.25 + 0.75 * smoothstep(-1.5, 1.5, surfaceTemp);
+    segregationIndex += frostWindow(depthTemp, uFrostEffectParamsA.x, uFrostEffectParamsA.y) * gradientFactor * warmSource;
+    float dailyAmp = uFrostEffectParamsB.y * exp(-crackDepth / dailySkin);
+    float zeroDist = depthTemp / max(dailyAmp + 1.4, 1.2);
+    zeroCrossIndex += exp(-zeroDist * zeroDist);
+  }
+  segregationIndex *= 0.25;
+  zeroCrossIndex *= 0.25;
+
+  float poreFactor = clamp(porosity / 0.16, 0.08, 2.4);
+  float permeability = pow(max(poreFactor, 1e-4), 1.35) * (1.0 - 0.62 * clay) * (0.30 + fracture);
+  float fractureFactor = 0.35 + 1.25 * fracture;
+  float tensileResistance = 0.25 + 2.25 * effectiveHardness * effectiveHardness;
+  float exposure = 0.16 + 0.84 * exp(-sedimentM / 0.32);
+  float iceShield = 1.0 - 0.62 * smoothstep(0.08, 1.20, iceDepth);
+  float snowDelta = (snowDepth - uFrostEffectParamsB.z) / max(uFrostEffectParamsB.w, 0.08);
+  float optimalSnow = exp(-snowDelta * snowDelta);
+  float nivationIndex = optimalSnow * (0.35 + 0.65 * snowMargin) * (0.70 + 0.55 * hollow)
+                      * (0.55 + 0.45 * smoothstep(0.05, 0.65, slope));
+
+  float segEff = frostSaturationEff(saturation, uFrostClimateB.z, 0.0);
+  float volEff = frostSaturationEff(saturation, uFrostClimateB.z, 1.0)
+               * smoothstep(uFrostEffectParamsB.x - 0.12, uFrostEffectParamsB.x + 0.10, saturation);
+  float segRate = uFrostEffectsA.x * segregationIndex * segEff * permeability * fractureFactor / tensileResistance;
+  float volRate = uFrostEffectsA.y * uFrostEffectParamsA.w * zeroCrossIndex * volEff
+                * poreFactor * (0.40 + fracture) / tensileResistance;
+  float nivRate = uFrostEffectsA.z * nivationIndex * segEff
+                * (0.45 + min(1.2, melt * 2.2 + tC.a))
+                * poreFactor * fractureFactor / tensileResistance;
+  float damageRate = max(0.0, (segRate * 0.045 + volRate * 0.022 + nivRate * 0.007) * exposure * iceShield);
+
+  if (initialise) {
+    float susceptibility = clamp(
+      (permeability * fractureFactor / tensileResistance)
+        * (0.30 + segregationIndex * 3.2 + nivationIndex * 0.45 + zeroCrossIndex * 0.25),
+      0.0, 1.35);
+    float seedHash = hash12(vec2(vec2(c) + vec2(uSeed * 0.113, -uSeed * 0.071)));
+    float initialDamage = clamp(uFrostEffectParamsC.x * susceptibility * (0.72 + seedHash * 0.55), 0.0, 1.05);
+    float thresholdMm = max(uFrostRelease.y, cellSize * 8.0);
+    float initialCrack = clamp(0.03 + seedHash * 0.28 + initialDamage * thresholdMm * 0.42, 0.01, thresholdMm * 0.92);
+    outFrost = vec4(initialDamage, initialCrack, saturation, 0.0);
+    return;
+  }
+
+  if (uFrostEffectsB.w < 0.5) {
+    outFrost = vec4(clamp(prev.r, 0.0, 1.2), clamp(prev.g, 0.0, 220.0), saturation, 0.0);
+    return;
+  }
+
+  float damageIncrement = damageRate * years;
+  float damage = min(1.2, clamp(prev.r, 0.0, 1.2) + damageIncrement);
+  float crackMm = clamp(prev.g, 0.01, 220.0);
+  crackMm = min(220.0, crackMm + damageIncrement * (16.0 + crackMm * 0.18) * (0.50 + damage));
+
+  float visibleThresholdMm = max(uFrostRelease.y, cellSize * 8.0);
+  float detachedM = 0.0;
+  if (damage >= uFrostRelease.x && crackMm >= visibleThresholdMm) {
+    float pitScaleM = max(cellSize * uFrostRelease.w, 0.20);
+    float pitNoise = fbm2D(worldXZ / pitScaleM + vec2(uSeed * 0.137, -uSeed * 0.091), 3, 0.58);
+    float crackWeb = ridgedFbm2D(worldXZ / max(pitScaleM * 1.7, 0.30) - vec2(uSeed * 0.071, uSeed * 0.043), 3, 0.55);
+    float pitSeed = clamp(pitNoise * 0.68 + crackWeb * 0.32, 0.0, 1.0);
+    float pitMask = smoothstep(0.88 - 0.46 * damage, 1.04 - 0.46 * damage, pitSeed);
+    float excess = min(1.5, (damage - uFrostRelease.x) * 1.7 + max(crackMm / visibleThresholdMm - 1.0, 0.0) * 0.35);
+    detachedM = min(uFrostRelease.z, uFrostRelease.z * (0.20 + 0.80 * excess) * pitMask);
+    if (detachedM > 0.0005) {
+      float release = clamp(detachedM / max(uFrostRelease.z, 0.005), 0.0, 1.0);
+      damage = max(0.04, damage - release * (0.34 + 0.38 * uFrostRelease.x));
+      crackMm = max(0.08, crackMm * (1.0 - 0.62 * release));
+    } else {
+      detachedM = 0.0;
+    }
+  }
+
+  outFrost = vec4(damage, crackMm, saturation, detachedM);
+}
+`;
+
+// =============================================================================
 // ROCK IMPRINT: stamps embedded-boulder footprints into the snowpack.
 // Snow crushed beneath a rock is compacted to its residual depth and the
 // displaced volume resurfaces as a rim hugging the rock (peak heights are
@@ -2450,6 +2832,16 @@ void main() {
 
   vec4 gates = vec4(feGate, cuGate, calcGate, saltGate);
   vec4 add = clamp(uMineralComp * gates * horizonGate * clamp(uMineralBand.w, 0.0, 1.0), vec4(0.0), vec4(1.0));
+
+  // Authored beds are themselves the mineral horizons: use this exact bed's
+  // Fe/Cu/carbonate/salt at this dipping stratigraphic coordinate instead of
+  // the legacy global composition gated by an equal-interval bed hash.
+  int authoredBedIdx = strataBedIndexAt(stratY);
+  if (authoredBedIdx >= 0) {
+    vec4 bedChem = clamp(uStrataBedsB[authoredBedIdx], vec4(0.0), vec4(1.0));
+    bedChem.y *= 0.55 + 0.45 * cuVeinNoise; // copper remains vein-hosted within its bed
+    add = clamp(bedChem * clamp(uMineralBand.w, 0.0, 1.0), vec4(0.0), vec4(1.0));
+  }
   outMineral = clamp(prev + (vec4(1.0) - prev) * add, vec4(0.0), vec4(1.0));
 }
 `;
@@ -2551,6 +2943,23 @@ void main() {
 
   float hardness = evalRockHardness3D(vec3(worldXZ.x, terr.r, worldXZ.y), uHardnessParams, uStrataOrient, uSeed);
   float fracture = clamp(1.15 - hardness, 0.10, 1.20);
+  float hydrolysisMineralFactor = -1.0; // legacy path is assigned after veinCalc
+  float hydrolysisAccessFactor = 1.0;
+  int authoredChemBedIdx = strataBedIndexAt(strataColumnCoord(vec3(worldXZ.x, terr.r, worldXZ.y), uStrataOrient, uSeed));
+  if (authoredChemBedIdx >= 0) {
+    vec4 authoredChemComp = clamp(uStrataBedsB[authoredChemBedIdx], vec4(0.0), vec4(1.0));
+    float authoredPorosity = clamp(uStrataBedsA[authoredChemBedIdx].z / 0.30, 0.03, 1.6);
+    float authoredClay = clamp(uStrataBedsC[authoredChemBedIdx].w, 0.0, 1.0);
+    fracture = clamp(0.10 + uStrataBedsA[authoredChemBedIdx].w * 1.05, 0.08, 1.25);
+    // Hydrolysis is chiefly silicate alteration; carbonate belongs mainly
+    // to dissolution in TERRAIN_INTEGRATE. Exact bed clay/Fe and pore access
+    // therefore replace the generic carbonate proxy for authored columns.
+    hydrolysisMineralFactor = clamp(
+      0.28 + authoredClay * 0.55 + authoredChemComp.x * 0.25
+        + (1.0 - authoredChemComp.z) * 0.30,
+      0.15, 1.35);
+    hydrolysisAccessFactor = 0.65 + 0.35 * authoredPorosity;
+  }
   float rockAccess = exp(-sedDepth * 0.85);
   float shallow = clamp(1.15 - sedDepth * 0.45, 0.0, 1.0);
   float exposed = (0.22 + 0.78 * rockAccess) * (1.0 - 0.72 * snowCover);
@@ -2569,13 +2978,14 @@ void main() {
 
   // Sedimentary-layer mineralogy overrides the generic provinces wherever
   // stratigraphic beds baked a source field: set an iron-rich bed and only
-  // that horizon leaches rust; copper beds feed patina; carbonate beds drive
-  // hydrolysis/dissolution; evaporite beds supply salt.
+  // that horizon leaches rust; copper beds feed patina; carbonate beds feed
+  // dissolution; clay/Fe silicate beds feed hydrolysis; evaporite beds supply salt.
   float mineralMix = clamp(uMineralFieldActive, 0.0, 1.0);
   veinFe = mix(veinFe, clamp(mineralC.r * 1.45 + veinFe * 0.12, 0.0, 1.25), mineralMix);
   veinCu = mix(veinCu, clamp(mineralC.g * 1.55 + veinCu * 0.10, 0.0, 1.25), mineralMix);
   veinCalc = mix(veinCalc, clamp(mineralC.b * 1.35 + veinCalc * 0.15, 0.0, 1.25), mineralMix);
   float saltSource = mix(0.35, clamp(mineralC.a * 1.50, 0.0, 1.20), mineralMix);
+  if (hydrolysisMineralFactor < 0.0) hydrolysisMineralFactor = 0.35 + 0.65 * veinCalc;
 
   // Limited pairwise downhill bleeding of dissolved iron/copper. Both cells
   // derive the same transfer from the same old terrain/state, so no stain is
@@ -2635,7 +3045,8 @@ void main() {
   // Hydrolysis: warm, persistently wet, shallowly buried soluble/fractured
   // bedrock alters toward clay saprolite. Strong channels strip it slowly.
   float hydrolysisDrive = uChemRates.y * clamp(moisture, 0.0, 1.3) * warmth * shallow
-                          * (0.35 + 0.65 * veinCalc) * fracture * (1.0 - 0.35 * snowCover);
+                          * hydrolysisMineralFactor * hydrolysisAccessFactor
+                          * fracture * (1.0 - 0.35 * snowCover);
   alteration = chemGrow(alteration, hydrolysisDrive * 0.018, dt);
   alteration *= exp(-max(discharge - 0.85, 0.0) * 0.0012 * dt);
 
@@ -2692,9 +3103,14 @@ layout(location = 0) out vec4 outTerrain;
 
 uniform sampler2D uTerrainTex;
 uniform sampler2D uRockObstacleTex;
+uniform sampler2D uSnowTex;
+uniform sampler2D uFrostTex;
 uniform vec4 uTalusParams;    // (gridRes, cellSize, talusControl, worldSpan)
 uniform vec4 uHardnessParams; // (rockHardness, strataStrength, strataFreq, faultWeakness)
 uniform vec4 uStrataOrient;   // (sinStrike, cosStrike, tanDip, reliefScale)
+uniform vec4 uFrostTalusA;    // (rockfall enabled, frost creep, avalanche, glacier)
+uniform vec4 uFrostTalusB;    // (creep rate, creep min slope, coarse mobility, avalanche entrainment)
+uniform vec4 uFrostTalusC;    // (years/step, avalanche slope, meltwash export, active)
 uniform float uDryAeolian;
 uniform float uSeed;
 
@@ -2717,6 +3133,10 @@ void main() {
   float effHC = max(hC, texelFetch(uRockObstacleTex, c, 0).r);
   vec2 worldXZ = (vUv - 0.5) * uTalusParams.w;
   float hardC = evalRockHardness3D(vec3(worldXZ.x, tC.r, worldXZ.y), uHardnessParams, uStrataOrient, uSeed);
+  vec4 snowC = texelFetch(uSnowTex, c, 0);
+  vec4 frostC = texelFetch(uFrostTex, c, 0);
+  float reposeScale = uFrostTalusA.x > 0.5 ? 1.0 : 0.0;
+  float frostTransportScale = uFrostTalusC.w > 0.5 ? clamp(uFrostTalusC.x * 0.35, 0.12, 2.0) : 0.0;
 
   float drySandBlend = clamp(uDryAeolian, 0.0, 1.0) * (1.0 - smoothstep(0.005, 0.030, tC.a));
   float talusTan = 0.48 + 0.34 * uTalusParams.z;
@@ -2736,6 +3156,8 @@ void main() {
     ivec2 nb = c + offs[i];
     float dist = (i < 4 ? 1.0 : 1.41421356) * cellSize;
     vec4 tN = texelFetch(uTerrainTex, nb, 0);
+    vec4 snowN = texelFetch(uSnowTex, nb, 0);
+    vec4 frostN = texelFetch(uFrostTex, nb, 0);
     float hN = tN.r + tN.g + tN.b;
     float diff = hC - hN;
     float effHN = max(hN, texelFetch(uRockObstacleTex, nb, 0).r);
@@ -2743,23 +3165,69 @@ void main() {
 
     float maxDiffFine = fineTan * dist;
     if (diffSed > maxDiffFine && tC.b > 1e-5) {
-      netFine -= min(tC.b * 0.11, (diffSed - maxDiffFine) * 0.085);
+      netFine -= min(tC.b * 0.11, (diffSed - maxDiffFine) * 0.085) * reposeScale;
     } else if (-diffSed > maxDiffFine && tN.b > 1e-5) {
-      netFine += min(tN.b * 0.11, (-diffSed - maxDiffFine) * 0.085);
+      netFine += min(tN.b * 0.11, (-diffSed - maxDiffFine) * 0.085) * reposeScale;
     }
 
     float maxDiffCoarse = talusTan * dist;
     if (diffSed > maxDiffCoarse && tC.g > 1e-5) {
-      netCoarse -= min(tC.g * 0.10, (diffSed - maxDiffCoarse) * 0.075);
+      netCoarse -= min(tC.g * 0.10, (diffSed - maxDiffCoarse) * 0.075) * reposeScale;
     } else if (-diffSed > maxDiffCoarse && tN.g > 1e-5) {
-      netCoarse += min(tN.g * 0.10, (-diffSed - maxDiffCoarse) * 0.075);
+      netCoarse += min(tN.g * 0.10, (-diffSed - maxDiffCoarse) * 0.075) * reposeScale;
+    }
+
+    // Snow-season mass export. These are pairwise-symmetric exchanges from
+    // the same old state, so frost creep / avalanche entrainment / till
+    // deformation move sediment downslope instead of deleting it or leaving
+    // all frost production on the summit cell that generated it.
+    if (frostTransportScale > 0.001) {
+      float pairSlope = abs(diffSed) / max(dist, 0.01);
+      float iceDiff = (hC + snowC.g) - (hN + snowN.g);
+      if (diffSed > 0.001) {
+        float creepGate = smoothstep(uFrostTalusB.y, uFrostTalusB.y + 0.45, pairSlope)
+          * (0.25 + 0.75 * clamp(frostC.b, 0.0, 1.0))
+          * (0.30 + 0.70 * clamp(frostC.r, 0.0, 1.0));
+        float creepDrive = uFrostTalusA.y * uFrostTalusB.x * creepGate * frostTransportScale;
+        netFine -= min(tC.b * 0.022, diffSed * 0.015) * creepDrive * (0.65 + 0.35 * uFrostTalusC.z);
+        netCoarse -= min(tC.g * 0.014, diffSed * 0.009) * creepDrive * uFrostTalusB.z;
+
+        float avalancheGate = smoothstep(0.05, 0.28, snowC.r)
+          * smoothstep(uFrostTalusC.y, uFrostTalusC.y + 0.55, pairSlope);
+        float avalancheDrive = uFrostTalusA.z * uFrostTalusB.w * avalancheGate * frostTransportScale;
+        netFine -= min(tC.b * 0.035, diffSed * 0.020) * avalancheDrive;
+        netCoarse -= min(tC.g * 0.024, diffSed * 0.014) * avalancheDrive;
+      } else if (diffSed < -0.001) {
+        float creepGateN = smoothstep(uFrostTalusB.y, uFrostTalusB.y + 0.45, pairSlope)
+          * (0.25 + 0.75 * clamp(frostN.b, 0.0, 1.0))
+          * (0.30 + 0.70 * clamp(frostN.r, 0.0, 1.0));
+        float creepDriveN = uFrostTalusA.y * uFrostTalusB.x * creepGateN * frostTransportScale;
+        netFine += min(tN.b * 0.022, (-diffSed) * 0.015) * creepDriveN * (0.65 + 0.35 * uFrostTalusC.z);
+        netCoarse += min(tN.g * 0.014, (-diffSed) * 0.009) * creepDriveN * uFrostTalusB.z;
+
+        float avalancheGateN = smoothstep(0.05, 0.28, snowN.r)
+          * smoothstep(uFrostTalusC.y, uFrostTalusC.y + 0.55, pairSlope);
+        float avalancheDriveN = uFrostTalusA.z * uFrostTalusB.w * avalancheGateN * frostTransportScale;
+        netFine += min(tN.b * 0.035, (-diffSed) * 0.020) * avalancheDriveN;
+        netCoarse += min(tN.g * 0.024, (-diffSed) * 0.014) * avalancheDriveN;
+      }
+
+      if (iceDiff > 0.001 && snowC.g > 0.05) {
+        float tillDrive = uFrostTalusA.w * frostTransportScale * smoothstep(0.05, 0.65, snowC.g);
+        netFine -= min(tC.b * 0.020, iceDiff * 0.012) * tillDrive;
+        netCoarse -= min(tC.g * 0.012, iceDiff * 0.007) * tillDrive;
+      } else if (iceDiff < -0.001 && snowN.g > 0.05) {
+        float tillDriveN = uFrostTalusA.w * frostTransportScale * smoothstep(0.05, 0.65, snowN.g);
+        netFine += min(tN.b * 0.020, (-iceDiff) * 0.012) * tillDriveN;
+        netCoarse += min(tN.g * 0.012, (-iceDiff) * 0.007) * tillDriveN;
+      }
     }
 
     float maxDiffCliff = cliffTan * dist;
-    if (diff > maxDiffCliff && tC.g < 0.05) {
+    if (reposeScale > 0.5 && diff > maxDiffCliff && tC.g < 0.05) {
       float calve = min(max(0.0, tC.r - 1.0) * 0.04, (diff - maxDiffCliff) * 0.032);
       bedCalveLoss += calve;
-    } else if (-diff > 0.78 * dist) {
+    } else if (reposeScale > 0.5 && -diff > 0.78 * dist) {
       vec2 nbXZ = ((vec2(nb) + 0.5) / uTalusParams.x - 0.5) * uTalusParams.w;
       float hardN = evalRockHardness3D(vec3(nbXZ.x, tN.r, nbXZ.y), uHardnessParams, uStrataOrient, uSeed);
       float nbCliffMax = (0.78 + 2.45 * hardN * hardN) * dist;
@@ -2838,6 +3306,7 @@ uniform sampler2D uVelocityFieldTex;
 uniform sampler2D uSnowTex;
 uniform sampler2D uChemTex;
 uniform sampler2D uMineralTex;
+uniform sampler2D uFrostTex;
 uniform sampler2D uCavePortalTex;
 uniform sampler2D uMaskPreviewTex;
 
@@ -3064,16 +3533,34 @@ void main() {
     ? mix(softRockCol, midRockCol, hardness * 2.0)
     : mix(midRockCol, hardRockCol, (hardness - 0.5) * 2.0);
 
+  // Authored measured section: each bed carries its own flat colour. This
+  // intentionally does not derive hue from the periodic hardness cycle, so
+  // a red shale, green marl, peach siltstone and cream dolomite stay in the
+  // exact one-way order/thicknesses authored by the user.
+  float authoredColumnMix = 0.0;
+  int renderBedIdx = strataBedIndexAt(strataColumnCoord(vec3(vWorldPos.x, rockY, vWorldPos.z), uStrataOrient, uSeed));
+  if (renderBedIdx >= 0) {
+    vec3 bedColour = clamp(uStrataBedsC[renderBedIdx].rgb, vec3(0.0), vec3(1.0));
+    bedColour *= 0.84 + 0.32 * hardness;
+    authoredColumnMix = clamp(uStrataColumnMeta.w, 0.0, 1.0);
+    rockAlbedo = mix(rockAlbedo, bedColour, authoredColumnMix);
+  }
+
   float elevFrac = clamp(rockY / max(uStrataOrient.w, 1.0), 0.0, 1.2);
-  rockAlbedo = mix(rockAlbedo, summitCol, smoothstep(0.76, 1.08, elevFrac) * 0.48);
-  rockAlbedo = mix(basinFloorCol, rockAlbedo, smoothstep(0.03, 0.20, elevFrac));
+  rockAlbedo = mix(rockAlbedo, summitCol, smoothstep(0.76, 1.08, elevFrac) * 0.48 * (1.0 - 0.78 * authoredColumnMix));
+  rockAlbedo = mix(
+    basinFloorCol,
+    rockAlbedo,
+    mix(smoothstep(0.03, 0.20, elevFrac), 1.0, authoredColumnMix * 0.82));
 
   // Icelandic subarctic vegetation belt: flat moss colour on gentle low & mid slopes
   if (uMaterialTheme == 1 || uMaterialTheme == 4 || uMaterialTheme == 8) {
     float mossTop = uMaterialTheme == 8 ? 0.82 : 0.66;
     float mossFlora = smoothstep(0.42, 0.88, bedNormal.y)
       * (1.0 - smoothstep(mossTop - 0.30, mossTop, elevFrac));
-    rockAlbedo = mix(rockAlbedo, mossCol, mossFlora * 0.85);
+    // Vegetation can still tint gentle authored-bed outcrops, but must not
+    // bury the measured section's flat lithology colours under a palette tint.
+    rockAlbedo = mix(rockAlbedo, mossCol, mossFlora * 0.85 * (1.0 - 0.78 * authoredColumnMix));
   }
 
   // ==========================================================================
@@ -3236,6 +3723,22 @@ void main() {
     minCol = mix(minCol, vec3(0.96, 0.42, 0.12), clamp(chemD.r, 0.0, 1.0) * 0.72);
     minCol = mix(minCol, vec3(0.10, 0.76, 0.58), clamp(-chemD.b, 0.0, 1.0) * 0.72);
     surfaceAlbedo = minCol;
+  } else if (uViewMode == 10) {
+    // Frost-state diagnostic. This deliberately reveals the stored state
+    // that natural shading hides: blue is pore saturation, violet/orange is
+    // sub-resolution crack damage, and yellow-white marks apertures that
+    // have crossed this grid's visible-pitting threshold.
+    vec4 frostD = sampleGridBilinear(uFrostTex, vUv, res);
+    float damageD = clamp(frostD.r, 0.0, 1.2);
+    float crackNorm = clamp(log2(1.0 + max(frostD.g, 0.0)) / 6.2, 0.0, 1.0);
+    float visibleCrack = smoothstep(max(6.0, cellSize * 8.0), max(12.0, cellSize * 16.0), frostD.g);
+    vec3 frostCol = vec3(0.045, 0.055, 0.075);
+    frostCol = mix(frostCol, vec3(0.08, 0.32, 0.72), clamp(frostD.b, 0.0, 1.0) * 0.52);
+    frostCol = mix(frostCol, vec3(0.48, 0.20, 0.68), clamp(damageD, 0.0, 1.0) * 0.78);
+    frostCol = mix(frostCol, vec3(0.96, 0.42, 0.10), crackNorm * clamp(damageD, 0.0, 1.0) * 0.78);
+    frostCol = mix(frostCol, vec3(1.00, 0.88, 0.42), visibleCrack * 0.88);
+    frostCol += vec3(0.95, 0.97, 1.00) * clamp(frostD.a * 5.0, 0.0, 0.65);
+    surfaceAlbedo = frostCol;
   }
 
   vec3 L = safeNorm3(uSunDir, vec3(0.4, 0.8, 0.4));
@@ -3631,6 +4134,14 @@ void main() {
   // baked geometric edge/cavity masks. No noise grain, no repeating fabric tiles
   // (uFabricMode accepted for compatibility, intentionally unused).
   vec3 albedo = mix(softCol, hardCol, clamp(hardness * 0.85 + vInstMeta.x * 0.25, 0.0, 1.0));
+  // Locally calved clasts inherit the flat colour of the authored bed at
+  // their centre; one source bed per boulder avoids painting fake strata
+  // bands across a transported block.
+  int rockBedIdx = strataBedIndexAt(strataColumnCoord(vInstCentre.xyz, uStrataOrient, uSeed));
+  if (rockBedIdx >= 0) {
+    vec3 bedClastColour = clamp(uStrataBedsC[rockBedIdx].rgb, vec3(0.0), vec3(1.0));
+    albedo = mix(albedo, bedClastColour * (0.86 + 0.24 * hardness), clamp(uStrataColumnMeta.w, 0.0, 1.0) * 0.78);
+  }
   albedo *= (1.0 + 0.08 * vMask.z - 0.14 * vMask.y);
 
   // Chemical weathering: iron rust bleeding & copper patina. Mineral content

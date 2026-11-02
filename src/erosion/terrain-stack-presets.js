@@ -18,6 +18,15 @@ import {
   ROCK_FABRIC_MODES,
   getVegetationDefaultsForLandscape,
 } from './erosion-presets.js';
+import {
+  DEFAULT_FROST_PARAMS,
+  createSnowEffectPreset,
+  summarizeSnowEffects,
+} from './frost-weathering.js';
+import {
+  createStrataColumnPreset,
+  summarizeStrataColumn,
+} from './stratigraphic-column.js';
 
 let layerUidCounter = 1;
 
@@ -197,8 +206,10 @@ export const LAYER_OPERATION_SPECS = {
     defaultName: 'Stratigraphic beds',
     glyph: 'strata',
     reads: ['Height', '3D Strata'],
-    writes: ['3D Hardness', 'Height', 'Overhang', 'Mineral Source'],
-    summary: (p) => `${Number(p.strataFreq).toFixed(1)} beds · dip ${Math.round(p.strataDip)}° · Fe ${Math.round((p.mineralIron ?? 0.55) * 100)}% · Cu ${Math.round((p.mineralCopper ?? 0.16) * 100)}%`,
+    writes: ['3D Hardness', 'Height', 'Overhang', 'Mineral Source', 'Authored Bed Column'],
+    summary: (p) => (p.strataColumnEnabled
+      ? `${summarizeStrataColumn(p.strataBeds)} · dip ${Math.round(p.strataDip ?? 0)}°`
+      : `${Number(p.strataFreq).toFixed(1)} periodic beds · dip ${Math.round(p.strataDip)}° · Fe ${Math.round((p.mineralIron ?? 0.55) * 100)}% · Cu ${Math.round((p.mineralCopper ?? 0.16) * 100)}%`),
     defaults: {
       rockHardness: DEFAULT_EROSION_PARAMS.rockHardness,
       strataStrength: DEFAULT_EROSION_PARAMS.strataStrength,
@@ -206,6 +217,11 @@ export const LAYER_OPERATION_SPECS = {
       strataDip: DEFAULT_EROSION_PARAMS.strataDip,
       strataStrike: DEFAULT_EROSION_PARAMS.strataStrike,
       faultWeakness: DEFAULT_EROSION_PARAMS.faultWeakness,
+      strataColumnEnabled: DEFAULT_EROSION_PARAMS.strataColumnEnabled,
+      strataColumnPreset: DEFAULT_EROSION_PARAMS.strataColumnPreset,
+      strataColumnBaseM: DEFAULT_EROSION_PARAMS.strataColumnBaseM,
+      strataColumnColorStrength: DEFAULT_EROSION_PARAMS.strataColumnColorStrength,
+      strataBeds: createStrataColumnPreset(DEFAULT_EROSION_PARAMS.strataColumnPreset),
       mineralIron: DEFAULT_EROSION_PARAMS.mineralIron,
       mineralCopper: DEFAULT_EROSION_PARAMS.mineralCopper,
       mineralCarbonate: DEFAULT_EROSION_PARAMS.mineralCarbonate,
@@ -494,15 +510,18 @@ export const LAYER_OPERATION_SPECS = {
     category: 'simulation',
     defaultName: 'Snowpack & glaciers',
     glyph: 'snow',
-    reads: ['Height', 'FineSed'],
-    writes: ['Height', 'FineSed', 'SnowIce'],
-    summary: (p) => `Snowline ${Math.round((p.snowline ?? 0.42) * 100)}% · snow ${Math.round((p.snowfallRate ?? 0.82) * 100)}% · ice ${Math.round((p.glacierStrength ?? 0.74) * 100)}%`,
+    reads: ['Height', 'FineSed', '3D Hardness', 'Bed Porosity/Fractures'],
+    writes: ['Height', 'FineSed', 'CoarseSed', 'SnowIce', 'Frost Damage'],
+    summary: (p) => `Snowline ${Math.round((p.snowline ?? 0.42) * 100)}% · snow ${Math.round((p.snowfallRate ?? 0.82) * 100)}% · ${summarizeSnowEffects(p.snowEffects)}`,
     defaults: {
       bakePasses: 0,
       snowline: DEFAULT_EROSION_PARAMS.snowline,
       snowfallRate: DEFAULT_EROSION_PARAMS.snowfallRate,
       glacierStrength: DEFAULT_EROSION_PARAMS.glacierStrength,
       iceMeltRate: DEFAULT_EROSION_PARAMS.iceMeltRate,
+      snowEffectPreset: DEFAULT_EROSION_PARAMS.snowEffectPreset,
+      snowEffects: createSnowEffectPreset(DEFAULT_EROSION_PARAMS.snowEffectPreset).effects,
+      ...structuredClone(DEFAULT_FROST_PARAMS),
       // Legacy fallback fields only; new Snow layers do not secretly start
       // a Wind season. Add Wind Erosion when wind is wanted.
       windSpeed: 0,
@@ -1187,6 +1206,239 @@ function buildSplineRoadTunnelRecipe() {
 }
 
 /**
+ * Two isolated showcase terrains for the research frost-damage state and
+ * authored non-repeating stratigraphic columns. They deliberately reuse the
+ * proven Himalayan/Icelandic base generators, but every new Snow and strata
+ * behaviour is contained in these new stacks rather than being retrofitted
+ * into an old showcase terrain's identity.
+ */
+function buildFrostPittedRainbowRangeRecipe() {
+  const seed = DEFAULT_EROSION_PARAMS.seed;
+  const snowPreset = createSnowEffectPreset('segregation-pitting');
+  const layers = [
+    createStackLayer('rock-placement', {
+      name: 'Frost-shattered summit blocks & boulders',
+      density: 0.42,
+      talusAffinity: 0.52,
+      settleSteps: 0,
+      seed,
+    }),
+    createStackLayer('aeolian-glacial', {
+      name: 'Segregation-ice frost cracking & pitting',
+      bakePasses: 42,
+      snowline: 0.38,
+      snowfallRate: 0.86,
+      glacierStrength: 0.46,
+      iceMeltRate: 0.30,
+      snowEffectPreset: snowPreset.presetId,
+      snowEffects: snowPreset.effects,
+      ...snowPreset.globals,
+      frostInitialDamage: 0.42,
+      frostYearsPerStep: 2.6,
+      windSpeed: 0,
+      windAzimuth: 35,
+      dryAeolianMode: 0,
+    }),
+    createStackLayer('thermal-talus', {
+      name: 'Scree repose below frost-pitted walls',
+      bakePasses: 0,
+      talusAngle: 0.62,
+      rockfallRate: 0.38,
+    }),
+    createStackLayer('chemical-weathering', {
+      name: 'Bed chemistry: rust, copper & carbonate films',
+      bakeSteps: 0,
+      chemRate: 0.58,
+      chemRust: 0.82,
+      chemHydrolysis: 0.55,
+      chemDissolution: 0.62,
+      chemSalt: 0.38,
+      chemVarnish: 0.28,
+      chemCopper: 0.58,
+    }),
+    createStackLayer('hydraulic-erosion', {
+      name: 'Snowmelt wash & light rain',
+      bakeSteps: 0,
+      rainIntensity: 0.22,
+      erosionStrength: 0.50,
+      sedimentCapacity: 0.68,
+      depositionRate: 0.52,
+      evaporation: 0.16,
+      headwaterFlow: 0,
+      lakeRetention: 0.28,
+      oasisSpring: 0,
+    }),
+    createStackLayer('stratigraphic-beds', {
+      name: 'Rainbow Andes authored bed column',
+      rockHardness: 0.54,
+      strataStrength: 0.96,
+      strataFreq: 10.5,
+      strataDip: 9,
+      strataStrike: 24,
+      faultWeakness: 0.58,
+      strataColumnEnabled: true,
+      strataColumnPreset: 'rainbow-andes',
+      strataColumnBaseM: -10,
+      strataColumnColorStrength: 0.96,
+      strataBeds: createStrataColumnPreset('rainbow-andes'),
+      mineralIron: 0.58,
+      mineralCopper: 0.22,
+      mineralCarbonate: 0.48,
+      mineralSalt: 0.16,
+      mineralHorizon: 0.48,
+      mineralHorizonWidth: 0.62,
+      mineralBandStrength: 0.25,
+      terraceCarve: 0.20,
+      ledgeOverhang: 0.08,
+      opacity: 1.0,
+      seed,
+    }),
+    createStackLayer('base-landform', {
+      name: 'Rainbow frost range base',
+      archetype: 7,
+      seed,
+      relief: 215,
+      roughness: 0.70,
+    }),
+    createEnvironmentLayer({ sunAzimuth: 46, sunElevation: 25 }),
+  ];
+  return {
+    manualRecipe: true,
+    expectedRelief: 215,
+    expectedRoughness: 0.70,
+    id: 'frost-pitted-rainbow-range',
+    name: 'Frost-Pitted Rainbow Range',
+    subtitle: 'New test terrain: sub-resolution segregation-ice cracks become visible pits across 14 non-repeating painted beds',
+    category: 'Frost Weathering Test',
+    terrainType: 7,
+    palette: 2,
+    fabricMode: 0,
+    emitterMode: 'glacial-blizzard',
+    particleCount: DEFAULT_EROSION_PARAMS.particleCount,
+    particleInertia: 0.34,
+    pipeFlowBlend: 0.50,
+    sunAzimuth: 46,
+    sunElevation: 25,
+    showWater: true,
+    showParticles: true,
+    layers: () => structuredClone(layers).map((l) => ({ ...l, id: nextLayerId(l.type.slice(0, 4)) })),
+  };
+}
+
+function buildNivationCirqueStrataRecipe() {
+  const seed = DEFAULT_EROSION_PARAMS.seed;
+  const snowPreset = createSnowEffectPreset('nivation-cirque');
+  const layers = [
+    createStackLayer('rock-placement', {
+      name: 'Cirque-floor blocks & frost debris',
+      density: 0.50,
+      talusAffinity: 0.55,
+      settleSteps: 0,
+      seed,
+    }),
+    createStackLayer('aeolian-glacial', {
+      name: 'Nivation, frost creep & snowpatch pitting',
+      bakePasses: 48,
+      snowline: 0.48,
+      snowfallRate: 0.68,
+      glacierStrength: 0.62,
+      iceMeltRate: 0.38,
+      snowEffectPreset: snowPreset.presetId,
+      snowEffects: snowPreset.effects,
+      ...snowPreset.globals,
+      frostInitialDamage: 0.36,
+      frostYearsPerStep: 2.2,
+      windSpeed: 0,
+      windAzimuth: -18,
+      dryAeolianMode: 0,
+    }),
+    createStackLayer('thermal-talus', {
+      name: 'Solifluction lobes & talus repose',
+      bakePasses: 0,
+      talusAngle: 0.58,
+      rockfallRate: 0.48,
+    }),
+    createStackLayer('chemical-weathering', {
+      name: 'Carbonate dissolution & mineral staining',
+      bakeSteps: 0,
+      chemRate: 0.62,
+      chemRust: 0.66,
+      chemHydrolysis: 0.58,
+      chemDissolution: 0.78,
+      chemSalt: 0.48,
+      chemVarnish: 0.24,
+      chemCopper: 0.46,
+    }),
+    createStackLayer('hydraulic-erosion', {
+      name: 'Meltwater rills & alpine rain',
+      bakeSteps: 0,
+      rainIntensity: 0.30,
+      erosionStrength: 0.56,
+      sedimentCapacity: 0.72,
+      depositionRate: 0.54,
+      evaporation: 0.14,
+      headwaterFlow: 0,
+      lakeRetention: 0.34,
+      oasisSpring: 0,
+    }),
+    createStackLayer('stratigraphic-beds', {
+      name: 'Alpine limestone / shale authored column',
+      rockHardness: 0.58,
+      strataStrength: 0.94,
+      strataFreq: 9.0,
+      strataDip: 14,
+      strataStrike: -18,
+      faultWeakness: 0.52,
+      strataColumnEnabled: true,
+      strataColumnPreset: 'alpine-limestone-shale',
+      strataColumnBaseM: -6,
+      strataColumnColorStrength: 0.94,
+      strataBeds: createStrataColumnPreset('alpine-limestone-shale'),
+      mineralIron: 0.28,
+      mineralCopper: 0.16,
+      mineralCarbonate: 0.82,
+      mineralSalt: 0.18,
+      mineralHorizon: 0.46,
+      mineralHorizonWidth: 0.60,
+      mineralBandStrength: 0.25,
+      terraceCarve: 0.22,
+      ledgeOverhang: 0.07,
+      opacity: 1.0,
+      seed,
+    }),
+    createStackLayer('base-landform', {
+      name: 'Nivation cirque strata base',
+      archetype: 6,
+      seed,
+      relief: 178,
+      roughness: 0.66,
+    }),
+    createEnvironmentLayer({ sunAzimuth: 38, sunElevation: 23 }),
+  ];
+  return {
+    manualRecipe: true,
+    expectedRelief: 178,
+    expectedRoughness: 0.66,
+    id: 'nivation-cirque-strata',
+    name: 'Nivation Cirque & Painted Strata',
+    subtitle: 'New test terrain: snowpatch-margin frost damage, solifluction export and an 11-bed limestone/shale column',
+    category: 'Frost Weathering Test',
+    terrainType: 6,
+    palette: 1,
+    fabricMode: 0,
+    emitterMode: 'glacial-blizzard',
+    particleCount: DEFAULT_EROSION_PARAMS.particleCount,
+    particleInertia: 0.34,
+    pipeFlowBlend: 0.52,
+    sunAzimuth: 38,
+    sunElevation: 23,
+    showWater: true,
+    showParticles: true,
+    layers: () => structuredClone(layers).map((l) => ({ ...l, id: nextLayerId(l.type.slice(0, 4)) })),
+  };
+}
+
+/**
  * Curated showcase order across all 19 original `EROSION_LANDSCAPES` (`icelandic-highlands` default first!).
  */
 const PRESET_ORDER = [
@@ -1207,6 +1459,8 @@ const PRESET_ORDER = [
   'utah-wind-rain-canyon',
   'spline-canyon-river-test',
   'spline-road-tunnel-test',
+  'frost-pitted-rainbow-range',
+  'nivation-cirque-strata',
   'alpine-divide',
   'fault-escarpment',
   'volcanic-caldera',
@@ -1222,6 +1476,10 @@ for (const id of PRESET_ORDER) {
     TERRAIN_STACK_PRESETS[id] = buildSplineCanyonRiverRecipe();
   } else if (id === 'spline-road-tunnel-test') {
     TERRAIN_STACK_PRESETS[id] = buildSplineRoadTunnelRecipe();
+  } else if (id === 'frost-pitted-rainbow-range') {
+    TERRAIN_STACK_PRESETS[id] = buildFrostPittedRainbowRangeRecipe();
+  } else if (id === 'nivation-cirque-strata') {
+    TERRAIN_STACK_PRESETS[id] = buildNivationCirqueStrataRecipe();
   } else if (EROSION_LANDSCAPES[id]) {
     TERRAIN_STACK_PRESETS[id] = buildStackRecipeFromLandscape(id);
   }

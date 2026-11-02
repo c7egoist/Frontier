@@ -24,6 +24,33 @@ import {
 } from './terrain-stack-presets.js';
 import { DEFAULT_EROSION_PARAMS } from './erosion-presets.js';
 import {
+  DEFAULT_FROST_PARAMS,
+  MAX_SNOW_EFFECTS,
+  SNOW_EFFECT_PRESETS,
+  SNOW_EFFECT_TYPES,
+  createSnowEffect,
+  createSnowEffectPreset,
+  deriveSnowEffectWeights,
+  estimateAnnualFrostWindow,
+  normalizeFrostParams,
+  normalizeSnowEffect,
+  normalizeSnowEffects,
+  summarizeSnowEffects,
+  visibleCrackThresholdMm,
+} from './frost-weathering.js';
+import {
+  MAX_STRATA_BEDS,
+  STRATA_COLUMN_PRESETS,
+  STRATA_LITHOLOGIES,
+  applyLithologyDefaults,
+  createStrataBed,
+  createStrataColumnPreset,
+  deriveBedProperties,
+  normalizeHexColor,
+  normalizeStrataColumn,
+  strataColumnThickness,
+} from './stratigraphic-column.js';
+import {
   azimuthForWindFromBearing,
   buildWindVectorField,
   windCompassFromAzimuth,
@@ -127,7 +154,7 @@ function layerIconColor(type, cat) {
 const OP_DESCRIPTIONS = {
   'base-landform': 'Constructs foundational bedrock elevation and base rock competency as the first terrain pass, immediately above the locked Environment layer.',
   'mountain-ridges': 'Adds, subtracts, or blends procedural ridges, plateaus, fault escarpments, dunes, or craters.',
-  'stratigraphic-beds': 'Carves dipping sedimentary bed benches and differential hardness, and gives those beds a chemical orientation (iron / copper / carbonate / salt horizons) for water-borne staining.',
+  'stratigraphic-beds': 'Carves dipping sedimentary bed benches and differential hardness. An optional authored measured section gives every bed its own thickness, flat colour, hardness, porosity, fracture, clay and Fe/Cu/carbonate/salt makeup; the sequence clamps at its ends instead of repeating.',
   'rock-stacks': 'Synthesizes Slate-style tiered, leaning boulder tors and mushroom caprock columns.',
   'cliff-push-pull': 'Applies 3D lateral crag buttress and ledge overhang vector displacement on steep faces.',
   'sdf-caves': 'Subtracts real 3D volumetric karst cave tunnels and cliff-base undercuts using boolean SDFs.',
@@ -135,7 +162,7 @@ const OP_DESCRIPTIONS = {
   'river-incision': 'Integrates catchment drainage discharge and carves bedrock gorges weighted by 3D rock hardness.',
   'hydraulic-erosion': 'Simulates rainfall runoff detachment, sediment capacity transport, and piedmont alluvial fans.',
   'thermal-talus': 'Spalls over-steepened cliff faces and relaxes loose scree cones to their angle of repose.',
-  'aeolian-glacial': 'Simulates alpine snowpack, avalanches, firn compaction and cirque glacier plucking. Wind erosion now has its own layer.',
+  'aeolian-glacial': 'Simulates snowpack, firn/glacier flow and a stackable frost-weathering process list. Segregation ice and freeze-thaw first store sub-resolution cracks; only coalesced, resolution-visible damage becomes pits/spalls, then frost creep, meltwash, avalanches and till export the debris.',
   'wind-erosion': 'Simulates turbulent wind flow around rock: sand saltation, deflation, lee deposition, differential sandstone abrasion, basal undercutting, yardang streamlining and warped vertical fluting for fins and spires.',
   'chemical-weathering': 'Reacts water, snowmelt and evaporation with mineral veins: iron rust, copper patina, hydrolysis to clay, dissolution, salt bursting and desert varnish.',
   'spline-feature': 'Legacy interactive spline for canyon gorges, graded roads, or lake basins (unchanged for existing terrains).',
@@ -144,6 +171,75 @@ const OP_DESCRIPTIONS = {
   'vegetation-placement': 'Instantiates up to 44,000 real 3D multi-blade grass tufts masked by slope, elevation, snow, and water.',
   [ENVIRONMENT_LAYER_TYPE]: 'The locked final stack layer. It owns the scene sun direction used for lighting and shadows; it is not a terrain-generating or erosion pass.',
 };
+
+const pctFmt = (v) => `${Math.round(v * 100)}%`;
+
+const FROST_GLOBAL_CONTROLS = [
+  { key: 'frostYearsPerStep', label: 'Simulated Years / Step', min: 0.05, max: 8, step: 0.05, fmt: (v) => `${Number(v).toFixed(2)} yr`, help: 'Physical time represented by one simulation step. Frost damage is intrinsically slow; this is acceleration, not an erosion-strength fudge.' },
+  { key: 'frostMeanTempC', label: 'Mean Annual Rock Temp', min: -18, max: 4, step: 0.1, fmt: (v) => `${Number(v).toFixed(1)}°C`, help: 'Reference rock temperature before elevation, aspect, snow-cover and seasonal/diurnal skin-depth corrections.' },
+  { key: 'frostSeasonalAmplitudeC', label: 'Seasonal Temp Amplitude', min: 0, max: 28, step: 0.25, fmt: (v) => `±${Number(v).toFixed(1)}°C`, help: 'Annual surface-temperature swing. At crack depth it is attenuated and phase-lagged by thermal diffusion.' },
+  { key: 'frostCrackDepthM', label: 'Active Crack Depth', min: 0.05, max: 2.5, step: 0.05, fmt: (v) => `${Number(v).toFixed(2)} m`, help: 'Depth of the frost-cracking horizon. Shallow layers feel diurnal cycles; deeper layers mainly feel slow seasonal segregation-ice growth.' },
+  { key: 'frostThermalDiffusivity', label: 'Thermal Diffusivity', min: 0.15, max: 2.5, step: 0.05, fmt: (v) => `${Number(v).toFixed(2)} ×10⁻⁶ m²/s`, help: 'Controls thermal skin depth. Dense crystalline rock conducts seasonal waves deeper than porous, clay-rich rock.' },
+  { key: 'frostMoisture', label: 'Pore-Water Supply', min: 0, max: 1, step: 0.02, fmt: pctFmt, help: 'Available water from snowmelt, wet sediment and climate before porosity/permeability turn it into stored pore saturation.' },
+  { key: 'frostSaturationPeak', label: 'Peak-Cracking Saturation', min: 0.45, max: 0.95, step: 0.01, fmt: pctFmt, help: 'Research-based optimum for segregation-ice cracking. Very dry pores cannot feed lenses; completely filled pores leave less accommodation space.' },
+  { key: 'frostSnowInsulationM', label: 'Snow Insulation Depth', min: 0.05, max: 1.5, step: 0.05, fmt: (v) => `${Number(v).toFixed(2)} m`, help: 'Snow thickness at which the rock surface is strongly thermally buffered. Thin snow can wet rock; deep snow often suppresses freeze-thaw cycling.' },
+  { key: 'frostInitialDamage', label: 'Initial Sub-Resolution Damage', min: 0, max: 0.85, step: 0.01, fmt: pctFmt, help: 'Pre-aged invisible crack/porosity state used when the stack is evaluated. It does not carve geometry by itself.' },
+  { key: 'frostDamageThreshold', label: 'Visible Damage Threshold', min: 0.1, max: 0.95, step: 0.01, fmt: pctFmt, help: 'Damage must reach this fraction before any bed material can detach as a pit or spall.' },
+  { key: 'frostVisibleCrackMm', label: 'Requested Visible Crack Width', min: 0.5, max: 80, step: 0.5, fmt: (v) => `${Number(v).toFixed(1)} mm`, help: 'Aperture the user considers visible. The solver also requires the crack to be representable at the active terrain-cell size.' },
+  { key: 'frostPitDepthM', label: 'Pit / Spall Depth per Release', min: 0.02, max: 0.6, step: 0.01, fmt: (v) => `${Number(v).toFixed(2)} m`, help: 'Cell-equivalent bedrock thickness detached after both damage and aperture thresholds are crossed.' },
+  { key: 'frostPitScaleCells', label: 'Pit Clustering Scale', min: 0.7, max: 4, step: 0.1, fmt: (v) => `${Number(v).toFixed(1)} cells`, help: 'Spatial scale of coalescing pitted patches. Bed porosity/fracture still decides where clusters can mature.' },
+  { key: 'frostDebrisRetention', label: 'Local Debris Retention', min: 0, max: 1, step: 0.02, fmt: pctFmt, help: 'Fraction of frost-loosened equivalent initially left in the source cell. The rest becomes available to meltwash/creep/avalanche/till export.' },
+];
+
+const SNOW_EFFECT_PARAM_CONTROLS = {
+  'segregation-ice': [
+    { key: 'windowLowC', label: 'Cold Window Edge', min: -16, max: -4, step: 0.25, fmt: (v) => `${Number(v).toFixed(1)}°C` },
+    { key: 'windowHighC', label: 'Warm Window Edge', min: -7, max: -0.5, step: 0.25, fmt: (v) => `${Number(v).toFixed(1)}°C` },
+    { key: 'gradientSensitivity', label: 'Thermal-Gradient Sensitivity', min: 0, max: 2.5, step: 0.05, fmt: (v) => `${Number(v).toFixed(2)}×` },
+    { key: 'depthScale', label: 'Segregation Depth Scale', min: 0.25, max: 2.5, step: 0.05, fmt: (v) => `${Number(v).toFixed(2)}×` },
+  ],
+  'volumetric-freeze-thaw': [
+    { key: 'cycleSensitivity', label: 'Zero-Crossing Sensitivity', min: 0, max: 2.5, step: 0.05, fmt: (v) => `${Number(v).toFixed(2)}×` },
+    { key: 'saturationFloor', label: 'Expansion Saturation Floor', min: 0.25, max: 0.95, step: 0.01, fmt: pctFmt },
+    { key: 'diurnalAmplitudeC', label: 'Diurnal Temp Amplitude', min: 0, max: 14, step: 0.25, fmt: (v) => `±${Number(v).toFixed(1)}°C` },
+  ],
+  'nivation-snowpatch': [
+    { key: 'optimalSnowDepthM', label: 'Most Active Snow Depth', min: 0.03, max: 2.5, step: 0.05, fmt: (v) => `${Number(v).toFixed(2)} m` },
+    { key: 'snowDepthWidthM', label: 'Active Depth Width', min: 0.08, max: 2.5, step: 0.05, fmt: (v) => `${Number(v).toFixed(2)} m` },
+    { key: 'meltwashExport', label: 'Meltwash Export', min: 0, max: 1, step: 0.02, fmt: pctFmt },
+  ],
+  'frost-creep-solifluction': [
+    { key: 'creepRate', label: 'Saturated Creep Rate', min: 0, max: 2, step: 0.05, fmt: (v) => `${Number(v).toFixed(2)}×` },
+    { key: 'minSlope', label: 'Minimum Creep Slope', min: 0, max: 0.8, step: 0.01, fmt: (v) => `${(Math.atan(v) * 180 / Math.PI).toFixed(1)}°` },
+    { key: 'coarseMobility', label: 'Coarse-Clast Mobility', min: 0, max: 1, step: 0.02, fmt: pctFmt },
+  ],
+  'avalanche-scour': [
+    { key: 'slopeThreshold', label: 'Avalanche Release Slope', min: 0.1, max: 1.6, step: 0.02, fmt: (v) => `${(Math.atan(v) * 180 / Math.PI).toFixed(1)}°` },
+    { key: 'entrainment', label: 'Loose-Debris Entrainment', min: 0, max: 1.5, step: 0.05, fmt: (v) => `${Number(v).toFixed(2)}×` },
+    { key: 'scourRate', label: 'Exposed-Bedrock Scour', min: 0, max: 2, step: 0.05, fmt: (v) => `${Number(v).toFixed(2)}×` },
+  ],
+  'glacier-plucking': [
+    { key: 'plucking', label: 'Joint-Block Plucking', min: 0, max: 2, step: 0.05, fmt: (v) => `${Number(v).toFixed(2)}×` },
+    { key: 'abrasion', label: 'Basal Abrasion / Rock Flour', min: 0, max: 2, step: 0.05, fmt: (v) => `${Number(v).toFixed(2)}×` },
+    { key: 'jointSensitivity', label: 'Joint & Thin-Bed Sensitivity', min: 0, max: 2.5, step: 0.05, fmt: (v) => `${Number(v).toFixed(2)}×` },
+  ],
+  'legacy-instant-nivation': [
+    { key: 'localRetention', label: 'Legacy Local Retention', min: 0, max: 1, step: 0.02, fmt: pctFmt },
+    { key: 'marginRate', label: 'Legacy Margin Rate', min: 0, max: 2, step: 0.05, fmt: (v) => `${Number(v).toFixed(2)}×` },
+  ],
+};
+
+const STRATA_BED_CONTROLS = [
+  { key: 'thicknessM', label: 'Thickness', min: 0.4, max: 90, step: 0.5, fmt: (v) => `${Number(v).toFixed(1)} m` },
+  { key: 'hardness', label: 'Rock Hardness / Competence', min: 0.04, max: 0.98, step: 0.01, fmt: pctFmt },
+  { key: 'porosity', label: 'Porosity', min: 0.003, max: 0.55, step: 0.005, fmt: pctFmt },
+  { key: 'fracture', label: 'Jointing / Fracture Density', min: 0, max: 1, step: 0.02, fmt: pctFmt },
+  { key: 'clay', label: 'Clay Fraction', min: 0, max: 1, step: 0.02, fmt: pctFmt },
+  { key: 'iron', label: 'Iron (Fe)', min: 0, max: 1, step: 0.02, fmt: pctFmt },
+  { key: 'copper', label: 'Copper (Cu)', min: 0, max: 1, step: 0.02, fmt: pctFmt },
+  { key: 'carbonate', label: 'Carbonate', min: 0, max: 1, step: 0.02, fmt: pctFmt },
+  { key: 'salt', label: 'Salt / Evaporite', min: 0, max: 1, step: 0.02, fmt: pctFmt },
+];
 
 // Complete Inspector Control Schema per Layer Type (1:1 aligned with canonical generators & conservative physics)
 const INSPECTOR_SCHEMAS = {
@@ -186,11 +282,13 @@ const INSPECTOR_SCHEMAS = {
     sliders: [
       { key: 'rockHardness', label: 'Base Rock Hardness', min: 0.08, max: 0.96, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
       { key: 'strataStrength', label: '3D Strata Contrast', min: 0.0, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
-      { key: 'strataFreq', label: 'Stratigraphic Bed Count', min: 2, max: 24, step: 0.5, fmt: (v) => `${Number(v).toFixed(1)} beds` },
+      { key: 'strataFreq', label: 'Legacy Periodic Bed Count', min: 2, max: 24, step: 0.5, fmt: (v) => `${Number(v).toFixed(1)} cycles` },
       { key: 'strataDip', label: 'Bedding Dip Angle', min: 0, max: 45, step: 1, fmt: (v) => `${Math.round(v)}°` },
       { key: 'strataStrike', label: 'Strike Azimuth', min: -180, max: 180, step: 1, fmt: (v) => `${Math.round(v)}°` },
       { key: 'faultWeakness', label: 'Fracture & Fault Weakness', min: 0.0, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
-      { key: 'mineralIron', label: 'Iron-Rich Beds (Fe → Rust)', min: 0.0, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
+      { key: 'strataColumnBaseM', label: 'Authored Column Base Elevation', min: -120, max: 180, step: 1, fmt: (v) => `${Math.round(v)} m` },
+      { key: 'strataColumnColorStrength', label: 'Authored Bed Colour Strength', min: 0.0, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
+      { key: 'mineralIron', label: 'Legacy Horizon Iron (Fe → Rust)', min: 0.0, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
       { key: 'mineralCopper', label: 'Copper Veins (Cu → Patina)', min: 0.0, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
       { key: 'mineralCarbonate', label: 'Carbonate / Soluble Beds', min: 0.0, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
       { key: 'mineralSalt', label: 'Salt / Evaporite Beds', min: 0.0, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
@@ -469,6 +567,8 @@ export class ErosionLayerStackUI {
     this.draggingSplineAxis = null;
     this._splineDrag = null;
     this.showWindDebug = false;
+    this.selectedSnowEffectId = null;
+    this.selectedStrataBedId = null;
     this._windField = null;
     this._windFieldKey = '';
     this._windFieldBuiltAt = 0;
@@ -999,6 +1099,672 @@ export class ErosionLayerStackUI {
     this.updateSceneCaption();
   }
 
+  _contrastTextForHex(hex) {
+    const safe = normalizeHexColor(hex);
+    const n = parseInt(safe.slice(1), 16);
+    const r = (n >> 16) & 255;
+    const g = (n >> 8) & 255;
+    const b = n & 255;
+    const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+    return luminance > 0.58 ? '#211b15' : '#fff8ec';
+  }
+
+  _rangeControlHtml(def, value, attrs) {
+    const numeric = Number.isFinite(Number(value)) ? Number(value) : def.min;
+    const pct = Math.max(0, Math.min(100, ((numeric - def.min) / Math.max(1e-6, def.max - def.min)) * 100));
+    return `
+      <div class="tp-control-row" ${def.help ? `title="${this._esc(def.help)}"` : ''}>
+        <div class="tp-control-label"><span>${def.label}</span></div>
+        <div class="tp-amount" style="--fill:${pct.toFixed(1)}%">
+          <input type="range" min="${def.min}" max="${def.max}" step="${def.step}" value="${numeric}" ${attrs} />
+          <output>${def.fmt(numeric)}</output>
+        </div>
+      </div>`;
+  }
+
+  _updateRangeOutput(input, def) {
+    const value = Number(input.value);
+    const amount = input.parentElement;
+    const output = amount?.querySelector?.('output');
+    if (output && def) output.textContent = def.fmt(value);
+    const pct = ((value - Number(input.min)) / Math.max(1e-6, Number(input.max) - Number(input.min))) * 100;
+    amount?.style?.setProperty?.('--fill', `${pct.toFixed(1)}%`);
+    return value;
+  }
+
+  _snowEffectsForInspector(layer) {
+    const effects = Array.isArray(layer.params.snowEffects)
+      ? normalizeSnowEffects(layer.params.snowEffects)
+      : createSnowEffectPreset(layer.params.snowEffectPreset ?? DEFAULT_EROSION_PARAMS.snowEffectPreset).effects;
+    layer.params.snowEffects = effects;
+    if (!effects.some((effect) => effect.id === this.selectedSnowEffectId)) {
+      this.selectedSnowEffectId = effects[0]?.id ?? null;
+    }
+    return effects;
+  }
+
+  _strataBedsForInspector(layer) {
+    const beds = normalizeStrataColumn(
+      layer.params.strataBeds,
+      layer.params.strataColumnPreset ?? DEFAULT_EROSION_PARAMS.strataColumnPreset,
+    );
+    layer.params.strataBeds = beds;
+    if (!beds.some((bed) => bed.id === this.selectedStrataBedId)) {
+      this.selectedStrataBedId = beds[beds.length - 1]?.id ?? null;
+    }
+    return beds;
+  }
+
+  _commitSnowLiveChange(layer, reason = 'Snow / frost settings changed', rerender = true) {
+    layer.params.snowEffects = normalizeSnowEffects(layer.params.snowEffects);
+    Object.assign(layer.params, normalizeFrostParams(layer.params));
+    const appliedLive = this.pipeline.applyLiveSnowLayerParams?.(layer, reason);
+    if (!appliedLive) {
+      this.pipeline.evaluateStack({ reseedPlacements: true });
+      this.renderAll();
+      return false;
+    }
+    this.renderStackList();
+    if (rerender) this.renderInspector();
+    this.updateSceneCaption();
+    return true;
+  }
+
+  _commitStrataChange(layer, { fast = false, rerender = true } = {}) {
+    layer.params.strataBeds = normalizeStrataColumn(
+      layer.params.strataBeds,
+      layer.params.strataColumnPreset ?? DEFAULT_EROSION_PARAMS.strataColumnPreset,
+    );
+    this.pipeline.evaluateStack({ reseedPlacements: true, fastPreview: fast });
+    if (rerender) this.renderAll();
+    else {
+      this.renderStackList();
+      this.updateSceneCaption();
+    }
+  }
+
+  _snowFrostCardHtml(layer, iconColor) {
+    const effects = this._snowEffectsForInspector(layer);
+    const frost = normalizeFrostParams(layer.params);
+    Object.assign(layer.params, frost);
+    const selected = effects.find((effect) => effect.id === this.selectedSnowEffectId) || effects[0] || null;
+    const derived = deriveSnowEffectWeights(effects);
+    const annual = estimateAnnualFrostWindow(frost, 0.35);
+    const cellSizeM = (this.engine.params.worldSpan || 500) / Math.max(32, this.engine.gridRes || this.pipeline.R || 256);
+    const visibleMm = visibleCrackThresholdMm(cellSizeM, frost.frostVisibleCrackMm);
+    const presetId = SNOW_EFFECT_PRESETS[layer.params.snowEffectPreset]
+      ? layer.params.snowEffectPreset
+      : 'custom';
+    const presetOptions = [
+      ...(presetId === 'custom' ? '<option value="custom" selected>Custom effect stack</option>' : ''),
+      ...Object.values(SNOW_EFFECT_PRESETS).map((preset) => `<option value="${preset.id}" ${preset.id === presetId ? 'selected' : ''}>${preset.label}</option>`),
+    ].join('');
+    const presetDescription = presetId === 'custom'
+      ? 'This stack has been edited. Duplicate process entries add their intensity (capped), while their physical sub-parameters are intensity-weighted.'
+      : SNOW_EFFECT_PRESETS[presetId].description;
+    const weightChips = [
+      ['Ice lenses', derived.weights.segregation],
+      ['Freeze–thaw', derived.weights.volumetric],
+      ['Nivation', derived.weights.nivation],
+      ['Frost creep', derived.weights.frostCreep],
+      ['Avalanche', derived.weights.avalanche],
+      ['Plucking', derived.weights.glacierPlucking],
+      ['Legacy instant', derived.weights.legacy],
+    ].filter(([, value]) => value > 0.001)
+      .map(([label, value]) => `<span class="tp-frost-weight-chip">${label} ${Math.round(value * 100)}%</span>`)
+      .join('') || '<span class="tp-frost-weight-chip muted">Snowpack only — no bedrock frost weathering</span>';
+    const globalControls = FROST_GLOBAL_CONTROLS
+      .map((def) => this._rangeControlHtml(def, frost[def.key], `data-frost-global="${def.key}"`))
+      .join('');
+    const addOptions = Object.values(SNOW_EFFECT_TYPES)
+      .map((type) => `<option value="${type.id}">${type.label}</option>`)
+      .join('');
+    const effectRows = effects.map((effect, index) => {
+      const spec = SNOW_EFFECT_TYPES[effect.type] || SNOW_EFFECT_TYPES['segregation-ice'];
+      return `
+        <div class="tp-snow-effect-row ${selected?.id === effect.id ? 'selected' : ''} ${effect.enabled ? '' : 'disabled'}" data-snow-effect-row="${effect.id}">
+          <button type="button" class="tp-effect-main" data-snow-effect-select="${effect.id}" title="Select and edit this Snow effect">
+            <span class="tp-effect-dot" style="background:${spec.color}"></span>
+            <span class="tp-effect-copy">
+              <strong>${this._esc(effect.name)}</strong>
+              <small>${spec.short} · ${Math.round(effect.intensity * 100)}% intensity</small>
+            </span>
+          </button>
+          <label class="tp-effect-enable" title="Enable this effect">
+            <input type="checkbox" data-snow-effect-enabled="${effect.id}" ${effect.enabled ? 'checked' : ''} />
+            <span>On</span>
+          </label>
+          <div class="tp-effect-row-actions">
+            <button type="button" data-snow-effect-move="-1:${effect.id}" ${index === 0 ? 'disabled' : ''} title="Move effect up in the stack">↑</button>
+            <button type="button" data-snow-effect-move="1:${effect.id}" ${index === effects.length - 1 ? 'disabled' : ''} title="Move effect down in the stack">↓</button>
+            <button type="button" data-snow-effect-duplicate="${effect.id}" ${effects.length >= MAX_SNOW_EFFECTS ? 'disabled' : ''} title="Duplicate effect (same-process intensities add)">⧉</button>
+            <button type="button" class="danger" data-snow-effect-delete="${effect.id}" title="Delete effect">×</button>
+          </div>
+        </div>`;
+    }).join('');
+    let selectedHtml = '<p class="tp-card-note">No frost-weathering effects. Snow/ice can still accumulate and flow, but it will not crack, pit or pluck bedrock.</p>';
+    if (selected) {
+      const spec = SNOW_EFFECT_TYPES[selected.type] || SNOW_EFFECT_TYPES['segregation-ice'];
+      const typeOptions = Object.values(SNOW_EFFECT_TYPES)
+        .map((type) => `<option value="${type.id}" ${type.id === selected.type ? 'selected' : ''}>${type.label}</option>`)
+        .join('');
+      const paramControls = (SNOW_EFFECT_PARAM_CONTROLS[selected.type] || [])
+        .map((def) => this._rangeControlHtml(def, selected[def.key], `data-snow-effect-param="${def.key}"`))
+        .join('');
+      selectedHtml = `
+        <div class="tp-selected-effect-panel">
+          <div class="tp-selected-effect-head">
+            <span class="tp-effect-dot large" style="background:${spec.color}"></span>
+            <div>
+              <strong>${spec.label}</strong>
+              <small>${summarizeSnowEffects(effects)}</small>
+            </div>
+          </div>
+          <p class="tp-card-note">${spec.description}</p>
+          <label class="tp-field-row">
+            <span>Effect Name</span>
+            <input type="text" class="tp-text-input" data-snow-effect-name value="${this._esc(selected.name)}" maxlength="90" />
+          </label>
+          <label class="tp-field-row">
+            <span>Process Type</span>
+            <select class="tp-select" data-snow-effect-type>${typeOptions}</select>
+          </label>
+          ${this._rangeControlHtml(
+            { key: 'intensity', label: 'Effect Intensity', min: 0, max: 2, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
+            selected.intensity,
+            'data-snow-effect-intensity="1"',
+          )}
+          ${paramControls}
+        </div>`;
+    }
+    return `
+      <section class="tp-property-card tp-snow-frost-card">
+        <h2><i style="background:${iconColor}"></i><span>Frost Cracking, Pitting & Snow Effect Stack</span></h2>
+        <p class="tp-card-note"><strong>Why old Snow could bury summits:</strong> it converted snowy bedrock to sediment immediately in the same cell. Frost debris is real, but real ice-lens damage needs water, a thermal gradient and time. This model stores hairline cracks invisibly, releases pits only after both thresholds below are crossed, then exports loosened debris through creep, meltwash, avalanches and subglacial till.</p>
+        <label class="tp-field-row">
+          <span>Snow Effect Preset</span>
+          <select class="tp-select" id="tp-snow-effect-preset">${presetOptions}</select>
+        </label>
+        <p class="tp-card-note">${presetDescription}</p>
+        <div class="tp-card-footer-btns">
+          <button type="button" class="tp-mini-btn" id="tp-btn-apply-snow-preset">Apply Preset</button>
+          <button type="button" class="tp-mini-btn ${this.pipeline.shadingMode === 10 ? 'active' : ''}" id="tp-btn-frost-diagnostic">Frost Damage View</button>
+        </div>
+        <div class="tp-frost-diagnostics">
+          <div><span>Segregation window</span><strong>${Math.round(annual.windowFraction * 100)}% of year</strong><small>at ${frost.frostCrackDepthM.toFixed(2)} m depth, 0.35 m snow</small></div>
+          <div><span>Thermal skin depth</span><strong>${annual.skinDepthM.toFixed(2)} m</strong><small>surface amplitude ±${annual.amplitudeC.toFixed(1)}°C after insulation</small></div>
+          <div><span>Mean gradient</span><strong>${annual.meanGradientCPerM.toFixed(1)} °C/m</strong><small>drives liquid-film migration to ice lenses</small></div>
+          <div><span>Saturation efficacy</span><strong>${Math.round(annual.saturationEfficacy * 100)}%</strong><small>peak at ${Math.round(frost.frostSaturationPeak * 100)}% pore saturation</small></div>
+          <div><span>Visible crack gate</span><strong>${visibleMm.toFixed(1)} mm</strong><small>= max(requested ${frost.frostVisibleCrackMm.toFixed(1)} mm, ${(cellSizeM * 8).toFixed(1)} mm at ${cellSizeM.toFixed(2)} m cells)</small></div>
+          <div><span>Damage gate</span><strong>${Math.round(frost.frostDamageThreshold * 100)}%</strong><small>below this, natural view and geometry stay unchanged</small></div>
+        </div>
+        <div class="tp-frost-weight-row">${weightChips}</div>
+        <details class="tp-frost-globals" open>
+          <summary>Climate, saturation &amp; sub-resolution release</summary>
+          <p class="tp-card-note">These are live Snow-season controls on the topmost enabled Snow layer: editing them pauses, but does not rebuild the terrain or erase stored cracks. Initial damage is the exception—it is applied when the stack next evaluates.</p>
+          ${globalControls}
+        </details>
+        <div class="tp-effect-add-row">
+          <select class="tp-select" id="tp-snow-effect-add-type" aria-label="Snow effect type to add">${addOptions}</select>
+          <button type="button" class="tp-mini-btn" id="tp-btn-add-snow-effect" ${effects.length >= MAX_SNOW_EFFECTS ? 'disabled' : ''}>+ Add Effect</button>
+        </div>
+        <div class="tp-snow-effect-list">${effectRows || '<div class="tp-empty-inline">No Snow effects in this stack.</div>'}</div>
+        ${selectedHtml}
+      </section>`;
+  }
+
+  _strataColumnCardHtml(layer, iconColor) {
+    const beds = this._strataBedsForInspector(layer);
+    const enabled = layer.params.strataColumnEnabled === true;
+    const presetId = STRATA_COLUMN_PRESETS[layer.params.strataColumnPreset]
+      ? layer.params.strataColumnPreset
+      : 'custom';
+    const totalM = strataColumnThickness(beds);
+    const baseM = Number(layer.params.strataColumnBaseM ?? DEFAULT_EROSION_PARAMS.strataColumnBaseM) || 0;
+    const selectedIndex = Math.max(0, beds.findIndex((bed) => bed.id === this.selectedStrataBedId));
+    const selected = beds[selectedIndex] || beds[beds.length - 1];
+    const selectedBottom = beds.slice(0, selectedIndex).reduce((sum, bed) => sum + bed.thicknessM, 0);
+    const presetOptions = [
+      ...(presetId === 'custom' ? '<option value="custom" selected>Custom geological column</option>' : ''),
+      ...Object.values(STRATA_COLUMN_PRESETS).map((preset) => `<option value="${preset.id}" ${preset.id === presetId ? 'selected' : ''}>${preset.label}</option>`),
+    ].join('');
+    const presetDescription = presetId === 'custom'
+      ? 'Custom measured section. Every bed below is used in order exactly once; beyond the top/bottom, the end bed continues instead of the palette repeating.'
+      : STRATA_COLUMN_PRESETS[presetId].description;
+    const columnRows = beds.map((bed, index) => ({ bed, index })).reverse().map(({ bed, index }) => {
+      const lith = STRATA_LITHOLOGIES[bed.lithology] || STRATA_LITHOLOGIES.sandstone;
+      const heightPx = Math.max(20, Math.min(52, 13 + bed.thicknessM * 1.15));
+      return `
+        <button type="button" class="tp-strata-bed-row ${selected?.id === bed.id ? 'selected' : ''}" data-strata-bed-select="${bed.id}"
+          style="--bed-color:${bed.color};--bed-text:${this._contrastTextForHex(bed.color)};height:${heightPx.toFixed(0)}px"
+          title="Bed ${index + 1} from bottom: ${this._esc(bed.name)} — ${bed.thicknessM.toFixed(1)} m ${lith.label}">
+          <span class="tp-bed-order">${index + 1}</span>
+          <span class="tp-bed-name">${this._esc(bed.name)}</span>
+          <span class="tp-bed-meta">${bed.thicknessM.toFixed(1)} m · H ${Math.round(bed.hardness * 100)}%</span>
+        </button>`;
+    }).join('');
+    let selectedHtml = '';
+    if (selected) {
+      const derived = deriveBedProperties(selected);
+      const lithOptions = Object.values(STRATA_LITHOLOGIES)
+        .map((lith) => `<option value="${lith.id}" ${lith.id === selected.lithology ? 'selected' : ''}>${lith.label}</option>`)
+        .join('');
+      const controls = STRATA_BED_CONTROLS
+        .map((def) => this._rangeControlHtml(def, selected[def.key], `data-strata-bed-param="${def.key}"`))
+        .join('');
+      selectedHtml = `
+        <div class="tp-selected-bed-panel">
+          <div class="tp-selected-bed-head">
+            <span class="tp-bed-swatch" style="background:${selected.color}"></span>
+            <div>
+              <strong>Bed ${selectedIndex + 1} of ${beds.length} from bottom</strong>
+              <small>Stratigraphic interval ${(baseM + selectedBottom).toFixed(1)}–${(baseM + selectedBottom + selected.thicknessM).toFixed(1)} m before dip/warp</small>
+            </div>
+          </div>
+          <label class="tp-field-row">
+            <span>Bed Name</span>
+            <input type="text" class="tp-text-input" data-strata-bed-name value="${this._esc(selected.name)}" maxlength="80" />
+          </label>
+          <label class="tp-field-row">
+            <span>Lithology Template</span>
+            <select class="tp-select" data-strata-bed-lithology>${lithOptions}</select>
+          </label>
+          <div class="tp-bed-color-row">
+            <label>
+              <span>Flat Bed Colour</span>
+              <input type="color" data-strata-bed-color value="${selected.color}" />
+            </label>
+            <input type="text" class="tp-text-input" data-strata-bed-color-hex value="${selected.color}" maxlength="7" aria-label="Bed colour hex" />
+          </div>
+          ${controls}
+          <div class="tp-bed-derived-grid">
+            <div><span>Permeability</span><strong>${derived.permeability.toFixed(2)}×</strong></div>
+            <div><span>Tensile resistance</span><strong>${derived.tensileResistance.toFixed(2)}×</strong></div>
+            <div><span>Frost susceptibility</span><strong>${derived.frostSusceptibility.toFixed(2)}×</strong></div>
+            <div><span>Solubility</span><strong>${Math.round(derived.solubility * 100)}%</strong></div>
+            <div><span>Glacier plucking</span><strong>${Math.round(derived.pluckingSusceptibility * 100)}%</strong></div>
+          </div>
+          <div class="tp-card-footer-btns">
+            <button type="button" class="tp-mini-btn" data-strata-bed-move="1" ${selectedIndex >= beds.length - 1 ? 'disabled' : ''}>Move Younger ↑</button>
+            <button type="button" class="tp-mini-btn" data-strata-bed-move="-1" ${selectedIndex <= 0 ? 'disabled' : ''}>Move Older ↓</button>
+            <button type="button" class="tp-mini-btn" data-strata-bed-duplicate="1" ${beds.length >= MAX_STRATA_BEDS ? 'disabled' : ''}>Duplicate</button>
+            <button type="button" class="tp-mini-btn danger" data-strata-bed-delete="1" ${beds.length <= 1 ? 'disabled' : ''}>Delete Bed</button>
+          </div>
+        </div>`;
+    }
+    return `
+      <section class="tp-property-card tp-strata-column-card">
+        <h2><i style="background:${iconColor}"></i><span>Authored Geological Column</span></h2>
+        <p class="tp-card-note">A measured section, youngest at the top and oldest at the bottom. Thickness, colour and chemistry are independent for every bed. The same bed drives hardness, benching, frost response, mineral staining and flat terrain colour—there is no procedural colour fabric and no repeating colour cycle.</p>
+        <label class="tp-check-row">
+          <input type="checkbox" id="tp-chk-strata-column-enabled" ${enabled ? 'checked' : ''} />
+          <span>Use authored non-repeating beds (instead of legacy periodic cycle)</span>
+        </label>
+        <label class="tp-field-row">
+          <span>Column Preset</span>
+          <select class="tp-select" id="tp-strata-column-preset">${presetOptions}</select>
+        </label>
+        <p class="tp-card-note">${presetDescription}</p>
+        <div class="tp-strata-summary">
+          <span><strong>${beds.length}</strong> beds</span>
+          <span><strong>${totalM.toFixed(1)} m</strong> total</span>
+          <span>${baseM.toFixed(0)} → ${(baseM + totalM).toFixed(0)} m</span>
+          <span>${enabled ? 'Active in simulation' : 'Inactive — legacy cycle in use'}</span>
+        </div>
+        <div class="tp-card-footer-btns">
+          <button type="button" class="tp-mini-btn" id="tp-btn-apply-strata-preset">Apply Column Preset</button>
+          <button type="button" class="tp-mini-btn" id="tp-btn-add-strata-bed" ${beds.length >= MAX_STRATA_BEDS ? 'disabled' : ''}>+ Add Youngest Bed</button>
+        </div>
+        <div class="tp-strata-column-head"><span>Youngest ↑</span><span>Click a bed to edit its chemistry</span><span>↓ Oldest</span></div>
+        <div class="tp-strata-column ${enabled ? '' : 'inactive'}">${columnRows}</div>
+        ${selectedHtml}
+      </section>`;
+  }
+
+  _wireSnowFrostInspector(layer) {
+    if (!this.elInspector || layer.type !== 'aeolian-glacial') return;
+    const root = this.elInspector;
+    const getEffects = () => this._snowEffectsForInspector(layer);
+    const getSelected = () => getEffects().find((effect) => effect.id === this.selectedSnowEffectId) || null;
+    const markCustom = () => { layer.params.snowEffectPreset = 'custom'; };
+    const applyLive = (rerender = true, fastNonAuthority = false) => {
+      layer.params.snowEffects = normalizeSnowEffects(getEffects());
+      Object.assign(layer.params, normalizeFrostParams(layer.params));
+      if (this.pipeline.applyLiveSnowLayerParams?.(layer)) {
+        this.renderStackList();
+        if (rerender) this.renderInspector();
+        this.updateSceneCaption();
+        return true;
+      }
+      this.pipeline.evaluateStack({ reseedPlacements: true, fastPreview: fastNonAuthority });
+      if (rerender) this.renderAll();
+      else {
+        this.renderStackList();
+        this.updateSceneCaption();
+      }
+      return false;
+    };
+
+    document.getElementById('tp-btn-apply-snow-preset')?.addEventListener('click', () => {
+      const select = document.getElementById('tp-snow-effect-preset');
+      const presetId = select?.value;
+      if (!presetId || presetId === 'custom' || !SNOW_EFFECT_PRESETS[presetId]) return;
+      const preset = createSnowEffectPreset(presetId);
+      layer.params.snowEffectPreset = preset.presetId;
+      layer.params.snowEffects = preset.effects;
+      Object.assign(layer.params, preset.globals);
+      this.selectedSnowEffectId = preset.effects[0]?.id ?? null;
+      applyLive(true);
+    });
+
+    document.getElementById('tp-btn-frost-diagnostic')?.addEventListener('click', () => {
+      this.pipeline.shadingMode = this.pipeline.shadingMode === 10 ? 0 : 10;
+      if (this.elShadingSelect) this.elShadingSelect.value = String(this.pipeline.shadingMode);
+      this.renderInspector();
+      this.updateSceneCaption();
+    });
+
+    root.querySelectorAll('[data-frost-global]').forEach((input) => {
+      const key = input.dataset.frostGlobal;
+      const def = FROST_GLOBAL_CONTROLS.find((entry) => entry.key === key);
+      input.addEventListener('input', () => {
+        const value = this._updateRangeOutput(input, def);
+        layer.params[key] = value;
+        if (key !== 'frostInitialDamage') {
+          layer.params.snowEffects = normalizeSnowEffects(getEffects());
+          if (!this.pipeline.applyLiveSnowLayerParams?.(layer)) {
+            this.pipeline.evaluateStack({ reseedPlacements: true, fastPreview: true });
+            this.renderStackList();
+          }
+        }
+        this.updateSceneCaption();
+      });
+      input.addEventListener('change', () => {
+        markCustom();
+        if (key === 'frostInitialDamage') {
+          // Pre-aging is an evaluated initial condition, not a live mutation
+          // of cracks that have already grown during this season.
+          this.pipeline.evaluateStack({ reseedPlacements: true });
+          this.renderAll();
+        } else {
+          applyLive(true);
+        }
+      });
+    });
+
+    document.getElementById('tp-btn-add-snow-effect')?.addEventListener('click', () => {
+      const effects = getEffects();
+      if (effects.length >= MAX_SNOW_EFFECTS) return;
+      const type = document.getElementById('tp-snow-effect-add-type')?.value || 'segregation-ice';
+      const effect = createSnowEffect(type);
+      effects.push(effect);
+      this.selectedSnowEffectId = effect.id;
+      markCustom();
+      applyLive(true);
+    });
+
+    root.querySelectorAll('[data-snow-effect-select]').forEach((button) => {
+      button.addEventListener('click', () => {
+        this.selectedSnowEffectId = button.dataset.snowEffectSelect;
+        this.renderInspector();
+      });
+    });
+
+    root.querySelectorAll('[data-snow-effect-enabled]').forEach((input) => {
+      input.addEventListener('change', () => {
+        const effect = getEffects().find((entry) => entry.id === input.dataset.snowEffectEnabled);
+        if (!effect) return;
+        effect.enabled = Boolean(input.checked);
+        this.selectedSnowEffectId = effect.id;
+        markCustom();
+        applyLive(true);
+      });
+    });
+
+    root.querySelectorAll('[data-snow-effect-move]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const [deltaRaw, effectId] = String(button.dataset.snowEffectMove).split(':');
+        const effects = getEffects();
+        const index = effects.findIndex((entry) => entry.id === effectId);
+        const nextIndex = index + Number(deltaRaw);
+        if (index < 0 || nextIndex < 0 || nextIndex >= effects.length) return;
+        [effects[index], effects[nextIndex]] = [effects[nextIndex], effects[index]];
+        this.selectedSnowEffectId = effectId;
+        markCustom();
+        applyLive(true);
+      });
+    });
+
+    root.querySelectorAll('[data-snow-effect-duplicate]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const effects = getEffects();
+        if (effects.length >= MAX_SNOW_EFFECTS) return;
+        const index = effects.findIndex((entry) => entry.id === button.dataset.snowEffectDuplicate);
+        if (index < 0) return;
+        const source = effects[index];
+        const copy = createSnowEffect(source.type, { ...source, id: undefined, name: `${source.name} copy` });
+        effects.splice(index + 1, 0, copy);
+        this.selectedSnowEffectId = copy.id;
+        markCustom();
+        applyLive(true);
+      });
+    });
+
+    root.querySelectorAll('[data-snow-effect-delete]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const effects = getEffects();
+        const index = effects.findIndex((entry) => entry.id === button.dataset.snowEffectDelete);
+        if (index < 0) return;
+        effects.splice(index, 1);
+        this.selectedSnowEffectId = effects[Math.min(index, effects.length - 1)]?.id ?? null;
+        markCustom();
+        applyLive(true);
+      });
+    });
+
+    const initialSelected = getSelected();
+    if (!initialSelected) return;
+    const selectedId = initialSelected.id;
+    const selectedType = initialSelected.type;
+
+    root.querySelector('[data-snow-effect-name]')?.addEventListener('change', (event) => {
+      const effect = getSelected();
+      if (!effect) return;
+      effect.name = String(event.target.value || '').trim() || SNOW_EFFECT_TYPES[effect.type].label;
+      markCustom();
+      applyLive(true);
+    });
+
+    root.querySelector('[data-snow-effect-type]')?.addEventListener('change', (event) => {
+      const effects = getEffects();
+      const index = effects.findIndex((entry) => entry.id === selectedId);
+      if (index < 0) return;
+      const current = effects[index];
+      effects[index] = createSnowEffect(event.target.value, {
+        id: current.id,
+        name: current.name,
+        enabled: current.enabled,
+        intensity: current.intensity,
+      });
+      this.selectedSnowEffectId = effects[index].id;
+      markCustom();
+      applyLive(true);
+    });
+
+    const bindEffectRange = (input, key, def) => {
+      input.addEventListener('input', () => {
+        // Each commit normalises into fresh effect objects. Resolve the
+        // selected entry by id for every input event; retaining the object
+        // captured when the Inspector was wired would make a slider drag
+        // stop updating after its first tick.
+        const effect = getSelected();
+        if (!effect) return;
+        effect[key] = this._updateRangeOutput(input, def);
+        layer.params.snowEffects = normalizeSnowEffects(layer.params.snowEffects);
+        if (!this.pipeline.applyLiveSnowLayerParams?.(layer)) {
+          this.pipeline.evaluateStack({ reseedPlacements: true, fastPreview: true });
+          this.renderStackList();
+        }
+        this.updateSceneCaption();
+      });
+      input.addEventListener('change', () => {
+        const effects = getEffects();
+        const index = effects.findIndex((entry) => entry.id === selectedId);
+        if (index >= 0) effects[index] = normalizeSnowEffect(effects[index]);
+        markCustom();
+        applyLive(true);
+      });
+    };
+
+    root.querySelectorAll('[data-snow-effect-intensity]').forEach((input) => {
+      bindEffectRange(input, 'intensity', { min: 0, max: 2, fmt: (v) => `${Math.round(v * 100)}%` });
+    });
+    root.querySelectorAll('[data-snow-effect-param]').forEach((input) => {
+      const key = input.dataset.snowEffectParam;
+      const def = (SNOW_EFFECT_PARAM_CONTROLS[selectedType] || []).find((entry) => entry.key === key);
+      if (def) bindEffectRange(input, key, def);
+    });
+  }
+
+  _wireStrataColumnInspector(layer) {
+    if (!this.elInspector || layer.type !== 'stratigraphic-beds') return;
+    const root = this.elInspector;
+    const getBeds = () => this._strataBedsForInspector(layer);
+    const selectedIndexIn = (beds) => Math.max(0, beds.findIndex((bed) => bed.id === this.selectedStrataBedId));
+    const getSelected = () => {
+      const beds = getBeds();
+      return beds[selectedIndexIn(beds)] || null;
+    };
+    const markCustom = () => { layer.params.strataColumnPreset = 'custom'; };
+
+    document.getElementById('tp-chk-strata-column-enabled')?.addEventListener('change', (event) => {
+      layer.params.strataColumnEnabled = Boolean(event.target.checked);
+      getBeds();
+      this._commitStrataChange(layer);
+    });
+
+    document.getElementById('tp-btn-apply-strata-preset')?.addEventListener('click', () => {
+      const presetId = document.getElementById('tp-strata-column-preset')?.value;
+      if (!presetId || presetId === 'custom' || !STRATA_COLUMN_PRESETS[presetId]) return;
+      layer.params.strataColumnPreset = presetId;
+      layer.params.strataBeds = createStrataColumnPreset(presetId);
+      layer.params.strataColumnEnabled = true;
+      this.selectedStrataBedId = layer.params.strataBeds[layer.params.strataBeds.length - 1]?.id ?? null;
+      this._commitStrataChange(layer);
+    });
+
+    document.getElementById('tp-btn-add-strata-bed')?.addEventListener('click', () => {
+      const beds = getBeds();
+      if (beds.length >= MAX_STRATA_BEDS) return;
+      const source = beds[selectedIndexIn(beds)] || beds[beds.length - 1];
+      const bed = createStrataBed(source?.lithology || 'sandstone', {
+        name: 'New youngest bed',
+        thicknessM: 12,
+      });
+      beds.push(bed);
+      this.selectedStrataBedId = bed.id;
+      markCustom();
+      this._commitStrataChange(layer);
+    });
+
+    root.querySelectorAll('[data-strata-bed-select]').forEach((button) => {
+      button.addEventListener('click', () => {
+        this.selectedStrataBedId = button.dataset.strataBedSelect;
+        this.renderInspector();
+      });
+    });
+
+    if (!getSelected()) return;
+
+    root.querySelector('[data-strata-bed-name]')?.addEventListener('change', (event) => {
+      const bed = getSelected();
+      if (!bed) return;
+      bed.name = String(event.target.value || '').trim() || STRATA_LITHOLOGIES[bed.lithology].label;
+      markCustom();
+      this._commitStrataChange(layer);
+    });
+
+    root.querySelector('[data-strata-bed-lithology]')?.addEventListener('change', (event) => {
+      const beds = getBeds();
+      const index = selectedIndexIn(beds);
+      beds[index] = applyLithologyDefaults(beds[index], event.target.value);
+      this.selectedStrataBedId = beds[index].id;
+      markCustom();
+      this._commitStrataChange(layer);
+    });
+
+    const colorInput = root.querySelector('[data-strata-bed-color]');
+    colorInput?.addEventListener('input', () => {
+      // Resolve by id on every colour/slider event: each commit rebuilds
+      // the normalised bed objects, so a captured bed would go stale after
+      // the first tick of a continuous drag.
+      const bed = getSelected();
+      if (!bed) return;
+      bed.color = normalizeHexColor(colorInput.value, bed.color);
+      const hexInput = root.querySelector('[data-strata-bed-color-hex]');
+      if (hexInput) hexInput.value = bed.color;
+      markCustom();
+      this._commitStrataChange(layer, { fast: true, rerender: false });
+    });
+    colorInput?.addEventListener('change', () => this._commitStrataChange(layer));
+
+    root.querySelector('[data-strata-bed-color-hex]')?.addEventListener('change', (event) => {
+      const bed = getSelected();
+      if (!bed) return;
+      bed.color = normalizeHexColor(event.target.value, bed.color);
+      markCustom();
+      this._commitStrataChange(layer);
+    });
+
+    root.querySelectorAll('[data-strata-bed-param]').forEach((input) => {
+      const key = input.dataset.strataBedParam;
+      const def = STRATA_BED_CONTROLS.find((entry) => entry.key === key);
+      input.addEventListener('input', () => {
+        const bed = getSelected();
+        if (!bed) return;
+        bed[key] = this._updateRangeOutput(input, def);
+        markCustom();
+        this._commitStrataChange(layer, { fast: true, rerender: false });
+      });
+      input.addEventListener('change', () => this._commitStrataChange(layer));
+    });
+
+    root.querySelectorAll('[data-strata-bed-move]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const beds = getBeds();
+        const index = selectedIndexIn(beds);
+        const nextIndex = index + Number(button.dataset.strataBedMove);
+        if (nextIndex < 0 || nextIndex >= beds.length) return;
+        [beds[index], beds[nextIndex]] = [beds[nextIndex], beds[index]];
+        this.selectedStrataBedId = beds[nextIndex].id;
+        markCustom();
+        this._commitStrataChange(layer);
+      });
+    });
+
+    root.querySelector('[data-strata-bed-duplicate]')?.addEventListener('click', () => {
+      const beds = getBeds();
+      if (beds.length >= MAX_STRATA_BEDS) return;
+      const index = selectedIndexIn(beds);
+      const source = beds[index];
+      const copy = createStrataBed(source.lithology, { ...source, id: undefined, name: `${source.name} copy` });
+      beds.splice(index + 1, 0, copy);
+      this.selectedStrataBedId = copy.id;
+      markCustom();
+      this._commitStrataChange(layer);
+    });
+
+    root.querySelector('[data-strata-bed-delete]')?.addEventListener('click', () => {
+      const beds = getBeds();
+      if (beds.length <= 1) return;
+      const index = selectedIndexIn(beds);
+      beds.splice(index, 1);
+      this.selectedStrataBedId = beds[Math.min(index, beds.length - 1)]?.id ?? null;
+      markCustom();
+      this._commitStrataChange(layer);
+    });
+  }
+
   renderInspector() {
     if (!this.elInspector) return;
     const layer = this.pipeline.getSelectedLayer();
@@ -1130,6 +1896,9 @@ export class ErosionLayerStackUI {
           </div>
         </section>`;
     }
+
+    const snowFrostCardHtml = layer.type === 'aeolian-glacial' ? this._snowFrostCardHtml(layer, iconColor) : '';
+    const strataColumnCardHtml = layer.type === 'stratigraphic-beds' ? this._strataColumnCardHtml(layer, iconColor) : '';
 
     // Per-layer season trigger: simulate ONLY this layer's process(es).
     let simCardHtml = '';
@@ -1305,6 +2074,8 @@ export class ErosionLayerStackUI {
       </section>
 
       ${authoringCardHtml}
+      ${snowFrostCardHtml}
+      ${strataColumnCardHtml}
       ${simCardHtml}
       ${windDebugCardHtml}
       ${maskCardHtml}
@@ -1412,6 +2183,9 @@ export class ErosionLayerStackUI {
         this.renderStackList();
       });
     }
+
+    this._wireSnowFrostInspector(layer);
+    this._wireStrataColumnInspector(layer);
 
     this.elInspector.querySelectorAll('[data-simulate-process]').forEach((b) => {
       b.addEventListener('click', () => {

@@ -332,7 +332,8 @@ void main() {
 
     vec2 dipDir = vec2(-sin(strikeRad), cos(strikeRad));
     float warp = (fbm2D(worldXZ * 0.009 + seed * 0.013, 3, 0.5) - 0.5) * 14.0;
-    float stratCoord = (tC.r + dot(worldXZ, dipDir) * tan(dipRad) + warp) / max(30.0, maxRelief);
+    float stratMeters = tC.r + dot(worldXZ, dipDir) * tan(dipRad) + warp;
+    float stratCoord = stratMeters / max(30.0, maxRelief);
 
     float ph = stratCoord * bedCount;
     float idx = floor(ph);
@@ -341,6 +342,31 @@ void main() {
     float stepF = mix(f, safeSmoothstep(0.18, 0.82, f), clamp(terraceStr * (0.45 + 0.55 * bedHard), 0.0, 0.96));
     float newStrat = (idx + stepF) / bedCount;
     float steppedH = newStrat * max(30.0, maxRelief) - dot(worldXZ, dipDir) * tan(dipRad) - warp;
+
+    // Authored measured section: bench inside the actual variable-thickness
+    // bed at this stratigraphic height. Hard beds retain ledges; soft beds
+    // round into slopes. Outside the section, bottom/top beds clamp rather
+    // than repeating the sequence.
+    if (uParam2.y > 0.5) {
+      // Use COMMON_GEOLOGY_GLSL's exact stratigraphic coordinate here, rather
+      // than this op's legacy benching coordinate, so the geometric ledge is
+      // carved inside the same bed that supplies hardness/colour/chemistry.
+      vec2 commonStrike = vec2(sin(strikeRad), cos(strikeRad));
+      float acrossCommon = dot(worldXZ, commonStrike);
+      float warpCommon = (fbm2D(worldXZ / max(maxRelief, 1.0) * 2.2 + seed, 3, 0.55) - 0.5) * 14.0;
+      float stratCommon = tC.r + acrossCommon * tan(dipRad) + warpCommon;
+      int authoredIdx = strataBedIndexAt(stratCommon);
+      if (authoredIdx >= 0) {
+        float localM = stratCommon - uStrataColumnMeta.z;
+        float bottomM = strataBedBottomM(authoredIdx);
+        float thicknessM = strataBedThicknessM(authoredIdx);
+        f = clamp((localM - bottomM) / max(thicknessM, 0.05), 0.0, 1.0);
+        bedHard = uStrataBedsA[authoredIdx].y;
+        stepF = mix(f, safeSmoothstep(0.18, 0.82, f), clamp(terraceStr * (0.35 + 0.65 * bedHard), 0.0, 0.96));
+        float newStratMeters = uStrataColumnMeta.z + bottomM + stepF * thicknessM;
+        steppedH = newStratMeters - acrossCommon * tan(dipRad) - warpCommon;
+      }
+    }
 
     float slopeGate = safeSmoothstep(8.0, 34.0, slopeDeg);
     tC.r = max(1.0, mix(tC.r, steppedH, clamp(opacity * terraceStr * (0.35 + 0.65 * slopeGate), 0.0, 1.0)));

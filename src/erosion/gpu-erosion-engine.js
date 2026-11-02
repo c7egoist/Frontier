@@ -7,6 +7,7 @@ import {
 import {
   FULLSCREEN_VERT,
   CHEM_WEATHER_FRAG,
+  FROST_DAMAGE_FRAG,
   MINERAL_ACCUM_FRAG,
   GRASS_INSTANCE_FRAG,
   GRASS_INSTANCE_VERT,
@@ -35,6 +36,17 @@ import { MAX_GRASS_TUFTS, buildGrassTuftMesh } from './grass-system.js';
 import { RockCalvingSystem } from './rock-calving.js';
 import { TerrainStackPipeline } from './terrain-stack-pipeline.js';
 import { effectiveWindAzimuthAtStep, windShiftOffsetDeg, windCyclesAtStep } from './wind-regime.js';
+import {
+  createSnowEffectPreset,
+  deriveSnowEffectWeights,
+  normalizeFrostParams,
+  normalizeSnowEffects,
+} from './frost-weathering.js';
+import {
+  createStrataColumnPreset,
+  normalizeStrataColumn,
+  packStrataColumnUniforms,
+} from './stratigraphic-column.js';
 
 const PART_TEX_W = 256;
 const PART_TEX_H = 128; // 256 * 128 = 32,768 GPU particle slots
@@ -205,6 +217,10 @@ export class GpuErosionEngine {
       engineOptions.gridSize ?? engineOptions.terrainResolution
     );
     this.params = { ...DEFAULT_EROSION_PARAMS, gridSize: requestedGridSize };
+    this.params.snowEffects = createSnowEffectPreset(DEFAULT_EROSION_PARAMS.snowEffectPreset).effects;
+    this.params.strataBeds = createStrataColumnPreset(DEFAULT_EROSION_PARAMS.strataColumnPreset);
+    this._strataColumnCacheKey = '';
+    this._strataColumnCache = null;
     this.gridRes = requestedGridSize;
 
     this.active = false;   // Whether this viewport tab is visible
@@ -273,6 +289,7 @@ export class GpuErosionEngine {
     this.progWaterFlux = createProgram(gl, FULLSCREEN_VERT, WATER_FLUX_FRAG, 'WaterFlux');
     this.progTerrainIntegrate = createProgram(gl, FULLSCREEN_VERT, TERRAIN_INTEGRATE_FRAG, 'TerrainIntegrate');
     this.progSnowCryo = createProgram(gl, FULLSCREEN_VERT, SNOW_CRYO_FRAG, 'SnowCryo');
+    this.progFrostDamage = createProgram(gl, FULLSCREEN_VERT, FROST_DAMAGE_FRAG, 'FrostDamage');
     this.progRockImprint = createProgram(gl, FULLSCREEN_VERT, ROCK_IMPRINT_FRAG, 'RockImprint');
     this.progRockObstacle = createProgram(gl, FULLSCREEN_VERT, ROCK_OBSTACLE_FRAG, 'RockObstacle');
     this.progChemWeather = createProgram(gl, FULLSCREEN_VERT, CHEM_WEATHER_FRAG, 'ChemWeather');
@@ -342,6 +359,24 @@ export class GpuErosionEngine {
     for (let i = 0; i < 2; i++) {
       gl.bindFramebuffer(gl.FRAMEBUFFER, this.fboChem[i]);
       gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+    // Frost-damage state ping-pong (RGBA32F: damage, crack aperture mm,
+    // pore saturation, detached metres queued for this step's integrator).
+    this.frostTex = [
+      createDataTexture(gl, R, R, gl.RGBA32F, gl.RGBA, gl.FLOAT),
+      createDataTexture(gl, R, R, gl.RGBA32F, gl.RGBA, gl.FLOAT),
+    ];
+    this.frostIdx = 0;
+    this.fboFrost = [
+      createFbo(gl, [this.frostTex[0]]),
+      createFbo(gl, [this.frostTex[1]]),
+    ];
+    for (let i = 0; i < 2; i++) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this.fboFrost[i]);
+      gl.clearColor(0, 0.05, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
     }
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -889,6 +924,140 @@ export class GpuErosionEngine {
     };
   }
 
+  /** Cached authored-bed uniform arrays shared by every geology shader. */
+  _getStrataColumnUniforms() {
+    const p = this.params;
+    const beds = normalizeStrataColumn(p.strataBeds, p.strataColumnPreset || DEFAULT_EROSION_PARAMS.strataColumnPreset);
+    const enabled = p.strataLayerEnabled !== false && p.strataColumnEnabled === true;
+    const key = JSON.stringify({
+      enabled,
+      preset: p.strataColumnPreset,
+      base: p.strataColumnBaseM,
+      color: p.strataColumnColorStrength,
+      beds,
+    });
+    if (key !== this._strataColumnCacheKey || !this._strataColumnCache) {
+      this._strataColumnCacheKey = key;
+      this._strataColumnCache = packStrataColumnUniforms(beds, {
+        enabled,
+        presetId: p.strataColumnPreset,
+        baseM: p.strataColumnBaseM ?? DEFAULT_EROSION_PARAMS.strataColumnBaseM,
+        colorStrength: p.strataColumnColorStrength ?? DEFAULT_EROSION_PARAMS.strataColumnColorStrength,
+      });
+    }
+    return this._strataColumnCache;
+  }
+
+  _bindStrataColumnUniforms(program) {
+    if (!program) return;
+    const gl = this.gl;
+    const packed = this._getStrataColumnUniforms();
+    gl.uniform4fv(gl.getUniformLocation(program, 'uStrataColumnMeta'), packed.meta);
+    gl.uniform4fv(gl.getUniformLocation(program, 'uStrataBedsA[0]'), packed.bedsA);
+    gl.uniform4fv(gl.getUniformLocation(program, 'uStrataBedsB[0]'), packed.bedsB);
+    gl.uniform4fv(gl.getUniformLocation(program, 'uStrataBedsC[0]'), packed.bedsC);
+  }
+
+  /** Normalised Snow effect-stack weights + physical frost controls. */
+  _getFrostUniforms() {
+    const p = this.params;
+    const frost = normalizeFrostParams(p);
+    const derived = deriveSnowEffectWeights(normalizeSnowEffects(p.snowEffects, p.snowEffectPreset));
+    const w = derived.weights;
+    const ep = derived.params;
+    const cryoPlaying = p.simCryoPlaying !== false;
+    const active = cryoPlaying && derived.anyDamage;
+    const sunAz = ((Number(p.sunAzimuth) || 0) * Math.PI) / 180;
+    const sunEl = ((Number(p.sunElevation) || 28) * Math.PI) / 180;
+    const sunHoriz = Math.max(0.12, Math.cos(sunEl));
+    return {
+      frost,
+      derived,
+      active,
+      anyWeathering: cryoPlaying && derived.anyWeathering,
+      anyTransport: cryoPlaying && derived.anyTransport,
+      domain: [this.gridRes, p.worldSpan / this.gridRes, p.worldSpan, this.stepCount || 0],
+      climateA: [frost.frostMeanTempC, frost.frostSeasonalAmplitudeC, frost.frostYearsPerStep, frost.frostCrackDepthM],
+      climateB: [frost.frostThermalDiffusivity, frost.frostMoisture, frost.frostSaturationPeak, frost.frostSnowInsulationM],
+      effectsA: [w.segregation, w.volumetric, w.nivation, w.legacy],
+      effectsB: [w.frostCreep, w.avalanche, w.glacierPlucking, active ? 1 : 0],
+      release: [frost.frostDamageThreshold, frost.frostVisibleCrackMm, frost.frostPitDepthM, frost.frostPitScaleCells],
+      effectParamsA: [ep.windowLowC, ep.windowHighC, ep.gradientSensitivity, ep.cycleSensitivity],
+      effectParamsB: [ep.saturationFloor, ep.diurnalAmplitudeC, ep.optimalSnowDepthM, ep.snowDepthWidthM],
+      effectParamsC: [frost.frostInitialDamage, 0, frost.frostDebrisRetention, ep.depthScale],
+      sun: [Math.cos(sunAz) * sunHoriz, Math.sin(sunAz) * sunHoriz, Math.max(0, Math.sin(sunEl)), 0],
+      integrateA: [cryoPlaying ? w.legacy : 0, cryoPlaying ? w.avalanche : 0, cryoPlaying ? w.glacierPlucking : 0, active ? 1 : 0],
+      integrateB: [frost.frostDebrisRetention, ep.avalancheSlope, ep.avalancheScour, ep.legacyRetention],
+      integrateC: [ep.glacierPlucking, ep.glacierAbrasion, ep.jointSensitivity, ep.legacyMarginRate],
+      talusA: [p.simRockfallPlaying === false ? 0 : 1, cryoPlaying ? w.frostCreep : 0, cryoPlaying ? w.avalanche : 0, cryoPlaying ? w.glacierPlucking : 0],
+      talusB: [ep.creepRate, ep.creepMinSlope, ep.coarseMobility, ep.avalancheEntrainment],
+      talusC: [frost.frostYearsPerStep, ep.avalancheSlope, ep.meltwashExport, cryoPlaying && derived.anyTransport ? 1 : 0],
+    };
+  }
+
+  _clearFrostWeathering() {
+    const gl = this.gl;
+    gl.viewport(0, 0, this.gridRes, this.gridRes);
+    for (let i = 0; i < 2; i++) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this.fboFrost[i]);
+      gl.clearColor(0, 0.05, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    this.frostIdx = 0;
+  }
+
+  _runFrostPass(initialise = false) {
+    const frostU = this._getFrostUniforms();
+    if (!initialise && !frostU.active) return false;
+    const gl = this.gl;
+    const R = this.gridRes;
+    const p = this.params;
+    const { hardnessVec, strataVec } = this._getHardnessUniforms();
+    const climate = this._getClimateUniforms();
+    const next = 1 - this.frostIdx;
+    const prev = this.frostIdx;
+
+    gl.disable(gl.DEPTH_TEST);
+    gl.disable(gl.BLEND);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.fboFrost[next]);
+    gl.viewport(0, 0, R, R);
+    gl.useProgram(this.progFrostDamage);
+    gl.bindVertexArray(this.emptyVao);
+    this._bindTex(this.progFrostDamage, 'uTerrainTex', this.terrainTex[this.terrainIdx], 0);
+    this._bindTex(this.progFrostDamage, 'uSnowTex', this.snowTex[this.snowIdx], 1);
+    this._bindTex(this.progFrostDamage, 'uFrostTex', this.frostTex[prev], 2);
+    this._bindTex(this.progFrostDamage, 'uChemTex', this.chemTex[this.chemIdx], 3);
+    gl.uniform4fv(gl.getUniformLocation(this.progFrostDamage, 'uFrostDomain'), frostU.domain);
+    gl.uniform4fv(gl.getUniformLocation(this.progFrostDamage, 'uFrostClimateA'), frostU.climateA);
+    gl.uniform4fv(gl.getUniformLocation(this.progFrostDamage, 'uFrostClimateB'), frostU.climateB);
+    gl.uniform4fv(gl.getUniformLocation(this.progFrostDamage, 'uFrostEffectsA'), frostU.effectsA);
+    gl.uniform4fv(gl.getUniformLocation(this.progFrostDamage, 'uFrostEffectsB'), frostU.effectsB);
+    gl.uniform4fv(gl.getUniformLocation(this.progFrostDamage, 'uFrostRelease'), frostU.release);
+    gl.uniform4fv(gl.getUniformLocation(this.progFrostDamage, 'uFrostEffectParamsA'), frostU.effectParamsA);
+    gl.uniform4fv(gl.getUniformLocation(this.progFrostDamage, 'uFrostEffectParamsB'), frostU.effectParamsB);
+    const paramsC = [...frostU.effectParamsC];
+    paramsC[1] = initialise ? 1 : 0;
+    gl.uniform4fv(gl.getUniformLocation(this.progFrostDamage, 'uFrostEffectParamsC'), paramsC);
+    gl.uniform4fv(gl.getUniformLocation(this.progFrostDamage, 'uFrostSun'), frostU.sun);
+    gl.uniform4fv(gl.getUniformLocation(this.progFrostDamage, 'uClimate'), climate.snowVec);
+    gl.uniform4fv(gl.getUniformLocation(this.progFrostDamage, 'uHardnessParams'), hardnessVec);
+    gl.uniform4fv(gl.getUniformLocation(this.progFrostDamage, 'uStrataOrient'), strataVec);
+    this._bindStrataColumnUniforms(this.progFrostDamage);
+    gl.uniform1f(gl.getUniformLocation(this.progFrostDamage, 'uSeed'), p.seed);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    this.frostIdx = next;
+    return true;
+  }
+
+  /** Clears and spatially pre-ages sub-resolution cracks for a fresh stack. */
+  seedFrostWeathering() {
+    this._clearFrostWeathering();
+    const frostU = this._getFrostUniforms();
+    if (!frostU.derived.anyDamage || frostU.frost.frostInitialDamage <= 0.0005) return;
+    this._runFrostPass(true);
+  }
+
   _getLayerVisUniforms() {
     const p = this.params;
     return [
@@ -1048,6 +1217,8 @@ export class GpuErosionEngine {
     const vegDefaults = getVegetationDefaultsForLandscape(preset.id);
     Object.assign(this.params, DEFAULT_EROSION_PARAMS, vegDefaults, preset.defaults, keep);
     this.params.proceduralModifiers = [];
+    this.params.snowEffects = createSnowEffectPreset(DEFAULT_EROSION_PARAMS.snowEffectPreset).effects;
+    this.params.strataBeds = createStrataColumnPreset(DEFAULT_EROSION_PARAMS.strataColumnPreset);
     this.params.materialTheme = preset.defaults.materialTheme ?? preset.materialTheme ?? 0;
     this.params.fabricMode = preset.defaults.fabricMode ?? preset.fabricMode ?? 0;
     if (preset.defaults.showWater !== undefined) {
@@ -1160,6 +1331,7 @@ export class GpuErosionEngine {
     this.snowIdx = 0;
     this.seedDefaultMineralField();
     this.seedChemicalWeathering();
+    this.seedFrostWeathering();
 
     // 3. Spawn staggered sky raindrops across all 32,768 GPU particle slots
     const emitter = EMITTER_MODES[p.emitterMode] || EMITTER_MODES['sky-rain'];
@@ -1293,6 +1465,7 @@ export class GpuErosionEngine {
     );
     gl.uniform4fv(gl.getUniformLocation(this.progMineralAccum, 'uHardnessParams'), hv);
     gl.uniform4fv(gl.getUniformLocation(this.progMineralAccum, 'uStrataOrient'), sv);
+    this._bindStrataColumnUniforms(this.progMineralAccum);
     gl.uniform4f(gl.getUniformLocation(this.progMineralAccum, 'uMineralDomain'), R, p.worldSpan, seed ?? p.seed, 0);
     gl.uniform1f(gl.getUniformLocation(this.progMineralAccum, 'uSeed'), seed ?? p.seed);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -1388,6 +1561,7 @@ export class GpuErosionEngine {
     );
     gl.uniform4fv(gl.getUniformLocation(this.progChemWeather, 'uHardnessParams'), hardnessVec);
     gl.uniform4fv(gl.getUniformLocation(this.progChemWeather, 'uStrataOrient'), strataVec);
+    this._bindStrataColumnUniforms(this.progChemWeather);
     gl.uniform4fv(gl.getUniformLocation(this.progChemWeather, 'uClimate'), climate.snowVec);
     gl.uniform1f(gl.getUniformLocation(this.progChemWeather, 'uSeed'), p.seed);
     gl.uniform1f(gl.getUniformLocation(this.progChemWeather, 'uChemFlowScale'), flowScale);
@@ -1430,6 +1604,13 @@ export class GpuErosionEngine {
     gl.uniform4f(gl.getUniformLocation(this.progThermalTalus, 'uTalusParams'), R, cellSize, p.talusAngle, p.worldSpan);
     gl.uniform4fv(gl.getUniformLocation(this.progThermalTalus, 'uHardnessParams'), hardnessVec);
     gl.uniform4fv(gl.getUniformLocation(this.progThermalTalus, 'uStrataOrient'), strataVec);
+    this._bindStrataColumnUniforms(this.progThermalTalus);
+    const frostU = this._getFrostUniforms();
+    const talusA = [...frostU.talusA];
+    talusA[0] = 1;
+    gl.uniform4fv(gl.getUniformLocation(this.progThermalTalus, 'uFrostTalusA'), talusA);
+    gl.uniform4fv(gl.getUniformLocation(this.progThermalTalus, 'uFrostTalusB'), frostU.talusB);
+    gl.uniform4fv(gl.getUniformLocation(this.progThermalTalus, 'uFrostTalusC'), frostU.talusC);
     gl.uniform1f(gl.getUniformLocation(this.progThermalTalus, 'uDryAeolian'), p.dryAeolianMode || 0.0);
     gl.uniform1f(gl.getUniformLocation(this.progThermalTalus, 'uSeed'), p.seed);
 
@@ -1438,6 +1619,8 @@ export class GpuErosionEngine {
       gl.bindFramebuffer(gl.FRAMEBUFFER, this.fboTerrainSingle[nextTalus]);
       this._bindTex(this.progThermalTalus, 'uTerrainTex', this.terrainTex[this.terrainIdx], 0);
       this._bindTex(this.progThermalTalus, 'uRockObstacleTex', this.obstacleTex[this.obstacleIdx], 1);
+      this._bindTex(this.progThermalTalus, 'uSnowTex', this.snowTex[this.snowIdx], 2);
+      this._bindTex(this.progThermalTalus, 'uFrostTex', this.frostTex[this.frostIdx], 3);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       this.terrainIdx = nextTalus;
     }
@@ -1467,6 +1650,7 @@ export class GpuErosionEngine {
       // than eroding every substep from the direction at batch start.
       const climate = this._getClimateUniforms();
       const windErosion = this._getWindErosionUniforms();
+      const frostU = this._getFrostUniforms();
       this._ensureRockObstacles();
       const prevP = this.partIdx;
       const nextP = 1 - prevP;
@@ -1525,6 +1709,7 @@ export class GpuErosionEngine {
         );
         gl.uniform4fv(gl.getUniformLocation(this.progParticleStep, 'uHardnessParams'), hardnessVec);
         gl.uniform4fv(gl.getUniformLocation(this.progParticleStep, 'uStrataOrient'), strataVec);
+        this._bindStrataColumnUniforms(this.progParticleStep);
         gl.uniform4fv(gl.getUniformLocation(this.progParticleStep, 'uSpeciesMix'), climate.speciesVec);
         gl.uniform4fv(gl.getUniformLocation(this.progParticleStep, 'uSnowParams'), climate.snowVec);
         gl.uniform4fv(gl.getUniformLocation(this.progParticleStep, 'uWindParams'), climate.windVec);
@@ -1574,6 +1759,11 @@ export class GpuErosionEngine {
         this.fluxIdx = nextFlux;
       }
 
+      // PASS C2: Frost-damage state. Runs before integration so only this
+      // step's resolution-visible detached equivalent (frost A) is consumed;
+      // sub-threshold cracks stay stored in R/G and change no geometry.
+      if (frostU.active) this._runFrostPass(false);
+
       // ---------------------------------------------------------------------
       // PASS D: Integrate Terrain + Water + Scattered Exchanges + Brush
       // ---------------------------------------------------------------------
@@ -1589,6 +1779,7 @@ export class GpuErosionEngine {
       this._bindTex(this.progTerrainIntegrate, 'uSnowTex', this.snowTex[this.snowIdx], 3);
       this._bindTex(this.progTerrainIntegrate, 'uRockObstacleTex', this.obstacleTex[this.obstacleIdx], 4);
       this._bindTex(this.progTerrainIntegrate, 'uChemTex', this.chemTex[this.chemIdx], 5);
+      this._bindTex(this.progTerrainIntegrate, 'uFrostTex', this.frostTex[this.frostIdx], 6);
 
       gl.uniform4f(gl.getUniformLocation(this.progTerrainIntegrate, 'uIntParams'), R, cellSize, dt, p.simHydraulicPlaying === false ? 0.0 : p.evaporation);
       gl.uniform4f(
@@ -1600,7 +1791,11 @@ export class GpuErosionEngine {
       );
       gl.uniform4fv(gl.getUniformLocation(this.progTerrainIntegrate, 'uHardnessParams'), hardnessVec);
       gl.uniform4fv(gl.getUniformLocation(this.progTerrainIntegrate, 'uStrataOrient'), strataVec);
+      this._bindStrataColumnUniforms(this.progTerrainIntegrate);
       gl.uniform4fv(gl.getUniformLocation(this.progTerrainIntegrate, 'uClimate'), climate.snowVec);
+      gl.uniform4fv(gl.getUniformLocation(this.progTerrainIntegrate, 'uFrostIntA'), frostU.integrateA);
+      gl.uniform4fv(gl.getUniformLocation(this.progTerrainIntegrate, 'uFrostIntB'), frostU.integrateB);
+      gl.uniform4fv(gl.getUniformLocation(this.progTerrainIntegrate, 'uFrostIntC'), frostU.integrateC);
       const riverSpring = p.simHydraulicPlaying === false
         ? 0.0
         : (p.oasisSpring ? -Math.max(0.05, p.headwaterFlow ?? 0.65) : (p.headwaterFlow ?? 0.0));
@@ -1657,14 +1852,16 @@ export class GpuErosionEngine {
       // ---------------------------------------------------------------------
       // PASS E: GPU Differential Cliff Spalling & Talus Angle-of-Repose Pass — gated by Rockfall/Talus Sim Layer!
       // ---------------------------------------------------------------------
-      if (p.simRockfallPlaying !== false) {
+      if (p.simRockfallPlaying !== false || frostU.anyTransport) {
         const nextTalus = 1 - this.terrainIdx;
         gl.bindFramebuffer(gl.FRAMEBUFFER, this.fboTerrainSingle[nextTalus]);
         gl.viewport(0, 0, R, R);
         gl.useProgram(this.progThermalTalus);
 
         this._bindTex(this.progThermalTalus, 'uTerrainTex', this.terrainTex[this.terrainIdx], 0);
-      this._bindTex(this.progThermalTalus, 'uRockObstacleTex', this.obstacleTex[this.obstacleIdx], 1);
+        this._bindTex(this.progThermalTalus, 'uRockObstacleTex', this.obstacleTex[this.obstacleIdx], 1);
+        this._bindTex(this.progThermalTalus, 'uSnowTex', this.snowTex[this.snowIdx], 2);
+        this._bindTex(this.progThermalTalus, 'uFrostTex', this.frostTex[this.frostIdx], 3);
         gl.uniform4f(
           gl.getUniformLocation(this.progThermalTalus, 'uTalusParams'),
           R,
@@ -1674,6 +1871,10 @@ export class GpuErosionEngine {
         );
         gl.uniform4fv(gl.getUniformLocation(this.progThermalTalus, 'uHardnessParams'), hardnessVec);
         gl.uniform4fv(gl.getUniformLocation(this.progThermalTalus, 'uStrataOrient'), strataVec);
+        this._bindStrataColumnUniforms(this.progThermalTalus);
+        gl.uniform4fv(gl.getUniformLocation(this.progThermalTalus, 'uFrostTalusA'), frostU.talusA);
+        gl.uniform4fv(gl.getUniformLocation(this.progThermalTalus, 'uFrostTalusB'), frostU.talusB);
+        gl.uniform4fv(gl.getUniformLocation(this.progThermalTalus, 'uFrostTalusC'), frostU.talusC);
         gl.uniform1f(gl.getUniformLocation(this.progThermalTalus, 'uDryAeolian'), p.dryAeolianMode || 0.0);
         gl.uniform1f(gl.getUniformLocation(this.progThermalTalus, 'uSeed'), p.seed);
 
@@ -1954,7 +2155,8 @@ export class GpuErosionEngine {
       p.viewMode === 'clay'     ? 4 :
       p.viewMode === 'cryo'     ? 5 :
       p.viewMode === 'hydro'    ? 6 :
-      p.viewMode === 'mineral'  ? 9 : 0;
+      p.viewMode === 'mineral'  ? 9 :
+      p.viewMode === 'frost'    ? 10 : 0;
 
     gl.enable(gl.DEPTH_TEST);
     gl.depthFunc(gl.LEQUAL);
@@ -1971,6 +2173,7 @@ export class GpuErosionEngine {
     this._bindTex(this.progTerrainRender, 'uSnowTex', this.snowTex[this.snowIdx], 3);
     this._bindTex(this.progTerrainRender, 'uChemTex', this.chemTex[this.chemIdx], 7);
     this._bindTex(this.progTerrainRender, 'uMineralTex', this.mineralTex[this.mineralIdx], 8);
+    this._bindTex(this.progTerrainRender, 'uFrostTex', this.frostTex[this.frostIdx], 9);
 
     gl.uniformMatrix4fv(gl.getUniformLocation(this.progTerrainRender, 'uViewProj'), false, viewProj);
     gl.uniform3fv(gl.getUniformLocation(this.progTerrainRender, 'uCameraPos'), eye);
@@ -1985,6 +2188,7 @@ export class GpuErosionEngine {
     gl.uniform4fv(gl.getUniformLocation(this.progTerrainRender, 'uLayerVis'), layerVisVec);
     gl.uniform4fv(gl.getUniformLocation(this.progTerrainRender, 'uHardnessParams'), hardnessVec);
     gl.uniform4fv(gl.getUniformLocation(this.progTerrainRender, 'uStrataOrient'), strataVec);
+    this._bindStrataColumnUniforms(this.progTerrainRender);
 
     const showCursorMode =
       p.brushMode === 'cloudburst' ? 1 :
@@ -2038,6 +2242,7 @@ export class GpuErosionEngine {
       gl.uniform4fv(gl.getUniformLocation(this.progRockInstance, 'uLayerVis'), layerVisVec);
       gl.uniform4fv(gl.getUniformLocation(this.progRockInstance, 'uHardnessParams'), hardnessVec);
       gl.uniform4fv(gl.getUniformLocation(this.progRockInstance, 'uStrataOrient'), strataVec);
+      this._bindStrataColumnUniforms(this.progRockInstance);
       gl.uniform4fv(gl.getUniformLocation(this.progRockInstance, 'uClimate'), climate.snowVec);
       gl.uniform1i(gl.getUniformLocation(this.progRockInstance, 'uViewMode'), viewCode);
       gl.uniform1i(gl.getUniformLocation(this.progRockInstance, 'uMaterialTheme'), this._themeCode());

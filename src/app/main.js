@@ -601,7 +601,7 @@ function restoreTerrainResolutionSnapshot() {
       : (TERRAIN_STACK_PRESETS[fallbackPresetId]?.name || pipe.projectTitle);
     pipe.paletteId = Number.isFinite(Number(snapshot.paletteId)) ? Number(snapshot.paletteId) : pipe.paletteId;
     pipe.fabricMode = Number.isFinite(Number(snapshot.fabricMode)) ? Number(snapshot.fabricMode) : pipe.fabricMode;
-    pipe.shadingMode = Math.max(0, Math.min(9, Math.round(Number(snapshot.shadingMode) || 0)));
+    pipe.shadingMode = Math.max(0, Math.min(10, Math.round(Number(snapshot.shadingMode) || 0)));
     pipe.authorTool = 'navigate';
     pipe.layers = restoredLayers;
     pipe.selectedLayerId = idMap.get(snapshot.selectedLayerId) || restoredLayers[0]?.id || null;
