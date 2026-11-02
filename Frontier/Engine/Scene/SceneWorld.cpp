@@ -338,6 +338,11 @@ void RenderPipelineRecord::SerializeConfiguration(toml::table& OutTable) const
     OutTable.insert_or_assign("virtualized_geometry", Parameters.VirtualizedGeometry);
     OutTable.insert_or_assign("virtualized_stream_slots", static_cast<int64_t>(Parameters.VirtualizedStreamSlots));
     OutTable.insert_or_assign("analytic_illumination", Parameters.AnalyticIllumination);
+    OutTable.insert_or_assign("solar_disc", Parameters.SolarDisc);
+    OutTable.insert_or_assign("stratified_sun", Parameters.StratifiedSun);
+    OutTable.insert_or_assign("penumbra_filter", Parameters.PenumbraFilter);
+    OutTable.insert_or_assign("mirror_filter", Parameters.MirrorFilter);
+    OutTable.insert_or_assign("mirror_trace", Parameters.MirrorTrace);
 }
 
 template <>
@@ -354,6 +359,11 @@ void RenderPipelineRecord::DeserializeConfiguration(const toml::table& InTable)
     Parameters.VirtualizedGeometry    = ReadBool(InTable, "virtualized_geometry", Parameters.VirtualizedGeometry);
     Parameters.VirtualizedStreamSlots = std::max(0, ReadInt(InTable, "virtualized_stream_slots", Parameters.VirtualizedStreamSlots));
     Parameters.AnalyticIllumination   = ReadBool(InTable, "analytic_illumination", Parameters.AnalyticIllumination);
+    Parameters.SolarDisc              = ReadBool(InTable, "solar_disc", Parameters.SolarDisc);
+    Parameters.StratifiedSun          = ReadBool(InTable, "stratified_sun", Parameters.StratifiedSun);
+    Parameters.PenumbraFilter         = ReadBool(InTable, "penumbra_filter", Parameters.PenumbraFilter);
+    Parameters.MirrorFilter           = ReadBool(InTable, "mirror_filter", Parameters.MirrorFilter);
+    Parameters.MirrorTrace            = ReadBool(InTable, "mirror_trace", Parameters.MirrorTrace);
     Parameters.AdvanceRevision();
 }
 

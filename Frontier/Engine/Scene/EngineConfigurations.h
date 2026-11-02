@@ -71,6 +71,13 @@ struct RenderPipelineConfiguration : RevisionCounter
     int   VirtualizedStreamSlots = 0;      // 0: one arena slot per page
     // 📝 The editor's fast closed-form renderer instead of the global illumination (levelspace key, no controls yet).
     bool  AnalyticIllumination   = false;
+    // 📝 Measured options beyond the demo for the RTX path's reflections and sun shadows (Exhibits/RayTracedLighting; levelspace
+    //    keys, no controls yet). All false reproduces the demo.
+    bool  SolarDisc              = false;   // the sun shaded as a disc; no solar disc in reflection rays
+    bool  StratifiedSun          = false;   // sun-disc samples stratified over 4×4 pixel blocks
+    bool  PenumbraFilter         = false;   // ray-traced sun verdicts filtered across their penumbra
+    bool  MirrorFilter           = false;   // smooth surfaces take the unfiltered reflection
+    bool  MirrorTrace            = false;   // with MirrorFilter: smooth surfaces traced at screen resolution
 };
 
 struct DistanceFieldConfiguration : RevisionCounter

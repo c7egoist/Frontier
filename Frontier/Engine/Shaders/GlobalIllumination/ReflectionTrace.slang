@@ -103,7 +103,9 @@ void TraverseMirrorReflection(uint3 Invocation : SV_DispatchThreadID)
     let Attributes = LoadTexel(SurfaceAttributes, ScreenPixel, 0);
     let Surface = ProjectSurfaceSample(Materials[ToUnsigned(Attributes.z + 0.5)]);
     let Roughness = SelectBranch(Surface.Roughness, Surface.CoatRoughness, Surface.CoatWeight > 0.0);
-    if (Roughness >= MirrorTraceRoughness || !FeatureEnabled(Refresh, FeatureRayTracing) || !FeatureEnabled(Refresh, FeatureRayTracedReflections))
+    let Reference = RefinementEnabled(Refresh, RefinementMirrorReference);
+    let Limit = SelectBranch(MirrorTraceRoughness, ResolveReflectionRoughness(Refresh), Reference);
+    if (Roughness >= Limit || !FeatureEnabled(Refresh, FeatureRayTracing) || !FeatureEnabled(Refresh, FeatureRayTracedReflections))
     {
         ReflectionTarget[ScreenPixel] = float4(0.0);
         return;
@@ -114,14 +116,21 @@ void TraverseMirrorReflection(uint3 Invocation : SV_DispatchThreadID)
     let Basis3 = ConstructTangentBasis(Normal);
     let TangentView = mul(View, transpose(Basis3));
     let Pair = ProjectTemporalPair(uint2(ScreenPixel), Refresh.RefreshIndex, 31u);
-    let Half = mul(ProjectVisibleNormal(TangentView, Roughness * Roughness, Pair), Basis3);
-    var Direction = reflect(-View, Half);
-    if (dot(Direction, Normal) <= 0.0)
-    {
-        Direction = reflect(-View, Normal);
-    }
     var Seed = ConstructPixelSeed(uint2(ScreenPixel), Refresh.RefreshIndex, 47u);
-    let Radiance = TraceMultiBounceReflection(Position + Normal * RayEpsilon, Direction, Roughness, Seed);
-    ReflectionTarget[ScreenPixel] = float4(min(Radiance, float3(200.0)), 1.0);
+    // 📝 Measurement reference: 16 R2 points of the lobe per pixel instead of one.
+    let Samples = SelectBranch(1u, 16u, Reference);
+    var Radiance = float3(0.0);
+    for (var Sample = 0u; Sample < Samples; Sample++)
+    {
+        let Point = SelectBranch(Pair, frac(Pair + float(Sample) * float2(0.7548776662466927, 0.5698402909980532)), Reference);
+        let Half = mul(ProjectVisibleNormal(TangentView, Roughness * Roughness, Point), Basis3);
+        var Direction = reflect(-View, Half);
+        if (dot(Direction, Normal) <= 0.0)
+        {
+            Direction = reflect(-View, Normal);
+        }
+        Radiance += min(TraceMultiBounceReflection(Position + Normal * RayEpsilon, Direction, Roughness, Seed), float3(200.0));
+    }
+    ReflectionTarget[ScreenPixel] = float4(Radiance / float(Samples), 1.0);
 }
 

@@ -117,8 +117,9 @@ void ResolveRecombination(uint3 Invocation : SV_DispatchThreadID)
     if (RefinementEnabled(Refresh, RefinementMirrorFilter))
     {
         let Mirror = LoadTexel(MirrorRadiance, Pixel, 0);
-        let MirrorShare = Mirror.a * (1.0 - smoothstep(MirrorSharpRoughness, MirrorBlendRoughness, SelectBranch(Surface.Roughness, Surface.CoatRoughness,
-                                                                                                                   Surface.CoatWeight > 0.0)));
+        let MirrorShare = Mirror.a * SelectBranch(1.0 - smoothstep(MirrorSharpRoughness, MirrorBlendRoughness, SelectBranch(Surface.Roughness, Surface.CoatRoughness,
+                                                                                                                        Surface.CoatWeight > 0.0)),
+                                                  1.0, RefinementEnabled(Refresh, RefinementMirrorReference));
         Reflection = float4(lerp(Reflection.rgb, Mirror.rgb, MirrorShare), Reflection.a);
     }
     var Glossy = Irradiance * InversePi;

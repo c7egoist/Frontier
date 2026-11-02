@@ -120,7 +120,18 @@ void IntegrateDirectRadiance(uint3 Invocation : SV_DispatchThreadID)
             let SunPair = SelectBranch(ProjectTemporalPair(Pixel, Refresh.RefreshIndex, 17u), ProjectStratifiedPair(Pixel, Refresh.RefreshIndex),
                                        RefinementEnabled(Refresh, RefinementStratifiedSun));
             SunDir     = SampleSunConeDirection(Refresh.SunDirection, SunPair);
-            if (PenumbraFiltered)
+            if (RefinementEnabled(Refresh, RefinementShadowReference))
+            {
+                // 📝 Measurement reference: the visible fraction of 64 R2 points of the disc, rotated per pixel and refresh.
+                var Visible = 0.0;
+                for (var Sample = 0u; Sample < 64u; Sample++)
+                {
+                    let Point = frac(float2(0.5, 0.5) + float(Sample) * float2(0.7548776662466927, 0.5698402909980532) + SunPair);
+                    Visible += TraceSceneVisibility(RayOrigin, SampleSunConeDirection(Refresh.SunDirection, Point), RayEpsilon, 400.0);
+                }
+                Visibility = Visible / 64.0;
+            }
+            else if (PenumbraFiltered)
             {
                 SunOcclusion = TraceSceneOcclusion(RayOrigin, SunDir, RayEpsilon, 400.0);
                 Visibility   = SelectBranch(1.0, 0.0, SunOcclusion >= 0.0);

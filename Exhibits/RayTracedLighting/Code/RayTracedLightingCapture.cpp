@@ -9,8 +9,8 @@
 //    <view[,view…]> <variant[,variant…]> [warm refreshes] [measured refreshes] [indirect 0|1] [width] [height]. Time is frozen so
 //    nothing but the estimators changes between refreshes; each variant starts from a cleared history. Measure whole multiples of
 //    the antialiasing's 16-refresh jitter cycle so every mean covers the same sub-pixel offsets. The Reference variant, when
-//    listed, runs first and measures twice as many; every later refresh is then compared with its mean. Views and variants: the
-//    tables below.
+//    listed, runs first (64 sun rays per pixel, 16 reflection samples per screen pixel); every later refresh is then compared with
+//    its mean. Views and variants: the tables below.
 #include "Frontier/Engine/Rendering/SceneViewport/SceneViewport.h"
 #include "stb_image_write.h"
 #include <algorithm>
@@ -63,7 +63,8 @@ const VariantSpecification Variants[] = {
     {"MirrorFilter", R::SolarDisc | R::MirrorFilter, true, true},
     {"MirrorTrace", R::SolarDisc | R::MirrorFilter | R::MirrorTrace, true, true},
     {"Refined", R::SolarDisc | R::StratifiedSun | R::PenumbraFilter | R::MirrorFilter | R::MirrorTrace, true, true},
-    {"Reference", R::SolarDisc | R::StratifiedSun | R::MirrorFilter | R::MirrorTrace, true, true},   // unbiased and sharp
+    // 📝 Converged: 64 sun rays per pixel, every reflective pixel traced 16 times at screen resolution and taken unfiltered.
+    {"Reference", R::SolarDisc | R::MirrorFilter | R::MirrorTrace | R::ShadowReference | R::MirrorReference, true, true},
     // 📝 Where fireflies come from: the direct term alone and the specular reflection alone, before and after the solar disc.
     {"DemoDirect", 0u, true, true, 1u},
     {"DemoSpecular", 0u, true, true, 5u},
@@ -236,10 +237,12 @@ int main(int ArgumentCount, char** Arguments)
             double RegionSquare = 0.0, TransitionSquare = 0.0;
             const uint32_t TransitionCount = static_cast<uint32_t>(std::count(Transition.begin(), Transition.end(), 1u));
             const uint32_t RegionCount     = static_cast<uint32_t>(std::count(InRegion.begin(), InRegion.end(), 1u));
-            const uint32_t Count = Measured * (IsReference ? 2u : 1u);
-            for (uint32_t Refresh = 0; Refresh < Warm + Count; ++Refresh)
+            const uint32_t Count = Measured;
+            // 📝 Every reference refresh is already converged; four refreshes settle its antialiasing history.
+            const uint32_t WarmCount = IsReference ? std::min(Warm, 4u) : Warm;
+            for (uint32_t Refresh = 0; Refresh < WarmCount + Count; ++Refresh)
             {
-                Measuring = Refresh >= Warm;
+                Measuring = Refresh >= WarmCount;
                 const auto Start = std::chrono::steady_clock::now();
                 if (!Viewport.Refresh(Camera, Environment, Rendering, 0.0, {Width, Height}, &Diagnostic))
                 {

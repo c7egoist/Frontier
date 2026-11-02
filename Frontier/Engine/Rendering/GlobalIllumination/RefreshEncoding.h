@@ -60,7 +60,9 @@ constexpr uint32_t StratifiedSun  = 2u;
 constexpr uint32_t PenumbraFilter = 4u;
 constexpr uint32_t MirrorFilter   = 8u;
 constexpr uint32_t MirrorTrace    = 16u;
-constexpr uint32_t PenumbraNarrow = 32u;   // [-] measurement only: the penumbra filter at half its radius
+constexpr uint32_t PenumbraNarrow  = 32u;    // [-] measurement only: the penumbra filter at half its radius
+constexpr uint32_t ShadowReference = 64u;    // [-] measurement only: 64 stratified sun rays per pixel
+constexpr uint32_t MirrorReference = 128u;   // [-] measurement only: every reflective pixel traced 16 times at screen resolution
 } // namespace RefinementBit
 
 // 📝 Inputs owned by systems outside the port (HMI brightness word, fire light, environment block, elapsed time):

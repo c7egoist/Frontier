@@ -232,6 +232,10 @@ SceneViewportRefresh EverestSceneViewport::Render(const SceneViewportRequest& Re
     Rendering.VirtualizedGeometry  = Pipeline.VirtualizedGeometry;
     Rendering.VirtualizedStreamSlots = static_cast<uint32_t>(std::max(0, Pipeline.VirtualizedStreamSlots));
     Rendering.AnalyticIllumination   = Pipeline.AnalyticIllumination;
+    namespace Bit = Frontier::GlobalIllumination::RefinementBit;
+    Rendering.Refinements = (Pipeline.SolarDisc ? Bit::SolarDisc : 0u) | (Pipeline.StratifiedSun ? Bit::StratifiedSun : 0u) |
+                            (Pipeline.PenumbraFilter ? Bit::PenumbraFilter : 0u) | (Pipeline.MirrorFilter ? Bit::MirrorFilter : 0u) |
+                            (Pipeline.MirrorTrace ? Bit::MirrorTrace : 0u);
     // 📝 Screen targets follow the panel once its size held still for six interface ticks (a dragged splitter would rebuild
     //    them on every tick); meanwhile the last extent stretches over the panel.
     const auto Requested = Frontier::GlobalIllumination::SceneViewport::ResolveScreenExtent(Request.PanelWidth, Request.PanelHeight, Request.PixelDensity, Quality);
