@@ -490,6 +490,29 @@ void MoonRecord::DeserializeConfiguration(const toml::table& InTable)
 }
 
 template <>
+void PlanetRecord::SerializeConfiguration(toml::table& OutTable) const
+{
+    OutTable.insert_or_assign("enabled", Parameters.Enabled);
+    OutTable.insert_or_assign("body", static_cast<int64_t>(Parameters.Body));
+    OutTable.insert_or_assign("apparent_diameter_deg", static_cast<double>(Parameters.ApparentDiameterDegrees));
+    OutTable.insert_or_assign("brightness", static_cast<double>(Parameters.Brightness));
+    OutTable.insert_or_assign("ring_system", Parameters.RingSystem);
+    OutTable.insert_or_assign("atmosphere_shell", Parameters.AtmosphereShell);
+}
+
+template <>
+void PlanetRecord::DeserializeConfiguration(const toml::table& InTable)
+{
+    Parameters.Enabled                 = ReadBool(InTable, "enabled", Parameters.Enabled);
+    Parameters.Body                    = std::min<uint32_t>(ReadUint32(InTable, "body", Parameters.Body), 3u);
+    Parameters.ApparentDiameterDegrees = ReadFloat(InTable, "apparent_diameter_deg", Parameters.ApparentDiameterDegrees);
+    Parameters.Brightness              = ReadFloat(InTable, "brightness", Parameters.Brightness);
+    Parameters.RingSystem              = ReadBool(InTable, "ring_system", Parameters.RingSystem);
+    Parameters.AtmosphereShell         = ReadBool(InTable, "atmosphere_shell", Parameters.AtmosphereShell);
+    Parameters.AdvanceRevision();
+}
+
+template <>
 void FogRecord::SerializeConfiguration(toml::table& OutTable) const
 {
     OutTable.insert_or_assign("enabled", Parameters.Enabled);
@@ -826,6 +849,7 @@ void SceneWorld::RegisterNativeEngineTypes()
     RegisterSimple.operator()<CloudRecord>("Clouds", "Environment · Clouds", RecordClassification::Environment, "Cloud", "ENVIRONMENT");
     RegisterSimple.operator()<StarRecord>("Stars", "Environment · Stars", RecordClassification::Environment, "Star", "ENVIRONMENT");
     RegisterSimple.operator()<MoonRecord>("Moons", "Environment · Moons", RecordClassification::Environment, "Moon", "ENVIRONMENT");
+    RegisterSimple.operator()<PlanetRecord>("Planet", "Environment · Planet", RecordClassification::Environment, "Planet", "ENVIRONMENT");
     RegisterSimple.operator()<FogRecord>("Fog", "Environment · Fog", RecordClassification::Environment, "CloudFog", "ENVIRONMENT");
     RegisterSimple.operator()<LightningRecord>("Lightning", "Environment · Lightning", RecordClassification::Illumination, "Zap", "ENVIRONMENT");
     RegisterSimple.operator()<WindRecord>("Wind", "Environment · Wind Field", RecordClassification::Environment, "Wind", "ENVIRONMENT");
@@ -938,6 +962,16 @@ SceneRecordBase* SceneWorld::FindFirstByType(std::string_view TypeIdentifier) no
         }
     }
     return nullptr;
+}
+
+std::vector<const SceneRecordBase*> SceneWorld::FindAllByType(std::string_view TypeIdentifier) const
+{
+    std::vector<const SceneRecordBase*> Found;
+    for (const std::unique_ptr<SceneRecordBase>& Entry : OwnedRecords)
+    {
+        if (Entry && Entry->QueryTypeIdentifier() == TypeIdentifier) Found.push_back(Entry.get());
+    }
+    return Found;
 }
 
 bool SceneWorld::LoadLevelSpace(const std::filesystem::path& LevelSpacePath, std::string* OutError)

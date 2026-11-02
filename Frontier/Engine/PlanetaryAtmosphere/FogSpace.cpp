@@ -551,25 +551,33 @@ bool FogSpace::Initialize(VulkanComputeExchange& Exchange,
                           const std::string&     ShaderBinaryDirectory,
                           std::string*           OutDiagnostic)
 {
-    const std::array<VkDescriptorType, 6> Bindings{{
+    const std::array<VkDescriptorType, 8> Bindings{{
         VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,         // Ensemble
         VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, // TransLut
         VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, // MultiLut
         VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, // CloudShadowLut
         VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,          // VisibilityProjection
         VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,          // HdrFrame
+        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,         // SceneShadowFrame
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, // SceneShadowDepth
     }};
 
-    return Exchange.LoadComputeProgram(ShaderBinaryDirectory + "/IntegrateFogSpace.spv",
-                                       "IntegrateFogSpaceMain",
-                                       Bindings,
-                                       sizeof(PushHeader),
-                                       Program_,
-                                       OutDiagnostic);
+    if (!Exchange.LoadComputeProgram(ShaderBinaryDirectory + "/IntegrateFogSpace.spv",
+                                     "IntegrateFogSpaceMain",
+                                     Bindings,
+                                     sizeof(PushHeader),
+                                     Program_,
+                                     OutDiagnostic))
+    {
+        return false;
+    }
+    const std::array<float, kFogSceneShadowFloat4Count * 4u> Absent{};
+    return Exchange.UploadMemorySpan(AbsentSceneShadow_, Absent.data(), sizeof(Absent));
 }
 
 void FogSpace::Shutdown(VulkanComputeExchange& Exchange) noexcept
 {
+    Exchange.ReleaseMemorySpan(AbsentSceneShadow_);
     Exchange.ReleaseProgram(Program_);
 }
 
@@ -580,16 +588,22 @@ bool FogSpace::Execute(VulkanComputeExchange&      Exchange,
                        const DeviceImageArraySlot& VisibilityImage,
                        DeviceImageArraySlot&       HdrFrameTarget,
                        uint32_t                    ViewportWidth,
-                       uint32_t                    ViewportHeight)
+                       uint32_t                    ViewportHeight,
+                       const FogSceneShadow*       SceneShadow)
 {
     const PushHeader Push{{ViewportWidth, ViewportHeight, 0u, 0u}, {0.0f, 0.0f, 0.0f, 0.0f}};
-    const std::array<ComputeDescriptorArgument, 6> Args{{
+    // 📝 Without scene cascades the shader sees control x = 0 and never samples the stand-in depth (the cloud shadow map).
+    const bool Shadowed = SceneShadow != nullptr && SceneShadow->Frame != nullptr && SceneShadow->Depth != nullptr &&
+                          SceneShadow->Frame->Handle != VK_NULL_HANDLE && SceneShadow->Depth->ArrayView != VK_NULL_HANDLE;
+    const std::array<ComputeDescriptorArgument, 8> Args{{
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, &EnsembleSpan, nullptr},
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, nullptr, &AtmosphereLuts.TransmittanceArray()},
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, nullptr, &AtmosphereLuts.MultiScatteringArray()},
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, nullptr, &Clouds.CloudShadowArray()},
         {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, nullptr, &VisibilityImage},
         {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, nullptr, &HdrFrameTarget},
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, Shadowed ? SceneShadow->Frame : &AbsentSceneShadow_, nullptr},
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, nullptr, Shadowed ? SceneShadow->Depth : &Clouds.CloudShadowArray()},
     }};
     return Exchange.DispatchCompute(
         Program_, Args, &Push, sizeof(Push), (ViewportWidth + 7u) / 8u, (ViewportHeight + 7u) / 8u, 1u);

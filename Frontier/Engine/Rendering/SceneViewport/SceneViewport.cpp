@@ -154,9 +154,9 @@ void SceneViewport::ResolveSky(const SceneEnvironment& S)
     Sky.PrimaryMoon.MoonElevation = std::asin(std::clamp(Moon[2], -1.0, 1.0)) * 180.0 / Pi;
     Sky.PrimaryMoon.MoonPhase     = std::acos(std::clamp(DotVector(Sun, Moon), -1.0, 1.0)) / Pi * 14.765;
 
-    // ④ stars and planets, atmosphere scales
+    // ④ stars and planets (each planet its own Scene Directory entry), atmosphere scales
     Sky.StarsEnabled      = S.Stars.Enabled;
-    Sky.PlanetsEnabled    = S.Stars.Enabled;
+    Sky.PlanetsEnabled    = std::any_of(S.Planets.begin(), S.Planets.end(), [](const PlanetConfiguration& Planet) { return Planet.Enabled; });
     Sky.AtmosphereEnabled = S.Atmosphere.Enabled;
     Sky.Atmosphere.Rayleigh = std::max(0.0f, S.Atmosphere.RayleighScattering);
     Sky.Atmosphere.Mie      = std::max(0.0, (static_cast<double>(S.Atmosphere.MieTurbidity) - 1.0) / 1.4);
@@ -203,7 +203,11 @@ bool SceneViewport::Refresh(const ViewportCamera& Camera, const SceneEnvironment
     Inputs.LuminairesLive          = true;
 
     RefreshInterlude Interlude;
-    if (Overlay_ && !Overlay_->PrepareInterlude(*Host_, Environment, Inputs.Camera, Sky.Latitude, Sky.Longitude, Interlude, OutDiagnostic)) return false;
+    if (Overlay_ && !Overlay_->PrepareInterlude(*Host_, Environment, Inputs.Camera, Sky.Latitude, Sky.Longitude, Configuration_.EnvironmentLighting,
+                                                Interlude, OutDiagnostic))
+    {
+        return false;
+    }
     return Host_->AdvanceRefresh(&Inputs, nullptr, nullptr, OutDiagnostic, &Interlude);
 }
 

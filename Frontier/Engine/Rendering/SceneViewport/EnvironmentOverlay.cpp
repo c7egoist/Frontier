@@ -59,6 +59,49 @@ Vector3 RotateAbout(const Vector3& Direction, const Vector3& Axis, double Angle)
             Direction[2] * Cosine + Cross[2] * Sine + Axis[2] * Along * (1.0 - Cosine)};
 }
 
+// 📝 The level's atmosphere record on the environment's medium: its scattering scales on the Earth reference (turbidity 2.4 ≙
+//    the reference aerosol load). The realm's sky and the sun's and moons' transmittance all come from it.
+AtmosphereParameters ResolveAtmosphereParameters(const SceneEnvironment& S)
+{
+    AtmosphereParameters Air = MakeEarthAtmosphere();
+    if (S.Atmosphere.Enabled)
+    {
+        const double Rayleigh = std::max(0.0, static_cast<double>(S.Atmosphere.RayleighScattering));
+        Air.RayleighScattering = {Air.RayleighScattering.R * Rayleigh, Air.RayleighScattering.G * Rayleigh, Air.RayleighScattering.B * Rayleigh};
+        const double Aerosol = std::max(0.0, (static_cast<double>(S.Atmosphere.MieTurbidity) - 1.0) / 1.4);
+        Air.MieScattering *= Aerosol;
+        Air.MieAbsorption *= Aerosol;
+        Air.MiePhaseG = std::clamp(static_cast<double>(S.Atmosphere.MieAnisotropyG), -0.95, 0.95);
+        const double Ozone = std::max(0.0, static_cast<double>(S.Atmosphere.OzoneAbsorptionScale));
+        Air.OzoneAbsorption = {Air.OzoneAbsorption.R * Ozone, Air.OzoneAbsorption.G * Ozone, Air.OzoneAbsorption.B * Ozone};
+        Air.GroundRadiusKm = std::max(100.0, static_cast<double>(S.Atmosphere.PlanetRadiusKm));
+        Air.TopRadiusKm    = Air.GroundRadiusKm + std::max(1.0, static_cast<double>(S.Atmosphere.AtmosphereThicknessKm));
+    }
+    else
+    {
+        Air.RayleighScattering = {0.0, 0.0, 0.0};
+        Air.MieScattering      = 0.0;
+        Air.MieAbsorption      = 0.0;
+        Air.OzoneAbsorption    = {0.0, 0.0, 0.0};
+    }
+    return Air;
+}
+
+constexpr float ObserverAltitudeKm = 0.05f;   // [km] the realm's observer above the ground
+
+// 📝 Transmittance of the environment's air from the observer toward a direction of the illumination world (z up).
+Vector3 ResolveAirTransmittance(const AtmosphereParameters& Air, const Vector3& Direction)
+{
+    const SpectrumRgb T = TransmittanceToTop(Air, Air.GroundRadiusKm + ObserverAltitudeKm, std::clamp(Direction[2], -1.0, 1.0), 48);
+    return {T.R, T.G, T.B};
+}
+
+// 📝 Planet records in the demo solver's order (Venus, Jupiter, Mars, Saturn): surface archetype and procedural seed.
+constexpr std::array<PlanetarySurfaceArchetype, 4> PlanetArchetypes = {PlanetarySurfaceArchetype::OceanicTerrestrial,
+                                                                       PlanetarySurfaceArchetype::BandedGasGiant,
+                                                                       PlanetarySurfaceArchetype::RustyDesertWorld,
+                                                                       PlanetarySurfaceArchetype::BandedGasGiant};
+
 } // namespace
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -99,6 +142,9 @@ struct EnvironmentOverlay::PlanetaryStore
     PlanetarySubmissionSequence Sequence{};
     PlanetaryRealmEnsemble      Ensemble{};
     PlanetaryCameraView         View{};
+    DeviceMemorySpan            SceneShadowFrame{};   // [-] the refresh's sun cascades for the fog (FogSceneShadow::Frame)
+    DeviceImageArraySlot        SceneShadowDepth{};   // [-] the refresh's cascade depth array, borrowed
+    FogSceneShadow              SceneShadow{};
 };
 
 EnvironmentOverlay::EnvironmentOverlay(DeviceExchange& Exchange, VulkanComputeExchange& Environment, ShaderInterchange& Shaders)
@@ -116,6 +162,11 @@ const PlanetaryCameraView& EnvironmentOverlay::QueryView() const noexcept
     return Planetary_->View;
 }
 
+bool EnvironmentOverlay::ReadOverlaidRadiance(std::vector<float>& OutLinearRgba)
+{
+    return Constructed_ && Planetary_->Sequence.ReadbackHdrFrame(Environment_, OutLinearRgba);
+}
+
 EnvironmentOverlay::~EnvironmentOverlay()
 {
     // 📝 The borrowed views go first; the images belong to the environment exchange.
@@ -123,7 +174,15 @@ EnvironmentOverlay::~EnvironmentOverlay()
     RadianceView_.reset();
     VisibilityTexture_.reset();
     RadianceTexture_.reset();
-    if (Constructed_) Planetary_->Sequence.Shutdown(Environment_);
+    LightingGroup_.reset();
+    BorrowedSky_.reset();
+    BorrowedCloudShadow_.reset();
+    if (Constructed_)
+    {
+        Planetary_->Sequence.ConfigureFogSceneShadow(nullptr);
+        Environment_.ReleaseMemorySpan(Planetary_->SceneShadowFrame);
+        Planetary_->Sequence.Shutdown(Environment_);
+    }
 }
 
 bool EnvironmentOverlay::Construct(const std::filesystem::path& EnvironmentShaders, const std::filesystem::path& CelestialMaps, std::string* OutDiagnostic)
@@ -149,7 +208,157 @@ bool EnvironmentOverlay::Construct(const std::filesystem::path& EnvironmentShade
         if (OutDiagnostic != nullptr) *OutDiagnostic = "environment visibility program: " + Shaders_.LastDiagnostic();
         return false;
     }
+    // 📝 The environment-lighting bridge: profile, the environment's sky view and cloud shadow map, the refresh's two targets.
+    const std::vector<DescriptorSlot> LightingSlots = {{D::Uniform}, {D::Texture2DLayered}, {D::Texture2DLayered}, {D::Sampler},
+                                                       {D::StorageTexture2D, TextureFormat::Rgba16Float},
+                                                       {D::StorageTexture2D, TextureFormat::Rgba16Float}};
+    LightingLayout_     = Exchange_.ConstructDescriptorLayout(LightingSlots, "Environment lighting");
+    LightingRegion_     = Exchange_.ConstructRegion(48, "Environment lighting profile");
+    SkyProgram_         = Shaders_.ConstructComputeProgram("EnvironmentLighting", "ProjectEnvironmentSky", {LightingLayout_});
+    CloudShadowProgram_ = Shaders_.ConstructComputeProgram("EnvironmentLighting", "ProjectCloudShadow", {LightingLayout_});
+    SamplerSpecification Linear;
+    Linear.MagFilter = Linear.MinFilter = FilterMode::Linear;
+    LightingSampler_ = Exchange_.ConstructSampler(Linear);
+    if (!LightingLayout_ || !LightingRegion_ || !SkyProgram_ || !CloudShadowProgram_ || !LightingSampler_)
+    {
+        if (OutDiagnostic != nullptr) *OutDiagnostic = "environment lighting program: " + Shaders_.LastDiagnostic();
+        return false;
+    }
     return true;
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                   ENVIRONMENT LIGHTING
+//------------------------------------------------------------------------------------------------------------------------
+
+void EnvironmentOverlay::AdjustLight(const IlluminationHost& Host, const SceneEnvironment& S, double Latitude, LightSolution& Light)
+{
+    const AtmosphereParameters Air  = ResolveAtmosphereParameters(S);
+    const Vector3&             Tint = Host.Atmosphere->SolarTint;   // the level's colour temperature, as the demo derives it
+    const double               E    = Host.Settings.SolarIlluminance;
+
+    // ① the sun through the environment's air, replacing the demo's own 64-step air mass (same sun, same fade)
+    const Vector3 Sun = ResolveAirTransmittance(Air, Light.SunDirection);
+    for (int Channel = 0; Channel < 3; ++Channel) Light.SolarIlluminance[Channel] = Sun[Channel] * Tint[Channel] * E * Light.SunVisible;
+    if (Light.Source == "Sun") Light.Illuminance = Light.SolarIlluminance;
+
+    // ② night (the demo's moon key light below −4°): Luna at the Moons record's phase and albedo, Ember lit by its elongation from
+    //    the sun; the brighter body casts the shadows, both add their light
+    if (Light.Source == "Moon")
+    {
+        const double Fade = !S.Solar.Enabled ? 1.0 : std::clamp((-static_cast<double>(S.Solar.ElevationDegrees) - 4.0) / 6.0, 0.0, 1.0);
+        auto Moonlight = [&](const Vector3& Direction, double Lit, double Gain, const Vector3& Colour) {
+            const double  Elevation = std::asin(std::clamp(Direction[2], -1.0, 1.0)) / DegreesToRadian;
+            const double  Horizon   = std::clamp((Elevation + 0.5) / 2.0, 0.0, 1.0);
+            const Vector3 Through   = ResolveAirTransmittance(Air, Direction);
+            Vector3       Arrival{};
+            for (int Channel = 0; Channel < 3; ++Channel) Arrival[Channel] = Colour[Channel] * Through[Channel] * Horizon * Fade * Lit * Gain;
+            return Arrival;
+        };
+        // 📝 Luna: the demo's full-moon light (0.08, 0.10, 0.14); phase 0 new · 0.5 full · 1 new, albedo against the reference 0.12.
+        const Vector3 LunaDirection  = ResolveMoonDirection(S.Moons.PrimaryOrbitDegrees, Latitude);
+        const double  LunaLit        = 0.5 - 0.5 * std::cos(2.0 * Pi * static_cast<double>(S.Moons.PrimaryPhase));
+        const Vector3 Luna           = Moonlight(LunaDirection, LunaLit, S.Moons.Enabled ? std::max(0.0, S.Moons.PrimaryAlbedo / 0.12) : 0.0,
+                                                 {0.08, 0.10, 0.14});
+        // 📝 Ember: disc ≈ 0.35 of Luna's at surface brightness 1.4 against 1.6, warmer; lit fraction (1 − cos elongation) / 2.
+        const Vector3 EmberDirection = ResolveMoonDirection(S.Moons.SecondaryOrbitDegrees, Latitude);
+        const double  EmberLit       = 0.5 - 0.5 * DotVector(Light.SunDirection, EmberDirection);
+        const Vector3 Ember          = Moonlight(EmberDirection, EmberLit, (S.Moons.Enabled && S.Moons.SecondaryMoonEnabled) ? 0.30 : 0.0,
+                                                 {0.10, 0.075, 0.05});
+        const double LunaSum  = Luna[0] + Luna[1] + Luna[2];
+        const double EmberSum = Ember[0] + Ember[1] + Ember[2];
+        if (LunaSum + EmberSum > 0.0) Light.Direction = LunaSum >= EmberSum ? LunaDirection : EmberDirection;
+        for (int Channel = 0; Channel < 3; ++Channel) Light.Illuminance[Channel] = Luna[Channel] + Ember[Channel];
+    }
+    AdjustedLight_ = Light;
+}
+
+bool EnvironmentOverlay::ReconstructLighting(IlluminationHost& Host, const SceneEnvironment& S)
+{
+    const DeviceImageArraySlot& Sky    = Planetary_->Sequence.AtmosphereLuts().SkyViewArray();
+    const DeviceImageArraySlot& Shadow = Planetary_->Sequence.Clouds().CloudShadowArray();
+    if (Sky.Image == VK_NULL_HANDLE || Shadow.Image == VK_NULL_HANDLE || Planetary_->Ensemble.Realms.empty()) return false;
+
+    // ① borrow the environment's sky view and cloud shadow map (rebuilt only when the environment replaced an image)
+    if (!LightingGroup_ || BorrowedImages_[0] != Sky.Image || BorrowedImages_[1] != Shadow.Image)
+    {
+        LightingGroup_.reset();
+        BorrowedSky_.reset();
+        BorrowedCloudShadow_.reset();
+        auto Borrow = [this](const DeviceImageArraySlot& Slot, const char* Label) {
+            TextureSpecification Specification;
+            Specification.Label         = Label;
+            Specification.Width         = Slot.Width;
+            Specification.Height        = Slot.Height;
+            Specification.DepthOrLayers = std::max(1u, Slot.ArrayLayers);
+            Specification.Format        = TextureFormat::Rgba16Float;
+            Specification.Usage         = TextureUsage::Storage | TextureUsage::Sampled;
+            return Exchange_.WrapTexture(Slot.Image, Specification);
+        };
+        BorrowedSky_         = Borrow(Sky, "Environment sky view (borrowed)");
+        BorrowedCloudShadow_ = Borrow(Shadow, "Environment cloud shadow map (borrowed)");
+        if (!BorrowedSky_ || !BorrowedCloudShadow_) return false;
+        TextureViewSpecification Layered;
+        Layered.Dimension    = ViewDimension::PlanarLayered;
+        Layered.DimensionSet = true;
+        LightingGroup_ = Exchange_.ConstructDescriptorGroup(
+            LightingLayout_, {LightingRegion_, Exchange_.ConstructView(BorrowedSky_, Layered), Exchange_.ConstructView(BorrowedCloudShadow_, Layered),
+                              LightingSampler_, Host.Atmosphere->SkyView, Exchange_.ConstructView(Host.CloudShadowTexture)},
+            "Environment lighting");
+        if (!LightingGroup_) return false;
+        BorrowedImages_ = {Sky.Image, Shadow.Image};
+    }
+
+    // ② the bridge profile: the environment's primary sun and planet, its scale, the cloud shadow square
+    const PlanetaryRealm& R      = Planetary_->Ensemble.Realms[0];
+    const bool            Sunlit = !R.Suns.empty();
+    const std::array<float, 3> SunDirection = Sunlit ? R.Suns[0].DirectionUnit : std::array<float, 3>{0.0f, 1.0f, 0.0f};
+    const bool  Shadowing = Sunlit && S.Clouds.Enabled && S.Clouds.CastGroundShadows && !R.CloudVolumes.empty();
+    const float Profile[12] = {SunDirection[0], SunDirection[1], SunDirection[2], static_cast<float>(1.0 / std::max(RadianceScale_, 1.0e-9)),
+                               static_cast<float>(R.Atmosphere.GroundRadiusKm), static_cast<float>(R.Atmosphere.GroundRadiusKm + R.ObserverAltitudeKm),
+                               0.0f, 1.0f,
+                               R.CloudShadowHalfSpanM, 0.0f, Shadowing ? 1.0f : 0.0f, 0.0f};
+    Exchange_.WriteRegion(LightingRegion_, 0, Profile, sizeof(Profile));
+
+    // ③ the demo's projected cloud shadow parameters (CloudShadowLayouts.slang) over that square, along this refresh's sun
+    const float    Half     = R.CloudShadowHalfSpanM;
+    const Vector3& Sun      = Host.LastLight.SunDirection;
+    const float    Base     = Shadowing ? static_cast<float>(R.CloudVolumes[0].Slab.LowerHeightM) : 0.0f;
+    const float    Top      = Shadowing ? static_cast<float>(R.CloudVolumes[0].Slab.TopHeightM) : 0.0f;
+    const float    Shadows[12] = {-Half, -Half, 2.0f * Half, Shadowing ? 1.0f : 0.0f,
+                                  static_cast<float>(Sun[0]), static_cast<float>(Sun[1]), static_cast<float>(Sun[2]), 1.0f,
+                                  12.0f, 4.0f, Base, Top};
+    Exchange_.WriteRegion(Host.CloudShadowParams, 0, Shadows, sizeof(Shadows));
+    return true;
+}
+
+void EnvironmentOverlay::ConfigureFogShadow(const IlluminationHost& Host, const SceneEnvironment& S)
+{
+    // 📝 Sun shafts through the scene: the fog samples the refresh's own sun cascades (rendered by now) when the sun is the key
+    //    light; at night the cascades follow the moon, and the environment's sun lies below the horizon anyway.
+    PlanetaryStore& P      = *Planetary_;
+    const bool      Shafts = S.Solar.Enabled && S.Solar.VolumetricLightShaft && S.Fog.Enabled && S.Fog.ReceiveRayShadow && Host.Shadow &&
+                        Host.Shadow->DepthTexture && Host.Shadow->LayeredView && Host.Shadow->LastReceiverBytes.size() >= 56 * sizeof(float) &&
+                        Host.LastLight.Source == "Sun";
+    if (!Shafts)
+    {
+        P.Sequence.ConfigureFogSceneShadow(nullptr);
+        return;
+    }
+    std::array<float, kFogSceneShadowFloat4Count * 4> Frame{};
+    std::memcpy(Frame.data(), Host.Shadow->LastReceiverBytes.data(), 56 * sizeof(float));
+    Frame[56] = 1.0f;      // enabled
+    Frame[57] = 0.0015f;   // depth bias (light clip depth)
+    if (!Environment_.UploadMemorySpan(P.SceneShadowFrame, Frame.data(), sizeof(Frame)))
+    {
+        P.Sequence.ConfigureFogSceneShadow(nullptr);
+        return;
+    }
+    const TextureSpecification& Depth = Host.Shadow->DepthTexture->Specification;
+    P.SceneShadowDepth = {Host.Shadow->DepthTexture->Image, VK_NULL_HANDLE, Host.Shadow->LayeredView->Handle, VK_FORMAT_D32_SFLOAT,
+                          Depth.Width, Depth.Height, Depth.DepthOrLayers, VK_IMAGE_LAYOUT_GENERAL};
+    P.SceneShadow = {&P.SceneShadowFrame, &P.SceneShadowDepth};
+    P.Sequence.ConfigureFogSceneShadow(&P.SceneShadow);
 }
 
 bool EnvironmentOverlay::ReconstructTargets(IlluminationHost& Host, uint32_t Width, uint32_t Height)
@@ -217,29 +426,9 @@ void EnvironmentOverlay::ResolveRealm(const IlluminationHost& Host, const SceneE
     R.Name = "SceneViewport";
 
     // ① atmosphere: the level's scattering scales on the Earth reference (turbidity 2.4 ≙ the reference aerosol load)
-    AtmosphereParameters Air = MakeEarthAtmosphere();
-    if (S.Atmosphere.Enabled)
-    {
-        const double Rayleigh = std::max(0.0, static_cast<double>(S.Atmosphere.RayleighScattering));
-        Air.RayleighScattering = {Air.RayleighScattering.R * Rayleigh, Air.RayleighScattering.G * Rayleigh, Air.RayleighScattering.B * Rayleigh};
-        const double Aerosol = std::max(0.0, (static_cast<double>(S.Atmosphere.MieTurbidity) - 1.0) / 1.4);
-        Air.MieScattering *= Aerosol;
-        Air.MieAbsorption *= Aerosol;
-        Air.MiePhaseG = std::clamp(static_cast<double>(S.Atmosphere.MieAnisotropyG), -0.95, 0.95);
-        const double Ozone = std::max(0.0, static_cast<double>(S.Atmosphere.OzoneAbsorptionScale));
-        Air.OzoneAbsorption = {Air.OzoneAbsorption.R * Ozone, Air.OzoneAbsorption.G * Ozone, Air.OzoneAbsorption.B * Ozone};
-        Air.GroundRadiusKm = std::max(100.0, static_cast<double>(S.Atmosphere.PlanetRadiusKm));
-        Air.TopRadiusKm    = Air.GroundRadiusKm + std::max(1.0, static_cast<double>(S.Atmosphere.AtmosphereThicknessKm));
-    }
-    else
-    {
-        Air.RayleighScattering = {0.0, 0.0, 0.0};
-        Air.MieScattering      = 0.0;
-        Air.MieAbsorption      = 0.0;
-        Air.OzoneAbsorption    = {0.0, 0.0, 0.0};
-    }
+    const AtmosphereParameters Air = ResolveAtmosphereParameters(S);
     R.Atmosphere              = Air;
-    R.ObserverAltitudeKm      = 0.05f;
+    R.ObserverAltitudeKm      = ObserverAltitudeKm;
     R.GroundPlaneY            = 0.0f;
     R.EnableAerialPerspective = S.Atmosphere.Enabled && S.Atmosphere.AerialPerspective;
 
@@ -299,24 +488,24 @@ void EnvironmentOverlay::ResolveRealm(const IlluminationHost& Host, const SceneE
     R.ScintillationStrength  = std::max(0.0f, S.Stars.AtmosphericScintillate / 0.35f);
     // 📝 N(m) ≈ 10^(0.4·m + 1.3) stars brighter than magnitude m over the whole sky.
     R.StarLimitingMagnitude  = static_cast<float>(std::clamp((std::log10(std::max<double>(10.0, S.Stars.HipparcosCount)) - 1.3) / 0.4, 2.0, 8.0));
+    // 📝 The planets of the demo's own orbital solver, each from its Scene Directory entry (Venus, Jupiter, Mars, Saturn).
     R.Planets.clear();
-    if (S.Stars.Enabled)
     {
         const Vector3 Pole = {0.0, std::cos(φ), std::sin(φ)};
-        const std::array<PlanetarySurfaceArchetype, 4> Archetypes = {PlanetarySurfaceArchetype::OceanicTerrestrial, PlanetarySurfaceArchetype::BandedGasGiant,
-                                                                     PlanetarySurfaceArchetype::RustyDesertWorld, PlanetarySurfaceArchetype::BandedGasGiant};
-        const std::array<float, 4> Radii = {0.0070f, 0.0110f, 0.0060f, 0.0090f};
-        for (size_t Planet = 0; Planet < 4 && Planet < Host.LastCelestial.Planets.size(); ++Planet)
+        for (const PlanetConfiguration& Planet : S.Planets)
         {
-            PlanetaryBodyDescriptor Body;
-            Body.Archetype        = Archetypes[Planet];
-            Body.DirectionUnit    = ToVec3(ProjectEnvironmentAxes(RotateAbout(Host.LastCelestial.Planets[Planet].Direction, Pole, -Drift)));
-            Body.AngularRadiusRad = Radii[Planet];
-            Body.SpinAxisUnit     = {0.12f, 0.97f, 0.21f};
-            Body.ProceduralSeed   = 7u + static_cast<uint32_t>(Planet) * 13u;
-            Body.Rings.Enabled    = Planet == 3;
-            Body.Atmosphere.Enabled = Planet == 0;
-            R.Planets.push_back(Body);
+            const size_t Body = std::min<size_t>(Planet.Body, PlanetArchetypes.size() - 1);
+            if (!Planet.Enabled || Body >= Host.LastCelestial.Planets.size()) continue;
+            PlanetaryBodyDescriptor Descriptor;
+            Descriptor.Archetype          = PlanetArchetypes[Body];
+            Descriptor.DirectionUnit      = ToVec3(ProjectEnvironmentAxes(RotateAbout(Host.LastCelestial.Planets[Body].Direction, Pole, -Drift)));
+            Descriptor.AngularRadiusRad   = static_cast<float>(0.5 * std::clamp(static_cast<double>(Planet.ApparentDiameterDegrees), 0.05, 6.0) * DegreesToRadian);
+            Descriptor.SurfaceAlbedoScale = std::max(0.0f, Planet.Brightness);
+            Descriptor.SpinAxisUnit       = {0.12f, 0.97f, 0.21f};
+            Descriptor.ProceduralSeed     = 7u + static_cast<uint32_t>(Body) * 13u;
+            Descriptor.Rings.Enabled      = Planet.RingSystem;
+            Descriptor.Atmosphere.Enabled = Planet.AtmosphereShell;
+            R.Planets.push_back(Descriptor);
         }
     }
 
@@ -406,7 +595,7 @@ void EnvironmentOverlay::ResolveRealm(const IlluminationHost& Host, const SceneE
 }
 
 bool EnvironmentOverlay::PrepareInterlude(IlluminationHost& Host, const SceneEnvironment& Environment, const CameraPose& Camera, double Latitude,
-                                              double Longitude, RefreshInterlude& OutInterlude, std::string* OutDiagnostic)
+                                          double Longitude, bool LightScene, RefreshInterlude& OutInterlude, std::string* OutDiagnostic)
 {
     if (!Constructed_ || !ReconstructTargets(Host, Host.ScreenExtent[0], Host.ScreenExtent[1]))
     {
@@ -428,9 +617,30 @@ bool EnvironmentOverlay::PrepareInterlude(IlluminationHost& Host, const SceneEnv
         Sequence.BindGroup(0, ImportGroups_[Parity]);
         Sequence.Dispatch(GroupsX, GroupsY);
     };
-    OutInterlude.Execute = [this, &Host, Environment, Camera, Latitude, Longitude]() {
-        // 📝 Runs after the resolve submission: the light, celestial placement and luminaires of this refresh are final.
-        ResolveRealm(Host, Environment, Camera, Latitude, Longitude);
+    if (LightScene)
+    {
+        OutInterlude.AdjustLight = [this, &Host, Environment, Latitude](LightSolution& Light) { AdjustLight(Host, Environment, Latitude, Light); };
+        OutInterlude.BeforeRecording = [this, &Host, Environment, Camera, Latitude, Longitude]() {
+            // 📝 The light of this refresh is final: the realm, its sky and its cloud shadows first, so the refresh samples them.
+            ResolveRealm(Host, Environment, Camera, Latitude, Longitude);
+            return Planetary_->Sequence.ExecuteSkyAndShadows(Environment_, Planetary_->Ensemble, Planetary_->View) && ReconstructLighting(Host, Environment);
+        };
+        const TextureSpecification& Sky    = Host.Atmosphere->SkyTexture->Specification;
+        const TextureSpecification& Clouds = Host.CloudShadowTexture->Specification;
+        OutInterlude.AfterSkyView = [this, SkyGroups = std::array<uint32_t, 2>{(Sky.Width + 7) / 8, (Sky.Height + 7) / 8},
+                                     CloudGroups = std::array<uint32_t, 2>{(Clouds.Width + 7) / 8, (Clouds.Height + 7) / 8}](CommandSequence& Sequence) {
+            Sequence.BindProgram(SkyProgram_);
+            Sequence.BindGroup(0, LightingGroup_);
+            Sequence.Dispatch(SkyGroups[0], SkyGroups[1]);
+            Sequence.BindProgram(CloudShadowProgram_);
+            Sequence.BindGroup(0, LightingGroup_);
+            Sequence.Dispatch(CloudGroups[0], CloudGroups[1]);
+        };
+    }
+    OutInterlude.Execute = [this, &Host, Environment, Camera, Latitude, Longitude, LightScene]() {
+        // 📝 Runs after the resolve submission: the light, celestial placement, luminaires and sun cascades of this refresh are final.
+        if (!LightScene) ResolveRealm(Host, Environment, Camera, Latitude, Longitude);
+        ConfigureFogShadow(Host, Environment);
         ++RefreshIndex_;
         return Planetary_->Sequence.ExecuteOverVisibility(Environment_, Planetary_->Ensemble, Planetary_->View);
     };

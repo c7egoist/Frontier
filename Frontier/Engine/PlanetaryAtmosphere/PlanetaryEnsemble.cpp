@@ -5,6 +5,8 @@
 
 #include "Engine/PlanetaryAtmosphere/PlanetaryEnsemble.h"
 
+#include <utility>
+
 #include <algorithm>
 #include <cmath>
 
@@ -846,18 +848,11 @@ bool PlanetarySubmissionSequence::EnsureViewportTargets(VulkanComputeExchange& E
     return true;
 }
 
-bool PlanetarySubmissionSequence::ExecuteOverVisibility(VulkanComputeExchange&        Exchange,
-                                                        const PlanetaryRealmEnsemble& Ensemble,
-                                                        const PlanetaryCameraView&    CameraView)
+bool PlanetarySubmissionSequence::ExecuteSkyAndShadows(VulkanComputeExchange&        Exchange,
+                                                       const PlanetaryRealmEnsemble& Ensemble,
+                                                       const PlanetaryCameraView&    CameraView)
 {
-    const uint32_t W = std::max(1u, CameraView.ViewportWidth);
-    const uint32_t H = std::max(1u, CameraView.ViewportHeight);
-    if (Visibility_.VisibilityArray().Width != W || Visibility_.VisibilityArray().Height != H || HdrFrameTarget_.Width != W ||
-        HdrFrameTarget_.Height != H)
-    {
-        return false;
-    }
-
+    SkyAndShadowsReady_ = false;
     LastPayload_ = PackEnsemblePayload(Ensemble, CameraView, PlanetaryDome_.IndexedStarCount());
     if (!Exchange.UploadMemorySpan(EnsembleSpan_,
                                    LastPayload_.Float4Slots.data(),
@@ -872,15 +867,33 @@ bool PlanetarySubmissionSequence::ExecuteOverVisibility(VulkanComputeExchange&  
     {
         Revisions.push_back({Realm.AtmosphereRevision, Realm.SkyViewRevision});
     }
+    SkyAndShadowsReady_ = AtmosphereLuts_.Execute(Exchange, EnsembleSpan_, Revisions) &&
+                          Clouds_.ExecuteShadowProjections(Exchange, EnsembleSpan_, AtmosphereLuts_,
+                                                           static_cast<uint32_t>(Ensemble.Realms.size()), Visibility_.VisibilityArray());
+    return SkyAndShadowsReady_;
+}
 
-    // Same order as ExecuteFrame, step 3 (the visibility raster) supplied by the caller.
-    return AtmosphereLuts_.Execute(Exchange, EnsembleSpan_, Revisions) &&
-           Clouds_.ExecuteShadowProjections(
-               Exchange, EnsembleSpan_, AtmosphereLuts_, static_cast<uint32_t>(Ensemble.Realms.size()), Visibility_.VisibilityArray()) &&
+bool PlanetarySubmissionSequence::ExecuteOverVisibility(VulkanComputeExchange&        Exchange,
+                                                        const PlanetaryRealmEnsemble& Ensemble,
+                                                        const PlanetaryCameraView&    CameraView)
+{
+    const uint32_t W = std::max(1u, CameraView.ViewportWidth);
+    const uint32_t H = std::max(1u, CameraView.ViewportHeight);
+    if (Visibility_.VisibilityArray().Width != W || Visibility_.VisibilityArray().Height != H || HdrFrameTarget_.Width != W ||
+        HdrFrameTarget_.Height != H)
+    {
+        return false;
+    }
+
+    // Same order as ExecuteFrame, step 3 (the visibility raster) supplied by the caller; the payload, LUTs and cloud shadow map
+    // come from ExecuteSkyAndShadows when it ran for this frame.
+    const bool Prepared = std::exchange(SkyAndShadowsReady_, false) || ExecuteSkyAndShadows(Exchange, Ensemble, CameraView);
+    SkyAndShadowsReady_ = false;
+    return Prepared &&
            PlanetaryDome_.Execute(Exchange, EnsembleSpan_, AtmosphereLuts_, Visibility_.VisibilityArray(), HdrFrameTarget_, W, H) &&
            Clouds_.ExecuteTraceAndReconstruct(
                Exchange, EnsembleSpan_, AtmosphereLuts_, Visibility_.VisibilityArray(), HdrFrameTarget_, W, H, CameraView.FrameIndex) &&
-           Fog_.Execute(Exchange, EnsembleSpan_, AtmosphereLuts_, Clouds_, Visibility_.VisibilityArray(), HdrFrameTarget_, W, H) &&
+           Fog_.Execute(Exchange, EnsembleSpan_, AtmosphereLuts_, Clouds_, Visibility_.VisibilityArray(), HdrFrameTarget_, W, H, FogSceneShadow_) &&
            LensFlare_.Execute(Exchange,
                               EnsembleSpan_,
                               Visibility_.VisibilityArray(),

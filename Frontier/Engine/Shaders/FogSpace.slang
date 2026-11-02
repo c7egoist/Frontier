@@ -15,6 +15,51 @@
 [[vk::binding(3, 0)]] Sampler2DArray<float4>                       CloudShadowLut;
 [[vk::binding(4, 0)]] [format("rgba16f")] RWTexture2DArray<float4> VisibilityImage;
 [[vk::binding(5, 0)]] [format("rgba16f")] RWTexture2DArray<float4> HdrFrame;
+// Another renderer's sun shadow cascades (FogSpace.h FogSceneShadow): rows 0-11 three light view-projection matrices of a z-up
+// world as row vectors, 12 far distances + count, 13 world texel sizes, 14 control (x enabled, y depth bias).
+[[vk::binding(6, 0)]] StructuredBuffer<float4>                     SceneShadowFrame;
+[[vk::binding(7, 0)]] Sampler2DArray<float4>                       SceneShadowDepth;
+
+// Sun visibility of a fog sample through the scene's shadow cascades: the finest cascade holding the point decides, 2x2 taps
+// at texel centres compared like the scene's own LessEqual comparison sampler; outside every cascade the shaft stays lit.
+float SampleSceneShadowVisibility(float3 PointMeters)
+{
+    float4 Control = SceneShadowFrame[14];
+    if (Control.x < 0.5f)
+    {
+        return 1.0f;
+    }
+    float3 World = float3(PointMeters.x, -PointMeters.z, PointMeters.y);
+    uint   Count = min(uint(SceneShadowFrame[12].w + 0.5f), 3u);
+    for (uint Cascade = 0u; Cascade < Count; ++Cascade)
+    {
+        float4 Clip = World.x * SceneShadowFrame[Cascade * 4u + 0u] + World.y * SceneShadowFrame[Cascade * 4u + 1u] +
+                      World.z * SceneShadowFrame[Cascade * 4u + 2u] + SceneShadowFrame[Cascade * 4u + 3u];
+        if (abs(Clip.w) < 1.0e-6f)
+        {
+            continue;
+        }
+        float3 Ndc = Clip.xyz / Clip.w;
+        float2 Uv  = float2(Ndc.x * 0.5f + 0.5f, 0.5f - Ndc.y * 0.5f);
+        if (any(Uv <= float2(0.0f)) || any(Uv >= float2(1.0f)) || Ndc.z > 1.0f || Ndc.z < 0.0f)
+        {
+            continue;
+        }
+        uint Width, Height, Layers;
+        SceneShadowDepth.GetDimensions(Width, Height, Layers);
+        float2 Texel  = float2(1.0f / float(max(Width, 1u)), 1.0f / float(max(Height, 1u)));
+        float2 Corner = (floor(Uv / Texel - 0.5f) + 0.5f) * Texel;
+        float  Lit    = 0.0f;
+        for (uint Tap = 0u; Tap < 4u; ++Tap)
+        {
+            float2 At     = Corner + float2(float(Tap & 1u), float(Tap >> 1u)) * Texel;
+            float  Stored = SceneShadowDepth.SampleLevel(float3(At, float(Cascade)), 0.0f).r;
+            Lit += (Ndc.z - Control.y <= Stored) ? 1.0f : 0.0f;
+        }
+        return Lit * 0.25f;
+    }
+    return 1.0f;
+}
 
 float FogHeightDensityAtY(float4 Hf0, float HeightM)
 {
@@ -244,7 +289,7 @@ void IntegrateFogSpaceMain(uint3 Tid : SV_DispatchThreadID)
                 continue;
             }
             float  CloudTr = SampleFogCloudTransmittance(
-                Ensemble, CloudShadowLut, RealmId, SamplePos, SolarDirection);
+                Ensemble, CloudShadowLut, RealmId, SamplePos, SolarDirection) * SampleSceneShadowVisibility(SamplePos);
             float3 AtmoTr  = SampleTransmittanceLutArray(
                 TransLut, RealmId, R0.x, R0.y, R0.x + max(R0.z, 1.0e-3f), SolarDirection.y);
             float  Phase   = HenyeyGreensteinValue(dot(RayDir, SolarDirection), 𝑔Mean);

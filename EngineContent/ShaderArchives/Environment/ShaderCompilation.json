@@ -2,7 +2,7 @@
   "format": 1,
   "set": "Environment",
   "compiler": "slangc 2026.14.1",
-  "refresh": "python Automation/StoreShaderArchives.py --build <build> --compiler <slangc>",
+  "refresh": "python Automation/StoreShaderArchives.py --build <build> --compiler <slangc or slang-wasm.js> --sets Environment",
   "entries": [
     {
       "file": "BakeAtmosphereProjectionLut.spv",
@@ -34,7 +34,7 @@
     },
     {
       "file": "IntegrateFogSpace.spv",
-      "spirv_sha256": "31b7e6aaaa41eee8eceef202f1190d3c02675b6d083fcce53cb1bd94499c7290"
+      "spirv_sha256": "86e3cd6f2385bfce5beaf1e537a10be531442f67f0f55dc432758ab8f50482b7"
     },
     {
       "file": "ProjectCloudShadow.spv",
@@ -84,7 +84,7 @@
     },
     {
       "file": "Frontier/Engine/Shaders/FogSpace.slang",
-      "sha256": "155788154827013c8fba51513e10ce1cd02df93944e85e4db5fe196f87dd224e"
+      "sha256": "4ae6fa093dd8cd3edc2b55e2bef07acdfaa54ca9b8cc651085ed8e26e6c9479f"
     },
     {
       "file": "Frontier/Engine/Shaders/ForceField.slang",

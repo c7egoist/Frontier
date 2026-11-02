@@ -290,7 +290,12 @@ bool IlluminationHost::AdvanceRefresh(const RefreshInputs* Inputs, const Refresh
         Settings.SolarIlluminance = Environment->SolarIlluminance;
         Settings.Atmosphere       = Environment->Atmosphere;
     }
-    const LightSolution Light = Atmosphere->ResolveLight(Settings.SunElevation, Settings.SunAzimuth, Settings.SolarIlluminance, Settings.Atmosphere);
+    LightSolution Light = Atmosphere->ResolveLight(Settings.SunElevation, Settings.SunAzimuth, Settings.SolarIlluminance, Settings.Atmosphere);
+    if (Interlude != nullptr && Interlude->AdjustLight)
+    {
+        Interlude->AdjustLight(Light);
+        Atmosphere->Light = Light;
+    }
     LastLight = Light;
     // 📝 A light that turns by more than 10° or changes brightness by more than 30 % relights every card and restarts history.
     const double Brightness = Light.Illuminance[0] + Light.Illuminance[1] + Light.Illuminance[2];
@@ -336,6 +341,11 @@ bool IlluminationHost::AdvanceRefresh(const RefreshInputs* Inputs, const Refresh
     Cards->ScheduleTiles(Settings.CardTileBudget);
     if (Inputs != nullptr) Shadow->ResolveCascades(Inputs->Camera, Light.Direction);
     if (Supplier) Supplier(RefreshIndex);
+    if (Interlude != nullptr && Interlude->BeforeRecording && !Interlude->BeforeRecording())
+    {
+        if (OutDiagnostic != nullptr && OutDiagnostic->empty()) *OutDiagnostic = "outside light inputs failed";
+        return false;
+    }
 
     // ④ record, in the demo's order
     // 🔍 Staged: every step in a command stream of its own behind the same staged writes, each submitted and awaited on its
@@ -366,6 +376,7 @@ bool IlluminationHost::AdvanceRefresh(const RefreshInputs* Inputs, const Refresh
         return Submitted;
     };
     Atmosphere->RecordSkyView(Begin("sky view"), Settings.SolarIlluminance);
+    if (Interlude != nullptr && Interlude->AfterSkyView) Interlude->AfterSkyView(Begin("environment light inputs"));
     Volumes->RecordFragments(Begin("fragment distances"));
     if (Inputs != nullptr)
     {

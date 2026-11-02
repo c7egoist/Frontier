@@ -123,6 +123,58 @@ primary_phase = 0.68
 secondary_enabled = true
 
 [[records]]
+identity = "rec_planet_venus"
+type = "Planet"
+name = "Venus"
+parent = "rec_atmosphere"
+[records.configuration]
+enabled = true
+body = 0
+apparent_diameter_deg = 0.80
+brightness = 1.0
+ring_system = false
+atmosphere_shell = true
+
+[[records]]
+identity = "rec_planet_jupiter"
+type = "Planet"
+name = "Jupiter"
+parent = "rec_atmosphere"
+[records.configuration]
+enabled = true
+body = 1
+apparent_diameter_deg = 1.26
+brightness = 1.0
+ring_system = false
+atmosphere_shell = false
+
+[[records]]
+identity = "rec_planet_mars"
+type = "Planet"
+name = "Mars"
+parent = "rec_atmosphere"
+[records.configuration]
+enabled = true
+body = 2
+apparent_diameter_deg = 0.69
+brightness = 1.0
+ring_system = false
+atmosphere_shell = false
+
+[[records]]
+identity = "rec_planet_saturn"
+type = "Planet"
+name = "Saturn"
+parent = "rec_atmosphere"
+[records.configuration]
+enabled = true
+body = 3
+apparent_diameter_deg = 1.03
+brightness = 1.0
+ring_system = true
+atmosphere_shell = false
+
+[[records]]
 identity = "rec_fog"
 type = "Fog"
 name = "Froxel Scattering Fog"

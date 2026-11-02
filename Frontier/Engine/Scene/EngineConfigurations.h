@@ -181,6 +181,35 @@ struct MoonConfiguration : RevisionCounter
     float EarthshineLuminance   = 0.22f;
 };
 
+// 📝 One planet of the sky, each its own Scene Directory entry. Body picks the demo's orbital solution it follows (0 Venus,
+//    1 Jupiter, 2 Mars, 3 Saturn); the drawn diameter is exaggerated so the disc reads at viewport resolution.
+struct PlanetConfiguration : RevisionCounter
+{
+    bool     Enabled                 = true;
+    uint32_t Body                    = 0;
+    float    ApparentDiameterDegrees = 0.80f;
+    float    Brightness              = 1.0f;
+    bool     RingSystem              = false;
+    bool     AtmosphereShell         = false;
+};
+
+inline constexpr std::array<const char*, 4> PlanetBodyNames = {"Venus", "Jupiter", "Mars", "Saturn"};
+
+// 📝 The four planets as a level without planet entries draws them (the environment's earlier defaults).
+[[nodiscard]] inline std::array<PlanetConfiguration, 4> ResolveDefaultPlanets() noexcept
+{
+    std::array<PlanetConfiguration, 4> Planets{};
+    const std::array<float, 4> Diameters = {0.80f, 1.26f, 0.69f, 1.03f};
+    for (uint32_t Body = 0; Body < 4; ++Body)
+    {
+        Planets[Body].Body                    = Body;
+        Planets[Body].ApparentDiameterDegrees = Diameters[Body];
+    }
+    Planets[0].AtmosphereShell = true;
+    Planets[3].RingSystem      = true;
+    return Planets;
+}
+
 struct FogConfiguration : RevisionCounter
 {
     bool  Enabled             = true;

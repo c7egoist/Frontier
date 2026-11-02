@@ -106,6 +106,13 @@ struct RefreshInterlude
     std::function<bool()>                                  Execute{};
     std::function<void(CommandSequence&, uint32_t Parity)> BeforePresent{};
     std::shared_ptr<DeviceTextureView>                     PresentSource{};
+
+    // 📝 Outside light inputs (all optional; unset, the refresh keeps the demo's own): AdjustLight sees the resolved light before
+    //    anything is derived from it, BeforeRecording runs once the refresh's writes are staged (outside work the refresh will
+    //    sample), and AfterSkyView records right after the demo's sky view so it can overwrite the refresh's light inputs.
+    std::function<void(LightSolution&)>                    AdjustLight{};
+    std::function<bool()>                                  BeforeRecording{};
+    std::function<void(CommandSequence&)>                  AfterSkyView{};
 };
 
 class IlluminationHost

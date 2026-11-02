@@ -78,7 +78,9 @@ set(FRONTIER_GLOBAL_ILLUMINATION_ENTRIES
     "DisplayPresent:PresentVertex:vertex"
     "DisplayPresent:PresentFragment:fragment"
     "EnvironmentVisibility:ProjectEnvironmentVisibility:compute"
-    "EnvironmentVisibility:RestoreEnvironmentRadiance:compute")
+    "EnvironmentVisibility:RestoreEnvironmentRadiance:compute"
+    "EnvironmentLighting:ProjectEnvironmentSky:compute"
+    "EnvironmentLighting:ProjectCloudShadow:compute")
 
 set(FRONTIER_GLOBAL_ILLUMINATION_SPV_OUTPUTS)
 if(FRONTIER_GLOBAL_ILLUMINATION_SLANGC)

@@ -108,6 +108,7 @@ using AtmosphereRecord     = TypedSceneRecord<AtmosphereConfiguration, Atmospher
 using CloudRecord          = TypedSceneRecord<CloudConfiguration, CloudInspector>;
 using StarRecord           = TypedSceneRecord<StarConfiguration, StarInspector>;
 using MoonRecord           = TypedSceneRecord<MoonConfiguration, MoonInspector>;
+using PlanetRecord         = TypedSceneRecord<PlanetConfiguration, PlanetInspector>;
 using FogRecord            = TypedSceneRecord<FogConfiguration, FogInspector>;
 using LightningRecord      = TypedSceneRecord<LightningConfiguration, LightningInspector>;
 using WindRecord           = TypedSceneRecord<WindConfiguration, WindInspector>;
@@ -126,6 +127,7 @@ using AtmosphereRecord     = TypedSceneRecord<AtmosphereConfiguration>;
 using CloudRecord          = TypedSceneRecord<CloudConfiguration>;
 using StarRecord           = TypedSceneRecord<StarConfiguration>;
 using MoonRecord           = TypedSceneRecord<MoonConfiguration>;
+using PlanetRecord         = TypedSceneRecord<PlanetConfiguration>;
 using FogRecord            = TypedSceneRecord<FogConfiguration>;
 using LightningRecord      = TypedSceneRecord<LightningConfiguration>;
 using WindRecord           = TypedSceneRecord<WindConfiguration>;
@@ -263,6 +265,7 @@ class SceneWorld
     [[nodiscard]] size_t             QueryRecordCount() const noexcept { return OwnedRecords.size(); }
     [[nodiscard]] SceneRecordBase*   FindRecord(RecordToken Token) noexcept;
     [[nodiscard]] SceneRecordBase*   FindFirstByType(std::string_view TypeIdentifier) noexcept;
+    [[nodiscard]] std::vector<const SceneRecordBase*> FindAllByType(std::string_view TypeIdentifier) const;
     [[nodiscard]] const std::string& QueryWorldName() const noexcept { return WorldName; }
     void                             ConfigureWorldName(std::string Name) { WorldName = std::move(Name); }
 

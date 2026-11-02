@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <vector>
 
 // 📝 The PlanetaryAtmosphere types stay out of this header: its catalogue 'StarRecord' and the scene's 'StarRecord' record
 //    alias both live in namespace Frontier, and editor code includes the scene.
@@ -39,6 +40,7 @@ struct SceneEnvironment
     MoonConfiguration         Moons{};
     FogConfiguration          Fog{};
     WindConfiguration         Wind{};
+    std::array<PlanetConfiguration, 4> Planets = ResolveDefaultPlanets();   // [-] one per Body: Venus, Jupiter, Mars, Saturn
     double                    ElapsedSeconds = 0.0;   // [s] advects clouds, twinkles stars, turns the sky
 };
 
@@ -76,17 +78,29 @@ class EnvironmentOverlay
     // 📝 Before IlluminationHost::AdvanceRefresh: matches the environment targets to the host's screen and returns the interlude that
     //    imports the resolved radiance, overlays the environment once the light of the refresh is known, and presents it.
     //    Latitude/Longitude place the observer for the stars (the sidereal angle follows the host's celestial solution).
+    //    LightScene: the environment also lights the refresh — its transmitted sun and moonlit night as the key light, its sky
+    //    as the sky view every bounce and reflection samples, its cloud shadow map on the ground — through the inputs the
+    //    ported units already read; false keeps the demo's own light inputs (the demo inputs of the parity validation).
     bool PrepareInterlude(IlluminationHost& Host, const SceneEnvironment& Environment, const CameraPose& Camera, double Latitude, double Longitude,
-                          RefreshInterlude& OutInterlude, std::string* OutDiagnostic = nullptr);
+                          bool LightScene, RefreshInterlude& OutInterlude, std::string* OutDiagnostic = nullptr);
+
+    // 🔍 The key light the last environment-lit refresh used (direction, illuminance, source) — validation reads it.
+    [[nodiscard]] const LightSolution& QueryAdjustedLight() const noexcept { return AdjustedLight_; }
 
     // 📝 The realm and camera of the last overlaid refresh (inspection, validation).
     [[nodiscard]] const PlanetaryRealmEnsemble& QueryEnsemble() const noexcept;
     [[nodiscard]] const PlanetaryCameraView&    QueryView() const noexcept;
 
+    // 🔍 The overlaid radiance of the last refresh as linear RGBA floats in the refresh's units (what present tone-maps).
+    bool ReadOverlaidRadiance(std::vector<float>& OutLinearRgba);
+
   private:
     struct PlanetaryStore;
     bool ReconstructTargets(IlluminationHost& Host, uint32_t Width, uint32_t Height);
     void ResolveRealm(const IlluminationHost& Host, const SceneEnvironment& Environment, const CameraPose& Camera, double Latitude, double Longitude);
+    void AdjustLight(const IlluminationHost& Host, const SceneEnvironment& Environment, double Latitude, LightSolution& Light);
+    bool ReconstructLighting(IlluminationHost& Host, const SceneEnvironment& Environment);
+    void ConfigureFogShadow(const IlluminationHost& Host, const SceneEnvironment& Environment);
 
     DeviceExchange&                    Exchange_;
     VulkanComputeExchange&             Environment_;
@@ -103,6 +117,16 @@ class EnvironmentOverlay
     uint32_t                           ScreenGeneration_ = ~0u;      // [-] host screen targets the import groups bind
     uint32_t                           RefreshIndex_     = 0;
     double                             RadianceScale_    = EnvironmentRadianceScale;
+
+    // 📝 Environment lighting: the bridge units (EnvironmentLighting.slang) and the environment's images they borrow.
+    std::shared_ptr<DescriptorLayout>  LightingLayout_{};
+    std::shared_ptr<DeviceRegion>      LightingRegion_{};
+    std::shared_ptr<DeviceProgram>     SkyProgram_{}, CloudShadowProgram_{};
+    std::shared_ptr<DescriptorGroup>   LightingGroup_{};
+    std::shared_ptr<DeviceSampler>     LightingSampler_{};
+    std::shared_ptr<DeviceTexture>     BorrowedSky_{}, BorrowedCloudShadow_{};
+    std::array<VkImage, 2>             BorrowedImages_ = {VK_NULL_HANDLE, VK_NULL_HANDLE};   // [-] the images the group binds
+    LightSolution                      AdjustedLight_{};
 };
 
 } // namespace Frontier::GlobalIllumination

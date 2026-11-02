@@ -168,6 +168,17 @@ void ValidateFogRadiancePayload(const float* Payload, std::size_t FloatCount);
 //                                      GPU VOLUMETRIC FOG SPACE SUBMISSION
 //------------------------------------------------------------------------------------------------------------------------
 
+// 📝 Another renderer's sun shadow cascades, sampled by the fog for its sun shafts. Frame holds kFogSceneShadowFloat4Count float4:
+//    three light view-projection matrices as rows (a z-up world, row vectors), the cascades' far distances and count, their
+//    world texel sizes, then control (x enabled, y depth bias); Depth is the cascades' depth array on the same device.
+inline constexpr uint32_t kFogSceneShadowFloat4Count = 15u;
+
+struct FogSceneShadow
+{
+    const DeviceMemorySpan*     Frame = nullptr;
+    const DeviceImageArraySlot* Depth = nullptr;
+};
+
 class FogSpace
 {
   public:
@@ -176,6 +187,7 @@ class FogSpace
                     std::string*           OutDiagnostic = nullptr);
     void Shutdown(VulkanComputeExchange& Exchange) noexcept;
 
+    // 📝 SceneShadow null (or incomplete): shafts shadowed by clouds and occluder spheres only, as before.
     bool Execute(VulkanComputeExchange&      Exchange,
                  const DeviceMemorySpan&     EnsembleSpan,
                  const AtmosphereProjection& AtmosphereLuts,
@@ -183,10 +195,12 @@ class FogSpace
                  const DeviceImageArraySlot& VisibilityImage,
                  DeviceImageArraySlot&       HdrFrameTarget,
                  uint32_t                    ViewportWidth,
-                 uint32_t                    ViewportHeight);
+                 uint32_t                    ViewportHeight,
+                 const FogSceneShadow*       SceneShadow = nullptr);
 
   private:
     ComputeProgramSlot Program_{};
+    DeviceMemorySpan   AbsentSceneShadow_{};   // [-] control x = 0: no scene cascades
 };
 
 } // namespace Frontier

@@ -2,7 +2,7 @@
   "format": 1,
   "set": "GlobalIllumination",
   "compiler": "slangc 2026.14.1",
-  "refresh": "python Automation/StoreShaderArchives.py --build <build> --compiler <slangc>",
+  "refresh": "python Automation/StoreShaderArchives.py --build <build> --compiler <slangc or slang-wasm.js> --sets GlobalIllumination",
   "entries": [
     {
       "file": "AtmosphereMultiple.IntegrateMultiple.spv",
@@ -67,6 +67,14 @@
     {
       "file": "DistanceUnion.UniteDistance.spv",
       "spirv_sha256": "384de21db945db55809a0a5191b7d1dbf90744006dfb39f13e10c5843da0ec25"
+    },
+    {
+      "file": "EnvironmentLighting.ProjectCloudShadow.spv",
+      "spirv_sha256": "6ae1c291a1cf2d9d7d2715eb5c7ba5f0e0e71ddd2456f8d468944cddf09e35c7"
+    },
+    {
+      "file": "EnvironmentLighting.ProjectEnvironmentSky.spv",
+      "spirv_sha256": "421c6aa87fadd956279f7e10b03322a71569156c2b3752437b8bf8537015267d"
     },
     {
       "file": "EnvironmentVisibility.ProjectEnvironmentVisibility.spv",
@@ -245,6 +253,10 @@
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/EffectLayouts.slang",
       "sha256": "92452f166057a85c9f25c4c12348f0a0f8076f82c7b793f701a82b56a3bce9b3"
+    },
+    {
+      "file": "Frontier/Engine/Shaders/GlobalIllumination/EnvironmentLighting.slang",
+      "sha256": "bf8cb844e7de55ebf56dbf4e567e295c38680a33a411a5f04c36006a3144f4e4"
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/EnvironmentVisibility.slang",

@@ -637,6 +637,33 @@ void MoonInspector::ConstructInspector()
     }
 }
 
+void PlanetInspector::EnumerateSwitches(std::vector<InspectorSwitchEntry>& OutSwitches)
+{
+    OutSwitches.push_back({"Ring System", "Banded annulus", &Parameters.RingSystem});
+    OutSwitches.push_back({"Atmosphere", "Limb scattering shell", &Parameters.AtmosphereShell});
+}
+
+void PlanetInspector::ConstructInspector()
+{
+    const InspectorPalette Palette = InspectorPalette::Resolve();
+    const EditorTypefaces  Faces   = EditorTypefaces::Resolve();
+
+    bool Changed = false;
+    int  Body    = static_cast<int>(std::min<uint32_t>(Parameters.Body, static_cast<uint32_t>(PlanetBodyNames.size() - 1)));
+    if (InspectorControls::ConstructSegmentedRow(Palette, Faces, "##PlanetBody", "Ephemeris", Body, PlanetBodyNames.data(),
+                                                 static_cast<int>(PlanetBodyNames.size())))
+    {
+        Parameters.Body = static_cast<uint32_t>(Body);
+        Changed         = true;
+    }
+    Changed |= InspectorControls::ConstructSliderRow(Palette, Faces, "##PlanetSize", "Drawn Diameter", Parameters.ApparentDiameterDegrees, 0.05f, 6.0f, "%.2f deg");
+    Changed |= InspectorControls::ConstructSliderRow(Palette, Faces, "##PlanetGain", "Brightness", Parameters.Brightness, 0.0f, 4.0f, "%.2f");
+    if (Changed)
+    {
+        Parameters.AdvanceRevision();
+    }
+}
+
 void FogInspector::EnumerateSwitches(std::vector<InspectorSwitchEntry>& OutSwitches)
 {
     OutSwitches.push_back({"Local Volume", "Bounded box", &Parameters.LocalVolume});
@@ -872,6 +899,8 @@ void CloudInspector::ConstructInspector() {}
 void StarInspector::ConstructInspector() {}
 void MoonInspector::EnumerateSwitches(std::vector<InspectorSwitchEntry>&) {}
 void MoonInspector::ConstructInspector() {}
+void PlanetInspector::EnumerateSwitches(std::vector<InspectorSwitchEntry>&) {}
+void PlanetInspector::ConstructInspector() {}
 void FogInspector::EnumerateSwitches(std::vector<InspectorSwitchEntry>&) {}
 void FogInspector::ConstructInspector() {}
 void LightningInspector::EnumerateSwitches(std::vector<InspectorSwitchEntry>&) {}

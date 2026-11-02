@@ -248,6 +248,11 @@ void ConstructEditorGlyph(ImDrawList*      DrawList,
         DrawList->AddCircle(Centre, R * 0.78f, Colour, 18, StrokeThickness);
         DrawList->AddCircleFilled(ImVec2(Centre.x + R * 0.30f, Centre.y - R * 0.22f), R * 0.56f, IM_COL32(22, 22, 22, 230), 14);
     }
+    else if (Identifier == "Planet")
+    {
+        DrawList->AddCircle(Centre, R * 0.50f, Colour, 18, StrokeThickness);
+        DrawList->AddEllipse(Centre, ImVec2(R * 0.98f, R * 0.30f), Colour, -0.35f, 24, StrokeThickness);
+    }
     else if (Identifier == "Cloud")
     {
         DrawList->AddRect(ImVec2(Centre.x - R * 0.85f, Centre.y - R * 0.18f),

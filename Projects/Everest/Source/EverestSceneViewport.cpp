@@ -60,6 +60,20 @@ Frontier::GlobalIllumination::SceneEnvironment ResolveSceneEnvironment(const Fro
     ReadConfiguration<Frontier::MoonRecord>(World, "Moons", Environment.Moons);
     ReadConfiguration<Frontier::FogRecord>(World, "Fog", Environment.Fog);
     ReadConfiguration<Frontier::WindRecord>(World, "Wind", Environment.Wind);
+    // 📝 Each planet entry drives the body it names; a level without planet entries keeps the four default planets.
+    const std::vector<const Frontier::SceneRecordBase*> Planets = World.FindAllByType("Planet");
+    if (!Planets.empty())
+    {
+        for (Frontier::PlanetConfiguration& Planet : Environment.Planets) Planet.Enabled = false;
+        for (const Frontier::SceneRecordBase* Entry : Planets)
+        {
+            if (const auto* Planet = dynamic_cast<const Frontier::PlanetRecord*>(Entry))
+            {
+                const Frontier::PlanetConfiguration& Configuration = Planet->QueryConfiguration();
+                Environment.Planets[std::min<uint32_t>(Configuration.Body, 3u)] = Configuration;
+            }
+        }
+    }
     // 📝 The flare belongs to the sun: no sun, no flare.
     Environment.Flare.Enabled  = Environment.Flare.Enabled && Environment.Solar.Enabled;
     Environment.ElapsedSeconds = ElapsedSeconds;

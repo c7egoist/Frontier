@@ -220,6 +220,13 @@ class PlanetarySubmissionSequence
     bool ExecuteOverVisibility(VulkanComputeExchange&        Exchange,
                                const PlanetaryRealmEnsemble& Ensemble,
                                const PlanetaryCameraView&    CameraView);
+    // 📝 The first steps of ExecuteOverVisibility on their own — payload, atmosphere LUTs, cloud shadow map — so another renderer
+    //    can light its surfaces with them first; the next ExecuteOverVisibility then reuses them instead of repeating them.
+    bool ExecuteSkyAndShadows(VulkanComputeExchange&        Exchange,
+                              const PlanetaryRealmEnsemble& Ensemble,
+                              const PlanetaryCameraView&    CameraView);
+    // 📝 Another renderer's sun shadow cascades for the fog's sun shafts; nullptr: shafts shadowed by clouds and spheres only.
+    void ConfigureFogSceneShadow(const FogSceneShadow* SceneShadow) noexcept { FogSceneShadow_ = SceneShadow; }
     [[nodiscard]] const DeviceImageArraySlot& HdrTarget() const noexcept { return HdrFrameTarget_; }
 
     bool ReadbackHdrFrame(VulkanComputeExchange& Exchange, std::vector<float>& OutLinearRgbaFloats);
@@ -249,6 +256,8 @@ class PlanetarySubmissionSequence
     FogSpace                  Fog_{};
     OpticalLensFlare          LensFlare_{};
     PackedEnsemblePayload     LastPayload_{};
+    bool                      SkyAndShadowsReady_ = false;     // [-] ExecuteSkyAndShadows ran for the coming overlay
+    const FogSceneShadow*     FogSceneShadow_     = nullptr;   // [-] borrowed; outlives the overlay that sets it
 };
 
 void TonemapHdrToSrgb8(std::span<const float> LinearRgbaFloats,
