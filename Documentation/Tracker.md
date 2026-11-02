@@ -1144,3 +1144,7 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
   against the demo nesting's 650, because adjacency-only grouping keeps about 142 disconnected props apart. The demo's
   cull uses a single-level Hi-Z. The `drawIndirectCount` path is unexercised on SwiftShader, which lacks it.
 - **Commits:** `7b06560 af1e898 c2afd72 3970b6a 8dddb3c d39bf03 c7d7f8c 1d5f1d7` and this documentation commit.
+- **Published Windows package:** built from clean source `fac38ac`; `Binaries/FrontierSceneViewport-Windows-x64.zip`,
+  24,432,620 bytes, 921 files, five shader sets verified (AnalyticIllumination and VirtualizedGeometry included),
+  `ProvingGround.nestingspace` staged. SHA-256 `bf58bb9ad500d5abaefc03eac16c786b835fe691d3ed1b8a1d678300e766f17c`.
+  Unsigned and never launched on Windows here.
