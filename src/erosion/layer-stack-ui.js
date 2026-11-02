@@ -36,6 +36,7 @@ import {
   normalizeSnowEffect,
   normalizeSnowEffects,
   summarizeSnowEffects,
+  snowmeltCycleAtStep,
   visibleCrackThresholdMm,
 } from './frost-weathering.js';
 import {
@@ -226,6 +227,14 @@ const SNOW_EFFECT_PARAM_CONTROLS = {
   'legacy-instant-nivation': [
     { key: 'localRetention', label: 'Legacy Local Retention', min: 0, max: 1, step: 0.02, fmt: pctFmt },
     { key: 'marginRate', label: 'Legacy Margin Rate', min: 0, max: 2, step: 0.05, fmt: (v) => `${Number(v).toFixed(2)}×` },
+  ],
+  'snowmelt-runoff': [
+    { key: 'cyclePeriodSteps', label: 'Cold → Warm/Dry Cycle Period', min: 16, max: 720, step: 2, fmt: (v) => `${Math.round(v)} steps` },
+    { key: 'cyclePhase', label: 'Cycle Start Phase (0 cold · 0.5 warm)', min: 0, max: 1, step: 0.01, fmt: (v) => `${Math.round(v * 100)}%` },
+    { key: 'warmMeltBoost', label: 'Warm-Phase Melt Boost', min: 0, max: 4, step: 0.05, fmt: (v) => `${Number(v).toFixed(2)}×` },
+    { key: 'runoffErosion', label: 'Meltwater Channel Cutting', min: 0, max: 2, step: 0.05, fmt: (v) => `${Number(v).toFixed(2)}×` },
+    { key: 'sedimentCapacity', label: 'Meltwater Sediment Capacity', min: 0, max: 2, step: 0.05, fmt: (v) => `${Number(v).toFixed(2)}×` },
+    { key: 'infiltration', label: 'Meltwater Infiltration', min: 0, max: 1, step: 0.02, fmt: pctFmt },
   ],
 };
 
@@ -441,7 +450,7 @@ const INSPECTOR_SCHEMAS = {
     selects: [],
     sliders: [
       { key: 'bakePasses', label: 'Stack Bake Passes', min: 0, max: 64, step: 2, fmt: (v) => (v > 0 ? `${Math.round(v)} passes` : 'Live sim') },
-      { key: 'snowline', label: 'Snowline Elevation', min: 0.05, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
+      { key: 'snowline', label: 'Snowline / Melt Equilibrium', min: 0.05, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
       { key: 'snowfallRate', label: 'Snowfall Rate', min: 0.0, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
       { key: 'glacierStrength', label: 'Glacier Ice Strength', min: 0.0, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
       { key: 'iceMeltRate', label: 'Glacial Meltwater Recharge', min: 0.0, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
@@ -1189,6 +1198,7 @@ export class ErosionLayerStackUI {
     Object.assign(layer.params, frost);
     const selected = effects.find((effect) => effect.id === this.selectedSnowEffectId) || effects[0] || null;
     const derived = deriveSnowEffectWeights(effects);
+    const meltCycle = snowmeltCycleAtStep(derived, this.engine.cryoStepCount ?? this.engine.stepCount ?? 0);
     const annual = estimateAnnualFrostWindow(frost, 0.35);
     const cellSizeM = (this.engine.params.worldSpan || 500) / Math.max(32, this.engine.gridRes || this.pipeline.R || 256);
     const visibleMm = visibleCrackThresholdMm(cellSizeM, frost.frostVisibleCrackMm);
@@ -1209,6 +1219,7 @@ export class ErosionLayerStackUI {
       ['Frost creep', derived.weights.frostCreep],
       ['Avalanche', derived.weights.avalanche],
       ['Plucking', derived.weights.glacierPlucking],
+      ['Snowmelt runoff', derived.weights.snowmelt],
       ['Legacy instant', derived.weights.legacy],
     ].filter(([, value]) => value > 0.001)
       .map(([label, value]) => `<span class="tp-frost-weight-chip">${label} ${Math.round(value * 100)}%</span>`)
@@ -1280,7 +1291,7 @@ export class ErosionLayerStackUI {
     return `
       <section class="tp-property-card tp-snow-frost-card">
         <h2><i style="background:${iconColor}"></i><span>Frost Cracking, Pitting & Snow Effect Stack</span></h2>
-        <p class="tp-card-note"><strong>Why old Snow could bury summits:</strong> it converted snowy bedrock to sediment immediately in the same cell. Frost debris is real, but real ice-lens damage needs water, a thermal gradient and time. This model stores hairline cracks invisibly, releases pits only after both thresholds below are crossed, then exports loosened debris through creep, meltwash, avalanches and subglacial till.</p>
+        <p class="tp-card-note"><strong>Why old Snow could bury summits:</strong> it converted snowy bedrock to sediment immediately in the same cell. Frost debris is real, but real ice-lens damage needs water, a thermal gradient and time. This model stores hairline cracks invisibly, releases pits only after both thresholds below are crossed, then exports loosened debris through creep, meltwash, avalanches and subglacial till. Snowfall now lands across the storm field at every elevation; the Snowline slider is the long-term melt-equilibrium line, so cold-phase valley snow can persist and later become erosive snowmelt runoff without Rain being enabled.</p>
         <label class="tp-field-row">
           <span>Snow Effect Preset</span>
           <select class="tp-select" id="tp-snow-effect-preset">${presetOptions}</select>
@@ -1297,6 +1308,7 @@ export class ErosionLayerStackUI {
           <div><span>Saturation efficacy</span><strong>${Math.round(annual.saturationEfficacy * 100)}%</strong><small>peak at ${Math.round(frost.frostSaturationPeak * 100)}% pore saturation</small></div>
           <div><span>Visible crack gate</span><strong>${visibleMm.toFixed(1)} mm</strong><small>= max(requested ${frost.frostVisibleCrackMm.toFixed(1)} mm, ${(cellSizeM * 8).toFixed(1)} mm at ${cellSizeM.toFixed(2)} m cells)</small></div>
           <div><span>Damage gate</span><strong>${Math.round(frost.frostDamageThreshold * 100)}%</strong><small>below this, natural view and geometry stay unchanged</small></div>
+          <div><span>Snowmelt cycle</span><strong>${meltCycle.active ? `${Math.round(meltCycle.phase * 100)}% · ${meltCycle.season < 0 ? 'cold accumulation' : 'warm/dry melt'}` : 'not in stack'}</strong><small>${meltCycle.active ? `snowfall ${meltCycle.snowfallMultiplier.toFixed(2)}× · melt ${meltCycle.meltMultiplier.toFixed(2)}× · valley retention ${Math.round(meltCycle.lowElevationRetention * 100)}%` : 'add Seasonal snowmelt cycle & runoff erosion to enable it'}</small></div>
         </div>
         <div class="tp-frost-weight-row">${weightChips}</div>
         <details class="tp-frost-globals" open>

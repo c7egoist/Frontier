@@ -123,6 +123,22 @@ export const SNOW_EFFECT_TYPES = Object.freeze({
       jointSensitivity: 1.0,
     }),
   }),
+  'snowmelt-runoff': Object.freeze({
+    id: 'snowmelt-runoff',
+    label: 'Seasonal snowmelt cycle & runoff erosion',
+    short: 'Snowmelt',
+    color: '#38bdf8',
+    description:
+      'A cold-to-warm snow cycle. During the cold phase snowfall can be retained well below the long-term snowline, including valley floors and drifted hollows. During the warm/dry phase that stored snow and ice melt; the resulting shallow-water runoff cuts channels, entrain fines/coarse debris and deposits them downslope. No rain particles or rainfall are switched on.',
+    defaults: Object.freeze({
+      cyclePeriodSteps: 180,
+      cyclePhase: 0.16,
+      warmMeltBoost: 1.65,
+      runoffErosion: 0.85,
+      sedimentCapacity: 0.85,
+      infiltration: 0.18,
+    }),
+  }),
   'legacy-instant-nivation': Object.freeze({
     id: 'legacy-instant-nivation',
     label: 'Legacy instant nivation (old model)',
@@ -159,6 +175,12 @@ const SNOW_EFFECT_PARAM_LIMITS = Object.freeze({
   jointSensitivity: [0, 2.5],
   localRetention: [0, 1],
   marginRate: [0, 2],
+  cyclePeriodSteps: [16, 720],
+  cyclePhase: [0, 1],
+  warmMeltBoost: [0, 4],
+  runoffErosion: [0, 2],
+  sedimentCapacity: [0, 2],
+  infiltration: [0, 1],
 });
 
 export function createSnowEffect(type = 'segregation-ice', overrides = {}) {
@@ -199,7 +221,7 @@ export const SNOW_EFFECT_PRESETS = Object.freeze({
   'research-balanced': Object.freeze({
     id: 'research-balanced',
     label: 'Research balanced periglacial',
-    description: 'Slow segregation-ice damage, modest freeze-thaw, snowpatch nivation, frost-creep export and joint-aware glacier plucking.',
+    description: 'Slow segregation-ice damage, modest freeze-thaw, snowpatch nivation, frost-creep export, joint-aware glacier plucking and a seasonal cold-accumulation / warm-melt runoff cycle.',
     globals: Object.freeze({ ...DEFAULT_FROST_PARAMS }),
     effects: () => effectList([
       ['segregation-ice', 0.85],
@@ -208,6 +230,7 @@ export const SNOW_EFFECT_PRESETS = Object.freeze({
       ['frost-creep-solifluction', 0.60],
       ['avalanche-scour', 0.35],
       ['glacier-plucking', 0.65],
+      ['snowmelt-runoff', 0.70],
     ]),
   }),
   'segregation-pitting': Object.freeze({
@@ -235,6 +258,7 @@ export const SNOW_EFFECT_PRESETS = Object.freeze({
       ['volumetric-freeze-thaw', 0.25],
       ['avalanche-scour', 0.30],
       ['glacier-plucking', 0.55],
+      ['snowmelt-runoff', 0.50, { cyclePeriodSteps: 150, runoffErosion: 0.65 }],
     ]),
   }),
   'freeze-thaw-shatter': Object.freeze({
@@ -260,6 +284,7 @@ export const SNOW_EFFECT_PRESETS = Object.freeze({
       ['frost-creep-solifluction', 0.85],
       ['avalanche-scour', 0.45],
       ['nivation-snowpatch', 0.45],
+      ['snowmelt-runoff', 0.80, { cyclePeriodSteps: 140, runoffErosion: 0.90 }],
     ]),
   }),
   'nivation-cirque': Object.freeze({
@@ -286,6 +311,7 @@ export const SNOW_EFFECT_PRESETS = Object.freeze({
       ['avalanche-scour', 0.65],
       ['volumetric-freeze-thaw', 0.35],
       ['glacier-plucking', 0.45],
+      ['snowmelt-runoff', 1.05, { cyclePeriodSteps: 130, warmMeltBoost: 1.9, runoffErosion: 1.05, sedimentCapacity: 1.0 }],
     ]),
   }),
   'glacier-plucking': Object.freeze({
@@ -308,12 +334,34 @@ export const SNOW_EFFECT_PRESETS = Object.freeze({
       ['segregation-ice', 0.70],
       ['frost-creep-solifluction', 0.55],
       ['avalanche-scour', 0.25],
+      ['snowmelt-runoff', 0.55, { cyclePeriodSteps: 220, runoffErosion: 0.60 }],
+    ]),
+  }),
+  'spring-snowmelt': Object.freeze({
+    id: 'spring-snowmelt',
+    label: 'Valley snow & spring melt flood',
+    description: 'Cold-phase snowfall is retained on valley floors and in drifts well below the melt-equilibrium line, then a warm/dry phase turns the stored pack into sediment-carrying meltwater channels.',
+    globals: Object.freeze({
+      ...DEFAULT_FROST_PARAMS,
+      frostYearsPerStep: 1.6,
+      frostMeanTempC: -2.8,
+      frostSeasonalAmplitudeC: 15,
+      frostMoisture: 0.72,
+      frostInitialDamage: 0.18,
+      frostDamageThreshold: 0.55,
+      frostDebrisRetention: 0.30,
+    }),
+    effects: () => effectList([
+      ['snowmelt-runoff', 1.25, { cyclePeriodSteps: 120, cyclePhase: 0.10, warmMeltBoost: 2.1, runoffErosion: 1.15, sedimentCapacity: 1.05, infiltration: 0.12 }],
+      ['nivation-snowpatch', 0.70, { meltwashExport: 0.80 }],
+      ['frost-creep-solifluction', 0.60],
+      ['segregation-ice', 0.40],
     ]),
   }),
   'snowpack-only': Object.freeze({
     id: 'snowpack-only',
     label: 'Snowpack & ice flow only',
-    description: 'Snow accumulation, drift, avalanching and firn/ice creep remain, but snow does not weather or pluck bedrock.',
+    description: 'Full-domain snow accumulation, drift, avalanching, finite melt routing and firn/ice creep remain, but snow does not weather/pluck bedrock and meltwater channel cutting is off.',
     globals: Object.freeze({ ...DEFAULT_FROST_PARAMS, frostInitialDamage: 0 }),
     effects: () => [],
   }),
@@ -400,6 +448,7 @@ export function deriveSnowEffectWeights(effectsInput) {
   const avalanche = byType.get('avalanche-scour') || [];
   const glacier = byType.get('glacier-plucking') || [];
   const legacy = byType.get('legacy-instant-nivation') || [];
+  const snowmelt = byType.get('snowmelt-runoff') || [];
 
   const weights = {
     segregation: weight('segregation-ice'),
@@ -409,6 +458,7 @@ export function deriveSnowEffectWeights(effectsInput) {
     avalanche: weight('avalanche-scour'),
     glacierPlucking: weight('glacier-plucking'),
     legacy: weight('legacy-instant-nivation'),
+    snowmelt: weight('snowmelt-runoff'),
   };
   const params = {
     windowLowC: weightedAverage(segregation, 'windowLowC', -8),
@@ -432,6 +482,12 @@ export function deriveSnowEffectWeights(effectsInput) {
     jointSensitivity: weightedAverage(glacier, 'jointSensitivity', 1),
     legacyRetention: weightedAverage(legacy, 'localRetention', 0.72),
     legacyMarginRate: weightedAverage(legacy, 'marginRate', 1),
+    cyclePeriodSteps: weightedAverage(snowmelt, 'cyclePeriodSteps', 180),
+    cyclePhase: weightedAverage(snowmelt, 'cyclePhase', 0.16),
+    warmMeltBoost: weightedAverage(snowmelt, 'warmMeltBoost', 1.65),
+    runoffErosion: weightedAverage(snowmelt, 'runoffErosion', 0.85),
+    sedimentCapacity: weightedAverage(snowmelt, 'sedimentCapacity', 0.85),
+    infiltration: weightedAverage(snowmelt, 'infiltration', 0.18),
   };
   if (params.windowHighC <= params.windowLowC + 0.5) params.windowHighC = params.windowLowC + 0.5;
   return {
@@ -439,10 +495,58 @@ export function deriveSnowEffectWeights(effectsInput) {
     weights,
     params,
     anyDamage: weights.segregation + weights.volumetric + weights.nivation > 0.001,
-    anyTransport: weights.frostCreep + weights.avalanche + weights.glacierPlucking > 0.001,
+    anyTransport: weights.frostCreep + weights.avalanche + weights.glacierPlucking + weights.snowmelt > 0.001,
     anyWeathering:
       weights.segregation + weights.volumetric + weights.nivation + weights.avalanche +
-      weights.glacierPlucking + weights.legacy > 0.001,
+      weights.glacierPlucking + weights.legacy + weights.snowmelt > 0.001,
+  };
+}
+
+/**
+ * Cold-accumulation / warm-dry-melt cycle used by the snowmelt-runoff effect.
+ *
+ * Phase 0 is the coldest point and phase 0.5 the warmest. The returned
+ * low-elevation retention is deliberately non-zero even without the effect:
+ * the snowline is a long-term melt-equilibrium line, not a physical switch
+ * that prevents falling snow from landing in valleys. With the effect active,
+ * cold phases retain most low snow; warm phases suppress new snowfall and
+ * amplify finite snow/ice melt into runoff.
+ */
+export function snowmeltCycleAtStep(derivedOrEffects, stepCount = 0) {
+  const derived = derivedOrEffects && derivedOrEffects.weights && derivedOrEffects.params
+    ? derivedOrEffects
+    : deriveSnowEffectWeights(derivedOrEffects);
+  const weight = clamp(derived.weights.snowmelt, 0, 2.5, 0);
+  const active = weight > 0.001;
+  const period = clamp(derived.params.cyclePeriodSteps, 16, 720, 180);
+  const phaseRaw = (Number(stepCount) || 0) / period + clamp(derived.params.cyclePhase, 0, 1, 0.16);
+  const phase = ((phaseRaw % 1) + 1) % 1;
+  const season = active ? -Math.cos(phase * Math.PI * 2) : 0; // -1 cold, +1 warm; neutral without the effect
+  const warm = smoothstep(-0.12, 0.88, season);
+  const cold = 1 - smoothstep(-0.82, 0.35, season);
+  const strength = clamp(weight, 0, 1.5, 0);
+  const cycleBlend = clamp(strength, 0, 1, 0);
+  const snowfallMultiplier = active
+    ? clamp(1.10 + 0.22 * cold * strength - 0.78 * warm * strength, 0.06, 1.38, 1)
+    : 1;
+  const fullCycleMelt = 0.05 + derived.params.warmMeltBoost * warm * Math.max(strength, 1);
+  const meltMultiplier = active
+    ? clamp((1 - cycleBlend) + cycleBlend * fullCycleMelt, 0.02, 4.2, 1)
+    : 1;
+  const lowElevationRetention = active
+    ? clamp(0.34 + cycleBlend * ((0.14 + 0.78 * cold) - 0.34), 0.08, 0.95, 0.34)
+    : 0.34;
+  return {
+    active,
+    weight,
+    phase,
+    season,
+    warm,
+    cold,
+    snowfallMultiplier,
+    meltMultiplier,
+    lowElevationRetention,
+    vec: [snowfallMultiplier, meltMultiplier, lowElevationRetention, season],
   };
 }
 
@@ -455,6 +559,7 @@ export function summarizeSnowEffects(effectsInput) {
   if (weights.volumetric > 0.001) parts.push(`freeze-thaw ${Math.round(weights.volumetric * 100)}%`);
   if (weights.nivation > 0.001) parts.push(`nivation ${Math.round(weights.nivation * 100)}%`);
   if (weights.frostCreep > 0.001) parts.push(`creep ${Math.round(weights.frostCreep * 100)}%`);
+  if (weights.snowmelt > 0.001) parts.push(`snowmelt runoff ${Math.round(weights.snowmelt * 100)}%`);
   if (weights.legacy > 0.001) parts.push('legacy instant');
   return parts.slice(0, 3).join(' · ') || `${active.length} snow effects`;
 }

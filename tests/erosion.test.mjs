@@ -66,6 +66,7 @@ import {
   estimateAnnualFrostWindow,
   normalizeFrostParams,
   normalizeSnowEffects,
+  snowmeltCycleAtStep,
   visibleCrackThresholdMm,
 } from '../src/erosion/frost-weathering.js';
 import {
@@ -1741,6 +1742,7 @@ test('Snow simulation is mass-conserving and visibility toggles exist for water/
 
   const climateHarness = Object.create(GpuErosionEngine.prototype);
   climateHarness.stepCount = 0;
+  climateHarness.cryoStepCount = 0;
   climateHarness.params = {
     ...DEFAULT_EROSION_PARAMS,
     emitterMode: 'glacial-blizzard',
@@ -1756,8 +1758,9 @@ test('Snow simulation is mass-conserving and visibility toggles exist for water/
   assert.deepEqual(climateHarness._getClimateUniforms().speciesVec, [0, 0, 0, 0],
     'Frost/glacier-only Cryo with zero snowfall creates no precipitation particles');
   climateHarness.params.snowfallRate = 0.8;
+  climateHarness.params.emitterMode = 'sky-rain';
   assert.deepEqual(climateHarness._getClimateUniforms().speciesVec, [0, 1, 0, 0],
-    'Snow solo emits snow particles only, never rain/wind/rockfall');
+    'Snow solo emits snow particles only, even if the inherited emitter was rain-oriented');
   assert.deepEqual(climateHarness._getSpeciesVisUniform(), [0, 1, 0, 0],
     'Snow solo hides every non-snow particle species');
 });
@@ -2672,13 +2675,14 @@ test('Terrain resolution is a safe boot-time quality option and the redesigned U
 });
 
 test('Snow frost cracks incubate below terrain resolution before thresholded pitting releases debris', () => {
-  assert.equal(Object.keys(SNOW_EFFECT_TYPES).length, 7);
-  assert.equal(Object.keys(SNOW_EFFECT_PRESETS).length, 7);
+  assert.equal(Object.keys(SNOW_EFFECT_TYPES).length, 8);
+  assert.equal(Object.keys(SNOW_EFFECT_PRESETS).length, 8);
   assert.deepEqual(normalizeFrostParams({}), normalizeFrostParams(DEFAULT_FROST_PARAMS));
 
   const balanced = createSnowEffectPreset('research-balanced');
   const balancedWeights = deriveSnowEffectWeights(balanced.effects);
   assert.ok(balancedWeights.weights.segregation > 0 && balancedWeights.weights.frostCreep > 0);
+  assert.ok(balancedWeights.weights.snowmelt > 0 && balancedWeights.anyTransport, 'Balanced Snow includes erosive seasonal snowmelt runoff');
   assert.equal(balancedWeights.weights.legacy, 0, 'Research presets must not secretly use instant in-place conversion');
   assert.equal(createSnowEffectPreset('snowpack-only').effects.length, 0);
   assert.ok(deriveSnowEffectWeights(createSnowEffectPreset('legacy-instant').effects).weights.legacy > 0);
@@ -2701,6 +2705,27 @@ test('Snow frost cracks incubate below terrain resolution before thresholded pit
   ]);
   assert.equal(new Set(duplicateIds.map((effect) => effect.id)).size, 2, 'Restored duplicate Snow-effect ids are made unique');
   assert.ok(duplicateIds.every((effect) => !effect.id.includes(':')), 'Snow-effect ids stay dataset-safe');
+
+  // The snowline is not allowed to be a zero-retention floor. In the cold
+  // phase most valley snowfall sticks; half a cycle later snowfall is
+  // suppressed and stored snow/ice melt is amplified instead.
+  const meltEffects = [createSnowEffect('snowmelt-runoff', {
+    intensity: 1,
+    cyclePeriodSteps: 100,
+    cyclePhase: 0,
+    warmMeltBoost: 2,
+  })];
+  const coldCycle = snowmeltCycleAtStep(meltEffects, 0);
+  const warmCycle = snowmeltCycleAtStep(meltEffects, 50);
+  assert.ok(coldCycle.lowElevationRetention > 0.85 && coldCycle.snowfallMultiplier > 1.1 && coldCycle.meltMultiplier < 0.2);
+  assert.ok(warmCycle.meltMultiplier > 1.8 && warmCycle.snowfallMultiplier < 0.5 && warmCycle.lowElevationRetention < coldCycle.lowElevationRetention);
+  const neutralCycle = snowmeltCycleAtStep([], 50);
+  assert.deepEqual(
+    [neutralCycle.snowfallMultiplier, neutralCycle.meltMultiplier, neutralCycle.lowElevationRetention, neutralCycle.season],
+    [1, 1, 0.34, 0],
+    'Snowpack-only still retains some low snowfall but has no imposed melt cycle',
+  );
+  assert.ok(deriveSnowEffectWeights(createSnowEffectPreset('spring-snowmelt').effects).weights.snowmelt > 1);
 
   // A visible aperture is resolution-aware: a 1 m cell cannot honestly show
   // a requested 2 mm crack, while the stored state can still carry it.
@@ -2766,10 +2791,28 @@ test('Snow frost cracks incubate below terrain resolution before thresholded pit
   for (const token of ['creepDrive', 'avalancheDrive', 'tillDrive', 'uFrostTalusA']) {
     assert.ok(Shaders.THERMAL_TALUS_FRAG.includes(token), `Talus frost export missing ${token}`);
   }
+  // Full-domain snowfall + snowmelt erosion contracts. The old hard gates
+  // (`altFactor`, `coldZone`) must not return: elevation now interpolates
+  // retention, while conservative meltwash moves the liberated sediment.
+  for (const token of ['lowElevationSnow', 'snowfallRetention', 'precipField']) {
+    assert.ok(Shaders.INIT_SNOW_FRAG.includes(token), `Initial snow must reach low terrain (${token})`);
+  }
+  assert.ok(!Shaders.INIT_SNOW_FRAG.includes('altFactor'));
+  assert.ok(Shaders.PARTICLE_STEP_FRAG.includes('altitudeStick') && Shaders.PARTICLE_STEP_FRAG.includes('0.34 + 0.66 * altitudeStick'));
+  for (const token of ['uMeltCycle', 'uMeltCycle.y', 'uMeltCycle.z', 'precipField', 'snowfallRetention']) {
+    assert.ok(Shaders.SNOW_CRYO_FRAG.includes(token), `Snow Cryo full-domain accumulation missing ${token}`);
+  }
+  assert.ok(!Shaders.SNOW_CRYO_FRAG.includes('coldZone'));
+  for (const token of ['uFrostIntD', 'meltPipeBlend', 'effectivePipeBlend', 'localCoarseShare']) {
+    assert.ok(Shaders.TERRAIN_INTEGRATE_FRAG.includes(token), `Snowmelt channel cutting missing ${token}`);
+  }
+  for (const token of ['uFrostTalusD', 'meltwashDrive', 'diffWater', 'sourceWater']) {
+    assert.ok(Shaders.THERMAL_TALUS_FRAG.includes(token), `Snowmelt pairwise sediment transport missing ${token}`);
+  }
   const engineSrc = fs.readFileSync(new URL('../src/erosion/gpu-erosion-engine.js', import.meta.url), 'utf8');
   const pipelineSrc = fs.readFileSync(new URL('../src/erosion/terrain-stack-pipeline.js', import.meta.url), 'utf8');
   const uiSrc = fs.readFileSync(new URL('../src/erosion/layer-stack-ui.js', import.meta.url), 'utf8');
-  for (const token of ['progFrostDamage', 'frostTex', 'fboFrost', 'seedFrostWeathering', "'uFrostTex', this.frostTex[this.frostIdx], 9"]) {
+  for (const token of ['progFrostDamage', 'frostTex', 'fboFrost', 'seedFrostWeathering', "'uFrostTex', this.frostTex[this.frostIdx], 9", "'uMeltCycle'", "'uFrostIntD'", "'uFrostTalusD'", 'cryoStepCount']) {
     assert.ok(engineSrc.includes(token), `Engine frost wiring missing ${token}`);
   }
   for (const token of ['applyLiveSnowLayerParams', 'seedFrostWeathering()', "case 10: return 10", "'uFrostTex', this.engine.frostTex[this.engine.frostIdx], 9"]) {
@@ -2790,6 +2833,7 @@ test('Snow frost cracks incubate below terrain resolution before thresholded pit
   const showcaseLayers = TERRAIN_STACK_PRESETS['frost-pitted-rainbow-range'].layers();
   const snowHtml = inspector._snowFrostCardHtml(showcaseLayers.find((layer) => layer.type === 'aeolian-glacial'), '#a8e6ff');
   assert.ok(snowHtml.includes('Segregation window') && snowHtml.includes('data-snow-effect-param'));
+  assert.ok(snowHtml.includes('Snowmelt runoff') && snowHtml.includes('Snowmelt cycle'), 'Snow Inspector exposes the valley-snow / melt-cycle state');
   assert.ok(inspector.selectedSnowEffectId, 'Snow Inspector selects an effect for editing');
 
   // An explicitly emptied custom stack is snowpack-only. It must not be
@@ -2809,6 +2853,8 @@ test('Snow frost cracks incubate below terrain resolution before thresholded pit
   assert.equal(availabilityHarness._computeSimAvailability().cryo, false);
   availabilitySnow.params.snowEffects = [createSnowEffect('segregation-ice')];
   assert.equal(availabilityHarness._computeSimAvailability().cryo, true);
+  availabilitySnow.params.snowEffects = [createSnowEffect('snowmelt-runoff')];
+  assert.equal(availabilityHarness._computeSimAvailability().cryo, true, 'A melt-only cycle can run to drain an existing snowpack');
 });
 
 test('Authored stratigraphic columns are non-repeating chemical beds with composition-derived properties', () => {
@@ -2917,8 +2963,9 @@ test('Authored stratigraphic columns are non-repeating chemical beds with compos
     assert.equal(strata[0].params.strataBeds.length, bedCount);
     assert.equal(snow.length, 1, `${presetId} snow count`);
     assert.equal(snow[0].params.snowEffectPreset, snowPreset);
-    assert.equal(snow[0].params.snowEffects.length, 6);
+    assert.equal(snow[0].params.snowEffects.length, 7);
     assert.ok(deriveSnowEffectWeights(snow[0].params.snowEffects).weights.legacy === 0);
+    assert.ok(deriveSnowEffectWeights(snow[0].params.snowEffects).weights.snowmelt > 0);
     assert.equal(stack[stack.length - 1].type, ENVIRONMENT_LAYER_TYPE);
     assert.equal(stack[stack.length - 2].params.seed, 4029);
   }

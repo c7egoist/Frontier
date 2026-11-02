@@ -512,7 +512,7 @@ export const LAYER_OPERATION_SPECS = {
     glyph: 'snow',
     reads: ['Height', 'FineSed', '3D Hardness', 'Bed Porosity/Fractures'],
     writes: ['Height', 'FineSed', 'CoarseSed', 'SnowIce', 'Frost Damage'],
-    summary: (p) => `Snowline ${Math.round((p.snowline ?? 0.42) * 100)}% · snow ${Math.round((p.snowfallRate ?? 0.82) * 100)}% · ${summarizeSnowEffects(p.snowEffects)}`,
+    summary: (p) => `Melt line ${Math.round((p.snowline ?? 0.42) * 100)}% · snowfall ${Math.round((p.snowfallRate ?? 0.82) * 100)}% · ${summarizeSnowEffects(p.snowEffects)}`,
     defaults: {
       bakePasses: 0,
       snowline: DEFAULT_EROSION_PARAMS.snowline,

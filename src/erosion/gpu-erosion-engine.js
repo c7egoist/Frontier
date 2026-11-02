@@ -41,6 +41,7 @@ import {
   deriveSnowEffectWeights,
   normalizeFrostParams,
   normalizeSnowEffects,
+  snowmeltCycleAtStep,
 } from './frost-weathering.js';
 import {
   createStrataColumnPreset,
@@ -226,6 +227,7 @@ export class GpuErosionEngine {
     this.active = false;   // Whether this viewport tab is visible
     this.playing = true;   // Whether simulation steps advance each frame
     this.stepCount = 0;
+    this.cryoStepCount = 0;
     this.startTimeMs = performance.now();
     this.fps = 60;
     this._fpsFrames = 0;
@@ -966,6 +968,7 @@ export class GpuErosionEngine {
     const w = derived.weights;
     const ep = derived.params;
     const cryoPlaying = p.simCryoPlaying !== false;
+    const meltCycle = snowmeltCycleAtStep(derived, this.cryoStepCount || 0);
     const active = cryoPlaying && derived.anyDamage;
     const sunAz = ((Number(p.sunAzimuth) || 0) * Math.PI) / 180;
     const sunEl = ((Number(p.sunElevation) || 28) * Math.PI) / 180;
@@ -973,6 +976,8 @@ export class GpuErosionEngine {
     return {
       frost,
       derived,
+      meltCycle,
+      meltCycleVec: meltCycle.vec,
       active,
       anyWeathering: cryoPlaying && derived.anyWeathering,
       anyTransport: cryoPlaying && derived.anyTransport,
@@ -989,9 +994,11 @@ export class GpuErosionEngine {
       integrateA: [cryoPlaying ? w.legacy : 0, cryoPlaying ? w.avalanche : 0, cryoPlaying ? w.glacierPlucking : 0, active ? 1 : 0],
       integrateB: [frost.frostDebrisRetention, ep.avalancheSlope, ep.avalancheScour, ep.legacyRetention],
       integrateC: [ep.glacierPlucking, ep.glacierAbrasion, ep.jointSensitivity, ep.legacyMarginRate],
+      integrateD: [cryoPlaying ? w.snowmelt : 0, ep.runoffErosion, ep.sedimentCapacity, ep.infiltration],
       talusA: [p.simRockfallPlaying === false ? 0 : 1, cryoPlaying ? w.frostCreep : 0, cryoPlaying ? w.avalanche : 0, cryoPlaying ? w.glacierPlucking : 0],
       talusB: [ep.creepRate, ep.creepMinSlope, ep.coarseMobility, ep.avalancheEntrainment],
       talusC: [frost.frostYearsPerStep, ep.avalancheSlope, ep.meltwashExport, cryoPlaying && derived.anyTransport ? 1 : 0],
+      talusD: [cryoPlaying ? w.snowmelt : 0, ep.sedimentCapacity, ep.runoffErosion, meltCycle.meltMultiplier],
     };
   }
 
@@ -1132,6 +1139,13 @@ export class GpuErosionEngine {
       wind = Math.max(wind, 0.18 + 0.55 * clamp01(p.windSpeed) * (0.45 + 0.55 * clamp01(p.windSandSupply ?? DEFAULT_EROSION_PARAMS.windSandSupply)));
     }
 
+    // A Snow solo must still produce visible falling snow even when the stack
+    // inherited a rain-oriented emitter; otherwise Eulerian snow would grow
+    // on the ground with no matching precipitation in the air.
+    if (p.simHydraulicPlaying === false && p.simCryoPlaying !== false && clamp01(p.snowfallRate) > 0.001) {
+      snow = Math.max(snow, 0.85);
+    }
+
     // Independent Simulation Layer Play/Pause Gating: allows running all active simulations
     // simultaneously OR soloing/pausing Hydraulic, Cryo, Wind, or Rockfall one at a time!
     if (p.simHydraulicPlaying === false) rain = 0.0;
@@ -1142,6 +1156,13 @@ export class GpuErosionEngine {
     // existing glacier. Zero snowfall means zero new snow particles; the
     // glacial-blizzard emitter label alone must not create precipitation.
     if (clamp01(p.snowfallRate) <= 0.001) snow = 0.0;
+
+    // One shared cold/warm phase drives visible flakes, Eulerian snowfall,
+    // low-elevation retention and finite melt. Applying it here prevents the
+    // particle system from snowing at full rate during the warm/dry phase.
+    const snowDerived = deriveSnowEffectWeights(normalizeSnowEffects(p.snowEffects, p.snowEffectPreset));
+    const meltCycle = snowmeltCycleAtStep(snowDerived, this.cryoStepCount || 0);
+    if (p.simCryoPlaying !== false) snow *= meltCycle.snowfallMultiplier;
 
     const rawSum = rain + snow + wind + rock;
     const sum = Math.max(1e-4, rawSum);
@@ -1154,12 +1175,14 @@ export class GpuErosionEngine {
     const azRad = (effectiveWindAzimuth * Math.PI) / 180;
     const windMag = 0.35 + 0.65 * clamp01(p.windSpeed);
     const activeWind = p.simWindPlaying === false ? 0.0 : clamp01(p.windSpeed);
-    const activeSnow = p.simCryoPlaying === false ? 0.0 : clamp01(p.snowfallRate);
+    const activeSnow = p.simCryoPlaying === false ? 0.0 : clamp01(clamp01(p.snowfallRate) * meltCycle.snowfallMultiplier);
     return {
       anySimActive: rawSum > 1e-4 || p.simHydraulicPlaying !== false || p.simCryoPlaying !== false || p.simWindPlaying !== false || p.simRockfallPlaying !== false || p.simChemicalPlaying !== false,
       anyParticleSpecies: rawSum > 1e-4,
       speciesVec: rawSum > 1e-4 ? [rain / sum, snow / sum, wind / sum, rock / sum] : [0, 0, 0, 0],
       snowVec: [p.snowline, activeSnow, p.simCryoPlaying === false ? 0.0 : clamp01(p.glacierStrength), 0.35 + 0.9 * activeSnow],
+      meltCycle,
+      meltCycleVec: meltCycle.vec,
       windVec: [Math.cos(azRad) * windMag, Math.sin(azRad) * windMag, p.simWindPlaying === false ? 0.0 : (0.25 + 0.95 * activeWind), 0.35 + 0.65 * activeWind],
       windAzimuthDeg: effectiveWindAzimuth,
       windShiftOffsetDeg: windShiftOffsetDeg(p, windCycles),
@@ -1380,6 +1403,7 @@ export class GpuErosionEngine {
     const cellAreaSample = (p.worldSpan * p.worldSpan) / (TELEMETRY_RES * TELEMETRY_RES);
 
     this.stepCount = 0;
+    this.cryoStepCount = 0;
     this._obstBuiltStep = -999; // force obstacle rebuild for the new landscape
     this.telemetry.steps = 0;
     this.telemetry.erodedVolumeM3 = 0;
@@ -1620,6 +1644,7 @@ export class GpuErosionEngine {
     gl.uniform4fv(gl.getUniformLocation(this.progThermalTalus, 'uFrostTalusA'), talusA);
     gl.uniform4fv(gl.getUniformLocation(this.progThermalTalus, 'uFrostTalusB'), frostU.talusB);
     gl.uniform4fv(gl.getUniformLocation(this.progThermalTalus, 'uFrostTalusC'), frostU.talusC);
+    gl.uniform4fv(gl.getUniformLocation(this.progThermalTalus, 'uFrostTalusD'), frostU.talusD);
     gl.uniform1f(gl.getUniformLocation(this.progThermalTalus, 'uDryAeolian'), p.dryAeolianMode || 0.0);
     gl.uniform1f(gl.getUniformLocation(this.progThermalTalus, 'uSeed'), p.seed);
 
@@ -1654,6 +1679,7 @@ export class GpuErosionEngine {
 
     for (let s = 0; s < count; s++) {
       this.stepCount++;
+      if (p.simCryoPlaying !== false) this.cryoStepCount = (this.cryoStepCount || 0) + 1;
       // Recompute per substep, not once per batch: a 96-step stack bake must
       // travel through the shifting wind regime (and gust phase), rather
       // than eroding every substep from the direction at batch start.
@@ -1805,6 +1831,7 @@ export class GpuErosionEngine {
       gl.uniform4fv(gl.getUniformLocation(this.progTerrainIntegrate, 'uFrostIntA'), frostU.integrateA);
       gl.uniform4fv(gl.getUniformLocation(this.progTerrainIntegrate, 'uFrostIntB'), frostU.integrateB);
       gl.uniform4fv(gl.getUniformLocation(this.progTerrainIntegrate, 'uFrostIntC'), frostU.integrateC);
+      gl.uniform4fv(gl.getUniformLocation(this.progTerrainIntegrate, 'uFrostIntD'), frostU.integrateD);
       const riverSpring = p.simHydraulicPlaying === false
         ? 0.0
         : (p.oasisSpring ? -Math.max(0.05, p.headwaterFlow ?? 0.65) : (p.headwaterFlow ?? 0.0));
@@ -1884,6 +1911,7 @@ export class GpuErosionEngine {
         gl.uniform4fv(gl.getUniformLocation(this.progThermalTalus, 'uFrostTalusA'), frostU.talusA);
         gl.uniform4fv(gl.getUniformLocation(this.progThermalTalus, 'uFrostTalusB'), frostU.talusB);
         gl.uniform4fv(gl.getUniformLocation(this.progThermalTalus, 'uFrostTalusC'), frostU.talusC);
+        gl.uniform4fv(gl.getUniformLocation(this.progThermalTalus, 'uFrostTalusD'), frostU.talusD);
         gl.uniform1f(gl.getUniformLocation(this.progThermalTalus, 'uDryAeolian'), p.dryAeolianMode || 0.0);
         gl.uniform1f(gl.getUniformLocation(this.progThermalTalus, 'uSeed'), p.seed);
 
@@ -1906,6 +1934,7 @@ export class GpuErosionEngine {
         this._bindTex(this.progSnowCryo, 'uRockObstacleTex', this.obstacleTex[this.obstacleIdx], 3);
         gl.uniform4f(gl.getUniformLocation(this.progSnowCryo, 'uCryoParams'), R, cellSize, dt, p.worldSpan);
         gl.uniform4fv(gl.getUniformLocation(this.progSnowCryo, 'uClimate'), climate.snowVec);
+        gl.uniform4fv(gl.getUniformLocation(this.progSnowCryo, 'uMeltCycle'), climate.meltCycleVec);
         gl.uniform4fv(gl.getUniformLocation(this.progSnowCryo, 'uStrataOrient'), strataVec);
         gl.uniform4f(
           gl.getUniformLocation(this.progSnowCryo, 'uWindCryo'),

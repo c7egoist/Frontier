@@ -510,7 +510,7 @@ export class TerrainStackPipeline {
         const frostWeights = deriveSnowEffectWeights(snowEffectsForLayer(layer)).weights;
         const frostActive = (frostWeights.segregation + frostWeights.volumetric
           + frostWeights.nivation + frostWeights.frostCreep + frostWeights.avalanche
-          + frostWeights.glacierPlucking + frostWeights.legacy) > 0.001;
+          + frostWeights.glacierPlucking + frostWeights.legacy + frostWeights.snowmelt) > 0.001;
         if ((p.snowfallRate ?? 0) > 0.015 || (p.glacierStrength ?? 0) > 0.015 || frostActive) avail.cryo = true;
         // Legacy combined stacks may still drive wind from the snow layer,
         // but a dedicated Wind Erosion layer is the sole wind authority.
@@ -1346,7 +1346,8 @@ export class TerrainStackPipeline {
           ep.dryAeolianMode = p.dryAeolianMode ?? 0.0;
         }
         ep.snowLayerEnabled = true;
-        ep.simCryoPlaying = ep.snowfallRate > 0.015 || ep.glacierStrength > 0.015;
+        ep.simCryoPlaying = ep.snowfallRate > 0.015 || ep.glacierStrength > 0.015
+          || deriveSnowEffectWeights(ep.snowEffects).anyWeathering;
         ep.simWindPlaying = ep.windSpeed > 0.03 && (ep.windErosionRate ?? DEFAULT_EROSION_PARAMS.windErosionRate) > 0.001;
 
         // Seed snowpack & valley glaciers (`progInitSnow`) on the terrain constructed up to this stage!

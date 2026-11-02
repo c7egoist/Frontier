@@ -813,14 +813,19 @@ void main() {
   vec2 worldXZ = (vUv - 0.5) * uCryoParams.w;
   float driftNoise = fbm2D(worldXZ * 0.024 + uSeed * 0.017, 4, 0.52);
 
-  // Full-domain mountain snowpack: covers ridges, shoulders, cirques & wind-drifted benches across
-  // the ENTIRE terrain above snowline (and snow-drifted hollows slightly below snowline!), while
-  // sheer 55-deg+ rock cliffs shed snow into couloir chutes & cliff-base snow aprons!
-  float altFactor = smoothstep(snowline - 0.16 * snowfallRate, snowline + 0.14, elevN + (driftNoise - 0.5) * 0.09);
+  // Snowfall is a full-domain precipitation field: flakes land on valley
+  // floors and cliff-base aprons as well as summits. The snowline below is a
+  // persistence/melt-equilibrium factor, not a hard "no snow below here"
+  // switch. Low ground starts with a thinner, drift/concavity-biased pack;
+  // high ground retains the full storm depth, while sheer cliffs still shed.
   float slopeHold = 1.0 - smoothstep(1.05, 1.95, slope);
   float couloirPool = clamp(concavity * 0.95, 0.0, 1.25);
+  float altitudeSurvival = smoothstep(snowline - 0.16 * snowfallRate, snowline + 0.14, elevN + (driftNoise - 0.5) * 0.09);
+  float lowElevationSnow = clamp(0.30 + 0.34 * driftNoise + 0.30 * couloirPool, 0.22, 0.92);
+  float snowfallRetention = clamp(mix(lowElevationSnow, 1.0, altitudeSurvival), 0.0, 1.15);
+  float precipField = 0.62 + 0.72 * driftNoise;
 
-  float initSnow = snowfallRate * (altFactor * slopeHold * (0.85 + 0.95 * driftNoise) + couloirPool * altFactor * 0.85);
+  float initSnow = snowfallRate * snowfallRetention * slopeHold * precipField * (0.78 + 0.55 * couloirPool);
   // Valley & cirque glaciers extend below the snowline down concave U-shaped troughs!
   float valleyGlacierZone = smoothstep(snowline - 0.28 * uClimate.z, snowline + 0.18, elevN)
                           * (1.0 - smoothstep(0.28, 0.82, slope))
@@ -1221,8 +1226,11 @@ void main() {
 
   vec4 snowCell = sampleGridBilinear(uSnowTex, uv, res);
   float elevFrac = clamp(tC.r / max(uStrataOrient.w, 1.0), 0.0, 1.25);
-  // Thermal + wind exposure control how much snow can actually stick at this cell
-  float snowStickCapacity = smoothstep(uSnowParams.x - 0.10, uSnowParams.x + 0.12, elevFrac)
+  // Thermal + wind exposure control how much snow can actually stick at this
+  // cell. Elevation changes persistence, but it is not a zero-stick cutoff:
+  // flakes that visibly land in valleys/flats retain a real fraction there.
+  float altitudeStick = smoothstep(uSnowParams.x - 0.10, uSnowParams.x + 0.12, elevFrac);
+  float snowStickCapacity = (0.34 + 0.66 * altitudeStick)
                             * (1.0 - smoothstep(0.52, 0.86, sinTheta))
                             * (1.0 - smoothstep(0.55, 1.10, snowCell.g * 0.6));
 
@@ -1326,7 +1334,7 @@ void main() {
 
   if (species == SP_SNOW) {
     // ---------------- SNOWPACK ACCUMULATION, AVALANCHE & GLACIER ICE FORMATION ----------------
-    float deposit = velWater.w * uSnowParams.y * 0.16 * (0.25 + snowStickCapacity);
+    float deposit = velWater.w * uSnowParams.y * 0.16 * (0.35 + 0.85 * snowStickCapacity);
     if (dh > 0.006) {
       // Snow fences into hollows & lee slopes: preferential drift accumulation
       deposit *= 1.35;
@@ -1719,6 +1727,7 @@ uniform vec4 uChemInt;        // (dissolution, salt bursting, hydrolysis convers
 uniform vec4 uFrostIntA;      // (legacy, avalanche, glacier, frost active)
 uniform vec4 uFrostIntB;      // (debris retention, avalanche slope, avalanche scour, legacy retention)
 uniform vec4 uFrostIntC;      // (glacier plucking, glacier abrasion, joint sensitivity, legacy margin rate)
+uniform vec4 uFrostIntD;      // (snowmelt weight, runoff erosion, sediment capacity, infiltration)
 uniform float uBrushStrength;
 uniform float uSeed;
 
@@ -1757,7 +1766,7 @@ void main() {
   // season is active (rain itself, snow/glacier melt, or chemical transport).
   // In Wind/Rockfall-only seasons the old flux field must not keep silently
   // moving rivers in the background.
-  float cryoActiveGate = max(step(0.001, uClimate.y + uClimate.z), clamp(uFrostIntA.w, 0.0, 1.0));
+  float cryoActiveGate = max(step(0.001, uClimate.y + uClimate.z), max(clamp(uFrostIntA.w, 0.0, 1.0), step(0.001, uFrostIntD.x)));
   float waterRoutingGate = max(step(0.01, uPipeErode.x), max(cryoActiveGate, step(0.001, uChemInt.w)));
   dWaterPipe *= waterRoutingGate;
   flowVel *= waterRoutingGate;
@@ -1788,7 +1797,13 @@ void main() {
   float water = max(0.0, terr.a + dWaterPipe + max(0.0, delta.a));
 
   vec2 worldXZ = (vUv - 0.5) * uPipeErode.w;
-  if (uPipeErode.x > 0.01 && water > 0.004) {
+  // Snowmelt uses the same shallow-water shear law as rain-fed runoff, but
+  // its discharge comes only from water already routed by the pipe plus the
+  // finite snow/ice melt added below. Enabling this blend does not enable
+  // rain particles, rainfall intensity or headwater springs.
+  float meltPipeBlend = clamp(uFrostIntD.x * uFrostIntD.y, 0.0, 1.6);
+  float effectivePipeBlend = max(uPipeErode.x, meltPipeBlend);
+  if (effectivePipeBlend > 0.01 && water > 0.004) {
     vec4 tR = texelFetch(uTerrainTex, ivec2(min(maxI, c.x + 1), c.y), 0);
     vec4 tL = texelFetch(uTerrainTex, ivec2(max(0, c.x - 1), c.y), 0);
     vec4 tU = texelFetch(uTerrainTex, ivec2(c.x, min(maxI, c.y + 1)), 0);
@@ -1805,11 +1820,19 @@ void main() {
     float shear = discharge * (0.15 + slope) * 2.2;
     float critShear = 0.04 + 0.55 * hardness * hardness;
     if (shear > critShear && slope > 0.06) {
-      float streamCut = min(0.035, (shear - critShear) * uPipeErode.y * uPipeErode.x * 0.018 * dt / (0.15 + 2.5 * hardness));
+      float streamCut = min(0.035, (shear - critShear) * uPipeErode.y * effectivePipeBlend * 0.018 * dt / (0.15 + 2.5 * hardness));
       streamCut *= armour; // boulder armours its own footprint against stream cutting
       bedrock = max(1.0, bedrock - streamCut);
-      fine += streamCut * 0.18;
-    } else if (flowSpeed < 0.85 && water > 0.012 && slope < 0.09) {
+      float meltShare = clamp(meltPipeBlend / max(effectivePipeBlend, 1e-4), 0.0, 1.0);
+      float meltCapacityShare = clamp(0.35 + 0.45 * uFrostIntD.z, 0.0, 1.0);
+      float localFineShare = mix(0.18, 0.52 * meltCapacityShare + 0.12, meltShare);
+      float localCoarseShare = meltShare * 0.14 * meltCapacityShare * (0.35 + 0.65 * hardness);
+      fine += streamCut * localFineShare;
+      coarse += streamCut * localCoarseShare;
+    } else if (uPipeErode.x > 0.01 && flowSpeed < 0.85 && water > 0.012 && slope < 0.09) {
+      // Rain-fed low-flow wash retains its legacy suspended-load settling.
+      // Snowmelt-only deposition is handled by conservative pairwise
+      // transport in THERMAL_TALUS, so it never creates source-less fines here.
       fine += min(0.008, water * 0.012 * uPipeErode.x * dt);
     }
   }
@@ -2306,6 +2329,12 @@ void main() {
     }
   }
 
+  if (uFrostIntD.x > 0.001 && water > 0.0) {
+    float infiltrationRate = clamp(uFrostIntD.w, 0.0, 1.0);
+    float infiltrated = min(water, meltWater * infiltrationRate * 0.35 + water * infiltrationRate * 0.055 * dt);
+    water = max(0.0, water - infiltrated);
+  }
+
   if (c.x == 0 || c.x == maxI || c.y == 0 || c.y == maxI) {
     water *= 0.65;
   } else {
@@ -2331,6 +2360,7 @@ uniform sampler2D uSnowDeltaTex;
 uniform sampler2D uRockObstacleTex;
 uniform vec4 uCryoParams;     // (gridRes, cellSize, dt, worldSpan)
 uniform vec4 uClimate;        // (snowlineNorm, snowfallRate, glacierStrength, meltRate)
+uniform vec4 uMeltCycle;      // (snowfall multiplier, melt multiplier, low-elevation retention, season -1 cold..+1 warm)
 uniform vec4 uStrataOrient;   // (sinStrike, cosStrike, tanDip, reliefScale)
 uniform vec4 uWindCryo;       // (windDirX, windDirZ, windSpeed, stepTime)
 uniform float uIceMeltRate;
@@ -2376,12 +2406,18 @@ void main() {
   // 1. FULL-DOMAIN OROGRAPHIC SNOWFALL
   // ==========================================================================
   if (uClimate.y > 0.01) {
-    float stormSwirl = 0.82 + 0.36 * fbm2D(worldXZ * 0.016 + vec2(uWindCryo.w * 0.025, -uWindCryo.w * 0.018) + uSeed * 0.01, 3, 0.52);
-    float coldZone = smoothstep(snowlineNorm - 0.18 * uClimate.y, snowlineNorm + 0.12, elevN);
+    // Moving storm bands determine where precipitation is actually falling.
+    // Elevation no longer zeroes that input: it only interpolates between
+    // the cycle's low-elevation retention and full high-elevation survival.
+    float stormBand = fbm2D(worldXZ * 0.016 + vec2(uWindCryo.w * 0.025, -uWindCryo.w * 0.018) + uSeed * 0.01, 3, 0.52);
+    float precipField = 0.48 + 0.85 * smoothstep(0.18, 0.82, stormBand);
+    float altitudeSurvival = smoothstep(snowlineNorm - 0.18 * uClimate.y, snowlineNorm + 0.12, elevN);
+    float lowRetention = clamp(uMeltCycle.z, 0.05, 0.98);
+    float snowfallRetention = clamp(mix(lowRetention, 1.0, altitudeSurvival), 0.0, 1.15);
     float capSoft = max(0.0, 1.0 - snowDepth / 6.5);
 
-    // Terrain-aware retention (ported from egoistm1inbox arena/fd0eaa50):
-    // snow sticks to gentle ground and sheds from steep faces (couloirs take it)
+    // Terrain-aware retention: snow sticks to gentle ground and sheds from
+    // steep faces (couloirs and cliff-base aprons receive the shed snow).
     float retention = 1.0 - smoothstep(0.62, 1.05, terrSlope);
 
     // Wind loading: the windward face is scoured, the lee face is loaded with drifted snow
@@ -2389,7 +2425,7 @@ void main() {
     float windFace = clamp(dot(nT.xz, -windDirC) * 2.0, -1.0, 1.0); // > 0 faces into the wind
     float windLoad = 1.0 - 0.45 * max(windFace, 0.0) + 0.35 * max(-windFace, 0.0);
 
-    snowDepth += uClimate.y * coldZone * stormSwirl * capSoft * retention * windLoad * 0.085 * dt;
+    snowDepth += uClimate.y * precipField * snowfallRetention * capSoft * retention * windLoad * 0.100 * dt;
   }
 
   // ==========================================================================
@@ -2474,18 +2510,24 @@ void main() {
   // 3. FIRN COMPACTION ABOVE SNOWLINE & TRUE ALTITUDE-LAPSE MELT BELOW SNOWLINE!
   // ==========================================================================
   float aboveSnowline = smoothstep(snowlineNorm - 0.05, snowlineNorm + 0.18, elevN);
-  float compaction = min(snowDepth * 0.16, max(0.0, snowDepth - 0.55) * aboveSnowline * uClimate.z * 0.38 * dt);
+  float firnZone = clamp(aboveSnowline + max(0.0, uMeltCycle.z - 0.34) * 0.38, 0.0, 1.0);
+  float compaction = min(snowDepth * 0.16, max(0.0, snowDepth - 0.55) * firnZone * uClimate.z * 0.38 * dt);
   snowDepth -= compaction;
   iceDepth += compaction;
 
-  // Strictly elevation-controlled air warmth: ZERO solar melt above the snowline so peaks,
-  // ridges, and high snowfields stay permanently snow-clad, while snow/glaciers creeping or
-  // avalanching below snowlineNorm melt naturally into 2.5D rivers & alpine tarns!
+  // Elevation lapse still makes valley snow the first to disappear, but the
+  // seasonal cycle controls WHEN melt happens. Cold phases suppress melt so
+  // low snow can build; warm/dry phases raise the effective melt line and
+  // convert a finite part of the stored pack/ice into runoff. High terrain
+  // retains a much smaller warm-season ablation term rather than a cliff at
+  // one elevation.
   float subSnowDepth = max(0.0, snowlineNorm - elevN);
-  // Rain-on-snow: standing/flowing water percolating through the pack ripens
-  // and melts it well above the plain degree-day rate.
-  float warmth = clamp(subSnowDepth / max(0.16, snowlineNorm) + clamp(terr.a * 1.6, 0.0, 0.45), 0.0, 1.5);
-  float meltMod = 0.35 + 1.35 * uIceMeltRate;
+  float warmSeason = smoothstep(-0.15, 0.90, uMeltCycle.w);
+  float highAblation = 0.10 * warmSeason * (1.0 - smoothstep(snowlineNorm + 0.18, snowlineNorm + 0.55, elevN));
+  // Water percolating through the pack ripens and melts it above the plain
+  // degree-day rate (including snowmelt itself; no rain is required).
+  float warmth = clamp(subSnowDepth / max(0.16, snowlineNorm) + highAblation + clamp(terr.a * 1.6, 0.0, 0.45), 0.0, 1.65);
+  float meltMod = (0.35 + 1.35 * uIceMeltRate) * clamp(uMeltCycle.y, 0.02, 4.2);
   float melt = min(snowDepth, snowDepth * 0.55 * meltMod * warmth * dt);
   snowDepth -= melt;
   // Valley glacier snouts also experience gentle basal/snout pressure-melting into rivers
@@ -3152,6 +3194,7 @@ uniform vec4 uStrataOrient;   // (sinStrike, cosStrike, tanDip, reliefScale)
 uniform vec4 uFrostTalusA;    // (rockfall enabled, frost creep, avalanche, glacier)
 uniform vec4 uFrostTalusB;    // (creep rate, creep min slope, coarse mobility, avalanche entrainment)
 uniform vec4 uFrostTalusC;    // (years/step, avalanche slope, meltwash export, active)
+uniform vec4 uFrostTalusD;    // (snowmelt weight, sediment capacity, runoff erosion, melt multiplier)
 uniform float uDryAeolian;
 uniform float uSeed;
 
@@ -3216,6 +3259,37 @@ void main() {
       netCoarse -= min(tC.g * 0.10, (diffSed - maxDiffCoarse) * 0.075) * reposeScale;
     } else if (-diffSed > maxDiffCoarse && tN.g > 1e-5) {
       netCoarse += min(tN.g * 0.10, (-diffSed - maxDiffCoarse) * 0.075) * reposeScale;
+    }
+
+    // Snowmelt wash: finite meltwater/standing water entrains existing loose
+    // sediment along the water-surface head gradient. This is a symmetric
+    // pairwise exchange, so sediment removed from a melt channel is deposited
+    // in the downstream cell rather than deleted. Coarse clasts require a
+    // steeper, higher-competence melt stream.
+    if (uFrostTalusD.x > 0.001) {
+      float waterHeadC = max(effHC, hC + tC.a);
+      float waterHeadN = max(effHN, hN + tN.a);
+      float diffWater = waterHeadC - waterHeadN;
+      float waterSlope = abs(diffWater) / max(dist, 0.01);
+      float meltCapacity = clamp(uFrostTalusD.y, 0.0, 2.0);
+      float meltPulse = clamp(uFrostTalusD.w, 0.05, 3.0);
+      if (diffWater > 0.001) {
+        float sourceWater = tC.a + (max(snowC.b, 0.0) + max(snowC.a, 0.0)) * 0.35;
+        float meltGate = smoothstep(0.0015, 0.035, sourceWater)
+          * (0.30 + 0.70 * smoothstep(0.0, 0.55, waterSlope));
+        float meltwashDrive = uFrostTalusD.x * meltCapacity * meltPulse * meltGate;
+        float coarseGate = smoothstep(0.22, 0.75, waterSlope);
+        netFine -= min(tC.b * 0.038, diffWater * 0.020) * meltwashDrive;
+        netCoarse -= min(tC.g * 0.016, diffWater * 0.007) * meltwashDrive * coarseGate * (0.35 + 0.65 * clamp(uFrostTalusD.z, 0.0, 2.0));
+      } else if (diffWater < -0.001) {
+        float sourceWaterN = tN.a + (max(snowN.b, 0.0) + max(snowN.a, 0.0)) * 0.35;
+        float meltGateN = smoothstep(0.0015, 0.035, sourceWaterN)
+          * (0.30 + 0.70 * smoothstep(0.0, 0.55, waterSlope));
+        float meltwashDriveN = uFrostTalusD.x * meltCapacity * meltPulse * meltGateN;
+        float coarseGateN = smoothstep(0.22, 0.75, waterSlope);
+        netFine += min(tN.b * 0.038, (-diffWater) * 0.020) * meltwashDriveN;
+        netCoarse += min(tN.g * 0.016, (-diffWater) * 0.007) * meltwashDriveN * coarseGateN * (0.35 + 0.65 * clamp(uFrostTalusD.z, 0.0, 2.0));
+      }
     }
 
     // Snow-season mass export. These are pairwise-symmetric exchanges from
