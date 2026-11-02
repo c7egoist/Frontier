@@ -28,31 +28,31 @@ export const LAYER_CATEGORIES = {
     id: 'landform',
     label: 'Landform & SDF',
     eyebrow: 'LANDFORM / SDF OPERATION',
-    color: '#c9b38c',
+    color: '#f0b35e',
   },
   simulation: {
     id: 'simulation',
     label: 'Simulation',
     eyebrow: 'SIMULATION PROCESS',
-    color: '#8ab49a',
+    color: '#4ade80',
   },
   spline: {
     id: 'spline',
     label: 'Spline Feature',
     eyebrow: 'SPATIAL SPLINE OPERATION',
-    color: '#88acc4',
+    color: '#5ac8fa',
   },
   rocks: {
     id: 'rocks',
     label: 'Rock Placement',
     eyebrow: 'ROCK & BOULDER LAYER',
-    color: '#b89f8d',
+    color: '#f08a5a',
   },
   vegetation: {
     id: 'vegetation',
     label: 'Vegetation',
     eyebrow: 'PLANT & FOLIAGE LAYER',
-    color: '#93b87e',
+    color: '#7ee06a',
   },
 };
 

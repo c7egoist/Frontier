@@ -355,6 +355,7 @@ function setStudioMode(mode) {
   document.getElementById('spline-gizmo-svg').classList.toggle('hidden-panel', !isTerrain);
   document.getElementById('wind-debug-canvas').classList.toggle('hidden-panel', !isTerrain);
   document.getElementById('tp-scene-nav').classList.toggle('hidden-panel', !isTerrain);
+  document.getElementById('tp-author-tools').classList.toggle('hidden-panel', !isTerrain);
   document.getElementById('tp-scene-caption').classList.toggle('hidden-panel', !isTerrain);
 
   document.getElementById('left-rock-panels').classList.toggle('hidden-panel', isTerrain);
@@ -364,7 +365,7 @@ function setStudioMode(mode) {
   document.getElementById('rock-camera-bar').classList.toggle('hidden-panel', isTerrain);
 
   const leftTabLabel = document.getElementById('tp-left-tab-label');
-  if (leftTabLabel) leftTabLabel.textContent = isTerrain ? 'Layer stack' : 'Rock archetypes';
+  if (leftTabLabel) leftTabLabel.textContent = isTerrain ? 'Outliner' : 'Rock archetypes';
 
   if (isTerrain) {
     progressBar.classList.add('hidden');

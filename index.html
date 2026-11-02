@@ -58,16 +58,19 @@
       <aside class="tp-dock tp-layer-dock">
         <div class="tp-tab-strip">
           <div class="tp-document-tab active">
-            <span id="tp-left-tab-label">Layer stack</span>
+            <span id="tp-left-tab-label">Outliner</span>
+            <span class="tp-tab-close" aria-hidden="true">✕</span>
           </div>
+          <span class="tp-tab-add" aria-hidden="true">+</span>
         </div>
 
         <!-- TERRAIN LAYER STACK PANE -->
         <div id="left-erosion-panels" class="tp-pane-scroll">
           <div class="tp-pane-heading">
             <div class="tp-pane-title-wrap">
-              <h1>Layer stack</h1>
+              <h1>Outliner</h1>
               <span class="tp-count-pill" id="tp-layer-count">7</span>
+              <span class="tp-outliner-meta">Terrain pipeline · bottom → top</span>
             </div>
             <div class="tp-add-menu-anchor">
               <button type="button" class="tp-add-btn" id="tp-btn-add-layer" title="Add Landform, SDF Cave, Sculpt, Simulation, Spline, Rock or Vegetation Layer">+</button>
@@ -78,14 +81,14 @@
           <div class="tp-layer-stats">
             <div class="tp-stat-card">
               <div class="tp-stat-top">
-                <span class="tp-stat-disc active"></span>
+                <span class="tp-stat-disc active">✓</span>
                 <span class="tp-stat-label">Active</span>
               </div>
               <div class="tp-stat-num" id="tp-stat-visible">7</div>
             </div>
             <div class="tp-stat-card">
               <div class="tp-stat-top">
-                <span class="tp-stat-disc muted"></span>
+                <span class="tp-stat-disc muted">△</span>
                 <span class="tp-stat-label">Muted</span>
               </div>
               <div class="tp-stat-num" id="tp-stat-hidden">0</div>
@@ -94,7 +97,7 @@
 
           <label class="tp-layer-search">
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3.5 3.5"/></svg>
-            <input type="text" id="tp-layer-search-input" placeholder="Filter stack operations..." autocomplete="off" />
+            <input type="text" id="tp-layer-search-input" placeholder="Search layers..." autocomplete="off" />
           </label>
 
           <div id="tp-sim-panel" class="tp-sim-panel" aria-label="Simulation seasons"></div>
@@ -206,14 +209,24 @@
         <div class="tp-tab-strip">
           <div class="tp-document-tab viewport-tab active">
             <span>Viewport</span>
+            <span class="tp-tab-close" aria-hidden="true">✕</span>
           </div>
+          <span class="tp-tab-add" aria-hidden="true">+</span>
         </div>
 
-        <!-- TERRAIN VIEWPORT SHADING & AUTHORING BARS (Explicitly separate from Layer Stack!) -->
-        <div id="tp-terrain-bars">
-          <div class="tp-viewport-toolbar">
+        <!-- VIEWPORT HEADER: camera + shading + visibility ONLY.
+             Authoring tools live in their own rail inside the stage below,
+             deliberately split away from this header. -->
+        <div id="tp-terrain-bars" class="tp-viewport-header">
+          <div class="tp-vp-left">
+            <div class="tp-vp-cam-group" id="tp-scene-nav" role="group" aria-label="Camera framing">
+              <button type="button" id="btn-er-frame" class="tp-vp-btn" title="Frame full terrain [F]">Overview</button>
+              <button type="button" id="btn-cam-cliff" class="tp-vp-btn" title="Frame low cliff &amp; SDF cave perspective">Cliff &amp; Caves</button>
+              <button type="button" id="btn-cam-top" class="tp-vp-btn" title="Top-down orthographic-style plan view">Top Plan</button>
+            </div>
+            <span class="tp-vp-sep" aria-hidden="true"></span>
             <div class="tp-toolbar-group">
-              <span class="tp-bar-label">Derived Shading</span>
+              <span class="tp-bar-label">Shading</span>
               <select id="tp-select-shading" class="tp-pill-select">
                 <option value="0">Derived Geology (AO + Strata + Sediment + Flow)</option>
                 <option value="1">AO &amp; Ridge Protrusions</option>
@@ -232,7 +245,9 @@
               <span class="tp-bar-label">Palette</span>
               <select id="tp-select-palette" class="tp-pill-select"></select>
             </div>
+          </div>
 
+          <div class="tp-vp-right">
             <div class="tp-toolbar-group">
               <span class="tp-bar-label">Show</span>
               <label class="tp-vis-toggle"><input type="checkbox" id="tp-vis-water" checked /><span>Water</span></label>
@@ -240,17 +255,6 @@
               <label class="tp-vis-toggle"><input type="checkbox" id="tp-vis-rain" checked /><span>Rain</span></label>
               <label class="tp-vis-toggle" title="Chemical weathering visibility: terrain + boulder rust, copper patina, salt, desert varnish and clay alteration"><span>Weathering</span><input type="range" id="tp-chem" min="0" max="1" step="0.05" value="0.7" style="width:64px" /></label>
             </div>
-          </div>
-
-          <div class="tp-authoring-bar" id="tp-author-tools">
-            <span class="tp-bar-label">Authoring</span>
-            <button type="button" data-tool="navigate" class="active" title="Orbit (LMB), Pan (MMB/Alt+LMB), Fly (RMB + WASD/QE)">Orbit / Fly</button>
-            <button type="button" data-tool="sculpt-add" title="Non-destructively raise terrain in active Sculpt Layer">+ Raise</button>
-            <button type="button" data-tool="sculpt-remove" title="Non-destructively carve terrain in active Sculpt Layer">− Carve</button>
-            <button type="button" data-tool="sculpt-smooth" title="Smooth terrain inside active Sculpt Layer">≈ Smooth</button>
-            <button type="button" data-tool="cave-carve" title="Subtract real 3D volumetric SDF caves &amp; overhangs!">◔ Carve 3D Cave</button>
-            <button type="button" data-tool="cave-fill" title="Fill 3D SDF cave volume">● Fill Cave</button>
-            <button type="button" data-tool="spline-edit" title="Drag 3D spline control handles directly on terrain">✎ Edit Spline</button>
           </div>
         </div>
 
@@ -264,10 +268,19 @@
             PIPELINE · EVALUATING BOTTOM → TOP
           </div>
 
-          <div class="tp-scene-nav" id="tp-scene-nav">
-            <button type="button" id="btn-er-frame" title="Frame full terrain [F]">Overview</button>
-            <button type="button" id="btn-cam-cliff" title="Frame low cliff &amp; SDF cave perspective">Cliff &amp; Caves</button>
-            <button type="button" id="btn-cam-top" title="Top-down orthographic-style plan view">Top Plan</button>
+          <!-- AUTHORING TOOL RAIL: split from the viewport header.
+               Vertical square tool buttons docked to the stage's left edge. -->
+          <div class="tp-tool-rail" id="tp-author-tools" role="toolbar" aria-label="Authoring tools">
+            <span class="tp-tool-rail-label">Tools</span>
+            <button type="button" data-tool="navigate" class="active" title="Orbit (LMB), Pan (MMB/Alt+LMB), Fly (RMB + WASD/QE)"><span class="tp-tool-glyph">✥</span><span class="tp-tool-label">Orbit</span></button>
+            <button type="button" data-tool="sculpt-add" title="Non-destructively raise terrain in active Sculpt Layer"><span class="tp-tool-glyph">▲</span><span class="tp-tool-label">Raise</span></button>
+            <button type="button" data-tool="sculpt-remove" title="Non-destructively carve terrain in active Sculpt Layer"><span class="tp-tool-glyph">▼</span><span class="tp-tool-label">Carve</span></button>
+            <button type="button" data-tool="sculpt-smooth" title="Smooth terrain inside active Sculpt Layer"><span class="tp-tool-glyph">≈</span><span class="tp-tool-label">Smooth</span></button>
+            <span class="tp-tool-sep" aria-hidden="true"></span>
+            <button type="button" data-tool="cave-carve" title="Subtract real 3D volumetric SDF caves &amp; overhangs!"><span class="tp-tool-glyph">◔</span><span class="tp-tool-label">Cave −</span></button>
+            <button type="button" data-tool="cave-fill" title="Fill 3D SDF cave volume"><span class="tp-tool-glyph">●</span><span class="tp-tool-label">Cave +</span></button>
+            <span class="tp-tool-sep" aria-hidden="true"></span>
+            <button type="button" data-tool="spline-edit" title="Drag 3D spline control handles directly on terrain"><span class="tp-tool-glyph">✎</span><span class="tp-tool-label">Spline</span></button>
           </div>
 
           <!-- Rock Studio HUD & Camera Bar (only visible in Rock Studio mode) -->
@@ -335,7 +348,9 @@
         <div class="tp-tab-strip">
           <div class="tp-document-tab active">
             <span>Inspector</span>
+            <span class="tp-tab-close" aria-hidden="true">✕</span>
           </div>
+          <span class="tp-tab-add" aria-hidden="true">+</span>
         </div>
 
         <!-- TERRAIN LAYER INSPECTOR -->

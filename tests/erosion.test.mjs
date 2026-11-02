@@ -2366,4 +2366,40 @@ test('Terrain resolution is a safe boot-time quality option and the redesigned U
   for (const token of ['2026 TELEMETRY-GLASS REDESIGN', 'body.tp-focus-mode .tp-layer-dock', '.tp-resolution-control', '.tp-collapsible-card', 'backdrop-filter: blur(18px)']) {
     assert.ok(cssSrc.includes(token), `Redesigned UI stylesheet missing ${token}`);
   }
+
+  // Charcoal Exhibits redesign: Outliner + Inspector dock tabs, squared
+  // layer entries with per-type coloured icons, and authoring tools split
+  // out of the viewport header into their own stage tool rail.
+  for (const token of [
+    'CHARCOAL EDITOR REDESIGN',
+    '--tp-dock: #0e0e10',
+    '--tp-select: #5ac8fa',
+    '.tp-tool-rail {',
+    '.tp-layer-status',
+    '#tp-terrain-bars.tp-viewport-header',
+    '#tp-scene-nav.tp-vp-cam-group',
+  ]) {
+    assert.ok(cssSrc.includes(token), `Charcoal editor stylesheet missing ${token}`);
+  }
+  const charcoalBlock = cssSrc.slice(cssSrc.indexOf('CHARCOAL EDITOR REDESIGN'));
+  assert.ok(/\.tp-layer-row \{[^}]*border-radius: 0;/s.test(charcoalBlock),
+    'Layer-stack entries must be squared (border-radius: 0) in the charcoal theme');
+  assert.ok(/\.tp-layer-icon \{[^}]*border-radius: 2px;/s.test(charcoalBlock),
+    'Layer icon tiles must be squared in the charcoal theme');
+
+  for (const token of ['LAYER_ICON_COLORS', 'layerIconColor(', 'tp-layer-status', "check: `<svg"]) {
+    assert.ok(uiSrc.includes(token), `Outliner coloured-icon/status wiring missing ${token}`);
+  }
+
+  // Tools live in the stage rail, NOT inside the viewport header element.
+  const headerStart = htmlSrc.indexOf('id="tp-terrain-bars"');
+  const stageStart = htmlSrc.indexOf('class="viewport-stage"');
+  const toolsIdx = htmlSrc.indexOf('id="tp-author-tools"');
+  assert.ok(headerStart > -1 && stageStart > headerStart, 'Viewport header precedes the stage');
+  assert.ok(toolsIdx > stageStart, 'Authoring tools are split out of the viewport header into the stage tool rail');
+  assert.ok(htmlSrc.includes('class="tp-tool-rail" id="tp-author-tools"'), 'Tool rail carries the author-tools contract id');
+  assert.ok(htmlSrc.includes('id="tp-scene-nav"') && htmlSrc.indexOf('id="tp-scene-nav"') < stageStart,
+    'Camera framing controls live in the viewport header');
+  assert.ok(htmlSrc.includes('>Outliner</h1>') && htmlSrc.includes('id="tp-left-tab-label">Outliner<'),
+    'Left dock is the Outliner, matching the Exhibits editor');
 });

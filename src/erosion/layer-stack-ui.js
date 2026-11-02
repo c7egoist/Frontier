@@ -54,7 +54,34 @@ const SVG_ICONS = {
   eyeOpen: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M1.5 8s2.4-4.2 6.5-4.2S14.5 8 14.5 8s-2.4 4.2-6.5 4.2S1.5 8 1.5 8Z"/><circle cx="8" cy="8" r="1.9"/></svg>`,
   eyeClosed: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M2 2l12 12M3.2 5.6C2.1 6.8 1.5 8 1.5 8s2.4 4.2 6.5 4.2c1.4 0 2.6-.4 3.6-1M6.6 3.9A7 7 0 0 1 8 3.8c4.1 0 6.5 4.2 6.5 4.2a11 11 0 0 1-1.8 2.4"/></svg>`,
   mask: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="5.5"/><path d="M8 2.5a5.5 5.5 0 0 1 0 11V2.5Z" fill="currentColor"/></svg>`,
+  check: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3.5 8.5 3 3 6-6.5"/></svg>`,
 };
+
+// Per-layer-type icon colours (Exhibits outliner style: every node carries
+// its own saturated glyph colour, not one muted colour per category).
+const LAYER_ICON_COLORS = {
+  'base-landform': '#f0b35e',
+  'mountain-ridges': '#ff8a5c',
+  'stratigraphic-beds': '#e8d06a',
+  'rock-stacks': '#d98cb3',
+  'cliff-push-pull': '#ff6b6b',
+  'sdf-caves': '#9d7bff',
+  'sculpt-layer': '#94a3ff',
+  'river-incision': '#4aa8ff',
+  'hydraulic-erosion': '#38bdf8',
+  'thermal-talus': '#e08a5a',
+  'aeolian-glacial': '#a8e6ff',
+  'wind-erosion': '#5eead4',
+  'chemical-weathering': '#e879f9',
+  'spline-feature': '#67e8f9',
+  'spline-landform': '#818cf8',
+  'rock-placement': '#d6a05a',
+  'vegetation-placement': '#6ee76a',
+};
+
+function layerIconColor(type, cat) {
+  return LAYER_ICON_COLORS[type] || (cat && cat.color) || '#8b9b82';
+}
 
 const OP_DESCRIPTIONS = {
   'base-landform': 'Constructs foundational bedrock elevation and base rock competency at the bottom of the stack.',
@@ -542,7 +569,7 @@ export class ErosionLayerStackUI {
         const desc = OP_DESCRIPTIONS[s.type] || '';
         html += `
           <button type="button" class="tp-menu-item" data-add-type="${s.type}">
-            <span class="tp-menu-dot" style="background:${cat.color}"></span>
+            <span class="tp-menu-dot" style="--cat-accent:${layerIconColor(s.type, cat)}">${SVG_ICONS[s.glyph] || SVG_ICONS.mountain}</span>
             <span class="tp-menu-item-body">
               <strong>${s.defaultName}</strong>
               <small>${desc}</small>
@@ -720,7 +747,7 @@ export class ErosionLayerStackUI {
                draggable="${layer.locked ? 'false' : 'true'}"
                data-select-id="${layer.id}" data-idx="${idx}">
             <span class="tp-drag-grip" title="Drag to reorder pipeline stage (Bottom → Top)">⋮⋮</span>
-            <span class="tp-layer-icon" style="--cat-accent:${cat.color}">
+            <span class="tp-layer-icon" data-layer-type="${layer.type}" style="--cat-accent:${layerIconColor(layer.type, cat)}">
               ${iconSvg}
             </span>
             <div class="tp-layer-meta">
@@ -730,6 +757,7 @@ export class ErosionLayerStackUI {
               </div>
               <div class="tp-layer-sub">${this._esc(summary)}</div>
             </div>
+            <span class="tp-layer-status ${layer.enabled ? 'on' : 'off'}" title="${layer.enabled ? 'Pass active' : 'Pass muted'}">${SVG_ICONS.check}</span>
             <div class="tp-layer-controls">
               ${
                 supportsMask
@@ -886,7 +914,7 @@ export class ErosionLayerStackUI {
     if (!this.elInspector) return;
     const layer = this.pipeline.getSelectedLayer();
     if (!layer) {
-      this.elInspector.innerHTML = `<div class="tp-empty-state">Select a layer in the stack to inspect its parameters and spatial mask.</div>`;
+      this.elInspector.innerHTML = `<div class="tp-empty-state">Select a layer in the Outliner to inspect its parameters and spatial mask.</div>`;
       return;
     }
 
@@ -895,6 +923,7 @@ export class ErosionLayerStackUI {
     const stepNum = layers.length - idx;
     const spec = LAYER_OPERATION_SPECS[layer.type] || LAYER_OPERATION_SPECS['mountain-ridges'];
     const cat = LAYER_CATEGORIES[spec.category] || LAYER_CATEGORIES.landform;
+    const iconColor = layerIconColor(layer.type, cat);
     const schema = INSPECTOR_SCHEMAS[layer.type] || { selects: [], sliders: [], hasSeed: false };
     const iconSvg = SVG_ICONS[spec.glyph] || SVG_ICONS.mountain;
     const specLabel = spec.defaultName || layer.type;
@@ -948,7 +977,7 @@ export class ErosionLayerStackUI {
       const curT = this.pipeline.authorTool;
       authoringCardHtml = `
         <section class="tp-property-card">
-          <h2><i style="background:${cat.color}"></i><span>Non-Destructive Sculpt Brushes</span></h2>
+          <h2><i style="background:${iconColor}"></i><span>Non-Destructive Sculpt Brushes</span></h2>
           <p class="tp-card-note">Paint basic raised/carved/smoothed shapes directly on the 3D terrain. They are stored only in this layer, then combined with the landform/noise using the Blend Operation above: Add, Multiply/Scale, Mix to Target, or Max/Min. Place this layer low for base-shape authoring or high for final hand finishing.</p>
           <div class="tp-brush-grid">
             <button type="button" class="${curT === 'sculpt-add' ? 'active' : ''}" data-set-tool="sculpt-add">+ Raise</button>
@@ -990,7 +1019,7 @@ export class ErosionLayerStackUI {
       }).join('');
       authoringCardHtml = `
         <section class="tp-property-card">
-          <h2><i style="background:${cat.color}"></i><span>3D Spline Control Path (${pts.length}/8 pts)</span></h2>
+          <h2><i style="background:${iconColor}"></i><span>3D Spline Control Path (${pts.length}/8 pts)</span></h2>
           <p class="tp-card-note">Select a point, then drag it on the terrain or pull the gizmo axes — <b style="color:#ff8a7a">X</b> east-west, <b style="color:#65e6b2">Y</b> elevation, <b style="color:#7ab8ff">Z</b> north-south — to steer this ${spModeLabel.toLowerCase()}. ${splineNote} Empty Y keeps the automatic grade; Delete removes the selected point.</p>
           <div class="tp-spline-pt-head"><span>#</span><span>X (m)</span><span>Z (m)</span><span>Y elev (m)</span><span></span><span></span></div>
           <div class="tp-spline-pt-list">${ptRows}</div>
@@ -1165,19 +1194,19 @@ export class ErosionLayerStackUI {
 
     this.elInspector.innerHTML = `
       <div class="tp-inspector-trail">
-        <span>Terrain Stack</span>
-        <i>›</i>
+        <span>Inspector</span>
+        <i>/</i>
         <span>${cat.label}</span>
         <i>›</i>
         <span>Step #${stepNum} of ${layers.length}</span>
       </div>
 
       <div class="tp-inspector-identity">
-        <div class="tp-identity-badge" style="--cat-accent:${cat.color}">
+        <div class="tp-identity-badge" style="--cat-accent:${iconColor}">
           ${iconSvg}
         </div>
         <div class="tp-identity-copy">
-          <span class="tp-eyebrow" style="color:${cat.color}">${cat.eyebrow || cat.label.toUpperCase()}</span>
+          <span class="tp-eyebrow" style="color:${iconColor}">${cat.eyebrow || cat.label.toUpperCase()}</span>
           <input type="text" class="tp-identity-title-input" id="tp-input-layer-name" value="${this._esc(layer.name)}" />
           <p class="tp-identity-desc">${specDesc}</p>
         </div>
@@ -1189,7 +1218,7 @@ export class ErosionLayerStackUI {
       </div>
 
       <section class="tp-property-card">
-        <h2><i style="background:${cat.color}"></i><span>${specLabel} Parameters</span></h2>
+        <h2><i style="background:${iconColor}"></i><span>${specLabel} Parameters</span></h2>
         ${controlsHtml}
       </section>
 
