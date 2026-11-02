@@ -1,0 +1,65 @@
+{
+  "url": "http://127.0.0.1:5173/?quality=low&fps=5",
+  "capturedAt": "2026-11-02T17:04:21.765Z",
+  "viewport": "1400x860, deviceScaleFactor 1, headless Chromium / SwiftShader",
+  "validationProfile": "quality=low, fps cap=5",
+  "environment": {
+    "title": "Frontier · Vector Field Studio",
+    "webgl2": true,
+    "renderer": "WebKit WebGL",
+    "floatFramebuffer": true,
+    "backend": "WebGL2 · GPU shaders",
+    "counts": "1,620 glyphs · 4,096 tracers · 9,409 surface vertices",
+    "fps": "2 FPS · 500.0 ms",
+    "legend": "Velocity"
+  },
+  "glyphMotion": {
+    "animated": true,
+    "viewport": {
+      "x": 282,
+      "y": 58,
+      "width": 804,
+      "height": 772
+    },
+    "sampleWidth": 360,
+    "sampleHeight": 220,
+    "threshold": 45,
+    "animatedChangedFraction": 0.40558,
+    "animatedMeanAbs": 21.901,
+    "staticChangedFraction": 0.11246,
+    "staticMeanAbs": 5.924,
+    "evidence": [
+      "06-arrow-motion-a.png",
+      "07-arrow-motion-b.png"
+    ]
+  },
+  "interactions": [
+    "animated vs. fixed-arrow frame difference",
+    "wind → terrain → force presets",
+    "scalar-channel filmstrip selection",
+    "sample CSV import",
+    "3D terrain probe click"
+  ],
+  "probe": {
+    "visible": true,
+    "position": "-11.36, 0.16, -11.88",
+    "vector": [
+      "3.247",
+      "0.177",
+      "-0.249"
+    ],
+    "scalar": "0.058"
+  },
+  "consoleErrors": [],
+  "pageErrors": [],
+  "captures": [
+    "01-wind-workspace.png",
+    "02-terrain-flow.png",
+    "03-force-field.png",
+    "04-imported-data.png",
+    "05-probe.png",
+    "06-arrow-motion-a.png",
+    "07-arrow-motion-b.png"
+  ],
+  "verdict": "PASS"
+}
