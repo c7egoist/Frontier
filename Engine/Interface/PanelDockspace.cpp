@@ -348,7 +348,9 @@ void PanelDockspace::ConstructInterface(float Scale)
         if (Entry.NativeWindow && DetachedEnabled)
             WindowClass.ViewportFlagsOverrideSet = ImGuiViewportFlags_NoAutoMerge;
         ImGui::SetNextWindowClass(&WindowClass);
-        if (ImGui::Begin(Entry.WindowName.c_str(), &Entry.Specification.Open))
+        const ImGuiWindowFlags PanelFlags =
+            Entry.Specification.WheelScrollOnly ? ImGuiWindowFlags_NoScrollbar : ImGuiWindowFlags_None;
+        if (ImGui::Begin(Entry.WindowName.c_str(), &Entry.Specification.Open, PanelFlags))
         {
             if (ImGui::BeginPopupContextWindow("Panel hosting"))
             {

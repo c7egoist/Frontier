@@ -300,7 +300,7 @@ void InspectorRuntime::InspectRecord([[maybe_unused]] RecordToken Token, bool& O
         Occupied != Slots.end() && Occupied->second.Inspectors.size() == 1 && Occupied->second.Inspectors.front()->QueryOccupiesColumn())
     {
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-        if (ImGui::BeginChild("##InspectorPageRegion", ImVec2(0.0f, 0.0f), false))
+        if (ImGui::BeginChild("##InspectorPageRegion", ImVec2(0.0f, 0.0f), ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar))
         {
             Occupied->second.Inspectors.front()->ConstructInspector();
             if (Meta.RemovableInEditor)
@@ -329,7 +329,9 @@ void InspectorRuntime::InspectRecord([[maybe_unused]] RecordToken Token, bool& O
         Palette, Faces, Meta.GroupName.empty() ? RecordClassificationName(Directory.QueryClassification(Token)) : Meta.GroupName.c_str());
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(18.0f, 16.0f));
-    if (ImGui::BeginChild("##InspectorRuntimeScrollRegion", ImVec2(0.0f, 0.0f), true))
+    // 📝 No scrollbars (owner's request): the wheel scrolls the page, eased, with Patch H's overscroll spring.
+    if (ImGui::BeginChild("##InspectorRuntimeScrollRegion", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders,
+                          ImGuiWindowFlags_NoScrollbar))
     {
         auto SlotIt = Slots.find(Token.Value);
         if (SlotIt == Slots.end() || SlotIt->second.Inspectors.empty())

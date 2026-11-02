@@ -14,10 +14,13 @@
 #include "Engine/Interface/NotificationSequence.h"
 #include "Engine/Interface/PanelExpansionTab.h"
 #include "Engine/Interface/TypefaceRegistry.h"
+#include "Engine/Interface/VectorCodec.h"
 #include "Engine/Lifecycle/ActivationSequence.h"
 #include <array>
 #include <filesystem>
+#include <functional>
 #include <string>
+#include <vector>
 
 namespace Frontier
 {
@@ -42,9 +45,23 @@ enum class ControlCentrePageCategory
     Workspace
 };
 
+// 📝 A host workspace's own action on the Quick Controls grid (the Everest editor's Projects and Save level), drawn
+//    after the built-in toggles with the same 64 px disc. Evaluating one closes the drawer.
+struct ControlCentreQuickAction
+{
+    std::string               Caption;
+    ControlCentreIconCategory Icon = ControlCentreIconCategory::ChevronBack;
+    std::function<void()>     Evaluate;
+};
+
 class ControlCentrePanel final : public ActivationSequence
 {
   public:
+    void ConfigureQuickActions(std::vector<ControlCentreQuickAction> Actions);
+    [[nodiscard]] size_t QueryQuickActionCount() const noexcept
+    {
+        return QuickActions.size();
+    }
     bool                                  ConfigurePreferenceScope(PreferenceScopeCategory Scope) noexcept;
     bool                                  ConfigurePersonalOverrides(bool Enabled) noexcept;
     bool                                  ReloadProfiles() noexcept;
@@ -341,6 +358,7 @@ class ControlCentrePanel final : public ActivationSequence
     PlaneExtent                SettingsExtent, BackExtent, ApplyExtent, DefaultsExtent, FooterExtent;
     std::array<PlaneExtent, 4> CategoryExtents{};
     std::array<PlaneExtent, 2> TileExtents{};
+    std::vector<ControlCentreQuickAction> QuickActions;
     std::array<PlaneExtent, 3> TabExtents{};
     PlaneExtent                CurrentCard;
     bool                       ControlContact = false;

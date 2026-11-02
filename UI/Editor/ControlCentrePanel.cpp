@@ -230,6 +230,11 @@ bool ControlCentrePanel::FinalizeInputPreferences() noexcept
 //                                              REFERENCE NAVIGATION
 //------------------------------------------------------------------------------------------------------------------------
 
+void ControlCentrePanel::ConfigureQuickActions(std::vector<ControlCentreQuickAction> Actions)
+{
+    QuickActions = std::move(Actions);
+}
+
 void ControlCentrePanel::ActivateSettingsPage(ControlCentrePageCategory Page) noexcept
 {
     if (Page != ActivePage)
@@ -320,22 +325,32 @@ void ControlCentrePanel::ConstructQuickLayout(PixelSpace &Surface, const PlaneEx
     const char                     *Labels[]  = {"FPS Overlay", "Notifications"};
     const ControlCentreIconCategory Icons[]   = {ControlCentreIconCategory::GaugeFrameRate,
                                                  ControlCentreIconCategory::NotificationsBell};
-    for (uint32_t Index = 0; Index < 2; ++Index)
+    // The host workspace's quick actions follow the two toggles in the same grid.
+    const uint32_t TileCount = 2u + static_cast<uint32_t>(QuickActions.size());
+    const uint32_t TileRows  = (TileCount + Columns - 1) / Columns;
+    std::function<void()> PendingAction;
+    for (uint32_t Index = 0; Index < TileCount; ++Index)
     {
+        const bool  Action = Index >= 2;
         const float X      = Card.MinimumX + (Index % Columns) * (Cell + 16) + (Cell - 64) * 0.5f;
         const float Y      = Card.MinimumY + 56 + (Index / Columns) * 130;
         const auto  Disc   = Spanning(X, Y, 64, 64);
-        TileExtents[Index] = QueryPhysicalExtent(Disc);
-        const bool On      = Index == 0 ? Notifications.QueryApplied().ShowFrameRateOverlay : NotificationsEnabled;
-        const bool Hover   = ControlKit::Over(Disc, Pointer);
-        ControlContact     = ControlContact || Hover;
+        if (!Action)
+            TileExtents[Index] = QueryPhysicalExtent(Disc);
+        const bool On    = !Action && (Index == 0 ? Notifications.QueryApplied().ShowFrameRateOverlay : NotificationsEnabled);
+        const bool Hover = ControlKit::Over(Disc, Pointer);
+        ControlContact   = ControlContact || Hover;
         Surface.FillRectangle(Disc, On ? K.Accent : K.Raised, 32);
-        ControlKit::GlyphCentred(Surface, Disc, 24, On ? K.AccentInk : K.TextDim, Icons[Index]);
+        ControlKit::GlyphCentred(Surface, Disc, 24, On ? K.AccentInk : (Action ? K.Text : K.TextDim),
+                                 Action ? QuickActions[Index - 2].Icon : Icons[Index]);
         if (Hover)
             ControlKit::OutlineRounded(Surface, Disc, K.Text, 32);
-        ControlKit::TextCentred(Surface, Spanning(X - (Cell - 64) * 0.5f, Y + 76, Cell, 14), On ? K.Text : K.TextDim,
-                                Labels[Index], 12);
-        if (Hover && Pointer.Released)
+        ControlKit::TextCentred(Surface, Spanning(X - (Cell - 64) * 0.5f, Y + 76, Cell, 14),
+                                On || Action ? K.Text : K.TextDim,
+                                Action ? QuickActions[Index - 2].Caption.c_str() : Labels[Index], 12);
+        if (Hover && Pointer.Released && Action)
+            PendingAction = QuickActions[Index - 2].Evaluate;
+        else if (Hover && Pointer.Released)
         {
             if (Index == 0)
                 Notifications.ConfigureFrameRateOverlay(!On);
@@ -347,8 +362,13 @@ void ControlCentrePanel::ConstructQuickLayout(PixelSpace &Surface, const PlaneEx
             }
         }
     }
+    if (PendingAction)
+    {
+        Expansion.ConfigureOpen(false);
+        PendingAction();   // A copy: the action may reconfigure the quick actions or leave the workspace
+    }
     const float StreamX = Split ? Card.MinimumX + TileWidth + 40 : Card.MinimumX;
-    const float StreamY = Card.MinimumY + (Split ? 48 : 210);
+    const float StreamY = Card.MinimumY + (Split ? 48 : 210 + 130 * static_cast<float>(TileRows - 1));
     if (Split)
         Surface.FillRectangle(Spanning(StreamX - 20, StreamY, 1, Card.MaximumY - StreamY), K.Divider);
     if (!StreamDocked)

@@ -128,6 +128,7 @@ DockPanelSpecification MakeSceneDirectoryPanelSpecification(SceneDirectoryPanel&
     Specification.Caption          = "Outliner";
     Specification.ConstructContent = [&Panel]() { Panel.ConstructInterface(); };
     Specification.Open             = true;
+    Specification.WheelScrollOnly  = true;
     return Specification;
 }
 
@@ -374,13 +375,9 @@ void SceneDirectoryPanel::ConstructInterface()
     ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0, 0, 0, 0));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));
-    ImGui::PushStyleVar(ImGuiStyleVar_ScrollbarSize, 8.0f * S);
-    ImGui::PushStyleVar(ImGuiStyleVar_ScrollbarRounding, 8.0f * S);
-    ImGui::PushStyleColor(ImGuiCol_ScrollbarBg, ImVec4(0, 0, 0, 0));
-    ImGui::PushStyleColor(ImGuiCol_ScrollbarGrab, ImGui::ColorConvertU32ToFloat4(ResolveCssColour(0x2C2C2CFF)));
-    ImGui::PushStyleColor(ImGuiCol_ScrollbarGrabHovered, ImGui::ColorConvertU32ToFloat4(ResolveCssColour(0x3A3A3AFF)));
-    ImGui::PushStyleColor(ImGuiCol_ScrollbarGrabActive, ImGui::ColorConvertU32ToFloat4(ResolveCssColour(0x444444FF)));
-    if (ImGui::BeginChild("##SceneDirectoryGroupedTree", ImVec2(InnerW, TreeHeight), false))
+    // 📝 No scrollbar (owner's request): the wheel scrolls the tree, eased, with Patch H's overscroll spring.
+    if (ImGui::BeginChild("##SceneDirectoryGroupedTree", ImVec2(InnerW, TreeHeight), ImGuiChildFlags_None,
+                          ImGuiWindowFlags_NoScrollbar))
     {
         ImDrawList* NestedDraw  = ImGui::GetWindowDrawList();
         const auto& VisibleRows = QueryVisible();
@@ -630,8 +627,7 @@ void SceneDirectoryPanel::ConstructInterface()
         }
     }
     ImGui::EndChild();
-    ImGui::PopStyleColor(4);
-    ImGui::PopStyleVar(4);
+    ImGui::PopStyleVar(2);
     ImGui::PopStyleColor();
 
     // -- .outliner-bottom: the world icon, the level title and subtitle, the status dot --------------------------------

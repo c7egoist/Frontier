@@ -264,12 +264,18 @@ int main(int ArgumentCount, char** Arguments)
         RenderFrames(36);
         WritePngCapture(OutputDir / "06-EverestControlCentre.png");
 
+        // Exhibit 06b: the workspace has no top toolbar; its Projects and Save level actions are on the Quick Controls page
+        Require(Centre->QueryQuickActionCount() == 2, "EverestWorkspace must place Projects and Save level on Quick Controls.");
+        Centre->ActivateSettingsPage(ControlCentrePageCategory::QuickControls);
+        RenderFrames(36);
+        WritePngCapture(OutputDir / "06b-EverestQuickControls.png");
+
         Ownership.reset();
         FrontierExhibit::AcknowledgeTextures();
         ImGui::GetIO().BackendFlags = 0;
         ImGui::DestroyContext();
 
-        std::cout << "[EverestInterfaceValidation] Passed (ProjectGenerator C++ scaffolding, .levelspace, composable inspectors, 7 PNG exhibits and "
+        std::cout << "[EverestInterfaceValidation] Passed (ProjectGenerator C++ scaffolding, .levelspace, composable inspectors, 8 PNG exhibits and "
                   << PageCaptures << " environment page captures verified).\n";
         return 0;
     }

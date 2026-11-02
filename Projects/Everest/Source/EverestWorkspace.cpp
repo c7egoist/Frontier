@@ -40,19 +40,6 @@ uint32_t EnsureProjectLogCategory(std::string_view CategoryName)
     return Frontier::LogCategories().Register(CategoryName, Frontier::LogColour::Mint, true);
 }
 
-#if FRONTIER_EDITOR && defined(FRONTIER_WITH_INTERFACE_SDK)
-
-float MeasureLabelWidth(ImFont* Font, float Size, const char* Text) noexcept
-{
-    if (Font == nullptr || Text == nullptr || Text[0] == '\0')
-    {
-        return 0.0f;
-    }
-    return Font->CalcTextSizeA(Size, 1.0e9f, 0.0f, Text).x;
-}
-
-#endif
-
 } // namespace
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -63,6 +50,7 @@ namespace
 {
 
 constexpr double DegreesToRadian = 3.14159265358979323846 / 180.0;
+constexpr float  NotchBandHeight = 18.0f;   // [px] the Control Centre notch tab's height (PanelExpansionTab, 18 px)
 
 // 📝 The demo's Render entity readouts (InspectorPages.js Meta): renderer and grade, TLAS instances (or the clipmap edge),
 //    surface cards and geometry clusters, published on the records' Outliner rows.
@@ -302,10 +290,30 @@ EverestWorkspace::EverestWorkspace(Frontier::ControlCentrePanel& ControlCentre,
     Frontier::InspectorRuntime::Instance().RegisterSolarPlacementSolver(&SolveSolarPlacement);
 
     Dockspace.ConfigureDockspaceKey("EverestWorkspaceDockspace");
-    Dockspace.ConfigureWorkspaceInsets(50.0f, Frontier::ViewportChromeControls::StatusStripHeight);
+    // 📝 No top toolbar (owner's request): only the Control Centre notch remains, in a band as tall as its tab.
+    Dockspace.ConfigureWorkspaceInsets(NotchBandHeight, Frontier::ViewportChromeControls::StatusStripHeight);
+    // 📝 The Control Centre can outlive the workspace (a host may retire it either way round): the actions hold only a weak
+    //    token of the workspace and do nothing once it is gone.
+    const std::weak_ptr<bool> Token = Liveness;
+    Centre.ConfigureQuickActions({
+        {"Projects", Frontier::ControlCentreIconCategory::FolderOpen,
+         [this, Token]() {
+             if (!Token.expired() && EvaluateReturnToBrowser)
+             {
+                 EvaluateReturnToBrowser();
+             }
+         }},
+        {"Save level", Frontier::ControlCentreIconCategory::SaveDisk,
+         [this, Token]() {
+             if (!Token.expired())
+             {
+                 SaveActiveLevel();
+             }
+         }},
+    });
 
     if (!Dockspace.Register(Frontier::MakeSceneDirectoryPanelSpecification(OutlinerPanel)) ||
-        !Dockspace.Register({"Viewport", "Viewport", [this]() { ConstructViewportSurface(); }, true}) ||
+        !Dockspace.Register({"Viewport", "Viewport", [this]() { ConstructViewportSurface(); }, true, {}, {}, true}) ||
         !Dockspace.Register(Frontier::MakeLogStreamPanelSpecification(LogPanel)) ||
         !Dockspace.Register(Frontier::MakeSceneInspectorPanelSpecification(InspectorPanel)))
     {
@@ -515,158 +523,39 @@ void EverestWorkspace::ConstructInterface(double DeltaSeconds)
 
     const float Scale = Centre.QueryAppearance().QueryApplied().InterfaceScale / 100.0f;
     Frontier::InspectorRuntime::Instance().ConfigureInterfaceScale(Scale);
-    ConstructTopToolbar(Scale);
+    // 📝 Ctrl+S saves the level (the save button left with the top toolbar; the Control Centre drawer carries it too).
+    const ImGuiIO& IO = ImGui::GetIO();
+    if (IO.KeyCtrl && !IO.WantTextInput && ImGui::IsKeyPressed(ImGuiKey_S, false))
+    {
+        SaveActiveLevel();
+    }
     Dockspace.ConstructInterface(Scale);
     ConstructStatusStrip(Scale);
     Frontier::InspectorRuntime::Instance().ConstructActiveEditor();
 }
 
-void EverestWorkspace::ConstructTopToolbar(float Scale)
+void EverestWorkspace::SaveActiveLevel()
 {
-    const Frontier::InspectorPalette Palette = Frontier::InspectorPalette::Resolve();
-    const Frontier::EditorTypefaces  Faces   = Frontier::EditorTypefaces::Resolve();
-    const ImGuiViewport*             MainVp  = ImGui::GetMainViewport();
-    const ImVec2                     BarPos  = MainVp->Pos;
-    const ImVec2                     BarSize(MainVp->Size.x, 50.0f);
-
-    ImGui::SetNextWindowPos(BarPos, ImGuiCond_Always);
-    ImGui::SetNextWindowSize(BarSize, ImGuiCond_Always);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImGui::ColorConvertU32ToFloat4(Palette.ColumnBg));
-    if (ImGui::Begin("##EverestTopToolbar", nullptr,
-                     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
-                         ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDocking |
-                         ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoBringToFrontOnFocus))
+    // 📝 The level file the workspace opened (Default.levelspace when it started from the project's own default).
+    std::string                 SaveDiag;
+    const uint32_t              ProjectCategory = EnsureProjectLogCategory("Everest");
+    const std::filesystem::path TargetPath      = ActiveLevelPath.empty()
+                                                      ? (ProjectRoot / "Content" / "Levels" / "Default.levelspace")
+                                                      : ActiveLevelPath;
+    if (QuerySceneWorld().SaveLevelSpace(TargetPath, &SaveDiag))
     {
-        ImDrawList* DrawList = ImGui::GetWindowDrawList();
-        DrawList->AddLine(ImVec2(BarPos.x, BarPos.y + BarSize.y - 1.0f),
-                          ImVec2(BarPos.x + BarSize.x, BarPos.y + BarSize.y - 1.0f),
-                          Palette.EdgeBorder, 1.0f);
-
-        float       CursorX = BarPos.x + 14.0f;
-        const float BtnY    = BarPos.y + 10.0f;
-        const float BtnH    = 30.0f;
-
-        {
-            const float BackW = 104.0f;
-            ImGui::SetCursorScreenPos(ImVec2(CursorX, BtnY));
-            if (ImGui::InvisibleButton("##ReturnProjectsBtn", ImVec2(BackW, BtnH)) && EvaluateReturnToBrowser)
-            {
-                EvaluateReturnToBrowser();
-            }
-            const bool Hover = ImGui::IsItemHovered();
-            DrawList->AddRectFilled(ImVec2(CursorX, BtnY), ImVec2(CursorX + BackW, BtnY + BtnH),
-                                    Hover ? Palette.SegmentedActiveBg : Palette.CountCardBg, 8.0f);
-            DrawList->AddRect(ImVec2(CursorX, BtnY), ImVec2(CursorX + BackW, BtnY + BtnH), Palette.CountCardBorder, 8.0f);
-            Frontier::ConstructEditorGlyph(DrawList, ImVec2(CursorX + 15.0f, BtnY + BtnH * 0.5f), 4.5f,
-                                           Palette.TextSecondary, "ChevronRight", 1.4f);
-            DrawList->AddText(Faces.Medium, 11.5f * Scale, ImVec2(CursorX + 26.0f, BtnY + 8.5f),
-                              Palette.TextPrimary, "Projects");
-            CursorX += BackW + 14.0f;
-        }
-
-        Frontier::ConstructEditorGlyph(DrawList, ImVec2(CursorX + 8.0f, BarPos.y + 25.0f), 7.0f,
-                                       Palette.ThemeAccent, "Layers", 1.5f);
-        DrawList->AddText(Faces.SemiBold, 13.5f, ImVec2(CursorX + 22.0f, BarPos.y + 17.0f),
-                          Palette.TextPrimary, "Everest");
-        CursorX += 22.0f + MeasureLabelWidth(Faces.SemiBold, 13.5f, "Everest") + 12.0f;
-
-        const std::string LevelFilename = ActiveLevelPath.empty()
-                                              ? std::string("Default.levelspace")
-                                              : ActiveLevelPath.filename().string();
-        char LevelBadge[128]{};
-        std::snprintf(LevelBadge, sizeof(LevelBadge), "%s · %zu records",
-                      LevelFilename.c_str(), QuerySceneWorld().QueryRecordCount());
-        const float BadgeW = MeasureLabelWidth(Faces.Monospace, 10.5f, LevelBadge) + 18.0f;
-        DrawList->AddRectFilled(ImVec2(CursorX, BtnY + 3.0f), ImVec2(CursorX + BadgeW, BtnY + BtnH - 3.0f),
-                                Palette.InsetFieldBg, 6.0f);
-        DrawList->AddRect(ImVec2(CursorX, BtnY + 3.0f), ImVec2(CursorX + BadgeW, BtnY + BtnH - 3.0f),
-                          Palette.InsetFieldBorder, 6.0f);
-        DrawList->AddText(Faces.Monospace, 10.5f, ImVec2(CursorX + 9.0f, BtnY + 9.0f),
-                          Palette.TextSecondary, LevelBadge);
-
-        float RightX = BarPos.x + BarSize.x - 14.0f;
-
-        {
-            const float SettingsW = 148.0f;
-            RightX -= SettingsW;
-            ImGui::SetCursorScreenPos(ImVec2(RightX, BtnY));
-            if (ImGui::InvisibleButton("##EverestOpenAppearanceBtn", ImVec2(SettingsW, BtnH)))
-            {
-                Centre.ActivateSettingsPage(Frontier::ControlCentrePageCategory::Appearance);
-            }
-            const bool Hover = ImGui::IsItemHovered();
-            DrawList->AddRectFilled(ImVec2(RightX, BtnY), ImVec2(RightX + SettingsW, BtnY + BtnH),
-                                    Hover ? Palette.SegmentedActiveBg : Palette.CountCardBg, 8.0f);
-            DrawList->AddRect(ImVec2(RightX, BtnY), ImVec2(RightX + SettingsW, BtnY + BtnH),
-                              Palette.CountCardBorder, 8.0f);
-            Frontier::ConstructEditorGlyph(DrawList, ImVec2(RightX + 16.0f, BtnY + BtnH * 0.5f), 6.0f,
-                                           Palette.ThemeAccent, "Sliders", 1.4f);
-            DrawList->AddText(Faces.Medium, 11.0f, ImVec2(RightX + 29.0f, BtnY + 9.0f),
-                              Palette.TextPrimary, "Control Centre");
-            RightX -= 10.0f;
-        }
-
-        {
-            const float SaveW = 132.0f;
-            RightX -= SaveW;
-            ImGui::SetCursorScreenPos(ImVec2(RightX, BtnY));
-            if (ImGui::InvisibleButton("##EverestSaveLevelBtn", ImVec2(SaveW, BtnH)))
-            {
-                std::string    SaveDiag;
-                const uint32_t ProjectCategory = EnsureProjectLogCategory("Everest");
-                const std::filesystem::path TargetPath = ActiveLevelPath.empty()
-                                                             ? (ProjectRoot / "Content" / "Levels" / "Default.levelspace")
-                                                             : ActiveLevelPath;
-                if (QuerySceneWorld().SaveLevelSpace(TargetPath, &SaveDiag))
-                {
-                    ActiveLevelPath = TargetPath;
-                    Frontier::WriteLogFormat(ProjectCategory, Frontier::LogSeverity::Info, Frontier::LogVerbosity::Log,
-                                             "EverestWorkspace", "Saved '%s' (%zu records).",
-                                             TargetPath.filename().string().c_str(),
-                                             QuerySceneWorld().QueryRecordCount());
-                }
-                else
-                {
-                    Diagnostic = SaveDiag;
-                    Frontier::WriteLogFormat(ProjectCategory, Frontier::LogSeverity::Error, Frontier::LogVerbosity::Log,
-                                             "EverestWorkspace", "Save failed: %s", SaveDiag.c_str());
-                }
-            }
-            const bool Hover = ImGui::IsItemHovered();
-            DrawList->AddRectFilled(ImVec2(RightX, BtnY), ImVec2(RightX + SaveW, BtnY + BtnH),
-                                    Hover ? Palette.SegmentedActiveBg : Palette.CountCardBg, 8.0f);
-            DrawList->AddRect(ImVec2(RightX, BtnY), ImVec2(RightX + SaveW, BtnY + BtnH),
-                              Palette.CountCardBorder, 8.0f);
-            DrawList->AddText(Faces.Medium, 11.0f, ImVec2(RightX + 14.0f, BtnY + 9.0f),
-                              Palette.TextSecondary, "Save .levelspace");
-            RightX -= 10.0f;
-        }
-
-        {
-            const auto* PipelineRecord = dynamic_cast<const Frontier::RenderPipelineRecord*>(
-                const_cast<Frontier::SceneWorld&>(QuerySceneWorld()).FindFirstByType("RenderPipeline"));
-            const char* TierText = "TIER: RTX (VK_KHR_ray_query)";
-            ImU32       TierTint = Palette.LiveGreen;
-            if (PipelineRecord != nullptr && !PipelineRecord->QueryConfiguration().HardwareRayQueryTier)
-            {
-                TierText = "TIER: GTX (4-Cascade SDF + SAH-2 BVH)";
-                TierTint = Palette.WarmAmber;
-            }
-            const float PillW = MeasureLabelWidth(Faces.Monospace, 10.0f, TierText) + 26.0f;
-            RightX -= PillW;
-            DrawList->AddRectFilled(ImVec2(RightX, BtnY + 3.0f), ImVec2(RightX + PillW, BtnY + BtnH - 3.0f),
-                                    Frontier::ModulateSpectrumAlpha(TierTint, 0.14f), 6.0f);
-            DrawList->AddRect(ImVec2(RightX, BtnY + 3.0f), ImVec2(RightX + PillW, BtnY + BtnH - 3.0f),
-                              Frontier::ModulateSpectrumAlpha(TierTint, 0.45f), 6.0f);
-            DrawList->AddCircleFilled(ImVec2(RightX + 10.0f, BtnY + BtnH * 0.5f), 3.0f, TierTint);
-            DrawList->AddText(Faces.Monospace, 10.0f, ImVec2(RightX + 18.0f, BtnY + 9.0f), TierTint, TierText);
-        }
+        ActiveLevelPath = TargetPath;
+        Frontier::WriteLogFormat(ProjectCategory, Frontier::LogSeverity::Info, Frontier::LogVerbosity::Log,
+                                 "EverestWorkspace", "Saved '%s' (%zu records).", TargetPath.filename().string().c_str(),
+                                 QuerySceneWorld().QueryRecordCount());
+        AnnounceViewportNotice("Saved " + TargetPath.filename().string());
     }
-    ImGui::End();
-    ImGui::PopStyleColor();
-    ImGui::PopStyleVar(2);
+    else
+    {
+        Diagnostic = SaveDiag;
+        Frontier::WriteLogFormat(ProjectCategory, Frontier::LogSeverity::Error, Frontier::LogVerbosity::Log,
+                                 "EverestWorkspace", "Save failed: %s", SaveDiag.c_str());
+    }
 }
 
 void EverestWorkspace::IntegrateViewportCamera(bool Hovered, bool Active, double DeltaSeconds)

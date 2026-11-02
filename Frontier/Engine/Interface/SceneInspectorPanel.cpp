@@ -21,6 +21,7 @@ DockPanelSpecification MakeSceneInspectorPanelSpecification(SceneInspectorPanel&
     Specification.Caption          = "Inspector";
     Specification.ConstructContent = [&Panel]() { Panel.ConstructInterface(); };
     Specification.Open             = true;
+    Specification.WheelScrollOnly  = true;
     return Specification;
 }
 

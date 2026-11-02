@@ -23,6 +23,7 @@ struct ImVec2;
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <memory>
 #include <string>
 
 namespace Everest
@@ -170,7 +171,7 @@ class EverestWorkspace
 
 #if FRONTIER_EDITOR && defined(FRONTIER_WITH_INTERFACE_SDK)
     void ServiceDynamicSceneRequests();
-    void ConstructTopToolbar(float Scale);
+    void SaveActiveLevel();
     void ConstructViewportSurface();
     void ConstructViewportSchematic(ImDrawList* DrawList, const ImVec2& Min, const ImVec2& Max);
     void IntegrateViewportCamera(bool Hovered, bool Active, double DeltaSeconds);
@@ -182,6 +183,7 @@ class EverestWorkspace
     void AnnounceViewportNotice(std::string Text);
 
     Frontier::ControlCentrePanel& Centre;
+    std::shared_ptr<bool>         Liveness = std::make_shared<bool>(true);   // the Control Centre actions' weak token
     Frontier::PanelDockspace      Dockspace;
     Frontier::SceneDirectoryPanel OutlinerPanel;
     Frontier::SceneInspectorPanel InspectorPanel;
