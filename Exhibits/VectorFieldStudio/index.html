@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="dark">
+    <meta name="description" content="Frontier Field Studio — a GPU-accelerated 3D vector field workspace for wind, force, and terrain analysis.">
+    <title>Frontier · Field Studio</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="app" id="app">
+        <header class="topbar">
+            <div class="brand">
+                <span class="brand-mark" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M3 8h9a3 3 0 1 0-3-3"/>
+                        <path d="M3 12h13a3 3 0 1 1-3 3"/>
+                        <path d="M3 16h6"/>
+                    </svg>
+                </span>
+                <span class="brand-text">
+                    <span class="brand-name">Frontier</span>
+                    <span class="brand-divider">/</span>
+                    <span class="brand-sub">Field Studio</span>
+                </span>
+            </div>
+            <nav class="mode-tabs" role="tablist" aria-label="Field mode">
+                <button class="mode-tab" data-mode="wind" role="tab" aria-selected="true"></button>
+                <button class="mode-tab" data-mode="force" role="tab" aria-selected="false"></button>
+                <button class="mode-tab" data-mode="terrain" role="tab" aria-selected="false"></button>
+            </nav>
+            <div class="top-actions">
+                <button class="icon-button" id="toggleOutlinerButton" title="Toggle outliner" aria-label="Toggle outliner"></button>
+                <button class="icon-button" id="toggleInspectorButton" title="Toggle inspector" aria-label="Toggle inspector"></button>
+                <div class="action-divider"></div>
+                <button class="icon-button" id="playButton" title="Play or pause (Space)" aria-label="Play or pause"></button>
+                <button class="icon-button" id="resetCameraButton" title="Reset camera (R)" aria-label="Reset camera"></button>
+                <div class="action-divider"></div>
+                <button class="icon-button" id="saveButton" title="Save scene" aria-label="Save scene"></button>
+                <button class="icon-button" id="openButton" title="Open scene" aria-label="Open scene"></button>
+                <button class="icon-button" id="screenshotButton" title="Screenshot (S)" aria-label="Screenshot"></button>
+                <button class="icon-button" id="helpButton" title="Help (?)" aria-label="Help"></button>
+                <input type="file" id="fileInput" accept="application/json,.json" hidden>
+            </div>
+        </header>
+        <main class="workspace">
+            <aside class="panel outliner-panel">
+                <div class="panel-head">
+                    <span class="panel-title">Outliner</span>
+                    <div class="panel-head-actions">
+                        <button class="icon-button small" id="addSourceButton" title="Add force source" aria-label="Add force source"></button>
+                    </div>
+                </div>
+                <div class="search-box">
+                    <span class="search-icon" aria-hidden="true"></span>
+                    <input type="search" id="searchInput" placeholder="Filter layers" aria-label="Filter layers" autocomplete="off">
+                </div>
+                <div class="outliner-scroll" id="outlinerTree"></div>
+                <div class="panel-foot"><span data-outliner-count>0 entries</span><span class="status-dot"></span><span>GPU field</span></div>
+            </aside>
+            <section class="viewport-shell">
+                <div class="viewport" id="viewport">
+                    <canvas id="glCanvas" aria-label="3D vector field viewport"></canvas>
+                    <div class="viewport-vignette"></div>
+                    <div class="viewport-overlay">
+                        <div class="vp-top-left">
+                            <div class="vp-mode"><span class="vp-mode-dot"></span><span id="vpModeLabel">Wind</span></div>
+                            <div class="vp-description" id="vpDescription">Air advection, turbulence, and terrain deflection</div>
+                        </div>
+                        <div class="vp-top-right">
+                            <div class="camera-group">
+                                <button class="vp-button" data-camera="iso" title="Isometric view">ISO</button>
+                                <button class="vp-button" data-camera="top" title="Top view">TOP</button>
+                                <button class="vp-button" data-camera="front" title="Front view">FRONT</button>
+                            </div>
+                            <button class="vp-button" id="probeToolButton" title="Probe tool (P)"></button>
+                            <button class="vp-button" id="autoRotateButton" title="Auto-orbit"></button>
+                        </div>
+                        <div class="vp-bottom-left">
+                            <div class="legend" id="legend">
+                                <div class="legend-head"><span id="legendTitle">Wind speed</span><span id="legendUnit">m/s</span></div>
+                                <div class="legend-bar" id="legendBar"></div>
+                                <div class="legend-labels"><span id="legendMin">0</span><span id="legendMax">35</span></div>
+                            </div>
+                        </div>
+                        <div class="vp-bottom-right">
+                            <div class="stats" id="statsOverlay">
+                                <div><span class="stat-label">FPS</span><span class="stat-value" id="statFps">—</span></div>
+                                <div><span class="stat-label">Frame</span><span class="stat-value" id="statFrame">—</span></div>
+                                <div><span class="stat-label">Particles</span><span class="stat-value" id="statParticles">—</span></div>
+                            </div>
+                            <canvas id="axisGizmo" class="axis-gizmo" width="92" height="92" aria-label="Axis orientation"></canvas>
+                        </div>
+                        <div class="probe-label hidden" id="probeLabel"></div>
+                        <div class="hover-readout" id="hoverReadout"></div>
+                    </div>
+                    <div class="gl-error hidden" id="glError">
+                        <div class="gl-error-card">
+                            <div class="gl-error-title">WebGL2 unavailable</div>
+                            <p id="glErrorText">This workspace needs WebGL2 with float render targets. Enable hardware acceleration or open the page in a current desktop browser.</p>
+                        </div>
+                    </div>
+                    <div class="loading" id="loading"><div class="loading-spinner"></div><span>Building field…</span></div>
+                </div>
+                <div class="statusbar">
+                    <div class="status-left"><span class="status-dot"></span><span id="statusRenderer">WebGL2</span><span class="status-sep">·</span><span id="statusFormat">—</span><span class="status-sep">·</span><span id="statusParticles">—</span></div>
+                    <div class="status-center" id="statusCursor">X —  Y —  Z —</div>
+                    <div class="status-right"><span id="statusFps">—</span><span class="status-sep">·</span><span id="statusQuality">Balanced</span></div>
+                </div>
+            </section>
+            <aside class="panel inspector-panel">
+                <div class="panel-head">
+                    <span class="panel-title">Inspector</span>
+                    <span class="inspector-type" id="inspectorType">Scene</span>
+                </div>
+                <div class="inspector-scroll" id="inspectorBody"></div>
+            </aside>
+        </main>
+    </div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <div class="modal-backdrop hidden" id="helpModal">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+            <div class="modal-head"><h2 id="helpTitle">Field Studio</h2><button class="icon-button" id="closeHelpButton" aria-label="Close help"></button></div>
+            <div class="modal-body">
+                <h3>Purpose</h3>
+                <p>A GPU-resident vector field workspace for air, force, and terrain analysis. The particle advection, field slices, and glyph grid evaluate the same field function on the GPU; the inspector exposes the parameters and live statistics.</p>
+                <h3>Viewport</h3>
+                <div class="shortcut-grid">
+                    <div class="shortcut"><span>Orbit</span><span class="key">Drag</span></div>
+                    <div class="shortcut"><span>Pan</span><span class="key">Shift + Drag</span></div>
+                    <div class="shortcut"><span>Zoom</span><span class="key">Scroll</span></div>
+                    <div class="shortcut"><span>Focus surface</span><span class="key">Double-click</span></div>
+                    <div class="shortcut"><span>Probe tool</span><span class="key">P</span></div>
+                    <div class="shortcut"><span>Play / pause</span><span class="key">Space</span></div>
+                    <div class="shortcut"><span>Wind / Force / Terrain</span><span class="key">1 / 2 / 3</span></div>
+                    <div class="shortcut"><span>Reset camera</span><span class="key">R</span></div>
+                    <div class="shortcut"><span>Screenshot</span><span class="key">S</span></div>
+                    <div class="shortcut"><span>Toggle grid</span><span class="key">G</span></div>
+                </div>
+                <h3>Field model</h3>
+                <p><strong>Wind</strong> combines a directional boundary flow, curl-noise turbulence, and terrain lift. <strong>Force</strong> sums attractors, repulsors, and vortices with a local-support falloff. <strong>Terrain</strong> follows the downhill gradient of the heightfield, with flow accumulation and vegetation sampled from the same terrain data.</p>
+                <h3>Performance</h3>
+                <p>The particle state lives in floating-point render targets and is advected by a fragment shader. Quality controls the particle texture size: 36k, 65k, or 147k particles. Rain uses a separate 16k state. The slice and glyphs evaluate the field directly, so no CPU readback is needed for the image.</p>
+                <h3>Persistence</h3>
+                <p>Scenes autosave to local storage. Use the save and open actions to move a scene as JSON. The renderer, field parameters, layer visibility, camera, and probe are included.</p>
+            </div>
+        </div>
+    </div>
+    <script type="module" src="src/FieldStudio.js"></script>
+</body>
+</html>

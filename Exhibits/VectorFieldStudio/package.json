@@ -1,0 +1,11 @@
+{
+  "name": "frontier-field-studio",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "GPU-accelerated 3D vector field workspace for wind, force, and terrain analysis.",
+  "scripts": {
+    "start": "python3 -m http.server 8080 --bind 0.0.0.0",
+    "test": "node --test tests/"
+  }
+}
