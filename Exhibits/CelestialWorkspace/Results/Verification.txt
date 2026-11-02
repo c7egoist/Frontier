@@ -47,3 +47,11 @@ Test project /home/user/Frontier/_ClaudeScratch/build/UI
 100% tests passed out of 4
 
 Total Test time (real) = 533.44 sec
+
+Final Windows archive
+Source revision: c6e31f68e250d4dfa8f6205b12fdb98acc8c46d6 (clean source)
+Bytes: 23828892
+SHA256: 9bd6b57e03af13cfdb946e125e98db380a75ca2a0b446013d8ef84231e4d1db8
+PASS: all 901 file hashes; exact executable; current environment/global-illumination SPIR-V.
+PASS: 20 persisted records, unused demonstration entries absent, 15 scene entries presented in Outliner.
+Windows runtime: NOT RUN. Signed: NO. Antivirus scan: NOT RUN.

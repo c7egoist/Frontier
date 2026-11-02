@@ -1093,3 +1093,8 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
   metadata is retained beside the exhibit. No GitHub Actions were run.
 - **Evidence:** `Exhibits/CelestialWorkspace/`; fixed-axis views are perspective views; Space is wide-range flight,
   not a new solar-system dynamics simulation. Renderer settings remain available from Control Centre Quick Controls.
+
+- **Published Windows package:** built from clean source `c6e31f68e250d4dfa8f6205b12fdb98acc8c46d6`;
+  `Binaries/FrontierSceneViewport-Windows-x64.zip`, 23,828,892 bytes. All 901 file hashes,
+  exact executable, current Environment/GlobalIllumination shaders and cleaned 20-record level verified.
+  SHA-256 `9bd6b57e03af13cfdb946e125e98db380a75ca2a0b446013d8ef84231e4d1db8`. Windows interactive execution/signing/antivirus checks remain unrun.

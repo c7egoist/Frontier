@@ -78,6 +78,7 @@ request plumbing are removed. Its retired uniform slot is explicitly reserved to
 | `EnvironmentInspectorValidation` | Numerical, codec, input and lifecycle checks; full planet captures |
 | `EverestInterfaceValidation` | Existing editor behaviour against the retained simulation exhibit fixture |
 | `EverestShippingValidation` | Editor-free simulation and serialization against the same explicit fixture |
+| `Results/WindowsPackage.json` | Source revision, package size and hashes; unrun Windows checks |
 | `Results/Verification.txt` | Final executed commands, results and limitations |
 
 Images are genuine production ImGui draw output with a native Vulkan scene readback. The scene is intentionally rendered
