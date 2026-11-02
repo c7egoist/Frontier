@@ -41,6 +41,9 @@ function summarizeSdfProcess(stats) {
           directionRangeDeg: stats.directionRangeDeg ?? 0,
           directionCycles: stats.directionCycles ?? 0,
           directionSamplesDeg: [...(stats.directionSamplesDeg || [])],
+          directionSectorOffsetsDeg: [...(stats.directionSectorOffsetsDeg || [])],
+          directionSectorCounts: [...(stats.directionSectorCounts || [])],
+          directionSectorShares: [...(stats.directionSectorShares || [])],
         }
       : {}),
     ...(stats.floodParticles !== undefined

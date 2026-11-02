@@ -186,7 +186,7 @@ test('generator runs slot flood on the Mesh→SDF bake, reports it and emits it 
       windErosionAmount: 0.25,
       windParticles: 1200,
       windAzimuth: 35,
-      windShiftMode: 'oscillate',
+      windShiftMode: 'variable',
       windShiftRange: 60,
       windShiftCycles: 2,
       thermalErosionAmount: 0,

@@ -142,13 +142,18 @@ npm run generate -- --archetype sedimentary-cliff --seed 4029 --lods --out expor
   speed, overall rate, rock abrasion, deflation, lee deposition, turbulent
   direction wander, gustiness, abrasive sand supply, saltation-curtain /
   undercut height, wrap-around streamlining and vertical fluting. The
-  prevailing direction itself can also move through geologic time
-  (`src/erosion/wind-regime.js`): **Fixed**, a seasonal **swing** of
-  ±range around the prevailing bearing, discrete weather-front **sectors**
-  across ±range, or a full 360° rotating **wind rose**, with a user-set
-  cycle length in simulation steps. Terrain uniforms are recomputed every
-  substep, so long bakes and stack replays really do travel through those
-  bearings; local gust wander and obstacle wrap then act around the current
+  prevailing direction itself can also change through geologic time
+  (`src/erosion/wind-regime.js`), but not as a sinusoidal windscreen-wiper
+  sweep. **Fixed** keeps one bearing. **Variable wind rose** dwells in one
+  of eight compass sectors, then changes to another in a deterministic
+  seeded sequence; the chosen prevailing sector receives the largest share,
+  adjacent sectors receive the next-largest shares, and side/rear/opposite
+  sectors still occur. Left and right sector pairs are quota-balanced.
+  **Weather fronts** dwell once in each configured sector per cycle in a
+  non-linear seeded order, and **Full wind rose** gives all eight sectors
+  equal dwell shares. Terrain uniforms are recomputed every substep, so
+  long bakes and stack replays really do spend the scheduled time in those
+  sectors; local gust wander and obstacle wrap then act around the current
   effective direction. Utah defaults to five front sectors across ±70° over
   220 steps. Local
   flow genuinely wraps around terrain — a multi-scale obstacle gradient
@@ -227,11 +232,13 @@ npm run generate -- --archetype sedimentary-cliff --seed 4029 --lods --out expor
   dissolution (the existing Fe/Cu stain pass remains the colour layer). All
   share geological hardness, convex-edge protection, thin-span protection
   and per-node carve caps before Dual Contouring. Rock wind uses the same
-  shifting-direction regimes as Terrain: each saltation grain keeps the
-  bearing for its short life while later grains sample the seasonal swing,
-  front-sector sequence or 360° wind rose over the bake. Rock & Cliff
-  Studio exposes prevailing azimuth, regime, swing range and cycles over
-  the bake alongside all of its existing rain/wind/thermal/cryo/chemical
+  sector-dwell regimes as Terrain: each saltation grain keeps its episode
+  bearing for its short life while later grains belong to other weather
+  episodes over the bake. The HUD and CLI report both the realized episode
+  sequence and the actual particle share in all eight sectors, making a
+  left/right bias visible instead of hiding it in an average. Rock & Cliff
+  Studio exposes prevailing azimuth, regime, wind-rose spread/sector range
+  and weather cycles over the bake alongside its rain/wind/thermal/cryo/chemical
   amounts. Tick **▶ Watch erosion live** to receive staged, anchored SDF
   preview meshes in the viewport while the worker continues; preview frame
   count and hold time are user sliders, previews are triangle-capped and

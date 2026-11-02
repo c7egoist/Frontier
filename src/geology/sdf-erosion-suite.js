@@ -30,7 +30,12 @@
 
 import { clamp, smoothstep } from '../core/vec3.js';
 import { scalarField3D } from '../core/spatial-noise.js';
-import { effectiveWindAzimuthDeg, normalizeWindShiftMode } from '../erosion/wind-regime.js';
+import {
+  effectiveWindAzimuthDeg,
+  normalizeWindAzimuthDeg,
+  normalizeWindShiftMode,
+  sampleWindDirectionSequenceDeg,
+} from '../erosion/wind-regime.js';
 import { erodeSdfWithRain } from './rain-erosion.js';
 
 const BRUSH_R = 1.6;
@@ -297,6 +302,8 @@ export function erodeSdfWithWind(sdf, options = {}) {
     windShiftMode: options.shiftMode ?? options.windShiftMode ?? options.windDirectionMode ?? 'fixed',
     windShiftRange: options.shiftRangeDeg ?? options.windShiftRange ?? options.windShiftRangeDeg ?? 55,
     windShiftSectors: options.shiftSectors ?? options.windShiftSectors ?? 5,
+    windShiftEpisodes: options.shiftEpisodes ?? options.windShiftEpisodes,
+    seed: options.seedSalt ?? options.seed ?? 0,
   };
   const shiftMode = normalizeWindShiftMode(windRegime.windShiftMode);
   const shiftCycles = clamp(
@@ -307,18 +314,17 @@ export function erodeSdfWithWind(sdf, options = {}) {
   stats.directionMode = shiftMode;
   stats.directionRangeDeg = clamp(Number(windRegime.windShiftRange) || 0, 0, 180);
   stats.directionCycles = shiftCycles;
-  // Sample at quarter-cycle points (bounded for HUD/CLI display). Five
-  // evenly spaced bake fractions would alias the UI's default two-cycle
-  // seasonal swing back to the prevailing bearing at every sample, falsely
-  // suggesting that the wind never moved.
-  const directionSampleCount = clamp(Math.ceil(Math.max(1, shiftCycles) * 4) + 1, 5, 17);
-  stats.directionSamplesDeg = Array.from(
-    { length: directionSampleCount },
-    (_, i) => Number(effectiveWindAzimuthDeg(
-      windRegime,
-      (i / (directionSampleCount - 1)) * shiftCycles
-    ).toFixed(2))
-  );
+  // Report actual scheduled dwell-episode directions, not arbitrary time
+  // samples. This makes the HUD/CLI sequence match the changing sectors
+  // used by the particles below.
+  stats.directionSamplesDeg = sampleWindDirectionSequenceDeg(windRegime, shiftCycles, 17)
+    .map((deg) => Number(deg.toFixed(2)));
+  // Actual particle-time distribution in eight sectors relative to the
+  // prevailing bearing. This is the regression signal for the old complaint
+  // that one side received systematically more wind than the other.
+  stats.directionSectorOffsetsDeg = [-180, -135, -90, -45, 0, 45, 90, 135];
+  stats.directionSectorCounts = new Array(8).fill(0);
+  stats.directionSectorShares = new Array(8).fill(0);
   const turbulence = clamp(options.turbulence ?? 0.45, 0, 1);
   const streamlining = clamp(options.streamlining ?? options.windStreamlining ?? 0.65, 0, 1);
   const sandSupply = clamp(options.sandSupply ?? 0.65, 0, 1);
@@ -355,10 +361,15 @@ export function erodeSdfWithWind(sdf, options = {}) {
 
     // Particle index is geologic time in an offline bake: later grains
     // belong to later weather. A grain keeps one regime direction for its
-    // short saltation life, while thousands of grains sample the swing,
-    // sector sequence or full wind rose across the bake.
+    // short saltation life, while thousands of grains realize the sector
+    // dwell quotas of the variable/front/full wind rose across the bake.
     const regimeFraction = particleCount > 1 ? pIdx / (particleCount - 1) : 0;
-    const azimuthRad = effectiveWindAzimuthDeg(windRegime, regimeFraction * shiftCycles) * Math.PI / 180;
+    const particleAzimuthDeg = effectiveWindAzimuthDeg(windRegime, regimeFraction * shiftCycles);
+    let relativeAzimuthDeg = normalizeWindAzimuthDeg(particleAzimuthDeg - prevailingAzimuthDeg);
+    if (relativeAzimuthDeg > 180) relativeAzimuthDeg -= 360;
+    const sectorIndex = Math.floor((((relativeAzimuthDeg + 202.5) % 360) + 360) % 360 / 45) % 8;
+    stats.directionSectorCounts[sectorIndex]++;
+    const azimuthRad = particleAzimuthDeg * Math.PI / 180;
     const baseWindX = Math.cos(azimuthRad), baseWindZ = Math.sin(azimuthRad);
     const perpX = -baseWindZ, perpZ = baseWindX;
     const surfaceAlongSpan = surfaceAlongSpanFor(baseWindX, baseWindZ);
@@ -540,6 +551,8 @@ export function erodeSdfWithWind(sdf, options = {}) {
   if (onProgress) onProgress(1);
   stats.erodedVolume = Math.max(0, stats.erodedVolume);
   stats.depositedVolume = Math.max(0, stats.depositedVolume);
+  stats.directionSectorShares = stats.directionSectorCounts.map((count) =>
+    Number((count / Math.max(1, particleCount)).toFixed(4)));
   stats.elapsedMs = Math.round(performance.now() - t0);
   return stats;
 }
@@ -1003,6 +1016,8 @@ export function erodeSdfWithSlotFlood(sdf, options = {}) {
     windShiftMode: options.windShiftMode ?? options.shiftMode ?? options.windDirectionMode ?? 'fixed',
     windShiftRange: options.windShiftRange ?? options.shiftRangeDeg ?? options.windShiftRangeDeg ?? 55,
     windShiftSectors: options.windShiftSectors ?? options.shiftSectors ?? 5,
+    windShiftEpisodes: options.windShiftEpisodes ?? options.shiftEpisodes,
+    seed: seedSalt,
   };
   const shiftMode = normalizeWindShiftMode(windRegime.windShiftMode);
   const shiftCycles = clamp(

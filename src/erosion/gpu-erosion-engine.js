@@ -968,8 +968,8 @@ export class GpuErosionEngine {
 
     const rawSum = rain + snow + wind + rock;
     const sum = Math.max(1e-4, rawSum);
-    // Slow weather regime: the prevailing direction itself moves over the
-    // simulation (seasonal swing / front sectors / full wind rose). Local
+    // Slow weather regime: the large-scale wind dwells in a sector and then
+    // changes sector (variable wind rose / fronts / equal full rose). Local
     // gust wander and terrain wrap in the shaders act around this vector.
     const windCycles = windCyclesAtStep(p, this.stepCount || 0);
     const effectiveWindAzimuth = effectiveWindAzimuthAtStep(p, this.stepCount || 0);

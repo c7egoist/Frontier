@@ -449,11 +449,11 @@ export const LAYER_OPERATION_SPECS = {
     summary: (p) => {
       const shiftMode = Number(p.windShiftMode ?? DEFAULT_EROSION_PARAMS.windShiftMode);
       const shift = shiftMode === 3
-        ? ' · 360° wind rose'
+        ? ' · full wind rose (equal sectors)'
         : shiftMode === 2
-          ? ` · front sectors ±${Math.round(p.windShiftRange ?? DEFAULT_EROSION_PARAMS.windShiftRange)}°`
+          ? ` · weather-front sectors ±${Math.round(p.windShiftRange ?? DEFAULT_EROSION_PARAMS.windShiftRange)}°`
           : shiftMode === 1
-            ? ` · seasonal swing ±${Math.round(p.windShiftRange ?? DEFAULT_EROSION_PARAMS.windShiftRange)}°`
+            ? ` · variable wind rose, spread ${Math.round(p.windShiftRange ?? DEFAULT_EROSION_PARAMS.windShiftRange)}°`
             : ' · fixed direction';
       return `${p.bakeSteps > 0 ? `${Math.round(p.bakeSteps)} baked · ` : ''}${Math.round((p.windSpeed ?? DEFAULT_EROSION_PARAMS.windSpeed) * 100)}% @ ${Math.round(p.windAzimuth ?? DEFAULT_EROSION_PARAMS.windAzimuth)}°${shift} · abrasion ${Math.round((p.windAbrasion ?? DEFAULT_EROSION_PARAMS.windAbrasion) * 100)}%`;
     },
@@ -781,8 +781,9 @@ function buildUtahWindRainRecipe() {
       bakeSteps: 0,
       windSpeed: 0.92,
       windAzimuth: 32,
-      // Desert fronts do not sandblast from one bearing forever: step the
-      // prevailing wind through sectors either side of the mean direction.
+      // Desert fronts do not sandblast from one bearing forever: each
+      // weather cycle dwells in every sector either side of the mean, in a
+      // seeded non-linear order rather than sweeping across the compass.
       windShiftMode: 2,
       windShiftRange: 70,
       windShiftPeriod: 220,

@@ -56,8 +56,8 @@ const SLIDER_SCHEMA = {
     { type: 'heading', label: 'Wind / Saltation' },
     { key: 'windErosionAmount', label: 'Wind Erosion Amount',      min: 0, max: 1, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
     { key: 'windAzimuth',       label: 'Prevailing Wind Azimuth (toward)', min: -180, max: 180, step: 1, fmt: (v) => `${v}°` },
-    { key: 'windShiftRange',    label: 'Direction Swing Range (±)', min: 0, max: 180, step: 5, fmt: (v) => `±${Math.round(Number(v))}°` },
-    { key: 'windShiftCycles',   label: 'Direction Cycles Over Bake', min: 0.25, max: 6, step: 0.25, fmt: (v) => `${Number(v).toFixed(2)}×` },
+    { key: 'windShiftRange',    label: 'Wind-Rose Spread / Sector Range', min: 0, max: 180, step: 5, fmt: (v) => `${Math.round(Number(v))}°` },
+    { key: 'windShiftCycles',   label: 'Weather-Pattern Cycles Over Bake', min: 0.25, max: 6, step: 0.25, fmt: (v) => `${Number(v).toFixed(2)}×` },
     { key: 'windTurbulence',    label: 'Gust Wander / Turbulence', min: 0, max: 1, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
     { key: 'windStreamlining',  label: 'Flow Wrap / Streamlining', min: 0, max: 1, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
     { type: 'heading', label: 'Thermal / Rockfall Talus' },
@@ -86,7 +86,7 @@ const state = {
     liveErosionPreview: false, erosionPreviewFrames: 6, erosionPreviewDelayMs: 380,
     rainErosionAmount: 0.5, rainDroplets: 8000, rainEdgeProtection: 0.7,
     slotFloodAmount: 0.85, slotFloodParticles: 6000, slotSedimentSupply: 0.62,
-    windErosionAmount: 0.30, windAzimuth: 35, windShiftMode: 'oscillate', windShiftRange: 60,
+    windErosionAmount: 0.30, windAzimuth: 35, windShiftMode: 'variable', windShiftRange: 60,
     windShiftCycles: 2, windTurbulence: 0.45, windStreamlining: 0.65,
     thermalErosionAmount: 0.20, thermalReposeAngle: 34,
     cryoErosionAmount: 0.10,
@@ -317,9 +317,13 @@ function updateRockHud(stats) {
     }
     const wind = stats.sdfErosion?.wind;
     if (wind?.directionMode && wind.directionMode !== 'fixed' && wind.directionSamplesDeg?.length) {
+      const sectorMix = wind.directionSectorOffsetsDeg?.length && wind.directionSectorShares?.length
+        ? ` Sector mix rel. prevailing: ${wind.directionSectorOffsetsDeg.map((off, i) =>
+            `${off > 0 ? '+' : ''}${off}° ${Math.round((wind.directionSectorShares[i] || 0) * 100)}%`).join(' · ')}.`
+        : '';
       readout.textContent +=
-        ` Wind direction over the bake (${wind.directionMode}, ${wind.directionCycles} cycle(s)): ` +
-        `${wind.directionSamplesDeg.map((deg) => `${Math.round(deg)}°`).join(' → ')}.`;
+        ` Wind direction episodes over the bake (${wind.directionMode}, ${wind.directionCycles} weather cycle(s)): ` +
+        `${wind.directionSamplesDeg.map((deg) => `${Math.round(deg)}°`).join(' → ')}.${sectorMix}`;
     }
     if (stats.sdfErosion?.previewFrames > 0) {
       readout.textContent += ` ${stats.sdfErosion.previewFrames} live SDF preview frame(s) were shown; export uses this final bake.`;
@@ -938,7 +942,7 @@ function selectArchetype(archId) {
     slotSedimentSupply: state.params.slotSedimentSupply ?? 0.62,
     windErosionAmount: state.params.windErosionAmount ?? 0.30,
     windAzimuth: state.params.windAzimuth ?? 35,
-    windShiftMode: state.params.windShiftMode ?? 'oscillate',
+    windShiftMode: state.params.windShiftMode ?? 'variable',
     windShiftRange: state.params.windShiftRange ?? 60,
     windShiftCycles: state.params.windShiftCycles ?? 2,
     windTurbulence: state.params.windTurbulence ?? 0.45,
@@ -1117,7 +1121,16 @@ function initRockActionButtons() {
 
   const windShiftSelect = document.getElementById('select-wind-shift-mode');
   if (windShiftSelect) {
-    windShiftSelect.value = state.params.windShiftMode || 'oscillate';
+    const savedWindShiftMode = String(state.params.windShiftMode || 'variable').trim().toLowerCase().replace(/_/g, '-');
+    const canonicalWindShiftModes = {
+      '0': 'fixed', fixed: 'fixed',
+      '1': 'variable', variable: 'variable', oscillate: 'variable', swing: 'variable',
+      seasonal: 'variable', 'seasonal-swing': 'variable',
+      '2': 'sectors', sectors: 'sectors', fronts: 'sectors', 'weather-fronts': 'sectors',
+      '3': 'rotate', rotate: 'rotate', rotating: 'rotate', 'full-wind-rose': 'rotate',
+    };
+    state.params.windShiftMode = canonicalWindShiftModes[savedWindShiftMode] || 'variable';
+    windShiftSelect.value = state.params.windShiftMode;
     windShiftSelect.addEventListener('change', (e) => {
       state.params.windShiftMode = e.target.value;
       requestSynthesis(false);
