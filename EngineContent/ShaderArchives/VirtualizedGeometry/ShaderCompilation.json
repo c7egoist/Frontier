@@ -50,23 +50,23 @@
     },
     {
       "file": "MaterialResolve.ResolveRefractionGather.spv",
-      "spirv_sha256": "65daf066073799eea2562bb152edcdeb0538569ef27777e68a1039cb47e71b69"
+      "spirv_sha256": "d8e0d78d958be34c3255a129f15294f33a149c42f1774ee002bb970a65edfd6d"
     },
     {
       "file": "VirtualizedGeometryCull.CullPhase2Disoccluded.spv",
-      "spirv_sha256": "e7559f95e374261efe8af780d0fd5738d54c354fd660bb727a3a616cbaaca608"
+      "spirv_sha256": "c0bdfe366d70f06807d626d89f0c4dd4c10a700db5256fc76c789046700c67b0"
     },
     {
       "file": "VirtualizedGeometryCull.CullPhase2DisoccludedCompacted.spv",
-      "spirv_sha256": "128db33377ba92c2f2fe5aab2206fe74b374235fcd8efe7ad9df35f127f2cfc2"
+      "spirv_sha256": "435bdc9dc0bdddc1803be7d46afc7bcdd7ee3ce823baf394e64b82c39f43a1e5"
     },
     {
       "file": "VirtualizedGeometryCull.SelectAndCullPhase1.spv",
-      "spirv_sha256": "e8cd782b56aa1fd056a205d5b8fe38e873071fc9e626d85c12de90658e9f8487"
+      "spirv_sha256": "38fcbd2f5afb81a4291b92dc66379964bc67f97c95a11d1c9713f299cb0af6fc"
     },
     {
       "file": "VirtualizedGeometryCull.SelectAndCullPhase1Compacted.spv",
-      "spirv_sha256": "f2fa10449d1b6ba702f963bf3f11623eefb23e3b0a04d90200aa12368e2e6f30"
+      "spirv_sha256": "0051576d5b3a9141e96273e4924c5c6582924dcb468b01bab5ff112618a5c18a"
     },
     {
       "file": "VisibilityRaster.VisibilityFragment.spv",
@@ -82,7 +82,7 @@
     },
     {
       "file": "VisibilityRaster.VisibilityVertex.spv",
-      "spirv_sha256": "cf9b57bbf0724294dc2a28270ba50f4f479b5485c16c232619569ab79295f454"
+      "spirv_sha256": "411f28f88cab32337a5ab44791e591405e4f33dd00b4992634379465c88a392b"
     }
   ],
   "sources": [
@@ -100,7 +100,7 @@
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/SceneLayouts.slang",
-      "sha256": "4bf1c6507cec129065a93ada9e6c984fabdea120b7bb6f2e4cb806a79470fec5"
+      "sha256": "38ec57559b8734bd6d26391fa6ce3a94f55351c61f94023202fc9f09b2a0c649"
     },
     {
       "file": "Frontier/Engine/Shaders/VirtualizedGeometry/ClusterDebugFallback.slang",

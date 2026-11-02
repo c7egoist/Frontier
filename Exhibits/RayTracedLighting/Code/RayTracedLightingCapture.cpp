@@ -6,8 +6,10 @@
 //    converged reference, refresh time and the cost of every refresh stage.
 
 // 📝 Usage: RayTracedLightingCapture <GlobalIllumination shaders> <Environment shaders> <ProvingGround> <CelestialMaps> <out>
-//    <view[,view…]> <variant[,variant…]> [warm refreshes] [measured refreshes] [indirect 0|1] [width] [height]. Time is frozen so nothing but the
-//    estimators changes between refreshes; each variant starts from a cleared history. Views and variants: the tables below.
+//    <view[,view…]> <variant[,variant…]> [warm refreshes] [measured refreshes] [indirect 0|1] [width] [height]. Time is frozen so
+//    nothing but the estimators changes between refreshes; each variant starts from a cleared history. Measure whole multiples of
+//    the antialiasing's 16-refresh jitter cycle so every mean covers the same sub-pixel offsets; the Reference variant measures
+//    three times as many. Views and variants: the tables below.
 #include "Frontier/Engine/Rendering/SceneViewport/SceneViewport.h"
 #include "stb_image_write.h"
 #include <algorithm>
@@ -206,24 +208,25 @@ int main(int ArgumentCount, char** Arguments)
             std::vector<double> Sum(static_cast<size_t>(Width) * Height * 3, 0.0), Square(Sum.size(), 0.0);
             std::vector<uint8_t> Rgba;
             StageTotals.clear();
-            for (uint32_t Refresh = 0; Refresh < Warm + Measured; ++Refresh)
+            const uint32_t Count = Measured * (std::string(Variant->Name) == "Reference" ? 3u : 1u);
+            for (uint32_t Refresh = 0; Refresh < Warm + Count; ++Refresh)
             {
                 Measuring = Refresh >= Warm;
                 const auto Start = std::chrono::steady_clock::now();
-                if (!Viewport.Refresh(Camera, Environment, Rendering, 1.0 / 30.0, {Width, Height}, &Diagnostic))
+                if (!Viewport.Refresh(Camera, Environment, Rendering, 0.0, {Width, Height}, &Diagnostic))
                 {
                     std::printf("[FAIL] %s refresh %u: %s\n", Variant->Name, Refresh, Diagnostic.c_str());
                     return 1;
                 }
                 const double Seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - Start).count();
                 if (!Measuring) continue;
-                Result.RefreshSeconds += Seconds / Measured;
+                Result.RefreshSeconds += Seconds / Count;
                 if (!Viewport.ReadPresented(Rgba))
                 {
                     std::printf("[FAIL] %s readback\n", Variant->Name);
                     return 1;
                 }
-                Result.Fireflies += static_cast<double>(CountFireflies(Rgba, Width, Height, Region)) / Measured;
+                Result.Fireflies += static_cast<double>(CountFireflies(Rgba, Width, Height, Region)) / Count;
                 for (size_t Pixel = 0; Pixel < static_cast<size_t>(Width) * Height; ++Pixel)
                     for (int Channel = 0; Channel < 3; ++Channel)
                     {
@@ -233,13 +236,13 @@ int main(int ArgumentCount, char** Arguments)
                     }
             }
             Measuring = false;
-            for (const auto& [Stage, Total] : StageTotals) Result.Stages[Stage] = Total / Measured;
+            for (const auto& [Stage, Total] : StageTotals) Result.Stages[Stage] = Total / Count;
             Result.Mean.resize(Sum.size());
             Result.Deviation.resize(Sum.size());
             for (size_t Index = 0; Index < Sum.size(); ++Index)
             {
-                Result.Mean[Index]      = Sum[Index] / Measured;
-                Result.Deviation[Index] = std::sqrt(std::max(0.0, Square[Index] / Measured - Result.Mean[Index] * Result.Mean[Index]));
+                Result.Mean[Index]      = Sum[Index] / Count;
+                Result.Deviation[Index] = std::sqrt(std::max(0.0, Square[Index] / Count - Result.Mean[Index] * Result.Mean[Index]));
             }
             // 📝 The last refresh and the mean over the measured refreshes.
             const std::string Stem = (OutFolder / (std::string(View->Name) + "-" + Variant->Name)).string();
