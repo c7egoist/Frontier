@@ -948,3 +948,36 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
 - **Download (interface + camera):** `Binaries/FrontierSceneViewport-Windows-x64.zip` from `6b9235a2` (Zig 0.13.0, no
   uncommitted changes, Surface 18 / GlobalIllumination 33 / Environment 15), 22.2 MiB, SHA-256
   `0aad940fe6314b5a5d977437150c5572c2a7e35a321464a1e387222903000c26`.
+
+## The demo's Sun Inspector page, 1:1 (2026-11-02, branch arena/88b72faa-frontier)
+
+- **Asked for:** option A, the environment Inspector pages 1:1 (Sun, Clouds, Atmosphere, Moons, Stars, Fog, Wind, Lens
+  flare); the web-only label "Could not load the app runtime." may go (approved).
+- **Done this turn: the Sun page and the controls its family shares**
+  (`Exhibits/SceneViewport/InterfacePortInventory.md`):
+  - *Controls:* `Frontier/Engine/Interface/ObservatoryControls.{h,cpp}`, from `CloudInspector.css`, `SunInspector.css`,
+    `NativeEnvironment.css` and `SliderControl.css`, with the narrow-column cascade (the Inspector is under the sheets'
+    520 px container breakpoint). The canvas `Pen` draws the demo's diagrams in their logical coordinates.
+  - *Page:* `Frontier/Engine/Interface/SolarObservatory.cpp`, `SunInspectorDashboard.js` 1:1 on `SolarConfiguration`
+    with four panes, every control live. A Frontier card keeps the native ray-shadow and light-shaft switches.
+  - *Runtime:* `RecordInspector::QueryOccupiesColumn` (the page lays out the whole column), `QuerySectionCount` /
+    `ConfigureSection`, `InspectorRuntime::RequestSelection` ("Open Lens Flare ↗"), the interface scale, and the
+    registered solar placement solver.
+  - *Native fields:* `SolarConfiguration` gains the demo Sun keys: disc, aureole, colour source, tint, day clock,
+    date, place. They are saved with the level; `ResolveSky` maps them; `Everest::AdvanceSolarDay` is the demo's
+    `AdvanceCelestial`, and `Everest::SolveSolarPlacement` answers the page with the GI port's `SolveCelestial`.
+  - *Text sizes:* CSS em sizes are now converted to stb_truetype pixel heights (DM Sans 1.302, JetBrains Mono 1.32),
+    in the new controls and in the viewport chrome, whose text drew about 23 % small.
+  - *Label contract:* 47 of 138 ported, 1 removal approved by the owner (2026-11-02), 90 pending.
+- **Verification (Linux host):** the full host build is warning-free in the new files; `EverestInterfaceValidation`
+  writes one capture per Sun section (`Exhibits/SceneViewport/Images/SunPage-*.png`) and shows the demo's own ephemeris
+  figures at the defaults (rise 05:31, set 18:12, 12.7 h); `InterfaceValidation`, `EverestShippingValidation`,
+  `ProjectSpaceValidation`, `EnvironmentRealmValidation`, `ProjectContentStagingValidation`,
+  `SceneViewportFlightValidation`, `DockingValidation`, `WorkspaceLayoutValidation` and `StoredShaderArchiveValidation`
+  pass.
+- **Not run:** no hardware GPU and no Windows session; the page's controls were exercised offscreen only.
+- **Next:** Atmosphere and Clouds on the same controls; then Stars and Moons (`ci-` family), Height and Atmospheric
+  fog (`fg-`), Wind and Lens optics, each with its own controls.
+- **Download (Sun page):** `Binaries/FrontierSceneViewport-Windows-x64.zip` from `dc93d268` (Zig 0.13.0, no
+  uncommitted changes, Surface 18 / GlobalIllumination 33 / Environment 15), 22.2 MiB, SHA-256
+  `0c3453599e65b14ecda52e55bb74b926af39965bc9bd4f598b2986d15188ab25`.
