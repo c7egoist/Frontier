@@ -94,6 +94,7 @@ artistic sky/shadow controls remain explicitly unavailable; they are not disguis
 | `Results/After/Checks.tsv`            | Native wind/noise/shape/quality comparisons                             |
 | `Results/Editor/Checks.tsv`           | 78 real record-to-renderer, bake, persistence and vector checks          |
 | `Results/Inspectors/Validation.tsv`   | Native interaction/serialization regressions, including Bake activation |
+| `Results/WindowsPackage.json`        | Exact Windows archive/source revision, hashes and limitations           |
 | `Results/Verification.txt`            | Final build, regression and package results                             |
 | `Results/CaptureManifest.json`        | Dimensions and SHA-256 of actual retained captures                      |
 | `Results/SourceManifest.json`         | Source hashes for the delivered change                                  |

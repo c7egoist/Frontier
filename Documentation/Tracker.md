@@ -1067,3 +1067,8 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
   interfaces are claimed. Artistic shadow controls that remain unsupported stay disabled.
 - **Evidence:** [LocalMedia](../Exhibits/LocalMedia/README.md), with baseline failures, repaired native captures,
   editor screenshots, source/image manifests and reproduction commands. No GitHub Actions were run.
+
+- **Published build:** `Binaries/FrontierSceneViewport-Windows-x64.zip`, built from clean source
+  `c6816fae35461e6b0776aab035a5ffbe1fc64bf4`; 23,819,540 bytes. ZIP integrity, all 901 file hashes, the exact
+  executable, current environment shaders and the 30-record level (Wind below Force Field) verified.
+  SHA-256 `9dd54698cfc9137c8ab1805274fd8e7a08e31d9df9a69bafbf825da99c9aee97`. Windows execution, signing and antivirus checks remain unrun.
