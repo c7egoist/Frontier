@@ -49,6 +49,10 @@ const SLIDER_SCHEMA = {
     { type: 'heading', label: 'Rain / Hydraulic Runoff' },
     { key: 'rainErosionAmount', label: 'Rainfall Erosion Amount', min: 0, max: 1, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
     { key: 'rainDroplets',      label: 'Raindrop Count',          min: 0, max: 48000, step: 500, fmt: (v) => `${(Number(v) / 1000).toFixed(1)}k` },
+    { type: 'heading', label: 'Slot Canyon Flash Flood (slot-canyon only)' },
+    { key: 'slotFloodAmount',    label: 'Flash-Flood Abrasion Amount', min: 0, max: 1, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
+    { key: 'slotFloodParticles', label: 'Flood Flow Packets',          min: 0, max: 20000, step: 250, fmt: (v) => `${(Number(v) / 1000).toFixed(1)}k` },
+    { key: 'slotSedimentSupply', label: 'Flood Sediment Supply (tools ↔ cover)', min: 0, max: 1, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
     { type: 'heading', label: 'Wind / Saltation' },
     { key: 'windErosionAmount', label: 'Wind Erosion Amount',      min: 0, max: 1, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
     { key: 'windAzimuth',       label: 'Prevailing Wind Azimuth (toward)', min: -180, max: 180, step: 1, fmt: (v) => `${v}°` },
@@ -81,6 +85,7 @@ const state = {
     sdfErosionSource: 'mesh', erosionSdfResolution: 192,
     liveErosionPreview: false, erosionPreviewFrames: 6, erosionPreviewDelayMs: 380,
     rainErosionAmount: 0.5, rainDroplets: 8000, rainEdgeProtection: 0.7,
+    slotFloodAmount: 0.85, slotFloodParticles: 6000, slotSedimentSupply: 0.62,
     windErosionAmount: 0.30, windAzimuth: 35, windShiftMode: 'oscillate', windShiftRange: 60,
     windShiftCycles: 2, windTurbulence: 0.45, windStreamlining: 0.65,
     thermalErosionAmount: 0.20, thermalReposeAngle: 34,
@@ -302,6 +307,14 @@ function updateRockHud(stats) {
       readout.textContent = 'Enable any SDF process above to convert and erode the formation. Mesh → SDF preserves world scale and grounded Y=0 for terrain placement.';
     }
 
+    const slotFlood = stats.sdfErosion?.slotFlood;
+    if (slotFlood?.particles > 0) {
+      readout.textContent +=
+        ` Slot flash flood: ${slotFlood.floodParticles.toLocaleString()} flood packets + ` +
+        `${slotFlood.windParticles.toLocaleString()} channel-wind grains · ` +
+        `${slotFlood.erodedM3.toFixed(2)} m³ abraded / ${slotFlood.depositedM3.toFixed(2)} m³ deposited · ` +
+        `${slotFlood.wallEvents.toLocaleString()} wall impacts, ${slotFlood.floorEvents.toLocaleString()} bed impacts.`;
+    }
     const wind = stats.sdfErosion?.wind;
     if (wind?.directionMode && wind.directionMode !== 'fixed' && wind.directionSamplesDeg?.length) {
       readout.textContent +=
@@ -920,6 +933,9 @@ function selectArchetype(archId) {
     erosionPreviewFrames: state.params.erosionPreviewFrames ?? 6,
     erosionPreviewDelayMs: state.params.erosionPreviewDelayMs ?? 380,
     rainErosionAmount: state.params.rainErosionAmount ?? 0.5,
+    slotFloodAmount: state.params.slotFloodAmount ?? 0.85,
+    slotFloodParticles: state.params.slotFloodParticles ?? 6000,
+    slotSedimentSupply: state.params.slotSedimentSupply ?? 0.62,
     windErosionAmount: state.params.windErosionAmount ?? 0.30,
     windAzimuth: state.params.windAzimuth ?? 35,
     windShiftMode: state.params.windShiftMode ?? 'oscillate',

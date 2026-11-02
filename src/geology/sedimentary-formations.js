@@ -378,10 +378,12 @@ export function buildSedimentaryCliff(params, tectonics, rng, recursiveFractureF
  * Antelope Canyon / Buckskin Gulch water-sculpted Navajo sandstone gorge:
  * - Two long, comparatively thin opposing fins make the asset read first as
  *   an open, walkable S-curved corridor, not as a crack in a mesa.
- * - Boundary-matched tiers/segments keep the fluted inner walls continuous,
- *   while calmer wave amplitudes preserve a clear floor-to-rim slot.
- * - High portal walls, restrained outer benches and only two floor stones
- *   keep both entrances legible from a normal 3/4 production view.
+ * - The centreline combines an in-phase meander with out-of-phase pinch /
+ *   swell reaches and slight bend asymmetry, matching mapped slot-wallforms.
+ * - A real segmented bedrock floor (pools, small knickpoint drops and two
+ *   chock/floor stones) gives the dedicated flash-flood SDF process a bed to
+ *   abrade and deposit on. The returned `slotCanyon` centreline is the flow
+ *   path used by that process; it is metadata, not another visible block.
  */
 export function buildSlotCanyon(params, tectonics, rng) {
   const S = params.scale;
@@ -394,11 +396,15 @@ export function buildSlotCanyon(params, tectonics, rng) {
   const bedFrame = buildStrikeDipFrame(strikeRad, dipRad);
   const overhang = params.overhangStrength ?? 0.80;
   const bevel = S * (0.0020 + 0.0030 * (params.edgeWear ?? 0.56));
-  const smoothR = S * 0.015;
+  // The wall is built from many boundary-matched tier/segment blocks.
+  // Sequential smooth-min makes every overlap swell into a visible waffle
+  // cell (verified against a hard-union render), so slot bedrock blocks use
+  // an exact min union and rely on their shared boundary planes instead.
+  const smoothR = 0;
 
   const lengthZ = S * 1.22;
   const height = S * 0.82;
-  const maxOuterX = S * 0.36;
+  const maxOuterX = S * 0.330;
   const phase = rng.float() * Math.PI * 2;
   const waveSalt = rng.int(1, 99999);
 
@@ -407,14 +413,53 @@ export function buildSlotCanyon(params, tectonics, rng) {
            S * 0.028 * Math.cos(zf * Math.PI * 2.7 - phase * 0.5);
   }
 
-  // Smooth analytical flood-fluted inner wall. The minimum clear gap is
-  // deliberately larger and the corkscrew amplitude smaller than the old
-  // version, whose opposing waves could visually close the corridor.
+  function slotCenterSecondDerivative(zf) {
+    // d²x/dz² for the analytic centreline above (zf is normalized by length).
+    const a = Math.PI * 1.75;
+    const b = Math.PI * 2.7;
+    return (
+      -S * 0.112 * a * a * Math.sin(zf * a + phase) -
+      S * 0.028 * b * b * Math.cos(zf * b - phase * 0.5)
+    ) / (lengthZ * lengthZ);
+  }
+
+  function floorYAt(zf) {
+    const s = clamp(zf + 0.5, 0, 1); // upstream (-Z) -> downstream (+Z)
+    // A gently descending bedrock bed with pool undulations and two small
+    // knickpoint drops. It remains well below waist height so the slot reads
+    // as a floor, not as a plug between the fins.
+    let y = groundY + height * (0.058 * (1 - s) + 0.030 * s);
+    y += S * 0.0045 * scalarField3D(s * 3.1, 0.4, phase * 0.31, waveSalt + 127);
+    y -= S * 0.0060 * (0.5 + 0.5 * Math.tanh((s - 0.34) * 18));
+    y -= S * 0.0075 * (0.5 + 0.5 * Math.tanh((s - 0.66) * 18));
+    return Math.max(groundY + S * 0.010, y);
+  }
+
+  // Smooth analytical flood-fluted inner wall. Research on Wire Pass and
+  // flume slots shows coexisting in-phase (meander) and out-of-phase
+  // (pinch-and-swell) wall undulations; both are represented here while the
+  // minimum clear gap stays open from portal to portal.
   function innerWallX(zf, yf, side) {
     const mouthFlare = 1.0 + 0.34 * Math.pow(Math.abs(zf) * 2.0, 2.2);
-    const halfGap = S * (0.082 + 0.022 * Math.pow(yf - 0.44, 2) * 2.0) * mouthFlare;
-    const vortexWave1 = Math.sin(yf * Math.PI * 2.45 + zf * Math.PI * 2.0 + side * 0.45) * S * (0.030 + 0.020 * overhang);
-    const vortexWave2 = Math.cos(yf * Math.PI * 4.1 - zf * Math.PI * 2.6 + side * 1.1) * S * 0.012;
+    const pinchSwell = clamp(
+      1.0 +
+        0.15 * Math.sin(zf * Math.PI * 3.15 + phase * 0.70) +
+        0.065 * scalarField3D(zf * 2.7, 0.8, 1.3, waveSalt + 61),
+      0.82,
+      1.22
+    );
+    let halfGap = S * (0.068 + 0.018 * Math.pow(yf - 0.44, 2) * 2.0) * mouthFlare * pinchSwell;
+
+    // Slight bend asymmetry low on the walls: the outside of a bend is a
+    // little more scoured/undercut, the inside a little more depositional.
+    // Kept to centimetres here; the SDF flood pass does the real abrasion.
+    const curvature = clamp(slotCenterSecondDerivative(zf) * S * 1.35, -1, 1);
+    const outerSide = curvature >= 0 ? -1 : 1;
+    const bendWeight = Math.exp(-yf * 2.15) * Math.abs(curvature);
+    halfGap += S * 0.011 * bendWeight * (side === outerSide ? 1.0 : -0.42);
+
+    const vortexWave1 = Math.sin(yf * Math.PI * 2.45 + zf * Math.PI * 2.0 + side * 0.45) * S * (0.020 + 0.013 * overhang);
+    const vortexWave2 = Math.cos(yf * Math.PI * 4.1 - zf * Math.PI * 2.6 + side * 1.1) * S * 0.008;
     const fineUndul = scalarField3D(zf * 3.2, yf * 3.2, side * 1.7, waveSalt) * S * 0.008;
     return slotCenterX(zf) + side * halfGap + side * (vortexWave1 + vortexWave2) + fineUndul;
   }
@@ -435,8 +480,8 @@ export function buildSlotCanyon(params, tectonics, rng) {
     return height * portalEnv * slickrockDomes;
   }
 
-  const nTiers = 10;
-  const nSegsZ = 16;
+  const nTiers = 12;
+  const nSegsZ = 18;
   const dzSeg = lengthZ / nSegsZ;
   const tierStepY = height / nTiers;
 
@@ -456,8 +501,11 @@ export function buildSlotCanyon(params, tectonics, rng) {
         const cz = zfMid * lengthZ;
 
         const localCrest = wallCrestH(zfMid, side);
-        if (y0 > localCrest - tierStepY * 0.18) continue;
-        const actualTopY = Math.min(localCrest, y1);
+        const crestZ0 = wallCrestH(zf0, side);
+        const crestZ1 = wallCrestH(zf1, side);
+        const crestMax = Math.max(localCrest, crestZ0, crestZ1);
+        if (y0 > crestMax - tierStepY * 0.18) continue;
+        const actualTopY = Math.min(crestMax, y1);
         const actualTopYf = (actualTopY - groundY) / height;
 
         // Exact boundary-matched evaluations so tier b and tier b+1 meet FLUSH with zero louver steps!
@@ -486,14 +534,17 @@ export function buildSlotCanyon(params, tectonics, rng) {
           b === 0 ? groundY : y0 - overlapY,
           cz - halfZ,
           xMax,
-          actualTopY + (actualTopY < localCrest - 1e-3 ? overlapY : tierStepY * 0.05),
+          actualTopY + (actualTopY < crestMax - 1e-3 ? overlapY : tierStepY * 0.05),
           cz + halfZ,
           'slotWaveWall'
         );
 
-        // Gently sloped slickrock rim cap ONLY on the topmost tier at this Z; internal tiers overlap smoothly!
-        if (actualTopY >= localCrest - tierStepY * 0.25) {
-          const rimN = vnorm([side * 0.34, 0.92, rng.signed() * 0.16]);
+        // Gently sloped slickrock rim cap ONLY on the topmost tier at this Z.
+        // Its Z slope is boundary-matched from the crest samples, rather
+        // than randomized per segment, so the rim no longer stair-steps.
+        if (actualTopY >= crestMax - tierStepY * 0.25) {
+          const crestSlope = clamp((crestZ1 - crestZ0) / dzSeg, -0.85, 0.85);
+          const rimN = vnorm([side * 0.34, 0.92, -crestSlope]);
           poly = clipPolyByHalfSpace(poly, rimN, vdot(rimN, [0.5 * (inXTop + outXTop), localCrest, cz]), 'slickrockRim') || poly;
         }
 
@@ -511,11 +562,20 @@ export function buildSlotCanyon(params, tectonics, rng) {
         const outerN = vnorm([side, -side * dxdyOut, -side * dxdzOut]);
         poly = clipPolyByHalfSpace(poly, outerN, vdot(outerN, [outXMid, segMidY, cz]), 'outerSlickrock') || poly;
 
-        // Tapered sandstone prows at entrance (-Z) and exit (+Z) portals
+        // Tapered sandstone prows at entrance (-Z) and exit (+Z) portals.
+        // Use ONE tier-independent plane per portal segment: anchoring this
+        // plane at each tier midpoint produced a stack of horizontal portal
+        // ledges even though the inner/outer walls themselves were C0.
         if (iz === 0 || iz === nSegsZ - 1) {
           const zSign = iz === 0 ? -1 : 1;
-          const prowN = vnorm([side * 0.42, 0.26, zSign * 0.87]);
-          poly = clipPolyByHalfSpace(poly, prowN, vdot(prowN, [0.5 * (inXMid + outXMid), segMidY, cz + zSign * halfZ * 0.58]), 'portalProw') || poly;
+          const prowYf = 0.45;
+          const prowAnchor = [
+            0.5 * (innerWallX(zfMid, prowYf, side) + outerFlankX(zfMid, prowYf, side)),
+            groundY + height * prowYf,
+            zSign * lengthZ * 0.5 - zSign * dzSeg * 0.10,
+          ];
+          const prowN = vnorm([side * 0.36, 0.10, zSign * 0.93]);
+          poly = clipPolyByHalfSpace(poly, prowN, vdot(prowN, prowAnchor), 'portalProw') || poly;
         }
 
         poly = clipPolyByHalfSpace(poly, [0, -1, 0], -groundY, 'base') || poly;
@@ -537,6 +597,51 @@ export function buildSlotCanyon(params, tectonics, rng) {
     // flank profile is cleaner and keeps the slot itself as the subject.
   }
 
+  // Segmented bedrock floor. Without this, rain/flood particles falling or
+  // flowing into the corridor meet only the asset ground plane, so there is
+  // no bed on which tools/cover, potholes, scour pools or sand bars can act.
+  for (let iz = 0; iz < nSegsZ; iz++) {
+    const zf0 = iz / nSegsZ - 0.5;
+    const zf1 = (iz + 1) / nSegsZ - 0.5;
+    const zfMid = 0.5 * (zf0 + zf1);
+    const cz = zfMid * lengthZ;
+    const z0 = zf0 * lengthZ - dzSeg * 0.10;
+    const z1 = zf1 * lengthZ + dzSeg * 0.10;
+    const xLeft = Math.min(innerWallX(zf0, 0, -1), innerWallX(zf1, 0, -1)) - S * 0.105;
+    const xRight = Math.max(innerWallX(zf0, 0, 1), innerWallX(zf1, 0, 1)) + S * 0.105;
+    const floor0 = floorYAt(zf0);
+    const floor1 = floorYAt(zf1);
+    const floorMid = floorYAt(zfMid);
+    let floorPoly = createBoxPoly(
+      xLeft,
+      groundY,
+      z0,
+      xRight,
+      Math.max(floor0, floor1) + S * 0.030,
+      z1,
+      'slotBedrockFloor'
+    );
+    const floorSlope = (floor1 - floor0) / Math.max(1e-6, dzSeg);
+    const crossSlope = scalarField3D(zfMid * 2.2, 1.7, 0.3, waveSalt + 149) * 0.045;
+    const floorN = vnorm([-crossSlope, 1, -floorSlope]);
+    floorPoly = clipPolyByHalfSpace(
+      floorPoly,
+      floorN,
+      vdot(floorN, [slotCenterX(zfMid), floorMid, cz]),
+      'slotFloorTop'
+    ) || floorPoly;
+    floorPoly = clipPolyByHalfSpace(floorPoly, [0, -1, 0], -groundY, 'base') || floorPoly;
+    const compFloor = compilePolyBlock(floorPoly, bedFrame, {
+      edgeBevel: bevel,
+      smoothUnionR: smoothR * 0.85,
+      detailScale: 0.72,
+      hardness: 0.58,
+      isEolian: true,
+      seedSalt: (waveSalt + 7001 + iz * 31) & 0x7fffffff,
+    });
+    if (compFloor) blocks.push(compFloor);
+  }
+
   // Two modest floor stones in the middle reach only. Portal boulders used
   // to plug the very openings that establish this as a canyon asset.
   for (const zf of [-0.16, 0.18]) {
@@ -545,7 +650,7 @@ export function buildSlotCanyon(params, tectonics, rng) {
     const rChock = S * rng.range(0.026, 0.042);
     const bFrame = buildStrikeDipFrame(rng.float() * Math.PI * 2, rng.range(18, 46) * DEG2RAD);
     let bPoly = sculptGeologicalParentPoly(
-      [bx, groundY + rChock * 0.68, bz],
+      [bx, floorYAt(zf) + rChock * 0.68, bz],
       [rChock * 1.15, rChock * 0.78, rChock * 1.25],
       bFrame,
       rng,
@@ -562,7 +667,34 @@ export function buildSlotCanyon(params, tectonics, rng) {
     if (compB) blocks.push(compB);
   }
 
-  return { blocks, cuts, groundY };
+  // Flow-path metadata for the dedicated slot flash-flood / channel-wind
+  // SDF process. Samples are in the same world coordinates as the blocks.
+  const slotSamples = [];
+  const nPathSamples = 49;
+  for (let i = 0; i < nPathSamples; i++) {
+    const zf = -0.5 + i / (nPathSamples - 1);
+    const left = innerWallX(zf, 0.25, -1);
+    const right = innerWallX(zf, 0.25, 1);
+    slotSamples.push({
+      z: zf * lengthZ,
+      x: slotCenterX(zf),
+      floorY: floorYAt(zf),
+      halfGap: Math.max(S * 0.035, 0.5 * (right - left)),
+      crestY: Math.min(wallCrestH(zf, -1), wallCrestH(zf, 1)),
+    });
+  }
+  const slotCanyon = {
+    version: 1,
+    axis: 'z',
+    flowDirection: 1, // upstream -Z -> downstream +Z (floor descends this way)
+    groundY,
+    height,
+    length: lengthZ,
+    phase,
+    samples: slotSamples,
+  };
+
+  return { blocks, cuts, groundY, slotCanyon };
 }
 
 /**

@@ -239,6 +239,24 @@ npm run generate -- --archetype sedimentary-cliff --seed 4029 --lods --out expor
   remains available for the fastest native path. CLI example:
   `--sdf-source mesh --erosion-res 320 --wind 0.45 --wind-shift sectors
   --wind-shift-range 80 --wind-shift-cycles 2 --thermal 0.25`.
+- **Slot-canyon flash-flood erosion**: Sculpted Narrow Slot Canyon no longer
+  relies only on sky-spawned rain and outside wind. Its builder now returns a
+  world-space centreline and a real segmented bedrock floor with pool
+  undulations and small knickpoint drops. After generic rain, the SDF suite
+  sends sediment-laden flood packets through the corridor itself: frequent,
+  competent and rare-deep stages wet different wall heights; bedload and
+  suspended tools abrade upstream-facing walls, ribs and the bed; pinch
+  reaches accelerate while swells/eddies deposit; helical secondary flow and
+  turbulence produce wall/floor impacts; and a sediment-supply control moves
+  between abrasive **tools** and protective **cover**. A lower-rate wind
+  polish is channelled along the slot afterwards, reflecting wind's secondary
+  role between floods. Rock Studio sliders set flash-flood amount, packet
+  count and sediment supply; the HUD reports flood/wind grains, wall and bed
+  impacts, and abraded/deposited volume. CLI example:
+  `--archetype slot-canyon --rain 0.55 --slot-flood 0.85
+  --slot-flood-particles 6000 --slot-sediment 0.62 --wind 0.35`. The slot's
+  boundary-matched wall blocks also use an exact-min union now: sequential
+  smooth-min over their overlaps was the source of the old waffle/louver flank.
 - **Formation cleanup pass**: Stratified Sedimentary Cliff is now one broad
   continuous escarpment with a rim-clipped skyline and narrower toe bench;
   Sculpted Narrow Slot Canyon is a taller, thinner pair of fins around a

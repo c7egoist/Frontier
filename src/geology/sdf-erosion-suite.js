@@ -16,6 +16,11 @@
  *                 then freeze-thaw expansion wedges grains loose.
  *   Chemical   -> water-residence dissolution in wet hollows and soluble
  *                 bands; the separate mesh stain pass colours the result.
+ *   Slot flood -> for `slot-canyon` only: sediment-laden flash-flood packets
+ *                 confined to the recorded canyon centreline (bedload +
+ *                 suspended tools, dynamic cover, constriction acceleration,
+ *                 helical secondary flow, expansion/eddy deposition), then
+ *                 a lower-rate channelled-wind polish along the same slot.
  *
  * Every process uses a sub-voxel SDF brush, geological hardness, convex-edge
  * protection, thin-wall protection, and a per-node carve cap. There is no
@@ -857,6 +862,533 @@ export function erodeSdfWithChemicalDissolution(sdf, options = {}) {
 }
 
 /**
+ * SLOT-CANYON FLASH FLOOD + CHANNELLED WIND.
+ *
+ * Generic rain falls from the sky and generic wind saltates over the outside
+ * of a fin; neither is how a slot is actually cut. Mapped/physical studies of
+ * Wire Pass-style slots identify episodic, sediment-laden flash floods as the
+ * dominant abrasion agent. This process therefore advects flow packets along
+ * the builder's recorded centreline instead of spawning them over the asset:
+ *
+ * - frequent, medium and rare flood stages wet different wall heights;
+ * - bedload packets stay near the bed, suspended packets occupy the flow;
+ * - local speed rises in pinch reaches (continuity) and falls in swells;
+ * - helical secondary circulation + turbulence drive packets into walls;
+ * - abrasion is biased to upstream-facing and protruding surfaces;
+ * - sediment first supplies abrasive "tools", then saturates/shields the bed
+ *   as dynamic "cover"; excess load is deposited in expansions/eddies;
+ * - channelled wind runs afterwards at a much lower rate, because eolian
+ *   polish modifies slot sandstone between floods rather than excavating it.
+ *
+ * The path is world-space metadata from `buildSlotCanyon`, so the identical
+ * process works on both the analytic SDF and a mesh-converted SDF.
+ */
+export function erodeSdfWithSlotFlood(sdf, options = {}) {
+  const t0 = performance.now();
+  const amount = clamp(options.amount ?? options.slotFloodAmount ?? 0, 0, 1);
+  const stats = {
+    particlesRequested: 0, particles: 0, floodParticles: 0, windParticles: 0,
+    steps: 0, erodedVolume: 0, depositedVolume: 0,
+    abrasionEvents: 0, depositionEvents: 0, wallEvents: 0, floorEvents: 0,
+    potholeEvents: 0, elapsedMs: 0,
+  };
+  const finish = () => {
+    stats.erodedVolume = Math.max(0, stats.erodedVolume);
+    stats.depositedVolume = Math.max(0, stats.depositedVolume);
+    stats.elapsedMs = Math.round(performance.now() - t0);
+    return stats;
+  };
+  if (!sdf || amount <= 0) return finish();
+
+  const slot = options.slotCanyon || options.slotPath || null;
+  const rawSamples = Array.isArray(slot) ? slot : (slot?.samples || []);
+  const optionGroundY = Number.isFinite(options.groundY) ? options.groundY : null;
+  const slotGroundY = Number.isFinite(slot?.groundY) ? slot.groundY : optionGroundY;
+  const samples = [];
+  for (const s of rawSamples) {
+    const z = Number(s?.z);
+    const x = Number(s?.x ?? s?.centerX ?? 0);
+    const halfGap = Number(s?.halfGap ?? s?.halfWidth ?? 0);
+    if (!Number.isFinite(z) || !Number.isFinite(x) || !(halfGap > 1e-6)) continue;
+    samples.push({
+      z,
+      x,
+      floorY: Number.isFinite(s?.floorY) ? Number(s.floorY) : (slotGroundY ?? 0),
+      halfGap,
+      crestY: Number.isFinite(s?.crestY) ? Number(s.crestY) : NaN,
+      dxdz: 0,
+      dFloorDz: 0,
+      dHalfDz: 0,
+    });
+  }
+  samples.sort((a, b) => a.z - b.z);
+  if (samples.length < 2) return finish();
+
+  let minFloorY = Infinity;
+  let meanHalfGap = 0;
+  for (const s of samples) {
+    minFloorY = Math.min(minFloorY, s.floorY);
+    meanHalfGap += s.halfGap;
+  }
+  meanHalfGap = Math.max(1e-6, meanHalfGap / samples.length);
+  const nominalHeight = Math.max(
+    1e-6,
+    Number(slot?.height) ||
+      samples.reduce((m, s) => Math.max(m, (Number.isFinite(s.crestY) ? s.crestY : s.floorY) - s.floorY), 0) ||
+      1
+  );
+  for (const s of samples) {
+    if (!Number.isFinite(s.crestY) || s.crestY <= s.floorY) s.crestY = s.floorY + nominalHeight;
+  }
+  for (let i = 0; i < samples.length; i++) {
+    const a = samples[Math.max(0, i - 1)];
+    const b = samples[Math.min(samples.length - 1, i + 1)];
+    const dz = Math.max(1e-9, b.z - a.z);
+    samples[i].dxdz = (b.x - a.x) / dz;
+    samples[i].dFloorDz = (b.floorY - a.floorY) / dz;
+    samples[i].dHalfDz = (b.halfGap - a.halfGap) / dz;
+  }
+
+  const pathMinZ = samples[0].z;
+  const pathMaxZ = samples[samples.length - 1].z;
+  const pathLength = Math.max(1e-6, pathMaxZ - pathMinZ);
+  const _path = { z: 0, x: 0, floorY: 0, halfGap: 1, crestY: 1, dxdz: 0, dFloorDz: 0, dHalfDz: 0 };
+  function pathAt(z) {
+    if (z <= pathMinZ) return samples[0];
+    if (z >= pathMaxZ) return samples[samples.length - 1];
+    let lo = 0;
+    let hi = samples.length - 1;
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if (samples[mid].z <= z) lo = mid;
+      else hi = mid;
+    }
+    const a = samples[lo];
+    const b = samples[hi];
+    const t = clamp((z - a.z) / Math.max(1e-9, b.z - a.z), 0, 1);
+    _path.z = z;
+    _path.x = a.x + (b.x - a.x) * t;
+    _path.floorY = a.floorY + (b.floorY - a.floorY) * t;
+    _path.halfGap = a.halfGap + (b.halfGap - a.halfGap) * t;
+    _path.crestY = a.crestY + (b.crestY - a.crestY) * t;
+    _path.dxdz = a.dxdz + (b.dxdz - a.dxdz) * t;
+    _path.dFloorDz = a.dFloorDz + (b.dFloorDz - a.dFloorDz) * t;
+    _path.dHalfDz = a.dHalfDz + (b.dHalfDz - a.dHalfDz) * t;
+    return _path;
+  }
+
+  const windAmount = clamp(options.windAmount ?? 0, 0, 1);
+  const floodCount = Math.max(0, Math.round(
+    options.particleCount ?? options.floodParticles ?? options.slotFloodParticles ??
+    defaultParticleCount(sdf, 6200)
+  ));
+  const windPolishCount = Math.max(0, Math.round(
+    options.windPolishParticles ?? options.slotWindParticles ??
+    (windAmount > 0.001 ? floodCount * 0.38 : 0)
+  ));
+  const totalParticles = floodCount + windPolishCount;
+  stats.particlesRequested = totalParticles;
+  if (!totalParticles) return finish();
+
+  const sedimentSupply = clamp(options.sedimentSupply ?? options.slotSedimentSupply ?? 0.62, 0, 1);
+  const edgeProtection = clamp(options.edgeProtection ?? 0.7, 0, 1);
+  const groundY = optionGroundY ?? slotGroundY ?? minFloorY;
+  const flowDirection = Number(slot?.flowDirection) < 0 ? -1 : 1;
+  const rng = options.rng;
+  const rand = () => (rng ? rng.float() : Math.random());
+  const onProgress = options.onProgress || null;
+  const seedSalt = (options.seedSalt ?? 0x51f15e) | 0;
+  const windRegime = {
+    windAzimuth: options.windAzimuthDeg ?? options.azimuthDeg ?? options.windAzimuth ?? 35,
+    windShiftMode: options.windShiftMode ?? options.shiftMode ?? options.windDirectionMode ?? 'fixed',
+    windShiftRange: options.windShiftRange ?? options.shiftRangeDeg ?? options.windShiftRangeDeg ?? 55,
+    windShiftSectors: options.windShiftSectors ?? options.shiftSectors ?? 5,
+  };
+  const shiftMode = normalizeWindShiftMode(windRegime.windShiftMode);
+  const shiftCycles = clamp(
+    Number(options.windShiftCycles ?? options.shiftCycles ?? (shiftMode === 'fixed' ? 0 : 1)),
+    0,
+    12
+  );
+  const baseWindSpeed = clamp(options.windSpeed ?? 0.62, 0.05, 1.5);
+
+  const tool = createSdfProcessTool(sdf, {
+    maxCarveDepth: sdf.voxelSize * (1.6 + 5.4 * Math.max(amount, windAmount * 0.55)),
+  });
+  const { h } = tool;
+  const reportEvery = Math.max(1, Math.floor(totalParticles / 16));
+  let globalParticle = 0;
+
+  // Sediment tools/cover balance: abrasion first benefits from supplied
+  // grains, then saturates as impacts interfere and bed cover accumulates.
+  const toolSupplyFactor = 0.25 + 1.30 * sedimentSupply * (1 - 0.42 * sedimentSupply);
+  const coverSupplyFactor = smoothstep(0.62, 1.0, sedimentSupply);
+
+  function runKind(kind, count) {
+    const isFlood = kind === 'flood';
+    for (let pIdx = 0; pIdx < count; pIdx++, globalParticle++) {
+      if (onProgress && globalParticle % reportEvery === 0) {
+        onProgress(globalParticle / Math.max(1, totalParticles));
+      }
+      const bakeFraction = totalParticles > 1 ? globalParticle / (totalParticles - 1) : 0;
+
+      let dirSign = flowDirection;
+      let axisStrength = 1;
+      if (!isFlood) {
+        const azimuthRad = effectiveWindAzimuthDeg(windRegime, bakeFraction * shiftCycles) * Math.PI / 180;
+        const axisZ = Math.sin(azimuthRad);
+        dirSign = axisZ >= 0 ? 1 : -1;
+        axisStrength = 0.28 + 0.72 * Math.abs(axisZ);
+      }
+
+      const endMargin = Math.min(h * 1.4, pathLength * 0.02);
+      const zLo = Math.max(pathMinZ, tool.minZ + h);
+      const zHi = Math.min(pathMaxZ, tool.maxZ - h);
+      const startZ = clamp(dirSign > 0 ? pathMinZ + endMargin : pathMaxZ - endMargin, zLo, zHi);
+      const endZ = clamp(dirSign > 0 ? pathMaxZ - endMargin : pathMinZ + endMargin, zLo, zHi);
+      const sp = pathAt(startZ);
+      const startX = sp.x;
+      const startFloorY = sp.floorY;
+      const startHalfGap = Math.max(h, sp.halfGap);
+      const startCrestY = sp.crestY;
+      const startDxDz = sp.dxdz;
+      const startDFloorDz = sp.dFloorDz;
+      const localHeight = Math.max(h, startCrestY - startFloorY);
+
+      // Confined discharge does not sample the cross-section uniformly:
+      // saltating bedload and near-wall suspended grains are the abrasive
+      // tools, so spawn more packets near the bed and walls than mid-air.
+      let q;
+      const qRoll = rand();
+      if (qRoll < 0.46) q = (rand() < 0.5 ? -1 : 1) * (0.68 + 0.30 * rand());
+      else if (qRoll < 0.82) q = (rand() * 2 - 1) * 0.72;
+      else q = (rand() * 2 - 1) * 0.36;
+
+      let px = startX + q * startHalfGap;
+      let py;
+      let pz = startZ;
+      let packetClass = 3; // channel wind
+      let floodDepth = localHeight;
+      let eventMagnitude = 1;
+      if (isFlood) {
+        const stageRoll = rand();
+        let depthFrac;
+        if (stageRoll < 0.52) depthFrac = 0.30 + rand() * 0.22;       // frequent flow
+        else if (stageRoll < 0.88) depthFrac = 0.52 + rand() * 0.26;  // competent flood
+        else depthFrac = 0.78 + rand() * 0.20;                        // rare deep flood
+        floodDepth = depthFrac * localHeight;
+        eventMagnitude = 0.62 + 0.72 * depthFrac;
+        const classRoll = rand();
+        if (classRoll < 0.48) {
+          packetClass = 0; // bedload
+          py = startFloorY + (0.035 + 0.18 * Math.pow(rand(), 1.6)) * floodDepth;
+        } else if (classRoll < 0.90) {
+          packetClass = 1; // suspended load
+          py = startFloorY + (0.14 + 0.74 * rand()) * floodDepth;
+        } else {
+          packetClass = 2; // high wash / near-surface load
+          py = startFloorY + (0.74 + 0.24 * rand()) * floodDepth;
+        }
+      } else {
+        py = startFloorY + (0.04 + 0.92 * Math.pow(rand(), 1.35)) * localHeight * 0.94;
+      }
+      py = clamp(py, tool.minY + h, tool.maxY - h);
+      if (!tool.insideInner(px, py, pz)) continue;
+
+      // If a near-wall spawn lands inside a wave crest, pull it towards the
+      // thalweg rather than starting a packet embedded in bedrock.
+      let startPhi = tool.sampleOnly(px, py, pz);
+      for (let attempt = 0; attempt < 4 && startPhi < 0.20 * h; attempt++) {
+        px = startX + (px - startX) * 0.55;
+        py = Math.min(startCrestY - 0.35 * h, py + 0.30 * h);
+        startPhi = tool.sampleOnly(px, py, pz);
+      }
+      if (startPhi < -0.25 * h) continue;
+
+      let tx = startDxDz * dirSign;
+      let ty = startDFloorDz * dirSign * 0.28;
+      let tz = dirSign;
+      const tl = Math.hypot(tx, ty, tz) || 1;
+      tx /= tl; ty /= tl; tz /= tl;
+      let particleSpeed = isFlood
+        ? (0.72 + rand() * 0.28) * eventMagnitude
+        : (0.42 + 0.62 * baseWindSpeed) * axisStrength * (0.78 + rand() * 0.45);
+      let vx = tx * particleSpeed;
+      let vy = ty * particleSpeed;
+      let vz = tz * particleSpeed;
+      let sediment = isFlood
+        ? h * (0.05 + 0.42 * sedimentSupply) * eventMagnitude
+        : h * (0.02 + 0.13 * sedimentSupply);
+      const minimumToolLoad = sediment * 0.30;
+      let energy = 1;
+      let maxAlong = dirSign * pz;
+      let staleSteps = 0;
+      const maxSteps = Math.round(clamp(
+        (pathLength / Math.max(h, 0.62 * h)) * (isFlood ? 1.35 : 1.10),
+        240,
+        1050
+      ));
+
+      stats.particles++;
+      if (isFlood) stats.floodParticles++;
+      else stats.windParticles++;
+
+      for (let step = 0; step < maxSteps; step++) {
+        if (!tool.insideInner(px, py, pz)) break;
+        if ((dirSign > 0 && pz >= endZ) || (dirSign < 0 && pz <= endZ)) break;
+        stats.steps++;
+
+        const lp = pathAt(pz);
+        const pathX = lp.x;
+        const floorY = lp.floorY;
+        const halfGap = Math.max(h, lp.halfGap);
+        const crestY = lp.crestY;
+        const dxdz = lp.dxdz;
+        const dFloorDz = lp.dFloorDz;
+        const dHalfDz = lp.dHalfDz;
+        const heightHere = Math.max(h, crestY - floorY);
+        const qHere = (px - pathX) / halfGap;
+        const sNorm = clamp((pz - pathMinZ) / pathLength, 0, 1);
+
+        // Centreline-confined target flow. Width is a continuity proxy:
+        // pinches accelerate, swells decelerate and become depositional.
+        let flowX = dxdz * dirSign;
+        let flowY = dFloorDz * dirSign * 0.28;
+        let flowZ = dirSign;
+        const flowLen = Math.hypot(flowX, flowY, flowZ) || 1;
+        flowX /= flowLen; flowY /= flowLen; flowZ /= flowLen;
+        const widthFactor = clamp(meanHalfGap / halfGap, 0.72, 1.80);
+        const expansionRate = clamp(dirSign * dHalfDz * 4.0, -1, 1);
+        const speedTarget = particleSpeed *
+          Math.pow(widthFactor, isFlood ? 0.78 : 0.45) *
+          (1 - 0.18 * Math.max(0, expansionRate)) * energy;
+
+        // Helical secondary circulation in bends plus aperiodic turbulence.
+        // This flow-wander field is not a texture: it only steers packets.
+        const crossX = -flowZ;
+        const crossZ = flowX;
+        const helixPhase = sNorm * Math.PI * 7.0 * dirSign +
+          clamp((py - floorY) / heightHere, 0, 1) * Math.PI * 2.3 + pIdx * 0.37;
+        const turbulence = scalarField3D(px * 0.135 + 3.1, py * 0.110 - 1.7, pz * 0.135 + 8.4, seedSalt ^ 0x3a7bd2);
+        const swirl = Math.sin(helixPhase) * (isFlood ? 0.13 : 0.07) + turbulence * (isFlood ? 0.16 : 0.08);
+        let targetX = flowX + crossX * swirl - qHere * (isFlood ? 0.11 : 0.15);
+        let targetY = flowY + Math.cos(helixPhase) * (qHere >= 0 ? 1 : -1) * (isFlood ? 0.040 : 0.018);
+        let targetZ = flowZ + crossZ * swirl;
+        if (isFlood && packetClass === 0) targetY -= 0.16;
+        else if (isFlood && packetClass === 1) targetY -= 0.035;
+        else if (!isFlood) targetY -= 0.018;
+        const targetLen = Math.hypot(targetX, targetY, targetZ) || 1;
+        targetX = targetX / targetLen * speedTarget;
+        targetY = targetY / targetLen * speedTarget;
+        targetZ = targetZ / targetLen * speedTarget;
+        const blend = isFlood ? 0.28 : 0.22;
+        vx += (targetX - vx) * blend;
+        vy += (targetY - vy) * blend;
+        vz += (targetZ - vz) * blend;
+
+        // Keep packets inside the slot's analytic airspace; the SDF remains
+        // the authority for where rock actually is.
+        const minPacketY = floorY + 0.32 * h;
+        if (py < minPacketY) {
+          py = minPacketY;
+          vy = Math.abs(vy) * 0.22;
+        }
+        const maxPacketY = crestY - 0.25 * h;
+        if (py > maxPacketY) {
+          py = maxPacketY;
+          vy = -Math.abs(vy) * 0.18;
+        }
+
+        tool.sampleGrad(px, py, pz);
+        let phi = tool.sg[0];
+        if (phi < -0.80 * h) {
+          const pr = tool.projectToSurface(px, py, pz);
+          tool.sampleGrad(pr[0], pr[1], pr[2]);
+          const gl0 = Math.hypot(tool.sg[1], tool.sg[2], tool.sg[3]);
+          if (gl0 < 1e-9) break;
+          px = pr[0] + (tool.sg[1] / gl0) * 0.50 * h;
+          py = pr[1] + (tool.sg[2] / gl0) * 0.50 * h;
+          pz = pr[2] + (tool.sg[3] / gl0) * 0.50 * h;
+          phi = 0.50 * h;
+          tool.sampleGrad(px, py, pz);
+          phi = tool.sg[0];
+        }
+
+        if (phi < 1.45 * h) {
+          const gx = tool.sg[1];
+          const gy = tool.sg[2];
+          const gz = tool.sg[3];
+          const gl = Math.hypot(gx, gy, gz);
+          if (gl >= 1e-9) {
+            const nnx = gx / gl;
+            const nny = gy / gl;
+            const nnz = gz / gl;
+            const sp2 = tool.projectToSurface(px, py, pz);
+            const sx = sp2[0];
+            const sy = sp2[1];
+            const sz = sp2[2];
+            const qSurf = (sx - pathX) / halfGap;
+            const hab = sy - floorY;
+            const steepness = Math.sqrt(Math.max(0, 1 - nny * nny));
+            const isFloor = nny > 0.48 && hab < 0.20 * heightHere && Math.abs(qSurf) < 1.55;
+            const isWall = !isFloor && steepness > 0.38 && Math.abs(qSurf) > 0.42 &&
+              Math.abs(qSurf) < 2.15 && sy < crestY + 0.5 * h;
+
+            if (isFloor || isWall) {
+              const dotNF = nnx * flowX + nny * flowY + nnz * flowZ;
+              const upstream = clamp(-dotNF, 0, 1);
+              const tangential = Math.sqrt(Math.max(0, 1 - dotNF * dotNF));
+              const protrusion = scalarField3D(sx * 0.22 + 7.8, sy * 0.18 - 2.6, sz * 0.22 + 4.9, seedSalt ^ 0x51ed27);
+              const exposure = 0.18 + 0.95 * Math.pow(upstream, 1.2) +
+                0.48 * tangential * steepness + 0.15 * Math.max(0, protrusion);
+
+              let heightTool;
+              if (isFlood) {
+                if (sy > floorY + floodDepth + 0.7 * h) {
+                  heightTool = 0;
+                } else if (packetClass === 0) {
+                  heightTool = 0.18 + 0.95 * Math.exp(-Math.max(0, hab) / Math.max(h, 0.18 * floodDepth));
+                } else if (packetClass === 1) {
+                  heightTool = 0.22 + 0.78 * Math.exp(-Math.max(0, hab) / Math.max(h, 0.62 * floodDepth));
+                } else {
+                  heightTool = 0.16 + 0.55 * Math.exp(
+                    -Math.abs(hab - floodDepth * 0.85) / Math.max(h, 0.35 * floodDepth)
+                  );
+                }
+              } else {
+                heightTool = 0.28 + 0.72 * Math.exp(-Math.max(0, hab) / Math.max(h, 0.40 * heightHere));
+              }
+
+              let coverFactor = 1;
+              if (isFloor) {
+                coverFactor = 1 - 0.58 * coverSupplyFactor * Math.exp(-Math.max(0, hab) / Math.max(h, 0.10 * heightHere));
+              } else if (hab < 0.16 * heightHere) {
+                coverFactor = 1 - 0.25 * coverSupplyFactor * Math.exp(-Math.max(0, hab) / Math.max(h, 0.10 * heightHere));
+              }
+
+              const eddyField = scalarField3D(sx * 0.16 - 5.2, sy * 0.11 + 2.1, sz * 0.16 - 8.7, seedSalt ^ 0x27d4eb);
+              const eddy = clamp(0.5 + 0.5 * eddyField + 0.45 * Math.max(0, expansionRate) + 0.25 * upstream, 0, 1.4);
+              const speedNow = clamp(Math.hypot(vx, vy, vz), 0.05, 2.4);
+              const capacity = h * (isFlood ? (0.10 + 0.62 * amount) : (0.04 + 0.28 * windAmount)) *
+                (0.20 + exposure) * (0.45 + speedNow) * (0.45 + sedimentSupply);
+              const canHold = isFloor || nny > 0.08;
+              const shouldDeposit = heightTool > 0 && canHold && sediment > capacity * 1.02 &&
+                (isFloor || expansionRate > 0.05 || speedNow < 0.48 || dotNF > 0.25);
+
+              if (shouldDeposit) {
+                const dep = Math.min(sediment * 0.38, (sediment - capacity) * 0.55 + h * 0.015);
+                if (dep > 1e-9) {
+                  const applied = tool.applyBrushAt(sx, sy, sz, -dep);
+                  if (applied < 0) {
+                    stats.depositedVolume -= applied * h * h;
+                    sediment = Math.max(0, sediment + applied);
+                    stats.depositionEvents++;
+                    if (isFloor) stats.floorEvents++;
+                    else stats.wallEvents++;
+                  }
+                }
+              } else if (heightTool > 0.001) {
+                const protection = tool.protectionMultiplier(sx, sy, sz, nnx, nny, nnz, {
+                  edgeProtection: edgeProtection * (isFlood ? 0.92 : 1.0),
+                  hardnessAt: options.hardnessAt,
+                });
+                const eddyBoost = isFloor ? (0.75 + 1.15 * eddy) : (0.85 + 0.45 * eddy);
+                let rate = h * (isFlood ? 0.125 : 0.055) *
+                  (0.18 + (isFlood ? amount : windAmount)) * exposure * heightTool *
+                  toolSupplyFactor * coverFactor * eddyBoost * speedNow * protection;
+                if (!isFlood) rate *= axisStrength;
+                const room = Math.max(0, capacity - sediment);
+                // Even at nominal capacity, the packet grain itself can chip
+                // an upstream-facing protrusion; keep this two orders below
+                // the free-tools rate so cover still throttles the bed.
+                const impactAllowance = upstream > 0.55 ? Math.min(rate * 0.16, h * 0.002) : 0;
+                const erode = Math.min(rate, room + impactAllowance);
+                if (erode > 1e-9) {
+                  const applied = tool.applyBrushAt(sx, sy, sz, erode);
+                  if (applied > 0) {
+                    stats.erodedVolume += applied * h * h;
+                    sediment += applied;
+                    stats.abrasionEvents++;
+                    if (isFloor) {
+                      stats.floorEvents++;
+                      if (eddy > 0.72 && rand() < 0.08) stats.potholeEvents++;
+                    } else {
+                      stats.wallEvents++;
+                    }
+                  }
+                }
+              }
+
+              // Slide/reflect off the wall or bed, then stand the packet off
+              // the surface by a fraction of a voxel so it does not grind
+              // the identical brush centre on every substep.
+              const vn = vx * nnx + vy * nny + vz * nnz;
+              if (vn < 0) {
+                const rebound = (isFloor && packetClass === 0) ? 1.02 : 1.28;
+                vx -= nnx * vn * rebound;
+                vy -= nny * vn * rebound;
+                vz -= nnz * vn * rebound;
+              }
+              vx += flowX * speedTarget * 0.16;
+              vy += flowY * speedTarget * 0.16;
+              vz += flowZ * speedTarget * 0.16;
+              const standOff = (isFloor && packetClass === 0) ? 0.38 : 0.52;
+              px = sx + nnx * h * standOff;
+              py = sy + nny * h * standOff;
+              pz = sz + nnz * h * standOff;
+              energy *= isFlood ? 0.996 : 0.998;
+            }
+          }
+        }
+
+        if (py <= groundY + 0.55 * h) {
+          if (sediment > 1e-9 && tool.insideInner(px, py, pz)) {
+            const applied = tool.applyBrushAt(px, Math.max(py, groundY + 0.55 * h), pz, -sediment);
+            if (applied < 0) stats.depositedVolume -= applied * h * h;
+          }
+          break;
+        }
+
+        let speedMag = Math.hypot(vx, vy, vz);
+        if (speedMag < 1e-9) {
+          vx = flowX * Math.max(0.05, speedTarget);
+          vy = flowY * Math.max(0.05, speedTarget);
+          vz = flowZ * Math.max(0.05, speedTarget);
+          speedMag = Math.hypot(vx, vy, vz) || 1;
+        }
+        const stepLen = phi > 2.0 * h
+          ? Math.min(3.4 * h, Math.max(0.85 * h, phi * 0.72))
+          : 0.80 * h;
+        const scaleStep = stepLen / speedMag;
+        px += vx * scaleStep;
+        py += vy * scaleStep;
+        pz += vz * scaleStep;
+
+        // A packet is a local control volume moving through the canyon:
+        // some suspended load is continually exported downstream. Without
+        // this leak every packet saturates after its first wall and the
+        // tools/cover law would switch all downstream abrasion off.
+        sediment = Math.max(minimumToolLoad, sediment * (isFlood ? 0.9985 : 0.9992));
+        energy *= isFlood ? 0.9995 : 0.9998;
+
+        const along = dirSign * pz;
+        if (along > maxAlong + 0.05 * h) {
+          maxAlong = along;
+          staleSteps = 0;
+        } else if (++staleSteps > 150) {
+          break;
+        }
+      }
+    }
+  }
+
+  runKind('flood', floodCount);
+  runKind('wind', windPolishCount);
+  if (onProgress) onProgress(1);
+  return finish();
+}
+
+/**
  * Runs the enabled SDF processes in a stable geological order.
  * Input is a flat options object; see generator.js for the UI mapping.
  */
@@ -866,6 +1398,7 @@ export function applySdfErosionSuite(sdf, options = {}) {
     chemicalDissolution: null,
     wind: null,
     rain: null,
+    slotFlood: null,
     cryo: null,
     thermal: null,
     previewFrames: 0,
@@ -940,6 +1473,30 @@ export function applySdfErosionSuite(sdf, options = {}) {
         hardnessAt: common.hardnessAt,
         groundY: common.groundY,
         rng: forkRng('rain-erosion'),
+        onProgress: progress,
+      }),
+    });
+  }
+  if ((options.slotFloodAmount ?? 0) > 0.001 && options.slotCanyon) {
+    tasks.push({
+      key: 'slotFlood',
+      stage: 'Slot flash-flood abrasion + channelled wind polish...',
+      run: (progress) => erodeSdfWithSlotFlood(sdf, {
+        ...common,
+        amount: options.slotFloodAmount,
+        slotCanyon: options.slotCanyon,
+        particleCount: options.slotFloodParticles,
+        windPolishParticles: options.slotWindParticles,
+        sedimentSupply: options.slotSedimentSupply ?? 0.62,
+        windAmount: options.windAmount ?? 0,
+        windAzimuthDeg: options.windAzimuthDeg ?? options.windAzimuth ?? 35,
+        windShiftMode: options.windShiftMode ?? options.windDirectionMode ?? 'fixed',
+        windShiftRange: options.windShiftRange ?? options.windShiftRangeDeg ?? 55,
+        windShiftCycles: options.windShiftCycles ?? options.windShiftCycleCount ?? 1,
+        windShiftSectors: options.windShiftSectors ?? 5,
+        windSpeed: options.windSpeed ?? 0.62,
+        rng: forkRng('sdf-slot-flash-flood'),
+        seedSalt: options.seedSalt,
         onProgress: progress,
       }),
     });

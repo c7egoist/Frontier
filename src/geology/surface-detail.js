@@ -59,6 +59,28 @@ export function createGeologicalSdfEvaluator(macro, params, rng) {
   const isKarst = !!preset.isKarst;
   const isSpireOrHoodoo = archetype === 'desert-spires' || archetype === 'hoodoo-columns';
   const isArch = archetype === 'desert-arch' || archetype === 'double-arch' || archetype === 'sea-arch';
+  const slotCanyon = archetype === 'slot-canyon' ? (macro.slotCanyon || null) : null;
+  const slotSamples = slotCanyon?.samples?.length > 1 ? slotCanyon.samples : null;
+  const _slotPath = { z: 0, x: 0, floorY: 0, halfGap: 1, crestY: 1 };
+  const slotPathAt = slotSamples
+    ? (wz) => {
+        const first = slotSamples[0];
+        const last = slotSamples[slotSamples.length - 1];
+        if (wz <= first.z) return first;
+        if (wz >= last.z) return last;
+        const f = ((wz - first.z) / Math.max(1e-9, last.z - first.z)) * (slotSamples.length - 1);
+        const i = Math.min(slotSamples.length - 2, Math.max(0, Math.floor(f)));
+        const t = clamp(f - i, 0, 1);
+        const a = slotSamples[i];
+        const b = slotSamples[i + 1];
+        _slotPath.z = wz;
+        _slotPath.x = a.x + (b.x - a.x) * t;
+        _slotPath.floorY = a.floorY + (b.floorY - a.floorY) * t;
+        _slotPath.halfGap = a.halfGap + (b.halfGap - a.halfGap) * t;
+        _slotPath.crestY = a.crestY + (b.crestY - a.crestY) * t;
+        return _slotPath;
+      }
+    : null;
 
   const facetAmp = params.facetAmplitude ?? 0.46;
   const cleavSharp = params.cleavageSharpness ?? 0.78;
@@ -356,6 +378,69 @@ export function createGeologicalSdfEvaluator(macro, params, rng) {
         sharpness2, tiltAmp * 0.55, 0.80, (blk.seedSalt & 511) + 57, _cleav2
       );
       disp += (_cleav1.facet * 0.68 + _cleav2.facet * 0.26) * mesoAmp * dScale;
+    } else if (slotPathAt && !blk.isBoulder) {
+      // SLOT-CANYON REGIME:
+      // Do not run the generic eolian cross-bed ledge stack at full strength
+      // here: on the old fins it produced regular horizontal louvers. Slot
+      // walls are dominated by flood-aligned flutes/scallops and helical
+      // polish, with cross-bedding only as a subdued differential relief.
+      const dScale = blk.detailScale;
+      const path = slotPathAt(wz);
+      const side = wx >= path.x ? 1 : -1;
+      const q = (wx - path.x) / Math.max(0.05, path.halfGap);
+      const absQ = Math.abs(q);
+      const height = Math.max(1e-6, slotCanyon.height || S * 0.82);
+      const yf = clamp((wy - (groundY ?? 0)) / height, 0, 1.25);
+      const innerMask = clamp(1.15 - Math.max(0, absQ - 0.72) / 0.85, 0, 1);
+      const floorMask = clamp(1 - Math.abs(wy - path.floorY) / (S * 0.075), 0, 1) *
+        clamp(1.25 - absQ / 1.45, 0, 1);
+
+      // Longitudinal cuspate flutes: slow variation downstream, finer
+      // variation with height/side. A second field adds scallop packets.
+      const fluteA = scalarField3D(
+        wz / (S * 0.175),
+        wy / (S * 0.052),
+        side * 2.7 + (slotCanyon.phase || 0),
+        warpSalt + 701
+      );
+      const fluteB = scalarField3D(
+        wz / (S * 0.068) + 4.2,
+        wy / (S * 0.150) + 1.7,
+        side * 1.9,
+        warpSalt + 733
+      );
+      const cusp = 0.58 - Math.pow(Math.abs(fluteA), 0.70);
+      const helical = Math.sin((wz / Math.max(1e-6, slotCanyon.length || S)) * Math.PI * 5.0 + yf * Math.PI * 2.15 + side * 0.85 + (slotCanyon.phase || 0));
+      const innerDisp = (cusp * 0.62 + fluteB * 0.20 + helical * 0.09) * mesoAmp * 1.55 * dScale;
+
+      // Subtle cross-bed relief: a single side-consistent, domain-warped
+      // foreset field. Switching dune sets at regular bed heights (as the
+      // generic desert regime does) stamped a train of horizontal grooves.
+      const slotDune = duneSets[side > 0 ? 1 : 5];
+      const bedPhaseWarp = scalarField3D(wx / (S * 0.24), wy / (S * 0.18), wz / (S * 0.24), warpSalt + 797) * 0.38;
+      const crossBed = smoothForesetLedge(
+        (px * slotDune.nx + py * slotDune.ny + pz * slotDune.nz) * slotDune.freq + bedPhaseWarp
+      ) * mesoAmp * 0.085 * dScale;
+
+      // Outer fins: broad world-space slickrock undulation. This must NOT
+      // use the winning block's seed: the fin is assembled from hundreds of
+      // tier/segment blocks, and per-block cleavage resets at every seam,
+      // making the flank look like a waffle of unrelated tiles.
+      const outerFieldA = scalarField3D(wx / (S * 0.230), wy / (S * 0.135), wz / (S * 0.230), warpSalt + 811);
+      const outerFieldB = scalarField3D(wx / (S * 0.072) + 3.7, wy / (S * 0.165) + 1.9, wz / (S * 0.072) + 6.2, warpSalt + 827);
+      const outerDisp = (outerFieldA * 0.38 + outerFieldB * 0.13) * mesoAmp * dScale;
+
+      disp += outerDisp * (1 - innerMask) + innerDisp * innerMask + crossBed * (0.35 + 0.65 * (1 - innerMask));
+
+      // Bed scallops / incipient potholes. Positive displacement carves the
+      // floor; the flood process subsequently deepens only where its flow,
+      // tools and eddies actually concentrate.
+      if (floorMask > 0.001) {
+        const bedField = scalarField3D(wx / (S * 0.082), 0.35, wz / (S * 0.082), warpSalt + 761);
+        const pothole = Math.max(0, bedField - 0.18) * 0.85;
+        const bedScallop = scalarField3D(wx / (S * 0.150), 1.1, wz / (S * 0.045), warpSalt + 787) * 0.18;
+        disp += (pothole + bedScallop) * mesoAmp * 1.35 * floorMask * dScale;
+      }
     } else if (isDesert || blk.isEolian) {
       // UTAH SANDSTONE REGIME:
       // Multi-set cross-bedding ledges + stepped fracture plates + micro-rock scarplets!

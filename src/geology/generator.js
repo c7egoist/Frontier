@@ -43,6 +43,17 @@ function summarizeSdfProcess(stats) {
           directionSamplesDeg: [...(stats.directionSamplesDeg || [])],
         }
       : {}),
+    ...(stats.floodParticles !== undefined
+      ? {
+          floodParticles: stats.floodParticles ?? 0,
+          windParticles: stats.windParticles ?? 0,
+          abrasionEvents: stats.abrasionEvents ?? 0,
+          depositionEvents: stats.depositionEvents ?? 0,
+          wallEvents: stats.wallEvents ?? 0,
+          floorEvents: stats.floorEvents ?? 0,
+          potholeEvents: stats.potholeEvents ?? 0,
+        }
+      : {}),
   };
 }
 
@@ -158,9 +169,18 @@ export function generateRockFormation(rawParams = {}, onProgress = null, onPrevi
   const cryoAmount = params.cryoErosionAmount ?? params.cryoAmount ?? 0;
   const chemicalDissolutionAmount =
     params.chemDissolutionAmount ?? params.chemicalDissolutionAmount ?? 0;
+  const slotCanyonPath = params.archetype === 'slot-canyon' ? (macro.slotCanyon || null) : null;
+  const slotFloodAmountRaw = params.slotFloodAmount ?? params.flashFloodAmount;
+  // Raw API callers that only set rain/wind still get the slot's defining
+  // through-flow process; Studio and the CLI pass an explicit amount.
+  const slotFloodAmount = slotCanyonPath
+    ? Math.max(0, Math.min(1, Number(
+        slotFloodAmountRaw ?? (0.72 * rainAmount + 0.28 * windAmount)
+      ) || 0))
+    : 0;
   const anySdfErosion =
     rainAmount > 0.001 || windAmount > 0.001 || thermalAmount > 0.001 ||
-    cryoAmount > 0.001 || chemicalDissolutionAmount > 0.001;
+    cryoAmount > 0.001 || chemicalDissolutionAmount > 0.001 || slotFloodAmount > 0.001;
   const requestedErosionResolution = normalizeErosionSdfResolution(
     params.erosionSdfResolution ?? params.sdfErosionResolution ?? 0
   );
@@ -229,6 +249,11 @@ export function generateRockFormation(rawParams = {}, onProgress = null, onPrevi
     erosionSuiteStats = applySdfErosionSuite(sdf, {
       rainAmount,
       rainDroplets: params.rainDroplets ?? Math.round(erosionGridMaxAxis * 48),
+      slotFloodAmount,
+      slotCanyon: slotCanyonPath,
+      slotFloodParticles: params.slotFloodParticles ?? params.flashFloodParticles,
+      slotWindParticles: params.slotWindParticles,
+      slotSedimentSupply: params.slotSedimentSupply ?? params.slotSediment ?? 0.62,
       windAmount,
       windParticles: params.windParticles ?? params.windErosionParticles,
       windAzimuthDeg: params.windAzimuth ?? params.windAzimuthDeg ?? 35,
@@ -398,6 +423,7 @@ export function generateRockFormation(rawParams = {}, onProgress = null, onPrevi
             chemicalDissolution: summarizeSdfProcess(erosionSuiteStats.chemicalDissolution),
             wind: summarizeSdfProcess(erosionSuiteStats.wind),
             rain: summarizeSdfProcess(erosionSuiteStats.rain),
+            slotFlood: summarizeSdfProcess(erosionSuiteStats.slotFlood),
             cryo: summarizeSdfProcess(erosionSuiteStats.cryo),
             thermal: summarizeSdfProcess(erosionSuiteStats.thermal),
             previewFrames: erosionPreviewFramesEmitted,

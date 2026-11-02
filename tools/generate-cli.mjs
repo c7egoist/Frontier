@@ -8,6 +8,7 @@
  *   npm run generate -- --archetype cliff-wall --rain 0.6 --rain-droplets 14000 --quality ultra --decimation 0.3
  *   npm run generate -- --archetype cliff-wall --sdf-source mesh --erosion-res 320 --wind 0.45 --thermal 0.25 --decimation 0.3
  *   npm run generate -- --archetype utah-canyon --wind 0.5 --wind-shift sectors --wind-shift-range 75 --wind-shift-cycles 2
+ *   npm run generate -- --archetype slot-canyon --rain 0.55 --slot-flood 0.85 --slot-flood-particles 6000 --slot-sediment 0.62 --wind 0.35
  */
 
 import fs from 'node:fs';
@@ -39,6 +40,9 @@ function parseArgs(argv) {
     else if (a === '--rain' && argv[i + 1]) opts.rainErosionAmount = Number(argv[++i]);
     else if (a === '--rain-droplets' && argv[i + 1]) opts.rainDroplets = Number(argv[++i]);
     else if (a === '--rain-edge' && argv[i + 1]) opts.rainEdgeProtection = Number(argv[++i]);
+    else if (a === '--slot-flood' && argv[i + 1]) opts.slotFloodAmount = Number(argv[++i]);
+    else if (a === '--slot-flood-particles' && argv[i + 1]) opts.slotFloodParticles = Number(argv[++i]);
+    else if (a === '--slot-sediment' && argv[i + 1]) opts.slotSedimentSupply = Number(argv[++i]);
     else if (a === '--sdf-source' && argv[i + 1]) opts.sdfErosionSource = argv[++i];
     else if (a === '--erosion-res' && argv[i + 1]) opts.erosionSdfResolution = Number(argv[++i]);
     else if (a === '--wind' && argv[i + 1]) opts.windErosionAmount = Number(argv[++i]);
@@ -97,12 +101,16 @@ if (opts.lods) {
   }
   if (res.stats.sdfErosion) {
     const suite = res.stats.sdfErosion;
-    const parts = ['chemicalDissolution', 'wind', 'rain', 'cryo', 'thermal']
+    const parts = ['chemicalDissolution', 'wind', 'rain', 'slotFlood', 'cryo', 'thermal']
       .filter((key) => suite[key])
       .map((key) => `${key} ${suite[key].erodedM3}m3`);
     console.log(`        SDF erosion (${suite.source}): ${parts.join(' | ')} | ${suite.elapsedMs}ms`);
     if (suite.wind?.directionMode) {
       console.log(`        wind regime: ${suite.wind.directionMode} | samples ${(suite.wind.directionSamplesDeg || []).join('° -> ')}°`);
+    }
+    if (suite.slotFlood) {
+      const sf = suite.slotFlood;
+      console.log(`        slot flood: ${sf.floodParticles} flood packets + ${sf.windParticles} channel-wind grains | wall ${sf.wallEvents} impacts | bed ${sf.floorEvents} impacts | pothole eddies ${sf.potholeEvents}`);
     }
   }
   if (res.stats.rainErosion) {
