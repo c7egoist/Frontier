@@ -232,7 +232,8 @@ void IlluminationHost::ReconstructScreenTargets(std::array<uint32_t, 2> Extent)
     Surface->ConstructTargets(Extent[0], Extent[1], Inputs);
     Resampling->ConstructTargets(TraceExtent, *Surface);
     Diffuse->ConstructTargets(TraceExtent, ScreenExtent, *Surface, {Resampling->IrradianceView, Resampling->IrradianceView}, Resampling->GuideViews);
-    Glossy->ConstructTargets(TraceExtent, ScreenExtent, *Surface, {Resampling->ReflectionView, Resampling->ReflectionView}, Resampling->GuideViews);
+    Glossy->ConstructTargets(TraceExtent, ScreenExtent, *Surface, {Resampling->ReflectionView, Resampling->ReflectionView}, Resampling->GuideViews,
+                             Resampling->MirrorView);
     auto CloudColour = Exchange.ConstructView(CloudColourTexture);
     DisplayNeutralResources Neutral{CloudParams, CloudColour, Exchange.ConstructView(CloudGuideTexture), CloudColour};
     Display->ConstructTargets(ScreenExtent, *Surface, *Resampling, *Diffuse, *Glossy, *Cards, Neutral);
@@ -400,6 +401,11 @@ bool IlluminationHost::AdvanceRefresh(const RefreshInputs* Inputs, const Refresh
     Cards->RecordLighting(Begin("card lighting"), Distance->MarchGroup, SamplingGroup, Settings.CardRadiosity);
     Surface->RecordSurface(Begin("surface raster"), Scene, VertexRegion);
     Surface->RecordDirect(Begin("direct radiance"), Distance->MarchGroup, SamplingGroup, RayTracing->MarchGroup);
+    // 📝 Refinements beyond the demo (RefreshToggles::Refinements, Exhibits/RayTracedLighting): each records only when selected.
+    const uint32_t Refinements = Inputs != nullptr ? Inputs->Toggles.Refinements : 0u;
+    const bool     RayTraced   = Inputs != nullptr && Inputs->Toggles.RayTracing;
+    if (RayTraced && Inputs->Toggles.RayTracedShadows && (Refinements & RefinementBit::PenumbraFilter) != 0u)
+        Surface->RecordPenumbra(Begin("penumbra resolve"));
     if (Settings.Indirect)
     {
         Resampling->RecordResampling(Begin("ReSTIR resampling"), Parity, Distance->MarchGroup, SamplingGroup, RayTracing->MarchGroup);
@@ -409,6 +415,13 @@ bool IlluminationHost::AdvanceRefresh(const RefreshInputs* Inputs, const Refresh
     {
         Resampling->RecordReflection(Begin("reflection trace"), Distance->MarchGroup, SamplingGroup, RayTracing->MarchGroup);
         Glossy->Record(Begin("glossy variance filter"), Parity, Settings.VarianceFilter);
+        if ((Refinements & RefinementBit::MirrorFilter) != 0u)
+        {
+            if (RayTraced && Inputs->Toggles.RayTracedReflections && (Refinements & RefinementBit::MirrorTrace) != 0u)
+                Resampling->RecordMirrorTrace(Begin("mirror trace"), Distance->MarchGroup, SamplingGroup, RayTracing->MarchGroup);
+            else
+                Glossy->RecordMirrorProjection(Begin("mirror projection"), Parity);
+        }
     }
     // 📝 Cluster inspection modes 10-14 come from the virtualized geometry's own targets; selecting one activates it on demand and,
     //    while activation is pending or no set is eligible, a checker fallback marks the inspection target instead of black.

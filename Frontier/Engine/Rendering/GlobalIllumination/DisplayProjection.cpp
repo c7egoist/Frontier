@@ -32,7 +32,8 @@ void DisplayProjection::ConstructPrograms(const std::shared_ptr<DeviceRegion>& R
     OccupantRegion_ = OccupantRegion;
     const std::vector<DescriptorSlot> RecombineSlots = {{D::Uniform}, {D::StorageRead}, {D::Texture2D}, {D::TextureDepth2D}, {D::Texture2D}, {D::Texture2D},
                                                         {D::Texture2D}, {D::Texture2D}, {D::Texture2D}, {D::Texture2D},
-                                                        {D::StorageTexture2D, TextureFormat::Rgba16Float}, {D::StorageRead}, {D::Texture2D}, {D::Sampler}};
+                                                        {D::StorageTexture2D, TextureFormat::Rgba16Float}, {D::StorageRead}, {D::Texture2D}, {D::Sampler},
+                                                        {D::Texture2D}};
     const std::vector<DescriptorSlot> AntialiasSlots = {{D::Uniform}, {D::Texture2D}, {D::Texture2D}, {D::Texture2D}, {D::Sampler},
                                                         {D::StorageTexture2D, TextureFormat::Rgba16Float}};
     const std::vector<DescriptorSlot> ExposureSlots = {{D::Uniform}, {D::Texture2D}, {D::Storage}};
@@ -92,7 +93,8 @@ void DisplayProjection::ConstructTargets(std::array<uint32_t, 2> Extent, const S
     auto IdleSmoke         = Exchange_.ConstructView(IdleSmokeTexture_);
     RecombineGroup_ = Exchange_.ConstructDescriptorGroup(RecombineLayout_, {RefreshRegion_, MaterialRegion_, Surface.AttributeView, Surface.DepthView,
                                                                             Surface.DirectView, Diffuse.ScreenView, Glossy.ScreenView, Resampling.IrradianceView,
-                                                                            InspectionView, Cards.FinalView, RecombinedView, OccupantRegion_, IdleSmoke, LinearClamp},
+                                                                            InspectionView, Cards.FinalView, RecombinedView, OccupantRegion_, IdleSmoke, LinearClamp,
+                                                                            Resampling.MirrorView},
                                                          "Display recombination");
     for (uint32_t Parity = 0; Parity < 2; ++Parity)
     {

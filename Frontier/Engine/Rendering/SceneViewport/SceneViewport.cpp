@@ -243,6 +243,7 @@ bool SceneViewport::Refresh(const ViewportCamera& Camera, const SceneEnvironment
     Inputs.Toggles.ExposureCompensation = Rendering.ExposureCompensation;
     Inputs.Toggles.RayTracing           = Configuration_.RayTracing;
     Inputs.Toggles.Inspection           = std::min<uint32_t>(Rendering.Inspection, 14u);
+    Inputs.Toggles.Refinements          = Rendering.Refinements;
     Host_->Settings.Indirect            = Rendering.GlobalIllumination;
     // 📝 The levelspace key raises the takeover and lowers it again; an inspection mode that activated it keeps it, as in the demo.
     if (Host_->Surface && Host_->Surface->Virtualized)
@@ -260,6 +261,7 @@ bool SceneViewport::Refresh(const ViewportCamera& Camera, const SceneEnvironment
     Inputs.Environment             = &Sky;
     Inputs.CelestialDelta          = std::max(0.0, DeltaSeconds);
     Inputs.LuminairesLive          = true;
+    if (ToggleAdjustment) ToggleAdjustment(Inputs.Toggles);
 
     RefreshInterlude Interlude;
     if (Overlay_ && !Overlay_->PrepareInterlude(*Host_, Environment, Inputs.Camera, Sky.Latitude, Sky.Longitude, Configuration_.EnvironmentLighting,

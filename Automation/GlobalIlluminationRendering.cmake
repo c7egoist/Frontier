@@ -67,9 +67,11 @@ set(FRONTIER_GLOBAL_ILLUMINATION_ENTRIES
     "SurfaceRaster:SurfaceVertex:vertex"
     "SurfaceRaster:SurfaceFragment:fragment"
     "DirectRadiance:IntegrateDirectRadiance:compute"
+    "PenumbraResolve:ResolvePenumbra:compute"
     "ReservoirTemporal:ResampleTemporal:compute"
     "ReservoirSpatial:ResampleSpatial:compute"
     "ReflectionTrace:TraverseReflection:compute"
+    "ReflectionTrace:TraverseMirrorReflection:compute"
     "VarianceTemporal:IntegrateTemporal:compute"
     "VarianceWavelet:ConvolveWavelet:compute"
     "VarianceUpsample:ProjectScreenSignal:compute"
@@ -150,6 +152,13 @@ if(BUILD_TESTING)
         Engine/Render/StbImageWriteImplementation.cpp)
     target_include_directories(SceneViewportValidation PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
     target_link_libraries(SceneViewportValidation PRIVATE FrontierSceneViewport)
+
+    # 📝 Ray-traced reflections and sun shadows under the demo's options and the refinements, measured (Exhibits/RayTracedLighting).
+    add_executable(RayTracedLightingCapture
+        Exhibits/RayTracedLighting/Code/RayTracedLightingCapture.cpp
+        Engine/Render/StbImageWriteImplementation.cpp)
+    target_include_directories(RayTracedLightingCapture PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
+    target_link_libraries(RayTracedLightingCapture PRIVATE FrontierSceneViewport)
 
     # 📝 The viewport's Unreal-style camera against the renderer's own view basis (no device) — Exhibits/SceneViewport/README.md.
     add_executable(SceneViewportFlightValidation

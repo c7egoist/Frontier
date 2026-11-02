@@ -27,12 +27,15 @@ class ResamplingSequence
                           const std::shared_ptr<DescriptorGroup>& SamplingGroup, const std::shared_ptr<DescriptorGroup>& RayTracingGroup);
     void RecordReflection(CommandSequence& Sequence, const std::shared_ptr<DescriptorGroup>& DistanceGroup,
                           const std::shared_ptr<DescriptorGroup>& SamplingGroup, const std::shared_ptr<DescriptorGroup>& RayTracingGroup);
+    // 📝 RefinementMirrorTrace: smooth surfaces traced per screen pixel into MirrorView (the recombination takes it unfiltered).
+    void RecordMirrorTrace(CommandSequence& Sequence, const std::shared_ptr<DescriptorGroup>& DistanceGroup,
+                           const std::shared_ptr<DescriptorGroup>& SamplingGroup, const std::shared_ptr<DescriptorGroup>& RayTracingGroup);
 
     std::array<uint32_t, 2>                         TraceExtent{0, 0};
     std::array<std::shared_ptr<DeviceTexture>, 2>   GuideTextures{};
-    std::shared_ptr<DeviceTexture>                  IrradianceTexture{}, ReflectionTexture{};
+    std::shared_ptr<DeviceTexture>                  IrradianceTexture{}, ReflectionTexture{}, MirrorTexture{};
     std::array<std::shared_ptr<DeviceTextureView>, 2> GuideViews{};
-    std::shared_ptr<DeviceTextureView>              IrradianceView{}, ReflectionView{};
+    std::shared_ptr<DeviceTextureView>              IrradianceView{}, ReflectionView{}, MirrorView{};   // [-] MirrorView: screen resolution
     std::array<std::shared_ptr<DeviceRegion>, 2>    Reservoirs{};
 
   private:
@@ -40,9 +43,10 @@ class ResamplingSequence
     ShaderInterchange&                Shaders_;
     std::shared_ptr<DeviceRegion>     RefreshRegion_{}, MaterialRegion_{};
     std::shared_ptr<DescriptorLayout> TemporalLayout_{}, SpatialLayout_{}, ReflectionLayout_{};
-    std::shared_ptr<DeviceProgram>    TemporalProgram_{}, SpatialProgram_{}, ReflectionProgram_{};
+    std::shared_ptr<DeviceProgram>    TemporalProgram_{}, SpatialProgram_{}, ReflectionProgram_{}, MirrorProgram_{};
     std::array<std::shared_ptr<DescriptorGroup>, 2> TemporalGroups_{}, SpatialGroups_{};
-    std::shared_ptr<DescriptorGroup>  ReflectionGroup_{};
+    std::shared_ptr<DescriptorGroup>  ReflectionGroup_{}, MirrorGroup_{};
+    std::array<uint32_t, 2>           ScreenExtent_{0, 0};
 };
 
 struct VarianceSettings
@@ -63,8 +67,11 @@ class VarianceIntegrator
     void ApplySettings(const VarianceSettings& Settings);
     void ConstructTargets(std::array<uint32_t, 2> TraceExtent, std::array<uint32_t, 2> ScreenExtent, const SurfaceProjection& Surface,
                           const std::array<std::shared_ptr<DeviceTextureView>, 2>& SourceViews,
-                          const std::array<std::shared_ptr<DeviceTextureView>, 2>& GuideViews);
+                          const std::array<std::shared_ptr<DeviceTextureView>, 2>& GuideViews,
+                          const std::shared_ptr<DeviceTextureView>& MirrorTarget = nullptr);
     void Record(CommandSequence& Sequence, uint32_t Parity, bool Reconstruct);
+    // 📝 RefinementMirrorFilter: the unfiltered signal projected onto the screen into the mirror target given at ConstructTargets.
+    void RecordMirrorProjection(CommandSequence& Sequence, uint32_t Parity);
 
     std::string                        Label{};
     VarianceSettings                   Settings{};
@@ -77,6 +84,7 @@ class VarianceIntegrator
     std::shared_ptr<DeviceRegion>     RefreshRegion_{};
     std::array<std::shared_ptr<DeviceRegion>, 5> StepRegions_{};
     std::shared_ptr<DescriptorLayout> TemporalLayout_{}, WaveletLayout_{}, ProjectionLayout_{};
+    std::array<std::shared_ptr<DescriptorGroup>, 2> MirrorGroups_{};
     std::shared_ptr<DeviceProgram>    TemporalProgram_{}, WaveletProgram_{}, ProjectionProgram_{};
     std::vector<std::shared_ptr<DeviceTexture>> Textures_{};
     std::array<std::shared_ptr<DescriptorGroup>, 2> TemporalGroups_{};

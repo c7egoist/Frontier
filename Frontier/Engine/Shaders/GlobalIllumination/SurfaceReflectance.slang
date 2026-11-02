@@ -111,3 +111,61 @@ float3 ResolveDirectReflectance(SurfaceSample Surface, float3 Normal, float3 Vie
     }
     return Layer;
 }
+
+// 📝 A distant disc light of angular radius θ (RefinementSolarDisc), after Karis 2013's representative point with Unreal's sphere-light
+//    energy normalisation: diffuse toward the disc's centre; GGX toward the disc point nearest the mirror direction, scaled by
+//    α² / α'² with α'² = α² + ¼·sinθ·(3α + sinθ) / (v·h + 0.001). A smooth surface shows a disc of the sun's size and energy where
+//    a point light gives a needle that a jittered direction can only hit by chance.
+float ResolveDiscLobe(float NdotH, float VdotH, float Alpha, float SinRadius)
+{
+    let Alpha2 = Alpha * Alpha;
+    let Widened2 = Alpha2 + 0.25 * SinRadius * (3.0 * Alpha + SinRadius) / (VdotH + 0.001);
+    let Denominator = NdotH * NdotH * (Alpha2 - 1.0) + 1.0;
+    return Alpha2 / (Pi * Denominator * Denominator) * (Alpha2 / Widened2);
+}
+
+float3 ResolveDiscReflectance(SurfaceSample Surface, float3 Normal, float3 View, float3 Centre, float AngularRadius)
+{
+    let NdotL = dot(Normal, Centre);
+    if (NdotL <= 0.0)
+    {
+        return float3(0.0);
+    }
+    let NdotV = max(dot(Normal, View), 1.0e-4);
+    let Mirror = reflect(-View, Normal);
+    let Along = dot(Mirror, Centre);
+    let Across = Mirror - Centre * Along;
+    let AcrossLength = length(Across);
+    let SinRadius = sin(AngularRadius);
+    var Nearest = Centre;
+    if (Along >= cos(AngularRadius))
+    {
+        Nearest = Mirror;
+    }
+    else if (AcrossLength > 1.0e-6)
+    {
+        Nearest = normalize(Centre * cos(AngularRadius) + Across * (SinRadius / AcrossLength));
+    }
+    let SpecularNdotL = max(dot(Normal, Nearest), 1.0e-4);
+    let Half = normalize(Nearest + View);
+    let NdotH = max(dot(Normal, Half), 0.0);
+    let VdotH = max(dot(View, Half), 0.0);
+    let Fresnel = ResolveFresnel(ResolveSpecularColour(Surface), VdotH);
+    let Alpha = Surface.Roughness * Surface.Roughness;
+    let Specular = Fresnel * ResolveDiscLobe(NdotH, VdotH, Alpha, SinRadius) * ResolveSmithVisibility(SpecularNdotL, NdotV, Surface.Roughness)
+                 * SpecularNdotL;
+    let CentreHalf = normalize(Centre + View);
+    let Diffuse = ResolveDiffuseAlbedo(Surface) * InversePi * (float3(1.0) - ResolveFresnel(ResolveSpecularColour(Surface), max(dot(View, CentreHalf), 0.0)))
+                * NdotL;
+    var Layer = Diffuse + Specular;
+    if (Surface.CoatWeight > 0.0)
+    {
+        let CoatFresnel = ResolveFresnel(float3(0.04), VdotH).x * Surface.CoatWeight;
+        let CoatAlpha = Surface.CoatRoughness * Surface.CoatRoughness;
+        let Coat = CoatFresnel * ResolveDiscLobe(NdotH, VdotH, CoatAlpha, SinRadius)
+                 * ResolveSmithVisibility(SpecularNdotL, NdotV, Surface.CoatRoughness) * SpecularNdotL;
+        Layer = Layer * (1.0 - CoatFresnel) + float3(Coat);
+    }
+    return Layer;
+}
+

@@ -5,14 +5,15 @@
 #include "NightStars.slang"
 // Analytic primary-ray celestial layer; intentionally excluded from diffuse GI LUTs.
 float SkyHash(float3 P) { return frac(sin(dot(P, float3(127.1,311.7,74.7))) * 43758.5453); }
-float3 CelestialSky(float3 D, Texture2DArray<float4> Atlas, SamplerState AtlasSampler) {
+// 📝 DiscWeight scales the solar disc alone (RefinementSolarDisc: 0 in reflection rays, whose sun the direct term carries).
+float3 ResolveCelestialRadiance(float3 D, Texture2DArray<float4> Atlas, SamplerState AtlasSampler, float DiscWeight) {
     let Sun = Refresh.SolarDisc.xyz;
     let Angle = acos(clamp(dot(D, Sun), -1.0, 1.0));
     let Coverage = max(0.00005, Refresh.StarControl.x);
     let Radius = Refresh.SolarDisc.w;
     let Limb = sqrt(max(0.0, 1.0 - pow(Angle / Radius, 2.0)));
     let Day = smoothstep(-0.02, 0.02, Sun.z);
-    var Result = Refresh.SolarRadiance.rgb * Refresh.CelestialControl.z * Day * (1.0-smoothstep(Radius-Coverage,Radius+Coverage,Angle)) * (0.4+0.6*Limb) * 2500.0;
+    var Result = Refresh.SolarRadiance.rgb * Refresh.CelestialControl.z * Day * (1.0-smoothstep(Radius-Coverage,Radius+Coverage,Angle)) * (0.4+0.6*Limb) * 2500.0 * DiscWeight;
     Result += Refresh.SolarRadiance.rgb*Refresh.CelestialControl.z*Refresh.SolarRadiance.w*(exp(-Angle*40.0)*0.35+exp(-Angle*9.0)*0.03+exp(-Angle*2.5)*0.004);
     Result += NativeTwilightLine(D,Sun,Refresh.Twilight.x,Refresh.Twilight.y,Refresh.Twilight.z)*Refresh.Twilight.w;
     let Night = (1.0-smoothstep(-12.0, -2.0, Refresh.Night.w)) * smoothstep(0.0,0.12,D.z);
@@ -56,4 +57,8 @@ float3 CelestialSky(float3 D, Texture2DArray<float4> Atlas, SamplerState AtlasSa
         }
     }
     return Result;
+}
+
+float3 CelestialSky(float3 D, Texture2DArray<float4> Atlas, SamplerState AtlasSampler) {
+    return ResolveCelestialRadiance(D, Atlas, AtlasSampler, 1.0);
 }

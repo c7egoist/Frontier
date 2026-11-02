@@ -45,6 +45,8 @@ void ResamplingSequence::ConstructPrograms(const std::shared_ptr<DeviceRegion>& 
     TemporalProgram_   = Shaders_.ConstructComputeProgram("ReservoirTemporal", "ResampleTemporal", {TemporalLayout_, DistanceLayout, SamplingLayout, RayTracingLayout});
     SpatialProgram_    = Shaders_.ConstructComputeProgram("ReservoirSpatial", "ResampleSpatial", {SpatialLayout_, DistanceLayout, SamplingLayout, RayTracingLayout});
     ReflectionProgram_ = Shaders_.ConstructComputeProgram("ReflectionTrace", "TraverseReflection", {ReflectionLayout_, DistanceLayout, SamplingLayout, RayTracingLayout});
+    MirrorProgram_     = Shaders_.ConstructComputeProgram("ReflectionTrace", "TraverseMirrorReflection",
+                                                          {ReflectionLayout_, DistanceLayout, SamplingLayout, RayTracingLayout});
 }
 
 void ResamplingSequence::ConstructTargets(std::array<uint32_t, 2> Extent, const SurfaceProjection& Surface)
@@ -79,6 +81,17 @@ void ResamplingSequence::ConstructTargets(std::array<uint32_t, 2> Extent, const 
     }
     ReflectionGroup_ = Exchange_.ConstructDescriptorGroup(ReflectionLayout_, {RefreshRegion_, MaterialRegion_, Surface.AttributeView, Surface.DepthView,
                                                                               ReflectionView});
+    TextureSpecification Mirror;
+    Mirror.Label  = "Mirror radiance";
+    Mirror.Width  = Surface.Extent[0];
+    Mirror.Height = Surface.Extent[1];
+    Mirror.Format = TextureFormat::Rgba16Float;
+    Mirror.Usage  = TextureUsage::Storage | TextureUsage::Sampled;
+    MirrorTexture = Exchange_.ConstructTexture(Mirror);
+    MirrorView    = Exchange_.ConstructView(MirrorTexture);
+    ScreenExtent_ = Surface.Extent;
+    MirrorGroup_  = Exchange_.ConstructDescriptorGroup(ReflectionLayout_, {RefreshRegion_, MaterialRegion_, Surface.AttributeView, Surface.DepthView, MirrorView},
+                                                       "Mirror trace");
 }
 
 void ResamplingSequence::RecordResampling(CommandSequence& Sequence, uint32_t Parity, const std::shared_ptr<DescriptorGroup>& DistanceGroup,
@@ -108,6 +121,17 @@ void ResamplingSequence::RecordReflection(CommandSequence& Sequence, const std::
     Sequence.BindGroup(2, SamplingGroup);
     Sequence.BindGroup(3, RayTracingGroup);
     Sequence.Dispatch((TraceExtent[0] + 7) / 8, (TraceExtent[1] + 7) / 8);
+}
+
+void ResamplingSequence::RecordMirrorTrace(CommandSequence& Sequence, const std::shared_ptr<DescriptorGroup>& DistanceGroup,
+                                           const std::shared_ptr<DescriptorGroup>& SamplingGroup, const std::shared_ptr<DescriptorGroup>& RayTracingGroup)
+{
+    Sequence.BindProgram(MirrorProgram_);
+    Sequence.BindGroup(0, MirrorGroup_);
+    Sequence.BindGroup(1, DistanceGroup);
+    Sequence.BindGroup(2, SamplingGroup);
+    Sequence.BindGroup(3, RayTracingGroup);
+    Sequence.Dispatch((ScreenExtent_[0] + 7) / 8, (ScreenExtent_[1] + 7) / 8);
 }
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -157,7 +181,8 @@ void VarianceIntegrator::ApplySettings(const VarianceSettings& NewSettings)
 
 void VarianceIntegrator::ConstructTargets(std::array<uint32_t, 2> TraceExtent, std::array<uint32_t, 2> ScreenExtent, const SurfaceProjection& Surface,
                                           const std::array<std::shared_ptr<DeviceTextureView>, 2>& SourceViews,
-                                          const std::array<std::shared_ptr<DeviceTextureView>, 2>& GuideViews)
+                                          const std::array<std::shared_ptr<DeviceTextureView>, 2>& GuideViews,
+                                          const std::shared_ptr<DeviceTextureView>& MirrorTarget)
 {
     auto Construct = [&](const std::string& Name, std::array<uint32_t, 2> Extent) {
         TextureSpecification Specification;
@@ -195,6 +220,9 @@ void VarianceIntegrator::ConstructTargets(std::array<uint32_t, 2> TraceExtent, s
                                                                                                     GuideViews[Parity], Target});
             Source = Target;
         }
+        MirrorGroups_[Parity] = MirrorTarget ? Exchange_.ConstructDescriptorGroup(ProjectionLayout_, {RefreshRegion_, SourceViews[Parity], GuideViews[Parity],
+                                                                                                   Surface.AttributeView, Surface.DepthView, MirrorTarget})
+                                             : nullptr;
         const std::array<std::shared_ptr<DeviceTextureView>, 4> Candidates = {SourceViews[Parity], RetainedViews[Parity], WaveletViews[0], WaveletViews[1]};
         for (uint32_t Candidate = 0; Candidate < 4; ++Candidate)
         {
@@ -224,6 +252,14 @@ void VarianceIntegrator::Record(CommandSequence& Sequence, uint32_t Parity, bool
     }
     Sequence.BindProgram(ProjectionProgram_);
     Sequence.BindGroup(0, ProjectionGroups_[Parity][Projection]);
+    Sequence.Dispatch((ScreenExtent_[0] + 7) / 8, (ScreenExtent_[1] + 7) / 8);
+}
+
+void VarianceIntegrator::RecordMirrorProjection(CommandSequence& Sequence, uint32_t Parity)
+{
+    if (!MirrorGroups_[Parity]) return;
+    Sequence.BindProgram(ProjectionProgram_);
+    Sequence.BindGroup(0, MirrorGroups_[Parity]);
     Sequence.Dispatch((ScreenExtent_[0] + 7) / 8, (ScreenExtent_[1] + 7) / 8);
 }
 

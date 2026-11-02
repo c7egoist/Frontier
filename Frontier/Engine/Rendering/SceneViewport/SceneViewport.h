@@ -56,6 +56,7 @@ struct ViewportRendering
     bool     VirtualizedGeometry  = false;   // [-] the cluster nesting takeover (the demo's ?hierarchy=1)
     uint32_t VirtualizedStreamSlots = 0;     // [-] arena slots the pages stream through (0: one per page)
     bool     AnalyticIllumination = false;   // [-] the fast closed-form renderer (AnalyticIllumination) instead of the GI
+    uint32_t Refinements          = 0;       // [-] RefinementBit mask of options beyond the demo (0: the demo)
 };
 
 // 📝 What the refresh ran with, for the viewport's readout (the demo's PresentMeasurements).
@@ -109,6 +110,8 @@ class SceneViewport
 
     // 📝 The demo's own environment the refresh encodes (its sky lights the scene; the overlaid environment is drawn over it).
     EnvironmentSettings Sky{};
+    // 🔍 Last word on the refresh toggles before each refresh (validation tools switch the demo's options and the refinements).
+    std::function<void(RefreshToggles&)> ToggleAdjustment{};
     [[nodiscard]] IlluminationHost*   AccessHost() noexcept { return Host_.get(); }
     [[nodiscard]] EnvironmentOverlay* AccessOverlay() noexcept { return Overlay_.get(); }
 

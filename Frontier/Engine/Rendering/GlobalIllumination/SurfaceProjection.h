@@ -91,11 +91,13 @@ class SurfaceProjection
     void RecordSurface(CommandSequence& Sequence, const SceneStructure& Scene, const std::shared_ptr<DeviceRegion>& VertexRegion);
     void RecordDirect(CommandSequence& Sequence, const std::shared_ptr<DescriptorGroup>& DistanceGroup,
                       const std::shared_ptr<DescriptorGroup>& SamplingGroup, const std::shared_ptr<DescriptorGroup>& RayTracingGroup);
+    // 📝 RefinementPenumbraFilter: the ray-traced sun's penumbra filtered across its width, into the direct radiance.
+    void RecordPenumbra(CommandSequence& Sequence);
 
     bool                               ClusteredEnabled = true;
     std::array<uint32_t, 2>            Extent{0, 0};
-    std::shared_ptr<DeviceTexture>     DepthTexture{}, AttributeTexture{}, MotionTexture{}, DirectTexture{};
-    std::shared_ptr<DeviceTextureView> DepthView{}, AttributeView{}, MotionView{}, DirectView{};
+    std::shared_ptr<DeviceTexture>     DepthTexture{}, AttributeTexture{}, MotionTexture{}, DirectTexture{}, PenumbraTexture{};
+    std::shared_ptr<DeviceTextureView> DepthView{}, AttributeView{}, MotionView{}, DirectView{}, PenumbraView{};
     std::unique_ptr<ClusteredGeometry> Clusters{};
     // 📝 The demo's Surface.Virtualized: the cluster nesting takeover of eligible static sets (inert unless enabled).
     std::unique_ptr<VirtualizedGeometry::NestingProjection> Virtualized{};
@@ -104,9 +106,9 @@ class SurfaceProjection
     DeviceExchange&                   Exchange_;
     ShaderInterchange&                Shaders_;
     std::shared_ptr<DeviceRegion>     RefreshRegion_{}, MaterialRegion_{};
-    std::shared_ptr<DescriptorLayout> RasterLayout_{}, DirectLayout_{};
-    std::shared_ptr<DescriptorGroup>  RasterGroup_{}, DirectGroup_{};
-    std::shared_ptr<DeviceProgram>    RasterProgram_{}, DirectProgram_{};
+    std::shared_ptr<DescriptorLayout> RasterLayout_{}, DirectLayout_{}, PenumbraLayout_{};
+    std::shared_ptr<DescriptorGroup>  RasterGroup_{}, DirectGroup_{}, PenumbraGroup_{};
+    std::shared_ptr<DeviceProgram>    RasterProgram_{}, DirectProgram_{}, PenumbraProgram_{};
 };
 
 } // namespace Frontier::GlobalIllumination

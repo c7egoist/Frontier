@@ -294,16 +294,17 @@ RayHit TraceSceneRay(float3 Origin, float3 Direction, float MinimumTravel, float
 //                                           TLAS + BLAS ANY-HIT VISIBILITY
 //------------------------------------------------------------------------------------------------------------------------
 
-// 📝 Exact any-hit shadow ray march: exits on the very first triangle intersection in [MinimumTravel, MaximumTravel).
-float TraceSceneVisibility(float3 Origin, float3 Direction, float MinimumTravel, float MaximumTravel)
+// 📝 Exact any-hit shadow ray march: exits on the very first triangle intersection in [MinimumTravel, MaximumTravel) and returns its
+//    travel (an occluder, not necessarily the nearest), or -1 when the ray is unoccluded.
+float TraceSceneOcclusion(float3 Origin, float3 Direction, float MinimumTravel, float MaximumTravel)
 {
     if (MaximumTravel <= MinimumTravel)
     {
-        return 1.0;
+        return -1.0;
     }
     if (BvhEntries[0].LeftOrFirst == EmptyTlasSentinel && BvhEntries[0].Count == 0u)
     {
-        return 1.0;
+        return -1.0;
     }
 
     let WorldRecip = SafeReciprocal(Direction);
@@ -415,7 +416,7 @@ float TraceSceneVisibility(float3 Origin, float3 Direction, float MinimumTravel,
                     let Travel = dot(E2, Q) * InvDet;
                     if (Travel >= MinimumTravel && Travel < MaximumTravel)
                     {
-                        return 0.0;
+                        return Travel;
                     }
                 }
             }
@@ -439,7 +440,13 @@ float TraceSceneVisibility(float3 Origin, float3 Direction, float MinimumTravel,
         }
     }
 
-    return 1.0;
+    return -1.0;
+}
+
+// 📝 The demo's verdict: 1 unoccluded, 0 occluded.
+float TraceSceneVisibility(float3 Origin, float3 Direction, float MinimumTravel, float MaximumTravel)
+{
+    return SelectBranch(1.0, 0.0, TraceSceneOcclusion(Origin, Direction, MinimumTravel, MaximumTravel) >= 0.0);
 }
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -452,6 +459,31 @@ float3 SampleSunConeDirection(float3 SunDirection, float2 Pair)
     let Disk = ProjectUniformDisk(Pair) * SolarAngularRadius;
     let Basis = ConstructTangentBasis(SunDirection);
     return normalize(SunDirection + Basis[0] * Disk.x + Basis[1] * Disk.y);
+}
+
+// 📝 RefinementSolarDisc: the sun reflected as the disc it is, toward the disc's centre (no sampled direction); the demo evaluates
+//    its point-light reflectance toward the shadow ray's jittered direction, which spikes on smooth surfaces.
+float3 ResolveSunReflectance(SurfaceSample Surface, float3 Normal, float3 View, float3 SampledDirection)
+{
+    if (RefinementEnabled(Refresh, RefinementSolarDisc))
+    {
+        return ResolveDiscReflectance(Surface, Normal, View, Refresh.SunDirection, SolarAngularRadius);
+    }
+    return ResolveDirectReflectance(Surface, Normal, View, SampledDirection);
+}
+
+float ResolveReflectedDiscWeight()
+{
+    return SelectBranch(1.0, 0.0, RefinementEnabled(Refresh, RefinementSolarDisc));
+}
+
+// 📝 RefinementStratifiedSun: neighbours in a 4×4 block take consecutive points of the R2 sequence (Bayer rank + 16 per refresh), so
+//    every block covers the disc evenly in each refresh; 32-bit fixed point keeps the sequence exact for 2^28 refreshes.
+float2 ProjectStratifiedPair(uint2 Pixel, uint RefreshIndex)
+{
+    let Bayer : uint[16] = {0u, 8u, 2u, 10u, 12u, 4u, 14u, 6u, 3u, 11u, 1u, 9u, 15u, 7u, 13u, 5u};
+    let Index = Bayer[(Pixel.y & 3u) * 4u + (Pixel.x & 3u)] + 16u * RefreshIndex;
+    return float2(float((Index * 3242174889u + 2147483648u) >> 8u), float((Index * 2447445414u + 2147483648u) >> 8u)) * (1.0 / 16777216.0);
 }
 
 // 📝 Heitz 2018, "Sampling the GGX Distribution of Visible Normals"; view in tangent space, Alpha = Roughness².
@@ -790,7 +822,7 @@ float3 EvaluateDirectNextEvent(
     let SunDir = SampleSunConeDirection(Refresh.SunDirection, Pair);
     if (dot(Normal, SunDir) > 0.0)
     {
-        let SunBrdf = ResolveDirectReflectance(Surface, Normal, View, SunDir) * Pi;
+        let SunBrdf = ResolveSunReflectance(Surface, Normal, View, SunDir) * Pi;
         if (any(SunBrdf > float3(0.0)))
         {
             var SunVis = 1.0;
@@ -1026,7 +1058,7 @@ float3 TraceMultiBounceReflection(
         if (!Hit.Hit)
         {
             var SkyRad = SampleSkyRadiance(RayDir);
-            if (CurrentRoughness<0.25){SkyRad += CelestialSky(RayDir,MoonAtlas,SkySampler) * (1.0-smoothstep(0.05,0.25,CurrentRoughness));}
+            if (CurrentRoughness<0.25){SkyRad += ResolveCelestialRadiance(RayDir,MoonAtlas,SkySampler,ResolveReflectedDiscWeight()) * (1.0-smoothstep(0.05,0.25,CurrentRoughness));}
             TotalRadiance += Throughput * SkyRad;
             break;
         }

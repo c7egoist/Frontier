@@ -32,6 +32,12 @@
 
   [[vk::binding(12, 0)]] Texture2D<float4> TyrePlume;
   [[vk::binding(13, 0)]] SamplerState PlumeSampler;
+  // 📝 RefinementMirrorFilter: the reflection without the variance filter (alpha 1 where present), at screen resolution.
+  [[vk::binding(14, 0)]] Texture2D<float4> MirrorRadiance;
+
+// 📝 Surfaces below MirrorSharpRoughness take the unfiltered reflection, those above MirrorBlendRoughness the variance-filtered one.
+static const float MirrorSharpRoughness = 0.10;
+static const float MirrorBlendRoughness = 0.20;
 float3 BlendPlume(float3 Colour, int2 Pixel) {
     if ((Refresh.Features & 4096u) == 0u || Refresh.InspectionMode != 0u) { return Colour; }
     let Sample = TyrePlume.SampleLevel(PlumeSampler, (float2(Pixel) + 0.5) * Refresh.InverseScreenExtent, 0.0);
@@ -107,7 +113,14 @@ void ResolveRecombination(uint3 Invocation : SV_DispatchThreadID)
     let Diffuse = ResolveDiffuseAlbedo(Surface) * InversePi * Irradiance;
 
     let GlossRoughness = SelectBranch(Surface.Roughness, Surface.CoatRoughness, Surface.CoatWeight > 0.0);
-    let Reflection = LoadTexel(ReflectionRadiance, Pixel, 0);
+    var Reflection = LoadTexel(ReflectionRadiance, Pixel, 0);
+    if (RefinementEnabled(Refresh, RefinementMirrorFilter))
+    {
+        let Mirror = LoadTexel(MirrorRadiance, Pixel, 0);
+        let MirrorShare = Mirror.a * (1.0 - smoothstep(MirrorSharpRoughness, MirrorBlendRoughness, SelectBranch(Surface.Roughness, Surface.CoatRoughness,
+                                                                                                                   Surface.CoatWeight > 0.0)));
+        Reflection = float4(lerp(Reflection.rgb, Mirror.rgb, MirrorShare), Reflection.a);
+    }
     var Glossy = Irradiance * InversePi;
     let UseRtReflections = FeatureEnabled(Refresh, FeatureRayTracing) && FeatureEnabled(Refresh, FeatureRayTracedReflections);
     let Cutoff = SelectBranch(0.50, ResolveReflectionRoughness(Refresh), UseRtReflections);

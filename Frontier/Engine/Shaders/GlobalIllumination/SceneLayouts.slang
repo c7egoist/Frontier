@@ -40,7 +40,7 @@ struct RefreshConstants
     uint SpatialCount;                            // [-]    spatial candidates per pixel
     float3 NightSkyRadiance;                      // [-]    floor radiance of the night sky
     float IncandescenceScale;                           // [-]    multiplies every authored incandescence
-    float Reserved112;                             // [-]    retained uniform alignment
+    uint Refinements;                              // [-]    RefinementBit mask of the post-parity options (0: the demo)
     float ExposureCompensation;                    // [EV]
     float IndirectScale;                           // [-]    multiplies the resolved indirect term
     uint DistanceInspection;                      // [-]    distance inspection selector
@@ -68,6 +68,18 @@ struct RefreshConstants
     float4 StarControl; 
     float4 Twilight; 
 };
+
+// 📝 RefinementBit — options beyond the demo, measured against it (Exhibits/RayTracedLighting); all clear reproduces it.
+static const uint RefinementSolarDisc       = 1u;    // [-] the sun as a disc light: representative-point highlight, no disc in reflection rays
+static const uint RefinementStratifiedSun   = 2u;    // [-] sun-disc samples stratified over 4×4 pixel blocks and refreshes
+static const uint RefinementPenumbraFilter  = 4u;    // [-] ray-traced sun visibility filtered across its penumbra
+static const uint RefinementMirrorFilter    = 8u;    // [-] smooth surfaces take the unfiltered reflection, rough ones the variance filter
+static const uint RefinementMirrorTrace     = 16u;   // [-] smooth surfaces traced at screen resolution
+
+bool RefinementEnabled(RefreshConstants Refresh, uint Bit)
+{
+    return (Refresh.Refinements & Bit) != 0u;
+}
 
 // 📝 FeatureBit — the toggles the control panel exposes, read by the programs that honour them.
 static const uint FeatureIndirect = 1u;

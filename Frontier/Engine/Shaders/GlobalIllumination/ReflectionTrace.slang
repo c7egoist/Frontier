@@ -75,7 +75,53 @@ void TraverseReflection(uint3 Invocation : SV_DispatchThreadID)
         let Bias = ResolveSurfaceBias(Position);
         let Hit = TraverseSceneDistance(Position + Normal * Bias, Direction, 0.5 * Bias, 300.0, Roughness * 0.05);
         Radiance = ResolveMarchRadiance(Hit, Direction);
-        if (!Hit.Hit && Roughness<0.25) { Radiance += CelestialSky(Direction,MoonAtlas,SkySampler)*(1.0-smoothstep(0.05,0.25,Roughness)); }
+        if (!Hit.Hit && Roughness<0.25) { Radiance += ResolveCelestialRadiance(Direction,MoonAtlas,SkySampler,ResolveReflectedDiscWeight())*(1.0-smoothstep(0.05,0.25,Roughness)); }
     }
     ReflectionTarget[int2(TracePixel)] = float4(min(Radiance, float3(200.0)), 1.0);
 }
+
+// 📝 RefinementMirrorTrace: surfaces smoother than MirrorTraceRoughness traced once per screen pixel into a screen-resolution target
+//    (alpha 1 where traced) that the recombination takes unfiltered; the half-resolution trace and its variance filter still serve
+//    every rougher surface. Other pixels leave alpha 0.
+static const float MirrorTraceRoughness = 0.20;
+
+[shader("compute")]
+[numthreads(8, 8, 1)]
+void TraverseMirrorReflection(uint3 Invocation : SV_DispatchThreadID)
+{
+    let ScreenPixel = int2(Invocation.xy);
+    if (any(float2(ScreenPixel) >= Refresh.ScreenExtent))
+    {
+        return;
+    }
+    let Depth = LoadTexel(SurfaceDepth, ScreenPixel, 0);
+    if (Depth <= 0.0)
+    {
+        ReflectionTarget[ScreenPixel] = float4(0.0);
+        return;
+    }
+    let Attributes = LoadTexel(SurfaceAttributes, ScreenPixel, 0);
+    let Surface = ProjectSurfaceSample(Materials[ToUnsigned(Attributes.z + 0.5)]);
+    let Roughness = SelectBranch(Surface.Roughness, Surface.CoatRoughness, Surface.CoatWeight > 0.0);
+    if (Roughness >= MirrorTraceRoughness || !FeatureEnabled(Refresh, FeatureRayTracing) || !FeatureEnabled(Refresh, FeatureRayTracedReflections))
+    {
+        ReflectionTarget[ScreenPixel] = float4(0.0);
+        return;
+    }
+    let Position = ReconstructWorldPosition(float2(ScreenPixel) + 0.5, Depth);
+    let Normal = DecodeOctahedral(Attributes.xy);
+    let View = normalize(Refresh.CameraPosition - Position);
+    let Basis3 = ConstructTangentBasis(Normal);
+    let TangentView = mul(View, transpose(Basis3));
+    let Pair = ProjectTemporalPair(uint2(ScreenPixel), Refresh.RefreshIndex, 31u);
+    let Half = mul(ProjectVisibleNormal(TangentView, Roughness * Roughness, Pair), Basis3);
+    var Direction = reflect(-View, Half);
+    if (dot(Direction, Normal) <= 0.0)
+    {
+        Direction = reflect(-View, Normal);
+    }
+    var Seed = ConstructPixelSeed(uint2(ScreenPixel), Refresh.RefreshIndex, 47u);
+    let Radiance = TraceMultiBounceReflection(Position + Normal * RayEpsilon, Direction, Roughness, Seed);
+    ReflectionTarget[ScreenPixel] = float4(min(Radiance, float3(200.0)), 1.0);
+}
+

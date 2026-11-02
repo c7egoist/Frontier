@@ -221,9 +221,14 @@ void SurfaceProjection::ConstructPrograms(const std::shared_ptr<DeviceRegion>& R
     Virtualized->ConstructPrograms(RefreshRegion, OccupantRegion);
     const std::vector<DescriptorSlot> DirectSlots = {{D::Uniform}, {D::StorageRead}, {D::Texture2D}, {D::TextureDepth2D}, {D::TextureDepth2DLayered},
                                                      {D::SamplerComparison}, {D::Uniform}, {D::Texture2D}, {D::Sampler},
-                                                     {D::StorageTexture2D, TextureFormat::Rgba16Float}, {D::StorageRead}, {D::Uniform}, {D::Texture2D}, {D::Sampler}};
+                                                     {D::StorageTexture2D, TextureFormat::Rgba16Float}, {D::StorageRead}, {D::Uniform}, {D::Texture2D}, {D::Sampler},
+                                                     {D::StorageTexture2D, TextureFormat::Rgba16Float}};
     DirectLayout_  = Exchange_.ConstructDescriptorLayout(DirectSlots, "Direct radiance");
     DirectProgram_ = Shaders_.ConstructComputeProgram("DirectRadiance", "IntegrateDirectRadiance", {DirectLayout_, DistanceLayout, SamplingLayout, RayTracingLayout});
+    const std::vector<DescriptorSlot> PenumbraSlots = {{D::Uniform}, {D::Texture2D}, {D::TextureDepth2D}, {D::Texture2D},
+                                                       {D::StorageTexture2D, TextureFormat::Rgba16Float}};
+    PenumbraLayout_  = Exchange_.ConstructDescriptorLayout(PenumbraSlots, "Penumbra resolve");
+    PenumbraProgram_ = Shaders_.ConstructComputeProgram("PenumbraResolve", "ResolvePenumbra", {PenumbraLayout_});
 }
 
 void SurfaceProjection::ConstructTargets(uint32_t Width, uint32_t Height, const SurfaceTargetInputs& Inputs)
@@ -243,15 +248,18 @@ void SurfaceProjection::ConstructTargets(uint32_t Width, uint32_t Height, const 
     AttributeTexture = Construct("Surface attributes", TextureFormat::Rgba16Float, Attachment);
     MotionTexture    = Construct("Surface motion", TextureFormat::Rg16Float, Attachment);
     DirectTexture    = Construct("Direct radiance", TextureFormat::Rgba16Float, TextureUsage::Storage | TextureUsage::Sampled);
+    PenumbraTexture  = Construct("Penumbra signal", TextureFormat::Rgba16Float, TextureUsage::Storage | TextureUsage::Sampled);
     DepthView     = Exchange_.ConstructView(DepthTexture);
     AttributeView = Exchange_.ConstructView(AttributeTexture);
     MotionView    = Exchange_.ConstructView(MotionTexture);
     DirectView    = Exchange_.ConstructView(DirectTexture);
+    PenumbraView  = Exchange_.ConstructView(PenumbraTexture);
     if (Virtualized) Virtualized->ConstructTargets(Width, Height);
     DirectGroup_ = Exchange_.ConstructDescriptorGroup(DirectLayout_, {RefreshRegion_, MaterialRegion_, AttributeView, DepthView, Inputs.ShadowLayered,
                                                                       Inputs.ShadowComparison, Inputs.ShadowReceiver, Inputs.SkyView, Inputs.SkySampler,
                                                                       DirectView, Inputs.LuminaireRegion, Inputs.CloudShadowParams, Inputs.CloudShadowView,
-                                                                      Inputs.CloudShadowSampler}, "Direct radiance");
+                                                                      Inputs.CloudShadowSampler, PenumbraView}, "Direct radiance");
+    PenumbraGroup_ = Exchange_.ConstructDescriptorGroup(PenumbraLayout_, {RefreshRegion_, AttributeView, DepthView, PenumbraView, DirectView}, "Penumbra resolve");
 }
 
 void SurfaceProjection::RecordSurface(CommandSequence& Sequence, const SceneStructure& Scene, const std::shared_ptr<DeviceRegion>& VertexRegion)
@@ -348,6 +356,13 @@ void SurfaceProjection::RecordDirect(CommandSequence& Sequence, const std::share
     Sequence.BindGroup(1, DistanceGroup);
     Sequence.BindGroup(2, SamplingGroup);
     Sequence.BindGroup(3, RayTracingGroup);
+    Sequence.Dispatch((Extent[0] + 7) / 8, (Extent[1] + 7) / 8);
+}
+
+void SurfaceProjection::RecordPenumbra(CommandSequence& Sequence)
+{
+    Sequence.BindProgram(PenumbraProgram_);
+    Sequence.BindGroup(0, PenumbraGroup_);
     Sequence.Dispatch((Extent[0] + 7) / 8, (Extent[1] + 7) / 8);
 }
 

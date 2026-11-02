@@ -84,7 +84,7 @@ std::vector<uint8_t> RefreshEncoder::Encode(const CameraPose& Camera, const Ligh
     Unsigned(107, Toggles.SpatialCount);
     for (int Channel = 0; Channel < 3; ++Channel) Scalar(108 + Channel, Light.NightSky[Channel]);
     Scalar(111, Toggles.IncandescenceScale);
-    Scalar(112, 0);
+    Unsigned(112, Toggles.Refinements);
     Scalar(113, Toggles.ExposureCompensation);
     Scalar(114, Toggles.IndirectScale);
     // 📝 JS Math.round rounds halfway cases towards +∞.

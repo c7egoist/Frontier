@@ -37,6 +37,8 @@ struct CascadeReceiver
   [[vk::binding(11, 0)]] ConstantBuffer<CloudShadowParameters> Shadow;
   [[vk::binding(12, 0)]] Texture2D<float4> CloudShadowMap;
   [[vk::binding(13, 0)]] SamplerState CloudShadowSampler;
+  // 📝 RefinementPenumbraFilter: the unshadowed sun term and the sun ray's blocker travel (-1 when unoccluded), for ResolvePenumbra.
+  [[vk::binding(14, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4> PenumbraTarget;
 #include "CloudShadowSample.slang"
 
 // 📝 3×3 percentage-closer taps, each a hardware bilinear comparison, after a normal offset of 1.5 texels.
@@ -109,20 +111,37 @@ void IntegrateDirectRadiance(uint3 Invocation : SV_DispatchThreadID)
 
     var Visibility = 1.0;
     var SunDir = Refresh.SunDirection;
+    let PenumbraFiltered = UseRtShadows && RefinementEnabled(Refresh, RefinementPenumbraFilter);
+    var SunOcclusion = -1.0;
     if (FeatureEnabled(Refresh, FeatureDirectShadow))
     {
         if (UseRtShadows)
         {
-            SunDir     = SampleSunConeDirection(Refresh.SunDirection, ProjectTemporalPair(Pixel, Refresh.RefreshIndex, 17u));
-            Visibility = TraceSceneVisibility(RayOrigin, SunDir, RayEpsilon, 400.0);
+            let SunPair = SelectBranch(ProjectTemporalPair(Pixel, Refresh.RefreshIndex, 17u), ProjectStratifiedPair(Pixel, Refresh.RefreshIndex),
+                                       RefinementEnabled(Refresh, RefinementStratifiedSun));
+            SunDir     = SampleSunConeDirection(Refresh.SunDirection, SunPair);
+            if (PenumbraFiltered)
+            {
+                SunOcclusion = TraceSceneOcclusion(RayOrigin, SunDir, RayEpsilon, 400.0);
+                Visibility   = SelectBranch(1.0, 0.0, SunOcclusion >= 0.0);
+            }
+            else
+            {
+                Visibility = TraceSceneVisibility(RayOrigin, SunDir, RayEpsilon, 400.0);
+            }
         }
         else
         {
             Visibility = ResolveCascadeVisibility(Position, Normal);
         }
     }
-    Visibility *= CloudGroundTransmission(Position);
-    var Radiance = Refresh.SunIlluminance * Visibility * ResolveDirectReflectance(Surface, Normal, View, SunDir);
+    let CloudTransmission = CloudGroundTransmission(Position);
+    Visibility *= CloudTransmission;
+    var Radiance = Refresh.SunIlluminance * Visibility * ResolveSunReflectance(Surface, Normal, View, SunDir);
+    if (PenumbraFiltered)
+    {
+        PenumbraTarget[int2(Pixel)] = float4(Refresh.SunIlluminance * CloudTransmission * ResolveSunReflectance(Surface, Normal, View, SunDir), SunOcclusion);
+    }
     let Fire = ResolveFireArrival(Position, Normal);
     if (any(Fire.Illuminance > float3(0.0)))
     {

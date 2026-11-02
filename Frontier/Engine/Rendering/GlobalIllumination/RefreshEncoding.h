@@ -49,7 +49,18 @@ struct RefreshToggles
     uint32_t DistanceInspection   = 1;
     double   ReflectionRoughness  = 0.80;
     double   ReflectionScale      = 1.0;
+    uint32_t Refinements          = 0;      // [-] RefinementBit mask (SceneLayouts.slang); 0 reproduces the demo
 };
+
+// 📝 Options beyond the demo, each measured against it (Exhibits/RayTracedLighting).
+namespace RefinementBit
+{
+constexpr uint32_t SolarDisc      = 1u;
+constexpr uint32_t StratifiedSun  = 2u;
+constexpr uint32_t PenumbraFilter = 4u;
+constexpr uint32_t MirrorFilter   = 8u;
+constexpr uint32_t MirrorTrace    = 16u;
+} // namespace RefinementBit
 
 // 📝 Inputs owned by systems outside the port (HMI brightness word, fire light, environment block, elapsed time):
 //    the editor supplies its own, a replay supplies the demo's.
