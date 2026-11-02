@@ -246,7 +246,7 @@ npm run generate -- --archetype sedimentary-cliff --seed 4029 --lods --out expor
   fused fins, offset foreground sentinels, phase-shifted Claron ribs and a
   grounded apron. Utah Canyon Wall & Alcove and Desert Caprock Mesa Butte
   remain available, but their broad artificial alcove/hole cuts are gone —
-  Utah keeps only a shallow open seep bay plus narrow joint chimneys, while
+  Utah is now a solid wall with bedding ledges plus narrow joint chimneys, while
   the Butte relies on its recessed soft bed under the caprock.
 - **Terrain resolution + calmer studio UI**: the header **Terrain grid**
   selector offers **256² Performance**, **512² Balanced** (the unchanged

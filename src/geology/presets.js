@@ -106,7 +106,7 @@ export const FORMATION_PRESETS = {
   'utah-canyon': {
     id: 'utah-canyon',
     name: 'Utah Canyon Wall & Alcove',
-    subtitle: 'Monolithic slickrock cliff, shallow seep bay & joint chimneys',
+    subtitle: 'Monolithic slickrock cliff, bedding ledges & joint chimneys',
     category: 'Desert',
     lithology: 'navajoRed',
     isDesertEolian: true,

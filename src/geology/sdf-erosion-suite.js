@@ -302,8 +302,17 @@ export function erodeSdfWithWind(sdf, options = {}) {
   stats.directionMode = shiftMode;
   stats.directionRangeDeg = clamp(Number(windRegime.windShiftRange) || 0, 0, 180);
   stats.directionCycles = shiftCycles;
-  stats.directionSamplesDeg = [0, 0.25, 0.5, 0.75, 1].map((f) =>
-    Number(effectiveWindAzimuthDeg(windRegime, f * shiftCycles).toFixed(2))
+  // Sample at quarter-cycle points (bounded for HUD/CLI display). Five
+  // evenly spaced bake fractions would alias the UI's default two-cycle
+  // seasonal swing back to the prevailing bearing at every sample, falsely
+  // suggesting that the wind never moved.
+  const directionSampleCount = clamp(Math.ceil(Math.max(1, shiftCycles) * 4) + 1, 5, 17);
+  stats.directionSamplesDeg = Array.from(
+    { length: directionSampleCount },
+    (_, i) => Number(effectiveWindAzimuthDeg(
+      windRegime,
+      (i / (directionSampleCount - 1)) * shiftCycles
+    ).toFixed(2))
   );
   const turbulence = clamp(options.turbulence ?? 0.45, 0, 1);
   const streamlining = clamp(options.streamlining ?? options.windStreamlining ?? 0.65, 0, 1);

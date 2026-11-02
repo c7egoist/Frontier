@@ -1485,9 +1485,9 @@ function buildDesertSpires(params, tectonics, rng) {
  * Zion / Escalante slickrock amphitheater wall:
  * - Sweeping crescent Navajo sandstone wall built from continuous stepped
  *   cliff units and tapering cross-bedded wings.
- * - The alcove is now a shallow, open seep bay recessed into the lower/mid
- *   wall units themselves. There is deliberately no deep boolean cave/vault
- *   punched into the cliff, because that read as a fake artificial hole.
+ * - The wall is deliberately solid: no boolean cave/vault and no localized
+ *   alcove recess punched into the cliff, because that read as a fake hole.
+ *   Only broad plan curvature, bedding ledges and narrow joints remain.
  */
 function buildUtahCanyon(params, tectonics, rng) {
   const S = params.scale;
@@ -1510,11 +1510,15 @@ function buildUtahCanyon(params, tectonics, rng) {
 
   function cliffFrontZ(x) {
     const u = x / (width * 0.5);
-    const leftHeadland = Math.exp(-((u + 0.52) * (u + 0.52)) / 0.14) * 0.34;
-    const rightHeadland = Math.exp(-((u - 0.50) * (u - 0.50)) / 0.14) * 0.30;
-    const bayCurve = -Math.exp(-(u * u) / 0.24) * 0.14;
-    const wingSweep = -0.34 * Math.pow(Math.abs(u), 2.4);
-    const undul = scalarField3D(u * 2.8, 0.5, 0.7, baySalt) * 0.06;
+    // Keep the amphitheater as a broad, open plan curve only. The former
+    // strong twin-headland/central-bay contrast put the centre ~2.5 m behind
+    // the side prows; combined with an overhanging mid unit, that still read
+    // as a cave mouth even after the boolean vault was deleted.
+    const leftHeadland = Math.exp(-((u + 0.52) * (u + 0.52)) / 0.20) * 0.17;
+    const rightHeadland = Math.exp(-((u - 0.50) * (u - 0.50)) / 0.20) * 0.15;
+    const bayCurve = -Math.exp(-(u * u) / 0.28) * 0.045;
+    const wingSweep = -0.30 * Math.pow(Math.abs(u), 2.4);
+    const undul = scalarField3D(u * 2.8, 0.5, 0.7, baySalt) * 0.050;
     return (leftHeadland + rightHeadland + bayCurve + wingSweep + undul) * depth;
   }
 
@@ -1530,28 +1534,17 @@ function buildUtahCanyon(params, tectonics, rng) {
     return height * wingEnv * rimSwell;
   }
 
-  // Shallow open seep bay: recess only the soft lower/mid wall units by a
-  // fraction of the wall depth. This keeps an alcove-like amphitheater in
-  // plan/profile without a roof, back wall or cave-like through-hole.
-  const shallowBayX = rng.signed() * width * 0.035;
-  function shallowBayRecess(x, unitIdx) {
-    const band = unitIdx === 1 ? 0.35 : unitIdx === 2 ? 0.70 : 0;
-    if (band <= 0) return 0;
-    const dx = (x - shallowBayX) / (width * 0.22);
-    const bay = Math.exp(-dx * dx);
-    const brokenEdge = 0.82 + 0.18 * scalarField3D(x / Math.max(1, S) * 2.4, unitIdx * 1.7, 0.4, baySalt + 811);
-    // Deliberately only ~0.4–0.6 m at production scale. A deeper first pass
-    // still read as a roofed cave between two pillars in the QA render.
-    return -depth * 0.055 * bay * band * brokenEdge * (0.78 + 0.22 * overhang);
-  }
+  // No localized seep-bay recess. Even a nominally shallow version became a
+  // roofed-looking alcove once the plan curve and bedding projections were
+  // added, so the lower/mid units now stay on the same solid wall surface.
 
   const wallUnits = [
-    { y0: 0.00, y1: 0.18, proj:  0.18, smooth: 1.2 },
-    { y0: 0.14, y1: 0.36, proj:  0.04, smooth: 1.0 },
-    { y0: 0.32, y1: 0.56, proj:  0.06, smooth: 1.0 },
-    { y0: 0.52, y1: 0.74, proj:  0.14, smooth: 1.0 },
-    { y0: 0.70, y1: 0.88, proj:  0.09, smooth: 1.1 },
-    { y0: 0.84, y1: 1.02, proj: -0.04, smooth: 1.3 },
+    { y0: 0.00, y1: 0.18, proj:  0.16, smooth: 1.2 },
+    { y0: 0.14, y1: 0.36, proj:  0.105, smooth: 1.0 },
+    { y0: 0.32, y1: 0.56, proj:  0.11, smooth: 1.0 },
+    { y0: 0.52, y1: 0.74, proj:  0.115, smooth: 1.0 },
+    { y0: 0.70, y1: 0.88, proj:  0.075, smooth: 1.1 },
+    { y0: 0.84, y1: 1.02, proj: -0.03, smooth: 1.3 },
   ];
 
   const nSegs = 16;
@@ -1571,9 +1564,8 @@ function buildUtahCanyon(params, tectonics, rng) {
 
       const actualTop = Math.min(localCrest, refY1);
       const browWave = scalarField3D((cx / width) * 4.2, uIdx * 1.7, 0.5, baySalt + uIdx * 47) * depth * 0.045;
-      const bayRecess = shallowBayRecess(cx, uIdx);
-      const fz0 = cliffFrontZ(cx - dxSeg * 0.5) + wu.proj * depth * (0.65 + 0.45 * overhang) + browWave + bayRecess;
-      const fz1 = cliffFrontZ(cx + dxSeg * 0.5) + wu.proj * depth * (0.65 + 0.45 * overhang) + browWave + bayRecess;
+      const fz0 = cliffFrontZ(cx - dxSeg * 0.5) + wu.proj * depth * (0.65 + 0.45 * overhang) + browWave;
+      const fz1 = cliffFrontZ(cx + dxSeg * 0.5) + wu.proj * depth * (0.65 + 0.45 * overhang) + browWave;
       const fzMid = 0.5 * (fz0 + fz1);
       const bzMid = Math.min(fzMid - S * 0.10, cliffBackZ(cx));
 
@@ -1596,7 +1588,9 @@ function buildUtahCanyon(params, tectonics, rng) {
 
       const midY = 0.5 * (refY0 + actualTop);
       const dzdx = clamp((fz1 - fz0) / dxSeg, -1.1, 1.1);
-      const batter = uIdx === 0 ? 0.34 : (uIdx === 3 ? -0.10 : (uIdx >= 4 ? 0.22 : 0.03));
+      // Positive batter makes each face retreat slightly as it rises. In
+      // particular, unit 3 no longer leans out over units 1–2 to form a roof.
+      const batter = uIdx === 0 ? 0.30 : (uIdx === 1 ? 0.16 : (uIdx === 2 ? 0.12 : (uIdx === 3 ? 0.08 : 0.20)));
       const frontN = vnorm([-dzdx, batter, 1.0]);
       poly = clipPolyByHalfSpace(poly, frontN, vdot(frontN, [cx, midY, fzMid]), 'canyonFace') || poly;
 
@@ -1620,18 +1614,18 @@ function buildUtahCanyon(params, tectonics, rng) {
     }
   }
 
-  // No alcove subtraction cuts: the shallow bay above is part of the wall
+  // No alcove subtraction cuts and no recessed alcove band in the wall
   // construction. Only the two narrow vertical joint chimneys below remain
   // as cuts, and they read as fracture slots rather than a cave/hole.
   for (const jxFrac of [-0.36, 0.35]) {
     const jx = jxFrac * width;
-    const slotW = S * (0.010 + 0.012 * aperture);
+    const slotW = S * (0.008 + 0.009 * aperture);
     const chimney = sculptGeologicalParentPoly(
       [jx, groundY + height * 0.56, cliffFrontZ(jx) + depth * 0.08],
-      [slotW, height * 0.32, depth * 0.20],
+      [slotW, height * 0.32, depth * 0.155],
       bedFrame,
       rng,
-      { jointDispersion: 0.05, cornerBlunt: 0.78 }
+      { jointDispersion: 0.03, cornerBlunt: 0.78 }
     );
     const compChim = compilePolyBlock(chimney, bedFrame, { edgeBevel: S * 0.002 });
     if (compChim) cuts.push(compChim);

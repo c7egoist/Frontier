@@ -270,7 +270,9 @@ test('SDF suite emits ordered watchable checkpoints without changing its final p
   }
   assert.ok(frames.some((f) => f.process === 'wind'));
   assert.equal(stats.wind.directionMode, 'oscillate');
-  assert.ok(new Set(stats.wind.directionSamplesDeg).size >= 3);
+  // Quarter-cycle samples expose both swing extrema instead of aliasing a
+  // multi-cycle regime back to its prevailing bearing in the HUD/CLI.
+  assert.deepEqual(stats.wind.directionSamplesDeg, [15, 80, 15, -50, 15, 80, 15]);
 });
 
 test('Rock generator live preview frames are separate finite snapshots and final bake stays grounded/exportable-shaped', () => {
@@ -344,6 +346,30 @@ test('Named formation fixes: no fake Utah/Butte holes, continuous sedimentary wa
     assert.ok(width < 1.5, `Utah cut must be a narrow fracture slot, not an alcove/vault (width ${width})`);
     assert.ok(cut.volume < 16, `Utah cut volume must stay slot-like (${cut.volume})`);
   }
+  // Removing the boolean vault is not enough by itself: a recessed mid-wall
+  // band under a projecting brow still renders as a fake cave. Sample the
+  // actual macro front (+Z) and require a solid, non-roofed wall profile.
+  const utahEvaluator = createGeologicalSdfEvaluator(utah.macro, utah.params, utah.rng.fork('detail'));
+  const utahFrontZ = (x, y) => {
+    let prevZ = 12;
+    let prev = utahEvaluator.evalMacro(x, y, prevZ);
+    for (let z = 11.9; z >= -8; z -= 0.1) {
+      const value = utahEvaluator.evalMacro(x, y, z);
+      if (prev > 0 && value <= 0) return prevZ + (z - prevZ) * (prev / (prev - value));
+      prevZ = z;
+      prev = value;
+    }
+    return null;
+  };
+  for (const y of [4.5, 6.0]) {
+    const centre = utahFrontZ(0, y);
+    const sideMax = Math.max(...[-5, -3, 3, 5].map((x) => utahFrontZ(x, y)));
+    assert.ok(centre !== null && sideMax - centre < 1.0,
+      `Utah centre must not be a deep alcove recess at y=${y} (centre ${centre}, sides ${sideMax})`);
+  }
+  const utahRoofProjection = utahFrontZ(0, 7.5) - utahFrontZ(0, 4.5);
+  assert.ok(utahRoofProjection < 0.55,
+    `Utah upper wall must not roof over the mid-wall (${utahRoofProjection})`);
 
   const butte = macroFor('sandstone-butte');
   assert.equal(butte.macro.cuts.length, 0, 'Butte broad alcove hole cut is removed');
