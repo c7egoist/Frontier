@@ -368,7 +368,7 @@ global-illumination refresh there, 0.2 s per analytic one.
 
 ![The nine sections of the Render settings page](Images/RenderSettings/Sections.jpg)
 
-## Scene objects: the geometry inspector and the modifier stack
+## Scene objects: the geometry inspector, the modifier stack and the editor's tools
 
 The proving ground's objects are level records: 37 `Geometry` records in
 `Projects/Everest/Content/Levels/Default.levelspace`, in eight Outliner groups (Course, Boundary, Cones, Hangar, Tunnel,
@@ -396,31 +396,88 @@ lay the copies out exactly where the demo's `LevelStructure.js` placed them:
 The **geometry inspector** is the Project Zero editor's object inspector (SultanAladin/Frontier-
 `Experimental/ProjectZeroEditor`, the geometry page of `Inspectors.jsx`) in C++, one class per card
 (`Interface/Inspectors/GeometryInspector`, `Inspectors/Geometry/`). New reusable controls: `RecordHeading`,
-`TransformTable`, `QuickTiles`, `ModifierPanel`, `ChannelRows`, `CardTitleRow` and `NotesField`.
+`TransformTable`, `QuickTiles`, `ModifierPanel`, `ChannelRows`, `CardTitleRow`, `NotesField` and `PlacementGizmo`.
 
-| Card           | Project Zero editor          | Here                                          | Renderer           |
-|----------------|------------------------------|-----------------------------------------------|--------------------|
-| Heading        | breadcrumb, title, notes     | the same; the notes are saved with the level  | —                  |
-| Transform      | position, rotation, scale    | the same: drag to scrub, double-click to type | ✔️ all copies move  |
-| Quick controls | six tiles                    | the same tiles; Physics needs Dynamic         | Visible, Locked ✔️  |
-| Modifiers      | —                            | Blender's stack (below)                       | ✔️                  |
-| Material       | compact MaterialPanel        | the copies' families from `Materials.bin`     | read-only          |
-| Fracture       | switch, Fracture editor      | the switch, cells, impulse, the editor        | authored           |
+| Card           | Project Zero editor       | Here                                            | Renderer           |
+|----------------|---------------------------|-------------------------------------------------|--------------------|
+| Heading        | breadcrumb, title, notes  | the same; the notes are saved with the level    | —                  |
+| Transform      | position, rotation, scale | the same, plus the viewport's W / E / R handles | ✔️ all copies move  |
+| Quick controls | six tiles                 | the same tiles; Physics needs Dynamic           | ✔️ all but Physics  |
+| Modifiers      | —                         | Blender's stack (below)                         | ✔️ with the reserve |
+| Material       | compact MaterialPanel     | the channels and their controls                 | ✔️ per object       |
+| Fracture       | switch, Fracture editor   | the switch, cells, impulse, the editor          | authored           |
 
 The modifier stack follows Blender's: *Add modifier* opens the menu (Generate › Array), and each modifier is a card with
 its fold chevron, viewport switch, move up, move down and remove. An Array card has the fit type (fixed count), the
 count, the relative offset (factors of one copy's extent), the constant offset (metres), the rotation step about Z and
 its pivot (each copy, or the object's origin for a radial array). Under the stack the inspector says how many copies
-the stack makes and how many the viewport shows.
+the stack makes, how many come from the reserve and how many the viewport shows.
 
-**How edits reach the renderer.** `Projects/Everest/Source/EverestSceneGeometry` binds each record to its occupants and
-evaluates its transform and modifier stack (`Scene/GeometryLayout`) into occupant placements.
+### Adding, moving and removing objects
+
+The owner asked for the Project Zero editor's tools (its Construct menu for primitives), for moving, adding and
+deleting objects, and for engine shapes as `.toml` files in the content folder with baked distance fields. Fracture
+stays a no-op and the physics (Jolt) is not added yet.
+
+- **Construct** (**Ctrl+A** or the Outliner's **+**): `ConstructPanel.jsx` in C++ (`Interface/ConstructPanel`), with
+  its category rail, search and entity tiles, then the name and properties and *Add to scene*. It offers the six
+  engine shapes and the level's environment and weather records.
+- **Engine shapes** (`EngineContent/ShapeArchives/*.toml`): Cube, Sphere, Cylinder, Cone, Torus and Plane (a 1 cm
+  slab), each with its baked signed distance volume (`.sdfspace`).
+- **Row menu** (right-click an Outliner row): Rename (F2, inline), Hide / Show, Fracture (no action yet), Duplicate
+  (Ctrl+D) and Remove (Del).
+- **Picking:** a click in the viewport selects the object whose part the ray meets first (by bounding box).
+- **Transform handles** (**W**, **E**, **R**; `Interface/Controls/PlacementGizmo`): move along the world axes, turn
+  about the object's Euler axes, scale along its axes or uniformly. Ctrl snaps to 0.25 m, 15° and 0.1; Esc undoes the
+  drag.
+- **Material controls** (the Material card): base colour, roughness, metallic, reflectance, clear coat, transmission
+  and emission, per object.
+
+A shape archive names its primitive, size, tessellation, surface (the `MaterialSpecification` channels), card density
+and distance volume. `ShapeArchiveBake EngineContent/ShapeArchives` tessellates each shape
+(`Engine/Geometry/ShapeArchive`) and bakes its exact distance with a winding-number sign, 40 voxels of 3.125 cm per
+metre of the shape; `ShapeArchiveBake … check` (ctest `ShapeArchiveBakeValidation`) bakes again and compares within
+the float16 rounding. A new shape lands on the ground where the view looks, resting on it.
+
+| Shape    | Triangles | Volume (voxels) | Largest deviation from the ideal form |
+|----------|----------:|-----------------|---------------------------------------|
+| Cube     | 12        | 40 × 40 × 40    | 0 (exact)                             |
+| Sphere   | 960       | 40 × 40 × 40    | 4.78 mm                               |
+| Cylinder | 128       | 40 × 40 × 40    | 2.41 mm                               |
+| Cone     | 64        | 40 × 40 × 40    | —                                     |
+| Torus    | 768       | 40 × 40 × 18    | 7.36 mm                               |
+| Plane    | 12        | 40 × 40 × 9     | 0 (exact)                             |
+
+**How the renderer takes new objects.** The scene archive's stress-test pool (occupants 922–1858) becomes the editor's
+**reserve**: 512 inactive occupants (#922–#1433, under the distance field's identity ceiling of 2044) that copies past
+the archive's and constructed objects take. The rest of the pool leaves every refresh. A reserve occupant first takes
+its template's shape: facet set, cards (captured again in a runtime shelf of the card atlas), BLAS root and profile
+(`IlluminationHost::AssignReserveOccupant`). The engine shapes join as facet sets after the archive's, their baked
+volumes go into the distance atlas, and the reserve lends each shape one occupant at bring-up. Removing one of the
+archive's objects hides its occupants while the level holds Geometry records. When the reserve runs out, the
+inspector says how many copies are not drawn.
+
+**Per-object switches.** Dynamic relights the object's cards every refresh. Cast shadows off leaves it out of the
+shadow runs, the shadow rays and the analytic solar depth (`ShadowExempt`). GI off leaves it out of the distance union
+and the traced rays (`IndirectExempt`). Physics stays an authored flag.
+
+**Materials.** The first edit of a family copies it into the object's own material block (96 blocks after the family
+table; the occupant's override carries `MaterialBlockBit` and the block's base), and its cards are captured again.
+*Revert to the shared family* drops the copy. The other objects sharing the family keep the scene archive's values.
+
+**Scaled copies in the distance field (GTX).** The union multiplies a copy's local distance by 1/√g, where g is the
+largest absolute row sum of AᵀA for its world-to-local map A (Gershgorin). That is exact for a uniform scale and
+never an overestimate otherwise, so a march never steps through a stretched copy.
+
+**How edits reach the renderer.** `Projects/Everest/Source/EverestSceneGeometry` binds each record to its occupants (or
+to an engine shape) and evaluates its transform and modifier stack (`Scene/GeometryLayout`) into occupant placements.
 `Rendering/GlobalIllumination/OccupantRelocation` (beyond the demo) applies them between refreshes:
 
 - the occupant profiles are rewritten, and a moved occupant carries its motion for one refresh (motion vectors);
-- a visibility change rebuilds the draw runs and the card tile lists;
+- a reserve occupant takes its template's shape, cards and profile first;
+- a visibility or shadow change rebuilds the draw runs and the card tile lists;
 - the distance field is invalidated over the old and the new bounds;
-- the moved occupants' cards relight first;
+- the moved occupants' cards relight first, and a changed surface is captured again;
 - the street lamps and lanterns follow their heads, and a hidden head leaves its light off.
 
 A copy at the archive's own placement keeps the archive's transform bit for bit, so the default level renders as before.
@@ -437,21 +494,38 @@ A copy at the archive's own placement keeps the archive's transform bit for bit,
 |---|---|
 | ![Crates](Images/Geometry/Inspector-Woodencrateswest.png) | ![Tower](Images/Geometry/Inspector-Controltower.png) |
 
-**Edits in the viewport** (`Code/SceneGeometryCapture.cpp`, global illumination on SwiftShader): the control tower is
-moved 9 m and turned 30°, the burnout tyre wall re-laid (8 stacks, 1.6 m apart), the tunnel halved (Array 8 → 4) and
-the street lamps hidden, all through the records. Three global-illumination refreshes later 16.3 % of the
-viewport's pixels have changed (mean |Δ| 9.3 levels): the tower and its shadow, the missing lamps, the spaced tyre
-stacks and the shorter tunnel. The analytic illumination (debug view 15) shows the same edits (15.0 % changed).
+**Edits in the viewport** (`Code/SceneGeometryCapture.cpp`, global illumination on SwiftShader), through the records
+and the editor's own paths:
+
+- the control tower moved 9 m and turned 30°, with Cast shadows off;
+- the burnout tyre wall re-laid (8 stacks, 1.6 m apart);
+- the tunnel lengthened from 8 to 12 segments, the last 4 from the reserve;
+- the street lamps hidden and the jump ramp removed;
+- the control tower duplicated 16 m along X (its three parts from the reserve);
+- a 3 m Cube with a red surface of its own, a 2 m Sphere and a 3 m Torus constructed as the dialog adds them.
+
+Three global-illumination refreshes later 17.1 % of the viewport's pixels have changed (mean |Δ| 11.2 levels). The
+GTX distance-field path shows the same edits (17.4 %), with the scaled cube and torus in the distance field, and so
+does the analytic illumination (debug view 15, 16.4 %).
 
 | Before | After |
 |---|---|
 | ![Before](Images/Geometry/Viewport-Before.png) | ![After](Images/Geometry/Viewport-After.png) |
 
-| The workspace after the edits | The burnout tyre wall's page: Array 8, 1.6 m (14 in the archive) |
+| GTX distance-field GI after the edits | The analytic illumination after the edits |
 |---|---|
-| ![Edited](Images/Geometry/Workspace-Edited.png) | ![Burnout tyre wall](Images/Geometry/Inspector-Burnouttyrewall.png) |
+| ![GTX](Images/Geometry/Viewport-After-Distance.png) | ![Analytic](Images/Geometry/Viewport-After-Analytic.png) |
 
-`Code/SceneGeometryValidation.cpp` (ctest `SceneGeometryValidation`, no device) checks the binding and the layouts:
+| The workspace after the edits (GTX run), the cube's move handles | The Construct dialog (Ctrl+A) |
+|---|---|
+| ![Edited](Images/Geometry/Workspace-Edited.png) | ![Construct](Images/Geometry/Workspace-Construct.png) |
+
+| The tunnel's page: Array 12, 4 from the reserve | The cube's page: an engine shape with its own surface |
+|---|---|
+| ![Tunnel](Images/Geometry/Inspector-Tunnel.png) | ![Cube](Images/Geometry/Inspector-Cube.png) |
+
+`Code/SceneGeometryValidation.cpp` (ctest `SceneGeometryValidation`, no device) checks the binding, the layouts and the
+editor's objects:
 
 | Check                                                                                           | Result |
 |-------------------------------------------------------------------------------------------------|--------|
@@ -463,20 +537,30 @@ stacks and the shorter tunnel. The analytic illumination (debug view 15) shows t
 | Kerbs moved 2 m: both strips' 36 occupants moved exactly (error 4.8 × 10⁻⁷)                     | ✔️      |
 | Skidpad ring turned 10°: the 24 cones turn about (−30, 30) (error 1.7 × 10⁻⁶ m)                 | ✔️      |
 | Street lamps hidden: all 40 poles and heads inactive                                            | ✔️      |
-| Control tower with an Array of 2: 2 copies made, 1 shown (the archive holds one)               | ✔️      |
+| Control tower with an Array of 2 and no reserve: 2 copies made, 1 shown                         | ✔️      |
 | 37 records read back from a saved level as written; placements decompose and invert exactly    | ✔️      |
+| 6 engine shapes, each with its baked distance volume                                            | ✔️      |
+| a reserve of 512 (#922–#1433): the default level still resolves its 504 placements exactly      | ✔️      |
+| Boundary north at count 60: 6 copies from the reserve at the archive's step, with its shape     | ✔️      |
+| Construct › Cube: one reserve occupant with the Cube's facet set, at exactly its placement      | ✔️      |
+| a duplicate of the control tower: its 3 parts from the reserve, moved exactly 16 m              | ✔️      |
+| Cast shadows off, GI off and Dynamic on reach every part's participation, and come back         | ✔️      |
+| the cube's own surface: one material block written, the override names it, cards recaptured    | ✔️      |
+| the cube's occupant profile carries the block override (0x80000058) for the shaders             | ✔️      |
+| the jump ramp removed: its occupant hidden                                                      | ✔️ ✔️    |
+| Boundary north at 654: 562 shown with the reserve exhausted; back at 54 the reserve returns     | ✔️      |
+| the distance scale: exact 2 for a uniform 2, 0.449 ≤ 0.5 for (3, 1, 0.5), 1 for a rigid copy    | ✔️      |
 
 **Limits.**
 
-- Copies come from the archive's occupants: an Array shows at most as many copies as the archive holds for the object
-  (60 copies of the 54 north barriers show 54, and the inspector says so). Adding occupants is the next step.
-- Dynamic, Cast shadows, GI and Physics are authored flags, as the Project Zero editor marks them: there is no
-  per-object shadow or GI switch in the renderer yet, and the physics (Jolt) comes next.
-- Materials are shown, not edited: a family is shared (Barrier concrete by six objects), so editing needs per-object
-  material slots.
-- Geometry objects are neither added nor removed in the editor: the scene archive decides what exists.
-- The distance-field (GTX) march reads a scaled copy at its unscaled distances.
-- Not checked with virtualized geometry switched on.
+- The reserve holds 512 occupants: copies and constructed objects beyond that are not drawn, and the inspector says
+  how many. At most 96 objects have surfaces of their own.
+- Picking tests each part's bounding box, not its triangles.
+- The rotation rings follow the Euler angles (Z, then Y, then X): the X and Y rings turn about the object's tilted
+  axes, not the world's.
+- Fracture is a no-op and Physics waits for the physics engine (Jolt).
+- Changing a shape archive's form needs `ShapeArchiveBake` again (the check reports a stale volume).
+- The speed of these paths on a GPU was not measured here: everything ran on SwiftShader.
 
 ## Checks
 

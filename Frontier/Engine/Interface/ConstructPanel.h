@@ -64,6 +64,7 @@ class ConstructPanel
     std::vector<ConstructCatalogueEntry> Catalogue_{};
     bool                                 Open_    = false;
     bool                                 Raise_   = false;   // [-] the modal opens on the next Construct
+    bool                                 Dismiss_ = false;   // [-] closed from outside: the modal closes on the next Construct
     std::string                          Group_   = "All";
     std::array<char, 96>                 Query_{};
     int                                  Picked_  = -1;      // [-] the catalogue entry of the properties step

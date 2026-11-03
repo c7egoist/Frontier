@@ -253,9 +253,12 @@ bool ModifierStackSection::Construct(ControlColumn& Page, GeometryConfiguration&
         // 📝 Copies past the archive's placements come from the reserve (the scene archive's former stress pool) while it lasts.
         const size_t Drawable = std::min<size_t>(Copies, Resolved.Authored + Resolved.Reserved + Resolved.ReserveFree / std::max<uint32_t>(1u, Resolved.Parts));
         const size_t Shown    = Parameters.Visible ? Drawable : 0;
+        // 📝 A shape's facet set is named "Shape <Name>"; the caption names the shape.
+        std::string ShapeName = Resolved.Shapes.empty() ? std::string("engine shape") : Resolved.Shapes.front();
+        if (ShapeName.rfind("Shape ", 0) == 0) ShapeName = ShapeName.substr(6);
         if (Stack.empty() && Resolved.Shape)
             std::snprintf(Text, sizeof(Text), "No modifiers: one %s, laid out from the reserve (%u occupants free). Add an Array to repeat it.",
-                          Resolved.Shapes.empty() ? "engine shape" : Resolved.Shapes.front().c_str(), Resolved.ReserveFree);
+                          ShapeName.c_str(), Resolved.ReserveFree);
         else if (Stack.empty() && Resolved.Authored > 0)
             std::snprintf(Text, sizeof(Text), "No modifiers: the object shows the scene archive's %u placement%s. Add an Array to repeat it.", Resolved.Authored,
                           Resolved.Authored == 1 ? "" : "s");

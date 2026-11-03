@@ -1284,3 +1284,31 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
   `e26511b8abde5e17e81aeed4ca2a527102243dc2ff465c4759be030d98ce46dd`. Against the `c22acd8` package: `Frontier.exe`,
   `Package.json`, `Default.levelspace` (53 records, 37 of them `Geometry`) and `README.md` (a Scene objects section).
 - **Commits:** `0ef104c 0ae82b1 99c0f6c 16163aa 9b9be69 b822b26` and this binary commit.
+
+## Adding, moving and removing scene objects; engine shapes with baked distance fields (2026-11-03)
+
+- **Requested:** fix the limits of the previous entry; port the Project Zero editor's tools (its Construct menu for
+  primitives); move, add and delete objects; engine shapes as `.toml` files in the content folder with their distance
+  fields baked. Fracture stays a no-op and the physics (Jolt) is not added yet.
+- **Engine shapes:** `EngineContent/ShapeArchives/{Cube,Sphere,Cylinder,Cone,Torus,Plane}.toml` (primitive, size,
+  tessellation, surface, card density) with baked `.sdfspace` volumes (exact distance, winding-number sign, 3.125 cm
+  voxels). `Engine/Geometry/ShapeArchive` reads and tessellates them; `ShapeArchiveBake` bakes them and its `check`
+  (ctest `ShapeArchiveBakeValidation`) compares a fresh bake within the float16 rounding.
+- **Renderer:** the stress-test pool becomes a reserve of 512 occupants that copies and constructed objects take (a
+  reserve occupant takes its template's facet set, cards, BLAS root and profile); the shapes join as facet sets with
+  their volumes in the distance atlas. Per-object Dynamic, Cast shadows (`ShadowExempt`) and GI (`IndirectExempt`)
+  reach the shadow runs, shadow rays, analytic solar depth, distance union and traced rays. Objects get material blocks
+  of their own (96 after the family table). The distance union bounds a scaled copy's distance (Gershgorin), exact
+  for uniform scale. The occupant profile now carries a block override unchanged (it was dropped as negative).
+- **Editor:** the Construct dialog (`Interface/ConstructPanel`, Ctrl+A or the Outliner's +); the Outliner row menu
+  (Rename with inline editing, Hide / Show, Fracture as a no-op, Duplicate, Remove) and the keys F2, Ctrl+D and Del;
+  picking in the viewport; W / E / R transform handles (`Interface/Controls/PlacementGizmo`, Ctrl snaps, Esc
+  undoes); editable material channels (copy on write into the object's block); the quick controls' captions and the
+  modifier stack's reserve figures.
+- **Validated:** `SceneGeometryValidation` 25 checks (12 new: the six baked shapes, the reserve with exact default
+  placements, an Array past the archive's copies, a constructed cube, a duplicate, the switches, a material block and
+  its profile word, removal, exhaustion and return, the distance scale bound). `SceneGeometryCapture` renders the
+  edits (tower moved, turned and shadowless, tyre wall re-laid, tunnel 8 → 12 with 4 from the reserve, lamps hidden,
+  jump ramp removed, tower duplicated, a red 3 m cube, a sphere and a torus constructed): 17.1 % of the RTX
+  global-illumination viewport changes, 17.4 % on the GTX distance-field path and 16.4 % with the analytic
+  illumination. The capture also renders the Construct dialog and the cube's move handles.

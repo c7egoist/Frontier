@@ -98,7 +98,10 @@ int main(int ArgumentCount, char** Arguments)
         std::vector<uint8_t>          ViewportPixels;
         std::array<uint32_t, 2>       ViewportExtent = {0, 0};
         std::string                   LastStatus;
+        bool                          Frozen = false;   // [-] interface-only ticks: the last image stays, nothing renders
+        Everest::SceneViewportImage   LastImage;
         Workspace.PresentSceneViewport = [&](const Everest::SceneViewportRequest& Request) {
+            if (Frozen && LastImage.Texture != 0) return LastImage;
             const auto Start = std::chrono::steady_clock::now();
             const Everest::SceneViewportRefresh Outcome = Bridge.Render(Request, Workspace.QuerySceneWorld(), Workspace.QueryElapsedSeconds());
             Everest::SceneViewportImage Image;
@@ -112,6 +115,7 @@ int main(int ArgumentCount, char** Arguments)
             }
             std::printf("  viewport %u x %u in %.1f s — %s\n", Outcome.Extent[0], Outcome.Extent[1],
                         std::chrono::duration<double>(std::chrono::steady_clock::now() - Start).count(), Outcome.Status.c_str());
+            LastImage = Image;
             return Image;
         };
         SceneWorld& World    = Workspace.QuerySceneWorld();
@@ -253,10 +257,19 @@ int main(int ArgumentCount, char** Arguments)
         const RecordToken Cube  = Construct("Cube", 3.0f, -44.0f, -21.0f, std::array<float, 3>{0.62f, 0.05f, 0.04f});
         const RecordToken Ball  = Construct("Sphere", 2.0f, -39.0f, -24.0f, std::nullopt);
         const RecordToken Torus = Construct("Torus", 3.0f, -48.0f, -26.0f, std::nullopt);
-        Workspace.QueryOutliner().Select(FindGeometry(World, "Burnout tyre wall")->QueryToken());
+        // 📝 The cube selected: its move handles over the viewport.
+        Workspace.QueryOutliner().Select(Cube);
         Tick(std::max(2, Refreshes / 2));
         WriteWorkspace(OutputDir / "Workspace-Edited.png");
         const std::vector<uint8_t> After = WriteViewport(OutputDir / "Viewport-After.png");
+        // 📝 The Construct dialog (Ctrl+A) over the workspace, on interface-only ticks.
+        Frozen = true;
+        Workspace.QueryConstructDialog().Open();
+        Tick(2);
+        WriteWorkspace(OutputDir / "Workspace-Construct.png");
+        Workspace.QueryConstructDialog().Close();
+        Tick(1);
+        Frozen = false;
         WritePage("Burnout tyre wall");
         WritePage("Tunnel");
         WritePage("Cube");

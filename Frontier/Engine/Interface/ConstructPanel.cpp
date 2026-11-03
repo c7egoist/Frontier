@@ -94,9 +94,10 @@ void ConstructPanel::Open()
 
 void ConstructPanel::Close()
 {
-    Open_   = false;
-    Raise_  = false;
-    Picked_ = -1;
+    Dismiss_ = Open_ && !Raise_;
+    Open_    = false;
+    Raise_   = false;
+    Picked_  = -1;
 }
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -105,7 +106,17 @@ void ConstructPanel::Close()
 
 std::optional<ConstructOrder> ConstructPanel::Construct(float Scale)
 {
-    if (!Open_) return std::nullopt;
+    if (!Open_)
+    {
+        // 📝 Closed from outside while the modal was up: it is submitted once more to close it.
+        if (Dismiss_ && ImGui::BeginPopupModal(DialogKey, nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoSavedSettings))
+        {
+            ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+        }
+        Dismiss_ = false;
+        return std::nullopt;
+    }
     const float           S     = std::max(0.5f, Scale);
     const EditorTypefaces Faces = EditorTypefaces::Resolve();
     if (Raise_)
@@ -134,7 +145,8 @@ std::optional<ConstructOrder> ConstructPanel::Construct(float Scale)
     ImGui::PopStyleColor(3);
     if (!Shown)
     {
-        Close();
+        Open_   = false;
+        Picked_ = -1;
         return std::nullopt;
     }
 
@@ -436,7 +448,8 @@ std::optional<ConstructOrder> ConstructPanel::Construct(float Scale)
     if (Closing)
     {
         ImGui::CloseCurrentPopup();
-        Close();
+        Open_   = false;
+        Picked_ = -1;
     }
     ImGui::EndPopup();
     return Order;
