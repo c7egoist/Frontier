@@ -178,9 +178,12 @@ if(SOLIDARC_WINDOWED_HOST AND TARGET glfw)
     if(WIN32)
         set_target_properties(SolidArc PROPERTIES WIN32_EXECUTABLE ON)
         target_link_options(SolidArc PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/ENTRY:mainCRTStartup>)
-        # 📝 Version details (Package/SolidArcWorkspace.rc); no icon and no custom manifest.
-        enable_language(RC)
-        target_sources(SolidArc PRIVATE "${SOLIDARC_NATIVE}/Package/SolidArcWorkspace.rc")
+        # 📝 Version details (Package/SolidArcWorkspace.rc); no icon and no custom manifest. MSVC only, like the
+        #    Frontier and TextureWorkspace version resources: the Zig cross-toolchain has no resource compiler.
+        if(MSVC)
+            enable_language(RC)
+            target_sources(SolidArc PRIVATE "${SOLIDARC_NATIVE}/Package/SolidArcWorkspace.rc")
+        endif()
         # 📝 MinGW-style toolchains (the Zig cross-build) keep a console window unless the subsystem is named explicitly.
         if(NOT MSVC)
             target_link_options(SolidArc PRIVATE "-Wl,--subsystem,windows")
