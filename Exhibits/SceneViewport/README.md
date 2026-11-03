@@ -429,9 +429,13 @@ A copy at the archive's own placement keeps the archive's transform bit for bit,
 |---|---|
 | ![Workspace](Images/Geometry/Workspace.png) | ![Boundary west](Images/Geometry/Inspector-Boundarywest.png) |
 
-| Skidpad ring (radial) | Street lamps (no modifiers) | Wooden crates west (fracture) | Control tower (three parts) |
-|---|---|---|---|
-| ![Skidpad](Images/Geometry/Inspector-Skidpadring.png) | ![Lamps](Images/Geometry/Inspector-Streetlamps.png) | ![Crates](Images/Geometry/Inspector-Woodencrateswest.png) | ![Tower](Images/Geometry/Inspector-Controltower.png) |
+| Skidpad ring (radial) | Street lamps (no modifiers) |
+|---|---|
+| ![Skidpad](Images/Geometry/Inspector-Skidpadring.png) | ![Lamps](Images/Geometry/Inspector-Streetlamps.png) |
+
+| Wooden crates west (fracture) | Control tower (three parts) |
+|---|---|
+| ![Crates](Images/Geometry/Inspector-Woodencrateswest.png) | ![Tower](Images/Geometry/Inspector-Controltower.png) |
 
 **Edits in the viewport** (`Code/SceneGeometryCapture.cpp`, global illumination on SwiftShader): the control tower is
 moved 9 m and turned 30°, the burnout tyre wall re-laid (8 stacks, 1.6 m apart), the tunnel halved (Array 8 → 4) and
@@ -572,6 +576,10 @@ build/StarScintillationCapture EngineContent/ShaderArchives/GlobalIllumination \
     EngineContent/ShaderArchives/Environment \
     EngineContent/EnvironmentArchives/ProvingGround EngineContent/EnvironmentArchives/CelestialMaps out \
     Still,Default,Shallow,Deep,Fast 480 270 6 30 30
+# Scene objects: the binding and layout checks (no device), then the workspace, six inspector pages and the viewport
+# before and after four edits (6 refreshes before, 3 after; a sixth argument "analytic" renders debug view 15 instead)
+build/SceneGeometryValidation Projects/Everest EngineContent/EnvironmentArchives/ProvingGround out
+build/SceneGeometryCapture EngineContent Projects/Everest EngineContent/ShaderArchives out 6
 ```
 
 The build stages `EnvironmentArchives/ProvingGround` into `Projects/Everest/Content` through the project's content

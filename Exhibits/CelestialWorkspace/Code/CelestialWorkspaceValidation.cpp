@@ -190,7 +190,8 @@ int main(int Count, char **Arguments)
             Tick();
             Tick();
             Capture("Moon-Native.png");
-            Require(Workspace.QueryOutliner().QueryTotal() == 16, "Outliner lists the fifteen rendered scene entries and the one Render settings component");
+            Require(Workspace.QueryOutliner().QueryTotal() == 53,
+                    "Outliner lists the fifteen rendered scene entries, the one Render settings component and the 37 scene objects");
             Require(Centre.QueryQuickActionCount() == 3, "Render settings remain available from the Control Centre too");
             int RenderSettingsRows = 0;
             for (const auto &Row : Workspace.QueryOutliner().QueryRows())
