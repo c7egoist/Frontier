@@ -70,8 +70,8 @@ already read by `SceneWorld.cpp`. The à-trous rows show wavelet levels: `Varian
 
 ## Found while building it
 
-- Inspection view 6 (BVH / distance field) is black in the C++ port: `DisplayRecombination.slang` reads
-  `InspectionRadiance`, but nothing writes it, because the demo's `InspectionMarch` was not ported.
+- Inspection view 6 (BVH / distance field) was black in the C++ port: nothing wrote `InspectionRadiance`, because the
+  demo's `InspectionMarch` was not ported. It is now, and the prototype shows the new capture.
 - Cluster views 10 and 11 show the demo's own diagnosis without virtualized geometry: the orange checker
   (`ClusterDebugFallback`) and an empty visibility buffer. The prototype switches to the virtualized captures when
   Virtualized geometry is on.
@@ -80,12 +80,32 @@ already read by `SceneWorld.cpp`. The à-trous rows show wavelet levels: `Varian
 - The viewport forwards only GI, TAA, exposure, inspection, virtualized geometry, analytic illumination and the
   refinements today; quality and the RTX tier apply at construction.
 
-## C++ step, after approval
+## C++ step (approved and built, 2026-11-03)
 
-1. One `RenderSettingsInspector` (its sections as separate units) replaces the RenderPipeline, Diagnostics,
-   DistanceField, SurfaceCard and PolygonCluster pages, built from the shared controls.
-2. `RenderPipelineConfiguration` gains the proposed fields; `ViewportRendering` forwards every one to
-   `RefreshToggles`, `IlluminationSettings` and `VarianceSettings`; trace and render scale rebuild the targets.
-3. `Default.levelspace` keeps one Render settings record; the four absorbed records migrate into it.
-4. Port the demo's `InspectionMarch` so view 6 shows the BVH / distance field.
-5. Timing from `DeviceExchange` submission timing replaces the prototype's model.
+The owner approved the prototype; the C++ editor now has it: `Frontier/Engine/Interface/Inspectors/`
+`RenderSettingsInspector` and `RenderSettings/`, one file per section, built from the shared controls in
+`Interface/Controls`. Render settings is not removable.
+
+| Step                               | In C++                                                                 |
+| ---------------------------------- | ---------------------------------------------------------------------- |
+| One component, one inspector       | The `RenderPipeline` record "Render settings", first in the Outliner   |
+| The four absorbed records          | Removed; older levels load without them (none reached the renderer)    |
+| Every setting reaches the renderer | `ViewportRendering`: toggles, trace scale, card tiles, both filters    |
+| Trace resolution, viewport scale   | Rebuild the screen targets; quality and RTX / GTX rebuild the viewport |
+| View 6 (BVH / distance field)      | Ported: `InspectionMarch.slang` (normals, step heat, light)            |
+| The fast analytic renderer         | A debug view of its own (view 15), on the page and the viewport bar    |
+| Timing                             | Measured refresh times (latest, smoothed, median, slowest), charted    |
+
+Differences from the prototype, all deliberate:
+
+- **Measured, not modelled.** The timing card shows each refresh's wall time from its first submission to its fence
+  (encoding and GPU work). Per-stage costs exist only with staged submissions (`SubmissionTiming`), so the page shows
+  no stage breakdown.
+- **Sections are panes.** The nine sections sit under two rows of tabs below the timing card, as the Sun and Stars
+  pages do, instead of one long scroll.
+- **Left out because the renderer has no such switch:** GPU cluster culling on/off, triangles per leaf, the cluster
+  bounds overlay, freezing the distance field and the distance-slice inset. The readout overlay stays on the viewport
+  bar (H).
+- **The analytic renderer is a debug view** (owner's request), not a third renderer tab.
+- Bloom, the filmic tonemap toggle, screen-space reflections and the probe range had no reader; their keys are
+  ignored when an older level carries them.

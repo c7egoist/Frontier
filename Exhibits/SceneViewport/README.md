@@ -334,11 +334,33 @@ the high grade, through this viewport. They are the Render settings prototype's 
 refreshes; each further view is one refresh with the antialiasing off, so no view carries the previous one's history.
 The capture found:
 
-- **View 6 (BVH / distance field) is black.** `DisplayRecombination.slang` reads `InspectionRadiance` for it, but no
-  program writes it: the demo's `InspectionMarch` was not ported.
+- **View 6 (BVH / distance field) was black:** nothing wrote `InspectionRadiance`, because the demo's `InspectionMarch`
+  was not ported. It is now (`InspectionMarch.slang`, `DisplayProjection::RecordInspection`, dispatched only for view
+  6). With ray tracing its primary rays read the BVH (`Inspection-06.jpg`: albedo and normals, a half-metre lattice);
+  on the GTX path they march the distance field (`Inspection-06-Gtx.jpg`: normals tinted by the cascade that answered,
+  the voxel lattice, freshly rewritten bricks glowing). Render settings › Debug views picks normals, step heat or
+  light (`distance_inspection`).
 - **Views 10 and 11 need virtualized geometry.** Without it they show the demo's own diagnosis, the orange "no
   virtualized geometry" checker (`ClusterDebugFallback`) and an empty visibility buffer. The
   `Inspection-NN-Virtualized.jpg` captures have it on.
+
+## Reflections with indirect GI off
+
+With indirect GI off the RTX reflections vanished: the glossy variance filter takes its validity guide (normal, depth,
+prior depth) from the ReSTIR temporal step, which does not run then, so every texel read as "no surface". A guide-only
+entry, `ReservoirTemporal.slang` `ProjectResamplingGuide`, now writes the guide when the resampling does not run;
+with indirect GI on nothing changes (the resampling's SPIR-V is byte-identical). `Images/ReflectionsIndirectOff.jpg`,
+640 × 360, high grade, after 6 refreshes: the final image and the reflection view (5) before and after, and the
+reflection view with indirect GI on for reference (rough ground stays darker with it off: there is no irradiance to
+fall back on).
+
+## Render settings inspector
+
+The whole renderer is one Outliner component, Render settings (the `RenderPipeline` record), with one page: the
+approved prototype (`Experimental/RenderSettingsInspector`) in C++. `Images/RenderSettings/` holds the workspace with
+it selected (`RenderSettings.png`) and each of its nine sections in a column tall enough to show it whole
+(`RenderSettings-Section-0.png` … `-8.png`: sampling, lighting, reflections, shadows, denoise, exposure, geometry,
+views, timing). The timing figures are the viewport's measured refreshes on SwiftShader, not estimates.
 
 ## Checks
 
@@ -430,9 +452,13 @@ build/SceneViewportValidation EngineContent/ShaderArchives/GlobalIllumination En
     EngineContent/EnvironmentArchives/ProvingGround EngineContent/EnvironmentArchives/CelestialMaps out low 480 270 12
 # Everest workspace with the live viewport
 build/SceneViewportWorkspaceCapture EngineContent Projects/Everest EngineContent/ShaderArchives out/EverestLiveSceneViewport.png 12
-# The fifteen inspection views (then 1 10 14 at the end for the virtualized cluster views)
+# The fifteen inspection views (then 1 10 14 at the end for the virtualized cluster views; view 6 on the GTX path:
+# … 0 6 6 1 0; reflections with indirect GI off: … high 640 360 6 0 5 5 0 1, then 0 0 0 0 1 for the final image)
 build/InspectionViewCapture EngineContent/ShaderArchives/GlobalIllumination EngineContent/ShaderArchives/Environment \
     EngineContent/EnvironmentArchives/ProvingGround EngineContent/EnvironmentArchives/CelestialMaps out high 960 540 12
+# The Render settings page: the workspace with it selected, then its nine sections one by one
+build/SceneViewportWorkspaceCapture EngineContent Projects/Everest EngineContent/ShaderArchives out/RenderSettings.png \
+    6 RenderPipeline 0,1,2,3,4,5,6,7,8
 # Star twinkle under the Stars record's controls
 build/StarScintillationCapture EngineContent/ShaderArchives/GlobalIllumination \
     EngineContent/ShaderArchives/Environment \

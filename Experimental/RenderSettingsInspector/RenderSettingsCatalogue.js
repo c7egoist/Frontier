@@ -22,7 +22,7 @@ const RenderSettingsCatalogue = (() =>
     ];
 
     // 📝 The demo's InspectionModes (InspectorPages.js); index = RefreshToggles::Inspection = levelspace inspection_mode. Missing:
-    //    the C++ port does not write the view yet (the demo's InspectionMarch). NeedsVirtualized: without virtualized geometry
+    //    the C++ port does not write the view (none since InspectionMarch was ported). NeedsVirtualized: without virtualized geometry
     //    the view shows the demo's orange "no virtualized geometry" checker (ClusterDebugFallback) or an empty visibility buffer.
     const InspectionViews = [
         { Index: 0,  Group: 'Lighting', Name: 'Final image',                    Short: 'Final' },
@@ -31,7 +31,7 @@ const RenderSettingsCatalogue = (() =>
         { Index: 3,  Group: 'Lighting', Name: 'Indirect irradiance (denoised)', Short: 'Denoised GI' },
         { Index: 4,  Group: 'Lighting', Name: 'ReSTIR irradiance (raw)',        Short: 'Raw ReSTIR' },
         { Index: 5,  Group: 'Lighting', Name: 'Glossy reflections',             Short: 'Reflections' },
-        { Index: 6,  Group: 'Scene',    Name: 'BVH / distance field',           Short: 'BVH / SDF', Missing: true },
+        { Index: 6,  Group: 'Scene',    Name: 'BVH / distance field',           Short: 'BVH / SDF' },
         { Index: 7,  Group: 'Scene',    Name: 'Surface cards (texel space)',    Short: 'Cards' },
         { Index: 8,  Group: 'Scene',    Name: 'Normals',                        Short: 'Normals' },
         { Index: 9,  Group: 'Scene',    Name: 'Albedo',                         Short: 'Albedo' },
