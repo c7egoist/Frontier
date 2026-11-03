@@ -35,6 +35,21 @@ def VerifyExecutable(Executable):
         raise RuntimeError('Expected a Windows x64 PE32+ executable: ' + str(Executable))
 
 
+def LocateSolidArcExecutable(Executable, Requested=None):
+    Payload = Executable.read_bytes()
+    Required = Requested is not None or any(Marker in Payload for Marker in
+        (b'SolidArcWorkspace.exe', 'SolidArcWorkspace.exe'.encode('utf-16-le')))
+    if not Required:
+        return None
+    Candidate = Requested.resolve() if Requested is not None else Executable.with_name('SolidArcWorkspace.exe')
+    if not Candidate.is_file():
+        raise RuntimeError('SolidArc-enabled Frontier requires SolidArcWorkspace.exe beside it; build the SolidArc target')
+    VerifyExecutable(Candidate)
+    if any(Marker not in Candidate.read_bytes() for Marker in (b'Shift straight', b'Surface cutters')):
+        raise RuntimeError('Refusing a stale pre-selection/cutter/Shift SolidArc executable')
+    return Candidate
+
+
 def VerifySpirv(Binary):
     Payload = Binary.read_bytes() if Binary.is_file() else b''
     if len(Payload) < 20 or len(Payload) % 4 or struct.unpack_from('<I', Payload)[0] != 0x07230203:
@@ -71,6 +86,7 @@ def VerifyStartup(Installation):
 def Main():
     Parser = argparse.ArgumentParser()
     Parser.add_argument('--executable', type=Path, required=True, help='the built Frontier.exe')
+    Parser.add_argument('--solidarc-executable', type=Path, help='override the CAD executable beside a SolidArc-enabled Frontier')
     Parser.add_argument('--toolchain', required=True, help='e.g. "Zig 0.13.0 x86_64-windows-gnu (Automation/WindowsToolchain.cmake)"')
     Parser.add_argument('--output', type=Path, default=RepositoryRoot / 'Binaries/FrontierSceneViewport-Windows-x64.zip')
     Parser.add_argument('--omit-material-archives', action='store_true',
@@ -78,6 +94,7 @@ def Main():
     Arguments = Parser.parse_args()
     Executable = Arguments.executable.resolve()
     VerifyExecutable(Executable)
+    SolidArcExecutable = LocateSolidArcExecutable(Executable, Arguments.solidarc_executable)
     BuildContent = Executable.parent / 'EngineContent'
     StagedProject = RepositoryRoot / 'Projects/Everest/Content'
     for Required in [BuildContent / 'FontArchives/FontCatalogue.json', StagedProject / 'EnvironmentArchives/ProvingGround/ProvingGround.facetspace',
@@ -89,9 +106,26 @@ def Main():
     with tempfile.TemporaryDirectory(dir=Scratch, prefix='editor-preview-') as Temporary:
         Installation = Path(Temporary)
         shutil.copy2(Executable, Installation / 'Frontier.exe')
+        if SolidArcExecutable is not None:
+            shutil.copy2(SolidArcExecutable, Installation / 'SolidArcWorkspace.exe')
+            shutil.copy2(RepositoryRoot / 'Experimental/SolidArc/Native/Package/SolidArcWorkspace.toml',
+                         Installation / 'SolidArcWorkspace.toml')
+            (Installation / 'Samples').mkdir()
+            shutil.copy2(RepositoryRoot / 'Experimental/VehicleSurfacing/Samples/SyntheticBonnet.toml',
+                         Installation / 'Samples/SyntheticBonnet.toml')
         # 📝 The EngineContent the build placed beside the executable: stored archives replaced by the sets it compiled.
         Omitted = shutil.ignore_patterns('MaterialArchives') if Arguments.omit_material_archives else None
         shutil.copytree(BuildContent, Installation / 'EngineContent', ignore=Omitted)
+        if SolidArcExecutable is not None:
+            Symbols = list((RepositoryRoot / 'EngineContent/Icons/SolidArc').glob('*.svg'))
+            if len(Symbols) < 66:
+                raise RuntimeError('Incomplete SolidArc icon source collection')
+            for Symbol in Symbols:
+                Bundled = Installation / 'EngineContent/Icons/SolidArc' / Symbol.name
+                if not Bundled.is_file() or Digest(Bundled) != Digest(Symbol):
+                    raise RuntimeError('Missing or stale packaged SolidArc icon: ' + Symbol.name)
+            if not (Installation / 'EngineContent/FontArchives/DMSans/DMSans-Regular.ttf').is_file():
+                raise RuntimeError('SolidArc requires the bundled DM Sans font')
         ShaderCounts = VerifyShaderSets(Installation)
         Project = Installation / 'Projects/Everest'
         Project.mkdir(parents=True)
@@ -107,6 +141,8 @@ def Main():
         Notices.mkdir()
         for Package, Filename in [('imgui', 'LICENSE.txt'), ('glfw', 'LICENSE.md'), ('tomlpp', 'LICENSE'), ('stb', 'LICENSE'), ('thorvg', 'LICENSE')]:
             shutil.copy2(RepositoryRoot / 'ExternalPackages' / Package / Filename, Notices / (Package + '-LICENSE.txt'))
+        if SolidArcExecutable is not None:
+            shutil.copy2(RepositoryRoot / 'ExternalPackages/volk/LICENSE.md', Notices / 'volk-LICENSE.txt')
         shutil.copytree(RepositoryRoot / 'ExternalPackages/vulkan-headers/LICENSES', Notices / 'Vulkan-Headers')
         shutil.copy2(RepositoryRoot / 'Engine/Interface/Lucide.NOTICE', Notices / 'Lucide.NOTICE')
         shutil.copy2(RepositoryRoot / 'Documentation/SourceNotices.md', Notices / 'SourceNotices.md')
@@ -116,6 +152,8 @@ def Main():
             'format': 1, 'target': 'Windows x64', 'toolchain': Arguments.toolchain, 'revision': Revision,
             'uncommitted_changes': bool(subprocess.check_output(['git', 'status', '--porcelain', '--untracked-files=no'], cwd=RepositoryRoot)),
             'signed': False, 'antivirus_scanned': False, 'windows_runtime_verified': False,
+            'solidarc': {'included': SolidArcExecutable is not None,
+                         'executable_sha256': Digest(SolidArcExecutable) if SolidArcExecutable is not None else None},
             'scene_viewport': 'Project Everest > Scene Viewport: ported VehicleHMI ReSTIR GI + PlanetaryAtmosphere environment',
             'omitted': ['EngineContent/MaterialArchives', 'Projects/Everest/Content/MaterialArchives'] if Arguments.omit_material_archives else [],
             'shader_sets': ShaderCounts, 'startup_files_verified': StartupFiles + StartupFolders,

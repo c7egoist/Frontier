@@ -20,6 +20,9 @@
 #include "UI/Editor/ProjectBrowserPanel.h"
 #include "EverestWorkspace.h"
 #include "EverestSceneViewport.h"
+#ifdef FRONTIER_SOLIDARC_ENABLED
+#include "UI/SolidArc/Browser/SolidArcBrowserLink.h"
+#endif
 #include <windows.h>
 #include <commdlg.h>
 #include <shlobj.h>
@@ -200,6 +203,10 @@ int main()
         }
         if (std::filesystem::exists(EverestProjectPath))
             Browser->AttachPaths({EverestProjectPath}, false);
+#ifdef FRONTIER_SOLIDARC_ENABLED
+        // 📝 SolidArc: .solidarc previews come from the SolidArc library; "Open in SolidArc" starts SolidArcWorkspace.exe.
+        Frontier::SolidArc::ConnectSolidArcBrowser(*Browser, {Frontier::SolidArc::LocateSolidArcWorkspace()});
+#endif
         Frontier::DiagnosticJournal::Append("Startup", "Project Browser initialized");
     };
     Callbacks.InitializeVulkan = [&](Frontier::VulkanPresentation &Display)
@@ -242,6 +249,18 @@ int main()
                 }
             }
             catch (const std::exception &Failure) { NoteFailure("QueryThumbnailImage", Failure); }
+            return Image;
+        };
+        Browser->QueryConfiguredThumbnail = [&](const std::string &Key, const Frontier::BrowserPreviewConfiguration &Configuration)
+        {
+            Frontier::BrowserPreviewImage Image;
+            try
+            {
+                PreviewRendering->RequestThumbnail(Key, Configuration);
+                if (!PreviewRendering->QueryThumbnail(Key).Ready) return Image;
+                Image.Texture = (uint64_t)Describe(PreviewRendering->QueryThumbnailView(Key));
+            }
+            catch (const std::exception &Failure) { NoteFailure("QueryConfiguredThumbnail", Failure); }
             return Image;
         };
         Browser->QueryLiveImage = [&]()

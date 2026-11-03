@@ -140,3 +140,15 @@ earlier builder comparison. The report and plan live in `Documentation/Plans/Ong
 measured refinements (`RefreshToggles::Refinements`), against converged references. Its new shader unit is
 `Frontier/Engine/Shaders/GlobalIllumination/PenumbraResolve.slang`. The report lives in
 `Documentation/Plans/Ongoing/RayTracedLighting.md`.
+
+## SolidArc CAD ownership
+
+- `Engine/GeometryProcessing/`: reusable CAD B-rep, curves, surfacing, feature tree and exchange.
+- `Engine/Render/OrbitCamera.*` and `Engine/Render/Shader/{CadStroke,MatCapLookup}.slang`: CAD camera/math.
+- `UI/SolidArc/`: CAD document, interface, browser connection, viewport and stored shaders.
+- `Experimental/SolidArc/Native/`: CAD executable, CMake integration, package configuration and shader compilation.
+- `Exhibits/SolidArc/Code/` and `Exhibits/GeometryProcessing/Code/`: CAD verification and fixtures.
+- `EngineContent/Icons/SolidArc/`: CAD SVG artwork in the existing content directory.
+
+No parallel ImGui/interface/font framework is introduced. The existing scene renderer and project startup remain owned
+by their current directories; CAD editing is a separate workspace launched by the project browser.

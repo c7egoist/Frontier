@@ -82,8 +82,8 @@ target_include_directories(FrontierVectorAuthoring PRIVATE "${CMAKE_SOURCE_DIR}/
 target_link_libraries(FrontierVectorAuthoring PUBLIC thorvg_static)
 add_library(FrontierTextureStudioUI STATIC UI/TextureStudio/MaterialLibraryPanel.cpp UI/TextureStudio/PatternWorkspacePanel.cpp
     UI/TextureStudio/StampWorkspacePanel.cpp UI/TextureStudio/BakingWorkspacePanel.cpp UI/TextureStudio/TexturePaintWorkspacePanel.cpp
-    UI/TextureStudio/PaintStampEngine.cpp UI/TextureStudio/PaintStampTools.cpp UI/TextureStudio/StampLibrary.cpp UI/TextureStudio/PanelChrome.cpp
-    UI/TextureStudio/PatternThumbnailRaster.cpp UI/TextureStudio/TypefaceCatalogue.cpp UI/TextureStudio/VectorMaskControls.cpp Engine/Interface/VectorAuthoringControls.cpp
+    UI/TextureStudio/PaintStampEngine.cpp UI/TextureStudio/PaintStampTools.cpp UI/TextureStudio/StampLibrary.cpp
+    UI/TextureStudio/PatternThumbnailRaster.cpp UI/TextureStudio/TypefaceCatalogue.cpp UI/TextureStudio/VectorMaskControls.cpp
     Engine/ContentInterchange/BakeMesh.cpp Engine/ContentInterchange/BakeField.cpp Engine/ContentInterchange/VolumeDistanceField.cpp Engine/ContentInterchange/VolumePreview.cpp Engine/ContentInterchange/BakeSurfaceImport.cpp Engine/ContentInterchange/BakeTiledOutput.cpp
     Engine/Render/StbImageWriteImplementation.cpp)
 target_link_libraries(FrontierTextureStudioUI PUBLIC FrontierMaterialLibrary FrontierInterface FrontierVectorAuthoring)
@@ -106,6 +106,10 @@ add_library(FrontierInterface STATIC
 target_include_directories(FrontierInterface PUBLIC "${CMAKE_SOURCE_DIR}"
     "${CMAKE_SOURCE_DIR}/ExternalPackages/tomlpp/include")
 target_link_libraries(FrontierInterface PUBLIC FrontierImGui thorvg_static FrontierTextFiles FrontierThumbnailAtlasCache)
+# Reuse the existing Texture Workspace controls and chrome without linking its painting implementation.
+add_library(FrontierAuthoringControls STATIC Engine/Interface/VectorAuthoringControls.cpp UI/TextureStudio/PanelChrome.cpp)
+target_link_libraries(FrontierAuthoringControls PUBLIC FrontierInterface FrontierVectorAuthoring)
+target_link_libraries(FrontierTextureStudioUI PUBLIC FrontierAuthoringControls)
 add_library(FrontierEditorUI STATIC UI/Editor/ProjectBrowserPanel.cpp UI/Editor/FoundationPanel.cpp UI/Editor/EditorWorkspace.cpp UI/Editor/ControlCentrePanel.cpp UI/Editor/ContentBrowserPanel.cpp)
 target_link_libraries(FrontierEditorUI PUBLIC FrontierInterface)
 target_compile_definitions(FrontierEditorUI PUBLIC FRONTIER_EDITOR=1)
@@ -735,3 +739,9 @@ include(Automation/EnvironmentRendering.cmake)
 include(Automation/VirtualizedGeometryRendering.cmake)
 include(Automation/AnalyticIlluminationRendering.cmake)
 include(Automation/GlobalIlluminationRendering.cmake)
+
+# SolidArc CAD workspace: reuse shared Frontier interface, dependencies and browser.
+option(FRONTIER_BUILD_SOLIDARC "Build the integrated SolidArc CAD workspace" ON)
+if(FRONTIER_BUILD_SOLIDARC)
+    include("${CMAKE_SOURCE_DIR}/Experimental/SolidArc/Native/SolidArc.cmake")
+endif()

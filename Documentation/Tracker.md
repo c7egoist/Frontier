@@ -1333,3 +1333,27 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
   global-illumination shaders, one analytic shader and three shader manifests, each identical to the stored archives.
   It replaces the package committed in `42386e7` (built at `28e7e41`, before the polish).
 - **Commits:** `92569e2 35cb1fc ca2cdd6 a2c33e6 62e765d 796c95d 28e7e41 42386e7 563c18b` and this binary commit.
+
+## SolidArc source integration against e72d319
+
+| Scope | Status | Evidence / remaining work |
+|---|---|---|
+| CAD source and browser connection | Locally verified | Exhibits/SolidArc/README.md and source-session evidence |
+| Existing Slate CAD fixes | Locally verified | 506 native checks; 300 rendered expectations |
+| New browser connection | Locally verified | 17 CPU checks; 15 Vulkan checks, including workspace process hand-off |
+| CAD regression | Locally verified | 869 green rows, no red |
+| Windows companion selection | Locally verified | 9 synthetic-PE packaging tests; not a Windows runtime test |
+| Windows host/runtime and product distribution | Not verified | Build and execute on Windows; preserve signing/AV policy |
+| Remote Frontier merge | Pending | This source port does not itself move the destination branch |
+| T-spline/CAD Form work | On hold | No implementation included |
+
+### SolidArc curve workflow revision — 2026-11-02
+
+| Change | Verification |
+|---|---|
+| Pointer split of native 3D curves | Exact knot split; real hover/click; original shape and one-step undo |
+| Live surface-distance editing | Linked target alone hydrates settings; field release applies; visible atomic refusals |
+| Three primary dock panels | Existing PanelDockspace; real tab drag, archived layout validation and reopening/reset |
+| Texture Workspace control reuse | Existing authoring surface and PanelChrome compiled once for both workspaces |
+| Guides and browser opening | Native guide plus Exhibits/SolidArc/CurveRebuildingGuide.md; existing browser hand-off retained |
+| Windows runtime / destination merge | Still pending; source checks are not a product binary or completed merge |
