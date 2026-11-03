@@ -1315,3 +1315,14 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
 - **Virtualized geometry checked:** with it on, the edits render alike (17.4 %). The check found that a change of the
   draw runs rebuilt the takeover and its two-pages-per-refresh streaming left the ground garbled for several refreshes
   (30.4 % changed after two); every page now streams in the refresh after a run-time rebuild (beyond the demo).
+- **All 21 ctest validations pass** (SwiftShader host): the 20 of the previous entry plus `ShapeArchiveBakeValidation`.
+- **Limits:** Fracture is a menu entry without an action and Physics an authored flag (Jolt later), as asked. The
+  reserve holds 512 occupants and the material blocks number 96. Picking meets the parts' bounding boxes, not their
+  triangles. There is no undo stack: Esc cancels a drag, and a removal stands until the level is reopened unsaved
+  (Ctrl+S saves). The speed on a GPU is not measured here (SwiftShader only).
+- **Windows binary:** `Binaries/FrontierSceneViewport-Windows-x64.zip` rebuilt at `28e7e41` (Zig 0.13.0 with Clang
+  18.1.6, material archives omitted): 24,855,759 bytes, 937 files, SHA-256
+  `67152daaea775fbc1eaaa2ba644370d5554ec819af7dd870324a14978716dd36`. Against the `b822b26` package: the twelve
+  `EngineContent/ShapeArchives` files (six `.toml`, six `.sdfspace`), `Frontier.exe`, `Package.json`, `README.md`, nine
+  global-illumination shaders, one analytic shader and three shader manifests, each identical to the stored archives.
+- **Commits:** `92569e2 35cb1fc ca2cdd6 a2c33e6 62e765d 796c95d 28e7e41` and this binary commit.
