@@ -63,7 +63,8 @@ const RenderSettingsCatalogue = (() =>
         DiffuseWaveletLevels: 4, DiffuseTallyLimit: 24, DiffuseMinimumWeight: 0.08, DiffuseColourSigma: 4.0,
         GlossyWaveletLevels: 3, GlossyTallyLimit: 12, GlossyMinimumWeight: 0.12, GlossyColourSigma: 3.0,
         AutoExposure: true, ExposureCompensation: 0.12,
-        VirtualizedGeometry: false, VirtualizedStreamSlots: 0, ClusteredGeometry: true, FreezeDistance: false,
+        VirtualizedGeometry: false, VirtualizedStreamSlots: 0, ClusteredGeometry: true, ClusterTriangles: 128, ClusterBounds: false,
+        FreezeDistance: false, LiveRefresh: true,
         Inspection: 0, DistanceInspection: 1, HudVisible: false, InsetEnabled: false, SliceHeight: 1.0,
         TargetRate: 60
     };
@@ -112,6 +113,7 @@ const RenderSettingsCatalogue = (() =>
         if (Key.startsWith('Diffuse') || Key.startsWith('Glossy'))
             if (!S.VarianceFilter) return Unavailable('denoiser off');
         if (Key === 'VirtualizedStreamSlots' && !S.VirtualizedGeometry) return Unavailable('virtualized geometry off');
+        if ((Key === 'ClusterTriangles' || Key === 'ClusterBounds') && !S.ClusteredGeometry) return Unavailable('cluster culling off');
         if (Key === 'DistanceInspection' && S.Inspection !== 6) return Unavailable('BVH / distance field view only');
         if (Key === 'SliceHeight' && !S.InsetEnabled) return Unavailable('slice inset off');
         return Available;
@@ -245,7 +247,8 @@ const RenderSettingsCatalogue = (() =>
         ['glossy_minimum_weight', S => S.GlossyMinimumWeight], ['glossy_colour_sigma', S => S.GlossyColourSigma],
         ['auto_exposure', S => S.AutoExposure], ['exposure_ev', S => S.ExposureCompensation],
         ['virtualized_geometry', S => S.VirtualizedGeometry], ['virtualized_stream_slots', S => S.VirtualizedStreamSlots],
-        ['clustered_geometry', S => S.ClusteredGeometry], ['freeze_distance', S => S.FreezeDistance],
+        ['clustered_geometry', S => S.ClusteredGeometry], ['max_cluster_triangles', S => S.ClusterTriangles],
+        ['cluster_bounds_overlay', S => S.ClusterBounds], ['freeze_distance', S => S.FreezeDistance], ['live_refresh', S => S.LiveRefresh],
         ['inspection_mode', S => S.Inspection], ['distance_inspection', S => S.DistanceInspection], ['readout_overlay', S => S.HudVisible],
         ['slice_inset', S => S.InsetEnabled], ['slice_height_m', S => S.SliceHeight]
     ];

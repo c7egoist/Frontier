@@ -245,7 +245,8 @@
     // 📝 What the editor will log for each change: the setting, its new reading, and what the renderer must rebuild for it.
     const Consequences = {
         RenderScale: 'render targets rebuilt', TraceScale: 'trace targets rebuilt', QualityTier: 'scene reloads at the new grade',
-        Renderer: 'refresh history cleared', Inspection: 'display only', VirtualizedGeometry: 'static sets re-recorded'
+        Renderer: 'refresh history cleared', Inspection: 'display only', VirtualizedGeometry: 'static sets re-recorded',
+        ClusterTriangles: 'clusters rebuilt', LiveRefresh: 'the viewport holds its last image while paused'
     };
     const LogEntries = [];
     let   LogPaused  = false;
@@ -696,7 +697,14 @@
                                       () => Settings.VirtualizedGeometry ? 'Virtualized' : Settings.ClusteredGeometry ? 'Clusters' : 'Direct');
         C.SwitchRow(Body, Bind('VirtualizedGeometry', { Label: 'Virtualized geometry', Detail: 'Cluster nesting of eligible static sets · recording calls from 6,452 to 10' }));
         C.SliderRow(Body, Bind('VirtualizedStreamSlots', { Label: 'Stream slots · 0 = one per page', Minimum: 0, Maximum: 64, Step: 1, Digits: 0 }));
-        C.SwitchRow(Body, Bind('ClusteredGeometry', { Label: 'GPU cluster culling', Detail: '128-triangle clusters culled on the GPU into indirect draws' }));
+        C.SwitchRow(Body, Bind('ClusteredGeometry', { Label: 'GPU cluster culling', Detail: 'Lossless clusters culled on the GPU into indirect draws' }));
+        C.SegmentedRow(Body, Bind('ClusterTriangles', { Label: 'Maximum triangles per leaf', Options: [['64', 64], ['128', 128], ['256', 256]],
+                                                        Tags: [['Rebuilds clusters', 'muted']] }));
+        C.SwitchRow(Body, Bind('ClusterBounds', { Label: 'Cluster bounds overlay', Detail: 'Green: GPU-visible · red: GPU-culled · grey: pending' }));
+        const Rebuild = C.Construct('button', 'pill-button', [C.ConstructGlyph('Reset'), C.Construct('span', null, 'Rebuild clusters')]);
+        Rebuild.type = 'button';
+        Rebuild.addEventListener('click', () => { AppendLog('RENDERING', 'Clusters rebuilt', `${Settings.ClusterTriangles} triangles per leaf`, 'warm'); C.Toast('Clusters rebuilt'); });
+        Body.append(C.Construct('div', 'action-row', Rebuild));
         ConstructStatGrid(Body, [['TLAS instances', '504'], ['TLAS entries', '1,007'], ['BLAS triangles', '20,878'],
                                  ['Occupants', '2,094'], ['Surface cards', '8,554'], ['Lamps', '30']]);
     }
@@ -753,6 +761,28 @@
         const Body = ConstructSection(Page, 'timing', 'Refresh timing', 'Activity', 'Timing',
                                       () => `${Catalog.EstimateSubmissions(Settings, ResolveViewportExtents()).Total.toFixed(1)} ms`);
         Caption(Body, 'Prototype estimate from the settings. In the editor these rows are the measured submission times of the last refresh.');
+        C.SwitchRow(Body, Bind('LiveRefresh', { Label: 'Live refresh', Detail: 'Pause to compare one still image against a change (A/B)' }));
+        // 📝 The demo's session recorder: the refresh times while recording, exported as CSV (refresh, milliseconds).
+        const Recorded = [];
+        let   Recording = false;
+        const RecordLabel = C.Construct('span', null, 'Record session');
+        const Record = C.Construct('button', 'pill-button', [C.ConstructGlyph('Activity'), RecordLabel]);
+        const Export = C.Construct('button', 'pill-button', [C.ConstructGlyph('Copy'), C.Construct('span', null, 'Copy CSV')]);
+        Record.type = Export.type = 'button';
+        Record.addEventListener('click', () =>
+        {
+            Recording = !Recording;
+            RecordLabel.textContent = Recording ? 'Pause recording' : `Record session · ${Recorded.length}`;
+            Record.classList.toggle('accent', Recording);
+        });
+        Export.addEventListener('click', () =>
+        {
+            const Text = ['refresh,milliseconds', ...Recorded.map((Milliseconds, Index) => `${Index},${Milliseconds.toFixed(3)}`)].join('\n');
+            (navigator.clipboard ? navigator.clipboard.writeText(Text) : Promise.reject()).then(() => C.Toast(`${Recorded.length} refreshes copied as CSV`),
+                                                                                              () => C.Toast('Copy unavailable here'));
+        });
+        Body.append(C.Construct('div', 'action-row', [Record, Export]));
+        LiveRefreshers.push(() => { if (Recording && Samples.length) { Recorded.push(Samples[Samples.length - 1]); RecordLabel.textContent = `Pause recording · ${Recorded.length}`; } });
         const List = C.Construct('div', 'timing-list');
         Body.append(List);
         C.Register(() =>
@@ -938,7 +968,7 @@
             if (Event.key === 'j' || Event.key === 'J') { Settings.InsetEnabled = !Settings.InsetEnabled; C.Broadcast(); }
         });
         C.Broadcast();
-        setInterval(() => { AdvanceSamples(); LiveRefreshers.forEach(Refresh => Refresh()); }, 100);
+        setInterval(() => { if (!Settings.LiveRefresh) return; AdvanceSamples(); LiveRefreshers.forEach(Refresh => Refresh()); }, 100);
     }
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', Initialize);
