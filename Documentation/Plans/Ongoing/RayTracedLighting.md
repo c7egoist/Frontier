@@ -48,7 +48,8 @@ at 480×270, whose 7.5–9 s refreshes make ratios more meaningful than millisec
    Rough surfaces keep the demo's filter, which their lobe needs.
 2. **Keep 🔍 `MirrorTrace` as a quality option.** It is the sharpest, but its cost grows with the screen area of smooth
    surfaces: the vehicle's clear coat will make that large.
-3. **Fix the reflections that vanish with indirect GI off** (§5), independent of the options.
+3. ✅ **Fixed (2026-11-03): the reflections no longer vanish with indirect GI off** (§5): `ReservoirTemporal`'s
+   guide-only entry `ProjectResamplingGuide` writes the guide when the resampling does not run (`a051e6a`).
 
 They are levelspace keys today, all off, so the 1:1 port stays the default until you decide (no controls, per your
 scope). In the Render settings record of `Projects/Everest/Content/Levels/Default.levelspace`, add `solar_disc = true`,
@@ -64,9 +65,12 @@ scope). In the Render settings record of `Projects/Everest/Content/Levels/Defaul
   most when the car returns.
 - ReSTIR's path vertices shade the sun through the same next-event estimate as the reflection hits, so 🌞 `SolarDisc`
   also removes highlight spikes from indirect light.
-- 🐞 **With indirect GI off, the RTX reflections vanish.** The glossy variance filter's temporal step, its wavelet and
+- ✅ **Fixed 2026-11-03 (`a051e6a`): with indirect GI off, the RTX reflections vanished.** The glossy variance filter's
+  temporal step, its wavelet and
   its screen upsample all take their validity guide from the ReSTIR temporal step (`ReservoirTemporal` writes
   `GuideViews`). Without indirect light that step does not run, the guide goes stale, and every half-resolution
   reflection texel is treated as invalid (zero). This is inherited from the demo's structure. A fix is to write the
   guide when indirect light is off (a guide-only entry of `ReservoirTemporal`), or to give the glossy filter a guide of
-  its own. 🔍 `MirrorTrace` is unaffected because it writes the screen directly.
+  its own. 🔍 `MirrorTrace` is unaffected because it writes the screen directly. The first fix is in: the entry runs only
+  with indirect light off, so the default refresh is unchanged (its SPIR-V is byte-identical). Before and after:
+  `Exhibits/SceneViewport/Images/ReflectionsIndirectOff.jpg`.

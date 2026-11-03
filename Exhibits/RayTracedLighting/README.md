@@ -106,9 +106,9 @@ direct stage itself varies about ±10 % between runs. The filter variants includ
 ## Results — reflections
 
 Measured with indirect light **on**: the glossy variance filter and its upsample take their validity guide from the
-ReSTIR step, so with indirect light off every half-resolution reflection is dropped (see the report, §5). The
-reference (`MirrorReference`) traces every reflective pixel 16 times at screen resolution and takes it unfiltered;
-figures cover the pane's and the cone's regions only.
+ReSTIR step, so with indirect light off every half-resolution reflection was dropped (see the report, §5; fixed
+since). The reference (`MirrorReference`) traces every reflective pixel 16 times at screen resolution and takes it
+unfiltered; figures cover the pane's and the cone's regions only.
 
 | View | Variant | Visible errors / refresh | Refresh RMS | Transition RMS | Temporal noise | Mean error (bias) | Reflection stages |
 |---|---|---:|---:|---:|---:|---:|---:|

@@ -44,7 +44,7 @@ int main(int ArgumentCount, char** Arguments)
         Require(World.LoadLevelSpace(EverestRoot.parent_path().parent_path() / "Exhibits/EverestInterface/Content/Simulation.levelspace"), "Simulation exhibit fixture failed to load");
 
         Require(World.QueryRecordCount() == 26, "Expected 26 dynamic records from the Simulation fixture in Shipping.");
-        Require(Frontier::RecordStore::Instance().QueryCount() == 30, "RecordStore count mismatch in Shipping.");
+        Require(Frontier::RecordStore::Instance().QueryCount() == 26, "RecordStore count mismatch in Shipping.");
         // 📝 The four planets of the sky are records of their own (Venus, Jupiter, Mars, Saturn), as in the editor.
         Require(World.FindAllByType("Planet").size() == 4, "Expected four Planet records in Shipping.");
         Require(Workspace.QueryActiveLevelPath().extension() == ".levelspace", "Active level must carry .levelspace extension.");

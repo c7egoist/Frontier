@@ -1336,7 +1336,19 @@ void SceneWorld::RegisterNativeEngineTypes()
     RegisterSimple.operator()<WindRecord>("Wind", "Environment · Wind Field", RecordClassification::Environment, "Wind", "Forcefield", "#a7f3d0");
 
     // Render settings (one record for the whole renderer) & Continuum Solver Types
-    RegisterSimple.operator()<RenderPipelineRecord>("RenderPipeline", "Render settings", RecordClassification::Illumination, "Monitor", "Rendering", "#9fb4d6");
+    RegisterType({"RenderPipeline", "Render settings", RecordClassification::Illumination,
+        [](std::string Name) -> std::unique_ptr<SceneRecordBase>
+        {
+            auto Entry = std::make_unique<RenderPipelineRecord>(RecordClassification::Illumination, "RenderPipeline", std::move(Name), "Monitor",
+                                                                "Rendering", "#9fb4d6");
+#if FRONTIER_EDITOR
+            // 📝 The renderer's one component: the editor offers no Remove for it (the level would render with defaults).
+            SceneDirectoryMetadata Meta = SceneDirectory::Instance().QueryMetadata(Entry->QueryToken());
+            Meta.RemovableInEditor      = false;
+            (void)SceneDirectory::Instance().ConfigureMetadata(Entry->QueryToken(), std::move(Meta));
+#endif
+            return Entry;
+        }});
     RegisterSimple.operator()<FluidPlumeRecord>("FluidPlume", "Solver · Fluid Plume", RecordClassification::Physics, "Flame", "Solvers", "#e8833a");
     RegisterSimple.operator()<FractureRecord>("Fracture", "Solver · Voronoi Fracture", RecordClassification::Physics, "Hammer", "Solvers", "#8fb3a4");
     RegisterSimple.operator()<ParticleRecord>("Particles", "Solver · GPU Particles", RecordClassification::Physics, "Sparkles", "Solvers", "#b494f4");
