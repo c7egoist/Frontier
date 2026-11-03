@@ -8,6 +8,10 @@ markers) and the Frontier Editor's Sun, Post Process and Fracture inspectors (ca
 tiles, live parameter map). Colours are the C++ `InspectorPalette` (dark branch) value for value; the accent stands for
 `ThemePalette::QueryAccentColor()`. Faces are DM Sans and JetBrains Mono, as `EditorTypefaces` loads them.
 
+![The prototype: outliner, viewport with Log Stream, and the Render settings inspector](Preview.jpg)
+
+![Inspector sections: resolution and sampling, GI, reflections, denoising, exposure, geometry, debug views, timing](Sections.jpg)
+
 ## Open it
 
 ```sh
