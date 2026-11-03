@@ -1279,3 +1279,8 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
 - **Limits:** copies are limited to the archive's occupants per object; Dynamic, Cast shadows, GI and Physics are
   authored flags (no per-object renderer switch yet, physics later); materials are read-only (shared families);
   geometry objects are not added or removed in the editor.
+- **Windows binary:** `Binaries/FrontierSceneViewport-Windows-x64.zip` rebuilt at `b822b26` (Zig 0.13.0, material
+  archives omitted): 24,618,034 bytes, 925 files, SHA-256
+  `e26511b8abde5e17e81aeed4ca2a527102243dc2ff465c4759be030d98ce46dd`. Against the `c22acd8` package: `Frontier.exe`,
+  `Package.json`, `Default.levelspace` (53 records, 37 of them `Geometry`) and `README.md` (a Scene objects section).
+- **Commits:** `0ef104c 0ae82b1 99c0f6c 16163aa 9b9be69 b822b26` and this binary commit.
