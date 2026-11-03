@@ -1142,8 +1142,8 @@ void EverestWorkspace::ConstructViewportSurface()
         Request.PickPoint           = PickPoint;
         Image       = PresentSceneViewport(Request);
         LastReadout = Image.Readout;
-        // 📝 GPU picking answers a click one interface tick later, from the image the click was made on; a click on the ground,
-        //    the sky or nothing pickable leaves the selection as it is.
+        // 📝 GPU picking answers a click one interface tick later, from the image the click was made on; a click on the sky or on
+        //    nothing a record owns leaves the selection as it is.
         if (LastReadout.Pick.Serial != 0 && LastReadout.Pick.Serial == PickSerial && PickApplied != PickSerial)
         {
             PickApplied = PickSerial;

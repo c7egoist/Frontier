@@ -75,11 +75,11 @@ class SceneGeometryOccupancy
     [[nodiscard]] const std::vector<Frontier::ShapeArchive>& QueryShapes() const noexcept { return Shapes_; }
     [[nodiscard]] uint32_t QueryReserveFree() const noexcept { return static_cast<uint32_t>(ReserveFree_.size()); }
 
-    // 📝 GPU picking: the record that shows an occupant (every part and copy of every record), replaced with the resolutions; empty
-    //    for the ground, the vehicle and occupants no record holds.
+    // 📝 GPU picking: the record that shows an occupant (every part and copy of every record; the ground is the Proving ground's),
+    //    replaced with the resolutions; empty for the vehicle and occupants no record holds.
     [[nodiscard]] std::optional<uint64_t> QueryOwner(uint32_t Occupant) const;
     // 📝 The record a pick selects: the one drawn at the picked pixel, else the nearest one drawn within the pick's reach (thin parts
-    //    stay easy to hit); empty where only the ground, the sky or occupants no record holds are near the pointer.
+    //    stay easy to hit); empty where only the sky or occupants no record holds are near the pointer.
     [[nodiscard]] std::optional<uint64_t> ResolvePickedRecord(const Frontier::GlobalIllumination::OccupantPick& Pick) const;
 
   private:

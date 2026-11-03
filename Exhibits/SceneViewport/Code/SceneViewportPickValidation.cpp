@@ -108,11 +108,13 @@ RayAnswer CastRay(const std::vector<WorldFacet>& Facets, const Vector3& Origin, 
         if (std::fabs(Determinant) < 1.0e-20) continue;
         const double Inverse = 1.0 / Determinant;
         const double T[3]    = {Origin[0] - Facet.Corner[0], Origin[1] - Facet.Corner[1], Origin[2] - Facet.Corner[2]};
+        // 📝 A loose barycentric bound first; the outline test below works in pixels (a long, thin facet's barycentric margin
+        //    says little about how far the ray passes it).
         const double U       = (T[0] * P[0] + T[1] * P[1] + T[2] * P[2]) * Inverse;
-        if (U < -1.0e-3 || U > 1.0 + 1.0e-3) continue;
+        if (U < -0.5 || U > 1.5) continue;
         const double Q[3] = {T[1] * A[2] - T[2] * A[1], T[2] * A[0] - T[0] * A[2], T[0] * A[1] - T[1] * A[0]};
         const double V    = (Direction[0] * Q[0] + Direction[1] * Q[1] + Direction[2] * Q[2]) * Inverse;
-        if (V < -1.0e-3 || U + V > 1.0 + 1.0e-3) continue;
+        if (V < -0.5 || U + V > 1.5) continue;
         const double Travel = (B[0] * Q[0] + B[1] * Q[1] + B[2] * Q[2]) * Inverse;
         if (Travel <= 0.0) continue;
         // 📝 Barycentric coordinate × the facet's height over that edge = the distance to the edge (negative: just outside it).
@@ -123,6 +125,7 @@ RayAnswer CastRay(const std::vector<WorldFacet>& Facets, const Vector3& Origin, 
         const double Weights[3] = {1.0 - U - V, U, V};
         double       Margin     = std::numeric_limits<double>::max();
         for (int Edge = 0; Edge < 3; ++Edge) Margin = std::min(Margin, Weights[Edge] * Twice / std::max(Lengths[Edge], 1.0e-12));
+        if (Margin < -0.1 * PixelSlope * Travel) continue;   // [-] more than 0.1 px outside: not a candidate
         Hits.push_back({Travel, Margin, Facet.Occupant});
     }
     RayAnswer Answer;
@@ -156,8 +159,45 @@ RayAnswer CastRay(const std::vector<WorldFacet>& Facets, const Vector3& Origin, 
     return Answer;
 }
 
+// 📝 For a disagreement: how the ray passes an occupant's facets (the hit with the widest margin, negative when outside every facet).
+std::string DescribePassage(const std::vector<WorldFacet>& Facets, const Vector3& Origin, const Vector3& Direction, double PixelSlope, uint32_t Occupant)
+{
+    double BestMargin = -std::numeric_limits<double>::max(), BestTravel = 0.0;
+    for (const WorldFacet& Facet : Facets)
+    {
+        if (Facet.Occupant != Occupant) continue;
+        const double A[3] = {Facet.EdgeA[0], Facet.EdgeA[1], Facet.EdgeA[2]};
+        const double B[3] = {Facet.EdgeB[0], Facet.EdgeB[1], Facet.EdgeB[2]};
+        const double P[3] = {Direction[1] * B[2] - Direction[2] * B[1], Direction[2] * B[0] - Direction[0] * B[2], Direction[0] * B[1] - Direction[1] * B[0]};
+        const double Determinant = A[0] * P[0] + A[1] * P[1] + A[2] * P[2];
+        if (std::fabs(Determinant) < 1.0e-20) continue;
+        const double T[3] = {Origin[0] - Facet.Corner[0], Origin[1] - Facet.Corner[1], Origin[2] - Facet.Corner[2]};
+        const double U    = (T[0] * P[0] + T[1] * P[1] + T[2] * P[2]) / Determinant;
+        const double Q[3] = {T[1] * A[2] - T[2] * A[1], T[2] * A[0] - T[0] * A[2], T[0] * A[1] - T[1] * A[0]};
+        const double V    = (Direction[0] * Q[0] + Direction[1] * Q[1] + Direction[2] * Q[2]) / Determinant;
+        const double Travel = (B[0] * Q[0] + B[1] * Q[1] + B[2] * Q[2]) / Determinant;
+        if (Travel <= 0.0) continue;
+        const double Normal[3] = {A[1] * B[2] - A[2] * B[1], A[2] * B[0] - A[0] * B[2], A[0] * B[1] - A[1] * B[0]};
+        const double Twice     = std::sqrt(Normal[0] * Normal[0] + Normal[1] * Normal[1] + Normal[2] * Normal[2]);
+        const double Lengths[3] = {std::sqrt((B[0] - A[0]) * (B[0] - A[0]) + (B[1] - A[1]) * (B[1] - A[1]) + (B[2] - A[2]) * (B[2] - A[2])),
+                                   std::sqrt(B[0] * B[0] + B[1] * B[1] + B[2] * B[2]), std::sqrt(A[0] * A[0] + A[1] * A[1] + A[2] * A[2])};
+        const double Weights[3] = {1.0 - U - V, U, V};
+        double       Margin     = std::numeric_limits<double>::max();
+        for (int Edge = 0; Edge < 3; ++Edge) Margin = std::min(Margin, Weights[Edge] * Twice / std::max(Lengths[Edge], 1.0e-12));
+        if (Margin > BestMargin)
+        {
+            BestMargin = Margin;
+            BestTravel = Travel;
+        }
+    }
+    char Text[160];
+    std::snprintf(Text, sizeof(Text), "#%u at %.4f m, %.3f px %s its facets", Occupant, BestTravel, std::fabs(BestMargin) / (PixelSlope * std::max(BestTravel, 1.0e-9)),
+                  BestMargin >= 0.0 ? "inside" : "outside");
+    return Text;
+}
+
 // 📝 The replaced method: the nearest bounding box of a record's drawn part (its facet set's local bounds in its placement) that the
-//    ray enters; a box around the camera counts at its far wall. The ground, its tiles and anything no record owns held no box.
+//    ray enters; a box around the camera counts at its far wall. Occupants no record owns held no box.
 uint32_t CastBoxes(const SceneStructure& Scene, const std::vector<char>& Owned, const Vector3& Origin, const Vector3& Direction)
 {
     uint32_t Nearest = OccupantPick::NoOccupant;
@@ -235,6 +275,21 @@ int main(int ArgumentCount, char** Arguments)
         Pipeline->AccessConfiguration().HardwareRayQueryTier = false;
         Pipeline->AccessConfiguration().AnalyticIllumination = true;
         Pipeline->AccessConfiguration().AdvanceRevision();
+        // 📝 A 4 m engine torus lying on open ground: its bounding box covers its 1.6 m hole.
+        const Frontier::RecordToken TorusToken = World.ConstructRecord("Geometry", "Torus");
+        {
+            auto& Torus = dynamic_cast<Frontier::GeometryRecord*>(World.FindRecord(TorusToken))->AccessConfiguration();
+            Torus.OccupantStems.clear();
+            Torus.ClaimsArchive = false;
+            Torus.ShapeName     = "Torus";
+            const float At[3]   = {-44.0f, -21.0f, 0.6f};
+            for (int Axis = 0; Axis < 3; ++Axis)
+            {
+                Torus.Spatial.PositionMetres[Axis] = At[Axis];
+                Torus.Spatial.Scale[Axis]          = 4.0f;
+            }
+            Torus.AdvanceRevision();
+        }
         Everest::EverestSceneViewport Bridge(Project, Shaders, nullptr);
 
         // 📝 The workspace's default view (SceneViewportFlight): position, heading 37.57°, elevation −5.23°.
@@ -279,9 +334,9 @@ int main(int ArgumentCount, char** Arguments)
         const ViewSample Views[] = {{"default view", Default},
                                     {"low, toward the tower", LookFrom({-34.0, -14.0, 2.4}, {-8.0, 6.0, 2.6})},
                                     {"high, over the course", LookFrom({-12.0, -46.0, 28.0}, {-10.0, 4.0, 0.0})}};
-        std::string Table = "| View | Picks | Pixels compared | Decided | Agree | Bounding box would differ | Pick ms (mean) |\n"
+        std::string Table = "| View | Picks | Pixels compared | Decided | Agree | Bounding box names another record | Pick ms (mean) |\n"
                             "|---|---:|---:|---:|---:|---:|---:|\n";
-        size_t TotalDecided = 0, TotalAgree = 0, TotalCompared = 0, TotalBox = 0, TotalPicks = 0;
+        size_t TotalDecided = 0, TotalAgree = 0, TotalCompared = 0, TotalBox = 0, TotalPicks = 0, TotalCovered = 0, TotalMisnamed = 0;
         double TotalMilliseconds = 0.0;
         uint32_t                OwnedOccupant = OccupantPick::NoOccupant;
         std::array<uint32_t, 2> OwnedPixel{}, SkyPixel{};
@@ -320,8 +375,11 @@ int main(int ArgumentCount, char** Arguments)
                             ++Decided;
                             Agree += Seen == Answer.Occupant ? 1 : 0;
                             if (Seen != Answer.Occupant)
-                                std::printf("      %s pixel (%lld, %lld): GPU %u, triangles %u\n", View.Name, static_cast<long long>(X), static_cast<long long>(Y), Seen,
-                                            Answer.Occupant);
+                                std::printf("      %s pixel (%lld, %lld): GPU %u (%s), triangles %u (%s)\n        GPU's: %s\n        reference's: %s\n", View.Name,
+                                            static_cast<long long>(X), static_cast<long long>(Y), Seen, Seen < Scene.Occupants.size() ? Scene.Occupants[Seen].Name.c_str() : "-",
+                                            Answer.Occupant, Answer.Occupant < Scene.Occupants.size() ? Scene.Occupants[Answer.Occupant].Name.c_str() : "-",
+                                            DescribePassage(Facets, Near, Direction, PixelSlope, Seen).c_str(),
+                                            DescribePassage(Facets, Near, Direction, PixelSlope, Answer.Occupant).c_str());
                             if (OffsetX == 0 && OffsetY == 0)
                             {
                                 // 📝 Records compared, not parts: a box on another part of the same record selects the same thing.
@@ -343,9 +401,27 @@ int main(int ArgumentCount, char** Arguments)
                             }
                         }
                 }
-            char Line[200];
-            std::snprintf(Line, sizeof(Line), "| %s | %zu | %zu | %zu | %zu | %zu of %zu picks | %.0f |\n", View.Name, Picks, Compared, Decided, Agree, BoxDiffers, Picks,
-                          Milliseconds / std::max<size_t>(1, Picks));
+            // 📝 The whole view on the CPU (every second pixel): where a bounding-box pick names another record than the one drawn.
+            size_t Covered = 0, Misnamed = 0;
+            for (uint32_t Y = 0; Y < Extent[1]; Y += 2)
+                for (uint32_t X = 0; X < Extent[0]; X += 2)
+                {
+                    const double    NdcX      = (X + 0.5) / Extent[0] * 2.0 - 1.0;
+                    const double    NdcY      = 1.0 - (Y + 0.5) / Extent[1] * 2.0;
+                    const Vector3   Near      = TransformPoint(Unprojection, {NdcX, NdcY, 1.0});
+                    const Vector3   Direction = NormalizeVector(SubtractVector(TransformPoint(Unprojection, {NdcX, NdcY, 0.5}), Near));
+                    const RayAnswer Answer    = CastRay(Facets, Near, Direction, PixelSlope);
+                    if (!Answer.Decided) continue;
+                    const uint32_t Boxed = CastBoxes(Scene, Owned, Near, Direction);
+                    const auto     Drawn = Answer.Occupant != OccupantPick::NoOccupant ? Objects.QueryOwner(Answer.Occupant) : std::nullopt;
+                    ++Covered;
+                    Misnamed += (Boxed != OccupantPick::NoOccupant ? Objects.QueryOwner(Boxed) : std::nullopt) != Drawn ? 1 : 0;
+                }
+            TotalCovered += Covered;
+            TotalMisnamed += Misnamed;
+            char Line[240];
+            std::snprintf(Line, sizeof(Line), "| %s | %zu | %zu | %zu | %zu | %zu of %zu picks; %.1f %% of the view | %.0f |\n", View.Name, Picks, Compared, Decided, Agree,
+                          BoxDiffers, Picks, 100.0 * Misnamed / std::max<size_t>(1, Covered), Milliseconds / std::max<size_t>(1, Picks));
             Table += Line;
             TotalDecided += Decided;
             TotalAgree += Agree;
@@ -357,9 +433,39 @@ int main(int ArgumentCount, char** Arguments)
                                                         std::to_string(Decided) + " decided pixels (" + std::to_string(Compared - Decided) + " at an outline or a coplanar overlap)");
         }
         Report(TotalDecided >= TotalCompared * 9 / 10, std::to_string(TotalDecided) + " of " + std::to_string(TotalCompared) + " compared pixels are decided by the reference");
-        std::printf("bounding boxes would have chosen another object than the one drawn at %zu of %zu picked pixels\n", TotalBox, TotalPicks);
+        std::printf("bounding boxes would have chosen another object than the one drawn at %zu of %zu picked pixels and at %zu of %zu pixels "
+                    "of the three views (%.1f %%)\n", TotalBox, TotalPicks, TotalMisnamed, TotalCovered, 100.0 * TotalMisnamed / std::max<size_t>(1, TotalCovered));
 
-        // ④ the editor's path: a click's serial and stage point answered with the record drawn there, from the last image
+        // ④ the torus's hole: a click there picks what is seen through it, where the torus's bounding box took the click
+        {
+            uint32_t TorusOccupant = OccupantPick::NoOccupant;
+            for (uint32_t Occupant = 0; Occupant < Scene.Occupants.size(); ++Occupant)
+                if (Objects.QueryOwner(Occupant) == TorusToken.Value) TorusOccupant = Occupant;
+            const ViewportCamera          Hole           = LookFrom({-44.0, -27.0, 14.0}, {-44.0, -21.0, 0.6});
+            const Transform               ViewProjection = Frontier::GlobalIllumination::SceneViewport::ResolveViewProjection(Hole, Extent);
+            const Transform               Unprojection   = InvertTransform(ViewProjection);
+            const Vector3                 Centre         = TransformPoint(ViewProjection, {-44.0, -21.0, 0.6});
+            const std::array<uint32_t, 2> Pixel = {static_cast<uint32_t>((Centre[0] * 0.5 + 0.5) * Extent[0]), static_cast<uint32_t>((0.5 - Centre[1] * 0.5) * Extent[1])};
+            OccupantPick Pick;
+            if (!Viewport->PickOccupants(Hole, Extent, Pixel, Pick, &Diagnostic)) throw std::runtime_error("pick failed: " + Diagnostic);
+            const double    NdcX      = (Pixel[0] + 0.5) / Extent[0] * 2.0 - 1.0;
+            const double    NdcY      = 1.0 - (Pixel[1] + 0.5) / Extent[1] * 2.0;
+            const Vector3   Near      = TransformPoint(Unprojection, {NdcX, NdcY, 1.0});
+            const Vector3   Direction = NormalizeVector(SubtractVector(TransformPoint(Unprojection, {NdcX, NdcY, 0.5}), Near));
+            const RayAnswer Answer    = CastRay(Facets, Near, Direction, 2.0 * std::tan(0.5 * Hole.VerticalFieldOfView) / Extent[1]);
+            const uint32_t  Seen      = Pick.QueryOccupant(0, 0);
+            const uint32_t  Boxed     = CastBoxes(Scene, Owned, Near, Direction);
+            size_t          Ring      = 0;
+            for (const uint32_t Occupant : Pick.Occupants) Ring += Occupant == TorusOccupant ? 1 : 0;
+            const auto Picked = Objects.ResolvePickedRecord(Pick);
+            Report(TorusOccupant != OccupantPick::NoOccupant && Answer.Decided && Seen == Answer.Occupant && Seen != TorusOccupant && Boxed == TorusOccupant &&
+                       Picked != TorusToken.Value,
+                   "the torus's hole (pixel " + std::to_string(Pixel[0]) + ", " + std::to_string(Pixel[1]) + "): the GPU pick finds #" + std::to_string(Seen) + " (" +
+                       (Seen < Scene.Occupants.size() ? Scene.Occupants[Seen].Name : std::string("nothing")) + ") as the triangles do, the torus's box took it " +
+                       "(#" + std::to_string(Boxed) + "); " + std::to_string(Ring) + " of 81 neighbourhood texels show the torus's ring");
+        }
+
+        // ⑤ the editor's path: a click's serial and stage point answered with the record drawn there, from the last image
         Report(OwnedOccupant != OccupantPick::NoOccupant && SkyFound, "the default view has a pixel on a record's part and one on the sky");
         if (OwnedOccupant != OccupantPick::NoOccupant)
         {
@@ -384,10 +490,11 @@ int main(int ArgumentCount, char** Arguments)
             Report(Again.Readout.Pick.Serial == 2, "an unchanged serial is not picked again (the answer stays)");
         }
 
-        char Summary[240];
+        char Summary[320];
         std::snprintf(Summary, sizeof(Summary), "\nGPU picks: %zu, mean %.0f ms on this device; %zu of %zu decided pixels agree with the triangles; bounding boxes "
-                                                "would differ at %zu of %zu picks\n",
-                      TotalPicks, TotalMilliseconds / std::max<size_t>(1, TotalPicks), TotalAgree, TotalDecided, TotalBox, TotalPicks);
+                                                "would differ at %zu of %zu picks and at %.1f %% of the views' pixels\n",
+                      TotalPicks, TotalMilliseconds / std::max<size_t>(1, TotalPicks), TotalAgree, TotalDecided, TotalBox, TotalPicks,
+                      100.0 * TotalMisnamed / std::max<size_t>(1, TotalCovered));
         Table += Summary;
         std::ofstream(Scratch / "SceneViewportPickValidation.md") << Table;
         std::printf("\n%s", Table.c_str());

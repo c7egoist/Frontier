@@ -60,7 +60,7 @@ struct SceneViewportRequest
 struct SceneViewportPick
 {
     uint64_t                Serial       = 0;              // [-] the request's PickSerial this answers; 0 = none yet
-    std::optional<uint64_t> Record{};                      // [-] record token value; empty: the ground, the sky or nothing pickable
+    std::optional<uint64_t> Record{};                      // [-] record token value; empty: the sky or nothing a record owns
     uint32_t                Occupant     = 0xFFFFFFFFu;    // [-] scene occupant at the clicked pixel (0xFFFFFFFF: none)
     double                  Milliseconds = 0.0;            // [ms] the pick's round trip on the device
     std::string             Failure{};                     // [-] why nothing could be picked
