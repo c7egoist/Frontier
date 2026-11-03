@@ -42,6 +42,7 @@ export interface RenderSettings {
   showCities: boolean;
   showWaterSlice: boolean;
   showLodRings: boolean;
+  showLodOverlay: boolean;
   wireframeLod: boolean;
   timeScale: number;
   paused: boolean;
@@ -63,11 +64,14 @@ export const DEFAULT_SETTINGS: RenderSettings = {
   showCities: true,
   showWaterSlice: false,
   showLodRings: true,
+  showLodOverlay: false,
   wireframeLod: false,
   timeScale: 1,
   paused: false,
   terrainDetail: 1,
 };
+
+export const TERRAIN_GRID = 480;
 
 export interface WaterStats {
   frameMs: number;
@@ -106,6 +110,11 @@ export class Renderer {
   private terrainBg: GPUBindGroup | null = null;
   private cityBg: GPUBindGroup | null = null;
   private mapBg: GPUBindGroup | null = null;
+  private bakeLayers: { height: Float32Array; bathy: Float32Array } | null = null;
+  private lastCities: Float32Array | null = null;
+  private simResolution = 0;
+  private needsReset = false;
+  private needsSeed = false;
   private postBg: GPUBindGroup | null = null;
   private ringBuffers: GPUBuffer[] = [];
   private oceanBgs: GPUBindGroup[] = [];
@@ -197,6 +206,8 @@ export class Renderer {
     this.cascades = cascades;
     this.cascadeGpu = createCascadeResources(this.device, cascades, this.pipelines.layouts);
     this.uploadCascadeStatics();
+    // The shallow-water sim samples cascade 0, so it can only be built once cascades exist.
+    if (this.bathyTexture) this.buildSimResources();
   }
 
   private uploadCascadeStatics() {
@@ -224,7 +235,8 @@ export class Renderer {
     this.heightTex = textures.height;
 
     // Terrain index buffer: quads as triangles, row-major grid.
-    const n = Math.min(480, size - 1);
+    // Terrain grid is a fixed 480x480 quads regardless of bake resolution; indices are shared.
+    const n = TERRAIN_GRID;
     const verts = n + 1;
     const idxCount = n * n * 6;
     const indices = new Uint32Array(idxCount);
@@ -276,6 +288,9 @@ export class Renderer {
       ],
     });
     this.bathyTexture = textures.bathy;
+    this.bakeLayers = layers;
+    this.lastCities = cities;
+    this.cityCount = cities.length / 4;
     this.buildSimResources();
   }
 
@@ -283,9 +298,11 @@ export class Renderer {
   private cityData: Float32Array = new Float32Array(0);
 
   private buildSimResources() {
-    if (!this.pipelines) return;
+    if (!this.pipelines || !this.bathyTexture || this.cascadeGpu.length === 0) return;
     const d = this.device;
     const n = this.settings.simResolution;
+    if (this.simResolution === n && this.simPing) return;
+    this.simResolution = n;
     for (const t of this.simPing ?? []) t.destroy();
     const mk = (label: string) => createTexture(d, label, n, n, HDR_FORMAT,
       GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST);
@@ -303,6 +320,22 @@ export class Renderer {
       ],
     });
     this.simBgs = [bg(this.simPing[0]), bg(this.simPing[1])];
+    this.needsSeed = true;
+  }
+
+  /** One-shot: fill the sim from the spectrum so the near field starts in agreement. */
+  private seedSim() {
+    if (!this.simBgs || !this.simPing || !this.pipelines) return;
+    const enc = this.device.createCommandEncoder({ label: 'sim-seed' });
+    const pass = enc.beginComputePass({ label: 'sim-seed' });
+    pass.setPipeline(this.pipelines.simSeed);
+    pass.setBindGroup(0, this.simBgs[0]);
+    const wg = Math.ceil(this.settings.simResolution / 8);
+    pass.dispatchWorkgroups(wg, wg);
+    pass.end();
+    this.device.queue.submit([enc.finish()]);
+    this.simParity = 0;
+    this.needsSeed = false;
   }
 
   private ensureTargets(w: number, h: number) {
@@ -369,7 +402,8 @@ export class Renderer {
       worldSize: this.bake?.worldSize ?? 1e7,
       halfWorld,
       spectrumN: this.settings.spectrumSize,
-      gridN: Math.min(480, (this.bake?.size ?? 481) - 1),
+      gridN: TERRAIN_GRID,
+      lodOverlay: this.settings.showLodOverlay,
     });
     void layers;
     this.device.queue.writeBuffer(this.frameBuffer, 0, buf);
@@ -431,6 +465,12 @@ export class Renderer {
     }
 
     // 4. shallow-water sim with CFL-clamped substeps.
+    if (this.needsSeed) {
+      // Seeding needs its own submit so the following step reads the seeded state.
+      d.queue.submit([enc.finish()]);
+      this.seedSim();
+      return;
+    }
     const simBgs = this.simBgs;
     if (simBgs && this.simPing) {
       const cell = (this.settings.simExtent * 2) / this.settings.simResolution;
@@ -471,6 +511,9 @@ export class Renderer {
 
   render(camera: OrbitCamera, dt: number, options: { mapView: boolean; mapCenter: [number, number]; mapHalf: number }) {
     if (!this.pipelines || !this.shaders) return;
+    // A settings change may have invalidated derived GPU resources; restore them before drawing
+    // rather than drawing with stale or missing bind groups.
+    if (this.settings.simResolution !== this.simResolution) this.buildSimResources();
     const d = this.device;
     const t0 = performance.now();
     const w = Math.max(1, Math.floor(this.canvas.width));
@@ -639,7 +682,7 @@ export class Renderer {
       halfExtent: (bake?.worldSize ?? 1e7) / 2,
       detailGain: this.settings.terrainDetail,
       seaLevel: 0,
-      gridN: Math.min(480, (bake?.size ?? 481) - 1),
+      gridN: TERRAIN_GRID,
     });
     this.device.queue.writeBuffer(this.terrainParams, 0, buf);
     void plan; void camera;

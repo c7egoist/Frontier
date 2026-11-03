@@ -136,6 +136,7 @@ export function wireControls(host: ControlHost, actions: ControlActions) {
   toggle('show-cities', 'showCities');
   toggle('show-slice', 'showWaterSlice');
   toggle('show-rings', 'showLodRings');
+  toggle('show-lod3d', 'showLodOverlay');
 
   // Keyboard-free buttons
   const pause = $<HTMLButtonElement>('btn-pause');

@@ -93,7 +93,7 @@ console.log('Shared header');
 {
   const r = reflected.oceanSurface!;
   const frameUniform = r.uniforms.find(u => u.name === 'frame');
-  check('frame uniform is present in graphics modules', !!frameUniform && frameUniform.size === 304,
+  check('frame uniform is present in graphics modules', !!frameUniform && frameUniform.size === 320,
     frameUniform ? `${frameUniform.size} B` : 'missing');
   const bindings = r.getBindGroups()[0] ?? [];
   check('frame binding is at group 0 binding 0', bindings[0]?.binding === 0 && bindings[0]?.name === 'frame');

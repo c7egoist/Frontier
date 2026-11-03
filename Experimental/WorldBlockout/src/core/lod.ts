@@ -77,16 +77,31 @@ const _clipmapCache = new Map<string, ClipmapRing[]>();
 
 /**
  * Base (finest) spacing in metres for a camera at `cameraHeight` above the water.
- * We want a quad to be at least `pixelErrorBudget` pixels wide at the sim radius, otherwise
- * we are paying for detail that aliases.
+ *
+ * The metric is the one that actually matters: a wave of amplitude `a` displaced by this grid
+ * has a geometric error of at most `a * (spacing / wavelength)`. We require the finest spacing to
+ * resolve the shortest cascade wavelength with at least 4 quads per wave, so crests exist as
+ * geometry instead of being smeared into the plane. Higher cameras see that wavelength at a
+ * distance, so the requirement relaxes and coarse levels replace it — exactly the behaviour the
+ * LOD chart is supposed to show.
  */
 export function resolveBaseSpacing(cameraHeight: number, p: LODParams): number {
-  const distance = Math.max(p.simRadius, cameraHeight * 0.5, 1);
-  let spacing = 0.25;
-  while (spacing < 64) {
-    const px = projectedPixels(spacing * 2, distance, p);
-    if (px < p.pixelErrorBudget * 2) spacing *= 2;
-    else break;
+  // The fine chop lives on the 8 m cascade and is invisible past a few hundred metres.
+  const shortestWave = 8;
+  const distance = Math.max(cameraHeight, p.simRadius * 0.25, 1);
+  const pixelsPerWave = projectedPixels(shortestWave, distance, p);
+  // 4 quads per wave while the wave is worth rendering, capped so we never go below 2 m quads
+  // (the near-field sim supplies finer detail in that band anyway).
+  let spacing = Math.min(8, shortestWave / 4);
+  if (pixelsPerWave < p.pixelErrorBudget * 2) {
+    // The short cascade is sub-pixel here: fall back to the 64 m cascade's resolution demand.
+    spacing = Math.min(16, 64 / 4);
+  }
+  if (pixelsPerWave < p.pixelErrorBudget * 0.5) {
+    spacing = Math.min(32, 512 / 8);
+  }
+  if (pixelsPerWave < p.pixelErrorBudget * 0.05) {
+    spacing = 64;
   }
   return spacing;
 }

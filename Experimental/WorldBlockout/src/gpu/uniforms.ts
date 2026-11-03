@@ -3,7 +3,7 @@
 //
 // Keep this file as the single place where uniform offsets are written by hand.
 
-export const FRAME_FLOATS = 76; // 2 mat4 + 11 vec4 = 304 B
+export const FRAME_FLOATS = 80; // 2 mat4 + 12 vec4 = 320 B
 
 /** Frame uniform: floats, indexed by FRAME_* offsets below. */
 export const F = {
@@ -20,6 +20,7 @@ export const F = {
   wind: 64,         // xy direction, z windSpeed, w choppiness
   cascade: 68,      // xyz tiles, w abyssDepth
   world: 72,        // x worldSize, y halfWorld, z spectrumN, w gridN
+  debug: 76,        // x lodOverlay, y waterSlice
 } as const;
 
 export interface FrameUniformInput {
@@ -54,6 +55,7 @@ export interface FrameUniformInput {
   halfWorld: number;
   spectrumN: number;
   gridN: number;
+  lodOverlay: boolean;
 }
 
 export function writeFrame(out: Float32Array, u: FrameUniformInput): Float32Array {
@@ -71,6 +73,7 @@ export function writeFrame(out: Float32Array, u: FrameUniformInput): Float32Arra
   out.set([u.windDir[0], u.windDir[1], u.windSpeed, u.choppiness], F.wind);
   out.set([u.cascadeTiles[0], u.cascadeTiles[1], u.cascadeTiles[2], u.abyssDepth], F.cascade);
   out.set([u.worldSize, u.halfWorld, u.spectrumN, u.gridN], F.world);
+  out.set([u.lodOverlay ? 1 : 0, 0, 0, 0], F.debug);
   return out;
 }
 
@@ -173,7 +176,7 @@ export const UNIFORM_SPECS = {
     ['viewProj', F.viewProj, 16], ['invViewProj', F.invViewProj, 16],
     ['eye', F.eye, 4], ['forward', F.forward, 4], ['sunDir', F.sunDir, 4], ['sunColor', F.sunColor, 4],
     ['sky', F.sky, 4], ['sim', F.sim, 4], ['screen', F.screen, 4], ['misc', F.misc, 4],
-    ['wind', F.wind, 4], ['cascade', F.cascade, 4], ['world', F.world, 4],
+    ['wind', F.wind, 4], ['cascade', F.cascade, 4], ['world', F.world, 4], ['debug', F.debug, 4],
   ] },
   RingData: { floats: 12, fields: [['origin', 0, 2], ['spacing', 2, 1], ['inner', 3, 1], ['outer', 4, 1],
     ['index', 5, 1], ['regime', 6, 1], ['quads', 7, 1], ['amplitude', 8, 1]] },

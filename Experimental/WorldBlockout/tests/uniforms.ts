@@ -58,7 +58,7 @@ for (const [file, structName, specKey] of [
     screenWidth: 1920, screenHeight: 1080, flatDistance: 25000, horizonDistance: 120000,
     fovY: 1.047, cameraHeight: 500, windDir: [1, 0], windSpeed: 11, choppiness: 1.1,
     cascadeTiles: [512, 64, 8], abyssDepth: 4200, worldSize: 1e7, halfWorld: 5e6,
-    spectrumN: 128, gridN: 1024,
+    spectrumN: 128, gridN: 1024, lodOverlay: false,
   });
   check('writeFrame lays out every field', buf[F.viewProj] === 2 && buf[F.invViewProj] === 3 &&
     buf[F.eye] === 10 && buf[F.eye + 3] === 4.5 && Math.abs(buf[F.screen + 2] - 1 / 1920) < 1e-9 &&

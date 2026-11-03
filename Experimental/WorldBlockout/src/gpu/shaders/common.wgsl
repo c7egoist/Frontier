@@ -17,6 +17,7 @@ struct Frame {
   wind          : vec4f, // xy wind dir, z wind speed, w choppiness
   cascade       : vec4f, // xyz cascade tiles, w = deep depth (used for out-of-world bathymetry)
   world         : vec4f, // x worldSize, y half world size, z spectrum N, w grid N
+  debug         : vec4f, // x lodOverlay (0/1), y waterSlice (0/1), z, w spare
 };
 
 struct Ring {

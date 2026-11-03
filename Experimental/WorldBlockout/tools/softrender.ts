@@ -46,11 +46,16 @@ function renderOceanView(w: number, h: number, time: number, eyeY = 9, pitchDeg 
       return lerp(lerp(a, b, tx), lerp(cc, d, tx), tz);
     };
   };
+  const extentFade = (wx: number, wz: number, tile: number) => {
+    const ext = tile * 0.5;
+    const rel = Math.max(Math.abs(wx), Math.abs(wz));
+    return smooth(ext, ext * 0.75, rel);
+  };
   const heightAt = (wx: number, wz: number, footprint: number): { h: number; active: number } => {
     let h = 0, active = 0;
     for (let c = 0; c < 3; c++) {
       const texel = tiles[c] / layers[c].size;
-      const fade = smooth(1, 3, texel / Math.max(footprint, 1e-4));
+      const fade = smooth(1, 3, texel / Math.max(footprint, 1e-4)) * extentFade(wx, wz, tiles[c]);
       if (fade <= 0.002) continue;
       h += sampler(c)(wx, wz) * fade;
       active = c;
@@ -305,60 +310,170 @@ function mapColor(h: number): [number, number, number] {
 // 4. LOD decision chart — the adaptivity evidence
 // ---------------------------------------------------------------------------
 function renderLodChart(w: number, h: number): Image {
-  const img = newImage(w, h, [12, 16, 24]);
+  const img = newImage(w, h, [11, 15, 22]);
   const P: LODParams = {
     fovY: 55 * Math.PI / 180, viewportHeight: 1080,
     simRadius: 900, flatDistance: 25000, horizonDistance: 60000, pixelErrorBudget: 4,
   };
   const altitudes = [2, 20, 200, 2000, 20000];
-  const x0 = 130, x1 = w - 210, y0 = 92, y1 = h - 104;
-  const xOf = (m: number) => x0 + (Math.log10(Math.max(m, 1)) / 4.7) * (x1 - x0);
-  const yOf = (sp: number) => y1 - (Math.log2(sp) / 11) * (y1 - y0);
-  // plot frame
-  rect(img, x0, y0, x1, y0, [46, 58, 74]);
-  rect(img, x0, y1, x1, y1, [46, 58, 74]);
-  rect(img, x0, y0, x0, y1, [46, 58, 74]);
-  for (let d = 1; d <= 10000; d *= 10) {
-    rect(img, xOf(d), y0, xOf(d), y1, [34, 44, 58], 0.8);
-    text(img, xOf(d) - (d >= 1000 ? 15 : 8), y1 + 10, d >= 1000 ? `${d / 1000}KM` : `${d}M`, [122, 140, 160]);
-  }
-  for (let sp = 1; sp <= 1024; sp *= 2) {
-    rect(img, x0, yOf(sp), x1, yOf(sp), [30, 38, 50], 0.8);
-    text(img, x0 - 56, Math.round(yOf(sp)) - 3, sp >= 1024 ? '1KM' : `${sp}M`, [122, 140, 160]);
-  }
-  const colors: [number, number, number][] = [[120, 200, 255], [95, 165, 225], [80, 140, 196], [66, 116, 165], [150, 210, 240]];
+  text(img, 18, 14, 'WATER LOD RESOLVER', [232, 240, 250], 2);
+  text(img, 18, 36, 'WHAT THE RESOLVER DECIDES, PER CAMERA ALTITUDE', [130, 150, 172]);
+  text(img, 18, 50, 'RING SPACING DOUBLES OUTWARD. THE BASE SPACING IS SET BY HOW MANY PIXELS THE SHORTEST WAVE', [126, 146, 168]);
+  text(img, 18, 62, 'SPANS AT THAT CAMERA HEIGHT: 2 M AT EYE LEVEL, 32 M FROM 20 KM. COARSE RINGS REPLACE FINE ONES.', [126, 146, 168]);
+
+  // five stacked panels, each showing ring spacing vs distance as a staircase
+  const panelH = Math.floor((h - 96) / altitudes.length);
+  const x0 = 150, x1 = w - 250;
+  const xOf = (m: number) => x0 + (Math.log10(Math.max(m, 1)) / Math.log10(52000)) * (x1 - x0);
+  const colours: [number, number, number][] = [[120, 200, 255], [95, 165, 225], [80, 140, 196], [66, 116, 165], [150, 210, 240]];
+
   altitudes.forEach((alt, ai) => {
+    const top = 84 + ai * panelH;
+    const bottom = top + panelH - 16;
     const plan = resolveWaterLod(alt, P);
+    const yOf = (sp: number) => bottom - (Math.log2(sp) / 10) * (bottom - top - 10);
+    // panel frame + axis ticks
+    rect(img, x0, bottom, x1, bottom, [40, 50, 64]);
+    rect(img, x0, top, x0, bottom, [40, 50, 64]);
+    for (let sp = 8; sp <= 1024; sp *= 2) {
+      rect(img, x0 - 5, Math.round(yOf(sp)), x0, Math.round(yOf(sp)), [46, 58, 74]);
+      text(img, x0 - 50, Math.round(yOf(sp)) - 3, sp >= 1024 ? '1KM' : `${sp}M`, [110, 128, 148]);
+    }
+    // ring staircase
     let prev: [number, number] | null = null;
     for (const r of plan.rings) {
-      if (r.outer > 60000) break;
-      const pt: [number, number] = [xOf(Math.max(r.outer, 1)), yOf(r.spacing)];
+      const pt: [number, number] = [xOf(Math.max(r.outer, 2)), yOf(r.spacing)];
       if (prev) {
-        const steps = Math.max(Math.abs(pt[0] - prev[0]), Math.abs(pt[1] - prev[1]));
+        const steps = Math.max(Math.abs(pt[0] - prev[0]), Math.abs(pt[1] - prev[1]), 1);
         for (let s2 = 0; s2 <= steps; s2++) {
           const tt = s2 / steps;
-          rect(img, Math.round(lerp(prev[0], pt[0], tt)), Math.round(lerp(prev[1], pt[1], tt)),
-            Math.round(lerp(prev[0], pt[0], tt)) + 1, Math.round(lerp(prev[1], pt[1], tt)) + 1, colors[ai]);
+          const xx = Math.round(lerp(prev[0], pt[0], tt));
+          const yy = Math.round(lerp(prev[1], pt[1], tt));
+          rect(img, xx, yy - 1, xx + 1, yy + 1, colours[ai]);
         }
       }
       prev = pt;
     }
-    const label = alt >= 1000 ? `${alt / 1000} KM` : `${alt} M`;
-    text(img, x1 + 26, 100 + ai * 18, `${label} CAMERA  ${plan.baseSpacing} M BASE`, colors[ai]);
+    // regime boundary markers
+    for (const [d, label] of [[P.simRadius, 'SIM'], [P.flatDistance, 'MESH']] as [number, string][]) {
+      for (let yy = top; yy < bottom; yy += 4) put(img, xOf(d), yy, [70, 84, 104]);
+      text(img, xOf(d) + 3, top + 2, label, [92, 108, 128]);
+    }
+    const name = alt >= 1000 ? `${alt / 1000} KM` : `${alt} M`;
+    text(img, 20, top + 2, name, colours[ai]);
+    text(img, 20, top + 14, `BASE ${plan.baseSpacing} M`, [110, 128, 148]);
+    text(img, x1 + 12, top + 6, `${plan.rings.length} RINGS  ${(plan.tris / 1000).toFixed(0)}K TRIS  MAX ${plan.maxErrorPx.toFixed(0)} PX`, colours[ai]);
   });
-  text(img, 24, 22, 'WATER LOD RESOLVER', [232, 240, 250], 2);
-  text(img, 24, 44, 'RING SPACING VS DISTANCE FOR FIVE CAMERA ALTITUDES. THE RESOLVER PICKS THE FINEST SPACING', [130, 150, 172]);
-  text(img, 24, 58, 'THAT STILL PROJECTS ABOVE THE PIXEL BUDGET, SO COST FOLLOWS VISIBLE ERROR, NOT DISTANCE.', [130, 150, 172]);
-  text(img, x0 + (x1 - x0) / 2 - 90, h - 44, 'DISTANCE FROM CAMERA (LOG SCALE)', [160, 180, 200]);
-  text(img, 30, y0 - 22, 'QUAD SPACING', [160, 180, 200]);
-  const bands: [number, number, string, [number, number, number]][] = [
-    [1, P.simRadius, 'SIMULATED', [95, 179, 240]],
-    [P.simRadius, P.flatDistance, 'DISPLACED MESH', [79, 139, 196]],
-    [P.flatDistance, 60000, 'FLAT + SPECTRUM NORMALS', [60, 107, 154]],
-  ];
-  for (const [a, b, name, col] of bands) {
-    rect(img, xOf(a), y1 + 30, xOf(b), y1 + 38, col, 0.9);
-    text(img, xOf(a) + 4, y1 + 44, name, [150, 172, 194]);
+  text(img, x0, h - 12, 'DISTANCE FROM CAMERA (LOG SCALE)', [150, 172, 194]);
+  text(img, 20, h - 12, 'SPACING', [150, 172, 194]);
+  return img;
+}
+
+/** Tessellation density view: draw every ring's quads in perspective so the density change is
+ *  the subject rather than a wireframe sketch. */
+function renderRingDensity(w: number, h: number, altitude: number, pitchDeg: number): Image {
+  const img = newImage(w, h, [9, 14, 22]);
+  const P: LODParams = {
+    fovY: 55 * Math.PI / 180, viewportHeight: 1080,
+    simRadius: 900, flatDistance: 25000, horizonDistance: 60000, pixelErrorBudget: 4,
+  };
+  const plan = resolveWaterLod(altitude, P);
+  const horizonY = Math.round(h * 0.34);
+  const fov = P.fovY, tanHalf = Math.tan(fov / 2);
+  const camH = Math.max(altitude, 2);
+  const pitch = pitchDeg * Math.PI / 180;
+
+  // background: sky + fogged water gradient
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (y < horizonY) {
+        const t = y / horizonY;
+        put(img, x, y, [Math.round(lerp(120, 176, t)), Math.round(lerp(142, 196, t)), Math.round(lerp(172, 222, t))]);
+      } else {
+        const t = (y - horizonY) / (h - horizonY);
+        put(img, x, y, [Math.round(lerp(96, 14, Math.pow(t, 0.55))), Math.round(lerp(118, 30, Math.pow(t, 0.55))), Math.round(lerp(140, 46, Math.pow(t, 0.55)))]);
+      }
+    }
+  }
+  // project world XZ (relative to camera) to screen, camera pitched down by `pitch`
+  const cosP = Math.cos(pitch), sinP = Math.sin(pitch);
+  const project = (wx: number, wz: number): [number, number, number] | null => {
+    // camera space: z forward along +X world (arbitrary), y up
+    const cz = wz;
+    const cy = camH;
+    if (cz <= 1) return null;
+    // rotate the point into camera orientation (pitch only)
+    const yCam = cy * cosP - cz * sinP;
+    const zCam = cy * sinP + cz * cosP;
+    if (zCam <= 1) return null;
+    const sx = w / 2 + (wx / (zCam * tanHalf * (w / h))) * (w / 2);
+    const sy = h * 0.5 - (yCam / (zCam * tanHalf)) * (h / 2);
+    return [sx, sy, zCam];
+  };
+  const colours: Record<string, [number, number, number]> = {
+    simulated: [150, 220, 255], displaced: [110, 175, 235], flat: [86, 132, 186], horizon: [60, 92, 130],
+  };
+  const drawn = plan.rings.slice(0, 10);
+  // draw coarse rings first so the fine lines sit on top
+  for (const ring of [...drawn].reverse()) {
+    const col = colours[ring.regime] ?? [90, 130, 170];
+    const quads = Math.min(ring.verts, 32);
+    const half = ring.outer;
+    const stepW = (2 * half) / quads;
+    // only within the visible forward band, to keep the picture readable
+    const zMin = Math.max(ring.inner, 2);
+    const zMax = Math.min(ring.outer, 30000);
+    if (zMax <= zMin) continue;
+    const zSteps = Math.max(2, Math.min(48, Math.round((zMax - zMin) / Math.max(ring.spacing * 4, 1))));
+    // longitudinal lines
+    for (let i = -quads / 2; i <= quads / 2; i++) {
+      const wx = i * stepW;
+      let prev: [number, number] | null = null;
+      for (let s2 = 0; s2 <= zSteps; s2++) {
+        const wz = lerp(zMin, zMax, s2 / zSteps);
+        const p = project(wx, wz);
+        if (p && prev) {
+          const steps = Math.max(Math.abs(p[0] - prev[0]), Math.abs(p[1] - prev[1]), 1);
+          for (let t = 0; t <= steps; t++) {
+            put(img, Math.round(lerp(prev[0], p[0], t / steps)), Math.round(lerp(prev[1], p[1], t / steps)), col, 0.5);
+          }
+        }
+        prev = p ? [p[0], p[1]] : null;
+      }
+    }
+    // transverse lines
+    const rows = Math.max(2, Math.min(60, Math.round((zMax - zMin) / ring.spacing)));
+    for (let r = 0; r <= rows; r++) {
+      const wz = lerp(zMin, zMax, r / rows);
+      let prev: [number, number] | null = null;
+      for (let i = -quads / 2; i <= quads / 2; i++) {
+        const p = project(i * stepW, wz);
+        if (p && prev) {
+          const steps = Math.max(Math.abs(p[0] - prev[0]), Math.abs(p[1] - prev[1]), 1);
+          for (let t = 0; t <= steps; t++) {
+            put(img, Math.round(lerp(prev[0], p[0], t / steps)), Math.round(lerp(prev[1], p[1], t / steps)), col, 0.42);
+          }
+        }
+        prev = p ? [p[0], p[1]] : null;
+      }
+    }
+    // ring boundary
+    const pEdge = project(-half, Math.min(zMax, half));
+    if (pEdge) {
+      for (let i = -quads / 2; i <= quads / 2; i++) {
+        const p = project(i * stepW, Math.min(zMax, half));
+        if (p) put(img, Math.round(p[0]), Math.round(p[1]), col, 0.95);
+      }
+    }
+  }
+  const title = 'ADAPTIVE WATER TESSELLATION';
+  rect(img, 10, 8, 10 + textWidth(title) * 2 + 10, 30, [8, 12, 18], 0.85);
+  text(img, 14, 13, title, [232, 242, 252], 2);
+  text(img, 14, 38, `CAMERA ${altitude} M AT ${Math.abs(pitchDeg)} DEG - ${plan.rings.length} RINGS - ${(plan.tris / 1000).toFixed(0)}K TRIS`, [140, 168, 196]);
+  let ly = h - 14 - drawn.length * 11;
+  for (const r of drawn) {
+    text(img, 14, ly, `RING ${String(r.index).padStart(2)}  ${String(r.spacing).padStart(5)} M QUADS  ${r.regime.toUpperCase().padEnd(10)} ${r.errorPx.toFixed(0)} PX ERROR`, colours[r.regime], 1);
+    ly += 11;
   }
   return img;
 }
@@ -468,10 +583,10 @@ writePng(`${OUT}/world-map.png`, map.img);
 console.log('rendering LOD chart…');
 writePng(`${OUT}/lod-resolver.png`, renderLodChart(1100, 620));
 
-console.log('rendering ring view from 200 m…');
-writePng(`${OUT}/lod-rings-200m.png`, renderRingView(1024, 576, 200));
-console.log('rendering ring view from 4000 m…');
-writePng(`${OUT}/lod-rings-4km.png`, renderRingView(1024, 576, 4000));
+console.log('rendering tessellation density at 200 m…');
+writePng(`${OUT}/lod-rings-200m.png`, renderRingDensity(1280, 720, 200, 22));
+console.log('rendering tessellation density at 4 km…');
+writePng(`${OUT}/lod-rings-4km.png`, renderRingDensity(1280, 720, 4000, 38));
 
 console.log(JSON.stringify({
   oceanHeights: { min: ocean.stats.heightMin, max: ocean.stats.heightMax },

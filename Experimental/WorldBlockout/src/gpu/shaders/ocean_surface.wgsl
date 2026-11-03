@@ -46,7 +46,7 @@ struct OVOut {
   @location(3) depth : f32,
   @location(4) screen : vec2f,
   @location(5) cascadeFade : vec3f,
-  @location(6) regime : f32,
+  @location(6) ringIndex : f32,
 };
 
 // ---------------------------------------------------------------------------
@@ -87,11 +87,17 @@ fn cascadeField(worldXZ : vec2f, tile : f32, layer : i32) -> vec4f {
  * screen space, decided per fragment, applied to both displacement and shading.
  */
 fn cascadeFade(worldXZ : vec2f, tile : f32, n : f32) -> f32 {
+  // A cascade only covers `tile` metres before it repeats; outside its extent it contributes
+  // nothing rather than tiling visibly. This is what keeps the far ocean seam-free.
+  let ext = 0.5 * tile;
+  let rel = abs(worldXZ - frame.eye.xz);
+  let inExtent = smoothstep(ext, ext * 0.75, max(rel.x, rel.y));
+  if (inExtent <= 0.0) { return 0.0; }
   let texel = tile / n;
   let dist = max(distance(vec3f(worldXZ.x, 0.0, worldXZ.y), frame.eye.xyz), 1.0);
   // World metres covered by one screen pixel at this distance (vertical FOV in frame.misc.z).
   let footprint = dist * 2.0 * tan(frame.misc.z * 0.5) / max(frame.screen.y, 1.0);
-  return smoothstep(1.0, 3.0, texel / max(footprint, 1e-4));
+  return smoothstep(1.0, 3.0, texel / max(footprint, 1e-4)) * inExtent;
 }
 
 fn sampleDisplacement(worldXZ : vec2f, fade : vec3f) -> vec4f {
@@ -157,10 +163,8 @@ const QUAD_CORNERS = array<vec2f, 6>(
   let bathy = bathymetry(worldXZ);
   let waterDepth = frame.sim.w - bathy.x;
 
-  var displacement = 0.0;
   var normal = vec3f(0.0, 1.0, 0.0);
   var foam = 0.0;
-  var regimeOut = ring.regime;
 
   // Underwater only: skip water where the seabed is above the water line.
   if (waterDepth <= 0.0) {
@@ -172,7 +176,7 @@ const QUAD_CORNERS = array<vec2f, 6>(
     out.depth = 0.0;
     out.screen = vec2f(0.0);
     out.cascadeFade = fade;
-    out.regime = regimeOut;
+    out.ringIndex = ring.index;
     return out;
   }
 
@@ -209,7 +213,7 @@ const QUAD_CORNERS = array<vec2f, 6>(
   out.depth = waterDepth;
   out.screen = out.pos.xy;
   out.cascadeFade = fade;
-  out.regime = regimeOut;
+  out.ringIndex = ring.index;
   return out;
 }
 
@@ -231,6 +235,16 @@ fn ggxSpecular(N : vec3f, V : vec3f, L : vec3f, roughness : f32, f0 : f32) -> f3
   return (d * g * f) / max(4.0 * ndv * ndl, 1e-3) * ndl;
 }
 
+/** Distinct, readable colour per ring for the LOD overlay. */
+fn ringTint(i : f32) -> vec3f {
+  let palette = array<vec3f, 8>(
+    vec3f(0.20, 0.55, 0.95), vec3f(0.22, 0.72, 0.80), vec3f(0.30, 0.85, 0.55),
+    vec3f(0.85, 0.85, 0.30), vec3f(0.95, 0.65, 0.25), vec3f(0.95, 0.40, 0.30),
+    vec3f(0.80, 0.35, 0.70), vec3f(0.55, 0.45, 0.95)
+  );
+  return palette[u32(clamp(i, 0.0, 7.0))];
+}
+
 @fragment fn fs(in : OVOut) -> @location(0) vec4f {
   // Discard fragments covered by a finer ring: keeps LODs from stitching over each other.
   let d = length(in.world.xz - frame.eye.xz);
@@ -238,7 +252,9 @@ fn ggxSpecular(N : vec3f, V : vec3f, L : vec3f, roughness : f32, f0 : f32) -> f3
   // the discard must use the square (Chebyshev) distance — using radial distance would leave the
   // corners of the finer square drawn twice and double-darken them through alpha blending.
   let cheb = max(abs(in.world.x - ring.origin.x), abs(in.world.z - ring.origin.y));
-  if (ring.index > 0.5 && cheb < ring.inner) { discard; }
+  // A ring covers the full square of half-extent `outer`; the next finer ring covers the square of
+  // half-extent `outer / 2`. Fragments inside that inner square belong to the finer ring.
+  if (ring.index > 0.5 && cheb < ring.outer * 0.5) { discard; }
 
   let V = normalize(frame.eye.xyz - in.world);
   let sunDir = normalize(frame.sunDir.xyz);
@@ -297,5 +313,11 @@ fn ggxSpecular(N : vec3f, V : vec3f, L : vec3f, roughness : f32, f0 : f32) -> f3
   let shoreAlpha = smoothstep(0.0, 0.35, depth);
 
   col = applyFog(col, in.world, frame.eye.xyz, sunDir);
+
+  // LOD overlay: `lodDebug` is 1 when the host wants the adaptive structure visible.
+  if (frame.debug.x > 0.5) {
+    let tint = ringTint(in.ringIndex);
+    col = mix(col, tint, 0.55);
+  }
   return vec4f(col, mix(0.65, 1.0, shoreAlpha));
 }
