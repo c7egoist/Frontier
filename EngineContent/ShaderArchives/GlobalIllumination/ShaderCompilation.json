@@ -101,6 +101,14 @@
       "spirv_sha256": "f9fd71cfa400458ff6a5271689cd34fd2c522698f738cfb0cd461edc1f17c88e"
     },
     {
+      "file": "PickRaster.PickFragment.spv",
+      "spirv_sha256": "14c424e84feeeecae65f620b8987363d5cc47a8e5828315acfbd3b8d81c50237"
+    },
+    {
+      "file": "PickRaster.PickVertex.spv",
+      "spirv_sha256": "dd778364384146f84e7ce1a4fe2c0a9e75d7ea0ce6f00a60ef1cb1e13f8f34ad"
+    },
+    {
       "file": "ReflectionTrace.TraverseMirrorReflection.spv",
       "spirv_sha256": "2356d5ca205a7988e6ceded298f9b35e0faf01f1c322b39b107e7b27edf025af"
     },
@@ -321,6 +329,10 @@
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/PenumbraResolve.slang",
       "sha256": "10e063b3ae327c7b919b49a2d992697f543ae94fdf0553434fb4f8eea6e46dc0"
+    },
+    {
+      "file": "Frontier/Engine/Shaders/GlobalIllumination/PickRaster.slang",
+      "sha256": "be18b160a14a5ec5a900289a128010e55107a12f11a988b2406973a6aadb9d4d"
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/RayIntersection.slang",
