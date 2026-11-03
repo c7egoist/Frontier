@@ -1,12 +1,12 @@
 {
-  "Revision": "02b9af3 + working tree",
+  "Revision": "930b001",
   "Platform": "linux x64",
   "Pages": {
     "ForceFieldEditor": {
       "Facts": {
         "Sources": 14,
         "Samples": 22040,
-        "Milliseconds": 22,
+        "Milliseconds": 12.899999999441206,
         "Rows": 16
       },
       "Wide": {
@@ -29,11 +29,11 @@
         "Effects": [
           [
             "Sparks",
-            170
+            173
           ],
           [
             "Leaves",
-            26
+            28
           ],
           [
             "Atoms (LJ gas)",
@@ -44,8 +44,7 @@
             1024
           ]
         ],
-        "Readbacks": 9,
-        "Presets": 0
+        "Readbacks": 10
       },
       "Agreement": {
         "Voxel": [
@@ -54,14 +53,14 @@
           12
         ],
         "Probe": [
-          3.46875,
-          -1.0888671875,
-          0.9912109375
+          3.5625,
+          -1.0986328125,
+          0.9931640625
         ],
         "Overlay": [
-          3.46875,
-          -1.0888671875,
-          0.9912109375
+          3.5625,
+          -1.0986328125,
+          0.9931640625
         ],
         "Difference": 0
       },
@@ -91,7 +90,7 @@
       "Detail": {
         "Sources": 14,
         "Samples": 22040,
-        "Milliseconds": 22,
+        "Milliseconds": 12.899999999441206,
         "Rows": 16
       }
     },
@@ -128,11 +127,11 @@
         "Effects": [
           [
             "Sparks",
-            170
+            173
           ],
           [
             "Leaves",
-            26
+            28
           ],
           [
             "Atoms (LJ gas)",
@@ -143,14 +142,13 @@
             1024
           ]
         ],
-        "Readbacks": 9,
-        "Presets": 0
+        "Readbacks": 10
       }
     },
     {
       "Claim": "the overlay has read the GPU wind lattice back",
       "Passed": true,
-      "Detail": 9
+      "Detail": 10
     },
     {
       "Claim": "the overlay reads exactly the texel the engine probe reads (same GPU lattice)",
@@ -162,14 +160,14 @@
           12
         ],
         "Probe": [
-          3.46875,
-          -1.0888671875,
-          0.9912109375
+          3.5625,
+          -1.0986328125,
+          0.9931640625
         ],
         "Overlay": [
-          3.46875,
-          -1.0888671875,
-          0.9912109375
+          3.5625,
+          -1.0986328125,
+          0.9931640625
         ],
         "Difference": 0
       }
