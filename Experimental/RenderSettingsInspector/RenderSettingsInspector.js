@@ -351,6 +351,10 @@
         ]);
         Page.append(Card);
         const Series = C.TimeSeries(Card, { Samples, Capacity: SampleCapacity, Target: () => 1000 / Settings.TargetRate, Height: 128 });
+        // 📝 The owner's observation in the demo: more rays per pixel did not lower the frame rate. The rate sits at the display's
+        //    cap while the GPU has headroom, so the cost shows first in GPU time, which is what this card leads with.
+        Card.append(C.Construct('div', 'hero-note', 'Why GPU time, not FPS: the frame rate holds at the display’s cap until the GPU runs out '
+                                                    + 'of headroom, so extra rays show here first.'));
         const LiveRefresh = () =>
         {
             const Latest = Samples.length ? Samples[Samples.length - 1] : 0;

@@ -283,6 +283,63 @@ up, azimuth 132°) and a dense cumulus box.
 
 It requires ① below 1.5 and ② above 2.2. It also renders the Everest cloud deck looking into the sun for inspection.
 
+## Star twinkle
+
+The owner reported that the stars did not twinkle and that the star controls seemed unhooked. There were two causes:
+
+- **Too weak to see.** The overlaid sky (PlanetaryAtmosphere) did twinkle, but its own equation swung a star at the
+  zenith only ±5.5 % at the default Twinkle depth (0.35, taken as strength depth ÷ 0.35); only stars near the horizon
+  moved more. The antialiasing then smooths what reaches the screen. Measured on screen: 4.0 % median brightness
+  variation at the default and 10.2 % at the slider's maximum, against 1.2 % with the twinkle off.
+- **Half unhooked.** The port's own night sky (the demo's NightStars, seen in reflections) took only the star switch
+  from the Stars record; brightness, limit, size, rotation, halo, Milky Way and the twinkle kept their defaults.
+
+The fix:
+
+- **One equation.** `PlanetaryProjection.slang`, its CPU twin `PlanetaryDomeProjection::EvaluateStarScintillation` and
+  the Stars page chart share the demo's three-frequency signal. Twinkle depth is the peak brightness swing at the
+  zenith. Toward the horizon the swing deepens with the airmass, × √(1.15 / (sin h + 0.15)): × 1.33 at 30°, × 1.9 at
+  10°, at most × 2.5.
+- **A twinkle clock.** The overlay integrates elapsed time × Twinkle rate, refresh by refresh, into the realm's slot
+  18.y. A rate change speeds or slows the twinkle without a jump in phase. The clock wraps hourly to keep the shader's
+  single-precision phase exact.
+- **Hooked.** The port's night sky takes every star field from the Stars record; its twinkle equation stays the
+  demo's.
+
+Measured with `Code/StarScintillationCapture.cpp`: night, moons, planets, clouds and fog off, the camera 50° up,
+480 × 270, low grade, antialiasing on. Each variant runs 6 warm and 30 measured refreshes at 30 Hz. Stars are the 223
+isolated peaks of the twinkle-off image; a star's brightness per refresh is its brightest pixel within one pixel. The
+log is `Results/StarScintillation.txt`.
+
+| Twinkle            | Before: median variation (p90), peak-to-peak | After: median variation (p90), peak-to-peak |
+| ------------------ | -------------------------------------------- | ------------------------------------------- |
+| Off                | 1.2 % (2.6 %), 3.8 %                         | 1.2 % (2.6 %), 3.8 %                        |
+| Depth 0.10         | —                                            | 7.5 % (8.9 %), 24.1 %                       |
+| Depth 0.35 default | 4.0 % (5.3 %), 13.8 %                        | 23.9 % (28.1 %), 76.0 %                     |
+| Depth 1.00         | 10.2 % (13.1 %), 33.8 %                      | 70.5 % (78.4 %), 205.3 %                    |
+| 0.35 at 3 Hz       | —                                            | 12.8 % (17.3 %), 46.3 %                     |
+
+The default now twinkles six times as much on screen, and every depth reads as its own. Faster twinkle loses more to
+the antialiasing's history: at 3 Hz the default keeps 12.8 % here, sampled at 30 refreshes a second; at the editor's
+60 or more it keeps more. The twinkle also dims stars a little on average (11 % at the default), because the
+antialiasing follows a dimming star at once but a brightening one over a few refreshes.
+
+![Star twinkle before and after](Images/StarTwinkle.png)
+
+## Inspection views
+
+`Code/InspectionViewCapture.cpp` renders the fifteen inspection views of the settled daylight view, at 960 × 540 and
+the high grade, through this viewport. They are the Render settings prototype's debug-view thumbnails
+(`Experimental/RenderSettingsInspector`), in `Images/Inspection/`. The first view settles over 12 antialiased
+refreshes; each further view is one refresh with the antialiasing off, so no view carries the previous one's history.
+The capture found:
+
+- **View 6 (BVH / distance field) is black.** `DisplayRecombination.slang` reads `InspectionRadiance` for it, but no
+  program writes it: the demo's `InspectionMarch` was not ported.
+- **Views 10 and 11 need virtualized geometry.** Without it they show the demo's own diagnosis, the orange "no
+  virtualized geometry" checker (`ClusterDebugFallback`) and an empty visibility buffer. The
+  `Inspection-NN-Virtualized.jpg` captures have it on.
+
 ## Checks
 
 `Code/SceneViewportValidation.cpp` (log: `Results/SceneViewportValidation.txt`, 18 checks, 0 failing) checks the
@@ -373,6 +430,14 @@ build/SceneViewportValidation EngineContent/ShaderArchives/GlobalIllumination En
     EngineContent/EnvironmentArchives/ProvingGround EngineContent/EnvironmentArchives/CelestialMaps out low 480 270 12
 # Everest workspace with the live viewport
 build/SceneViewportWorkspaceCapture EngineContent Projects/Everest EngineContent/ShaderArchives out/EverestLiveSceneViewport.png 12
+# The fifteen inspection views (then 1 10 14 at the end for the virtualized cluster views)
+build/InspectionViewCapture EngineContent/ShaderArchives/GlobalIllumination EngineContent/ShaderArchives/Environment \
+    EngineContent/EnvironmentArchives/ProvingGround EngineContent/EnvironmentArchives/CelestialMaps out high 960 540 12
+# Star twinkle under the Stars record's controls
+build/StarScintillationCapture EngineContent/ShaderArchives/GlobalIllumination \
+    EngineContent/ShaderArchives/Environment \
+    EngineContent/EnvironmentArchives/ProvingGround EngineContent/EnvironmentArchives/CelestialMaps out \
+    Still,Default,Shallow,Deep,Fast 480 270 6 30 30
 ```
 
 The build stages `EnvironmentArchives/ProvingGround` into `Projects/Everest/Content` through the project's content

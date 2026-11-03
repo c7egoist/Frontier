@@ -1172,3 +1172,29 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
 - **Published Windows package:** built from `c384f66`; `Binaries/FrontierSceneViewport-Windows-x64.zip`, 24,495,031
   bytes, 923 files, SHA-256 `0fa5f5f909ae823836c3089d4576028c09d97a21078ae9b2a9c51068492d453a`. The refinements are
   off in the shipped level (levelspace keys above). Unsigned and never launched on Windows here.
+
+## Render settings inspector prototype; star twinkle (2026-11-03, arena/88b72faa-frontier)
+
+- **Requested:** the stars must twinkle and follow their controls. The RTX reflections trace at half resolution, so the
+  resolution and rays per pixel need controls. Before the C++ UI, an HTML version of the Render settings: every render
+  setting of the VehicleHMI demo as one outliner component with one inspector, after the dashboard reference image and
+  the Frontier Editor's Sun, Moon, material and fracture inspectors.
+- **Prototype:** `Experimental/RenderSettingsInspector/`. One Render settings component replaces five records
+  (Diagnostics, Geometry clusters, BVH & distance field, Surface cache). Its inspector has renderer tabs (RTX, GTX,
+  Analytic), a GPU-time card (estimated; measured in C++), viewport scale, trace resolution (Full / Half / Quarter),
+  paths per pixel and the quality grade, then GI, reflections, sun and shadows with the measured refinements, denoising
+  by wavelet levels, exposure, geometry, the distance-field cascades, the fifteen debug views, refresh timing and the
+  levelspace entry. Colours are the C++ `InspectorPalette`; the faces are DM Sans and JetBrains Mono. Awaiting the
+  owner's approval before the C++ step.
+- **Debug views captured** from the C++ viewport (`Exhibits/SceneViewport/Images/Inspection/`, `InspectionViewCapture`).
+  View 6 (BVH / distance field) is black: the demo's `InspectionMarch` was never ported. Views 10 and 11 show the
+  demo's own "no virtualized geometry" diagnosis until virtualized geometry is on.
+- **Also found:** `BloomIntensity`, `AcesFilmicTonemap`, `ScreenSpaceReflections` and `InspectionDistanceMode` have no
+  reader in the renderer, and the viewport forwards only part of the settings today.
+- **Stars:** the overlaid sky's twinkle was too weak to see (±5.5 % at the zenith by default). The port's own night sky
+  took only the star switch from the Stars record. Now one equation serves the sky, its CPU twin and the Stars page
+  chart. Twinkle depth is the zenith's peak swing, deepened toward the horizon, and a CPU twinkle clock follows the
+  rate. The port's night sky takes every star field from the record. On screen (`StarScintillationCapture`, 223 stars,
+  antialiased) the default's brightness variation rose from 4.0 % to 23.9 %; depth 0.10 gives 7.5 % and depth 1.00
+  gives 70.5 % (10.2 % before), against 1.2 % with the twinkle off.
+- **Commits:** `419441d f780988 2b0cf13` and this documentation commit.

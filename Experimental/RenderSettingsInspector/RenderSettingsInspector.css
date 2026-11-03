@@ -580,3 +580,4 @@ svg.glyph { width: 1em; height: 1em; flex: none; stroke: currentColor; fill: non
     position: absolute; left: 6px; bottom: 5px; padding: 1px 7px; border-radius: 999px; background: rgba(20, 14, 6, 0.82);
     border: 1px solid rgba(232, 168, 74, 0.45); color: #e8b46a; font-size: 8.5px; letter-spacing: 0.08em; text-transform: uppercase;
 }
+.hero-note { margin-top: 8px; padding-top: 9px; border-top: 1px dashed #2c2c2c; color: var(--text-faint); font-size: 10.5px; line-height: 1.45; }
