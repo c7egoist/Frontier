@@ -10,7 +10,8 @@
     "check": "tsc --noEmit",
     "test": "node scripts/test-all.mjs",
     "shaders": "node --experimental-strip-types tests/shaders.ts",
-    "evidence": "node --experimental-strip-types tools/softrender.ts Exhibits"
+    "evidence": "node --experimental-strip-types tools/softrender.ts Exhibits && node --experimental-strip-types tools/worldview.ts Exhibits",
+    "evidence:world": "node --experimental-strip-types tools/worldview.ts Exhibits"
   },
   "devDependencies": {
     "@sparticuz/chromium": "^153.0.0",

@@ -107,6 +107,8 @@ shader or validation error instead of failing silently.
 | `Exhibits/ocean-surface-low.png` | 10 m camera, grazing angle, chop cascades resolving with distance |
 | `Exhibits/water-column.png` | the surface as a height profile — crests, troughs and Hs, not a texture |
 | `Exhibits/world-map.png` | the SDF world: continents, shelves, gulfs, archipelago, coastline |
+| `Exhibits/world-view.png` | third-person blockout view: whole region, ocean to the horizon |
+| `Exhibits/world-coast.png` | the Gulf of Kesh from 470 km up — coastline, shelf, island chain |
 | `Exhibits/lod-resolver.png` | the resolver's decisions per camera altitude |
 | `Exhibits/lod-rings-*.png` | tessellation density at 200 m and 4 km |
 
