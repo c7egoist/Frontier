@@ -129,9 +129,13 @@ class IlluminationHost
     bool AdvanceRefresh(const RefreshInputs* Inputs, const RefreshWriteSupplier& Prepare, const RefreshWriteSupplier& Supplier,
                         std::string* OutDiagnostic = nullptr, const RefreshInterlude* Interlude = nullptr);
 
-    // 📝 Street-lamp heads and lamp-post lanterns of the loaded scene, in placement order (LevelStructure.js).
+    // 📝 Street-lamp heads and lamp-post lanterns of the loaded scene, in placement order (LevelStructure.js); an inactive
+    //    head or lantern keeps its slot unlit.
     void ResolveLampPlacements();
 
+    // 📝 Writes the profiles of the relocated occupants: settles those relocated before the last refresh, then carries the newly
+    //    relocated ones' motion for this refresh.
+    void SettleRelocatedOccupants();
     // 🔍 One line per bring-up step with its duration (the editor's diagnostic journal); unset = silent.
     std::function<void(const std::string&)> Journal{};
     // 🔍 Refreshes still to submit step by step (a device fault then names its step); a bring-up sets two.
@@ -166,6 +170,9 @@ class IlluminationHost
     EnvironmentEncoder                  EnvironmentEncoding{};
     LuminaireRegister                      Luminaires{};
     std::vector<LampPlacement>          StreetLampPoles{}, PointLampPosts{};
+    // 📝 Beyond the demo: occupants the editor relocated since the last refresh (OccupantRelocation), and those it relocated
+    //    before the last refresh, whose previous transform catches up at the next one.
+    std::vector<uint32_t>               RelocatedOccupants{}, SettlingOccupants{};
     LightSolution                          LastLight{};
     CelestialSolution                   LastCelestial{};
     std::optional<std::pair<Vector3, double>> PriorLight{};   // [-] direction, summed illuminance of the previous refresh

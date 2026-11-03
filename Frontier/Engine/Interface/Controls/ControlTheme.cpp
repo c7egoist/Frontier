@@ -276,6 +276,37 @@ ControlTheme ControlTheme::ResolveNative() noexcept
     return Theme;
 }
 
+// 📝 The Project Zero editor's inspector (Editor.css): page #141414, ink #f0f0f0, muted #888, captions #757575, the warm accent
+//    #c8b59d of its material headings, segmented controls #111 with the active #343434.
+ControlTheme ControlTheme::ResolveGeometry() noexcept
+{
+    ControlTheme Theme    = ResolveNative();
+    Theme.PageFill        = ResolveCssColour(0x141414FF);
+    Theme.Ink             = ResolveCssColour(0xF0F0F0FF);
+    Theme.Muted           = ResolveCssColour(0x888888FF);
+    Theme.Accent          = ResolveCssColour(0xC8B59DFF);
+    Theme.Eyebrow         = ResolveCssColour(0x919191FF);
+    Theme.Subtitle        = ResolveCssColour(0x8A8A8AFF);
+    Theme.Caption         = ResolveCssColour(0x757575FF);
+    Theme.ControlLabel    = ResolveCssColour(0xBDBDBDFF);
+    Theme.CardHeading     = ResolveCssColour(0xDDDDDDFF);
+    Theme.Index           = ResolveCssColour(0x777777FF);
+    Theme.TabSelectedFill = ResolveCssColour(0x343434FF);
+    Theme.TabSelectedText = ResolveCssColour(0xEEEEEEFF);
+    Theme.TabText         = ResolveCssColour(0x8A8A8AFF);
+    Theme.TabHoverFill    = ResolveCssColour(0x262626FF);
+    Theme.TabHoverText    = ResolveCssColour(0xD8D8D8FF);
+    Theme.MetricFill      = ResolveCssColour(0x222222FF);
+    Theme.MetricBorder    = ResolveCssColour(0xFFFFFF06);
+    Theme.SelectFill      = ResolveCssColour(0x111111FF);
+    Theme.SelectBorder    = ResolveCssColour(0xFFFFFF12);
+    Theme.SliderCapsule   = ResolveCssColour(0x0E0E0EFF);
+    Theme.SliderEmpty     = ResolveCssColour(0x161616FF);
+    Theme.CaptionSize       = 10.0f;
+    Theme.CaptionLineHeight = 1.7f;
+    return Theme;
+}
+
 ControlTheme ControlTheme::ResolveWind() noexcept
 {
     ControlTheme Theme       = ResolveNative();

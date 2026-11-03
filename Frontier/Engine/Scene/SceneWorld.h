@@ -114,6 +114,7 @@ using ForceFieldRecord     = TypedSceneRecord<ForceFieldConfiguration, ForceFiel
 using FluidPlumeRecord     = TypedSceneRecord<FluidPlumeConfiguration, FluidPlumeInspector>;
 using FractureRecord       = TypedSceneRecord<FractureConfiguration, FractureInspector>;
 using ParticleRecord       = TypedSceneRecord<ParticleConfiguration, ParticleInspector>;
+using GeometryRecord       = TypedSceneRecord<GeometryConfiguration, GeometryInspector>;
 #else
 using RenderPipelineRecord = TypedSceneRecord<RenderPipelineConfiguration>;
 using SolarRecord          = TypedSceneRecord<SolarConfiguration>;
@@ -130,6 +131,7 @@ using ForceFieldRecord     = TypedSceneRecord<ForceFieldConfiguration>;
 using FluidPlumeRecord     = TypedSceneRecord<FluidPlumeConfiguration>;
 using FractureRecord       = TypedSceneRecord<FractureConfiguration>;
 using ParticleRecord       = TypedSceneRecord<ParticleConfiguration>;
+using GeometryRecord       = TypedSceneRecord<GeometryConfiguration>;
 #endif
 
 //------------------------------------------------------------------------------------------------------------------------

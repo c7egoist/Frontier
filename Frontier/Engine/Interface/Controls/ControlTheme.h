@@ -131,6 +131,7 @@ struct ControlTheme
     ImU32 SliderCapsule      = 0;
 
     [[nodiscard]] static ControlTheme ResolveNative() noexcept;
+    [[nodiscard]] static ControlTheme ResolveGeometry() noexcept;   // [-] the Project Zero editor's object inspector
     [[nodiscard]] static ControlTheme ResolveWind() noexcept;
     [[nodiscard]] static ControlTheme ResolveFog() noexcept;
     [[nodiscard]] static ControlTheme ResolveStars() noexcept;

@@ -1073,6 +1073,122 @@ void ParticleRecord::DeserializeConfiguration(const toml::table& InTable)
     Parameters.AdvanceRevision();
 }
 
+namespace
+{
+
+// 📝 Rounded to 0.1 mm / 0.0001: the record keeps floats, and the level file should read the figures the inspector shows.
+void WriteRoundedFloat3(toml::table& OutTable, std::string_view Key, const float Values[3])
+{
+    toml::array Array;
+    for (int Axis = 0; Axis < 3; ++Axis) Array.push_back(std::round(static_cast<double>(Values[Axis]) * 1.0e4) / 1.0e4);
+    OutTable.insert_or_assign(Key, std::move(Array));
+}
+
+} // namespace
+
+template <>
+void GeometryRecord::SerializeConfiguration(toml::table& OutTable) const
+{
+    toml::array Stems;
+    for (const std::string& Stem : Parameters.OccupantStems) Stems.push_back(Stem);
+    OutTable.insert_or_assign("occupants", std::move(Stems));
+    if (Parameters.OccupantFirst != 0) OutTable.insert_or_assign("occupant_first", static_cast<int64_t>(Parameters.OccupantFirst));
+    if (Parameters.OccupantCount != 0) OutTable.insert_or_assign("occupant_count", static_cast<int64_t>(Parameters.OccupantCount));
+    if (Parameters.BaseCopies != 0) OutTable.insert_or_assign("base_copies", static_cast<int64_t>(Parameters.BaseCopies));
+    if (Parameters.ArchiveOriginAuthored)
+    {
+        WriteRoundedFloat3(OutTable, "archive_origin_m", Parameters.ArchiveOriginMetres);
+        OutTable.insert_or_assign("archive_yaw_deg", std::round(static_cast<double>(Parameters.ArchiveYawDegrees) * 1.0e4) / 1.0e4);
+    }
+    OutTable.insert_or_assign("group", Parameters.GroupName);
+    OutTable.insert_or_assign("glyph", Parameters.GlyphName);
+    if (!Parameters.Notes.empty()) OutTable.insert_or_assign("notes", Parameters.Notes);
+    OutTable.insert_or_assign("visible", Parameters.Visible);
+    OutTable.insert_or_assign("dynamic", Parameters.Dynamic);
+    OutTable.insert_or_assign("cast_shadows", Parameters.CastShadows);
+    OutTable.insert_or_assign("global_illumination", Parameters.GlobalIllumination);
+    OutTable.insert_or_assign("physics", Parameters.Physics);
+    OutTable.insert_or_assign("locked", Parameters.Locked);
+    WriteRoundedFloat3(OutTable, "position_m", Parameters.Spatial.PositionMetres);
+    WriteRoundedFloat3(OutTable, "orientation_deg", Parameters.Spatial.OrientationDegrees);
+    WriteRoundedFloat3(OutTable, "scale", Parameters.Spatial.Scale);
+    OutTable.insert_or_assign("fracture", Parameters.Fracture.Enabled);
+    if (Parameters.Fracture.Enabled)
+    {
+        OutTable.insert_or_assign("voronoi_cells", static_cast<int64_t>(Parameters.Fracture.VoronoiCellCount));
+        OutTable.insert_or_assign("impulse_threshold_ns", static_cast<double>(Parameters.Fracture.ImpulseThresholdNs));
+    }
+    toml::array Stack;
+    for (const ArrayModifierConfiguration& Modifier : Parameters.Modifiers)
+    {
+        toml::table Entry;
+        Entry.insert_or_assign("type", "Array");
+        Entry.insert_or_assign("label", Modifier.Label);
+        Entry.insert_or_assign("enabled", Modifier.Enabled);
+        Entry.insert_or_assign("expanded", Modifier.Expanded);
+        Entry.insert_or_assign("count", static_cast<int64_t>(Modifier.Count));
+        Entry.insert_or_assign("relative_offset", Modifier.RelativeOffset);
+        WriteRoundedFloat3(Entry, "relative_factor", Modifier.RelativeFactor);
+        Entry.insert_or_assign("constant_offset", Modifier.ConstantOffset);
+        WriteRoundedFloat3(Entry, "constant_m", Modifier.ConstantMetres);
+        Entry.insert_or_assign("rotation_step_deg", std::round(static_cast<double>(Modifier.RotationStepDegrees) * 1.0e4) / 1.0e4);
+        Entry.insert_or_assign("radial_pivot", Modifier.RadialPivot);
+        Stack.push_back(std::move(Entry));
+    }
+    if (!Stack.empty()) OutTable.insert_or_assign("modifiers", std::move(Stack));
+}
+
+template <>
+void GeometryRecord::DeserializeConfiguration(const toml::table& InTable)
+{
+    Parameters.OccupantStems.clear();
+    if (const toml::array* Stems = InTable["occupants"].as_array())
+        for (const toml::node& Stem : *Stems)
+            if (const auto Text = Stem.value<std::string>()) Parameters.OccupantStems.push_back(*Text);
+    Parameters.OccupantFirst      = ReadUint32(InTable, "occupant_first", 0u);
+    Parameters.OccupantCount      = ReadUint32(InTable, "occupant_count", 0u);
+    Parameters.BaseCopies         = ReadUint32(InTable, "base_copies", 0u);
+    Parameters.ArchiveOriginAuthored = InTable.contains("archive_origin_m");
+    if (Parameters.ArchiveOriginAuthored) ReadFloat3(InTable, "archive_origin_m", Parameters.ArchiveOriginMetres);
+    Parameters.ArchiveYawDegrees  = ReadFloat(InTable, "archive_yaw_deg", 0.0f);
+    Parameters.GroupName          = InTable["group"].value_or(std::string("Geometry"));
+    Parameters.GlyphName          = InTable["glyph"].value_or(std::string("Box"));
+    Parameters.Notes              = InTable["notes"].value_or(std::string());
+    Parameters.Visible            = ReadBool(InTable, "visible", Parameters.Visible);
+    Parameters.Dynamic            = ReadBool(InTable, "dynamic", Parameters.Dynamic);
+    Parameters.CastShadows        = ReadBool(InTable, "cast_shadows", Parameters.CastShadows);
+    Parameters.GlobalIllumination = ReadBool(InTable, "global_illumination", Parameters.GlobalIllumination);
+    Parameters.Physics            = ReadBool(InTable, "physics", Parameters.Physics);
+    Parameters.Locked             = ReadBool(InTable, "locked", Parameters.Locked);
+    DeserializeSpatialSubtable(InTable, Parameters.Spatial);
+    Parameters.Fracture.Enabled            = ReadBool(InTable, "fracture", false);
+    Parameters.Fracture.VoronoiCellCount   = ReadUint32(InTable, "voronoi_cells", Parameters.Fracture.VoronoiCellCount);
+    Parameters.Fracture.ImpulseThresholdNs = ReadFloat(InTable, "impulse_threshold_ns", Parameters.Fracture.ImpulseThresholdNs);
+    Parameters.Modifiers.clear();
+    if (const toml::array* Stack = InTable["modifiers"].as_array())
+    {
+        for (const toml::node& Node : *Stack)
+        {
+            const toml::table* Entry = Node.as_table();
+            if (Entry == nullptr || (*Entry)["type"].value_or(std::string("Array")) != "Array") continue;
+            ArrayModifierConfiguration Modifier;
+            Modifier.Label               = (*Entry)["label"].value_or(std::string("Array"));
+            Modifier.Enabled             = ReadBool(*Entry, "enabled", Modifier.Enabled);
+            Modifier.Expanded            = ReadBool(*Entry, "expanded", Modifier.Expanded);
+            Modifier.Count               = std::max(1u, ReadUint32(*Entry, "count", Modifier.Count));
+            Modifier.RelativeOffset      = ReadBool(*Entry, "relative_offset", Modifier.RelativeOffset);
+            ReadFloat3(*Entry, "relative_factor", Modifier.RelativeFactor);
+            Modifier.ConstantOffset      = ReadBool(*Entry, "constant_offset", Modifier.ConstantOffset);
+            ReadFloat3(*Entry, "constant_m", Modifier.ConstantMetres);
+            Modifier.RotationStepDegrees = ReadFloat(*Entry, "rotation_step_deg", Modifier.RotationStepDegrees);
+            Modifier.RadialPivot         = ReadBool(*Entry, "radial_pivot", Modifier.RadialPivot);
+            Parameters.Modifiers.push_back(std::move(Modifier));
+        }
+    }
+    ConfigureEditorPresentation(Parameters.GlyphName.c_str(), Parameters.GroupName.c_str(), "Geometry", "");
+    Parameters.AdvanceRevision();
+}
+
 //------------------------------------------------------------------------------------------------------------------------
 //                                      COMPOSABLE MULTI-CONFIGURATION SCENE RECORDS
 //------------------------------------------------------------------------------------------------------------------------
@@ -1334,6 +1450,20 @@ void SceneWorld::RegisterNativeEngineTypes()
     RegisterSimple.operator()<ForceFieldRecord>("ForceField", "Forcefield · Atmospheric Field", RecordClassification::Environment,
         "Wind", "Forcefield", "#a7f3d0");
     RegisterSimple.operator()<WindRecord>("Wind", "Environment · Wind Field", RecordClassification::Environment, "Wind", "Forcefield", "#a7f3d0");
+
+    // 📝 The scene archive's objects, edited by the geometry inspector: the archive decides what exists, so the editor neither
+    //    adds nor removes them; each record names its own group and glyph.
+    RegisterType({"Geometry", "Scene · Geometry", RecordClassification::Geometry,
+        [](std::string Name) -> std::unique_ptr<SceneRecordBase>
+        {
+            auto Entry = std::make_unique<GeometryRecord>(RecordClassification::Geometry, "Geometry", std::move(Name), "Box", "Geometry", "#a8bbeb");
+#if FRONTIER_EDITOR
+            SceneDirectoryMetadata Meta = SceneDirectory::Instance().QueryMetadata(Entry->QueryToken());
+            Meta.RemovableInEditor      = false;
+            (void)SceneDirectory::Instance().ConfigureMetadata(Entry->QueryToken(), std::move(Meta));
+#endif
+            return Entry;
+        }});
 
     // Render settings (one record for the whole renderer) & Continuum Solver Types
     RegisterType({"RenderPipeline", "Render settings", RecordClassification::Illumination,

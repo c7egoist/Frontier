@@ -239,6 +239,8 @@ bool SceneViewport::Refresh(const ViewportCamera& Camera, const SceneEnvironment
         Sun.KelvinTemperature    = Environment.Solar.KelvinTemperature;
         Sun.AngularDiameter      = Environment.Solar.AngularDiameterDeg;
         Sun.ExposureCompensation = Rendering.ExposureCompensation;
+        // 📝 The analytic illumination reads the occupant profiles too: relocated occupants are written before it draws.
+        if (!Host_->RelocatedOccupants.empty() || !Host_->SettlingOccupants.empty()) Host_->SettleRelocatedOccupants();
         return Analytic_->Refresh(View, Sun, ScreenExtent, Host_->CaptureView, OutDiagnostic);
     }
     ResolveSky(Environment);
@@ -344,6 +346,11 @@ VkImageView SceneViewport::QueryPresentedView() const noexcept
 std::array<uint32_t, 2> SceneViewport::QueryScreenExtent() const noexcept
 {
     return Host_ ? Host_->ScreenExtent : std::array<uint32_t, 2>{0, 0};
+}
+
+uint32_t SceneViewport::RelocateOccupants(const std::vector<OccupantPlacement>& Placements)
+{
+    return Host_ ? GlobalIllumination::RelocateOccupants(*Host_, Placements) : 0u;
 }
 
 bool SceneViewport::ReadPresented(std::vector<uint8_t>& OutRgba)

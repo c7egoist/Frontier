@@ -294,6 +294,7 @@ void InspectorRuntime::InspectRecord([[maybe_unused]] RecordToken Token, bool& O
 
     const SceneDirectoryMetadata Meta = Directory.QueryMetadata(Token);
     const std::string            Name = Directory.QueryName(Token);
+    InspectedToken                    = Token;
 
     // 📝 A page that occupies the column (the demo's environment Inspector pages) lays it out itself, edge to edge.
     if (auto Occupied = Slots.find(Token.Value);

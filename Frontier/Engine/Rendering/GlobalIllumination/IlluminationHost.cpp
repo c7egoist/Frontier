@@ -262,7 +262,7 @@ void IlluminationHost::ResolveLampPlacements()
         const bool Pole    = Occupant.Name.rfind("Light pole head ", 0) == 0;
         const bool Lantern = Occupant.Name.rfind("Point lamp lantern ", 0) == 0;
         if (!Pole && !Lantern) continue;
-        const LampPlacement Placement{Occupant.Current[12], Occupant.Current[13], Occupant.Current[14]};
+        const LampPlacement Placement{Occupant.Current[12], Occupant.Current[13], Occupant.Current[14], !Occupant.Inactive};
         (Pole ? Poles : Lanterns).emplace_back(ParseTrailingIndex(Occupant.Name), Placement);
     }
     auto Ordered = [](std::vector<std::pair<int32_t, LampPlacement>>& Entries) {
@@ -273,6 +273,25 @@ void IlluminationHost::ResolveLampPlacements()
     };
     StreetLampPoles = Ordered(Poles);
     PointLampPosts  = Ordered(Lanterns);
+}
+
+void IlluminationHost::SettleRelocatedOccupants()
+{
+    // 📝 Beyond the demo (OccupantRelocation): one profile write per occupant, after this refresh's dynamic profiles.
+    auto WriteProfile = [this](uint32_t Index) {
+        if (Index >= Scene.Occupants.size()) return;
+        const std::vector<uint8_t> Profile = Scene.EncodeOccupantRange(&Volumes->Volumes, Index, 1u);
+        Exchange.WriteRegion(OccupantRegion, static_cast<VkDeviceSize>(Index) * OccupantStride, Profile.data(), Profile.size());
+    };
+    for (const uint32_t Index : SettlingOccupants)
+    {
+        if (std::find(RelocatedOccupants.begin(), RelocatedOccupants.end(), Index) != RelocatedOccupants.end()) continue;
+        Scene.RetainOccupantTransform(Index);
+        WriteProfile(Index);
+    }
+    for (const uint32_t Index : RelocatedOccupants) WriteProfile(Index);
+    SettlingOccupants = std::move(RelocatedOccupants);
+    RelocatedOccupants.clear();
 }
 
 bool IlluminationHost::AdvanceRefresh(const RefreshInputs* Inputs, const RefreshWriteSupplier& Prepare, const RefreshWriteSupplier& Supplier,
@@ -332,6 +351,7 @@ bool IlluminationHost::AdvanceRefresh(const RefreshInputs* Inputs, const Refresh
         Exchange.WriteRegion(RefreshRegion, 0, Constants.data(), Constants.size());
         const std::vector<uint8_t> Dynamic = Scene.EncodeOccupantProfiles(&Volumes->Volumes, Scene.DynamicCount);
         Exchange.WriteRegion(OccupantRegion, 0, Dynamic.data(), Dynamic.size());
+        if (!RelocatedOccupants.empty() || !SettlingOccupants.empty()) SettleRelocatedOccupants();
         if (Inputs->LuminairesLive)
         {
             const std::vector<uint8_t> Packed = Luminaires.Update(Inputs->VehicleTransform, StreetLampPoles, PointLampPosts);

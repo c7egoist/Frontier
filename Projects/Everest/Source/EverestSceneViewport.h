@@ -1,11 +1,12 @@
 /*==========================================================================================================================================
                                                        EVERESTSCENEVIEWPORT.H
 ==========================================================================================================================================*/
-// 🧩 Project Everest's live Scene Viewport: the level's environment and render-pipeline records drive the engine SceneViewport
-//    (ported VehicleHMI ReSTIR GI of the proving ground + the PlanetaryAtmosphere environment) on the host's device.
+// 🧩 Project Everest's live Scene Viewport: the level's environment, render-pipeline and geometry records drive the engine
+//    SceneViewport (ported VehicleHMI ReSTIR GI of the proving ground + the PlanetaryAtmosphere environment) on the host's device.
 
 #pragma once
 
+#include "EverestSceneGeometry.h"
 #include "EverestWorkspace.h"
 
 #include "Frontier/Engine/Rendering/SceneViewport/SceneViewport.h"
@@ -49,6 +50,7 @@ class EverestSceneViewport
     SceneViewportRefresh Render(const SceneViewportRequest& Request, const Frontier::SceneWorld& World, double ElapsedSeconds);
 
     [[nodiscard]] Frontier::GlobalIllumination::SceneViewport* AccessViewport() noexcept { return Viewport_.get(); }
+    [[nodiscard]] const SceneGeometryOccupancy&                QueryGeometry() const noexcept { return Geometry_; }
 
   private:
     std::filesystem::path                                        ProjectRoot_;
@@ -63,6 +65,8 @@ class EverestSceneViewport
     std::array<uint32_t, 2>                                      RequestedExtent_     = {0, 0};
     uint32_t                                                     StableExtentCount_   = 0;   // [-] interface ticks at RequestedExtent_
     SceneViewportRefresh                                         Held_{};                     // [-] the last outcome, shown while live refresh is off
+    SceneGeometryOccupancy                                       Geometry_{};                 // [-] the level's geometry records on the scene's occupants
+    const Frontier::GlobalIllumination::SceneStructure*          GeometryScene_ = nullptr;    // [-] the scene Geometry_ was reset with
 };
 
 } // namespace Everest

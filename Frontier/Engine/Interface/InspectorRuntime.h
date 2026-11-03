@@ -104,6 +104,8 @@ class InspectorRuntime
 
     // Central Inspector dispatch: renders all modular inspectors attached to Token and signals deletion requests.
     void InspectRecord(RecordToken Token, bool& OutDeleteRequested);
+    // 📝 The record InspectRecord is laying out (a page reads its record's name and metadata through it).
+    [[nodiscard]] RecordToken QueryInspectedToken() const noexcept { return InspectedToken; }
 
     // Standalone *Editor activation (FractureEditor, FluidPlumeEditor, ParticleEditor, or custom).
     bool                      RequestEditorOpen(RecordToken Token) noexcept;
@@ -158,6 +160,7 @@ class InspectorRuntime
     RecordToken                             ActiveEditorToken{};
 #endif
     std::string          PendingSelectionType{};
+    RecordToken          InspectedToken{};
     SolarPlacementSolver SolarSolver    = nullptr;
     float                InterfaceScale = 1.0f;
     EnvironmentEditAccess EnvironmentAccess{};

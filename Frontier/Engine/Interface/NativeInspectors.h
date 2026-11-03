@@ -2,7 +2,8 @@
                                                              NATIVEINSPECTORS.H
 ==========================================================================================================================================*/
 // 🧩 Every native RecordInspector, one class per file under Inspectors/: the composable property
-//    inspectors, the Render settings inspector, the environment pages and the continuum and particle inspectors.
+//    inspectors, the Render settings inspector, the environment pages, the continuum and particle inspectors and the
+//    geometry inspector.
 
 #pragma once
 
@@ -26,4 +27,5 @@
 #include "Engine/Interface/Inspectors/ForceFieldInspector.h"
 #include "Engine/Interface/Inspectors/FluidPlumeInspector.h"
 #include "Engine/Interface/Inspectors/FractureInspector.h"
+#include "Engine/Interface/Inspectors/GeometryInspector.h"
 #include "Engine/Interface/Inspectors/ParticleInspector.h"

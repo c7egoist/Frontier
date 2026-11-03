@@ -3,7 +3,7 @@
 ==========================================================================================================================================*/
 // 🧩 Every reusable Inspector page control in one include: the column and theme, the typography, the
 //    diagram pen and canvas, and one class per control (heading, tabs, readouts, tags, tiles, sliders,
-//    selects, presets, toggles, rows, captions, footers).
+//    selects, presets, toggles, rows, captions, footers, and the Project Zero record controls).
 
 #pragma once
 
@@ -32,6 +32,13 @@
 #include "Engine/Interface/Controls/TintRow.h"
 #include "Engine/Interface/Controls/CaptionText.h"
 #include "Engine/Interface/Controls/FooterRow.h"
+#include "Engine/Interface/Controls/RecordHeading.h"
+#include "Engine/Interface/Controls/CardTitleRow.h"
+#include "Engine/Interface/Controls/NotesField.h"
+#include "Engine/Interface/Controls/TransformTable.h"
+#include "Engine/Interface/Controls/QuickTiles.h"
+#include "Engine/Interface/Controls/ModifierPanel.h"
+#include "Engine/Interface/Controls/ChannelRows.h"
 
 #include "Engine/Interface/Controls/SectionHeading.h"
 #include "Engine/Interface/Controls/DisclosureRow.h"

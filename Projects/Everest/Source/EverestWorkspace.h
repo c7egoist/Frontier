@@ -19,6 +19,7 @@ struct ImVec2;
 #include "UI/Editor/ControlCentrePanel.h"
 #endif
 
+#include "Engine/Scene/EngineConfigurations.h"
 #include "Engine/Scene/EnvironmentDiagnostics.h"
 
 #include <array>
@@ -27,6 +28,7 @@ struct ImVec2;
 #include <functional>
 #include <memory>
 #include <string>
+#include <unordered_map>
 
 namespace Everest
 {
@@ -66,6 +68,10 @@ struct SceneViewportReadout
     uint32_t                SurfaceCards        = 0;         // [-] surface cards
     uint32_t                SceneTriangles      = 0;
     uint32_t                GeometryClusters    = 0;         // [-] geometry cluster candidates
+    // 📝 What each Geometry record resolved to against the loaded scene archive (record token value → resolution) and a
+    //    counter that advances whenever any of them changed; the workspace copies them into the records for their inspector.
+    std::shared_ptr<const std::unordered_map<uint64_t, Frontier::GeometryConfiguration::Resolution>> Geometry{};
+    uint64_t                GeometryGeneration  = 0;
 };
 
 struct SceneViewportImage
@@ -230,6 +236,7 @@ class EverestWorkspace
     int                           ConstraintSettleTicks  = 0;         // [-] ticks whose motion is dropped after a lock
     SceneViewportOverlays         Overlays{};
     SceneViewportReadout          LastReadout{};
+    uint64_t                      PublishedGeometryGeneration = 0;   // [-] the geometry resolutions last copied into the records
     std::array<float, 240>        FrameDurations{};                   // [ms] the last 240 interface ticks (1 % low)
     size_t                        FrameDurationCursor    = 0;
     double                        FrameSeconds           = 0.0;       // [s] smoothed tick (0.9 / 0.1)

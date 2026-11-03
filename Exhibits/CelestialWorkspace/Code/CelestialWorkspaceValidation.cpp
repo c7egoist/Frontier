@@ -108,7 +108,8 @@ int main(int Count, char **Arguments)
             Require(Centre.Initialize() && Centre.Activate(), "Native UI initialized");
             Everest::EverestWorkspace Workspace(Centre, Project);
             auto &World = Workspace.QuerySceneWorld();
-            Require(World.QueryRecordCount() == 16, "Clean default retains only rendered environment and the one Render settings record");
+            Require(World.QueryRecordCount() == 53 && World.FindAllByType("Geometry").size() == 37,
+                    "Clean default retains only rendered environment, the one Render settings record and the 37 scene objects");
             for (const char *Type : {"SpatialNode", "RigidBody", "ThermalBody", "ChemicalVessel", "FluidPlume", "Fracture", "Particles",
                                      "HarmonicOscillator", "Lightning", "AerialFog"})
                 Require(World.FindFirstByType(Type) == nullptr, std::string("No unused default ") + Type);

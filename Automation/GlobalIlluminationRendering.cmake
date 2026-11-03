@@ -24,6 +24,7 @@ add_library(FrontierGlobalIllumination STATIC
     Frontier/Engine/Rendering/GlobalIllumination/EnvironmentEncoding.cpp
     Frontier/Engine/Rendering/GlobalIllumination/LuminaireRegister.cpp
     Frontier/Engine/Rendering/GlobalIllumination/IlluminationHost.cpp
+    Frontier/Engine/Rendering/GlobalIllumination/OccupantRelocation.cpp
     Frontier/Engine/Rendering/VirtualizedGeometry/NestingProjection.cpp)
 
 target_include_directories(FrontierGlobalIllumination PUBLIC

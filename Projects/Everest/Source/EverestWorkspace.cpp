@@ -57,6 +57,20 @@ constexpr float  NotchBandHeight = 18.0f;   // [px] the Control Centre notch tab
 // 📝 The demo's Render entity readouts (InspectorPages.js Meta): renderer and grade, TLAS instances (or the clipmap edge),
 //    surface cards and geometry clusters, published on the records' Outliner rows.
 #if FRONTIER_EDITOR
+// 📝 The geometry records' resolutions (what each stands for in the scene archive), copied whenever any of them changed.
+void PublishGeometryResolutions(Frontier::SceneWorld& World, const SceneViewportReadout& Readout, uint64_t& PublishedGeneration)
+{
+    if (!Readout.Geometry || Readout.GeometryGeneration == PublishedGeneration) return;
+    PublishedGeneration = Readout.GeometryGeneration;
+    for (const Frontier::SceneRecordBase* Entry : World.FindAllByType("Geometry"))
+    {
+        auto* Geometry = dynamic_cast<Frontier::GeometryRecord*>(World.FindRecord(Entry->QueryToken()));
+        if (Geometry == nullptr) continue;
+        const auto Resolved = Readout.Geometry->find(Entry->QueryToken().Value);
+        Geometry->AccessConfiguration().Resolved = Resolved != Readout.Geometry->end() ? Resolved->second : Frontier::GeometryConfiguration::Resolution{};
+    }
+}
+
 void PublishRenderReadouts(Frontier::SceneWorld& World, const SceneViewportReadout& Readout)
 {
     if (!Readout.Presenting) return;
@@ -312,14 +326,16 @@ EverestWorkspace::EverestWorkspace(Frontier::ControlCentrePanel& ControlCentre,
 {
     InitializeWorld();
 
-    // 📝 The scene's entries plus the one Render settings component (the whole renderer, owner's request); it is not constructible.
-    const std::vector<std::string> SceneTypes = {"RenderPipeline","Solar","OpticalFlare","Atmosphere","Clouds","Fog","Stars","Moons","Planet","ForceField","Wind"};
+    // 📝 The scene's entries plus the one Render settings component (the whole renderer, owner's request) and the scene archive's
+    //    geometry objects; neither the renderer nor the geometry is constructible (the archive decides what geometry exists).
+    const std::vector<std::string> SceneTypes = {"RenderPipeline","Solar","OpticalFlare","Atmosphere","Clouds","Fog","Stars","Moons","Planet","ForceField","Wind",
+                                                 "Geometry"};
     OutlinerPanel.ConfigureVisibleTypes(SceneTypes);
     auto Types = QuerySceneWorld().EnumerateRegisteredTypes();
     std::erase_if(Types,[&](const auto& Entry)
     {
         return (std::find(SceneTypes.begin(),SceneTypes.end(),Entry.first)==SceneTypes.end() && Entry.first!="LocalCloud" && Entry.first!="LocalFog") ||
-               Entry.first=="RenderPipeline";
+               Entry.first=="RenderPipeline" || Entry.first=="Geometry";
     });
     OutlinerPanel.ConfigureConstructibleTypes(std::move(Types));
     OutlinerPanel.Synchronize(Frontier::SceneDirectory::Instance());
@@ -853,6 +869,7 @@ void EverestWorkspace::ConstructViewportSurface()
         Request.CameraUp = Navigation.Up;
         Image       = PresentSceneViewport(Request);
         LastReadout = Image.Readout;
+        PublishGeometryResolutions(QuerySceneWorld(), LastReadout, PublishedGeometryGeneration);
         PublishRenderReadouts(QuerySceneWorld(), LastReadout);
     }
     if (Image.Texture != 0)

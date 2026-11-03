@@ -8,6 +8,7 @@
 
 #include "EnvironmentOverlay.h"
 #include "Rendering/AnalyticIllumination/AnalyticIlluminationSequence.h"
+#include "Rendering/GlobalIllumination/OccupantRelocation.h"
 
 #include <array>
 #include <filesystem>
@@ -122,6 +123,10 @@ class SceneViewport
     EnvironmentSettings Sky{};
     // 🔍 Last word on the refresh toggles before each refresh (validation tools switch the demo's options and the refinements).
     std::function<void(RefreshToggles&)> ToggleAdjustment{};
+    // 📝 Beyond the demo: the editor's placements of the proving ground's occupants (OccupantRelocation), applied before the next
+    //    refresh; returns how many occupants changed. A rebuilt viewport starts from the archive again.
+    uint32_t RelocateOccupants(const std::vector<OccupantPlacement>& Placements);
+    [[nodiscard]] const SceneStructure* QueryScene() const noexcept { return Host_ ? &Host_->Scene : nullptr; }
     [[nodiscard]] IlluminationHost*   AccessHost() noexcept { return Host_.get(); }
     [[nodiscard]] EnvironmentOverlay* AccessOverlay() noexcept { return Overlay_.get(); }
 

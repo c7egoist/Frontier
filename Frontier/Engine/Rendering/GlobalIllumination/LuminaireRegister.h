@@ -52,9 +52,10 @@ struct LuminaireProfile
 // 📝 A fixture placement (LevelStructure.js ResolveLevelPlacements): PoleHead heads and LampLantern lanterns.
 struct LampPlacement
 {
-    double X = 0.0;   // [m]
-    double Y = 0.0;   // [m]
-    double Z = 0.0;   // [m] 0 = the fixture's default mounting height
+    double X   = 0.0;    // [m]
+    double Y   = 0.0;    // [m]
+    double Z   = 0.0;    // [m] 0 = the fixture's default mounting height
+    bool   Lit = true;   // [-] beyond the demo: false when the editor hides the head or lantern (the lamp keeps its slot)
 };
 
 inline constexpr uint32_t MaximumLuminaires      = 64;

@@ -14,6 +14,8 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <fstream>
+#include <iterator>
 
 namespace Everest
 {
@@ -219,12 +221,26 @@ SceneViewportRefresh EverestSceneViewport::Render(const SceneViewportRequest& Re
                                  RayTracing ? "RTX ReSTIR" : "GTX distance field");
     }
 
-    // ② one refresh through the level's records; with live refresh off the last image stays (Render settings › Refresh timing)
+    // ② the level's geometry records on the scene's occupants: a new scene (a rebuilt viewport) is bound afresh, then only the
+    //    records that changed are placed again
+    if (Viewport_->QueryScene() != GeometryScene_)
+    {
+        std::vector<uint8_t> Materials;
+        if (std::ifstream Stream(Viewport_->QueryConfiguration().SceneArchive / "Materials.bin", std::ios::binary); Stream)
+            Materials.assign(std::istreambuf_iterator<char>(Stream), std::istreambuf_iterator<char>());
+        Geometry_.Reset(Viewport_->QueryScene(), std::move(Materials));
+        GeometryScene_ = Viewport_->QueryScene();
+    }
+    if (const auto Placements = Geometry_.ResolvePlacements(World); !Placements.empty()) (void)Viewport_->RelocateOccupants(Placements);
+
+    // ③ one refresh through the level's records; with live refresh off the last image stays (Render settings › Refresh timing)
     if (!Pipeline.LiveRefresh && Held_.View != VK_NULL_HANDLE && Held_.View == Viewport_->QueryPresentedView())
     {
         SceneViewportRefresh Paused = Held_;
-        Paused.Readout.Held = true;
-        Paused.Status       = "HELD: live refresh is off  |  " + Held_.Status;
+        Paused.Readout.Held               = true;
+        Paused.Readout.Geometry           = Geometry_.QueryResolutions();
+        Paused.Readout.GeometryGeneration = Geometry_.QueryGeneration();
+        Paused.Status                     = "HELD: live refresh is off  |  " + Held_.Status;
         return Paused;
     }
     Frontier::GlobalIllumination::ViewportCamera Camera;
@@ -346,6 +362,8 @@ SceneViewportRefresh EverestSceneViewport::Render(const SceneViewportRequest& Re
     Outcome.Readout.ClipResolution      = Statistics.ClipResolution;
     Outcome.Readout.SurfaceCards        = Statistics.SurfaceCards;
     Outcome.Readout.GeometryClusters    = Statistics.GeometryClusters;
+    Outcome.Readout.Geometry            = Geometry_.QueryResolutions();
+    Outcome.Readout.GeometryGeneration  = Geometry_.QueryGeneration();
     Held_ = Outcome;
     return Outcome;
 }

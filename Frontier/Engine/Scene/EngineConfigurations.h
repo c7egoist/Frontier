@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace Frontier
 {
@@ -648,6 +649,79 @@ struct SurfaceOpticsConfiguration : RevisionCounter
     float IndexOfRefraction         = 1.50f;
     bool  CastShadows               = true;
     bool  ReceiveGlobalIllumination = true;
+};
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                              SCENE GEOMETRY CONFIGURATIONS
+//------------------------------------------------------------------------------------------------------------------------
+
+// 📝 One Array modifier, after Blender's: Count copies of everything above it in the modifier stack. Copy n moves by n × (the
+//    constant offset in metres + the relative offset in extents of one copy) along the object's own axes and turns by n × the
+//    rotation step about the object's Z axis, in place (about the copy's own origin) or about the object's origin (radial).
+struct ArrayModifierConfiguration
+{
+    std::string Label               = "Array";
+    bool        Enabled             = true;                   // [-] the viewport switch: off, the stack skips the modifier
+    bool        Expanded            = true;                   // [-] the panel is unfolded in the stack
+    uint32_t    Count               = 2;                      // [-] copies, the first one included
+    bool        RelativeOffset      = true;                   // [-]
+    float       RelativeFactor[3]   = {1.0f, 0.0f, 0.0f};     // [-] multiples of one copy's extent
+    bool        ConstantOffset      = false;                  // [-]
+    float       ConstantMetres[3]   = {1.0f, 0.0f, 0.0f};     // [m]
+    float       RotationStepDegrees = 0.0f;                   // [°] about Z, per copy
+    bool        RadialPivot         = false;                  // [-] turn about the object's origin instead of each copy's own
+};
+
+// 📝 One object of the level's scene (levelspace type "Geometry"): the scene archive's placements it stands for, the quick
+//    controls, the transform, the modifier stack and the fracture, edited by the geometry inspector (the Project Zero editor's).
+struct GeometryConfiguration : RevisionCounter
+{
+    // 📝 The archive occupants: one name stem per part, each matching the stem alone or the stem and one trailing token
+    //    ("Boundary North -58"), in archive order; OccupantFirst / OccupantCount take a range of every part's matches.
+    std::vector<std::string> OccupantStems{};
+    uint32_t                 OccupantFirst = 0;       // [-]
+    uint32_t                 OccupantCount = 0;       // [-] 0: every match from OccupantFirst
+    uint32_t                 BaseCopies    = 0;       // [-] archive placements the modifier stack starts from; 0: all of them
+    // 📝 Where the object's origin sits in the archive (position and turn about Z): the transform at which the object shows
+    //    the archive's own placements. Unauthored, it is the first placement's.
+    bool                     ArchiveOriginAuthored = false;
+    float                    ArchiveOriginMetres[3] = {0.0f, 0.0f, 0.0f};   // [m]
+    float                    ArchiveYawDegrees      = 0.0f;                 // [°]
+    std::string              GroupName{};             // [-] Outliner group
+    std::string              GlyphName{};             // [-] Outliner glyph (GlyphSymbol name)
+    std::string              Notes{};
+
+    bool Visible            = true;    // [-] drawn, traced and unioned into the distance field
+    bool Dynamic            = false;   // [-] authored: moves at run time (physics)
+    bool CastShadows        = true;    // [-] authored
+    bool GlobalIllumination = true;    // [-] authored
+    bool Physics            = false;   // [-] authored: a rigid body once the physics runs
+    bool Locked             = false;   // [-] the transform and the modifier stack refuse edits
+
+    SpatialConfiguration                    Spatial{};     // [-] the object's transform in the scene (z up)
+    std::vector<ArrayModifierConfiguration> Modifiers{};   // [-] top to bottom
+    FractureConfiguration                   Fracture = [] { FractureConfiguration Disabled; Disabled.Enabled = false; return Disabled; }();
+
+    // 📝 Resolved by the viewport against the loaded scene archive and published by the workspace; not saved.
+    struct Resolution
+    {
+        bool                               Bound            = false;   // [-] every part matched the same number of occupants
+        uint32_t                           Authored         = 0;       // [-] placements in the archive: the most copies shown
+        uint32_t                           Copies           = 0;       // [-] copies the base and the modifier stack produce
+        uint32_t                           Shown            = 0;       // [-] copies drawn
+        uint32_t                           Parts            = 0;       // [-] shapes per copy
+        uint32_t                           Facets           = 0;       // [-] triangles per copy
+        float                              Extent[3]        = {};      // [m] one copy's local bounds
+        std::vector<std::string>           Shapes{};                   // [-] the parts' facet sets
+        std::vector<uint32_t>              Families{};                 // [-] material families the copies use, ascending
+        std::vector<std::string>           FamilyNames{};
+        std::vector<std::array<float, 12>> FamilyChannels{};           // [-] albedo, roughness, emission, metalness, coat, specular, transmission
+        std::vector<uint32_t>              FamilyUsers{};              // [-] geometry objects sharing each family
+        bool                               Breakable        = false;   // [-] a smash-alley prop with a fragment pool
+        uint32_t                           FragmentCapacity = 0;       // [-]
+        bool                               Luminous         = false;   // [-] carries clustered lamps (street lamps, lanterns)
+        std::string                        Diagnostic{};               // [-] why it did not bind
+    } Resolved{};
 };
 
 } // namespace Frontier

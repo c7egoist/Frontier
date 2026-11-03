@@ -115,6 +115,7 @@ add_library(FrontierSceneEditorUI STATIC
     Frontier/Engine/Scene/RecordEntry.cpp
     Frontier/Engine/Scene/SceneDirectory.cpp
     Frontier/Engine/Scene/SceneWorld.cpp
+    Frontier/Engine/Scene/GeometryLayout.cpp
     Frontier/Engine/Diagnostics/LogCategories.cpp
     Frontier/Engine/Diagnostics/LogRingStore.cpp
     Frontier/Engine/Diagnostics/LogStream.cpp
@@ -161,6 +162,13 @@ add_library(FrontierSceneEditorUI STATIC
     Frontier/Engine/Interface/Controls/TintRow.cpp
     Frontier/Engine/Interface/Controls/CaptionText.cpp
     Frontier/Engine/Interface/Controls/FooterRow.cpp
+    Frontier/Engine/Interface/Controls/RecordHeading.cpp
+    Frontier/Engine/Interface/Controls/CardTitleRow.cpp
+    Frontier/Engine/Interface/Controls/NotesField.cpp
+    Frontier/Engine/Interface/Controls/TransformTable.cpp
+    Frontier/Engine/Interface/Controls/QuickTiles.cpp
+    Frontier/Engine/Interface/Controls/ModifierPanel.cpp
+    Frontier/Engine/Interface/Controls/ChannelRows.cpp
     Frontier/Engine/Interface/Inspectors/RenderInspectionModes.cpp
     Frontier/Engine/Interface/Inspectors/SpatialInspector.cpp
     Frontier/Engine/Interface/Inspectors/PhysicsInspector.cpp
@@ -199,6 +207,12 @@ add_library(FrontierSceneEditorUI STATIC
     Frontier/Engine/Interface/Inspectors/FluidPlumeInspector.cpp
     Frontier/Engine/Interface/Inspectors/FractureInspector.cpp
     Frontier/Engine/Interface/Inspectors/ParticleInspector.cpp
+    Frontier/Engine/Interface/Inspectors/GeometryInspector.cpp
+    Frontier/Engine/Interface/Inspectors/Geometry/TransformSection.cpp
+    Frontier/Engine/Interface/Inspectors/Geometry/QuickControlSection.cpp
+    Frontier/Engine/Interface/Inspectors/Geometry/ModifierStackSection.cpp
+    Frontier/Engine/Interface/Inspectors/Geometry/MaterialSection.cpp
+    Frontier/Engine/Interface/Inspectors/Geometry/FractureSection.cpp
     Frontier/Engine/Interface/SceneInspectorPanel.cpp
     Frontier/Engine/Interface/ViewportChromeControls.cpp)
 target_include_directories(FrontierSceneEditorUI PUBLIC
@@ -215,7 +229,8 @@ add_library(EverestProjectEditor STATIC
     Projects/Everest/Source/EverestSimulationRecords.cpp
     Projects/Everest/Source/EverestViewportNavigation.cpp
     Projects/Everest/Source/EverestWorkspace.cpp
-    Projects/Everest/Source/EverestSceneViewport.cpp)
+    Projects/Everest/Source/EverestSceneViewport.cpp
+    Projects/Everest/Source/EverestSceneGeometry.cpp)
 target_include_directories(EverestProjectEditor PUBLIC
     "${CMAKE_SOURCE_DIR}"
     "${CMAKE_SOURCE_DIR}/Frontier"
@@ -232,6 +247,7 @@ add_library(EverestProjectRuntime STATIC
     Frontier/Engine/Scene/RecordEntry.cpp
     Frontier/Engine/Scene/SceneDirectory.cpp
     Frontier/Engine/Scene/SceneWorld.cpp
+    Frontier/Engine/Scene/GeometryLayout.cpp
     Frontier/Engine/Diagnostics/LogCategories.cpp
     Frontier/Engine/Diagnostics/LogRingStore.cpp
     Frontier/Engine/Diagnostics/LogStream.cpp

@@ -98,7 +98,7 @@ int main(int ArgumentCount, char **Arguments)
             Require(Centre.Initialize() && Centre.Activate(), "Control Centre initialized");
             Everest::EverestWorkspace Workspace(Centre, Project);
             auto                     &World = Workspace.QuerySceneWorld();
-            Require(World.QueryRecordCount() == 16, "Default level includes Force Field and local media");
+            Require(World.QueryRecordCount() == 53, "Default level includes Force Field, local media and the 37 scene objects");
             auto *FieldEntry      = dynamic_cast<ForceFieldRecord *>(World.FindFirstByType("ForceField"));
             auto *WindEntry       = dynamic_cast<WindRecord *>(World.FindFirstByType("Wind"));
             auto *AtmosphereEntry = dynamic_cast<AtmosphereRecord *>(World.FindFirstByType("Atmosphere"));

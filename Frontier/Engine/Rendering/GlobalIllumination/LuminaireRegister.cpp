@@ -78,6 +78,7 @@ std::vector<uint8_t> LuminaireRegister::Update(const std::optional<Transform>& V
     for (const LampPlacement& Pole : Poles)
     {
         if (Luminaires.size() >= MaximumLuminaires - 16) break;
+        if (!Pole.Lit) continue;
         LuminaireProfile Lamp;
         Lamp.Category  = LuminaireCategory::StreetLamp;
         Lamp.Position  = {Pole.X, Pole.Y, (Pole.Z != 0.0 ? Pole.Z : 10.8) - 0.25};
@@ -95,6 +96,7 @@ std::vector<uint8_t> LuminaireRegister::Update(const std::optional<Transform>& V
         if (Luminaires.size() >= MaximumLuminaires - 4) break;
         const LampPlacement& Placement = PointLamps[Index];
         const bool           Cool      = (Index & 1u) == 1u;
+        if (!Placement.Lit) continue;
         LuminaireProfile Lamp;
         Lamp.Category  = LuminaireCategory::Omni;
         Lamp.Position  = {Placement.X, Placement.Y, (Placement.Z != 0.0 ? Placement.Z : 5.35) - 0.35};

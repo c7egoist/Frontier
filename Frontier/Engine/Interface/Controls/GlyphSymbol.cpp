@@ -211,6 +211,37 @@ constexpr GlyphSource GlyphSources[] = {
     {"NativeBake",
      "<path d='M12 5h7l2 2v12l-2 2H7l-2-2v-6M2 9h11M9 5l4 4-4 4M3 2v3M1.5 3.5h3'/>"
      "<rect x='14' y='14' width='3' height='3'/>"},
+    // 📝 The geometry inspector and its Outliner rows (lucide: lock, move, atom, fence, warehouse, tower-control, lamp-floor,
+    //    copy, wrench, chevron-up, arrow-up-right; CastShadow and TrafficLight drawn in the same 24-unit stroke style).
+    {"Lock", "<rect width='18' height='11' x='3' y='11' rx='2'/> <path d='M7 11V7a5 5 0 0 1 10 0v4'/>"},
+    {"Move",
+     "<path d='M12 2v20'/> <path d='m15 19-3 3-3-3'/> <path d='m19 9 3 3-3 3'/> <path d='M2 12h20'/> <path d='m5 9-3 3 3 3'/> "
+     "<path d='m9 5 3-3 3 3'/>"},
+    {"Atom",
+     "<circle cx='12' cy='12' r='1'/> <path d='M20.2 20.2c2.04-2.03.02-7.36-4.5-11.9-4.54-4.52-9.87-6.54-11.9-4.5-2.04 2.03-.02 7.36 4.5 11.9 "
+     "4.54 4.52 9.87 6.54 11.9 4.5Z'/> <path d='M15.7 15.7c4.52-4.54 6.54-9.87 4.5-11.9-2.03-2.04-7.36-.02-11.9 4.5-4.52 4.54-6.54 9.87-4.5 "
+     "11.9 2.03 2.04 7.36.02 11.9-4.5Z'/>"},
+    {"CastShadow", "<path d='M4 8 9 5l5 3v6l-5 3-5-3Z'/> <path d='M4 8l5 3 5-3M9 11v6'/> <path d='M14 14l7 3.5-5 3-7-3.5'/>"},
+    {"Fence",
+     "<path d='M4 3 2 5v15c0 .6.4 1 1 1h2c.6 0 1-.4 1-1V5Z'/> <path d='M6 8h4'/> <path d='M6 18h4'/> "
+     "<path d='m12 3-2 2v15c0 .6.4 1 1 1h2c.6 0 1-.4 1-1V5Z'/> <path d='M14 8h4'/> <path d='M14 18h4'/> "
+     "<path d='m20 3-2 2v15c0 .6.4 1 1 1h2c.6 0 1-.4 1-1V5Z'/>"},
+    {"Warehouse",
+     "<path d='M22 8.35V20a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8.35A2 2 0 0 1 3.26 6.5l8-3.2a2 2 0 0 1 1.48 0l8 3.2A2 2 0 0 1 22 8.35Z'/> "
+     "<path d='M6 18h12'/> <path d='M6 14h12'/> <rect width='12' height='12' x='6' y='10'/>"},
+    {"TowerControl",
+     "<path d='M18.2 12.27 20 6H4l1.8 6.27a1 1 0 0 0 .95.73h10.5a1 1 0 0 0 .96-.73Z'/> <path d='M8 13v9'/> <path d='M16 22v-9'/> "
+     "<path d='m9 6 1 7'/> <path d='m15 6-1 7'/> <path d='M12 6V2'/> <path d='M13 2h-2'/>"},
+    {"LampFloor", "<path d='M9 2h6l3 7H6l3-7Z'/> <path d='M12 9v13'/> <path d='M9 22h6'/>"},
+    {"TrafficLight",
+     "<rect x='7' y='2' width='10' height='17' rx='3'/> <circle cx='12' cy='6.5' r='1.6'/> <circle cx='12' cy='10.5' r='1.6'/> "
+     "<circle cx='12' cy='14.5' r='1.6'/> <path d='M12 19v3'/>"},
+    {"Copy", "<rect width='14' height='14' x='8' y='8' rx='2'/> <path d='M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2'/>"},
+    {"Wrench",
+     "<path d='M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 "
+     "6 0 0 1 7.94-7.94l-3.76 3.76z'/>"},
+    {"ChevronUp", "<path d='m18 15-6-6-6 6'/>"},
+    {"ArrowUpRight", "<path d='M7 7h10v10'/> <path d='M7 17 17 7'/>"},
 };
 
 // 📝 ConstructGlyph's Native map: the environment artwork each Native* name shows.
