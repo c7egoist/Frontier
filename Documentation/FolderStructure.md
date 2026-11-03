@@ -133,3 +133,10 @@ earlier builder comparison. The report and plan live in `Documentation/Plans/Ong
 `Frontier/Engine/Rendering/AnalyticIllumination/` is the editor's fast closed-form renderer (library
 `FrontierAnalyticIllumination`, Slang units in `Frontier/Engine/Shaders/AnalyticIllumination/`, archive set
 `AnalyticIllumination`). `Exhibits/AnalyticIllumination/` retains its offscreen capture against the global illumination.
+
+## Ray-traced lighting evidence (2026-11-02)
+
+`Exhibits/RayTracedLighting/` measures the RTX path's reflections and sun shadows under the demo's behaviour and the
+measured refinements (`RefreshToggles::Refinements`), against converged references. Its new shader unit is
+`Frontier/Engine/Shaders/GlobalIllumination/PenumbraResolve.slang`. The report lives in
+`Documentation/Plans/Ongoing/RayTracedLighting.md`.

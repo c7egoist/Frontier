@@ -1148,3 +1148,24 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
   24,432,620 bytes, 921 files, five shader sets verified (AnalyticIllumination and VirtualizedGeometry included),
   `ProvingGround.nestingspace` staged. SHA-256 `bf58bb9ad500d5abaefc03eac16c786b835fe691d3ed1b8a1d678300e766f17c`.
   Unsigned and never launched on Windows here.
+
+## Ray-traced reflections and sun shadows: sources, options, measurements (2026-11-02, arena/88b72faa-frontier)
+
+- **Requested:** find where the RTX reflections' fireflies come from, why the reflection blur ruins them, and why the
+  ray-traced sun shadows' edges are noisy while GTX's are clean; test options without hurting performance and report.
+- **Sources found:** the sun counted twice (highlight toward the shadow ray's jittered direction with a 393,000 GGX
+  peak, plus the solar disc at 2,500× in reflection rays, clamped at 200). The filters-off grain comes from both
+  signals (diffuse ×2.9, specular ×2.1). The blur is a half-resolution trace, three à-trous iterations with
+  receiver-only edge stops, and surface-motion reprojection. The shadows: one jittered ray per pixel and refresh,
+  averaged only by TAA; GTX uses raster cascades with 3×3 PCF, not the distance field.
+- **Options** (`RefreshToggles::Refinements`, levelspace keys `solar_disc`, `stratified_sun`, `penumbra_filter`,
+  `mirror_filter`, `mirror_trace`, all off = the demo; direct radiance bit-identical to the demo's shader with mask 0).
+- **Measured** (`Exhibits/RayTracedLighting/`, converged references): SolarDisc cuts the sun glint's visible errors
+  572 → 56 for free. PenumbraFilter (half radius) cuts visible shadow errors 928 → 615 and 903 → 673 and flicker by
+  30 % for 34–37 ms. MirrorFilter takes 41 % off the pane's error for 13 ms. MirrorTrace halves it for 561 ms. The
+  cascades are the least accurate.
+- **Found:** with indirect GI off, the RTX reflections vanish (the glossy filter's guide comes from the ReSTIR step);
+  not fixed, reported.
+- **New engine parts:** `PenumbraResolve.slang`, the `TraverseMirrorReflection` entry,
+  `DeviceExchange::SubmissionTiming`, `SceneViewport::ToggleAdjustment`, the `Refinements` word (refresh scalar 112,
+  formerly unused).
