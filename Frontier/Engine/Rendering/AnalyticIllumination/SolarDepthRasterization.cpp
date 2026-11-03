@@ -49,7 +49,8 @@ void SolarDepthRasterization::Record(CommandSequence& Sequence, const std::share
     Sequence.BindGroup(0, Group);
     Sequence.BindVertexRegion(0, VertexRegion);
     Sequence.BindVertexRegion(1, Instances);
-    for (const DrawRun& Run : Scene.DrawRuns)
+    // 📝 The shadow runs: every drawn occupant but the ground and the objects switched out of shadows (ShadowExempt).
+    for (const DrawRun& Run : Scene.ShadowRuns)
     {
         const FacetSet& Set = Scene.FacetSets[Run.FacetSet];
         Sequence.Draw(Set.VertexCount, Run.Count, Set.FirstVertex, Run.First);

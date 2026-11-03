@@ -74,7 +74,15 @@ struct IlluminationAssets
     std::vector<uint8_t>  StarCatalogue{};              // [B] rgba32float texels, 1024 wide
     uint32_t              StarCatalogueRows = 1;
     bool                  OmitVehicle       = false;    // [-] deactivate the vehicle body and wheels before bring-up (no car)
+    // 📝 Beyond the demo: the engine shapes join the scene as facet sets (their surfaces as families after Materials.bin's), and the
+    //    stress pool becomes the editor's reserve of ReserveCapacity occupants (SceneStructure::ConvertStressReserve).
+    std::vector<ShapeArchive> Shapes{};
+    uint32_t                  ReserveCapacity = 0;          // [-] 0 keeps the demo's stress pool
 };
+
+// 📝 Material blocks per object (MaterialBlockBit): each a whole copy of the family table, after the table itself.
+constexpr uint32_t MaterialBlockCapacity = 96;   // [-]
+constexpr uint32_t MaterialStride        = 48;   // [B] MaterialSpecification
 
 // 📝 Per-refresh writes not produced by the ported host modules (camera-, physics- and effect-driven buffers); a replay
 //    supplies them from a capture, the editor from its own scene.
@@ -136,6 +144,16 @@ class IlluminationHost
     // 📝 Writes the profiles of the relocated occupants: settles those relocated before the last refresh, then carries the newly
     //    relocated ones' motion for this refresh.
     void SettleRelocatedOccupants();
+
+    // 📝 Beyond the demo. A reserve occupant takes a template occupant's facet set, participation, cards and surface: its cards are
+    //    laid out and captured again, its ray tracing root follows and its profile is rewritten at the next refresh. Returns false
+    //    for an occupant outside the reserve.
+    bool AssignReserveOccupant(uint32_t Occupant, const OccupantEntry& Template);
+    // 📝 Captures the cards of these occupants again (their surface changed) and relights them first.
+    void RecaptureOccupants(const std::vector<uint32_t>& Occupants);
+    // 📝 Writes material block Block (MaterialFamilyCount records of MaterialStride bytes); false past the capacity.
+    bool WriteMaterialBlock(uint32_t Block, const std::vector<uint8_t>& Records);
+    [[nodiscard]] uint32_t QueryMaterialBlockBase(uint32_t Block) const noexcept { return MaterialFamilyCount * (1u + Block); }
     // 🔍 One line per bring-up step with its duration (the editor's diagnostic journal); unset = silent.
     std::function<void(const std::string&)> Journal{};
     // 🔍 Refreshes still to submit step by step (a device fault then names its step); a bring-up sets two.
@@ -176,6 +194,7 @@ class IlluminationHost
     LightSolution                          LastLight{};
     CelestialSolution                   LastCelestial{};
     std::optional<std::pair<Vector3, double>> PriorLight{};   // [-] direction, summed illuminance of the previous refresh
+    uint32_t                            MaterialFamilyCount = 0;   // [-] Materials.bin's families and the engine shapes'
     uint32_t                            RefreshIndex = 0;
     uint32_t                            ScreenGeneration = 0;   // [-] advances whenever the screen targets are rebuilt
     bool                                PriorValid   = false;

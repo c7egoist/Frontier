@@ -77,7 +77,8 @@ ShadingVarying ShadingVertex([[vk::location(0)]] float3 Position : LOCATION0, [[
     Varying.Position = mul(World, Analytic.ViewProjection);
     Varying.World    = World.xyz;
     Varying.Normal   = mul(float4(Normal, 0.0), Occupant.LocalToWorld).xyz;
-    Varying.Family   = Occupant.MaterialOverride != NoFamilyOverride ? Occupant.MaterialOverride : Family;
+    let Override     = Occupant.MaterialOverride;
+    Varying.Family   = Override == NoFamilyOverride ? Family : ((Override & FamilyBlockBit) != 0u ? (Override & ~FamilyBlockBit) + Family : Override);
     return Varying;
 }
 

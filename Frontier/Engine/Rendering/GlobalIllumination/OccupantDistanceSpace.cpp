@@ -21,6 +21,32 @@ constexpr uint32_t MinimumVolumeTexels = 8;       // [texel] shortest volume axi
 constexpr uint32_t SignRayCount        = 32;      // [-]     rays per voxel for the back-face sign heuristic
 constexpr uint32_t SlabVoxelBudget     = 65536;   // [voxel] voxels per submission
 constexpr uint32_t PoolStride          = FragmentPool.MaxTriangles * 3 + FragmentPool.MaxPlanes;   // [vec4] per job
+
+// 📝 IEEE 754 binary16, round to nearest even; finite inputs only (distances), overflow saturates to ±65504.
+uint16_t PackHalf(float Scalar) noexcept
+{
+    uint32_t Bits = 0;
+    std::memcpy(&Bits, &Scalar, 4);
+    const uint32_t Sign     = (Bits >> 16) & 0x8000u;
+    const int32_t  Exponent = static_cast<int32_t>((Bits >> 23) & 0xFFu) - 127 + 15;
+    uint32_t       Mantissa = Bits & 0x7FFFFFu;
+    if (Exponent <= 0)
+    {
+        if (Exponent < -10) return static_cast<uint16_t>(Sign);
+        Mantissa |= 0x800000u;
+        const uint32_t Shift = static_cast<uint32_t>(14 - Exponent);
+        uint32_t       Half  = Mantissa >> Shift;
+        const uint32_t Rest  = Mantissa & ((1u << Shift) - 1u);
+        const uint32_t Mid   = 1u << (Shift - 1u);
+        if (Rest > Mid || (Rest == Mid && (Half & 1u))) ++Half;
+        return static_cast<uint16_t>(Sign | Half);
+    }
+    if (Exponent >= 31) return static_cast<uint16_t>(Sign | 0x7BFFu);
+    uint32_t Half = Sign | (static_cast<uint32_t>(Exponent) << 10) | (Mantissa >> 13);
+    const uint32_t Rest = Mantissa & 0x1FFFu;
+    if (Rest > 0x1000u || (Rest == 0x1000u && (Half & 1u))) ++Half;
+    return static_cast<uint16_t>(std::min<uint32_t>(Half, Sign | 0x7BFFu));
+}
 } // namespace
 
 OccupantDistanceSpace::OccupantDistanceSpace(DeviceExchange& Exchange, ShaderInterchange& Shaders)
@@ -44,6 +70,22 @@ bool OccupantDistanceSpace::ConstructVolumes(SceneStructure& Scene, double Voxel
     for (uint32_t SetIndex : Required)
     {
         FacetSet& Set   = Scene.FacetSets[SetIndex];
+        if (Set.BakedVolume)
+        {
+            // 📝 A baked engine shape keeps the layout it was baked for at every quality grade.
+            OccupantVolume Volume;
+            Volume.FacetSet    = SetIndex;
+            Volume.VoxelExtent = Set.BakedVolume->VoxelExtent;
+            Volume.Resolution  = Set.BakedVolume->Resolution;
+            for (int Axis = 0; Axis < 3; ++Axis) Volume.Minimum[Axis] = Set.BakedVolume->Minimum[Axis];
+            Volume.TexelOrigin = {0, 0, Depth};
+            Set.VolumeIndex    = static_cast<int32_t>(Volumes.size());
+            Volumes.push_back(Volume);
+            Width  = std::max(Width, Volume.Resolution[0]);
+            Height = std::max(Height, Volume.Resolution[1]);
+            Depth += Volume.Resolution[2] + 1;
+            continue;
+        }
         double    Voxel = Set.DistanceVoxel * VoxelScale;
         Vector3   Extent{};
         for (int Axis = 0; Axis < 3; ++Axis) Extent[Axis] = Set.LocalMaximum[Axis] - Set.LocalMinimum[Axis];
@@ -102,7 +144,7 @@ bool OccupantDistanceSpace::ConstructVolumes(SceneStructure& Scene, double Voxel
     Specification.DepthOrLayers = SpaceExtent[2];
     Specification.Dimension     = TextureDimension::Volumetric;
     Specification.Format        = TextureFormat::Rgba16Float;
-    Specification.Usage         = TextureUsage::Storage | TextureUsage::Sampled;
+    Specification.Usage         = TextureUsage::Storage | TextureUsage::Sampled | TextureUsage::CopyTarget;
     Texture     = Exchange_.ConstructTexture(Specification);
     TextureView = Exchange_.ConstructView(Texture);
 
@@ -115,6 +157,20 @@ bool OccupantDistanceSpace::ConstructVolumes(SceneStructure& Scene, double Voxel
     {
         const OccupantVolume& Volume = Volumes[VolumeIndex];
         const FacetSet&    Set = Scene.FacetSets[Volume.FacetSet];
+        if (Set.BakedVolume)
+        {
+            // 📝 The baked texels as the transfer writes them: (signed distance, 0, 0, 1).
+            const auto&           Distances = Set.BakedVolume->Distances;
+            std::vector<uint16_t> Texels(Distances.size() * 4, 0u);
+            for (size_t Index = 0; Index < Distances.size(); ++Index)
+            {
+                Texels[Index * 4]     = PackHalf(Distances[Index]);
+                Texels[Index * 4 + 3] = 0x3C00u;
+            }
+            Exchange_.WriteTexture(Texture, 0, Texels.data(), Texels.size() * sizeof(uint16_t), Volume.Resolution[0], Volume.Resolution[1],
+                                   Volume.Resolution[2], Volume.TexelOrigin[0], Volume.TexelOrigin[1], Volume.TexelOrigin[2]);
+            continue;
+        }
         std::vector<float> Corners(Set.Facets.size() * 9);
         for (size_t Index = 0; Index < Set.Facets.size(); ++Index)
         {

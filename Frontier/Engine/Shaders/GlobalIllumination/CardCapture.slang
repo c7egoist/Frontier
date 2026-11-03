@@ -43,7 +43,7 @@ CaptureVarying CaptureVertex([[vk::location(0)]] float3 Position : LOCATION0, [[
     var Varying : CaptureVarying = {};
     Varying.Position = float4(Coordinates.x * 2.0 - 1.0, 1.0 - Coordinates.y * 2.0, Coordinates.z, 1.0);
     Varying.Normal   = Normal;
-    Varying.Family   = SelectBranch(Family, Occupant.MaterialOverride, Occupant.MaterialOverride != NoMaterialOverride);
+    Varying.Family   = ResolveSurfaceFamily(Family, Occupant.MaterialOverride);
     Varying.Card     = CardIndex;
     return Varying;
 }

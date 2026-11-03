@@ -1095,6 +1095,8 @@ void GeometryRecord::SerializeConfiguration(toml::table& OutTable) const
     if (Parameters.OccupantFirst != 0) OutTable.insert_or_assign("occupant_first", static_cast<int64_t>(Parameters.OccupantFirst));
     if (Parameters.OccupantCount != 0) OutTable.insert_or_assign("occupant_count", static_cast<int64_t>(Parameters.OccupantCount));
     if (Parameters.BaseCopies != 0) OutTable.insert_or_assign("base_copies", static_cast<int64_t>(Parameters.BaseCopies));
+    if (!Parameters.ClaimsArchive) OutTable.insert_or_assign("claims_archive", false);
+    if (!Parameters.ShapeName.empty()) OutTable.insert_or_assign("shape", Parameters.ShapeName);
     if (Parameters.ArchiveOriginAuthored)
     {
         WriteRoundedFloat3(OutTable, "archive_origin_m", Parameters.ArchiveOriginMetres);
@@ -1136,6 +1138,25 @@ void GeometryRecord::SerializeConfiguration(toml::table& OutTable) const
         Stack.push_back(std::move(Entry));
     }
     if (!Stack.empty()) OutTable.insert_or_assign("modifiers", std::move(Stack));
+    // 📝 The surfaces the object owns: [[surfaces]] family = n, albedo = [r, g, b], roughness = …, as the shape archives name them.
+    toml::array Surfaces;
+    for (const SurfaceSlotConfiguration& Slot : Parameters.SurfaceSlots)
+    {
+        toml::table Entry;
+        const auto& Channel = Slot.Channels;
+        auto Rounded = [](float Scalar) { return std::round(static_cast<double>(Scalar) * 1.0e5) / 1.0e5; };
+        Entry.insert_or_assign("family", static_cast<int64_t>(Slot.Family));
+        Entry.insert_or_assign("albedo", toml::array{Rounded(Channel[0]), Rounded(Channel[1]), Rounded(Channel[2])});
+        Entry.insert_or_assign("roughness", Rounded(Channel[3]));
+        Entry.insert_or_assign("incandescence", toml::array{Rounded(Channel[4]), Rounded(Channel[5]), Rounded(Channel[6])});
+        Entry.insert_or_assign("metalness", Rounded(Channel[7]));
+        Entry.insert_or_assign("coat", Rounded(Channel[8]));
+        Entry.insert_or_assign("coat_roughness", Rounded(Channel[9]));
+        Entry.insert_or_assign("specular", Rounded(Channel[10]));
+        Entry.insert_or_assign("transmission", Rounded(Channel[11]));
+        Surfaces.push_back(std::move(Entry));
+    }
+    if (!Surfaces.empty()) OutTable.insert_or_assign("surfaces", std::move(Surfaces));
 }
 
 template <>
@@ -1148,6 +1169,8 @@ void GeometryRecord::DeserializeConfiguration(const toml::table& InTable)
     Parameters.OccupantFirst      = ReadUint32(InTable, "occupant_first", 0u);
     Parameters.OccupantCount      = ReadUint32(InTable, "occupant_count", 0u);
     Parameters.BaseCopies         = ReadUint32(InTable, "base_copies", 0u);
+    Parameters.ClaimsArchive      = ReadBool(InTable, "claims_archive", true);
+    Parameters.ShapeName          = InTable["shape"].value_or(std::string());
     Parameters.ArchiveOriginAuthored = InTable.contains("archive_origin_m");
     if (Parameters.ArchiveOriginAuthored) ReadFloat3(InTable, "archive_origin_m", Parameters.ArchiveOriginMetres);
     Parameters.ArchiveYawDegrees  = ReadFloat(InTable, "archive_yaw_deg", 0.0f);
@@ -1183,6 +1206,31 @@ void GeometryRecord::DeserializeConfiguration(const toml::table& InTable)
             Modifier.RotationStepDegrees = ReadFloat(*Entry, "rotation_step_deg", Modifier.RotationStepDegrees);
             Modifier.RadialPivot         = ReadBool(*Entry, "radial_pivot", Modifier.RadialPivot);
             Parameters.Modifiers.push_back(std::move(Modifier));
+        }
+    }
+    Parameters.SurfaceSlots.clear();
+    if (const toml::array* Surfaces = InTable["surfaces"].as_array())
+    {
+        for (const toml::node& Node : *Surfaces)
+        {
+            const toml::table* Entry = Node.as_table();
+            if (Entry == nullptr) continue;
+            SurfaceSlotConfiguration Slot;
+            Slot.Family = ReadUint32(*Entry, "family", 0u);
+            auto Read3 = [&](const char* Key, size_t First) {
+                if (const toml::array* Values = (*Entry)[Key].as_array())
+                    for (size_t Index = 0; Index < 3 && Index < Values->size(); ++Index)
+                        Slot.Channels[First + Index] = static_cast<float>((*Values)[Index].value_or(0.0));
+            };
+            Read3("albedo", 0);
+            Read3("incandescence", 4);
+            Slot.Channels[3]  = ReadFloat(*Entry, "roughness", 0.5f);
+            Slot.Channels[7]  = ReadFloat(*Entry, "metalness", 0.0f);
+            Slot.Channels[8]  = ReadFloat(*Entry, "coat", 0.0f);
+            Slot.Channels[9]  = ReadFloat(*Entry, "coat_roughness", 0.0f);
+            Slot.Channels[10] = ReadFloat(*Entry, "specular", 0.04f);
+            Slot.Channels[11] = ReadFloat(*Entry, "transmission", 0.0f);
+            Parameters.SurfaceSlots.push_back(Slot);
         }
     }
     ConfigureEditorPresentation(Parameters.GlyphName.c_str(), Parameters.GroupName.c_str(), "Geometry", "");
@@ -1451,18 +1499,13 @@ void SceneWorld::RegisterNativeEngineTypes()
         "Wind", "Forcefield", "#a7f3d0");
     RegisterSimple.operator()<WindRecord>("Wind", "Environment · Wind Field", RecordClassification::Environment, "Wind", "Forcefield", "#a7f3d0");
 
-    // 📝 The scene archive's objects, edited by the geometry inspector: the archive decides what exists, so the editor neither
-    //    adds nor removes them; each record names its own group and glyph.
+    // 📝 The scene's objects, edited by the geometry inspector: the scene archive's own (a record claims their occupants) and the
+    //    editor's (engine shapes and duplicates, laid out from the reserve); each record names its own group and glyph. Removing
+    //    an archive object hides its occupants for as long as the level has no record claiming them.
     RegisterType({"Geometry", "Scene · Geometry", RecordClassification::Geometry,
         [](std::string Name) -> std::unique_ptr<SceneRecordBase>
         {
-            auto Entry = std::make_unique<GeometryRecord>(RecordClassification::Geometry, "Geometry", std::move(Name), "Box", "Geometry", "#a8bbeb");
-#if FRONTIER_EDITOR
-            SceneDirectoryMetadata Meta = SceneDirectory::Instance().QueryMetadata(Entry->QueryToken());
-            Meta.RemovableInEditor      = false;
-            (void)SceneDirectory::Instance().ConfigureMetadata(Entry->QueryToken(), std::move(Meta));
-#endif
-            return Entry;
+            return std::make_unique<GeometryRecord>(RecordClassification::Geometry, "Geometry", std::move(Name), "Box", "Geometry", "#a8bbeb");
         }});
 
     // Render settings (one record for the whole renderer) & Continuum Solver Types

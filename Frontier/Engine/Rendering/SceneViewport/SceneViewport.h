@@ -26,6 +26,8 @@ struct SceneViewportConfiguration
     std::filesystem::path EnvironmentShaders{};          // [-] EngineContent/ShaderArchives/Environment; empty = the demo's own sky only
     std::filesystem::path SceneArchive{};                // [-] EnvironmentArchives/ProvingGround
     std::filesystem::path CelestialMaps{};               // [-] EnvironmentArchives/CelestialMaps
+    std::filesystem::path ShapeArchives{};               // [-] EngineContent/ShapeArchives; empty = no engine shapes (beyond the demo)
+    uint32_t              ReserveCapacity = 512;         // [-] stress-pool occupants kept as the editor's reserve (0 = the demo's pool)
     std::string           Quality    = "medium";         // [-] the demo's grades: low | medium | high
     bool                  RayTracing = true;             // [-] RTX ReSTIR path tracer; false = GTX distance-field GI
     uint32_t              TraceScale = 2;                // [-] screen pixels per resampling pixel along one axis
@@ -127,6 +129,7 @@ class SceneViewport
     //    refresh; returns how many occupants changed. A rebuilt viewport starts from the archive again.
     uint32_t RelocateOccupants(const std::vector<OccupantPlacement>& Placements);
     [[nodiscard]] const SceneStructure* QueryScene() const noexcept { return Host_ ? &Host_->Scene : nullptr; }
+    [[nodiscard]] const std::vector<ShapeArchive>& QueryShapes() const noexcept { return Shapes_; }
     [[nodiscard]] IlluminationHost*   AccessHost() noexcept { return Host_.get(); }
     [[nodiscard]] EnvironmentOverlay* AccessOverlay() noexcept { return Overlay_.get(); }
 
@@ -137,6 +140,7 @@ class SceneViewport
     std::unique_ptr<DeviceExchange>        Exchange_{};
     std::unique_ptr<VulkanComputeExchange> Environment_{};
     std::unique_ptr<IlluminationHost>      Host_{};
+    std::vector<ShapeArchive>              Shapes_{};                        // [-] the engine shapes the scene was built with
     bool                                   VirtualizedConfigured_ = false;   // [-] last levelspace value of the cluster takeover
     RefreshToggles                         LastToggles_{};                   // [-] what the last global-illumination refresh ran with
     std::unique_ptr<AnalyticIllumination::AnalyticIlluminationSequence> Analytic_{};   // [-] built on first selection

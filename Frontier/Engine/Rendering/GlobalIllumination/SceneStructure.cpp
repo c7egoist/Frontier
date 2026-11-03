@@ -197,7 +197,8 @@ void SceneStructure::ConstructDrawRuns()
         {
             OpenRun = -1;
         }
-        const bool Shadowed = Drawn && static_cast<int32_t>(Index) != GroundOccupant;
+        const bool Shadowed = Drawn && static_cast<int32_t>(Index) != GroundOccupant &&
+                              !(Occupant.Participation & OccupantParticipation::ShadowExempt);
         if (Shadowed && OpenShadow >= 0 && Shadows[OpenShadow].FacetSet == Occupant.FacetSet &&
             Shadows[OpenShadow].First + Shadows[OpenShadow].Count == Index)
         {
@@ -215,6 +216,87 @@ void SceneStructure::ConstructDrawRuns()
     }
     DrawRuns   = std::move(Runs);
     ShadowRuns = std::move(Shadows);
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                   ENGINE SHAPES & RESERVE
+//------------------------------------------------------------------------------------------------------------------------
+
+void SceneStructure::AppendShapeSets(const std::vector<ShapeArchive>& Shapes, uint32_t FirstFamily)
+{
+    ShapeSetFirst = static_cast<uint32_t>(FacetSets.size());
+    ShapeSetCount = static_cast<uint32_t>(Shapes.size());
+    for (uint32_t Index = 0; Index < Shapes.size(); ++Index)
+    {
+        const ShapeArchive& Shape = Shapes[Index];
+        FacetSet            Set;
+        Set.Name          = "Shape " + Shape.Name;
+        Set.DistanceVoxel = Shape.VoxelExtent;
+        Set.CardDensity   = Shape.CardDensity;
+        for (int Axis = 0; Axis < 3; ++Axis)
+        {
+            Set.LocalMinimum[Axis] = -0.5 * Shape.Size[Axis];
+            Set.LocalMaximum[Axis] = 0.5 * Shape.Size[Axis];
+        }
+        for (const ShapeFacet& Source : Shape.Facets)
+        {
+            FacetEntry Facet;
+            for (int Corner = 0; Corner < 3; ++Corner)
+                for (int Axis = 0; Axis < 3; ++Axis)
+                {
+                    Facet.Corners[Corner][Axis] = Source.Corners[Corner][Axis];
+                    Facet.Normals[Corner][Axis] = Source.Normals[Corner][Axis];
+                }
+            Facet.Family          = FirstFamily + Index;
+            Facet.NormalsAuthored = true;
+            Set.Facets.push_back(Facet);
+        }
+        Set.VertexCount = static_cast<uint32_t>(Set.Facets.size()) * 3u;
+        if (Shape.Distance) Set.BakedVolume = std::make_shared<const ShapeDistanceVolume>(*Shape.Distance);
+        FacetSets.push_back(std::move(Set));
+    }
+}
+
+void SceneStructure::ConvertStressReserve(uint32_t Capacity)
+{
+    ReserveFirst = StressFirst;
+    ReserveCount = std::min(Capacity, StressCapacity);
+    for (uint32_t Slot = 0; Slot < StressCapacity && StressFirst + Slot < Occupants.size(); ++Slot)
+    {
+        OccupantEntry& Occupant = Occupants[StressFirst + Slot];
+        const OccupantEntry Former = Occupant;
+        Occupant = OccupantEntry{};
+        Occupant.Name     = "Reserve " + std::to_string(Slot);
+        Occupant.FacetSet = Former.FacetSet;
+        Occupant.Current  = ConstructIdentityTransform();
+        Occupant.Previous = Occupant.Current;
+        Occupant.Inactive = true;
+        if (Slot >= ReserveCount) continue;
+        // 📝 Each reserve occupant starts on an engine shape (round robin), so every shape owns a distance volume and the cards are
+        //    laid out for a shape; a template reassigns it before it is shown.
+        Occupant.Participation = OccupantParticipation::Raster | OccupantParticipation::Distance | OccupantParticipation::Cards;
+        if (ShapeSetCount > 0) Occupant.FacetSet = ShapeSetFirst + Slot % ShapeSetCount;
+        const FacetSet& Set   = FacetSets[Occupant.FacetSet];
+        Occupant.CardMinimum = Set.LocalMinimum;
+        Occupant.CardMaximum = Set.LocalMaximum;
+        Occupant.CardDensity = Set.CardDensity > 0.0 ? Set.CardDensity : Former.CardDensity;
+    }
+    StressCapacity = 0;
+}
+
+void SceneStructure::AssignReserveTemplate(uint32_t Index, const OccupantEntry& Template)
+{
+    OccupantEntry& Occupant = Occupants[Index];
+    Occupant.FacetSet         = Template.FacetSet;
+    Occupant.Participation    = Template.Participation & ~(OccupantParticipation::Dynamic | OccupantParticipation::Shredded);
+    Occupant.MaterialOverride = Template.MaterialOverride;
+    Occupant.CardMinimum      = Template.CardMinimum;
+    Occupant.CardMaximum      = Template.CardMaximum;
+    Occupant.CardDensity      = Template.CardDensity;
+    Occupant.FallbackAlbedo   = Template.FallbackAlbedo;
+    Occupant.Obstacle         = Template.Obstacle;
+    Occupant.Moving.reset();
+    Occupant.UnionTransform.reset();
 }
 
 bool SceneStructure::ConstructDistanceList()

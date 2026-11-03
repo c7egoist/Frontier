@@ -25,6 +25,7 @@ struct SurfaceCard
     uint32_t                Occupant = 0;
     std::array<uint32_t, 2> TexelExtent{};    // [texel]
     std::array<uint32_t, 2> TexelOrigin{};    // [texel]
+    std::array<uint32_t, 2> TexelAllotment{}; // [texel] the rectangle packed for it (a reassigned card may use less of it)
 };
 
 // 📝 One 8×8 relighting tile: card index and (TileY << 16) | TileX.
@@ -50,6 +51,13 @@ class SurfaceCardDepot
                                                             const std::shared_ptr<DeviceTextureView>& MoonAtlas,
                                                             const std::shared_ptr<DeviceTextureView>& Catalogue);
     void CaptureCards(const SceneStructure& Scene, const std::shared_ptr<DeviceRegion>& VertexRegion);
+
+    // 📝 Beyond the demo. A reserve occupant that took another shape gets cards for its new bounds, in its own rectangles when they
+    //    fit and else in the rows the packing left free (or clamped to its own when those run out); the indices of its cards come back.
+    //    RecaptureCards captures only the given cards again, clearing their rectangles and their radiosity first.
+    std::vector<uint32_t> ReassignOccupantCards(SceneStructure& Scene, uint32_t Occupant);
+    void RecaptureCards(const SceneStructure& Scene, const std::shared_ptr<DeviceRegion>& VertexRegion,
+                        const std::vector<uint32_t>& CardIndices);
     void InvalidateLighting();
     void ScheduleTiles(uint32_t TileBudget);
     void RecordLighting(CommandSequence& Sequence, const std::shared_ptr<DescriptorGroup>& DistanceGroup,
@@ -80,8 +88,17 @@ class SurfaceCardDepot
     std::shared_ptr<DeviceProgram>     DirectProgram{}, RadiosityProgram{}, FinalProgram{}, CaptureProgram{};
 
   private:
+    [[nodiscard]] bool AllotRuntimeRectangle(uint32_t Width, uint32_t Height, std::array<uint32_t, 2>& Origin);
+    void               EncodeCard(const SurfaceCard& Card, uint8_t* Target) const;
+
     DeviceExchange&    Exchange_;
     ShaderInterchange& Shaders_;
+    uint32_t           RuntimeShelfX_      = 0;   // [texel] the free rows below the packing, filled shelf by shelf at run time
+    uint32_t           RuntimeShelfY_      = 0;   // [texel]
+    uint32_t           RuntimeShelfHeight_ = 0;   // [texel]
+    uint64_t           TileCapacity_       = 0;   // [-] tiles the tile region holds
+    std::shared_ptr<DeviceTexture>     CaptureDepth_{};
+    std::shared_ptr<DeviceTextureView> CaptureDepthView_{};
 };
 
 } // namespace Frontier::GlobalIllumination

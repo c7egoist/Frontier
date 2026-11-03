@@ -7,7 +7,10 @@
 
 #include "TransformProjection.h"
 
+#include "Frontier/Engine/Geometry/ShapeArchive.h"
+
 #include <cstdint>
+#include <memory>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -25,7 +28,14 @@ constexpr uint32_t Cards    = 4u;    // [-] - owns surface cards in the card dep
 constexpr uint32_t Dynamic  = 8u;    // [-] - transform may change every refresh
 constexpr uint32_t Fallback = 16u;   // [-] - card-less: a traced hit shades from the packed albedo (FirstCard)
 constexpr uint32_t Shredded = 32u;   // [-] - wheel whose tyre rubber is shredded
+// 📝 Beyond the demo, the editor's per-object switches (the geometry inspector's Cast shadows and GI).
+constexpr uint32_t ShadowExempt   = 64u;    // [-] - casts no shadow: left out of the shadow depth and of every shadow ray
+constexpr uint32_t IndirectExempt = 128u;   // [-] - takes no part in indirect light: left out of the distance field and the traced rays
 } // namespace OccupantParticipation
+
+// 📝 Beyond the demo: an occupant's MaterialOverride with this bit set offsets every per-facet family by the low bits, so the object
+//    reads its own copy of the material table (a material block) instead of the families it shares.
+constexpr uint32_t MaterialBlockBit = 0x80000000u;
 
 constexpr uint32_t VertexStride    = 32u;     // [B] - position.xyz, family (u32), normal.xyz, occupant offset (u32)
 constexpr uint32_t OccupantStride  = 336u;    // [B] - OccupantProfile
@@ -67,6 +77,9 @@ struct FacetSet
     uint32_t                VertexCapacity = 0;     // [-] reserved vertices of a fragmented set
     bool                    Fragmented     = false;   // [-] the demo's fragment-set flag (bit 0)
     int32_t                 VolumeIndex    = -1;    // [-] OccupantDistanceSpace volume, -1 when none
+    // 📝 An engine shape's baked signed distance volume (ShapeArchive): its layout replaces the one OccupantDistanceSpace would
+    //    choose and its texels are written instead of transferred.
+    std::shared_ptr<const ShapeDistanceVolume> BakedVolume{};
 };
 
 // 📝 Placement of one occupant's distance volume inside the occupant distance space (OccupantDistanceSpace volumes).
@@ -136,6 +149,18 @@ class SceneStructure
         return EncodeOccupantRange(Volumes, 0, Count);
     }
 
+    // 📝 Beyond the demo: the engine shapes join as facet sets after the archive's (their facets take the families FirstFamily onwards),
+    //    and the stress pool becomes the editor's reserve: Capacity inactive occupants that copies and constructed objects take, the rest
+    //    of the pool leaving every step.
+    void AppendShapeSets(const std::vector<ShapeArchive>& Shapes, uint32_t FirstFamily);
+    void ConvertStressReserve(uint32_t Capacity);
+    // 📝 A reserve occupant takes the facet set, participation, card bounds and surface of a template occupant.
+    void AssignReserveTemplate(uint32_t Occupant, const OccupantEntry& Template);
+    [[nodiscard]] bool QueryReserved(uint32_t Occupant) const noexcept
+    {
+        return Occupant >= ReserveFirst && Occupant < ReserveFirst + ReserveCount;
+    }
+
     std::vector<FacetSet>      FacetSets{};
     std::vector<OccupantEntry> Occupants{};
     int32_t                    VehicleBody = -1;
@@ -151,6 +176,10 @@ class SceneStructure
     uint32_t                   StressCapacity = 0;
     uint32_t                   ConeFirst = 0;
     uint32_t                   ConeCount = 0;
+    uint32_t                   ShapeSetFirst = 0;      // [-] the engine shapes' facet sets
+    uint32_t                   ShapeSetCount = 0;
+    uint32_t                   ReserveFirst  = 0;      // [-] the editor's reserve occupants (the former stress pool)
+    uint32_t                   ReserveCount  = 0;
     std::vector<uint32_t>      DistanceList{};
     std::vector<DrawRun>       DrawRuns{};
     std::vector<DrawRun>       ShadowRuns{};

@@ -693,6 +693,12 @@ if(BUILD_TESTING)
         "${CMAKE_SOURCE_DIR}/Projects/Everest"
         "${CMAKE_BINARY_DIR}/everest-interface-exhibits")
 
+    # 📝 The engine shapes' signed distance volumes (EngineContent/ShapeArchives/<Name>.sdfspace); "check" compares instead of writing.
+    add_executable(ShapeArchiveBake
+        Exhibits/SceneViewport/Code/ShapeArchiveBake.cpp)
+    target_link_libraries(ShapeArchiveBake PRIVATE FrontierSceneViewport)
+    add_test(NAME ShapeArchiveBakeValidation COMMAND ShapeArchiveBake "${CMAKE_SOURCE_DIR}/EngineContent/ShapeArchives" check)
+
     # 📝 The level's Geometry records against the scene archive, no device — Exhibits/SceneViewport/README.md.
     add_executable(SceneGeometryValidation
         Exhibits/SceneViewport/Code/SceneGeometryValidation.cpp)

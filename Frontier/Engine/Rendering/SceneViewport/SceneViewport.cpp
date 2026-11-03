@@ -85,6 +85,22 @@ bool SceneViewport::Construct(const VulkanDeviceAccess* HostDevice, const SceneV
     Assets.FacetSpace  = Configuration.SceneArchive / "ProvingGround.facetspace";
     Assets.OmitVehicle = true;
     if (!ReadArchive(Configuration.SceneArchive / "Materials.bin", Assets.MaterialProfiles, OutDiagnostic)) return false;
+    // 📝 Beyond the demo: the engine shapes (EngineContent/ShapeArchives) and the editor's reserve of occupants for copies and
+    //    constructed objects. A shape without a matching bake is transferred on the device like any facet set.
+    if (!Configuration.ShapeArchives.empty())
+    {
+        std::vector<std::string> Diagnostics;
+        Shapes_ = ReadShapeArchives(Configuration.ShapeArchives, &Diagnostics);
+        for (const ShapeArchive& Shape : Shapes_)
+            if (!Shape.Distance) Diagnostics.push_back(Shape.Name + ": " + Shape.Diagnostic);
+        if (Configuration.Journal)
+        {
+            Configuration.Journal("engine shapes: " + std::to_string(Shapes_.size()) + " from " + Configuration.ShapeArchives.string());
+            for (const std::string& Diagnostic : Diagnostics) Configuration.Journal("engine shapes: " + Diagnostic);
+        }
+    }
+    Assets.Shapes          = Shapes_;
+    Assets.ReserveCapacity = Configuration.ReserveCapacity;
     IlluminationSettings Settings;
     Settings.Quality    = Configuration.Quality;
     Settings.RayTracing = Configuration.RayTracing;

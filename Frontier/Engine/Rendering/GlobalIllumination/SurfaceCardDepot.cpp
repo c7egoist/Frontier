@@ -165,36 +165,198 @@ bool SurfaceCardDepot::PackCards()
             ShelfHeight = 0;
         }
         if (ShelfY + Height > Extent) return false;
-        Card.TexelOrigin = {ShelfX, ShelfY};
+        Card.TexelOrigin    = {ShelfX, ShelfY};
+        Card.TexelAllotment = Card.TexelExtent;
         ShelfX += Width;
         ShelfHeight = std::max(ShelfHeight, Height);
     }
+    RuntimeShelfX_      = 0;
+    RuntimeShelfY_      = ShelfY + ShelfHeight;
+    RuntimeShelfHeight_ = 0;
     return true;
+}
+
+void SurfaceCardDepot::EncodeCard(const SurfaceCard& Card, uint8_t* Target) const
+{
+    float    Scalars[12] = {};
+    uint32_t Words[12]   = {};
+    for (int Axis = 0; Axis < 3; ++Axis)
+    {
+        Scalars[Axis]     = static_cast<float>(Card.LocalMinimum[Axis]);
+        Scalars[4 + Axis] = static_cast<float>(Card.LocalMaximum[Axis]);
+    }
+    std::memcpy(Words, Scalars, sizeof(Scalars));
+    Words[3]  = Card.Axis;
+    Words[7]  = Card.Occupant;
+    Words[8]  = Card.TexelOrigin[0];
+    Words[9]  = Card.TexelOrigin[1];
+    Words[10] = Card.TexelExtent[0];
+    Words[11] = Card.TexelExtent[1];
+    std::memcpy(Target, Words, CardStride);
 }
 
 std::vector<uint8_t> SurfaceCardDepot::EncodeCardProfiles() const
 {
     std::vector<uint8_t> Bytes(std::max<size_t>(1, Cards.size()) * CardStride, 0u);
-    for (size_t Index = 0; Index < Cards.size(); ++Index)
+    for (size_t Index = 0; Index < Cards.size(); ++Index) EncodeCard(Cards[Index], Bytes.data() + Index * CardStride);
+    return Bytes;
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                   REASSIGNMENT
+//------------------------------------------------------------------------------------------------------------------------
+
+bool SurfaceCardDepot::AllotRuntimeRectangle(uint32_t Width, uint32_t Height, std::array<uint32_t, 2>& Origin)
+{
+    const uint32_t Extent = Configuration.Extent;
+    if (Width > Extent) return false;
+    if (RuntimeShelfX_ + Width > Extent)
+    {
+        RuntimeShelfY_ += RuntimeShelfHeight_;
+        RuntimeShelfX_      = 0;
+        RuntimeShelfHeight_ = 0;
+    }
+    if (RuntimeShelfY_ + Height > Extent) return false;
+    Origin = {RuntimeShelfX_, RuntimeShelfY_};
+    RuntimeShelfX_ += Width;
+    RuntimeShelfHeight_ = std::max(RuntimeShelfHeight_, Height);
+    return true;
+}
+
+std::vector<uint32_t> SurfaceCardDepot::ReassignOccupantCards(SceneStructure& Scene, uint32_t Index)
+{
+    std::vector<uint32_t> Changed;
+    OccupantEntry&        Occupant = Scene.Occupants[Index];
+    // 📝 The occupant's cards are the run that names it from FirstCard on (six for a reserve occupant, kept whatever it shows).
+    uint32_t Count = 0;
+    while (Occupant.FirstCard + Count < Cards.size() && Cards[Occupant.FirstCard + Count].Occupant == Index) ++Count;
+    TileTotal -= OccupantTiles[Index].size();
+    OccupantTiles[Index].clear();
+    if (!(Occupant.Participation & OccupantParticipation::Cards) || Count == 0)
+    {
+        Occupant.CardCount = 0;
+        return Changed;
+    }
+    Occupant.CardCount = Count;
+    Vector3 Minimum = Occupant.CardMinimum;
+    Vector3 Maximum = Occupant.CardMaximum;
+    for (int Axis = 0; Axis < 3; ++Axis)
+    {
+        const double Grow = std::max(0.01, 0.01 * (Maximum[Axis] - Minimum[Axis]));
+        Minimum[Axis] -= Grow;
+        Maximum[Axis] += Grow;
+    }
+    const double Density = Occupant.CardDensity * DensityScaleUsed;
+    auto Size = [Density](double Length) {
+        const double Clamped = std::min(MaximumCardTexels, std::max(MinimumCardTexels, RoundHalfUp(Length * Density)));
+        return static_cast<uint32_t>(std::ceil(Clamped / 4.0) * 4.0);
+    };
+    uint64_t Tiles = TileTotal;
+    for (uint32_t Local = 0; Local < Count; ++Local)
+    {
+        const uint32_t CardIndex = Occupant.FirstCard + Local;
+        SurfaceCard&   Card      = Cards[CardIndex];
+        const uint32_t DepthAxis = Card.Axis >> 1;
+        const uint32_t AcrossU   = (DepthAxis + 1) % 3;
+        const uint32_t AcrossV   = (DepthAxis + 2) % 3;
+        std::array<uint32_t, 2> Wanted = {Size(Maximum[AcrossU] - Minimum[AcrossU]), Size(Maximum[AcrossV] - Minimum[AcrossV])};
+        const uint64_t WantedTiles = static_cast<uint64_t>((Wanted[0] + 7) / 8) * ((Wanted[1] + 7) / 8);
+        if (Wanted[0] > Card.TexelAllotment[0] || Wanted[1] > Card.TexelAllotment[1])
+        {
+            std::array<uint32_t, 2> Origin{};
+            if (Tiles + WantedTiles <= TileCapacity_ && AllotRuntimeRectangle(Wanted[0], Wanted[1], Origin))
+            {
+                Card.TexelOrigin    = Origin;
+                Card.TexelAllotment = Wanted;
+            }
+            else
+            {
+                Wanted = {std::min(Wanted[0], Card.TexelAllotment[0]), std::min(Wanted[1], Card.TexelAllotment[1])};
+            }
+        }
+        Card.LocalMinimum = Minimum;
+        Card.LocalMaximum = Maximum;
+        Card.TexelExtent  = Wanted;
+        for (uint32_t TileY = 0; TileY < (Card.TexelExtent[1] + 7) / 8; ++TileY)
+            for (uint32_t TileX = 0; TileX < (Card.TexelExtent[0] + 7) / 8; ++TileX)
+            {
+                OccupantTiles[Index].push_back({CardIndex, (TileY << 16) | TileX});
+                ++Tiles;
+            }
+        uint8_t Bytes[CardStride] = {};
+        EncodeCard(Card, Bytes);
+        if (CardRegion) Exchange_.WriteRegion(CardRegion, static_cast<VkDeviceSize>(CardIndex) * CardStride, Bytes, CardStride);
+        Changed.push_back(CardIndex);
+    }
+    TileTotal = Tiles;
+    return Changed;
+}
+
+void SurfaceCardDepot::RecaptureCards(const SceneStructure& Scene, const std::shared_ptr<DeviceRegion>& VertexRegion,
+                                      const std::vector<uint32_t>& CardIndices)
+{
+    if (CardIndices.empty() || !CaptureProgram) return;
+    // ① clear every rectangle (its whole allotment) to the capture's clear values, and its direct, final and radiosity terms
+    for (const uint32_t CardIndex : CardIndices)
+    {
+        const SurfaceCard& Card   = Cards[CardIndex];
+        const uint32_t     Width  = Card.TexelAllotment[0];
+        const uint32_t     Height = Card.TexelAllotment[1];
+        const size_t       Texels = static_cast<size_t>(Width) * Height;
+        const std::vector<uint8_t>  Clear8(Texels * 4, 0u);
+        std::vector<uint8_t>        Normal(Texels * 4, 0u);
+        for (size_t Texel = 0; Texel < Texels; ++Texel)
+        {
+            Normal[Texel * 4]     = 128u;
+            Normal[Texel * 4 + 1] = 128u;
+            Normal[Texel * 4 + 2] = 255u;
+        }
+        const std::vector<uint16_t> Clear16(Texels * 4, 0u);
+        const std::vector<uint16_t> Depth(Texels, 0x4400u);   // [-] 4.0 in binary16, the capture's far depth
+        const uint32_t X = Card.TexelOrigin[0], Y = Card.TexelOrigin[1];
+        Exchange_.WriteTexture(AlbedoTexture, 0, Clear8.data(), Clear8.size(), Width, Height, 1, X, Y);
+        Exchange_.WriteTexture(NormalTexture, 0, Normal.data(), Normal.size(), Width, Height, 1, X, Y);
+        Exchange_.WriteTexture(IncandescenceTexture, 0, Clear16.data(), Clear16.size() * 2, Width, Height, 1, X, Y);
+        Exchange_.WriteTexture(DepthTexture, 0, Depth.data(), Depth.size() * 2, Width, Height, 1, X, Y);
+        Exchange_.WriteTexture(DirectTexture, 0, Clear16.data(), Clear16.size() * 2, Width, Height, 1, X, Y);
+        Exchange_.WriteTexture(FinalTexture, 0, Clear16.data(), Clear16.size() * 2, Width, Height, 1, X, Y);
+        const std::vector<float> Sites(static_cast<size_t>(Width / 4) * 4, 0.0f);
+        for (uint32_t SiteY = Y / 4; SiteY < (Y + Height) / 4; ++SiteY)
+            Exchange_.WriteRegion(SiteRegion, (static_cast<VkDeviceSize>(SiteY) * SiteStride + X / 4) * 16, Sites.data(), Sites.size() * 4);
+    }
+    // ② draw only these cards, keeping every other texel
+    if (!CaptureDepth_)
+    {
+        TextureSpecification DepthSpecification;
+        DepthSpecification.Label  = "Card recapture depth";
+        DepthSpecification.Width  = Configuration.Extent;
+        DepthSpecification.Height = Configuration.Extent;
+        DepthSpecification.Format = TextureFormat::Depth32Float;
+        DepthSpecification.Usage  = TextureUsage::RenderAttachment;
+        CaptureDepth_     = Exchange_.ConstructTexture(DepthSpecification);
+        CaptureDepthView_ = Exchange_.ConstructView(CaptureDepth_);
+    }
+    CommandSequence Sequence = Exchange_.BeginSequence();
+    const std::array<ColorAttachment, 4> Colors = {{{AlbedoView, LoadOperation::Load, {0, 0, 0, 0}},
+                                                    {NormalView, LoadOperation::Load, {0.5f, 0.5f, 1.0f, 0.0f}},
+                                                    {IncandescenceView, LoadOperation::Load, {0, 0, 0, 0}},
+                                                    {DepthView, LoadOperation::Load, {4.0f, 0, 0, 0}}}};
+    const DepthAttachment Depth{CaptureDepthView_, LoadOperation::Clear, 1.0f};
+    Sequence.BeginRaster(Colors, &Depth, "Card recapture");
+    Sequence.BindProgram(CaptureProgram);
+    Sequence.BindGroup(0, CaptureGroup);
+    Sequence.BindVertexRegion(0, VertexRegion);
+    for (const uint32_t Index : CardIndices)
     {
         const SurfaceCard& Card = Cards[Index];
-        float    Scalars[12] = {};
-        uint32_t Words[12]   = {};
-        for (int Axis = 0; Axis < 3; ++Axis)
-        {
-            Scalars[Axis]     = static_cast<float>(Card.LocalMinimum[Axis]);
-            Scalars[4 + Axis] = static_cast<float>(Card.LocalMaximum[Axis]);
-        }
-        std::memcpy(Words, Scalars, sizeof(Scalars));
-        Words[3]  = Card.Axis;
-        Words[7]  = Card.Occupant;
-        Words[8]  = Card.TexelOrigin[0];
-        Words[9]  = Card.TexelOrigin[1];
-        Words[10] = Card.TexelExtent[0];
-        Words[11] = Card.TexelExtent[1];
-        std::memcpy(Bytes.data() + Index * CardStride, Words, CardStride);
+        const FacetSet&    Set  = Scene.FacetSets[Scene.Occupants[Card.Occupant].FacetSet];
+        Sequence.SetViewport(static_cast<float>(Card.TexelOrigin[0]), static_cast<float>(Card.TexelOrigin[1]),
+                             static_cast<float>(Card.TexelExtent[0]), static_cast<float>(Card.TexelExtent[1]), 0.0f, 1.0f);
+        Sequence.SetScissor(Card.TexelOrigin[0], Card.TexelOrigin[1], Card.TexelExtent[0], Card.TexelExtent[1]);
+        Sequence.Draw(Set.VertexCount, 1, Set.FirstVertex, Index);
     }
-    return Bytes;
+    Sequence.EndRaster();
+    Exchange_.Submit(Sequence);
 }
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -215,13 +377,15 @@ void SurfaceCardDepot::ConstructResources(const std::shared_ptr<DeviceRegion>& R
         Specification.Usage  = Usage;
         return Exchange_.ConstructTexture(Specification);
     };
-    const uint32_t Attachment = TextureUsage::RenderAttachment | TextureUsage::Sampled;
+    // 📝 Copy targets too: a recapture clears its rectangles with queue writes (RecaptureCards).
+    const uint32_t Attachment = TextureUsage::RenderAttachment | TextureUsage::Sampled | TextureUsage::CopyTarget;
     AlbedoTexture        = Construct("Card albedo", TextureFormat::Rgba8UnormSrgb, Attachment);
     NormalTexture        = Construct("Card normal", TextureFormat::Rgba8Unorm, Attachment);
     IncandescenceTexture = Construct("Card incandescence", TextureFormat::Rgba16Float, Attachment);
     DepthTexture         = Construct("Card depth", TextureFormat::R16Float, Attachment);
-    DirectTexture        = Construct("Card direct irradiance", TextureFormat::Rgba16Float, TextureUsage::Storage | TextureUsage::Sampled);
-    FinalTexture         = Construct("Card final radiance", TextureFormat::Rgba16Float, TextureUsage::Storage | TextureUsage::Sampled);
+    const uint32_t Stored = TextureUsage::Storage | TextureUsage::Sampled | TextureUsage::CopyTarget;
+    DirectTexture        = Construct("Card direct irradiance", TextureFormat::Rgba16Float, Stored);
+    FinalTexture         = Construct("Card final radiance", TextureFormat::Rgba16Float, Stored);
     AlbedoView        = Exchange_.ConstructView(AlbedoTexture);
     NormalView        = Exchange_.ConstructView(NormalTexture);
     IncandescenceView = Exchange_.ConstructView(IncandescenceTexture);
@@ -234,6 +398,7 @@ void SurfaceCardDepot::ConstructResources(const std::shared_ptr<DeviceRegion>& R
     SiteRegion = Exchange_.ConstructRegion(static_cast<VkDeviceSize>(SiteStride) * SiteStride * 16, "Radiosity sites");
     // 📝 Every tile once, plus the warm-up list, which may repeat tiles the round-robin also picks this refresh.
     const uint64_t TileCapacity = std::max<uint64_t>(1, 2 * TileTotal);
+    TileCapacity_ = TileCapacity;
     TileRegion = Exchange_.ConstructRegion(TileCapacity * 8, "Card tiles");
     WorkRegion = Exchange_.ConstructRegion(16, "Card work");
 

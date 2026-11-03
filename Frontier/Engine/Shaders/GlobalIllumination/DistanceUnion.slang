@@ -39,7 +39,7 @@ groupshared uint PageIdentity[64];
 groupshared float4x4 PageInverse[64];   // WorldToLocal
 groupshared float4 PageVolume[64];     // xyz VolumeMinimum [m], w VoxelExtent [m]
 groupshared float4 PageTexel[64];     // xyz VolumeTexelOrigin [texel]
-groupshared float4 PageExtent[64];     // xyz VolumeTexelExtent [texel]
+groupshared float4 PageExtent[64];     // xyz VolumeTexelExtent [texel], w distance scale (local metres to world metres)
 
 void WriteClipTexel(uint Level, int3 Texel, float4 Texel4)
 {
@@ -63,7 +63,19 @@ float SamplePageDistance(uint Slot, float3 Position, float3 InverseSpace)
     let Clamped = clamp(Local, Lowest, Highest);
     let Outside = length(Local - Clamped);
     let Texel = PageTexel[Slot].xyz + (Clamped - Volume.xyz) / Volume.w;
-    return VolumeSpace.SampleLevel(VolumeSampler, Texel * InverseSpace, 0.0).x + Outside;
+    return (VolumeSpace.SampleLevel(VolumeSampler, Texel * InverseSpace, 0.0).x + Outside) * PageExtent[Slot].w;
+}
+
+// 📝 Beyond the demo: a volume holds local distances; a scaled occupant answers in world metres. With σ the largest singular value of
+//    the world-to-local map A, a local distance d is at least d / σ in the world. σ² is the largest eigenvalue of AᵀA, bounded by its
+//    largest absolute row sum (Gershgorin): exact for uniform scale and for a copy scaled along its own axes, never an overestimate of
+//    the distance otherwise (a march never steps through a stretched copy), and 1 for the archive's rigid placements.
+float ResolveDistanceScale(float4x4 WorldToLocal)
+{
+    let A = float3x3(WorldToLocal[0].xyz, WorldToLocal[1].xyz, WorldToLocal[2].xyz);
+    let Gram = mul(transpose(A), A);
+    let σSquared = max(max(dot(abs(Gram[0]), float3(1.0)), dot(abs(Gram[1]), float3(1.0))), dot(abs(Gram[2]), float3(1.0)));
+    return 1.0 / sqrt(max(σSquared, 1.0e-20));
 }
 
  
@@ -109,14 +121,16 @@ void UniteDistance(uint3 Group : SV_GroupID, uint Lane : SV_GroupIndex)
             let Index = DistanceList[Page + Lane];
             let Minimum = Occupants[Index].WorldMinimum;
             let Maximum = Occupants[Index].WorldMaximum;
-            if (all(Maximum + float3(Clip.Band) >= BrickMinimum) && all(Minimum - float3(Clip.Band) <= BrickMaximum))
+            // 📝 Beyond the demo: an object switched out of indirect light leaves the field.
+            let Exempt = (Occupants[Index].Participation & ParticipationIndirectExempt) != 0u;
+            if (!Exempt && all(Maximum + float3(Clip.Band) >= BrickMinimum) && all(Minimum - float3(Clip.Band) <= BrickMaximum))
             {
                 uint Slot; InterlockedAdd(PageCount, 1u, Slot);
                 PageIdentity[Slot] = Index;
                 PageInverse[Slot]  = Occupants[Index].WorldToLocal;
                 PageVolume[Slot]   = float4(Occupants[Index].VolumeMinimum, Occupants[Index].VoxelExtent);
                 PageTexel[Slot]    = float4(Occupants[Index].VolumeTexelOrigin, 0.0);
-                PageExtent[Slot]   = float4(Occupants[Index].VolumeTexelExtent, 0.0);
+                PageExtent[Slot]   = float4(Occupants[Index].VolumeTexelExtent, ResolveDistanceScale(Occupants[Index].WorldToLocal));
             }
         }
         GroupMemoryBarrierWithGroupSync();

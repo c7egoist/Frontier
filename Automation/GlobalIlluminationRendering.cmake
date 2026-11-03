@@ -120,8 +120,10 @@ endif()
 # 📝 The live scene viewport: the illumination refresh with the PlanetaryAtmosphere environment overlaid on it on one device
 #    and queue (the editor's Scene Viewport, Exhibits/SceneViewport).
 add_library(FrontierSceneViewport STATIC
+    Frontier/Engine/Geometry/ShapeArchive.cpp
     Frontier/Engine/Rendering/SceneViewport/EnvironmentOverlay.cpp
     Frontier/Engine/Rendering/SceneViewport/SceneViewport.cpp)
+target_include_directories(FrontierSceneViewport PUBLIC "${CMAKE_SOURCE_DIR}/ExternalPackages/tomlpp/include")
 target_link_libraries(FrontierSceneViewport PUBLIC FrontierGlobalIllumination FrontierEnvironmentRendering FrontierAnalyticIllumination)
 if(TARGET FrontierGlobalIlluminationShaders)
     add_dependencies(FrontierSceneViewport FrontierGlobalIlluminationShaders)

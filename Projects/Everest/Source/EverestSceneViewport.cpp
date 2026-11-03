@@ -195,6 +195,9 @@ SceneViewportRefresh EverestSceneViewport::Render(const SceneViewportRequest& Re
         Configuration.EnvironmentShaders        = ShaderRoot_ / "Environment";
         Configuration.SceneArchive              = ResolveArchive(ProjectRoot_, "ProvingGround");
         Configuration.CelestialMaps             = ResolveArchive(ProjectRoot_, "CelestialMaps");
+        // 📝 The engine shapes sit beside the shader archives: EngineContent/ShapeArchives.
+        const std::filesystem::path ShaderFolder = ShaderRoot_.has_filename() ? ShaderRoot_ : ShaderRoot_.parent_path();
+        Configuration.ShapeArchives             = ShaderFolder.parent_path() / "ShapeArchives";
         Configuration.Quality                   = Quality;
         Configuration.RayTracing                = RayTracing;
         // 🔍 Every bring-up step and device fault lands in the diagnostic journal as it happens (a lost device still leaves
@@ -228,10 +231,16 @@ SceneViewportRefresh EverestSceneViewport::Render(const SceneViewportRequest& Re
         std::vector<uint8_t> Materials;
         if (std::ifstream Stream(Viewport_->QueryConfiguration().SceneArchive / "Materials.bin", std::ios::binary); Stream)
             Materials.assign(std::istreambuf_iterator<char>(Stream), std::istreambuf_iterator<char>());
-        Geometry_.Reset(Viewport_->QueryScene(), std::move(Materials));
+        Geometry_.Reset(Viewport_->QueryScene(), std::move(Materials), Viewport_->QueryShapes());
         GeometryScene_ = Viewport_->QueryScene();
     }
-    if (const auto Placements = Geometry_.ResolvePlacements(World); !Placements.empty()) (void)Viewport_->RelocateOccupants(Placements);
+    if (const auto Placements = Geometry_.ResolvePlacements(World); !Placements.empty())
+    {
+        // 📝 The objects' own surfaces first: the placements capture their cards again from them.
+        for (const auto& [Block, Records] : Geometry_.ConsumeMaterialBlocks())
+            if (auto* Host = Viewport_->AccessHost()) (void)Host->WriteMaterialBlock(Block, Records);
+        (void)Viewport_->RelocateOccupants(Placements);
+    }
 
     // ③ one refresh through the level's records; with live refresh off the last image stays (Render settings › Refresh timing)
     if (!Pipeline.LiveRefresh && Held_.View != VK_NULL_HANDLE && Held_.View == Viewport_->QueryPresentedView())

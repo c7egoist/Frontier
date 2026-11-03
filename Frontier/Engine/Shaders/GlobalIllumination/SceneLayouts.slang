@@ -183,7 +183,22 @@ static const uint ParticipationCards = 4u;
 static const uint ParticipationDynamic = 8u;
 static const uint ParticipationFallback = 16u;   // card-less: FirstCard carries the packed albedo
 static const uint ParticipationShredded = 32u;   // wheel whose tyre rubber is shredded; ray march dispatches through TyreFamily
+// 📝 Beyond the demo, the editor's per-object switches: no shadow (shadow depth and shadow rays) and no indirect light (the
+//    distance field and the traced rays).
+static const uint ParticipationShadowExempt = 64u;
+static const uint ParticipationIndirectExempt = 128u;
 static const uint NoMaterialOverride = 0xFFFFFFFFu;
+// 📝 Beyond the demo: an override with this bit offsets the per-facet family into the object's own material block.
+static const uint MaterialBlockBit = 0x80000000u;
+
+uint ResolveSurfaceFamily(uint RawFamily, uint Override)
+{
+    if (Override == NoMaterialOverride)
+    {
+        return RawFamily;
+    }
+    return SelectBranch(Override, (Override & ~MaterialBlockBit) + RawFamily, (Override & MaterialBlockBit) != 0u);
+}
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                                     CARD RECORD

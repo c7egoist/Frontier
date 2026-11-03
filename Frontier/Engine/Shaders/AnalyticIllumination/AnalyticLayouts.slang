@@ -31,3 +31,4 @@ struct AnalyticConstants
   [[vk::binding(4, 0)]] SamplerComparisonState             SolarComparison;
 
 static const uint NoFamilyOverride = 0xFFFFFFFFu;   // [-] OccupantProfile.MaterialOverride keeping the per-facet family
+static const uint FamilyBlockBit   = 0x80000000u;   // [-] beyond the demo: the override offsets the family into the object's material block

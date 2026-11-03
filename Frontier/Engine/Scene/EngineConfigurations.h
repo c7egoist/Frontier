@@ -672,8 +672,17 @@ struct ArrayModifierConfiguration
     bool        RadialPivot         = false;                  // [-] turn about the object's origin instead of each copy's own
 };
 
-// 📝 One object of the level's scene (levelspace type "Geometry"): the scene archive's placements it stands for, the quick
-//    controls, the transform, the modifier stack and the fracture, edited by the geometry inspector (the Project Zero editor's).
+// 📝 One surface slot an object owns instead of the material family it shares: the family it replaces and its twelve
+//    MaterialSpecification channels (albedo rgb, roughness, incandescence rgb, metalness, coat, coat roughness, specular, transmission).
+struct SurfaceSlotConfiguration
+{
+    uint32_t              Family = 0;      // [-]
+    std::array<float, 12> Channels{};      // [-]
+};
+
+// 📝 One object of the level's scene (levelspace type "Geometry"): the scene archive's placements it stands for (or an engine
+//    shape), the quick controls, the transform, the modifier stack, its own surfaces and the fracture, edited by the geometry
+//    inspector (the Project Zero editor's).
 struct GeometryConfiguration : RevisionCounter
 {
     // 📝 The archive occupants: one name stem per part, each matching the stem alone or the stem and one trailing token
@@ -682,6 +691,10 @@ struct GeometryConfiguration : RevisionCounter
     uint32_t                 OccupantFirst = 0;       // [-]
     uint32_t                 OccupantCount = 0;       // [-] 0: every match from OccupantFirst
     uint32_t                 BaseCopies    = 0;       // [-] archive placements the modifier stack starts from; 0: all of them
+    // 📝 An object that does not claim the archive's occupants (a duplicate) lays out reserve copies of the same shapes; an object
+    //    with a ShapeName is an engine shape (EngineContent/ShapeArchives/<ShapeName>.toml) and names no occupants.
+    bool                     ClaimsArchive = true;
+    std::string              ShapeName{};
     // 📝 Where the object's origin sits in the archive (position and turn about Z): the transform at which the object shows
     //    the archive's own placements. Unauthored, it is the first placement's.
     bool                     ArchiveOriginAuthored = false;
@@ -700,6 +713,7 @@ struct GeometryConfiguration : RevisionCounter
 
     SpatialConfiguration                    Spatial{};     // [-] the object's transform in the scene (z up)
     std::vector<ArrayModifierConfiguration> Modifiers{};   // [-] top to bottom
+    std::vector<SurfaceSlotConfiguration>   SurfaceSlots{};   // [-] families this object no longer shares
     FractureConfiguration                   Fracture = [] { FractureConfiguration Disabled; Disabled.Enabled = false; return Disabled; }();
 
     // 📝 Resolved by the viewport against the loaded scene archive and published by the workspace; not saved.
@@ -709,6 +723,10 @@ struct GeometryConfiguration : RevisionCounter
         uint32_t                           Authored         = 0;       // [-] placements in the archive: the most copies shown
         uint32_t                           Copies           = 0;       // [-] copies the base and the modifier stack produce
         uint32_t                           Shown            = 0;       // [-] copies drawn
+        uint32_t                           Reserved         = 0;       // [-] copies laid out from the reserve (beyond the archive's)
+        uint32_t                           ReserveFree      = 0;       // [-] reserve occupants nobody holds
+        bool                               Shape            = false;   // [-] an engine shape
+        bool                               OwnSurfaces      = false;   // [-] holds a material block of its own
         uint32_t                           Parts            = 0;       // [-] shapes per copy
         uint32_t                           Facets           = 0;       // [-] triangles per copy
         float                              Extent[3]        = {};      // [m] one copy's local bounds

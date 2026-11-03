@@ -127,6 +127,11 @@ RayHit TraceSceneRay(float3 Origin, float3 Direction, float MinimumTravel, float
             }
             if ((Entry.Count & TlasLeafBit) != 0u)
             {
+                // 📝 Beyond the demo: an object switched out of indirect light is invisible to every traced ray but shadow rays.
+                if ((Occupants[Entry.Count & TlasIndexMask].Participation & ParticipationIndirectExempt) != 0u)
+                {
+                    continue;
+                }
                 CurrentOcc  = Entry.Count & TlasIndexMask;
                 let Occ = Occupants[CurrentOcc];
                 OccParticipation    = Occ.Participation;
@@ -265,7 +270,7 @@ RayHit TraceSceneRay(float3 Origin, float3 Direction, float MinimumTravel, float
         Result.Travel   = Nearest;
         Result.Normal   = WorldNorm;
         Result.Geometry = WorldGeom;
-        Result.Family   = SelectBranch(RawFamily, Occ.MaterialOverride, Occ.MaterialOverride != NoMaterialOverride);
+        Result.Family   = ResolveSurfaceFamily(RawFamily, Occ.MaterialOverride);
         Result.Identity = SelectBranch(BestOcc, GroundIdentity, BestOcc == GroundOccupantIndex);
         Result.Hit      = true;
         return Result;
@@ -340,6 +345,11 @@ float TraceSceneOcclusion(float3 Origin, float3 Direction, float MinimumTravel, 
             {
                 let OccIdx = Entry.Count & TlasIndexMask;
                 let Occ = Occupants[OccIdx];
+                // 📝 Beyond the demo: an object switched out of shadows lets every shadow ray through.
+                if ((Occ.Participation & ParticipationShadowExempt) != 0u)
+                {
+                    continue;
+                }
                 OccParticipation    = Occ.Participation;
                 LocalOrigin = (mul(float4(Origin, 1.0), Occ.WorldToLocal)).xyz;
                 LocalDir    = (mul(float4(Direction, 0.0), Occ.WorldToLocal)).xyz;

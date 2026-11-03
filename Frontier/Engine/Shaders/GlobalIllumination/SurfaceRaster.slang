@@ -74,7 +74,7 @@ SurfaceVarying SurfaceVertex([[vk::location(0)]] float3 Position : LOCATION0, [[
     Varying.CurrentClip   = mul(World, Refresh.UnjitteredViewProjection);
     Varying.PreviousClip  = mul(Previous, Refresh.PreviousUnjitteredViewProjection);
     Varying.Normal        = (mul(float4(Moved.Normal, 0.0), Occupant.LocalToWorld)).xyz;
-    Varying.Family        = SelectBranch(Family, Occupant.MaterialOverride, Occupant.MaterialOverride != NoMaterialOverride);
+    Varying.Family        = ResolveSurfaceFamily(Family, Occupant.MaterialOverride);
     Varying.WorldPosition = World.xyz;
     Varying.Vehicle       = SelectBranch(0u, 1u, Index < VehicleOccupantCount);
     Varying.BodyLocal     = (mul(World, Occupants[0].WorldToLocal)).xyz;

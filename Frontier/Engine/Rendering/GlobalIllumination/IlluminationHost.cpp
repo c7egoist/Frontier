@@ -80,12 +80,26 @@ bool IlluminationHost::Construct(const IlluminationAssets& Assets, const Illumin
         for (int32_t Index : {Scene.VehicleBody, Scene.VehicleWheels[0], Scene.VehicleWheels[1], Scene.VehicleWheels[2], Scene.VehicleWheels[3]})
             if (Index >= 0 && static_cast<size_t>(Index) < Scene.Occupants.size()) Scene.Occupants[Index].Inactive = true;
     }
+    // 📝 Beyond the demo: the engine shapes after the archive's facet sets, their surfaces after its families, and the editor's reserve.
+    std::vector<uint8_t> MaterialTable = Assets.MaterialProfiles;
+    MaterialTable.resize(MaterialTable.size() / MaterialStride * MaterialStride);
+    Scene.AppendShapeSets(Assets.Shapes, static_cast<uint32_t>(MaterialTable.size() / MaterialStride));
+    for (const ShapeArchive& Shape : Assets.Shapes)
+    {
+        const auto* Channels = reinterpret_cast<const uint8_t*>(Shape.Surface.data());
+        MaterialTable.insert(MaterialTable.end(), Channels, Channels + MaterialStride);
+    }
+    if (Assets.ReserveCapacity > 0) Scene.ConvertStressReserve(Assets.ReserveCapacity);
+    MaterialFamilyCount = static_cast<uint32_t>(MaterialTable.size() / MaterialStride);
     ResolveLampPlacements();
 
     // ① records every stage shares
     const std::vector<uint8_t> VertexStream = Scene.EncodeVertexStream();
     VertexRegion    = Exchange.ConstructRegionFrom(VertexStream.data(), VertexStream.size(), "Facet vertices");
-    MaterialRegion  = Exchange.ConstructRegionFrom(Assets.MaterialProfiles.data(), Assets.MaterialProfiles.size(), "Materials");
+    // 📝 The family table, then room for the objects' material blocks (MaterialBlockBit).
+    const VkDeviceSize MaterialBytes = static_cast<VkDeviceSize>(MaterialFamilyCount) * (1u + MaterialBlockCapacity) * MaterialStride;
+    MaterialRegion  = Exchange.ConstructRegion(MaterialBytes, "Materials");
+    Exchange.WriteRegion(MaterialRegion, 0, MaterialTable.data(), MaterialTable.size());
     RefreshRegion   = Exchange.ConstructRegion(RefreshConstantsBytes, "Refresh constants");
     LuminaireRegion = Exchange.ConstructRegion(LuminaireRegisterBytes, "Clustered luminaire profiles");
     OccupantRegion  = Exchange.ConstructRegion(static_cast<VkDeviceSize>(Scene.Occupants.size()) * OccupantStride, "Occupant profiles");
@@ -292,6 +306,60 @@ void IlluminationHost::SettleRelocatedOccupants()
     for (const uint32_t Index : RelocatedOccupants) WriteProfile(Index);
     SettlingOccupants = std::move(RelocatedOccupants);
     RelocatedOccupants.clear();
+}
+
+bool IlluminationHost::AssignReserveOccupant(uint32_t Index, const OccupantEntry& Template)
+{
+    if (!Scene.QueryReserved(Index) || Template.FacetSet >= Scene.FacetSets.size()) return false;
+    Scene.AssignReserveTemplate(Index, Template);
+    OccupantEntry& Occupant = Scene.Occupants[Index];
+    // 📝 A shape without a distance volume cannot be unioned (only shapes some occupant unions at bring-up have one).
+    if (Scene.FacetSets[Occupant.FacetSet].VolumeIndex < 0) Occupant.Participation &= ~OccupantParticipation::Distance;
+    if (Cards)
+    {
+        const std::vector<uint32_t> Changed = Cards->ReassignOccupantCards(Scene, Index);
+        // 📝 The capture reads the occupant's surface from its profile: write it ahead of the capture.
+        const std::vector<uint8_t> Profile = Scene.EncodeOccupantRange(&Volumes->Volumes, Index, 1u);
+        Exchange.WriteRegion(OccupantRegion, static_cast<VkDeviceSize>(Index) * OccupantStride, Profile.data(), Profile.size());
+        Cards->RecaptureCards(Scene, VertexRegion, Changed);
+        Cards->RebuildTileLists(Scene);
+        Cards->WarmOccupants(Scene, {Index}, 3);
+    }
+    if (RayTracing && Index < RayTracing->OccupantBlasRoot.size())
+        RayTracing->OccupantBlasRoot[Index] = RayTracing->FacetBlasRoots[Occupant.FacetSet];
+    if (std::find(RelocatedOccupants.begin(), RelocatedOccupants.end(), Index) == RelocatedOccupants.end())
+        RelocatedOccupants.push_back(Index);
+    Scene.ConstructDrawRuns();
+    return true;
+}
+
+void IlluminationHost::RecaptureOccupants(const std::vector<uint32_t>& Indices)
+{
+    if (!Cards || Indices.empty()) return;
+    std::vector<uint32_t> CardIndices;
+    for (const uint32_t Index : Indices)
+    {
+        if (Index >= Scene.Occupants.size()) continue;
+        const OccupantEntry& Occupant = Scene.Occupants[Index];
+        for (uint32_t Card = 0; Card < Occupant.CardCount; ++Card) CardIndices.push_back(Occupant.FirstCard + Card);
+    }
+    // 📝 The capture reads the occupant's material override from its profile: rewrite those first (the writes precede the capture).
+    for (const uint32_t Index : Indices)
+    {
+        if (Index >= Scene.Occupants.size()) continue;
+        const std::vector<uint8_t> Profile = Scene.EncodeOccupantRange(&Volumes->Volumes, Index, 1u);
+        Exchange.WriteRegion(OccupantRegion, static_cast<VkDeviceSize>(Index) * OccupantStride, Profile.data(), Profile.size());
+    }
+    Cards->RecaptureCards(Scene, VertexRegion, CardIndices);
+    Cards->WarmOccupants(Scene, Indices, 3);
+}
+
+bool IlluminationHost::WriteMaterialBlock(uint32_t Block, const std::vector<uint8_t>& Records)
+{
+    if (Block >= MaterialBlockCapacity || !MaterialRegion) return false;
+    const size_t Bytes = std::min<size_t>(Records.size(), static_cast<size_t>(MaterialFamilyCount) * MaterialStride);
+    Exchange.WriteRegion(MaterialRegion, static_cast<VkDeviceSize>(QueryMaterialBlockBase(Block)) * MaterialStride, Records.data(), Bytes);
+    return true;
 }
 
 bool IlluminationHost::AdvanceRefresh(const RefreshInputs* Inputs, const RefreshWriteSupplier& Prepare, const RefreshWriteSupplier& Supplier,
