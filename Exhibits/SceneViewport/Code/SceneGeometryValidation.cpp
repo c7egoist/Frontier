@@ -464,6 +464,19 @@ int main(int ArgumentCount, char** Arguments)
             Report(Blocks.size() == 1 && std::fabs(Red - 0.62f) < 1.0e-6f && Overridden && After.OwnSurfaces,
                    "the cube's own surface: 1 material block written (family #" + std::to_string(Slot.Family) + " albedo red 0.62), the cube's override names "
                    "the block and its cards are captured again");
+            // 📝 The override reaches the shaders through the occupant profile (OccupantProfile.MaterialOverride, word 71) unchanged.
+            uint32_t Stored = 0, Expected = 0;
+            for (const OccupantPlacement& Placement : Placed)
+                if (Placement.Occupant == CubeOccupant && Placement.MaterialOverride)
+                {
+                    Reserved.Occupants[CubeOccupant].MaterialOverride = *Placement.MaterialOverride;
+                    Expected = static_cast<uint32_t>(*Placement.MaterialOverride);
+                }
+            const std::vector<uint8_t> Profile = Reserved.EncodeOccupantRange(nullptr, CubeOccupant, 1);
+            std::memcpy(&Stored, Profile.data() + 71 * 4, sizeof(Stored));
+            char Line[160];
+            std::snprintf(Line, sizeof(Line), "the cube's occupant profile carries the block override 0x%08X (expected 0x%08X)", Stored, Expected);
+            Report(Expected != 0 && Stored == Expected, Line);
         }
 
         // ⑲ removing an archive object: the jump ramp's occupant is hidden while the level holds Geometry records

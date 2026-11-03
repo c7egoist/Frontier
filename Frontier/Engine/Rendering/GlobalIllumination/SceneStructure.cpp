@@ -426,7 +426,8 @@ std::vector<uint8_t> SceneStructure::EncodeOccupantRange(const std::vector<Occup
             StoreFloat(Bytes, Offset + 68 + Axis, Bounds.Maximum[Axis]);
         }
         StoreUnsigned(Bytes, Offset + 67, Occupant.Participation);
-        StoreUnsigned(Bytes, Offset + 71, Occupant.MaterialOverride >= 0 ? static_cast<uint32_t>(Occupant.MaterialOverride) : 0xFFFFFFFFu);
+        // 📝 −1 keeps the per-facet families; a material block's override carries MaterialBlockBit (negative as int32) and is stored as is.
+        StoreUnsigned(Bytes, Offset + 71, Occupant.MaterialOverride != -1 ? static_cast<uint32_t>(Occupant.MaterialOverride) : 0xFFFFFFFFu);
         const OccupantVolume* Volume = Occupant.Volume ? &*Occupant.Volume
                                      : ((Volumes != nullptr && Set.VolumeIndex >= 0) ? &(*Volumes)[static_cast<size_t>(Set.VolumeIndex)] : nullptr);
         if (Volume != nullptr)

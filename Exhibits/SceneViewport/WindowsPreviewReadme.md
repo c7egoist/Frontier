@@ -63,19 +63,35 @@ renderer. Its debug views include view 15, the analytic illumination. Save with 
 
 ## Scene objects
 
-- Select an object, for example **Boundary west** under Boundary. Its inspector has the heading with notes,
-  Transform, Quick controls, Modifiers, Material and Fracture. **F**, Orbit selected and Chase selected use it as the
-  camera's target.
+- Select an object, for example **Boundary west** under Boundary, in the Outliner or by **clicking it in the
+  viewport**. Its inspector has the heading with notes, Transform, Quick controls, Modifiers, Material and Fracture.
+  **F**, Orbit selected and Chase selected use it as the camera's target.
+- **Move, rotate and scale in the viewport:** with an object selected, **W** shows the move arrows (world X, Y and Z),
+  **E** the rotation rings (the object's Z, Y and X angles) and **R** the scale handles (one axis, or the centre
+  square for all three). Drag a handle with the left button. Hold **Ctrl** to snap (0.25 m, 15°, 0.1), and press
+  **Esc** during a drag to put the object back. A click that does not move the camera selects what is under the
+  pointer.
+- **Add:** **Ctrl+A** or the Outliner's **+** opens **Construct**. Search or pick a category, choose an entity, name it,
+  then press **Add to scene**. Under Geometry are the engine shapes Cube, Sphere, Cylinder, Cone, Torus and Plane, with
+  scale and surface colour on the properties step. A new shape lands on the ground where the view looks. The other
+  categories add the level's environment and weather records.
+- **Row menu:** right-click an Outliner row for **Rename** (F2), **Hide**/**Show**, **Fracture** (not available
+  yet), **Duplicate** (Ctrl+D) and **Remove** (Del). Removing one of the proving ground's objects hides it. A duplicate
+  appears beside the original.
 - **Transform:** drag a field to scrub or double-click to type (Alt for precision, Shift for speed). Every copy moves
-  with the object; the reset buttons return it to where the scene archive placed it.
+  with the object, and the reset buttons return it to where it was placed.
 - **Modifiers:** a repeated set is one object with an Array modifier stack, as in Blender. **Add modifier → Generate →
   Array** adds one. Each card folds, switches off in the viewport, moves up or down, or is removed. Count, relative
-  offset, constant offset, rotation step and pivot (each copy, or the object's origin for a ring) re-lay the copies
-  in the viewport.
-- **Quick controls:** Visible and Locked act now. Dynamic, Cast shadows, GI and Physics are saved with the level but
-  have no renderer or physics effect yet. Breakable objects carry Fracture settings and open the Fracture editor.
-- **Limits:** an Array shows at most as many copies as the scene archive holds for that object, and the inspector says
-  how many. Materials are shown, not edited. Objects cannot be added or deleted.
+  offset, constant offset, rotation step and pivot (each copy, or the object's origin for a ring) re-lay the copies in
+  the viewport. Copies beyond the scene archive's own come from a reserve of 512.
+- **Quick controls:** Visible, Dynamic (relit every refresh), Cast shadows, GI and Locked act on the viewport. Physics
+  is saved with the level and waits for the physics engine. Breakable objects carry Fracture settings.
+- **Material:** pick the surface slot, then change the base colour, roughness, metallic, reflectance, clear coat,
+  transmission or emission. The first change gives the object a surface of its own, and the other objects sharing the
+  material keep theirs. **Revert to the shared family** drops it.
+- **Limits:** the reserve holds at most 512 copies and constructed objects beyond the archive's own, and the inspector
+  says when it runs out. At most 96 objects have surfaces of their own. Picking uses each part's bounding box.
+  Fracture does nothing yet.
 
 ## Local media, wind and baking
 

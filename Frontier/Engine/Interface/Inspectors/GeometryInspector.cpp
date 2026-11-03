@@ -78,7 +78,7 @@ void GeometryInspector::ConstructInspector()
     // ① the heading: Inspector / Geometry / group, the object's name, what it is made of; the notes under it when open
     std::string Breadcrumb = "Inspector / Geometry";
     if (!Parameters.GroupName.empty()) Breadcrumb += " / " + Parameters.GroupName;
-    std::string Subtitle = Resolved.Shape ? "Engine shape" : (Parameters.ClaimsArchive ? "Geometry" : "Duplicate");
+    std::string Subtitle = !Parameters.ShapeName.empty() ? "Engine shape" : (Parameters.ClaimsArchive ? "Geometry" : "Duplicate");
     if (Resolved.Bound)
     {
         for (size_t Part = 0; Part < Resolved.Shapes.size() && Part < 3; ++Part)

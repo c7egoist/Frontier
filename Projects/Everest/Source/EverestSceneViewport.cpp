@@ -9,6 +9,7 @@
 #include "Engine/Diagnostics/DiagnosticJournal.h"
 #include "Engine/Diagnostics/LogCategories.h"
 #include "Engine/Diagnostics/LogStream.h"
+#include "Engine/Interface/ProjectContent.h"
 
 #include <algorithm>
 #include <chrono>
@@ -195,9 +196,13 @@ SceneViewportRefresh EverestSceneViewport::Render(const SceneViewportRequest& Re
         Configuration.EnvironmentShaders        = ShaderRoot_ / "Environment";
         Configuration.SceneArchive              = ResolveArchive(ProjectRoot_, "ProvingGround");
         Configuration.CelestialMaps             = ResolveArchive(ProjectRoot_, "CelestialMaps");
-        // 📝 The engine shapes sit beside the shader archives: EngineContent/ShapeArchives.
+        // 📝 The engine shapes sit beside the shader archives (EngineContent/ShapeArchives); shaders compiled into a build folder
+        //    have none beside them, so the engine content's own folder serves (the Construct dialog lists the same one).
         const std::filesystem::path ShaderFolder = ShaderRoot_.has_filename() ? ShaderRoot_ : ShaderRoot_.parent_path();
+        std::error_code             Missing;
         Configuration.ShapeArchives             = ShaderFolder.parent_path() / "ShapeArchives";
+        if (!std::filesystem::is_directory(Configuration.ShapeArchives, Missing))
+            Configuration.ShapeArchives = Frontier::QueryEngineContentDirectory() / "ShapeArchives";
         Configuration.Quality                   = Quality;
         Configuration.RayTracing                = RayTracing;
         // 🔍 Every bring-up step and device fault lands in the diagnostic journal as it happens (a lost device still leaves
