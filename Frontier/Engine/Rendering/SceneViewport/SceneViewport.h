@@ -57,6 +57,14 @@ struct ViewportRendering
     uint32_t VirtualizedStreamSlots = 0;     // [-] arena slots the pages stream through (0: one per page)
     bool     AnalyticIllumination = false;   // [-] the fast closed-form renderer (AnalyticIllumination) instead of the GI
     uint32_t Refinements          = 0;       // [-] RefinementBit mask of options beyond the demo (0: the demo)
+    // 📝 The rest of the Render settings record. Every default is the demo's, so a caller that sets only the fields above refreshes
+    //    exactly as before; the fields above overwrite Toggles' Indirect, Antialias, ExposureCompensation, Inspection and Refinements,
+    //    and Toggles.RayTracing applies only on a viewport built with ray tracing (SceneViewportConfiguration::RayTracing).
+    RefreshToggles   Toggles{};
+    uint32_t         TraceScale     = 0;       // [-] screen pixels per resampling pixel along one axis (1, 2, 4); 0 = as constructed
+    uint32_t         CardTileBudget = 0;       // [-] static surface-card tiles relit per refresh; 0 = the quality grade's
+    VarianceSettings DiffuseFilter{0.08f, 24, 3, 4.0f};
+    VarianceSettings GlossyFilter{0.12f, 12, 2, 3.0f};
 };
 
 // 📝 What the refresh ran with, for the viewport's readout (the demo's PresentMeasurements).
@@ -106,7 +114,9 @@ class SceneViewport
     bool ReadPresented(std::vector<uint8_t>& OutRgba);
 
     // 📝 The demo's ReconstructScreenTargets sizing: density × render scale, capped by the grade's pixel limit, at least 64 px.
-    [[nodiscard]] static std::array<uint32_t, 2> ResolveScreenExtent(double PanelWidth, double PanelHeight, double PixelDensity, const std::string& Quality);
+    //    ViewportScale (Render settings › Viewport scale, 0.25–2) multiplies the grade's render scale under the same cap.
+    [[nodiscard]] static std::array<uint32_t, 2> ResolveScreenExtent(double PanelWidth, double PanelHeight, double PixelDensity, const std::string& Quality,
+                                                                     double ViewportScale = 1.0);
 
     // 📝 The demo's own environment the refresh encodes (its sky lights the scene; the overlaid environment is drawn over it).
     EnvironmentSettings Sky{};
@@ -123,6 +133,7 @@ class SceneViewport
     std::unique_ptr<VulkanComputeExchange> Environment_{};
     std::unique_ptr<IlluminationHost>      Host_{};
     bool                                   VirtualizedConfigured_ = false;   // [-] last levelspace value of the cluster takeover
+    RefreshToggles                         LastToggles_{};                   // [-] what the last global-illumination refresh ran with
     std::unique_ptr<AnalyticIllumination::AnalyticIlluminationSequence> Analytic_{};   // [-] built on first selection
     std::unique_ptr<EnvironmentOverlay>    Overlay_{};
     std::shared_ptr<DeviceTextureView>     PresentedView_{};

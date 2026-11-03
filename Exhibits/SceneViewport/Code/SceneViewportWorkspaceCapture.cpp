@@ -15,6 +15,7 @@
 #include <stb_image_write.h>
 
 #include <chrono>
+#include <cstdlib>
 #include <cstdio>
 #include <filesystem>
 #include <stdexcept>
@@ -41,12 +42,22 @@ int main(int ArgumentCount, char** Arguments)
     try
     {
         std::setvbuf(stdout, nullptr, _IONBF, 0);
-        Require(ArgumentCount >= 5, "usage: SceneViewportWorkspaceCapture <EngineContent> <Projects/Everest> <ShaderRoot> <Out.png> [Refreshes] [Level]");
+        Require(ArgumentCount >= 5, "usage: SceneViewportWorkspaceCapture <EngineContent> <Projects/Everest> <ShaderRoot> <Out.png> [Refreshes] "
+                                    "[Select type] [Inspector sections, e.g. 0,1,2]");
         const std::filesystem::path ContentDir  = std::filesystem::absolute(Arguments[1]);
         const std::filesystem::path EverestRoot = std::filesystem::absolute(Arguments[2]);
         const std::filesystem::path ShaderRoot  = std::filesystem::absolute(Arguments[3]);
         const std::filesystem::path OutputPath  = std::filesystem::absolute(Arguments[4]);
         const int                   Refreshes   = ArgumentCount > 5 ? std::atoi(Arguments[5]) : 10;
+        const std::string           SelectType  = ArgumentCount > 6 ? Arguments[6] : "";
+        std::vector<int>            Sections;
+        if (ArgumentCount > 7)
+            for (const char* Cursor = Arguments[7]; *Cursor != '\0';)
+            {
+                Sections.push_back(std::atoi(Cursor));
+                while (*Cursor != '\0' && *Cursor != ',') ++Cursor;
+                if (*Cursor == ',') ++Cursor;
+            }
         std::filesystem::create_directories(OutputPath.parent_path());
 
         ImGui::CreateContext();
@@ -89,6 +100,14 @@ int main(int ArgumentCount, char** Arguments)
 
         // 📝 The capture shows the demo's readout (H) and distance slice (I), which the editor starts with off.
         Workspace.AccessViewportOverlays().ReadoutVisible       = true;
+        RecordToken Selected{};
+        if (!SelectType.empty())
+        {
+            SceneRecordBase* Entry = Workspace.QuerySceneWorld().FindFirstByType(SelectType);
+            Require(Entry != nullptr, "no record of type " + SelectType);
+            Selected = Entry->QueryToken();
+            Workspace.QueryOutliner().Select(Selected);
+        }
         for (int Tick = 0; Tick < Refreshes; ++Tick)
         {
             Centre->PrepareInterface();
@@ -133,6 +152,55 @@ int main(int ArgumentCount, char** Arguments)
             std::filesystem::path Normals = OutputPath;
             Normals.replace_filename(OutputPath.stem().string() + "-Normals" + OutputPath.extension().string());
             WriteCapture(Normals);
+        }
+
+        // 📝 The selected record's Inspector page, section by section, each in a column tall enough for the whole section (the
+        //    workspace's column shows only its top); the measurements are the ones the refreshes above published.
+        if (Selected.IsValid() && !Sections.empty())
+        {
+            RecordInspector* Page = InspectorRuntime::Instance().FindInspector(Selected);
+            Require(Page != nullptr, "the selected record has no inspector");
+            if (auto* Pipeline = dynamic_cast<RenderPipelineRecord*>(Workspace.QuerySceneWorld().FindRecord(Selected)))
+                Pipeline->AccessConfiguration().InspectionModeIndex = 0;
+            constexpr int ColumnWidth = 470, ColumnHeight = 2900;
+            for (const int Section : Sections)
+            {
+                Page->ConfigureSection(Section);
+                for (int Settle = 0; Settle < 3; ++Settle)
+                {
+                    Io.DisplaySize = ImVec2(static_cast<float>(ColumnWidth), static_cast<float>(ColumnHeight));
+                    Centre->PrepareInterface();
+                    ImGui::NewFrame();
+                    ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+                    ImGui::SetNextWindowSize(ImVec2(static_cast<float>(ColumnWidth), static_cast<float>(ColumnHeight)));
+                    ImGui::Begin("##InspectorSectionCapture", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings);
+                    bool DeleteRequested = false;
+                    InspectorRuntime::Instance().InspectRecord(Selected, DeleteRequested);
+                    ImGui::End();
+                    ImGui::Render();
+                    FrontierExhibit::AcknowledgeTextures();
+                }
+                const ImDrawData* DrawData = ImGui::GetDrawData();
+                std::vector<unsigned char> Pixels(static_cast<size_t>(ColumnWidth) * ColumnHeight * 3u, 14u);
+                for (const ImDrawList* List : DrawData->CmdLists)
+                    FrontierExhibit::RasterizeCommands(List, Pixels.data(), ColumnWidth, ColumnHeight, DrawData->DisplayPos, DrawData->FramebufferScale, nullptr,
+                                                       nullptr);
+                // 📝 Cropped below the last row that differs from the column's empty bottom row.
+                const auto RowDiffers = [&](int Row) {
+                    for (int Column = 0; Column < ColumnWidth * 3; ++Column)
+                        if (std::abs(int(Pixels[static_cast<size_t>(Row) * ColumnWidth * 3 + Column]) -
+                                     int(Pixels[static_cast<size_t>(ColumnHeight - 1) * ColumnWidth * 3 + Column])) > 6)
+                            return true;
+                    return false;
+                };
+                int Used = ColumnHeight - 1;
+                while (Used > 0 && !RowDiffers(Used)) --Used;
+                Used = std::min(ColumnHeight, Used + 24);
+                std::filesystem::path Target = OutputPath;
+                Target.replace_filename(OutputPath.stem().string() + "-Section-" + std::to_string(Section) + OutputPath.extension().string());
+                Require(stbi_write_png(Target.string().c_str(), ColumnWidth, Used, 3, Pixels.data(), ColumnWidth * 3) != 0, "PNG write failed");
+                std::printf("[SceneViewportWorkspaceCapture] %s (section %d, %d px)\n", Target.string().c_str(), Section, Used);
+            }
         }
 
         Workspace.PresentSceneViewport = nullptr;

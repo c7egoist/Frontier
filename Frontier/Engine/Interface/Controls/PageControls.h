@@ -24,6 +24,8 @@
 #include "Engine/Interface/Controls/SliderRow.h"
 #include "Engine/Interface/Controls/SelectRow.h"
 #include "Engine/Interface/Controls/PresetStrip.h"
+#include "Engine/Interface/Controls/ChoiceRow.h"
+#include "Engine/Interface/Controls/ChoiceList.h"
 #include "Engine/Interface/Controls/ToggleRow.h"
 #include "Engine/Interface/Controls/NextButton.h"
 #include "Engine/Interface/Controls/DateRow.h"

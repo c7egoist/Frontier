@@ -99,11 +99,7 @@ class TypedSceneRecord final : public SceneRecordBase
 };
 
 #if FRONTIER_EDITOR
-using DiagnosticsRecord    = TypedSceneRecord<DiagnosticsConfiguration, DiagnosticsInspector>;
-using RenderPipelineRecord = TypedSceneRecord<RenderPipelineConfiguration, RenderPipelineInspector>;
-using DistanceFieldRecord  = TypedSceneRecord<DistanceFieldConfiguration, DistanceFieldInspector>;
-using SurfaceCardRecord    = TypedSceneRecord<SurfaceCardConfiguration, SurfaceCardInspector>;
-using PolygonClusterRecord = TypedSceneRecord<PolygonClusterConfiguration, PolygonClusterInspector>;
+using RenderPipelineRecord = TypedSceneRecord<RenderPipelineConfiguration, RenderSettingsInspector>;
 using SolarRecord          = TypedSceneRecord<SolarConfiguration, SolarInspector>;
 using OpticalFlareRecord   = TypedSceneRecord<OpticalFlareConfiguration, OpticalFlareInspector>;
 using AtmosphereRecord     = TypedSceneRecord<AtmosphereConfiguration, AtmosphereInspector>;
@@ -119,11 +115,7 @@ using FluidPlumeRecord     = TypedSceneRecord<FluidPlumeConfiguration, FluidPlum
 using FractureRecord       = TypedSceneRecord<FractureConfiguration, FractureInspector>;
 using ParticleRecord       = TypedSceneRecord<ParticleConfiguration, ParticleInspector>;
 #else
-using DiagnosticsRecord    = TypedSceneRecord<DiagnosticsConfiguration>;
 using RenderPipelineRecord = TypedSceneRecord<RenderPipelineConfiguration>;
-using DistanceFieldRecord  = TypedSceneRecord<DistanceFieldConfiguration>;
-using SurfaceCardRecord    = TypedSceneRecord<SurfaceCardConfiguration>;
-using PolygonClusterRecord = TypedSceneRecord<PolygonClusterConfiguration>;
 using SolarRecord          = TypedSceneRecord<SolarConfiguration>;
 using OpticalFlareRecord   = TypedSceneRecord<OpticalFlareConfiguration>;
 using AtmosphereRecord     = TypedSceneRecord<AtmosphereConfiguration>;

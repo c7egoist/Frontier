@@ -105,7 +105,7 @@ class InspectorRuntime
     // Central Inspector dispatch: renders all modular inspectors attached to Token and signals deletion requests.
     void InspectRecord(RecordToken Token, bool& OutDeleteRequested);
 
-    // Standalone *Editor activation (FractureEditor, FluidPlumeEditor, ParticleEditor, PolygonClusterEditor, or custom).
+    // Standalone *Editor activation (FractureEditor, FluidPlumeEditor, ParticleEditor, or custom).
     bool                      RequestEditorOpen(RecordToken Token) noexcept;
     void                      CloseActiveEditor() noexcept;
     [[nodiscard]] RecordToken QueryActiveEditorToken() const noexcept;

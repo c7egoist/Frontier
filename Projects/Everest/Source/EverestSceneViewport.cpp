@@ -198,7 +198,8 @@ SceneViewportRefresh EverestSceneViewport::Render(const SceneViewportRequest& Re
         // 🔍 Every bring-up step and device fault lands in the diagnostic journal as it happens (a lost device still leaves
         //    the step it struck in the log).
         Configuration.Journal = [](const std::string& Line) { Frontier::DiagnosticJournal::Append("SceneViewport", Line); };
-        const auto Extent = Frontier::GlobalIllumination::SceneViewport::ResolveScreenExtent(Request.PanelWidth, Request.PanelHeight, Request.PixelDensity, Quality);
+        const auto Extent = Frontier::GlobalIllumination::SceneViewport::ResolveScreenExtent(Request.PanelWidth, Request.PanelHeight, Request.PixelDensity, Quality,
+                                                                                             Pipeline.RenderScale);
         auto Candidate = std::make_unique<Frontier::GlobalIllumination::SceneViewport>();
         std::string Diagnostic;
         const auto  Start = std::chrono::steady_clock::now();
@@ -218,7 +219,14 @@ SceneViewportRefresh EverestSceneViewport::Render(const SceneViewportRequest& Re
                                  RayTracing ? "RTX ReSTIR" : "GTX distance field");
     }
 
-    // ② one refresh through the level's records
+    // ② one refresh through the level's records; with live refresh off the last image stays (Render settings › Refresh timing)
+    if (!Pipeline.LiveRefresh && Held_.View != VK_NULL_HANDLE && Held_.View == Viewport_->QueryPresentedView())
+    {
+        SceneViewportRefresh Paused = Held_;
+        Paused.Readout.Held = true;
+        Paused.Status       = "HELD: live refresh is off  |  " + Held_.Status;
+        return Paused;
+    }
     Frontier::GlobalIllumination::ViewportCamera Camera;
     Camera.Position            = {Request.CameraPosition[0], Request.CameraPosition[1], Request.CameraPosition[2]};
     Camera.Target              = {Request.CameraTarget[0], Request.CameraTarget[1], Request.CameraTarget[2]};
@@ -236,9 +244,46 @@ SceneViewportRefresh EverestSceneViewport::Render(const SceneViewportRequest& Re
     Rendering.Refinements = (Pipeline.SolarDisc ? Bit::SolarDisc : 0u) | (Pipeline.StratifiedSun ? Bit::StratifiedSun : 0u) |
                             (Pipeline.PenumbraFilter ? Bit::PenumbraFilter : 0u) | (Pipeline.MirrorFilter ? Bit::MirrorFilter : 0u) |
                             (Pipeline.MirrorTrace ? Bit::MirrorTrace : 0u);
+    // 📝 The rest of the Render settings record, setting for setting onto the demo's toggles, host settings and variance filters.
+    auto& Toggles                = Rendering.Toggles;
+    Toggles.InitialCandidates    = static_cast<uint32_t>(std::clamp(Pipeline.InitialCandidates, 1, 4));
+    Toggles.MaxBounces           = static_cast<uint32_t>(std::clamp(Pipeline.MaxBounces, 1, 4));
+    Toggles.MultiBounceNee       = Pipeline.MultiBounceNee;
+    Toggles.RussianRoulette      = Pipeline.RussianRoulette;
+    Toggles.TemporalReuse        = Pipeline.TemporalReuse;
+    Toggles.SpatialReuse         = Pipeline.SpatialReuse;
+    Toggles.VisibilityReuse      = Pipeline.VisibilityReuse;
+    Toggles.RadianceRefresh      = Pipeline.RadianceRefresh;
+    Toggles.SpatialCount         = static_cast<uint32_t>(std::clamp(Pipeline.SpatialCount, 0, 8));
+    Toggles.SpatialRadius        = Pipeline.SpatialRadius;
+    Toggles.TemporalTallyLimit   = Pipeline.TemporalTallyLimit;
+    Toggles.IndirectScale        = Pipeline.IndirectScale;
+    Toggles.SkyScale             = Pipeline.SkyScale;
+    Toggles.IncandescenceScale   = Pipeline.IncandescenceScale;
+    Toggles.CardRadiosity        = Pipeline.CardRadiosity;
+    Toggles.Reflection           = Pipeline.Reflection;
+    Toggles.RayTracedReflections = Pipeline.RayTracedReflections;
+    Toggles.ReflectionBounces    = static_cast<uint32_t>(std::clamp(Pipeline.ReflectionBounces, 1, 4));
+    Toggles.ReflectionScale      = Pipeline.ReflectionScale;
+    Toggles.ReflectionRoughness  = Pipeline.ReflectionRoughness;
+    Toggles.DirectShadow         = Pipeline.DirectShadow;
+    Toggles.RayTracedShadows     = Pipeline.RayTracedShadows;
+    Toggles.FireflyFilter        = Pipeline.FireflyFilter;
+    Toggles.VarianceFilter       = Pipeline.VarianceFilter;
+    Toggles.AutoExposure         = Pipeline.AutoExposure;
+    Toggles.DistanceInspection   = static_cast<uint32_t>(std::clamp(Pipeline.DistanceInspection, 1, 3));
+    Rendering.TraceScale         = static_cast<uint32_t>(std::clamp(Pipeline.TraceScale, 1, 4));
+    Rendering.CardTileBudget     = static_cast<uint32_t>(std::max(0, Pipeline.CardTileBudget));
+    const auto Filter = [](int Levels, int Tally, float Weight, float Sigma) {
+        return Frontier::GlobalIllumination::VarianceSettings{Weight, static_cast<uint32_t>(std::clamp(Tally, 1, 64)),
+                                                              static_cast<uint32_t>(std::clamp(Levels, 1, 4) - 1), Sigma};
+    };
+    Rendering.DiffuseFilter = Filter(Pipeline.DiffuseWaveletLevels, Pipeline.DiffuseTallyLimit, Pipeline.DiffuseMinimumWeight, Pipeline.DiffuseColourSigma);
+    Rendering.GlossyFilter  = Filter(Pipeline.GlossyWaveletLevels, Pipeline.GlossyTallyLimit, Pipeline.GlossyMinimumWeight, Pipeline.GlossyColourSigma);
     // 📝 Screen targets follow the panel once its size held still for six interface ticks (a dragged splitter would rebuild
     //    them on every tick); meanwhile the last extent stretches over the panel.
-    const auto Requested = Frontier::GlobalIllumination::SceneViewport::ResolveScreenExtent(Request.PanelWidth, Request.PanelHeight, Request.PixelDensity, Quality);
+    const auto Requested = Frontier::GlobalIllumination::SceneViewport::ResolveScreenExtent(Request.PanelWidth, Request.PanelHeight, Request.PixelDensity, Quality,
+                                                                                            Pipeline.RenderScale);
     StableExtentCount_ = Requested == RequestedExtent_ ? StableExtentCount_ + 1 : 0;
     RequestedExtent_   = Requested;
     const auto Extent = StableExtentCount_ >= 6 ? Requested : Viewport_->QueryScreenExtent();
@@ -256,18 +301,27 @@ SceneViewportRefresh EverestSceneViewport::Render(const SceneViewportRequest& Re
     }
     const double Milliseconds = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - Start).count();
     RefreshMilliseconds_      = RefreshMilliseconds_ <= 0.0 ? Milliseconds : RefreshMilliseconds_ * 0.9 + Milliseconds * 0.1;
+    Outcome.Readout.LatestMilliseconds = Milliseconds;
     if (auto* Overlay = Viewport_->AccessOverlay()) Outcome.Readout.Environment = Overlay->QueryReadout();
     Outcome.View   = Viewport_->QueryPresentedView();
     Outcome.Extent = Viewport_->QueryScreenExtent();
     char Status[160];
-    std::snprintf(Status, sizeof(Status), "LIVE: ReSTIR GI %s + PlanetaryAtmosphere  |  %u x %u  |  %.1f ms", RayTracing ? "RTX" : "GTX", Outcome.Extent[0],
-                  Outcome.Extent[1], RefreshMilliseconds_);
+    if (Pipeline.AnalyticIllumination)
+        std::snprintf(Status, sizeof(Status), "LIVE: Analytic illumination (fast preview)  |  %u x %u  |  %.1f ms", Outcome.Extent[0], Outcome.Extent[1],
+                      RefreshMilliseconds_);
+    else
+        std::snprintf(Status, sizeof(Status), "LIVE: ReSTIR GI %s + PlanetaryAtmosphere  |  %u x %u  |  %.1f ms", RayTracing ? "RTX" : "GTX", Outcome.Extent[0],
+                      Outcome.Extent[1], RefreshMilliseconds_);
     Outcome.Status = Status;
 
     // 📝 The demo's readout figures (IlluminationHost.js PresentMeasurements): renderer tag and the TLAS line.
     const Frontier::GlobalIllumination::ViewportStatistics Statistics = Viewport_->QueryStatistics();
     char Tag[96];
-    if (Statistics.RayTracing)
+    if (Pipeline.AnalyticIllumination)
+    {
+        std::snprintf(Tag, sizeof(Tag), "Analytic illumination (no rays)");
+    }
+    else if (Statistics.RayTracing)
     {
         std::snprintf(Tag, sizeof(Tag), "RTX ReSTIR PT (%uB GI \xC2\xB7 %uB Refl \xC2\xB7 M=%u)", Statistics.MaxBounces, Statistics.ReflectionBounces,
                       Statistics.InitialCandidates);
@@ -292,6 +346,7 @@ SceneViewportRefresh EverestSceneViewport::Render(const SceneViewportRequest& Re
     Outcome.Readout.ClipResolution      = Statistics.ClipResolution;
     Outcome.Readout.SurfaceCards        = Statistics.SurfaceCards;
     Outcome.Readout.GeometryClusters    = Statistics.GeometryClusters;
+    Held_ = Outcome;
     return Outcome;
 }
 

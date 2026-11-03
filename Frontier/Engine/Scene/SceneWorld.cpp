@@ -310,121 +310,124 @@ void SceneRecordBase::ConfigureEditorPresentation(const char* GlyphIdentifier,
 //------------------------------------------------------------------------------------------------------------------------
 
 template <>
-void DiagnosticsRecord::SerializeConfiguration(toml::table& OutTable) const
-{
-    OutTable.insert_or_assign("timing_overlay", Parameters.TimingOverlayEnabled);
-    OutTable.insert_or_assign("memory_overlay", Parameters.MemoryOverlayEnabled);
-}
-
-template <>
-void DiagnosticsRecord::DeserializeConfiguration(const toml::table& InTable)
-{
-    Parameters.TimingOverlayEnabled = ReadBool(InTable, "timing_overlay", Parameters.TimingOverlayEnabled);
-    Parameters.MemoryOverlayEnabled = ReadBool(InTable, "memory_overlay", Parameters.MemoryOverlayEnabled);
-    Parameters.AdvanceRevision();
-}
-
-template <>
 void RenderPipelineRecord::SerializeConfiguration(toml::table& OutTable) const
 {
     OutTable.insert_or_assign("enabled", Parameters.Enabled);
     OutTable.insert_or_assign("hardware_ray_query", Parameters.HardwareRayQueryTier);
-    OutTable.insert_or_assign("quality_tier", static_cast<int64_t>(Parameters.QualityTier));
-    OutTable.insert_or_assign("inspection_mode", static_cast<int64_t>(Parameters.InspectionModeIndex));
-    OutTable.insert_or_assign("exposure_ev", static_cast<double>(Parameters.ExposureCompensationEv));
-    OutTable.insert_or_assign("bloom_intensity", static_cast<double>(Parameters.BloomIntensity));
-    OutTable.insert_or_assign("global_illumination", Parameters.GlobalIllumination);
-    OutTable.insert_or_assign("temporal_aa", Parameters.TemporalAntiAliasing);
-    OutTable.insert_or_assign("virtualized_geometry", Parameters.VirtualizedGeometry);
-    OutTable.insert_or_assign("virtualized_stream_slots", static_cast<int64_t>(Parameters.VirtualizedStreamSlots));
     OutTable.insert_or_assign("analytic_illumination", Parameters.AnalyticIllumination);
+    OutTable.insert_or_assign("global_illumination", Parameters.GlobalIllumination);
+    OutTable.insert_or_assign("multi_bounce_nee", Parameters.MultiBounceNee);
+    OutTable.insert_or_assign("russian_roulette", Parameters.RussianRoulette);
+    OutTable.insert_or_assign("temporal_reuse", Parameters.TemporalReuse);
+    OutTable.insert_or_assign("spatial_reuse", Parameters.SpatialReuse);
+    OutTable.insert_or_assign("visibility_reuse", Parameters.VisibilityReuse);
+    OutTable.insert_or_assign("radiance_refresh", Parameters.RadianceRefresh);
+    OutTable.insert_or_assign("card_radiosity", Parameters.CardRadiosity);
+    OutTable.insert_or_assign("reflections", Parameters.Reflection);
+    OutTable.insert_or_assign("ray_traced_reflections", Parameters.RayTracedReflections);
+    OutTable.insert_or_assign("mirror_filter", Parameters.MirrorFilter);
+    OutTable.insert_or_assign("mirror_trace", Parameters.MirrorTrace);
+    OutTable.insert_or_assign("direct_shadow", Parameters.DirectShadow);
+    OutTable.insert_or_assign("ray_traced_shadows", Parameters.RayTracedShadows);
+    OutTable.insert_or_assign("firefly_filter", Parameters.FireflyFilter);
     OutTable.insert_or_assign("solar_disc", Parameters.SolarDisc);
     OutTable.insert_or_assign("stratified_sun", Parameters.StratifiedSun);
     OutTable.insert_or_assign("penumbra_filter", Parameters.PenumbraFilter);
-    OutTable.insert_or_assign("mirror_filter", Parameters.MirrorFilter);
-    OutTable.insert_or_assign("mirror_trace", Parameters.MirrorTrace);
+    OutTable.insert_or_assign("variance_filter", Parameters.VarianceFilter);
+    OutTable.insert_or_assign("temporal_aa", Parameters.TemporalAntiAliasing);
+    OutTable.insert_or_assign("auto_exposure", Parameters.AutoExposure);
+    OutTable.insert_or_assign("virtualized_geometry", Parameters.VirtualizedGeometry);
+    OutTable.insert_or_assign("live_refresh", Parameters.LiveRefresh);
+    OutTable.insert_or_assign("quality_tier", static_cast<int64_t>(Parameters.QualityTier));
+    OutTable.insert_or_assign("trace_scale", static_cast<int64_t>(Parameters.TraceScale));
+    OutTable.insert_or_assign("initial_candidates", static_cast<int64_t>(Parameters.InitialCandidates));
+    OutTable.insert_or_assign("max_bounces", static_cast<int64_t>(Parameters.MaxBounces));
+    OutTable.insert_or_assign("spatial_count", static_cast<int64_t>(Parameters.SpatialCount));
+    OutTable.insert_or_assign("card_tile_budget", static_cast<int64_t>(Parameters.CardTileBudget));
+    OutTable.insert_or_assign("reflection_bounces", static_cast<int64_t>(Parameters.ReflectionBounces));
+    OutTable.insert_or_assign("diffuse_wavelet_levels", static_cast<int64_t>(Parameters.DiffuseWaveletLevels));
+    OutTable.insert_or_assign("diffuse_tally_limit", static_cast<int64_t>(Parameters.DiffuseTallyLimit));
+    OutTable.insert_or_assign("glossy_wavelet_levels", static_cast<int64_t>(Parameters.GlossyWaveletLevels));
+    OutTable.insert_or_assign("glossy_tally_limit", static_cast<int64_t>(Parameters.GlossyTallyLimit));
+    OutTable.insert_or_assign("virtualized_stream_slots", static_cast<int64_t>(Parameters.VirtualizedStreamSlots));
+    OutTable.insert_or_assign("inspection_mode", static_cast<int64_t>(Parameters.InspectionModeIndex));
+    OutTable.insert_or_assign("distance_inspection", static_cast<int64_t>(Parameters.DistanceInspection));
+    OutTable.insert_or_assign("target_rate", static_cast<int64_t>(Parameters.TargetRate));
+    OutTable.insert_or_assign("render_scale", static_cast<double>(Parameters.RenderScale));
+    OutTable.insert_or_assign("spatial_radius", static_cast<double>(Parameters.SpatialRadius));
+    OutTable.insert_or_assign("temporal_tally_limit", static_cast<double>(Parameters.TemporalTallyLimit));
+    OutTable.insert_or_assign("indirect_scale", static_cast<double>(Parameters.IndirectScale));
+    OutTable.insert_or_assign("sky_scale", static_cast<double>(Parameters.SkyScale));
+    OutTable.insert_or_assign("incandescence_scale", static_cast<double>(Parameters.IncandescenceScale));
+    OutTable.insert_or_assign("reflection_scale", static_cast<double>(Parameters.ReflectionScale));
+    OutTable.insert_or_assign("reflection_roughness", static_cast<double>(Parameters.ReflectionRoughness));
+    OutTable.insert_or_assign("diffuse_minimum_weight", static_cast<double>(Parameters.DiffuseMinimumWeight));
+    OutTable.insert_or_assign("diffuse_colour_sigma", static_cast<double>(Parameters.DiffuseColourSigma));
+    OutTable.insert_or_assign("glossy_minimum_weight", static_cast<double>(Parameters.GlossyMinimumWeight));
+    OutTable.insert_or_assign("glossy_colour_sigma", static_cast<double>(Parameters.GlossyColourSigma));
+    OutTable.insert_or_assign("exposure_ev", static_cast<double>(Parameters.ExposureCompensationEv));
 }
 
+// 📝 The bloom, filmic tonemap, screen-space reflection and probe-range keys of earlier levels had no reader; they are ignored.
 template <>
 void RenderPipelineRecord::DeserializeConfiguration(const toml::table& InTable)
 {
     Parameters.Enabled                = ReadBool(InTable, "enabled", Parameters.Enabled);
     Parameters.HardwareRayQueryTier   = ReadBool(InTable, "hardware_ray_query", Parameters.HardwareRayQueryTier);
-    Parameters.QualityTier            = std::clamp(ReadInt(InTable, "quality_tier", Parameters.QualityTier), 0, 2);
-    Parameters.InspectionModeIndex    = std::clamp(ReadInt(InTable, "inspection_mode", Parameters.InspectionModeIndex), 0, 14);
-    Parameters.ExposureCompensationEv = ReadFloat(InTable, "exposure_ev", Parameters.ExposureCompensationEv);
-    Parameters.BloomIntensity         = ReadFloat(InTable, "bloom_intensity", Parameters.BloomIntensity);
-    Parameters.GlobalIllumination     = ReadBool(InTable, "global_illumination", Parameters.GlobalIllumination);
-    Parameters.TemporalAntiAliasing   = ReadBool(InTable, "temporal_aa", Parameters.TemporalAntiAliasing);
-    Parameters.VirtualizedGeometry    = ReadBool(InTable, "virtualized_geometry", Parameters.VirtualizedGeometry);
-    Parameters.VirtualizedStreamSlots = std::max(0, ReadInt(InTable, "virtualized_stream_slots", Parameters.VirtualizedStreamSlots));
     Parameters.AnalyticIllumination   = ReadBool(InTable, "analytic_illumination", Parameters.AnalyticIllumination);
+    Parameters.GlobalIllumination     = ReadBool(InTable, "global_illumination", Parameters.GlobalIllumination);
+    Parameters.MultiBounceNee         = ReadBool(InTable, "multi_bounce_nee", Parameters.MultiBounceNee);
+    Parameters.RussianRoulette        = ReadBool(InTable, "russian_roulette", Parameters.RussianRoulette);
+    Parameters.TemporalReuse          = ReadBool(InTable, "temporal_reuse", Parameters.TemporalReuse);
+    Parameters.SpatialReuse           = ReadBool(InTable, "spatial_reuse", Parameters.SpatialReuse);
+    Parameters.VisibilityReuse        = ReadBool(InTable, "visibility_reuse", Parameters.VisibilityReuse);
+    Parameters.RadianceRefresh        = ReadBool(InTable, "radiance_refresh", Parameters.RadianceRefresh);
+    Parameters.CardRadiosity          = ReadBool(InTable, "card_radiosity", Parameters.CardRadiosity);
+    Parameters.Reflection             = ReadBool(InTable, "reflections", Parameters.Reflection);
+    Parameters.RayTracedReflections   = ReadBool(InTable, "ray_traced_reflections", Parameters.RayTracedReflections);
+    Parameters.MirrorFilter           = ReadBool(InTable, "mirror_filter", Parameters.MirrorFilter);
+    Parameters.MirrorTrace            = ReadBool(InTable, "mirror_trace", Parameters.MirrorTrace);
+    Parameters.DirectShadow           = ReadBool(InTable, "direct_shadow", Parameters.DirectShadow);
+    Parameters.RayTracedShadows       = ReadBool(InTable, "ray_traced_shadows", Parameters.RayTracedShadows);
+    Parameters.FireflyFilter          = ReadBool(InTable, "firefly_filter", Parameters.FireflyFilter);
     Parameters.SolarDisc              = ReadBool(InTable, "solar_disc", Parameters.SolarDisc);
     Parameters.StratifiedSun          = ReadBool(InTable, "stratified_sun", Parameters.StratifiedSun);
     Parameters.PenumbraFilter         = ReadBool(InTable, "penumbra_filter", Parameters.PenumbraFilter);
-    Parameters.MirrorFilter           = ReadBool(InTable, "mirror_filter", Parameters.MirrorFilter);
-    Parameters.MirrorTrace            = ReadBool(InTable, "mirror_trace", Parameters.MirrorTrace);
-    Parameters.AdvanceRevision();
-}
-
-template <>
-void DistanceFieldRecord::SerializeConfiguration(toml::table& OutTable) const
-{
-    OutTable.insert_or_assign("enabled", Parameters.Enabled);
-    OutTable.insert_or_assign("cascade0_m", static_cast<double>(Parameters.CascadeZeroRadiusMetres));
-    OutTable.insert_or_assign("cascade1_m", static_cast<double>(Parameters.CascadeOneRadiusMetres));
-    OutTable.insert_or_assign("cascade2_m", static_cast<double>(Parameters.CascadeTwoRadiusMetres));
-    OutTable.insert_or_assign("cascade3_m", static_cast<double>(Parameters.CascadeThreeRadiusMetres));
-    OutTable.insert_or_assign("max_cone_steps", static_cast<int64_t>(Parameters.MaxConeSteps));
-}
-
-template <>
-void DistanceFieldRecord::DeserializeConfiguration(const toml::table& InTable)
-{
-    Parameters.Enabled                  = ReadBool(InTable, "enabled", Parameters.Enabled);
-    Parameters.CascadeZeroRadiusMetres  = ReadFloat(InTable, "cascade0_m", Parameters.CascadeZeroRadiusMetres);
-    Parameters.CascadeOneRadiusMetres   = ReadFloat(InTable, "cascade1_m", Parameters.CascadeOneRadiusMetres);
-    Parameters.CascadeTwoRadiusMetres   = ReadFloat(InTable, "cascade2_m", Parameters.CascadeTwoRadiusMetres);
-    Parameters.CascadeThreeRadiusMetres = ReadFloat(InTable, "cascade3_m", Parameters.CascadeThreeRadiusMetres);
-    Parameters.MaxConeSteps             = ReadUint32(InTable, "max_cone_steps", Parameters.MaxConeSteps);
-    Parameters.AdvanceRevision();
-}
-
-template <>
-void SurfaceCardRecord::SerializeConfiguration(toml::table& OutTable) const
-{
-    OutTable.insert_or_assign("enabled", Parameters.Enabled);
-    OutTable.insert_or_assign("atlas_px", static_cast<int64_t>(Parameters.AtlasResolutionPx));
-    OutTable.insert_or_assign("bounce_gain", static_cast<double>(Parameters.IndirectBounceGain));
-    OutTable.insert_or_assign("cards_per_object", static_cast<int64_t>(Parameters.CardsPerObject));
-}
-
-template <>
-void SurfaceCardRecord::DeserializeConfiguration(const toml::table& InTable)
-{
-    Parameters.Enabled            = ReadBool(InTable, "enabled", Parameters.Enabled);
-    Parameters.AtlasResolutionPx  = ReadUint32(InTable, "atlas_px", Parameters.AtlasResolutionPx);
-    Parameters.IndirectBounceGain = ReadFloat(InTable, "bounce_gain", Parameters.IndirectBounceGain);
-    Parameters.CardsPerObject     = ReadUint32(InTable, "cards_per_object", Parameters.CardsPerObject);
-    Parameters.AdvanceRevision();
-}
-
-template <>
-void PolygonClusterRecord::SerializeConfiguration(toml::table& OutTable) const
-{
-    OutTable.insert_or_assign("enabled", Parameters.Enabled);
-    OutTable.insert_or_assign("hierarchy_depth", static_cast<int64_t>(Parameters.HierarchyDepth));
-    OutTable.insert_or_assign("max_cluster_triangles", static_cast<int64_t>(Parameters.MaxClusterTriangles));
-    OutTable.insert_or_assign("hiz_culling", Parameters.HiZOcclusionCulling);
-}
-
-template <>
-void PolygonClusterRecord::DeserializeConfiguration(const toml::table& InTable)
-{
-    Parameters.Enabled             = ReadBool(InTable, "enabled", Parameters.Enabled);
-    Parameters.HierarchyDepth      = ReadUint32(InTable, "hierarchy_depth", Parameters.HierarchyDepth);
-    Parameters.MaxClusterTriangles = ReadUint32(InTable, "max_cluster_triangles", Parameters.MaxClusterTriangles);
-    Parameters.HiZOcclusionCulling = ReadBool(InTable, "hiz_culling", Parameters.HiZOcclusionCulling);
+    Parameters.VarianceFilter         = ReadBool(InTable, "variance_filter", Parameters.VarianceFilter);
+    Parameters.TemporalAntiAliasing   = ReadBool(InTable, "temporal_aa", Parameters.TemporalAntiAliasing);
+    Parameters.AutoExposure           = ReadBool(InTable, "auto_exposure", Parameters.AutoExposure);
+    Parameters.VirtualizedGeometry    = ReadBool(InTable, "virtualized_geometry", Parameters.VirtualizedGeometry);
+    Parameters.LiveRefresh            = ReadBool(InTable, "live_refresh", Parameters.LiveRefresh);
+    Parameters.QualityTier            = std::clamp(ReadInt(InTable, "quality_tier", Parameters.QualityTier), 0, 2);
+    Parameters.TraceScale             = std::clamp(ReadInt(InTable, "trace_scale", Parameters.TraceScale), 1, 4);
+    Parameters.InitialCandidates      = std::clamp(ReadInt(InTable, "initial_candidates", Parameters.InitialCandidates), 1, 4);
+    Parameters.MaxBounces             = std::clamp(ReadInt(InTable, "max_bounces", Parameters.MaxBounces), 1, 4);
+    Parameters.SpatialCount           = std::clamp(ReadInt(InTable, "spatial_count", Parameters.SpatialCount), 0, 8);
+    Parameters.CardTileBudget         = std::clamp(ReadInt(InTable, "card_tile_budget", Parameters.CardTileBudget), 0, 8192);
+    Parameters.ReflectionBounces      = std::clamp(ReadInt(InTable, "reflection_bounces", Parameters.ReflectionBounces), 1, 4);
+    Parameters.DiffuseWaveletLevels   = std::clamp(ReadInt(InTable, "diffuse_wavelet_levels", Parameters.DiffuseWaveletLevels), 1, 4);
+    Parameters.DiffuseTallyLimit      = std::clamp(ReadInt(InTable, "diffuse_tally_limit", Parameters.DiffuseTallyLimit), 1, 64);
+    Parameters.GlossyWaveletLevels    = std::clamp(ReadInt(InTable, "glossy_wavelet_levels", Parameters.GlossyWaveletLevels), 1, 4);
+    Parameters.GlossyTallyLimit       = std::clamp(ReadInt(InTable, "glossy_tally_limit", Parameters.GlossyTallyLimit), 1, 64);
+    Parameters.VirtualizedStreamSlots = std::clamp(ReadInt(InTable, "virtualized_stream_slots", Parameters.VirtualizedStreamSlots), 0, 64);
+    Parameters.InspectionModeIndex    = std::clamp(ReadInt(InTable, "inspection_mode", Parameters.InspectionModeIndex), 0, 14);
+    Parameters.DistanceInspection     = std::clamp(ReadInt(InTable, "distance_inspection", Parameters.DistanceInspection), 1, 3);
+    Parameters.TargetRate             = std::clamp(ReadInt(InTable, "target_rate", Parameters.TargetRate), 30, 120);
+    Parameters.RenderScale            = std::clamp(ReadFloat(InTable, "render_scale", Parameters.RenderScale), 0.25f, 2.0f);
+    Parameters.SpatialRadius          = std::clamp(ReadFloat(InTable, "spatial_radius", Parameters.SpatialRadius), 2.0f, 48.0f);
+    Parameters.TemporalTallyLimit     = std::clamp(ReadFloat(InTable, "temporal_tally_limit", Parameters.TemporalTallyLimit), 1.0f, 40.0f);
+    Parameters.IndirectScale          = std::clamp(ReadFloat(InTable, "indirect_scale", Parameters.IndirectScale), 0.0f, 3.0f);
+    Parameters.SkyScale               = std::clamp(ReadFloat(InTable, "sky_scale", Parameters.SkyScale), 0.0f, 3.0f);
+    Parameters.IncandescenceScale     = std::clamp(ReadFloat(InTable, "incandescence_scale", Parameters.IncandescenceScale), 0.0f, 3.0f);
+    Parameters.ReflectionScale        = std::clamp(ReadFloat(InTable, "reflection_scale", Parameters.ReflectionScale), 0.0f, 3.0f);
+    Parameters.ReflectionRoughness    = std::clamp(ReadFloat(InTable, "reflection_roughness", Parameters.ReflectionRoughness), 0.15f, 1.0f);
+    Parameters.DiffuseMinimumWeight   = std::clamp(ReadFloat(InTable, "diffuse_minimum_weight", Parameters.DiffuseMinimumWeight), 0.01f, 0.5f);
+    Parameters.DiffuseColourSigma     = std::clamp(ReadFloat(InTable, "diffuse_colour_sigma", Parameters.DiffuseColourSigma), 0.5f, 16.0f);
+    Parameters.GlossyMinimumWeight    = std::clamp(ReadFloat(InTable, "glossy_minimum_weight", Parameters.GlossyMinimumWeight), 0.01f, 0.5f);
+    Parameters.GlossyColourSigma      = std::clamp(ReadFloat(InTable, "glossy_colour_sigma", Parameters.GlossyColourSigma), 0.5f, 16.0f);
+    Parameters.ExposureCompensationEv = std::clamp(ReadFloat(InTable, "exposure_ev", Parameters.ExposureCompensationEv), -4.0f, 4.0f);
+    // 📝 Only the demo's three trace resolutions: full, half and quarter.
+    if (Parameters.TraceScale == 3) Parameters.TraceScale = 2;
     Parameters.AdvanceRevision();
 }
 
@@ -1332,15 +1335,8 @@ void SceneWorld::RegisterNativeEngineTypes()
         "Wind", "Forcefield", "#a7f3d0");
     RegisterSimple.operator()<WindRecord>("Wind", "Environment · Wind Field", RecordClassification::Environment, "Wind", "Forcefield", "#a7f3d0");
 
-    // Render Engine & Continuum Solver Types
-    RegisterSimple.operator()<DiagnosticsRecord>("Diagnostics", "Render · Diagnostics", RecordClassification::Interface, "Activity", "Render", "#69dfa5");
-    RegisterSimple.operator()<RenderPipelineRecord>("RenderPipeline", "Render · Pipeline", RecordClassification::Illumination, "Monitor", "Render", "#9fb4d6");
-    RegisterSimple.operator()<DistanceFieldRecord>("DistanceField", "Render · Distance Field", RecordClassification::Geometry, "GridLattice", "Render",
-                                                   "#9fb4d6");
-    RegisterSimple.operator()<SurfaceCardRecord>("SurfaceCards", "Render · Surface Cards", RecordClassification::Illumination, "LayoutGrid", "Render",
-                                                 "#9fb4d6");
-    RegisterSimple.operator()<PolygonClusterRecord>("PolygonClusters", "Render · Polygon Clusters", RecordClassification::Geometry, "Layers", "Render",
-                                                    "#78aaff");
+    // Render settings (one record for the whole renderer) & Continuum Solver Types
+    RegisterSimple.operator()<RenderPipelineRecord>("RenderPipeline", "Render settings", RecordClassification::Illumination, "Monitor", "Rendering", "#9fb4d6");
     RegisterSimple.operator()<FluidPlumeRecord>("FluidPlume", "Solver · Fluid Plume", RecordClassification::Physics, "Flame", "Solvers", "#e8833a");
     RegisterSimple.operator()<FractureRecord>("Fracture", "Solver · Voronoi Fracture", RecordClassification::Physics, "Hammer", "Solvers", "#8fb3a4");
     RegisterSimple.operator()<ParticleRecord>("Particles", "Solver · GPU Particles", RecordClassification::Physics, "Sparkles", "Solvers", "#b494f4");

@@ -108,7 +108,7 @@ int main(int Count, char **Arguments)
             Require(Centre.Initialize() && Centre.Activate(), "Native UI initialized");
             Everest::EverestWorkspace Workspace(Centre, Project);
             auto &World = Workspace.QuerySceneWorld();
-            Require(World.QueryRecordCount() == 20, "Clean default retains only rendered environment and required renderer settings");
+            Require(World.QueryRecordCount() == 16, "Clean default retains only rendered environment and the one Render settings record");
             for (const char *Type : {"SpatialNode", "RigidBody", "ThermalBody", "ChemicalVessel", "FluidPlume", "Fracture", "Particles",
                                      "HarmonicOscillator", "Lightning", "AerialFog"})
                 Require(World.FindFirstByType(Type) == nullptr, std::string("No unused default ") + Type);
@@ -189,11 +189,17 @@ int main(int Count, char **Arguments)
             Tick();
             Tick();
             Capture("Moon-Native.png");
-            Require(Workspace.QueryOutliner().QueryTotal() == 15, "Outliner only lists the fifteen rendered scene entries");
-            Require(Centre.QueryQuickActionCount() == 3, "Render settings remain available outside the scene list");
+            Require(Workspace.QueryOutliner().QueryTotal() == 16, "Outliner lists the fifteen rendered scene entries and the one Render settings component");
+            Require(Centre.QueryQuickActionCount() == 3, "Render settings remain available from the Control Centre too");
+            int RenderSettingsRows = 0;
             for (const auto &Row : Workspace.QueryOutliner().QueryRows())
-                Require(Row.Name != "Simulation Origin" && Row.Name != "Diagnostics" && Row.Name != "Render settings",
-                        "No dummy or renderer metadata in Outliner");
+            {
+                Require(Row.Name != "Simulation Origin" && Row.Name != "Diagnostics" && Row.Name != "Geometry clusters" && Row.Name != "Surface cache" &&
+                            Row.Name != "BVH & distance field",
+                        "No dummy or absorbed renderer records in Outliner");
+                RenderSettingsRows += Row.Name == "Render settings" ? 1 : 0;
+            }
+            Require(RenderSettingsRows == 1, "The renderer is one Render settings component in the Outliner");
             Io.AddKeyEvent(ImGuiKey_V, true);
             Tick();
             Io.AddKeyEvent(ImGuiKey_V, false);

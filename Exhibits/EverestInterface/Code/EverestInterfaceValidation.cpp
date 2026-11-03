@@ -162,7 +162,7 @@ int main(int ArgumentCount, char** Arguments)
         Everest::EverestWorkspace Workspace(*Centre, LaunchedPath.parent_path());
         SceneWorld&               World = Workspace.QuerySceneWorld();
         Require(World.LoadLevelSpace(EverestRoot.parent_path().parent_path() / "Exhibits/EverestInterface/Content/Simulation.levelspace"), "Simulation exhibit fixture failed to load");
-        Require(World.QueryRecordCount() == 30, "Expected 30 records in Projects/Everest/Content/Levels/Default.levelspace.");
+        Require(World.QueryRecordCount() == 26, "Expected 26 records in the Simulation fixture (one Render settings record).");
         // 📝 Each planet of the sky is its own Scene Directory entry (Venus, Jupiter, Mars, Saturn), beside the starfield and moons.
         Require(World.FindAllByType("Planet").size() == 4 && World.FindFirstByType("Stars") && World.FindFirstByType("Moons"),
                 "Expected four Planet entries beside the Stars and Moons entries.");
@@ -217,7 +217,7 @@ int main(int ArgumentCount, char** Arguments)
         RenderFrames(4);
         WritePngCapture(OutputDir / "04-EverestChemicalKinetics.png");
 
-        // Exhibit 07: Select RenderPipelineRecord (dual-tier GPU path, quality, buffer inspection, exposure, bloom).
+        // Exhibit 07: Select the Render settings record (RenderPipeline): the one inspector for the whole renderer.
         // Numbered 07 so the existing 01-06 capture names stay stable.
         auto* PipelineRec = World.FindFirstByType("RenderPipeline");
         Require(PipelineRec != nullptr, "Expected RenderPipeline record in Everest SceneWorld.");
@@ -255,11 +255,11 @@ int main(int ArgumentCount, char** Arguments)
         // Exhibit 06: Dynamic scene mutation via Outliner + ControlCentrePanel Appearance & Settings modal
         Workspace.QueryOutliner().RequestConstructRecord("ChemicalVessel");
         RenderFrames(2);
-        Require(World.QueryRecordCount() == 31, "Dynamic RequestConstructRecord('ChemicalVessel') failed.");
+        Require(World.QueryRecordCount() == 27, "Dynamic RequestConstructRecord('ChemicalVessel') failed.");
         const RecordToken AddedToken = Workspace.QueryOutliner().QuerySelected();
         Workspace.QueryOutliner().RequestDeleteRecord(AddedToken);
         RenderFrames(2);
-        Require(World.QueryRecordCount() == 30, "Dynamic RequestDeleteRecord failed.");
+        Require(World.QueryRecordCount() == 26, "Dynamic RequestDeleteRecord failed.");
 
         Centre->ActivateSettingsPage(ControlCentrePageCategory::Appearance);
         RenderFrames(36);

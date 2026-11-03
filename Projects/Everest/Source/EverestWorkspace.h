@@ -57,6 +57,8 @@ struct SceneViewportReadout
     std::array<uint32_t, 2> ScreenExtent        = {0, 0};    // [px]
     std::array<uint32_t, 2> TraceExtent         = {0, 0};    // [px]
     double                  RefreshMilliseconds = 0.0;       // [ms] smoothed refresh duration
+    double                  LatestMilliseconds  = 0.0;       // [ms] the last refresh alone
+    bool                    Held                = false;     // [-] live refresh is off: the image is the last one, not refreshed
     std::string             Failure{};                       // [-] why there is no image, if it failed
     bool                    RayTracing          = false;     // [-] RTX ReSTIR path tracer, else GTX distance-field GI
     uint32_t                TlasInstances       = 0;         // [-] active software TLAS instances

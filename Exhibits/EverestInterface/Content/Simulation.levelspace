@@ -3,58 +3,73 @@ format_version = 1
 name = "Everest — Default Scene"
 
 [[records]]
-identity = "rec_diagnostics"
-type = "Diagnostics"
-name = "Diagnostics"
-[records.configuration]
-timing_overlay = true
-memory_overlay = false
-
-[[records]]
-identity = "rec_clusters"
-type = "PolygonClusters"
-name = "Geometry clusters"
-[records.configuration]
-enabled = true
-hierarchy_depth = 6
-max_cluster_triangles = 128
-hiz_culling = true
-
-[[records]]
 identity = "rec_pipeline"
 type = "RenderPipeline"
 name = "Render settings"
 [records.configuration]
+# The whole renderer in one record (Render settings inspector); every value below is the VehicleHMI demo's unless noted.
 enabled = true
-hardware_ray_query = true
-quality_tier = 2
-inspection_mode = 0
-exposure_ev = 0.12
-bloom_intensity = 0.26
+hardware_ray_query = true          # RTX ReSTIR path tracer; false: GTX distance-field GI
+quality_tier = 2                   # 0 low, 1 medium, 2 high
+analytic_illumination = false      # the fast closed-form preview instead of the global illumination (a debug view)
+# Resolution & sampling
+render_scale = 1.0                 # viewport scale, under the grade's pixel ceiling
+trace_scale = 2                    # GI and reflections: 1 full, 2 half, 4 quarter
+initial_candidates = 2             # paths per pixel (M)
+# Global illumination
 global_illumination = true
+max_bounces = 3
+multi_bounce_nee = true
+russian_roulette = true
+temporal_reuse = true
+spatial_reuse = true
+visibility_reuse = true
+radiance_refresh = true
+spatial_count = 5
+spatial_radius = 20.0
+temporal_tally_limit = 20.0
+indirect_scale = 1.0
+sky_scale = 1.0
+incandescence_scale = 1.0
+card_radiosity = true
+card_tile_budget = 0               # 0: the grade's
+# Reflections
+reflections = true
+ray_traced_reflections = true
+reflection_bounces = 2
+reflection_scale = 1.0
+reflection_roughness = 0.8
+mirror_filter = false              # measured option (Documentation/Plans/Ongoing/RayTracedLighting.md)
+mirror_trace = false               # measured option, costly
+# Sun & shadows
+direct_shadow = true
+ray_traced_shadows = true
+firefly_filter = true
+solar_disc = false                 # measured option
+stratified_sun = false             # measured option
+penumbra_filter = false            # measured option
+# Denoising & antialiasing
+variance_filter = true
 temporal_aa = true
-
-[[records]]
-identity = "rec_sdf"
-type = "DistanceField"
-name = "BVH & distance field"
-[records.configuration]
-enabled = true
-cascade0_m = 16.0
-cascade1_m = 48.0
-cascade2_m = 128.0
-cascade3_m = 320.0
-max_cone_steps = 48
-
-[[records]]
-identity = "rec_cards"
-type = "SurfaceCards"
-name = "Surface cache"
-[records.configuration]
-enabled = true
-atlas_px = 1024
-bounce_gain = 1.15
-cards_per_object = 6
+diffuse_wavelet_levels = 4
+diffuse_tally_limit = 24
+diffuse_minimum_weight = 0.08
+diffuse_colour_sigma = 4.0
+glossy_wavelet_levels = 3
+glossy_tally_limit = 12
+glossy_minimum_weight = 0.12
+glossy_colour_sigma = 3.0
+# Exposure
+auto_exposure = true
+exposure_ev = 0.12                 # this level's own
+# Geometry
+virtualized_geometry = false
+virtualized_stream_slots = 0
+# Debug views and timing
+inspection_mode = 0
+distance_inspection = 1            # view 6 reads: 1 normals, 2 steps, 3 light
+live_refresh = true
+target_rate = 60
 
 [[records]]
 identity = "rec_solar"

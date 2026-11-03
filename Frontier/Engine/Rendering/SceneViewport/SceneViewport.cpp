@@ -47,10 +47,11 @@ SceneViewport::~SceneViewport()
     if (Exchange_) Exchange_->Shutdown();
 }
 
-std::array<uint32_t, 2> SceneViewport::ResolveScreenExtent(double PanelWidth, double PanelHeight, double PixelDensity, const std::string& Quality)
+std::array<uint32_t, 2> SceneViewport::ResolveScreenExtent(double PanelWidth, double PanelHeight, double PixelDensity, const std::string& Quality,
+                                                           double ViewportScale)
 {
     const QualityGrade Grade = ResolveQualityGrade(Quality);
-    double Ratio = std::min(PixelDensity > 0.0 ? PixelDensity : 1.0, 2.0) * Grade.RenderScale;
+    double Ratio = std::min(PixelDensity > 0.0 ? PixelDensity : 1.0, 2.0) * Grade.RenderScale * std::clamp(ViewportScale, 0.25, 2.0);
     const double Pixels = PanelWidth * PanelHeight * Ratio * Ratio;
     if (Pixels > Grade.PixelLimit) Ratio *= std::sqrt(Grade.PixelLimit / Pixels);
     return {static_cast<uint32_t>(std::max(64.0, std::floor(PanelWidth * Ratio))), static_cast<uint32_t>(std::max(64.0, std::floor(PanelHeight * Ratio)))};
@@ -202,10 +203,13 @@ bool SceneViewport::Refresh(const ViewportCamera& Camera, const SceneEnvironment
 {
     if (!Host_) return false;
     ScreenExtent = {std::max(64u, ScreenExtent[0]), std::max(64u, ScreenExtent[1])};
-    if (ScreenExtent != Host_->ScreenExtent)
+    // 📝 Render settings › Trace resolution: the resampling targets follow it as they follow the screen extent.
+    const uint32_t TraceScale = Rendering.TraceScale != 0 ? std::clamp(Rendering.TraceScale, 1u, 4u) : std::max(1u, Configuration_.TraceScale);
+    if (ScreenExtent != Host_->ScreenExtent || TraceScale != Host_->Settings.TraceScale)
     {
         // 📝 A borrowing owner may still sample the old presented image in flight: retire everything before replacing it.
         Exchange_->AwaitIdle();
+        Host_->Settings.TraceScale = TraceScale;
         Host_->ReconstructScreenTargets(ScreenExtent);
         PresentedView_ = Exchange_->ConstructView(Host_->CaptureTexture);
     }
@@ -249,13 +253,25 @@ bool SceneViewport::Refresh(const ViewportCamera& Camera, const SceneEnvironment
     Inputs.Camera.Near                = Camera.Near;
     // 📝 IlluminationHost.js: the cascades centre 0.45 of a cascade-0 span ahead of the camera.
     Inputs.Focus = MultiplyAddVector(Camera.Position, Inputs.Camera.Forward, 0.45 * Host_->Grade.ClipResolution * Host_->Grade.FinestVoxel);
+    Inputs.Toggles                      = Rendering.Toggles;
     Inputs.Toggles.Indirect             = Rendering.GlobalIllumination;
     Inputs.Toggles.Antialias            = Rendering.TemporalAntiAliasing;
     Inputs.Toggles.ExposureCompensation = Rendering.ExposureCompensation;
-    Inputs.Toggles.RayTracing           = Configuration_.RayTracing;
+    Inputs.Toggles.RayTracing           = Configuration_.RayTracing && Rendering.Toggles.RayTracing;
     Inputs.Toggles.Inspection           = std::min<uint32_t>(Rendering.Inspection, 14u);
     Inputs.Toggles.Refinements          = Rendering.Refinements;
+    // 📝 The demo's Settings object is its toggles: the host skips the dispatches of what the toggles switch off.
     Host_->Settings.Indirect            = Rendering.GlobalIllumination;
+    Host_->Settings.Reflection          = Inputs.Toggles.Reflection;
+    Host_->Settings.VarianceFilter      = Inputs.Toggles.VarianceFilter;
+    Host_->Settings.CardRadiosity       = Inputs.Toggles.CardRadiosity;
+    Host_->Settings.CardTileBudget      = Rendering.CardTileBudget != 0 ? Rendering.CardTileBudget : Host_->Grade.TileBudget;
+    const auto Differs = [](const VarianceSettings& Left, const VarianceSettings& Right) {
+        return Left.MinimumWeight != Right.MinimumWeight || Left.TallyLimit != Right.TallyLimit || Left.WaveletIterations != Right.WaveletIterations ||
+               Left.ColourSigma != Right.ColourSigma;
+    };
+    if (Host_->Diffuse && Differs(Host_->Diffuse->Settings, Rendering.DiffuseFilter)) Host_->Diffuse->ApplySettings(Rendering.DiffuseFilter);
+    if (Host_->Glossy && Differs(Host_->Glossy->Settings, Rendering.GlossyFilter)) Host_->Glossy->ApplySettings(Rendering.GlossyFilter);
     // 📝 The levelspace key raises the takeover and lowers it again; an inspection mode that activated it keeps it, as in the demo.
     if (Host_->Surface && Host_->Surface->Virtualized)
     {
@@ -273,6 +289,7 @@ bool SceneViewport::Refresh(const ViewportCamera& Camera, const SceneEnvironment
     Inputs.CelestialDelta          = std::max(0.0, DeltaSeconds);
     Inputs.LuminairesLive          = true;
     if (ToggleAdjustment) ToggleAdjustment(Inputs.Toggles);
+    LastToggles_ = Inputs.Toggles;
 
     RefreshInterlude Interlude;
     if (Overlay_ && !Overlay_->PrepareInterlude(*Host_, Environment, Inputs.Camera, Sky.Latitude, Sky.Longitude, Configuration_.EnvironmentLighting,
@@ -294,8 +311,8 @@ bool SceneViewport::Refresh(const ViewportCamera& Camera, const SceneEnvironment
 ViewportStatistics SceneViewport::QueryStatistics() const noexcept
 {
     ViewportStatistics Statistics;
-    const RefreshToggles Toggles;
-    Statistics.RayTracing        = Configuration_.RayTracing;
+    const RefreshToggles& Toggles = LastToggles_;
+    Statistics.RayTracing        = Configuration_.RayTracing && Toggles.RayTracing;
     Statistics.MaxBounces        = Toggles.MaxBounces;
     Statistics.ReflectionBounces = Toggles.ReflectionBounces;
     Statistics.InitialCandidates = Toggles.InitialCandidates;

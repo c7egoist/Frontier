@@ -32,89 +32,104 @@ struct RevisionCounter
 //                                                    RENDER ENGINE CONFIGURATIONS
 //------------------------------------------------------------------------------------------------------------------------
 
-struct DiagnosticsConfiguration : RevisionCounter
-{
-    float    FrameTimeMs          = 16.2f;
-    float    FramesPerSecond      = 61.7f;
-    float    GpuRayQueryMs        = 3.4f;
-    float    GpuLightingMs        = 4.1f;
-    float    GpuVolumetricMs      = 2.6f;
-    uint32_t ActiveDrawCount      = 184;
-    bool     TimingOverlayEnabled = true;
-    bool     MemoryOverlayEnabled = false;
-    std::array<float, 64> FrameHistoryMs{};
-
-    DiagnosticsConfiguration() noexcept
-    {
-        for (size_t Index = 0; Index < FrameHistoryMs.size(); ++Index)
-        {
-            FrameHistoryMs[Index] = 15.8f + static_cast<float>(Index % 5u) * 0.25f;
-        }
-    }
-};
-
+// 📝 The one Render settings record (levelspace type "RenderPipeline"): every setting of the ported renderer (the VehicleHMI demo's
+//    RefreshToggles, IlluminationSettings and the two VarianceSettings), the options measured beyond it, the debug views and the
+//    refresh timing. The defaults are the demo's. It absorbed the Diagnostics, DistanceField, SurfaceCards and PolygonClusters
+//    records, none of whose values reached the renderer; a level that still lists them loads without them.
 struct RenderPipelineConfiguration : RevisionCounter
 {
     bool  Enabled                = true;
-    bool  HardwareRayQueryTier   = true;   // true: RTX VK_KHR_ray_query | false: GTX 4-Cascade SDF + SAH-2 BVH
-    int   QualityTier            = 2;      // 0 Low · 1 Medium · 2 Ultra
-    int   InspectionModeIndex    = 0;      // 0..14 viewport inspection buffer modes
-    int   InspectionDistanceMode = 2;      // 0 Near · 1 Medium · 2 Far
-    float ExposureCompensationEv = 0.15f;
-    float BloomIntensity         = 0.28f;
-    bool  TemporalAntiAliasing   = true;
+    bool  HardwareRayQueryTier   = true;    // [-] RTX ReSTIR path tracer (VK_KHR_ray_query BVH) | GTX distance-field GI; rebuilds the viewport
+    int   QualityTier            = 2;       // [-] 0 Low · 1 Medium · 2 High (IlluminationConstants grades); reloads the scene
+
+    // 📝 Resolution & sampling
+    float RenderScale            = 1.0f;    // [-] viewport scale, multiplies the grade's render scale under its pixel ceiling (0.25–2)
+    int   TraceScale             = 2;       // [-] 1 Full · 2 Half · 4 Quarter: screen pixels per GI and reflection pixel along one axis
+    int   InitialCandidates      = 2;       // [-] paths per pixel (M), 1–4
+
+    // 📝 Global illumination
     bool  GlobalIllumination     = true;
-    bool  ScreenSpaceReflections = true;
-    bool  AcesFilmicTonemap      = true;
-    // 📝 The demo's ?hierarchy=1 and ?streampages: the cluster nesting takeover of eligible static sets (levelspace keys, no controls).
+    int   MaxBounces             = 3;       // [-] path bounces, 1–4
+    bool  MultiBounceNee         = true;
+    bool  RussianRoulette        = true;
+    bool  TemporalReuse          = true;
+    bool  SpatialReuse           = true;
+    bool  VisibilityReuse        = true;
+    bool  RadianceRefresh        = true;
+    int   SpatialCount           = 5;       // [-] spatial candidates, 0–8
+    float SpatialRadius          = 20.0f;   // [px] 2–48
+    float TemporalTallyLimit     = 20.0f;   // [-] temporal M limit, 1–40
+    float IndirectScale          = 1.0f;    // [-]
+    float SkyScale               = 1.0f;    // [-]
+    float IncandescenceScale     = 1.0f;    // [-] emissive surfaces
+    bool  CardRadiosity          = true;
+    int   CardTileBudget         = 0;       // [-] static card tiles relit per refresh; 0 = the grade's
+
+    // 📝 Reflections
+    bool  Reflection             = true;
+    bool  RayTracedReflections   = true;
+    int   ReflectionBounces      = 2;       // [-] 1–4
+    float ReflectionScale        = 1.0f;    // [-]
+    float ReflectionRoughness    = 0.80f;   // [-] roughness cutoff of the RTX reflection rays, 0.15–1
+    bool  MirrorFilter           = false;   // [-] measured option: smooth surfaces take the unfiltered reflection
+    bool  MirrorTrace            = false;   // [-] measured option, with MirrorFilter: smooth surfaces traced at screen resolution
+
+    // 📝 Sun & shadows
+    bool  DirectShadow           = true;
+    bool  RayTracedShadows       = true;
+    bool  FireflyFilter          = true;
+    bool  SolarDisc              = false;   // [-] measured option: the sun shaded as a disc; no solar disc in reflection rays
+    bool  StratifiedSun          = false;   // [-] measured option: sun-disc samples stratified over 4×4 pixel blocks
+    bool  PenumbraFilter         = false;   // [-] measured option: ray-traced sun verdicts filtered across their penumbra
+
+    // 📝 Denoising & antialiasing (wavelet levels = VarianceSettings::WaveletIterations + 1)
+    bool  VarianceFilter         = true;
+    bool  TemporalAntiAliasing   = true;
+    int   DiffuseWaveletLevels   = 4;       // [-] 1–4
+    int   DiffuseTallyLimit      = 24;      // [-] history limit, 1–64
+    float DiffuseMinimumWeight   = 0.08f;   // [-] 0.01–0.5
+    float DiffuseColourSigma     = 4.0f;    // [σ] 0.5–16
+    int   GlossyWaveletLevels    = 3;
+    int   GlossyTallyLimit       = 12;
+    float GlossyMinimumWeight    = 0.12f;
+    float GlossyColourSigma      = 3.0f;
+
+    // 📝 Exposure
+    bool  AutoExposure           = true;
+    float ExposureCompensationEv = 0.15f;   // [EV] −4–4
+
+    // 📝 Geometry: the demo's ?hierarchy=1 and ?streampages (the cluster nesting takeover of eligible static sets)
     bool  VirtualizedGeometry    = false;
-    int   VirtualizedStreamSlots = 0;      // 0: one arena slot per page
-    // 📝 The editor's fast closed-form renderer instead of the global illumination (levelspace key, no controls yet).
-    bool  AnalyticIllumination   = false;
-    // 📝 Measured options beyond the demo for the RTX path's reflections and sun shadows (Exhibits/RayTracedLighting; levelspace
-    //    keys, no controls yet). All false reproduces the demo.
-    bool  SolarDisc              = false;   // the sun shaded as a disc; no solar disc in reflection rays
-    bool  StratifiedSun          = false;   // sun-disc samples stratified over 4×4 pixel blocks
-    bool  PenumbraFilter         = false;   // ray-traced sun verdicts filtered across their penumbra
-    bool  MirrorFilter           = false;   // smooth surfaces take the unfiltered reflection
-    bool  MirrorTrace            = false;   // with MirrorFilter: smooth surfaces traced at screen resolution
-};
+    int   VirtualizedStreamSlots = 0;       // [-] 0: one arena slot per page
 
-struct DistanceFieldConfiguration : RevisionCounter
-{
-    bool     Enabled                 = true;
-    float    CascadeZeroRadiusMetres = 16.0f;
-    float    CascadeOneRadiusMetres  = 48.0f;
-    float    CascadeTwoRadiusMetres  = 128.0f;
-    float    CascadeThreeRadiusMetres = 320.0f;
-    uint32_t ClipmapVoxelResolution  = 64;
-    float    ConeTraceStepScale      = 1.0f;
-    uint32_t MaxConeSteps            = 48;
-    bool     AnalyticalPrimitives    = true;
-    bool     TrilinearCascadeBlend   = true;
-};
+    // 📝 Debug views: the demo's inspection views 0–14 and, as a view of its own, the editor's fast closed-form renderer
+    int   InspectionModeIndex    = 0;       // [-] 0–14 (RefreshToggles::Inspection)
+    int   DistanceInspection     = 1;       // [-] view 6 reads: 1 normals · 2 traversal steps · 3 next-event light / cards
+    bool  AnalyticIllumination   = false;   // [-] the analytic illumination instead of the global illumination
 
-struct SurfaceCardConfiguration : RevisionCounter
-{
-    bool     Enabled             = true;
-    uint32_t AtlasResolutionPx   = 1024;
-    float    IndirectBounceGain  = 1.15f;
-    uint32_t CardsPerObject      = 6;
-    float    SkyVisibilityWeight = 0.85f;
-    bool     TemporalAccumulate  = true;
-    bool     IrradianceProbes    = true;
-};
+    // 📝 Refresh timing
+    bool  LiveRefresh            = true;    // [-] false holds the last image (compare a still against a change)
+    int   TargetRate             = 60;      // [Hz] budget line of the timing chart: 30 · 60 · 120
 
-struct PolygonClusterConfiguration : RevisionCounter
-{
-    bool     Enabled              = true;
-    uint32_t HierarchyDepth       = 6;
-    uint32_t MaxClusterTriangles  = 128;
-    uint32_t LodErrorThresholdPx  = 1;
-    uint32_t VisibleClusterCount  = 248;
-    uint32_t CulledClusterCount   = 112;
-    bool     HiZOcclusionCulling  = true;
-    bool     FreezeCullingFrustum = false;
+    // 📝 Measured by the viewport and published by the workspace after each refresh; not saved.
+    struct Measurements
+    {
+        bool                    Presenting       = false;
+        bool                    RayTracing       = false;
+        double                  RefreshMs        = 0.0;   // [ms] smoothed refresh (submission to completion)
+        double                  LatestMs         = 0.0;   // [ms] the last refresh alone
+        std::array<float, 96>   HistoryMs{};              // [ms] ring of recent refreshes
+        uint32_t                HistoryCount     = 0;     // [-] refreshes written into the ring
+        uint64_t                RefreshCount     = 0;     // [-] refreshes since the viewport came up
+        std::array<uint32_t, 2> ScreenExtent     = {0, 0};
+        std::array<uint32_t, 2> TraceExtent      = {0, 0};
+        uint32_t                TlasInstances    = 0;
+        uint32_t                ClipResolution   = 0;     // [voxels]
+        uint32_t                SurfaceCards     = 0;
+        uint32_t                GeometryClusters = 0;
+        uint32_t                SceneTriangles   = 0;
+        std::string             Adapter{};
+    } Measured{};
 };
 
 //------------------------------------------------------------------------------------------------------------------------

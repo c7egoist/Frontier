@@ -25,6 +25,7 @@
 #endif
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <stdexcept>
@@ -73,10 +74,33 @@ void PublishRenderReadouts(Frontier::SceneWorld& World, const SceneViewportReado
         Meta.LiveMetadata = Text;
         (void)Frontier::SceneDirectory::Instance().ConfigureMetadata(Entry->QueryToken(), std::move(Meta));
     };
-    Publish("RenderPipeline", std::string(Readout.RayTracing ? "RTX \xC2\xB7 PT" : "GTX \xC2\xB7 SDF") + " \xC2\xB7 " + Readout.Quality);
-    Publish("DistanceField", Readout.RayTracing ? std::to_string(Readout.TlasInstances) + " TLAS" : std::to_string(Readout.ClipResolution) + "\xC2\xB3");
-    Publish("SurfaceCards", std::to_string(Readout.SurfaceCards));
-    Publish("PolygonClusters", std::to_string(Readout.GeometryClusters) + " clusters");
+    auto* Pipeline = dynamic_cast<Frontier::RenderPipelineRecord*>(World.FindFirstByType("RenderPipeline"));
+    if (Pipeline == nullptr) return;
+    // 📝 The Render settings page's measurements: the refresh times and what the viewport ran with (not saved with the level).
+    auto& Measured = Pipeline->AccessConfiguration().Measured;
+    if (!Readout.Held && Readout.LatestMilliseconds > 0.0)
+    {
+        Measured.HistoryMs[Measured.RefreshCount % Measured.HistoryMs.size()] = static_cast<float>(Readout.LatestMilliseconds);
+        Measured.HistoryCount = std::min<uint32_t>(Measured.HistoryCount + 1u, static_cast<uint32_t>(Measured.HistoryMs.size()));
+        ++Measured.RefreshCount;
+    }
+    Measured.Presenting       = Readout.Presenting;
+    Measured.RayTracing       = Readout.RayTracing;
+    Measured.RefreshMs        = Readout.RefreshMilliseconds;
+    Measured.LatestMs         = Readout.Held ? Measured.LatestMs : Readout.LatestMilliseconds;
+    Measured.ScreenExtent     = Readout.ScreenExtent;
+    Measured.TraceExtent      = Readout.TraceExtent;
+    Measured.TlasInstances    = Readout.TlasInstances;
+    Measured.ClipResolution   = Readout.ClipResolution;
+    Measured.SurfaceCards     = Readout.SurfaceCards;
+    Measured.GeometryClusters = Readout.GeometryClusters;
+    Measured.SceneTriangles   = Readout.SceneTriangles;
+    Measured.Adapter          = Readout.Adapter;
+    const auto& Settings = Pipeline->QueryConfiguration();
+    char Row[96];
+    std::snprintf(Row, sizeof(Row), "%s \xC2\xB7 %u\xC3\x97%u \xC2\xB7 %.1f ms", Settings.AnalyticIllumination ? "Analytic" : (Readout.RayTracing ? "RTX" : "GTX"),
+                  Readout.ScreenExtent[0], Readout.ScreenExtent[1], Readout.RefreshMilliseconds);
+    Publish("RenderPipeline", Row);
 }
 
 #endif
@@ -288,12 +312,14 @@ EverestWorkspace::EverestWorkspace(Frontier::ControlCentrePanel& ControlCentre,
 {
     InitializeWorld();
 
-    const std::vector<std::string> SceneTypes = {"Solar","OpticalFlare","Atmosphere","Clouds","Fog","Stars","Moons","Planet","ForceField","Wind"};
+    // 📝 The scene's entries plus the one Render settings component (the whole renderer, owner's request); it is not constructible.
+    const std::vector<std::string> SceneTypes = {"RenderPipeline","Solar","OpticalFlare","Atmosphere","Clouds","Fog","Stars","Moons","Planet","ForceField","Wind"};
     OutlinerPanel.ConfigureVisibleTypes(SceneTypes);
     auto Types = QuerySceneWorld().EnumerateRegisteredTypes();
     std::erase_if(Types,[&](const auto& Entry)
     {
-        return std::find(SceneTypes.begin(),SceneTypes.end(),Entry.first)==SceneTypes.end() && Entry.first!="LocalCloud" && Entry.first!="LocalFog";
+        return (std::find(SceneTypes.begin(),SceneTypes.end(),Entry.first)==SceneTypes.end() && Entry.first!="LocalCloud" && Entry.first!="LocalFog") ||
+               Entry.first=="RenderPipeline";
     });
     OutlinerPanel.ConfigureConstructibleTypes(std::move(Types));
     OutlinerPanel.Synchronize(Frontier::SceneDirectory::Instance());
@@ -445,16 +471,6 @@ void EverestWorkspace::IntegrateSimulation(double DeltaSeconds)
 
     Application.StepFrame(ClampedDt);
 
-    if (auto* DiagRecord = dynamic_cast<Frontier::DiagnosticsRecord*>(QuerySceneWorld().FindFirstByType("Diagnostics")))
-    {
-        if (ClampedDt > 1.0e-5f)
-        {
-            auto& Diag           = DiagRecord->AccessConfiguration();
-            const float Instant  = ClampedDt * 1000.0f;
-            Diag.FrameTimeMs     = Diag.FrameTimeMs * 0.9f + Instant * 0.1f;
-            Diag.FramesPerSecond = 1000.0f / std::max(0.25f, Diag.FrameTimeMs);
-        }
-    }
 }
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -908,6 +924,28 @@ void EverestWorkspace::ConstructViewportBar(const ImVec2& Min,const ImVec2& Max,
     if (ViewportChromeControls::ConstructIconButton("##HomeCamera",{X,Min.y+(Height-Button)*.5f},Button,"RotateCcw",false,true,"Return to the scene camera"))
     {
         Flight=SceneViewportFlight{};Navigation=SceneViewportNavigation{};
+    }
+    X+=Button+Gap;
+    // 📝 Debug views (Render settings › Debug views): the demo's inspection views and the analytic illumination as a view of its own.
+    if (auto* Pipeline=dynamic_cast<Frontier::RenderPipelineRecord*>(QuerySceneWorld().FindFirstByType("RenderPipeline")))
+    {
+        using Frontier::RenderInspectionModes;
+        static const auto ViewNames=[]
+        {
+            std::array<const char*,RenderInspectionModes::ViewCount> Names{};
+            for (size_t Index=0;Index<Names.size();++Index) Names[Index]=RenderInspectionModes::Views[Index].Name;
+            return Names;
+        }();
+        auto& Settings=Pipeline->AccessConfiguration();
+        int View=Settings.AnalyticIllumination?RenderInspectionModes::AnalyticView:std::clamp(Settings.InspectionModeIndex,0,14);
+        const float Wide=std::min(236*Scale,(Max.x-Min.x)*.30f);
+        if (X+Wide<Max.x-12*Scale-2*Button-2*Gap &&
+            ViewportChromeControls::ConstructSelectField("##DebugView",Faces,{X,Min.y+(Height-Button)*.5f},{Wide,Button},ViewNames.data(),int(ViewNames.size()),View,Scale))
+        {
+            Settings.AnalyticIllumination=View==RenderInspectionModes::AnalyticView;
+            if (!Settings.AnalyticIllumination) Settings.InspectionModeIndex=View;
+            Settings.AdvanceRevision();
+        }
     }
     const float Right=Max.x-12*Scale;
     if (ViewportChromeControls::ConstructIconButton("##Readout",{Right-2*Button-Gap,Min.y+(Height-Button)*.5f},Button,"Activity",Overlays.ReadoutVisible,true,"Detailed readout (H)")) ToggleViewportOverlay(0);

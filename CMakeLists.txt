@@ -131,7 +131,6 @@ add_library(FrontierSceneEditorUI STATIC
     Frontier/Engine/Interface/FractureEditor.cpp
     Frontier/Engine/Interface/FluidPlumeEditor.cpp
     Frontier/Engine/Interface/ParticleEditor.cpp
-    Frontier/Engine/Interface/PolygonClusterEditor.cpp
     Frontier/Engine/Interface/Controls/ControlTheme.cpp
     Frontier/Engine/Interface/Controls/ControlColumn.cpp
     Frontier/Engine/Interface/Controls/GlyphRun.cpp
@@ -154,6 +153,8 @@ add_library(FrontierSceneEditorUI STATIC
     Frontier/Engine/Interface/Controls/SliderRow.cpp
     Frontier/Engine/Interface/Controls/SelectRow.cpp
     Frontier/Engine/Interface/Controls/PresetStrip.cpp
+    Frontier/Engine/Interface/Controls/ChoiceRow.cpp
+    Frontier/Engine/Interface/Controls/ChoiceList.cpp
     Frontier/Engine/Interface/Controls/ToggleRow.cpp
     Frontier/Engine/Interface/Controls/NextButton.cpp
     Frontier/Engine/Interface/Controls/DateRow.cpp
@@ -166,11 +167,18 @@ add_library(FrontierSceneEditorUI STATIC
     Frontier/Engine/Interface/Inspectors/ThermalInspector.cpp
     Frontier/Engine/Interface/Inspectors/ChemicalInspector.cpp
     Frontier/Engine/Interface/Inspectors/SurfaceOpticsInspector.cpp
-    Frontier/Engine/Interface/Inspectors/DiagnosticsInspector.cpp
-    Frontier/Engine/Interface/Inspectors/RenderPipelineInspector.cpp
-    Frontier/Engine/Interface/Inspectors/DistanceFieldInspector.cpp
-    Frontier/Engine/Interface/Inspectors/SurfaceCardInspector.cpp
-    Frontier/Engine/Interface/Inspectors/PolygonClusterInspector.cpp
+    Frontier/Engine/Interface/Inspectors/RenderSettingsInspector.cpp
+    Frontier/Engine/Interface/Inspectors/RenderSettings/RenderSettingsReadings.cpp
+    Frontier/Engine/Interface/Inspectors/RenderSettings/RenderSettingsRows.cpp
+    Frontier/Engine/Interface/Inspectors/RenderSettings/SamplingSection.cpp
+    Frontier/Engine/Interface/Inspectors/RenderSettings/IlluminationSection.cpp
+    Frontier/Engine/Interface/Inspectors/RenderSettings/ReflectionSection.cpp
+    Frontier/Engine/Interface/Inspectors/RenderSettings/ShadowSection.cpp
+    Frontier/Engine/Interface/Inspectors/RenderSettings/DenoiseSection.cpp
+    Frontier/Engine/Interface/Inspectors/RenderSettings/ExposureSection.cpp
+    Frontier/Engine/Interface/Inspectors/RenderSettings/GeometrySection.cpp
+    Frontier/Engine/Interface/Inspectors/RenderSettings/ViewSection.cpp
+    Frontier/Engine/Interface/Inspectors/RenderSettings/TimingSection.cpp
     Frontier/Engine/Interface/Inspectors/SolarInspector.cpp
     Frontier/Engine/Interface/Inspectors/OpticalReference.cpp
     Frontier/Engine/Interface/Inspectors/OpticalFlareInspector.cpp
