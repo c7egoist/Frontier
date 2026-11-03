@@ -13,7 +13,7 @@ import { PE } from './Engine/pe.js';
 //                                                    HALF FLOATS
 //------------------------------------------------------------------------------------------------------------------------
 
-function DecodeHalf(Bits)
+export function DecodeHalf(Bits)
 {
     const Sign = Bits & 0x8000 ? -1 : 1;
     const Exponent = (Bits >> 10) & 0x1f;
@@ -53,13 +53,13 @@ export function ConstructLatticeReadback(Engine)
             {
                 for (let Row = 0; Row < Rows; ++Row)
                 {
-                    const Base = (Layer * Rows + Row) * RowHalves;
+                    const RowStart = (Layer * Rows + Row) * RowHalves;
                     for (let Column = 0; Column < Columns; ++Column)
                     {
                         const Target = ((Layer * Rows + Row) * Columns + Column) * 3;
-                        Vectors[Target] = DecodeHalf(Halves[Base + Column * 4]);
-                        Vectors[Target + 1] = DecodeHalf(Halves[Base + Column * 4 + 1]);
-                        Vectors[Target + 2] = DecodeHalf(Halves[Base + Column * 4 + 2]);
+                        Vectors[Target] = DecodeHalf(Halves[RowStart + Column * 4]);
+                        Vectors[Target + 1] = DecodeHalf(Halves[RowStart + Column * 4 + 1]);
+                        Vectors[Target + 2] = DecodeHalf(Halves[RowStart + Column * 4 + 2]);
                     }
                 }
             }

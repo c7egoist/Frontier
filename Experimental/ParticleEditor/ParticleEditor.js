@@ -87,7 +87,7 @@ let Selected = 'Field';
 let PageScope = null, OutlinerScope = null, InspectorScroller = null;
 let Visualization = null, OutlinerQuery = '', LibraryGroup = 'All', LibraryQuery = '';
 
-const KindLabels = { 0: 'Streak', 1: 'Wind-driven', 3: 'Molecular · LJ', 4: 'Molecular · reactive', 5: 'VFX', 6: 'Swarm · flocking', 7: 'Light fibres' };
+const CategoryLabels = { 0: 'Streak', 1: 'Wind-driven', 3: 'Molecular · LJ', 4: 'Molecular · reactive', 5: 'VFX', 6: 'Swarm · flocking', 7: 'Light fibres' };
 const GroupGlyphs = { Transitions: 'Boxes', VFX: 'Flame', 'Wind-blown': 'Leaf', 'Light fibres': 'Zap', Water: 'Drop', Ambient: 'Sparkles', Effects: 'Sparkles',
                       Weather: 'Cloud', Fields: 'Magnet', Ground: 'Layers', Physics: 'Atom', Storms: 'Tornado', Aircraft: 'Rays', Space: 'Planet' };
 const ForceGlyphs = { prevailing: 'Wind', gust: 'Front', tornado: 'Tornado', outflow: 'Blast', attract: 'Attract', repel: 'Repel', lift: 'Lift', magnetic: 'Magnet',
@@ -165,7 +165,7 @@ function AddEffect(PresetId)
     const Effect = ConstructEffect(PresetId, Same ? `${Preset.name} ${Same + 1}` : Preset.name);
     Scene.Effects.push(Effect);
     Selected = Effect.Token;
-    const Kind = KindLabels[Effect.P.kind] || 'Particles';
+    const Kind = CategoryLabels[Effect.P.kind] || 'Particles';
     AppendLog('PARTICLES', `Added ${Effect.Name}`, `${Preset.group === Kind ? Kind : `${Preset.group} · ${Kind}`} · `
               + (Effect.P.kind === 7 ? `${FormatInteger(Effect.P.fibre.strands)} strands` : `${FormatInteger(Effect.Gpu.cap)} capacity`), 'live');
     ConstructOutliner();
@@ -706,7 +706,7 @@ function ConstructTreeRow(Host, Row)
 
 function DescribeEffectMeta(Effect)
 {
-    const Kind = KindLabels[Effect.P.kind] || 'Particles';
+    const Kind = CategoryLabels[Effect.P.kind] || 'Particles';
     if (Effect.P.kind === 7) return `${Kind} · ${FormatInteger(Effect.P.fibre.strands)} strands`;
     const Alive = Effect.Gpu && Effect.Gpu.stats_ ? Effect.Gpu.stats_.alive : 0;
     return `${Kind} · ${FormatInteger(Alive)} alive`;
@@ -845,8 +845,8 @@ function OpenLibrary()
                 Swatch.style.background = `linear-gradient(90deg, ${Colour}, ${Ending})`;
                 const Card = C.Construct('button', 'library-card', [
                     C.Construct('div', 'card-top', [Glyph, C.Construct('div', null, [C.Construct('div', 'card-name', Preset.name),
-                        C.Construct('div', 'card-native', Preset.group === (KindLabels[Preset.p.kind] || '') ? Preset.group.toUpperCase()
-                                                                  : `${Preset.group.toUpperCase()} · ${(KindLabels[Preset.p.kind] || 'Particles').toUpperCase()}`)])]),
+                        C.Construct('div', 'card-native', Preset.group === (CategoryLabels[Preset.p.kind] || '') ? Preset.group.toUpperCase()
+                                                                  : `${Preset.group.toUpperCase()} · ${(CategoryLabels[Preset.p.kind] || 'Particles').toUpperCase()}`)])]),
                     C.Construct('div', 'card-blurb', Preset.blurb), Swatch,
                     InScene ? C.Construct('span', 'card-badge', `${InScene} in scene`) : null]);
                 Card.type = 'button';
@@ -1128,7 +1128,7 @@ function ConstructEffectPage(Page, Effect)
     const Preset = PE.presetById(Effect.PresetId);
     const Molecular = P.kind === 3 || P.kind === 4, Fibre = P.kind === 7;
     PE.Edits.For(Effect);
-    const Heading = ConstructHeading(Page, `Particle effects / ${Preset.group}`, Effect.Name, C.Construct('span', 'live-pill', [C.Construct('i'), C.Construct('span', null, (KindLabels[P.kind] || 'Particles').toUpperCase())]),
+    const Heading = ConstructHeading(Page, `Particle effects / ${Preset.group}`, Effect.Name, C.Construct('span', 'live-pill', [C.Construct('i'), C.Construct('span', null, (CategoryLabels[P.kind] || 'Particles').toUpperCase())]),
                                      Preset.blurb);
     C.Register(() => { Heading.textContent = Effect.Name; });
     const Mark = C.Construct('div', 'mark live', C.ConstructGlyph('Check'));
@@ -1159,7 +1159,7 @@ function ConstructEffectPage(Page, Effect)
         MarkText.textContent = !P.visible ? 'Hidden' : !Scene.Playing ? 'Paused' : Full ? 'At capacity' : Molecular ? 'Every particle alive' : Fibre ? 'Drawn analytically' : 'Within capacity';
     });
     C.ChipRow(Page, [
-        () => [(KindLabels[P.kind] || 'Particles').split(' · ')[0], 'kind'],
+        () => [(CategoryLabels[P.kind] || 'Particles').split(' · ')[0], 'kind'],
         () => [P.blend === 'alpha' ? 'Alpha' : 'Additive', 'blend'],
         () => [['Streak', 'Sphere', 'Leaf', 'Glow', 'Cube', 'Coin', 'Bubble'][P.shape] || '—', 'shape'],
         () => [FormatInteger(Fibre ? P.fibre.strands : Effect.Gpu.cap), Fibre ? 'strands' : 'capacity']]);

@@ -1440,6 +1440,42 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
   characters outside the Windows code page may not open.
 - **Commits:** `76e05ee` and the commit with this entry.
 
+## Force Field and Particle editor prototypes (2026-11-03)
+
+- **Requested:** integrate the Force Field and Particle editors before the vehicle step, as HTML prototypes first,
+  opened on a server. The Particle editor keeps its engine and preset library but gets the Render settings outliner
+  and inspector design. The Force Field editor is redone: the Force Field is the master component and Wind its
+  guest; the eos vector field is reused and extended to 100 m – 100 km; localized forces (attraction, repulsion and
+  more) sit under it; both editors use the same visualization.
+- **Source:** the two editors are in eos `arena/24b8f4ad-frontier` (`549c477`), not `arena/923866fc` (which holds the
+  Fracture, Light and Photometric editors only).
+- **Force Field editor** (`Experimental/ForceFieldEditor/`): outliner (Force Field → Wind → forces by contribution),
+  Map and Oblique views with range pills, minimap of the 100 km extent, timeline with trigger lanes, Log Stream, and
+  three inspector pages. Sixteen force types: the native `ForceSourceKind` flow set plus the eos Current, the eos
+  accelerate fields and the drag volume, in the eos Flow / Accelerate / Damp taxonomy with reach, falloff, time
+  windows and acts-on channels. The Wind is the native `PlanetaryWindProfile` opened with `Default.levelspace`'s
+  record. Proposed: four field cascades (2 m – 1 km cells, 256 m – 131 km), a mesoscale variation, `ForceSource`
+  records nested under `rec_force_field`.
+- **Field visualization** (`Experimental/ForceFieldVisualization/`): one renderer, Map / Oblique / Camera; the eos
+  colour stops and arrows; world-snapped power-of-two sampling with a level-of-detail filter; tracers, scale bar,
+  legend, cascade overlay, minimap.
+- **Particle editor** (`Experimental/ParticleEditor/`): the eos engine files unchanged (provenance and hashes in its
+  README), eos `frame()` ported with Frontier names, a new outliner, inspector and 52-preset library sheet. The field
+  overlay reads the GPU wind lattice back (73 728 B every 150 ms) and ports `fieldAccel`, so it shows what the
+  particles feel; the eos 3D lattice arrows are off by default.
+- **Shared controls:** `InspectorControls.js` gained refresher scopes, logarithmic m / km sliders, `TimeSeries`
+  units, vector, colour, select, text, chip, action, plot and dial rows; the editors' chrome moved into
+  `RenderSettingsInspector.css`. Render settings renders as before.
+- **Validated:** `ForceFieldValidation.mjs` 33 of 33 (the Wind matches the native step sample at 400 points within
+  1e-9 m/s; existing levelspace keys checked against `SceneWorld.cpp`); eos `CheckForceFields.mjs` 91 of 91;
+  `PrototypeCaptures.mjs` 11 of 11 on headless Chromium with SwiftShader WebGPU, including the overlay's lattice
+  copy equal to the engine's probe texel. Evidence: `Exhibits/ForceFieldEditor/`.
+- **Rename candidates for the C++ step:** the native `VortexColumn` and `SphericalImpulseShell` (barred words
+  *Vortex*, *Shell*) and the eos engine's `kind`, `system` and `emit` names.
+- **Limits:** browser prototypes, not the C++ editor; captured on SwiftShader, not in a Windows browser. The C++
+  integration follows the owner's review.
+- **Commits:** `1ef6ea8`, `06a58e0`, `02b9af3` and the commit with this entry.
+
 ## SolidArc source integration against e72d319
 
 | Scope | Status | Evidence / remaining work |

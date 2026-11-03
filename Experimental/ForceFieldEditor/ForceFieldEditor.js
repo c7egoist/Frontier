@@ -830,7 +830,7 @@
             C.Construct('div', 'hero-metrics', [Metric, C.Construct('div', 'metric-side', [Rate, Low])])]);
         Page.append(Card);
         const Series = C.TimeSeries(Card, { Samples: PeakSamples, Capacity: SampleCapacity, Target: () => SeriesTargets[Settings.Contribution][0], Height: 120,
-                                            Unit: () => V.ResolveUnit(Settings.Contribution, Settings.Quantity), TargetLabel: () => SeriesTargets[Settings.Contribution][1], Headroom: 1.25,
+                                            Unit: () => V.ResolveUnit(Settings.Contribution, Settings.Quantity), TargetLabel: () => SeriesTargets[Settings.Contribution][1], Headroom: 1.25, AxisDigits: 1,
                                             TimeLabels: ['−10 s', '−5 s', 'now'] });
         Card.append(C.Construct('div', 'hero-note', 'The peak of the selected quantity across the view at its level of detail. Zoom out and small forces fade into '
                                                     + 'their cells, as a coarse cascade averages them.'));
@@ -851,7 +851,8 @@
             else
             {
                 BudgetMark.className = 'mark live';
-                BudgetText.textContent = `${(V.Quantities[Settings.Quantity] || V.Quantities.Speed).Label} · ${Settings.ScaleMode === 'Automatic' ? 'auto scale' : 'fixed scale'}`;
+                const Shown = Settings.Contribution === 'Damp' ? 'Damping rate' : (V.Quantities[Settings.Quantity] || V.Quantities.Speed).Label;
+                BudgetText.textContent = `${Shown} · ${Settings.ScaleMode === 'Automatic' ? 'auto scale' : 'fixed scale'}`;
             }
         };
         LiveRefreshers.push(LiveRefresh);
@@ -1301,7 +1302,7 @@
                              Write: Enabled => { Scene.Visualization.Follow = Enabled ? Source.Token : null; AppendLog('VIEW', Enabled ? `Following ${Source.Name}` : 'Follow off', null, 'live', 'View.Follow'); } });
         Page.append(Grid);
         C.ActionRow(Page, [
-            { Label: 'Frame in view', Glyph: 'Crosshair', Act: () => FrameSource(Source) },
+            { Label: 'Frame in view', Glyph: 'Crosshair', Act: () => FitSourceInView(Source) },
             { Label: 'Duplicate', Glyph: 'Copy', Act: () => DuplicateSource(Source) },
             { Label: 'Remove', Glyph: 'Trash', Tone: 'danger', Act: () => RemoveSource(Source) }]);
         const ConstructTabs = ConstructSectionTabs(Page);
@@ -1314,7 +1315,7 @@
         ConstructTabs();
     }
 
-    function FrameSource(Source)
+    function FitSourceInView(Source)
     {
         const Entry = F.PrepareSource(Source, Scene.Wind, Clock.Time);
         const View = Visualization.View;

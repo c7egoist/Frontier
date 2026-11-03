@@ -33,6 +33,13 @@ python3 -m http.server 8080 --directory .   # from the repository root
 | `RenderSettingsInspector.js`  | The page: outliner, viewport, hero, the ten sections, levelspace record          |
 | `Fonts/`                      | DM Sans 300 / 400 / 500 (OFL)                                                    |
 
+The Force Field and Particle editor prototypes reuse this design and these controls (2026-11-03). Added for them,
+backward compatible: refresher scopes (`OpenScope`, `CloseScope`, `ReleaseScope`) so a rebuilt page releases its
+refreshers; logarithmic sliders with m / km readings; units and labels on `TimeSeries`; `SelectRow`, `TextRow`,
+`VectorRow`, `ColourRow`, `ChipToggles`, `ActionRow`, `StatGrid`, `ChipRow`, `CurvePlot`, `PolarDial`; force and
+particle glyphs; and, in the stylesheet, the editors' shared chrome (outliner nesting, library sheet, minimap).
+This page opens no scopes, so it behaves as before (`Exhibits/ForceFieldEditor/Images/RenderSettingsRegression.jpg`).
+
 ## What is real and what is estimated
 
 | Shown                    | Source                                                                                 |

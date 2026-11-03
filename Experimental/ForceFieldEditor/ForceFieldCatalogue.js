@@ -239,11 +239,11 @@ const ForceFieldCatalogue = (() =>
         return (Mixed ^ (Mixed >>> 16)) >>> 0;
     }
 
-    const GradientTable = new Float64Array(32);
+    const GradientDirections = new Float64Array(32);
     for (let Index = 0; Index < 16; ++Index)
     {
-        GradientTable[Index * 2] = Math.cos((Index + 0.5) / 16 * Math.PI * 2);
-        GradientTable[Index * 2 + 1] = Math.sin((Index + 0.5) / 16 * Math.PI * 2);
+        GradientDirections[Index * 2] = Math.cos((Index + 0.5) / 16 * Math.PI * 2);
+        GradientDirections[Index * 2 + 1] = Math.sin((Index + 0.5) / 16 * Math.PI * 2);
     }
 
     function NoiseGradient(U, V, Seed, Gradient)
@@ -254,8 +254,8 @@ const ForceFieldCatalogue = (() =>
         const SlopeX = 30 * X * X * (X * (X - 2) + 1), SlopeY = 30 * Y * Y * (Y * (Y - 2) + 1);
         const A = (Hash(ColumnIndex, RowIndex, Seed) & 15) * 2, B = (Hash(ColumnIndex + 1, RowIndex, Seed) & 15) * 2;
         const C = (Hash(ColumnIndex, RowIndex + 1, Seed) & 15) * 2, D = (Hash(ColumnIndex + 1, RowIndex + 1, Seed) & 15) * 2;
-        const AX = GradientTable[A], AY = GradientTable[A + 1], BX = GradientTable[B], BY = GradientTable[B + 1];
-        const CX = GradientTable[C], CY = GradientTable[C + 1], DX = GradientTable[D], DY = GradientTable[D + 1];
+        const AX = GradientDirections[A], AY = GradientDirections[A + 1], BX = GradientDirections[B], BY = GradientDirections[B + 1];
+        const CX = GradientDirections[C], CY = GradientDirections[C + 1], DX = GradientDirections[D], DY = GradientDirections[D + 1];
         const N00 = AX * X + AY * Y, N10 = BX * (X - 1) + BY * Y, N01 = CX * X + CY * (Y - 1), N11 = DX * (X - 1) + DY * (Y - 1);
         const Cross = N00 - N10 - N01 + N11;
         const Reading = N00 + FadeX * (N10 - N00) + FadeY * (N01 - N00) + FadeX * FadeY * Cross;
@@ -280,13 +280,13 @@ const ForceFieldCatalogue = (() =>
         let Bearing = Wind.Bearing + Wind.Veer * AltitudeKm;
         let SpeedGain = Math.max(0.15, 1 + Wind.Shear * Math.min(AltitudeKm, 12));
         const Drift = 0.35 * Wind.Speed * Time;
-        const BaseX = Math.sin(Wind.Bearing * Radian), BaseZ = -Math.cos(Wind.Bearing * Radian);
+        const HeadingX = Math.sin(Wind.Bearing * Radian), HeadingZ = -Math.cos(Wind.Bearing * Radian);
         if (Wind.MesoscaleStrength > 0 && Wind.MesoscaleScale > 0)
         {
             const Visible = Resolvable(Wind.MesoscaleScale * 2, CellSpan);
             if (Visible > 0)
             {
-                const U = (X - BaseX * Drift) / Wind.MesoscaleScale, V = (Z - BaseZ * Drift) / Wind.MesoscaleScale;
+                const U = (X - HeadingX * Drift) / Wind.MesoscaleScale, V = (Z - HeadingZ * Drift) / Wind.MesoscaleScale;
                 const SpeedShift = NoiseGradient(U, V, Wind.Seed + 11, NoiseGradientStore);
                 const TurnShift = NoiseGradient(U + 37.1, V - 19.7, Wind.Seed + 23, NoiseGradientStore);
                 SpeedGain *= 1 + Wind.MesoscaleStrength * SpeedShift * Visible;
@@ -307,7 +307,7 @@ const ForceFieldCatalogue = (() =>
             if (Visible > 0)
             {
                 const Scale = Math.max(4, Wind.TurbulenceScale);
-                const U = (X - BaseX * Drift) / Scale, V = (Z - BaseZ * Drift) / Scale;
+                const U = (X - HeadingX * Drift) / Scale, V = (Z - HeadingZ * Drift) / Scale;
                 const Gain = Wind.Turbulence * Wind.Speed * 0.45 * Visible;
                 NoiseGradient(U, V + Y / Scale * 0.37, Wind.Seed, NoiseGradientStore);
                 Out[0] += NoiseGradientStore[1] * Gain;
@@ -379,10 +379,13 @@ const ForceFieldCatalogue = (() =>
 
     // 📝 Reach share at a point: Everywhere 1; Sphere by 3D distance; Column by horizontal distance between the base and the
     //    top (+30 % taper); Box in the source's own frame turned to its bearing. Falloff shapes the edge (eos Falls).
-    function ResolveReach(Source, Centre, X, Y, Z)
+    function ResolveReach(Source, Centre, X, Y, Z, Ground)
     {
         if (Source.Reach === 'Everywhere') return 1;
-        const DeltaX = X - Centre[0], DeltaY = Y - Centre[1], DeltaZ = Z - Centre[2];
+        const DeltaX = X - Centre[0], DeltaZ = Z - Centre[2];
+        // 📝 A microburst's centre is its core altitude; its column stands on the ground and reaches 1.4 × that altitude.
+        const ColumnFoot = Source.Type === 'Microburst' ? (Ground ?? 0) : Centre[1];
+        const DeltaY = Y - ColumnFoot;
         if (Source.Reach === 'Sphere')
         {
             const Separation = Math.sqrt(DeltaX * DeltaX + DeltaY * DeltaY + DeltaZ * DeltaZ);
@@ -390,7 +393,7 @@ const ForceFieldCatalogue = (() =>
         }
         if (Source.Reach === 'Column')
         {
-            const Height = Math.max(1, Source.Height);
+            const Height = Math.max(1, Source.Type === 'Microburst' ? Math.max(Source.Height, (Centre[1] - ColumnFoot) * 1.4) : Source.Height);
             if (DeltaY < -15 || DeltaY > Height * 1.3) return 0;
             const Separation = Math.hypot(DeltaX, DeltaZ);
             if (Separation >= Source.Radius) return 0;
@@ -466,11 +469,11 @@ const ForceFieldCatalogue = (() =>
             const Separation = Math.hypot(DeltaX, DeltaZ), RelativeY = Y - Ground;
             const ColumnRadius = Math.max(5, Source.InnerRadius), Ring = Math.max(10, Source.RingRadius);
             if (RelativeY < 0 || RelativeY > Math.max(40, Centre[1] * 1.4)) return;
-            const DownCore = Math.exp(-(Separation * Separation) / (ColumnRadius * ColumnRadius)) * Smooth01(RelativeY / 35);
+            const DowndraftColumn = Math.exp(-(Separation * Separation) / (ColumnRadius * ColumnRadius)) * Smooth01(RelativeY / 35);
             const OutRing = (Separation / Ring) * Math.exp(-0.5 * Math.pow(Separation / Ring, 2)) * Math.exp(-RelativeY / Math.max(42, Ring * 0.28));
             const Inverse = Separation > 1e-4 ? 1 / Separation : 0;
             Out[0] += Envelope * Source.Strength * OutRing * DeltaX * Inverse;
-            Out[1] -= Envelope * Source.Downdraft * DownCore;
+            Out[1] -= Envelope * Source.Downdraft * DowndraftColumn;
             Out[2] += Envelope * Source.Strength * OutRing * DeltaZ * Inverse;
             return;
         }
@@ -483,12 +486,12 @@ const ForceFieldCatalogue = (() =>
             const PlumeRadius = Math.max(2, Source.InnerRadius * (1 + 0.45 * HeightShare));
             const ρ = Separation / PlumeRadius;
             if (ρ >= 3.5) return;
-            const CoreEnvelope = Envelope * Math.exp(-0.5 * ρ * ρ) * Smooth01(RelativeY / 10 + 0.15) * (1 - Smooth01((HeightShare - 1) / 0.35));
+            const ChimneyEnvelope = Envelope * Math.exp(-0.5 * ρ * ρ) * Smooth01(RelativeY / 10 + 0.15) * (1 - Smooth01((HeightShare - 1) / 0.35));
             const RadialMode = -Smooth01(0.35 - HeightShare) + 0.55 * Smooth01((HeightShare - 0.72) / 0.28);
             const Inverse = Separation > 1e-4 ? 1 / Separation : 0;
             const Radial = Envelope * Source.Inflow * RadialMode * (2 * ρ / (1 + ρ * ρ));
             Out[0] += DeltaX * Inverse * Radial;
-            Out[1] += Source.Strength * CoreEnvelope;
+            Out[1] += Source.Strength * ChimneyEnvelope;
             Out[2] += DeltaZ * Inverse * Radial;
             return;
         }
@@ -497,13 +500,13 @@ const ForceFieldCatalogue = (() =>
             const Turn = Source.Bearing * Radian, AxisX = Math.sin(Turn), AxisZ = -Math.cos(Turn);
             const RelativeX = X - Centre[0], RelativeY = Y - Centre[1], RelativeZ = Z - Centre[2];
             const Axial = RelativeX * AxisX + RelativeZ * AxisZ;
-            const Length = Math.max(2, Source.Length), BaseRadius = Math.max(0.5, Source.InnerRadius);
-            if (Axial < -0.2 * BaseRadius || Axial > 1.25 * Length) return;
+            const Length = Math.max(2, Source.Length), CorridorRadius = Math.max(0.5, Source.InnerRadius);
+            if (Axial < -0.2 * CorridorRadius || Axial > 1.25 * Length) return;
             const PerpendicularX = RelativeX - AxisX * Axial, PerpendicularZ = RelativeZ - AxisZ * Axial;
             const RadialSquared = PerpendicularX * PerpendicularX + RelativeY * RelativeY + PerpendicularZ * PerpendicularZ;
-            const JetRadius = BaseRadius * (1 + 0.35 * Math.max(0, Axial) / Length);
+            const JetRadius = CorridorRadius * (1 + 0.35 * Math.max(0, Axial) / Length);
             if (RadialSquared >= 9 * JetRadius * JetRadius) return;
-            const AxialEnvelope = Smooth01((Axial + 0.2 * BaseRadius) / (0.4 * BaseRadius)) * (1 - Smooth01((Axial - 0.85 * Length) / (0.4 * Length)));
+            const AxialEnvelope = Smooth01((Axial + 0.2 * CorridorRadius) / (0.4 * CorridorRadius)) * (1 - Smooth01((Axial - 0.85 * Length) / (0.4 * Length)));
             const Gain = Envelope * AxialEnvelope * Math.exp(-0.5 * RadialSquared / (JetRadius * JetRadius)) * Source.Strength;
             Out[0] += AxisX * Gain;
             Out[2] += AxisZ * Gain;
@@ -529,10 +532,10 @@ const ForceFieldCatalogue = (() =>
             const Thickness = Math.max(0.5, Source.Thickness);
             const DeltaX = X - Centre[0], DeltaY = Y - Centre[1], DeltaZ = Z - Centre[2];
             const Separation = Math.sqrt(DeltaX * DeltaX + DeltaY * DeltaY + DeltaZ * DeltaZ);
-            const ShellShare = (Separation - FrontRadius) / Thickness;
-            if (Math.abs(ShellShare) >= 3.2 || Separation < 1e-4) return;
+            const FrontShare = (Separation - FrontRadius) / Thickness;
+            if (Math.abs(FrontShare) >= 3.2 || Separation < 1e-4) return;
             const Attenuation = Math.pow(InitialRadius / Math.max(InitialRadius, FrontRadius), 0.65);
-            const Outward = Source.Strength * Envelope * Attenuation * Math.exp(-0.5 * ShellShare * ShellShare) / Separation;
+            const Outward = Source.Strength * Envelope * Attenuation * Math.exp(-0.5 * FrontShare * FrontShare) / Separation;
             Out[0] += DeltaX * Outward;
             Out[1] += DeltaY * Outward;
             Out[2] += DeltaZ * Outward;
@@ -652,7 +655,7 @@ const ForceFieldCatalogue = (() =>
         const { Source, Envelope, Age, Centre } = Entry;
         if (Entry.Contribution === 'Flow')
         {
-            const Share = Source.Reach === 'Everywhere' || Source.Type === 'GustFront' ? 1 : ResolveReach(Source, Centre, X, Y, Z);
+            const Share = Source.Reach === 'Everywhere' || Source.Type === 'GustFront' ? 1 : ResolveReach(Source, Centre, X, Y, Z, Wind.GroundHeight);
             if (Share <= 0) return false;
             if (Share >= 0.999) { EvaluateFlowSource(Source, Wind, X, Y, Z, Age, Envelope, Centre, Out); return true; }
             FlowScratch[0] = FlowScratch[1] = FlowScratch[2] = 0;
@@ -660,7 +663,7 @@ const ForceFieldCatalogue = (() =>
             Out[0] += FlowScratch[0] * Share; Out[1] += FlowScratch[1] * Share; Out[2] += FlowScratch[2] * Share;
             return true;
         }
-        const Share = ResolveReach(Source, Centre, X, Y, Z);
+        const Share = ResolveReach(Source, Centre, X, Y, Z, Wind.GroundHeight);
         if (Share <= 0) return false;
         if (Entry.Contribution === 'Accelerate') EvaluateAccelerateSource(Source, X, Y, Z, Envelope, Share, Centre, Out);
         else Out[0] += Source.Strength * Share * Envelope;

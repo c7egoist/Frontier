@@ -295,7 +295,7 @@ const InspectorControls = (() =>
             else if (Event.key === 'Home') { WriteQuantity(Binding.Minimum); Event.preventDefault(); }
             else if (Event.key === 'End') { WriteQuantity(Binding.Maximum); Event.preventDefault(); }
         });
-        const CommitInput = () =>
+        const ResolveInput = () =>
         {
             const Parsed = Binding.Parse ? Binding.Parse(Input.value, UnitLabel ? UnitLabel.textContent : '')
                                          : parseFloat(Input.value.replace(',', '.'));
@@ -304,7 +304,7 @@ const InspectorControls = (() =>
             Input.value = Text;
             if (UnitLabel) UnitLabel.textContent = Unit;
         };
-        Input.addEventListener('change', CommitInput);
+        Input.addEventListener('change', ResolveInput);
         Input.addEventListener('keydown', Event => { if (Event.key === 'Enter') Input.blur(); });
         new ResizeObserver(() => PlaceKnob(Share(Binding.Read()))).observe(Track);
 
@@ -1024,8 +1024,8 @@ const InspectorControls = (() =>
                 if (Curve.Fill)
                 {
                     const First = Curve.Points[0], Last = Curve.Points[Curve.Points.length - 1];
-                    const Base = AtY(Math.max(Y0, Math.min(Y1, 0)));
-                    Svg.append(ConstructSvg('path', { d: `${Path} L${AtX(Last[0]).toFixed(1)} ${Base} L${AtX(First[0]).toFixed(1)} ${Base} Z`, fill: Curve.Fill }));
+                    const BaselineY = AtY(Math.max(Y0, Math.min(Y1, 0)));
+                    Svg.append(ConstructSvg('path', { d: `${Path} L${AtX(Last[0]).toFixed(1)} ${BaselineY} L${AtX(First[0]).toFixed(1)} ${BaselineY} Z`, fill: Curve.Fill }));
                 }
                 Svg.append(ConstructSvg('path', { d: Path, fill: 'none', stroke: Curve.Stroke || '#dedede', 'stroke-width': Curve.Width || 1.4,
                                                   'stroke-linejoin': 'round', 'stroke-dasharray': Curve.Dashed ? '5 5' : '' }));
@@ -1088,10 +1088,10 @@ const InspectorControls = (() =>
             }
             const Back = [Centre - Math.sin(Turn) * Radius * 0.55, Centre + Math.cos(Turn) * Radius * 0.55];
             const Lateral = [Math.cos(Turn) * 7, Math.sin(Turn) * 7];
-            const HeadBase = [Centre + Math.sin(Turn) * (Radius - 22), Centre - Math.cos(Turn) * (Radius - 22)];
-            Svg.append(ConstructSvg('line', { x1: Back[0], y1: Back[1], x2: HeadBase[0], y2: HeadBase[1], stroke: '#dfe7f3', 'stroke-width': 2, 'stroke-linecap': 'round' }),
-                       ConstructSvg('path', { d: `M${Tip[0] - Math.sin(Turn) * 8} ${Tip[1] + Math.cos(Turn) * 8} L${HeadBase[0] + Lateral[0]} ${HeadBase[1] + Lateral[1]} `
-                                                + `L${HeadBase[0] - Lateral[0]} ${HeadBase[1] - Lateral[1]} Z`, fill: '#dfe7f3' }),
+            const ArrowNeck = [Centre + Math.sin(Turn) * (Radius - 22), Centre - Math.cos(Turn) * (Radius - 22)];
+            Svg.append(ConstructSvg('line', { x1: Back[0], y1: Back[1], x2: ArrowNeck[0], y2: ArrowNeck[1], stroke: '#dfe7f3', 'stroke-width': 2, 'stroke-linecap': 'round' }),
+                       ConstructSvg('path', { d: `M${Tip[0] - Math.sin(Turn) * 8} ${Tip[1] + Math.cos(Turn) * 8} L${ArrowNeck[0] + Lateral[0]} ${ArrowNeck[1] + Lateral[1]} `
+                                                + `L${ArrowNeck[0] - Lateral[0]} ${ArrowNeck[1] - Lateral[1]} Z`, fill: '#dfe7f3' }),
                        ConstructSvg('circle', { cx: Tip[0], cy: Tip[1], r: 7, fill: '#e8e8e8', stroke: '#0c0c0c', 'stroke-width': 2 }),
                        ConstructSvg('circle', { cx: Centre, cy: Centre, r: 3, fill: '#ffffff' }));
             const Reading = Specification.Resolve ? Specification.Resolve() : { Text: `${Bearing.toFixed(0)}°`, Caption: '' };
