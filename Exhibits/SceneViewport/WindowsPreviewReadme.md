@@ -52,13 +52,30 @@ colour and status icons. Render time is not a separate GPU timestamp. No workspa
 
 ## Outliner and settings
 
-Outliner shows 15 actual scene/environment entries. The Frontier brand/workspace banners and level badge are removed.
-Simulation Origin and unrendered scientific, fluid, fracture and particle examples are not in the default scene.
-Their reusable engine code remains; regression examples live in an exhibit fixture.
+The Outliner shows the 15 scene/environment entries, the one **Render settings** component and the proving ground's
+37 objects in eight groups (Course, Boundary, Cones, Hangar, Tunnel, Control tower, Smash alley, Lighting). The
+Frontier brand/workspace banners and level badge are removed. Simulation Origin and unrendered scientific, fluid,
+fracture and particle examples are not in the default scene. Their reusable engine code remains; regression examples
+live in an exhibit fixture.
 
-Required renderer settings remain persisted in the level. Open **Control Centre → Quick Controls → Render settings**
-to edit the renderer without listing its implementation details as scene objects. Save with **Ctrl+S** or **Save
-level**.
+Select **Render settings** in the Outliner (or open **Control Centre → Quick Controls → Render settings**) to edit the
+renderer. Its debug views include view 15, the analytic illumination. Save with **Ctrl+S** or **Save level**.
+
+## Scene objects
+
+- Select an object, for example **Boundary west** under Boundary. Its inspector has the heading with notes,
+  Transform, Quick controls, Modifiers, Material and Fracture. **F**, Orbit selected and Chase selected use it as the
+  camera's target.
+- **Transform:** drag a field to scrub or double-click to type (Alt for precision, Shift for speed). Every copy moves
+  with the object; the reset buttons return it to where the scene archive placed it.
+- **Modifiers:** a repeated set is one object with an Array modifier stack, as in Blender. **Add modifier → Generate →
+  Array** adds one. Each card folds, switches off in the viewport, moves up or down, or is removed. Count, relative
+  offset, constant offset, rotation step and pivot (each copy, or the object's origin for a ring) re-lay the copies
+  in the viewport.
+- **Quick controls:** Visible and Locked act now. Dynamic, Cast shadows, GI and Physics are saved with the level but
+  have no renderer or physics effect yet. Breakable objects carry Fracture settings and open the Fracture editor.
+- **Limits:** an Array shows at most as many copies as the scene archive holds for that object, and the inspector says
+  how many. Materials are shown, not edited. Objects cannot be added or deleted.
 
 ## Local media, wind and baking
 

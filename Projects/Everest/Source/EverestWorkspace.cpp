@@ -932,7 +932,7 @@ void EverestWorkspace::ConstructViewportBar(const ImVec2& Min,const ImVec2& Max,
     {
         const auto Subject=ResolveCameraSubject();
         ConfigureSceneCamera(Flight,Navigation,SceneCameraMode(Mode),Subject);
-        if ((Mode==0 || Mode==1) && !Subject.Available) AnnounceViewportNotice("Select a local volume, field region or celestial body to target");
+        if ((Mode==0 || Mode==1) && !Subject.Available) AnnounceViewportNotice("Select a scene object, local volume, field region or celestial body to target");
     }
     X+=std::min(210*Scale,(Max.x-Min.x)*.42f)+Gap;
     if (ViewportChromeControls::ConstructIconButton("##FrameSelection",{X,Min.y+(Height-Button)*.5f},Button,"Focus",false,true,"Frame selected (F)"))
