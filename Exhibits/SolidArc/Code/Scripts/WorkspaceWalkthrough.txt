@@ -138,6 +138,10 @@ expect camera-distance < 7.9
 capture 07Navigated
 
 # ⑧ orientation cube, view bar, projection, grid
+# The perspective cube hides its top face below about 14° of elevation (eye 4.05 × sin(pitch) under the face at 1);
+# at the 12° left by ⑦ the click would land on the Front face, so orbit back up first.
+drag Middle viewport 0.5 0.5 by 0 50 5
+expect camera-pitch ~ 0.6154797087
 click @CubeTop
 expect camera-pitch ~ 1.5707963268
 expect grid-plane == 0
