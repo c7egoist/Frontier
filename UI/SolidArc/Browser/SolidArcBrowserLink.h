@@ -48,8 +48,12 @@ bool LaunchSolidArcWorkspace(const std::filesystem::path& Workspace, const std::
 // Browser-side description of one document (geometry, residence key, summary, refusal).
 [[nodiscard]] BrowserNativeDocument DescribeSolidArcBrowserDocument(const std::filesystem::path& Path);
 
-// Installs QueryDocumentGeometry and LaunchWorkspaceDocument on Browser. QueryConfiguredThumbnail stays with the host,
-// which owns the preview renderer.
+// 📝 The browser's New dialog › SolidArc model: an empty document titled Title (empty: the file name), written by SolidArc's
+//    own codec so the workspace opens it like any saved model. False + Refusal when Path exists or cannot be written.
+bool CreateSolidArcBrowserDocument(const std::filesystem::path& Path, const std::string& Title, std::string& Refusal);
+
+// Installs QueryDocumentGeometry, CreateWorkspaceDocument and LaunchWorkspaceDocument on Browser. QueryConfiguredThumbnail
+// stays with the host, which owns the preview renderer.
 void ConnectSolidArcBrowser(ProjectBrowserPanel& Browser, SolidArcBrowserLinkSettings Settings);
 
 } // namespace Frontier::SolidArc

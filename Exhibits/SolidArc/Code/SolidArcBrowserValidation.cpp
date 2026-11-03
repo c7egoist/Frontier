@@ -389,11 +389,47 @@ int main(int Count, char** Arguments)
     const bool OpenedCondition = std::filesystem::exists(Opened) && Described.find("Bracket") != std::string::npos;
     Expect("The started workspace opened Bracket.solidarc", OpenedCondition ? Utf8(Opened) : "no workspace capture", OpenedCondition);
 
+    // ⑨ New dialog: the three choices, then New › SolidArc model creates, previews and hands over an empty model
+    const std::pair<Frontier::BrowserCreation, const char*> Choices[] = {
+        { Frontier::BrowserCreation::GameProject, "BrowserNewProject" },
+        { Frontier::BrowserCreation::SolidArcDocument, "BrowserNewModel" },
+        { Frontier::BrowserCreation::TextureLibrary, "BrowserNewLibrary" },
+    };
+    for (const auto& [Choice, Capture] : Choices)
+    {
+        Browser.ChooseCreation(Choice);
+        Browser.DebugShow("", 0, 0, false, 100, "details", "oled", false, true);
+        Frames(4, Capture);
+    }
+    Browser.ChooseCreation(Frontier::BrowserCreation::GameProject);
+    Browser.DebugShow("", 0, 0, false, 100, "details", "oled", false, false);
+    Frames(2, "");
+    std::error_code Cleared;
+    std::filesystem::remove(HandOff / "Workspace.png", Cleared);
+    std::filesystem::remove(HandOff / "Workspace.json", Cleared);
+    const std::filesystem::path Fresh = Exhibits / "New model.solidarc";
+    std::filesystem::remove(Fresh, Cleared);
+    const bool Created = Browser.CreateDocument(Frontier::BrowserCreation::SolidArcDocument, Exhibits / "New model", "");
+    Expect("New › SolidArc model writes an empty model and starts the workspace", Created ? Utf8(Fresh) : Browser.QueryDiagnostic(),
+           Created && std::filesystem::exists(Fresh));
+    const auto* FreshEntry = Browser.QueryEntry(Browser.QueryActiveToken());
+    Expect("The new model previews as the bare stage", FreshEntry ? FreshEntry->NativeSummary : "missing",
+           FreshEntry && FreshEntry->Geometry && FreshEntry->NativeRefusal.empty() && FreshEntry->NativeSummary.rfind("0 bodies", 0) == 0);
+    Frames(12, "BrowserNewModelReader");
+    const auto FreshWaited = std::chrono::steady_clock::now();
+    while (!std::filesystem::exists(Opened) && std::chrono::steady_clock::now() - FreshWaited < std::chrono::seconds(240))
+        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+    std::string FreshDescribed;
+    if (std::ifstream Json{ HandOff / "Workspace.json" }) FreshDescribed.assign(std::istreambuf_iterator<char>(Json), std::istreambuf_iterator<char>());
+    const bool FreshOpened = std::filesystem::exists(Opened) && FreshDescribed.find("New model") != std::string::npos;
+    Expect("The started workspace opened the new model", FreshOpened ? Utf8(Opened) : "no workspace capture", FreshOpened);
+
     std::string Unexpected;
     for (const auto& Failure : Failures) Unexpected += (Unexpected.empty() ? "" : "; ") + Failure;
     Expect("Preview renderer accepted every configuration", Failures.empty() ? "no refusals" : Unexpected, Failures.empty());
 
-    // ⑨ report
+    // ⑩ report
     int Failed = 0;
     std::ostringstream Report;
     Report << "| Expectation | Observed | Result |\n|-------------|----------|--------|\n";

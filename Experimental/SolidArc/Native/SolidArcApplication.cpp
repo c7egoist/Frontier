@@ -13,6 +13,7 @@
 #include "UI/SolidArc/Document/SolidArcSpecimen.h"
 #include "UI/SolidArc/Interface/SolidArcFrame.h"
 #include "UI/SolidArc/Interface/SolidArcInterface.h"
+#include "UI/SolidArc/Interface/SolidArcLaunch.h"
 #include "UI/SolidArc/Interface/SolidArcOptions.h"
 #include "UI/SolidArc/Viewport/SolidArcDevice.h"
 
@@ -215,19 +216,13 @@ int main(int Count, char** Arguments)
 {
     using Frontier::GeometryProcessing::DescribeUtf8Path;
     using Frontier::GeometryProcessing::ResolveUtf8Path;
-    const std::vector<std::string> Words = CollectArguments(Count, Arguments);
-    std::string OptionsPath = "SolidArcWorkspace.toml";
-    std::string OpenPath;
-    std::string CurvesPath;
-    bool        Specimen = false;
-    for (size_t Index = 1; Index < Words.size(); ++Index)
-    {
-        const std::string& Flag = Words[Index];
-        if (Flag == "--options" && Index + 1 < Words.size()) OptionsPath = Words[++Index];
-        else if (Flag == "--open" && Index + 1 < Words.size()) OpenPath = Words[++Index];
-        else if (Flag == "--curves" && Index + 1 < Words.size()) CurvesPath = Words[++Index];
-        else if (Flag == "--specimen") Specimen = true;
-    }
+    // 📝 `--open <document>` (the Frontier browser) and a bare document word (Windows "Open with", a file association, a drop
+    //    on the icon) both open the document; see SolidArcLaunch.h.
+    const Frontier::SolidArc::SolidArcLaunchRequest Launch = Frontier::SolidArc::ResolveSolidArcLaunch(CollectArguments(Count, Arguments));
+    const std::string OptionsPath = Launch.OptionsPath;
+    std::string       OpenPath    = Launch.OpenPath;
+    std::string       CurvesPath  = Launch.CurvesPath;
+    const bool        Specimen    = Launch.Specimen;
     // 📝 Paths given on the command line are fixed against the launch folder before the package folder is adopted.
     std::error_code AbsoluteFailure;
     if (!OpenPath.empty()) OpenPath = DescribeUtf8Path(std::filesystem::absolute(ResolveUtf8Path(OpenPath), AbsoluteFailure));
@@ -336,6 +331,13 @@ int main(int Count, char** Arguments)
             RefreshSolidArcScene(State, false);
             FitSolidArcCamera(State.Camera, State.Scene);
             State.DocumentPath = OpenPath;
+            State.Status       = "Opened " + OpenPath;
+        }
+        else
+        {
+            // 📝 A refused document must not look like an empty one: the status line and the journal say why.
+            State.Status = "Open refused: " + File.Refusal;
+            State.Journal.push_back(State.Status);
         }
     }
 

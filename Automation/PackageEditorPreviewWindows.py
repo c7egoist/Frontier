@@ -50,6 +50,20 @@ def LocateSolidArcExecutable(Executable, Requested=None):
     return Candidate
 
 
+def LocateTextureExecutable(Executable, Requested=None):
+    # 📝 The browser's New dialog › Texture library starts TextureWorkspace.exe beside Frontier.exe (target TextureStudio).
+    Payload = Executable.read_bytes()
+    Required = Requested is not None or any(Marker in Payload for Marker in
+        (b'TextureWorkspace.exe', 'TextureWorkspace.exe'.encode('utf-16-le')))
+    if not Required:
+        return None
+    Candidate = Requested.resolve() if Requested is not None else Executable.with_name('TextureWorkspace.exe')
+    if not Candidate.is_file():
+        raise RuntimeError('Frontier starts TextureWorkspace.exe from its New dialog; build the TextureStudio target beside it')
+    VerifyExecutable(Candidate)
+    return Candidate
+
+
 def VerifySpirv(Binary):
     Payload = Binary.read_bytes() if Binary.is_file() else b''
     if len(Payload) < 20 or len(Payload) % 4 or struct.unpack_from('<I', Payload)[0] != 0x07230203:
@@ -87,14 +101,17 @@ def Main():
     Parser = argparse.ArgumentParser()
     Parser.add_argument('--executable', type=Path, required=True, help='the built Frontier.exe')
     Parser.add_argument('--solidarc-executable', type=Path, help='override the CAD executable beside a SolidArc-enabled Frontier')
+    Parser.add_argument('--texture-executable', type=Path, help='override TextureWorkspace.exe beside Frontier.exe')
     Parser.add_argument('--toolchain', required=True, help='e.g. "Zig 0.13.0 x86_64-windows-gnu (Automation/WindowsToolchain.cmake)"')
     Parser.add_argument('--output', type=Path, default=RepositoryRoot / 'Binaries/FrontierSceneViewport-Windows-x64.zip')
     Parser.add_argument('--omit-material-archives', action='store_true',
-                        help='leave out the Texture Studio material archives (~180 MiB); the Scene Viewport does not read them')
+                        help='leave out the Texture Studio material archives (~96 MiB); the Scene Viewport does not read them '
+                             'and TextureWorkspace then starts with an empty library')
     Arguments = Parser.parse_args()
     Executable = Arguments.executable.resolve()
     VerifyExecutable(Executable)
     SolidArcExecutable = LocateSolidArcExecutable(Executable, Arguments.solidarc_executable)
+    TextureExecutable = LocateTextureExecutable(Executable, Arguments.texture_executable)
     BuildContent = Executable.parent / 'EngineContent'
     StagedProject = RepositoryRoot / 'Projects/Everest/Content'
     for Required in [BuildContent / 'FontArchives/FontCatalogue.json', StagedProject / 'EnvironmentArchives/ProvingGround/ProvingGround.facetspace',
@@ -113,6 +130,8 @@ def Main():
             (Installation / 'Samples').mkdir()
             shutil.copy2(RepositoryRoot / 'Experimental/VehicleSurfacing/Samples/SyntheticBonnet.toml',
                          Installation / 'Samples/SyntheticBonnet.toml')
+        if TextureExecutable is not None:
+            shutil.copy2(TextureExecutable, Installation / 'TextureWorkspace.exe')
         # 📝 The EngineContent the build placed beside the executable: stored archives replaced by the sets it compiled.
         Omitted = shutil.ignore_patterns('MaterialArchives') if Arguments.omit_material_archives else None
         shutil.copytree(BuildContent, Installation / 'EngineContent', ignore=Omitted)
@@ -154,6 +173,9 @@ def Main():
             'signed': False, 'antivirus_scanned': False, 'windows_runtime_verified': False,
             'solidarc': {'included': SolidArcExecutable is not None,
                          'executable_sha256': Digest(SolidArcExecutable) if SolidArcExecutable is not None else None},
+            'texture_workspace': {'included': TextureExecutable is not None,
+                                  'executable_sha256': Digest(TextureExecutable) if TextureExecutable is not None else None,
+                                  'material_presets': not Arguments.omit_material_archives},
             'scene_viewport': 'Project Everest > Scene Viewport: ported VehicleHMI ReSTIR GI + PlanetaryAtmosphere environment',
             'omitted': ['EngineContent/MaterialArchives', 'Projects/Everest/Content/MaterialArchives'] if Arguments.omit_material_archives else [],
             'shader_sets': ShaderCounts, 'startup_files_verified': StartupFiles + StartupFolders,

@@ -15,7 +15,12 @@
 
 ## 💡 Start
 
-- Double-click `SolidArcWorkspace.exe`, or open a document: `SolidArcWorkspace.exe --open "C:\Parts\Bracket.solidarc"`.
+- Double-click `SolidArcWorkspace.exe`, or open a document: `SolidArcWorkspace.exe "C:\Parts\Bracket.solidarc"`
+  (`--open` before the path works too).
+- To open `.solidarc` files with a double-click, choose **Open with → Look for another app on this PC**, pick
+  `SolidArcWorkspace.exe` and tick **Always use this app**. Windows passes the file as a bare path, which opens it.
+- From Frontier: **Project browser → New → SolidArc model** creates an empty model and opens it here; **Open from
+  disk** lists `.solidarc` files, and **Open in SolidArc** starts the workspace with the chosen one.
 - `--specimen` starts with the fillet / chamfer specimen; `--options <file>` uses another options file.
 - Navigation and commands follow Plasticity (orbit, pan and zoom on the mouse; `B` fillet, `E` extrude, `1`–`5` modes, `Alt+Z` x-ray).
 - On a curved face, a sketch lies on the exact tangent plane under the pointer. `E` → Union starts the extrude slightly inside the face (the Inspector shows how far), so the joined body closes and its junction edge takes a chamfer.

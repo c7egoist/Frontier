@@ -42,9 +42,18 @@ constexpr std::array<float, 5>     BodySurfaces    = { 0.0f, 2.0f, 4.0f, 1.0f, 3
 std::vector<float> ConvertSolidArcSceneToBrowserFrame(const SolidArcScene& Scene)
 {
     std::vector<float> Vertices;
+
+    // ① reference floor + grid first (surfaces 6 / 5: the contour generator skips them, as for the fixture); an empty model
+    //    (a new document from the browser's New dialog) is just this stage
+    BrowserPreviewDetail::PushBox(Vertices, { 0, -.06, 0 }, { 16, .08, 16 }, 6);
+    for (int Line = -8; Line <= 8; ++Line)
+    {
+        BrowserPreviewDetail::PushBox(Vertices, { double(Line), 0, 0 }, { .012, .004, 16 }, 5);
+        BrowserPreviewDetail::PushBox(Vertices, { 0, 0, double(Line) }, { 16, .004, .012 }, 5);
+    }
     if (Scene.Corners.empty()) return Vertices;
 
-    // ① bounds in the browser axes (x, z, −y)
+    // ② bounds in the browser axes (x, z, −y)
     std::array<double, 3> Low  = { 1e300, 1e300, 1e300 };
     std::array<double, 3> High = { -1e300, -1e300, -1e300 };
     for (const SolidArcSceneCorner& Corner : Scene.Corners)
@@ -60,14 +69,6 @@ std::vector<float> ConvertSolidArcSceneToBrowserFrame(const SolidArcScene& Scene
     const double Tall  = std::max(High[1] - Low[1], 1e-9);
     const double Scale = std::min(FootprintWidth / Wide, FootprintHeight / Tall);                                  // [-] - Uniform
     const std::array<double, 3> Shift = { -(Low[0] + High[0]) * 0.5, -Low[1], -(Low[2] + High[2]) * 0.5 };
-
-    // ② reference floor + grid first (surfaces 6 / 5: the contour generator skips them, as for the fixture)
-    BrowserPreviewDetail::PushBox(Vertices, { 0, -.06, 0 }, { 16, .08, 16 }, 6);
-    for (int Line = -8; Line <= 8; ++Line)
-    {
-        BrowserPreviewDetail::PushBox(Vertices, { double(Line), 0, 0 }, { .012, .004, 16 }, 5);
-        BrowserPreviewDetail::PushBox(Vertices, { 0, 0, double(Line) }, { 16, .004, .012 }, 5);
-    }
 
     // ③ document triangles: position, normal, surface, separation (none)
     Vertices.reserve(Vertices.size() + Scene.Corners.size() * 10);
@@ -126,11 +127,7 @@ SolidArcBrowserPreview ComposeSolidArcBrowserPreview(const std::filesystem::path
         Preview.Refusal = Scene.Refusal;
         return Preview;
     }
-    if (Scene.Corners.empty())
-    {
-        Preview.Refusal = "The document holds no solid bodies.";
-        return Preview;
-    }
+    // 📝 No bodies is not a refusal: a model created by the browser's New dialog starts empty and previews as the bare stage.
     Preview.Title         = File.Title;
     Preview.StepCount     = File.Tree.Steps.size();
     Preview.BodyCount     = Scene.Bodies.size();

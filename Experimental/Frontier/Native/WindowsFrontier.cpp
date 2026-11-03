@@ -67,7 +67,13 @@ std::vector<std::filesystem::path> ChooseImportFiles(GLFWwindow *Window)
     OPENFILENAMEW Selection{};
     Selection.lStructSize  = sizeof(Selection);
     Selection.hwndOwner    = glfwGetWin32Window(Window);
-    Selection.lpstrFilter  = L"Supported files (*.projectspace;*.png;*.jpg;*.jpeg;*.webp;*.md)\0*.projectspace;*.png;*.jpg;*.jpeg;*.webp;*.md\0\0";
+    // 📝 Every format the browser attaches (ClassifyBrowserImport); .solidarc models were missing, so they could not be picked.
+    Selection.lpstrFilter  = L"Supported files (*.projectspace;*.solidarc;*.png;*.jpg;*.jpeg;*.webp;*.md)\0"
+                             L"*.projectspace;*.solidarc;*.png;*.jpg;*.jpeg;*.webp;*.md\0"
+                             L"Game projects (*.projectspace)\0*.projectspace\0"
+                             L"SolidArc models (*.solidarc)\0*.solidarc\0"
+                             L"Images and Markdown (*.png;*.jpg;*.jpeg;*.webp;*.md)\0*.png;*.jpg;*.jpeg;*.webp;*.md\0"
+                             L"All files (*.*)\0*.*\0\0";
     Selection.lpstrFile    = Filenames.data();
     Selection.nMaxFile     = DWORD(Filenames.size());
     Selection.Flags        = OFN_NOCHANGEDIR | OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST | OFN_ALLOWMULTISELECT |
@@ -103,6 +109,86 @@ std::filesystem::path ChooseImportFolder(GLFWwindow *Window)
         if (Resolved) return std::filesystem::path(Folder);
     }
     return std::filesystem::path{};
+}
+
+// 📝 New dialog › Browse: a .solidarc to create (no overwrite prompt: the browser never replaces a file) or a library folder.
+std::filesystem::path ChooseCreationPath(GLFWwindow *Window, Frontier::BrowserCreation Creation)
+{
+    if (Creation == Frontier::BrowserCreation::GameProject) return ChooseProjectPath(Window, true);
+    if (Creation == Frontier::BrowserCreation::SolidArcDocument)
+    {
+        wchar_t       Filename[32768] = {};
+        OPENFILENAMEW Selection{};
+        Selection.lStructSize = sizeof(Selection);
+        Selection.hwndOwner   = glfwGetWin32Window(Window);
+        Selection.lpstrFilter = L"SolidArc models (*.solidarc)\0*.solidarc\0\0";
+        Selection.lpstrFile   = Filename;
+        Selection.nMaxFile    = 32768;
+        Selection.lpstrDefExt = L"solidarc";
+        Selection.lpstrTitle  = L"Save the new SolidArc model as";
+        Selection.Flags       = OFN_NOCHANGEDIR | OFN_PATHMUSTEXIST;
+        return GetSaveFileNameW(&Selection) != FALSE ? std::filesystem::path(Filename) : std::filesystem::path{};
+    }
+    wchar_t Display[MAX_PATH] = {};
+    BROWSEINFOW Selection{};
+    Selection.hwndOwner = glfwGetWin32Window(Window);
+    Selection.pszDisplayName = Display;
+    Selection.lpszTitle = L"Choose or create the texture library folder";
+    Selection.ulFlags = BIF_NEWDIALOGSTYLE | BIF_RETURNONLYFSDIRS; // 📝 "Make New Folder" stays available.
+    if (const PIDLIST_ABSOLUTE Chosen = SHBrowseForFolderW(&Selection))
+    {
+        wchar_t Folder[MAX_PATH] = {};
+        const bool Resolved = SHGetPathFromIDListW(Chosen, Folder) != FALSE;
+        CoTaskMemFree(Chosen);
+        if (Resolved) return std::filesystem::path(Folder);
+    }
+    return std::filesystem::path{};
+}
+
+// 📝 CommandLineToArgvW quoting: backslashes double only before a quote, so "C:\" survives as one argument.
+std::wstring QuoteCommandWord(const std::wstring &Word)
+{
+    std::wstring Quoted = L"\"";
+    size_t Backslashes = 0;
+    for (const wchar_t Letter : Word)
+    {
+        if (Letter == L'\\') { ++Backslashes; continue; }
+        Quoted.append(Letter == L'"' ? Backslashes * 2 + 1 : Backslashes, L'\\');
+        Backslashes = 0;
+        Quoted.push_back(Letter);
+    }
+    Quoted.append(Backslashes * 2, L'\\');
+    return Quoted + L"\"";
+}
+
+// 📝 TextureWorkspace.exe beside Frontier.exe, started on one material library folder (`--library <folder>`). The working
+//    directory is inherited, so it resolves EngineContent exactly like the browser.
+bool LaunchTextureWorkspace(const std::filesystem::path &Folder, std::string &Refusal)
+{
+    wchar_t Executable[MAX_PATH] = {};
+    const DWORD Length = GetModuleFileNameW(nullptr, Executable, MAX_PATH);
+    const std::filesystem::path Workspace = Length && Length < MAX_PATH
+        ? std::filesystem::path(Executable).parent_path() / L"TextureWorkspace.exe" : std::filesystem::path{};
+    std::error_code Failure;
+    if (Workspace.empty() || !std::filesystem::is_regular_file(Workspace, Failure))
+    {
+        Refusal = "TextureWorkspace.exe was not found next to Frontier.exe.";
+        return false;
+    }
+    std::wstring CommandLine = QuoteCommandWord(Workspace.wstring()) + L" --library " + QuoteCommandWord(Folder.wstring());
+    STARTUPINFOW Startup{};
+    PROCESS_INFORMATION Started{};
+    Startup.cb = sizeof(Startup);
+    if (!CreateProcessW(Workspace.c_str(), CommandLine.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &Startup,
+            &Started))
+    {
+        Refusal = "TextureWorkspace.exe could not be started (Windows error " + std::to_string(GetLastError()) + ").";
+        return false;
+    }
+    CloseHandle(Started.hThread);
+    CloseHandle(Started.hProcess);
+    Frontier::DiagnosticJournal::Append("TextureWorkspace", "library=" + Frontier::DiagnosticJournal::EncodePath(Folder));
+    return true;
 }
 
 // 📝 `Frontier.exe <project>.projectspace` (or a project dropped on Frontier.exe) opens that project instead of the browser.
@@ -177,6 +263,21 @@ int main()
     std::filesystem::path Preferences;
     bool ReturnRequested = false;
     std::filesystem::path LaunchProject = ResolveLaunchProject();
+#ifdef FRONTIER_SOLIDARC_ENABLED
+    // 📝 Open by file type: a .solidarc given to Frontier.exe (a drop on its icon, or Frontier picked in "Open with") belongs to
+    //    SolidArc, so it is handed to SolidArcWorkspace.exe and Frontier does not open a window of its own.
+    if (Frontier::QueryBrowserSolidArcExtension(Frontier::DiagnosticJournal::EncodePath(LaunchProject.extension())))
+    {
+        std::string Refusal;
+        if (Frontier::SolidArc::LaunchSolidArcWorkspace(Frontier::SolidArc::LocateSolidArcWorkspace(), {}, LaunchProject, Refusal))
+            return 0;
+        Frontier::DiagnosticJournal::Append("SolidArcRefused", Refusal);
+        std::wstring Message(size_t(MultiByteToWideChar(CP_UTF8, 0, Refusal.data(), int(Refusal.size()), nullptr, 0)), L'\0');
+        MultiByteToWideChar(CP_UTF8, 0, Refusal.data(), int(Refusal.size()), Message.data(), int(Message.size()));
+        MessageBoxW(nullptr, Message.c_str(), L"Frontier", MB_OK | MB_ICONERROR);
+        return 1;
+    }
+#endif
     Frontier::ApplicationWindowCallbacks Callbacks;
     Callbacks.Title = "Frontier - Project Browser [" FRONTIER_BUILD_COMMIT "]";
     Callbacks.SceneRendering = true;
@@ -194,6 +295,8 @@ int main()
         PreviewCatalogue = Frontier::ConstructBrowserCatalogue();
         Browser->PickImportFiles = [&]() { return ChooseImportFiles(Window); };
         Browser->PickImportFolder = [&]() { return ChooseImportFolder(Window); };
+        Browser->PickCreationPath = [&](Frontier::BrowserCreation Creation) { return ChooseCreationPath(Window, Creation); };
+        Browser->LaunchTextureWorkspace = LaunchTextureWorkspace;
         std::filesystem::path EverestProjectPath = "Projects/Everest/Everest.projectspace";
         if (!std::filesystem::exists(EverestProjectPath))
         {

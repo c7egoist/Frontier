@@ -676,6 +676,92 @@ bool ProjectBrowserPanel::CreateProject(const std::filesystem::path &Destination
     return SelectProject(Destination);
 }
 
+bool ProjectBrowserPanel::CreateDocument(
+    BrowserCreation Creation, const std::filesystem::path &Destination, const std::string &Name)
+{
+    namespace fs = std::filesystem;
+    const auto Readable = [](const fs::path &Path)
+    {
+        const std::u8string Raw = Path.u8string();
+        return std::string(Raw.begin(), Raw.end());
+    };
+    // 📝 Names come from a text field; surrounding blanks are not part of a title, and an empty name takes the file name.
+    const size_t First = Name.find_first_not_of(" \t\r\n"), Last = Name.find_last_not_of(" \t\r\n");
+    std::string Title = First == std::string::npos ? std::string{} : Name.substr(First, Last - First + 1);
+    if (Title.empty()) Title = Readable(Destination.stem());
+    std::error_code Status;
+    if (Creation == BrowserCreation::GameProject)
+    {
+        if (!CreateProject(Destination, Title)) return false;
+        (void)AttachPaths({SelectedPath}, true);
+        // 📝 The new project opens in the editor straight away: the host consumes the launch path on the next frame.
+        return RequestOpenProject();
+    }
+    if (Destination.empty())
+    {
+        Diagnostic = Creation == BrowserCreation::SolidArcDocument ? "Choose where to save the new SolidArc model."
+                                                                   : "Choose a folder for the texture library.";
+        return false;
+    }
+    if (Creation == BrowserCreation::SolidArcDocument)
+    {
+        fs::path Placed = Destination;
+        if (!QueryBrowserSolidArcExtension(Readable(Placed.extension()))) Placed += ".solidarc";
+        if (!CreateWorkspaceDocument || !LaunchWorkspaceDocument)
+        {
+            Diagnostic = "SolidArc is not connected to this browser.";
+            return false;
+        }
+        if (fs::exists(Placed, Status))
+        {
+            Diagnostic = "A file already exists at " + Readable(Placed) + "; choose another name.";
+            return false;
+        }
+        std::string Refusal;
+        if (!CreateWorkspaceDocument(Placed, Title, Refusal))
+        {
+            Diagnostic = Refusal.empty() ? "The SolidArc model could not be created." : Refusal;
+            return false;
+        }
+        (void)AttachPaths({Placed}, true);
+        // 💡 The model exists from here on: a workspace that does not start is reported, not treated as a failed creation.
+        Refusal.clear();
+        const bool Started = LaunchWorkspaceDocument(Placed, Refusal);
+        Diagnostic.clear();
+        Notify(Started ? "Created " + Readable(Placed.filename()) + " and opened it in SolidArc."
+                       : "Created " + Readable(Placed.filename()) + ", but SolidArc did not start: " +
+                             (Refusal.empty() ? std::string("no reason was given.") : Refusal));
+        return true;
+    }
+    // 📝 Texture library: the folder (created when missing) opens in the Texture Workspace.
+    const fs::path Folder = Destination.has_filename() ? Destination : Destination.parent_path();
+    if (!LaunchTextureWorkspace)
+    {
+        Diagnostic = "The Texture Workspace is not connected to this browser.";
+        return false;
+    }
+    if (fs::exists(Folder, Status) && !fs::is_directory(Folder, Status))
+    {
+        Diagnostic = "A file already exists at " + Readable(Folder) + "; choose a folder.";
+        return false;
+    }
+    fs::create_directories(Folder, Status);
+    if (Status)
+    {
+        Diagnostic = "The library folder could not be created: " + Status.message();
+        return false;
+    }
+    std::string Refusal;
+    if (!LaunchTextureWorkspace(Folder, Refusal))
+    {
+        Diagnostic = Refusal.empty() ? "The Texture Workspace did not start." : Refusal;
+        return false;
+    }
+    Diagnostic.clear();
+    Notify("Opened the texture library " + Readable(Folder.filename()) + " in the Texture Workspace.");
+    return true;
+}
+
 bool ProjectBrowserPanel::RequestOpenProject()
 {
     if (SelectedPath.empty())
@@ -1399,7 +1485,7 @@ void ProjectBrowserPanel::ConstructLibrary(float Width)
                 RowY += CardH + Gap;
             }
         };
-        // ➕ Native creation card (the prototype has no creation flow; the native browser keeps Blank Project).
+        // ➕ Native creation card (the prototype has no creation flow): the New dialog, whose game project is Blank Project.
         PlaceCard(
             [&](ImVec2 Min)
             {
@@ -1418,18 +1504,21 @@ void ProjectBrowserPanel::ConstructLibrary(float Width)
                     S.Faint);
                 const float TX = Top.x + 16 * Scale;
                 float TY = Top.y + PreviewH + 15 * Scale;
-                DrawBrowserText(Frame.Draw, Font, 13 * Scale, ImVec2(TX, TY), S.Text, "Blank Project");
-                DrawBrowserText(Frame.Draw, Font, 9 * Scale,
-                    ImVec2(TX + MeasureBrowserText(Font, 13 * Scale, "Blank Project").x + 8 * Scale, TY + 3 * Scale),
-                    S.Faint, ".projectspace");
+                // 📝 One entry for every application: the New dialog chooses game project, SolidArc model or library.
+                const float TagX = TX + MeasureBrowserText(Font, 13 * Scale, "New").x + 8 * Scale;
+                DrawBrowserText(Frame.Draw, Font, 13 * Scale, ImVec2(TX, TY), S.Text, "New");
+                DrawBrowserText(Frame.Draw, Font, 9 * Scale, ImVec2(TagX, TY + 3 * Scale), S.Faint,
+                    EllipsizeBrowserText(Font, 9 * Scale, ".projectspace · .solidarc · library",
+                        Top.x + CardW - 16 * Scale - TagX));
                 TY += 17 * Scale + 5 * Scale;
                 DrawBrowserText(Frame.Draw, Font, 10 * Scale, ImVec2(TX, TY), S.Muted,
-                    "Start from an empty project container");
+                    EllipsizeBrowserText(Font, 10 * Scale, "Game project, SolidArc model or texture library",
+                        CardW - 32 * Scale));
                 TY += 12 * Scale + 14 * Scale;
                 Frame.Draw->AddLine(ImVec2(TX, TY), ImVec2(Top.x + CardW - 16 * Scale, TY), S.Line,
                     std::max(1.f, Scale));
                 TY += 10 * Scale;
-                DrawBrowserText(Frame.Draw, Font, 9 * Scale, ImVec2(TX, TY), S.Faint, "Preset");
+                DrawBrowserText(Frame.Draw, Font, 9 * Scale, ImVec2(TX, TY), S.Faint, "Create");
                 if (Clicked) Creating = true;
             });
         for (const BrowserCatalogueEntry *Entry : Listed)
@@ -2692,6 +2781,8 @@ void ProjectBrowserPanel::ConstructLaunchDialog(float Width)
             ImGui::CloseCurrentPopup();
         }
         Y += 37 * Scale + Pad;
+        // 📝 The extent item starts at the dialog origin: placed after the last button, it doubled the dialog's height.
+        ImGui::SetCursorScreenPos(Origin);
         ImGui::Dummy(ImVec2(DialogW, Y - Origin.y));
         if (DrawBrowserIconButton("close-dialog", ImVec2(Origin.x + DialogW - 16 * Scale - 30 * Scale,
                                                      Origin.y + 16 * Scale),
@@ -2720,9 +2811,26 @@ void ProjectBrowserPanel::ConstructCreationModal()
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
     ImGui::PushStyleColor(ImGuiCol_PopupBg, S.Panel);
     ImGui::PushStyleColor(ImGuiCol_Border, S.Line);
-    const float DialogW = std::min(440 * Scale, ImGui::GetMainViewport()->Size.x - 32 * Scale);
+    const float DialogW = std::min(460 * Scale, ImGui::GetMainViewport()->Size.x - 32 * Scale);
     ImGui::SetNextWindowSize(ImVec2(DialogW, 0));
     ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    // 📝 One dialog, three applications: what is created decides where it opens.
+    struct CreationFace
+    {
+        BrowserCreation Choice;
+        const char *Label, *Title, *Destination, *Hint, *Action, *Note;
+    };
+    static constexpr CreationFace Faces[] = {
+        {BrowserCreation::GameProject, "Game project", "New game project", "Destination .projectspace",
+            "Choose a destination…", "Create project", "Opens in the Frontier editor (Game Engine)."},
+        {BrowserCreation::SolidArcDocument, "SolidArc model", "New SolidArc model", "Destination .solidarc",
+            "Choose where to save the model…", "Create model", "An empty model that opens in SolidArc."},
+        {BrowserCreation::TextureLibrary, "Texture library", "New texture library", "Library folder",
+            "Choose or create a folder…", "Open library",
+            "The folder is created when missing and opens in the Texture Workspace."},
+    };
+    const char *const ChoiceIds[] = {"create-choice-project", "create-choice-model", "create-choice-library"};
+    const CreationFace &Face = Faces[size_t(CreationChoice)];
     bool Open = true;
     if (ImGui::BeginPopupModal("##create", &Open,
             ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_AlwaysAutoResize))
@@ -2734,26 +2842,73 @@ void ProjectBrowserPanel::ConstructCreationModal()
         const float Pad = 30 * Scale;
         float Y = Origin.y + Pad;
         const float InnerW = DialogW - Pad * 2;
-        DrawBrowserText(Draw, Font, 20 * Scale, ImVec2(Origin.x + Pad, Y), S.Text, "New project");
+        DrawBrowserText(Draw, Font, 20 * Scale, ImVec2(Origin.x + Pad, Y), S.Text, Face.Title);
         Y += 20 * Scale + 18 * Scale;
-        DrawBrowserText(Draw, Font, 9 * Scale, ImVec2(Origin.x + Pad, Y), S.Muted, "Name");
-        Y += 9 * Scale + 8 * Scale;
+        // 📝 Segmented choice: Game project · SolidArc model · Texture library.
+        const float SegmentH = 32 * Scale, SegmentW = InnerW / 3;
+        Draw->AddRectFilled(ImVec2(Origin.x + Pad, Y), ImVec2(Origin.x + Pad + InnerW, Y + SegmentH), S.Control,
+            SegmentH / 2);
+        Draw->AddRect(ImVec2(Origin.x + Pad, Y), ImVec2(Origin.x + Pad + InnerW, Y + SegmentH), S.Line, SegmentH / 2, 0,
+            std::max(1.f, Scale));
+        for (size_t Index = 0; Index < std::size(Faces); ++Index)
+        {
+            const ImVec2 Min(Origin.x + Pad + SegmentW * float(Index), Y);
+            const bool Clicked = PlaceBrowserHit(Min, ImVec2(SegmentW, SegmentH), ChoiceIds[Index]);
+            const bool Hovered = ImGui::IsItemHovered();
+            const bool Chosen = Faces[Index].Choice == CreationChoice;
+            const float Inset = 3 * Scale;
+            if (Chosen || Hovered)
+                Draw->AddRectFilled(ImVec2(Min.x + Inset, Min.y + Inset),
+                    ImVec2(Min.x + SegmentW - Inset, Min.y + SegmentH - Inset), Chosen ? S.Selected : S.Control,
+                    (SegmentH - Inset * 2) / 2);
+            if (Chosen)
+                Draw->AddRect(ImVec2(Min.x + Inset, Min.y + Inset),
+                    ImVec2(Min.x + SegmentW - Inset, Min.y + SegmentH - Inset), S.Line, (SegmentH - Inset * 2) / 2, 0,
+                    std::max(1.f, Scale));
+            const std::string Label = EllipsizeBrowserText(Font, 11 * Scale, Faces[Index].Label, SegmentW - 12 * Scale);
+            const ImVec2 Extent = MeasureBrowserText(Font, 11 * Scale, Label);
+            DrawBrowserText(Draw, Font, 11 * Scale,
+                ImVec2(Min.x + (SegmentW - Extent.x) / 2, Min.y + (SegmentH - 11 * Scale) / 2),
+                Chosen || Hovered ? S.Text : S.Muted, Label);
+            if (Clicked && !Chosen)
+            {
+                // 📝 A typed destination follows the choice: .projectspace ↔ .solidarc, no extension for a folder.
+                std::filesystem::path Typed = DecodeContentPath(DestinationText.data());
+                if (!Typed.empty() && Typed.has_filename())
+                {
+                    const BrowserCreation Next = Faces[Index].Choice;
+                    Typed.replace_extension(Next == BrowserCreation::GameProject        ? ".projectspace"
+                                            : Next == BrowserCreation::SolidArcDocument ? ".solidarc"
+                                                                                        : "");
+                    std::snprintf(DestinationText.data(), DestinationText.size(), "%s", EncodeContentPath(Typed).c_str());
+                }
+                CreationChoice = Faces[Index].Choice;
+                CreateError.clear();
+            }
+        }
+        Y += SegmentH + 20 * Scale;
         ImGui::PushStyleColor(ImGuiCol_FrameBg, S.Control);
         ImGui::PushStyleColor(ImGuiCol_Text, S.Text);
         ImGui::PushStyleColor(ImGuiCol_TextDisabled, S.Faint);
         ImGui::PushStyleColor(ImGuiCol_Border, S.Line);
         ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, std::max(1.f, Scale));
         ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 7 * Scale);
-        ImGui::SetCursorPos(ImVec2(Pad + ImGui::GetScrollX(), Y - Origin.y + ImGui::GetScrollY()));
-        ImGui::SetNextItemWidth(InnerW);
-        ImGui::InputTextWithHint("##name", "Untitled project", NameText.data(), NameText.size());
-        Y += 30 * Scale + 16 * Scale;
-        Draw->AddText(Font, 9 * Scale, ImVec2(Origin.x + Pad, Y), S.Muted, "Destination .projectspace");
+        if (CreationChoice != BrowserCreation::TextureLibrary) // 📝 A library is only its folder.
+        {
+            DrawBrowserText(Draw, Font, 9 * Scale, ImVec2(Origin.x + Pad, Y), S.Muted, "Name");
+            Y += 9 * Scale + 8 * Scale;
+            ImGui::SetCursorPos(ImVec2(Pad + ImGui::GetScrollX(), Y - Origin.y + ImGui::GetScrollY()));
+            ImGui::SetNextItemWidth(InnerW);
+            ImGui::InputTextWithHint("##name",
+                CreationChoice == BrowserCreation::GameProject ? "Untitled project" : "Untitled model", NameText.data(),
+                NameText.size());
+            Y += 30 * Scale + 16 * Scale;
+        }
+        Draw->AddText(Font, 9 * Scale, ImVec2(Origin.x + Pad, Y), S.Muted, Face.Destination);
         Y += 9 * Scale + 8 * Scale;
         ImGui::SetCursorPos(ImVec2(Pad + ImGui::GetScrollX(), Y - Origin.y + ImGui::GetScrollY()));
         ImGui::SetNextItemWidth(InnerW - 90 * Scale);
-        ImGui::InputTextWithHint(
-            "##destination", "Choose a destination…", DestinationText.data(), DestinationText.size());
+        ImGui::InputTextWithHint("##destination", Face.Hint, DestinationText.data(), DestinationText.size());
         ImGui::PopStyleVar(2);
         ImGui::PopStyleColor(4);
         const float BrowseW = MeasureBrowserText(Font, 11 * Scale, "Browse").x + 28 * Scale;
@@ -2763,31 +2918,36 @@ void ProjectBrowserPanel::ConstructCreationModal()
             ImGui::IsItemHovered() ? S.Faint : S.Line, 7 * Scale, 0, std::max(1.f, Scale));
         DrawBrowserText(Draw, Font, 11 * Scale, ImVec2(BrowseMin.x + 14 * Scale, BrowseMin.y + 8 * Scale), S.Text,
             "Browse");
-        if (BrowseClicked && PickProjectPath)
+        if (BrowseClicked)
         {
-            const std::filesystem::path Picked = PickProjectPath(true);
+            std::filesystem::path Picked;
+            if (PickCreationPath) Picked = PickCreationPath(CreationChoice);
+            else if (CreationChoice == BrowserCreation::GameProject && PickProjectPath) Picked = PickProjectPath(true);
+            else if (CreationChoice == BrowserCreation::TextureLibrary && PickImportFolder) Picked = PickImportFolder();
             if (!Picked.empty())
                 std::snprintf(DestinationText.data(), DestinationText.size(), "%s", EncodeContentPath(Picked).c_str());
         }
         Y += 30 * Scale + 12 * Scale;
+        Y += DrawBrowserParagraph(Draw, Font, 10 * Scale, ImVec2(Origin.x + Pad, Y), S.Faint, Face.Note, InnerW,
+            15 * Scale);
+        Y += 10 * Scale;
         if (!CreateError.empty())
         {
             Y += DrawBrowserParagraph(Draw, Font, 10 * Scale, ImVec2(Origin.x + Pad, Y), HexColour("#d98a8a"),
                 CreateError, InnerW, 15 * Scale);
             Y += 8 * Scale;
         }
-        const float CreateW = MeasureBrowserText(Font, 12 * Scale, "Create project").x + 40 * Scale;
+        const float CreateW = MeasureBrowserText(Font, 12 * Scale, Face.Action).x + 40 * Scale;
         const float CancelW = MeasureBrowserText(Font, 12 * Scale, "Cancel").x + 28 * Scale;
         float BX = Origin.x + Pad + InnerW - CreateW;
-        if (DrawBrowserPrimary("create-go", ImVec2(BX, Y), "Create project", BrowserIcon::Plus, false, Frame,
+        if (DrawBrowserPrimary("create-go", ImVec2(BX, Y), Face.Action, BrowserIcon::Plus, false, Frame,
                 12 * Scale, 20 * Scale, 36 * Scale))
         {
-            if (CreateProject(DecodeContentPath(DestinationText.data()), NameText.data()))
+            if (CreateDocument(CreationChoice, DecodeContentPath(DestinationText.data()), NameText.data()))
             {
                 CreateError.clear();
                 Creating = false;
                 ImGui::CloseCurrentPopup();
-                AttachPaths({SelectedPath}, true);
             }
             else CreateError = Diagnostic;
         }
@@ -2803,6 +2963,8 @@ void ProjectBrowserPanel::ConstructCreationModal()
             ImGui::CloseCurrentPopup();
         }
         Y += 36 * Scale + Pad;
+        // 📝 The extent item starts at the dialog origin: placed after the last button, it doubled the dialog's height.
+        ImGui::SetCursorScreenPos(Origin);
         ImGui::Dummy(ImVec2(DialogW, Y - Origin.y));
         if (!Open)
         {

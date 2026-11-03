@@ -286,7 +286,16 @@ int RunTextureWorkspace(int ArgumentCount, char **Arguments)
         {
             const auto Presets = ContentRoot / "EngineContent/MaterialArchives/TextureStudio";
             Directory = LocalDirectory.empty() ? Presets : LocalDirectory / "Frontier/TextureStudio/Materials";
-            if (Directory != Presets)
+            // 📝 The Frontier download leaves the preset archives out (GitHub's 100 MB file limit): without them the user
+            //    library starts empty instead of refusing to start (recursive_directory_iterator throws on a missing folder).
+            std::error_code PresetFailure;
+            const bool PresetsShipped = std::filesystem::is_directory(Presets, PresetFailure);
+            if (!PresetsShipped)
+            {
+                std::filesystem::create_directories(Directory, PresetFailure);
+                Frontier::DiagnosticJournal::Append("MaterialBackfill", "preset archives not installed; library starts empty");
+            }
+            if (Directory != Presets && PresetsShipped)
             {
                 // 📝 Mirror the shipped preset tree (materials, Textures/ maps, presets) with skip_existing, so
                 // fresh installs resolve texture files and existing installs backfill missing additions

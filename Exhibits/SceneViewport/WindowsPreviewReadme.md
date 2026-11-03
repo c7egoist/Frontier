@@ -1,14 +1,15 @@
 # Frontier editor preview — Windows x64
 
-Extract the ZIP into a new folder. Keep `Frontier.exe`, `EngineContent/` and `Projects/` together.
-Start `Frontier.exe`, then open Project Everest. Alternatively:
+Extract the ZIP into a new folder. Keep `Frontier.exe`, `SolidArcWorkspace.exe`, `TextureWorkspace.exe`,
+`EngineContent/` and `Projects/` together. Start `Frontier.exe`, then open Project Everest. Alternatively:
 
 ```text
 Frontier.exe Projects\Everest\Everest.projectspace
 ```
 
 `Package.json` identifies the source revision, file hashes, toolchain and omitted content. The small archive excludes
-Texture Studio material archives; the scene viewport does not need them.
+Texture Studio material archives; the scene viewport does not need them, and the Texture Workspace then starts with an
+empty library (see below).
 
 ## Celestial bodies
 
@@ -97,14 +98,34 @@ renderer. Its debug views include view 15, the analytic illumination. Save with 
   says when it runs out. At most 96 objects have surfaces of their own.
   Fracture does nothing yet.
 
-## SolidArc CAD workspace
+## Three applications
 
-`SolidArcWorkspace.exe` beside `Frontier.exe` is the SolidArc CAD workspace, a separate program.
+| Application | Program | Opens |
+|-------------|---------|-------|
+| Game Engine | `Frontier.exe` | `.projectspace` game projects, for example Project Everest |
+| SolidArc (modelling) | `SolidArcWorkspace.exe` | `.solidarc` models |
+| Texture Workspace (texturing and baking) | `TextureWorkspace.exe` | a material library folder |
 
-- Start it directly (double-click), or `SolidArcWorkspace.exe --open "C:\Parts\Bracket.solidarc"`. `--specimen`
-  starts with the fillet and chamfer specimen.
-- From Frontier: **Project browser → Open from disk**, choose a `.solidarc` document. Its card shows a live preview,
-  and **Open in SolidArc** starts the workspace with it.
+The Project browser in `Frontier.exe` reaches all three:
+
+- **New**, the first card in the library, opens the New dialog. Choose **Game project**, **SolidArc model** or
+  **Texture library**, give a name and a destination, then create it. A game project opens in the editor, a model
+  opens in SolidArc and a library opens in the Texture Workspace. A library folder is created when it is missing.
+- **Open from disk** lists `.projectspace` and `.solidarc` files, images and Markdown. The file opens in the reader
+  with a preview. **Open in Frontier** or **Open in SolidArc** then starts the application for that file type.
+- `Frontier.exe <project>.projectspace` opens the project in the editor. `Frontier.exe <model>.solidarc`, or a model
+  dropped on `Frontier.exe`, hands the model to SolidArc.
+
+Double-clicking a `.solidarc` without an installer makes Windows ask which app to use. Choose **More apps → Look for
+another app on this PC**, pick `SolidArcWorkspace.exe` and tick **Always use this app to open .solidarc files**. The
+model then opens directly. Earlier builds ignored the file named this way and showed an empty document unless they
+were started with `--open`.
+
+### SolidArc
+
+- Start it directly (double-click), `SolidArcWorkspace.exe "C:\Parts\Bracket.solidarc"` or
+  `SolidArcWorkspace.exe --open "C:\Parts\Bracket.solidarc"`. `--specimen` starts with the fillet and chamfer
+  specimen. When a model cannot be read, the status line says why.
 - Options are in `SolidArcWorkspace.toml`. Save writes `Documents/Bracket.solidarc` by default, the autosave goes to
   `Autosave/` and the log to `SolidArcTrace.log` (the **Log** button or **F12** opens it). `Samples/` holds the
   curve import sample.
@@ -113,6 +134,15 @@ renderer. Its debug views include view 15, the analytic illumination. Save with 
 - The panels are Frontier's docking panels, and the sliders, switches and tabs are Frontier's controls.
 - It needs a Vulkan 1.3 driver. It was cross-built like `Frontier.exe` and has not been started on Windows here;
   please report the first launch. The cross-built program carries no version details.
+
+### Texture Workspace
+
+- Start it from the New dialog, directly, or as `TextureWorkspace.exe --library "D:\Materials"`. Without
+  `--library` it uses `%LOCALAPPDATA%\Frontier\TextureStudio\Materials`.
+- The material presets (`EngineContent/MaterialArchives`, about 96 MB) are not in this ZIP because GitHub refuses
+  files over 100 MB, so the library starts empty. Copy `EngineContent/MaterialArchives` from the repository into the
+  extracted `EngineContent/` folder to get them.
+- It was cross-built like `Frontier.exe` and has not been started on Windows here; please report the first launch.
 
 ## Local media, wind and baking
 

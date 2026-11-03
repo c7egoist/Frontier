@@ -10,6 +10,7 @@
 #include "UI/SolidArc/Browser/SolidArcBrowserLink.h"
 
 #include "UI/SolidArc/Browser/SolidArcBrowserPreview.h"
+#include "UI/SolidArc/Document/SolidArcDocumentCodec.h"
 
 #include <cerrno>
 #include <cstdio>
@@ -194,7 +195,26 @@ BrowserNativeDocument DescribeSolidArcBrowserDocument(const std::filesystem::pat
                          Count(Preview.StepCount, "step", "steps");
     Native.Description = "SolidArc document '" + Preview.Title + "', replayed by GeometryProcessing and tessellated into " +
                          std::to_string(Preview.TriangleCount) + " triangles in " + Timing + ". Open it in SolidArc to edit the feature tree.";
+    if (Preview.BodyCount == 0)
+        Native.Description = "SolidArc model '" + Preview.Title + "' has no bodies yet. Open it in SolidArc to start modelling.";
     return Native;
+}
+
+bool CreateSolidArcBrowserDocument(const std::filesystem::path& Path, const std::string& Title, std::string& Refusal)
+{
+    std::error_code Failure;
+    if (Path.empty() || std::filesystem::exists(Path, Failure))
+    {
+        Refusal = Path.empty() ? "Choose where to save the new SolidArc model." : "A file already exists at " + Utf8(Path) + "; choose another name.";
+        return false;
+    }
+    const SolidArcDocument Document = CreateSolidArcDocument(Title.empty() ? Utf8(Path.stem()) : Title);
+    if (!SaveSolidArcDocument(Document, Utf8(Path)))
+    {
+        Refusal = "The SolidArc model could not be written to " + Utf8(Path) + ".";
+        return false;
+    }
+    return true;
 }
 
 void ConnectSolidArcBrowser(ProjectBrowserPanel& Browser, SolidArcBrowserLinkSettings Settings)
@@ -204,6 +224,10 @@ void ConnectSolidArcBrowser(ProjectBrowserPanel& Browser, SolidArcBrowserLinkSet
         BrowserNativeDocument Native;
         if (!QueryBrowserSolidArcExtension(Utf8(Path.extension()))) return Native;
         return DescribeSolidArcBrowserDocument(Path);
+    };
+    Browser.CreateWorkspaceDocument = [](const std::filesystem::path& Path, const std::string& Title, std::string& Refusal)
+    {
+        return CreateSolidArcBrowserDocument(Path, Title, Refusal);
     };
     Browser.LaunchWorkspaceDocument = [Settings = std::move(Settings)](const std::filesystem::path& Document, std::string& Refusal)
     {
