@@ -573,7 +573,7 @@ export class LandmassOceanSimulation {
     if (reset) this.reset();
   }
 
-  reset(warmupSteps = 144) {
+  reset(warmupSteps = null) {
     this.simTime = 0;
     this._accumulator = 0;
     this._sim.value.y = 0;
@@ -584,11 +584,13 @@ export class LandmassOceanSimulation {
     this._clearTarget(this.fluxTargets[0]);
     this._clearTarget(this.fluxTargets[1]);
     this._syncRenderTextures();
-    // 144 * 0.05 s = 7.2 simulated seconds: enough for the seeded swell to
-    // acquire pipe flux/velocity and for the first breaking foam to form
-    // before the workspace is presented, without making generation sluggish.
+    // Warm the seeded swell up so pipe flux/velocity and the first breaking
+    // foam exist before presentation. Higher resolutions use fewer warm-up
+    // steps because each step touches many more cells.
     if (this.params.enabled) {
-      const steps = Math.max(0, Math.min(240, Math.floor(warmupSteps) || 0));
+      const defaultWarmupSteps = Math.round(THREE.MathUtils.clamp(36864 / this.size, 48, 144));
+      const requestedSteps = warmupSteps == null ? defaultWarmupSteps : (Math.floor(warmupSteps) || 0);
+      const steps = Math.max(0, Math.min(240, requestedSteps));
       for (let i = 0; i < steps; i++) this.stepOnce(0.05);
     }
   }
@@ -665,5 +667,19 @@ export class LandmassOceanSimulation {
       this._stepWindowTime = 0;
     }
     return steps;
+  }
+
+  dispose() {
+    this.scene.remove(this.waterMesh);
+    this.scene.remove(this.foamMesh);
+    this.surfaceGeometry?.dispose();
+    this.waterMaterial?.dispose();
+    this.foamMaterial?.dispose();
+    this.initMaterial?.dispose();
+    this.fluxMaterial?.dispose();
+    this.integrateMaterial?.dispose();
+    this.passQuad?.geometry?.dispose();
+    this.bedTexture?.dispose();
+    for (const target of [...this.stateTargets, ...this.fluxTargets]) target.dispose();
   }
 }

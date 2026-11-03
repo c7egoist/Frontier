@@ -219,6 +219,7 @@
               <button type="button" class="lm-shape-card" data-lm-shape="archipelago"><strong>Archipelago</strong><span>Several islands</span></button>
               <button type="button" class="lm-shape-card" data-lm-shape="peninsula"><strong>Peninsula</strong><span>Connected from west</span></button>
               <button type="button" class="lm-shape-card" data-lm-shape="coast"><strong>Coastline</strong><span>Land west · ocean east</span></button>
+              <button type="button" class="lm-shape-card" data-lm-shape="open"><strong>Open World</strong><span>Continents across the full plane</span></button>
             </div>
             <label class="field-row" style="margin-top:9px;">
               <span>Shape</span>
@@ -228,11 +229,20 @@
                 <option value="archipelago">Archipelago</option>
                 <option value="peninsula">Peninsula</option>
                 <option value="coast">Coastline</option>
+                <option value="open">Open World</option>
               </select>
             </label>
             <div class="seed-row">
               <input id="lm-seed" type="number" step="1" value="4029" aria-label="Landmass seed" />
               <button id="lm-random-seed" class="btn-mini accent" type="button">Random landmass</button>
+            </div>
+            <div class="slider-group">
+              <div class="slider-label"><span>World size</span><output id="lm-out-world-size">40,075 km across</output></div>
+              <input id="lm-world-size" type="range" min="0" max="1" step="0.001" value="1" />
+            </div>
+            <div class="slider-group">
+              <div class="slider-label"><span>Land + water resolution</span><output id="lm-out-world-resolution">256²</output></div>
+              <input id="lm-world-resolution" type="range" min="128" max="512" step="32" value="256" />
             </div>
             <div class="slider-group">
               <div class="slider-label"><span>Land coverage</span><output id="lm-out-land-coverage">54%</output></div>
@@ -258,7 +268,7 @@
               <button id="lm-generate" class="btn-primary" type="button">Generate landmass</button>
               <button id="lm-reset-sculpt" class="btn-secondary" type="button">Reset sculpt</button>
             </div>
-            <p class="export-note">Landmass Studio starts from a randomized base. <strong>Random landmass</strong> picks a new shape, seed, coverage, coast roughness, relief, terrain roughness, and ocean depth. Generation replaces sculpt edits. This is only the broad land/ocean base—no erosion, rivers, snow, rocks, vegetation, or other systems.</p>
+            <p class="export-note">Landmass Studio starts from a randomized base. <strong>Random landmass</strong> picks a new shape, seed, coverage, coast roughness, relief, terrain roughness, and ocean depth while preserving your world size and resolution. <strong>World size</strong> sets the physical scale of the flat sculpting plane, up to a 40,075 km planet-sized map. <strong>Land + water resolution</strong> rebuilds the heightfield and the 2.5D ocean together at 128²–512². Generation replaces sculpt edits. This is only the broad land/ocean base—no erosion, rivers, snow, rocks, vegetation, or other systems.</p>
           </section>
 
           <section class="panel-section">
@@ -274,14 +284,14 @@
               <button type="button" class="lm-tool-btn" data-lm-tool="flatten">Flatten</button>
             </div>
             <div class="slider-group" style="margin-top:9px;">
-              <div class="slider-label"><span>Brush radius</span><output id="lm-out-brush-radius">190 m</output></div>
+              <div class="slider-label"><span>Brush radius</span><output id="lm-out-brush-radius">3,173 km</output></div>
               <input id="lm-brush-radius" type="range" min="25" max="650" step="5" value="190" />
             </div>
             <div class="slider-group">
               <div class="slider-label"><span>Brush strength</span><output id="lm-out-brush-strength">3.2 m</output></div>
               <input id="lm-brush-strength" type="range" min="0.2" max="9" step="0.1" value="3.2" />
             </div>
-            <p class="export-note">With a sculpt tool selected, drag with the left mouse button. Use the right mouse button to orbit and the middle button to pan. Island/continent borders stay underwater so sculpting does not recreate a square land edge.</p>
+            <p class="export-note">With a sculpt tool selected, drag with the left mouse button. Use the right mouse button to orbit and the middle button to pan. Continent, island, and archipelago borders stay underwater; Open World, coastline, and peninsula shapes may run to the map edges. Brush radius is shown at the current world scale.</p>
           </section>
         </div>
       </aside>

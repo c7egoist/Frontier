@@ -4692,7 +4692,7 @@ summary:focus-visible {
   color: var(--tp-muted);
 }
 
-.lm-shape-card:last-child {
+.lm-shape-card:last-child:nth-child(odd) {
   grid-column: 1 / -1;
 }
 

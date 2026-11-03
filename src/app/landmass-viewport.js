@@ -32,6 +32,33 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+const WORLD_SIZE_MIN_KM = 0.4;
+const WORLD_SIZE_MAX_KM = 40075;
+
+function formatKm(km) {
+  const value = Number(km);
+  if (!Number.isFinite(value)) return '—';
+  if (value >= 1000) return `${Math.round(value).toLocaleString('en-US')} km`;
+  if (value >= 100) return `${Math.round(value)} km`;
+  if (value >= 10) return `${value.toFixed(1)} km`;
+  if (value >= 1) return `${value.toFixed(2)} km`;
+  return `${Math.round(value * 1000)} m`;
+}
+
+function worldSizeKmToSlider(km) {
+  const safe = clamp(Number(km) || WORLD_SIZE_MAX_KM, WORLD_SIZE_MIN_KM, WORLD_SIZE_MAX_KM);
+  return (Math.log(safe) - Math.log(WORLD_SIZE_MIN_KM))
+    / (Math.log(WORLD_SIZE_MAX_KM) - Math.log(WORLD_SIZE_MIN_KM));
+}
+
+function sliderToWorldSizeKm(t) {
+  const safe = clamp(Number(t) || 0, 0, 1);
+  return Math.exp(
+    Math.log(WORLD_SIZE_MIN_KM)
+    + (Math.log(WORLD_SIZE_MAX_KM) - Math.log(WORLD_SIZE_MIN_KM)) * safe
+  );
+}
+
 export class LandmassStudioViewport {
   constructor(container) {
     this.container = container;
@@ -126,6 +153,16 @@ export class LandmassStudioViewport {
     this.renderer.setSize(width, height);
   }
 
+  _worldScale() {
+    const physicalMeters = (Number(this.params.worldSizeKm) || WORLD_SIZE_MAX_KM) * 1000;
+    const displayMeters = Math.max(1, this.field?.worldSpan || this.params.worldSpan || 2400);
+    return physicalMeters / displayMeters;
+  }
+
+  _formatDisplayLength(displayMeters) {
+    return formatKm(((Number(displayMeters) || 0) * this._worldScale()) / 1000);
+  }
+
   _initLights() {
     const span = this.params.worldSpan;
     this.sun = new THREE.DirectionalLight('#fff2dc', 2.8);
@@ -149,7 +186,7 @@ export class LandmassStudioViewport {
     this.scene.add(rim);
   }
 
-  _initTerrain() {
+  _buildTerrainGeometry() {
     const size = this.field.size;
     const span = this.field.worldSpan;
     const positions = new Float32Array(size * size * 3);
@@ -188,7 +225,11 @@ export class LandmassStudioViewport {
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     geometry.setIndex(new THREE.BufferAttribute(indices, 1));
     geometry.computeVertexNormals();
+    return geometry;
+  }
 
+  _initTerrain() {
+    const geometry = this._buildTerrainGeometry();
     this.terrainMaterial = new THREE.MeshStandardMaterial({
       vertexColors: true,
       roughness: 0.97,
@@ -203,6 +244,13 @@ export class LandmassStudioViewport {
   _refreshTerrainGeometry() {
     if (!this.terrainMesh) return;
     const geometry = this.terrainMesh.geometry;
+    if (geometry.attributes.position.count !== this.field.heights.length) {
+      const oldGeometry = geometry;
+      this.terrainMesh.geometry = this._buildTerrainGeometry();
+      oldGeometry.dispose();
+      this._terrainDirty = false;
+      return;
+    }
     const positions = geometry.attributes.position.array;
     const colors = buildLandmassColors(this.field, this.view.seaLevel);
     for (let i = 0; i < this.field.heights.length; i++) {
@@ -244,7 +292,11 @@ export class LandmassStudioViewport {
     this.oceanMesh.renderOrder = 2;
     this.scene.add(this.oceanMesh);
 
-    this.ocean = new LandmassOceanSimulation(this.renderer, this.scene, this.field, {
+    this.ocean = this._createOceanSimulation();
+  }
+
+  _createOceanSimulation() {
+    return new LandmassOceanSimulation(this.renderer, this.scene, this.field, {
       seaLevel: this.view.seaLevel,
       opacity: this.view.oceanOpacity,
       waveHeight: this.view.waveHeight,
@@ -347,7 +399,12 @@ export class LandmassStudioViewport {
     this.field = generateLandmass(this.params);
     this.seabedMesh.position.y = -this.params.oceanDepth - 3;
     this._refreshTerrainGeometry();
-    this.ocean?.setField(this.field, true);
+    if (this.ocean && this.ocean.size !== this.field.size) {
+      this.ocean.dispose();
+      this.ocean = this._createOceanSimulation();
+    } else {
+      this.ocean?.setField(this.field, true);
+    }
     this._updateShoreline();
     this._updateStats();
   }
@@ -509,14 +566,15 @@ export class LandmassStudioViewport {
       if (el) el.textContent = value;
     };
     set('lm-stat-land', `${Math.round(stats.landFraction * 100)}%`);
-    set('lm-stat-shore', `${((this._shorelineLength || 0) / 1000).toFixed(2)} km`);
+    set('lm-stat-shore', this._formatDisplayLength(this._shorelineLength || 0));
     set('lm-stat-foam', `${this.field.size}² · ${this.ocean?.stepsPerSecond || 0}/s`);
     set('lm-stat-elev', `${Math.round(stats.minHeight)}…${Math.round(stats.maxHeight)} m`);
     const readout = byId('lm-readout');
     if (readout) {
+      const cellKm = (Number(this.params.worldSizeKm) || WORLD_SIZE_MAX_KM) / Math.max(1, this.field.size - 1);
       readout.textContent =
-        `${this.params.shape} · seed ${this.params.seed} · ${this.field.size}² simple heightfield · ` +
-        `${this._shorelineContours.length} shoreline contour(s). ` +
+        `${this.params.shape} · ${formatKm(this.params.worldSizeKm)} flat world · ${this.field.size}² land+water (${formatKm(cellKm)}/cell) · ` +
+        `seed ${this.params.seed} · ${this._shorelineContours.length} shoreline contour(s). ` +
         'Ocean uses Terrain Studio-style 2.5D virtual-pipe water. Whitewater foam is a persistent simulated state ' +
         'created by breaking, beach uprush and steep-shore impact, then advected and decayed by the water—not a foam ' +
         'noise pattern and not particles. Detailed terrains can be placed on this base in a later step.';
@@ -541,6 +599,8 @@ export class LandmassStudioViewport {
       };
       const seed = byId('lm-seed');
       if (seed) seed.value = String(this.params.seed);
+      setRange('lm-world-size', 'lm-out-world-size', worldSizeKmToSlider(this.params.worldSizeKm), (v) => `${formatKm(sliderToWorldSizeKm(v))} across`);
+      setRange('lm-world-resolution', 'lm-out-world-resolution', this.params.gridSize, (v) => `${Math.round(v)}²`);
       setRange('lm-land-coverage', 'lm-out-land-coverage', this.params.landCoverage, (v) => `${Math.round(v * 100)}%`);
       setRange('lm-coast-roughness', 'lm-out-coast-roughness', this.params.coastRoughness, (v) => `${Math.round(v * 100)}%`);
       setRange('lm-relief', 'lm-out-relief', this.params.relief, (v) => `${Math.round(v)} m`);
@@ -563,13 +623,31 @@ export class LandmassStudioViewport {
     };
 
     syncGeneratorInputs();
+    bindRange('lm-world-size', 'lm-out-world-size', (v) => `${formatKm(sliderToWorldSizeKm(v))} across`, (v) => {
+      this.params.worldSizeKm = sliderToWorldSizeKm(v);
+      const brushOutput = byId('lm-out-brush-radius');
+      if (brushOutput) brushOutput.textContent = this._formatDisplayLength(this.brush.radius);
+      this._updateStats();
+    });
+    const resolutionInput = byId('lm-world-resolution');
+    const resolutionOutput = byId('lm-out-world-resolution');
+    resolutionInput?.addEventListener('input', () => {
+      if (resolutionOutput) resolutionOutput.textContent = `${Math.round(Number(resolutionInput.value) || 256)}²`;
+    });
+    resolutionInput?.addEventListener('change', () => {
+      const nextResolution = Math.round(clamp(Number(resolutionInput.value) || 256, 128, 512));
+      if (nextResolution !== this.params.gridSize) {
+        this.params.gridSize = nextResolution;
+        this.regenerate(this.params);
+      }
+    });
     bindRange('lm-land-coverage', 'lm-out-land-coverage', (v) => `${Math.round(v * 100)}%`, (v) => { this.params.landCoverage = v; });
     bindRange('lm-coast-roughness', 'lm-out-coast-roughness', (v) => `${Math.round(v * 100)}%`, (v) => { this.params.coastRoughness = v; });
     bindRange('lm-relief', 'lm-out-relief', (v) => `${Math.round(v)} m`, (v) => { this.params.relief = v; });
     bindRange('lm-roughness', 'lm-out-roughness', (v) => `${Math.round(v * 100)}%`, (v) => { this.params.roughness = v; });
     bindRange('lm-ocean-depth', 'lm-out-ocean-depth', (v) => `${Math.round(v)} m`, (v) => { this.params.oceanDepth = v; });
 
-    bindRange('lm-brush-radius', 'lm-out-brush-radius', (v) => `${Math.round(v)} m`, (v) => { this.brush.radius = v; });
+    bindRange('lm-brush-radius', 'lm-out-brush-radius', (v) => this._formatDisplayLength(v), (v) => { this.brush.radius = v; });
     bindRange('lm-brush-strength', 'lm-out-brush-strength', (v) => `${Number(v).toFixed(1)} m`, (v) => { this.brush.strength = v; });
 
     bindRange('lm-sea-level', 'lm-out-sea-level', (v) => `${Math.round(v)} m`, (v) => {
@@ -639,7 +717,7 @@ export class LandmassStudioViewport {
       this.regenerate(this.params);
     });
     byId('lm-random-seed')?.addEventListener('click', () => {
-      this.params = createRandomLandmassParams();
+      this.params = createRandomLandmassParams(Math.random, this.params);
       syncGeneratorInputs();
       this.regenerate(this.params);
     });

@@ -14,6 +14,7 @@ export const LANDMASS_SHAPES = Object.freeze([
   Object.freeze({ id: 'archipelago', label: 'Archipelago', description: 'Several separate islands' }),
   Object.freeze({ id: 'peninsula', label: 'Peninsula', description: 'Land connected from the west' }),
   Object.freeze({ id: 'coast', label: 'Coastline', description: 'Land to the west, ocean to the east' }),
+  Object.freeze({ id: 'open', label: 'Open World', description: 'Continents across a flat planet-sized map' }),
 ]);
 
 const SHAPE_IDS = new Set(LANDMASS_SHAPES.map((shape) => shape.id));
@@ -23,6 +24,7 @@ export const DEFAULT_LANDMASS_PARAMS = Object.freeze({
   seed: 4029,
   gridSize: 256,
   worldSpan: 2400,
+  worldSizeKm: 40075,
   landCoverage: 0.54,
   coastRoughness: 0.62,
   relief: 230,
@@ -122,8 +124,9 @@ export function normalizeLandmassParams(input = {}) {
   return {
     shape,
     seed: Math.round(finiteOr(src.seed, DEFAULT_LANDMASS_PARAMS.seed)) >>> 0,
-    gridSize: Math.round(clamp(finiteOr(src.gridSize, DEFAULT_LANDMASS_PARAMS.gridSize), 64, 320)),
+    gridSize: Math.round(clamp(finiteOr(src.gridSize, DEFAULT_LANDMASS_PARAMS.gridSize), 64, 512)),
     worldSpan: clamp(finiteOr(src.worldSpan, DEFAULT_LANDMASS_PARAMS.worldSpan), 400, 8000),
+    worldSizeKm: clamp(finiteOr(src.worldSizeKm, DEFAULT_LANDMASS_PARAMS.worldSizeKm), 0.4, 40075),
     landCoverage: clamp(finiteOr(src.landCoverage, DEFAULT_LANDMASS_PARAMS.landCoverage), 0.12, 0.86),
     coastRoughness: clamp(finiteOr(src.coastRoughness, DEFAULT_LANDMASS_PARAMS.coastRoughness), 0, 1),
     relief: clamp(finiteOr(src.relief, DEFAULT_LANDMASS_PARAMS.relief), 20, 420),
@@ -137,34 +140,39 @@ export function normalizeLandmassParams(input = {}) {
  * deterministic random function in tests; the studio passes Math.random so
  * opening Landmass Studio and pressing Random Landmass gives a new base.
  */
-export function createRandomLandmassParams(random = Math.random) {
+export function createRandomLandmassParams(random = Math.random, base = {}) {
+  const preserved = base && typeof base === 'object' ? base : {};
   const next = () => {
     const value = Number(random());
     return Number.isFinite(value) ? clamp(value, 0, 0.999999) : 0.5;
   };
   const between = (min, max) => min + (max - min) * next();
   const shapeRoll = next();
-  const shape = shapeRoll < 0.38
-    ? 'continent'
-    : shapeRoll < 0.58
-      ? 'island'
-      : shapeRoll < 0.74
-        ? 'archipelago'
-        : shapeRoll < 0.87
-          ? 'peninsula'
-          : 'coast';
+  const shape = shapeRoll < 0.24
+    ? 'open'
+    : shapeRoll < 0.48
+      ? 'continent'
+      : shapeRoll < 0.62
+        ? 'island'
+        : shapeRoll < 0.76
+          ? 'archipelago'
+          : shapeRoll < 0.88
+            ? 'peninsula'
+            : 'coast';
   const coverageByShape = {
     continent: [0.42, 0.68],
     island: [0.3, 0.58],
     archipelago: [0.28, 0.55],
     peninsula: [0.38, 0.64],
     coast: [0.36, 0.66],
+    open: [0.34, 0.62],
   }[shape];
   return normalizeLandmassParams({
     shape,
     seed: Math.floor(next() * 999_999_999) + 1,
-    gridSize: DEFAULT_LANDMASS_PARAMS.gridSize,
-    worldSpan: DEFAULT_LANDMASS_PARAMS.worldSpan,
+    gridSize: preserved.gridSize ?? DEFAULT_LANDMASS_PARAMS.gridSize,
+    worldSpan: preserved.worldSpan ?? DEFAULT_LANDMASS_PARAMS.worldSpan,
+    worldSizeKm: preserved.worldSizeKm ?? DEFAULT_LANDMASS_PARAMS.worldSizeKm,
     landCoverage: between(coverageByShape[0], coverageByShape[1]),
     coastRoughness: between(0.28, 0.92),
     relief: between(120, 365),
@@ -210,6 +218,24 @@ function makeLobes(params, rng) {
       lobe(-0.02, (rng() - 0.5) * 0.34, 0.34, 0.2, 0.86),
       lobe(-0.62, (rng() - 0.5) * 0.4, 0.36, 0.34, 0.92),
     ];
+  }
+  if (params.shape === 'open') {
+    const lobes = [];
+    for (let i = 0; i < 10; i++) {
+      lobes.push(lobe(
+        (rng() * 2 - 1) * 0.98,
+        (rng() * 2 - 1) * 0.98,
+        0.18 + rng() * 0.16,
+        0.14 + rng() * 0.12,
+        0.78 + rng() * 0.34
+      ));
+    }
+    // Edge-crossing masses keep this from reading as one island trapped in
+    // a box: an open-world/planet map may legitimately continue past any side.
+    lobes.push(lobe(-1.02, (rng() - 0.5) * 1.1, 0.34, 0.24, 0.95));
+    lobes.push(lobe(1.02, (rng() - 0.5) * 1.1, 0.32, 0.22, 0.9));
+    lobes.push(lobe((rng() - 0.5) * 1.1, -1.02, 0.3, 0.24, 0.88));
+    return lobes;
   }
   if (params.shape === 'coast') return [];
 

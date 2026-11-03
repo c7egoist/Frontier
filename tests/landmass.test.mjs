@@ -72,15 +72,28 @@ test('Landmass generation is deterministic, signed around sea level, and keeps c
   assert.ok(maxBorderHeight < 0, 'Continent domain edges remain underwater instead of ending as a square land cut');
 });
 
-test('Landmass shape presets cover island, archipelago, peninsula, and coastline bases', () => {
-  for (const shape of ['island', 'archipelago', 'peninsula', 'coast']) {
+test('Landmass shape presets cover island, archipelago, peninsula, coastline, and open-world bases', () => {
+  for (const shape of ['island', 'archipelago', 'peninsula', 'coast', 'open']) {
     const field = generateLandmass({ shape, gridSize: 112, seed: 4029 });
     assert.ok(field.stats.minHeight < 0 && field.stats.maxHeight > 0, `${shape} has both seabed and land`);
     assert.ok(field.stats.landFraction > 0.08 && field.stats.landFraction < 0.72, `${shape} leaves useful ocean around the land`);
   }
   const archipelago = generateLandmass({ shape: 'archipelago', gridSize: 128, seed: 4029 });
   assert.ok(landComponents(archipelago).length >= 2, 'Archipelago produces separated islands');
+
+  const open = generateLandmass({ shape: 'open', gridSize: 128, seed: 4029 });
+  let openBorderLand = 0;
+  for (let i = 0; i < open.size; i++) {
+    if (open.heights[i] >= 0) openBorderLand++;
+    if (open.heights[(open.size - 1) * open.size + i] >= 0) openBorderLand++;
+    if (open.heights[i * open.size] >= 0) openBorderLand++;
+    if (open.heights[i * open.size + open.size - 1] >= 0) openBorderLand++;
+  }
+  assert.ok(openBorderLand > 0, 'Open World land may continue to the flat map edges instead of being trapped as an island');
+
   assert.equal(normalizeLandmassParams({ shape: 'not-a-shape' }).shape, 'continent');
+  assert.equal(normalizeLandmassParams({ gridSize: 999 }).gridSize, 512, 'Land+water resolution is capped at the supported 512² grid');
+  assert.equal(normalizeLandmassParams({ worldSizeKm: 999999 }).worldSizeKm, 40075, 'Flat world size is capped at full planet scale');
 });
 
 test('Random landmass recipes vary the whole base shape while staying inside safe generation ranges', () => {
@@ -91,15 +104,16 @@ test('Random landmass recipes vary the whole base shape while staying inside saf
   const a = createRandomLandmassParams(() => rollsA[aIndex++]);
   const b = createRandomLandmassParams(() => rollsB[bIndex++]);
 
-  assert.equal(a.shape, 'continent');
+  assert.equal(a.shape, 'open');
   assert.equal(b.shape, 'archipelago');
   assert.notEqual(a.seed, b.seed, 'Random landmass changes more than a numeric seed');
   assert.notEqual(a.landCoverage, b.landCoverage);
   assert.notEqual(a.coastRoughness, b.coastRoughness);
   assert.notEqual(a.relief, b.relief);
   for (const params of [a, b]) {
-    assert.equal(params.gridSize, 256, 'Random bases keep the interactive sculpt/ocean resolution');
+    assert.equal(params.gridSize, 256, 'Random bases use the default land+water resolution unless preserved from the studio');
     assert.equal(params.worldSpan, 2400);
+    assert.equal(params.worldSizeKm, 40075, 'Random bases default to the full planet-scale flat world');
     assert.ok(params.landCoverage >= 0.28 && params.landCoverage <= 0.68);
     assert.ok(params.coastRoughness >= 0.28 && params.coastRoughness <= 0.92);
     assert.ok(params.relief >= 120 && params.relief <= 365);
@@ -109,8 +123,13 @@ test('Random landmass recipes vary the whole base shape while staying inside saf
     assert.ok(field.stats.minHeight < 0 && field.stats.maxHeight > 0, `${params.shape} random recipe creates land plus ocean bed`);
   }
 
+  const preserved = createRandomLandmassParams(() => 0.5, { gridSize: 512, worldSizeKm: 100, worldSpan: 2400 });
+  assert.equal(preserved.gridSize, 512, 'Random landmass preserves the selected land+water resolution');
+  assert.equal(preserved.worldSizeKm, 100, 'Random landmass preserves the selected flat world size');
+
   const viewportSrc = fs.readFileSync(new URL('../src/app/landmass-viewport.js', import.meta.url), 'utf8');
   assert.ok(viewportSrc.includes('this.params = createRandomLandmassParams();'), 'Opening Landmass Studio starts from a randomized base');
+  assert.ok(viewportSrc.includes('createRandomLandmassParams(Math.random, this.params)'), 'Random button preserves world size and resolution');
   assert.ok(viewportSrc.includes('syncGeneratorInputs();'), 'Random recipes are reflected in the visible generator controls');
 });
 
@@ -184,6 +203,8 @@ test('Ocean foam is persistent whitewater from the Terrain Studio-style 2.5D vir
   const coreSrc = fs.readFileSync(new URL('../src/core/landmass.js', import.meta.url), 'utf8');
   const oceanSrc = fs.readFileSync(new URL('../src/app/landmass-ocean.js', import.meta.url), 'utf8');
   assert.ok(viewportSrc.includes('new LandmassOceanSimulation'));
+  assert.ok(viewportSrc.includes('_createOceanSimulation()'), 'Ocean simulation can be recreated at a new resolution');
+  assert.ok(viewportSrc.includes('this.ocean.dispose()'), 'Resolution changes dispose the previous ocean simulation');
   assert.ok(viewportSrc.includes('this.ocean?.update(delta)'));
   assert.ok(!viewportSrc.includes('buildFoamGeometry'), 'Old shoreline foam strips are no longer the visible foam source');
   assert.ok(!viewportSrc.includes('animateFoamGeometry'), 'Old scripted vertex surf motion is gone');
@@ -191,7 +212,9 @@ test('Ocean foam is persistent whitewater from the Terrain Studio-style 2.5D vir
   assert.ok(!oceanSrc.includes('THREE.Points'), 'Simulated foam is not particle foam');
   assert.ok(!oceanSrc.includes('valueNoise2'), 'Foam state is not painted from procedural noise');
   assert.ok(oceanSrc.includes('this.foamMesh = new THREE.Mesh'), 'Whitewater remains a displaced surface mesh');
-  assert.ok(oceanSrc.includes('reset(warmupSteps = 144)'), 'Ocean reset warms up flux, velocity, and foam before presentation');
+  assert.ok(oceanSrc.includes('reset(warmupSteps = null)'), 'Ocean reset warms up flux, velocity, and foam before presentation');
+  assert.ok(oceanSrc.includes('36864 / this.size'), 'Ocean warm-up adapts to land+water resolution');
+  assert.ok(oceanSrc.includes('dispose()'), 'Ocean resources can be disposed when resolution changes');
   assert.ok(oceanSrc.includes('sqrt(max(0.2, uSim.z) * max(1.0, uDomain.y)) * k'), 'Swell forcing uses virtual-pipe wave celerity');
 });
 
@@ -204,6 +227,11 @@ test('Landmass Studio is wired as a third simple workspace without Terrain Studi
     'id="left-landmass-panels"',
     'id="right-landmass-panels"',
     'id="landmass-viewport"',
+    'data-lm-shape="open"',
+    'Open World',
+    'id="lm-world-size"',
+    'id="lm-world-resolution"',
+    'Land + water resolution',
     'SURF &amp; WHITEWATER FOAM',
     'no erosion, rivers, snow, rocks, vegetation, or other systems',
   ]) {
