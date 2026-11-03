@@ -1200,4 +1200,8 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
   gives 70.5 % (10.2 % before), against 1.2 % with the twinkle off.
 - **Validated:** `CelestialRenderValidation`, `LocalMediaValidation` and `EnvironmentRealmValidation` pass after the
   twinkle change (SwiftShader, 406 s); the shader archives verify with 0 failures.
-- **Commits:** `419441d f780988 2b0cf13 ab96e56 9955237 0c59f28` and this documentation commit.
+- **Windows binary:** `Binaries/FrontierSceneViewport-Windows-x64.zip` rebuilt at `48a8380` with the twinkle (Zig 0.13.0
+  cross-toolchain, material archives omitted): 24,495,349 bytes, 923 files, SHA-256
+  `58f2eed74ccd9429d81eecced6cd0d9601d022551a897804f293a43e92fb9d53`. Against the `c384f66` package only `Frontier.exe`,
+  the twinkle shader `RasterizePlanetaryProjection.spv`, its compilation manifest and `Package.json` differ.
+- **Commits:** `419441d f780988 2b0cf13 ab96e56 9955237 0c59f28 4573642 1c6eda4 48a8380` and this binary commit.
