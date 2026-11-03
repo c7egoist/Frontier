@@ -153,6 +153,20 @@ if(BUILD_TESTING)
     target_include_directories(SceneViewportValidation PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
     target_link_libraries(SceneViewportValidation PRIVATE FrontierSceneViewport)
 
+    # 📝 The fifteen inspection views of one settled daylight view: the Render settings inspector's debug-view thumbnails.
+    add_executable(InspectionViewCapture
+        Exhibits/SceneViewport/Code/InspectionViewCapture.cpp
+        Engine/Render/StbImageWriteImplementation.cpp)
+    target_include_directories(InspectionViewCapture PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
+    target_link_libraries(InspectionViewCapture PRIVATE FrontierSceneViewport)
+
+    # 📝 How much the stars twinkle on screen under the Stars record's scintillation controls (Exhibits/SceneViewport/README.md).
+    add_executable(StarScintillationCapture
+        Exhibits/SceneViewport/Code/StarScintillationCapture.cpp
+        Engine/Render/StbImageWriteImplementation.cpp)
+    target_include_directories(StarScintillationCapture PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
+    target_link_libraries(StarScintillationCapture PRIVATE FrontierSceneViewport)
+
     # 📝 Ray-traced reflections and sun shadows under the demo's options and the refinements, measured (Exhibits/RayTracedLighting).
     add_executable(RayTracedLightingCapture
         Exhibits/RayTracedLighting/Code/RayTracedLightingCapture.cpp
