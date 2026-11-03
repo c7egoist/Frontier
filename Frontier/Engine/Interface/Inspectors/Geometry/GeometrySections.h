@@ -53,8 +53,9 @@ class ModifierStackSection
 class GeometryMaterialSection
 {
   public:
-    // 📝 The material families the object's copies use, one slot shown at a time, with the scene archive's channel values.
-    static void Construct(ControlColumn& Page, const GeometryConfiguration& Parameters, const std::string& RecordName, int& Slot);
+    // 📝 The material families the object's copies use, one slot shown at a time, with their channel values and controls; the
+    //    first edit copies the family into the object's SurfaceSlots (its material block). True when the surfaces changed.
+    static bool Construct(ControlColumn& Page, GeometryConfiguration& Parameters, const std::string& RecordName, int& Slot);
 };
 
 class GeometryFractureSection

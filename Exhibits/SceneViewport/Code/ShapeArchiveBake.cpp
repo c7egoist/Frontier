@@ -83,15 +83,21 @@ int main(int ArgumentCount, char** Arguments)
         std::string Outcome = "written";
         if (Check)
         {
-            double Drift = -1.0;
+            // 📝 The stored volume is float16: a voxel matches while it is within half a unit in the last place of its distance
+            //    (2⁻¹¹ of it, at least 6 × 10⁻⁵ m), whatever compiler baked it.
+            double Drift    = -1.0;
+            size_t Exceeded = 0;
             if (Archive.Distance && Archive.Distance->Distances.size() == Volume.Distances.size())
             {
                 Drift = 0.0;
                 for (size_t Index = 0; Index < Volume.Distances.size(); ++Index)
-                    Drift = std::max(Drift, static_cast<double>(std::abs(Archive.Distance->Distances[Index] - Volume.Distances[Index])));
+                {
+                    const double Difference = std::abs(static_cast<double>(Archive.Distance->Distances[Index]) - Volume.Distances[Index]);
+                    Drift = std::max(Drift, Difference);
+                    Exceeded += Difference > std::max(6.0e-5, std::abs(static_cast<double>(Volume.Distances[Index])) * 4.9e-4) + 1.0e-7 ? 1u : 0u;
+                }
             }
-            // 📝 The stored volume is float16: half a unit in the last place of a ½ m distance is 1.2 × 10⁻⁴ m.
-            const bool Matches = Drift >= 0.0 && Drift < 2.5e-4;
+            const bool Matches = Drift >= 0.0 && Exceeded == 0;
             Failures += Matches ? 0 : 1;
             char Line[192];
             if (Drift < 0.0) std::snprintf(Line, sizeof(Line), "stale or missing (%s)", Archive.Diagnostic.c_str());

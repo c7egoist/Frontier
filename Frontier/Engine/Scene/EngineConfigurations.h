@@ -723,6 +723,7 @@ struct GeometryConfiguration : RevisionCounter
         uint32_t                           Authored         = 0;       // [-] placements in the archive: the most copies shown
         uint32_t                           Copies           = 0;       // [-] copies the base and the modifier stack produce
         uint32_t                           Shown            = 0;       // [-] copies drawn
+        uint32_t                           Layout           = 0;       // [-] base placements it lays out (the archive's; 1 for a shape)
         uint32_t                           Reserved         = 0;       // [-] copies laid out from the reserve (beyond the archive's)
         uint32_t                           ReserveFree      = 0;       // [-] reserve occupants nobody holds
         bool                               Shape            = false;   // [-] an engine shape

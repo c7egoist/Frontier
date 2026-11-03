@@ -134,6 +134,7 @@ void SceneGeometryOccupancy::Reset(const Frontier::GlobalIllumination::SceneStru
         for (uint32_t Slot = Scene_->ReserveCount; Slot > 0; --Slot) ReserveFree_.push_back(Scene_->ReserveFirst + Slot - 1);
     }
     Snapshot_ = std::make_shared<const GeometryResolutions>();
+    Volumes_  = std::make_shared<const std::vector<Frontier::GeometryPickVolume>>();
     ++Generation_;
 }
 
@@ -195,6 +196,7 @@ void SceneGeometryOccupancy::Bind(Occupancy& Entry, const Frontier::GeometryConf
         }
         Resolution.Bound  = true;
         Resolution.Shape  = true;
+        Resolution.Layout = 1;
         Resolution.Parts  = 1;
         Resolution.Shapes = {Set.Name};
         Resolution.Facets = static_cast<uint32_t>(Set.Facets.size());
@@ -245,6 +247,7 @@ void SceneGeometryOccupancy::Bind(Occupancy& Entry, const Frontier::GeometryConf
         }
         Resolution.Bound    = true;
         Resolution.Authored = Configuration.ClaimsArchive ? static_cast<uint32_t>(Placements) : 0u;
+        Resolution.Layout   = static_cast<uint32_t>(Placements);
         Resolution.Parts    = static_cast<uint32_t>(Parts.size());
         for (const auto& Part : Parts)
         {
@@ -574,62 +577,25 @@ std::vector<Frontier::GlobalIllumination::OccupantPlacement> SceneGeometryOccupa
             Snapshot->emplace(Token, std::move(Resolution));
         }
         Snapshot_ = std::move(Snapshot);
+        auto Volumes = std::make_shared<std::vector<Frontier::GeometryPickVolume>>();
+        for (const auto& [Token, Entry] : Occupancies_)
+            for (const ShownOccupant& Shown : Entry.Shown)
+            {
+                const auto& Set = Scene_->FacetSets[Shown.FacetSet];
+                Frontier::GeometryPickVolume Volume;
+                Volume.Token     = Token;
+                Volume.Placement = Shown.Placement;
+                for (size_t Axis = 0; Axis < 3; ++Axis)
+                {
+                    Volume.LocalMinimum[Axis] = static_cast<float>(Set.LocalMinimum[Axis]);
+                    Volume.LocalMaximum[Axis] = static_cast<float>(Set.LocalMaximum[Axis]);
+                }
+                Volumes->push_back(Volume);
+            }
+        Volumes_ = std::move(Volumes);
         ++Generation_;
     }
     return Placements;
-}
-
-//------------------------------------------------------------------------------------------------------------------------
-//                                                    PICKING
-//------------------------------------------------------------------------------------------------------------------------
-
-std::optional<uint64_t> SceneGeometryOccupancy::PickRecord(const std::array<double, 3>& Origin, const std::array<double, 3>& Direction,
-                                                           double* OutTravel) const
-{
-    if (Scene_ == nullptr) return std::nullopt;
-    std::optional<uint64_t> Nearest;
-    double                  Best = 1.0e30;
-    for (const auto& [Token, Entry] : Occupancies_)
-    {
-        for (const ShownOccupant& Shown : Entry.Shown)
-        {
-            // 📝 The ray in the part's frame (affine: travel stays the world parameter), then the slab test on its local bounds.
-            const Frontier::PlacementMatrix Inverse = Frontier::InvertPlacement(Shown.Placement);
-            std::array<double, 3> LocalOrigin{}, LocalDirection{};
-            for (size_t Row = 0; Row < 3; ++Row)
-            {
-                LocalOrigin[Row]    = Inverse[12 + Row];
-                LocalDirection[Row] = 0.0;
-                for (size_t Column = 0; Column < 3; ++Column)
-                {
-                    LocalOrigin[Row] += Inverse[Column * 4 + Row] * Origin[Column];
-                    LocalDirection[Row] += Inverse[Column * 4 + Row] * Direction[Column];
-                }
-            }
-            const auto& Set   = Scene_->FacetSets[Shown.FacetSet];
-            double      Enter = 0.0, Leave = 1.0e30;
-            bool        Missed = false;
-            for (size_t Axis = 0; Axis < 3 && !Missed; ++Axis)
-            {
-                if (std::abs(LocalDirection[Axis]) < 1.0e-12)
-                {
-                    Missed = LocalOrigin[Axis] < Set.LocalMinimum[Axis] || LocalOrigin[Axis] > Set.LocalMaximum[Axis];
-                    continue;
-                }
-                double Near = (Set.LocalMinimum[Axis] - LocalOrigin[Axis]) / LocalDirection[Axis];
-                double Far  = (Set.LocalMaximum[Axis] - LocalOrigin[Axis]) / LocalDirection[Axis];
-                if (Near > Far) std::swap(Near, Far);
-                Enter = std::max(Enter, Near);
-                Leave = std::min(Leave, Far);
-                Missed = Enter > Leave;
-            }
-            if (Missed || Enter >= Best) continue;
-            Best    = Enter;
-            Nearest = Token;
-        }
-    }
-    if (Nearest && OutTravel != nullptr) *OutTravel = Best;
-    return Nearest;
 }
 
 } // namespace Everest

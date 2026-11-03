@@ -248,20 +248,32 @@ bool ModifierStackSection::Construct(ControlColumn& Page, GeometryConfiguration&
     }
     else
     {
-        const size_t Bases  = Parameters.BaseCopies == 0 ? Resolved.Authored : std::min<size_t>(Parameters.BaseCopies, Resolved.Authored);
+        const size_t Bases  = Parameters.BaseCopies == 0 ? Resolved.Layout : std::min<size_t>(Parameters.BaseCopies, Resolved.Layout);
         const size_t Copies = CountModifierCopies(Bases, Stack);
-        const size_t Shown  = Parameters.Visible ? std::min<size_t>(Copies, Resolved.Authored) : 0;
-        if (Stack.empty())
+        // 📝 Copies past the archive's placements come from the reserve (the scene archive's former stress pool) while it lasts.
+        const size_t Drawable = std::min<size_t>(Copies, Resolved.Authored + Resolved.Reserved + Resolved.ReserveFree / std::max<uint32_t>(1u, Resolved.Parts));
+        const size_t Shown    = Parameters.Visible ? Drawable : 0;
+        if (Stack.empty() && Resolved.Shape)
+            std::snprintf(Text, sizeof(Text), "No modifiers: one %s, laid out from the reserve (%u occupants free). Add an Array to repeat it.",
+                          Resolved.Shapes.empty() ? "engine shape" : Resolved.Shapes.front().c_str(), Resolved.ReserveFree);
+        else if (Stack.empty() && Resolved.Authored > 0)
             std::snprintf(Text, sizeof(Text), "No modifiers: the object shows the scene archive's %u placement%s. Add an Array to repeat it.", Resolved.Authored,
                           Resolved.Authored == 1 ? "" : "s");
+        else if (Stack.empty())
+            std::snprintf(Text, sizeof(Text), "No modifiers: %zu cop%s of the archive's layout, laid out from the reserve.", Copies, Copies == 1 ? "y" : "ies");
+        else if (Resolved.Authored > 0)
+            std::snprintf(Text, sizeof(Text), "The stack makes %zu cop%s of %zu base cop%s; the scene archive holds %u, the reserve lays out the other %zu, and the "
+                                              "viewport shows %zu.",
+                          Copies, Copies == 1 ? "y" : "ies", Bases, Bases == 1 ? "y" : "ies", Resolved.Authored,
+                          Copies > Resolved.Authored ? std::min<size_t>(Copies, Drawable) - std::min<size_t>(Copies, Resolved.Authored) : 0u, Shown);
         else
-            std::snprintf(Text, sizeof(Text), "The stack makes %zu cop%s of %zu base cop%s; the scene archive holds %u, and the viewport shows %zu.", Copies,
-                          Copies == 1 ? "y" : "ies", Bases, Bases == 1 ? "y" : "ies", Resolved.Authored, Shown);
-        CaptionText::Construct(Page, Text, 0.0f, Copies > Resolved.Authored ? 4.0f : 16.0f);
-        if (Copies > Resolved.Authored)
+            std::snprintf(Text, sizeof(Text), "The stack makes %zu cop%s of %zu base cop%s, laid out from the reserve; the viewport shows %zu.", Copies,
+                          Copies == 1 ? "y" : "ies", Bases, Bases == 1 ? "y" : "ies", Shown);
+        CaptionText::Construct(Page, Text, 0.0f, Copies > Drawable ? 4.0f : 16.0f);
+        if (Copies > Drawable)
         {
-            std::snprintf(Text, sizeof(Text), "%zu cop%s past the archive's %u placements are not drawn: the renderer's occupants come from the scene archive.",
-                          Copies - Resolved.Authored, Copies - Resolved.Authored == 1 ? "y is" : "ies are", Resolved.Authored);
+            std::snprintf(Text, sizeof(Text), "%zu cop%s not drawn: the reserve is in use (%u occupants free). Remove copies elsewhere to free some.",
+                          Copies - Drawable, Copies - Drawable == 1 ? "y is" : "ies are", Resolved.ReserveFree);
             const float  S      = Page.QueryScale();
             const float  Height = ParagraphBlock::Construct(Page, Page.QueryFaces().Regular, 10.0f * S, 1.6f, Page.QueryCursor(), Page.QueryWidth(),
                                                             ResolveCautionInk(), Text, true) / S;

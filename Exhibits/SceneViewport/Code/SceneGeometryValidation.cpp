@@ -2,16 +2,21 @@
                                                         SCENEGEOMETRYVALIDATION.CPP
 ==========================================================================================================================================*/
 // 🧩 The scene geometry against the scene archive (no device): Project Everest's Geometry records bind every static
-//    occupant of the proving ground once, reproduce the archive's placements exactly, and move, hide and re-lay them as edited.
+//    occupant of the proving ground once, reproduce the archive's placements exactly, and move, hide and re-lay them as edited;
+//    then the editor's own objects: the baked engine shapes, the reserve that copies and constructed objects take, the
+//    per-object shadow / indirect / dynamic switches, material blocks, removal and the distance field's scale bound.
 
 #include "EverestSceneGeometry.h"
 
+#include "Frontier/Engine/Geometry/ShapeArchive.h"
 #include "Frontier/Engine/Rendering/GlobalIllumination/SceneStructure.h"
 #include "Frontier/Engine/Scene/GeometryLayout.h"
 #include "Frontier/Engine/Scene/SceneWorld.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -70,7 +75,8 @@ int main(int ArgumentCount, char** Arguments)
 {
     try
     {
-        if (ArgumentCount < 3) throw std::runtime_error("usage: SceneGeometryValidation <Projects/Everest> <EnvironmentArchives/ProvingGround> [scratch]");
+        if (ArgumentCount < 3)
+            throw std::runtime_error("usage: SceneGeometryValidation <Projects/Everest> <EnvironmentArchives/ProvingGround> [scratch] [ShapeArchives]");
         const std::filesystem::path Project = Arguments[1];
         const std::filesystem::path Archive = Arguments[2];
         const std::filesystem::path Scratch = ArgumentCount > 3 ? std::filesystem::path(Arguments[3]) : std::filesystem::temp_directory_path();
@@ -267,6 +273,253 @@ int main(int ArgumentCount, char** Arguments)
                        Frontier::ConfirmProximity(Identity, Frontier::ConstructIdentityPlacement(), 1.0e-9, 1.0e-9),
                    "placements decompose into position, XYZ Euler and scale and invert exactly");
         }
+        // ⑫ the engine shapes: six archives in EngineContent/ShapeArchives, each with its baked distance volume
+        const std::filesystem::path ShapeFolder = ArgumentCount > 4 ? std::filesystem::path(Arguments[4]) : Archive.parent_path().parent_path() / "ShapeArchives";
+        std::vector<std::string>             ShapeDiagnostics;
+        const std::vector<Frontier::ShapeArchive> Shapes = Frontier::ReadShapeArchives(ShapeFolder, &ShapeDiagnostics);
+        std::string ShapeNames;
+        size_t      Baked = 0;
+        for (const Frontier::ShapeArchive& Shape : Shapes)
+        {
+            Baked += Shape.Distance ? 1 : 0;
+            ShapeNames += (ShapeNames.empty() ? "" : ", ") + Shape.Name;
+            if (!Shape.Distance) std::printf("      %s: %s\n", Shape.Name.c_str(), Shape.Diagnostic.c_str());
+        }
+        Report(Shapes.size() == 6 && Baked == 6, std::to_string(Shapes.size()) + " engine shapes (" + ShapeNames + "), " + std::to_string(Baked) +
+                                                     " with their baked distance volumes");
+        const auto ShapeIndex = [&](const std::string& Name) {
+            for (size_t Index = 0; Index < Shapes.size(); ++Index)
+                if (Shapes[Index].Name == Name) return static_cast<uint32_t>(Index);
+            throw std::runtime_error("no engine shape " + Name);
+        };
+
+        // ⑬ the reserve: the scene as the viewport loads it (shapes appended, the stress pool's first 512 occupants reserved)
+        Frontier::SceneWorld Editor;
+        if (!Editor.LoadLevelSpace(Project / "Content" / "Levels" / "Default.levelspace", &Diagnostic)) throw std::runtime_error(Diagnostic);
+        SceneStructure Reserved;
+        if (!Reserved.LoadFacetSpace(Archive / "ProvingGround.facetspace", &Diagnostic)) throw std::runtime_error(Diagnostic);
+        Reserved.AppendShapeSets(Shapes, static_cast<uint32_t>(Materials.size() / 48));
+        Reserved.ConvertStressReserve(512);
+        Everest::SceneGeometryOccupancy Objects;
+        Objects.Reset(&Reserved, Materials, Shapes);
+        {
+            const auto Start = Objects.ResolvePlacements(Editor);
+            size_t     Same  = 0, FromReserve = 0;
+            for (const OccupantPlacement& Placement : Start)
+            {
+                Same += Placement.Active && Placement.Current == Reserved.Occupants[Placement.Occupant].Current ? 1 : 0;
+                FromReserve += Reserved.QueryReserved(Placement.Occupant) ? 1 : 0;
+            }
+            char Line[220];
+            std::snprintf(Line, sizeof(Line), "a reserve of %u occupants (#%u-#%u, below the distance field's identity ceiling 2044): the default level "
+                                              "still resolves %zu placements exactly, none from the reserve",
+                          Reserved.ReserveCount, Reserved.ReserveFirst, Reserved.ReserveFirst + Reserved.ReserveCount - 1, Start.size());
+            Report(Reserved.ReserveCount == 512 && Objects.QueryReserveFree() == 512 && Reserved.ReserveFirst + Reserved.ReserveCount <= 2044 &&
+                       Start.size() == 504 && Same == Start.size() && FromReserve == 0,
+                   Line);
+        }
+
+        // ⑭ an array past the archive's copies: the reserve lays out the rest at the same step, with the object's shape
+        auto&                     NorthEdit  = FindGeometry(Editor, "Boundary north")->AccessConfiguration();
+        const Frontier::RecordToken NorthToken = FindGeometry(Editor, "Boundary north")->QueryToken();
+        NorthEdit.Modifiers.front().Count = 60;
+        NorthEdit.AdvanceRevision();
+        {
+            const auto                     Placed  = Objects.ResolvePlacements(Editor);
+            const auto                     Archived = Matches(Reserved, "Boundary North");
+            std::vector<OccupantPlacement> Extra;
+            for (const OccupantPlacement& Placement : Placed)
+                if (Reserved.QueryReserved(Placement.Occupant) && Placement.Active) Extra.push_back(Placement);
+            std::sort(Extra.begin(), Extra.end(), [](const OccupantPlacement& Left, const OccupantPlacement& Right) { return Left.Current[12] < Right.Current[12]; });
+            const auto& First  = Reserved.Occupants[Archived[0]].Current;
+            const auto& Second = Reserved.Occupants[Archived[1]].Current;
+            double      Worst  = Extra.size() == 6 ? 0.0 : 1.0;
+            bool        Shaped = Extra.size() == 6;
+            for (size_t Copy = 0; Copy < Extra.size(); ++Copy)
+            {
+                const double Step = static_cast<double>(54 + Copy);
+                for (int Axis = 0; Axis < 3; ++Axis)
+                    Worst = std::max(Worst, std::fabs(Extra[Copy].Current[static_cast<size_t>(12 + Axis)] -
+                                                      (First[static_cast<size_t>(12 + Axis)] + Step * (Second[static_cast<size_t>(12 + Axis)] - First[static_cast<size_t>(12 + Axis)]))));
+                Shaped = Shaped && Extra[Copy].Template && Extra[Copy].Template->FacetSet == Reserved.Occupants[Archived[0]].FacetSet;
+            }
+            const auto& Resolution = Objects.QueryResolutions()->at(NorthToken.Value);
+            char        Line[220];
+            std::snprintf(Line, sizeof(Line), "Boundary north at count 60: %u copies shown, %u from the reserve at the archive's step (worst %.2e m), each with "
+                                              "the boundary's shape",
+                          Resolution.Shown, Resolution.Reserved, Worst);
+            Report(Resolution.Shown == 60 && Resolution.Reserved == 6 && Worst < 1.0e-4 && Shaped, Line);
+        }
+
+        // ⑮ an engine shape: a record that names the Cube takes one reserve occupant with the shape's facet set
+        const Frontier::RecordToken CubeToken = Editor.ConstructRecord("Geometry", "Cube");
+        auto& CubeEdit = dynamic_cast<Frontier::GeometryRecord*>(Editor.FindRecord(CubeToken))->AccessConfiguration();
+        CubeEdit.OccupantStems.clear();
+        CubeEdit.ClaimsArchive = false;
+        CubeEdit.ShapeName     = "Cube";
+        const float CubeAt[3] = {-44.0f, -21.0f, 1.5f};
+        for (int Axis = 0; Axis < 3; ++Axis)
+        {
+            CubeEdit.Spatial.PositionMetres[Axis] = CubeAt[Axis];
+            CubeEdit.Spatial.Scale[Axis]          = 3.0f;
+        }
+        CubeEdit.Spatial.OrientationDegrees[2] = 20.0f;
+        CubeEdit.AdvanceRevision();
+        uint32_t CubeOccupant = 0;
+        {
+            const auto Placed   = Objects.ResolvePlacements(Editor);
+            const auto Expected = Frontier::ConstructPlacement({-44.0, -21.0, 1.5}, {0.0, 0.0, 20.0}, {3.0, 3.0, 3.0});
+            bool       Found    = false;
+            for (const OccupantPlacement& Placement : Placed)
+                if (Placement.Template && Placement.Template->FacetSet == Reserved.ShapeSetFirst + ShapeIndex("Cube"))
+                {
+                    Found        = Reserved.QueryReserved(Placement.Occupant) && Placement.Active && Frontier::ConfirmProximity(Placement.Current, Expected, 1.0e-5, 1.0e-5);
+                    CubeOccupant = Placement.Occupant;
+                }
+            const auto& Resolution = Objects.QueryResolutions()->at(CubeToken.Value);
+            Report(Found && Resolution.Bound && Resolution.Shape && Resolution.Shown == 1 && Resolution.Facets == Shapes[ShapeIndex("Cube")].Facets.size(),
+                   "Construct > Cube at (-44, -21), 3 m, turned 20\xC2\xB0: reserve occupant #" + std::to_string(CubeOccupant) + " with the Cube's facet set (" +
+                       std::to_string(Resolution.Facets) + " triangles) at exactly that placement");
+        }
+
+        // ⑯ a duplicate: the control tower's three parts again from the reserve, 16 m along X
+        const Frontier::RecordToken CopyToken = Editor.ConstructRecord("Geometry", "Control tower copy");
+        {
+            auto& CopyEdit = dynamic_cast<Frontier::GeometryRecord*>(Editor.FindRecord(CopyToken))->AccessConfiguration();
+            CopyEdit       = FindGeometry(Editor, "Control tower")->QueryConfiguration();
+            CopyEdit.ClaimsArchive = false;
+            CopyEdit.Spatial.PositionMetres[0] += 16.0f;
+            CopyEdit.AdvanceRevision();
+            const auto Placed = Objects.ResolvePlacements(Editor);
+            std::set<uint32_t> TowerSets;
+            for (const char* Stem : {"Control tower", "Control tower cabin", "Control tower roof"})
+                for (const uint32_t Occupant : Matches(Reserved, Stem)) TowerSets.insert(Reserved.Occupants[Occupant].FacetSet);
+            size_t Parts = 0;
+            double Worst = 0.0;
+            for (const OccupantPlacement& Placement : Placed)
+            {
+                if (!Reserved.QueryReserved(Placement.Occupant) || !Placement.Template || Placement.Template->FacetSet == Reserved.ShapeSetFirst + ShapeIndex("Cube"))
+                    continue;
+                if (!TowerSets.count(Placement.Template->FacetSet)) continue;
+                ++Parts;
+                const auto& Source = Placement.Template->Current;
+                Worst = std::max({Worst, std::fabs(Placement.Current[12] - Source[12] - 16.0), std::fabs(Placement.Current[13] - Source[13]),
+                                  std::fabs(Placement.Current[14] - Source[14])});
+            }
+            char Line[200];
+            std::snprintf(Line, sizeof(Line), "Duplicate of the control tower: %zu parts from the reserve, each the original's placement moved 16 m in X (worst %.2e m)",
+                          Parts, Worst);
+            Report(Parts == 3 && Worst < 1.0e-4, Line);
+        }
+
+        // ⑰ the switches: Cast shadows off, GI off and Dynamic on reach every part's participation, and come back
+        auto& TowerEdit = FindGeometry(Editor, "Control tower")->AccessConfiguration();
+        {
+            namespace Bits = Frontier::GlobalIllumination::OccupantParticipation;
+            TowerEdit.CastShadows        = false;
+            TowerEdit.GlobalIllumination = false;
+            TowerEdit.Dynamic            = true;
+            TowerEdit.AdvanceRevision();
+            size_t Set = 0, Cleared = 0;
+            for (const OccupantPlacement& Placement : Objects.ResolvePlacements(Editor))
+                Set += Placement.Participation && (*Placement.Participation & (Bits::ShadowExempt | Bits::IndirectExempt | Bits::Dynamic)) ==
+                                                      (Bits::ShadowExempt | Bits::IndirectExempt | Bits::Dynamic)
+                           ? 1
+                           : 0;
+            TowerEdit.CastShadows        = true;
+            TowerEdit.GlobalIllumination = true;
+            TowerEdit.Dynamic            = false;
+            TowerEdit.AdvanceRevision();
+            for (const OccupantPlacement& Placement : Objects.ResolvePlacements(Editor))
+                Cleared += Placement.Participation && (*Placement.Participation & (Bits::ShadowExempt | Bits::IndirectExempt | Bits::Dynamic)) == 0 ? 1 : 0;
+            Report(Set == 3 && Cleared == 3, "Control tower with Cast shadows and GI off and Dynamic on: " + std::to_string(Set) +
+                                                 " of 3 parts carry ShadowExempt | IndirectExempt | Dynamic, and " + std::to_string(Cleared) +
+                                                 " lose them again");
+        }
+
+        // ⑱ a surface of its own: the cube's first family copied into a material block, its cards captured again
+        {
+            const auto& Resolution = Objects.QueryResolutions()->at(CubeToken.Value);
+            Frontier::SurfaceSlotConfiguration Slot;
+            Slot.Family   = Resolution.Families.front();
+            Slot.Channels = Resolution.FamilyChannels.front();
+            Slot.Channels[0] = 0.62f;
+            Slot.Channels[1] = 0.05f;
+            Slot.Channels[2] = 0.04f;
+            CubeEdit.SurfaceSlots.push_back(Slot);
+            CubeEdit.AdvanceRevision();
+            const auto Placed = Objects.ResolvePlacements(Editor);
+            const auto Blocks = Objects.ConsumeMaterialBlocks();
+            bool       Overridden = false;
+            for (const OccupantPlacement& Placement : Placed)
+                if (Placement.Occupant == CubeOccupant)
+                    Overridden = Placement.MaterialOverride && (static_cast<uint32_t>(*Placement.MaterialOverride) & Frontier::GlobalIllumination::MaterialBlockBit) != 0 &&
+                                 Placement.Recapture;
+            float Red = -1.0f;
+            if (Blocks.size() == 1 && Blocks.front().second.size() >= (Slot.Family + 1) * 48u)
+                std::memcpy(&Red, Blocks.front().second.data() + static_cast<size_t>(Slot.Family) * 48u, sizeof(float));
+            const auto& After = Objects.QueryResolutions()->at(CubeToken.Value);
+            Report(Blocks.size() == 1 && std::fabs(Red - 0.62f) < 1.0e-6f && Overridden && After.OwnSurfaces,
+                   "the cube's own surface: 1 material block written (family #" + std::to_string(Slot.Family) + " albedo red 0.62), the cube's override names "
+                   "the block and its cards are captured again");
+        }
+
+        // ⑲ removing an archive object: the jump ramp's occupant is hidden while the level holds Geometry records
+        {
+            const auto Ramp = Matches(Reserved, "Jump ramp");
+            Report(Editor.DestroyRecord(FindGeometry(Editor, "Jump ramp")->QueryToken()), "the jump ramp record is removed");
+            const auto Placed = Index(Objects.ResolvePlacements(Editor));
+            size_t     Hidden = 0;
+            for (const uint32_t Occupant : Ramp) Hidden += Placed.count(Occupant) && !Placed.at(Occupant).Active ? 1 : 0;
+            Report(!Ramp.empty() && Hidden == Ramp.size(), std::to_string(Hidden) + " of " + std::to_string(Ramp.size()) + " jump ramp occupants hidden after its removal");
+        }
+
+        // ⑳ exhaustion: more copies than the reserve holds are reported, and the reserve comes back when they go
+        {
+            NorthEdit.Modifiers.front().Count = 654;
+            NorthEdit.AdvanceRevision();
+            (void)Objects.ResolvePlacements(Editor);
+            const auto Exhausted = Objects.QueryResolutions()->at(NorthToken.Value);
+            const uint32_t FreeWhenExhausted = Objects.QueryReserveFree();
+            NorthEdit.Modifiers.front().Count = 54;
+            NorthEdit.AdvanceRevision();
+            (void)Objects.ResolvePlacements(Editor);
+            const uint32_t FreeAfter = Objects.QueryReserveFree();
+            char Line[220];
+            std::snprintf(Line, sizeof(Line), "Boundary north at count 654: %u of %u copies shown with the reserve exhausted (%u free); back at 54 the reserve "
+                                              "has %u free (the cube and the tower copy hold 4)",
+                          Exhausted.Shown, Exhausted.Copies, FreeWhenExhausted, FreeAfter);
+            Report(Exhausted.Copies == 654 && Exhausted.Shown == 54 + 508 && FreeWhenExhausted == 0 && FreeAfter == 508, Line);
+        }
+
+        // ㉑ the distance field's scale bound (DistanceUnion.slang ResolveDistanceScale): exact for a uniform scale, never above the
+        //    smallest singular value otherwise
+        {
+            const auto DistanceScale = [](const Frontier::PlacementMatrix& Placement) {
+                const Frontier::PlacementMatrix Inverse = Frontier::InvertPlacement(Placement);
+                double                          Bound   = 0.0;
+                for (int Row = 0; Row < 3; ++Row)
+                {
+                    double Sum = 0.0;
+                    for (int Column = 0; Column < 3; ++Column)
+                    {
+                        double Gram = 0.0;
+                        for (int Inner = 0; Inner < 3; ++Inner) Gram += Inverse[static_cast<size_t>(Row * 4 + Inner)] * Inverse[static_cast<size_t>(Column * 4 + Inner)];
+                        Sum += std::fabs(Gram);
+                    }
+                    Bound = std::max(Bound, Sum);
+                }
+                return 1.0 / std::sqrt(std::max(Bound, 1.0e-20));
+            };
+            const double Uniform   = DistanceScale(Frontier::ConstructPlacement({1.0, 2.0, 3.0}, {10.0, 20.0, 30.0}, {2.0, 2.0, 2.0}));
+            const double Stretched = DistanceScale(Frontier::ConstructPlacement({1.0, 2.0, 3.0}, {10.0, 20.0, 30.0}, {3.0, 1.0, 0.5}));
+            const double Rigid     = DistanceScale(Frontier::ConstructPlacement({-5.0, 4.0, 0.0}, {0.0, 0.0, 73.0}, {1.0, 1.0, 1.0}));
+            char         Line[200];
+            std::snprintf(Line, sizeof(Line), "distance scale: %.12f for a uniform 2 (exact 2), %.4f for (3, 1, 0.5) (never above 0.5), %.12f for a rigid placement",
+                          Uniform, Stretched, Rigid);
+            Report(std::fabs(Uniform - 2.0) < 1.0e-9 && Stretched <= 0.5 + 1.0e-12 && Stretched > 0.05 && std::fabs(Rigid - 1.0) < 1.0e-9, Line);
+        }
+
         std::printf("SceneGeometryValidation: %d of %d checks passed\n", Checks - Failures, Checks);
         return Failures == 0 ? 0 : 1;
     }

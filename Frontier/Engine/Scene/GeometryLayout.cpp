@@ -220,4 +220,53 @@ std::vector<PlacementMatrix> EvaluateModifierStack(const std::vector<PlacementMa
     return Copies;
 }
 
+//------------------------------------------------------------------------------------------------------------------------
+//                                                    PICKING
+//------------------------------------------------------------------------------------------------------------------------
+
+std::optional<uint64_t> PickGeometryVolume(const std::vector<GeometryPickVolume>& Volumes, const std::array<double, 3>& Origin,
+                                           const std::array<double, 3>& Direction, double* OutTravel)
+{
+    std::optional<uint64_t> Nearest;
+    double                  Best = 1.0e30;
+    for (const GeometryPickVolume& Volume : Volumes)
+    {
+        // 📝 The ray in the part's frame, then the slab test on its local bounds.
+        const PlacementMatrix Inverse = InvertPlacement(Volume.Placement);
+        std::array<double, 3> LocalOrigin{}, LocalDirection{};
+        for (size_t Row = 0; Row < 3; ++Row)
+        {
+            LocalOrigin[Row] = Inverse[12 + Row];
+            for (size_t Column = 0; Column < 3; ++Column)
+            {
+                LocalOrigin[Row] += Inverse[Column * 4 + Row] * Origin[Column];
+                LocalDirection[Row] += Inverse[Column * 4 + Row] * Direction[Column];
+            }
+        }
+        double Enter = 0.0, Leave = 1.0e30;
+        bool   Missed = false;
+        for (size_t Axis = 0; Axis < 3 && !Missed; ++Axis)
+        {
+            if (std::abs(LocalDirection[Axis]) < 1.0e-12)
+            {
+                Missed = LocalOrigin[Axis] < Volume.LocalMinimum[Axis] || LocalOrigin[Axis] > Volume.LocalMaximum[Axis];
+                continue;
+            }
+            double Near = (Volume.LocalMinimum[Axis] - LocalOrigin[Axis]) / LocalDirection[Axis];
+            double Far  = (Volume.LocalMaximum[Axis] - LocalOrigin[Axis]) / LocalDirection[Axis];
+            if (Near > Far) std::swap(Near, Far);
+            Enter  = std::max(Enter, Near);
+            Leave  = std::min(Leave, Far);
+            Missed = Enter > Leave;
+        }
+        // 📝 A volume around the camera (a tunnel it stands in) counts at its far wall, so what stands inside it stays pickable.
+        if (!Missed && Enter <= 1.0e-9) Enter = Leave;
+        if (Missed || Enter >= Best) continue;
+        Best    = Enter;
+        Nearest = Volume.Token;
+    }
+    if (Nearest && OutTravel != nullptr) *OutTravel = Best;
+    return Nearest;
+}
+
 } // namespace Frontier

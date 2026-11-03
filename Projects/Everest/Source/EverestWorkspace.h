@@ -12,6 +12,8 @@
 #if FRONTIER_EDITOR && defined(FRONTIER_WITH_INTERFACE_SDK)
 struct ImDrawList;
 struct ImVec2;
+#include "Engine/Interface/ConstructPanel.h"
+#include "Engine/Interface/Controls/PlacementGizmo.h"
 #include "Engine/Interface/LogStreamPanel.h"
 #include "Engine/Interface/PanelDockspace.h"
 #include "Engine/Interface/SceneDirectoryPanel.h"
@@ -21,6 +23,7 @@ struct ImVec2;
 
 #include "Engine/Scene/EngineConfigurations.h"
 #include "Engine/Scene/EnvironmentDiagnostics.h"
+#include "Engine/Scene/GeometryLayout.h"
 
 #include <array>
 #include <cstdint>
@@ -71,6 +74,7 @@ struct SceneViewportReadout
     // 📝 What each Geometry record resolved to against the loaded scene archive (record token value → resolution) and a
     //    counter that advances whenever any of them changed; the workspace copies them into the records for their inspector.
     std::shared_ptr<const std::unordered_map<uint64_t, Frontier::GeometryConfiguration::Resolution>> Geometry{};
+    std::shared_ptr<const std::vector<Frontier::GeometryPickVolume>> GeometryVolumes{};   // [-] shown parts, for picking
     uint64_t                GeometryGeneration  = 0;
 };
 
@@ -193,6 +197,12 @@ class EverestWorkspace
     [[nodiscard]] Frontier::SceneInspectorPanel& QueryInspector() noexcept { return InspectorPanel; }
     [[nodiscard]] Frontier::LogStreamPanel&      QueryLogStream() noexcept { return LogPanel; }
     [[nodiscard]] Frontier::PanelDockspace&      QueryDockspace() noexcept { return Dockspace; }
+    [[nodiscard]] Frontier::ConstructPanel&      QueryConstructDialog() noexcept { return ConstructDialog; }
+
+    // 📝 Adds what the Construct dialog ordered: an engine shape as a Geometry record on the ground where the view looks, or a
+    //    record type; and duplicates a scene object (its copies from the reserve). The dialog and the keys call these too.
+    void                  ServiceConstructOrder(const Frontier::ConstructOrder& Order);
+    Frontier::RecordToken DuplicateGeometryRecord(Frontier::RecordToken Token);
 #endif
 
     [[nodiscard]] EverestApplication&          AccessApplication() noexcept { return Application; }
@@ -210,9 +220,18 @@ class EverestWorkspace
 #if FRONTIER_EDITOR && defined(FRONTIER_WITH_INTERFACE_SDK)
     void ServiceDynamicSceneRequests();
     void SaveActiveLevel();
+    // 📝 Scene objects (the Project Zero editor's tools): the Construct dialog's catalogue and orders, duplicates, renames, the
+    //    keys, picking in the viewport and the transform handles.
+    void ConfigureConstructCatalogue();
+    void ServiceSceneObjectKeys();
+    void ApplyPendingSurfaces();
+    [[nodiscard]] std::string ResolveUniqueName(const std::string& Stem) const;
+    [[nodiscard]] std::array<double, 3> ResolveGroundTarget() const;
+    [[nodiscard]] Frontier::GeometryConfiguration* ResolveEditedGeometry();
+    [[nodiscard]] Frontier::PlacementView ResolvePlacementView(const ImVec2& StageMin, const ImVec2& StageExtent) const;
     void ConstructViewportSurface();
     void ConstructViewportSchematic(ImDrawList* DrawList, const ImVec2& Min, const ImVec2& Max);
-    void IntegrateViewportCamera(bool Hovered, bool Active, double DeltaSeconds);
+    void IntegrateViewportCamera(bool Hovered, bool Active, double DeltaSeconds, bool LeftClaimed = false);
     void ReleasePointerConstraint();
     void ConstructViewportBar(const ImVec2& Min, const ImVec2& Max, float Scale);
     void ConstructViewportOverlays(const ImVec2& StageMin, const ImVec2& StageMax, const SceneViewportImage& Image, float Scale);
@@ -243,6 +262,13 @@ class EverestWorkspace
     std::string                   NoticeText{};                       // [-] #overlay-notice
     double                        NoticeSeconds          = 0.0;       // [s] left on screen
     int                           AnnouncedSpeedSetting  = 4;         // [-]
+    Frontier::ConstructPanel      ConstructDialog{};
+    Frontier::PlacementGizmo      Gizmo{};
+    Frontier::PlacementGizmoMode  GizmoMode              = Frontier::PlacementGizmoMode::Move;
+    ImVec2                        PickPress{};                        // [px] where a left press on the stage began
+    bool                          PickPending            = false;     // [-] that press may still be a click (a pick)
+    bool                          GizmoPress             = false;     // [-] that press began on a handle
+    std::unordered_map<uint64_t, std::array<float, 3>> PendingAlbedo{};   // [-] constructed shapes waiting for their family
 #endif
 
     std::filesystem::path ProjectRoot;

@@ -2,15 +2,22 @@
                                                             MATERIALSECTION.CPP
 ==========================================================================================================================================*/
 // 🧩 The geometry inspector's material card (the Project Zero editor's compact MaterialPanel): the families the object's
-//    copies use, one surface slot at a time, with the scene archive's channel values.
+//    copies use, one surface slot at a time, with their channel values and the controls that give the object surfaces of
+//    its own (copy on write: the first edit copies the family into the object's material block).
 
 #include "Engine/Interface/Inspectors/Geometry/GeometrySections.h"
 
+#include "Engine/Interface/Controls/ActionRow.h"
 #include "Engine/Interface/Controls/ChannelRows.h"
 #include "Engine/Interface/Controls/PageControls.h"
+#include "Engine/Interface/Controls/SliderRow.h"
+#include "Engine/Interface/Controls/TintRow.h"
 #include "Engine/Interface/InspectorControls.h"
 
+#include <imgui.h>
+
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <string>
@@ -58,12 +65,12 @@ uint32_t EncodeSwatch(float Red, float Green, float Blue)
 //                                                    MATERIAL
 //------------------------------------------------------------------------------------------------------------------------
 
-void GeometryMaterialSection::Construct(ControlColumn& Page, const GeometryConfiguration& Parameters, const std::string& RecordName, int& Slot)
+bool GeometryMaterialSection::Construct(ControlColumn& Page, GeometryConfiguration& Parameters, const std::string& RecordName, int& Slot)
 {
     const auto&            Resolved = Parameters.Resolved;
     const EditorTypefaces& Faces    = Page.QueryFaces();
     const float            S        = Page.QueryScale();
-    if (!Resolved.Bound || Resolved.Families.empty()) return;
+    if (!Resolved.Bound || Resolved.Families.empty()) return false;
     Slot = std::clamp(Slot, 0, static_cast<int>(Resolved.Families.size()) - 1);
     const size_t                 Chosen   = static_cast<size_t>(Slot);
     const uint32_t               Family   = Resolved.Families[Chosen];
@@ -129,11 +136,68 @@ void GeometryMaterialSection::Construct(ControlColumn& Page, const GeometryConfi
         {"Transmission", "Surface", Transmission, "constant", 0u},
     };
     (void)ChannelRows::Construct(Page, "Channels", Rows, 7, 0);
-    std::snprintf(Text, sizeof(Text), "Read from the scene archive's material table (Materials.bin). %s is shared by %u object%s, so it is shown here; "
-                                      "editing waits for material slots of the object's own.",
-                  Resolved.FamilyNames[Chosen].c_str(), Users, Users == 1 ? "" : "s");
+
+    // ④ the controls: the first edit copies the family into the object's surfaces (its material block), Revert gives it back
+    auto Owned = std::find_if(Parameters.SurfaceSlots.begin(), Parameters.SurfaceSlots.end(),
+                              [Family](const SurfaceSlotConfiguration& Entry) { return Entry.Family == Family; });
+    const bool            Owns    = Owned != Parameters.SurfaceSlots.end();
+    std::array<float, 12> Edited  = Owns ? Owned->Channels : Channels;
+    bool                  Changed = false;
+    const bool            Enabled = !Parameters.Locked;
+    ImGui::PushID("MaterialControls");
+    float Albedo[3] = {Edited[0], Edited[1], Edited[2]};
+    if (TintRow::Construct(Page, "BaseColour", "Base colour", Albedo, Enabled, "The surface's albedo (linear)"))
+    {
+        for (int Channel = 0; Channel < 3; ++Channel) Edited[static_cast<size_t>(Channel)] = Albedo[Channel];
+        Changed = true;
+    }
+    Changed |= SliderRow::Construct(Page, "Roughness", "Roughness", Edited[3], 0.02f, 1.0f, 0.01f, "", 1.0f, Enabled);
+    Changed |= SliderRow::Construct(Page, "Metallic", "Metallic", Edited[7], 0.0f, 1.0f, 0.01f, "", 1.0f, Enabled);
+    Changed |= SliderRow::Construct(Page, "Reflectance", "Reflectance", Edited[10], 0.0f, 1.0f, 0.005f, "", 1.0f, Enabled,
+                                    "Specular level: 0.5 is a 4 % reflectance at normal incidence");
+    Changed |= SliderRow::Construct(Page, "Coat", "Clear coat", Edited[8], 0.0f, 1.0f, 0.01f, "", 1.0f, Enabled);
+    Changed |= SliderRow::Construct(Page, "CoatRoughness", "Coat roughness", Edited[9], 0.0f, 1.0f, 0.01f, "", 1.0f, Enabled);
+    Changed |= SliderRow::Construct(Page, "Transmission", "Transmission", Edited[11], 0.0f, 1.0f, 0.01f, "", 1.0f, Enabled);
+    const float Glow    = std::max({Edited[4], Edited[5], Edited[6]});
+    float       Hue[3]  = {Glow > 0.0f ? Edited[4] / Glow : 1.0f, Glow > 0.0f ? Edited[5] / Glow : 1.0f, Glow > 0.0f ? Edited[6] / Glow : 1.0f};
+    float       Lumens  = Glow;
+    const bool  Tinted  = TintRow::Construct(Page, "EmissionColour", "Emission colour", Hue, Enabled, "The incandescence's colour");
+    const bool  Brought = SliderRow::Construct(Page, "EmissionStrength", "Emission", Lumens, 0.0f, 40.0f, 0.05f, "", 1.0f, Enabled,
+                                               "Incandescence strength (linear radiance scale)");
+    if (Tinted || Brought)
+    {
+        for (int Channel = 0; Channel < 3; ++Channel) Edited[static_cast<size_t>(4 + Channel)] = Hue[Channel] * Lumens;
+        Changed = true;
+    }
+    if (Changed)
+    {
+        if (Owns) Owned->Channels = Edited;
+        else Parameters.SurfaceSlots.push_back({Family, Edited});
+    }
+    if (Owns && !Changed)
+    {
+        const ActionEntry Revert[1] = {{"RevertSurface", "Revert to the shared family", Enabled, "Drop this object's copy of the family"}};
+        ActionRowLook     Look;
+        Look.MarginTop    = 12.0f;
+        Look.MarginBottom = 12.0f;
+        if (ActionRow::Construct(Page, Revert, Look) == 0)
+        {
+            Parameters.SurfaceSlots.erase(Owned);
+            Changed = true;
+        }
+    }
+    ImGui::PopID();
+    if (Owns)
+        std::snprintf(Text, sizeof(Text), "This object owns its %s surfaces (a material block of its own); the %u other object%s sharing the family keep "
+                                          "the scene archive's values.",
+                      Resolved.FamilyNames[Chosen].c_str(), Users > 0 ? Users - 1 : 0u, Users == 2 ? "" : "s");
+    else
+        std::snprintf(Text, sizeof(Text), "From the scene archive's material table (Materials.bin), shared by %u object%s. The first edit copies %s into this "
+                                          "object's own surfaces; the others keep theirs.",
+                      Users, Users == 1 ? "" : "s", Resolved.FamilyNames[Chosen].c_str());
     CaptionText::Construct(Page, Text, 0.0f, 0.0f);
     Page.EndCard();
+    return Changed;
 }
 
 } // namespace Frontier

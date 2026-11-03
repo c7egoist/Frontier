@@ -57,15 +57,16 @@ bool GeometryTransformSection::Construct(ControlColumn& Page, GeometryConfigurat
         {"Scale", "\xC3\x97", Spatial.Scale, 0.001f, 1000.0f, 0.01f, "%.3f", {1.0f, 1.0f, 1.0f}},
     };
     const bool Changed = TransformTable::Construct(Page, "Transform", Rows, 3, !Parameters.Locked);
-    char Note[200];
+    char        Note[240];
+    const char* Origin = Parameters.ClaimsArchive && Parameters.ShapeName.empty() ? "where the scene archive placed it" : "where it was constructed";
     if (Parameters.Locked)
         std::snprintf(Note, sizeof(Note), "Object locked. Unlock it in Quick controls to edit.");
     else if (Parameters.Resolved.Shown > 1)
         std::snprintf(Note, sizeof(Note), "Drag to scrub, double-click to type \xC2\xB7 Alt for precision, Shift for speed. All %u copies move with the object; "
-                                          "the resets return it to where the scene archive placed it.", Parameters.Resolved.Shown);
+                                          "the resets return it to %s. In the viewport: W move, E rotate, R scale.", Parameters.Resolved.Shown, Origin);
     else
         std::snprintf(Note, sizeof(Note), "Drag to scrub, double-click to type \xC2\xB7 Alt for precision, Shift for speed. The resets return the object to "
-                                          "where the scene archive placed it.");
+                                          "%s. In the viewport: W move, E rotate, R scale.", Origin);
     CaptionText::Construct(Page, Note, 0.0f, 0.0f);
     Page.EndCard();
     if (Changed) Spatial.AdvanceRevision();

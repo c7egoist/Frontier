@@ -74,9 +74,9 @@ class SceneGeometryOccupancy
     [[nodiscard]] const std::vector<Frontier::ShapeArchive>& QueryShapes() const noexcept { return Shapes_; }
     [[nodiscard]] uint32_t QueryReserveFree() const noexcept { return static_cast<uint32_t>(ReserveFree_.size()); }
 
-    // 📝 The record whose shown copy the ray meets first (each part's local bounds under its placement), and the travel to it.
-    [[nodiscard]] std::optional<uint64_t> PickRecord(const std::array<double, 3>& Origin, const std::array<double, 3>& Direction,
-                                                     double* OutTravel = nullptr) const;
+    // 📝 Every shown part of every record with its placement and local bounds, replaced with the resolutions (the workspace
+    //    picks objects in the viewport with them: PickGeometryVolume).
+    [[nodiscard]] std::shared_ptr<const std::vector<Frontier::GeometryPickVolume>> QueryPickVolumes() const noexcept { return Volumes_; }
 
   private:
     struct ShownOccupant
@@ -127,6 +127,7 @@ class SceneGeometryOccupancy
     std::vector<std::pair<uint32_t, std::vector<uint8_t>>> BlockWrites_{};
     std::unordered_map<uint64_t, Occupancy>             Occupancies_{};
     std::shared_ptr<const GeometryResolutions>          Snapshot_ = std::make_shared<const GeometryResolutions>();
+    std::shared_ptr<const std::vector<Frontier::GeometryPickVolume>> Volumes_ = std::make_shared<const std::vector<Frontier::GeometryPickVolume>>();
     uint64_t                                            Generation_ = 0;
 };
 

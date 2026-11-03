@@ -169,6 +169,8 @@ add_library(FrontierSceneEditorUI STATIC
     Frontier/Engine/Interface/Controls/QuickTiles.cpp
     Frontier/Engine/Interface/Controls/ModifierPanel.cpp
     Frontier/Engine/Interface/Controls/ChannelRows.cpp
+    Frontier/Engine/Interface/Controls/PlacementGizmo.cpp
+    Frontier/Engine/Interface/ConstructPanel.cpp
     Frontier/Engine/Interface/Inspectors/RenderInspectionModes.cpp
     Frontier/Engine/Interface/Inspectors/SpatialInspector.cpp
     Frontier/Engine/Interface/Inspectors/PhysicsInspector.cpp

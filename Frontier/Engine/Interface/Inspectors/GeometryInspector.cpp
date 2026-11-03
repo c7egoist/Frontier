@@ -78,13 +78,18 @@ void GeometryInspector::ConstructInspector()
     // ① the heading: Inspector / Geometry / group, the object's name, what it is made of; the notes under it when open
     std::string Breadcrumb = "Inspector / Geometry";
     if (!Parameters.GroupName.empty()) Breadcrumb += " / " + Parameters.GroupName;
-    std::string Subtitle = "Geometry";
+    std::string Subtitle = Resolved.Shape ? "Engine shape" : (Parameters.ClaimsArchive ? "Geometry" : "Duplicate");
     if (Resolved.Bound)
     {
-        for (size_t Part = 0; Part < Resolved.Shapes.size() && Part < 3; ++Part) Subtitle += (Part == 0 ? " \xC2\xB7 " : " + ") + Resolved.Shapes[Part];
+        for (size_t Part = 0; Part < Resolved.Shapes.size() && Part < 3; ++Part)
+        {
+            std::string Shape = Resolved.Shapes[Part];
+            if (Shape.rfind("Shape ", 0) == 0) Shape = Shape.substr(6);
+            Subtitle += (Part == 0 ? " \xC2\xB7 " : " + ") + Shape;
+        }
         char Copies[64];
-        if (Resolved.Authored > 1 || !Parameters.Modifiers.empty())
-            std::snprintf(Copies, sizeof(Copies), " \xC2\xB7 %u of %u cop%s shown", Resolved.Shown, Resolved.Authored, Resolved.Authored == 1 ? "y" : "ies");
+        if (Resolved.Copies > 1 || !Parameters.Modifiers.empty())
+            std::snprintf(Copies, sizeof(Copies), " \xC2\xB7 %u of %u cop%s shown", Resolved.Shown, Resolved.Copies, Resolved.Copies == 1 ? "y" : "ies");
         else std::snprintf(Copies, sizeof(Copies), " \xC2\xB7 %u triangles", Resolved.Facets);
         Subtitle += Copies;
     }
@@ -97,7 +102,7 @@ void GeometryInspector::ConstructInspector()
     Changed |= GeometryTransformSection::Construct(Page, Parameters);
     Changed |= GeometryQuickSection::Construct(Page, Parameters);
     Changed |= ModifierStackSection::Construct(Page, Parameters);
-    GeometryMaterialSection::Construct(Page, Parameters, Name, MaterialSlot);
+    Changed |= GeometryMaterialSection::Construct(Page, Parameters, Name, MaterialSlot);
     bool OpenEditor = false;
     Changed |= GeometryFractureSection::Construct(Page, Parameters, OpenEditor);
     if (OpenEditor) (void)InspectorRuntime::Instance().RequestEditorOpen(Token);

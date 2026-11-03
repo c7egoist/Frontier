@@ -16,10 +16,12 @@
 #include "Engine/Interface/InspectorRuntime.h"
 #include "Engine/Interface/LogStreamPanelRegistration.h"
 #include "Engine/Interface/NativeInspectors.h"
+#include "Engine/Interface/ProjectContent.h"
 #include "Engine/Interface/SceneDirectoryPanelRegistration.h"
 #include "Engine/Interface/SceneInspectorPanel.h"
 #include "Engine/Interface/ViewportChromeControls.h"
 #include "Engine/Scene/SceneDirectory.h"
+#include "Frontier/Engine/Geometry/ShapeArchive.h"
 #include <imgui.h>
 #include <imgui_internal.h>
 #endif
@@ -29,6 +31,7 @@
 #include <cmath>
 #include <cstdio>
 #include <stdexcept>
+#include <unordered_map>
 #include <vector>
 
 namespace Everest
@@ -338,6 +341,9 @@ EverestWorkspace::EverestWorkspace(Frontier::ControlCentrePanel& ControlCentre,
                Entry.first=="RenderPipeline" || Entry.first=="Geometry";
     });
     OutlinerPanel.ConfigureConstructibleTypes(std::move(Types));
+    // 📝 The Outliner's '+' and Ctrl+A open the Construct dialog: the engine shapes, then the record types above.
+    OutlinerPanel.ConfigureConstructDialog(true);
+    ConfigureConstructCatalogue();
     OutlinerPanel.Synchronize(Frontier::SceneDirectory::Instance());
 
     if (Frontier::SceneRecordBase* Solar = QuerySceneWorld().FindFirstByType("Solar"))
@@ -506,6 +512,35 @@ void EverestWorkspace::ServiceDynamicSceneRequests()
     const uint32_t ProjectCategory = EnsureProjectLogCategory("Everest");
     bool           Mutated         = false;
 
+    if (OutlinerPanel.ConsumeConstructDialogRequest()) ConstructDialog.Open();
+    while (const auto DuplicateToken = OutlinerPanel.ConsumeDuplicateRequest())
+    {
+        const std::string           Original = Frontier::SceneDirectory::Instance().QueryName(*DuplicateToken);
+        const Frontier::RecordToken Created  = DuplicateGeometryRecord(*DuplicateToken);
+        if (!Created.IsValid())
+        {
+            AnnounceViewportNotice("Only scene objects duplicate");
+            continue;
+        }
+        OutlinerPanel.Synchronize(Frontier::SceneDirectory::Instance());
+        OutlinerPanel.Select(Created);
+        Mutated = true;
+        Frontier::WriteLogFormat(ProjectCategory, Frontier::LogSeverity::Info, Frontier::LogVerbosity::Log, "EverestWorkspace",
+                                 "Duplicated '%s' as '%s' (token #%llu): its copies come from the reserve.", Original.c_str(),
+                                 Frontier::SceneDirectory::Instance().QueryName(Created).c_str(), static_cast<unsigned long long>(Created.Value));
+    }
+    while (const auto Renamed = OutlinerPanel.ConsumeRenameRequest())
+    {
+        if (Frontier::SceneRecordBase* Record = QuerySceneWorld().FindRecord(Renamed->first))
+        {
+            const std::string Former = Record->QueryRecordName();
+            Record->AssignRecordName(Renamed->second);
+            Mutated = true;
+            Frontier::WriteLogFormat(ProjectCategory, Frontier::LogSeverity::Info, Frontier::LogVerbosity::Log, "EverestWorkspace",
+                                     "Renamed '%s' to '%s'.", Former.c_str(), Renamed->second.c_str());
+        }
+    }
+
     while (const auto RequestedType = OutlinerPanel.ConsumeConstructRequest())
     {
         Frontier::RecordToken ParentToken{};
@@ -547,6 +582,214 @@ void EverestWorkspace::ServiceDynamicSceneRequests()
     {
         OutlinerPanel.Synchronize(Frontier::SceneDirectory::Instance());
     }
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                    SCENE OBJECTS
+//------------------------------------------------------------------------------------------------------------------------
+
+void EverestWorkspace::ConfigureConstructCatalogue()
+{
+    std::vector<Frontier::ConstructCatalogueEntry> Catalogue;
+    // ① the engine shapes: EngineContent/ShapeArchives/*.toml
+    for (const Frontier::ShapeArchive& Shape : Frontier::ReadShapeArchives(Frontier::QueryEngineContentDirectory() / "ShapeArchives"))
+    {
+        Frontier::ConstructCatalogueEntry Entry;
+        Entry.Identifier = Shape.Name;
+        Entry.Caption    = Shape.Name;
+        Entry.Glyph      = Shape.GlyphName.empty() ? "Box" : Shape.GlyphName;
+        Entry.Group      = "Geometry";
+        Entry.Summary    = Shape.Description;
+        Entry.Shape      = true;
+        Entry.Size       = Shape.Size;
+        Entry.Albedo     = {Shape.Surface[0], Shape.Surface[1], Shape.Surface[2]};
+        Catalogue.push_back(std::move(Entry));
+    }
+    // ② the record types the level can add, under the Project Zero editor's categories
+    struct TypeLook
+    {
+        const char* Type;
+        const char* Group;
+        const char* Glyph;
+    };
+    static constexpr TypeLook Looks[] = {
+        {"Solar", "Environment", "Sun"},      {"OpticalFlare", "Environment", "Aperture"}, {"Atmosphere", "Environment", "Sunrise"},
+        {"Stars", "Environment", "Sparkles"}, {"Moons", "Environment", "Moon"},          {"Planet", "Environment", "Orbit"},
+        {"Clouds", "Weather", "CloudFog"},    {"LocalCloud", "Weather", "CloudFog"},     {"Fog", "Weather", "Droplets"},
+        {"LocalFog", "Weather", "Droplets"},  {"Wind", "Weather", "Wind"},               {"ForceField", "Weather", "Waves"},
+    };
+    for (const auto& [Type, Label] : OutlinerPanel.QueryConstructibleTypes())
+    {
+        Frontier::ConstructCatalogueEntry Entry;
+        Entry.Identifier = Type;
+        const size_t Divider = Label.find("\xC2\xB7 ");
+        Entry.Caption    = Divider == std::string::npos ? Label : Label.substr(Divider + 3);
+        Entry.Group      = "Environment";
+        Entry.Glyph      = "Box";
+        for (const TypeLook& Look : Looks)
+            if (Type == Look.Type)
+            {
+                Entry.Group = Look.Group;
+                Entry.Glyph = Look.Glyph;
+            }
+        Entry.Summary = Label + ".";
+        Catalogue.push_back(std::move(Entry));
+    }
+    ConstructDialog.ConfigureCatalogue(std::move(Catalogue));
+}
+
+std::string EverestWorkspace::ResolveUniqueName(const std::string& Stem) const
+{
+    const auto Taken = [this](const std::string& Name) {
+        for (const auto& Row : OutlinerPanel.QueryRows())
+            if (Row.Name == Name) return true;
+        return false;
+    };
+    if (!Taken(Stem)) return Stem;
+    for (int Index = 2;; ++Index)
+    {
+        const std::string Name = Stem + " " + std::to_string(Index);
+        if (!Taken(Name)) return Name;
+    }
+}
+
+std::array<double, 3> EverestWorkspace::ResolveGroundTarget() const
+{
+    // 📝 Where the view meets the ground (z = 0), 4 to 40 m ahead; looking level or up, 12 m ahead on the ground.
+    const std::array<double, 3> Forward = Flight.ResolveForward();
+    double                      Reach   = 12.0;
+    if (Forward[2] < -0.02) Reach = std::clamp(-Flight.Position[2] / Forward[2], 4.0, 40.0);
+    const double Level = std::max(1.0e-6, std::hypot(Forward[0], Forward[1]));
+    if (Forward[2] < -0.02) return {Flight.Position[0] + Forward[0] * Reach, Flight.Position[1] + Forward[1] * Reach, 0.0};
+    return {Flight.Position[0] + Forward[0] / Level * Reach, Flight.Position[1] + Forward[1] / Level * Reach, 0.0};
+}
+
+void EverestWorkspace::ServiceConstructOrder(const Frontier::ConstructOrder& Order)
+{
+    const uint32_t ProjectCategory = EnsureProjectLogCategory("Everest");
+    const std::string Name = ResolveUniqueName(Order.Name);
+    if (!Order.Entry.Shape)
+    {
+        // 📝 A record type: as the Outliner's add menu, with the dialog's name and visibility.
+        Frontier::RecordToken ParentToken{};
+        if (Order.Entry.Identifier == "OpticalFlare")
+            if (Frontier::SceneRecordBase* Solar = QuerySceneWorld().FindFirstByType("Solar")) ParentToken = Solar->QueryToken();
+        const Frontier::RecordToken Created = QuerySceneWorld().ConstructRecord(Order.Entry.Identifier, Name, ParentToken);
+        if (!Created.IsValid()) return;
+        if (!Order.Visible) (void)Frontier::SceneDirectory::Instance().ConfigureVisible(Created, false);
+        OutlinerPanel.Synchronize(Frontier::SceneDirectory::Instance());
+        OutlinerPanel.Select(Created);
+        Frontier::WriteLogFormat(ProjectCategory, Frontier::LogSeverity::Info, Frontier::LogVerbosity::Log, "EverestWorkspace",
+                                 "Constructed '%s' (type '%s', token #%llu).", Name.c_str(), Order.Entry.Identifier.c_str(),
+                                 static_cast<unsigned long long>(Created.Value));
+        return;
+    }
+    // 📝 An engine shape: a Geometry record that names the shape and claims no archive occupants, on the ground where the view
+    //    looks and resting on it (the shapes span −0.5 … 0.5 of their bounding box).
+    const Frontier::RecordToken Created = QuerySceneWorld().ConstructRecord("Geometry", Name);
+    auto* Record = dynamic_cast<Frontier::GeometryRecord*>(QuerySceneWorld().FindRecord(Created));
+    if (Record == nullptr) return;
+    Frontier::GeometryConfiguration& Configuration = Record->AccessConfiguration();
+    Configuration.OccupantStems.clear();
+    Configuration.ClaimsArchive = false;
+    Configuration.ShapeName     = Order.Entry.Identifier;
+    Configuration.GroupName     = "Constructed";
+    Configuration.GlyphName     = Order.Entry.Glyph;
+    Configuration.Visible       = Order.Visible;
+    const std::array<double, 3> Ground = ResolveGroundTarget();
+    for (size_t Axis = 0; Axis < 3; ++Axis) Configuration.Spatial.Scale[Axis] = Order.Size;
+    Configuration.Spatial.PositionMetres[0] = static_cast<float>(Ground[0]);
+    Configuration.Spatial.PositionMetres[1] = static_cast<float>(Ground[1]);
+    Configuration.Spatial.PositionMetres[2] = static_cast<float>(0.5 * Order.Entry.Size[2] * Order.Size);
+    Configuration.Spatial.OrientationDegrees[2] = static_cast<float>(std::round(Flight.Heading / 15.0) * 15.0);
+    Configuration.AdvanceRevision();
+    Record->ConfigureEditorPresentation(Configuration.GlyphName.c_str(), Configuration.GroupName.c_str(), "Geometry", "");
+    // 📝 A colour of its own waits until the viewport has bound the shape (its material family is known then).
+    if (Order.Surfaced) PendingAlbedo[Created.Value] = Order.Albedo;
+    OutlinerPanel.Synchronize(Frontier::SceneDirectory::Instance());
+    OutlinerPanel.Select(Created);
+    Frontier::WriteLogFormat(ProjectCategory, Frontier::LogSeverity::Info, Frontier::LogVerbosity::Log, "EverestWorkspace",
+                             "Constructed '%s' (engine shape %s \xC3\x97 %.2f, token #%llu) at (%.1f, %.1f).", Name.c_str(),
+                             Order.Entry.Identifier.c_str(), Order.Size, static_cast<unsigned long long>(Created.Value), Ground[0], Ground[1]);
+}
+
+void EverestWorkspace::ApplyPendingSurfaces()
+{
+    for (auto Cursor = PendingAlbedo.begin(); Cursor != PendingAlbedo.end();)
+    {
+        auto* Record = dynamic_cast<Frontier::GeometryRecord*>(QuerySceneWorld().FindRecord(Frontier::RecordToken{Cursor->first}));
+        if (Record == nullptr)
+        {
+            Cursor = PendingAlbedo.erase(Cursor);
+            continue;
+        }
+        Frontier::GeometryConfiguration& Configuration = Record->AccessConfiguration();
+        const auto&                      Resolved      = Configuration.Resolved;
+        if (!Resolved.Bound || Resolved.Families.empty() || Resolved.FamilyChannels.empty())
+        {
+            ++Cursor;
+            continue;
+        }
+        Frontier::SurfaceSlotConfiguration Slot;
+        Slot.Family   = Resolved.Families.front();
+        Slot.Channels = Resolved.FamilyChannels.front();
+        for (size_t Channel = 0; Channel < 3; ++Channel) Slot.Channels[Channel] = Cursor->second[Channel];
+        Configuration.SurfaceSlots.push_back(Slot);
+        Configuration.AdvanceRevision();
+        Cursor = PendingAlbedo.erase(Cursor);
+    }
+}
+
+Frontier::RecordToken EverestWorkspace::DuplicateGeometryRecord(Frontier::RecordToken Token)
+{
+    auto* Source = dynamic_cast<Frontier::GeometryRecord*>(QuerySceneWorld().FindRecord(Token));
+    if (Source == nullptr) return {};
+    Frontier::GeometryConfiguration Copy = Source->QueryConfiguration();
+    // 📝 Beside the original, one width and a metre along X; a duplicate lays out reserve copies of the same shapes (it never
+    //    claims the archive's occupants, so removing it leaves the original alone).
+    const auto&  Resolved = Source->QueryConfiguration().Resolved;
+    const double Width    = Resolved.Bound ? static_cast<double>(Resolved.BoundsMaximum[0] - Resolved.BoundsMinimum[0]) : 1.0;
+    Copy.ClaimsArchive    = false;
+    Copy.Resolved         = {};
+    Copy.Locked           = false;
+    Copy.Spatial.PositionMetres[0] += static_cast<float>(std::max(2.0, Width + 1.0));
+    const Frontier::RecordToken Created = QuerySceneWorld().ConstructRecord("Geometry", ResolveUniqueName(Source->QueryRecordName() + " copy"));
+    auto* Target = dynamic_cast<Frontier::GeometryRecord*>(QuerySceneWorld().FindRecord(Created));
+    if (Target == nullptr) return {};
+    Target->AccessConfiguration() = std::move(Copy);
+    Target->AccessConfiguration().AdvanceRevision();
+    Target->ConfigureEditorPresentation(Target->QueryConfiguration().GlyphName.c_str(), Target->QueryConfiguration().GroupName.c_str(), "Geometry", "");
+    return Created;
+}
+
+Frontier::GeometryConfiguration* EverestWorkspace::ResolveEditedGeometry()
+{
+    // 📝 The selected scene object, while it is shown, unlocked and bound (its transform has handles then).
+    auto* Record = dynamic_cast<Frontier::GeometryRecord*>(QuerySceneWorld().FindRecord(OutlinerPanel.QuerySelected()));
+    if (Record == nullptr) return nullptr;
+    Frontier::GeometryConfiguration& Configuration = Record->AccessConfiguration();
+    if (Configuration.Locked || !Configuration.Visible || !Configuration.Resolved.Bound || Configuration.Resolved.Shown == 0) return nullptr;
+    return &Configuration;
+}
+
+Frontier::PlacementView EverestWorkspace::ResolvePlacementView(const ImVec2& StageMin, const ImVec2& StageExtent) const
+{
+    return Frontier::PlacementView::Resolve(Flight.Position, Flight.ResolveForward(), Navigation.Up, Flight.ResolveFieldOfView(), StageMin, StageExtent);
+}
+
+void EverestWorkspace::ServiceSceneObjectKeys()
+{
+    // 📝 The Project Zero editor's keys: Ctrl+A Construct, Ctrl+D duplicate, Del remove, F2 rename; never while a field takes the
+    //    keys, the camera flies or the dialog is up.
+    const ImGuiIO& IO = ImGui::GetIO();
+    if (IO.WantTextInput || ImGui::IsMouseDown(ImGuiMouseButton_Right) || ConstructDialog.QueryOpen()) return;
+    const Frontier::RecordToken Selected = OutlinerPanel.QuerySelected();
+    if (IO.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_A, false)) ConstructDialog.Open();
+    else if (IO.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_D, false) && Selected.IsValid()) OutlinerPanel.RequestDuplicateRecord(Selected);
+    else if (!IO.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Delete, false) && Selected.IsValid() &&
+             Frontier::SceneDirectory::Instance().QueryMetadata(Selected).RemovableInEditor)
+        OutlinerPanel.RequestDeleteRecord(Selected);
+    else if (ImGui::IsKeyPressed(ImGuiKey_F2, false) && Selected.IsValid()) OutlinerPanel.BeginRename(Selected);
 }
 
 void EverestWorkspace::ConstructInterface(double DeltaSeconds)
@@ -706,6 +949,7 @@ void EverestWorkspace::ConstructInterface(double DeltaSeconds)
     {
         SaveActiveLevel();
     }
+    ServiceSceneObjectKeys();
     if (!IO.WantTextInput && ImGui::IsKeyPressed(ImGuiKey_V,false)) ToggleViewportOverlay(2);
     if (Overlays.Fullscreen && ImGui::IsKeyPressed(ImGuiKey_Escape,false)) { Overlays.Fullscreen=false; NoticeSeconds=0; NoticeText.clear(); }
     std::array<float,3> Focus;
@@ -717,6 +961,7 @@ void EverestWorkspace::ConstructInterface(double DeltaSeconds)
     if (Overlays.Fullscreen) ConstructFullscreenViewport(Scale);
     else Dockspace.ConstructInterface(Scale);
     Frontier::InspectorRuntime::Instance().ConstructActiveEditor();
+    if (const auto Order = ConstructDialog.Construct(Scale)) ServiceConstructOrder(*Order);
 }
 
 void EverestWorkspace::SaveActiveLevel()
@@ -743,7 +988,7 @@ void EverestWorkspace::SaveActiveLevel()
     }
 }
 
-void EverestWorkspace::IntegrateViewportCamera(bool Hovered, bool Active, double DeltaSeconds)
+void EverestWorkspace::IntegrateViewportCamera(bool Hovered, bool Active, double DeltaSeconds, bool LeftClaimed)
 {
     // 📝 Unreal Engine's perspective viewport navigation (IntegrateSceneViewportFlight); this reads one tick of ImGui input.
     //    Called right after the viewport's invisible button, so SetItemKeyOwner claims keys for that button.
@@ -751,7 +996,8 @@ void EverestWorkspace::IntegrateViewportCamera(bool Hovered, bool Active, double
     SceneViewportPointer Pointer;
     Pointer.Hovered      = Hovered;
     Pointer.Active       = Active;
-    Pointer.LeftDown     = ImGui::IsMouseDown(ImGuiMouseButton_Left);
+    // 📝 A press on a transform handle belongs to the handle: the camera leaves the left button alone until the release.
+    Pointer.LeftDown     = ImGui::IsMouseDown(ImGuiMouseButton_Left) && !LeftClaimed;
     Pointer.RightDown    = ImGui::IsMouseDown(ImGuiMouseButton_Right);
     Pointer.MiddleDown   = ImGui::IsMouseDown(ImGuiMouseButton_Middle);
     Pointer.AltDown      = IO.KeyAlt;
@@ -841,14 +1087,39 @@ void EverestWorkspace::ConstructViewportSurface()
                            ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight | ImGuiButtonFlags_MouseButtonMiddle);
     const bool StageHovered = ImGui::IsItemHovered();
     const bool StageActive  = ImGui::IsItemActive();
-    IntegrateViewportCamera(StageHovered, StageActive, ViewportDeltaSeconds);
-
-    // 📝 The demo's overlay keys, while the viewport has the pointer or the focus and no text field takes the keys.
     const ImGuiIO& IO = ImGui::GetIO();
+
+    // 📝 The selected scene object's transform handles: a left press on one drags it, a press elsewhere that is released
+    //    without moving picks the object under the pointer (Project Zero's viewport selection).
+    const ImVec2                     StageExtent(W, H - BarH);
+    const Frontier::PlacementView    View   = ResolvePlacementView(StageMin, StageExtent);
+    Frontier::GeometryConfiguration* Edited = ResolveEditedGeometry();
+    if (StageHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !IO.KeyAlt && !ImGui::IsMouseDown(ImGuiMouseButton_Right))
+    {
+        GizmoPress  = Edited != nullptr && Gizmo.Probe(View, GizmoMode, Edited->Spatial, IO.MousePos, Scale) >= 0;
+        PickPending = !GizmoPress;
+        PickPress   = IO.MousePos;
+    }
+    IntegrateViewportCamera(StageHovered, StageActive, ViewportDeltaSeconds, GizmoPress || Gizmo.QueryEngaged());
+
+    // 📝 The demo's overlay keys, while the viewport has the pointer or the focus and no text field takes the keys; W, E and R
+    //    choose the transform handles (Unreal's keys) while the camera is not flying.
     if ((StageHovered || ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) && !IO.WantTextInput && !StageActive)
     {
         if (ImGui::IsKeyPressed(ImGuiKey_H, false)) ToggleViewportOverlay(0);
-
+    }
+    if ((StageHovered || ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) && !IO.WantTextInput && !IO.KeyCtrl &&
+        !ImGui::IsMouseDown(ImGuiMouseButton_Right))
+    {
+        const std::array<std::pair<ImGuiKey, Frontier::PlacementGizmoMode>, 3> ModeKeys = {{{ImGuiKey_W, Frontier::PlacementGizmoMode::Move},
+                                                                                            {ImGuiKey_E, Frontier::PlacementGizmoMode::Rotate},
+                                                                                            {ImGuiKey_R, Frontier::PlacementGizmoMode::Scale}}};
+        for (const auto& [Key, Mode] : ModeKeys)
+        {
+            if (!ImGui::IsKeyPressed(Key, false) || GizmoMode == Mode) continue;
+            GizmoMode = Mode;
+            AnnounceViewportNotice(Mode == Frontier::PlacementGizmoMode::Move ? "Move (W)" : Mode == Frontier::PlacementGizmoMode::Rotate ? "Rotate (E)" : "Scale (R)");
+        }
     }
 
     ImDrawList* DrawList = ImGui::GetWindowDrawList();
@@ -870,6 +1141,7 @@ void EverestWorkspace::ConstructViewportSurface()
         Image       = PresentSceneViewport(Request);
         LastReadout = Image.Readout;
         PublishGeometryResolutions(QuerySceneWorld(), LastReadout, PublishedGeometryGeneration);
+        ApplyPendingSurfaces();
         PublishRenderReadouts(QuerySceneWorld(), LastReadout);
     }
     if (Image.Texture != 0)
@@ -897,6 +1169,32 @@ void EverestWorkspace::ConstructViewportSurface()
     else
     {
         ConstructViewportSchematic(DrawList, StageMin, Max);
+    }
+    if (Edited != nullptr && Image.Texture != 0)
+    {
+        const Frontier::PlacementGizmoOutcome Outcome = Gizmo.Construct(DrawList, View, GizmoMode, Edited->Spatial, IO.KeyCtrl, GizmoPress, Scale);
+        if (Outcome.Changed) Edited->AdvanceRevision();
+        if (Outcome.Engaged && ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+        {
+            Gizmo.Cancel(Edited->Spatial);
+            Edited->AdvanceRevision();
+        }
+    }
+    if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+    {
+        const float Travel = std::hypot(IO.MousePos.x - PickPress.x, IO.MousePos.y - PickPress.y);
+        if (PickPending && Travel < 5.0f * Scale && LastReadout.GeometryVolumes)
+        {
+            std::array<double, 3> Origin{}, Direction{};
+            View.ResolveRay(IO.MousePos, Origin, Direction);
+            if (const auto Picked = Frontier::PickGeometryVolume(*LastReadout.GeometryVolumes, Origin, Direction))
+            {
+                OutlinerPanel.Select(Frontier::RecordToken{*Picked});
+                OutlinerPanel.Synchronize(Frontier::SceneDirectory::Instance());
+            }
+        }
+        PickPending = false;
+        GizmoPress  = false;
     }
     ConstructViewportOverlays(StageMin, Max, Image, Scale);
     DrawList->PopClipRect();

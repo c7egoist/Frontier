@@ -98,6 +98,7 @@ constexpr GlyphSource GlyphSources[] = {
      "<path d='m2 2 20 20'/>"},
     {"ChevronDown", "<path d='m6 9 6 6 6-6'/>"},
     {"ChevronRight", "<path d='m9 18 6-6-6-6'/>"},
+    {"ChevronLeft", "<path d='m15 18-6-6 6-6'/>"},
     {"X", "<path d='M18 6 6 18'/> <path d='m6 6 12 12'/>"},
     {"Search", "<path d='m21 21-4.34-4.34'/> <circle cx='11' cy='11' r='8'/>"},
     {"RotateCcw", "<path d='M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8'/> <path d='M3 3v5h5'/>"},
@@ -211,6 +212,13 @@ constexpr GlyphSource GlyphSources[] = {
     {"NativeBake",
      "<path d='M12 5h7l2 2v12l-2 2H7l-2-2v-6M2 9h11M9 5l4 4-4 4M3 2v3M1.5 3.5h3'/>"
      "<rect x='14' y='14' width='3' height='3'/>"},
+    // 📝 The engine shapes of the Construct dialog and their Outliner rows (Box is the cube), drawn in the 24-unit stroke style
+    //    with arcs for the ellipses.
+    {"Sphere", "<circle cx='12' cy='12' r='9'/> <path d='M3 12a9 3.5 0 0 0 18 0'/> <path d='M12 3a3.5 9 0 0 0 0 18'/>"},
+    {"Cylinder", "<path d='M4 6a8 3 0 1 0 16 0a8 3 0 1 0-16 0'/> <path d='M4 6v12'/> <path d='M20 6v12'/> <path d='M4 18a8 3 0 0 0 16 0'/>"},
+    {"Cone", "<path d='M12 3 4 18'/> <path d='m12 3 8 15'/> <path d='M4 18a8 3 0 0 0 16 0'/>"},
+    {"Torus", "<path d='M2 12a10 6 0 1 0 20 0a10 6 0 1 0-20 0'/> <path d='M7.5 11.2a4.5 2 0 0 0 9 0'/> <path d='M9 12.4a3 1.3 0 0 1 6 0'/>"},
+    {"Square", "<path d='M2 16 8 8h14l-6 8Z'/>"},
     // 📝 The geometry inspector and its Outliner rows (lucide: lock, move, atom, fence, warehouse, tower-control, lamp-floor,
     //    copy, wrench, chevron-up, arrow-up-right; CastShadow and TrafficLight drawn in the same 24-unit stroke style).
     {"Lock", "<rect width='18' height='11' x='3' y='11' rx='2'/> <path d='M7 11V7a5 5 0 0 1 10 0v4'/>"},

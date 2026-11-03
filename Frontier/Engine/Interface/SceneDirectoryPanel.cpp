@@ -221,6 +221,45 @@ std::optional<RecordToken> SceneDirectoryPanel::ConsumeDeleteRequest()
     return Request;
 }
 
+void SceneDirectoryPanel::RequestDuplicateRecord(RecordToken Token)
+{
+    if (Token.IsValid()) PendingDuplicateTokens.push_back(Token);
+}
+
+std::optional<RecordToken> SceneDirectoryPanel::ConsumeDuplicateRequest()
+{
+    if (PendingDuplicateTokens.empty()) return std::nullopt;
+    const RecordToken Request = PendingDuplicateTokens.front();
+    PendingDuplicateTokens.erase(PendingDuplicateTokens.begin());
+    return Request;
+}
+
+void SceneDirectoryPanel::RequestRenameRecord(RecordToken Token, std::string Name)
+{
+    if (Token.IsValid() && !Name.empty()) PendingRenames.emplace_back(Token, std::move(Name));
+}
+
+std::optional<std::pair<RecordToken, std::string>> SceneDirectoryPanel::ConsumeRenameRequest()
+{
+    if (PendingRenames.empty()) return std::nullopt;
+    std::pair<RecordToken, std::string> Request = std::move(PendingRenames.front());
+    PendingRenames.erase(PendingRenames.begin());
+    return Request;
+}
+
+void SceneDirectoryPanel::BeginRename(RecordToken Token)
+{
+    Renaming    = Token;
+    RenameFocus = Token.IsValid();
+}
+
+bool SceneDirectoryPanel::ConsumeConstructDialogRequest()
+{
+    const bool Requested     = ConstructDialogRequested;
+    ConstructDialogRequested = false;
+    return Requested;
+}
+
 void SceneDirectoryPanel::Select(RecordToken Token)
 {
     Selected = Token;

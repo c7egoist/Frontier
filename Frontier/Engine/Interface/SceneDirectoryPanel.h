@@ -101,6 +101,19 @@ class SceneDirectoryPanel
     void RequestDeleteRecord(RecordToken Token);
     [[nodiscard]] std::optional<RecordToken> ConsumeDeleteRequest();
 
+    // 📝 The row menu's and the keys' requests (the Project Zero editor's row menu: Rename, Hide, Fracture, Duplicate, Remove);
+    //    the host services them against the level's records, as it does construction and deletion.
+    void RequestDuplicateRecord(RecordToken Token);
+    [[nodiscard]] std::optional<RecordToken> ConsumeDuplicateRequest();
+    void RequestRenameRecord(RecordToken Token, std::string Name);
+    [[nodiscard]] std::optional<std::pair<RecordToken, std::string>> ConsumeRenameRequest();
+    void BeginRename(RecordToken Token);   // the row's name turns into a text field (F2, the row menu's Rename)
+    [[nodiscard]] RecordToken QueryRenaming() const { return Renaming; }
+
+    // 📝 With the Construct dialog offered, the '+' button asks the host to open it (the host draws it) instead of the add menu.
+    void ConfigureConstructDialog(bool Offered) { ConstructDialogOffered = Offered; }
+    [[nodiscard]] bool ConsumeConstructDialogRequest();
+
     // Native drawing (interface-SDK builds; an empty stub without the SDK, so portable builds keep linking).
     // The host calls Synchronize() each frame first, then services TakeSpawnRequest().
     void ConstructInterface();
@@ -124,6 +137,12 @@ class SceneDirectoryPanel
     std::vector<std::pair<std::string, std::string>> ConstructibleTypes;
     std::vector<std::string>                         PendingConstructTypes;
     std::vector<RecordToken>                         PendingDeleteTokens;
+    std::vector<RecordToken>                         PendingDuplicateTokens;
+    std::vector<std::pair<RecordToken, std::string>> PendingRenames;
+    RecordToken                                      Renaming;
+    bool                                             RenameFocus              = false;
+    bool                                             ConstructDialogOffered   = false;
+    bool                                             ConstructDialogRequested = false;
     RecordToken                                      Selected;
     SceneInspectorSummary               Inspector;
 };

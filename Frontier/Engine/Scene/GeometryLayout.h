@@ -9,6 +9,7 @@
 #include "Engine/Scene/EngineConfigurations.h"
 
 #include <array>
+#include <optional>
 #include <cstddef>
 #include <vector>
 
@@ -65,5 +66,23 @@ constexpr size_t CopyCeiling = 4096;   // [-] copies one evaluation produces at 
 [[nodiscard]] std::vector<PlacementMatrix> EvaluateModifierStack(const std::vector<PlacementMatrix>&             Bases,
                                                                  const std::vector<ArrayModifierConfiguration>& Modifiers,
                                                                  const std::array<double, 3>&                    Extent);
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                    PICKING
+//------------------------------------------------------------------------------------------------------------------------
+
+// 📝 One shown part of a geometry record (record token value) for picking: its placement and its shape's local bounds.
+struct GeometryPickVolume
+{
+    uint64_t             Token = 0;
+    PlacementMatrix      Placement{};
+    std::array<float, 3> LocalMinimum{};   // [m]
+    std::array<float, 3> LocalMaximum{};   // [m]
+};
+
+// 📝 The record whose volume the ray meets first (the slab test in each volume's frame; affine, so the travel stays the world
+//    parameter) and the travel to it; a volume the ray starts inside counts at its far wall.
+[[nodiscard]] std::optional<uint64_t> PickGeometryVolume(const std::vector<GeometryPickVolume>& Volumes, const std::array<double, 3>& Origin,
+                                                         const std::array<double, 3>& Direction, double* OutTravel = nullptr);
 
 } // namespace Frontier

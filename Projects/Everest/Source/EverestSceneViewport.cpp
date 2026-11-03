@@ -248,6 +248,7 @@ SceneViewportRefresh EverestSceneViewport::Render(const SceneViewportRequest& Re
         SceneViewportRefresh Paused = Held_;
         Paused.Readout.Held               = true;
         Paused.Readout.Geometry           = Geometry_.QueryResolutions();
+        Paused.Readout.GeometryVolumes    = Geometry_.QueryPickVolumes();
         Paused.Readout.GeometryGeneration = Geometry_.QueryGeneration();
         Paused.Status                     = "HELD: live refresh is off  |  " + Held_.Status;
         return Paused;
@@ -372,6 +373,7 @@ SceneViewportRefresh EverestSceneViewport::Render(const SceneViewportRequest& Re
     Outcome.Readout.SurfaceCards        = Statistics.SurfaceCards;
     Outcome.Readout.GeometryClusters    = Statistics.GeometryClusters;
     Outcome.Readout.Geometry            = Geometry_.QueryResolutions();
+    Outcome.Readout.GeometryVolumes     = Geometry_.QueryPickVolumes();
     Outcome.Readout.GeometryGeneration  = Geometry_.QueryGeneration();
     Held_ = Outcome;
     return Outcome;

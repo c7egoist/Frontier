@@ -182,7 +182,8 @@ void SceneDirectoryPanel::ConstructInterface()
         ImGui::SetCursorScreenPos(AddMin);
         if (ImGui::InvisibleButton("##AddSceneRecordBtn", ImVec2(AddSide, AddSide)))
         {
-            ImGui::OpenPopup("##OutlinerAddRecordPopup");
+            if (ConstructDialogOffered) ConstructDialogRequested = true;
+            else                        ImGui::OpenPopup("##OutlinerAddRecordPopup");
         }
         const bool AddHovered = ImGui::IsItemHovered();
         DrawList->AddRectFilled(AddMin, ImVec2(AddMin.x + AddSide, AddMin.y + AddSide),
@@ -190,7 +191,7 @@ void SceneDirectoryPanel::ConstructInterface()
         DrawList->AddRect(AddMin, ImVec2(AddMin.x + AddSide, AddMin.y + AddSide), ResolveCssColour(0x2C2C2CFF), 6.0f * S, 0, S);
         (void)GlyphSymbol::Construct(DrawList, "Plus", ImVec2(AddMin.x + 4.0f * S, AddMin.y + 4.0f * S), 14.0f * S, 1.7f,
                                      AddHovered ? ResolveCssColour(0xF0F0F0FF) : ResolveCssColour(0xA9A9A9FF));
-        if (AddHovered) ImGui::SetTooltip("Add a record to the level");
+        if (AddHovered) ImGui::SetTooltip(ConstructDialogOffered ? "Construct an object or add a record (Ctrl+A)" : "Add a record to the level");
 
         ImGui::SetNextWindowPos(ImVec2(RightX - 210.0f * S, AddMin.y + AddSide + 2.0f * S), ImGuiCond_Appearing);
         if (DropdownControlSurface::BeginMenu("##OutlinerAddRecordPopup"))
@@ -381,10 +382,43 @@ void SceneDirectoryPanel::ConstructInterface()
                     const float StateW     = (2.0f + 7.0f + 4.0f) * S;
                     const float ButtonW    = std::max(40.0f * S, (RowMax.x - RowMin.x) - EyeW - StateW - TrashW - EditorBtnW);
 
-                    ImGui::SetCursorScreenPos(RowMin);
-                    const bool RowClicked = ImGui::InvisibleButton("##SelectRow", ImVec2(ButtonW, RowH));
-                    const bool RowDouble  = ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0);
+                    // 📝 While the row is renamed its name is a text field, so the row button stays out of its way.
+                    const bool Renamed    = Renaming == Row.Token;
+                    bool       RowClicked = false, RowDouble = false, RowMenu = false;
+                    if (!Renamed)
+                    {
+                        ImGui::SetCursorScreenPos(RowMin);
+                        RowClicked = ImGui::InvisibleButton("##SelectRow", ImVec2(ButtonW, RowH), ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
+                        RowMenu    = RowClicked && ImGui::IsMouseReleased(ImGuiMouseButton_Right);
+                        RowClicked = RowClicked && !RowMenu;
+                        RowDouble  = ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0);
+                    }
                     const bool RowHovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem) && ImGui::IsMouseHoveringRect(RowMin, RowMax);
+                    if (RowMenu)
+                    {
+                        Select(Row.Token);
+                        NeedsSync = true;
+                        ImGui::OpenPopup("##RowMenu");
+                    }
+                    // 📝 The Project Zero editor's row menu: Rename, Hide, Fracture (not yet: no action), Duplicate, Remove.
+                    if (DropdownControlSurface::BeginMenu("##RowMenu"))
+                    {
+                        if (DropdownControlSurface::Option("Rename        F2")) BeginRename(Row.Token);
+                        if (DropdownControlSurface::Option(On ? "Hide" : "Show"))
+                        {
+                            if (Switch.Switched) Switch.Inspector->ConfigureToggle(!On);
+                            else                 (void)Directory.ConfigureVisible(Row.Token, !Row.Visible);
+                            NeedsSync = true;
+                        }
+                        (void)DropdownControlSurface::Option("Fracture");
+                        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Fracture is not available yet: the physics (Jolt) comes first");
+                        if (Meta.RemovableInEditor)
+                        {
+                            if (DropdownControlSurface::Option("Duplicate     Ctrl+D")) RequestDuplicateRecord(Row.Token);
+                            if (DropdownControlSurface::Option("Remove        Del")) RequestDeleteRecord(Row.Token);
+                        }
+                        DropdownControlSurface::EndMenu();
+                    }
 
                     if (SelectedRow)
                     {
@@ -455,9 +489,46 @@ void SceneDirectoryPanel::ConstructInterface()
                                   FadeColour(ResolveCssColour(0x666666FF), Fade), Readout.c_str());
                         NameRight = ButtonRight - ReadoutW - 11.0f * S;
                     }
-                    const ImU32       NameInk = FadeColour(SelectedRow ? ResolveCssColour(0xF1F1F1FF) : ResolveCssColour(0xA3A3A3FF), Fade);
-                    const std::string Name    = EllipsizeText(Faces, Faces.Regular, 12.0f * S, Row.Name, std::max(0.0f, NameRight - ItemX));
-                    PlaceText(NestedDraw, Faces, Faces.Regular, 12.0f * S, ItemX, Middle - 0.5f * 12.0f * 1.35f * S, 1.35f, NameInk, Name.c_str());
+                    const ImU32 NameInk = FadeColour(SelectedRow ? ResolveCssColour(0xF1F1F1FF) : ResolveCssColour(0xA3A3A3FF), Fade);
+                    if (Renamed)
+                    {
+                        // 📝 Inline rename: Enter or leaving the field keeps the name, Escape drops it.
+                        static std::array<char, 128> RenameBuffer{};
+                        if (RenameFocus) std::snprintf(RenameBuffer.data(), RenameBuffer.size(), "%s", Row.Name.c_str());
+                        const float FieldH = 12.0f * 1.35f * S + 6.0f * S;
+                        NestedDraw->AddRectFilled(ImVec2(ItemX - 4.0f * S, Middle - 0.5f * FieldH), ImVec2(NameRight, Middle + 0.5f * FieldH),
+                                                  ResolveCssColour(0x151515FF), 6.0f * S);
+                        NestedDraw->AddRect(ImVec2(ItemX - 4.0f * S, Middle - 0.5f * FieldH), ImVec2(NameRight, Middle + 0.5f * FieldH),
+                                            ResolveCssColour(0x4A4A4AFF), 6.0f * S, 0, S);
+                        ImGui::SetCursorScreenPos(ImVec2(ItemX, Middle - 0.5f * 12.0f * GlyphRun::EmPixelHeight * S));
+                        ImGui::PushFont(Faces.Regular, 12.0f * GlyphRun::EmPixelHeight * S /
+                                                           std::max(0.01f, ImGui::GetStyle().FontScaleMain * ImGui::GetStyle().FontScaleDpi));
+                        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0.0f, 0.0f));
+                        ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.0f);
+                        ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0, 0, 0, 0));
+                        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(ResolveCssColour(0xF1F1F1FF)));
+                        ImGui::SetNextItemWidth(std::max(40.0f * S, NameRight - ItemX - 6.0f * S));
+                        if (RenameFocus) ImGui::SetKeyboardFocusHere();
+                        const bool Entered = ImGui::InputText("##RenameRow", RenameBuffer.data(), RenameBuffer.size(),
+                                                              ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
+                        const bool Escaped = ImGui::IsItemActive() && ImGui::IsKeyPressed(ImGuiKey_Escape);
+                        const bool Left    = !RenameFocus && !ImGui::IsItemActive();
+                        ImGui::PopStyleColor(2);
+                        ImGui::PopStyleVar(2);
+                        ImGui::PopFont();
+                        RenameFocus = false;
+                        if (Escaped) Renaming = RecordToken{};
+                        else if (Entered || Left)
+                        {
+                            if (std::string(RenameBuffer.data()) != Row.Name) RequestRenameRecord(Row.Token, RenameBuffer.data());
+                            Renaming = RecordToken{};
+                        }
+                    }
+                    else
+                    {
+                        const std::string Name = EllipsizeText(Faces, Faces.Regular, 12.0f * S, Row.Name, std::max(0.0f, NameRight - ItemX));
+                        PlaceText(NestedDraw, Faces, Faces.Regular, 12.0f * S, ItemX, Middle - 0.5f * 12.0f * 1.35f * S, 1.35f, NameInk, Name.c_str());
+                    }
 
                     float RightCursor = RowMin.x + ButtonW;
 

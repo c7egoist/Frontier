@@ -30,9 +30,9 @@ bool GeometryQuickSection::Construct(ControlColumn& Page, GeometryConfiguration&
     const bool Dynamic = Parameters.Dynamic, Physics = Parameters.Physics;
     const QuickTile Tiles[6] = {
         {"Visible", "Eye", &Parameters.Visible, "Drawn, traced and unioned into the distance field; off hides every copy"},
-        {"Dynamic", "Move", &Parameters.Dynamic, "Authored: moves at run time once the physics runs"},
-        {"Cast shadows", "CastShadow", &Parameters.CastShadows, "Authored: the renderer has no per-object shadow switch yet"},
-        {"GI", "Sparkles", &Parameters.GlobalIllumination, "Authored: the renderer has no per-object GI switch yet"},
+        {"Dynamic", "Move", &Parameters.Dynamic, "Relit every refresh (its surface cards) instead of in turn: for objects that move"},
+        {"Cast shadows", "CastShadow", &Parameters.CastShadows, "Off: left out of the shadow depth and of every shadow ray"},
+        {"GI", "Sparkles", &Parameters.GlobalIllumination, "Off: left out of the distance field and the traced rays (no bounce light)"},
         {"Physics", "Atom", &Parameters.Physics, "Authored: a rigid body once the physics (Jolt) runs"},
         {"Locked", "Lock", &Parameters.Locked, "Refuses transform and modifier edits"},
     };
@@ -41,8 +41,8 @@ bool GeometryQuickSection::Construct(ControlColumn& Page, GeometryConfiguration&
     if (Parameters.Physics && !Physics) Parameters.Dynamic = true;
     if (!Parameters.Dynamic && Dynamic) Parameters.Physics = false;
     char Note[240];
-    std::snprintf(Note, sizeof(Note), "%s object \xC2\xB7 %s. Visible and Locked act now; shadows, GI and physics are authored flags until their renderer "
-                                      "switches and the physics arrive.",
+    std::snprintf(Note, sizeof(Note), "%s object \xC2\xB7 %s. Visible, Dynamic, Cast shadows, GI and Locked act on the viewport now; Physics is "
+                                      "authored until the physics (Jolt) arrives.",
                   Parameters.Dynamic ? "Dynamic" : "Static", Parameters.Physics ? "Physics requested" : "Physics off");
     CaptionText::Construct(Page, Note, 0.0f, 0.0f);
     Page.EndCard();
