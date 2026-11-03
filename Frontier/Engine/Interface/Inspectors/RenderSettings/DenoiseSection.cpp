@@ -23,7 +23,7 @@ namespace
 bool ConstructLobe(ControlColumn& Page, const char* Lobe, const char* Prefix, int& Levels, int& Tally, float& Weight, float& Sigma, int TraceScale,
                    const char* Unavailable)
 {
-    using namespace RenderSettingsRows;
+    using namespace SectionRows;
     // 📝 À-trous step 2^(n-1) trace pixels at level n: the widest tap reaches 2 · 2^(n-1) trace pixels, × trace scale on screen.
     const int Reach = 2 * (1 << (std::clamp(Levels, 1, 4) - 1)) * std::clamp(TraceScale, 1, 4);
     char Heading[64], Id[64];
@@ -45,7 +45,7 @@ bool ConstructLobe(ControlColumn& Page, const char* Lobe, const char* Prefix, in
 
 bool DenoiseSection::Construct(ControlColumn& Page, RenderPipelineConfiguration& P, const RenderSettingsReading& Reading)
 {
-    using namespace RenderSettingsRows;
+    using namespace SectionRows;
     char Status[48];
     std::snprintf(Status, sizeof(Status), "%s \xC2\xB7 %d / %d levels", P.VarianceFilter ? "SVGF" : "Off", P.DiffuseWaveletLevels, P.GlossyWaveletLevels);
     BeginSection(Page, "Denoising & antialiasing", "Layers", Status,

@@ -18,7 +18,7 @@ namespace Frontier
 
 bool ShadowSection::Construct(ControlColumn& Page, RenderPipelineConfiguration& P, const RenderSettingsReading& Reading)
 {
-    using namespace RenderSettingsRows;
+    using namespace SectionRows;
     const bool Recommended = P.SolarDisc && P.StratifiedSun && P.PenumbraFilter && P.MirrorFilter;
     const bool Demo        = !P.SolarDisc && !P.StratifiedSun && !P.PenumbraFilter && !P.MirrorFilter && !P.MirrorTrace;
     BeginSection(Page, "Sun & shadows", "Sun", Reading.RayTraced && P.RayTracedShadows ? "BVH cone" : "Cascades",

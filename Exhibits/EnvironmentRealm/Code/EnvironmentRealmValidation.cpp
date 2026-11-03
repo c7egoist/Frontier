@@ -271,7 +271,7 @@ void VerifyPhysicalOracles(const std::filesystem::path& RepoRoot)
         REQUIRE_ENV(std::hypot(ZeroGustHigh.X, ZeroGustHigh.Z) > std::hypot(ZeroGustLow.X, ZeroGustLow.Z),
                     "Ekman vertical wind profile must shear/accelerate with altitude");
 
-        VortexColumnParameters TornadoSpec{};
+        TornadoColumnParameters TornadoSpec{};
         TornadoSpec.GroundAnchorMeters      = {0.0, 0.0, 0.0};
         TornadoSpec.TranslationVelocityMps  = {0.0, 0.0, 0.0};
         TornadoSpec.ColumnHeightMeters      = 1100.0;
@@ -1128,7 +1128,7 @@ void VerifyGpuPipelineAndRenderExhibits(const std::filesystem::path& RepoRoot,
         StormWind.GustAmplitude        = 0.28;
         R.ForceField.SetWindProfile(StormWind);
 
-        VortexColumnParameters Funnel{};
+        TornadoColumnParameters Funnel{};
         Funnel.GroundAnchorMeters      = {8.0, 0.0, 320.0};
         Funnel.TranslationVelocityMps  = {0.0, 0.0, 0.0};
         Funnel.SpineLeanXMeters        = 46.0;

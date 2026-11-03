@@ -534,7 +534,7 @@ void EnvironmentOverlay::ResolveRealm(const IlluminationHost& Host, const SceneE
     if (Planetary_->PreviousTime > S.ElapsedSeconds) Planetary_->Motions.clear();
     const double Delta = Planetary_->PreviousTime < 0 ? 0 : std::clamp(S.ElapsedSeconds - Planetary_->PreviousTime, 0.0, 1.0);
     Planetary_->PreviousTime = S.ElapsedSeconds;
-    ConfigureAtmosphericFlow(R.ForceField, S.Forces, S.Wind, S.ElapsedSeconds);
+    ConfigureAtmosphericFlow(R.ForceField, S.Forces, S.Wind, S.ElapsedSeconds, S.ForceSources);
     std::unordered_set<uint64_t> Receivers;
     auto Advect = [&](uint64_t Token, const float Centre[3], bool Enabled, bool Follow, double Independent)
     {
@@ -718,11 +718,14 @@ void EnvironmentOverlay::PublishEnvironmentReadout(const SceneEnvironment& Setti
     const auto& Eye = Planetary_->View.PositionMeters;
     Result->WindAtCamera = EvaluateWorldFlow(Realm.ForceField,{Eye[0],-Eye[2],Eye[1]},Settings.Forces.IncludeTurbulence);
     if (Settings.Forces.Enabled && Settings.Wind.Enabled) Result->Contributions.emplace_back("Wind · ambient flow + gust + shear + curl");
-    constexpr const char* SourceNames[] = {"None","Vortex column","Traveling gust front","Radial microburst","Localized gust puff",
-        "Aerodynamic wake","Thermal updraft","Directional jet","Spherical impulse"};
     if (Settings.Forces.Enabled)
+    {
         for (const auto& Source : Realm.ForceField.ActiveSources())
-            Result->Contributions.emplace_back(SourceNames[std::min<uint32_t>(8,static_cast<uint32_t>(Source.Kind))]);
+            Result->Contributions.emplace_back(std::string(ResolveForceSourceDescriptor(Source.Category).Name) + " · triggered");
+        for (const auto& Prepared : Realm.ForceField.AuthoredSources())
+            if (Prepared.Contribution == ForceContribution::Flow && Prepared.Activation.Envelope > 1e-3)
+                Result->Contributions.emplace_back(std::string(ResolveForceSourceDescriptor(Prepared.Source.Category).Name) + " · authored");
+    }
     if (Settings.Forces.Visualize)
     {
         const uint32_t Edge = std::clamp(Settings.Forces.GridResolution,3u,8u);

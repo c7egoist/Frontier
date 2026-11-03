@@ -417,6 +417,102 @@ struct LightningConfiguration : RevisionCounter
     float FlashRadiusMetres      = 1800.0f;
 };
 
+//------------------------------------------------------------------------------------------------------------------------
+//                                                    FORCE FIELD TAXONOMY
+//------------------------------------------------------------------------------------------------------------------------
+
+// 📝 The eos force-field taxonomy: a flow is a velocity the air carries [m/s], an acceleration is added to a receiver's
+//    velocity whatever its coupling [m/s²], and damping scales velocity down [1/s]. The three never share a bucket.
+enum class ForceContribution : uint8_t
+{
+    Flow       = 0,
+    Accelerate = 1,
+    Damp       = 2,
+};
+
+// 📝 The localized force types. 1 – 8 keep the numbers the GPU force records carry (ForceField.slang); 9 – 16 are the
+//    eos Particle editor's fields (forcefields.js).
+enum class ForceSourceCategory : uint8_t
+{
+    None           = 0,
+    TornadoColumn  = 1,    // Burgers–Rott column: tornado, waterspout, dust devil
+    GustFront      = 2,    // travelling surge: squall line, haboob wall
+    Microburst     = 3,    // downdraft column and its ground outflow ring
+    GustPuff       = 4,    // Gaussian packet drifting with the wind
+    VehicleWake    = 5,    // slipstream tow and counter-rotating pair behind a moving body
+    ThermalUpdraft = 6,    // buoyant chimney with entrainment and divergence
+    JetCorridor    = 7,    // Venturi corridor: canyon, tunnel draft
+    BlastWave      = 8,    // expanding spherical front r(t) = r₀ + c·t
+    Current        = 9,    // steady flow inside a box
+    Attractor      = 10,   // pull toward the centre, with swirl and a swallow radius
+    Repulsor       = 11,   // push away from the centre
+    Orbit          = 12,   // tangential pull around world up
+    Lift           = 13,   // straight up, fading toward the edge
+    MagneticDipole = 14,   // along the field lines of a dipole on world Z
+    Gravity        = 15,   // unbounded downward acceleration
+    DragVolume     = 16,   // velocity bled away inside a box
+};
+
+enum class ForceReach : uint8_t
+{
+    Everywhere = 0,
+    Sphere     = 1,
+    Column     = 2,
+    Box        = 3,
+};
+
+enum class ForceFalloff : uint8_t
+{
+    None          = 0,
+    Linear        = 1,
+    Smooth        = 2,
+    InverseSquare = 3,
+};
+
+enum class ForceActivation : uint8_t
+{
+    Always  = 0,
+    Window  = 1,
+    Trigger = 2,
+};
+
+// 📝 Receivers (the Acts on list). A force with no receivers named acts on every receiver; only such flows can share
+//    the baked lattice, the rest are evaluated per receiver.
+enum ForceReceiver : uint32_t
+{
+    ForceReceiverParticles     = 1u << 0u,
+    ForceReceiverDebris        = 1u << 1u,
+    ForceReceiverPrecipitation = 1u << 2u,
+    ForceReceiverClouds        = 1u << 3u,
+    ForceReceiverPlumes        = 1u << 4u,
+    ForceReceiverFoliage       = 1u << 5u,
+    ForceReceiverVehicles      = 1u << 6u,
+    ForceReceiverEvery         = (1u << 7u) - 1u,
+};
+
+// 📝 What the field visualization colours: horizontal speed, one axis, vorticity ω or divergence ∇·v.
+enum class ForceFieldQuantity : uint8_t
+{
+    Speed      = 0,
+    AlongX     = 1,   // east
+    AlongZ     = 2,   // south
+    Vertical   = 3,
+    Vorticity  = 4,
+    Divergence = 5,
+};
+
+enum class ForceFieldProjection : uint8_t
+{
+    Map     = 0,   // top-down
+    Oblique = 1,   // the slice as a tilted plate
+};
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                    FORCE FIELD AND WIND
+//------------------------------------------------------------------------------------------------------------------------
+
+// 📝 The master component: the whole field's switches, its visualization and the proposed cascades. The Wind is its guest
+//    record and the localized forces (ForceSource records) sit under it.
 struct ForceFieldConfiguration : RevisionCounter
 {
     bool Enabled = true;
@@ -426,6 +522,39 @@ struct ForceFieldConfiguration : RevisionCounter
     uint32_t GridResolution = 5;
     float ArrowSeconds = 0.5f; // [s] velocity multiplied by this time gives the world-space arrow length
     bool IncludeTurbulence = true;
+
+    // 📝 Range and detail (proposed): cascade c holds CellsPerSide² × VerticalCells cells of FinestCellMetres × 8^c.
+    uint32_t Cascades         = 4;
+    float    FinestCellMetres = 2.0f;
+    uint32_t CellsPerSide     = 128;
+    uint32_t VerticalCells    = 32;
+    float    ExtentMetres     = 100000.0f;   // [m] the authored extent the minimap shows
+    uint32_t Receivers        = ForceReceiverEvery;
+
+    // 📝 The field visualization: what the viewport's Field view and the scene overlay show.
+    ForceContribution    ViewContribution   = ForceContribution::Flow;
+    ForceFieldQuantity   Quantity           = ForceFieldQuantity::Speed;
+    ForceFieldProjection Projection         = ForceFieldProjection::Map;
+    bool                 AutomaticScale     = true;
+    float                FixedScale         = 30.0f;   // [unit of the contribution] full scale of the colours
+    bool                 Heatmap            = true;
+    bool                 SmoothHeatmap      = true;
+    bool                 Arrows             = true;
+    bool                 Tracers            = true;
+    bool                 ShowCascades       = false;
+    bool                 Labels             = true;
+    bool                 SceneOverlay       = false;   // the slice drawn over the scene viewport
+    float                SliceHeightMetres  = 10.0f;   // [m] above the ground
+    float                HeatmapOpacity     = 1.0f;
+    float                ArrowSpacingPixels = 40.0f;
+    uint32_t             TracerCount        = 360;
+    float                CellPixels         = 6.0f;    // [px] the sample cell on screen
+
+    // 📝 The timeline windowed and triggered forces follow; TimelineSeconds is not saved.
+    float    TimelineDurationSeconds = 120.0f;
+    float    TimelineRate            = 1.0f;
+    bool     TimelinePlaying         = true;
+    double   TimelineSeconds         = 0.0;
 };
 
 struct WindConfiguration : RevisionCounter
@@ -445,6 +574,61 @@ struct WindConfiguration : RevisionCounter
     float GustStrength           = 0.25f;
     float ShearPerKilometre      = 0.15f;
     float VeerDegreesPerKilometre = 8.0f;
+    // 📝 A slow speed and direction variation over tens of kilometres, so a 100 km view is not one uniform arrow.
+    float    MesoscaleScaleMetres = 18000.0f;
+    float    MesoscaleStrength    = 0.22f;
+    float    GroundHeightMetres   = 0.0f;
+    uint32_t Seed                 = 7331;
+};
+
+// 📝 One localized force (a ForceSource record under the Force Field). The position is in scene axes (x east, y north,
+//    z up); bearings are compass degrees of travel (0° north, 90° east). The type's own parameters share one record:
+//    each type reads the ones its descriptor lists (ForceSourceCatalogue) and the rest keep their defaults.
+struct ForceSourceConfiguration : RevisionCounter
+{
+    bool                Enabled              = true;
+    ForceSourceCategory Category             = ForceSourceCategory::GustPuff;
+    double              CentreMetres[3]      = {0.0, 0.0, 0.0};
+    ForceReach          Reach                = ForceReach::Sphere;
+    double              ReachMetres          = 100.0;          // [m] sphere or column radius
+    double              HeightMetres         = 200.0;          // [m] column or box height, type height
+    double              HalfExtentsMetres[2] = {50.0, 50.0};   // [m] box half extents across and along the bearing
+    ForceFalloff        Falloff              = ForceFalloff::Smooth;
+    ForceActivation     Activation           = ForceActivation::Always;
+    double              BeginsSeconds        = 0.0;
+    double              LastsSeconds         = 0.0;            // [s] 0: forever
+    double              RepeatsSeconds       = 0.0;            // [s] 0: once
+    double              RampInSeconds        = 1.25;
+    double              RampOutSeconds       = 2.0;
+    uint32_t            ActsOn               = 0;              // ForceReceiver bits; 0: every receiver
+
+    double Strength                   = 12.0;   // [m/s, m/s² or 1/s by contribution]
+    double InnerRadiusMetres          = 20.0;
+    double CollarRadiusMetres         = 96.0;
+    double InflowMetresPerSecond      = 26.0;
+    double UpdraftMetresPerSecond     = 42.0;
+    double Spin                       = 1.0;    // [-] +1 cyclonic (counter-clockwise from above), −1 anticyclonic
+    double TrackBearingDegrees        = 109.0;
+    double TrackSpeedMetresPerSecond  = 3.7;
+    double FrontSpeedMetresPerSecond  = 18.0;
+    double CrestDepthMetres           = 85.0;
+    double HalfWidthMetres            = 900.0;
+    double BearingDegrees             = 0.0;
+    double DowndraftMetresPerSecond   = 24.0;
+    double RingRadiusMetres           = 150.0;
+    double LengthMetres               = 95.0;
+    double LiftMetresPerSecond        = 0.8;
+    double VerticalRadiusMetres       = 14.0;
+    double Drift                      = 0.92;   // [-] share of the wind at its height that carries a gust puff
+    double ExpansionMetresPerSecond   = 110.0;
+    double ThicknessMetres            = 14.0;
+    double InitialRadiusMetres        = 3.0;
+    double CirculationMetresPerSecond = 7.5;
+    double BodySpeedMetresPerSecond   = 22.0;
+    double Swirl                      = 2.0;    // [m/s²]
+    double SwallowRadiusMetres        = 0.0;
+
+    double TriggeredAtSeconds = -1.0;   // [s] timeline time of the last Fire; < 0 armed. Not saved.
 };
 
 //------------------------------------------------------------------------------------------------------------------------

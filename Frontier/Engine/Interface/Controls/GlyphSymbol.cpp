@@ -250,6 +250,33 @@ constexpr GlyphSource GlyphSources[] = {
      "6 0 0 1 7.94-7.94l-3.76 3.76z'/>"},
     {"ChevronUp", "<path d='m18 15-6-6-6 6'/>"},
     {"ArrowUpRight", "<path d='M7 7h10v10'/> <path d='M7 17 17 7'/>"},
+    // 📝 The force glyphs of the Force Field editor prototype (InspectorControls.js GlyphPaths); its orbit ellipse is drawn as two
+    //    arcs (ForceOrbit, beside lucide's Orbit) and the blast's dashed ring as a plain one.
+    {"Tornado", "<path d='M3 5h18M5.5 9h13M8 13h8.5M10 17h5M11.5 21h2'/>"},
+    {"Attract", "<circle cx='12' cy='12' r='2.2'/><path d='M3 12h5M16 12h5M12 3v5M12 16v5M6 10l2 2-2 2M18 10l-2 2 2 2M10 6l2 2 2-2M10 18l2-2 2 2'/>"},
+    {"Repel",
+     "<circle cx='12' cy='12' r='2.2'/><path d='M2.5 12h5M16.5 12h5M12 2.5v5M12 16.5v5M4.5 10l-2 2 2 2M19.5 10l2 2-2 2M10 4.5l2-2 2 2M10 19.5l2 2 2-2'/>"},
+    {"ForceOrbit", "<circle cx='12' cy='12' r='2.4'/><path d='M20.68 8.14A9.5 4.4 -24 1 0 3.32 15.86A9.5 4.4 -24 1 0 20.68 8.14'/>"},
+    {"Magnet", "<path d='M5 3.5h4.5v8a2.5 2.5 0 0 0 5 0v-8H19v8a7 7 0 0 1-14 0z'/><path d='M5 7.5h4.5M14.5 7.5H19'/>"},
+    {"Thermal", "<path d='M8 20V8M5 11l3-3 3 3M16 20V4.5M13 7.5l3-3 3 3'/>"},
+    {"Downburst", "<path d='M12 3v10M9 10l3 3 3-3'/><path d='M3 20c2.8-3.6 5.6-4.4 9-4.4s6.2.8 9 4.4'/>"},
+    {"Front", "<path d='M14.5 3c-3 3-3 15 0 18'/><path d='M3 8h7.5M3 12h8M3 16h7.5'/><path d='M18 9l2.5 3-2.5 3'/>"},
+    {"Jet", "<path d='M3 8.5h11l6 3.5-6 3.5H3'/><path d='M6.5 12h6'/>"},
+    {"Puff", "<circle cx='9' cy='13' r='4.5'/><circle cx='16' cy='10.5' r='3.5'/><path d='M3 20h18'/>"},
+    {"Blast", "<circle cx='12' cy='12' r='2'/><circle cx='12' cy='12' r='5.6'/><circle cx='12' cy='12' r='9.2'/>"},
+    {"Wake",
+     "<path d='M2.5 15.5h3.5l2.2-4.5h6.6l3.2 4.5h3.5'/><circle cx='7.5' cy='16.8' r='1.7'/><circle cx='16.5' cy='16.8' r='1.7'/>"
+     "<path d='M3 8h4M2.5 11h2'/>"},
+    {"Current", "<rect x='3' y='5' width='18' height='14' rx='2.5'/><path d='M6.5 10h9.5l-2-2M6.5 14h9.5l-2 2'/>"},
+    {"Lift", "<path d='M12 18.5V5M8 9l4-4 4 4'/><path d='M5 20.5h14'/>"},
+    {"Gravity", "<path d='M12 3.5V17M8 13l4 4 4-4'/><path d='M5 20.5h14'/>"},
+    {"Damp", "<path d='M2.5 9c1.6-3.6 3.2-3.6 4.8 0s3.2 2.6 4.8 0 3-1.8 4.6 0 2.4 1.2 4.8 0'/><path d='M2.5 15.5h19'/>"},
+    {"Swirl", "<path d='M12 12.2a2.3 2.3 0 1 1 2.3 2.3A4.8 4.8 0 1 1 12 7.4a7.2 7.2 0 1 1-7.2 7.2'/>"},
+    {"Library", "<path d='M4 4.5h4v15H4zM10 4.5h4v15h-4z'/><path d='M15.8 5.8l3.4-.9 3.3 13.6-3.4.9z'/>"},
+    {"Crosshair", "<circle cx='12' cy='12' r='7'/><path d='M12 2.5v5M12 16.5v5M2.5 12h5M16.5 12h5'/>"},
+    {"Compass", "<circle cx='12' cy='12' r='9'/><path d='M15.5 8.5l-2 5-5 2 2-5z'/>"},
+    {"Timeline", "<path d='M3 12h18'/><circle cx='7' cy='12' r='2'/><circle cx='15.5' cy='12' r='2'/><path d='M7 5v3M15.5 16v3'/>"},
+    {"Globe", "<circle cx='12' cy='12' r='9'/><path d='M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18'/>"},
 };
 
 // 📝 ConstructGlyph's Native map: the environment artwork each Native* name shows.

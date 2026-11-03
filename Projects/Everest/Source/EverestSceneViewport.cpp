@@ -116,6 +116,9 @@ Frontier::GlobalIllumination::SceneEnvironment ResolveSceneEnvironment(const Fro
     ReadConfiguration<Frontier::WindRecord>(World, "Wind", Environment.Wind);
     if (const auto Entries = World.FindAllByType("ForceField"); !Entries.empty())
         if (const auto* Entry = dynamic_cast<const Frontier::ForceFieldRecord*>(Entries.front())) Environment.Forces = Entry->QueryConfiguration();
+    for (const auto* Entry : World.FindAllByType("ForceSource"))
+        if (const auto* Source = dynamic_cast<const Frontier::ForceSourceRecord*>(Entry); Source && Source->QueryConfiguration().Enabled)
+            Environment.ForceSources.push_back(Source->QueryConfiguration());
     if (const auto Entries = World.FindAllByType("Atmosphere"); !Entries.empty()) Environment.AtmosphereToken = Entries.front()->QueryToken().Value;
     for (const auto* Entry : World.FindAllByType("Clouds"))
     {

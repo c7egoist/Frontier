@@ -25,6 +25,7 @@
 #include "Engine/Interface/Inspectors/LightningInspector.h"
 #include "Engine/Interface/Inspectors/WindInspector.h"
 #include "Engine/Interface/Inspectors/ForceFieldInspector.h"
+#include "Engine/Interface/Inspectors/ForceSourceInspector.h"
 #include "Engine/Interface/Inspectors/FluidPlumeInspector.h"
 #include "Engine/Interface/Inspectors/FractureInspector.h"
 #include "Engine/Interface/Inspectors/GeometryInspector.h"

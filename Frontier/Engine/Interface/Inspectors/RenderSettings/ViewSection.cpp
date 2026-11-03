@@ -21,7 +21,7 @@ namespace Frontier
 
 bool ViewSection::Construct(ControlColumn& Page, RenderPipelineConfiguration& P, const RenderSettingsReading& Reading)
 {
-    using namespace RenderSettingsRows;
+    using namespace SectionRows;
     const int Chosen = P.AnalyticIllumination ? RenderInspectionModes::AnalyticView : std::clamp(P.InspectionModeIndex, 0, 14);
     BeginSection(Page, "Debug views", "Bug", RenderInspectionModes::Views[Chosen].Name,
                  "What the viewport shows. Views 00 to 14 are the demo's buffers; the fast preview swaps the global illumination for the "

@@ -6,6 +6,7 @@
 #include "Engine/Scene/SceneWorld.h"
 
 #include "Engine/Scene/SceneDirectory.h"
+#include "Engine/PhysicalDynamics/ForceSourceCatalogue.h"
 
 #include <toml++/toml.hpp>
 
@@ -83,6 +84,72 @@ void ReadFloat3(const toml::table& InTable, std::string_view Key, float OutValue
         }
     }
 }
+
+double ReadDouble(const toml::table& Table, std::string_view Key, double Fallback)
+{
+    if (const auto Quantity = Table[Key].value<double>(); Quantity && std::isfinite(*Quantity)) return *Quantity;
+    if (const auto Whole = Table[Key].value<int64_t>()) return static_cast<double>(*Whole);
+    return Fallback;
+}
+
+void ReadDoubles(const toml::table& Table, std::string_view Key, double* OutValues, size_t Count)
+{
+    if (const toml::array* Array = Table[Key].as_array())
+    {
+        for (size_t Index = 0; Index < Count && Index < Array->size(); ++Index)
+        {
+            if (const auto Value = (*Array)[Index].value<double>(); Value && std::isfinite(*Value)) OutValues[Index] = *Value;
+            else if (const auto Whole = (*Array)[Index].value<int64_t>()) OutValues[Index] = static_cast<double>(*Whole);
+        }
+    }
+}
+
+void WriteDoubles(toml::table& Table, std::string_view Key, const double* Values, size_t Count)
+{
+    toml::array Array;
+    for (size_t Index = 0; Index < Count; ++Index) Array.push_back(Values[Index]);
+    Table.insert_or_assign(Key, std::move(Array));
+}
+
+// 📝 The Acts on list as receiver names ([] = every receiver).
+toml::array WriteReceivers(uint32_t Receivers)
+{
+    toml::array Array;
+    for (const ForceReceiverDescriptor& Receiver : EnumerateForceReceivers())
+        if (Receivers & Receiver.Receiver) Array.push_back(std::string(Receiver.Identifier));
+    return Array;
+}
+
+uint32_t ReadReceivers(const toml::table& Table, std::string_view Key, uint32_t Fallback)
+{
+    const toml::array* Array = Table[Key].as_array();
+    if (!Array) return Fallback;
+    uint32_t Receivers = 0;
+    for (const toml::node& Entry : *Array)
+        if (const auto Name = Entry.value<std::string>())
+            for (const ForceReceiverDescriptor& Receiver : EnumerateForceReceivers())
+                if (*Name == Receiver.Identifier) Receivers |= Receiver.Receiver;
+    return Receivers;
+}
+
+template <typename Choice, size_t Count>
+const char* NameChoice(Choice Value, const char* const (&Names)[Count])
+{
+    return Names[std::min<size_t>(static_cast<size_t>(Value), Count - 1)];
+}
+
+template <typename Choice, size_t Count>
+Choice ReadChoice(const toml::table& Table, std::string_view Key, Choice Fallback, const char* const (&Names)[Count])
+{
+    if (const auto Name = Table[Key].value<std::string>())
+        for (size_t Index = 0; Index < Count; ++Index)
+            if (*Name == Names[Index]) return static_cast<Choice>(Index);
+    return Fallback;
+}
+
+constexpr const char* ContributionNames[] = {"flow", "accelerate", "damp"};
+constexpr const char* QuantityNames[]     = {"speed", "along_x", "along_z", "vertical", "vorticity", "divergence"};
+constexpr const char* ProjectionNames[]   = {"map", "oblique"};
 
 void WriteAtmosphereOptics(toml::table& Table, const AtmosphereOpticalConfiguration& Optical)
 {
@@ -963,6 +1030,32 @@ void ForceFieldRecord::SerializeConfiguration(toml::table& Table) const
     Table.insert_or_assign("arrow_seconds",double(Parameters.ArrowSeconds));
     WriteFloat3(Table,"centre_metres",Parameters.CentreMetres);
     WriteFloat3(Table,"half_extents_metres",Parameters.HalfExtentsMetres);
+    Table.insert_or_assign("cascades", int64_t(Parameters.Cascades));
+    Table.insert_or_assign("finest_cell_metres", double(Parameters.FinestCellMetres));
+    Table.insert_or_assign("cells_per_side", int64_t(Parameters.CellsPerSide));
+    Table.insert_or_assign("vertical_cells", int64_t(Parameters.VerticalCells));
+    Table.insert_or_assign("extent_metres", double(Parameters.ExtentMetres));
+    Table.insert_or_assign("receivers", WriteReceivers(Parameters.Receivers));
+    Table.insert_or_assign("view_contribution", NameChoice(Parameters.ViewContribution, ContributionNames));
+    Table.insert_or_assign("view_quantity", NameChoice(Parameters.Quantity, QuantityNames));
+    Table.insert_or_assign("view_projection", NameChoice(Parameters.Projection, ProjectionNames));
+    Table.insert_or_assign("automatic_scale", Parameters.AutomaticScale);
+    Table.insert_or_assign("fixed_scale", double(Parameters.FixedScale));
+    Table.insert_or_assign("heatmap", Parameters.Heatmap);
+    Table.insert_or_assign("smooth_heatmap", Parameters.SmoothHeatmap);
+    Table.insert_or_assign("arrows", Parameters.Arrows);
+    Table.insert_or_assign("tracers", Parameters.Tracers);
+    Table.insert_or_assign("show_cascades", Parameters.ShowCascades);
+    Table.insert_or_assign("labels", Parameters.Labels);
+    Table.insert_or_assign("scene_overlay", Parameters.SceneOverlay);
+    Table.insert_or_assign("slice_height_metres", double(Parameters.SliceHeightMetres));
+    Table.insert_or_assign("heatmap_opacity", double(Parameters.HeatmapOpacity));
+    Table.insert_or_assign("arrow_spacing_pixels", double(Parameters.ArrowSpacingPixels));
+    Table.insert_or_assign("tracer_count", int64_t(Parameters.TracerCount));
+    Table.insert_or_assign("cell_pixels", double(Parameters.CellPixels));
+    Table.insert_or_assign("timeline_duration_seconds", double(Parameters.TimelineDurationSeconds));
+    Table.insert_or_assign("timeline_rate", double(Parameters.TimelineRate));
+    Table.insert_or_assign("timeline_playing", Parameters.TimelinePlaying);
 }
 
 template <>
@@ -976,6 +1069,32 @@ void ForceFieldRecord::DeserializeConfiguration(const toml::table& Table)
     ReadFloat3(Table,"centre_metres",Parameters.CentreMetres);
     ReadFloat3(Table,"half_extents_metres",Parameters.HalfExtentsMetres);
     for (float& Half : Parameters.HalfExtentsMetres) Half = std::clamp(Half,1.0f,1000.0f);
+    Parameters.Cascades = std::clamp(ReadUint32(Table, "cascades", Parameters.Cascades), 1u, kMaximumForceCascades);
+    Parameters.FinestCellMetres = std::clamp(ReadFloat(Table, "finest_cell_metres", Parameters.FinestCellMetres), 0.25f, 1000.0f);
+    Parameters.CellsPerSide = std::clamp(ReadUint32(Table, "cells_per_side", Parameters.CellsPerSide), 16u, 512u);
+    Parameters.VerticalCells = std::clamp(ReadUint32(Table, "vertical_cells", Parameters.VerticalCells), 4u, 128u);
+    Parameters.ExtentMetres = std::clamp(ReadFloat(Table, "extent_metres", Parameters.ExtentMetres), 100.0f, 400000.0f);
+    Parameters.Receivers = ReadReceivers(Table, "receivers", Parameters.Receivers);
+    Parameters.ViewContribution = ReadChoice(Table, "view_contribution", Parameters.ViewContribution, ContributionNames);
+    Parameters.Quantity = ReadChoice(Table, "view_quantity", Parameters.Quantity, QuantityNames);
+    Parameters.Projection = ReadChoice(Table, "view_projection", Parameters.Projection, ProjectionNames);
+    Parameters.AutomaticScale = ReadBool(Table, "automatic_scale", Parameters.AutomaticScale);
+    Parameters.FixedScale = std::clamp(ReadFloat(Table, "fixed_scale", Parameters.FixedScale), 0.01f, 1000.0f);
+    Parameters.Heatmap = ReadBool(Table, "heatmap", Parameters.Heatmap);
+    Parameters.SmoothHeatmap = ReadBool(Table, "smooth_heatmap", Parameters.SmoothHeatmap);
+    Parameters.Arrows = ReadBool(Table, "arrows", Parameters.Arrows);
+    Parameters.Tracers = ReadBool(Table, "tracers", Parameters.Tracers);
+    Parameters.ShowCascades = ReadBool(Table, "show_cascades", Parameters.ShowCascades);
+    Parameters.Labels = ReadBool(Table, "labels", Parameters.Labels);
+    Parameters.SceneOverlay = ReadBool(Table, "scene_overlay", Parameters.SceneOverlay);
+    Parameters.SliceHeightMetres = std::clamp(ReadFloat(Table, "slice_height_metres", Parameters.SliceHeightMetres), 0.0f, 12000.0f);
+    Parameters.HeatmapOpacity = std::max(0.0f, ReadFloat(Table, "heatmap_opacity", Parameters.HeatmapOpacity));   // 📝 saturates at 1 where drawn
+    Parameters.ArrowSpacingPixels = std::clamp(ReadFloat(Table, "arrow_spacing_pixels", Parameters.ArrowSpacingPixels), 16.0f, 120.0f);
+    Parameters.TracerCount = std::clamp(ReadUint32(Table, "tracer_count", Parameters.TracerCount), 0u, 2000u);
+    Parameters.CellPixels = std::clamp(ReadFloat(Table, "cell_pixels", Parameters.CellPixels), 2.0f, 24.0f);
+    Parameters.TimelineDurationSeconds = std::clamp(ReadFloat(Table, "timeline_duration_seconds", Parameters.TimelineDurationSeconds), 5.0f, 3600.0f);
+    Parameters.TimelineRate = std::clamp(ReadFloat(Table, "timeline_rate", Parameters.TimelineRate), 0.0f, 16.0f);
+    Parameters.TimelinePlaying = ReadBool(Table, "timeline_playing", Parameters.TimelinePlaying);
     Parameters.AdvanceRevision();
 }
 
@@ -996,6 +1115,10 @@ void WindRecord::SerializeConfiguration(toml::table& OutTable) const
     OutTable.insert_or_assign("gust_strength", static_cast<double>(Parameters.GustStrength));
     OutTable.insert_or_assign("shear_per_kilometre", static_cast<double>(Parameters.ShearPerKilometre));
     OutTable.insert_or_assign("veer_degrees_per_kilometre", static_cast<double>(Parameters.VeerDegreesPerKilometre));
+    OutTable.insert_or_assign("ground_height_metres", static_cast<double>(Parameters.GroundHeightMetres));
+    OutTable.insert_or_assign("seed", static_cast<int64_t>(Parameters.Seed));
+    OutTable.insert_or_assign("mesoscale_scale_metres", static_cast<double>(Parameters.MesoscaleScaleMetres));
+    OutTable.insert_or_assign("mesoscale_strength", static_cast<double>(Parameters.MesoscaleStrength));
 }
 
 template <>
@@ -1015,6 +1138,81 @@ void WindRecord::DeserializeConfiguration(const toml::table& InTable)
     Parameters.GustStrength = ReadFloat(InTable, "gust_strength", Parameters.GustStrength);
     Parameters.ShearPerKilometre = ReadFloat(InTable, "shear_per_kilometre", Parameters.ShearPerKilometre);
     Parameters.VeerDegreesPerKilometre = ReadFloat(InTable, "veer_degrees_per_kilometre", Parameters.VeerDegreesPerKilometre);
+    Parameters.GroundHeightMetres = ReadFloat(InTable, "ground_height_metres", Parameters.GroundHeightMetres);
+    Parameters.Seed = ReadUint32(InTable, "seed", Parameters.Seed);
+    Parameters.MesoscaleScaleMetres = std::clamp(ReadFloat(InTable, "mesoscale_scale_metres", Parameters.MesoscaleScaleMetres), 0.0f, 200000.0f);
+    Parameters.MesoscaleStrength = std::clamp(ReadFloat(InTable, "mesoscale_strength", Parameters.MesoscaleStrength), 0.0f, 1.0f);
+    Parameters.AdvanceRevision();
+}
+
+// 📝 A ForceSource record names its category and keeps only what that category reads (its descriptor's parameters and
+//    bearings), the reach, the timing and the receivers; everything else returns to the category's defaults on load.
+template <>
+void ForceSourceRecord::SerializeConfiguration(toml::table& Table) const
+{
+    const ForceSourceDescriptor& Descriptor = ResolveForceSourceDescriptor(Parameters.Category);
+    Table.insert_or_assign("enabled", Parameters.Enabled);
+    Table.insert_or_assign("category", std::string(Descriptor.Identifier));
+    Table.insert_or_assign("contribution", std::string(ResolveForceContributionDescriptor(Descriptor.Contribution).Identifier));
+    WriteDoubles(Table, "centre_metres", Parameters.CentreMetres, 3);
+    Table.insert_or_assign("reach", std::string(ResolveForceReachIdentifier(Parameters.Reach)));
+    Table.insert_or_assign("reach_metres", Parameters.ReachMetres);
+    Table.insert_or_assign("falloff", std::string(ResolveForceFalloffIdentifier(Parameters.Falloff)));
+    for (const ForceParameterDescriptor& Parameter : Descriptor.Parameters)
+        Table.insert_or_assign(Parameter.Identifier, Parameters.*(Parameter.Member));
+    for (const ForceBearingDescriptor& Bearing : Descriptor.Bearings)
+        Table.insert_or_assign(Bearing.Identifier, Parameters.*(Bearing.Member));
+    if (Descriptor.Spin) Table.insert_or_assign("spin", std::string(Parameters.Spin < 0 ? "anticyclonic" : "cyclonic"));
+    if (Parameters.Reach == ForceReach::Column || Parameters.Reach == ForceReach::Box)
+        Table.insert_or_assign("height_metres", Parameters.HeightMetres);
+    if (Parameters.Reach == ForceReach::Box && Parameters.Category != ForceSourceCategory::JetCorridor &&
+        Parameters.Category != ForceSourceCategory::VehicleWake)
+    {
+        WriteDoubles(Table, "half_extents_metres", Parameters.HalfExtentsMetres, 2);
+        Table.insert_or_assign("bearing_deg", Parameters.BearingDegrees);
+    }
+    Table.insert_or_assign("activation", std::string(ResolveForceActivationIdentifier(Parameters.Activation)));
+    Table.insert_or_assign("begins_seconds", Parameters.BeginsSeconds);
+    Table.insert_or_assign("lasts_seconds", Parameters.LastsSeconds);
+    Table.insert_or_assign("repeats_seconds", Parameters.RepeatsSeconds);
+    Table.insert_or_assign("ramp_in_seconds", Parameters.RampInSeconds);
+    Table.insert_or_assign("ramp_out_seconds", Parameters.RampOutSeconds);
+    Table.insert_or_assign("acts_on", WriteReceivers(Parameters.ActsOn));
+}
+
+template <>
+void ForceSourceRecord::DeserializeConfiguration(const toml::table& Table)
+{
+    const auto                   CategoryName = Table["category"].value<std::string>();
+    const ForceSourceDescriptor* Descriptor   = CategoryName ? ResolveForceSourceDescriptor(*CategoryName) : nullptr;
+    if (Descriptor)
+    {
+        const uint64_t Revision = Parameters.Revision;
+        Parameters              = ConstructForceSource(Descriptor->Category);
+        Parameters.Revision     = Revision;
+    }
+    const ForceSourceDescriptor& Active = ResolveForceSourceDescriptor(Parameters.Category);
+    Parameters.Enabled = ReadBool(Table, "enabled", Parameters.Enabled);
+    ReadDoubles(Table, "centre_metres", Parameters.CentreMetres, 3);
+    if (const auto Name = Table["reach"].value<std::string>()) Parameters.Reach = ParseForceReach(*Name, Parameters.Reach);
+    Parameters.ReachMetres = std::clamp(ReadDouble(Table, "reach_metres", Parameters.ReachMetres), 0.1, 400000.0);
+    if (const auto Name = Table["falloff"].value<std::string>()) Parameters.Falloff = ParseForceFalloff(*Name, Parameters.Falloff);
+    for (const ForceParameterDescriptor& Parameter : Active.Parameters)
+        Parameters.*(Parameter.Member) = std::clamp(ReadDouble(Table, Parameter.Identifier, Parameters.*(Parameter.Member)),
+                                                    std::min(Parameter.Minimum, 0.0), Parameter.Maximum * 4.0);
+    for (const ForceBearingDescriptor& Bearing : Active.Bearings)
+        Parameters.*(Bearing.Member) = ReadDouble(Table, Bearing.Identifier, Parameters.*(Bearing.Member));
+    if (const auto Spin = Table["spin"].value<std::string>()) Parameters.Spin = *Spin == "anticyclonic" ? -1.0 : 1.0;
+    Parameters.HeightMetres = std::clamp(ReadDouble(Table, "height_metres", Parameters.HeightMetres), 0.1, 40000.0);
+    ReadDoubles(Table, "half_extents_metres", Parameters.HalfExtentsMetres, 2);
+    Parameters.BearingDegrees = ReadDouble(Table, "bearing_deg", Parameters.BearingDegrees);
+    if (const auto Name = Table["activation"].value<std::string>()) Parameters.Activation = ParseForceActivation(*Name, Parameters.Activation);
+    Parameters.BeginsSeconds  = std::max(0.0, ReadDouble(Table, "begins_seconds", Parameters.BeginsSeconds));
+    Parameters.LastsSeconds   = std::max(0.0, ReadDouble(Table, "lasts_seconds", Parameters.LastsSeconds));
+    Parameters.RepeatsSeconds = std::max(0.0, ReadDouble(Table, "repeats_seconds", Parameters.RepeatsSeconds));
+    Parameters.RampInSeconds  = std::max(0.0, ReadDouble(Table, "ramp_in_seconds", Parameters.RampInSeconds));
+    Parameters.RampOutSeconds = std::max(0.0, ReadDouble(Table, "ramp_out_seconds", Parameters.RampOutSeconds));
+    Parameters.ActsOn = ReadReceivers(Table, "acts_on", Parameters.ActsOn);
     Parameters.AdvanceRevision();
 }
 
@@ -1498,6 +1696,14 @@ void SceneWorld::RegisterNativeEngineTypes()
     RegisterSimple.operator()<ForceFieldRecord>("ForceField", "Forcefield · Atmospheric Field", RecordClassification::Environment,
         "Wind", "Forcefield", "#a7f3d0");
     RegisterSimple.operator()<WindRecord>("Wind", "Environment · Wind Field", RecordClassification::Environment, "Wind", "Forcefield", "#a7f3d0");
+    RegisterType({"ForceSource", "Forcefield · Force Source", RecordClassification::Environment,
+        [](std::string Name) -> std::unique_ptr<SceneRecordBase>
+        {
+            auto Entry = std::make_unique<ForceSourceRecord>(RecordClassification::Environment, "ForceSource", std::move(Name), "Wind",
+                                                             "Forcefield", "#a7f3d0");
+            Entry->AccessConfiguration() = ConstructForceSource(ForceSourceCategory::GustPuff);
+            return Entry;
+        }});
 
     // 📝 The scene's objects, edited by the geometry inspector: the scene archive's own (a record claims their occupants) and the
     //    editor's (engine shapes and duplicates, laid out from the reserve); each record names its own group and glyph. Removing

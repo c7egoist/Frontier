@@ -183,7 +183,7 @@ add_library(FrontierSceneEditorUI STATIC
     Frontier/Engine/Interface/Inspectors/SurfaceOpticsInspector.cpp
     Frontier/Engine/Interface/Inspectors/RenderSettingsInspector.cpp
     Frontier/Engine/Interface/Inspectors/RenderSettings/RenderSettingsReadings.cpp
-    Frontier/Engine/Interface/Inspectors/RenderSettings/RenderSettingsRows.cpp
+    Frontier/Engine/Interface/Controls/SectionRows.cpp
     Frontier/Engine/Interface/Inspectors/RenderSettings/SamplingSection.cpp
     Frontier/Engine/Interface/Inspectors/RenderSettings/IlluminationSection.cpp
     Frontier/Engine/Interface/Inspectors/RenderSettings/ReflectionSection.cpp
@@ -210,6 +210,7 @@ add_library(FrontierSceneEditorUI STATIC
     Frontier/Engine/Interface/Inspectors/LightningInspector.cpp
     Frontier/Engine/Interface/Inspectors/WindInspector.cpp
     Frontier/Engine/Interface/Inspectors/ForceFieldInspector.cpp
+    Frontier/Engine/Interface/Inspectors/ForceSourceInspector.cpp
     Frontier/Engine/Interface/Inspectors/FluidPlumeInspector.cpp
     Frontier/Engine/Interface/Inspectors/FractureInspector.cpp
     Frontier/Engine/Interface/Inspectors/ParticleInspector.cpp
@@ -253,6 +254,7 @@ add_library(EverestProjectRuntime STATIC
     Frontier/Engine/Scene/RecordEntry.cpp
     Frontier/Engine/Scene/SceneDirectory.cpp
     Frontier/Engine/Scene/SceneWorld.cpp
+    Frontier/Engine/PhysicalDynamics/ForceSourceCatalogue.cpp
     Frontier/Engine/Scene/GeometryLayout.cpp
     Frontier/Engine/Diagnostics/LogCategories.cpp
     Frontier/Engine/Diagnostics/LogRingStore.cpp
@@ -688,6 +690,14 @@ if(BUILD_TESTING)
         "${CMAKE_BINARY_DIR}/environment-inspector-exhibits"
         "${CMAKE_SOURCE_DIR}/Exhibits/EnvironmentInspectors/Results/ReferenceExpectations.tsv")
     set_tests_properties(EnvironmentInspectorValidation PROPERTIES WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}" TIMEOUT 240)
+
+    # 📝 The C++ force field against the approved Force Field editor prototype (ForceFieldCatalogue.js): every contribution,
+    #    activation, profile and the budget of the demo field, and the level's ForceSource records.
+    add_executable(ForceFieldCatalogueValidation
+        Exhibits/ForceFieldEditor/Code/ForceFieldCatalogueValidation.cpp)
+    target_link_libraries(ForceFieldCatalogueValidation PRIVATE EverestProjectEditor)
+    add_test(NAME ForceFieldCatalogueValidation COMMAND ForceFieldCatalogueValidation "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(ForceFieldCatalogueValidation PROPERTIES TIMEOUT 120)
 
     add_executable(EverestInterfaceValidation
         Exhibits/EverestInterface/Code/EverestInterfaceValidation.cpp

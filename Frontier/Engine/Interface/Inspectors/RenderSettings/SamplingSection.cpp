@@ -56,7 +56,7 @@ void ConstructExtentDiagram(ControlColumn& Page, const RenderSettingsReading& Re
 
 bool SamplingSection::Construct(ControlColumn& Page, RenderPipelineConfiguration& P, const RenderSettingsReading& Reading)
 {
-    using namespace RenderSettingsRows;
+    using namespace SectionRows;
     char Status[64];
     std::snprintf(Status, sizeof(Status), "%u\xC3\x97%u \xC2\xB7 %s trace", Reading.Render[0], Reading.Render[1],
                   P.TraceScale == 1 ? "Full" : P.TraceScale == 2 ? "Half" : "Quarter");

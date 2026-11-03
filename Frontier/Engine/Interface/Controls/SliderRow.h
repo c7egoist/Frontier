@@ -25,6 +25,11 @@ class SliderRow
                           const char* Unit, float DisplayScale = 1.0f, bool Enabled = true, const char* Tooltip = nullptr);
     static bool ConstructInteger(ControlColumn& Column, const char* Id, const char* Label, uint32_t& Quantity, uint32_t Minimum,
                                  uint32_t Maximum, const char* Unit, bool Enabled = true, const char* Tooltip = nullptr);
+    // 📝 A distance on a logarithmic track (InspectorControls.js Scale: 'Logarithmic'): equal travel per decade, the figure
+    //    in m below a kilometre and km above, typed in the unit shown. Step 0 snaps to three significant figures.
+    static bool ConstructDistance(ControlColumn& Column, const char* Id, const char* Label, double& Metres, double Minimum, double Maximum,
+                                  double Step = 0.0, bool Enabled = true, const char* Tooltip = nullptr);
+    static void FormatDistance(double Metres, char* Text, uint32_t Capacity) noexcept;
 };
 
 } // namespace Frontier

@@ -31,7 +31,7 @@ std::string Thousands(uint64_t Count)
 
 bool GeometrySection::Construct(ControlColumn& Page, RenderPipelineConfiguration& P, const RenderSettingsReading& Reading)
 {
-    using namespace RenderSettingsRows;
+    using namespace SectionRows;
     BeginSection(Page, "Geometry", "Boxes", P.VirtualizedGeometry ? "Virtualized" : "Clusters",
                  "The scene the renderer loaded: its triangles, the surface clusters the raster culls, and the distance field.");
     bool Changed = Switch(Page, "VirtualizedGeometry", "Virtualized geometry", P.VirtualizedGeometry, nullptr,

@@ -160,8 +160,8 @@ int main(int Argc, char** Argv)
         Space.SetWindProfile(BaseWind);
 
         AerodynamicWakeParameters Wake{};
-        Wake.EmitterOriginMeters    = {0.0, 0.8, 0.0};
-        Wake.EmitterVelocityMps     = {0.0, 0.0, 24.0}; // Moving +Z => wake trails along -Z
+        Wake.BodyOriginMeters    = {0.0, 0.8, 0.0};
+        Wake.BodyVelocityMps     = {0.0, 0.0, 24.0}; // Moving +Z => wake trails along -Z
         Wake.HalfWidthMeters        = 1.25;
         Wake.WakeLengthMeters       = 36.0;
         Wake.WakeHeightMeters       = 3.6;
@@ -270,7 +270,7 @@ int main(int Argc, char** Argv)
         Gp.CenterMeters = {15.0, 6.0, 65.0};
         (void)AllEight.TriggerGustPuff(Gp, {0.1, 20.0, 1.0});
         AerodynamicWakeParameters Aw{};
-        Aw.EmitterOriginMeters = {-18.0, 1.0, 95.0};
+        Aw.BodyOriginMeters = {-18.0, 1.0, 95.0};
         (void)AllEight.TriggerAerodynamicWake(Aw, {0.1, 20.0, 1.0});
         ThermalUpdraftParameters Tu{};
         Tu.BaseAnchorMeters = {45.0, 0.0, 175.0};
@@ -356,8 +356,8 @@ int main(int Argc, char** Argv)
 
     // Trigger 5 (Right Foreground): High-speed Aerodynamic Rooster-Tail Wake streaking across X = +55 m, Z = 135 m
     AerodynamicWakeParameters Wake{};
-    Wake.EmitterOriginMeters    = {95.0, 1.2, 135.0};
-    Wake.EmitterVelocityMps     = {24.0, 0.0, -5.0};
+    Wake.BodyOriginMeters    = {95.0, 1.2, 135.0};
+    Wake.BodyVelocityMps     = {24.0, 0.0, -5.0};
     Wake.HalfWidthMeters        = 4.5;
     Wake.WakeLengthMeters       = 68.0;
     Wake.WakeHeightMeters       = 11.5;

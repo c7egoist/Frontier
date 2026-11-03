@@ -54,6 +54,7 @@ struct SceneEnvironment
     FogConfiguration          Fog{};
     WindConfiguration         Wind{};
     ForceFieldConfiguration   Forces{};
+    std::vector<ForceSourceConfiguration> ForceSources;   // the level's enabled ForceSource records (scene axes)
     std::vector<LocalCloudEnvironment> LocalClouds;
     std::vector<LocalFogEnvironment> LocalFogVolumes;
     uint64_t AtmosphereToken = 0;

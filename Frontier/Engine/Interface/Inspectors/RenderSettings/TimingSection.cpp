@@ -21,7 +21,7 @@ namespace Frontier
 
 bool TimingSection::Construct(ControlColumn& Page, RenderPipelineConfiguration& P, const RenderSettingsReading& Reading)
 {
-    using namespace RenderSettingsRows;
+    using namespace SectionRows;
     const auto& M = P.Measured;
     char Status[48];
     if (M.Presenting) std::snprintf(Status, sizeof(Status), "%.1f ms", M.RefreshMs);

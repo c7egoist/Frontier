@@ -18,7 +18,7 @@ namespace Frontier
 
 bool IlluminationSection::Construct(ControlColumn& Page, RenderPipelineConfiguration& P, const RenderSettingsReading& Reading)
 {
-    using namespace RenderSettingsRows;
+    using namespace SectionRows;
     char Status[48];
     if (Reading.RayTraced) std::snprintf(Status, sizeof(Status), "%dB \xC2\xB7 M%d", P.MaxBounces, P.InitialCandidates);
     else std::snprintf(Status, sizeof(Status), "%s", Reading.Analytic ? "Analytic" : "Distance field");

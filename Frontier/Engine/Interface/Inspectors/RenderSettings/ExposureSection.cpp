@@ -17,7 +17,7 @@ namespace Frontier
 
 bool ExposureSection::Construct(ControlColumn& Page, RenderPipelineConfiguration& P, const RenderSettingsReading& Reading)
 {
-    using namespace RenderSettingsRows;
+    using namespace SectionRows;
     char Status[48];
     std::snprintf(Status, sizeof(Status), "%s \xC2\xB7 %+.2f EV", P.AutoExposure ? "Auto" : "Fixed", P.ExposureCompensationEv);
     BeginSection(Page, "Exposure", "Gauge", Status, "The analytic illumination applies the compensation too.");

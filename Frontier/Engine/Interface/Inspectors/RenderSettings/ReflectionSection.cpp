@@ -18,7 +18,7 @@ namespace Frontier
 
 bool ReflectionSection::Construct(ControlColumn& Page, RenderPipelineConfiguration& P, const RenderSettingsReading& Reading)
 {
-    using namespace RenderSettingsRows;
+    using namespace SectionRows;
     char Status[48];
     if (!P.Reflection) std::snprintf(Status, sizeof(Status), "Off");
     else if (Reading.RayTraced && P.RayTracedReflections) std::snprintf(Status, sizeof(Status), "RTX \xC2\xB7 %dB", P.ReflectionBounces);

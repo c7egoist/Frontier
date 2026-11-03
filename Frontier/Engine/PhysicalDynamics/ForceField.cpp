@@ -1,8 +1,9 @@
 /*==========================================================================================================================================
                                                    FORCE FIELD DEFINITION
 ==========================================================================================================================================*/
-// 🧩 Analytic Ekman wind + gust fast path, 6-tap divergence-free curl swirl, Burgers-Rott curved-spine tornado
-//    vortex + cyclostrophic Δp condensation funnel, haboob gust fronts, microbursts, and multi-species particle drag.
+// 🧩 Analytic Ekman wind + gust fast path, divergence-free curl eddies and mesoscale drift, Burgers-Rott curved-spine tornado
+//    column + cyclostrophic Δp condensation funnel, haboob gust fronts, microbursts, authored force sources and
+//    multi-species particle drag.
 
 #include "Engine/PhysicalDynamics/ForceField.h"
 
@@ -43,36 +44,11 @@ double HashLattice(int32_t X, int32_t Y, int32_t Z, uint32_t Seed) noexcept
     return static_cast<double>(HashMix(Wx ^ Wy ^ Wz)) * (1.0 / 4294967296.0);
 }
 
-double Quintic(double T) noexcept
+// 📝 Level-of-detail filter: a term whose wavelength is under two cells fades out (by six cells it is whole), as a coarse
+//    cascade would average it away; without it, gust bands and eddies alias into noise at 100 km. CellSpan 0 keeps all.
+double ResolveResolvable(double WavelengthMeters, double CellSpanMeters) noexcept
 {
-    const double C = std::clamp(T, 0.0, 1.0);
-    return C * C * C * (C * (C * 6.0 - 15.0) + 10.0);
-}
-
-double ScalarNoise3D(SpatialVector Point, uint32_t Seed) noexcept
-{
-    const int32_t X0 = static_cast<int32_t>(std::floor(Point.X));
-    const int32_t Y0 = static_cast<int32_t>(std::floor(Point.Y));
-    const int32_t Z0 = static_cast<int32_t>(std::floor(Point.Z));
-    const double  Fx = Quintic(Point.X - static_cast<double>(X0));
-    const double  Fy = Quintic(Point.Y - static_cast<double>(Y0));
-    const double  Fz = Quintic(Point.Z - static_cast<double>(Z0));
-    const auto    Lerp = [](double A, double B, double T) noexcept { return A + (B - A) * T; };
-
-    const double N00 = Lerp(HashLattice(X0, Y0, Z0, Seed), HashLattice(X0 + 1, Y0, Z0, Seed), Fx);
-    const double N10 = Lerp(HashLattice(X0, Y0 + 1, Z0, Seed), HashLattice(X0 + 1, Y0 + 1, Z0, Seed), Fx);
-    const double N01 = Lerp(HashLattice(X0, Y0, Z0 + 1, Seed), HashLattice(X0 + 1, Y0, Z0 + 1, Seed), Fx);
-    const double N11 = Lerp(HashLattice(X0, Y0 + 1, Z0 + 1, Seed), HashLattice(X0 + 1, Y0 + 1, Z0 + 1, Seed), Fx);
-    return 2.0 * Lerp(Lerp(N00, N10, Fy), Lerp(N01, N11, Fy), Fz) - 1.0;
-}
-
-SpatialVector VectorPotential3D(SpatialVector ScaledPoint, uint32_t Seed) noexcept
-{
-    return {
-        ScalarNoise3D(ScaledPoint, Seed + 17u),
-        ScalarNoise3D({ScaledPoint.X + 31.7, ScaledPoint.Y + 19.3, ScaledPoint.Z + 7.1}, Seed + 131u),
-        ScalarNoise3D({ScaledPoint.X - 13.9, ScaledPoint.Y + 41.2, ScaledPoint.Z - 23.5}, Seed + 509u),
-    };
+    return Smooth01((WavelengthMeters / std::max(1.0e-6, CellSpanMeters) - 2.0) / 4.0);
 }
 
 double ComputeActivationEnvelope(const ActiveForceSource& Source) noexcept
@@ -153,13 +129,13 @@ BeaufortWindClassification ClassifyBeaufortWind(double SpeedMetersPerSecond) noe
     return {12u, "Hurricane Force"};
 }
 
-ForceSourceHandle ForceFieldSpace::TriggerTornado(const VortexColumnParameters& Parameters, TriggerEnvelopeTiming Timing)
+ForceSourceHandle ForceFieldSpace::TriggerTornado(const TornadoColumnParameters& Parameters, TriggerEnvelopeTiming Timing)
 {
     ActiveForceSource Entry{};
     Entry.Handle             = NextHandle_++;
-    Entry.Kind               = ForceSourceKind::VortexColumn;
+    Entry.Category               = ForceSourceCategory::TornadoColumn;
     Entry.Timing             = Timing;
-    Entry.Vortex             = Parameters;
+    Entry.Column             = Parameters;
     Entry.ActivationEnvelope = (Timing.RampInSeconds <= 1.0e-4) ? 1.0 : 0.0;
     Sources_.push_back(Entry);
     return Entry.Handle;
@@ -170,7 +146,7 @@ ForceSourceHandle ForceFieldSpace::TriggerDustDevil(SpatialVector GroundAnchorMe
                                                     double        PeakSwirlMps,
                                                     double        HoldSeconds)
 {
-    VortexColumnParameters Devil{};
+    TornadoColumnParameters Devil{};
     Devil.GroundAnchorMeters      = GroundAnchorMeters;
     Devil.TranslationVelocityMps  = {2.2, 0.0, 0.8};
     Devil.SpineLeanXMeters        = 9.0;
@@ -192,7 +168,7 @@ ForceSourceHandle ForceFieldSpace::TriggerGustFront(const GustFrontParameters& P
 {
     ActiveForceSource Entry{};
     Entry.Handle             = NextHandle_++;
-    Entry.Kind               = ForceSourceKind::TravelingGustFront;
+    Entry.Category               = ForceSourceCategory::GustFront;
     Entry.Timing             = Timing;
     Entry.GustFront          = Parameters;
     Entry.ActivationEnvelope = (Timing.RampInSeconds <= 1.0e-4) ? 1.0 : 0.0;
@@ -204,7 +180,7 @@ ForceSourceHandle ForceFieldSpace::TriggerMicroburst(const MicroburstParameters&
 {
     ActiveForceSource Entry{};
     Entry.Handle             = NextHandle_++;
-    Entry.Kind               = ForceSourceKind::RadialMicroburst;
+    Entry.Category               = ForceSourceCategory::Microburst;
     Entry.Timing             = Timing;
     Entry.Microburst         = Parameters;
     Entry.ActivationEnvelope = (Timing.RampInSeconds <= 1.0e-4) ? 1.0 : 0.0;
@@ -216,7 +192,7 @@ ForceSourceHandle ForceFieldSpace::TriggerGustPuff(const GustPuffParameters& Par
 {
     ActiveForceSource Entry{};
     Entry.Handle             = NextHandle_++;
-    Entry.Kind               = ForceSourceKind::LocalizedGustPuff;
+    Entry.Category               = ForceSourceCategory::GustPuff;
     Entry.Timing             = Timing;
     Entry.GustPuff           = Parameters;
     Entry.ActivationEnvelope = (Timing.RampInSeconds <= 1.0e-4) ? 1.0 : 0.0;
@@ -228,7 +204,7 @@ ForceSourceHandle ForceFieldSpace::TriggerAerodynamicWake(const AerodynamicWakeP
 {
     ActiveForceSource Entry{};
     Entry.Handle             = NextHandle_++;
-    Entry.Kind               = ForceSourceKind::AerodynamicWake;
+    Entry.Category               = ForceSourceCategory::VehicleWake;
     Entry.Timing             = Timing;
     Entry.Wake               = Parameters;
     Entry.ActivationEnvelope = (Timing.RampInSeconds <= 1.0e-4) ? 1.0 : 0.0;
@@ -240,7 +216,7 @@ ForceSourceHandle ForceFieldSpace::TriggerThermalUpdraft(const ThermalUpdraftPar
 {
     ActiveForceSource Entry{};
     Entry.Handle             = NextHandle_++;
-    Entry.Kind               = ForceSourceKind::ThermalUpdraftPlume;
+    Entry.Category               = ForceSourceCategory::ThermalUpdraft;
     Entry.Timing             = Timing;
     Entry.Thermal            = Parameters;
     Entry.ActivationEnvelope = (Timing.RampInSeconds <= 1.0e-4) ? 1.0 : 0.0;
@@ -252,7 +228,7 @@ ForceSourceHandle ForceFieldSpace::TriggerDirectionalJet(const DirectionalJetPar
 {
     ActiveForceSource Entry{};
     Entry.Handle             = NextHandle_++;
-    Entry.Kind               = ForceSourceKind::DirectionalJetCorridor;
+    Entry.Category               = ForceSourceCategory::JetCorridor;
     Entry.Timing             = Timing;
     Entry.Jet                = Parameters;
     Entry.ActivationEnvelope = (Timing.RampInSeconds <= 1.0e-4) ? 1.0 : 0.0;
@@ -264,7 +240,7 @@ ForceSourceHandle ForceFieldSpace::TriggerSphericalImpulse(const SphericalImpuls
 {
     ActiveForceSource Entry{};
     Entry.Handle             = NextHandle_++;
-    Entry.Kind               = ForceSourceKind::SphericalImpulseShell;
+    Entry.Category               = ForceSourceCategory::BlastWave;
     Entry.Timing             = Timing;
     Entry.Impulse            = Parameters;
     Entry.ActivationEnvelope = (Timing.RampInSeconds <= 1.0e-4) ? 1.0 : 0.0;
@@ -298,16 +274,16 @@ void ForceFieldSpace::Step(double DeltaSeconds) noexcept
         Source.AgeSeconds += Dt;
         Source.ActivationEnvelope = ComputeActivationEnvelope(Source);
 
-        if (Source.Kind == ForceSourceKind::VortexColumn)
+        if (Source.Category == ForceSourceCategory::TornadoColumn)
         {
-            Source.Vortex.GroundAnchorMeters.X += Source.Vortex.TranslationVelocityMps.X * Dt;
-            Source.Vortex.GroundAnchorMeters.Y += Source.Vortex.TranslationVelocityMps.Y * Dt;
-            Source.Vortex.GroundAnchorMeters.Z += Source.Vortex.TranslationVelocityMps.Z * Dt;
-            const double CoreRef = std::max(2.0, Source.Vortex.GroundCoreRadiusMeters);
-            const double ωCore   = (Source.Vortex.TangentialPeakSpeedMps * Source.ActivationEnvelope) / CoreRef;
+            Source.Column.GroundAnchorMeters.X += Source.Column.TranslationVelocityMps.X * Dt;
+            Source.Column.GroundAnchorMeters.Y += Source.Column.TranslationVelocityMps.Y * Dt;
+            Source.Column.GroundAnchorMeters.Z += Source.Column.TranslationVelocityMps.Z * Dt;
+            const double CoreRef = std::max(2.0, Source.Column.GroundCoreRadiusMeters);
+            const double ωCore   = (Source.Column.TangentialPeakSpeedMps * Source.ActivationEnvelope) / CoreRef;
             Source.SwirlPhaseRadians += ωCore * Dt;
         }
-        else if (Source.Kind == ForceSourceKind::LocalizedGustPuff)
+        else if (Source.Category == ForceSourceCategory::GustPuff)
         {
             // Localized wind packets automatically drift downstream with the global Ekman wind at their altitude
             const double AltKm     = std::max(0.0, Source.GustPuff.CenterMeters.Y - GroundPlaneYMeters_) * 1.0e-3;
@@ -317,11 +293,11 @@ void ForceFieldSpace::Step(double DeltaSeconds) noexcept
             Source.GustPuff.CenterMeters.X += std::cos(Bearing) * DriftSpd * Dt;
             Source.GustPuff.CenterMeters.Z += std::sin(Bearing) * DriftSpd * Dt;
         }
-        else if (Source.Kind == ForceSourceKind::AerodynamicWake)
+        else if (Source.Category == ForceSourceCategory::VehicleWake)
         {
-            Source.Wake.EmitterOriginMeters.X += Source.Wake.EmitterVelocityMps.X * Dt;
-            Source.Wake.EmitterOriginMeters.Y += Source.Wake.EmitterVelocityMps.Y * Dt;
-            Source.Wake.EmitterOriginMeters.Z += Source.Wake.EmitterVelocityMps.Z * Dt;
+            Source.Wake.BodyOriginMeters.X += Source.Wake.BodyVelocityMps.X * Dt;
+            Source.Wake.BodyOriginMeters.Y += Source.Wake.BodyVelocityMps.Y * Dt;
+            Source.Wake.BodyOriginMeters.Z += Source.Wake.BodyVelocityMps.Z * Dt;
         }
 
         const bool ExpiredFromRelease =
@@ -342,6 +318,83 @@ void ForceFieldSpace::Step(double DeltaSeconds) noexcept
             ++Index;
         }
     }
+    AuthoredSeconds_ += Dt;
+    PrepareAuthoredSources();
+}
+
+void ForceFieldSpace::SetElapsedSeconds(double Seconds) noexcept
+{
+    ElapsedSeconds_ = Seconds;
+}
+
+void ForceFieldSpace::SetWindProfile(const PlanetaryWindProfile& Profile) noexcept
+{
+    Wind_ = Profile;
+    PrepareAuthoredSources();
+}
+
+void ForceFieldSpace::SetGroundPlaneYMeters(double GroundYMeters) noexcept
+{
+    GroundPlaneYMeters_ = GroundYMeters;
+    PrepareAuthoredSources();
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                    AUTHORED SOURCES
+//------------------------------------------------------------------------------------------------------------------------
+
+void ForceFieldSpace::ConfigureAuthoredSources(std::span<const ForceSourceConfiguration> Sources, double TimelineSeconds)
+{
+    AuthoredConfigurations_.assign(Sources.begin(), Sources.end());
+    AuthoredSeconds_ = std::isfinite(TimelineSeconds) ? TimelineSeconds : 0.0;
+    PrepareAuthoredSources();
+}
+
+// 📝 The wind as the catalogue reads it (compass bearing of travel, speed, veer, shear, ground): the profile's own terms.
+ForceWindReading ForceFieldSpace::QueryAuthoredWind() const noexcept
+{
+    ForceWindReading Reading;
+    Reading.Enabled                 = Wind_.SpeedMetersPerSecond > 0.0;
+    Reading.BearingDegrees          = Wind_.BearingRadians * 180.0 / π + 90.0;
+    Reading.SpeedMetresPerSecond    = Wind_.SpeedMetersPerSecond;
+    Reading.VeerDegreesPerKilometre = Wind_.VeerRadiansPerKilometer * 180.0 / π;
+    Reading.ShearPerKilometre       = Wind_.ShearPerKilometer;
+    Reading.GroundHeightMetres      = GroundPlaneYMeters_;
+    return Reading;
+}
+
+void ForceFieldSpace::PrepareAuthoredSources() noexcept
+{
+    Authored_.clear();
+    if (AuthoredConfigurations_.empty()) return;
+    const ForceWindReading Wind = QueryAuthoredWind();
+    Authored_.reserve(AuthoredConfigurations_.size());
+    for (const ForceSourceConfiguration& Source : AuthoredConfigurations_)
+        Authored_.push_back(PrepareForceSource(Source, Wind, AuthoredSeconds_));
+}
+
+SpatialVector ForceFieldSpace::EvaluateContribution(ForceContribution Contribution,
+                                                    SpatialVector     WorldPointMeters,
+                                                    double            CellSpanMeters,
+                                                    bool              IncludeCurlSwirl,
+                                                    int32_t           Solo) const noexcept
+{
+    if (!Enabled_) return {};
+    SpatialVector Out{};
+    if (Contribution == ForceContribution::Flow)
+    {
+        if (Solo == kSoloEvery) return EvaluateStepSample(WorldPointMeters, IncludeCurlSwirl, CellSpanMeters).AirVelocityMps;
+        if (Solo == kSoloWind) return EvaluateWindFlow(WorldPointMeters, IncludeCurlSwirl, CellSpanMeters);
+    }
+    if (Solo == kSoloWind) return Out;
+    const ForceWindReading Wind = QueryAuthoredWind();
+    for (size_t Index = 0; Index < Authored_.size(); ++Index)
+    {
+        if (Authored_[Index].Contribution != Contribution) continue;
+        if (Solo >= 0 && static_cast<size_t>(Solo) != Index) continue;
+        (void)EvaluatePreparedForceSource(Authored_[Index], Wind, WorldPointMeters, Out);
+    }
+    return Out;
 }
 
 SpatialVector ForceFieldSpace::SampleStep(SpatialVector WorldPointMeters) const noexcept
@@ -349,65 +402,80 @@ SpatialVector ForceFieldSpace::SampleStep(SpatialVector WorldPointMeters) const 
     return EvaluateStepSample(WorldPointMeters, false).AirVelocityMps;
 }
 
-SpatialVector ForceFieldSpace::SampleSwirl(SpatialVector WorldPointMeters) const noexcept
+// 📝 The curl of a 2D gradient-noise stream function ψ(u, v): (∂ψ/∂v, −∂ψ/∂u) is divergence-free in the horizontal and reads
+//    as round eddies; a fifth of a second noise drives a small vertical part. The pattern drifts downwind at 0.35 × the wind.
+SpatialVector ForceFieldSpace::SampleSwirl(SpatialVector WorldPointMeters, double CellSpanMeters) const noexcept
 {
     if (!Enabled_) return {};
     if (Wind_.SwirlStrength <= 1.0e-5 || Wind_.SpeedMetersPerSecond <= 1.0e-5)
     {
         return {};
     }
-    const double Scale   = std::max(4.0, Wind_.SwirlScaleMeters);
-    const double InvS    = 1.0 / Scale;
-    const double Drift   = 0.35 * Wind_.SpeedMetersPerSecond * ElapsedSeconds_;
-    const SpatialVector P = {
-        (WorldPointMeters.X - std::cos(Wind_.BearingRadians) * Drift) * InvS,
-        WorldPointMeters.Y * InvS,
-        (WorldPointMeters.Z - std::sin(Wind_.BearingRadians) * Drift) * InvS,
-    };
-
-    constexpr double Eps    = 0.08;
-    const auto       PxPlus = VectorPotential3D({P.X + Eps, P.Y, P.Z}, Wind_.Seed);
-    const auto       PxMin  = VectorPotential3D({P.X - Eps, P.Y, P.Z}, Wind_.Seed);
-    const auto       PyPlus = VectorPotential3D({P.X, P.Y + Eps, P.Z}, Wind_.Seed);
-    const auto       PyMin  = VectorPotential3D({P.X, P.Y - Eps, P.Z}, Wind_.Seed);
-    const auto       PzPlus = VectorPotential3D({P.X, P.Y, P.Z + Eps}, Wind_.Seed);
-    const auto       PzMin  = VectorPotential3D({P.X, P.Y, P.Z - Eps}, Wind_.Seed);
-
-    const double Inv2E = 1.0 / (2.0 * Eps);
-    const double CurlX = (PyPlus.Z - PyMin.Z) * Inv2E - (PzPlus.Y - PzMin.Y) * Inv2E;
-    const double CurlY = (PzPlus.X - PzMin.X) * Inv2E - (PxPlus.Z - PxMin.Z) * Inv2E;
-    const double CurlZ = (PxPlus.Y - PxMin.Y) * Inv2E - (PyPlus.X - PyMin.X) * Inv2E;
-
-    const double Gain = Wind_.SwirlStrength * Wind_.SpeedMetersPerSecond * 0.45;
-    return {CurlX * Gain, CurlY * Gain * 0.45, CurlZ * Gain};
+    const double Visible = ResolveResolvable(Wind_.SwirlScaleMeters * 2.0, CellSpanMeters);
+    if (Visible <= 0.0) return {};
+    const double Scale = std::max(4.0, Wind_.SwirlScaleMeters);
+    const double Drift = 0.35 * Wind_.SpeedMetersPerSecond * ElapsedSeconds_;
+    const double U     = (WorldPointMeters.X - std::cos(Wind_.BearingRadians) * Drift) / Scale;
+    const double V     = (WorldPointMeters.Z - std::sin(Wind_.BearingRadians) * Drift) / Scale;
+    const double Gain  = Wind_.SwirlStrength * Wind_.SpeedMetersPerSecond * 0.45 * Visible;
+    double       Gradient[2]{};
+    (void)EvaluateGradientNoise(U, V + WorldPointMeters.Y / Scale * 0.37, Wind_.Seed, Gradient);
+    SpatialVector Eddy{Gradient[1] * Gain, 0.0, -Gradient[0] * Gain};
+    Eddy.Y = EvaluateGradientNoise(U + 71.3, V + 13.9, Wind_.Seed + 5u, Gradient) * Gain * 0.2;
+    return Eddy;
 }
 
-ForceFieldSample ForceFieldSpace::EvaluateStepSample(SpatialVector WorldPointMeters, bool IncludeCurlSwirl) const noexcept
+// 📝 Ekman speed gain and veer with altitude, the slow mesoscale variation, and the coherent two-frequency gust wave
+//    travelling downwind, each faded by the level of detail; then the eddies.
+SpatialVector ForceFieldSpace::EvaluateWindFlow(SpatialVector WorldPointMeters, bool IncludeCurlSwirl, double CellSpanMeters) const noexcept
+{
+    if (!Enabled_) return {};
+    const double AltAboveGroundM = std::max(0.0, WorldPointMeters.Y - GroundPlaneYMeters_);
+    const double AltKm           = AltAboveGroundM * 1.0e-3;
+    double       Bearing         = Wind_.BearingRadians + Wind_.VeerRadiansPerKilometer * AltKm;
+    double       ShearGain       = std::max(0.15, 1.0 + Wind_.ShearPerKilometer * std::min(AltKm, 12.0));
+    if (Wind_.MesoscaleStrength > 0.0 && Wind_.MesoscaleScaleMeters > 0.0)
+    {
+        const double Visible = ResolveResolvable(Wind_.MesoscaleScaleMeters * 2.0, CellSpanMeters);
+        if (Visible > 0.0)
+        {
+            const double Drift = 0.35 * Wind_.SpeedMetersPerSecond * ElapsedSeconds_;
+            const double U     = (WorldPointMeters.X - std::cos(Wind_.BearingRadians) * Drift) / Wind_.MesoscaleScaleMeters;
+            const double V     = (WorldPointMeters.Z - std::sin(Wind_.BearingRadians) * Drift) / Wind_.MesoscaleScaleMeters;
+            double       Gradient[2]{};
+            const double SpeedShift = EvaluateGradientNoise(U, V, Wind_.Seed + 11u, Gradient);
+            const double TurnShift  = EvaluateGradientNoise(U + 37.1, V - 19.7, Wind_.Seed + 23u, Gradient);
+            ShearGain *= 1.0 + Wind_.MesoscaleStrength * SpeedShift * Visible;
+            Bearing += Wind_.MesoscaleStrength * 55.0 * (π / 180.0) * TurnShift * Visible;
+        }
+    }
+    const double DirX = std::cos(Bearing);
+    const double DirZ = std::sin(Bearing);
+
+    const double AlongWindCoord = WorldPointMeters.X * DirX + WorldPointMeters.Z * DirZ;
+    const double Phase          = Twoπ * Wind_.GustFrequencyHz * ElapsedSeconds_ - 0.011 * AlongWindCoord;
+    const double GustWave       = 0.62 * std::sin(Phase) * ResolveResolvable(Twoπ / 0.011, CellSpanMeters) +
+                            0.38 * std::sin(2.17 * Phase + 1.13) * ResolveResolvable(Twoπ / (0.011 * 2.17), CellSpanMeters);
+    const double LocalWindSpeed = Wind_.SpeedMetersPerSecond * ShearGain * (1.0 + Wind_.GustAmplitude * GustWave);
+
+    SpatialVector Flow{DirX * LocalWindSpeed, 0.0, DirZ * LocalWindSpeed};
+    if (IncludeCurlSwirl)
+    {
+        const SpatialVector Eddy = SampleSwirl(WorldPointMeters, CellSpanMeters);
+        Flow.X += Eddy.X;
+        Flow.Y += Eddy.Y;
+        Flow.Z += Eddy.Z;
+    }
+    return Flow;
+}
+
+ForceFieldSample ForceFieldSpace::EvaluateStepSample(SpatialVector WorldPointMeters, bool IncludeCurlSwirl, double CellSpanMeters) const noexcept
 {
     if (!Enabled_) return {};
     ForceFieldSample Out{};
 
-    // 1. Base Ekman altitude-sheared wind + coherent multi-frequency gust wave (trig-only fast path)
-    const double AltAboveGroundM = std::max(0.0, WorldPointMeters.Y - GroundPlaneYMeters_);
-    const double AltKm           = AltAboveGroundM * 1.0e-3;
-    const double Bearing         = Wind_.BearingRadians + Wind_.VeerRadiansPerKilometer * AltKm;
-    const double DirX            = std::cos(Bearing);
-    const double DirZ            = std::sin(Bearing);
-    const double ShearGain       = std::max(0.15, 1.0 + Wind_.ShearPerKilometer * std::min(AltKm, 12.0));
-
-    const double AlongWindCoord = WorldPointMeters.X * DirX + WorldPointMeters.Z * DirZ;
-    const double Phase          = Twoπ * Wind_.GustFrequencyHz * ElapsedSeconds_ - 0.011 * AlongWindCoord;
-    const double GustWave       = 0.62 * std::sin(Phase) + 0.38 * std::sin(2.17 * Phase + 1.13);
-    const double LocalWindSpeed = Wind_.SpeedMetersPerSecond * ShearGain * (1.0 + Wind_.GustAmplitude * GustWave);
-
-    Out.AirVelocityMps = {DirX * LocalWindSpeed, 0.0, DirZ * LocalWindSpeed};
-    if (IncludeCurlSwirl)
-    {
-        const SpatialVector Eddy = SampleSwirl(WorldPointMeters);
-        Out.AirVelocityMps.X += Eddy.X;
-        Out.AirVelocityMps.Y += Eddy.Y;
-        Out.AirVelocityMps.Z += Eddy.Z;
-    }
+    // 1. Base Ekman altitude-sheared wind + mesoscale + coherent multi-frequency gust wave (+ curl eddies)
+    Out.AirVelocityMps = EvaluateWindFlow(WorldPointMeters, IncludeCurlSwirl, CellSpanMeters);
 
     double WeightAlbedoSum = 0.0;
     SpectrumRgb WeightedAlbedo{0.0, 0.0, 0.0};
@@ -421,9 +489,9 @@ ForceFieldSample ForceFieldSpace::EvaluateStepSample(SpatialVector WorldPointMet
             continue;
         }
 
-        if (Source.Kind == ForceSourceKind::VortexColumn)
+        if (Source.Category == ForceSourceCategory::TornadoColumn)
         {
-            const VortexColumnParameters& V      = Source.Vortex;
+            const TornadoColumnParameters& V      = Source.Column;
             const double                  RelY   = WorldPointMeters.Y - V.GroundAnchorMeters.Y;
             const double                  SpanH  = std::max(10.0, V.ColumnHeightMeters);
             if (RelY < -15.0 || RelY > SpanH * 1.30)
@@ -443,13 +511,13 @@ ForceFieldSample ForceFieldSpace::EvaluateStepSample(SpatialVector WorldPointMet
             const double ρNorm      = Radius / SafeCore;
 
             // Burgers-Rott tangential velocity: peaks at ρ_norm = 1 with v_θ = V_max
-            const double VortexProfile = (2.0 * ρNorm) / (1.0 + ρNorm * ρNorm);
-            const double vTangential   = Env * TopTaper * V.TangentialPeakSpeedMps * VortexProfile;
+            const double ColumnProfile = (2.0 * ρNorm) / (1.0 + ρNorm * ρNorm);
+            const double vTangential   = Env * TopTaper * V.TangentialPeakSpeedMps * ColumnProfile;
 
             // Near-ground boundary-layer radial inflow transitioning to upper-collar divergence
             const double InflowBand    = std::exp(-RelY / std::max(12.0, 0.16 * SpanH)) -
                                          0.35 * Smooth01((HNorm - 0.72) / 0.28);
-            const double vRadial       = -Env * TopTaper * V.RadialInflowSpeedMps * InflowBand * VortexProfile;
+            const double vRadial       = -Env * TopTaper * V.RadialInflowSpeedMps * InflowBand * ColumnProfile;
 
             // Helical axial updraft concentrated inside and around the funnel wall
             const double vUpdraft      = Env * TopTaper * V.AxialUpdraftSpeedMps *
@@ -500,7 +568,7 @@ ForceFieldSample ForceFieldSpace::EvaluateStepSample(SpatialVector WorldPointMet
                 WeightAlbedoSum += σDebris;
             }
         }
-        else if (Source.Kind == ForceSourceKind::TravelingGustFront)
+        else if (Source.Category == ForceSourceCategory::GustFront)
         {
             const GustFrontParameters& G   = Source.GustFront;
             const double DirLen            = std::hypot(G.PropagationDirectionXZ.X, G.PropagationDirectionXZ.Z);
@@ -535,7 +603,7 @@ ForceFieldSample ForceFieldSpace::EvaluateStepSample(SpatialVector WorldPointMet
                 WeightAlbedoSum += σDust;
             }
         }
-        else if (Source.Kind == ForceSourceKind::RadialMicroburst)
+        else if (Source.Category == ForceSourceCategory::Microburst)
         {
             const MicroburstParameters& M    = Source.Microburst;
             const double                Dx   = WorldPointMeters.X - M.CoreCenterMeters.X;
@@ -562,7 +630,7 @@ ForceFieldSample ForceFieldSpace::EvaluateStepSample(SpatialVector WorldPointMet
                 WeightAlbedoSum += σDust;
             }
         }
-        else if (Source.Kind == ForceSourceKind::LocalizedGustPuff)
+        else if (Source.Category == ForceSourceCategory::GustPuff)
         {
             const GustPuffParameters& P    = Source.GustPuff;
             const double              Rxz  = std::max(1.5, P.RadiusXZMeters);
@@ -586,17 +654,17 @@ ForceFieldSample ForceFieldSpace::EvaluateStepSample(SpatialVector WorldPointMet
                 WeightAlbedoSum += σDust;
             }
         }
-        else if (Source.Kind == ForceSourceKind::AerodynamicWake)
+        else if (Source.Category == ForceSourceCategory::VehicleWake)
         {
             const AerodynamicWakeParameters& W      = Source.Wake;
-            const double                     SpdXZ  = std::hypot(W.EmitterVelocityMps.X, W.EmitterVelocityMps.Z);
-            const double                     FwdX   = (SpdXZ > 1.0e-5) ? (W.EmitterVelocityMps.X / SpdXZ) : 0.0;
-            const double                     FwdZ   = (SpdXZ > 1.0e-5) ? (W.EmitterVelocityMps.Z / SpdXZ) : 1.0;
+            const double                     SpdXZ  = std::hypot(W.BodyVelocityMps.X, W.BodyVelocityMps.Z);
+            const double                     FwdX   = (SpdXZ > 1.0e-5) ? (W.BodyVelocityMps.X / SpdXZ) : 0.0;
+            const double                     FwdZ   = (SpdXZ > 1.0e-5) ? (W.BodyVelocityMps.Z / SpdXZ) : 1.0;
             const double                     RightX = FwdZ;
             const double                     RightZ = -FwdX;
-            const double                     RelX   = WorldPointMeters.X - W.EmitterOriginMeters.X;
+            const double                     RelX   = WorldPointMeters.X - W.BodyOriginMeters.X;
             const double                     RelY   = WorldPointMeters.Y - GroundPlaneYMeters_;
-            const double                     RelZ   = WorldPointMeters.Z - W.EmitterOriginMeters.Z;
+            const double                     RelZ   = WorldPointMeters.Z - W.BodyOriginMeters.Z;
             // TrailDist > 0 downstream behind the moving vehicle/obstacle
             const double                     TrailDist   = -(RelX * FwdX + RelZ * FwdZ);
             const double                     LateralDist = RelX * RightX + RelZ * RightZ;
@@ -629,7 +697,7 @@ ForceFieldSample ForceFieldSpace::EvaluateStepSample(SpatialVector WorldPointMet
                 WeightAlbedoSum += σWake;
             }
         }
-        else if (Source.Kind == ForceSourceKind::ThermalUpdraftPlume)
+        else if (Source.Category == ForceSourceCategory::ThermalUpdraft)
         {
             const ThermalUpdraftParameters& T    = Source.Thermal;
             const double                    RelY = WorldPointMeters.Y - T.BaseAnchorMeters.Y;
@@ -672,7 +740,7 @@ ForceFieldSample ForceFieldSpace::EvaluateStepSample(SpatialVector WorldPointMet
                 }
             }
         }
-        else if (Source.Kind == ForceSourceKind::DirectionalJetCorridor)
+        else if (Source.Category == ForceSourceCategory::JetCorridor)
         {
             const DirectionalJetParameters& J      = Source.Jet;
             const double                    AxLen  = std::sqrt(J.AxisDirectionUnit.X * J.AxisDirectionUnit.X +
@@ -713,7 +781,7 @@ ForceFieldSample ForceFieldSpace::EvaluateStepSample(SpatialVector WorldPointMet
                 }
             }
         }
-        else if (Source.Kind == ForceSourceKind::SphericalImpulseShell)
+        else if (Source.Category == ForceSourceCategory::BlastWave)
         {
             const SphericalImpulseParameters& S      = Source.Impulse;
             const double                      R0     = std::max(0.5, S.InitialRadiusMeters);
@@ -741,6 +809,17 @@ ForceFieldSample ForceFieldSpace::EvaluateStepSample(SpatialVector WorldPointMet
                 WeightedAlbedo.B += σShock * S.ShockAlbedoRgb.B;
                 WeightAlbedoSum += σShock;
             }
+        }
+    }
+
+    // 3. Authored flow sources (ForceSource records)
+    if (!Authored_.empty())
+    {
+        const ForceWindReading Wind = QueryAuthoredWind();
+        for (const PreparedForceSource& Prepared : Authored_)
+        {
+            if (Prepared.Contribution != ForceContribution::Flow) continue;
+            (void)EvaluatePreparedForceSource(Prepared, Wind, WorldPointMeters, Out.AirVelocityMps);
         }
     }
 
@@ -879,9 +958,9 @@ uint32_t ForceFieldSpace::AppendGpuForceRecords(std::vector<std::array<float, 4>
             continue;
         }
 
-        if (Source.Kind == ForceSourceKind::VortexColumn)
+        if (Source.Category == ForceSourceCategory::TornadoColumn)
         {
-            const VortexColumnParameters& V = Source.Vortex;
+            const TornadoColumnParameters& V = Source.Column;
             OutFloat4Table.push_back({static_cast<float>(V.GroundAnchorMeters.X),
                                       static_cast<float>(V.GroundAnchorMeters.Y),
                                       static_cast<float>(V.GroundAnchorMeters.Z),
@@ -900,7 +979,7 @@ uint32_t ForceFieldSpace::AppendGpuForceRecords(std::vector<std::array<float, 4>
                                       static_cast<float>(Source.SwirlPhaseRadians)});
             ++Written;
         }
-        else if (Source.Kind == ForceSourceKind::TravelingGustFront)
+        else if (Source.Category == ForceSourceCategory::GustFront)
         {
             const GustFrontParameters& G      = Source.GustFront;
             const double               DirLen = std::hypot(G.PropagationDirectionXZ.X, G.PropagationDirectionXZ.Z);
@@ -925,7 +1004,7 @@ uint32_t ForceFieldSpace::AppendGpuForceRecords(std::vector<std::array<float, 4>
                                       0.0f});
             ++Written;
         }
-        else if (Source.Kind == ForceSourceKind::RadialMicroburst)
+        else if (Source.Category == ForceSourceCategory::Microburst)
         {
             const MicroburstParameters& M = Source.Microburst;
             OutFloat4Table.push_back({static_cast<float>(M.CoreCenterMeters.X),
@@ -946,7 +1025,7 @@ uint32_t ForceFieldSpace::AppendGpuForceRecords(std::vector<std::array<float, 4>
                                       0.38f});
             ++Written;
         }
-        else if (Source.Kind == ForceSourceKind::LocalizedGustPuff)
+        else if (Source.Category == ForceSourceCategory::GustPuff)
         {
             const GustPuffParameters& P = Source.GustPuff;
             OutFloat4Table.push_back({static_cast<float>(P.CenterMeters.X),
@@ -967,15 +1046,15 @@ uint32_t ForceFieldSpace::AppendGpuForceRecords(std::vector<std::array<float, 4>
                                       static_cast<float>(Source.AgeSeconds)});
             ++Written;
         }
-        else if (Source.Kind == ForceSourceKind::AerodynamicWake)
+        else if (Source.Category == ForceSourceCategory::VehicleWake)
         {
             const AerodynamicWakeParameters& W     = Source.Wake;
-            const double                     SpdXZ = std::hypot(W.EmitterVelocityMps.X, W.EmitterVelocityMps.Z);
-            const float                      FwdX  = (SpdXZ > 1.0e-5) ? static_cast<float>(W.EmitterVelocityMps.X / SpdXZ) : 0.0f;
-            const float                      FwdZ  = (SpdXZ > 1.0e-5) ? static_cast<float>(W.EmitterVelocityMps.Z / SpdXZ) : 1.0f;
-            OutFloat4Table.push_back({static_cast<float>(W.EmitterOriginMeters.X),
+            const double                     SpdXZ = std::hypot(W.BodyVelocityMps.X, W.BodyVelocityMps.Z);
+            const float                      FwdX  = (SpdXZ > 1.0e-5) ? static_cast<float>(W.BodyVelocityMps.X / SpdXZ) : 0.0f;
+            const float                      FwdZ  = (SpdXZ > 1.0e-5) ? static_cast<float>(W.BodyVelocityMps.Z / SpdXZ) : 1.0f;
+            OutFloat4Table.push_back({static_cast<float>(W.BodyOriginMeters.X),
                                       static_cast<float>(GroundPlaneYMeters_),
-                                      static_cast<float>(W.EmitterOriginMeters.Z),
+                                      static_cast<float>(W.BodyOriginMeters.Z),
                                       5.0f});
             OutFloat4Table.push_back({FwdX,
                                       FwdZ,
@@ -991,7 +1070,7 @@ uint32_t ForceFieldSpace::AppendGpuForceRecords(std::vector<std::array<float, 4>
                                       static_cast<float>(W.SprayDustAlbedoRgb.B)});
             ++Written;
         }
-        else if (Source.Kind == ForceSourceKind::ThermalUpdraftPlume)
+        else if (Source.Category == ForceSourceCategory::ThermalUpdraft)
         {
             const ThermalUpdraftParameters& T = Source.Thermal;
             OutFloat4Table.push_back({static_cast<float>(T.BaseAnchorMeters.X),
@@ -1012,7 +1091,7 @@ uint32_t ForceFieldSpace::AppendGpuForceRecords(std::vector<std::array<float, 4>
                                       static_cast<float>(Source.AgeSeconds)});
             ++Written;
         }
-        else if (Source.Kind == ForceSourceKind::DirectionalJetCorridor)
+        else if (Source.Category == ForceSourceCategory::JetCorridor)
         {
             const DirectionalJetParameters& J     = Source.Jet;
             const double                    AxLen = std::sqrt(J.AxisDirectionUnit.X * J.AxisDirectionUnit.X +
@@ -1036,7 +1115,7 @@ uint32_t ForceFieldSpace::AppendGpuForceRecords(std::vector<std::array<float, 4>
                                       static_cast<float>(J.JetAlbedoRgb.B)});
             ++Written;
         }
-        else if (Source.Kind == ForceSourceKind::SphericalImpulseShell)
+        else if (Source.Category == ForceSourceCategory::BlastWave)
         {
             const SphericalImpulseParameters& S      = Source.Impulse;
             const double                      R0     = std::max(0.5, S.InitialRadiusMeters);

@@ -229,6 +229,371 @@ direction_deg = 45.0
 speed_mps = 6.5
 turbulence = 0.45
 
+# The localized forces under the Force Field: the approved prototype's demo field (ForceFieldCatalogue.js
+# ConstructDefaultField), 100 m to 100 km. Centres are scene axes (east, north, up); bearings are compass degrees of travel.
+
+[[records]]
+identity = "rec_force_mesocyclone"
+type = "ForceSource"
+name = "Mesocyclone"
+parent = "rec_force_field"
+[records.configuration]
+enabled = true
+category = "tornado_column"
+contribution = "flow"
+centre_metres = [-21000.0, -9000.0, 0.0]
+reach = "column"
+reach_metres = 26000.0
+falloff = "smooth"
+strength = 24.0
+inner_radius_metres = 2600.0
+collar_radius_metres = 5200.0
+inflow_mps = 8.0
+updraft_mps = 12.0
+height_metres = 9000.0
+track_speed_mps = 12.0
+track_bearing_deg = 62.0
+spin = "cyclonic"
+activation = "always"
+begins_seconds = 0.0
+lasts_seconds = 0.0
+repeats_seconds = 0.0
+ramp_in_seconds = 1.25
+ramp_out_seconds = 2.0
+acts_on = []
+
+[[records]]
+identity = "rec_force_squall_line"
+type = "ForceSource"
+name = "Squall line"
+parent = "rec_force_field"
+[records.configuration]
+enabled = true
+category = "gust_front"
+contribution = "flow"
+centre_metres = [-30000.0, 14000.0, 0.0]
+reach = "everywhere"
+reach_metres = 900.0
+falloff = "smooth"
+strength = 22.0
+front_speed_mps = 16.0
+crest_depth_metres = 1800.0
+half_width_metres = 24000.0
+height_metres = 1500.0
+bearing_deg = 118.0
+activation = "always"
+begins_seconds = 0.0
+lasts_seconds = 0.0
+repeats_seconds = 0.0
+ramp_in_seconds = 1.25
+ramp_out_seconds = 2.0
+acts_on = []
+
+[[records]]
+identity = "rec_force_tornado"
+type = "ForceSource"
+name = "Tornado"
+parent = "rec_force_field"
+[records.configuration]
+enabled = true
+category = "tornado_column"
+contribution = "flow"
+centre_metres = [0.0, -220.0, 0.0]
+reach = "column"
+reach_metres = 600.0
+falloff = "smooth"
+strength = 68.0
+inner_radius_metres = 20.0
+collar_radius_metres = 96.0
+inflow_mps = 26.0
+updraft_mps = 42.0
+height_metres = 950.0
+track_speed_mps = 3.7
+track_bearing_deg = 109.0
+spin = "cyclonic"
+activation = "always"
+begins_seconds = 0.0
+lasts_seconds = 0.0
+repeats_seconds = 0.0
+ramp_in_seconds = 1.25
+ramp_out_seconds = 2.0
+acts_on = []
+
+[[records]]
+identity = "rec_force_microburst"
+type = "ForceSource"
+name = "Microburst"
+parent = "rec_force_field"
+[records.configuration]
+enabled = true
+category = "microburst"
+contribution = "flow"
+centre_metres = [1800.0, 900.0, 260.0]
+reach = "column"
+reach_metres = 600.0
+falloff = "smooth"
+strength = 31.0
+downdraft_mps = 24.0
+inner_radius_metres = 65.0
+ring_radius_metres = 150.0
+height_metres = 364.0
+activation = "always"
+begins_seconds = 0.0
+lasts_seconds = 0.0
+repeats_seconds = 0.0
+ramp_in_seconds = 1.25
+ramp_out_seconds = 2.0
+acts_on = []
+
+[[records]]
+identity = "rec_force_thermal"
+type = "ForceSource"
+name = "Thermal"
+parent = "rec_force_field"
+[records.configuration]
+enabled = true
+category = "thermal_updraft"
+contribution = "flow"
+centre_metres = [-950.0, -650.0, 0.0]
+reach = "column"
+reach_metres = 170.0
+falloff = "smooth"
+strength = 14.5
+inflow_mps = 4.8
+inner_radius_metres = 48.0
+height_metres = 620.0
+activation = "always"
+begins_seconds = 0.0
+lasts_seconds = 0.0
+repeats_seconds = 0.0
+ramp_in_seconds = 1.25
+ramp_out_seconds = 2.0
+acts_on = []
+
+[[records]]
+identity = "rec_force_canyon_jet"
+type = "ForceSource"
+name = "Canyon jet"
+parent = "rec_force_field"
+[records.configuration]
+enabled = true
+category = "jet_corridor"
+contribution = "flow"
+centre_metres = [700.0, -1050.0, 4.0]
+reach = "box"
+reach_metres = 120.0
+falloff = "smooth"
+strength = 24.0
+length_metres = 95.0
+inner_radius_metres = 12.0
+bearing_deg = 80.0
+height_metres = 200.0
+activation = "always"
+begins_seconds = 0.0
+lasts_seconds = 0.0
+repeats_seconds = 0.0
+ramp_in_seconds = 1.25
+ramp_out_seconds = 2.0
+acts_on = []
+
+[[records]]
+identity = "rec_force_gust_puff"
+type = "ForceSource"
+name = "Gust puff"
+parent = "rec_force_field"
+[records.configuration]
+enabled = true
+category = "gust_puff"
+contribution = "flow"
+centre_metres = [-420.0, 480.0, 12.0]
+reach = "sphere"
+reach_metres = 28.0
+falloff = "smooth"
+strength = 12.0
+lift_mps = 0.8
+vertical_radius_metres = 14.0
+drift = 0.92
+bearing_deg = 112.0
+activation = "always"
+begins_seconds = 0.0
+lasts_seconds = 0.0
+repeats_seconds = 0.0
+ramp_in_seconds = 1.25
+ramp_out_seconds = 2.0
+acts_on = []
+
+[[records]]
+identity = "rec_force_blast_wave"
+type = "ForceSource"
+name = "Blast wave"
+parent = "rec_force_field"
+[records.configuration]
+enabled = true
+category = "blast_wave"
+contribution = "flow"
+centre_metres = [320.0, 320.0, 2.0]
+reach = "sphere"
+reach_metres = 1500.0
+falloff = "none"
+strength = 42.0
+expansion_mps = 110.0
+thickness_metres = 14.0
+initial_radius_metres = 3.0
+activation = "window"
+begins_seconds = 6.0
+lasts_seconds = 14.0
+repeats_seconds = 30.0
+ramp_in_seconds = 0.0
+ramp_out_seconds = 2.0
+acts_on = []
+
+[[records]]
+identity = "rec_force_vehicle_wake"
+type = "ForceSource"
+name = "Vehicle wake"
+parent = "rec_force_field"
+[records.configuration]
+enabled = true
+category = "vehicle_wake"
+contribution = "flow"
+centre_metres = [-60.0, 40.0, 0.65]
+reach = "box"
+reach_metres = 80.0
+falloff = "smooth"
+strength = 13.5
+circulation_mps = 7.5
+body_speed_mps = 22.0
+half_width_metres = 1.15
+length_metres = 36.0
+height_metres = 3.4
+bearing_deg = 20.0
+activation = "always"
+begins_seconds = 0.0
+lasts_seconds = 0.0
+repeats_seconds = 0.0
+ramp_in_seconds = 1.25
+ramp_out_seconds = 2.0
+acts_on = []
+
+[[records]]
+identity = "rec_force_attractor"
+type = "ForceSource"
+name = "Attractor"
+parent = "rec_force_field"
+[records.configuration]
+enabled = true
+category = "attractor"
+contribution = "accelerate"
+centre_metres = [520.0, -380.0, 10.0]
+reach = "sphere"
+reach_metres = 260.0
+falloff = "smooth"
+strength = 6.0
+swirl = 2.0
+swallow_radius_metres = 0.0
+activation = "always"
+begins_seconds = 0.0
+lasts_seconds = 0.0
+repeats_seconds = 0.0
+ramp_in_seconds = 1.25
+ramp_out_seconds = 2.0
+acts_on = []
+
+[[records]]
+identity = "rec_force_repulsor"
+type = "ForceSource"
+name = "Repulsor"
+parent = "rec_force_field"
+[records.configuration]
+enabled = true
+category = "repulsor"
+contribution = "accelerate"
+centre_metres = [-560.0, 150.0, 10.0]
+reach = "sphere"
+reach_metres = 180.0
+falloff = "smooth"
+strength = 8.0
+activation = "always"
+begins_seconds = 0.0
+lasts_seconds = 0.0
+repeats_seconds = 0.0
+ramp_in_seconds = 1.25
+ramp_out_seconds = 2.0
+acts_on = []
+
+[[records]]
+identity = "rec_force_gravity"
+type = "ForceSource"
+name = "Gravity"
+parent = "rec_force_field"
+[records.configuration]
+enabled = true
+category = "gravity"
+contribution = "accelerate"
+centre_metres = [0.0, 0.0, 0.0]
+reach = "everywhere"
+reach_metres = 500.0
+falloff = "none"
+strength = 9.81
+activation = "always"
+begins_seconds = 0.0
+lasts_seconds = 0.0
+repeats_seconds = 0.0
+ramp_in_seconds = 1.25
+ramp_out_seconds = 2.0
+acts_on = []
+
+[[records]]
+identity = "rec_force_drag_volume"
+type = "ForceSource"
+name = "Drag volume"
+parent = "rec_force_field"
+[records.configuration]
+enabled = true
+category = "drag_volume"
+contribution = "damp"
+centre_metres = [1100.0, -300.0, 0.0]
+reach = "box"
+reach_metres = 150.0
+falloff = "smooth"
+strength = 0.8
+height_metres = 40.0
+half_extents_metres = [150.0, 80.0]
+bearing_deg = 0.0
+activation = "always"
+begins_seconds = 0.0
+lasts_seconds = 0.0
+repeats_seconds = 0.0
+ramp_in_seconds = 1.25
+ramp_out_seconds = 2.0
+acts_on = []
+
+[[records]]
+identity = "rec_force_storm_outflow"
+type = "ForceSource"
+name = "Storm outflow"
+parent = "rec_force_field"
+[records.configuration]
+enabled = true
+category = "microburst"
+contribution = "flow"
+centre_metres = [26000.0, -24000.0, 1800.0]
+reach = "column"
+reach_metres = 22000.0
+falloff = "smooth"
+strength = 26.0
+downdraft_mps = 18.0
+inner_radius_metres = 2400.0
+ring_radius_metres = 7000.0
+height_metres = 364.0
+activation = "trigger"
+begins_seconds = 0.0
+lasts_seconds = 0.0
+repeats_seconds = 0.0
+ramp_in_seconds = 1.25
+ramp_out_seconds = 2.0
+acts_on = []
+
 # The proving ground's objects (the geometry inspector), each standing for occupants of the scene archive
 # (EnvironmentArchives/ProvingGround) by name. A repeated set is one object with Array modifiers that lay its copies out
 # exactly where the archive placed them; the archive origin is where the object's origin sits in the archive.

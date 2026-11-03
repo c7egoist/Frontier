@@ -1,10 +1,10 @@
 /*==========================================================================================================================================
-                                                          RENDERSETTINGSROWS.CPP
+                                                             SECTIONROWS.CPP
 ==========================================================================================================================================*/
-// 🧩 The rows the Render settings sections share: a section card with its glyph, title and status, sub-headings, and switches and
-//    sliders that fade with the reason a setting does not apply.
+// 🧩 The rows tab-switched inspector sections share: a section card with its glyph, title and status, sub-headings, and switches
+//    and sliders (linear, logarithmic distance, bearing) that fade with the reason a setting does not apply.
 
-#include "Engine/Interface/Inspectors/RenderSettings/RenderSettingsSections.h"
+#include "Engine/Interface/Controls/SectionRows.h"
 
 #if FRONTIER_EDITOR && defined(FRONTIER_WITH_INTERFACE_SDK)
 
@@ -12,12 +12,14 @@
 #include "Engine/Interface/InspectorControls.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
+#include <cstdio>
 
 namespace Frontier
 {
 
-namespace RenderSettingsRows
+namespace SectionRows
 {
 
 void BeginSection(ControlColumn& Page, const char* Title, const char* Glyph, const char* Status, const char* Caption)
@@ -73,7 +75,48 @@ bool Amount(ControlColumn& Page, const char* Id, const char* Label, float& Setti
                                 Unavailable != nullptr ? Unavailable : Tooltip);
 }
 
-} // namespace RenderSettingsRows
+bool Measure(ControlColumn& Page, const char* Id, const char* Label, double& Setting, double Minimum, double Maximum, double Step,
+             const char* Unit, const char* Unavailable, const char* Tooltip)
+{
+    float Proxy = static_cast<float>(std::clamp(Setting, Minimum, Maximum));
+    if (!SliderRow::Construct(Page, Id, Label, Proxy, static_cast<float>(Minimum), static_cast<float>(Maximum), static_cast<float>(Step),
+                              Unit != nullptr ? Unit : "", 1.0f, Unavailable == nullptr, Unavailable != nullptr ? Unavailable : Tooltip))
+        return false;
+    Setting = static_cast<double>(Proxy);
+    return true;
+}
+
+bool Distance(ControlColumn& Page, const char* Id, const char* Label, double& Metres, double Minimum, double Maximum, double Step,
+              const char* Unavailable, const char* Tooltip)
+{
+    return SliderRow::ConstructDistance(Page, Id, Label, Metres, Minimum, Maximum, Step, Unavailable == nullptr,
+                                        Unavailable != nullptr ? Unavailable : Tooltip);
+}
+
+const char* ResolveCompassPoint(double Degrees) noexcept
+{
+    static constexpr const char* Points[16] = {"N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"};
+    const double Wrapped = std::fmod(std::fmod(Degrees, 360.0) + 360.0, 360.0);
+    return Points[static_cast<int>(std::floor(Wrapped / 22.5 + 0.5)) % 16];
+}
+
+bool Bearing(ControlColumn& Page, const char* Id, const char* Label, double& Degrees, const char* Unavailable)
+{
+    char Unit[24];
+    std::snprintf(Unit, sizeof(Unit), "\xC2\xB0 %s", ResolveCompassPoint(Degrees));
+    float Proxy = static_cast<float>(std::fmod(std::fmod(Degrees, 360.0) + 360.0, 360.0));
+    if (!SliderRow::Construct(Page, Id, Label, Proxy, 0.0f, 359.0f, 1.0f, Unit, 1.0f, Unavailable == nullptr, Unavailable))
+        return false;
+    Degrees = static_cast<double>(Proxy);
+    return true;
+}
+
+void FormatDistance(double Metres, char* Text, uint32_t Capacity) noexcept
+{
+    SliderRow::FormatDistance(Metres, Text, Capacity);
+}
+
+} // namespace SectionRows
 
 } // namespace Frontier
 

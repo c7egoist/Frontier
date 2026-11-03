@@ -8,6 +8,7 @@
 #include "Engine/PhysicalDynamics/ForceField.h"
 #include "Engine/Scene/EngineConfigurations.h"
 #include <array>
+#include <span>
 
 namespace Frontier
 {
@@ -16,10 +17,13 @@ namespace Frontier
 //                                                    SCENE FLOW
 //------------------------------------------------------------------------------------------------------------------------
 
-void                                ConfigureAtmosphericFlow(ForceFieldSpace               &Field,
-                                                             const ForceFieldConfiguration &Controls,
-                                                             const WindConfiguration       &Wind,
-                                                             double                         ElapsedSeconds);
+// 📝 Sources are the level's ForceSource records (scene axes), on the Force Field's timeline clock (Controls.TimelineSeconds);
+//    their flows join the field the renderer and the editor read. ElapsedSeconds drives the wind.
+void                                ConfigureAtmosphericFlow(ForceFieldSpace                          &Field,
+                                                             const ForceFieldConfiguration            &Controls,
+                                                             const WindConfiguration                  &Wind,
+                                                             double                                    ElapsedSeconds,
+                                                             std::span<const ForceSourceConfiguration> Sources = {});
 [[nodiscard]] std::array<double, 3> EvaluateWorldFlow(const ForceFieldSpace       &Field,
                                                       const std::array<double, 3> &Position,
                                                       bool                         Turbulence = true);
