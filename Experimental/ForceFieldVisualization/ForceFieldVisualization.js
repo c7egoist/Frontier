@@ -984,6 +984,20 @@ const ForceFieldVisualization = (() =>
             }
         }
 
+        // 📝 In Camera mode with ClipToExtent, everything drawn on the slice stays inside the projected domain, so a reach that
+        //    is larger than the domain (an attractor's pull) does not run across the whole view.
+        function ClipToExtent()
+        {
+            if (View.Mode !== 'Camera' || !Options.ClipToExtent || !Options.Extent) return;
+            const E = Options.Extent, SliceY = Options.SliceHeight;
+            const Corners = [[E.MinimumX, E.MinimumZ], [E.MaximumX, E.MinimumZ], [E.MaximumX, E.MaximumZ], [E.MinimumX, E.MaximumZ]].map(([X, Z]) => Project(X, SliceY, Z));
+            if (!Corners.every(Boolean)) return;
+            Context.beginPath();
+            Corners.forEach(([X, Y], Index) => Index ? Context.lineTo(X, Y) : Context.moveTo(X, Y));
+            Context.closePath();
+            Context.clip();
+        }
+
         function RenderProbe()
         {
             if (!Options.ProbePoint) return;
@@ -1148,9 +1162,12 @@ const ForceFieldVisualization = (() =>
             Context.setTransform(Ratio, 0, 0, Ratio, 0, 0);
             RenderGroundGrid();
             RenderCascades();
+            Context.save();
+            ClipToExtent();
             RenderArrows();
             RenderTracers();
             RenderSources();
+            Context.restore();
             RenderProbe();
             RenderLegend();
             RenderScaleBar();

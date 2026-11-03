@@ -657,7 +657,8 @@ svg.glyph { width: 1em; height: 1em; flex: none; stroke: currentColor; fill: non
                                           EDITOR CHROME: BAR CHOICES AND MINIMAP
 ------------------------------------------------------------------------------------------------------------------------*/
 /* 📝 Shared by the Force Field and Particle editor prototypes (the editors' own files keep only what is theirs). */
-.bar-choice { display: flex; gap: 3px; padding: 3px; border-radius: 999px; background: #121212; border: 1px solid #1f1f1f; }
+.renderer-chip { white-space: nowrap; flex: none; }
+.bar-choice { flex: none; display: flex; gap: 3px; padding: 3px; border-radius: 999px; background: #121212; border: 1px solid #1f1f1f; }
 .bar-choice button {
     height: 26px; padding: 0 11px; border: 0; border-radius: 999px; background: none; color: #7d7d7d; font-size: 11px; cursor: pointer;
     display: flex; align-items: center; gap: 6px; transition: all 180ms var(--ease);
