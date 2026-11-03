@@ -370,8 +370,10 @@ int main(int ArgumentCount, char** Arguments)
             const auto Placed   = Objects.ResolvePlacements(Editor);
             const auto Expected = Frontier::ConstructPlacement({-44.0, -21.0, 1.5}, {0.0, 0.0, 20.0}, {3.0, 3.0, 3.0});
             bool       Found    = false;
+            // 📝 A reserve occupant already showing the shape (the reserve lends each shape one at bring-up) needs no template.
             for (const OccupantPlacement& Placement : Placed)
-                if (Placement.Template && Placement.Template->FacetSet == Reserved.ShapeSetFirst + ShapeIndex("Cube"))
+                if ((Placement.Template ? Placement.Template->FacetSet : Reserved.Occupants[Placement.Occupant].FacetSet) ==
+                    Reserved.ShapeSetFirst + ShapeIndex("Cube"))
                 {
                     Found        = Reserved.QueryReserved(Placement.Occupant) && Placement.Active && Frontier::ConfirmProximity(Placement.Current, Expected, 1.0e-5, 1.0e-5);
                     CubeOccupant = Placement.Occupant;
