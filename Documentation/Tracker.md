@@ -1188,7 +1188,8 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
   owner's approval before the C++ step.
 - **Debug views captured** from the C++ viewport (`Exhibits/SceneViewport/Images/Inspection/`, `InspectionViewCapture`).
   View 6 (BVH / distance field) is black: the demo's `InspectionMarch` was never ported. Views 10 and 11 show the
-  demo's own "no virtualized geometry" diagnosis until virtualized geometry is on.
+  demo's own "no virtualized geometry" diagnosis until virtualized geometry is on; with it on
+  (`Inspection-10..14-Virtualized.jpg`) they show the ground's cluster IDs and its deferred resolve.
 - **Also found:** `BloomIntensity`, `AcesFilmicTonemap`, `ScreenSpaceReflections` and `InspectionDistanceMode` have no
   reader in the renderer, and the viewport forwards only part of the settings today.
 - **Stars:** the overlaid sky's twinkle was too weak to see (±5.5 % at the zenith by default). The port's own night sky
@@ -1197,4 +1198,6 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
   rate. The port's night sky takes every star field from the record. On screen (`StarScintillationCapture`, 223 stars,
   antialiased) the default's brightness variation rose from 4.0 % to 23.9 %; depth 0.10 gives 7.5 % and depth 1.00
   gives 70.5 % (10.2 % before), against 1.2 % with the twinkle off.
-- **Commits:** `419441d f780988 2b0cf13` and this documentation commit.
+- **Validated:** `CelestialRenderValidation`, `LocalMediaValidation` and `EnvironmentRealmValidation` pass after the
+  twinkle change (SwiftShader, 406 s); the shader archives verify with 0 failures.
+- **Commits:** `419441d f780988 2b0cf13 ab96e56 9955237 0c59f28` and this documentation commit.
