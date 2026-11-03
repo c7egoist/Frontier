@@ -1234,3 +1234,15 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
   smoothed, median and slowest of the last 96; there is no per-stage breakdown without staged submissions.
 - **Not ported (no renderer switch):** GPU cluster culling on/off, triangles per leaf, the cluster bounds overlay,
   freezing the field and the slice inset.
+- **Validated (SwiftShader host):** 19 ctest validations pass. Interface and level loading: ControlCentre, ProjectSpace,
+  Interface, EverestInterface, EverestShipping, ProjectContentStaging. Workspace: CelestialWorkspace (16 Outliner rows,
+  exactly one Render settings), SceneMedia, EnvironmentInspector. Rendering: CelestialRender, LocalMedia,
+  EnvironmentRealm, SolarOcclusion, ForceFieldTrigger, ClusterDiagnostic, NestingParity, VirtualizedGeometry,
+  SceneViewportFlight, StoredShaderArchive. The record counts the level tests assert dropped by the four absorbed
+  records (20 to 16, 30 to 26). On SwiftShader a global-illumination refresh of the workspace takes about 55 s and an
+  analytic one 0.2 s (`Exhibits/SceneViewport/Images/RenderSettings/`).
+- **Windows binary:** `Binaries/FrontierSceneViewport-Windows-x64.zip` rebuilt at `c6210cb` (Zig 0.13.0, material
+  archives omitted): 24,564,458 bytes, 925 files, SHA-256
+  `d6858397990f8a0dee980a6032a57823bcb2d9ef0d314e8e4143d55ff82cda19`. Against the `df045f1` package: the two new
+  SPIR-V entries, the shader manifest, `Frontier.exe`, `Package.json` and `Default.levelspace`.
+- **Commits:** `a051e6a 5c7c625 19bb3be 21f1b5a b5d2f3a 3143712 6640104 c6210cb` and this binary commit.
