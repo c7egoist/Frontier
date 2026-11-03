@@ -361,7 +361,12 @@ approved prototype (`Experimental/RenderSettingsInspector`) in C++. `Images/Rend
 it selected (`RenderSettings.png`) and each of its nine sections in a column tall enough to show it whole
 (`RenderSettings-Section-0.png` … `-8.png`: sampling, lighting, reflections, shadows, denoise, exposure, geometry,
 views, timing). `RenderSettings-Analytic.png` is the workspace with debug view 15, the analytic illumination,
-chosen. The timing figures are the viewport's measured refreshes on SwiftShader, not estimates.
+chosen. The timing figures are the viewport's measured refreshes on SwiftShader, not estimates: about 55 s per
+global-illumination refresh there, 0.2 s per analytic one.
+
+![The Everest workspace with Render settings selected](Images/RenderSettings/RenderSettings.png)
+
+![The nine sections of the Render settings page](Images/RenderSettings/Sections.jpg)
 
 ## Checks
 
