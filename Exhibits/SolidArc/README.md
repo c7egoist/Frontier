@@ -36,7 +36,9 @@ windowing substrate; that build is for verification, not a usable desktop distri
 The current editor preview packager detects CAD-enabled Frontier and requires the companion
 `SolidArcWorkspace.exe`. It copies CAD options, a sample and the volk notice, and verifies CAD icons/font.
 The existing signature/antivirus policy and the restricted two-application distribution packager are unchanged.
-No new Windows binary or Windows execution verification is claimed by this source port.
+The branch's Windows package (`Binaries/FrontierSceneViewport-Windows-x64.zip`) carries the cross-built
+`SolidArcWorkspace.exe`; it has not been started on Windows. The version resource (`Package/SolidArcWorkspace.rc`)
+is compiled with MSVC only, as Frontier's own is: the Zig cross-toolchain has no resource compiler.
 
 ## Verification
 
@@ -53,7 +55,8 @@ Rendered workflows are under `Code/Integration/*Check.txt` and use SolidArcCaptu
 
 Fresh evidence for this port is retained in the source session under
 `SolidArc/Integration/Frontier-e72d319/Validation`, with its audit and source manifest alongside it.
-This is a prepared integration change, not evidence that the remote Frontier branch has already been merged.
+It was merged into `arena/88b72faa-frontier` in `4a6b6b7` (SolidArc only). The results of this branch's own
+runs, including the ctest walkthroughs, are in `Documentation/Tracker.md`.
 
 Fresh results: 506 native CAD checks, 17 browser CPU checks, 300 CAD Vulkan expectations,
 15 browser Vulkan expectations including process hand-off, 869 CAD rows and 9 packaging unit tests.

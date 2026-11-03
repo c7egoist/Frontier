@@ -48,3 +48,4 @@ The Control Centre uses the reference trapezoidal notch and upward swipe-to-clos
 The optional SolidArc integration reuses this branch's UI/dependency/content setup and existing project browser.
 See [SolidArc build, scope and verification](Exhibits/SolidArc/README.md).
 CAD document previews and launch are available when `FRONTIER_BUILD_SOLIDARC=ON` (default).
+The Windows package in `Binaries/` carries `SolidArcWorkspace.exe` beside `Frontier.exe`.

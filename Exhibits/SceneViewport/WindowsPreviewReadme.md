@@ -71,6 +71,10 @@ renderer. Its debug views include view 15, the analytic illumination. Save with 
   square for all three). Drag a handle with the left button. Hold **Ctrl** to snap (0.25 m, 15°, 0.1), and press
   **Esc** during a drag to put the object back. A click that does not move the camera selects what is under the
   pointer.
+- **Picking:** the GPU draws the scene's triangles again around the clicked pixel and selects the object whose
+  surface is there, so a click beside a large object or in a ring's hole no longer selects it. The ground selects
+  the proving ground. Where the pixel shows the sky or the vehicle, the nearest object within 4 pixels is selected,
+  and with none the selection stays as it was.
 - **Add:** **Ctrl+A** or the Outliner's **+** opens **Construct**. Search or pick a category, choose an entity, name it,
   then press **Add to scene**. Under Geometry are the engine shapes Cube, Sphere, Cylinder, Cone, Torus and Plane, with
   scale and surface colour on the properties step. A new shape lands on the ground where the view looks. The other
@@ -90,8 +94,25 @@ renderer. Its debug views include view 15, the analytic illumination. Save with 
   transmission or emission. The first change gives the object a surface of its own, and the other objects sharing the
   material keep theirs. **Revert to the shared family** drops it.
 - **Limits:** the reserve holds at most 512 copies and constructed objects beyond the archive's own, and the inspector
-  says when it runs out. At most 96 objects have surfaces of their own. Picking uses each part's bounding box.
+  says when it runs out. At most 96 objects have surfaces of their own.
   Fracture does nothing yet.
+
+## SolidArc CAD workspace
+
+`SolidArcWorkspace.exe` beside `Frontier.exe` is the SolidArc CAD workspace, a separate program.
+
+- Start it directly (double-click), or `SolidArcWorkspace.exe --open "C:\Parts\Bracket.solidarc"`. `--specimen`
+  starts with the fillet and chamfer specimen.
+- From Frontier: **Project browser → Open from disk**, choose a `.solidarc` document. Its card shows a live preview,
+  and **Open in SolidArc** starts the workspace with it.
+- Options are in `SolidArcWorkspace.toml`. Save writes `Documents/Bracket.solidarc` by default, the autosave goes to
+  `Autosave/` and the log to `SolidArcTrace.log` (the **Log** button or **F12** opens it). `Samples/` holds the
+  curve import sample.
+- Navigation and commands follow Plasticity: orbit, pan and zoom on the mouse, **B** fillet, **E** extrude,
+  **1**–**5** selection modes. Right-click or **Enter** confirms a command, **Esc** cancels it.
+- The panels are Frontier's docking panels, and the sliders, switches and tabs are Frontier's controls.
+- It needs a Vulkan 1.3 driver. It was cross-built like `Frontier.exe` and has not been started on Windows here;
+  please report the first launch. The cross-built program carries no version details.
 
 ## Local media, wind and baking
 
