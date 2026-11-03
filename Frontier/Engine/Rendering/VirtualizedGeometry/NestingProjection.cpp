@@ -8,6 +8,7 @@
 #include <bit>
 #include <chrono>
 #include <cstring>
+#include <utility>
 namespace Frontier::VirtualizedGeometry
 {
 using namespace Frontier::GlobalIllumination;
@@ -372,6 +373,7 @@ NestingProjection* NestingProjection::Prepare(const SceneStructure& Scene)
     for (const DrawRun& Run : Scene.DrawRuns)
         Key += (Key.empty() ? "" : "|") + std::to_string(Run.FacetSet) + ":" + std::to_string(Run.First) + ":" + std::to_string(Run.Count);
     if (Key == Key_ && Records_) return this;
+    const bool Rebuilt = !Key_.empty();
     Key_ = Key;
     Clusters_.clear();
     OwnedOccupants_.clear();
@@ -470,6 +472,7 @@ NestingProjection* NestingProjection::Prepare(const SceneStructure& Scene)
         if (Page.Pinned) Allocator_->Pin(Page.GlobalPage);
     StreamQueue_.clear();
     for (const StreamingPage& Page : Pages_) StreamQueue_.push_back(Page.GlobalPage);
+    BurstLoads_ = Rebuilt ? PageCount : 0u;
 
     auto Make = [&](VkDeviceSize Bytes, const std::string& Label) { return Exchange_.ConstructRegion(std::max<VkDeviceSize>(4, Bytes), Label); };
     ClusterRecords_ = Make(static_cast<VkDeviceSize>(RecordCount_) * RecordWords * 4, "Nesting cluster records");
@@ -559,7 +562,7 @@ void NestingProjection::RefreshGroups()
 void NestingProjection::RecordCullPhase1(CommandSequence& Sequence)
 {
     if (!Records_) return;
-    ServiceStreaming(2);
+    ServiceStreaming(BurstLoads_ > 0 ? std::exchange(BurstLoads_, 0u) : 2u);
     RefreshGroups();
     if (!CullGroup_) return;
     RecordedCommands_     = 0;

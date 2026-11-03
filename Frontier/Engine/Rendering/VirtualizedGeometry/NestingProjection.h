@@ -153,6 +153,9 @@ class NestingProjection
     std::vector<RecordMirror>         RecordMirrors_{};
     std::vector<uint32_t>             PageLocalFirstIndices_{};
     uint32_t                          RecordCount_ = 0, SlotVertexCount_ = 1, SlotIndexCount_ = 1;
+    // 📝 Beyond the demo (which never rebuilds at run time): after the draw runs change (an object shown, hidden, added or
+    //    removed), every page streams in the next refresh instead of two per refresh, so the takeover shows no partial cut.
+    uint32_t                          BurstLoads_ = 0;
     std::unique_ptr<PageSlotAllocator> Allocator_{};
     std::vector<uint32_t>             StreamQueue_{};
     int32_t                           RefreshCount_ = 0;   // [-] the demo's FrameCount

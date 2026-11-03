@@ -664,10 +664,14 @@ build/StarScintillationCapture EngineContent/ShaderArchives/GlobalIllumination \
     EngineContent/ShaderArchives/Environment \
     EngineContent/EnvironmentArchives/ProvingGround EngineContent/EnvironmentArchives/CelestialMaps out \
     Still,Default,Shallow,Deep,Fast 480 270 6 30 30
-# Scene objects: the binding and layout checks (no device), then the workspace, six inspector pages and the viewport
-# before and after four edits (6 refreshes before, 3 after; a sixth argument "analytic" renders debug view 15 instead)
+# Engine shapes: bake the distance volumes after changing a shape archive; "check" compares a fresh bake instead
+build/ShapeArchiveBake EngineContent/ShapeArchives
+build/ShapeArchiveBake EngineContent/ShapeArchives check
+# Scene objects: the binding, layout and reserve checks (no device), then the workspace, eight inspector pages, the
+# Construct dialog and the viewport before and after the edits (6 refreshes before, 3 after; the sixth argument picks
+# gi, analytic, distance or virtualized, the seventh the refreshes after the edits)
 build/SceneGeometryValidation Projects/Everest EngineContent/EnvironmentArchives/ProvingGround out
-build/SceneGeometryCapture EngineContent Projects/Everest EngineContent/ShaderArchives out 6
+build/SceneGeometryCapture EngineContent Projects/Everest EngineContent/ShaderArchives out 6 gi
 ```
 
 The build stages `EnvironmentArchives/ProvingGround` into `Projects/Everest/Content` through the project's content

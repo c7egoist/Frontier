@@ -64,7 +64,7 @@ int main(int ArgumentCount, char** Arguments)
     {
         std::setvbuf(stdout, nullptr, _IONBF, 0);
         Require(ArgumentCount >= 5, "usage: SceneGeometryCapture <EngineContent> <Projects/Everest> <ShaderRoot> <OutDir> [GI refreshes] "
-                                    "[gi|analytic|distance|virtualized]");
+                                    "[gi|analytic|distance|virtualized] [refreshes after the edits]");
         const std::filesystem::path ContentDir  = std::filesystem::absolute(Arguments[1]);
         const std::filesystem::path EverestRoot = std::filesystem::absolute(Arguments[2]);
         const std::filesystem::path ShaderRoot  = std::filesystem::absolute(Arguments[3]);
@@ -74,6 +74,7 @@ int main(int ArgumentCount, char** Arguments)
         //    the virtualized geometry clusters.
         const std::string           Mode         = ArgumentCount > 6 ? std::string(Arguments[6]) : std::string("gi");
         const bool                  AnalyticOnly = Mode == "analytic";
+        const int                   AfterEdits   = ArgumentCount > 7 ? std::atoi(Arguments[7]) : std::max(2, Refreshes / 2);
         Require(Mode == "gi" || Mode == "analytic" || Mode == "distance" || Mode == "virtualized", "unknown mode " + Mode);
         std::filesystem::create_directories(OutputDir);
 
@@ -259,7 +260,7 @@ int main(int ArgumentCount, char** Arguments)
         const RecordToken Torus = Construct("Torus", 3.0f, -48.0f, -26.0f, std::nullopt);
         // 📝 The cube selected: its move handles over the viewport.
         Workspace.QueryOutliner().Select(Cube);
-        Tick(std::max(2, Refreshes / 2));
+        Tick(AfterEdits);
         WriteWorkspace(OutputDir / "Workspace-Edited.png");
         const std::vector<uint8_t> After = WriteViewport(OutputDir / "Viewport-After.png");
         // 📝 The Construct dialog (Ctrl+A) over the workspace, on interface-only ticks.
