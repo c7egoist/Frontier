@@ -1334,6 +1334,65 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
   It replaces the package committed in `42386e7` (built at `28e7e41`, before the polish).
 - **Commits:** `92569e2 35cb1fc ca2cdd6 a2c33e6 62e765d 796c95d 28e7e41 42386e7 563c18b` and this binary commit.
 
+## SolidArc integrated (SolidArc only); GPU picking (2026-11-03)
+
+- **Requested:** integrate SolidArc from Slate `arena/4f335fa8-slate`, merging only SolidArc and none of the rest; it
+  reuses Frontier's interface components (sliders, toggles, controls, docking). Replace the bounding-box picking with
+  GPU picking.
+- **SolidArc:** Slate's `SolidArcOnly.patch`, prepared for this branch at `e72d319`, applied with a three-way merge:
+  498 paths (484 new, 14 changed), identical to Slate's package except the merged `FolderStructure.md` and this file.
+  The CAD document, interface, viewport, browser connection and shaders live in `UI/SolidArc/`, the geometry kernel
+  in `Engine/GeometryProcessing/`, the executable in `Experimental/SolidArc/Native/` (`SolidArcWorkspace`, CMake
+  option `FRONTIER_BUILD_SOLIDARC`, on by default), the checks in `Exhibits/SolidArc/` and
+  `Exhibits/GeometryProcessing/`, the icons in `EngineContent/Icons/SolidArc/`. It reuses `ControlKit`,
+  `PanelDockspace`, `VectorAuthoringControls`, `PanelChrome`, `IconPresentation` and the new
+  `FrontierAuthoringControls` library. The Project Browser opens `.solidarc` documents in it (*Open in SolidArc*,
+  thumbnails, live previews). Slate's framework, applications, vehicles and binaries are not included. The CAD code
+  keeps its 484 inherited names (`SolidArcFrame.cpp` and the like), as Slate's package does. New dependency: volk
+  (pinned in `UIDependencies.json`).
+- **SolidArc test fixes:** `SolidArcDocumentValidation` looked for the icons relative to the working directory, and
+  ctest runs it from the build folder (0 icons found); the build now names the folder (`SOLIDARC_ICON_FOLDER`).
+  `SolidArcBrowserValidation` read the build's Surface shaders, which a build without a Slang compiler does not have;
+  it now reads the stored set there, as the editor does.
+- **GPU picking:** a click sends a serial and the stage point with the next viewport request. Before the refresh,
+  the viewport rasterises the scene's draw runs again from the last image's camera into a 9 × 9 occupant target
+  about the clicked pixel (`PickProjection`, `PickRaster.slang`, reverse depth). The occupant's Geometry record is
+  selected; where the pixel shows the sky or nothing a record owns, the nearest record within 4 px is selected. The
+  bounding-box code is removed. Measured on SwiftShader (`SceneViewportPickValidation`, 10 checks): 1,507 of 1,507
+  decided pixels in three views equal a CPU triangle cast (5 of 1,512 lie on outlines or coplanar overlaps); bounding
+  boxes named another record at 0.6 % of the views' pixels and took a click in a torus's hole; a pick costs 9–14 ms
+  on SwiftShader. `SceneGeometryValidation` has 27 checks (2 new).
+- **Validated (SwiftShader host):** all 82 ctest validations outside the SolidArc walkthroughs pass, the new
+  `SceneViewportPickValidation` and the five SolidArc suites among them: `SolidArcDocumentValidation` (all rows
+  green, 151 s), `SolidArcViewportValidation` (31.5 s), `SolidArcBrowserValidation` (15 of 15, including the hand-off
+  to the workspace process), `FrontierSolidArcBrowserIntegrationValidation` and `SolidArcCurveWorkflowValidation`.
+- **SolidArc walkthroughs** (`ctest -R Walkthrough`: 51 scripts that drive the real interface through
+  `SolidArcCapture`; not part of Slate's evidence): 40 pass on SwiftShader (the full run took 2,303 s). Twelve scripts
+  were brought up to date without changing any of their checks. The Drawing options panel, shown by default while a
+  drawing tool is active, covered viewport points that eleven of them click, so they hide it first
+  (`click @DrawingOptions`). The orientation-cube check clicked the top face at 12° of elevation, where the perspective
+  cube hides it, so `WorkspaceWalkthrough` orbits up first. The picture the Fill walkthrough places as an image plane
+  was missing from Slate's package; a capture of the empty workspace stands in
+  (`Exhibits/SolidArc/Images/HtmlReference/EmptyWorkspace.png`), and its crop and opacity clicks name the authoring
+  sliders' tracks. Eleven still fail where SolidArc's behaviour changed after they were written, and they are left
+  as they are: Delete refuses without a selected component (Shortcut, Delete); *Snap to curves* is on by default
+  (AltSlide, CurveFlow, Snapping); the knife's insert library differs (Knife); a second line joins the first sketch
+  (LinkedConstraints, RevolveSweep); a loft lift snaps to 0.8 rather than 0.7 (Gizmo); a bevel reaches 1.003 rather
+  than staying under 1 (BevelReach); a cut leaves one body rather than two (NurbsBlend). The SolidArc interface code
+  and every Frontier file it uses are unchanged from Slate's package and its base `e72d319`, so these failures are
+  Slate's own.
+- **Windows binary:** `Binaries/FrontierSceneViewport-Windows-x64.zip`, 31,236,290 bytes, 1,075 files, SHA-256
+  `dabc0d31b7b1fe0c4473d29635c3d8b238d6717be35093e40b9a121d32a7424f`, packaged at `c6acc97` (Frontier.exe built at
+  `b5a350e`). Against the `7eef1a7` package (937 files) it adds `SolidArcWorkspace.exe` (9,260,544 bytes) with
+  `SolidArcWorkspace.toml`, the curve sample and the volk notice, the 66 SolidArc icons (in `EngineContent/` and in
+  the project's staged copy) and the two `PickRaster` SPIR-V files (Global Illumination set 37 → 39). The first
+  SolidArc Windows build stopped at `SolidArcWorkspace.rc`: the Zig cross-toolchain has no resource compiler, so the
+  version resource is now compiled with MSVC only, as Frontier's own is (`b5a350e`). The package README describes
+  GPU picking and how to open SolidArc.
+- **Limits:** Slate never compiled or ran SolidArc on Windows, and it is not run on Windows here either (the package
+  is cross-built). The pick's cost on a GPU is not measured here.
+- **Commits:** `4a6b6b7 877aa3c 2731a28 ed14b22 9149cd6 b5a350e c25e20f c6acc97` and the commit with this entry.
+
 ## SolidArc source integration against e72d319
 
 | Scope | Status | Evidence / remaining work |
@@ -1344,7 +1403,7 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
 | CAD regression | Locally verified | 869 green rows, no red |
 | Windows companion selection | Locally verified | 9 synthetic-PE packaging tests; not a Windows runtime test |
 | Windows host/runtime and product distribution | Not verified | Build and execute on Windows; preserve signing/AV policy |
-| Remote Frontier merge | Pending | This source port does not itself move the destination branch |
+| Remote Frontier merge | Done | Merged into `arena/88b72faa-frontier` in `4a6b6b7` (SolidArc only); see above |
 | T-spline/CAD Form work | On hold | No implementation included |
 
 ### SolidArc curve workflow revision — 2026-11-02
