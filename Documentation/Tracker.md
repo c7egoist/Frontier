@@ -1169,3 +1169,6 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
 - **New engine parts:** `PenumbraResolve.slang`, the `TraverseMirrorReflection` entry,
   `DeviceExchange::SubmissionTiming`, `SceneViewport::ToggleAdjustment`, the `Refinements` word (refresh scalar 112,
   formerly unused).
+- **Published Windows package:** built from `c384f66`; `Binaries/FrontierSceneViewport-Windows-x64.zip`, 24,495,031
+  bytes, 923 files, SHA-256 `0fa5f5f909ae823836c3089d4576028c09d97a21078ae9b2a9c51068492d453a`. The refinements are
+  off in the shipped level (levelspace keys above). Unsigned and never launched on Windows here.
