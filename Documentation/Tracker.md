@@ -1316,13 +1316,20 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
   draw runs rebuilt the takeover and its two-pages-per-refresh streaming left the ground garbled for several refreshes
   (30.4 % changed after two); every page now streams in the refresh after a run-time rebuild (beyond the demo).
 - **All 21 ctest validations pass** (SwiftShader host): the 20 of the previous entry plus `ShapeArchiveBakeValidation`.
+  The eight that link the inspector passed again after the polish below.
 - **Limits:** Fracture is a menu entry without an action and Physics an authored flag (Jolt later), as asked. The
   reserve holds 512 occupants and the material blocks number 96. Picking meets the parts' bounding boxes, not their
   triangles. There is no undo stack: Esc cancels a drag, and a removal stands until the level is reopened unsaved
   (Ctrl+S saves). The speed on a GPU is not measured here (SwiftShader only).
-- **Windows binary:** `Binaries/FrontierSceneViewport-Windows-x64.zip` rebuilt at `28e7e41` (Zig 0.13.0 with Clang
-  18.1.6, material archives omitted): 24,855,759 bytes, 937 files, SHA-256
-  `67152daaea775fbc1eaaa2ba644370d5554ec819af7dd870324a14978716dd36`. Against the `b822b26` package: the twelve
+- **Material card polish (after the first package):** the channel list now names a colour the way the colour control
+  under it does (the demo's channel^(1/2.2); the base colour read `#CE3F38` above and `#CD4138` below). Reflectance's
+  note names the shaders' specular level, the dielectric F0 (0.04 is 4 %); it said 0.5. The captions read for a family
+  no other object uses and name an engine shape's surface; the Fracture card has a note for engine shapes. The eight
+  inspector pages were captured again.
+- **Windows binary:** `Binaries/FrontierSceneViewport-Windows-x64.zip` rebuilt at `563c18b` (Zig 0.13.0 with Clang
+  18.1.6, material archives omitted): 24,856,394 bytes, 937 files, SHA-256
+  `62b438b263d8fc40cdf18f649de34c471556257bde4060c2c33b9376ee99d997`. Against the `b822b26` package: the twelve
   `EngineContent/ShapeArchives` files (six `.toml`, six `.sdfspace`), `Frontier.exe`, `Package.json`, `README.md`, nine
   global-illumination shaders, one analytic shader and three shader manifests, each identical to the stored archives.
-- **Commits:** `92569e2 35cb1fc ca2cdd6 a2c33e6 62e765d 796c95d 28e7e41` and this binary commit.
+  It replaces the package committed in `42386e7` (built at `28e7e41`, before the polish).
+- **Commits:** `92569e2 35cb1fc ca2cdd6 a2c33e6 62e765d 796c95d 28e7e41 42386e7 563c18b` and this binary commit.
