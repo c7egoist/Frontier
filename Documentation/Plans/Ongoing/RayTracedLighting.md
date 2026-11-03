@@ -37,7 +37,7 @@ at 480×270, whose 7.5–9 s refreshes make ratios more meaningful than millisec
 | 🌗 `PenumbraFilter` | Sun verdicts averaged over a disc a quarter of the local penumbra wide, plane and normal weights | Pole: 928 → 615 visible errors, error RMS 7.11 → 5.69; tower: 903 → 673, 8.21 → 6.61; flicker −30 % | 34–37 ms (0.4 % of a refresh) | ✅ adopt |
 | 🪞 `MirrorFilter` | Surfaces smoother than 0.10 take the unfiltered reflection, fading to the filtered one by 0.20 | Pane: refresh error 2.70 → 1.58, visible errors 57 → 37, no added flicker; grain stays at the converged level | 13 ms | ✅ adopt |
 | 🔍 `MirrorTrace` | With `MirrorFilter`: smooth surfaces traced per screen pixel instead of upsampled | Pane: 2.70 → 1.36, edges closest to converged | 561 ms in a view where the pane covers 13 % of the screen | ⚙️ optional |
-| ⬜ variance filters off | The demo's own switch (what "without the blur" did) | Pane slightly sharper (2.51) but 37 % more flicker; grain doubles | saves 46 ms | ❌ |
+| ⬜ variance filters off | The demo's own switch (what "without the blur" did) | Pane slightly sharper (2.51) but 37 % more flicker; grain doubles | saves both filters (46 ms of it glossy) | ❌ |
 | 🟩 cascades (GTX) | Raster shadow maps instead of rays | Steadiest but furthest from the true shadow: 1,601 / 2,246 visible errors, edges displaced at distance | saves 150–270 ms | ❌ for RTX |
 
 ## 4. Recommendation
@@ -58,8 +58,8 @@ scope). In the Render settings record of `Projects/Everest/Content/Levels/Defaul
 
 - The shadow cascades are rasterized on the RTX path too. They cannot be skipped: the environment's fog shafts sample
   them (`EnvironmentOverlay` `SceneShadowDepth`).
-- The demo's `FireflyFilter` clamps only the indirect path samples and the ReSTIR spatial weights. Reflection samples
-  are clamped at 200, which is roughly 400× a sunlit grey surface.
+- The demo's `FireflyFilter` clamps only the indirect path samples (luminance 24) and the ReSTIR spatial weights.
+  Reflection samples are clamped only at 200.
 - The omitted vehicle's clear coat (roughness 0.03) is the worst case for both sun mechanisms. 🌞 `SolarDisc` matters
   most when the car returns.
 - ReSTIR's path vertices shade the sun through the same next-event estimate as the reflection hits, so 🌞 `SolarDisc`
