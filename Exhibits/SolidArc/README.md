@@ -56,7 +56,13 @@ Rendered workflows are under `Code/Integration/*Check.txt` and use SolidArcCaptu
 Fresh evidence for this port is retained in the source session under
 `SolidArc/Integration/Frontier-e72d319/Validation`, with its audit and source manifest alongside it.
 It was merged into `arena/88b72faa-frontier` in `4a6b6b7` (SolidArc only). The results of this branch's own
-runs, including the ctest walkthroughs, are in `Documentation/Tracker.md`.
+runs are in `Documentation/Tracker.md`.
+
+The 51 ctest walkthroughs (`Code/Scripts/*Walkthrough.txt`) were not part of Slate's evidence. On this branch 40
+pass. Twelve scripts were brought up to date without changing their checks: the Drawing options panel covered points
+they click, the cube check clicked a face the perspective cube hides, and the Fill walkthrough's picture was missing
+(`Images/HtmlReference/EmptyWorkspace.png` is now a capture of the empty workspace). The eleven that still fail,
+and why, are listed in the tracker.
 
 Fresh results: 506 native CAD checks, 17 browser CPU checks, 300 CAD Vulkan expectations,
 15 browser Vulkan expectations including process hand-off, 869 CAD rows and 9 packaging unit tests.

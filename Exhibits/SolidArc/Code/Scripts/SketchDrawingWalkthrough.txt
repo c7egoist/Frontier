@@ -8,6 +8,12 @@
 # box: +1/3 · closed Hermite through (0.2,0.2) (0.5,0.2) (0.5,0.8) (0.2,0.8) has area 0.246, pocket 0.5 deep (from the
 # top face): −0.123.
 
+# The Drawing options panel, shown by default while a drawing tool is active, covers the top right of the
+# viewport where some of these clicks land: hide it first (Inspector › Surface tracing › Drawing options).
+frames 2
+click @DrawingOptions
+frames 2
+
 # Placement snapped to the 0.1 grid, as these checks were written for (free placement is the default since ⑮ of Snapping).
 snap grid on
 

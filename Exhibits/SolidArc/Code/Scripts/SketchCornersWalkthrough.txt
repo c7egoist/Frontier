@@ -5,6 +5,12 @@
 #      --document …/SketchCorners.solidarc --script Scripts/SketchCornersWalkthrough.txt
 # Closed forms: 2 × 1 × 1 with four r 0.25 fillets: 2 − (4 − π)/16 = 1.946350.
 
+# The Drawing options panel, shown by default while a drawing tool is active, covers the top right of the
+# viewport where some of these clicks land: hide it first (Inspector › Surface tracing › Drawing options).
+frames 2
+click @DrawingOptions
+frames 2
+
 # Placement snapped to the 0.1 grid, as these checks were written for (free placement is the default since ⑮ of Snapping).
 snap grid on
 

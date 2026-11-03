@@ -6,6 +6,12 @@
 # Closed forms: puck r 0.5 × 1 = π/4 = 0.785398; joined square 0.5 × 0.5 and disc r 0.3, extruded 1 as a new body:
 # 0.25 + 0.09π = 0.532743, total 1.318141.
 
+# The Drawing options panel, shown by default while a drawing tool is active, covers the top right of the
+# viewport where some of these clicks land: hide it first (Inspector › Surface tracing › Drawing options).
+frames 2
+click @DrawingOptions
+frames 2
+
 # Placement snapped to the 0.1 grid, as these checks were written for (free placement is the default since ⑮ of Snapping).
 snap grid on
 

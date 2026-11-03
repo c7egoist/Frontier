@@ -10,6 +10,12 @@
 #    popup. The shapes become 10 3D curves on the can, lengths kept.
 # ④ A rectangle on the ground with the circle: the planes say nothing, so in perspective the axis popup still asks.
 
+# The Drawing options panel, shown by default while a drawing tool is active, covers the top right of the
+# viewport where some of these clicks land: hide it first (Inspector › Surface tracing › Drawing options).
+frames 2
+click @DrawingOptions
+frames 2
+
 snap grid on
 
 key N Ctrl

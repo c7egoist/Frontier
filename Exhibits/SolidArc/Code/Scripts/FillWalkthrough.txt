@@ -6,6 +6,12 @@
 #      --document …/Fill.solidarc --script Exhibits/SolidArc/Code/Scripts/FillWalkthrough.txt
 # Closed forms: unit circles at (0,0) and (1,0): lens 2π/3 − √3/2 = 1.228369698609, crescent π − lens = 1.913222954981.
 
+# The Drawing options panel, shown by default while a drawing tool is active, covers the top right of the
+# viewport where some of these clicks land: hide it first (Inspector › Surface tracing › Drawing options).
+frames 2
+click @DrawingOptions
+frames 2
+
 # Placement snapped to the 0.1 grid, as these checks were written for (free placement is the default since ⑮ of Snapping).
 snap grid on
 
@@ -197,12 +203,13 @@ expect image-photo == 1
 click @ImageFlipAcross
 frames 2
 expect image-mirrored == 1
-click @ImageCropLeft
+# Crop and opacity are Frontier authoring sliders now: the clicks name their tracks (…Slider)
+click @ImageCropLeftSlider
 frames 3
 expect image-crop-left > 0
-move @ImageOpacity offset -15 0
+move @ImageOpacitySlider offset -15 0
 frames 2
-click @ImageOpacity offset -15 0
+click @ImageOpacitySlider offset -15 0
 frames 2
 expect image-opacity > 0.25
 expect image-opacity < 0.55

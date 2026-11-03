@@ -7,6 +7,12 @@
 # Closed forms: box 2 × 1 × 1 cut at x = 0.6 (line drawn upward: inside = left = x < 0.6) → 0.6 + 1.4; core r 0.3 → 0.09π;
 # pentagram A(1,0) → C(1.6,1.9) → E(0,0.7) → B(2,0.7) → D(0.4,1.9) trimmed to its star: shoelace area 1.237928331467.
 
+# The Drawing options panel, shown by default while a drawing tool is active, covers the top right of the
+# viewport where some of these clicks land: hide it first (Inspector › Surface tracing › Drawing options).
+frames 2
+click @DrawingOptions
+frames 2
+
 # Placement snapped to the 0.1 grid, as these checks were written for (free placement is the default since ⑮ of Snapping).
 snap grid on
 

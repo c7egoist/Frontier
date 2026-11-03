@@ -6,6 +6,12 @@
 #      --document …/FilletDrag.solidarc --script Exhibits/SolidArc/Code/Scripts/FilletDragWalkthrough.txt
 # Closed forms: rectangle 3 × 1.5 with four r 0.3 fillets: every arc sweeps 90°.
 
+# The Drawing options panel, shown by default while a drawing tool is active, covers the top right of the
+# viewport where some of these clicks land: hide it first (Inspector › Surface tracing › Drawing options).
+frames 2
+click @DrawingOptions
+frames 2
+
 # Placement snapped to the 0.1 grid, as these checks were written for (free placement is the default since ⑮ of Snapping).
 snap grid on
 

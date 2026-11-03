@@ -8,6 +8,12 @@
 # Closed forms on the 2 × 1 × 1 box: front-top → back-top round the top rim 2 + 1 + 2 = 5 (either side), the whole
 # rim 6; front-top → right-bottom shares no loop (refused along a loop), shortest 2 + 1 + 1 = 4 down the front-right edge.
 
+# The Drawing options panel, shown by default while a drawing tool is active, covers the top right of the
+# viewport where some of these clicks land: hide it first (Inspector › Surface tracing › Drawing options).
+frames 2
+click @DrawingOptions
+frames 2
+
 snap grid on
 
 # ① empty document, Top view: a 2 × 1 rectangle, filled, extruded 1

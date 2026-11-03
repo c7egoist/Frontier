@@ -7,6 +7,12 @@
 # Closed forms: box 2 × 1 × 1 = 2 (moves and turns keep it); S z ×2 → 4; joined unit square extruded 1 → 1;
 # offset ¼ → a 1.5 square; pipe r 0.2 along a line of 2 → π · 0.04 · 2 = 0.251327.
 
+# The Drawing options panel, shown by default while a drawing tool is active, covers the top right of the
+# viewport where some of these clicks land: hide it first (Inspector › Surface tracing › Drawing options).
+frames 2
+click @DrawingOptions
+frames 2
+
 # Placement snapped to the 0.1 grid, as these checks were written for (free placement is the default since ⑮ of Snapping).
 snap grid on
 

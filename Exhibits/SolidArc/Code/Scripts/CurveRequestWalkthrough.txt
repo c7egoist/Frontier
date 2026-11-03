@@ -12,6 +12,12 @@
 #    curve, Alt+H shows it again. ⑥ Trim (T) on a Hermite curve between two lines: the middle piece goes, the rest keeps
 #    its exact shape (W18 ⑧: every point on the original within 10⁻¹⁴).
 
+# The Drawing options panel, shown by default while a drawing tool is active, covers the top right of the
+# viewport where some of these clicks land: hide it first (Inspector › Surface tracing › Drawing options).
+frames 2
+click @DrawingOptions
+frames 2
+
 snap grid on
 
 # ① two curves side by side on the side plane YZ (Right view: the drawing plane follows the view)

@@ -8,6 +8,12 @@
 # the Ctrl snap reaches it; circle r 0.5 on the top face (z 1) lofted to circle r 1 on the ground = an oblique frustum,
 # V = π · 1 / 3 · (1 + 0.25 + 0.5) = 1.832596 (Cavalieri: parallel similar sections).
 
+# The Drawing options panel, shown by default while a drawing tool is active, covers the top right of the
+# viewport where some of these clicks land: hide it first (Inspector › Surface tracing › Drawing options).
+frames 2
+click @DrawingOptions
+frames 2
+
 # Placement snapped to the 0.1 grid, as these checks were written for (free placement is the default since ⑮ of Snapping).
 snap grid on
 
