@@ -1393,6 +1393,53 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
   is cross-built). The pick's cost on a GPU is not measured here.
 - **Commits:** `4a6b6b7 877aa3c 2731a28 ed14b22 9149cd6 b5a350e c25e20f c6acc97` and the commit with this entry.
 
+## Each file opens in its own application; SolidArc opens a bare path (2026-11-03)
+
+- **Requested:** SolidArc (modelling), the Texture Workspace (texturing and baking) and the game engine are all
+  reached through the Frontier Project Browser; the owner chose "New dialog + open by file type". Opening a
+  `.solidarc` through Windows *Open with* → `SolidArcWorkspace.exe` always showed an empty document unless it was
+  started from a `.bat` file: fix that, and make it load through the Project Browser. The browser need not open the
+  Texture Workspace for now, but add it for completeness.
+- **Why the document was empty:** SolidArcWorkspace read only `--options`, `--open`, `--curves` and `--specimen`.
+  Windows starts the program chosen in *Open with* (or associated with the extension, or given a file dropped on its
+  icon) as `SolidArcWorkspace.exe "<file>"`, so the path arrived as a bare word and was ignored; the `.bat` file
+  passed `--open`. `ResolveSolidArcLaunch` (`UI/SolidArc/Interface/SolidArcLaunch.h`) now takes the first bare word
+  as the document. An explicit `--open` wins, and switches are never taken as the document. A document that cannot
+  be read now says why in the status line (`Open refused: …`) instead of looking like an empty one.
+- **New dialog:** the library's first card is **New** (game project, SolidArc model or texture library). A segmented
+  choice switches the dialog's title, fields, Browse and button:
+  - **Game project:** Blank Project as before; the new project then opens in the editor at once.
+  - **SolidArc model:** an empty `.solidarc` written by SolidArc's own codec (`CreateSolidArcBrowserDocument`). It is
+    attached to the library and opened in SolidArcWorkspace. An existing file is never replaced.
+  - **Texture library:** the folder, created when missing, opens in `TextureWorkspace.exe --library <folder>`.
+
+  `ProjectBrowserPanel::CreateDocument(BrowserCreation, Destination, Name)` is the same path for the checks. Browse
+  uses a Save dialog for a model and a folder picker with *Make New Folder* for a library.
+- **Open by file type:** the Windows open dialog offered only `.projectspace`, images and Markdown, so SolidArc models
+  could not be picked in the browser. It now lists `.solidarc` too, with a filter per type and *All files*.
+  `Frontier.exe <model>.solidarc`, or a model dropped on `Frontier.exe`, hands the model to SolidArcWorkspace without
+  opening a window. The reader's *Open in Frontier* / *Open in SolidArc* already started the right program.
+- **Empty models** preview as the reference stage with "0 bodies · 0 faces · 0 steps" and say "has no bodies yet",
+  instead of "This SolidArc document could not be read: The document holds no solid bodies".
+- **Dialog height:** the New dialog and the launch dialog were twice as tall as their content, because the extent
+  item followed the last button. They now end below their buttons.
+- **Texture Workspace:** it starts with an empty library when the preset archives are not installed (the ZIP leaves
+  them out). Before, it stopped at start-up, iterating over the missing preset folder. The packager ships
+  `TextureWorkspace.exe` beside `Frontier.exe` (`--texture-executable` overrides) and records it in `Package.json`.
+- **Validated (host):** `ProjectBrowserValidation` (the New dialog's hand-offs with stand-in programs, 775 drawn
+  states); `FrontierSolidArcBrowserIntegrationValidation` (32 checks, 17 new: SolidArc's real codec writes and reads
+  the new model, and the workspace command line); `SolidArcBrowserValidation` (18 of 18 on SwiftShader, 3 new: New ›
+  SolidArc model creates and previews the model, and the started workspace process opens it);
+  `EverestInterfaceValidation`; `WindowsPackageValidation.py` (13 tests, 4 new). The captures are
+  `Exhibits/ProjectBrowser/Images/New*.png`.
+- **Windows binary:** `Binaries/FrontierSceneViewport-Windows-x64.zip`, 34,655,562 bytes, 1,076 files, SHA-256
+  `35ee83e50b40d64d12a4d0518ec0ef3217a7c23f488a6b81746e384276d22f07`, built and packaged at `76e05ee`. Against the
+  `56cf38d` package it adds `TextureWorkspace.exe` (7,670,272 bytes); the material presets stay out (96 MB).
+- **Limits:** not run on Windows here. There is no installer, so `.solidarc` files are associated through *Open with
+  → Always use this app*. TextureWorkspace reads `--library` from the narrow command line, so a library path with
+  characters outside the Windows code page may not open.
+- **Commits:** `76e05ee` and the commit with this entry.
+
 ## SolidArc source integration against e72d319
 
 | Scope | Status | Evidence / remaining work |

@@ -77,6 +77,27 @@ class CompanionSelectionValidation(unittest.TestCase):
         Packaging.LocateSolidArcExecutable(self.Frontier, self.Cad)
         self.assertEqual(self.Cad.read_bytes(), Before)
 
+    # The New dialog's texture library starts TextureWorkspace.exe beside Frontier.exe.
+    def test_editor_without_texture_launch_stays_unchanged(self):
+        self.assertIsNone(Packaging.LocateTextureExecutable(self.Frontier))
+
+    def test_texture_launch_requires_companion(self):
+        WriteExecutable(self.Frontier, 'TextureWorkspace.exe'.encode('utf-16-le'))
+        with self.assertRaisesRegex(RuntimeError, 'TextureWorkspace.exe'):
+            Packaging.LocateTextureExecutable(self.Frontier)
+
+    def test_texture_companion_selected(self):
+        WriteExecutable(self.Frontier, 'TextureWorkspace.exe'.encode('utf-16-le'))
+        Texture = self.Directory / 'TextureWorkspace.exe'
+        WriteExecutable(Texture)
+        self.assertEqual(Packaging.LocateTextureExecutable(self.Frontier), Texture)
+
+    def test_texture_companion_wrong_architecture_refused(self):
+        WriteExecutable(self.Frontier, 'TextureWorkspace.exe'.encode('utf-16-le'))
+        WriteExecutable(self.Directory / 'TextureWorkspace.exe', Machine=0x14c)
+        with self.assertRaisesRegex(RuntimeError, 'Windows x64'):
+            Packaging.LocateTextureExecutable(self.Frontier)
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
