@@ -88,7 +88,7 @@ int main(int ArgumentCount, char** Arguments)
     if (ArgumentCount < 6)
     {
         std::printf("usage: InspectionViewCapture <GlobalIllumination shaders> <Environment shaders> <ProvingGround> <CelestialMaps> <out> "
-                    "[quality] [width] [height] [warm refreshes] [virtualized 0|1] [first view] [last view]\n");
+                    "[quality] [width] [height] [warm refreshes] [virtualized 0|1] [first view] [last view] [indirect 0|1] [ray tracing 0|1]\n");
         return 2;
     }
     std::setvbuf(stdout, nullptr, _IONBF, 0);
@@ -105,6 +105,8 @@ int main(int ArgumentCount, char** Arguments)
     const bool     Virtualized              = ArgumentCount > 10 && std::atoi(Arguments[10]) != 0;
     const uint32_t FirstView                = ArgumentCount > 11 ? std::min(14u, static_cast<uint32_t>(std::atoi(Arguments[11]))) : 0u;
     const uint32_t LastView                 = ArgumentCount > 12 ? std::min(14u, static_cast<uint32_t>(std::atoi(Arguments[12]))) : 14u;
+    const bool     Indirect                 = ArgumentCount <= 13 || std::atoi(Arguments[13]) != 0;
+    Configuration.RayTracing                = ArgumentCount <= 14 || std::atoi(Arguments[14]) != 0;
     Configuration.Journal = [](const std::string& Line) { std::printf("  %s\n", Line.c_str()); };
     std::filesystem::create_directories(OutFolder);
 
@@ -115,9 +117,9 @@ int main(int ArgumentCount, char** Arguments)
         std::printf("bring-up: %s\n", Diagnostic.c_str());
         return 2;
     }
-    std::printf("device: %s, %u × %u, quality %s, %u warm refreshes, virtualized geometry %s, views %u–%u\n",
-                Viewport.QueryAdapter().c_str(), Width, Height, Configuration.Quality.c_str(), Warm, Virtualized ? "on" : "off", FirstView,
-                LastView);
+    std::printf("device: %s, %u × %u, quality %s, %u warm refreshes, virtualized geometry %s, indirect %s, %s, views %u–%u\n",
+                Viewport.QueryAdapter().c_str(), Width, Height, Configuration.Quality.c_str(), Warm, Virtualized ? "on" : "off", Indirect ? "on" : "off",
+                Configuration.RayTracing ? "RTX" : "GTX", FirstView, LastView);
 
     // 📝 SceneViewportValidation's "Daylight" camera: the course from its south-west corner.
     ViewportCamera Course;
@@ -131,6 +133,7 @@ int main(int ArgumentCount, char** Arguments)
         Rendering.Inspection           = View;
         Rendering.TemporalAntiAliasing = View == 0;
         Rendering.VirtualizedGeometry  = Virtualized;
+        Rendering.GlobalIllumination   = Indirect;
         const uint32_t Refreshes       = View == FirstView ? std::max(Warm, 1u) : 1u;
         const auto     Start           = std::chrono::steady_clock::now();
         for (uint32_t Refresh = 0; Refresh < Refreshes; ++Refresh)
@@ -152,8 +155,9 @@ int main(int ArgumentCount, char** Arguments)
         std::vector<uint8_t> Rgb(static_cast<size_t>(Width) * Height * 3);
         for (size_t Texel = 0; Texel < static_cast<size_t>(Width) * Height; ++Texel)
             for (size_t Channel = 0; Channel < 3; ++Channel) Rgb[Texel * 3 + Channel] = Rgba[Texel * 4 + Channel];
-        char Name[64];
-        std::snprintf(Name, sizeof(Name), Virtualized ? "Inspection-%02u-Virtualized.jpg" : "Inspection-%02u.jpg", View);
+        char Name[80];
+        std::snprintf(Name, sizeof(Name), "Inspection-%02u%s%s%s.jpg", View, Virtualized ? "-Virtualized" : "", Indirect ? "" : "-IndirectOff",
+                      Configuration.RayTracing ? "" : "-Gtx");
         const std::string Path    = (OutFolder / Name).string();
         const bool        Written = stbi_write_jpg(Path.c_str(), static_cast<int>(Width), static_cast<int>(Height), 3, Rgb.data(), 90) != 0;
         const double      Mean    = MeanLuminance(Rgba);

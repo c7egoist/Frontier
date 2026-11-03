@@ -206,6 +206,7 @@ bool IlluminationHost::Construct(const IlluminationAssets& Assets, const Illumin
     Glossy->ConstructPrograms(RefreshRegion);
     Display = std::make_unique<DisplayProjection>(Exchange, Shaders);
     Display->ConstructPrograms(RefreshRegion, MaterialRegion, OccupantRegion, TextureFormat::Rgba8UnormSrgb);
+    Display->ConstructInspection(Distance->MarchLayout, Cards->SamplingLayout, RayTracing->MarchLayout);
     for (const auto& [Offset, Bytes] : Assets.MaterialRewrites)
     {
         Exchange.WriteRegion(MaterialRegion, Offset, Bytes.data(), Bytes.size());
@@ -411,6 +412,11 @@ bool IlluminationHost::AdvanceRefresh(const RefreshInputs* Inputs, const Refresh
         Resampling->RecordResampling(Begin("ReSTIR resampling"), Parity, Distance->MarchGroup, SamplingGroup, RayTracing->MarchGroup);
         Diffuse->Record(Begin("diffuse variance filter"), Parity, Settings.VarianceFilter);
     }
+    else if (Settings.Reflection)
+    {
+        // 📝 Beyond the demo: the reflections' variance filter needs this refresh's guide, which only the resampling wrote.
+        Resampling->RecordGuide(Begin("resampling guide"), Parity);
+    }
     if (Settings.Reflection)
     {
         Resampling->RecordReflection(Begin("reflection trace"), Distance->MarchGroup, SamplingGroup, RayTracing->MarchGroup);
@@ -423,6 +429,9 @@ bool IlluminationHost::AdvanceRefresh(const RefreshInputs* Inputs, const Refresh
                 Glossy->RecordMirrorProjection(Begin("mirror projection"), Parity);
         }
     }
+    // 📝 Inspection mode 6: the demo's inspection march through the distance field (GTX) or the BVH (RTX) alone.
+    if (Inputs != nullptr && Inputs->Toggles.Inspection == 6u)
+        Display->RecordInspection(Begin("inspection march"), Distance->MarchGroup, SamplingGroup, RayTracing->MarchGroup);
     // 📝 Cluster inspection modes 10-14 come from the virtualized geometry's own targets; selecting one activates it on demand and,
     //    while activation is pending or no set is eligible, a checker fallback marks the inspection target instead of black.
     if (Inputs != nullptr && Inputs->Toggles.Inspection >= 10 && Surface->Virtualized)

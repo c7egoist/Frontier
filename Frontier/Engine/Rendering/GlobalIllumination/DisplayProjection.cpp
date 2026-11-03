@@ -91,6 +91,7 @@ void DisplayProjection::ConstructTargets(std::array<uint32_t, 2> Extent, const S
     auto FlareImage        = Exchange_.ConstructView(FlareImageTexture_);
     auto FlareTransmission = Exchange_.ConstructView(FlareTransmissionTexture_);
     auto IdleSmoke         = Exchange_.ConstructView(IdleSmokeTexture_);
+    if (InspectionLayout_) InspectionGroup_ = Exchange_.ConstructDescriptorGroup(InspectionLayout_, {RefreshRegion_, InspectionView}, "Inspection march");
     RecombineGroup_ = Exchange_.ConstructDescriptorGroup(RecombineLayout_, {RefreshRegion_, MaterialRegion_, Surface.AttributeView, Surface.DepthView,
                                                                             Surface.DirectView, Diffuse.ScreenView, Glossy.ScreenView, Resampling.IrradianceView,
                                                                             InspectionView, Cards.FinalView, RecombinedView, OccupantRegion_, IdleSmoke, LinearClamp,
@@ -123,6 +124,27 @@ void DisplayProjection::RecordResolve(CommandSequence& Sequence, uint32_t Parity
     Sequence.BindProgram(ExposureProgram_);
     Sequence.BindGroup(0, ExposureGroups_[Parity]);
     Sequence.Dispatch(1);
+}
+
+void DisplayProjection::ConstructInspection(const std::shared_ptr<DescriptorLayout>& DistanceLayout, const std::shared_ptr<DescriptorLayout>& SamplingLayout,
+                                            const std::shared_ptr<DescriptorLayout>& RayTracingLayout)
+{
+    const std::vector<DescriptorSlot> InspectionSlots = {{D::Uniform}, {D::StorageTexture2D, TextureFormat::Rgba16Float}};
+    InspectionLayout_  = Exchange_.ConstructDescriptorLayout(InspectionSlots, "Inspection march");
+    InspectionProgram_ = Shaders_.ConstructComputeProgram("InspectionMarch", "MarchInspection",
+                                                          {InspectionLayout_, DistanceLayout, SamplingLayout, RayTracingLayout});
+}
+
+void DisplayProjection::RecordInspection(CommandSequence& Sequence, const std::shared_ptr<DescriptorGroup>& DistanceGroup,
+                                         const std::shared_ptr<DescriptorGroup>& SamplingGroup, const std::shared_ptr<DescriptorGroup>& RayTracingGroup)
+{
+    if (!InspectionProgram_ || !InspectionGroup_) return;
+    Sequence.BindProgram(InspectionProgram_);
+    Sequence.BindGroup(0, InspectionGroup_);
+    Sequence.BindGroup(1, DistanceGroup);
+    Sequence.BindGroup(2, SamplingGroup);
+    Sequence.BindGroup(3, RayTracingGroup);
+    Sequence.Dispatch((ScreenExtent[0] + 7) / 8, (ScreenExtent[1] + 7) / 8);
 }
 
 void DisplayProjection::RecordRecombination(CommandSequence& Sequence)

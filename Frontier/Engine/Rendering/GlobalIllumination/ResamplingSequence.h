@@ -25,6 +25,9 @@ class ResamplingSequence
     void ConstructTargets(std::array<uint32_t, 2> TraceExtent, const SurfaceProjection& Surface);
     void RecordResampling(CommandSequence& Sequence, uint32_t Parity, const std::shared_ptr<DescriptorGroup>& DistanceGroup,
                           const std::shared_ptr<DescriptorGroup>& SamplingGroup, const std::shared_ptr<DescriptorGroup>& RayTracingGroup);
+    // 📝 Beyond the demo: this refresh's guide alone (ReservoirTemporal step ①), for a refresh whose indirect illumination is off;
+    //    the reflections' variance filter reads it. RecordResampling writes it otherwise.
+    void RecordGuide(CommandSequence& Sequence, uint32_t Parity);
     void RecordReflection(CommandSequence& Sequence, const std::shared_ptr<DescriptorGroup>& DistanceGroup,
                           const std::shared_ptr<DescriptorGroup>& SamplingGroup, const std::shared_ptr<DescriptorGroup>& RayTracingGroup);
     // 📝 RefinementMirrorTrace: smooth surfaces traced per screen pixel into MirrorView (the recombination takes it unfiltered).
@@ -43,7 +46,7 @@ class ResamplingSequence
     ShaderInterchange&                Shaders_;
     std::shared_ptr<DeviceRegion>     RefreshRegion_{}, MaterialRegion_{};
     std::shared_ptr<DescriptorLayout> TemporalLayout_{}, SpatialLayout_{}, ReflectionLayout_{};
-    std::shared_ptr<DeviceProgram>    TemporalProgram_{}, SpatialProgram_{}, ReflectionProgram_{}, MirrorProgram_{};
+    std::shared_ptr<DeviceProgram>    TemporalProgram_{}, SpatialProgram_{}, ReflectionProgram_{}, MirrorProgram_{}, GuideProgram_{};
     std::array<std::shared_ptr<DescriptorGroup>, 2> TemporalGroups_{}, SpatialGroups_{};
     std::shared_ptr<DescriptorGroup>  ReflectionGroup_{}, MirrorGroup_{};
     std::array<uint32_t, 2>           ScreenExtent_{0, 0};

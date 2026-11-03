@@ -93,6 +93,10 @@
       "spirv_sha256": "58b58b3ba880588a38ba79332ec22b098e77b9d687e1ebe9c40bc7b93b5eba2a"
     },
     {
+      "file": "InspectionMarch.MarchInspection.spv",
+      "spirv_sha256": "5c611ec5934f24631c06b7797821d5405c5842624da010780a4730c5cdd1836a"
+    },
+    {
       "file": "PenumbraResolve.ResolvePenumbra.spv",
       "spirv_sha256": "f9fd71cfa400458ff6a5271689cd34fd2c522698f738cfb0cd461edc1f17c88e"
     },
@@ -107,6 +111,10 @@
     {
       "file": "ReservoirSpatial.ResampleSpatial.spv",
       "spirv_sha256": "04660a18f4c771da37589ace9747480eb0bb86fe85a13aec76052880060f63dc"
+    },
+    {
+      "file": "ReservoirTemporal.ProjectResamplingGuide.spv",
+      "spirv_sha256": "ec98728d42a8ff050ae115feada27a3e3945c87f0bcd3a9b200d3cbd6f455fff"
     },
     {
       "file": "ReservoirTemporal.ResampleTemporal.spv",
@@ -291,6 +299,10 @@
       "sha256": "e7db94f4ed7070df8437a5462c47a95ddabf41c3498825c44675364fd631b3f1"
     },
     {
+      "file": "Frontier/Engine/Shaders/GlobalIllumination/InspectionMarch.slang",
+      "sha256": "503faa7e76043ef0ec7f773a64a9422cdb2de33a221f38febb7fd2cd0bf2776d"
+    },
+    {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/IntrinsicParity.slang",
       "sha256": "8073ff213243e2548ab7d7bc96fda2406ce9931f4e63279f624672beb5ca2c84"
     },
@@ -332,7 +344,7 @@
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/ReservoirTemporal.slang",
-      "sha256": "0ad3ee3cfd631e8ba0182510bb8dc3dff622d8b8f3418e916c91e8e836378c9c"
+      "sha256": "df5be41ab1e6df9ac98a97fcd5e8383b10f11c48cc053ebd782337dd06bc2600"
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/SceneLayouts.slang",

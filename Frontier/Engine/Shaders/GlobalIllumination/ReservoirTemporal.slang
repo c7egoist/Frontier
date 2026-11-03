@@ -200,3 +200,28 @@ void ResampleTemporal(uint3 Invocation : SV_DispatchThreadID)
     Current.Weight = SelectBranch(0.0, Current.WeightSum / (Current.Tally * Selected), Selected > 0.0 && Current.Tally > 0.0);
     CurrentReservoirs[Index] = PackReservoir(Current);
 }
+
+// 📝 Beyond the demo: step ① alone, for a refresh whose indirect illumination is off while its reflections are on. The glossy
+//    variance filter reads this refresh's guide (normal, depth, prior depth) to accept its own history and to stop its wavelet
+//    and projection at edges; without the resampling nothing wrote it, every texel read as "no surface" (w < 0.5) and the
+//    reflections vanished. With indirect illumination on the resampling writes the guide and this entry point never runs.
+[shader("compute")]
+[numthreads(8, 8, 1)]
+void ProjectResamplingGuide(uint3 Invocation : SV_DispatchThreadID)
+{
+    let TracePixel = Invocation.xy;
+    if (any(TracePixel >= uint2(Refresh.TraceExtent)))
+    {
+        return;
+    }
+    let ScreenPixel = ResolveScreenPixel(TracePixel);
+    let Depth = LoadTexel(SurfaceDepth, ScreenPixel, 0);
+    if (Depth <= 0.0)
+    {
+        GuideTarget[int2(TracePixel)] = float4(0.0);
+        return;
+    }
+    let Position = ReconstructWorldPosition(float2(ScreenPixel) + 0.5, Depth);
+    let Normal = DecodeOctahedral(LoadTexel(SurfaceAttributes, ScreenPixel, 0).xy);
+    GuideTarget[int2(TracePixel)] = float4(EncodeOctahedral(Normal), ResolveViewDepth(Position), 1.0 + ResolvePriorViewDepth(Position));
+}

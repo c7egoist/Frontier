@@ -47,6 +47,7 @@ void ResamplingSequence::ConstructPrograms(const std::shared_ptr<DeviceRegion>& 
     ReflectionProgram_ = Shaders_.ConstructComputeProgram("ReflectionTrace", "TraverseReflection", {ReflectionLayout_, DistanceLayout, SamplingLayout, RayTracingLayout});
     MirrorProgram_     = Shaders_.ConstructComputeProgram("ReflectionTrace", "TraverseMirrorReflection",
                                                           {ReflectionLayout_, DistanceLayout, SamplingLayout, RayTracingLayout});
+    GuideProgram_      = Shaders_.ConstructComputeProgram("ReservoirTemporal", "ProjectResamplingGuide", {TemporalLayout_});
 }
 
 void ResamplingSequence::ConstructTargets(std::array<uint32_t, 2> Extent, const SurfaceProjection& Surface)
@@ -110,6 +111,13 @@ void ResamplingSequence::RecordResampling(CommandSequence& Sequence, uint32_t Pa
     Sequence.BindGroup(3, RayTracingGroup);
     Sequence.BindGroup(0, SpatialGroups_[Parity]);
     Sequence.Dispatch(GroupsX, GroupsY);
+}
+
+void ResamplingSequence::RecordGuide(CommandSequence& Sequence, uint32_t Parity)
+{
+    Sequence.BindProgram(GuideProgram_);
+    Sequence.BindGroup(0, TemporalGroups_[Parity]);
+    Sequence.Dispatch((TraceExtent[0] + 7) / 8, (TraceExtent[1] + 7) / 8);
 }
 
 void ResamplingSequence::RecordReflection(CommandSequence& Sequence, const std::shared_ptr<DescriptorGroup>& DistanceGroup,
