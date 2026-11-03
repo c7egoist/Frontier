@@ -87,15 +87,18 @@ export const LAYOUTS = {
     { binding: 4, visibility: 'compute', kind: 'tex-storage-write' },
     { binding: 5, visibility: 'compute', kind: 'tex' },
   ],
+  // The vertex stage samples the cascades and the bathymetry to displace geometry, so these are
+  // vertex-visible; the fragment stage shades with the same resources. The sim texture is
+  // storage-written by compute and read with a non-filtering access path.
   oceanSurface: [
     { binding: 0, visibility: 'vertex-fragment', kind: 'uniform' },
-    { binding: 1, visibility: 'fragment', kind: 'tex-array', viewDimension: '2d-array' },
-    { binding: 2, visibility: 'fragment', kind: 'sampler' },
-    { binding: 3, visibility: 'fragment', kind: 'tex' },
-    { binding: 4, visibility: 'fragment', kind: 'tex' },
-    { binding: 5, visibility: 'fragment', kind: 'sampler' },
-    { binding: 6, visibility: 'fragment', kind: 'tex' },
-    { binding: 7, visibility: 'fragment', kind: 'tex' },
+    { binding: 1, visibility: 'vertex-fragment', kind: 'tex' },
+    { binding: 2, visibility: 'vertex-fragment', kind: 'sampler' },
+    { binding: 3, visibility: 'vertex-fragment', kind: 'tex' },
+    { binding: 4, visibility: 'vertex-fragment', kind: 'tex' },
+    { binding: 5, visibility: 'vertex-fragment', kind: 'sampler' },
+    { binding: 6, visibility: 'vertex-fragment', kind: 'tex' },
+    { binding: 7, visibility: 'vertex-fragment', kind: 'tex' },
   ],
   terrain: [
     { binding: 0, visibility: 'vertex-fragment', kind: 'uniform' },

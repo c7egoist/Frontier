@@ -136,15 +136,16 @@ fn ridged2(p: vec2f, octaves: u32) -> f32 {
 // ---------------------------------------------------------------------------
 fn skyColor(dir: vec3f, sunDir: vec3f) -> vec3f {
   let up = clamp(dir.y, -1.0, 1.0);
-  let zenith = vec3f(0.055, 0.14, 0.34);
-  let horizon = vec3f(0.62, 0.72, 0.86);
-  let ground = vec3f(0.10, 0.11, 0.12);
-  let t = pow(clamp(up, 0.0, 1.0), 0.55);
+  let zenith = vec3f(0.030, 0.085, 0.235);
+  let horizon = vec3f(0.46, 0.56, 0.71);
+  let ground = vec3f(0.07, 0.08, 0.09);
+  let t = pow(clamp(up, 0.0, 1.0), 0.62);
   var col = mix(horizon, zenith, t);
-  // sun glow
+  // sun glow: a soft halo plus a tight disc, both kept below clipping so the tonemapper does
+  // not wash the whole sky out on a low sun.
   let sd = max(dot(dir, sunDir), 0.0);
-  let glow = pow(sd, 8.0) * 0.35 + pow(sd, 220.0) * 3.0;
-  col = col + frame.sunColor.rgb * glow;
+  let glow = pow(sd, 6.0) * 0.10 + pow(sd, 300.0) * 1.4;
+  col = col + frame.sunColor.rgb * glow * 0.55;
   // below horizon fades to haze
   col = mix(ground, col, smoothstep(-0.12, 0.02, up));
   // very cheap cloud band, only for the sky pass

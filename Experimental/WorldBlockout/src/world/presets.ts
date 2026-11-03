@@ -83,14 +83,14 @@ export const AUSTRAL: ContinentShape = {
 
 /** Archipelago islands added as SDF blobs (not polygons) — quick blocking masses. */
 export const ARCHIPELAGO: BrushOp[] = [
-  { kind: 'blob', x: -2_650_000, z: -1_150_000, radius: 210_000, strength: 0.55, squareness: 0.15, name: 'Isle of Kesh' },
-  { kind: 'blob', x: -2_250_000, z: -1_620_000, radius: 120_000, strength: 0.4, squareness: 0.25, name: 'Kesh Minor' },
-  { kind: 'blob', x: -2_980_000, z: -1_720_000, radius: 90_000, strength: 0.35, squareness: 0.1, name: 'Gull Rock' },
-  { kind: 'blob', x: -1_250_000, z: 2_650_000, radius: 260_000, strength: 0.45, squareness: 0.35, name: 'Verdant Shelf' },
-  { kind: 'blob', x: -820_000, z: 3_120_000, radius: 140_000, strength: 0.35, squareness: 0.2, name: 'Petrel Isles' },
-  { kind: 'blob', x: 2_600_000, z: 2_250_000, radius: 180_000, strength: 0.5, squareness: 0.3, name: 'Tallow Isle' },
-  { kind: 'blob', x: 3_350_000, z: -2_650_000, radius: 320_000, strength: 0.42, squareness: 0.4, name: 'Far Reach' },
-  { kind: 'blob', x: 3_050_000, z: -2_150_000, radius: 160_000, strength: 0.36, squareness: 0.15, name: 'Reach Shoal' },
+  { kind: 'blob', x: -2_650_000, z: -1_150_000, radius: 170_000, aspect: 1.7, rotation: 0.5, strength: 0.55, squareness: 0.2, name: 'Isle of Kesh' },
+  { kind: 'blob', x: -2_280_000, z: -1_600_000, radius: 95_000, aspect: 1.4, rotation: 0.9, strength: 0.4, squareness: 0.25, name: 'Kesh Minor' },
+  { kind: 'blob', x: -2_980_000, z: -1_720_000, radius: 70_000, aspect: 1.2, strength: 0.35, squareness: 0.1, name: 'Gull Rock' },
+  { kind: 'blob', x: -1_250_000, z: 2_650_000, radius: 220_000, aspect: 1.9, rotation: -0.35, strength: 0.45, squareness: 0.3, name: 'Verdant Shelf' },
+  { kind: 'blob', x: -840_000, z: 3_080_000, radius: 110_000, aspect: 1.5, rotation: 0.2, strength: 0.35, squareness: 0.2, name: 'Petrel Isles' },
+  { kind: 'blob', x: 2_600_000, z: 2_250_000, radius: 150_000, aspect: 1.6, rotation: 1.1, strength: 0.5, squareness: 0.25, name: 'Tallow Isle' },
+  { kind: 'blob', x: 3_350_000, z: -2_650_000, radius: 270_000, aspect: 2.2, rotation: 0.35, strength: 0.42, squareness: 0.35, name: 'Far Reach' },
+  { kind: 'blob', x: 3_050_000, z: -2_150_000, radius: 130_000, aspect: 1.3, strength: 0.36, squareness: 0.15, name: 'Reach Shoal' },
 ];
 
 /**
@@ -98,10 +98,12 @@ export const ARCHIPELAGO: BrushOp[] = [
  * the brief asked (Africa-like continent with gulfs), and stay editable as their own objects.
  */
 export const GULFS: BrushOp[] = [
-  { kind: 'gulf', x: -1_550_000, z: 350_000, radius: 620_000, strength: 0.75, squareness: 0.55, name: 'Gulf of Kesh' },
-  { kind: 'gulf', x: 2_050_000, z: 420_000, radius: 480_000, strength: 0.6, squareness: 0.8, name: 'Sea of Reeds' },
-  { kind: 'gulf', x: 900_000, z: -2_050_000, radius: 700_000, strength: 0.7, squareness: 0.35, name: 'Southern Bight' },
-  { kind: 'gulf', x: 2_800_000, z: 900_000, radius: 350_000, strength: 0.55, squareness: 0.6, name: 'Horn Bay' },
+  // Elongated and rotated so they read as gulfs biting into a coast rather than stamped circles.
+  { kind: 'gulf', x: -1_420_000, z: 300_000, radius: 300_000, aspect: 2.1, rotation: 0.42, strength: 0.7, squareness: 0.35, falloff: 0.8, name: 'Gulf of Kesh' },
+  { kind: 'gulf', x: 2_020_000, z: 480_000, radius: 260_000, aspect: 1.8, rotation: -0.6, strength: 0.55, squareness: 0.6, falloff: 0.9, name: 'Sea of Reeds' },
+  { kind: 'gulf', x: 900_000, z: -1_980_000, radius: 380_000, aspect: 1.6, rotation: 0.15, strength: 0.65, squareness: 0.25, falloff: 0.85, name: 'Southern Bight' },
+  { kind: 'gulf', x: 2_760_000, z: 940_000, radius: 210_000, aspect: 2.4, rotation: -0.9, strength: 0.5, squareness: 0.4, falloff: 0.8, name: 'Horn Bay' },
+  { kind: 'gulf', x: 620_000, z: 1_150_000, radius: 240_000, aspect: 1.5, rotation: 1.2, strength: 0.45, squareness: 0.3, falloff: 0.9, name: 'Rift Lake' },
 ];
 
 /** Continental shelves widened where the brief wants shallow seas for the sim. */

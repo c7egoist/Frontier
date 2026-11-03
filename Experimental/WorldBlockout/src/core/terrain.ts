@@ -75,6 +75,10 @@ export interface BrushOp {
   falloff?: number;
   /** SDF blob shape: 0 = circle, 0..1 = squareness (superellipse). */
   squareness?: number;
+  /** Rotation of the shape in radians (elongated gulfs follow a coast). */
+  rotation?: number;
+  /** Length / width ratio along the rotated local X axis. */
+  aspect?: number;
   /** Label for the outliner. */
   name?: string;
   /** Set when the op is added, for export metadata. */
@@ -302,12 +306,23 @@ export function distanceToPolyline(x: number, z: number, line: [number, number][
 
 /** Superellipse SDF blob, returns signed distance in metres (negative inside). */
 function blobDistance(x: number, z: number, op: BrushOp): number {
-  const dx = Math.abs(x - op.x), dz = Math.abs(z - op.z);
+  let dx = x - op.x, dz = z - op.z;
+  const rot = op.rotation ?? 0;
+  if (rot) {
+    // Rotate the sample into the op's local frame so water bodies can run along a coast.
+    const c = Math.cos(-rot), sn = Math.sin(-rot);
+    const rx = dx * c - dz * sn;
+    const rz = dx * sn + dz * c;
+    dx = rx; dz = rz;
+  }
+  const ax = Math.abs(dx), az = Math.abs(dz);
   const sq = clamp(op.squareness ?? 0, 0, 0.95);
   if (sq <= 0.001) return Math.hypot(dx, dz) - op.radius;
   // Smooth blend between circle and square so gulfs can be long and boxy.
-  const ellipse = Math.hypot(dx, dz) - op.radius;
-  const box = Math.max(dx, dz) - op.radius;
+  // Elongation: `aspect` > 1 stretches along the op's local X (rifts, seas, straits).
+  const aspect = Math.max(1, op.aspect ?? 1);
+  const ellipse = Math.hypot(ax / aspect, az) - op.radius;
+  const box = Math.max(ax / aspect, az) - op.radius;
   return lerp(ellipse, box, sq);
 }
 
@@ -336,10 +351,43 @@ export class WorldField {
     this.layers = buildWorldLayers(continents, params.worldSize, layerSize);
   }
 
-  /** Signed distance to the nearest coastline, metres (negative inland). */
+  /**
+   * Highest noise frequency (cycles per world) the current bake can represent. Anything above
+   * this aliases into speckle at bake resolution, so the field stops adding octaves there. This
+   * is why a 512² bake of a 10,000 km world looks smooth instead of crunchy.
+   */
+  private get maxCycles(): number {
+    return Math.max(8, this.params.gridSize / 4);
+  }
+
+  /** fbm stopped at the bake's Nyquist limit. */
+  private bandedFbm(x: number, z: number, baseFreq: number, octaves: number, gain = 0.5): number {
+    const limit = this.maxCycles / baseFreq;
+    const allowed = Math.max(1, Math.min(octaves, Math.floor(Math.log2(Math.max(limit, 1))) + 1));
+    return this.noise.fbm2(x, z, allowed, 2, gain);
+  }
+
+  private bandedRidged(x: number, z: number, baseFreq: number, octaves: number): number {
+    const limit = this.maxCycles / baseFreq;
+    const allowed = Math.max(1, Math.min(octaves, Math.floor(Math.log2(Math.max(limit, 1))) + 1));
+    return this.noise.ridged2(x, z, allowed);
+  }
+
+  /**
+   * Signed distance to the nearest coastline, metres (negative inland).
+   * Warped by low-frequency noise so authored polygons read as fractal coastline, not a cut-out.
+   */
   coastDistance(x: number, z: number): number {
     if (!this.continents.length) return this.params.worldSize;
-    return sampleLayer(this.layers.coast, this.layers.size, this.layers.worldSize, x, z);
+    const base = sampleLayer(this.layers.coast, this.layers.size, this.layers.worldSize, x, z);
+    const s = 1 / this.params.worldSize;
+    // 60 km of coast warp at 3 octaves: bays, headlands and estuaries without shredding the shape.
+    const warpAmp = 2.2 + 2.4 * Math.min(3, Math.floor(Math.log2(Math.max(this.maxCycles / 6, 1))) + 1);
+    void warpAmp;
+    const warp = this.noise.fbm2(x * s * 7.5 + 31.7, z * s * 7.5 - 12.4, 4, 2, 0.5);
+    const warp2 = this.noise.fbm2(x * s * 19 - 5.3, z * s * 19 + 8.8, 3, 2, 0.5);
+    const amp = this.params.worldSize * 0.011; // ~110 km of coastal irregularity at world scale
+    return base + warp * amp + warp2 * amp * 0.35;
   }
 
   /** Base terrain before brush ops: the SDF blockout evaluated as a heightfield. */
@@ -357,8 +405,8 @@ export class WorldField {
     const spine = sampleLayer(this.layers.spine, this.layers.size, ws, px, pz);
 
     // --- sea floor ---------------------------------------------------------
-    const ridge = this.noise.ridged2(x * s * 22 + 4.1, z * s * 22 - 2.7, 4);
-    const abyss = -p.abyssDepth * (0.82 + 0.3 * ridge * p.roughness);
+    const ridge = this.bandedRidged(x * s * 9 + 4.1, z * s * 9 - 2.7, 9, 4);
+    const abyss = -p.abyssDepth * (0.86 + 0.26 * ridge * p.roughness);
 
     // Shelf: from abyss up to shelfDepth over shelfWidth of offshore distance.
     const offshore = Math.max(coast, 0);
@@ -370,18 +418,24 @@ export class WorldField {
     const inland = Math.max(-coast, 0);
     const inlandT = smoothstep(0, ws * 0.16, inland);
     const plateau = p.plateauHeight * uplift * (0.35 + 0.65 * inlandT);
-    const plains = this.noise.fbm2(x * s * 30 + 9.7, z * s * 30 + 3.3, 5) * 220 * p.roughness;
-    const mountains = this.noise.ridged2(x * s * 46 - 12.3, z * s * 46 + 7.9, 6) *
-      Math.min(1, spine * 1.35) * p.peakHeight * p.mountainAmount;
+    // Rolling relief: broad, slow undulation rather than per-pixel noise.
+    const plains = this.bandedFbm(x * s * 6.5 + 9.7, z * s * 6.5 + 3.3, 6.5, 5) * 320 * p.roughness;
+    const hills = this.bandedFbm(x * s * 17 - 3.1, z * s * 17 + 5.9, 17, 4) * 130 * p.roughness;
+    // Mountains only where the spine mask says so, with a broad ridged base and sharp crests.
+    const spineW = Math.min(1, Math.pow(spine, 0.75) * 1.45);
+    const mountains = (this.bandedRidged(x * s * 12 - 12.3, z * s * 12 + 7.9, 12, 5) * 0.75
+      + this.bandedRidged(x * s * 34 + 2.7, z * s * 34 - 6.1, 34, 3) * 0.25) *
+      spineW * p.peakHeight * p.mountainAmount;
     // Coastal plain bias: land near the coast sits low, as real coastlines do.
     const coastalBias = -smoothstep(0, ws * 0.05, inland) * 120;
-    const land = Math.max(6, plateau + plains + mountains + coastalBias);
+    const land = Math.max(6, plateau + plains + hills + mountains + coastalBias);
 
     // Blend across the shoreline over ~2 km so there is a beach, not a step.
     const shoreT = smoothstep(-2500, 2500, coast);
     let h = lerp(land, seaFloor, shoreT);
-    // Cliff / bluff detail near the shore, fading inland.
-    h += this.detail.noise2(x * s * 640, z * s * 640) * 45 * Math.exp(-Math.abs(coast) / 26000);
+    // Cliff / bluff detail near the shore, band-limited like everything else.
+    const bluff = this.bandedFbm(x * s * 140, z * s * 140, 140, 3) * 55 * Math.exp(-Math.abs(coast) / 22000);
+    h += bluff;
     return h;
   }
 

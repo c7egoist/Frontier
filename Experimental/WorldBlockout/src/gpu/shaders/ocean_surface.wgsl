@@ -255,8 +255,8 @@ fn ggxSpecular(N : vec3f, V : vec3f, L : vec3f, roughness : f32, f0 : f32) -> f3
   let depth = max(in.depth, 0.0);
 
   // --- water body colour: Beer-Lambert absorption of the seabed -----------------------------
-  let absorbCoeff = vec3f(0.38, 0.09, 0.055);   // per metre, coastal water
-  let scatterColor = vec3f(0.006, 0.048, 0.070);
+  let absorbCoeff = vec3f(0.42, 0.10, 0.055);   // per metre, coastal water
+  let scatterColor = vec3f(0.003, 0.030, 0.058);
   let lightThrough = exp(-depth * absorbCoeff);
   let seabedAlbedo = vec3f(0.30, 0.29, 0.22);
   let sunNdl = max(dot(N, sunDir), 0.0);
@@ -268,18 +268,23 @@ fn ggxSpecular(N : vec3f, V : vec3f, L : vec3f, roughness : f32, f0 : f32) -> f3
   let R = reflect(-V, N);
   var refl = skyColor(R, sunDir);
   refl = applyFog(refl, in.world + R * 8000.0, frame.eye.xyz, sunDir);
-  let fresnel = 0.02 + 0.98 * pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 5.0);
+  let ndv = clamp(dot(N, V), 0.0, 1.0);
+  let fresnel = 0.02 + 0.98 * pow(1.0 - ndv, 5.0);
+  // Water does not reflect the sky at face value: a little is absorbed in the surface layer,
+  // and at grazing angles the wave slopes roughen the mirror so the reflection dims rather than
+  // blowing out to white.
+  refl = refl * mix(0.62, 0.95, smoothstep(0.0, 0.35, ndv));
 
   // Roughness grows with distance because sub-pixel waves are unresolved.
   let rough = clamp(0.04 + 0.10 * clamp(length(slope), 0.0, 1.0) + smoothstep(200.0, 30000.0, d) * 0.25, 0.02, 0.6);
-  var spec = ggxSpecular(N, V, sunDir, rough, 0.02) * frame.sunColor.rgb * frame.sunDir.w * 3.0;
+  var spec = ggxSpecular(N, V, sunDir, rough, 0.02) * frame.sunColor.rgb * frame.sunDir.w * 1.6;
 
   // --- subsurface glow through backlit crests ------------------------------------------------
   let H = normalize(sunDir + N * 0.35);
   let sss = pow(clamp(dot(V, -H), 0.0, 1.0), 3.0) * clamp(1.0 - N.y * 3.0, 0.0, 1.0);
   let sssCol = vec3f(0.05, 0.35, 0.30) * sss * frame.sunColor.rgb * frame.sunDir.w * 0.7;
 
-  var col = mix(body, refl, clamp(fresnel, 0.0, 1.0)) + spec + sssCol;
+  var col = mix(body, refl, clamp(fresnel, 0.0, 0.86)) + spec + sssCol;
 
   // --- foam ----------------------------------------------------------------------------------
   let shoreFoam = smoothstep(6.0, 0.4, depth) * smoothstep(0.0, 0.35, in.foam + 0.35);
