@@ -965,7 +965,8 @@ select {
 }
 
 .erosion-canvas,
-.viewport-canvas {
+.viewport-canvas,
+.landmass-canvas {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -4644,4 +4645,87 @@ summary:focus-visible {
     grid-column: 1 / -1;
     justify-content: flex-end;
   }
+}
+
+/* ==========================================================================
+   LANDMASS STUDIO (third workspace: simple landmass + ocean only)
+   These are ordinary editor controls, so they stay rounded; only Terrain
+   Studio layer-stack rows are rectangular.
+   ========================================================================== */
+
+.lm-shape-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.lm-shape-card,
+.lm-tool-btn {
+  border: 1px solid var(--tp-border);
+  background: #141414;
+  color: #d8d8d2;
+  cursor: pointer;
+  transition: background 0.13s, border-color 0.13s, color 0.13s;
+}
+
+.lm-shape-card {
+  min-height: 48px;
+  border-radius: 13px;
+  padding: 8px 9px;
+  text-align: left;
+}
+
+.lm-shape-card strong,
+.lm-shape-card span {
+  display: block;
+}
+
+.lm-shape-card strong {
+  font-size: 11px;
+  font-weight: 600;
+  color: #efefeb;
+}
+
+.lm-shape-card span {
+  margin-top: 2px;
+  font-size: 9.5px;
+  color: var(--tp-muted);
+}
+
+.lm-shape-card:last-child {
+  grid-column: 1 / -1;
+}
+
+.lm-tool-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.lm-tool-btn {
+  min-height: 28px;
+  border-radius: 999px;
+  padding: 0 8px;
+  font-size: 10.5px;
+}
+
+.lm-shape-card:hover,
+.lm-tool-btn:hover {
+  background: #202020;
+  color: #ffffff;
+}
+
+.lm-shape-card.active,
+.lm-tool-btn.active {
+  border-color: rgba(217, 178, 129, 0.58);
+  background: #2b241c;
+  color: #f2d8b3;
+}
+
+.lm-shape-card.active span {
+  color: #cbb694;
+}
+
+.landmass-canvas canvas {
+  display: block;
 }

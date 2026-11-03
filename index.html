@@ -30,6 +30,9 @@
         <button id="mode-btn-rock" class="tp-ws-btn" type="button">
           Rock &amp; Cliff Studio
         </button>
+        <button id="mode-btn-landmass" class="tp-ws-btn" type="button">
+          Landmass Studio
+        </button>
       </div>
 
       <div class="tp-header-right" id="tp-terrain-header-actions">
@@ -202,6 +205,85 @@
             </div>
           </section>
         </div>
+
+        <!-- LANDMASS STUDIO LEFT PANE: simple generator + sculpt only. -->
+        <div id="left-landmass-panels" class="tp-pane-scroll hidden-panel">
+          <section class="panel-section">
+            <div class="section-header">
+              <span>AUTO-GENERATE LANDMASS</span>
+              <span class="tag-pill">BASE ONLY</span>
+            </div>
+            <div class="lm-shape-grid" role="group" aria-label="Landmass shape">
+              <button type="button" class="lm-shape-card active" data-lm-shape="continent"><strong>Continent</strong><span>One large landmass</span></button>
+              <button type="button" class="lm-shape-card" data-lm-shape="island"><strong>Island</strong><span>One compact island</span></button>
+              <button type="button" class="lm-shape-card" data-lm-shape="archipelago"><strong>Archipelago</strong><span>Several islands</span></button>
+              <button type="button" class="lm-shape-card" data-lm-shape="peninsula"><strong>Peninsula</strong><span>Connected from west</span></button>
+              <button type="button" class="lm-shape-card" data-lm-shape="coast"><strong>Coastline</strong><span>Land west · ocean east</span></button>
+            </div>
+            <label class="field-row" style="margin-top:9px;">
+              <span>Shape</span>
+              <select id="lm-shape">
+                <option value="continent" selected>Continent</option>
+                <option value="island">Island</option>
+                <option value="archipelago">Archipelago</option>
+                <option value="peninsula">Peninsula</option>
+                <option value="coast">Coastline</option>
+              </select>
+            </label>
+            <div class="seed-row">
+              <input id="lm-seed" type="number" step="1" value="4029" aria-label="Landmass seed" />
+              <button id="lm-random-seed" class="btn-mini accent" type="button">Random</button>
+            </div>
+            <div class="slider-group">
+              <div class="slider-label"><span>Land coverage</span><output id="lm-out-land-coverage">54%</output></div>
+              <input id="lm-land-coverage" type="range" min="0.12" max="0.86" step="0.01" value="0.54" />
+            </div>
+            <div class="slider-group">
+              <div class="slider-label"><span>Coast roughness</span><output id="lm-out-coast-roughness">62%</output></div>
+              <input id="lm-coast-roughness" type="range" min="0" max="1" step="0.01" value="0.62" />
+            </div>
+            <div class="slider-group">
+              <div class="slider-label"><span>Rough relief</span><output id="lm-out-relief">230 m</output></div>
+              <input id="lm-relief" type="range" min="20" max="420" step="5" value="230" />
+            </div>
+            <div class="slider-group">
+              <div class="slider-label"><span>Terrain roughness</span><output id="lm-out-roughness">58%</output></div>
+              <input id="lm-roughness" type="range" min="0" max="1" step="0.01" value="0.58" />
+            </div>
+            <div class="slider-group">
+              <div class="slider-label"><span>Ocean depth</span><output id="lm-out-ocean-depth">72 m</output></div>
+              <input id="lm-ocean-depth" type="range" min="10" max="180" step="2" value="72" />
+            </div>
+            <div class="export-buttons">
+              <button id="lm-generate" class="btn-primary" type="button">Generate landmass</button>
+              <button id="lm-reset-sculpt" class="btn-secondary" type="button">Reset sculpt</button>
+            </div>
+            <p class="export-note">Generation replaces sculpt edits. This is only the broad land/ocean base—no erosion, rivers, snow, rocks, vegetation, or other systems.</p>
+          </section>
+
+          <section class="panel-section">
+            <div class="section-header">
+              <span>SCULPT LANDMASS</span>
+              <span class="tag-pill">DIRECT</span>
+            </div>
+            <div class="lm-tool-grid" role="group" aria-label="Landmass sculpt tools">
+              <button type="button" class="lm-tool-btn active" data-lm-tool="navigate">Navigate</button>
+              <button type="button" class="lm-tool-btn" data-lm-tool="raise">Raise</button>
+              <button type="button" class="lm-tool-btn" data-lm-tool="lower">Lower</button>
+              <button type="button" class="lm-tool-btn" data-lm-tool="smooth">Smooth</button>
+              <button type="button" class="lm-tool-btn" data-lm-tool="flatten">Flatten</button>
+            </div>
+            <div class="slider-group" style="margin-top:9px;">
+              <div class="slider-label"><span>Brush radius</span><output id="lm-out-brush-radius">190 m</output></div>
+              <input id="lm-brush-radius" type="range" min="25" max="650" step="5" value="190" />
+            </div>
+            <div class="slider-group">
+              <div class="slider-label"><span>Brush strength</span><output id="lm-out-brush-strength">3.2 m</output></div>
+              <input id="lm-brush-strength" type="range" min="0.2" max="9" step="0.1" value="3.2" />
+            </div>
+            <p class="export-note">With a sculpt tool selected, drag with the left mouse button. Use the right mouse button to orbit and the middle button to pan. Island/continent borders stay underwater so sculpting does not recreate a square land edge.</p>
+          </section>
+        </div>
       </aside>
 
       <!-- 2. CENTER DOCK: 3D VIEWPORT + SHADING BAR + AUTHORING BAR + PRESET SHELF -->
@@ -294,6 +376,13 @@
             <div class="hud-stat"><span class="hud-k">TIME</span><span class="hud-v" id="stat-time">—</span></div>
           </div>
 
+          <div id="hud-landmass" class="hud-top hidden-panel">
+            <div class="hud-stat"><span class="hud-k">LAND</span><span class="hud-v" id="lm-stat-land">—</span></div>
+            <div class="hud-stat"><span class="hud-k">SHORE</span><span class="hud-v" id="lm-stat-shore">—</span></div>
+            <div class="hud-stat"><span class="hud-k">FOAM MESH</span><span class="hud-v" id="lm-stat-foam">—</span></div>
+            <div class="hud-stat"><span class="hud-k">ELEV</span><span class="hud-v" id="lm-stat-elev">—</span></div>
+          </div>
+
           <div id="status-toast" class="status-toast hidden">Synthesizing...</div>
 
           <!-- WebGL2 Terrain Pipeline Canvas -->
@@ -314,6 +403,14 @@
             <button data-cam="low" class="cam-btn" type="button">Low Eye</button>
             <button data-cam="side" class="cam-btn" type="button">Side</button>
             <button data-cam="top" class="cam-btn" type="button">Top</button>
+          </div>
+
+          <div id="landmass-viewport" class="viewport-canvas landmass-canvas hidden-panel"></div>
+
+          <div id="landmass-camera-bar" class="camera-bar hidden-panel">
+            <button data-lm-cam="overview" class="cam-btn" type="button">Overview [F]</button>
+            <button data-lm-cam="coast" class="cam-btn" type="button">Low Coast</button>
+            <button data-lm-cam="top" class="cam-btn" type="button">Top Plan</button>
           </div>
         </div>
 
@@ -445,6 +542,60 @@
               <button id="btn-export-glb" class="btn-primary" type="button">Export .GLB</button>
               <button id="btn-export-obj" class="btn-secondary" type="button">Export .OBJ</button>
             </div>
+          </section>
+        </div>
+
+        <!-- LANDMASS STUDIO RIGHT PANE: ocean + geometry foam only. -->
+        <div id="right-landmass-panels" class="tp-pane-scroll hidden-panel">
+          <section class="panel-section">
+            <div class="section-header">
+              <span>OCEAN</span>
+              <span class="tag-pill">SIMPLE SURFACE</span>
+            </div>
+            <div class="slider-group">
+              <div class="slider-label"><span>Sea level</span><output id="lm-out-sea-level">0 m</output></div>
+              <input id="lm-sea-level" type="range" min="-35" max="35" step="1" value="0" />
+            </div>
+            <div class="slider-group">
+              <div class="slider-label"><span>Ocean opacity</span><output id="lm-out-ocean-opacity">78%</output></div>
+              <input id="lm-ocean-opacity" type="range" min="0.1" max="1" step="0.01" value="0.78" />
+            </div>
+            <div class="toggle-grid">
+              <label class="check-pill"><input id="lm-show-ocean" type="checkbox" checked /><span>Show ocean</span></label>
+            </div>
+          </section>
+
+          <section class="panel-section">
+            <div class="section-header">
+              <span>FOAM GEOMETRY</span>
+              <span class="tag-pill">MESH ONLY</span>
+            </div>
+            <p class="export-note">The shoreline is traced from the heightfield. Foam bands and broken surf patches are built as real triangles following that shoreline; their vertices move with the surf. This panel does not enable shader-pattern foam or particle foam.</p>
+            <div class="slider-group">
+              <div class="slider-label"><span>Foam width</span><output id="lm-out-foam-width">22 m</output></div>
+              <input id="lm-foam-width" type="range" min="3" max="45" step="1" value="22" />
+            </div>
+            <div class="slider-group">
+              <div class="slider-label"><span>Surf patches</span><output id="lm-out-surf-energy">68%</output></div>
+              <input id="lm-surf-energy" type="range" min="0" max="1" step="0.01" value="0.68" />
+            </div>
+            <div class="slider-group">
+              <div class="slider-label"><span>Foam motion</span><output id="lm-out-foam-speed">1.0×</output></div>
+              <input id="lm-foam-speed" type="range" min="0" max="2.5" step="0.1" value="1" />
+            </div>
+            <div class="toggle-grid">
+              <label class="check-pill"><input id="lm-show-foam" type="checkbox" checked /><span>Show foam geometry</span></label>
+            </div>
+          </section>
+
+          <section class="panel-section">
+            <div class="section-header">
+              <span>VIEW &amp; READOUT</span>
+            </div>
+            <div class="toggle-grid">
+              <label class="check-pill"><input id="lm-wireframe" type="checkbox" /><span>Wireframe</span></label>
+            </div>
+            <p class="export-note" id="lm-readout">Landmass Studio is ready.</p>
           </section>
         </div>
       </aside>

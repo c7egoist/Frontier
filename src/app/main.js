@@ -16,6 +16,7 @@ import { FORMATION_PRESETS, LITHOLOGY_PALETTES, resolveParams } from '../geology
 import { exportFormationToGLB } from '../io/glb-exporter.js';
 import { exportFormationToOBJ } from '../io/obj-exporter.js';
 import { ArchCurveGizmoOverlay } from './arch-curve-gizmo.js';
+import { LandmassStudioViewport } from './landmass-viewport.js';
 import { RockStudioViewport } from './viewport.js';
 
 // ============================================================================
@@ -79,7 +80,11 @@ const CATEGORIES = ['All', 'Arch', 'Sedimentary', 'Desert', 'Cliff', 'Outcrop', 
 const QUICK_SEEDS = [4029, 7714, 1984, 9301, 5518, 2607];
 
 const state = {
-  studioMode: window.location.hash === '#rock' ? 'rock' : 'erosion',
+  studioMode: window.location.hash === '#landmass'
+    ? 'landmass'
+    : window.location.hash === '#rock'
+      ? 'rock'
+      : 'erosion',
   params: resolveParams({
     archetype: 'desert-arch', seed: 4029, quality: 'medium', decimation: 1.0,
     sdfErosionSource: 'mesh', erosionSdfResolution: 192,
@@ -109,6 +114,7 @@ const progressBar = document.getElementById('progress-bar');
 const progressFill = document.getElementById('progress-fill');
 const statusToast = document.getElementById('status-toast');
 const viewportEl = document.getElementById('viewport-canvas');
+const landmassViewportEl = document.getElementById('landmass-viewport');
 const stageEl = document.querySelector('.viewport-stage');
 const erosionCanvas = document.getElementById('erosion-canvas');
 const terrainResolutionSelect = document.getElementById('tp-terrain-resolution');
@@ -119,6 +125,7 @@ let erosionEngine = null;
 let erosionLayerStackUI = null;
 let fatalGpuError = null;
 let viewport = null;
+let landmassViewport = null;
 let curveOverlay = null;
 let curveToolBound = false;
 
@@ -145,6 +152,19 @@ function ensureRockViewport() {
     console.error('Rock Studio viewport error:', err);
   }
   return viewport;
+}
+
+function ensureLandmassViewport() {
+  if (landmassViewport) return landmassViewport;
+  try {
+    landmassViewport = new LandmassStudioViewport(landmassViewportEl);
+    landmassViewport.setActive(false);
+  } catch (err) {
+    console.error('Landmass Studio viewport error:', err);
+    statusToast.classList.remove('hidden');
+    statusToast.textContent = `Landmass Studio Error: ${err.message || err}`;
+  }
+  return landmassViewport;
 }
 
 function updateErosionHud(tel) {
@@ -353,11 +373,14 @@ function updateRockHud(stats) {
 // ============================================================================
 
 function setStudioMode(mode) {
-  state.studioMode = mode === 'rock' ? 'rock' : 'erosion';
+  state.studioMode = mode === 'landmass' ? 'landmass' : mode === 'rock' ? 'rock' : 'erosion';
   const isTerrain = state.studioMode === 'erosion';
+  const isRock = state.studioMode === 'rock';
+  const isLandmass = state.studioMode === 'landmass';
 
   document.getElementById('mode-btn-erosion').classList.toggle('active', isTerrain);
-  document.getElementById('mode-btn-rock').classList.toggle('active', !isTerrain);
+  document.getElementById('mode-btn-rock').classList.toggle('active', isRock);
+  document.getElementById('mode-btn-landmass').classList.toggle('active', isLandmass);
 
   document.getElementById('left-erosion-panels').classList.toggle('hidden-panel', !isTerrain);
   document.getElementById('right-erosion-panels').classList.toggle('hidden-panel', !isTerrain);
@@ -372,28 +395,43 @@ function setStudioMode(mode) {
   document.getElementById('tp-author-tools').classList.toggle('hidden-panel', !isTerrain);
   document.getElementById('tp-scene-caption').classList.toggle('hidden-panel', !isTerrain);
 
-  document.getElementById('left-rock-panels').classList.toggle('hidden-panel', isTerrain);
-  document.getElementById('right-rock-panels').classList.toggle('hidden-panel', isTerrain);
-  document.getElementById('hud-rock').classList.toggle('hidden-panel', isTerrain);
-  document.getElementById('viewport-canvas').classList.toggle('hidden-panel', isTerrain);
-  document.getElementById('rock-camera-bar').classList.toggle('hidden-panel', isTerrain);
+  document.getElementById('left-rock-panels').classList.toggle('hidden-panel', !isRock);
+  document.getElementById('right-rock-panels').classList.toggle('hidden-panel', !isRock);
+  document.getElementById('hud-rock').classList.toggle('hidden-panel', !isRock);
+  document.getElementById('viewport-canvas').classList.toggle('hidden-panel', !isRock);
+  document.getElementById('rock-camera-bar').classList.toggle('hidden-panel', !isRock);
+
+  document.getElementById('left-landmass-panels').classList.toggle('hidden-panel', !isLandmass);
+  document.getElementById('right-landmass-panels').classList.toggle('hidden-panel', !isLandmass);
+  document.getElementById('hud-landmass').classList.toggle('hidden-panel', !isLandmass);
+  document.getElementById('landmass-viewport').classList.toggle('hidden-panel', !isLandmass);
+  document.getElementById('landmass-camera-bar').classList.toggle('hidden-panel', !isLandmass);
 
   const leftTabLabel = document.getElementById('tp-left-tab-label');
-  if (leftTabLabel) leftTabLabel.textContent = isTerrain ? 'Outliner' : 'Rock archetypes';
+  if (leftTabLabel) {
+    leftTabLabel.textContent = isTerrain ? 'Outliner' : isRock ? 'Rock archetypes' : 'Landmass';
+  }
+  const docTitle = document.getElementById('tp-doc-title');
+  if (docTitle && isLandmass) docTitle.textContent = 'Untitled Landmass';
+  else if (docTitle && isTerrain && erosionEngine?.pipeline?.projectTitle) {
+    docTitle.textContent = erosionEngine.pipeline.projectTitle;
+  }
+
+  if (curveOverlay && state.curveMode && !isRock) setCurveMode(false);
+  if (viewport && !isRock) viewport.setActive(false);
+  if (landmassViewport && !isLandmass) landmassViewport.setActive(false);
 
   if (isTerrain) {
     progressBar.classList.add('hidden');
     if (!fatalGpuError) {
       statusToast.classList.add('hidden');
     }
-    if (curveOverlay && state.curveMode) setCurveMode(false);
-    if (viewport) viewport.setActive(false);
     if (erosionEngine) {
       erosionEngine.resizeIfNeeded();
       erosionEngine.start();
     }
     window.history.replaceState(null, '', '#terrain');
-  } else {
+  } else if (isRock) {
     if (erosionEngine) erosionEngine.stop();
     const vp = ensureRockViewport();
     if (vp) vp.setActive(true);
@@ -404,11 +442,19 @@ function setStudioMode(mode) {
       vp.frameCamera('hero');
     }
     window.history.replaceState(null, '', '#rock');
+  } else {
+    progressBar.classList.add('hidden');
+    if (!fatalGpuError) statusToast.classList.add('hidden');
+    if (erosionEngine) erosionEngine.stop();
+    const vp = ensureLandmassViewport();
+    if (vp) vp.setActive(true);
+    window.history.replaceState(null, '', '#landmass');
   }
 }
 
 document.getElementById('mode-btn-erosion').addEventListener('click', () => setStudioMode('erosion'));
 document.getElementById('mode-btn-rock').addEventListener('click', () => setStudioMode('rock'));
+document.getElementById('mode-btn-landmass').addEventListener('click', () => setStudioMode('landmass'));
 
 // Focus mode keeps every control available, but temporarily removes the two
 // side docks so the terrain/rock viewport becomes the dominant workspace.
@@ -425,6 +471,7 @@ if (focusPanelsButton) {
     requestAnimationFrame(() => {
       erosionEngine?.resizeIfNeeded();
       viewport?.resize();
+      landmassViewport?.resize();
     });
   });
 }
@@ -1181,7 +1228,10 @@ function initRockActionButtons() {
       }
       return;
     }
-    if (e.key === 'f' || e.key === 'F') ensureRockViewport()?.frameCamera('hero');
+    if (e.key === 'f' || e.key === 'F') {
+      if (state.studioMode === 'landmass') ensureLandmassViewport()?.frameCamera('overview');
+      else ensureRockViewport()?.frameCamera('hero');
+    }
   });
 }
 
