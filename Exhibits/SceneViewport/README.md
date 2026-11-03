@@ -447,6 +447,10 @@ stacks and the shorter tunnel. The analytic illumination (debug view 15) shows t
 |---|---|
 | ![Before](Images/Geometry/Viewport-Before.png) | ![After](Images/Geometry/Viewport-After.png) |
 
+| The workspace after the edits | The burnout tyre wall's page: Array 8, 1.6 m (14 in the archive) |
+|---|---|
+| ![Edited](Images/Geometry/Workspace-Edited.png) | ![Burnout tyre wall](Images/Geometry/Inspector-Burnouttyrewall.png) |
+
 `Code/SceneGeometryValidation.cpp` (ctest `SceneGeometryValidation`, no device) checks the binding and the layouts:
 
 | Check                                                                                           | Result |

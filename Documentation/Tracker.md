@@ -1271,7 +1271,11 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
 - **Validated:** `SceneGeometryValidation` (new ctest, 13 checks, no device): binding and coverage, exact default
   placements, count, step, move, radial turn, hide, an Array beyond the archive, the level file round trip, the
   placement algebra. `SceneGeometryCapture` renders the workspace, six inspector pages and the viewport before and
-  after four edits through the records (`Exhibits/SceneViewport/Images/Geometry/`).
+  after four edits through the records (`Exhibits/SceneViewport/Images/Geometry/`): the tower moved 9 m and turned
+  30°, the burnout tyre wall re-laid as Array 8 at 1.6 m, the tunnel Array 8 → 4 and the street lamps hidden change
+  16.3 % of the global-illumination viewport's pixels (mean |Δ| 9.3 levels), 15.0 % with the analytic illumination.
+- **All 20 ctest validations pass** (SwiftShader host): the 19 of the previous entry plus `SceneGeometryValidation`.
+  The level tests now count 53 records (16 + 37) and CelestialWorkspace 53 Outliner rows.
 - **Limits:** copies are limited to the archive's occupants per object; Dynamic, Cast shadows, GI and Physics are
   authored flags (no per-object renderer switch yet, physics later); materials are read-only (shared families);
   geometry objects are not added or removed in the editor.
