@@ -152,6 +152,26 @@ int main(int ArgumentCount, char** Arguments)
             std::filesystem::path Normals = OutputPath;
             Normals.replace_filename(OutputPath.stem().string() + "-Normals" + OutputPath.extension().string());
             WriteCapture(Normals);
+
+            // 📝 Debug view 15: the analytic illumination instead of the global illumination (Render settings › Debug views).
+            Pipeline->AccessConfiguration().InspectionModeIndex  = 0;
+            Pipeline->AccessConfiguration().AnalyticIllumination = true;
+            Pipeline->AccessConfiguration().AdvanceRevision();
+            for (int Tick = 0; Tick < 2; ++Tick)
+            {
+                Centre->PrepareInterface();
+                ImGui::NewFrame();
+                (void)Centre->Integrate(1.0 / 30.0);
+                Workspace.ConstructInterface(1.0 / 30.0);
+                Centre->ConstructInterface();
+                ImGui::Render();
+                FrontierExhibit::AcknowledgeTextures();
+            }
+            std::filesystem::path Analytic = OutputPath;
+            Analytic.replace_filename(OutputPath.stem().string() + "-Analytic" + OutputPath.extension().string());
+            WriteCapture(Analytic);
+            Pipeline->AccessConfiguration().AnalyticIllumination = false;
+            Pipeline->AccessConfiguration().AdvanceRevision();
         }
 
         // 📝 The selected record's Inspector page, section by section, each in a column tall enough for the whole section (the
