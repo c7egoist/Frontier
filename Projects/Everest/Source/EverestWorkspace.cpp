@@ -1138,8 +1138,26 @@ void EverestWorkspace::ConstructViewportSurface()
         Request.VerticalFieldOfView = Flight.ResolveFieldOfView();
         Request.DeltaSeconds        = ViewportDeltaSeconds;
         Request.CameraUp = Navigation.Up;
+        Request.PickSerial          = PickSerial;
+        Request.PickPoint           = PickPoint;
         Image       = PresentSceneViewport(Request);
         LastReadout = Image.Readout;
+        // 📝 GPU picking answers a click one interface tick later, from the image the click was made on; a click on the ground,
+        //    the sky or nothing pickable leaves the selection as it is.
+        if (LastReadout.Pick.Serial != 0 && LastReadout.Pick.Serial == PickSerial && PickApplied != PickSerial)
+        {
+            PickApplied = PickSerial;
+            if (LastReadout.Pick.Record)
+            {
+                OutlinerPanel.Select(Frontier::RecordToken{*LastReadout.Pick.Record});
+                OutlinerPanel.Synchronize(Frontier::SceneDirectory::Instance());
+            }
+            else if (!LastReadout.Pick.Failure.empty())
+            {
+                Frontier::WriteLogFormat(EnsureProjectLogCategory("Everest"), Frontier::LogSeverity::Warning, Frontier::LogVerbosity::Log,
+                                         "SceneViewport", "Viewport pick: %s", LastReadout.Pick.Failure.c_str());
+            }
+        }
         PublishGeometryResolutions(QuerySceneWorld(), LastReadout, PublishedGeometryGeneration);
         ApplyPendingSurfaces();
         PublishRenderReadouts(QuerySceneWorld(), LastReadout);
@@ -1183,15 +1201,11 @@ void EverestWorkspace::ConstructViewportSurface()
     if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
     {
         const float Travel = std::hypot(IO.MousePos.x - PickPress.x, IO.MousePos.y - PickPress.y);
-        if (PickPending && Travel < 5.0f * Scale && LastReadout.GeometryVolumes)
+        // 📝 A click asks the viewport which record is drawn under the pointer (GPU picking against the shown triangles).
+        if (PickPending && Travel < 5.0f * Scale && LastReadout.Presenting && StageExtent.x > 0.0f && StageExtent.y > 0.0f)
         {
-            std::array<double, 3> Origin{}, Direction{};
-            View.ResolveRay(IO.MousePos, Origin, Direction);
-            if (const auto Picked = Frontier::PickGeometryVolume(*LastReadout.GeometryVolumes, Origin, Direction))
-            {
-                OutlinerPanel.Select(Frontier::RecordToken{*Picked});
-                OutlinerPanel.Synchronize(Frontier::SceneDirectory::Instance());
-            }
+            ++PickSerial;
+            PickPoint = {static_cast<double>((IO.MousePos.x - StageMin.x) / StageExtent.x), static_cast<double>((IO.MousePos.y - StageMin.y) / StageExtent.y)};
         }
         PickPending = false;
         GizmoPress  = false;

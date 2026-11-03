@@ -9,11 +9,13 @@
 #include "EnvironmentOverlay.h"
 #include "Rendering/AnalyticIllumination/AnalyticIlluminationSequence.h"
 #include "Rendering/GlobalIllumination/OccupantRelocation.h"
+#include "Rendering/GlobalIllumination/PickProjection.h"
 
 #include <array>
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -128,6 +130,15 @@ class SceneViewport
     // 📝 Beyond the demo: the editor's placements of the proving ground's occupants (OccupantRelocation), applied before the next
     //    refresh; returns how many occupants changed. A rebuilt viewport starts from the archive again.
     uint32_t RelocateOccupants(const std::vector<OccupantPlacement>& Placements);
+    // 📝 Beyond the demo: GPU picking (PickProjection). The occupants drawn at and around a point of the last refreshed image (a
+    //    fraction of its width and height from the top-left), seen through that refresh's camera, unjittered, with the occupants
+    //    where that refresh drew them; false while nothing has been refreshed or when the pick program is unavailable.
+    bool PickOccupants(std::array<double, 2> Point, OccupantPick& Outcome, std::string* OutDiagnostic = nullptr);
+    // 📝 The same for a pixel of an image of ScreenExtent pixels seen through Camera (validation, no refresh needed).
+    bool PickOccupants(const ViewportCamera& Camera, std::array<uint32_t, 2> ScreenExtent, std::array<uint32_t, 2> Pixel, OccupantPick& Outcome,
+                       std::string* OutDiagnostic = nullptr);
+    // 📝 The unjittered view-projection the refresh encodes for Camera at ScreenExtent (RefreshEncoder, AnalyticIlluminationSequence).
+    [[nodiscard]] static Transform ResolveViewProjection(const ViewportCamera& Camera, std::array<uint32_t, 2> ScreenExtent) noexcept;
     [[nodiscard]] const SceneStructure* QueryScene() const noexcept { return Host_ ? &Host_->Scene : nullptr; }
     [[nodiscard]] const std::vector<ShapeArchive>& QueryShapes() const noexcept { return Shapes_; }
     [[nodiscard]] IlluminationHost*   AccessHost() noexcept { return Host_.get(); }
@@ -145,6 +156,9 @@ class SceneViewport
     RefreshToggles                         LastToggles_{};                   // [-] what the last global-illumination refresh ran with
     std::unique_ptr<AnalyticIllumination::AnalyticIlluminationSequence> Analytic_{};   // [-] built on first selection
     std::unique_ptr<EnvironmentOverlay>    Overlay_{};
+    std::unique_ptr<PickProjection>        Pick_{};                          // [-] built on the first pick
+    std::optional<ViewportCamera>          PickCamera_{};                    // [-] the camera of the last refreshed image
+    std::array<uint32_t, 2>                PickExtent_ = {0, 0};             // [px] and its extent
     std::shared_ptr<DeviceTextureView>     PresentedView_{};
     std::string                            Adapter_{};
     double                                 ElapsedSeconds_ = 0.0;

@@ -24,6 +24,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <vector>
 
 namespace
@@ -533,6 +534,36 @@ int main(int ArgumentCount, char** Arguments)
             std::snprintf(Line, sizeof(Line), "distance scale: %.12f for a uniform 2 (exact 2), %.4f for (3, 1, 0.5) (never above 0.5), %.12f for a rigid placement",
                           Uniform, Stretched, Rigid);
             Report(std::fabs(Uniform - 2.0) < 1.0e-9 && Stretched <= 0.5 + 1.0e-12 && Stretched > 0.05 && std::fabs(Rigid - 1.0) < 1.0e-9, Line);
+        }
+
+        // ㉒ GPU picking's records: every shown part names its record, the ground, the vehicle and removed objects name none, and a pick
+        //    takes the record drawn at the picked pixel, else the nearest drawn within its reach
+        {
+            using Frontier::GlobalIllumination::OccupantPick;
+            const auto North    = Matches(Reserved, "Boundary North");
+            const auto Ramp     = Matches(Reserved, "Jump ramp");
+            size_t     NorthOwned = 0;
+            for (const uint32_t Occupant : North) NorthOwned += Objects.QueryOwner(Occupant) == NorthToken.Value ? 1 : 0;
+            bool Unowned = !Objects.QueryOwner(static_cast<uint32_t>(Reserved.GroundOccupant)) && !Objects.QueryOwner(0u);
+            for (const uint32_t Occupant : Ramp) Unowned = Unowned && !Objects.QueryOwner(Occupant);
+            Report(NorthOwned == North.size() && North.size() == 54 && Objects.QueryOwner(CubeOccupant) == CubeToken.Value && Unowned,
+                   "pick owners: " + std::to_string(NorthOwned) + " of " + std::to_string(North.size()) + " Boundary north parts and the cube's reserve " +
+                       "occupant name their records; the ground, the vehicle and the removed jump ramp name none");
+            const auto Synthetic = [](std::initializer_list<std::tuple<int32_t, int32_t, uint32_t>> Texels) {
+                OccupantPick Pick;
+                Pick.Reach = 4;
+                Pick.Occupants.assign(81, OccupantPick::NoOccupant);
+                for (const auto& [OffsetX, OffsetY, Occupant] : Texels) Pick.Occupants[static_cast<size_t>((4 + OffsetY) * 9 + 4 + OffsetX)] = Occupant;
+                return Pick;
+            };
+            const uint32_t Ground = static_cast<uint32_t>(Reserved.GroundOccupant);
+            const auto     Drawn  = Objects.ResolvePickedRecord(Synthetic({{0, 0, CubeOccupant}, {1, 0, North[0]}, {-1, 0, North[1]}}));
+            const auto     Near   = Objects.ResolvePickedRecord(Synthetic({{0, 0, Ground}, {3, 0, North[0]}, {1, 2, CubeOccupant}}));
+            const auto     Beyond = Objects.ResolvePickedRecord(Synthetic({{0, 0, Ground}, {4, 1, CubeOccupant}}));
+            const auto     Sky    = Objects.ResolvePickedRecord(Synthetic({}));
+            Report(Drawn == CubeToken.Value && Near == CubeToken.Value && !Beyond && !Sky,
+                   "pick resolution: the record drawn at the pixel wins over its neighbours; on the ground the nearest record within 4 px "
+                   "(1, 2 before 3, 0); none at (4, 1), outside the reach, or on the sky");
         }
 
         std::printf("SceneGeometryValidation: %d of %d checks passed\n", Checks - Failures, Checks);

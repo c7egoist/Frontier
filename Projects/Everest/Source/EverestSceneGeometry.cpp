@@ -134,13 +134,41 @@ void SceneGeometryOccupancy::Reset(const Frontier::GlobalIllumination::SceneStru
         for (uint32_t Slot = Scene_->ReserveCount; Slot > 0; --Slot) ReserveFree_.push_back(Scene_->ReserveFirst + Slot - 1);
     }
     Snapshot_ = std::make_shared<const GeometryResolutions>();
-    Volumes_  = std::make_shared<const std::vector<Frontier::GeometryPickVolume>>();
+    Owners_.clear();
     ++Generation_;
 }
 
 const Frontier::PlacementMatrix* SceneGeometryOccupancy::QueryArchiveTransform(uint32_t Occupant) const noexcept
 {
     return Occupant < Archive_.size() ? &Archive_[Occupant] : nullptr;
+}
+
+std::optional<uint64_t> SceneGeometryOccupancy::QueryOwner(uint32_t Occupant) const
+{
+    const auto Found = Owners_.find(Occupant);
+    return Found != Owners_.end() ? std::optional<uint64_t>(Found->second) : std::nullopt;
+}
+
+std::optional<uint64_t> SceneGeometryOccupancy::ResolvePickedRecord(const Frontier::GlobalIllumination::OccupantPick& Pick) const
+{
+    // 📝 Nearest first within a disc of the pick's reach; the picked pixel itself is distance 0, so what is drawn there always wins.
+    std::optional<uint64_t> Nearest;
+    const int32_t           Reach = static_cast<int32_t>(Pick.Reach);
+    int32_t                 Best  = Reach * Reach + 1;
+    for (int32_t OffsetY = -Reach; OffsetY <= Reach; ++OffsetY)
+        for (int32_t OffsetX = -Reach; OffsetX <= Reach; ++OffsetX)
+        {
+            const int32_t Distance = OffsetX * OffsetX + OffsetY * OffsetY;
+            if (Distance >= Best) continue;
+            const uint32_t Occupant = Pick.QueryOccupant(OffsetX, OffsetY);
+            if (Occupant == Frontier::GlobalIllumination::OccupantPick::NoOccupant) continue;
+            if (const auto Owner = QueryOwner(Occupant))
+            {
+                Nearest = Owner;
+                Best    = Distance;
+            }
+        }
+    return Nearest;
 }
 
 std::vector<std::pair<uint32_t, std::vector<uint8_t>>> SceneGeometryOccupancy::ConsumeMaterialBlocks()
@@ -577,22 +605,9 @@ std::vector<Frontier::GlobalIllumination::OccupantPlacement> SceneGeometryOccupa
             Snapshot->emplace(Token, std::move(Resolution));
         }
         Snapshot_ = std::move(Snapshot);
-        auto Volumes = std::make_shared<std::vector<Frontier::GeometryPickVolume>>();
+        Owners_.clear();
         for (const auto& [Token, Entry] : Occupancies_)
-            for (const ShownOccupant& Shown : Entry.Shown)
-            {
-                const auto& Set = Scene_->FacetSets[Shown.FacetSet];
-                Frontier::GeometryPickVolume Volume;
-                Volume.Token     = Token;
-                Volume.Placement = Shown.Placement;
-                for (size_t Axis = 0; Axis < 3; ++Axis)
-                {
-                    Volume.LocalMinimum[Axis] = static_cast<float>(Set.LocalMinimum[Axis]);
-                    Volume.LocalMaximum[Axis] = static_cast<float>(Set.LocalMaximum[Axis]);
-                }
-                Volumes->push_back(Volume);
-            }
-        Volumes_ = std::move(Volumes);
+            for (const ShownOccupant& Shown : Entry.Shown) Owners_[Shown.Occupant] = Token;
         ++Generation_;
     }
     return Placements;

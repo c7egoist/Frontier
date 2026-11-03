@@ -714,6 +714,15 @@ if(BUILD_TESTING)
         "${CMAKE_SOURCE_DIR}/EngineContent/EnvironmentArchives/ProvingGround"
         "${CMAKE_BINARY_DIR}/scene-geometry-exhibits")
 
+    # 📝 GPU picking against the shown triangles and the editor's click path (own device) — Exhibits/SceneViewport/README.md.
+    add_executable(SceneViewportPickValidation
+        Exhibits/SceneViewport/Code/SceneViewportPickValidation.cpp)
+    target_link_libraries(SceneViewportPickValidation PRIVATE EverestProjectEditor)
+    add_test(NAME SceneViewportPickValidation COMMAND SceneViewportPickValidation
+        "${CMAKE_SOURCE_DIR}/Projects/Everest" "${CMAKE_BINARY_DIR}/ShaderArchives"
+        "${CMAKE_BINARY_DIR}/scene-viewport-pick-exhibits")
+    set_tests_properties(SceneViewportPickValidation PROPERTIES RUN_SERIAL TRUE)
+
     # 📝 The Everest workspace with its live Scene Viewport (own device), CPU-rasterized — Exhibits/SceneViewport/README.md.
     add_executable(SceneViewportWorkspaceCapture
         Exhibits/SceneViewport/Code/SceneViewportWorkspaceCapture.cpp

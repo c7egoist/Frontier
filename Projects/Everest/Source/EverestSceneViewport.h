@@ -67,6 +67,7 @@ class EverestSceneViewport
     SceneViewportRefresh                                         Held_{};                     // [-] the last outcome, shown while live refresh is off
     SceneGeometryOccupancy                                       Geometry_{};                 // [-] the level's geometry records on the scene's occupants
     const Frontier::GlobalIllumination::SceneStructure*          GeometryScene_ = nullptr;    // [-] the scene Geometry_ was reset with
+    SceneViewportPick                                            Pick_{};                     // [-] the answer to the last pick serial
 };
 
 } // namespace Everest

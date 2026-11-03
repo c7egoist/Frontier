@@ -25,6 +25,7 @@ add_library(FrontierGlobalIllumination STATIC
     Frontier/Engine/Rendering/GlobalIllumination/LuminaireRegister.cpp
     Frontier/Engine/Rendering/GlobalIllumination/IlluminationHost.cpp
     Frontier/Engine/Rendering/GlobalIllumination/OccupantRelocation.cpp
+    Frontier/Engine/Rendering/GlobalIllumination/PickProjection.cpp
     Frontier/Engine/Rendering/VirtualizedGeometry/NestingProjection.cpp)
 
 target_include_directories(FrontierGlobalIllumination PUBLIC
@@ -86,7 +87,10 @@ set(FRONTIER_GLOBAL_ILLUMINATION_ENTRIES
     "EnvironmentVisibility:ProjectEnvironmentVisibility:compute"
     "EnvironmentVisibility:RestoreEnvironmentRadiance:compute"
     "EnvironmentLighting:ProjectEnvironmentSky:compute"
-    "EnvironmentLighting:ProjectCloudShadow:compute")
+    "EnvironmentLighting:ProjectCloudShadow:compute"
+    # 📝 Beyond the demo: the editor's GPU picking (PickProjection).
+    "PickRaster:PickVertex:vertex"
+    "PickRaster:PickFragment:fragment")
 
 set(FRONTIER_GLOBAL_ILLUMINATION_SPV_OUTPUTS)
 if(FRONTIER_GLOBAL_ILLUMINATION_SLANGC)

@@ -234,7 +234,8 @@ endif()
 add_executable(SolidArcDocumentValidation "${SOLIDARC_EXHIBIT}/SolidArcDocumentValidation.cpp")
 target_link_libraries(SolidArcDocumentValidation PRIVATE FrontierSolidArcUI)
 target_compile_definitions(SolidArcDocumentValidation PRIVATE SOLIDARC_VEHICLE_SAMPLE="${FRONTIER_ROOT}/Experimental/VehicleSurfacing/Samples/SyntheticBonnet.toml"
-                                                                     SOLIDARC_STEP_FIXTURES="${FRONTIER_ROOT}/Exhibits/GeometryProcessing/Code/StepFixtures")
+                                                                     SOLIDARC_STEP_FIXTURES="${FRONTIER_ROOT}/Exhibits/GeometryProcessing/Code/StepFixtures"
+                                                                     SOLIDARC_ICON_FOLDER="${FRONTIER_ROOT}/EngineContent/Icons/SolidArc")
 
 add_executable(SolidArcViewportValidation "${SOLIDARC_EXHIBIT}/SolidArcViewportValidation.cpp")
 target_link_libraries(SolidArcViewportValidation PRIVATE FrontierSolidArcUI)

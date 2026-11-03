@@ -30,6 +30,7 @@ struct ImVec2;
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 
@@ -48,6 +49,21 @@ struct SceneViewportRequest
     double                VerticalFieldOfView = 1.0471975511965976;   // [rad]
     double                DeltaSeconds        = 0.0;                  // [s]
     std::array<double,3> CameraUp = {0,0,1};
+    // 📝 GPU picking: a click on the stage asks for the record drawn under it in the image the click was made on; the readout's
+    //    Pick answers the serial one interface tick later.
+    uint64_t              PickSerial          = 0;                    // [-] advances with every click; 0 = nothing asked
+    std::array<double, 2> PickPoint           = {0.0, 0.0};           // [-] fraction of the stage's width and height, from the top-left
+};
+
+// 📝 The answer to the stage's last click (GPU picking, PickProjection): the Geometry record drawn at the clicked pixel, or the
+//    nearest one drawn within the pick's reach around it.
+struct SceneViewportPick
+{
+    uint64_t                Serial       = 0;              // [-] the request's PickSerial this answers; 0 = none yet
+    std::optional<uint64_t> Record{};                      // [-] record token value; empty: the ground, the sky or nothing pickable
+    uint32_t                Occupant     = 0xFFFFFFFFu;    // [-] scene occupant at the clicked pixel (0xFFFFFFFF: none)
+    double                  Milliseconds = 0.0;            // [ms] the pick's round trip on the device
+    std::string             Failure{};                     // [-] why nothing could be picked
 };
 
 // 📝 What the host's renderer reports for the viewport bar, readout and status strip (the demo's PresentMeasurements).
@@ -74,8 +90,8 @@ struct SceneViewportReadout
     // 📝 What each Geometry record resolved to against the loaded scene archive (record token value → resolution) and a
     //    counter that advances whenever any of them changed; the workspace copies them into the records for their inspector.
     std::shared_ptr<const std::unordered_map<uint64_t, Frontier::GeometryConfiguration::Resolution>> Geometry{};
-    std::shared_ptr<const std::vector<Frontier::GeometryPickVolume>> GeometryVolumes{};   // [-] shown parts, for picking
     uint64_t                GeometryGeneration  = 0;
+    SceneViewportPick       Pick{};                          // [-] the answer to the last click on the stage
 };
 
 struct SceneViewportImage
@@ -267,6 +283,9 @@ class EverestWorkspace
     Frontier::PlacementGizmoMode  GizmoMode              = Frontier::PlacementGizmoMode::Move;
     ImVec2                        PickPress{};                        // [px] where a left press on the stage began
     bool                          PickPending            = false;     // [-] that press may still be a click (a pick)
+    uint64_t                      PickSerial             = 0;         // [-] clicks sent to the viewport for GPU picking
+    uint64_t                      PickApplied            = 0;         // [-] the last of them whose answer was applied
+    std::array<double, 2>         PickPoint{};                        // [-] the last click, as a fraction of the stage
     bool                          GizmoPress             = false;     // [-] that press began on a handle
     std::unordered_map<uint64_t, std::array<float, 3>> PendingAlbedo{};   // [-] constructed shapes waiting for their family
 #endif

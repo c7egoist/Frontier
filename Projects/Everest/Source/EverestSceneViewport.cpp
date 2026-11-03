@@ -229,6 +229,30 @@ SceneViewportRefresh EverestSceneViewport::Render(const SceneViewportRequest& Re
                                  RayTracing ? "RTX ReSTIR" : "GTX distance field");
     }
 
+    // ①½ GPU picking: a new pick serial asks for the record drawn under the stage point in the image the click was made on — the
+    //    last refreshed image, before this request's placements and refresh change anything
+    if (Request.PickSerial != Pick_.Serial)
+    {
+        Pick_        = {};
+        Pick_.Serial = Request.PickSerial;
+        Frontier::GlobalIllumination::OccupantPick Seen;
+        std::string                                Diagnostic;
+        if (Viewport_->QueryScene() != GeometryScene_)
+        {
+            Pick_.Failure = "the scene was rebuilt since the image was made";
+        }
+        else if (Viewport_->PickOccupants(Request.PickPoint, Seen, &Diagnostic))
+        {
+            Pick_.Occupant     = Seen.QueryOccupant(0, 0);
+            Pick_.Record       = Geometry_.ResolvePickedRecord(Seen);
+            Pick_.Milliseconds = Seen.Milliseconds;
+        }
+        else
+        {
+            Pick_.Failure = Diagnostic;
+        }
+    }
+
     // ② the level's geometry records on the scene's occupants: a new scene (a rebuilt viewport) is bound afresh, then only the
     //    records that changed are placed again
     if (Viewport_->QueryScene() != GeometryScene_)
@@ -253,7 +277,7 @@ SceneViewportRefresh EverestSceneViewport::Render(const SceneViewportRequest& Re
         SceneViewportRefresh Paused = Held_;
         Paused.Readout.Held               = true;
         Paused.Readout.Geometry           = Geometry_.QueryResolutions();
-        Paused.Readout.GeometryVolumes    = Geometry_.QueryPickVolumes();
+        Paused.Readout.Pick               = Pick_;
         Paused.Readout.GeometryGeneration = Geometry_.QueryGeneration();
         Paused.Status                     = "HELD: live refresh is off  |  " + Held_.Status;
         return Paused;
@@ -378,7 +402,7 @@ SceneViewportRefresh EverestSceneViewport::Render(const SceneViewportRequest& Re
     Outcome.Readout.SurfaceCards        = Statistics.SurfaceCards;
     Outcome.Readout.GeometryClusters    = Statistics.GeometryClusters;
     Outcome.Readout.Geometry            = Geometry_.QueryResolutions();
-    Outcome.Readout.GeometryVolumes     = Geometry_.QueryPickVolumes();
+    Outcome.Readout.Pick                = Pick_;
     Outcome.Readout.GeometryGeneration  = Geometry_.QueryGeneration();
     Held_ = Outcome;
     return Outcome;

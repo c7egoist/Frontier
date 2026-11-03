@@ -2900,10 +2900,11 @@ void ValidateStage3CadFeatures()
               Format("Realtime edit on semitransparent cutter %s: initial ΔV=%.6f → push floor +0.10 ΔV=%.6f (rel %.2e) → fillet rim r=0.03 ΔV=%.6f, sound=%d",
                      CutterKey.c_str(), InitialLoss, DeeperLoss, PushErr, FilletedLoss, EditLive.Summary.SoundCondition ? 1 : 0));
 
-        // Verify standalone SolidArc SVG icon inventory in EngineContent/Icons/SolidArc!
+        // Verify standalone SolidArc SVG icon inventory in EngineContent/Icons/SolidArc (the build names the folder, so the check
+        // holds from any working directory; ctest runs this one from the build folder).
         int SvgCount = 0;
         std::error_code FsErr;
-        for (const char* Candidate : { "EngineContent/Icons/SolidArc", "/tmp/_ClaudeScratch/FrontierRepo/EngineContent/Icons/SolidArc" })
+        for (const char* Candidate : { SOLIDARC_ICON_FOLDER, "EngineContent/Icons/SolidArc" })
         {
             if (!std::filesystem::is_directory(Candidate, FsErr)) continue;
             SvgCount = 0;

@@ -40,6 +40,7 @@ SceneViewport::~SceneViewport()
 {
     // 📝 Device resources die before their exchanges; the borrowed environment views before the environment images.
     PresentedView_.reset();
+    Pick_.reset();
     Overlay_.reset();
     Host_.reset();
     if (Environment_) Environment_->Shutdown();
@@ -257,7 +258,10 @@ bool SceneViewport::Refresh(const ViewportCamera& Camera, const SceneEnvironment
         Sun.ExposureCompensation = Rendering.ExposureCompensation;
         // 📝 The analytic illumination reads the occupant profiles too: relocated occupants are written before it draws.
         if (!Host_->RelocatedOccupants.empty() || !Host_->SettlingOccupants.empty()) Host_->SettleRelocatedOccupants();
-        return Analytic_->Refresh(View, Sun, ScreenExtent, Host_->CaptureView, OutDiagnostic);
+        if (!Analytic_->Refresh(View, Sun, ScreenExtent, Host_->CaptureView, OutDiagnostic)) return false;
+        PickCamera_ = Camera;
+        PickExtent_ = ScreenExtent;
+        return true;
     }
     ResolveSky(Environment);
 
@@ -323,7 +327,10 @@ bool SceneViewport::Refresh(const ViewportCamera& Camera, const SceneEnvironment
         Interlude.BeforeAntialias    = nullptr;
         Interlude.AntialiasSource    = nullptr;
     }
-    return Host_->AdvanceRefresh(&Inputs, nullptr, nullptr, OutDiagnostic, &Interlude);
+    if (!Host_->AdvanceRefresh(&Inputs, nullptr, nullptr, OutDiagnostic, &Interlude)) return false;
+    PickCamera_ = Camera;
+    PickExtent_ = ScreenExtent;
+    return true;
 }
 
 ViewportStatistics SceneViewport::QueryStatistics() const noexcept
@@ -367,6 +374,57 @@ std::array<uint32_t, 2> SceneViewport::QueryScreenExtent() const noexcept
 uint32_t SceneViewport::RelocateOccupants(const std::vector<OccupantPlacement>& Placements)
 {
     return Host_ ? GlobalIllumination::RelocateOccupants(*Host_, Placements) : 0u;
+}
+
+Transform SceneViewport::ResolveViewProjection(const ViewportCamera& Camera, std::array<uint32_t, 2> ScreenExtent) noexcept
+{
+    const double Aspect = static_cast<double>(ScreenExtent[0]) / static_cast<double>(std::max(1u, ScreenExtent[1]));
+    return MultiplyTransform(ConstructPerspectiveTransform(Camera.VerticalFieldOfView, Aspect, Camera.Near),
+                             ConstructViewTransform(Camera.Position, Camera.Target, Camera.Up));
+}
+
+bool SceneViewport::PickOccupants(std::array<double, 2> Point, OccupantPick& Outcome, std::string* OutDiagnostic)
+{
+    if (!PickCamera_ || PickExtent_[0] == 0 || PickExtent_[1] == 0)
+    {
+        if (OutDiagnostic != nullptr) *OutDiagnostic = "no refreshed image to pick in";
+        return false;
+    }
+    // 📝 The image is shown stretched over the stage: the point's pixel is its fraction of the image's extent.
+    std::array<uint32_t, 2> Pixel{};
+    for (size_t Axis = 0; Axis < 2; ++Axis)
+    {
+        const double Scaled = std::floor(std::clamp(Point[Axis], 0.0, 1.0) * PickExtent_[Axis]);
+        Pixel[Axis]         = static_cast<uint32_t>(std::min(Scaled, static_cast<double>(PickExtent_[Axis] - 1u)));
+    }
+    return PickOccupants(*PickCamera_, PickExtent_, Pixel, Outcome, OutDiagnostic);
+}
+
+bool SceneViewport::PickOccupants(const ViewportCamera& Camera, std::array<uint32_t, 2> ScreenExtent, std::array<uint32_t, 2> Pixel,
+                                  OccupantPick& Outcome, std::string* OutDiagnostic)
+{
+    if (!Host_ || !Host_->VertexRegion || !Host_->OccupantRegion)
+    {
+        if (OutDiagnostic != nullptr) *OutDiagnostic = "the scene viewport is not up";
+        return false;
+    }
+    if (!Pick_)
+    {
+        try
+        {
+            auto Candidate = std::make_unique<PickProjection>(*Exchange_, Host_->Shaders);
+            Candidate->Construct(Host_->OccupantRegion);
+            Pick_ = std::move(Candidate);
+        }
+        catch (const std::exception& Failure)
+        {
+            if (OutDiagnostic != nullptr) *OutDiagnostic = std::string("GPU picking unavailable: ") + Failure.what();
+            return false;
+        }
+    }
+    // 📝 The occupant profiles stay as the last refresh wrote them (relocations wait for the next refresh's motion bookkeeping), so
+    //    the pick sees what the image shows.
+    return Pick_->Pick(Host_->Scene, Host_->VertexRegion, ResolveViewProjection(Camera, ScreenExtent), ScreenExtent, Pixel, Outcome, OutDiagnostic);
 }
 
 bool SceneViewport::ReadPresented(std::vector<uint8_t>& OutRgba)

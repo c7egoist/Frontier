@@ -7,6 +7,7 @@
 #pragma once
 
 #include "Frontier/Engine/Rendering/GlobalIllumination/OccupantRelocation.h"
+#include "Frontier/Engine/Rendering/GlobalIllumination/PickProjection.h"
 #include "Frontier/Engine/Rendering/GlobalIllumination/SceneStructure.h"
 #include "Frontier/Engine/Scene/GeometryLayout.h"
 #include "Frontier/Engine/Scene/SceneWorld.h"
@@ -74,9 +75,12 @@ class SceneGeometryOccupancy
     [[nodiscard]] const std::vector<Frontier::ShapeArchive>& QueryShapes() const noexcept { return Shapes_; }
     [[nodiscard]] uint32_t QueryReserveFree() const noexcept { return static_cast<uint32_t>(ReserveFree_.size()); }
 
-    // 📝 Every shown part of every record with its placement and local bounds, replaced with the resolutions (the workspace
-    //    picks objects in the viewport with them: PickGeometryVolume).
-    [[nodiscard]] std::shared_ptr<const std::vector<Frontier::GeometryPickVolume>> QueryPickVolumes() const noexcept { return Volumes_; }
+    // 📝 GPU picking: the record that shows an occupant (every part and copy of every record), replaced with the resolutions; empty
+    //    for the ground, the vehicle and occupants no record holds.
+    [[nodiscard]] std::optional<uint64_t> QueryOwner(uint32_t Occupant) const;
+    // 📝 The record a pick selects: the one drawn at the picked pixel, else the nearest one drawn within the pick's reach (thin parts
+    //    stay easy to hit); empty where only the ground, the sky or occupants no record holds are near the pointer.
+    [[nodiscard]] std::optional<uint64_t> ResolvePickedRecord(const Frontier::GlobalIllumination::OccupantPick& Pick) const;
 
   private:
     struct ShownOccupant
@@ -127,7 +131,7 @@ class SceneGeometryOccupancy
     std::vector<std::pair<uint32_t, std::vector<uint8_t>>> BlockWrites_{};
     std::unordered_map<uint64_t, Occupancy>             Occupancies_{};
     std::shared_ptr<const GeometryResolutions>          Snapshot_ = std::make_shared<const GeometryResolutions>();
-    std::shared_ptr<const std::vector<Frontier::GeometryPickVolume>> Volumes_ = std::make_shared<const std::vector<Frontier::GeometryPickVolume>>();
+    std::unordered_map<uint32_t, uint64_t>              Owners_{};         // [-] shown occupant → record token value
     uint64_t                                            Generation_ = 0;
 };
 
