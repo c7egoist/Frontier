@@ -1312,3 +1312,6 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
   jump ramp removed, tower duplicated, a red 3 m cube, a sphere and a torus constructed): 17.1 % of the RTX
   global-illumination viewport changes, 17.4 % on the GTX distance-field path and 16.4 % with the analytic
   illumination. The capture also renders the Construct dialog and the cube's move handles.
+- **Virtualized geometry checked:** with it on, the edits render alike (17.4 %). The check found that a change of the
+  draw runs rebuilt the takeover and its two-pages-per-refresh streaming left the ground garbled for several refreshes
+  (30.4 % changed after two); every page now streams in the refresh after a run-time rebuild (beyond the demo).

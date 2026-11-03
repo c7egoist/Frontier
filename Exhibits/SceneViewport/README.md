@@ -516,6 +516,13 @@ does the analytic illumination (debug view 15, 16.4 %).
 |---|---|
 | ![GTX](Images/Geometry/Viewport-After-Distance.png) | ![Analytic](Images/Geometry/Viewport-After-Analytic.png) |
 
+**Virtualized geometry.** Switched on (Render settings › Geometry), the same edits render the same way: 17.4 % of the
+pixels change two refreshes after them ([image](Images/Geometry/Viewport-After-Virtualized.png)). The check found one
+defect. A change of the draw runs (an object shown, hidden, added or removed) rebuilds the takeover's records, and the
+demo's streaming of two pages per refresh left the ground garbled for several refreshes: 30.4 % had changed two
+refreshes after the edits, with brown grass and speckled asphalt. The demo never rebuilds at run time, so beyond it,
+every page now streams in the refresh after a rebuild (`NestingProjection::BurstLoads_`).
+
 | The workspace after the edits (GTX run), the cube's move handles | The Construct dialog (Ctrl+A) |
 |---|---|
 | ![Edited](Images/Geometry/Workspace-Edited.png) | ![Construct](Images/Geometry/Workspace-Construct.png) |
