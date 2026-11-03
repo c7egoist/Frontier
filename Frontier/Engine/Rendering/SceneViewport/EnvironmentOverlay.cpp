@@ -154,6 +154,8 @@ struct EnvironmentOverlay::PlanetaryStore
     };
     std::unordered_map<uint64_t, Motion> Motions;
     double PreviousTime = -1;
+    double TwinkleClock = 0.0;    // [s] elapsed time × the twinkle rate, integrated refresh by refresh
+    double TwinkleTime  = -1.0;   // [s] the elapsed time it was last advanced to
 
     PlanetarySubmissionSequence Sequence{};
     PlanetaryRealmEnsemble      Ensemble{};
@@ -496,11 +498,21 @@ void EnvironmentOverlay::ResolveRealm(const IlluminationHost& Host, const SceneE
     const float Starlight    = static_cast<float>(2.9 / 0.82 * RadianceScale_);
     R.StarBrightnessScale    = S.Stars.Enabled ? std::max(0.0f, S.Stars.MagnitudeGain) * Starlight : 0.0f;
     R.MilkyWayIntensity      = S.Stars.Enabled ? std::max(0.0f, S.Stars.MilkyWayLuminance / 0.55f) * Starlight : 0.0f;
-    R.ScintillationStrength  = S.Stars.ScintillationEnabled ? std::max(0.0f, S.Stars.AtmosphericScintillate / 0.35f) : 0.0f;
+    // 📝 Twinkle depth is the peak brightness swing at the zenith (the sky deepens it toward the horizon). The clock advances
+    //    at the twinkle rate, so changing the rate speeds or slows the twinkle without a jump in its phase; wrapped hourly so
+    //    the shader's single-precision phase stays exact.
+    R.ScintillationStrength  = S.Stars.ScintillationEnabled ? std::clamp(S.Stars.AtmosphericScintillate, 0.0f, 1.0f) : 0.0f;
+    const double TwinkleRate = std::clamp(static_cast<double>(S.Stars.ScintillationRateHz), 0.2, 3.0);
+    if (Planetary_->TwinkleTime >= 0.0 && S.ElapsedSeconds > Planetary_->TwinkleTime)
+    {
+        const double Advance     = std::min(S.ElapsedSeconds - Planetary_->TwinkleTime, 0.25) * TwinkleRate;   // [s] of twinkle
+        Planetary_->TwinkleClock = std::fmod(Planetary_->TwinkleClock + Advance, 3600.0);
+    }
+    Planetary_->TwinkleTime = S.ElapsedSeconds;
+    R.StarTwinkleClock       = static_cast<float>(Planetary_->TwinkleClock);
     // 📝 N(m) ≈ 10^(0.4·m + 1.3) stars brighter than magnitude m over the whole sky.
     R.StarLimitingMagnitude = std::clamp(S.Stars.LimitingMagnitude,0.0f,8.0f);
     R.StarPointSize = std::clamp(S.Stars.PointSize,.2f,3.0f);
-    R.StarScintillationRate = std::clamp(S.Stars.ScintillationRateHz,.2f,3.0f);
     R.StarHalo = std::clamp(S.Stars.HaloGain,0.0f,2.0f);
     // 📝 The planets of the demo's own orbital solver, each from its Scene Directory entry (Venus, Jupiter, Mars, Saturn).
     R.Planets.clear();

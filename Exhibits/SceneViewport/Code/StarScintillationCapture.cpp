@@ -85,7 +85,7 @@ struct StarSite
 };
 
 // 📝 Isolated peaks of the sky: brighter than every pixel within two, well above the sky around them, above the horizon band.
-std::vector<StarSite> LocateStars(const std::vector<double>& Mean, int Width, int Height)
+std::vector<StarSite> IdentifyStars(const std::vector<double>& Mean, int Width, int Height)
 {
     std::vector<StarSite> Sites;
     for (int Y = 3; Y < Height * 2 / 3; ++Y)
@@ -217,7 +217,7 @@ int main(int ArgumentCount, char** Arguments)
                 stbi_write_png(Path.c_str(), static_cast<int>(Width), static_cast<int>(Height), 4, Rgba.data(), static_cast<int>(Width * 4));
             }
         }
-        if (Sites.empty()) Sites = LocateStars(Mean, static_cast<int>(Width), static_cast<int>(Height));
+        if (Sites.empty()) Sites = IdentifyStars(Mean, static_cast<int>(Width), static_cast<int>(Height));
         // ① each star's brightness per refresh: the brightest pixel within one of its peak
         std::vector<double> Variation, Swing, Brightness;
         for (const StarSite& Site : Sites)

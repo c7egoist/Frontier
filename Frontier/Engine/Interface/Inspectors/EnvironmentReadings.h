@@ -114,13 +114,16 @@ inline constexpr double Pi = 3.14159265358979323846;
     return {std::cos(θ) * Radius, -std::sin(θ) * Radius};
 }
 
+// 📝 The sky's own twinkle (PlanetaryProjection.slang EvaluateScintillationGpu) at the zenith: the demo's three-frequency signal,
+//    its peak swing the twinkle depth. The sky deepens it toward the horizon (× 1.33 at 30°, × 1.9 at 10°, at most × 2.5).
 [[nodiscard]] inline double StarScintillation(double Time, const StarConfiguration &Stars, const std::array<float, 7> &Star) noexcept
 {
-    const double Phase = Star[0] * 91.7 + Star[1] * 213.1 + Star[2] * 57.3;
-    const double τ     = Time * Stars.ScintillationRateHz;
+    const double Phase  = Star[0] * 91.7 + Star[1] * 213.1 + Star[2] * 57.3;
+    const double τ      = Time * Stars.ScintillationRateHz;
     const double Signal =
         0.6 * std::sin(τ * 6.283185 + Phase) + 0.28 * std::sin(τ * 11.71 + Phase * 1.7) + 0.12 * std::sin(τ * 19.37 + Phase * 2.3);
-    return 1.0 + (Stars.ScintillationEnabled ? Stars.AtmosphericScintillate : 0.0f) * 0.35 * Signal;
+    const double Depth  = Stars.ScintillationEnabled ? std::clamp(static_cast<double>(Stars.AtmosphericScintillate), 0.0, 1.0) : 0.0;
+    return std::max(0.05, 1.0 + Depth * Signal);
 }
 
 inline constexpr double LunarCycle = 29.53;

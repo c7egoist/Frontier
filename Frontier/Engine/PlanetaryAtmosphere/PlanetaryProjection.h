@@ -182,8 +182,8 @@ struct PlanetaryDomeSpecification
     Vec3                                 SolarIrradianceRgb    = {1.0f, 0.98f, 0.94f};
     float                                SolarAngularRadiusRad = 0.00465f;
     float                                PixelAngularSizeRad   = 0.0014f;
-    float                                TimeSeconds           = 0.0f;
-    float                                ScintillationStrength = 1.0f;
+    float                                TimeSeconds           = 0.0f;    // [s] also the twinkle clock
+    float                                ScintillationStrength = 0.35f;   // [0-1] the twinkle's peak swing at the zenith
     float                                MilkyWayStrength      = 1.0f;
     float                                LimitingMagnitude     = 7.5f;
     std::vector<LunarBodyDescriptor>     Moons{};
@@ -223,8 +223,8 @@ class PlanetaryDomeProjection
     [[nodiscard]] static Vec3  KelvinToBlackbodyChromaticity(float TemperatureKelvin) noexcept;
     [[nodiscard]] static float EvaluateStarScintillation(float AltitudeSine,
                                                          float PhaseSeed,
-                                                         float TimeSeconds,
-                                                         float Strength = 1.0f) noexcept;
+                                                         float TwinkleClock,
+                                                         float Depth = 0.35f) noexcept;
     [[nodiscard]] static Vec3  EvaluateMilkyWayBandRadiance(Vec3 DirectionUnit, float Strength = 1.0f) noexcept;
 
     [[nodiscard]] PlanetaryDomeSample EvaluateDirection(const PlanetaryDomeSpecification& Specification,

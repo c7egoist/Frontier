@@ -46,7 +46,7 @@
     },
     {
       "file": "RasterizePlanetaryProjection.spv",
-      "spirv_sha256": "d4fc8425f823e5a1ce863924716eaeebb7071a749d6e57fef88ab41fc9dae87f"
+      "spirv_sha256": "7219cf818298437cd2f68d9255636d7711688c2179d45bf113149dca5be990d0"
     },
     {
       "file": "RasterizeVisibilityProjection.spv",
@@ -96,7 +96,7 @@
     },
     {
       "file": "Frontier/Engine/Shaders/PlanetaryProjection.slang",
-      "sha256": "825c6e381d3d27413bb7d5a9697ea7fe346e8eea780598dd1992f9a9c1a3759b"
+      "sha256": "66e62a4f3399577af31c97da893d4567895c98aad4304e2624d2d484693a06ff"
     },
     {
       "file": "Frontier/Engine/Shaders/PlanetaryRecords.slang",

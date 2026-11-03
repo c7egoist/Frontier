@@ -107,11 +107,11 @@ struct PlanetaryRealm
     std::array<float, 3>        GroundAlbedoRgb         = {0.22f, 0.23f, 0.20f};
     float                       TwilightStrength        = 1.15f;
     float                       StarBrightnessScale     = 1.0f;
-    float                       ScintillationStrength   = 1.0f;
+    float                       ScintillationStrength   = 0.35f;   // [0-1] the twinkle's peak brightness swing at the zenith
     float                       MilkyWayIntensity       = 1.0f;
-    float StarPointSize = 1;
-    float StarScintillationRate = 1;
-    float StarHalo = 0;
+    float                       StarPointSize           = 1.0f;
+    float                       StarTwinkleClock        = 0.0f;    // [s] the twinkle signal's clock: elapsed time × the twinkle rate
+    float                       StarHalo                = 0.0f;
     float                       StarLimitingMagnitude   = 7.0f;
     std::array<float, 3>        StarBasisRow0           = {1.0f, 0.0f, 0.0f};
     std::array<float, 3>        StarBasisRow1           = {0.0f, 1.0f, 0.0f};

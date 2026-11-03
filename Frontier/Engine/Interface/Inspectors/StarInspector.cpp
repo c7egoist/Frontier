@@ -240,9 +240,10 @@ bool StarInspector::ConstructScintillation(ControlColumn &Page)
     auto       Pen       = DiagramCanvas::Begin(Page, "StarScintillation", 640, 330, 15, 15);
     for (int Stripe = 0; Stripe < 32; ++Stripe)
         Pen.Line({Stripe * 20.0f, 0}, {Stripe * 20.0f, 330}, ResolveCssColour(0xB9B9D805));
-    for (const float Gain : {0.7f, 1.0f, 1.3f})
+    // 📝 150 px per unit of gain: a full-depth twinkle (0 … 2) still fits the 330 px plot.
+    for (const float Gain : {0.5f, 1.0f, 1.5f})
     {
-        const float Height = 165 - (Gain - 1) * 300;
+        const float Height = 165 - (Gain - 1) * 150;
         Pen.Line({65, Height}, {606, Height}, ResolveCssColour(0xB9B9D827), 1, 2, 6);
         Pen.Text({50, Height + 5}, Figure("%.1f", Gain).c_str(), ResolveCssColour(0x9497ADFF), 20, 1);
     }
@@ -254,7 +255,7 @@ bool StarInspector::ConstructScintillation(ControlColumn &Page)
             Points.push_back(
                 {65 + Sample / 160.0f * 541,
                  165 - static_cast<float>((EnvironmentReadings::StarScintillation(Time - 4 + Sample / 40.0, Parameters, *Brightest) - 1) *
-                                          300)});
+                                          150)});
         Pen.Path(Points, ResolveCssColour(0xD7C4E5FF), 2.4f);
         Pen.Circle(Points.back(), 6, ResolveCssColour(0xEBD8F4FF));
     }
@@ -266,8 +267,9 @@ bool StarInspector::ConstructScintillation(ControlColumn &Page)
     Changed |= SliderRow::Construct(Page, "TwinkleRate", "Twinkle rate", Parameters.ScintillationRateHz, 0.2f, 3, 0.1f, "Hz");
     CaptionText::Construct(
         Page,
-        "Exact demo three-frequency signal for the brightest catalogue entry, sampled at 8 Hz using the UI clock. Relative gain only; not "
-        "measured GPU brightness or a live capture. The native sky uses its own scintillation equation.",
+        "The sky's own twinkle for the brightest catalogue entry at the zenith (the demo's three-frequency signal; depth is the peak "
+        "swing), sampled at 8 Hz on the UI clock. Toward the horizon the sky deepens it: × 1.33 at 30°, × 1.9 at 10°. Relative gain, "
+        "not a capture.",
         10, 10);
     Page.EndCard();
     return Changed;

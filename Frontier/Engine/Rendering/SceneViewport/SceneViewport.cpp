@@ -169,6 +169,17 @@ void SceneViewport::ResolveSky(const SceneEnvironment& S)
 
     // ④ stars and planets (each planet its own Scene Directory entry), atmosphere scales
     Sky.StarsEnabled      = S.Stars.Enabled;
+    // 📝 The port's own night sky (NightStars, seen in reflections) from the same Stars record as the overlaid sky: the demo's
+    //    Stars page keys, with the Milky Way on the overlay's scale (0.55 the demo's 1).
+    Sky.StarBrightness    = std::max(0.0f, S.Stars.MagnitudeGain);
+    Sky.StarLimit         = std::clamp(static_cast<double>(S.Stars.LimitingMagnitude), 0.0, 8.0);
+    Sky.StarSize          = std::clamp(static_cast<double>(S.Stars.PointSize), 0.2, 3.0);
+    Sky.StarRotation      = S.Stars.RotationDegrees;
+    Sky.StarHalo          = std::clamp(static_cast<double>(S.Stars.HaloGain), 0.0, 2.0);
+    Sky.MilkyWay          = std::max(0.0, static_cast<double>(S.Stars.MilkyWayLuminance) / 0.55);
+    Sky.TwinkleEnabled    = S.Stars.ScintillationEnabled;
+    Sky.TwinkleDepth      = std::clamp(static_cast<double>(S.Stars.AtmosphericScintillate), 0.0, 1.0);
+    Sky.TwinkleRate       = std::clamp(static_cast<double>(S.Stars.ScintillationRateHz), 0.2, 3.0);
     Sky.PlanetsEnabled    = std::any_of(S.Planets.begin(), S.Planets.end(), [](const PlanetConfiguration& Planet) { return Planet.Enabled; });
     Sky.AtmosphereEnabled = S.Atmosphere.Enabled;
     Sky.Atmosphere.Rayleigh = std::max(0.0f, S.Atmosphere.RayleighScattering);

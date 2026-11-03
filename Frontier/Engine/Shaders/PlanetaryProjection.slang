@@ -36,19 +36,21 @@ float2 DirectionToOctUv(float3 Direction)
     return saturate(float2(0.5f * OctX + 0.5f, 0.5f * OctY + 0.5f));
 }
 
-float EvaluateScintillationGpu(float sinθAltitude, float Seed, float TimeSeconds, float Strength)
+// 📝 Scintillation: the demo's three-frequency twinkle signal (NightStars) on the realm's twinkle clock τ. Its peak swing is the
+//    twinkle depth at the zenith, deeper toward the horizon where the light crosses more air: × √(1.15 / (sin h + 0.15)), at most
+//    × 2.5 (× 1.33 at 30°, × 1.9 at 10°). PlanetaryDomeProjection::EvaluateStarScintillation is its CPU twin.
+float EvaluateScintillationGpu(float sinθAltitude, float Seed, float TwinkleClock, float Depth)
 {
-    if (Strength <= 0.0f)
+    if (Depth <= 0.0f)
     {
         return 1.0f;
     }
-    float ClampedSin = max(0.035f, sinθAltitude);
-    float Airmass    = 1.0f / (ClampedSin + 0.025f * exp(-11.0f * ClampedSin));
-    float σAmplitude = min(0.65f, 0.055f * Strength * pow(Airmass, 0.85f));
-    float Wave       = 0.50f * sin(TimeSeconds * 7.3f + Seed * kTwoπ) +
-                       0.31f * sin(TimeSeconds * 13.7f + Seed * 19.1f) +
-                       0.19f * cos(TimeSeconds * 23.1f + Seed * 41.7f);
-    return max(0.10f, 1.0f + σAmplitude * Wave);
+    float Phase        = Seed * kTwoπ;
+    float Signal       = 0.60f * sin(TwinkleClock * kTwoπ + Phase) +
+                         0.28f * sin(TwinkleClock * 11.71f + Phase * 1.7f) +
+                         0.12f * sin(TwinkleClock * 19.37f + Phase * 2.3f);
+    float AirmassDepth = min(2.5f, sqrt(1.15f / (max(sinθAltitude, 0.0f) + 0.15f)));
+    return max(0.05f, 1.0f + Depth * AirmassDepth * Signal);
 }
 
 float3 EvaluateMilkyWayGpu(float3 CelestialDirection, float Intensity)
@@ -344,7 +346,6 @@ void RasterizePlanetaryProjectionMain(uint3 Tid : SV_DispatchThreadID)
 
     float TanHalfY     = Ensemble[1].w;
     float PixelSpanRad = (2.0f * TanHalfY) / max(float(Push.Counts.y), 1.0f);
-    float TimeSeconds  = Ensemble[3].w;
 
     // 2. Transform ViewDirection into Realm's celestial star frame
     float3 StarRow0      = Ensemble[RealmOffset + 14u].xyz;
@@ -400,7 +401,7 @@ void RasterizePlanetaryProjectionMain(uint3 Tid : SV_DispatchThreadID)
                     float4 St1     = StarRecords[StIdx + 1u];
                     float  Flux    = pow(10.0f, -0.34f * (St0.w - 0.5f)) * 0.28f * R5.y;
                     float  Core    = exp(-0.5f * (θStar * θStar) / (σPsf * σPsf));
-                    float  Twinkle = EvaluateScintillationGpu(ViewDirection.y, St1.w, TimeSeconds * Ensemble[RealmOffset+18u].y, R5.z);
+                    float  Twinkle = EvaluateScintillationGpu(ViewDirection.y, St1.w, Ensemble[RealmOffset + 18u].y, R5.z);
                     float Halo = Ensemble[RealmOffset+18u].z * .08f * exp(-.125f*(θStar*θStar)/(σPsf*σPsf));
                     ExoRadiance   += St1.xyz * (Flux * (Core+Halo) * Twinkle);
                 }

@@ -592,7 +592,7 @@ PackedEnsemblePayload PackEnsemblePayload(const PlanetaryRealmEnsemble& Ensemble
                               static_cast<float>(ForceCount),
                               static_cast<float>(WindProf.GustAmplitude),
                               EffWindSec});
-        RealmSlots.push_back({Realm.StarPointSize,Realm.StarScintillationRate,Realm.StarHalo,0});
+        RealmSlots.push_back({Realm.StarPointSize, Realm.StarTwinkleClock, Realm.StarHalo, 0.0f});
     }
 
     for (const PortalAperture& Portal : Ensemble.Portals)

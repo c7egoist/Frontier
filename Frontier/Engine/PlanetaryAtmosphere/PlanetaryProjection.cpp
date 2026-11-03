@@ -699,23 +699,23 @@ bool PlanetaryDomeProjection::LoadLunarAtlas(const std::string& LunaJpegOrPpmPat
     return LunarAtlas_.BuildFromLunaSource(LunaJpegOrPpmPath, AtlasWidth, AtlasHeight);
 }
 
+// 📝 PlanetaryProjection.slang EvaluateScintillationGpu, term for term: the demo's three-frequency signal on the twinkle clock, the
+//    depth the zenith's peak swing, deepened with the airmass toward the horizon.
 float PlanetaryDomeProjection::EvaluateStarScintillation(float AltitudeSine,
                                                          float PhaseSeed,
-                                                         float TimeSeconds,
-                                                         float Strength) noexcept
+                                                         float TwinkleClock,
+                                                         float Depth) noexcept
 {
-    if (Strength <= 0.0f)
+    if (Depth <= 0.0f)
     {
         return 1.0f;
     }
-    const float SinAlt    = std::max(0.05f, AltitudeSine);
-    const float Airmass   = 1.0f / (SinAlt + 0.025f * std::exp(-11.0f * SinAlt));
-    const float σIndex    = std::min(0.62f, 0.048f * Strength * std::pow(Airmass, 0.85f));
-    const float PhaseBase = PhaseSeed * Twoπ * 17.0f;
-    const float Osc       = 0.52f * std::sin(TimeSeconds * 9.7f + PhaseBase) +
-                            0.31f * std::sin(TimeSeconds * 16.3f + PhaseBase * 2.31f) +
-                            0.17f * std::cos(TimeSeconds * 24.9f + PhaseBase * 3.73f);
-    return std::clamp(1.0f + σIndex * Osc, 0.22f, 1.95f);
+    const float Phase        = PhaseSeed * Twoπ;
+    const float Signal       = 0.60f * std::sin(TwinkleClock * Twoπ + Phase) +
+                               0.28f * std::sin(TwinkleClock * 11.71f + Phase * 1.7f) +
+                               0.12f * std::sin(TwinkleClock * 19.37f + Phase * 2.3f);
+    const float AirmassDepth = std::min(2.5f, std::sqrt(1.15f / (std::max(AltitudeSine, 0.0f) + 0.15f)));
+    return std::max(0.05f, 1.0f + Depth * AirmassDepth * Signal);
 }
 
 Vec3 PlanetaryDomeProjection::EvaluateMilkyWayBandRadiance(Vec3 DirectionUnit, float Strength) noexcept
