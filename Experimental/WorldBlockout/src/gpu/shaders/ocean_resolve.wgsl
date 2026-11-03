@@ -31,27 +31,27 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
   let pos = vec2i(x, z);
   let scale = rp.invScale;
 
-  let a = textureLoad(srcA, pos, 0);
-  let b = textureLoad(srcB, pos, 0);
+  let a = textureLoad(srcA, pos);
+  let b = textureLoad(srcB, pos);
 
   let h = a.x * scale;
   let dx = a.z * scale;
   let dz = b.x * scale;
 
   // Central differences on the periodic tile.
-  let xm = textureLoad(srcA, vec2i(wrap(x - 1, n), z), 0).x * scale;
-  let xp = textureLoad(srcA, vec2i(wrap(x + 1, n), z), 0).x * scale;
-  let zm = textureLoad(srcA, vec2i(x, wrap(z - 1, n)), 0).x * scale;
-  let zp = textureLoad(srcA, vec2i(x, wrap(z + 1, n)), 0).x * scale;
+  let xm = textureLoad(srcA, vec2i(wrap(x - 1, n), z)).x * scale;
+  let xp = textureLoad(srcA, vec2i(wrap(x + 1, n), z)).x * scale;
+  let zm = textureLoad(srcA, vec2i(x, wrap(z - 1, n))).x * scale;
+  let zp = textureLoad(srcA, vec2i(x, wrap(z + 1, n))).x * scale;
   let cell = rp.tile / f32(n);
   let slopeX = (xp - xm) / (2.0 * cell);
   let slopeZ = (zp - zm) / (2.0 * cell);
 
   // Jacobian of the horizontal displacement map: < 0 means the surface folded (whitecaps).
-  let dxp = textureLoad(srcA, vec2i(wrap(x + 1, n), z), 0).z * scale;
-  let dxm = textureLoad(srcA, vec2i(wrap(x - 1, n), z), 0).z * scale;
-  let dzp = textureLoad(srcB, vec2i(x, wrap(z + 1, n)), 0).x * scale;
-  let dzm = textureLoad(srcB, vec2i(x, wrap(z - 1, n)), 0).x * scale;
+  let dxp = textureLoad(srcA, vec2i(wrap(x + 1, n), z)).z * scale;
+  let dxm = textureLoad(srcA, vec2i(wrap(x - 1, n), z)).z * scale;
+  let dzp = textureLoad(srcB, vec2i(x, wrap(z + 1, n))).x * scale;
+  let dzm = textureLoad(srcB, vec2i(x, wrap(z - 1, n))).x * scale;
   let ddx = (dxp - dxm) / (2.0 * cell);
   let ddz = (dzp - dzm) / (2.0 * cell);
   let jacobian = (1.0 + ddx) * (1.0 + ddz);

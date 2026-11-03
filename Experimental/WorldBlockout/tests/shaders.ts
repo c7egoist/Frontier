@@ -104,6 +104,71 @@ console.log('Shared header');
     !r.uniforms.some(u => u.name === 'frame'), 'no Frame uniform in ocean_sim.wgsl');
 }
 
+console.log('WGSL type rules the parser does not enforce');
+{
+  // wgsl_reflect only parses. A real device rejects mixing * and ^ without parentheses
+  // ("mixing '*' and '^' requires parenthesis"), and rejects a level argument on a storage
+  // texture. Both of these shipped once; catch them statically instead of at runtime.
+  const stripComments = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+
+  const parenBalance = (s: string) => { let d = 0; for (const ch of s) { if (ch === '(') d++; else if (ch === ')') d--; } return d; };
+
+  /** Split the top-level comma-separated arguments of the call whose '(' is at `open`. */
+  const argsOf = (src: string, open: number) => {
+    const parts: string[] = [];
+    let depth = 0, cur = '';
+    for (let i = open + 1; i < src.length; i++) {
+      const ch = src[i];
+      if (ch === '(') { depth++; cur += ch; }
+      else if (ch === ')') { if (depth === 0) { parts.push(cur); return parts; } depth--; cur += ch; }
+      else if (ch === ',' && depth === 0) { parts.push(cur); cur = ''; }
+      else cur += ch;
+    }
+    return parts;
+  };
+
+  for (const key of Object.keys(SHADER_FILES) as ShaderKey[]) {
+    if (key === 'common') continue;
+    const src = stripComments(moduleOf(key));
+
+    // 1. `a * b ^ c` is a type error in WGSL unless parenthesised.
+    let mixOk = true, mixDetail = '';
+    for (const line of src.split('\n')) {
+      const noCast = line.replace(/bitcast<[^>]*>/g, '').replace(/<[^<>]*>/g, '');
+      if (/\*[^;()]*\^/.test(noCast) || /\^[^;()]*\*/.test(noCast)) {
+        mixOk = false; mixDetail = line.trim();
+        break;
+      }
+    }
+    check(`${key}: no unparenthesised * and ^ on one line`, mixOk, mixDetail);
+
+    // 2. textureLoad arity must match the texture's declared kind.
+    const declared = new Map<string, 'storage' | 'sampled'>();
+    for (const m of src.matchAll(/(?:var|let)\s+(?:<[^>]*>\s*)?(\w+)\s*:\s*(texture_storage_2d|texture_2d)\b/g)) {
+      declared.set(m[1], m[2] === 'texture_storage_2d' ? 'storage' : 'sampled');
+    }
+    let arityOk = true, arityDetail = '';
+    for (const line of src.split('\n')) {
+      for (const m of line.matchAll(/textureLoad\(\s*(\w+)\s*,/g)) {
+        const kind = declared.get(m[1]);
+        if (!kind) continue;
+        const open = line.indexOf('textureLoad(', m.index);
+        const args = argsOf(line, line.indexOf('(', open));
+        const want2 = kind === 'storage';
+        if (want2 && args.length !== 2) { arityOk = false; arityDetail = `storage ${m[1]} needs 2 args, found ${args.length}`; }
+        if (!want2 && args.length !== 3) { arityOk = false; arityDetail = `sampled ${m[1]} needs 3 args, found ${args.length}`; }
+      }
+    }
+    check(`${key}: textureLoad arity matches texture kind`, arityOk, arityDetail);
+  }
+
+  // 3. Every module must at least be paren-balanced: a truncated include else fails obscurely.
+  for (const key of Object.keys(SHADER_FILES) as ShaderKey[]) {
+    const bal = parenBalance(stripComments(key === 'common' ? raw.common : moduleOf(key)));
+    check(`${key}: balanced parentheses`, bal === 0, bal === 0 ? '' : `off by ${bal}`);
+  }
+}
+
 console.log('Ocean shader sanity');
 {
   const src = raw.oceanSurface;

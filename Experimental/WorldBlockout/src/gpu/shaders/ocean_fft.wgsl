@@ -74,8 +74,8 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
     let rev = i32(bitReverse(u32(along), bits));
     let srcPos = coord(p.axis, rev, other);
     let dstPos = coord(p.axis, along, other);
-    textureStore(dstA, dstPos, textureLoad(srcA, srcPos, 0));
-    textureStore(dstB, dstPos, textureLoad(srcB, srcPos, 0));
+    textureStore(dstA, dstPos, textureLoad(srcA, srcPos));
+    textureStore(dstB, dstPos, textureLoad(srcB, srcPos));
     return;
   }
 
@@ -96,10 +96,10 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
 
   let aPos = coord(p.axis, lowerIndex, other);
   let bPos = coord(p.axis, upperIndex, other);
-  let aA = textureLoad(srcA, aPos, 0);
-  let aB = textureLoad(srcB, aPos, 0);
-  let bA = textureLoad(srcA, bPos, 0);
-  let bB = textureLoad(srcB, bPos, 0);
+  let aA = textureLoad(srcA, aPos);
+  let aB = textureLoad(srcB, aPos);
+  let bA = textureLoad(srcA, bPos);
+  let bB = textureLoad(srcB, bPos);
 
   let tH  = cmul(tw, vec2f(bA.x, bA.y));
   let tDx = cmul(tw, vec2f(bA.z, bA.w));

@@ -43,7 +43,7 @@ const GRAD3 = array<vec2f, 12>(
 );
 
 fn hash12(p : vec2f) -> u32 {
-  var h = bitcast<u32>(p.x) * 1597334673u ^ bitcast<u32>(p.y) * 3812015801u;
+  var h = (bitcast<u32>(p.x) * 1597334673u) ^ (bitcast<u32>(p.y) * 3812015801u);
   h = (h ^ (h >> 15u)) * 2246822519u;
   h = (h ^ (h >> 13u)) * 3266489917u;
   return h ^ (h >> 16u);
