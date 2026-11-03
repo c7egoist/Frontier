@@ -14,7 +14,7 @@ struct SliceParams {
   pad2      : f32,
 };
 @group(1) @binding(0) var<uniform> sl : SliceParams;
-@group(1) @binding(1) var fieldTex : texture_2d_array<f32>;
+@group(1) @binding(1) var fieldTex : texture_2d<f32>;
 @group(1) @binding(2) var fieldSampler : sampler;
 @group(1) @binding(3) var bathyTex : texture_2d<f32>;
 @group(1) @binding(4) var sliceSampler : sampler;
@@ -26,7 +26,7 @@ fn surfaceAt(t : f32) -> vec2f {
   else { world = vec2f(sl.fixed, sl.fixed - sl.halfLen + t * 2.0 * sl.halfLen); }
   let uv = (world + vec2f(frame.world.y, frame.world.y)) / frame.world.x;
   let b = textureSampleLevel(bathyTex, sliceSampler, uv, 0.0).r;
-  let f = textureSampleLevel(fieldTex, fieldSampler, uv, 0, 0.0);
+  let f = textureSampleLevel(fieldTex, fieldSampler, uv, 0.0);
   return vec2f(b, frame.sim.w + f.x * sl.heightScale);
 }
 

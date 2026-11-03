@@ -10,7 +10,7 @@ console.log('Uniform layouts');
 {
   const src = read('common.wgsl');
   const r = new WgslReflect(src);
-  const frame = r.uniforms.find(u => u.name === 'frame');
+  const frame = r.uniforms.find(u => u.name === 'frame')!;
   check('Frame struct size matches host', frame.size === FRAME_FLOATS * 4, `wgsl ${frame.size} B, host ${FRAME_FLOATS * 4} B`);
   const members = frame.members as { name: string; offset: number; size: number }[];
   let allMatch = true;

@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Frontier · World Blockout</title>
+<link rel="stylesheet" href="./src/ui/editor.css" />
+</head>
+<body>
+<div id="app">
+  <canvas id="view"></canvas>
+
+  <header id="topbar">
+    <div class="brand">
+      <span class="mark"></span>
+      <div>
+        <strong>Frontier</strong>
+        <small>World Blockout · SDF-first · adaptive ocean</small>
+      </div>
+    </div>
+    <nav id="modes">
+      <button data-mode="3d" class="active">3D</button>
+      <button data-mode="map">Map</button>
+    </nav>
+    <div id="stats">
+      <span id="stat-fps">—</span>
+      <span id="stat-tris">—</span>
+      <span id="stat-hs">—</span>
+      <span id="stat-gpu">initialising…</span>
+    </div>
+  </header>
+
+  <aside id="left">
+    <section class="panel">
+      <h2>World</h2>
+      <label>Seed <input id="seed" type="number" value="20261103" /></label>
+      <div class="row">
+        <button id="btn-generate" class="primary">Generate continents</button>
+      </div>
+      <label>Bake resolution
+        <select id="bake-res">
+          <option value="256">256² (fast)</option>
+          <option value="512" selected>512²</option>
+          <option value="1024">1024² (slow)</option>
+        </select>
+      </label>
+      <label>Terrain detail <input id="terrain-detail" type="range" min="0" max="2" step="0.05" value="1" /></label>
+      <label>Elevation peak <span id="peak-val">5200 m</span>
+        <input id="peak" type="range" min="800" max="9000" step="100" value="5200" />
+      </label>
+      <label>Shelf width <span id="shelf-val">220 km</span>
+        <input id="shelf" type="range" min="20" max="900" step="10" value="220" />
+      </label>
+    </section>
+
+    <section class="panel">
+      <h2>Sculpt</h2>
+      <div id="tools" class="grid">
+        <button data-tool="raise" title="Raise terrain">Raise</button>
+        <button data-tool="lower" title="Lower terrain">Lower</button>
+        <button data-tool="flatten" title="Level a pad (cities)">Flatten</button>
+        <button data-tool="smooth" title="Relax terrain">Smooth</button>
+        <button data-tool="gulf" title="Cut water into land">Gulf</button>
+        <button data-tool="blob" title="Add a landmass">Landmass</button>
+        <button data-tool="city" title="Place a city plot">City plot</button>
+        <button data-tool="none" class="active" title="Orbit only">None</button>
+      </div>
+      <label>Brush radius <span id="brush-val">120 km</span>
+        <input id="brush" type="range" min="2" max="900" step="1" value="120" />
+      </label>
+      <label>Strength <span id="strength-val">0.65</span>
+        <input id="strength" type="range" min="0.05" max="1" step="0.05" value="0.65" />
+      </label>
+      <p class="hint">Click the terrain to apply. Brush edits the SDF field, then only the affected
+        bake cells are re-rasterised — no full rebake per stroke.</p>
+      <div id="outliner" class="outliner"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Ocean</h2>
+      <label>Wind speed <span id="wind-val">11 m/s</span>
+        <input id="wind" type="range" min="1" max="30" step="0.5" value="11" />
+      </label>
+      <label>Wind direction <span id="winddir-val">34°</span>
+        <input id="winddir" type="range" min="0" max="360" step="1" value="34" />
+      </label>
+      <label>Choppiness <span id="chop-val">1.15</span>
+        <input id="chop" type="range" min="0" max="2" step="0.05" value="1.15" />
+      </label>
+      <label>Spectrum resolution
+        <select id="spec-res">
+          <option value="64">64² (cheap)</option>
+          <option value="128" selected>128² (default)</option>
+          <option value="256">256² (sharp, heavy)</option>
+        </select>
+      </label>
+      <label>Near-field sim extent <span id="extent-val">900 m</span>
+        <input id="extent" type="range" min="200" max="2500" step="50" value="900" />
+      </label>
+      <label>Sim resolution
+        <select id="sim-res">
+          <option value="128">128²</option>
+          <option value="256" selected>256²</option>
+          <option value="384">384²</option>
+        </select>
+      </label>
+      <label>LOD pixel budget <span id="pixel-val">4 px</span>
+        <input id="pixel" type="range" min="1" max="12" step="0.5" value="4" />
+      </label>
+      <p class="hint">Cascades fade out when one of their texels projects below the pixel budget.
+        That decision is what makes this adaptive instead of a fixed distance chain.</p>
+    </section>
+
+    <section class="panel">
+      <h2>View</h2>
+      <label class="check"><input id="show-cities" type="checkbox" checked /> City plots</label>
+      <label class="check"><input id="show-slice" type="checkbox" /> Water column slice</label>
+      <label class="check"><input id="show-rings" type="checkbox" checked /> LOD ring overlay (map)</label>
+      <label>Exposure <input id="exposure" type="range" min="0.2" max="3" step="0.05" value="1.15" /></label>
+      <label>Sun elevation <span id="sun-val">18°</span>
+        <input id="sun" type="range" min="2" max="85" step="1" value="18" />
+      </label>
+      <label>Sun azimuth <span id="sunaz-val">118°</span>
+        <input id="sunaz" type="range" min="0" max="360" step="1" value="118" />
+      </label>
+      <div class="row">
+        <button id="btn-pause">Pause time</button>
+        <button id="btn-reset">Reset view</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Export</h2>
+      <div class="row">
+        <button id="btn-png">World map PNG</button>
+        <button id="btn-height">Heightmap PNG</button>
+      </div>
+      <div class="row">
+        <button id="btn-obj">Terrain OBJ</button>
+        <button id="btn-json">World JSON</button>
+      </div>
+      <div class="row">
+        <button id="btn-coast">Coastline SVG</button>
+        <button id="btn-spectrum">Spectrum CSV</button>
+      </div>
+      <p class="hint">Exports are generated from the same field the editor renders, so the GLB/OBJ,
+        heightmap and city table agree with the view.</p>
+    </section>
+  </aside>
+
+  <aside id="right">
+    <section class="panel">
+      <h2>Adaptive water</h2>
+      <div id="lod-plan" class="readout">waiting for GPU…</div>
+      <div id="cascade-list" class="readout"></div>
+      <div id="sim-readout" class="readout"></div>
+    </section>
+    <section class="panel">
+      <h2>Legend</h2>
+      <ul class="legend">
+        <li><i class="sw sim"></i> simulated height field (SWE)</li>
+        <li><i class="sw disp"></i> displaced mesh (spectrum)</li>
+        <li><i class="sw flat"></i> flat geometry, spectrum normals</li>
+        <li><i class="sw horizon"></i> horizon skirt</li>
+      </ul>
+    </section>
+    <section class="panel" id="error-panel" hidden>
+      <h2>Renderer</h2>
+      <pre id="error-text"></pre>
+    </section>
+  </aside>
+
+  <div id="loading">
+    <div class="spinner"></div>
+    <div id="loading-text">Starting…</div>
+  </div>
+</div>
+<script type="module" src="./src/app/main.ts"></script>
+</body>
+</html>

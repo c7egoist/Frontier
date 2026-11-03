@@ -100,12 +100,14 @@ export function writeRing(out: Float32Array, r: RingUniformInput) {
   return out;
 }
 
-export const SIM_PARAMS_FLOATS = 8;
+export const SIM_PARAMS_FLOATS = 12;
 export function writeSimParams(out: Float32Array, p: {
-  n: number; dt: number; cell: number; gravity: number; drag: number; damping: number; waterLevel: number;
+  n: number; dt: number; cell: number; gravity: number; drag: number; damping: number;
+  waterLevel: number; tau: number; originX: number; originZ: number; tile: number;
 }) {
   out[0] = p.n; out[1] = p.dt; out[2] = p.cell; out[3] = p.gravity;
-  out[4] = p.drag; out[5] = p.damping; out[6] = p.waterLevel; out[7] = 0;
+  out[4] = p.drag; out[5] = p.damping; out[6] = p.waterLevel; out[7] = p.tau;
+  out[8] = p.originX; out[9] = p.originZ; out[10] = p.tile; out[11] = 0;
   return out;
 }
 
@@ -178,5 +180,5 @@ export const UNIFORM_SPECS = {
   OceanSim: { floats: 8, fields: [['time', 0, 1], ['spectrumN', 1, 1], ['choppiness', 2, 1], ['amplitude', 3, 1], ['tile', 4, 1]] },
   FFTParams: { floats: 4, fields: [['n', 0, 1], ['axis', 1, 1], ['step', 2, 1], ['inv', 3, 1]] },
   ResolveParams: { floats: 4, fields: [['n', 0, 1], ['tile', 1, 1], ['invScale', 2, 1], ['choppy', 3, 1]] },
-  SimParams: { floats: 8, fields: [['n', 0, 1], ['dt', 1, 1], ['cell', 2, 1], ['gravity', 3, 1], ['drag', 4, 1], ['damping', 5, 1], ['waterLevel', 6, 1]] },
+  SimParams: { floats: 12, fields: [['n', 0, 1], ['dt', 1, 1], ['cell', 2, 1], ['gravity', 3, 1], ['drag', 4, 1], ['damping', 5, 1], ['waterLevel', 6, 1], ['tau', 7, 1], ['originX', 8, 1], ['originZ', 9, 1], ['tile', 10, 1]] },
 } as const;

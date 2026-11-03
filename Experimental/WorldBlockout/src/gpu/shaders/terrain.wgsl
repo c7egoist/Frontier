@@ -20,6 +20,7 @@ struct TerrainParams {
 @group(1) @binding(0) var<uniform> tp : TerrainParams;
 @group(1) @binding(1) var heightTex : texture_2d<f32>;
 @group(1) @binding(2) var linearClampTex : sampler;
+@group(1) @binding(3) var<storage, read> indices : array<u32>;
 
 struct TOut {
   @builtin(position) pos : vec4f,
@@ -42,8 +43,9 @@ fn sampleHeight(uv : vec2f) -> vec4f {
   return textureSampleLevel(heightTex, linearClampTex, uv, 0.0);
 }
 
-@vertex fn vs(@builtin(vertex_index) idx : u32, @builtin(instance_index) inst : u32) -> TOut {
+@vertex fn vs(@builtin(vertex_index) vi : u32) -> TOut {
   let n = i32(tp.gridN);
+  let idx = indices[vi];
   let x = i32(idx % u32(n + 1));
   let z = i32(idx / u32(n + 1));
   let t = vec2f(f32(x) / f32(n), f32(z) / f32(n));

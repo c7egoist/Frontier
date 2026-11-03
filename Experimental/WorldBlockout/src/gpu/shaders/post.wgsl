@@ -1,7 +1,6 @@
 // Composite: scene colour + subtle vignette, nothing hidden.
-@group(0) @binding(0) var<uniform> frame : Frame;
-@group(0) @binding(1) var sceneTex : texture_2d<f32>;
-@group(0) @binding(2) var postSampler : sampler;
+@group(1) @binding(0) var sceneTex : texture_2d<f32>;
+@group(1) @binding(1) var postSampler : sampler;
 
 struct POut {
   @builtin(position) pos : vec4f,

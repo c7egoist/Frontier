@@ -26,11 +26,15 @@ struct RingData {
   pad2        : f32,
 };
 @group(1) @binding(0) var<uniform> ring : RingData;
-@group(1) @binding(1) var fieldTex : texture_2d_array<f32>;   // cascade fields (h, sx, sz, jac)
+// One texture per cascade keeps sampling explicit (no texture-array layer arithmetic in the
+// hot loop) and lets each cascade keep its own resolution.
+@group(1) @binding(1) var fieldTex0 : texture_2d<f32>;        // cascade 0: h, sx, sz, jacobian
 @group(1) @binding(2) var fieldSampler : sampler;
 @group(1) @binding(3) var simTex : texture_2d<f32>;           // near-field SWE sim
-@group(1) @binding(4) var bathyTex : texture_2d<f32>;         // r = terrain height, g = coast d
+@group(1) @binding(4) var bathyTex : texture_2d<f32>;         // r = terrain height, g = coast distance
 @group(1) @binding(5) var bathySampler : sampler;
+@group(1) @binding(6) var fieldTex1 : texture_2d<f32>;        // cascade 1 (64 m)
+@group(1) @binding(7) var fieldTex2 : texture_2d<f32>;        // cascade 2 (8 m)
 
 const CASCADE_TILES = vec3f(512.0, 64.0, 8.0);
 
@@ -65,13 +69,16 @@ fn tpWorldHalf() -> f32 { return frame.world.y; }
 // Cascade sampling
 // ---------------------------------------------------------------------------
 fn cascadeUv(worldXZ : vec2f, tile : f32, layer : i32) -> vec2f {
-  // Camera-anchored jitter hides the tile repetition without making the surface swim.
-  let jitter = floor(frame.eye.xz / tile) * tile * 0.0;
-  return (worldXZ - jitter) / tile;
+  // World-locked: the wave field is periodic with the tile, so sampling must not move with the
+  // camera or the surface would swim under the viewer.
+  return worldXZ / tile;
 }
 
 fn cascadeField(worldXZ : vec2f, tile : f32, layer : i32) -> vec4f {
-  return textureSampleLevel(fieldTex, fieldSampler, cascadeUv(worldXZ, tile, layer), layer, 0.0);
+  let uv = cascadeUv(worldXZ, tile, layer);
+  if (layer == 0) { return textureSampleLevel(fieldTex0, fieldSampler, uv, 0.0); }
+  if (layer == 1) { return textureSampleLevel(fieldTex1, fieldSampler, uv, 0.0); }
+  return textureSampleLevel(fieldTex2, fieldSampler, uv, 0.0);
 }
 
 /**
@@ -121,11 +128,19 @@ fn spectrumFoam(worldXZ : vec2f, fade : vec3f) -> f32 {
 // ---------------------------------------------------------------------------
 // Vertex
 // ---------------------------------------------------------------------------
+// Per-triangle corner table: xy = (grid offset x, grid offset z).
+const QUAD_CORNERS = array<vec2f, 6>(
+  vec2f(0.0, 0.0), vec2f(0.0, 1.0), vec2f(1.0, 1.0),
+  vec2f(0.0, 0.0), vec2f(1.0, 1.0), vec2f(1.0, 0.0)
+);
+
 @vertex fn vs(@builtin(vertex_index) idx : u32) -> OVOut {
   let q = u32(ring.quads);
-  let x = f32(idx % (q + 1u));
-  let z = f32(idx / (q + 1u));
-  let t = vec2f(x, z) / f32(q);
+  let quad = idx / 6u;
+  let corner = QUAD_CORNERS[idx % 6u];
+  let qx = f32(quad % q);
+  let qz = f32(quad / q);
+  let t = (vec2f(qx, qz) + corner) / f32(q);
 
   // Full-square LOD: the outer radius bounds this ring; finer rings are drawn over it and the
   // fragment stage discards anything inside a finer ring.
@@ -219,9 +234,11 @@ fn ggxSpecular(N : vec3f, V : vec3f, L : vec3f, roughness : f32, f0 : f32) -> f3
 @fragment fn fs(in : OVOut) -> @location(0) vec4f {
   // Discard fragments covered by a finer ring: keeps LODs from stitching over each other.
   let d = length(in.world.xz - frame.eye.xz);
-  // Rings are nested and each covers a full square; anything inside the previous ring's outer
-  // extent belongs to that finer ring, so this one drops it. (Discard, not depth-fight.)
-  if (ring.index > 0.5 && d < ring.inner) { discard; }
+  // Rings are nested squares. The finer ring covers a square of half-extent `ring.inner`, so
+  // the discard must use the square (Chebyshev) distance — using radial distance would leave the
+  // corners of the finer square drawn twice and double-darken them through alpha blending.
+  let cheb = max(abs(in.world.x - ring.origin.x), abs(in.world.z - ring.origin.y));
+  if (ring.index > 0.5 && cheb < ring.inner) { discard; }
 
   let V = normalize(frame.eye.xyz - in.world);
   let sunDir = normalize(frame.sunDir.xyz);

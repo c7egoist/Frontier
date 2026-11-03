@@ -15,7 +15,7 @@ struct MapParams {
 @group(1) @binding(0) var<uniform> mp : MapParams;
 @group(1) @binding(1) var heightTex : texture_2d<f32>;
 @group(1) @binding(2) var mapSampler : sampler;
-@group(1) @binding(3) var cityBuffer : array<vec4f, 32>;  // xy = x,z ; z = radius ; w = kind
+@group(1) @binding(3) var<uniform> cityBuffer : array<vec4f, 32>;  // xy = x,z ; z = radius ; w = kind
 
 struct MOut {
   @builtin(position) pos : vec4f,
