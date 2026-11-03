@@ -26,7 +26,10 @@ struct MetricTile
 class MetricTiles
 {
   public:
-    static void Construct(ControlColumn& Column, const MetricTile* Metrics, int Count);
+    static constexpr int LastLead = -1;        // [-] the last tile lit (.co-kpis)
+    static constexpr int NoLead   = 1 << 30;   // [-] no tile lit
+    // 📝 Lead: the lit tile's index, LastLead (the default) or NoLead.
+    static void Construct(ControlColumn& Column, const MetricTile* Metrics, int Count, int Lead = LastLead);
 };
 
 } // namespace Frontier

@@ -1205,3 +1205,32 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
   `58f2eed74ccd9429d81eecced6cd0d9601d022551a897804f293a43e92fb9d53`. Against the `c384f66` package only `Frontier.exe`,
   the twinkle shader `RasterizePlanetaryProjection.spv`, its compilation manifest and `Package.json` differ.
 - **Commits:** `419441d f780988 2b0cf13 ab96e56 9955237 0c59f28 4573642 1c6eda4 48a8380` and this binary commit.
+
+## Render settings inspector in C++; analytic illumination as a debug view; reflections with GI off (2026-11-03)
+
+- **Requested:** add the approved Render settings inspector to the C++ editor; add the fast analytic renderer as a debug
+  view; fix the RTX reflections that vanish with indirect GI off. Whether the four measured RTX options should be on by
+  default is still open: they stay off (the demo), and the page applies them with one action.
+- **One component, one page:** the `RenderPipeline` record "Render settings" heads the Outliner under Rendering and
+  cannot be removed. Its page (`Interface/Inspectors/RenderSettingsInspector`, nine sections under
+  `RenderSettings/`, one file each) has the renderer tabs, a measured timing card with its chart, the readouts, and the
+  sections Sampling, Lighting, Reflections, Shadows, Denoise, Exposure, Geometry, Views and Timing. Two reusable
+  controls were added, `ChoiceRow` and `ChoiceList`, and `MetricTiles` can light no tile.
+- **Every setting reaches the renderer:** `RenderPipelineConfiguration` carries the demo's toggles, host settings and
+  both variance filters (levelspace keys as the prototype proposed). `ViewportRendering` forwards them. Trace
+  resolution and viewport scale rebuild the screen targets. Defaults equal the demo, so the capture tools render as
+  before.
+- **Absorbed:** the Diagnostics, DistanceField, SurfaceCards and PolygonClusters records, their pages and the mock
+  `PolygonClusterEditor` are gone; none of their values reached the renderer. Older levels load without them. Bloom,
+  filmic-tonemap, screen-space-reflection and probe-range keys had no reader and are ignored.
+- **Analytic illumination as a debug view:** view 15 in Render settings › Debug views and in the new debug-view select
+  on the viewport bar. The status line and readout name it.
+- **Reflections with indirect GI off:** the glossy filter's guide came only from the ReSTIR temporal step. The new
+  guide-only entry `ReservoirTemporal` `ProjectResamplingGuide` runs when the resampling does not (the resampling's
+  SPIR-V is byte-identical). Before and after: `Exhibits/SceneViewport/Images/ReflectionsIndirectOff.jpg`.
+- **View 6 ported:** the demo's `InspectionMarch` (`InspectionMarch.slang`, `DisplayProjection::RecordInspection`).
+  It reads the BVH on RTX and the distance-field cascades on GTX (`Images/Inspection/Inspection-06*.jpg`).
+- **Timing is measured:** each refresh's wall time from first submission to fence. The page shows the latest,
+  smoothed, median and slowest of the last 96; there is no per-stage breakdown without staged submissions.
+- **Not ported (no renderer switch):** GPU cluster culling on/off, triangles per leaf, the cluster bounds overlay,
+  freezing the field and the slice inset.

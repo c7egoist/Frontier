@@ -42,8 +42,8 @@ bool TimingSection::Construct(ControlColumn& Page, RenderPipelineConfiguration& 
     const MetricTile Upper[2] = {{"Latest", M.Presenting ? Latest : "\xE2\x80\x94", "ms"}, {"Smoothed", M.Presenting ? Smoothed : "\xE2\x80\x94", "ms"}};
     const MetricTile Lower[2] = {{"Median of recent", M.Presenting ? Median : "\xE2\x80\x94", "ms"},
                                  {"Slowest of recent", M.Presenting ? Slowest : "\xE2\x80\x94", "ms"}};
-    MetricTiles::Construct(Page, Upper, 2);
-    MetricTiles::Construct(Page, Lower, 2);
+    MetricTiles::Construct(Page, Upper, 2, MetricTiles::NoLead);
+    MetricTiles::Construct(Page, Lower, 2, MetricTiles::NoLead);
 
     static const char* const Budgets[3] = {"30 fps", "60 fps", "120 fps"};
     int Budget = P.TargetRate <= 30 ? 0 : (P.TargetRate >= 120 ? 2 : 1);

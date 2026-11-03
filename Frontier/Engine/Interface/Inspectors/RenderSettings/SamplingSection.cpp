@@ -90,8 +90,8 @@ bool SamplingSection::Construct(ControlColumn& Page, RenderPipelineConfiguration
     std::snprintf(Ceiling, sizeof(Ceiling), "%.1f", Grade.PixelLimit / 1.0e6);
     const MetricTile Upper[3] = {{"Cascades", Cascades, ""}, {"Finest voxel", Voxel, "m"}, {"March steps", Steps, ""}};
     const MetricTile Lower[3] = {{"Shadow map", Shadow, "px"}, {"Card atlas", Atlas, "px"}, {"Pixel ceiling", Ceiling, "Mpx"}};
-    MetricTiles::Construct(Page, Upper, 3);
-    MetricTiles::Construct(Page, Lower, 3);
+    MetricTiles::Construct(Page, Upper, 3, MetricTiles::NoLead);
+    MetricTiles::Construct(Page, Lower, 3, MetricTiles::NoLead);
     EndSection(Page);
     return Changed;
 }

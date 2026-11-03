@@ -43,13 +43,13 @@ bool GeometrySection::Construct(ControlColumn& Page, RenderPipelineConfiguration
     const MetricTile Counts[3] = {{"Scene triangles", M.Presenting ? Thousands(M.SceneTriangles) : std::string("\xE2\x80\x94"), ""},
                                   {"Surface clusters", M.Presenting ? Thousands(M.GeometryClusters) : std::string("\xE2\x80\x94"), ""},
                                   {"Surface cards", M.Presenting ? Thousands(M.SurfaceCards) : std::string("\xE2\x80\x94"), ""}};
-    MetricTiles::Construct(Page, Counts, 3);
+    MetricTiles::Construct(Page, Counts, 3, MetricTiles::NoLead);
 
     SubHeading(Page, "Distance field & BVH");
     char Spans[4][24];
     for (size_t Cascade = 0; Cascade < 4; ++Cascade) std::snprintf(Spans[Cascade], sizeof(Spans[Cascade]), "%.0f", Reading.CascadeSpans[Cascade]);
     const MetricTile Cascades[4] = {{"Cascade 0", Spans[0], "m"}, {"Cascade 1", Spans[1], "m"}, {"Cascade 2", Spans[2], "m"}, {"Cascade 3", Spans[3], "m"}};
-    MetricTiles::Construct(Page, Cascades, 4);
+    MetricTiles::Construct(Page, Cascades, 4, MetricTiles::NoLead);
     char Line[160];
     if (M.Presenting && M.RayTracing)
         std::snprintf(Line, sizeof(Line), "BVH: %u TLAS instances over the static BLAS. Cascades of %u\xC2\xB3 voxels, finest %.3g m (%s grade).", M.TlasInstances,

@@ -24,7 +24,7 @@ namespace Frontier
 //                                                    METRIC TILES
 //------------------------------------------------------------------------------------------------------------------------
 
-void MetricTiles::Construct(ControlColumn& Column, const MetricTile* Metrics, int Count)
+void MetricTiles::Construct(ControlColumn& Column, const MetricTile* Metrics, int Count, int LeadIndex)
 {
     const ControlTheme&    Theme    = Column.QueryTheme();
     ImDrawList* const      DrawList = Column.QueryDrawList();
@@ -44,7 +44,7 @@ void MetricTiles::Construct(ControlColumn& Column, const MetricTile* Metrics, in
     const float  TileWide = (Width - Gap * static_cast<float>(Count - 1)) / static_cast<float>(Count);
     for (int Index = 0; Index < Count; ++Index)
     {
-        const bool   Lead = Index == Count - 1;
+        const bool   Lead = Index == (LeadIndex == LastLead ? Count - 1 : LeadIndex);
         const ImVec2 Min(Top.x + static_cast<float>(Index) * (TileWide + Gap), Top.y);
         const ImVec2 Max(Min.x + TileWide, Min.y + TileTall * S);
         DrawList->AddRectFilled(Min, Max, Lead ? Theme.MetricLeadFill : Theme.MetricFill, Radius * S);

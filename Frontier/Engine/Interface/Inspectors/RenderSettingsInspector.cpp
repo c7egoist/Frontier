@@ -76,7 +76,8 @@ void RenderSettingsInspector::ConstructTimingCard(ControlColumn& Page)
     Page.BeginCard(Look, !M.Presenting ? "Waiting for the viewport" : (Within ? "Within budget" : "Over budget"), "MEASURED");
     char Figure[32], Unit[48];
     std::snprintf(Figure, sizeof(Figure), "%.1f", M.Presenting ? M.RefreshMs : 0.0);
-    std::snprintf(Unit, sizeof(Unit), "ms \xC2\xB7 %.0f per second", M.Presenting && M.RefreshMs > 0.0 ? 1000.0 / M.RefreshMs : 0.0);
+    const double PerSecond = M.Presenting && M.RefreshMs > 0.0 ? 1000.0 / M.RefreshMs : 0.0;
+    std::snprintf(Unit, sizeof(Unit), PerSecond < 10.0 ? "ms \xC2\xB7 %.2f per second" : "ms \xC2\xB7 %.0f per second", PerSecond);
     ReadoutBlock::Construct(Page, "Refresh time", M.Presenting ? Figure : "\xE2\x80\x94", Unit, 34.0f);
 
     DiagramPen Pen = DiagramCanvas::Begin(Page, "RefreshChart", 640, 190, 4, 6);
@@ -132,9 +133,9 @@ void RenderSettingsInspector::ConstructReadouts(ControlColumn& Page, const Rende
     const MetricTile Work[3]    = {{"Rays per refresh, at most", Reading.RayTraced ? Rays : "0", ""}, {"Render pixels", Pixels, "M"},
                                    {"Viewport scale", Scale, "\xC3\x97"}};
     const MetricTile Depth[3]    = {{"Paths per pixel", Paths, "M"}, {"Bounces GI \xC2\xB7 reflections", Bounces, ""}, {"Quality", Reading.Grade->Name, ""}};
-    MetricTiles::Construct(Page, Extents, 2);
-    MetricTiles::Construct(Page, Work, 3);
-    MetricTiles::Construct(Page, Depth, 3);
+    MetricTiles::Construct(Page, Extents, 2, MetricTiles::NoLead);
+    MetricTiles::Construct(Page, Work, 3, MetricTiles::NoLead);
+    MetricTiles::Construct(Page, Depth, 3, MetricTiles::NoLead);
 }
 
 // 📝 Nine sections on two rows of pills sharing one selection (the column is too narrow for nine equal pills on one row).

@@ -185,15 +185,17 @@ int main(int ArgumentCount, char** Arguments)
                 for (const ImDrawList* List : DrawData->CmdLists)
                     FrontierExhibit::RasterizeCommands(List, Pixels.data(), ColumnWidth, ColumnHeight, DrawData->DisplayPos, DrawData->FramebufferScale, nullptr,
                                                        nullptr);
-                // 📝 Cropped below the last row that differs from the column's empty bottom row.
+                // 📝 Cropped below the last row whose inner columns differ from the page fill: the page fills the whole column, so
+                //    the reference is a row just above the column's bottom edge, where no section reaches.
+                const int  Reference  = ColumnHeight - 12;
                 const auto RowDiffers = [&](int Row) {
-                    for (int Column = 0; Column < ColumnWidth * 3; ++Column)
+                    for (int Column = 24 * 3; Column < (ColumnWidth - 24) * 3; ++Column)
                         if (std::abs(int(Pixels[static_cast<size_t>(Row) * ColumnWidth * 3 + Column]) -
-                                     int(Pixels[static_cast<size_t>(ColumnHeight - 1) * ColumnWidth * 3 + Column])) > 6)
+                                     int(Pixels[static_cast<size_t>(Reference) * ColumnWidth * 3 + Column])) > 6)
                             return true;
                     return false;
                 };
-                int Used = ColumnHeight - 1;
+                int Used = Reference;
                 while (Used > 0 && !RowDiffers(Used)) --Used;
                 Used = std::min(ColumnHeight, Used + 24);
                 std::filesystem::path Target = OutputPath;
