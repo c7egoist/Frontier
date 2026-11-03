@@ -1246,3 +1246,32 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
   `d6858397990f8a0dee980a6032a57823bcb2d9ef0d314e8e4143d55ff82cda19`. Against the `df045f1` package: the two new
   SPIR-V entries, the shader manifest, `Frontier.exe`, `Package.json` and `Default.levelspace`.
 - **Commits:** `a051e6a 5c7c625 19bb3be 21f1b5a b5d2f3a 3143712 6640104 c6210cb` and this binary commit.
+
+## Scene objects with the Project Zero object inspector and a Blender-style modifier stack (2026-11-03)
+
+- **Requested:** the four measured RTX options stay off ("leave it"). Add the scene's other objects, give them the
+  Project Zero editor's object inspector, and make each repeated set one array with a modifier stack like Blender's.
+- **Source of the inspector:** SultanAladin/Frontier- `Experimental/ProjectZeroEditor` (branch
+  `arena/10e50e56-frontier`, `0c2214c9`), the geometry page of `Inspectors.jsx` with `TransformPanel`, the quick
+  controls, the compact `MaterialPanel` and `FracturePanel`; it was captured in headless Chromium for reference.
+- **Scene objects:** 37 `Geometry` records in `Projects/Everest/Content/Levels/Default.levelspace`, in eight Outliner
+  groups, cover all 504 static occupants of the scene archive once (the vehicle, the fragment and stress pools and the
+  ground tiles stay out). Repeated sets are one object each: 15 objects carry Array modifiers whose stacks reproduce the
+  demo's placements (radial rings, stacked arrays for the moose and parking cones, turned crates); multi-shape fixtures
+  (street lamps, tunnel, control tower) are one object with parts.
+- **Inspector:** `Interface/Inspectors/GeometryInspector` with one class per card in `Inspectors/Geometry/` (transform,
+  quick controls, modifier stack, material, fracture). New reusable controls: `RecordHeading`, `TransformTable`,
+  `QuickTiles`, `ModifierPanel`, `ChannelRows`, `CardTitleRow`, `NotesField`; a Project Zero theme
+  (`ControlTheme::ResolveGeometry`) and 13 glyphs. Selecting an object makes it the camera's subject.
+- **Renderer:** `Scene/GeometryLayout` evaluates the transform and the modifier stack; `EverestSceneGeometry` binds the
+  records by occupant name and resolves placements; `GlobalIllumination/OccupantRelocation` (beyond the demo) applies
+  them: profiles with one refresh of motion, draw runs and card tiles on visibility changes, distance-field
+  invalidation over old and new bounds, priority card relighting, lamps that follow (and switch off with) their heads.
+  The default level keeps the archive's transforms bit for bit.
+- **Validated:** `SceneGeometryValidation` (new ctest, 13 checks, no device): binding and coverage, exact default
+  placements, count, step, move, radial turn, hide, an Array beyond the archive, the level file round trip, the
+  placement algebra. `SceneGeometryCapture` renders the workspace, six inspector pages and the viewport before and
+  after four edits through the records (`Exhibits/SceneViewport/Images/Geometry/`).
+- **Limits:** copies are limited to the archive's occupants per object; Dynamic, Cast shadows, GI and Physics are
+  authored flags (no per-object renderer switch yet, physics later); materials are read-only (shared families);
+  geometry objects are not added or removed in the editor.

@@ -213,6 +213,7 @@ void SceneGeometryOccupancy::Resolve(Occupancy& Entry, const Frontier::GeometryC
     Resolution.Shown  = Configuration.Visible ? static_cast<uint32_t>(std::min(Copies.size(), Authored)) : 0u;
     // ③ copy n takes the archive's placement n: its parts move rigidly with it, and a copy at the archive's own placement keeps
     //    the archive's transforms exactly
+    GlobalIllumination::WorldBounds Shown{{1.0e30, 1.0e30, 1.0e30}, {-1.0e30, -1.0e30, -1.0e30}};
     for (size_t Copy = 0; Copy < Authored; ++Copy)
     {
         const bool      Active = Copy < Resolution.Shown;
@@ -228,7 +229,20 @@ void SceneGeometryOccupancy::Resolve(Occupancy& Entry, const Frontier::GeometryC
         {
             const uint32_t Occupant = Part[Copy];
             Placements.push_back({Occupant, Exact ? Archive_[Occupant] : MultiplyPlacement(Delta, Archive_[Occupant]), Active});
+            if (!Active) continue;
+            const auto& Set    = Scene_->FacetSets[Scene_->Occupants[Occupant].FacetSet];
+            const auto  Bounds = GlobalIllumination::TransformBounds(Placements.back().Current, Set.LocalMinimum, Set.LocalMaximum);
+            for (size_t Axis = 0; Axis < 3; ++Axis)
+            {
+                Shown.Minimum[Axis] = std::min(Shown.Minimum[Axis], Bounds.Minimum[Axis]);
+                Shown.Maximum[Axis] = std::max(Shown.Maximum[Axis], Bounds.Maximum[Axis]);
+            }
         }
+    }
+    for (size_t Axis = 0; Axis < 3; ++Axis)
+    {
+        Resolution.BoundsMinimum[Axis] = Resolution.Shown > 0 ? static_cast<float>(Shown.Minimum[Axis]) : 0.0f;
+        Resolution.BoundsMaximum[Axis] = Resolution.Shown > 0 ? static_cast<float>(Shown.Maximum[Axis]) : 0.0f;
     }
 }
 

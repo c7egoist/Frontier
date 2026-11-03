@@ -301,7 +301,14 @@ ControlTheme ControlTheme::ResolveGeometry() noexcept
     Theme.SelectFill      = ResolveCssColour(0x111111FF);
     Theme.SelectBorder    = ResolveCssColour(0xFFFFFF12);
     Theme.SliderCapsule   = ResolveCssColour(0x0E0E0EFF);
-    Theme.SliderEmpty     = ResolveCssColour(0x161616FF);
+    Theme.SliderEmpty     = ResolveCssColour(0x262626FF);   // [-] the kslider track (raised #222) on the #1a1a1a cards
+    // 📝 .fracture-mode: the segmented track #0e0e0e over #ffffff0b, the pressed segment #343434 with #eee.
+    Theme.PresetFill          = ResolveCssColour(0x0E0E0EFF);
+    Theme.PresetBorder        = ResolveCssColour(0xFFFFFF0B);
+    Theme.PresetText          = ResolveCssColour(0x9A9A9AFF);
+    Theme.PresetPressedFill   = ResolveCssColour(0x343434FF);
+    Theme.PresetPressedBorder = ResolveCssColour(0xFFFFFF14);
+    Theme.PresetPressedText   = ResolveCssColour(0xEEEEEEFF);
     Theme.CaptionSize       = 10.0f;
     Theme.CaptionLineHeight = 1.7f;
     return Theme;

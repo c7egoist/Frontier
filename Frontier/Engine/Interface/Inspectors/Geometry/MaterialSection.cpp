@@ -92,7 +92,7 @@ void GeometryMaterialSection::Construct(ControlColumn& Page, const GeometryConfi
     {
         std::vector<std::string> Labels;
         std::vector<const char*> Pointers;
-        for (size_t Index = 0; Index < std::min<size_t>(Resolved.Families.size(), 4); ++Index) Labels.push_back("Slot " + std::to_string(Index));
+        for (size_t Index = 0; Index < std::min<size_t>(Resolved.Families.size(), 4); ++Index) Labels.push_back(Resolved.FamilyNames[Index]);
         for (const std::string& Label : Labels) Pointers.push_back(Label.c_str());
         int Selected = Slot < static_cast<int>(Pointers.size()) ? Slot : -1;
         if (TabStrip::Construct(Page, "MaterialSlots", Pointers.data(), static_cast<int>(Pointers.size()), Selected) && Selected >= 0) Slot = Selected;

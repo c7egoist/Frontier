@@ -368,6 +368,108 @@ global-illumination refresh there, 0.2 s per analytic one.
 
 ![The nine sections of the Render settings page](Images/RenderSettings/Sections.jpg)
 
+## Scene objects: the geometry inspector and the modifier stack
+
+The proving ground's objects are level records: 37 `Geometry` records in
+`Projects/Everest/Content/Levels/Default.levelspace`, in eight Outliner groups (Course, Boundary, Cones, Hangar, Tunnel,
+Control tower, Smash alley, Lighting). Each names the scene archive's occupants it stands for by stem
+(`occupants = ["Boundary West"]` matches *Boundary West -54* … *54*). Together they cover all 504 static occupants, each
+once. The other 1,590 are the vehicle (omitted), the breakable props' fragment pools, the stress-test pool and the
+ground's card tiles.
+
+A repeated set is **one object with Array modifiers** (the owner's request, after Blender's modifier stack). The stacks
+lay the copies out exactly where the demo's `LevelStructure.js` placed them:
+
+| Object                                   | Copies    | Modifier stack                                                |
+|------------------------------------------|----------:|---------------------------------------------------------------|
+| Boundary north, south                    | 54 each   | Array 54, 4 m along X                                         |
+| Boundary west, east                      | 28 each   | Array 28, 4 m along the object's X (it is turned 90°)         |
+| Kerbs (both strips), alley barriers      | 18, 19    | Array, 4 m and 3 m; the two rows are two parts of one copy    |
+| Skidpad ring, inner ring                 | 24, 8     | Array, 15° and 45° about the ring's centre (radial)           |
+| Moose test cones                         | 20        | Array 2 (4 m X), Array 5 (6 m Y), Array 2 (3 m X, 35 m Y)     |
+| Parking bay cones                        | 8         | Array 2 (10 m Y), Array 4 (7 m X)                             |
+| Wooden crates west                       | 3         | Array 3, 1.1 m along Y, each turned 7.56° in place            |
+| Tunnel, hangar roof                      | 8, 6      | Array, 4 m and 3 m; walls, roof slats and lamps are parts     |
+| Street lamps, lamp posts, traffic lights | 20, 10, 6 | none: the demo's irregular placements; pole and head as parts |
+| Control tower                            | 1         | none: tower, cabin and roof as three parts                    |
+
+The **geometry inspector** is the Project Zero editor's object inspector (SultanAladin/Frontier-
+`Experimental/ProjectZeroEditor`, the geometry page of `Inspectors.jsx`) in C++, one class per card
+(`Interface/Inspectors/GeometryInspector`, `Inspectors/Geometry/`). New reusable controls: `RecordHeading`,
+`TransformTable`, `QuickTiles`, `ModifierPanel`, `ChannelRows`, `CardTitleRow` and `NotesField`.
+
+| Card           | Project Zero editor          | Here                                          | Renderer           |
+|----------------|------------------------------|-----------------------------------------------|--------------------|
+| Heading        | breadcrumb, title, notes     | the same; the notes are saved with the level  | —                  |
+| Transform      | position, rotation, scale    | the same: drag to scrub, double-click to type | ✔️ all copies move  |
+| Quick controls | six tiles                    | the same tiles; Physics needs Dynamic         | Visible, Locked ✔️  |
+| Modifiers      | —                            | Blender's stack (below)                       | ✔️                  |
+| Material       | compact MaterialPanel        | the copies' families from `Materials.bin`     | read-only          |
+| Fracture       | switch, Fracture editor      | the switch, cells, impulse, the editor        | authored           |
+
+The modifier stack follows Blender's: *Add modifier* opens the menu (Generate › Array), and each modifier is a card with
+its fold chevron, viewport switch, move up, move down and remove. An Array card has the fit type (fixed count), the
+count, the relative offset (factors of one copy's extent), the constant offset (metres), the rotation step about Z and
+its pivot (each copy, or the object's origin for a radial array). Under the stack the inspector says how many copies
+the stack makes and how many the viewport shows.
+
+**How edits reach the renderer.** `Projects/Everest/Source/EverestSceneGeometry` binds each record to its occupants and
+evaluates its transform and modifier stack (`Scene/GeometryLayout`) into occupant placements.
+`Rendering/GlobalIllumination/OccupantRelocation` (beyond the demo) applies them between refreshes:
+
+- the occupant profiles are rewritten, and a moved occupant carries its motion for one refresh (motion vectors);
+- a visibility change rebuilds the draw runs and the card tile lists;
+- the distance field is invalidated over the old and the new bounds;
+- the moved occupants' cards relight first;
+- the street lamps and lanterns follow their heads, and a hidden head leaves its light off.
+
+A copy at the archive's own placement keeps the archive's transform bit for bit, so the default level renders as before.
+
+| The workspace with an array selected | The Boundary west page |
+|---|---|
+| ![Workspace](Images/Geometry/Workspace.png) | ![Boundary west](Images/Geometry/Inspector-Boundarywest.png) |
+
+| Skidpad ring (radial) | Street lamps (no modifiers) | Wooden crates west (fracture) | Control tower (three parts) |
+|---|---|---|---|
+| ![Skidpad](Images/Geometry/Inspector-Skidpadring.png) | ![Lamps](Images/Geometry/Inspector-Streetlamps.png) | ![Crates](Images/Geometry/Inspector-Woodencrateswest.png) | ![Tower](Images/Geometry/Inspector-Controltower.png) |
+
+**Edits in the viewport** (`Code/SceneGeometryCapture.cpp`, global illumination on SwiftShader): the control tower is
+moved 9 m and turned 30°, the burnout tyre wall re-laid (8 stacks, 1.6 m apart), the tunnel halved (Array 8 → 4) and
+the street lamps hidden, all through the records. Three global-illumination refreshes later 16.3 % of the
+viewport's pixels have changed (mean |Δ| 9.3 levels): the tower and its shadow, the missing lamps, the spaced tyre
+stacks and the shorter tunnel. The analytic illumination (debug view 15) shows the same edits (15.0 % changed).
+
+| Before | After |
+|---|---|
+| ![Before](Images/Geometry/Viewport-Before.png) | ![After](Images/Geometry/Viewport-After.png) |
+
+`Code/SceneGeometryValidation.cpp` (ctest `SceneGeometryValidation`, no device) checks the binding and the layouts:
+
+| Check                                                                                           | Result |
+|-------------------------------------------------------------------------------------------------|--------|
+| 37 records, all bound; 504 occupants bound once each; the rest are vehicle, pools and tiles     | ✔️      |
+| the default level's 504 placements are the archive's transforms bit for bit, all active         | ✔️      |
+| an unchanged level resolves no placements again                                                 | ✔️      |
+| Boundary north at count 20: 20 copies in place, 34 hidden                                       | ✔️      |
+| Boundary north at a 5 m step: copy n at x = −58 + 5n (error 0)                                  | ✔️      |
+| Kerbs moved 2 m: both strips' 36 occupants moved exactly (error 4.8 × 10⁻⁷)                     | ✔️      |
+| Skidpad ring turned 10°: the 24 cones turn about (−30, 30) (error 1.7 × 10⁻⁶ m)                 | ✔️      |
+| Street lamps hidden: all 40 poles and heads inactive                                            | ✔️      |
+| Control tower with an Array of 2: 2 copies made, 1 shown (the archive holds one)               | ✔️      |
+| 37 records read back from a saved level as written; placements decompose and invert exactly    | ✔️      |
+
+**Limits.**
+
+- Copies come from the archive's occupants: an Array shows at most as many copies as the archive holds for the object
+  (60 copies of the 54 north barriers show 54, and the inspector says so). Adding occupants is the next step.
+- Dynamic, Cast shadows, GI and Physics are authored flags, as the Project Zero editor marks them: there is no
+  per-object shadow or GI switch in the renderer yet, and the physics (Jolt) comes next.
+- Materials are shown, not edited: a family is shared (Barrier concrete by six objects), so editing needs per-object
+  material slots.
+- Geometry objects are neither added nor removed in the editor: the scene archive decides what exists.
+- The distance-field (GTX) march reads a scaled copy at its unscaled distances.
+- Not checked with virtualized geometry switched on.
+
 ## Checks
 
 `Code/SceneViewportValidation.cpp` (log: `Results/SceneViewportValidation.txt`, 18 checks, 0 failing) checks the

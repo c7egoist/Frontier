@@ -11,6 +11,7 @@
 #include "Engine/Interface/Inspectors/FractureInspector.h"
 #include "Engine/Scene/EngineConfigurations.h"
 
+#include <algorithm>
 #include <string>
 
 namespace Frontier
@@ -41,6 +42,20 @@ class GeometryInspector final : public RecordInspector
     [[nodiscard]] std::string QueryDirectoryReadout() const override;
     [[nodiscard]] const char* QueryDirectoryGlyph() const noexcept override;
     [[nodiscard]] RecordOperationalCondition QueryDirectoryCondition() const noexcept override;
+    // 📝 The camera's subject (frame and orbit the selection): the world bounds of the shown copies.
+    bool QueryViewTarget(InspectorViewTarget& View) const noexcept override
+    {
+        const auto& Resolved = Parameters.Resolved;
+        if (!Resolved.Bound || Resolved.Shown == 0) return false;
+        double Radius = 0.5;
+        for (int Axis = 0; Axis < 3; ++Axis)
+        {
+            View.Position[static_cast<size_t>(Axis)] = 0.5 * (Resolved.BoundsMinimum[Axis] + Resolved.BoundsMaximum[Axis]);
+            Radius = std::max(Radius, 0.5 * static_cast<double>(Resolved.BoundsMaximum[Axis] - Resolved.BoundsMinimum[Axis]));
+        }
+        View.Radius = Radius;
+        return true;
+    }
     void                      ConstructInspector() override;
 
   private:

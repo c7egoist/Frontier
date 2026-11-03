@@ -712,6 +712,8 @@ struct GeometryConfiguration : RevisionCounter
         uint32_t                           Parts            = 0;       // [-] shapes per copy
         uint32_t                           Facets           = 0;       // [-] triangles per copy
         float                              Extent[3]        = {};      // [m] one copy's local bounds
+        float                              BoundsMinimum[3] = {};      // [m] world bounds of the shown copies
+        float                              BoundsMaximum[3] = {};      // [m]
         std::vector<std::string>           Shapes{};                   // [-] the parts' facet sets
         std::vector<uint32_t>              Families{};                 // [-] material families the copies use, ascending
         std::vector<std::string>           FamilyNames{};

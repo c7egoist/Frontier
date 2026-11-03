@@ -693,12 +693,28 @@ if(BUILD_TESTING)
         "${CMAKE_SOURCE_DIR}/Projects/Everest"
         "${CMAKE_BINARY_DIR}/everest-interface-exhibits")
 
+    # 📝 The level's Geometry records against the scene archive, no device — Exhibits/SceneViewport/README.md.
+    add_executable(SceneGeometryValidation
+        Exhibits/SceneViewport/Code/SceneGeometryValidation.cpp)
+    target_link_libraries(SceneGeometryValidation PRIVATE EverestProjectEditor)
+    add_test(NAME SceneGeometryValidation COMMAND SceneGeometryValidation
+        "${CMAKE_SOURCE_DIR}/Projects/Everest"
+        "${CMAKE_SOURCE_DIR}/EngineContent/EnvironmentArchives/ProvingGround"
+        "${CMAKE_BINARY_DIR}/scene-geometry-exhibits")
+
     # 📝 The Everest workspace with its live Scene Viewport (own device), CPU-rasterized — Exhibits/SceneViewport/README.md.
     add_executable(SceneViewportWorkspaceCapture
         Exhibits/SceneViewport/Code/SceneViewportWorkspaceCapture.cpp
         Engine/Render/StbImageWriteImplementation.cpp)
     target_include_directories(SceneViewportWorkspaceCapture PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
     target_link_libraries(SceneViewportWorkspaceCapture PRIVATE EverestProjectEditor)
+
+    # 📝 The scene objects in the workspace: the geometry groups, five geometry inspector pages, the viewport before and after edits.
+    add_executable(SceneGeometryCapture
+        Exhibits/SceneViewport/Code/SceneGeometryCapture.cpp
+        Engine/Render/StbImageWriteImplementation.cpp)
+    target_include_directories(SceneGeometryCapture PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
+    target_link_libraries(SceneGeometryCapture PRIVATE EverestProjectEditor)
 
     add_executable(EverestShippingValidation
         Exhibits/EverestInterface/Code/EverestShippingValidation.cpp)

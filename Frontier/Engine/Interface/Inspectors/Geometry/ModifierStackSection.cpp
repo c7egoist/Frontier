@@ -52,6 +52,20 @@ std::string ResolveModifierLabel(const std::vector<ArrayModifierConfiguration>& 
     }
 }
 
+// 📝 A read-only setting row: the label at the left, its reading at the right (Blender's Fit Type, fixed here).
+void ConstructReadingRow(ControlColumn& Page, const char* Label, const char* Reading, const char* Tooltip)
+{
+    const EditorTypefaces& Faces = Page.QueryFaces();
+    const float            S     = Page.QueryScale();
+    const ImVec2           Top   = Page.Space(26.0f, 2.0f, 6.0f);
+    ImGui::SetCursorScreenPos(Top);
+    ImGui::Dummy(ImVec2(Page.QueryWidth(), 26.0f * S));
+    ControlColumn::ConstructTooltip(Tooltip);
+    (void)GlyphRun::Construct(Page, Faces.Regular, 11.0f * S, ImVec2(Top.x, Top.y + 17.0f * S), Page.QueryTheme().ControlLabel, Label);
+    const float Advance = GlyphRun::Measure(Page, Faces.Regular, 11.0f * S, Reading);
+    (void)GlyphRun::Construct(Page, Faces.Regular, 11.0f * S, ImVec2(Top.x + Page.QueryWidth() - Advance, Top.y + 17.0f * S), Page.QueryTheme().Ink, Reading);
+}
+
 // 📝 Add modifier: a full-width button opening the menu of modifier kinds (only Generate › Array exists here). True on a pick.
 bool ConstructAddModifier(ControlColumn& Page, bool Enabled)
 {
@@ -170,19 +184,25 @@ bool ModifierStackSection::Construct(ControlColumn& Page, GeometryConfiguration&
         Changed |= Modifier.Expanded != WasExpanded || Modifier.Enabled != WasEnabled;
         if (Modifier.Expanded)
         {
-            static const char* const Fits[1] = {"Fixed count"};
-            int                      Fit     = 0;
-            (void)ChoiceRow::Construct(Page, "Fit", "Fit type", Fits, 1, Fit, !Locked, nullptr, "Blender's Fit Length and Fit Curve are not offered");
+            ConstructReadingRow(Page, "Fit type", "Fixed count", "Blender's Fit Length and Fit Curve are not offered");
             Changed |= SliderRow::ConstructInteger(Page, "Count", "Count", Modifier.Count, 1u, 512u, "copies", !Locked);
-            Changed |= ToggleRow::Construct(Page, "Relative", "Relative offset", Modifier.RelativeOffset, !Locked,
-                                            "Steps in multiples of one copy's extent along the object's axes");
+            bool Relative = Modifier.RelativeOffset;
+            if (SwitchRow::Construct(Page, "Relative", "Relative offset", Relative) && !Locked)
+            {
+                Modifier.RelativeOffset = Relative;
+                Changed                 = true;
+            }
             if (Modifier.RelativeOffset)
             {
                 const TransformTableRow Factor{"Factor", "\xC3\x97 extent", Modifier.RelativeFactor, -1000.0f, 1000.0f, 0.01f, "%.2f", {1.0f, 0.0f, 0.0f}};
                 Changed |= TransformTable::Construct(Page, "RelativeFactor", &Factor, 1, !Locked, true);
             }
-            Changed |= ToggleRow::Construct(Page, "Constant", "Constant offset", Modifier.ConstantOffset, !Locked,
-                                            "Steps a fixed distance along the object's axes");
+            bool Constant = Modifier.ConstantOffset;
+            if (SwitchRow::Construct(Page, "Constant", "Constant offset", Constant) && !Locked)
+            {
+                Modifier.ConstantOffset = Constant;
+                Changed                 = true;
+            }
             if (Modifier.ConstantOffset)
             {
                 const TransformTableRow Distance{"Distance", "m", Modifier.ConstantMetres, -10000.0f, 10000.0f, 0.01f, "%.2f", {1.0f, 0.0f, 0.0f}};
