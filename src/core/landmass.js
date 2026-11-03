@@ -24,7 +24,6 @@ export const DEFAULT_LANDMASS_PARAMS = Object.freeze({
   seed: 4029,
   gridSize: 256,
   worldSpan: 2400,
-  worldSizeKm: 40075,
   landCoverage: 0.54,
   coastRoughness: 0.62,
   relief: 230,
@@ -121,12 +120,17 @@ function smoothMax(a, b, softness = 9) {
 export function normalizeLandmassParams(input = {}) {
   const src = input && typeof input === 'object' ? input : {};
   const shape = SHAPE_IDS.has(src.shape) ? src.shape : DEFAULT_LANDMASS_PARAMS.shape;
+  // worldSpan is the real heightfield width in metres. The former
+  // worldSizeKm alias is still accepted on input, but it is converted into
+  // worldSpan instead of being carried as display-only scale metadata.
+  const worldSpanMeters = src.worldSpan ?? (
+    src.worldSizeKm == null ? DEFAULT_LANDMASS_PARAMS.worldSpan : Number(src.worldSizeKm) * 1000
+  );
   return {
     shape,
     seed: Math.round(finiteOr(src.seed, DEFAULT_LANDMASS_PARAMS.seed)) >>> 0,
     gridSize: Math.round(clamp(finiteOr(src.gridSize, DEFAULT_LANDMASS_PARAMS.gridSize), 64, 512)),
-    worldSpan: clamp(finiteOr(src.worldSpan, DEFAULT_LANDMASS_PARAMS.worldSpan), 400, 8000),
-    worldSizeKm: clamp(finiteOr(src.worldSizeKm, DEFAULT_LANDMASS_PARAMS.worldSizeKm), 0.4, 40075),
+    worldSpan: clamp(finiteOr(worldSpanMeters, DEFAULT_LANDMASS_PARAMS.worldSpan), 400, 40075000),
     landCoverage: clamp(finiteOr(src.landCoverage, DEFAULT_LANDMASS_PARAMS.landCoverage), 0.12, 0.86),
     coastRoughness: clamp(finiteOr(src.coastRoughness, DEFAULT_LANDMASS_PARAMS.coastRoughness), 0, 1),
     relief: clamp(finiteOr(src.relief, DEFAULT_LANDMASS_PARAMS.relief), 20, 420),
@@ -171,8 +175,9 @@ export function createRandomLandmassParams(random = Math.random, base = {}) {
     shape,
     seed: Math.floor(next() * 999_999_999) + 1,
     gridSize: preserved.gridSize ?? DEFAULT_LANDMASS_PARAMS.gridSize,
-    worldSpan: preserved.worldSpan ?? DEFAULT_LANDMASS_PARAMS.worldSpan,
-    worldSizeKm: preserved.worldSizeKm ?? DEFAULT_LANDMASS_PARAMS.worldSizeKm,
+    worldSpan: preserved.worldSpan ?? (
+      preserved.worldSizeKm == null ? DEFAULT_LANDMASS_PARAMS.worldSpan : Number(preserved.worldSizeKm) * 1000
+    ),
     landCoverage: between(coverageByShape[0], coverageByShape[1]),
     coastRoughness: between(0.28, 0.92),
     relief: between(120, 365),

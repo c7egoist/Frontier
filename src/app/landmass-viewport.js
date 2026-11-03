@@ -32,8 +32,14 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-const WORLD_SIZE_MIN_KM = 0.4;
-const WORLD_SIZE_MAX_KM = 40075;
+// The heightfield's worldSpan is real metres. Rendering uses this fixed
+// scene span and converts physical <-> scene coordinates at the picking,
+// brush, camera, shoreline, and ocean-surface boundaries; that avoids
+// pretending a label changed the data while also avoiding float32 jitter
+// at a 40,075,000 m world width.
+const DISPLAY_SPAN = 2400;
+const WORLD_SPAN_MIN_M = 400;
+const WORLD_SPAN_MAX_M = 40075000;
 
 function formatKm(km) {
   const value = Number(km);
@@ -45,24 +51,24 @@ function formatKm(km) {
   return `${Math.round(value * 1000)} m`;
 }
 
-function worldSizeKmToSlider(km) {
-  const safe = clamp(Number(km) || WORLD_SIZE_MAX_KM, WORLD_SIZE_MIN_KM, WORLD_SIZE_MAX_KM);
-  return (Math.log(safe) - Math.log(WORLD_SIZE_MIN_KM))
-    / (Math.log(WORLD_SIZE_MAX_KM) - Math.log(WORLD_SIZE_MIN_KM));
+function worldSpanToSlider(meters) {
+  const safe = clamp(Number(meters) || WORLD_SPAN_MAX_M, WORLD_SPAN_MIN_M, WORLD_SPAN_MAX_M);
+  return (Math.log(safe) - Math.log(WORLD_SPAN_MIN_M))
+    / (Math.log(WORLD_SPAN_MAX_M) - Math.log(WORLD_SPAN_MIN_M));
 }
 
-function sliderToWorldSizeKm(t) {
+function sliderToWorldSpan(t) {
   const safe = clamp(Number(t) || 0, 0, 1);
   return Math.exp(
-    Math.log(WORLD_SIZE_MIN_KM)
-    + (Math.log(WORLD_SIZE_MAX_KM) - Math.log(WORLD_SIZE_MIN_KM)) * safe
+    Math.log(WORLD_SPAN_MIN_M)
+    + (Math.log(WORLD_SPAN_MAX_M) - Math.log(WORLD_SPAN_MIN_M)) * safe
   );
 }
 
 export class LandmassStudioViewport {
   constructor(container) {
     this.container = container;
-    this.params = createRandomLandmassParams();
+    this.params = createRandomLandmassParams(Math.random, { worldSpan: WORLD_SPAN_MAX_M });
     this.field = generateLandmass(this.params);
     this.view = {
       seaLevel: 0,
@@ -75,6 +81,7 @@ export class LandmassStudioViewport {
       surfStrength: 1,
       foamLifetime: 8.5,
       oceanSpeed: 1,
+      waterResolution: 256,
       wireframe: false,
     };
     this.tool = 'navigate';
@@ -153,18 +160,21 @@ export class LandmassStudioViewport {
     this.renderer.setSize(width, height);
   }
 
-  _worldScale() {
-    const physicalMeters = (Number(this.params.worldSizeKm) || WORLD_SIZE_MAX_KM) * 1000;
-    const displayMeters = Math.max(1, this.field?.worldSpan || this.params.worldSpan || 2400);
-    return physicalMeters / displayMeters;
+  _renderScale() {
+    const physicalMeters = Math.max(1, this.field?.worldSpan || this.params.worldSpan || DISPLAY_SPAN);
+    return DISPLAY_SPAN / physicalMeters;
   }
 
-  _formatDisplayLength(displayMeters) {
-    return formatKm(((Number(displayMeters) || 0) * this._worldScale()) / 1000);
+  _formatPhysicalLength(physicalMeters) {
+    return formatKm((Number(physicalMeters) || 0) / 1000);
+  }
+
+  _formatDisplayLength(displayUnits) {
+    return this._formatPhysicalLength((Number(displayUnits) || 0) / Math.max(this._renderScale(), 1e-12));
   }
 
   _initLights() {
-    const span = this.params.worldSpan;
+    const span = DISPLAY_SPAN;
     this.sun = new THREE.DirectionalLight('#fff2dc', 2.8);
     this.sun.position.set(-span * 0.48, span * 0.72, span * 0.28);
     this.sun.castShadow = true;
@@ -188,7 +198,9 @@ export class LandmassStudioViewport {
 
   _buildTerrainGeometry() {
     const size = this.field.size;
-    const span = this.field.worldSpan;
+    // Vertex XZ are scene units; sampling and measurements remain in the
+    // field's real metre coordinates.
+    const span = DISPLAY_SPAN;
     const positions = new Float32Array(size * size * 3);
     const colors = buildLandmassColors(this.field, this.view.seaLevel);
     const indices = new Uint32Array((size - 1) * (size - 1) * 6);
@@ -264,7 +276,7 @@ export class LandmassStudioViewport {
   }
 
   _initOcean() {
-    const span = this.params.worldSpan;
+    const span = DISPLAY_SPAN;
     const seabedGeometry = new THREE.CircleGeometry(span * 1.7, 96);
     seabedGeometry.rotateX(-Math.PI / 2);
     this.seabedMesh = new THREE.Mesh(
@@ -297,6 +309,8 @@ export class LandmassStudioViewport {
 
   _createOceanSimulation() {
     return new LandmassOceanSimulation(this.renderer, this.scene, this.field, {
+      resolution: this.view.waterResolution,
+      displaySpan: DISPLAY_SPAN,
       seaLevel: this.view.seaLevel,
       opacity: this.view.oceanOpacity,
       waveHeight: this.view.waveHeight,
@@ -308,6 +322,12 @@ export class LandmassStudioViewport {
       enabled: this.view.showOcean,
       showFoam: this.view.showFoam,
     });
+  }
+
+  _recreateOceanSimulation() {
+    const previous = this.ocean;
+    this.ocean = this._createOceanSimulation();
+    previous?.dispose?.();
   }
 
   _updateShoreline() {
@@ -366,14 +386,18 @@ export class LandmassStudioViewport {
   }
 
   frameCamera(mode = 'overview') {
-    const span = this.params.worldSpan;
+    const span = DISPLAY_SPAN;
     if (mode === 'top') {
       this.camera.position.set(0, span * 1.24, 0.01);
       this.controls.target.set(0, 0, 0);
     } else if (mode === 'coast') {
       const contour = this._shorelineContours?.[0];
-      const point = contour?.points?.[Math.floor(contour.points.length * 0.35)];
-      if (point) {
+      const physicalPoint = contour?.points?.[Math.floor(contour.points.length * 0.35)];
+      if (physicalPoint) {
+        // extractShorelineContours returns physical metres; convert once
+        // here so camera framing stays in the 2,400-unit scene domain.
+        const scale = this._renderScale();
+        const point = [physicalPoint[0] * scale, physicalPoint[1] * scale];
         const len = Math.hypot(point[0], point[1]) || 1;
         const outX = point[0] / len;
         const outZ = point[1] / len;
@@ -394,14 +418,29 @@ export class LandmassStudioViewport {
     this.controls.update();
   }
 
+  _setWorldSpan(nextWorldSpan) {
+    this.params = normalizeLandmassParams({ ...this.params, worldSpan: nextWorldSpan });
+    // Rescale the existing physical field instead of regenerating it, so
+    // changing world size preserves sculpting while every metre-based
+    // sample, brush, shoreline, and cell measurement uses the new span.
+    this.field.worldSpan = this.params.worldSpan;
+    if (this.field.params) this.field.params.worldSpan = this.params.worldSpan;
+    this._refreshTerrainGeometry();
+    this.ocean?.setField(this.field, false);
+    this._updateShoreline();
+    this._updateStats();
+  }
+
   regenerate(nextParams = this.params) {
     this.params = normalizeLandmassParams(nextParams);
     this.field = generateLandmass(this.params);
     this.seabedMesh.position.y = -this.params.oceanDepth - 3;
     this._refreshTerrainGeometry();
-    if (this.ocean && this.ocean.size !== this.field.size) {
-      this.ocean.dispose();
-      this.ocean = this._createOceanSimulation();
+    // Land resolution no longer dictates water resolution. Rebuild only
+    // when the independently selected water grid differs; otherwise the
+    // ocean simply resamples the regenerated physical bed.
+    if (this.ocean && this.ocean.size !== this.view.waterResolution) {
+      this._recreateOceanSimulation();
     } else {
       this.ocean?.setField(this.field, true);
     }
@@ -418,8 +457,9 @@ export class LandmassStudioViewport {
     this.raycaster.setFromCamera(pointer, this.camera);
     const origin = this.raycaster.ray.origin;
     const direction = this.raycaster.ray.direction;
-    const span = this.field.worldSpan;
+    const span = DISPLAY_SPAN;
     const half = span * 0.5;
+    const renderScale = this._renderScale();
     const cell = span / Math.max(1, this.field.size - 1);
     const step = Math.max(3, cell * 0.72);
     const maxDistance = span * 4.5;
@@ -430,7 +470,8 @@ export class LandmassStudioViewport {
       const x = origin.x + direction.x * t;
       const y = origin.y + direction.y * t;
       const z = origin.z + direction.z * t;
-      return y - sampleLandmassHeight(this.field, x, z);
+      // The ray is in scene units; the heightfield is in physical metres.
+      return y - sampleLandmassHeight(this.field, x / renderScale, z / renderScale);
     };
 
     for (let t = 0; t <= maxDistance; t += step) {
@@ -453,7 +494,11 @@ export class LandmassStudioViewport {
         const hitT = (lo + hi) * 0.5;
         const hx = origin.x + direction.x * hitT;
         const hz = origin.z + direction.z * hitT;
-        return new THREE.Vector3(hx, sampleLandmassHeight(this.field, hx, hz), hz);
+        return new THREE.Vector3(
+          hx,
+          sampleLandmassHeight(this.field, hx / renderScale, hz / renderScale),
+          hz
+        );
       }
       prevT = t;
       prevD = d;
@@ -465,7 +510,7 @@ export class LandmassStudioViewport {
         const x = origin.x + direction.x * t;
         const z = origin.z + direction.z * t;
         if (Math.abs(x) <= half && Math.abs(z) <= half) {
-          return new THREE.Vector3(x, sampleLandmassHeight(this.field, x, z), z);
+          return new THREE.Vector3(x, sampleLandmassHeight(this.field, x / renderScale, z / renderScale), z);
         }
       }
     }
@@ -475,10 +520,13 @@ export class LandmassStudioViewport {
   _applyBrushAt(point) {
     if (!point || this.tool === 'navigate') return;
     const protectBorder = ['continent', 'island', 'archipelago'].includes(this.params.shape);
+    const renderScale = Math.max(this._renderScale(), 1e-12);
     const result = applyLandmassBrush(this.field, {
-      x: point.x,
-      z: point.z,
-      radius: this.brush.radius,
+      // Cursor point/radius are scene units; brush itself operates on the
+      // field's real metre coordinates.
+      x: point.x / renderScale,
+      z: point.z / renderScale,
+      radius: this.brush.radius / renderScale,
       strength: this.brush.strength,
       mode: this.tool,
       targetHeight: this._flattenTarget,
@@ -566,14 +614,16 @@ export class LandmassStudioViewport {
       if (el) el.textContent = value;
     };
     set('lm-stat-land', `${Math.round(stats.landFraction * 100)}%`);
-    set('lm-stat-shore', this._formatDisplayLength(this._shorelineLength || 0));
-    set('lm-stat-foam', `${this.field.size}² · ${this.ocean?.stepsPerSecond || 0}/s`);
+    set('lm-stat-shore', this._formatPhysicalLength(this._shorelineLength || 0));
+    set('lm-stat-foam', `${this.ocean?.size || this.view.waterResolution}² · ${this.ocean?.stepsPerSecond || 0}/s`);
     set('lm-stat-elev', `${Math.round(stats.minHeight)}…${Math.round(stats.maxHeight)} m`);
     const readout = byId('lm-readout');
     if (readout) {
-      const cellKm = (Number(this.params.worldSizeKm) || WORLD_SIZE_MAX_KM) / Math.max(1, this.field.size - 1);
+      const landCellKm = (this.field.worldSpan / 1000) / Math.max(1, this.field.size - 1);
+      const waterCellKm = (this.field.worldSpan / 1000) / Math.max(1, (this.ocean?.size || this.view.waterResolution) - 1);
       readout.textContent =
-        `${this.params.shape} · ${formatKm(this.params.worldSizeKm)} flat world · ${this.field.size}² land+water (${formatKm(cellKm)}/cell) · ` +
+        `${this.params.shape} · ${formatKm(this.field.worldSpan / 1000)} flat world · ${this.field.size}² land (${formatKm(landCellKm)}/cell) · ` +
+        `${this.ocean?.size || this.view.waterResolution}² water (${formatKm(waterCellKm)}/cell) · ` +
         `seed ${this.params.seed} · ${this._shorelineContours.length} shoreline contour(s). ` +
         'Ocean uses Terrain Studio-style 2.5D virtual-pipe water. Whitewater foam is a persistent simulated state ' +
         'created by breaking, beach uprush and steep-shore impact, then advected and decayed by the water—not a foam ' +
@@ -599,8 +649,9 @@ export class LandmassStudioViewport {
       };
       const seed = byId('lm-seed');
       if (seed) seed.value = String(this.params.seed);
-      setRange('lm-world-size', 'lm-out-world-size', worldSizeKmToSlider(this.params.worldSizeKm), (v) => `${formatKm(sliderToWorldSizeKm(v))} across`);
+      setRange('lm-world-size', 'lm-out-world-size', worldSpanToSlider(this.params.worldSpan), (v) => `${formatKm(sliderToWorldSpan(v) / 1000)} across`);
       setRange('lm-world-resolution', 'lm-out-world-resolution', this.params.gridSize, (v) => `${Math.round(v)}²`);
+      setRange('lm-water-resolution', 'lm-out-water-resolution', this.view.waterResolution, (v) => `${Math.round(v)}²`);
       setRange('lm-land-coverage', 'lm-out-land-coverage', this.params.landCoverage, (v) => `${Math.round(v * 100)}%`);
       setRange('lm-coast-roughness', 'lm-out-coast-roughness', this.params.coastRoughness, (v) => `${Math.round(v * 100)}%`);
       setRange('lm-relief', 'lm-out-relief', this.params.relief, (v) => `${Math.round(v)} m`);
@@ -623,11 +674,19 @@ export class LandmassStudioViewport {
     };
 
     syncGeneratorInputs();
-    bindRange('lm-world-size', 'lm-out-world-size', (v) => `${formatKm(sliderToWorldSizeKm(v))} across`, (v) => {
-      this.params.worldSizeKm = sliderToWorldSizeKm(v);
-      const brushOutput = byId('lm-out-brush-radius');
-      if (brushOutput) brushOutput.textContent = this._formatDisplayLength(this.brush.radius);
-      this._updateStats();
+    const worldSizeInput = byId('lm-world-size');
+    const worldSizeOutput = byId('lm-out-world-size');
+    worldSizeInput?.addEventListener('input', () => {
+      const nextWorldSpan = sliderToWorldSpan(Number(worldSizeInput.value));
+      if (worldSizeOutput) worldSizeOutput.textContent = `${formatKm(nextWorldSpan / 1000)} across`;
+    });
+    worldSizeInput?.addEventListener('change', () => {
+      const nextWorldSpan = Math.round(sliderToWorldSpan(Number(worldSizeInput.value)));
+      if (nextWorldSpan !== Math.round(this.params.worldSpan)) {
+        this._setWorldSpan(nextWorldSpan);
+        const brushOutput = byId('lm-out-brush-radius');
+        if (brushOutput) brushOutput.textContent = this._formatDisplayLength(this.brush.radius);
+      }
     });
     const resolutionInput = byId('lm-world-resolution');
     const resolutionOutput = byId('lm-out-world-resolution');
@@ -639,6 +698,19 @@ export class LandmassStudioViewport {
       if (nextResolution !== this.params.gridSize) {
         this.params.gridSize = nextResolution;
         this.regenerate(this.params);
+      }
+    });
+    const waterResolutionInput = byId('lm-water-resolution');
+    const waterResolutionOutput = byId('lm-out-water-resolution');
+    waterResolutionInput?.addEventListener('input', () => {
+      if (waterResolutionOutput) waterResolutionOutput.textContent = `${Math.round(Number(waterResolutionInput.value) || 256)}²`;
+    });
+    waterResolutionInput?.addEventListener('change', () => {
+      const nextWaterResolution = Math.round(clamp(Number(waterResolutionInput.value) || 256, 128, 1024));
+      if (nextWaterResolution !== this.view.waterResolution) {
+        this.view.waterResolution = nextWaterResolution;
+        this._recreateOceanSimulation();
+        this._updateStats();
       }
     });
     bindRange('lm-land-coverage', 'lm-out-land-coverage', (v) => `${Math.round(v * 100)}%`, (v) => { this.params.landCoverage = v; });

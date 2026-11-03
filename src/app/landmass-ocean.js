@@ -12,7 +12,7 @@
  */
 
 import * as THREE from 'three';
-import { computeOceanConnectedMask } from '../core/landmass.js';
+import { computeOceanConnectedMask, sampleLandmassHeight } from '../core/landmass.js';
 
 const PASS_VERTEX = /* glsl */`
 out vec2 vUv;
@@ -339,9 +339,7 @@ function makeRenderTarget(size) {
   });
 }
 
-function buildSurfaceGeometry(field) {
-  const size = field.size;
-  const span = field.worldSpan;
+function buildSurfaceGeometry(size, span) {
   const positions = new Float32Array(size * size * 3);
   const uvs = new Float32Array(size * size * 2);
   const indices = new Uint32Array((size - 1) * (size - 1) * 6);
@@ -387,8 +385,13 @@ export class LandmassOceanSimulation {
     this.renderer = renderer;
     this.scene = scene;
     this.field = field;
-    this.size = field.size;
-    this.cellSize = field.worldSpan / Math.max(1, field.size - 1);
+    // Water resolution is deliberately independent of the land grid. The
+    // bed is resampled from the physical landmass field into this grid;
+    // displaySpan keeps the rendered/simulated surface in stable scene units
+    // even when field.worldSpan is tens of millions of metres.
+    this.size = Math.round(THREE.MathUtils.clamp(Number(params.resolution) || field.size, 64, 1024));
+    this.displaySpan = Math.max(1, Number(params.displaySpan) || 2400);
+    this.cellSize = this.displaySpan / Math.max(1, this.size - 1);
     this.params = {
       seaLevel: 0,
       opacity: 0.78,
@@ -409,6 +412,7 @@ export class LandmassOceanSimulation {
     this._stepWindowTime = 0;
     this.stepsPerSecond = 0;
 
+    this._bedHeights = new Float32Array(this.size * this.size);
     this._bedData = new Float32Array(this.size * this.size * 4);
     this.bedTexture = new THREE.DataTexture(
       this._bedData,
@@ -428,7 +432,7 @@ export class LandmassOceanSimulation {
     this.stateIndex = 0;
     this.fluxIndex = 0;
 
-    this._domain = { value: new THREE.Vector4(this.size, this.cellSize, field.worldSpan, this.params.seaLevel) };
+    this._domain = { value: new THREE.Vector4(this.size, this.cellSize, this.displaySpan, this.params.seaLevel) };
     this._sim = { value: new THREE.Vector4(0.05, 0, 9.81, this.params.foamLifetime) };
     this._waveA = { value: new THREE.Vector4(0.82, -0.57, this.params.waveHeight, this.params.waveLength) };
     this._waveB = { value: new THREE.Vector4(this.params.surfStrength, 1, 0.14, 1) };
@@ -480,7 +484,7 @@ export class LandmassOceanSimulation {
     this.passQuad.frustumCulled = false;
     this.passScene.add(this.passQuad);
 
-    this.surfaceGeometry = buildSurfaceGeometry(field);
+    this.surfaceGeometry = buildSurfaceGeometry(this.size, this.displaySpan);
     this.waterMaterial = new THREE.ShaderMaterial({
       glslVersion: THREE.GLSL3,
       uniforms: {
@@ -553,13 +557,38 @@ export class LandmassOceanSimulation {
   }
 
   syncBed(recomputeOceanMask = true) {
+    // Resample the physical landmass bed onto the independent water grid.
+    // When the resolutions happen to match this is a direct copy; otherwise
+    // every water cell samples the true physical heightfield coordinates.
+    if (this.size === this.field.size) {
+      this._bedHeights.set(this.field.heights);
+    } else {
+      const physicalSpan = this.field.worldSpan;
+      let i = 0;
+      for (let iz = 0; iz < this.size; iz++) {
+        const physicalZ = (iz / Math.max(1, this.size - 1) - 0.5) * physicalSpan;
+        for (let ix = 0; ix < this.size; ix++) {
+          const physicalX = (ix / Math.max(1, this.size - 1) - 0.5) * physicalSpan;
+          this._bedHeights[i++] = sampleLandmassHeight(this.field, physicalX, physicalZ);
+        }
+      }
+    }
+
+    const sampledField = {
+      size: this.size,
+      heights: this._bedHeights,
+      worldSpan: this.field.worldSpan,
+    };
     const mask = recomputeOceanMask
-      ? computeOceanConnectedMask(this.field, this.params.seaLevel)
+      ? computeOceanConnectedMask(sampledField, this.params.seaLevel)
       : this._lastOceanMask;
-    this._lastOceanMask = mask || computeOceanConnectedMask(this.field, this.params.seaLevel);
-    for (let i = 0; i < this.field.heights.length; i++) {
+    this._lastOceanMask = mask && mask.length === this._bedHeights.length
+      ? mask
+      : computeOceanConnectedMask(sampledField, this.params.seaLevel);
+
+    for (let i = 0; i < this._bedHeights.length; i++) {
       const o = i * 4;
-      this._bedData[o] = this.field.heights[i];
+      this._bedData[o] = this._bedHeights[i];
       this._bedData[o + 1] = this._lastOceanMask[i] || 0;
       this._bedData[o + 2] = 0;
       this._bedData[o + 3] = 1;
@@ -598,7 +627,7 @@ export class LandmassOceanSimulation {
   setParams(next = {}) {
     Object.assign(this.params, next);
     const angle = THREE.MathUtils.degToRad(Number(this.params.waveDirection) || 0);
-    this._domain.value.set(this.size, this.cellSize, this.field.worldSpan, Number(this.params.seaLevel) || 0);
+    this._domain.value.set(this.size, this.cellSize, this.displaySpan, Number(this.params.seaLevel) || 0);
     this._sim.value.set(0.05, this.simTime, 9.81, Math.max(0.25, Number(this.params.foamLifetime) || 8.5));
     this._waveA.value.set(
       Math.cos(angle),
@@ -652,13 +681,14 @@ export class LandmassOceanSimulation {
     const speed = Math.max(0, Number(this.params.speed) || 0);
     const dt = 0.05;
     this._accumulator += Math.min(Math.max(deltaSeconds, 0), 0.05) * 6 * speed;
+    const maxSteps = this.size >= 768 ? 4 : this.size >= 512 ? 6 : 8;
     let steps = 0;
-    while (this._accumulator >= dt && steps < 8) {
+    while (this._accumulator >= dt && steps < maxSteps) {
       this.stepOnce(dt);
       this._accumulator -= dt;
       steps++;
     }
-    if (steps >= 8) this._accumulator = 0;
+    if (steps >= maxSteps) this._accumulator = 0;
     this._stepsLastSecond += steps;
     this._stepWindowTime += Math.max(0, deltaSeconds);
     if (this._stepWindowTime >= 0.75) {

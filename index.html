@@ -241,7 +241,7 @@
               <input id="lm-world-size" type="range" min="0" max="1" step="0.001" value="1" />
             </div>
             <div class="slider-group">
-              <div class="slider-label"><span>Land + water resolution</span><output id="lm-out-world-resolution">256²</output></div>
+              <div class="slider-label"><span>Landmass resolution</span><output id="lm-out-world-resolution">256²</output></div>
               <input id="lm-world-resolution" type="range" min="128" max="512" step="32" value="256" />
             </div>
             <div class="slider-group">
@@ -268,7 +268,7 @@
               <button id="lm-generate" class="btn-primary" type="button">Generate landmass</button>
               <button id="lm-reset-sculpt" class="btn-secondary" type="button">Reset sculpt</button>
             </div>
-            <p class="export-note">Landmass Studio starts from a randomized base. <strong>Random landmass</strong> picks a new shape, seed, coverage, coast roughness, relief, terrain roughness, and ocean depth while preserving your world size and resolution. <strong>World size</strong> sets the physical scale of the flat sculpting plane, up to a 40,075 km planet-sized map. <strong>Land + water resolution</strong> rebuilds the heightfield and the 2.5D ocean together at 128²–512². Generation replaces sculpt edits. This is only the broad land/ocean base—no erosion, rivers, snow, rocks, vegetation, or other systems.</p>
+            <p class="export-note">Landmass Studio starts from a randomized base. <strong>Random landmass</strong> picks a new shape, seed, coverage, coast roughness, relief, terrain roughness, and ocean depth while preserving your world size and resolutions. <strong>World size</strong> changes the existing heightfield's real width in metres without erasing sculpt edits, up to a flat 40,075 km planet-sized plane; the viewport renders that physical field in a stable 2,400-unit scene and converts picking, brush, shoreline, and cell measurements back to metres. <strong>Landmass resolution</strong> rebuilds only the heightfield at 128²–512². The separate <strong>Water resolution</strong> control in Ocean rebuilds the 2.5D water grid at 128²–1024² and resamples the landmass bed into it. Generation replaces sculpt edits. This is only the broad land/ocean base—no erosion, rivers, snow, rocks, vegetation, or other systems.</p>
           </section>
 
           <section class="panel-section">
@@ -569,6 +569,10 @@
             <div class="slider-group">
               <div class="slider-label"><span>Ocean opacity</span><output id="lm-out-ocean-opacity">78%</output></div>
               <input id="lm-ocean-opacity" type="range" min="0.1" max="1" step="0.01" value="0.78" />
+            </div>
+            <div class="slider-group">
+              <div class="slider-label"><span>Water resolution</span><output id="lm-out-water-resolution">256²</output></div>
+              <input id="lm-water-resolution" type="range" min="128" max="1024" step="32" value="256" />
             </div>
             <div class="toggle-grid">
               <label class="check-pill"><input id="lm-show-ocean" type="checkbox" checked /><span>Show ocean</span></label>
