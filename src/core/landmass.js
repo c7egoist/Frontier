@@ -132,6 +132,47 @@ export function normalizeLandmassParams(input = {}) {
   };
 }
 
+/**
+ * Create a fresh randomized base-landmass recipe. A caller may inject a
+ * deterministic random function in tests; the studio passes Math.random so
+ * opening Landmass Studio and pressing Random Landmass gives a new base.
+ */
+export function createRandomLandmassParams(random = Math.random) {
+  const next = () => {
+    const value = Number(random());
+    return Number.isFinite(value) ? clamp(value, 0, 0.999999) : 0.5;
+  };
+  const between = (min, max) => min + (max - min) * next();
+  const shapeRoll = next();
+  const shape = shapeRoll < 0.38
+    ? 'continent'
+    : shapeRoll < 0.58
+      ? 'island'
+      : shapeRoll < 0.74
+        ? 'archipelago'
+        : shapeRoll < 0.87
+          ? 'peninsula'
+          : 'coast';
+  const coverageByShape = {
+    continent: [0.42, 0.68],
+    island: [0.3, 0.58],
+    archipelago: [0.28, 0.55],
+    peninsula: [0.38, 0.64],
+    coast: [0.36, 0.66],
+  }[shape];
+  return normalizeLandmassParams({
+    shape,
+    seed: Math.floor(next() * 999_999_999) + 1,
+    gridSize: DEFAULT_LANDMASS_PARAMS.gridSize,
+    worldSpan: DEFAULT_LANDMASS_PARAMS.worldSpan,
+    landCoverage: between(coverageByShape[0], coverageByShape[1]),
+    coastRoughness: between(0.28, 0.92),
+    relief: between(120, 365),
+    roughness: between(0.24, 0.88),
+    oceanDepth: between(42, 125),
+  });
+}
+
 function makeLobes(params, rng) {
   const scale = 0.72 + params.landCoverage * 0.58;
   const lobe = (x, z, rx, rz, amplitude = 1) => ({
@@ -336,6 +377,41 @@ export function computeLandmassStats(field, seaLevel = 0) {
   };
 }
 
+/**
+ * Ocean-connected cells at a given sea level. The GPU ocean uses this so
+ * its reservoir/wave maker cannot spontaneously fill an enclosed inland
+ * depression; water may still enter such a basin dynamically by overtopping
+ * a sill through the pipe simulation.
+ */
+export function computeOceanConnectedMask(field, seaLevel = 0) {
+  const size = field.size;
+  const mask = new Float32Array(size * size);
+  const stack = [];
+  const push = (ix, iz) => {
+    if (ix < 0 || iz < 0 || ix >= size || iz >= size) return;
+    const idx = iz * size + ix;
+    if (mask[idx] || field.heights[idx] >= seaLevel) return;
+    mask[idx] = 1;
+    stack.push(idx);
+  };
+  for (let i = 0; i < size; i++) {
+    push(i, 0);
+    push(i, size - 1);
+    push(0, i);
+    push(size - 1, i);
+  }
+  while (stack.length) {
+    const idx = stack.pop();
+    const ix = idx % size;
+    const iz = Math.floor(idx / size);
+    push(ix - 1, iz);
+    push(ix + 1, iz);
+    push(ix, iz - 1);
+    push(ix, iz + 1);
+  }
+  return mask;
+}
+
 export function applyLandmassBrush(field, options = {}) {
   const size = field.size;
   const span = field.worldSpan;
@@ -535,262 +611,6 @@ export function extractShorelineContours(field, seaLevel = 0) {
 
   contours.sort((a, b) => b.length - a.length);
   return contours;
-}
-
-function smoothContourPoints(input, closed) {
-  if (input.length < 3) return input.map((p) => [...p]);
-  return input.map((p, i) => {
-    const prev = closed ? input[(i - 1 + input.length) % input.length] : input[Math.max(0, i - 1)];
-    const next = closed ? input[(i + 1) % input.length] : input[Math.min(input.length - 1, i + 1)];
-    return [
-      p[0] + ((prev[0] + next[0]) * 0.5 - p[0]) * 0.18,
-      p[1] + ((prev[1] + next[1]) * 0.5 - p[1]) * 0.18,
-    ];
-  });
-}
-
-function pointHash(x, z, seed, salt = 0) {
-  return hash01(Math.round(x * 0.37) + salt * 1931, Math.round(z * 0.37) - salt * 917, seed ^ (salt * 0x45d9f3b));
-}
-
-/**
- * Build foam as actual shoreline-following mesh bands and broken surf
- * patches. This intentionally does not generate foam in a fragment shader
- * and does not use foam particles: every visible foam edge is a vertex in
- * the returned geometry.
- */
-export function buildFoamGeometry(field, options = {}) {
-  const seaLevel = finiteOr(options.seaLevel, 0);
-  const foamWidth = Math.max(1, finiteOr(options.foamWidth, 16));
-  const surfEnergy = clamp(finiteOr(options.surfEnergy, 0.68), 0, 1);
-  const seed = Math.round(finiteOr(options.seed, field?.params?.seed ?? 4029)) >>> 0;
-  const contours = extractShorelineContours(field, seaLevel);
-  const positions = [];
-  const colors = [];
-  const meta = [];
-  const indices = [];
-  const cell = field.worldSpan / Math.max(1, field.size - 1);
-
-  function addVertex(point, seaward, offset, y, color, phase, mobility) {
-    positions.push(point[0] + seaward[0] * offset, y, point[1] + seaward[1] * offset);
-    colors.push(color[0], color[1], color[2]);
-    meta.push(seaward[0], seaward[1], phase, mobility);
-    return positions.length / 3 - 1;
-  }
-
-  function addBandSegment(infoA, infoB, band) {
-    const rowCount = 3;
-    const start = positions.length / 3;
-    const strip = [];
-    for (const info of [infoA, infoB]) {
-      const rows = [];
-      for (let row = 0; row < rowCount; row++) {
-        const anchor = info.bandOffsets[band][0];
-        const rawOffset = info.bandOffsets[band][row];
-        const offset = anchor + (rawOffset - anchor) * info.bandScales[band];
-        const y = seaLevel + info.bandHeights[band][row];
-        const color = info.bandColors[band][row];
-        rows.push(addVertex(info.point, info.seaward, offset, y, color, info.phase, [0.22, 0.62, 1][band]));
-      }
-      strip.push(rows);
-    }
-    for (let row = 0; row < rowCount - 1; row++) {
-      const a = strip[0][row] - start;
-      const b = strip[1][row] - start;
-      const c = strip[0][row + 1] - start;
-      const d = strip[1][row + 1] - start;
-      const base = start;
-      indices.push(base + a, base + c, base + b, base + b, base + c, base + d);
-    }
-  }
-
-  contours.forEach((contour, contourIndex) => {
-    const smoothed = smoothContourPoints(contour.points, contour.closed);
-    const extended = contour.closed ? [...smoothed, smoothed[0]] : smoothed;
-    if (extended.length < 2) return;
-    const infos = [];
-    const contourPhase = pointHash(contourIndex * 91, Math.round(contour.length), seed, 211) * Math.PI * 2;
-    // Foam is laid down as tapered surf patches, not as one perfect
-    // continuous outline. This envelope reaches zero in genuine gaps and
-    // at patch tips; addBandSegment collapses each band toward its inner
-    // edge as the envelope falls, producing lens-shaped geometry.
-    const patchScaleAt = (distance, band) => {
-      const baseLength = foamWidth * [5.4, 4.2, 3.1][band];
-      const cycle = distance / Math.max(8, baseLength)
-        + band * 0.37
-        + contourIndex * 1.71
-        + Math.sin(distance * 0.0021 + band * 1.7) * 0.18;
-      const u = cycle - Math.floor(cycle);
-      const duty = [0.9, 0.72, 0.55][band];
-      if (u > duty) return 0;
-      return Math.pow(Math.sin(Math.PI * u / duty), 0.62);
-    };
-    let cumulative = 0;
-
-    for (let i = 0; i < extended.length; i++) {
-      const point = extended[i];
-      if (i > 0) cumulative += Math.hypot(point[0] - extended[i - 1][0], point[1] - extended[i - 1][1]);
-      const prev = extended[Math.max(0, i - 1)];
-      const next = extended[Math.min(extended.length - 1, i + 1)];
-      let tangent = [next[0] - prev[0], next[1] - prev[1]];
-      const tangentLength = Math.hypot(tangent[0], tangent[1]) || 1;
-      tangent = [tangent[0] / tangentLength, tangent[1] / tangentLength];
-
-      const gradient = sampleLandmassGradient(field, point[0], point[1]);
-      const gradLength = Math.hypot(gradient[0], gradient[1]);
-      let seaward;
-      if (gradLength > 1e-5) {
-        seaward = [-gradient[0] / gradLength, -gradient[1] / gradLength];
-      } else {
-        seaward = [-tangent[1], tangent[0]];
-        const hA = sampleLandmassHeight(field, point[0] + seaward[0] * cell, point[1] + seaward[1] * cell);
-        const hB = sampleLandmassHeight(field, point[0] - seaward[0] * cell, point[1] - seaward[1] * cell);
-        if (hA > hB) seaward = [-seaward[0], -seaward[1]];
-      }
-
-      const slope = gradLength;
-      const beachFactor = clamp(1 - slope / 0.62, 0, 1);
-      // Foam width and motion vary in broad surf groups, not from
-      // point-to-point random hashes. The small edge-detail terms are also
-      // low-frequency FBM sampled along shoreline distance, so neighbouring
-      // foam vertices form coherent lace rather than a spiky comb.
-      const waveGroup = 0.5 + 0.5 * Math.sin(
-        cumulative * 0.014 + contourPhase + Math.sin(cumulative * 0.0031) * 1.4
-      );
-      const surfEnvelope = 0.58 + waveGroup * 0.54;
-      const widthHere = foamWidth * (0.18 + beachFactor * 1.02) * surfEnvelope;
-      const jag0 = fbm(cumulative * 0.018, contourIndex * 7.3 + 1.7, seed ^ 0x51c3, 3) * 0.5 + 0.5;
-      const jag1 = fbm(cumulative * 0.013, contourIndex * 7.3 + 9.2, seed ^ 0x9a17, 3) * 0.5 + 0.5;
-      const jag2 = fbm(cumulative * 0.009, contourIndex * 7.3 + 15.8, seed ^ 0x2bd4, 3) * 0.5 + 0.5;
-      const phase = (cumulative * 0.009 + contourIndex * 0.37) % 1;
-      const waterlineScale = 0.46 + waveGroup * 0.54;
-      const bandPatch = [
-        patchScaleAt(cumulative, 0),
-        patchScaleAt(cumulative, 1),
-        patchScaleAt(cumulative, 2),
-      ];
-
-      infos.push({
-        point,
-        seaward,
-        slope,
-        cumulative,
-        waveGroup,
-        phase,
-        bandPatch,
-        bandScales: [
-          0.12 + bandPatch[0] * 0.88,
-          0.08 + bandPatch[1] * 0.92,
-          0.08 + bandPatch[2] * 0.92,
-        ],
-        bandOffsets: [
-          [
-            -widthHere * 0.06 * waterlineScale,
-            widthHere * 0.11 * waterlineScale,
-            widthHere * (0.25 + jag0 * 0.055) * waterlineScale,
-          ],
-          [
-            widthHere * (0.31 + jag1 * 0.035),
-            widthHere * (0.48 + jag1 * 0.045),
-            widthHere * (0.67 + jag1 * 0.075),
-          ],
-          [
-            widthHere * (0.79 + jag2 * 0.04),
-            widthHere * (0.96 + jag2 * 0.05),
-            widthHere * (1.13 + jag2 * 0.09),
-          ],
-        ],
-        bandHeights: [
-          [0.12, 0.31, 0.14],
-          [0.1, 0.24, 0.1],
-          [0.08, 0.18, 0.08],
-        ],
-        bandColors: [
-          [[0.9, 0.96, 0.99], [1, 1, 1], [0.72, 0.88, 0.95]],
-          [[0.82, 0.92, 0.97], [0.98, 1, 1], [0.62, 0.82, 0.92]],
-          [[0.74, 0.88, 0.95], [0.93, 0.98, 1], [0.54, 0.76, 0.89]],
-        ],
-      });
-    }
-
-    // One neighbour pass removes any remaining one-cell steps in foam
-    // width. The shoreline itself stays where marching squares found it;
-    // only the seaward offsets of the foam mesh are smoothed.
-    const rawOffsets = infos.map((info) => info.bandOffsets.map((rows) => [...rows]));
-    for (let i = 1; i < infos.length - 1; i++) {
-      for (let band = 0; band < 3; band++) {
-        for (let row = 0; row < 3; row++) {
-          infos[i].bandOffsets[band][row] =
-            rawOffsets[i - 1][band][row] * 0.22 +
-            rawOffsets[i][band][row] * 0.56 +
-            rawOffsets[i + 1][band][row] * 0.22;
-        }
-      }
-    }
-
-    for (let i = 0; i < infos.length - 1; i++) {
-      const a = infos[i];
-      const b = infos[i + 1];
-      if (Math.max(a.bandPatch[0], b.bandPatch[0]) > 0.015) {
-        addBandSegment(a, b, 0);
-      }
-      const midDistance = (a.cumulative + b.cumulative) * 0.5;
-      const waveGroup = (a.waveGroup + b.waveGroup) * 0.5;
-      const laceDetail = fbm(midDistance * 0.012, contourIndex * 11.6 + 4.4, seed ^ 0x70e3, 3) * 0.5 + 0.5;
-      if (
-        surfEnergy > 0.01
-        && Math.max(a.bandPatch[1], b.bandPatch[1]) > 0.015
-        && waveGroup > 1.14 - surfEnergy * 0.86
-        && laceDetail > 0.16
-      ) {
-        addBandSegment(a, b, 1);
-      }
-      if (
-        surfEnergy > 0.08
-        && Math.max(a.bandPatch[2], b.bandPatch[2]) > 0.015
-        && waveGroup > 1.34 - surfEnergy * 0.76
-        && laceDetail > 0.3
-        && laceDetail < 0.94
-      ) {
-        addBandSegment(a, b, 2);
-      }
-    }
-  });
-
-  const positionArray = new Float32Array(positions);
-  return {
-    positions: positionArray,
-    basePositions: new Float32Array(positionArray),
-    colors: new Float32Array(colors),
-    meta: new Float32Array(meta),
-    indices: new Uint32Array(indices),
-    contours,
-    vertexCount: positionArray.length / 3,
-    triangleCount: indices.length / 3,
-    shorelineLength: contours.reduce((sum, contour) => sum + contour.length, 0),
-    seaLevel,
-    foamWidth,
-  };
-}
-
-export function animateFoamGeometry(foam, timeSeconds = 0, options = {}) {
-  if (!foam?.positions || !foam?.basePositions || !foam?.meta) return foam;
-  const speed = Math.max(0, finiteOr(options.speed, 1));
-  const amplitude = Math.max(0, finiteOr(options.amplitude, Math.max(0.5, (foam.foamWidth || 16) * 0.09)));
-  const lift = Math.max(0, finiteOr(options.lift, 0.08));
-  const tau = Math.PI * 2;
-  for (let i = 0; i < foam.vertexCount; i++) {
-    const p = i * 3;
-    const m = i * 4;
-    const phase = foam.meta[m + 2] * tau;
-    const mobility = foam.meta[m + 3];
-    const wave = Math.sin(timeSeconds * speed * (0.75 + mobility * 0.42) + phase);
-    const travel = wave * amplitude * mobility;
-    foam.positions[p] = foam.basePositions[p] + foam.meta[m] * travel;
-    foam.positions[p + 1] = foam.basePositions[p + 1] + (wave * 0.5 + 0.5) * lift * mobility;
-    foam.positions[p + 2] = foam.basePositions[p + 2] + foam.meta[m + 1] * travel;
-  }
-  return foam;
 }
 
 function mixColor(a, b, t) {

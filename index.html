@@ -232,7 +232,7 @@
             </label>
             <div class="seed-row">
               <input id="lm-seed" type="number" step="1" value="4029" aria-label="Landmass seed" />
-              <button id="lm-random-seed" class="btn-mini accent" type="button">Random</button>
+              <button id="lm-random-seed" class="btn-mini accent" type="button">Random landmass</button>
             </div>
             <div class="slider-group">
               <div class="slider-label"><span>Land coverage</span><output id="lm-out-land-coverage">54%</output></div>
@@ -258,7 +258,7 @@
               <button id="lm-generate" class="btn-primary" type="button">Generate landmass</button>
               <button id="lm-reset-sculpt" class="btn-secondary" type="button">Reset sculpt</button>
             </div>
-            <p class="export-note">Generation replaces sculpt edits. This is only the broad land/ocean base—no erosion, rivers, snow, rocks, vegetation, or other systems.</p>
+            <p class="export-note">Landmass Studio starts from a randomized base. <strong>Random landmass</strong> picks a new shape, seed, coverage, coast roughness, relief, terrain roughness, and ocean depth. Generation replaces sculpt edits. This is only the broad land/ocean base—no erosion, rivers, snow, rocks, vegetation, or other systems.</p>
           </section>
 
           <section class="panel-section">
@@ -379,7 +379,7 @@
           <div id="hud-landmass" class="hud-top hidden-panel">
             <div class="hud-stat"><span class="hud-k">LAND</span><span class="hud-v" id="lm-stat-land">—</span></div>
             <div class="hud-stat"><span class="hud-k">SHORE</span><span class="hud-v" id="lm-stat-shore">—</span></div>
-            <div class="hud-stat"><span class="hud-k">FOAM MESH</span><span class="hud-v" id="lm-stat-foam">—</span></div>
+            <div class="hud-stat"><span class="hud-k">2.5D WATER</span><span class="hud-v" id="lm-stat-foam">—</span></div>
             <div class="hud-stat"><span class="hud-k">ELEV</span><span class="hud-v" id="lm-stat-elev">—</span></div>
           </div>
 
@@ -545,12 +545,12 @@
           </section>
         </div>
 
-        <!-- LANDMASS STUDIO RIGHT PANE: ocean + geometry foam only. -->
+        <!-- LANDMASS STUDIO RIGHT PANE: simulated 2.5D ocean + persistent whitewater foam. -->
         <div id="right-landmass-panels" class="tp-pane-scroll hidden-panel">
           <section class="panel-section">
             <div class="section-header">
               <span>OCEAN</span>
-              <span class="tag-pill">SIMPLE SURFACE</span>
+              <span class="tag-pill">2.5D VIRTUAL PIPES</span>
             </div>
             <div class="slider-group">
               <div class="slider-label"><span>Sea level</span><output id="lm-out-sea-level">0 m</output></div>
@@ -567,24 +567,36 @@
 
           <section class="panel-section">
             <div class="section-header">
-              <span>FOAM GEOMETRY</span>
-              <span class="tag-pill">MESH ONLY</span>
+              <span>SURF &amp; WHITEWATER FOAM</span>
+              <span class="tag-pill">SIMULATED STATE</span>
             </div>
-            <p class="export-note">The shoreline is traced from the heightfield. Foam bands and broken surf patches are built as real triangles following that shoreline; their vertices move with the surf. This panel does not enable shader-pattern foam or particle foam.</p>
+            <p class="export-note">This uses the same virtual-pipe principle as Terrain Studio's 2.5D water. Incoming swell travels through the simulated depth/velocity field; foam is created where waves become depth-limited, run up the shore, or strike steeper ground. That whitewater quantity then moves with the water, spreads, and decays on a foam surface above the water. It is not a fragment-noise pattern and not particles.</p>
             <div class="slider-group">
-              <div class="slider-label"><span>Foam width</span><output id="lm-out-foam-width">22 m</output></div>
-              <input id="lm-foam-width" type="range" min="3" max="45" step="1" value="22" />
-            </div>
-            <div class="slider-group">
-              <div class="slider-label"><span>Surf patches</span><output id="lm-out-surf-energy">68%</output></div>
-              <input id="lm-surf-energy" type="range" min="0" max="1" step="0.01" value="0.68" />
+              <div class="slider-label"><span>Wave height</span><output id="lm-out-wave-height">0.75 m</output></div>
+              <input id="lm-wave-height" type="range" min="0" max="2.5" step="0.05" value="0.75" />
             </div>
             <div class="slider-group">
-              <div class="slider-label"><span>Foam motion</span><output id="lm-out-foam-speed">1.0×</output></div>
-              <input id="lm-foam-speed" type="range" min="0" max="2.5" step="0.1" value="1" />
+              <div class="slider-label"><span>Wave length</span><output id="lm-out-wave-length">145 m</output></div>
+              <input id="lm-wave-length" type="range" min="45" max="360" step="5" value="145" />
+            </div>
+            <div class="slider-group">
+              <div class="slider-label"><span>Wave direction</span><output id="lm-out-wave-direction">-35°</output></div>
+              <input id="lm-wave-direction" type="range" min="-180" max="180" step="1" value="-35" />
+            </div>
+            <div class="slider-group">
+              <div class="slider-label"><span>Foam generation</span><output id="lm-out-surf-strength">1.0×</output></div>
+              <input id="lm-surf-strength" type="range" min="0" max="2.5" step="0.1" value="1" />
+            </div>
+            <div class="slider-group">
+              <div class="slider-label"><span>Foam lifetime</span><output id="lm-out-foam-lifetime">8.5 s</output></div>
+              <input id="lm-foam-lifetime" type="range" min="0.5" max="12" step="0.1" value="8.5" />
+            </div>
+            <div class="slider-group">
+              <div class="slider-label"><span>Ocean speed</span><output id="lm-out-ocean-speed">1.0×</output></div>
+              <input id="lm-ocean-speed" type="range" min="0" max="2.5" step="0.1" value="1" />
             </div>
             <div class="toggle-grid">
-              <label class="check-pill"><input id="lm-show-foam" type="checkbox" checked /><span>Show foam geometry</span></label>
+              <label class="check-pill"><input id="lm-show-foam" type="checkbox" checked /><span>Show simulated foam</span></label>
             </div>
           </section>
 

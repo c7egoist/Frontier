@@ -4726,6 +4726,16 @@ summary:focus-visible {
   color: #cbb694;
 }
 
+#left-landmass-panels .seed-row input {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+#left-landmass-panels .seed-row button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 .landmass-canvas canvas {
   display: block;
 }

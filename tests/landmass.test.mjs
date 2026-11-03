@@ -3,14 +3,20 @@ import fs from 'node:fs';
 import test from 'node:test';
 
 import {
-  animateFoamGeometry,
   applyLandmassBrush,
-  buildFoamGeometry,
+  computeOceanConnectedMask,
+  createRandomLandmassParams,
   extractShorelineContours,
   generateLandmass,
   normalizeLandmassParams,
   sampleLandmassHeight,
 } from '../src/core/landmass.js';
+import {
+  LANDMASS_OCEAN_FLUX_FRAG,
+  LANDMASS_OCEAN_INIT_FRAG,
+  LANDMASS_OCEAN_INTEGRATE_FRAG,
+} from '../src/app/landmass-ocean.js';
+import { checkGlslScopes } from './glsl-scope-check.mjs';
 
 function landComponents(field) {
   const seen = new Uint8Array(field.heights.length);
@@ -77,6 +83,57 @@ test('Landmass shape presets cover island, archipelago, peninsula, and coastline
   assert.equal(normalizeLandmassParams({ shape: 'not-a-shape' }).shape, 'continent');
 });
 
+test('Random landmass recipes vary the whole base shape while staying inside safe generation ranges', () => {
+  const rollsA = [0.05, 0.123, 0.22, 0.41, 0.58, 0.66, 0.74];
+  const rollsB = [0.66, 0.987, 0.83, 0.19, 0.31, 0.48, 0.9];
+  let aIndex = 0;
+  let bIndex = 0;
+  const a = createRandomLandmassParams(() => rollsA[aIndex++]);
+  const b = createRandomLandmassParams(() => rollsB[bIndex++]);
+
+  assert.equal(a.shape, 'continent');
+  assert.equal(b.shape, 'archipelago');
+  assert.notEqual(a.seed, b.seed, 'Random landmass changes more than a numeric seed');
+  assert.notEqual(a.landCoverage, b.landCoverage);
+  assert.notEqual(a.coastRoughness, b.coastRoughness);
+  assert.notEqual(a.relief, b.relief);
+  for (const params of [a, b]) {
+    assert.equal(params.gridSize, 256, 'Random bases keep the interactive sculpt/ocean resolution');
+    assert.equal(params.worldSpan, 2400);
+    assert.ok(params.landCoverage >= 0.28 && params.landCoverage <= 0.68);
+    assert.ok(params.coastRoughness >= 0.28 && params.coastRoughness <= 0.92);
+    assert.ok(params.relief >= 120 && params.relief <= 365);
+    assert.ok(params.roughness >= 0.24 && params.roughness <= 0.88);
+    assert.ok(params.oceanDepth >= 42 && params.oceanDepth <= 125);
+    const field = generateLandmass({ ...params, gridSize: 96 });
+    assert.ok(field.stats.minHeight < 0 && field.stats.maxHeight > 0, `${params.shape} random recipe creates land plus ocean bed`);
+  }
+
+  const viewportSrc = fs.readFileSync(new URL('../src/app/landmass-viewport.js', import.meta.url), 'utf8');
+  assert.ok(viewportSrc.includes('this.params = createRandomLandmassParams();'), 'Opening Landmass Studio starts from a randomized base');
+  assert.ok(viewportSrc.includes('syncGeneratorInputs();'), 'Random recipes are reflected in the visible generator controls');
+});
+
+test('Ocean-connected mask admits the sea but does not pre-fill enclosed inland depressions', () => {
+  const field = {
+    size: 7,
+    heights: new Float32Array([
+      -5, -5, -5, -5, -5, -5, -5,
+      -5, 10, 10, 10, 10, 10, -5,
+      -5, 10, -3, -3, -3, 10, -5,
+      -5, 10, -3, -3, -3, 10, -5,
+      -5, 10, -3, -3, -3, 10, -5,
+      -5, 10, 10, 10, 10, 10, -5,
+      -5, -5, -5, -5, -5, -5, -5,
+    ]),
+  };
+  const mask = computeOceanConnectedMask(field, 0);
+  assert.equal(mask[0], 1, 'Boundary ocean is connected');
+  assert.equal(mask[3 * 7 + 3], 0, 'A below-sea inland bowl is not initially treated as ocean');
+  assert.ok(LANDMASS_OCEAN_INIT_FRAG.includes('oceanMaskAt(c)'), 'Initial ocean depth respects ocean connectivity');
+  assert.ok(LANDMASS_OCEAN_INIT_FRAG.includes('waveEta(cellWorld(c))'), 'Reset seeds the incoming swell instead of a motionless flat ocean');
+});
+
 test('Direct landmass sculpting raises terrain but cannot raise the protected square border', () => {
   const field = generateLandmass({ shape: 'continent', gridSize: 96, seed: 4029 });
   const centerBefore = sampleLandmassHeight(field, 0, 0);
@@ -89,37 +146,53 @@ test('Direct landmass sculpting raises terrain but cannot raise the protected sq
   assert.equal(field.heights[0], borderBefore, 'Protected continent corner remains fixed underwater');
 });
 
-test('Shoreline foam is actual animated mesh geometry, not a shader or particle representation', () => {
+test('Ocean foam is persistent whitewater from the Terrain Studio-style 2.5D virtual-pipe state, not decorative foam', () => {
   const field = generateLandmass({ shape: 'continent', gridSize: 128, seed: 4029 });
   const contours = extractShorelineContours(field, 0);
   assert.ok(contours.length >= 1 && contours[0].closed, 'A continent shoreline contour is traced from the elevation field');
 
-  const foam = buildFoamGeometry(field, { seaLevel: 0, foamWidth: 16, surfEnergy: 0.68 });
-  assert.ok(foam.vertexCount > 1000, 'Foam has real shoreline vertices');
-  assert.ok(foam.triangleCount > 500, 'Foam has real shoreline triangles');
-  assert.equal(foam.positions.length, foam.vertexCount * 3);
-  assert.equal(foam.meta.length, foam.vertexCount * 4);
-  assert.ok(foam.shorelineLength > field.worldSpan, 'Foam follows a full irregular shoreline');
-  for (let i = 0; i < foam.vertexCount; i++) {
-    const y = foam.positions[i * 3 + 1];
-    assert.ok(y > 0 && y < 0.5, 'Foam geometry sits just above sea level');
+  for (const token of [
+    'float surfC = bedC + depth;',
+    'vec4 dh = vec4(surfC - surfR',
+    'oldFlux * retain + dh *',
+    'volumeAvailable = depth * area / dt',
+    'antiOvershoot = max(maxDh, 0.0) * area * 0.5 / dt',
+  ]) {
+    assert.ok(LANDMASS_OCEAN_FLUX_FRAG.includes(token), `Virtual-pipe flux missing: ${token}`);
+  }
+  for (const token of [
+    'dt * (totalIn - totalOut)',
+    'float foamAdvected = texture(uStateTex, backUv).g;',
+    'foam *= exp(-dt * foamDecayRate / max(0.25, uSim.w));',
+    'float breaker =',
+    'float uprush =',
+    'float impact =',
+    'outState = vec4(depth, foam, velocity.x, velocity.y);',
+  ]) {
+    assert.ok(LANDMASS_OCEAN_INTEGRATE_FRAG.includes(token), `Persistent foam integration missing: ${token}`);
   }
 
-  const baseBefore = [...foam.basePositions.slice(0, 12)];
-  animateFoamGeometry(foam, 1.35, { speed: 1 });
-  assert.deepEqual([...foam.basePositions.slice(0, 12)], baseBefore, 'Animation preserves generated base geometry');
-  assert.notDeepEqual(
-    [...foam.positions.slice(0, 12)],
-    baseBefore,
-    'Surf motion moves foam vertices rather than changing a fragment pattern'
-  );
+  for (const [name, src] of Object.entries({
+    init: LANDMASS_OCEAN_INIT_FRAG,
+    flux: LANDMASS_OCEAN_FLUX_FRAG,
+    integrate: LANDMASS_OCEAN_INTEGRATE_FRAG,
+  })) {
+    assert.deepEqual(checkGlslScopes(src, `landmass-ocean-${name}`), [], `${name} ocean shader has no undeclared identifiers`);
+  }
 
   const viewportSrc = fs.readFileSync(new URL('../src/app/landmass-viewport.js', import.meta.url), 'utf8');
   const coreSrc = fs.readFileSync(new URL('../src/core/landmass.js', import.meta.url), 'utf8');
-  assert.ok(coreSrc.includes('every visible foam edge is a vertex'), 'Core documents the geometry-foam contract');
-  assert.ok(!viewportSrc.includes('ShaderMaterial'), 'Landmass viewport uses no custom foam shader material');
-  assert.ok(!viewportSrc.includes('THREE.Points'), 'Landmass viewport uses no foam particles');
-  assert.ok(viewportSrc.includes('buildFoamGeometry') && viewportSrc.includes('animateFoamGeometry'));
+  const oceanSrc = fs.readFileSync(new URL('../src/app/landmass-ocean.js', import.meta.url), 'utf8');
+  assert.ok(viewportSrc.includes('new LandmassOceanSimulation'));
+  assert.ok(viewportSrc.includes('this.ocean?.update(delta)'));
+  assert.ok(!viewportSrc.includes('buildFoamGeometry'), 'Old shoreline foam strips are no longer the visible foam source');
+  assert.ok(!viewportSrc.includes('animateFoamGeometry'), 'Old scripted vertex surf motion is gone');
+  assert.ok(!coreSrc.includes('export function buildFoamGeometry'), 'Superseded shoreline-strip foam builder is removed');
+  assert.ok(!oceanSrc.includes('THREE.Points'), 'Simulated foam is not particle foam');
+  assert.ok(!oceanSrc.includes('valueNoise2'), 'Foam state is not painted from procedural noise');
+  assert.ok(oceanSrc.includes('this.foamMesh = new THREE.Mesh'), 'Whitewater remains a displaced surface mesh');
+  assert.ok(oceanSrc.includes('reset(warmupSteps = 144)'), 'Ocean reset warms up flux, velocity, and foam before presentation');
+  assert.ok(oceanSrc.includes('sqrt(max(0.2, uSim.z) * max(1.0, uDomain.y)) * k'), 'Swell forcing uses virtual-pipe wave celerity');
 });
 
 test('Landmass Studio is wired as a third simple workspace without Terrain Studio simulation panels', () => {
@@ -131,7 +204,7 @@ test('Landmass Studio is wired as a third simple workspace without Terrain Studi
     'id="left-landmass-panels"',
     'id="right-landmass-panels"',
     'id="landmass-viewport"',
-    'FOAM GEOMETRY',
+    'SURF &amp; WHITEWATER FOAM',
     'no erosion, rivers, snow, rocks, vegetation, or other systems',
   ]) {
     assert.ok(html.includes(token), `Landmass HTML missing ${token}`);
