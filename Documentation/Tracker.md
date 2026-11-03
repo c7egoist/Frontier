@@ -1256,9 +1256,9 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
   controls, the compact `MaterialPanel` and `FracturePanel`; it was captured in headless Chromium for reference.
 - **Scene objects:** 37 `Geometry` records in `Projects/Everest/Content/Levels/Default.levelspace`, in eight Outliner
   groups, cover all 504 static occupants of the scene archive once (the vehicle, the fragment and stress pools and the
-  ground tiles stay out). Repeated sets are one object each: 15 objects carry Array modifiers whose stacks reproduce the
-  demo's placements (radial rings, stacked arrays for the moose and parking cones, turned crates); multi-shape fixtures
-  (street lamps, tunnel, control tower) are one object with parts.
+  ground tiles stay out). Repeated sets are one object each: 26 objects carry 32 Array modifiers (five stack two or
+  three) whose stacks reproduce the demo's placements (radial rings, stacked arrays for the moose and parking cones,
+  turned crates); multi-shape fixtures (street lamps, tunnel, control tower) are one object with parts.
 - **Inspector:** `Interface/Inspectors/GeometryInspector` with one class per card in `Inspectors/Geometry/` (transform,
   quick controls, modifier stack, material, fracture). New reusable controls: `RecordHeading`, `TransformTable`,
   `QuickTiles`, `ModifierPanel`, `ChannelRows`, `CardTitleRow`, `NotesField`; a Project Zero theme
