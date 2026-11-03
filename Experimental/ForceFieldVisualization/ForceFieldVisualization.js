@@ -46,7 +46,7 @@ const ForceFieldVisualization = (() =>
     //------------------------------------------------------------------------------------------------------------------------
 
     const Quantities = {
-        Speed:      { Label: 'Speed',        Short: '|v|', Signed: false, Derivative: false },
+        Speed:      { Label: 'Horizontal speed', Short: '|v|', Signed: false, Derivative: false },
         AlongX:     { Label: 'East · X',     Short: 'vx',  Signed: true,  Derivative: false },
         AlongZ:     { Label: 'South · Z',    Short: 'vz',  Signed: true,  Derivative: false },
         Vertical:   { Label: 'Vertical · Y', Short: 'vy',  Signed: true,  Derivative: false },
@@ -65,6 +65,7 @@ const ForceFieldVisualization = (() =>
     function FormatDistance(Metres)
     {
         const Magnitude = Math.abs(Metres);
+        if (Magnitude < 1e-6) return '0 m';
         if (Magnitude >= 1000) return `${(Metres / 1000).toFixed(Magnitude >= 10000 ? 0 : Magnitude >= 2000 ? 1 : 2).replace(/\.0+$/, '')} km`;
         if (Magnitude >= 10) return `${Metres.toFixed(0)} m`;
         if (Magnitude >= 1) return `${Metres.toFixed(1).replace(/\.0$/, '')} m`;
@@ -142,7 +143,7 @@ const ForceFieldVisualization = (() =>
         const View = { Mode: 'Map', CentreX: 0, CentreZ: 0, Span: 2000, Yaw: Math.PI / 4, Pitch: 0.62, ViewProjection: null };
         const Statistics = { Samples: 0, Milliseconds: 0, CellSpan: 1, Scale: 1, Peak: 0, Columns: 0, Rows: 0, ArrowSpan: 1, Refreshes: 0 };
         const Probe = new Float64Array(3);
-        const Lattice = { Columns: 0, Rows: 0, OriginX: 0, OriginZ: 0, CellSpan: 1, Vectors: new Float32Array(0), Quantity: new Float32Array(0),
+        const Lattice = { Columns: 0, Rows: 0, OriginX: 0, OriginZ: 0, CellSpan: 1, MedianVertical: 0, Vectors: new Float32Array(0), Quantity: new Float32Array(0),
                           Inside: new Uint8Array(0), Image: null, ImageCanvas: document.createElement('canvas'), Stamp: '', Time: -1, RefreshedAt: 0,
                           Unit: 'm/s' };
         const Offscreen = document.createElement('canvas');
@@ -231,7 +232,8 @@ const ForceFieldVisualization = (() =>
             MaximumX = Math.max(...Corners.map(Corner => Corner[0]));
             MinimumZ = Math.min(...Corners.map(Corner => Corner[1]));
             MaximumZ = Math.max(...Corners.map(Corner => Corner[1]));
-            const Limit = View.Span * 3;
+            // 📝 Oblique shows the slice as a plate (0.84 of a span a side) standing in space, so its edges and the columns read as 3D.
+            const Limit = View.Mode === 'Oblique' ? View.Span * 0.42 : View.Span * 3;
             MinimumX = Math.max(MinimumX, View.CentreX - Limit); MaximumX = Math.min(MaximumX, View.CentreX + Limit);
             MinimumZ = Math.max(MinimumZ, View.CentreZ - Limit); MaximumZ = Math.min(MaximumZ, View.CentreZ + Limit);
             if (Options.ClipToExtent && Options.Extent)
@@ -246,7 +248,7 @@ const ForceFieldVisualization = (() =>
         //                                                   SAMPLING
         //--------------------------------------------------------------------------------------------------------------------
 
-        // 📝 Level of detail: the cell span is the power of two (in metres) at or above CellPixels on screen, so the grid snaps
+        // 📝 Level of detail: the cell span is the power of two (in metres) nearest CellPixels on screen, so the grid snaps
         //    to the world and panning never shimmers; each halving of zoom is one level, like a clipmap cascade.
         function ResolveCellSpan()
         {
@@ -256,7 +258,7 @@ const ForceFieldVisualization = (() =>
                 return Math.max(Coverage.MaximumX - Coverage.MinimumX, Coverage.MaximumZ - Coverage.MinimumZ) / Options.CameraCells;
             }
             const Wanted = View.Span / Math.max(1, Width) * Options.CellPixels;
-            return Math.pow(2, Math.ceil(Math.log2(Math.max(1e-4, Wanted))));
+            return Math.pow(2, Math.round(Math.log2(Math.max(1e-4, Wanted))));
         }
 
         function ResolveStamp()
@@ -339,7 +341,7 @@ const ForceFieldVisualization = (() =>
                     const VX = Vectors[Index * 3], VY = Vectors[Index * 3 + 1], VZ = Vectors[Index * 3 + 2];
                     let Reading;
                     if (Options.Contribution === 'Damp') Reading = VX;
-                    else if (Mode === 'Speed') Reading = Math.sqrt(VX * VX + VY * VY + VZ * VZ);
+                    else if (Mode === 'Speed') Reading = Math.sqrt(VX * VX + VZ * VZ);
                     else if (Mode === 'AlongX') Reading = VX;
                     else if (Mode === 'AlongZ') Reading = VZ;
                     else if (Mode === 'Vertical') Reading = VY;
@@ -360,6 +362,13 @@ const ForceFieldVisualization = (() =>
             }
             Statistics.Peak = Peak;
             Lattice.Unit = ResolveUnit(Options.Contribution, Mode);
+            // 📝 The rising / sinking markers compare each cell with the view's median vertical reading, so a uniform pull
+            //    (gravity everywhere) marks nothing while a lift column or a downdraft still stands out.
+            const Strides = [];
+            const Count = Columns * Rows, Stride = Math.max(1, Math.floor(Count / 400));
+            for (let Index = 0; Index < Count; Index += Stride) if (Inside[Index]) Strides.push(Vectors[Index * 3 + 1]);
+            Strides.sort((A, B) => A - B);
+            Lattice.MedianVertical = Strides.length ? Strides[Strides.length >> 1] : 0;
             // 📝 Automatic scale: the 98th percentile of |reading| (a 256-bin histogram), eased between refreshes and snapped
             //    when the view jumps by more than ×4, so the legend does not flicker while the field animates.
             let Target = Options.FixedScale;
@@ -532,6 +541,15 @@ const ForceFieldVisualization = (() =>
                 Context.setLineDash([6, 6]);
                 StrokeWorldPolygon([[E.MinimumX, SliceY, E.MinimumZ], [E.MaximumX, SliceY, E.MinimumZ], [E.MaximumX, SliceY, E.MaximumZ], [E.MinimumX, SliceY, E.MaximumZ]], true);
             }
+            if (View.Mode === 'Oblique')
+            {
+                // 📝 The plate's rim and a faint ground shadow below it, so the slice height reads.
+                Context.setLineDash([]);
+                Context.strokeStyle = 'rgba(223,231,243,0.55)';
+                Context.lineWidth = 1.2;
+                StrokeWorldPolygon([[Coverage.MinimumX, SliceY, Coverage.MinimumZ], [Coverage.MaximumX, SliceY, Coverage.MinimumZ],
+                                    [Coverage.MaximumX, SliceY, Coverage.MaximumZ], [Coverage.MinimumX, SliceY, Coverage.MaximumZ]], true);
+            }
             Context.restore();
         }
 
@@ -550,7 +568,8 @@ const ForceFieldVisualization = (() =>
                 Context.setLineDash(Position === 0 ? [] : [7, 5]);
                 StrokeWorldPolygon([[FocusX - Half, SliceY, FocusZ - Half], [FocusX + Half, SliceY, FocusZ - Half], [FocusX + Half, SliceY, FocusZ + Half], [FocusX - Half, SliceY, FocusZ + Half]], true);
                 const Corner = Project(FocusX - Half, SliceY, FocusZ - Half);
-                if (Corner && Corner[0] > -200 && Corner[1] > -40 && Corner[0] < Width && Corner[1] < Height)
+                const Across = Cascade.Extent * (View.Mode === 'Camera' ? 0 : ResolveAffine().PixelsPerMetre);
+                if (Corner && Across >= 90 && Corner[0] > -200 && Corner[1] > -40 && Corner[0] < Width && Corner[1] < Height)
                 {
                     const Label = Cascade.Label || `C${Position} · ${FormatDistance(Cascade.Extent)} · ${FormatDistance(Cascade.Cell)} cells`;
                     const LabelX = Math.max(8, Corner[0] + 6), LabelY = Math.max(16, Corner[1] + 15);
@@ -610,13 +629,14 @@ const ForceFieldVisualization = (() =>
                 {
                     if (!Interpolate(X, Z, Vector)) continue;
                     const Horizontal = Math.hypot(Vector[0], Vector[2]);
-                    const Magnitude = Math.hypot(Horizontal, Vector[1]);
+                    const Magnitude = Math.hypot(Horizontal, Vector[1] - Lattice.MedianVertical);
                     if (Magnitude < Scale * 0.02) continue;
                     const Tail = Project(X, SliceY, Z);
                     if (!Tail || Tail[0] < -40 || Tail[1] < -40 || Tail[0] > Width + 40 || Tail[1] > Height + 40) continue;
-                    if (Math.abs(Vector[1]) > Horizontal * 1.4 && Math.abs(Vector[1]) > Scale * 0.12)
+                    const Lifted = Vector[1] - Lattice.MedianVertical;
+                    if (Math.abs(Lifted) > Horizontal * 1.4 && Math.abs(Lifted) > Scale * 0.12)
                     {
-                        const Target = Vector[1] > 0 ? Rising : Sinking;
+                        const Target = Lifted > 0 ? Rising : Sinking;
                         Target.moveTo(Tail[0] + 4, Tail[1]);
                         Target.arc(Tail[0], Tail[1], 4, 0, Math.PI * 2);
                         Drawn++;
@@ -663,10 +683,11 @@ const ForceFieldVisualization = (() =>
                 {
                     if (!Interpolate(X, Z, Reseed)) continue;
                     const Horizontal = Math.hypot(Reseed[0], Reseed[2]);
-                    if (!(Math.abs(Reseed[1]) > Horizontal * 1.4 && Math.abs(Reseed[1]) > Scale * 0.12)) continue;
+                    const Lifted = Reseed[1] - Lattice.MedianVertical;
+                    if (!(Math.abs(Lifted) > Horizontal * 1.4 && Math.abs(Lifted) > Scale * 0.12)) continue;
                     const Point = Project(X, SliceY, Z);
                     if (!Point) continue;
-                    if (Reseed[1] > 0) { Context.beginPath(); Context.arc(Point[0], Point[1], 1.3, 0, Math.PI * 2); Context.fill(); }
+                    if (Lifted > 0) { Context.beginPath(); Context.arc(Point[0], Point[1], 1.3, 0, Math.PI * 2); Context.fill(); }
                     else
                     {
                         Context.beginPath();
@@ -775,12 +796,14 @@ const ForceFieldVisualization = (() =>
             return [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([U, V]) =>
             {
                 const LocalX = U * Source.HalfX, LocalZ = V * Source.HalfZ;
-                return [Source.X + LocalX * Cosine - LocalZ * Sine, Y, Source.Z + LocalX * Sine + LocalZ * Cosine];
+                const CentreX = Source.OutlineX ?? Source.X, CentreZ = Source.OutlineZ ?? Source.Z;
+                return [CentreX + LocalX * Cosine - LocalZ * Sine, Y, CentreZ + LocalX * Sine + LocalZ * Cosine];
             });
         }
 
-        // 📝 Source: { Id, X, Y, Z, Radius, Shape ('Circle' | 'Box' | 'Everywhere'), HalfX, HalfZ, Rotation [°], InnerRadius,
-        //    Height (column), Bearing [°], Contribution, Label, Active (0–1), Selected, Track: [[X, Z], …] }.
+        // 📝 Source: { Id, X, Y, Z, Radius, Shape ('Circle' | 'Box' | 'Everywhere'), HalfX, HalfZ, Rotation [°], OutlineX/OutlineZ
+        //    (a box centred away from the handle), InnerRadius, Height (column), Bearing [°], Contribution, Label, Active (0–1),
+        //    Selected, Dim (another contribution than the one shown), Track: [[X, Z], …] }.
         function RenderSources()
         {
             if (!Options.ShowSources) return;
@@ -792,7 +815,7 @@ const ForceFieldVisualization = (() =>
             {
                 const Colour = Source.Colour || ContributionColours[Source.Contribution] || '#dfe7f3';
                 const Active = Source.Active ?? 1;
-                Context.globalAlpha = 0.45 + 0.55 * Math.min(1, Active + (Source.Selected ? 0.4 : 0));
+                Context.globalAlpha = (0.45 + 0.55 * Math.min(1, Active + (Source.Selected ? 0.4 : 0))) * (Source.Dim && !Source.Selected ? 0.4 : 1);
                 Context.strokeStyle = Colour;
                 Context.lineWidth = Source.Selected ? 2 : 1.2;
                 Context.setLineDash(Active > 0.01 ? [] : [5, 5]);
@@ -818,16 +841,16 @@ const ForceFieldVisualization = (() =>
                         Context.restore();
                     }
                 }
-                if (View.Mode === 'Oblique' && Source.SliceY > 0)
+                if (View.Mode === 'Oblique' && Source.Height > 0)
                 {
                     Context.save();
                     Context.setLineDash([]);
                     Context.lineWidth = 1.4;
-                    StrokeWorldPolygon([[Source.X, Source.Y, Source.Z], [Source.X, Source.Y + Source.SliceY, Source.Z]], false);
+                    StrokeWorldPolygon([[Source.X, Source.Y, Source.Z], [Source.X, Source.Y + Source.Height, Source.Z]], false);
                     if (Source.Radius * PixelsPerMetre >= 3)
                     {
                         Context.globalAlpha *= 0.5;
-                        StrokeWorldPolygon(CircleOutline(Source.X, Source.Y + Source.SliceY, Source.Z, Math.max(Source.InnerRadius || 0, Source.Radius * 0.3), 48), true);
+                        StrokeWorldPolygon(CircleOutline(Source.X, Source.Y + Source.Height, Source.Z, Math.max(Source.InnerRadius || 0, Source.Radius * 0.3), 48), true);
                     }
                     Context.restore();
                 }
@@ -867,7 +890,9 @@ const ForceFieldVisualization = (() =>
                     Context.arc(Centre[0], Centre[1], 9, 0, Math.PI * 2);
                     Context.stroke();
                 }
-                if (Options.ShowLabels && Source.Label) Labels.push([Source, Centre, Colour]);
+                // 📝 At large spans a source smaller than a few pixels keeps its dot but not its label, so a 100 km view stays legible.
+                const Tiny = PixelsPerMetre && Source.Shape !== 'Everywhere' && Math.max(Source.Radius || 0, Source.HalfX || 0, Source.HalfZ || 0) * PixelsPerMetre < 6;
+                if (Options.ShowLabels && Source.Label && (!Tiny || Source.Selected) && (!Source.Dim || Source.Selected)) Labels.push([Source, Centre, Colour]);
             }
             Context.globalAlpha = 1;
             Context.font = '500 11px "DM Sans", sans-serif';
@@ -1010,7 +1035,7 @@ const ForceFieldVisualization = (() =>
                         Probe[0] = Probe[1] = Probe[2] = 0;
                         const X = Extent.MinimumX + (Column + 0.5) / Size * SpanX, Z = Extent.MinimumZ + (Row + 0.5) / Size * SpanZ;
                         const Within = Specification.Sample(Options.Contribution === 'Damp' ? 'Damp' : Options.Contribution, X, Options.SliceHeight, Z, Time, CellSpan, Probe) !== false;
-                        const Reading = Options.Contribution === 'Damp' ? Probe[0] : Math.hypot(Probe[0], Probe[1], Probe[2]);
+                        const Reading = Options.Contribution === 'Damp' ? Probe[0] : Math.hypot(Probe[0], Probe[2]);
                         Readings[Row * Size + Column] = Reading;
                         Inside[Row * Size + Column] = Within ? 1 : 0;
                         if (Within) Peak = Math.max(Peak, Reading);

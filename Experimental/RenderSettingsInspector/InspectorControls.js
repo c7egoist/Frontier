@@ -473,7 +473,8 @@ const InspectorControls = (() =>
 
     // 📝 The dashboard reference's chart: dashed guides, a dashed target, shaded windows above the target with white markers
     //    at their edges, a thin bright line. Binding: { Samples (array), Capacity, Target() [ms], Height }.
-    //    Optional: Unit ('ms'), TargetLabel ('Target'), TargetDigits (1), AxisDigits (0), Headroom (1.6), TimeLabels.
+    //    Optional: Unit ('ms'), TargetLabel ('Target') — either may be a function —, TargetDigits (1), AxisDigits (0), Headroom (1.6),
+    //    TimeLabels.
     function TimeSeries(Parent, Binding)
     {
         const Height = Binding.Height || 132;
@@ -491,7 +492,7 @@ const InspectorControls = (() =>
             const Bottom  = Height - 18;
             const Target  = Binding.Target();
             const Samples = Binding.Samples;
-            const Unit    = Binding.Unit ?? 'ms';
+            const Unit    = typeof Binding.Unit === 'function' ? Binding.Unit() : (Binding.Unit ?? 'ms');
             const Suffix  = Unit ? ' ' + Unit : '';
             const Peak    = (Math.max(Target * (Binding.Headroom ?? 1.6), ...Samples) * 1.08) || 1;
             const AtY     = Milliseconds => Bottom - (Milliseconds / Peak) * (Bottom - 6);
@@ -540,7 +541,8 @@ const InspectorControls = (() =>
             Svg.append(ConstructSvg('line', { x1: 0, x2: Right, y1: TargetY, y2: TargetY, stroke: '#ffffff', 'stroke-opacity': 0.55,
                                               'stroke-dasharray': '7 6' }),
                        ConstructSvg('text', { x: 0, y: TargetY - 5, fill: '#9a9a9a' },
-                                     (Binding.TargetLabel ?? 'Target') + ' ' + Target.toFixed(Binding.TargetDigits ?? 1) + Suffix));
+                                     (typeof Binding.TargetLabel === 'function' ? Binding.TargetLabel() : (Binding.TargetLabel ?? 'Target')) + ' '
+                                     + Target.toFixed(Binding.TargetDigits ?? 1) + Suffix));
             const TimeLabels = Binding.TimeLabels || ['−10 s', '−5 s', 'now'];
             for (const [Text, Share] of [[TimeLabels[0], 0], [TimeLabels[1], 0.5], [TimeLabels[2], 1]])
                 Svg.append(ConstructSvg('text', { x: Share * Right, y: Height - 2, 'text-anchor': Share === 0 ? 'start' : Share === 1 ? 'end' : 'middle' }, Text));
