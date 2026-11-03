@@ -222,12 +222,16 @@ endif()
 if(TARGET FrontierSolidArcBrowser AND TARGET FrontierSurfaceRasterization)
     add_executable(SolidArcBrowserValidation "${SOLIDARC_EXHIBIT}/SolidArcBrowserValidation.cpp")
     target_link_libraries(SolidArcBrowserValidation PRIVATE FrontierSolidArcUI FrontierSolidArcBrowser FrontierSurfaceRasterization)
+    # 📝 A build without a Slang compiler has no Surface set of its own: the test reads the stored set, as the editor then does.
+    set(SOLIDARC_BROWSER_SHADERS "${FRONTIER_ROOT}/EngineContent/ShaderArchives/Surface")
     if(TARGET FrontierSurfaceShaders)
-        add_dependencies(SolidArcBrowserValidation FrontierSurfaceShaders SolidArcCapture)
+        add_dependencies(SolidArcBrowserValidation FrontierSurfaceShaders)
+        set(SOLIDARC_BROWSER_SHADERS "${FRONTIER_SURFACE_SHADER_DIRECTORY}")
     endif()
+    add_dependencies(SolidArcBrowserValidation SolidArcCapture)
     add_test(NAME SolidArcBrowserValidation
              COMMAND SolidArcBrowserValidation --exhibits "${CMAKE_BINARY_DIR}/SolidArc/BrowserValidation"
-                     --shaders "${FRONTIER_SURFACE_SHADER_DIRECTORY}" --workspace "$<TARGET_FILE:SolidArcCapture>")
+                     --shaders "${SOLIDARC_BROWSER_SHADERS}" --workspace "$<TARGET_FILE:SolidArcCapture>")
     set_tests_properties(SolidArcBrowserValidation PROPERTIES WORKING_DIRECTORY "${FRONTIER_ROOT}" SKIP_RETURN_CODE 77 TIMEOUT 900)
 endif()
 

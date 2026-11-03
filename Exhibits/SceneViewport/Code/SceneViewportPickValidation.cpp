@@ -460,7 +460,8 @@ int main(int ArgumentCount, char** Arguments)
             const auto Picked = Objects.ResolvePickedRecord(Pick);
             Report(TorusOccupant != OccupantPick::NoOccupant && Answer.Decided && Seen == Answer.Occupant && Seen != TorusOccupant && Boxed == TorusOccupant &&
                        Picked != TorusToken.Value,
-                   "the torus's hole (pixel " + std::to_string(Pixel[0]) + ", " + std::to_string(Pixel[1]) + "): the GPU pick finds #" + std::to_string(Seen) + " (" +
+                   "the torus (" + (TorusOccupant != OccupantPick::NoOccupant ? "reserve occupant #" + std::to_string(TorusOccupant) : std::string("not placed")) +
+                       ") through its hole (pixel " + std::to_string(Pixel[0]) + ", " + std::to_string(Pixel[1]) + "): the GPU pick finds #" + std::to_string(Seen) + " (" +
                        (Seen < Scene.Occupants.size() ? Scene.Occupants[Seen].Name : std::string("nothing")) + ") as the triangles do, the torus's box took it " +
                        "(#" + std::to_string(Boxed) + "); " + std::to_string(Ring) + " of 81 neighbourhood texels show the torus's ring");
         }

@@ -78,12 +78,14 @@ Frontier/Engine/
 │   ├── GlobalIllumination/                   the 1:1 port (namespace Frontier::GlobalIllumination)
 │   │     IlluminationHost, SceneStructure, BoundingStructure, OccupantDistanceSpace, SceneDistanceSpace,
 │   │     SurfaceCardDepot, RayTracingSpace, AtmosphereIntegrator, ShadowProjection, SurfaceProjection,
-│   │     ResamplingSequence, DisplayProjection, RefreshEncoding, EnvironmentEncoding, LuminaireRegister, …
+│   │     ResamplingSequence, DisplayProjection, RefreshEncoding, EnvironmentEncoding, LuminaireRegister,
+│   │     PickProjection (GPU picking, beyond the demo), …
 │   └── SceneViewport/                        SceneViewport (bring-up + refresh) and EnvironmentOverlay
-└── Shaders/GlobalIllumination/*.slang        55 Slang units, 33 SPIR-V entries (EnvironmentVisibility and
-                                              EnvironmentLighting bridge to the environment; the rest is the port)
+└── Shaders/GlobalIllumination/*.slang        58 Slang units, 39 SPIR-V entries (EnvironmentVisibility and
+                                              EnvironmentLighting bridge to the environment, PickRaster picks;
+                                              the rest is the port)
 EngineContent/ShaderArchives/
-├── GlobalIllumination/                       stored SPIR-V of the port (33) + ShaderCompilation.json
+├── GlobalIllumination/                       stored SPIR-V of the port (39) + ShaderCompilation.json
 └── Environment/                              stored SPIR-V of PlanetaryAtmosphere (15) + ShaderCompilation.json
 Projects/Everest/Source/EverestSceneViewport  level records → SceneViewport
 ```
@@ -426,7 +428,8 @@ stays a no-op and the physics (Jolt) is not added yet.
   slab), each with its baked signed distance volume (`.sdfspace`).
 - **Row menu** (right-click an Outliner row): Rename (F2, inline), Hide / Show, Fracture (no action yet), Duplicate
   (Ctrl+D) and Remove (Del).
-- **Picking:** a click in the viewport selects the object whose part the ray meets first (by bounding box).
+- **Picking:** a click in the viewport selects the object drawn under the pointer (GPU picking against the shown
+  triangles; see [GPU picking](#gpu-picking)).
 - **Transform handles** (**W**, **E**, **R**; `Interface/Controls/PlacementGizmo`): move along the world axes, turn
   about the object's Euler axes, scale along its axes or uniformly. Ctrl snaps to 0.25 m, 15° and 0.1; Esc undoes the
   drag.
@@ -564,12 +567,57 @@ editor's objects:
 
 - The reserve holds 512 occupants: copies and constructed objects beyond that are not drawn, and the inspector says
   how many. At most 96 objects have surfaces of their own.
-- Picking tests each part's bounding box, not its triangles.
 - The rotation rings follow the Euler angles (Z, then Y, then X): the X and Y rings turn about the object's tilted
   axes, not the world's.
 - Fracture is a no-op and Physics waits for the physics engine (Jolt).
 - Changing a shape archive's form needs `ShapeArchiveBake` again (the check reports a stale volume).
 - The speed of these paths on a GPU was not measured here: everything ran on SwiftShader.
+
+## GPU picking
+
+Picking met each object's bounding box, so a click near a large, slanted or rounded object could select it. A click
+now asks the GPU which object is drawn under the pointer.
+
+- **The click:** a left press and release that travels less than 5 interface pixels sends a serial and the point on
+  the stage with the next viewport request (`SceneViewportRequest::PickSerial`, `PickPoint`). The answer comes back
+  in the readout one interface tick later (`SceneViewportReadout::Pick`) and selects the record in the Outliner and
+  the inspector. A click on the sky, or on nothing a record owns, leaves the selection as it is.
+- **The pick** (`Rendering/GlobalIllumination/PickProjection`, `Shaders/GlobalIllumination/PickRaster.slang`): the
+  scene's draw runs (every facet set and occupant the surface raster draws) are rasterised again, from the camera of
+  the image on screen and without its jitter, into a 9 × 9 `R32Uint` target with its own reverse depth. The clip
+  space is stretched about the clicked pixel, so each texel is one screen pixel around it and keeps the nearest
+  occupant. The pick reads the image's own vertex stream and occupant profiles, so it works with the cluster,
+  virtualized-geometry and analytic paths alike: one submission and a 324-byte readback per click.
+- **The record:** `SceneGeometryOccupancy::QueryOwner` maps the occupant to the Geometry record that shows it (every
+  part and copy, the reserve's included; the ground is the Proving ground's). The clicked pixel's record wins. Where
+  the pixel shows the sky or nothing a record owns, the nearest record within 4 pixels is taken, so thin poles stay
+  easy to hit.
+- **Timing:** the pick runs before the refresh in `EverestSceneViewport::Render`, with the camera and extent of the
+  last image (kept after every refresh), so it matches what is on screen while the camera moves.
+- The bounding-box code (`GeometryPickVolume`, `PickGeometryVolume`, the readout's `GeometryVolumes`) is removed.
+
+`Code/SceneViewportPickValidation.cpp` (ctest `SceneViewportPickValidation`, own device) measured it on SwiftShader
+at 192 × 108 with 39,590 drawn facets. The reference is a CPU ray cast through each pixel's centre over the same facets,
+in double precision:
+
+| View                  | Picks | Pixels compared | Decided | GPU = triangles | Boxes name another record     | Pick   |
+|-----------------------|------:|----------------:|--------:|----------------:|-------------------------------|-------:|
+| default view          |    24 |             504 |     504 |             504 | 1 of 24 picks; 0.9 % of view  |  10 ms |
+| low, toward the tower |    24 |             504 |     503 |             503 | 0 of 24 picks; 0.4 % of view  |  10 ms |
+| high, over the course |    24 |             504 |     500 |             500 | 0 of 24 picks; 0.5 % of view  |   9 ms |
+
+- Every fourth pick compares all 81 texels of its neighbourhood. "Decided" leaves out the 5 of 1,512 pixels whose
+  centre lies within 0.05 px of an outline or on a coplanar overlap, where any rasteriser may take either side.
+- "Boxes name another record" compares the replaced bounding-box test with the triangles at the picked pixels and at
+  every second pixel of each view (90 of 15,303 pixels, 0.6 %). The proving ground's objects are mostly boxes, so the
+  boxes went wrong at the slanted and rounded shapes and beside large objects.
+- A 4 m torus seen from above: a click in its 1.6 m hole picks the ground seen through it, as the triangles do. Its
+  bounding box took that click.
+- The editor's path: a click on a building part answers serial 1 with its record (14 ms), a click on the sky answers
+  with no record, and an unchanged serial is not picked again. 10 of 10 checks pass.
+- `SceneGeometryValidation` adds two CPU checks: the owners, and the clicked-pixel-first resolution within 4 px.
+- The 10 ms is SwiftShader's CPU rasteriser drawing 118,770 vertices. On a GPU the pick is one small draw sequence
+  and a wait for it. That cost was not measured here.
 
 ## Checks
 
@@ -681,6 +729,8 @@ build/ShapeArchiveBake EngineContent/ShapeArchives check
 # gi, analytic, distance or virtualized, the seventh the refreshes after the edits)
 build/SceneGeometryValidation Projects/Everest EngineContent/EnvironmentArchives/ProvingGround out
 build/SceneGeometryCapture EngineContent Projects/Everest EngineContent/ShaderArchives out 6 gi
+# GPU picking against a CPU triangle cast, the torus's hole and the click path (own device)
+build/SceneViewportPickValidation Projects/Everest EngineContent/ShaderArchives out
 ```
 
 The build stages `EnvironmentArchives/ProvingGround` into `Projects/Everest/Content` through the project's content

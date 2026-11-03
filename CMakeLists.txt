@@ -721,7 +721,8 @@ if(BUILD_TESTING)
     add_test(NAME SceneViewportPickValidation COMMAND SceneViewportPickValidation
         "${CMAKE_SOURCE_DIR}/Projects/Everest" "${CMAKE_BINARY_DIR}/ShaderArchives"
         "${CMAKE_BINARY_DIR}/scene-viewport-pick-exhibits")
-    set_tests_properties(SceneViewportPickValidation PROPERTIES RUN_SERIAL TRUE)
+    # 📝 From the repository root: the engine shapes (the torus) resolve through EngineContent when the shaders come from the build.
+    set_tests_properties(SceneViewportPickValidation PROPERTIES RUN_SERIAL TRUE WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
     # 📝 The Everest workspace with its live Scene Viewport (own device), CPU-rasterized — Exhibits/SceneViewport/README.md.
     add_executable(SceneViewportWorkspaceCapture

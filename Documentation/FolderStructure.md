@@ -32,6 +32,7 @@ Frontier/
 │       │   ├── AnalyticIllumination/ # Editor/Development closed-form renderer (sun shadow map, Blinn-Phong, sky)
 │       │   ├── GlobalIllumination/ # 1:1 port of the VehicleHMI ReSTIR GI renderer (distance field, cards, BVH, ReSTIR, SVGF)
 │       │   ├── SceneViewport/      # SceneViewport + EnvironmentOverlay: the GI refresh with PlanetaryAtmosphere over it
+│       │   │                       # and GPU picking (GlobalIllumination/PickProjection: the occupant under a click)
 │       │   └── VirtualizedGeometry/ # 1:1 port of the VehicleHMI cluster nesting (build, cut, GPU cull, pages) + I1-I5
 │       └── Shaders/           # Slang 2026 SPIR-V 1.3 compute & raster shaders, one folder per renderer above
 ├── UI/
