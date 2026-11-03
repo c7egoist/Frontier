@@ -186,7 +186,7 @@ svg.glyph { width: 1em; height: 1em; flex: none; stroke: currentColor; fill: non
     transition: background 160ms var(--ease), border-color 160ms var(--ease);
 }
 .tree-row:hover { background: var(--row-hover); }
-.tree-row.child { margin-left: 22px; }
+.tree-row.nested { margin-left: 22px; }
 .tree-row.selected {
     background: linear-gradient(180deg, var(--row-selected-top), var(--row-selected-bottom));
     border-color: var(--row-selected-border);
@@ -524,7 +524,7 @@ svg.glyph { width: 1em; height: 1em; flex: none; stroke: currentColor; fill: non
 ------------------------------------------------------------------------------------------------------------------------*/
 .diagram { display: block; width: 100%; overflow: visible; }
 .diagram text { font-family: 'DM Sans', sans-serif; }
-.diagram-frame { margin: 2px 0 6px; padding: 12px; border-radius: 18px; background: #151515; border: 1px solid #232323; }
+.diagram-panel { margin: 2px 0 6px; padding: 12px; border-radius: 18px; background: #151515; border: 1px solid #232323; }
 .stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 10px; }
 .stat-cell { padding: 9px 10px; border-radius: 14px; background: #171717; border: 1px solid #232323; }
 .stat-cell b { display: block; font-size: 14px; font-weight: 400; font-variant-numeric: tabular-nums; }

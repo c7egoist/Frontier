@@ -48,7 +48,7 @@ const RenderSettingsCatalogue = (() =>
     //                                                       DEFAULTS
     //------------------------------------------------------------------------------------------------------------------------
 
-    // 📝 The demo's defaults (RefreshToggles, IlluminationSettings, VarianceSettings ×2: passes = WaveletIterations + 1) with Default.levelspace's own values
+    // 📝 The demo's defaults (RefreshToggles, IlluminationSettings, VarianceSettings ×2: wavelet levels = WaveletIterations + 1) with Default.levelspace's own values
     //    (quality 2, exposure 0.12 EV); the measured refinements off, as the shipped level has them.
     const DemoDefaults = {
         Renderer: 'Rtx', QualityTier: 2, RenderScale: 1.0, TraceScale: 2, InitialCandidates: 2,
@@ -60,8 +60,8 @@ const RenderSettingsCatalogue = (() =>
         MirrorFilter: false, MirrorTrace: false,
         DirectShadow: true, RayTracedShadows: true, FireflyFilter: true, SolarDisc: false, StratifiedSun: false, PenumbraFilter: false,
         VarianceFilter: true, Antialias: true,
-        DiffusePasses: 4, DiffuseTallyLimit: 24, DiffuseMinimumWeight: 0.08, DiffuseColourSigma: 4.0,
-        GlossyPasses: 3, GlossyTallyLimit: 12, GlossyMinimumWeight: 0.12, GlossyColourSigma: 3.0,
+        DiffuseWaveletLevels: 4, DiffuseTallyLimit: 24, DiffuseMinimumWeight: 0.08, DiffuseColourSigma: 4.0,
+        GlossyWaveletLevels: 3, GlossyTallyLimit: 12, GlossyMinimumWeight: 0.12, GlossyColourSigma: 3.0,
         AutoExposure: true, ExposureCompensation: 0.12,
         VirtualizedGeometry: false, VirtualizedStreamSlots: 0, ClusteredGeometry: true, FreezeDistance: false,
         Inspection: 0, DistanceInspection: 1, HudVisible: false, InsetEnabled: false, SliceHeight: 1.0,
@@ -88,7 +88,7 @@ const RenderSettingsCatalogue = (() =>
                               'SkyScale', 'IncandescenceScale', 'CardRadiosity', 'CardTileBudget', 'InitialCandidates', 'TraceScale',
                               'Reflection', 'RayTracedReflections', 'ReflectionBounces', 'ReflectionScale', 'ReflectionRoughness', 'MirrorFilter',
                               'MirrorTrace', 'RayTracedShadows', 'FireflyFilter', 'SolarDisc', 'StratifiedSun', 'PenumbraFilter', 'VarianceFilter',
-                              'DiffusePasses', 'DiffuseTallyLimit', 'DiffuseMinimumWeight', 'DiffuseColourSigma', 'GlossyPasses',
+                              'DiffuseWaveletLevels', 'DiffuseTallyLimit', 'DiffuseMinimumWeight', 'DiffuseColourSigma', 'GlossyWaveletLevels',
                               'GlossyTallyLimit', 'GlossyMinimumWeight', 'GlossyColourSigma', 'FreezeDistance'];
         if (Analytic && LightingKeys.includes(Key)) return Unavailable('analytic renderer');
         const RtxKeys = ['MaxBounces', 'InitialCandidates', 'MultiBounceNee', 'RussianRoulette', 'VisibilityReuse', 'RayTracedShadows',
@@ -202,7 +202,7 @@ const RenderSettingsCatalogue = (() =>
                 if (Traced && S.MirrorFilter && S.MirrorTrace) Push('Mirror trace', 'Reflections', 1.6 * RenderShare);
             }
             if (S.VarianceFilter)
-                Push('Variance filters', 'Denoising', (0.09 * S.DiffusePasses + 0.09 * S.GlossyPasses + 0.12) * TraceShare * 1.6);
+                Push('Variance filters', 'Denoising', (0.09 * S.DiffuseWaveletLevels + 0.09 * S.GlossyWaveletLevels + 0.12) * TraceShare * 1.6);
             Push('Recombination', 'Image', 0.2 * RenderShare);
         }
         Push('Environment overlay', 'Image', 0.95 * ScreenShare);
@@ -239,9 +239,9 @@ const RenderSettingsCatalogue = (() =>
         ['direct_shadow', S => S.DirectShadow], ['ray_traced_shadows', S => S.RayTracedShadows], ['firefly_filter', S => S.FireflyFilter],
         ['solar_disc', S => S.SolarDisc], ['stratified_sun', S => S.StratifiedSun], ['penumbra_filter', S => S.PenumbraFilter],
         ['variance_filter', S => S.VarianceFilter], ['temporal_aa', S => S.Antialias],
-        ['diffuse_passes', S => S.DiffusePasses], ['diffuse_tally_limit', S => S.DiffuseTallyLimit],
+        ['diffuse_wavelet_levels', S => S.DiffuseWaveletLevels], ['diffuse_tally_limit', S => S.DiffuseTallyLimit],
         ['diffuse_minimum_weight', S => S.DiffuseMinimumWeight], ['diffuse_colour_sigma', S => S.DiffuseColourSigma],
-        ['glossy_passes', S => S.GlossyPasses], ['glossy_tally_limit', S => S.GlossyTallyLimit],
+        ['glossy_wavelet_levels', S => S.GlossyWaveletLevels], ['glossy_tally_limit', S => S.GlossyTallyLimit],
         ['glossy_minimum_weight', S => S.GlossyMinimumWeight], ['glossy_colour_sigma', S => S.GlossyColourSigma],
         ['auto_exposure', S => S.AutoExposure], ['exposure_ev', S => S.ExposureCompensation],
         ['virtualized_geometry', S => S.VirtualizedGeometry], ['virtualized_stream_slots', S => S.VirtualizedStreamSlots],

@@ -53,7 +53,7 @@ The record `RenderPipeline` ("Render settings") absorbs `Diagnostics`, `PolygonC
 | Global illumination      | Indirect GI, path bounces, NEE, roulette, ReSTIR reuse, intensities, surface cache    |
 | Reflections              | Reflections, RTX rays, bounces, intensity, roughness cutoff, mirror filter and trace  |
 | Sun & shadows            | Sun shadows, ray-traced shadows, firefly filter, solar disc, stratified sun, penumbra |
-| Denoising & antialiasing | Variance filter, diffuse and glossy à-trous passes, history, edge stops; temporal AA  |
+| Denoising & antialiasing | Variance filter, diffuse and glossy wavelet levels, history, edge stops; temporal AA  |
 | Exposure                 | Auto exposure, compensation                                                           |
 | Geometry                 | Virtualized geometry, stream slots, GPU cluster culling                               |
 | Distance field & BVH     | The grade's four clipmap cascades, freezing the field                                 |
@@ -61,7 +61,7 @@ The record `RenderPipeline` ("Render settings") absorbs `Diagnostics`, `PolygonC
 | Refresh timing           | Per-submission times of the last refresh                                              |
 
 The levelspace block at the end writes the record; keys marked `# proposed` are new for the C++ step, the others are
-already read by `SceneWorld.cpp`. The à-trous rows show passes: `VarianceIntegrator` dispatches
+already read by `SceneWorld.cpp`. The à-trous rows show wavelet levels: `VarianceIntegrator` dispatches
 `min(4, WaveletIterations + 1)`, so the demo's glossy filter runs 3 and the diffuse filter 4.
 
 ## Found while building it

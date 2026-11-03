@@ -12,7 +12,7 @@
     const Samples  = [];
     const SampleCapacity = 100;
     const ViewFolder     = '../../Exhibits/SceneViewport/Images/Inspection/';
-    let   SelectedRecord = 'render';
+    let   SelectedEntry = 'render';
     let   InspectorScroller = null;
     const LiveRefreshers = [];
 
@@ -57,7 +57,7 @@
               Meta: () => `${{ Rtx: 'RTX', Gtx: 'GTX', Analytic: 'Analytic' }[Settings.Renderer]} · ${FormatExtent(ResolveViewportExtents().Render)}` }] },
         { Title: 'Environment', Rows: [
             { Id: 'sun', Name: 'Sun', Glyph: 'Sun', Colour: '#e8c27a', Meta: () => '38° · 98 klx' },
-            { Id: 'flare', Name: 'Lens Flare', Glyph: 'Flare', Colour: '#e8c27a', Meta: () => '0.62 × · 7 blades', Child: true },
+            { Id: 'flare', Name: 'Lens Flare', Glyph: 'Flare', Colour: '#e8c27a', Meta: () => '0.62 × · 7 blades', Nested: true },
             { Id: 'clouds', Name: 'Clouds', Glyph: 'Cloud', Colour: '#b9c6d6', Meta: () => '42 % cover · 1750 m' },
             { Id: 'localcloud', Name: 'Local Cloud', Glyph: 'Cloud', Colour: '#b9c6d6', Meta: () => 'Local volume' },
             { Id: 'localfog', Name: 'Local Volumetric Fog', Glyph: 'Fog', Colour: '#a7b5c4', Meta: () => 'Local volume' },
@@ -71,7 +71,7 @@
             { Id: 'heightfog', Name: 'Height Fog', Glyph: 'Fog', Colour: '#a7b5c4', Meta: () => '0.012 · falloff 0.14' }] },
         { Title: 'Forces', Rows: [
             { Id: 'force', Name: 'Force Field', Glyph: 'Wind', Colour: '#8fc7b8', Meta: () => 'Ambient flow' },
-            { Id: 'wind', Name: 'Wind', Glyph: 'Wind', Colour: '#8fc7b8', Meta: () => '6.5 m/s · 45°', Child: true }] }
+            { Id: 'wind', Name: 'Wind', Glyph: 'Wind', Colour: '#8fc7b8', Meta: () => '6.5 m/s · 45°', Nested: true }] }
     ];
 
     function ConstructOutliner(Content)
@@ -101,11 +101,11 @@
                 const Glyph = C.Construct('div', 'row-glyph', C.ConstructGlyph(Row.Glyph));
                 Glyph.style.color = Row.Colour;
                 Glyph.style.background = Row.Colour + '1f';
-                const Element = C.Construct('div', 'tree-row' + (Row.Child ? ' child' : ''), [
+                const Element = C.Construct('div', 'tree-row' + (Row.Nested ? ' nested' : ''), [
                     Glyph, C.Construct('div', 'row-text', [C.Construct('div', 'row-name', Row.Name), Meta]),
                     C.Construct('div', 'row-state', C.ConstructGlyph('Check'))]);
-                Element.addEventListener('click', () => { SelectedRecord = Row.Id; ConstructInspectorPage(); C.Broadcast(); });
-                C.Register(() => { Meta.textContent = Row.Meta(); Element.classList.toggle('selected', SelectedRecord === Row.Id); });
+                Element.addEventListener('click', () => { SelectedEntry = Row.Id; ConstructInspectorPage(); C.Broadcast(); });
+                C.Register(() => { Meta.textContent = Row.Meta(); Element.classList.toggle('selected', SelectedEntry === Row.Id); });
                 Section.append(Element);
             }
             if (Group.Title === 'Rendering')
@@ -180,12 +180,12 @@
         const Extents = ResolveViewportExtents();
         const Sharpness = Math.min(1, Extents.Render[0] / Extents.Screen[0]);
         const Cover = Math.max(Width / Source.naturalWidth, Height / Source.naturalHeight);
-        const DrawnWidth = Source.naturalWidth * Cover, DrawnHeight = Source.naturalHeight * Cover;
+        const CoverWidth = Source.naturalWidth * Cover, CoverHeight = Source.naturalHeight * Cover;
         Downsampled.width = Math.max(16, Math.round(Width * Sharpness));
         Downsampled.height = Math.max(16, Math.round(Height * Sharpness));
         const Small = Downsampled.getContext('2d');
         Small.imageSmoothingQuality = 'high';
-        Small.drawImage(Source, (Width - DrawnWidth) / 2 * Sharpness, (Height - DrawnHeight) / 2 * Sharpness, DrawnWidth * Sharpness, DrawnHeight * Sharpness);
+        Small.drawImage(Source, (Width - CoverWidth) / 2 * Sharpness, (Height - CoverHeight) / 2 * Sharpness, CoverWidth * Sharpness, CoverHeight * Sharpness);
         Context.imageSmoothingEnabled = true;
         Context.imageSmoothingQuality = Sharpness < 1 ? 'low' : 'high';
         Context.drawImage(Downsampled, 0, 0, Width, Height);
@@ -423,7 +423,7 @@
     function ConstructResolutionDiagram(Parent)
     {
         const Height = 168;
-        const Panel = C.Construct('div', 'diagram-frame');
+        const Panel = C.Construct('div', 'diagram-panel');
         const Svg = C.ConstructSvg('svg', { class: 'diagram', height: Height });
         Panel.append(Svg);
         Parent.append(Panel);
@@ -462,7 +462,7 @@
     function ConstructCascadeDiagram(Parent)
     {
         const Height = 176;
-        const Panel = C.Construct('div', 'diagram-frame');
+        const Panel = C.Construct('div', 'diagram-panel');
         const Svg = C.ConstructSvg('svg', { class: 'diagram', height: Height });
         Panel.append(Svg);
         Parent.append(Panel);
@@ -497,7 +497,7 @@
     {
         const Height = 74;
         const Svg = C.ConstructSvg('svg', { class: 'diagram', height: Height });
-        const Panel = C.Construct('div', 'diagram-frame', Svg);
+        const Panel = C.Construct('div', 'diagram-panel', Svg);
         Parent.append(Panel);
         const Materials = [['Glass', 0.04], ['Tempered pane', 0.06], ['Traffic cone', 0.22]];
         const Refresh = () =>
@@ -657,18 +657,18 @@
     function ConstructDenoising(Page)
     {
         const Body = ConstructSection(Page, 'denoising', 'Denoising & antialiasing', 'Layers', 'Denoise',
-                                      () => Settings.VarianceFilter && Settings.Renderer !== 'Analytic' ? `SVGF ${Settings.DiffusePasses} · ${Settings.GlossyPasses} passes` : 'Off');
+                                      () => Settings.VarianceFilter && Settings.Renderer !== 'Analytic' ? `SVGF ${Settings.DiffuseWaveletLevels} · ${Settings.GlossyWaveletLevels} levels` : 'Off');
         C.SwitchRow(Body, Bind('VarianceFilter', { Label: 'Denoiser (SVGF)', Detail: 'Temporal moments, then à-trous wavelet iterations per lobe' }));
-        // 📝 VarianceIntegrator dispatches min(4, WaveletIterations + 1) 5 × 5 à-trous passes; the last reaches 2 · 2^(n−1) trace
-        //    pixels, on screen × the trace scale (the glossy filter's ±16 px at the demo's 3 passes and half-resolution trace).
-        const Reach = Passes => 2 * Math.pow(2, Passes - 1) * Settings.TraceScale;
+        // 📝 VarianceIntegrator dispatches min(4, WaveletIterations + 1) 5 × 5 à-trous levels; the last reaches 2 · 2^(n−1) trace
+        //    pixels, on screen × the trace scale (the glossy filter's ±16 px at the demo's 3 levels and half-resolution trace).
+        const Reach = Levels => 2 * Math.pow(2, Levels - 1) * Settings.TraceScale;
         for (const [Lobe, Title] of [['Diffuse', 'Diffuse filter'], ['Glossy', 'Glossy filter']])
         {
             const Card = C.Construct('div', 'sub-card');
             const Small = C.Construct('small');
             Card.append(C.Construct('div', 'sub-card-title', [C.Construct('span', null, Title), Small]));
-            C.Register(() => { Small.textContent = `reach ±${Reach(Settings[Lobe + 'Passes'])} screen px`; });
-            C.SliderRow(Card, Bind(Lobe + 'Passes', { Label: 'À-trous passes', Minimum: 1, Maximum: 4, Step: 1, Digits: 0 }));
+            C.Register(() => { Small.textContent = `reach ±${Reach(Settings[Lobe + 'WaveletLevels'])} screen px`; });
+            C.SliderRow(Card, Bind(Lobe + 'WaveletLevels', { Label: 'À-trous wavelet levels', Minimum: 1, Maximum: 4, Step: 1, Digits: 0 }));
             C.SliderRow(Card, Bind(Lobe + 'TallyLimit', { Label: 'History limit', Minimum: 1, Maximum: 64, Step: 1, Digits: 0, Labels: ['Responsive', 'Stable'] }));
             C.SliderRow(Card, Bind(Lobe + 'MinimumWeight', { Label: 'Minimum blend weight', Minimum: 0.01, Maximum: 0.5, Step: 0.01, Digits: 2 }));
             C.SliderRow(Card, Bind(Lobe + 'ColourSigma', { Label: 'Colour edge stop', Minimum: 0.5, Maximum: 16, Step: 0.5, Unit: 'σ', Digits: 1 }));
@@ -773,7 +773,7 @@
         });
     }
 
-    function ConstructRecord(Page)
+    function ConstructLevelspaceBlock(Page)
     {
         Page.append(C.Construct('div', 'properties-head', [C.Construct('div', 'title', 'Levelspace record'),
                                                             C.Construct('div', 'caption', 'Replaces five records')]));
@@ -791,7 +791,7 @@
         Copy.addEventListener('click', () =>
         {
             const Text = Catalog.EncodeLevelspace(Settings).join('\n');
-            (navigator.clipboard ? navigator.clipboard.writeText(Text) : Promise.reject()).then(() => C.Toast('Record copied'), () => C.Toast('Copy unavailable here'));
+            (navigator.clipboard ? navigator.clipboard.writeText(Text) : Promise.reject()).then(() => C.Toast('Levelspace entry copied'), () => C.Toast('Copy unavailable here'));
         });
         Page.append(C.Construct('div', 'action-row', [Reset, Copy]), Block);
         C.Register(() =>
@@ -865,7 +865,7 @@
         Content.append(Page);
         Page.append(C.Construct('div', 'breadcrumb-row', [C.Construct('div', 'breadcrumb', [document.createTextNode('Inspector / '), C.Construct('b', null, 'Rendering')]),
                                                            C.Construct('button', 'notes-pill', [C.ConstructGlyph('Plus'), C.Construct('span', null, 'Add notes')])]));
-        if (SelectedRecord !== 'render')
+        if (SelectedEntry !== 'render')
         {
             Page.append(C.Construct('div', 'empty-inspector', [C.Construct('h3', null, 'Outside this prototype'),
                 document.createTextNode('This record keeps its existing C++ inspector. The prototype covers the one Render settings component; select it in the Outliner.')]));
@@ -886,7 +886,7 @@
         ConstructDistanceField(Page);
         ConstructViews(Page);
         ConstructTiming(Page);
-        ConstructRecord(Page);
+        ConstructLevelspaceBlock(Page);
         ConstructTabs();
     }
 
@@ -894,7 +894,7 @@
     //                                                     INITIALIZATION
     //------------------------------------------------------------------------------------------------------------------------
 
-    // 📝 A frame-time sample every 100 ms around the estimate (±3 %, rare 1.5× spikes), so the chart moves as the editor's will.
+    // 📝 A refresh-time sample every 100 ms around the estimate (±3 %, rare 1.5× spikes), so the chart moves as the editor's will.
     function AdvanceSamples()
     {
         const Estimate = Catalog.EstimateSubmissions(Settings, ResolveViewportExtents()).Total;
