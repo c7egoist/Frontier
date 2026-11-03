@@ -360,8 +360,8 @@ The whole renderer is one Outliner component, Render settings (the `RenderPipeli
 approved prototype (`Experimental/RenderSettingsInspector`) in C++. `Images/RenderSettings/` holds the workspace with
 it selected (`RenderSettings.png`) and each of its nine sections in a column tall enough to show it whole
 (`RenderSettings-Section-0.png` … `-8.png`: sampling, lighting, reflections, shadows, denoise, exposure, geometry,
-views, timing). `RenderSettings-Analytic.png` is the workspace with debug view 15, the analytic illumination, chosen. The
-timing figures are the viewport's measured refreshes on SwiftShader, not estimates.
+views, timing). `RenderSettings-Analytic.png` is the workspace with debug view 15, the analytic illumination,
+chosen. The timing figures are the viewport's measured refreshes on SwiftShader, not estimates.
 
 ## Checks
 
