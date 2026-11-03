@@ -10,7 +10,7 @@ tiles, live parameter map). Colours are the C++ `InspectorPalette` (dark branch)
 
 ![The prototype: outliner, viewport with Log Stream, and the Render settings inspector](Preview.jpg)
 
-![Inspector sections: resolution and sampling, GI, reflections, denoising, exposure, geometry, debug views, timing](Sections.jpg)
+![Inspector sections: resolution, GI, reflections, denoising, exposure, geometry, debug views](Sections.jpg)
 
 ## Open it
 
