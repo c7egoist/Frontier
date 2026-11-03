@@ -1,0 +1,7 @@
+node_modules/
+dist/
+_AgentScratch/
+_ClaudeScratch/
+__pycache__/
+.DS_Store
+*.log
