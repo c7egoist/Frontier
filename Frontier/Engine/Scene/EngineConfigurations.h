@@ -705,9 +705,9 @@ struct GeometryConfiguration : RevisionCounter
     std::string              Notes{};
 
     bool Visible            = true;    // [-] drawn, traced and unioned into the distance field
-    bool Dynamic            = false;   // [-] authored: moves at run time (physics)
-    bool CastShadows        = true;    // [-] authored
-    bool GlobalIllumination = true;    // [-] authored
+    bool Dynamic            = false;   // [-] its cards relight every refresh (moves at run time once the physics runs)
+    bool CastShadows        = true;    // [-] in the shadow runs, the shadow rays and the analytic solar depth
+    bool GlobalIllumination = true;    // [-] in the distance union and the traced rays
     bool Physics            = false;   // [-] authored: a rigid body once the physics runs
     bool Locked             = false;   // [-] the transform and the modifier stack refuse edits
 

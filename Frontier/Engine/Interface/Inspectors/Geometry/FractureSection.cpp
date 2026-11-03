@@ -49,6 +49,9 @@ bool GeometryFractureSection::Construct(ControlColumn& Page, GeometryConfigurati
     if (Resolved.Breakable)
         std::snprintf(Note, sizeof(Note), "A smash-alley prop: the scene archive holds a pool of %u fragments for each copy. Breaking it needs the physics "
                                           "(Jolt), which comes next; the settings are saved with the level.", Resolved.FragmentCapacity);
+    else if (Resolved.Shape)
+        std::snprintf(Note, sizeof(Note), "An engine shape has no fragment pool yet: the fracture settings are kept with the level for when the physics "
+                                          "arrives.");
     else
         std::snprintf(Note, sizeof(Note), "Not breakable in the scene archive: the fracture settings are kept with the level for when the physics arrives.");
     CaptionText::Construct(Page, Note, 4.0f, 0.0f);

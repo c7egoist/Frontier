@@ -46,12 +46,11 @@ CardLook ResolveMaterialCardLook()
     return Look;
 }
 
-// 📝 Linear Rec.709 to the sRGB byte of a swatch.
+// 📝 Linear to the display byte of a swatch the way TintRow shows its colour (the demo's channel^(1/2.2)), so the channel
+//    list and the colour control below it name the same hex.
 uint32_t EncodeDisplayByte(float Linear)
 {
-    const float Clamped = std::clamp(Linear, 0.0f, 1.0f);
-    const float Encoded = Clamped <= 0.0031308f ? 12.92f * Clamped : 1.055f * std::pow(Clamped, 1.0f / 2.4f) - 0.055f;
-    return static_cast<uint32_t>(std::lround(Encoded * 255.0f));
+    return static_cast<uint32_t>(std::lround(std::pow(std::clamp(Linear, 0.0f, 1.0f), 1.0f / 2.2f) * 255.0f));
 }
 
 uint32_t EncodeSwatch(float Red, float Green, float Blue)
@@ -154,7 +153,7 @@ bool GeometryMaterialSection::Construct(ControlColumn& Page, GeometryConfigurati
     Changed |= SliderRow::Construct(Page, "Roughness", "Roughness", Edited[3], 0.02f, 1.0f, 0.01f, "", 1.0f, Enabled);
     Changed |= SliderRow::Construct(Page, "Metallic", "Metallic", Edited[7], 0.0f, 1.0f, 0.01f, "", 1.0f, Enabled);
     Changed |= SliderRow::Construct(Page, "Reflectance", "Reflectance", Edited[10], 0.0f, 1.0f, 0.005f, "", 1.0f, Enabled,
-                                    "Specular level: 0.5 is a 4 % reflectance at normal incidence");
+                                    "Specular level: the dielectric reflectance at normal incidence (F0); 0.04 is 4 %, most non-metals");
     Changed |= SliderRow::Construct(Page, "Coat", "Clear coat", Edited[8], 0.0f, 1.0f, 0.01f, "", 1.0f, Enabled);
     Changed |= SliderRow::Construct(Page, "CoatRoughness", "Coat roughness", Edited[9], 0.0f, 1.0f, 0.01f, "", 1.0f, Enabled);
     Changed |= SliderRow::Construct(Page, "Transmission", "Transmission", Edited[11], 0.0f, 1.0f, 0.01f, "", 1.0f, Enabled);
@@ -187,14 +186,23 @@ bool GeometryMaterialSection::Construct(ControlColumn& Page, GeometryConfigurati
         }
     }
     ImGui::PopID();
-    if (Owns)
-        std::snprintf(Text, sizeof(Text), "This object owns its %s surfaces (a material block of its own); the %u other object%s sharing the family keep "
-                                          "the scene archive's values.",
-                      Resolved.FamilyNames[Chosen].c_str(), Users > 0 ? Users - 1 : 0u, Users == 2 ? "" : "s");
+    // 📝 An engine shape's family comes from its archive's [surface] (EngineContent/ShapeArchives/<Shape>.toml), the others from
+    //    the scene archive's material table.
+    const uint32_t    Others     = Users > 0 ? Users - 1 : 0u;
+    const std::string FamilyName = Resolved.FamilyNames[Chosen];
+    const std::string Origin     = Resolved.Shape ? "the engine shape's" : "the scene archive's";
+    const std::string Source     = Resolved.Shape ? "From the engine shape's surface (ShapeArchives/" + Parameters.ShapeName + ".toml)"
+                                                  : std::string("From the scene archive's material table (Materials.bin)");
+    if (Owns && Others == 0)
+        std::snprintf(Text, sizeof(Text), "This object owns its copy of %s (a material block of its own); no other object uses the family.",
+                      FamilyName.c_str());
+    else if (Owns)
+        std::snprintf(Text, sizeof(Text), "This object owns its copy of %s (a material block of its own); the %u other object%s sharing the family keep%s "
+                                          "%s values.",
+                      FamilyName.c_str(), Others, Others == 1 ? "" : "s", Others == 1 ? "s" : "", Origin.c_str());
     else
-        std::snprintf(Text, sizeof(Text), "From the scene archive's material table (Materials.bin), shared by %u object%s. The first edit copies %s into this "
-                                          "object's own surfaces; the others keep theirs.",
-                      Users, Users == 1 ? "" : "s", Resolved.FamilyNames[Chosen].c_str());
+        std::snprintf(Text, sizeof(Text), "%s, shared by %u object%s. The first edit copies %s into this object's own material block%s", Source.c_str(), Users,
+                      Users == 1 ? "" : "s", FamilyName.c_str(), Others > 0 ? "; the others keep theirs." : ".");
     CaptionText::Construct(Page, Text, 0.0f, 0.0f);
     Page.EndCard();
     return Changed;

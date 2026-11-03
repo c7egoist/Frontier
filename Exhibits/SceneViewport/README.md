@@ -463,7 +463,9 @@ and the traced rays (`IndirectExempt`). Physics stays an authored flag.
 
 **Materials.** The first edit of a family copies it into the object's own material block (96 blocks after the family
 table; the occupant's override carries `MaterialBlockBit` and the block's base), and its cards are captured again.
-*Revert to the shared family* drops the copy. The other objects sharing the family keep the scene archive's values.
+*Revert to the shared family* drops the copy. The other objects sharing the family keep the scene archive's values (an
+engine shape's family starts from its archive's `[surface]`). The channel list names colours as the colour controls
+do (the demo's channel^(1/2.2)), and Reflectance is the shaders' specular level, the dielectric F0 (0.04 is 4 %).
 
 **Scaled copies in the distance field (GTX).** The union multiplies a copy's local distance by 1/√g, where g is the
 largest absolute row sum of AᵀA for its world-to-local map A (Gershgorin). That is exact for a uniform scale and
