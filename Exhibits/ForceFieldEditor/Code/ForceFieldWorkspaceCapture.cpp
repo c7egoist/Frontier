@@ -63,6 +63,7 @@ int main(int ArgumentCount, char** Arguments)
         Io.DisplaySize = ImVec2(static_cast<float>(CaptureWidth), static_cast<float>(CaptureHeight));
         Io.DeltaTime   = 1.0f / 30.0f;
         Io.IniFilename = nullptr;
+        Io.ConfigFlags |= ImGuiConfigFlags_DockingEnable | ImGuiConfigFlags_NavEnableKeyboard;   // the dockspace's, before the first refresh
         Io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures | ImGuiBackendFlags_RendererHasVtxOffset;
         ImGui::GetPlatformIO().Renderer_TextureMaxWidth  = 4096;
         ImGui::GetPlatformIO().Renderer_TextureMaxHeight = 4096;

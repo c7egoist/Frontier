@@ -252,6 +252,18 @@ std::string InspectorRuntime::ConsumeSelectionRequest()
     return Request;
 }
 
+void InspectorRuntime::RequestWorkspaceAction(std::string Action)
+{
+    if (!Action.empty() && PendingWorkspaceActions.size() < 64) PendingWorkspaceActions.push_back(std::move(Action));
+}
+
+std::vector<std::string> InspectorRuntime::ConsumeWorkspaceActions()
+{
+    std::vector<std::string> Actions;
+    Actions.swap(PendingWorkspaceActions);
+    return Actions;
+}
+
 void InspectorRuntime::ConfigureInterfaceScale(float Scale) noexcept
 {
     InterfaceScale = Scale > 0.0f ? Scale : 1.0f;

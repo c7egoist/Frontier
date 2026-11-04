@@ -26,7 +26,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace Everest
@@ -601,6 +603,117 @@ void EverestWorkspace::ConstructFieldOverlay(const ImVec2& StageMin, const ImVec
     Camera.VerticalFieldOfView = Flight.ResolveFieldOfView();
     if (!ConfigureFieldSlice(Overlay, true)) return;
     Overlay.Render(ImGui::GetWindowDrawList(), Frontier::EditorTypefaces::Resolve(), StageMin, StageMax, Record->QueryConfiguration().TimelineSeconds, Scale);
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                    PAGE LINKS
+//------------------------------------------------------------------------------------------------------------------------
+
+// 📝 The Force Field page reads the forces under the field and the Field view's measurements; while the view shows, its peak
+//    joins the hero's history about ten times a second (a change of unit starts the history again).
+void EverestWorkspace::PublishFieldReadings(Frontier::EnvironmentEditAccess& Access, double DeltaSeconds)
+{
+    for (const Frontier::SceneRecordBase* Entry : QuerySceneWorld().FindAllByType("ForceSource"))
+        if (auto* Source = dynamic_cast<Frontier::ForceSourceRecord*>(QuerySceneWorld().FindRecord(Entry->QueryToken())))
+            Access.ForceSources.push_back({Source->QueryToken().Value, Source->QueryRecordName(), &Source->AccessConfiguration()});
+    Frontier::ForceFieldReadings& Readings = Field.Readings;
+    Readings.FieldShown                    = Field.Shown;
+    if (Field.Shown && Field.Slice && Field.Slice->QueryStatistics().Samples > 0)
+    {
+        const Frontier::FieldStatistics& Statistics = Field.Slice->QueryStatistics();
+        const char*                      Unit       = Field.Slice->QueryUnit();
+        if (std::string_view(Unit) != Readings.Unit) Readings.HistoryCount = Readings.HistoryCursor = 0;
+        Readings.Measured     = true;
+        Readings.Peak         = Statistics.Peak;
+        Readings.Span         = Field.Slice->View.Span;
+        Readings.Cell         = Statistics.CellSpan;
+        Readings.Samples      = Statistics.Samples;
+        Readings.Milliseconds = Statistics.Milliseconds;
+        Readings.Unit         = Unit;
+        Field.ReadingSeconds += std::max(0.0, DeltaSeconds);
+        if (Field.ReadingSeconds >= 0.1 || Readings.HistoryCount == 0)
+        {
+            Field.ReadingSeconds                     = 0.0;
+            Readings.History[Readings.HistoryCursor] = static_cast<float>(Statistics.Peak);
+            Readings.HistoryCursor                   = (Readings.HistoryCursor + 1u) % static_cast<uint32_t>(Readings.History.size());
+            Readings.HistoryCount                    = std::min<uint32_t>(Readings.HistoryCount + 1u, static_cast<uint32_t>(Readings.History.size()));
+        }
+    }
+    Access.FieldReadings = Readings;
+}
+
+// 📝 What the Force Field and force pages ask the workspace for: select a force, add one (by type, or the Construct dialog
+//    on its Forces group), show or leave the Field view, and jump the view to a range.
+void EverestWorkspace::ServiceFieldActions()
+{
+    for (const std::string& Action : Frontier::InspectorRuntime::Instance().ConsumeWorkspaceActions())
+    {
+        const size_t      Colon    = Action.find(':');
+        const std::string Verb     = Action.substr(0, Colon);
+        const std::string Argument = Colon == std::string::npos ? std::string{} : Action.substr(Colon + 1);
+        if (Verb == "select")
+        {
+            OutlinerPanel.Select(Frontier::RecordToken{std::strtoull(Argument.c_str(), nullptr, 10)});
+            OutlinerPanel.Synchronize(Frontier::SceneDirectory::Instance());
+        }
+        else if (Verb == "add-force" && Argument.empty())
+            ConstructDialog.Open("Forces");
+        else if (Verb == "add-force")
+        {
+            const Frontier::ForceSourceDescriptor* Descriptor = Frontier::ResolveForceSourceDescriptor(Argument);
+            if (Descriptor == nullptr) continue;
+            const std::string           Name    = ResolveUniqueName(Descriptor->Name);
+            const Frontier::RecordToken Created = ConstructForceRecord(Argument, Name, true);
+            if (Created.IsValid())
+                Frontier::WriteLogFormat(FieldLogCategory(), Frontier::LogSeverity::Info, Frontier::LogVerbosity::Log, "Forces",
+                                         "Added '%s' (%s) under the Force Field.", Name.c_str(), Descriptor->Name);
+        }
+        else if (Verb == "field-view")
+            Field.Shown = Argument != "off";
+        else if (Verb == "field-span")
+        {
+            Field.Shown = true;
+            if (!Field.Slice)
+            {
+                Field.Slice            = std::make_unique<Frontier::ForceFieldVisualization>();
+                Field.Slice->View.Span = 6000.0;
+            }
+            Field.Slice->JumpToSpan(std::clamp(std::atof(Argument.c_str()), 40.0, 2.4e5));
+        }
+    }
+}
+
+// 📝 A ForceSource record under the Force Field with its type's defaults: in the middle of the Field view while it shows,
+//    otherwise on the ground where the camera looks.
+Frontier::RecordToken EverestWorkspace::ConstructForceRecord(const std::string& Identifier, const std::string& Name, bool Visible)
+{
+    const Frontier::ForceSourceDescriptor* Descriptor = Frontier::ResolveForceSourceDescriptor(Identifier);
+    if (Descriptor == nullptr) return {};
+    Frontier::RecordToken Owner{};
+    if (Frontier::SceneRecordBase* FieldRecord = QuerySceneWorld().FindFirstByType("ForceField")) Owner = FieldRecord->QueryToken();
+    const Frontier::RecordToken Created = QuerySceneWorld().ConstructRecord("ForceSource", Name, Owner);
+    auto*                       Record  = dynamic_cast<Frontier::ForceSourceRecord*>(QuerySceneWorld().FindRecord(Created));
+    if (Record == nullptr) return {};
+    Frontier::ForceSourceConfiguration& Source   = Record->AccessConfiguration();
+    const uint64_t                      Revision = Source.Revision;
+    Source                                       = Frontier::ConstructForceSource(Descriptor->Category);
+    Source.Revision                              = Revision;
+    if (Field.Shown && Field.Slice)
+    {
+        Source.CentreMetres[0] = std::round(Field.Slice->View.CentreX);
+        Source.CentreMetres[1] = std::round(-Field.Slice->View.CentreZ);
+    }
+    else
+    {
+        const std::array<double, 3> Ground = ResolveGroundTarget();
+        Source.CentreMetres[0]             = std::round(Ground[0] * 10.0) / 10.0;
+        Source.CentreMetres[1]             = std::round(Ground[1] * 10.0) / 10.0;
+    }
+    Source.AdvanceRevision();
+    if (!Visible) (void)Frontier::SceneDirectory::Instance().ConfigureVisible(Created, false);
+    OutlinerPanel.Synchronize(Frontier::SceneDirectory::Instance());
+    OutlinerPanel.Select(Created);
+    return Created;
 }
 
 } // namespace Everest

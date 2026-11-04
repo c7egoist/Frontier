@@ -10,6 +10,7 @@
 #include <array>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace Frontier
@@ -25,7 +26,7 @@ struct ConstructCatalogueEntry
     std::string           Identifier{};
     std::string           Caption{};
     std::string           Glyph{};                     // [-] GlyphSymbol name
-    std::string           Group{};                     // [-] Environment, Weather, Cameras, Geometry or Lighting
+    std::string           Group{};                     // [-] Environment, Weather, Forces, Cameras, Geometry or Lighting
     std::string           Summary{};                   // [-] the properties step's note
     bool                  Shape = false;
     std::array<double, 3> Size{1.0, 1.0, 1.0};         // [m] a shape's bounding box
@@ -54,6 +55,8 @@ class ConstructPanel
     [[nodiscard]] const std::vector<ConstructCatalogueEntry>& QueryCatalogue() const noexcept { return Catalogue_; }
 
     void Open();
+    // 📝 Opens on one category of the rail ("Forces": the Force Field page's "Add a localized force").
+    void Open(std::string_view Group);
     void Close();
     [[nodiscard]] bool QueryOpen() const noexcept { return Open_; }
 

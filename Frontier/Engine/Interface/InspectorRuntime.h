@@ -117,6 +117,11 @@ class InspectorRuntime
     void                      RequestSelection(std::string_view TypeIdentifier);
     [[nodiscard]] std::string ConsumeSelectionRequest();
 
+    // 📝 A page asking the workspace for something only the workspace can do, as a short verb:argument line ("select:<token>",
+    //    "add-force:<identifier>", "field-view:on", "field-span:<metres>"); the workspace consumes them once per frame.
+    void                                   RequestWorkspaceAction(std::string Action);
+    [[nodiscard]] std::vector<std::string> ConsumeWorkspaceActions();
+
     // 📝 The workspace's interface scale (Appearance → Interface scale / 100), configured once per frame.
     void                ConfigureInterfaceScale(float Scale) noexcept;
     [[nodiscard]] float ResolveInterfaceScale() const noexcept;
@@ -160,6 +165,7 @@ class InspectorRuntime
     RecordToken                             ActiveEditorToken{};
 #endif
     std::string          PendingSelectionType{};
+    std::vector<std::string> PendingWorkspaceActions{};
     RecordToken          InspectedToken{};
     SolarPlacementSolver SolarSolver    = nullptr;
     float                InterfaceScale = 1.0f;

@@ -13,6 +13,7 @@
 struct ImDrawList;
 struct ImVec2;
 #include "Engine/Interface/ConstructPanel.h"
+#include "Engine/Interface/EnvironmentEditAccess.h"
 #include "Engine/Interface/Controls/PlacementGizmo.h"
 #include "Engine/Interface/LogStreamPanel.h"
 #include "Engine/Interface/PanelDockspace.h"
@@ -223,6 +224,8 @@ class EverestWorkspace
         bool                                               Hovering = false;
         std::array<double, 2>                              HoverPoint{};
         bool                                               Scrubbing = false;
+        Frontier::ForceFieldReadings                       Readings{};          // [-] what the Force Field page's hero reads
+        double                                             ReadingSeconds = 0.0; // [s] since the last peak joined the history
     };
     [[nodiscard]] FieldViewport& AccessFieldViewport() noexcept { return Field; }
 
@@ -281,6 +284,10 @@ class EverestWorkspace
     void ConstructFieldTimeline(const ImVec2& Min, const ImVec2& Max, float Scale);
     void ConstructFieldBar(const ImVec2& Min, const ImVec2& Max, float Scale);
     void ConstructFieldOverlay(const ImVec2& StageMin, const ImVec2& StageMax, float Scale);
+    // 📝 The Force Field page's list of forces and the Field view's readings, and the page's workspace actions.
+    void PublishFieldReadings(Frontier::EnvironmentEditAccess& Access, double DeltaSeconds);
+    void ServiceFieldActions();
+    Frontier::RecordToken ConstructForceRecord(const std::string& Identifier, const std::string& Name, bool Visible);
 
     Frontier::ControlCentrePanel& Centre;
     std::shared_ptr<bool>         Liveness = std::make_shared<bool>(true);   // the Control Centre actions' weak token

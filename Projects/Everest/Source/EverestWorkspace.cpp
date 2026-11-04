@@ -21,6 +21,7 @@
 #include "Engine/Interface/SceneDirectoryPanelRegistration.h"
 #include "Engine/Interface/SceneInspectorPanel.h"
 #include "Engine/Interface/ViewportChromeControls.h"
+#include "Engine/PhysicalDynamics/ForceSourceCatalogue.h"
 #include "Engine/Scene/SceneDirectory.h"
 #include "Frontier/Engine/Geometry/ShapeArchive.h"
 #include <imgui.h>
@@ -333,13 +334,14 @@ EverestWorkspace::EverestWorkspace(Frontier::ControlCentrePanel& ControlCentre,
     // 📝 The scene's entries plus the one Render settings component (the whole renderer, owner's request) and the scene archive's
     //    geometry objects; neither the renderer nor the geometry is constructible (the archive decides what geometry exists).
     const std::vector<std::string> SceneTypes = {"RenderPipeline","Solar","OpticalFlare","Atmosphere","Clouds","Fog","Stars","Moons","Planet","ForceField","Wind",
-                                                 "Geometry"};
+                                                 "ForceSource","Geometry"};
     OutlinerPanel.ConfigureVisibleTypes(SceneTypes);
     auto Types = QuerySceneWorld().EnumerateRegisteredTypes();
     std::erase_if(Types,[&](const auto& Entry)
     {
+        // 📝 The localized forces are added by type, as the Construct dialog's Forces group (one tile per type), not as one record type.
         return (std::find(SceneTypes.begin(),SceneTypes.end(),Entry.first)==SceneTypes.end() && Entry.first!="LocalCloud" && Entry.first!="LocalFog") ||
-               Entry.first=="RenderPipeline" || Entry.first=="Geometry";
+               Entry.first=="RenderPipeline" || Entry.first=="Geometry" || Entry.first=="ForceSource";
     });
     OutlinerPanel.ConfigureConstructibleTypes(std::move(Types));
     // 📝 The Outliner's '+' and Ctrl+A open the Construct dialog: the engine shapes, then the record types above.
@@ -636,6 +638,17 @@ void EverestWorkspace::ConfigureConstructCatalogue()
         Entry.Summary = Label + ".";
         Catalogue.push_back(std::move(Entry));
     }
+    // ③ the localized forces under the Force Field, one tile per type in the library's order (flows, accelerations, damping)
+    for (const Frontier::ForceSourceDescriptor& Descriptor : Frontier::EnumerateForceSourceDescriptors())
+    {
+        Frontier::ConstructCatalogueEntry Entry;
+        Entry.Identifier = std::string("ForceSource:") + Descriptor.Identifier;
+        Entry.Caption    = Descriptor.Name;
+        Entry.Glyph      = Descriptor.Glyph;
+        Entry.Group      = "Forces";
+        Entry.Summary    = std::string(Frontier::ResolveForceContributionDescriptor(Descriptor.Contribution).Label) + " \xC2\xB7 " + Descriptor.Blurb;
+        Catalogue.push_back(std::move(Entry));
+    }
     ConstructDialog.ConfigureCatalogue(std::move(Catalogue));
 }
 
@@ -669,6 +682,16 @@ void EverestWorkspace::ServiceConstructOrder(const Frontier::ConstructOrder& Ord
 {
     const uint32_t ProjectCategory = EnsureProjectLogCategory("Everest");
     const std::string Name = ResolveUniqueName(Order.Name);
+    if (Order.Entry.Identifier.rfind("ForceSource:", 0) == 0)
+    {
+        // 📝 A localized force: a ForceSource record under the Force Field, with its type's defaults, where the view looks.
+        const Frontier::RecordToken Created = ConstructForceRecord(Order.Entry.Identifier.substr(12), Name, Order.Visible);
+        if (Created.IsValid())
+            Frontier::WriteLogFormat(ProjectCategory, Frontier::LogSeverity::Info, Frontier::LogVerbosity::Log, "EverestWorkspace",
+                                     "Constructed '%s' (force %s, token #%llu).", Name.c_str(), Order.Entry.Identifier.c_str() + 12,
+                                     static_cast<unsigned long long>(Created.Value));
+        return;
+    }
     if (!Order.Entry.Shape)
     {
         // 📝 A record type: as the Outliner's add menu, with the dialog's name and visibility.
@@ -907,7 +930,9 @@ void EverestWorkspace::ConstructInterface(double DeltaSeconds)
     {
         Access.CelestialReady = false;
     }
+    PublishFieldReadings(Access, DeltaSeconds);
     Frontier::InspectorRuntime::Instance().ConfigureEnvironmentAccess(Access);
+    ServiceFieldActions();
     // 📝 A page's "Open … ↗" selects the first record of the type it names.
     if (const std::string Requested = Frontier::InspectorRuntime::Instance().ConsumeSelectionRequest(); !Requested.empty())
     {

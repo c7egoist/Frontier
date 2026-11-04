@@ -36,7 +36,7 @@ namespace
 {
 
 constexpr const char* DialogKey = "##ConstructDialog";
-constexpr const char* Groups[]  = {"All", "Environment", "Weather", "Cameras", "Geometry", "Lighting"};
+constexpr const char* Groups[]  = {"All", "Environment", "Weather", "Forces", "Cameras", "Geometry", "Lighting"};
 
 // 📝 Text on a CSS line box of LineHeight × Size, its top at Top; the advance.
 float PlaceText(ImDrawList* DrawList, const EditorTypefaces& Faces, ImFont* Face, float Size, float X, float Top, float LineHeight, ImU32 Colour,
@@ -90,6 +90,12 @@ void ConstructPanel::Open()
     Raise_       = true;
     Picked_      = -1;
     FocusSearch_ = true;
+}
+
+void ConstructPanel::Open(std::string_view Group)
+{
+    Open();
+    Group_ = std::string(Group);
 }
 
 void ConstructPanel::Close()
