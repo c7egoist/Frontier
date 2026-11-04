@@ -169,9 +169,9 @@ struct ClutchParameters
     float ConverterKFactor        = 100.0f;  // [rpm/√Nm] pump torque = (N_pump / K)²
     float ConverterStallRatio     = 1.9f;    // [-] turbine/pump torque at stall
     float ConverterCouplingPoint  = 0.85f;   // [-] speed ratio where the ratio reaches 1
-    float LockupRPM               = 1400.0f; // [rpm] turbine speed that engages the lockup clutch
+    float LockupRPM               = 3000.0f; // [rpm] turbine speed that engages the lockup clutch (above stall: locking earlier lugs the unspooled engine and the car never breaks through)
     float LockupDropRPM           = 300.0f;  // [rpm] hysteresis below LockupRPM that releases it
-    float LockupRate              = 5.0f;    // [1/s] lockup engagement slew
+    float LockupRate              = 2.0f;    // [1/s] lockup engagement slew (a progressive ~0.5 s grab; slamming it chatters)
 };
 
 enum class DifferentialMode
@@ -223,6 +223,7 @@ struct DrivetrainOutputs
     float ParasiticDrag_Nm = 0.0f;    // supercharger crank load (0 when NA/turbo)
     float ClutchTorque_Nm = 0.0f;     // torque transmitted through clutch
     bool  ClutchLocked = false;
+    float ClutchEngagement = 0.0f;   // [-] 0 open … 1 rigid (the lockup level on the converter; the servo engagement staged)
     float GearboxOutputTorque_Nm = 0.0f;   // after gear × final drive × efficiency
     float LeftDriveTorque_Nm = 0.0f;       // differential outputs
     float RightDriveTorque_Nm = 0.0f;

@@ -1089,6 +1089,11 @@ void VehicleSolver::StepPacejka(float Δτ) noexcept
                 bi.PedalCommand = Clamp(DriverCommand.Brake, 0.0f, 1.0f);
                 bi.WheelOmega   = WheelSpin[i];
                 bi.SlipRatio    = kappa;
+                // 📝 The cycled ABS feeds on the KINEMATIC (wheel-speed) slip, not the relaxation-lagged κ: a real sensor
+                //    measures instantaneous wheel speed, and the ~15 ms relaxation lag in the feedback path is pure loop
+                //    delay that caps the cycle duty (F6). The legacy proportional loop keeps the lagged signal verbatim.
+                if (ActiveConfiguration.Abs.ReapplyRate > 0.0f && onGnd)
+                    bi.SlipRatio = (-WheelSpin[i] * RollingLever - Vx) / std::max(std::fabs(Vx), 0.5f);
                 bi.Airspeed     = speed;
                 bi.Braked       = true;
                 const BrakeWheelOutput bo = BrakingHydraulics.Step(i, bi, Δτ);
@@ -1120,15 +1125,18 @@ void VehicleSolver::StepPacejka(float Δτ) noexcept
                 const float g = ActiveConfiguration.ElectricMotor.ReductionRatio;
                 Ieff += ActiveConfiguration.ElectricMotor.RotorInertia * g * g / static_cast<float>(nDriven);
             }
-            else if (category == ClutchCategory::TorqueConverter && !dOut.ClutchLocked)
-            {
-                // Unlocked the fluid decouples the engine: no reflected inertia (the coupling is soft and damped,
-                // so the bare wheel inertia integrates stably).
-            }
-            else
+            else if (legacyGearbox)
             {
                 const float g = ActiveConfiguration.Transmission.RatioAt(gearUsed) * ActiveConfiguration.Transmission.FinalDriveRatio;
                 Ieff += ActiveConfiguration.Engine.EngineInertia * g * g / static_cast<float>(nDriven);
+            }
+            else
+            {
+                // 📝 Staged couplings scale the reflected engine inertia with the engagement: an open clutch (or an
+                //    unlocked converter) leaves the wheels light; a locked one reflects the full crank inertia. Blending on
+                //    the engagement instead of switching on a locked flag keeps the wheel loop chatter-free (G6).
+                const float g = ActiveConfiguration.Transmission.RatioAt(gearUsed) * ActiveConfiguration.Transmission.FinalDriveRatio;
+                Ieff += ActiveConfiguration.Engine.EngineInertia * g * g / static_cast<float>(nDriven) * Clamp(dOut.ClutchEngagement, 0.0f, 1.0f);
             }
         }
 

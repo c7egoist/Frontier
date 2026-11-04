@@ -102,7 +102,10 @@ struct AbsParameters
     //    ReapplyRate — the dump/hold/reapply rhythm of a production modulator, which holds slip at the target instead
     //    of hunting through it. 0 keeps the proportional loop (the source behaviour).
     float ReapplyRate = 0.0f;    // [1/s] reapply ramp (0: proportional loop)
-    float DumpRate    = 12.0f;   // [1/s] dump ramp while over the target
+    float DumpRate    = 20.0f;   // [1/s] dump ramp while over the target
+    float SlipBand    = 0.05f;   // [-] hold band around the target (dump above, reapply below, hold inside)
+    float RegulationFloor = 0.22f;   // [-] lowest scale the regulating dump reaches (deep enough to recover, shallow enough
+                                     //      that the climb back stays inside the flat zone; only a true lock blows past it)
 };
 
 struct BrakeWheelReading
@@ -115,6 +118,7 @@ struct BrakeWheelReading
     float Cooling_W     = 0.0f;
     bool  AbsActive     = false;   // currently cutting pressure to regulate slip
     float AbsScale      = 1.0f;    // [-] cycled-ABS pressure scale reading (1 while the loop is proportional)
+    bool  AbsLatched    = false;   // cycled ABS was over the band last step (entry-cut edge trigger)
 };
 
 struct BrakeWheelInput
@@ -172,9 +176,19 @@ public:
         const float over = std::fabs(in.SlipRatio) - AntilockParameters.SlipTarget;
         if (AntilockParameters.ReapplyRate > 0.0f)
         {
-            if (absEligible && over > 0.0f) w.AbsScale -= AntilockParameters.DumpRate * dt;
-            else                            w.AbsScale += AntilockParameters.ReapplyRate * dt;
+            // 📝 Three-state cycled ABS: dump above the band, reapply below it, HOLD inside — the hold phase parks the
+            //    pressure where slip ≈ target instead of limit-cycling through it. Crossing the band edge trims the pressure
+            //    at once; while still over it keeps trimming in small steps. The regulating dump never goes below
+            //    RegulationFloor: crashing to the floor every cycle forces a full climb back through the linear falloff
+            //    (most of the cycle wasted under the cap); parking shallow keeps the whole cycle inside the flat zone.
+            //    Only a true deep lock (past twice the target) blows past the floor with the full dump rate.
+            const bool overBand = absEligible && over > AntilockParameters.SlipBand;
+            if (overBand && !w.AbsLatched) w.AbsScale = std::max(AntilockParameters.RegulationFloor, w.AbsScale * 0.98f);
+            else if (overBand && over > AntilockParameters.SlipTarget) w.AbsScale -= AntilockParameters.DumpRate * dt;
+            else if (overBand) w.AbsScale = std::max(AntilockParameters.RegulationFloor, w.AbsScale - AntilockParameters.ReapplyRate * 1.5f * dt);
+            else if (!absEligible || over < -AntilockParameters.SlipBand) w.AbsScale += AntilockParameters.ReapplyRate * dt;
             w.AbsScale = std::clamp(w.AbsScale, AntilockParameters.DumpFloor, 1.0f);
+            w.AbsLatched = overBand;
             absScale = absEligible ? w.AbsScale : 1.0f;
         }
         else if (absEligible)

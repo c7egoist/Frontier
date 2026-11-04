@@ -328,7 +328,9 @@ void Drivetrain::StepConverter(float pumpRPM, float turbineRPM, bool lockupAllow
     const float target = lockupAllowed ? 1.0f : 0.0f;
     LockupEngagement = Clampf(LockupEngagement + Clampf(target - LockupEngagement, -Clutch.LockupRate * dt, Clutch.LockupRate * dt), 0.0f, 1.0f);
     const float capacity = Clutch.MaxTorqueCapacity * LockupEngagement;
-    const float k = capacity / std::max(Clutch.BreakawaySlipRPM * kRpmToRad, 1e-3f);
+    // 📝 The lockup plate works over twice the breakaway slip band: grabbing with a saturated plate shock-excites the
+    //    driveline loop (G6 chatter); the wider band slips controllably through the grab and still holds cruise slip small.
+    const float k = capacity / std::max(Clutch.BreakawaySlipRPM * kRpmToRad * 2.0f, 1e-3f);
     const float direct = Clampf((pump - turb) * kRpmToRad * k, -capacity, capacity);
     pumpTorque_Nm    = pumpTq * (1.0f - LockupEngagement) + direct;
     turbineTorque_Nm = pumpTq * ratio * (1.0f - LockupEngagement) + direct;
@@ -531,6 +533,7 @@ DrivetrainOutputs Drivetrain::Step(const DrivetrainInputs& In) noexcept
     float clutchTorque = 0.0f;      // what reaches the gearbox (turbine torque on the converter)
     float crankLoad    = 0.0f;      // what loads the crank (both DCT plates, the pump on the converter)
     bool  locked       = false;
+    float coupling01    = 0.0f;   // how rigidly the engine is coupled to the gearbox (drives the reflected inertia)
     float converterSlip = 0.0f;
     float dualA = 0.0f, dualB = 0.0f, dualPreRatio = 0.0f;
     bool  dualBlend = false;
@@ -543,6 +546,7 @@ DrivetrainOutputs Drivetrain::Step(const DrivetrainInputs& In) noexcept
         clutchTorque = Clampf(slipRPM * kRpmToRad * k, -capacity, capacity);
         crankLoad = clutchTorque;
         locked = (engagement > Clutch.LockupEngagement) && (std::fabs(slipRPM) < Clutch.LockupSlipRPM);
+        coupling01 = engagement;
     }
     else if (Clutch.Category == ClutchCategory::TorqueConverter)
     {
@@ -556,6 +560,7 @@ DrivetrainOutputs Drivetrain::Step(const DrivetrainInputs& In) noexcept
         clutchTorque = turbTq;
         crankLoad    = pumpTq;
         locked = (LockupEngagement > Clutch.LockupEngagement) && (std::fabs(converterSlip) < Clutch.LockupSlipRPM);
+        coupling01 = LockupEngagement;
     }
     else
     {
@@ -569,6 +574,7 @@ DrivetrainOutputs Drivetrain::Step(const DrivetrainInputs& In) noexcept
         clutchTorque = Clampf(slipRPM * kRpmToRad * k, -capacity, capacity);
         crankLoad = clutchTorque;
         locked = (engagementCmd > Clutch.LockupEngagement) && (std::fabs(slipRPM) < Clutch.LockupSlipRPM);
+        coupling01 = engagementCmd;
         if (Clutch.Category == ClutchCategory::DualClutch && !inNeutral && In.HandoffBlend >= 0.0f && In.HandoffBlend < 1.0f && In.PreselectGearIndex >= 0)
         {
             dualPreRatio = Trans.RatioAt(In.PreselectGearIndex);
@@ -624,6 +630,7 @@ DrivetrainOutputs Drivetrain::Step(const DrivetrainInputs& In) noexcept
     Out.ParasiticDrag_Nm = parasiticDrag;
     Out.ClutchTorque_Nm = clutchTorque;
     Out.ClutchLocked = locked;
+    Out.ClutchEngagement = coupling01;
     Out.GearboxOutputTorque_Nm = gearboxOutTorque;
     Out.LeftDriveTorque_Nm = outL;
     Out.RightDriveTorque_Nm = outR;

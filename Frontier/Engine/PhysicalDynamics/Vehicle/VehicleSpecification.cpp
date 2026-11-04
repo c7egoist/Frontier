@@ -47,8 +47,16 @@ VehicleSpecification ConstructControlVehicleSpecification()
     Solver.Turbo.TurboFrictionCoeff     = 5.0e-5f;
     Solver.Turbo.TurboFrictionQuadratic = 1.0e-9f;
     Solver.Turbo.TurboInertia           = 2.0e-4f;
-    // 📝 Cycled ABS (dump fast, reapply on a controlled ramp) instead of the hunting proportional loop.
-    Solver.Abs.ReapplyRate = 3.0f;
+    // 📝 Cycled ABS (dump fast, reapply in small steps, hold inside the band) instead of the hunting proportional loop.
+    //    The dump is solenoid-fast (~5 ms: these brakes lock a wheel in ~10 ms past the peak) while the reapply creeps at
+    //    ~3 %/step — a coarse reapply overshoots the narrow stable band and lock-recovery wastes the stop (F6).
+    Solver.Abs.DumpRate = 200.0f;
+    Solver.Abs.ReapplyRate = 2.0f;
+    // 📝 Motorsport-modulator hydraulics to match: the stock line slew (500/800 bar/s) takes ~50 ms to move 40 bar, so the
+    //    caliper could never follow the modulator — every cycle sank into a deep lock and its recovery wasted the stop.
+    //    A GT3 dump valve opens the caliper to the reservoir in ~10 ms and the pump rebuilds in ~20 ms (F6).
+    Solver.Brakes.PressureRiseRate = 200.0e6f;
+    Solver.Brakes.PressureFallRate = 400.0e6f;
     // 📝 Brakes, aids and the engine's conditions.
     Solver.BrakeThermalEnabled     = true;
     Solver.Abs.Enabled             = true;
@@ -357,6 +365,8 @@ std::vector<VehicleFigure> EnumerateVehicleFigures(VehicleSpecification& S)
     Real("abs", "floor", "ABS pressure floor", "", 0.0, 1.0, C.Abs.DumpFloor);
     Real("abs", "reapply_per_s", "Cycled reapply rate (0: proportional)", "1/s", 0.0, 20.0, C.Abs.ReapplyRate);
     Real("abs", "dump_per_s", "Cycled dump rate", "1/s", 1.0, 60.0, C.Abs.DumpRate);
+    Real("abs", "slip_band", "Cycled hold band", "", 0.0, 0.15, C.Abs.SlipBand);
+    Real("abs", "regulation_floor", "Cycled dump floor", "", 0.05, 0.6, C.Abs.RegulationFloor);
     Switch("traction", "enabled", "Traction control", C.TractionControl.Enabled);
     Real("traction", "slip_target", "Slip target", "", 0.02, 0.5, C.TractionControl.SlipTarget);
     Real("traction", "gain", "Throttle cut per slip", "", 0.5, 40.0, C.TractionControl.Gain);
