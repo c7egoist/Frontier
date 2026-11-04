@@ -106,6 +106,14 @@ add_library(FrontierInterface STATIC
 target_include_directories(FrontierInterface PUBLIC "${CMAKE_SOURCE_DIR}"
     "${CMAKE_SOURCE_DIR}/ExternalPackages/tomlpp/include")
 target_link_libraries(FrontierInterface PUBLIC FrontierImGui thorvg_static FrontierTextFiles FrontierThumbnailAtlasCache)
+# Interface extension (Frontier/Extensions/Interface): GizmoSpace, the gizmo SolidArc and the Frontier editor share, and its
+# interface rasterization. The Vulkan texture bridge (ViewportTexture) compiles into each host beside the ImGui Vulkan adapter.
+add_library(FrontierInterfaceExtension STATIC
+    Frontier/Extensions/Interface/GizmoSpace.cpp
+    Frontier/Extensions/Interface/GizmoRasterization.cpp)
+target_include_directories(FrontierInterfaceExtension PUBLIC "${CMAKE_SOURCE_DIR}")
+target_compile_features(FrontierInterfaceExtension PUBLIC cxx_std_20)
+target_link_libraries(FrontierInterfaceExtension PUBLIC FrontierImGui)
 # Reuse the existing Texture Workspace controls and chrome without linking its painting implementation.
 add_library(FrontierAuthoringControls STATIC Engine/Interface/VectorAuthoringControls.cpp UI/TextureStudio/PanelChrome.cpp)
 target_link_libraries(FrontierAuthoringControls PUBLIC FrontierInterface FrontierVectorAuthoring)
@@ -118,7 +126,7 @@ add_library(FrontierSceneEditorUI STATIC
     Frontier/Engine/Scene/RecordStore.cpp
     Frontier/Engine/Scene/RecordEntry.cpp
     Frontier/Engine/Scene/SceneDirectory.cpp
-    Frontier/Engine/Scene/SceneWorld.cpp
+    Frontier/Engine/Scene/WorldSpace.cpp
     Frontier/Engine/Scene/GeometryLayout.cpp
     Frontier/Engine/Diagnostics/LogCategories.cpp
     Frontier/Engine/Diagnostics/LogRingStore.cpp
@@ -245,25 +253,35 @@ target_include_directories(FrontierSceneEditorUI PUBLIC
     "${CMAKE_SOURCE_DIR}/Frontier")
 target_compile_definitions(FrontierSceneEditorUI PUBLIC FRONTIER_WITH_INTERFACE_SDK=1 FRONTIER_EDITOR_PROFILE=1 FRONTIER_EDITOR=1)
 target_include_directories(FrontierSceneEditorUI PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
-target_link_libraries(FrontierSceneEditorUI PUBLIC FrontierEditorUI Threads::Threads PRIVATE FrontierSurfaceRasterization FrontierEnvironmentRendering)
+target_link_libraries(FrontierSceneEditorUI PUBLIC FrontierEditorUI FrontierInterfaceExtension Threads::Threads PRIVATE FrontierSurfaceRasterization FrontierEnvironmentRendering)
 
 include(Automation/StageProjectContent.cmake)
+
+# Extensions (Frontier/Extensions/<Name>/): the bridges between engine systems and the applications or runtime that use them.
+add_library(FrontierRenderingExtension STATIC
+    Frontier/Extensions/Rendering/RenderingExtension.cpp
+    Frontier/Extensions/Rendering/SceneGeometryOccupancy.cpp)
+target_link_libraries(FrontierRenderingExtension PUBLIC FrontierSceneEditorUI FrontierSceneViewport)
+add_library(FrontierParticleExtension STATIC
+    Frontier/Extensions/Particle/ParticleExtension.cpp)
+target_link_libraries(FrontierParticleExtension PUBLIC FrontierSceneEditorUI FrontierParticleSimulation)
+add_library(FrontierNetworkingExtension STATIC
+    Frontier/Extensions/Networking/NetworkingSpace.cpp
+    Frontier/Extensions/Networking/NetworkingExtension.cpp)
+target_link_libraries(FrontierNetworkingExtension PUBLIC FrontierSceneEditorUI)
 
 add_library(EverestProjectEditor STATIC
     Projects/Everest/Source/EverestApplication.cpp
     Projects/Everest/Source/EverestSimulationRecords.cpp
     Projects/Everest/Source/EverestViewportNavigation.cpp
     Projects/Everest/Source/EverestWorkspace.cpp
-    Projects/Everest/Source/EverestSceneViewport.cpp
-    Projects/Everest/Source/EverestFieldViewport.cpp
-    Projects/Everest/Source/EverestParticleViewport.cpp
-    Projects/Everest/Source/EverestSceneGeometry.cpp)
+    Projects/Everest/Source/EverestFieldViewport.cpp)
 target_include_directories(EverestProjectEditor PUBLIC
     "${CMAKE_SOURCE_DIR}"
     "${CMAKE_SOURCE_DIR}/Frontier"
     "${CMAKE_SOURCE_DIR}/Projects/Everest/Source")
 target_compile_definitions(EverestProjectEditor PUBLIC FRONTIER_WITH_INTERFACE_SDK=1 FRONTIER_EDITOR_PROFILE=1 FRONTIER_EDITOR=1)
-target_link_libraries(EverestProjectEditor PUBLIC FrontierSceneEditorUI FrontierSceneViewport FrontierParticleSimulation)
+target_link_libraries(EverestProjectEditor PUBLIC FrontierSceneEditorUI FrontierRenderingExtension FrontierParticleExtension)
 frontier_stage_project_content(EverestProjectEditor
     "${CMAKE_SOURCE_DIR}/Projects/Everest/Everest.projectspace"
     "${CMAKE_SOURCE_DIR}/EngineContent"
@@ -273,7 +291,7 @@ add_library(EverestProjectRuntime STATIC
     Frontier/Engine/Scene/RecordStore.cpp
     Frontier/Engine/Scene/RecordEntry.cpp
     Frontier/Engine/Scene/SceneDirectory.cpp
-    Frontier/Engine/Scene/SceneWorld.cpp
+    Frontier/Engine/Scene/WorldSpace.cpp
     Frontier/Engine/PhysicalDynamics/ForceSourceCatalogue.cpp
     Frontier/Engine/Scene/GeometryLayout.cpp
     Frontier/Engine/Diagnostics/LogCategories.cpp
@@ -356,6 +374,7 @@ if(WIN32)
     target_compile_definitions(FrontierUI PRIVATE FRONTIER_UI_VULKAN=1 VK_NO_PROTOTYPES GLFW_INCLUDE_NONE)
     target_link_libraries(FrontierUI PRIVATE FrontierEditorUI glfw)
     add_executable(Frontier Experimental/Frontier/Native/WindowsFrontier.cpp
+        Frontier/Extensions/Interface/ViewportTexture.cpp
         Engine/Interface/WindowsApplication.cpp Engine/Interface/VulkanPresentation.cpp
         "${IMGUI_ROOT}/backends/imgui_impl_glfw.cpp" "${IMGUI_ROOT}/backends/imgui_impl_vulkan.cpp")
     target_include_directories(Frontier PRIVATE "${IMGUI_ROOT}/backends"
@@ -727,6 +746,19 @@ if(BUILD_TESTING)
     target_link_libraries(ParticleLibraryValidation PRIVATE FrontierEnvironmentRendering)
     add_test(NAME ParticleLibraryValidation COMMAND ParticleLibraryValidation "${CMAKE_SOURCE_DIR}")
     set_tests_properties(ParticleLibraryValidation PROPERTIES TIMEOUT 60)
+
+    add_executable(NetworkingSpaceValidation
+        Exhibits/Networking/Code/NetworkingSpaceValidation.cpp)
+    target_link_libraries(NetworkingSpaceValidation PRIVATE FrontierNetworkingExtension)
+    add_test(NAME NetworkingSpaceValidation COMMAND NetworkingSpaceValidation "${CMAKE_SOURCE_DIR}/Exhibits/Networking/Results/NetworkingSpaceValidation.md")
+    set_tests_properties(NetworkingSpaceValidation PROPERTIES TIMEOUT 60)
+
+    add_executable(ParticleSpaceValidation
+        Exhibits/ParticleEditor/Code/ParticleSpaceValidation.cpp)
+    target_include_directories(ParticleSpaceValidation PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/tomlpp/include")
+    target_link_libraries(ParticleSpaceValidation PRIVATE FrontierEnvironmentRendering)
+    add_test(NAME ParticleSpaceValidation COMMAND ParticleSpaceValidation "${CMAKE_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/ParticleSpaceScratch")
+    set_tests_properties(ParticleSpaceValidation PROPERTIES TIMEOUT 60)
 
     add_executable(EverestInterfaceValidation
         Exhibits/EverestInterface/Code/EverestInterfaceValidation.cpp

@@ -117,7 +117,7 @@ The regression set is `ForceFieldCatalogueValidation`, `ForceFieldTriggerValidat
 - the flow shapes (Burgers–Rott peak at the inner radius, cyclonic spin, microburst downdraft and outflow, thermal
   updraft, gust front ahead / behind its nose, blast shell at r₀ + c·t) and the accelerate / damp types;
 - the prepared fast path equal to direct evaluation; every levelspace key shown as existing is read by
-  `WindRecord` or `ForceFieldRecord` in `SceneWorld.cpp` (checked against the C++ source);
+  `WindRecord` or `ForceFieldRecord` in `WorldSpace.cpp` (checked against the C++ source);
 - distance formatting, scale bars, the camera unprojection, the colour stops; the Particle editor's `fieldAccel` port
   and half-float decoding.
 

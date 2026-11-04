@@ -13,7 +13,7 @@
 #include "UI/SolidArc/Document/SolidArcScene.h"
 #include "UI/SolidArc/Viewport/SolidArcCamera.h"
 #include "UI/SolidArc/Viewport/SolidArcDevice.h"
-#include "UI/SolidArc/Viewport/SolidArcGizmo.h"
+#include "Frontier/Extensions/Interface/GizmoSpace.h"
 
 #include <array>
 #include <cstdint>
@@ -97,7 +97,7 @@ struct SolidArcViewportStyle
     bool  SectionEnabled  = false;                                                           // [-]   - Alt+S: clip at SectionPlane, cap the solids
     std::array<double, 4> SectionPlane = { 0.0, 0.0, 1.0, 0.0 };                             // [-]   - (n, w): kept side n·P + w ≥ 0
     std::vector<SolidArcImagePlaneDraw> ImagePlanes = {};                                    // [-]   - Blueprint references, depth-tested behind the model
-    SolidArcGizmoGeometry Gizmo        = {};                                                 // [-]   - Transform gizmo (CPU points, drawn last on cleared depth)
+    GizmoGeometry Gizmo        = {};                                                 // [-]   - Transform gizmo (CPU points, drawn last on cleared depth)
 };
 
 // One sub-viewport pane inside the shared offscreen Colour / Identity / Depth targets (Single = 1 pane, Split = 2..4 panes).

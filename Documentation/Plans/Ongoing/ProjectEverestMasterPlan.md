@@ -11,7 +11,7 @@
 - **Editor Compile-Time Boundary (`#ifdef FRONTIER_EDITOR`):** All Editor UI, `SceneDirectory` metadata,
   `DiagramControls`, `InspectorRuntime`, modular `*Inspector` classes, and standalone `<Domain>Editor` modals compile
   only when `FRONTIER_EDITOR` is enabled. Shipping/Runtime builds (`FRONTIER_EDITOR == 0`) compile only runtime
-  `RecordEntry` types, `RecordStore`, `SceneWorld`, and pure C++ `*Configuration` structures.
+  `RecordEntry` types, `RecordStore`, `WorldSpace`, and pure C++ `*Configuration` structures.
 - **Banned Vocabulary Compliance:** Enforce `EngineDocs/AgenticInstuctions/SKILL-Naming.md` including `2026-10-31`
   additions (`Model`, `Cache`, `Widget`, `Kit`, `Footprint`, `Shared`, `DedicatedStudio`, `SpecialtyEditor`, `Specialty`,
   `Actor`, `Beacon`, and avoiding `Buffer` unless strictly required by Vulkan/Slang API).

@@ -1,10 +1,12 @@
 /*==========================================================================================================================================
                                                           PLACEMENTGIZMO.CPP
 ==========================================================================================================================================*/
-// 🧩 The transform handles: arrows along the world axes (Move), rings about the Euler axes (Rotate) and axis handles with
-//    a centre square (Scale), a constant 90 px long on screen whatever the distance, and their drags.
+// 🧩 The transform handles: GizmoSpace's handles (SolidArc's gizmo: cones and plane quads to move, arcs to rotate, cylinders and
+//    the centre ring to scale), a constant size on screen whatever the distance, drawn by GizmoRasterization; and their drags.
 
 #include "Engine/Interface/Controls/PlacementGizmo.h"
+
+#include "Frontier/Extensions/Interface/GizmoRasterization.h"
 
 #include <algorithm>
 #include <cmath>
@@ -21,7 +23,7 @@ using Vector = std::array<double, 3>;
 
 constexpr double Pi              = 3.14159265358979323846;
 constexpr double DegreesPerRadian = 180.0 / Pi;
-constexpr float  HandlePixels    = 90.0f;   // [px] arrow and axis length on screen
+constexpr float  HandlePixels    = 120.0f;  // [px] the gizmo's unit length L on screen (SolidArc: 150 px)
 constexpr float  PickPixels      = 8.0f;    // [px] how near the pointer must be
 
 Vector Add(const Vector& Left, const Vector& Right) { return {Left[0] + Right[0], Left[1] + Right[1], Left[2] + Right[2]}; }
@@ -36,19 +38,6 @@ Vector Normalize(const Vector& Value)
 {
     const double Length = std::sqrt(Dot(Value, Value));
     return Length > 1.0e-12 ? Multiply(Value, 1.0 / Length) : Vector{0.0, 0.0, 1.0};
-}
-
-// 📝 X, Y and Z: warm red, green and blue, brightened while hovered or held.
-ImU32 ResolveAxisInk(int Axis, bool Lit)
-{
-    if (Lit) return IM_COL32(255, 214, 94, 255);
-    switch (Axis)
-    {
-        case 0:  return IM_COL32(242, 101, 92, 245);
-        case 1:  return IM_COL32(111, 211, 106, 245);
-        case 2:  return IM_COL32(90, 160, 255, 245);
-        default: return IM_COL32(236, 236, 236, 245);
-    }
 }
 
 // 📝 The rotation of ConstructPlacement, R = Rz(γ) · Ry(β) · Rx(α), as three columns (the object's axes).
@@ -76,31 +65,61 @@ std::array<Vector, 3> ResolveHandleAxes(PlacementGizmoMode Mode, const SpatialCo
     return {Vector{1.0, 0.0, 0.0}, Vector{0.0, 1.0, 0.0}, Vector{0.0, 0.0, 1.0}};
 }
 
-float SegmentDistance(ImVec2 Point, ImVec2 From, ImVec2 To)
+// 📝 Handle codes: 0–2 the axes (move along, rotate about, scale along), 3 Scale's uniform centre ring, 4–6 the plane quads
+//    (normal X, Y, Z), 7 Move's centre ring (the screen plane).
+constexpr int UniformHandle = 3;
+constexpr int PlaneHandle   = 4;
+constexpr int ScreenHandle  = 7;
+
+int ResolveHandleCode(GizmoHandle Handle, PlacementGizmoMode Mode) noexcept
 {
-    const float Dx = To.x - From.x, Dy = To.y - From.y;
-    const float Span = Dx * Dx + Dy * Dy;
-    const float T    = Span > 1.0e-6f ? std::clamp(((Point.x - From.x) * Dx + (Point.y - From.y) * Dy) / Span, 0.0f, 1.0f) : 0.0f;
-    const float Ex = From.x + T * Dx - Point.x, Ey = From.y + T * Dy - Point.y;
-    return std::sqrt(Ex * Ex + Ey * Ey);
+    const int Code = static_cast<int>(Handle);
+    if (Handle == GizmoHandle::None) return -1;
+    if (Handle == GizmoHandle::Centre) return Mode == PlacementGizmoMode::Scale ? UniformHandle : Mode == PlacementGizmoMode::Move ? ScreenHandle : -1;
+    if (Handle >= GizmoHandle::PlaneYZ && Handle <= GizmoHandle::PlaneXY) return PlaneHandle + Code - static_cast<int>(GizmoHandle::PlaneYZ);
+    return GizmoHandleAxis(Handle);
 }
 
-// 📝 A ring of Radius about Axis through Centre, as screen points (the ones behind the camera break it).
-std::vector<std::vector<ImVec2>> ProjectRing(const PlacementView& View, const Vector& Centre, const Vector& Axis, double Radius)
+GizmoHandle ResolveGizmoHandle(int Code, PlacementGizmoMode Mode) noexcept
 {
-    const Vector Reference = std::abs(Axis[2]) < 0.9 ? Vector{0.0, 0.0, 1.0} : Vector{1.0, 0.0, 0.0};
-    const Vector First     = Normalize(Cross(Axis, Reference));
-    const Vector Second    = Cross(Axis, First);
-    std::vector<std::vector<ImVec2>> Runs(1);
-    for (int Step = 0; Step <= 72; ++Step)
-    {
-        const double Angle = 2.0 * Pi * Step / 72.0;
-        const Vector Point = Add(Centre, Add(Multiply(First, Radius * std::cos(Angle)), Multiply(Second, Radius * std::sin(Angle))));
-        ImVec2       Screen;
-        if (View.Project(Point, Screen)) Runs.back().push_back(Screen);
-        else if (!Runs.back().empty()) Runs.emplace_back();
-    }
-    return Runs;
+    if (Code < 0) return GizmoHandle::None;
+    if (Code == UniformHandle || Code == ScreenHandle) return GizmoHandle::Centre;
+    if (Code >= PlaneHandle) return static_cast<GizmoHandle>(static_cast<int>(GizmoHandle::PlaneYZ) + Code - PlaneHandle);
+    const GizmoHandle First = Mode == PlacementGizmoMode::Move ? GizmoHandle::TranslateX : Mode == PlacementGizmoMode::Rotate ? GizmoHandle::RotateX
+                                                                                                                              : GizmoHandle::ScaleX;
+    return static_cast<GizmoHandle>(static_cast<int>(First) + Code);
+}
+
+OrbitCameraFrame ResolveFrame(const PlacementView& View)
+{
+    return ResolveGizmoFrame(View.Eye, View.Forward, View.Up, View.VerticalFieldOfView, View.StageExtent.x, View.StageExtent.y);
+}
+
+// 📝 GizmoSpace's pose: the handle axes as a right-handed unit frame (Rotate's Euler axes are orthogonal only while β = 0:
+//    the frame keeps the γ axis and the turned Y, so each arc sits about the axis it turns), a constant HandlePixels on screen.
+GizmoPose ResolvePose(const OrbitCameraFrame& Frame, PlacementGizmoMode Mode, const SpatialConfiguration& Spatial, float Scale)
+{
+    std::array<Vector, 3> Axes = ResolveHandleAxes(Mode, Spatial);
+    if (Mode == PlacementGizmoMode::Rotate) Axes[0] = Normalize(Cross(Axes[1], Axes[2]));
+    GizmoPose Pose;
+    Pose.Origin = {Spatial.PositionMetres[0], Spatial.PositionMetres[1], Spatial.PositionMetres[2]};
+    for (size_t Axis = 0; Axis < 3; ++Axis) Pose.Axes[Axis] = {Axes[Axis][0], Axes[Axis][1], Axes[Axis][2]};
+    Pose.Size   = MeasureGizmoSize(Frame, Pose.Origin, HandlePixels * Scale);
+    Pose.Modes  = Mode == PlacementGizmoMode::Move ? GizmoTranslate : Mode == PlacementGizmoMode::Rotate ? GizmoRotate : GizmoScale;
+    Pose.Hidden = Mode == PlacementGizmoMode::Rotate ? 1u << static_cast<uint32_t>(GizmoHandle::Centre) : 0u;
+    return Pose;
+}
+
+// 📝 Where the pointer's ray meets the plane through Centre with Normal; false when it runs along the plane or away from it.
+bool ResolvePlaneHit(const PlacementView& View, ImVec2 Pointer, const Vector& Centre, const Vector& Normal, Vector& OutHit)
+{
+    Vector Origin{}, Direction{};
+    View.ResolveRay(Pointer, Origin, Direction);
+    const OrbitRay Ray{Origin, Direction};
+    const auto     Hit = IntersectGizmoPlane(Ray, {Centre[0], Centre[1], Centre[2]}, {Normal[0], Normal[1], Normal[2]});
+    if (!Hit) return false;
+    OutHit = {Hit->X, Hit->Y, Hit->Z};
+    return true;
 }
 
 // 📝 The parameter along the line Centre + s·Axis nearest the ray (Origin, Direction); false when they run parallel.
@@ -177,39 +196,12 @@ double PlacementView::ResolvePixelMetres(const std::array<double, 3>& World) con
 
 int PlacementGizmo::Probe(const PlacementView& View, PlacementGizmoMode Mode, const SpatialConfiguration& Spatial, ImVec2 Pointer, float Scale) const
 {
-    const Vector Centre = {Spatial.PositionMetres[0], Spatial.PositionMetres[1], Spatial.PositionMetres[2]};
-    ImVec2       CentreScreen;
-    if (!View.Project(Centre, CentreScreen)) return -1;
-    const double                Length = HandlePixels * Scale * View.ResolvePixelMetres(Centre);
-    const std::array<Vector, 3> Axes   = ResolveHandleAxes(Mode, Spatial);
-    int                         Best   = -1;
-    float                       Nearest = PickPixels * Scale;
-    if (Mode == PlacementGizmoMode::Scale)
-    {
-        const float Dx = Pointer.x - CentreScreen.x, Dy = Pointer.y - CentreScreen.y;
-        if (std::max(std::abs(Dx), std::abs(Dy)) <= 9.0f * Scale) return 3;
-    }
-    for (int Axis = 0; Axis < 3; ++Axis)
-    {
-        float Distance = 1.0e9f;
-        if (Mode == PlacementGizmoMode::Rotate)
-        {
-            for (const auto& Run : ProjectRing(View, Centre, Axes[static_cast<size_t>(Axis)], Length * 0.85))
-                for (size_t Index = 1; Index < Run.size(); ++Index) Distance = std::min(Distance, SegmentDistance(Pointer, Run[Index - 1], Run[Index]));
-        }
-        else
-        {
-            ImVec2 Tip;
-            if (!View.Project(Add(Centre, Multiply(Axes[static_cast<size_t>(Axis)], Length)), Tip)) continue;
-            Distance = SegmentDistance(Pointer, CentreScreen, Tip);
-        }
-        if (Distance < Nearest)
-        {
-            Nearest = Distance;
-            Best    = Axis;
-        }
-    }
-    return Best;
+    ImVec2 CentreScreen;
+    if (!View.Project({Spatial.PositionMetres[0], Spatial.PositionMetres[1], Spatial.PositionMetres[2]}, CentreScreen)) return -1;
+    const OrbitCameraFrame Frame    = ResolveFrame(View);
+    const GizmoGeometry    Geometry = BuildGizmoGeometry(ResolvePose(Frame, Mode, Spatial, Scale), Frame, GizmoHandle::None, GizmoHandle::None);
+    const GizmoHandle      Handle   = PickGizmoHandle(Geometry, Frame, Pointer.x - View.StageMin.x, Pointer.y - View.StageMin.y, PickPixels * Scale);
+    return ResolveHandleCode(Handle, Mode);
 }
 
 PlacementGizmoOutcome PlacementGizmo::Construct(ImDrawList* DrawList, const PlacementView& View, PlacementGizmoMode Mode, SpatialConfiguration& Spatial,
@@ -233,7 +225,12 @@ PlacementGizmoOutcome PlacementGizmo::Construct(ImDrawList* DrawList, const Plac
         const Vector Centre = {Spatial.PositionMetres[0], Spatial.PositionMetres[1], Spatial.PositionMetres[2]};
         ImVec2       CentreScreen;
         (void)View.Project(Centre, CentreScreen);
-        if (Mode == PlacementGizmoMode::Move)
+        if (Mode == PlacementGizmoMode::Move && Handle_ >= PlaneHandle)
+        {
+            const Vector Normal = Handle_ == ScreenHandle ? View.Forward : ResolveHandleAxes(Mode, Spatial)[static_cast<size_t>(Handle_ - PlaneHandle)];
+            if (!ResolvePlaneHit(View, Pointer, Centre, Normal, PressHit_)) PressHit_ = Centre;
+        }
+        else if (Mode == PlacementGizmoMode::Move)
         {
             Vector Origin{}, Direction{};
             View.ResolveRay(Pointer, Origin, Direction);
@@ -244,7 +241,7 @@ PlacementGizmoOutcome PlacementGizmo::Construct(ImDrawList* DrawList, const Plac
         {
             LastAngle_ = std::atan2(-(Pointer.y - CentreScreen.y), Pointer.x - CentreScreen.x);
         }
-        else if (Handle_ < 3)
+        else if (Handle_ < UniformHandle)
         {
             const Vector Axis = ResolveHandleAxes(Mode, Spatial)[static_cast<size_t>(Handle_)];
             ImVec2       Tip;
@@ -268,7 +265,28 @@ PlacementGizmoOutcome PlacementGizmo::Construct(ImDrawList* DrawList, const Plac
         Outcome.Engaged = true;
         const size_t Axis = static_cast<size_t>(std::min(Handle_, 2));
         SpatialConfiguration Next = Start_;
-        if (Mode == PlacementGizmoMode::Move)
+        if (Mode == PlacementGizmoMode::Move && Handle_ >= PlaneHandle)
+        {
+            const Vector Normal = Handle_ == ScreenHandle ? View.Forward : ResolveHandleAxes(Mode, Start_)[static_cast<size_t>(Handle_ - PlaneHandle)];
+            Vector       Hit{};
+            if (ResolvePlaneHit(View, Pointer, StartCentre, Normal, Hit))
+            {
+                Vector Travel = Subtract(Hit, PressHit_);
+                if (Snap)
+                    for (double& Component : Travel) Component = std::round(Component / 0.25) * 0.25;
+                for (size_t Component = 0; Component < 3; ++Component)
+                    Next.PositionMetres[Component] = static_cast<float>(Start_.PositionMetres[Component] + Travel[Component]);
+                if (Handle_ == ScreenHandle)
+                    std::snprintf(Readout, sizeof(Readout), "%+.2f %+.2f %+.2f m", Travel[0], Travel[1], Travel[2]);
+                else
+                {
+                    const size_t First = Handle_ == PlaneHandle ? 1 : 0, Second = Handle_ == PlaneHandle + 2 ? 1 : 2;
+                    std::snprintf(Readout, sizeof(Readout), "%c%c %+.2f %+.2f m", "XYZ"[First], "XYZ"[Second], Travel[First], Travel[Second]);
+                }
+            }
+            else Next = Spatial;
+        }
+        else if (Mode == PlacementGizmoMode::Move)
         {
             const Vector Direction = ResolveHandleAxes(Mode, Start_)[Axis];
             Vector       Origin{}, Ray{};
@@ -300,7 +318,7 @@ PlacementGizmoOutcome PlacementGizmo::Construct(ImDrawList* DrawList, const Plac
         }
         else
         {
-            if (Handle_ == 3)
+            if (Handle_ == UniformHandle)
             {
                 double Factor = std::max(0.01, 1.0 + ((Pointer.x - PressPointer_.x) - (Pointer.y - PressPointer_.y)) / (150.0 * Scale));
                 for (size_t Component = 0; Component < 3; ++Component)
@@ -338,54 +356,14 @@ PlacementGizmoOutcome PlacementGizmo::Construct(ImDrawList* DrawList, const Plac
         }
     }
 
-    // ③ the handles, a constant HandlePixels long on screen
+    // ③ the handles (GizmoSpace, SolidArc's look), a constant HandlePixels on screen
     if (DrawList == nullptr) return Outcome;
-    const Vector Centre = {Spatial.PositionMetres[0], Spatial.PositionMetres[1], Spatial.PositionMetres[2]};
-    ImVec2       CentreScreen;
-    if (!View.Project(Centre, CentreScreen)) return Outcome;
-    const double                Length = HandlePixels * Scale * View.ResolvePixelMetres(Centre);
-    const std::array<Vector, 3> Axes   = ResolveHandleAxes(Mode, Spatial);
-    const float                 Stroke = 2.5f * Scale;
-    for (int Axis = 0; Axis < 3; ++Axis)
-    {
-        const bool  Lit = Hover == Axis;
-        const ImU32 Ink = ResolveAxisInk(Axis, Lit);
-        if (Mode == PlacementGizmoMode::Rotate)
-        {
-            for (const auto& Run : ProjectRing(View, Centre, Axes[static_cast<size_t>(Axis)], Length * 0.85))
-                if (Run.size() > 1) DrawList->AddPolyline(Run.data(), static_cast<int>(Run.size()), Ink, ImDrawFlags_None, Lit ? Stroke * 1.4f : Stroke);
-            continue;
-        }
-        ImVec2 Tip;
-        if (!View.Project(Add(Centre, Multiply(Axes[static_cast<size_t>(Axis)], Length)), Tip)) continue;
-        DrawList->AddLine(CentreScreen, Tip, IM_COL32(0, 0, 0, 110), Stroke + 2.0f * Scale);
-        DrawList->AddLine(CentreScreen, Tip, Ink, Lit ? Stroke * 1.3f : Stroke);
-        const float Dx = Tip.x - CentreScreen.x, Dy = Tip.y - CentreScreen.y;
-        const float Span = std::sqrt(Dx * Dx + Dy * Dy);
-        if (Span < 1.0f) continue;
-        const ImVec2 Along(Dx / Span, Dy / Span), Across(-Dy / Span, Dx / Span);
-        if (Mode == PlacementGizmoMode::Move)
-        {
-            const float  Head = 13.0f * Scale, Half = 5.5f * Scale;
-            const ImVec2 Point(Tip.x + Along.x * Head, Tip.y + Along.y * Head);
-            DrawList->AddTriangleFilled(Point, ImVec2(Tip.x + Across.x * Half, Tip.y + Across.y * Half), ImVec2(Tip.x - Across.x * Half, Tip.y - Across.y * Half), Ink);
-        }
-        else
-        {
-            const float Half = 5.0f * Scale;
-            DrawList->AddRectFilled(ImVec2(Tip.x - Half, Tip.y - Half), ImVec2(Tip.x + Half, Tip.y + Half), Ink, 1.5f * Scale);
-        }
-    }
-    if (Mode == PlacementGizmoMode::Scale)
-    {
-        const float Half = 7.0f * Scale;
-        DrawList->AddRectFilled(ImVec2(CentreScreen.x - Half, CentreScreen.y - Half), ImVec2(CentreScreen.x + Half, CentreScreen.y + Half),
-                                ResolveAxisInk(3, Hover == 3), 2.0f * Scale);
-    }
-    else
-    {
-        DrawList->AddCircleFilled(CentreScreen, 4.0f * Scale, IM_COL32(236, 236, 236, 235), 16);
-    }
+    ImVec2 CentreScreen;
+    if (!View.Project({Spatial.PositionMetres[0], Spatial.PositionMetres[1], Spatial.PositionMetres[2]}, CentreScreen)) return Outcome;
+    const OrbitCameraFrame Frame   = ResolveFrame(View);
+    const GizmoHandle      Lit     = ResolveGizmoHandle(Hover, Mode);
+    const GizmoHandle      Grabbed = ResolveGizmoHandle(Handle_, Mode);
+    RasterizeGizmo(DrawList, BuildGizmoGeometry(ResolvePose(Frame, Mode, Spatial, Scale), Frame, Lit, Grabbed), Frame, View.StageMin);
     if (Readout[0] != '\0')
     {
         const ImVec2 Text(Pointer.x + 16.0f * Scale, Pointer.y + 10.0f * Scale);

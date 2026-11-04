@@ -1,20 +1,20 @@
-/*====================================================================================================================================
-                                                         SOLIDARCGIZMO.CPP
-====================================================================================================================================*/
-// 🧩 Transform gizmo (Slate GizmoPRO look): CPU-built handle triangles drawn by the GPU program, CPU pick and drag maths
+/*==========================================================================================================================================
+                                                               GIZMOSPACE.CPP
+==========================================================================================================================================*/
+// 🧩 The gizmo's handle triangles (Slate GizmoPRO look), their pick and the drag maths.
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                                    INCLUDES
 //------------------------------------------------------------------------------------------------------------------------
 
-#include "UI/SolidArc/Viewport/SolidArcGizmo.h"
+#include "Frontier/Extensions/Interface/GizmoSpace.h"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <numbers>
 
-namespace Frontier::SolidArc
+namespace Frontier
 {
 
 using GeometryProcessing::Cross;
@@ -82,7 +82,7 @@ constexpr uint8_t QuadHoverAlpha = 140;                                         
 class GizmoBuilder
 {
 public:
-    GizmoBuilder(const SolidArcGizmoPose& Pose, std::vector<SolidArcGizmoVertex>& Vertices) : Pose(Pose), Vertices(Vertices) {}
+    GizmoBuilder(const GizmoPose& Pose, std::vector<GizmoVertex>& Vertices) : Pose(Pose), Vertices(Vertices) {}
 
     // Gizmo units (L, along Pose.Axes) → world.
     [[nodiscard]] Vector3 Place(Vector3 Local) const
@@ -91,11 +91,11 @@ public:
     }
     [[nodiscard]] Vector3 Turn(Vector3 Local) const { return Pose.Axes[0] * Local.X + Pose.Axes[1] * Local.Y + Pose.Axes[2] * Local.Z; }
 
-    void Triangle(Vector3 First, Vector3 Second, Vector3 Third, Vector3 Normal, uint32_t Colour, SolidArcGizmoHandle Handle)
+    void Triangle(Vector3 First, Vector3 Second, Vector3 Third, Vector3 Normal, uint32_t Colour, GizmoHandle Handle)
     {
         for (const Vector3& Corner : { First, Second, Third })
         {
-            SolidArcGizmoVertex Vertex;
+            GizmoVertex Vertex;
             Vertex.Position[0] = float(Corner.X); Vertex.Position[1] = float(Corner.Y); Vertex.Position[2] = float(Corner.Z);
             Vertex.Normal[0]   = float(Normal.X); Vertex.Normal[1]   = float(Normal.Y); Vertex.Normal[2]   = float(Normal.Z);
             Vertex.Colour      = Colour;
@@ -105,7 +105,7 @@ public:
     }
 
     // A round solid along Axis (local unit vector): radius tapering from BaseRadius at Start to TopRadius at End.
-    void Round(Vector3 Axis, double Start, double End, double BaseRadius, double TopRadius, uint32_t Colour, SolidArcGizmoHandle Handle)
+    void Round(Vector3 Axis, double Start, double End, double BaseRadius, double TopRadius, uint32_t Colour, GizmoHandle Handle)
     {
         const Vector3 First  = Perpendicular(Axis);
         const Vector3 Second = Cross(Axis, First);
@@ -132,7 +132,7 @@ public:
     }
 
     // Flat band (u, v local): radii Inner … Outer over angles Low … High, unlit.
-    void Band(Vector3 U, Vector3 V, double Inner, double Outer, double Low, double High, int Segments, uint32_t Colour, SolidArcGizmoHandle Handle)
+    void Band(Vector3 U, Vector3 V, double Inner, double Outer, double Low, double High, int Segments, uint32_t Colour, GizmoHandle Handle)
     {
         for (int Index = 0; Index < Segments; ++Index)
         {
@@ -147,7 +147,7 @@ public:
     }
 
     // World stroke From → To of width Width (world), facing the eye (Toward = unit eye direction).
-    void Stroke(Vector3 From, Vector3 To, double Width, Vector3 Toward, uint32_t Colour, SolidArcGizmoHandle Handle)
+    void Stroke(Vector3 From, Vector3 To, double Width, Vector3 Toward, uint32_t Colour, GizmoHandle Handle)
     {
         Vector3 Side = Cross(To - From, Toward);
         if (Length(Side) < 1.0e-12) return;
@@ -156,11 +156,11 @@ public:
         Triangle(From - Side, To + Side, To - Side, {}, Colour, Handle);
     }
 
-    const SolidArcGizmoPose&           Pose;
-    std::vector<SolidArcGizmoVertex>&  Vertices;
+    const GizmoPose&           Pose;
+    std::vector<GizmoVertex>&  Vertices;
 };
 
-[[nodiscard]] bool HiddenCondition(const SolidArcGizmoPose& Pose, SolidArcGizmoHandle Handle)
+[[nodiscard]] bool HiddenCondition(const GizmoPose& Pose, GizmoHandle Handle)
 {
     return (Pose.Hidden >> uint32_t(Handle)) & 1u;
 }
@@ -170,6 +170,37 @@ public:
 //------------------------------------------------------------------------------------------------------------------------
 //                                                    PUBLIC FUNCTIONS
 //------------------------------------------------------------------------------------------------------------------------
+
+OrbitCameraFrame ResolveGizmoFrame(const std::array<double, 3>& Eye, const std::array<double, 3>& Forward, const std::array<double, 3>& Up,
+                                   double VerticalFieldOfView, double Width, double Height)
+{
+    // 📝 Vulkan clip space as the SolidArc camera writes it: x right, y down, depth in [0, 1] between Near and Far.
+    constexpr double Near = 0.05, Far = 1.0e5;                                               // [len]
+    const Vector3 Ahead   = Normalize(FromArray(Forward));
+    const Vector3 Across  = Normalize(Cross(Ahead, FromArray(Up)));
+    const Vector3 Upward  = Cross(Across, Ahead);
+    const Vector3 Station = FromArray(Eye);
+    const double  Tangent = std::tan(0.5 * VerticalFieldOfView);
+    const double  Aspect  = Height > 0.0 ? Width / Height : 1.0;
+    const double  Depth   = Far / (Far - Near);
+    const double  Rows[4][4] = {
+        { Across.X / (Tangent * Aspect), Across.Y / (Tangent * Aspect), Across.Z / (Tangent * Aspect), -Dot(Across, Station) / (Tangent * Aspect) },
+        { -Upward.X / Tangent, -Upward.Y / Tangent, -Upward.Z / Tangent, Dot(Upward, Station) / Tangent },
+        { Ahead.X * Depth, Ahead.Y * Depth, Ahead.Z * Depth, -Dot(Ahead, Station) * Depth - Near * Depth },
+        { Ahead.X, Ahead.Y, Ahead.Z, -Dot(Ahead, Station) },
+    };
+    OrbitCameraFrame Frame;
+    for (int Row = 0; Row < 4; ++Row)
+        for (int Column = 0; Column < 4; ++Column) Frame.ClipFromWorld[Column * 4 + Row] = Rows[Row][Column];
+    Frame.Eye           = Eye;
+    Frame.Right         = { Across.X, Across.Y, Across.Z };
+    Frame.Up            = { Upward.X, Upward.Y, Upward.Z };
+    Frame.Forward       = { Ahead.X, Ahead.Y, Ahead.Z };
+    Frame.WorldPerPixel = 2.0 * Tangent / std::max(1.0, Height);                             // [len] - At unit depth
+    Frame.Width         = Width;
+    Frame.Height        = Height;
+    return Frame;
+}
 
 double MeasureGizmoSize(const OrbitCameraFrame& Frame, Vector3 Origin, double Pixels)
 {
@@ -190,25 +221,25 @@ double MeasureGizmoSize(const OrbitCameraFrame& Frame, Vector3 Origin, double Pi
     return PerUnit > 1.0e-9 ? Pixels / PerUnit : Pixels * Frame.WorldPerPixel;
 }
 
-SolidArcGizmoGeometry BuildSolidArcGizmo(const SolidArcGizmoPose& Pose, const OrbitCameraFrame& Frame, SolidArcGizmoHandle Hover, SolidArcGizmoHandle Grabbed)
+GizmoGeometry BuildGizmoGeometry(const GizmoPose& Pose, const OrbitCameraFrame& Frame, GizmoHandle Hover, GizmoHandle Grabbed)
 {
-    SolidArcGizmoGeometry Geometry;
+    GizmoGeometry Geometry;
     if (Pose.Modes == 0) return Geometry;
     GizmoBuilder  Builder(Pose, Geometry.Vertices);
     const Vector3 Units[3] = { { 1.0, 0.0, 0.0 }, { 0.0, 1.0, 0.0 }, { 0.0, 0.0, 1.0 } };
     const Vector3 Toward   = FromArray(Frame.Forward) * -1.0;                                 // [-] - Towards the eye
-    const auto Glow = [&](SolidArcGizmoHandle Handle) { return Handle == Hover || Handle == Grabbed; };
-    const auto Shown = [&](SolidArcGizmoHandle Handle) { return !HiddenCondition(Pose, Handle); };
+    const auto Glow = [&](GizmoHandle Handle) { return Handle == Hover || Handle == Grabbed; };
+    const auto Shown = [&](GizmoHandle Handle) { return !HiddenCondition(Pose, Handle); };
 
     // ① opaque: cones, scale cylinders, rotate arcs, quad edges, centre ring
     for (int Axis = 0; Axis < 3; ++Axis)
     {
         const Vector3 OtherU = Axis == 0 ? Units[1] : Units[0];                              // [-] - Slate OTHERS[axis].u
         const Vector3 OtherV = Axis == 2 ? Units[1] : Units[2];                              // [-] - Slate OTHERS[axis].v
-        const auto Translate = SolidArcGizmoHandle(uint8_t(SolidArcGizmoHandle::TranslateX) + Axis);
-        const auto Rotate    = SolidArcGizmoHandle(uint8_t(SolidArcGizmoHandle::RotateX) + Axis);
-        const auto Scale     = SolidArcGizmoHandle(uint8_t(SolidArcGizmoHandle::ScaleX) + Axis);
-        const auto Plane     = SolidArcGizmoHandle(uint8_t(SolidArcGizmoHandle::PlaneYZ) + Axis);
+        const auto Translate = GizmoHandle(uint8_t(GizmoHandle::TranslateX) + Axis);
+        const auto Rotate    = GizmoHandle(uint8_t(GizmoHandle::RotateX) + Axis);
+        const auto Scale     = GizmoHandle(uint8_t(GizmoHandle::ScaleX) + Axis);
+        const auto Plane     = GizmoHandle(uint8_t(GizmoHandle::PlaneYZ) + Axis);
         if ((Pose.Modes & GizmoTranslate) && Shown(Translate))
             Builder.Round(Units[Axis], Tip - 0.5 * ConeHeight, Tip + 0.5 * ConeHeight, ConeRadius, 0.0, PackColour(AxisColours[Axis], Glow(Translate)), Translate);
         if ((Pose.Modes & GizmoScale) && Shown(Scale))
@@ -228,14 +259,14 @@ SolidArcGizmoGeometry BuildSolidArcGizmo(const SolidArcGizmoPose& Pose, const Or
         }
     }
     // Centre ring: a band facing the eye (Slate billboards a thin torus).
-    if (Shown(SolidArcGizmoHandle::Centre))
+    if (Shown(GizmoHandle::Centre))
     {
         const Vector3 Right = FromArray(Frame.Right), Up = FromArray(Frame.Up);
         const Vector3 LocalRight{ Dot(Right, Pose.Axes[0]), Dot(Right, Pose.Axes[1]), Dot(Right, Pose.Axes[2]) };
         const Vector3 LocalUp{ Dot(Up, Pose.Axes[0]), Dot(Up, Pose.Axes[1]), Dot(Up, Pose.Axes[2]) };
         const double  Tube = std::max(RingTube, 0.75 * StrokePixels / GizmoPixels);          // [L] - At least a visible stroke
         Builder.Band(LocalRight, LocalUp, RingRadius - Tube, RingRadius + Tube, 0.0, 2.0 * std::numbers::pi, RingSegments,
-                     PackColour(RingColour, Glow(SolidArcGizmoHandle::Centre)), SolidArcGizmoHandle::Centre);
+                     PackColour(RingColour, Glow(GizmoHandle::Centre)), GizmoHandle::Centre);
     }
     Geometry.OpaqueCount = static_cast<uint32_t>(Geometry.Vertices.size());
 
@@ -244,7 +275,7 @@ SolidArcGizmoGeometry BuildSolidArcGizmo(const SolidArcGizmoPose& Pose, const Or
     {
         for (int Axis = 0; Axis < 3; ++Axis)
         {
-            const auto Plane = SolidArcGizmoHandle(uint8_t(SolidArcGizmoHandle::PlaneYZ) + Axis);
+            const auto Plane = GizmoHandle(uint8_t(GizmoHandle::PlaneYZ) + Axis);
             if (!Shown(Plane)) continue;
             const Vector3 OtherU = Axis == 0 ? Units[1] : Units[0];
             const Vector3 OtherV = Axis == 2 ? Units[1] : Units[2];
@@ -259,10 +290,10 @@ SolidArcGizmoGeometry BuildSolidArcGizmo(const SolidArcGizmoPose& Pose, const Or
     return Geometry;
 }
 
-SolidArcGizmoHandle PickSolidArcGizmo(const SolidArcGizmoGeometry& Geometry, const OrbitCameraFrame& Frame, double PixelX, double PixelY, double Reach)
+GizmoHandle PickGizmoHandle(const GizmoGeometry& Geometry, const OrbitCameraFrame& Frame, double PixelX, double PixelY, double Reach)
 {
     struct Projected { double X = 0.0, Y = 0.0, Depth = 0.0; bool Valid = false; };
-    const auto Project = [&](const SolidArcGizmoVertex& Vertex)
+    const auto Project = [&](const GizmoVertex& Vertex)
     {
         Projected Point;
         double Clip[4] = {};
@@ -283,7 +314,7 @@ SolidArcGizmoHandle PickSolidArcGizmo(const SolidArcGizmoGeometry& Geometry, con
         const double Share  = Square > 0.0 ? std::clamp(((PixelX - From.X) * AlongX + (PixelY - From.Y) * AlongY) / Square, 0.0, 1.0) : 0.0;
         return std::hypot(From.X + AlongX * Share - PixelX, From.Y + AlongY * Share - PixelY);
     };
-    SolidArcGizmoHandle Best            = SolidArcGizmoHandle::None;
+    GizmoHandle Best            = GizmoHandle::None;
     double              BestGap         = Reach;
     bool                BestTranslucent = true;
     double              BestDepth       = 1e300;
@@ -308,42 +339,42 @@ SolidArcGizmoHandle PickSolidArcGizmo(const SolidArcGizmoGeometry& Geometry, con
         //    (the cone seen through a quad stays grabbable); then the nearest depth.
         const bool Translucent = Index >= Geometry.OpaqueCount;
         const bool Better = Distance < BestGap || (Distance == BestGap && ((!Translucent && BestTranslucent) || (Translucent == BestTranslucent && Depth < BestDepth)));
-        if (Better || Best == SolidArcGizmoHandle::None)
+        if (Better || Best == GizmoHandle::None)
         {
             BestGap         = Distance;
             BestTranslucent = Translucent;
             BestDepth       = Depth;
-            Best            = SolidArcGizmoHandle(Geometry.Vertices[Index].Handle);
+            Best            = GizmoHandle(Geometry.Vertices[Index].Handle);
         }
     }
     return Best;
 }
 
-int GizmoHandleAxis(SolidArcGizmoHandle Handle) noexcept
+int GizmoHandleAxis(GizmoHandle Handle) noexcept
 {
     const int Code = int(Handle);
     if (Code >= 1 && Code <= 12) return (Code - 1) % 3;
     return -1;
 }
 
-const char* GizmoHandleLabel(SolidArcGizmoHandle Handle) noexcept
+const char* GizmoHandleLabel(GizmoHandle Handle) noexcept
 {
     switch (Handle)
     {
-    case SolidArcGizmoHandle::None:       return "none";
-    case SolidArcGizmoHandle::TranslateX: return "X move";
-    case SolidArcGizmoHandle::TranslateY: return "Y move";
-    case SolidArcGizmoHandle::TranslateZ: return "Z move";
-    case SolidArcGizmoHandle::PlaneYZ:    return "X-plane move";
-    case SolidArcGizmoHandle::PlaneXZ:    return "Y-plane move";
-    case SolidArcGizmoHandle::PlaneXY:    return "Z-plane move";
-    case SolidArcGizmoHandle::RotateX:    return "X rotate";
-    case SolidArcGizmoHandle::RotateY:    return "Y rotate";
-    case SolidArcGizmoHandle::RotateZ:    return "Z rotate";
-    case SolidArcGizmoHandle::ScaleX:     return "X scale";
-    case SolidArcGizmoHandle::ScaleY:     return "Y scale";
-    case SolidArcGizmoHandle::ScaleZ:     return "Z scale";
-    case SolidArcGizmoHandle::Centre:     return "centre";
+    case GizmoHandle::None:       return "none";
+    case GizmoHandle::TranslateX: return "X move";
+    case GizmoHandle::TranslateY: return "Y move";
+    case GizmoHandle::TranslateZ: return "Z move";
+    case GizmoHandle::PlaneYZ:    return "X-plane move";
+    case GizmoHandle::PlaneXZ:    return "Y-plane move";
+    case GizmoHandle::PlaneXY:    return "Z-plane move";
+    case GizmoHandle::RotateX:    return "X rotate";
+    case GizmoHandle::RotateY:    return "Y rotate";
+    case GizmoHandle::RotateZ:    return "Z rotate";
+    case GizmoHandle::ScaleX:     return "X scale";
+    case GizmoHandle::ScaleY:     return "Y scale";
+    case GizmoHandle::ScaleZ:     return "Z scale";
+    case GizmoHandle::Centre:     return "centre";
     }
     return "?";
 }
@@ -383,4 +414,4 @@ std::optional<double> MeasureGizmoAngle(const OrbitRay& Ray, Vector3 Origin, Vec
     return std::atan2(Dot(Offset, V), Dot(Offset, U));
 }
 
-} // namespace Frontier::SolidArc
+} // namespace Frontier

@@ -82,7 +82,7 @@ independent transcription of the native formulas at 400 points (worst difference
 
 ## Levelspace
 
-Each page ends with the records it would write. Keys without “proposed” are the ones `SceneWorld.cpp` reads today
+Each page ends with the records it would write. Keys without “proposed” are the ones `WorldSpace.cpp` reads today
 (`ForceFieldRecord`, `WindRecord`); the validation checks that claim against the C++ source. Localized forces become
 `ForceSource` records nested under `rec_force_field`, as the Wind record already is.
 

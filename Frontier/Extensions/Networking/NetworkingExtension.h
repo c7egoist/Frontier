@@ -1,0 +1,83 @@
+/*==========================================================================================================================================
+                                                           NETWORKINGEXTENSION.H
+==========================================================================================================================================*/
+// 🧩 The bridge between a level and its peers: the host replicates its WorldSpace records into the NetworkingSpace, a transport
+//    carries the messages, and a client absorbs them into its own WorldSpace. The transport is an interface: the loopback here
+//    (one process, both ends) now; an EOSExtension / EpicAdapter (Epic Online Services) implements it later.
+
+#pragma once
+
+#include "Frontier/Extensions/Networking/NetworkingSpace.h"
+
+#include "Frontier/Engine/Scene/RecordToken.h"
+
+#include <cstdint>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <vector>
+
+namespace Frontier
+{
+
+class WorldSpace;
+
+// 📝 The wire form of a message: a 24-byte little-endian header (sender, receiver, topic, sequence, payload length) and the
+//    payload. Every transport frames messages this way.
+[[nodiscard]] std::string EncodeNetworkMessage(const NetworkMessage& Message);
+bool                      DecodeNetworkMessage(std::string_view Bytes, NetworkMessage& Message);
+
+class NetworkTransport
+{
+  public:
+    virtual ~NetworkTransport() = default;
+
+    virtual bool                                      Send(const NetworkMessage& Message) = 0;
+    [[nodiscard]] virtual std::vector<NetworkMessage> Receive()                           = 0;
+    [[nodiscard]] virtual const char*                 QueryName() const noexcept          = 0;
+};
+
+// 📝 Two ends in one process: what one sends, the other receives, framed and unframed as a socket would carry it.
+class LoopbackTransport final : public NetworkTransport
+{
+  public:
+    static void Connect(LoopbackTransport& First, LoopbackTransport& Second) noexcept;
+
+    bool                                      Send(const NetworkMessage& Message) override;
+    [[nodiscard]] std::vector<NetworkMessage> Receive() override;
+    [[nodiscard]] const char*                 QueryName() const noexcept override { return "Loopback"; }
+
+  private:
+    LoopbackTransport*       Partner = nullptr;
+    std::vector<std::string> Frames;
+};
+
+class NetworkingExtension
+{
+  public:
+    NetworkingExtension(NetworkingSpace& Space, NetworkTransport& Transport) noexcept : Space(Space), Transport(Transport) {}
+
+    // 📝 Introduces the local peer to the others (name and role).
+    void Greet();
+
+    // 📝 Host: every record whose level TOML changed since the last call leaves as one RecordState message; records gone from
+    //    the level leave as RecordRemoval. Returns the messages posted.
+    size_t Replicate(const WorldSpace& World);
+
+    // 📝 Moves posted messages to the transport and received ones into the space.
+    void Exchange();
+
+    // 📝 Client: applies the received messages. A host record is matched to the local record of the same type and name (both
+    //    sides opened the same level) or constructed. Returns the messages applied.
+    size_t Absorb(WorldSpace& World);
+
+    [[nodiscard]] size_t QueryMatchedRecords() const noexcept { return Matched.size(); }
+
+  private:
+    NetworkingSpace&                          Space;
+    NetworkTransport&                         Transport;
+    std::unordered_map<uint64_t, std::string> Sent;      // host record token → the state last sent
+    std::unordered_map<uint64_t, RecordToken> Matched;   // host record token → local record
+};
+
+} // namespace Frontier

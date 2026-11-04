@@ -38,8 +38,8 @@ enum class ParticleFieldCategory : uint8_t
     Magnetic   = 7,    // acceleration, force type 3
     Gravity    = 8,    // acceleration, packed as an inverted lift
     Orbit      = 9,    // acceleration, packed as an attractor
-    Drag       = 10,   // damping, no GPU path yet
-    Current    = 11,   // flow inside a box, no GPU path yet
+    Drag       = 10,   // damping inside a box (field program type 4)
+    Current    = 11,   // flow inside a box (field program type 5)
 };
 
 inline constexpr uint32_t ParticleFieldCategoryCount = 12;

@@ -13,7 +13,7 @@
 #include "Engine/PhysicalDynamics/AtmosphericFlow.h"
 #include "Engine/PhysicalDynamics/ForceField.h"
 #include "Engine/PhysicalDynamics/ForceSourceCatalogue.h"
-#include "Engine/Scene/SceneWorld.h"
+#include "Engine/Scene/WorldSpace.h"
 
 #include <toml++/toml.hpp>
 
@@ -347,7 +347,7 @@ int main(int ArgumentCount, char** Arguments)
     //------------------------------------------------------------------------------------------------------------------------
     std::cout << "\nThe level's ForceSource records (Default.levelspace)\n";
     {
-        SceneWorld  World;
+        WorldSpace  World;
         std::string Diagnostic;
         const bool  Loaded = World.LoadLevelSpace(Root / "Projects/Everest/Content/Levels/Default.levelspace", &Diagnostic);
         Verify(Loaded, "Default.levelspace loads" + (Diagnostic.empty() ? std::string{} : ": " + Diagnostic));

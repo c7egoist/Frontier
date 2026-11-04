@@ -19,7 +19,7 @@ namespace Frontier
 struct ParticleRefreshPlan;
 struct ParticleEffectInstance;
 
-// 📝 The editor advances its scene on the interface thread and hands the plan over; the host (the editor application, a capture)
+// 📝 The editor advances its space on the interface thread and hands the plan over; the host (the editor application, a capture)
 //    runs ParticleSimulationSequence on its device and registers the image with the interface renderer.
 struct ParticleViewportRequest
 {

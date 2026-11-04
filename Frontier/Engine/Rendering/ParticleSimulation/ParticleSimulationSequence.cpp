@@ -340,7 +340,7 @@ bool ParticleSimulationSequence::Refresh(const ParticleRefreshPlan& Plan, std::s
         return false;
     }
 
-    // ① stores: one set per effect; an effect gone from the scene releases its own
+    // ① stores: one set per effect; an effect gone from the space releases its own
     for (auto& Stores : Stores_) Stores->Seen = false;
     std::vector<EffectStores*> JobStores(Plan.Jobs.size(), nullptr);
     for (size_t Index = 0; Index < Plan.Jobs.size(); ++Index)

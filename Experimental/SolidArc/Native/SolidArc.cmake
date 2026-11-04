@@ -120,11 +120,21 @@ add_library(FrontierSolidArcDocument STATIC
 target_include_directories(FrontierSolidArcDocument PUBLIC "${FRONTIER_ROOT}")
 target_link_libraries(FrontierSolidArcDocument PUBLIC FrontierGeometryProcessing FrontierOrbitCamera SolidArcTomlPlusPlus SolidArcStb)
 
+# 📝 GizmoSpace (Frontier/Extensions/Interface): the gizmo SolidArc shares with the Frontier editor. The root build defines the
+#    target; the standalone tree builds the same two files here.
+if(NOT TARGET FrontierInterfaceExtension)
+    add_library(FrontierInterfaceExtension STATIC
+        "${FRONTIER_ROOT}/Frontier/Extensions/Interface/GizmoSpace.cpp"
+        "${FRONTIER_ROOT}/Frontier/Extensions/Interface/GizmoRasterization.cpp")
+    target_include_directories(FrontierInterfaceExtension PUBLIC "${FRONTIER_ROOT}")
+    target_compile_features(FrontierInterfaceExtension PUBLIC cxx_std_20)
+    target_link_libraries(FrontierInterfaceExtension PUBLIC FrontierImGui)
+endif()
+
 add_library(FrontierSolidArcUI STATIC
     ${SOLIDARC_UI}/Viewport/SolidArcCamera.cpp
     ${SOLIDARC_UI}/Viewport/SolidArcDevice.cpp
     ${SOLIDARC_UI}/Viewport/SolidArcRasterization.cpp
-    ${SOLIDARC_UI}/Viewport/SolidArcGizmo.cpp
     ${SOLIDARC_UI}/Viewport/SolidArcPortableImage.cpp
     ${SOLIDARC_UI}/Viewport/SolidArcSnapping.cpp
     ${SOLIDARC_UI}/Viewport/SolidArcSurfaceTracing.cpp
@@ -142,7 +152,7 @@ if(WIN32)
     target_link_libraries(FrontierSolidArcUI PUBLIC comdlg32)                                # GetOpenFileNameW (Image plane › Browse)
 endif()
 target_include_directories(FrontierSolidArcUI PUBLIC "${FRONTIER_ROOT}")
-target_link_libraries(FrontierSolidArcUI PUBLIC FrontierSolidArcDocument FrontierInterface FrontierAuthoringControls SolidArcVolk SolidArcImGuiVulkan SolidArcTomlPlusPlus SolidArcStb)
+target_link_libraries(FrontierSolidArcUI PUBLIC FrontierSolidArcDocument FrontierInterface FrontierInterfaceExtension FrontierAuthoringControls SolidArcVolk SolidArcImGuiVulkan SolidArcTomlPlusPlus SolidArcStb)
 target_compile_definitions(FrontierSolidArcUI PRIVATE SOLIDARC_FONT_PATH="${SOLIDARC_FONT_FILE}" SOLIDARC_CONTENT_ROOT="${FRONTIER_ROOT}")
 if(NOT MSVC)
     target_compile_options(FrontierSolidArcUI PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers)

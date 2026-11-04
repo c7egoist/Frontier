@@ -665,17 +665,12 @@ struct FractureConfiguration : RevisionCounter
     uint32_t PrefractureTriggerCount = 0;
 };
 
+// 📝 A Particles record keeps its ParticleSpace (effects, force fields, wind, lightning) in a file of its own beside the level,
+//    edited in the Particle editor. SpaceFile is relative to the level's folder; empty until the editor first opens the record.
 struct ParticleConfiguration : RevisionCounter
 {
-    bool  Enabled                 = true;
-    float SparkRatePerSecond      = 280.0f;
-    float RainDropDensity         = 0.0f;
-    float SnowFlakeDensity        = 0.0f;
-    float GravityMultiplier       = 1.0f;
-    float AerodynamicDrag         = 0.32f;
-    float BounceRestitution       = 0.45f;
-    bool  GpuWeatherPrecipitation = true;
-    bool  DepthBufferCollisions   = true;
+    bool        Enabled = true;
+    std::string SpaceFile;   // "<level>.<record>.particlespace"
 };
 
 //------------------------------------------------------------------------------------------------------------------------

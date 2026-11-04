@@ -111,10 +111,10 @@ const ParticleEffectCensus* ParticleEditorPages::ResolveCensus(const ParticleVie
 
 void ParticleEditorPages::ConstructFieldPage(ControlColumn& Page, ParticleEditorContext& Context)
 {
-    ParticleScene&           Scene   = Context.Scene;
+    ParticleSpace&           Space   = Context.Space;
     ParticleOverlaySettings& Overlay = Context.Overlay;
     if (PageHeading::Construct(Page, "ParticleFieldOverlay", "ENVIRONMENT", "Force Field", Overlay.Enabled ? "\xE2\x97\x8F Overlay" : "\xE2\x97\x8B Overlay",
-                               "The same master component as the Force Field editor: the wind lattice (its guest) and the scene's localized "
+                               "The same master component as the Force Field editor: the wind lattice (its guest) and the space's localized "
                                "forces, drawn by the shared visualization.",
                                "Show the field overlay (V)"))
     {
@@ -136,7 +136,7 @@ void ParticleEditorPages::ConstructFieldPage(ControlColumn& Page, ParticleEditor
     MetricTiles::Construct(Page, Probe, 3, MetricTiles::NoLead);
 
     uint32_t Flow = 0, Accelerate = 0, Damp = 0, Lattice = 0, Packed = 0, Authored = 0;
-    for (const ParticleField& Field : Scene.Fields)
+    for (const ParticleField& Field : Space.Fields)
     {
         const ParticleFieldDescriptor& Descriptor = ResolveParticleFieldDescriptor(Field.Category);
         Flow += Descriptor.Contribution == ForceContribution::Flow ? 1u : 0u;
@@ -157,7 +157,7 @@ void ParticleEditorPages::ConstructFieldPage(ControlColumn& Page, ParticleEditor
                                    { "Lattice", "6912", "24\xC3\x97" "12\xC3\x97" "24 cells" } };
     MetricTiles::Construct(Page, Counts, 4, MetricTiles::NoLead);
     const MetricTile Paths[3] = { { "Summed into the lattice", LatticeText, "flows" }, { "Packed for fieldAccel", PackedText, "this refresh" },
-                                  { "Authored only", AuthoredText, "no GPU path yet" } };
+                                  { "Without a GPU path", AuthoredText, "fields" } };
     MetricTiles::Construct(Page, Paths, 3, MetricTiles::NoLead);
 
     SectionHeading::Construct(Page, "Quick controls", "Overlay and lattice");
@@ -167,7 +167,7 @@ void ParticleEditorPages::ConstructFieldPage(ControlColumn& Page, ParticleEditor
         { "Slice arrows", "Move", &Overlay.Arrows, "Arrows on the slice" },
         { "Tracers", "Activity", &Overlay.Tracers, "Particles advected on the slice" },
         { "Labels", "Flag", &Overlay.Labels, "Force names on their outlines" },
-        { "Lattice arrows", "Wind", &Scene.Wind.ShowArrows, "One arrow per lattice cell, rastered on the GPU" },
+        { "Lattice arrows", "Wind", &Space.Wind.ShowArrows, "One arrow per lattice cell, rastered on the GPU" },
     };
     QuickTiles::Construct(Page, "ParticleFieldQuick", Tiles, 6, 3);
 
@@ -198,7 +198,7 @@ void ParticleEditorPages::ConstructFieldPage(ControlColumn& Page, ParticleEditor
         SectionRows::EndSection(Page);
     }
     if (NextButton::Construct(Page, "ParticleOpenWind", "Open the Wind guest \xE2\x86\x97")) Context.Requests.push_back("select:Wind");
-    FooterRow::Construct(Page, "Force Field \xC2\xB7 Wind \xC2\xB7 forces", "Particle scene");
+    FooterRow::Construct(Page, "Force Field \xC2\xB7 Wind \xC2\xB7 forces", "Particle space");
 }
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -207,7 +207,7 @@ void ParticleEditorPages::ConstructFieldPage(ControlColumn& Page, ParticleEditor
 
 void ParticleEditorPages::ConstructWindPage(ControlColumn& Page, ParticleEditorContext& Context)
 {
-    ParticleWindSettings& Wind = Context.Scene.Wind;
+    ParticleWindSettings& Wind = Context.Space.Wind;
     if (PageHeading::Construct(Page, "ParticleWindArrows", "GUEST OF THE FORCE FIELD", "Wind", Wind.ShowArrows ? "\xE2\x97\x8F Arrows" : "\xE2\x97\x8B Arrows",
                                "The wind lattice: every flow field summed on 24 \xC3\x97 12 \xC3\x97 24 cells each refresh, with turbulence and "
                                "divergence-free swirl, sampled by every wind-driven particle.",
@@ -233,7 +233,29 @@ void ParticleEditorPages::ConstructWindPage(ControlColumn& Page, ParticleEditorC
     SectionRows::Switch(Page, "ParticleFloor", "Floor grid", Wind.ShowFloor);
     SectionRows::Switch(Page, "ParticleDomain", "Domain box", Wind.ShowDomain);
     SectionRows::EndSection(Page);
-    FooterRow::Construct(Page, "Wind \xC2\xB7 guest of the Force Field", "Particle scene");
+
+    // 📝 The level's Force Field (100 m – 100 km) where the domain stands in the level, as one more prevailing flow.
+    ParticleLevelWind& Level = Context.Space.LevelWind;
+    char               Flow[64] = "off";
+    if (Level.Follow && Level.FlowMps)
+    {
+        const double Speed   = std::hypot((*Level.FlowMps)[0], (*Level.FlowMps)[2]);
+        const double Bearing = std::fmod(std::atan2((*Level.FlowMps)[0], -(*Level.FlowMps)[2]) * 57.29577951308232 + 360.0, 360.0);
+        std::snprintf(Flow, sizeof(Flow), "%.1f m/s \xC2\xB7 %.0f\xC2\xB0", Speed, Bearing);
+    }
+    else if (Level.Follow)
+    {
+        std::snprintf(Flow, sizeof(Flow), "no Force Field");
+    }
+    SectionRows::BeginSection(Page, "Level", "Globe", Flow,
+                              "The level's Force Field at the anchor joins the lattice as one prevailing flow (its horizontal part).");
+    SectionRows::Switch(Page, "ParticleLevelFollow", "Follow the level's Force Field", Level.Follow,
+                        Context.LevelFlowAvailable ? nullptr : "No level is open");
+    SectionRows::Distance(Page, "ParticleLevelAnchorX", "Anchor X", Level.AnchorMetres[0], -100000.0, 100000.0, 1.0);
+    SectionRows::Distance(Page, "ParticleLevelAnchorY", "Anchor Y", Level.AnchorMetres[1], -100000.0, 100000.0, 1.0);
+    SectionRows::Distance(Page, "ParticleLevelAnchorZ", "Anchor height", Level.AnchorMetres[2], 0.0, 100000.0, 1.0);
+    SectionRows::EndSection(Page);
+    FooterRow::Construct(Page, "Wind \xC2\xB7 guest of the Force Field", "Particle space");
 }
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -242,8 +264,8 @@ void ParticleEditorPages::ConstructWindPage(ControlColumn& Page, ParticleEditorC
 
 void ParticleEditorPages::ConstructForcePage(ControlColumn& Page, ParticleEditorContext& Context, size_t Index)
 {
-    if (Index >= Context.Scene.Fields.size()) return;
-    ParticleField&                 Field      = Context.Scene.Fields[Index];
+    if (Index >= Context.Space.Fields.size()) return;
+    ParticleField&                 Field      = Context.Space.Fields[Index];
     const ParticleFieldDescriptor& Descriptor = ResolveParticleFieldDescriptor(Field.Category);
     char                           Eyebrow[64];
     std::snprintf(Eyebrow, sizeof(Eyebrow), "%s \xC2\xB7 %s", Descriptor.Contribution == ForceContribution::Flow ? "FLOW"
@@ -298,7 +320,7 @@ void ParticleEditorPages::ConstructForcePage(ControlColumn& Page, ParticleEditor
 
 void ParticleEditorPages::ConstructLightningPage(ControlColumn& Page, ParticleEditorContext& Context)
 {
-    ParticleLightning& Lightning = Context.Scene.Lightning;
+    ParticleLightning& Lightning = Context.Space.Lightning;
     if (PageHeading::Construct(Page, "ParticleLightningAuto", "ENVIRONMENT", "Lightning", Lightning.Automatic ? "\xE2\x97\x8F Automatic" : "\xE2\x97\x8B Manual",
                                "Midpoint-displacement bolts with branches; a strike bursts any Strike sparks effect at its ground point.",
                                "Automatic strikes"))
@@ -321,15 +343,15 @@ void ParticleEditorPages::ConstructLightningPage(ControlColumn& Page, ParticleEd
     if (SectionRows::Count(Page, "ParticleLightningLevels", "Subdivisions", Levels, 2, 8, "levels")) Lightning.Levels = Levels;
     SectionRows::Measure(Page, "ParticleLightningBranches", "Branch chance", Lightning.BranchChance, 0.0, 1.0, 0.01, "");
     SectionRows::EndSection(Page);
-    SectionRows::BeginSection(Page, "Web", "Route", Context.Scene.LightningWeb.Enabled ? "on" : "off", "Bolts between the visible effects' origins.");
-    SectionRows::Switch(Page, "ParticleWebEnabled", "Lightning web", Context.Scene.LightningWeb.Enabled);
-    SectionRows::Measure(Page, "ParticleWebInterval", "Interval", Context.Scene.LightningWeb.IntervalSeconds, 0.1, 5.0, 0.05, "s");
-    int Links = static_cast<int>(Context.Scene.LightningWeb.Links);
-    if (SectionRows::Count(Page, "ParticleWebLinks", "Neighbours", Links, 1, 4, "links")) Context.Scene.LightningWeb.Links = static_cast<uint32_t>(Links);
+    SectionRows::BeginSection(Page, "Web", "Route", Context.Space.LightningWeb.Enabled ? "on" : "off", "Bolts between the visible effects' origins.");
+    SectionRows::Switch(Page, "ParticleWebEnabled", "Lightning web", Context.Space.LightningWeb.Enabled);
+    SectionRows::Measure(Page, "ParticleWebInterval", "Interval", Context.Space.LightningWeb.IntervalSeconds, 0.1, 5.0, 0.05, "s");
+    int Links = static_cast<int>(Context.Space.LightningWeb.Links);
+    if (SectionRows::Count(Page, "ParticleWebLinks", "Neighbours", Links, 1, 4, "links")) Context.Space.LightningWeb.Links = static_cast<uint32_t>(Links);
     SectionRows::EndSection(Page);
     const ActionEntry Strike[1] = { { "ParticleStrike", "Strike now (L)" } };
     if (ActionRow::Construct(Page, std::span<const ActionEntry>(Strike, 1)) == 0) Context.Requests.push_back("strike");
-    FooterRow::Construct(Page, "eos lightning \xC2\xB7 seeded bolts", "Particle scene");
+    FooterRow::Construct(Page, "eos lightning \xC2\xB7 seeded bolts", "Particle space");
 }
 
 //------------------------------------------------------------------------------------------------------------------------

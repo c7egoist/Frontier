@@ -1140,6 +1140,25 @@ uint32_t ForceFieldSpace::AppendGpuForceRecords(std::vector<std::array<float, 4>
             ++Written;
         }
     }
+    // 📝 Authored tornado columns (the level's ForceSource records) raise their condensation funnels in the GPU clouds as the
+    //    triggered ones do: the same four-record layout, their envelope on the Force Field's timeline clock.
+    for (const PreparedForceSource& Prepared : Authored_)
+    {
+        if (Written >= kMaxGpuForceSourcesRealm) break;
+        const ForceSourceConfiguration& Column = Prepared.Source;
+        const float                     Env    = static_cast<float>(Prepared.Activation.Envelope);
+        if (!Column.Enabled || Column.Category != ForceSourceCategory::TornadoColumn || Env <= 1.0e-4f) continue;
+        const double Inner = std::max(1.0, Column.InnerRadiusMetres);
+        const double Phase = std::fmod(Column.Strength / Inner * AuthoredSeconds_, 6.283185307179586);
+        OutFloat4Table.push_back({static_cast<float>(Prepared.CentreMetres.X), static_cast<float>(Prepared.CentreMetres.Y),
+                                  static_cast<float>(Prepared.CentreMetres.Z), 1.0f});
+        OutFloat4Table.push_back({static_cast<float>(Column.HeightMetres), static_cast<float>(Inner),
+                                  static_cast<float>(std::max(Inner, Column.CollarRadiusMetres)), 0.0f});
+        OutFloat4Table.push_back({static_cast<float>(Column.Strength * Column.Spin) * Env, static_cast<float>(Column.InflowMetresPerSecond) * Env,
+                                  static_cast<float>(Column.UpdraftMetresPerSecond) * Env, 0.0f});
+        OutFloat4Table.push_back({Env * 0.92f, static_cast<float>(std::min(88.0, 0.1 * Column.HeightMetres)), Env * 0.085f, static_cast<float>(Phase)});
+        ++Written;
+    }
     return Written;
 }
 

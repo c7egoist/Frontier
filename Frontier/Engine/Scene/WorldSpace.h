@@ -1,5 +1,5 @@
 /*==========================================================================================================================================
-                                                            SCENEWORLD.H
+                                                            WORLDSPACE.H
 ==========================================================================================================================================*/
 // 🧩 Dynamic scene world owning polymorphic RecordEntry instances, .levelspace serialization, and extensible type factories.
 
@@ -240,16 +240,16 @@ struct SceneTypeRegistration
     std::function<std::unique_ptr<SceneRecordBase>(std::string)> ConstructCallback;
 };
 
-class SceneWorld
+class WorldSpace
 {
   public:
     static constexpr const char* LevelSpaceExtension = ".levelspace";
 
-    SceneWorld();
-    ~SceneWorld();
+    WorldSpace();
+    ~WorldSpace();
 
-    SceneWorld(const SceneWorld&)            = delete;
-    SceneWorld& operator=(const SceneWorld&) = delete;
+    WorldSpace(const WorldSpace&)            = delete;
+    WorldSpace& operator=(const WorldSpace&) = delete;
 
     void RegisterType(SceneTypeRegistration Registration);
     [[nodiscard]] std::vector<std::pair<std::string, std::string>> EnumerateRegisteredTypes() const;

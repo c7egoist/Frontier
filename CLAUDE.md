@@ -80,6 +80,7 @@ Follow `Documentation/FolderStructure.md`. Do not invent alternative top-level f
 |----------------------------------|-------------------------------------------------------|
 | `Engine/`                        | Reusable production code shared across applications.  |
 | `UI/Editor/`                     | Production editor UI.                                 |
+| `Frontier/Extensions/<Name>/`    | Bridges between engine systems and applications.      |
 | `Exhibits/`                      | Validation code, retained results, and proof images.   |
 | `Exhibits/EditorMirror/`          | Comparison mirror of the C++ editor UI.                |
 | `Experimental/`                  | Prototypes, experimental HTML, and related assets.     |
@@ -97,6 +98,40 @@ Update the folder map and affected references whenever approved moves change pat
 Maintain one tracker, not per-agent progress reports or competing backlogs.
 Keep detailed results in exhibits and link them from the tracker.
 Do not silently weaken rules to make a scan pass.
+
+## Extensions and Spaces
+
+`Frontier/Extensions/<Name>/` holds the bridges between engine systems and the applications or runtime that use them.
+Before writing a second copy of anything for another workspace (Frontier, SolidArc, Texture Workspace, a game), reuse or
+extend an extension. One implementation serves every workspace.
+
+| Folder        | Files                                                 | Bridges                                      |
+|---------------|-------------------------------------------------------|----------------------------------------------|
+| `Interface/`  | `ViewportTexture`, `GizmoSpace`, `GizmoRasterization` | Engine images to UI textures; one gizmo      |
+| `Rendering/`  | `RenderingExtension`, `SceneGeometryOccupancy`        | Level records to the scene renderer          |
+| `Particle/`   | `ParticleExtension`                                   | A ParticleSpace to the GPU particle engine   |
+| `Physics/`    | `PhysicsExtension`, `JoltExtension`, `PhysicsSpace`   | Level records to Jolt rigid bodies and back  |
+| `Networking/` | `NetworkingExtension`, `NetworkingSpace`              | Spaces to transports; Epic Online Services   |
+
+- Name each bridge `<Name>Extension`. A third-party backend gets its own file: `JoltExtension`, later `EOSExtension`
+  or `EpicAdapter`.
+- Extensions may include `Engine/` and `Frontier/Engine/`. Engine code never includes an extension. Projects and
+  applications include extensions.
+- Third-party sources still come pinned through `Automation/` manifests into `ExternalPackages/`.
+
+Each simulation domain owns a Space: the world its members live, move and interact in. Name it `<Domain>Space`.
+
+| Space                       | Members                                            | File             |
+|-----------------------------|----------------------------------------------------|------------------|
+| `WorldSpace`                | The level's records                                | `.levelspace`    |
+| `ParticleSpace`             | Particle effects, force fields, wind and lightning | `.particlespace` |
+| `PhysicsSpace`              | Rigid bodies and colliders                         | the level        |
+| `NetworkingSpace`           | Peers, sessions and replicated records (abstract)  | none             |
+| `GizmoSpace`                | Gizmo handles, their pick and their drags          | none             |
+| `InterfaceSpace` (planned)  | Game UI                                            | none yet         |
+| `SimulationSpace` (planned) | Fluid, gas and water simulations                   | none yet         |
+
+- Call a domain's world a Space, never a scene. A Space persists as `.<domain>space` TOML when it has a file.
 
 ## Scratchpad
 
@@ -195,7 +230,7 @@ or project-specific types belong in `Engine/` or `UI/Editor/`.
     `Binaries/FrontierSceneViewport-Windows-x64.zip` with its `.zip.sha256` (earlier packages went to the owner's Drive).
     `.sdfspace` SDF volumes, the software SAH BVH, and the `PreviewRaster` shadow modes remain.
 - **Project creation auto-scaffolding (`ProjectGenerator`):** Creating a new project via `ProjectBrowserPanel`
-  auto-generates C++ source scaffolding (`Source/<Identifier>Application.{h,cpp}` with main loop and `SceneWorld`
+  auto-generates C++ source scaffolding (`Source/<Identifier>Application.{h,cpp}` with main loop and `WorldSpace`
   integration), a buildable `CMakeLists.txt`, and a default scene (`Content/Levels/Default.levelspace`).
 - **Main branch & post-commit sync rule:** Base all work on
   `https://github.com/SultanAladin/Frontier/tree/arena/11f31835-frontier` (reusing its `CLAUDE.md`, `PanelDockspace`,
@@ -240,7 +275,7 @@ or project-specific types belong in `Engine/` or `UI/Editor/`.
   - Standalone authoring editors are individual `<Domain>Editor` classes (`FractureEditor`, `FluidPlumeEditor`,
     `ParticleEditor`, `PolygonClusterEditor`) invoked directly via `RecordInspector` virtual hooks.
   - Project-specific records and user-authored `*Inspector` classes live in `Projects/<Project>/` and register into
-    `SceneWorld` and `InspectorRuntime` without modifying `Engine/`.
+    `WorldSpace` and `InspectorRuntime` without modifying `Engine/`.
   - **Sequencing rule:** Leave `VehicleInspector` and vehicle systems deferred until Environment and Render Engines
     (RTX `VK_KHR_ray_query` and GTX 4-cascade SDF + Surface Cards + SAH-2 BVH) are complete.
 

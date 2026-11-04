@@ -25,12 +25,13 @@ class ControlColumn;
 //    "remove:<token>", "rebuild:<token>", "reset", "strike", "library", "select:<token>", "add-force:<category>").
 struct ParticleEditorContext
 {
-    ParticleScene&               Scene;
+    ParticleSpace&               Space;
     const ParticleEffectLibrary& Library;
     ParticleOverlaySettings&     Overlay;
     const ParticleViewportImage& Image;
     const ParticleRefreshPlan*   Plan = nullptr;
     std::vector<std::string>&    Requests;
+    bool                         LevelFlowAvailable = false;   // the host can sample the level's Force Field
 };
 
 namespace ParticleEditorPages

@@ -1,19 +1,19 @@
 /*==========================================================================================================================================
-                                                     EVERESTPARTICLEVIEWPORT.CPP
+                                                        PARTICLEEXTENSION.CPP
 ==========================================================================================================================================*/
 // 🧩 One refresh of the Particle editor's viewport: bring-up on first use, the queue drained (the interface may still sample the
 //    last image), the engine's refresh, then the census, probe and (when asked) the wind lattice for the editor.
 
-#include "EverestParticleViewport.h"
+#include "Frontier/Extensions/Particle/ParticleExtension.h"
 
-#include "Frontier/Engine/PhysicalDynamics/ParticleDynamics/ParticleScene.h"
+#include "Frontier/Engine/PhysicalDynamics/ParticleDynamics/ParticleSpace.h"
 
 #include <chrono>
 
-namespace Everest
+namespace Frontier
 {
 
-EverestParticleViewport::EverestParticleViewport(std::filesystem::path ShaderRoot, const Frontier::VulkanDeviceAccess* HostDevice)
+ParticleExtension::ParticleExtension(std::filesystem::path ShaderRoot, const VulkanDeviceAccess* HostDevice)
     : ShaderRoot_(std::move(ShaderRoot))
 {
     if (HostDevice != nullptr && HostDevice->Device != VK_NULL_HANDLE)
@@ -23,14 +23,14 @@ EverestParticleViewport::EverestParticleViewport(std::filesystem::path ShaderRoo
     }
 }
 
-EverestParticleViewport::~EverestParticleViewport() = default;
+ParticleExtension::~ParticleExtension() = default;
 
-ParticleViewportOutcome EverestParticleViewport::Render(const Frontier::ParticleViewportRequest& Request)
+ParticleViewportOutcome ParticleExtension::Render(const ParticleViewportRequest& Request)
 {
     ParticleViewportOutcome Outcome;
     if (!Constructed_ && Failure_.empty())
     {
-        Sequence_ = std::make_unique<Frontier::ParticleSimulation::ParticleSimulationSequence>();
+        Sequence_ = std::make_unique<ParticleSimulation::ParticleSimulationSequence>();
         std::string Diagnostic;
         if (Sequence_->Construct(HostDeviceAttached_ ? &Device_ : nullptr, ShaderRoot_ / "ParticleSimulation", &Diagnostic))
         {
@@ -66,13 +66,13 @@ ParticleViewportOutcome EverestParticleViewport::Render(const Frontier::Particle
     Outcome.Image.Extent              = Sequence_->QueryExtent();
     Outcome.Image.RefreshMilliseconds = Sequence_->QueryRefreshMilliseconds();
     Outcome.Image.StoreBytes          = Sequence_->QueryStoreBytes();
-    for (const Frontier::ParticleEffectInstance& Effect : *Request.Effects)
+    for (const ParticleEffectInstance& Effect : *Request.Effects)
     {
-        const Frontier::ParticleSimulation::ParticleCensus* Census = Sequence_->QueryCensus(Effect.Token);
+        const ParticleSimulation::ParticleCensus* Census = Sequence_->QueryCensus(Effect.Token);
         if (Census == nullptr || !Census->Valid) continue;
         Outcome.Image.Census.push_back({ Effect.Token, Census->Alive, Census->SpeciesA, Census->SpeciesB, Census->SpeciesC, Census->Energy });
     }
-    const Frontier::ParticleSimulation::ParticleProbeReading& Probe = Sequence_->QueryProbe();
+    const ParticleSimulation::ParticleProbeReading& Probe = Sequence_->QueryProbe();
     Outcome.Image.ProbeValid = Probe.Valid;
     Outcome.Image.Probe      = { Probe.Velocity[0], Probe.Velocity[1], Probe.Velocity[2], Probe.Magnitude };
     if (Request.ReadLattice)
@@ -88,4 +88,4 @@ ParticleViewportOutcome EverestParticleViewport::Render(const Frontier::Particle
     return Outcome;
 }
 
-} // namespace Everest
+} // namespace Frontier

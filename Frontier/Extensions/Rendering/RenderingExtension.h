@@ -1,13 +1,13 @@
 /*==========================================================================================================================================
-                                                       EVERESTSCENEVIEWPORT.H
+                                                            RENDERINGEXTENSION.H
 ==========================================================================================================================================*/
-// 🧩 Project Everest's live Scene Viewport: the level's environment, render-pipeline and geometry records drive the engine
-//    SceneViewport (ported VehicleHMI ReSTIR GI of the proving ground + the PlanetaryAtmosphere environment) on the host's device.
+// 🧩 The bridge between a level and the scene renderer: the level's environment, render-pipeline and geometry records drive the
+//    engine SceneViewport (the ported VehicleHMI ReSTIR GI + the PlanetaryAtmosphere environment) on the host's device.
 
 #pragma once
 
-#include "EverestSceneGeometry.h"
-#include "EverestWorkspace.h"
+#include "Frontier/Extensions/Rendering/SceneGeometryOccupancy.h"
+#include "Frontier/Engine/Interface/SceneViewportPresentation.h"
 
 #include "Frontier/Engine/Rendering/SceneViewport/SceneViewport.h"
 #include "Frontier/Engine/Scene/SolarPlacement.h"
@@ -17,11 +17,11 @@
 #include <memory>
 #include <string>
 
-namespace Everest
+namespace Frontier
 {
 
 // 📝 The level's environment records as the viewport reads them; an absent record switches its effect off.
-[[nodiscard]] Frontier::GlobalIllumination::SceneEnvironment ResolveSceneEnvironment(const Frontier::SceneWorld& World, double ElapsedSeconds);
+[[nodiscard]] Frontier::GlobalIllumination::SceneEnvironment ResolveSceneEnvironment(const Frontier::WorldSpace& World, double ElapsedSeconds);
 
 // 📝 The GlobalIllumination port's celestial solver (the demo's SolveCelestial) answering the Sun page and the day clock.
 [[nodiscard]] Frontier::SolarPlacement SolveSolarPlacement(const Frontier::SolarPlacementQuery& Query);
@@ -38,16 +38,16 @@ struct SceneViewportRefresh
     SceneViewportReadout    Readout{};                 // [-] the viewport bar, readout and status strip figures
 };
 
-class EverestSceneViewport
+class RenderingExtension
 {
   public:
     // 📝 ProjectRoot holds Content/EnvironmentArchives/{ProvingGround,CelestialMaps}; ShaderRoot holds the GlobalIllumination
     //    and Environment SPIR-V folders. HostDevice null opens a device of its own (offscreen validation).
-    EverestSceneViewport(std::filesystem::path ProjectRoot, std::filesystem::path ShaderRoot, const Frontier::VulkanDeviceAccess* HostDevice);
+    RenderingExtension(std::filesystem::path ProjectRoot, std::filesystem::path ShaderRoot, const Frontier::VulkanDeviceAccess* HostDevice);
 
     // 📝 Renders one refresh for the request; rebuilds the renderer when the quality tier or the ray-tracing tier changes and holds
     //    the last image while the Render settings' live refresh is off.
-    SceneViewportRefresh Render(const SceneViewportRequest& Request, const Frontier::SceneWorld& World, double ElapsedSeconds);
+    SceneViewportRefresh Render(const SceneViewportRequest& Request, const Frontier::WorldSpace& World, double ElapsedSeconds);
 
     [[nodiscard]] Frontier::GlobalIllumination::SceneViewport* AccessViewport() noexcept { return Viewport_.get(); }
     [[nodiscard]] const SceneGeometryOccupancy&                QueryGeometry() const noexcept { return Geometry_; }
@@ -70,4 +70,4 @@ class EverestSceneViewport
     SceneViewportPick                                            Pick_{};                     // [-] the answer to the last pick serial
 };
 
-} // namespace Everest
+} // namespace Frontier

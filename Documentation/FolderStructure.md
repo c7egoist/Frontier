@@ -23,6 +23,12 @@ Frontier/
 │   ├── Lifecycle/             # Activation sequence
 │   └── Render/                # Blank; Git retention marker only
 ├── Frontier/
+│   ├── Extensions/            # Bridges between engine systems and the applications/runtime (see CLAUDE.md)
+│   │   ├── Interface/         # ViewportTexture, GizmoSpace, GizmoRasterization
+│   │   ├── Rendering/         # RenderingExtension, SceneGeometryOccupancy
+│   │   ├── Particle/          # ParticleExtension
+│   │   ├── Physics/           # PhysicsExtension, JoltExtension, PhysicsSpace
+│   │   └── Networking/        # NetworkingExtension, NetworkingSpace (EOSExtension / EpicAdapter later)
 │   └── Engine/                # Multi-realm PlanetaryAtmosphere, GeometricRaster, DeviceExchange, Rendering & Shaders
 │       ├── DeviceExchange/    # VulkanComputeExchange (compute), DeviceExchange (raster + compute, WebGPU ordering), VulkanDeviceAccess
 │       ├── GeometricRaster/   # VisibilityProjection (cross-portal ray routing & reversed-Z visibility)
@@ -148,12 +154,12 @@ measured refinements (`RefreshToggles::Refinements`), against converged referenc
 - `Frontier/Engine/Interface/ForceFieldVisualization/`: the field slice both editors draw (Map, Oblique, Camera).
 - `Frontier/Engine/Interface/Inspectors/ForceField/`: the Force Field, Wind and force pages.
 - `Projects/Everest/Source/EverestFieldViewport.cpp`: the Field view in the Everest viewport.
-- `Frontier/Engine/PhysicalDynamics/ParticleDynamics/`: the Particle editor's scene, preset library decoder, force
-  taxonomy, uniform packing and lightning (library `FrontierEnvironmentRendering`).
+- `Frontier/Engine/PhysicalDynamics/ParticleDynamics/`: the ParticleSpace, its `.particlespace` codec, the preset
+  library decoder, force taxonomy, uniform packing and lightning (library `FrontierEnvironmentRendering`).
 - `Frontier/Engine/Rendering/ParticleSimulation/` and `Frontier/Engine/Shaders/ParticleSimulation/`: the GPU particle
   engine (library `FrontierParticleSimulation`, archive set `ParticleSimulation`).
 - `Frontier/Engine/Interface/ParticleEditor/` and `ParticleEditor.*`: the editor window, its pages and field overlay.
-- `Projects/Everest/Source/EverestParticleViewport.*`: the engine on the editor's device.
+- `Frontier/Extensions/Particle/ParticleExtension.*`: the engine on the editor's device.
 - `EngineContent/ParticleArchives/ParticleLibrary.toml`: the 52 presets, exported by
   `Automation/ExportParticleLibrary.mjs`.
 - `Exhibits/ForceFieldEditor/` and `Exhibits/ParticleEditor/`: parity tests, captures and their READMEs. The plan is
@@ -170,3 +176,15 @@ measured refinements (`RefreshToggles::Refinements`), against converged referenc
 
 No parallel ImGui/interface/font framework is introduced. The existing scene renderer and project startup remain owned
 by their current directories; CAD editing is a separate workspace launched by the project browser.
+
+## Extensions and Spaces (2026-11-04)
+
+- `Frontier/Extensions/<Name>/`: the bridges between engine systems and applications, one implementation for every
+  workspace. The rule and the Space table live in `CLAUDE.md` (Extensions and Spaces).
+- `Frontier/Engine/Scene/WorldSpace.*`: the level's world (formerly `SceneWorld`).
+- `Frontier/Engine/Interface/SceneViewportPresentation.h`: the Scene Viewport contract between a workspace and its host.
+- `Frontier/Extensions/Interface/GizmoSpace.*` replaces `UI/SolidArc/Viewport/SolidArcGizmo.*`; SolidArc draws it with
+  its GPU program, the Frontier editor with `GizmoRasterization`.
+- `Frontier/Extensions/Rendering/` replaces `Projects/Everest/Source/EverestSceneViewport.*` and
+  `EverestSceneGeometry.*`.
+- The plan is `Documentation/Plans/Ongoing/ExtensionsAndSpaces.md`.

@@ -9,7 +9,7 @@
 #include "Engine/Interface/InspectorRuntime.h"
 #include "Engine/Interface/NativeInspectors.h"
 #include "Engine/Scene/EngineConfigurations.h"
-#include "Engine/Scene/SceneWorld.h"
+#include "Engine/Scene/WorldSpace.h"
 
 #include <cmath>
 #include <string>
@@ -85,6 +85,6 @@ class HarmonicOscillatorRecord final : public Frontier::SceneRecordBase
     HarmonicOscillatorConfiguration Oscillator{};
 };
 
-void RegisterEverestSimulationTypes(Frontier::SceneWorld& World);
+void RegisterEverestSimulationTypes(Frontier::WorldSpace& World);
 
 } // namespace Everest

@@ -6,11 +6,11 @@
 //    the bounding-box test it replaced is measured on the same pixels; then the editor's path, a click's serial through the Everest
 //    viewport to the Geometry record drawn under it.
 
-#include "EverestSceneViewport.h"
+#include "Frontier/Extensions/Rendering/RenderingExtension.h"
 
 #include "Frontier/Engine/Rendering/GlobalIllumination/PickProjection.h"
 #include "Frontier/Engine/Rendering/GlobalIllumination/TransformProjection.h"
-#include "Frontier/Engine/Scene/SceneWorld.h"
+#include "Frontier/Engine/Scene/WorldSpace.h"
 
 #include <algorithm>
 #include <chrono>
@@ -266,7 +266,7 @@ int main(int ArgumentCount, char** Arguments)
 
         // ① the level and the bridge the editor uses, on a device of its own: low grade, distance-field GI, the analytic
         //   renderer presenting (picking does not depend on any of them; they keep the bring-up and refreshes short)
-        Frontier::SceneWorld World;
+        Frontier::WorldSpace World;
         std::string          Diagnostic;
         if (!World.LoadLevelSpace(Project / "Content" / "Levels" / "Default.levelspace", &Diagnostic)) throw std::runtime_error(Diagnostic);
         auto* Pipeline = dynamic_cast<Frontier::RenderPipelineRecord*>(World.FindFirstByType("RenderPipeline"));
@@ -290,14 +290,14 @@ int main(int ArgumentCount, char** Arguments)
             }
             Torus.AdvanceRevision();
         }
-        Everest::EverestSceneViewport Bridge(Project, Shaders, nullptr);
+        Frontier::RenderingExtension Bridge(Project, Shaders, nullptr);
 
         // 📝 The workspace's default view (SceneViewportFlight): position, heading 37.57°, elevation −5.23°.
         const double         Heading   = 37.57 * 3.141592653589793 / 180.0;
         const double         Elevation = -5.23 * 3.141592653589793 / 180.0;
         const Vector3        Eye{-61.9997, -34.0018, 9.0052};
         const Vector3        Forward{std::cos(Elevation) * std::cos(Heading), std::cos(Elevation) * std::sin(Heading), std::sin(Elevation)};
-        Everest::SceneViewportRequest Request;
+        Frontier::SceneViewportRequest Request;
         Request.PanelWidth          = 320.0f;
         Request.PanelHeight         = 180.0f;
         Request.PixelDensity        = 1.0f;
@@ -305,7 +305,7 @@ int main(int ArgumentCount, char** Arguments)
         Request.CameraTarget        = {Eye[0] + Forward[0] * 65.88, Eye[1] + Forward[1] * 65.88, Eye[2] + Forward[2] * 65.88};
         Request.DeltaSeconds        = 1.0 / 30.0;
         const auto Start = std::chrono::steady_clock::now();
-        const Everest::SceneViewportRefresh First = Bridge.Render(Request, World, 0.0);
+        const Frontier::SceneViewportRefresh First = Bridge.Render(Request, World, 0.0);
         std::printf("bring-up and first refresh: %.1f s — %s\n", std::chrono::duration<double>(std::chrono::steady_clock::now() - Start).count(),
                     First.Status.c_str());
         Report(First.View != VK_NULL_HANDLE && First.Readout.Presenting, "the Everest viewport presents an image (" + std::to_string(First.Extent[0]) + " x " +

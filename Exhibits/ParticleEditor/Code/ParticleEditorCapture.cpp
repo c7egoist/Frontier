@@ -12,7 +12,7 @@
 #include "Engine/Interface/ParticleEditor/ParticleEditorWorkspace.h"
 #include "Engine/Interface/SceneDirectoryPanel.h"
 #include "Engine/Scene/SceneDirectory.h"
-#include "EverestParticleViewport.h"
+#include "Frontier/Extensions/Particle/ParticleExtension.h"
 #include "EverestWorkspace.h"
 #include "Exhibits/ControlCentre/Code/CpuRasterization.h"
 #include "UI/Editor/ControlCentrePanel.h"
@@ -78,7 +78,7 @@ int main(int ArgumentCount, char** Arguments)
         Require(Centre->Initialize() && Centre->Activate(), "ControlCentrePanel initialization failed");
 
         Everest::EverestWorkspace       Workspace(*Centre, EverestRoot);
-        Everest::EverestParticleViewport Bridge(ShaderRoot, nullptr);
+        Frontier::ParticleExtension Bridge(ShaderRoot, nullptr);
         std::vector<uint8_t>             ParticlePixels;
         std::array<uint32_t, 2>          ParticleExtent = { 0, 0 };
         bool                             ReadNext       = false;
@@ -86,7 +86,7 @@ int main(int ArgumentCount, char** Arguments)
         // 📝 The presenter the editor application registers, here on an own device; the image is read back only for the tick a
         //    capture rasterizes.
         InspectorRuntime::Instance().RegisterParticleViewportPresenter([&](const ParticleViewportRequest& Request) {
-            Everest::ParticleViewportOutcome Outcome = Bridge.Render(Request);
+            Frontier::ParticleViewportOutcome Outcome = Bridge.Render(Request);
             ParticleViewportImage            Image   = std::move(Outcome.Image);
             if (Outcome.View != VK_NULL_HANDLE)
             {
@@ -103,7 +103,7 @@ int main(int ArgumentCount, char** Arguments)
         });
 
         // 📝 A Particles record as the Construct dialog adds one, selected, and its editor opened as the Inspector's button does.
-        SceneWorld&       World = Workspace.QuerySceneWorld();
+        WorldSpace&       World = Workspace.QueryWorldSpace();
         const RecordToken Token = World.ConstructRecord("Particles", "GPU Particles");
         Require(Token.IsValid(), "the Particles record could not be constructed");
         Workspace.QueryOutliner().Select(Token);
@@ -131,7 +131,7 @@ int main(int ArgumentCount, char** Arguments)
         Require(Editor != nullptr && InspectorRuntime::Instance().QueryActiveEditorToken() == Token, "the Particle editor did not open");
         Require(Editor->QueryDiagnostic().empty(), Editor->QueryDiagnostic());
         std::printf("[ParticleEditorCapture] editor open: %zu presets, %zu effects, %zu fields\n", Editor->QueryLibrary().Presets.size(),
-                    Editor->AccessScene().Effects.size(), Editor->AccessScene().Fields.size());
+                    Editor->AccessSpace().Effects.size(), Editor->AccessSpace().Fields.size());
 
         std::ofstream Ledger(OutputDir / "Captures.tsv");
         Ledger << "capture\tselected\teffects\talive\tfields\toverlay\tlattice\tmean_ms\textent\n";
@@ -155,10 +155,10 @@ int main(int ArgumentCount, char** Arguments)
             Require(stbi_write_png(Target.string().c_str(), CaptureWidth, CaptureHeight, 3, Pixels.data(), CaptureWidth * 3) != 0, "PNG write failed");
             const double Mean = RefreshTimes.empty() ? 0.0 : std::accumulate(RefreshTimes.begin(), RefreshTimes.end(), 0.0) / RefreshTimes.size();
             std::printf("[ParticleEditorCapture] %s: %s selected, %zu effects, %u alive, overlay %s, lattice %s, %u x %u image, %.1f ms mean refresh\n",
-                        Target.string().c_str(), Editor->AccessScene().Selected.c_str(), Editor->AccessScene().Effects.size(), Alive,
+                        Target.string().c_str(), Editor->AccessSpace().Selected.c_str(), Editor->AccessSpace().Effects.size(), Alive,
                         Editor->Overlay.Settings.Enabled ? "on" : "off", Image.Lattice ? "read" : "none", ParticleExtent[0], ParticleExtent[1], Mean);
-            Ledger << Name << '\t' << Editor->AccessScene().Selected << '\t' << Editor->AccessScene().Effects.size() << '\t' << Alive << '\t'
-                  << Editor->AccessScene().Fields.size() << '\t' << (Editor->Overlay.Settings.Enabled ? "on" : "off") << '\t'
+            Ledger << Name << '\t' << Editor->AccessSpace().Selected << '\t' << Editor->AccessSpace().Effects.size() << '\t' << Alive << '\t'
+                  << Editor->AccessSpace().Fields.size() << '\t' << (Editor->Overlay.Settings.Enabled ? "on" : "off") << '\t'
                   << (Image.Lattice ? "read" : "none") << '\t' << Mean << '\t' << ParticleExtent[0] << 'x' << ParticleExtent[1] << '\n';
             RefreshTimes.clear();
             return Alive;
@@ -176,7 +176,7 @@ int main(int ArgumentCount, char** Arguments)
             ++Captured;
         }
         // ② An effect's page: the first effect selected in the Outliner (its origin cross turns amber).
-        Editor->Perform("select:" + Editor->AccessScene().Effects.front().Token);
+        Editor->Perform("select:" + Editor->AccessSpace().Effects.front().Token);
         Tick(12);
         if (Wanted("EffectPage"))
         {
@@ -203,7 +203,7 @@ int main(int ArgumentCount, char** Arguments)
         // ⑤ Lightning: its page and a strike (the bolt is lit for a few ticks).
         Editor->Perform("contribution:flow");
         Editor->Perform("select:Lightning");
-        Editor->AccessScene().Lightning.Automatic = false;
+        Editor->AccessSpace().Lightning.Automatic = false;
         Tick(4);
         Editor->Perform("strike");
         Tick(3);
@@ -222,10 +222,10 @@ int main(int ArgumentCount, char** Arguments)
             ++Captured;
         }
         // ⑦ A preset from the library: the tornado, selected, the camera closer.
-        const size_t Before = Editor->AccessScene().Effects.size();
+        const size_t Before = Editor->AccessSpace().Effects.size();
         Require(Editor->Perform("add:tornado"), "the tornado preset could not be added");
-        Require(Editor->AccessScene().Effects.size() == Before + 1 && !Editor->QueryLibraryShown(), "the tornado did not join the scene");
-        Editor->Perform("select:" + Editor->AccessScene().Effects.back().Token);
+        Require(Editor->AccessSpace().Effects.size() == Before + 1 && !Editor->QueryLibraryShown(), "the tornado did not join the scene");
+        Editor->Perform("select:" + Editor->AccessSpace().Effects.back().Token);
         Editor->Perform("camera:0.4,0.22,13");
         Tick(90);
         if (Wanted("TornadoPreset"))
@@ -235,7 +235,7 @@ int main(int ArgumentCount, char** Arguments)
         }
         // ⑧ The prototype's wind arrows (the lattice drawn on the GPU) with the overlay off.
         Editor->Perform("overlay:off");
-        Editor->AccessScene().Wind.ShowArrows = true;
+        Editor->AccessSpace().Wind.ShowArrows = true;
         Editor->Perform("select:Wind");
         Editor->Perform("camera:0.6,0.55,15");
         Tick(20);

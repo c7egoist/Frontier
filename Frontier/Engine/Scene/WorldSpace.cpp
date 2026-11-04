@@ -1,9 +1,9 @@
 /*==========================================================================================================================================
-                                                           SCENEWORLD.CPP
+                                                           WORLDSPACE.CPP
 ==========================================================================================================================================*/
 // 🧩 Dynamic scene world implementation with .levelspace container serialization and composable record simulation.
 
-#include "Engine/Scene/SceneWorld.h"
+#include "Engine/Scene/WorldSpace.h"
 
 #include "Engine/Scene/SceneDirectory.h"
 #include "Engine/PhysicalDynamics/ForceSourceCatalogue.h"
@@ -1256,18 +1256,14 @@ template <>
 void ParticleRecord::SerializeConfiguration(toml::table& OutTable) const
 {
     OutTable.insert_or_assign("enabled", Parameters.Enabled);
-    OutTable.insert_or_assign("spark_rate", static_cast<double>(Parameters.SparkRatePerSecond));
-    OutTable.insert_or_assign("rain_density", static_cast<double>(Parameters.RainDropDensity));
-    OutTable.insert_or_assign("snow_density", static_cast<double>(Parameters.SnowFlakeDensity));
+    if (!Parameters.SpaceFile.empty()) OutTable.insert_or_assign("space_file", Parameters.SpaceFile);
 }
 
 template <>
 void ParticleRecord::DeserializeConfiguration(const toml::table& InTable)
 {
-    Parameters.Enabled            = ReadBool(InTable, "enabled", Parameters.Enabled);
-    Parameters.SparkRatePerSecond = ReadFloat(InTable, "spark_rate", Parameters.SparkRatePerSecond);
-    Parameters.RainDropDensity    = ReadFloat(InTable, "rain_density", Parameters.RainDropDensity);
-    Parameters.SnowFlakeDensity   = ReadFloat(InTable, "snow_density", Parameters.SnowFlakeDensity);
+    Parameters.Enabled = ReadBool(InTable, "enabled", Parameters.Enabled);
+    if (const auto File = InTable["space_file"].value<std::string>()) Parameters.SpaceFile = *File;
     Parameters.AdvanceRevision();
 }
 
@@ -1591,20 +1587,20 @@ void ChemicalVesselRecord::StepSimulation(float DeltaSeconds)
 }
 
 //------------------------------------------------------------------------------------------------------------------------
-//                                                    SCENEWORLD
+//                                                    WORLDSPACE
 //------------------------------------------------------------------------------------------------------------------------
 
-SceneWorld::SceneWorld()
+WorldSpace::WorldSpace()
 {
     RegisterNativeEngineTypes();
 }
 
-SceneWorld::~SceneWorld()
+WorldSpace::~WorldSpace()
 {
     Clear();
 }
 
-void SceneWorld::RegisterType(SceneTypeRegistration Registration)
+void WorldSpace::RegisterType(SceneTypeRegistration Registration)
 {
     for (SceneTypeRegistration& Existing : TypeRegistry)
     {
@@ -1617,7 +1613,7 @@ void SceneWorld::RegisterType(SceneTypeRegistration Registration)
     TypeRegistry.push_back(std::move(Registration));
 }
 
-std::vector<std::pair<std::string, std::string>> SceneWorld::EnumerateRegisteredTypes() const
+std::vector<std::pair<std::string, std::string>> WorldSpace::EnumerateRegisteredTypes() const
 {
     std::vector<std::pair<std::string, std::string>> Result;
     Result.reserve(TypeRegistry.size());
@@ -1628,7 +1624,7 @@ std::vector<std::pair<std::string, std::string>> SceneWorld::EnumerateRegistered
     return Result;
 }
 
-void SceneWorld::RegisterNativeEngineTypes()
+void WorldSpace::RegisterNativeEngineTypes()
 {
     auto RegisterSimple = [this]<typename RecordType>(const char*          TypeId,
                                                       const char*          CategoryLabel,
@@ -1733,7 +1729,7 @@ void SceneWorld::RegisterNativeEngineTypes()
     RegisterSimple.operator()<ParticleRecord>("Particles", "Solver · GPU Particles", RecordClassification::Physics, "Sparkles", "Solvers", "#b494f4");
 }
 
-RecordToken SceneWorld::ConstructRecord(std::string_view TypeIdentifier,
+RecordToken WorldSpace::ConstructRecord(std::string_view TypeIdentifier,
                                         std::string      DisplayName,
                                         RecordToken      ParentToken)
 {
@@ -1762,7 +1758,7 @@ RecordToken SceneWorld::ConstructRecord(std::string_view TypeIdentifier,
     return {};
 }
 
-bool SceneWorld::DestroyRecord(RecordToken Token)
+bool WorldSpace::DestroyRecord(RecordToken Token)
 {
     if (!Token.IsValid())
     {
@@ -1789,7 +1785,7 @@ bool SceneWorld::DestroyRecord(RecordToken Token)
     return true;
 }
 
-void SceneWorld::Clear()
+void WorldSpace::Clear()
 {
     while (!OwnedRecords.empty())
     {
@@ -1797,7 +1793,7 @@ void SceneWorld::Clear()
     }
 }
 
-void SceneWorld::AdvanceSimulation(float DeltaSeconds)
+void WorldSpace::AdvanceSimulation(float DeltaSeconds)
 {
     for (std::unique_ptr<SceneRecordBase>& Record : OwnedRecords)
     {
@@ -1808,7 +1804,7 @@ void SceneWorld::AdvanceSimulation(float DeltaSeconds)
     }
 }
 
-SceneRecordBase* SceneWorld::FindRecord(RecordToken Token) noexcept
+SceneRecordBase* WorldSpace::FindRecord(RecordToken Token) noexcept
 {
     for (std::unique_ptr<SceneRecordBase>& Entry : OwnedRecords)
     {
@@ -1820,7 +1816,7 @@ SceneRecordBase* SceneWorld::FindRecord(RecordToken Token) noexcept
     return nullptr;
 }
 
-SceneRecordBase* SceneWorld::FindFirstByType(std::string_view TypeIdentifier) noexcept
+SceneRecordBase* WorldSpace::FindFirstByType(std::string_view TypeIdentifier) noexcept
 {
     for (std::unique_ptr<SceneRecordBase>& Entry : OwnedRecords)
     {
@@ -1832,7 +1828,7 @@ SceneRecordBase* SceneWorld::FindFirstByType(std::string_view TypeIdentifier) no
     return nullptr;
 }
 
-std::vector<const SceneRecordBase*> SceneWorld::FindAllByType(std::string_view TypeIdentifier) const
+std::vector<const SceneRecordBase*> WorldSpace::FindAllByType(std::string_view TypeIdentifier) const
 {
     std::vector<const SceneRecordBase*> Found;
     for (const std::unique_ptr<SceneRecordBase>& Entry : OwnedRecords)
@@ -1842,7 +1838,7 @@ std::vector<const SceneRecordBase*> SceneWorld::FindAllByType(std::string_view T
     return Found;
 }
 
-bool SceneWorld::LoadLevelSpace(const std::filesystem::path& LevelSpacePath, std::string* OutError)
+bool WorldSpace::LoadLevelSpace(const std::filesystem::path& LevelSpacePath, std::string* OutError)
 {
     if (LevelSpacePath.extension() != LevelSpaceExtension)
     {
@@ -1928,7 +1924,7 @@ bool SceneWorld::LoadLevelSpace(const std::filesystem::path& LevelSpacePath, std
     return true;
 }
 
-bool SceneWorld::SaveLevelSpace(const std::filesystem::path& LevelSpacePath, std::string* OutError) const
+bool WorldSpace::SaveLevelSpace(const std::filesystem::path& LevelSpacePath, std::string* OutError) const
 {
     if (LevelSpacePath.extension() != LevelSpaceExtension)
     {
@@ -1999,7 +1995,7 @@ bool SceneWorld::SaveLevelSpace(const std::filesystem::path& LevelSpacePath, std
     return Output.good();
 }
 
-bool SceneWorld::LoadStartupLevelFromProject(const std::filesystem::path& ProjectSpacePath, std::string* OutError)
+bool WorldSpace::LoadStartupLevelFromProject(const std::filesystem::path& ProjectSpacePath, std::string* OutError)
 {
     toml::table ProjectDoc;
     try

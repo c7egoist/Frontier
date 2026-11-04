@@ -1,10 +1,10 @@
 /*==========================================================================================================================================
-                                                      EVERESTSCENEVIEWPORT.CPP
+                                                           RENDERINGEXTENSION.CPP
 ==========================================================================================================================================*/
-// 🧩 Project Everest's live Scene Viewport: the level's environment and render-pipeline records drive the engine SceneViewport
-//    (ported VehicleHMI ReSTIR GI of the proving ground + the PlanetaryAtmosphere environment) on the host's device.
+// 🧩 One refresh of a level's Scene Viewport: the level's environment and render-pipeline records drive the engine SceneViewport
+//    (the ported VehicleHMI ReSTIR GI + the PlanetaryAtmosphere environment) on the host's device.
 
-#include "EverestSceneViewport.h"
+#include "Frontier/Extensions/Rendering/RenderingExtension.h"
 
 #include "Engine/Diagnostics/DiagnosticJournal.h"
 #include "Engine/Diagnostics/LogCategories.h"
@@ -18,20 +18,20 @@
 #include <fstream>
 #include <iterator>
 
-namespace Everest
+namespace Frontier
 {
 
 namespace
 {
 
-template <typename EntryType> const EntryType* FindEntry(const Frontier::SceneWorld& World, const char* Type)
+template <typename EntryType> const EntryType* FindEntry(const Frontier::WorldSpace& World, const char* Type)
 {
-    return dynamic_cast<const EntryType*>(const_cast<Frontier::SceneWorld&>(World).FindFirstByType(Type));
+    return dynamic_cast<const EntryType*>(const_cast<Frontier::WorldSpace&>(World).FindFirstByType(Type));
 }
 
 // 📝 Copies an entry's configuration, or disables its effect when the level has no such entry.
 template <typename EntryType, typename Configuration>
-void ReadConfiguration(const Frontier::SceneWorld& World, const char* Type, Configuration& Target)
+void ReadConfiguration(const Frontier::WorldSpace& World, const char* Type, Configuration& Target)
 {
     if (const EntryType* Entry = FindEntry<EntryType>(World, Type)) Target = Entry->QueryConfiguration();
     else Target.Enabled = false;
@@ -40,7 +40,7 @@ void ReadConfiguration(const Frontier::SceneWorld& World, const char* Type, Conf
 // 📝 The level-wide medium of a type whose entries can also be bounded volumes (Clouds, Fog): the first entry that is not
 //    a local volume. Local volumes (Local Cloud, Local Volumetric Fog) have no renderer here yet.
 template <typename EntryType, typename Configuration>
-void ReadGlobalConfiguration(const Frontier::SceneWorld& World, const char* Type, Configuration& Target)
+void ReadGlobalConfiguration(const Frontier::WorldSpace& World, const char* Type, Configuration& Target)
 {
     for (const Frontier::SceneRecordBase* Entry : World.FindAllByType(Type))
     {
@@ -103,7 +103,7 @@ bool AdvanceSolarDay(Frontier::SolarConfiguration& Sun, double DeltaSeconds)
     return true;
 }
 
-Frontier::GlobalIllumination::SceneEnvironment ResolveSceneEnvironment(const Frontier::SceneWorld& World, double ElapsedSeconds)
+Frontier::GlobalIllumination::SceneEnvironment ResolveSceneEnvironment(const Frontier::WorldSpace& World, double ElapsedSeconds)
 {
     Frontier::GlobalIllumination::SceneEnvironment Environment;
     ReadConfiguration<Frontier::SolarRecord>(World, "Solar", Environment.Solar);
@@ -154,13 +154,13 @@ Frontier::GlobalIllumination::SceneEnvironment ResolveSceneEnvironment(const Fro
     return Environment;
 }
 
-EverestSceneViewport::EverestSceneViewport(std::filesystem::path ProjectRoot, std::filesystem::path ShaderRoot, const Frontier::VulkanDeviceAccess* HostDevice)
+RenderingExtension::RenderingExtension(std::filesystem::path ProjectRoot, std::filesystem::path ShaderRoot, const Frontier::VulkanDeviceAccess* HostDevice)
     : ProjectRoot_(std::move(ProjectRoot)), ShaderRoot_(std::move(ShaderRoot)), HostDeviceAttached_(HostDevice != nullptr)
 {
     if (HostDevice != nullptr) Device_ = *HostDevice;
 }
 
-SceneViewportRefresh EverestSceneViewport::Render(const SceneViewportRequest& Request, const Frontier::SceneWorld& World, double ElapsedSeconds)
+SceneViewportRefresh RenderingExtension::Render(const SceneViewportRequest& Request, const Frontier::WorldSpace& World, double ElapsedSeconds)
 {
     SceneViewportRefresh Outcome;
     Frontier::RenderPipelineConfiguration Pipeline;
@@ -411,4 +411,4 @@ SceneViewportRefresh EverestSceneViewport::Render(const SceneViewportRequest& Re
     return Outcome;
 }
 
-} // namespace Everest
+} // namespace Frontier

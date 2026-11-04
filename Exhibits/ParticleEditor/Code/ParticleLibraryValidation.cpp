@@ -339,10 +339,20 @@ int main(int ArgumentCount, char** Arguments)
         Placements.push_back({ Preset ? &Preset->Parameters : nullptr });
     }
     const ParticleFieldPayloads Timed = ResolveParticleFieldPayloads(Fields, SceneTime);
+    // 📝 The prototype packs no drag volume or current (no GPU path in eos); the C++ engine packs them as types 4 and 5. Parity
+    //    is checked on the prototype's own entries, and the extension apart.
+    std::vector<ParticleAccelerationEntry> PrototypeEntries;
+    size_t                                 BoxEntries = 0;
+    for (const ParticleAccelerationEntry& Entry : Timed.Accelerations)
+    {
+        if (Entry.Slot >= 4) ++BoxEntries;
+        else PrototypeEntries.push_back(Entry);
+    }
     ParticleAccelerationBlock Accelerations{};
-    PackParticleAccelerationFields(Accelerations, Placements, Timed.Accelerations, SceneTime);
+    PackParticleAccelerationFields(Accelerations, Placements, PrototypeEntries, SceneTime);
     const FloatComparison AccelerationResult = CompareFloats(Accelerations, ReadNumbers(Scene["acceleration_fields"]));
     Expect(AccelerationResult.Values == 128 && AccelerationResult.Exact == 128, "acceleration fields match bit for bit");
+    Expect(BoxEntries > 0, "the reference's drag volume and current reach the field program (types 4 and 5)");
 
     ParticleLensingBlock Lensing{};
     const ParticleLensingReading LensingCounts = PackParticleLensing(Lensing, Placements, Camera, Aspect, SceneTime);

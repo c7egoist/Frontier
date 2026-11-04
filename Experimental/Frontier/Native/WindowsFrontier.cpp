@@ -19,8 +19,9 @@
 #include "UI/Editor/EditorWorkspace.h"
 #include "UI/Editor/ProjectBrowserPanel.h"
 #include "EverestWorkspace.h"
-#include "EverestSceneViewport.h"
-#include "EverestParticleViewport.h"
+#include "Frontier/Extensions/Rendering/RenderingExtension.h"
+#include "Frontier/Extensions/Particle/ParticleExtension.h"
+#include "Frontier/Extensions/Interface/ViewportTexture.h"
 #include "Engine/Interface/InspectorRuntime.h"
 #ifdef FRONTIER_SOLIDARC_ENABLED
 #include "UI/SolidArc/Browser/SolidArcBrowserLink.h"
@@ -224,26 +225,20 @@ int main()
     bool PreviewFailed = false;
     // 📝 Everest's live Scene Viewport borrows the presentation device; its presented image is sampled in GENERAL layout.
     Frontier::VulkanPresentation *Presentation = nullptr;
-    std::unique_ptr<Everest::EverestSceneViewport> SceneView;
-    VkImageView SceneViewImage = VK_NULL_HANDLE;
-    VkDescriptorSet SceneViewDescriptor = VK_NULL_HANDLE;
+    std::unique_ptr<Frontier::RenderingExtension> SceneView;
+    Frontier::ViewportTexture SceneViewTexture;
     int SceneViewJournalEntries = 0; // 📝 the first statuses and every new target reach the diagnostic file, capped
     // 📝 The Particle editor's viewport: the GPU particle engine on the same device, its image sampled in GENERAL layout.
-    std::unique_ptr<Everest::EverestParticleViewport> ParticleView;
-    VkImageView ParticleViewImage = VK_NULL_HANDLE;
-    VkDescriptorSet ParticleViewDescriptor = VK_NULL_HANDLE;
+    std::unique_ptr<Frontier::ParticleExtension> ParticleView;
+    Frontier::ViewportTexture ParticleViewTexture;
     int ParticleViewJournalEntries = 0;
     const auto RetireSceneView = [&]()
     {
         SceneView.reset(); // 📝 Waits for the device before releasing anything the interface could still sample.
-        if (SceneViewDescriptor) ImGui_ImplVulkan_RemoveTexture(SceneViewDescriptor);
-        SceneViewDescriptor = VK_NULL_HANDLE;
-        SceneViewImage = VK_NULL_HANDLE;
+        SceneViewTexture.Retire();
         Frontier::InspectorRuntime::Instance().RegisterParticleViewportPresenter({});
         ParticleView.reset(); // 📝 Drains the queue as the scene viewport does.
-        if (ParticleViewDescriptor) ImGui_ImplVulkan_RemoveTexture(ParticleViewDescriptor);
-        ParticleViewDescriptor = VK_NULL_HANDLE;
-        ParticleViewImage = VK_NULL_HANDLE;
+        ParticleViewTexture.Retire();
     };
     const auto ResolveBesideExecutable = [](const std::filesystem::path &Relative)
     {
@@ -481,34 +476,28 @@ int main()
                     glfwSetInputMode(Target, GLFW_RAW_MOUSE_MOTION, ConstraintEnabled ? GLFW_TRUE : GLFW_FALSE);
                 glfwSetInputMode(Target, GLFW_CURSOR, ConstraintEnabled ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
             };
-            EverestSpace->PresentSceneViewport = [&](const Everest::SceneViewportRequest &Request)
+            EverestSpace->PresentSceneViewport = [&](const Frontier::SceneViewportRequest &Request)
             {
-                Everest::SceneViewportImage Image;
+                Frontier::SceneViewportImage Image;
                 try
                 {
                     if (!SceneView)
                     {
                         const Frontier::VulkanDeviceAccess Device = Presentation ? Presentation->QueryDeviceAccess() : Frontier::VulkanDeviceAccess{};
-                        SceneView = std::make_unique<Everest::EverestSceneViewport>(
+                        SceneView = std::make_unique<Frontier::RenderingExtension>(
                             EverestSpace->QueryProjectRoot(), ResolveBesideExecutable("EngineContent/ShaderArchives"), &Device);
                     }
-                    const Everest::SceneViewportRefresh Outcome =
-                        SceneView->Render(Request, EverestSpace->QuerySceneWorld(), EverestSpace->QueryElapsedSeconds());
+                    const Frontier::SceneViewportRefresh Outcome =
+                        SceneView->Render(Request, EverestSpace->QueryWorldSpace(), EverestSpace->QueryElapsedSeconds());
                     Image.Status  = Outcome.Status;
                     Image.Readout = Outcome.Readout;
-                    if ((Outcome.View != SceneViewImage || SceneViewJournalEntries < 12) && SceneViewJournalEntries < 32)
+                    if ((SceneViewTexture.QueryChanged(Outcome.View) || SceneViewJournalEntries < 12) && SceneViewJournalEntries < 32)
                     {
                         Frontier::DiagnosticJournal::Append("SceneViewport", (Outcome.View ? "image " : "no image ") + Outcome.Status);
                         ++SceneViewJournalEntries;
                     }
-                    if (Outcome.View != SceneViewImage)
-                    {
-                        // 📝 Render() retired the queue before replacing its targets: the previous set is no longer sampled.
-                        if (SceneViewDescriptor) ImGui_ImplVulkan_RemoveTexture(SceneViewDescriptor);
-                        SceneViewDescriptor = Outcome.View ? ImGui_ImplVulkan_AddTexture(Outcome.View, VK_IMAGE_LAYOUT_GENERAL) : VK_NULL_HANDLE;
-                        SceneViewImage = Outcome.View;
-                    }
-                    Image.Texture = (uint64_t)SceneViewDescriptor;
+                    // 📝 Render() retired the queue before replacing its targets: the previous registration is no longer sampled.
+                    Image.Texture = SceneViewTexture.Resolve(Outcome.View);
                 }
                 catch (const std::exception &Failure)
                 {
@@ -526,23 +515,17 @@ int main()
                         if (!ParticleView)
                         {
                             const Frontier::VulkanDeviceAccess Device = Presentation ? Presentation->QueryDeviceAccess() : Frontier::VulkanDeviceAccess{};
-                            ParticleView = std::make_unique<Everest::EverestParticleViewport>(ResolveBesideExecutable("EngineContent/ShaderArchives"), &Device);
+                            ParticleView = std::make_unique<Frontier::ParticleExtension>(ResolveBesideExecutable("EngineContent/ShaderArchives"), &Device);
                         }
-                        Everest::ParticleViewportOutcome Outcome = ParticleView->Render(Request);
+                        Frontier::ParticleViewportOutcome Outcome = ParticleView->Render(Request);
                         Image = std::move(Outcome.Image);
-                        if ((Outcome.View != ParticleViewImage || !Image.Failure.empty()) && ParticleViewJournalEntries < 16)
+                        if ((ParticleViewTexture.QueryChanged(Outcome.View) || !Image.Failure.empty()) && ParticleViewJournalEntries < 16)
                         {
                             Frontier::DiagnosticJournal::Append("ParticleViewport", Outcome.View ? "image on " + Image.Adapter : "no image: " + Image.Failure);
                             ++ParticleViewJournalEntries;
                         }
-                        if (Outcome.View != ParticleViewImage)
-                        {
-                            // 📝 The engine drained the queue before replacing its targets: the previous view is no longer sampled.
-                            if (ParticleViewDescriptor) ImGui_ImplVulkan_RemoveTexture(ParticleViewDescriptor);
-                            ParticleViewDescriptor = Outcome.View ? ImGui_ImplVulkan_AddTexture(Outcome.View, VK_IMAGE_LAYOUT_GENERAL) : VK_NULL_HANDLE;
-                            ParticleViewImage = Outcome.View;
-                        }
-                        Image.Texture = (uint64_t)ParticleViewDescriptor;
+                        // 📝 The engine drained the queue before replacing its targets: the previous registration is no longer sampled.
+                        Image.Texture = ParticleViewTexture.Resolve(Outcome.View);
                     }
                     catch (const std::exception &Failure)
                     {

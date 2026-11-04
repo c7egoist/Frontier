@@ -1,10 +1,10 @@
 /*==========================================================================================================================================
-                                                         EVERESTSCENEGEOMETRY.CPP
+                                                         SCENEGEOMETRYOCCUPANCY.CPP
 ==========================================================================================================================================*/
-// 🧩 Project Everest's scene geometry: binds the level's Geometry records to the proving ground's occupants by name, resolves
-//    each record's transform and modifier stack into occupant placements for the viewport, and reports what each resolved to.
+// 🧩 The level's Geometry records on the scene renderer's occupants: binds each record to an occupant by name, resolves its
+//    transform and modifier stack into occupant placements for the viewport, and reports what each resolved to.
 
-#include "EverestSceneGeometry.h"
+#include "Frontier/Extensions/Rendering/SceneGeometryOccupancy.h"
 
 #include "Frontier/Engine/Rendering/GlobalIllumination/IlluminationHost.h"
 
@@ -14,7 +14,7 @@
 #include <set>
 #include <utility>
 
-namespace Everest
+namespace Frontier
 {
 
 namespace
@@ -535,7 +535,7 @@ void SceneGeometryOccupancy::Resolve(Occupancy& Entry, const Frontier::GeometryC
     }
 }
 
-std::vector<Frontier::GlobalIllumination::OccupantPlacement> SceneGeometryOccupancy::ResolvePlacements(const Frontier::SceneWorld& World)
+std::vector<Frontier::GlobalIllumination::OccupantPlacement> SceneGeometryOccupancy::ResolvePlacements(const Frontier::WorldSpace& World)
 {
     std::vector<Frontier::GlobalIllumination::OccupantPlacement> Placements;
     if (Scene_ == nullptr) return Placements;
@@ -613,4 +613,4 @@ std::vector<Frontier::GlobalIllumination::OccupantPlacement> SceneGeometryOccupa
     return Placements;
 }
 
-} // namespace Everest
+} // namespace Frontier

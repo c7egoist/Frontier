@@ -4,6 +4,7 @@
 // 🧩 ParticleLibrary.toml decoded: the presets with every parameter, their wind links, the default wind and force list.
 
 #include "Frontier/Engine/PhysicalDynamics/ParticleDynamics/ParticleEffectLibrary.h"
+#include "Frontier/Engine/PhysicalDynamics/ParticleDynamics/ParticleEffectCodec.h"
 
 #include <toml++/toml.hpp>
 
@@ -362,20 +363,9 @@ void DecodeLightFibre(const toml::table& Keys, LightFibreParameters& Fibre, KeyR
     }
 }
 
-bool DecodePreset(const toml::table& Keys, ParticlePreset& Preset, size_t Index, std::string& Diagnostic)
+bool DecodeEffectParameters(const toml::table& Keys, ParticleEffectParameters& P, const std::string& Where, std::string& Diagnostic)
 {
-    const std::string        Where = "preset " + std::to_string(Index + 1);
-    KeyReading               Reading(Keys, Where, Diagnostic);
-    ParticleEffectParameters& P = Preset.Parameters;
-    Reading.Read("identifier", Preset.Identifier);
-    Reading.Read("name", Preset.Name);
-    Reading.Read("group", Preset.Group);
-    Reading.Read("blurb", Preset.Blurb);
-    if (Preset.Identifier.empty() || Preset.Name.empty())
-    {
-        Diagnostic = Where + ": identifier and name are required";
-        return false;
-    }
+    KeyReading Reading(Keys, Where, Diagnostic);
     Reading.Read("behaviour", P.Behaviour, BehaviourSpellings);
     Reading.Read("appearance", P.Appearance, AppearanceSpellings);
     Reading.Read("leaf_surface", P.LeafSurface, LeafSurfaceSpellings);
@@ -421,27 +411,6 @@ bool DecodePreset(const toml::table& Keys, ParticlePreset& Preset, size_t Index,
     Reading.Read("burst_at_origin", P.BurstAtOrigin);
     Reading.Read("visible", P.Visible);
 
-    if (const toml::table* Link = Keys["wind_link"].as_table())
-    {
-        KeyReading     LinkReading(*Link, Where + " wind_link", Diagnostic);
-        ParticleWindLink Decoded;
-        std::string      Category;
-        LinkReading.Read("category", Category);
-        const ParticleFieldDescriptor* Descriptor = ResolveParticleFieldDescriptor(Category);
-        if (!Descriptor || Descriptor->LatticeSlot < 0)
-        {
-            Diagnostic = Where + ": a wind link names a lattice flow, not \"" + Category + "\"";
-            return false;
-        }
-        Decoded.Category = Descriptor->Category;
-        LinkReading.Read("name", Decoded.Name);
-        LinkReading.Read("local", Decoded.Local);
-        LinkReading.Read("radius_metres", Decoded.RadiusMetres);
-        LinkReading.Read("strength", Decoded.Strength);
-        LinkReading.Read("bearing_degrees", Decoded.BearingDegrees);
-        LinkReading.Read("rate_hz", Decoded.RateHz);
-        Preset.WindLink = Decoded;
-    }
     if (const toml::table* Section = Keys["transition"].as_table())
     {
         KeyReading       SectionReading(*Section, Where + " transition", Diagnostic);
@@ -507,6 +476,120 @@ bool DecodePreset(const toml::table& Keys, ParticlePreset& Preset, size_t Index,
     return Diagnostic.empty();
 }
 
+bool DecodePreset(const toml::table& Keys, ParticlePreset& Preset, size_t Index, std::string& Diagnostic)
+{
+    const std::string Where = "preset " + std::to_string(Index + 1);
+    KeyReading        Reading(Keys, Where, Diagnostic);
+    Reading.Read("identifier", Preset.Identifier);
+    Reading.Read("name", Preset.Name);
+    Reading.Read("group", Preset.Group);
+    Reading.Read("blurb", Preset.Blurb);
+    if (Preset.Identifier.empty() || Preset.Name.empty())
+    {
+        Diagnostic = Where + ": identifier and name are required";
+        return false;
+    }
+    if (!DecodeEffectParameters(Keys, Preset.Parameters, Where, Diagnostic))
+    {
+        return false;
+    }
+    if (const toml::table* Link = Keys["wind_link"].as_table())
+    {
+        KeyReading     LinkReading(*Link, Where + " wind_link", Diagnostic);
+        ParticleWindLink Decoded;
+        std::string      Category;
+        LinkReading.Read("category", Category);
+        const ParticleFieldDescriptor* Descriptor = ResolveParticleFieldDescriptor(Category);
+        if (!Descriptor || Descriptor->LatticeSlot < 0)
+        {
+            Diagnostic = Where + ": a wind link names a lattice flow, not \"" + Category + "\"";
+            return false;
+        }
+        Decoded.Category = Descriptor->Category;
+        LinkReading.Read("name", Decoded.Name);
+        LinkReading.Read("local", Decoded.Local);
+        LinkReading.Read("radius_metres", Decoded.RadiusMetres);
+        LinkReading.Read("strength", Decoded.Strength);
+        LinkReading.Read("bearing_degrees", Decoded.BearingDegrees);
+        LinkReading.Read("rate_hz", Decoded.RateHz);
+        Preset.WindLink = Decoded;
+    }
+    return Diagnostic.empty();
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                    SPELLING
+//------------------------------------------------------------------------------------------------------------------------
+
+// 📝 The spelling of a choice: the first name the decoder accepts for it.
+template <typename Choice, size_t Count>
+const char* Spell(Choice Value, const std::array<std::pair<const char*, Choice>, Count>& Spellings)
+{
+    for (const auto& [Spelling, Candidate] : Spellings)
+    {
+        if (Candidate == Value)
+        {
+            return Spelling;
+        }
+    }
+    return Spellings.front().first;
+}
+
+template <size_t Count>
+toml::array SpellNumbers(const std::array<double, Count>& Values)
+{
+    toml::array Array;
+    for (const double Value : Values)
+    {
+        Array.push_back(Value);
+    }
+    return Array;
+}
+
+void EncodeLightFibre(const LightFibreParameters& Fibre, toml::table& Keys)
+{
+    Keys.insert_or_assign("shape", Spell(Fibre.Shape, FibreShapeSpellings));
+    Keys.insert_or_assign("strands", static_cast<int64_t>(Fibre.Strands));
+    Keys.insert_or_assign("segments", static_cast<int64_t>(Fibre.Segments));
+    Keys.insert_or_assign("seed", static_cast<int64_t>(Fibre.Seed));
+    Keys.insert_or_assign("loop_seconds", Fibre.LoopSeconds);
+    Keys.insert_or_assign("scale", Fibre.Scale);
+    Keys.insert_or_assign("length_metres", Fibre.LengthMetres);
+    Keys.insert_or_assign("spread_metres", Fibre.SpreadMetres);
+    Keys.insert_or_assign("amplitude_metres", Fibre.AmplitudeMetres);
+    Keys.insert_or_assign("frequency", Fibre.Frequency);
+    Keys.insert_or_assign("sheet_width_metres", Fibre.SheetWidthMetres);
+    Keys.insert_or_assign("ripple", Fibre.Ripple);
+    Keys.insert_or_assign("waves", Fibre.Waves);
+    Keys.insert_or_assign("phase_spread", Fibre.PhaseSpread);
+    Keys.insert_or_assign("trail_length", Fibre.TrailLength);
+    Keys.insert_or_assign("path_shape", Fibre.PathShape);
+    Keys.insert_or_assign("path_size_metres", Fibre.PathSizeMetres);
+    Keys.insert_or_assign("harmonic", Fibre.Harmonic);
+    Keys.insert_or_assign("window_cycles", Fibre.WindowCycles);
+    Keys.insert_or_assign("window", Fibre.Window);
+    Keys.insert_or_assign("thickness", Fibre.Thickness);
+    Keys.insert_or_assign("taper", Fibre.Taper);
+    Keys.insert_or_assign("intensity", Fibre.Intensity);
+    Keys.insert_or_assign("halo", Fibre.Halo);
+    Keys.insert_or_assign("baseline", Fibre.Baseline);
+    Keys.insert_or_assign("colour_mode", Spell(Fibre.Colouring, ColouringSpellings));
+    Keys.insert_or_assign("accent_colour", SpellNumbers(Fibre.AccentColour));
+    Keys.insert_or_assign("accent_mix", Fibre.AccentMix);
+    Keys.insert_or_assign("sparks", Fibre.Sparks);
+    Keys.insert_or_assign("spark_size", Fibre.SparkSize);
+    Keys.insert_or_assign("spark_brightness", Fibre.SparkBrightness);
+    Keys.insert_or_assign("pulse_rate", Fibre.PulseRate);
+    Keys.insert_or_assign("pulse_depth", Fibre.PulseDepth);
+    Keys.insert_or_assign("pulse_shape", Spell(Fibre.Pulse, PulseSpellings));
+    toml::array Stops;
+    for (const LightFibreStop& Stop : Fibre.Stops)
+    {
+        Stops.push_back(toml::table{ { "position", Stop.Position }, { "colour", SpellNumbers(Stop.Colour) } });
+    }
+    Keys.insert_or_assign("stop", std::move(Stops));
+}
+
 bool ParseDocument(const std::filesystem::path& File, toml::table& Document, std::string& Diagnostic)
 {
     try
@@ -562,6 +645,141 @@ const char* ResolveParticleBehaviourLabel(ParticleBehaviour Behaviour) noexcept
 bool EvaluateParticleMolecular(const ParticleEffectParameters& Parameters) noexcept
 {
     return Parameters.Behaviour == ParticleBehaviour::LennardJones || Parameters.Behaviour == ParticleBehaviour::Reactive;
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                    CODEC
+//------------------------------------------------------------------------------------------------------------------------
+
+bool DecodeParticleEffectParameters(const toml::table& Keys, ParticleEffectParameters& Parameters, const std::string& Where, std::string& Diagnostic)
+{
+    return DecodeEffectParameters(Keys, Parameters, Where, Diagnostic);
+}
+
+void EncodeParticleEffectParameters(const ParticleEffectParameters& P, toml::table& Keys)
+{
+    Keys.insert_or_assign("behaviour", Spell(P.Behaviour, BehaviourSpellings));
+    Keys.insert_or_assign("appearance", Spell(P.Appearance, AppearanceSpellings));
+    Keys.insert_or_assign("leaf_surface", Spell(P.LeafSurface, LeafSurfaceSpellings));
+    Keys.insert_or_assign("blend", Spell(P.Blend, BlendSpellings));
+    Keys.insert_or_assign("release_shape", Spell(P.ReleaseShape, ReleaseShapeSpellings));
+    Keys.insert_or_assign("capacity", static_cast<int64_t>(P.Capacity));
+    Keys.insert_or_assign("release_rate", P.ReleaseRate);
+    Keys.insert_or_assign("origin_metres", SpellNumbers(P.OriginMetres));
+    Keys.insert_or_assign("radius_metres", P.RadiusMetres);
+    Keys.insert_or_assign("box_half_metres", SpellNumbers(P.BoxHalfMetres));
+    Keys.insert_or_assign("direction", SpellNumbers(P.Direction));
+    Keys.insert_or_assign("spread_radians", P.SpreadRadians);
+    Keys.insert_or_assign("speed_minimum_mps", P.SpeedMinimum);
+    Keys.insert_or_assign("speed_maximum_mps", P.SpeedMaximum);
+    Keys.insert_or_assign("drag", P.Drag);
+    Keys.insert_or_assign("gravity", P.Gravity);
+    Keys.insert_or_assign("life_minimum_seconds", P.LifeMinimumSeconds);
+    Keys.insert_or_assign("life_maximum_seconds", P.LifeMaximumSeconds);
+    Keys.insert_or_assign("size_start_metres", P.SizeStartMetres);
+    Keys.insert_or_assign("size_end_metres", P.SizeEndMetres);
+    Keys.insert_or_assign("size_scale", P.SizeScale);
+    Keys.insert_or_assign("colour_a", SpellNumbers(P.ColourA));
+    Keys.insert_or_assign("colour_b", SpellNumbers(P.ColourB));
+    Keys.insert_or_assign("colour_c", SpellNumbers(P.ColourC));
+    Keys.insert_or_assign("wind_coupling", P.WindCoupling);
+    Keys.insert_or_assign("bounce", P.Bounce);
+    Keys.insert_or_assign("buoyancy", P.Buoyancy);
+    Keys.insert_or_assign("flutter", P.Flutter);
+    Keys.insert_or_assign("temperature", P.Temperature);
+    Keys.insert_or_assign("epsilon", P.Epsilon);
+    Keys.insert_or_assign("sigma", P.Sigma);
+    Keys.insert_or_assign("damping", P.Damping);
+    Keys.insert_or_assign("react_rate", P.ReactRate);
+    Keys.insert_or_assign("dissociation", P.Dissociation);
+    Keys.insert_or_assign("react_radius", P.ReactRadius);
+    Keys.insert_or_assign("fraction_a", P.FractionA);
+    Keys.insert_or_assign("integration_step_seconds", P.IntegrationStepSeconds);
+    Keys.insert_or_assign("pulse_hz", P.PulseHz);
+    Keys.insert_or_assign("pulse_depth", P.PulseDepth);
+    Keys.insert_or_assign("swarm_radius_metres", P.SwarmRadiusMetres);
+    Keys.insert_or_assign("burst_every_seconds", P.BurstEverySeconds);
+    Keys.insert_or_assign("burst_count", static_cast<int64_t>(P.BurstCount));
+    Keys.insert_or_assign("burst_at_origin", P.BurstAtOrigin);
+    Keys.insert_or_assign("visible", P.Visible);
+    if (P.Transition)
+    {
+        const ParticleTransition& T = *P.Transition;
+        Keys.insert_or_assign("transition", toml::table{ { "hold_minimum_seconds", T.HoldMinimumSeconds },
+                                                         { "hold_spread_seconds", T.HoldSpreadSeconds },
+                                                         { "burst_share", T.BurstShare },
+                                                         { "fragment", T.Fragment },
+                                                         { "fragment_life_seconds", T.FragmentLifeSeconds },
+                                                         { "wave", Spell(T.Wave, WaveSpellings) },
+                                                         { "assemble", static_cast<int64_t>(T.Assemble) },
+                                                         { "launch_distance_metres", T.LaunchDistanceMetres },
+                                                         { "after", T.Butterflies ? "butterfly" : "none" } });
+    }
+    if (P.Attractor)
+    {
+        const ParticleAttractor& A = *P.Attractor;
+        Keys.insert_or_assign("attractor", toml::table{ { "enabled", A.Enabled },
+                                                        { "strength", A.Strength },
+                                                        { "radius_metres", A.RadiusMetres },
+                                                        { "swirl", A.Swirl },
+                                                        { "swallow_metres", A.SwallowMetres } });
+    }
+    if (P.Lensing)
+    {
+        Keys.insert_or_assign("lensing", toml::table{ { "event_radius_metres", P.Lensing->EventRadiusMetres },
+                                                      { "einstein_ratio", P.Lensing->EinsteinRatio } });
+    }
+    if (P.HeatShimmer)
+    {
+        const ParticleHeatShimmer& H = *P.HeatShimmer;
+        Keys.insert_or_assign("heat_shimmer", toml::table{ { "radius_metres", H.RadiusMetres },
+                                                           { "strength", H.Strength },
+                                                           { "frequency", H.Frequency },
+                                                           { "rate", H.Rate } });
+    }
+    if (P.MagneticDipole)
+    {
+        const ParticleMagneticDipole& M = *P.MagneticDipole;
+        Keys.insert_or_assign("magnetic_dipole", toml::table{ { "strength", M.Strength },
+                                                              { "guide", M.Guide },
+                                                              { "radius_metres", M.RadiusMetres } });
+    }
+    if (P.LightFibre)
+    {
+        toml::table Fibre;
+        EncodeLightFibre(*P.LightFibre, Fibre);
+        Keys.insert_or_assign("light_fibre", std::move(Fibre));
+    }
+}
+
+bool DecodeParticleField(const toml::table& Keys, ParticleField& Field, const std::string& Where, std::string& Diagnostic)
+{
+    return DecodeField(Keys, Field, Where, Diagnostic);
+}
+
+void EncodeParticleField(const ParticleField& Field, toml::table& Keys)
+{
+    Keys.insert_or_assign("category", ResolveParticleFieldDescriptor(Field.Category).Identifier);
+    Keys.insert_or_assign("name", Field.Name);
+    Keys.insert_or_assign("enabled", Field.Enabled);
+    Keys.insert_or_assign("centre_metres", SpellNumbers(Field.Centre));
+    Keys.insert_or_assign("direction", SpellNumbers(Field.Direction));
+    Keys.insert_or_assign("strength", Field.Strength);
+    Keys.insert_or_assign("radius_metres", Field.Radius);
+    Keys.insert_or_assign("reach", Spell(Field.Reach, ReachSpellings));
+    Keys.insert_or_assign("falloff", Spell(Field.Falloff, FalloffSpellings));
+    Keys.insert_or_assign("swirl", Field.Swirl);
+    Keys.insert_or_assign("rate_hz", Field.Rate);
+    Keys.insert_or_assign("swallow_metres", Field.Swallow);
+    toml::array ActsOn;
+    for (const std::string& Channel : Field.ActsOn)
+    {
+        ActsOn.push_back(Channel);
+    }
+    Keys.insert_or_assign("acts_on", std::move(ActsOn));
+    Keys.insert_or_assign("begins_seconds", Field.Begins);
+    Keys.insert_or_assign("lasts_seconds", Field.Lasts);
+    Keys.insert_or_assign("repeats_seconds", Field.Repeats);
 }
 
 //------------------------------------------------------------------------------------------------------------------------

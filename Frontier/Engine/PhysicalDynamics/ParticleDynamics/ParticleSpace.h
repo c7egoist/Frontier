@@ -1,7 +1,7 @@
 /*==========================================================================================================================================
-                                                             PARTICLESCENE.H
+                                                             PARTICLESPACE.H
 ==========================================================================================================================================*/
-// 🧩 The Particle editor's scene: its effects, force fields, wind, camera, lightning and clock, advanced one refresh at a time into
+// 🧩 The particle space, the world the effects live in: its effects, force fields, wind, camera, lightning and clock, advanced one refresh at a time into
 //    the plan the GPU sequence carries out.
 
 #pragma once
@@ -20,7 +20,7 @@ namespace Frontier
 {
 
 // 📝 A port of the prototype's scene and refresh (Experimental/ParticleEditor/ParticleEditor.js: Scene, ConstructEffect,
-//    ApplyWindLink, Advance, ConstructLines). Math.random becomes one seeded generator, so a scene replays identically.
+//    ApplyWindLink, Advance, ConstructLines). Math.random becomes one seeded generator, so a space replays identically.
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                                    EFFECTS
@@ -92,8 +92,18 @@ struct ParticleRefreshPlan
 };
 
 //------------------------------------------------------------------------------------------------------------------------
-//                                                    SCENE
+//                                                    SPACE
 //------------------------------------------------------------------------------------------------------------------------
+
+// 📝 The level's Force Field (100 m to 100 km) at the place the particle domain stands in the level: sampled by the host each
+//    refresh while the space follows it, and added to the lattice as one more prevailing flow (its horizontal part: the
+//    lattice's flows are horizontal).
+struct ParticleLevelWind
+{
+    bool                                 Follow       = false;
+    std::array<double, 3>                AnchorMetres = { 0.0, 0.0, 2.0 };   // level axes (z up)
+    std::optional<std::array<double, 3>> FlowMps;                            // domain axes (y up); not stored
+};
 
 struct ParticleLightningWeb
 {
@@ -103,12 +113,12 @@ struct ParticleLightningWeb
     uint32_t Links           = 2;
 };
 
-class ParticleScene
+class ParticleSpace
 {
 public:
-    explicit ParticleScene(uint32_t Seed = 20261104u) noexcept : RandomCounter(Seed) {}
+    explicit ParticleSpace(uint32_t Seed = 20261104u) noexcept : RandomCounter(Seed) {}
 
-    // 📝 The prototype's opening scene: the default force list and wind, then the named presets (the library's default
+    // 📝 The prototype's opening space: the default force list and wind, then the named presets (the library's default
     //    scene when Presets is empty).
     void ConstructDefault(const ParticleEffectLibrary& Library, const std::vector<std::string>* Presets = nullptr);
 
@@ -136,6 +146,7 @@ public:
     ParticleOrbitCamera                 Camera;
     ParticleLightning                   Lightning;
     ParticleLightningWeb                LightningWeb;
+    ParticleLevelWind                   LevelWind;
     bool                                Playing      = true;
     double                              TimeScale    = 1.0;
     double                              TimeSeconds  = 0.0;

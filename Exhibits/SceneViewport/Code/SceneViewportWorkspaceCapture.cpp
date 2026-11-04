@@ -1,12 +1,12 @@
 /*==========================================================================================================================================
                                                    SCENEVIEWPORTWORKSPACECAPTURE.CPP
 ==========================================================================================================================================*/
-// 🧩 The Everest workspace with its live Scene Viewport, captured offscreen: the real EverestWorkspace and EverestSceneViewport
+// 🧩 The Everest workspace with its live Scene Viewport, captured offscreen: the real EverestWorkspace and RenderingExtension
 //    (records → SceneViewport on a device of its own), the presented image read back and CPU-rasterized into the interface.
 
 #include "Engine/Interface/IconPresentation.h"
 #include "Engine/Interface/InspectorRuntime.h"
-#include "EverestSceneViewport.h"
+#include "Frontier/Extensions/Rendering/RenderingExtension.h"
 #include "EverestWorkspace.h"
 #include "Exhibits/ControlCentre/Code/CpuRasterization.h"
 #include "UI/Editor/ControlCentrePanel.h"
@@ -77,14 +77,14 @@ int main(int ArgumentCount, char** Arguments)
 
         // 📝 The same bridge the editor uses; here it opens its own device and the image comes back to the CPU.
         Everest::EverestWorkspace     Workspace(*Centre, EverestRoot);
-        Everest::EverestSceneViewport Bridge(EverestRoot, ShaderRoot, nullptr);
+        Frontier::RenderingExtension Bridge(EverestRoot, ShaderRoot, nullptr);
         std::vector<uint8_t>          ViewportPixels;
         std::array<uint32_t, 2>       ViewportExtent = {0, 0};
         std::string                   LastStatus;
-        Workspace.PresentSceneViewport = [&](const Everest::SceneViewportRequest& Request) {
+        Workspace.PresentSceneViewport = [&](const Frontier::SceneViewportRequest& Request) {
             const auto Start = std::chrono::steady_clock::now();
-            const Everest::SceneViewportRefresh Outcome = Bridge.Render(Request, Workspace.QuerySceneWorld(), Workspace.QueryElapsedSeconds());
-            Everest::SceneViewportImage Image;
+            const Frontier::SceneViewportRefresh Outcome = Bridge.Render(Request, Workspace.QueryWorldSpace(), Workspace.QueryElapsedSeconds());
+            Frontier::SceneViewportImage Image;
             Image.Status  = Outcome.Status;
             Image.Readout = Outcome.Readout;
             LastStatus    = Outcome.Status;
@@ -103,7 +103,7 @@ int main(int ArgumentCount, char** Arguments)
         RecordToken Selected{};
         if (!SelectType.empty())
         {
-            SceneRecordBase* Entry = Workspace.QuerySceneWorld().FindFirstByType(SelectType);
+            SceneRecordBase* Entry = Workspace.QueryWorldSpace().FindFirstByType(SelectType);
             Require(Entry != nullptr, "no record of type " + SelectType);
             Selected = Entry->QueryToken();
             Workspace.QueryOutliner().Select(Selected);
@@ -138,7 +138,7 @@ int main(int ArgumentCount, char** Arguments)
 
         // 📝 The viewport bar's inspection select writes the RenderPipeline record; the next refresh reads it. Here the record
         //    is set to the demo's "Normals" view (8) and one more refresh is captured beside the main image.
-        if (auto* Pipeline = dynamic_cast<RenderPipelineRecord*>(Workspace.QuerySceneWorld().FindFirstByType("RenderPipeline")))
+        if (auto* Pipeline = dynamic_cast<RenderPipelineRecord*>(Workspace.QueryWorldSpace().FindFirstByType("RenderPipeline")))
         {
             Pipeline->AccessConfiguration().InspectionModeIndex = 8;
             Pipeline->AccessConfiguration().AdvanceRevision();
@@ -180,7 +180,7 @@ int main(int ArgumentCount, char** Arguments)
         {
             RecordInspector* Page = InspectorRuntime::Instance().FindInspector(Selected);
             Require(Page != nullptr, "the selected record has no inspector");
-            if (auto* Pipeline = dynamic_cast<RenderPipelineRecord*>(Workspace.QuerySceneWorld().FindRecord(Selected)))
+            if (auto* Pipeline = dynamic_cast<RenderPipelineRecord*>(Workspace.QueryWorldSpace().FindRecord(Selected)))
                 Pipeline->AccessConfiguration().InspectionModeIndex = 0;
             constexpr int ColumnWidth = 470, ColumnHeight = 2900;
             for (const int Section : Sections)

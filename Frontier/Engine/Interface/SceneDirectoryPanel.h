@@ -89,7 +89,7 @@ class SceneDirectoryPanel
     void RequestSpawn(RecordClassification Classification);
     [[nodiscard]] std::optional<RecordClassification> TakeSpawnRequest();
 
-    // Dynamic Game Engine Editor construction / deletion catalogue (populated by SceneWorld).
+    // Dynamic Game Engine Editor construction / deletion catalogue (populated by WorldSpace).
     void ConfigureVisibleTypes(std::vector<std::string> Types) { VisibleTypes = {Types.begin(),Types.end()}; }
     void ConfigureConstructibleTypes(std::vector<std::pair<std::string, std::string>> TypeEntries);
     [[nodiscard]] const std::vector<std::pair<std::string, std::string>>& QueryConstructibleTypes() const noexcept

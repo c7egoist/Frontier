@@ -12,9 +12,13 @@
 #include "Engine/Interface/EnvironmentEditAccess.h"
 #include "Engine/Interface/ParticleEditor/ParticleViewportPresentation.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
+#include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -150,6 +154,17 @@ class InspectorRuntime
     void                PublishSolarElevation(float Degrees) noexcept { SolarElevation = Degrees; }
     [[nodiscard]] float QuerySolarElevation() const noexcept { return SolarElevation; }
 
+    // 📝 The level file the workspace edits: records that keep a file of their own beside the level (a Particles record's
+    //    .particlespace) resolve it from here. Empty when no level is open (captures, the Project Browser).
+    void                                       ConfigureLevelFile(std::filesystem::path File) { LevelFile = std::move(File); }
+    [[nodiscard]] const std::filesystem::path& QueryLevelFile() const noexcept { return LevelFile; }
+
+    // 📝 The level's Force Field at a point of the level (z-up metres) as air velocity [m/s]: registered by the workspace that
+    //    owns the level; empty without a Force Field record. The Particle editor's space follows it on request.
+    using LevelFlowSampler = std::function<std::optional<std::array<double, 3>>(const std::array<double, 3>& LevelMetres)>;
+    void                                  RegisterLevelFlowSampler(LevelFlowSampler Sampler) { FlowSampler = std::move(Sampler); }
+    [[nodiscard]] const LevelFlowSampler& QueryLevelFlowSampler() const noexcept { return FlowSampler; }
+
   private:
     friend class RecordEntry;
 
@@ -178,6 +193,8 @@ class InspectorRuntime
     float                InterfaceScale = 1.0f;
     EnvironmentEditAccess EnvironmentAccess{};
     float                SolarElevation = 38.0f;   // [°]
+    std::filesystem::path LevelFile{};
+    LevelFlowSampler      FlowSampler;
 };
 
 } // namespace Frontier

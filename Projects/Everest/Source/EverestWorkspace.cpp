@@ -9,7 +9,7 @@
 #include "Engine/Diagnostics/LogStream.h"
 
 #if FRONTIER_EDITOR && defined(FRONTIER_WITH_INTERFACE_SDK)
-#include "EverestSceneViewport.h"
+#include "Frontier/Extensions/Rendering/RenderingExtension.h"
 
 #include "Engine/Interface/Controls/WorldVectorOverlay.h"
 #include "Engine/Interface/ForceFieldVisualization/ForceFieldVisualization.h"
@@ -17,6 +17,7 @@
 #include "Engine/Interface/InspectorRuntime.h"
 #include "Engine/Interface/LogStreamPanelRegistration.h"
 #include "Engine/Interface/NativeInspectors.h"
+#include "Engine/Interface/ParticleEditor.h"
 #include "Engine/Interface/ProjectContent.h"
 #include "Engine/Interface/SceneDirectoryPanelRegistration.h"
 #include "Engine/Interface/SceneInspectorPanel.h"
@@ -63,7 +64,7 @@ constexpr float  NotchBandHeight = 18.0f;   // [px] the Control Centre notch tab
 //    surface cards and geometry clusters, published on the records' Outliner rows.
 #if FRONTIER_EDITOR
 // 📝 The geometry records' resolutions (what each stands for in the scene archive), copied whenever any of them changed.
-void PublishGeometryResolutions(Frontier::SceneWorld& World, const SceneViewportReadout& Readout, uint64_t& PublishedGeneration)
+void PublishGeometryResolutions(Frontier::WorldSpace& World, const SceneViewportReadout& Readout, uint64_t& PublishedGeneration)
 {
     if (!Readout.Geometry || Readout.GeometryGeneration == PublishedGeneration) return;
     PublishedGeneration = Readout.GeometryGeneration;
@@ -76,7 +77,7 @@ void PublishGeometryResolutions(Frontier::SceneWorld& World, const SceneViewport
     }
 }
 
-void PublishRenderReadouts(Frontier::SceneWorld& World, const SceneViewportReadout& Readout)
+void PublishRenderReadouts(Frontier::WorldSpace& World, const SceneViewportReadout& Readout)
 {
     if (!Readout.Presenting) return;
     if (Readout.Environment && Readout.Environment->AtmosphereBake)
@@ -336,7 +337,7 @@ EverestWorkspace::EverestWorkspace(Frontier::ControlCentrePanel& ControlCentre,
     const std::vector<std::string> SceneTypes = {"RenderPipeline","Solar","OpticalFlare","Atmosphere","Clouds","Fog","Stars","Moons","Planet","ForceField","Wind",
                                                  "ForceSource","Geometry"};
     OutlinerPanel.ConfigureVisibleTypes(SceneTypes);
-    auto Types = QuerySceneWorld().EnumerateRegisteredTypes();
+    auto Types = QueryWorldSpace().EnumerateRegisteredTypes();
     std::erase_if(Types,[&](const auto& Entry)
     {
         // 📝 The localized forces are added by type, as the Construct dialog's Forces group (one tile per type), not as one record type.
@@ -349,13 +350,14 @@ EverestWorkspace::EverestWorkspace(Frontier::ControlCentrePanel& ControlCentre,
     ConfigureConstructCatalogue();
     OutlinerPanel.Synchronize(Frontier::SceneDirectory::Instance());
 
-    if (Frontier::SceneRecordBase* Solar = QuerySceneWorld().FindFirstByType("Solar"))
+    if (Frontier::SceneRecordBase* Solar = QueryWorldSpace().FindFirstByType("Solar"))
     {
         OutlinerPanel.Select(Solar->QueryToken());
         OutlinerPanel.Synchronize(Frontier::SceneDirectory::Instance());
     }
 
-    Frontier::InspectorRuntime::Instance().RegisterSolarPlacementSolver(&SolveSolarPlacement);
+    Frontier::InspectorRuntime::Instance().RegisterSolarPlacementSolver(&Frontier::SolveSolarPlacement);
+    Frontier::InspectorRuntime::Instance().RegisterLevelFlowSampler([this](const std::array<double, 3>& LevelMetres) { return SampleLevelFlow(LevelMetres); });
 
     Dockspace.ConfigureDockspaceKey("EverestWorkspaceDockspace");
     // 📝 No top toolbar (owner's request): only the Control Centre notch remains, in a band as tall as its tab.
@@ -372,7 +374,7 @@ EverestWorkspace::EverestWorkspace(Frontier::ControlCentrePanel& ControlCentre,
              }
          }},
         {"Render settings",Frontier::ControlCentreIconCategory::SlidersQuality,
-         [this,Token]() { if (!Token.expired()) if (auto* Entry=QuerySceneWorld().FindFirstByType("RenderPipeline")) OutlinerPanel.Select(Entry->QueryToken()); }},
+         [this,Token]() { if (!Token.expired()) if (auto* Entry=QueryWorldSpace().FindFirstByType("RenderPipeline")) OutlinerPanel.Select(Entry->QueryToken()); }},
         {"Save level", Frontier::ControlCentreIconCategory::SaveDisk,
          [this, Token]() {
              if (!Token.expired())
@@ -436,6 +438,8 @@ EverestWorkspace::~EverestWorkspace()
 #if FRONTIER_EDITOR && defined(FRONTIER_WITH_INTERFACE_SDK)
     ReleasePointerConstraint();
     Frontier::InspectorRuntime::Instance().ConfigureEnvironmentAccess({});
+    Frontier::InspectorRuntime::Instance().RegisterLevelFlowSampler({});
+    Frontier::InspectorRuntime::Instance().ConfigureLevelFile({});
 #endif
 }
 
@@ -449,7 +453,7 @@ void EverestWorkspace::InitializeWorld()
     {
         if (Application.Initialize(ProjectSpacePath, &Diagnostic))
         {
-            ActiveLevelPath = QuerySceneWorld().QueryLoadedLevelPath();
+            ActiveLevelPath = QueryWorldSpace().QueryLoadedLevelPath();
 #if FRONTIER_EDITOR
             Frontier::SceneDirectory::Instance().ConfigureActiveSceneHeader(
                 ActiveLevelPath.stem().string(), "Frontier LevelSpace");
@@ -457,7 +461,7 @@ void EverestWorkspace::InitializeWorld()
             Frontier::WriteLogFormat(ProjectCategory, Frontier::LogSeverity::Info, Frontier::LogVerbosity::Log,
                                      "EverestWorkspace", "Loaded '%s' (%zu scene records).",
                                      ActiveLevelPath.filename().string().c_str(),
-                                     QuerySceneWorld().QueryRecordCount());
+                                     QueryWorldSpace().QueryRecordCount());
         }
         else
         {
@@ -468,8 +472,8 @@ void EverestWorkspace::InitializeWorld()
     else
     {
         ActiveLevelPath = ProjectRoot / "Content" / "Levels" / "Default.levelspace";
-        RegisterEverestSimulationTypes(QuerySceneWorld());
-        if (std::filesystem::exists(ActiveLevelPath) && QuerySceneWorld().LoadLevelSpace(ActiveLevelPath, &Diagnostic))
+        RegisterEverestSimulationTypes(QueryWorldSpace());
+        if (std::filesystem::exists(ActiveLevelPath) && QueryWorldSpace().LoadLevelSpace(ActiveLevelPath, &Diagnostic))
         {
 #if FRONTIER_EDITOR
             Frontier::SceneDirectory::Instance().ConfigureActiveSceneHeader(
@@ -480,9 +484,13 @@ void EverestWorkspace::InitializeWorld()
         {
             Diagnostic = "Project container missing: " + ProjectSpacePath.string();
             Frontier::WriteLogFormat(ProjectCategory, Frontier::LogSeverity::Warning, Frontier::LogVerbosity::Log,
-                                     "EverestWorkspace", "Initialized empty SceneWorld (%s).", Diagnostic.c_str());
+                                     "EverestWorkspace", "Initialized empty WorldSpace (%s).", Diagnostic.c_str());
         }
     }
+#if FRONTIER_EDITOR && defined(FRONTIER_WITH_INTERFACE_SDK)
+    // 📝 Records with a file of their own (a Particles record's .particlespace) keep it beside this level.
+    Frontier::InspectorRuntime::Instance().ConfigureLevelFile(ActiveLevelPath);
+#endif
 }
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -534,7 +542,7 @@ void EverestWorkspace::ServiceDynamicSceneRequests()
     }
     while (const auto Renamed = OutlinerPanel.ConsumeRenameRequest())
     {
-        if (Frontier::SceneRecordBase* Record = QuerySceneWorld().FindRecord(Renamed->first))
+        if (Frontier::SceneRecordBase* Record = QueryWorldSpace().FindRecord(Renamed->first))
         {
             const std::string Former = Record->QueryRecordName();
             Record->AssignRecordName(Renamed->second);
@@ -549,12 +557,12 @@ void EverestWorkspace::ServiceDynamicSceneRequests()
         Frontier::RecordToken ParentToken{};
         if (*RequestedType == "OpticalFlare")
         {
-            if (Frontier::SceneRecordBase* Solar = QuerySceneWorld().FindFirstByType("Solar"))
+            if (Frontier::SceneRecordBase* Solar = QueryWorldSpace().FindFirstByType("Solar"))
             {
                 ParentToken = Solar->QueryToken();
             }
         }
-        const Frontier::RecordToken Created = QuerySceneWorld().ConstructRecord(*RequestedType, {}, ParentToken);
+        const Frontier::RecordToken Created = QueryWorldSpace().ConstructRecord(*RequestedType, {}, ParentToken);
         if (Created.IsValid())
         {
             OutlinerPanel.Synchronize(Frontier::SceneDirectory::Instance());
@@ -571,7 +579,7 @@ void EverestWorkspace::ServiceDynamicSceneRequests()
     while (const auto DeleteToken = OutlinerPanel.ConsumeDeleteRequest())
     {
         const std::string OldName = Frontier::SceneDirectory::Instance().QueryName(*DeleteToken);
-        if (QuerySceneWorld().DestroyRecord(*DeleteToken))
+        if (QueryWorldSpace().DestroyRecord(*DeleteToken))
         {
             Mutated = true;
             Frontier::WriteLogFormat(ProjectCategory, Frontier::LogSeverity::Info, Frontier::LogVerbosity::Log,
@@ -697,8 +705,8 @@ void EverestWorkspace::ServiceConstructOrder(const Frontier::ConstructOrder& Ord
         // 📝 A record type: as the Outliner's add menu, with the dialog's name and visibility.
         Frontier::RecordToken ParentToken{};
         if (Order.Entry.Identifier == "OpticalFlare")
-            if (Frontier::SceneRecordBase* Solar = QuerySceneWorld().FindFirstByType("Solar")) ParentToken = Solar->QueryToken();
-        const Frontier::RecordToken Created = QuerySceneWorld().ConstructRecord(Order.Entry.Identifier, Name, ParentToken);
+            if (Frontier::SceneRecordBase* Solar = QueryWorldSpace().FindFirstByType("Solar")) ParentToken = Solar->QueryToken();
+        const Frontier::RecordToken Created = QueryWorldSpace().ConstructRecord(Order.Entry.Identifier, Name, ParentToken);
         if (!Created.IsValid()) return;
         if (!Order.Visible) (void)Frontier::SceneDirectory::Instance().ConfigureVisible(Created, false);
         OutlinerPanel.Synchronize(Frontier::SceneDirectory::Instance());
@@ -710,8 +718,8 @@ void EverestWorkspace::ServiceConstructOrder(const Frontier::ConstructOrder& Ord
     }
     // 📝 An engine shape: a Geometry record that names the shape and claims no archive occupants, on the ground where the view
     //    looks and resting on it (the shapes span −0.5 … 0.5 of their bounding box).
-    const Frontier::RecordToken Created = QuerySceneWorld().ConstructRecord("Geometry", Name);
-    auto* Record = dynamic_cast<Frontier::GeometryRecord*>(QuerySceneWorld().FindRecord(Created));
+    const Frontier::RecordToken Created = QueryWorldSpace().ConstructRecord("Geometry", Name);
+    auto* Record = dynamic_cast<Frontier::GeometryRecord*>(QueryWorldSpace().FindRecord(Created));
     if (Record == nullptr) return;
     Frontier::GeometryConfiguration& Configuration = Record->AccessConfiguration();
     Configuration.OccupantStems.clear();
@@ -741,7 +749,7 @@ void EverestWorkspace::ApplyPendingSurfaces()
 {
     for (auto Cursor = PendingAlbedo.begin(); Cursor != PendingAlbedo.end();)
     {
-        auto* Record = dynamic_cast<Frontier::GeometryRecord*>(QuerySceneWorld().FindRecord(Frontier::RecordToken{Cursor->first}));
+        auto* Record = dynamic_cast<Frontier::GeometryRecord*>(QueryWorldSpace().FindRecord(Frontier::RecordToken{Cursor->first}));
         if (Record == nullptr)
         {
             Cursor = PendingAlbedo.erase(Cursor);
@@ -766,7 +774,7 @@ void EverestWorkspace::ApplyPendingSurfaces()
 
 Frontier::RecordToken EverestWorkspace::DuplicateGeometryRecord(Frontier::RecordToken Token)
 {
-    auto* Source = dynamic_cast<Frontier::GeometryRecord*>(QuerySceneWorld().FindRecord(Token));
+    auto* Source = dynamic_cast<Frontier::GeometryRecord*>(QueryWorldSpace().FindRecord(Token));
     if (Source == nullptr) return {};
     Frontier::GeometryConfiguration Copy = Source->QueryConfiguration();
     // 📝 Beside the original, one width and a metre along X; a duplicate lays out reserve copies of the same shapes (it never
@@ -777,8 +785,8 @@ Frontier::RecordToken EverestWorkspace::DuplicateGeometryRecord(Frontier::Record
     Copy.Resolved         = {};
     Copy.Locked           = false;
     Copy.Spatial.PositionMetres[0] += static_cast<float>(std::max(2.0, Width + 1.0));
-    const Frontier::RecordToken Created = QuerySceneWorld().ConstructRecord("Geometry", ResolveUniqueName(Source->QueryRecordName() + " copy"));
-    auto* Target = dynamic_cast<Frontier::GeometryRecord*>(QuerySceneWorld().FindRecord(Created));
+    const Frontier::RecordToken Created = QueryWorldSpace().ConstructRecord("Geometry", ResolveUniqueName(Source->QueryRecordName() + " copy"));
+    auto* Target = dynamic_cast<Frontier::GeometryRecord*>(QueryWorldSpace().FindRecord(Created));
     if (Target == nullptr) return {};
     Target->AccessConfiguration() = std::move(Copy);
     Target->AccessConfiguration().AdvanceRevision();
@@ -789,7 +797,7 @@ Frontier::RecordToken EverestWorkspace::DuplicateGeometryRecord(Frontier::Record
 Frontier::GeometryConfiguration* EverestWorkspace::ResolveEditedGeometry()
 {
     // 📝 The selected scene object, while it is shown, unlocked and bound (its transform has handles then).
-    auto* Record = dynamic_cast<Frontier::GeometryRecord*>(QuerySceneWorld().FindRecord(OutlinerPanel.QuerySelected()));
+    auto* Record = dynamic_cast<Frontier::GeometryRecord*>(QueryWorldSpace().FindRecord(OutlinerPanel.QuerySelected()));
     if (Record == nullptr) return nullptr;
     Frontier::GeometryConfiguration& Configuration = Record->AccessConfiguration();
     if (Configuration.Locked || !Configuration.Visible || !Configuration.Resolved.Bound || Configuration.Resolved.Shown == 0) return nullptr;
@@ -806,7 +814,8 @@ void EverestWorkspace::ServiceSceneObjectKeys()
     // 📝 The Project Zero editor's keys: Ctrl+A Construct, Ctrl+D duplicate, Del remove, F2 rename; never while a field takes the
     //    keys, the camera flies or the dialog is up.
     const ImGuiIO& IO = ImGui::GetIO();
-    if (IO.WantTextInput || ImGui::IsMouseDown(ImGuiMouseButton_Right) || ConstructDialog.QueryOpen()) return;
+    // 📝 Nor while a modal editor (the Particle editor) has the keys: Delete there must not remove the record behind it.
+    if (IO.WantTextInput || ImGui::IsMouseDown(ImGuiMouseButton_Right) || ConstructDialog.QueryOpen() || ImGui::GetTopMostPopupModal() != nullptr) return;
     const Frontier::RecordToken Selected = OutlinerPanel.QuerySelected();
     if (IO.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_A, false)) ConstructDialog.Open();
     else if (IO.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_D, false) && Selected.IsValid()) OutlinerPanel.RequestDuplicateRecord(Selected);
@@ -842,40 +851,40 @@ void EverestWorkspace::ConstructInterface(double DeltaSeconds)
     Access.CameraReady   = true;
     Access.CameraEye     = Flight.Position;
     Access.CameraForward = Flight.ResolveForward();
-    if (auto* Entry = dynamic_cast<Frontier::SolarRecord*>(QuerySceneWorld().FindFirstByType("Solar")))
+    if (auto* Entry = dynamic_cast<Frontier::SolarRecord*>(QueryWorldSpace().FindFirstByType("Solar")))
         Access.Solar = &Entry->AccessConfiguration();
-    if (auto* Entry = dynamic_cast<Frontier::AtmosphereRecord*>(QuerySceneWorld().FindFirstByType("Atmosphere")))
+    if (auto* Entry = dynamic_cast<Frontier::AtmosphereRecord*>(QueryWorldSpace().FindFirstByType("Atmosphere")))
         Access.Atmosphere = &Entry->AccessConfiguration();
-    if (auto* Entry = dynamic_cast<Frontier::ForceFieldRecord*>(QuerySceneWorld().FindFirstByType("ForceField")))
+    if (auto* Entry = dynamic_cast<Frontier::ForceFieldRecord*>(QueryWorldSpace().FindFirstByType("ForceField")))
         Access.Forces = &Entry->AccessConfiguration();
-    if (auto* Entry = dynamic_cast<Frontier::WindRecord*>(QuerySceneWorld().FindFirstByType("Wind")))
+    if (auto* Entry = dynamic_cast<Frontier::WindRecord*>(QueryWorldSpace().FindFirstByType("Wind")))
         Access.Wind = &Entry->AccessConfiguration();
-    if (auto* Entry = dynamic_cast<Frontier::LightningRecord*>(QuerySceneWorld().FindFirstByType("Lightning")))
+    if (auto* Entry = dynamic_cast<Frontier::LightningRecord*>(QueryWorldSpace().FindFirstByType("Lightning")))
         Access.Lightning = &Entry->AccessConfiguration();
-    for (auto* Entry : QuerySceneWorld().FindAllByType("Clouds"))
+    for (auto* Entry : QueryWorldSpace().FindAllByType("Clouds"))
     {
-        auto* Cloud = dynamic_cast<Frontier::CloudRecord*>(QuerySceneWorld().FindRecord(Entry->QueryToken()));
+        auto* Cloud = dynamic_cast<Frontier::CloudRecord*>(QueryWorldSpace().FindRecord(Entry->QueryToken()));
         if (Cloud == nullptr) continue;
         auto& Destination = Cloud->QueryConfiguration().LocalVolume ? Access.LocalCloud : Access.Clouds;
         if (Destination == nullptr) Destination = &Cloud->AccessConfiguration();
     }
-    for (auto* Entry : QuerySceneWorld().FindAllByType("Fog"))
+    for (auto* Entry : QueryWorldSpace().FindAllByType("Fog"))
     {
-        auto* Fog = dynamic_cast<Frontier::FogRecord*>(QuerySceneWorld().FindRecord(Entry->QueryToken()));
+        auto* Fog = dynamic_cast<Frontier::FogRecord*>(QueryWorldSpace().FindRecord(Entry->QueryToken()));
         if (Fog == nullptr) continue;
         auto& Destination = Fog->QueryConfiguration().LocalVolume ? Access.LocalFog : Access.Fog;
         if (Destination == nullptr) Destination = &Fog->AccessConfiguration();
     }
 
     // 📝 The day clock (the demo's AdvanceCelestial) moves the level's sun before anything reads it this frame.
-    if (auto* Solar = dynamic_cast<Frontier::SolarRecord*>(QuerySceneWorld().FindFirstByType("Solar")))
+    if (auto* Solar = dynamic_cast<Frontier::SolarRecord*>(QueryWorldSpace().FindFirstByType("Solar")))
     {
-        (void)AdvanceSolarDay(Solar->AccessConfiguration(), DeltaSeconds);
+        (void)Frontier::AdvanceSolarDay(Solar->AccessConfiguration(), DeltaSeconds);
         Frontier::InspectorRuntime::Instance().PublishSolarElevation(Solar->QueryConfiguration().ElevationDegrees);
     }
-    for (const auto* Entry : QuerySceneWorld().FindAllByType("Planet"))
+    for (const auto* Entry : QueryWorldSpace().FindAllByType("Planet"))
     {
-        if (auto* Planet = dynamic_cast<Frontier::PlanetRecord*>(QuerySceneWorld().FindRecord(Entry->QueryToken())))
+        if (auto* Planet = dynamic_cast<Frontier::PlanetRecord*>(QueryWorldSpace().FindRecord(Entry->QueryToken())))
         {
             const auto Body = Planet->QueryConfiguration().Body;
             if (Body < Access.Planets.size() && Access.Planets[Body] == nullptr)
@@ -906,9 +915,9 @@ void EverestWorkspace::ConstructInterface(double DeltaSeconds)
                     Planet->AzimuthDegrees=Azimuth;Planet->ElevationDegrees=Elevation;Planet->AdvanceRevision();
                 }
             }
-        for (const auto* Entry : QuerySceneWorld().FindAllByType("Moons"))
+        for (const auto* Entry : QueryWorldSpace().FindAllByType("Moons"))
         {
-            auto* Moons = dynamic_cast<Frontier::MoonRecord*>(QuerySceneWorld().FindRecord(Entry->QueryToken()));
+            auto* Moons = dynamic_cast<Frontier::MoonRecord*>(QueryWorldSpace().FindRecord(Entry->QueryToken()));
             if (Moons == nullptr) continue;
             auto& Configuration = Moons->AccessConfiguration();
             bool Changed = false;
@@ -936,17 +945,17 @@ void EverestWorkspace::ConstructInterface(double DeltaSeconds)
     // 📝 A page's "Open … ↗" selects the first record of the type it names.
     if (const std::string Requested = Frontier::InspectorRuntime::Instance().ConsumeSelectionRequest(); !Requested.empty())
     {
-        Frontier::SceneRecordBase* Target = QuerySceneWorld().FindFirstByType(Requested);
+        Frontier::SceneRecordBase* Target = QueryWorldSpace().FindFirstByType(Requested);
         if (Requested == "LocalCloud" || Requested == "LocalFog")
         {
-            for (auto* Candidate : QuerySceneWorld().FindAllByType(Requested == "LocalCloud" ? "Clouds" : "Fog"))
+            for (auto* Candidate : QueryWorldSpace().FindAllByType(Requested == "LocalCloud" ? "Clouds" : "Fog"))
             {
                 const auto* Cloud = dynamic_cast<const Frontier::CloudRecord*>(Candidate);
                 const auto* Fog   = dynamic_cast<const Frontier::FogRecord*>(Candidate);
                 if ((Cloud != nullptr && Cloud->QueryConfiguration().LocalVolume) ||
                     (Fog != nullptr && Fog->QueryConfiguration().LocalVolume))
                 {
-                    Target = QuerySceneWorld().FindRecord(Candidate->QueryToken());
+                    Target = QueryWorldSpace().FindRecord(Candidate->QueryToken());
                     break;
                 }
             }
@@ -1001,12 +1010,16 @@ void EverestWorkspace::SaveActiveLevel()
     const std::filesystem::path TargetPath      = ActiveLevelPath.empty()
                                                       ? (ProjectRoot / "Content" / "Levels" / "Default.levelspace")
                                                       : ActiveLevelPath;
-    if (QuerySceneWorld().SaveLevelSpace(TargetPath, &SaveDiag))
+    if (QueryWorldSpace().SaveLevelSpace(TargetPath, &SaveDiag))
     {
         ActiveLevelPath = TargetPath;
+#if FRONTIER_EDITOR && defined(FRONTIER_WITH_INTERFACE_SDK)
+        Frontier::InspectorRuntime::Instance().ConfigureLevelFile(ActiveLevelPath);
+        (void)Frontier::ParticleEditor::SaveSpace();
+#endif
         Frontier::WriteLogFormat(ProjectCategory, Frontier::LogSeverity::Info, Frontier::LogVerbosity::Log,
                                  "EverestWorkspace", "Saved '%s' (%zu records).", TargetPath.filename().string().c_str(),
-                                 QuerySceneWorld().QueryRecordCount());
+                                 QueryWorldSpace().QueryRecordCount());
         AnnounceViewportNotice("Saved " + TargetPath.filename().string());
     }
     else
@@ -1141,13 +1154,14 @@ void EverestWorkspace::ConstructViewportSurface()
     IntegrateViewportCamera(StageHovered, StageActive, ViewportDeltaSeconds, GizmoPress || Gizmo.QueryEngaged());
 
     // 📝 The demo's overlay keys, while the viewport has the pointer or the focus and no text field takes the keys; W, E and R
-    //    choose the transform handles (Unreal's keys) while the camera is not flying.
-    if ((StageHovered || ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) && !IO.WantTextInput && !StageActive)
+    //    choose the transform handles (Unreal's keys) while the camera is not flying. A modal editor keeps the keys to itself.
+    const bool ModalEditor = ImGui::GetTopMostPopupModal() != nullptr;
+    if ((StageHovered || ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) && !IO.WantTextInput && !StageActive && !ModalEditor)
     {
         if (ImGui::IsKeyPressed(ImGuiKey_H, false)) ToggleViewportOverlay(0);
     }
     if ((StageHovered || ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) && !IO.WantTextInput && !IO.KeyCtrl &&
-        !ImGui::IsMouseDown(ImGuiMouseButton_Right))
+        !ImGui::IsMouseDown(ImGuiMouseButton_Right) && !ModalEditor)
     {
         const std::array<std::pair<ImGuiKey, Frontier::PlacementGizmoMode>, 3> ModeKeys = {{{ImGuiKey_W, Frontier::PlacementGizmoMode::Move},
                                                                                             {ImGuiKey_E, Frontier::PlacementGizmoMode::Rotate},
@@ -1196,14 +1210,14 @@ void EverestWorkspace::ConstructViewportSurface()
                                          "SceneViewport", "Viewport pick: %s", LastReadout.Pick.Failure.c_str());
             }
         }
-        PublishGeometryResolutions(QuerySceneWorld(), LastReadout, PublishedGeometryGeneration);
+        PublishGeometryResolutions(QueryWorldSpace(), LastReadout, PublishedGeometryGeneration);
         ApplyPendingSurfaces();
-        PublishRenderReadouts(QuerySceneWorld(), LastReadout);
+        PublishRenderReadouts(QueryWorldSpace(), LastReadout);
     }
     if (Image.Texture != 0)
     {
         DrawList->AddImage(static_cast<ImTextureID>(Image.Texture), StageMin, Max);
-        const auto* FieldRecord = dynamic_cast<const Frontier::ForceFieldRecord*>(QuerySceneWorld().FindFirstByType("ForceField"));
+        const auto* FieldRecord = dynamic_cast<const Frontier::ForceFieldRecord*>(QueryWorldSpace().FindFirstByType("ForceField"));
         if (FieldRecord && FieldRecord->QueryConfiguration().Visualize && !Overlays.Fullscreen && LastReadout.Environment)
         {
             Frontier::WorldVectorView Projection;
@@ -1302,7 +1316,7 @@ void EverestWorkspace::ConstructViewportBar(const ImVec2& Min,const ImVec2& Max,
     }
     X+=Button+Gap;
     // 📝 Debug views (Render settings › Debug views): the demo's inspection views and the analytic illumination as a view of its own.
-    if (auto* Pipeline=dynamic_cast<Frontier::RenderPipelineRecord*>(QuerySceneWorld().FindFirstByType("RenderPipeline")))
+    if (auto* Pipeline=dynamic_cast<Frontier::RenderPipelineRecord*>(QueryWorldSpace().FindFirstByType("RenderPipeline")))
     {
         using Frontier::RenderInspectionModes;
         static const auto ViewNames=[]
@@ -1445,7 +1459,7 @@ void EverestWorkspace::ConstructViewportFooter(float Scale)
     std::snprintf(Rate,sizeof(Rate),"%.0f",Fps);
     std::snprintf(Time,sizeof(Time),"%.1f ms",LastReadout.RefreshMilliseconds);
     float Elevation=0;
-    if(const auto* Entry=dynamic_cast<const Frontier::SolarRecord*>(QuerySceneWorld().FindFirstByType("Solar"))) Elevation=Entry->QueryConfiguration().ElevationDegrees;
+    if(const auto* Entry=dynamic_cast<const Frontier::SolarRecord*>(QueryWorldSpace().FindFirstByType("Solar"))) Elevation=Entry->QueryConfiguration().ElevationDegrees;
     std::snprintf(Sun,sizeof(Sun),"%.1f°",double(Elevation));
     const std::vector<Frontier::ViewportStatusItem> Cells = {{"FPS",Rate,Health,Fps>=55?"Activity":"TriangleAlert"},
         {"RENDER",LastReadout.Presenting?Time:"—",IM_COL32(164,192,212,255),"Info"},
@@ -1463,7 +1477,7 @@ void EverestWorkspace::ConstructViewportSchematic(ImDrawList* DrawList, const Im
 
     float SunElevation = 38.0f;
     float SunAzimuth   = 132.0f;
-    if (const auto* SolarRec = dynamic_cast<const Frontier::SolarRecord*>(QuerySceneWorld().FindFirstByType("Solar")))
+    if (const auto* SolarRec = dynamic_cast<const Frontier::SolarRecord*>(QueryWorldSpace().FindFirstByType("Solar")))
     {
         SunElevation = SolarRec->QueryConfiguration().ElevationDegrees;
         SunAzimuth   = SolarRec->QueryConfiguration().AzimuthDegrees;

@@ -11,7 +11,7 @@
 #if FRONTIER_EDITOR && defined(FRONTIER_WITH_INTERFACE_SDK)
 
 #include "Engine/Interface/ForceFieldVisualization/ForceFieldVisualization.h"
-#include "Frontier/Engine/PhysicalDynamics/ParticleDynamics/ParticleScene.h"
+#include "Frontier/Engine/PhysicalDynamics/ParticleDynamics/ParticleSpace.h"
 
 #include <imgui.h>
 
@@ -46,9 +46,9 @@ public:
     ParticleFieldOverlay();
 
     // 📝 A new lattice (four floats per cell, x fastest) and this refresh's fields; each call re-samples the slice.
-    void ConfigureLattice(std::shared_ptr<const std::vector<float>> Cells, const ParticleScene& Scene, const ParticleRefreshPlan& Plan);
+    void ConfigureLattice(std::shared_ptr<const std::vector<float>> Cells, const ParticleSpace& Space, const ParticleRefreshPlan& Plan);
 
-    void Render(ImDrawList* Ink, const EditorTypefaces& Faces, ImVec2 Minimum, ImVec2 Maximum, const ParticleScene& Scene, float Scale);
+    void Render(ImDrawList* Ink, const EditorTypefaces& Faces, ImVec2 Minimum, ImVec2 Maximum, const ParticleSpace& Space, float Scale);
 
     // 📝 The contribution at a domain point: m/s, m/s² or the damping rate in X.
     [[nodiscard]] SpatialVector Sample(ForceContribution Contribution, SpatialVector Point) const;

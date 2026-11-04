@@ -1,8 +1,8 @@
 /*==========================================================================================================================================
-                                                          EVERESTSCENEGEOMETRY.H
+                                                          SCENEGEOMETRYOCCUPANCY.H
 ==========================================================================================================================================*/
-// 🧩 Project Everest's scene geometry: binds the level's Geometry records to the proving ground's occupants by name, resolves
-//    each record's transform and modifier stack into occupant placements for the viewport, and reports what each resolved to.
+// 🧩 The level's Geometry records on the scene renderer's occupants: binds each record to an occupant by name, resolves its
+//    transform and modifier stack into occupant placements for the viewport, and reports what each resolved to.
 
 #pragma once
 
@@ -10,7 +10,7 @@
 #include "Frontier/Engine/Rendering/GlobalIllumination/PickProjection.h"
 #include "Frontier/Engine/Rendering/GlobalIllumination/SceneStructure.h"
 #include "Frontier/Engine/Scene/GeometryLayout.h"
-#include "Frontier/Engine/Scene/SceneWorld.h"
+#include "Frontier/Engine/Scene/WorldSpace.h"
 
 #include <array>
 #include <cstdint>
@@ -21,7 +21,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace Everest
+namespace Frontier
 {
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -60,7 +60,7 @@ class SceneGeometryOccupancy
     // 📝 The placements of every Geometry record whose configuration changed since the last call (all of them after Reset): its
     //    archive copies, its copies beyond them from the reserve, and the archive occupants nobody claims any more (hidden while the
     //    level holds Geometry records, back at the archive's placements once it holds none).
-    [[nodiscard]] std::vector<Frontier::GlobalIllumination::OccupantPlacement> ResolvePlacements(const Frontier::SceneWorld& World);
+    [[nodiscard]] std::vector<Frontier::GlobalIllumination::OccupantPlacement> ResolvePlacements(const Frontier::WorldSpace& World);
 
     // 📝 The material blocks (block, MaterialFamilyCount records) changed since the last call; the viewport writes them before it
     //    applies the placements, whose cards are captured again from them.
@@ -135,4 +135,4 @@ class SceneGeometryOccupancy
     uint64_t                                            Generation_ = 0;
 };
 
-} // namespace Everest
+} // namespace Frontier

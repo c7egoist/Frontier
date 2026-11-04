@@ -7,7 +7,7 @@
 #include "Engine/Interface/InspectorRuntime.h"
 #include "Engine/Interface/Inspectors/AtmosphereBakeImages.h"
 #include "Engine/Scene/EnvironmentDiagnostics.h"
-#include "EverestSceneViewport.h"
+#include "Frontier/Extensions/Rendering/RenderingExtension.h"
 #include "EverestWorkspace.h"
 #include "Exhibits/ControlCentre/Code/CpuRasterization.h"
 #include "UI/Editor/ControlCentrePanel.h"
@@ -97,7 +97,7 @@ int main(int ArgumentCount, char **Arguments)
             auto &Centre = *static_cast<ControlCentrePanel *>(Ownership.get());
             Require(Centre.Initialize() && Centre.Activate(), "Control Centre initialized");
             Everest::EverestWorkspace Workspace(Centre, Project);
-            auto                     &World = Workspace.QuerySceneWorld();
+            auto                     &World = Workspace.QueryWorldSpace();
             Require(World.QueryRecordCount() == 67, "Default level includes Force Field, its 14 forces, local media and the 37 scene objects");
             auto *FieldEntry      = dynamic_cast<ForceFieldRecord *>(World.FindFirstByType("ForceField"));
             auto *WindEntry       = dynamic_cast<WindRecord *>(World.FindFirstByType("Wind"));
@@ -171,7 +171,7 @@ int main(int ArgumentCount, char **Arguments)
                 Field.HalfExtentsMetres[Axis] = Axis == 2 ? 5 : 10;
             }
             Cloud.CentreMetres[2] = 14;
-            const auto Snapshot   = Everest::ResolveSceneEnvironment(World, 0);
+            const auto Snapshot   = Frontier::ResolveSceneEnvironment(World, 0);
             Require(Snapshot.LocalClouds.size() == 1 && Snapshot.LocalFogVolumes.size() == 1,
                     "Viewport snapshot includes both local record sets");
             const auto ExtraCloud = World.ConstructRecord("LocalCloud", "Additional cloud");
@@ -181,18 +181,18 @@ int main(int ArgumentCount, char **Arguments)
                     "Create menu entries construct bounded media");
             World.DestroyRecord(ExtraCloud);
             World.DestroyRecord(ExtraFog);
-            Everest::EverestSceneViewport                   Bridge(Project, Shaders, nullptr);
+            Frontier::RenderingExtension                   Bridge(Project, Shaders, nullptr);
             std::vector<uint8_t>                            ViewportPixels;
             std::array<uint32_t, 2>                         ViewportExtent{};
             std::shared_ptr<const EnvironmentRenderReadout> Latest;
-            Workspace.PresentSceneViewport = [&](const Everest::SceneViewportRequest &Request)
+            Workspace.PresentSceneViewport = [&](const Frontier::SceneViewportRequest &Request)
             {
                 auto Small                           = Request;
                 Small.PanelWidth                     = 320;
                 Small.PanelHeight                    = 200;
                 Small.PixelDensity                   = 1;
                 const auto                  Rendered = Bridge.Render(Small, World, Workspace.QueryElapsedSeconds());
-                Everest::SceneViewportImage Image;
+                Frontier::SceneViewportImage Image;
                 Image.Status  = Rendered.Status;
                 Image.Readout = Rendered.Readout;
                 Require(Rendered.View != VK_NULL_HANDLE, "Native viewport renders: " + Rendered.Status);
@@ -314,7 +314,7 @@ int main(int ArgumentCount, char **Arguments)
             AtmosphereEntry->SerializeConfiguration(Before);
             Require(Before["baked"].is_table(), "Baked optical snapshot serializes as TOML");
             Require(World.SaveLevelSpace(Scratch / "Baked.levelspace"), "Baked level saved");
-            SceneWorld Reloaded;
+            WorldSpace Reloaded;
             Require(Reloaded.LoadLevelSpace(Scratch / "Baked.levelspace"), "Baked level reloaded");
             auto *ReloadedAir = dynamic_cast<AtmosphereRecord *>(Reloaded.FindFirstByType("Atmosphere"));
             Require(ReloadedAir && ReloadedAir->QueryConfiguration().BakedAvailable &&

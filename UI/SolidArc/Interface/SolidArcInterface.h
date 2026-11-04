@@ -821,11 +821,11 @@ struct SolidArcGizmoSession
     bool                              FlatCondition = false;                                 // [-]   - A 90° view: only the screen-plane handles (FitGizmoToView)
     std::vector<std::string>          Names         = {};                                    // [-]   - Face names / body keys / sketch labels
     std::vector<int>                  Points        = {};                                    // [-]   - Sketch point indices (Points target)
-    SolidArcGizmoPose                 Pose          = {};                                    // [-]   - Frame shown (start frame while dragging)
-    SolidArcGizmoGeometry             Geometry      = {};                                    // [-]   - CPU copy of the drawn triangles (pick)
-    SolidArcGizmoHandle               Hover         = SolidArcGizmoHandle::None;             // [-]   - Handle under the pointer
+    GizmoPose                 Pose          = {};                                    // [-]   - Frame shown (start frame while dragging)
+    GizmoGeometry             Geometry      = {};                                    // [-]   - CPU copy of the drawn triangles (pick)
+    GizmoHandle               Hover         = GizmoHandle::None;             // [-]   - Handle under the pointer
     bool                              DragCondition = false;                                 // [-]   - A handle is held
-    SolidArcGizmoHandle               Grab          = SolidArcGizmoHandle::None;             // [-]   - Held handle
+    GizmoHandle               Grab          = GizmoHandle::None;             // [-]   - Held handle
     GeometryProcessing::Vector3       GrabPoint     = {};                                    // [len] - Plane / screen hit at the press
     double                            GrabValue     = 0.0;                                   // [-]   - Axis parameter [len] or angle [rad] at the press
     ImVec2                            GrabPixel     = {};                                    // [px]  - Press position (viewport local)
@@ -1076,7 +1076,7 @@ bool ParseSolidArcLength(const std::string& Text, double& Value);
 void EvaluateSolidArcGizmo(SolidArcWorkspaceState& State, const OrbitCameraFrame& Frame);
 
 // Executes a single gizmo command on State.Document for the currently resolved State.Gizmo target and refreshes Scene.
-[[nodiscard]] SolidArcCommandOutcome ApplySolidArcGizmo(SolidArcWorkspaceState& State, SolidArcGizmoHandle Handle,
+[[nodiscard]] SolidArcCommandOutcome ApplySolidArcGizmo(SolidArcWorkspaceState& State, GizmoHandle Handle,
                                                         GeometryProcessing::Vector3 Shift, double Angle = 0.0, double Factor = 1.0);
 
 } // namespace Frontier::SolidArc

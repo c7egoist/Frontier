@@ -11,6 +11,7 @@
 #include "Engine/Interface/Controls/ControlTheme.h"
 #include "Engine/Interface/Controls/GlyphSymbol.h"
 #include "Engine/Interface/InspectorControls.h"
+#include "Engine/PhysicalDynamics/ParticleDynamics/ParticleSpaceCodec.h"
 
 #include <algorithm>
 #include <cctype>
@@ -148,8 +149,78 @@ ParticleEditorWorkspace::ParticleEditorWorkspace(const std::filesystem::path& Li
         Diagnostic = "Particle library: " + Diagnostic;
         return;
     }
-    Scene.ConstructDefault(Library);
+    Space.ConstructDefault(Library);
     AppendLog("FORCES", "Field overlay: the Force Field editor\xE2\x80\x99s visualization", "flow read back from the GPU lattice; acceleration from fieldAccel");
+}
+
+ParticleEditorWorkspace::~ParticleEditorWorkspace()
+{
+    (void)SaveSpaceFile();
+}
+
+bool ParticleEditorWorkspace::AttachSpaceFile(const std::filesystem::path& File)
+{
+    if (File == SpaceFile) return true;
+    (void)SaveSpaceFile();
+    std::string     Failure;
+    std::error_code Missing;
+    if (std::filesystem::exists(File, Missing))
+    {
+        ParticleSpace Loaded;
+        if (!ReadParticleSpace(File, Loaded, Failure))
+        {
+            AppendLog("SPACE", "Could not read " + File.filename().string(), Failure, true);
+            return false;
+        }
+        Space = std::move(Loaded);
+        AppendLog("SPACE", "Opened " + File.filename().string(), std::to_string(Space.Effects.size()) + " effects \xC2\xB7 " + std::to_string(Space.Fields.size()) + " forces");
+    }
+    else
+    {
+        Space = ParticleSpace{};
+        Space.ConstructDefault(Library);
+        if (!WriteParticleSpace(Space, File, Failure))
+        {
+            AppendLog("SPACE", "Could not create " + File.filename().string(), Failure, true);
+            return false;
+        }
+        AppendLog("SPACE", "Created " + File.filename().string(), "from the library's opening space");
+    }
+    SpaceFile   = File;
+    SavedText   = EncodeParticleSpace(Space);
+    Changed     = false;
+    ChangeClock = 0.0;
+    Planned     = false;
+    Image       = ParticleViewportImage{};
+    return true;
+}
+
+bool ParticleEditorWorkspace::SaveSpaceFile()
+{
+    if (SpaceFile.empty()) return false;
+    std::string Encoded = EncodeParticleSpace(Space);
+    if (Encoded == SavedText) return true;
+    std::string Failure;
+    if (!WriteParticleSpace(Space, SpaceFile, Failure))
+    {
+        AppendLog("SPACE", "Could not save " + SpaceFile.filename().string(), Failure, true);
+        return false;
+    }
+    SavedText = std::move(Encoded);
+    Changed   = false;
+    AppendLog("SPACE", "Saved " + SpaceFile.filename().string());
+    return true;
+}
+
+bool ParticleEditorWorkspace::QuerySpaceChanged()
+{
+    if (SpaceFile.empty()) return false;
+    if (ChangeClock >= 0.5)
+    {
+        Changed     = EncodeParticleSpace(Space) != SavedText;
+        ChangeClock = 0.0;
+    }
+    return Changed;
 }
 
 void ParticleEditorWorkspace::AppendLog(std::string Category, std::string Text, std::string Detail, bool Warm)
@@ -165,12 +236,12 @@ bool ParticleEditorWorkspace::Perform(std::string_view Action)
     const auto Argument = Colon == std::string_view::npos ? std::string_view{} : Action.substr(Colon + 1);
     if (Verb == "select")
     {
-        Scene.Selected = std::string(Argument);
+        Space.Selected = std::string(Argument);
         return true;
     }
     if (Verb == "add")
     {
-        const ParticleEffectInstance* Effect = Scene.AddEffect(Library, Argument);
+        const ParticleEffectInstance* Effect = Space.AddEffect(Library, Argument);
         if (!Effect) return false;
         const ParticlePreset* Preset = Library.ResolvePreset(Argument);
         char Detail[96];
@@ -182,21 +253,21 @@ bool ParticleEditorWorkspace::Perform(std::string_view Action)
     }
     if (Verb == "duplicate")
     {
-        const ParticleEffectInstance* Copy = Scene.DuplicateEffect(Library, Argument);
+        const ParticleEffectInstance* Copy = Space.DuplicateEffect(Library, Argument);
         if (Copy) AppendLog("PARTICLES", "Duplicated " + Copy->Name.substr(0, Copy->Name.size() - 5));
         return Copy != nullptr;
     }
     if (Verb == "remove")
     {
         std::string Name;
-        if (const ParticleEffectInstance* Effect = Scene.ResolveEffect(Argument)) Name = Effect->Name;
-        const bool Removed = Scene.RemoveEffect(Argument);
+        if (const ParticleEffectInstance* Effect = Space.ResolveEffect(Argument)) Name = Effect->Name;
+        const bool Removed = Space.RemoveEffect(Argument);
         if (Removed) AppendLog("PARTICLES", "Removed " + Name, {}, true);
         return Removed;
     }
     if (Verb == "rebuild")
     {
-        ParticleEffectInstance* Effect = Scene.ResolveEffect(Argument);
+        ParticleEffectInstance* Effect = Space.ResolveEffect(Argument);
         if (!Effect) return false;
         Effect->NeedFill     = true;
         Effect->Head         = 0;
@@ -209,46 +280,46 @@ bool ParticleEditorWorkspace::Perform(std::string_view Action)
     {
         const ParticleFieldDescriptor* Descriptor = ResolveParticleFieldDescriptor(Argument);
         if (!Descriptor) return false;
-        if (Descriptor->Contribution == ForceContribution::Flow && Scene.CountFlowFields() >= ParticleWindComponentLimit) return false;
+        if (Descriptor->Contribution == ForceContribution::Flow && Space.CountFlowFields() >= ParticleWindComponentLimit) return false;
         ParticleField Field = ConstructParticleField(Descriptor->Category);
         Field.Centre        = { 0.0, 1.0, 0.0 };
         Field.Radius        = Descriptor->Reach == ForceReach::Everywhere ? 8.0 : 3.0;
-        Scene.Fields.push_back(std::move(Field));
-        Scene.Selected = "force:" + std::to_string(Scene.Fields.size() - 1);
+        Space.Fields.push_back(std::move(Field));
+        Space.Selected = "force:" + std::to_string(Space.Fields.size() - 1);
         AppendLog("FORCES", std::string("Added ") + Descriptor->Name, "at the domain centre");
         return true;
     }
     if (Verb == "remove-force")
     {
         const size_t Index = static_cast<size_t>(std::atoi(std::string(Argument).c_str()));
-        if (Index >= Scene.Fields.size()) return false;
-        AppendLog("FORCES", "Removed " + Scene.Fields[Index].Name, {}, true);
-        Scene.Fields.erase(Scene.Fields.begin() + static_cast<std::ptrdiff_t>(Index));
-        Scene.Selected = "Field";
+        if (Index >= Space.Fields.size()) return false;
+        AppendLog("FORCES", "Removed " + Space.Fields[Index].Name, {}, true);
+        Space.Fields.erase(Space.Fields.begin() + static_cast<std::ptrdiff_t>(Index));
+        Space.Selected = "Field";
         return true;
     }
     if (Verb == "reset")
     {
-        Scene.ResetEffects();
+        Space.ResetEffects();
         AppendLog("PARTICLES", "Every effect cleared and re-seeded", {}, true);
         return true;
     }
     if (Verb == "strike")
     {
-        const std::array<double, 3> Hit = Scene.StrikeNow();
+        const std::array<double, 3> Hit = Space.StrikeNow();
         char Detail[96];
-        std::snprintf(Detail, sizeof(Detail), "at (%.1f, %.1f, %.1f) m \xC2\xB7 thunder after %.1f s", Hit[0], Hit[1], Hit[2], Scene.Lightning.DistanceMetres / 343.0);
+        std::snprintf(Detail, sizeof(Detail), "at (%.1f, %.1f, %.1f) m \xC2\xB7 thunder after %.1f s", Hit[0], Hit[1], Hit[2], Space.Lightning.DistanceMetres / 343.0);
         AppendLog("LIGHTNING", "Strike", Detail, true);
         return true;
     }
     if (Verb == "pause" || Verb == "play")
     {
-        Scene.Playing = Verb == "play";
+        Space.Playing = Verb == "play";
         return true;
     }
     if (Verb == "time-scale")
     {
-        Scene.TimeScale = std::clamp(std::atof(std::string(Argument).c_str()), 0.0, 4.0);
+        Space.TimeScale = std::clamp(std::atof(std::string(Argument).c_str()), 0.0, 4.0);
         return true;
     }
     if (Verb == "library")
@@ -269,17 +340,32 @@ bool ParticleEditorWorkspace::Perform(std::string_view Action)
     }
     if (Verb == "camera")
     {
-        double Yaw = Scene.Camera.Yaw, Pitch = Scene.Camera.Pitch, Distance = Scene.Camera.Distance;
+        double Yaw = Space.Camera.Yaw, Pitch = Space.Camera.Pitch, Distance = Space.Camera.Distance;
         if (std::sscanf(std::string(Argument).c_str(), "%lf,%lf,%lf", &Yaw, &Pitch, &Distance) < 2) return false;
-        Scene.Camera.Yaw      = Yaw;
-        Scene.Camera.Pitch    = std::clamp(Pitch, -0.1, 1.5);
-        Scene.Camera.Distance = std::clamp(Distance, 2.0, 60.0);
+        Space.Camera.Yaw      = Yaw;
+        Space.Camera.Pitch    = std::clamp(Pitch, -0.1, 1.5);
+        Space.Camera.Distance = std::clamp(Distance, 2.0, 60.0);
         return true;
     }
     if (Verb == "top-view")
     {
-        Scene.Camera.Pitch = Scene.Camera.Pitch > 1.3 ? 0.3 : 1.45;
+        Space.Camera.Pitch = Space.Camera.Pitch > 1.3 ? 0.3 : 1.45;
         return true;
+    }
+    if (Verb == "save")
+    {
+        if (Argument.empty()) return SaveSpaceFile();
+        std::string Failure;
+        if (!WriteParticleSpace(Space, std::filesystem::path(std::string(Argument)), Failure)) return false;
+        SpaceFile = std::filesystem::path(std::string(Argument));
+        SavedText = EncodeParticleSpace(Space);
+        Changed   = false;
+        AppendLog("SPACE", "Saved " + SpaceFile.filename().string());
+        return true;
+    }
+    if (Verb == "load")
+    {
+        return AttachSpaceFile(std::filesystem::path(std::string(Argument)));
     }
     return false;
 }
@@ -291,8 +377,16 @@ bool ParticleEditorWorkspace::Perform(std::string_view Action)
 void ParticleEditorWorkspace::Present(uint32_t Width, uint32_t Height, double DeltaSeconds)
 {
     if (Library.Presets.empty()) return;
-    Plan    = Scene.Advance(Planned ? DeltaSeconds : 0.0, Width, Height);
+    // 📝 The level's Force Field at the anchor, turned into the domain's axes (level x, y, z up → domain x, z, −y).
+    Space.LevelWind.FlowMps.reset();
+    if (Space.LevelWind.Follow && LevelFlow)
+    {
+        if (const std::optional<std::array<double, 3>> Flow = LevelFlow(Space.LevelWind.AnchorMetres))
+            Space.LevelWind.FlowMps = std::array<double, 3>{ (*Flow)[0], (*Flow)[2], -(*Flow)[1] };
+    }
+    Plan    = Space.Advance(Planned ? DeltaSeconds : 0.0, Width, Height);
     Planned = true;
+    ChangeClock += DeltaSeconds;
     if (!Presenter)
     {
         Image.Failure = "The particle viewport needs the editor's Vulkan device.";
@@ -301,7 +395,7 @@ void ParticleEditorWorkspace::Present(uint32_t Width, uint32_t Height, double De
     LatticeClock += DeltaSeconds;
     ParticleViewportRequest Request;
     Request.Plan        = &Plan;
-    Request.Effects     = &Scene.Effects;
+    Request.Effects     = &Space.Effects;
     Request.ReadLattice = Overlay.Settings.Enabled && LatticeClock >= 0.15;
     const bool Fresh    = Image.Adapter.empty();
     ParticleViewportImage Next = Presenter(Request);
@@ -309,7 +403,7 @@ void ParticleEditorWorkspace::Present(uint32_t Width, uint32_t Height, double De
     for (const ParticleEffectCensus& Previous : Image.Census)
     {
         const bool Present = std::any_of(Next.Census.begin(), Next.Census.end(), [&](const ParticleEffectCensus& Census) { return Census.Token == Previous.Token; });
-        if (!Present && Scene.ResolveEffect(Previous.Token)) Next.Census.push_back(Previous);
+        if (!Present && Space.ResolveEffect(Previous.Token)) Next.Census.push_back(Previous);
     }
     if (!Next.ProbeValid && Image.ProbeValid)
     {
@@ -325,12 +419,12 @@ void ParticleEditorWorkspace::Present(uint32_t Width, uint32_t Height, double De
     {
         LatticeClock = 0.0;
     }
-    if (Request.ReadLattice && Next.Lattice) Overlay.ConfigureLattice(Next.Lattice, Scene, Plan);
+    if (Request.ReadLattice && Next.Lattice) Overlay.ConfigureLattice(Next.Lattice, Space, Plan);
     Image = std::move(Next);
     if (Fresh && !Image.Adapter.empty())
     {
         char Detail[96];
-        std::snprintf(Detail, sizeof(Detail), "%zu effects \xC2\xB7 %zu presets in the library", Scene.Effects.size(), Library.Presets.size());
+        std::snprintf(Detail, sizeof(Detail), "%zu effects \xC2\xB7 %zu presets in the library", Space.Effects.size(), Library.Presets.size());
         AppendLog("PARTICLES", "Vulkan ready \xC2\xB7 " + Image.Adapter, Detail);
     }
 }
@@ -368,7 +462,7 @@ void ParticleEditorWorkspace::Construct(ImVec2 Minimum, ImVec2 Maximum, float Sc
     // 📝 Space pauses, L strikes, V shows the overlay, Escape closes the library (the prototype's keys).
     if (!ImGui::GetIO().WantTextInput)
     {
-        if (ImGui::IsKeyPressed(ImGuiKey_Space, false)) Requests.push_back(Scene.Playing ? "pause" : "play");
+        if (ImGui::IsKeyPressed(ImGuiKey_Space, false)) Requests.push_back(Space.Playing ? "pause" : "play");
         if (ImGui::IsKeyPressed(ImGuiKey_L, false)) Requests.push_back("strike");
         if (ImGui::IsKeyPressed(ImGuiKey_V, false)) Requests.push_back(Overlay.Settings.Enabled ? "overlay:off" : "overlay:on");
         if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) && LibraryShown) LibraryShown = false;
@@ -392,13 +486,13 @@ void ParticleEditorWorkspace::ConstructOutliner(ImDrawList* Ink, ImVec2 Minimum,
     const float Left = Minimum.x + 16.0f * Scale, Right = Maximum.x - 16.0f * Scale;
     Style.Text(Ink, Style.Faces.Medium, 22.0f, ImVec2(Left, Top), P.TextPrimary, "Outliner");
     char Subtitle[64];
-    const size_t Records = 3 + Scene.Fields.size() + Scene.Effects.size();
-    std::snprintf(Subtitle, sizeof(Subtitle), "Particle scene \xC2\xB7 %zu records", Records);
+    const size_t Records = 3 + Space.Fields.size() + Space.Effects.size();
+    std::snprintf(Subtitle, sizeof(Subtitle), "Particle space \xC2\xB7 %zu records", Records);
     Style.Text(Ink, Style.Faces.Regular, 11.0f, ImVec2(Left, Top + 30.0f * Scale), P.TextSecondary, Subtitle);
     Top += 56.0f * Scale;
 
     // 📝 The two count cards.
-    const size_t Visible = static_cast<size_t>(std::count_if(Scene.Effects.begin(), Scene.Effects.end(), [](const ParticleEffectInstance& Effect) { return Effect.Parameters.Visible; }));
+    const size_t Visible = static_cast<size_t>(std::count_if(Space.Effects.begin(), Space.Effects.end(), [](const ParticleEffectInstance& Effect) { return Effect.Parameters.Visible; }));
     const float  CardW   = (Right - Left - 8.0f * Scale) / 2.0f;
     for (int Card = 0; Card < 2; ++Card)
     {
@@ -409,7 +503,7 @@ void ParticleEditorWorkspace::ConstructOutliner(ImDrawList* Ink, ImVec2 Minimum,
                                Card == 0 ? P.LiveGreen : P.TextMuted);
         Style.Text(Ink, Style.Faces.Regular, 10.5f, ImVec2(Corner.x + 12.0f * Scale, Corner.y + 36.0f * Scale), P.TextSecondary, Card == 0 ? "Visible effects" : "Hidden");
         char Figure[16];
-        std::snprintf(Figure, sizeof(Figure), "%zu", Card == 0 ? Visible : Scene.Effects.size() - Visible);
+        std::snprintf(Figure, sizeof(Figure), "%zu", Card == 0 ? Visible : Space.Effects.size() - Visible);
         Style.Text(Ink, Style.Faces.Light, 26.0f, ImVec2(Corner.x + CardW - Style.Measure(Style.Faces.Light, 26.0f, Figure) - 12.0f * Scale, Corner.y + 14.0f * Scale),
                    P.TextPrimary, Figure);
     }
@@ -424,7 +518,7 @@ void ParticleEditorWorkspace::ConstructOutliner(ImDrawList* Ink, ImVec2 Minimum,
         const float  Height  = 40.0f * Scale;
         const ImVec2 RowMin(Left - 4.0f * Scale, Top);
         const ImVec2 RowMax(Right + 4.0f * Scale, Top + Height);
-        const bool   Chosen  = Scene.Selected == Token;
+        const bool   Chosen  = Space.Selected == Token;
         ImGui::SetCursorScreenPos(RowMin);
         ImGui::PushID(Token.c_str());
         const bool Pressed = ImGui::InvisibleButton("##Row", ImVec2(RowMax.x - RowMin.x - 30.0f * Scale, Height));
@@ -466,15 +560,15 @@ void ParticleEditorWorkspace::ConstructOutliner(ImDrawList* Ink, ImVec2 Minimum,
                       ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoBackground);
     Ink = ImGui::GetWindowDrawList();
     Top = ImGui::GetCursorScreenPos().y;
-    Group("ENVIRONMENT", 3 + Scene.Fields.size());
+    Group("ENVIRONMENT", 3 + Space.Fields.size());
     char Meta[128];
-    std::snprintf(Meta, sizeof(Meta), "Master \xC2\xB7 %zu fields \xC2\xB7 overlay %s", Scene.Fields.size(), Overlay.Settings.Enabled ? "on" : "off");
+    std::snprintf(Meta, sizeof(Meta), "Master \xC2\xB7 %zu fields \xC2\xB7 overlay %s", Space.Fields.size(), Overlay.Settings.Enabled ? "on" : "off");
     Row("Field", 0, "GridLattice", IM_COL32(143, 211, 196, 255), "Force Field", Meta, &Overlay.Settings.Enabled);
-    std::snprintf(Meta, sizeof(Meta), "Guest \xC2\xB7 lattice 24 \xC3\x97 12 \xC3\x97 24 \xC2\xB7 \xC3\x97%.2g", Scene.Wind.WindScale);
+    std::snprintf(Meta, sizeof(Meta), "Guest \xC2\xB7 lattice 24 \xC3\x97 12 \xC3\x97 24 \xC2\xB7 \xC3\x97%.2g", Space.Wind.WindScale);
     Row("Wind", 1, "Wind", IM_COL32(143, 211, 196, 255), "Wind", Meta, nullptr);
-    for (size_t Index = 0; Index < Scene.Fields.size(); ++Index)
+    for (size_t Index = 0; Index < Space.Fields.size(); ++Index)
     {
-        ParticleField&                 Field      = Scene.Fields[Index];
+        ParticleField&                 Field      = Space.Fields[Index];
         const ParticleFieldDescriptor& Descriptor = ResolveParticleFieldDescriptor(Field.Category);
         const char* Contribution = Descriptor.Contribution == ForceContribution::Flow ? "Flow" : Descriptor.Contribution == ForceContribution::Accelerate ? "Accelerate" : "Damp";
         char        Reach[32];
@@ -485,11 +579,11 @@ void ParticleEditorWorkspace::ConstructOutliner(ImDrawList* Ink, ImVec2 Minimum,
                          : Descriptor.Contribution == ForceContribution::Accelerate ? IM_COL32(232, 194, 122, 255) : IM_COL32(185, 163, 232, 255);
         Row("force:" + std::to_string(Index), 2, ResolveForceGlyph(Field.Category), Tint, Field.Name, Meta, &Field.Enabled);
     }
-    std::snprintf(Meta, sizeof(Meta), "%u strikes \xC2\xB7 %s", Scene.Lightning.Strikes, Scene.Lightning.Automatic ? "automatic" : "manual");
-    Row("Lightning", 0, "Zap", IM_COL32(201, 184, 240, 255), "Lightning", Meta, &Scene.Lightning.Automatic);
+    std::snprintf(Meta, sizeof(Meta), "%u strikes \xC2\xB7 %s", Space.Lightning.Strikes, Space.Lightning.Automatic ? "automatic" : "manual");
+    Row("Lightning", 0, "Zap", IM_COL32(201, 184, 240, 255), "Lightning", Meta, &Space.Lightning.Automatic);
     Top += 6.0f * Scale;
-    Group("PARTICLE EFFECTS", Scene.Effects.size());
-    for (ParticleEffectInstance& Effect : Scene.Effects)
+    Group("PARTICLE EFFECTS", Space.Effects.size());
+    for (ParticleEffectInstance& Effect : Space.Effects)
     {
         const ParticlePreset*       Preset = Library.ResolvePreset(Effect.PresetIdentifier);
         const ParticleEffectCensus* Census = ParticleEditorPages::ResolveCensus(Image, Effect.Token);
@@ -534,7 +628,7 @@ void ParticleEditorWorkspace::ConstructViewport(ImDrawList* Ink, ImVec2 Minimum,
     const float BarY = Minimum.y + 12.0f * Scale;
     Ink->AddRectFilled(ImVec2(Left, BarY), ImVec2(Left + 30.0f * Scale, BarY + 30.0f * Scale), P.CountCardBg, 8.0f * Scale);
     GlyphSymbol::Construct(Ink, "Sparkles", ImVec2(Left + 7.0f * Scale, BarY + 7.0f * Scale), 16.0f * Scale, 1.4f, P.TextSecondary);
-    Style.Text(Ink, Style.Faces.Medium, 13.0f, ImVec2(Left + 40.0f * Scale, BarY + 1.0f * Scale), P.TextPrimary, "Particle scene");
+    Style.Text(Ink, Style.Faces.Medium, 13.0f, ImVec2(Left + 40.0f * Scale, BarY + 1.0f * Scale), P.TextPrimary, "Particle space");
     Style.Text(Ink, Style.Faces.Regular, 10.0f, ImVec2(Left + 40.0f * Scale, BarY + 18.0f * Scale), P.TextSecondary, "eos engine on Vulkan");
     float       Cursor = Left + 200.0f * Scale;
     const bool  Live   = Image.Texture != 0;
@@ -545,8 +639,8 @@ void ParticleEditorWorkspace::ConstructViewport(ImDrawList* Ink, ImVec2 Minimum,
     Style.Text(Ink, Style.Faces.Medium, 10.0f, ImVec2(Cursor + 21.0f * Scale, BarY + 8.5f * Scale), Live ? P.LiveGreen : P.WarmAmber, Pill);
     Cursor += PillW + 12.0f * Scale;
     float Width = 0.0f;
-    if (ConstructPillButton(Style, Ink, "##ParticlePause", ImVec2(Cursor, BarY), Scene.Playing ? "Pause" : "Play", !Scene.Playing, Scene.Playing ? "Pause" : "Play", &Width))
-        Requests.push_back(Scene.Playing ? "pause" : "play");
+    if (ConstructPillButton(Style, Ink, "##ParticlePause", ImVec2(Cursor, BarY), Space.Playing ? "Pause" : "Play", !Space.Playing, Space.Playing ? "Pause" : "Play", &Width))
+        Requests.push_back(Space.Playing ? "pause" : "play");
     Cursor += Width + 6.0f * Scale;
     if (ConstructPillButton(Style, Ink, "##ParticleReset", ImVec2(Cursor, BarY), "Reset", false, "RotateCcw", &Width)) Requests.push_back("reset");
     Cursor += Width + 6.0f * Scale;
@@ -557,7 +651,7 @@ void ParticleEditorWorkspace::ConstructViewport(ImDrawList* Ink, ImVec2 Minimum,
     {
         char Id[32];
         std::snprintf(Id, sizeof(Id), "##ParticleSpeed%.2f", Factor);
-        if (ConstructPillButton(Style, Ink, Id, ImVec2(Cursor, BarY), Label, std::fabs(Scene.TimeScale - Factor) < 1e-6, nullptr, &Width))
+        if (ConstructPillButton(Style, Ink, Id, ImVec2(Cursor, BarY), Label, std::fabs(Space.TimeScale - Factor) < 1e-6, nullptr, &Width))
             Requests.push_back("time-scale:" + std::to_string(Factor));
         Cursor += Width + 3.0f * Scale;
     }
@@ -565,7 +659,7 @@ void ParticleEditorWorkspace::ConstructViewport(ImDrawList* Ink, ImVec2 Minimum,
     if (ConstructPillButton(Style, Ink, "##ParticleFieldToggle", ImVec2(Cursor, BarY), "Field", Overlay.Settings.Enabled, "GridLattice", &Width))
         Requests.push_back(Overlay.Settings.Enabled ? "overlay:off" : "overlay:on");
     Cursor += Width + 6.0f * Scale;
-    if (ConstructPillButton(Style, Ink, "##ParticleTopView", ImVec2(Cursor, BarY), "Top", Scene.Camera.Pitch > 1.3, "Map", &Width)) Requests.push_back("top-view");
+    if (ConstructPillButton(Style, Ink, "##ParticleTopView", ImVec2(Cursor, BarY), "Top", Space.Camera.Pitch > 1.3, "Map", &Width)) Requests.push_back("top-view");
 
     // 📝 The image, the overlay and the readouts.
     const ImVec2 StageMin(Minimum.x + 8.0f * Scale, Minimum.y + HeaderHeight * Scale);
@@ -581,7 +675,7 @@ void ParticleEditorWorkspace::ConstructViewport(ImDrawList* Ink, ImVec2 Minimum,
         Style.Text(Ink, Style.Faces.Medium, 12.0f, ImVec2(StageMin.x + 24.0f * Scale, StageMin.y + 24.0f * Scale), P.WarmAmber, Reason);
     }
     Ink->PushClipRect(StageMin, StageMax, true);
-    Overlay.Render(Ink, Style.Faces, StageMin, StageMax, Scene, Scale);
+    Overlay.Render(Ink, Style.Faces, StageMin, StageMax, Space, Scale);
 
     // 📝 Orbit: drag turns, right-drag pans, the wheel zooms (the minimap keeps its own clicks).
     const ImVec2 MinimapMin(StageMax.x - 182.0f * Scale, StageMin.y + 12.0f * Scale);
@@ -594,38 +688,38 @@ void ParticleEditorWorkspace::ConstructViewport(ImDrawList* Ink, ImVec2 Minimum,
         const ImVec2 Delta = ImGui::GetIO().MouseDelta;
         if (ImGui::IsMouseDown(ImGuiMouseButton_Left))
         {
-            Scene.Camera.Yaw -= Delta.x * 0.006;
-            Scene.Camera.Pitch = std::clamp(Scene.Camera.Pitch + Delta.y * 0.006, -0.1, 1.5);
+            Space.Camera.Yaw -= Delta.x * 0.006;
+            Space.Camera.Pitch = std::clamp(Space.Camera.Pitch + Delta.y * 0.006, -0.1, 1.5);
         }
         else if (ImGui::IsMouseDown(ImGuiMouseButton_Right))
         {
-            const ParticleCameraReading Reading = ResolveParticleCamera(Scene.Camera, 1.0);
-            const double                Step    = Scene.Camera.Distance * 0.0016;
-            for (int Axis = 0; Axis < 3; ++Axis) Scene.Camera.Target[Axis] += (-Reading.Right[Axis] * Delta.x + Reading.Up[Axis] * Delta.y) * Step;
+            const ParticleCameraReading Reading = ResolveParticleCamera(Space.Camera, 1.0);
+            const double                Step    = Space.Camera.Distance * 0.0016;
+            for (int Axis = 0; Axis < 3; ++Axis) Space.Camera.Target[Axis] += (-Reading.Right[Axis] * Delta.x + Reading.Up[Axis] * Delta.y) * Step;
         }
     }
     if (ImGui::IsItemHovered() && ImGui::GetIO().MouseWheel != 0.0f)
-        Scene.Camera.Distance = std::clamp(Scene.Camera.Distance * std::exp(-ImGui::GetIO().MouseWheel * 0.1), 2.0, 60.0);
+        Space.Camera.Distance = std::clamp(Space.Camera.Distance * std::exp(-ImGui::GetIO().MouseWheel * 0.1), 2.0, 60.0);
 
     // 📝 The HUD: particles, refresh rate, GPU time and the clock, then the probe.
     uint32_t Alive = 0, Capacity = 0;
-    for (const ParticleEffectInstance& Effect : Scene.Effects)
+    for (const ParticleEffectInstance& Effect : Space.Effects)
     {
         if (Effect.Parameters.Behaviour == ParticleBehaviour::LightFibre || !Effect.Parameters.Visible) continue;
         Capacity += ResolveParticleCapacity(Effect.Parameters);
         if (const ParticleEffectCensus* Census = ParticleEditorPages::ResolveCensus(Image, Effect.Token)) Alive += Census->Alive;
     }
     char Hud[160];
-    std::snprintf(Hud, sizeof(Hud), "PARTICLES %u / %u   RATE %.0f fps   GPU %.2f ms   t %.1f s", Alive, Capacity, Scene.RefreshRate, Image.RefreshMilliseconds, Scene.TimeSeconds);
+    std::snprintf(Hud, sizeof(Hud), "PARTICLES %u / %u   RATE %.0f fps   GPU %.2f ms   t %.1f s", Alive, Capacity, Space.RefreshRate, Image.RefreshMilliseconds, Space.TimeSeconds);
     const ImVec2 HudAt(StageMin.x + 12.0f * Scale, StageMin.y + 12.0f * Scale);
     const float  HudW = Style.Measure(Style.Faces.Monospace, 10.5f, Hud) + 20.0f * Scale;
     Ink->AddRectFilled(HudAt, ImVec2(HudAt.x + HudW, HudAt.y + 26.0f * Scale), IM_COL32(12, 13, 17, 215), 7.0f * Scale);
     Style.Text(Ink, Style.Faces.Monospace, 10.5f, ImVec2(HudAt.x + 10.0f * Scale, HudAt.y + 6.5f * Scale), P.TextPrimary, Hud);
-    if (Scene.ProbeEnabled)
+    if (Space.ProbeEnabled)
     {
-        const auto Cell = Scene.ResolveProbeCell();
+        const auto Cell = Space.ResolveProbeCell();
         char Lines[4][128];
-        std::snprintf(Lines[0], sizeof(Lines[0]), "PROBE (%.1f, %.1f, %.1f) m \xC2\xB7 cell %u, %u, %u", Scene.Probe[0], Scene.Probe[1], Scene.Probe[2], Cell[0], Cell[1], Cell[2]);
+        std::snprintf(Lines[0], sizeof(Lines[0]), "PROBE (%.1f, %.1f, %.1f) m \xC2\xB7 cell %u, %u, %u", Space.Probe[0], Space.Probe[1], Space.Probe[2], Cell[0], Cell[1], Cell[2]);
         std::snprintf(Lines[1], sizeof(Lines[1]), "wind %.2f  %.2f  %.2f m/s", Image.Probe[0], Image.Probe[1], Image.Probe[2]);
         std::snprintf(Lines[2], sizeof(Lines[2]), "|v| %.2f \xC2\xB7 horizontal %.2f m/s", Image.Probe[3], std::hypot(Image.Probe[0], Image.Probe[2]));
         std::snprintf(Lines[3], sizeof(Lines[3]), "readback %.2f ms \xC2\xB7 8 B", Image.LatticeMilliseconds);
@@ -641,7 +735,7 @@ void ParticleEditorWorkspace::ConstructViewport(ImDrawList* Ink, ImVec2 Minimum,
     {
         Ink->AddRectFilled(MinimapMin, ImVec2(MinimapMax.x, MinimapMax.y + 20.0f * Scale), IM_COL32(12, 13, 17, 225), 9.0f * Scale);
         Overlay.Slice.ConstructMinimap("##ParticleMinimap", Ink, ImVec2(MinimapMin.x + 8.0f * Scale, MinimapMin.y + 8.0f * Scale),
-                                       ImVec2(MinimapMax.x - 8.0f * Scale, MinimapMax.y - 8.0f * Scale), Scene.TimeSeconds, Scale);
+                                       ImVec2(MinimapMax.x - 8.0f * Scale, MinimapMax.y - 8.0f * Scale), Space.TimeSeconds, Scale);
         Style.Text(Ink, Style.Faces.Regular, 9.5f, ImVec2(MinimapMin.x + 8.0f * Scale, MinimapMax.y - 2.0f * Scale), P.TextSecondary, "Lattice domain");
         Style.Text(Ink, Style.Faces.Regular, 9.5f, ImVec2(MinimapMax.x - Style.Measure(Style.Faces.Regular, 9.5f, "12 \xC3\x97 12 m") - 8.0f * Scale, MinimapMax.y - 2.0f * Scale),
                    P.TextSecondary, "12 \xC3\x97 12 m");
@@ -719,12 +813,12 @@ void ParticleEditorWorkspace::ConstructInspector(ImVec2 Minimum, ImVec2 Maximum,
     {
         const ControlTheme    Theme = ControlTheme::ResolveNative();
         ControlColumn         Page(Theme, Style.Faces, Scale);
-        ParticleEditorContext Context{ Scene, Library, Overlay.Settings, Image, Planned ? &Plan : nullptr, Requests };
-        const std::string&    Selected = Scene.Selected;
+        ParticleEditorContext Context{ Space, Library, Overlay.Settings, Image, Planned ? &Plan : nullptr, Requests, static_cast<bool>(LevelFlow) };
+        const std::string&    Selected = Space.Selected;
         if (Selected == "Wind") ParticleEditorPages::ConstructWindPage(Page, Context);
         else if (Selected == "Lightning") ParticleEditorPages::ConstructLightningPage(Page, Context);
         else if (Selected.rfind("force:", 0) == 0) ParticleEditorPages::ConstructForcePage(Page, Context, static_cast<size_t>(std::atoi(Selected.c_str() + 6)));
-        else if (ParticleEffectInstance* Effect = Scene.ResolveEffect(Selected)) ParticleEditorPages::ConstructEffectPage(Page, Context, *Effect);
+        else if (ParticleEffectInstance* Effect = Space.ResolveEffect(Selected)) ParticleEditorPages::ConstructEffectPage(Page, Context, *Effect);
         else ParticleEditorPages::ConstructFieldPage(Page, Context);
         Page.Finalize();
     }

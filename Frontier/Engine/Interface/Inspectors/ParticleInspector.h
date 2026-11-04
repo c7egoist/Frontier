@@ -1,7 +1,7 @@
 /*==========================================================================================================================================
                                                             PARTICLEINSPECTOR.H
 ==========================================================================================================================================*/
-// 🧩 ParticleConfiguration: GPU particles, with its ParticleEditor.
+// 🧩 ParticleConfiguration: the record's ParticleSpace file, its figures, and the Particle Editor that edits it.
 
 #pragma once
 
@@ -24,7 +24,7 @@ class ParticleInspector final : public RecordInspector
     explicit ParticleInspector(ParticleConfiguration& InParameters) noexcept : Parameters(InParameters) {}
 
     [[nodiscard]] const char* QueryEyebrowText() const noexcept override { return "SOLVER · GPU PARTICLES"; }
-    [[nodiscard]] const char* QuerySectionNote() const noexcept override { return "Ballistic & precipitation"; }
+    [[nodiscard]] const char* QuerySectionNote() const noexcept override { return "Particle space"; }
     [[nodiscard]] const char* QueryEditorButtonLabel() const noexcept override { return "Particle Editor"; }
     void                      ConstructEditor(RecordToken Token) override;
     [[nodiscard]] bool        QueryToggleSupported() const noexcept override { return true; }

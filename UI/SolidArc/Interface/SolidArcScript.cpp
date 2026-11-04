@@ -570,7 +570,7 @@ bool ObserveField(const SolidArcWorkspaceState& State, const std::string& Field,
     if (Field == "gizmo-visible-handles")
     {
         uint32_t Mask = 0;
-        for (const SolidArcGizmoVertex& V : State.Style.Gizmo.Vertices)
+        for (const GizmoVertex& V : State.Style.Gizmo.Vertices)
             if (V.Handle > 0 && V.Handle <= 13) Mask |= (1u << V.Handle);
         int Count = 0;
         for (int Bit = 1; Bit <= 13; ++Bit) if (Mask & (1u << Bit)) ++Count;
@@ -585,7 +585,7 @@ bool ObserveField(const SolidArcWorkspaceState& State, const std::string& Field,
     if (Field == "gizmo-arrows")                                                            // Move arrows shown: 2 flat · 3 in 3D
     {
         int Shown = 0;
-        for (int Axis = 0; Axis < 3; ++Axis) Shown += ((State.Gizmo.Pose.Hidden >> (uint32_t(SolidArcGizmoHandle::TranslateX) + uint32_t(Axis))) & 1u) ? 0 : 1;
+        for (int Axis = 0; Axis < 3; ++Axis) Shown += ((State.Gizmo.Pose.Hidden >> (uint32_t(GizmoHandle::TranslateX) + uint32_t(Axis))) & 1u) ? 0 : 1;
         return Numeric(State.Gizmo.Target == SolidArcGizmoTarget::None ? 0.0 : double(Shown));
     }
     if (Field == "gizmo-target")

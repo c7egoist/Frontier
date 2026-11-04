@@ -6,12 +6,12 @@
 //    then the editor's own objects: the baked engine shapes, the reserve that copies and constructed objects take, the
 //    per-object shadow / indirect / dynamic switches, material blocks, removal and the distance field's scale bound.
 
-#include "EverestSceneGeometry.h"
+#include "Frontier/Extensions/Rendering/SceneGeometryOccupancy.h"
 
 #include "Frontier/Engine/Geometry/ShapeArchive.h"
 #include "Frontier/Engine/Rendering/GlobalIllumination/SceneStructure.h"
 #include "Frontier/Engine/Scene/GeometryLayout.h"
-#include "Frontier/Engine/Scene/SceneWorld.h"
+#include "Frontier/Engine/Scene/WorldSpace.h"
 
 #include <algorithm>
 #include <cmath>
@@ -43,7 +43,7 @@ void Report(bool Passed, const std::string& Line)
     std::printf("%s  %s\n", Passed ? "PASS" : "FAIL", Line.c_str());
 }
 
-Frontier::GeometryRecord* FindGeometry(Frontier::SceneWorld& World, const std::string& Name)
+Frontier::GeometryRecord* FindGeometry(Frontier::WorldSpace& World, const std::string& Name)
 {
     for (const Frontier::SceneRecordBase* Entry : World.FindAllByType("Geometry"))
         if (Entry->QueryRecordName() == Name) return dynamic_cast<Frontier::GeometryRecord*>(World.FindRecord(Entry->QueryToken()));
@@ -66,7 +66,7 @@ std::vector<uint32_t> Matches(const SceneStructure& Scene, const std::string& St
 {
     std::vector<uint32_t> Found;
     for (uint32_t Occupant = 0; Occupant < Scene.Occupants.size(); ++Occupant)
-        if (Everest::MatchOccupantStem(Scene.Occupants[Occupant].Name, Stem)) Found.push_back(Occupant);
+        if (Frontier::MatchOccupantStem(Scene.Occupants[Occupant].Name, Stem)) Found.push_back(Occupant);
     return Found;
 }
 
@@ -84,7 +84,7 @@ int main(int ArgumentCount, char** Arguments)
         std::filesystem::create_directories(Scratch);
 
         // ① the level and the scene archive, as the editor loads them
-        Frontier::SceneWorld World;
+        Frontier::WorldSpace World;
         std::string          Diagnostic;
         if (!World.LoadLevelSpace(Project / "Content" / "Levels" / "Default.levelspace", &Diagnostic)) throw std::runtime_error(Diagnostic);
         SceneStructure Scene;
@@ -96,7 +96,7 @@ int main(int ArgumentCount, char** Arguments)
         Report(Records == 37, "the level holds " + std::to_string(Records) + " Geometry records (37)");
 
         // ② binding: every record binds, and the static occupants are bound once each
-        Everest::SceneGeometryOccupancy Occupancy;
+        Frontier::SceneGeometryOccupancy Occupancy;
         Occupancy.Reset(&Scene, Materials);
         const std::vector<OccupantPlacement> Initial = Occupancy.ResolvePlacements(World);
         const auto                           Resolutions = Occupancy.QueryResolutions();
@@ -242,7 +242,7 @@ int main(int ArgumentCount, char** Arguments)
         // ⑩ the record survives the level file
         const std::filesystem::path Saved = Scratch / "SceneGeometryValidation.levelspace";
         if (!World.SaveLevelSpace(Saved, &Diagnostic)) throw std::runtime_error(Diagnostic);
-        Frontier::SceneWorld Reloaded;
+        Frontier::WorldSpace Reloaded;
         if (!Reloaded.LoadLevelSpace(Saved, &Diagnostic)) throw std::runtime_error(Diagnostic);
         size_t Same = 0;
         for (const Frontier::SceneRecordBase* Entry : World.FindAllByType("Geometry"))
@@ -295,13 +295,13 @@ int main(int ArgumentCount, char** Arguments)
         };
 
         // ⑬ the reserve: the scene as the viewport loads it (shapes appended, the stress pool's first 512 occupants reserved)
-        Frontier::SceneWorld Editor;
+        Frontier::WorldSpace Editor;
         if (!Editor.LoadLevelSpace(Project / "Content" / "Levels" / "Default.levelspace", &Diagnostic)) throw std::runtime_error(Diagnostic);
         SceneStructure Reserved;
         if (!Reserved.LoadFacetSpace(Archive / "ProvingGround.facetspace", &Diagnostic)) throw std::runtime_error(Diagnostic);
         Reserved.AppendShapeSets(Shapes, static_cast<uint32_t>(Materials.size() / 48));
         Reserved.ConvertStressReserve(512);
-        Everest::SceneGeometryOccupancy Objects;
+        Frontier::SceneGeometryOccupancy Objects;
         Objects.Reset(&Reserved, Materials, Shapes);
         {
             const auto Start = Objects.ResolvePlacements(Editor);

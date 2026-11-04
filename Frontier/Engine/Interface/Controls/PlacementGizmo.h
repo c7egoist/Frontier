@@ -1,9 +1,10 @@
 /*==========================================================================================================================================
                                                            PLACEMENTGIZMO.H
 ==========================================================================================================================================*/
-// 🧩 The viewport's transform handles for the selected object (W move, E rotate, R scale): drawn over the presented image
-//    with the camera it was rendered with, and dragged with the left button. Move follows the world axes, Rotate the
-//    object's Euler angles (OrientationDegrees: Z, then Y, then X) and Scale the object's own axes or all three at once.
+// 🧩 The viewport's transform handles for the selected object (W move, E rotate, R scale): GizmoSpace's handles (SolidArc's
+//    gizmo) drawn over the presented image with the camera it was rendered with, and dragged with the left button. Move
+//    follows the world axes, their planes or the screen, Rotate the object's Euler angles (OrientationDegrees: Z, then Y,
+//    then X) and Scale the object's own axes or all three at once.
 
 #pragma once
 
@@ -65,7 +66,8 @@ struct PlacementGizmoOutcome
 class PlacementGizmo
 {
   public:
-    // 📝 The handle under a screen point: 0–2 the axes (X, Y, Z), 3 Scale's uniform handle, −1 none.
+    // 📝 The handle under a screen point: 0–2 the axes (X, Y, Z), 3 Scale's uniform ring, 4–6 Move's plane quads (normal X, Y,
+    //    Z), 7 Move's centre ring (the screen plane), −1 none.
     [[nodiscard]] int Probe(const PlacementView& View, PlacementGizmoMode Mode, const SpatialConfiguration& Spatial, ImVec2 Pointer,
                             float Scale) const;
 
@@ -85,6 +87,7 @@ class PlacementGizmo
     SpatialConfiguration Start_{};
     ImVec2               PressPointer_{};
     double               PressParameter_ = 0.0;   // [m] along the axis (Move), [rad] about the centre (Rotate), [px] along the axis (Scale)
+    std::array<double, 3> PressHit_{};            // [m] where the press met a plane handle's plane (plane and screen moves)
     double               Swept_          = 0.0;   // [rad] Rotate: the angle swept so far
     double               LastAngle_      = 0.0;   // [rad]
 };

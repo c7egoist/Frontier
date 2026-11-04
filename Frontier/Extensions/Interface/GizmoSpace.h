@@ -1,7 +1,9 @@
-/*====================================================================================================================================
-                                                          SOLIDARCGIZMO.H
-====================================================================================================================================*/
-// 🧩 Transform gizmo (Slate GizmoPRO look): CPU-built handle triangles drawn by the GPU program, CPU pick and drag maths
+/*==========================================================================================================================================
+                                                                GIZMOSPACE.H
+==========================================================================================================================================*/
+// 🧩 GizmoSpace, the world the transform gizmo lives in, shared by every workspace (SolidArc, the Frontier editor and the
+//    games): the Slate GizmoPRO handles as CPU-built triangles, the pick on those same triangles and the drag maths.
+//    SolidArc draws the triangles with its GPU program (SolidArcGizmo.slang); the Frontier editor with GizmoRasterization.
 
 #pragma once
 
@@ -12,11 +14,12 @@
 #include "Engine/GeometryProcessing/Geometry/VectorAlgebra.h"
 #include "Engine/Render/OrbitCamera.h"
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <vector>
 
-namespace Frontier::SolidArc
+namespace Frontier
 {
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -34,7 +37,7 @@ constexpr double GizmoPixels = 150.0;                                           
 //                                                    TYPES
 //------------------------------------------------------------------------------------------------------------------------
 
-enum class SolidArcGizmoHandle : uint8_t
+enum class GizmoHandle : uint8_t
 {
     None       = 0,
     TranslateX = 1,                                                                          // Cone on +x
@@ -52,18 +55,18 @@ enum class SolidArcGizmoHandle : uint8_t
     Centre     = 13,                                                                         // White ring facing the eye
 };
 
-// 📝 32-byte vertex of the gizmo program (Shaders/SolidArcGizmo.slang). Normal (0, 0, 0) = unlit (quads, arcs, ring,
-//    edge strokes); Colour is RGBA8 (R in the low byte) read as UNORM; Handle is the owning handle (CPU pick only).
-struct SolidArcGizmoVertex
+// 📝 32-byte vertex of SolidArc's gizmo program (UI/SolidArc/Shaders/SolidArcGizmo.slang). Normal (0, 0, 0) = unlit
+//    (quads, arcs, ring, edge strokes); Colour is RGBA8 (R in the low byte) read as UNORM; Handle is the owning handle.
+struct GizmoVertex
 {
     float    Position[3] = {};                                                               // [len] - World point
     float    Normal[3]   = {};                                                               // [-]   - Shading normal (0: unlit)
     uint32_t Colour      = 0;                                                                // [-]   - RGBA8
-    uint32_t Handle      = 0;                                                                // [-]   - SolidArcGizmoHandle
+    uint32_t Handle      = 0;                                                                // [-]   - GizmoHandle
 };
-static_assert(sizeof(SolidArcGizmoVertex) == 32, "SolidArcGizmoVertex must stay 32 bytes");
+static_assert(sizeof(GizmoVertex) == 32, "GizmoVertex must stay 32 bytes");
 
-struct SolidArcGizmoPose
+struct GizmoPose
 {
     GeometryProcessing::Vector3 Origin  = {};                                                // [len] - Gizmo centre (pivot)
     GeometryProcessing::Vector3 Axes[3] = { { 1.0, 0.0, 0.0 }, { 0.0, 1.0, 0.0 }, { 0.0, 0.0, 1.0 } }; // [-] - Right-handed unit frame
@@ -73,31 +76,34 @@ struct SolidArcGizmoPose
 };
 
 // 📝 The CPU copy of everything the GPU draws: the same triangles serve the pick, so what is seen is what is grabbed.
-struct SolidArcGizmoGeometry
+struct GizmoGeometry
 {
-    std::vector<SolidArcGizmoVertex> Vertices    = {};                                       // [-] - Triangle list: opaque first, then translucent
-    uint32_t                         OpaqueCount = 0;                                        // [-] - Vertices before the translucent quads
+    std::vector<GizmoVertex> Vertices    = {};                                               // [-] - Triangle list: opaque first, then translucent
+    uint32_t                 OpaqueCount = 0;                                                // [-] - Vertices before the translucent quads
 };
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                                    PUBLIC FUNCTIONS
 //------------------------------------------------------------------------------------------------------------------------
 
+// 📝 The camera frame of a perspective view given by its eye, forward and up directions (any up axis: SolidArc is y up, the
+//    Frontier level z up) over a Width × Height pixel stage. WorldFromClip stays empty: the gizmo never casts rays from it.
+[[nodiscard]] OrbitCameraFrame ResolveGizmoFrame(const std::array<double, 3>& Eye, const std::array<double, 3>& Forward,
+                                                 const std::array<double, 3>& Up, double VerticalFieldOfView, double Width, double Height);
+
 // World length that spans Pixels on screen at Origin's depth (perspective or orthographic).
 [[nodiscard]] double MeasureGizmoSize(const OrbitCameraFrame& Frame, GeometryProcessing::Vector3 Origin, double Pixels);
 
 // Handle triangles in world space: Hover / Grabbed glow (Slate emissive #555555), the ring billboarded to Frame.
-[[nodiscard]] SolidArcGizmoGeometry BuildSolidArcGizmo(const SolidArcGizmoPose& Pose, const OrbitCameraFrame& Frame, SolidArcGizmoHandle Hover,
-                                                       SolidArcGizmoHandle Grabbed);
+[[nodiscard]] GizmoGeometry BuildGizmoGeometry(const GizmoPose& Pose, const OrbitCameraFrame& Frame, GizmoHandle Hover, GizmoHandle Grabbed);
 
 // Handle under the viewport pixel (local, top-left origin): inside a projected triangle or within Reach pixels of one
 // (inside first, opaque handles before see-through plane quads, then nearest); None when the pointer misses the gizmo.
-[[nodiscard]] SolidArcGizmoHandle PickSolidArcGizmo(const SolidArcGizmoGeometry& Geometry, const OrbitCameraFrame& Frame, double PixelX, double PixelY,
-                                                    double Reach);
+[[nodiscard]] GizmoHandle PickGizmoHandle(const GizmoGeometry& Geometry, const OrbitCameraFrame& Frame, double PixelX, double PixelY, double Reach);
 
 // Axis index 0 / 1 / 2 a handle acts along / about (−1: plane-free or centre).
-[[nodiscard]] int GizmoHandleAxis(SolidArcGizmoHandle Handle) noexcept;
-[[nodiscard]] const char* GizmoHandleLabel(SolidArcGizmoHandle Handle) noexcept;
+[[nodiscard]] int GizmoHandleAxis(GizmoHandle Handle) noexcept;
+[[nodiscard]] const char* GizmoHandleLabel(GizmoHandle Handle) noexcept;
 
 // 💡 Drag maths (Slate GizmoPRO): the axis parameter of the point on Origin + t·Axis closest to the pointer ray (skew
 //    lines; empty when they run parallel), the ray / plane hit, and the angle of that hit about Axis measured from U.
@@ -107,4 +113,4 @@ struct SolidArcGizmoGeometry
 [[nodiscard]] std::optional<double> MeasureGizmoAngle(const OrbitRay& Ray, GeometryProcessing::Vector3 Origin, GeometryProcessing::Vector3 Axis,
                                                       GeometryProcessing::Vector3 Reference);
 
-} // namespace Frontier::SolidArc
+} // namespace Frontier

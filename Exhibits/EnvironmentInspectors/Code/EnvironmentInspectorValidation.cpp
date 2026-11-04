@@ -12,7 +12,7 @@
 #include "Engine/Interface/Inspectors/LunarSurfaceReference.h"
 #include "Engine/Interface/Inspectors/OpticalReference.h"
 #include "Engine/Interface/Inspectors/StarCatalogueReference.h"
-#include "Engine/Scene/SceneWorld.h"
+#include "Engine/Scene/WorldSpace.h"
 #include "Exhibits/ControlCentre/Code/CpuRasterization.h"
 #include "UI/Editor/ControlCentrePanel.h"
 
@@ -254,7 +254,7 @@ void PerturbConfiguration(toml::node &Entry)
 
 void ValidatePersistence(const std::filesystem::path &Project, const std::filesystem::path &Scratch)
 {
-    SceneWorld  World;
+    WorldSpace  World;
     std::string Diagnostic;
     if (!World.LoadLevelSpace(Project.parent_path().parent_path().parent_path() / "Exhibits/EverestInterface/Content/Simulation.levelspace", &Diagnostic)) throw std::runtime_error(Diagnostic);
     for (const char *Category : {"Clouds", "Wind", "ForceField", "Atmosphere", "Planet", "Fog", "AerialFog", "Lightning", "Stars", "OpticalFlare", "Moons"})
@@ -282,7 +282,7 @@ void ValidatePersistence(const std::filesystem::path &Project, const std::filesy
     Near(Moons.Instances[0].PhaseDays, 29.53 / 4, 1e-5, "Legacy Moon phase migrates to days");
     Verify(!Moons.Instances[0].Visible, "Legacy Moon visibility migrates");
     Verify(World.SaveLevelSpace(Scratch / "Environment.levelspace", &Diagnostic), "Complete environment level saved");
-    SceneWorld Reloaded;
+    WorldSpace Reloaded;
     Verify(Reloaded.LoadLevelSpace(Scratch / "Environment.levelspace", &Diagnostic) &&
                Reloaded.QueryRecordCount() == World.QueryRecordCount(),
            "Complete environment level reloaded");

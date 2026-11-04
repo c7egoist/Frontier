@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <utility>
 
 namespace Frontier
@@ -891,7 +892,8 @@ void ControlCentrePanel::ConstructInterface() noexcept
         Input.ResetInteraction();
         Appearance.CloseMenus();
     }
-    if (Notifications.QueryApplied().ShowFrameRateOverlay)
+    // 📝 A modal editor (the Particle editor) shows its own rate and puts its Close button where the badge would sit.
+    if (Notifications.QueryApplied().ShowFrameRateOverlay && ImGui::GetTopMostPopupModal() == nullptr)
     {
         char FpsLabel[32];
         std::snprintf(FpsLabel, sizeof(FpsLabel), "%.1f FPS", ImGui::GetIO().Framerate);

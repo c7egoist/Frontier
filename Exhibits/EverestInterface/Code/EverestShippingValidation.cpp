@@ -1,7 +1,7 @@
 /*==========================================================================================================================================
                                                    EVERESTSHIPPINGVALIDATION.CPP
 ==========================================================================================================================================*/
-// 🧩 Shipping validation (FRONTIER_EDITOR == 0): proves SceneWorld, .levelspace containers, physics, thermal, and chemical simulation link
+// 🧩 Shipping validation (FRONTIER_EDITOR == 0): proves WorldSpace, .levelspace containers, physics, thermal, and chemical simulation link
 //    and run cleanly with SceneDirectory, InspectorRuntime, and Editor UI compiled out completely.
 
 #include "Engine/Diagnostics/BuildConfiguration.h"
@@ -40,7 +40,7 @@ int main(int ArgumentCount, char** Arguments)
         const std::filesystem::path EverestRoot = std::filesystem::absolute(Arguments[1]);
 
         Everest::EverestWorkspace Workspace(EverestRoot);
-        Frontier::SceneWorld&     World = Workspace.QuerySceneWorld();
+        Frontier::WorldSpace&     World = Workspace.QueryWorldSpace();
         Require(World.LoadLevelSpace(EverestRoot.parent_path().parent_path() / "Exhibits/EverestInterface/Content/Simulation.levelspace"), "Simulation exhibit fixture failed to load");
 
         Require(World.QueryRecordCount() == 26, "Expected 26 dynamic records from the Simulation fixture in Shipping.");
@@ -67,7 +67,7 @@ int main(int ArgumentCount, char** Arguments)
         Require(Oscillator != nullptr, "HarmonicOscillatorRecord missing from Default.levelspace.");
         const float InitialDisp = Oscillator->QueryOscillator().CurrentDisplacementM;
 
-        // Step simulation frames via EverestWorkspace -> EverestApplication -> SceneWorld.
+        // Step simulation frames via EverestWorkspace -> EverestApplication -> WorldSpace.
         for (int Step = 0; Step < 30; ++Step)
         {
             Workspace.IntegrateSimulation(1.0 / 60.0);
@@ -89,7 +89,7 @@ int main(int ArgumentCount, char** Arguments)
 
         const std::filesystem::path RoundTripPath = std::filesystem::temp_directory_path() / "EverestShippingRoundTrip.levelspace";
         Require(World.SaveLevelSpace(RoundTripPath, &ErrorDiag), "SaveLevelSpace failed in Shipping.");
-        Frontier::SceneWorld Reloaded;
+        Frontier::WorldSpace Reloaded;
         Everest::RegisterEverestSimulationTypes(Reloaded);
         Require(Reloaded.LoadLevelSpace(RoundTripPath, &ErrorDiag), "LoadLevelSpace failed in Shipping.");
         Require(Reloaded.QueryRecordCount() == 26, "Reloaded .levelspace record count mismatch.");

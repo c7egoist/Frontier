@@ -18,7 +18,7 @@
 #include "UI/SolidArc/Document/SolidArcSpecimen.h"
 #include "UI/SolidArc/Document/VehicleCurveImport.h"
 #include "UI/SolidArc/Viewport/SolidArcCamera.h"
-#include "UI/SolidArc/Viewport/SolidArcGizmo.h"
+#include "Frontier/Extensions/Interface/GizmoSpace.h"
 #include "UI/SolidArc/Viewport/SolidArcSnapping.h"
 #include "UI/SolidArc/Viewport/Generated/SolidArcShaderArchive.h"
 #include "UI/SolidArc/Interface/SolidArcInterface.h"
@@ -2944,7 +2944,7 @@ void ValidateGizmoAndContinuedLofts()
             { OrbitViewPreset::Isometric, "Isometric(3D)", false, false }
         };
 
-        const auto CountVisible = [](const SolidArcGizmoSession& Gizmo, SolidArcGizmoHandle First)
+        const auto CountVisible = [](const SolidArcGizmoSession& Gizmo, GizmoHandle First)
         {
             int Shown = 0;
             for (int Axis = 0; Axis < 3; ++Axis)
@@ -2967,13 +2967,13 @@ void ValidateGizmoAndContinuedLofts()
         {
             for (int Axis = 0; Axis < 3; ++Axis)
             {
-                const SolidArcGizmoHandle Handle = SolidArcGizmoHandle(uint32_t(SolidArcGizmoHandle::TranslateX) + uint32_t(Axis));
+                const GizmoHandle Handle = GizmoHandle(uint32_t(GizmoHandle::TranslateX) + uint32_t(Axis));
                 if ((Gizmo.Pose.Hidden >> uint32_t(Handle)) & 1u) continue;
                 // Cone spans [0.86, 1.04] · Size; 1.00 · Size probes the unoccluded cone tip half (clear of the 0.95 quad corner on isometric rays).
                 const Vector3 Tip = Gizmo.Pose.Origin + Gizmo.Pose.Axes[Axis] * (1.00 * Gizmo.Pose.Size);
                 double PixelX = 0.0, PixelY = 0.0;
                 if (!ProjectPoint(Frame, Tip, PixelX, PixelY)) return false;
-                if (PickSolidArcGizmo(Gizmo.Geometry, Frame, PixelX, PixelY, 6.0) != Handle) return false;
+                if (PickGizmoHandle(Gizmo.Geometry, Frame, PixelX, PixelY, 6.0) != Handle) return false;
             }
             return !Gizmo.Geometry.Vertices.empty();
         };
@@ -3007,10 +3007,10 @@ void ValidateGizmoAndContinuedLofts()
                     State.Camera.Distance            = 6.0;
                     const OrbitCameraFrame Frame = FrameOrbitCamera(State.Camera, 1280.0, 720.0);
                     EvaluateSolidArcGizmo(State, Frame);
-                    const int Arrows = CountVisible(State.Gizmo, SolidArcGizmoHandle::TranslateX);
-                    const int Planes = CountVisible(State.Gizmo, SolidArcGizmoHandle::PlaneYZ);
-                    const int Rings  = CountVisible(State.Gizmo, SolidArcGizmoHandle::RotateX);
-                    const int Scales = CountVisible(State.Gizmo, SolidArcGizmoHandle::ScaleX);
+                    const int Arrows = CountVisible(State.Gizmo, GizmoHandle::TranslateX);
+                    const int Planes = CountVisible(State.Gizmo, GizmoHandle::PlaneYZ);
+                    const int Rings  = CountVisible(State.Gizmo, GizmoHandle::RotateX);
+                    const int Scales = CountVisible(State.Gizmo, GizmoHandle::ScaleX);
                     const bool ExpectedCounts = View.FlatCondition ? (Arrows == 2 && Planes == 1 && Rings == 1 && Scales == 2)
                                                                    : (Arrows == 3 && Planes == 3 && Rings == 3 && Scales == 3);
                     const bool PickOk = VerifyShownArrowsPickable(State.Gizmo, Frame);
@@ -3022,7 +3022,7 @@ void ValidateGizmoAndContinuedLofts()
                 PresentOrbitView(State.Camera, OrbitViewPreset::Top);
                 State.Camera.OrthographicEnabled = true;
                 EvaluateSolidArcGizmo(State, FrameOrbitCamera(State.Camera, 1280.0, 720.0));
-                const SolidArcCommandOutcome Moved = ApplySolidArcGizmo(State, SolidArcGizmoHandle::PlaneXY, { 0.35, -0.25, 0.0 });
+                const SolidArcCommandOutcome Moved = ApplySolidArcGizmo(State, GizmoHandle::PlaneXY, { 0.35, -0.25, 0.0 });
                 if (!Moved.AcceptedCondition || !State.Document.Summary.SoundCondition
                     || std::abs(State.Document.Summary.Volume - VolumeBefore) > 1.0e-9 * std::max(1.0, VolumeBefore))
                 {
@@ -3063,15 +3063,15 @@ void ValidateGizmoAndContinuedLofts()
                 State.Camera.OrthographicEnabled = View.Orthographic;
                 const OrbitCameraFrame Frame = FrameOrbitCamera(State.Camera, 1280.0, 720.0);
                 EvaluateSolidArcGizmo(State, Frame);
-                const int Arrows = CountVisible(State.Gizmo, SolidArcGizmoHandle::TranslateX);
-                const int Planes = CountVisible(State.Gizmo, SolidArcGizmoHandle::PlaneYZ);
+                const int Arrows = CountVisible(State.Gizmo, GizmoHandle::TranslateX);
+                const int Planes = CountVisible(State.Gizmo, GizmoHandle::PlaneYZ);
                 if (Arrows != (View.FlatCondition ? 2 : 3) || Planes != (View.FlatCondition ? 1 : 3) || !VerifyShownArrowsPickable(State.Gizmo, Frame))
                     ++SubFailures;
             }
             PresentOrbitView(State.Camera, OrbitViewPreset::Top);
             State.Camera.OrthographicEnabled = true;
             EvaluateSolidArcGizmo(State, FrameOrbitCamera(State.Camera, 1280.0, 720.0));
-            const SolidArcCommandOutcome Pushed = ApplySolidArcGizmo(State, SolidArcGizmoHandle::TranslateX, { 0.25, 0.0, 0.0 });
+            const SolidArcCommandOutcome Pushed = ApplySolidArcGizmo(State, GizmoHandle::TranslateX, { 0.25, 0.0, 0.0 });
             const double FaceVolErr = std::abs(State.Document.Summary.Volume - 4.5);
             if (!Pushed.AcceptedCondition || FaceVolErr > 1.0e-9) ++SubFailures;
             RefreshSolidArcScene(State, false);
@@ -3086,18 +3086,18 @@ void ValidateGizmoAndContinuedLofts()
                 State.Camera.OrthographicEnabled = View.Orthographic;
                 const OrbitCameraFrame Frame = FrameOrbitCamera(State.Camera, 1280.0, 720.0);
                 EvaluateSolidArcGizmo(State, Frame);
-                if (CountVisible(State.Gizmo, SolidArcGizmoHandle::TranslateX) != (View.FlatCondition ? 2 : 3) || !VerifyShownArrowsPickable(State.Gizmo, Frame))
+                if (CountVisible(State.Gizmo, GizmoHandle::TranslateX) != (View.FlatCondition ? 2 : 3) || !VerifyShownArrowsPickable(State.Gizmo, Frame))
                     ++SubFailures;
             }
             State.PickMode = SolidArcPickMode::ControlPoint;
             SelectSolidArcName(State.Document, SolidArcSelectionKind::Vertex, State.Scene.Vertices[0].Name, false, ActiveBodyKey);
             PresentOrbitView(State.Camera, OrbitViewPreset::Top);
             EvaluateSolidArcGizmo(State, FrameOrbitCamera(State.Camera, 1280.0, 720.0));
-            if (CountVisible(State.Gizmo, SolidArcGizmoHandle::TranslateX) != 2 || CountVisible(State.Gizmo, SolidArcGizmoHandle::PlaneYZ) != 1)
+            if (CountVisible(State.Gizmo, GizmoHandle::TranslateX) != 2 || CountVisible(State.Gizmo, GizmoHandle::PlaneYZ) != 1)
                 ++SubFailures;
             SelectSolidArcName(State.Document, SolidArcSelectionKind::Vertex, State.Scene.Vertices[1].Name, true, ActiveBodyKey);
             EvaluateSolidArcGizmo(State, FrameOrbitCamera(State.Camera, 1280.0, 720.0));
-            if (CountVisible(State.Gizmo, SolidArcGizmoHandle::TranslateX) != 2 || CountVisible(State.Gizmo, SolidArcGizmoHandle::ScaleX) != 2)
+            if (CountVisible(State.Gizmo, GizmoHandle::TranslateX) != 2 || CountVisible(State.Gizmo, GizmoHandle::ScaleX) != 2)
                 ++SubFailures;
 
             Tally(GizmoAllViewsGate, FaceVolErr, SubFailures == 0,
@@ -3154,8 +3154,8 @@ void ValidateGizmoAndContinuedLofts()
                             State.Camera.OrthographicEnabled = View.Orthographic;
                             const OrbitCameraFrame Frame = FrameOrbitCamera(State.Camera, 1280.0, 720.0);
                             EvaluateSolidArcGizmo(State, Frame);
-                            const int Arrows = CountVisible(State.Gizmo, SolidArcGizmoHandle::TranslateX);
-                            const int Planes = CountVisible(State.Gizmo, SolidArcGizmoHandle::PlaneYZ);
+                            const int Arrows = CountVisible(State.Gizmo, GizmoHandle::TranslateX);
+                            const int Planes = CountVisible(State.Gizmo, GizmoHandle::PlaneYZ);
                             ++SketchChecks;
                             if (State.Gizmo.Target != SolidArcGizmoTarget::Sketches
                                 || Arrows != (View.FlatCondition ? 2 : 3)
@@ -3177,8 +3177,8 @@ void ValidateGizmoAndContinuedLofts()
                             State.Camera.OrthographicEnabled = View.Orthographic;
                             const OrbitCameraFrame Frame = FrameOrbitCamera(State.Camera, 1280.0, 720.0);
                             EvaluateSolidArcGizmo(State, Frame);
-                            const int Arrows = CountVisible(State.Gizmo, SolidArcGizmoHandle::TranslateX);
-                            const int Planes = CountVisible(State.Gizmo, SolidArcGizmoHandle::PlaneYZ);
+                            const int Arrows = CountVisible(State.Gizmo, GizmoHandle::TranslateX);
+                            const int Planes = CountVisible(State.Gizmo, GizmoHandle::PlaneYZ);
                             ++SketchChecks;
                             if (State.Gizmo.Target != SolidArcGizmoTarget::Points
                                 || Arrows != (View.FlatCondition ? 2 : 3)
@@ -3224,8 +3224,8 @@ void ValidateGizmoAndContinuedLofts()
                     EvaluateSolidArcGizmo(State, Frame);
                     ++SpaceChecks;
                     if (State.Gizmo.Target != SolidArcGizmoTarget::Sketches
-                        || CountVisible(State.Gizmo, SolidArcGizmoHandle::TranslateX) != (View.FlatCondition ? 2 : 3)
-                        || CountVisible(State.Gizmo, SolidArcGizmoHandle::PlaneYZ) != (View.FlatCondition ? 1 : 3)
+                        || CountVisible(State.Gizmo, GizmoHandle::TranslateX) != (View.FlatCondition ? 2 : 3)
+                        || CountVisible(State.Gizmo, GizmoHandle::PlaneYZ) != (View.FlatCondition ? 1 : 3)
                         || !VerifyShownArrowsPickable(State.Gizmo, Frame))
                     {
                         ++SpaceFailures;
@@ -3243,8 +3243,8 @@ void ValidateGizmoAndContinuedLofts()
                     EvaluateSolidArcGizmo(State, Frame);
                     ++SpaceChecks;
                     if (State.Gizmo.Target != SolidArcGizmoTarget::Poles
-                        || CountVisible(State.Gizmo, SolidArcGizmoHandle::TranslateX) != (View.FlatCondition ? 2 : 3)
-                        || CountVisible(State.Gizmo, SolidArcGizmoHandle::PlaneYZ) != (View.FlatCondition ? 1 : 3)
+                        || CountVisible(State.Gizmo, GizmoHandle::TranslateX) != (View.FlatCondition ? 2 : 3)
+                        || CountVisible(State.Gizmo, GizmoHandle::PlaneYZ) != (View.FlatCondition ? 1 : 3)
                         || !VerifyShownArrowsPickable(State.Gizmo, Frame))
                     {
                         ++SpaceFailures;
@@ -3258,9 +3258,9 @@ void ValidateGizmoAndContinuedLofts()
                 EvaluateSolidArcGizmo(State, FrameOrbitCamera(State.Camera, 1280.0, 720.0));
                 ++SpaceChecks;
                 if (State.Gizmo.Target != SolidArcGizmoTarget::Poles
-                    || CountVisible(State.Gizmo, SolidArcGizmoHandle::TranslateX) != 2
-                    || CountVisible(State.Gizmo, SolidArcGizmoHandle::ScaleX) != 2
-                    || CountVisible(State.Gizmo, SolidArcGizmoHandle::RotateX) != 1)
+                    || CountVisible(State.Gizmo, GizmoHandle::TranslateX) != 2
+                    || CountVisible(State.Gizmo, GizmoHandle::ScaleX) != 2
+                    || CountVisible(State.Gizmo, GizmoHandle::RotateX) != 1)
                 {
                     ++SpaceFailures;
                 }
@@ -3274,7 +3274,7 @@ void ValidateGizmoAndContinuedLofts()
             PresentOrbitView(State.Camera, OrbitViewPreset::Top);
             EvaluateSolidArcGizmo(State, FrameOrbitCamera(State.Camera, 1280.0, 720.0));
             const Vector3 PoleBefore = State.Document.Regeneration.Curves.at(CurveA).Curve.Definition->Poles[1];
-            const SolidArcCommandOutcome PoleMoved = ApplySolidArcGizmo(State, SolidArcGizmoHandle::TranslateY, { 0.0, 0.35, 0.0 });
+            const SolidArcCommandOutcome PoleMoved = ApplySolidArcGizmo(State, GizmoHandle::TranslateY, { 0.0, 0.35, 0.0 });
             const Vector3 PoleAfter  = State.Document.Regeneration.Curves.at(CurveA).Curve.Definition->Poles[1];
             const double  PoleErr    = Distance(PoleAfter, PoleBefore + Vector3{ 0.0, 0.35, 0.0 });
             if (!PoleMoved.AcceptedCondition || PoleErr > 1.0e-12 || !State.Document.Summary.SoundCondition) ++SpaceFailures;
@@ -3285,7 +3285,7 @@ void ValidateGizmoAndContinuedLofts()
             State.Document.Selection.Curves = { CurveB };
             EvaluateSolidArcGizmo(State, FrameOrbitCamera(State.Camera, 1280.0, 720.0));
             const Vector3 EndBefore  = State.Document.Regeneration.Curves.at(CurveB).Curve.Definition->Poles.back();
-            const SolidArcCommandOutcome CurveMoved = ApplySolidArcGizmo(State, SolidArcGizmoHandle::TranslateX, { 0.25, 0.0, 0.0 });
+            const SolidArcCommandOutcome CurveMoved = ApplySolidArcGizmo(State, GizmoHandle::TranslateX, { 0.25, 0.0, 0.0 });
             const Vector3 EndAfter   = State.Document.Regeneration.Curves.at(CurveB).Curve.Definition->Poles.back();
             const double  CurveErr   = Distance(EndAfter, EndBefore + Vector3{ 0.25, 0.0, 0.0 });
             if (!CurveMoved.AcceptedCondition || CurveErr > 1.0e-12 || !State.Document.Summary.SoundCondition) ++SpaceFailures;
@@ -4436,10 +4436,10 @@ void ValidateBatch5TransformsNumpadAndSplitViews()
                   : ("Direct sequence failed: " + Err + " " + ErrSign));
 
         // ② Modal gizmo single-axis isolation + 3D axis guide line + live G ⇄ R ⇄ S verb switching + repeat-axis free toggle:
-        auto OnlyHandleInGizmo = [&](SolidArcGizmoHandle ExpectedHandle)
+        auto OnlyHandleInGizmo = [&](GizmoHandle ExpectedHandle)
         {
             if (Ui.State.Style.Gizmo.Vertices.empty()) return false;
-            for (const SolidArcGizmoVertex& V : Ui.State.Style.Gizmo.Vertices)
+            for (const GizmoVertex& V : Ui.State.Style.Gizmo.Vertices)
                 if (V.Handle != uint32_t(ExpectedHandle)) return false;
             return true;
         };
@@ -4459,19 +4459,19 @@ void ValidateBatch5TransformsNumpadAndSplitViews()
 
         std::string ErrModal;
         const bool OpenGZ = Ui.RunScript("key G\nframes 1\nkey Z\nframes 1\n", ErrModal);
-        const bool OnlyTransZ   = OpenGZ && OnlyHandleInGizmo(SolidArcGizmoHandle::TranslateZ)
+        const bool OnlyTransZ   = OpenGZ && OnlyHandleInGizmo(GizmoHandle::TranslateZ)
                                && Ui.State.Widgets.Find("GizmoTranslateZ") != nullptr
                                && Ui.State.Widgets.Find("GizmoTranslateX") == nullptr
                                && Ui.State.Widgets.Find("GizmoTranslateY") == nullptr;
         const bool HasGuideLine = OpenGZ && HasBlueAxisGuideLineInDrawData();
 
         const bool SwitchR      = Ui.RunScript("key R\nframes 1\n", ErrModal);
-        const bool OnlyRotZ     = SwitchR && OnlyHandleInGizmo(SolidArcGizmoHandle::RotateZ)
+        const bool OnlyRotZ     = SwitchR && OnlyHandleInGizmo(GizmoHandle::RotateZ)
                                && Ui.State.Widgets.Find("GizmoRotateZ") != nullptr
                                && Ui.State.Widgets.Find("GizmoRotateX") == nullptr;
 
         const bool SwitchS      = Ui.RunScript("key S\nframes 1\n", ErrModal);
-        const bool OnlyScaleZ   = SwitchS && OnlyHandleInGizmo(SolidArcGizmoHandle::ScaleZ)
+        const bool OnlyScaleZ   = SwitchS && OnlyHandleInGizmo(GizmoHandle::ScaleZ)
                                && Ui.State.Widgets.Find("GizmoScaleZ") != nullptr
                                && Ui.State.Widgets.Find("GizmoScaleX") == nullptr;
 
@@ -4726,8 +4726,8 @@ void ValidateBatch5TransformsNumpadAndSplitViews()
         for (const SolidArcRasterPane& P : PanesGZ)
         {
             if (P.Style.Gizmo.Vertices.empty()) AllFourIsolateZ = false;
-            for (const SolidArcGizmoVertex& V : P.Style.Gizmo.Vertices)
-                if (V.Handle != uint32_t(SolidArcGizmoHandle::TranslateZ)) AllFourIsolateZ = false;
+            for (const GizmoVertex& V : P.Style.Gizmo.Vertices)
+                if (V.Handle != uint32_t(GizmoHandle::TranslateZ)) AllFourIsolateZ = false;
         }
         (void)Ui.RunScript("type 4\nframes 1\nkey Enter\nframes 2\nexpect transform == 0\n", Err);
         RefreshSolidArcScene(Ui.State, false);
@@ -4754,12 +4754,12 @@ static void ValidateBatch6GizmoZoomAndInteractiveDimensions()
     };
 
     // Measure max projected screen-pixel distance from Origin to any TranslateZ vertex on a gizmo in Frame.
-    auto GizmoHandlePixelSpan = [&](const SolidArcGizmoGeometry& Gizmo, const Vector3& Origin, const OrbitCameraFrame& F, SolidArcGizmoHandle Handle) -> double
+    auto GizmoHandlePixelSpan = [&](const GizmoGeometry& Gizmo, const Vector3& Origin, const OrbitCameraFrame& F, GizmoHandle Handle) -> double
     {
         double Ox = 0.0, Oy = 0.0;
         if (!ProjectPanePixel(F, Origin.X, Origin.Y, Origin.Z, Ox, Oy)) return 0.0;
         double Best = 0.0;
-        for (const SolidArcGizmoVertex& V : Gizmo.Vertices)
+        for (const GizmoVertex& V : Gizmo.Vertices)
         {
             if (V.Handle != uint32_t(Handle)) continue;
             double Vx = 0.0, Vy = 0.0;
@@ -4790,9 +4790,9 @@ static void ValidateBatch6GizmoZoomAndInteractiveDimensions()
 
         const Vector3 GizmoOrigin = Ui.State.Gizmo.Pose.Origin;
         const OrbitCameraFrame RefUiFrame = FrameOrbitCamera(Ui.State.Camera, Ui.State.ViewportRect[2], Ui.State.ViewportRect[3]);
-        const double RefUiSpan = GizmoHandlePixelSpan(Ui.State.Style.Gizmo, GizmoOrigin, RefUiFrame, SolidArcGizmoHandle::TranslateZ);
+        const double RefUiSpan = GizmoHandlePixelSpan(Ui.State.Style.Gizmo, GizmoOrigin, RefUiFrame, GizmoHandle::TranslateZ);
         const std::vector<SolidArcRasterPane> RefPanes = ComposeSolidArcRasterPanes(Ui.State, 1280, 720);
-        const double RefGpuSpan = GizmoHandlePixelSpan(RefPanes[0].Style.Gizmo, GizmoOrigin, RefPanes[0].Frame, SolidArcGizmoHandle::TranslateZ);
+        const double RefGpuSpan = GizmoHandlePixelSpan(RefPanes[0].Style.Gizmo, GizmoOrigin, RefPanes[0].Frame, GizmoHandle::TranslateZ);
 
         // ① 24 consecutive single-frame wheel zoom ticks (12 in, 12 out, zero recovery frames) in Perspective + Ortho:
         double WorstWheelUiJitter  = 0.0;
@@ -4803,9 +4803,9 @@ static void ValidateBatch6GizmoZoomAndInteractiveDimensions()
             Ui.State.Camera.OrthographicEnabled = (Pass == 1);
             Ui.StepFrame();
             const OrbitCameraFrame BaseUiF = FrameOrbitCamera(Ui.State.Camera, Ui.State.ViewportRect[2], Ui.State.ViewportRect[3]);
-            const double BaseUiSpan = GizmoHandlePixelSpan(Ui.State.Style.Gizmo, GizmoOrigin, BaseUiF, SolidArcGizmoHandle::TranslateZ);
+            const double BaseUiSpan = GizmoHandlePixelSpan(Ui.State.Style.Gizmo, GizmoOrigin, BaseUiF, GizmoHandle::TranslateZ);
             const auto BasePanes = ComposeSolidArcRasterPanes(Ui.State, 1280, 720);
-            const double BaseGpuSpan = GizmoHandlePixelSpan(BasePanes[0].Style.Gizmo, GizmoOrigin, BasePanes[0].Frame, SolidArcGizmoHandle::TranslateZ);
+            const double BaseGpuSpan = GizmoHandlePixelSpan(BasePanes[0].Style.Gizmo, GizmoOrigin, BasePanes[0].Frame, GizmoHandle::TranslateZ);
 
             for (int Tick = 0; Tick < 24; ++Tick)
             {
@@ -4817,9 +4817,9 @@ static void ValidateBatch6GizmoZoomAndInteractiveDimensions()
                 Io.MouseWheel = 0.0f;
 
                 const OrbitCameraFrame CurUiF = FrameOrbitCamera(Ui.State.Camera, Ui.State.ViewportRect[2], Ui.State.ViewportRect[3]);
-                const double CurUiSpan = GizmoHandlePixelSpan(Ui.State.Style.Gizmo, GizmoOrigin, CurUiF, SolidArcGizmoHandle::TranslateZ);
+                const double CurUiSpan = GizmoHandlePixelSpan(Ui.State.Style.Gizmo, GizmoOrigin, CurUiF, GizmoHandle::TranslateZ);
                 const auto CurPanes = ComposeSolidArcRasterPanes(Ui.State, 1280, 720);
-                const double CurGpuSpan = GizmoHandlePixelSpan(CurPanes[0].Style.Gizmo, GizmoOrigin, CurPanes[0].Frame, SolidArcGizmoHandle::TranslateZ);
+                const double CurGpuSpan = GizmoHandlePixelSpan(CurPanes[0].Style.Gizmo, GizmoOrigin, CurPanes[0].Frame, GizmoHandle::TranslateZ);
                 // Measure Gizmo.Pose.Size vs exact analytical MeasureGizmoSize:
                 const double ExpectedSize = MeasureGizmoSize(CurUiF, GizmoOrigin, GizmoPixels);
                 const double SizeRelErr   = std::abs(Ui.State.Gizmo.Pose.Size - ExpectedSize) / std::max(1.0e-9, ExpectedSize);
@@ -4862,13 +4862,13 @@ static void ValidateBatch6GizmoZoomAndInteractiveDimensions()
         }
         (void)Ui.RunScript("key G\nframes 1\n", Err);
         const auto ModalPanesBefore = ComposeSolidArcRasterPanes(Ui.State, 1280, 720);
-        const double ModalSpanBefore = GizmoHandlePixelSpan(ModalPanesBefore[0].Style.Gizmo, GizmoOrigin, ModalPanesBefore[0].Frame, SolidArcGizmoHandle::TranslateZ);
+        const double ModalSpanBefore = GizmoHandlePixelSpan(ModalPanesBefore[0].Style.Gizmo, GizmoOrigin, ModalPanesBefore[0].Frame, GizmoHandle::TranslateZ);
         ImGui::GetIO().MousePos   = ImVec2(Ui.State.ViewportRect[0] + 0.5f * Ui.State.ViewportRect[2], Ui.State.ViewportRect[1] + 0.5f * Ui.State.ViewportRect[3]);
         ImGui::GetIO().MouseWheel = 2.0f;
         Ui.StepFrame();
         ImGui::GetIO().MouseWheel = 0.0f;
         const auto ModalPanesAfter = ComposeSolidArcRasterPanes(Ui.State, 1280, 720);
-        const double ModalSpanAfter = GizmoHandlePixelSpan(ModalPanesAfter[0].Style.Gizmo, GizmoOrigin, ModalPanesAfter[0].Frame, SolidArcGizmoHandle::TranslateZ);
+        const double ModalSpanAfter = GizmoHandlePixelSpan(ModalPanesAfter[0].Style.Gizmo, GizmoOrigin, ModalPanesAfter[0].Frame, GizmoHandle::TranslateZ);
         const double ModalZoomJitter = std::abs(ModalSpanAfter - ModalSpanBefore);
         (void)Ui.RunScript("key Escape\nframes 1\n", Err);
         Tally(GizmoZoomGate, std::max(WorstShortcutJitter, ModalZoomJitter),
@@ -9203,25 +9203,25 @@ int main()
                                  { GizmoRotate | GizmoScale, "R+S" }, { GizmoTranslate | GizmoRotate | GizmoScale, "T+R+S" } };
         for (const ModeSet& Set : Sets)
         {
-            SolidArcGizmoPose Pose;
+            GizmoPose Pose;
             Pose.Modes = Set.Modes;
             Pose.Size  = MeasureGizmoSize(Frame, Pose.Origin, GizmoPixels);
-            const SolidArcGizmoGeometry Geometry = BuildSolidArcGizmo(Pose, Frame, SolidArcGizmoHandle::None, SolidArcGizmoHandle::None);
+            const GizmoGeometry Geometry = BuildGizmoGeometry(Pose, Frame, GizmoHandle::None, GizmoHandle::None);
             // 📝 Slate proportions (L = 1, tip 0.95): cone at the tip, cylinder 0.28 inside, plane quad at (u + v)(tip − 0.08),
             //    arc on the 45° bisector at 0.62 · tip.
             const double Tip = 0.95, Arc = 0.62 * Tip / std::sqrt(2.0), Size = Pose.Size;
-            struct Probe { Vector3 Point; SolidArcGizmoHandle Handle; uint32_t Mode; };
+            struct Probe { Vector3 Point; GizmoHandle Handle; uint32_t Mode; };
             const Probe Probes[] = {
-                { { Tip * Size, 0.0, 0.0 }, SolidArcGizmoHandle::TranslateX, GizmoTranslate }, { { 0.0, Tip * Size, 0.0 }, SolidArcGizmoHandle::TranslateY, GizmoTranslate },
-                { { 0.0, 0.0, Tip * Size }, SolidArcGizmoHandle::TranslateZ, GizmoTranslate },
-                { { (Tip - 0.08) * Size, (Tip - 0.08) * Size, 0.0 }, SolidArcGizmoHandle::PlaneXY, GizmoTranslate },
+                { { Tip * Size, 0.0, 0.0 }, GizmoHandle::TranslateX, GizmoTranslate }, { { 0.0, Tip * Size, 0.0 }, GizmoHandle::TranslateY, GizmoTranslate },
+                { { 0.0, 0.0, Tip * Size }, GizmoHandle::TranslateZ, GizmoTranslate },
+                { { (Tip - 0.08) * Size, (Tip - 0.08) * Size, 0.0 }, GizmoHandle::PlaneXY, GizmoTranslate },
                 // 📝 In the exact isometric view the x–z quad centre lies on the eye ray through the y cone (their offset
                 //    (0.87, −0.95, 0.87) runs along the view axis), and the opaque cone rightly wins; probe the quad's free corner.
-                { { (Tip - 0.03) * Size, 0.0, (Tip - 0.13) * Size }, SolidArcGizmoHandle::PlaneXZ, GizmoTranslate },
-                { { (Tip - 0.28) * Size, 0.0, 0.0 }, SolidArcGizmoHandle::ScaleX, GizmoScale }, { { 0.0, (Tip - 0.28) * Size, 0.0 }, SolidArcGizmoHandle::ScaleY, GizmoScale },
-                { { 0.0, 0.0, (Tip - 0.28) * Size }, SolidArcGizmoHandle::ScaleZ, GizmoScale },
-                { { Arc * Size, Arc * Size, 0.0 }, SolidArcGizmoHandle::RotateZ, GizmoRotate }, { { 0.0, Arc * Size, Arc * Size }, SolidArcGizmoHandle::RotateX, GizmoRotate },
-                { { Arc * Size, 0.0, Arc * Size }, SolidArcGizmoHandle::RotateY, GizmoRotate } };
+                { { (Tip - 0.03) * Size, 0.0, (Tip - 0.13) * Size }, GizmoHandle::PlaneXZ, GizmoTranslate },
+                { { (Tip - 0.28) * Size, 0.0, 0.0 }, GizmoHandle::ScaleX, GizmoScale }, { { 0.0, (Tip - 0.28) * Size, 0.0 }, GizmoHandle::ScaleY, GizmoScale },
+                { { 0.0, 0.0, (Tip - 0.28) * Size }, GizmoHandle::ScaleZ, GizmoScale },
+                { { Arc * Size, Arc * Size, 0.0 }, GizmoHandle::RotateZ, GizmoRotate }, { { 0.0, Arc * Size, Arc * Size }, GizmoHandle::RotateX, GizmoRotate },
+                { { Arc * Size, 0.0, Arc * Size }, GizmoHandle::RotateY, GizmoRotate } };
             int Picks = 0, Misses = 0;
             std::string Wrong;
             for (const Probe& Entry : Probes)
@@ -9229,13 +9229,13 @@ int main()
                 if (!(Set.Modes & Entry.Mode)) continue;
                 double X = 0.0, Y = 0.0;
                 Project(Entry.Point, X, Y);
-                const SolidArcGizmoHandle Found = PickSolidArcGizmo(Geometry, Frame, X, Y, 6.0);
+                const GizmoHandle Found = PickGizmoHandle(Geometry, Frame, X, Y, 6.0);
                 ++Picks;
                 if (Found != Entry.Handle) { ++Misses; Wrong += std::string(" ") + GizmoHandleLabel(Entry.Handle) + "→" + GizmoHandleLabel(Found); }
             }
             double FarX = 0.0, FarY = 0.0;
             Project({ 0.0, 0.0, 0.0 }, FarX, FarY);
-            const bool Far = PickSolidArcGizmo(Geometry, Frame, FarX + 400.0, FarY, 6.0) == SolidArcGizmoHandle::None;
+            const bool Far = PickGizmoHandle(Geometry, Frame, FarX + 400.0, FarY, 6.0) == GizmoHandle::None;
             Tally(GizmoGate, double(Misses), Misses == 0 && Far && Geometry.OpaqueCount <= Geometry.Vertices.size() && !Geometry.Vertices.empty(),
                   Format("%s: %d handle(s) picked at their projected centres, far pixel misses, %zu vertices (%u opaque)%s", Set.Name, Picks, Geometry.Vertices.size(), Geometry.OpaqueCount, Wrong.c_str()));
         }

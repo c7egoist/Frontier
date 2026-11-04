@@ -130,7 +130,7 @@ Semantic voids that hide what code does. NOT exhaustive — apply the §0 gates 
 | `Cache` / `Cached` | `Atlas` / `Store` / `Table` / `History` / `Retained` / `Resident` / `Lut`. |
 | `Entity`/`Element` | `RecordEntry`; store `RecordStore`; tag `RecordClassification`. |
 | `Designation` | `…Token` (`RecordToken`), via `TokenIssuer` + `TokenAuthentication`. |
-| `Subsystem` | `Extensions/<Name>/`, a `…Division` coordinator, or name it for what it does. |
+| `Subsystem` | a bridge → `Frontier/Extensions/<Name>/` (`<Name>Extension`); a domain world → `<Domain>Space`; a `…Division` coordinator; or name it for what it does. |
 
 **Render-unit suffixes (choose by mechanism — NOT interchangeable):**
 

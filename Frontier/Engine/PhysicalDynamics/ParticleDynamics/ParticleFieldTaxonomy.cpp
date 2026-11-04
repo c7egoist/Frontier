@@ -30,8 +30,8 @@ constexpr ParticleFieldDescriptor ParticleFieldDescriptors[ParticleFieldCategory
     { ParticleFieldCategory::Gravity, "gravity", "Gravity", ForceContribution::Accelerate, ForceReach::Everywhere, -1, 2, true,
       "m/s²" },
     { ParticleFieldCategory::Orbit, "orbit", "Orbit", ForceContribution::Accelerate, ForceReach::Sphere, -1, 0, false, "m/s²" },
-    { ParticleFieldCategory::Drag, "drag", "Drag volume", ForceContribution::Damp, ForceReach::Box, -1, -1, false, "1/s" },
-    { ParticleFieldCategory::Current, "current", "Current", ForceContribution::Flow, ForceReach::Box, -1, -1, false, "m/s" },
+    { ParticleFieldCategory::Drag, "drag", "Drag volume", ForceContribution::Damp, ForceReach::Box, -1, 4, false, "1/s" },
+    { ParticleFieldCategory::Current, "current", "Current", ForceContribution::Flow, ForceReach::Box, -1, 5, false, "m/s" },
 };
 
 struct ParticleSeparation
@@ -431,7 +431,7 @@ std::optional<ParticleLatticeComponent> ConstructParticleLatticeComponent(const 
 std::optional<ParticleAccelerationEntry> ConstructParticleAccelerationEntry(const ParticleField& Field) noexcept
 {
     const ParticleFieldDescriptor& Descriptor = ResolveParticleFieldDescriptor(Field.Category);
-    if (Descriptor.Contribution != ForceContribution::Accelerate || Descriptor.ForceSlot < 0)
+    if (Descriptor.ForceSlot < 0 || (Descriptor.Contribution == ForceContribution::Flow && Descriptor.LatticeSlot >= 0))
     {
         return std::nullopt;
     }
@@ -442,6 +442,21 @@ std::optional<ParticleAccelerationEntry> ConstructParticleAccelerationEntry(cons
     Entry.Strength        = Descriptor.Inverts ? -Field.Strength : Field.Strength;
     Entry.Swirl           = Field.Swirl;
     Entry.Swallow         = Field.Swallow;
+    if (Field.Category == ParticleFieldCategory::Current)
+    {
+        // 📝 A current carries its flow velocity in the three strength slots (the shader relaxes particles toward it).
+        const double Length = std::sqrt(Field.Direction[0] * Field.Direction[0] + Field.Direction[1] * Field.Direction[1] +
+                                        Field.Direction[2] * Field.Direction[2]);
+        const double Scale  = Length > 1.0e-9 ? Field.Strength / Length : 0.0;
+        Entry.Strength      = Field.Direction[0] * Scale;
+        Entry.Swirl         = Field.Direction[1] * Scale;
+        Entry.Swallow       = Field.Direction[2] * Scale;
+    }
+    else if (Field.Category == ParticleFieldCategory::Drag)
+    {
+        Entry.Swirl   = 0.0;
+        Entry.Swallow = 0.0;
+    }
     Entry.Begins          = Field.Begins;
     Entry.DurationSeconds = Field.Lasts > 0.0 ? Field.Lasts : 1.0e9;
     Entry.PeriodSeconds   = Field.Repeats;
@@ -453,13 +468,9 @@ bool EvaluateParticleFieldPackable(const ParticleField& Field) noexcept
     const ParticleFieldDescriptor& Descriptor = ResolveParticleFieldDescriptor(Field.Category);
     if (Descriptor.Contribution == ForceContribution::Flow)
     {
-        return Descriptor.LatticeSlot >= 0;
+        return Descriptor.LatticeSlot >= 0 || Descriptor.ForceSlot >= 0;
     }
-    if (Descriptor.Contribution == ForceContribution::Accelerate)
-    {
-        return Descriptor.ForceSlot >= 0;
-    }
-    return false;   // 📝 Damping has no GPU path yet; the inspector says so rather than dropping it.
+    return Descriptor.ForceSlot >= 0;   // 📝 Accelerations and the drag volume, in the field program's acceleration list
 }
 
 ParticleFieldPayloads ResolveParticleFieldPayloads(std::span<const ParticleField> Fields, std::optional<double> TimeSeconds)
@@ -472,14 +483,15 @@ ParticleFieldPayloads ResolveParticleFieldPayloads(std::span<const ParticleField
             continue;
         }
         const ForceContribution Contribution = ResolveParticleFieldDescriptor(Field.Category).Contribution;
-        if (Contribution == ForceContribution::Flow)
+        const bool Lattice = Contribution == ForceContribution::Flow && ResolveParticleFieldDescriptor(Field.Category).LatticeSlot >= 0;
+        if (Lattice)
         {
             if (const std::optional<ParticleLatticeComponent> Component = ConstructParticleLatticeComponent(Field))
             {
                 Payloads.Lattice.push_back(*Component);
             }
         }
-        else if (Contribution == ForceContribution::Accelerate)
+        else
         {
             if (!Field.Enabled || !EvaluateParticleFieldAwake(Field, TimeSeconds.value_or(Field.Begins)))
             {

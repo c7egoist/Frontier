@@ -1,9 +1,9 @@
 /*==========================================================================================================================================
-                                                            PARTICLESCENE.CPP
+                                                            PARTICLESPACE.CPP
 ==========================================================================================================================================*/
-// 🧩 The prototype's scene and refresh in C++: effects with their wind links, bursts, molecular sub-steps, the jobs, the guides.
+// 🧩 The particle space and its refresh in C++ (the prototype's Scene): effects with their wind links, bursts, molecular sub-steps, the jobs, the guides.
 
-#include "Frontier/Engine/PhysicalDynamics/ParticleDynamics/ParticleScene.h"
+#include "Frontier/Engine/PhysicalDynamics/ParticleDynamics/ParticleSpace.h"
 
 #include <algorithm>
 #include <cmath>
@@ -53,7 +53,7 @@ void AppendBox(std::vector<float>& Out, const Point& Low, const Point& High, con
 //                                                    EFFECTS
 //------------------------------------------------------------------------------------------------------------------------
 
-double ParticleScene::Random() noexcept
+double ParticleSpace::Random() noexcept
 {
     // 📝 mulberry32, standing in for Math.random.
     RandomCounter  = RandomCounter + 0x6d2b79f5u;
@@ -63,13 +63,13 @@ double ParticleScene::Random() noexcept
     return static_cast<double>(Mixed ^ (Mixed >> 14u)) / 4294967296.0;
 }
 
-uint32_t ParticleScene::CountFlowFields() const noexcept
+uint32_t ParticleSpace::CountFlowFields() const noexcept
 {
     return static_cast<uint32_t>(std::count_if(Fields.begin(), Fields.end(), [](const ParticleField& Field)
                                                { return ResolveParticleFieldDescriptor(Field.Category).Contribution == ForceContribution::Flow; }));
 }
 
-void ParticleScene::ApplyWindLink(const ParticlePreset& Preset)
+void ParticleSpace::ApplyWindLink(const ParticlePreset& Preset)
 {
     if (!Preset.WindLink)
     {
@@ -106,7 +106,7 @@ void ParticleScene::ApplyWindLink(const ParticlePreset& Preset)
     Found->Enabled = true;
 }
 
-void ParticleScene::ConstructDefault(const ParticleEffectLibrary& Library, const std::vector<std::string>* Presets)
+void ParticleSpace::ConstructDefault(const ParticleEffectLibrary& Library, const std::vector<std::string>* Presets)
 {
     Effects.clear();
     FibrePaths.clear();
@@ -132,7 +132,7 @@ void ParticleScene::ConstructDefault(const ParticleEffectLibrary& Library, const
     }
 }
 
-ParticleEffectInstance* ParticleScene::AddEffect(const ParticleEffectLibrary& Library, std::string_view PresetIdentifier)
+ParticleEffectInstance* ParticleSpace::AddEffect(const ParticleEffectLibrary& Library, std::string_view PresetIdentifier)
 {
     const ParticlePreset* Preset = Library.ResolvePreset(PresetIdentifier);
     if (!Preset)
@@ -152,7 +152,7 @@ ParticleEffectInstance* ParticleScene::AddEffect(const ParticleEffectLibrary& Li
     return &Effects.back();
 }
 
-ParticleEffectInstance* ParticleScene::DuplicateEffect(const ParticleEffectLibrary& Library, std::string_view Token)
+ParticleEffectInstance* ParticleSpace::DuplicateEffect(const ParticleEffectLibrary& Library, std::string_view Token)
 {
     const ParticleEffectInstance* Source = ResolveEffect(Token);
     if (!Source)
@@ -178,7 +178,7 @@ ParticleEffectInstance* ParticleScene::DuplicateEffect(const ParticleEffectLibra
     return &Effects.back();
 }
 
-bool ParticleScene::RemoveEffect(std::string_view Token)
+bool ParticleSpace::RemoveEffect(std::string_view Token)
 {
     const auto Before = Effects.size();
     std::erase_if(Effects, [&](const ParticleEffectInstance& Effect) { return Effect.Token == Token; });
@@ -187,13 +187,13 @@ bool ParticleScene::RemoveEffect(std::string_view Token)
     return Effects.size() != Before;
 }
 
-ParticleEffectInstance* ParticleScene::ResolveEffect(std::string_view Token) noexcept
+ParticleEffectInstance* ParticleSpace::ResolveEffect(std::string_view Token) noexcept
 {
     const auto Found = std::find_if(Effects.begin(), Effects.end(), [&](const ParticleEffectInstance& Effect) { return Effect.Token == Token; });
     return Found == Effects.end() ? nullptr : &*Found;
 }
 
-void ParticleScene::ResetEffects()
+void ParticleSpace::ResetEffects()
 {
     for (ParticleEffectInstance& Effect : Effects)
     {
@@ -207,7 +207,7 @@ void ParticleScene::ResetEffects()
     Lightning.Flash = 0.0;
 }
 
-void ParticleScene::ReceiveStrike(const std::array<double, 3>& Hit)
+void ParticleSpace::ReceiveStrike(const std::array<double, 3>& Hit)
 {
     for (ParticleEffectInstance& Effect : Effects)
     {
@@ -219,7 +219,7 @@ void ParticleScene::ReceiveStrike(const std::array<double, 3>& Hit)
     }
 }
 
-std::array<double, 3> ParticleScene::StrikeNow()
+std::array<double, 3> ParticleSpace::StrikeNow()
 {
     const std::array<double, 3> Hit = Lightning.Strike(TimeSeconds);
     ReceiveStrike(Hit);
@@ -230,7 +230,7 @@ std::array<double, 3> ParticleScene::StrikeNow()
 //                                                    GUIDES AND PROBE
 //------------------------------------------------------------------------------------------------------------------------
 
-std::vector<float> ParticleScene::ConstructGuides() const
+std::vector<float> ParticleSpace::ConstructGuides() const
 {
     std::vector<float> Out;
     if (Wind.ShowDomain)
@@ -271,7 +271,7 @@ std::vector<float> ParticleScene::ConstructGuides() const
     return Out;
 }
 
-std::array<uint32_t, 3> ParticleScene::ResolveProbeCell() const noexcept
+std::array<uint32_t, 3> ParticleSpace::ResolveProbeCell() const noexcept
 {
     std::array<uint32_t, 3> Cell{};
     for (int Axis = 0; Axis < 3; ++Axis)
@@ -287,7 +287,7 @@ std::array<uint32_t, 3> ParticleScene::ResolveProbeCell() const noexcept
 //                                                    REFRESH
 //------------------------------------------------------------------------------------------------------------------------
 
-ParticleRefreshPlan ParticleScene::Advance(double RealDeltaSeconds, uint32_t ViewWidth, uint32_t ViewHeight)
+ParticleRefreshPlan ParticleSpace::Advance(double RealDeltaSeconds, uint32_t ViewWidth, uint32_t ViewHeight)
 {
     ParticleRefreshPlan Plan;
     Plan.ViewWidth  = std::max(1u, ViewWidth);
@@ -324,7 +324,22 @@ ParticleRefreshPlan ParticleScene::Advance(double RealDeltaSeconds, uint32_t Vie
 
     const double Aspect = static_cast<double>(Plan.ViewWidth) / static_cast<double>(std::max(1u, Plan.ViewHeight));
     Plan.Camera         = ResolveParticleCamera(Camera, Aspect);
-    const ParticleFieldPayloads Flow = ResolveParticleFieldPayloads(Fields);
+    std::vector<ParticleField> Flowing(Fields.begin(), Fields.end());
+    if (LevelWind.Follow && LevelWind.FlowMps && CountFlowFields() < ParticleWindComponentLimit)
+    {
+        const double Speed = std::hypot((*LevelWind.FlowMps)[0], (*LevelWind.FlowMps)[2]);
+        if (Speed > 1.0e-6)
+        {
+            ParticleField Level = ConstructParticleField(ParticleFieldCategory::Prevailing);
+            Level.Name          = "Level wind";
+            Level.Enabled       = true;
+            Level.Strength      = Speed;
+            Level.Direction     = { (*LevelWind.FlowMps)[0] / Speed, 0.0, (*LevelWind.FlowMps)[2] / Speed };
+            Level.Rate          = 0.0;
+            Flowing.push_back(std::move(Level));
+        }
+    }
+    const ParticleFieldPayloads Flow = ResolveParticleFieldPayloads(Flowing);
     ParticleRefreshReadings     Readings;
     Readings.TimeSeconds    = TimeSeconds;
     Readings.DeltaSeconds   = Delta;

@@ -47,13 +47,25 @@ float3 ResolveFieldAcceleration(float3 Point, float3 Velocity)
         let B = Fields[2u + 3u * Index];
         let C = Fields[3u + 3u * Index];
         if (!EvaluateFieldAwake(C, Now)) { continue; }
+        let Category = ToUnsigned(B.x);
+        if (Category >= 4u)
+        {
+            // 📝 Box volumes: a cube of half size A.w about A.xyz (0: everywhere), fading over its outer fifth. The drag volume
+            //    bleeds B.y of the velocity per second; the current relaxes particles toward its flow B.yzw at 1.5 per second.
+            let Reach = abs(Point - A.xyz);
+            let Edge = max(Reach.x, max(Reach.y, Reach.z));
+            if (A.w > 0.0 && Edge >= A.w) { continue; }
+            let Inside = SelectBranch(1.0 - smoothstep(0.8 * A.w, A.w, Edge), 1.0, A.w <= 0.0);
+            if (Category == 4u) { Acceleration -= Velocity * B.y * Inside; }
+            else { Acceleration += (B.yzw - Velocity) * 1.5 * Inside; }
+            continue;
+        }
         let Offset = A.xyz - Point;
         let Distance = length(Offset);
         let Everywhere = A.w <= 0.0;
         if (!Everywhere && Distance >= A.w) { continue; }
         let Share = SelectBranch(pow(clamp(1.0 - Distance / max(A.w, 1e-3), 0.0, 1.0), 2.0), 1.0, Everywhere);
         let Toward = Offset / max(Distance, 1e-3);
-        let Category = ToUnsigned(B.x);
         if (Category == 0u)
         {
             let Tangent = normalize(cross(float3(0.0, 1.0, 0.0), Toward) + float3(1e-5, 0.0, 0.0));

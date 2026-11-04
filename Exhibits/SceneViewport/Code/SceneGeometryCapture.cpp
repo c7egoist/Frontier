@@ -6,7 +6,7 @@
 
 #include "Engine/Interface/IconPresentation.h"
 #include "Engine/Interface/InspectorRuntime.h"
-#include "EverestSceneViewport.h"
+#include "Frontier/Extensions/Rendering/RenderingExtension.h"
 #include "EverestWorkspace.h"
 #include "Exhibits/ControlCentre/Code/CpuRasterization.h"
 #include "UI/Editor/ControlCentrePanel.h"
@@ -40,7 +40,7 @@ void Require(bool Condition, const std::string& Message)
     if (!Condition) throw std::runtime_error(Message);
 }
 
-Frontier::GeometryRecord* FindGeometry(Frontier::SceneWorld& World, const std::string& Name)
+Frontier::GeometryRecord* FindGeometry(Frontier::WorldSpace& World, const std::string& Name)
 {
     for (const Frontier::SceneRecordBase* Entry : World.FindAllByType("Geometry"))
         if (Entry->QueryRecordName() == Name) return dynamic_cast<Frontier::GeometryRecord*>(World.FindRecord(Entry->QueryToken()));
@@ -95,17 +95,17 @@ int main(int ArgumentCount, char** Arguments)
 
         // 📝 The bridge the editor uses, on a device of its own; the presented image comes back to the CPU.
         Everest::EverestWorkspace     Workspace(*Centre, EverestRoot);
-        Everest::EverestSceneViewport Bridge(EverestRoot, ShaderRoot, nullptr);
+        Frontier::RenderingExtension Bridge(EverestRoot, ShaderRoot, nullptr);
         std::vector<uint8_t>          ViewportPixels;
         std::array<uint32_t, 2>       ViewportExtent = {0, 0};
         std::string                   LastStatus;
         bool                          Frozen = false;   // [-] interface-only ticks: the last image stays, nothing renders
-        Everest::SceneViewportImage   LastImage;
-        Workspace.PresentSceneViewport = [&](const Everest::SceneViewportRequest& Request) {
+        Frontier::SceneViewportImage   LastImage;
+        Workspace.PresentSceneViewport = [&](const Frontier::SceneViewportRequest& Request) {
             if (Frozen && LastImage.Texture != 0) return LastImage;
             const auto Start = std::chrono::steady_clock::now();
-            const Everest::SceneViewportRefresh Outcome = Bridge.Render(Request, Workspace.QuerySceneWorld(), Workspace.QueryElapsedSeconds());
-            Everest::SceneViewportImage Image;
+            const Frontier::SceneViewportRefresh Outcome = Bridge.Render(Request, Workspace.QueryWorldSpace(), Workspace.QueryElapsedSeconds());
+            Frontier::SceneViewportImage Image;
             Image.Status  = Outcome.Status;
             Image.Readout = Outcome.Readout;
             LastStatus    = Outcome.Status;
@@ -119,7 +119,7 @@ int main(int ArgumentCount, char** Arguments)
             LastImage = Image;
             return Image;
         };
-        SceneWorld& World    = Workspace.QuerySceneWorld();
+        WorldSpace& World    = Workspace.QueryWorldSpace();
         auto*       Pipeline = dynamic_cast<RenderPipelineRecord*>(World.FindFirstByType("RenderPipeline"));
         Require(Pipeline != nullptr, "no Render settings record");
         Pipeline->AccessConfiguration().AnalyticIllumination = AnalyticOnly;

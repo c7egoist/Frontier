@@ -4546,9 +4546,9 @@ void ApplyTransformSession(SolidArcWorkspaceState& State)
 // - When unconstrained (Axis < 0): full Move / Rotate / Scale gizmo at DisplayPivot.
 // - When constrained to X / Y / Z (Axis >= 0, !PlaneCondition): hides all other handles so ONLY the chosen axis gizmo handle shows.
 // - When constrained to a plane (Shift+X / Y / Z): shows only the two in-plane handles + plane quad.
-[[nodiscard]] SolidArcGizmoPose MakeTransformSessionGizmoPose(const SolidArcTransformSession& Transform, const OrbitCameraFrame& Frame, SolidArcGizmoHandle& OutActiveHandle)
+[[nodiscard]] GizmoPose MakeTransformSessionGizmoPose(const SolidArcTransformSession& Transform, const OrbitCameraFrame& Frame, GizmoHandle& OutActiveHandle)
 {
-    SolidArcGizmoPose Pose{};
+    GizmoPose Pose{};
     Pose.Origin  = Transform.DisplayPivot;
     Pose.Axes[0] = { 1.0, 0.0, 0.0 };
     Pose.Axes[1] = { 0.0, 1.0, 0.0 };
@@ -4556,16 +4556,16 @@ void ApplyTransformSession(SolidArcWorkspaceState& State)
     Pose.Size    = MeasureGizmoSize(Frame, Pose.Origin, GizmoPixels);
     Pose.Modes   = Transform.Verb == SolidArcTransformVerb::Move ? GizmoTranslate
                  : Transform.Verb == SolidArcTransformVerb::Rotate ? GizmoRotate : GizmoScale;
-    OutActiveHandle = SolidArcGizmoHandle::None;
-    constexpr auto Bit = [](SolidArcGizmoHandle Handle) { return 1u << uint32_t(Handle); };
+    OutActiveHandle = GizmoHandle::None;
+    constexpr auto Bit = [](GizmoHandle Handle) { return 1u << uint32_t(Handle); };
     if (Transform.Axis >= 0 && Transform.Axis < 3)
     {
         if (!Transform.PlaneCondition)
         {
-            const SolidArcGizmoHandle Base = Transform.Verb == SolidArcTransformVerb::Move ? SolidArcGizmoHandle::TranslateX
-                                           : Transform.Verb == SolidArcTransformVerb::Rotate ? SolidArcGizmoHandle::RotateX
-                                           : SolidArcGizmoHandle::ScaleX;
-            OutActiveHandle = SolidArcGizmoHandle(uint8_t(Base) + Transform.Axis);
+            const GizmoHandle Base = Transform.Verb == SolidArcTransformVerb::Move ? GizmoHandle::TranslateX
+                                           : Transform.Verb == SolidArcTransformVerb::Rotate ? GizmoHandle::RotateX
+                                           : GizmoHandle::ScaleX;
+            OutActiveHandle = GizmoHandle(uint8_t(Base) + Transform.Axis);
             Pose.Hidden     = ~Bit(OutActiveHandle);
         }
         else
@@ -4573,16 +4573,16 @@ void ApplyTransformSession(SolidArcWorkspaceState& State)
             const int U = (Transform.Axis + 1) % 3, V = (Transform.Axis + 2) % 3;
             if (Transform.Verb == SolidArcTransformVerb::Move)
             {
-                const auto HPlane = SolidArcGizmoHandle(uint8_t(SolidArcGizmoHandle::PlaneYZ) + Transform.Axis);
-                const auto HU     = SolidArcGizmoHandle(uint8_t(SolidArcGizmoHandle::TranslateX) + U);
-                const auto HV     = SolidArcGizmoHandle(uint8_t(SolidArcGizmoHandle::TranslateX) + V);
+                const auto HPlane = GizmoHandle(uint8_t(GizmoHandle::PlaneYZ) + Transform.Axis);
+                const auto HU     = GizmoHandle(uint8_t(GizmoHandle::TranslateX) + U);
+                const auto HV     = GizmoHandle(uint8_t(GizmoHandle::TranslateX) + V);
                 OutActiveHandle   = HPlane;
                 Pose.Hidden       = ~(Bit(HPlane) | Bit(HU) | Bit(HV));
             }
             else
             {
-                const auto HU   = SolidArcGizmoHandle(uint8_t(SolidArcGizmoHandle::ScaleX) + U);
-                const auto HV   = SolidArcGizmoHandle(uint8_t(SolidArcGizmoHandle::ScaleX) + V);
+                const auto HU   = GizmoHandle(uint8_t(GizmoHandle::ScaleX) + U);
+                const auto HV   = GizmoHandle(uint8_t(GizmoHandle::ScaleX) + V);
                 OutActiveHandle = HU;
                 Pose.Hidden     = ~(Bit(HU) | Bit(HV));
             }
@@ -4708,17 +4708,17 @@ void DriveTransformSession(SolidArcWorkspaceState& State, const OrbitCameraFrame
     }
 
     // Check if an LMB press-and-drag starts on one of the modal gizmo's axis handles to constrain that axis automatically.
-    SolidArcGizmoHandle PreActive = SolidArcGizmoHandle::None;
-    const SolidArcGizmoPose PrePose = MakeTransformSessionGizmoPose(Transform, Frame, PreActive);
-    const SolidArcGizmoGeometry PreGeom = BuildSolidArcGizmo(PrePose, Frame, SolidArcGizmoHandle::None, PreActive);
+    GizmoHandle PreActive = GizmoHandle::None;
+    const GizmoPose PrePose = MakeTransformSessionGizmoPose(Transform, Frame, PreActive);
+    const GizmoGeometry PreGeom = BuildGizmoGeometry(PrePose, Frame, GizmoHandle::None, PreActive);
     if (State.ViewportHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
     {
-        const SolidArcGizmoHandle Hit = PickSolidArcGizmo(PreGeom, Frame, Local.x, Local.y, 7.0);
+        const GizmoHandle Hit = PickGizmoHandle(PreGeom, Frame, Local.x, Local.y, 7.0);
         const int HitAxis = GizmoHandleAxis(Hit);
         if (HitAxis >= 0)
         {
             Transform.Axis           = HitAxis;
-            Transform.PlaneCondition = (Hit >= SolidArcGizmoHandle::PlaneYZ && Hit <= SolidArcGizmoHandle::PlaneXY);
+            Transform.PlaneCondition = (Hit >= GizmoHandle::PlaneYZ && Hit <= GizmoHandle::PlaneXY);
             Transform.Start          = Io.MousePos;
             Transform.StartLocal     = Local;
         }
@@ -4852,20 +4852,20 @@ void DriveTransformSession(SolidArcWorkspaceState& State, const OrbitCameraFrame
     if (!Transform.Typed.empty()) Transform.Readout += " · typed " + Transform.Typed;
 
     // Emit the live modal gizmo (all axes when unconstrained; ONLY the locked axis handle when X / Y / Z is active).
-    SolidArcGizmoHandle ActiveHandle = SolidArcGizmoHandle::None;
-    const SolidArcGizmoPose ModalPose = MakeTransformSessionGizmoPose(Transform, Frame, ActiveHandle);
-    SolidArcGizmoGeometry ModalGeom   = BuildSolidArcGizmo(ModalPose, Frame, SolidArcGizmoHandle::None, ActiveHandle);
-    const SolidArcGizmoHandle HoverHandle = State.ViewportHovered
-        ? PickSolidArcGizmo(ModalGeom, Frame, Local.x, Local.y, 6.0)
-        : SolidArcGizmoHandle::None;
-    if (HoverHandle != SolidArcGizmoHandle::None && ActiveHandle == SolidArcGizmoHandle::None)
-        ModalGeom = BuildSolidArcGizmo(ModalPose, Frame, HoverHandle, SolidArcGizmoHandle::None);
+    GizmoHandle ActiveHandle = GizmoHandle::None;
+    const GizmoPose ModalPose = MakeTransformSessionGizmoPose(Transform, Frame, ActiveHandle);
+    GizmoGeometry ModalGeom   = BuildGizmoGeometry(ModalPose, Frame, GizmoHandle::None, ActiveHandle);
+    const GizmoHandle HoverHandle = State.ViewportHovered
+        ? PickGizmoHandle(ModalGeom, Frame, Local.x, Local.y, 6.0)
+        : GizmoHandle::None;
+    if (HoverHandle != GizmoHandle::None && ActiveHandle == GizmoHandle::None)
+        ModalGeom = BuildGizmoGeometry(ModalPose, Frame, HoverHandle, GizmoHandle::None);
     State.Style.Gizmo = ModalGeom;
 
     // Record visible modal gizmo handle widgets for automated inspection & picking.
     {
         uint32_t Drawn = 0;
-        for (const SolidArcGizmoVertex& Vertex : ModalGeom.Vertices) Drawn |= 1u << Vertex.Handle;
+        for (const GizmoVertex& Vertex : ModalGeom.Vertices) Drawn |= 1u << Vertex.Handle;
         static const char* Keys[] = { "", "GizmoTranslateX", "GizmoTranslateY", "GizmoTranslateZ", "GizmoPlaneYZ", "GizmoPlaneXZ", "GizmoPlaneXY",
                                       "GizmoRotateX", "GizmoRotateY", "GizmoRotateZ", "GizmoScaleX", "GizmoScaleY", "GizmoScaleZ", "GizmoCentre" };
         for (int Code = 1; Code <= 13; ++Code)
@@ -4983,8 +4983,8 @@ void ResolveGizmoTarget(SolidArcWorkspaceState& State)
     Gizmo.Pose.Axes[0] = { 1.0, 0.0, 0.0 };
     Gizmo.Pose.Axes[1] = { 0.0, 1.0, 0.0 };
     Gizmo.Pose.Axes[2] = { 0.0, 0.0, 1.0 };
-    constexpr uint32_t AxisScales = (1u << uint32_t(SolidArcGizmoHandle::ScaleX)) | (1u << uint32_t(SolidArcGizmoHandle::ScaleY)) | (1u << uint32_t(SolidArcGizmoHandle::ScaleZ));
-    constexpr uint32_t CentreBit  = 1u << uint32_t(SolidArcGizmoHandle::Centre);
+    constexpr uint32_t AxisScales = (1u << uint32_t(GizmoHandle::ScaleX)) | (1u << uint32_t(GizmoHandle::ScaleY)) | (1u << uint32_t(GizmoHandle::ScaleZ));
+    constexpr uint32_t CentreBit  = 1u << uint32_t(GizmoHandle::Centre);
     // 📝 Direct reshape: mode-1 body vertices (no sketch points picked) or mode-2 edges move by the gizmo map; the frame is
     //    the world (box edits stay axis-true), centred on the distinct ends. A single vertex only moves.
     const auto ResolveShape = [&](const std::vector<std::string>& Names, bool VertexCondition)
@@ -5018,12 +5018,12 @@ void ResolveGizmoTarget(SolidArcWorkspaceState& State)
             }
         }
         if (Count == 0) return false;
-        constexpr auto Bit = [](SolidArcGizmoHandle Handle) { return 1u << uint32_t(Handle); };
+        constexpr auto Bit = [](GizmoHandle Handle) { return 1u << uint32_t(Handle); };
         uint32_t Hidden = (Gizmo.Modes & (GizmoTranslate | GizmoScale)) ? 0u : CentreBit;
         if (Count == 1)
         {
             // One point: no turn or scale about itself; the centre ring is a screen move only.
-            Hidden = Bit(SolidArcGizmoHandle::RotateX) | Bit(SolidArcGizmoHandle::RotateY) | Bit(SolidArcGizmoHandle::RotateZ) | AxisScales;
+            Hidden = Bit(GizmoHandle::RotateX) | Bit(GizmoHandle::RotateY) | Bit(GizmoHandle::RotateZ) | AxisScales;
             if (!(Gizmo.Modes & GizmoTranslate)) Hidden |= CentreBit;
         }
         Gizmo.Target          = SolidArcGizmoTarget::Shape;
@@ -5051,11 +5051,11 @@ void ResolveGizmoTarget(SolidArcWorkspaceState& State)
             {
                 Vector3 Sum;
                 for (int Pole : State.PoleDrag.PickedPoles) Sum = Sum + Poles[Pole];
-                constexpr auto Bit = [](SolidArcGizmoHandle Handle) { return 1u << uint32_t(Handle); };
+                constexpr auto Bit = [](GizmoHandle Handle) { return 1u << uint32_t(Handle); };
                 uint32_t Hidden = (Gizmo.Modes & (GizmoTranslate | GizmoScale)) ? 0u : CentreBit;
                 if (State.PoleDrag.PickedPoles.size() == 1)
                 {
-                    Hidden = Bit(SolidArcGizmoHandle::RotateX) | Bit(SolidArcGizmoHandle::RotateY) | Bit(SolidArcGizmoHandle::RotateZ) | AxisScales;
+                    Hidden = Bit(GizmoHandle::RotateX) | Bit(GizmoHandle::RotateY) | Bit(GizmoHandle::RotateZ) | AxisScales;
                     if (!(Gizmo.Modes & GizmoTranslate)) Hidden |= CentreBit;
                 }
                 Gizmo.Target      = SolidArcGizmoTarget::Poles;
@@ -5099,10 +5099,10 @@ void ResolveGizmoTarget(SolidArcWorkspaceState& State)
                 const OrthonormalFrame Plane = ElevatedSketchPlane(Document, *Step);
                 Vector3 Sum;
                 for (int Point : Points.Points) Sum = Sum + PlacePlanePoint(Plane, Sketch.Points[Point].Position);
-                constexpr auto Bit = [](SolidArcGizmoHandle Handle) { return 1u << uint32_t(Handle); };
-                uint32_t Hidden = Bit(SolidArcGizmoHandle::TranslateZ) | Bit(SolidArcGizmoHandle::PlaneYZ) | Bit(SolidArcGizmoHandle::PlaneXZ) | Bit(SolidArcGizmoHandle::RotateX)
-                                | Bit(SolidArcGizmoHandle::RotateY) | Bit(SolidArcGizmoHandle::ScaleZ);
-                if (Points.Points.size() == 1) Hidden |= Bit(SolidArcGizmoHandle::RotateZ) | Bit(SolidArcGizmoHandle::ScaleX) | Bit(SolidArcGizmoHandle::ScaleY);
+                constexpr auto Bit = [](GizmoHandle Handle) { return 1u << uint32_t(Handle); };
+                uint32_t Hidden = Bit(GizmoHandle::TranslateZ) | Bit(GizmoHandle::PlaneYZ) | Bit(GizmoHandle::PlaneXZ) | Bit(GizmoHandle::RotateX)
+                                | Bit(GizmoHandle::RotateY) | Bit(GizmoHandle::ScaleZ);
+                if (Points.Points.size() == 1) Hidden |= Bit(GizmoHandle::RotateZ) | Bit(GizmoHandle::ScaleX) | Bit(GizmoHandle::ScaleY);
                 if (!(Gizmo.Modes & GizmoTranslate) && (Points.Points.size() == 1 || !(Gizmo.Modes & GizmoScale))) Hidden |= CentreBit;
                 Gizmo.Target       = SolidArcGizmoTarget::Points;
                 Gizmo.Names        = { Points.Sketch };
@@ -5207,7 +5207,7 @@ void ResolveGizmoTarget(SolidArcWorkspaceState& State)
     Gizmo.Target      = SolidArcGizmoTarget::Sketches;
     Gizmo.Names       = Sketches;
     Gizmo.Pose.Origin = Sum * (1.0 / Count);
-    Gizmo.Pose.Hidden = (SinglePlanarSketch ? (1u << uint32_t(SolidArcGizmoHandle::ScaleZ)) : 0u)
+    Gizmo.Pose.Hidden = (SinglePlanarSketch ? (1u << uint32_t(GizmoHandle::ScaleZ)) : 0u)
                       | ((Gizmo.Modes & (GizmoTranslate | GizmoScale)) ? 0u : CentreBit);
 }
 
@@ -5233,16 +5233,16 @@ void FitGizmoToView(SolidArcWorkspaceState& State)
 {
     SolidArcGizmoSession& Gizmo = State.Gizmo;
     if (Gizmo.Target == SolidArcGizmoTarget::None) return;
-    constexpr auto Bit = [](SolidArcGizmoHandle Handle) { return 1u << uint32_t(Handle); };
-    const auto     Of  = [](SolidArcGizmoHandle First, int Axis) { return SolidArcGizmoHandle(uint8_t(First) + Axis); };
+    constexpr auto Bit = [](GizmoHandle Handle) { return 1u << uint32_t(Handle); };
+    const auto     Of  = [](GizmoHandle First, int Axis) { return GizmoHandle(uint8_t(First) + Axis); };
     const int      View = State.FullXYZEnabled ? -1 : ViewAxisCondition(State.Camera);
     Gizmo.FlatCondition = View >= 0;
     if (View < 0)
     {
         if (Gizmo.Target == SolidArcGizmoTarget::Points)
         {
-            Gizmo.Pose.Hidden &= ~(Bit(SolidArcGizmoHandle::TranslateZ) | Bit(SolidArcGizmoHandle::PlaneYZ) | Bit(SolidArcGizmoHandle::PlaneXZ));
-            if (Gizmo.Points.size() >= 2) Gizmo.Pose.Hidden &= ~(Bit(SolidArcGizmoHandle::RotateX) | Bit(SolidArcGizmoHandle::RotateY));
+            Gizmo.Pose.Hidden &= ~(Bit(GizmoHandle::TranslateZ) | Bit(GizmoHandle::PlaneYZ) | Bit(GizmoHandle::PlaneXZ));
+            if (Gizmo.Points.size() >= 2) Gizmo.Pose.Hidden &= ~(Bit(GizmoHandle::RotateX) | Bit(GizmoHandle::RotateY));
         }
         return;
     }
@@ -5265,11 +5265,11 @@ void FitGizmoToView(SolidArcWorkspaceState& State)
                               || (Gizmo.Target == SolidArcGizmoTarget::Poles  && Gizmo.Points.size() < 2)
                               || (Gizmo.Target == SolidArcGizmoTarget::Shape  && Gizmo.VertexCondition && Gizmo.Names.size() < 2);
         const bool NoScale     = SinglePoint || Gizmo.Target == SolidArcGizmoTarget::Faces;
-        constexpr uint32_t CentreBit = 1u << uint32_t(SolidArcGizmoHandle::Centre);
+        constexpr uint32_t CentreBit = 1u << uint32_t(GizmoHandle::Centre);
         Gizmo.Pose.Hidden = 0u;
         if (SinglePoint)
         {
-            Gizmo.Pose.Hidden |= Bit(SolidArcGizmoHandle::RotateX) | Bit(SolidArcGizmoHandle::RotateY) | Bit(SolidArcGizmoHandle::RotateZ);
+            Gizmo.Pose.Hidden |= Bit(GizmoHandle::RotateX) | Bit(GizmoHandle::RotateY) | Bit(GizmoHandle::RotateZ);
             if (!(Gizmo.Modes & GizmoTranslate)) Gizmo.Pose.Hidden |= CentreBit;
         }
         else if (!(Gizmo.Modes & (GizmoTranslate | GizmoScale)))
@@ -5278,17 +5278,17 @@ void FitGizmoToView(SolidArcWorkspaceState& State)
         }
         if (NoScale)
         {
-            Gizmo.Pose.Hidden |= Bit(SolidArcGizmoHandle::ScaleX) | Bit(SolidArcGizmoHandle::ScaleY) | Bit(SolidArcGizmoHandle::ScaleZ);
+            Gizmo.Pose.Hidden |= Bit(GizmoHandle::ScaleX) | Bit(GizmoHandle::ScaleY) | Bit(GizmoHandle::ScaleZ);
         }
     }
     for (int Axis = 0; Axis < 3; ++Axis)
     {
         if (Axis == Facing)
         {
-            Gizmo.Pose.Hidden |= Bit(Of(SolidArcGizmoHandle::TranslateX, Axis)) | Bit(Of(SolidArcGizmoHandle::ScaleX, Axis));
+            Gizmo.Pose.Hidden |= Bit(Of(GizmoHandle::TranslateX, Axis)) | Bit(Of(GizmoHandle::ScaleX, Axis));
             continue;
         }
-        Gizmo.Pose.Hidden |= Bit(Of(SolidArcGizmoHandle::PlaneYZ, Axis)) | Bit(Of(SolidArcGizmoHandle::RotateX, Axis));
+        Gizmo.Pose.Hidden |= Bit(Of(GizmoHandle::PlaneYZ, Axis)) | Bit(Of(GizmoHandle::RotateX, Axis));
     }
 }
 
@@ -5300,20 +5300,20 @@ void FitGizmoToView(SolidArcWorkspaceState& State)
     return Gizmo.Target == SolidArcGizmoTarget::Faces || !(Gizmo.Pose.Modes & GizmoTranslate);
 }
 
-[[nodiscard]] bool GizmoRotateHandle(SolidArcGizmoHandle Handle) noexcept
+[[nodiscard]] bool GizmoRotateHandle(GizmoHandle Handle) noexcept
 {
-    return Handle >= SolidArcGizmoHandle::RotateX && Handle <= SolidArcGizmoHandle::RotateZ;
+    return Handle >= GizmoHandle::RotateX && Handle <= GizmoHandle::RotateZ;
 }
 
-[[nodiscard]] bool GizmoScaleHandle(const SolidArcGizmoSession& Gizmo, SolidArcGizmoHandle Handle)
+[[nodiscard]] bool GizmoScaleHandle(const SolidArcGizmoSession& Gizmo, GizmoHandle Handle)
 {
-    return (Handle >= SolidArcGizmoHandle::ScaleX && Handle <= SolidArcGizmoHandle::ScaleZ) || (Handle == SolidArcGizmoHandle::Centre && GizmoCentreScaleCondition(Gizmo));
+    return (Handle >= GizmoHandle::ScaleX && Handle <= GizmoHandle::ScaleZ) || (Handle == GizmoHandle::Centre && GizmoCentreScaleCondition(Gizmo));
 }
 
 // The rigid / affine map of the current drag (bodies and sketches).
 [[nodiscard]] AffineMap GizmoMap(const SolidArcGizmoSession& Gizmo)
 {
-    const SolidArcGizmoHandle Handle = Gizmo.Grab;
+    const GizmoHandle Handle = Gizmo.Grab;
     const int                 Axis   = GizmoHandleAxis(Handle);
     if (GizmoRotateHandle(Handle)) return RotationMap(Gizmo.Pose.Origin, Gizmo.Pose.Axes[Axis], Gizmo.Angle);
     if (GizmoScaleHandle(Gizmo, Handle))
@@ -5345,7 +5345,7 @@ void FitGizmoToView(SolidArcWorkspaceState& State)
 //    about the axis through its centre; scale scales each face about its centre.
 [[nodiscard]] SolidArcCommandOutcome ApplyGizmoCommand(SolidArcDocument& Document, const SolidArcGizmoSession& Gizmo)
 {
-    const SolidArcGizmoHandle Handle = Gizmo.Grab;
+    const GizmoHandle Handle = Gizmo.Grab;
     const int                 Axis   = GizmoHandleAxis(Handle);
     const char* Verb = GizmoRotateHandle(Handle) ? "Rotate" : GizmoScaleHandle(Gizmo, Handle) ? "Scale" : "Move";
     switch (Gizmo.Target)
@@ -5396,7 +5396,7 @@ void FitGizmoToView(SolidArcWorkspaceState& State)
         if (GizmoScaleHandle(Gizmo, Handle)) return ChangeSolidArcSelection(Document, FaceOperationKind::Scale, Gizmo.Factor);
         const double  ShiftLength = Length(Gizmo.Shift);
         const Vector3 Direction   = ShiftLength > 0.0 ? Gizmo.Shift * (1.0 / ShiftLength) : Gizmo.FaceNormal;
-        if (Handle == SolidArcGizmoHandle::TranslateZ && std::abs(Dot(Gizmo.Pose.Axes[2], Gizmo.FaceNormal)) > 1.0 - 1.0e-5)
+        if (Handle == GizmoHandle::TranslateZ && std::abs(Dot(Gizmo.Pose.Axes[2], Gizmo.FaceNormal)) > 1.0 - 1.0e-5)
             return ChangeSolidArcSelection(Document, FaceOperationKind::Offset, Dot(Gizmo.Shift, Gizmo.FaceNormal));
         if (std::abs(Dot(Direction, Gizmo.FaceNormal)) > 1.0 - 1.0e-5)
             return ChangeSolidArcSelection(Document, FaceOperationKind::Offset, Dot(Gizmo.Shift, Gizmo.FaceNormal));
@@ -5424,7 +5424,7 @@ void CancelGizmoDrag(SolidArcWorkspaceState& State, const std::string& Message)
 {
     SolidArcGizmoSession& Gizmo = State.Gizmo;
     Gizmo.DragCondition = false;
-    Gizmo.Grab          = SolidArcGizmoHandle::None;
+    Gizmo.Grab          = GizmoHandle::None;
     Gizmo.Preview.reset();
     Gizmo.RigidCondition = false;
     Gizmo.StagedKey.clear();
@@ -5462,7 +5462,7 @@ void CommitGizmoDrag(SolidArcWorkspaceState& State)
 void DriveGizmoDrag(SolidArcWorkspaceState& State, const OrbitCameraFrame& Frame, ImVec2 Local)
 {
     SolidArcGizmoSession&    Gizmo = State.Gizmo;
-    const SolidArcGizmoPose& Pose  = Gizmo.Pose;
+    const GizmoPose& Pose  = Gizmo.Pose;
     const ImGuiIO&           Io    = ImGui::GetIO();
     const bool               Snap  = !Io.KeyCtrl;                                            // Snapping on by default, Ctrl free
     const OrbitRay           Ray   = CastOrbitRay(Frame, Local.x, Local.y);
@@ -5504,7 +5504,7 @@ void DriveGizmoDrag(SolidArcWorkspaceState& State, const OrbitCameraFrame& Frame
         Gizmo.Factor  = std::max(0.05, Snapped(Ratio, FactorSnap));
         Gizmo.Readout = Compose("%s %.3fx", Axis >= 0 ? Name : "uniform scale", Gizmo.Factor);
     }
-    else if (Gizmo.Grab >= SolidArcGizmoHandle::TranslateX && Gizmo.Grab <= SolidArcGizmoHandle::TranslateZ)
+    else if (Gizmo.Grab >= GizmoHandle::TranslateX && Gizmo.Grab <= GizmoHandle::TranslateZ)
     {
         if (const std::optional<double> Parameter = MeasureAxisParameter(Ray, Pose.Origin, Pose.Axes[Axis]))
             Gizmo.Shift = Pose.Axes[Axis] * Snapped(*Parameter - Gizmo.GrabValue, MoveSnap);
@@ -5528,7 +5528,7 @@ void DriveGizmoDrag(SolidArcWorkspaceState& State, const OrbitCameraFrame& Frame
     }
     if (Gizmo.Target == SolidArcGizmoTarget::Faces)
         Gizmo.Readout += GizmoRotateHandle(Gizmo.Grab) ? " · face rotate" : GizmoScaleHandle(Gizmo, Gizmo.Grab) ? " · face scale"
-                       : Gizmo.Grab == SolidArcGizmoHandle::TranslateZ ? " · push / pull" : " · face tweak";
+                       : Gizmo.Grab == GizmoHandle::TranslateZ ? " · push / pull" : " · face tweak";
     if (Gizmo.Target == SolidArcGizmoTarget::Points) Gizmo.Readout += Compose(" · %d sketch point%s", int(Gizmo.Points.size()), Gizmo.Points.size() == 1 ? "" : "s");
     if (Gizmo.Target == SolidArcGizmoTarget::Shape)
         Gizmo.Readout += Compose(" · reshape %d %s", int(Gizmo.Names.size()), Gizmo.VertexCondition ? (Gizmo.Names.size() == 1 ? "vertex" : "vertices") : (Gizmo.Names.size() == 1 ? "edge" : "edges"));
@@ -5578,10 +5578,10 @@ void RecordGizmoWidgets(SolidArcWorkspaceState& State, const OrbitCameraFrame& F
     const SolidArcGizmoSession& Gizmo = State.Gizmo;
     if (Gizmo.Target == SolidArcGizmoTarget::None) return;
     uint32_t Drawn = 0;
-    for (const SolidArcGizmoVertex& Vertex : Gizmo.Geometry.Vertices) Drawn |= 1u << Vertex.Handle;
+    for (const GizmoVertex& Vertex : Gizmo.Geometry.Vertices) Drawn |= 1u << Vertex.Handle;
     static const char* Keys[] = { "", "GizmoTranslateX", "GizmoTranslateY", "GizmoTranslateZ", "GizmoPlaneYZ", "GizmoPlaneXZ", "GizmoPlaneXY",
                                   "GizmoRotateX", "GizmoRotateY", "GizmoRotateZ", "GizmoScaleX", "GizmoScaleY", "GizmoScaleZ", "GizmoCentre" };
-    const SolidArcGizmoPose& Pose = Gizmo.Pose;
+    const GizmoPose& Pose = Gizmo.Pose;
     for (int Code = 1; Code <= 13; ++Code)
     {
         if (!(Drawn & (1u << Code))) continue;
@@ -5613,21 +5613,21 @@ bool DriveGizmo(SolidArcWorkspaceState& State, const OrbitCameraFrame& Frame, Im
     if (!GizmoAvailableCondition(State))
     {
         if (Gizmo.DragCondition) CancelGizmoDrag(State, {});
-        Gizmo.Hover  = SolidArcGizmoHandle::None;
+        Gizmo.Hover  = GizmoHandle::None;
         Gizmo.Target = SolidArcGizmoTarget::None;
         return false;
     }
     if (!Gizmo.DragCondition) { ResolveGizmoTarget(State); FitGizmoToView(State); }
-    if (Gizmo.Target == SolidArcGizmoTarget::None) { Gizmo.Hover = SolidArcGizmoHandle::None; return false; }
+    if (Gizmo.Target == SolidArcGizmoTarget::None) { Gizmo.Hover = GizmoHandle::None; return false; }
     Gizmo.Pose.Modes = Gizmo.Modes;
     Gizmo.Pose.Size  = MeasureGizmoSize(Frame, Gizmo.Pose.Origin, GizmoPixels);
-    Gizmo.Geometry   = BuildSolidArcGizmo(Gizmo.Pose, Frame, Gizmo.DragCondition ? SolidArcGizmoHandle::None : Gizmo.Hover, Gizmo.Grab);
+    Gizmo.Geometry   = BuildGizmoGeometry(Gizmo.Pose, Frame, Gizmo.DragCondition ? GizmoHandle::None : Gizmo.Hover, Gizmo.Grab);
     bool Owned = false;
     if (!Gizmo.DragCondition)
     {
         Gizmo.Hover = PointerCondition && !ImGui::IsMouseDown(ImGuiMouseButton_Middle) && !ImGui::IsMouseDown(ImGuiMouseButton_Right)
-                    ? PickSolidArcGizmo(Gizmo.Geometry, Frame, Local.x, Local.y, 6.0) : SolidArcGizmoHandle::None;
-        Owned = Gizmo.Hover != SolidArcGizmoHandle::None;
+                    ? PickGizmoHandle(Gizmo.Geometry, Frame, Local.x, Local.y, 6.0) : GizmoHandle::None;
+        Owned = Gizmo.Hover != GizmoHandle::None;
         if (Owned && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
         {
             // Press: the handle's reference value at the pointer (axis parameter, angle, plane / screen hit).
@@ -5650,7 +5650,7 @@ bool DriveGizmo(SolidArcWorkspaceState& State, const OrbitCameraFrame& Frame, Im
             {
                 Gizmo.GrabValue = MeasureGizmoAngle(Ray, Gizmo.Pose.Origin, Gizmo.Pose.Axes[Axis], Gizmo.Pose.Axes[(Axis + 1) % 3]).value_or(0.0);
             }
-            else if (Axis >= 0 && (Gizmo.Grab <= SolidArcGizmoHandle::TranslateZ || Gizmo.Grab >= SolidArcGizmoHandle::ScaleX))
+            else if (Axis >= 0 && (Gizmo.Grab <= GizmoHandle::TranslateZ || Gizmo.Grab >= GizmoHandle::ScaleX))
                 Gizmo.GrabValue = MeasureAxisParameter(Ray, Gizmo.Pose.Origin, Gizmo.Pose.Axes[Axis]).value_or(0.0);
             else
                 Gizmo.GrabPoint = IntersectGizmoPlane(Ray, Gizmo.Pose.Origin, Axis >= 0 ? Gizmo.Pose.Axes[Axis] : Forward).value_or(Gizmo.Pose.Origin);
@@ -5677,10 +5677,10 @@ bool DriveGizmo(SolidArcWorkspaceState& State, const OrbitCameraFrame& Frame, Im
         else if (Length(Gizmo.Shift) > 0.0)
         {
             // The gizmo rides with a move (axes stay fixed for the whole drag) and stays GizmoPixels on screen.
-            SolidArcGizmoPose Riding = Gizmo.Pose;
+            GizmoPose Riding = Gizmo.Pose;
             Riding.Origin = Riding.Origin + Gizmo.Shift;
             Riding.Size   = MeasureGizmoSize(Frame, Riding.Origin, GizmoPixels);
-            Gizmo.Geometry = BuildSolidArcGizmo(Riding, Frame, SolidArcGizmoHandle::None, Gizmo.Grab);
+            Gizmo.Geometry = BuildGizmoGeometry(Riding, Frame, GizmoHandle::None, Gizmo.Grab);
         }
     }
     if (Gizmo.Target != SolidArcGizmoTarget::None) State.Style.Gizmo = Gizmo.Geometry;
@@ -14168,23 +14168,23 @@ void SetSolidArcViewportLayout(SolidArcWorkspaceState& State, SolidArcViewportLa
 
 std::vector<SolidArcRasterPane> ComposeSolidArcRasterPanes(const SolidArcWorkspaceState& State, uint32_t TargetWidth, uint32_t TargetHeight)
 {
-    auto BuildPaneGizmo = [&](const OrbitCamera& Cam, const OrbitCameraFrame& PaneFrame, bool ActivePaneCondition) -> SolidArcGizmoGeometry
+    auto BuildPaneGizmo = [&](const OrbitCamera& Cam, const OrbitCameraFrame& PaneFrame, bool ActivePaneCondition) -> GizmoGeometry
     {
         if (State.Transform.ActiveCondition)
         {
-            SolidArcGizmoHandle ActiveH = SolidArcGizmoHandle::None;
-            const SolidArcGizmoPose Pose = MakeTransformSessionGizmoPose(State.Transform, PaneFrame, ActiveH);
-            return BuildSolidArcGizmo(Pose, PaneFrame, SolidArcGizmoHandle::None, ActiveH);
+            GizmoHandle ActiveH = GizmoHandle::None;
+            const GizmoPose Pose = MakeTransformSessionGizmoPose(State.Transform, PaneFrame, ActiveH);
+            return BuildGizmoGeometry(Pose, PaneFrame, GizmoHandle::None, ActiveH);
         }
         if (!GizmoAvailableCondition(State) || State.Gizmo.Target == SolidArcGizmoTarget::None)
             return {};
         if (ActivePaneCondition && State.Gizmo.DragCondition)
         {
-            SolidArcGizmoPose Riding = State.Gizmo.Pose;
+            GizmoPose Riding = State.Gizmo.Pose;
             Riding.Origin = Riding.Origin + State.Gizmo.Shift;
             Riding.Modes  = State.Gizmo.Modes;
             Riding.Size   = MeasureGizmoSize(PaneFrame, Riding.Origin, GizmoPixels);
-            return BuildSolidArcGizmo(Riding, PaneFrame, SolidArcGizmoHandle::None, State.Gizmo.Grab);
+            return BuildGizmoGeometry(Riding, PaneFrame, GizmoHandle::None, State.Gizmo.Grab);
         }
         SolidArcWorkspaceState TempState;
         TempState.Camera                = Cam;
@@ -14198,8 +14198,8 @@ std::vector<SolidArcRasterPane> ComposeSolidArcRasterPanes(const SolidArcWorkspa
         FitGizmoToView(TempState);
         TempState.Gizmo.Pose.Modes = State.Gizmo.Modes;
         TempState.Gizmo.Pose.Size  = MeasureGizmoSize(PaneFrame, TempState.Gizmo.Pose.Origin, GizmoPixels);
-        const SolidArcGizmoHandle HoverH = ActivePaneCondition ? State.Gizmo.Hover : SolidArcGizmoHandle::None;
-        return BuildSolidArcGizmo(TempState.Gizmo.Pose, PaneFrame, HoverH, State.Gizmo.Grab);
+        const GizmoHandle HoverH = ActivePaneCondition ? State.Gizmo.Hover : GizmoHandle::None;
+        return BuildGizmoGeometry(TempState.Gizmo.Pose, PaneFrame, HoverH, State.Gizmo.Grab);
     };
 
     std::vector<SolidArcRasterPane> Panes;
@@ -15990,7 +15990,7 @@ void DrawViewport(SolidArcWorkspaceState& State, ImTextureID ViewportTexture, Im
     }
     const char* Hint = State.Gizmo.DragCondition
                            ? "Gizmo: drag the handle (snaps: 0.1 move · 5° turn · ×0.1 scale; Ctrl free) · release commits · Esc cancels"
-                       : State.Gizmo.Hover != SolidArcGizmoHandle::None
+                       : State.Gizmo.Hover != GizmoHandle::None
                            ? "Gizmo: press and drag · cones move along an axis · squares move in a plane · arcs rotate · cylinders scale · ring screen move / uniform scale · y cycles modes"
                        : State.Transform.ActiveCondition
                            ? (State.Transform.Verb == SolidArcTransformVerb::Move ? "Move: pointer snaps to points / edges / faces (Ctrl free) · X / Y / Z axis · Shift+X / Y / Z plane · G screen · type a distance · click / right-click / Enter commit · Esc cancel"
@@ -20190,12 +20190,12 @@ void DrawSolidArcInterface(SolidArcWorkspaceState& State, ImTextureID ViewportTe
         const OrbitCameraFrame LatestFrame = ViewportFrame(State);
         if (State.Transform.ActiveCondition)
         {
-            SolidArcGizmoHandle ActiveH = SolidArcGizmoHandle::None;
-            const SolidArcGizmoPose ModalPose = MakeTransformSessionGizmoPose(State.Transform, LatestFrame, ActiveH);
-            const SolidArcGizmoGeometry ModalGeo = BuildSolidArcGizmo(ModalPose, LatestFrame, SolidArcGizmoHandle::None, ActiveH);
+            GizmoHandle ActiveH = GizmoHandle::None;
+            const GizmoPose ModalPose = MakeTransformSessionGizmoPose(State.Transform, LatestFrame, ActiveH);
+            const GizmoGeometry ModalGeo = BuildGizmoGeometry(ModalPose, LatestFrame, GizmoHandle::None, ActiveH);
             State.Style.Gizmo = ModalGeo;
             uint32_t Drawn = 0;
-            for (const SolidArcGizmoVertex& Vertex : ModalGeo.Vertices) Drawn |= 1u << Vertex.Handle;
+            for (const GizmoVertex& Vertex : ModalGeo.Vertices) Drawn |= 1u << Vertex.Handle;
             static const char* Keys[] = { "", "GizmoTranslateX", "GizmoTranslateY", "GizmoTranslateZ", "GizmoPlaneYZ", "GizmoPlaneXZ", "GizmoPlaneXY",
                                           "GizmoRotateX", "GizmoRotateY", "GizmoRotateZ", "GizmoScaleX", "GizmoScaleY", "GizmoScaleZ", "GizmoCentre" };
             for (int Code = 1; Code <= 13; ++Code)
@@ -20221,7 +20221,7 @@ void DrawSolidArcInterface(SolidArcWorkspaceState& State, ImTextureID ViewportTe
             {
                 State.Gizmo.Pose.Modes = State.Gizmo.Modes;
                 State.Gizmo.Pose.Size  = MeasureGizmoSize(LatestFrame, State.Gizmo.Pose.Origin, GizmoPixels);
-                State.Gizmo.Geometry   = BuildSolidArcGizmo(State.Gizmo.Pose, LatestFrame, State.Gizmo.Hover, SolidArcGizmoHandle::None);
+                State.Gizmo.Geometry   = BuildGizmoGeometry(State.Gizmo.Pose, LatestFrame, State.Gizmo.Hover, GizmoHandle::None);
                 State.Style.Gizmo      = State.Gizmo.Geometry;
                 RecordGizmoWidgets(State, LatestFrame);
             }
@@ -20429,7 +20429,7 @@ void EvaluateSolidArcGizmo(SolidArcWorkspaceState& State, const OrbitCameraFrame
     Gizmo.Geometry = {};
     if (!GizmoAvailableCondition(State))
     {
-        Gizmo.Hover  = SolidArcGizmoHandle::None;
+        Gizmo.Hover  = GizmoHandle::None;
         Gizmo.Target = SolidArcGizmoTarget::None;
         return;
     }
@@ -20438,10 +20438,10 @@ void EvaluateSolidArcGizmo(SolidArcWorkspaceState& State, const OrbitCameraFrame
     if (Gizmo.Target == SolidArcGizmoTarget::None) return;
     Gizmo.Pose.Modes = Gizmo.Modes;
     Gizmo.Pose.Size  = MeasureGizmoSize(Frame, Gizmo.Pose.Origin, GizmoPixels);
-    Gizmo.Geometry   = BuildSolidArcGizmo(Gizmo.Pose, Frame, SolidArcGizmoHandle::None, SolidArcGizmoHandle::None);
+    Gizmo.Geometry   = BuildGizmoGeometry(Gizmo.Pose, Frame, GizmoHandle::None, GizmoHandle::None);
 }
 
-SolidArcCommandOutcome ApplySolidArcGizmo(SolidArcWorkspaceState& State, SolidArcGizmoHandle Handle, Vector3 Shift, double Angle, double Factor)
+SolidArcCommandOutcome ApplySolidArcGizmo(SolidArcWorkspaceState& State, GizmoHandle Handle, Vector3 Shift, double Angle, double Factor)
 {
     SolidArcGizmoSession& Gizmo = State.Gizmo;
     Gizmo.Grab   = Handle;
@@ -20454,7 +20454,7 @@ SolidArcCommandOutcome ApplySolidArcGizmo(SolidArcWorkspaceState& State, SolidAr
         RefreshSolidArcScene(State, true);
         ++Gizmo.Commits;
     }
-    Gizmo.Grab = SolidArcGizmoHandle::None;
+    Gizmo.Grab = GizmoHandle::None;
     return Outcome;
 }
 

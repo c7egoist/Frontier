@@ -72,7 +72,7 @@ The record `RenderPipeline` ("Render settings") absorbs `Diagnostics`, `PolygonC
 | Refresh timing           | Per-submission times of the last refresh                                              |
 
 The levelspace block at the end writes the record; keys marked `# proposed` are new for the C++ step, the others are
-already read by `SceneWorld.cpp`. The à-trous rows show wavelet levels: `VarianceIntegrator` dispatches
+already read by `WorldSpace.cpp`. The à-trous rows show wavelet levels: `VarianceIntegrator` dispatches
 `min(4, WaveletIterations + 1)`, so the demo's glossy filter runs 3 and the diffuse filter 4.
 
 ## Found while building it

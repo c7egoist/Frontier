@@ -6,11 +6,11 @@
 //
 //     ParticleSimulationCapture <repository root> <shader folder> <output folder> [capture]
 //
-// 📝 The same CPU scene (ParticleScene) and GPU sequence (ParticleSimulationSequence) the editor runs. Each capture starts a fresh
+// 📝 The same CPU scene (ParticleSpace) and GPU sequence (ParticleSimulationSequence) the editor runs. Each capture starts a fresh
 //    scene, advances it by fixed 1/60 s ticks and writes <capture>.png plus a line of figures to Captures.tsv.
 
 #include "Frontier/Engine/PhysicalDynamics/ParticleDynamics/ParticleEffectLibrary.h"
-#include "Frontier/Engine/PhysicalDynamics/ParticleDynamics/ParticleScene.h"
+#include "Frontier/Engine/PhysicalDynamics/ParticleDynamics/ParticleSpace.h"
 #include "Frontier/Engine/Rendering/ParticleSimulation/ParticleSimulationSequence.h"
 
 #include <stb_image_write.h>
@@ -33,7 +33,7 @@ struct CaptureScene
     const char*                                  Name;
     std::vector<std::string>                     Presets;   // empty = the library's default scene
     double                                       Seconds;
-    std::function<void(ParticleScene&)>          Arrange;
+    std::function<void(ParticleSpace&)>          Arrange;
 };
 
 } // namespace
@@ -66,14 +66,14 @@ int main(int ArgumentCount, char** Arguments)
     }
     std::printf("🧩 ParticleSimulationCapture on %s\n", Sequence.QueryAdapter().c_str());
 
-    const auto Overview = [](ParticleScene& Scene) { Scene.Camera = { 0.6, 0.3, 12.5, { 0.0, 1.6, 0.0 } }; };
+    const auto Overview = [](ParticleSpace& Space) { Space.Camera = { 0.6, 0.3, 12.5, { 0.0, 1.6, 0.0 } }; };
     const auto Close    = [](double Yaw, double Pitch, double Distance, std::array<double, 3> Target)
     {
-        return [=](ParticleScene& Scene) { Scene.Camera = { Yaw, Pitch, Distance, Target }; Scene.Lightning.Automatic = false; };
+        return [=](ParticleSpace& Space) { Space.Camera = { Yaw, Pitch, Distance, Target }; Space.Lightning.Automatic = false; };
     };
     const std::vector<CaptureScene> Scenes = {
         { "DefaultScene", {}, 2.5, Overview },
-        { "WindArrows", {}, 1.5, [](ParticleScene& Scene) { Scene.Wind.ShowArrows = true; Scene.Camera = { 0.6, 0.55, 15.0, { 0.0, 1.0, 0.0 } }; } },
+        { "WindArrows", {}, 1.5, [](ParticleSpace& Space) { Space.Wind.ShowArrows = true; Space.Camera = { 0.6, 0.55, 15.0, { 0.0, 1.0, 0.0 } }; } },
         { "TornadoDebris", { "tornado" }, 4.0, Close(0.4, 0.22, 11.0, { 0.0, 2.0, -2.0 }) },
         { "Fireworks", { "fireworks" }, 3.0, Close(0.6, 0.12, 14.0, { 0.0, 3.5, 0.0 }) },
         { "FireAndSmoke", { "fire", "smoke" }, 3.0, Close(0.5, 0.18, 7.0, { 0.0, 1.4, 0.0 }) },
@@ -87,7 +87,7 @@ int main(int ArgumentCount, char** Arguments)
         { "Bubbles", { "bubbles" }, 3.0, Close(0.6, 0.2, 7.0, { 0.0, 1.5, 0.0 }) },
         { "MagneticLines", { "magnetic-lines", "magnetic-particles" }, 2.5, Close(0.6, 0.4, 12.0, { 0.0, 2.0, 0.0 }) },
         { "Lightning", { "strikeSparks" }, 1.6,
-          [](ParticleScene& Scene) { Scene.Camera = { 0.6, 0.15, 16.0, { 0.0, 4.0, 0.0 } }; Scene.Lightning.NextStrikeSeconds = 1.45; } },
+          [](ParticleSpace& Space) { Space.Camera = { 0.6, 0.15, 16.0, { 0.0, 4.0, 0.0 } }; Space.Lightning.NextStrikeSeconds = 1.45; } },
     };
 
     std::ofstream Ledger(Output / "Captures.tsv");
@@ -97,18 +97,18 @@ int main(int ArgumentCount, char** Arguments)
     for (const CaptureScene& Capture : Scenes)
     {
         if (!Only.empty() && Only != Capture.Name) continue;
-        ParticleScene Scene;
-        Scene.ConstructDefault(Library, Capture.Presets.empty() ? nullptr : &Capture.Presets);
-        if (Capture.Arrange) Capture.Arrange(Scene);
+        ParticleSpace Space;
+        Space.ConstructDefault(Library, Capture.Presets.empty() ? nullptr : &Capture.Presets);
+        if (Capture.Arrange) Capture.Arrange(Space);
         const uint32_t Refreshes = static_cast<uint32_t>(Capture.Seconds * 60.0 + 0.5);
         double         Total     = 0.0;
         bool           Healthy   = true;
         for (uint32_t Refresh = 0; Refresh < Refreshes && Healthy; ++Refresh)
         {
             // 📝 The first tick of a scene carries no time, as the prototype's first frame.
-            const ParticleRefreshPlan Plan  = Scene.Advance(Refresh == 0 ? 0.0 : 1.0 / 60.0, Width, Height);
+            const ParticleRefreshPlan Plan  = Space.Advance(Refresh == 0 ? 0.0 : 1.0 / 60.0, Width, Height);
             const auto                Begun = std::chrono::steady_clock::now();
-            Healthy = Sequence.Refresh(Plan, Scene.Effects, &Diagnostic);
+            Healthy = Sequence.Refresh(Plan, Space.Effects, &Diagnostic);
             Total += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - Begun).count();
         }
         if (!Healthy)
@@ -118,10 +118,10 @@ int main(int ArgumentCount, char** Arguments)
             continue;
         }
         // 📝 A last refresh that reads every census, so the figures belong to the captured image.
-        ParticleRefreshPlan Final = Scene.Advance(1.0 / 60.0, Width, Height);
+        ParticleRefreshPlan Final = Space.Advance(1.0 / 60.0, Width, Height);
         for (ParticleRefreshJob& Job : Final.Jobs) Job.ReadCensus = Job.Simulate;
-        Final.ProbeCell = Scene.ResolveProbeCell();
-        if (!Sequence.Refresh(Final, Scene.Effects, &Diagnostic))
+        Final.ProbeCell = Space.ResolveProbeCell();
+        if (!Sequence.Refresh(Final, Space.Effects, &Diagnostic))
         {
             std::printf("  🔴 %s: %s\n", Capture.Name, Diagnostic.c_str());
             ++Failures;
@@ -149,7 +149,7 @@ int main(int ArgumentCount, char** Arguments)
             continue;
         }
         uint32_t Alive = 0, Capacity = 0;
-        for (const ParticleEffectInstance& Effect : Scene.Effects)
+        for (const ParticleEffectInstance& Effect : Space.Effects)
         {
             Capacity += Effect.Parameters.Behaviour == ParticleBehaviour::LightFibre ? 0u : ResolveParticleCapacity(Effect.Parameters);
             if (const ParticleSimulation::ParticleCensus* Census = Sequence.QueryCensus(Effect.Token); Census && Census->Valid) Alive += Census->Alive;
@@ -158,7 +158,7 @@ int main(int ArgumentCount, char** Arguments)
         std::printf("  %-20s %4u refreshes  %6u / %6u alive  %5.1f%% lit  %7.1f ms mean  probe %.2f m/s\n", Capture.Name, Refreshes + 1, Alive,
                     Capacity, 100.0 * static_cast<double>(Lit) / (static_cast<double>(Width) * Height), Total / std::max(1u, Refreshes),
                     Probe.Valid ? Probe.Magnitude : 0.0f);
-        for (const ParticleEffectInstance& Effect : Scene.Effects)
+        for (const ParticleEffectInstance& Effect : Space.Effects)
         {
             if (const ParticleSimulation::ParticleCensus* Census = Sequence.QueryCensus(Effect.Token); Census && Census->Valid)
             {

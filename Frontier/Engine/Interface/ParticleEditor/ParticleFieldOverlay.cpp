@@ -153,12 +153,12 @@ SpatialVector ParticleFieldOverlay::Sample(ForceContribution Contribution, Spati
     return { Value[0], Value[1], Value[2] };
 }
 
-void ParticleFieldOverlay::ConfigureLattice(std::shared_ptr<const std::vector<float>> Cells, const ParticleScene& Scene, const ParticleRefreshPlan& Plan)
+void ParticleFieldOverlay::ConfigureLattice(std::shared_ptr<const std::vector<float>> Cells, const ParticleSpace& Space, const ParticleRefreshPlan& Plan)
 {
     if (Cells) Cells_ = std::move(Cells);
     Accelerations_ = std::make_shared<ParticleAccelerationBlock>(Plan.Fields);
-    Fields_        = std::make_shared<std::vector<ParticleField>>(Scene.Fields);
-    TimeSeconds_   = Scene.TimeSeconds;
+    Fields_        = std::make_shared<std::vector<ParticleField>>(Space.Fields);
+    TimeSeconds_   = Space.TimeSeconds;
     // 📝 The sampler holds its own copies, so the slice can sample them away from the interface thread.
     Slice.ConfigureSampler([Lattice = Cells_, Accelerations = Accelerations_, Fields = Fields_, Time = TimeSeconds_](ForceContribution Contribution,
                                                                                                                    SpatialVector     Point) -> SpatialVector
@@ -179,7 +179,7 @@ void ParticleFieldOverlay::ConfigureLattice(std::shared_ptr<const std::vector<fl
                            ++Revision_);
 }
 
-void ParticleFieldOverlay::Render(ImDrawList* Ink, const EditorTypefaces& Faces, ImVec2 Minimum, ImVec2 Maximum, const ParticleScene& Scene, float Scale)
+void ParticleFieldOverlay::Render(ImDrawList* Ink, const EditorTypefaces& Faces, ImVec2 Minimum, ImVec2 Maximum, const ParticleSpace& Space, float Scale)
 {
     if (!Settings.Enabled) return;
     FieldVisualizationOptions& Options = Slice.Options;
@@ -192,14 +192,14 @@ void ParticleFieldOverlay::Render(ImDrawList* Ink, const EditorTypefaces& Faces,
     Options.SliceHeight  = Settings.SliceHeight;
     Options.Opacity      = Settings.Opacity;
     Options.ArrowSpacing = Settings.ArrowSpacing;
-    Options.HasProbe     = Scene.ProbeEnabled;
-    Options.ProbePoint   = { Scene.Probe[0], Scene.Probe[2] };
+    Options.HasProbe     = Space.ProbeEnabled;
+    Options.ProbePoint   = { Space.Probe[0], Space.Probe[2] };
 
     // 📝 The forces as the slice outlines them: flows dim while acceleration is shown and the other way round.
     Options.Sources.clear();
-    for (size_t Index = 0; Index < Scene.Fields.size(); ++Index)
+    for (size_t Index = 0; Index < Space.Fields.size(); ++Index)
     {
-        const ParticleField&           Field      = Scene.Fields[Index];
+        const ParticleField&           Field      = Space.Fields[Index];
         const ParticleFieldDescriptor& Descriptor = ResolveParticleFieldDescriptor(Field.Category);
         FieldSourceOutline             Outline;
         Outline.Index        = static_cast<int32_t>(Index);
@@ -215,7 +215,7 @@ void ParticleFieldOverlay::Render(ImDrawList* Ink, const EditorTypefaces& Faces,
         Outline.Contribution = Descriptor.Contribution;
         Outline.Label        = Field.Name;
         Outline.Active       = Field.Enabled ? 1.0 : 0.25;
-        Outline.Selected     = Scene.Selected == "force:" + std::to_string(Index);
+        Outline.Selected     = Space.Selected == "force:" + std::to_string(Index);
         Outline.Dim          = Descriptor.Contribution != Settings.Contribution || !Field.Enabled;
         // 📝 eos bearings are atan2(x, z) (0° = +Z); the slice reads compass bearings, 0° = −Z, 90° = +X.
         Outline.ShowBearing    = Descriptor.Contribution == ForceContribution::Flow && Field.Category != ParticleFieldCategory::Tornado
@@ -224,8 +224,8 @@ void ParticleFieldOverlay::Render(ImDrawList* Ink, const EditorTypefaces& Faces,
         Options.Sources.push_back(std::move(Outline));
     }
 
-    const ParticleCameraReading Camera = ResolveParticleCamera(Scene.Camera, (Maximum.x - Minimum.x) / std::max(1.0f, Maximum.y - Minimum.y));
-    const Triple Forward = { Scene.Camera.Target[0] - Camera.Eye[0], Scene.Camera.Target[1] - Camera.Eye[1], Scene.Camera.Target[2] - Camera.Eye[2] };
+    const ParticleCameraReading Camera = ResolveParticleCamera(Space.Camera, (Maximum.x - Minimum.x) / std::max(1.0f, Maximum.y - Minimum.y));
+    const Triple Forward = { Space.Camera.Target[0] - Camera.Eye[0], Space.Camera.Target[1] - Camera.Eye[1], Space.Camera.Target[2] - Camera.Eye[2] };
     const double Length  = std::max(1e-9, std::sqrt(Forward[0] * Forward[0] + Forward[1] * Forward[1] + Forward[2] * Forward[2]));
     FieldCamera& View    = Slice.View.Camera;
     View.Eye             = ConvertToSceneAxes(Camera.Eye);
@@ -234,7 +234,7 @@ void ParticleFieldOverlay::Render(ImDrawList* Ink, const EditorTypefaces& Faces,
     View.Up              = ConvertToSceneAxes(Camera.Up);
     View.VerticalFieldOfView = 45.0 * 3.14159265358979323846 / 180.0;
     Slice.View.Mode      = FieldViewMode::Camera;
-    Slice.Render(Ink, Faces, Minimum, Maximum, Scene.TimeSeconds, Scale);
+    Slice.Render(Ink, Faces, Minimum, Maximum, Space.TimeSeconds, Scale);
 }
 
 } // namespace Frontier

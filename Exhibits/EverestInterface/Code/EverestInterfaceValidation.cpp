@@ -102,7 +102,7 @@ int main(int ArgumentCount, char** Arguments)
             Require(std::filesystem::exists(GeneratedDir / "Content" / "Levels" / "Default.levelspace"),
                     "Auto-generated Content/Levels/Default.levelspace missing.");
 
-            SceneWorld GeneratedWorld;
+            WorldSpace GeneratedWorld;
             std::string LoadErr;
             Require(GeneratedWorld.LoadStartupLevelFromProject(GeneratedProj, &LoadErr),
                     ("Generated Default.levelspace failed to load: " + LoadErr).c_str());
@@ -160,7 +160,7 @@ int main(int ArgumentCount, char** Arguments)
         // 2. Open EverestWorkspace and verify composable multi-inspector bindings
         // -------------------------------------------------------------------------------------------------------------
         Everest::EverestWorkspace Workspace(*Centre, LaunchedPath.parent_path());
-        SceneWorld&               World = Workspace.QuerySceneWorld();
+        WorldSpace&               World = Workspace.QueryWorldSpace();
         Require(World.LoadLevelSpace(EverestRoot.parent_path().parent_path() / "Exhibits/EverestInterface/Content/Simulation.levelspace"), "Simulation exhibit fixture failed to load");
         Require(World.QueryRecordCount() == 26, "Expected 26 records in the Simulation fixture (one Render settings record).");
         // 📝 Each planet of the sky is its own Scene Directory entry (Venus, Jupiter, Mars, Saturn), beside the starfield and moons.
@@ -174,7 +174,7 @@ int main(int ArgumentCount, char** Arguments)
         auto* OscRec      = World.FindFirstByType("HarmonicOscillator");
         auto* FractureRec = World.FindFirstByType("Fracture");
         Require(OriginRec && RigidRec && ThermalRec && ChemRec && OscRec && FractureRec,
-                "Expected composable records missing from Everest SceneWorld.");
+                "Expected composable records missing from Everest WorldSpace.");
 
         Require(InspectorRuntime::Instance().QueryInspectorCount(OriginRec->QueryToken()) == 1,
                 "SpatialNodeRecord must attach exactly 1 inspector (SpatialInspector).");
@@ -220,7 +220,7 @@ int main(int ArgumentCount, char** Arguments)
         // Exhibit 07: Select the Render settings record (RenderPipeline): the one inspector for the whole renderer.
         // Numbered 07 so the existing 01-06 capture names stay stable.
         auto* PipelineRec = World.FindFirstByType("RenderPipeline");
-        Require(PipelineRec != nullptr, "Expected RenderPipeline record in Everest SceneWorld.");
+        Require(PipelineRec != nullptr, "Expected RenderPipeline record in Everest WorldSpace.");
         Workspace.QueryOutliner().Select(PipelineRec->QueryToken());
         RenderFrames(4);
         WritePngCapture(OutputDir / "07-EverestRenderPipelineInspector.png");
@@ -230,7 +230,7 @@ int main(int ArgumentCount, char** Arguments)
         for (const char* Type : {"Solar", "Atmosphere", "Clouds", "Wind", "ForceField", "Fog", "AerialFog", "Lightning", "Stars", "Moons", "OpticalFlare"})
         {
             SceneRecordBase* PageEntry = World.FindFirstByType(Type);
-            Require(PageEntry != nullptr, "Expected every environment page's record in Everest SceneWorld.");
+            Require(PageEntry != nullptr, "Expected every environment page's record in Everest WorldSpace.");
             RecordInspector* Page = InspectorRuntime::Instance().FindInspector(PageEntry->QueryToken());
             Require(Page != nullptr && Page->QueryOccupiesColumn(), "An environment Inspector page must occupy the Inspector column.");
             Workspace.QueryOutliner().Select(PageEntry->QueryToken());

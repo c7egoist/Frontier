@@ -19,7 +19,7 @@
 #include "Engine/PhysicalDynamics/AtmosphericFlow.h"
 #include "Engine/PhysicalDynamics/ForceSourceCatalogue.h"
 #include "Engine/Scene/SceneDirectory.h"
-#include "Engine/Scene/SceneWorld.h"
+#include "Engine/Scene/WorldSpace.h"
 
 #include <imgui.h>
 
@@ -44,7 +44,7 @@ struct FieldRecords
     std::vector<Frontier::ForceSourceRecord*> Sources;
 };
 
-FieldRecords ResolveFieldRecords(Frontier::SceneWorld& World)
+FieldRecords ResolveFieldRecords(Frontier::WorldSpace& World)
 {
     FieldRecords Records;
     Records.Field = dynamic_cast<Frontier::ForceFieldRecord*>(World.FindFirstByType("ForceField"));
@@ -95,7 +95,7 @@ float MeasureFace(ImFont* Face, float Size, const char* Text)
 //    fired trigger keeps its firing time.
 void EverestWorkspace::AdvanceFieldTimeline(double DeltaSeconds)
 {
-    auto* Record = dynamic_cast<Frontier::ForceFieldRecord*>(QuerySceneWorld().FindFirstByType("ForceField"));
+    auto* Record = dynamic_cast<Frontier::ForceFieldRecord*>(QueryWorldSpace().FindFirstByType("ForceField"));
     if (Record == nullptr) return;
     Frontier::ForceFieldConfiguration& Forces = Record->AccessConfiguration();
     if (!Forces.TimelinePlaying || Field.Scrubbing) return;
@@ -109,9 +109,22 @@ void EverestWorkspace::AdvanceFieldTimeline(double DeltaSeconds)
 
 // 📝 One slice from the level's records: the field as the renderer evaluates it (ConfigureAtmosphericFlow, at the timeline's
 //    time), the Force Field's view settings and the sources' outlines. False without a Force Field record.
+std::optional<std::array<double, 3>> EverestWorkspace::SampleLevelFlow(const std::array<double, 3>& LevelMetres)
+{
+    const FieldRecords Records = ResolveFieldRecords(QueryWorldSpace());
+    if (Records.Field == nullptr || !Records.Field->QueryConfiguration().Enabled) return std::nullopt;
+    Frontier::WindConfiguration Wind = Records.Wind != nullptr ? Records.Wind->QueryConfiguration() : Frontier::WindConfiguration{};
+    if (Records.Wind == nullptr) Wind.Enabled = false;
+    std::vector<Frontier::ForceSourceConfiguration> Sources;
+    for (const Frontier::ForceSourceRecord* Source : Records.Sources) Sources.push_back(Source->QueryConfiguration());
+    Frontier::ForceFieldSpace Space;
+    Frontier::ConfigureAtmosphericFlow(Space, Records.Field->QueryConfiguration(), Wind, QueryElapsedSeconds(), Sources);
+    return Frontier::EvaluateWorldFlow(Space, LevelMetres);
+}
+
 bool EverestWorkspace::ConfigureFieldSlice(Frontier::ForceFieldVisualization& Slice, bool Camera)
 {
-    const FieldRecords Records = ResolveFieldRecords(QuerySceneWorld());
+    const FieldRecords Records = ResolveFieldRecords(QueryWorldSpace());
     if (Records.Field == nullptr) return false;
     const Frontier::ForceFieldConfiguration& Forces = Records.Field->QueryConfiguration();
     Frontier::WindConfiguration              Wind   = Records.Wind != nullptr ? Records.Wind->QueryConfiguration() : Frontier::WindConfiguration{};
@@ -186,7 +199,7 @@ void EverestWorkspace::ConstructFieldViewport(const ImVec2& StageMin, const ImVe
         Ink->PopClipRect();
         return;
     }
-    FieldRecords                       Records = ResolveFieldRecords(QuerySceneWorld());
+    FieldRecords                       Records = ResolveFieldRecords(QueryWorldSpace());
     Frontier::ForceFieldConfiguration& Forces  = Records.Field->AccessConfiguration();
 
     const float  TimelineHeight = 92.0f * Scale;
@@ -337,7 +350,7 @@ void EverestWorkspace::ConstructFieldTimeline(const ImVec2& Min, const ImVec2& M
     using Frontier::ViewportChromeControls;
     const Frontier::EditorTypefaces Faces   = Frontier::EditorTypefaces::Resolve();
     ImDrawList*                     Ink     = ImGui::GetWindowDrawList();
-    FieldRecords                    Records = ResolveFieldRecords(QuerySceneWorld());
+    FieldRecords                    Records = ResolveFieldRecords(QueryWorldSpace());
     if (Records.Field == nullptr) return;
     Frontier::ForceFieldConfiguration& Forces   = Records.Field->AccessConfiguration();
     const double                       Duration = std::max(1.0, static_cast<double>(Forces.TimelineDurationSeconds));
@@ -525,7 +538,7 @@ void EverestWorkspace::ConstructFieldBar(const ImVec2& Min, const ImVec2& Max, f
         Field.Shown = Shown == 1;
     Right -= 132.0f * Scale + Gap;
 
-    auto* Record = dynamic_cast<Frontier::ForceFieldRecord*>(QuerySceneWorld().FindFirstByType("ForceField"));
+    auto* Record = dynamic_cast<Frontier::ForceFieldRecord*>(QueryWorldSpace().FindFirstByType("ForceField"));
     if (Record == nullptr) return;
     Frontier::ForceFieldConfiguration& Forces = Record->AccessConfiguration();
     // 📝 Range pills: the one closest to the span lights.
@@ -585,7 +598,7 @@ void EverestWorkspace::ConstructFieldBar(const ImVec2& Min, const ImVec2& Max, f
 //    shows through.
 void EverestWorkspace::ConstructFieldOverlay(const ImVec2& StageMin, const ImVec2& StageMax, float Scale)
 {
-    const auto* Record = dynamic_cast<const Frontier::ForceFieldRecord*>(QuerySceneWorld().FindFirstByType("ForceField"));
+    const auto* Record = dynamic_cast<const Frontier::ForceFieldRecord*>(QueryWorldSpace().FindFirstByType("ForceField"));
     if (Record == nullptr || !Record->QueryConfiguration().SceneOverlay || !Record->QueryConfiguration().Enabled) return;
     if (!Field.Overlay) Field.Overlay = std::make_unique<Frontier::ForceFieldVisualization>();
     Frontier::ForceFieldVisualization& Overlay = *Field.Overlay;
@@ -609,12 +622,13 @@ void EverestWorkspace::ConstructFieldOverlay(const ImVec2& StageMin, const ImVec
 //                                                    PAGE LINKS
 //------------------------------------------------------------------------------------------------------------------------
 
-// 📝 The Force Field page reads the forces under the field and the Field view's measurements; while the view shows, its peak
-//    joins the hero's history about ten times a second (a change of unit starts the history again).
+// 📝 The Force Field page reads the forces under the field and the Field view's measurements; its peak joins the hero's history
+//    about ten times a second (a change of unit starts the history again). While the view is hidden, a 16 × 16 sampling of the
+//    same area at 10 m above the ground keeps the history filling.
 void EverestWorkspace::PublishFieldReadings(Frontier::EnvironmentEditAccess& Access, double DeltaSeconds)
 {
-    for (const Frontier::SceneRecordBase* Entry : QuerySceneWorld().FindAllByType("ForceSource"))
-        if (auto* Source = dynamic_cast<Frontier::ForceSourceRecord*>(QuerySceneWorld().FindRecord(Entry->QueryToken())))
+    for (const Frontier::SceneRecordBase* Entry : QueryWorldSpace().FindAllByType("ForceSource"))
+        if (auto* Source = dynamic_cast<Frontier::ForceSourceRecord*>(QueryWorldSpace().FindRecord(Entry->QueryToken())))
             Access.ForceSources.push_back({Source->QueryToken().Value, Source->QueryRecordName(), &Source->AccessConfiguration()});
     // 📝 The contribution the page shows joins the Log Stream when it changes (the prototype's VIEW lines).
     if (Access.Forces != nullptr && static_cast<int>(Access.Forces->ViewContribution) != Field.LoggedContribution)
@@ -649,6 +663,50 @@ void EverestWorkspace::PublishFieldReadings(Frontier::EnvironmentEditAccess& Acc
             Readings.History[Readings.HistoryCursor] = static_cast<float>(Statistics.Peak);
             Readings.HistoryCursor                   = (Readings.HistoryCursor + 1u) % static_cast<uint32_t>(Readings.History.size());
             Readings.HistoryCount                    = std::min<uint32_t>(Readings.HistoryCount + 1u, static_cast<uint32_t>(Readings.History.size()));
+        }
+    }
+    else if (Access.Forces != nullptr)
+    {
+        Field.ReadingSeconds += std::max(0.0, DeltaSeconds);
+        if (Field.ReadingSeconds >= 0.1 || Readings.HistoryCount == 0)
+        {
+            Field.ReadingSeconds = 0.0;
+            const FieldRecords Records = ResolveFieldRecords(QueryWorldSpace());
+            if (Records.Field != nullptr)
+            {
+                const Frontier::ForceFieldConfiguration& Forces = Records.Field->QueryConfiguration();
+                Frontier::WindConfiguration Wind = Records.Wind != nullptr ? Records.Wind->QueryConfiguration() : Frontier::WindConfiguration{};
+                if (Records.Wind == nullptr) Wind.Enabled = false;
+                std::vector<Frontier::ForceSourceConfiguration> Sources;
+                for (const Frontier::ForceSourceRecord* Source : Records.Sources) Sources.push_back(Source->QueryConfiguration());
+                Frontier::ForceFieldSpace Space;
+                Frontier::ConfigureAtmosphericFlow(Space, Forces, Wind, Forces.TimelineSeconds, Sources);
+                const double CentreX = Field.Slice ? Field.Slice->View.CentreX : 0.0;
+                const double CentreZ = Field.Slice ? Field.Slice->View.CentreZ : 0.0;
+                const double Span    = Field.Slice ? Field.Slice->View.Span : 6000.0;
+                const double Cell    = Span / 16.0;
+                double       Peak    = 0.0;
+                for (int Row = 0; Row < 16; ++Row)
+                    for (int Column = 0; Column < 16; ++Column)
+                    {
+                        const Frontier::SpatialVector Point{CentreX + (Column + 0.5 - 8.0) * Cell, Space.GroundPlaneYMeters() + 10.0, CentreZ + (Row + 0.5 - 8.0) * Cell};
+                        const Frontier::SpatialVector Value = Space.EvaluateContribution(Forces.ViewContribution, Point, Cell);
+                        const double Reading = Forces.ViewContribution == Frontier::ForceContribution::Damp ? std::abs(Value.X)
+                                                                                                             : std::sqrt(Value.X * Value.X + Value.Y * Value.Y + Value.Z * Value.Z);
+                        Peak = std::max(Peak, Reading);
+                    }
+                const char* Unit = Frontier::ForceFieldVisualization::ResolveUnit(Forces.ViewContribution, Frontier::ForceFieldQuantity::Speed);
+                if (std::string_view(Unit) != Readings.Unit) Readings.HistoryCount = Readings.HistoryCursor = 0;
+                Readings.Measured                        = true;
+                Readings.Peak                            = Peak;
+                Readings.Span                            = Span;
+                Readings.Cell                            = Cell;
+                Readings.Samples                         = 256;
+                Readings.Unit                            = Unit;
+                Readings.History[Readings.HistoryCursor] = static_cast<float>(Peak);
+                Readings.HistoryCursor                   = (Readings.HistoryCursor + 1u) % static_cast<uint32_t>(Readings.History.size());
+                Readings.HistoryCount                    = std::min<uint32_t>(Readings.HistoryCount + 1u, static_cast<uint32_t>(Readings.History.size()));
+            }
         }
     }
     Access.FieldReadings = Readings;
@@ -702,8 +760,8 @@ void EverestWorkspace::ServiceFieldActions()
         else if (Verb == "fire")
         {
             auto* Record = dynamic_cast<Frontier::ForceSourceRecord*>(
-                QuerySceneWorld().FindRecord(Frontier::RecordToken{std::strtoull(Argument.c_str(), nullptr, 10)}));
-            auto* Forces = dynamic_cast<Frontier::ForceFieldRecord*>(QuerySceneWorld().FindFirstByType("ForceField"));
+                QueryWorldSpace().FindRecord(Frontier::RecordToken{std::strtoull(Argument.c_str(), nullptr, 10)}));
+            auto* Forces = dynamic_cast<Frontier::ForceFieldRecord*>(QueryWorldSpace().FindFirstByType("ForceField"));
             if (Record == nullptr || Forces == nullptr) continue;
             Frontier::ForceSourceConfiguration& Source = Record->AccessConfiguration();
             Source.TriggeredAtSeconds                  = Forces->QueryConfiguration().TimelineSeconds;
@@ -721,9 +779,9 @@ Frontier::RecordToken EverestWorkspace::ConstructForceRecord(const std::string& 
     const Frontier::ForceSourceDescriptor* Descriptor = Frontier::ResolveForceSourceDescriptor(Identifier);
     if (Descriptor == nullptr) return {};
     Frontier::RecordToken Owner{};
-    if (Frontier::SceneRecordBase* FieldRecord = QuerySceneWorld().FindFirstByType("ForceField")) Owner = FieldRecord->QueryToken();
-    const Frontier::RecordToken Created = QuerySceneWorld().ConstructRecord("ForceSource", Name, Owner);
-    auto*                       Record  = dynamic_cast<Frontier::ForceSourceRecord*>(QuerySceneWorld().FindRecord(Created));
+    if (Frontier::SceneRecordBase* FieldRecord = QueryWorldSpace().FindFirstByType("ForceField")) Owner = FieldRecord->QueryToken();
+    const Frontier::RecordToken Created = QueryWorldSpace().ConstructRecord("ForceSource", Name, Owner);
+    auto*                       Record  = dynamic_cast<Frontier::ForceSourceRecord*>(QueryWorldSpace().FindRecord(Created));
     if (Record == nullptr) return {};
     Frontier::ForceSourceConfiguration& Source   = Record->AccessConfiguration();
     const uint64_t                      Revision = Source.Revision;

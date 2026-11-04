@@ -420,7 +420,7 @@ void SolidArcRasterization::CreatePipelines()
     Gizmo.Fragment      = GizmoFragment;
     Gizmo.VertexEntry   = SolidArcGizmoVertexEntry;
     Gizmo.FragmentEntry = SolidArcGizmoFragmentEntry;
-    Gizmo.Bindings      = { { 0, sizeof(SolidArcGizmoVertex), VK_VERTEX_INPUT_RATE_VERTEX } };
+    Gizmo.Bindings      = { { 0, sizeof(Frontier::GizmoVertex), VK_VERTEX_INPUT_RATE_VERTEX } };
     Gizmo.Attributes    = { { 0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0 }, { 1, 0, VK_FORMAT_R32G32B32_SFLOAT, 12 }, { 2, 0, VK_FORMAT_R8G8B8A8_UNORM, 24 } };
     Gizmo.ColourBlend   = true;
     Gizmo.IdentityWrite = false;
@@ -710,18 +710,18 @@ void SolidArcRasterization::RecordPanes(VkCommandBuffer Commands, const std::vec
     }
     if (TotalGizmoVerts > 0 && GizmoPipeline)
     {
-        const VkDeviceSize Needed = sizeof(SolidArcGizmoVertex) * TotalGizmoVerts;
+        const VkDeviceSize Needed = sizeof(Frontier::GizmoVertex) * TotalGizmoVerts;
         if (GizmoBuffer.Size < Needed)
         {
             vkDeviceWaitIdle(Device->Device);
             Device->DestroyBuffer(GizmoBuffer);
             GizmoBuffer = Device->CreateBuffer(std::max<VkDeviceSize>(Needed * 2, 64 * 1024), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, true);
         }
-        auto* Dst = static_cast<SolidArcGizmoVertex*>(GizmoBuffer.Mapped);
+        auto* Dst = static_cast<Frontier::GizmoVertex*>(GizmoBuffer.Mapped);
         for (size_t Idx = 0; Idx < Panes.size(); ++Idx)
         {
             if (GizmoCount[Idx] > 0)
-                std::memcpy(Dst + GizmoFirst[Idx], Panes[Idx].Style.Gizmo.Vertices.data(), sizeof(SolidArcGizmoVertex) * GizmoCount[Idx]);
+                std::memcpy(Dst + GizmoFirst[Idx], Panes[Idx].Style.Gizmo.Vertices.data(), sizeof(Frontier::GizmoVertex) * GizmoCount[Idx]);
         }
     }
 

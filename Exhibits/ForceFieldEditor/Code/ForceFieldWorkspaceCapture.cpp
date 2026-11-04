@@ -12,7 +12,7 @@
 #include "Engine/Interface/SceneDirectoryPanel.h"
 #include "Engine/PhysicalDynamics/ForceSourceCatalogue.h"
 #include "Engine/Scene/SceneDirectory.h"
-#include "EverestSceneViewport.h"
+#include "Frontier/Extensions/Rendering/RenderingExtension.h"
 #include "EverestWorkspace.h"
 #include "Exhibits/ControlCentre/Code/CpuRasterization.h"
 #include "UI/Editor/ControlCentrePanel.h"
@@ -78,14 +78,14 @@ int main(int ArgumentCount, char** Arguments)
         Require(Centre->Initialize() && Centre->Activate(), "ControlCentrePanel initialization failed");
 
         Everest::EverestWorkspace     Workspace(*Centre, EverestRoot);
-        Everest::EverestSceneViewport Bridge(EverestRoot, ShaderRoot, nullptr);
+        Frontier::RenderingExtension Bridge(EverestRoot, ShaderRoot, nullptr);
         std::vector<uint8_t>          ViewportPixels;
         std::array<uint32_t, 2>       ViewportExtent = {0, 0};
         std::string                   LastStatus;
-        Workspace.PresentSceneViewport = [&](const Everest::SceneViewportRequest& Request) {
+        Workspace.PresentSceneViewport = [&](const Frontier::SceneViewportRequest& Request) {
             const auto                          Start   = std::chrono::steady_clock::now();
-            const Everest::SceneViewportRefresh Outcome = Bridge.Render(Request, Workspace.QuerySceneWorld(), Workspace.QueryElapsedSeconds());
-            Everest::SceneViewportImage         Image;
+            const Frontier::SceneViewportRefresh Outcome = Bridge.Render(Request, Workspace.QueryWorldSpace(), Workspace.QueryElapsedSeconds());
+            Frontier::SceneViewportImage         Image;
             Image.Status  = Outcome.Status;
             Image.Readout = Outcome.Readout;
             LastStatus    = Outcome.Status;
@@ -99,7 +99,7 @@ int main(int ArgumentCount, char** Arguments)
             return Image;
         };
 
-        SceneWorld& World  = Workspace.QuerySceneWorld();
+        WorldSpace& World  = Workspace.QueryWorldSpace();
         auto*       Forces = dynamic_cast<ForceFieldRecord*>(World.FindFirstByType("ForceField"));
         Require(Forces != nullptr, "the level has no Force Field record");
         ForceFieldConfiguration& Field = Forces->AccessConfiguration();

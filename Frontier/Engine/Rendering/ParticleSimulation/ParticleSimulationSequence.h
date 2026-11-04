@@ -7,7 +7,7 @@
 #pragma once
 
 #include "Frontier/Engine/DeviceExchange/DeviceExchange.h"
-#include "Frontier/Engine/PhysicalDynamics/ParticleDynamics/ParticleScene.h"
+#include "Frontier/Engine/PhysicalDynamics/ParticleDynamics/ParticleSpace.h"
 
 #include <array>
 #include <cstdint>

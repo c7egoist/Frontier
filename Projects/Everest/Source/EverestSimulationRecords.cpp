@@ -167,7 +167,7 @@ void HarmonicOscillatorRecord::StepSimulation(float DeltaSeconds)
     Physics.LinearVelocityMps[1] = Oscillator.CurrentVelocityMps;
 }
 
-void RegisterEverestSimulationTypes(Frontier::SceneWorld& World)
+void RegisterEverestSimulationTypes(Frontier::WorldSpace& World)
 {
     World.RegisterType({
         "HarmonicOscillator",

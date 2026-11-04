@@ -7,7 +7,7 @@
 #include "Engine/Interface/InspectorRuntime.h"
 #include "Engine/Interface/Inspectors/PlanetSurfacePreview.h"
 #include "EverestWorkspace.h"
-#include "EverestSceneViewport.h"
+#include "Frontier/Extensions/Rendering/RenderingExtension.h"
 #include "Exhibits/ControlCentre/Code/CpuRasterization.h"
 #include <imgui_internal.h>
 #include <stb_image_write.h>
@@ -107,7 +107,7 @@ int main(int Count, char **Arguments)
             auto &Centre = *static_cast<ControlCentrePanel *>(Ownership.get());
             Require(Centre.Initialize() && Centre.Activate(), "Native UI initialized");
             Everest::EverestWorkspace Workspace(Centre, Project);
-            auto &World = Workspace.QuerySceneWorld();
+            auto &World = Workspace.QueryWorldSpace();
             Require(World.QueryRecordCount() == 67 && World.FindAllByType("Geometry").size() == 37 && World.FindAllByType("ForceSource").size() == 14,
                     "Clean default retains only rendered environment, the one Render settings record, the 37 scene objects and the 14 forces");
             for (const char *Type : {"SpatialNode", "RigidBody", "ThermalBody", "ChemicalVessel", "FluidPlume", "Fracture", "Particles",
@@ -139,18 +139,18 @@ int main(int Count, char **Arguments)
             Moon.ElevationDegrees = 30;
             for (const auto *Entry : World.FindAllByType("Planet"))
                 dynamic_cast<PlanetRecord *>(World.FindRecord(Entry->QueryToken()))->AccessConfiguration().Enabled = false;
-            Everest::EverestSceneViewport Bridge(Project, Shaders, nullptr);
+            Frontier::RenderingExtension Bridge(Project, Shaders, nullptr);
             constexpr uint64_t ViewTag = 0xCE1E571A;
             std::vector<uint8_t> Pixels;
             std::array<uint32_t, 2> Extent{};
-            Workspace.PresentSceneViewport = [&](const Everest::SceneViewportRequest &Request)
+            Workspace.PresentSceneViewport = [&](const Frontier::SceneViewportRequest &Request)
             {
                 auto Small = Request;
                 Small.PanelWidth = 480;
                 Small.PanelHeight = 300;
                 Small.PixelDensity = 1;
                 const auto Result = Bridge.Render(Small, World, Workspace.QueryElapsedSeconds());
-                Everest::SceneViewportImage Image;
+                Frontier::SceneViewportImage Image;
                 Image.Status = Result.Status;
                 Image.Readout = Result.Readout;
                 Require(Result.View != VK_NULL_HANDLE, "Native viewport: " + Result.Status);

@@ -1,7 +1,8 @@
 /*==========================================================================================================================================
                                                         PARTICLEEDITOR.CPP
 ==========================================================================================================================================*/
-// 🧩 The Particle editor window: a title bar with the live readout and Close, and the editor's columns below it.
+// 🧩 The Particle editor window: a title bar with the live readout, the space's file and Close, and the editor's columns below;
+//    the record's .particlespace is attached when the window opens and written back when it closes.
 
 #include "Engine/Interface/ParticleEditor.h"
 
@@ -50,11 +51,48 @@ ParticleEditorWorkspace* ParticleEditor::AccessWorkspace()
     return ResolveWorkspace().get();
 }
 
-void ParticleEditor::ConstructInterface(RecordToken Token, RecordInspector&)
+bool ParticleEditor::SaveSpace()
+{
+    return ResolveWorkspace()->SaveSpaceFile();
+}
+
+std::string ParticleEditor::NameSpaceFile(const std::filesystem::path& LevelFile, const std::string& RecordName)
+{
+    std::string Name = LevelFile.stem().string() + "." + RecordName;
+    for (char& Letter : Name)
+    {
+        const bool Kept = (Letter >= 'a' && Letter <= 'z') || (Letter >= 'A' && Letter <= 'Z') || (Letter >= '0' && Letter <= '9') || Letter == '-' ||
+                          Letter == '_' || Letter == '.';
+        if (!Kept) Letter = '_';
+    }
+    return Name + ".particlespace";
+}
+
+std::filesystem::path ParticleEditor::ResolveSpaceFile(const ParticleConfiguration& Parameters)
+{
+    const std::filesystem::path& Level = InspectorRuntime::Instance().QueryLevelFile();
+    if (Level.empty() || Parameters.SpaceFile.empty()) return {};
+    return Level.parent_path() / DecodeUtf8Path(Parameters.SpaceFile);
+}
+
+void ParticleEditor::ConstructInterface(RecordToken Token, ParticleConfiguration& Parameters)
 {
     ParticleEditorWorkspace& Workspace = *ResolveWorkspace();
     InspectorRuntime&        Runtime   = InspectorRuntime::Instance();
     Workspace.Presenter                = Runtime.QueryParticleViewportPresenter();
+    Workspace.LevelFlow                = Runtime.QueryLevelFlowSampler();
+
+    // 📝 The record's space: named on first use (the level then saves the name), read or created beside the level.
+    if (!Runtime.QueryLevelFile().empty())
+    {
+        if (Parameters.SpaceFile.empty())
+        {
+            Parameters.SpaceFile = NameSpaceFile(Runtime.QueryLevelFile(), SceneDirectory::Instance().QueryName(Token));
+            Parameters.AdvanceRevision();
+        }
+        const std::filesystem::path File = ResolveSpaceFile(Parameters);
+        if (Workspace.QuerySpaceFile() != File) (void)Workspace.AttachSpaceFile(File);
+    }
 
     const InspectorPalette Palette = InspectorPalette::Resolve();
     const EditorTypefaces  Faces   = EditorTypefaces::Resolve();
@@ -89,9 +127,10 @@ void ParticleEditor::ConstructInterface(RecordToken Token, RecordInspector&)
         Ink->AddLine(ImVec2(Position.x, Position.y + Header), ImVec2(Position.x + Size.x, Position.y + Header), Palette.EdgeBorder, 1.0f);
         ConstructEditorGlyph(Ink, ImVec2(Position.x + 24.0f * Scale, Position.y + 25.0f * Scale), 8.0f * Scale, Palette.ThemeAccent, "Sparkles", 1.5f);
         Ink->AddText(Faces.Medium, 14.0f * Scale, ImVec2(Position.x + 42.0f * Scale, Position.y + 16.5f * Scale), Palette.TextPrimary, "Frontier \xC2\xB7 Particle editor");
-        char Readout[160];
-        std::snprintf(Readout, sizeof(Readout), "LIVE \xC2\xB7 %s \xC2\xB7 %zu EFFECTS \xC2\xB7 %zu FIELDS", SceneDirectory::Instance().QueryName(Token).c_str(),
-                      Workspace.AccessScene().Effects.size(), Workspace.AccessScene().Fields.size());
+        char Readout[256];
+        const std::string File = Workspace.QuerySpaceFile().empty() ? std::string("no level file") : Workspace.QuerySpaceFile().filename().string();
+        std::snprintf(Readout, sizeof(Readout), "LIVE \xC2\xB7 %s \xC2\xB7 %zu EFFECTS \xC2\xB7 %zu FIELDS \xC2\xB7 %s%s", SceneDirectory::Instance().QueryName(Token).c_str(),
+                      Workspace.AccessSpace().Effects.size(), Workspace.AccessSpace().Fields.size(), File.c_str(), Workspace.QuerySpaceChanged() ? " \xC2\xB7 UNSAVED" : "");
         Ink->AddText(Faces.Monospace, 10.5f * Scale, ImVec2(Position.x + 300.0f * Scale, Position.y + 19.5f * Scale), Palette.LiveGreen, Readout);
         const float  CloseW = 108.0f * Scale;
         const ImVec2 CloseMin(Position.x + Size.x - CloseW - 14.0f * Scale, Position.y + 10.0f * Scale);
@@ -107,6 +146,7 @@ void ParticleEditor::ConstructInterface(RecordToken Token, RecordInspector&)
         Workspace.Construct(BodyMin, BodyMax, Scale, ImGui::GetIO().DeltaTime);
         if (Closing)
         {
+            (void)Workspace.SaveSpaceFile();
             ImGui::CloseCurrentPopup();
             Runtime.CloseActiveEditor();
         }
@@ -120,8 +160,11 @@ void ParticleEditor::ConstructInterface(RecordToken Token, RecordInspector&)
 
 namespace Frontier
 {
-void ParticleEditor::ConstructInterface(RecordToken, RecordInspector&) {}
+void ParticleEditor::ConstructInterface(RecordToken, ParticleConfiguration&) {}
 ParticleEditorWorkspace* ParticleEditor::AccessWorkspace() { return nullptr; }
+bool ParticleEditor::SaveSpace() { return false; }
+std::filesystem::path ParticleEditor::ResolveSpaceFile(const ParticleConfiguration&) { return {}; }
+std::string ParticleEditor::NameSpaceFile(const std::filesystem::path&, const std::string&) { return {}; }
 } // namespace Frontier
 
 #endif
