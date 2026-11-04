@@ -180,7 +180,7 @@ by their current directories; CAD editing is a separate workspace launched by th
 ## Extensions and Spaces (2026-11-04)
 
 - `Frontier/Extensions/<Name>/`: the bridges between engine systems and applications, one implementation for every
-  workspace. The rule and the Space table live in `CLAUDE.md` (Extensions and Spaces).
+  workspace. The rule and the list of Spaces live in `CLAUDE.md` (Extensions and Spaces).
 - `Frontier/Engine/Scene/WorldSpace.*`: the level's world (formerly `SceneWorld`).
 - `Frontier/Engine/Interface/SceneViewportPresentation.h`: the Scene Viewport contract between a workspace and its host.
 - `Frontier/Extensions/Interface/GizmoSpace.*` replaces `UI/SolidArc/Viewport/SolidArcGizmo.*`; SolidArc draws it with

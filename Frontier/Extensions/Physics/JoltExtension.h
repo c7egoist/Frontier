@@ -1,8 +1,8 @@
 /*==========================================================================================================================================
                                                               JOLTEXTENSION.H
 ==========================================================================================================================================*/
-// 🧩 The Jolt backend of the Physics extension: Jolt's process-wide registration (allocator, factory, types) held by count, the
-//    two object layers (fixed, moving) with their broad-phase mapping and filters, and the temporary allocator and job system a
+// 🧩 The Jolt backend of the Physics extension: Jolt's program-wide registration (allocator, factory, types) held by count, the
+//    two object layers (fixed, moving) with their broad-phase mapping and filters, and the temporary allocator and job threads a
 //    PhysicsSpace steps with. Only the Physics extension includes Jolt; everything above it sees PhysicsSpace.
 
 #pragma once

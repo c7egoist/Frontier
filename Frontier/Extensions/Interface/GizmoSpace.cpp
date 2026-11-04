@@ -171,7 +171,7 @@ public:
 //                                                    PUBLIC FUNCTIONS
 //------------------------------------------------------------------------------------------------------------------------
 
-OrbitCameraFrame ResolveGizmoFrame(const std::array<double, 3>& Eye, const std::array<double, 3>& Forward, const std::array<double, 3>& Up,
+OrbitCameraFrame ResolveGizmoCamera(const std::array<double, 3>& Eye, const std::array<double, 3>& Forward, const std::array<double, 3>& Up,
                                    double VerticalFieldOfView, double Width, double Height)
 {
     // 📝 Vulkan clip space as the SolidArc camera writes it: x right, y down, depth in [0, 1] between Near and Far.
@@ -189,17 +189,17 @@ OrbitCameraFrame ResolveGizmoFrame(const std::array<double, 3>& Eye, const std::
         { Ahead.X * Depth, Ahead.Y * Depth, Ahead.Z * Depth, -Dot(Ahead, Station) * Depth - Near * Depth },
         { Ahead.X, Ahead.Y, Ahead.Z, -Dot(Ahead, Station) },
     };
-    OrbitCameraFrame Frame;
+    OrbitCameraFrame Camera;
     for (int Row = 0; Row < 4; ++Row)
-        for (int Column = 0; Column < 4; ++Column) Frame.ClipFromWorld[Column * 4 + Row] = Rows[Row][Column];
-    Frame.Eye           = Eye;
-    Frame.Right         = { Across.X, Across.Y, Across.Z };
-    Frame.Up            = { Upward.X, Upward.Y, Upward.Z };
-    Frame.Forward       = { Ahead.X, Ahead.Y, Ahead.Z };
-    Frame.WorldPerPixel = 2.0 * Tangent / std::max(1.0, Height);                             // [len] - At unit depth
-    Frame.Width         = Width;
-    Frame.Height        = Height;
-    return Frame;
+        for (int Column = 0; Column < 4; ++Column) Camera.ClipFromWorld[Column * 4 + Row] = Rows[Row][Column];
+    Camera.Eye           = Eye;
+    Camera.Right         = { Across.X, Across.Y, Across.Z };
+    Camera.Up            = { Upward.X, Upward.Y, Upward.Z };
+    Camera.Forward       = { Ahead.X, Ahead.Y, Ahead.Z };
+    Camera.WorldPerPixel = 2.0 * Tangent / std::max(1.0, Height);                            // [len] - At unit depth
+    Camera.Width         = Width;
+    Camera.Height        = Height;
+    return Camera;
 }
 
 double MeasureGizmoSize(const OrbitCameraFrame& Frame, Vector3 Origin, double Pixels)

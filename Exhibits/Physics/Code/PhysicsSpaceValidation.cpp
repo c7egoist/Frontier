@@ -223,7 +223,7 @@ bool WriteCapture(const std::filesystem::path& Target, const std::filesystem::pa
                                IM_COL32(86, 200, 186, 255),  IM_COL32(90, 160, 255, 255),  IM_COL32(150, 128, 255, 255), IM_COL32(222, 120, 220, 255),
                                IM_COL32(236, 236, 236, 255), IM_COL32(255, 196, 160, 255), IM_COL32(180, 230, 255, 255), IM_COL32(200, 255, 190, 255),
                                IM_COL32(255, 120, 160, 255) };
-    for (int Frame = 0; Frame < 3; ++Frame)
+    for (int Refresh = 0; Refresh < 3; ++Refresh)
     {
         Io.DeltaTime = 1.0f / 30.0f;
         ImGui::NewFrame();
@@ -251,9 +251,9 @@ bool WriteCapture(const std::filesystem::path& Target, const std::filesystem::pa
                 if (Body == 0) continue;
                 const bool  Fixed = Descriptor.Motion == PhysicsMotion::Fixed;
                 if (Fixed && !Last) continue;
-                const ImU32 Base = Fixed ? IM_COL32(120, 126, 138, 255) : Moving[Body % 13];
-                const ImU32 Fill = (Base & 0x00FFFFFFu) | ((Fixed ? 255u : Alpha * 3u / 5u) << 24);
-                const ImU32 Edge = (Base & 0x00FFFFFFu) | (Alpha << 24);
+                const ImU32 Tint = Fixed ? IM_COL32(120, 126, 138, 255) : Moving[Body % 13];
+                const ImU32 Fill = (Tint & 0x00FFFFFFu) | ((Fixed ? 255u : Alpha * 3u / 5u) << 24);
+                const ImU32 Edge = (Tint & 0x00FFFFFFu) | (Alpha << 24);
                 if (Descriptor.Shape == PhysicsShape::Sphere)
                 {
                     const ImVec2 Centre = Project(Reading.PositionMetres);

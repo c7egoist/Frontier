@@ -3,7 +3,7 @@
 ==========================================================================================================================================*/
 // 🧩 A ParticleSpace on disk: the `.particlespace` TOML file a Particles record keeps beside its level. It holds the clock,
 //    camera, wind, lightning, probe and level-wind settings, the [[force]] records and one [[effect]] per effect, every
-//    parameter spelled as the preset library spells it. Live state (particles, bolts, the time) is not stored.
+//    parameter spelled as the preset library spells it. Live values (particles, bolts, the time) are not stored.
 
 #pragma once
 

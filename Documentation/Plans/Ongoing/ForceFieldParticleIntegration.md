@@ -136,4 +136,4 @@ Renames for the engine's barred words: *system* → effect, *kind* → `Particle
 | Drag volume and current without a GPU path                   | ✔️ Field program types 4 and 5                      |
 | The Force Field page history only while the Field view shows | ✔️ A 16 × 16 background sampling keeps it filling   |
 | The proposed cascades (4 × 128² × 32)                        | Budgeted and drawn; the lattice comes with particles |
-| The prototype's thunder sound                                | Open: the engine has no audio system                |
+| The prototype's thunder sound                                | Open: the engine has no audio output yet            |

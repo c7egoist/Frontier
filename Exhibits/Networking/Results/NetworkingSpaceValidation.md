@@ -9,17 +9,17 @@ Host and client levels joined by the loopback transport.
 | 🟢 | each side knows both peers after the greetings |
 | 🟢 | the client level holds 3 records (3) |
 | 🟢 | every host record is matched to a client record |
-| 🟢 | Solar 'Sun' arrives with the same state |
-| 🟢 | RigidBody 'Crate' arrives with the same state |
-| 🟢 | Clouds 'Cumulus' arrives with the same state |
+| 🟢 | Solar 'Sun' arrives with the same configuration |
+| 🟢 | RigidBody 'Crate' arrives with the same configuration |
+| 🟢 | Clouds 'Cumulus' arrives with the same configuration |
 | 🟢 | an unchanged level sends nothing |
 | 🟢 | moving the sun sends one message (1) |
 | 🟢 | the client's sun follows (elevation 12.5°) |
 | 🟢 | removing the clouds removes them on the client |
 | 🟢 | the client level holds 2 records |
-| 🟢 | a frame decodes to the message it encodes (33 bytes) |
-| 🟢 | a truncated frame is refused |
-| 🟢 | a frame shorter than its header is refused |
+| 🟢 | a packet decodes to the message it encodes (33 bytes) |
+| 🟢 | a truncated packet is refused |
+| 🟢 | a packet shorter than its header is refused |
 | 🟢 | the client received every message and byte the host sent (6 messages, 2676 B) |
 
 17 / 17 assertions.

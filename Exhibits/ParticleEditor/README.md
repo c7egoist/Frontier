@@ -135,7 +135,7 @@ _ClaudeScratch/build/UI/ParticleEditorCapture EngineContent Projects/Everest _Cl
 - **Box volumes:** the drag volume (type 4) and the current (type 5) now run in the field program. The prototype parity
   check covers eos's own entries and checks the box volumes separately.
 - **Tornado funnels:** authored tornado ForceSource records raise condensation funnels in the GPU clouds.
-- **Test:** `ParticleSpaceValidation` passes 146/146:
+- **Test:** `ParticleSpaceValidation`, 146/146 assertions:
   - 56 effects survive the round trip bit for bit, and 1680/1680 refresh uniforms are identical.
   - The level wind adds one flow only while it is followed.
   - Both box volumes are packed, and 6 malformed files are refused.
@@ -145,4 +145,4 @@ _ClaudeScratch/build/UI/ParticleEditorCapture EngineContent Projects/Everest _Cl
 
 - Captured offscreen on Linux with SwiftShader. The Windows build is cross-compiled and was not run on Windows.
 - The level wind enters the lattice as one horizontal prevailing flow; the lattice's flows are horizontal.
-- The prototype's thunder sound is not ported: the engine has no audio system yet.
+- The prototype's thunder sound is not ported: the engine has no audio output yet.

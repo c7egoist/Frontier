@@ -1,7 +1,7 @@
 /*==========================================================================================================================================
                                                                 GIZMOSPACE.H
 ==========================================================================================================================================*/
-// 🧩 GizmoSpace, the world the transform gizmo lives in, shared by every workspace (SolidArc, the Frontier editor and the
+// 🧩 GizmoSpace, the world the transform gizmo lives in, one for every workspace (SolidArc, the Frontier editor and the
 //    games): the Slate GizmoPRO handles as CPU-built triangles, the pick on those same triangles and the drag maths.
 //    SolidArc draws the triangles with its GPU program (SolidArcGizmo.slang); the Frontier editor with GizmoRasterization.
 
@@ -86,9 +86,9 @@ struct GizmoGeometry
 //                                                    PUBLIC FUNCTIONS
 //------------------------------------------------------------------------------------------------------------------------
 
-// 📝 The camera frame of a perspective view given by its eye, forward and up directions (any up axis: SolidArc is y up, the
-//    Frontier level z up) over a Width × Height pixel stage. WorldFromClip stays empty: the gizmo never casts rays from it.
-[[nodiscard]] OrbitCameraFrame ResolveGizmoFrame(const std::array<double, 3>& Eye, const std::array<double, 3>& Forward,
+// 📝 The camera of a perspective view given by its eye, forward and up directions (any up axis: SolidArc is y up, the
+//    Frontier level z up) over a Width × Height pixel viewport. WorldFromClip stays empty: the gizmo never casts rays from it.
+[[nodiscard]] OrbitCameraFrame ResolveGizmoCamera(const std::array<double, 3>& Eye, const std::array<double, 3>& Forward,
                                                  const std::array<double, 3>& Up, double VerticalFieldOfView, double Width, double Height);
 
 // World length that spans Pixels on screen at Origin's depth (perspective or orthographic).

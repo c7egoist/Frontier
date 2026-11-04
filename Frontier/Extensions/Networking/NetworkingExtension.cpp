@@ -1,7 +1,7 @@
 /*==========================================================================================================================================
                                                           NETWORKINGEXTENSION.CPP
 ==========================================================================================================================================*/
-// 🧩 Replication of WorldSpace records as their level TOML, the message framing and the loopback transport.
+// 🧩 Replication of WorldSpace records as their level TOML, the messages' wire form and the loopback transport.
 
 #include "Frontier/Extensions/Networking/NetworkingExtension.h"
 
@@ -43,7 +43,7 @@ std::string Print(const toml::table& Table)
 } // namespace
 
 //------------------------------------------------------------------------------------------------------------------------
-//                                                    FRAMING
+//                                                    WIRE FORM
 //------------------------------------------------------------------------------------------------------------------------
 
 std::string EncodeNetworkMessage(const NetworkMessage& Message)
@@ -86,19 +86,19 @@ void LoopbackTransport::Connect(LoopbackTransport& First, LoopbackTransport& Sec
 bool LoopbackTransport::Send(const NetworkMessage& Message)
 {
     if (Partner == nullptr) return false;
-    Partner->Frames.push_back(EncodeNetworkMessage(Message));
+    Partner->Packets.push_back(EncodeNetworkMessage(Message));
     return true;
 }
 
 std::vector<NetworkMessage> LoopbackTransport::Receive()
 {
     std::vector<NetworkMessage> Messages;
-    for (const std::string& Frame : Frames)
+    for (const std::string& Packet : Packets)
     {
         NetworkMessage Message;
-        if (DecodeNetworkMessage(Frame, Message)) Messages.push_back(std::move(Message));
+        if (DecodeNetworkMessage(Packet, Message)) Messages.push_back(std::move(Message));
     }
-    Frames.clear();
+    Packets.clear();
     return Messages;
 }
 
@@ -125,14 +125,14 @@ size_t NetworkingExtension::Replicate(const WorldSpace& World)
             Present.insert(Token);
             toml::table Configuration;
             Record->SerializeConfiguration(Configuration);
-            std::string State = Print(toml::table{ { "token", static_cast<int64_t>(Token) },
-                                                   { "type", Record->QueryTypeIdentifier() },
-                                                   { "name", Record->QueryRecordName() },
-                                                   { "configuration", std::move(Configuration) } });
+            std::string Payload = Print(toml::table{ { "token", static_cast<int64_t>(Token) },
+                                                     { "type", Record->QueryTypeIdentifier() },
+                                                     { "name", Record->QueryRecordName() },
+                                                     { "configuration", std::move(Configuration) } });
             std::string& Last = Sent[Token];
-            if (Last == State) continue;
-            Last = State;
-            Space.Post(NetworkTopic::RecordState, std::move(State));
+            if (Last == Payload) continue;
+            Last = Payload;
+            Space.Post(NetworkTopic::RecordConfiguration, std::move(Payload));
             ++Posted;
         }
     }
@@ -188,7 +188,7 @@ size_t NetworkingExtension::Absorb(WorldSpace& World)
             }
             continue;
         }
-        if (Message.Topic != NetworkTopic::RecordState) continue;
+        if (Message.Topic != NetworkTopic::RecordConfiguration) continue;
         const std::string  Type          = Document["type"].value<std::string>().value_or("");
         const std::string  Name          = Document["name"].value<std::string>().value_or("");
         const toml::table* Configuration = Document["configuration"].as_table();

@@ -13,10 +13,10 @@
 namespace Frontier
 {
 
-// 📝 Draws Geometry over the stage whose top-left corner is StageMin (Frame.Width × Frame.Height pixels). Lit handles take the
+// 📝 Rasterizes Geometry over the viewport rectangle whose top-left corner is StageMin (Camera.Width × Camera.Height pixels). Lit handles take the
 //    program's headlight (ambient 0.45 + diffuse 0.55 toward the eye); the opaque handles go far to near, the translucent
 //    plane quads over them. Fills carry no anti-aliased fringe, so neighbouring facets meet without seams; the silhouette
 //    edges get an anti-aliased stroke instead.
-void RasterizeGizmo(ImDrawList* DrawList, const GizmoGeometry& Geometry, const OrbitCameraFrame& Frame, ImVec2 StageMin);
+void RasterizeGizmo(ImDrawList* DrawList, const GizmoGeometry& Geometry, const OrbitCameraFrame& Camera, ImVec2 StageMin);
 
 } // namespace Frontier

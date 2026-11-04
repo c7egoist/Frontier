@@ -26,7 +26,7 @@ In the editor, Simulate turns the level into a PhysicsSpace:
 
 ## Test
 
-`PhysicsSpaceValidation` (ctest) checks:
+`PhysicsSpaceValidation` (ctest) covers:
 
 - Free fall against z₀ − g t² / 2.
 - A cube coming to rest and sleeping.
@@ -51,5 +51,5 @@ Each body is drawn at 0, 0.5, 1, 1.5, 2 and 3 s (faint) and at 5 s (solid), with
 
 ## Later
 
-- Convex hulls and triangle meshes from the engine shapes' facets, in place of boxes over the bounds.
+- Convex hulls and facet sets from the engine shapes, in place of boxes over the bounds.
 - Constraints (hinges, the vehicle's suspension), a character controller, and Jolt's debug renderer in the viewport.

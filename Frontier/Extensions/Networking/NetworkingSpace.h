@@ -19,11 +19,11 @@ enum class NetworkRole : uint8_t
     Client,   // receives the host's world
 };
 
-// 📝 What a message carries: a greeting, one record's state, a record's removal, a farewell.
+// 📝 What a message carries: a greeting, one record's configuration, a record's removal, a farewell.
 enum class NetworkTopic : uint8_t
 {
     Greeting,
-    RecordState,
+    RecordConfiguration,
     RecordRemoval,
     Farewell,
 };

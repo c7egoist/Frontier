@@ -23,7 +23,7 @@ namespace Frontier
 class WorldSpace;
 
 // 📝 The wire form of a message: a 24-byte little-endian header (sender, receiver, topic, sequence, payload length) and the
-//    payload. Every transport frames messages this way.
+//    payload. Every transport sends messages in this form.
 [[nodiscard]] std::string EncodeNetworkMessage(const NetworkMessage& Message);
 bool                      DecodeNetworkMessage(std::string_view Bytes, NetworkMessage& Message);
 
@@ -37,7 +37,7 @@ class NetworkTransport
     [[nodiscard]] virtual const char*                 QueryName() const noexcept          = 0;
 };
 
-// 📝 Two ends in one process: what one sends, the other receives, framed and unframed as a socket would carry it.
+// 📝 Two ends in one program: what one sends, the other receives, in the wire form a socket would carry.
 class LoopbackTransport final : public NetworkTransport
 {
   public:
@@ -49,7 +49,7 @@ class LoopbackTransport final : public NetworkTransport
 
   private:
     LoopbackTransport*       Partner = nullptr;
-    std::vector<std::string> Frames;
+    std::vector<std::string> Packets;
 };
 
 class NetworkingExtension
@@ -60,7 +60,7 @@ class NetworkingExtension
     // 📝 Introduces the local peer to the others (name and role).
     void Greet();
 
-    // 📝 Host: every record whose level TOML changed since the last call leaves as one RecordState message; records gone from
+    // 📝 Host: every record whose level TOML changed since the last call leaves as one RecordConfiguration message; records gone from
     //    the level leave as RecordRemoval. Returns the messages posted.
     size_t Replicate(const WorldSpace& World);
 
@@ -76,7 +76,7 @@ class NetworkingExtension
   private:
     NetworkingSpace&                          Space;
     NetworkTransport&                         Transport;
-    std::unordered_map<uint64_t, std::string> Sent;      // host record token → the state last sent
+    std::unordered_map<uint64_t, std::string> Sent;      // host record token → the payload last sent
     std::unordered_map<uint64_t, RecordToken> Matched;   // host record token → local record
 };
 

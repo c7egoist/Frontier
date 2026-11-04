@@ -86,9 +86,9 @@ bool ReadText(const std::filesystem::path& File, std::string& Text, std::string&
         Diagnostic = "cannot open " + File.filename().string();
         return false;
     }
-    std::ostringstream Buffer;
-    Buffer << Stream.rdbuf();
-    Text = Buffer.str();
+    std::ostringstream Gathered;
+    Gathered << Stream.rdbuf();
+    Text = Gathered.str();
     return true;
 }
 

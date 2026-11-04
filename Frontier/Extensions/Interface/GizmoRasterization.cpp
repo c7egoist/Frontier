@@ -35,23 +35,23 @@ struct ProjectedTriangle
     uint32_t        First       = 0;        // [-] first vertex in the geometry
 };
 
-ProjectedCorner ProjectCorner(const OrbitCameraFrame& Frame, const GizmoVertex& Vertex, ImVec2 StageMin)
+ProjectedCorner ProjectCorner(const OrbitCameraFrame& Camera, const GizmoVertex& Vertex, ImVec2 StageMin)
 {
     ProjectedCorner Corner;
     double          Clip[4] = {};
     for (int Row = 0; Row < 4; ++Row)
-        Clip[Row] = Frame.ClipFromWorld[0 * 4 + Row] * Vertex.Position[0] + Frame.ClipFromWorld[1 * 4 + Row] * Vertex.Position[1] +
-                    Frame.ClipFromWorld[2 * 4 + Row] * Vertex.Position[2] + Frame.ClipFromWorld[3 * 4 + Row];
+        Clip[Row] = Camera.ClipFromWorld[0 * 4 + Row] * Vertex.Position[0] + Camera.ClipFromWorld[1 * 4 + Row] * Vertex.Position[1] +
+                    Camera.ClipFromWorld[2 * 4 + Row] * Vertex.Position[2] + Camera.ClipFromWorld[3 * 4 + Row];
     if (Clip[3] <= 1.0e-9) return Corner;
-    Corner.Screen = ImVec2(StageMin.x + static_cast<float>((Clip[0] / Clip[3] * 0.5 + 0.5) * Frame.Width),
-                           StageMin.y + static_cast<float>((Clip[1] / Clip[3] * 0.5 + 0.5) * Frame.Height));
+    Corner.Screen = ImVec2(StageMin.x + static_cast<float>((Clip[0] / Clip[3] * 0.5 + 0.5) * Camera.Width),
+                           StageMin.y + static_cast<float>((Clip[1] / Clip[3] * 0.5 + 0.5) * Camera.Height));
     Corner.Depth  = Clip[2] / Clip[3];
     Corner.Valid  = true;
     return Corner;
 }
 
 // 📝 SolidArcGizmo.slang's fragment program: Colour · (0.45 + 0.55 · |N · −Forward|) when lit, the flat colour otherwise.
-ImU32 ShadeVertex(const OrbitCameraFrame& Frame, const GizmoVertex& Vertex)
+ImU32 ShadeVertex(const OrbitCameraFrame& Camera, const GizmoVertex& Vertex)
 {
     double     Channels[3] = { static_cast<double>(Vertex.Colour & 0xffu), static_cast<double>((Vertex.Colour >> 8) & 0xffu),
                                static_cast<double>((Vertex.Colour >> 16) & 0xffu) };
@@ -59,7 +59,7 @@ ImU32 ShadeVertex(const OrbitCameraFrame& Frame, const GizmoVertex& Vertex)
     const double Size      = Vertex.Normal[0] * Vertex.Normal[0] + Vertex.Normal[1] * Vertex.Normal[1] + Vertex.Normal[2] * Vertex.Normal[2];
     if (Size > 1.0e-6)
     {
-        const double Facing = std::abs(Vertex.Normal[0] * Frame.Forward[0] + Vertex.Normal[1] * Frame.Forward[1] + Vertex.Normal[2] * Frame.Forward[2]) /
+        const double Facing = std::abs(Vertex.Normal[0] * Camera.Forward[0] + Vertex.Normal[1] * Camera.Forward[1] + Vertex.Normal[2] * Camera.Forward[2]) /
                               std::sqrt(Size);
         for (double& Channel : Channels) Channel *= 0.45 + 0.55 * Facing;
     }
@@ -80,7 +80,7 @@ CornerKey KeyCorner(const GizmoVertex& Vertex)
 
 } // namespace
 
-void RasterizeGizmo(ImDrawList* DrawList, const GizmoGeometry& Geometry, const OrbitCameraFrame& Frame, ImVec2 StageMin)
+void RasterizeGizmo(ImDrawList* DrawList, const GizmoGeometry& Geometry, const OrbitCameraFrame& Camera, ImVec2 StageMin)
 {
     if (DrawList == nullptr || Geometry.Vertices.size() < 3) return;
 
@@ -93,13 +93,13 @@ void RasterizeGizmo(ImDrawList* DrawList, const GizmoGeometry& Geometry, const O
         bool              Valid = true;
         for (uint32_t Corner = 0; Corner < 3; ++Corner)
         {
-            Triangle.Corners[Corner] = ProjectCorner(Frame, Geometry.Vertices[First + Corner], StageMin);
+            Triangle.Corners[Corner] = ProjectCorner(Camera, Geometry.Vertices[First + Corner], StageMin);
             Valid                    = Valid && Triangle.Corners[Corner].Valid;
         }
         if (!Valid) continue;
         const ImVec2 A = Triangle.Corners[0].Screen, B = Triangle.Corners[1].Screen, C = Triangle.Corners[2].Screen;
         Triangle.Winding     = (B.x - A.x) * (C.y - A.y) - (C.x - A.x) * (B.y - A.y);
-        Triangle.Ink         = ShadeVertex(Frame, Geometry.Vertices[First]);
+        Triangle.Ink         = ShadeVertex(Camera, Geometry.Vertices[First]);
         Triangle.Depth       = (Triangle.Corners[0].Depth + Triangle.Corners[1].Depth + Triangle.Corners[2].Depth) / 3.0;
         Triangle.Translucent = First >= Geometry.OpaqueCount;
         Triangle.First       = First;

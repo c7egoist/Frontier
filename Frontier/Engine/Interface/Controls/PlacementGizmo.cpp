@@ -90,21 +90,21 @@ GizmoHandle ResolveGizmoHandle(int Code, PlacementGizmoMode Mode) noexcept
     return static_cast<GizmoHandle>(static_cast<int>(First) + Code);
 }
 
-OrbitCameraFrame ResolveFrame(const PlacementView& View)
+OrbitCameraFrame ResolveCamera(const PlacementView& View)
 {
-    return ResolveGizmoFrame(View.Eye, View.Forward, View.Up, View.VerticalFieldOfView, View.StageExtent.x, View.StageExtent.y);
+    return ResolveGizmoCamera(View.Eye, View.Forward, View.Up, View.VerticalFieldOfView, View.StageExtent.x, View.StageExtent.y);
 }
 
 // 📝 GizmoSpace's pose: the handle axes as a right-handed unit frame (Rotate's Euler axes are orthogonal only while β = 0:
 //    the frame keeps the γ axis and the turned Y, so each arc sits about the axis it turns), a constant HandlePixels on screen.
-GizmoPose ResolvePose(const OrbitCameraFrame& Frame, PlacementGizmoMode Mode, const SpatialConfiguration& Spatial, float Scale)
+GizmoPose ResolvePose(const OrbitCameraFrame& Camera, PlacementGizmoMode Mode, const SpatialConfiguration& Spatial, float Scale)
 {
     std::array<Vector, 3> Axes = ResolveHandleAxes(Mode, Spatial);
     if (Mode == PlacementGizmoMode::Rotate) Axes[0] = Normalize(Cross(Axes[1], Axes[2]));
     GizmoPose Pose;
     Pose.Origin = {Spatial.PositionMetres[0], Spatial.PositionMetres[1], Spatial.PositionMetres[2]};
     for (size_t Axis = 0; Axis < 3; ++Axis) Pose.Axes[Axis] = {Axes[Axis][0], Axes[Axis][1], Axes[Axis][2]};
-    Pose.Size   = MeasureGizmoSize(Frame, Pose.Origin, HandlePixels * Scale);
+    Pose.Size   = MeasureGizmoSize(Camera, Pose.Origin, HandlePixels * Scale);
     Pose.Modes  = Mode == PlacementGizmoMode::Move ? GizmoTranslate : Mode == PlacementGizmoMode::Rotate ? GizmoRotate : GizmoScale;
     Pose.Hidden = Mode == PlacementGizmoMode::Rotate ? 1u << static_cast<uint32_t>(GizmoHandle::Centre) : 0u;
     return Pose;
@@ -198,9 +198,9 @@ int PlacementGizmo::Probe(const PlacementView& View, PlacementGizmoMode Mode, co
 {
     ImVec2 CentreScreen;
     if (!View.Project({Spatial.PositionMetres[0], Spatial.PositionMetres[1], Spatial.PositionMetres[2]}, CentreScreen)) return -1;
-    const OrbitCameraFrame Frame    = ResolveFrame(View);
-    const GizmoGeometry    Geometry = BuildGizmoGeometry(ResolvePose(Frame, Mode, Spatial, Scale), Frame, GizmoHandle::None, GizmoHandle::None);
-    const GizmoHandle      Handle   = PickGizmoHandle(Geometry, Frame, Pointer.x - View.StageMin.x, Pointer.y - View.StageMin.y, PickPixels * Scale);
+    const OrbitCameraFrame Camera   = ResolveCamera(View);
+    const GizmoGeometry    Geometry = BuildGizmoGeometry(ResolvePose(Camera, Mode, Spatial, Scale), Camera, GizmoHandle::None, GizmoHandle::None);
+    const GizmoHandle      Handle   = PickGizmoHandle(Geometry, Camera, Pointer.x - View.StageMin.x, Pointer.y - View.StageMin.y, PickPixels * Scale);
     return ResolveHandleCode(Handle, Mode);
 }
 
@@ -360,10 +360,10 @@ PlacementGizmoOutcome PlacementGizmo::Construct(ImDrawList* DrawList, const Plac
     if (DrawList == nullptr) return Outcome;
     ImVec2 CentreScreen;
     if (!View.Project({Spatial.PositionMetres[0], Spatial.PositionMetres[1], Spatial.PositionMetres[2]}, CentreScreen)) return Outcome;
-    const OrbitCameraFrame Frame   = ResolveFrame(View);
+    const OrbitCameraFrame Camera  = ResolveCamera(View);
     const GizmoHandle      Lit     = ResolveGizmoHandle(Hover, Mode);
     const GizmoHandle      Grabbed = ResolveGizmoHandle(Handle_, Mode);
-    RasterizeGizmo(DrawList, BuildGizmoGeometry(ResolvePose(Frame, Mode, Spatial, Scale), Frame, Lit, Grabbed), Frame, View.StageMin);
+    RasterizeGizmo(DrawList, BuildGizmoGeometry(ResolvePose(Camera, Mode, Spatial, Scale), Camera, Lit, Grabbed), Camera, View.StageMin);
     if (Readout[0] != '\0')
     {
         const ImVec2 Text(Pointer.x + 16.0f * Scale, Pointer.y + 10.0f * Scale);

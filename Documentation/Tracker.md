@@ -1636,7 +1636,7 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
 - **Limits:**
   - Objects with several copies are held during Simulate (one transform per record).
   - Bodies are boxes over the resolved bounds.
-  - The thunder sound is not ported: there is no audio system.
+  - The thunder sound is not ported: the engine has no audio output yet.
   - The Vulkan device and window host are still separate for SolidArc (planned).
   - Not run on Windows here.
 - **Commits:** `84b9f69`, `bf9ea53`, `19846a8`, `4967491`, `83f036c`, `e697a53` and the commit with this entry and the

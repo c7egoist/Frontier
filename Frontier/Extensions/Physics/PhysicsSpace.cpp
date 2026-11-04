@@ -1,7 +1,7 @@
 /*==========================================================================================================================================
                                                               PHYSICSSPACE.CPP
 ==========================================================================================================================================*/
-// 🧩 The PhysicsSpace on Jolt: one PhysicsSystem with the extension's layers, box and sphere bodies, contact tally and stepping.
+// 🧩 The PhysicsSpace on Jolt: one Jolt solver with the extension's layers, box and sphere bodies, contact tally and stepping.
 
 #include "Frontier/Extensions/Physics/PhysicsSpace.h"
 
@@ -47,7 +47,7 @@ JPH::Vec3 ToVector(const std::array<double, 3>& Value)
 struct PhysicsSpace::Implementation
 {
     JoltExtension          Backend;
-    JPH::PhysicsSystem     System;
+    JPH::PhysicsSystem     Solver;
     ContactTally           Contacts;
     std::vector<JPH::BodyID> Bodies;
 
@@ -57,14 +57,14 @@ struct PhysicsSpace::Implementation
 PhysicsSpace::PhysicsSpace(const PhysicsSpaceSettings& Settings) : Detail(std::make_unique<Implementation>(Settings.Workers))
 {
     const JPH::uint Bodies = std::max<JPH::uint>(16, Settings.MaximumBodies);
-    Detail->System.Init(Bodies, 0, Bodies, Bodies, Detail->Backend.QueryLayers(), Detail->Backend.QueryLayerFilter(), Detail->Backend.QueryPairFilter());
-    Detail->System.SetGravity(ToVector(Settings.GravityMps2));
-    Detail->System.SetContactListener(&Detail->Contacts);
+    Detail->Solver.Init(Bodies, 0, Bodies, Bodies, Detail->Backend.QueryLayers(), Detail->Backend.QueryLayerFilter(), Detail->Backend.QueryPairFilter());
+    Detail->Solver.SetGravity(ToVector(Settings.GravityMps2));
+    Detail->Solver.SetContactListener(&Detail->Contacts);
 }
 
 PhysicsSpace::~PhysicsSpace()
 {
-    JPH::BodyInterface& Interface = Detail->System.GetBodyInterface();
+    JPH::BodyInterface& Interface = Detail->Solver.GetBodyInterface();
     for (const JPH::BodyID& Body : Detail->Bodies)
     {
         Interface.RemoveBody(Body);
@@ -108,7 +108,7 @@ uint32_t PhysicsSpace::AddBody(const PhysicsBodyDescriptor& Descriptor)
             Settings.mMassPropertiesOverride.mMass = static_cast<float>(Descriptor.MassKilograms);
         }
     }
-    JPH::BodyInterface& Interface = Detail->System.GetBodyInterface();
+    JPH::BodyInterface& Interface = Detail->Solver.GetBodyInterface();
     const JPH::BodyID   Body      = Interface.CreateAndAddBody(Settings, Moving ? JPH::EActivation::Activate : JPH::EActivation::DontActivate);
     if (Body.IsInvalid()) return Refused;
     Detail->Bodies.push_back(Body);
@@ -118,13 +118,13 @@ uint32_t PhysicsSpace::AddBody(const PhysicsBodyDescriptor& Descriptor)
 
 void PhysicsSpace::Prepare()
 {
-    Detail->System.OptimizeBroadPhase();
+    Detail->Solver.OptimizeBroadPhase();
 }
 
 void PhysicsSpace::Step(double DeltaSeconds, uint32_t CollisionSteps)
 {
     if (!(DeltaSeconds > 0.0)) return;
-    (void)Detail->System.Update(static_cast<float>(DeltaSeconds), static_cast<int>(std::max(1u, CollisionSteps)), &Detail->Backend.AccessTemporary(),
+    (void)Detail->Solver.Update(static_cast<float>(DeltaSeconds), static_cast<int>(std::max(1u, CollisionSteps)), &Detail->Backend.AccessTemporary(),
                                 &Detail->Backend.AccessJobs());
     SimulatedSeconds += DeltaSeconds;
 }
@@ -133,7 +133,7 @@ PhysicsBodyReading PhysicsSpace::ReadBody(uint32_t Index) const
 {
     PhysicsBodyReading Reading;
     if (Index >= Detail->Bodies.size()) return Reading;
-    const JPH::BodyInterface& Interface = Detail->System.GetBodyInterfaceNoLock();
+    const JPH::BodyInterface& Interface = Detail->Solver.GetBodyInterfaceNoLock();
     const JPH::BodyID         Body      = Detail->Bodies[Index];
     JPH::RVec3                Position;
     JPH::Quat                 Rotation;
@@ -150,7 +150,7 @@ PhysicsBodyReading PhysicsSpace::ReadBody(uint32_t Index) const
 
 size_t PhysicsSpace::QueryAwakeCount() const
 {
-    return Detail->System.GetNumActiveBodies(JPH::EBodyType::RigidBody);
+    return Detail->Solver.GetNumActiveBodies(JPH::EBodyType::RigidBody);
 }
 
 uint64_t PhysicsSpace::QueryContactsAdded() const noexcept
@@ -179,7 +179,7 @@ std::array<double, 4> ResolvePhysicsOrientation(const std::array<double, 3>& Ori
 
 std::array<double, 3> ResolvePhysicsEulerDegrees(const std::array<double, 4>& Q) noexcept
 {
-    // 📝 From the rotation's matrix: β = asin(−R₂₀), α = atan2(R₂₁, R₂₂), γ = atan2(R₁₀, R₀₀).
+    // 📝 From the rotation's columns: β = asin(−R₂₀), α = atan2(R₂₁, R₂₂), γ = atan2(R₁₀, R₀₀).
     constexpr double Degrees = 180.0 / 3.14159265358979323846;
     const double     X = Q[0], Y = Q[1], Z = Q[2], W = Q[3];
     const double     R00 = 1.0 - 2.0 * (Y * Y + Z * Z), R10 = 2.0 * (X * Y + Z * W), R20 = 2.0 * (X * Z - Y * W);

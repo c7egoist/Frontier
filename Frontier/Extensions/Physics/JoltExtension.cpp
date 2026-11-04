@@ -1,7 +1,7 @@
 /*==========================================================================================================================================
                                                              JOLTEXTENSION.CPP
 ==========================================================================================================================================*/
-// 🧩 Jolt's registration for the process, counted across every PhysicsSpace alive, and the stepping resources.
+// 🧩 Jolt's registration for the program, counted across every PhysicsSpace alive, and the stepping resources.
 
 #include "Frontier/Extensions/Physics/JoltExtension.h"
 
