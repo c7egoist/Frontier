@@ -43,7 +43,7 @@ int main(int ArgumentCount, char** Arguments)
     {
         std::setvbuf(stdout, nullptr, _IONBF, 0);
         Require(ArgumentCount >= 5, "usage: SceneViewportWorkspaceCapture <EngineContent> <Projects/Everest> <ShaderRoot> <Out.png> [Refreshes] "
-                                    "[Select type] [Inspector sections, e.g. 0,1,2]");
+                                    "[Select type or type:name] [Inspector sections, e.g. 0,1,2]");
         const std::filesystem::path ContentDir  = std::filesystem::absolute(Arguments[1]);
         const std::filesystem::path EverestRoot = std::filesystem::absolute(Arguments[2]);
         const std::filesystem::path ShaderRoot  = std::filesystem::absolute(Arguments[3]);
@@ -65,6 +65,7 @@ int main(int ArgumentCount, char** Arguments)
         Io.DisplaySize = ImVec2(static_cast<float>(CaptureWidth), static_cast<float>(CaptureHeight));
         Io.DeltaTime   = 1.0f / 30.0f;
         Io.IniFilename = nullptr;
+        Io.ConfigFlags |= ImGuiConfigFlags_DockingEnable | ImGuiConfigFlags_NavEnableKeyboard;   // 📝 before the first NewFrame, as the workspace expects
         Io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures | ImGuiBackendFlags_RendererHasVtxOffset;
         ImGui::GetPlatformIO().Renderer_TextureMaxWidth  = 4096;
         ImGui::GetPlatformIO().Renderer_TextureMaxHeight = 4096;
@@ -103,8 +104,14 @@ int main(int ArgumentCount, char** Arguments)
         RecordToken Selected{};
         if (!SelectType.empty())
         {
-            SceneRecordBase* Entry = Workspace.QueryWorldSpace().FindFirstByType(SelectType);
-            Require(Entry != nullptr, "no record of type " + SelectType);
+            // 📝 "Type" selects the first record of that type, "Type:Name" the record of that name.
+            const size_t      Colon = SelectType.find(':');
+            const std::string Type  = SelectType.substr(0, Colon);
+            const std::string Name  = Colon == std::string::npos ? std::string{} : SelectType.substr(Colon + 1);
+            SceneRecordBase*  Entry = Name.empty() ? Workspace.QueryWorldSpace().FindFirstByType(Type) : nullptr;
+            for (const SceneRecordBase* Candidate : Workspace.QueryWorldSpace().FindAllByType(Type))
+                if (!Name.empty() && Candidate->QueryRecordName() == Name) Entry = Workspace.QueryWorldSpace().FindRecord(Candidate->QueryToken());
+            Require(Entry != nullptr, "no record " + SelectType);
             Selected = Entry->QueryToken();
             Workspace.QueryOutliner().Select(Selected);
         }

@@ -382,6 +382,17 @@ int main(int ArgumentCount, char** Arguments)
         WorldSpace        World;
         const RecordToken Crate    = World.ConstructRecord("Geometry", "Crate");
         const RecordToken Pedestal = World.ConstructRecord("Geometry", "Pedestal");
+        const RecordToken Cones    = World.ConstructRecord("Geometry", "Cones");
+        if (auto* ConeRecord = dynamic_cast<GeometryRecord*>(World.FindRecord(Cones)))
+        {
+            GeometryConfiguration& Group = ConeRecord->AccessConfiguration();
+            Group.Physics                = true;   // 📝 six copies share this one transform: the group is held
+            Group.Resolved.Shown         = 6;
+            Group.Resolved.Extent[0] = Group.Resolved.Extent[1] = Group.Resolved.Extent[2] = 0.5f;
+            Group.Resolved.BoundsMinimum[0] = 4.0f, Group.Resolved.BoundsMaximum[0] = 9.0f;
+            Group.Resolved.BoundsMinimum[1] = -0.25f, Group.Resolved.BoundsMaximum[1] = 0.25f;
+            Group.Resolved.BoundsMinimum[2] = 0.0f, Group.Resolved.BoundsMaximum[2] = 0.5f;
+        }
         auto*             CrateRecord    = dynamic_cast<GeometryRecord*>(World.FindRecord(Crate));
         auto*             PedestalRecord = dynamic_cast<GeometryRecord*>(World.FindRecord(Pedestal));
         if (CrateRecord && PedestalRecord)
@@ -405,6 +416,7 @@ int main(int ArgumentCount, char** Arguments)
             for (int Step = 0; Step < 4 * 60; ++Step) (void)Bridge.Step(World, 1.0 / 60.0);
             const float Rested = Box.Spatial.PositionMetres[2];
             Expect(MovingBodies == 1 && Bridge.QueryTally().Fixed == 2, "the bridge makes 1 moving body and 2 colliders (ground, pedestal)");
+            Expect(Bridge.QueryTally().Held == 1, "a record with six copies is held, not turned into one body for all of them");
             Expect(std::abs(Rested - 2.5f) < 0.03f, "the crate record lands on the pedestal record: origin at " + Figure("%.3f", Rested) + " m (2.5 expected)");
             Bridge.End(World);
             Expect(Box.Spatial.PositionMetres[2] == 5.0f && Box.Spatial.PositionMetres[0] == 0.2f && !Box.Dynamic, "stopping puts the crate back at 5 m");

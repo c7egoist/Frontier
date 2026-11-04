@@ -121,13 +121,28 @@ _ClaudeScratch/build/UI/ParticleEditorCapture EngineContent Projects/Everest _Cl
 | `Code/ParticleLibraryValidation.cpp` | The C++ port against that reference |
 | `Code/ParticleSimulationCapture.cpp` | The engine alone: one scene per capture |
 | `Code/ParticleEditorCapture.cpp` | The editor in the Everest workspace |
+| `Code/ParticleSpaceValidation.cpp` | The `.particlespace` file, the level wind and the box volumes |
+
+## ParticleSpace in the level (2026-11-04)
+
+- **File:** a Particles record keeps its ParticleSpace in `<level>.<record>.particlespace` beside the level.
+  - It is TOML in the preset library's own spelling, with the level key `space_file`.
+  - The editor creates the file from the library's opening space the first time it opens the record.
+  - The title shows the file and `UNSAVED`. Close and the level's Ctrl+S write it back.
+  - The record's Inspector shows the space's figures; the six unused sliders are gone.
+- **Level wind:** Wind page › Level. The level's Force Field (100 m to 100 km), sampled at an anchor in the level,
+  joins the lattice as one more prevailing flow.
+- **Box volumes:** the drag volume (type 4) and the current (type 5) now run in the field program. The prototype parity
+  check covers eos's own entries and checks the box volumes separately.
+- **Tornado funnels:** authored tornado ForceSource records raise condensation funnels in the GPU clouds.
+- **Test:** `ParticleSpaceValidation` passes 146/146:
+  - 56 effects survive the round trip bit for bit, and 1680/1680 refresh uniforms are identical.
+  - The level wind adds one flow only while it is followed.
+  - Both box volumes are packed, and 6 malformed files are refused.
+  - Ledger: `Results/ParticleSpaceValidation.txt`.
 
 ## Limits
 
 - Captured offscreen on Linux with SwiftShader. The Windows build is cross-compiled and was not run on Windows.
-- The particle scene lives for the editor session. It is not yet stored in the level, and the Particles record's
-  six Inspector sliders do not drive it.
-- The editor's Force Field is the particle scene's 12 m lattice with its own fields. The level's Force Field record
-  (100 m to 100 km) is drawn by the same visualization but is not yet a source for the particles.
-- As in the prototype, the drag volume and the current are authored and drawn but have no GPU path yet.
-- The prototype's thunder sound is not ported.
+- The level wind enters the lattice as one horizontal prevailing flow; the lattice's flows are horizontal.
+- The prototype's thunder sound is not ported: the engine has no audio system yet.

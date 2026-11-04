@@ -128,7 +128,12 @@ Renames for the engine's barred words: *system* → effect, *kind* → `Particle
 
 ## 7. Open points
 
-- The particle scene lives for the editor session: storing it in the level, and the Particles record's own sliders.
-- The level's Force Field record (100 m to 100 km) as a source for the particle lattice.
-- Authored flow sources in the GPU cloud records (funnels for authored tornadoes) — after the owner sees the field.
-- The proposed cascades (4 × 128² × 32) are budgeted and drawn; the GPU lattice itself comes with the particles.
+| Point                                                       | Outcome (2026-11-04, plan `ExtensionsAndSpaces.md`) |
+|-------------------------------------------------------------|-----------------------------------------------------|
+| The particle scene lives for the session; the record sliders | ✔️ `.particlespace` per record; sliders replaced    |
+| The level's Force Field as a particle lattice source         | ✔️ Wind page › Level: sampled at an anchor          |
+| Authored flow sources in the GPU clouds (tornado funnels)    | ✔️ Authored tornado columns in the cloud records    |
+| Drag volume and current without a GPU path                   | ✔️ Field program types 4 and 5                      |
+| The Force Field page history only while the Field view shows | ✔️ A 16 × 16 background sampling keeps it filling   |
+| The proposed cascades (4 × 128² × 32)                        | Budgeted and drawn; the lattice comes with particles |
+| The prototype's thunder sound                                | Open: the engine has no audio system                |

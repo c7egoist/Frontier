@@ -1,10 +1,11 @@
 /*==========================================================================================================================================
                                                              PHYSICSEXTENSION.H
 ==========================================================================================================================================*/
-// 🧩 The bridge between a level and its PhysicsSpace. Geometry records with Physics on become moving boxes the size of their
-//    resolved extent; the other single shown objects become fixed colliders; RigidBody records become spheres; a ground slab
-//    tops out at z = 0. Each step writes the moving bodies' transforms back into their records, and the end puts every record
-//    back where the simulation found it (the editor's Simulate).
+// 🧩 The bridge between a level and its PhysicsSpace. A Geometry record shown once with Physics on becomes a moving box the size
+//    of its resolved extent; the other objects shown once become fixed colliders; an object with several copies is held (its
+//    copies share one transform, so they cannot fall apart); RigidBody records become spheres; a ground slab tops out at z = 0.
+//    Each step writes the moving bodies' transforms back into their records, and the end puts every record back where the
+//    simulation found it (the editor's Simulate).
 
 #pragma once
 
@@ -26,7 +27,8 @@ struct PhysicsExtensionTally
 {
     size_t Moving    = 0;   // [-] bodies written back to records
     size_t Fixed     = 0;   // [-] colliders, the ground included
-    size_t Skipped   = 0;   // [-] objects with several copies or no size (not collided against)
+    size_t Held      = 0;   // [-] objects with several copies (they keep their place and are not collided against)
+    size_t Skipped   = 0;   // [-] objects without a size or hidden
     double StepMilliseconds = 0.0;
 };
 

@@ -62,6 +62,11 @@ size_t PhysicsExtension::Begin(WorldSpace& World, const PhysicsSpaceSettings& Se
         const std::array<double, 3> Minimum = ToDouble(Resolved.BoundsMinimum), Maximum = ToDouble(Resolved.BoundsMaximum);
         const std::array<double, 3> World3  = { Maximum[0] - Minimum[0], Maximum[1] - Minimum[1], Maximum[2] - Minimum[2] };
         const bool                  Bounded = World3[0] > 1.0e-3 && World3[1] > 1.0e-3 && World3[2] > 1.0e-3;
+        if (Resolved.Shown > 1)
+        {
+            ++Tally.Held;
+            continue;
+        }
         if (Geometry.Physics)
         {
             const SpatialConfiguration& Spatial = Geometry.Spatial;

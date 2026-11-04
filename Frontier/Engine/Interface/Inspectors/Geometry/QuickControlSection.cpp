@@ -40,10 +40,10 @@ bool GeometryQuickSection::Construct(ControlColumn& Page, GeometryConfiguration&
     // 📝 The reference pairs them: physics needs a dynamic body, and a static body drops its physics.
     if (Parameters.Physics && !Physics) Parameters.Dynamic = true;
     if (!Parameters.Dynamic && Dynamic) Parameters.Physics = false;
-    char Note[240];
-    std::snprintf(Note, sizeof(Note), "%s object \xC2\xB7 %s. Visible, Dynamic, Cast shadows, GI and Locked act on the viewport now; Physics is "
-                                      "authored until the physics (Jolt) arrives.",
-                  Parameters.Dynamic ? "Dynamic" : "Static", Parameters.Physics ? "Physics requested" : "Physics off");
+    char Note[320];
+    std::snprintf(Note, sizeof(Note), "%s object \xC2\xB7 %s. Physics acts while the level simulates (Alt+S, the viewport's Play) on an "
+                                      "object shown once; an object with several copies stays put, as the copies share one transform.",
+                  Parameters.Dynamic ? "Dynamic" : "Static", Parameters.Physics ? "Physics on" : "Physics off");
     CaptionText::Construct(Page, Note, 0.0f, 0.0f);
     Page.EndCard();
     return Changed;

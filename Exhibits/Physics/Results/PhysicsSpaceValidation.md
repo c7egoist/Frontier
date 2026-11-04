@@ -14,9 +14,10 @@ JoltPhysics 5.6.0 behind `Frontier/Extensions/Physics` (cross-platform determini
 | 🟢 | a 30-body pile settles bit-identically twice (cross-platform deterministic build) |
 | 🟢 | Euler (Z, then Y, then X) → quaternion → Euler: worst 1.3e-13° |
 | 🟢 | the bridge makes 1 moving body and 2 colliders (ground, pedestal) |
+| 🟢 | a record with six copies is held, not turned into one body for all of them |
 | 🟢 | the crate record lands on the pedestal record: origin at 2.500 m (2.5 expected) |
 | 🟢 | stopping puts the crate back at 5 m |
-| 🟢 | 1000 falling boxes: 12.16 ms per 1/60 s step on 1 workers (this sandbox, Debug build of the extension) |
+| 🟢 | 1000 falling boxes: 30.53 ms per 1/60 s step on 1 workers (this sandbox, Debug build of the extension) |
 | 🟢 | capture written: PhysicsSpaceFalling.png |
 
-14 / 14 assertions.
+15 / 15 assertions.

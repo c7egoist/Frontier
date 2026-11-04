@@ -1432,8 +1432,11 @@ void EverestWorkspace::ToggleSimulation()
     const size_t Moving = Physics->Begin(QueryWorldSpace());
     const auto&  Tally  = Physics->QueryTally();
     char         Text[160];
-    if (Moving > 0) std::snprintf(Text, sizeof(Text), "Simulating \xC2\xB7 %zu moving, %zu colliders (Alt+S stops)", Moving, Tally.Fixed);
-    else std::snprintf(Text, sizeof(Text), "Simulating \xC2\xB7 no object has Physics on (%zu colliders) \xC2\xB7 Alt+S stops", Tally.Fixed);
+    if (Moving > 0)
+        std::snprintf(Text, sizeof(Text), "Simulating \xC2\xB7 %zu moving, %zu colliders, %zu groups held (Alt+S stops)", Moving, Tally.Fixed, Tally.Held);
+    else
+        std::snprintf(Text, sizeof(Text), "Simulating \xC2\xB7 no single object has Physics on (%zu colliders, %zu groups held) \xC2\xB7 Alt+S stops",
+                      Tally.Fixed, Tally.Held);
     AnnounceViewportNotice(Text);
 }
 
