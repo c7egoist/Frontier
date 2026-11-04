@@ -316,8 +316,15 @@ void ParticleEditorWorkspace::Present(uint32_t Width, uint32_t Height, double De
         Next.ProbeValid = true;
         Next.Probe      = Image.Probe;
     }
-    if (!Next.Lattice) Next.Lattice = Image.Lattice;
-    else LatticeClock = 0.0;
+    if (!Next.Lattice)
+    {
+        Next.Lattice             = Image.Lattice;
+        Next.LatticeMilliseconds = Image.LatticeMilliseconds;
+    }
+    else
+    {
+        LatticeClock = 0.0;
+    }
     if (Request.ReadLattice && Next.Lattice) Overlay.ConfigureLattice(Next.Lattice, Scene, Plan);
     Image = std::move(Next);
     if (Fresh && !Image.Adapter.empty())
@@ -580,6 +587,7 @@ void ParticleEditorWorkspace::ConstructViewport(ImDrawList* Ink, ImVec2 Minimum,
     const ImVec2 MinimapMin(StageMax.x - 182.0f * Scale, StageMin.y + 12.0f * Scale);
     const ImVec2 MinimapMax(StageMax.x - 12.0f * Scale, StageMin.y + 182.0f * Scale);
     ImGui::SetCursorScreenPos(StageMin);
+    ImGui::SetNextItemAllowOverlap();   // the minimap, submitted after, keeps its clicks
     ImGui::InvisibleButton("##ParticleOrbit", ImVec2(StageMax.x - StageMin.x, StageMax.y - StageMin.y), ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
     if (ImGui::IsItemActive())
     {
@@ -761,9 +769,23 @@ void ParticleEditorWorkspace::ConstructLibrarySheet(ImDrawList*, ImVec2 Minimum,
         float Width = 0.0f;
         if (ConstructPillButton(Style, Ink, "##ParticleLibraryClose", ImVec2(SheetMax.x - 120.0f * Scale, SheetMin.y + 18.0f * Scale), "Close (Esc)", false, "X", &Width))
             LibraryShown = false;
-        ImGui::SetCursorScreenPos(ImVec2(SheetMax.x - 420.0f * Scale, SheetMin.y + 20.0f * Scale));
+        // 📝 The search field in the inspector's inset look.
+        ImGui::SetCursorScreenPos(ImVec2(SheetMax.x - 420.0f * Scale, SheetMin.y + 18.0f * Scale));
         ImGui::SetNextItemWidth(280.0f * Scale);
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 9.0f * Scale);
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(12.0f * Scale, 8.0f * Scale));
+        ImGui::PushStyleColor(ImGuiCol_FrameBg, ImGui::ColorConvertU32ToFloat4(P.InsetFieldBg));
+        ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImGui::ColorConvertU32ToFloat4(P.InsetFieldBg));
+        ImGui::PushStyleColor(ImGuiCol_FrameBgActive, ImGui::ColorConvertU32ToFloat4(P.InsetFieldBg));
+        ImGui::PushStyleColor(ImGuiCol_Border, ImGui::ColorConvertU32ToFloat4(P.InsetFieldBorder));
+        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(P.TextPrimary));
+        ImGui::PushStyleColor(ImGuiCol_TextDisabled, ImGui::ColorConvertU32ToFloat4(P.TextMuted));
+        ImGui::PushFont(Style.Pick(Style.Faces.Regular), 11.5f * Scale);
         ImGui::InputTextWithHint("##ParticleLibrarySearch", "Search presets", LibraryQuery, sizeof(LibraryQuery));
+        ImGui::PopFont();
+        ImGui::PopStyleColor(6);
+        ImGui::PopStyleVar(3);
 
         float ChipX = Left;
         float ChipY = SheetMin.y + 74.0f * Scale;

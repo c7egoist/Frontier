@@ -976,8 +976,10 @@ void EverestWorkspace::ConstructInterface(double DeltaSeconds)
     {
         SaveActiveLevel();
     }
-    ServiceSceneObjectKeys();
-    if (!IO.WantTextInput && ImGui::IsKeyPressed(ImGuiKey_V,false)) ToggleViewportOverlay(2);
+    // 📝 An open editor window (the Particle editor) owns the keys: nothing behind it is removed or toggled.
+    const bool EditorOpen = Frontier::InspectorRuntime::Instance().QueryActiveEditorToken().IsValid();
+    if (!EditorOpen) ServiceSceneObjectKeys();
+    if (!EditorOpen && !IO.WantTextInput && ImGui::IsKeyPressed(ImGuiKey_V,false)) ToggleViewportOverlay(2);
     if (Overlays.Fullscreen && ImGui::IsKeyPressed(ImGuiKey_Escape,false)) { Overlays.Fullscreen=false; NoticeSeconds=0; NoticeText.clear(); }
     std::array<float,3> Focus;
     if (Frontier::InspectorRuntime::Instance().ConsumeSkyFocus(Focus))

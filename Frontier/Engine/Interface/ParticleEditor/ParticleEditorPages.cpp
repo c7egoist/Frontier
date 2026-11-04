@@ -154,7 +154,7 @@ void ParticleEditorPages::ConstructFieldPage(ControlColumn& Page, ParticleEditor
     std::snprintf(PackedText, sizeof(PackedText), "%u of 8", Packed);
     std::snprintf(AuthoredText, sizeof(AuthoredText), "%u", Authored);
     const MetricTile Counts[4] = { { "Flow", FlowText, "fields" }, { "Accelerate", AccelerateText, "fields" }, { "Damp", DampText, "fields" },
-                                   { "Lattice", "24\xC2\xB7" "12\xC2\xB7" "24", "cells" } };
+                                   { "Lattice", "6912", "24\xC3\x97" "12\xC3\x97" "24 cells" } };
     MetricTiles::Construct(Page, Counts, 4, MetricTiles::NoLead);
     const MetricTile Paths[3] = { { "Summed into the lattice", LatticeText, "flows" }, { "Packed for fieldAccel", PackedText, "this refresh" },
                                   { "Authored only", AuthoredText, "no GPU path yet" } };

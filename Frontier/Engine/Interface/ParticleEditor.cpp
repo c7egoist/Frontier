@@ -7,6 +7,7 @@
 
 #if FRONTIER_EDITOR && defined(FRONTIER_WITH_INTERFACE_SDK)
 
+#include "Engine/Interface/ContentDirectory.h"
 #include "Engine/Interface/InspectorControls.h"
 #include "Engine/Interface/InspectorRuntime.h"
 #include "Engine/Interface/ParticleEditor/ParticleEditorWorkspace.h"
@@ -15,6 +16,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <filesystem>
 #include <memory>
 
 namespace Frontier
@@ -23,10 +25,21 @@ namespace Frontier
 namespace
 {
 
+// 📝 The library beside the executable (EngineContent/ParticleArchives), whatever the working folder: an editor opened through
+//    Windows' Open with starts in the document's folder.
+std::filesystem::path ResolveLibraryFile()
+{
+    const std::filesystem::path Relative = std::filesystem::path("ParticleArchives") / "ParticleLibrary.toml";
+    const std::filesystem::path Engine   = QueryEngineContentDirectory();
+    std::error_code             Failure;
+    if (!Engine.empty() && std::filesystem::is_regular_file(Engine / Relative, Failure)) return Engine / Relative;
+    return ResolveContentDirectory("EngineContent") / Relative;
+}
+
 std::unique_ptr<ParticleEditorWorkspace>& ResolveWorkspace()
 {
     static std::unique_ptr<ParticleEditorWorkspace> Workspace;
-    if (!Workspace) Workspace = std::make_unique<ParticleEditorWorkspace>(QueryEngineContentDirectory() / "ParticleArchives" / "ParticleLibrary.toml");
+    if (!Workspace) Workspace = std::make_unique<ParticleEditorWorkspace>(ResolveLibraryFile());
     return Workspace;
 }
 
@@ -51,14 +64,23 @@ void ParticleEditor::ConstructInterface(RecordToken Token, RecordInspector&)
     const ImVec2           Position(Main->WorkPos.x + Margin.x, Main->WorkPos.y + Margin.y);
     const ImVec2           Size(std::max(1100.0f, Main->WorkSize.x - Margin.x * 2.0f), std::max(640.0f, Main->WorkSize.y - Margin.y * 2.0f));
 
+    // 📝 A modal popup: it stays above the workspace, dims it and keeps the pointer from the panels behind it, as long as the
+    //    record's editor is the active one.
+    constexpr const char* WindowName = "##ParticleEditorWindow";
+    if (!ImGui::IsPopupOpen(WindowName)) ImGui::OpenPopup(WindowName);
     ImGui::SetNextWindowPos(Position, ImGuiCond_Always);
     ImGui::SetNextWindowSize(Size, ImGuiCond_Always);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 16.0f * Scale);
-    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImGui::ColorConvertU32ToFloat4(Palette.ViewportBg));
-    if (ImGui::Begin("##ParticleEditorWindow", nullptr,
-                     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDocking |
-                         ImGuiWindowFlags_NoScrollWithMouse))
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+    ImGui::PushStyleColor(ImGuiCol_PopupBg, ImGui::ColorConvertU32ToFloat4(Palette.ViewportBg));
+    ImGui::PushStyleColor(ImGuiCol_ModalWindowDimBg, ImVec4(0.02f, 0.02f, 0.03f, 0.55f));
+    const bool Shown = ImGui::BeginPopupModal(WindowName, nullptr,
+                                              ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+                                                  ImGuiWindowFlags_NoScrollWithMouse);
+    ImGui::PopStyleColor(2);
+    ImGui::PopStyleVar(3);
+    if (Shown)
     {
         ImDrawList* Ink    = ImGui::GetWindowDrawList();
         const float Header = 50.0f * Scale;
@@ -74,7 +96,7 @@ void ParticleEditor::ConstructInterface(RecordToken Token, RecordInspector&)
         const float  CloseW = 108.0f * Scale;
         const ImVec2 CloseMin(Position.x + Size.x - CloseW - 14.0f * Scale, Position.y + 10.0f * Scale);
         ImGui::SetCursorScreenPos(CloseMin);
-        if (ImGui::InvisibleButton("##CloseParticleEditor", ImVec2(CloseW, 30.0f * Scale))) Runtime.CloseActiveEditor();
+        const bool Closing = ImGui::InvisibleButton("##CloseParticleEditor", ImVec2(CloseW, 30.0f * Scale));
         const bool Hovered = ImGui::IsItemHovered();
         Ink->AddRectFilled(CloseMin, ImVec2(CloseMin.x + CloseW, CloseMin.y + 30.0f * Scale), Hovered ? Palette.SegmentedActiveBg : Palette.CountCardBg, 9.0f * Scale);
         Ink->AddRect(CloseMin, ImVec2(CloseMin.x + CloseW, CloseMin.y + 30.0f * Scale), Palette.InsetFieldBorder, 9.0f * Scale);
@@ -83,10 +105,13 @@ void ParticleEditor::ConstructInterface(RecordToken Token, RecordInspector&)
         const ImVec2 BodyMin(Position.x + 12.0f * Scale, Position.y + Header + 12.0f * Scale);
         const ImVec2 BodyMax(Position.x + Size.x - 12.0f * Scale, Position.y + Size.y - 12.0f * Scale);
         Workspace.Construct(BodyMin, BodyMax, Scale, ImGui::GetIO().DeltaTime);
+        if (Closing)
+        {
+            ImGui::CloseCurrentPopup();
+            Runtime.CloseActiveEditor();
+        }
+        ImGui::EndPopup();
     }
-    ImGui::End();
-    ImGui::PopStyleColor();
-    ImGui::PopStyleVar(2);
 }
 
 } // namespace Frontier

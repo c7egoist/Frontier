@@ -778,6 +778,14 @@ if(BUILD_TESTING)
     target_include_directories(ForceFieldWorkspaceCapture PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
     target_link_libraries(ForceFieldWorkspaceCapture PRIVATE EverestProjectEditor)
 
+    # 📝 The Particle editor in the workspace: opened from a Particles record, the GPU particle engine read back into the image,
+    #    the Outliner, Inspector pages, field overlay and preset library — Exhibits/ParticleEditor/README.md.
+    add_executable(ParticleEditorCapture
+        Exhibits/ParticleEditor/Code/ParticleEditorCapture.cpp
+        Engine/Render/StbImageWriteImplementation.cpp)
+    target_include_directories(ParticleEditorCapture PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
+    target_link_libraries(ParticleEditorCapture PRIVATE EverestProjectEditor)
+
     # 📝 The scene objects in the workspace: the geometry groups, five geometry inspector pages, the viewport before and after edits.
     add_executable(SceneGeometryCapture
         Exhibits/SceneViewport/Code/SceneGeometryCapture.cpp
