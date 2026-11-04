@@ -1586,8 +1586,8 @@ DriveCycleAudit RunDriveCycle(SolverRig& Car, float dt, bool Electric)
             Audit.BatteryWork_J += T.BatteryPower_W * dt;
             const float MotorOmega = T.MotorRPM * V::Drivetrain::kRpmToRad;
             Audit.MotorWork_J += T.MotorTorque_Nm * MotorOmega * dt;
-            Audit.LossWork_J += (Cfg.ElectricMotor.CopperLossCoeff * T.MotorTorque_Nm * T.MotorTorque_Nm + Cfg.ElectricMotor.IronLossCoeff * MotorOmega * MotorOmega +
-                                 Cfg.ElectricMotor.FrictionCoeff * std::fabs(MotorOmega)) *
+            Audit.LossWork_J += (Cfg.ElectricMotor.CopperLoss * T.MotorTorque_Nm * T.MotorTorque_Nm + Cfg.ElectricMotor.IronLoss * MotorOmega * MotorOmega +
+                                 Cfg.ElectricMotor.FrictionLoss * std::fabs(MotorOmega)) *
                                 dt;
             const float Current = T.BatteryVoltage_V > 1.0f ? T.BatteryPower_W / T.BatteryVoltage_V : 0.0f;
             Audit.OhmicWork_J += Current * Current * Cfg.Battery.InternalResistance_Ohm * dt;
