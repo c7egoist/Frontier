@@ -22,7 +22,7 @@ editors in the Frontier editor before the vehicle step. This plan records the ph
 | A | Engine port of `ForceFieldCatalogue.js`, renames, records, levelspace, parity test | ✔️ `2691cd8` |
 | B | Field view: Scene · Field switch, map, oblique, minimap, timeline, camera overlay | ✔️ `440c481` `f6f0deb` |
 | C | Force Field, Wind and Force pages, Forces group, workspace actions, Log Stream | ✔️ `ddff77f` … `fc32e34` |
-| D | Windows binary and Tracker | 🚧 |
+| D | Windows binary and Tracker | ✔️ `3b0df56` and the commit with the binary |
 | E | Particle editor: outliner, inspector, library, its own Vulkan viewport (Slang port) | 🚧 |
 
 ## 3. Phase A — engine

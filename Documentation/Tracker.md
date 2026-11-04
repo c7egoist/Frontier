@@ -1517,12 +1517,17 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
 - **Evidence:** `Exhibits/ForceFieldEditor/README.md` and nine `Images/Editor*.jpg`. The 6 km map samples 11,400
   cells of 32 m in 6.5 ms; the 100 km map 12,276 cells of 512 m in 7.4 ms; the oblique tornado 29,070 cells of 8 m
   in 18.2 ms (timeline at 18.25 s).
-- **Windows binary:** being built at `fc32e34`; the package figures follow in this entry.
+- **Windows binary:** `Binaries/FrontierSceneViewport-Windows-x64.zip`, 34,781,189 bytes, SHA-256
+  `56d1a3fd154a3d2f0d1cd8452fcc02c492eaf94e1520244d8191389131e6f900`. Built with Zig 0.13.0 for x86_64-windows-gnu
+  (`Automation/WindowsToolchain.cmake`) on the Linux host from the `fc32e34` sources. It was packaged at `fc78edc`,
+  whose later commits change no compiled source. It holds `Frontier.exe`, `SolidArcWorkspace.exe`,
+  `TextureWorkspace.exe` and the five shader sets, without the material archives. It is unsigned, not virus-scanned
+  and not started on Windows.
 - **Limits:** not run on Windows here. The GPU cloud synthesis still takes only triggered forces, so authored forces
   do not change the sky. The cascades are budgeted and drawn; the GPU lattice comes with the particles (phase E). The
   page's history fills only while the Field view shows.
-- **Commits:** `2691cd8`, `440c481`, `f6f0deb`, `ddff77f`, `abe5ffa`, `dad9016`, `163cea1`, `de76fa4`, `fc32e34` and
-  the commit with this entry.
+- **Commits:** `2691cd8`, `440c481`, `f6f0deb`, `ddff77f`, `abe5ffa`, `dad9016`, `163cea1`, `de76fa4`, `fc32e34`,
+  `3b0df56` (this entry) and the commit with the binary.
 
 ## SolidArc source integration against e72d319
 
