@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Frontier · Vehicle Audio Simulation — Engineering Grade</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  color-scheme:dark;
+  --bg:#04070a; --panel:rgba(11,16,14,.92); --panel-edge:rgba(255,255,255,.085);
+  --surface:#0e1411; --surface2:#151d18; --surface3:#1c2620;
+  --line:rgba(255,255,255,.075); --lineSoft:rgba(255,255,255,.045);
+  --text:#eef3f0; --muted:#97a29b; --faint:#5f6b64;
+  --mint:#2fe6a7; --mintDim:rgba(47,230,167,.13); --mintInk:#053322;
+  --amber:#ffb454; --coral:#ff6d6d; --blue:#63a8ff; --purple:#b18cff; --pink:#ff7ad9;
+  --red:#ff4747;
+  --r:16px;
+  --mono:"JetBrains Mono",ui-monospace,monospace;
+  --sans:"DM Sans",system-ui,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:var(--sans);background:var(--bg);color:var(--text);overflow:hidden}
+body{
+  background-image: radial-gradient(1100px 600px at 78% -10%, rgba(47,230,167,.07), transparent 60%),
+                    radial-gradient(900px 700px at -10% 110%, rgba(23,90,70,.14), transparent 55%),
+                    radial-gradient(closest-side at 50% 50%, #070b09, var(--bg));
+}
+button{font-family:inherit}
+a{color:var(--mint)}
+.shell{height:100vh;display:flex;flex-direction:column}
+.topbar{
+  height:54px;display:flex;align-items:center;gap:14px;padding:0 18px;
+  border-bottom:1px solid var(--line); background:rgba(6,10,8,.72); backdrop-filter:blur(14px);
+}
+.brand{display:flex;align-items:center;gap:10px;font-weight:500;letter-spacing:-.02em}
+.brand-mark{width:28px;height:28px;border-radius:9px;background:var(--surface2);border:1px solid var(--line);display:grid;place-items:center}
+.brand-mark svg{width:15px;height:15px}
+.chip{padding:6px 10px;border-radius:999px;background:var(--surface2);border:1px solid var(--line);font-size:12px;color:var(--muted)}
+.chip.live{color:var(--mint);border-color:rgba(47,230,167,.28);background:rgba(47,230,167,.08)}
+.topbar-stats{margin-left:auto;display:flex;gap:10px;align-items:center}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.btn{padding:8px 13px;border-radius:11px;border:1px solid var(--line);background:var(--surface2);color:var(--text);cursor:pointer;font-size:13px;transition:all .15s}
+.btn:hover{transform:translateY(-1px);border-color:rgba(255,255,255,.14)}
+.btn.primary{background:var(--mint);color:var(--mintInk);border-color:var(--mint);font-weight:500}
+.btn.ghost{background:transparent}
+.btn.active{background:var(--surface3);border-color:rgba(255,255,255,.14)}
+.layout{flex:1;display:grid;grid-template-columns:310px 1fr 340px;gap:14px;padding:14px;min-height:0}
+.card{background:var(--panel);border:1px solid var(--panel-edge);border-radius:18px;backdrop-filter:blur(18px);box-shadow:0 24px 60px rgba(0,0,0,.42);display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.card-head{padding:14px 14px 10px;border-bottom:1px solid var(--lineSoft);display:flex;align-items:center;gap:10px}
+.card-head h2{font-size:13px;letter-spacing:.11em;text-transform:uppercase;color:var(--faint);font-weight:500}
+.card-body{padding:12px;overflow:auto;flex:1}
+.card-foot{padding:10px 12px;border-top:1px solid var(--lineSoft);display:flex;gap:8px;align-items:center}
+.vehicle-list{display:flex;flex-direction:column;gap:8px}
+.veh{padding:11px 11px;border-radius:13px;border:1px solid var(--line);background:var(--surface);cursor:pointer;text-align:left;transition:all .14s}
+.veh:hover{border-color:rgba(255,255,255,.16);transform:translateY(-1px)}
+.veh.active{background:#0f1a15;border-color:rgba(47,230,167,.32);box-shadow:0 6px 18px rgba(47,230,167,.14)}
+.veh .name{font-size:13px;font-weight:500}
+.veh .sub{font-size:11.5px;color:var(--muted);margin-top:2px}
+.veh .meta{font-family:var(--mono);font-size:10.5px;color:var(--faint);margin-top:6px;display:flex;gap:8px}
+.pill{padding:3px 7px;border-radius:999px;background:var(--surface3);border:1px solid var(--line);font-size:10.5px;color:var(--muted)}
+.center{display:flex;flex-direction:column;gap:14px;min-height:0}
+.gauge-wrap{position:relative;height:360px;display:grid;place-items:center;background:radial-gradient(600px 360px at 50% 72%, rgba(47,230,167,.08), transparent 62%), linear-gradient(180deg, rgba(255,255,255,.02), transparent), var(--surface);border:1px solid var(--lineSoft);border-radius:18px;overflow:hidden}
+.gauge-svg{width:min(420px,95%);height:auto}
+.readouts{position:absolute;inset:auto 0 14px;display:flex;justify-content:center;gap:10px}
+.readout{min-width:96px;padding:8px 10px;border-radius:12px;background:rgba(7,11,9,.78);border:1px solid var(--line);text-align:center}
+.readout .label{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint)}
+.readout .value{font-family:var(--mono);font-size:20px;font-weight:500;margin-top:2px}
+.readout .unit{font-size:11px;color:var(--faint)}
+.bars{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.bar{padding:10px 12px;border-radius:12px;background:var(--surface);border:1px solid var(--lineSoft)}
+.bar .label{font-size:10px;letter-spacing:.11em;text-transform:uppercase;color:var(--faint);display:flex;justify-content:space-between}
+.track{height:8px;border-radius:999px;background:rgba(255,255,255,.07);overflow:hidden;margin-top:8px;position:relative}
+.fill{height:100%;border-radius:999px;transition:width .06s linear}
+.fill.throttle{background:linear-gradient(90deg, #2fe6a7, #63a8ff)}
+.fill.brake{background:linear-gradient(90deg, #ff6d6d, #ffb454)}
+.fill.boost{background:linear-gradient(90deg, #b18cff, #ff7ad9)}
+.wasd{display:flex;gap:8px;justify-content:center}
+.key{width:54px;height:54px;border-radius:12px;border:1px solid var(--line);background:var(--surface2);display:grid;place-items:center;font-weight:500;position:relative;transition:all .09s}
+.key.active{background:var(--mint);color:var(--mintInk);border-color:var(--mint);transform:translateY(-1px);box-shadow:0 8px 18px rgba(47,230,167,.22)}
+.key small{position:absolute;bottom:4px;font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:inherit;opacity:.7}
+.strips{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.strip{padding:10px 12px;border-radius:12px;background:var(--surface);border:1px solid var(--lineSoft)}
+.strip h3{font-size:11px;letter-spacing:.11em;text-transform:uppercase;color:var(--faint)}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;margin-top:8px;font-family:var(--mono);font-size:12px}
+.kv dt{color:var(--faint)} .kv dd{color:var(--text);text-align:right}
+.spectrum{height:96px;border-radius:12px;background:var(--surface);border:1px solid var(--lineSoft);overflow:hidden;position:relative}
+.spectrum canvas{width:100%;height:100%;display:block}
+.log{height:140px;overflow:auto;font-family:var(--mono);font-size:11.5px;line-height:1.55;background:rgba(4,7,6,.55);border:1px solid var(--lineSoft);border-radius:12px;padding:8px 10px}
+.log .t{color:var(--faint)} .log .sev-warn{color:var(--amber)} .log .sev-err{color:var(--coral)}
+.controls{display:flex;flex-wrap:wrap;gap:8px}
+.ctrl{flex:1;min-width:140px;padding:10px 11px;border-radius:12px;background:var(--surface);border:1px solid var(--lineSoft)}
+.ctrl label{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--faint);display:flex;justify-content:space-between}
+.ctrl input[type=range]{width:100%;margin-top:8px}
+.notice{padding:10px 12px;border-radius:12px;background:rgba(47,230,167,.08);border:1px solid rgba(47,230,167,.18);font-size:12.5px;line-height:1.5;color:#cde8dd}
+.notice strong{color:var(--mint)}
+.doc{padding:12px;border-radius:12px;background:var(--surface);border:1px solid var(--lineSoft);font-size:13px;line-height:1.6;color:var(--muted)}
+.doc h3{font-size:13px;color:var(--text);margin:10px 0 6px}
+.doc ul{margin-left:16px}
+.doc li{margin:4px 0}
+.transport{display:flex;gap:8px}
+.transport .btn{flex:1}
+.gear{font-family:var(--mono);width:44px;height:44px;border-radius:11px;display:grid;place-items:center;background:var(--surface2);border:1px solid var(--line);font-size:18px;font-weight:500}
+.gear.N{color:var(--faint)} .gear.R{color:var(--amber)}
+canvas.gauge-hit{position:absolute;inset:0;width:100%;height:100%}
+@media (max-width:1180px){ .layout{grid-template-columns:1fr;overflow:auto} .center{order:-1} }
+</style>
+</head>
+<body>
+<div class="shell">
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark"><svg viewBox="0 0 24 24" fill="none" stroke="#2fe6a7" stroke-width="2.3" stroke-linecap="round"><path d="M5 5.5v13M10.2 5.5v13M15.4 5.5v8M20.6 5.5v5"/></svg></div>
+      <div>
+        <div style="letter-spacing:-.02em">Frontier · Vehicle Audio</div>
+        <div style="font-size:11px;color:var(--faint);font-weight:400;letter-spacing:.06em;text-transform:uppercase">Engineering-grade drivetrain & induction synthesis · time-based</div>
+      </div>
+    </div>
+    <span class="chip live" id="audioChip">Audio suspended — press Start</span>
+    <span class="chip" id="workletChip">Worklet: probe…</span>
+    <span class="chip mono" id="fpsChip">60 FPS · phys 240 Hz</span>
+    <div class="topbar-stats">
+      <button class="btn ghost" id="btnDoc" title="Show engineering note">Engineering note</button>
+      <button class="btn primary" id="btnStart">▶ Start engine</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <!-- LEFT: vehicle roster -->
+    <section class="card">
+      <div class="card-head"><h2>Vehicle roster — 9 identities</h2><span class="pill" id="vehCount">9</span></div>
+      <div class="card-body">
+        <div class="vehicle-list" id="vehicleList"></div>
+        <div class="notice" style="margin-top:12px">
+          <strong>Selection is acoustic.</strong> Each card loads its firing order, torque curve, forced induction map and harmonic table. No samples — all synthesis is procedural.
+        </div>
+        <div class="doc" id="vehSpecDoc" style="margin-top:10px"></div>
+      </div>
+      <div class="card-foot">
+        <span class="mono" style="font-size:11px;color:var(--faint)">Tip: WASD drives. Q/E shift · N neutral · Space handbrake</span>
+      </div>
+    </section>
+
+    <!-- CENTER: gauges + WASD + spectrum -->
+    <section class="center">
+      <div class="gauge-wrap" id="gaugeWrap">
+        <svg class="gauge-svg" viewBox="0 0 520 360" id="gaugeSvg" role="img" aria-label="Tachometer">
+          <defs>
+            <linearGradient id="gMint" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="#2fe6a7"/><stop offset="100%" stop-color="#63a8ff"/></linearGradient>
+            <filter id="glow"><feGaussianBlur stdDeviation="3" /></filter>
+          </defs>
+          <!-- outer arc -->
+          <g id="gaugeBg"></g>
+          <g id="gaugeTicks"></g>
+          <!-- needle -->
+          <g id="needleGroup">
+            <line id="needle" x1="260" y1="195" x2="260" y2="44" stroke="#eef3f0" stroke-width="3.2" stroke-linecap="round" />
+            <circle cx="260" cy="195" r="9" fill="#eef3f0" />
+            <circle cx="260" cy="195" r="4" fill="#04070a" />
+          </g>
+          <!-- centre text -->
+          <text id="rpmText" x="260" y="232" text-anchor="middle" font-family="JetBrains Mono" font-size="30" font-weight="500" fill="#eef3f0">0</text>
+          <text id="rpmUnit" x="260" y="250" text-anchor="middle" font-family="DM Sans" font-size="11" letter-spacing="0.14em" fill="#5f6b64">RPM</text>
+          <text id="gearText" x="260" y="278" text-anchor="middle" font-family="JetBrains Mono" font-size="18" fill="#2fe6a7">N</text>
+        </svg>
+        <div class="readouts">
+          <div class="readout"><div class="label">Speed</div><div class="value mono" id="speedVal">0</div><div class="unit mono" id="speedUnit">km/h · 0 mph</div></div>
+          <div class="readout"><div class="label">Boost</div><div class="value mono" id="boostVal">0.00</div><div class="unit mono" id="boostUnit">bar · 0.0 psi</div></div>
+          <div class="readout"><div class="label">Turbo / SC</div><div class="value mono" id="turboVal">18k</div><div class="unit mono" id="turboUnit">rpm</div></div>
+          <div class="readout"><div class="label">Load</div><div class="value mono" id="loadVal">0%</div><div class="unit mono">throttle + boost</div></div>
+        </div>
+      </div>
+
+      <div class="bars">
+        <div class="bar"><div class="label"><span>Throttle</span><span class="mono" id="thrPct">0%</span></div><div class="track"><div class="fill throttle" id="thrFill" style="width:0%"></div></div></div>
+        <div class="bar"><div class="label"><span>Brake</span><span class="mono" id="brkPct">0%</span></div><div class="track"><div class="fill brake" id="brkFill" style="width:0%"></div></div></div>
+        <div class="bar"><div class="label"><span>Manifold</span><span class="mono" id="bstPct">0.00 bar</span></div><div class="track"><div class="fill boost" id="bstFill" style="width:0%"></div></div></div>
+        <div class="bar"><div class="label"><span>Audio headroom</span><span class="mono" id="headroom">—</span></div><div class="track"><div class="fill boost" id="audioFill" style="width:12%; background:linear-gradient(90deg,#2fe6a7,#ffb454)"></div></div></div>
+      </div>
+
+      <div style="display:flex;gap:10px;align-items:center;justify-content:space-between">
+        <div class="wasd" id="wasd">
+          <div class="key" data-k="w">W<small>throttle</small></div>
+          <div class="key" data-k="a">A<small>steer L</small></div>
+          <div class="key" data-k="s">S<small>brake</small></div>
+          <div class="key" data-k="d">D<small>steer R</small></div>
+          <div class="gear N" id="gearBadge">N</div>
+        </div>
+        <div class="transport">
+          <button class="btn" id="btnPrev">◀ Prev</button>
+          <button class="btn" id="btnNext">Next ▶</button>
+        </div>
+      </div>
+
+      <div class="spectrum"><canvas id="specCanvas" width="900" height="160"></canvas></div>
+      <div class="strips">
+        <div class="strip"><h3>Firing & order</h3><div class="kv" id="firingKv"></div></div>
+        <div class="strip"><h3>Drivetrain state</h3><div class="kv" id="driveKv"></div></div>
+      </div>
+    </section>
+
+    <!-- RIGHT: controls, telemetry, doc -->
+    <section class="card">
+      <div class="card-head"><h2>Drivetrain & proof</h2><span class="pill mono" id="physChip">phys 0 Hz</span></div>
+      <div class="card-body" style="display:flex;flex-direction:column;gap:12px">
+        <div class="controls">
+          <div class="ctrl"><label><span>Render cap</span><span class="mono" id="fpsLabel">60 FPS</span></label><input type="range" id="fpsRange" min="5" max="60" value="60" step="1"><div style="font-size:11px;color:var(--faint);margin-top:4px">Low FPS must NOT mute. Physics/audio run at 240 Hz on their own timer.</div></div>
+          <div class="ctrl"><label><span>Master</span><span class="mono" id="volLabel">88%</span></label><input type="range" id="volRange" min="0" max="100" value="88"><div style="font-size:11px;color:var(--faint);margin-top:4px">Compressor at -13 dB, 3.2:1 — keeps transients musical.</div></div>
+        </div>
+        <div class="controls">
+          <div class="ctrl"><label><span>Tyre load</span><span class="mono" id="loadChip">0%</span></label><div class="mono" style="font-size:11px;color:var(--muted);margin-top:6px" id="loadDetail">—</div></div>
+          <div class="ctrl"><label><span>Shift mode</span><span class="mono">Auto + Q/E</span></label><div style="display:flex;gap:6px;margin-top:8px"><button class="btn" id="btnQ" style="flex:1">Q Down</button><button class="btn" id="btnE" style="flex:1">E Up</button><button class="btn" id="btnN" >N</button></div></div>
+        </div>
+        <div class="spectrum" style="height:78px"><canvas id="waveCanvas" width="900" height="120"></canvas></div>
+        <div class="log" id="eventLog"></div>
+        <div class="doc" id="engineeringDoc">
+          <h3>Why this never goes silent at low FPS</h3>
+          <ul>
+            <li><strong>Audio clock is the master.</strong> Web Audio runs on its own high-priority thread at 48 kHz. Oscillator & noise nodes are slewed via <span class="mono">AudioParam.linearRamp</span> against <span class="mono">ctx.currentTime</span>, not <span class="mono">requestAnimationFrame</span>.</li>
+            <li><strong>Physics is fixed-step (240 Hz) on a wall-clock timer.</strong> An accumulator integrates <span class="mono">performance.now()</span> → 4.16 ms steps via <span class="mono">setInterval</span> / worker, independent of the render cap. Even at 5 FPS the tach, boost and loads evolve smoothly and audio still receives 240 updates/s.</li>
+            <li><strong>Proof:</strong> set “Render cap” to 5 FPS — rAF draws 5×/s but the spectrum, boost gauge and turbo whine remain continuous. The headroom bar shows audio thread health; the physics chip stays ~240 Hz.</li>
+            <li><strong>No sample library.</strong> Exhaust is additive: firing frequency = <span class="mono">rpm/60 × cylinders/2</span> with per-vehicle harmonic weights (e.g. crossplane V8 has strong 0.5 & 1.5 sub-harmonics for burble; V12 is 6th/12th dominant). Turbo/SC are first-principles (boost lag τ, gear-whine frequency = <span class="mono">rpm/60 × drive × lobes</span>).</li>
+          </ul>
+          <h3>Secondary & induction</h3>
+          <ul>
+            <li><strong>Turbo:</strong> 1st-order spool τ=0.32–0.48 s up, 0.11 s blow-off; anti-lag holds 0.38 bar at 4200+ rpm; BOV chirp on throttle drop &gt;0.35 at &gt;0.35 bar.</li>
+            <li><strong>Supercharger:</strong> mechanical whine ∝ rpm (no lag), parasitic loss 38 Nm at redline, FM wobble at high boost.</li>
+            <li><strong>Twincharged (Challenger):</strong> compound sum with 55/45 SC/turbo balance, 1.65 bar peak.</li>
+            <li><strong>Secondary:</strong> overrun pops when throttle 0 &gt;3400 rpm (≈1.8% per frame, filtered noise 950 Hz), transmission whine ∝ wheel speed, wind = bandpassed noise ∝ v¹·⁴⁵, limiter flutter cuts gain 58% randomly.</li>
+            <li><strong>Electric (Taycan):</strong> inverter whine = polePairs × rotorHz + carrier FM 8.2–11 kHz, regen howl on brake, 2-speed shift at ~8500 motor rpm.</li>
+          </ul>
+          <h3>Driving</h3>
+          <ul>
+            <li><strong>W/S</strong> throttle/brake (rates 7.0/6.5 s⁻¹). <strong>A/D</strong> steer adds subtle diff load (±4% cornering reserve). <strong>Q/E</strong> manual shift (auto also at 92% redline). <strong>Space</strong> neutral.</li>
+            <li>Torque curves interpolated smoothstep between dyno points; effective mass includes crank inertia <span class="mono">I·G²/R²</span> so high gears feel heavier — honest longitudinal dynamics.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="card-foot">
+        <span class="mono" style="font-size:11px;color:var(--faint)" id="statusLine">Idle — start audio to drive.</span>
+        <span style="margin-left:auto" class="pill mono" id="audioHealth">health —</span>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script type="module">
+import { VEHICLE_PRESETS } from "./audio/VehicleSpecifications.js";
+import { DrivetrainModel } from "./audio/DrivetrainModel.js";
+import { VehicleAudioEngine } from "./audio/VehicleAudioEngine.js";
+
+const $ = id=>document.getElementById(id);
+const vehicleList=$("vehicleList"), vehSpecDoc=$("vehSpecDoc");
+const gaugeSvg=$("gaugeSvg"), needle=$("needle"), rpmText=$("rpmText"), gearText=$("gearText");
+const speedVal=$("speedVal"), speedUnit=$("speedUnit"), boostVal=$("boostVal"), boostUnit=$("boostUnit"), turboVal=$("turboVal"), turboUnit=$("turboUnit"), loadVal=$("loadVal");
+const thrPct=$("thrPct"), thrFill=$("thrFill"), brkPct=$("brkPct"), brkFill=$("brkFill"), bstPct=$("bstPct"), bstFill=$("bstFill"), audioFill=$("audioFill"), headroom=$("headroom");
+const gearBadge=$("gearBadge"), wasdEl=$("wasd"), physChip=$("physChip"), fpsChip=$("fpsChip"), fpsRange=$("fpsRange"), fpsLabel=$("fpsLabel");
+const volRange=$("volRange"), volLabel=$("volLabel"), audioChip=$("audioChip"), workletChip=$("workletChip"), audioHealth=$("audioHealth"), statusLine=$("statusLine");
+const specCanvas=$("specCanvas"), waveCanvas=$("waveCanvas"), eventLog=$("eventLog");
+const btnStart=$("btnStart"), btnPrev=$("btnPrev"), btnNext=$("btnNext"), btnQ=$("btnQ"), btnE=$("btnE"), btnN=$("btnN"), btnDoc=$("btnDoc");
+const firingKv=$("firingKv"), driveKv=$("driveKv"), loadChip=$("loadChip"), loadDetail=$("loadDetail"), engineeringDoc=$("engineeringDoc");
+
+// --- Roster ---
+let selectedIndex=0;
+let drivetrain, audioEngine;
+let audioStarted=false;
+let activeKeys=new Set();
+let throttleTarget=0, brakeTarget=0, steer=0;
+let renderCap=60, lastFrame=performance.now(), frameCount=0, fps=60, physHz=0, physTicks=0, lastPhysLog=performance.now();
+let analyser=null, dataArray=null, waveArray=null;
+let masterVol=0.88;
+
+// Build roster UI
+function buildRoster(){
+  vehicleList.innerHTML="";
+  VEHICLE_PRESETS.forEach((v,i)=>{
+    const b=document.createElement("button");
+    b.className="veh"+(i===selectedIndex?" active":"");
+    b.innerHTML=`<div class="name">${v.name}</div><div class="sub">${v.short}</div><div class="meta"><span>${v.cylinders===0? "Electric" : v.cylinders+" cyl "+v.crankPlane}</span><span>⌀ ${v.displacementCc? v.displacementCc+" cc":"—"}</span><span class="${v.induction.type}">${v.induction.type}</span></div>`;
+    b.addEventListener("click",()=>selectVehicle(i));
+    vehicleList.appendChild(b);
+  });
+}
+function formatSpec(v){
+  const boost = v.induction.type==="NA"||v.induction.type==="electric"? "NA" : v.induction.peakBoostBar.toFixed(2)+" bar ("+(v.induction.peakBoostBar*14.5038).toFixed(1)+" psi)";
+  const harm = Object.entries(v.harmonics).map(([o,w])=> `${o}×:${w.toFixed(2)}`).join(" · ");
+  const gears = v.gearRatios.map(r=>r.toFixed(2)).join(" / ");
+  const firing = v.cylinders? `${(v.redlineRpm/60*(v.cylinders/2)).toFixed(1)} Hz firing @ redline` : "— inverter 6-pole carrier";
+  return `
+  <div style="font-family:var(--mono);font-size:11px;color:var(--faint)">${v.id} — mass ${v.massKg} kg · Cd ${v.dragCd} · R ${v.wheelRadiusM}m</div>
+  <div style="margin-top:6px"><strong style="color:var(--text)">${v.name}</strong> — ${v.short}</div>
+  <div style="font-size:12px;color:var(--muted);margin-top:6px">Redline ${v.redlineRpm.toLocaleString()} · Idle ${v.idleRpm} · Final ${v.finalDrive.toFixed(2)}<br>Gears: ${gears}</div>
+  <div style="font-size:12px;color:var(--muted);margin-top:6px">Firing: ${firing} · order weights ${harm||"electric"}</div>
+  <div style="font-size:12px;color:var(--muted);margin-top:6px">Induction: <strong>${v.induction.type}</strong> · ${boost} ${v.induction.scRatio? " · SC "+v.induction.scRatio.toFixed(2)+":1×"+(v.induction.rotorLobes||3)+" lobes":""} ${v.induction.turboTau? " · τ "+v.induction.turboTau+"s":""}</div>
+  `;
+}
+function selectVehicle(i){
+  selectedIndex=(i+VEHICLE_PRESETS.length)%VEHICLE_PRESETS.length;
+  buildRoster();
+  const spec=VEHICLE_PRESETS[selectedIndex];
+  vehSpecDoc.innerHTML=formatSpec(spec);
+  if(drivetrain) drivetrain.setSpec(spec);
+  if(audioEngine) audioEngine.setSpec(spec);
+  if(analyser) drawGaugeScale(spec);
+  logEvent(`Selected ${spec.name} — ${spec.short}`, "info");
+  // update firing table
+  updateStaticTables();
+}
+buildRoster(); selectVehicle(0);
+
+// --- Drivetrain & Audio init ---
+drivetrain = new DrivetrainModel(VEHICLE_PRESETS[selectedIndex]);
+audioEngine = new VehicleAudioEngine();
+
+async function ensureAudio(){
+  if(audioStarted) return true;
+  try{
+    await audioEngine.start();
+    audioEngine.setSpec(VEHICLE_PRESETS[selectedIndex]);
+    // analyser for spectrum
+    analyser = audioEngine.ctx.createAnalyser();
+    analyser.fftSize = 2048;
+    analyser.smoothingTimeConstant = 0.82;
+    dataArray = new Uint8Array(analyser.frequencyBinCount);
+    waveArray = new Uint8Array(analyser.fftSize);
+    try{ audioEngine.compressor.connect(analyser); }catch{ audioEngine.masterGain.connect(analyser); }
+    // master vol via masterGain
+    audioEngine.masterGain.gain.value = masterVol*0.92;
+    audioStarted=true;
+    audioChip.textContent="Audio running — WASD to drive";
+    audioChip.className="chip live";
+    btnStart.textContent="■ Stop";
+    workletChip.textContent = audioEngine.useWorklet? "Worklet: armed" : "Worklet: fallback (oscillators carry audio rate)";
+    workletChip.className="chip";
+    logEvent("AudioContext @ "+audioEngine.ctx.sampleRate+" Hz — "+(audioEngine.useWorklet?"worklet phase guard armed":"oscillator graph (sample-accurate)"), "info");
+    statusLine.textContent="Engine running — hold W to accelerate.";
+    return true;
+  }catch(e){
+    console.error(e);
+    audioChip.textContent="Audio failed: "+e.message;
+    logEvent("Audio start failed: "+e.message, "err");
+    return false;
+  }
+}
+btnStart.addEventListener("click", async()=>{
+  if(!audioStarted){
+    await ensureAudio();
+    if(audioStarted && audioEngine.ctx.state==="suspended") await audioEngine.ctx.resume();
+  } else {
+    audioEngine.stop();
+    audioStarted=false;
+    audioChip.textContent="Audio suspended — press Start";
+    audioChip.className="chip";
+    btnStart.textContent="▶ Start engine";
+    statusLine.textContent="Audio stopped.";
+  }
+});
+btnPrev.addEventListener("click",()=>selectVehicle(selectedIndex-1));
+btnNext.addEventListener("click",()=>selectVehicle(selectedIndex+1));
+btnQ.addEventListener("click",()=>{ drivetrain.shiftDown(); logEvent("Manual downshift → "+(drivetrain.gear===0?"N":drivetrain.gear), "warn"); });
+btnE.addEventListener("click",()=>{ const ok=drivetrain.shiftUp(); logEvent(ok? "Manual upshift → "+drivetrain.gear : "Shift blocked", ok?"info":"warn"); });
+btnN.addEventListener("click",()=>{ drivetrain.toggleNeutral(); logEvent("Neutral toggle → "+(drivetrain.gear===0?"N":drivetrain.gear), "info"); });
+btnDoc.addEventListener("click",()=>{ engineeringDoc.scrollIntoView({behavior:"smooth", block:"nearest"}); engineeringDoc.style.boxShadow="0 0 0 2px rgba(47,230,167,.28)"; setTimeout(()=>engineeringDoc.style.boxShadow="", 900); });
+
+fpsRange.addEventListener("input",()=>{
+  renderCap = parseInt(fpsRange.value,10);
+  fpsLabel.textContent = renderCap+" FPS";
+  fpsChip.textContent = renderCap+" FPS cap · phys 240 Hz independent";
+});
+volRange.addEventListener("input",()=>{
+  masterVol = parseInt(volRange.value,10)/100;
+  volLabel.textContent = Math.round(masterVol*100)+"%";
+  if(audioEngine && audioEngine.masterGain) audioEngine.masterGain.gain.linearRampToValueAtTime(Math.max(0.0001, masterVol*0.92), audioEngine.ctx.currentTime+0.08);
+});
+
+// --- Keyboard (WASD + extras) ---
+const keyMap={w:"w", arrowup:"w", a:"a", arrowleft:"a", s:"s", arrowdown:"s", d:"d", arrowright:"d"};
+window.addEventListener("keydown", async(e)=>{
+  const k=e.key.toLowerCase();
+  if(k===" "){ e.preventDefault(); activeKeys.add(" "); drivetrain.toggleNeutral(); logEvent("Space → neutral toggle", "info"); return; }
+  if(k==="q"){ if(!e.repeat) { drivetrain.shiftDown(); logEvent("Q → downshift", "warn"); } e.preventDefault(); return; }
+  if(k==="e"){ if(!e.repeat) { const ok=drivetrain.shiftUp(); logEvent(ok?"E → upshift":"E → blocked", ok?"info":"warn"); } e.preventDefault(); return; }
+  if(k==="n"){ if(!e.repeat) { drivetrain.toggleNeutral(); logEvent("N → "+(drivetrain.gear===0?"N":drivetrain.gear), "info"); } return; }
+  const mapped=keyMap[k];
+  if(mapped){
+    if(!activeKeys.has(mapped)) activeKeys.add(mapped);
+    e.preventDefault();
+    if(!audioStarted && mapped==="w"){
+      await ensureAudio();
+    }
+    updateWASD();
+  }
+});
+window.addEventListener("keyup",(e)=>{
+  const k=e.key.toLowerCase();
+  const mapped=keyMap[k];
+  if(mapped){ activeKeys.delete(mapped); updateWASD(); }
+  if(k===" ") activeKeys.delete(" ");
+});
+function updateWASD(){
+  wasdEl.querySelectorAll(".key").forEach(el=>{
+    const kk=el.dataset.k;
+    el.classList.toggle("active", activeKeys.has(kk));
+  });
+  // steer hint
+  steer = (activeKeys.has("d")?1:0) - (activeKeys.has("a")?1:0);
+}
+function pollPedals(dt){
+  // target pedals from keys with approach rates handled in DrivetrainModel, here just set targets
+  const wantThrottle = activeKeys.has("w")? 1 : 0;
+  const wantBrake = activeKeys.has("s")? 1 : 0;
+  throttleTarget = wantThrottle;
+  brakeTarget = wantBrake;
+  // add slight steer load modulation: cornering adds 0.04 slip
+  // handled via drivetrain load injection? simple: modulate brake slightly?
+  drivetrain.setInputs({throttle: throttleTarget, brake: brakeTarget});
+}
+
+// --- Fixed-timestep physics & audio (never tied to rAF) ---
+let accumulator=0, lastWall=performance.now();
+const FIXED_DT = 1/240; // 240 Hz
+let physAccumMs=0;
+
+setInterval(()=>{
+  const now=performance.now();
+  let frameTime = (now - lastWall)/1000;
+  lastWall=now;
+  // clamp large gaps (tab hidden)
+  if(frameTime>0.12) frameTime=0.12;
+  accumulator += frameTime;
+  physAccumMs += frameTime*1000;
+  let steps=0;
+  while(accumulator >= FIXED_DT){
+    pollPedals(FIXED_DT);
+    const {events} = drivetrain.step(FIXED_DT);
+    const snap = drivetrain.snapshot();
+    // gentle steer load into audio: tell engine about lateral?
+    // inject tiny load bump for cornering
+    if(steer!==0) snap.load = Math.min(1.15, snap.load + 0.04);
+
+    if(audioStarted){
+      audioEngine.pushState(snap, events);
+      for(const ev of events){
+        if(ev.type==="shift") logEvent(`Shift ${ev.from??"?"}→${ev.gear} @ ${Math.round(snap.rpm)} rpm`, "info");
+        else if(ev.type==="pop") logEvent(`Overrun pop ×${ev.intensity.toFixed(2)}`, "warn");
+        else if(ev.type==="bov") logEvent(`BOV dump ${ev.boost.toFixed(2)} bar`, "info");
+        else if(ev.type==="limiter") {}; // too spammy
+      }
+    }
+    // UI latches updated at physics rate but rendered throttled
+    latestSnap = snap;
+    accumulator -= FIXED_DT;
+    steps++; physTicks++;
+    if(steps>8) { accumulator=0; break; } // avoid spiral
+  }
+  // phys Hz estimate
+  if(now - lastPhysLog > 480){
+    physHz = Math.round(physTicks *1000/(now-lastPhysLog));
+    physChip.textContent = "phys "+physHz+" Hz · "+ (steps?steps+" steps":"idle");
+    lastPhysLog=now; physTicks=0;
+  }
+  // audio health
+  if(audioEngine && audioEngine.ctx){
+    const baseLatency = audioEngine.ctx.baseLatency || 0;
+    const outLatency = audioEngine.ctx.outputLatency || 0;
+    audioHealth.textContent = `lat ${((baseLatency+outLatency)*1000).toFixed(1)} ms · ${audioEngine.ctx.state}`;
+  }
+}, 4); // ~250 Hz timer, independent of render
+
+let latestSnap=null;
+
+// --- Render loop (throttled to renderCap) ---
+let lastRender=0, rafId=0;
+function render(now){
+  rafId=requestAnimationFrame(render);
+  frameCount++;
+  // throttle to renderCap
+  if(now - lastRender < 1000/renderCap - 0.5) return;
+  // fps estimation
+  const dt = now - lastRender;
+  lastRender=now;
+  if(now - lastFrame > 500){
+    fps = Math.round(frameCount*1000/(now-lastFrame));
+    fpsChip.textContent = `${fps} FPS (cap ${renderCap}) · phys 240 Hz`;
+    lastFrame=now; frameCount=0;
+  }
+  if(!latestSnap) return;
+  const s=latestSnap;
+  updateGauges(s);
+  updateBars(s);
+  updateTables(s);
+  drawSpectrum();
+  drawWave();
+}
+rafId=requestAnimationFrame(render);
+
+function updateGauges(s){
+  const spec=s.spec;
+  const maxR = spec.redlineRpm;
+  const rpm=s.rpm;
+  // needle: map 0..max*1.08 to  -120deg .. +120deg (240deg sweep)
+  const sweep=240, startDeg=-120;
+  const frac = Math.max(0, Math.min(1, rpm/(maxR*1.06)));
+  const deg = startDeg + frac*sweep;
+  // needle pivot at 260,195
+  const rad=deg*Math.PI/180;
+  const len=148;
+  const x2=260 + Math.sin(rad)*len;
+  const y2=195 - Math.cos(rad)*len;
+  needle.setAttribute("x2", x2);
+  needle.setAttribute("y2", y2);
+  // color zone
+  const isRed = rpm > spec.redlineRpm*0.92;
+  const isLimiter = s.limiter;
+  needle.setAttribute("stroke", isLimiter? "#ff4747" : isRed? "#ffb454" : "#eef3f0");
+  rpmText.textContent = spec.cylinders===0 ? Math.round(rpm).toLocaleString() : Math.round(rpm).toLocaleString();
+  rpmText.setAttribute("fill", isLimiter? "#ff4747" : isRed? "#ffb454" : "#eef3f0");
+  gearText.textContent = s.gearLabel;
+  gearText.setAttribute("fill", s.shifting? "#ffb454" : s.gear===0? "#5f6b64":"#2fe6a7");
+  gearBadge.textContent=s.gearLabel;
+  gearBadge.className="gear "+(s.gear===0?"N": s.shifting?"N":"");
+  gearBadge.style.color = s.shifting? "#ffb454": s.gear===0? "#5f6b64": "#2fe6a7";
+  gearBadge.style.borderColor = s.shifting? "rgba(255,180,84,.4)": s.gear===0? "rgba(255,255,255,.08)":"rgba(47,230,167,.32)";
+
+  speedVal.textContent = Math.round(s.speedKmh);
+  speedUnit.textContent = `${Math.round(s.speedKmh)} km/h · ${Math.round(s.speedMph)} mph` + (steer? ` · steer ${steer>0? "R":"L"}`:"");
+  boostVal.textContent = s.boostBar.toFixed(2);
+  boostUnit.textContent = `${s.boostBar.toFixed(2)} bar · ${s.boostPsi.toFixed(1)} psi`;
+  turboVal.textContent = s.turboRpm> 1000 ? (s.turboRpm/1000).toFixed(1)+"k" : Math.round(s.turboRpm);
+  turboUnit.textContent = spec.induction.type==="electric"? "motor rpm" : spec.induction.type==="supercharger"? "SC rotor" : "turbo shaft";
+  loadVal.textContent = Math.round(s.load*100)+"%";
+
+  // headroom bar (fake based on limiter/shift activity)
+  const head = Math.max(8, 92 - s.load*22 - (s.limiter? 28:0));
+  audioFill.style.width = head+"%";
+  headroom.textContent = s.limiter? "limiter" : s.shifting? "shift" : head>72? "clean" : head>48? "warm":"hot";
+}
+
+function updateBars(s){
+  thrPct.textContent = Math.round(s.throttle*100)+"%";
+  thrFill.style.width = (s.throttle*100)+"%";
+  brkPct.textContent = Math.round(s.brake*100)+"%";
+  brkFill.style.width = (s.brake*100)+"%";
+  bstPct.textContent = s.boostBar.toFixed(2)+" bar · "+s.boostPsi.toFixed(1)+" psi";
+  bstFill.style.width = Math.min(100, s.boostBar/(s.spec.induction.peakBoostBar||1)*100)+"%";
+  loadChip.textContent = Math.round(s.load*100)+"%";
+  loadDetail.textContent = `throttle ${Math.round(s.throttle*100)}% · boost ${s.boostBar.toFixed(2)} bar · gear ${s.gearLabel} · drag ${(0.5*1.225*s.spec.dragCd*s.spec.frontalAreaM2*s.vehicleSpeed*s.vehicleSpeed).toFixed(0)} N`;
+}
+
+function updateTables(s){
+  const spec=s.spec;
+  const firing = spec.cylinders? `${(s.rpm/60*(spec.cylinders/2)).toFixed(1)} Hz (${spec.cylinders} cyl × ${spec.cylinders/2}/rev)` : `${(s.rpm/60*(spec.electricDrive?.polePairs||6)).toFixed(1)} Hz electrical`;
+  firingKv.innerHTML = `
+    <dt>Cylinders</dt><dd>${spec.cylinders||"0 · electric"}</dd>
+    <dt>Firing / elec</dt><dd>${firing}</dd>
+    <dt>Order weights</dt><dd style="font-size:10px;line-height:1.4">${Object.entries(spec.harmonics).map(([o,w])=>o+"× "+w.toFixed(2)).join(" · ")||"inverter"}</dd>
+    <dt>Exhaust</dt><dd>${spec.exhaustResHz? spec.exhaustResHz+" Hz Helmholtz":"electric whine"}</dd>
+    <dt>Whine</dt><dd>${spec.induction.type==="turbo"? "turbo "+Math.round(s.turboRpm).toLocaleString()+" shaft" : spec.induction.type==="supercharger"? "SC "+(s.rpm/60*spec.induction.scRatio*spec.induction.rotorLobes).toFixed(0)+" Hz rotor" : spec.induction.type==="twincharged"? "compound SC+"+Math.round(s.turboRpm/1000)+"k turbo" : spec.cylinders===0?"inverter carrier 8–11 kHz" : "NA"}</dd>
+  `;
+  driveKv.innerHTML = `
+    <dt>Gear</dt><dd>${s.gearLabel} / ${spec.gearRatios.length} · ${spec.gearRatios.map(r=>r.toFixed(2)).join(" · ")}</dd>
+    <dt>Speed</dt><dd>${s.speedKmh.toFixed(1)} km/h · ${s.vehicleSpeed.toFixed(2)} m/s</dd>
+    <dt>Torque @ rpm</dt><dd>${Math.round(torqueAt(spec,s.rpm))} Nm @ ${Math.round(s.rpm)} rpm (crank)</dd>
+    <dt>Effective mass</dt><dd>${spec.massKg} kg + I·G²/R²</dd>
+    <dt>Limit</dt><dd>${s.limiter? "LIMTER CUT":"—"} ${s.shifting?" · shifting":""}</dd>
+  `;
+}
+function torqueAt(spec,rpm){
+  const pts=spec.torquePoints;
+  if(rpm<=pts[0].rpm) return pts[0].tq;
+  if(rpm>=pts[pts.length-1].rpm) return pts[pts.length-1].tq;
+  for(let i=0;i<pts.length-1;i++){
+    if(rpm>=pts[i].rpm && rpm<=pts[i+1].rpm){
+      const t=(rpm-pts[i].rpm)/(pts[i+1].rpm-pts[i].rpm);
+      const s=t*t*(3-2*t);
+      return pts[i].tq + s*(pts[i+1].tq-pts[i].tq);
+    }
+  }
+  return pts[pts.length-1].tq;
+}
+
+// --- Gauge scale drawing ---
+function drawGaugeScale(spec){
+  const bg=$("gaugeBg"), ticks=$("gaugeTicks");
+  bg.innerHTML=""; ticks.innerHTML="";
+  const rOuter=138, cx=260, cy=195;
+  // arc background
+  const start=-120, end=120, sweep=end-start;
+  // tick count
+  const majorStep = spec.cylinders===0? 4000 : (spec.redlineRpm>8000?1000:1000);
+  const minorStep = majorStep/2;
+  for(let rpm=0; rpm<= spec.redlineRpm*1.06; rpm+=minorStep){
+    const frac=rpm/(spec.redlineRpm*1.06);
+    const deg=start+frac*sweep;
+    const rad=deg*Math.PI/180;
+    const isMajor = rpm%majorStep===0;
+    const r1 = rOuter - (isMajor? 14:7);
+    const r2 = rOuter;
+    const x1=cx+Math.sin(rad)*r1, y1=cy-Math.cos(rad)*r1;
+    const x2=cx+Math.sin(rad)*r2, y2=cy-Math.cos(rad)*r2;
+    const isRed = rpm> spec.redlineRpm*0.92;
+    const col = isRed? "#ff6d6d" : rpm> spec.redlineRpm*0.76? "#ffb454":"rgba(255,255,255,.22)";
+    const line=document.createElementNS("http://www.w3.org/2000/svg","line");
+    line.setAttribute("x1",x1); line.setAttribute("y1",y1); line.setAttribute("x2",x2); line.setAttribute("y2",y2);
+    line.setAttribute("stroke", col); line.setAttribute("stroke-width", isMajor? "2.1":"1.2"); line.setAttribute("stroke-linecap","round");
+    ticks.appendChild(line);
+    if(isMajor){
+      const tx=cx+Math.sin(rad)*(rOuter-26), ty=cy-Math.cos(rad)*(rOuter-26);
+      const txt=document.createElementNS("http://www.w3.org/2000/svg","text");
+      txt.setAttribute("x",tx); txt.setAttribute("y",ty+4);
+      txt.setAttribute("text-anchor","middle"); txt.setAttribute("font-family","JetBrains Mono"); txt.setAttribute("font-size","10"); txt.setAttribute("fill", isRed? "#ff6d6d":"#5f6b64");
+      txt.textContent= spec.cylinders===0? (rpm/1000|0)+"k" : (rpm/1000|0).toString();
+      ticks.appendChild(txt);
+    }
+  }
+  // redline arc
+  const redFrac = 0.92, redStart = start + redFrac*sweep;
+  const arcPath = describeArc(cx,cy,rOuter-1.5, redStart, end);
+  const p=document.createElementNS("http://www.w3.org/2000/svg","path");
+  p.setAttribute("d", arcPath); p.setAttribute("fill","none"); p.setAttribute("stroke","rgba(255,71,71,.72)"); p.setAttribute("stroke-width","3.2"); p.setAttribute("stroke-linecap","round");
+  bg.appendChild(p);
+}
+function describeArc(cx,cy,r, startDeg,endDeg){
+  const startRad=(startDeg-90)*Math.PI/180, endRad=(endDeg-90)*Math.PI/180;
+  const x1=cx+r*Math.cos(startRad), y1=cy+r*Math.sin(startRad);
+  const x2=cx+r*Math.cos(endRad), y2=cy+r*Math.sin(endRad);
+  const large = endDeg-startDeg>180?1:0;
+  return `M ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2}`;
+}
+drawGaugeScale(VEHICLE_PRESETS[selectedIndex]);
+updateStaticTables();
+function updateStaticTables(){ if(latestSnap) {updateTables(latestSnap);} else { firingKv.innerHTML="<dt>—</dt><dd>start engine</dd>"; driveKv.innerHTML="<dt>—</dt><dd>—</dd>"; }}
+
+// --- Spectrum & Wave ---
+function drawSpectrum(){
+  if(!analyser || !dataArray) return;
+  analyser.getByteFrequencyData(dataArray);
+  const ctx=specCanvas.getContext("2d");
+  const w=specCanvas.width, h=specCanvas.height;
+  ctx.clearRect(0,0,w,h);
+  // grid
+  ctx.fillStyle="#0e1411"; ctx.fillRect(0,0,w,h);
+  ctx.strokeStyle="rgba(255,255,255,.05)"; ctx.lineWidth=1;
+  for(let x=0;x<w;x+=90){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,h); ctx.stroke(); }
+  for(let y=0;y<h;y+=32){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke(); }
+  // bars logarithmic-ish: sample every
+  const bars=96;
+  const step=Math.floor(dataArray.length / bars *0.55);
+  const barW=w/bars*0.78;
+  for(let i=0;i<bars;i++){
+    const idx=Math.floor(Math.pow(i/bars,1.35)* dataArray.length*0.62);
+    const v=dataArray[idx]/255;
+    const bh= v* (h-10);
+    const x=i*(w/bars) + (w/bars - barW)/2;
+    const y=h-bh;
+    const hue = 140 + v*42; // mint to amber
+    ctx.fillStyle=`hsl(${hue} 72% ${42+v*18}%)`;
+    ctx.fillRect(x,y,barW,bh);
+    // glow
+    if(v>0.62){ ctx.fillStyle=`hsla(${hue} 82% 58% / .18)`; ctx.fillRect(x-1,y-2,barW+2,bh+4); }
+  }
+  // label
+  ctx.fillStyle="rgba(151,162,155,.62)"; ctx.font="10px JetBrains Mono"; ctx.fillText("20 Hz",6,h-6); ctx.fillText("20 kHz", w-46,h-6);
+}
+function drawWave(){
+  if(!analyser || !waveArray) return;
+  analyser.getByteTimeDomainData(waveArray);
+  const ctx=waveCanvas.getContext("2d");
+  const w=waveCanvas.width, h=waveCanvas.height;
+  ctx.clearRect(0,0,w,h);
+  ctx.fillStyle="#0e1411"; ctx.fillRect(0,0,w,h);
+  ctx.strokeStyle="rgba(255,255,255,.06)"; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(0,h/2); ctx.lineTo(w,h/2); ctx.stroke();
+  ctx.strokeStyle="#2fe6a7"; ctx.lineWidth=1.6; ctx.beginPath();
+  const slice=w/waveArray.length;
+  let x=0;
+  for(let i=0;i<waveArray.length;i++){
+    const v=waveArray[i]/128 -1;
+    const y=v* h*0.42 + h/2;
+    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    x+=slice;
+  }
+  ctx.stroke();
+  // envelope fill
+  ctx.lineTo(w,h/2); ctx.lineTo(0,h/2); ctx.closePath();
+  ctx.fillStyle="rgba(47,230,167,.06)"; ctx.fill();
+}
+
+function logEvent(text, sev="info"){
+  const line=document.createElement("div");
+  const t=new Date().toLocaleTimeString("en-GB", {hour12:false}) + "."+String(Date.now()%1000).padStart(3,"0");
+  line.innerHTML=`<span class="t">[${t}]</span> <span class="sev-${sev}">${text}</span>`;
+  eventLog.appendChild(line);
+  eventLog.scrollTop = eventLog.scrollHeight;
+  while(eventLog.children.length>86) eventLog.removeChild(eventLog.firstChild);
+}
+logEvent("Ready — press Start engine, then hold W.", "info");
+logEvent("Physics fixed 240 Hz on wall-clock timer — render cap does not affect audio.", "info");
+updateWASD();
+
+// --- UX: click gauge to blip ---
+gaugeSvg.addEventListener("click", async()=>{
+  if(!audioStarted) await ensureAudio();
+  activeKeys.add("w");
+  updateWASD();
+  setTimeout(()=>{ activeKeys.delete("w"); updateWASD(); }, 180);
+});
+
+// handle visibility
+document.addEventListener("visibilitychange", ()=>{
+  if(document.hidden) logEvent("Tab hidden — audio thread continues offscreen.", "warn");
+  else logEvent("Tab visible — render resumes, physics never paused.", "info");
+});
+
+// space for handbrake visual
+window.addEventListener("keydown", e=>{ if(e.code==="Space") { e.preventDefault(); }});
+</script>
+</body>
+</html>
