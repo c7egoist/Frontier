@@ -226,6 +226,7 @@ class EverestWorkspace
         bool                                               Scrubbing = false;
         Frontier::ForceFieldReadings                       Readings{};          // [-] what the Force Field page's hero reads
         double                                             ReadingSeconds = 0.0; // [s] since the last peak joined the history
+        int                                                LoggedContribution = -1; // [-] the contribution the Log Stream last named
     };
     [[nodiscard]] FieldViewport& AccessFieldViewport() noexcept { return Field; }
 

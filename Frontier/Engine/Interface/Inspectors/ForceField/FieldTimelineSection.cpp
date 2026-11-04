@@ -9,6 +9,7 @@
 #if FRONTIER_EDITOR && defined(FRONTIER_WITH_INTERFACE_SDK)
 
 #include "Engine/Interface/Controls/PageControls.h"
+#include "Engine/Interface/InspectorRuntime.h"
 
 #include <array>
 #include <cmath>
@@ -57,14 +58,15 @@ bool FieldTimelineSection::Construct(ControlColumn& Page, ForceFieldConfiguratio
     const MetricTile Tiles[3] = {{"Clock", Clock, "s"}, {"Windowed", std::to_string(Windows), "forces"}, {"Triggered", std::to_string(Triggers), "forces"}};
     MetricTiles::Construct(Page, Tiles, 3, MetricTiles::NoLead);
 
-    // 📝 Fire stamps the trigger with the clock (TriggeredAtSeconds is runtime only; below zero is armed).
-    std::vector<ForceSourceConfiguration*> Armed;
-    std::vector<std::string>               Captions;
+    // 📝 Fire asks the workspace to stamp the trigger with the clock, as the lane's FIRE does (TriggeredAtSeconds is runtime only;
+    //    below zero is armed), so both write the same Log Stream line.
+    std::vector<const ForceSourceAccess*> Armed;
+    std::vector<std::string>              Captions;
     if (Reading.Access != nullptr)
         for (const ForceSourceAccess& Entry : Reading.Access->ForceSources)
             if (Entry.Configuration != nullptr && Entry.Configuration->Activation == ForceActivation::Trigger && Armed.size() < 3)
             {
-                Armed.push_back(Entry.Configuration);
+                Armed.push_back(&Entry);
                 Captions.push_back("Fire " + Entry.Name);
             }
     if (!Armed.empty())
@@ -72,15 +74,12 @@ bool FieldTimelineSection::Construct(ControlColumn& Page, ForceFieldConfiguratio
         std::array<ActionEntry, 3> Actions{};
         constexpr const char*      Ids[3] = {"FireFirst", "FireSecond", "FireThird"};
         for (size_t Index = 0; Index < Armed.size(); ++Index)
-            Actions[Index] = {Ids[Index], Captions[Index].c_str(), Armed[Index]->Enabled, "Starts the force's envelope at the clock's time"};
+            Actions[Index] = {Ids[Index], Captions[Index].c_str(), Armed[Index]->Configuration->Enabled, "Starts the force's envelope at the clock's time"};
         ActionRowLook Look;
         Look.MarginTop    = 4;
         Look.MarginBottom = 10;
         if (const int Pressed = ActionRow::Construct(Page, std::span<const ActionEntry>(Actions.data(), Armed.size()), Look); Pressed >= 0)
-        {
-            Armed[Pressed]->TriggeredAtSeconds = Field.TimelineSeconds;
-            Armed[Pressed]->AdvanceRevision();
-        }
+            InspectorRuntime::Instance().RequestWorkspaceAction("fire:" + std::to_string(Armed[Pressed]->Token));
     }
     else
     {

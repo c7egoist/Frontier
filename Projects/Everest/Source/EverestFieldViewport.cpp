@@ -616,6 +616,18 @@ void EverestWorkspace::PublishFieldReadings(Frontier::EnvironmentEditAccess& Acc
     for (const Frontier::SceneRecordBase* Entry : QuerySceneWorld().FindAllByType("ForceSource"))
         if (auto* Source = dynamic_cast<Frontier::ForceSourceRecord*>(QuerySceneWorld().FindRecord(Entry->QueryToken())))
             Access.ForceSources.push_back({Source->QueryToken().Value, Source->QueryRecordName(), &Source->AccessConfiguration()});
+    // 📝 The contribution the page shows joins the Log Stream when it changes (the prototype's VIEW lines).
+    if (Access.Forces != nullptr && static_cast<int>(Access.Forces->ViewContribution) != Field.LoggedContribution)
+    {
+        const bool Opening       = Field.LoggedContribution < 0;
+        Field.LoggedContribution = static_cast<int>(Access.Forces->ViewContribution);
+        if (!Opening)
+        {
+            const Frontier::ForceContributionDescriptor& Facts = Frontier::ResolveForceContributionDescriptor(Access.Forces->ViewContribution);
+            Frontier::WriteLogFormat(FieldLogCategory(), Frontier::LogSeverity::Info, Frontier::LogVerbosity::Log, "View", "Showing %s \xC2\xB7 %s",
+                                     Facts.Label, Facts.Unit);
+        }
+    }
     Frontier::ForceFieldReadings& Readings = Field.Readings;
     Readings.FieldShown                    = Field.Shown;
     if (Field.Shown && Field.Slice && Field.Slice->QueryStatistics().Samples > 0)
@@ -669,7 +681,11 @@ void EverestWorkspace::ServiceFieldActions()
                                          "Added '%s' (%s) under the Force Field.", Name.c_str(), Descriptor->Name);
         }
         else if (Verb == "field-view")
+        {
             Field.Shown = Argument != "off";
+            Frontier::WriteLogFormat(FieldLogCategory(), Frontier::LogSeverity::Info, Frontier::LogVerbosity::Log, "View", "%s",
+                                     Field.Shown ? "Field view shown from the Force Field page" : "Back to the scene view");
+        }
         else if (Verb == "field-span")
         {
             Field.Shown = true;
@@ -679,6 +695,21 @@ void EverestWorkspace::ServiceFieldActions()
                 Field.Slice->View.Span = 6000.0;
             }
             Field.Slice->JumpToSpan(std::clamp(std::atof(Argument.c_str()), 40.0, 2.4e5));
+            char Span[32];
+            Frontier::ForceFieldVisualization::FormatDistance(Field.Slice->View.Span, Span, sizeof(Span));
+            Frontier::WriteLogFormat(FieldLogCategory(), Frontier::LogSeverity::Info, Frontier::LogVerbosity::Log, "View", "Field view across %s", Span);
+        }
+        else if (Verb == "fire")
+        {
+            auto* Record = dynamic_cast<Frontier::ForceSourceRecord*>(
+                QuerySceneWorld().FindRecord(Frontier::RecordToken{std::strtoull(Argument.c_str(), nullptr, 10)}));
+            auto* Forces = dynamic_cast<Frontier::ForceFieldRecord*>(QuerySceneWorld().FindFirstByType("ForceField"));
+            if (Record == nullptr || Forces == nullptr) continue;
+            Frontier::ForceSourceConfiguration& Source = Record->AccessConfiguration();
+            Source.TriggeredAtSeconds                  = Forces->QueryConfiguration().TimelineSeconds;
+            Source.AdvanceRevision();
+            Frontier::WriteLogFormat(FieldLogCategory(), Frontier::LogSeverity::Info, Frontier::LogVerbosity::Log, "Forces", "%s: fired at %.1f s",
+                                     Record->QueryRecordName().c_str(), Source.TriggeredAtSeconds);
         }
     }
 }
