@@ -38,7 +38,8 @@ bool FieldViewSection::Construct(ControlColumn& Page, ForceFieldConfiguration& F
                  "The slice the viewport shows: which quantity, how it is coloured, and how high above the ground it is cut.");
     bool Changed = false;
 
-    // 📝 Six quantities on two rows sharing one selection; damping is a rate, so it shows its magnitude only.
+    // 📝 Six quantities on two rows sharing one selection (the components, then ω and ∇·v); damping is a rate, so it shows
+    //    its magnitude only.
     const int Shown     = static_cast<int>(Field.Quantity);
     int       Component = Shown < 4 ? Shown : -1;
     int       Derived   = Shown >= 4 ? Shown - 4 : -1;
@@ -48,7 +49,7 @@ bool FieldViewSection::Construct(ControlColumn& Page, ForceFieldConfiguration& F
         Field.Quantity = static_cast<ForceFieldQuantity>(Component);
         Changed        = true;
     }
-    if (ChoiceRow::Construct(Page, "FieldDerivative", "", Derivatives, 2, Derived, !Damp, nullptr, Damp ? "Damping is a rate" : nullptr) &&
+    if (ChoiceRow::Construct(Page, "FieldDerivative", "Derivative", Derivatives, 2, Derived, !Damp, nullptr, Damp ? "Damping is a rate" : nullptr) &&
         Derived >= 0)
     {
         Field.Quantity = static_cast<ForceFieldQuantity>(4 + Derived);

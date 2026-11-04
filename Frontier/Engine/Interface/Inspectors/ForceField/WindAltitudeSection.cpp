@@ -80,12 +80,26 @@ bool WindAltitudeSection::Construct(ControlColumn& Page, WindConfiguration& Wind
     Profile.Height = 300.0f;
     ForceFieldPieces::ConstructCurvePlot(Page, "WindAltitude", Profile);
 
+    // 📝 The hodograph keeps one scale on both axes (the plot is 560 × 248 logical px), fitted around the track and the origin.
     ForceFieldPieces::CurvePlot Hodograph;
-    const double                Span = Fastest * 1.1;
-    Hodograph.XRange                 = {-Span, Span};
-    Hodograph.YRange                 = {-Span * 0.62, Span * 0.62};
-    Hodograph.Curves.push_back({{{-Span, 0.0}, {Span, 0.0}}, IM_COL32(255, 255, 255, 31), 1.0f, false, 0});
-    Hodograph.Curves.push_back({{{0.0, -Span}, {0.0, Span}}, IM_COL32(255, 255, 255, 31), 1.0f, false, 0});
+    double                      MinimumX = 0.0, MaximumX = 0.0, MinimumY = 0.0, MaximumY = 0.0;
+    for (const ProfilePoint& Point : Points)
+    {
+        MinimumX = std::min(MinimumX, Point.East);
+        MaximumX = std::max(MaximumX, Point.East);
+        MinimumY = std::min(MinimumY, Point.North);
+        MaximumY = std::max(MaximumY, Point.North);
+    }
+    const double Aspect  = 560.0 / 248.0;
+    double       HalfX   = std::max(0.5, (MaximumX - MinimumX) * 0.62);
+    double       HalfY   = std::max(0.5, (MaximumY - MinimumY) * 0.62);
+    HalfX                = std::max(HalfX, HalfY * Aspect);
+    HalfY                = HalfX / Aspect;
+    const double MiddleX = (MinimumX + MaximumX) / 2.0, MiddleY = (MinimumY + MaximumY) / 2.0;
+    Hodograph.XRange     = {MiddleX - HalfX, MiddleX + HalfX};
+    Hodograph.YRange     = {MiddleY - HalfY, MiddleY + HalfY};
+    Hodograph.Curves.push_back({{{Hodograph.XRange[0], 0.0}, {Hodograph.XRange[1], 0.0}}, IM_COL32(255, 255, 255, 31), 1.0f, false, 0});
+    Hodograph.Curves.push_back({{{0.0, Hodograph.YRange[0]}, {0.0, Hodograph.YRange[1]}}, IM_COL32(255, 255, 255, 31), 1.0f, false, 0});
     ForceFieldPieces::PlotCurve Track;
     for (const ProfilePoint& Point : Points) Track.Points.push_back({Point.East, Point.North});
     Track.Stroke = IM_COL32(159, 180, 214, 255);
@@ -93,9 +107,7 @@ bool WindAltitudeSection::Construct(ControlColumn& Page, WindConfiguration& Wind
     for (const int Index : Marked)
     {
         Hodograph.Curves.push_back({{{0.0, 0.0}, {Points[Index].East, Points[Index].North}}, IM_COL32(223, 231, 243, 115), 1.0f, Index > 0, 0});
-        if (Index > 0) std::snprintf(Text, sizeof(Text), "%.0f km", Index / 10.0);
-        else std::snprintf(Text, sizeof(Text), "ground");
-        Hodograph.Markers.push_back({Points[Index].East, Points[Index].North, Text});
+        Hodograph.Markers.push_back({Points[Index].East, Points[Index].North, Index == 0 ? "ground" : (Index == 30 ? "3 km" : "")});
     }
     std::snprintf(Text, sizeof(Text), "Toward %.0f\xC2\xB0 at the ground, %.0f\xC2\xB0 at 3 km", Wind.DirectionDegrees,
                   Wind.DirectionDegrees + Wind.VeerDegreesPerKilometre * 3.0);

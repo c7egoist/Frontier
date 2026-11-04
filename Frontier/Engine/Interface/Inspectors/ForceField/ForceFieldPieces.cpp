@@ -175,7 +175,10 @@ void ConstructCurvePlot(ControlColumn& Page, const char* Id, const CurvePlot& Pl
     {
         const ImVec2 At = Map(Plot.XRange[0], Guide.Y);
         Pen.Line({Left, At.y}, {Right, At.y}, ResolveCssColour(0xFFFFFF70), 1.2f, 6, 5);
-        Pen.Text({Left + 8.0f, At.y - 7.0f}, Guide.Text.c_str(), Theme.Muted, 15, -1);
+        // 📝 A backing under the label (about half an em a glyph), so the curve passing beneath it stays readable.
+        const float Extent = 8.0f * static_cast<float>(Guide.Text.size()) + 12.0f;
+        Pen.Rect({Left + 4.0f, At.y - 26.0f}, {Extent, 22.0f}, ResolveCssColour(0x1A1C1FE0), 6.0f);
+        Pen.Text({Left + 10.0f, At.y - 9.0f}, Guide.Text.c_str(), Theme.Muted, 15, -1);
     }
     for (const PlotMarker& Marker : Plot.Markers)
     {
