@@ -23,6 +23,7 @@ await import(pathToFileURL(join(EngineFolder, 'fibres.js')).href);
 await import(pathToFileURL(join(EngineFolder, 'forcefields.js')).href);
 await import(pathToFileURL(join(EngineFolder, 'presets.js')).href);
 await import(pathToFileURL(join(EngineFolder, 'engine.js')).href);
+await import(pathToFileURL(join(EngineFolder, 'lightning.js')).href);
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                                    PROTOTYPE FUNCTIONS
@@ -214,6 +215,25 @@ for (const Time of Times)
                        `advanced_${Index} = ${Doubles(Next)}`);
         });
     }
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                    LIGHTNING
+//------------------------------------------------------------------------------------------------------------------------
+
+// 📝 The seeded bolts: two strikes, a web between four points, the automatic strike due at 1.5 s, then the packed segments.
+{
+    const Lightning = new PE.Lightning();
+    const First = Lightning.strike(0.5);
+    const Second = Lightning.strike(1.0);
+    const Links = Lightning.web(1.2, [[0, 1, 0], [3, 1, -2], [-2, 2, 1], [1, 3, 3]], { k: 2, life: 0.5 });
+    const Hits = Lightning.update(1 / 60, 1.6);
+    const Count = Lightning.pack(1.65);
+    Lines.push('', '[lightning]', `first_strike = ${Doubles(First)}`, `second_strike = ${Doubles(Second)}`, `web_links = ${Links}`,
+               `automatic_strike = ${Doubles(Hits[0] || [0, 0, 0])}`, `next_strike_seconds = ${Double(Lightning.nextAt)}`,
+               `flash = ${Double(Lightning.flash)}`, `bolt_segments = [${Lightning.bolts.map(Bolt => Bolt.segs.length).join(', ')}]`,
+               `bolt_seeds = ${Doubles(Lightning.bolts.map(Bolt => Bolt.seed))}`, `segment_count = ${Count}`,
+               `segments = ${Singles(Lightning.dataBuf.subarray(0, Count * 8))}`);
 }
 
 //------------------------------------------------------------------------------------------------------------------------

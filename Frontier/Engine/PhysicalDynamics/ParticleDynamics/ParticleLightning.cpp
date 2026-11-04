@@ -174,10 +174,11 @@ uint32_t ParticleLightning::Pack(double NowSeconds, std::vector<float>& Segments
     {
         const double Age  = NowSeconds - Bolt.BeganSeconds;
         const double Fade = std::pow(std::max(0.0, 1.0 - Age / Bolt.LifeSeconds), 1.5);
-        // 📝 Flicker: a new brightness every 40 ms (JavaScript's % keeps the dividend's sign, as fmod does).
+        // 📝 Flicker: a new brightness every 40 ms. As eos writes it, 0.45 * (h % 1 + 1) % 1 groups as (0.45 * (h % 1 + 1)) % 1, so
+        //    the flicker spans 0.55 … 1.45; JavaScript's % keeps the dividend's sign, as fmod does.
         const double Cell      = std::floor(Age / 0.04);
-        const double Wrapped   = std::fmod(std::fmod(std::sin((Cell + Bolt.Seed) * 91.7) * 43758.5453, 1.0) + 1.0, 1.0);
-        const double Flicker   = 0.55 + 0.45 * Wrapped;
+        const double Hashed    = std::sin((Cell + Bolt.Seed) * 91.7) * 43758.5453;
+        const double Flicker   = 0.55 + std::fmod(0.45 * (std::fmod(Hashed, 1.0) + 1.0), 1.0);
         const double Intensity = 2.6 * Fade * std::fabs(Flicker);
         for (const ParticleLightningSegment& Segment : Bolt.Segments)
         {

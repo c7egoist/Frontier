@@ -13,6 +13,7 @@
 
 #include "Frontier/Engine/PhysicalDynamics/ParticleDynamics/ParticleEffectLibrary.h"
 #include "Frontier/Engine/PhysicalDynamics/ParticleDynamics/ParticleFieldTaxonomy.h"
+#include "Frontier/Engine/PhysicalDynamics/ParticleDynamics/ParticleLightning.h"
 #include "Frontier/Engine/PhysicalDynamics/ParticleDynamics/ParticleUniformPacking.h"
 
 #include <toml++/toml.hpp>
@@ -407,6 +408,48 @@ int main(int ArgumentCount, char** Arguments)
     Expect(WorstSample <= 1e-12 && WorstResolved <= 1e-12 && WorstAdvanced <= 1e-12, "taxonomy readings within 1e-12");
     std::printf("  taxonomy: %zu readings x %zu fields, worst relative error: sample %.3g, resolved %.3g, advanced %.3g\n",
                 ReadingCount, Fields.size(), WorstSample, WorstResolved, WorstAdvanced);
+
+    //--------------------------------------------------------------------------------------------------------------------
+    //                                                LIGHTNING
+    //--------------------------------------------------------------------------------------------------------------------
+
+    {
+        const toml::table&                       Recorded = *Reference["lightning"].as_table();
+        ParticleLightning                        Lightning;
+        const std::array<double, 3>              First    = Lightning.Strike(0.5);
+        const std::array<double, 3>              Second   = Lightning.Strike(1.0);
+        const std::vector<std::array<double, 3>> Points   = { { 0.0, 1.0, 0.0 }, { 3.0, 1.0, -2.0 }, { -2.0, 2.0, 1.0 }, { 1.0, 3.0, 3.0 } };
+        const uint32_t                           Links    = Lightning.Web(1.2, Points, 2, 0.5);
+        const std::vector<std::array<double, 3>> Hits     = Lightning.Advance(1.0 / 60.0, 1.6);
+        std::vector<float>                       Segments;
+        const uint32_t                           Count    = Lightning.Pack(1.65, Segments);
+        const auto Same = [](const std::array<double, 3>& Mine, const std::vector<double>& Theirs)
+        {
+            return Theirs.size() == 3 && RelativeError(Mine[0], Theirs[0]) <= 1e-12 && RelativeError(Mine[1], Theirs[1]) <= 1e-12
+                && RelativeError(Mine[2], Theirs[2]) <= 1e-12;
+        };
+        Expect(Same(First, ReadNumbers(Recorded["first_strike"])) && Same(Second, ReadNumbers(Recorded["second_strike"])),
+               "lightning strikes land where the prototype's do");
+        Expect(Links == static_cast<uint32_t>(Recorded["web_links"].value<int64_t>().value_or(-1)), "the lightning web makes the same links");
+        Expect(Hits.size() == 1 && Same(Hits[0], ReadNumbers(Recorded["automatic_strike"])), "the automatic strike at 1.5 s");
+        Expect(RelativeError(Lightning.NextStrikeSeconds, Recorded["next_strike_seconds"].value<double>().value_or(0.0)) <= 1e-12
+               && RelativeError(Lightning.Flash, Recorded["flash"].value<double>().value_or(0.0)) <= 1e-12, "next strike time and flash");
+        const std::vector<double> SegmentCounts = ReadNumbers(Recorded["bolt_segments"]);
+        const std::vector<double> Seeds         = ReadNumbers(Recorded["bolt_seeds"]);
+        bool                      Bolts         = SegmentCounts.size() == Lightning.Bolts.size() && Seeds.size() == Lightning.Bolts.size();
+        for (size_t Index = 0; Bolts && Index < Lightning.Bolts.size(); ++Index)
+        {
+            Bolts = Lightning.Bolts[Index].Segments.size() == static_cast<size_t>(SegmentCounts[Index])
+                 && RelativeError(Lightning.Bolts[Index].Seed, Seeds[Index]) <= 1e-12;
+        }
+        Expect(Bolts, "every bolt has the prototype's segments and seed");
+        const std::vector<double> Packed = ReadNumbers(Recorded["segments"]);
+        const FloatComparison     Result = CompareFloats(std::span<const float>(Segments.data(), static_cast<size_t>(Count) * 8u), Packed);
+        Expect(Count == static_cast<uint32_t>(Recorded["segment_count"].value<int64_t>().value_or(-1)) && Result.Largest <= 1,
+               "packed lightning segments within 1 ulp");
+        std::printf("  lightning: %zu bolts, %u segments, %zu / %zu floats exact (largest %u ulp)\n", Lightning.Bolts.size(), Count, Result.Exact,
+                    Result.Values, Result.Largest);
+    }
 
     //--------------------------------------------------------------------------------------------------------------------
     //                                                HYPOT
