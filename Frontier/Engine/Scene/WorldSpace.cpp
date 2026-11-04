@@ -4,6 +4,7 @@
 // 🧩 Dynamic scene world implementation with .levelspace container serialization and composable record simulation.
 
 #include "Engine/Scene/WorldSpace.h"
+#include "Engine/Scene/VehicleRecordCodec.h"
 
 #include "Engine/Scene/SceneDirectory.h"
 #include "Engine/PhysicalDynamics/ForceSourceCatalogue.h"
@@ -1253,6 +1254,30 @@ void FractureRecord::DeserializeConfiguration(const toml::table& InTable)
 }
 
 template <>
+void VehicleRecord::SerializeConfiguration(toml::table& OutTable) const
+{
+    EncodeVehicleConfiguration(Parameters, OutTable);
+}
+
+template <>
+void VehicleRecord::DeserializeConfiguration(const toml::table& InTable)
+{
+    DecodeVehicleConfiguration(InTable, Parameters);
+}
+
+template <>
+void TyreRecord::SerializeConfiguration(toml::table& OutTable) const
+{
+    EncodeTyreConfiguration(Parameters, OutTable);
+}
+
+template <>
+void TyreRecord::DeserializeConfiguration(const toml::table& InTable)
+{
+    DecodeTyreConfiguration(InTable, Parameters);
+}
+
+template <>
 void ParticleRecord::SerializeConfiguration(toml::table& OutTable) const
 {
     OutTable.insert_or_assign("enabled", Parameters.Enabled);
@@ -1727,6 +1752,9 @@ void WorldSpace::RegisterNativeEngineTypes()
     RegisterSimple.operator()<FluidPlumeRecord>("FluidPlume", "Solver · Fluid Plume", RecordClassification::Physics, "Flame", "Solvers", "#e8833a");
     RegisterSimple.operator()<FractureRecord>("Fracture", "Solver · Voronoi Fracture", RecordClassification::Physics, "Hammer", "Solvers", "#8fb3a4");
     RegisterSimple.operator()<ParticleRecord>("Particles", "Solver · GPU Particles", RecordClassification::Physics, "Sparkles", "Solvers", "#b494f4");
+    // 📝 Vehicles (Project Drive on Jolt) and the tyres they enclose.
+    RegisterSimple.operator()<VehicleRecord>("Vehicle", "Vehicle · Control Vehicle", RecordClassification::Vehicle, "Car", "Vehicles", "#e8c24a");
+    RegisterSimple.operator()<TyreRecord>("Tyre", "Vehicle · Tyre", RecordClassification::Tyre, "CircleDot", "Vehicles", "#e8c24a");
 }
 
 RecordToken WorldSpace::ConstructRecord(std::string_view TypeIdentifier,
@@ -1826,6 +1854,15 @@ SceneRecordBase* WorldSpace::FindFirstByType(std::string_view TypeIdentifier) no
         }
     }
     return nullptr;
+}
+
+std::vector<const SceneRecordBase*> WorldSpace::EnumerateRecords() const
+{
+    std::vector<const SceneRecordBase*> Records;
+    Records.reserve(OwnedRecords.size());
+    for (const std::unique_ptr<SceneRecordBase>& Record : OwnedRecords)
+        if (Record) Records.push_back(Record.get());
+    return Records;
 }
 
 std::vector<const SceneRecordBase*> WorldSpace::FindAllByType(std::string_view TypeIdentifier) const

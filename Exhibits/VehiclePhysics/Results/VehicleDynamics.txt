@@ -1,0 +1,55 @@
+
+A · Magic Formula (Project Drive's GRIT sheet, the Control vehicle's coefficients)
+  🟢 no slip, no force (Fx(0) = Fy(0) = 0 with the sheet's zero shifts)
+  🟢 force follows the slip's sign over ±0.9 (traction and braking, both turning directions)
+  🟢 longitudinal slip stiffness 41472 N/unit = BCD 41472 (-0.000 %)
+  🟢 cornering stiffness 59904 N/rad = BCD 59904 (-0.000 %)
+  🟢 longitudinal peak 6185 N = D 6185 (μx 1.93)
+  📝 the sheet's longitudinal peak sits at slip 0.308 (road tyres peak near 0.10 – 0.15; pBx1 and pCx1 set it), so traction control aims just under it; below about 2.5 m/s the automated clutch ties the driven wheels to the idle engine speed, so a launch from rest slips whatever the throttle
+  🟢 lateral peak 7786 N = D 7786 (μy 2.43) at 13.0°
+  📝 the source's load factor 1 − s |dfz| makes μ rise with load below Fz0: μ 2.275 at 2 kN, 2.363 at 4 kN
+  🟢 load sensitivity (Control vehicle): peak μ falls monotonically as the load rises, 1 → 8 kN (μ 2.467 → 2.188)
+  🟢 aligning moment restores (Mz -697.7 N·m against Fy 2071 N at 2°) and the trail shrinks with slip (336.9 → -5.5 mm at 10°)
+  📝 the source's combined slip divides by the stiffnesses in kN, so G stays ≈ 1: 5° takes 0.02 % of the traction, and slips combine to 9565 N (1.23 × the larger peak)
+  🟢 combined slip (MF6.1): cornering at 5° takes 26 % of the traction away (Fx 3089 → 2285 N at slip 0.08)
+  🟢 friction ellipse (MF6.1): no combination of slips exceeds the larger peak by more than 5 % (7782 against 7786 N)
+  🟢 MF6.1: 20 % more pressure scales the cornering stiffness by 0.875 (1 + PPY1 dpi = 0.875)
+  🟢 MF6.1: at the nominal pressure the force is bit-identical to the pressure-blind formula
+  🟢 relaxation: a slip step builds 66 % of its force after one relaxation length (σ 0.039 m; first order: 63 %), 99.8 % at 6σ
+
+B · The Control vehicle on a Jolt chassis (inline 240 Hz steps)
+  🟢 it settles on four tyres and stands still (0.0001 m/s after 3 s)
+  🟢 the tyres carry the car: Σ Fz 12282 N against the sprung and rim weight 12282 N (-0.00 %)
+  🟢 front axle share 0.492 against the authored 0.491
+  🟢 the spring tyre deflects 12.1 mm under 3019 N (load / stiffness 12.1 mm)
+  🟢 full-throttle launch: 31.0 m/s (112 km/h) in 6 s, upshifted to gear 3, never slowing
+  🟢 traction control: above 5 m/s the driven slip over its 0.25 target integrates to 0.0090 s with it on against 0.0163 s off (worst 0.336 after 0.5 s; it cut the throttle to 15 %; 45 % less excess)
+  🟢 free rolling: front slip 0.0000, ω R 30.65 m/s against 29.63 m/s travel
+  🟢 braking from 29.6 m/s: peak deceleration 12.47 m/s² within the friction limit μ (W + downforce) / m = 15.49 m/s² (4465 N downforce)
+  🟢 stopping distance 40.8 m ≥ v² / (2 × that limit) 28.3 m; ABS worked 390 wheel-ticks
+  🟢 4 m/s circle: radius 83.2 m against the kinematic L / tan δ 81.6 m
+  🟢 14 m/s: yaw rate 0.0397 rad/s against the bicycle model 0.0432 (understeer gradient 0.0022 rad/g)
+  🟢 lateral acceleration 0.57 m/s² stays inside the grip 11.28 m/s²
+
+C · The pieces added beyond Project Drive
+  🟢 supercharger boost follows the crank: 77 % of its 0.80 bar 0.1 s after full throttle (turbo 3 % of 0.07 bar)
+  🟢 the blower takes 78.6 N·m from the crank under load, 3.8 N·m bypassed off throttle; the turbo none
+  🟢 charge air: 93.7 °C after the compressor at 0.8 bar (isentropic over η = 93.7 °C), ambient through a perfect intercooler, 38.4 °C live
+  🟢 a 90 s, 25 kW slide heats the tread to 336 °C and the air to 30.1 °C; gauge 117.3 kPa = gas law 117.3 kPa at constant volume
+  🟢 heat balance: stored 1086 kJ, residual 6.08e-06 J
+  🟢 a carcass squeezed 2 % raises the gauge to 114.31 kPa (p V constant: 114.31 kPa)
+  🟢 cold window: a 20 °C tread grips × 0.760 (window from 68 °C)
+  🟢 fuel: 41.32 g burnt over 4 s at full throttle against BSFC × 538 kJ + idle = 41.32 g; the sprung mass is 0.0414 kg lighter
+  🟢 a locked-wheel stop with ABS off heats the front tread 44.6 K (87 kJ of sliding heat taken in)
+  🟢 wear: the front tread loses 0.0002 mm on that stop, grip × 0.99999
+  🟢 fluids warm under load: coolant 33.67 °C, oil 28.29 °C
+  🟢 Ackermann: turning left the inner (left) wheel turns 18.34°, the outer 15.90° (turn radius 11.0 m)
+
+D · The physics thread, its snapshots, and the register
+  🟢 240 Hz cadence: 240 steps in 1.004 s of wall time (241 expected), 240 wakes, real-time ratio 1.000, 0 dropped
+  🟢 snapshot exchange: 534357 reads under a racing producer, 0 torn, 0 out of order
+  🟢 the physics thread stepped the car 154 times while the caller refreshed 40 times
+  🟢 register: 4 records → 1 vehicle, 1 moving, 1 fracture (fixed bounds), 1 without physics
+  🟢 register document lists every object and its physics part (Results/WorldRegisterSample.md)
+
+🟢 42 / 42 assertions

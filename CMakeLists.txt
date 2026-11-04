@@ -122,11 +122,27 @@ add_library(FrontierEditorUI STATIC UI/Editor/ProjectBrowserPanel.cpp UI/Editor/
 target_link_libraries(FrontierEditorUI PUBLIC FrontierInterface)
 target_compile_definitions(FrontierEditorUI PUBLIC FRONTIER_EDITOR=1)
 find_package(Threads REQUIRED)
+# 📝 Vehicle physics: Project Drive (GRIT's translation, renamed and proven identical to its source), the soft tyre carcasses
+#    (spring, XPBD lattice, Hex8 finite elements) and the authored specification. No Jolt here; the Physics extension hosts it.
+add_library(FrontierVehicleDynamics STATIC
+    Frontier/Engine/PhysicalDynamics/Vehicle/Aerodynamics.cpp
+    Frontier/Engine/PhysicalDynamics/Vehicle/Drivetrain.cpp
+    Frontier/Engine/PhysicalDynamics/Vehicle/PacejkaMagicFormula.cpp
+    Frontier/Engine/PhysicalDynamics/Vehicle/TyreSlipDynamics.cpp
+    Frontier/Engine/PhysicalDynamics/Vehicle/VehicleGeometry.cpp
+    Frontier/Engine/PhysicalDynamics/Vehicle/VehicleSolver.cpp
+    Frontier/Engine/PhysicalDynamics/Vehicle/TyreCarcassLattice.cpp
+    Frontier/Engine/PhysicalDynamics/Vehicle/TyreCarcassSolid.cpp
+    Frontier/Engine/PhysicalDynamics/Vehicle/VehicleSpecification.cpp)
+target_include_directories(FrontierVehicleDynamics PUBLIC "${CMAKE_SOURCE_DIR}" "${CMAKE_SOURCE_DIR}/Frontier")
 add_library(FrontierSceneEditorUI STATIC
     Frontier/Engine/Scene/RecordStore.cpp
     Frontier/Engine/Scene/RecordEntry.cpp
     Frontier/Engine/Scene/SceneDirectory.cpp
     Frontier/Engine/Scene/WorldSpace.cpp
+    Frontier/Engine/Scene/WorldRegister.cpp
+    Frontier/Engine/Scene/VehicleRecordCodec.cpp
+    Frontier/Engine/Scene/VehicleReadings.cpp
     Frontier/Engine/Scene/GeometryLayout.cpp
     Frontier/Engine/Diagnostics/LogCategories.cpp
     Frontier/Engine/Diagnostics/LogRingStore.cpp
@@ -241,6 +257,8 @@ add_library(FrontierSceneEditorUI STATIC
     Frontier/Engine/Interface/Inspectors/FractureInspector.cpp
     Frontier/Engine/Interface/Inspectors/ParticleInspector.cpp
     Frontier/Engine/Interface/Inspectors/GeometryInspector.cpp
+    Frontier/Engine/Interface/Inspectors/VehicleInspector.cpp
+    Frontier/Engine/Interface/Inspectors/TyreInspector.cpp
     Frontier/Engine/Interface/Inspectors/Geometry/TransformSection.cpp
     Frontier/Engine/Interface/Inspectors/Geometry/QuickControlSection.cpp
     Frontier/Engine/Interface/Inspectors/Geometry/ModifierStackSection.cpp
@@ -253,7 +271,7 @@ target_include_directories(FrontierSceneEditorUI PUBLIC
     "${CMAKE_SOURCE_DIR}/Frontier")
 target_compile_definitions(FrontierSceneEditorUI PUBLIC FRONTIER_WITH_INTERFACE_SDK=1 FRONTIER_EDITOR_PROFILE=1 FRONTIER_EDITOR=1)
 target_include_directories(FrontierSceneEditorUI PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
-target_link_libraries(FrontierSceneEditorUI PUBLIC FrontierEditorUI FrontierInterfaceExtension Threads::Threads PRIVATE FrontierSurfaceRasterization FrontierEnvironmentRendering)
+target_link_libraries(FrontierSceneEditorUI PUBLIC FrontierEditorUI FrontierInterfaceExtension FrontierVehicleDynamics Threads::Threads PRIVATE FrontierSurfaceRasterization FrontierEnvironmentRendering)
 
 include(Automation/StageProjectContent.cmake)
 
@@ -274,7 +292,10 @@ include(Automation/JoltPhysics.cmake)
 frontier_add_jolt()
 add_library(FrontierPhysicsExtension STATIC
     Frontier/Extensions/Physics/JoltExtension.cpp
+    Frontier/Extensions/Physics/JoltAdapter.cpp
     Frontier/Extensions/Physics/PhysicsSpace.cpp
+    Frontier/Extensions/Physics/PhysicsThread.cpp
+    Frontier/Extensions/Physics/PhysicsVehicle.cpp
     Frontier/Extensions/Physics/PhysicsExtension.cpp)
 target_link_libraries(FrontierPhysicsExtension PUBLIC FrontierSceneEditorUI PRIVATE Jolt)
 
@@ -300,6 +321,7 @@ add_library(EverestProjectRuntime STATIC
     Frontier/Engine/Scene/RecordEntry.cpp
     Frontier/Engine/Scene/SceneDirectory.cpp
     Frontier/Engine/Scene/WorldSpace.cpp
+    Frontier/Engine/Scene/VehicleRecordCodec.cpp
     Frontier/Engine/PhysicalDynamics/ForceSourceCatalogue.cpp
     Frontier/Engine/Scene/GeometryLayout.cpp
     Frontier/Engine/Diagnostics/LogCategories.cpp
@@ -315,7 +337,7 @@ target_include_directories(EverestProjectRuntime PUBLIC
     "${CMAKE_SOURCE_DIR}/Projects/Everest/Source"
     "${CMAKE_SOURCE_DIR}/ExternalPackages/tomlpp/include")
 target_compile_definitions(EverestProjectRuntime PUBLIC FRONTIER_SHIPPING_PROFILE=1 FRONTIER_EDITOR=0)
-target_link_libraries(EverestProjectRuntime PUBLIC Threads::Threads)
+target_link_libraries(EverestProjectRuntime PUBLIC FrontierVehicleDynamics Threads::Threads)
 frontier_stage_project_content(EverestProjectRuntime
     "${CMAKE_SOURCE_DIR}/Projects/Everest/Everest.projectspace"
     "${CMAKE_SOURCE_DIR}/EngineContent"
@@ -762,6 +784,30 @@ if(BUILD_TESTING)
     target_link_libraries(PhysicsSpaceValidation PRIVATE FrontierPhysicsExtension)
     add_test(NAME PhysicsSpaceValidation COMMAND PhysicsSpaceValidation "${CMAKE_SOURCE_DIR}/Exhibits/Physics")
     set_tests_properties(PhysicsSpaceValidation PROPERTIES TIMEOUT 300)
+
+    # 📝 Vehicle physics: physics checks of the slip, tyre and powertrain models on the Jolt-hosted car, the three tyre carcasses,
+    #    and Project Drive's own suites run against the renamed core (RunProjectDriveIdentity.sh compares them with the source).
+    add_executable(VehicleDynamicsValidation Exhibits/VehiclePhysics/Code/VehicleDynamicsValidation.cpp)
+    target_link_libraries(VehicleDynamicsValidation PRIVATE FrontierPhysicsExtension)
+    add_test(NAME VehicleDynamicsValidation COMMAND VehicleDynamicsValidation "${CMAKE_SOURCE_DIR}/Exhibits/VehiclePhysics")
+    set_tests_properties(VehicleDynamicsValidation PROPERTIES TIMEOUT 900)
+    add_executable(TyreCarcassValidation Exhibits/VehiclePhysics/Code/TyreCarcassValidation.cpp)
+    target_link_libraries(TyreCarcassValidation PRIVATE FrontierPhysicsExtension)
+    add_test(NAME TyreCarcassValidation COMMAND TyreCarcassValidation "${CMAKE_SOURCE_DIR}/Exhibits/VehiclePhysics")
+    set_tests_properties(TyreCarcassValidation PROPERTIES TIMEOUT 900)
+    foreach(ProjectDriveSuite VehicleValidation VehicleDrivingValidation AbsSuperchargerValidation AerodynamicsValidation BrakingValidation
+            SuperchargerValidation VehicleInputValidation ProjectDriveTrace)
+        add_executable(ProjectDrive${ProjectDriveSuite} Exhibits/VehiclePhysics/Code/ProjectDrive/${ProjectDriveSuite}.cpp)
+        target_include_directories(ProjectDrive${ProjectDriveSuite} PRIVATE "${CMAKE_SOURCE_DIR}/Frontier/Engine/PhysicalDynamics/Vehicle")
+        target_link_libraries(ProjectDrive${ProjectDriveSuite} PRIVATE FrontierVehicleDynamics)
+        if(NOT MSVC)
+            target_compile_options(ProjectDrive${ProjectDriveSuite} PRIVATE -w)
+        endif()
+        if(NOT ProjectDriveSuite STREQUAL "ProjectDriveTrace")
+            add_test(NAME ProjectDrive${ProjectDriveSuite} COMMAND ProjectDrive${ProjectDriveSuite})
+            set_tests_properties(ProjectDrive${ProjectDriveSuite} PROPERTIES TIMEOUT 300)
+        endif()
+    endforeach()
 
     add_executable(NetworkingSpaceValidation
         Exhibits/Networking/Code/NetworkingSpaceValidation.cpp)

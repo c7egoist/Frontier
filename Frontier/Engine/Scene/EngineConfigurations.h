@@ -5,6 +5,8 @@
 
 #pragma once
 
+#include "Engine/PhysicalDynamics/Vehicle/VehicleSpecification.h"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -923,5 +925,54 @@ struct GeometryConfiguration : RevisionCounter
         std::string                        Diagnostic{};               // [-] why it did not bind
     } Resolved{};
 };
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                    VEHICLE AND TYRES
+//------------------------------------------------------------------------------------------------------------------------
+
+// 📝 One drivable vehicle (levelspace type "Vehicle"): where it starts, whether it simulates, and its whole specification
+//    (VehicleSpecification: geometry and every tunable of the solver). The scene archive's ControlVehicle body and wheels
+//    (occupants 0–4) draw it; the four Tyre records it encloses carry the per-corner set.
+struct VehicleConfiguration : RevisionCounter
+{
+    bool                          Visible = true;    // [-] drawn (the archive's car), else the occupants stay inactive
+    bool                          Physics = true;    // [-] driven by the physics once Simulate starts
+    bool                          Possessed = true;  // [-] the driving keys reach this vehicle while simulating
+    SpatialConfiguration          Spatial = [] { SpatialConfiguration Start; Start.PositionMetres[0] = -40.0f; Start.PositionMetres[1] = 0.0f;
+                                                 Start.PositionMetres[2] = 0.0f; return Start; }();   // [-] start: ground point under the CoM, heading
+    std::string                   GroupName = "Vehicles";
+    Vehicle::VehicleSpecification Specification = Vehicle::ConstructControlVehicleSpecification();
+};
+
+// 📝 One tyre of a vehicle (levelspace type "Tyre", enclosed by its Vehicle record): the corner it is fitted to, its compound
+//    and cold pressure. A detached tyre keeps its record in the pit lane and leaves its corner to the vehicle's default.
+struct TyreConfiguration : RevisionCounter
+{
+    uint32_t    Corner       = 0;          // [-] 0 front left, 1 front right, 2 rear left, 3 rear right
+    bool        Enclosed     = true;       // [-] fitted to its vehicle
+    std::string Compound     = "Medium";   // [-] Soft · Medium · Hard · Intermediate · Wet
+    float       ColdPressure = 110000.0f;  // [Pa]
+    std::string SetName      = "Set A";
+};
+
+// 📝 The compounds the tyre records name: grip scale and window (the vehicle inspector prototype's CompoundCatalogue).
+struct TyreCompound
+{
+    const char* Name;
+    const char* Colour;
+    float       GripScale;
+    float       WindowLow_C, WindowHigh_C;
+    float       WearRate;
+};
+inline constexpr TyreCompound TyreCompounds[] = {
+    { "Soft", "#e05b5b", 1.06f, 78.0f, 104.0f, 1.35f },      { "Medium", "#e8c24a", 1.00f, 68.0f, 96.0f, 1.00f },
+    { "Hard", "#dcdcdc", 0.94f, 58.0f, 88.0f, 0.72f },       { "Intermediate", "#4cbf6f", 0.84f, 40.0f, 70.0f, 0.90f },
+    { "Wet", "#4a90e2", 0.72f, 30.0f, 60.0f, 0.85f } };
+[[nodiscard]] inline const TyreCompound& ResolveTyreCompound(const std::string& Name) noexcept
+{
+    for (const TyreCompound& Compound : TyreCompounds)
+        if (Name == Compound.Name) return Compound;
+    return TyreCompounds[1];
+}
 
 } // namespace Frontier
