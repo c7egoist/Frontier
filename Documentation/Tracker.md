@@ -1580,6 +1580,68 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
 - **Commits:** `fc78edc`, `315eec9`, `24f4a26`, `1c88331`, `420724a`, `4fd9014`, `cdabf6c`, `bbdfe2d`, `d0b150c`,
   `b8968c2` and the commit with this entry and the binary.
 
+## Extensions and Spaces, Jolt physics, networking scaffold (2026-11-04)
+
+- **Request (20th):**
+  - Use ParticleSpace instead of "particle scene", and add `Frontier/Extensions/<Name>/` bridges with their rule in
+    CLAUDE.md.
+  - Reuse one renderer, gizmo and texture bridge across SolidArc, the Frontier editor and the Texture Workspace.
+  - Set up Jolt now and scaffold networking, with Epic later.
+  - Finish the remaining Particle and Force Field work.
+- **Plan:** `Documentation/Plans/Ongoing/ExtensionsAndSpaces.md` (steps 1–8 ✔️).
+- **Spaces:**
+  - `ParticleScene` → `ParticleSpace` and `SceneWorld` → `WorldSpace`; CLAUDE.md holds the Space table.
+  - GizmoSpace, PhysicsSpace and NetworkingSpace are new.
+- **Extensions:**
+  - `Interface/` (ViewportTexture, GizmoSpace, GizmoRasterization).
+  - `Rendering/` (from EverestSceneViewport and EverestSceneGeometry).
+  - `Particle/` (from EverestParticleViewport).
+  - `Physics/` (JoltExtension, PhysicsSpace, PhysicsExtension).
+  - `Networking/` (NetworkingSpace, NetworkingExtension).
+- **Gizmo:** the Frontier editor now draws and picks SolidArc's gizmo, through GizmoSpace and GizmoRasterization. It
+  gains plane and screen moves. SolidArc keeps its GPU program, fed from the same triangles.
+- **Particle space:** a Particles record keeps `<level>.<record>.particlespace` beside the level.
+  - The editor attaches the file, shows `UNSAVED`, and saves on Close and with the level.
+  - The Inspector shows the space's figures; the six unused sliders are gone.
+  - Level wind: the level's Force Field, sampled at an anchor, joins the lattice.
+  - The drag volume and the current have a GPU path.
+  - Authored tornado columns raise funnels in the GPU clouds.
+  - The Force Field page history fills at all times.
+  - A modal editor keeps the workspace keys, and the FPS badge hides under it.
+- **Physics:**
+  - JoltPhysics v5.6.0 is pinned in `Automation/UIDependencies.json` (commit `e77f1755`, sha256 `1f32328f…`) and built
+    through `Jolt/Jolt.cmake`, cross-platform deterministic with an SSE4.2 baseline.
+  - Simulate (Alt+S, the viewport bar's Play) makes Geometry records shown once with Physics on fall and collide;
+    stopping restores them.
+- **Networking:** a loopback transport and record replication as level TOML. `EOSExtension`/`EpicAdapter` are documented
+  for later.
+- **Tests:** 15/15 ctest in 1100 s (Linux host, Debug, SwiftShader).
+  - The regression set: CelestialWorkspace, SceneMedia, EnvironmentInspector, ForceFieldCatalogue, ParticleLibrary
+    (344/344, eos parity), EverestInterface, SceneGeometry, SceneViewportPick, EverestShipping, EnvironmentRealm,
+    ForceFieldTrigger and SceneViewportFlight.
+  - New: PhysicsSpaceValidation 15/15, ParticleSpaceValidation 146/146, NetworkingSpaceValidation 17/17.
+- **Evidence:**
+  - `Exhibits/Physics/Images/PhysicsSpaceFalling.png`.
+  - `Exhibits/SceneViewport/Images/GizmoSpaceFrontier.jpg`.
+  - `Exhibits/Physics`, `Exhibits/Networking` and `Exhibits/ParticleEditor` (READMEs and ledgers).
+- **Windows binary:** `Binaries/FrontierSceneViewport-Windows-x64.zip`, 35,690,260 bytes, SHA-256
+  `f3f1358a43a3e0031c36bd4def28a82c8f7415575b7ab60ce8b57e6495f0d22a`. It replaces the Particle editor entry's zip.
+  - Built with Zig 0.13.0 for x86_64-windows-gnu on the Linux host, with Jolt built through `Jolt/Jolt.cmake`;
+    packaged at `e697a53`.
+  - It holds `Frontier.exe`, `SolidArcWorkspace.exe`, `TextureWorkspace.exe`, the six shader sets and
+    `Notices/JoltPhysics-LICENSE.txt`.
+  - It is unsigned, not virus-scanned and not started on Windows.
+- **Sandbox reset:** four commits made while GitHub was unreachable were lost when the sandbox was replaced. They were
+  replayed from the session record and pushed: `84b9f69` onward.
+- **Limits:**
+  - Objects with several copies are held during Simulate (one transform per record).
+  - Bodies are boxes over the resolved bounds.
+  - The thunder sound is not ported: there is no audio system.
+  - The Vulkan device and window host are still separate for SolidArc (planned).
+  - Not run on Windows here.
+- **Commits:** `84b9f69`, `bf9ea53`, `19846a8`, `4967491`, `83f036c`, `e697a53` and the commit with this entry and the
+  binary.
+
 ## SolidArc source integration against e72d319
 
 | Scope | Status | Evidence / remaining work |

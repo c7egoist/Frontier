@@ -37,7 +37,7 @@ and the remaining Particle and Force Field work.
 | 6    | `Networking/` scaffold and its validation                                                         | ✔️     |
 | 7    | `Physics/`: pinned Jolt, `JoltExtension`, `PhysicsSpace`, `PhysicsExtension`, Simulate, capture   | ✔️     |
 | 8    | Remaining Particle and Force Field points (plan `ForceFieldParticleIntegration.md` §7)            | ✔️     |
-| 9    | Builds, tests, captures, Windows package, Tracker                                                 | 🚧     |
+| 9    | Builds, tests, captures, Windows package, Tracker                                                 | ✔️     |
 
 ## Later
 
