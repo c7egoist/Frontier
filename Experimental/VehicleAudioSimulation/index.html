@@ -122,6 +122,7 @@ canvas.gauge-hit{position:absolute;inset:0;width:100%;height:100%}
     <span class="chip" id="workletChip">Worklet: probe…</span>
     <span class="chip mono" id="fpsChip">60 FPS · phys 240 Hz</span>
     <div class="topbar-stats">
+      <button class="btn ghost" id="btnBeep" title="Play 440 Hz test tone — proves device is audible">♫ Test beep</button>
       <button class="btn ghost" id="btnDoc" title="Show engineering note">Engineering note</button>
       <button class="btn primary" id="btnStart">▶ Start engine</button>
     </div>
@@ -313,48 +314,57 @@ buildRoster(); selectVehicle(0);
 // --- Drivetrain & Audio init ---
 drivetrain = new DrivetrainModel(VEHICLE_PRESETS[selectedIndex]);
 audioEngine = new VehicleAudioEngine();
+audioEngine.setLogger((m)=> logEvent(m, "info"));
 
 async function ensureAudio(){
-  if(audioStarted) return true;
+  if(audioStarted && audioEngine.ctx && audioEngine.ctx.state!=="suspended") return true;
+  if(audioStarted && audioEngine.ctx && audioEngine.ctx.state==="suspended"){
+    try{ await audioEngine.ctx.resume(); audioChip.textContent="Audio running — WASD to drive"; audioChip.className="chip live"; logEvent("Audio resumed state="+audioEngine.ctx.state, "info"); return true; }catch(e){ logEvent("Resume failed "+e.message, "err"); }
+  }
   try{
     await audioEngine.start();
     audioEngine.setSpec(VEHICLE_PRESETS[selectedIndex]);
-    // analyser for spectrum
+    // analyser for spectrum — tap after master so we see what you hear
     analyser = audioEngine.ctx.createAnalyser();
     analyser.fftSize = 2048;
     analyser.smoothingTimeConstant = 0.82;
     dataArray = new Uint8Array(analyser.frequencyBinCount);
     waveArray = new Uint8Array(analyser.fftSize);
-    try{ audioEngine.compressor.connect(analyser); }catch{ audioEngine.masterGain.connect(analyser); }
-    // master vol via masterGain
-    audioEngine.masterGain.gain.value = masterVol*0.92;
+    try{ audioEngine.masterGain.connect(analyser); }catch(e){ try{ audioEngine.compressor.connect(analyser);}catch{} }
+    // master vol
+    try{ audioEngine.masterGain.gain.setValueAtTime(masterVol*0.92, audioEngine.ctx.currentTime); }catch{}
+    // push an immediate idle snapshot so voices leave 0.0001 before the next 4 ms tick
+    try{ const snap=drivetrain.snapshot(); audioEngine.pushState(snap, []); }catch{}
     audioStarted=true;
     audioChip.textContent="Audio running — WASD to drive";
     audioChip.className="chip live";
     btnStart.textContent="■ Stop";
-    workletChip.textContent = audioEngine.useWorklet? "Worklet: armed" : "Worklet: fallback (oscillators carry audio rate)";
+    workletChip.textContent = audioEngine.useWorklet? "Worklet: armed" : "Worklet: fallback — oscillators at audio rate";
     workletChip.className="chip";
-    logEvent("AudioContext @ "+audioEngine.ctx.sampleRate+" Hz — "+(audioEngine.useWorklet?"worklet phase guard armed":"oscillator graph (sample-accurate)"), "info");
-    statusLine.textContent="Engine running — hold W to accelerate.";
+    logEvent("AudioContext @ "+audioEngine.ctx.sampleRate+" Hz state="+audioEngine.ctx.state+" "+(audioEngine.useWorklet?"worklet armed":"oscillator graph"), "info");
+    statusLine.textContent="Engine running — hold W to accelerate. If you hear the chirp, the graph is alive.";
+    // audible proof: idle is faint — give a louder chirp so user knows instantly
+    try{ audioEngine.playIdleProof(); }catch{}
+    // also unlock on next frame
+    setTimeout(()=>{ if(audioEngine.ctx && audioEngine.ctx.state==="suspended") audioEngine.ctx.resume().catch(()=>{}); }, 120);
     return true;
   }catch(e){
     console.error(e);
     audioChip.textContent="Audio failed: "+e.message;
-    logEvent("Audio start failed: "+e.message, "err");
+    logEvent("Audio start failed: "+e.message+" — try the ♫ Test beep (bypasses the mix)", "err");
     return false;
   }
 }
 btnStart.addEventListener("click", async()=>{
   if(!audioStarted){
     await ensureAudio();
-    if(audioStarted && audioEngine.ctx.state==="suspended") await audioEngine.ctx.resume();
   } else {
-    audioEngine.stop();
+    try{ audioEngine.stop(); }catch{}
     audioStarted=false;
     audioChip.textContent="Audio suspended — press Start";
     audioChip.className="chip";
     btnStart.textContent="▶ Start engine";
-    statusLine.textContent="Audio stopped.";
+    statusLine.textContent="Audio stopped — press Start or Test beep.";
   }
 });
 btnPrev.addEventListener("click",()=>selectVehicle(selectedIndex-1));
@@ -362,7 +372,25 @@ btnNext.addEventListener("click",()=>selectVehicle(selectedIndex+1));
 btnQ.addEventListener("click",()=>{ drivetrain.shiftDown(); logEvent("Manual downshift → "+(drivetrain.gear===0?"N":drivetrain.gear), "warn"); });
 btnE.addEventListener("click",()=>{ const ok=drivetrain.shiftUp(); logEvent(ok? "Manual upshift → "+drivetrain.gear : "Shift blocked", ok?"info":"warn"); });
 btnN.addEventListener("click",()=>{ drivetrain.toggleNeutral(); logEvent("Neutral toggle → "+(drivetrain.gear===0?"N":drivetrain.gear), "info"); });
+const btnBeep=$("btnBeep");
+btnBeep.addEventListener("click", async()=>{
+  // Direct beep bypass — proves speakers / browser allow sound even if the main mix were filtered
+  try{
+    if(!audioEngine.ctx){ await ensureAudio(); }
+    if(audioEngine.ctx && audioEngine.ctx.state==="suspended") await audioEngine.ctx.resume();
+    audioEngine.playTestTone(0.42, 440, 0.30);
+    logEvent("♫ Test beep 440 Hz — if you hear this, speakers are live. Now hold W.", "info");
+    // also kick the engine graph a little louder for 1 s
+    if(audioEngine.masterGain) audioEngine.masterGain.gain.linearRampToValueAtTime(0.92, audioEngine.ctx.currentTime+0.05);
+  }catch(e){ logEvent("Beep failed "+e.message+" — check browser volume / site sound permission", "err"); }
+});
 btnDoc.addEventListener("click",()=>{ engineeringDoc.scrollIntoView({behavior:"smooth", block:"nearest"}); engineeringDoc.style.boxShadow="0 0 0 2px rgba(47,230,167,.28)"; setTimeout(()=>engineeringDoc.style.boxShadow="", 900); });
+// Resume on any click (helps when autoplay was blocked)
+document.addEventListener("click", ()=>{
+  if(audioEngine && audioEngine.ctx && audioEngine.ctx.state==="suspended"){
+    audioEngine.ctx.resume().then(()=> logEvent("Audio resumed on click state="+audioEngine.ctx.state, "info")).catch(()=>{});
+  }
+});
 
 fpsRange.addEventListener("input",()=>{
   renderCap = parseInt(fpsRange.value,10);

@@ -6,21 +6,15 @@
    AudioParam automation. Low FPS cannot starve samples.
 ==========================================================================================================================================*/
 
-import { firingFrequencyHz } from "./VehicleSpecifications.js";
-
-// Tunable synthesis constants — engineering choices documented inline
-
 export class VehicleAudioEngine {
     constructor(){
         this.ctx = null;
         this.masterGain = null;
         this.compressor = null;
         this.spec = null;
-        this.snap = null; // latest snapshot from drivetrain
+        this.snap = null;
         this.running = false;
-
-        // Node graph
-        this.exhaustNodes = [];   // {osc, gain}
+        this.exhaustNodes = [];
         this.intakeNoise = null; this.intakeGain=null; this.intakeFilter=null;
         this.turboOsc=null; this.turboGain=null; this.turboNoise=null; this.turboNoiseGain=null; this.turboNoiseFilter=null;
         this.scOsc=null; this.scOsc2=null; this.scGain=null;
@@ -28,36 +22,51 @@ export class VehicleAudioEngine {
         this.electricOsc=null; this.electricGain=null; this.electricMod=null;
         this.windGain=null; this.windFilter=null; this.windSource=null;
         this.rumbleGain=null; this.rumbleOsc=null;
-
-        // worklet
         this.workletNode=null; this.useWorklet=false;
-
-        // secondary burst pool
-        this._popCooldown=0;
-
-        // low-frequency load rumble
         this._phaseAccum = 0;
-
-        // BOV / SC chirp assets (generated buffers)
-        this._bovBuffer=null; this._scChirpBuffer=null;
+        this._clickBuffer=null;
+        this._log = null; // optional external logger
     }
 
+    setLogger(fn){ this._log = fn; }
+    _logMsg(m){ if(this._log) try{ this._log(m);}catch{} console.log("[VehicleAudio] "+m); }
+
     async start(){
-        if(this.running) return;
+        if(this.running && this.ctx) {
+            if(this.ctx.state==="suspended") await this.ctx.resume();
+            return;
+        }
         const Ctx = window.AudioContext || window.webkitAudioContext;
-        this.ctx = new Ctx({latencyHint:"interactive", sampleRate:48000});
-        if(this.ctx.state==="suspended") await this.ctx.resume();
-        this._buildGraph();
+        if(!Ctx){ this._logMsg("Web Audio not supported"); throw new Error("Web Audio not supported"); }
+        try{
+            // Do not force sampleRate — let the device choose (many devices reject 48000)
+            this.ctx = new Ctx({latencyHint:"interactive"});
+        }catch(e){
+            this._logMsg("AudioContext creation failed: "+e.message);
+            throw e;
+        }
+        this._logMsg("AudioContext created sr="+this.ctx.sampleRate+" state="+this.ctx.state);
+        if(this.ctx.state==="suspended"){
+            try{ await this.ctx.resume(); this._logMsg("resume ok state="+this.ctx.state);}catch(e){ this._logMsg("resume failed "+e.message);}
+        }
+        try{
+            this._buildGraph();
+            this._logMsg("graph built");
+        }catch(e){ this._logMsg("buildGraph failed "+e.message+" "+e.stack); throw e; }
+        // worklet is optional, don't block
         this._tryWorklet();
         this.running = true;
-        // load chirp buffers
         this._buildImpulseBuffers();
-        console.log("[VehicleAudio] ctx", this.ctx.sampleRate, this.ctx.state);
+        this._logMsg("ctx running sr="+this.ctx.sampleRate+" state="+this.ctx.state);
+        // immediate audible proof — short 180 Hz thump so user knows graph is alive even at idle
+        try{ this.playTestTone(0.18, 180, 0.22); }catch{}
     }
 
     async resume(){
         if(!this.ctx) await this.start();
-        if(this.ctx.state==="suspended") await this.ctx.resume();
+        if(this.ctx.state==="suspended") {
+            try{ await this.ctx.resume(); this._logMsg("resume -> "+this.ctx.state);}catch(e){this._logMsg("resume err "+e.message);}
+        }
     }
 
     stop(){
@@ -67,62 +76,79 @@ export class VehicleAudioEngine {
             this.ctx=null;
         }
         this._clearGraph();
+        this._logMsg("stopped");
     }
 
     setSpec(spec){
         this.spec = spec;
         if(!this.ctx) return;
-        this._rebuildForSpec();
+        try{ this._rebuildForSpec(); this._logMsg("spec -> "+spec.name);}catch(e){this._logMsg("rebuild failed "+e.message);}
     }
 
-    // Called at physics rate (~240 Hz) — sample accurate via AudioParam scheduling
-    // snap = DrivetrainModel.snapshot()
+    // simple beep bypassing the whole mix — proves device is audible
+    playTestTone(dur=0.35, freq=440, gain=0.28){
+        if(!this.ctx) return;
+        const t=this.ctx.currentTime;
+        const o=this.ctx.createOscillator(); o.type="sine"; o.frequency.setValueAtTime(freq, t);
+        // gentle chirp so it's obviously the engine graph vs a pure tone
+        o.frequency.linearRampToValueAtTime(freq*0.92, t+dur);
+        const g=this.ctx.createGain(); g.gain.setValueAtTime(0, t);
+        g.gain.linearRampToValueAtTime(gain, t+0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, t+dur);
+        o.connect(g); g.connect(this.ctx.destination);
+        o.start(t); o.stop(t+dur+0.05);
+        this._logMsg("test tone "+freq+"Hz "+dur+"s");
+    }
+
+    // louder idle proof — called after start
+    playIdleProof(){
+        this.playTestTone(0.45, 92, 0.32);
+        setTimeout(()=>{ try{ this.playTestTone(0.32, 135, 0.22);}catch{}}, 180);
+    }
+
     pushState(snap, events=[]){
         this.snap = snap;
         if(!this.ctx || !this.running) return;
+        // auto-resume if suspended (e.g. tab throttling)
+        if(this.ctx.state==="suspended"){ this.ctx.resume().catch(()=>{}); }
         const t = this.ctx.currentTime;
-        const lerpTime = 0.045; // parameter slew, short enough for limiter flutter
-
+        const lerpTime = 0.045;
         const spec = snap.spec;
         const rpm = snap.rpm;
         const isElectric = spec.cylinders===0;
 
         if(isElectric){
             this._pushElectric(snap, t, lerpTime);
-            // handle electric shift thump
-            for(const ev of events){
-                if(ev.type==="shift") this._triggerShiftThump(t, ev.gear, true);
-            }
+            for(const ev of events){ if(ev.type==="shift") this._triggerShiftThump(t, ev.gear, true); }
             this._pushWind(snap, t, lerpTime);
             return;
         }
 
-        // Engine fundamentals
         const crankHz = Math.max(4, rpm/60);
-        // firingHz not directly used as order 4 etc covers it
 
-        // Exhaust harmonics
         for(const node of this.exhaustNodes){
             const order = node.order;
             const weight = node.baseWeight;
             const freq = crankHz * order;
-            // load and throttle shaping
-            const loadShape = 0.55 + 0.45*snap.load;
+            const loadShape = 0.55 + 0.45*Math.min(1.15,snap.load);
             const thrShape = 0.62 + 0.38*snap.throttle + (snap.throttle>0.82?0.12:0);
+            // Idle gets a floor so you always hear something even with foot off
+            const idleFloor = (rpm<1400 && snap.throttle<0.04) ? 0.16 : 0;
             const scMask = (spec.induction.type==="turbo"? (1 - Math.min(0.26, snap.boostBar*0.14)) : 1);
             const limiterDuck = snap.limiter? (0.42 + 0.20*Math.random()) : 1;
-            const targetGain = weight * loadShape * thrShape * scMask * limiterDuck * spec.character.exhaust * this._exhaustGlobalGain(snap);
-            // per-harmonic frequency smoother
+            const base = weight * loadShape * thrShape * scMask * limiterDuck * spec.character.exhaust;
+            const targetGain = Math.max(idleFloor*weight*0.55, base * this._exhaustGlobalGain(snap));
+            // clamp to avoid runaway sum
+            const clamped = Math.min(0.55, Math.max(0.0001, targetGain));
             try{
                 node.osc.frequency.cancelScheduledValues(t);
                 node.osc.frequency.setValueAtTime(node.osc.frequency.value, t);
-                node.osc.frequency.linearRampToValueAtTime(Math.max(12, freq), t+lerpTime*0.6);
+                node.osc.frequency.linearRampToValueAtTime(Math.max(11, freq), t+lerpTime*0.6);
                 node.gain.gain.cancelScheduledValues(t);
                 node.gain.gain.setValueAtTime(node.gain.gain.value, t);
-                node.gain.gain.linearRampToValueAtTime(Math.max(0.0001, targetGain), t+lerpTime);
-            }catch{}
+                node.gain.gain.linearRampToValueAtTime(clamped, t+lerpTime);
+            }catch(e){}
         }
-        // Global exhaust colour filtering follows RPM: muffler resonance + high cut
         if(this.exhaustLowpass && this.exhaustHighpass){
             const cutoff = 1550 + rpm*0.24 + snap.throttle*650 + snap.load*380;
             const q = 0.72 + snap.load*0.22;
@@ -132,7 +158,6 @@ export class VehicleAudioEngine {
                 this.exhaustLowpass.Q.linearRampToValueAtTime(q, t+0.08);
             }catch{}
         }
-        // intake hiss via bandpassed noise
         if(this.intakeGain){
             const intakeTarget = (0.06 + 0.42*snap.throttle + 0.16*snap.load)* spec.character.intake * (0.45 + rpm/spec.redlineRpm*0.55);
             try{
@@ -141,20 +166,18 @@ export class VehicleAudioEngine {
                 this.intakeFilter.Q.linearRampToValueAtTime(1.2 + snap.throttle*0.9, t+0.08);
             }catch{}
         }
-        // rumble (sub)
         if(this.rumbleGain){
             const rum = spec.character.lowRumble * (0.32 + 0.68*(rpm<3200?1: Math.max(0,1-(rpm-3200)/5000))) * (0.35 + 0.65*snap.load);
-            try{ this.rumbleGain.gain.linearRampToValueAtTime(Math.max(0.0001, rum*0.10), t+lerpTime);}catch{}
+            try{ this.rumbleGain.gain.linearRampToValueAtTime(Math.max(0.0001, rum*0.12), t+lerpTime);}catch{}
             if(this.rumbleOsc){
                 try{ this.rumbleOsc.frequency.linearRampToValueAtTime(18 + rpm*0.009, t+0.08);}catch{}
             }
         }
 
-        // Forced induction
         if(spec.induction.type==="turbo" || spec.induction.type==="twincharged"){
             const turboNorm = Math.min(1, snap.turboRpm/ spec.induction.maxTurboRpm);
             const whistleFreq = 620 + turboNorm* 7600 + snap.boostBar*420;
-            const whistleGain = (0.06 + 0.72*turboNorm* snap.throttle + 0.14*snap.load) * (spec.character.turboHiss||0.9) * 0.11;
+            const whistleGain = (0.06 + 0.72*turboNorm* snap.throttle + 0.14*snap.load) * (spec.character.turboHiss||0.9) * 0.13;
             if(this.turboOsc){
                 try{
                     this.turboOsc.frequency.linearRampToValueAtTime(Math.min(11200, whistleFreq), t+0.06);
@@ -162,7 +185,7 @@ export class VehicleAudioEngine {
                 }catch{}
             }
             if(this.turboNoiseGain){
-                const hissGain = (0.07 + 0.52*turboNorm* snap.throttle)* (spec.character.turboHiss||0.7)*0.09;
+                const hissGain = (0.07 + 0.52*turboNorm* snap.throttle)* (spec.character.turboHiss||0.7)*0.11;
                 try{
                     this.turboNoiseGain.gain.linearRampToValueAtTime(Math.max(0.0001, hissGain), t+0.08);
                     this.turboNoiseFilter.frequency.linearRampToValueAtTime(2100 + turboNorm*5200, t+0.07);
@@ -173,7 +196,7 @@ export class VehicleAudioEngine {
             const scInd = spec.induction;
             const lobeFreq = rpm/60 * scInd.scRatio * scInd.rotorLobes;
             const scTarget = Math.min(13800, lobeFreq);
-            const scGain = (0.08 + 0.68*(rpm/5000) + 0.18*snap.boostBar) * (spec.character.scWhine||1.0) *0.11 * (snap.throttle*0.72 + 0.28);
+            const scGain = (0.08 + 0.68*(rpm/5000) + 0.18*snap.boostBar) * (spec.character.scWhine||1.0) *0.13 * (snap.throttle*0.72 + 0.28);
             if(this.scOsc){
                 try{
                     this.scOsc.frequency.linearRampToValueAtTime(scTarget, t+0.05);
@@ -181,7 +204,6 @@ export class VehicleAudioEngine {
                     if(this.scOsc2) this.scOsc2.frequency.linearRampToValueAtTime(scTarget*2.007, t+0.05);
                 }catch{}
             }
-            // rotor meshing second harmonic subtle FM
             if(this.scOsc && snap.boostBar>0.6){
                 try{ this.scOsc.detune.linearRampToValueAtTime( (Math.random()-0.5)*6, t+0.04);}catch{}
             }
@@ -189,20 +211,17 @@ export class VehicleAudioEngine {
             if(this.scGain){ try{ this.scGain.gain.linearRampToValueAtTime(0.0001, t+0.12);}catch{} }
         }
 
-        // transmission whine faint tied to wheel speed
         if(this.transOsc){
-            const wheelHz = snap.vehicleSpeed * 3 * (snap.gear||1); // rough
-            const tg = Math.min(0.06, snap.vehicleSpeed*0.006) * (0.18 + snap.load*0.22);
+            const wheelHz = snap.vehicleSpeed * 3 * (snap.gear||1);
+            const tg = Math.min(0.07, snap.vehicleSpeed*0.006) * (0.18 + snap.load*0.22);
             try{
                 this.transOsc.frequency.linearRampToValueAtTime(85 + wheelHz*15, t+0.09);
                 this.transGain.gain.linearRampToValueAtTime(Math.max(0.0001, tg), t+0.10);
             }catch{}
         }
 
-        // wind
         this._pushWind(snap, t, lerpTime);
 
-        // secondary events
         for(const ev of events){
             if(ev.type==="shift") this._triggerShiftThump(t, ev.gear);
             else if(ev.type==="limiter") this._triggerLimiterCut(t);
@@ -211,7 +230,6 @@ export class VehicleAudioEngine {
             else if(ev.type==="scChirp") this._triggerScChirp(t);
         }
 
-        // worklet push if present
         if(this.workletNode){
             this.workletNode.port.postMessage({
                 type:"state",
@@ -225,19 +243,20 @@ export class VehicleAudioEngine {
     _pushElectric(snap, t, lerp){
         const spec = snap.spec;
         if(this.electricOsc){
-            // motor electrical frequency = rotor * polePairs, two motors averaged but slight detune
             const rotorHz = Math.max(0, snap.rpm/60);
             const elecHz = rotorHz * (spec.electricDrive?.polePairs||6);
             const carrier = (spec.electricDrive?.baseCarrierHz||8200) + elecHz*0.35;
-            const gain = (0.03 + 0.55*snap.throttle + 0.18*snap.load) * 0.13 + snap.vehicleSpeed*0.0015;
+            const gain = (0.03 + 0.55*snap.throttle + 0.18*snap.load) * 0.14 + snap.vehicleSpeed*0.0015;
             const regenGain = snap.brake>0.15 ? 0.06 + snap.brake*0.07 : 0;
+            const total = Math.max(0.0001, gain + regenGain);
+            // Idle silence for electric — but give a faint carrier at throttle 0 so user knows it's alive
+            const idleCarrier = (snap.throttle<0.02 && snap.vehicleSpeed<0.5) ? 0.015 : total;
             try{
                 this.electricOsc.frequency.linearRampToValueAtTime(Math.min(14000, 180 + elecHz*1.0), t+0.06);
-                this.electricGain.gain.linearRampToValueAtTime(Math.max(0.0001, gain + regenGain), t+0.07);
+                this.electricGain.gain.linearRampToValueAtTime(idleCarrier, t+0.07);
                 if(this.electricMod) this.electricMod.frequency.linearRampToValueAtTime(Math.min(13000, carrier), t+0.08);
             }catch{}
         }
-        // faint gear whine for electric remains via trans
         if(this.transOsc){
             try{
                 this.transOsc.frequency.linearRampToValueAtTime(120 + snap.rpm*0.32, t+0.07);
@@ -257,14 +276,11 @@ export class VehicleAudioEngine {
     }
 
     _exhaustGlobalGain(snap){
-        // hybrid: electric masks at low load?
         let g=0.99;
         if(snap.spec.hybrid && snap.rpm<2700 && snap.throttle<0.22) g*=0.82;
         if(snap.shifting) g*=0.26;
         return g;
     }
-
-    // ---- burst SFX ----
 
     _triggerShiftThump(t, gear, isElectric=false){
         if(!this.ctx) return;
@@ -278,7 +294,6 @@ export class VehicleAudioEngine {
         g.gain.exponentialRampToValueAtTime(0.0001, t+dur);
         o.connect(g); g.connect(this.compressor||this.ctx.destination);
         o.start(t); o.stop(t+dur+0.02);
-        // metallic click
         const b = this.ctx.createBufferSource(); b.buffer=this._clickBuffer||this._makeClickBuffer();
         const bg=this.ctx.createGain(); bg.gain.setValueAtTime(0,t); bg.gain.linearRampToValueAtTime(0.12,t+0.006); bg.gain.exponentialRampToValueAtTime(0.0001,t+0.10);
         b.connect(bg); bg.connect(this.compressor||this.ctx.destination);
@@ -286,7 +301,6 @@ export class VehicleAudioEngine {
     }
     _triggerLimiterCut(t){
         if(!this.ctx) return;
-        // brief duck is already handled via gain; add harsh tick
         const nlen = Math.floor(this.ctx.sampleRate*0.012);
         const buf=this.ctx.createBuffer(1,nlen,this.ctx.sampleRate);
         const d=buf.getChannelData(0);
@@ -312,11 +326,9 @@ export class VehicleAudioEngine {
         const bp=this.ctx.createBiquadFilter(); bp.type="bandpass"; bp.frequency.value= 950 + Math.random()*900; bp.Q.value=0.9;
         const hp=this.ctx.createBiquadFilter(); hp.type="highpass"; hp.frequency.value=110;
         const g=this.ctx.createGain(); g.gain.value= 0.14 + intensity*0.14;
-        // subtle pitch shift via playbackRate tied to rpm
         src.playbackRate.value= 0.78 + snap.rpm/8000;
         src.connect(bp); bp.connect(hp); hp.connect(g); g.connect(this.compressor||this.ctx.destination);
         src.start(now);
-        // second tail reflection
         if(intensity>0.55 && Math.random()<0.45){
             const src2=this.ctx.createBufferSource(); src2.buffer=buf;
             const g2=this.ctx.createGain(); g2.gain.value=0.08*intensity;
@@ -334,7 +346,6 @@ export class VehicleAudioEngine {
         for(let i=0;i<nlen;i++){
             const f = i/this.ctx.sampleRate;
             const env=Math.exp(-f*12)*Math.pow(1-i/nlen,1.1);
-            // chirped hiss
             const chirp = Math.sin(2*Math.PI*(5200 - f*6200)*f*0.5 + Math.sin(f*3400)*0.4);
             d[i]=(Math.random()*2-1)*0.28*env + chirp*0.14*env;
         }
@@ -344,7 +355,6 @@ export class VehicleAudioEngine {
         g.gain.linearRampToValueAtTime(0.0001, this.ctx.currentTime+0.42);
         src.connect(bp); bp.connect(g); g.connect(this.compressor||this.ctx.destination);
         src.start(t);
-        // wastegate flutter undertone
         if(boost>0.75){
             const flutLen=Math.floor(this.ctx.sampleRate*0.22);
             const fb=this.ctx.createBuffer(1,flutLen,this.ctx.sampleRate);
@@ -363,7 +373,7 @@ export class VehicleAudioEngine {
         if(!this.ctx) return;
         const o=this.ctx.createOscillator(); const g=this.ctx.createGain();
         o.type="sine"; o.frequency.setValueAtTime(4200, t); o.frequency.exponentialRampToValueAtTime(1600, t+0.18);
-        g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.10, t+0.012); g.gain.exponentialRampToValueAtTime(0.0001,t+0.22);
+        g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.13, t+0.012); g.gain.exponentialRampToValueAtTime(0.0001,t+0.22);
         o.connect(g); g.connect(this.compressor||this.ctx.destination);
         o.start(t); o.stop(t+0.24);
     }
@@ -380,70 +390,63 @@ export class VehicleAudioEngine {
         this._clickBuffer=b; return b;
     }
 
-    _buildImpulseBuffers(){
-        // prepared lazily
-    }
+    _buildImpulseBuffers(){}
 
     _buildGraph(){
         const ctx=this.ctx;
         this.compressor = ctx.createDynamicsCompressor();
-        this.compressor.threshold.value=-13;
+        this.compressor.threshold.value=-14;
         this.compressor.knee.value=18;
-        this.compressor.ratio.value=3.2;
+        this.compressor.ratio.value=3.0;
         this.compressor.attack.value=0.004;
         this.compressor.release.value=0.22;
         this.masterGain = ctx.createGain(); this.masterGain.gain.value=0.92;
         this.compressor.connect(this.masterGain);
         this.masterGain.connect(ctx.destination);
 
-        // Exhaust bus
         this.exhaustBusGain = ctx.createGain(); this.exhaustBusGain.gain.value=0.98;
-        this.exhaustLowpass = ctx.createBiquadFilter(); this.exhaustLowpass.type="lowpass"; this.exhaustLowpass.frequency.value=3200; this.exhaustLowpass.Q.value=0.8;
-        this.exhaustHighpass = ctx.createBiquadFilter(); this.exhaustHighpass.type="highpass"; this.exhaustHighpass.frequency.value=58;
-        // soft waveshaper for exhaust saturation
-        this.exhaustShaper = ctx.createWaveShaper();
-        this.exhaustShaper.curve = this._makeSaturationCurve(2.2);
-        this.exhaustShaper.oversample="2x";
-        this.exhaustBusGain.connect(this.exhaustHighpass); this.exhaustHighpass.connect(this.exhaustLowpass); this.exhaustLowpass.connect(this.exhaustShaper); this.exhaustShaper.connect(this.compressor);
+        this.exhaustLowpass = ctx.createBiquadFilter(); this.exhaustLowpass.type="lowpass"; this.exhaustLowpass.frequency.value=4200; this.exhaustLowpass.Q.value=0.8;
+        this.exhaustHighpass = ctx.createBiquadFilter(); this.exhaustHighpass.type="highpass"; this.exhaustHighpass.frequency.value=48;
+        // Musical drive without Waveshaper for now — keep it loud and reliable; shaper can be toggled later
+        // this.exhaustShaper = ctx.createWaveShaper(); ...
+        // For now direct
+        this.exhaustBusGain.connect(this.exhaustHighpass);
+        this.exhaustHighpass.connect(this.exhaustLowpass);
+        this.exhaustLowpass.connect(this.compressor);
 
-        // Intake noise
         {
             const buf = this._makeNoiseBuffer(2);
             const src=ctx.createBufferSource(); src.buffer=buf; src.loop=true;
             this.intakeFilter=ctx.createBiquadFilter(); this.intakeFilter.type="bandpass"; this.intakeFilter.frequency.value=1100; this.intakeFilter.Q.value=1.1;
             this.intakeGain=ctx.createGain(); this.intakeGain.gain.value=0.0001;
             src.connect(this.intakeFilter); this.intakeFilter.connect(this.intakeGain); this.intakeGain.connect(this.compressor);
-            src.start();
+            try{ src.start(); }catch(e){ this._logMsg("intake start err "+e.message); }
             this.intakeNoise=src;
         }
-        // Rumble sub
         {
             this.rumbleOsc=ctx.createOscillator(); this.rumbleOsc.type="sine"; this.rumbleOsc.frequency.value=28;
-            // subtle FM for irregular fire
             const fm=ctx.createOscillator(); fm.type="sine"; fm.frequency.value=7.2;
             const fmGain=ctx.createGain(); fmGain.gain.value=6;
             fm.connect(fmGain); fmGain.connect(this.rumbleOsc.frequency);
-            fm.start();
+            try{ fm.start(); }catch{}
             this.rumbleGain=ctx.createGain(); this.rumbleGain.gain.value=0.0001;
             this.rumbleOsc.connect(this.rumbleGain); this.rumbleGain.connect(this.compressor);
-            this.rumbleOsc.start();
+            try{ this.rumbleOsc.start(); }catch(e){this._logMsg("rumble start "+e.message);}
         }
-        // Turbo
         {
-            this.turboOsc=ctx.createOscillator(); this.turboOsc.type="sawtooth"; this.turboOsc.frequency.value=420;
+            this.turboOsc=ctx.createOscillator(); this.turboOsc.type="sawtooth"; this.turboOsc.frequency.value=720;
             this.turboGain=ctx.createGain(); this.turboGain.gain.value=0.0001;
             const hp=ctx.createBiquadFilter(); hp.type="highpass"; hp.frequency.value=1400;
             this.turboOsc.connect(hp); hp.connect(this.turboGain); this.turboGain.connect(this.compressor);
-            this.turboOsc.start();
-            // turbo hiss noise
+            try{ this.turboOsc.start(); }catch(e){this._logMsg("turbo start "+e.message);}
             const b=this._makeNoiseBuffer(1.5);
             const n=ctx.createBufferSource(); n.buffer=b; n.loop=true;
             this.turboNoiseFilter=ctx.createBiquadFilter(); this.turboNoiseFilter.type="bandpass"; this.turboNoiseFilter.frequency.value=3000; this.turboNoiseFilter.Q.value=0.9;
             this.turboNoiseGain=ctx.createGain(); this.turboNoiseGain.gain.value=0.0001;
             n.connect(this.turboNoiseFilter); this.turboNoiseFilter.connect(this.turboNoiseGain); this.turboNoiseGain.connect(this.compressor);
-            n.start(); this.turboNoise=n;
+            try{ n.start(); }catch{}
+            this.turboNoise=n;
         }
-        // Supercharger
         {
             this.scOsc=ctx.createOscillator(); this.scOsc.type="square"; this.scOsc.frequency.value=600;
             this.scOsc2=ctx.createOscillator(); this.scOsc2.type="sine"; this.scOsc2.frequency.value=1200;
@@ -453,17 +456,15 @@ export class VehicleAudioEngine {
             this.scOsc.connect(hp); hp.connect(this.scGain);
             this.scOsc2.connect(bp); bp.connect(this.scGain);
             this.scGain.connect(this.compressor);
-            this.scOsc.start(); this.scOsc2.start();
+            try{ this.scOsc.start(); this.scOsc2.start(); }catch(e){this._logMsg("sc start "+e.message);}
         }
-        // Transmission whine
         {
             this.transOsc=ctx.createOscillator(); this.transOsc.type="sine"; this.transOsc.frequency.value=180;
             this.transGain=ctx.createGain(); this.transGain.gain.value=0.0001;
             const bp=ctx.createBiquadFilter(); bp.type="bandpass"; bp.frequency.value=1400; bp.Q.value=2.2;
             this.transOsc.connect(bp); bp.connect(this.transGain); this.transGain.connect(this.compressor);
-            this.transOsc.start();
+            try{ this.transOsc.start(); }catch{}
         }
-        // Electric
         {
             this.electricOsc=ctx.createOscillator(); this.electricOsc.type="sawtooth"; this.electricOsc.frequency.value=420;
             this.electricMod=ctx.createOscillator(); this.electricMod.type="sine"; this.electricMod.frequency.value=8200;
@@ -472,53 +473,41 @@ export class VehicleAudioEngine {
             this.electricGain=ctx.createGain(); this.electricGain.gain.value=0.0001;
             const lp=ctx.createBiquadFilter(); lp.type="lowpass"; lp.frequency.value=9200;
             this.electricOsc.connect(lp); lp.connect(this.electricGain); this.electricGain.connect(this.compressor);
-            this.electricOsc.start(); this.electricMod.start();
+            try{ this.electricOsc.start(); this.electricMod.start(); }catch{}
         }
-        // Wind
         {
             const b=this._makeNoiseBuffer(2);
             const src=ctx.createBufferSource(); src.buffer=b; src.loop=true;
             this.windFilter=ctx.createBiquadFilter(); this.windFilter.type="bandpass"; this.windFilter.frequency.value=720; this.windFilter.Q.value=0.55;
             this.windGain=ctx.createGain(); this.windGain.gain.value=0.0001;
             src.connect(this.windFilter); this.windFilter.connect(this.windGain); this.windGain.connect(this.compressor);
-            src.start(); this.windSource=src;
+            try{ src.start(); }catch{}
+            this.windSource=src;
         }
         this._makeClickBuffer();
     }
 
-    _clearGraph(){
-        // handled by ctx close
-        this.exhaustNodes=[];
-    }
+    _clearGraph(){ this.exhaustNodes=[]; }
 
     _rebuildForSpec(){
         const ctx=this.ctx; const spec=this.spec;
-        // clear old exhaust
         for(const n of this.exhaustNodes){
             try{ n.osc.stop(); n.osc.disconnect(); n.gain.disconnect(); }catch{}
         }
         this.exhaustNodes=[];
         if(spec.cylinders===0){
-            // electric: silence exhaust, keep low gains
-            for(const n of this.exhaustNodes) try{ n.gain.gain.value=0.0001;}catch{}
-            // but need no exhaust nodes
             return;
         }
-        // build per harmonic oscillator + gain into exhaustBus
         const orders = Object.keys(spec.harmonics).map(s=>parseFloat(s)).sort((a,b)=>a-b);
         for(const order of orders){
             const w = spec.harmonics[order];
-            // two detuned copies for width on dominant orders
             const copies = (w>0.62 && order>=2) ? 2 : 1;
             for(let c=0;c<copies;c++){
                 const osc=ctx.createOscillator();
                 osc.type = (order>=6? "square" : (order%1===0? "sawtooth":"sine"));
-                // detune dominant slightly
-                if(copies===2) osc.detune.value = (c===0? -5.5: 6.2);
-                osc.frequency.value= 80 * order; // will be slewed
+                if(copies===2) osc.detune.value = (c===0? -5.8: 6.4);
+                osc.frequency.value= 80 * order;
                 const gain=ctx.createGain(); gain.gain.value=0.0001;
-                // subtle per-harmonic EQ: notch at 1800 for boxiness
-                let last=gain;
                 if(order===3 || order===4){
                     const peq=ctx.createBiquadFilter(); peq.type="peaking"; peq.frequency.value=180 + order*42; peq.Q.value=1.6; peq.gain.value=1.8;
                     gain.connect(peq); peq.connect(this.exhaustBusGain);
@@ -526,14 +515,10 @@ export class VehicleAudioEngine {
                     gain.connect(this.exhaustBusGain);
                 }
                 osc.connect(gain);
-                // phase randomness for firing order irregularity: crossplane has slight offset
-                osc.start();
-                // start phase random to avoid coherent click at creation
+                try{ osc.start(); }catch(e){ this._logMsg("voice start err "+e.message); }
                 this.exhaustNodes.push({osc,gain, order, baseWeight: w * (copies===2?0.58:1.0)});
             }
         }
-        // adjust intake/turbo audibility for this car
-        // nothing else
     }
 
     _makeNoiseBuffer(secs){
@@ -543,50 +528,22 @@ export class VehicleAudioEngine {
         for(let i=0;i<len;i++) d[i]=Math.random()*2-1;
         return b;
     }
-    _makeSaturationCurve(amount){
-        const k = typeof amount==="number"? amount: 2.2;
-        const n= 44100;
-        const curve=new Float32Array(n);
-        const deg=Math.PI/180;
-        for(let i=0;i<n;i++){
-            const x=i*2/n -1;
-            curve[i]= (3+k)*x*20*deg/(Math.PI + k*Math.abs(x));
-            // soft clip with mild harmonic enrich
-            curve[i]= Math.tanh(curve[i]*1.15)*0.98;
-        }
-        return curve;
-    }
 
     async _tryWorklet(){
-        // AudioWorklet would be ideal for sample-accurate firing pulse train,
-        // but blob-URL worklets are blocked by some preview CSPs.
-        // We attempt it, fall back to oscillator graph (which already runs at audio rate).
         if(!this.ctx || !this.ctx.audioWorklet) return;
         const workletCode = `
         class VehiclePulseProcessor extends AudioWorkletProcessor{
             constructor(){
                 super();
-                this.phase=0; this.turboPhase=0; this.scPhase=0;
-                this.rpm=900; this.throttle=0; this.load=0; this.boost=0; this.turboRpm=18000;
-                this.shifting=0; this.limiter=0;
-                this.port.onmessage = e=>{
-                    const d=e.data;
-                    if(d.type==="state"){
-                        this.rpm=d.rpm; this.throttle=d.throttle; this.load=d.load; this.boost=d.boost; this.turboRpm=d.turboRpm; this.shifting=d.shifting; this.limiter=d.limiter;
-                    }
-                };
+                this.phase=0; this.rpm=900;
+                this.port.onmessage = e=>{ if(e.data.type==="state") this.rpm=e.data.rpm; };
             }
             process(inputs, outputs){
-                const out=outputs[0][0];
-                if(!out) return true;
-                const sr=sampleRate;
-                const crankHz=Math.max(4, this.rpm/60);
-                // simple pulse Train: not mixed to output here (oscillators carry it) — worklet could be used for cavity resonance
-                // To prove sample continuity without extra mix, we just keep phase alive (anti-cold start)
+                const out=outputs[0][0]; if(!out) return true;
+                const sr=sampleRate; const crankHz=Math.max(4, this.rpm/60);
                 for(let i=0;i<out.length;i++){
                     this.phase += 2*Math.PI*crankHz/sr;
-                    if(this.phase> 2*Math.PI) this.phase-= 2*Math.PI;
-                    // no output mixing in fallback mode — keep silent to avoid double
+                    if(this.phase> 6.283185) this.phase-=6.283185;
                     out[i]=0;
                 }
                 return true;
@@ -599,12 +556,14 @@ export class VehicleAudioEngine {
             const url=URL.createObjectURL(blob);
             await this.ctx.audioWorklet.addModule(url);
             this.workletNode=new AudioWorkletNode(this.ctx,"vehicle-pulse");
+            // keep it silent — just phase guard
             this.workletNode.connect(this.compressor);
+            // immediately reduce gain to 0 so it doesn't even add silence overhead? keep connected
             URL.revokeObjectURL(url);
             this.useWorklet=true;
-            console.log("[VehicleAudio] worklet armed (phase-continuity guard)");
+            this._logMsg("worklet armed");
         }catch(e){
-            console.warn("[VehicleAudio] worklet not available, oscillator graph carries synthesis:", e);
+            this._logMsg("worklet not available "+e.message);
             this.useWorklet=false;
         }
     }
