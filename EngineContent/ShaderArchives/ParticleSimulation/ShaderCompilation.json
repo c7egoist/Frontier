@@ -94,7 +94,7 @@
     },
     {
       "file": "ParticleSimulation.AdvanceParticles.spv",
-      "spirv_sha256": "147c03059ebc1be27154bd8b0a891c72251521fbbe6643d16048b2bf8754c898"
+      "spirv_sha256": "b860cd23f676052c0fc55ede361ee34b180bba975b4f06d5af677ef540c08002"
     },
     {
       "file": "ParticleSimulation.AdvanceSwarm.spv",
@@ -148,7 +148,7 @@
     },
     {
       "file": "Frontier/Engine/Shaders/ParticleSimulation/ParticleSimulation.slang",
-      "sha256": "ac78aca9cae77a6e8711b433c40a583f629aa258e79de15c0cbdf8672d62da36"
+      "sha256": "6cff5f1cc954bc70dae2c265fab466b80c122af1fb13b3f6a001b01c8ef2a9f7"
     },
     {
       "file": "Frontier/Engine/Shaders/ParticleSimulation/WindLattice.slang",
