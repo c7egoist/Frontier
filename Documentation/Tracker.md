@@ -1529,6 +1529,57 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
 - **Commits:** `2691cd8`, `440c481`, `f6f0deb`, `ddff77f`, `abe5ffa`, `dad9016`, `163cea1`, `de76fa4`, `fc32e34`,
   `3b0df56` (this entry) and the commit with the binary.
 
+## Particle editor in C++ (2026-11-04)
+
+- **Requested:** the second half of bringing the approved prototypes into the C++ editor before vehicles: the
+  Particle editor, phase E of `Documentation/Plans/Ongoing/ForceFieldParticleIntegration.md`.
+- **Engine (E1–E3):** the eos engine (`549c477`) in C++, Vulkan and Slang, its behaviour unchanged.
+  - `EngineContent/ParticleArchives/ParticleLibrary.toml` holds the same 52 presets in 14 groups, exported from
+    `presets.js`.
+  - `PhysicalDynamics/ParticleDynamics/` holds the scene, the library decoder, the 12-type force taxonomy, the uniform
+    packing and the lightning.
+  - `Rendering/ParticleSimulation/ParticleSimulationSequence` runs the stores, the wind lattice, the simulation, the
+    rasterizations, the light fibres and the lensing. `Shaders/ParticleSimulation/` holds 6 Slang files: 30 entries,
+    stored as the sixth shader set.
+- **Editor (E4):** a Particles record's *Particle Editor* button opens it as a modal window over the workspace.
+  - **Outliner:** the Force Field (master), the Wind (guest), the forces, Lightning and the effects, each with its
+    eye.
+  - **Viewport:** the engine's image with the HUD, the probe and the minimap. The Force Field editor's visualization
+    lies over it: flow read back from the GPU lattice, acceleration from `fieldAccel`, damping from the taxonomy.
+  - **Inspector:** Force Field, Wind, force, Lightning and effect pages in the Render settings controls.
+  - **Library sheet:** search and group chips. Below it, the Log Stream.
+  - The host registers the engine with `InspectorRuntime`: `EverestParticleViewport`, on the editor's Vulkan device.
+    While the editor is open, the workspace's keys (Delete, Ctrl+D, V …) leave the scene alone.
+- **Validated (Linux host, SwiftShader):**
+
+  | Check | Result |
+  |---|---|
+  | `ParticleLibraryValidation` against the prototype | ✔️ 343 of 343; 3,008 effect uniforms exact |
+  | Stored Slang archives (`StoreShaderArchives.py --verify`) | ✔️ 30 archives, 0 failures |
+  | `ParticleSimulationCapture` | ✔️ 15 of 15; default scene 2,270 of 6,248 alive (prototype 2,241) |
+  | `ParticleEditorCapture` | ✔️ 8 of 8 with open and close checks, 107 s |
+  | Regression set (12 tests, below) | ✔️ 12 of 12 |
+
+  The regression set: the eight of the Force Field entry, plus `ParticleLibraryValidation`,
+  `SceneGeometryValidation`, `SceneMediaValidation` and `SceneViewportPickValidation`. `SceneMediaValidation` had
+  failed since phase A: it now expects the default level's 67 records, and its wind check switches off the authored
+  forces and the mesoscale variation, so it reads the wind alone.
+- **Evidence:** `Exhibits/ParticleEditor/README.md`, 8 `Images/Editor*.jpg` and 15 `Images/Engine*.jpg`.
+- **Windows binary:** `Binaries/FrontierSceneViewport-Windows-x64.zip`, 35,011,471 bytes, SHA-256
+  `5e6b1919cdfd4aa487450d1e01df78ece38881c9bb56d0ac3a7b1e34097426c8`. It replaces the Force Field entry's zip.
+  - Built with Zig 0.13.0 for x86_64-windows-gnu on the Linux host from the `d0b150c` sources, and packaged at
+    `b8968c2`, which changes only documents.
+  - It holds `Frontier.exe`, `SolidArcWorkspace.exe`, `TextureWorkspace.exe` and the six shader sets (with
+    ParticleSimulation), without the material archives.
+  - It is unsigned, not virus-scanned and not started on Windows.
+- **Limits:**
+  - The particle scene lives for the editor session; it is not yet stored in the level.
+  - The level's Force Field record is not yet a source for the particle lattice.
+  - The drag volume and the current have no GPU path, as in the prototype; the thunder sound is not ported.
+  - Not run on Windows here.
+- **Commits:** `fc78edc`, `315eec9`, `24f4a26`, `1c88331`, `420724a`, `4fd9014`, `cdabf6c`, `bbdfe2d`, `d0b150c`,
+  `b8968c2` and the commit with this entry and the binary.
+
 ## SolidArc source integration against e72d319
 
 | Scope | Status | Evidence / remaining work |

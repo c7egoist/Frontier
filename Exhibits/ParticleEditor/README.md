@@ -47,7 +47,7 @@ repulsor, a drag volume and a current) are added from the Force Field page and d
   the wind lattice read back;
 - `add-force:attract` adds the attractor, the library sheet opens, and `add:tornado` adds the preset and closes the
   sheet;
-- *Close Editor* clears the active editor.
+- closing (`CloseActiveEditor`, what *Close Editor* calls) clears the active editor; the workspace runs on.
 
 ## Editor captures
 

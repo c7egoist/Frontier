@@ -98,7 +98,7 @@ int main(int ArgumentCount, char **Arguments)
             Require(Centre.Initialize() && Centre.Activate(), "Control Centre initialized");
             Everest::EverestWorkspace Workspace(Centre, Project);
             auto                     &World = Workspace.QuerySceneWorld();
-            Require(World.QueryRecordCount() == 53, "Default level includes Force Field, local media and the 37 scene objects");
+            Require(World.QueryRecordCount() == 67, "Default level includes Force Field, its 14 forces, local media and the 37 scene objects");
             auto *FieldEntry      = dynamic_cast<ForceFieldRecord *>(World.FindFirstByType("ForceField"));
             auto *WindEntry       = dynamic_cast<WindRecord *>(World.FindFirstByType("Wind"));
             auto *AtmosphereEntry = dynamic_cast<AtmosphereRecord *>(World.FindFirstByType("Atmosphere"));
@@ -112,6 +112,10 @@ int main(int ArgumentCount, char **Arguments)
             Wind.DirectionDegrees     = 90;
             Wind.SpeedMetresPerSecond = 4;
             Wind.GustStrength = Wind.CurlNoiseTurbulence = Wind.ShearPerKilometre = Wind.VeerDegreesPerKilometre = 0;
+            Wind.MesoscaleStrength = 0;
+            // 📝 The default level's authored forces would add their flow at the camera; the axis mapping is checked on the wind alone.
+            for (const auto *Entry : World.FindAllByType("ForceSource"))
+                dynamic_cast<ForceSourceRecord *>(World.FindRecord(Entry->QueryToken()))->AccessConfiguration().Enabled = false;
             auto &Pipeline       = dynamic_cast<RenderPipelineRecord *>(World.FindFirstByType("RenderPipeline"))->AccessConfiguration();
             Pipeline.QualityTier = 0;
             Pipeline.HardwareRayQueryTier = false;
@@ -234,7 +238,8 @@ int main(int ArgumentCount, char **Arguments)
             Require(Latest->LocalClouds == 1 && Latest->LocalFogVolumes == 1, "Both local media reach native renderer");
             Require(Latest->Vectors.size() == 27, "World-vector sample lattice generated");
             Require(std::abs(Latest->WindAtCamera[0] - 4) < 1e-6 && std::abs(Latest->WindAtCamera[1]) < 1e-6,
-                    "World +X wind maps to native Y-up solver correctly");
+                    "World +X wind maps to native Y-up solver correctly: (" + std::to_string(Latest->WindAtCamera[0]) + ", " +
+                        std::to_string(Latest->WindAtCamera[1]) + ", " + std::to_string(Latest->WindAtCamera[2]) + ") m/s");
             Capture("ForceField.png");
             Workspace.QueryOutliner().Select(LocalFog->QueryToken());
             Tick();
