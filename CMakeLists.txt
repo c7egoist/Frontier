@@ -212,6 +212,20 @@ add_library(FrontierSceneEditorUI STATIC
     Frontier/Engine/Interface/Inspectors/ForceFieldInspector.cpp
     Frontier/Engine/Interface/Inspectors/ForceSourceInspector.cpp
     Frontier/Engine/Interface/ForceFieldVisualization/ForceFieldVisualization.cpp
+    Frontier/Engine/Interface/Inspectors/ForceField/ForceFieldPageReading.cpp
+    Frontier/Engine/Interface/Inspectors/ForceField/ForceFieldPieces.cpp
+    Frontier/Engine/Interface/Inspectors/ForceField/FieldViewSection.cpp
+    Frontier/Engine/Interface/Inspectors/ForceField/FieldRangeSection.cpp
+    Frontier/Engine/Interface/Inspectors/ForceField/FieldForcesSection.cpp
+    Frontier/Engine/Interface/Inspectors/ForceField/FieldReceiversSection.cpp
+    Frontier/Engine/Interface/Inspectors/ForceField/FieldTimelineSection.cpp
+    Frontier/Engine/Interface/Inspectors/ForceField/FieldVectorsSection.cpp
+    Frontier/Engine/Interface/Inspectors/ForceField/FieldBudgetSection.cpp
+    Frontier/Engine/Interface/Inspectors/ForceField/WindFlowSection.cpp
+    Frontier/Engine/Interface/Inspectors/ForceField/WindGustSection.cpp
+    Frontier/Engine/Interface/Inspectors/ForceField/WindAltitudeSection.cpp
+    Frontier/Engine/Interface/Inspectors/ForceField/WindEddySection.cpp
+    Frontier/Engine/Interface/Inspectors/ForceField/WindMesoscaleSection.cpp
     Frontier/Engine/Interface/Inspectors/FluidPlumeInspector.cpp
     Frontier/Engine/Interface/Inspectors/FractureInspector.cpp
     Frontier/Engine/Interface/Inspectors/ParticleInspector.cpp
