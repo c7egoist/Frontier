@@ -19,9 +19,9 @@ namespace Frontier
 namespace
 {
 
-std::array<double, 3> ToDouble(const float Values[3])
+std::array<double, 3> ToDouble(const float Coordinates[3])
 {
-    return { Values[0], Values[1], Values[2] };
+    return { Coordinates[0], Coordinates[1], Coordinates[2] };
 }
 
 // 📝 A table cell: at most Width characters (UTF-8 aware), pipes escaped, the cut marked with an ellipsis.
@@ -40,10 +40,10 @@ std::string FitCell(const std::string& Text, size_t Width)
     return Escaped.substr(0, Cut) + "…";
 }
 
-std::string FormatTriple(const std::array<double, 3>& Values, const char* Separator)
+std::string FormatTriple(const std::array<double, 3>& Coordinates, const char* Separator)
 {
     char Text[96];
-    std::snprintf(Text, sizeof(Text), "%.1f%s%.1f%s%.1f", Values[0], Separator, Values[1], Separator, Values[2]);
+    std::snprintf(Text, sizeof(Text), "%.1f%s%.1f%s%.1f", Coordinates[0], Separator, Coordinates[1], Separator, Coordinates[2]);
     return Text;
 }
 
@@ -112,14 +112,15 @@ void WorldRegister::Survey(const WorldSpace& World)
             Entry.Spatial        = true;
             Entry.PositionMetres = ToDouble(Vessel->QuerySpatial().PositionMetres);
         }
-        else if (const auto* Node = dynamic_cast<const SpatialNodeRecord*>(Record))
+        else if (const auto* SpatialRecord = dynamic_cast<const SpatialNodeRecord*>(Record))
         {
             Entry.Spatial        = true;
-            Entry.PositionMetres = ToDouble(Node->QuerySpatial().PositionMetres);
+            Entry.PositionMetres = ToDouble(SpatialRecord->QuerySpatial().PositionMetres);
         }
         else if (const auto* Vehicle = dynamic_cast<const VehicleRecord*>(Record))
         {
             const VehicleConfiguration& Configuration = Vehicle->QueryConfiguration();
+            Entry.Group           = Configuration.GroupName;
             Entry.Visible         = Configuration.Visible;
             Entry.Spatial         = true;
             Entry.PositionMetres  = ToDouble(Configuration.Spatial.PositionMetres);
@@ -127,7 +128,15 @@ void WorldRegister::Survey(const WorldSpace& World)
         }
         else if (const auto* Tyre = dynamic_cast<const TyreRecord*>(Record))
         {
-            Entry.PhysicsAuthored = Tyre->QueryConfiguration().Enclosed;
+            const TyreConfiguration& Configuration = Tyre->QueryConfiguration();
+            Entry.PhysicsAuthored = Configuration.Enclosed;
+            Entry.Group           = Configuration.SetName;
+            static constexpr const char* CornerNames[4] = { "FL", "FR", "RL", "RR" };
+            std::string EnclosureSummary = std::string(CornerNames[Configuration.Corner & 3u]) + " · " + Configuration.Compound + " · " +
+                                           std::to_string(static_cast<int>(std::llround(Configuration.ColdPressure * 1.0e-3f))) + " kPa";
+            if (const SceneRecordBase* Enclosing = const_cast<WorldSpace&>(World).FindRecord(Record->QueryParentToken()))
+                EnclosureSummary += (Configuration.Enclosed ? " · fitted to " : " · pit lane for ") + Enclosing->QueryRecordName();
+            Entry.Remark = std::move(EnclosureSummary);
         }
         Entries.push_back(std::move(Entry));
     }

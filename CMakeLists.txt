@@ -795,6 +795,11 @@ if(BUILD_TESTING)
     target_link_libraries(TyreCarcassValidation PRIVATE FrontierPhysicsExtension)
     add_test(NAME TyreCarcassValidation COMMAND TyreCarcassValidation "${CMAKE_SOURCE_DIR}/Exhibits/VehiclePhysics")
     set_tests_properties(TyreCarcassValidation PROPERTIES TIMEOUT 900)
+    add_executable(VehicleWorkspaceCapture
+        Exhibits/VehiclePhysics/Code/VehicleWorkspaceCapture.cpp
+        Engine/Render/StbImageWriteImplementation.cpp)
+    target_include_directories(VehicleWorkspaceCapture PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
+    target_link_libraries(VehicleWorkspaceCapture PRIVATE EverestProjectEditor)
     foreach(ProjectDriveSuite VehicleValidation VehicleDrivingValidation AbsSuperchargerValidation AerodynamicsValidation BrakingValidation
             SuperchargerValidation VehicleInputValidation ProjectDriveTrace)
         add_executable(ProjectDrive${ProjectDriveSuite} Exhibits/VehiclePhysics/Code/ProjectDrive/${ProjectDriveSuite}.cpp)

@@ -426,7 +426,7 @@ std::shared_ptr<const TyreCarcassCompliance> ConstructCompliance(double Radius, 
     return Tables;
 }
 
-// 📝 Tables are shared by design (every tyre of a vehicle, every vehicle of the same tyre).
+// 📝 Tables are reused across tyres of identical geometry, material and reference pressure.
 std::shared_ptr<const TyreCarcassCompliance> ResolveCompliance(double Radius, double RimRadius, double Width, const TyreCarcassSolid::Material& Design,
                                                                double ReferencePressure)
 {
@@ -436,7 +436,7 @@ std::shared_ptr<const TyreCarcassCompliance> ResolveCompliance(double Radius, do
     const Key Wanted{ Radius, RimRadius, Width, Design.YoungModulus, Design.PoissonRatio, Design.PrestressScale, Design.CordModulus, ReferencePressure };
     std::lock_guard<std::mutex> Guard(Lock);
     if (auto Found = Designs.find(Wanted); Found != Designs.end())
-        if (auto Shared = Found->second.lock()) return Shared;
+        if (auto Existing = Found->second.lock()) return Existing;
     auto Built = ConstructCompliance(Radius, RimRadius, Width, Design, ReferencePressure);
     if (!Built->Valid) return nullptr;
     Designs[Wanted] = Built;
@@ -446,7 +446,17 @@ std::shared_ptr<const TyreCarcassCompliance> ResolveCompliance(double Radius, do
 } // namespace
 
 TyreCarcassSolid::TyreCarcassSolid(const TyreCarcassParameters& Parameters, float TyreRadius, float TyreRimRadius, float TyreWidth)
-    : TyreCarcassSolid(Parameters, TyreRadius, TyreRimRadius, TyreWidth, Material{})
+    : TyreCarcassSolid(
+          Parameters,
+          TyreRadius,
+          TyreRimRadius,
+          TyreWidth,
+          Material{
+              Parameters.FemYoungModulus,
+              std::clamp(Parameters.FemPoissonRatio, 0.05, 0.49),
+              Parameters.FemPrestressScale,
+              Parameters.FemCordModulus,
+              Parameters.FemDampingRate })
 {
 }
 
@@ -568,7 +578,40 @@ double TyreCarcassSolid::SolveContact(const CarcassContact& Contact, int& Touchi
         }
         if (Largest < 1.0e-3) break;
     }
-    // ④ the tread's displacement: inflation plus the compliance's response to the contact forces
+    // ④ the tread's displacement: inflation plus the compliance's response to normal + Coulomb-bounded tangential contact forces
+    double Total = 0.0;
+    for (int A = 0; A < Count; ++A)
+        if (Force[static_cast<size_t>(A)] > 0.0) Total += Force[static_cast<size_t>(A)];
+
+    double TractionPerNormal[3] = { 0.0, 0.0, 0.0 };
+    if (Total > 1.0e-6)
+    {
+        const double RawTangential[3] = {
+            static_cast<double>(Contact.TangentialForce.x),
+            static_cast<double>(Contact.TangentialForce.y),
+            static_cast<double>(Contact.TangentialForce.z) };
+        const double NormalProjection = RawTangential[0] * NormalWorld[0] + RawTangential[1] * NormalWorld[1] + RawTangential[2] * NormalWorld[2];
+        double       PlanarWorld[3]   = {
+            RawTangential[0] - NormalProjection * NormalWorld[0],
+            RawTangential[1] - NormalProjection * NormalWorld[1],
+            RawTangential[2] - NormalProjection * NormalWorld[2] };
+        const double PlanarMagnitude = std::sqrt(PlanarWorld[0] * PlanarWorld[0] + PlanarWorld[1] * PlanarWorld[1] + PlanarWorld[2] * PlanarWorld[2]);
+        if (PlanarMagnitude > 1.0e-6)
+        {
+            const double CoulombLimit = std::max(0.0, Tuning.Friction) * Total;
+            const double ClampScale   = PlanarMagnitude > CoulombLimit ? (CoulombLimit / PlanarMagnitude) : 1.0;
+            for (int Axis = 0; Axis < 3; ++Axis) PlanarWorld[Axis] *= ClampScale;
+            double TractionWheel[3] = {};
+            TurnBack(Contact.HubRotation, PlanarWorld, TractionWheel);
+            for (int Axis = 0; Axis < 3; ++Axis) TractionPerNormal[Axis] = TractionWheel[Axis] / Total;
+        }
+    }
+
+    const double ForceDirection[3] = {
+        Normal[0] + TractionPerNormal[0],
+        Normal[1] + TractionPerNormal[1],
+        Normal[2] + TractionPerNormal[2] };
+
     for (int Tread = 0; Tread < TreadCount; ++Tread)
     {
         double Sum[3] = { Inflated[static_cast<size_t>(Tread * 3)], Inflated[static_cast<size_t>(Tread * 3 + 1)], Inflated[static_cast<size_t>(Tread * 3 + 2)] };
@@ -578,18 +621,16 @@ double TyreCarcassSolid::SolveContact(const CarcassContact& Contact, int& Touchi
             double Block[3][3];
             CartesianBlock(Tread, Candidates[static_cast<size_t>(A)], Block);
             for (int Row = 0; Row < 3; ++Row)
-                Sum[Row] += (Block[Row][0] * Normal[0] + Block[Row][1] * Normal[1] + Block[Row][2] * Normal[2]) * Force[static_cast<size_t>(A)];
+                Sum[Row] += (Block[Row][0] * ForceDirection[0] + Block[Row][1] * ForceDirection[1] + Block[Row][2] * ForceDirection[2]) * Force[static_cast<size_t>(A)];
         }
         for (int Axis = 0; Axis < 3; ++Axis) Displacement[static_cast<size_t>(Tread * 3 + Axis)] = Sum[Axis];
     }
-    double Total = 0.0;
     for (int A = 0; A < Count; ++A)
     {
         const double Pushed = Force[static_cast<size_t>(A)];
         if (Pushed <= 0.0) continue;
         const int Tread = Candidates[static_cast<size_t>(A)];
         TreadForce[static_cast<size_t>(Tread)] = Pushed;
-        Total += Pushed;
         const double* Rest = Tables->Rest[NodeIndex(Tread / TreadRings, Tread % TreadRings + 1, 1)];
         const double  Local[3] = { Rest[0] + Displacement[static_cast<size_t>(Tread * 3)], Rest[1] + Displacement[static_cast<size_t>(Tread * 3 + 1)],
                                    Rest[2] + Displacement[static_cast<size_t>(Tread * 3 + 2)] };

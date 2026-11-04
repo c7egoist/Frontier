@@ -130,6 +130,11 @@ class SceneViewport
     // 📝 Beyond the demo: the editor's placements of the proving ground's occupants (OccupantRelocation), applied before the next
     //    refresh; returns how many occupants changed. A rebuilt viewport starts from the archive again.
     uint32_t RelocateOccupants(const std::vector<OccupantPlacement>& Placements);
+    // 📝 Writes the live or resting vehicle deformation profile (VehicleVisual.slang VehicleProfile) into Host_->VehicleRegion,
+    //    preserving the steering-column pivot/axis and cabin frame loaded from VehicleProfile.bin.
+    void WriteVehicleState(float SteeringAngle, const std::array<bool, 4>& CarcassFieldActive,
+                           const std::array<std::array<float, 4>, 4>& Deformation,
+                           const std::array<const float*, 4>& CarcassFields);
     // 📝 Beyond the demo: GPU picking (PickProjection). The occupants drawn at and around a point of the last refreshed image (a
     //    fraction of its width and height from the top-left), seen through that refresh's camera, unjittered, with the occupants
     //    where that refresh drew them; false while nothing has been refreshed or when the pick program is unavailable.
@@ -162,6 +167,7 @@ class SceneViewport
     std::shared_ptr<DeviceTextureView>     PresentedView_{};
     std::string                            Adapter_{};
     double                                 ElapsedSeconds_ = 0.0;
+    std::vector<float>                     BaseVehicleProfile_{};            // [-] VehicleProfile.bin baseline (cabin, steering column, tablet)
 };
 
 } // namespace Frontier::GlobalIllumination

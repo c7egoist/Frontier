@@ -726,6 +726,37 @@ void EverestWorkspace::ServiceFieldActions()
             OutlinerPanel.Select(Frontier::RecordToken{std::strtoull(Argument.c_str(), nullptr, 10)});
             OutlinerPanel.Synchronize(Frontier::SceneDirectory::Instance());
         }
+        else if (Verb == "fit-tyres")
+        {
+            const Frontier::RecordToken VehicleToken{std::strtoull(Argument.c_str(), nullptr, 10)};
+            const auto* VehicleRec = dynamic_cast<Frontier::VehicleRecord*>(QueryWorldSpace().FindRecord(VehicleToken));
+            if (VehicleRec == nullptr) continue;
+            std::array<bool, 4> Covered{};
+            for (const Frontier::SceneRecordBase* Existing : QueryWorldSpace().FindAllByType("Tyre"))
+            {
+                const auto* Tyre = dynamic_cast<const Frontier::TyreRecord*>(Existing);
+                if (Tyre != nullptr && Existing->QueryParentToken() == VehicleToken)
+                    Covered[Tyre->QueryConfiguration().Corner & 3u] = true;
+            }
+            static constexpr const char* CornerTags[4] = { "FL", "FR", "RL", "RR" };
+            const float DefaultCold = VehicleRec->QueryConfiguration().Specification.Solver.Tyre.InflationPressure;
+            for (uint32_t Corner = 0u; Corner < 4u; ++Corner)
+            {
+                if (Covered[Corner]) continue;
+                const std::string           TyreName  = ResolveUniqueName(VehicleRec->QueryRecordName() + " Tyre " + CornerTags[Corner]);
+                const Frontier::RecordToken TyreToken = QueryWorldSpace().ConstructRecord("Tyre", TyreName, VehicleToken);
+                if (auto* CreatedTyre = dynamic_cast<Frontier::TyreRecord*>(QueryWorldSpace().FindRecord(TyreToken)))
+                {
+                    Frontier::TyreConfiguration& Fit = CreatedTyre->AccessConfiguration();
+                    Fit.Corner                       = Corner;
+                    Fit.Enclosed                     = true;
+                    Fit.Compound                     = "Medium";
+                    Fit.ColdPressure                 = DefaultCold;
+                    Fit.AdvanceRevision();
+                }
+            }
+            OutlinerPanel.Synchronize(Frontier::SceneDirectory::Instance());
+        }
         else if (Verb == "add-force" && Argument.empty())
             ConstructDialog.Open("Forces");
         else if (Verb == "add-force")

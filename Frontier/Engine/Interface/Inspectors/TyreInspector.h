@@ -20,15 +20,18 @@ class TyreInspector final : public RecordInspector
   public:
     explicit TyreInspector(TyreConfiguration& InParameters) noexcept : Parameters(InParameters) {}
 
-    [[nodiscard]] const char* QueryEyebrowText() const noexcept override { return "VEHICLE · TYRE"; }
-    [[nodiscard]] const char* QuerySectionNote() const noexcept override { return "Fitted set"; }
-    [[nodiscard]] bool        QueryToggleSupported() const noexcept override { return true; }
-    [[nodiscard]] bool        QueryToggleEnabled() const noexcept override { return Parameters.Enclosed; }
-    void                      ConfigureToggle(bool Enabled) override { Parameters.Enclosed = Enabled; Parameters.AdvanceRevision(); }
-    [[nodiscard]] uint64_t    QueryRevision() const noexcept override { return Parameters.Revision; }
-    [[nodiscard]] bool        QueryOccupiesColumn() const noexcept override { return true; }
-    [[nodiscard]] std::string QueryDirectoryReadout() const override;
-    void                      ConstructInspector() override;
+    [[nodiscard]] const char*        QueryEyebrowText() const noexcept override { return "VEHICLE · TYRE"; }
+    [[nodiscard]] const char*        QuerySectionNote() const noexcept override { return "Fitted set"; }
+    [[nodiscard]] bool               QueryToggleSupported() const noexcept override { return true; }
+    [[nodiscard]] bool               QueryToggleEnabled() const noexcept override { return Parameters.Enclosed; }
+    void                             ConfigureToggle(bool Enabled) override { Parameters.Enclosed = Enabled; Parameters.AdvanceRevision(); }
+    [[nodiscard]] uint64_t           QueryRevision() const noexcept override { return Parameters.Revision; }
+    [[nodiscard]] bool               QueryOccupiesColumn() const noexcept override { return true; }
+    [[nodiscard]] std::string        QueryDirectoryReadout() const override;
+    void                             ConstructInspector() override;
+
+    [[nodiscard]] TyreConfiguration&       AccessConfiguration() noexcept { return Parameters; }
+    [[nodiscard]] const TyreConfiguration& QueryConfiguration() const noexcept { return Parameters; }
 
   private:
     TyreConfiguration& Parameters;

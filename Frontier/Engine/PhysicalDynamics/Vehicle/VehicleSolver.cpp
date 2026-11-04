@@ -62,6 +62,14 @@ void VehicleSolver::AdvanceTyreContact(const std::vector<HubMotion>& Motions, fl
             Step.Contact.SpinRate      = motion.SpinRate;
             Step.Contact.GaugePressure = LiveThermal ? static_cast<float>(WheelThermals[i].GaugePressure) : ColdPressure;
             Step.Contact.Seconds       = Δτ;
+            if (i < CurrentTelemetry.Wheels.size())
+            {
+                const WheelTelemetry& PreviousWheel = CurrentTelemetry.Wheels[i];
+                const Vec3            WheelForward  = PlanarNormalized(motion.Orientation.Rotate({ 1.0f, 0.0f, 0.0f }));
+                const Vec3            WheelLeft     = PlanarNormalized(motion.Orientation.Rotate({ 0.0f, 1.0f, 0.0f }));
+                Step.Contact.TangentialForce =
+                    WheelForward * PreviousWheel.LongitudinalForce + WheelLeft * PreviousWheel.LateralForce;
+            }
             const Vec3 Foot = motion.Position - motion.Orientation.Rotate({0.0f, 0.0f, 1.0f}) * ActiveConfiguration.Tyre.Radius;
             Vec3 Surface{}, Normal{};
             if (ChassisHooks.Ground && ChassisHooks.Ground(Foot, Surface, Normal) && Normal.Length() > 1.0e-6f)

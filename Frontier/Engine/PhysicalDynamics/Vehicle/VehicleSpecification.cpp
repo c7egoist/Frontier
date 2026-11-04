@@ -112,36 +112,36 @@ std::vector<VehicleFigure> EnumerateVehicleFigures(VehicleSpecification& S)
                           double Display = 1.0, double Offset = 0.0)
     {
         Add(Section, Key, Label, Unit, VehicleFigureCategory::Real, Minimum, Maximum, [&Target] { return static_cast<double>(Target); },
-            [&Target](double Value) { Target = static_cast<float>(Value); }, Display, Offset);
+            [&Target](double Assigned) { Target = static_cast<float>(Assigned); }, Display, Offset);
     };
     const auto Wide = [&](const char* Section, const char* Key, const char* Label, const char* Unit, double Minimum, double Maximum, double& Target,
                           double Display = 1.0, double Offset = 0.0)
     {
-        Add(Section, Key, Label, Unit, VehicleFigureCategory::Real, Minimum, Maximum, [&Target] { return Target; }, [&Target](double Value) { Target = Value; },
+        Add(Section, Key, Label, Unit, VehicleFigureCategory::Real, Minimum, Maximum, [&Target] { return Target; }, [&Target](double Assigned) { Target = Assigned; },
             Display, Offset);
     };
     const auto Switch = [&](const char* Section, const char* Key, const char* Label, bool& Target)
     {
         Add(Section, Key, Label, "", VehicleFigureCategory::Switch, 0.0, 1.0, [&Target] { return Target ? 1.0 : 0.0; },
-            [&Target](double Value) { Target = Value > 0.5; });
+            [&Target](double Assigned) { Target = Assigned > 0.5; });
     };
     const auto Whole = [&](const char* Section, const char* Key, const char* Label, const char* Unit, double Minimum, double Maximum, auto& Target)
     {
         Add(Section, Key, Label, Unit, VehicleFigureCategory::Whole, Minimum, Maximum, [&Target] { return static_cast<double>(Target); },
-            [&Target, Minimum, Maximum](double Value)
+            [&Target, Minimum, Maximum](double Assigned)
             {
                 using Stored = std::remove_reference_t<decltype(Target)>;
-                Target = static_cast<Stored>(std::llround(std::clamp(Value, Minimum, Maximum)));
+                Target = static_cast<Stored>(std::llround(std::clamp(Assigned, Minimum, Maximum)));
             });
     };
     const auto Choose = [&](const char* Section, const char* Key, const char* Label, std::vector<std::string> Choices, auto& Target)
     {
         const double Last = static_cast<double>(Choices.size()) - 1.0;
         Add(Section, Key, Label, "", VehicleFigureCategory::Choice, 0.0, Last, [&Target] { return static_cast<double>(static_cast<int>(Target)); },
-            [&Target, Last](double Value)
+            [&Target, Last](double Assigned)
             {
                 using Stored = std::remove_reference_t<decltype(Target)>;
-                Target = static_cast<Stored>(static_cast<int>(std::llround(std::clamp(Value, 0.0, Last))));
+                Target = static_cast<Stored>(static_cast<int>(std::llround(std::clamp(Assigned, 0.0, Last))));
             },
             1.0, 0.0, std::move(Choices));
     };
@@ -198,11 +198,25 @@ std::vector<VehicleFigure> EnumerateVehicleFigures(VehicleSpecification& S)
     Real("contact", "fan_half_angle_rad", "Fan half angle", "°", 5.0, 80.0, C.TraceContact.FanHalfAngleRad, Degrees);
     Real("contact", "fan_step_rad", "Fan step", "°", 1.0, 20.0, C.TraceContact.FanStepRad, Degrees);
     Whole("contact", "slices", "Slices across the tread", "", 1.0, 7.0, C.TraceContact.LateralCount);
-    Choose("carcass", "model", "Carcass", { "Spring", "XPBD", "3D FEM" }, C.Carcass);
+    Choose("carcass", "formulation", "Carcass formulation", { "Spring", "XPBD", "3D FEM" }, C.Carcass);
+    Wide("carcass", "reference_pressure_pa", "Calibration gauge pressure", "kPa", 40.0, 350.0, C.CarcassTuning.ReferencePressure, 1.0e-3);
+    Wide("carcass", "reference_stiffness_npm", "Calibration radial stiffness", "kN/m", 60.0, 600.0, C.CarcassTuning.ReferenceStiffness, 1.0e-3);
+    Wide("carcass", "pressure_share", "Pneumatic stiffness share", "", 0.0, 1.0, C.CarcassTuning.PressureShare);
     Wide("carcass", "tread_mass_kg", "Moving tread mass", "kg", 1.0, 30.0, C.CarcassTuning.TreadMass);
     Wide("carcass", "damping_per_s", "Carcass hysteresis", "1/s", 0.0, 120.0, C.CarcassTuning.DampingPerSecond);
     Wide("carcass", "friction", "Carcass contact friction", "μ", 0.0, 2.0, C.CarcassTuning.Friction);
     Whole("carcass", "substeps", "Lattice sub-steps", "", 1.0, 8.0, C.CarcassTuning.Substeps);
+    Wide("carcass", "xpbd_pressure_share", "XPBD outward pressure share", "", 0.05, 1.5, C.CarcassTuning.XpbdPressureForceFactor);
+    Wide("carcass", "xpbd_spoke_compliance", "XPBD spoke compliance", "µm/N", 2.0, 200.0, C.CarcassTuning.XpbdSpokeCompliance, 1.0e6);
+    Wide("carcass", "xpbd_belt_compliance", "XPBD belt compliance", "µm/N", 0.1, 40.0, C.CarcassTuning.XpbdBeltCompliance, 1.0e6);
+    Wide("carcass", "xpbd_lateral_compliance", "XPBD lateral compliance", "µm/N", 0.1, 40.0, C.CarcassTuning.XpbdLateralCompliance, 1.0e6);
+    Wide("carcass", "xpbd_shear_compliance", "XPBD shear compliance", "µm/N", 0.1, 40.0, C.CarcassTuning.XpbdShearCompliance, 1.0e6);
+    Whole("carcass", "xpbd_iterations", "XPBD iterations per sub-step", "", 2.0, 32.0, C.CarcassTuning.XpbdIterations);
+    Wide("carcass", "fem_young_modulus_pa", "3D FEM Young's modulus", "MPa", 0.5, 25.0, C.CarcassTuning.FemYoungModulus, 1.0e-6);
+    Wide("carcass", "fem_poisson_ratio", "3D FEM Poisson ratio", "", 0.10, 0.48, C.CarcassTuning.FemPoissonRatio);
+    Wide("carcass", "fem_prestress_scale", "3D FEM follower-pressure scale", "", 0.5, 25.0, C.CarcassTuning.FemPrestressScale);
+    Wide("carcass", "fem_cord_modulus_pa", "3D FEM cord tensile modulus", "MPa", 40.0, 1500.0, C.CarcassTuning.FemCordModulus, 1.0e-6);
+    Wide("carcass", "fem_damping_nspm", "3D FEM radial damping", "N·s/m", 0.0, 8000.0, C.CarcassTuning.FemDampingRate);
     // 📝 Magic Formula (Project Drive's GRIT sheet) and MF6.1 pressure terms
     {
         PacejkaParameters& P = C.TyrePacejka;

@@ -2004,10 +2004,10 @@ bool WorldSpace::SaveLevelSpace(const std::filesystem::path& LevelSpacePath, std
         Entry.insert_or_assign("identity", TokenIdentities[Record->QueryToken().Value]);
         Entry.insert_or_assign("type", Record->QueryTypeIdentifier());
         Entry.insert_or_assign("name", Record->QueryRecordName());
-        const RecordToken Parent = Record->QueryParentToken();
-        if (Parent.IsValid())
+        const RecordToken EnclosingToken = Record->QueryParentToken();
+        if (EnclosingToken.IsValid())
         {
-            if (const auto Found = TokenIdentities.find(Parent.Value); Found != TokenIdentities.end())
+            if (const auto Found = TokenIdentities.find(EnclosingToken.Value); Found != TokenIdentities.end())
             {
                 Entry.insert_or_assign("parent", Found->second);
             }

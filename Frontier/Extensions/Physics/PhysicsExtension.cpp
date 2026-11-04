@@ -20,9 +20,9 @@ namespace Frontier
 namespace
 {
 
-std::array<double, 3> ToDouble(const float Values[3])
+std::array<double, 3> ToDouble(const float Coordinates[3])
 {
-    return { Values[0], Values[1], Values[2] };
+    return { Coordinates[0], Coordinates[1], Coordinates[2] };
 }
 
 std::array<double, 3> Conjugated(const std::array<double, 4>& Q, const std::array<double, 3>& Vector)
@@ -236,13 +236,29 @@ size_t PhysicsExtension::Begin(WorldSpace& World, const PhysicsExtensionSettings
     if (Settings.WriteRegister && !World.QueryLoadedLevelPath().empty())
         (void)Register.WriteMarkdown(WorldRegister::ResolveDocumentPath(World.QueryLoadedLevelPath()));
 
-    // ⑥ the step rate, and the physics thread when asked for
-    const double Rate = Settings.StepHz > 0.0 ? Settings.StepHz : (Vehicles.empty() ? 60.0 : 240.0);
-    StepSeconds     = 1.0 / Rate;
-    Tally.StepHz    = Rate;
-    Threaded        = Settings.Threaded;
-    Tally.Threaded  = Threaded;
+    // ⑥ the step rate, substepping, and the physics thread when asked for
+    double AuthoredVehicleHz = 0.0;
+    int    AuthoredCollision = Settings.CollisionSteps;
+    int    AuthoredSubsteps  = Settings.SolverSubsteps;
+    for (const VehicleLink& Link : Vehicles)
+    {
+        if (const auto* Record = dynamic_cast<const VehicleRecord*>(World.FindRecord(Link.Record)))
+        {
+            const VehicleConfiguration& Configuration = Record->QueryConfiguration();
+            AuthoredVehicleHz = std::max(AuthoredVehicleHz, static_cast<double>(Configuration.PhysicsStepHz));
+            AuthoredCollision = std::max(AuthoredCollision, Configuration.CollisionSteps);
+            AuthoredSubsteps  = std::max(AuthoredSubsteps, Configuration.SolverSubsteps);
+        }
+    }
+    const double Rate = Settings.StepHz > 0.0 ? Settings.StepHz : (Vehicles.empty() ? 60.0 : (AuthoredVehicleHz > 0.0 ? AuthoredVehicleHz : 240.0));
+    StepSeconds       = 1.0 / Rate;
+    CollisionSteps    = std::clamp(AuthoredCollision, 1, 8);
+    SolverSubsteps    = std::clamp(AuthoredSubsteps, 1, 8);
+    Tally.StepHz      = Rate;
+    Threaded          = Settings.Threaded;
+    Tally.Threaded    = Threaded;
     FillSnapshot(Latest);
+    (void)ApplySnapshot(World, Latest);
     if (Threaded)
     {
         PhysicsThreadConfiguration Configuration;
@@ -278,6 +294,7 @@ void PhysicsExtension::AddVehicle(WorldSpace& World, RecordToken Token, WorldReg
     Vehicle::VehicleSolverConfiguration Solver = Vehicle::ResolveSolverConfiguration(Configuration.Specification);
     // 📝 The tyres it encloses set their corners: cold pressure, compound grip, and the compounds' window for the thermal grip.
     std::vector<RecordToken> Tyres;
+    std::array<bool, 4>      CornerFitted{ true, true, true, true };
     Solver.CornerPressures.assign(4, Solver.Tyre.InflationPressure);
     Solver.CornerGrip.assign(4, 1.0f);
     double WindowLow = 0.0, WindowHigh = 0.0;
@@ -287,13 +304,19 @@ void PhysicsExtension::AddVehicle(WorldSpace& World, RecordToken Token, WorldReg
         const auto* Tyre = dynamic_cast<const TyreRecord*>(Candidate);
         if (Tyre == nullptr || Candidate->QueryParentToken() != Token) continue;
         const TyreConfiguration& Fit = Tyre->QueryConfiguration();
+        const uint32_t           CornerIndex = Fit.Corner & 3u;
         Tyres.push_back(Candidate->QueryToken());
         if (WorldRegisterEntry* TyreEntry = Register.Find(Candidate->QueryToken()))
             TyreEntry->Physics = Fit.Enclosed ? PhysicsParticipation::Tyre : PhysicsParticipation::Skipped;
-        if (!Fit.Enclosed) continue;
+        if (!Fit.Enclosed)
+        {
+            CornerFitted[CornerIndex] = false;
+            continue;
+        }
+        CornerFitted[CornerIndex] = true;
         const TyreCompound& Compound = ResolveTyreCompound(Fit.Compound);
-        Solver.CornerPressures[Fit.Corner & 3u] = Fit.ColdPressure;
-        Solver.CornerGrip[Fit.Corner & 3u]      = Compound.GripScale;
+        Solver.CornerPressures[CornerIndex] = Fit.ColdPressure;
+        Solver.CornerGrip[CornerIndex]      = Compound.GripScale;
         WindowLow += Compound.WindowLow_C + 273.15;
         WindowHigh += Compound.WindowHigh_C + 273.15;
         ++Fitted;
@@ -305,12 +328,15 @@ void PhysicsExtension::AddVehicle(WorldSpace& World, RecordToken Token, WorldReg
         Solver.TyreThermal.GripFadeTemperature   = std::max(Solver.TyreThermal.GripFadeTemperature, Solver.TyreThermal.OptimumTemperature + 40.0);
     }
     VehicleLink Link;
-    Link.Physics      = std::make_unique<PhysicsVehicle>();
-    Link.Record       = Token;
-    Link.Tyres        = Tyres;
-    Link.Saved        = Configuration.Spatial;
-    Link.Possessed    = Configuration.Possessed;
-    Link.CentreHeight = Configuration.Specification.Geometry.CoMHeight;
+    Link.Physics        = std::make_unique<PhysicsVehicle>();
+    Link.Record         = Token;
+    Link.Tyres          = Tyres;
+    Link.Saved          = Configuration.Spatial;
+    Link.Possessed      = Configuration.Possessed;
+    Link.CentreHeight   = Configuration.Specification.Geometry.CoMHeight;
+    Link.Carcass        = Solver.Carcass;
+    Link.CornerFitted   = CornerFitted;
+    Link.SolverSubsteps = std::max(1, Configuration.SolverSubsteps);
     std::string Error;
     if (!Link.Physics->Construct(*Space, Token, Configuration.Specification, Solver, ToDouble(Configuration.Spatial.PositionMetres),
                                  Configuration.Spatial.OrientationDegrees[2], &Error))
@@ -360,13 +386,21 @@ void PhysicsExtension::StepOnce(double Seconds)
     const VehicleCommand& Command = Applied;
     const bool Reset = Command.ResetSerial != AppliedReset;
     AppliedReset     = Command.ResetSerial;
-    for (VehicleLink& Link : Vehicles)
+    if (Reset)
     {
-        if (Reset) Link.Physics->Reset();
-        Link.Physics->AssignInput(Link.Possessed ? Command.Input : PhysicsVehicleInput{});
-        Link.Physics->Step(Seconds);
+        for (VehicleLink& Link : Vehicles) Link.Physics->Reset();
     }
-    Space->Step(Seconds, 1);
+    const int    Substeps       = std::max(1, SolverSubsteps);
+    const double SubstepSeconds = Seconds / static_cast<double>(Substeps);
+    for (int Substep = 0; Substep < Substeps; ++Substep)
+    {
+        for (VehicleLink& Link : Vehicles)
+        {
+            Link.Physics->AssignInput(Link.Possessed ? Command.Input : PhysicsVehicleInput{});
+            Link.Physics->Step(SubstepSeconds);
+        }
+        Space->Step(SubstepSeconds, CollisionSteps);
+    }
     ++StepCount;
 }
 
@@ -468,14 +502,26 @@ size_t PhysicsExtension::ApplySnapshot(WorldSpace& World, const PhysicsSnapshot&
             ++Written;
         }
         VehicleReading Reading;
-        Reading.Simulating       = true;
-        Reading.Telemetry        = View.Telemetry;
-        Reading.SimulatedSeconds = Snapshot.SimulatedSeconds;
-        Reading.Steps            = Snapshot.Steps;
-        Reading.StepHz           = 1.0 / StepSeconds;
-        Reading.StepMicroseconds = Measured.MeanStepMicroseconds;
-        Reading.RealtimeRatio    = Threaded ? Measured.RealtimeRatio : 1.0;
-        Reading.Throttle         = { View.Input.Throttle, View.Input.Brake, View.Input.Steer, View.Input.Handbrake ? 1.0f : 0.0f };
+        Reading.Simulating          = true;
+        Reading.Telemetry           = View.Telemetry;
+        Reading.SimulatedSeconds    = Snapshot.SimulatedSeconds;
+        Reading.Steps               = Snapshot.Steps;
+        Reading.StepHz              = 1.0 / StepSeconds;
+        Reading.StepMicroseconds    = Measured.MeanStepMicroseconds;
+        Reading.RealtimeRatio       = Threaded ? Measured.RealtimeRatio : 1.0;
+        Reading.Throttle            = { View.Input.Throttle, View.Input.Brake, View.Input.Steer, View.Input.Handbrake ? 1.0f : 0.0f };
+        Reading.Carcass             = Link.Carcass;
+        Reading.VisualValid         = true;
+        Reading.BodyTransform       = View.Body;
+        Reading.WheelTransforms     = View.Wheels;
+        Reading.CornerFields        = View.Fields;
+        Reading.CornerFieldValid    = View.FieldValid;
+        Reading.CornerFitted        = Link.CornerFitted;
+        Reading.ContactAngle        = View.ContactAngle;
+        Reading.Deflection          = View.Deflection;
+        Reading.GaugePressure       = View.GaugePressure;
+        Reading.LateralShift        = View.LateralShift;
+        Reading.SteeringColumnAngle = -View.Input.Steer * 2.3561945f;
         PublishVehicleReading(Link.Record, Reading);
         for (const RecordToken& Tyre : Link.Tyres) PublishVehicleReading(Tyre, Reading);
     }

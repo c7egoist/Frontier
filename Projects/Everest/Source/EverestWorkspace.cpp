@@ -11,6 +11,8 @@
 #if FRONTIER_EDITOR && defined(FRONTIER_WITH_INTERFACE_SDK)
 #include "Frontier/Extensions/Rendering/RenderingExtension.h"
 #include "Frontier/Extensions/Physics/PhysicsExtension.h"
+#include "Engine/Scene/VehicleReadings.h"
+#include "Engine/Scene/WorldRegister.h"
 
 #include "Engine/Interface/Controls/WorldVectorOverlay.h"
 #include "Engine/Interface/ForceFieldVisualization/ForceFieldVisualization.h"
@@ -336,7 +338,7 @@ EverestWorkspace::EverestWorkspace(Frontier::ControlCentrePanel& ControlCentre,
     // 📝 The scene's entries plus the one Render settings component (the whole renderer, owner's request) and the scene archive's
     //    geometry objects; neither the renderer nor the geometry is constructible (the archive decides what geometry exists).
     const std::vector<std::string> SceneTypes = {"RenderPipeline","Solar","OpticalFlare","Atmosphere","Clouds","Fog","Stars","Moons","Planet","ForceField","Wind",
-                                                 "ForceSource","Geometry"};
+                                                 "ForceSource","Geometry","Vehicle","Tyre"};
     OutlinerPanel.ConfigureVisibleTypes(SceneTypes);
     auto Types = QueryWorldSpace().EnumerateRegisteredTypes();
     std::erase_if(Types,[&](const auto& Entry)
@@ -630,6 +632,7 @@ void EverestWorkspace::ConfigureConstructCatalogue()
         {"Stars", "Environment", "Sparkles"}, {"Moons", "Environment", "Moon"},          {"Planet", "Environment", "Orbit"},
         {"Clouds", "Weather", "CloudFog"},    {"LocalCloud", "Weather", "CloudFog"},     {"Fog", "Weather", "Droplets"},
         {"LocalFog", "Weather", "Droplets"},  {"Wind", "Weather", "Wind"},               {"ForceField", "Weather", "Waves"},
+        {"Vehicle", "Geometry", "Car"},       {"Tyre", "Geometry", "CircleDot"},
     };
     for (const auto& [Type, Label] : OutlinerPanel.QueryConstructibleTypes())
     {
@@ -708,8 +711,45 @@ void EverestWorkspace::ServiceConstructOrder(const Frontier::ConstructOrder& Ord
         Frontier::RecordToken ParentToken{};
         if (Order.Entry.Identifier == "OpticalFlare")
             if (Frontier::SceneRecordBase* Solar = QueryWorldSpace().FindFirstByType("Solar")) ParentToken = Solar->QueryToken();
+        if (Order.Entry.Identifier == "Tyre")
+        {
+            const Frontier::RecordToken CurrentSelected = OutlinerPanel.QuerySelected();
+            if (dynamic_cast<Frontier::VehicleRecord*>(QueryWorldSpace().FindRecord(CurrentSelected)) != nullptr)
+                ParentToken = CurrentSelected;
+            else if (Frontier::SceneRecordBase* FirstVehicle = QueryWorldSpace().FindFirstByType("Vehicle"))
+                ParentToken = FirstVehicle->QueryToken();
+        }
         const Frontier::RecordToken Created = QueryWorldSpace().ConstructRecord(Order.Entry.Identifier, Name, ParentToken);
         if (!Created.IsValid()) return;
+        if (Order.Entry.Identifier == "Vehicle")
+        {
+            if (auto* VehicleRec = dynamic_cast<Frontier::VehicleRecord*>(QueryWorldSpace().FindRecord(Created)))
+            {
+                Frontier::VehicleConfiguration& VehicleConfig = VehicleRec->AccessConfiguration();
+                const std::array<double, 3>     Ground        = ResolveGroundTarget();
+                VehicleConfig.Visible                         = Order.Visible;
+                VehicleConfig.Spatial.PositionMetres[0]       = static_cast<float>(Ground[0]);
+                VehicleConfig.Spatial.PositionMetres[1]       = static_cast<float>(Ground[1]);
+                VehicleConfig.Spatial.PositionMetres[2]       = 0.0f;
+                VehicleConfig.Spatial.OrientationDegrees[2]   = static_cast<float>(std::round(Flight.Heading / 15.0) * 15.0);
+                VehicleConfig.AdvanceRevision();
+            }
+            static constexpr const char* CornerTags[4] = { "FL", "FR", "RL", "RR" };
+            for (uint32_t Corner = 0u; Corner < 4u; ++Corner)
+            {
+                const std::string           TyreName  = Name + " Tyre " + CornerTags[Corner];
+                const Frontier::RecordToken TyreToken = QueryWorldSpace().ConstructRecord("Tyre", TyreName, Created);
+                if (auto* TyreRec = dynamic_cast<Frontier::TyreRecord*>(QueryWorldSpace().FindRecord(TyreToken)))
+                {
+                    Frontier::TyreConfiguration& Fit = TyreRec->AccessConfiguration();
+                    Fit.Corner                       = Corner;
+                    Fit.Enclosed                     = true;
+                    Fit.Compound                     = "Medium";
+                    Fit.ColdPressure                 = 110000.0f;
+                    Fit.AdvanceRevision();
+                }
+            }
+        }
         if (!Order.Visible) (void)Frontier::SceneDirectory::Instance().ConfigureVisible(Created, false);
         OutlinerPanel.Synchronize(Frontier::SceneDirectory::Instance());
         OutlinerPanel.Select(Created);
@@ -830,7 +870,12 @@ void EverestWorkspace::ServiceSceneObjectKeys()
 void EverestWorkspace::ConstructInterface(double DeltaSeconds)
 {
     IntegrateSimulation(DeltaSeconds);
-    if (Physics && Physics->QueryRunning()) (void)Physics->Step(QueryWorldSpace(), DeltaSeconds);
+    if (Physics && Physics->QueryRunning())
+    {
+        IntegrateDrivingControls(DeltaSeconds);
+        (void)Physics->Step(QueryWorldSpace(), DeltaSeconds);
+        IntegrateChaseCamera(DeltaSeconds);
+    }
     ViewportDeltaSeconds = DeltaSeconds;
     AdvanceFieldTimeline(DeltaSeconds);
 
@@ -1025,6 +1070,9 @@ void EverestWorkspace::SaveActiveLevel()
         Frontier::WriteLogFormat(ProjectCategory, Frontier::LogSeverity::Info, Frontier::LogVerbosity::Log,
                                  "EverestWorkspace", "Saved '%s' (%zu records).", TargetPath.filename().string().c_str(),
                                  QueryWorldSpace().QueryRecordCount());
+        Frontier::WorldRegister Register;
+        Register.Survey(QueryWorldSpace());
+        (void)Register.WriteMarkdown(Frontier::WorldRegister::ResolveDocumentPath(TargetPath));
         AnnounceViewportNotice("Saved " + TargetPath.filename().string());
     }
     else
@@ -1167,7 +1215,7 @@ void EverestWorkspace::ConstructViewportSurface()
         if (IO.KeyAlt && ImGui::IsKeyPressed(ImGuiKey_S, false)) ToggleSimulation();
     }
     if ((StageHovered || ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) && !IO.WantTextInput && !IO.KeyCtrl &&
-        !ImGui::IsMouseDown(ImGuiMouseButton_Right) && !ModalEditor)
+        !ImGui::IsMouseDown(ImGuiMouseButton_Right) && !ModalEditor && !QueryVehicleDrivingActive())
     {
         const std::array<std::pair<ImGuiKey, Frontier::PlacementGizmoMode>, 3> ModeKeys = {{{ImGuiKey_W, Frontier::PlacementGizmoMode::Move},
                                                                                             {ImGuiKey_E, Frontier::PlacementGizmoMode::Rotate},
@@ -1426,18 +1474,148 @@ void EverestWorkspace::ToggleSimulation()
     if (Physics->QueryRunning())
     {
         Physics->End(QueryWorldSpace());
+        DriverControls = Frontier::Vehicle::DriverInputIntegrator{};
         AnnounceViewportNotice("Simulation stopped \xC2\xB7 objects restored");
         return;
     }
-    const size_t Moving = Physics->Begin(QueryWorldSpace());
+    Frontier::PhysicsExtensionSettings Settings{};
+    Settings.WriteRegister = true;
+    const char* CarcassLabel = nullptr;
+    for (const Frontier::SceneRecordBase* Candidate : QueryWorldSpace().FindAllByType("Vehicle"))
+    {
+        const auto* VehicleRec = dynamic_cast<const Frontier::VehicleRecord*>(Candidate);
+        if (VehicleRec == nullptr || !VehicleRec->QueryConfiguration().Visible || !VehicleRec->QueryConfiguration().Physics) continue;
+        const Frontier::VehicleConfiguration& Config = VehicleRec->QueryConfiguration();
+        Settings.Threaded       = Config.ThreadedPhysics;
+        Settings.StepHz         = Config.PhysicsStepHz > 0.0f ? static_cast<double>(Config.PhysicsStepHz) : 240.0;
+        Settings.CollisionSteps = std::clamp(Config.CollisionSteps, 1, 8);
+        Settings.SolverSubsteps = std::clamp(Config.SolverSubsteps, 1, 8);
+        CarcassLabel            = Frontier::Vehicle::TyreCarcassName(Config.Specification.Solver.Carcass);
+        break;
+    }
+    DriverControls = Frontier::Vehicle::DriverInputIntegrator{};
+    const size_t Moving = Physics->Begin(QueryWorldSpace(), Settings);
     const auto&  Tally  = Physics->QueryTally();
-    char         Text[160];
-    if (Moving > 0)
-        std::snprintf(Text, sizeof(Text), "Simulating \xC2\xB7 %zu moving, %zu colliders, %zu groups held (Alt+S stops)", Moving, Tally.Fixed, Tally.Held);
+    char         Text[220];
+    if (Tally.Vehicles > 0)
+    {
+        std::snprintf(Text, sizeof(Text),
+                      "Driving (%s \xC2\xB7 %.0f Hz %s) \xC2\xB7 W/S/A/D/Space drive \xC2\xB7 R reset \xC2\xB7 C chase \xC2\xB7 Alt+S stop",
+                      CarcassLabel ? CarcassLabel : "Spring", Tally.StepHz, Tally.Threaded ? "PhysicsThread" : "inline");
+    }
+    else if (Moving > 0)
+    {
+        std::snprintf(Text, sizeof(Text), "Simulating \xC2\xB7 %zu moving, %zu colliders, %zu static fractures, %zu groups held (Alt+S stops)",
+                      Moving, Tally.Fixed, Tally.Fracture, Tally.Held);
+    }
     else
-        std::snprintf(Text, sizeof(Text), "Simulating \xC2\xB7 no single object has Physics on (%zu colliders, %zu groups held) \xC2\xB7 Alt+S stops",
-                      Tally.Fixed, Tally.Held);
+    {
+        std::snprintf(Text, sizeof(Text), "Simulating \xC2\xB7 no single object has Physics on (%zu colliders, %zu static fractures) \xC2\xB7 Alt+S stops",
+                      Tally.Fixed, Tally.Fracture);
+    }
     AnnounceViewportNotice(Text);
+}
+
+bool EverestWorkspace::QueryVehicleDrivingActive() const
+{
+    if (!Physics || !Physics->QueryRunning()) return false;
+    for (const Frontier::SceneRecordBase* Candidate : const_cast<EverestWorkspace*>(this)->QueryWorldSpace().FindAllByType("Vehicle"))
+    {
+        const auto* VehicleRec = dynamic_cast<const Frontier::VehicleRecord*>(Candidate);
+        if (VehicleRec != nullptr && VehicleRec->QueryConfiguration().Visible && VehicleRec->QueryConfiguration().Physics &&
+            VehicleRec->QueryConfiguration().Possessed)
+            return true;
+    }
+    return false;
+}
+
+void EverestWorkspace::IntegrateDrivingControls(double DeltaSeconds)
+{
+    if (!QueryVehicleDrivingActive()) return;
+    const ImGuiIO& IO      = ImGui::GetIO();
+    const bool     Blocked = IO.WantTextInput || ImGui::IsMouseDown(ImGuiMouseButton_Right) || ConstructDialog.QueryOpen() ||
+                         ImGui::GetTopMostPopupModal() != nullptr;
+    if (!Blocked && !IO.KeyCtrl && !IO.KeyAlt)
+    {
+        DriverControls.ForwardThrottleKey(ImGui::IsKeyDown(ImGuiKey_W) || ImGui::IsKeyDown(ImGuiKey_UpArrow));
+        DriverControls.ForwardBrakeKey(ImGui::IsKeyDown(ImGuiKey_S) || ImGui::IsKeyDown(ImGuiKey_DownArrow));
+        DriverControls.ForwardSteerLeftKey(ImGui::IsKeyDown(ImGuiKey_A) || ImGui::IsKeyDown(ImGuiKey_LeftArrow));
+        DriverControls.ForwardSteerRightKey(ImGui::IsKeyDown(ImGuiKey_D) || ImGui::IsKeyDown(ImGuiKey_RightArrow));
+        DriverControls.ForwardHandbrakeKey(ImGui::IsKeyDown(ImGuiKey_Space));
+        if (ImGui::IsKeyPressed(ImGuiKey_R, false))
+        {
+            Physics->RequestVehicleReset();
+            AnnounceViewportNotice("Vehicle reset to start");
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_C, false))
+        {
+            for (const Frontier::SceneRecordBase* Candidate : QueryWorldSpace().FindAllByType("Vehicle"))
+            {
+                auto* VehicleRec = dynamic_cast<Frontier::VehicleRecord*>(QueryWorldSpace().FindRecord(Candidate->QueryToken()));
+                if (VehicleRec != nullptr && VehicleRec->QueryConfiguration().Possessed)
+                {
+                    bool& Enabled = VehicleRec->AccessConfiguration().ChaseCamera;
+                    Enabled       = !Enabled;
+                    VehicleRec->AccessConfiguration().AdvanceRevision();
+                    AnnounceViewportNotice(Enabled ? "Chase camera on (C)" : "Chase camera off (C)");
+                    break;
+                }
+            }
+        }
+    }
+    else
+    {
+        DriverControls.ForwardThrottleKey(false);
+        DriverControls.ForwardBrakeKey(false);
+        DriverControls.ForwardSteerLeftKey(false);
+        DriverControls.ForwardSteerRightKey(false);
+        DriverControls.ForwardHandbrakeKey(false);
+    }
+
+    const Frontier::Vehicle::DriverCommand Command = DriverControls.Advance(static_cast<float>(std::clamp(DeltaSeconds, 0.0, 0.1)));
+    Frontier::PhysicsVehicleInput          Input{};
+    Input.Throttle  = Command.Drive.Throttle;
+    Input.Brake     = Command.Drive.Brake;
+    Input.Steer     = Command.Drive.Steer;
+    Input.Handbrake = Command.Drive.Handbrake;
+    Physics->AssignVehicleInput(Input);
+}
+
+void EverestWorkspace::IntegrateChaseCamera(double DeltaSeconds)
+{
+    if (!Physics || !Physics->QueryRunning() || ImGui::IsMouseDown(ImGuiMouseButton_Right)) return;
+    for (const Frontier::SceneRecordBase* Candidate : QueryWorldSpace().FindAllByType("Vehicle"))
+    {
+        const auto* VehicleRec = dynamic_cast<const Frontier::VehicleRecord*>(Candidate);
+        if (VehicleRec == nullptr || !VehicleRec->QueryConfiguration().Visible || !VehicleRec->QueryConfiguration().Physics ||
+            !VehicleRec->QueryConfiguration().Possessed || !VehicleRec->QueryConfiguration().ChaseCamera)
+            continue;
+        Frontier::VehicleReading Reading;
+        if (!Frontier::QueryVehicleReading(Candidate->QueryToken(), Reading) || !Reading.Simulating) continue;
+
+        const Frontier::Vehicle::ChassisKinematics& Chassis = Reading.Telemetry.Chassis;
+        const Frontier::Vehicle::Vec3               Forward = Chassis.Orientation.Rotate({ 1.0f, 0.0f, 0.0f });
+        const std::array<double, 3>                 DesiredEye = {
+            static_cast<double>(Chassis.Position.x - Forward.x * 7.2f),
+            static_cast<double>(Chassis.Position.y - Forward.y * 7.2f),
+            static_cast<double>(std::max(1.2f, Chassis.Position.z + 1.85f)) };
+        const std::array<double, 3> Focus = {
+            static_cast<double>(Chassis.Position.x + Forward.x * 3.5f),
+            static_cast<double>(Chassis.Position.y + Forward.y * 3.5f),
+            static_cast<double>(Chassis.Position.z + 0.45f) };
+
+        const double Blend = 1.0 - std::exp(-std::clamp(DeltaSeconds, 0.0, 0.25) * 9.0);
+        for (size_t Axis = 0; Axis < 3; ++Axis)
+            Flight.Position[Axis] += (DesiredEye[Axis] - Flight.Position[Axis]) * Blend;
+        const double Dx     = Focus[0] - Flight.Position[0];
+        const double Dy     = Focus[1] - Flight.Position[1];
+        const double Dz     = Focus[2] - Flight.Position[2];
+        const double Planar = std::max(1.0e-6, std::hypot(Dx, Dy));
+        Flight.Heading      = std::atan2(Dy, Dx) * 180.0 / 3.14159265358979323846;
+        Flight.Elevation    = std::atan2(Dz, Planar) * 180.0 / 3.14159265358979323846;
+        Flight.Velocity     = { 0.0, 0.0, 0.0 };
+        break;
+    }
 }
 
 void EverestWorkspace::ToggleViewportOverlay(int Overlay)

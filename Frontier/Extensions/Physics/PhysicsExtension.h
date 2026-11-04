@@ -35,6 +35,8 @@ struct PhysicsExtensionSettings
     PhysicsSpaceSettings Space{};
     bool                 Threaded            = false;   // [-] the physics thread steps (the editor); false: Step() steps inline
     double               StepHz              = 0.0;     // [Hz] 0: 240 with a vehicle, 60 without
+    int                  CollisionSteps      = 1;       // [-] Jolt broadphase/narrowphase steps per fixed step
+    int                  SolverSubsteps      = 1;       // [-] inner vehicle/drivetrain/tyre sub-steps per fixed step
     uint32_t             MaximumCatchUpSteps = 8;       // [-] physics-thread steps per wake before a backlog is dropped
     bool                 WriteRegister       = true;    // [-] <Level>.WorldRegister.md beside a loaded level
 };
@@ -108,8 +110,11 @@ class PhysicsExtension
         RecordToken                     Record{};
         std::vector<RecordToken>        Tyres;
         SpatialConfiguration            Saved{};
-        bool                            Possessed = true;
+        bool                            Possessed    = true;
         double                          CentreHeight = 0.53;   // [m] centre of mass above the ground at rest
+        Vehicle::TyreCarcassCategory    Carcass      = Vehicle::TyreCarcassCategory::Spring;
+        std::array<bool, 4>             CornerFitted{ true, true, true, true };
+        int                             SolverSubsteps = 1;
     };
     struct VehicleCommand
     {
@@ -134,10 +139,12 @@ class PhysicsExtension
     VehicleCommand                           Applied{};          // [-] physics side: the controls the steps use
     uint64_t                                 AppliedReset = 0;   // [-] physics side: the last reset carried out
     PhysicsSnapshot                          Latest;             // [-] the snapshot the last Step applied
-    uint64_t                                 StepCount = 0;
-    double                                   StepSeconds = 1.0 / 60.0;
-    double                                   Remainder = 0.0;   // [s] time not yet stepped (inline)
-    bool                                     Threaded  = false;
+    uint64_t                                 StepCount      = 0;
+    double                                   StepSeconds    = 1.0 / 60.0;
+    int                                      CollisionSteps = 1;
+    int                                      SolverSubsteps = 1;
+    double                                   Remainder      = 0.0;   // [s] time not yet stepped (inline)
+    bool                                     Threaded       = false;
 };
 
 } // namespace Frontier

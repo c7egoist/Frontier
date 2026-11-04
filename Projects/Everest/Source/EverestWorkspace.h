@@ -19,6 +19,7 @@ struct ImVec2;
 #include "Engine/Interface/PanelDockspace.h"
 #include "Engine/Interface/SceneDirectoryPanel.h"
 #include "Engine/Interface/SceneInspectorPanel.h"
+#include "Engine/PhysicalDynamics/Vehicle/DriverInputIntegrator.h"
 #include "UI/Editor/ControlCentrePanel.h"
 namespace Frontier
 {
@@ -183,6 +184,8 @@ class EverestWorkspace
     //    record type; and duplicates a scene object (its copies from the reserve). The dialog and the keys call these too.
     void                  ServiceConstructOrder(const Frontier::ConstructOrder& Order);
     Frontier::RecordToken DuplicateGeometryRecord(Frontier::RecordToken Token);
+    void                  ToggleSimulation();
+    [[nodiscard]] Frontier::PhysicsExtension* AccessPhysics() noexcept { return Physics.get(); }
 #endif
 
     [[nodiscard]] EverestApplication&          AccessApplication() noexcept { return Application; }
@@ -219,9 +222,9 @@ class EverestWorkspace
     SceneCameraSubject ResolveCameraSubject() const;
     void ConstructFullscreenViewport(float Scale);
     void ToggleViewportOverlay(int Overlay);
-    // 📝 Simulate (Alt+S, the viewport bar's Play): the level's PhysicsSpace steps the objects with Physics on; stopping puts every
-    //    moved object back.
-    void ToggleSimulation();
+    void IntegrateDrivingControls(double DeltaSeconds);
+    void IntegrateChaseCamera(double DeltaSeconds);
+    [[nodiscard]] bool QueryVehicleDrivingActive() const;
     void AnnounceViewportNotice(std::string Text);
     // 📝 The Force Field in the viewport (EverestFieldViewport.cpp): the timeline clock, one slice from the level's records,
     //    the Field view with its timeline lanes, its bar, and the slice over the scene.
@@ -270,8 +273,9 @@ class EverestWorkspace
     std::array<double, 2>         PickPoint{};                        // [-] the last click, as a fraction of the stage
     bool                          GizmoPress             = false;     // [-] that press began on a handle
     std::unordered_map<uint64_t, std::array<float, 3>> PendingAlbedo{};   // [-] constructed shapes waiting for their family
-    FieldViewport                 Field{};
-    std::unique_ptr<Frontier::PhysicsExtension> Physics;
+    FieldViewport                                Field{};
+    std::unique_ptr<Frontier::PhysicsExtension>  Physics;
+    Frontier::Vehicle::DriverInputIntegrator     DriverControls{};
 #endif
 
     std::filesystem::path ProjectRoot;

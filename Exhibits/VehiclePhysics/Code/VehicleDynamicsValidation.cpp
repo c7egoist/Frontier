@@ -13,6 +13,7 @@
 #include "Frontier/Engine/PhysicalDynamics/Vehicle/PacejkaMagicFormula.h"
 #include "Frontier/Engine/PhysicalDynamics/Vehicle/TyreSlipDynamics.h"
 #include "Frontier/Engine/PhysicalDynamics/Vehicle/VehicleSpecification.h"
+#include "Frontier/Engine/Scene/VehicleReadings.h"
 #include "Frontier/Engine/Scene/WorldRegister.h"
 #include "Frontier/Engine/Scene/WorldSpace.h"
 
@@ -641,6 +642,91 @@ void ValidateThread(const std::filesystem::path& Exhibit)
     }
 }
 
+void ValidateIntegration(const std::filesystem::path& Results)
+{
+    Heading("E · Soft-carcass readings, coupled substeps, pit-lane tyres and levelspace round-trip");
+    {
+        WorldSpace        Saved;
+        const RecordToken CarToken = Saved.ConstructRecord("Vehicle", "Proving GT");
+        auto*             Car      = dynamic_cast<VehicleRecord*>(Saved.FindRecord(CarToken));
+        VehicleConfiguration& Authored                    = Car->AccessConfiguration();
+        Authored.ThreadedPhysics                          = true;
+        Authored.PhysicsStepHz                            = 360.0f;
+        Authored.CollisionSteps                           = 3;
+        Authored.SolverSubsteps                           = 2;
+        Authored.ChaseCamera                              = true;
+        Authored.Possessed                                = true;
+        Authored.Specification.Solver.Carcass             = V::TyreCarcassCategory::Fem;
+        Authored.Specification.Solver.CarcassTuning.XpbdSpokeCompliance = 6.2e-5;
+        Authored.Specification.Solver.CarcassTuning.FemYoungModulus     = 4.1e6;
+        Authored.Specification.Solver.CarcassTuning.FemCordModulus      = 450.0e6;
+        const std::filesystem::path TempLevel = Results / "VehicleRoundTrip.levelspace";
+        std::string                 Diag;
+        const bool                  Wrote = Saved.SaveLevelSpace(TempLevel, &Diag);
+
+        WorldSpace Loaded;
+        const bool ReadOk = Wrote && Loaded.LoadLevelSpace(TempLevel, &Diag);
+        const auto Vehicles = Loaded.FindAllByType("Vehicle");
+        const auto* Restored = !Vehicles.empty() ? dynamic_cast<const VehicleRecord*>(Vehicles.front()) : nullptr;
+        const bool  Match    = Restored != nullptr &&
+                            std::fabs(Restored->QueryConfiguration().PhysicsStepHz - 360.0f) < 1.0e-3f &&
+                            Restored->QueryConfiguration().CollisionSteps == 3 &&
+                            Restored->QueryConfiguration().SolverSubsteps == 2 &&
+                            Restored->QueryConfiguration().ChaseCamera &&
+                            Restored->QueryConfiguration().Specification.Solver.Carcass == V::TyreCarcassCategory::Fem &&
+                            std::fabs(Restored->QueryConfiguration().Specification.Solver.CarcassTuning.XpbdSpokeCompliance - 6.2e-5) < 1.0e-9 &&
+                            std::fabs(Restored->QueryConfiguration().Specification.Solver.CarcassTuning.FemYoungModulus - 4.1e6) < 1.0;
+        std::error_code Ignore;
+        std::filesystem::remove(TempLevel, Ignore);
+        Report(ReadOk && Match, "levelspace round-trips stepping, chase camera, carcass category and XPBD/3D-FEM moduli");
+    }
+    {
+        WorldSpace        World;
+        const RecordToken CarToken = World.ConstructRecord("Vehicle", "Control vehicle");
+        auto*             Car      = dynamic_cast<VehicleRecord*>(World.FindRecord(CarToken));
+        Car->AccessConfiguration().Specification.Solver.Carcass = V::TyreCarcassCategory::Fem;
+        Car->AccessConfiguration().CollisionSteps               = 2;
+        Car->AccessConfiguration().SolverSubsteps               = 2;
+
+        static constexpr const char* Tags[4] = { "FL", "FR", "RL", "RR" };
+        for (uint32_t Corner = 0; Corner < 4u; ++Corner)
+        {
+            const RecordToken TyreToken = World.ConstructRecord("Tyre", std::string("Tyre ") + Tags[Corner], CarToken);
+            auto*             Tyre      = dynamic_cast<TyreRecord*>(World.FindRecord(TyreToken));
+            Tyre->AccessConfiguration().Corner       = Corner;
+            Tyre->AccessConfiguration().Compound     = Corner < 2u ? "Soft" : "Medium";
+            Tyre->AccessConfiguration().ColdPressure = 115000.0f;
+            Tyre->AccessConfiguration().Enclosed     = (Corner != 3u); // RR detached in pit lane
+        }
+
+        PhysicsExtension         Physics;
+        PhysicsExtensionSettings Settings;
+        Settings.Threaded       = false;
+        Settings.CollisionSteps = 2;
+        Settings.SolverSubsteps = 2;
+        Settings.WriteRegister  = false;
+        Physics.Begin(World, Settings);
+        for (int Step = 0; Step < 45; ++Step) (void)Physics.Step(World, 1.0 / 60.0);
+
+        VehicleReading Reading;
+        const bool     HasReading  = QueryVehicleReading(CarToken, Reading);
+        float          PeakFieldMm = 0.0f;
+        for (uint32_t Wheel = 0; Wheel < 4u; ++Wheel)
+            for (size_t Entry = 0; Entry < Reading.CornerFields[Wheel].size(); ++Entry)
+                PeakFieldMm = std::max(PeakFieldMm, std::fabs(Reading.CornerFields[Wheel][Entry]) * 1000.0f);
+
+        const WorldRegister& Register = Physics.QueryRegister();
+        Report(HasReading && Reading.CornerFieldValid[0] && Reading.CornerFieldValid[1] && Reading.CornerFieldValid[2] &&
+                   PeakFieldMm > 5.0f && Reading.CornerFitted[0] && Reading.CornerFitted[1] && Reading.CornerFitted[2] && !Reading.CornerFitted[3],
+               Format("coupled 2×2 substeps publish 160-node 3D FEM field (peak %.1f mm) and pit-lane RR detachment", PeakFieldMm));
+        Report(Register.CountParticipation(PhysicsParticipation::Vehicle) == 1 &&
+                   Register.CountParticipation(PhysicsParticipation::Tyre) == 3 &&
+                   Register.CountParticipation(PhysicsParticipation::Skipped) == 1,
+               "WorldRegister classifies 1 Vehicle, 3 fitted Tyres and 1 pit-lane detached Tyre");
+        Physics.End(World);
+    }
+}
+
 } // namespace
 
 int main(int ArgumentCount, char** Arguments)
@@ -652,6 +738,7 @@ int main(int ArgumentCount, char** Arguments)
     ValidateHost(Results);
     ValidateConditions();
     ValidateThread(Exhibit);
+    ValidateIntegration(Results);
     const std::string Summary = Format("\n%s %d / %d assertions\n", Failed == 0 ? "🟢" : "🔴", Passed, Passed + Failed);
     std::printf("%s", Summary.c_str());
     Log << Summary;

@@ -935,9 +935,14 @@ struct GeometryConfiguration : RevisionCounter
 //    (occupants 0–4) draw it; the four Tyre records it encloses carry the per-corner set.
 struct VehicleConfiguration : RevisionCounter
 {
-    bool                          Visible = true;    // [-] drawn (the archive's car), else the occupants stay inactive
-    bool                          Physics = true;    // [-] driven by the physics once Simulate starts
-    bool                          Possessed = true;  // [-] the driving keys reach this vehicle while simulating
+    bool                          Visible         = true;    // [-] drawn (the archive's car), else the occupants stay inactive
+    bool                          Physics         = true;    // [-] driven by the physics once Simulate starts
+    bool                          Possessed       = true;    // [-] the driving keys reach this vehicle while simulating
+    bool                          ChaseCamera     = true;    // [-] viewport camera follows behind this vehicle while possessed
+    bool                          ThreadedPhysics = true;    // [-] run editor simulation on the fixed-cadence PhysicsThread
+    float                         PhysicsStepHz   = 240.0f;  // [Hz] fixed-rate physics cadence
+    int                           CollisionSteps  = 1;       // [-] Jolt broadphase/narrowphase steps per fixed step
+    int                           SolverSubsteps  = 1;       // [-] inner vehicle/drivetrain/tyre sub-steps per fixed step
     SpatialConfiguration          Spatial = [] { SpatialConfiguration Start; Start.PositionMetres[0] = -40.0f; Start.PositionMetres[1] = 0.0f;
                                                  Start.PositionMetres[2] = 0.0f; return Start; }();   // [-] start: ground point under the CoM, heading
     std::string                   GroupName = "Vehicles";

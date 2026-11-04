@@ -142,10 +142,10 @@ void ValidateCurves(const std::filesystem::path& Results)
         V::CarcassResponse    Dummy;
         const double Loads[3] = { V::ResolveCarcassStiffness(Tuning, Pressure) * 0.015, Settle(Lattice, Pressed(0.015, Pressure), Dummy),
                                   Settle(Solid, Pressed(0.015, Pressure), Dummy) };
-        for (int Model = 0; Model < 3; ++Model)
+        for (int Category = 0; Category < 3; ++Category)
         {
-            Stiffer &= Loads[Model] > Last[Model];
-            Last[Model] = Loads[Model];
+            Stiffer &= Loads[Category] > Last[Category];
+            Last[Category] = Loads[Category];
         }
     }
     Report(Stiffer, "more pressure, more load at the same deflection, for every model (0, 55, 110, 220 kPa)");
@@ -176,6 +176,14 @@ void ValidateLattice()
     V::CarcassResponse    Hanging;
     const double FreeLoad = Settle(Free, Airborne, Hanging);
     Report(FreeLoad < 1.0 && Hanging.ContactCount == 0, Format("off the road it carries nothing (%.3f N, no contact)", FreeLoad));
+
+    V::TyreCarcassParameters SofterSpokes = Tuning;
+    SofterSpokes.XpbdSpokeCompliance      = Tuning.XpbdSpokeCompliance * 3.0;
+    V::TyreCarcassLattice SoftLattice(SofterSpokes, Radius, Rim, Width);
+    V::CarcassResponse    SoftLast;
+    const double          SoftLoad = Settle(SoftLattice, Pressed(0.02, 110000.0), SoftLast);
+    Report(SoftLoad > 500.0 && SoftLoad < Load * 0.96,
+           Format("authored XpbdSpokeCompliance ×3 softens the lattice load (%.0f N → %.0f N at 20 mm)", Load, SoftLoad));
 }
 
 void ValidateSolid()
@@ -228,6 +236,49 @@ void ValidateSolid()
         Lowest = Spin == 0.0f ? Down : std::min(Lowest, Down);
     }
     Report(Lowest > 0.01, Format("the deformation stays at the bottom while the wheel turns (≥ %.1f mm displacement at the bottom at four spin angles)", Lowest * 1000.0));
+
+    // 📝 Coulomb-bounded 3D Hex8 tangential traction: Pacejka lateral/longitudinal road traction shears the contact patch laterally and longitudinally.
+    V::TyreCarcassParameters ShearTuning = Tuning;
+    ShearTuning.Friction                 = 1.15;
+    V::CarcassContact LateralTraction    = Pressed(0.025, 110000.0);
+    LateralTraction.TangentialForce      = { -2400.0f, -3800.0f, 0.0f };
+    V::TyreCarcassSolid ShearedSolid(ShearTuning, Radius, Rim, Width);
+    V::CarcassResponse  ShearedResponse;
+    (void)Settle(ShearedSolid, LateralTraction, ShearedResponse);
+    V::CarcassField RestField{}, ShearedField{};
+    Solid.SampleField(0.0f, RestField);
+    ShearedSolid.SampleField(0.0f, ShearedField);
+    double PeakLateralShear = 0.0, PeakForeAftShear = 0.0;
+    for (uint32_t Point = 0; Point < V::CarcassFieldPoints; ++Point)
+    {
+        PeakForeAftShear = std::max(PeakForeAftShear, static_cast<double>(std::fabs(ShearedField[Point * 3 + 0] - RestField[Point * 3 + 0])));
+        PeakLateralShear = std::max(PeakLateralShear, static_cast<double>(std::fabs(ShearedField[Point * 3 + 1] - RestField[Point * 3 + 1])));
+    }
+    // Verify Coulomb saturation: 2× and 20× the friction limit produce identical bounded shear.
+    V::CarcassContact SaturatedA = Pressed(0.025, 110000.0), SaturatedB = Pressed(0.025, 110000.0);
+    SaturatedA.TangentialForce = { 0.0f, -25000.0f, 0.0f };
+    SaturatedB.TangentialForce = { 0.0f, -250000.0f, 0.0f };
+    V::TyreCarcassSolid SatSolidA(ShearTuning, Radius, Rim, Width), SatSolidB(ShearTuning, Radius, Rim, Width);
+    V::CarcassResponse  SatRespA, SatRespB;
+    (void)Settle(SatSolidA, SaturatedA, SatRespA);
+    (void)Settle(SatSolidB, SaturatedB, SatRespB);
+    V::CarcassField SatFieldA{}, SatFieldB{};
+    SatSolidA.SampleField(0.0f, SatFieldA);
+    SatSolidB.SampleField(0.0f, SatFieldB);
+    double SaturationDiff = 0.0;
+    for (size_t Entry = 0; Entry < SatFieldA.size(); ++Entry)
+        SaturationDiff = std::max(SaturationDiff, static_cast<double>(std::fabs(SatFieldA[Entry] - SatFieldB[Entry])));
+    Report(PeakLateralShear > 0.0015 && PeakForeAftShear > 0.0010 && SaturationDiff < 1.0e-5,
+           Format("3D Hex8 tangential shear: patch shifts %.1f mm laterally & %.1f mm longitudinally, Coulomb-clamped (Δ = %.2g m)",
+                  PeakLateralShear * 1000.0, PeakForeAftShear * 1000.0, SaturationDiff));
+
+    V::TyreCarcassParameters StifferRubber = Tuning;
+    StifferRubber.FemYoungModulus          = Tuning.FemYoungModulus * 1.5;
+    V::TyreCarcassSolid StiffSolid(StifferRubber, Radius, Rim, Width);
+    V::CarcassResponse  StiffResponse;
+    const double        StiffLoad = Settle(StiffSolid, Pressed(0.025, 110000.0), StiffResponse);
+    Report(StiffLoad > Last.NormalLoad * 1.03,
+           Format("authored FemYoungModulus ×1.5 stiffens 3D Hex8 load (%.0f N → %.0f N at 25 mm)", Last.NormalLoad, StiffLoad));
 }
 
 void ValidateCars(const std::filesystem::path& Results)

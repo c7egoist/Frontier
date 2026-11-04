@@ -1,11 +1,11 @@
 /*==========================================================================================================================================
                                                                TYRECARCASS.H
 ==========================================================================================================================================*/
-// 🧩 The soft body under the tread, one seam for three models. Spring is Project Drive's radial spring on the contact fan
+// 🧩 The soft body under the tread, one seam for three formulations. Spring is Project Drive's radial spring on the contact fan
 //    (TraceContactTyre.h, no carcass object). XPBD is a particle lattice whose constraint reactions carry the load
 //    (TyreCarcassLattice). FEM is a hexahedral Neo-Hookean carcass whose bead reactions carry it (TyreCarcassSolid). Each soft
-//    model is posed on the hub every step, meets the road plane the contact fan found, and answers the normal load, its deflection
-//    and the air volume it encloses (so the gas pressure follows deformation as well as temperature). Each also lays its
+//    formulation is posed on the hub every step, meets the road plane the contact fan found, and answers the normal load, its
+//    deflection and the air volume it encloses (so the gas pressure follows deformation as well as temperature). Each also lays its
 //    displacements out on the renderer's 32 × 5 nodal field (VehicleVisual.slang, VehicleProfile::CarcassDisplacements).
 
 #pragma once
@@ -44,16 +44,27 @@ inline constexpr uint32_t CarcassRingCount   = 5;
 inline constexpr uint32_t CarcassFieldPoints = CarcassSectorCount * CarcassRingCount;
 using CarcassField                           = std::array<float, CarcassFieldPoints * 3>;
 
-// 📝 Tuning both soft models share (their own constants live with them).
+// 📝 Tuning the soft formulations share, plus lattice (XPBD) and hexahedral continuum (3D FEM) parameters.
 struct TyreCarcassParameters
 {
-    double ReferencePressure = 110000.0;   // [Pa] gauge pressure the calibration is quoted at (TraceContact's reference)
-    double ReferenceStiffness = 250000.0;  // [N/m] radial stiffness at ReferencePressure the soft models are calibrated to
-    double PressureShare     = 0.75;       // [-] fraction of the stiffness the air carries (as TraceContactParameters)
-    double TreadMass         = 9.0;        // [kg] tread and carcass mass that moves (the rest of the 12 kg sits on the rim)
-    double DampingPerSecond  = 24.0;       // [1/s] carcass hysteresis, a velocity damping in the wheel axes
-    double Friction          = 1.0;        // [-] road friction cap on the contact correction (tangential ÷ normal)
-    int    Substeps          = 1;          // [-] lattice sub-steps per vehicle step (the FEM solves each step exactly)
+    double ReferencePressure       = 110000.0;  // [Pa]    gauge pressure the calibration is quoted at (TraceContact's reference)
+    double ReferenceStiffness      = 250000.0;  // [N/m]   radial stiffness at ReferencePressure the soft formulations calibrate to
+    double PressureShare           = 0.75;      // [-]     fraction of the stiffness the air carries (as TraceContactParameters)
+    double TreadMass               = 9.0;       // [kg]    tread and carcass mass that moves (the rest of the 12 kg sits on the rim)
+    double DampingPerSecond        = 24.0;      // [1/s]   carcass hysteresis, a velocity damping in the wheel axes
+    double Friction                = 1.0;       // [-]     road friction cap on the contact correction (tangential ÷ normal)
+    int    Substeps                = 1;         // [-]     lattice sub-steps per vehicle step (the FEM solves each step directly)
+    double XpbdPressureForceFactor = 0.35;      // [-]     share of gauge pressure carried radially outward by XPBD tread particles
+    double XpbdSpokeCompliance     = 4.0e-5;    // [m/N]   XPBD radial spoke compliance (rim to tread)
+    double XpbdBeltCompliance      = 2.0e-6;    // [m/N]   XPBD circumferential belt compliance
+    double XpbdLateralCompliance   = 2.0e-6;    // [m/N]   XPBD cross-tread lateral compliance
+    double XpbdShearCompliance     = 3.0e-6;    // [m/N]   XPBD diagonal shear compliance
+    int    XpbdIterations          = 12;        // [-]     XPBD constraint sweeps per sub-step
+    double FemYoungModulus         = 3.3e6;     // [Pa]    3D Hex8 FEM smeared rubber + ply Young's modulus
+    double FemPoissonRatio         = 0.45;      // [-]     3D Hex8 FEM Poisson ratio
+    double FemPrestressScale       = 9.5;       // [-]     3D Hex8 FEM follower-pressure geometric stiffness scale
+    double FemCordModulus          = 400.0e6;   // [Pa]    3D Hex8 FEM cord tensile modulus governing inflation growth
+    double FemDampingRate          = 1500.0;    // [N·s/m] 3D Hex8 FEM radial deflection-rate damping
 };
 
 // 📝 One step's boundary conditions. HubRotation carries steer and camber, never spin (the carcass is axisymmetric about the
@@ -68,6 +79,7 @@ struct CarcassContact
     Vec3  GroundNormal{0.0f, 0.0f, 1.0f}; // [-]
     bool  Ground        = false;          // [-] a road plane was found
     float GaugePressure = 110000.0f;      // [Pa] the live (gas-law) pressure
+    Vec3  TangentialForce{};              // [N] planar road-on-tyre traction (Fx forward + Fy lateral) in world axes
     float Seconds       = 1.0f / 240.0f;  // [s]
 };
 

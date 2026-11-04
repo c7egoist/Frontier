@@ -53,6 +53,8 @@ class RenderingExtension
     [[nodiscard]] const SceneGeometryOccupancy&                QueryGeometry() const noexcept { return Geometry_; }
 
   private:
+    void SynchronizeVehicleVisuals(const Frontier::WorldSpace& World);
+
     std::filesystem::path                                        ProjectRoot_;
     std::filesystem::path                                        ShaderRoot_;
     bool                                                         HostDeviceAttached_ = false;
@@ -68,6 +70,10 @@ class RenderingExtension
     SceneGeometryOccupancy                                       Geometry_{};                 // [-] the level's geometry records on the scene's occupants
     const Frontier::GlobalIllumination::SceneStructure*          GeometryScene_ = nullptr;    // [-] the scene Geometry_ was reset with
     SceneViewportPick                                            Pick_{};                     // [-] the answer to the last pick serial
+    bool                                                         VehicleShown_       = false; // [-] occupants 0..4 currently active
+    RecordToken                                                  ActiveVehicleToken_{};       // [-] shown vehicle record for viewport picking
+    std::array<RecordToken, 4>                                   ActiveCornerTokens_{};       // [-] enclosed FL/FR/RL/RR tyre tokens
+    uint64_t                                                     AuthoringSignature_ = 0;     // [-] memoized revision digest while stopped
 };
 
 } // namespace Frontier

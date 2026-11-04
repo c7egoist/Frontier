@@ -1665,3 +1665,56 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
 | Texture Workspace control reuse | Existing authoring surface and PanelChrome compiled once for both workspaces |
 | Guides and browser opening | Native guide plus Exhibits/SolidArc/CurveRebuildingGuide.md; existing browser hand-off retained |
 | Windows runtime / destination merge | Still pending; source checks are not a product binary or completed merge |
+
+## Vehicle physics on Jolt: Project Drive, three carcasses, inspectors, captures (2026-11-04)
+
+- **Requested (21st):** Jolt with vehicle physics, tested so the slip and tyre dynamics are correct, the missing
+  pieces completed (supercharger, tyre pressure, tyre temperature and the rest), three tyre soft-body models on the
+  vehicle shown deforming while the car runs, the vehicle inspector, a register of every world object, an adapter
+  that brings every object into Jolt, and a physics thread with sub-steps. Plan:
+  `Documentation/Plans/Ongoing/VehiclePhysics.md`, steps 1–10, all done.
+- **Solver:** Project Drive (`SultanAladin/Frontier-` `3f14808`) renamed to the naming rules in
+  `Engine/PhysicalDynamics/Vehicle/`; `RunProjectDriveIdentity.sh` prints bit-identical numbers (126/126 PASS, the
+  169,380-number force/slip/drivetrain trace identical). Two source findings fixed behind switches (off keeps
+  Project Drive exactly): the load factor applies above Fz0 only, and combined slip uses MF6.1 G functions.
+- **Missing pieces:** twin-screw supercharger with bypass, parasitic drag and charge-air temperature; enclosed-gas
+  tyre pressure following deformation and temperature; three-capacity tyre thermal model with a cold-grip window;
+  wear; fuel mass in binary64; coolant/oil temperatures; traction control; Ackermann steering.
+- **Carcasses:** one seam in the contact step, three load-carrying formulations — Spring (radial spring on the
+  contact fan), XPBD (84-particle lattice with enclosed gas volume), 3D FEM (Hex8 Neo-Hookean + prestress +
+  Coulomb tangential shear). Calibrated to the spring at the 15 mm / 110 kPa operating point (0.95 / 0.96 of its
+  load); the car settles at 12.3 / 12.8 / 13.8 mm; 0.09 / 0.69 / 0.20 ms per vehicle step.
+- **Thread, adapter, register:** `PhysicsThread` at fixed 240 Hz with input mailbox and published snapshot;
+  `PhysicsAdapter`/`JoltAdapter` with coupled `CollisionSteps`/`SolverSubsteps`; `WorldRegister` surveys every
+  record (vehicle, moving, fixed, held, fracture-as-static-bounds, tyre, none) and writes
+  `<Level>.WorldRegister.md` beside the level on save.
+- **Viewport and editor:** body and wheels follow the physics through occupant relocation (occupants 0–4);
+  `VehicleVisual.slang` deforms the tyres (analytic path for Spring, 32 × 5 nodal field for XPBD/FEM); driving
+  input and chase camera; `VehicleInspector` (9 tabs, curve authoring, four-corner pit bay, live telemetry) and
+  `TyreInspector`; Vehicle/Tyre in the Outliner and construct catalogue; `fit-tyres` action; AnalyticIllumination
+  SPIR-V archives rebuilt (`StoreShaderArchives.py --verify` 6/6).
+- **Validated (Linux host, Release, SwiftShader):**
+
+  | Check | Result |
+  |---|---|
+  | `RunProjectDriveIdentity.sh` | ✔️ 126/126 PASS, 169,380 trace numbers identical |
+  | `VehicleDynamicsValidation` | ✔️ 45/45: Pacejka, MF6.1, launch/braking/cornering, powertrain, thread, register |
+  | `TyreCarcassValidation` | ✔️ 17/17: all three carcasses, gas law, shear, the car on each |
+  | `VehicleWorkspaceCapture` | ✔️ 5 workspace screenshots, 4 Inspector sections, 32 + 48 animation frames |
+  | Viewport/interface regression | ✔️ SceneGeometry, SceneViewportPick, SceneViewportFlight, EverestInterface, ForceFieldCatalogue, EverestShipping, StoredShaderArchive |
+  | Naming/format audit | ✔️ branch diff rescanned; `DrawProgressBar`→`RasterizeProgressBar`, `ComposeColumnMajor`→`AssembleColumnMajor`, `TrialDeflection`→`EstimatedDeflection`, `PeakNodeMm`→`PeakFieldMm`, `SpatialItem`→`SpatialRecord`, `Frame`→`Step` |
+
+- **Evidence:** `Exhibits/VehiclePhysics/README.md`, `VehicleRunningProvingGround.gif` (32 frames),
+  `TyreDeformationAllThree.gif` (16 synchronized frames), `Results/` (screenshots, `TyreCarcassComparison.png`,
+  `VehicleDynamics.txt`, `TyreCarcass.txt`, curve/trace CSVs),
+  `Projects/Everest/Content/Levels/ProvingGroundVehicle.levelspace` (+ `.WorldRegister.md`) and
+  `Default.WorldRegister.md` (`Default.levelspace` untouched).
+- **Windows cross-build:** `FrontierVehicleDynamics`, `FrontierPhysicsExtension`, `EverestProjectRuntime`,
+  `EverestProjectEditor`, `TyreCarcassValidation`, `VehicleDynamicsValidation`, `VehicleWorkspaceCapture`
+  cross-compile to x86_64-windows-gnu with Zig 0.13.0 (`Automation/WindowsToolchain.cmake`), 604/604 build steps;
+  not launched on Windows here.
+- **Limits:**
+  - No electric motor/battery, aquaplaning, GPU tyre solvers, or per-triangle static colliders yet.
+  - Fractured objects stay static bounds until the fracture work.
+  - Capture GIFs are SwiftShader renders, not Windows GPU captures.
+- **Commits:** the commit with this entry.

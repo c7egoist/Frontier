@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <fstream>
 
 namespace Frontier::GlobalIllumination
@@ -121,6 +122,11 @@ bool SceneViewport::Construct(const VulkanDeviceAccess* HostDevice, const SceneV
         std::vector<uint8_t> Bytes;
         if (!ReadArchive(Configuration.SceneArchive / Name, Bytes, OutDiagnostic)) return false;
         Exchange_->WriteRegion(Region, 0, Bytes.data(), std::min<VkDeviceSize>(Bytes.size(), Region->Capacity));
+        if (Region == Host_->VehicleRegion && Bytes.size() >= sizeof(float))
+        {
+            BaseVehicleProfile_.assign(Bytes.size() / sizeof(float), 0.0f);
+            std::memcpy(BaseVehicleProfile_.data(), Bytes.data(), BaseVehicleProfile_.size() * sizeof(float));
+        }
     }
 
     // ③ the PlanetaryAtmosphere environment on the same device and queue (the viewport keeps the demo's own sky without it)
@@ -238,7 +244,8 @@ bool SceneViewport::Refresh(const ViewportCamera& Camera, const SceneEnvironment
         {
             auto Candidate = std::make_unique<AnalyticIllumination::AnalyticIlluminationSequence>(
                 *Exchange_, Configuration_.GlobalIlluminationShaders.parent_path() / "AnalyticIllumination");
-            if (!Candidate->Construct(Host_->Scene, Host_->VertexRegion, Host_->OccupantRegion, Host_->MaterialRegion, OutDiagnostic)) return false;
+            if (!Candidate->Construct(Host_->Scene, Host_->VertexRegion, Host_->OccupantRegion, Host_->MaterialRegion, OutDiagnostic, Host_->VehicleRegion))
+                return false;
             Analytic_ = std::move(Candidate);
             if (Configuration_.Journal) Configuration_.Journal("analytic illumination up");
         }
@@ -374,6 +381,64 @@ std::array<uint32_t, 2> SceneViewport::QueryScreenExtent() const noexcept
 uint32_t SceneViewport::RelocateOccupants(const std::vector<OccupantPlacement>& Placements)
 {
     return Host_ ? GlobalIllumination::RelocateOccupants(*Host_, Placements) : 0u;
+}
+
+void SceneViewport::WriteVehicleState(float SteeringAngle, const std::array<bool, 4>& CarcassFieldActive,
+                                      const std::array<std::array<float, 4>, 4>& Deformation,
+                                      const std::array<const float*, 4>& CarcassFields)
+{
+    if (!Host_ || !Exchange_ || !Host_->VehicleRegion) return;
+    constexpr size_t ProfileFloats = 2612u; // 10,448 B = 653 float4s (VehicleVisual.slang VehicleProfile)
+    std::vector<float> Profile(ProfileFloats, 0.0f);
+    if (!BaseVehicleProfile_.empty())
+    {
+        const size_t CopyFloats = std::min(Profile.size(), BaseVehicleProfile_.size());
+        std::memcpy(Profile.data(), BaseVehicleProfile_.data(), CopyFloats * sizeof(float));
+    }
+    else
+    {
+        Profile[1]  = 1.0f; // Cabin.y: see-through glazing enabled
+        Profile[10] = 1.0f; // Axis: non-zero unit axis fallback
+        Profile[19] = 1.0f; // CabinShift.w: unit tablet scale
+    }
+    Profile[0] = SteeringAngle;
+    for (size_t Wheel = 0; Wheel < 4; ++Wheel)
+    {
+        const size_t WheelOffset       = 20u + Wheel * 4u;
+        const size_t DeformationOffset = 36u + Wheel * 4u;
+        const bool   FieldActive       = CarcassFieldActive[Wheel] && CarcassFields[Wheel] != nullptr;
+        Profile[WheelOffset + 0u] = 0.0f;
+        Profile[WheelOffset + 1u] = FieldActive ? 1.0f : 0.0f;
+        Profile[WheelOffset + 2u] = 0.0f;
+        Profile[WheelOffset + 3u] = 0.0f;
+        for (size_t Axis = 0; Axis < 4; ++Axis) Profile[DeformationOffset + Axis] = Deformation[Wheel][Axis];
+        const size_t FieldBase = 52u + Wheel * 160u * 4u;
+        if (FieldActive)
+        {
+            const float* Displacements = CarcassFields[Wheel];
+            float        PeakMagnitude = 0.0f;
+            for (size_t Point = 0; Point < 160u; ++Point)
+            {
+                const float Dx = Displacements[Point * 3u + 0u];
+                const float Dy = Displacements[Point * 3u + 1u];
+                const float Dz = Displacements[Point * 3u + 2u];
+                Profile[FieldBase + Point * 4u + 0u] = Dx;
+                Profile[FieldBase + Point * 4u + 1u] = Dy;
+                Profile[FieldBase + Point * 4u + 2u] = Dz;
+                Profile[FieldBase + Point * 4u + 3u] = 0.0f;
+                PeakMagnitude = std::max(PeakMagnitude, std::sqrt(Dx * Dx + Dy * Dy + Dz * Dz));
+            }
+            // 📝 VehicleVisual.slang gates both Path A and Path B on Deformation[Wheel].y > 1e-5; ensure inflated nodal fields enter Path A.
+            if (PeakMagnitude > 1.0e-5f && Profile[DeformationOffset + 1u] <= 1.0e-5f)
+                Profile[DeformationOffset + 1u] = PeakMagnitude;
+        }
+        else
+        {
+            std::fill_n(Profile.data() + FieldBase, 160u * 4u, 0.0f);
+        }
+    }
+    Exchange_->WriteRegion(Host_->VehicleRegion, 0, Profile.data(),
+                           std::min<VkDeviceSize>(Profile.size() * sizeof(float), Host_->VehicleRegion->Capacity));
 }
 
 Transform SceneViewport::ResolveViewProjection(const ViewportCamera& Camera, std::array<uint32_t, 2> ScreenExtent) noexcept

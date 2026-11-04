@@ -49,7 +49,16 @@ double Distance(const double A[3], const double B[3])
 } // namespace
 
 TyreCarcassLattice::TyreCarcassLattice(const TyreCarcassParameters& Parameters, float TyreRadius, float TyreRimRadius, float TyreWidth)
-    : Tuning(Parameters), Radius(TyreRadius), RimRadius(TyreRimRadius), Width(TyreWidth)
+    : PressureForceFactor(Parameters.XpbdPressureForceFactor)
+    , SpokeCompliance(Parameters.XpbdSpokeCompliance)
+    , BeltCompliance(Parameters.XpbdBeltCompliance)
+    , LateralCompliance(Parameters.XpbdLateralCompliance)
+    , ShearCompliance(Parameters.XpbdShearCompliance)
+    , Iterations(std::max(1, Parameters.XpbdIterations))
+    , Tuning(Parameters)
+    , Radius(TyreRadius)
+    , RimRadius(TyreRimRadius)
+    , Width(TyreWidth)
 {
     // 📝 The 5ec lattice's proportions (shoulder rows ±0.13 m on a 0.3958 m tread, shoulders 6 mm under the crown), scaled.
     const double Lateral  = 0.13 / 0.3958 * Width;

@@ -68,9 +68,9 @@ proper physics thread with sub-steps.
 |      | Ackermann steering                                                                              |        |
 | 6    | The vehicle on Jolt (`VehicleRecord`, chassis body, hooks, ground query)                        | ✔️     |
 | 7    | Tyre carcass seam with Spring, XPBD and FEM                                                     | ✔️     |
-| 8    | The car in the viewport: occupants 0–4, `VehicleProfile`, driving input, chase camera           | 🚧     |
-| 9    | `VehicleInspector`, tyre inspector, telemetry dock                                               | 🚧     |
-| 10   | Validation, captures (car running, tyre deformation for all three models), documents, Windows   | 🚧     |
+| 8    | The car in the viewport: occupants 0–4, `VehicleProfile`, driving input, chase camera           | ✔️     |
+| 9    | `VehicleInspector`, tyre inspector, telemetry dock                                               | ✔️     |
+| 10   | Validation, captures (car running, tyre deformation for all three models), documents, Windows   | ✔️     |
 
 ## Validation
 
@@ -102,6 +102,21 @@ proper physics thread with sub-steps.
 | Spring | Project Drive's radial spring on the contact fan                     | 250 kN/m at 110 kPa, air share 75 % | 12.3 mm     |
 | XPBD   | 84 particles, spokes, belt, shear, air volume, inflation as force    | η 0.35, one sub-step: 0.95 at 15 mm | 12.8 mm     |
 | 3D FEM | Hex8, K_m + κ (p / p_ref) K_σ, tension-only prestress, LCP contact   | E 3.3 MPa, κ 9.5: 0.96 at 15 mm     | 13.8 mm     |
+
+## Evidence (2026-11-04, `arena/c8d71a98-frontier`)
+
+- `Exhibits/VehiclePhysics/README.md`: the exhibit ledger with the calibration table and run commands.
+- `Exhibits/VehiclePhysics/VehicleRunningProvingGround.gif` (32 frames) and
+  `Exhibits/VehiclePhysics/TyreDeformationAllThree.gif` (16 synchronized frames, all three carcasses).
+- `Exhibits/VehiclePhysics/Results/`: workspace screenshots, full-height Inspector sections,
+  `TyreCarcassComparison.png`, and the `VehicleDynamics.txt` (45/45) / `TyreCarcass.txt` (17/17) ledgers.
+- `Projects/Everest/Content/Levels/ProvingGroundVehicle.levelspace` (+ `.WorldRegister.md`) and
+  `Default.WorldRegister.md` (67 baseline records; `Default.levelspace` untouched).
+- Suites: `RunProjectDriveIdentity.sh` 126/126 PASS with 169,380 trace numbers identical;
+  `SceneGeometryValidation`, `SceneViewportPickValidation`, `SceneViewportFlightValidation`,
+  `EverestInterfaceValidation`, `ForceFieldCatalogueValidation`, `EverestShippingValidation` and
+  `StoredShaderArchiveValidation` pass; `EverestProjectEditor` / `EverestProjectRuntime` build on Linux
+  and cross-build to Windows x64 (Zig 0.13.0, `Automation/WindowsToolchain.cmake`; not launched there).
 
 ## Later
 

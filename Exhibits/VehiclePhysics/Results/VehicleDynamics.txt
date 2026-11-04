@@ -47,9 +47,14 @@ C · The pieces added beyond Project Drive
 
 D · The physics thread, its snapshots, and the register
   🟢 240 Hz cadence: 240 steps in 1.004 s of wall time (241 expected), 240 wakes, real-time ratio 1.000, 0 dropped
-  🟢 snapshot exchange: 534357 reads under a racing producer, 0 torn, 0 out of order
-  🟢 the physics thread stepped the car 154 times while the caller refreshed 40 times
+  🟢 snapshot exchange: 322192 reads under a racing producer, 0 torn, 0 out of order
+  🟢 the physics thread stepped the car 151 times while the caller refreshed 40 times
   🟢 register: 4 records → 1 vehicle, 1 moving, 1 fracture (fixed bounds), 1 without physics
   🟢 register document lists every object and its physics part (Results/WorldRegisterSample.md)
 
-🟢 42 / 42 assertions
+E · Soft-carcass readings, coupled substeps, pit-lane tyres and levelspace round-trip
+  🟢 levelspace round-trips stepping, chase camera, carcass category and XPBD/3D-FEM moduli
+  🟢 coupled 2×2 substeps publish 160-node 3D FEM field (peak 13.9 mm) and pit-lane RR detachment
+  🟢 WorldRegister classifies 1 Vehicle, 3 fitted Tyres and 1 pit-lane detached Tyre
+
+🟢 45 / 45 assertions
