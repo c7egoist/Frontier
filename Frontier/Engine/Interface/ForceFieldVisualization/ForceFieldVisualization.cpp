@@ -192,6 +192,17 @@ void ForceFieldVisualization::ConfigureField(const ForceFieldSpace& Field, uint6
     }
 }
 
+void ForceFieldVisualization::ConfigureSampler(FieldSampler Sampler, uint64_t Revision)
+{
+    Field_.reset();
+    Sampler_ = std::make_shared<const FieldSampler>(std::move(Sampler));
+    if (Revision != FieldRevision_)
+    {
+        FieldRevision_ = Revision;
+        Dirty_         = true;
+    }
+}
+
 //------------------------------------------------------------------------------------------------------------------------
 //                                                    PROJECTION
 //------------------------------------------------------------------------------------------------------------------------
@@ -363,6 +374,7 @@ std::string ForceFieldVisualization::ResolveStamp() const
 }
 
 std::shared_ptr<ForceFieldVisualization::Lattice> ForceFieldVisualization::SampleLattice(std::shared_ptr<const ForceFieldSpace> Field,
+                                                                                         std::shared_ptr<const FieldSampler>    Sampler,
                                                                                          LatticeRequest                         Request)
 {
     const auto Started = std::chrono::steady_clock::now();
@@ -376,14 +388,16 @@ std::shared_ptr<ForceFieldVisualization::Lattice> ForceFieldVisualization::Sampl
     const size_t Count = static_cast<size_t>(Request.Columns) * Request.Rows;
     Result->Vectors.assign(Count * 3, 0.0f);
     Result->Inside.assign(Count, 1);
-    if (Field)
+    if (Field || Sampler)
         for (uint32_t Row = 0; Row < Request.Rows; ++Row)
         {
             const double Z = Request.OriginZ + Row * Request.CellSpan;
             for (uint32_t Column = 0; Column < Request.Columns; ++Column)
             {
                 const double        X     = Request.OriginX + Column * Request.CellSpan;
-                const SpatialVector Value = Field->EvaluateContribution(Request.Contribution, {X, Request.SliceY, Z}, Request.CellSpan, true, Request.Solo);
+                const SpatialVector Value = Sampler ? (*Sampler)(Request.Contribution, {X, Request.SliceY, Z})
+                                                    : Field->EvaluateContribution(Request.Contribution, {X, Request.SliceY, Z}, Request.CellSpan, true,
+                                                                                  Request.Solo);
                 const size_t        Index = static_cast<size_t>(Row) * Request.Columns + Column;
                 Result->Vectors[Index * 3]     = static_cast<float>(Value.X);
                 Result->Vectors[Index * 3 + 1] = static_cast<float>(Value.Y);
@@ -1190,7 +1204,7 @@ void ForceFieldVisualization::Render(ImDrawList* Ink, const EditorTypefaces& Fac
         PendingStamp_        = Stamp;
         RefreshedAt_         = Now;
         Dirty_               = false;
-        Pending_             = std::async(std::launch::async, &ForceFieldVisualization::SampleLattice, Field_, Request);
+        Pending_             = std::async(std::launch::async, &ForceFieldVisualization::SampleLattice, Field_, Sampler_, Request);
         // 📝 The first lattice is waited for, so a view never opens empty.
         if (!Lattice_) AcceptLattice(Pending_.get());
         DerivationStamp_ = Derivation;
@@ -1223,10 +1237,11 @@ void ForceFieldVisualization::SettleSampling()
 FieldProbeReading ForceFieldVisualization::ProbeWorld(double X, double Z) const
 {
     FieldProbeReading Reading;
-    if (!Field_) return Reading;
+    if (!Field_ && !Sampler_) return Reading;
     const double Cell = Lattice_ ? Lattice_->CellSpan : 1.0, Half = Cell / 2.0, SliceY = Options.SliceHeight;
     auto Read = [&](double SampleX, double SampleZ) {
-        return Field_->EvaluateContribution(Options.Contribution, {SampleX, SliceY, SampleZ}, Cell, true, Options.Solo);
+        return Sampler_ ? (*Sampler_)(Options.Contribution, {SampleX, SliceY, SampleZ})
+                        : Field_->EvaluateContribution(Options.Contribution, {SampleX, SliceY, SampleZ}, Cell, true, Options.Solo);
     };
     const SpatialVector Centre = Read(X, Z), East = Read(X + Half, Z), West = Read(X - Half, Z), South = Read(X, Z + Half), North = Read(X, Z - Half);
     Reading.Valid      = true;
@@ -1388,7 +1403,7 @@ FieldInteraction ForceFieldVisualization::ConstructNavigation(const char* Id, Im
 //    rectangle (Map) or the inverse-projected screen (Oblique).
 bool ForceFieldVisualization::ConstructMinimap(const char* Id, ImDrawList* Ink, ImVec2 Minimum, ImVec2 Maximum, double, float Scale)
 {
-    if (!Options.HasExtent || !Field_) return false;
+    if (!Options.HasExtent || (!Field_ && !Sampler_)) return false;
     constexpr int Size  = 72;
     const auto&   E     = Options.Extent;
     const double  SpanX = E[2] - E[0], SpanZ = E[3] - E[1];
@@ -1407,7 +1422,8 @@ bool ForceFieldVisualization::ConstructMinimap(const char* Id, ImDrawList* Ink, 
             for (int Column = 0; Column < Size; ++Column)
             {
                 const double        X = E[0] + (Column + 0.5) / Size * SpanX, Z = E[1] + (Row + 0.5) / Size * SpanZ;
-                const SpatialVector V = Field_->EvaluateContribution(Options.Contribution, {X, Options.SliceHeight, Z}, Cell, true, Options.Solo);
+                const SpatialVector V = Sampler_ ? (*Sampler_)(Options.Contribution, {X, Options.SliceHeight, Z})
+                                                 : Field_->EvaluateContribution(Options.Contribution, {X, Options.SliceHeight, Z}, Cell, true, Options.Solo);
                 const double        Reading = Options.Contribution == ForceContribution::Damp ? V.X : std::hypot(V.X, V.Z);
                 Readings[static_cast<size_t>(Row) * Size + Column] = Reading;
                 Peak = std::max(Peak, Reading);

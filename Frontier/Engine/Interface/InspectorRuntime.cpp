@@ -284,6 +284,11 @@ SolarPlacementSolver InspectorRuntime::QuerySolarPlacementSolver() const noexcep
     return SolarSolver;
 }
 
+void InspectorRuntime::RegisterParticleViewportPresenter(ParticleViewportPresenter Presenter)
+{
+    ParticlePresenter = std::move(Presenter);
+}
+
 void InspectorRuntime::InspectRecord([[maybe_unused]] RecordToken Token, bool& OutDeleteRequested)
 {
     OutDeleteRequested = false;

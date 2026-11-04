@@ -14,6 +14,7 @@
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <future>
 #include <memory>
 #include <string>
@@ -182,6 +183,11 @@ class ForceFieldVisualization
     //    editor edits. Revision changes re-sample at once.
     void ConfigureField(const ForceFieldSpace& Field, uint64_t Revision);
 
+    // 📝 Any field the slice samples in place of a ForceFieldSpace (the Particle editor's lattice): the contribution at a field-axis
+    //    point in the contribution's unit (damping in X). It runs on the sampling thread, so it must read immutable data.
+    using FieldSampler = std::function<SpatialVector(ForceContribution Contribution, SpatialVector Point)>;
+    void ConfigureSampler(FieldSampler Sampler, uint64_t Revision);
+
     // 📝 One refresh into the rectangle. Time is the field's timeline time; the lattice is re-sampled when the view, the
     //    slice or the field changed, or every RefreshSeconds while time advances.
     void Render(ImDrawList* Ink, const EditorTypefaces& Faces, ImVec2 Minimum, ImVec2 Maximum, double Time, float Scale);
@@ -255,7 +261,8 @@ class ForceFieldVisualization
         double A = 1, B = 0, C = 0, D = 1, Lift = 0, PixelsPerMetre = 1;
     };
 
-    static std::shared_ptr<Lattice> SampleLattice(std::shared_ptr<const ForceFieldSpace> Field, LatticeRequest Request);
+    static std::shared_ptr<Lattice> SampleLattice(std::shared_ptr<const ForceFieldSpace> Field, std::shared_ptr<const FieldSampler> Sampler,
+                                                  LatticeRequest Request);
 
     [[nodiscard]] Affine      ResolveAffine() const noexcept;
     [[nodiscard]] Coverage    ResolveCoverage() const;
@@ -282,6 +289,7 @@ class ForceFieldVisualization
     int32_t HitSource(ImVec2 Screen) const;
 
     std::shared_ptr<const ForceFieldSpace> Field_;
+    std::shared_ptr<const FieldSampler>    Sampler_;
     uint64_t                               FieldRevision_ = ~0ull;
     std::shared_ptr<Lattice>               Lattice_;
     std::future<std::shared_ptr<Lattice>>  Pending_;

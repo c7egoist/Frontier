@@ -20,6 +20,8 @@
 #include "UI/Editor/ProjectBrowserPanel.h"
 #include "EverestWorkspace.h"
 #include "EverestSceneViewport.h"
+#include "EverestParticleViewport.h"
+#include "Engine/Interface/InspectorRuntime.h"
 #ifdef FRONTIER_SOLIDARC_ENABLED
 #include "UI/SolidArc/Browser/SolidArcBrowserLink.h"
 #endif
@@ -226,12 +228,22 @@ int main()
     VkImageView SceneViewImage = VK_NULL_HANDLE;
     VkDescriptorSet SceneViewDescriptor = VK_NULL_HANDLE;
     int SceneViewJournalEntries = 0; // 📝 the first statuses and every new target reach the diagnostic file, capped
+    // 📝 The Particle editor's viewport: the GPU particle engine on the same device, its image sampled in GENERAL layout.
+    std::unique_ptr<Everest::EverestParticleViewport> ParticleView;
+    VkImageView ParticleViewImage = VK_NULL_HANDLE;
+    VkDescriptorSet ParticleViewDescriptor = VK_NULL_HANDLE;
+    int ParticleViewJournalEntries = 0;
     const auto RetireSceneView = [&]()
     {
         SceneView.reset(); // 📝 Waits for the device before releasing anything the interface could still sample.
         if (SceneViewDescriptor) ImGui_ImplVulkan_RemoveTexture(SceneViewDescriptor);
         SceneViewDescriptor = VK_NULL_HANDLE;
         SceneViewImage = VK_NULL_HANDLE;
+        Frontier::InspectorRuntime::Instance().RegisterParticleViewportPresenter({});
+        ParticleView.reset(); // 📝 Drains the queue as the scene viewport does.
+        if (ParticleViewDescriptor) ImGui_ImplVulkan_RemoveTexture(ParticleViewDescriptor);
+        ParticleViewDescriptor = VK_NULL_HANDLE;
+        ParticleViewImage = VK_NULL_HANDLE;
     };
     const auto ResolveBesideExecutable = [](const std::filesystem::path &Relative)
     {
@@ -505,6 +517,40 @@ int main()
                 }
                 return Image;
             };
+            Frontier::InspectorRuntime::Instance().RegisterParticleViewportPresenter(
+                [&](const Frontier::ParticleViewportRequest &Request)
+                {
+                    Frontier::ParticleViewportImage Image;
+                    try
+                    {
+                        if (!ParticleView)
+                        {
+                            const Frontier::VulkanDeviceAccess Device = Presentation ? Presentation->QueryDeviceAccess() : Frontier::VulkanDeviceAccess{};
+                            ParticleView = std::make_unique<Everest::EverestParticleViewport>(ResolveBesideExecutable("EngineContent/ShaderArchives"), &Device);
+                        }
+                        Everest::ParticleViewportOutcome Outcome = ParticleView->Render(Request);
+                        Image = std::move(Outcome.Image);
+                        if ((Outcome.View != ParticleViewImage || !Image.Failure.empty()) && ParticleViewJournalEntries < 16)
+                        {
+                            Frontier::DiagnosticJournal::Append("ParticleViewport", Outcome.View ? "image on " + Image.Adapter : "no image: " + Image.Failure);
+                            ++ParticleViewJournalEntries;
+                        }
+                        if (Outcome.View != ParticleViewImage)
+                        {
+                            // 📝 The engine drained the queue before replacing its targets: the previous view is no longer sampled.
+                            if (ParticleViewDescriptor) ImGui_ImplVulkan_RemoveTexture(ParticleViewDescriptor);
+                            ParticleViewDescriptor = Outcome.View ? ImGui_ImplVulkan_AddTexture(Outcome.View, VK_IMAGE_LAYOUT_GENERAL) : VK_NULL_HANDLE;
+                            ParticleViewImage = Outcome.View;
+                        }
+                        Image.Texture = (uint64_t)ParticleViewDescriptor;
+                    }
+                    catch (const std::exception &Failure)
+                    {
+                        Image.Failure = std::string("Particle viewport failed: ") + Failure.what();
+                        Frontier::DiagnosticJournal::Append("ParticleViewportRefused", Failure.what());
+                    }
+                    return Image;
+                });
         }
         else
         {

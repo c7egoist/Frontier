@@ -10,6 +10,7 @@
 #include "Engine/Scene/SceneDirectory.h"
 #include "Engine/Scene/SolarPlacement.h"
 #include "Engine/Interface/EnvironmentEditAccess.h"
+#include "Engine/Interface/ParticleEditor/ParticleViewportPresentation.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -130,6 +131,11 @@ class InspectorRuntime
     void                                     RegisterSolarPlacementSolver(SolarPlacementSolver Solver) noexcept;
     [[nodiscard]] SolarPlacementSolver       QuerySolarPlacementSolver() const noexcept;
 
+    // 📝 The Particle editor's GPU image: registered by the project whose host owns a Vulkan device (the editor application, a
+    //    capture); without it the editor still runs its scene and says why the viewport is empty.
+    void                                    RegisterParticleViewportPresenter(ParticleViewportPresenter Presenter);
+    [[nodiscard]] const ParticleViewportPresenter& QueryParticleViewportPresenter() const noexcept { return ParticlePresenter; }
+
     void RequestSkyFocus(float Azimuth, float Elevation, float Diameter) noexcept { SkyFocus = {Azimuth,Elevation,Diameter}; SkyFocusPending = true; }
     bool ConsumeSkyFocus(std::array<float,3>& Focus) noexcept
     {
@@ -168,6 +174,7 @@ class InspectorRuntime
     std::vector<std::string> PendingWorkspaceActions{};
     RecordToken          InspectedToken{};
     SolarPlacementSolver SolarSolver    = nullptr;
+    ParticleViewportPresenter ParticlePresenter;
     float                InterfaceScale = 1.0f;
     EnvironmentEditAccess EnvironmentAccess{};
     float                SolarElevation = 38.0f;   // [°]

@@ -1,41 +1,92 @@
 /*==========================================================================================================================================
                                                         PARTICLEEDITOR.CPP
 ==========================================================================================================================================*/
-// 🧩 Standalone GPU particle dynamics authoring editor bound to ParticleInspector.
+// 🧩 The Particle editor window: a title bar with the live readout and Close, and the editor's columns below it.
 
 #include "Engine/Interface/ParticleEditor.h"
 
 #if FRONTIER_EDITOR && defined(FRONTIER_WITH_INTERFACE_SDK)
 
-#include "Engine/Interface/DiagramControls.h"
 #include "Engine/Interface/InspectorControls.h"
+#include "Engine/Interface/InspectorRuntime.h"
+#include "Engine/Interface/ParticleEditor/ParticleEditorWorkspace.h"
+#include "Engine/Interface/ProjectContent.h"
+#include "Engine/Scene/SceneDirectory.h"
 
-#include <cmath>
+#include <algorithm>
+#include <cstdio>
+#include <memory>
 
 namespace Frontier
 {
 
-void ParticleEditor::ConstructInterface(RecordToken Token, RecordInspector& Inspector)
+namespace
 {
+
+std::unique_ptr<ParticleEditorWorkspace>& ResolveWorkspace()
+{
+    static std::unique_ptr<ParticleEditorWorkspace> Workspace;
+    if (!Workspace) Workspace = std::make_unique<ParticleEditorWorkspace>(QueryEngineContentDirectory() / "ParticleArchives" / "ParticleLibrary.toml");
+    return Workspace;
+}
+
+} // namespace
+
+ParticleEditorWorkspace* ParticleEditor::AccessWorkspace()
+{
+    return ResolveWorkspace().get();
+}
+
+void ParticleEditor::ConstructInterface(RecordToken Token, RecordInspector&)
+{
+    ParticleEditorWorkspace& Workspace = *ResolveWorkspace();
+    InspectorRuntime&        Runtime   = InspectorRuntime::Instance();
+    Workspace.Presenter                = Runtime.QueryParticleViewportPresenter();
+
     const InspectorPalette Palette = InspectorPalette::Resolve();
     const EditorTypefaces  Faces   = EditorTypefaces::Resolve();
+    const float            Scale   = Runtime.ResolveInterfaceScale();
+    const ImGuiViewport*   Main    = ImGui::GetMainViewport();
+    const ImVec2           Margin(28.0f * Scale, 24.0f * Scale);
+    const ImVec2           Position(Main->WorkPos.x + Margin.x, Main->WorkPos.y + Margin.y);
+    const ImVec2           Size(std::max(1100.0f, Main->WorkSize.x - Margin.x * 2.0f), std::max(640.0f, Main->WorkSize.y - Margin.y * 2.0f));
 
-    DiagramControls::ConstructEditorModalFrame(
-        "ParticleEditor — Ballistic & Precipitation Dynamics", "Sparkles", Token, Inspector,
-        [&](ImDrawList* DrawList, ImVec2 Min, ImVec2 Max) {
-            const ImVec2 Centre((Min.x + Max.x) * 0.5f, (Min.y + Max.y) * 0.52f);
-            const ImU32  Lilac = ParseHexSpectrum("#b494f4", Palette.ThemeAccent);
-            for (int Index = 0; Index < 44; ++Index)
-            {
-                const float  Theta = -0.35f - (static_cast<float>(Index % 17) / 17.0f) * 2.2f;
-                const float  R     = 24.0f + static_cast<float>((Index * 29) % 130);
-                const ImVec2 P0(Centre.x + std::cos(Theta) * R, Centre.y + 40.0f + std::sin(Theta) * R * 0.78f);
-                const ImVec2 P1(P0.x + std::cos(Theta) * 11.0f, P0.y + std::sin(Theta) * 11.0f + 4.0f);
-                DrawList->AddLine(P0, P1, Index % 3 == 0 ? Palette.WarmAmber : Lilac, 1.6f);
-            }
-            DrawList->AddText(Faces.Monospace, 10.5f, ImVec2(Min.x + 16.0f, Min.y + 14.0f),
-                              Palette.TextSecondary, "GPU BALLISTIC TRAJECTORIES · AERODYNAMIC DRAG & BOUNCE");
-        });
+    ImGui::SetNextWindowPos(Position, ImGuiCond_Always);
+    ImGui::SetNextWindowSize(Size, ImGuiCond_Always);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 16.0f * Scale);
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImGui::ColorConvertU32ToFloat4(Palette.ViewportBg));
+    if (ImGui::Begin("##ParticleEditorWindow", nullptr,
+                     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDocking |
+                         ImGuiWindowFlags_NoScrollWithMouse))
+    {
+        ImDrawList* Ink    = ImGui::GetWindowDrawList();
+        const float Header = 50.0f * Scale;
+        Ink->AddRect(Position, ImVec2(Position.x + Size.x, Position.y + Size.y), Palette.EdgeBorder, 16.0f * Scale, 0, 1.5f);
+        Ink->AddRectFilled(Position, ImVec2(Position.x + Size.x, Position.y + Header), Palette.InspectorTopBg, 16.0f * Scale, ImDrawFlags_RoundCornersTop);
+        Ink->AddLine(ImVec2(Position.x, Position.y + Header), ImVec2(Position.x + Size.x, Position.y + Header), Palette.EdgeBorder, 1.0f);
+        ConstructEditorGlyph(Ink, ImVec2(Position.x + 24.0f * Scale, Position.y + 25.0f * Scale), 8.0f * Scale, Palette.ThemeAccent, "Sparkles", 1.5f);
+        Ink->AddText(Faces.Medium, 14.0f * Scale, ImVec2(Position.x + 42.0f * Scale, Position.y + 16.5f * Scale), Palette.TextPrimary, "Frontier \xC2\xB7 Particle editor");
+        char Readout[160];
+        std::snprintf(Readout, sizeof(Readout), "LIVE \xC2\xB7 %s \xC2\xB7 %zu EFFECTS \xC2\xB7 %zu FIELDS", SceneDirectory::Instance().QueryName(Token).c_str(),
+                      Workspace.AccessScene().Effects.size(), Workspace.AccessScene().Fields.size());
+        Ink->AddText(Faces.Monospace, 10.5f * Scale, ImVec2(Position.x + 300.0f * Scale, Position.y + 19.5f * Scale), Palette.LiveGreen, Readout);
+        const float  CloseW = 108.0f * Scale;
+        const ImVec2 CloseMin(Position.x + Size.x - CloseW - 14.0f * Scale, Position.y + 10.0f * Scale);
+        ImGui::SetCursorScreenPos(CloseMin);
+        if (ImGui::InvisibleButton("##CloseParticleEditor", ImVec2(CloseW, 30.0f * Scale))) Runtime.CloseActiveEditor();
+        const bool Hovered = ImGui::IsItemHovered();
+        Ink->AddRectFilled(CloseMin, ImVec2(CloseMin.x + CloseW, CloseMin.y + 30.0f * Scale), Hovered ? Palette.SegmentedActiveBg : Palette.CountCardBg, 9.0f * Scale);
+        Ink->AddRect(CloseMin, ImVec2(CloseMin.x + CloseW, CloseMin.y + 30.0f * Scale), Palette.InsetFieldBorder, 9.0f * Scale);
+        Ink->AddText(Faces.Medium, 11.0f * Scale, ImVec2(CloseMin.x + 18.0f * Scale, CloseMin.y + 8.5f * Scale), Palette.TextPrimary, "Close Editor");
+
+        const ImVec2 BodyMin(Position.x + 12.0f * Scale, Position.y + Header + 12.0f * Scale);
+        const ImVec2 BodyMax(Position.x + Size.x - 12.0f * Scale, Position.y + Size.y - 12.0f * Scale);
+        Workspace.Construct(BodyMin, BodyMax, Scale, ImGui::GetIO().DeltaTime);
+    }
+    ImGui::End();
+    ImGui::PopStyleColor();
+    ImGui::PopStyleVar(2);
 }
 
 } // namespace Frontier
@@ -45,6 +96,7 @@ void ParticleEditor::ConstructInterface(RecordToken Token, RecordInspector& Insp
 namespace Frontier
 {
 void ParticleEditor::ConstructInterface(RecordToken, RecordInspector&) {}
+ParticleEditorWorkspace* ParticleEditor::AccessWorkspace() { return nullptr; }
 } // namespace Frontier
 
 #endif

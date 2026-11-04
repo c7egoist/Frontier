@@ -136,6 +136,9 @@ add_library(FrontierSceneEditorUI STATIC
     Frontier/Engine/Interface/FractureEditor.cpp
     Frontier/Engine/Interface/FluidPlumeEditor.cpp
     Frontier/Engine/Interface/ParticleEditor.cpp
+    Frontier/Engine/Interface/ParticleEditor/ParticleFieldOverlay.cpp
+    Frontier/Engine/Interface/ParticleEditor/ParticleEditorPages.cpp
+    Frontier/Engine/Interface/ParticleEditor/ParticleEditorWorkspace.cpp
     Frontier/Engine/Interface/Controls/ControlTheme.cpp
     Frontier/Engine/Interface/Controls/ControlColumn.cpp
     Frontier/Engine/Interface/Controls/GlyphRun.cpp
@@ -253,13 +256,14 @@ add_library(EverestProjectEditor STATIC
     Projects/Everest/Source/EverestWorkspace.cpp
     Projects/Everest/Source/EverestSceneViewport.cpp
     Projects/Everest/Source/EverestFieldViewport.cpp
+    Projects/Everest/Source/EverestParticleViewport.cpp
     Projects/Everest/Source/EverestSceneGeometry.cpp)
 target_include_directories(EverestProjectEditor PUBLIC
     "${CMAKE_SOURCE_DIR}"
     "${CMAKE_SOURCE_DIR}/Frontier"
     "${CMAKE_SOURCE_DIR}/Projects/Everest/Source")
 target_compile_definitions(EverestProjectEditor PUBLIC FRONTIER_WITH_INTERFACE_SDK=1 FRONTIER_EDITOR_PROFILE=1 FRONTIER_EDITOR=1)
-target_link_libraries(EverestProjectEditor PUBLIC FrontierSceneEditorUI FrontierSceneViewport)
+target_link_libraries(EverestProjectEditor PUBLIC FrontierSceneEditorUI FrontierSceneViewport FrontierParticleSimulation)
 frontier_stage_project_content(EverestProjectEditor
     "${CMAKE_SOURCE_DIR}/Projects/Everest/Everest.projectspace"
     "${CMAKE_SOURCE_DIR}/EngineContent"
