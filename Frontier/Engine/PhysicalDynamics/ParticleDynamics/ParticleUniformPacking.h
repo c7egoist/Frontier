@@ -1,7 +1,7 @@
 /*==========================================================================================================================================
                                                           PARTICLEUNIFORMPACKING.H
 ==========================================================================================================================================*/
-// 🧩 The Particle editor's GPU payloads: an effect's 256-byte uniform, a light fibre's uniform and path table, the refresh
+// 🧩 The Particle editor's GPU payloads: an effect's 256-byte uniform, a light fibre's uniform and path samples, the refresh
 //    constants, the wind components, the acceleration fields and the lensing block, packed exactly as the prototype packs them.
 
 #pragma once
@@ -60,7 +60,7 @@ struct ParticleEffectRefresh
     double                CellMetres    = 1.0;
 };
 
-// 📝 eos createSystem: the particle capacity a system allocates (at least 64).
+// 📝 The particle capacity an effect allocates (eos createSystem: at least 64).
 [[nodiscard]] uint32_t ResolveParticleCapacity(const ParticleEffectParameters& Parameters) noexcept;
 
 // 📝 The molecular lattice's cells per axis for an effect's box and σ (2.5 σ cut-off), 1 for every other behaviour.

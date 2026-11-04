@@ -24,17 +24,17 @@ constexpr const char* LightFibrePathNames[LightFibrePathCount] = { "Ring",    "F
 
 // 📝 Each reader leaves the target unchanged when the key is absent, so the struct defaults stand in; a key present with
 //    the wrong type is an error.
-class TableReading
+class KeyReading
 {
 public:
-    TableReading(const toml::table& Table, std::string Where, std::string& Diagnostic) : Table(Table), Where(std::move(Where)),
+    KeyReading(const toml::table& Keys, std::string Where, std::string& Diagnostic) : Keys(Keys), Where(std::move(Where)),
         Diagnostic(Diagnostic)
     {
     }
 
     void Read(const char* Key, double& Target)
     {
-        const toml::node* Found = Table.get(Key);
+        const toml::node* Found = Keys.get(Key);
         if (!Found)
         {
             return;
@@ -49,7 +49,7 @@ public:
 
     void Read(const char* Key, std::optional<double>& Target)
     {
-        if (Table.get(Key))
+        if (Keys.get(Key))
         {
             double Reading = 0.0;
             Read(Key, Reading);
@@ -59,7 +59,7 @@ public:
 
     void Read(const char* Key, int32_t& Target)
     {
-        const toml::node* Found = Table.get(Key);
+        const toml::node* Found = Keys.get(Key);
         if (!Found)
         {
             return;
@@ -74,7 +74,7 @@ public:
 
     void Read(const char* Key, bool& Target)
     {
-        const toml::node* Found = Table.get(Key);
+        const toml::node* Found = Keys.get(Key);
         if (!Found)
         {
             return;
@@ -89,7 +89,7 @@ public:
 
     void Read(const char* Key, std::string& Target)
     {
-        const toml::node* Found = Table.get(Key);
+        const toml::node* Found = Keys.get(Key);
         if (!Found)
         {
             return;
@@ -105,7 +105,7 @@ public:
     template <size_t Count>
     void Read(const char* Key, std::array<double, Count>& Target)
     {
-        const toml::node* Found = Table.get(Key);
+        const toml::node* Found = Keys.get(Key);
         if (!Found)
         {
             return;
@@ -130,7 +130,7 @@ public:
 
     void Read(const char* Key, std::vector<std::string>& Target)
     {
-        const toml::node* Found = Table.get(Key);
+        const toml::node* Found = Keys.get(Key);
         if (!Found)
         {
             return;
@@ -183,7 +183,7 @@ private:
         }
     }
 
-    const toml::table& Table;
+    const toml::table& Keys;
     std::string        Where;
     std::string&       Diagnostic;
 };
@@ -255,7 +255,7 @@ constexpr std::array<std::pair<const char*, ForceReach>, 4> ReachSpellings = { {
     { "everywhere", ForceReach::Everywhere },
     { "sphere", ForceReach::Sphere },
     { "box", ForceReach::Box },
-    { "cone", ForceReach::Sphere },   // 📝 eos declares a cone reach that no kind uses; sampling treats it as a sphere
+    { "cone", ForceReach::Sphere },   // 📝 eos declares a cone reach that no category uses; sampling treats it as a sphere
 } };
 
 constexpr std::array<std::pair<const char*, ForceFalloff>, 4> FalloffSpellings = { {
@@ -269,10 +269,10 @@ constexpr std::array<std::pair<const char*, ForceFalloff>, 4> FalloffSpellings =
 //                                                    SECTIONS
 //------------------------------------------------------------------------------------------------------------------------
 
-bool DecodeField(const toml::table& Table, ParticleField& Field, const std::string& Where, std::string& Diagnostic)
+bool DecodeField(const toml::table& Keys, ParticleField& Field, const std::string& Where, std::string& Diagnostic)
 {
     std::string Category;
-    TableReading Reading(Table, Where, Diagnostic);
+    KeyReading Reading(Keys, Where, Diagnostic);
     Reading.Read("category", Category);
     const ParticleFieldDescriptor* Descriptor = ResolveParticleFieldDescriptor(Category);
     if (!Descriptor)
@@ -299,7 +299,7 @@ bool DecodeField(const toml::table& Table, ParticleField& Field, const std::stri
     return Reading.Succeeded();
 }
 
-void DecodeLightFibre(const toml::table& Table, LightFibreParameters& Fibre, TableReading& Reading)
+void DecodeLightFibre(const toml::table& Keys, LightFibreParameters& Fibre, KeyReading& Reading)
 {
     Reading.Read("shape", Fibre.Shape, FibreShapeSpellings);
     Reading.Read("strands", Fibre.Strands);
@@ -336,7 +336,7 @@ void DecodeLightFibre(const toml::table& Table, LightFibreParameters& Fibre, Tab
     Reading.Read("pulse_depth", Fibre.PulseDepth);
     Reading.Read("pulse_shape", Fibre.Pulse, PulseSpellings);
     Fibre.Stops.clear();
-    if (const toml::array* Stops = Table["stop"].as_array())
+    if (const toml::array* Stops = Keys["stop"].as_array())
     {
         for (const toml::node& Entry : *Stops)
         {
@@ -362,10 +362,10 @@ void DecodeLightFibre(const toml::table& Table, LightFibreParameters& Fibre, Tab
     }
 }
 
-bool DecodePreset(const toml::table& Table, ParticlePreset& Preset, size_t Index, std::string& Diagnostic)
+bool DecodePreset(const toml::table& Keys, ParticlePreset& Preset, size_t Index, std::string& Diagnostic)
 {
     const std::string        Where = "preset " + std::to_string(Index + 1);
-    TableReading             Reading(Table, Where, Diagnostic);
+    KeyReading               Reading(Keys, Where, Diagnostic);
     ParticleEffectParameters& P = Preset.Parameters;
     Reading.Read("identifier", Preset.Identifier);
     Reading.Read("name", Preset.Name);
@@ -421,9 +421,9 @@ bool DecodePreset(const toml::table& Table, ParticlePreset& Preset, size_t Index
     Reading.Read("burst_at_origin", P.BurstAtOrigin);
     Reading.Read("visible", P.Visible);
 
-    if (const toml::table* Link = Table["wind_link"].as_table())
+    if (const toml::table* Link = Keys["wind_link"].as_table())
     {
-        TableReading     LinkReading(*Link, Where + " wind_link", Diagnostic);
+        KeyReading     LinkReading(*Link, Where + " wind_link", Diagnostic);
         ParticleWindLink Decoded;
         std::string      Category;
         LinkReading.Read("category", Category);
@@ -442,26 +442,26 @@ bool DecodePreset(const toml::table& Table, ParticlePreset& Preset, size_t Index
         LinkReading.Read("rate_hz", Decoded.RateHz);
         Preset.WindLink = Decoded;
     }
-    if (const toml::table* Section = Table["transition"].as_table())
+    if (const toml::table* Section = Keys["transition"].as_table())
     {
-        TableReading       SectionReading(*Section, Where + " transition", Diagnostic);
+        KeyReading       SectionReading(*Section, Where + " transition", Diagnostic);
         ParticleTransition Decoded;
         std::string        After;
-        SectionReading.Read("hold_base_seconds", Decoded.HoldBaseSeconds);
+        SectionReading.Read("hold_minimum_seconds", Decoded.HoldMinimumSeconds);
         SectionReading.Read("hold_spread_seconds", Decoded.HoldSpreadSeconds);
         SectionReading.Read("burst_share", Decoded.BurstShare);
         SectionReading.Read("fragment", Decoded.Fragment);
         SectionReading.Read("fragment_life_seconds", Decoded.FragmentLifeSeconds);
         SectionReading.Read("wave", Decoded.Wave, WaveSpellings);
         SectionReading.Read("assemble", Decoded.Assemble);
-        SectionReading.Read("shell_metres", Decoded.ShellMetres);
+        SectionReading.Read("launch_distance_metres", Decoded.LaunchDistanceMetres);
         SectionReading.Read("after", After);
         Decoded.Butterflies = After == "butterfly";
         P.Transition        = Decoded;
     }
-    if (const toml::table* Section = Table["attractor"].as_table())
+    if (const toml::table* Section = Keys["attractor"].as_table())
     {
-        TableReading      SectionReading(*Section, Where + " attractor", Diagnostic);
+        KeyReading      SectionReading(*Section, Where + " attractor", Diagnostic);
         ParticleAttractor Decoded;
         SectionReading.Read("enabled", Decoded.Enabled);
         SectionReading.Read("strength", Decoded.Strength);
@@ -470,17 +470,17 @@ bool DecodePreset(const toml::table& Table, ParticlePreset& Preset, size_t Index
         SectionReading.Read("swallow_metres", Decoded.SwallowMetres);
         P.Attractor = Decoded;
     }
-    if (const toml::table* Section = Table["lensing"].as_table())
+    if (const toml::table* Section = Keys["lensing"].as_table())
     {
-        TableReading    SectionReading(*Section, Where + " lensing", Diagnostic);
+        KeyReading    SectionReading(*Section, Where + " lensing", Diagnostic);
         ParticleLensing Decoded;
-        SectionReading.Read("horizon_metres", Decoded.HorizonMetres);
+        SectionReading.Read("event_radius_metres", Decoded.EventRadiusMetres);
         SectionReading.Read("einstein_ratio", Decoded.EinsteinRatio);
         P.Lensing = Decoded;
     }
-    if (const toml::table* Section = Table["heat_shimmer"].as_table())
+    if (const toml::table* Section = Keys["heat_shimmer"].as_table())
     {
-        TableReading        SectionReading(*Section, Where + " heat_shimmer", Diagnostic);
+        KeyReading        SectionReading(*Section, Where + " heat_shimmer", Diagnostic);
         ParticleHeatShimmer Decoded;
         SectionReading.Read("radius_metres", Decoded.RadiusMetres);
         SectionReading.Read("strength", Decoded.Strength);
@@ -488,18 +488,18 @@ bool DecodePreset(const toml::table& Table, ParticlePreset& Preset, size_t Index
         SectionReading.Read("rate", Decoded.Rate);
         P.HeatShimmer = Decoded;
     }
-    if (const toml::table* Section = Table["magnetic_dipole"].as_table())
+    if (const toml::table* Section = Keys["magnetic_dipole"].as_table())
     {
-        TableReading           SectionReading(*Section, Where + " magnetic_dipole", Diagnostic);
+        KeyReading           SectionReading(*Section, Where + " magnetic_dipole", Diagnostic);
         ParticleMagneticDipole Decoded;
         SectionReading.Read("strength", Decoded.Strength);
         SectionReading.Read("guide", Decoded.Guide);
         SectionReading.Read("radius_metres", Decoded.RadiusMetres);
         P.MagneticDipole = Decoded;
     }
-    if (const toml::table* Section = Table["light_fibre"].as_table())
+    if (const toml::table* Section = Keys["light_fibre"].as_table())
     {
-        TableReading         SectionReading(*Section, Where + " light_fibre", Diagnostic);
+        KeyReading         SectionReading(*Section, Where + " light_fibre", Diagnostic);
         LightFibreParameters Decoded;
         DecodeLightFibre(*Section, Decoded, SectionReading);
         P.LightFibre = std::move(Decoded);
@@ -580,9 +580,9 @@ bool DecodeParticleFields(const std::filesystem::path& File, std::vector<Particl
     {
         for (size_t Index = 0; Index < Records->size(); ++Index)
         {
-            const toml::table* Table = (*Records)[Index].as_table();
+            const toml::table* Entry = (*Records)[Index].as_table();
             ParticleField      Field;
-            if (!Table || !DecodeField(*Table, Field, "force " + std::to_string(Index + 1), Diagnostic))
+            if (!Entry || !DecodeField(*Entry, Field, "force " + std::to_string(Index + 1), Diagnostic))
             {
                 return false;
             }
@@ -602,15 +602,15 @@ bool ParticleEffectLibrary::Decode(const std::filesystem::path& File, std::strin
     }
     if (const toml::table* Library = Document["library"].as_table())
     {
-        TableReading Reading(*Library, "library", Diagnostic);
+        KeyReading Reading(*Library, "library", Diagnostic);
         Reading.Read("source", Source);
         Reading.Read("presets_sha256", PresetsDigest);
         Reading.Read("groups", Groups);
         Reading.Read("default_scene", DefaultScene);
     }
-    if (const toml::table* WindTable = Document["wind"].as_table())
+    if (const toml::table* WindKeys = Document["wind"].as_table())
     {
-        TableReading Reading(*WindTable, "wind", Diagnostic);
+        KeyReading Reading(*WindKeys, "wind", Diagnostic);
         Reading.Read("wind_scale", Wind.WindScale);
         Reading.Read("turbulence", Wind.Turbulence);
         Reading.Read("arrow_reference_mps", Wind.ArrowReferenceMps);
@@ -636,9 +636,9 @@ bool ParticleEffectLibrary::Decode(const std::filesystem::path& File, std::strin
     }
     for (size_t Index = 0; Index < Records->size(); ++Index)
     {
-        const toml::table* Table = (*Records)[Index].as_table();
+        const toml::table* Entry = (*Records)[Index].as_table();
         ParticlePreset     Preset;
-        if (!Table || !DecodePreset(*Table, Preset, Index, Diagnostic))
+        if (!Entry || !DecodePreset(*Entry, Preset, Index, Diagnostic))
         {
             return false;
         }

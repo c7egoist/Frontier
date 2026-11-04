@@ -187,15 +187,15 @@ void PackParticleEffectUniform(ParticleEffectUniform& Out, const ParticleEffectP
     if (P.Behaviour == ParticleBehaviour::VisualEffect)
     {
         // 📝 The transition fields: lattice slot = wave (1 melt, 2 glitch), butterflies, flight mode (0 burst or fall,
-        //    1 rebuild, 2 stack), fragment flag; reach slot = hold base, hold spread, burst share, fragment life;
-        //    miscellany w = the rebuild's start distance or the stack's drop height.
+        //    1 rebuild, 2 stack), fragment flag; reach slot = hold minimum, hold spread, burst share, fragment life;
+        //    miscellany w = the launch distance (a rebuild's start distance, a stack's drop height).
         const std::optional<ParticleTransition>& T = P.Transition;
         const double Wave = T ? static_cast<double>(static_cast<uint32_t>(T->Wave)) : 0.0;
         Put(Out, SlotMolecularLattice, Wave, T && T->Butterflies ? 1.0 : 0.0, T ? static_cast<double>(T->Assemble) : 0.0,
             T && T->Fragment ? 1.0 : 0.0);
-        Put(Out, SlotMolecularReach, T ? T->HoldBaseSeconds : 0.0, T ? T->HoldSpreadSeconds : 0.0, T ? T->BurstShare : 0.0,
+        Put(Out, SlotMolecularReach, T ? T->HoldMinimumSeconds : 0.0, T ? T->HoldSpreadSeconds : 0.0, T ? T->BurstShare : 0.0,
             T ? T->FragmentLifeSeconds : 0.0);
-        Put(Out, SlotMiscellany, P.SizeScale, P.PulseHz, P.PulseDepth, T && T->ShellMetres != 0.0 ? T->ShellMetres : 0.0);
+        Put(Out, SlotMiscellany, P.SizeScale, P.PulseHz, P.PulseDepth, T && T->LaunchDistanceMetres != 0.0 ? T->LaunchDistanceMetres : 0.0);
     }
 }
 
@@ -473,7 +473,7 @@ ParticleLensingReading PackParticleLensing(ParticleLensingBlock& Out, std::span<
             continue;
         }
         const ParticleLensing& Hole = *P->Lensing;
-        PutAt(Out, Reading.HoleCount * 4, Point.U, Point.V, Hole.HorizonMetres * Hole.EinsteinRatio * Point.K, Hole.HorizonMetres * Point.K);
+        PutAt(Out, Reading.HoleCount * 4, Point.U, Point.V, Hole.EventRadiusMetres * Hole.EinsteinRatio * Point.K, Hole.EventRadiusMetres * Point.K);
         ++Reading.HoleCount;
     }
     for (const ParticleEffectPlacement& Effect : Effects)

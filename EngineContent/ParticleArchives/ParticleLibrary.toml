@@ -2138,7 +2138,7 @@ burst_at_origin = true
 visible = true
 
 [preset.transition]
-hold_base_seconds = 0.6
+hold_minimum_seconds = 0.6
 hold_spread_seconds = 1.6
 burst_share = 0.5
 fragment = true
@@ -2195,7 +2195,7 @@ burst_at_origin = true
 visible = true
 
 [preset.transition]
-hold_base_seconds = 0.4
+hold_minimum_seconds = 0.4
 hold_spread_seconds = 0.9
 burst_share = 0.85
 fragment = false
@@ -2252,14 +2252,14 @@ burst_at_origin = true
 visible = true
 
 [preset.transition]
-hold_base_seconds = 0.2
+hold_minimum_seconds = 0.2
 hold_spread_seconds = 3.0
 burst_share = 0.15
 fragment = false
 fragment_life_seconds = 0.0
 wave = "melt"
 assemble = 0.0
-shell_metres = 0.0
+launch_distance_metres = 0.0
 
 [[preset]]
 identifier = "reverse-derez"
@@ -2312,14 +2312,14 @@ burst_at_origin = true
 visible = true
 
 [preset.transition]
-hold_base_seconds = 0.3
+hold_minimum_seconds = 0.3
 hold_spread_seconds = 2.0
 burst_share = 0.0
 fragment = false
 fragment_life_seconds = 0.0
 wave = "corner"
 assemble = 1.0
-shell_metres = 3.0
+launch_distance_metres = 3.0
 
 [[preset]]
 identifier = "voxel-explosion"
@@ -2372,14 +2372,14 @@ burst_at_origin = true
 visible = true
 
 [preset.transition]
-hold_base_seconds = 0.4
+hold_minimum_seconds = 0.4
 hold_spread_seconds = 0.15
 burst_share = 1.0
 fragment = false
 fragment_life_seconds = 0.0
 wave = "corner"
 assemble = 0.0
-shell_metres = 0.0
+launch_distance_metres = 0.0
 
 [[preset]]
 identifier = "coin-stack"
@@ -2432,14 +2432,14 @@ burst_at_origin = true
 visible = true
 
 [preset.transition]
-hold_base_seconds = 0.3
+hold_minimum_seconds = 0.3
 hold_spread_seconds = 3.0
 burst_share = 0.0
 fragment = false
 fragment_life_seconds = 0.0
 wave = "corner"
 assemble = 2.0
-shell_metres = 3.0
+launch_distance_metres = 3.0
 
 [[preset]]
 identifier = "coin-fountain"
@@ -2542,14 +2542,14 @@ burst_at_origin = true
 visible = true
 
 [preset.transition]
-hold_base_seconds = 0.2
+hold_minimum_seconds = 0.2
 hold_spread_seconds = 3.0
 burst_share = 0.1
 fragment = false
 fragment_life_seconds = 0.0
 wave = "melt"
 assemble = 0.0
-shell_metres = 0.0
+launch_distance_metres = 0.0
 after = "none"
 
 [[preset]]
@@ -2603,14 +2603,14 @@ burst_at_origin = true
 visible = true
 
 [preset.transition]
-hold_base_seconds = 0.2
+hold_minimum_seconds = 0.2
 hold_spread_seconds = 3.0
 burst_share = 0.1
 fragment = false
 fragment_life_seconds = 0.0
 wave = "melt"
 assemble = 0.0
-shell_metres = 0.0
+launch_distance_metres = 0.0
 after = "butterfly"
 
 [[preset]]
@@ -2671,7 +2671,7 @@ swirl = 3.5
 swallow_metres = 0.4
 
 [preset.lensing]
-horizon_metres = 0.45
+event_radius_metres = 0.45
 einstein_ratio = 3.0
 
 [[preset]]
@@ -3030,12 +3030,12 @@ burst_at_origin = true
 visible = true
 
 [preset.transition]
-hold_base_seconds = 0.2
+hold_minimum_seconds = 0.2
 hold_spread_seconds = 2.5
 burst_share = 0.2
 fragment = false
 fragment_life_seconds = 0.0
 wave = "glitch"
 assemble = 0.0
-shell_metres = 0.0
+launch_distance_metres = 0.0
 after = "none"

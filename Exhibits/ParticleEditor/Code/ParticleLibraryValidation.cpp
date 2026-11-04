@@ -2,7 +2,7 @@
                                                         PARTICLELIBRARYVALIDATION.CPP
 ==========================================================================================================================================*/
 // 🧩 The C++ Particle editor's library and GPU payloads against the approved prototype: the 52 presets decoded from
-//    ParticleLibrary.toml, every effect uniform, light-fibre uniform and path table, the refresh constants, the wind
+//    ParticleLibrary.toml, every effect uniform, light-fibre uniform and path samples, the refresh constants, the wind
 //    components, the acceleration fields, the lensing block and the eos force taxonomy's readings.
 //
 //     ParticleLibraryValidation <repository root>
@@ -33,11 +33,11 @@ namespace
 {
 
 int Failures = 0;
-int Checks   = 0;
+int Assertions = 0;
 
 void Expect(bool Condition, const std::string& Claim)
 {
-    ++Checks;
+    ++Assertions;
     if (!Condition)
     {
         ++Failures;
@@ -423,6 +423,6 @@ int main(int ArgumentCount, char** Arguments)
     Expect(!HypotResults.empty() && HypotExact == HypotResults.size(), "Math.hypot reproduced bit for bit");
     std::printf("  hypot: %zu / %zu bit-exact\n", HypotExact, HypotResults.size());
 
-    std::printf("%s %d / %d checks\n", Failures == 0 ? "✔️" : "🔴", Checks - Failures, Checks);
+    std::printf("%s %d / %d assertions\n", Failures == 0 ? "✔️" : "🔴", Assertions - Failures, Assertions);
     return Failures == 0 ? 0 : 1;
 }

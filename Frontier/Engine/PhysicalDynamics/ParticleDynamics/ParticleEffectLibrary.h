@@ -26,7 +26,7 @@ namespace Frontier
 //                                                    ENUMERATIONS
 //------------------------------------------------------------------------------------------------------------------------
 
-// 📝 The simulation path. The numbers are the GPU's kind codes (2 is unused).
+// 📝 The simulation path. The numbers are the codes the shaders read (2 is unused).
 enum class ParticleBehaviour : uint8_t
 {
     Ballistic    = 0,   // streaks, rain, hail, debris: drag, gravity, bounce
@@ -115,14 +115,14 @@ inline constexpr uint32_t LightFibreStopLimit   = 8;
 
 struct ParticleTransition
 {
-    double                 HoldBaseSeconds     = 0.0;
+    double                 HoldMinimumSeconds  = 0.0;
     double                 HoldSpreadSeconds   = 0.0;
     double                 BurstShare          = 0.0;    // [0..1]
     bool                   Fragment            = false;
     double                 FragmentLifeSeconds = 0.0;
     ParticleTransitionWave Wave                = ParticleTransitionWave::Corner;
     int32_t                Assemble            = 0;      // 0 burst, 1 rebuild, 2 stack
-    double                 ShellMetres         = 0.0;
+    double                 LaunchDistanceMetres = 0.0;   // a rebuild's start distance, a stack's drop height
     bool                   Butterflies         = false;  // the pieces fly off as butterflies
 };
 
@@ -135,10 +135,10 @@ struct ParticleAttractor
     double SwallowMetres = 0.0;
 };
 
-// 📝 A black hole's screen-space lensing: the event horizon and the Einstein ring as a multiple of it.
+// 📝 A black hole's screen-space lensing: the event radius and the Einstein ring as a multiple of it.
 struct ParticleLensing
 {
-    double HorizonMetres = 0.0;
+    double EventRadiusMetres = 0.0;
     double EinsteinRatio = 0.0;
 };
 

@@ -30,7 +30,7 @@ enum class ParticleFieldCategory : uint8_t
 {
     Prevailing = 0,    // flow, wind lattice component 0: directional
     Gust       = 1,    // flow, component 1: gust bands
-    Tornado    = 2,    // flow, component 2: vortex column
+    Tornado    = 2,    // flow, component 2: spinning column
     Outflow    = 3,    // flow, component 3: radial (negative strength = suction)
     Attract    = 4,    // acceleration, force type 0
     Repel      = 5,    // acceleration, force type 1

@@ -316,7 +316,7 @@ std::array<double, 3> SampleParticleField(const ParticleField& Field, const std:
         }
         return { In[0] + Round[0], In[1] + Round[1], In[2] + Round[2] };
     }
-    // 📝 The flow kinds and the magnetic drive are directional about their own axis.
+    // 📝 The flow categories and the magnetic drive are directional about their own axis.
     const std::array<double, 3>& Axis   = Field.Direction;
     double                       Length = Hypotenuse(Axis[0], Axis[1], Axis[2]);
     if (Length == 0.0)

@@ -9,7 +9,8 @@
 // 📝 The source is the eos engine kept unchanged in Experimental/ParticleEditor/Engine/ (eos 549c477). Numbers are written with
 //    JavaScript's shortest round-trip form, so the C++ decoder reads back the same doubles the prototype holds; the sRGB hex
 //    colours are already linear here (PE.hexLinear), so C++ never repeats that conversion.
-// 📝 Renamed for the engine's vocabulary: kind → behaviour, shape → appearance, emit → release, blackHole → lensing.
+// 📝 Renamed for the engine's vocabulary: behaviour, appearance, release, lensing, event radius, launch distance and hold
+//    minimum stand for the eos kind, shape, emit, blackHole, horizon, shell and holdBase.
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
@@ -97,17 +98,17 @@ const FibreKeys = [
     ['pulseDepth', 'pulse_depth'], ['pulseShape', 'pulse_shape'],
 ];
 const TransitionKeys = [
-    ['holdBase', 'hold_base_seconds'], ['holdSpread', 'hold_spread_seconds'], ['burstShare', 'burst_share'],
+    ['holdBase', 'hold_minimum_seconds'], ['holdSpread', 'hold_spread_seconds'], ['burstShare', 'burst_share'],
     ['fragment', 'fragment'], ['childLife', 'fragment_life_seconds'], ['wave', 'wave'], ['assemble', 'assemble'],
-    ['shell', 'shell_metres'], ['after', 'after'],
+    ['shell', 'launch_distance_metres'], ['after', 'after'],
 ];
 const AttractorKeys = [['enabled', 'enabled'], ['strength', 'strength'], ['radius', 'radius_metres'], ['swirl', 'swirl'],
                        ['swallow', 'swallow_metres']];
-const LensingKeys   = [['horizon', 'horizon_metres'], ['einstein', 'einstein_ratio']];
+const LensingKeys   = [['horizon', 'event_radius_metres'], ['einstein', 'einstein_ratio']];
 const ShimmerKeys   = [['radius', 'radius_metres'], ['strength', 'strength'], ['freq', 'frequency'], ['rate', 'rate']];
 const DipoleKeys    = [['strength', 'strength'], ['guide', 'guide'], ['radius', 'radius_metres']];
 
-function Table(Lines, Header, Source, Keys, Known)
+function Section(Lines, Header, Source, Keys, Known)
 {
     if (!Source) return;
     const Seen = new Set(Keys.map(([Key]) => Key));
@@ -147,14 +148,14 @@ function ExportPreset(Lines, Preset)
         Line(Lines, 'bearing_degrees', Changes.bearing);
         Line(Lines, 'rate_hz', Changes.freq);
     }
-    Table(Lines, 'preset.transition', P.transition, TransitionKeys);
-    Table(Lines, 'preset.attractor', P.attractor, AttractorKeys);
-    Table(Lines, 'preset.lensing', P.blackHole, LensingKeys);
-    Table(Lines, 'preset.heat_shimmer', P.heatShimmer, ShimmerKeys);
-    Table(Lines, 'preset.magnetic_dipole', P.magneticField, DipoleKeys);
+    Section(Lines, 'preset.transition', P.transition, TransitionKeys);
+    Section(Lines, 'preset.attractor', P.attractor, AttractorKeys);
+    Section(Lines, 'preset.lensing', P.blackHole, LensingKeys);
+    Section(Lines, 'preset.heat_shimmer', P.heatShimmer, ShimmerKeys);
+    Section(Lines, 'preset.magnetic_dipole', P.magneticField, DipoleKeys);
     if (P.fibre)
     {
-        Table(Lines, 'preset.light_fibre', P.fibre, FibreKeys, new Set(['stops']));
+        Section(Lines, 'preset.light_fibre', P.fibre, FibreKeys, new Set(['stops']));
         for (const Stop of P.fibre.stops || [])
         {
             Lines.push('', '[[preset.light_fibre.stop]]');
