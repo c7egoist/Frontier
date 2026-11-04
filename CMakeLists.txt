@@ -791,6 +791,7 @@ endif()
 include(Automation/EnvironmentRendering.cmake)
 include(Automation/VirtualizedGeometryRendering.cmake)
 include(Automation/AnalyticIlluminationRendering.cmake)
+include(Automation/ParticleSimulationRendering.cmake)
 include(Automation/GlobalIlluminationRendering.cmake)
 
 # SolidArc CAD workspace: reuse shared Frontier interface, dependencies and browser.

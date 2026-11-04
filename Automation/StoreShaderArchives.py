@@ -28,6 +28,10 @@ ArchiveSets = {
     # 📝 The analytic illumination's units include the illumination port's scene layouts and intrinsics as well.
     'AnalyticIllumination': ('Frontier/Engine/Shaders/AnalyticIllumination', ['SolarDepthRasterization', 'SurfaceShadingRasterization'],
                              ['Frontier/Engine/Shaders/GlobalIllumination']),
+    # 📝 The Particle editor's units (the eos shaders) include the illumination port's intrinsics.
+    'ParticleSimulation': ('Frontier/Engine/Shaders/ParticleSimulation', ['ParticleSimulation', 'WindLattice', 'ParticleRasterization',
+                                                                          'LightFibreRasterization', 'LensingRasterization'],
+                           ['Frontier/Engine/Shaders/GlobalIllumination']),
     'Environment': ('Frontier/Engine/Shaders', ['AtmosphereScattering', 'AtmosphereProjection', 'VisibilityProjection',
                                                  'PlanetaryProjection', 'CloudShadowProjection', 'VolumetricClouds', 'FogSpace',
                                                  'OpticalLensFlare', 'PreviewRaster']),
