@@ -619,6 +619,21 @@ in double precision:
 - The 10 ms is SwiftShader's CPU rasteriser drawing 118,770 vertices. On a GPU the pick is one small draw sequence
   and a wait for it. That cost was not measured here.
 
+## Shared gizmo and the Rendering extension (2026-11-04)
+
+- **Gizmo:** the transform handles are GizmoSpace's (`Frontier/Extensions/Interface/GizmoSpace`), the gizmo SolidArc
+  draws as well.
+  - `GizmoRasterization` draws its triangles with SolidArc's headlight shading: cones and plane quads move, arcs rotate,
+    and cylinders with the centre ring scale.
+  - The Frontier editor gains the plane quads and the screen move (the centre ring).
+  - `Images/GizmoSpaceFrontier.jpg` shows the Control tower selected, with `Images/GizmoSpaceFrontierDetail.jpg` at 3×.
+- **Bridge:** the bridge from the level to this renderer is `Frontier/Extensions/Rendering/RenderingExtension`
+  (formerly `EverestSceneViewport`).
+  - `SceneGeometryOccupancy` was formerly `EverestSceneGeometry`.
+  - The viewport contract is `Frontier/Engine/Interface/SceneViewportPresentation.h`.
+- **Simulate:** the viewport bar's Play button (Alt+S) runs the level's PhysicsSpace; see `Exhibits/Physics/README.md`.
+- **Capture:** `SceneViewportWorkspaceCapture … 3 "Geometry:Control tower"` selects a record by name.
+
 ## Checks
 
 `Code/SceneViewportValidation.cpp` (log: `Results/SceneViewportValidation.txt`, 18 checks, 0 failing) checks the
