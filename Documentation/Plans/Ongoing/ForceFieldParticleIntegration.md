@@ -121,7 +121,7 @@ behaviour unchanged; the UI follows the approved prototype (outliner, inspector,
 | E2 | `1c88331` |
 | E3 | `420724a` `4fd9014` |
 | E4 | `cdabf6c` `bbdfe2d` |
-| E5 | `d0b150c` and the commits with the docs and the binary |
+| E5 | `d0b150c` `b8968c2` `540740e` (binary, Tracker) |
 
 Renames for the engine's barred words: *system* → effect, *kind* → `ParticleBehaviour`, *emit* → release,
 *frame* → refresh, buffers → stores, *pass* → dispatch or rasterization.
