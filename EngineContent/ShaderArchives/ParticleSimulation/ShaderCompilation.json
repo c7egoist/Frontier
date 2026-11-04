@@ -136,7 +136,7 @@
     },
     {
       "file": "Frontier/Engine/Shaders/ParticleSimulation/LightFibreRasterization.slang",
-      "sha256": "63af86cdf3d2a9c38f3851325dc1a66ae656885881cee38370f70ecfd1dce668"
+      "sha256": "6555e66e5e3c6f95d5ee11708a917a062879fc1ee3826ef1d5eeeacc92f96d1b"
     },
     {
       "file": "Frontier/Engine/Shaders/ParticleSimulation/ParticleLayouts.slang",

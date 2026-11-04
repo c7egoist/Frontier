@@ -142,6 +142,23 @@ measured refinements (`RefreshToggles::Refinements`), against converged referenc
 `Frontier/Engine/Shaders/GlobalIllumination/PenumbraResolve.slang`. The report lives in
 `Documentation/Plans/Ongoing/RayTracedLighting.md`.
 
+## Force Field and Particle editors (2026-11-04)
+
+- `Frontier/Engine/PhysicalDynamics/ForceSourceCatalogue.*`: the 16 force types of the Force Field editor.
+- `Frontier/Engine/Interface/ForceFieldVisualization/`: the field slice both editors draw (Map, Oblique, Camera).
+- `Frontier/Engine/Interface/Inspectors/ForceField/`: the Force Field, Wind and force pages.
+- `Projects/Everest/Source/EverestFieldViewport.cpp`: the Field view in the Everest viewport.
+- `Frontier/Engine/PhysicalDynamics/ParticleDynamics/`: the Particle editor's scene, preset library decoder, force
+  taxonomy, uniform packing and lightning (library `FrontierEnvironmentRendering`).
+- `Frontier/Engine/Rendering/ParticleSimulation/` and `Frontier/Engine/Shaders/ParticleSimulation/`: the GPU particle
+  engine (library `FrontierParticleSimulation`, archive set `ParticleSimulation`).
+- `Frontier/Engine/Interface/ParticleEditor/` and `ParticleEditor.*`: the editor window, its pages and field overlay.
+- `Projects/Everest/Source/EverestParticleViewport.*`: the engine on the editor's device.
+- `EngineContent/ParticleArchives/ParticleLibrary.toml`: the 52 presets, exported by
+  `Automation/ExportParticleLibrary.mjs`.
+- `Exhibits/ForceFieldEditor/` and `Exhibits/ParticleEditor/`: parity tests, captures and their READMEs. The plan is
+  `Documentation/Plans/Ongoing/ForceFieldParticleIntegration.md`.
+
 ## SolidArc CAD ownership
 
 - `Engine/GeometryProcessing/`: reusable CAD B-rep, curves, surfacing, feature tree and exchange.

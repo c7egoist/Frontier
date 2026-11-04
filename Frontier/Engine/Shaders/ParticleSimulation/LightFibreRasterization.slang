@@ -286,8 +286,8 @@ float4 FibreFragment(FibreVarying In) : SV_Target0
     let Streak = SelectBranch(0.0, pow(1.0 - Behind / Window, 2.0) * Front, Behind < Window);
     let Lit = Fibre.Light.z + (1.0 - Fibre.Light.z) * Streak;
     let Ends = smoothstep(0.0, 0.04, In.Along) * (1.0 - smoothstep(0.96, 1.0, In.Along));
-    let Base = ResolveFibreColour(In.Along, In.Strand);
-    let Tint = lerp(Base, Fibre.AccentColour.xyz, Fibre.Accent.x * ResolveFibreUnit(In.Strand, 12.0));
+    let Hue = ResolveFibreColour(In.Along, In.Strand);
+    let Tint = lerp(Hue, Fibre.AccentColour.xyz, Fibre.Accent.x * ResolveFibreUnit(In.Strand, 12.0));
     let Vary = 0.4 + 0.9 * ResolveFibreUnit(In.Strand, 13.0);
     let Level = Fibre.Light.x * Vary * (Filament + Glow) * Lit * Ends * In.Fade * ResolveFibrePulse(In.Along);
     return float4(Tint * Level, 1.0);

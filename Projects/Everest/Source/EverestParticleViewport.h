@@ -39,12 +39,12 @@ class EverestParticleViewport
     [[nodiscard]] Frontier::ParticleSimulation::ParticleSimulationSequence* AccessSequence() noexcept { return Sequence_.get(); }
 
   private:
-    std::filesystem::path                                                ShaderRoot_;
-    bool                                                                 HostDeviceAttached_ = false;
-    Frontier::VulkanDeviceAccess                                         Device_{};
+    std::filesystem::path                                                     ShaderRoot_;
+    bool                                                                      HostDeviceAttached_ = false;
+    Frontier::VulkanDeviceAccess                                              Device_{};
     std::unique_ptr<Frontier::ParticleSimulation::ParticleSimulationSequence> Sequence_{};
-    bool                                                                 Constructed_ = false;
-    std::string                                                          Failure_{};
+    bool                                                                      Constructed_ = false;
+    std::string                                                               Failure_{};
 };
 
 } // namespace Everest

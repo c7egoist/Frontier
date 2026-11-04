@@ -133,23 +133,23 @@ int main(int ArgumentCount, char** Arguments)
         std::printf("[ParticleEditorCapture] editor open: %zu presets, %zu effects, %zu fields\n", Editor->QueryLibrary().Presets.size(),
                     Editor->AccessScene().Effects.size(), Editor->AccessScene().Fields.size());
 
-        std::ofstream Table(OutputDir / "Captures.tsv");
-        Table << "capture\tselected\teffects\talive\tfields\toverlay\tlattice\tmean_ms\textent\n";
+        std::ofstream Ledger(OutputDir / "Captures.tsv");
+        Ledger << "capture\tselected\teffects\talive\tfields\toverlay\tlattice\tmean_ms\textent\n";
         const auto WriteCapture = [&](const std::string& Name) {
             const ParticleViewportImage& Image = Editor->QueryImage();
             Require(Image.Failure.empty(), Name + ": " + Image.Failure);
             Require(Image.Texture == ParticleTag && !ParticlePixels.empty(), Name + ": the viewport has no particle image");
             uint32_t Alive = 0;
             for (const ParticleEffectCensus& Census : Image.Census) Alive += Census.Alive;
-            const ImDrawData*          DrawData = ImGui::GetDrawData();
+            const ImDrawData*          Submitted = ImGui::GetDrawData();
             std::vector<unsigned char> Pixels(static_cast<size_t>(CaptureWidth) * CaptureHeight * 3u, 14u);
             const std::function<FrontierExhibit::Image(ImTextureID)> Resolve = [&](ImTextureID Texture) {
                 return Texture == ParticleTag
                            ? FrontierExhibit::Image{ ParticlePixels.data(), static_cast<int>(ParticleExtent[0]), static_cast<int>(ParticleExtent[1]), 4 }
                            : FrontierExhibit::Image{};
             };
-            for (const ImDrawList* List : DrawData->CmdLists)
-                FrontierExhibit::RasterizeCommands(List, Pixels.data(), CaptureWidth, CaptureHeight, DrawData->DisplayPos, DrawData->FramebufferScale, nullptr,
+            for (const ImDrawList* List : Submitted->CmdLists)
+                FrontierExhibit::RasterizeCommands(List, Pixels.data(), CaptureWidth, CaptureHeight, Submitted->DisplayPos, Submitted->FramebufferScale, nullptr,
                                                    &Resolve);
             const std::filesystem::path Target = OutputDir / (Name + ".png");
             Require(stbi_write_png(Target.string().c_str(), CaptureWidth, CaptureHeight, 3, Pixels.data(), CaptureWidth * 3) != 0, "PNG write failed");
@@ -157,7 +157,7 @@ int main(int ArgumentCount, char** Arguments)
             std::printf("[ParticleEditorCapture] %s: %s selected, %zu effects, %u alive, overlay %s, lattice %s, %u x %u image, %.1f ms mean refresh\n",
                         Target.string().c_str(), Editor->AccessScene().Selected.c_str(), Editor->AccessScene().Effects.size(), Alive,
                         Editor->Overlay.Settings.Enabled ? "on" : "off", Image.Lattice ? "read" : "none", ParticleExtent[0], ParticleExtent[1], Mean);
-            Table << Name << '\t' << Editor->AccessScene().Selected << '\t' << Editor->AccessScene().Effects.size() << '\t' << Alive << '\t'
+            Ledger << Name << '\t' << Editor->AccessScene().Selected << '\t' << Editor->AccessScene().Effects.size() << '\t' << Alive << '\t'
                   << Editor->AccessScene().Fields.size() << '\t' << (Editor->Overlay.Settings.Enabled ? "on" : "off") << '\t'
                   << (Image.Lattice ? "read" : "none") << '\t' << Mean << '\t' << ParticleExtent[0] << 'x' << ParticleExtent[1] << '\n';
             RefreshTimes.clear();

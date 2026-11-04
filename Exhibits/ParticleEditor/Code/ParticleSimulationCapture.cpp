@@ -4,10 +4,10 @@
 // 🧩 The C++ particle engine offscreen: the prototype's default scene and showcased presets refreshed at 60 Hz on an own Vulkan
 //    device, each captured with its census, probe and refresh cost.
 //
-//     ParticleSimulationCapture <repository root> <shader folder> <output folder> [stage]
+//     ParticleSimulationCapture <repository root> <shader folder> <output folder> [capture]
 //
-// 📝 The same CPU scene (ParticleScene) and GPU sequence (ParticleSimulationSequence) the editor runs. Each stage starts a fresh
-//    scene, advances it by fixed 1/60 s ticks and writes <stage>.png plus a line of figures to Captures.tsv.
+// 📝 The same CPU scene (ParticleScene) and GPU sequence (ParticleSimulationSequence) the editor runs. Each capture starts a fresh
+//    scene, advances it by fixed 1/60 s ticks and writes <capture>.png plus a line of figures to Captures.tsv.
 
 #include "Frontier/Engine/PhysicalDynamics/ParticleDynamics/ParticleEffectLibrary.h"
 #include "Frontier/Engine/PhysicalDynamics/ParticleDynamics/ParticleScene.h"
@@ -28,7 +28,7 @@ using namespace Frontier;
 namespace
 {
 
-struct CaptureStage
+struct CaptureScene
 {
     const char*                                  Name;
     std::vector<std::string>                     Presets;   // empty = the library's default scene
@@ -42,7 +42,7 @@ int main(int ArgumentCount, char** Arguments)
 {
     if (ArgumentCount < 4)
     {
-        std::fprintf(stderr, "usage: ParticleSimulationCapture <repository root> <shader folder> <output folder> [stage]\n");
+        std::fprintf(stderr, "usage: ParticleSimulationCapture <repository root> <shader folder> <output folder> [capture]\n");
         return 2;
     }
     const std::filesystem::path Root    = Arguments[1];
@@ -71,7 +71,7 @@ int main(int ArgumentCount, char** Arguments)
     {
         return [=](ParticleScene& Scene) { Scene.Camera = { Yaw, Pitch, Distance, Target }; Scene.Lightning.Automatic = false; };
     };
-    const std::vector<CaptureStage> Stages = {
+    const std::vector<CaptureScene> Scenes = {
         { "DefaultScene", {}, 2.5, Overview },
         { "WindArrows", {}, 1.5, [](ParticleScene& Scene) { Scene.Wind.ShowArrows = true; Scene.Camera = { 0.6, 0.55, 15.0, { 0.0, 1.0, 0.0 } }; } },
         { "TornadoDebris", { "tornado" }, 4.0, Close(0.4, 0.22, 11.0, { 0.0, 2.0, -2.0 }) },
@@ -90,17 +90,17 @@ int main(int ArgumentCount, char** Arguments)
           [](ParticleScene& Scene) { Scene.Camera = { 0.6, 0.15, 16.0, { 0.0, 4.0, 0.0 } }; Scene.Lightning.NextStrikeSeconds = 1.45; } },
     };
 
-    std::ofstream Table(Output / "Captures.tsv");
-    Table << "stage\trefreshes\tseconds\talive\tcapacity\tstore_bytes\tmean_ms\tprobe_mps\n";
+    std::ofstream Ledger(Output / "Captures.tsv");
+    Ledger << "capture\trefreshes\tseconds\talive\tcapacity\tstore_bytes\tmean_ms\tprobe_mps\n";
     constexpr uint32_t Width = 960, Height = 540;
     int Failures = 0;
-    for (const CaptureStage& Stage : Stages)
+    for (const CaptureScene& Capture : Scenes)
     {
-        if (!Only.empty() && Only != Stage.Name) continue;
+        if (!Only.empty() && Only != Capture.Name) continue;
         ParticleScene Scene;
-        Scene.ConstructDefault(Library, Stage.Presets.empty() ? nullptr : &Stage.Presets);
-        if (Stage.Arrange) Stage.Arrange(Scene);
-        const uint32_t Refreshes = static_cast<uint32_t>(Stage.Seconds * 60.0 + 0.5);
+        Scene.ConstructDefault(Library, Capture.Presets.empty() ? nullptr : &Capture.Presets);
+        if (Capture.Arrange) Capture.Arrange(Scene);
+        const uint32_t Refreshes = static_cast<uint32_t>(Capture.Seconds * 60.0 + 0.5);
         double         Total     = 0.0;
         bool           Healthy   = true;
         for (uint32_t Refresh = 0; Refresh < Refreshes && Healthy; ++Refresh)
@@ -113,7 +113,7 @@ int main(int ArgumentCount, char** Arguments)
         }
         if (!Healthy)
         {
-            std::printf("  🔴 %s: %s\n", Stage.Name, Diagnostic.c_str());
+            std::printf("  🔴 %s: %s\n", Capture.Name, Diagnostic.c_str());
             ++Failures;
             continue;
         }
@@ -123,14 +123,14 @@ int main(int ArgumentCount, char** Arguments)
         Final.ProbeCell = Scene.ResolveProbeCell();
         if (!Sequence.Refresh(Final, Scene.Effects, &Diagnostic))
         {
-            std::printf("  🔴 %s: %s\n", Stage.Name, Diagnostic.c_str());
+            std::printf("  🔴 %s: %s\n", Capture.Name, Diagnostic.c_str());
             ++Failures;
             continue;
         }
         std::vector<uint8_t> Rgba;
         if (!Sequence.ReadPresentedImage(Rgba, &Diagnostic) || Rgba.size() < static_cast<size_t>(Width) * Height * 4u)
         {
-            std::printf("  🔴 %s: %s\n", Stage.Name, Diagnostic.c_str());
+            std::printf("  🔴 %s: %s\n", Capture.Name, Diagnostic.c_str());
             ++Failures;
             continue;
         }
@@ -141,10 +141,10 @@ int main(int ArgumentCount, char** Arguments)
             for (int Channel = 0; Channel < 3; ++Channel) Rgb[Pixel * 3 + Channel] = Rgba[Pixel * 4 + Channel];
             Lit += (Rgba[Pixel * 4] + Rgba[Pixel * 4 + 1] + Rgba[Pixel * 4 + 2]) > 90 ? 1 : 0;
         }
-        const std::filesystem::path Target = Output / (std::string(Stage.Name) + ".png");
+        const std::filesystem::path Target = Output / (std::string(Capture.Name) + ".png");
         if (stbi_write_png(Target.string().c_str(), Width, Height, 3, Rgb.data(), Width * 3) == 0)
         {
-            std::printf("  🔴 %s: PNG write failed\n", Stage.Name);
+            std::printf("  🔴 %s: PNG write failed\n", Capture.Name);
             ++Failures;
             continue;
         }
@@ -155,7 +155,7 @@ int main(int ArgumentCount, char** Arguments)
             if (const ParticleSimulation::ParticleCensus* Census = Sequence.QueryCensus(Effect.Token); Census && Census->Valid) Alive += Census->Alive;
         }
         const auto& Probe = Sequence.QueryProbe();
-        std::printf("  %-20s %4u refreshes  %6u / %6u alive  %5.1f%% lit  %7.1f ms mean  probe %.2f m/s\n", Stage.Name, Refreshes + 1, Alive,
+        std::printf("  %-20s %4u refreshes  %6u / %6u alive  %5.1f%% lit  %7.1f ms mean  probe %.2f m/s\n", Capture.Name, Refreshes + 1, Alive,
                     Capacity, 100.0 * static_cast<double>(Lit) / (static_cast<double>(Width) * Height), Total / std::max(1u, Refreshes),
                     Probe.Valid ? Probe.Magnitude : 0.0f);
         for (const ParticleEffectInstance& Effect : Scene.Effects)
@@ -166,7 +166,7 @@ int main(int ArgumentCount, char** Arguments)
                             Census->SpeciesB, Census->SpeciesC, Census->Energy);
             }
         }
-        Table << Stage.Name << '\t' << Refreshes + 1 << '\t' << Stage.Seconds << '\t' << Alive << '\t' << Capacity << '\t' << Sequence.QueryStoreBytes()
+        Ledger << Capture.Name << '\t' << Refreshes + 1 << '\t' << Capture.Seconds << '\t' << Alive << '\t' << Capacity << '\t' << Sequence.QueryStoreBytes()
               << '\t' << Total / std::max(1u, Refreshes) << '\t' << (Probe.Valid ? Probe.Magnitude : 0.0f) << '\n';
     }
     std::printf("%s %d failures\n", Failures == 0 ? "✔️" : "🔴", Failures);
