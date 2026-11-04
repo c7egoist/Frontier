@@ -1,6 +1,6 @@
 # Force Field and Particle editors — C++ integration plan
 
-Status: **in progress** (2026-11-04, branch `arena/88b72faa-frontier`). The owner approved the HTML prototypes
+Status: **phases A to E done** (2026-11-04, branch `arena/88b72faa-frontier`). The owner approved the HTML prototypes
 (`Experimental/ForceFieldEditor`, `Experimental/ParticleEditor`, `Exhibits/ForceFieldEditor`) and asked for both
 editors in the Frontier editor before the vehicle step. This plan records the phases and what each one delivered.
 
@@ -23,7 +23,7 @@ editors in the Frontier editor before the vehicle step. This plan records the ph
 | B | Field view: Scene · Field switch, map, oblique, minimap, timeline, camera overlay | ✔️ `440c481` `f6f0deb` |
 | C | Force Field, Wind and Force pages, Forces group, workspace actions, Log Stream | ✔️ `ddff77f` … `fc32e34` |
 | D | Windows binary and Tracker | ✔️ `3b0df56` and the commit with the binary |
-| E | Particle editor: outliner, inspector, library, its own Vulkan viewport (Slang port) | 🚧 |
+| E | Particle editor: outliner, inspector, library, its own Vulkan viewport (Slang port) | ✔️ `fc78edc` … see §6 |
 
 ## 3. Phase A — engine
 
@@ -101,11 +101,34 @@ behaviour unchanged; the UI follows the approved prototype (outliner, inspector,
 - E2: simulation, wind lattice, rendering, light fibres and lensing, compiled by the pinned slangc and stored like
   the other shader sets.
 - E3: particle stores, census and probe readbacks; the captures are compared with the prototype's.
+- E4: the editor in the Everest workspace, opened from a Particles record (`InspectorRuntime::RequestEditorOpen`) as
+  a modal window that owns the keys while open:
+  - `Interface/ParticleEditor/ParticleEditorWorkspace`: the Outliner, viewport bar, HUD, probe, minimap, Log Stream,
+    the library sheet and the editor's verbs (`select:`, `add:`, `add-force:`, `strike`, `library:on` …).
+  - `ParticleEditorPages`: the Force Field, Wind, force, Lightning and effect pages in the Render settings controls.
+  - `ParticleFieldOverlay`: `ForceFieldVisualization` in its Camera projection over the image, given a sampler of the
+    particle scene (`FieldSampler`): Flow from the lattice readback, Accelerate from `fieldAccel`, Damp from the
+    taxonomy.
+  - The engine runs through a presenter the application registers (`RegisterParticleViewportPresenter`):
+    `Projects/Everest/Source/EverestParticleViewport` on the editor's Vulkan device. It waits for the queue before
+    each refresh, because the previous interface refresh may still sample the image. `WindowsFrontier.cpp` registers
+    it and retires it with the scene view.
+- E5: `Exhibits/ParticleEditor/README.md` (8 editor and 15 engine captures), the Tracker entry and the Windows binary.
+
+| Step | Commits |
+|---|---|
+| E1 | `fc78edc` `315eec9` `24f4a26` |
+| E2 | `1c88331` |
+| E3 | `420724a` `4fd9014` |
+| E4 | `cdabf6c` `bbdfe2d` |
+| E5 | `d0b150c` and the commits with the docs and the binary |
 
 Renames for the engine's barred words: *system* → effect, *kind* → `ParticleBehaviour`, *emit* → release,
 *frame* → refresh, buffers → stores, *pass* → dispatch or rasterization.
 
 ## 7. Open points
 
+- The particle scene lives for the editor session: storing it in the level, and the Particles record's own sliders.
+- The level's Force Field record (100 m to 100 km) as a source for the particle lattice.
 - Authored flow sources in the GPU cloud records (funnels for authored tornadoes) — after the owner sees the field.
 - The proposed cascades (4 × 128² × 32) are budgeted and drawn; the GPU lattice itself comes with the particles.
