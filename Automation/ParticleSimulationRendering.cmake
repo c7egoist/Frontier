@@ -1,8 +1,12 @@
 #============================================================================================================================================
 #                                                   PARTICLESIMULATIONRENDERING.CMAKE
 #============================================================================================================================================
-# 🧩 The Particle editor's GPU engine: the Slang units ported from the eos shaders (archive set ParticleSimulation), compiled one
-#    SPIR-V file per entry point.
+# 🧩 The Particle editor's GPU engine: the eos WebGPU engine on the device exchange (Frontier/Engine/Rendering/ParticleSimulation) and
+#    its Slang units ported from the eos shaders (archive set ParticleSimulation), compiled one SPIR-V file per entry point.
+
+add_library(FrontierParticleSimulation STATIC
+    Frontier/Engine/Rendering/ParticleSimulation/ParticleSimulationSequence.cpp)
+target_link_libraries(FrontierParticleSimulation PUBLIC FrontierGlobalIllumination FrontierEnvironmentRendering)
 
 # 📝 The units include the illumination port's intrinsics (IntrinsicParity.slang), so they compile with the same pinned compiler;
 #    without it the editor uses EngineContent/ShaderArchives/ParticleSimulation.
@@ -76,4 +80,18 @@ if(FRONTIER_GLOBAL_ILLUMINATION_SLANGC)
             VERBATIM)
     endforeach()
     add_custom_target(FrontierParticleSimulationShaders ALL DEPENDS ${FRONTIER_PARTICLE_SIMULATION_SPV_OUTPUTS})
+endif()
+if(TARGET FrontierParticleSimulationShaders)
+    add_dependencies(FrontierParticleSimulation FrontierParticleSimulationShaders)
+endif()
+
+if(BUILD_TESTING)
+    # 📝 The C++ particle engine offscreen on its own device: the default scene and one capture per showcased preset
+    #    (Exhibits/ParticleEditor).
+    add_executable(ParticleSimulationCapture
+        Exhibits/ParticleEditor/Code/ParticleSimulationCapture.cpp
+        Engine/Render/StbImageWriteImplementation.cpp)
+    target_include_directories(ParticleSimulationCapture PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb"
+        "${CMAKE_SOURCE_DIR}/ExternalPackages/tomlpp/include")
+    target_link_libraries(ParticleSimulationCapture PRIVATE FrontierParticleSimulation)
 endif()
