@@ -715,6 +715,15 @@ if(BUILD_TESTING)
     add_test(NAME ForceFieldCatalogueValidation COMMAND ForceFieldCatalogueValidation "${CMAKE_SOURCE_DIR}")
     set_tests_properties(ForceFieldCatalogueValidation PROPERTIES TIMEOUT 120)
 
+    # 📝 The C++ Particle editor library and GPU payloads against the approved prototype (eos presets.js, fillSys, fillFibre,
+    #    the prototype's camera, field and lensing packing, and the eos force taxonomy).
+    add_executable(ParticleLibraryValidation
+        Exhibits/ParticleEditor/Code/ParticleLibraryValidation.cpp)
+    target_include_directories(ParticleLibraryValidation PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/tomlpp/include")
+    target_link_libraries(ParticleLibraryValidation PRIVATE FrontierEnvironmentRendering)
+    add_test(NAME ParticleLibraryValidation COMMAND ParticleLibraryValidation "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(ParticleLibraryValidation PROPERTIES TIMEOUT 60)
+
     add_executable(EverestInterfaceValidation
         Exhibits/EverestInterface/Code/EverestInterfaceValidation.cpp
         Engine/Render/StbImageWriteImplementation.cpp)

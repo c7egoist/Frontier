@@ -216,6 +216,25 @@ for (const Time of Times)
     }
 }
 
+//------------------------------------------------------------------------------------------------------------------------
+//                                                    HYPOT
+//------------------------------------------------------------------------------------------------------------------------
+
+// 📝 Math.hypot as V8 computes it, for ResolveCompensatedHypotenuse: two and three arguments over many magnitudes.
+let Seed = 20261104;
+const Random = () => ((Seed = (Seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+const Arguments = [], Hypotenuses = [];
+for (let Index = 0; Index < 96; Index++)
+{
+    const Magnitude = 10 ** (Math.floor(Random() * 12) - 6);
+    const Values = [0, 1, 2].map(() => (Random() - 0.5) * Magnitude);
+    if (Index % 3 === 0) Values[2] = 0;
+    Arguments.push(...Values);
+    Hypotenuses.push(Index % 3 === 0 ? Math.hypot(Values[0], Values[1]) : Math.hypot(...Values));
+}
+Lines.push('', '# 📝 Every third triple is a two-argument hypot of its first two values.', '[hypot]',
+           `arguments = ${Doubles(Arguments)}`, `results = ${Doubles(Hypotenuses)}`);
+
 const Output = join(Root, 'Exhibits/ParticleEditor/Results/PackingReference.toml');
 mkdirSync(dirname(Output), { recursive: true });
 writeFileSync(Output, Lines.join('\n') + '\n', 'utf8');

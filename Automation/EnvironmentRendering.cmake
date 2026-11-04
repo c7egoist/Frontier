@@ -18,6 +18,9 @@ add_library(FrontierEnvironmentRendering STATIC
     Frontier/Engine/PhysicalDynamics/ForceField.cpp
     Frontier/Engine/PhysicalDynamics/AtmosphericFlow.cpp
     Frontier/Engine/PhysicalDynamics/ForceSourceCatalogue.cpp
+    Frontier/Engine/PhysicalDynamics/ParticleDynamics/ParticleFieldTaxonomy.cpp
+    Frontier/Engine/PhysicalDynamics/ParticleDynamics/ParticleEffectLibrary.cpp
+    Frontier/Engine/PhysicalDynamics/ParticleDynamics/ParticleUniformPacking.cpp
     Frontier/Engine/PlanetaryAtmosphere/AtmosphereScattering.cpp
     Frontier/Engine/PlanetaryAtmosphere/AstronomicalEphemeris.cpp
     Frontier/Engine/PlanetaryAtmosphere/AtmosphereProjection.cpp
@@ -40,7 +43,8 @@ target_include_directories(FrontierEnvironmentRendering PUBLIC
     "${CMAKE_SOURCE_DIR}/Engine/Interface"
     "${CMAKE_SOURCE_DIR}/ExternalPackages/vulkan-headers/include")
 target_include_directories(FrontierEnvironmentRendering PRIVATE
-    "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
+    "${CMAKE_SOURCE_DIR}/ExternalPackages/stb"
+    "${CMAKE_SOURCE_DIR}/ExternalPackages/tomlpp/include")
 target_compile_definitions(FrontierEnvironmentRendering PUBLIC VK_NO_PROTOTYPES)
 target_link_libraries(FrontierEnvironmentRendering PUBLIC ${CMAKE_DL_LIBS} Threads::Threads)
 
