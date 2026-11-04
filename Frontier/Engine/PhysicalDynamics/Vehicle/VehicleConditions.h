@@ -43,8 +43,10 @@ struct TractionControlSpecification
     float RecoveryRate  = 3.0f;    // [1/s] how fast a cut throttle returns
 };
 
-// 📝 Fuel (GRIT FFuelSpecifications): flow = brake power × SpecificConsumption + IdleFlow; an empty tank stops the engine's torque.
-//    The fuel's mass rides in the chassis, so the host lowers the body's mass as it burns.
+// 📝 Fuel (GRIT FFuelSpecifications): flow = indicated power (brake + friction + pumping) × SpecificConsumption + IdleFlow;
+//    an empty tank stops the engine's torque. Indicated efficiency is roughly constant over load, so part-load fuel rises
+//    with the friction share (the Willans approximation). The fuel's mass rides in the chassis, so the host lowers the
+//    body's mass as it burns.
 struct FuelSpecification
 {
     bool  Enabled                    = false;
@@ -53,6 +55,7 @@ struct FuelSpecification
     float DensityKgPerLitre          = 0.745f;   // [kg/L]    petrol
     float SpecificConsumption_gPerKWh = 270.0f;  // [g/kWh]   brake-specific fuel consumption
     float IdleFlow_gPerS             = 0.25f;    // [g/s]
+    float LowerHeatingValue_MJkg     = 44.0f;    // [MJ/kg]   petrol (energy audits: fuel mass × LHV)
 };
 
 // 📝 Engine coolant and oil, two lumped heat capacities (GRIT CoolantSpecifications, EngineOilSpecifications): the share of fuel heat
@@ -89,6 +92,61 @@ struct ChargeAirSpecification
     float IntercoolerEffectiveness = 0.75f;     // [-]
     float ReferenceTemperature_K   = 318.15f;   // [K] charge temperature the boost curves were measured at
     bool  DensityCorrection        = false;
+};
+
+// 📝 Intake manifold (mean-value filling dynamics): the throttle meters air into the plenum through a compressible orifice
+//    (choked below the critical pressure ratio), the engine gulps it by speed-density, and the manifold density relative
+//    to upstream sets the torque ratio — vacuum, not the pedal, meters the air at part throttle. Off by default; on, the
+//    pumping loss follows the vacuum instead of (1 − throttle). Upstream is ambient on NA engines, ambient + boost with a
+//    blow-through throttle on forced induction (density at ambient temperature; the charge-air correction stays separate).
+struct IntakeManifoldSpecification
+{
+    bool  Enabled                 = false;
+    float PlenumVolume_L          = 3.5f;    // [L]   plenum + runners
+    float ThrottleBore_mm         = 65.0f;   // [mm]
+    float DischargeCoefficient    = 0.75f;   // [-]
+    float IdleThrottle            = 0.012f;  // [-]   bypass opening at zero pedal (the idle governor trims around it)
+    float Displacement_L          = 3.8f;    // [L]   swept volume (4-stroke gulp)
+    float VolumetricEfficiency    = 0.85f;   // [-]   at VolumetricPeakRPM
+    float VolumetricPeakRPM       = 4500.0f; // [rpm]
+    float VolumetricFalloff       = 0.15f;   // [-]   fractional loss at ±4000 rpm from the peak (quadratic)
+};
+
+// 📝 Traction motor (permanent-magnet synchronous): torque cap, power cap past the base speed, overspeed ceiling,
+//    drivability slew, copper (T²) + iron (ω²) + friction (|ω|) losses, and recuperation opposing motion with the brake.
+//    Single-speed reduction to the driven wheels; reverse is out of scope.
+struct ElectricMotorParameters
+{
+    float PeakTorque_Nm          = 400.0f;    // [Nm]
+    float PeakPower_W            = 150000.0f; // [W]
+    float RegenerativeTorque_Nm  = 250.0f;    // [Nm]   recuperation cap (motor shaft)
+    float MaxRPM                 = 16000.0f;  // [rpm]
+    float ReductionRatio         = 8.5f;      // [-]    single-speed
+    float DrivetrainEff          = 0.92f;     // [-]
+    float RotorInertia           = 0.05f;     // [kg·m²]
+    float TorqueRateLimit_NmPerS = 3000.0f;   // [Nm/s] drivability slew
+    float CopperLoss             = 0.05f;     // [W/Nm²]  P = c·T²
+    float IronLoss               = 0.012f;    // [W·s²/rad²] P = c·ω²
+    float FrictionLoss           = 0.5f;      // [W·s/rad]  P = c·|ω|
+};
+
+// 📝 Traction battery: open-circuit voltage linear in charge, series resistance (the load sag), current limits that clip
+//    motor torque, coulomb counting, and a lumped temperature that derates the motor when hot.
+struct BatteryParameters
+{
+    float Capacity_kWh           = 75.0f;   // [kWh]
+    float NominalVoltage_V       = 350.0f;  // [V]   capacity reference
+    float OpenCircuitEmpty_V     = 320.0f;  // [V]
+    float OpenCircuitFull_V      = 380.0f;  // [V]
+    float InternalResistance_Ohm = 0.08f;   // [Ω]
+    float MaxDischargeCurrent_A  = 600.0f;  // [A]
+    float MaxChargeCurrent_A     = 300.0f;  // [A]
+    float InitialCharge          = 0.6f;    // [-]   0..1 at Reset
+    float ThermalCapacity_JK     = 80000.0f;// [J/K]
+    float CoolingConductance_WK  = 25.0f;   // [W/K] to ambient
+    float AmbientTemperature_K   = 293.15f; // [K]
+    float DerateStart_K          = 318.15f; // [K]   full power below
+    float DerateEnd_K            = 333.15f; // [K]   no power above
 };
 
 // 📝 Compressor outlet and intercooled charge temperatures for a gauge boost (bar) at one compressor efficiency.

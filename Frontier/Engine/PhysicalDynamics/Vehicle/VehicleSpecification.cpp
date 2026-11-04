@@ -41,6 +41,14 @@ VehicleSpecification ConstructControlVehicleSpecification()
     Solver.TyrePacejka.LoadSensitivityAboveReference = true;
     Solver.TyrePacejka.CombinedSlipMf61              = true;
     Solver.TyreWear.Enabled = true;
+    // 📝 The source's turbo presets cannot spool: the friction (2e-3·ω + 5e-5·ω²) absorbs ~100 kW by 12k rpm, and the
+    //    0.02 kg·m² shaft inertia is ~100× a GT-R-class cartridge, so boost never passes 0.1 bar. Physical presets (a few
+    //    kW of friction at 100k rpm, 2e-4 kg·m²) let it spool in ~1 s and regulate on the wastegate (section C1b).
+    Solver.Turbo.TurboFrictionCoeff     = 5.0e-5f;
+    Solver.Turbo.TurboFrictionQuadratic = 1.0e-9f;
+    Solver.Turbo.TurboInertia           = 2.0e-4f;
+    // 📝 Cycled ABS (dump fast, reapply on a controlled ramp) instead of the hunting proportional loop.
+    Solver.Abs.ReapplyRate = 3.0f;
     // 📝 Brakes, aids and the engine's conditions.
     Solver.BrakeThermalEnabled     = true;
     Solver.Abs.Enabled             = true;
@@ -272,7 +280,7 @@ std::vector<VehicleFigure> EnumerateVehicleFigures(VehicleSpecification& S)
     Real("engine", "inertia_kgm2", "Engine inertia", "kg·m²", 0.02, 3.0, C.Engine.EngineInertia);
     Choose("induction", "category", "Induction", { "Naturally aspirated", "Turbocharged", "Supercharged" }, C.Induction);
     Switch("induction", "race_tune", "Race fuel tune", C.RaceTune);
-    Real("turbo", "inertia_kgm2", "Turbo inertia", "kg·m²", 0.001, 0.2, C.Turbo.TurboInertia);
+    Real("turbo", "inertia_kgm2", "Turbo inertia", "kg·m²", 0.00005, 0.2, C.Turbo.TurboInertia);
     Real("turbo", "friction", "Shaft friction", "", 0.0, 0.05, C.Turbo.TurboFrictionCoeff);
     Real("turbo", "friction_quadratic", "Shaft friction, quadratic", "", 0.0, 0.001, C.Turbo.TurboFrictionQuadratic);
     Real("turbo", "wastegate_bar", "Wastegate limit", "bar", 0.2, 4.0, C.Turbo.WastegateMaxBoost);
@@ -306,6 +314,17 @@ std::vector<VehicleFigure> EnumerateVehicleFigures(VehicleSpecification& S)
     Real("clutch", "breakaway_rpm", "Breakaway slip", "rpm", 10.0, 2000.0, C.Clutch.BreakawaySlipRPM);
     Real("clutch", "lockup_engagement", "Lock-up engagement", "", 0.5, 1.0, C.Clutch.LockupEngagement);
     Real("clutch", "lockup_rpm", "Lock-up slip", "rpm", 1.0, 500.0, C.Clutch.LockupSlipRPM);
+    Choose("clutch", "category", "Clutch", { "Single plate", "Dual clutch", "Torque converter" }, C.Clutch.Category);
+    Real("clutch", "shift_s", "Staged shift time (0: instant)", "s", 0.0, 2.0, C.Clutch.ShiftDuration);
+    Real("clutch", "handoff_s", "DCT handoff overlap", "s", 0.05, 1.0, C.Clutch.HandoffSeconds);
+    Real("clutch", "launch_s", "Launch ramp", "s", 0.1, 3.0, C.Clutch.LaunchSeconds);
+    Real("clutch", "converter_k", "Converter K factor", "rpm/√Nm", 20.0, 400.0, C.Clutch.ConverterKFactor);
+    Real("clutch", "converter_stall_ratio", "Converter stall ratio", "×", 1.0, 3.0, C.Clutch.ConverterStallRatio);
+    Real("clutch", "converter_coupling", "Converter coupling point", "", 0.5, 1.0, C.Clutch.ConverterCouplingPoint);
+    Real("clutch", "converter_lockup_rpm", "Converter lock-up speed", "rpm", 400.0, 6000.0, C.Clutch.LockupRPM);
+    Real("clutch", "converter_lockup_drop_rpm", "Lock-up hysteresis", "rpm", 50.0, 2000.0, C.Clutch.LockupDropRPM);
+    Real("clutch", "converter_lockup_rate", "Lock-up rate", "1/s", 0.5, 20.0, C.Clutch.LockupRate);
+    Choose("propulsion", "type", "Propulsion", { "Combustion", "Electric" }, C.Propulsion);
     Choose("differential", "mode", "Differential", { "Open", "Locked", "Limited slip", "Torque vectoring" }, C.Differential.Mode);
     Real("differential", "locking", "Locking factor", "", 0.0, 1.0, C.Differential.LockingFactor);
     Real("differential", "preload_nm", "Preload", "N·m", 0.0, 500.0, C.Differential.Preload_Nm);
@@ -336,6 +355,8 @@ std::vector<VehicleFigure> EnumerateVehicleFigures(VehicleSpecification& S)
     Real("abs", "gain", "ABS gain", "", 0.5, 40.0, C.Abs.Gain);
     Real("abs", "minimum_mps", "ABS minimum speed", "m/s", 0.0, 10.0, C.Abs.MinSpeed);
     Real("abs", "floor", "ABS pressure floor", "", 0.0, 1.0, C.Abs.DumpFloor);
+    Real("abs", "reapply_per_s", "Cycled reapply rate (0: proportional)", "1/s", 0.0, 20.0, C.Abs.ReapplyRate);
+    Real("abs", "dump_per_s", "Cycled dump rate", "1/s", 1.0, 60.0, C.Abs.DumpRate);
     Switch("traction", "enabled", "Traction control", C.TractionControl.Enabled);
     Real("traction", "slip_target", "Slip target", "", 0.02, 0.5, C.TractionControl.SlipTarget);
     Real("traction", "gain", "Throttle cut per slip", "", 0.5, 40.0, C.TractionControl.Gain);
@@ -443,6 +464,24 @@ std::vector<VehicleFigure> EnumerateVehicleFigures(VehicleSpecification& S)
     Real("fuel", "density", "Fuel density", "kg/L", 0.5, 1.0, C.Fuel.DensityKgPerLitre);
     Real("fuel", "bsfc", "Specific consumption", "g/kWh", 150.0, 500.0, C.Fuel.SpecificConsumption_gPerKWh);
     Real("fuel", "idle_gps", "Idle flow", "g/s", 0.0, 3.0, C.Fuel.IdleFlow_gPerS);
+    Real("fuel", "lhv_mjkg", "Lower heating value", "MJ/kg", 20.0, 60.0, C.Fuel.LowerHeatingValue_MJkg);
+    Switch("intake", "enabled", "Intake manifold filling", C.Intake.Enabled);
+    Real("intake", "plenum_l", "Plenum volume", "L", 0.5, 12.0, C.Intake.PlenumVolume_L);
+    Real("intake", "throttle_mm", "Throttle bore", "mm", 20.0, 120.0, C.Intake.ThrottleBore_mm);
+    Real("intake", "discharge", "Discharge coefficient", "", 0.3, 1.0, C.Intake.DischargeCoefficient);
+    Real("intake", "idle_throttle", "Idle bypass", "", 0.0, 0.1, C.Intake.IdleThrottle);
+    Real("intake", "displacement_l", "Swept volume", "L", 0.5, 10.0, C.Intake.Displacement_L);
+    Real("intake", "volumetric_efficiency", "Volumetric efficiency", "", 0.4, 1.2, C.Intake.VolumetricEfficiency);
+    Real("motor", "peak_torque_nm", "Peak torque", "N·m", 50.0, 1500.0, C.ElectricMotor.PeakTorque_Nm);
+    Real("motor", "peak_power_kw", "Peak power", "kW", 20.0, 600.0, C.ElectricMotor.PeakPower_W, Kilo);
+    Real("motor", "regen_nm", "Regen cap", "N·m", 0.0, 800.0, C.ElectricMotor.RegenerativeTorque_Nm);
+    Real("motor", "max_rpm", "Overspeed ceiling", "rpm", 4000.0, 30000.0, C.ElectricMotor.MaxRPM);
+    Real("motor", "reduction", "Reduction ratio", "×", 2.0, 20.0, C.ElectricMotor.ReductionRatio);
+    Real("motor", "rotor_inertia", "Rotor inertia", "kg·m²", 0.005, 0.5, C.ElectricMotor.RotorInertia);
+    Real("battery", "capacity_kwh", "Capacity", "kWh", 5.0, 200.0, C.Battery.Capacity_kWh);
+    Real("battery", "resistance_ohm", "Internal resistance", "Ω", 0.005, 0.5, C.Battery.InternalResistance_Ohm);
+    Real("battery", "charge_current_a", "Max charge current", "A", 20.0, 800.0, C.Battery.MaxChargeCurrent_A);
+    Real("battery", "initial_charge", "Charge at reset", "", 0.0, 1.0, C.Battery.InitialCharge);
     Switch("fluids", "enabled", "Coolant and oil", C.Fluids.Enabled);
     Real("fluids", "ambient_k", "Air temperature", "°C", -30.0, 50.0, C.Fluids.AmbientTemperature_K, 1.0, Celsius);
     Real("fluids", "coolant_capacity", "Coolant heat capacity", "kJ/K", 5.0, 200.0, C.Fluids.CoolantCapacity_JK, Kilo);

@@ -159,7 +159,7 @@ float VehicleSolver::WheelSteer(size_t Wheel) const noexcept
 void VehicleSolver::IntegrateEngineConditions(float Seconds, float Power) noexcept
 {
     const EngineFluidSpecification& Fluids = ActiveConfiguration.Fluids;
-    if (!Fluids.Enabled) return;
+    if (!Fluids.Enabled || ActiveConfiguration.Propulsion == PropulsionType::Electric) return;
     const float Omega    = CurrentTelemetry.EngineRPM * Drivetrain::kRpmToRad;
     const float Friction = (ActiveConfiguration.Engine.EngineBrakingCoeff * Omega + ActiveConfiguration.Engine.EngineBrakingQuadratic * Omega * Omega) * Omega;
     const float FuelHeat = (std::max(0.0f, Power) + std::max(0.0f, Friction)) / std::max(0.05f, Fluids.ThermalEfficiency);
@@ -202,11 +202,21 @@ void VehicleSolver::Build(const VehicleSolverConfiguration& config, const Hooks&
     Powertrain.AssignSupercharger(ActiveConfiguration.Supercharger);
     Powertrain.AssignRaceTune(ActiveConfiguration.RaceTune);
     Powertrain.AssignChargeAir(ActiveConfiguration.ChargeAir);
+    Powertrain.AssignPropulsion(ActiveConfiguration.Propulsion);
+    Powertrain.AssignIntake(ActiveConfiguration.Intake);
+    Powertrain.AssignElectricMotor(ActiveConfiguration.ElectricMotor);
+    Powertrain.AssignBattery(ActiveConfiguration.Battery);
     Powertrain.Reset(ActiveConfiguration.Engine.IdleRPM);
     BrakingHydraulics.Configure(ActiveConfiguration.Wheels.size(), ActiveConfiguration.Brakes, ActiveConfiguration.Abs);
 
     GearIndex  = ActiveConfiguration.Transmission.NeutralIndex;       // start in neutral (auto-clutch engages 1st on throttle)
     ShiftTimer = ActiveConfiguration.ShiftCooldownSeconds;
+    ShiftProgress = -1.0f;
+    ShiftTarget   = ActiveConfiguration.Transmission.NeutralIndex + 1;
+    ShiftDown     = false;
+    PreselectGear = -1;
+    LaunchTimer   = 0.0f;
+    LockupAllowed = false;
     WheelSpin.assign(ActiveConfiguration.Wheels.size(), 0.0f);
     // Start every strut at the sag its own spring settles to, so the car stands at its authored ride height on step
     //    zero instead of dropping into it and ringing for the first second of every run.
@@ -264,6 +274,10 @@ void VehicleSolver::Build(const VehicleSolverConfiguration& config, const Hooks&
     CurrentTelemetry.EngineRPM = ActiveConfiguration.Engine.IdleRPM;
     CurrentTelemetry.GearIndex = GearIndex;
     CurrentTelemetry.PacejkaActive = ActiveConfiguration.ActiveScheme == DrivingScheme::PacejkaDrivetrain;
+    CurrentTelemetry.ShiftActive = false;
+    CurrentTelemetry.HandoffBlend = -1.0f;
+    CurrentTelemetry.ClutchEngagement = 1.0f;
+    CurrentTelemetry.BatteryCharge = ActiveConfiguration.Battery.InitialCharge;
 
     ConstructionComplete = !Wheels.empty() && static_cast<bool>(ChassisHooks.ReadChassis) &&
              static_cast<bool>(ChassisHooks.ApplyForceAtPoint) && static_cast<bool>(ChassisHooks.Ground);
@@ -619,11 +633,58 @@ void VehicleSolver::StepPacejka(float Δτ) noexcept
     const int firstGear = neutral + 1;
     const int lastGear  = static_cast<int>(ActiveConfiguration.Transmission.GearRatios.size()) - 1;
     const float throttleCmd = Clamp(DriverCommand.Throttle, 0.0f, 1.0f);
-    // 📝 Declutch BEFORE producing torque. Brake-holding at speed must not re-engage first gear every tick.
-    const bool BrakePriority = throttleCmd < 0.05f && (DriverCommand.Brake > 0.0f || DriverCommand.Handbrake);
-    if (BrakePriority) GearIndex = neutral;
-    if (GearIndex == neutral && !BrakePriority && (throttleCmd > 0.05f || forwardVel > 1.0f))
-        GearIndex = firstGear;
+    // 📝 Staged gearboxes, the converter automatic and the electric drive take the servo path below; the source's
+    //    instant-shift single plate keeps this block exactly as it was.
+    const bool electricDrive = ActiveConfiguration.Propulsion == PropulsionType::Electric;
+    const ClutchCategory category = ActiveConfiguration.Clutch.Category;
+    const bool legacyGearbox = !electricDrive && category == ClutchCategory::SinglePlate && !(ActiveConfiguration.Clutch.ShiftDuration > 0.0f);
+    float servoEngagement = -1.0f, servoThrottleOverride = -1.0f, servoHandoff = -1.0f;
+    int   servoPreselect = -1;
+    if (legacyGearbox)
+    {
+        // 📝 Declutch BEFORE producing torque. Brake-holding at speed must not re-engage first gear every tick.
+        const bool BrakePriority = throttleCmd < 0.05f && (DriverCommand.Brake > 0.0f || DriverCommand.Handbrake);
+        if (BrakePriority) GearIndex = neutral;
+        if (GearIndex == neutral && !BrakePriority && (throttleCmd > 0.05f || forwardVel > 1.0f))
+            GearIndex = firstGear;
+    }
+    else if (electricDrive) GearIndex = firstGear;   // single-speed: no gears, no clutch, no idle
+    else if (category == ClutchCategory::TorqueConverter)
+    {
+        // A converter automatic stays in drive the way a PRND selector would: the fluid absorbs standstill and
+        // braking, so it never auto-declutches (that is what lets it creep). It still shifts itself by rpm.
+        if (GearIndex == neutral && forwardVel > -1.0f) GearIndex = firstGear;
+    }
+    else
+    {
+        // Staged single plate / dual clutch: engage like the legacy clutch, but under brakes the clutch opens
+        // instead of the gearbox dropping to neutral (that is what an AMT/DCT does).
+        if (GearIndex == neutral && (throttleCmd > 0.05f || forwardVel > 1.0f)) GearIndex = firstGear;
+        const bool brakingToStop = DriverCommand.Brake > 0.4f && throttleCmd < 0.05f && speed < 3.0f;
+        if ((speed < 0.5f && throttleCmd < 0.05f) || brakingToStop) LaunchTimer = 0.0f;
+        else if (throttleCmd > 0.05f) LaunchTimer = std::min(LaunchTimer + Δτ, std::max(0.05f, ActiveConfiguration.Clutch.LaunchSeconds) + 1.0f);
+        const float launchRamp = Clamp(LaunchTimer / std::max(0.05f, ActiveConfiguration.Clutch.LaunchSeconds), 0.0f, 1.0f);
+        if (category == ClutchCategory::DualClutch)
+        {
+            servoEngagement = 1.0f;
+            if (ShiftProgress >= 0.0f)
+            {
+                servoHandoff = Clamp(ShiftProgress, 0.0f, 1.0f);
+                servoPreselect = PreselectGear;
+                if (ShiftDown && ShiftProgress > 0.2f && ShiftProgress < 0.8f) servoThrottleOverride = std::max(throttleCmd, 0.55f);
+            }
+        }
+        else
+        {
+            float shiftEngagement = 1.0f;
+            if (ShiftProgress >= 0.0f)
+            {
+                shiftEngagement = 1.0f - std::sin(3.14159265f * Clamp(ShiftProgress, 0.0f, 1.0f));
+                servoThrottleOverride = throttleCmd * shiftEngagement;
+            }
+            servoEngagement = std::min(launchRamp, shiftEngagement);
+        }
+    }
 
     // 📝 Beyond Project Drive: traction control trims the throttle the engine sees from the driven wheels' last slip.
     if (ActiveConfiguration.TractionControl.Enabled)
@@ -639,8 +700,9 @@ void VehicleSolver::StepPacejka(float Δτ) noexcept
     }
     DrivetrainInputs di;
     di.Throttle       = ActiveConfiguration.TractionControl.Enabled ? throttleCmd * TractionScale : throttleCmd;
+    if (servoThrottleOverride >= 0.0f) di.Throttle = servoThrottleOverride;   // shift ignition cut / rev-match blip
     if (ActiveConfiguration.Fuel.Enabled) di.Fuelled = FuelMass > 0.0;
-    if (ActiveConfiguration.Fluids.Enabled)
+    if (ActiveConfiguration.Fluids.Enabled && !electricDrive)
     {
         const EngineFluidSpecification& Fluids = ActiveConfiguration.Fluids;
         const float Cold = Clamp((Fluids.OilTarget_K - OilTemperature) / std::max(1.0f, Fluids.OilTarget_K - Fluids.AmbientTemperature_K), 0.0f, 1.0f);
@@ -651,14 +713,39 @@ void VehicleSolver::StepPacejka(float Δτ) noexcept
     di.DrivenWheelRPM = drivenAvgRpm;
     di.LeftWheelRPM   = leftRpm;
     di.RightWheelRPM  = rightRpm;
+    di.ClutchEngagement   = servoEngagement;
+    di.PreselectGearIndex = servoPreselect;
+    di.HandoffBlend       = servoHandoff;
+    di.LockupAllowed      = LockupAllowed;
+    di.Brake              = Clamp(DriverCommand.Brake, 0.0f, 1.0f);
+    di.VehicleSpeed       = speed;
+    // 📝 Cooperative regen demand: the pedal's braking demand in motor-shaft Nm, so recuperation takes the first share
+    //    up to its cap and friction fills the rest. Combustion leaves the demand unset (no regen).
+    di.RegenDemand_Nm = -1.0f;
+    if (electricDrive && DriverCommand.Brake > 0.0f && nDriven > 0)
+    {
+        float fullPedal = ActiveConfiguration.MaxBrakeTorquePerWheel;
+        if (ActiveConfiguration.BrakeThermalEnabled)
+            fullPedal = ActiveConfiguration.Brakes.BrakeTorque(ActiveConfiguration.Brakes.MaxBrakePressure, ActiveConfiguration.Brakes.AmbientTemp);
+        const float demandWheels = Clamp(DriverCommand.Brake, 0.0f, 1.0f) * fullPedal * static_cast<float>(nDriven);
+        const float motorGain = std::max(0.1f, ActiveConfiguration.ElectricMotor.ReductionRatio) * std::max(0.5f, ActiveConfiguration.ElectricMotor.DrivetrainEff);
+        di.RegenDemand_Nm = demandWheels / motorGain;
+    }
     const DrivetrainOutputs dOut = Powertrain.Step(di);
     const int gearUsed = di.GearIndex;   // gear the drive torque was produced in — Ieff must match it (below)
     // 📝 Beyond Project Drive: brake power, fuel burnt (BSFC) and the engine fluids it heats; the sprung mass loses the fuel.
     EnginePower = std::max(0.0f, dOut.EngineTorque_Nm * dOut.EngineRPM * Drivetrain::kRpmToRad);
-    if (ActiveConfiguration.Fuel.Enabled)
+    if (ActiveConfiguration.Fuel.Enabled && !electricDrive)
     {
         const FuelSpecification& Fuel = ActiveConfiguration.Fuel;
-        const double Flow  = FuelMass > 0.0 ? static_cast<double>(EnginePower) * 0.001 * Fuel.SpecificConsumption_gPerKWh / 3600.0 + Fuel.IdleFlow_gPerS : 0.0;   // [g/s]
+        // 📝 Fuel follows the INDICATED work (brake + friction + pumping): indicated efficiency is roughly constant
+        //    over load, so part-load fuel rises with the friction share instead of tracking brake work linearly (the
+        //    Willans approximation). Exact with the standard friction/pumping laws; approximate with the intake on.
+        const float Omega = dOut.EngineRPM * Drivetrain::kRpmToRad;
+        const float FrictionPower = (ActiveConfiguration.Engine.EngineBrakingCoeff * Omega + ActiveConfiguration.Engine.EngineBrakingQuadratic * Omega * Omega) * Omega;
+        const float PumpingPower  = ActiveConfiguration.Engine.EngineBrakingQuadratic * Omega * Omega * (1.0f - di.Throttle) * Omega;
+        const double Indicated_kW = static_cast<double>(std::max(0.0f, EnginePower) + std::max(0.0f, FrictionPower) + std::max(0.0f, PumpingPower)) * 0.001;
+        const double Flow  = FuelMass > 0.0 ? Indicated_kW * Fuel.SpecificConsumption_gPerKWh / 3600.0 + Fuel.IdleFlow_gPerS : 0.0;   // [g/s]
         const double Burnt = std::min(FuelMass, Flow * static_cast<double>(Δτ) * 0.001);
         FuelMass  -= Burnt;
         FuelBurnt += Burnt;
@@ -676,25 +763,65 @@ void VehicleSolver::StepPacejka(float Δτ) noexcept
 
     // ── Automatic gearbox (AMT): up/down-shift on engine rpm with a cooldown, drop to neutral once nearly stopped ─────
     ShiftTimer += Δτ;
-    if (GearIndex != neutral)
+    if (legacyGearbox)
     {
-        if (ShiftTimer >= ActiveConfiguration.ShiftCooldownSeconds)
+        if (GearIndex != neutral)
+        {
+            if (ShiftTimer >= ActiveConfiguration.ShiftCooldownSeconds)
+            {
+                if (dOut.EngineRPM > ActiveConfiguration.UpshiftRPM && GearIndex < lastGear && throttleCmd > 0.1f)
+                {
+                    ++GearIndex; ShiftTimer = 0.0f;
+                }
+                else if (dOut.EngineRPM < ActiveConfiguration.DownshiftRPM && GearIndex > firstGear)
+                {
+                    --GearIndex; ShiftTimer = 0.0f;
+                }
+            }
+            // Declutch once nearly stopped, OR when braking firmly at low speed — otherwise idle creep through the clutch
+            //    fights the brake and the car settles at a crawl instead of coming fully to rest (as a real driver would
+            //    clutch in / the auto would decouple against the held brake).
+            const bool nearlyStopped = speed < 0.5f && throttleCmd < 0.05f;
+            const bool brakingToStop = DriverCommand.Brake > 0.4f && throttleCmd < 0.05f && speed < 3.0f;
+            if (nearlyStopped || brakingToStop) GearIndex = neutral;
+        }
+    }
+    else if (!electricDrive)
+    {
+        // 📝 Staged shifts: advance the shift/handoff, commit the target gear, or trigger a new shift on rpm. The
+        //    declutching lives in the launch servo (the clutch opens; the gearbox never drops to neutral under brakes).
+        if (ShiftProgress >= 0.0f)
+        {
+            const float span = category == ClutchCategory::DualClutch ? std::max(0.05f, ActiveConfiguration.Clutch.HandoffSeconds)
+                                                                      : std::max(0.05f, ActiveConfiguration.Clutch.ShiftDuration);
+            ShiftProgress += Δτ / span;
+            if (ShiftProgress >= 1.0f)
+            {
+                GearIndex = ShiftTarget;
+                ShiftProgress = -1.0f;
+                PreselectGear = -1;
+                ShiftTimer = 0.0f;
+            }
+        }
+        else if (GearIndex != neutral && ShiftTimer >= ActiveConfiguration.ShiftCooldownSeconds)
         {
             if (dOut.EngineRPM > ActiveConfiguration.UpshiftRPM && GearIndex < lastGear && throttleCmd > 0.1f)
             {
-                ++GearIndex; ShiftTimer = 0.0f;
+                ShiftTarget = GearIndex + 1; ShiftDown = false; ShiftProgress = 0.0f; PreselectGear = ShiftTarget;
             }
             else if (dOut.EngineRPM < ActiveConfiguration.DownshiftRPM && GearIndex > firstGear)
             {
-                --GearIndex; ShiftTimer = 0.0f;
+                ShiftTarget = GearIndex - 1; ShiftDown = true; ShiftProgress = 0.0f; PreselectGear = ShiftTarget;
             }
         }
-        // Declutch once nearly stopped, OR when braking firmly at low speed — otherwise idle creep through the clutch
-        //    fights the brake and the car settles at a crawl instead of coming fully to rest (as a real driver would
-        //    clutch in / the auto would decouple against the held brake).
-        const bool nearlyStopped = speed < 0.5f && throttleCmd < 0.05f;
-        const bool brakingToStop = DriverCommand.Brake > 0.4f && throttleCmd < 0.05f && speed < 3.0f;
-        if (nearlyStopped || brakingToStop) GearIndex = neutral;
+        // 📝 Converter lockup: allowed once the turbine is fast, released with hysteresis or through a shift.
+        if (category == ClutchCategory::TorqueConverter && GearIndex != neutral)
+        {
+            const float turbineRPM = drivenAvgRpm * std::fabs(ActiveConfiguration.Transmission.RatioAt(GearIndex)) * ActiveConfiguration.Transmission.FinalDriveRatio;
+            if (turbineRPM > ActiveConfiguration.Clutch.LockupRPM) LockupAllowed = true;
+            else if (turbineRPM < ActiveConfiguration.Clutch.LockupRPM - ActiveConfiguration.Clutch.LockupDropRPM || ShiftProgress >= 0.0f) LockupAllowed = false;
+        }
+        else LockupAllowed = false;
     }
 
     CurrentTelemetry.Chassis = cs;
@@ -719,6 +846,16 @@ void VehicleSolver::StepPacejka(float Δτ) noexcept
     CurrentTelemetry.ParasiticDrag_Nm = dOut.ParasiticDrag_Nm;
     CurrentTelemetry.GearIndex = GearIndex;
     CurrentTelemetry.PacejkaActive = true;
+    CurrentTelemetry.ManifoldPressure_Bar = dOut.ManifoldPressure_Bar;
+    CurrentTelemetry.ShiftActive = ShiftProgress >= 0.0f;
+    CurrentTelemetry.HandoffBlend = servoHandoff;
+    CurrentTelemetry.ClutchEngagement = servoEngagement < 0.0f ? 1.0f : servoEngagement;
+    CurrentTelemetry.ConverterSlipRPM = dOut.ConverterSlipRPM;
+    CurrentTelemetry.MotorRPM = dOut.MotorRPM;
+    CurrentTelemetry.MotorTorque_Nm = dOut.MotorTorque_Nm;
+    CurrentTelemetry.BatteryCharge = dOut.BatteryCharge;
+    CurrentTelemetry.BatteryVoltage_V = dOut.BatteryVoltage_V;
+    CurrentTelemetry.BatteryPower_W = dOut.BatteryPower_W;
 
     // ── Aerodynamics (GRIT source-only port, physically CLOSED-LOOP) ─────────────────────────────────────────────────
     //   Compute the whole aero package ONCE per step from the chassis reading. Drag, side-force and the YAW/ROLL moments
@@ -927,6 +1064,19 @@ void VehicleSolver::StepPacejka(float Δτ) noexcept
         if (wheel.Driven)
             driveTq = (wheel.LocalOffset.y > 0.0f) ? dOut.LeftDriveTorque_Nm : dOut.RightDriveTorque_Nm;
 
+        // 📝 Cooperative regen blending: recuperation takes the first share of the pedal's demand and friction fills
+        //    the rest, so the pedal always sums to the same stop. The demand is measured in the active brake law
+        //    (hydraulic torque at this disc's temperature, else the legacy constant). Combustion reports no regen.
+        float regenTq = 0.0f;
+        if (electricDrive && wheel.Driven)
+            regenTq = (wheel.LocalOffset.y > 0.0f) ? dOut.LeftRegenTorque_Nm : dOut.RightRegenTorque_Nm;
+        float fullPedalTorque = ActiveConfiguration.MaxBrakeTorquePerWheel;
+        if (ActiveConfiguration.BrakeThermalEnabled)
+            fullPedalTorque = ActiveConfiguration.Brakes.BrakeTorque(ActiveConfiguration.Brakes.MaxBrakePressure,
+                                                                      BrakingHydraulics.Reading(i).Temperature_K);
+        const float pedalDemand = Clamp(DriverCommand.Brake, 0.0f, 1.0f) * fullPedalTorque;
+        const float frictionShare = pedalDemand > 1.0f ? Clamp(1.0f - std::fabs(regenTq) / pedalDemand, 0.0f, 1.0f) : 1.0f;
+
         float brakeTq = 0.0f;
         if (wheel.Braked)
         {
@@ -942,7 +1092,7 @@ void VehicleSolver::StepPacejka(float Δτ) noexcept
                 bi.Airspeed     = speed;
                 bi.Braked       = true;
                 const BrakeWheelOutput bo = BrakingHydraulics.Step(i, bi, Δτ);
-                brakeTq += bo.BrakeTorque_Nm;
+                brakeTq += bo.BrakeTorque_Nm * frictionShare;
                 WheelTelemetry& bt = CurrentTelemetry.Wheels[std::min<size_t>(i, CurrentTelemetry.Wheels.size() - 1)];
                 bt.BrakeTorque_Nm   = bo.BrakeTorque_Nm;
                 bt.BrakePressure_Pa = bo.Pressure_Pa;
@@ -951,7 +1101,7 @@ void VehicleSolver::StepPacejka(float Δτ) noexcept
             }
             else
             {
-                brakeTq += DriverCommand.Brake * ActiveConfiguration.MaxBrakeTorquePerWheel;
+                brakeTq += DriverCommand.Brake * ActiveConfiguration.MaxBrakeTorquePerWheel * frictionShare;
             }
         }
         if (DriverCommand.Handbrake && !wheel.Steered) brakeTq += ActiveConfiguration.HandbrakeTorque;
@@ -964,8 +1114,22 @@ void VehicleSolver::StepPacejka(float Δτ) noexcept
         float Ieff = Iw;
         if (wheel.Driven && nDriven > 0)
         {
-            const float g = ActiveConfiguration.Transmission.RatioAt(gearUsed) * ActiveConfiguration.Transmission.FinalDriveRatio;
-            Ieff += ActiveConfiguration.Engine.EngineInertia * g * g / static_cast<float>(nDriven);
+            if (electricDrive)
+            {
+                // The rotor reflected through the single-speed reduction (no clutch, no gears).
+                const float g = ActiveConfiguration.ElectricMotor.ReductionRatio;
+                Ieff += ActiveConfiguration.ElectricMotor.RotorInertia * g * g / static_cast<float>(nDriven);
+            }
+            else if (category == ClutchCategory::TorqueConverter && !dOut.ClutchLocked)
+            {
+                // Unlocked the fluid decouples the engine: no reflected inertia (the coupling is soft and damped,
+                // so the bare wheel inertia integrates stably).
+            }
+            else
+            {
+                const float g = ActiveConfiguration.Transmission.RatioAt(gearUsed) * ActiveConfiguration.Transmission.FinalDriveRatio;
+                Ieff += ActiveConfiguration.Engine.EngineInertia * g * g / static_cast<float>(nDriven);
+            }
         }
 
         // The tyre's own mass as a thin ring at the tread radius.

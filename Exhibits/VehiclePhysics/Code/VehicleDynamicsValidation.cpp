@@ -4,7 +4,9 @@
 // 🧩 The vehicle checked against physics, not only against its source: the Magic Formula's slopes, peaks and signs, combined slip
 //    and relaxation; the Jolt-hosted car at rest, rolling, launching, braking and cornering against the linear bicycle model; the
 //    pieces added beyond Project Drive (supercharger, charge air, tyre pressure and temperature, wear, fuel, fluids, traction
-//    control, Ackermann, the MF6.1 pressure terms); the physics thread's cadence and its snapshot hand-off; and the register.
+//    control, Ackermann, the MF6.1 pressure terms); the physics thread's cadence and its snapshot hand-off; and the register —
+//    plus the simulation-grade programme on a mock chassis (no Jolt): grades and hill-hold, three clutch models, the intake
+//    manifold, the battery-electric path, and an end-to-end drive cycle audited for energy and rerun for determinism.
 //    Usage: VehicleDynamicsValidation <exhibit folder>  (writes Results/VehicleDynamics.txt and Results/*.csv)
 
 #include "Frontier/Extensions/Physics/PhysicsExtension.h"
@@ -22,7 +24,9 @@
 #include <cstdarg>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -127,6 +131,140 @@ struct Proving
         }
     }
 };
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                    A SOLVER ON A MOCK CHASSIS (NO JOLT, SLOPES ALLOWED)
+//------------------------------------------------------------------------------------------------------------------------
+// The solver is engine-agnostic: the same hooks it binds to Jolt bind to a rigid box integrated here, over an analytic
+// ground query. That runs grades, long cycles and determinism checks the flat Jolt proving ground cannot.
+
+struct MockChassis
+{
+    V::ChassisKinematics Reading{};
+    V::Vec3 Force{}, Torque{};
+    float Mass = 1300.0f;
+    V::Vec3 InvInertiaDiag{ 1.0f / 800.0f, 1.0f / 2500.0f, 1.0f / 2500.0f };
+
+    void Integrate(float dt)
+    {
+        Reading.LinearVelocity += (Force * (1.0f / Mass) + V::Vec3{ 0.0f, 0.0f, -9.81f }) * dt;
+        Reading.Position += Reading.LinearVelocity * dt;
+        const V::Quat Inv{ -Reading.Orientation.x, -Reading.Orientation.y, -Reading.Orientation.z, Reading.Orientation.w };
+        const V::Vec3 LocalTorque = Inv.Rotate(Torque);
+        V::Vec3       LocalVel    = Inv.Rotate(Reading.AngularVelocity);
+        LocalVel.x += LocalTorque.x * InvInertiaDiag.x * dt;
+        LocalVel.y += LocalTorque.y * InvInertiaDiag.y * dt;
+        LocalVel.z += LocalTorque.z * InvInertiaDiag.z * dt;
+        Reading.AngularVelocity = Reading.Orientation.Rotate(LocalVel);
+        const float Spin = Reading.AngularVelocity.Length();
+        if (Spin > 1.0e-8f)
+            Reading.Orientation = (V::Quat::AxisAngle(Reading.AngularVelocity * (1.0f / Spin), Spin * dt) * Reading.Orientation).Normalized();
+        Force = {};
+        Torque = {};
+    }
+};
+
+struct SolverRig
+{
+    V::VehicleSolver Solver;
+    MockChassis      Chassis;
+
+    void Build(V::VehicleSolverConfiguration cfg, V::GroundQuery ground, const V::Vec3& origin, float Yaw = 0.0f)
+    {
+        Chassis                 = MockChassis{};
+        Chassis.Reading.Position    = origin;
+        Chassis.Reading.Orientation = V::Quat::AxisAngle(V::Vec3{ 0.0f, 0.0f, 1.0f }, Yaw);
+        Chassis.Mass            = cfg.ChassisMass;
+        Chassis.InvInertiaDiag  = cfg.InvChassisInertia;
+        V::VehicleSolver::Hooks hooks;
+        hooks.ReadChassis       = [this] { return Chassis.Reading; };
+        hooks.ApplyForceAtPoint = [this](const V::Vec3& f, const V::Vec3& p)
+        {
+            Chassis.Force += f;
+            Chassis.Torque += V::Cross(p - Chassis.Reading.Position, f);
+        };
+        hooks.ApplyTorque = [this](const V::Vec3& t) { Chassis.Torque += t; };
+        hooks.Ground      = ground;
+        Solver.Build(cfg, hooks, Chassis.Reading);
+    }
+    void Run(const V::DriverInput& in, float seconds, float dt)
+    {
+        Solver.AssignInput(in);
+        for (int s = 0, n = static_cast<int>(seconds / dt); s < n; ++s)
+        {
+            Solver.Step(dt);
+            Chassis.Integrate(dt);
+        }
+    }
+    [[nodiscard]] const V::VehicleTelemetry& Telemetry() const { return Solver.Telemetry(); }
+};
+
+V::VehicleSolverConfiguration ControlConfig(const std::function<void(V::VehicleSpecification&)>& Adjust = {})
+{
+    V::VehicleSpecification S = V::ConstructControlVehicleSpecification();
+    if (Adjust) Adjust(S);
+    return V::ResolveSolverConfiguration(S);
+}
+
+V::GroundQuery FlatGround()
+{
+    return [](const V::Vec3& p, V::Vec3& s, V::Vec3& n)
+    {
+        s = { p.x, p.y, 0.0f };
+        n = { 0.0f, 0.0f, 1.0f };
+        return true;
+    };
+}
+
+// An infinite grade rising along +X (grade = rise/run e.g. 0.15 for 15 %).
+V::GroundQuery SlopedGround(float grade)
+{
+    return [grade](const V::Vec3& p, V::Vec3& s, V::Vec3& n)
+    {
+        s = { p.x, p.y, grade * p.x };
+        n = V::Vec3{ -grade, 0.0f, 1.0f }.Normalized();
+        return true;
+    };
+}
+
+// FNV-1a over the telemetry's float bits: two identical runs must hash identically (section I).
+std::string HashTelemetry(const V::VehicleTelemetry& T)
+{
+    uint64_t hash = 1469598103934665603ull;
+    const auto Mix = [&](float v)
+    {
+        uint32_t bits;
+        std::memcpy(&bits, &v, 4);
+        hash ^= bits;
+        hash *= 1099511628211ull;
+    };
+    const auto Mix64 = [&](double v)
+    {
+        uint64_t bits;
+        std::memcpy(&bits, &v, 8);
+        hash ^= bits;
+        hash *= 1099511628211ull;
+    };
+    Mix(T.ForwardSpeed);
+    Mix(T.EngineRPM);
+    Mix(static_cast<float>(T.GearIndex));
+    Mix(T.BoostBar);
+    Mix(T.Chassis.Position.x);
+    Mix(T.Chassis.Position.z);
+    Mix(T.Chassis.LinearVelocity.x);
+    for (uint32_t w = 0; w < T.WheelCount && w < 8; ++w)
+    {
+        Mix(T.Wheels[w].WheelOmega);
+        Mix(T.Wheels[w].VerticalLoad);
+        Mix(T.Wheels[w].BrakeTemp_K);
+    }
+    Mix64(T.FuelBurnt);
+    Mix(T.BatteryCharge);
+    Mix(T.ManifoldPressure_Bar);
+    char text[17];
+    std::snprintf(text, sizeof(text), "%016llx", static_cast<unsigned long long>(hash));
+    return text;
+}
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                                    A · MAGIC FORMULA
@@ -259,6 +397,16 @@ void ValidateFormula(const std::filesystem::path& Results)
     Report(std::fabs(AtSigma / Settled - 0.632f) < 0.08f && std::fabs(Result.Forces.Fy / Settled - 1.0f) < 0.02f,
            Format("relaxation: a slip step builds %.0f %% of its force after one relaxation length (σ %.3f m; first order: 63 %%), %.1f %% at 6σ",
                   AtSigma / Settled * 100.0f, Sigma, Result.Forces.Fy / Settled * 100.0f));
+    // A10 camber thrust at zero slip, mirrored both ways
+    const float CamberZero  = Tyre.Combined(0.0f, 0.0f, 0.0f, Fz).Fy;
+    const float CamberPlus  = Tyre.Combined(0.0f, 0.0f, 0.0873f, Fz).Fy;
+    const float CamberMinus = Tyre.Combined(0.0f, 0.0f, -0.0873f, Fz).Fy;
+    Report(std::fabs(CamberPlus) > std::fabs(CamberZero) + 20.0f && std::fabs(CamberPlus + CamberMinus) < std::fabs(CamberPlus) * 0.05f + 1.0f,
+           Format("camber: 5° of lean thrusts %.0f N sideways at zero slip, mirrored leaning the other way (%.0f N)", CamberPlus, CamberMinus));
+    // A11 a sliding tyre holds most of its peak (no cliff past it)
+    const float Sliding = Tyre.LongitudinalForce(1.0f, 0.0f, Fz);
+    Report(Sliding / PeakX > 0.5f && Sliding / PeakX < 0.8f,
+           Format("saturation: sliding at κ = 1 keeps %.0f %% of the longitudinal peak (%.0f of %.0f N)", Sliding / PeakX * 100.0f, Sliding, PeakX));
 }
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -452,6 +600,24 @@ void ValidateConditions()
         Report(std::fabs(Adiabatic - Expected) < 0.01f && std::fabs(Cooled - 293.15f) < 1.0e-3f && SuperCharge > 293.15f,
                Format("charge air: %.1f °C after the compressor at 0.8 bar (isentropic over η = %.1f °C), ambient through a perfect intercooler, %.1f °C live",
                       Adiabatic - 273.15f, Expected - 273.15f, SuperCharge - 273.15f));
+        // C1b the wastegate holds the ceiling on a loaded full-throttle run (the turbo only spools against load)
+        {
+            const float dt = 1.0f / 240.0f;
+            SolverRig Car;
+            Car.Build(ControlConfig(), FlatGround(), { 0.0f, 0.0f, 0.40f });
+            Car.Run(V::DriverInput{}, 1.0f, dt);
+            float Highest = 0.0f;
+            Car.Solver.AssignInput(V::DriverInput{ 1.0f, 0.0f, 0.0f, false });
+            for (int s = 0; s < static_cast<int>(12.0f / dt); ++s)
+            {
+                Car.Solver.Step(dt);
+                Car.Chassis.Integrate(dt);
+                Highest = std::max(Highest, Car.Telemetry().BoostBar);
+            }
+            const float Ceiling = Car.Solver.QueryConfiguration().Turbo.WastegateMaxBoost;
+            Report(Highest <= Ceiling * 1.02f && Highest > Ceiling * 0.5f,
+                   Format("the wastegate caps boost at %.2f bar on a 12 s full-throttle run (peak %.2f bar)", Ceiling, Highest));
+        }
     }
     {
         // C2 gas law and heating
@@ -491,25 +657,31 @@ void ValidateConditions()
     }
     {
         // C4 burnout heats the rear, wear accrues, fuel follows BSFC, fluids warm, Ackermann geometry
-        // 📝 Fuel over a full-throttle run: the burn must equal BSFC × the brake work plus the idle flow.
+        // 📝 Fuel over a full-throttle run: the burn must equal BSFC × the INDICATED work (brake + friction + pumping)
+        //    plus the idle flow (the Willans approximation: indicated efficiency is roughly constant over load).
         Proving Car;
         Car.Drive(0.0f, 0.0f, 0.0f, 1.0);
         const double BurntBefore = Car.Telemetry().FuelBurnt;
         const float  MassBefore  = Car.Telemetry().ChassisMass;
+        const V::VehicleSolverConfiguration& FuelCfg = Car.Solver().QueryConfiguration();
         double       Work = 0.0;
         for (int Step = 0; Step < 240 * 4; ++Step)
         {
             Car.Physics.AssignVehicleInput(PhysicsVehicleInput{ 1.0f, 0.0f, 0.0f, false });
             Car.Physics.AdvanceSteps(1);
-            Work += Car.Telemetry().EnginePower_W * Car.Physics.QueryStepSeconds();
+            const V::VehicleTelemetry& StepT = Car.Telemetry();
+            const float StepOmega = StepT.EngineRPM * V::Drivetrain::kRpmToRad;
+            Work += (std::max(0.0f, StepT.EnginePower_W) + (FuelCfg.Engine.EngineBrakingCoeff * StepOmega + FuelCfg.Engine.EngineBrakingQuadratic * StepOmega * StepOmega) * StepOmega +
+                     FuelCfg.Engine.EngineBrakingQuadratic * StepOmega * StepOmega * (1.0f - StepT.ThrottleApplied) * StepOmega) *
+                    Car.Physics.QueryStepSeconds();
         }
         const V::VehicleTelemetry& T = Car.Telemetry();
         const V::FuelSpecification& Fuel = Car.Solver().QueryConfiguration().Fuel;
         const double Expected = Work / 3.6e6 * Fuel.SpecificConsumption_gPerKWh * 0.001 + 4.0 * Fuel.IdleFlow_gPerS * 0.001;
         const double Burnt    = T.FuelBurnt - BurntBefore;
         Report(std::fabs(Burnt / Expected - 1.0) < 0.01 && MassBefore - T.ChassisMass > 0.0f,
-               Format("fuel: %.2f g burnt over 4 s at full throttle against BSFC × %.0f kJ + idle = %.2f g; the sprung mass is %.4f kg lighter", Burnt * 1000.0,
-                      Work * 0.001, Expected * 1000.0, MassBefore - T.ChassisMass));
+               Format("fuel: %.2f g burnt over 4 s at full throttle against BSFC × %.0f kJ indicated + idle = %.2f g; the sprung mass is %.4f kg lighter",
+                      Burnt * 1000.0, Work * 0.001, Expected * 1000.0, MassBefore - T.ChassisMass));
         // 📝 A locked-wheel stop (ABS off): the sliding treads heat and wear.
         Proving Skid([](V::VehicleSpecification& S) { S.Solver.Abs.Enabled = false; });
         Skid.Drive(0.0f, 0.0f, 0.0f, 1.0);
@@ -727,6 +899,793 @@ void ValidateIntegration(const std::filesystem::path& Results)
     }
 }
 
+//------------------------------------------------------------------------------------------------------------------------
+//                                                    F · GRADES AND BRAKES
+//------------------------------------------------------------------------------------------------------------------------
+// 📝 Hill-hold on slopes, hill start, climbing power, braked descent, brake fade and ABS — all on the mock chassis,
+//    where the ground can tilt.
+
+void ValidateGrades()
+{
+    Heading("F · Grades, hill-hold and brakes");
+    const float dt = 1.0f / 240.0f;
+    // F1 handbrake hold on a 20 % grade
+    {
+        SolverRig Car;
+        Car.Build(ControlConfig(), SlopedGround(0.20f), { 0.0f, 0.0f, 0.40f + 0.20f * 1.7f });
+        Car.Run(V::DriverInput{ 0.0f, 0.0f, 0.0f, true }, 0.5f, dt);
+        const float X0 = Car.Chassis.Reading.Position.x;
+        Car.Run(V::DriverInput{ 0.0f, 0.0f, 0.0f, true }, 3.0f, dt);
+        const float Creep = std::fabs(Car.Chassis.Reading.Position.x - X0);
+        Report(Creep < 0.005f, Format("handbrake holds on 20 %%: %.1f mm creep in 3 s", Creep * 1000.0f));
+    }
+    // F2 foot-brake hold on a 15 % grade
+    {
+        SolverRig Car;
+        Car.Build(ControlConfig(), SlopedGround(0.15f), { 0.0f, 0.0f, 0.40f + 0.15f * 1.7f });
+        Car.Run(V::DriverInput{ 0.0f, 1.0f, 0.0f, false }, 0.5f, dt);
+        const float X0 = Car.Chassis.Reading.Position.x;
+        Car.Run(V::DriverInput{ 0.0f, 1.0f, 0.0f, false }, 3.0f, dt);
+        const float Creep = std::fabs(Car.Chassis.Reading.Position.x - X0);
+        Report(Creep < 0.005f, Format("foot brake holds on 15 %%: %.1f mm creep in 3 s", Creep * 1000.0f));
+    }
+    // F2b hill start: load up against the handbrake, release, pull away with no rollback
+    {
+        SolverRig Car;
+        Car.Build(ControlConfig(), SlopedGround(0.15f), { 0.0f, 0.0f, 0.40f + 0.15f * 1.7f });
+        Car.Run(V::DriverInput{ 0.0f, 0.0f, 0.0f, true }, 1.0f, dt);
+        const float X0 = Car.Chassis.Reading.Position.x;
+        Car.Run(V::DriverInput{ 1.0f, 0.0f, 0.0f, true }, 0.5f, dt);
+        float Least = 0.0f;
+        Car.Solver.AssignInput(V::DriverInput{ 1.0f, 0.0f, 0.0f, false });
+        for (int s = 0; s < static_cast<int>(4.0f / dt); ++s)
+        {
+            Car.Solver.Step(dt);
+            Car.Chassis.Integrate(dt);
+            Least = std::min(Least, Car.Chassis.Reading.Position.x - X0);
+        }
+        Report(Least > -0.05f && Car.Telemetry().ForwardSpeed > 5.0f,
+               Format("hill start on 15 %%: %.0f mm rollback at most, pulls away to %.1f m/s", Least * 1000.0f, Car.Telemetry().ForwardSpeed));
+    }
+    // F3 climbing power: full throttle up 15 % from rest
+    {
+        SolverRig Car;
+        Car.Build(ControlConfig(), SlopedGround(0.15f), { 0.0f, 0.0f, 0.40f + 0.15f * 1.7f });
+        Car.Run(V::DriverInput{ 1.0f, 0.0f, 0.0f, false }, 8.0f, dt);
+        Report(Car.Telemetry().ForwardSpeed > 25.0f, Format("climb: %.1f m/s after 8 s at full throttle up 15 %%", Car.Telemetry().ForwardSpeed));
+    }
+    // F4 climbing holds speed under power, and a braked descent holds speed instead of running away
+    {
+        SolverRig Car;
+        Car.Build(ControlConfig(), SlopedGround(0.15f), { 0.0f, 0.0f, 0.40f + 0.15f * 1.7f });
+        Car.Run(V::DriverInput{}, 1.0f, dt);
+        Car.Run(V::DriverInput{ 1.0f, 0.0f, 0.0f, false }, 4.0f, dt);
+        float ErrorSum = 0.0f;
+        int   Samples = 0;
+        for (int s = 0; s < static_cast<int>(8.0f / dt); ++s)
+        {
+            const float Error = 10.0f - Car.Telemetry().ForwardSpeed;
+            Car.Solver.AssignInput(V::DriverInput{ std::clamp(0.45f + 0.25f * Error, 0.0f, 1.0f), std::clamp(-0.15f * Error, 0.0f, 1.0f), 0.0f, false });
+            Car.Solver.Step(dt);
+            Car.Chassis.Integrate(dt);
+            if (s > static_cast<int>(2.0f / dt))
+            {
+                ErrorSum += std::fabs(Car.Telemetry().ForwardSpeed - 10.0f);
+                ++Samples;
+            }
+        }
+        Report(ErrorSum / Samples < 1.5f, Format("climb on 15 %%: holds 10 m/s under power to %.2f m/s mean error", ErrorSum / Samples));
+    }
+    {
+        SolverRig Car;
+        Car.Build(ControlConfig(), SlopedGround(0.15f), { 0.0f, 0.0f, 0.40f + 0.15f * 1.7f }, 3.14159265f);
+        Car.Run(V::DriverInput{}, 1.0f, dt);
+        float ErrorSum = 0.0f, PeakSpeed = 0.0f;
+        int   Samples = 0;
+        for (int s = 0; s < static_cast<int>(12.0f / dt); ++s)
+        {
+            const float Error = Car.Telemetry().ForwardSpeed - 8.0f;
+            Car.Solver.AssignInput(V::DriverInput{ 0.0f, std::clamp(0.05f + 0.50f * Error, 0.0f, 1.0f), 0.0f, false });
+            Car.Solver.Step(dt);
+            Car.Chassis.Integrate(dt);
+            if (s > static_cast<int>(3.0f / dt))
+            {
+                ErrorSum += std::fabs(Car.Telemetry().ForwardSpeed - 8.0f);
+                PeakSpeed = std::max(PeakSpeed, Car.Telemetry().ForwardSpeed);
+                ++Samples;
+            }
+        }
+        Report(ErrorSum / Samples < 1.0f && PeakSpeed < 12.0f,
+               Format("descent on 15 %%: holds 8 m/s on the brakes to %.2f m/s mean error, never runs past %.1f m/s", ErrorSum / Samples, PeakSpeed));
+    }
+    // F5 repeated stops cook the discs and the pads fade: torque per bar of line pressure falls with temperature
+    //    (the stop distance barely moves — these GT3-sized discs and the ABS have margin to spare, as they should).
+    {
+        SolverRig Car;
+        Car.Build(ControlConfig(), FlatGround(), { 0.0f, 0.0f, 0.40f });
+        Car.Run(V::DriverInput{}, 1.0f, dt);
+        const auto& Discs = Car.Solver.QueryConfiguration().Brakes;
+        float FirstGain = 0.0f, LastGain = 0.0f, Hottest = 0.0f, FirstPressure = 0.0f, LastPressure = 0.0f;
+        for (int Stop = 0; Stop < 7; ++Stop)
+        {
+            Car.Solver.AssignInput(V::DriverInput{ 1.0f, 0.0f, 0.0f, false });
+            for (int s = 0; s < static_cast<int>(12.0f / dt) && Car.Telemetry().ForwardSpeed < 40.0f; ++s)
+            {
+                Car.Solver.Step(dt);
+                Car.Chassis.Integrate(dt);
+            }
+            double TorqueSum = 0.0, PressureSum = 0.0;
+            int    Samples = 0;
+            Car.Solver.AssignInput(V::DriverInput{ 0.0f, 1.0f, 0.0f, false });
+            for (int s = 0; s < static_cast<int>(12.0f / dt) && Car.Telemetry().ForwardSpeed > 5.0f; ++s)
+            {
+                Car.Solver.Step(dt);
+                Car.Chassis.Integrate(dt);
+                const auto& Wheel = Car.Telemetry().Wheels[0];
+                if (Wheel.BrakePressure_Pa > 2.0e6f)
+                {
+                    TorqueSum += std::fabs(Wheel.BrakeTorque_Nm);
+                    PressureSum += Wheel.BrakePressure_Pa;
+                    ++Samples;
+                }
+            }
+            const float Gain = Samples > 0 ? static_cast<float>(TorqueSum / PressureSum) : 0.0f;
+            const float MeanPressure = Samples > 0 ? static_cast<float>(PressureSum / Samples) : 0.0f;
+            if (Stop == 0)
+            {
+                FirstGain = Gain;
+                FirstPressure = MeanPressure;
+            }
+            if (Stop == 6)
+            {
+                LastGain = Gain;
+                LastPressure = MeanPressure;
+            }
+            Hottest = std::max(Hottest, Car.Telemetry().Wheels[0].BrakeTemp_K);
+        }
+        Report(LastGain < FirstGain * 0.97f && Hottest > Discs.FadeStartTemp && LastPressure >= FirstPressure,
+               Format("seven 40→5 m/s stops: torque per bar falls %.4f → %.4f N·m/Pa as the discs reach %.0f °C (ABS holds %.0f → %.0f bar)", FirstGain,
+                      LastGain, Hottest - 273.15f, FirstPressure * 1.0e-5f, LastPressure * 1.0e-5f));
+    }
+    // F6 ABS on wet tarmac: regulates slip near the sheet's peak and stops with the locked car
+    {
+        auto StopFrom = [&](bool Abs, float& MeanSlip)
+        {
+            SolverRig Car;
+            Car.Build(ControlConfig([&](V::VehicleSpecification& S)
+                      {
+                          S.Solver.Abs.Enabled = Abs;
+                          S.Solver.Abs.SlipTarget = 0.25f;   // near this sheet's longitudinal peak (κ ≈ 0.30)
+                          S.Solver.TyrePacejka.Lx = 0.55f;   // wet tarmac
+                          S.Solver.TyrePacejka.Ly = 0.55f;
+                      }),
+                      FlatGround(), { 0.0f, 0.0f, 0.40f });
+            Car.Run(V::DriverInput{}, 1.0f, dt);
+            Car.Solver.AssignInput(V::DriverInput{ 1.0f, 0.0f, 0.0f, false });
+            for (int s = 0; s < static_cast<int>(10.0f / dt) && Car.Telemetry().ForwardSpeed < 25.0f; ++s)
+            {
+                Car.Solver.Step(dt);
+                Car.Chassis.Integrate(dt);
+            }
+            const float FromX = Car.Chassis.Reading.Position.x;
+            double SlipSum = 0.0;
+            int    SlipN = 0;
+            Car.Solver.AssignInput(V::DriverInput{ 0.0f, 1.0f, 0.0f, false });
+            for (int s = 0; s < static_cast<int>(10.0f / dt) && Car.Telemetry().ForwardSpeed > 0.5f; ++s)
+            {
+                Car.Solver.Step(dt);
+                Car.Chassis.Integrate(dt);
+                if (Car.Telemetry().ForwardSpeed > 3.0f)
+                {
+                    SlipSum += std::fabs(Car.Telemetry().Wheels[0].SlipRatio);
+                    ++SlipN;
+                }
+            }
+            MeanSlip = SlipN > 0 ? static_cast<float>(SlipSum / SlipN) : 0.0f;
+            return Car.Chassis.Reading.Position.x - FromX;
+        };
+        float SlipAbs = 0.0f, SlipLocked = 0.0f;
+        const float WithAbs = StopFrom(true, SlipAbs), WithoutAbs = StopFrom(false, SlipLocked);
+        Report(WithAbs <= WithoutAbs * 1.05f && SlipAbs < 0.35f && SlipLocked > SlipAbs,
+               Format("wet stop: ABS holds |κ| at %.2f and stops in %.1f m against %.1f m locked (|κ| %.2f)", SlipAbs, WithAbs, WithoutAbs, SlipLocked));
+    }
+    // F6b steering while braking: the ABS car still turns, the locked car ploughs straight on
+    {
+        auto HeadingChange = [&](bool Abs)
+        {
+            SolverRig Car;
+            Car.Build(ControlConfig([&](V::VehicleSpecification& S)
+                      {
+                          S.Solver.Abs.Enabled = Abs;
+                          S.Solver.Abs.SlipTarget = 0.25f;
+                          S.Solver.TyrePacejka.Lx = 0.55f;
+                          S.Solver.TyrePacejka.Ly = 0.55f;
+                      }),
+                      FlatGround(), { 0.0f, 0.0f, 0.40f });
+            Car.Run(V::DriverInput{}, 1.0f, dt);
+            Car.Solver.AssignInput(V::DriverInput{ 1.0f, 0.0f, 0.0f, false });
+            for (int s = 0; s < static_cast<int>(10.0f / dt) && Car.Telemetry().ForwardSpeed < 20.0f; ++s)
+            {
+                Car.Solver.Step(dt);
+                Car.Chassis.Integrate(dt);
+            }
+            const V::Vec3 StartFwd = Car.Chassis.Reading.Orientation.Rotate(V::Vec3{ 1.0f, 0.0f, 0.0f });
+            const float StartYaw = std::atan2(StartFwd.y, StartFwd.x);
+            Car.Solver.AssignInput(V::DriverInput{ 0.0f, 1.0f, 0.3f, false });
+            for (int s = 0; s < static_cast<int>(8.0f / dt) && Car.Telemetry().ForwardSpeed > 2.0f; ++s)
+            {
+                Car.Solver.Step(dt);
+                Car.Chassis.Integrate(dt);
+            }
+            const V::Vec3 EndFwd = Car.Chassis.Reading.Orientation.Rotate(V::Vec3{ 1.0f, 0.0f, 0.0f });
+            return std::fabs(std::atan2(EndFwd.y, EndFwd.x) - StartYaw);
+        };
+        const float YawAbs = HeadingChange(true), YawLocked = HeadingChange(false);
+        Report(YawAbs > 0.05f && YawLocked < 0.03f,
+               Format("braking + steering: the ABS car yaws %.1f°, the locked car %.1f°", YawAbs * 57.2958f, YawLocked * 57.2958f));
+    }
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                    G · CLUTCHES
+//------------------------------------------------------------------------------------------------------------------------
+// 📝 Three couplings: the staged single plate (torque hole), the dual clutch (overlap handoff, no hole), and the torque
+//    converter (stall, creep, lockup).
+
+void ValidateClutches(const std::filesystem::path& Results)
+{
+    Heading("G · Clutch models");
+    const float dt = 1.0f / 240.0f;
+    // G1 the staged single plate opens a torque hole through the shift
+    {
+        SolverRig Car;
+        Car.Build(ControlConfig([](V::VehicleSpecification& S) { S.Solver.Clutch.ShiftDuration = 0.40f; }), FlatGround(), { 0.0f, 0.0f, 0.40f });
+        Car.Run(V::DriverInput{}, 1.0f, dt);
+        std::ofstream Trace(Results / "ShiftTrace.csv");
+        Trace << "t_s,gear,engagement,rpm,gearbox_nm,speed_mps\n";
+        float LeastEngagement = 1.0f, PreTorque = 0.0f, HoleTorque = 1.0e9f;
+        bool  SawShift = false, SawSecond = false;
+        Car.Solver.AssignInput(V::DriverInput{ 1.0f, 0.0f, 0.0f, false });
+        for (int s = 0; s < static_cast<int>(10.0f / dt); ++s)
+        {
+            Car.Solver.Step(dt);
+            Car.Chassis.Integrate(dt);
+            const V::VehicleTelemetry& T = Car.Telemetry();
+            Trace << s * dt << "," << T.GearIndex - 2 << "," << T.ClutchEngagement << "," << T.EngineRPM << "," << T.GearboxDriveTorque_Nm << ","
+                  << T.ForwardSpeed << "\n";
+            if (!SawShift && !T.ShiftActive && T.GearIndex == 3) PreTorque = T.GearboxDriveTorque_Nm;
+            if (T.ShiftActive)
+            {
+                SawShift = true;
+                LeastEngagement = std::min(LeastEngagement, T.ClutchEngagement);
+                HoleTorque = std::min(HoleTorque, T.GearboxDriveTorque_Nm);
+            }
+            if (T.GearIndex == 4) SawSecond = true;
+        }
+        Report(SawShift && SawSecond && LeastEngagement < 0.3f && HoleTorque < PreTorque * 0.4f,
+               Format("single plate 1→2 in 0.4 s: engagement dips to %.2f, drive torque falls to %.0f N·m through the hole (%.0f N·m before)", LeastEngagement,
+                      HoleTorque, PreTorque));
+    }
+    // G2 the dual clutch hands torque across without opening (no dip below the new gear's pull, 1→2 inside 200 ms)
+    {
+        SolverRig Car;
+        Car.Build(ControlConfig([](V::VehicleSpecification& S) { S.Solver.Clutch.Category = V::ClutchCategory::DualClutch; }), FlatGround(),
+                  { 0.0f, 0.0f, 0.40f });
+        Car.Run(V::DriverInput{}, 1.0f, dt);
+        float LeastTorque = 1.0e9f, Span12 = 0.0f;
+        bool  In12 = false, Past12 = false;
+        double PostSum = 0.0;
+        int    PostN = 0;
+        Car.Solver.AssignInput(V::DriverInput{ 1.0f, 0.0f, 0.0f, false });
+        for (int s = 0; s < static_cast<int>(14.0f / dt); ++s)
+        {
+            Car.Solver.Step(dt);
+            Car.Chassis.Integrate(dt);
+            const V::VehicleTelemetry& T = Car.Telemetry();
+            if (T.ShiftActive && T.GearIndex == 3)
+            {
+                In12 = true;
+                Span12 += dt;
+                LeastTorque = std::min(LeastTorque, T.GearboxDriveTorque_Nm);
+            }
+            else if (In12 && !Past12 && T.GearIndex == 4) Past12 = true;
+            else if (Past12 && T.GearIndex == 4 && PostN < 120)
+            {
+                PostSum += T.GearboxDriveTorque_Nm;
+                ++PostN;
+            }
+            else if (PostN >= 120) break;
+        }
+        const float Post = PostN > 0 ? static_cast<float>(PostSum / PostN) : 1.0f;
+        Report(Span12 > 0.05f && Span12 < 0.2f && LeastTorque > Post * 0.85f,
+               Format("dual clutch 1→2: %.0f ms handoff, torque never dips below %.0f %% of the new gear's pull (%.0f vs %.0f N·m)", Span12 * 1000.0f,
+                      LeastTorque / Post * 100.0f, LeastTorque, Post));
+    }
+    // G3 no torque holes means the DCT out-launches the staged single plate to 30 m/s (across the 1→2 shift)
+    {
+        auto LaunchTo = [&](V::ClutchCategory Category, float ShiftSeconds)
+        {
+            SolverRig Car;
+            Car.Build(ControlConfig([&](V::VehicleSpecification& S)
+                      {
+                          S.Solver.Clutch.Category = Category;
+                          S.Solver.Clutch.ShiftDuration = ShiftSeconds;
+                      }),
+                      FlatGround(), { 0.0f, 0.0f, 0.40f });
+            Car.Run(V::DriverInput{}, 1.0f, dt);
+            Car.Solver.AssignInput(V::DriverInput{ 1.0f, 0.0f, 0.0f, false });
+            for (int s = 0; s < static_cast<int>(14.0f / dt); ++s)
+            {
+                Car.Solver.Step(dt);
+                Car.Chassis.Integrate(dt);
+                if (Car.Telemetry().ForwardSpeed >= 30.0f) return s * dt;
+            }
+            return 14.0f;
+        };
+        const float Single = LaunchTo(V::ClutchCategory::SinglePlate, 0.4f), Dct = LaunchTo(V::ClutchCategory::DualClutch, 0.0f);
+        Report(Dct < Single, Format("0–30 m/s: dual clutch %.2f s against %.2f s for the staged single plate", Dct, Single));
+    }
+    // G4 the converter stalls against the brakes instead of stalling the engine
+    {
+        SolverRig Car;
+        Car.Build(ControlConfig([](V::VehicleSpecification& S) { S.Solver.Clutch.Category = V::ClutchCategory::TorqueConverter; }), FlatGround(),
+                  { 0.0f, 0.0f, 0.40f });
+        Car.Run(V::DriverInput{}, 1.0f, dt);
+        Car.Run(V::DriverInput{ 1.0f, 1.0f, 0.0f, false }, 3.0f, dt);
+        const V::VehicleTelemetry& T = Car.Telemetry();
+        Report(T.EngineRPM > 1400.0f && T.EngineRPM < 3200.0f && std::fabs(T.ForwardSpeed) < 0.5f,
+               Format("foot on both pedals: the engine stalls at %.0f rpm against the converter, the car stands (%.2f m/s)", T.EngineRPM, T.ForwardSpeed));
+    }
+    // G5 the converter creeps at idle in drive (and stays in drive)
+    {
+        SolverRig Car;
+        Car.Build(ControlConfig([](V::VehicleSpecification& S) { S.Solver.Clutch.Category = V::ClutchCategory::TorqueConverter; }), FlatGround(),
+                  { 0.0f, 0.0f, 0.40f });
+        Car.Run(V::DriverInput{}, 4.0f, dt);
+        const V::VehicleTelemetry& T = Car.Telemetry();
+        Report(T.ForwardSpeed > 0.5f && T.GearIndex == 3 && T.EngineRPM < 1000.0f,
+               Format("idle in drive: creeps to %.2f m/s in gear %d at %.0f rpm", T.ForwardSpeed, T.GearIndex - 2, T.EngineRPM));
+    }
+    // G6 the lockup clutch closes at speed and the slip nearly vanishes
+    {
+        SolverRig Car;
+        Car.Build(ControlConfig([](V::VehicleSpecification& S) { S.Solver.Clutch.Category = V::ClutchCategory::TorqueConverter; }), FlatGround(),
+                  { 0.0f, 0.0f, 0.40f });
+        Car.Run(V::DriverInput{}, 1.0f, dt);
+        Car.Solver.AssignInput(V::DriverInput{ 1.0f, 0.0f, 0.0f, false });
+        for (int s = 0; s < static_cast<int>(10.0f / dt) && Car.Telemetry().ForwardSpeed < 20.0f; ++s)
+        {
+            Car.Solver.Step(dt);
+            Car.Chassis.Integrate(dt);
+        }
+        for (int s = 0; s < static_cast<int>(3.0f / dt); ++s)
+        {
+            const float Error = 20.0f - Car.Telemetry().ForwardSpeed;
+            Car.Solver.AssignInput(V::DriverInput{ std::clamp(0.30f + 0.20f * Error, 0.0f, 1.0f), 0.0f, 0.0f, false });
+            Car.Solver.Step(dt);
+            Car.Chassis.Integrate(dt);
+        }
+        const V::VehicleTelemetry& T = Car.Telemetry();
+        Report(std::fabs(T.ConverterSlipRPM) < 100.0f,
+               Format("cruise at %.1f m/s: converter slip %.0f rpm with the lockup closed", T.ForwardSpeed, T.ConverterSlipRPM));
+    }
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                    H · INTAKE AND ELECTRIC
+//------------------------------------------------------------------------------------------------------------------------
+// 📝 Manifold filling (fill time, part-throttle nonlinearity, overrun, wide-open parity, idle vacuum) and the
+//    battery-electric path (motor envelope, launch, recuperation, battery sag).
+
+void ValidateElectricIntake(const std::filesystem::path& Results)
+{
+    Heading("H · Intake manifold and electric drive");
+    const float dt = 1.0f / 240.0f;
+    // H1 the manifold fills in milliseconds after a tip-in (naturally aspirated, fixed load, to isolate the intake)
+    {
+        V::VehicleSpecification S = V::ConstructControlVehicleSpecification();
+        S.Solver.Induction = V::InductionType::NaturallyAspirated;
+        S.Solver.Intake.Enabled = true;
+        V::Drivetrain Drive;
+        Drive.AssignEngine(S.Solver.Engine);
+        Drive.AssignTransmission(S.Solver.Transmission);
+        Drive.AssignClutch(S.Solver.Clutch);
+        Drive.AssignDifferential(S.Solver.Differential);
+        Drive.AssignInduction(V::InductionType::NaturallyAspirated);
+        Drive.AssignIntake(S.Solver.Intake);
+        Drive.Reset(3000.0f);
+        V::DrivetrainInputs In;
+        In.dt = dt;
+        In.GearIndex = S.Solver.Transmission.NeutralIndex + 1;
+        In.DrivenWheelRPM = 3000.0f / (S.Solver.Transmission.RatioAt(In.GearIndex) * S.Solver.Transmission.FinalDriveRatio);
+        In.Throttle = 0.0f;
+        V::DrivetrainOutputs Out{};
+        for (int Step = 0; Step < 240 * 2; ++Step) Out = Drive.Step(In);
+        const float Shut = Out.ManifoldPressure_Bar;
+        In.Throttle = 1.0f;
+        float Cross10 = -1.0f, Cross90 = -1.0f;
+        for (int Step = 0; Step < 240; ++Step)
+        {
+            Out = Drive.Step(In);
+            const float Fill = (Out.ManifoldPressure_Bar - Shut) / std::max(0.01f, 1.013f - Shut);
+            if (Cross10 < 0.0f && Fill >= 0.1f) Cross10 = Step * dt;
+            if (Cross90 < 0.0f && Fill >= 0.9f) Cross90 = Step * dt;
+        }
+        const float FillTime = (Cross10 >= 0.0f && Cross90 >= 0.0f) ? Cross90 - Cross10 : -1.0f;
+        Report(FillTime > 0.002f && FillTime < 0.050f,
+               Format("tip-in: the manifold fills from %.2f bar in %.0f ms (a 3.5 L plenum fills fast; turbo lag is the slow part)", Shut, FillTime * 1000.0f));
+    }
+    // H1b part throttle is nonlinear with the intake (vacuum, not the pedal, meters the air) and linear without
+    {
+        auto PedalRatio = [&](bool Intake)
+        {
+            V::VehicleSpecification S = V::ConstructControlVehicleSpecification();
+            S.Solver.Induction = V::InductionType::NaturallyAspirated;
+            S.Solver.Intake.Enabled = Intake;
+            V::Drivetrain Drive;
+            Drive.AssignEngine(S.Solver.Engine);
+            Drive.AssignTransmission(S.Solver.Transmission);
+            Drive.AssignClutch(S.Solver.Clutch);
+            Drive.AssignDifferential(S.Solver.Differential);
+            Drive.AssignInduction(V::InductionType::NaturallyAspirated);
+            Drive.AssignIntake(S.Solver.Intake);
+            Drive.Reset(3000.0f);
+            V::DrivetrainInputs In;
+            In.dt = dt;
+            In.GearIndex = S.Solver.Transmission.NeutralIndex + 1;
+            In.DrivenWheelRPM = 3000.0f / (S.Solver.Transmission.RatioAt(In.GearIndex) * S.Solver.Transmission.FinalDriveRatio);
+            V::DrivetrainOutputs Out{};
+            auto Steady = [&](float Pedal)
+            {
+                In.Throttle = Pedal;
+                double Sum = 0.0;
+                for (int Step = 0; Step < 240 * 3; ++Step)
+                {
+                    Out = Drive.Step(In);
+                    if (Step >= 240 * 2) Sum += Out.EngineTorque_Nm;
+                }
+                return static_cast<float>(Sum / 240.0);
+            };
+            const float Part = Steady(0.10f), Full = Steady(1.0f);
+            return Part / std::max(1.0f, Full);
+        };
+        const float With = PedalRatio(true), Without = PedalRatio(false);
+        Report(With > 0.40f && With < 0.75f && std::fabs(Without - 0.10f) < 0.03f,
+               Format("10 %% pedal at 3000 rpm: %.0f %% of full torque with the intake (%.0f %% without)", With * 100.0f, Without * 100.0f));
+    }
+    // H1c shut-throttle overrun drags on vacuum pumping at speed
+    {
+        V::VehicleSpecification S = V::ConstructControlVehicleSpecification();
+        S.Solver.Induction = V::InductionType::NaturallyAspirated;
+        S.Solver.Intake.Enabled = true;
+        V::Drivetrain Drive;
+        Drive.AssignEngine(S.Solver.Engine);
+        Drive.AssignTransmission(S.Solver.Transmission);
+        Drive.AssignClutch(S.Solver.Clutch);
+        Drive.AssignDifferential(S.Solver.Differential);
+        Drive.AssignInduction(V::InductionType::NaturallyAspirated);
+        Drive.AssignIntake(S.Solver.Intake);
+        Drive.Reset(4000.0f);
+        V::DrivetrainInputs In;
+        In.dt = dt;
+        In.GearIndex = S.Solver.Transmission.NeutralIndex + 1;
+        In.DrivenWheelRPM = 4000.0f / (S.Solver.Transmission.RatioAt(In.GearIndex) * S.Solver.Transmission.FinalDriveRatio);
+        In.Throttle = 0.0f;
+        V::DrivetrainOutputs Out{};
+        double Sum = 0.0;
+        for (int Step = 0; Step < 240 * 3; ++Step)
+        {
+            Out = Drive.Step(In);
+            if (Step >= 240 * 2) Sum += Out.EngineTorque_Nm;
+        }
+        const float Drag = static_cast<float>(Sum / 240.0);
+        Report(Drag < -15.0f && Drag > -80.0f, Format("overrun at 4000 rpm, throttle shut: the engine drags %.0f N·m on vacuum", Drag));
+    }
+    // H2 wide-open steady torque matches with the intake on or off
+    {
+        auto SteadyTorque = [&](bool Intake, float& Manifold, float& Band)
+        {
+            V::VehicleSpecification S = V::ConstructControlVehicleSpecification();
+            S.Solver.Induction = V::InductionType::NaturallyAspirated;
+            S.Solver.Intake.Enabled = Intake;
+            V::Drivetrain Drive;
+            Drive.AssignEngine(S.Solver.Engine);
+            Drive.AssignTransmission(S.Solver.Transmission);
+            Drive.AssignClutch(S.Solver.Clutch);
+            Drive.AssignDifferential(S.Solver.Differential);
+            Drive.AssignInduction(V::InductionType::NaturallyAspirated);
+            Drive.AssignIntake(S.Solver.Intake);
+            Drive.Reset(4500.0f);
+            V::DrivetrainInputs In;
+            In.dt = dt;
+            In.GearIndex = S.Solver.Transmission.NeutralIndex + 3;
+            In.Throttle = 1.0f;
+            In.DrivenWheelRPM = 4500.0f / (S.Solver.Transmission.RatioAt(In.GearIndex) * S.Solver.Transmission.FinalDriveRatio);
+            V::DrivetrainOutputs Out{};
+            double Sum = 0.0;
+            float  Least = 1.0e9f, Most = -1.0e9f;
+            for (int Step = 0; Step < 240 * 4; ++Step)
+            {
+                Out = Drive.Step(In);
+                if (Step >= 240 * 3)
+                {
+                    Sum += Out.EngineTorque_Nm;
+                    Least = std::min(Least, Out.EngineTorque_Nm);
+                    Most = std::max(Most, Out.EngineTorque_Nm);
+                }
+            }
+            Manifold = Out.ManifoldPressure_Bar;
+            Band = Most - Least;
+            return static_cast<float>(Sum / 240.0);
+        };
+        float ManifoldOn = 0.0f, BandOn = 0.0f, ManifoldOff = 0.0f, BandOff = 0.0f;
+        const float Off = SteadyTorque(false, ManifoldOff, BandOff), On = SteadyTorque(true, ManifoldOn, BandOn);
+        Report(std::fabs(On / Off - 1.0f) < 0.03f,
+               Format("steady WOT at 4500 rpm: %.0f N·m with the intake (manifold %.3f bar, ±%.1f N·m), %.0f N·m without (±%.1f N·m)", On, ManifoldOn,
+                      BandOn * 0.5f, Off, BandOff * 0.5f));
+    }
+    // H3 idle: the governor holds the engine on a vacuum with the throttle shut
+    {
+        SolverRig Car;
+        Car.Build(ControlConfig([](V::VehicleSpecification& S)
+                  {
+                      S.Solver.Induction = V::InductionType::NaturallyAspirated;
+                      S.Solver.Intake.Enabled = true;
+                  }),
+                  FlatGround(), { 0.0f, 0.0f, 0.40f });
+        Car.Run(V::DriverInput{}, 6.0f, dt);
+        const V::VehicleTelemetry& T = Car.Telemetry();
+        Report(T.EngineRPM > 650.0f && T.EngineRPM < 950.0f && T.ManifoldPressure_Bar > 0.08f && T.ManifoldPressure_Bar < 0.5f,
+               Format("idle: manifold at %.2f bar absolute, engine held at %.0f rpm", T.ManifoldPressure_Bar, T.EngineRPM));
+    }
+    // H4 the motor holds its torque cap, then its power cap past the base speed
+    {
+        V::VehicleSpecification S = V::ConstructControlVehicleSpecification();
+        S.Solver.Propulsion = V::PropulsionType::Electric;
+        auto ShaftAt = [&](float MotorRPM)
+        {
+            V::Drivetrain Drive;
+            Drive.AssignTransmission(S.Solver.Transmission);
+            Drive.AssignDifferential(S.Solver.Differential);
+            Drive.AssignPropulsion(V::PropulsionType::Electric);
+            Drive.AssignElectricMotor(S.Solver.ElectricMotor);
+            Drive.AssignBattery(S.Solver.Battery);
+            Drive.Reset(0.0f);
+            V::DrivetrainInputs In;
+            In.dt = dt;
+            In.GearIndex = S.Solver.Transmission.NeutralIndex + 1;
+            In.DrivenWheelRPM = MotorRPM / S.Solver.ElectricMotor.ReductionRatio;
+            In.Throttle = 1.0f;
+            In.VehicleSpeed = 30.0f;
+            V::DrivetrainOutputs Out{};
+            for (int Step = 0; Step < 240 * 2; ++Step) Out = Drive.Step(In);
+            return Out;
+        };
+        const V::DrivetrainOutputs Low = ShaftAt(1000.0f), High = ShaftAt(10000.0f);
+        const float HighPower = High.MotorTorque_Nm * High.MotorRPM * V::Drivetrain::kRpmToRad;
+        Report(std::fabs(Low.MotorTorque_Nm - S.Solver.ElectricMotor.PeakTorque_Nm) < 1.0f &&
+                   std::fabs(HighPower / S.Solver.ElectricMotor.PeakPower_W - 1.0f) < 0.005f,
+               Format("motor envelope: %.0f N·m at 1000 rpm (cap %.0f), %.1f kW at 10000 rpm (cap %.0f)", Low.MotorTorque_Nm,
+                      S.Solver.ElectricMotor.PeakTorque_Nm, HighPower * 0.001f, S.Solver.ElectricMotor.PeakPower_W * 0.001f));
+    }
+    // H5 the electric car launches to 100 km/h on the motor alone
+    {
+        SolverRig Car;
+        Car.Build(ControlConfig([](V::VehicleSpecification& S) { S.Solver.Propulsion = V::PropulsionType::Electric; }), FlatGround(), { 0.0f, 0.0f, 0.40f });
+        Car.Run(V::DriverInput{}, 1.0f, dt);
+        std::ofstream Trace(Results / "ElectricLaunch.csv");
+        Trace << "t_s,speed_mps,motor_rpm,motor_nm,battery_kw,charge\n";
+        float Reach = -1.0f;
+        Car.Solver.AssignInput(V::DriverInput{ 1.0f, 0.0f, 0.0f, false });
+        for (int s = 0; s < static_cast<int>(12.0f / dt); ++s)
+        {
+            Car.Solver.Step(dt);
+            Car.Chassis.Integrate(dt);
+            const V::VehicleTelemetry& T = Car.Telemetry();
+            if (s % 12 == 0)
+                Trace << s * dt << "," << T.ForwardSpeed << "," << T.MotorRPM << "," << T.MotorTorque_Nm << "," << T.BatteryPower_W * 0.001f << ","
+                      << T.BatteryCharge << "\n";
+            if (Reach < 0.0f && T.ForwardSpeed >= 27.78f) Reach = s * dt;
+        }
+        Report(Reach > 0.0f && Reach < 7.5f, Format("EV launch: 0–100 km/h in %.2f s", Reach));
+    }
+    // H6 a gentle stop returns a third of the braking energy to the battery
+    {
+        SolverRig Car;
+        Car.Build(ControlConfig([](V::VehicleSpecification& S) { S.Solver.Propulsion = V::PropulsionType::Electric; }), FlatGround(), { 0.0f, 0.0f, 0.40f });
+        Car.Run(V::DriverInput{}, 1.0f, dt);
+        Car.Solver.AssignInput(V::DriverInput{ 1.0f, 0.0f, 0.0f, false });
+        for (int s = 0; s < static_cast<int>(10.0f / dt) && Car.Telemetry().ForwardSpeed < 22.0f; ++s)
+        {
+            Car.Solver.Step(dt);
+            Car.Chassis.Integrate(dt);
+        }
+        const float Fast = Car.Telemetry().ForwardSpeed, ChargeBefore = Car.Telemetry().BatteryCharge;
+        Car.Run(V::DriverInput{ 0.0f, 0.12f, 0.0f, false }, 12.0f, dt);
+        const float Slow = Car.Telemetry().ForwardSpeed, ChargeAfter = Car.Telemetry().BatteryCharge;
+        const float Mass = Car.Solver.QueryConfiguration().ChassisMass;
+        const float Kinetic = 0.5f * Mass * (Fast * Fast - Slow * Slow);
+        const float Returned = (ChargeAfter - ChargeBefore) * Car.Solver.QueryConfiguration().Battery.Capacity_kWh * 3.6e6f;
+        Report(Slow < 6.0f && Returned > Kinetic * 0.30f,
+               Format("gentle regen stop %.0f → %.0f m/s returns %.0f kJ of %.0f kJ (%.0f %%)", Fast, Slow, Returned * 0.001f, Kinetic * 0.001f,
+                      Returned / Kinetic * 100.0f));
+    }
+    // H7 the battery sags under load and recovers at rest
+    {
+        SolverRig Car;
+        Car.Build(ControlConfig([](V::VehicleSpecification& S) { S.Solver.Propulsion = V::PropulsionType::Electric; }), FlatGround(), { 0.0f, 0.0f, 0.40f });
+        Car.Run(V::DriverInput{}, 1.0f, dt);
+        const float Rest = Car.Telemetry().BatteryVoltage_V;
+        float Loaded = Rest;
+        Car.Solver.AssignInput(V::DriverInput{ 1.0f, 0.0f, 0.0f, false });
+        for (int s = 0; s < static_cast<int>(6.0f / dt); ++s)
+        {
+            Car.Solver.Step(dt);
+            Car.Chassis.Integrate(dt);
+            Loaded = std::min(Loaded, Car.Telemetry().BatteryVoltage_V);
+        }
+        Report(Rest - Loaded > 15.0f && Loaded > 250.0f, Format("battery: %.0f V at rest, sags to %.0f V at full power", Rest, Loaded));
+    }
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                    I · END TO END
+//------------------------------------------------------------------------------------------------------------------------
+// 📝 A full drive cycle audited for energy: chemical → indicated → gearbox → wheels → motion, recuperated for the EV,
+//    and twice-run for identical hashes.
+
+struct DriveCycleAudit
+{
+    double IndicatedWork_J = 0.0;   // engine: brake + friction + pumping
+    double GearboxWork_J = 0.0;
+    double DriveWork_J = 0.0;       // sum of wheel drive power
+    double ContactWork_J = 0.0;     // tyre forces · hub velocity
+    double DragWork_J = 0.0;        // aero force · chassis velocity
+    double BatteryWork_J = 0.0;     // EV: terminal power (signed)
+    double MotorWork_J = 0.0;       // EV: shaft power (signed)
+    double LossWork_J = 0.0;        // EV: copper + iron + friction
+    double OhmicWork_J = 0.0;       // EV: I²R
+    double KineticStart_J = 0.0, KineticEnd_J = 0.0, PotentialEnd_J = 0.0;
+    double FuelBurntStart = 0.0, FuelBurntEnd = 0.0;
+    double ChargeStart = 0.0, ChargeEnd = 0.0;
+    float  TopSpeed = 0.0f, PeakLateral = 0.0f;
+    int    TopGear = 0;
+};
+
+DriveCycleAudit RunDriveCycle(SolverRig& Car, float dt, bool Electric)
+{
+    DriveCycleAudit Audit;
+    const V::VehicleSolverConfiguration& Cfg = Car.Solver.QueryConfiguration();
+    const auto Step = [&]
+    {
+        Car.Solver.Step(dt);
+        Car.Chassis.Integrate(dt);
+        const V::VehicleTelemetry& T = Car.Telemetry();
+        Audit.TopSpeed = std::max(Audit.TopSpeed, T.ForwardSpeed);
+        Audit.TopGear = std::max(Audit.TopGear, T.GearIndex);
+        Audit.PeakLateral = std::max(Audit.PeakLateral, std::fabs(T.Chassis.AngularVelocity.z) * T.ForwardSpeed);
+        if (!Electric)
+        {
+            const float Omega = T.EngineRPM * V::Drivetrain::kRpmToRad;
+            Audit.IndicatedWork_J += (std::max(0.0f, T.EnginePower_W) + (Cfg.Engine.EngineBrakingCoeff * Omega + Cfg.Engine.EngineBrakingQuadratic * Omega * Omega) * Omega +
+                                      Cfg.Engine.EngineBrakingQuadratic * Omega * Omega * (1.0f - T.ThrottleApplied) * Omega) *
+                                     dt;
+        }
+        Audit.GearboxWork_J += T.GearboxDriveTorque_Nm * 0.5f * (T.Wheels[2].WheelOmega + T.Wheels[3].WheelOmega) * dt;
+        const V::Vec3 Fwd = T.Chassis.Orientation.Rotate(V::Vec3{ 1.0f, 0.0f, 0.0f });
+        const V::Vec3 Lat = T.Chassis.Orientation.Rotate(V::Vec3{ 0.0f, 1.0f, 0.0f });
+        for (uint32_t w = 0; w < T.WheelCount; ++w)
+        {
+            const V::Vec3 HubVel = T.Chassis.LinearVelocity + V::Cross(T.Chassis.AngularVelocity, T.Wheels[w].ContactPoint - T.Chassis.Position);
+            Audit.ContactWork_J += (T.Wheels[w].LongitudinalForce * V::Dot(HubVel, Fwd) + T.Wheels[w].LateralForce * V::Dot(HubVel, Lat)) * dt;
+        }
+        Audit.DriveWork_J += (T.Wheels[0].DrivePower_W + T.Wheels[1].DrivePower_W + T.Wheels[2].DrivePower_W + T.Wheels[3].DrivePower_W) * dt;
+        Audit.DragWork_J += (V::Dot(T.Aero.DragForceWorld, T.Chassis.LinearVelocity) + V::Dot(T.Aero.SideForceWorld, T.Chassis.LinearVelocity)) * dt;
+        if (Electric)
+        {
+            Audit.BatteryWork_J += T.BatteryPower_W * dt;
+            const float MotorOmega = T.MotorRPM * V::Drivetrain::kRpmToRad;
+            Audit.MotorWork_J += T.MotorTorque_Nm * MotorOmega * dt;
+            Audit.LossWork_J += (Cfg.ElectricMotor.CopperLossCoeff * T.MotorTorque_Nm * T.MotorTorque_Nm + Cfg.ElectricMotor.IronLossCoeff * MotorOmega * MotorOmega +
+                                 Cfg.ElectricMotor.FrictionCoeff * std::fabs(MotorOmega)) *
+                                dt;
+            const float Current = T.BatteryVoltage_V > 1.0f ? T.BatteryPower_W / T.BatteryVoltage_V : 0.0f;
+            Audit.OhmicWork_J += Current * Current * Cfg.Battery.InternalResistance_Ohm * dt;
+        }
+    };
+    Car.Run(V::DriverInput{}, 1.0f, dt);
+    Audit.KineticStart_J = 0.5 * Cfg.ChassisMass * Car.Telemetry().ForwardSpeed * Car.Telemetry().ForwardSpeed;
+    Audit.FuelBurntStart = Car.Telemetry().FuelBurnt;
+    Audit.ChargeStart = Car.Telemetry().BatteryCharge;
+    Car.Solver.AssignInput(V::DriverInput{ 1.0f, 0.0f, 0.0f, false });
+    for (int s = 0; s < static_cast<int>(14.0f / dt) && Car.Telemetry().ForwardSpeed < 38.0f; ++s) Step();
+    for (int s = 0; s < static_cast<int>(5.0f / dt); ++s)   // cruise at 32 m/s
+    {
+        const float Error = 32.0f - Car.Telemetry().ForwardSpeed;
+        Car.Solver.AssignInput(V::DriverInput{ std::clamp(0.35f + 0.15f * Error, 0.0f, 1.0f), std::clamp(-0.10f * Error, 0.0f, 1.0f), 0.0f, false });
+        Step();
+    }
+    for (int s = 0; s < static_cast<int>(8.0f / dt) && Car.Telemetry().ForwardSpeed > 20.5f; ++s)   // ease off to 20 m/s
+    {
+        const float Error = Car.Telemetry().ForwardSpeed - 20.0f;
+        Car.Solver.AssignInput(V::DriverInput{ 0.0f, std::clamp(0.05f + 0.20f * Error, 0.0f, 1.0f), 0.0f, false });
+        Step();
+    }
+    for (int s = 0; s < static_cast<int>(6.0f / dt); ++s)   // slalom through 20 m/s
+    {
+        const float Error = 20.0f - Car.Telemetry().ForwardSpeed;
+        Car.Solver.AssignInput(V::DriverInput{ std::clamp(0.30f + 0.15f * Error, 0.0f, 1.0f), std::clamp(-0.10f * Error, 0.0f, 1.0f),
+                                                0.10f * std::sin(2.0f * 3.14159265f * 0.3f * s * dt), false });
+        Step();
+    }
+    Car.Solver.AssignInput(V::DriverInput{ 0.0f, 1.0f, 0.0f, false });   // stop
+    for (int s = 0; s < static_cast<int>(10.0f / dt) && Car.Telemetry().ForwardSpeed > 0.5f; ++s) Step();
+    Audit.KineticEnd_J = 0.5 * Cfg.ChassisMass * Car.Telemetry().ForwardSpeed * Car.Telemetry().ForwardSpeed;
+    Audit.PotentialEnd_J = Cfg.ChassisMass * 9.81 * Car.Telemetry().Chassis.Position.z;
+    Audit.FuelBurntEnd = Car.Telemetry().FuelBurnt;
+    Audit.ChargeEnd = Car.Telemetry().BatteryCharge;
+    return Audit;
+}
+
+void ValidateEndToEnd()
+{
+    Heading("I · End-to-end energy drive cycle");
+    const float dt = 1.0f / 240.0f;
+    // I1 the cycle exercises the whole powertrain: launch to 38 m/s through the gears, a loaded slalom, a full stop
+    DriveCycleAudit Audit;
+    {
+        SolverRig Car;
+        Car.Build(ControlConfig(), FlatGround(), { 0.0f, 0.0f, 0.40f });
+        Audit = RunDriveCycle(Car, dt, false);
+        Report(Audit.TopSpeed > 36.0f && Audit.TopGear >= 4 && Audit.PeakLateral > 2.0f && Car.Telemetry().ForwardSpeed < 0.5f,
+               Format("cycle: %.1f m/s through gear %d, slalom peaks at %.1f m/s² lateral, ends stopped", Audit.TopSpeed, Audit.TopGear - 2, Audit.PeakLateral));
+    }
+    // I2 the engine's indicated efficiency sits in the gasoline band
+    {
+        const float Lhv = ControlConfig().Fuel.LowerHeatingValue_MJkg * 1.0e6f;   // [J/kg]
+        const double FuelEnergy = (Audit.FuelBurntEnd - Audit.FuelBurntStart) * Lhv;
+        Report(FuelEnergy > 0.0 && Audit.IndicatedWork_J / FuelEnergy > 0.25 && Audit.IndicatedWork_J / FuelEnergy < 0.35,
+               Format("efficiency: %.2f MJ indicated of %.2f MJ fuel = %.1f %% (gasoline: 25–35 %%)", Audit.IndicatedWork_J * 1.0e-6, FuelEnergy * 1.0e-6,
+                      Audit.IndicatedWork_J / FuelEnergy * 100.0));
+    }
+    // I3 the wheels' work closes against motion + aero + climb
+    {
+        const double Net = Audit.ContactWork_J + Audit.DragWork_J - (Audit.KineticEnd_J - Audit.KineticStart_J) - Audit.PotentialEnd_J;
+        Report(std::fabs(Net / std::fabs(Audit.ContactWork_J)) < 0.15f,
+               Format("wheels: %.2f MJ through the contacts closes against %.2f MJ motion + drag + climb to %.1f %%", Audit.ContactWork_J * 1.0e-6,
+                      (Audit.KineticEnd_J - Audit.KineticStart_J + Audit.PotentialEnd_J - Audit.DragWork_J) * 1.0e-6,
+                      Net / std::fabs(Audit.ContactWork_J) * 100.0));
+    }
+    // I4 the driveline keeps most of what the gearbox sends it
+    {
+        Report(Audit.DriveWork_J / Audit.GearboxWork_J > 0.85 && Audit.DriveWork_J / Audit.GearboxWork_J < 0.97,
+               Format("driveline: %.2f MJ at the wheels of %.2f MJ from the gearbox (%.0f %%)", Audit.DriveWork_J * 1.0e-6, Audit.GearboxWork_J * 1.0e-6,
+                      Audit.DriveWork_J / Audit.GearboxWork_J * 100.0));
+    }
+    // I5 the EV cycle balances the battery against shaft, losses and cell resistance
+    {
+        SolverRig Car;
+        Car.Build(ControlConfig([](V::VehicleSpecification& S) { S.Solver.Propulsion = V::PropulsionType::Electric; }), FlatGround(), { 0.0f, 0.0f, 0.40f });
+        const DriveCycleAudit Electric = RunDriveCycle(Car, dt, true);
+        const float Capacity = Car.Solver.QueryConfiguration().Battery.Capacity_kWh * 3.6e6f;
+        const double Drawn = (Electric.ChargeStart - Electric.ChargeEnd) * Capacity;
+        const double Model = Electric.MotorWork_J + Electric.LossWork_J + Electric.OhmicWork_J;
+        Report(Electric.TopSpeed > 24.0f && std::fabs(Drawn - Model) / std::fabs(Drawn) < 0.05f,
+               Format("EV cycle: %.2f MJ drawn balances %.2f MJ of shaft + losses to %.1f %% (top speed %.1f m/s)", Drawn * 1.0e-6, Model * 1.0e-6,
+                      (Drawn - Model) / std::fabs(Drawn) * 100.0, Electric.TopSpeed));
+    }
+    // I6 the same cycle twice hashes identically (bitwise determinism)
+    {
+        SolverRig First, Second;
+        First.Build(ControlConfig(), FlatGround(), { 0.0f, 0.0f, 0.40f });
+        Second.Build(ControlConfig(), FlatGround(), { 0.0f, 0.0f, 0.40f });
+        RunDriveCycle(First, dt, false);
+        RunDriveCycle(Second, dt, false);
+        const std::string HashFirst = HashTelemetry(First.Telemetry()), HashSecond = HashTelemetry(Second.Telemetry());
+        Report(HashFirst == HashSecond, Format("determinism: two drive cycles hash %s", HashFirst.c_str()));
+    }
+}
+
 } // namespace
 
 int main(int ArgumentCount, char** Arguments)
@@ -739,6 +1698,10 @@ int main(int ArgumentCount, char** Arguments)
     ValidateConditions();
     ValidateThread(Exhibit);
     ValidateIntegration(Results);
+    ValidateGrades();
+    ValidateClutches(Results);
+    ValidateElectricIntake(Results);
+    ValidateEndToEnd();
     const std::string Summary = Format("\n%s %d / %d assertions\n", Failed == 0 ? "🟢" : "🔴", Passed, Passed + Failed);
     std::printf("%s", Summary.c_str());
     Log << Summary;

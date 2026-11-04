@@ -98,6 +98,11 @@ struct AbsParameters
     float Gain        = 8.0f;    // [-] pressure-cut gain per unit slip overshoot
     float MinSpeed    = 2.0f;    // [m/s] ABS inactive below this (let the car stop / stiction hold)
     float DumpFloor   = 0.05f;   // [-] minimum pressure fraction the regulator will bleed to
+    // 📝 Cycled ABS: while over the target the pressure scale dumps at DumpRate, otherwise it reapplies at
+    //    ReapplyRate — the dump/hold/reapply rhythm of a production modulator, which holds slip at the target instead
+    //    of hunting through it. 0 keeps the proportional loop (the source behaviour).
+    float ReapplyRate = 0.0f;    // [1/s] reapply ramp (0: proportional loop)
+    float DumpRate    = 12.0f;   // [1/s] dump ramp while over the target
 };
 
 struct BrakeWheelReading
@@ -109,6 +114,7 @@ struct BrakeWheelReading
     float HeatGen_W     = 0.0f;
     float Cooling_W     = 0.0f;
     bool  AbsActive     = false;   // currently cutting pressure to regulate slip
+    float AbsScale      = 1.0f;    // [-] cycled-ABS pressure scale reading (1 while the loop is proportional)
 };
 
 struct BrakeWheelInput
@@ -163,9 +169,16 @@ public:
         //   This holds the wheel near the μ–slip peak instead of letting it lock.
         float absScale = 1.0f;
         const bool absEligible = AntilockParameters.Enabled && pedal > 0.05f && (in.Airspeed > AntilockParameters.MinSpeed);
-        if (absEligible)
+        const float over = std::fabs(in.SlipRatio) - AntilockParameters.SlipTarget;
+        if (AntilockParameters.ReapplyRate > 0.0f)
         {
-            const float over = std::fabs(in.SlipRatio) - AntilockParameters.SlipTarget;
+            if (absEligible && over > 0.0f) w.AbsScale -= AntilockParameters.DumpRate * dt;
+            else                            w.AbsScale += AntilockParameters.ReapplyRate * dt;
+            w.AbsScale = std::clamp(w.AbsScale, AntilockParameters.DumpFloor, 1.0f);
+            absScale = absEligible ? w.AbsScale : 1.0f;
+        }
+        else if (absEligible)
+        {
             if (over > 0.0f) absScale = std::clamp(1.0f - AntilockParameters.Gain * over, AntilockParameters.DumpFloor, 1.0f);
         }
         w.AbsActive = absEligible && (absScale < 0.95f);

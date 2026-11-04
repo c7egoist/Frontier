@@ -115,6 +115,12 @@ void Drivetrain::Reset(float engineRPM) noexcept
     BovPosition = 0.0f;
     WastegatePosition = 0.0f;
     SuperBoostBar = 0.0f;
+    ManifoldPressure_Bar = 1.01325f;
+    IdleServo            = 0.0f;
+    LockupEngagement     = 0.0f;
+    MotorTorqueSlew_Nm   = 0.0f;
+    BatteryCharge        = Battery.InitialCharge;
+    BatteryTemperature_K = Battery.AmbientTemperature_K;
 }
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -129,8 +135,13 @@ float Drivetrain::NetEngineTorque(float omega, float throttle, float boostMult, 
     const float wot = Engine.TorqueCurve.Sample(rpm);
     const float drive = wot * boostMult * thr;
     const float frictionTq = Engine.EngineBrakingCoeff * omega * FrictionScale;
-    const float pumpingTq  = Engine.EngineBrakingQuadratic * omega * omega * FrictionScale;
-    const float resistance = frictionTq + pumpingTq * (1.0f - thr);
+    // 📝 With the intake on, the caller passes the air ratio as the throttle (vacuum meters the air) and the pumping
+    //    loss is the real throttling work Δp·Vd/4π — the quadratic law is negligible at idle vacuum and would run the
+    //    idle away. Off, this is the source's law bit for bit.
+    const float pumpingTq = Intake.Enabled
+        ? std::max(0.0f, UpstreamPressure_Bar - ManifoldPressure_Bar) * 1.0e5f * (std::max(0.5f, Intake.Displacement_L) * 0.001f) / 12.5663706f
+        : Engine.EngineBrakingQuadratic * omega * omega * FrictionScale;
+    const float resistance = Intake.Enabled ? frictionTq + pumpingTq : frictionTq + pumpingTq * (1.0f - thr);
     return drive - resistance - clutchLoad;
 }
 
@@ -250,6 +261,163 @@ void Drivetrain::SpoolTurbo(float engineRPM, float throttle, float dt) noexcept
 }
 
 //------------------------------------------------------------------------------------------------------------------------
+//   Intake manifold filling (Heywood mean-value law): the throttle meters air into the plenum through a compressible
+//   orifice (choked below the critical ratio), the engine gulps it by speed-density, and the air ratio ρ_m/ρ_up scales
+//   the torque — vacuum, not the pedal, meters the air at part throttle. Returns the ratio for NetEngineTorque.
+//   The idle governor is a PI loop on the bypass trim holding 30 rpm above the hard idle floor (a droop above stall).
+//------------------------------------------------------------------------------------------------------------------------
+float Drivetrain::StepIntake(float upstream_Bar, float engineRPM, float throttle, float dt) noexcept
+{
+    constexpr float GasConstant = 287.0f, Gamma = 1.4f, AmbientT = 293.15f;
+    const float pedal = Clampf(throttle, 0.0f, 1.0f);
+    float idleErr = 0.0f;
+    if (pedal < 0.05f)
+    {
+        idleErr = (Engine.IdleRPM + 30.0f) - engineRPM;
+        float next = IdleServo + idleErr * 3.0e-6f;
+        if (next < -Intake.IdleThrottle && idleErr < 0.0f) next = -Intake.IdleThrottle;
+        else if (next > 0.12f && idleErr > 0.0f)           next = 0.12f;
+        IdleServo = Clampf(next, -Intake.IdleThrottle, 0.12f);
+    }
+    else if (IdleServo > 0.0f) IdleServo = std::max(0.0f, IdleServo - dt * 0.5f);
+    else                       IdleServo = std::min(0.0f, IdleServo + dt * 0.5f);
+    const float opening = Clampf(pedal + Intake.IdleThrottle + IdleServo + idleErr * 2.0e-4f, 0.0f, 1.0f);
+
+    const float upstream = std::max(0.2f, upstream_Bar);
+    const float bore     = std::max(0.01f, Intake.ThrottleBore_mm) * 0.001f;
+    const float area     = opening * 0.78539816f * bore * bore;
+    const float volume   = std::max(0.5f, Intake.PlenumVolume_L) * 0.001f;
+    const float veShape  = (engineRPM - Intake.VolumetricPeakRPM) / 4000.0f;
+    const float ve       = std::max(0.5f * Intake.VolumetricEfficiency,
+                                    Intake.VolumetricEfficiency * (1.0f - Intake.VolumetricFalloff * veShape * veShape));
+    const float gulpPerDensity = ve * std::max(0.5f, Intake.Displacement_L) * 0.001f * (std::max(0.0f, engineRPM) / 120.0f);
+    const float upstreamDensity = upstream * 1.0e5f / (GasConstant * AmbientT);
+    // The fill time constant (~7 ms) is near the step, so sub-step the density integration.
+    float density = ManifoldPressure_Bar * 1.0e5f / (GasConstant * AmbientT);
+    const int   subSteps = 4;
+    const float h = dt / static_cast<float>(subSteps);
+    for (int s = 0; s < subSteps; ++s)
+    {
+        const float ratio = Clampf(density / std::max(1.0e-4f, upstreamDensity), 0.0f, 1.0f);
+        const float psi = ratio <= 0.528f ? 0.685f   // choked: √γ·(2/(γ+1))^((γ+1)/(2(γ−1)))
+            : std::sqrt(std::max(0.0f, (2.0f * Gamma / (Gamma - 1.0f)) *
+                                 (std::pow(ratio, 2.0f / Gamma) - std::pow(ratio, (Gamma + 1.0f) / Gamma))));
+        const float throttleFlow = Intake.DischargeCoefficient * area * (upstream * 1.0e5f) / std::sqrt(GasConstant * AmbientT) * psi;
+        density = std::max(0.0f, density + (throttleFlow - gulpPerDensity * density) * h / volume);
+    }
+    ManifoldPressure_Bar = Clampf(density * GasConstant * AmbientT * 1.0e-5f, 0.05f, upstream * 1.02f);
+    return Clampf(ManifoldPressure_Bar / upstream, 0.0f, 1.0f);
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+//   Torque converter (quasi-static): the pump loads the engine by the K-factor law, fading to nothing as the turbine
+//   catches the pump (a fluid coupling at ν = 1 transmits nothing); the turbine torque is the pump torque times the
+//   ratio, 1.9 at stall falling to 1 at the coupling point. The lockup clutch is a direct plate in parallel, slewed.
+//------------------------------------------------------------------------------------------------------------------------
+void Drivetrain::StepConverter(float pumpRPM, float turbineRPM, bool lockupAllowed, float dt, float& pumpTorque_Nm, float& turbineTorque_Nm) noexcept
+{
+    const float pump = std::max(0.0f, pumpRPM);
+    const float turb = std::max(0.0f, turbineRPM);
+    const float nu = Clampf(turb / std::max(pump, 1.0f), 0.0f, 1.0f);
+    const float fade = Clampf((nu - 0.85f) / 0.15f, 0.0f, 1.0f);
+    const float throughput = 1.0f - fade * fade * (3.0f - 2.0f * fade);
+    const float K = std::max(10.0f, Clutch.ConverterKFactor);
+    const float pumpTq = (pump / K) * (pump / K) * throughput;
+    const float couple = Clampf((Clutch.ConverterCouplingPoint - nu) / std::max(0.05f, Clutch.ConverterCouplingPoint), 0.0f, 1.0f);
+    const float ratio = 1.0f + (std::max(1.0f, Clutch.ConverterStallRatio) - 1.0f) * couple;
+    const float target = lockupAllowed ? 1.0f : 0.0f;
+    LockupEngagement = Clampf(LockupEngagement + Clampf(target - LockupEngagement, -Clutch.LockupRate * dt, Clutch.LockupRate * dt), 0.0f, 1.0f);
+    const float capacity = Clutch.MaxTorqueCapacity * LockupEngagement;
+    const float k = capacity / std::max(Clutch.BreakawaySlipRPM * kRpmToRad, 1e-3f);
+    const float direct = Clampf((pump - turb) * kRpmToRad * k, -capacity, capacity);
+    pumpTorque_Nm    = pumpTq * (1.0f - LockupEngagement) + direct;
+    turbineTorque_Nm = pumpTq * ratio * (1.0f - LockupEngagement) + direct;
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+//   Electric drive: a permanent-magnet motor on a single-speed reduction with torque/power/overspeed envelope,
+//   drivability slew and copper/iron/friction losses, against a battery (open-circuit voltage in charge, series
+//   resistance, current limits that clip torque, coulomb counting, thermal derate). Recuperation takes the pedal's
+//   braking demand up to the motor and pack limits and fades out near rest, where friction finishes the stop.
+//------------------------------------------------------------------------------------------------------------------------
+void Drivetrain::StepElectric(const DrivetrainInputs& In, float dt, DrivetrainOutputs& Out) noexcept
+{
+    const float direction = In.GearIndex < Trans.NeutralIndex ? -1.0f : 1.0f;
+    const float motorRPM  = In.DrivenWheelRPM * Motor.ReductionRatio * direction;
+    const float motorW    = motorRPM * kRpmToRad;
+    const float throttle  = Clampf(In.Throttle, 0.0f, 1.0f);
+    const float brake     = Clampf(In.Brake, 0.0f, 1.0f);
+
+    const float regenGate = Clampf((In.VehicleSpeed - 0.5f) / 1.5f, 0.0f, 1.0f);
+    const float regenDemand = In.RegenDemand_Nm >= 0.0f ? In.RegenDemand_Nm : brake * Motor.RegenerativeTorque_Nm;
+    float demand = direction * throttle * Motor.PeakTorque_Nm - Sign(motorRPM) * regenDemand * regenGate;
+    if (BatteryCharge <= 0.0f && demand * motorW > 0.0f) demand = std::min(demand, 0.0f);
+    if (BatteryCharge >= 1.0f && demand * motorW < 0.0f) demand = std::max(demand, 0.0f);
+
+    const float slewMax = std::max(1.0f, Motor.TorqueRateLimit_NmPerS) * dt;
+    MotorTorqueSlew_Nm += Clampf(demand - MotorTorqueSlew_Nm, -slewMax, slewMax);
+    const float heatDerate = Clampf((Battery.DerateEnd_K - BatteryTemperature_K) /
+                                    std::max(1.0f, Battery.DerateEnd_K - Battery.DerateStart_K), 0.0f, 1.0f);
+    float torqueCap = Motor.PeakTorque_Nm * heatDerate;
+    const float powerCap = Motor.PeakPower_W * heatDerate;
+    if (std::fabs(motorW) > 1.0e-3f) torqueCap = std::min(torqueCap, powerCap / std::fabs(motorW));
+    if (std::fabs(motorRPM) > Motor.MaxRPM) torqueCap = 0.0f;
+    float shaftTorque = Clampf(MotorTorqueSlew_Nm, -torqueCap, torqueCap);
+
+    // Battery: terminal power → current (quadratic in R) → the current limits scale torque back.
+    const float ocv = Battery.OpenCircuitEmpty_V + Clampf(BatteryCharge, 0.0f, 1.0f) * (Battery.OpenCircuitFull_V - Battery.OpenCircuitEmpty_V);
+    const float R = std::max(1.0e-4f, Battery.InternalResistance_Ohm);
+    const auto SolveCurrent = [&](float termP)
+    {
+        const float disc = std::max(0.0f, ocv * ocv - 4.0f * R * termP);
+        return (ocv - std::sqrt(disc)) / (2.0f * R);
+    };
+    const auto LossPower = [&](float shaftTq)
+    {
+        return Motor.CopperLoss * shaftTq * shaftTq + Motor.IronLoss * motorW * motorW + Motor.FrictionLoss * std::fabs(motorW);
+    };
+    float current = SolveCurrent(shaftTorque * motorW + LossPower(shaftTorque));
+    if (current > Battery.MaxDischargeCurrent_A && current > 0.0f)
+    {
+        shaftTorque *= Battery.MaxDischargeCurrent_A / current;
+        current = SolveCurrent(shaftTorque * motorW + LossPower(shaftTorque));
+    }
+    else if (-current > Battery.MaxChargeCurrent_A && current < 0.0f)
+    {
+        shaftTorque *= Battery.MaxChargeCurrent_A / -current;
+        current = SolveCurrent(shaftTorque * motorW + LossPower(shaftTorque));
+    }
+    const float terminalV = ocv - current * R;
+    const float terminalP = terminalV * current;
+    const float ampHours = std::max(1.0f, Battery.Capacity_kWh * 1000.0f / std::max(50.0f, Battery.NominalVoltage_V));
+    BatteryCharge = Clampf(BatteryCharge - current * dt / (ampHours * 3600.0f), 0.0f, 1.0f);
+    BatteryTemperature_K += (current * current * R - Battery.CoolingConductance_WK * (BatteryTemperature_K - Battery.AmbientTemperature_K)) * dt /
+                            std::max(1000.0f, Battery.ThermalCapacity_JK);
+
+    const float wheelTorque = shaftTorque * Motor.ReductionRatio * Motor.DrivetrainEff * direction;
+    float outL = 0.0f, outR = 0.0f;
+    Differentiate(wheelTorque, In.LeftWheelRPM, In.RightWheelRPM, outL, outR);
+    const float regenWheel = std::min(0.0f, shaftTorque) * Motor.ReductionRatio * Motor.DrivetrainEff;
+    float regenL = 0.0f, regenR = 0.0f;
+    Differentiate(regenWheel, In.LeftWheelRPM, In.RightWheelRPM, regenL, regenR);
+
+    Out.EngineRPM = motorRPM;
+    Out.EngineTorque_Nm = shaftTorque;
+    Out.MotorRPM = motorRPM;
+    Out.MotorTorque_Nm = shaftTorque;
+    Out.BatteryCharge = BatteryCharge;
+    Out.BatteryVoltage_V = terminalV;
+    Out.BatteryPower_W = terminalP;
+    Out.ClutchTorque_Nm = shaftTorque;
+    Out.ClutchLocked = true;
+    Out.GearboxOutputTorque_Nm = wheelTorque;
+    Out.LeftDriveTorque_Nm = outL;
+    Out.RightDriveTorque_Nm = outR;
+    Out.LeftRegenTorque_Nm = regenL;
+    Out.RightRegenTorque_Nm = regenR;
+}
+
+//------------------------------------------------------------------------------------------------------------------------
 //   Differential torque split.
 //------------------------------------------------------------------------------------------------------------------------
 void Drivetrain::Differentiate(float driveTorque, float leftRPM, float rightRPM, float& outL, float& outR) const noexcept
@@ -307,6 +475,12 @@ DrivetrainOutputs Drivetrain::Step(const DrivetrainInputs& In) noexcept
     const float throttle = In.Fuelled ? Clampf(In.Throttle, 0.0f, 1.0f) : 0.0f;
     FrictionScale = In.FrictionScale;
     const float engineRPM0 = EngineOmega * kRadToRpm;
+    // 📝 The electric drive replaces the whole combustion pipeline (motor + battery, full outputs).
+    if (Propulsion == PropulsionType::Electric)
+    {
+        StepElectric(In, dt, Out);
+        return Out;
+    }
 
     // 1) Forced induction (uses last-step engine rpm). Turbo spools off the exhaust; the supercharger tracks the crank
     //    instantly and taxes it with parasitic drag; NA has neither. boostMult scales the engine torque curve.
@@ -339,23 +513,84 @@ DrivetrainOutputs Drivetrain::Step(const DrivetrainInputs& In) noexcept
             boostMult = 1.0f + (boostMult - 1.0f) * (Charge.ReferenceTemperature_K / chargeTemperature);
     }
 
+    // 📝 With the intake on, the plenum fills here and the air ratio replaces the pedal inside NetEngineTorque
+    //    (vacuum meters the air; the pumping loss follows Δp·Vd/4π). Off, airRatio is the pedal exactly.
+    float airRatio = throttle;
+    if (Intake.Enabled)
+    {
+        UpstreamPressure_Bar = Charge.AmbientPressure_Bar + (Induction == InductionType::NaturallyAspirated ? 0.0f : reportBoostBar);
+        airRatio = StepIntake(UpstreamPressure_Bar, engineRPM0, throttle, dt);
+    }
+
     // 2) Clutch: compute transmitted torque from slip between engine and gearbox input.
     const float gearRatio = Trans.RatioAt(In.GearIndex);
     const bool  inNeutral = (In.GearIndex == Trans.NeutralIndex) || (gearRatio == 0.0f);
     const float gearboxInputRPM = inNeutral ? engineRPM0
                                             : In.DrivenWheelRPM * std::fabs(gearRatio) * Trans.FinalDriveRatio;
     const float slipRPM = engineRPM0 - gearboxInputRPM;
-
-    // Capacity scales with engagement (assume fully engaged when not shifting → 1.0).
-    const float engagement = inNeutral ? 0.0f : 1.0f;
-    const float capacity = Clutch.MaxTorqueCapacity * engagement;
-    const float k = capacity / std::max(Clutch.BreakawaySlipRPM * kRpmToRad, 1e-3f);   // Nm per (rad/s) slip
-    float clutchTorque = Clampf(slipRPM * kRpmToRad * k, -capacity, capacity);
-    const bool locked = (engagement > Clutch.LockupEngagement) && (std::fabs(slipRPM) < Clutch.LockupSlipRPM);
+    float clutchTorque = 0.0f;      // what reaches the gearbox (turbine torque on the converter)
+    float crankLoad    = 0.0f;      // what loads the crank (both DCT plates, the pump on the converter)
+    bool  locked       = false;
+    float converterSlip = 0.0f;
+    float dualA = 0.0f, dualB = 0.0f, dualPreRatio = 0.0f;
+    bool  dualBlend = false;
+    if (Clutch.Category == ClutchCategory::SinglePlate && In.ClutchEngagement < 0.0f && In.HandoffBlend < 0.0f)
+    {
+        // Capacity scales with engagement (assume fully engaged when not shifting → 1.0).
+        const float engagement = inNeutral ? 0.0f : 1.0f;
+        const float capacity = Clutch.MaxTorqueCapacity * engagement;
+        const float k = capacity / std::max(Clutch.BreakawaySlipRPM * kRpmToRad, 1e-3f);   // Nm per (rad/s) slip
+        clutchTorque = Clampf(slipRPM * kRpmToRad * k, -capacity, capacity);
+        crankLoad = clutchTorque;
+        locked = (engagement > Clutch.LockupEngagement) && (std::fabs(slipRPM) < Clutch.LockupSlipRPM);
+    }
+    else if (Clutch.Category == ClutchCategory::TorqueConverter)
+    {
+        float pumpTq = 0.0f, turbTq = 0.0f;
+        if (!inNeutral)
+        {
+            StepConverter(engineRPM0, gearboxInputRPM, In.LockupAllowed, dt, pumpTq, turbTq);
+            converterSlip = engineRPM0 - gearboxInputRPM;
+        }
+        else LockupEngagement = 0.0f;
+        clutchTorque = turbTq;
+        crankLoad    = pumpTq;
+        locked = (LockupEngagement > Clutch.LockupEngagement) && (std::fabs(converterSlip) < Clutch.LockupSlipRPM);
+    }
+    else
+    {
+        // 📝 Staged single plate (the gearbox servo's engagement) or dual-clutch overlap. Each DCT clutch's PRESSURE
+        //    ramps with its blend share (that is what the mechatronic meters); the transmitted torque is whatever each
+        //    plate holds at its slip, so the engine is never double-loaded through the handoff. The offgoing plate can
+        //    only push the driving way (an opening plate cannot drag the engine back).
+        const float engagementCmd = Clampf(In.ClutchEngagement < 0.0f ? 1.0f : In.ClutchEngagement, 0.0f, 1.0f) * (inNeutral ? 0.0f : 1.0f);
+        const float capacity = Clutch.MaxTorqueCapacity * engagementCmd;
+        const float k = capacity / std::max(Clutch.BreakawaySlipRPM * kRpmToRad, 1e-3f);
+        clutchTorque = Clampf(slipRPM * kRpmToRad * k, -capacity, capacity);
+        crankLoad = clutchTorque;
+        locked = (engagementCmd > Clutch.LockupEngagement) && (std::fabs(slipRPM) < Clutch.LockupSlipRPM);
+        if (Clutch.Category == ClutchCategory::DualClutch && !inNeutral && In.HandoffBlend >= 0.0f && In.HandoffBlend < 1.0f && In.PreselectGearIndex >= 0)
+        {
+            dualPreRatio = Trans.RatioAt(In.PreselectGearIndex);
+            const float h = Clampf(In.HandoffBlend, 0.0f, 1.0f);
+            const float slipA = engineRPM0 - In.DrivenWheelRPM * std::fabs(gearRatio) * Trans.FinalDriveRatio;
+            const float slipB = engineRPM0 - In.DrivenWheelRPM * std::fabs(dualPreRatio) * Trans.FinalDriveRatio;
+            const float driving = throttle >= 0.05f ? 1.0f : -1.0f;
+            const float capA = Clutch.MaxTorqueCapacity * engagementCmd * (1.0f - h);
+            const float capB = Clutch.MaxTorqueCapacity * engagementCmd * h;
+            const float rawA = Clampf(slipA * kRpmToRad * capA / std::max(Clutch.BreakawaySlipRPM * kRpmToRad, 1e-3f), -capA, capA);
+            dualA = driving > 0.0f ? std::max(0.0f, rawA) : std::min(0.0f, rawA);
+            dualB = Clampf(slipB * kRpmToRad * capB / std::max(Clutch.BreakawaySlipRPM * kRpmToRad, 1e-3f), -capB, capB);
+            clutchTorque = dualA + dualB;
+            crankLoad    = dualA + dualB;
+            locked       = false;
+            dualBlend    = true;
+        }
+    }
 
     // 3) Engine dynamics — RK4 on ω with the clutch reaction + supercharger parasitic drag as load.
-    const float clutchLoad = clutchTorque + parasiticDrag;   // torque pulled off the crank (clutch + blower drag)
-    auto f = [&](float w) noexcept { return NetEngineTorque(w, throttle, boostMult, clutchLoad) * Engine.InvEngineInertia; };
+    const float clutchLoad = crankLoad + parasiticDrag;   // torque pulled off the crank (clutch + blower drag)
+    auto f = [&](float w) noexcept { return NetEngineTorque(w, airRatio, boostMult, clutchLoad) * Engine.InvEngineInertia; };
     const float w0 = EngineOmega;
     const float k1 = f(w0);
     const float k2 = f(w0 + 0.5f * dt * k1);
@@ -372,16 +607,17 @@ DrivetrainOutputs Drivetrain::Step(const DrivetrainInputs& In) noexcept
     rpmNew = Clampf(rpmNew, Engine.IdleRPM, Engine.RedlineRPM);
     EngineOmega = rpmNew * kRpmToRad;
 
-    // 4) Transmission → gearbox output torque.
+    // 4) Transmission → gearbox output torque (the DCT mixes both plates' ratios through the handoff).
     const float gearboxOutTorque = inNeutral ? 0.0f
-        : clutchTorque * gearRatio * Trans.FinalDriveRatio * Trans.DriveEfficiency;
+        : dualBlend ? (dualA * gearRatio + dualB * dualPreRatio) * Trans.FinalDriveRatio * Trans.DriveEfficiency
+                    : clutchTorque * gearRatio * Trans.FinalDriveRatio * Trans.DriveEfficiency;
 
     // 5) Differential split.
     float outL = 0.0f, outR = 0.0f;
     Differentiate(gearboxOutTorque, In.LeftWheelRPM, In.RightWheelRPM, outL, outR);
 
     Out.EngineRPM = rpmNew;
-    Out.EngineTorque_Nm = NetEngineTorque(EngineOmega, throttle, boostMult, 0.0f);
+    Out.EngineTorque_Nm = NetEngineTorque(EngineOmega, airRatio, boostMult, 0.0f);
     Out.TurboRPM = reportForcedRPM;
     Out.BoostPressure_Bar = reportBoostBar;
     Out.BoostMultiplier = boostMult;
@@ -392,6 +628,8 @@ DrivetrainOutputs Drivetrain::Step(const DrivetrainInputs& In) noexcept
     Out.LeftDriveTorque_Nm = outL;
     Out.RightDriveTorque_Nm = outR;
     Out.ChargeTemperature_K = chargeTemperature;
+    Out.ManifoldPressure_Bar = Intake.Enabled ? ManifoldPressure_Bar : 0.0f;
+    Out.ConverterSlipRPM = Clutch.Category == ClutchCategory::TorqueConverter ? converterSlip : 0.0f;
     return Out;
 }
 

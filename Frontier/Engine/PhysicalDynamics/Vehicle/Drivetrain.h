@@ -139,12 +139,39 @@ struct TransmissionParameters
     }
 };
 
+// What couples the engine to the gearbox. SinglePlate is the source's AMT friction clutch (instant shifts unless
+//   ShiftDuration stages them); DualClutch overlaps two plates through a handoff; TorqueConverter is a fluid automatic
+//   with a lockup clutch. Reverse driving is out of scope for every category (no PRND selector is lawled).
+enum class ClutchCategory
+{
+    SinglePlate,
+    DualClutch,
+    TorqueConverter,
+};
+
+enum class PropulsionType
+{
+    Combustion,   // engine → clutch → multi-speed gearbox (the source)
+    Electric,     // traction motor → single-speed reduction (no gears, no clutch, no idle)
+};
+
 struct ClutchParameters
 {
     float MaxTorqueCapacity = 1200.0f;   // [N·m] (preset: 1500)
     float BreakawaySlipRPM  = 300.0f;    // slip at which capacity is reached
     float LockupEngagement  = 0.98f;
     float LockupSlipRPM     = 50.0f;
+    // 📝 Beyond Project Drive (all identities by default: SinglePlate, instant shifts, no converter).
+    ClutchCategory Category       = ClutchCategory::SinglePlate;
+    float ShiftDuration           = 0.0f;    // [s] staged single-plate shift (0: the source's instant shift)
+    float HandoffSeconds          = 0.15f;   // [s] dual-clutch overlap
+    float LaunchSeconds           = 0.8f;    // [s] staged single-plate launch ramp
+    float ConverterKFactor        = 100.0f;  // [rpm/√Nm] pump torque = (N_pump / K)²
+    float ConverterStallRatio     = 1.9f;    // [-] turbine/pump torque at stall
+    float ConverterCouplingPoint  = 0.85f;   // [-] speed ratio where the ratio reaches 1
+    float LockupRPM               = 1400.0f; // [rpm] turbine speed that engages the lockup clutch
+    float LockupDropRPM           = 300.0f;  // [rpm] hysteresis below LockupRPM that releases it
+    float LockupRate              = 5.0f;    // [1/s] lockup engagement slew
 };
 
 enum class DifferentialMode
@@ -176,6 +203,14 @@ struct DrivetrainInputs
     // 📝 Beyond Project Drive (Frontier): an empty tank stops the combustion torque; cold oil scales the engine's friction.
     bool  Fuelled       = true;   // [-]
     float FrictionScale = 1.0f;   // [-]
+    // 📝 Staged gearboxes, the converter and the electric drive (< 0 / -1: unset — the source's behaviour).
+    float ClutchEngagement    = -1.0f; // [-] staged single-plate engagement (0..1)
+    int   PreselectGearIndex  = -1;    // dual-clutch preselected gear
+    float HandoffBlend        = -1.0f; // [-] dual-clutch overlap 0..1
+    bool  LockupAllowed       = true;  // converter lockup permission from the gearbox servo
+    float Brake               = 0.0f;  // [0..1] brake pedal (regen authority on the electric drive)
+    float RegenDemand_Nm      = -1.0f; // [Nm] motor-shaft regen the pedal asks for (< 0: pedal × the regen peak)
+    float VehicleSpeed        = 0.0f;  // [m/s] (regen fades out near rest)
 };
 
 struct DrivetrainOutputs
@@ -192,6 +227,16 @@ struct DrivetrainOutputs
     float LeftDriveTorque_Nm = 0.0f;       // differential outputs
     float RightDriveTorque_Nm = 0.0f;
     float ChargeTemperature_K = 0.0f;      // intercooled charge air (0 while ChargeAir is off)
+    // 📝 Beyond Project Drive (intake manifold, converter, electric drive; 0/unset while off).
+    float ManifoldPressure_Bar   = 0.0f;  // [bar] absolute plenum pressure
+    float ConverterSlipRPM       = 0.0f;  // [rpm] pump − turbine (converter only)
+    float MotorRPM               = 0.0f;  // [rpm] traction motor shaft
+    float MotorTorque_Nm         = 0.0f;  // [Nm] motor shaft torque (+ motoring)
+    float BatteryCharge          = 0.0f;  // [-] 0..1
+    float BatteryVoltage_V       = 0.0f;  // [V] terminal voltage under load
+    float BatteryPower_W         = 0.0f;  // [W] terminal power (+ discharging)
+    float LeftRegenTorque_Nm     = 0.0f;  // [Nm] recuperation at the wheels (≤ 0)
+    float RightRegenTorque_Nm    = 0.0f;  // [Nm]
 };
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -209,6 +254,10 @@ public:
     void AssignSupercharger(const SuperchargerParameters& P) noexcept { Super = P; }
     void AssignRaceTune(bool race) noexcept { RaceTune = race; }
     void AssignChargeAir(const ChargeAirSpecification& P) noexcept { Charge = P; }
+    void AssignPropulsion(PropulsionType p) noexcept { Propulsion = p; }
+    void AssignIntake(const IntakeManifoldSpecification& P) noexcept { Intake = P; }
+    void AssignElectricMotor(const ElectricMotorParameters& P) noexcept { Motor = P; }
+    void AssignBattery(const BatteryParameters& P) noexcept { Battery = P; }
 
     void Reset(float engineRPM) noexcept;
 
@@ -231,6 +280,11 @@ private:
     // Belt-driven supercharger: returns the torque multiplier for this step and writes the parasitic crank drag.
     float StepSupercharger(float engineRPM, float throttle, float dt, float& parasiticDrag_Nm) noexcept;
     void  Differentiate(float driveTorque, float leftRPM, float rightRPM, float& outL, float& outR) const noexcept;
+    // 📝 Beyond Project Drive: plenum filling (returns the air ratio ρ_m/ρ_up), the fluid converter (pump load and
+    //    turbine torque, blended with the lockup clutch), and the electric drive (motor + battery, full outputs).
+    float StepIntake(float upstream_Bar, float engineRPM, float throttle, float dt) noexcept;
+    void  StepConverter(float pumpRPM, float turbineRPM, bool lockupAllowed, float dt, float& pumpTorque_Nm, float& turbineTorque_Nm) noexcept;
+    void  StepElectric(const DrivetrainInputs& In, float dt, DrivetrainOutputs& Out) noexcept;
 
     EngineParameters       Engine;
     TurbochargerParameters Turbo;
@@ -241,6 +295,10 @@ private:
     InductionType          Induction = InductionType::Turbocharged;
     bool                   RaceTune  = false;
     ChargeAirSpecification Charge{};
+    PropulsionType         Propulsion = PropulsionType::Combustion;
+    IntakeManifoldSpecification Intake{};
+    ElectricMotorParameters     Motor{};
+    BatteryParameters           Battery{};
 
     float EngineOmega   = 73.3f;   // rad/s (~700 rpm)
     float TurboOmegaRad = 0.0f;    // rad/s (turbo shaft speed)
@@ -249,6 +307,14 @@ private:
     float WastegatePosition = 0.0f;// [0..1]
     float SuperBoostBar = 0.0f;    // bar (supercharger, bypass-regulated)
     float FrictionScale = 1.0f;    // [-] the oil's friction multiplier for this step (DrivetrainInputs::FrictionScale)
+    // 📝 Beyond Project Drive reading (intake manifold, converter lockup, electric drive).
+    float ManifoldPressure_Bar = 1.01325f; // [bar] absolute plenum pressure
+    float UpstreamPressure_Bar = 1.01325f; // [bar] throttle-upstream pressure this step (ambient + blow-through boost)
+    float IdleServo            = 0.0f;     // [-] idle governor integrator trim
+    float LockupEngagement     = 0.0f;     // [-] converter lockup clutch 0..1
+    float MotorTorqueSlew_Nm   = 0.0f;     // [Nm] drivability-slewed motor demand
+    float BatteryCharge        = 0.6f;     // [-] 0..1
+    float BatteryTemperature_K = 293.15f;  // [K]
 };
 
 } // namespace Frontier::Vehicle

@@ -199,6 +199,10 @@ struct VehicleSolverConfiguration
     FuelSpecification            Fuel{};
     EngineFluidSpecification     Fluids{};
     ChargeAirSpecification       ChargeAir{};
+    PropulsionType               Propulsion = PropulsionType::Combustion;   // combustion or the electric drive
+    IntakeManifoldSpecification  Intake{};                                 // plenum filling (combustion only)
+    ElectricMotorParameters      ElectricMotor{};                           // traction motor (electric only)
+    BatteryParameters            Battery{};                                 // traction battery (electric only)
     std::vector<float>           CornerPressures{};   // [Pa] per wheel cold pressure (the Tyre records); empty: Tyre.InflationPressure
     std::vector<float>           CornerGrip{};        // [-]  per wheel compound grip; empty: 1
 };
@@ -300,6 +304,16 @@ struct VehicleTelemetry
     float    OilTemperature_K     = 0.0f;
     float    ChargeTemperature_K  = 0.0f;
     float    EnginePower_W     = 0.0f;   // [W]    brake power
+    float    ManifoldPressure_Bar = 0.0f;   // [bar] absolute plenum pressure (0 while the intake is off)
+    bool     ShiftActive       = false; // [-]    a staged shift/handoff is in progress this step
+    float    HandoffBlend      = -1.0f; // [-]    dual-clutch overlap 0..1 (-1 while idle/legacy)
+    float    ClutchEngagement  = 1.0f;  // [-]    staged single-plate engagement (1 while legacy)
+    float    ConverterSlipRPM  = 0.0f;  // [rpm]  pump − turbine (converter only)
+    float    MotorRPM          = 0.0f;  // [rpm]  traction motor shaft (electric only)
+    float    MotorTorque_Nm    = 0.0f;  // [Nm]   motor shaft torque (electric only)
+    float    BatteryCharge     = 0.0f;  // [-]    0..1 (electric only)
+    float    BatteryVoltage_V  = 0.0f;  // [V]    terminal voltage under load (electric only)
+    float    BatteryPower_W    = 0.0f;  // [W]    terminal power, + discharging (electric only)
 };
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -378,6 +392,13 @@ private:
     std::vector<SlipDeflection>            SlipDeflections;     // per-wheel relaxation-length deflection reading
     int                               GearIndex = 3; // current gear (3 = 1st)
     float                             ShiftTimer = 0.0f;
+    // Staged-gearbox servo reading (< 0 / −1 while the legacy instant shift runs — see StepPacejka):
+    float                             ShiftProgress = -1.0f;   // [-] 0..1 through a staged shift/handoff
+    int                               ShiftTarget = 3;         // gear the staged shift is heading for
+    bool                              ShiftDown = false;       // the staged shift is a downshift (rev-match blip)
+    int                               PreselectGear = -1;      // dual-clutch preselected gear mid-handoff
+    float                             LaunchTimer = 0.0f;      // [s] staged single-plate launch ramp
+    bool                              LockupAllowed = false;   // converter lockup permission this step
     // Beyond Project Drive:
     [[nodiscard]] float WheelSteer(size_t Wheel) const noexcept;   // the angle this wheel turns (Ackermann share)
     void IntegrateEngineConditions(float Seconds, float EnginePower) noexcept;
