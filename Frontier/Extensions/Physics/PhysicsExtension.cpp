@@ -72,7 +72,16 @@ size_t PhysicsExtension::Begin(WorldSpace& World, const PhysicsSpaceSettings& Se
             const SpatialConfiguration& Spatial = Geometry.Spatial;
             std::array<double, 3> Size = { Resolved.Extent[0] * std::abs(Spatial.Scale[0]), Resolved.Extent[1] * std::abs(Spatial.Scale[1]),
                                            Resolved.Extent[2] * std::abs(Spatial.Scale[2]) };
-            if (!(Size[0] > 1.0e-3 && Size[1] > 1.0e-3 && Size[2] > 1.0e-3)) Size = Bounded ? World3 : std::array<double, 3>{ 1.0, 1.0, 1.0 };
+            if (!(Size[0] > 1.0e-3 && Size[1] > 1.0e-3 && Size[2] > 1.0e-3))
+            {
+                // 📝 Not resolved against the scene yet (no extent): its world bounds, or nothing to simulate.
+                if (!Bounded)
+                {
+                    ++Tally.Skipped;
+                    continue;
+                }
+                Size = World3;
+            }
             const std::array<double, 3> Origin      = ToDouble(Spatial.PositionMetres);
             const std::array<double, 4> Orientation = ResolvePhysicsOrientation(ToDouble(Spatial.OrientationDegrees));
             // 📝 The world bounds' centre is the shape's centre: its offset from the origin, in the object's own axes.

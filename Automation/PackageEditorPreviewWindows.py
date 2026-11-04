@@ -159,7 +159,8 @@ def Main():
                 raise RuntimeError('Packaged font differs: ' + Typeface['file'])
         Notices = Installation / 'Notices'
         Notices.mkdir()
-        for Package, Filename in [('imgui', 'LICENSE.txt'), ('glfw', 'LICENSE.md'), ('tomlpp', 'LICENSE'), ('stb', 'LICENSE'), ('thorvg', 'LICENSE')]:
+        for Package, Filename in [('imgui', 'LICENSE.txt'), ('glfw', 'LICENSE.md'), ('tomlpp', 'LICENSE'), ('stb', 'LICENSE'), ('thorvg', 'LICENSE'),
+                                  ('JoltPhysics', 'LICENSE')]:
             shutil.copy2(RepositoryRoot / 'ExternalPackages' / Package / Filename, Notices / (Package + '-LICENSE.txt'))
         if SolidArcExecutable is not None:
             shutil.copy2(RepositoryRoot / 'ExternalPackages/volk/LICENSE.md', Notices / 'volk-LICENSE.txt')
