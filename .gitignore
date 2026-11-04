@@ -17,6 +17,8 @@ EngineContent/*
 !EngineContent/Defaults/
 !EngineContent/MaterialArchives/
 !EngineContent/PatternArchives/
+# The Particle editor's preset library (Automation/ExportParticleLibrary.mjs).
+!EngineContent/ParticleArchives/
 !EngineContent/EnvironmentArchives/
 !EngineContent/ShaderArchives/
 # The engine shapes (Construct › Geometry) and their baked distance volumes (Exhibits/SceneViewport/Code/ShapeArchiveBake.cpp).
