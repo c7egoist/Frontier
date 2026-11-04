@@ -1476,6 +1476,54 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
   integration follows the owner's review.
 - **Commits:** `1ef6ea8`, `06a58e0`, `02b9af3` and the commit with this entry.
 
+## Force Field editor in C++ (2026-11-04)
+
+- **Requested:** after the prototypes, bring the Force Field and Particle editors into the C++ editor; both come
+  before the vehicle step. This entry covers the Force Field editor, phases A to D of
+  `Documentation/Plans/Ongoing/ForceFieldParticleIntegration.md`. The Particle editor is phase E.
+- **Engine (A):** `ForceSourceCatalogue` ports the approved `ForceFieldCatalogue.js` line for line: 16 force types
+  (9 flows, 6 accelerations, 1 damping), activation (Always, Window, Trigger), moving centres, reach masks with
+  falloff, the radial profile, the cascade budget and the Beaufort scale. `ForceFieldSpace` runs the authored forces
+  on the Force Field's timeline clock and reads any contribution (flow m/s, accelerate m/s², damp 1/s, one force
+  alone) with detail by cell span from 100 m to 100 km, the mesoscale variation and divergence-free eddies.
+  `ForceSourceKind` became `ForceSourceCategory` (TornadoColumn, GustFront, Microburst, GustPuff, VehicleWake,
+  ThermalUpdraft, JetCorridor, BlastWave), so the barred *Vortex* and *Shell* are gone. `ForceSource` records sit
+  under the Force Field with a snake_case levelspace codec; `Default.levelspace` holds the prototype's 14 forces.
+- **Field view (B):** `Interface/ForceFieldVisualization/` is the slice renderer both editors use: Map, Oblique and
+  Camera projections, an asynchronous lattice of at most 48,000 samples on world-snapped power-of-two cells, the
+  turbo legend with a 98th-percentile scale, the eos arrows, tracers, source outlines, the cascade overlay and a
+  72² minimap of the 100 km extent. The viewport bar's Scene · Field switch shows it, with one timeline lane per
+  force. Over the scene it follows the viewport camera.
+- **Pages and links (C):**
+  - Force Field page: the peak in view with its history, forces by contribution and cost, quick switches, and View,
+    Range, Forces, Receivers, Timeline, Vectors, Budget.
+  - Wind page: the speed at 10 m now and over the last 12 s, compass, shear and veer, and Flow, Gusts, Altitude,
+    Eddies (a wind-only vorticity preview), Mesoscale.
+  - Force page: the radial profile, and Strength, Reach, Timing, Receivers.
+  - The Outliner lists the forces under the Force Field. The Construct dialog has a Forces group with the 16 types; a
+    new force lands in the middle of the Field view while it shows, otherwise where the camera looks.
+  - Workspace actions (`select:`, `add-force`, `field-view:`, `field-span:`, `fire:`) connect the pages to the
+    workspace. The Log Stream records the view switches, the contribution shown and each firing.
+- **Validated (Linux host, SwiftShader):**
+
+  | Check | Result |
+  |---|---|
+  | `ForceFieldCatalogueValidation` against the prototype | ✔️ 23 of 23; 1,781 samples, worst error 0 at 1e-9 |
+  | `ForceFieldWorkspaceCapture` | ✔️ 22 captures and the Workspace stage, 535 s |
+  | `EnvironmentInspectorValidation` | ✔️ |
+  | The eight regression tests (`Exhibits/ForceFieldEditor/README.md`) | ✔️ 8 of 8 |
+
+  `CelestialWorkspaceValidation` now expects 67 Outliner records: the 14 forces are listed.
+- **Evidence:** `Exhibits/ForceFieldEditor/README.md` and nine `Images/Editor*.jpg`. The 6 km map samples 11,400
+  cells of 32 m in 6.5 ms; the 100 km map 12,276 cells of 512 m in 7.4 ms; the oblique tornado 29,070 cells of 8 m
+  in 18.2 ms (timeline at 18.25 s).
+- **Windows binary:** being built at `fc32e34`; the package figures follow in this entry.
+- **Limits:** not run on Windows here. The GPU cloud synthesis still takes only triggered forces, so authored forces
+  do not change the sky. The cascades are budgeted and drawn; the GPU lattice comes with the particles (phase E). The
+  page's history fills only while the Field view shows.
+- **Commits:** `2691cd8`, `440c481`, `f6f0deb`, `ddff77f`, `abe5ffa`, `dad9016`, `163cea1`, `de76fa4`, `fc32e34` and
+  the commit with this entry.
+
 ## SolidArc source integration against e72d319
 
 | Scope | Status | Evidence / remaining work |
