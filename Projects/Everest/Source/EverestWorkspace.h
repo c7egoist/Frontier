@@ -23,6 +23,7 @@ struct ImVec2;
 namespace Frontier
 {
 class ForceFieldVisualization;
+class PhysicsExtension;
 }
 #endif
 
@@ -218,6 +219,9 @@ class EverestWorkspace
     SceneCameraSubject ResolveCameraSubject() const;
     void ConstructFullscreenViewport(float Scale);
     void ToggleViewportOverlay(int Overlay);
+    // 📝 Simulate (Alt+S, the viewport bar's Play): the level's PhysicsSpace steps the objects with Physics on; stopping puts every
+    //    moved object back.
+    void ToggleSimulation();
     void AnnounceViewportNotice(std::string Text);
     // 📝 The Force Field in the viewport (EverestFieldViewport.cpp): the timeline clock, one slice from the level's records,
     //    the Field view with its timeline lanes, its bar, and the slice over the scene.
@@ -267,6 +271,7 @@ class EverestWorkspace
     bool                          GizmoPress             = false;     // [-] that press began on a handle
     std::unordered_map<uint64_t, std::array<float, 3>> PendingAlbedo{};   // [-] constructed shapes waiting for their family
     FieldViewport                 Field{};
+    std::unique_ptr<Frontier::PhysicsExtension> Physics;
 #endif
 
     std::filesystem::path ProjectRoot;

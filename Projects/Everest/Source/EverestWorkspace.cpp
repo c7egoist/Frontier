@@ -10,6 +10,7 @@
 
 #if FRONTIER_EDITOR && defined(FRONTIER_WITH_INTERFACE_SDK)
 #include "Frontier/Extensions/Rendering/RenderingExtension.h"
+#include "Frontier/Extensions/Physics/PhysicsExtension.h"
 
 #include "Engine/Interface/Controls/WorldVectorOverlay.h"
 #include "Engine/Interface/ForceFieldVisualization/ForceFieldVisualization.h"
@@ -437,6 +438,7 @@ EverestWorkspace::~EverestWorkspace()
 {
 #if FRONTIER_EDITOR && defined(FRONTIER_WITH_INTERFACE_SDK)
     ReleasePointerConstraint();
+    if (Physics && Physics->QueryRunning()) Physics->End(QueryWorldSpace());
     Frontier::InspectorRuntime::Instance().ConfigureEnvironmentAccess({});
     Frontier::InspectorRuntime::Instance().RegisterLevelFlowSampler({});
     Frontier::InspectorRuntime::Instance().ConfigureLevelFile({});
@@ -828,6 +830,7 @@ void EverestWorkspace::ServiceSceneObjectKeys()
 void EverestWorkspace::ConstructInterface(double DeltaSeconds)
 {
     IntegrateSimulation(DeltaSeconds);
+    if (Physics && Physics->QueryRunning()) (void)Physics->Step(QueryWorldSpace(), DeltaSeconds);
     ViewportDeltaSeconds = DeltaSeconds;
     AdvanceFieldTimeline(DeltaSeconds);
 
@@ -1004,7 +1007,9 @@ void EverestWorkspace::ConstructInterface(double DeltaSeconds)
 
 void EverestWorkspace::SaveActiveLevel()
 {
-    // 📝 The level file the workspace opened (Default.levelspace when it started from the project's own default).
+    // 📝 The level file the workspace opened (Default.levelspace when it started from the project's own default). A running
+    //    simulation stops first, so the level keeps the authored transforms, not the simulated ones.
+    if (Physics && Physics->QueryRunning()) ToggleSimulation();
     std::string                 SaveDiag;
     const uint32_t              ProjectCategory = EnsureProjectLogCategory("Everest");
     const std::filesystem::path TargetPath      = ActiveLevelPath.empty()
@@ -1159,6 +1164,7 @@ void EverestWorkspace::ConstructViewportSurface()
     if ((StageHovered || ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) && !IO.WantTextInput && !StageActive && !ModalEditor)
     {
         if (ImGui::IsKeyPressed(ImGuiKey_H, false)) ToggleViewportOverlay(0);
+        if (IO.KeyAlt && ImGui::IsKeyPressed(ImGuiKey_S, false)) ToggleSimulation();
     }
     if ((StageHovered || ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) && !IO.WantTextInput && !IO.KeyCtrl &&
         !ImGui::IsMouseDown(ImGuiMouseButton_Right) && !ModalEditor)
@@ -1328,7 +1334,7 @@ void EverestWorkspace::ConstructViewportBar(const ImVec2& Min,const ImVec2& Max,
         auto& Settings=Pipeline->AccessConfiguration();
         int View=Settings.AnalyticIllumination?RenderInspectionModes::AnalyticView:std::clamp(Settings.InspectionModeIndex,0,14);
         const float Wide=std::min(236*Scale,(Max.x-Min.x)*.30f);
-        if (X+Wide<Max.x-12*Scale-2*Button-3*Gap-132*Scale &&
+        if (X+Wide<Max.x-12*Scale-3*Button-4*Gap-132*Scale &&
             ViewportChromeControls::ConstructSelectField("##DebugView",Faces,{X,Min.y+(Height-Button)*.5f},{Wide,Button},ViewNames.data(),int(ViewNames.size()),View,Scale))
         {
             Settings.AnalyticIllumination=View==RenderInspectionModes::AnalyticView;
@@ -1343,6 +1349,9 @@ void EverestWorkspace::ConstructViewportBar(const ImVec2& Min,const ImVec2& Max,
     if (ViewportChromeControls::ConstructSegmentedSwitch("##SceneField",Faces,{Right-2*Button-2*Gap-132*Scale,Min.y+(Height-Button)*.5f},{132*Scale,Button},
         SceneFieldLabels,2,Shown,nullptr,nullptr,Scale))
         Field.Shown=Shown==1;
+    const bool Simulating=Physics && Physics->QueryRunning();
+    if (ViewportChromeControls::ConstructIconButton("##Simulate",{Right-3*Button-3*Gap-132*Scale,Min.y+(Height-Button)*.5f},Button,Simulating?"Pause":"Play",Simulating,true,
+        Simulating?"Stop simulating and restore the objects (Alt+S)":"Simulate: objects with Physics on fall and collide (Alt+S)")) ToggleSimulation();
     if (ViewportChromeControls::ConstructIconButton("##Readout",{Right-2*Button-Gap,Min.y+(Height-Button)*.5f},Button,"Activity",Overlays.ReadoutVisible,true,"Detailed readout (H)")) ToggleViewportOverlay(0);
     if (ViewportChromeControls::ConstructIconButton("##Fullscreen",{Right-Button,Min.y+(Height-Button)*.5f},Button,"ScanCorners",Overlays.Fullscreen,true,"Fullscreen viewport (V), Escape restores panels")) ToggleViewportOverlay(2);
     Ink->PopClipRect();
@@ -1409,6 +1418,23 @@ void EverestWorkspace::ConstructViewportOverlays(const ImVec2& StageMin, const I
     {
         ViewportChromeControls::ConstructOverlayNotice(DrawList, Faces, StageMin, StageMax, NoticeText.c_str(), Scale);
     }
+}
+
+void EverestWorkspace::ToggleSimulation()
+{
+    if (!Physics) Physics = std::make_unique<Frontier::PhysicsExtension>();
+    if (Physics->QueryRunning())
+    {
+        Physics->End(QueryWorldSpace());
+        AnnounceViewportNotice("Simulation stopped \xC2\xB7 objects restored");
+        return;
+    }
+    const size_t Moving = Physics->Begin(QueryWorldSpace());
+    const auto&  Tally  = Physics->QueryTally();
+    char         Text[160];
+    if (Moving > 0) std::snprintf(Text, sizeof(Text), "Simulating \xC2\xB7 %zu moving, %zu colliders (Alt+S stops)", Moving, Tally.Fixed);
+    else std::snprintf(Text, sizeof(Text), "Simulating \xC2\xB7 no object has Physics on (%zu colliders) \xC2\xB7 Alt+S stops", Tally.Fixed);
+    AnnounceViewportNotice(Text);
 }
 
 void EverestWorkspace::ToggleViewportOverlay(int Overlay)

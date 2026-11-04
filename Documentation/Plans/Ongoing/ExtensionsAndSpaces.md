@@ -33,10 +33,10 @@ and the remaining Particle and Force Field work.
 | 2    | `ParticleScene` → `ParticleSpace`, `SceneWorld` → `WorldSpace`                                    | ✔️     |
 | 3    | `Particle/ParticleExtension`, `Rendering/RenderingExtension`, `SceneViewportPresentation.h`       | ✔️     |
 | 4    | `Interface/ViewportTexture`, `GizmoSpace`, `GizmoRasterization`; `PlacementGizmo` on GizmoSpace   | ✔️     |
-| 5    | `.particlespace` codec; the Particles record links its file; the editor loads and saves it       | 🚧     |
-| 6    | `Networking/` scaffold and its validation                                                         | 🚧     |
-| 7    | `Physics/`: pinned Jolt, `JoltExtension`, `PhysicsSpace`, `PhysicsExtension`, Simulate, capture   | 🚧     |
-| 8    | Remaining Particle and Force Field points (plan `ForceFieldParticleIntegration.md` §7)            | 🚧     |
+| 5    | `.particlespace` codec; the Particles record links its file; the editor loads and saves it       | ✔️     |
+| 6    | `Networking/` scaffold and its validation                                                         | ✔️     |
+| 7    | `Physics/`: pinned Jolt, `JoltExtension`, `PhysicsSpace`, `PhysicsExtension`, Simulate, capture   | ✔️     |
+| 8    | Remaining Particle and Force Field points (plan `ForceFieldParticleIntegration.md` §7)            | ✔️     |
 | 9    | Builds, tests, captures, Windows package, Tracker                                                 | 🚧     |
 
 ## Later

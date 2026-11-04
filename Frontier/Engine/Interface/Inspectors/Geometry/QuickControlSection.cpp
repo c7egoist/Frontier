@@ -33,7 +33,7 @@ bool GeometryQuickSection::Construct(ControlColumn& Page, GeometryConfiguration&
         {"Dynamic", "Move", &Parameters.Dynamic, "Relit every refresh (its surface cards) instead of in turn: for objects that move"},
         {"Cast shadows", "CastShadow", &Parameters.CastShadows, "Off: left out of the shadow depth and of every shadow ray"},
         {"GI", "Sparkles", &Parameters.GlobalIllumination, "Off: left out of the distance field and the traced rays (no bounce light)"},
-        {"Physics", "Atom", &Parameters.Physics, "Authored: a rigid body once the physics (Jolt) runs"},
+        {"Physics", "Atom", &Parameters.Physics, "A rigid body while the level simulates (Alt+S): falls and collides"},
         {"Locked", "Lock", &Parameters.Locked, "Refuses transform and modifier edits"},
     };
     bool Changed = QuickTiles::Construct(Page, "QuickControls", Tiles, 6, Page.QueryContainerWidth() < 300.0f ? 2 : 3);

@@ -269,6 +269,14 @@ add_library(FrontierNetworkingExtension STATIC
     Frontier/Extensions/Networking/NetworkingSpace.cpp
     Frontier/Extensions/Networking/NetworkingExtension.cpp)
 target_link_libraries(FrontierNetworkingExtension PUBLIC FrontierSceneEditorUI)
+# 📝 Physics: JoltPhysics (pinned, Automation/JoltPhysics.cmake) behind PhysicsSpace; only the extension sees Jolt's headers.
+include(Automation/JoltPhysics.cmake)
+frontier_add_jolt()
+add_library(FrontierPhysicsExtension STATIC
+    Frontier/Extensions/Physics/JoltExtension.cpp
+    Frontier/Extensions/Physics/PhysicsSpace.cpp
+    Frontier/Extensions/Physics/PhysicsExtension.cpp)
+target_link_libraries(FrontierPhysicsExtension PUBLIC FrontierSceneEditorUI PRIVATE Jolt)
 
 add_library(EverestProjectEditor STATIC
     Projects/Everest/Source/EverestApplication.cpp
@@ -281,7 +289,7 @@ target_include_directories(EverestProjectEditor PUBLIC
     "${CMAKE_SOURCE_DIR}/Frontier"
     "${CMAKE_SOURCE_DIR}/Projects/Everest/Source")
 target_compile_definitions(EverestProjectEditor PUBLIC FRONTIER_WITH_INTERFACE_SDK=1 FRONTIER_EDITOR_PROFILE=1 FRONTIER_EDITOR=1)
-target_link_libraries(EverestProjectEditor PUBLIC FrontierSceneEditorUI FrontierRenderingExtension FrontierParticleExtension)
+target_link_libraries(EverestProjectEditor PUBLIC FrontierSceneEditorUI FrontierRenderingExtension FrontierParticleExtension FrontierPhysicsExtension)
 frontier_stage_project_content(EverestProjectEditor
     "${CMAKE_SOURCE_DIR}/Projects/Everest/Everest.projectspace"
     "${CMAKE_SOURCE_DIR}/EngineContent"
@@ -746,6 +754,14 @@ if(BUILD_TESTING)
     target_link_libraries(ParticleLibraryValidation PRIVATE FrontierEnvironmentRendering)
     add_test(NAME ParticleLibraryValidation COMMAND ParticleLibraryValidation "${CMAKE_SOURCE_DIR}")
     set_tests_properties(ParticleLibraryValidation PROPERTIES TIMEOUT 60)
+
+    add_executable(PhysicsSpaceValidation
+        Exhibits/Physics/Code/PhysicsSpaceValidation.cpp
+        Engine/Render/StbImageWriteImplementation.cpp)
+    target_include_directories(PhysicsSpaceValidation PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
+    target_link_libraries(PhysicsSpaceValidation PRIVATE FrontierPhysicsExtension)
+    add_test(NAME PhysicsSpaceValidation COMMAND PhysicsSpaceValidation "${CMAKE_SOURCE_DIR}/Exhibits/Physics")
+    set_tests_properties(PhysicsSpaceValidation PROPERTIES TIMEOUT 300)
 
     add_executable(NetworkingSpaceValidation
         Exhibits/Networking/Code/NetworkingSpaceValidation.cpp)
