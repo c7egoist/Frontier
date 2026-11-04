@@ -19,6 +19,10 @@ struct ImVec2;
 #include "Engine/Interface/SceneDirectoryPanel.h"
 #include "Engine/Interface/SceneInspectorPanel.h"
 #include "UI/Editor/ControlCentrePanel.h"
+namespace Frontier
+{
+class ForceFieldVisualization;
+}
 #endif
 
 #include "Engine/Scene/EngineConfigurations.h"
@@ -209,6 +213,19 @@ class EverestWorkspace
     [[nodiscard]] SceneViewportFlight&      AccessViewportFlight() noexcept { return Flight; }
     [[nodiscard]] SceneViewportOverlays&    AccessViewportOverlays() noexcept { return Overlays; }
 
+    // 📝 The Force Field's view in the viewport: Shown swaps the scene for the slice (100 m to 100 km); Overlay is the slice
+    //    over the rendered scene; Hovering and HoverPoint are the pointer's last reading; Scrubbing holds the timeline.
+    struct FieldViewport
+    {
+        bool                                               Shown = false;
+        std::unique_ptr<Frontier::ForceFieldVisualization> Slice;
+        std::unique_ptr<Frontier::ForceFieldVisualization> Overlay;
+        bool                                               Hovering = false;
+        std::array<double, 2>                              HoverPoint{};
+        bool                                               Scrubbing = false;
+    };
+    [[nodiscard]] FieldViewport& AccessFieldViewport() noexcept { return Field; }
+
     [[nodiscard]] Frontier::SceneDirectoryPanel& QueryOutliner() noexcept { return OutlinerPanel; }
     [[nodiscard]] Frontier::SceneInspectorPanel& QueryInspector() noexcept { return InspectorPanel; }
     [[nodiscard]] Frontier::LogStreamPanel&      QueryLogStream() noexcept { return LogPanel; }
@@ -256,6 +273,14 @@ class EverestWorkspace
     void ConstructFullscreenViewport(float Scale);
     void ToggleViewportOverlay(int Overlay);
     void AnnounceViewportNotice(std::string Text);
+    // 📝 The Force Field in the viewport (EverestFieldViewport.cpp): the timeline clock, one slice from the level's records,
+    //    the Field view with its timeline lanes, its bar, and the slice over the scene.
+    void AdvanceFieldTimeline(double DeltaSeconds);
+    bool ConfigureFieldSlice(Frontier::ForceFieldVisualization& Slice, bool Camera);
+    void ConstructFieldViewport(const ImVec2& StageMin, const ImVec2& StageMax, float Scale);
+    void ConstructFieldTimeline(const ImVec2& Min, const ImVec2& Max, float Scale);
+    void ConstructFieldBar(const ImVec2& Min, const ImVec2& Max, float Scale);
+    void ConstructFieldOverlay(const ImVec2& StageMin, const ImVec2& StageMax, float Scale);
 
     Frontier::ControlCentrePanel& Centre;
     std::shared_ptr<bool>         Liveness = std::make_shared<bool>(true);   // the Control Centre actions' weak token
@@ -288,6 +313,7 @@ class EverestWorkspace
     std::array<double, 2>         PickPoint{};                        // [-] the last click, as a fraction of the stage
     bool                          GizmoPress             = false;     // [-] that press began on a handle
     std::unordered_map<uint64_t, std::array<float, 3>> PendingAlbedo{};   // [-] constructed shapes waiting for their family
+    FieldViewport                 Field{};
 #endif
 
     std::filesystem::path ProjectRoot;

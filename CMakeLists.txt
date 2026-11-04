@@ -211,6 +211,7 @@ add_library(FrontierSceneEditorUI STATIC
     Frontier/Engine/Interface/Inspectors/WindInspector.cpp
     Frontier/Engine/Interface/Inspectors/ForceFieldInspector.cpp
     Frontier/Engine/Interface/Inspectors/ForceSourceInspector.cpp
+    Frontier/Engine/Interface/ForceFieldVisualization/ForceFieldVisualization.cpp
     Frontier/Engine/Interface/Inspectors/FluidPlumeInspector.cpp
     Frontier/Engine/Interface/Inspectors/FractureInspector.cpp
     Frontier/Engine/Interface/Inspectors/ParticleInspector.cpp
@@ -237,6 +238,7 @@ add_library(EverestProjectEditor STATIC
     Projects/Everest/Source/EverestViewportNavigation.cpp
     Projects/Everest/Source/EverestWorkspace.cpp
     Projects/Everest/Source/EverestSceneViewport.cpp
+    Projects/Everest/Source/EverestFieldViewport.cpp
     Projects/Everest/Source/EverestSceneGeometry.cpp)
 target_include_directories(EverestProjectEditor PUBLIC
     "${CMAKE_SOURCE_DIR}"
@@ -740,6 +742,14 @@ if(BUILD_TESTING)
         Engine/Render/StbImageWriteImplementation.cpp)
     target_include_directories(SceneViewportWorkspaceCapture PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
     target_link_libraries(SceneViewportWorkspaceCapture PRIVATE EverestProjectEditor)
+
+    # 📝 The Force Field in the workspace: the Field view from 100 m to 100 km, the slice over the scene and the Force Field,
+    #    Wind and force inspector pages — Exhibits/ForceFieldEditor/README.md.
+    add_executable(ForceFieldWorkspaceCapture
+        Exhibits/ForceFieldEditor/Code/ForceFieldWorkspaceCapture.cpp
+        Engine/Render/StbImageWriteImplementation.cpp)
+    target_include_directories(ForceFieldWorkspaceCapture PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
+    target_link_libraries(ForceFieldWorkspaceCapture PRIVATE EverestProjectEditor)
 
     # 📝 The scene objects in the workspace: the geometry groups, five geometry inspector pages, the viewport before and after edits.
     add_executable(SceneGeometryCapture

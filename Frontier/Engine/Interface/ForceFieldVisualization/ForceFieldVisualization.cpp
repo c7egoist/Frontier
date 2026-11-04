@@ -1215,6 +1215,11 @@ void ForceFieldVisualization::Render(ImDrawList* Ink, const EditorTypefaces& Fac
 //                                                    READINGS AND NAVIGATION
 //------------------------------------------------------------------------------------------------------------------------
 
+void ForceFieldVisualization::SettleSampling()
+{
+    if (Pending_.valid()) AcceptLattice(Pending_.get());
+}
+
 FieldProbeReading ForceFieldVisualization::ProbeWorld(double X, double Z) const
 {
     FieldProbeReading Reading;

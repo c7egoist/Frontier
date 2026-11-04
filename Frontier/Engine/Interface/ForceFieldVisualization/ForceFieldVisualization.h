@@ -195,6 +195,8 @@ class ForceFieldVisualization
     bool ConstructMinimap(const char* Id, ImDrawList* Ink, ImVec2 Minimum, ImVec2 Maximum, double Time, float Scale);
 
     void Invalidate() noexcept { Dirty_ = true; }
+    // 📝 Waits for the sampling in flight and shows it (captures and tests, where the next refresh must hold the result).
+    void SettleSampling();
     void Zoom(double Factor, ImVec2 About);
     void JumpToSpan(double Span);
 

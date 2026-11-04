@@ -12,6 +12,7 @@
 #include "EverestSceneViewport.h"
 
 #include "Engine/Interface/Controls/WorldVectorOverlay.h"
+#include "Engine/Interface/ForceFieldVisualization/ForceFieldVisualization.h"
 #include "Engine/Interface/InspectorControls.h"
 #include "Engine/Interface/InspectorRuntime.h"
 #include "Engine/Interface/LogStreamPanelRegistration.h"
@@ -796,6 +797,7 @@ void EverestWorkspace::ConstructInterface(double DeltaSeconds)
 {
     IntegrateSimulation(DeltaSeconds);
     ViewportDeltaSeconds = DeltaSeconds;
+    AdvanceFieldTimeline(DeltaSeconds);
 
     if (ObservedLayoutRevision != Centre.QueryLayoutResetRevision())
     {
@@ -1081,6 +1083,15 @@ void EverestWorkspace::ConstructViewportSurface()
     const ImVec2 Max(Min.x + W, Min.y + H);
     const ImVec2 StageMin(Min.x, Min.y + BarH);
 
+    // 📝 The Field view takes the stage instead of the scene: the Force Field's slice, its HUD and timeline lanes.
+    if (Field.Shown)
+    {
+        ReleasePointerConstraint();
+        ConstructFieldViewport(StageMin, Max, Scale);
+        ConstructViewportBar(Min, ImVec2(Max.x, StageMin.y), Scale);
+        return;
+    }
+
     ImGui::SetCursorScreenPos(StageMin);
     ImGui::SetNextItemAllowOverlap();
     ImGui::InvisibleButton("##SceneViewportCanvas", ImVec2(W, H - BarH),
@@ -1165,8 +1176,8 @@ void EverestWorkspace::ConstructViewportSurface()
     if (Image.Texture != 0)
     {
         DrawList->AddImage(static_cast<ImTextureID>(Image.Texture), StageMin, Max);
-        const auto* Field = dynamic_cast<const Frontier::ForceFieldRecord*>(QuerySceneWorld().FindFirstByType("ForceField"));
-        if (Field && Field->QueryConfiguration().Visualize && !Overlays.Fullscreen && LastReadout.Environment)
+        const auto* FieldRecord = dynamic_cast<const Frontier::ForceFieldRecord*>(QuerySceneWorld().FindFirstByType("ForceField"));
+        if (FieldRecord && FieldRecord->QueryConfiguration().Visualize && !Overlays.Fullscreen && LastReadout.Environment)
         {
             Frontier::WorldVectorView Projection;
             Projection.Eye = Flight.Position;
@@ -1179,10 +1190,12 @@ void EverestWorkspace::ConstructViewportSurface()
             Projection.Up={R[1]*F[2]-R[2]*F[1],R[2]*F[0]-R[0]*F[2],R[0]*F[1]-R[1]*F[0]};
             Projection.VerticalFieldOfView = Flight.ResolveFieldOfView();
             Frontier::WorldVectorOverlay::Construct(DrawList,StageMin,{W,H-BarH},Projection,
-                LastReadout.Environment->Vectors,Field->QueryConfiguration().ArrowSeconds,Scale);
+                LastReadout.Environment->Vectors,FieldRecord->QueryConfiguration().ArrowSeconds,Scale);
             DrawList->AddText({StageMin.x + 12 * Scale,StageMin.y + 12 * Scale},IM_COL32(160,220,236,230),
                 "Atmospheric flow / m/s / X-ray vectors");
         }
+        // 📝 The Force Field's Scene overlay: the slice in this camera's perspective over the image.
+        if (!Overlays.Fullscreen) ConstructFieldOverlay(StageMin, Max, Scale);
     }
     else
     {
@@ -1236,6 +1249,12 @@ void EverestWorkspace::ConstructViewportBar(const ImVec2& Min,const ImVec2& Max,
     auto* Ink=ImGui::GetWindowDrawList();
     ViewportChromeControls::ConstructBarBackground(Ink,Min,Max,Scale);
     Ink->PushClipRect(Min,Max,true);
+    if (Field.Shown)
+    {
+        ConstructFieldBar(Min,Max,Scale);
+        Ink->PopClipRect();
+        return;
+    }
     const float Height=Max.y-Min.y, Button=34*Scale, Gap=8*Scale;
     float X=Min.x+12*Scale;
     int Mode=int(Navigation.Mode);
@@ -1268,7 +1287,7 @@ void EverestWorkspace::ConstructViewportBar(const ImVec2& Min,const ImVec2& Max,
         auto& Settings=Pipeline->AccessConfiguration();
         int View=Settings.AnalyticIllumination?RenderInspectionModes::AnalyticView:std::clamp(Settings.InspectionModeIndex,0,14);
         const float Wide=std::min(236*Scale,(Max.x-Min.x)*.30f);
-        if (X+Wide<Max.x-12*Scale-2*Button-2*Gap &&
+        if (X+Wide<Max.x-12*Scale-2*Button-3*Gap-132*Scale &&
             ViewportChromeControls::ConstructSelectField("##DebugView",Faces,{X,Min.y+(Height-Button)*.5f},{Wide,Button},ViewNames.data(),int(ViewNames.size()),View,Scale))
         {
             Settings.AnalyticIllumination=View==RenderInspectionModes::AnalyticView;
@@ -1277,6 +1296,12 @@ void EverestWorkspace::ConstructViewportBar(const ImVec2& Min,const ImVec2& Max,
         }
     }
     const float Right=Max.x-12*Scale;
+    // 📝 Scene | Field: the Force Field's view of the level (the slice from 100 m to 100 km) in place of the scene.
+    static constexpr const char* SceneFieldLabels[]={"Scene","Field"};
+    int Shown=0;
+    if (ViewportChromeControls::ConstructSegmentedSwitch("##SceneField",Faces,{Right-2*Button-2*Gap-132*Scale,Min.y+(Height-Button)*.5f},{132*Scale,Button},
+        SceneFieldLabels,2,Shown,nullptr,nullptr,Scale))
+        Field.Shown=Shown==1;
     if (ViewportChromeControls::ConstructIconButton("##Readout",{Right-2*Button-Gap,Min.y+(Height-Button)*.5f},Button,"Activity",Overlays.ReadoutVisible,true,"Detailed readout (H)")) ToggleViewportOverlay(0);
     if (ViewportChromeControls::ConstructIconButton("##Fullscreen",{Right-Button,Min.y+(Height-Button)*.5f},Button,"ScanCorners",Overlays.Fullscreen,true,"Fullscreen viewport (V), Escape restores panels")) ToggleViewportOverlay(2);
     Ink->PopClipRect();

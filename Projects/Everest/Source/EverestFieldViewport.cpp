@@ -67,7 +67,8 @@ ImU32 ContributionTint(Frontier::ForceContribution Contribution, int Alpha)
 
 uint32_t FieldLogCategory()
 {
-    return Frontier::LogCategories().Register("Forces", Frontier::LogColour::Mint, true);
+    static const uint32_t Category = Frontier::LogCategories().Register("Forces", Frontier::LogColour::Mint, true);
+    return Category;
 }
 
 // 📝 A dark rounded panel of the viewport chrome (the prototype's .viewport-hud and .minimap).
@@ -478,61 +479,88 @@ void EverestWorkspace::ConstructFieldTimeline(const ImVec2& Min, const ImVec2& M
 //                                                    BAR AND OVERLAY
 //------------------------------------------------------------------------------------------------------------------------
 
-// 📝 The viewport bar in the Field view: back to the scene, the title, the sampling chip, Map / Oblique and the range pills.
+// 📝 The viewport bar in the Field view: the title on the left; on the right the sampling chip, Map / Oblique, the range pills,
+//    and Scene | Field, centring and fullscreen where the scene's bar has Scene | Field, the readout and fullscreen.
 void EverestWorkspace::ConstructFieldBar(const ImVec2& Min, const ImVec2& Max, float Scale)
 {
     using Frontier::ViewportChromeControls;
     const Frontier::EditorTypefaces Faces  = Frontier::EditorTypefaces::Resolve();
     ImDrawList*                     Ink    = ImGui::GetWindowDrawList();
     const float                     Height = Max.y - Min.y, Control = 34.0f * Scale, Gap = 8.0f * Scale;
-    float                           X      = Min.x + 12.0f * Scale;
-    int                             Shown  = 1;
-    if (ViewportChromeControls::ConstructSegmentedSwitch("##SceneField", Faces, ImVec2(X, Min.y + (Height - Control) * 0.5f), ImVec2(132.0f * Scale, Control),
-                                                        ViewLabels, 2, Shown, nullptr, nullptr, Scale))
-        Field.Shown = Shown == 1;
-    X += 132.0f * Scale + 14.0f * Scale;
+    const float                     Top    = Min.y + (Height - Control) * 0.5f;
+    float                           X      = Min.x + 14.0f * Scale;
     (void)Frontier::GlyphSymbol::Construct(Ink, "Wind", ImVec2(X, Min.y + (Height - 20.0f * Scale) * 0.5f), 20.0f * Scale, 1.8f, IM_COL32(200, 206, 214, 255));
-    X += 28.0f * Scale;
+    X += 30.0f * Scale;
     Ink->AddText(Faces.Medium, 13.0f * Scale, ImVec2(X, Min.y + Height * 0.5f - 15.0f * Scale), IM_COL32(236, 240, 246, 255), "Force field");
     char Meta[160];
     std::snprintf(Meta, sizeof(Meta), "Everest \xC2\xB7 %s \xC2\xB7 100 m \xE2\x80\x93 100 km", ActiveLevelPath.filename().string().c_str());
     Ink->AddText(Faces.Regular, 10.0f * Scale, ImVec2(X, Min.y + Height * 0.5f + 2.0f * Scale), IM_COL32(130, 136, 146, 255), Meta);
+    X += std::max(MeasureFace(Faces.Medium, 13.0f * Scale, "Force field"), MeasureFace(Faces.Regular, 10.0f * Scale, Meta)) + 16.0f * Scale;
+
+    float Right = Max.x - 12.0f * Scale;
+    if (ViewportChromeControls::ConstructIconButton("##FieldFullscreen", ImVec2(Right - Control, Top), Control, "ScanCorners", Overlays.Fullscreen, true,
+                                                    "Fullscreen viewport (V), Escape restores panels"))
+        ToggleViewportOverlay(2);
+    Right -= Control + Gap;
+    if (ViewportChromeControls::ConstructIconButton("##FieldCentre", ImVec2(Right - Control, Top), Control, "Focus", false, true,
+                                                    "Centre the view on the selected force (or the field's centre)") &&
+        Field.Slice)
+    {
+        Field.Slice->View.CentreX = 0.0;
+        Field.Slice->View.CentreZ = 0.0;
+        for (const Frontier::FieldSourceOutline& Outline : Field.Slice->Options.Sources)
+            if (Outline.Selected)
+            {
+                Field.Slice->View.CentreX = Outline.X;
+                Field.Slice->View.CentreZ = Outline.Z;
+            }
+        Field.Slice->Invalidate();
+    }
+    Right -= Control + Gap;
+    int Shown = 1;
+    if (ViewportChromeControls::ConstructSegmentedSwitch("##SceneField", Faces, ImVec2(Right - 132.0f * Scale, Top), ImVec2(132.0f * Scale, Control),
+                                                        ViewLabels, 2, Shown, nullptr, nullptr, Scale))
+        Field.Shown = Shown == 1;
+    Right -= 132.0f * Scale + Gap;
 
     auto* Record = dynamic_cast<Frontier::ForceFieldRecord*>(QuerySceneWorld().FindFirstByType("ForceField"));
     if (Record == nullptr) return;
     Frontier::ForceFieldConfiguration& Forces = Record->AccessConfiguration();
-    float                              Right  = Max.x - 12.0f * Scale;
     // 📝 Range pills: the one closest to the span lights.
     const float RangeWidth = 236.0f * Scale;
-    int         Range      = -1;
-    if (Field.Slice)
-        for (int Index = 0; Index < 4; ++Index)
+    if (Right - RangeWidth > X)
+    {
+        int Range = -1;
+        if (Field.Slice)
+            for (int Index = 0; Index < 4; ++Index)
+            {
+                const double Ratio = Field.Slice->View.Span / RangeSpans[Index];
+                if (Ratio > 0.7 && Ratio < 1.45) Range = Index;
+            }
+        int Picked = Range;
+        if (ViewportChromeControls::ConstructSegmentedSwitch("##FieldRange", Faces, ImVec2(Right - RangeWidth, Top), ImVec2(RangeWidth, Control), RangeLabels, 4,
+                                                            Picked, nullptr, nullptr, Scale) &&
+            Picked >= 0 && Field.Slice)
         {
-            const double Ratio = Field.Slice->View.Span / RangeSpans[Index];
-            if (Ratio > 0.7 && Ratio < 1.45) Range = Index;
+            Field.Slice->JumpToSpan(RangeSpans[Picked]);
+            char Span[32];
+            Frontier::ForceFieldVisualization::FormatDistance(RangeSpans[Picked], Span, sizeof(Span));
+            Frontier::WriteLogFormat(FieldLogCategory(), Frontier::LogSeverity::Info, Frontier::LogVerbosity::Log, "View", "Range: %s", Span);
         }
-    int Picked = Range;
-    if (Right - RangeWidth > X + 260.0f * Scale &&
-        ViewportChromeControls::ConstructSegmentedSwitch("##FieldRange", Faces, ImVec2(Right - RangeWidth, Min.y + (Height - Control) * 0.5f),
-                                                        ImVec2(RangeWidth, Control), RangeLabels, 4, Picked, nullptr, nullptr, Scale) &&
-        Picked >= 0 && Field.Slice)
-    {
-        Field.Slice->JumpToSpan(RangeSpans[Picked]);
-        char Span[32];
-        Frontier::ForceFieldVisualization::FormatDistance(RangeSpans[Picked], Span, sizeof(Span));
-        Frontier::WriteLogFormat(FieldLogCategory(), Frontier::LogSeverity::Info, Frontier::LogVerbosity::Log, "View", "Range: %s", Span);
+        Right -= RangeWidth + Gap;
     }
-    Right -= RangeWidth + Gap;
     const float ProjectionWidth = 150.0f * Scale;
-    int         Projection      = Forces.Projection == Frontier::ForceFieldProjection::Oblique ? 1 : 0;
-    if (Right - ProjectionWidth > X + 240.0f * Scale &&
-        ViewportChromeControls::ConstructSegmentedSwitch("##FieldProjection", Faces, ImVec2(Right - ProjectionWidth, Min.y + (Height - Control) * 0.5f),
-                                                        ImVec2(ProjectionWidth, Control), ProjectionNames, 2, Projection, nullptr, nullptr, Scale))
+    if (Right - ProjectionWidth > X)
     {
-        Forces.Projection = Projection == 1 ? Frontier::ForceFieldProjection::Oblique : Frontier::ForceFieldProjection::Map;
-        Forces.AdvanceRevision();
+        int Projection = Forces.Projection == Frontier::ForceFieldProjection::Oblique ? 1 : 0;
+        if (ViewportChromeControls::ConstructSegmentedSwitch("##FieldProjection", Faces, ImVec2(Right - ProjectionWidth, Top), ImVec2(ProjectionWidth, Control),
+                                                            ProjectionNames, 2, Projection, nullptr, nullptr, Scale))
+        {
+            Forces.Projection = Projection == 1 ? Frontier::ForceFieldProjection::Oblique : Frontier::ForceFieldProjection::Map;
+            Forces.AdvanceRevision();
+        }
+        Right -= ProjectionWidth + Gap;
     }
-    Right -= ProjectionWidth + Gap;
     // 📝 The sampling chip: what the view is (the CPU field, analytic) and what one refresh costs.
     char Chip[96];
     if (Field.Slice)
@@ -541,7 +569,7 @@ void EverestWorkspace::ConstructFieldBar(const ImVec2& Min, const ImVec2& Max, f
     else std::snprintf(Chip, sizeof(Chip), "ANALYTIC \xC2\xB7 CPU SAMPLED");
     const float ChipSize = 9.5f * Scale;
     const float ChipWide = MeasureFace(Faces.Medium, ChipSize, Chip) + 30.0f * Scale;
-    if (Right - ChipWide > X + 220.0f * Scale)
+    if (Right - ChipWide > X)
     {
         const ImVec2 ChipMin(Right - ChipWide, Min.y + (Height - 24.0f * Scale) * 0.5f);
         Ink->AddRectFilled(ChipMin, ImVec2(Right, ChipMin.y + 24.0f * Scale), IM_COL32(143, 211, 196, 24), 12.0f * Scale);
