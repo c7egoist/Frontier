@@ -5,10 +5,13 @@
 //    from 100 m to 100 km, HUD, minimap, timeline lanes), the slice over the live Scene Viewport (own device, read back), and
 //    the Force Field, Wind and force inspector pages section by section. Every capture checks what it shows.
 
+#include "Engine/Interface/ConstructPanel.h"
 #include "Engine/Interface/ForceFieldVisualization/ForceFieldVisualization.h"
 #include "Engine/Interface/IconPresentation.h"
 #include "Engine/Interface/InspectorRuntime.h"
+#include "Engine/Interface/SceneDirectoryPanel.h"
 #include "Engine/PhysicalDynamics/ForceSourceCatalogue.h"
+#include "Engine/Scene/SceneDirectory.h"
 #include "EverestSceneViewport.h"
 #include "EverestWorkspace.h"
 #include "Exhibits/ControlCentre/Code/CpuRasterization.h"
@@ -330,6 +333,86 @@ int main(int ArgumentCount, char** Arguments)
                 }
                 Io.DisplaySize = ImVec2(static_cast<float>(CaptureWidth), static_cast<float>(CaptureHeight));
             }
+        }
+        // ⑧ The workspace links (checked, not captured): the Outliner lists every force, the Construct dialog's Forces group holds
+        //    the sixteen types, the dialog's order and the pages' actions add forces where the view is, select and show.
+        if (Wanted("Workspace"))
+        {
+            const auto ForceTokens = [&]() {
+                std::vector<uint64_t> Tokens;
+                for (const SceneRecordBase* Entry : World.FindAllByType("ForceSource")) Tokens.push_back(Entry->QueryToken().Value);
+                return Tokens;
+            };
+            const auto Selected = [&]() { return dynamic_cast<ForceSourceRecord*>(World.FindRecord(Workspace.QueryOutliner().QuerySelected())); };
+            Tick(1);
+            int Listed = 0;
+            for (const SceneDirectoryRow& Row : Workspace.QueryOutliner().QueryRows())
+                for (const uint64_t Token : ForceTokens()) Listed += Row.Token.Value == Token ? 1 : 0;
+            Require(Listed == SourceCount, "Workspace: the Outliner lists " + std::to_string(Listed) + " of " + std::to_string(SourceCount) + " forces");
+            int Tiles = 0;
+            for (const ConstructCatalogueEntry& Entry : Workspace.QueryConstructDialog().QueryCatalogue())
+            {
+                Tiles += Entry.Group == "Forces" ? 1 : 0;
+                Require(Entry.Identifier != "ForceSource", "Workspace: the bare ForceSource type is constructible");
+            }
+            Require(Tiles == 16, "Workspace: the Forces group holds " + std::to_string(Tiles) + " types");
+
+            // The page's "add-force:<type>" with the Field view showing: under the Force Field, at the view's centre.
+            Workspace.AccessFieldViewport().Shown = true;
+            Tick(1);
+            Require(Workspace.AccessFieldViewport().Slice != nullptr, "Workspace: the Field view made no slice");
+            Workspace.AccessFieldViewport().Slice->View.CentreX = 300.0;
+            Workspace.AccessFieldViewport().Slice->View.CentreZ = -400.0;
+            InspectorRuntime::Instance().RequestWorkspaceAction("add-force:attractor");
+            Tick(1);
+            ForceSourceRecord* Added = Selected();
+            Require(Added != nullptr && Added->QueryConfiguration().Category == ForceSourceCategory::Attractor, "Workspace: add-force made no attractor");
+            Require(Added->QueryRecordName() == "Attractor 2", "Workspace: the new attractor is named '" + Added->QueryRecordName() + "'");
+            Require(SceneDirectory::Instance().QueryParent(Added->QueryToken()).Value == Forces->QueryToken().Value,
+                    "Workspace: the new attractor is not under the Force Field");
+            Require(std::abs(Added->QueryConfiguration().CentreMetres[0] - 300.0) < 1e-6 && std::abs(Added->QueryConfiguration().CentreMetres[1] - 400.0) < 1e-6,
+                    "Workspace: the new attractor is not at the view's centre");
+            Require(static_cast<int>(ForceTokens().size()) == SourceCount + 1, "Workspace: the level does not hold the new force");
+
+            // The Construct dialog's order with the Field view hidden: the type's defaults on the ground where the camera looks.
+            Workspace.AccessFieldViewport().Shown = false;
+            ConstructOrder Order;
+            for (const ConstructCatalogueEntry& Entry : Workspace.QueryConstructDialog().QueryCatalogue())
+                if (Entry.Identifier == "ForceSource:thermal_updraft") Order.Entry = Entry;
+            Require(!Order.Entry.Identifier.empty(), "Workspace: the Forces group has no thermal");
+            Order.Name = Order.Entry.Caption;
+            Workspace.ServiceConstructOrder(Order);
+            Tick(1);
+            ForceSourceRecord* Ordered = Selected();
+            Require(Ordered != nullptr && Ordered->QueryConfiguration().Category == ForceSourceCategory::ThermalUpdraft, "Workspace: the order made no thermal");
+            Require(Ordered->QueryConfiguration().Strength == ConstructForceSource(ForceSourceCategory::ThermalUpdraft).Strength,
+                    "Workspace: the thermal does not have its type's defaults");
+
+            // select, field-view, field-span and the Construct dialog on its Forces group.
+            InspectorRuntime::Instance().RequestWorkspaceAction("select:" + std::to_string(Tornado->QueryToken().Value));
+            Tick(1);
+            Require(Workspace.QueryOutliner().QuerySelected().Value == Tornado->QueryToken().Value, "Workspace: select did not select the Tornado");
+            InspectorRuntime::Instance().RequestWorkspaceAction("field-span:1000");
+            Tick(1);
+            Require(Workspace.AccessFieldViewport().Shown && std::abs(Workspace.AccessFieldViewport().Slice->View.Span - 1000.0) < 1e-6,
+                    "Workspace: field-span did not show 1 km");
+            Settle();
+            Require(InspectorRuntime::Instance().QueryEnvironmentAccess().FieldReadings.Measured, "Workspace: the page reads no measurement");
+            Require(InspectorRuntime::Instance().QueryEnvironmentAccess().ForceSources.size() == static_cast<size_t>(SourceCount + 2),
+                    "Workspace: the page does not list every force");
+            InspectorRuntime::Instance().RequestWorkspaceAction("field-view:off");
+            Tick(1);
+            Require(!Workspace.AccessFieldViewport().Shown, "Workspace: field-view:off left the Field view");
+            InspectorRuntime::Instance().RequestWorkspaceAction("add-force");
+            Tick(1);
+            Require(Workspace.QueryConstructDialog().QueryOpen(), "Workspace: add-force did not open the Construct dialog");
+            Workspace.QueryConstructDialog().Close();
+            Tick(1);
+            std::printf("[ForceFieldWorkspaceCapture] Workspace: %d forces listed, 16 force types to construct; add-force, the dialog's order, select, "
+                        "field-span, field-view and the dialog's Forces group all answered\n",
+                        Listed);
+            for (const RecordToken Token : {Added->QueryToken(), Ordered->QueryToken()}) (void)World.DestroyRecord(Token);
+            ++Captured;
         }
         Require(Captured > 0, "nothing matched " + Only);
         std::printf("[ForceFieldWorkspaceCapture] %d captures\n", Captured);
