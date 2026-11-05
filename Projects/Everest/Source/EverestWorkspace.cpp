@@ -11,6 +11,7 @@
 #if FRONTIER_EDITOR && defined(FRONTIER_WITH_INTERFACE_SDK)
 #include "Frontier/Extensions/Rendering/RenderingExtension.h"
 #include "Frontier/Extensions/Physics/PhysicsExtension.h"
+#include "Frontier/Extensions/Networking/NetworkingSession.h"
 #include "Engine/Scene/VehicleReadings.h"
 #include "Engine/Scene/WorldRegister.h"
 
@@ -385,6 +386,14 @@ EverestWorkspace::EverestWorkspace(Frontier::ControlCentrePanel& ControlCentre,
                  SaveActiveLevel();
              }
          }},
+        {"Networking", Frontier::ControlCentreIconCategory::WirelessSignal,
+         [this, Token]() {
+             if (!Token.expired())
+             {
+                 ToggleNetworking();
+             }
+         },
+         [this, Token]() { return !Token.expired() && QueryNetworkingEnabled(); }},
     });
 
     auto OutlinerSpec=Frontier::MakeSceneDirectoryPanelSpecification(OutlinerPanel);
@@ -876,6 +885,8 @@ void EverestWorkspace::ConstructInterface(double DeltaSeconds)
         (void)Physics->Step(QueryWorldSpace(), DeltaSeconds);
         IntegrateChaseCamera(DeltaSeconds);
     }
+    // 📝 The replication session advances over the level while the Networking toggle enables it (silent otherwise).
+    if (Network) (void)Network->Advance(QueryWorldSpace());
     ViewportDeltaSeconds = DeltaSeconds;
     AdvanceFieldTimeline(DeltaSeconds);
 
@@ -1514,6 +1525,23 @@ void EverestWorkspace::ToggleSimulation()
                       Tally.Fixed, Tally.Fracture);
     }
     AnnounceViewportNotice(Text);
+}
+
+void EverestWorkspace::ToggleNetworking()
+{
+    if (!Network)
+    {
+        Network = std::make_unique<Frontier::NetworkingSession>();
+        Network->ConfigureLocalPeer("Everest", Frontier::NetworkRole::Host);
+    }
+    Network->ConfigureEnabled(!Network->QueryEnabled());
+    if (Network->QueryEnabled()) Network->Greet();
+    AnnounceViewportNotice(Network->QueryReading());
+}
+
+bool EverestWorkspace::QueryNetworkingEnabled() const noexcept
+{
+    return Network && Network->QueryEnabled();
 }
 
 bool EverestWorkspace::QueryVehicleDrivingActive() const

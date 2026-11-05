@@ -24,6 +24,7 @@ struct ImVec2;
 namespace Frontier
 {
 class ForceFieldVisualization;
+class NetworkingSession;
 class PhysicsExtension;
 }
 #endif
@@ -185,7 +186,11 @@ class EverestWorkspace
     void                  ServiceConstructOrder(const Frontier::ConstructOrder& Order);
     Frontier::RecordToken DuplicateGeometryRecord(Frontier::RecordToken Token);
     void                  ToggleSimulation();
+    // 📝 The Quick Controls "Networking" toggle: enables the session's replication (loopback until a provider links).
+    void                  ToggleNetworking();
+    [[nodiscard]] bool    QueryNetworkingEnabled() const noexcept;
     [[nodiscard]] Frontier::PhysicsExtension* AccessPhysics() noexcept { return Physics.get(); }
+    [[nodiscard]] Frontier::NetworkingSession* AccessNetworking() noexcept { return Network.get(); }
 #endif
 
     [[nodiscard]] EverestApplication&          AccessApplication() noexcept { return Application; }
@@ -275,6 +280,7 @@ class EverestWorkspace
     std::unordered_map<uint64_t, std::array<float, 3>> PendingAlbedo{};   // [-] constructed shapes waiting for their family
     FieldViewport                                Field{};
     std::unique_ptr<Frontier::PhysicsExtension>  Physics;
+    std::unique_ptr<Frontier::NetworkingSession> Network;   // [-] - the replication session the Networking toggle drives
     Frontier::Vehicle::DriverInputIntegrator     DriverControls{};
 #endif
 

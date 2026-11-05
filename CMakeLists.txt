@@ -283,10 +283,28 @@ target_link_libraries(FrontierRenderingExtension PUBLIC FrontierSceneEditorUI Fr
 add_library(FrontierParticleExtension STATIC
     Frontier/Extensions/Particle/ParticleExtension.cpp)
 target_link_libraries(FrontierParticleExtension PUBLIC FrontierSceneEditorUI FrontierParticleSimulation)
+# 📝 Networking providers: the EOS and Photon SDKs stay optional; without them the adapters compile as honest stubs.
+option(FRONTIER_EOS_SDK "Link the Epic Online Services SDK behind EosAdapter" OFF)
+option(FRONTIER_PHOTON_SDK "Link the Photon Realtime SDK behind PhotonAdapter" OFF)
+set(FRONTIER_EOS_SDK_ROOT "" CACHE PATH "EOS SDK root (Include/, Lib/ or Bin/) when FRONTIER_EOS_SDK is on")
+set(FRONTIER_PHOTON_ROOT "" CACHE PATH "Photon Realtime root (realtime/include) when FRONTIER_PHOTON_SDK is on")
 add_library(FrontierNetworkingExtension STATIC
     Frontier/Extensions/Networking/NetworkingSpace.cpp
-    Frontier/Extensions/Networking/NetworkingExtension.cpp)
+    Frontier/Extensions/Networking/NetworkingTransport.cpp
+    Frontier/Extensions/Networking/NetworkingExtension.cpp
+    Frontier/Extensions/Networking/ReplicationCodec.cpp
+    Frontier/Extensions/Networking/EosAdapter.cpp
+    Frontier/Extensions/Networking/PhotonAdapter.cpp
+    Frontier/Extensions/Networking/NetworkingSession.cpp)
 target_link_libraries(FrontierNetworkingExtension PUBLIC FrontierSceneEditorUI)
+if(FRONTIER_EOS_SDK)
+    target_compile_definitions(FrontierNetworkingExtension PUBLIC FRONTIER_EOS_SDK)
+    target_include_directories(FrontierNetworkingExtension PUBLIC "${FRONTIER_EOS_SDK_ROOT}/Include")
+endif()
+if(FRONTIER_PHOTON_SDK)
+    target_compile_definitions(FrontierNetworkingExtension PUBLIC FRONTIER_PHOTON_SDK)
+    target_include_directories(FrontierNetworkingExtension PUBLIC "${FRONTIER_PHOTON_ROOT}/realtime/include")
+endif()
 # 📝 Physics: JoltPhysics (pinned, Automation/JoltPhysics.cmake) behind PhysicsSpace; only the extension sees Jolt's headers.
 include(Automation/JoltPhysics.cmake)
 frontier_add_jolt()
@@ -310,7 +328,7 @@ target_include_directories(EverestProjectEditor PUBLIC
     "${CMAKE_SOURCE_DIR}/Frontier"
     "${CMAKE_SOURCE_DIR}/Projects/Everest/Source")
 target_compile_definitions(EverestProjectEditor PUBLIC FRONTIER_WITH_INTERFACE_SDK=1 FRONTIER_EDITOR_PROFILE=1 FRONTIER_EDITOR=1)
-target_link_libraries(EverestProjectEditor PUBLIC FrontierSceneEditorUI FrontierRenderingExtension FrontierParticleExtension FrontierPhysicsExtension)
+target_link_libraries(EverestProjectEditor PUBLIC FrontierSceneEditorUI FrontierRenderingExtension FrontierParticleExtension FrontierPhysicsExtension FrontierNetworkingExtension)
 frontier_stage_project_content(EverestProjectEditor
     "${CMAKE_SOURCE_DIR}/Projects/Everest/Everest.projectspace"
     "${CMAKE_SOURCE_DIR}/EngineContent"
@@ -819,6 +837,11 @@ if(BUILD_TESTING)
     target_link_libraries(NetworkingSpaceValidation PRIVATE FrontierNetworkingExtension)
     add_test(NAME NetworkingSpaceValidation COMMAND NetworkingSpaceValidation "${CMAKE_SOURCE_DIR}/Exhibits/Networking/Results/NetworkingSpaceValidation.md")
     set_tests_properties(NetworkingSpaceValidation PROPERTIES TIMEOUT 60)
+    add_executable(NetworkingProviderValidation
+        Exhibits/Networking/Code/NetworkingProviderValidation.cpp)
+    target_link_libraries(NetworkingProviderValidation PRIVATE FrontierNetworkingExtension)
+    add_test(NAME NetworkingProviderValidation COMMAND NetworkingProviderValidation "${CMAKE_SOURCE_DIR}/Exhibits/Networking/Results/NetworkingProviderValidation.md")
+    set_tests_properties(NetworkingProviderValidation PROPERTIES TIMEOUT 60)
 
     add_executable(ParticleSpaceValidation
         Exhibits/ParticleEditor/Code/ParticleSpaceValidation.cpp)

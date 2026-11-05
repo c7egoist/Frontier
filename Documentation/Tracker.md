@@ -1718,3 +1718,22 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
   - Fractured objects stay static bounds until the fracture work.
   - Capture GIFs are SwiftShader renders, not Windows GPU captures.
 - **Commits:** the commit with this entry.
+
+#### Networking / collision / portal workstreams (2026-11-04, branch `arena/c8d71a98-frontier`)
+
+- **Scope (owner answers 2026-11-04):** (1) merge Project-Networking providers into Frontier behind
+  `NetworkTransport`, Quick Actions toggle named "Networking" (Enabled/Disabled), one PR at the end;
+  (2) polygon-accurate colliders replacing box approximations, collision-debug visibility toggle, drivable ramp;
+  (3) full portal system (recursive faces, split in/out rendering, object scaling, partial physics,
+  far-side transparency) on a format-agnostic polygon-surface base (no format readers yet).
+- **Naming mapping (SKILL-Naming):** `Object`/`Actor`/`Mesh` are banned; the "base class" is the existing
+  `RecordEntry` + modular configurations with a new `PolygonSurfaceReader` intake interface and a
+  `SurfaceFormatRegistry` keyed by extension. "Quick Actions" is the Control Centre Quick Controls grid
+  (`ControlCentreQuickAction`, configured per workspace in e.g. `EverestWorkspace.cpp`).
+- **Phase A (provider networking):** engine owns `ReplicationCodec` (FP1 wire form, unchanged),
+  `EosAdapter` (real EOS P2P relay), `PhotonAdapter` (Photon events + receive queue), `NetworkingSession`
+  (owns Space + transport, `Enabled` toggle, per-frame `Advance`); Project-Networking transports become shims
+  over the adapters; Everest ticks the session and hosts the Quick Actions toggle.
+- **Deviation:** the post-commit sync rule (`SultanAladin/Frontier arena/11f31835-frontier`) conflicts with
+  Arena session-branch discipline; all work stays on `arena/c8d71a98-frontier` until the final PR.
+- **Evidence:** `Exhibits/Networking/` (this entry's validation ledger).
