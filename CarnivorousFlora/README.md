@@ -53,3 +53,12 @@ so a dormant predator is the same silhouette, colour and wind motion as its harm
     src/flora    petal/leaf/tube geometry, flowers, decoys, predator head + brain
     src/world    sky + PMREM environment, terrain, GPU grass, forest, ferns, wildflowers, pollen, sun shafts
     src/game     player, AI scout, procedural audio, UI
+
+## Gallery
+
+| | |
+|---|---|
+| ![orchid](screenshots/orchid-serpent-alert.jpg) | ![lily](screenshots/briar-lily-alert.jpg) |
+| ![meadow](screenshots/meadow-camouflage.png) | ![title](screenshots/title.png) |
+
+(Captured headless on a software renderer; real GPUs will be much smoother.)
