@@ -18,6 +18,7 @@ import { exportFormationToOBJ } from '../io/obj-exporter.js';
 import { ArchCurveGizmoOverlay } from './arch-curve-gizmo.js';
 import { RockStudioViewport } from './viewport.js';
 import { WorldLayout } from './world-layout.js';
+import { maskFingerprint, regionMask } from '../world/world-map.js';
 import { bakeTerrainDocument, captureTerrainDocument, restoreTerrainDocument } from './world-terrain-session.js';
 
 // ============================================================================
@@ -371,6 +372,7 @@ function finishWorldTerrain() {
   region.document = doc;
   region.bake = bakeTerrainDocument(doc, worldLayout.previewSize);
   region.maskRevision = worldLayout.world.layers.find(layer => layer.id === region.layerId)?.revision;
+  region.maskFingerprint = maskFingerprint(regionMask(worldLayout.world, region));
   worldLayout.save();
   activeWorldRegion = null;
   erosionEngine.pipeline.setWorldBaseMask(null);
@@ -387,7 +389,9 @@ function openWorldTerrain(region, mask) {
     window.alert(`This terrain was saved at ${region.document.size}². Set Terrain grid to ${region.document.size}² before editing it. The preview bake is still available.`);
     return;
   }
-  const stale = region.document && region.maskRevision !== layer?.revision;
+  const stale = region.document && (region.maskFingerprint !== undefined
+    ? region.maskFingerprint !== maskFingerprint(mask)
+    : region.maskRevision !== layer?.revision);
   if (stale && !window.confirm('The shape mask changed since this terrain was last edited. Rebuilding applies the new mask but resets its live erosion progress. Continue?')) return;
   if (!window.confirm('Opening a world terrain pauses the current simulation. Terrain, sculpting, snow, chemistry and frost fields are preserved, but airborne particles and moving rock placements restart when switching. Continue?')) return;
   try {

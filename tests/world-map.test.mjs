@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { addRegion, addShapeLayer, bakeWorld, createWorld, normalizeBounds, paintMask, regionMask } from '../src/world/world-map.js';
+import { addRegion, addShapeLayer, bakeWorld, createWorld, maskFingerprint, migrateWorld, normalizeBounds, paintMask, regionMask, sampleMask, visibleTileKeys } from '../src/world/world-map.js';
 
 test('painted masks remain layer-local and bounds crop the correct map area', () => {
   const w = createWorld(), a = addShapeLayer(w), b = addShapeLayer(w);
   paintMask(a, .25, .5, .75, .5, .12);
-  assert.equal(b.mask.some(Boolean), false);
+  assert.deepEqual(Object.keys(b.tiles), []);
   const r = addRegion(w, a.id, normalizeBounds(.2, .3, .8, .7));
   const crop = regionMask(w, r, 33);
   assert.ok(crop[16 * 33 + 16] > 240);
@@ -40,4 +40,49 @@ test('shape edits mark the stored mask revision stale', () => {
   const revision = layer.revision;
   paintMask(layer, .2, .2, .2, .2, .03);
   assert.ok(layer.revision > revision);
+});
+
+
+test('sparse masks paint across tile seams and at large negative or positive coordinates', () => {
+  const world = createWorld(), layer = addShapeLayer(world);
+  paintMask(layer, -.04, .5, .04, .5, .08);
+  assert.ok(sampleMask(layer, -.01, .5) > 245);
+  assert.ok(sampleMask(layer, .01, .5) > 245);
+  paintMask(layer, 1000.3, -987.2, 1000.3, -987.2, .03);
+  assert.ok(sampleMask(layer, 1000.3, -987.2) > 245);
+  assert.ok(visibleTileKeys(world).includes('1000,-988'));
+  const far = addRegion(world, layer.id, normalizeBounds(1000.2, -987.3, 1000.4, -987.1));
+  assert.ok(regionMask(world, far, 33)[16 * 33 + 16] > 245);
+  assert.ok(Object.keys(layer.tiles).length < 10, 'untouched intervening world allocates no tiles');
+});
+
+test('legacy one-tile worlds migrate without changing regions or stored documents', () => {
+  const mask = new Uint8Array(256 * 256); mask[128 * 256 + 128] = 255;
+  const doc = { terrain: new Float32Array([3]) };
+  const old = { version: 1, nextLayer: 2, nextRegion: 2, layers: [{ id: 'shape-1', name: 'Old', visible: true, mask }], regions: [{ id: 'terrain-1', layerId: 'shape-1', bounds: { x: 0, y: 0, width: 1, height: 1 }, document: doc }] };
+  const migrated = migrateWorld(old);
+  assert.equal(migrated.version, 2);
+  assert.equal(migrated.layers[0].tiles['0,0'][128 * 256 + 128], 255);
+  assert.equal(migrated.regions[0].document, doc);
+  assert.equal(old.version, 1, 'migration does not mutate the stored legacy world');
+});
+
+test('adjacent world bakes share the same samples at their tile boundary', () => {
+  const world = createWorld(), layer = addShapeLayer(world);
+  paintMask(layer, .9, .5, 1.1, .5, .1);
+  const left = bakeWorld(world, 17, {x:0,y:0,width:1,height:1});
+  const right = bakeWorld(world, 17, {x:1,y:0,width:1,height:1});
+  for (let y=0; y<17; y++) assert.equal(left.coverage[y*17+16], right.coverage[y*17]);
+});
+
+
+test('distant edits on the same shape do not invalidate a terrain region mask', () => {
+  const world = createWorld(), layer = addShapeLayer(world);
+  paintMask(layer, .5, .5, .5, .5, .15);
+  const region = addRegion(world, layer.id, normalizeBounds(.25, .25, .75, .75));
+  const before = maskFingerprint(regionMask(world, region));
+  paintMask(layer, 100, -40, 100, -40, .1);
+  assert.equal(maskFingerprint(regionMask(world, region)), before);
+  paintMask(layer, .5, .5, .5, .5, .05, true);
+  assert.notEqual(maskFingerprint(regionMask(world, region)), before);
 });

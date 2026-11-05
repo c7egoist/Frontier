@@ -4670,3 +4670,7 @@ summary:focus-visible {
 .world-footer { padding:10px 16px; color:#a5afb0; border-top:1px solid #2c3032; }
 @media(max-width:800px) { .world-panel { width:200px; } .world-toolbar { gap:6px; } }
 .world-region-actions { display:flex; gap:4px; } .world-region-actions button { flex:1; padding:5px; font-size:10px; }
+/* The map is a window into an unbounded sparse grid, not a fixed-size canvas. */
+.world-map-wrap { width:100%; height:100%; max-height:none; aspect-ratio:auto; }
+.world-tools input[type="checkbox"] { width:auto; }
+#world-sea-level { width:64px; }
