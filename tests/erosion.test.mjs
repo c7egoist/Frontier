@@ -1740,7 +1740,10 @@ test('End-to-end stateful Mock-WebGL2 + DOM boot of GpuErosionEngine, TerrainSta
 
     // Cycle through ALL canonical stack presets plus Utah and the standalone
     // spline-authoring recipes, verifying exact generator/parameter/seed
-    // parity & zero feedback loops!
+    // parity & zero feedback loops, while the imported world mask survives
+    // every preset replacement and remains bound to the same document.
+    engine.pipeline.setWorldBaseMask(new Uint8Array(16 * 16).fill(180), 16);
+    const importedMaskTexture = engine.pipeline.worldBaseMaskTex;
     for (const presetId of Object.keys(TERRAIN_STACK_PRESETS)) {
       const stackPreset = TERRAIN_STACK_PRESETS[presetId];
       const isManualRecipe = stackPreset.manualRecipe === true;
@@ -1751,6 +1754,8 @@ test('End-to-end stateful Mock-WebGL2 + DOM boot of GpuErosionEngine, TerrainSta
         ...(isManualRecipe ? { relief: stackPreset.expectedRelief, roughness: stackPreset.expectedRoughness } : {}),
       };
       engine.pipeline.loadPreset(presetId);
+      assert.equal(engine.pipeline.worldBaseMaskEnabled, true, `Preset ${presetId} keeps the world mask active`);
+      assert.equal(engine.pipeline.worldBaseMaskTex, importedMaskTexture, `Preset ${presetId} keeps the imported mask texture`);
       assert.equal(engine.params.relief, d.relief, `Preset ${presetId} relief parity`);
       assert.equal(engine.params.roughness, d.roughness, `Preset ${presetId} roughness parity`);
       assert.equal(engine.params.seed, 4029, `Preset ${presetId} seed parity`);
@@ -1760,6 +1765,8 @@ test('End-to-end stateful Mock-WebGL2 + DOM boot of GpuErosionEngine, TerrainSta
       ui.renderAll();
       engine.renderFrame();
     }
+
+    engine.pipeline.setWorldBaseMask(null);
 
     // Utah workflow: top Wind layer is selected/armed on load, simulation
     // remains paused, and only Rain + Wind are available seasons.

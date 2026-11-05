@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { addRegion, addShapeLayer, bakeWorld, createWorld, maskFingerprint, migrateWorld, normalizeBounds, paintMask, regionMask, sampleMask, visibleTileKeys } from '../src/world/world-map.js';
+import { addRegion, addShapeLayer, bakeWorld, createWorld, maskFingerprint, migrateWorld, normalizeBounds, paintMask, regionMask, sampleMask, terrainImportMapping, terrainImportMask, visibleTileKeys } from '../src/world/world-map.js';
 
 test('painted masks remain layer-local and bounds crop the correct map area', () => {
   const w = createWorld(), a = addShapeLayer(w), b = addShapeLayer(w);
@@ -85,4 +85,28 @@ test('distant edits on the same shape do not invalidate a terrain region mask', 
   assert.equal(maskFingerprint(regionMask(world, region)), before);
   paintMask(layer, .5, .5, .5, .5, .05, true);
   assert.notEqual(maskFingerprint(regionMask(world, region)), before);
+});
+
+
+test('rectangular region is padded in a square simulation and crops back without stretching', async () => {
+  const world = createWorld(), layer = addShapeLayer(world);
+  paintMask(layer, .3, .5, 1.7, .5, .4);
+  const region = addRegion(world, layer.id, normalizeBounds(0, 0, 2, 1));
+  const mapping = terrainImportMapping(region);
+  assert.deepEqual(mapping, { x: 0, y: .25, width: 1, height: .5, mode: 'padded' });
+  const mask = terrainImportMask(world, region, 65);
+  assert.equal(mask[2 * 65 + 32], 0, 'padding is empty');
+  assert.ok(mask[32 * 65 + 32] > 240, 'authored shape survives inside padding');
+  const raw = new Float32Array(9 * 9 * 4);
+  for (let y = 0; y < 9; y++) for (let x = 0; x < 9; x++) raw[(y * 9 + x) * 4] = y * 10 + x;
+  const { bakeTerrainDocument } = await import('../src/app/world-terrain-session.js');
+  const baked = bakeTerrainDocument({ size: 9, terrain: raw }, 3, mapping);
+  assert.deepEqual(Array.from(baked.heights), [20, 24, 28, 40, 44, 48, 60, 64, 68]);
+  region.importMapping = 'padded'; region.document = { size: 9 };
+  assert.deepEqual(terrainImportMapping(region), mapping, 'mapping remains stable after saving');
+});
+
+test('legacy rectangular documents retain their existing square mapping', () => {
+  const region = { bounds: { x:0, y:0, width:4, height:1 }, document: { size:256 } };
+  assert.deepEqual(terrainImportMapping(region), {x:0, y:0, width:1, height:1, mode:'stretch'});
 });

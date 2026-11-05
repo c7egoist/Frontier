@@ -1,13 +1,14 @@
 import { WorldPreview } from './world-preview.js';
 import { loadWorld, saveWorld } from '../world/world-storage.js';
 import { bakeTerrainDocument } from './world-terrain-session.js';
-import { MASK_RESOLUTION, addRegion, addShapeLayer, createWorld, migrateWorld, normalizeBounds, paintMask, regionMask, visibleTileKeys } from '../world/world-map.js';
+import { MASK_RESOLUTION, addRegion, addShapeLayer, createWorld, migrateWorld, normalizeBounds, paintMask, regionMask, terrainImportMapping, visibleTileKeys } from '../world/world-map.js';
 
 /** World layout owns only a 2D mask and bounded baked terrain patches. */
 export class WorldLayout {
-  constructor(root, onEdit) {
+  constructor(root, onEdit, onChange = () => {}) {
     this.root = root;
     this.onEdit = onEdit;
+    this.onChange = onChange;
     this.world = createWorld();
     this.selectedLayer = addShapeLayer(this.world).id;
     this.selectedRegion = null;
@@ -53,7 +54,7 @@ export class WorldLayout {
       this.previewSize = Number(event.target.value);
       // Re-bake from each saved full-resolution terrain, not from its old
       // low-resolution preview. The world grid can then be scaled independently.
-      for (const region of this.world.regions) if (region.document) region.bake = bakeTerrainDocument(region.document, this.previewSize);
+      for (const region of this.world.regions) if (region.document) region.bake = bakeTerrainDocument(region.document, this.previewSize, terrainImportMapping(region));
       this.save(); this.render();
     };
     this.render();
@@ -117,7 +118,7 @@ export class WorldLayout {
     if (!this.pointer || event.pointerId !== this.pointer.id) return;
     if (!this.pointer.pan && this.tool === 'bounds' && event.type !== 'pointercancel') {
       const b = normalizeBounds(this.pointer.start.x, this.pointer.start.y, this.pointer.last.x, this.pointer.last.y);
-      if (b) { const region = addRegion(this.world, this.selectedLayer, b); this.selectedRegion = region.id; this.status('Terrain bounds assigned. Select Edit in Terrain Studio to start from the shape mask.'); }
+      if (b) { const region = addRegion(this.world, this.selectedLayer, b); this.selectedRegion = region.id; this.status('Terrain bounds assigned. Open in Terrain Studio to start from the shape mask.'); }
     }
     const changed = !this.pointer.pan; this.pointer = null; this.render(); if (changed) this.save();
   }
@@ -145,8 +146,8 @@ export class WorldLayout {
     for (const region of this.world.regions) {
       const row = document.createElement('div'); row.className = `world-region ${region.id === this.selectedRegion ? 'selected' : ''}`;
       const title = document.createElement('strong'); title.textContent = region.name;
-      const details = document.createElement('small'); details.textContent = `${this.world.layers.find(item => item.id === region.layerId)?.name || 'Shape'} · ${region.bake ? `baked ${region.bake.size}²` : 'not baked'}`;
-      const edit = document.createElement('button'); edit.textContent = 'Edit in Terrain Studio'; edit.onclick = () => { this.selectedRegion = region.id; this.onEdit(region, regionMask(this.world, region)); this.render(); };
+      const details = document.createElement('small'); details.textContent = `${this.world.layers.find(item => item.id === region.layerId)?.name || 'Shape'} · ${region.bake ? `baked ${region.bake.size}²` : 'not baked'} · ${(region.bounds.width / region.bounds.height).toFixed(2)}:1 bounds`;
+      const edit = document.createElement('button'); edit.textContent = 'Open in Terrain Studio'; edit.onclick = () => { this.selectedRegion = region.id; this.onEdit(region, regionMask(this.world, region)); this.render(); };
       const actions = document.createElement('div'); actions.className = 'world-region-actions';
       const select = document.createElement('button'); select.textContent = 'Select'; select.onclick = () => { this.selectedRegion = region.id; this.selectedLayer = region.layerId; const b = region.bounds; this.view = { x: b.x + b.width / 2, y: b.y + b.height / 2, pixelsPerTile: Math.max(.001, Math.min(1024, .7 * Math.min(this.canvas.width / b.width, this.canvas.height / b.height))) }; this.render(); };
       const rename = document.createElement('button'); rename.textContent = 'Rename'; rename.onclick = () => { const value = prompt('Terrain name', region.name); if (value?.trim()) { region.name = value.trim().slice(0, 80); this.render(); this.save(); } };
@@ -157,6 +158,7 @@ export class WorldLayout {
     if (!this.world.regions.length) regions.textContent = 'No terrain bounds yet.';
     this.drawMap();
     if (this.previewVisible) this.updatePreview();
+    this.onChange();
   }
   drawMap() {
     const ctx = this.ctx, width = this.canvas.width, height = this.canvas.height, scale = this.view.pixelsPerTile;

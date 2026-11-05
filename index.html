@@ -216,6 +216,16 @@
           <span class="tp-tab-add" aria-hidden="true">+</span>
         </div>
 
+        <div id="tp-world-terrain-bar" class="tp-world-terrain-bar">
+          <label for="tp-world-terrain">World terrain</label>
+          <select id="tp-world-terrain" aria-label="Choose a world terrain to edit" disabled>
+            <option value="">Standalone terrain</option>
+          </select>
+          <span id="tp-world-mask-state" class="tp-world-mask-state">Loading world regions…</span>
+          <button id="tp-world-layout-open" type="button">World Layout</button>
+          <button id="tp-world-terrain-bake" type="button" hidden>Save &amp; view world</button>
+        </div>
+
         <!-- VIEWPORT HEADER: camera + shading + visibility ONLY.
              Authoring tools live in their own rail inside the stage below,
              deliberately split away from this header. -->
@@ -339,7 +349,7 @@
               <span class="cb-chevron">▾</span>
               <span>Terrain recipes</span>
             </button>
-            <span class="cb-hint">Closed by default · open when switching terrains</span>
+            <span class="cb-hint" id="cb-world-preset-hint">Closed by default · open when switching terrains</span>
           </div>
           <div class="cb-drawer" id="cb-shelf-drawer" hidden>
             <div class="cb-preset-grid" id="cb-preset-grid"></div>

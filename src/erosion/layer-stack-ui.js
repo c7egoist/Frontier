@@ -2597,6 +2597,7 @@ export class ErosionLayerStackUI {
     this.elPresetGrid.querySelectorAll('[data-preset-id]').forEach((card) => {
       card.addEventListener('click', () => {
         const id = card.dataset.presetId;
+        if (this.pipeline.worldBaseMaskEnabled && !window.confirm('Load this recipe on the selected world terrain? It replaces the current terrain layers, sculpting and live erosion progress, but keeps the world mask and bounds.')) return;
         this.pipeline.loadPreset(id);
         this.renderAll();
         if (this.onPresetChanged) this.onPresetChanged(id);

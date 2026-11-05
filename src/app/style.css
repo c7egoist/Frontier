@@ -4674,3 +4674,11 @@ summary:focus-visible {
 .world-map-wrap { width:100%; height:100%; max-height:none; aspect-ratio:auto; }
 .world-tools input[type="checkbox"] { width:auto; }
 #world-sea-level { width:64px; }
+/* A world region remains a document-level mask, independent of recipe layers. */
+.tp-world-terrain-bar { display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:8px 12px; border-bottom:1px solid var(--tp-border); background:#111315; }
+.tp-world-terrain-bar label { color:#aab4b2; font-size:11px; font-weight:650; }
+.tp-world-terrain-bar select,.tp-world-terrain-bar button { border:1px solid #38413e; border-radius:8px; background:#1a1f1d; color:#dfe9e4; padding:6px 9px; }
+.tp-world-terrain-bar select { max-width:220px; }
+.tp-world-terrain-bar button { cursor:pointer; }
+.tp-world-terrain-bar button:hover { border-color:#6cbb99; }
+.tp-world-mask-state { flex:1; min-width:130px; color:#94ad9f; font-size:11px; }

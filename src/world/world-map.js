@@ -100,6 +100,30 @@ export function maskFingerprint(mask) {
   return hash >>> 0;
 }
 
+/** Fit a rectangular world region into the square simulation without stretching.
+ * Legacy documents without a mapping remain in their original stretched layout. */
+export function terrainImportMapping(region) {
+  if (region.importMapping === 'stretch' || (region.document && !region.importMapping)) {
+    return { x: 0, y: 0, width: 1, height: 1, mode: 'stretch' };
+  }
+  const b = region.bounds, span = Math.max(b.width, b.height);
+  const width = b.width / span, height = b.height / span;
+  return { x: (1 - width) / 2, y: (1 - height) / 2, width, height, mode: 'padded' };
+}
+
+/** Crop a rectangular map region into its original aspect inside the square GPU grid. */
+export function terrainImportMask(world, region, size = MASK_RESOLUTION) {
+  const layer = world.layers.find(item => item.id === region.layerId);
+  if (!layer) throw new Error('Region shape layer no longer exists');
+  const output = new Uint8Array(size * size), b = region.bounds, m = terrainImportMapping(region);
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    const u = x / (size - 1), v = y / (size - 1);
+    if (u < m.x || u > m.x + m.width || v < m.y || v > m.y + m.height) continue;
+    output[y * size + x] = Math.round(sampleMask(layer, b.x + (u - m.x) / m.width * b.width, b.y + (v - m.y) / m.height * b.height));
+  }
+  return output;
+}
+
 export function regionMask(world, region, size = MASK_RESOLUTION) {
   const layer = world.layers.find(item => item.id === region.layerId);
   if (!layer) throw new Error('Region shape layer no longer exists');

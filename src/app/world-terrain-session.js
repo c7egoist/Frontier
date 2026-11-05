@@ -56,10 +56,11 @@ export function restoreTerrainDocument(engine, doc, { restoreTerrain = true } = 
   pipe.pauseSimulationForEdit('Terrain document restored; simulation paused');
 }
 /** Downsample live bedrock + sediment to a compact height bake. */
-export function bakeTerrainDocument(doc, size = 128) {
+export function bakeTerrainDocument(doc, size = 128, mapping = { x: 0, y: 0, width: 1, height: 1 }) {
   const heights = new Float32Array(size * size), r = doc.size;
   for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
-    const sx = Math.round(x / (size - 1) * (r - 1)), sy = Math.round(y / (size - 1) * (r - 1));
+    const sx = Math.round((mapping.x + x / (size - 1) * mapping.width) * (r - 1));
+    const sy = Math.round((mapping.y + y / (size - 1) * mapping.height) * (r - 1));
     const i = (sy * r + sx) * 4;
     heights[y * size + x] = doc.terrain[i] + doc.terrain[i + 1] + doc.terrain[i + 2];
   }

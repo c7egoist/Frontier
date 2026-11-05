@@ -18,7 +18,7 @@ import { exportFormationToOBJ } from '../io/obj-exporter.js';
 import { ArchCurveGizmoOverlay } from './arch-curve-gizmo.js';
 import { RockStudioViewport } from './viewport.js';
 import { WorldLayout } from './world-layout.js';
-import { maskFingerprint, regionMask } from '../world/world-map.js';
+import { maskFingerprint, regionMask, terrainImportMapping, terrainImportMask } from '../world/world-map.js';
 import { bakeTerrainDocument, captureTerrainDocument, restoreTerrainDocument } from './world-terrain-session.js';
 
 // ============================================================================
@@ -358,6 +358,47 @@ function updateRockHud(stats) {
 let worldLayout = null;
 let activeWorldRegion = null;
 let standaloneTerrainDocument = null;
+
+function syncWorldTerrainSelector() {
+  const select = document.getElementById('tp-world-terrain');
+  const status = document.getElementById('tp-world-mask-state');
+  const bake = document.getElementById('tp-world-terrain-bake');
+  const hint = document.getElementById('cb-world-preset-hint');
+  if (!select || !worldLayout) return;
+  select.replaceChildren();
+  const standalone = document.createElement('option');
+  standalone.value = ''; standalone.textContent = 'Standalone terrain'; select.append(standalone);
+  for (const region of worldLayout.world.regions) {
+    const option = document.createElement('option'); option.value = region.id;
+    const layer = worldLayout.world.layers.find(item => item.id === region.layerId);
+    option.textContent = `${region.name} · ${layer?.name || 'Shape'}`;
+    select.append(option);
+  }
+  select.value = activeWorldRegion?.id || '';
+  select.disabled = !worldLayout.ready || worldLayout.storageFailed || !erosionEngine;
+  if (status) {
+    if (!worldLayout.ready) status.textContent = 'Loading world regions…';
+    else if (worldLayout.storageFailed) status.textContent = 'World storage unavailable';
+    else if (activeWorldRegion) {
+      const mapping = terrainImportMapping(activeWorldRegion);
+      status.textContent = mapping.mode === 'stretch'
+        ? 'World mask active · legacy square mapping'
+        : 'World mask active · rectangle padded, not stretched';
+    } else status.textContent = 'No world mask · select a region or create one in World Layout';
+  }
+  if (bake) bake.hidden = !activeWorldRegion;
+  if (hint) hint.textContent = activeWorldRegion
+    ? 'Any recipe uses this world mask · loading replaces the current stack'
+    : 'Closed by default · open when switching terrains';
+}
+
+function ensureWorldLayout() {
+  if (!worldLayout) {
+    worldLayout = new WorldLayout(document.getElementById('world-layout'), openWorldTerrain, syncWorldTerrainSelector);
+    syncWorldTerrainSelector();
+  }
+  return worldLayout;
+}
 window.addEventListener('beforeunload', (event) => {
   if (!activeWorldRegion) return;
   // The terrain is baked and persisted when the user returns to World Layout.
@@ -370,7 +411,7 @@ function finishWorldTerrain() {
   const region = activeWorldRegion;
   const doc = captureTerrainDocument(erosionEngine);
   region.document = doc;
-  region.bake = bakeTerrainDocument(doc, worldLayout.previewSize);
+  region.bake = bakeTerrainDocument(doc, worldLayout.previewSize, terrainImportMapping(region));
   region.maskRevision = worldLayout.world.layers.find(layer => layer.id === region.layerId)?.revision;
   region.maskFingerprint = maskFingerprint(regionMask(worldLayout.world, region));
   worldLayout.save();
@@ -380,23 +421,29 @@ function finishWorldTerrain() {
   standaloneTerrainDocument = null;
   if (terrainResolutionSelect) { terrainResolutionSelect.disabled = false; terrainResolutionSelect.title = ''; }
   erosionLayerStackUI?.renderAll();
+  syncWorldTerrainSelector();
 }
 
 function openWorldTerrain(region, mask) {
-  if (!erosionEngine?.pipeline) { window.alert('Terrain Studio is unavailable because the GPU pipeline did not start.'); return; }
+  if (!erosionEngine?.pipeline) { window.alert('Terrain Studio is unavailable because the GPU pipeline did not start.'); return false; }
+  if (activeWorldRegion?.id === region.id) { syncWorldTerrainSelector(); return true; }
   const layer = worldLayout.world.layers.find(item => item.id === region.layerId);
   if (region.document && region.document.size !== erosionEngine.gridRes) {
     window.alert(`This terrain was saved at ${region.document.size}². Set Terrain grid to ${region.document.size}² before editing it. The preview bake is still available.`);
-    return;
+    return false;
   }
   const stale = region.document && (region.maskFingerprint !== undefined
     ? region.maskFingerprint !== maskFingerprint(mask)
     : region.maskRevision !== layer?.revision);
-  if (stale && !window.confirm('The shape mask changed since this terrain was last edited. Rebuilding applies the new mask but resets its live erosion progress. Continue?')) return;
-  if (!window.confirm('Opening a world terrain pauses the current simulation. Terrain, sculpting, snow, chemistry and frost fields are preserved, but airborne particles and moving rock placements restart when switching. Continue?')) return;
+  if (stale && !window.confirm('The shape mask changed since this terrain was last edited. Rebuilding applies the new mask but resets its live erosion progress. Continue?')) return false;
+  const mapping = terrainImportMapping(region);
+  if (mapping.mode === 'padded' && Math.min(mapping.width, mapping.height) * Math.min(erosionEngine.gridRes, 256) < 8
+    && !window.confirm('This rectangle is very narrow relative to its length. Padding it inside the square terrain grid leaves fewer than 8 mask cells across its narrow side, so detail will be lost. Continue?')) return false;
+  if (!window.confirm('Opening a world terrain pauses the current simulation. Terrain, sculpting, snow, chemistry and frost fields are preserved, but airborne particles and moving rock placements restart when switching. Continue?')) return false;
   try {
+    if (activeWorldRegion) finishWorldTerrain();
     standaloneTerrainDocument = captureTerrainDocument(erosionEngine);
-    erosionEngine.pipeline.setWorldBaseMask(mask);
+    erosionEngine.pipeline.setWorldBaseMask(terrainImportMask(worldLayout.world, region));
     if (region.document) restoreTerrainDocument(erosionEngine, region.document, { restoreTerrain: !stale });
     else {
       const pipe = erosionEngine.pipeline;
@@ -408,18 +455,24 @@ function openWorldTerrain(region, mask) {
       pipe.selectedLayerId = base.id;
       pipe.evaluateStack({ reseedPlacements: true });
     }
+    if (!region.document && !region.importMapping) region.importMapping = 'padded';
     activeWorldRegion = region;
     if (terrainResolutionSelect) { terrainResolutionSelect.disabled = true; terrainResolutionSelect.title = 'Choose Terrain grid before opening a world terrain. Changing resolution reloads the studio.'; }
     erosionLayerStackUI?.renderAll();
     setStudioMode('erosion');
+    syncWorldTerrainSelector();
     statusToast.classList.remove('hidden');
-    statusToast.textContent = `Editing ${region.name} · return to World Layout to bake this terrain`;
+    statusToast.textContent = `Editing ${region.name} · select any Terrain recipe; the world mask remains active`;
+    return true;
   } catch (err) {
     console.error('Could not open world terrain', err);
     erosionEngine.pipeline.setWorldBaseMask(null);
     if (standaloneTerrainDocument) restoreTerrainDocument(erosionEngine, standaloneTerrainDocument);
     standaloneTerrainDocument = null; activeWorldRegion = null;
+    if (terrainResolutionSelect) terrainResolutionSelect.disabled = false;
+    syncWorldTerrainSelector();
     window.alert(`Could not open terrain: ${err.message}`);
+    return false;
   }
 }
 
@@ -443,6 +496,7 @@ function setStudioMode(mode) {
   document.getElementById('left-erosion-panels').classList.toggle('hidden-panel', !isTerrain);
   document.getElementById('right-erosion-panels').classList.toggle('hidden-panel', !isTerrain);
   document.getElementById('tp-terrain-bars').classList.toggle('hidden-panel', !isTerrain);
+  document.getElementById('tp-world-terrain-bar').classList.toggle('hidden-panel', !isTerrain);
   document.getElementById('tp-terrain-header-actions').classList.toggle('hidden-panel', !isTerrain);
   document.getElementById('hud-erosion').classList.toggle('hidden-panel', !isTerrain);
   document.getElementById('cb-shelf-root').classList.toggle('hidden-panel', !isTerrain);
@@ -478,8 +532,7 @@ function setStudioMode(mode) {
     if (erosionEngine) erosionEngine.stop();
     if (viewport) viewport.setActive(false);
     if (curveOverlay && state.curveMode) setCurveMode(false);
-    if (!worldLayout) worldLayout = new WorldLayout(document.getElementById('world-layout'), openWorldTerrain);
-    worldLayout.render();
+    ensureWorldLayout().render();
     window.history.replaceState(null, '', '#world');
   } else {
     if (erosionEngine) erosionEngine.stop();
@@ -495,6 +548,20 @@ function setStudioMode(mode) {
   }
 }
 
+document.getElementById('tp-world-terrain').addEventListener('change', (event) => {
+  const id = event.target.value;
+  if (!id && activeWorldRegion) {
+    if (window.confirm('Save this terrain to the world and return to the standalone terrain?')) {
+      try { finishWorldTerrain(); } catch (err) { console.error(err); window.alert(`Could not save terrain: ${err.message}`); }
+    }
+  } else if (id && worldLayout?.ready) {
+    const region = worldLayout.world.regions.find(item => item.id === id);
+    if (region) openWorldTerrain(region, regionMask(worldLayout.world, region));
+  }
+  syncWorldTerrainSelector();
+});
+document.getElementById('tp-world-layout-open').addEventListener('click', () => setStudioMode('world'));
+document.getElementById('tp-world-terrain-bake').addEventListener('click', () => setStudioMode('world'));
 document.getElementById('mode-btn-world').addEventListener('click', () => setStudioMode('world'));
 document.getElementById('mode-btn-erosion').addEventListener('click', () => setStudioMode('erosion'));
 document.getElementById('mode-btn-rock').addEventListener('click', () => setStudioMode('rock'));
@@ -1276,6 +1343,7 @@ function initRockActionButtons() {
 
 // Boot Frontier Terrain Studio + Rock Studio Controls
 initTerrainStudio();
+ensureWorldLayout();
 buildCategoryFilterBar();
 buildArchetypeCards();
 buildSliders('tectonics', 'sliders-tectonics');
