@@ -45,6 +45,21 @@ import {
   normalizeSeasonalClimateParams,
 } from './seasonal-climate.js';
 
+// The optional world-map mask is applied to the base landform before the
+// remainder of the stack and simulation run. Ordinary Terrain Studio is unchanged.
+const WORLD_BASE_MASK_FRAG = `#version 300 es
+precision highp float;
+precision highp sampler2D;
+in vec2 vUv;
+uniform sampler2D uTerrain;
+uniform sampler2D uWorldMask;
+out vec4 outTerrain;
+void main() {
+  vec4 terrain = texture(uTerrain, vUv);
+  float weight = texture(uWorldMask, vUv).r;
+  outTerrain = vec4(terrain.rgb * weight, terrain.a * weight);
+}`;
+
 const PART_TEX_W = 256;
 const PART_TEX_H = 128;
 const MAX_GPU_PARTICLES = PART_TEX_W * PART_TEX_H;
@@ -262,6 +277,47 @@ export class TerrainStackPipeline {
     gl.bindVertexArray(this.engine.emptyVao);
     this._bindTex(this.progCopyVec, 'uSrcTex', srcTex, 0);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+
+  /** Set the cropped world-shape mask for the active terrain document. */
+  setWorldBaseMask(mask, size = 256) {
+    const gl = this.gl;
+    if (!mask) {
+      this.worldBaseMaskEnabled = false;
+      return;
+    }
+    if (mask.length !== size * size) throw new Error('Invalid world mask');
+    if (!this.progWorldBaseMask) {
+      this.progWorldBaseMask = link(gl, FULLSCREEN_VERT, WORLD_BASE_MASK_FRAG, 'WorldBaseMask');
+      this.worldBaseMaskTex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, this.worldBaseMaskTex);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    }
+    const rgba = new Uint8Array(size * size * 4);
+    for (let i = 0; i < mask.length; i++) rgba[i * 4] = rgba[i * 4 + 1] = rgba[i * 4 + 2] = rgba[i * 4 + 3] = mask[i];
+    gl.bindTexture(gl.TEXTURE_2D, this.worldBaseMaskTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, size, size, 0, gl.RGBA, gl.UNSIGNED_BYTE, rgba);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    this.worldBaseMaskEnabled = true;
+  }
+
+  _applyWorldBaseMask() {
+    if (!this.worldBaseMaskEnabled) return;
+    const gl = this.gl, current = this.engine.terrainIdx, next = 1 - current;
+    gl.disable(gl.DEPTH_TEST);
+    gl.disable(gl.BLEND);
+    gl.disable(gl.CULL_FACE);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.engine.fboTerrainSingle[next]);
+    gl.viewport(0, 0, this.R, this.R);
+    gl.useProgram(this.progWorldBaseMask);
+    gl.bindVertexArray(this.engine.emptyVao);
+    this._bindTex(this.progWorldBaseMask, 'uTerrain', this.engine.terrainTex[current], 0);
+    this._bindTex(this.progWorldBaseMask, 'uWorldMask', this.worldBaseMaskTex, 1);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    this.engine.terrainIdx = next;
   }
 
   _getOrCreateSculptEntry(layerId) {
@@ -1081,6 +1137,7 @@ export class TerrainStackPipeline {
         );
         gl.uniform1f(gl.getUniformLocation(this.engine.progInitTerrain, 'uWorldSpan'), span);
         gl.drawArrays(gl.TRIANGLES, 0, 3);
+        this._applyWorldBaseMask();
       } else if (layer.type === 'stratigraphic-beds') {
         ep.strataLayerEnabled = true;
         ep.rockHardness = p.rockHardness ?? DEFAULT_EROSION_PARAMS.rockHardness;
@@ -1418,6 +1475,10 @@ export class TerrainStackPipeline {
         ep.grassDryBlend = p.dryBlend ?? (p.species === 1 ? 0.85 : 0.14);
       }
     }
+
+    // Higher landform operations can extend beyond the flat base. Clip the
+    // evaluated ground to the authored shape before snapshots and live erosion.
+    this._applyWorldBaseMask();
 
     // 3. Copy evaluated initial terrain into `engine.initialTerrainTex` (ANGLE-safe shader copy!)
     this._copyTex(this.engine.terrainTex[this.engine.terrainIdx], this.engine.fboInitialTerrain);

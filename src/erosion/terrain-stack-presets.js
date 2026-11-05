@@ -108,6 +108,10 @@ for (const preset of Object.values(EROSION_LANDSCAPES)) {
   };
 }
 
+// A flat start for hand-authored world masks; recipes can still choose any
+// existing procedural generator or stack procedural landforms above it.
+BASE_ARCHETYPES[19] = { id: 19, label: 'Flat base' };
+
 export const COMBINE_MODES = {
   0: { id: 0, label: 'Add (Uplift)' },
   1: { id: 1, label: 'Subtract (Excavate)' },

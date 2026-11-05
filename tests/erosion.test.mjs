@@ -1526,6 +1526,8 @@ test('End-to-end stateful Mock-WebGL2 + DOM boot of GpuErosionEngine, TerrainSta
       TEXTURE0: 0x84c0,
       RGBA32F: 0x8814,
       RGBA16F: 0x881a,
+      RGBA8: 0x8058,
+      UNSIGNED_BYTE: 0x1401,
       RGBA: 0x1908,
       FLOAT: 0x1406,
       HALF_FLOAT: 0x140b,
@@ -1683,6 +1685,13 @@ test('End-to-end stateful Mock-WebGL2 + DOM boot of GpuErosionEngine, TerrainSta
     assert.equal(engine.params.seed, 4029, 'Default seed must be 4029');
     assert.equal(engine.pipeline.liveSimRunning, false, 'Live simulation must be explicitly triggered, not auto-started by evaluation');
     assert.equal(engine.pipeline.simPlaybackMode, 'solo', 'Seasons default to one-at-a-time playback');
+    // The optional world mask must never read the texture attached to its output FBO.
+    engine.pipeline.setWorldBaseMask(new Uint8Array(16 * 16).fill(255), 16);
+    engine.pipeline.evaluateStack({ reseedPlacements: false, fastPreview: true });
+    assert.equal(engine.pipeline.worldBaseMaskEnabled, true);
+    engine.pipeline.setWorldBaseMask(null);
+    engine.pipeline.evaluateStack({ reseedPlacements: false, fastPreview: true });
+    assert.equal(engine.pipeline.worldBaseMaskEnabled, false);
     assert.equal(engine.gridRes, 512, 'Terrain resolution defaults to the established 512² simulation grid');
     assert.equal(elements.get('cb-shelf-drawer').hidden, true, 'Preset recipes stay closed by default so the viewport stays dominant');
     assert.ok(elements.get('tp-sim-panel').innerHTML.includes('SIMULATION SEASONS'), 'Simulation Seasons panel must render');

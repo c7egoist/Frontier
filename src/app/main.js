@@ -17,6 +17,8 @@ import { exportFormationToGLB } from '../io/glb-exporter.js';
 import { exportFormationToOBJ } from '../io/obj-exporter.js';
 import { ArchCurveGizmoOverlay } from './arch-curve-gizmo.js';
 import { RockStudioViewport } from './viewport.js';
+import { WorldLayout } from './world-layout.js';
+import { bakeTerrainDocument, captureTerrainDocument, restoreTerrainDocument } from './world-terrain-session.js';
 
 // ============================================================================
 // SCHEMA DEFINITIONS: 3D ROCK & CLIFF STUDIO
@@ -79,7 +81,7 @@ const CATEGORIES = ['All', 'Arch', 'Sedimentary', 'Desert', 'Cliff', 'Outcrop', 
 const QUICK_SEEDS = [4029, 7714, 1984, 9301, 5518, 2607];
 
 const state = {
-  studioMode: window.location.hash === '#rock' ? 'rock' : 'erosion',
+  studioMode: window.location.hash === '#rock' ? 'rock' : window.location.hash === '#world' ? 'world' : 'erosion',
   params: resolveParams({
     archetype: 'desert-arch', seed: 4029, quality: 'medium', decimation: 1.0,
     sdfErosionSource: 'mesh', erosionSdfResolution: 192,
@@ -352,12 +354,87 @@ function updateRockHud(stats) {
 // WORKSPACE SWITCHING (TERRAIN STUDIO <-> 3D ROCK & CLIFF STUDIO)
 // ============================================================================
 
+let worldLayout = null;
+let activeWorldRegion = null;
+let standaloneTerrainDocument = null;
+window.addEventListener('beforeunload', (event) => {
+  if (!activeWorldRegion) return;
+  // The terrain is baked and persisted when the user returns to World Layout.
+  event.preventDefault();
+  event.returnValue = '';
+});
+
+function finishWorldTerrain() {
+  if (!activeWorldRegion || !erosionEngine) return;
+  const region = activeWorldRegion;
+  const doc = captureTerrainDocument(erosionEngine);
+  region.document = doc;
+  region.bake = bakeTerrainDocument(doc, worldLayout.previewSize);
+  region.maskRevision = worldLayout.world.layers.find(layer => layer.id === region.layerId)?.revision;
+  worldLayout.save();
+  activeWorldRegion = null;
+  erosionEngine.pipeline.setWorldBaseMask(null);
+  if (standaloneTerrainDocument) restoreTerrainDocument(erosionEngine, standaloneTerrainDocument);
+  standaloneTerrainDocument = null;
+  if (terrainResolutionSelect) { terrainResolutionSelect.disabled = false; terrainResolutionSelect.title = ''; }
+  erosionLayerStackUI?.renderAll();
+}
+
+function openWorldTerrain(region, mask) {
+  if (!erosionEngine?.pipeline) { window.alert('Terrain Studio is unavailable because the GPU pipeline did not start.'); return; }
+  const layer = worldLayout.world.layers.find(item => item.id === region.layerId);
+  if (region.document && region.document.size !== erosionEngine.gridRes) {
+    window.alert(`This terrain was saved at ${region.document.size}². Set Terrain grid to ${region.document.size}² before editing it. The preview bake is still available.`);
+    return;
+  }
+  const stale = region.document && region.maskRevision !== layer?.revision;
+  if (stale && !window.confirm('The shape mask changed since this terrain was last edited. Rebuilding applies the new mask but resets its live erosion progress. Continue?')) return;
+  if (!window.confirm('Opening a world terrain pauses the current simulation. Terrain, sculpting, snow, chemistry and frost fields are preserved, but airborne particles and moving rock placements restart when switching. Continue?')) return;
+  try {
+    standaloneTerrainDocument = captureTerrainDocument(erosionEngine);
+    erosionEngine.pipeline.setWorldBaseMask(mask);
+    if (region.document) restoreTerrainDocument(erosionEngine, region.document, { restoreTerrain: !stale });
+    else {
+      const pipe = erosionEngine.pipeline;
+      pipe.loadPreset(pipe.activePresetId);
+      const environment = pipe.layers.find(layer => layer.type === 'environment-sun');
+      const base = createStackLayer('base-landform', { name: 'Flat masked base', params: { archetype: 19 } });
+      pipe.layers = environment ? [base, environment] : [base];
+      pipe.projectTitle = region.name;
+      pipe.selectedLayerId = base.id;
+      pipe.evaluateStack({ reseedPlacements: true });
+    }
+    activeWorldRegion = region;
+    if (terrainResolutionSelect) { terrainResolutionSelect.disabled = true; terrainResolutionSelect.title = 'Choose Terrain grid before opening a world terrain. Changing resolution reloads the studio.'; }
+    erosionLayerStackUI?.renderAll();
+    setStudioMode('erosion');
+    statusToast.classList.remove('hidden');
+    statusToast.textContent = `Editing ${region.name} · return to World Layout to bake this terrain`;
+  } catch (err) {
+    console.error('Could not open world terrain', err);
+    erosionEngine.pipeline.setWorldBaseMask(null);
+    if (standaloneTerrainDocument) restoreTerrainDocument(erosionEngine, standaloneTerrainDocument);
+    standaloneTerrainDocument = null; activeWorldRegion = null;
+    window.alert(`Could not open terrain: ${err.message}`);
+  }
+}
+
 function setStudioMode(mode) {
-  state.studioMode = mode === 'rock' ? 'rock' : 'erosion';
+  const nextMode = mode === 'rock' ? 'rock' : mode === 'world' ? 'world' : 'erosion';
+  if (state.studioMode === 'erosion' && nextMode !== 'erosion' && activeWorldRegion) {
+    try { finishWorldTerrain(); }
+    catch (err) { console.error(err); window.alert(`Could not save terrain: ${err.message}`); return; }
+  }
+  state.studioMode = nextMode;
   const isTerrain = state.studioMode === 'erosion';
+  const isRock = state.studioMode === 'rock';
+  const isWorld = state.studioMode === 'world';
+  document.querySelector('.tp-layout').classList.toggle('hidden-panel', isWorld);
+  document.getElementById('world-layout').classList.toggle('hidden-panel', !isWorld);
+  document.getElementById('mode-btn-world').classList.toggle('active', isWorld);
 
   document.getElementById('mode-btn-erosion').classList.toggle('active', isTerrain);
-  document.getElementById('mode-btn-rock').classList.toggle('active', !isTerrain);
+  document.getElementById('mode-btn-rock').classList.toggle('active', isRock);
 
   document.getElementById('left-erosion-panels').classList.toggle('hidden-panel', !isTerrain);
   document.getElementById('right-erosion-panels').classList.toggle('hidden-panel', !isTerrain);
@@ -393,6 +470,13 @@ function setStudioMode(mode) {
       erosionEngine.start();
     }
     window.history.replaceState(null, '', '#terrain');
+  } else if (isWorld) {
+    if (erosionEngine) erosionEngine.stop();
+    if (viewport) viewport.setActive(false);
+    if (curveOverlay && state.curveMode) setCurveMode(false);
+    if (!worldLayout) worldLayout = new WorldLayout(document.getElementById('world-layout'), openWorldTerrain);
+    worldLayout.render();
+    window.history.replaceState(null, '', '#world');
   } else {
     if (erosionEngine) erosionEngine.stop();
     const vp = ensureRockViewport();
@@ -407,6 +491,7 @@ function setStudioMode(mode) {
   }
 }
 
+document.getElementById('mode-btn-world').addEventListener('click', () => setStudioMode('world'));
 document.getElementById('mode-btn-erosion').addEventListener('click', () => setStudioMode('erosion'));
 document.getElementById('mode-btn-rock').addEventListener('click', () => setStudioMode('rock'));
 

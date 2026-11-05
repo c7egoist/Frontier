@@ -315,7 +315,11 @@ void main() {
   float initFine = 0.0;
   float initWater = 0.0;
 
-  if (kind == 1) {
+  if (kind == 19) {
+    // Flat ground for an authored world mask; other generators remain available.
+    outTerrain = vec4(8.0, 0.0, 0.0, 0.0);
+    return;
+  } else if (kind == 1) {
     // 1. Stratified Canyon Plateau & Piedmont Basin:
     // High dissected cuesta plateau on the upper two-thirds with sharp ridged drainage divides,
     // dropping across stepped canyon rims onto a broad low-gradient piedmont basin where braided alluvial fans spread!
