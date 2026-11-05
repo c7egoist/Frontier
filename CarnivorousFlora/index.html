@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Carnivorous Flora · Frontier prototype</title>
+<style>
+  :root { color-scheme: dark; --ink:#f2ecd9; --glow:#ffd9a0; --pink:#e0679f; }
+  html, body { margin:0; height:100%; background:#0b0d09; overflow:hidden; font-family: 'Segoe UI', system-ui, -apple-system, Roboto, sans-serif; color:var(--ink); }
+  canvas#view { position:fixed; inset:0; width:100%; height:100%; display:block; }
+  #ui { position:fixed; inset:0; pointer-events:none; }
+  #ui > * { pointer-events:none; }
+  .hidden { display:none !important; }
+  #vignette-hit { position:fixed; inset:0; opacity:0; background: radial-gradient(ellipse at center, transparent 40%, rgba(170,10,10,.75) 100%); transition: opacity .15s; }
+  #crosshair { position:fixed; left:50%; top:50%; width:4px; height:4px; margin:-2px; border-radius:50%; background:rgba(255,255,255,.7); box-shadow:0 0 6px rgba(0,0,0,.6); }
+  body.observer #crosshair { display:none; }
+  #vitals { position:fixed; left:24px; bottom:22px; width:260px; text-shadow:0 1px 3px #000; }
+  #vitals label { display:block; font-size:10px; letter-spacing:.2em; opacity:.8; margin:4px 0 10px; }
+  .bar { height:8px; background:rgba(0,0,0,.45); border:1px solid rgba(255,255,255,.18); border-radius:5px; overflow:hidden; }
+  .bar span { display:block; height:100%; width:100%; background:#9bd35a; transition: width .15s; }
+  .bar.vis { height:5px; }
+  #toasts { position:fixed; left:50%; top:16%; transform:translateX(-50%); text-align:center; }
+  .toast { font-size:18px; letter-spacing:.14em; text-transform:uppercase; padding:6px 14px; text-shadow:0 2px 8px #000; animation: in .25s ease-out; transition: opacity .6s; }
+  .toast.warn { color:#ff8a6a; } .toast.good { color:#b8f08a; } .toast.out { opacity:0; }
+  @keyframes in { from { opacity:0; transform:translateY(-8px) } }
+  #struggle { position:fixed; left:50%; bottom:18%; transform:translateX(-50%); width:min(460px,80vw); text-align:center; text-shadow:0 2px 8px #000; }
+  #struggle .title { font-size:28px; letter-spacing:.4em; color:#ff7a5a; margin-bottom:10px; animation: pulse .5s infinite alternate; }
+  #struggle .hint { font-size:12px; letter-spacing:.2em; margin-top:8px; opacity:.9; }
+  #struggle .bar.big { height:14px; } #struggle .bar span { background:linear-gradient(90deg,#ff6a3a,#ffd37a); }
+  @keyframes pulse { from { opacity:.65; transform:scale(1) } to { opacity:1; transform:scale(1.05) } }
+  body.observer #vitals { display:none; }
+  #mode-tag { position:fixed; left:50%; bottom:20px; white-space:nowrap; transform:translateX(-50%); font-size:11px; letter-spacing:.2em; opacity:.8; text-shadow:0 1px 4px #000; }
+  #death { position:fixed; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; background:radial-gradient(ellipse at center, rgba(40,0,0,.35), rgba(10,0,0,.88)); pointer-events:auto !important; }
+  #death h1 { font-size:76px; letter-spacing:.3em; margin:0; color:#e84a3a; font-weight:300; text-shadow:0 0 40px #7a0000; }
+  #death p { opacity:.8; letter-spacing:.2em; }
+  button { pointer-events:auto; font:inherit; color:var(--ink); background:rgba(255,217,160,.1); border:1px solid rgba(255,217,160,.55); padding:10px 22px; border-radius:4px; letter-spacing:.12em; cursor:pointer; transition: background .2s; }
+  button:hover:enabled { background:rgba(255,217,160,.28); } button:disabled { opacity:.4; cursor:wait; }
+  button.alt { border-color:rgba(255,255,255,.3); background:rgba(255,255,255,.05); }
+  #start { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background:radial-gradient(ellipse at 50% 30%, rgba(30,40,20,.55), rgba(5,8,4,.93)); pointer-events:auto !important; backdrop-filter: blur(4px); }
+  #start .card { max-width:640px; padding:36px 44px; text-align:center; }
+  .eyebrow { letter-spacing:.5em; font-size:11px; color:var(--pink); }
+  #start h1 { font-size:46px; font-weight:200; letter-spacing:.14em; margin:10px 0 14px; text-transform:uppercase; text-shadow:0 0 30px rgba(255,200,140,.25); }
+  .sub { line-height:1.6; opacity:.85; margin:0 0 22px; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:6px 24px; text-align:left; margin:0 auto 24px; max-width:420px; font-size:14px; opacity:.9; }
+  .grid b { color:var(--glow); display:inline-block; min-width:78px; }
+  .buttons { display:flex; gap:12px; justify-content:center; flex-wrap:wrap; }
+  #loading { margin-top:18px; font-size:12px; letter-spacing:.3em; opacity:.6; }
+  #debug { position:fixed; right:12px; top:12px; width:200px; padding:10px 12px; background:rgba(8,10,6,.55); border:1px solid rgba(255,255,255,.12); border-radius:6px; font-size:12px; pointer-events:auto; backdrop-filter: blur(4px); }
+  #debug label { display:block; margin:5px 0; } #debug button { width:100%; margin-top:6px; padding:5px; font-size:11px; }
+  #debug input[type=range] { width:90px; vertical-align:middle; }
+  #fps { opacity:.7; margin-bottom:4px; font-variant-numeric:tabular-nums; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three/build/three.module.min.js", "three/addons/": "./vendor/three/addons/" } }
+</script>
+</head>
+<body>
+<canvas id="view"></canvas>
+<div id="ui"></div>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
