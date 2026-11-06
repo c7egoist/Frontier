@@ -64,6 +64,8 @@ layout(std140, set = 0, binding = 0) uniform PyroUniformBlock {
     vec4 uSliceAndPipParams;    // x=sliceAxis, y=slicePos, z=showAtlasPip, w=atlasPipField
     vec4 uEmberAndActiveParams; // x=showActiveCells, y=emberSize, z=emberIntensity, w=emberLifetime
     vec4 uEmberExtraParams;     // x=emberAshiness, y=viewportHeightPx, z=nearPlane, w=farPlane
+    vec4 uWorldGridOrigin;      // x=originX, y=originZ, z=priorOriginX, w=priorOriginZ
+    vec4 uWorldGridFlags;       // x=worldGridEnabled, y=cellSizeXZ, z=cellSizeY, w=floorWorldZ
 };
 
 layout(set = 0, binding = 1) uniform sampler2D uTex0;
@@ -76,13 +78,42 @@ float gRes()   { return uGridParams.x; }
 float gTilesX(){ return uGridParams.y; }
 float gTilesY(){ return uGridParams.z; }
 vec2  gAtlasSize() { return vec2(uGridParams.x * uGridParams.y, uGridParams.x * uGridParams.z); }
+bool  isWorldGrid() { return uWorldGridFlags.x > 0.5; }
+ivec2 worldGridOrigin() { return ivec2(int(round(uWorldGridOrigin.x)), int(round(uWorldGridOrigin.y))); }
+ivec2 worldGridPriorOrigin() { return ivec2(int(round(uWorldGridOrigin.z)), int(round(uWorldGridOrigin.w))); }
 
-ivec3 atlasPxToVoxel(ivec2 px) {
+ivec3 wrapAtlasVoxel(ivec3 wc, int N) {
+    int wx = ((wc.x % N) + N) % N;
+    int wy = clamp(wc.y, 0, N - 1);
+    int wz = ((wc.z % N) + N) % N;
+    return ivec3(wx, wy, wz);
+}
+
+ivec3 atlasPxToRawVoxel(ivec2 px) {
     int N  = int(uGridParams.x + 0.5);
     int tx = px.x / N;
     int ty = px.y / N;
     int z  = ty * int(uGridParams.y + 0.5) + tx;
     return ivec3(px.x - tx * N, px.y - ty * N, z);
+}
+
+ivec3 atlasPxToVoxel(ivec2 px) {
+    int N = int(uGridParams.x + 0.5);
+    ivec3 av = atlasPxToRawVoxel(px);
+    if (!isWorldGrid() || av.z >= N) return av;
+    ivec2 org = worldGridOrigin();
+    int lx = (((av.x - org.x) % N) + N) % N;
+    int lz = (((av.z - org.y) % N) + N) % N;
+    return ivec3(lx, av.y, lz);
+}
+
+bool worldGridEnteredFresh(ivec3 localV, int N) {
+    if (!isWorldGrid()) return false;
+    ivec2 org  = worldGridOrigin();
+    ivec2 porg = worldGridPriorOrigin();
+    ivec2 wc   = org + localV.xz;
+    return wc.x < porg.x + 1 || wc.x >= porg.x + N - 1 ||
+           wc.y < porg.y + 1 || wc.y >= porg.y + N - 1;
 }
 
 ivec2 voxelToAtlasPx(ivec3 v) {
@@ -95,11 +126,38 @@ ivec2 voxelToAtlasPx(ivec3 v) {
 }
 
 vec4 fetch3D(sampler2D tex, ivec3 v) {
-    return texelFetch(tex, voxelToAtlasPx(v), 0);
+    int N = int(uGridParams.x + 0.5);
+    ivec3 cl = clamp(v, ivec3(0), ivec3(N - 1));
+    if (!isWorldGrid()) {
+        return texelFetch(tex, voxelToAtlasPx(cl), 0);
+    }
+    ivec2 org = worldGridOrigin();
+    ivec3 av  = wrapAtlasVoxel(ivec3(org.x + cl.x, cl.y, org.y + cl.z), N);
+    return texelFetch(tex, voxelToAtlasPx(av), 0);
 }
 
 vec4 sample3DLinear(sampler2D tex, vec3 uvw) {
-    float N   = uGridParams.x;
+    float N = uGridParams.x;
+    if (isWorldGrid()) {
+        int iN = int(N + 0.5);
+        vec3 localCell = clamp(uvw, vec3(0.5 / N), vec3(1.0 - 0.5 / N)) * N - 0.5;
+        ivec3 l0 = clamp(ivec3(floor(localCell)), ivec3(0), ivec3(iN - 1));
+        ivec3 l1 = min(l0 + ivec3(1), ivec3(iN - 1));
+        vec3 f = clamp(localCell - vec3(l0), vec3(0.0), vec3(1.0));
+        vec4 c000 = fetch3D(tex, ivec3(l0.x, l0.y, l0.z));
+        vec4 c100 = fetch3D(tex, ivec3(l1.x, l0.y, l0.z));
+        vec4 c010 = fetch3D(tex, ivec3(l0.x, l1.y, l0.z));
+        vec4 c110 = fetch3D(tex, ivec3(l1.x, l1.y, l0.z));
+        vec4 c001 = fetch3D(tex, ivec3(l0.x, l0.y, l1.z));
+        vec4 c101 = fetch3D(tex, ivec3(l1.x, l0.y, l1.z));
+        vec4 c011 = fetch3D(tex, ivec3(l0.x, l1.y, l1.z));
+        vec4 c111 = fetch3D(tex, ivec3(l1.x, l1.y, l1.z));
+        vec4 c00 = mix(c000, c100, f.x);
+        vec4 c10 = mix(c010, c110, f.x);
+        vec4 c01 = mix(c001, c101, f.x);
+        vec4 c11 = mix(c011, c111, f.x);
+        return mix(mix(c00, c10, f.y), mix(c01, c11, f.y), f.z);
+    }
     float txN = uGridParams.y;
     vec2 invA = 1.0 / gAtlasSize();
     vec3 c    = clamp(uvw, vec3(0.5 / N), vec3(1.0 - 0.5 / N));
@@ -222,6 +280,10 @@ void main() {
 
     vec4 velData = texelFetch(uTex0, px, 0);
     vec4 thData  = texelFetch(uTex1, px, 0);
+    if (worldGridEnteredFresh(v, N)) {
+        velData = vec4(0.0);
+        thData  = vec4(0.0);
+    }
     vec3 uvw     = (vec3(v) + 0.5) / float(N);
     float dt     = uGridParams.w;
     float time   = uTimeAndFlags.x;
@@ -243,7 +305,7 @@ void main() {
     }
 
     if (uTimeAndFlags.z > 0.5) {
-        vec4 worldSdf = texelFetch(uTex2, px, 0);
+        vec4 worldSdf = texelFetch(uTex2, voxelToAtlasPx(v), 0);
         float voxelSizeM = max(0.02, (uDomainBoxMax.x - uDomainBoxMin.x) / float(N));
         if (worldSdf.a <= 0.35 * voxelSizeM) {
             solid = 1.0;
@@ -347,17 +409,34 @@ void main() {
     int extCount = int(uBlastDirVelAndPad.w + 0.5);
     for (int i = 0; i < 8; ++i) {
         if (i >= extCount) break;
-        vec3 eDiff = uvw - uExtPosRad[i].xyz;
-        float eDist = length(eDiff);
-        float eRad  = max(0.022, uExtPosRad[i].w);
-        if (eDist < eRad * 1.35) {
-            float n = 0.68 + 0.64 * valueNoise3D(uvw * 14.0 + vec3(time * 5.2, float(i) * 3.7, -time * 3.9));
-            float ek = (1.0 - smoothstep(eRad * 0.12, eRad * 1.35, eDist)) * n;
-            float rate = uExtVelRate[i].w * dt * ek;
-            thData.r = min(12.0, thData.r + uExtThermo[i].x * rate * 1.35);
-            thData.g = max(thData.g, uExtThermo[i].y * ek);
-            thData.b = min(12.0, thData.b + uExtThermo[i].z * rate * 1.25);
-            velData.xyz = mix(velData.xyz, uExtVelRate[i].xyz, clamp(rate * 0.65, 0.0, 0.78));
+        if (isWorldGrid()) {
+            vec3 eDiffM = (uvw - uExtPosRad[i].xyz) * boxSpan;
+            float cellM = boxSpan.x / float(N);
+            float eRadM = max(1.35 * cellM, uExtPosRad[i].w * boxSpan.x);
+            float eDistM = length(eDiffM);
+            if (eDistM < eRadM * 1.40) {
+                vec3 worldP = uDomainBoxMin.xyz + uvw * boxSpan;
+                float n = 0.68 + 0.64 * valueNoise3D(worldP * 1.85 + vec3(time * 5.2, float(i) * 3.7, -time * 3.9));
+                float ek = (1.0 - smoothstep(eRadM * 0.12, eRadM * 1.40, eDistM)) * n;
+                float rate = uExtVelRate[i].w * dt * ek;
+                thData.r = min(14.0, thData.r + uExtThermo[i].x * rate * 1.55);
+                thData.g = max(thData.g, uExtThermo[i].y * ek);
+                thData.b = min(14.0, thData.b + uExtThermo[i].z * rate * 1.35);
+                velData.xyz = mix(velData.xyz, uExtVelRate[i].xyz, clamp(rate * 0.65, 0.0, 0.78));
+            }
+        } else {
+            vec3 eDiff = uvw - uExtPosRad[i].xyz;
+            float eDist = length(eDiff);
+            float eRad  = max(0.022, uExtPosRad[i].w);
+            if (eDist < eRad * 1.35) {
+                float n = 0.68 + 0.64 * valueNoise3D(uvw * 14.0 + vec3(time * 5.2, float(i) * 3.7, -time * 3.9));
+                float ek = (1.0 - smoothstep(eRad * 0.12, eRad * 1.35, eDist)) * n;
+                float rate = uExtVelRate[i].w * dt * ek;
+                thData.r = min(12.0, thData.r + uExtThermo[i].x * rate * 1.35);
+                thData.g = max(thData.g, uExtThermo[i].y * ek);
+                thData.b = min(12.0, thData.b + uExtThermo[i].z * rate * 1.25);
+                velData.xyz = mix(velData.xyz, uExtVelRate[i].xyz, clamp(rate * 0.65, 0.0, 0.78));
+            }
         }
     }
 
@@ -391,7 +470,9 @@ void main() {
     vec3 boxSpan  = max(vec3(0.25), uDomainBoxMax.xyz - uDomainBoxMin.xyz);
     vec3 uvw      = (vec3(v) + 0.5) / float(N);
     float dt      = uGridParams.w;
-    vec3 velScale = (dt * 0.34) / max(vec3(0.75), pow(boxSpan, vec3(0.65)));
+    vec3 velScale = isWorldGrid()
+        ? (vec3(dt) / boxSpan)
+        : ((dt * 0.34) / max(vec3(0.75), pow(boxSpan, vec3(0.65))));
 
     // RK2 midpoint backtrace in normalised UVW
     vec3 uvwMid  = clamp(uvw - 0.5 * selfVel.xyz * velScale, vec3(0.5 / float(N)), vec3(1.0 - 0.5 / float(N)));
@@ -449,7 +530,9 @@ void main() {
     vec3 boxSpan  = max(vec3(0.25), uDomainBoxMax.xyz - uDomainBoxMin.xyz);
     vec3 uvw      = (vec3(v) + 0.5) / float(N);
     float dt      = uGridParams.w;
-    vec3 velScale = (dt * 0.34) / max(vec3(0.75), pow(boxSpan, vec3(0.65)));
+    vec3 velScale = isWorldGrid()
+        ? (vec3(dt) / boxSpan)
+        : ((dt * 0.34) / max(vec3(0.75), pow(boxSpan, vec3(0.65))));
 
     // Reverse step (+dt) from forward-advected state
     vec3 uvwFwd  = clamp(uvw + velPrev.xyz * velScale, vec3(0.5 / float(N)), vec3(1.0 - 0.5 / float(N)));
@@ -560,7 +643,10 @@ void main() {
     vec4 th = texelFetch(uTex2, px, 0);
     float activity = clamp(th.r * 0.60 + th.g * 0.80 + th.b * 0.50, 0.0, 1.5);
     if (uAdvectAndForces1.y > 0.001 && activity > 0.01) {
-        vec3 np = uvw * max(0.5, uAdvectAndForces1.z) + vec3(uTimeAndFlags.x * 0.65, -uTimeAndFlags.x * 1.35, uTimeAndFlags.x * 0.45);
+        vec3 baseCoord = isWorldGrid()
+            ? ((uDomainBoxMin.xyz + uvw * (uDomainBoxMax.xyz - uDomainBoxMin.xyz)) * 0.22)
+            : uvw;
+        vec3 np = baseCoord * max(0.5, uAdvectAndForces1.z) + vec3(uTimeAndFlags.x * 0.65, -uTimeAndFlags.x * 1.35, uTimeAndFlags.x * 0.45);
         vec3 turb = vec3(
             fbm3D(np + vec3(13.1, 7.7, 3.3)) - 0.5,
             fbm3D(np + vec3(5.9, 21.3, 17.4)) - 0.5,
@@ -689,7 +775,7 @@ void main() {
     }
 
     vec4 selfVel = texelFetch(uTex2, px, 0);
-    if (selfVel.a > 0.5) {
+    if (selfVel.a > 0.5 || worldGridEnteredFresh(v, N)) {
         outPres = vec4(0.0);
         return;
     }
@@ -979,8 +1065,12 @@ void main() {
 
     int steps = clamp(int(uOpticsParams3.y + 0.5), 24, 192);
     float boxDiag      = length(bSpan);
-    float stepLen      = (boxDiag * 0.82) / float(steps);
-    float opticalScale = 1.75 / max(1.0, boxDiag);
+    float stepLen      = isWorldGrid()
+        ? max(0.08, (tStop - tStart) / float(steps))
+        : ((boxDiag * 0.82) / float(steps));
+    float opticalScale = isWorldGrid()
+        ? 0.42
+        : (1.75 / max(1.0, boxDiag));
     float jitter       = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
     float t            = tStart + jitter * stepLen;
 

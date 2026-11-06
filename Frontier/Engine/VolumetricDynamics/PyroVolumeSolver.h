@@ -115,6 +115,12 @@ class PyroVolumeSolver
     void UploadWorldSdfAtlas(VulkanContext& Ctx, const float* RgbaTexels, size_t FloatCount);
     void DisableWorldSdf() noexcept { WorldSdfEnabled = false; }
 
+    // Continuous toroidal world-grid mode for Proving Grounds driving-course smoke & fire (never attached to vehicle)
+    void SetWorldGridMode(bool Enabled) noexcept;
+    [[nodiscard]] bool IsWorldGridMode() const noexcept { return WorldGridEnabled; }
+    void UpdateWorldGridFocus(float FocusWorldX, float FocusWorldY, const GasSettings& Settings) noexcept;
+    [[nodiscard]] std::array<int32_t, 2> QueryWorldGridOrigin() const noexcept { return { WorldGridOriginX, WorldGridOriginZ }; }
+
     void AssignExternalSources(const PyroExternalSource* Sources, int Count) noexcept;
     void AssignBrush(const std::array<float, 3>& PosUvw, const std::array<float, 3>& VelPyro, bool Active) noexcept;
 
@@ -226,6 +232,12 @@ class PyroVolumeSolver
     VkFramebuffer                  ViewportFboLoad      = VK_NULL_HANDLE;
 
     bool                           WorldSdfEnabled      = false;
+    bool                           WorldGridEnabled     = false;
+    bool                           WorldGridHasFocus    = false;
+    int32_t                        WorldGridOriginX     = 0;
+    int32_t                        WorldGridOriginZ     = 0;
+    int32_t                        WorldGridPriorOriginX= 0;
+    int32_t                        WorldGridPriorOriginZ= 0;
     std::array<PyroExternalSource, 8> ExternalSources{};
     int                            ExternalSourceCount  = 0;
 

@@ -2,20 +2,22 @@
                                                             EVERESTGLFWMAIN.CPP
 ==========================================================================================================================================*/
 // 🧩 GLFW + Vulkan 1.1 interactive front-end for Project Everest:
-//    Hosts the Frontier Editor (Outliner + 3D GPU SDF World + GasCardSurface Inspector), seamless 1:1 C++ FluidEditor
-//    ("Fluid — Frontier Experimental"), Lobby & Proving Grounds navigation, ControlVehicle driving, and 4-wheel tyre smoke & fire.
-//    Zero OpenGL dependencies.
+//    Hosts the authentic Frontier Editor (EverestWorkspace + ControlCentrePanel + Outliner + Inspector + Log Stream + Construct),
+//    the authentic Smoke & fire editor (FluidPlumeEditorWorkspace), 3D GPU SDF Proving Grounds, ControlVehicle driving,
+//    and continuous toroidal world-grid Pacejka tyre smoke & fire. Zero OpenGL dependencies.
 //
 //      EverestWindow [--archive DIR] [--proving-grounds] [--fluid-editor] [--preset ID] [--frames N] [--capture PATH.png]
 
-#include "Frontier/Engine/Editor/FrontierEditorWorkspace.h"
-#include "Frontier/Engine/Input/InputEncoder.h"
+#include "Engine/Interface/FluidPlumeEditor.h"
+#include "Engine/Interface/FluidPlumeEditor/FluidPlumeEditorWorkspace.h"
+#include "Engine/Interface/IconPresentation.h"
+#include "Engine/Interface/InspectorRuntime.h"
+#include "Engine/Lifecycle/ActivationSequence.h"
 #include "Frontier/Engine/Rendering/PngImageCodec.h"
 #include "Frontier/Engine/Rendering/VulkanContext.h"
-#include "Frontier/Engine/Session/LobbySession.h"
-#include "Frontier/Game/CameraController.h"
-#include "Projects/Everest/Source/Navigation/NavigationApp.h"
-#include "Projects/Everest/Source/Session/SessionPolicy.h"
+#include "Frontier/Engine/VolumetricDynamics/FluidPlumeBridge.h"
+#include "Projects/Everest/Source/EverestWorkspace.h"
+#include "UI/Editor/ControlCentrePanel.h"
 
 #ifndef GLFW_INCLUDE_NONE
 #define GLFW_INCLUDE_NONE
@@ -26,7 +28,9 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <string>
@@ -35,22 +39,38 @@
 namespace
 {
 
-std::string LocateFacetArchiveDir(const std::string& OverrideDir)
+std::filesystem::path LocateRepositorySubpath(const std::filesystem::path& Rel)
 {
-    if (!OverrideDir.empty() && std::filesystem::exists(OverrideDir + "/ControlVehicleBody.facet"))
-        return OverrideDir;
+    const std::filesystem::path Candidates[] = {
+        Rel,
+        std::filesystem::path("..") / Rel,
+        std::filesystem::path("../..") / Rel,
+    };
+    for (const auto& P : Candidates)
+    {
+        if (std::filesystem::exists(P))
+            return std::filesystem::absolute(P);
+    }
+    return std::filesystem::absolute(Rel);
+}
+
+std::filesystem::path LocateFacetArchiveDir(const std::string& OverrideDir)
+{
+    if (!OverrideDir.empty() && std::filesystem::exists(std::filesystem::path(OverrideDir) / "ControlVehicleBody.facet"))
+        return std::filesystem::absolute(OverrideDir);
 
     const char* Candidates[] = {
         "Experimental/VehicleHmiPrototype/Archive",
+        "Archive",
         "../Experimental/VehicleHmiPrototype/Archive",
         "../../Experimental/VehicleHmiPrototype/Archive",
     };
     for (const char* Dir : Candidates)
     {
-        if (std::filesystem::exists(std::string(Dir) + "/ControlVehicleBody.facet"))
-            return Dir;
+        if (std::filesystem::exists(std::filesystem::path(Dir) / "ControlVehicleBody.facet"))
+            return std::filesystem::absolute(Dir);
     }
-    return OverrideDir.empty() ? "Experimental/VehicleHmiPrototype/Archive" : OverrideDir;
+    return std::filesystem::absolute("Experimental/VehicleHmiPrototype/Archive");
 }
 
 bool CreateGlfwWindowSurfaceCallback(VkInstance Instance, void* UserData, VkSurfaceKHR& OutSurface)
@@ -68,7 +88,7 @@ int main(int ArgumentCount, char** Arguments)
     std::string ArchiveDirectory = "";
     std::string InitialPresetId  = "";
     std::string CapturePngPath   = "";
-    bool StartInProvingGrounds   = false;
+    bool StartInProvingGrounds   = true;
     bool StartInFluidEditor      = false;
     int MaxFrames                = 0;
 
@@ -84,74 +104,77 @@ int main(int ArgumentCount, char** Arguments)
             MaxFrames = std::atoi(Arguments[++Index]);
         else if (std::strcmp(Arguments[Index], "--proving-grounds") == 0)
             StartInProvingGrounds = true;
+        else if (std::strcmp(Arguments[Index], "--lobby") == 0)
+            StartInProvingGrounds = false;
         else if (std::strcmp(Arguments[Index], "--fluid-editor") == 0)
             StartInFluidEditor = true;
     }
 
-    ArchiveDirectory            = LocateFacetArchiveDir(ArchiveDirectory);
-    const FacetArchiveData Body = LoadFacetArchive(ArchiveDirectory + "/ControlVehicleBody.facet");
-    const FacetArchiveData Tyre = LoadFacetArchive(ArchiveDirectory + "/ControlVehicleTyre.facet");
-    const FacetArchiveData Rim  = LoadFacetArchive(ArchiveDirectory + "/ControlVehicleRim.facet");
-    if (!Body.IsValid() || !Tyre.IsValid() || !Rim.IsValid())
-    {
-        std::fprintf(stderr, "EverestWindow: vehicle facet archives not found or invalid under %s\n", ArchiveDirectory.c_str());
-        return 1;
-    }
-
     if (!glfwInit())
     {
-        std::fprintf(stderr, "EverestWindow: GLFW initialization failed\n");
-        return 1;
-    }
-
-    if (!glfwVulkanSupported())
-    {
-        std::fprintf(stderr, "EverestWindow: GLFW reports Vulkan loader is not available on this host\n");
-        glfwTerminate();
+        std::fprintf(stderr, "EverestWindow: glfwInit failed.\n");
         return 1;
     }
 
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
-
-    GLFWwindow* Window = glfwCreateWindow(1440, 860, "Project Everest — Frontier Editor & Fluid (Vulkan)", nullptr, nullptr);
+    GLFWwindow* Window = glfwCreateWindow(1600, 920, "Frontier Editor — Project Everest (Vulkan 1.1)", nullptr, nullptr);
     if (!Window)
     {
-        std::fprintf(stderr, "EverestWindow: could not create GLFW window\n");
+        std::fprintf(stderr, "EverestWindow: glfwCreateWindow failed.\n");
         glfwTerminate();
         return 1;
     }
-    glfwSetInputMode(Window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
 
-    uint32_t ReqExtCount    = 0u;
-    const char** ReqExtList = glfwGetRequiredInstanceExtensions(&ReqExtCount);
-    int InitialFbW = 1440, InitialFbH = 860;
-    glfwGetFramebufferSize(Window, &InitialFbW, &InitialFbH);
+    uint32_t GlfwExtCount = 0u;
+    const char** GlfwExts = glfwGetRequiredInstanceExtensions(&GlfwExtCount);
+    std::vector<const char*> ReqExts;
+    for (uint32_t Idx = 0u; Idx < GlfwExtCount; ++Idx)
+        ReqExts.push_back(GlfwExts[Idx]);
 
     VulkanContext VkCtx{};
-    std::string VkDiagnostic;
-    if (!VkCtx.InitializeWithSurface(ReqExtList, ReqExtCount, &CreateGlfwWindowSurfaceCallback, Window,
-                                     std::max(1, InitialFbW), std::max(1, InitialFbH), VkDiagnostic))
+    std::string Diag;
+    int InitFbW = 1600, InitFbH = 920;
+    glfwGetFramebufferSize(Window, &InitFbW, &InitFbH);
+    if (!VkCtx.InitializeWithSurface(ReqExts.data(), static_cast<uint32_t>(ReqExts.size()),
+                                     CreateGlfwWindowSurfaceCallback, Window, InitFbW, InitFbH, Diag))
     {
-        std::fprintf(stderr, "EverestWindow: Vulkan initialization failed: %s\n", VkDiagnostic.c_str());
+        std::fprintf(stderr, "EverestWindow: Vulkan 1.1 initialization failed: %s\n", Diag.c_str());
         glfwDestroyWindow(Window);
         glfwTerminate();
         return 1;
     }
+
+    EverestPlumeSceneRuntime PlumeScene{};
+    if (!PlumeScene.Initialize(VkCtx, LocateFacetArchiveDir(ArchiveDirectory), Diag))
+    {
+        std::fprintf(stderr, "EverestWindow: PlumeScene initialization failed: %s\n", Diag.c_str());
+        VkCtx.Shutdown();
+        glfwDestroyWindow(Window);
+        glfwTerminate();
+        return 1;
+    }
+    PlumeScene.ConfigureProvingGroundsMode(StartInProvingGrounds);
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
-    ImGuiIO& Io    = ImGui::GetIO();
+    ImGuiIO& Io = ImGui::GetIO();
     Io.IniFilename = nullptr;
+    Io.ConfigFlags  |= ImGuiConfigFlags_DockingEnable | ImGuiConfigFlags_NavEnableKeyboard;
+    Io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures | ImGuiBackendFlags_RendererHasVtxOffset;
+    ImGui::GetPlatformIO().Renderer_TextureMaxWidth  = 4096;
+    ImGui::GetPlatformIO().Renderer_TextureMaxHeight = 4096;
 
-    FrontierEditorWorkspace Editor{};
-    Editor.LoadDefaultFonts();
+    const std::filesystem::path ContentDir  = LocateRepositorySubpath("EngineContent");
+    const std::filesystem::path EverestRoot = LocateRepositorySubpath("Projects/Everest");
+    IconPresentation::Attach(ContentDir / "Icons");
 
     ImGui_ImplGlfw_InitForVulkan(Window, true);
+
     VulkanImGuiPresenter GuiPresenter{};
-    if (!GuiPresenter.Initialize(VkCtx, VkCtx.QueryTargetSwapchainClear(), VkDiagnostic))
+    if (!GuiPresenter.Initialize(VkCtx, VkCtx.QueryTargetSwapchainClear(), Diag))
     {
-        std::fprintf(stderr, "EverestWindow: Vulkan ImGui presenter failed: %s\n", VkDiagnostic.c_str());
+        std::fprintf(stderr, "EverestWindow: VulkanImGuiPresenter failed: %s\n", Diag.c_str());
+        PlumeScene.Shutdown(VkCtx);
         ImGui_ImplGlfw_Shutdown();
         ImGui::DestroyContext();
         VkCtx.Shutdown();
@@ -160,77 +183,58 @@ int main(int ArgumentCount, char** Arguments)
         return 1;
     }
 
-    if (!Editor.Initialize(VkCtx, &Body, &Tyre, &Rim, VkDiagnostic))
+    const std::filesystem::path PreferencesPath = std::filesystem::temp_directory_path() / "FrontierEverestPersonal.projectspace";
+    ActivationOwnership Ownership(new ControlCentrePanel(ContentDir / "FontArchives", PreferencesPath, EverestRoot / "Everest.projectspace"));
+    auto* Centre = static_cast<ControlCentrePanel*>(Ownership.get());
+    (void)Centre->Initialize();
+    (void)Centre->Activate();
+
+    Everest::EverestWorkspace Workspace(*Centre, EverestRoot);
+    WorldSpace& World = Workspace.QueryWorldSpace();
+
+    RecordToken PlumeToken{};
+    if (SceneRecordBase* ExistingPlume = World.FindFirstByType("FluidPlume"))
+        PlumeToken = ExistingPlume->QueryToken();
+    else
+        PlumeToken = World.ConstructRecord("FluidPlume", "Fluid Plume");
+
+    PlumeScene.ResetWorldSimulation(VkCtx, World);
+
+    Workspace.PresentSceneViewport = [&](const SceneViewportRequest& Req) -> SceneViewportImage {
+        return PlumeScene.PresentSceneViewport(VkCtx, Workspace.QueryWorldSpace(), Req);
+    };
+    Workspace.StepSimulationCallback = [&](WorldSpace& W, double DtSec, const Everest::EverestWorkspace::SimulationStepDriver& Drv) {
+        PlumeScene.StepWorldSimulation(VkCtx, W, DtSec, Drv.Throttle, Drv.Brake, Drv.Steer, Drv.Handbrake, Drv.ResetRequested);
+    };
+    InspectorRuntime::Instance().RegisterPlumeViewportPresenter([&](const PlumeViewportRequest& Req) -> PlumeViewportImage {
+        return PlumeScene.PresentPlumeViewport(VkCtx, Req);
+    });
+
+    if (StartInFluidEditor && PlumeToken.IsValid())
     {
-        std::fprintf(stderr, "EverestWindow: FrontierEditorWorkspace failed: %s\n", VkDiagnostic.c_str());
-        GuiPresenter.Shutdown(VkCtx);
-        ImGui_ImplGlfw_Shutdown();
-        ImGui::DestroyContext();
-        VkCtx.Shutdown();
-        glfwDestroyWindow(Window);
-        glfwTerminate();
-        return 1;
+        Workspace.QueryOutliner().Select(PlumeToken);
+        InspectorRuntime::Instance().RequestEditorOpen(PlumeToken);
+        if (FluidPlumeEditorWorkspace* Ed = FluidPlumeEditor::AccessWorkspace())
+        {
+            Ed->Perform("emitter:fire");
+            if (!InitialPresetId.empty())
+                Ed->Perform("look:" + InitialPresetId);
+        }
+    }
+    else if (PlumeToken.IsValid())
+    {
+        Workspace.QueryOutliner().Select(PlumeToken);
     }
 
-    SessionConfiguration Configuration{};
-    LobbySession Game(Configuration, Everest::ConstructEverestSessionPolicy);
-    Everest::NavigationApp Navigation(Configuration);
-    InputEncoder Encoder;
-    CameraController Camera;
-    static const InputRoutingPolicy FallbackRouting{};
-
-    if (StartInProvingGrounds)
-        Navigation.Navigate(Game, 2u);
-    if (StartInFluidEditor)
-        Editor.OpenFluidEditorForPlume(1u);
-    if (!InitialPresetId.empty() && Editor.AccessPlumes().size() > 1u)
-    {
-        PyroVolumeSolver* TargetSolver = Editor.AccessPlumes()[1].Solver.get();
-        if (TargetSolver)
-            Editor.AccessFluidEditor().LoadPresetByIdentity(VkCtx, *TargetSolver, InitialPresetId.c_str());
-    }
-
-    double PreviousTime = glfwGetTime();
-    float SmoothedFps   = 60.0f;
-    int FrameCounter    = 0;
+    double LastTime  = glfwGetTime();
+    int FrameCounter = 0;
 
     while (!glfwWindowShouldClose(Window))
     {
         glfwPollEvents();
         const double Now = glfwGetTime();
-        const float Step = std::clamp(static_cast<float>(Now - PreviousTime), 1.0f / 240.0f, 1.0f / 20.0f);
-        PreviousTime     = Now;
-        SmoothedFps      = SmoothedFps * 0.90f + (1.0f / std::max(Step, 1.0e-4f)) * 0.10f;
-
-        if (!Editor.IsFluidEditorOpen())
-        {
-            const SessionPolicy* Policy       = Game.QuerySession().QueryPolicy();
-            const InputRoutingPolicy& Routing = Policy ? Policy->QueryInputRoutingPolicy() : FallbackRouting;
-            const InputControlMode Mode       = (Routing.AllowDriving && Editor.WantsVehicleDrivingInput())
-                                              ? InputControlMode::Driving : InputControlMode::Navigation;
-            InputPacket Packet                = Encoder.SampleGlfwWindow(Window, Step, Mode);
-            Packet.LookYawDelta               = 0.0f;
-            Packet.LookPitchDelta             = 0.0f;
-            Packet                            = Routing.Route(Packet);
-            if (!Encoder.WasActionPressed(InputActionResetUnit))
-                Packet.ActionBits &= ~static_cast<uint32_t>(InputActionResetUnit);
-
-            if (Editor.AccessTyreIntake().BurnoutLineLock && Packet.ThrottleAxis > 0.05f)
-            {
-                Packet.BrakeAxis     = 0.85f;
-                Packet.HandbrakeAxis = 1.0f;
-            }
-
-            Game.SubmitLocalInput(Packet);
-            Game.Step(Step);
-
-            const SessionPolicy* UpdatedPolicy       = Game.QuerySession().QueryPolicy();
-            const InputRoutingPolicy& UpdatedRouting = UpdatedPolicy ? UpdatedPolicy->QueryInputRoutingPolicy() : FallbackRouting;
-            InputPacket CameraPacket                 = Packet;
-            if (!Encoder.WasActionPressed(InputActionCycleCamera))
-                CameraPacket.ActionBits &= ~static_cast<uint32_t>(InputActionCycleCamera);
-            Camera.Step(CameraPacket, UpdatedRouting, Game.QueryLocalVehicle());
-        }
+        const double Dt  = std::clamp(Now - LastTime, 1.0 / 240.0, 0.05);
+        LastTime         = Now;
 
         int WinW = 1, WinH = 1, FbW = 1, FbH = 1;
         glfwGetWindowSize(Window, &WinW, &WinH);
@@ -238,24 +242,16 @@ int main(int ArgumentCount, char** Arguments)
         if (FbW <= 0 || FbH <= 0)
             continue;
 
+        Centre->PrepareInterface();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
-        ImGui::SetNextWindowPos({ 0.0f, 0.0f });
-        ImGui::SetNextWindowSize({ static_cast<float>(WinW), static_cast<float>(WinH) });
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, { 0.0f, 0.0f });
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-        ImGui::Begin("##FrontierRoot", nullptr,
-                     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
-                     ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus);
+        (void)Centre->Integrate(Dt);
+        (void)Workspace.ConfigurePlatform();
+        Workspace.ConstructInterface(Dt);
+        Centre->ConstructInterface();
 
-        Editor.TickAndDraw(VkCtx, Game, Navigation, Camera, Step, SmoothedFps,
-                           { 0.0f, 0.0f }, { static_cast<float>(WinW), static_cast<float>(WinH) });
-
-        ImGui::End();
-        ImGui::PopStyleVar(2);
         ImGui::Render();
-
         GuiPresenter.SyncManagedTextures(VkCtx);
 
         VkCommandBuffer SwapCmd = VK_NULL_HANDLE;
@@ -309,7 +305,9 @@ int main(int ArgumentCount, char** Arguments)
     }
 
     VkCtx.WaitIdle();
-    Editor.Shutdown(VkCtx);
+    InspectorRuntime::Instance().RegisterPlumeViewportPresenter({});
+    Ownership.reset();
+    PlumeScene.Shutdown(VkCtx);
     GuiPresenter.Shutdown(VkCtx);
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();

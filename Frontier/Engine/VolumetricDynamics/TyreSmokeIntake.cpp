@@ -477,7 +477,7 @@ int TyreSmokeIntake::ProjectIntoDomain(const std::array<float, 3>& DomainOriginW
             return;
         PyroExternalSource Src{};
         Src.PositionUvw      = Uvw;
-        Src.NormalizedRadius = std::clamp(WorldRadiusMetres / std::max(1.0f, Bounds.EffectiveWidth), 0.025f, 0.16f);
+        Src.NormalizedRadius = std::clamp(WorldRadiusMetres / std::max(1.0f, Bounds.EffectiveWidth), 0.004f, 0.16f);
         Src.VelocityPyro     = WorldVelToPyro(WorldVel);
         Src.SmokeRate        = Smoke;
         Src.Temperature      = Temp;

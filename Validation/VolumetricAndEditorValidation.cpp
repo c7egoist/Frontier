@@ -2,25 +2,32 @@
                                                      VOLUMETRICANDEDITORVALIDATION.CPP
 ==========================================================================================================================================*/
 // 🧩 End-to-end C++ & Headless Vulkan 1.1 validation suite for:
-//    1. 18-preset GasPresetLibrary & 85-field GasSceneCodec (.gasscene.toml round-trip + all Sample scenes).
-//    2. 82-control FluidEditorControls specification parity.
-//    3. 3D WorldSdfScene analytic SDF + ControlVehicle aerodynamic wake velocity field.
-//    4. TyreSmokeIntake Pacejka slip -> 3-node thermal conduction -> rubber smoke -> >= 160 C ignition fire + fire light.
-//    5. Headless Vulkan 1.1 GPU execution of PyroVolumeSolver, WorldSdfScene, FluidEditorWorkspace, and FrontierEditorWorkspace,
-//       plus 1440x860 PNG visual proof capture when invoked with --write-proofs [DIR]. Zero OpenGL / EGL dependencies.
+//    1. 18-preset GasPresetLibrary, 82-parameter GasParameterCatalogue, & .gasscene.toml round-trip + all 8 Sample scenes.
+//    2. 3D WorldSdfScene analytic SDF + ControlVehicle aerodynamic wake velocity field.
+//    3. TyreSmokeIntake Pacejka slip -> 3-node thermal conduction -> rubber smoke -> >= 160 C ignition fire + fire light.
+//    4. Headless Vulkan 1.1 PyroVolumeSolver standalone raymarch + transparent RGBA8 flipbook bake.
+//    5. Continuous Toroidal World-Grid driving-course smoke (WorldGridRelocations > 0 across >20 m travel) +
+//       authentic Frontier Editor (EverestWorkspace + ControlCentrePanel + FluidPlumeEditorWorkspace) with 1920x1080 PNG proofs.
 
-#include "Frontier/Engine/Editor/FrontierEditorWorkspace.h"
+#include "Engine/Interface/FluidPlumeEditor.h"
+#include "Engine/Interface/FluidPlumeEditor/FluidPlumeEditorWorkspace.h"
+#include "Engine/Interface/IconPresentation.h"
+#include "Engine/Interface/InspectorRuntime.h"
+#include "Engine/Lifecycle/ActivationSequence.h"
+#include "Engine/PhysicalDynamics/FluidDynamics/GasParameterCatalogue.h"
 #include "Frontier/Engine/Rendering/PngImageCodec.h"
 #include "Frontier/Engine/Rendering/VulkanContext.h"
 #include "Frontier/Engine/Rendering/WorldSdfScene.h"
 #include "Frontier/Engine/Session/LobbySession.h"
+#include "Frontier/Engine/VolumetricDynamics/FluidPlumeBridge.h"
 #include "Frontier/Engine/VolumetricDynamics/GasPresetLibrary.h"
 #include "Frontier/Engine/VolumetricDynamics/GasSceneCodec.h"
 #include "Frontier/Engine/VolumetricDynamics/PyroVolumeSolver.h"
 #include "Frontier/Engine/VolumetricDynamics/TyreSmokeIntake.h"
-#include "Frontier/Game/CameraController.h"
+#include "Projects/Everest/Source/EverestWorkspace.h"
 #include "Projects/Everest/Source/Navigation/NavigationApp.h"
 #include "Projects/Everest/Source/Session/SessionPolicy.h"
+#include "UI/Editor/ControlCentrePanel.h"
 
 #include <imgui.h>
 
@@ -52,7 +59,22 @@ void Expect(bool Condition, const char* Description)
     }
 }
 
-std::string ReadWholeFile(const std::string& Path)
+std::filesystem::path LocateRepositorySubpath(const std::filesystem::path& Rel)
+{
+    const std::filesystem::path Candidates[] = {
+        Rel,
+        std::filesystem::path("..") / Rel,
+        std::filesystem::path("../..") / Rel,
+    };
+    for (const auto& P : Candidates)
+    {
+        if (std::filesystem::exists(P))
+            return std::filesystem::absolute(P);
+    }
+    return std::filesystem::absolute(Rel);
+}
+
+std::string ReadWholeFile(const std::filesystem::path& Path)
 {
     std::ifstream In(Path, std::ios::binary);
     if (!In)
@@ -117,15 +139,15 @@ int main(int ArgumentCount, char** Arguments)
         }
     }
 
-    std::printf("=== 1. Validating 18 Presets, 82 Controls & .gasscene.toml Codec ===\n");
+    std::printf("=== 1. Validating 18 Presets, GasParameterCatalogue & .gasscene.toml Codec ===\n");
     Expect(GasPresetCount == 18u, "Exact 18 presets ported from Experimental/Fluid/src/presets.js");
-    Expect(FluidEditor::FluidControlCount == 82u, "Exact 82 inspector controls ported from Experimental/Fluid/src/SceneSpecification.js");
+    Expect(FluidDynamics::QueryGasParameterCatalogue().size() == 33u && FluidDynamics::QueryGasPresets().size() == 6u,
+           "Authentic Frontier GasParameterCatalogue (33 entries, 6 looks) populated");
     Expect(FindGasPreset("ue5_pyro_default") != nullptr, "ue5_pyro_default preset registered");
     Expect(FindGasPreset("megaton_open_bounds") != nullptr, "megaton_open_bounds preset registered");
     Expect(FindGasPreset("tyre_burnout") != nullptr, "tyre_burnout preset registered");
     Expect(FindGasPreset("low_gpu_performance") != nullptr, "low_gpu_performance preset registered");
 
-    // Round-trip every preset through .gasscene.toml
     bool AllPresetsRoundTrip = true;
     const GasPreset* PresetTable = GasPresetLibrary();
     for (uint32_t PIdx = 0u; PIdx < GasPresetCount; ++PIdx)
@@ -147,7 +169,6 @@ int main(int ArgumentCount, char** Arguments)
     }
     Expect(AllPresetsRoundTrip, "All 18 GasPresets round-trip losslessly through .gasscene.toml");
 
-    // Parse shipped Sample scenes
     const char* SampleFiles[8] = {
         "Experimental/Fluid/Samples/camp_fire_steady.gasscene.toml",
         "Experimental/Fluid/Samples/cold_dust_fall.gasscene.toml",
@@ -161,7 +182,7 @@ int main(int ArgumentCount, char** Arguments)
     bool AllSamplesParsed = true;
     for (const char* SamplePath : SampleFiles)
     {
-        const std::string Text = ReadWholeFile(SamplePath);
+        const std::string Text = ReadWholeFile(LocateRepositorySubpath(SamplePath));
         GasScene SampleDoc{};
         if (Text.empty() || !ReadGasScene(Text, SampleDoc).Accepted)
             AllSamplesParsed = false;
@@ -186,7 +207,7 @@ int main(int ArgumentCount, char** Arguments)
     SessionConfiguration Config{};
     LobbySession BurnoutSession(Config, Everest::ConstructEverestSessionPolicy);
     Everest::NavigationApp BurnoutNav(Config);
-    BurnoutNav.Navigate(BurnoutSession, 2u); // Proving Grounds!
+    BurnoutNav.Navigate(BurnoutSession, 2u); // Proving Grounds
 
     DeployableUnit* Car = BurnoutSession.QueryLocalVehicle();
     Expect(Car != nullptr, "ControlVehicle deployed on Proving Grounds");
@@ -203,12 +224,11 @@ int main(int ArgumentCount, char** Arguments)
     BurnoutBox.EffectiveHeight = 4.2f;
     PyroExternalSource WheelSrcs[8]{};
 
-    // 960 ticks = 16.0 s standing burnout at 60 Hz (heats rear tread > 180 C for > 1.0 s -> ignites!)
     for (int Tick = 0; Tick < 960 && Car; ++Tick)
     {
         InputPacket Pkt{};
         Pkt.ThrottleAxis = 1.0f;
-        Pkt.BrakeAxis    = 1.0f; // standing burnout line-lock!
+        Pkt.BrakeAxis    = 1.0f;
         Pkt.SteerAxis    = 0.18f;
         BurnoutSession.SubmitLocalInput(Pkt);
         BurnoutSession.Step(1.0f / 60.0f);
@@ -225,7 +245,7 @@ int main(int ArgumentCount, char** Arguments)
     Expect(SawTyreSmoke, "Standing burnout generates active Pacejka tyre smoke sources");
     Expect(SawTyreFire,  "Sustained >= 160 C tyre overheat ignites rubber fire + emits DynamicFireLight");
 
-    std::printf("\n=== 4. Validating Headless Vulkan 1.1 Solver, SDF World & Editor Workspaces ===\n");
+    std::printf("\n=== 4. Validating Headless Vulkan 1.1 Solver, Toroidal World-Grid & Authentic Frontier Editor ===\n");
     VulkanContext VkCtx{};
     std::string VkDiag;
     if (!VkCtx.InitializeHeadless(VkDiag))
@@ -243,10 +263,10 @@ int main(int ArgumentCount, char** Arguments)
 
     // Standalone PyroVolumeSolver + 2x2 Flipbook bake check
     {
-        GasSettings StandaloneSettings       = ConstructPresetSettings("ue5_pyro_default");
-        StandaloneSettings.LatticeResolution = 32;
-        StandaloneSettings.PressureIterations= 12;
-        StandaloneSettings.RaymarchSteps     = 56;
+        GasSettings StandaloneSettings        = ConstructPresetSettings("ue5_pyro_default");
+        StandaloneSettings.LatticeResolution  = 32;
+        StandaloneSettings.PressureIterations = 12;
+        StandaloneSettings.RaymarchSteps      = 56;
         PyroVolumeSolver StandaloneSolver{};
         Expect(StandaloneSolver.Initialize(VkCtx, StandaloneSettings, VkDiag), "PyroVolumeSolver initializes all 15 Vulkan 1.1 SPIR-V pipelines");
 
@@ -270,180 +290,223 @@ int main(int ArgumentCount, char** Arguments)
         StandaloneSolver.Shutdown(VkCtx);
     }
 
-    // Full ImGui + FrontierEditorWorkspace + FluidEditorWorkspace validation & 1440x860 visual proof capture
-    const FacetArchiveData Body = LoadFacetArchive("Experimental/VehicleHmiPrototype/Archive/ControlVehicleBody.facet");
-    const FacetArchiveData Tyre = LoadFacetArchive("Experimental/VehicleHmiPrototype/Archive/ControlVehicleTyre.facet");
-    const FacetArchiveData Rim  = LoadFacetArchive("Experimental/VehicleHmiPrototype/Archive/ControlVehicleRim.facet");
-    Expect(Body.IsValid() && Tyre.IsValid() && Rim.IsValid(), "ControlVehicle .facet archives loaded");
+    // Authentic Frontier UI + EverestWorkspace + FluidPlumeEditorWorkspace + Toroidal World-Grid validation
+    const std::filesystem::path ContentDir  = LocateRepositorySubpath("EngineContent");
+    const std::filesystem::path EverestRoot = LocateRepositorySubpath("Projects/Everest");
+    const std::filesystem::path ArchiveDir  = LocateRepositorySubpath("Experimental/VehicleHmiPrototype/Archive");
+
+    Expect(std::filesystem::exists(ContentDir / "FontArchives" / "DMSans" / "DMSans-Regular.ttf"), "OFL DM Sans fonts staged in EngineContent/FontArchives");
+    Expect(std::filesystem::exists(ContentDir / "Icons"), "SVG Icon archives staged in EngineContent/Icons");
+
+    EverestPlumeSceneRuntime PlumeScene{};
+    Expect(PlumeScene.Initialize(VkCtx, ArchiveDir, VkDiag),
+           "EverestPlumeSceneRuntime initializes WorldSdfScene + World-Grid PyroSolver + Editor PyroSolver");
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& Io    = ImGui::GetIO();
     Io.IniFilename = nullptr;
+    Io.DeltaTime   = 1.0f / 30.0f;
+    Io.ConfigFlags  |= ImGuiConfigFlags_DockingEnable | ImGuiConfigFlags_NavEnableKeyboard;
+    Io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures | ImGuiBackendFlags_RendererHasVtxOffset;
+    ImGui::GetPlatformIO().Renderer_TextureMaxWidth  = 4096;
+    ImGui::GetPlatformIO().Renderer_TextureMaxHeight = 4096;
 
-    const int WinW = 1440;
-    const int WinH = 860;
+    IconPresentation::Attach(ContentDir / "Icons");
+
+    const int WinW = WriteProofs ? 1920 : 800;
+    const int WinH = WriteProofs ? 1080 : 480;
     Io.DisplaySize = { static_cast<float>(WinW), static_cast<float>(WinH) };
-
-    FrontierEditorWorkspace Editor{};
-    Editor.LoadDefaultFonts();
 
     VulkanImGuiPresenter GuiPresenter{};
     Expect(GuiPresenter.Initialize(VkCtx, VkCtx.QueryTargetSingleRgba8Clear(), VkDiag),
-           "VulkanImGuiPresenter initializes SPIR-V UI pipeline + managed font textures");
-    Expect(Editor.Initialize(VkCtx, &Body, &Tyre, &Rim, VkDiag),
-           "FrontierEditorWorkspace initializes WorldSdfScene + World Pyro plumes on Vulkan 1.1");
+           "VulkanImGuiPresenter initializes SPIR-V UI pipeline + multi-texture cache");
 
     VulkanImageTarget ProofColor{};
     Expect(VkCtx.CreateImageTarget(WinW, WinH, VK_FORMAT_R8G8B8A8_UNORM,
                                    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, false, ProofColor, VkDiag),
-           "Allocated 1440x860 RGBA8 offscreen Vulkan UI target");
+           "Allocated 1920x1080 RGBA8 offscreen Vulkan UI target");
     const VulkanImageTarget* ProofAtt[1] = { &ProofColor };
     VkFramebuffer ProofFbo = VkCtx.CreateFramebuffer(VkCtx.QueryTargetSingleRgba8Clear(), ProofAtt, 1u, WinW, WinH);
 
-    LobbySession LiveGame(Config, Everest::ConstructEverestSessionPolicy);
-    Everest::NavigationApp LiveNav(Config);
-    CameraController LiveCam{};
-    LiveNav.Navigate(LiveGame, 2u); // Proving Grounds!
+    const std::filesystem::path PrefsPath = std::filesystem::temp_directory_path() / "FrontierValidationPersonal.projectspace";
+    std::filesystem::remove(PrefsPath);
+    ActivationOwnership Ownership(new ControlCentrePanel(ContentDir / "FontArchives", PrefsPath, EverestRoot / "Everest.projectspace"));
+    auto* Centre = static_cast<ControlCentrePanel*>(Ownership.get());
+    Expect(Centre->Initialize() && Centre->Activate(), "ControlCentrePanel initializes TypefaceRegistry + theme + dockspace");
 
-    auto RunEditorFrame = [&](float Dt, std::vector<uint8_t>* OutCapture) -> bool
     {
-        Io.DeltaTime = Dt;
-        ImGui::NewFrame();
-        ImGui::SetNextWindowPos({ 0.0f, 0.0f });
-        ImGui::SetNextWindowSize({ static_cast<float>(WinW), static_cast<float>(WinH) });
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, { 0.0f, 0.0f });
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-        ImGui::Begin("##ValidationRoot", nullptr,
-                     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
-                     ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus);
+        Everest::EverestWorkspace Workspace(*Centre, EverestRoot);
 
-        Editor.TickAndDraw(VkCtx, LiveGame, LiveNav, LiveCam, Dt, 60.0f,
-                           { 0.0f, 0.0f }, { static_cast<float>(WinW), static_cast<float>(WinH) });
+        WorldSpace& World = Workspace.QueryWorldSpace();
+        RecordToken PlumeToken{};
+        if (SceneRecordBase* ExistingPlume = World.FindFirstByType("FluidPlume"))
+            PlumeToken = ExistingPlume->QueryToken();
+        else
+            PlumeToken = World.ConstructRecord("FluidPlume", "Smoke and fire");
+        Expect(PlumeToken.IsValid(), "FluidPlume scene record present in Everest WorldSpace");
 
-        ImGui::End();
-        ImGui::PopStyleVar(2);
-        ImGui::Render();
+        PlumeScene.ResetWorldSimulation(VkCtx, World);
 
-        if (OutCapture)
-            return RenderImGuiFrameOffscreen(VkCtx, GuiPresenter, ProofColor, ProofFbo, WinW, WinH, *OutCapture);
-        return true;
-    };
+        Workspace.PresentSceneViewport = [&](const SceneViewportRequest& Req) -> SceneViewportImage {
+            return PlumeScene.PresentSceneViewport(VkCtx, Workspace.QueryWorldSpace(), Req);
+        };
+        Workspace.StepSimulationCallback = [&](WorldSpace& W, double DtSec, const Everest::EverestWorkspace::SimulationStepDriver& Drv) {
+            PlumeScene.StepWorldSimulation(VkCtx, W, DtSec, Drv.Throttle, Drv.Brake, Drv.Steer, Drv.Handbrake, Drv.ResetRequested);
+        };
+        InspectorRuntime::Instance().RegisterPlumeViewportPresenter([&](const PlumeViewportRequest& Req) -> PlumeViewportImage {
+            return PlumeScene.PresentPlumeViewport(VkCtx, Req);
+        });
 
-    if (WriteProofs)
-        std::filesystem::create_directories(ProofDir);
+        auto StepUiFrame = [&](double Dt, std::vector<uint8_t>* OutCapture) -> bool {
+            Io.DisplaySize = { static_cast<float>(WinW), static_cast<float>(WinH) };
+            Io.DeltaTime   = static_cast<float>(Dt);
+            Centre->PrepareInterface();
+            ImGui::NewFrame();
+            (void)Centre->Integrate(Dt);
+            (void)Workspace.ConfigurePlatform();
+            Workspace.ConstructInterface(Dt);
+            Centre->ConstructInterface();
+            ImGui::Render();
+            if (OutCapture)
+                return RenderImGuiFrameOffscreen(VkCtx, GuiPresenter, ProofColor, ProofFbo, WinW, WinH, *OutCapture);
+            GuiPresenter.SyncManagedTextures(VkCtx);
+            return true;
+        };
 
-    // Proof 1: 1:1 FluidEditorWorkspace running ue5_pyro_default plume
-    Editor.OpenFluidEditorForPlume(1u);
-    Editor.AccessFluidEditor().LoadPresetByIdentity(VkCtx, *Editor.AccessPlumes()[1].Solver, "ue5_pyro_default");
-    Editor.AccessFluidEditor().AccessActiveSettings().LatticeResolution = 48;
-    Editor.AccessPlumes()[1].Solver->EnsureLatticeResolution(VkCtx, 48);
-    Editor.AccessPlumes()[1].Solver->TriggerBurstSequence(Editor.AccessFluidEditor().QueryActiveSettings(), "single");
-    for (int Warm = 0; Warm < 40; ++Warm)
-        Editor.AccessPlumes()[1].Solver->AdvanceSimulation(VkCtx, Editor.AccessFluidEditor().AccessActiveSettings(), 1.0f / 32.0f);
-    std::vector<uint8_t> Frame1;
-    Expect(RunEditorFrame(1.0f / 60.0f, &Frame1) && HasNonTrivialColorVariance(Frame1),
-           "FluidEditorWorkspace (ue5_pyro_default) renders full UI + Vulkan 3D plume");
-    if (WriteProofs)
-        WriteRgbaPngFile(ProofDir + "/01_fluid_editor_pyro_plume.png", Frame1.data(), WinW, WinH);
+        if (WriteProofs)
+            std::filesystem::create_directories(ProofDir);
 
-    // Proof 2: FluidEditorWorkspace running megaton_open_bounds mushroom cloud + shrapnel detonation
-    Editor.AccessFluidEditor().LoadPresetByIdentity(VkCtx, *Editor.AccessPlumes()[1].Solver, "megaton_open_bounds");
-    Editor.AccessFluidEditor().AccessActiveSettings().LatticeResolution = 48;
-    Editor.AccessPlumes()[1].Solver->EnsureLatticeResolution(VkCtx, 48);
-    Editor.AccessPlumes()[1].Solver->TriggerBurstSequence(Editor.AccessFluidEditor().QueryActiveSettings(), "mushroom");
-    for (int Warm = 0; Warm < 36; ++Warm)
-        Editor.AccessPlumes()[1].Solver->AdvanceSimulation(VkCtx, Editor.AccessFluidEditor().AccessActiveSettings(), 1.0f / 32.0f);
-    std::vector<uint8_t> Frame2;
-    Expect(RunEditorFrame(1.0f / 60.0f, &Frame2) && HasNonTrivialColorVariance(Frame2),
-           "FluidEditorWorkspace (megaton_open_bounds) renders mushroom cloud + shrapnel trails");
-    if (WriteProofs)
-        WriteRgbaPngFile(ProofDir + "/02_fluid_editor_nuclear_blast.png", Frame2.data(), WinW, WinH);
+        // Warm dockspace layout for 3 frames
+        for (int Warm = 0; Warm < 3; ++Warm)
+            StepUiFrame(1.0 / 30.0, nullptr);
 
-    // Proof 3: Return to FrontierEditorWorkspace — 3D SDF Proving Grounds + ControlVehicle + Camp fire + GasCardSurface
-    Editor.CloseFluidEditor();
-    Editor.AccessFluidEditor().LoadPresetByIdentity(VkCtx, *Editor.AccessPlumes()[1].Solver, "camp_fire");
-    for (WorldPlumeInstance& Plume : Editor.AccessPlumes())
-    {
-        Plume.Settings.LatticeResolution = 48;
-        if (Plume.Solver)
-            Plume.Solver->EnsureLatticeResolution(VkCtx, 48);
-    }
-    Editor.SelectPlume(1u); // Camp fire selected -> shows GasCardSurface + "Open FluidEditor" button!
-    {
-        InputPacket CamSetup{};
-        CamSetup.LookYawDelta   = -0.55f;
-        CamSetup.LookPitchDelta =  0.12f;
-        const InputRoutingPolicy Pol{};
-        LiveCam.Step(CamSetup, Pol, LiveGame.QueryLocalVehicle());
-    }
-    for (int Warm = 0; Warm < 32; ++Warm)
-    {
-        for (size_t Idx = 1u; Idx < Editor.AccessPlumes().size(); ++Idx)
+        // Proof 1: Authentic FluidPlumeEditor ("Smoke & fire") with Pyro fire plume + Fire inspector page
+        Workspace.QueryOutliner().Select(PlumeToken);
+        Expect(InspectorRuntime::Instance().RequestEditorOpen(PlumeToken), "FluidPlumeEditor opens via InspectorRuntime::RequestEditorOpen");
+        StepUiFrame(1.0 / 30.0, nullptr);
+        if (FluidPlumeEditorWorkspace* Ed = FluidPlumeEditor::AccessWorkspace())
         {
-            if (Editor.AccessPlumes()[Idx].Visible && Editor.AccessPlumes()[Idx].Solver)
-                Editor.AccessPlumes()[Idx].Solver->AdvanceSimulation(VkCtx, Editor.AccessPlumes()[Idx].Settings, 1.0f / 30.0f);
+            Ed->Perform("emitter:fire");
+            Ed->Perform("look:inferno");
+            Ed->Perform("select:Fire");
         }
-    }
-    std::vector<uint8_t> Frame3;
-    Expect(RunEditorFrame(1.0f / 60.0f, &Frame3) && HasNonTrivialColorVariance(Frame3),
-           "FrontierEditorWorkspace renders 3D SDF Proving Grounds + ControlVehicle + Volumetric plumes");
-    if (WriteProofs)
-        WriteRgbaPngFile(ProofDir + "/03_frontier_editor_world_sdf.png", Frame3.data(), WinW, WinH);
-
-    // Proof 4: ControlVehicle standing burnout -> dense tyre smoke + overheated rubber fire + dynamic fire lighting!
-    Editor.SelectPlume(0u); // Select Tyre smoke & fire domain!
-    Editor.SetBurnoutLineLock(true);
-    if (DeployableUnit* LiveCar = LiveGame.QueryLocalVehicle())
-    {
-        for (int Warm = 0; Warm < 940; ++Warm)
+        StepUiFrame(1.0 / 30.0, nullptr);
         {
-            InputPacket BurnPkt{};
-            BurnPkt.ThrottleAxis  = 1.0f;
-            BurnPkt.BrakeAxis     = 0.85f;
-            BurnPkt.HandbrakeAxis = 1.0f;
-            BurnPkt.SteerAxis     = 0.22f;
-            LiveGame.SubmitLocalInput(BurnPkt);
-            LiveGame.Step(1.0f / 60.0f);
-            const auto P = LiveCar->QueryPositionMetres();
-            Editor.AccessTyreIntake().Advance(*LiveCar, 1.0f / 60.0f, WorldSdfScene::ResolveCourseHeight(P[0], P[1], true));
+            GasSettings WarmFire       = ConstructPresetSettings("ue5_pyro_default");
+            WarmFire.LatticeResolution = PlumeScene.AccessEditorSolver().QueryLatticeResolution();
+            PlumeScene.AccessEditorSolver().TriggerBurstSequence(WarmFire, "single");
+            const int WarmSteps = WriteProofs ? 28 : 8;
+            for (int Warm = 0; Warm < WarmSteps; ++Warm)
+                PlumeScene.AccessEditorSolver().AdvanceSimulation(VkCtx, WarmFire, 1.0f / 30.0f);
+        }
+        StepUiFrame(1.0 / 30.0, nullptr);
+        std::vector<uint8_t> Frame1;
+        Expect(StepUiFrame(1.0 / 30.0, &Frame1) && HasNonTrivialColorVariance(Frame1),
+               "Authentic FluidPlumeEditorWorkspace (Smoke & fire) renders UI + Vulkan 3D Pyro plume");
+        if (WriteProofs)
+            WriteRgbaPngFile(ProofDir + "/01_fluid_editor_pyro_plume.png", Frame1.data(), WinW, WinH);
 
-            // Inject active tyre smoke & fire directly into Plumes[0] for the final 85 warmup steps!
-            if (Warm >= 855 && !Editor.AccessPlumes().empty() && Editor.AccessPlumes()[0].Solver)
+        // Proof 2: Authentic FluidPlumeEditor Libraries sheet + Thick burnout / mushroom detonation
+        if (FluidPlumeEditorWorkspace* Ed = FluidPlumeEditor::AccessWorkspace())
+        {
+            Ed->Perform("emitter:fire");
+            Ed->Perform("look:thick-burnout");
+            Ed->Perform("library:on");
+            Ed->Perform("library-tab:looks");
+        }
+        {
+            GasSettings WarmBlast       = ConstructPresetSettings("megaton_open_bounds");
+            WarmBlast.LatticeResolution = PlumeScene.AccessEditorSolver().QueryLatticeResolution();
+            PlumeScene.AccessEditorSolver().TriggerBurstSequence(WarmBlast, "mushroom");
+            const int WarmSteps = WriteProofs ? 24 : 8;
+            for (int Warm = 0; Warm < WarmSteps; ++Warm)
+                PlumeScene.AccessEditorSolver().AdvanceSimulation(VkCtx, WarmBlast, 1.0f / 30.0f);
+        }
+        StepUiFrame(1.0 / 30.0, nullptr);
+        std::vector<uint8_t> Frame2;
+        Expect(StepUiFrame(1.0 / 30.0, &Frame2) && HasNonTrivialColorVariance(Frame2),
+               "Authentic FluidPlumeEditorWorkspace renders Libraries sheet + live Vulkan plume");
+        if (WriteProofs)
+            WriteRgbaPngFile(ProofDir + "/02_fluid_editor_nuclear_blast.png", Frame2.data(), WinW, WinH);
+
+        // Proof 3: Authentic EverestWorkspace (Outliner + FluidPlumeInspector + Log Stream + 3D SDF Proving Grounds)
+        InspectorRuntime::Instance().CloseActiveEditor();
+        Workspace.QueryOutliner().Select(PlumeToken);
+        // Aim scene viewport camera nicely at the Proving Grounds pad + ControlVehicle
+        Workspace.AccessViewportFlight().Position  = { -13.5, -9.5, 4.4 };
+        Workspace.AccessViewportFlight().Heading   =  33.0;
+        Workspace.AccessViewportFlight().Elevation = -14.5;
+        StepUiFrame(1.0 / 30.0, nullptr);
+        std::vector<uint8_t> Frame3;
+        Expect(StepUiFrame(1.0 / 30.0, &Frame3) && HasNonTrivialColorVariance(Frame3),
+               "Authentic EverestWorkspace renders Outliner + FluidPlumeInspector + 3D SDF Proving Grounds");
+        if (WriteProofs)
+            WriteRgbaPngFile(ProofDir + "/03_frontier_editor_world_sdf.png", Frame3.data(), WinW, WinH);
+
+        // Proof 4: Continuous Toroidal World-Grid Burnout & Drift across the Proving Grounds!
+        PlumeScene.ResetWorldSimulation(VkCtx, World);
+        if (SceneRecordBase* VehRec = World.FindFirstByType("Vehicle"))
+            Workspace.QueryOutliner().Select(VehRec->QueryToken());
+
+        // Phase A: Standing burnout to heat rear tyres past ignition (>160 C) + build initial plume
+        const int BurnoutWorldStart = WriteProofs ? 810 : 832;
+        for (int Step = 0; Step < 840; ++Step)
+        {
+            if (Step < BurnoutWorldStart)
             {
-                WorldPlumeInstance& TyrePlume = Editor.AccessPlumes()[0];
-                TyrePlume.OriginWorld = { P[0], P[1], WorldSdfScene::ResolveCourseHeight(P[0], P[1], true) };
-                PyroExternalSource WheelSources[8]{};
-                std::vector<DynamicFireLight> DummyLights;
-                const PyroBoundsBox B = TyrePlume.Solver->ComputeBoundsBox(TyrePlume.Settings);
-                const int SrcCnt = Editor.AccessTyreIntake().ProjectIntoDomain(TyrePlume.OriginWorld, B, WheelSources, 8, DummyLights);
-                TyrePlume.Solver->AssignExternalSources(WheelSources, SrcCnt);
-                Editor.AccessTyreIntake().AdaptTyreDomainAppearance(TyrePlume.Settings);
-                TyrePlume.Solver->AdvanceSimulation(VkCtx, TyrePlume.Settings, 1.0f / 30.0f);
+                InputPacket Pkt{};
+                Pkt.ThrottleAxis  = 1.0f;
+                Pkt.BrakeAxis     = 0.85f;
+                Pkt.HandbrakeAxis = 1.0f;
+                Pkt.SteerAxis     = 0.16f;
+                PlumeScene.AccessTyreIntake().BurnoutLineLock = true;
+                PlumeScene.AccessVehicleUnit().ApplyInputPacket(Pkt, 1.0f / 60.0f);
+                const auto Pos = PlumeScene.AccessVehicleUnit().QueryPositionMetres();
+                PlumeScene.AccessTyreIntake().Advance(PlumeScene.AccessVehicleUnit(), 1.0f / 60.0f,
+                                                      WorldSdfScene::ResolveCourseHeight(Pos[0], Pos[1], true));
+            }
+            else
+            {
+                PlumeScene.StepWorldSimulation(VkCtx, World, 1.0 / 35.0, 1.0f, 0.85f, 0.16f, true, false);
             }
         }
-    }
-    {
-        InputPacket BurnPkt{};
-        BurnPkt.ThrottleAxis  = 1.0f;
-        BurnPkt.BrakeAxis     = 0.85f;
-        BurnPkt.HandbrakeAxis = 1.0f;
-        BurnPkt.SteerAxis     = 0.22f;
-        LiveGame.SubmitLocalInput(BurnPkt);
-        LiveGame.Step(1.0f / 60.0f);
-    }
-    std::vector<uint8_t> Frame4;
-    Expect(RunEditorFrame(1.0f / 60.0f, &Frame4) && HasNonTrivialColorVariance(Frame4),
-           "ControlVehicle burnout renders 4-wheel tyre smoke + ignited rubber fire + SDF ground glow");
-    if (WriteProofs)
-    {
-        WriteRgbaPngFile(ProofDir + "/04_vehicle_burnout_smoke_and_fire.png", Frame4.data(), WinW, WinH);
-        std::printf("  [INFO] Wrote 4 Vulkan PNG proofs to %s\n", ProofDir.c_str());
+        // Phase B: Release line-lock & power-drift >10 metres across the Proving Grounds so the toroidal world-grid relocates!
+        const auto StartDrivePos = PlumeScene.AccessVehicleUnit().QueryPositionMetres();
+        const int DriveTicks = WriteProofs ? 60 : 28;
+        for (int Step = 0; Step < DriveTicks; ++Step)
+        {
+            // Full throttle, zero brake/handbrake so the vehicle accelerates across the course while spinning hot rear tyres!
+            PlumeScene.StepWorldSimulation(VkCtx, World, 1.0 / 25.0, 1.0f, 0.0f, 0.16f, false, false);
+        }
+        const auto EndDrivePos = PlumeScene.AccessVehicleUnit().QueryPositionMetres();
+        const float DrivenDistMetres = std::hypot(EndDrivePos[0] - StartDrivePos[0], EndDrivePos[1] - StartDrivePos[1]);
+        std::printf("  [INFO] Toroidal World-Grid drive distance = %.2f m, voxel relocations = %llu\n",
+                    DrivenDistMetres, static_cast<unsigned long long>(PlumeScene.QueryWorldGridRelocations()));
+        Expect(DrivenDistMetres > 4.0f && PlumeScene.QueryWorldGridRelocations() > 0u,
+               "Toroidal World-Grid relocates smoothly across Proving Grounds without resetting smoke trail");
+
+        // Position chase/quarter camera looking across the moving car & its continuous world-grid smoke/fire trail
+        Workspace.AccessViewportFlight().Position  = { EndDrivePos[0] - 9.0, EndDrivePos[1] - 9.2, 4.2 };
+        Workspace.AccessViewportFlight().Heading   =  46.0;
+        Workspace.AccessViewportFlight().Elevation = -14.0;
+        StepUiFrame(1.0 / 30.0, nullptr);
+        std::vector<uint8_t> Frame4;
+        Expect(StepUiFrame(1.0 / 30.0, &Frame4) && HasNonTrivialColorVariance(Frame4),
+               "EverestWorkspace renders continuous World-Grid tyre smoke & ignited rubber fire behind moving ControlVehicle");
+        if (WriteProofs)
+        {
+            WriteRgbaPngFile(ProofDir + "/04_vehicle_burnout_smoke_and_fire.png", Frame4.data(), WinW, WinH);
+            std::printf("  [INFO] Wrote 4 1920x1080 Vulkan PNG proofs to %s\n", ProofDir.c_str());
+        }
+
+        InspectorRuntime::Instance().RegisterPlumeViewportPresenter({});
     }
 
     VkCtx.DestroyFramebuffer(ProofFbo);
     VkCtx.DestroyImageTarget(ProofColor);
-    Editor.Shutdown(VkCtx);
+    Ownership.reset();
+    PlumeScene.Shutdown(VkCtx);
     GuiPresenter.Shutdown(VkCtx);
     ImGui::DestroyContext();
     VkCtx.Shutdown();

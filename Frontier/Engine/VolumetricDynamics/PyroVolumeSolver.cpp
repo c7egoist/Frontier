@@ -57,8 +57,10 @@ struct alignas(16) PyroUniformBlock
     float SliceAndPipParams[4];    // x=sliceAxis, y=slicePos, z=showAtlasPip, w=atlasPipField
     float EmberAndActiveParams[4]; // x=showActiveCells, y=emberSize, z=emberIntensity, w=emberLifetime
     float EmberExtraParams[4];     // x=emberAshiness, y=viewportHeightPx, z=nearPlane, w=farPlane
+    float WorldGridOrigin[4];      // x=originX, y=originZ, z=priorOriginX, w=priorOriginZ
+    float WorldGridFlags[4];       // x=worldGridEnabled, y=cellSizeXZ, z=cellSizeY, w=floorWorldZ
 };
-static_assert(sizeof(PyroUniformBlock) == 68u * 16u, "PyroUniformBlock std140 size mismatch");
+static_assert(sizeof(PyroUniformBlock) == 70u * 16u, "PyroUniformBlock std140 size mismatch");
 
 void ResolveTileLayout(int32_t RequestedRes, int32_t& OutRes, int32_t& OutTx, int32_t& OutTy) noexcept
 {
@@ -457,11 +459,14 @@ void PyroVolumeSolver::ClearLattice(VulkanContext& Ctx)
 
     PendingBlasts.clear();
     Projectiles.clear();
-    DynamicSurge   = 1.0f;
-    SimulationTime = 0.0f;
-    StepCounter    = 0u;
-    ReadSlotIdx    = 0;
-    ReadPresIdx    = 0;
+    DynamicSurge          = 1.0f;
+    SimulationTime        = 0.0f;
+    StepCounter           = 0u;
+    ReadSlotIdx           = 0;
+    ReadPresIdx           = 0;
+    WorldGridHasFocus     = false;
+    WorldGridPriorOriginX = WorldGridOriginX;
+    WorldGridPriorOriginZ = WorldGridOriginZ;
 }
 
 void PyroVolumeSolver::UploadWorldSdfAtlas(VulkanContext& Ctx, const float* RgbaTexels, size_t FloatCount)
@@ -471,6 +476,51 @@ void PyroVolumeSolver::UploadWorldSdfAtlas(VulkanContext& Ctx, const float* Rgba
     std::string Diag;
     if (Ctx.UploadRgba32fImage(WorldSdfImg, RgbaTexels, static_cast<size_t>(AtlasWidth * AtlasHeight * 4), Diag))
         WorldSdfEnabled = true;
+}
+
+void PyroVolumeSolver::SetWorldGridMode(bool Enabled) noexcept
+{
+    if (WorldGridEnabled != Enabled)
+    {
+        WorldGridEnabled  = Enabled;
+        WorldGridHasFocus = false;
+    }
+}
+
+void PyroVolumeSolver::UpdateWorldGridFocus(float FocusWorldX, float FocusWorldY, const GasSettings& Settings) noexcept
+{
+    if (!WorldGridEnabled)
+        return;
+
+    const int32_t N        = std::max<int32_t>(16, LatticeRes > 0 ? LatticeRes : Settings.LatticeResolution);
+    const float   SpanXZ   = std::max(4.0f, Settings.BoundsWidth);
+    const float   CellXZ   = SpanXZ / static_cast<float>(N);
+    const int32_t FocusX   = static_cast<int32_t>(std::floor(FocusWorldX / CellXZ));
+    const int32_t FocusZ   = static_cast<int32_t>(std::floor(FocusWorldY / CellXZ));
+
+    if (!WorldGridHasFocus)
+    {
+        WorldGridOriginX      = FocusX - N / 2;
+        WorldGridOriginZ      = FocusZ - N / 2;
+        WorldGridPriorOriginX = WorldGridOriginX;
+        WorldGridPriorOriginZ = WorldGridOriginZ;
+        WorldGridHasFocus     = true;
+        return;
+    }
+
+    // Recentre window by integer world cells only when focus exits the inner 50% deadzone (PlumeSpace.js recentreWindow)
+    const int32_t Margin  = std::max<int32_t>(2, N / 4);
+    const int32_t CenterX = WorldGridOriginX + N / 2;
+    const int32_t CenterZ = WorldGridOriginZ + N / 2;
+    if (FocusX < CenterX - Margin)
+        WorldGridOriginX += (FocusX - (CenterX - Margin));
+    else if (FocusX > CenterX + Margin)
+        WorldGridOriginX += (FocusX - (CenterX + Margin));
+
+    if (FocusZ < CenterZ - Margin)
+        WorldGridOriginZ += (FocusZ - (CenterZ - Margin));
+    else if (FocusZ > CenterZ + Margin)
+        WorldGridOriginZ += (FocusZ - (CenterZ + Margin));
 }
 
 void PyroVolumeSolver::AssignExternalSources(const PyroExternalSource* Sources, int Count) noexcept
@@ -490,6 +540,21 @@ void PyroVolumeSolver::AssignBrush(const std::array<float, 3>& PosUvw, const std
 PyroBoundsBox PyroVolumeSolver::ComputeBoundsBox(const GasSettings& Settings) const noexcept
 {
     PyroBoundsBox Box{};
+    if (WorldGridEnabled)
+    {
+        const int32_t N    = std::max<int32_t>(16, LatticeRes > 0 ? LatticeRes : Settings.LatticeResolution);
+        Box.SurgeMultiplier= 1.0f;
+        Box.EffectiveWidth = std::max(4.0f, Settings.BoundsWidth);
+        Box.EffectiveHeight= std::max(2.0f, Settings.BoundsHeight);
+        const float CellXZ = Box.EffectiveWidth / static_cast<float>(N);
+        const float MinX   = static_cast<float>(WorldGridOriginX) * CellXZ;
+        const float MinZ   = static_cast<float>(WorldGridOriginZ) * CellXZ;
+        Box.BoxMin         = { MinX, -0.60f, MinZ };
+        Box.BoxMax         = { MinX + Box.EffectiveWidth, -0.60f + Box.EffectiveHeight, MinZ + Box.EffectiveWidth };
+        Box.DomainScale    = { Box.EffectiveWidth, Box.EffectiveHeight, Box.EffectiveWidth };
+        return Box;
+    }
+
     const float Mult    = Settings.DynamicBounds ? std::clamp(DynamicSurge, 1.0f, std::max(1.0f, Settings.DynamicBoundsMax)) : 1.0f;
     Box.SurgeMultiplier = Mult;
     Box.EffectiveWidth  = std::max(0.4f, Settings.BoundsWidth * Mult);
@@ -582,12 +647,23 @@ namespace
 {
 
 void PopulateCommonPyroUbo(PyroUniformBlock& Ubo, const GasSettings& S, const PyroBoundsBox& Bounds,
-                           int32_t Res, int32_t Tx, int32_t Ty, float Dt, float SimTime, bool WorldSdfOn) noexcept
+                           int32_t Res, int32_t Tx, int32_t Ty, float Dt, float SimTime, bool WorldSdfOn,
+                           bool WorldGridOn, int32_t WGOriginX, int32_t WGOriginZ,
+                           int32_t WGPriorOriginX, int32_t WGPriorOriginZ) noexcept
 {
     Ubo.GridParams[0]   = static_cast<float>(Res);
     Ubo.GridParams[1]   = static_cast<float>(Tx);
     Ubo.GridParams[2]   = static_cast<float>(Ty);
     Ubo.GridParams[3]   = Dt;
+
+    Ubo.WorldGridOrigin[0] = static_cast<float>(WGOriginX);
+    Ubo.WorldGridOrigin[1] = static_cast<float>(WGOriginZ);
+    Ubo.WorldGridOrigin[2] = static_cast<float>(WGPriorOriginX);
+    Ubo.WorldGridOrigin[3] = static_cast<float>(WGPriorOriginZ);
+    Ubo.WorldGridFlags[0]  = WorldGridOn ? 1.0f : 0.0f;
+    Ubo.WorldGridFlags[1]  = Bounds.EffectiveWidth  / static_cast<float>(std::max<int32_t>(1, Res));
+    Ubo.WorldGridFlags[2]  = Bounds.EffectiveHeight / static_cast<float>(std::max<int32_t>(1, Res));
+    Ubo.WorldGridFlags[3]  = 0.0f;
 
     Ubo.TimeAndSwitches[0] = SimTime;
     Ubo.TimeAndSwitches[1] = (S.VorticityConfinement > 0.001f) ? 1.0f : 0.0f;
@@ -776,7 +852,9 @@ void PyroVolumeSolver::AdvanceSimulation(VulkanContext& Ctx, GasSettings& Settin
 
     const PyroBoundsBox Bounds = ComputeBoundsBox(Settings);
     PyroUniformBlock Ubo{};
-    PopulateCommonPyroUbo(Ubo, Settings, Bounds, LatticeRes, TilesX, TilesY, Dt, SimulationTime, WorldSdfEnabled);
+    PopulateCommonPyroUbo(Ubo, Settings, Bounds, LatticeRes, TilesX, TilesY, Dt, SimulationTime, WorldSdfEnabled,
+                          WorldGridEnabled, WorldGridOriginX, WorldGridOriginZ,
+                          WorldGridPriorOriginX, WorldGridPriorOriginZ);
 
     if (BrushActive)
     {
@@ -985,6 +1063,8 @@ void PyroVolumeSolver::AdvanceSimulation(VulkanContext& Ctx, GasSettings& Settin
 
     ReadSlotIdx = Nxt;
     Ctx.SubmitAndWaitFrameCommands();
+    WorldGridPriorOriginX = WorldGridOriginX;
+    WorldGridPriorOriginZ = WorldGridOriginZ;
 }
 
 //----------------------------------------------------------------------------------------------------------------------
@@ -1025,7 +1105,8 @@ bool PyroVolumeSolver::RenderStandaloneViewport(VulkanContext& Ctx, const GasSet
 
     const PyroBoundsBox Bounds = ComputeBoundsBox(Settings);
     PyroUniformBlock Ubo{};
-    PopulateCommonPyroUbo(Ubo, Settings, Bounds, LatticeRes, TilesX, TilesY, 1.0f / 60.0f, SimulationTime, WorldSdfEnabled);
+    PopulateCommonPyroUbo(Ubo, Settings, Bounds, LatticeRes, TilesX, TilesY, 1.0f / 60.0f, SimulationTime, WorldSdfEnabled,
+                          false, 0, 0, 0, 0);
 
     Ubo.DomainBoxMax[3]       = Cam.Aspect;
     Ubo.CamPosAndFov[0]       = Cam.Position[0];
@@ -1093,7 +1174,9 @@ void PyroVolumeSolver::RecordCompositeIntoWorldTarget(VulkanContext& Ctx, VkComm
 
     const PyroBoundsBox Bounds = ComputeBoundsBox(Settings);
     PyroUniformBlock Ubo{};
-    PopulateCommonPyroUbo(Ubo, Settings, Bounds, LatticeRes, TilesX, TilesY, 1.0f / 60.0f, SimulationTime, WorldSdfEnabled);
+    PopulateCommonPyroUbo(Ubo, Settings, Bounds, LatticeRes, TilesX, TilesY, 1.0f / 60.0f, SimulationTime, WorldSdfEnabled,
+                          WorldGridEnabled, WorldGridOriginX, WorldGridOriginZ,
+                          WorldGridOriginX, WorldGridOriginZ);
 
     Ubo.DomainBoxMax[3]       = Cam.Aspect;
     Ubo.CamPosAndFov[0]       = Cam.Position[0];
