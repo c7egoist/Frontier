@@ -1,0 +1,79 @@
+name: Everest C++ binaries
+
+on:
+  push:
+    branches:
+      - main
+      - arena/0b4c5376-frontier
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install GLFW build dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxkbcommon-dev libgl1-mesa-dev
+
+      - name: Configure CMake
+        run: cmake -S Frontier -B build -DCMAKE_BUILD_TYPE=Release -DFRONTIER_ENABLE_GLFW=ON
+
+      - name: Build Everest and validation
+        run: cmake --build build --config Release --parallel 2
+
+      - name: Run C++ validation
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Stage standalone test package
+        shell: bash
+        run: |
+          mkdir -p dist/Everest/Archive
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            cp build/Release/Everest.exe dist/Everest/Everest.exe
+            cp build/Release/EverestWindow.exe dist/Everest/EverestWindow.exe
+          else
+            cp build/Everest dist/Everest/Everest
+            cp build/EverestWindow dist/Everest/EverestWindow
+          fi
+          cp Experimental/VehicleHmiPrototype/Archive/ControlVehicleBody.facet dist/Everest/Archive/
+          cp Experimental/VehicleHmiPrototype/Archive/ControlVehicleTyre.facet dist/Everest/Archive/
+          cp Experimental/VehicleHmiPrototype/Archive/ControlVehicleRim.facet dist/Everest/Archive/
+          cat > dist/Everest/README.txt <<'EOF'
+          Project Everest — C++ test build
+
+          The executable opens in the Lobby. From a terminal in this folder:
+            Everest --archive Archive --render lobby.ppm
+            Everest --archive Archive --navigate proving-grounds --render proving-grounds.ppm
+            Everest --archive Archive --navigate proving-grounds --navigate lobby --render return-lobby.ppm
+
+          Add --guests 4 for a five-car session, --xray for the local vehicle scan, or --menu to list routes.
+          PPM images open in common image viewers; the Archive folder contains the required ControlVehicle facets.
+
+          Interactive GLFW/OpenGL window:
+            EverestWindow --archive Archive
+          Lobby: arrows/D-pad choose, Enter selects, Space readies, A selects/readies, Esc/B backs out; mouse orbits the parked car.
+          Proving Grounds: WASD/left stick drive, triggers throttle/brake, Space/X handbrake, Shift/Y boost,
+          mouse looks, C/right bumper cycles camera, R/back resets, Esc/start opens routes.
+          On Windows, run Everest.exe or EverestWindow.exe. On Linux, an X11 desktop and OpenGL driver are required.
+          EOF
+
+      - name: Upload test binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: Everest-${{ runner.os }}
+          path: dist/Everest/
+          if-no-files-found: error
+          retention-days: 30
