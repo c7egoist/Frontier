@@ -48,6 +48,27 @@ target_link_libraries(LobbySession PRIVATE FrontierGame FrontierSession)
 add_executable(Everest ../Projects/Everest/Source/Game/EverestMain.cpp)
 target_link_libraries(Everest PRIVATE FrontierGame FrontierSession EverestNavigation)
 
+# The 1:1 C++ port of the exhibit's fluid/smoke editor (Experimental/FluidSmokeEditor): plume lattice, sources,
+# SDF world interaction, march and the editor UI model. Device-free C++17, like the session slice.
+add_library(FluidSmokeEditor STATIC
+    ../Experimental/FluidSmokeEditor/Source/FluidSmokeEditor.cpp
+    ../Experimental/FluidSmokeEditor/Source/GasParameters.cpp
+    ../Experimental/FluidSmokeEditor/Source/PlumeMarch.cpp
+    ../Experimental/FluidSmokeEditor/Source/PlumeSourceProjection.cpp
+    ../Experimental/FluidSmokeEditor/Source/PlumeSpace.cpp
+    ../Experimental/FluidSmokeEditor/Source/PlumeTransport.cpp
+    ../Experimental/FluidSmokeEditor/Source/SceneDistanceField.cpp
+    ../Experimental/FluidSmokeEditor/Source/SmokeSequence.cpp)
+target_include_directories(FluidSmokeEditor PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
+target_compile_features(FluidSmokeEditor PUBLIC cxx_std_17)
+
+add_executable(FluidSmokeValidation ../Validation/FluidSmokeValidation.cpp)
+target_link_libraries(FluidSmokeValidation PRIVATE FluidSmokeEditor)
+
+# Headless visual proof: scripted burnout through the ported lattice, marched and composited to a PPM/PNG.
+add_executable(FluidSmokeProof ../Validation/FluidSmokeProof.cpp)
+target_link_libraries(FluidSmokeProof PRIVATE FluidSmokeEditor)
+
 if(FRONTIER_ENABLE_GLFW)
     include(FetchContent)
     set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
@@ -66,4 +87,6 @@ endif()
 
 if(BUILD_TESTING)
     add_test(NAME SessionValidation COMMAND SessionValidation)
+    add_test(NAME FluidSmokeValidation COMMAND FluidSmokeValidation)
+    add_test(NAME FluidSmokeProof COMMAND FluidSmokeProof ${CMAKE_CURRENT_BINARY_DIR}/FluidSmokeEditorProof.ppm)
 endif()

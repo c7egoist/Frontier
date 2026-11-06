@@ -163,7 +163,7 @@ FluidSmoke::PlumeTelemetry BuildPlumeTelemetry(const Frontier::DeployableUnit& U
         Wheel.SlipSpeed = Slip;
         Wheel.SlidingPower = 900.0f * Slip * Slip;
         TyreThermalState& Heat = Thermal[W];
-        Heat.SurfaceKelvin += (Wheel.SlidingPower * 0.00045f - 6.0f * (Heat.SurfaceKelvin - 300.0f)) * StepSeconds;
+        Heat.SurfaceKelvin += (Wheel.SlidingPower * 0.15f - 6.0f * (Heat.SurfaceKelvin - 300.0f)) * StepSeconds;
         if (Heat.SurfaceKelvin > 523.15f)
         {
             Heat.IgnitionSeconds += StepSeconds;

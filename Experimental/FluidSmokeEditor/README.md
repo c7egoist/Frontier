@@ -48,3 +48,7 @@ record, SDF obstruction and occupant velocity, a simulated burnout through the t
 passes, the march, fire illumination and the editor UI model:
 
     g++ -std=c++17 -I. Validation/FluidSmokeValidation.cpp Experimental/FluidSmokeEditor/Source/*.cpp -o /tmp/FluidSmokeValidation && /tmp/FluidSmokeValidation
+
+`Validation/FluidSmokeProof.cpp` (CMake target `FluidSmokeProof`, ctest name `FluidSmokeProof`) renders a
+scripted burnout + tyre fire through the ported lattice to `VisualProof/FluidSmokeEditorProof.png` —
+see the committed proof image.

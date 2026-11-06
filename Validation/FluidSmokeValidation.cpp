@@ -183,6 +183,24 @@ int main()
         const FireArrival Shadowed = ResolveFireArrival(Field, { 0, 0, 0.35f }, { 0, 0, 1 }, { 5, 0, 0.35f },
                                                         5.0f, { 1, 0.46f, 0.14f }, 8.0f);
         Check(Shadowed.Illuminance[0] == 0.0f, "the vehicle body shadows the fire light through the SDF");
+
+        // 📝 a burning tyre: flame seats, soot and a fire light that the march scatters from within
+        WheelTelemetry Burning = Wheel;
+        Burning.Thermal.Ignited = true;
+        Burning.Thermal.CombustionPower = 6000.0f;
+        Telemetry.Wheels[2] = Burning;
+        for (int Frame = 0; Frame < 60; ++Frame)
+            Smoke.Advance(1.0f / 60.0f, true, Telemetry, Opts, Settings, Telemetry.Position, { 0, 0, 1 }, Field);
+        Check(Smoke.FireLight.Intensity > 0.0f, "a burning tyre produces a fire light");
+        Check(!Smoke.Sources.Lights.empty(), "flame seats are projected as lights");
+        long long Flame = 0, Soot = 0;
+        for (const Vec4& T : Smoke.Thermo[Smoke.State])
+        {
+            if (T.Z > 1.0e-3f) ++Flame;
+            if (T.W > 1.0e-3f) ++Soot;
+        }
+        Check(Flame > 0, "the thermo lattice holds flame");
+        Check(Soot > 0, "burning sheds soot");
     }
 
     std::printf("Editor model (EditorShell.js / InspectorPages.js Smoke & fire page)\n");
