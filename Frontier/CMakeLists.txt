@@ -1,0 +1,85 @@
+# Frontier engine — session & game mechanics (standalone slice).
+#
+# The standalone session/validation build has no renderer or GLFW dependency and works with a C++17
+# compiler. FRONTIER_ENABLE_GLFW optionally fetches GLFW/OpenGL and adds the interactive EverestWindow;
+# SampleGlfwWindow / DriveFromWindow are enabled only for that build.
+#
+#   cmake -S Frontier -B /tmp/frontier-build && cmake --build /tmp/frontier-build
+#   /tmp/frontier-build/SessionValidation
+
+cmake_minimum_required(VERSION 3.16)
+project(FrontierSession CXX)
+include(CTest)
+option(FRONTIER_ENABLE_GLFW "Build the interactive GLFW/OpenGL Everest window" OFF)
+
+add_library(FrontierSession STATIC
+    Engine/Input/InputEncoder.cpp
+    Engine/Input/InputDriver.cpp
+    Engine/Input/SyntheticDriver.cpp
+    Engine/Scene/DeployableUnit.cpp
+    Engine/Scene/FacetArchive.cpp
+    Engine/Session/SpawnPolicy.cpp
+    Engine/Session/SessionConfiguration.cpp
+    Engine/Session/SessionPolicy.cpp
+    Engine/Session/SessionSpace.cpp
+    Engine/Session/TransferConfiguration.cpp
+    Engine/Session/LevelTransition.cpp
+    Engine/Session/LobbySession.cpp
+    ../Projects/Everest/Source/Session/SessionPolicy.cpp)
+target_include_directories(FrontierSession PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
+target_compile_features(FrontierSession PUBLIC cxx_std_17)
+
+add_library(EverestNavigation STATIC ../Projects/Everest/Source/Navigation/NavigationApp.cpp)
+target_link_libraries(EverestNavigation PUBLIC FrontierSession)
+
+add_executable(SessionValidation ../Validation/SessionValidation.cpp)
+target_link_libraries(SessionValidation PRIVATE FrontierSession EverestNavigation)
+
+add_library(FrontierCamera STATIC Game/CameraController.cpp)
+target_link_libraries(FrontierCamera PUBLIC FrontierSession)
+target_link_libraries(SessionValidation PRIVATE FrontierCamera)
+
+add_library(FrontierGame STATIC Game/SoftwarePresentation.cpp)
+target_link_libraries(FrontierGame PUBLIC FrontierSession FrontierCamera)
+
+add_library(FrontierPlume STATIC
+    Engine/VolumetricDynamics/GasParameters.cpp
+    Engine/VolumetricDynamics/PlumeSourceProjection.cpp
+    Engine/VolumetricDynamics/PlumeSpace.cpp
+    Engine/VolumetricDynamics/PlumeKernels.cpp
+    Engine/Interface/FluidPlumeEditor.cpp)
+target_link_libraries(FrontierPlume PUBLIC FrontierGame)
+target_compile_features(FrontierPlume PUBLIC cxx_std_17)
+
+add_executable(LobbySession Game/LobbySessionMain.cpp)
+target_link_libraries(LobbySession PRIVATE FrontierGame FrontierSession)
+
+add_executable(Everest ../Projects/Everest/Source/Game/EverestMain.cpp)
+target_link_libraries(Everest PRIVATE FrontierGame FrontierPlume FrontierSession EverestNavigation)
+
+add_executable(PlumeParity ../Validation/PlumeParity.cpp)
+target_link_libraries(PlumeParity PRIVATE FrontierPlume)
+
+add_executable(FluidPlumeEditorCapture ../Validation/FluidPlumeEditorCapture.cpp)
+target_link_libraries(FluidPlumeEditorCapture PRIVATE FrontierPlume)
+
+if(FRONTIER_ENABLE_GLFW)
+    include(FetchContent)
+    set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_WAYLAND OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(glfw URL https://github.com/glfw/glfw/archive/refs/tags/3.4.tar.gz)
+    FetchContent_MakeAvailable(glfw)
+    find_package(OpenGL REQUIRED)
+
+    target_compile_definitions(FrontierSession PUBLIC FRONTIER_WITH_GLFW)
+    target_link_libraries(FrontierSession PUBLIC glfw)
+    add_executable(EverestWindow ../Projects/Everest/Source/Game/EverestGlfwMain.cpp)
+    target_link_libraries(EverestWindow PRIVATE FrontierGame FrontierPlume FrontierSession EverestNavigation OpenGL::GL glfw)
+endif()
+
+if(BUILD_TESTING)
+    add_test(NAME SessionValidation COMMAND SessionValidation)
+    add_test(NAME PlumeParity COMMAND PlumeParity)
+endif()
