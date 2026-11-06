@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Frontier — Landscape Studio</title>
+  <link rel="stylesheet" href="/src/app/style.css" />
+</head>
+<body>
+  <div id="app" class="tp-studio">
+    <header class="tp-workspace-header">
+      <div class="tp-header-left">
+        <div class="tp-studio-mark">
+          <span class="tp-mark-glyph">◆</span>
+          <span class="tp-mark-text">Frontier</span>
+        </div>
+        <span class="tp-header-sep"></span>
+        <span class="tp-doc-name" id="tp-doc-title">Untitled Landscape</span>
+        <button id="btn-toggle-panels" class="tp-hdr-btn tp-focus-btn" type="button" aria-pressed="false" title="Hide the side panels and give the viewport the full workspace">Focus</button>
+      </div>
+
+      <div class="tp-workspace-switch" id="studio-mode-switcher">
+        <button id="mode-btn-mask" class="tp-ws-btn active" type="button"><span class="tp-ws-dot"></span>2D Mask Editor</button>
+        <button id="mode-btn-landscape" class="tp-ws-btn" type="button">Landscape</button>
+      </div>
+
+      <div class="tp-header-right" id="tp-header-actions">
+        <span class="tp-header-sep"></span>
+        <button id="btn-undo" class="tp-hdr-btn" type="button" title="Undo [Ctrl+Z]">↶</button>
+        <button id="btn-redo" class="tp-hdr-btn" type="button" title="Redo [Ctrl+Shift+Z]">↷</button>
+        <span class="tp-header-sep"></span>
+        <button id="btn-save" class="tp-hdr-btn" type="button" title="Save document to local storage">Save</button>
+        <button id="btn-export" class="tp-hdr-btn primary" type="button" title="Export document JSON">Export</button>
+      </div>
+    </header>
+
+    <div class="tp-layout">
+      <!-- LEFT DOCK: MASK LAYER STACK -->
+      <aside class="tp-dock tp-layer-dock">
+        <div class="tp-tab-strip">
+          <div class="tp-document-tab active">
+            <span id="tp-left-tab-label">Outliner</span>
+            <span class="tp-tab-close" aria-hidden="true">✕</span>
+          </div>
+          <span class="tp-tab-add" aria-hidden="true">+</span>
+        </div>
+        <div class="tp-pane-scroll" id="left-pane">
+          <div class="tp-pane-heading">
+            <div class="tp-pane-title-wrap">
+              <h1>Mask Layers</h1>
+              <span class="tp-count-pill" id="tp-layer-count">0</span>
+              <span class="tp-outliner-meta">2D masks · bottom → top</span>
+            </div>
+            <div class="tp-add-menu-anchor">
+              <button type="button" class="tp-add-btn" id="tp-btn-add-layer" title="Add mask layer">+</button>
+            </div>
+          </div>
+          <label class="tp-layer-search">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3.5 3.5"/></svg>
+            <input type="text" id="tp-layer-search-input" placeholder="Search layers..." autocomplete="off" />
+          </label>
+          <div class="tp-layer-order top"><span>TOP — EVALUATED LAST</span><em>↑ Bottom-Up</em></div>
+          <div class="tp-layer-list" id="tp-layer-list"></div>
+          <div class="tp-layer-order bottom"><span>BOTTOM — BASE FIRST</span></div>
+        </div>
+      </aside>
+
+      <!-- CENTER: VIEWPORT -->
+      <main class="tp-viewport" id="tp-viewport">
+        <div class="tp-viewport-toolbar" id="toolbar-2d">
+          <button type="button" data-tool="brush" class="tp-tool-btn active" title="Paint mask [B]"><span class="tp-tool-label">Brush</span></button>
+          <button type="button" data-tool="erase" class="tp-tool-btn" title="Erase mask [E]"><span class="tp-tool-label">Erase</span></button>
+          <button type="button" data-tool="pan" class="tp-tool-btn" title="Pan [H]"><span class="tp-tool-label">Pan</span></button>
+          <button type="button" data-tool="box" class="tp-tool-btn" title="Box-select region [R]"><span class="tp-tool-label">Region</span></button>
+          <span class="tp-tool-sep"></span>
+          <button type="button" id="btn-add-region" class="tp-tool-btn" title="Add selected region to active layer" disabled><span class="tp-tool-label">+ Region</span></button>
+          <button type="button" id="btn-clear-selection" class="tp-tool-btn" title="Clear selection" disabled><span class="tp-tool-label">✕ Sel</span></button>
+        </div>
+        <div class="tp-viewport-toolbar hidden-panel" id="toolbar-3d">
+          <button type="button" id="btn-rebuild" class="tp-tool-btn active" title="Re-evaluate landscape from mask layers"><span class="tp-tool-label">↻ Rebuild</span></button>
+          <button type="button" id="btn-wasd" class="tp-tool-btn" title="WASD camera movement" aria-pressed="false"><span class="tp-tool-label">WASD</span></button>
+          <span class="tp-tool-sep"></span>
+          <label class="tp-res-label">Grid
+            <select id="tp-grid-res" class="tp-res-select">
+              <option value="256">256²</option>
+              <option value="512" selected>512²</option>
+              <option value="768">768²</option>
+              <option value="1024">1024²</option>
+            </select>
+          </label>
+          <label class="tp-res-label">Depth
+            <select id="tp-grid-depth" class="tp-res-select">
+              <option value="64">64</option>
+              <option value="128" selected>128</option>
+              <option value="256">256</option>
+            </select>
+          </label>
+        </div>
+        <div class="tp-canvas-wrap" id="canvas-wrap">
+          <canvas id="mask-canvas"></canvas>
+          <canvas id="gl-canvas" class="hidden-panel"></canvas>
+          <div id="status-toast" class="status-toast hidden">Working…</div>
+        </div>
+        <footer class="tp-viewport-footer" id="hud-footer">
+          <span id="hud-mode">MASK 2D</span>
+          <span id="hud-cursor">—</span>
+          <span id="hud-zoom">ZOOM 100%</span>
+          <span id="hud-fps">60 FPS</span>
+        </footer>
+      </main>
+
+      <!-- RIGHT DOCK: INSPECTOR -->
+      <aside class="tp-dock tp-inspector-dock">
+        <div class="tp-tab-strip">
+          <div class="tp-document-tab active">
+            <span>Inspector</span>
+            <span class="tp-tab-close" aria-hidden="true">✕</span>
+          </div>
+          <span class="tp-tab-add" aria-hidden="true">+</span>
+        </div>
+        <div class="tp-pane-scroll">
+          <div class="tp-inspector-body" id="tp-inspector-content"></div>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <script type="module" src="/src/app/main.js"></script>
+</body>
+</html>

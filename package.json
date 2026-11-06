@@ -1,0 +1,17 @@
+{
+  "name": "frontier-landscape-studio",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Frontier Landscape Studio — 2D mask editor + SDF landscape workspace (ProjectZero editor UI)",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 5173",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0 --port 4173",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "vite": "^6.0.0"
+  }
+}
