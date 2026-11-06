@@ -10,24 +10,17 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 
-#if defined(_WIN32)
-    #ifndef WIN32_LEAN_AND_MEAN
-    #define WIN32_LEAN_AND_MEAN
-    #endif
-    #ifndef NOMINMAX
-    #define NOMINMAX
-    #endif
-    #include <windows.h>
-#else
-    #include <dlfcn.h>
-#endif
-
 namespace Frontier
 {
+
+void* OpenPlatformDynamicLibrary(const char* LibraryPath) noexcept;
+PFN_vkVoidFunction LookupPlatformDynamicSymbol(void* LibraryHandle, const char* SymbolName) noexcept;
+void ClosePlatformDynamicLibrary(void* LibraryHandle) noexcept;
 
 namespace
 {
@@ -102,14 +95,14 @@ VulkanContext::~VulkanContext()
 bool VulkanContext::LoadVulkanLibrary(std::string& OutDiagnostic)
 {
 #if defined(_WIN32)
-    HMODULE Mod = LoadLibraryA("vulkan-1.dll");
-    if (!Mod)
+    LibraryHandle = OpenPlatformDynamicLibrary("vulkan-1.dll");
+    if (!LibraryHandle)
     {
         OutDiagnostic = "Could not load vulkan-1.dll.";
         return false;
     }
-    LibraryHandle          = reinterpret_cast<void*>(Mod);
-    Fn.GetInstanceProcAddr = reinterpret_cast<PFN_vkGetInstanceProcAddr>(GetProcAddress(Mod, "vkGetInstanceProcAddr"));
+    Fn.GetInstanceProcAddr = reinterpret_cast<PFN_vkGetInstanceProcAddr>(
+        LookupPlatformDynamicSymbol(LibraryHandle, "vkGetInstanceProcAddr"));
 #else
     // Automatically point Vulkan loader at sandbox SwiftShader ICD if system ICD is absent
     if (std::getenv("VK_ICD_FILENAMES") == nullptr && std::getenv("VK_DRIVER_FILES") == nullptr)
@@ -138,7 +131,7 @@ bool VulkanContext::LoadVulkanLibrary(std::string& OutDiagnostic)
 
     for (const std::string& Path : Candidates)
     {
-        LibraryHandle = dlopen(Path.c_str(), RTLD_NOW | RTLD_LOCAL);
+        LibraryHandle = OpenPlatformDynamicLibrary(Path.c_str());
         if (LibraryHandle)
             break;
     }
@@ -147,7 +140,8 @@ bool VulkanContext::LoadVulkanLibrary(std::string& OutDiagnostic)
         OutDiagnostic = "Could not load Vulkan shared library (libvulkan).";
         return false;
     }
-    Fn.GetInstanceProcAddr = reinterpret_cast<PFN_vkGetInstanceProcAddr>(dlsym(LibraryHandle, "vkGetInstanceProcAddr"));
+    Fn.GetInstanceProcAddr = reinterpret_cast<PFN_vkGetInstanceProcAddr>(
+        LookupPlatformDynamicSymbol(LibraryHandle, "vkGetInstanceProcAddr"));
 #endif
 
     if (!Fn.GetInstanceProcAddr)
@@ -788,13 +782,8 @@ void VulkanContext::Shutdown() noexcept
         Fn.DestroyInstance(Instance, nullptr);
     Instance = VK_NULL_HANDLE;
 
-#if defined(_WIN32)
     if (LibraryHandle)
-        FreeLibrary(reinterpret_cast<HMODULE>(LibraryHandle));
-#else
-    if (LibraryHandle)
-        dlclose(LibraryHandle);
-#endif
+        ClosePlatformDynamicLibrary(LibraryHandle);
     LibraryHandle = nullptr;
     Fn            = VulkanFunctionTable{};
     UiTextureRegistry.clear();
@@ -1886,3 +1875,62 @@ void VulkanImGuiPresenter::RecordDrawData(VulkanContext& Ctx, VkCommandBuffer Cm
 }
 
 } // namespace Frontier
+
+//----------------------------------------------------------------------------------------------------------------------
+//                          ISOLATED OS SHARED-LIBRARY LOADER (ZERO WIN32 MACRO POLLUTION)
+//----------------------------------------------------------------------------------------------------------------------
+
+#if defined(_WIN32)
+    #ifndef WIN32_LEAN_AND_MEAN
+    #define WIN32_LEAN_AND_MEAN
+    #endif
+    #ifndef NOMINMAX
+    #define NOMINMAX
+    #endif
+    #include <windows.h>
+
+namespace Frontier
+{
+
+void* OpenPlatformDynamicLibrary(const char* LibraryPath) noexcept
+{
+    return reinterpret_cast<void*>(LoadLibraryA(LibraryPath));
+}
+
+PFN_vkVoidFunction LookupPlatformDynamicSymbol(void* LibraryHandle, const char* SymbolName) noexcept
+{
+    return reinterpret_cast<PFN_vkVoidFunction>(
+        GetProcAddress(reinterpret_cast<HMODULE>(LibraryHandle), SymbolName));
+}
+
+void ClosePlatformDynamicLibrary(void* LibraryHandle) noexcept
+{
+    if (LibraryHandle)
+        FreeLibrary(reinterpret_cast<HMODULE>(LibraryHandle));
+}
+
+} // namespace Frontier
+#else
+    #include <dlfcn.h>
+
+namespace Frontier
+{
+
+void* OpenPlatformDynamicLibrary(const char* LibraryPath) noexcept
+{
+    return dlopen(LibraryPath, RTLD_NOW | RTLD_LOCAL);
+}
+
+PFN_vkVoidFunction LookupPlatformDynamicSymbol(void* LibraryHandle, const char* SymbolName) noexcept
+{
+    return reinterpret_cast<PFN_vkVoidFunction>(dlsym(LibraryHandle, SymbolName));
+}
+
+void ClosePlatformDynamicLibrary(void* LibraryHandle) noexcept
+{
+    if (LibraryHandle)
+        dlclose(LibraryHandle);
+}
+
+} // namespace Frontier
+#endif

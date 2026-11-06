@@ -37,10 +37,26 @@ jobs:
         run: cmake -S Frontier -B build -DCMAKE_BUILD_TYPE=Release -DFRONTIER_ENABLE_GLFW=ON
 
       - name: Build Everest and validation
-        run: cmake --build build --config Release --parallel 2
+        shell: bash
+        run: |
+          set -o pipefail
+          if ! cmake --build build --config Release --parallel 2 2>&1 | tee build.log; then
+            grep -E "error |Error |ERROR|fatal |FAILED|LNK[0-9]+" build.log | head -n 25 | while IFS= read -r line; do
+              echo "::error::$line"
+            done
+            exit 1
+          fi
 
       - name: Run C++ & Vulkan validation
-        run: ctest --test-dir build -C Release --output-on-failure
+        shell: bash
+        run: |
+          set -o pipefail
+          if ! ctest --test-dir build -C Release --output-on-failure 2>&1 | tee ctest.log; then
+            grep -E "FAIL|Error|Failed|Exception" ctest.log | head -n 25 | while IFS= read -r line; do
+              echo "::error::$line"
+            done
+            exit 1
+          fi
 
       - name: Stage standalone test package
         shell: bash
