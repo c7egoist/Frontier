@@ -184,24 +184,35 @@ SceneViewportRefresh RenderingExtension::Render(const SceneViewportRequest& Requ
         return Outcome;
     }
 
-    // ① (re)build when the tiers change; a failed bring-up is not retried until they change again
-    if (!Viewport_ || Quality != Quality_ || RayTracing != RayTracing_)
+    const std::string RequestedArchive = World.QueryEnvironmentArchive().empty() ? "ProvingGround" : World.QueryEnvironmentArchive();
+    const bool        IndoorLobby      = (RequestedArchive == "Lobby");
+
+    // ① (re)build when the scene archive or rendering tiers change; a failed bring-up is not retried until they change again
+    if (!Viewport_ || RequestedArchive != SceneArchive_ || Quality != Quality_ || RayTracing != RayTracing_)
     {
-        if (!Failure_.empty() && Quality == Quality_ && RayTracing == RayTracing_)
+        if (!Failure_.empty() && RequestedArchive == SceneArchive_ && Quality == Quality_ && RayTracing == RayTracing_)
         {
             Outcome.Status          = Failure_;
-            Outcome.Readout.Failure = Failure_;
+            Outcome.Readout.Failure = Outcome.Status;
             return Outcome;
         }
         Viewport_.reset();
-        Quality_    = Quality;
-        RayTracing_ = RayTracing;
+        GeometryScene_ = nullptr;
+        Held_          = {};
+        Pick_          = {};
+        SceneArchive_  = RequestedArchive;
+        Quality_       = Quality;
+        RayTracing_    = RayTracing;
         Failure_.clear();
         Frontier::GlobalIllumination::SceneViewportConfiguration Configuration;
         Configuration.GlobalIlluminationShaders = ShaderRoot_ / "GlobalIllumination";
-        Configuration.EnvironmentShaders        = ShaderRoot_ / "Environment";
-        Configuration.SceneArchive              = ResolveArchive(ProjectRoot_, "ProvingGround");
-        Configuration.CelestialMaps             = ResolveArchive(ProjectRoot_, "CelestialMaps");
+        if (!IndoorLobby)
+        {
+            Configuration.EnvironmentShaders = ShaderRoot_ / "Environment";
+        }
+        Configuration.EnvironmentLighting = !IndoorLobby;
+        Configuration.SceneArchive        = ResolveArchive(ProjectRoot_, SceneArchive_.c_str());
+        Configuration.CelestialMaps       = ResolveArchive(ProjectRoot_, "CelestialMaps");
         // 📝 The engine shapes sit beside the shader archives (EngineContent/ShapeArchives); shaders compiled into a build folder
         //    have none beside them, so the engine content's own folder serves (the Construct dialog lists the same one).
         const std::filesystem::path ShaderFolder = ShaderRoot_.has_filename() ? ShaderRoot_ : ShaderRoot_.parent_path();
@@ -255,7 +266,10 @@ SceneViewportRefresh RenderingExtension::Render(const SceneViewportRequest& Requ
             Pick_.Record   = Geometry_.ResolvePickedRecord(Seen);
             if (!Pick_.Record.has_value() && VehicleShown_)
             {
-                if (Pick_.Occupant == 0u && ActiveVehicleToken_.IsValid())
+                const bool HeroPlate = Pick_.Occupant == 5u && Viewport_->QueryScene() != nullptr &&
+                                       Viewport_->QueryScene()->Occupants.size() > 5u &&
+                                       Viewport_->QueryScene()->Occupants[5].Name == "Hero plates";
+                if ((Pick_.Occupant == 0u || HeroPlate) && ActiveVehicleToken_.IsValid())
                 {
                     Pick_.Record = ActiveVehicleToken_.Value;
                 }
@@ -308,6 +322,7 @@ SceneViewportRefresh RenderingExtension::Render(const SceneViewportRequest& Requ
     Camera.Position            = {Request.CameraPosition[0], Request.CameraPosition[1], Request.CameraPosition[2]};
     Camera.Target              = {Request.CameraTarget[0], Request.CameraTarget[1], Request.CameraTarget[2]};
     Camera.VerticalFieldOfView = Request.VerticalFieldOfView;
+    Camera.Near                = std::max(0.005, Request.CameraNear);
     Camera.Up = Request.CameraUp;
     Frontier::GlobalIllumination::ViewportRendering Rendering;
     Rendering.GlobalIllumination   = Pipeline.GlobalIllumination;
@@ -433,6 +448,9 @@ SceneViewportRefresh RenderingExtension::Render(const SceneViewportRequest& Requ
 void RenderingExtension::SynchronizeVehicleVisuals(const Frontier::WorldSpace& World)
 {
     if (!Viewport_ || Viewport_->QueryScene() == nullptr || Viewport_->QueryScene()->Occupants.size() < 5u) return;
+    const auto& SceneOccupants  = Viewport_->QueryScene()->Occupants;
+    const bool  HasHeroPlates   = SceneOccupants.size() > 5u && SceneOccupants[5].Name == "Hero plates";
+    const uint32_t VehicleCount = HasHeroPlates ? 6u : 5u;
 
     const Frontier::VehicleRecord* ShownVehicle = nullptr;
     for (const Frontier::SceneRecordBase* Candidate : World.FindAllByType("Vehicle"))
@@ -450,8 +468,8 @@ void RenderingExtension::SynchronizeVehicleVisuals(const Frontier::WorldSpace& W
         if (VehicleShown_)
         {
             std::vector<Frontier::GlobalIllumination::OccupantPlacement> Hidden;
-            Hidden.reserve(5u);
-            for (uint32_t Index = 0u; Index < 5u; ++Index)
+            Hidden.reserve(VehicleCount);
+            for (uint32_t Index = 0u; Index < VehicleCount; ++Index)
             {
                 Frontier::GlobalIllumination::OccupantPlacement Placement;
                 Placement.Occupant = Index;
@@ -540,7 +558,7 @@ void RenderingExtension::SynchronizeVehicleVisuals(const Frontier::WorldSpace& W
             Configuration.Spatial.PositionMetres[2] };
 
         std::vector<Frontier::GlobalIllumination::OccupantPlacement> Placements;
-        Placements.reserve(5u);
+        Placements.reserve(VehicleCount);
 
         Frontier::GlobalIllumination::OccupantPlacement BodyPlacement;
         BodyPlacement.Occupant  = 0u;
@@ -548,6 +566,12 @@ void RenderingExtension::SynchronizeVehicleVisuals(const Frontier::WorldSpace& W
         BodyPlacement.Active    = true;
         BodyPlacement.Recapture = FirstActivation;
         Placements.push_back(BodyPlacement);
+        if (HasHeroPlates)
+        {
+            Frontier::GlobalIllumination::OccupantPlacement PlatePlacement = BodyPlacement;
+            PlatePlacement.Occupant = 5u;
+            Placements.push_back(PlatePlacement);
+        }
 
         std::array<bool, 4>                   FieldActive{};
         std::array<std::array<float, 4>, 4>   Deformation{};
@@ -669,7 +693,7 @@ void RenderingExtension::SynchronizeVehicleVisuals(const Frontier::WorldSpace& W
         GroundBase + Orientation.Rotate({ 0.0f, 0.0f, Geometry.AuthoredGroundOffset() - MeanDeflection });
 
     std::vector<Frontier::GlobalIllumination::OccupantPlacement> Placements;
-    Placements.reserve(5u);
+    Placements.reserve(VehicleCount);
 
     Frontier::GlobalIllumination::OccupantPlacement BodyPlacement;
     BodyPlacement.Occupant  = 0u;
@@ -677,6 +701,12 @@ void RenderingExtension::SynchronizeVehicleVisuals(const Frontier::WorldSpace& W
     BodyPlacement.Active    = true;
     BodyPlacement.Recapture = FirstActivation;
     Placements.push_back(BodyPlacement);
+    if (HasHeroPlates)
+    {
+        Frontier::GlobalIllumination::OccupantPlacement PlatePlacement = BodyPlacement;
+        PlatePlacement.Occupant = 5u;
+        Placements.push_back(PlatePlacement);
+    }
 
     const float AxleX[4] = { Geometry.FrontAxleX(), Geometry.FrontAxleX(), -Geometry.RearAxleX(), -Geometry.RearAxleX() };
     const float AxleY[4] = { +0.5f * Geometry.TrackFront, -0.5f * Geometry.TrackFront, +0.5f * Geometry.TrackRear, -0.5f * Geometry.TrackRear };

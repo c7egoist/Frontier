@@ -29,6 +29,7 @@ struct SceneViewportRequest
     std::array<double, 3> CameraPosition      = {0.0, 0.0, 0.0};      // [m] z-up world of the scene
     std::array<double, 3> CameraTarget        = {1.0, 0.0, 0.0};      // [m]
     double                VerticalFieldOfView = 1.0471975511965976;   // [rad]
+    double                CameraNear          = 0.05;                 // [m] near clip distance (0.01 m in HMI rig, 0.02 m cockpit)
     double                DeltaSeconds        = 0.0;                  // [s]
     std::array<double,3> CameraUp = {0,0,1};
     // 📝 GPU picking: a click on the stage asks for the record drawn under it in the image the click was made on; the readout's

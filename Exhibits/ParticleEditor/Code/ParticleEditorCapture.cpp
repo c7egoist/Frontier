@@ -78,6 +78,7 @@ int main(int ArgumentCount, char** Arguments)
         Require(Centre->Initialize() && Centre->Activate(), "ControlCentrePanel initialization failed");
 
         Everest::EverestWorkspace       Workspace(*Centre, EverestRoot);
+        Require(Workspace.OpenLevel(EverestRoot / "Content/Levels/Default.levelspace"), "Failed to open Default.levelspace");
         Frontier::ParticleExtension Bridge(ShaderRoot, nullptr);
         std::vector<uint8_t>             ParticlePixels;
         std::array<uint32_t, 2>          ParticleExtent = { 0, 0 };

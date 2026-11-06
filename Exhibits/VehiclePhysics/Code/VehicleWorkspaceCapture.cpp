@@ -112,6 +112,7 @@ int main(int ArgumentCount, char** Arguments)
         Require(Centre->Initialize() && Centre->Activate(), "ControlCentrePanel initialization failed");
 
         Everest::EverestWorkspace    Workspace(*Centre, EverestRoot);
+        Require(Workspace.OpenLevel(EverestRoot / "Content/Levels/Default.levelspace"), "Failed to open Default.levelspace");
         Frontier::RenderingExtension Bridge(EverestRoot, ShaderRoot, nullptr);
         std::vector<uint8_t>         ViewportPixels;
         std::array<uint32_t, 2>      ViewportExtent = { 0, 0 };

@@ -266,12 +266,19 @@ add_library(FrontierSceneEditorUI STATIC
     Frontier/Engine/Interface/Inspectors/Geometry/FractureSection.cpp
     Frontier/Engine/Interface/SceneInspectorPanel.cpp
     Frontier/Engine/Interface/ViewportChromeControls.cpp)
+add_library(FrontierSession STATIC
+    Frontier/Engine/Session/SessionSpace.cpp
+    Frontier/Engine/Rendering/SceneViewport/VehicleCameraSolver.cpp)
+target_include_directories(FrontierSession PUBLIC
+    "${CMAKE_SOURCE_DIR}"
+    "${CMAKE_SOURCE_DIR}/Frontier")
+
 target_include_directories(FrontierSceneEditorUI PUBLIC
     "${CMAKE_SOURCE_DIR}"
     "${CMAKE_SOURCE_DIR}/Frontier")
 target_compile_definitions(FrontierSceneEditorUI PUBLIC FRONTIER_WITH_INTERFACE_SDK=1 FRONTIER_EDITOR_PROFILE=1 FRONTIER_EDITOR=1)
 target_include_directories(FrontierSceneEditorUI PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
-target_link_libraries(FrontierSceneEditorUI PUBLIC FrontierEditorUI FrontierInterfaceExtension FrontierVehicleDynamics Threads::Threads PRIVATE FrontierSurfaceRasterization FrontierEnvironmentRendering)
+target_link_libraries(FrontierSceneEditorUI PUBLIC FrontierEditorUI FrontierInterfaceExtension FrontierVehicleDynamics FrontierSession Threads::Threads PRIVATE FrontierSurfaceRasterization FrontierEnvironmentRendering)
 
 include(Automation/StageProjectContent.cmake)
 
@@ -322,7 +329,9 @@ add_library(EverestProjectEditor STATIC
     Projects/Everest/Source/EverestSimulationRecords.cpp
     Projects/Everest/Source/EverestViewportNavigation.cpp
     Projects/Everest/Source/EverestWorkspace.cpp
-    Projects/Everest/Source/EverestFieldViewport.cpp)
+    Projects/Everest/Source/EverestFieldViewport.cpp
+    Projects/Everest/Source/Session/LobbySessionPolicy.cpp
+    Projects/Everest/Source/Session/LobbySession.cpp)
 target_include_directories(EverestProjectEditor PUBLIC
     "${CMAKE_SOURCE_DIR}"
     "${CMAKE_SOURCE_DIR}/Frontier"
@@ -339,23 +348,28 @@ add_library(EverestProjectRuntime STATIC
     Frontier/Engine/Scene/RecordEntry.cpp
     Frontier/Engine/Scene/SceneDirectory.cpp
     Frontier/Engine/Scene/WorldSpace.cpp
+    Frontier/Engine/Scene/WorldRegister.cpp
     Frontier/Engine/Scene/VehicleRecordCodec.cpp
+    Frontier/Engine/Scene/VehicleReadings.cpp
     Frontier/Engine/PhysicalDynamics/ForceSourceCatalogue.cpp
     Frontier/Engine/Scene/GeometryLayout.cpp
+    Frontier/Engine/Interface/ProjectContent.cpp
     Frontier/Engine/Diagnostics/LogCategories.cpp
     Frontier/Engine/Diagnostics/LogRingStore.cpp
     Frontier/Engine/Diagnostics/LogStream.cpp
     Projects/Everest/Source/EverestApplication.cpp
     Projects/Everest/Source/EverestSimulationRecords.cpp
     Projects/Everest/Source/EverestViewportNavigation.cpp
-    Projects/Everest/Source/EverestWorkspace.cpp)
+    Projects/Everest/Source/EverestWorkspace.cpp
+    Projects/Everest/Source/Session/LobbySessionPolicy.cpp
+    Projects/Everest/Source/Session/LobbySession.cpp)
 target_include_directories(EverestProjectRuntime PUBLIC
     "${CMAKE_SOURCE_DIR}"
     "${CMAKE_SOURCE_DIR}/Frontier"
     "${CMAKE_SOURCE_DIR}/Projects/Everest/Source"
     "${CMAKE_SOURCE_DIR}/ExternalPackages/tomlpp/include")
 target_compile_definitions(EverestProjectRuntime PUBLIC FRONTIER_SHIPPING_PROFILE=1 FRONTIER_EDITOR=0)
-target_link_libraries(EverestProjectRuntime PUBLIC FrontierVehicleDynamics Threads::Threads)
+target_link_libraries(EverestProjectRuntime PUBLIC FrontierVehicleDynamics FrontierSession Threads::Threads)
 frontier_stage_project_content(EverestProjectRuntime
     "${CMAKE_SOURCE_DIR}/Projects/Everest/Everest.projectspace"
     "${CMAKE_SOURCE_DIR}/EngineContent"
@@ -920,6 +934,22 @@ if(BUILD_TESTING)
     target_link_libraries(EverestShippingValidation PRIVATE EverestProjectRuntime)
     add_test(NAME EverestShippingValidation COMMAND EverestShippingValidation
         "${CMAKE_SOURCE_DIR}/Projects/Everest")
+
+    # 📝 Studio Lobby startup, dynamic 1-to-5 vehicle roster, Lobby-only cinematic camera, rig/route transitions & GPU captures.
+    add_executable(LobbySessionValidation
+        Exhibits/LobbySession/Code/LobbySessionValidation.cpp)
+    target_link_libraries(LobbySessionValidation PRIVATE EverestProjectEditor)
+    add_test(NAME LobbySessionValidation COMMAND LobbySessionValidation
+        "${CMAKE_SOURCE_DIR}/EngineContent"
+        "${CMAKE_SOURCE_DIR}/Projects/Everest"
+        "${CMAKE_BINARY_DIR}/LobbySessionValidation.md")
+    set_tests_properties(LobbySessionValidation PROPERTIES TIMEOUT 120)
+
+    add_executable(LobbyWorkspaceCapture
+        Exhibits/LobbySession/Code/LobbyWorkspaceCapture.cpp
+        Engine/Render/StbImageWriteImplementation.cpp)
+    target_include_directories(LobbyWorkspaceCapture PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
+    target_link_libraries(LobbyWorkspaceCapture PRIVATE EverestProjectEditor)
 endif()
 
 include(Automation/EnvironmentRendering.cmake)
@@ -927,6 +957,50 @@ include(Automation/VirtualizedGeometryRendering.cmake)
 include(Automation/AnalyticIlluminationRendering.cmake)
 include(Automation/ParticleSimulationRendering.cmake)
 include(Automation/GlobalIlluminationRendering.cmake)
+
+# Standalone Vulkan Everest game runtime (FRONTIER_EDITOR == 0, GLFW_NO_API, zero OpenGL).
+add_executable(Everest
+    Projects/Everest/Source/EverestRuntimeMain.cpp
+    Frontier/Extensions/Rendering/RenderingExtension.cpp
+    Frontier/Extensions/Rendering/SceneGeometryOccupancy.cpp
+    Frontier/Extensions/Physics/JoltExtension.cpp
+    Frontier/Extensions/Physics/JoltAdapter.cpp
+    Frontier/Extensions/Physics/PhysicsSpace.cpp
+    Frontier/Extensions/Physics/PhysicsThread.cpp
+    Frontier/Extensions/Physics/PhysicsVehicle.cpp
+    Frontier/Extensions/Physics/PhysicsExtension.cpp
+    Frontier/Extensions/Interface/ViewportTexture.cpp
+    Engine/Interface/WindowsApplication.cpp
+    Engine/Interface/VulkanPresentation.cpp
+    "${IMGUI_ROOT}/backends/imgui_impl_glfw.cpp"
+    "${IMGUI_ROOT}/backends/imgui_impl_vulkan.cpp")
+target_include_directories(Everest PRIVATE
+    "${IMGUI_ROOT}/backends"
+    "${CMAKE_SOURCE_DIR}/ExternalPackages/vulkan-headers/include")
+target_compile_definitions(Everest PRIVATE
+    FRONTIER_UI_VULKAN=1 VK_NO_PROTOTYPES GLFW_INCLUDE_NONE
+    FRONTIER_BUILD_COMMIT=\"${FRONTIER_BUILD_COMMIT}\"
+    FRONTIER_BUILD_REVISION="${FRONTIER_BUILD_REVISION}")
+target_link_libraries(Everest PRIVATE EverestProjectRuntime FrontierSceneViewport FrontierEditorUI Jolt glfw)
+if(WIN32)
+    target_compile_definitions(Everest PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_link_libraries(Everest PRIVATE comdlg32 shell32 ole32)
+    if(MSVC)
+        target_link_options(Everest PRIVATE /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup)
+    endif()
+endif()
+if(TARGET FrontierGlobalIlluminationShaders)
+    add_dependencies(Everest FrontierGlobalIlluminationShaders)
+endif()
+if(TARGET FrontierEnvironmentShaders)
+    add_dependencies(Everest FrontierEnvironmentShaders)
+endif()
+if(TARGET FrontierVirtualizedGeometryShaders)
+    add_dependencies(Everest FrontierVirtualizedGeometryShaders)
+endif()
+if(TARGET FrontierAnalyticIlluminationShaders)
+    add_dependencies(Everest FrontierAnalyticIlluminationShaders)
+endif()
 
 # SolidArc CAD workspace: reuse shared Frontier interface, dependencies and browser.
 option(FRONTIER_BUILD_SOLIDARC "Build the integrated SolidArc CAD workspace" ON)

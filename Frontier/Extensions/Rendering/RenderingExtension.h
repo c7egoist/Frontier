@@ -60,6 +60,7 @@ class RenderingExtension
     bool                                                         HostDeviceAttached_ = false;
     Frontier::VulkanDeviceAccess                                 Device_{};
     std::unique_ptr<Frontier::GlobalIllumination::SceneViewport> Viewport_{};
+    std::string                                                  SceneArchive_{};
     std::string                                                  Quality_{};
     bool                                                         RayTracing_ = true;
     std::string                                                  Failure_{};

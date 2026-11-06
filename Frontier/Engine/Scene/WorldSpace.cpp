@@ -1901,13 +1901,18 @@ bool WorldSpace::LoadLevelSpace(const std::filesystem::path& LevelSpacePath, std
     }
 
     Clear();
-    LoadedLevelPath = LevelSpacePath;
+    LoadedLevelPath    = LevelSpacePath;
+    EnvironmentArchive = "ProvingGround";
 
     if (const toml::table* LevelHeader = Document["level"].as_table())
     {
         if (const auto Name = (*LevelHeader)["name"].value<std::string>())
         {
             WorldName = *Name;
+        }
+        if (const auto Archive = (*LevelHeader)["environment_archive"].value<std::string>(); Archive && !Archive->empty())
+        {
+            EnvironmentArchive = *Archive;
         }
     }
 
@@ -1982,6 +1987,10 @@ bool WorldSpace::SaveLevelSpace(const std::filesystem::path& LevelSpacePath, std
     toml::table Header;
     Header.insert_or_assign("format_version", int64_t{1});
     Header.insert_or_assign("name", WorldName);
+    if (!EnvironmentArchive.empty() && EnvironmentArchive != "ProvingGround")
+    {
+        Header.insert_or_assign("environment_archive", EnvironmentArchive);
+    }
     Root.insert_or_assign("level", std::move(Header));
 
     std::unordered_map<uint64_t, std::string> TokenIdentities;

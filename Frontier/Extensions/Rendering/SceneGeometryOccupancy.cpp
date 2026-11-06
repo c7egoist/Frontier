@@ -126,7 +126,8 @@ void SceneGeometryOccupancy::Reset(const Frontier::GlobalIllumination::SceneStru
             const auto& Occupant = Entries_[Index];
             const bool  Vehicle  = static_cast<int32_t>(Index) == Scene_->VehicleBody ||
                                  std::find(Scene_->VehicleWheels.begin(), Scene_->VehicleWheels.end(), static_cast<int32_t>(Index)) !=
-                                     Scene_->VehicleWheels.end();
+                                     Scene_->VehicleWheels.end() ||
+                                 Occupant.Name == "Hero plates";
             Coverable_[Index] = !Vehicle && !Occupant.Inactive && !Occupant.Fragment && !Scene_->QueryReserved(Index) &&
                                 (Occupant.Participation & OccupantParticipation::Raster) != 0;
             if (Scene_->QueryReserved(Index)) ReserveSet_[Index] = static_cast<int32_t>(Occupant.FacetSet);

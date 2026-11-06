@@ -39,7 +39,8 @@ SceneViewport::SceneViewport() = default;
 
 SceneViewport::~SceneViewport()
 {
-    // 📝 Device resources die before their exchanges; the borrowed environment views before the environment images.
+    // 📝 Device resources die before their exchanges; retire in-flight work before tearing down borrowed views and host buffers.
+    if (Exchange_) Exchange_->AwaitIdle();
     PresentedView_.reset();
     Pick_.reset();
     Overlay_.reset();
@@ -82,9 +83,28 @@ bool SceneViewport::Construct(const VulkanDeviceAccess* HostDevice, const SceneV
     }
     if (Configuration.Journal) Configuration.Journal("bring-up on " + Adapter_ + " (" + (HostDevice != nullptr ? "the editor's device" : "an own device") + ")");
 
-    // ① the proving ground exactly as the demo built it, the vehicle deactivated (no car yet)
+    // ① resolve <ArchiveStem>.facetspace dynamically (falling back to ProvingGround.facetspace or first *.facetspace)
     IlluminationAssets Assets;
-    Assets.FacetSpace  = Configuration.SceneArchive / "ProvingGround.facetspace";
+    const std::string  ArchiveStem   = Configuration.SceneArchive.filename().string();
+    std::filesystem::path FacetCandidate = Configuration.SceneArchive / (ArchiveStem + ".facetspace");
+    std::error_code       FacetError;
+    if (!std::filesystem::is_regular_file(FacetCandidate, FacetError))
+    {
+        FacetCandidate = Configuration.SceneArchive / "ProvingGround.facetspace";
+        if (!std::filesystem::is_regular_file(FacetCandidate, FacetError) &&
+            std::filesystem::is_directory(Configuration.SceneArchive, FacetError))
+        {
+            for (const auto& Entry : std::filesystem::directory_iterator(Configuration.SceneArchive, FacetError))
+            {
+                if (Entry.is_regular_file() && Entry.path().extension() == ".facetspace")
+                {
+                    FacetCandidate = Entry.path();
+                    break;
+                }
+            }
+        }
+    }
+    Assets.FacetSpace  = FacetCandidate;
     Assets.OmitVehicle = true;
     if (!ReadArchive(Configuration.SceneArchive / "Materials.bin", Assets.MaterialProfiles, OutDiagnostic)) return false;
     // 📝 Beyond the demo: the engine shapes (EngineContent/ShapeArchives) and the editor's reserve of occupants for copies and
@@ -111,6 +131,14 @@ bool SceneViewport::Construct(const VulkanDeviceAccess* HostDevice, const SceneV
     Host_->Journal = Configuration.Journal;
     ScreenExtent = {std::max(64u, ScreenExtent[0]), std::max(64u, ScreenExtent[1])};
     if (!Host_->Construct(Assets, Settings, ScreenExtent, OutDiagnostic)) return false;
+    if (ArchiveStem == "Lobby")
+    {
+        Host_->StreetLampPoles.clear();
+        Host_->PointLampPosts.clear();
+        Host_->Luminaires.StudioLuminaires = QueryLobbyStudioLuminaires();
+        Host_->Luminaires.VehicleBeam      = AutomotiveBeam::Off;
+        Host_->Luminaires.RoofLightEnabled = false;
+    }
 
     // ② idle profiles of the parts the editor does not run yet (vehicle visual, effects, the demo's own clouds)
     const std::pair<const char*, std::shared_ptr<DeviceRegion>> Profiles[] = {{"VehicleProfile.bin", Host_->VehicleRegion},

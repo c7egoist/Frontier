@@ -7,12 +7,12 @@
 
 #include "Engine/Diagnostics/LogCategories.h"
 #include "Engine/Diagnostics/LogStream.h"
+#include "Engine/Scene/VehicleReadings.h"
 
 #if FRONTIER_EDITOR && defined(FRONTIER_WITH_INTERFACE_SDK)
 #include "Frontier/Extensions/Rendering/RenderingExtension.h"
 #include "Frontier/Extensions/Physics/PhysicsExtension.h"
 #include "Frontier/Extensions/Networking/NetworkingSession.h"
-#include "Engine/Scene/VehicleReadings.h"
 #include "Engine/Scene/WorldRegister.h"
 
 #include "Engine/Interface/Controls/WorldVectorOverlay.h"
@@ -504,6 +504,232 @@ void EverestWorkspace::InitializeWorld()
     // 📝 Records with a file of their own (a Particles record's .particlespace) keep it beside this level.
     Frontier::InspectorRuntime::Instance().ConfigureLevelFile(ActiveLevelPath);
 #endif
+    SynchronizeActiveLevelState(true, false);
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                    SESSION & LEVEL TRANSITIONS
+//------------------------------------------------------------------------------------------------------------------------
+
+bool EverestWorkspace::QueryLobbyActive() const noexcept
+{
+    return QueryWorldSpace().QueryEnvironmentArchive() == "Lobby";
+}
+
+Frontier::VehicleSubjectKinematics EverestWorkspace::ResolveVehicleKinematics(double AspectRatio) const
+{
+    Frontier::VehicleSubjectKinematics Subject{};
+    Subject.AspectRatio = std::max(0.25, AspectRatio);
+    Subject.Available   = false;
+
+    for (const Frontier::SceneRecordBase* Candidate : QueryWorldSpace().FindAllByType("Vehicle"))
+    {
+        const auto* VehicleRec = dynamic_cast<const Frontier::VehicleRecord*>(Candidate);
+        if (VehicleRec == nullptr || !VehicleRec->QueryConfiguration().Visible)
+        {
+            continue;
+        }
+        Subject.Available = true;
+        const Frontier::VehicleConfiguration& Configuration = VehicleRec->QueryConfiguration();
+
+        Frontier::VehicleReading Reading;
+        if (Frontier::QueryVehicleReading(Candidate->QueryToken(), Reading) && Reading.Simulating)
+        {
+            const Frontier::Vehicle::ChassisKinematics& Chassis = Reading.Telemetry.Chassis;
+            const Frontier::Vehicle::Vec3               Fwd     = Chassis.Orientation.Rotate({1.0f, 0.0f, 0.0f});
+            const Frontier::Vehicle::Vec3               Left    = Chassis.Orientation.Rotate({0.0f, 1.0f, 0.0f});
+            const Frontier::Vehicle::Vec3               Up      = Chassis.Orientation.Rotate({0.0f, 0.0f, 1.0f});
+            Subject.PositionMetres       = {Chassis.Position.x, Chassis.Position.y, Chassis.Position.z};
+            Subject.ForwardUnit          = {Fwd.x, Fwd.y, Fwd.z};
+            Subject.LeftUnit             = {Left.x, Left.y, Left.z};
+            Subject.UpUnit               = {Up.x, Up.y, Up.z};
+            Subject.VelocityMetresPerSec = {Chassis.LinearVelocity.x, Chassis.LinearVelocity.y, Chassis.LinearVelocity.z};
+            Subject.SpeedMetresPerSecond = std::sqrt(Subject.VelocityMetresPerSec[0] * Subject.VelocityMetresPerSec[0] +
+                                                     Subject.VelocityMetresPerSec[1] * Subject.VelocityMetresPerSec[1] +
+                                                     Subject.VelocityMetresPerSec[2] * Subject.VelocityMetresPerSec[2]);
+            Subject.GroundFloorMetres    = static_cast<double>(Configuration.Spatial.PositionMetres[2]);
+            if (Reading.VisualValid)
+            {
+                Subject.FrontLeftHubMetres = {Reading.WheelTransforms[0][12], Reading.WheelTransforms[0][13], Reading.WheelTransforms[0][14]};
+                Subject.RearRightHubMetres = {Reading.WheelTransforms[3][12], Reading.WheelTransforms[3][13], Reading.WheelTransforms[3][14]};
+                return Subject;
+            }
+        }
+        else
+        {
+            const double YawRad   = static_cast<double>(Configuration.Spatial.OrientationDegrees[2]) * DegreesToRadian;
+            const double PitchRad = static_cast<double>(Configuration.Spatial.OrientationDegrees[1]) * DegreesToRadian;
+            const double RollRad  = static_cast<double>(Configuration.Spatial.OrientationDegrees[0]) * DegreesToRadian;
+            const Frontier::Vehicle::Quat Orientation =
+                (Frontier::Vehicle::Quat::AxisAngle({0.0f, 0.0f, 1.0f}, static_cast<float>(YawRad)) *
+                 Frontier::Vehicle::Quat::AxisAngle({0.0f, 1.0f, 0.0f}, static_cast<float>(PitchRad)) *
+                 Frontier::Vehicle::Quat::AxisAngle({1.0f, 0.0f, 0.0f}, static_cast<float>(RollRad))).Normalized();
+            const Frontier::Vehicle::Vec3 Fwd  = Orientation.Rotate({1.0f, 0.0f, 0.0f});
+            const Frontier::Vehicle::Vec3 Left = Orientation.Rotate({0.0f, 1.0f, 0.0f});
+            const Frontier::Vehicle::Vec3 Up   = Orientation.Rotate({0.0f, 0.0f, 1.0f});
+            const double GroundOffset          = static_cast<double>(Configuration.Specification.Geometry.AuthoredGroundOffset());
+            Subject.GroundFloorMetres          = static_cast<double>(Configuration.Spatial.PositionMetres[2]);
+            Subject.PositionMetres             = {
+                static_cast<double>(Configuration.Spatial.PositionMetres[0]) + Fwd.x * 0.0 + Up.x * GroundOffset,
+                static_cast<double>(Configuration.Spatial.PositionMetres[1]) + Fwd.y * 0.0 + Up.y * GroundOffset,
+                static_cast<double>(Configuration.Spatial.PositionMetres[2]) + Up.z * GroundOffset,
+            };
+            Subject.ForwardUnit = {Fwd.x, Fwd.y, Fwd.z};
+            Subject.LeftUnit    = {Left.x, Left.y, Left.z};
+            Subject.UpUnit      = {Up.x, Up.y, Up.z};
+        }
+
+        auto TransformWheelOffset = [&](double X, double Y, double Z)
+        {
+            return std::array<double, 3>{
+                Subject.PositionMetres[0] + Subject.ForwardUnit[0] * X + Subject.LeftUnit[0] * Y + Subject.UpUnit[0] * Z,
+                Subject.PositionMetres[1] + Subject.ForwardUnit[1] * X + Subject.LeftUnit[1] * Y + Subject.UpUnit[1] * Z,
+                Subject.PositionMetres[2] + Subject.ForwardUnit[2] * X + Subject.LeftUnit[2] * Y + Subject.UpUnit[2] * Z,
+            };
+        };
+        Subject.FrontLeftHubMetres = TransformWheelOffset(1.7274, 1.0475, -0.0215);
+        Subject.RearRightHubMetres = TransformWheelOffset(-1.6686, -1.0475, -0.0215);
+        break;
+    }
+
+    return Subject;
+}
+
+void EverestWorkspace::ApplyVehicleCameraSolution(const Frontier::VehicleCameraSolution& Solution)
+{
+    ActiveNearClipMetres = Solution.NearClipMetres;
+    ActiveVeilOpacity    = Solution.VeilOpacity;
+    LastAppliedStudioEye = Solution.PositionMetres;
+
+#if FRONTIER_EDITOR && defined(FRONTIER_WITH_INTERFACE_SDK)
+    Flight.Position            = Solution.PositionMetres;
+    Flight.VerticalFieldOfView = Solution.VerticalFieldOfViewRadians;
+    Flight.FieldOfViewOffset   = 0.0;
+    Flight.FieldOfViewRate     = 0.0;
+    Flight.Velocity            = {0.0, 0.0, 0.0};
+    Navigation.Up              = Solution.UpUnit;
+
+    const double Dx            = Solution.TargetMetres[0] - Solution.PositionMetres[0];
+    const double Dy            = Solution.TargetMetres[1] - Solution.PositionMetres[1];
+    const double Dz            = Solution.TargetMetres[2] - Solution.PositionMetres[2];
+    const double Planar        = std::hypot(Dx, Dy);
+    const double Distance      = std::max(0.05, std::sqrt(Dx * Dx + Dy * Dy + Dz * Dz));
+    Flight.PivotDistance       = Distance;
+    Flight.Heading             = std::atan2(Dy, Dx) / DegreesToRadian;
+    Flight.Elevation           = std::clamp(std::atan2(Dz, std::max(1.0e-6, Planar)) / DegreesToRadian, -89.5, 89.5);
+#endif
+}
+
+void EverestWorkspace::SynchronizeActiveLevelState(bool ResetOutdoorEditorCamera, bool StartDrivingSimulation)
+{
+    const bool InLobby = QueryLobbyActive();
+    if (InLobby)
+    {
+        (void)Lobby.SynchronizeWorldVisibility(QueryWorldSpace());
+        VehicleCamera.ConfigureEnvironment(true, ResolveVehicleKinematics());
+        StudioCameraEngaged = true;
+        ApplyVehicleCameraSolution(VehicleCamera.QueryLastSolution());
+    }
+    else
+    {
+        StudioCameraEngaged  = false;
+        ActiveNearClipMetres = 0.05;
+        VehicleCamera.ConfigureEnvironment(false, ResolveVehicleKinematics());
+#if FRONTIER_EDITOR && defined(FRONTIER_WITH_INTERFACE_SDK)
+        if (ResetOutdoorEditorCamera)
+        {
+            Flight     = SceneViewportFlight{};
+            Navigation = SceneViewportNavigation{};
+        }
+        if (StartDrivingSimulation && (!Physics || !Physics->QueryRunning()))
+        {
+            ToggleSimulation();
+        }
+#else
+        (void)ResetOutdoorEditorCamera;
+        (void)StartDrivingSimulation;
+#endif
+    }
+}
+
+void EverestWorkspace::CheckExternalLevelReload()
+{
+    const std::filesystem::path Loaded = QueryWorldSpace().QueryLoadedLevelPath();
+    if (Loaded.empty() || Loaded == ActiveLevelPath)
+    {
+        return;
+    }
+    ActiveLevelPath = Loaded;
+#if FRONTIER_EDITOR && defined(FRONTIER_WITH_INTERFACE_SDK)
+    PublishedGeometryGeneration = 0;
+    Frontier::SceneDirectory::Instance().ConfigureActiveSceneHeader(ActiveLevelPath.stem().string(), "Frontier LevelSpace");
+    Frontier::InspectorRuntime::Instance().ConfigureLevelFile(ActiveLevelPath);
+    OutlinerPanel.Synchronize(Frontier::SceneDirectory::Instance());
+    // Reset Flight to standard outdoor scene camera only if the caller has not already staged a custom Flight pose.
+    const double DriftFromStudio = std::hypot(Flight.Position[0] - LastAppliedStudioEye[0],
+                                              std::hypot(Flight.Position[1] - LastAppliedStudioEye[1],
+                                                         Flight.Position[2] - LastAppliedStudioEye[2]));
+    const bool CallerLeftStudioPose = StudioCameraEngaged && (DriftFromStudio < 1.0e-3);
+    SynchronizeActiveLevelState(CallerLeftStudioPose, false);
+#else
+    SynchronizeActiveLevelState(false, false);
+#endif
+}
+
+bool EverestWorkspace::OpenLevel(const std::filesystem::path& LevelPath, bool StartDrivingSimulation)
+{
+#if FRONTIER_EDITOR && defined(FRONTIER_WITH_INTERFACE_SDK)
+    if (Physics && Physics->QueryRunning())
+    {
+        Physics->End(QueryWorldSpace());
+        DriverControls = Frontier::Vehicle::DriverInputIntegrator{};
+    }
+    Frontier::ClearVehicleReadings();
+#endif
+
+    std::filesystem::path ResolvedPath = LevelPath;
+    if (ResolvedPath.is_relative() && !std::filesystem::exists(ResolvedPath))
+    {
+        ResolvedPath = ProjectRoot / ResolvedPath;
+    }
+
+    std::string LoadDiag;
+    if (!QueryWorldSpace().LoadLevelSpace(ResolvedPath, &LoadDiag))
+    {
+        Diagnostic = LoadDiag;
+        Frontier::WriteLogFormat(EnsureProjectLogCategory("Everest"), Frontier::LogSeverity::Error, Frontier::LogVerbosity::Log,
+                                 "EverestWorkspace", "OpenLevel failed for '%s': %s",
+                                 ResolvedPath.string().c_str(), LoadDiag.c_str());
+        return false;
+    }
+
+    ActiveLevelPath = QueryWorldSpace().QueryLoadedLevelPath();
+#if FRONTIER_EDITOR && defined(FRONTIER_WITH_INTERFACE_SDK)
+    PublishedGeometryGeneration = 0;
+    PendingAlbedo.clear();
+    Frontier::SceneDirectory::Instance().ConfigureActiveSceneHeader(ActiveLevelPath.stem().string(), "Frontier LevelSpace");
+    Frontier::InspectorRuntime::Instance().ConfigureLevelFile(ActiveLevelPath);
+    OutlinerPanel.Synchronize(Frontier::SceneDirectory::Instance());
+    if (Frontier::SceneRecordBase* Solar = QueryWorldSpace().FindFirstByType("Solar"))
+    {
+        OutlinerPanel.Select(Solar->QueryToken());
+    }
+#endif
+
+    SynchronizeActiveLevelState(true, StartDrivingSimulation);
+    Frontier::WriteLogFormat(EnsureProjectLogCategory("Everest"), Frontier::LogSeverity::Info, Frontier::LogVerbosity::Log,
+                             "EverestWorkspace", "Opened level '%s' (archive '%s', %zu records).",
+                             ActiveLevelPath.filename().string().c_str(),
+                             QueryWorldSpace().QueryEnvironmentArchive().c_str(),
+                             QueryWorldSpace().QueryRecordCount());
+    return true;
+}
+
+void EverestWorkspace::BeginLevelTransition(const std::filesystem::path& LevelPath, bool StartDrivingSimulation)
+{
+    PendingTransitionLevel = LevelPath;
+    PendingTransitionDrive = StartDrivingSimulation;
+    VehicleCamera.BeginRouteTransition(0.48, 0.58);
 }
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -512,11 +738,13 @@ void EverestWorkspace::InitializeWorld()
 
 void EverestWorkspace::IntegrateSimulation(double DeltaSeconds)
 {
+    CheckExternalLevelReload();
+
     const float ClampedDt = static_cast<float>(std::clamp(DeltaSeconds, 0.0, 0.25));
     ElapsedSeconds += static_cast<double>(ClampedDt);
 
+    Lobby.Advance(QueryWorldSpace(), static_cast<double>(ClampedDt));
     Application.StepFrame(ClampedDt);
-
 }
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -1165,7 +1393,80 @@ void EverestWorkspace::IntegrateViewportCamera(bool Hovered, bool Active, double
     if(Selected!=Navigation.Selected && Navigation.Mode!=SceneCameraMode::Free && Navigation.Mode!=SceneCameraMode::Space)
         ConfigureSceneCamera(Flight,Navigation,Navigation.Mode,Subject);
     Navigation.Selected=Selected;
+
+    const bool KeysAvailable = (Hovered || ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) &&
+                               !IO.WantTextInput && !IO.KeyCtrl && !IO.KeyAlt && !Pointer.RightDown &&
+                               !ConstructDialog.QueryOpen() && ImGui::GetTopMostPopupModal() == nullptr;
+
+    if (QueryLobbyActive())
+    {
+        if (KeysAvailable)
+        {
+            for (int SlotKey = 0; SlotKey < 5; ++SlotKey)
+            {
+                if (ImGui::IsKeyPressed(static_cast<ImGuiKey>(ImGuiKey_1 + SlotKey), false))
+                {
+                    Lobby.ConfigureTargetDriverCount(QueryWorldSpace(), static_cast<uint32_t>(SlotKey + 1));
+                    OutlinerPanel.Synchronize(Frontier::SceneDirectory::Instance());
+                    AnnounceViewportNotice(std::to_string(Lobby.QueryActiveVehicleCount()) + " / 5 Lobby vehicles active");
+                }
+            }
+            if (ImGui::IsKeyPressed(ImGuiKey_Enter, false) && !VehicleCamera.QueryRouteTransitionActive())
+            {
+                BeginLevelTransition(ProjectRoot / "Content" / "Levels" / "ProvingGroundVehicle.levelspace", true);
+            }
+        }
+
+        if (Pointer.RightDown)
+        {
+            StudioCameraEngaged  = false;
+            ActiveNearClipMetres = 0.05;
+        }
+
+        if (StudioCameraEngaged)
+        {
+            Frontier::VehicleCameraInput CameraInput{};
+            CameraInput.PointerDeltaPixels = Pointer.MotionPixels;
+            CameraInput.WheelNotches       = Pointer.WheelNotches;
+            CameraInput.PrimaryDrag        = Active && Pointer.LeftDown;
+            CameraInput.CycleNextRig       = KeysAvailable && !IO.KeyShift && ImGui::IsKeyPressed(ImGuiKey_C, false);
+            CameraInput.CyclePreviousRig   = KeysAvailable && IO.KeyShift && ImGui::IsKeyPressed(ImGuiKey_C, false);
+            CameraInput.AnyActivity        = CameraInput.PrimaryDrag || std::abs(CameraInput.WheelNotches) > 0.0;
+
+            const double Aspect = LastReadout.ScreenExtent[1] > 0u
+                                      ? static_cast<double>(LastReadout.ScreenExtent[0]) / static_cast<double>(LastReadout.ScreenExtent[1])
+                                      : 16.0 / 9.0;
+            const auto Solution = VehicleCamera.Advance(ResolveVehicleKinematics(Aspect), CameraInput, DeltaSeconds);
+            ApplyVehicleCameraSolution(Solution);
+            if (CameraInput.CycleNextRig || CameraInput.CyclePreviousRig)
+            {
+                AnnounceViewportNotice("Studio camera: " + std::string(Frontier::QueryVehicleCameraModeLabel(VehicleCamera.QueryMode())) + " (C)");
+            }
+            if (VehicleCamera.ConsumeRouteSwitchPoint() && !PendingTransitionLevel.empty())
+            {
+                const std::filesystem::path Destination = std::exchange(PendingTransitionLevel, {});
+                (void)OpenLevel(Destination, PendingTransitionDrive);
+            }
+            return;
+        }
+    }
+
     IntegrateSceneCamera(Flight,Navigation,Pointer,Subject,DeltaSeconds);
+
+    if (VehicleCamera.QueryRouteTransitionActive())
+    {
+        const auto FadeSolution = VehicleCamera.Advance(ResolveVehicleKinematics(), Frontier::VehicleCameraInput{}, DeltaSeconds);
+        ActiveVeilOpacity       = FadeSolution.VeilOpacity;
+        if (VehicleCamera.ConsumeRouteSwitchPoint() && !PendingTransitionLevel.empty())
+        {
+            const std::filesystem::path Destination = std::exchange(PendingTransitionLevel, {});
+            (void)OpenLevel(Destination, PendingTransitionDrive);
+        }
+    }
+    else
+    {
+        ActiveVeilOpacity = 0.0;
+    }
 }
 
 void EverestWorkspace::ReleasePointerConstraint()
@@ -1253,6 +1554,7 @@ void EverestWorkspace::ConstructViewportSurface()
         Request.CameraPosition      = Flight.Position;
         Request.CameraTarget        = Flight.ResolveTarget();
         Request.VerticalFieldOfView = Flight.ResolveFieldOfView();
+        Request.CameraNear          = ActiveNearClipMetres;
         Request.DeltaSeconds        = ViewportDeltaSeconds;
         Request.CameraUp = Navigation.Up;
         Request.PickSerial          = PickSerial;
@@ -1377,7 +1679,16 @@ void EverestWorkspace::ConstructViewportBar(const ImVec2& Min,const ImVec2& Max,
     X+=Button+Gap;
     if (ViewportChromeControls::ConstructIconButton("##HomeCamera",{X,Min.y+(Height-Button)*.5f},Button,"RotateCcw",false,true,"Return to the scene camera"))
     {
-        Flight=SceneViewportFlight{};Navigation=SceneViewportNavigation{};
+        if (QueryLobbyActive())
+        {
+            StudioCameraEngaged = true;
+            VehicleCamera.ConfigureModeImmediate(Frontier::VehicleCameraMode::Orbit, ResolveVehicleKinematics());
+            ApplyVehicleCameraSolution(VehicleCamera.QueryLastSolution());
+        }
+        else
+        {
+            Flight=SceneViewportFlight{};Navigation=SceneViewportNavigation{};
+        }
     }
     X+=Button+Gap;
     // 📝 Debug views (Render settings › Debug views): the demo's inspection views and the analytic illumination as a view of its own.
@@ -1434,6 +1745,10 @@ void EverestWorkspace::ConstructViewportOverlays(const ImVec2& StageMin, const I
                                                      Image.Status.empty() ? "Starting" : Image.Status.c_str(), 0.0f, Scale);
     }
     const bool Overlaid = !Overlays.Fullscreen && Image.Texture != 0;
+    if (PresentSceneViewport)
+    {
+        ConstructSessionViewportOverlay(StageMin, StageMax, Scale);
+    }
 
     // ③ #hud: the readout lines of the demo's PresentMeasurements, with this viewport's camera keys
     if (Overlaid && Overlays.ReadoutVisible)
@@ -1477,6 +1792,180 @@ void EverestWorkspace::ConstructViewportOverlays(const ImVec2& StageMin, const I
     {
         ViewportChromeControls::ConstructOverlayNotice(DrawList, Faces, StageMin, StageMax, NoticeText.c_str(), Scale);
     }
+
+    // ⑤ Cinematic / route transition fade veil across the viewport stage.
+    if (ActiveVeilOpacity > 0.002)
+    {
+        const int Alpha = std::clamp(static_cast<int>(std::lround(ActiveVeilOpacity * 255.0)), 0, 255);
+        DrawList->AddRectFilled(StageMin, StageMax, IM_COL32(6, 8, 12, Alpha));
+    }
+}
+
+void EverestWorkspace::ConstructSessionViewportOverlay(const ImVec2& StageMin, const ImVec2& StageMax, float Scale)
+{
+    if (Overlays.Fullscreen)
+    {
+        return;
+    }
+
+    const float StageWidth  = StageMax.x - StageMin.x;
+    const float StageHeight = StageMax.y - StageMin.y;
+    if (StageWidth < 260.0f * Scale || StageHeight < 180.0f * Scale)
+    {
+        return;
+    }
+
+    ImDrawList* DrawList = ImGui::GetWindowDrawList();
+
+    // Outdoor driving strip (Proving Grounds): quick return to Studio Lobby + 8-rig VehicleHMI camera selector + live speed.
+    if (!QueryLobbyActive())
+    {
+        if (!QueryVehicleDrivingActive())
+        {
+            return;
+        }
+        const ImVec2 StripMin(StageMin.x + 12.0f * Scale, StageMin.y + 12.0f * Scale);
+        ImGui::SetCursorScreenPos(StripMin);
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 6.0f * Scale);
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10.0f * Scale, 5.0f * Scale));
+        ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(18, 24, 34, 220));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(34, 48, 68, 240));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, IM_COL32(48, 68, 96, 255));
+        if (ImGui::Button("Studio Lobby (L)##ReturnToLobby") && !VehicleCamera.QueryRouteTransitionActive())
+        {
+            BeginLevelTransition(ProjectRoot / "Content" / "Levels" / "Lobby.levelspace", false);
+        }
+        ImGui::SameLine(0.0f, 6.0f * Scale);
+        const std::string RigLabel = "Cam: " + std::string(Frontier::QueryVehicleCameraModeLabel(VehicleCamera.QueryMode())) + " (C)##DriveRig";
+        if (ImGui::Button(RigLabel.c_str()))
+        {
+            VehicleCamera.CycleRig(false);
+        }
+        const auto Subject = ResolveVehicleKinematics();
+        if (Subject.Available)
+        {
+            ImGui::SameLine(0.0f, 6.0f * Scale);
+            char SpeedBadge[48];
+            std::snprintf(SpeedBadge, sizeof(SpeedBadge), "%.0f km/h", Subject.SpeedMetresPerSecond * 3.6);
+            ImGui::BeginDisabled();
+            ImGui::Button(SpeedBadge);
+            ImGui::EndDisabled();
+        }
+        ImGui::PopStyleColor(3);
+        ImGui::PopStyleVar(2);
+        return;
+    }
+
+    // Studio Lobby session card: 1..5 dynamic roster stands, rig transition camera pills, and Proving Grounds launch.
+    const float  CardWidth  = std::min(292.0f * Scale, StageWidth - 24.0f * Scale);
+    const float  CardHeight = 228.0f * Scale;
+    const ImVec2 CardMin(StageMin.x + 12.0f * Scale, StageMin.y + 12.0f * Scale);
+    const ImVec2 CardMax(CardMin.x + CardWidth, CardMin.y + CardHeight);
+
+    DrawList->AddRectFilled(CardMin, CardMax, IM_COL32(12, 16, 22, 214), 10.0f * Scale);
+    DrawList->AddRect(CardMin, CardMax, IM_COL32(96, 122, 152, 92), 10.0f * Scale, 0, 1.0f);
+
+    const auto&    SessionState = Lobby.QuerySession();
+    const uint32_t ActiveCount  = Lobby.QueryActiveVehicleCount();
+    const auto&    CameraState  = VehicleCamera.QueryLastSolution();
+
+    char HeaderLine[96];
+    if (CameraState.CinematicActive)
+    {
+        std::snprintf(HeaderLine, sizeof(HeaderLine), "STUDIO LOBBY  \xC2\xB7  %u/5  \xC2\xB7  TOUR %u/6",
+                      ActiveCount, CameraState.CinematicShotIndex + 1u);
+    }
+    else if (CameraState.EntranceDollyActive)
+    {
+        std::snprintf(HeaderLine, sizeof(HeaderLine), "STUDIO LOBBY  \xC2\xB7  %u/5  \xC2\xB7  ENTRANCE", ActiveCount);
+    }
+    else if (CameraState.TransitionActive)
+    {
+        std::snprintf(HeaderLine, sizeof(HeaderLine), "STUDIO LOBBY  \xC2\xB7  %u/5  \xC2\xB7  TRANSITION", ActiveCount);
+    }
+    else
+    {
+        std::snprintf(HeaderLine, sizeof(HeaderLine), "STUDIO LOBBY  \xC2\xB7  %u/5 DRIVERS", ActiveCount);
+    }
+    DrawList->AddText(ImVec2(CardMin.x + 12.0f * Scale, CardMin.y + 10.0f * Scale), IM_COL32(226, 234, 244, 245), HeaderLine);
+
+    const auto& Presets = QueryLobbyPresetCallsigns();
+    for (uint32_t Slot = 0u; Slot < 5u; ++Slot)
+    {
+        const float                         RowY        = CardMin.y + (34.0f + static_cast<float>(Slot) * 21.0f) * Scale;
+        const Frontier::SessionParticipant* Participant = SessionState.FindParticipantInSlot(Slot);
+        char                                RowText[96];
+        ImU32                               RowTint = IM_COL32(118, 130, 146, 175);
+        if (Participant != nullptr)
+        {
+            std::snprintf(RowText, sizeof(RowText), "P%u  %-8s  \xC2\xB7  %s%s",
+                          Slot + 1u,
+                          Participant->Callsign.c_str(),
+                          Participant->RankBadge.c_str(),
+                          Participant->LocalDriver ? "  [HOST]" : "");
+            RowTint = Participant->LocalDriver ? IM_COL32(142, 220, 178, 245) : IM_COL32(188, 212, 238, 235);
+        }
+        else
+        {
+            std::snprintf(RowText, sizeof(RowText), "P%u  Stand vacant  (%s)", Slot + 1u, std::string(Presets[Slot].Callsign).c_str());
+        }
+        DrawList->AddText(ImVec2(CardMin.x + 12.0f * Scale, RowY), RowTint, RowText);
+    }
+
+    ImGui::SetCursorScreenPos(ImVec2(CardMin.x + 10.0f * Scale, CardMin.y + 144.0f * Scale));
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 5.0f * Scale);
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(7.0f * Scale, 3.5f * Scale));
+    ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(26, 34, 46, 230));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(42, 58, 80, 245));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, IM_COL32(58, 82, 112, 255));
+
+    ImGui::BeginDisabled(ActiveCount >= 5u);
+    if (ImGui::Button("+ Join##LobbyJoin"))
+    {
+        (void)Lobby.JoinGuestDriver(QueryWorldSpace());
+        OutlinerPanel.Synchronize(Frontier::SceneDirectory::Instance());
+    }
+    ImGui::EndDisabled();
+
+    ImGui::SameLine(0.0f, 5.0f * Scale);
+    ImGui::BeginDisabled(ActiveCount <= 1u);
+    if (ImGui::Button("- Leave##LobbyLeave"))
+    {
+        (void)Lobby.LeaveLastGuest(QueryWorldSpace());
+        OutlinerPanel.Synchronize(Frontier::SceneDirectory::Instance());
+    }
+    ImGui::EndDisabled();
+
+    ImGui::SameLine(0.0f, 8.0f * Scale);
+    static constexpr std::array<std::pair<Frontier::VehicleCameraMode, const char*>, 3> StudioRigs = {{
+        {Frontier::VehicleCameraMode::Orbit, "Orbit"},
+        {Frontier::VehicleCameraMode::Cockpit, "Cabin"},
+        {Frontier::VehicleCameraMode::Hmi, "HMI"},
+    }};
+    for (size_t RigIdx = 0u; RigIdx < StudioRigs.size(); ++RigIdx)
+    {
+        if (RigIdx > 0u) ImGui::SameLine(0.0f, 4.0f * Scale);
+        const bool SelectedRig = StudioCameraEngaged && VehicleCamera.QueryMode() == StudioRigs[RigIdx].first;
+        if (SelectedRig) ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(52, 92, 138, 245));
+        if (ImGui::Button(StudioRigs[RigIdx].second))
+        {
+            StudioCameraEngaged = true;
+            VehicleCamera.TransitionToMode(StudioRigs[RigIdx].first);
+        }
+        if (SelectedRig) ImGui::PopStyleColor();
+    }
+
+    ImGui::SetCursorScreenPos(ImVec2(CardMin.x + 10.0f * Scale, CardMin.y + 182.0f * Scale));
+    ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(36, 108, 78, 238));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(48, 136, 98, 250));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, IM_COL32(62, 162, 116, 255));
+    if (ImGui::Button("Enter Proving Grounds  \xE2\x96\xB8##EnterCourse", ImVec2(CardWidth - 20.0f * Scale, 32.0f * Scale)) &&
+        !VehicleCamera.QueryRouteTransitionActive())
+    {
+        BeginLevelTransition(ProjectRoot / "Content" / "Levels" / "ProvingGroundVehicle.levelspace", true);
+    }
+    ImGui::PopStyleColor(6);
+    ImGui::PopStyleVar(2);
 }
 
 void EverestWorkspace::ToggleSimulation()
@@ -1575,6 +2064,10 @@ void EverestWorkspace::IntegrateDrivingControls(double DeltaSeconds)
             Physics->RequestVehicleReset();
             AnnounceViewportNotice("Vehicle reset to start");
         }
+        if (ImGui::IsKeyPressed(ImGuiKey_L, false) && !VehicleCamera.QueryRouteTransitionActive())
+        {
+            BeginLevelTransition(ProjectRoot / "Content" / "Levels" / "Lobby.levelspace", false);
+        }
         if (ImGui::IsKeyPressed(ImGuiKey_C, false))
         {
             for (const Frontier::SceneRecordBase* Candidate : QueryWorldSpace().FindAllByType("Vehicle"))
@@ -1582,10 +2075,9 @@ void EverestWorkspace::IntegrateDrivingControls(double DeltaSeconds)
                 auto* VehicleRec = dynamic_cast<Frontier::VehicleRecord*>(QueryWorldSpace().FindRecord(Candidate->QueryToken()));
                 if (VehicleRec != nullptr && VehicleRec->QueryConfiguration().Possessed)
                 {
-                    bool& Enabled = VehicleRec->AccessConfiguration().ChaseCamera;
-                    Enabled       = !Enabled;
-                    VehicleRec->AccessConfiguration().AdvanceRevision();
-                    AnnounceViewportNotice(Enabled ? "Chase camera on (C)" : "Chase camera off (C)");
+                    VehicleRec->AccessConfiguration().ChaseCamera = true;
+                    VehicleCamera.CycleRig(IO.KeyShift);
+                    AnnounceViewportNotice("Driving camera: " + std::string(Frontier::QueryVehicleCameraModeLabel(VehicleCamera.QueryMode())) + " (C)");
                     break;
                 }
             }
@@ -1621,27 +2113,19 @@ void EverestWorkspace::IntegrateChaseCamera(double DeltaSeconds)
         Frontier::VehicleReading Reading;
         if (!Frontier::QueryVehicleReading(Candidate->QueryToken(), Reading) || !Reading.Simulating) continue;
 
-        const Frontier::Vehicle::ChassisKinematics& Chassis = Reading.Telemetry.Chassis;
-        const Frontier::Vehicle::Vec3               Forward = Chassis.Orientation.Rotate({ 1.0f, 0.0f, 0.0f });
-        const std::array<double, 3>                 DesiredEye = {
-            static_cast<double>(Chassis.Position.x - Forward.x * 7.2f),
-            static_cast<double>(Chassis.Position.y - Forward.y * 7.2f),
-            static_cast<double>(std::max(1.2f, Chassis.Position.z + 1.85f)) };
-        const std::array<double, 3> Focus = {
-            static_cast<double>(Chassis.Position.x + Forward.x * 3.5f),
-            static_cast<double>(Chassis.Position.y + Forward.y * 3.5f),
-            static_cast<double>(Chassis.Position.z + 0.45f) };
-
-        const double Blend = 1.0 - std::exp(-std::clamp(DeltaSeconds, 0.0, 0.25) * 9.0);
-        for (size_t Axis = 0; Axis < 3; ++Axis)
-            Flight.Position[Axis] += (DesiredEye[Axis] - Flight.Position[Axis]) * Blend;
-        const double Dx     = Focus[0] - Flight.Position[0];
-        const double Dy     = Focus[1] - Flight.Position[1];
-        const double Dz     = Focus[2] - Flight.Position[2];
-        const double Planar = std::max(1.0e-6, std::hypot(Dx, Dy));
-        Flight.Heading      = std::atan2(Dy, Dx) * 180.0 / 3.14159265358979323846;
-        Flight.Elevation    = std::atan2(Dz, Planar) * 180.0 / 3.14159265358979323846;
-        Flight.Velocity     = { 0.0, 0.0, 0.0 };
+        const ImGuiIO&               IO = ImGui::GetIO();
+        Frontier::VehicleCameraInput CameraInput{};
+        if (!IO.WantCaptureMouse)
+        {
+            CameraInput.PointerDeltaPixels = {static_cast<double>(IO.MouseDelta.x), static_cast<double>(IO.MouseDelta.y)};
+            CameraInput.WheelNotches       = static_cast<double>(IO.MouseWheel);
+            CameraInput.PrimaryDrag        = ImGui::IsMouseDown(ImGuiMouseButton_Left);
+        }
+        const double Aspect = LastReadout.ScreenExtent[1] > 0u
+                                  ? static_cast<double>(LastReadout.ScreenExtent[0]) / static_cast<double>(LastReadout.ScreenExtent[1])
+                                  : 16.0 / 9.0;
+        const auto Solution = VehicleCamera.Advance(ResolveVehicleKinematics(Aspect), CameraInput, DeltaSeconds);
+        ApplyVehicleCameraSolution(Solution);
         break;
     }
 }

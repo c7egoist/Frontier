@@ -275,6 +275,9 @@ class WorldSpace
     [[nodiscard]] const std::string& QueryWorldName() const noexcept { return WorldName; }
     void                             ConfigureWorldName(std::string Name) { WorldName = std::move(Name); }
 
+    [[nodiscard]] const std::string& QueryEnvironmentArchive() const noexcept { return EnvironmentArchive; }
+    void                             ConfigureEnvironmentArchive(std::string Archive) { EnvironmentArchive = std::move(Archive); }
+
     [[nodiscard]] const std::filesystem::path& QueryLoadedLevelPath() const noexcept { return LoadedLevelPath; }
 
     bool LoadLevelSpace(const std::filesystem::path& LevelSpacePath, std::string* OutError = nullptr);
@@ -284,7 +287,8 @@ class WorldSpace
   private:
     void RegisterNativeEngineTypes();
 
-    std::string                                   WorldName = "Default";
+    std::string                                   WorldName          = "Default";
+    std::string                                   EnvironmentArchive = "ProvingGround";
     std::filesystem::path                         LoadedLevelPath;
     std::vector<SceneTypeRegistration>            TypeRegistry;
     std::vector<std::unique_ptr<SceneRecordBase>> OwnedRecords;
