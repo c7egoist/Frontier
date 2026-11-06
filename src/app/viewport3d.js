@@ -2,7 +2,7 @@
 import { GLSL_NOISE } from '../core/noise.js';
 import { buildFieldGLSL, MAX_LAYERS, MAX_OPS, UNDER_DEPTH } from '../core/landscape.js';
 
-const VERT = /* glsl */`
+const VERT = /* glsl */`#version 300 es
 layout(location=0) in vec2 aPos;
 out vec2 vUv;
 void main() { vUv = aPos * 0.5 + 0.5; gl_Position = vec4(aPos, 0.0, 1.0); }
@@ -108,7 +108,7 @@ void main() {
       water += vec3(1.0, 0.9, 0.7) * spec;
       // shoreline foam: fade where terrain SDF is near zero
       float shore = map(p + vec3(0.0, -0.4, 0.0));
-      float foam = smoothstep(2.5, 0.0, abs(shore)) * (0.5 + 0.5 * sin(uTime * 2.0 + p.x * 0.3 + p.z * 0.23));
+      float foam = (1.0 - smoothstep(0.0, 2.5, abs(shore))) * (0.5 + 0.5 * sin(uTime * 2.0 + p.x * 0.3 + p.z * 0.23));
       water = mix(water, vec3(0.85, 0.92, 0.95), foam * 0.55);
       // distance fog
       float fog = 1.0 - exp(-t * 0.0009);
@@ -174,10 +174,10 @@ export class Viewport3D {
     gl.enableVertexAttribArray(0);
     gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
     this.u = {};
-    for (const name of ['uRes', 'uTime', 'uCamPos', 'uCamRot', 'uSeaLevel',
-      `uRegion`, `uBase`, `uEdge`, `uVisible`, `uOpLayer`, `uOpType`, `uOpA`, `uOpB`, `uOpVis`, `uOpInfl`]) {
-      this.u[name] = gl.getUniformLocation(prog, name);
-    }
+    const scalar = ['uRes', 'uTime', 'uCamPos', 'uCamRot', 'uSeaLevel'];
+    const arrays = ['uRegion', 'uBase', 'uEdge', 'uVisible', 'uOpLayer', 'uOpType', 'uOpA', 'uOpB', 'uOpVis', 'uOpInfl'];
+    for (const name of scalar) this.u[name] = gl.getUniformLocation(prog, name);
+    for (const name of arrays) this.u[name] = gl.getUniformLocation(prog, `${name}[0]`) || gl.getUniformLocation(prog, name);
   }
 
   _bind() {
