@@ -61,7 +61,7 @@ if(FRONTIER_ENABLE_GLFW)
     target_compile_definitions(FrontierSession PUBLIC FRONTIER_WITH_GLFW)
     target_link_libraries(FrontierSession PUBLIC glfw)
     add_executable(EverestWindow ../Projects/Everest/Source/Game/EverestGlfwMain.cpp)
-    target_link_libraries(EverestWindow PRIVATE FrontierGame FrontierSession EverestNavigation OpenGL::GL glfw)
+    target_link_libraries(EverestWindow PRIVATE FrontierGame FrontierSession EverestNavigation FluidSmokeEditor OpenGL::GL glfw)
 endif()
 
 if(BUILD_TESTING)

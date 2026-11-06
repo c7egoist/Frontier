@@ -26,7 +26,10 @@ enum InputActionBit : uint32_t
     InputActionNavigatePrev = 1u << 8,   // [-] previous menu destination
     InputActionNavigateNext = 1u << 9,   // [-] next menu destination
     InputActionConfirm      = 1u << 10,  // [-] select the current menu destination
-    InputActionBack         = 1u << 11   // [-] close the menu / cancel a selection
+    InputActionBack         = 1u << 11,  // [-] close the menu / cancel a selection
+    InputActionEditorSmoke  = 1u << 12,  // [-] open the Smoke & fire editor (key 1)
+    InputActionEditorFluid  = 1u << 13,  // [-] open the Fluid editor (key 2)
+    InputActionEditorPlume  = 1u << 14   // [-] open the Plume editor (key 3)
 };
 
 enum class InputControlMode : uint8_t

@@ -85,6 +85,9 @@ InputPacket InputEncoder::EncodeState(const RawInputState& State, float StepSeco
     if (State.KeyC || State.GamepadCycleCamera) Bits |= InputActionCycleCamera;
     if (State.KeyL) Bits |= InputActionLights;
     if (State.KeyEscape || State.GamepadMenu) Bits |= InputActionMenu;
+    if (State.Key1) Bits |= InputActionEditorSmoke;
+    if (State.Key2) Bits |= InputActionEditorFluid;
+    if (State.Key3) Bits |= InputActionEditorPlume;
     Packet.ActionBits = Bits;
 
     LatestPacket = Packet;

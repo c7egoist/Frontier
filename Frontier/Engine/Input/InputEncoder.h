@@ -23,6 +23,7 @@ struct RawInputState
     bool  KeyUp = false, KeyDown = false, KeyLeft = false, KeyRight = false;
     bool  KeySpace = false, KeyShift = false, KeyEnter = false, KeyEscape = false;
     bool  KeyR = false, KeyC = false, KeyL = false;
+    bool  Key1 = false, Key2 = false, Key3 = false;   // fluid/smoke editor: smoke / fluid / plume
     bool  GamepadNavigatePrev = false, GamepadNavigateNext = false;
     bool  GamepadConfirm = false, GamepadBack = false, GamepadReady = false;
     bool  GamepadHandbrake = false, GamepadBoost = false, GamepadReset = false;

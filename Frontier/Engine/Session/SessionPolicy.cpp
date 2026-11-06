@@ -36,7 +36,8 @@ InputPacket InputRoutingPolicy::Route(const InputPacket& Packet) const noexcept
 
     const uint32_t NavigationActions = InputActionMenu | InputActionNavigatePrev | InputActionNavigateNext
                                      | InputActionConfirm | InputActionBack;
-    uint32_t Allowed = AllowLevelNavigation ? NavigationActions : 0u;
+    constexpr uint32_t EditorActions = InputActionEditorSmoke | InputActionEditorFluid | InputActionEditorPlume;
+    uint32_t Allowed = (AllowLevelNavigation ? NavigationActions : 0u) | EditorActions;
     if (AllowDriving) Allowed |= InputActionHandbrake | InputActionReverse;
     if (AllowBoost) Allowed |= InputActionBoost;
     if (AllowReady) Allowed |= InputActionReady;
