@@ -30,6 +30,11 @@ uint32_t PhysicsSpace::AddBody(const PhysicsBodyDescriptor& Descriptor)
     return Index;
 }
 
+void PhysicsSpace::RemoveBody(uint32_t Index)
+{
+    Adapter->RemoveBody(Index);
+}
+
 void PhysicsSpace::Prepare()
 {
     Adapter->Prepare();

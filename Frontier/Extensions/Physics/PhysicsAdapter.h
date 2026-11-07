@@ -25,6 +25,9 @@ enum class PhysicsShape : uint8_t
 {
     Box,
     Sphere,
+    Cylinder,    // Z-aligned cylinder within HalfExtentMetres
+    Cone,        // Z-aligned cone (base at -Z, apex at +Z) within HalfExtentMetres
+    Torus,       // Z-aligned hollow torus ring within HalfExtentMetres (open centre hole)
     Hull,        // the convex hull of Points
     Triangles,   // Points indexed three at a time by Triangles; fixed bodies only
 };
@@ -107,6 +110,8 @@ class PhysicsAdapter
 
     // 📝 The body's index, or PhysicsNoBody when the solver is full or the shape is degenerate.
     virtual uint32_t AddBody(const PhysicsBodyDescriptor& Descriptor) = 0;
+    // 📝 Removes a body from the solver while keeping all other body indices unchanged.
+    virtual void RemoveBody(uint32_t Body) = 0;
     // 📝 Arranges the broad phase once the bodies are in (stepping works without it, only slower at first).
     virtual void Prepare() = 0;
     // 📝 One step of Seconds, split into CollisionSteps collision sub-steps. Forces added since the last step act during it.

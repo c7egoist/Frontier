@@ -477,9 +477,10 @@ void SceneGeometryOccupancy::Resolve(Occupancy& Entry, const Frontier::GeometryC
     // ⑤ placements: an archive copy at the archive's own placement keeps the archive's transforms exactly; a reserve copy takes its
     //    template's shape when it shows another
     Resolution.WorldTriangles.clear();
-    const bool EmitMeshTriangles = Configuration.Visible && !Configuration.Physics && !Configuration.Fracture.Enabled && Usable == 1u &&
-                                   Resolution.Facets > 0u && Resolution.Facets <= 4096u;
-    if (EmitMeshTriangles) Resolution.WorldTriangles.reserve(static_cast<size_t>(Resolution.Facets) * 3u);
+    const size_t TotalShownFacets = static_cast<size_t>(Resolution.Facets) * Usable;
+    const bool   EmitMeshTriangles = Configuration.Visible && (!Configuration.Physics || Configuration.Fracture.Enabled || Usable > 1u) &&
+                                     Usable >= 1u && TotalShownFacets > 0u && TotalShownFacets <= 65536u;
+    if (EmitMeshTriangles) Resolution.WorldTriangles.reserve(TotalShownFacets * 3u);
     GlobalIllumination::WorldBounds Bounds{{1.0e30, 1.0e30, 1.0e30}, {-1.0e30, -1.0e30, -1.0e30}};
     auto Emit = [&](uint32_t Occupant, const OccupantEntry& Base, const PlacementMatrix& Placement, bool Active, bool Reserve, size_t Part) {
         OccupantPlacement Entrant{Occupant, Placement, Active};

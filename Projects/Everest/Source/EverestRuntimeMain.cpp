@@ -80,7 +80,6 @@ Frontier::VehicleSubjectKinematics SampleRuntimeVehicleSubject(const Frontier::W
             const Frontier::Vehicle::Vec3               Fwd     = Chassis.Orientation.Rotate({1.0f, 0.0f, 0.0f});
             const Frontier::Vehicle::Vec3               Left    = Chassis.Orientation.Rotate({0.0f, 1.0f, 0.0f});
             const Frontier::Vehicle::Vec3               Up      = Chassis.Orientation.Rotate({0.0f, 0.0f, 1.0f});
-            Subject.PositionMetres       = {Chassis.Position.x, Chassis.Position.y, Chassis.Position.z};
             Subject.ForwardUnit          = {Fwd.x, Fwd.y, Fwd.z};
             Subject.LeftUnit             = {Left.x, Left.y, Left.z};
             Subject.UpUnit               = {Up.x, Up.y, Up.z};
@@ -91,16 +90,23 @@ Frontier::VehicleSubjectKinematics SampleRuntimeVehicleSubject(const Frontier::W
             Subject.GroundFloorMetres    = static_cast<double>(Configuration.Spatial.PositionMetres[2]);
             if (Reading.VisualValid)
             {
+                Subject.PositionMetres     = {Reading.BodyTransform[12], Reading.BodyTransform[13], Reading.BodyTransform[14]};
                 Subject.FrontLeftHubMetres = {Reading.WheelTransforms[0][12], Reading.WheelTransforms[0][13], Reading.WheelTransforms[0][14]};
                 Subject.RearRightHubMetres = {Reading.WheelTransforms[3][12], Reading.WheelTransforms[3][13], Reading.WheelTransforms[3][14]};
                 return Subject;
             }
+            constexpr double ChassisToBodyZ = 0.11285;
+            Subject.PositionMetres = {
+                static_cast<double>(Chassis.Position.x) - static_cast<double>(Up.x) * ChassisToBodyZ,
+                static_cast<double>(Chassis.Position.y) - static_cast<double>(Up.y) * ChassisToBodyZ,
+                static_cast<double>(Chassis.Position.z) - static_cast<double>(Up.z) * ChassisToBodyZ,
+            };
         }
         else
         {
             constexpr double DegToRad = 3.14159265358979323846 / 180.0;
             const double     YawRad   = static_cast<double>(Configuration.Spatial.OrientationDegrees[2]) * DegToRad;
-            const double     OffsetZ  = static_cast<double>(Configuration.Specification.Geometry.AuthoredGroundOffset());
+            constexpr double OffsetZ  = 0.41715;
             Subject.GroundFloorMetres = static_cast<double>(Configuration.Spatial.PositionMetres[2]);
             Subject.PositionMetres    = {
                 static_cast<double>(Configuration.Spatial.PositionMetres[0]),
@@ -297,6 +303,11 @@ int main(int, char**)
         {
             CameraInput.CycleNextRig     = !IO.KeyShift && ImGui::IsKeyPressed(ImGuiKey_C, false);
             CameraInput.CyclePreviousRig = IO.KeyShift && ImGui::IsKeyPressed(ImGuiKey_C, false);
+            if (ImGui::IsKeyPressed(ImGuiKey_M, false))
+            {
+                Camera.TransitionToRig(Camera.QueryRig() == Frontier::VehicleCameraRig::Hmi ? Frontier::VehicleCameraRig::Cockpit
+                                                                                            : Frontier::VehicleCameraRig::Hmi);
+            }
         }
         CameraInput.AnyActivity = CameraInput.PrimaryDrag || std::abs(CameraInput.WheelNotches) > 0.0;
 

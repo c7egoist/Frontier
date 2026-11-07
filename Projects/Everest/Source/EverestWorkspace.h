@@ -153,6 +153,8 @@ class EverestWorkspace
     [[nodiscard]] const LobbySession&                  QueryLobbySession() const noexcept { return Lobby; }
     [[nodiscard]] Frontier::VehicleCameraSolver&       AccessVehicleCamera() noexcept { return VehicleCamera; }
     [[nodiscard]] const Frontier::VehicleCameraSolver& QueryVehicleCamera() const noexcept { return VehicleCamera; }
+    [[nodiscard]] bool                                 QueryGameCameraMode() const noexcept { return StudioCameraEngaged; }
+    void                                               ConfigureGameCameraMode(bool Enabled);
 
 #if FRONTIER_EDITOR && defined(FRONTIER_WITH_INTERFACE_SDK)
     bool ConfigurePlatform() noexcept;
@@ -277,6 +279,7 @@ class EverestWorkspace
     SceneViewportOverlays         Overlays{};
     SceneViewportReadout          LastReadout{};
     uint64_t                      PublishedGeometryGeneration = 0;   // [-] the geometry resolutions last copied into the records
+    bool                          PendingAutoSimulation       = false; // [-] start simulation once geometry resolutions publish
     std::array<float, 240>        FrameDurations{};                   // [ms] the last 240 interface ticks (1 % low)
     size_t                        FrameDurationCursor    = 0;
     double                        FrameSeconds           = 0.0;       // [s] smoothed tick (0.9 / 0.1)

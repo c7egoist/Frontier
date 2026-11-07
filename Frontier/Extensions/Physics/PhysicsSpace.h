@@ -28,6 +28,8 @@ class PhysicsSpace
 
     // 📝 The body's index in the space (0, 1, 2 …), or PhysicsNoBody when the space is full or the shape is degenerate.
     uint32_t AddBody(const PhysicsBodyDescriptor& Descriptor);
+    // 📝 Removes a body from the solver while preserving existing body indices.
+    void RemoveBody(uint32_t Index);
     // 📝 Arranges the broad phase once the bodies are in (stepping works without it, only slower at first).
     void Prepare();
     // 📝 One step of DeltaSeconds, split into CollisionSteps sub-steps (more for fast bodies).

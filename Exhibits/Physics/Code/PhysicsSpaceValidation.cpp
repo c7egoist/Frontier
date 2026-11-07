@@ -424,6 +424,78 @@ int main(int ArgumentCount, char** Arguments)
         else Expect(false, "Geometry records construct");
     }
 
+    // ⑦b Engine shapes (Plane, Sphere, Cylinder, Cone, Torus, Cube), multi-copy triangle-mesh colliders, and live SynchronizeWorld
+    {
+        WorldSpace World;
+
+        auto SpawnShape = [&](const std::string& Name, const std::string& ShapeName, bool Moving,
+                              std::array<float, 3> Pos, std::array<float, 3> Scale = { 1.0f, 1.0f, 1.0f }) -> GeometryRecord*
+        {
+            const RecordToken Tok = World.ConstructRecord("Geometry", Name);
+            auto* Rec = dynamic_cast<GeometryRecord*>(World.FindRecord(Tok));
+            if (Rec == nullptr) return nullptr;
+            GeometryConfiguration& Cfg = Rec->AccessConfiguration();
+            Cfg.ShapeName              = ShapeName;
+            Cfg.Physics                = Moving;
+            for (int Axis = 0; Axis < 3; ++Axis)
+            {
+                Cfg.Spatial.PositionMetres[Axis] = Pos[static_cast<size_t>(Axis)];
+                Cfg.Spatial.Scale[Axis]          = Scale[static_cast<size_t>(Axis)];
+            }
+            Cfg.AdvanceRevision();
+            return Rec;
+        };
+
+        auto* Deck   = SpawnShape("Deck", "Plane", false, { 0.0f, 0.0f, 1.0f }, { 10.0f, 10.0f, 1.0f });
+        auto* Ball   = SpawnShape("Ball", "Sphere", true, { -2.5f, 0.0f, 3.0f });
+        auto* Barrel = SpawnShape("Barrel", "Cylinder", true, { -0.8f, 0.0f, 3.0f });
+        auto* Marker = SpawnShape("Marker", "Cone", true, { 0.8f, 0.0f, 3.0f });
+        auto* Ring   = SpawnShape("Ring", "Torus", true, { 2.5f, 0.0f, 2.2f });
+
+        // Multi-copy static barrier with per-copy WorldTriangles (2 vertical walls at x = 6.0 and x = 9.0)
+        const RecordToken WallTok = World.ConstructRecord("Geometry", "MultiWall");
+        auto*             WallRec = dynamic_cast<GeometryRecord*>(World.FindRecord(WallTok));
+        if (WallRec != nullptr)
+        {
+            GeometryConfiguration& WallCfg = WallRec->AccessConfiguration();
+            WallCfg.Resolved.Shown         = 2;
+            WallCfg.Resolved.Bound         = true;
+            WallCfg.Resolved.BoundsMinimum[0] = 5.9f, WallCfg.Resolved.BoundsMinimum[1] = -2.0f, WallCfg.Resolved.BoundsMinimum[2] = 0.0f;
+            WallCfg.Resolved.BoundsMaximum[0] = 9.1f, WallCfg.Resolved.BoundsMaximum[1] = 2.0f, WallCfg.Resolved.BoundsMaximum[2] = 3.0f;
+            auto AppendQuad = [&](float X)
+            {
+                const std::array<float, 3> A = { X, -2.0f, 0.0f }, B = { X, 2.0f, 0.0f }, C = { X, 2.0f, 3.0f }, D = { X, -2.0f, 3.0f };
+                for (const auto& V : { A, B, C, A, C, D }) WallCfg.Resolved.WorldTriangles.push_back(V);
+            };
+            AppendQuad(6.0f);
+            AppendQuad(9.0f);
+        }
+
+        PhysicsExtension Bridge;
+        const size_t     InitialMoving = Bridge.Begin(World);
+        Expect(InitialMoving == 4 && Bridge.QueryTally().Held == 0 && Bridge.QueryTally().Fixed == 3,
+               "engine shapes + 2-copy triangle-mesh barrier build 4 moving shapes, 3 fixed colliders, and 0 held");
+
+        for (int Step = 0; Step < 90; ++Step) (void)Bridge.Step(World, 1.0 / 60.0);
+
+        // Spawn a moving Cube LIVE mid-simulation via SynchronizeWorld without resetting the settled shapes!
+        auto* LiveCube = SpawnShape("LiveCube", "Cube", true, { 0.0f, 2.5f, 3.0f });
+        for (int Step = 0; Step < 150; ++Step) (void)Bridge.Step(World, 1.0 / 60.0);
+
+        const float BallZ   = Ball->QueryConfiguration().Spatial.PositionMetres[2];
+        const float BarrelZ = Barrel->QueryConfiguration().Spatial.PositionMetres[2];
+        const float MarkerZ = Marker->QueryConfiguration().Spatial.PositionMetres[2];
+        const float RingZ   = Ring->QueryConfiguration().Spatial.PositionMetres[2];
+        const float CubeZ   = LiveCube->QueryConfiguration().Spatial.PositionMetres[2];
+        Expect(Deck != nullptr && BallZ > 1.45f && BallZ < 1.56f && BarrelZ > 1.45f && BarrelZ < 1.56f &&
+                   MarkerZ > 1.15f && MarkerZ < 1.56f && RingZ > 1.10f && RingZ < 1.25f,
+               "Sphere (" + Figure("%.2f", BallZ) + " m), Cylinder (" + Figure("%.2f", BarrelZ) + " m), Cone (" +
+                   Figure("%.2f", MarkerZ) + " m), and hollow Torus (" + Figure("%.2f", RingZ) + " m) collide and rest on Plane (z=1.005 m)");
+        Expect(Bridge.QueryTally().Moving == 5 && CubeZ > 1.45f && CubeZ < 1.56f,
+               "live-spawned Cube synchronizes into Jolt mid-run and rests on Plane at " + Figure("%.2f", CubeZ) + " m");
+        Bridge.End(World);
+    }
+
     // ⑧ 1000 boxes falling onto the ground: the cost of a step
     double StepMilliseconds = 0.0;
     {

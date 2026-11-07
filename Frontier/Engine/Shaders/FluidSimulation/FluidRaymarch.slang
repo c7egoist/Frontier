@@ -65,13 +65,13 @@ float3 ToneMapAces(float3 Radiance)
     return clamp((Radiance * (2.51 * Radiance + 0.03)) / (Radiance * (2.43 * Radiance + 0.59) + 0.14), float3(0.0), float3(1.0));
 }
 
-float3 EvaluateColliderNormal(float3 Uvw, int Category, float3 Centre, float Radius)
+float3 EvaluateColliderNormal(float3 Uvw, int Category, float3 Centre, float Radius, float3 Scale)
 {
     let Step = 0.004;
     return normalize(float3(
-        EvaluateColliderSignedDistance(Uvw + float3(Step, 0.0, 0.0), Category, Centre, Radius) - EvaluateColliderSignedDistance(Uvw - float3(Step, 0.0, 0.0), Category, Centre, Radius),
-        EvaluateColliderSignedDistance(Uvw + float3(0.0, Step, 0.0), Category, Centre, Radius) - EvaluateColliderSignedDistance(Uvw - float3(0.0, Step, 0.0), Category, Centre, Radius),
-        EvaluateColliderSignedDistance(Uvw + float3(0.0, 0.0, Step), Category, Centre, Radius) - EvaluateColliderSignedDistance(Uvw - float3(0.0, 0.0, Step), Category, Centre, Radius)));
+        EvaluateColliderSignedDistance(Uvw + float3(Step, 0.0, 0.0), Category, Centre, Radius, Scale) - EvaluateColliderSignedDistance(Uvw - float3(Step, 0.0, 0.0), Category, Centre, Radius, Scale),
+        EvaluateColliderSignedDistance(Uvw + float3(0.0, Step, 0.0), Category, Centre, Radius, Scale) - EvaluateColliderSignedDistance(Uvw - float3(0.0, Step, 0.0), Category, Centre, Radius, Scale),
+        EvaluateColliderSignedDistance(Uvw + float3(0.0, 0.0, Step), Category, Centre, Radius, Scale) - EvaluateColliderSignedDistance(Uvw - float3(0.0, 0.0, Step), Category, Centre, Radius, Scale)));
 }
 
 float TraceColliderHit(float3 Origin, float3 Direction, float StartT, float EndT, float3 HalfBox, float3 Scale, int Category, float3 Centre, float Radius)
@@ -81,20 +81,19 @@ float TraceColliderHit(float3 Origin, float3 Direction, float StartT, float EndT
         return 1.0e9;
     }
     var Travel = max(0.0, StartT);
-    let Metric = min(Scale.x, min(Scale.y, Scale.z));
-    for (var Step = 0; Step < 56; Step++)
+    for (var Step = 0; Step < 64; Step++)
     {
         if (Travel > EndT)
         {
             break;
         }
         let Uvw      = ProjectWorldToUvw(Origin + Direction * Travel, HalfBox, Scale);
-        let Distance = EvaluateColliderSignedDistance(Uvw, Category, Centre, Radius);
-        if (Distance < 0.0018)
+        let Distance = EvaluateColliderSignedDistance(Uvw, Category, Centre, Radius, Scale);
+        if (Distance < 0.0025)
         {
             return Travel;
         }
-        Travel += max(Distance * Metric * 0.65, 0.006);
+        Travel += max(Distance * 0.72, 0.005);
     }
     return 1.0e9;
 }
@@ -370,7 +369,7 @@ float4 RaymarchFragment(RaymarchVarying In) : SV_Target0
     {
         let HitWorld  = Origin + Direction * ObstacleHitT;
         let HitUvw    = ProjectWorldToUvw(HitWorld, HalfBox, Scale);
-        let Normal    = EvaluateColliderNormal(HitUvw, ObstacleCat, Raymarch.ObstaclePosition.xyz, ObstacleRadius);
+        let Normal    = EvaluateColliderNormal(HitUvw, ObstacleCat, Raymarch.ObstaclePosition.xyz, ObstacleRadius, Scale);
         let Diffuse   = max(0.0, dot(Normal, SunDir));
         let Shadow    = EvaluateLightShadow(HitWorld + Normal * 0.03, SunDir, HalfBox, Scale, min(ShadowSteps, 6u), ShadowExtinction);
         let HalfVec   = normalize(SunDir - Direction);

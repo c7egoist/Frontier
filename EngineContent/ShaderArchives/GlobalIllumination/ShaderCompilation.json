@@ -1,7 +1,7 @@
 {
   "format": 1,
   "set": "GlobalIllumination",
-  "compiler": "slangc 2026.14.1",
+  "compiler": "unrecorded",
   "refresh": "python Automation/StoreShaderArchives.py --build <build> --compiler <slangc or slang-wasm.js> --sets GlobalIllumination",
   "entries": [
     {
@@ -42,7 +42,7 @@
     },
     {
       "file": "DisplayAntialias.IntegrateAntialias.spv",
-      "spirv_sha256": "395d715a5cb48fc59f8aad55578fe95477c818d53785bbad18c158d4530a6b85"
+      "spirv_sha256": "77717e11d95cf71450c87cdd9fd9eb3122f90f46fa6212e4e6dd113a4e67db66"
     },
     {
       "file": "DisplayExposure.IntegrateExposure.spv",
@@ -110,11 +110,11 @@
     },
     {
       "file": "PlumeAdvection.AdvectThermo.spv",
-      "spirv_sha256": "6d8b1759f0604859d909089c5497a864bbf9e6256d5b58bf7d73bf14205ec8f4"
+      "spirv_sha256": "8814514a56084c8d6b43c705894cf1455e7e09020f0ed6b826461042c29b050a"
     },
     {
       "file": "PlumeAdvection.AdvectVelocity.spv",
-      "spirv_sha256": "c28d65a1e699be17b05d2e10e561bfc638574f8ef0e3d9737b52779f7c7a3460"
+      "spirv_sha256": "ba8c4eeacbb599991fc6c4b4259b28ea8bf7a4afaa00819f5583005fc086d1c6"
     },
     {
       "file": "PlumeAdvection.ResolveSunTransmittance.spv",
@@ -280,7 +280,7 @@
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/DisplayAntialias.slang",
-      "sha256": "44265c0ec3746371ac18e4a2e460f1c0dd250e3931bc3e05bdc3b7ca8d323606"
+      "sha256": "e7746019213a913de2f8e0f96eff5f819c5db4d133c06913a3e473712d2dc4bb"
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/DisplayExposure.slang",
@@ -372,7 +372,7 @@
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/PlumeAdvection.slang",
-      "sha256": "28a80e2833962f29b0dc613c9bc860251698a49df51e21a82849277fdcc0c008"
+      "sha256": "43bd3170b528426a5727a0f3b3b54f80d6b4e9e35d43546c4627f9d0c427543a"
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/PlumeLayouts.slang",

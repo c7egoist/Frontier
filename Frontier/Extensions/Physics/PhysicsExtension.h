@@ -29,6 +29,7 @@ namespace Frontier
 {
 
 class WorldSpace;
+class SceneRecordBase;
 
 struct PhysicsExtensionSettings
 {
@@ -73,8 +74,10 @@ class PhysicsExtension
     size_t Begin(WorldSpace& World, const PhysicsExtensionSettings& Settings);
     size_t Begin(WorldSpace& World, const PhysicsSpaceSettings& Settings = {});
     // 📝 Inline: steps the space for DeltaSeconds in fixed steps; threaded: hands the inputs over and takes the newest snapshot.
-    //    Either way writes the moving bodies and vehicles back. Returns the records written.
+    //    Either way synchronizes newly resolved/constructed/edited scene colliders and writes moving bodies and vehicles back.
     size_t Step(WorldSpace& World, double DeltaSeconds);
+    // 📝 Synchronizes Geometry and RigidBody colliders when records resolve, are constructed/deleted, or static colliders move.
+    bool SynchronizeWorld(WorldSpace& World);
     // 📝 Stops the thread, puts every moved record back and clears the space.
     void End(WorldSpace& World);
 
@@ -122,14 +125,29 @@ class PhysicsExtension
         uint64_t            ResetSerial = 0;
     };
 
+    struct RecordBinding
+    {
+        RecordToken          Record{};
+        uint32_t             Body          = PhysicsNoBody;
+        PhysicsParticipation Participation = PhysicsParticipation::None;
+        uint64_t             Signature     = 0;
+        bool                 Geometry      = true;
+    };
+
     void StepOnce(double Seconds);
     void FillSnapshot(PhysicsSnapshot& Snapshot) const;
     size_t ApplySnapshot(WorldSpace& World, const PhysicsSnapshot& Snapshot);
     void AddVehicle(WorldSpace& World, RecordToken Record, WorldRegisterEntry* Entry);
+    RecordBinding BuildGeometryCollider(WorldSpace& World, SceneRecordBase& RecordBase, uint64_t Signature, WorldRegisterEntry* Entry);
+    RecordBinding BuildRigidBodyCollider(SceneRecordBase& RecordBase, uint64_t Signature, WorldRegisterEntry* Entry);
+    void RecomputeTally();
+    void StartPhysicsThread();
 
     std::unique_ptr<PhysicsSpace>            Space;
     std::vector<Link>                        Links;
+    std::vector<RecordBinding>               Bindings;
     std::vector<VehicleLink>                 Vehicles;
+    PhysicsExtensionSettings                 ActiveSettings{};
     WorldRegister                            Register;
     PhysicsExtensionTally                    Tally;
     PhysicsThread                            Thread;

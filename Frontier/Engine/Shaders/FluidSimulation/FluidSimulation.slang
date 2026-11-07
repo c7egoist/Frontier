@@ -69,19 +69,36 @@ void InjectSources(uint3 Cell : SV_DispatchThreadID)
     var Velocity    = PrimaryRead.Load(int4(Texel, 0));
     var Density     = SecondaryRead.Load(int4(Texel, 0));
 
+    let Scale       = max(Simulation.DomainBounds.xyz, float3(0.25));
+    let CellWorld   = InverseGrid * min(Scale.x, min(Scale.y, Scale.z));
     let Category    = int(Simulation.ObstacleGeometry.x + 0.5);
-    let SignedDist  = EvaluateColliderSignedDistance(Uvw, Category, Simulation.ObstaclePosition.xyz, Simulation.ObstacleGeometry.y);
+    let SignedDist  = EvaluateColliderSignedDistance(Uvw, Category, Simulation.ObstaclePosition.xyz, Simulation.ObstacleGeometry.y, Scale);
+    let ObsWorldVel = Simulation.ObstacleVelocity.xyz * Scale;
     if (SignedDist < 0.0)
     {
-        PrimaryWrite[Texel]   = float4(Simulation.ObstacleVelocity.xyz * Simulation.GridTiming.x, 1.0);
+        PrimaryWrite[Texel]   = float4(ObsWorldVel, 1.0);
         SecondaryWrite[Texel] = float4(0.0);
         return;
     }
     Velocity.w = 0.0;
-    if (SignedDist < InverseGrid * 2.2 && Category > 0)
+    if (SignedDist < CellWorld * 2.2 && Category > 0)
     {
-        let Skin     = smoothstep(InverseGrid * 2.2, 0.0, SignedDist);
-        Velocity.xyz = lerp(Velocity.xyz, Simulation.ObstacleVelocity.xyz * Simulation.GridTiming.x * 0.9, Skin * 0.65);
+        let Step   = max(InverseGrid * 0.5, 0.004);
+        let Grad   = float3(
+            EvaluateColliderSignedDistance(Uvw + float3(Step, 0.0, 0.0), Category, Simulation.ObstaclePosition.xyz, Simulation.ObstacleGeometry.y, Scale) -
+                EvaluateColliderSignedDistance(Uvw - float3(Step, 0.0, 0.0), Category, Simulation.ObstaclePosition.xyz, Simulation.ObstacleGeometry.y, Scale),
+            EvaluateColliderSignedDistance(Uvw + float3(0.0, Step, 0.0), Category, Simulation.ObstaclePosition.xyz, Simulation.ObstacleGeometry.y, Scale) -
+                EvaluateColliderSignedDistance(Uvw - float3(0.0, Step, 0.0), Category, Simulation.ObstaclePosition.xyz, Simulation.ObstacleGeometry.y, Scale),
+            EvaluateColliderSignedDistance(Uvw + float3(0.0, 0.0, Step), Category, Simulation.ObstaclePosition.xyz, Simulation.ObstacleGeometry.y, Scale) -
+                EvaluateColliderSignedDistance(Uvw - float3(0.0, 0.0, Step), Category, Simulation.ObstaclePosition.xyz, Simulation.ObstacleGeometry.y, Scale));
+        let Normal = normalize(Grad + float3(1.0e-6));
+        let Inward = dot(Velocity.xyz - ObsWorldVel, Normal);
+        if (Inward < 0.0)
+        {
+            Velocity.xyz -= Normal * Inward;
+        }
+        let Skin     = smoothstep(CellWorld * 2.2, 0.0, SignedDist);
+        Velocity.xyz = lerp(Velocity.xyz, ObsWorldVel, Skin * 0.45);
     }
 
     if (Simulation.SourceGeometry.x > 0.5)
@@ -194,8 +211,27 @@ void AdvectFields(uint3 Cell : SV_DispatchThreadID)
     }
 
     let Scale       = max(Simulation.DomainBounds.xyz, float3(0.25));
+    let Category    = int(Simulation.ObstacleGeometry.x + 0.5);
     let UvwVelocity = CurrentVel.xyz / Scale;
-    let BackPos     = clamp(Uvw - DeltaTime * UvwVelocity, float3(0.5 * InverseGrid), float3(1.0 - 0.5 * InverseGrid));
+    var BackPos     = clamp(Uvw - DeltaTime * UvwVelocity, float3(0.5 * InverseGrid), float3(1.0 - 0.5 * InverseGrid));
+    if (Category > 0)
+    {
+        let BackSigned = EvaluateColliderSignedDistance(BackPos, Category, Simulation.ObstaclePosition.xyz, Simulation.ObstacleGeometry.y, Scale);
+        if (BackSigned < 0.0)
+        {
+            let Step   = max(InverseGrid * 0.5, 0.004);
+            let Grad   = float3(
+                EvaluateColliderSignedDistance(BackPos + float3(Step, 0.0, 0.0), Category, Simulation.ObstaclePosition.xyz, Simulation.ObstacleGeometry.y, Scale) -
+                    EvaluateColliderSignedDistance(BackPos - float3(Step, 0.0, 0.0), Category, Simulation.ObstaclePosition.xyz, Simulation.ObstacleGeometry.y, Scale),
+                EvaluateColliderSignedDistance(BackPos + float3(0.0, Step, 0.0), Category, Simulation.ObstaclePosition.xyz, Simulation.ObstacleGeometry.y, Scale) -
+                    EvaluateColliderSignedDistance(BackPos - float3(0.0, Step, 0.0), Category, Simulation.ObstaclePosition.xyz, Simulation.ObstacleGeometry.y, Scale),
+                EvaluateColliderSignedDistance(BackPos + float3(0.0, 0.0, Step), Category, Simulation.ObstaclePosition.xyz, Simulation.ObstacleGeometry.y, Scale) -
+                    EvaluateColliderSignedDistance(BackPos - float3(0.0, 0.0, Step), Category, Simulation.ObstaclePosition.xyz, Simulation.ObstacleGeometry.y, Scale));
+            let Normal = normalize(Grad + float3(1.0e-6));
+            BackPos    = clamp(BackPos + (Normal / Scale) * (-BackSigned + 0.25 * InverseGrid * min(Scale.x, min(Scale.y, Scale.z))),
+                               float3(0.5 * InverseGrid), float3(1.0 - 0.5 * InverseGrid));
+        }
+    }
 
     let ForwardVel  = PrimaryRead.SampleLevel(LinearClamp, BackPos, 0.0);
     var AdvectedVel = ForwardVel.xyz;

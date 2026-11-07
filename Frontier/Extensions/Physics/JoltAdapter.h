@@ -40,6 +40,7 @@ class JoltAdapter final : public PhysicsAdapter
     JoltAdapter& operator=(const JoltAdapter&) = delete;
 
     uint32_t AddBody(const PhysicsBodyDescriptor& Descriptor) override;
+    void     RemoveBody(uint32_t Body) override;
     void     Prepare() override;
     void     Step(double Seconds, uint32_t CollisionSteps) override;
 

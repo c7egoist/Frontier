@@ -14,9 +14,12 @@
 #include <Jolt/Physics/Collision/RayCast.h>
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/ConvexHullShape.h>
+#include <Jolt/Physics/Collision/Shape/CylinderShape.h>
 #include <Jolt/Physics/Collision/Shape/MeshShape.h>
 #include <Jolt/Physics/Collision/Shape/OffsetCenterOfMassShape.h>
+#include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
+#include <Jolt/Physics/Collision/Shape/StaticCompoundShape.h>
 
 #include <algorithm>
 #include <cmath>
@@ -64,6 +67,7 @@ JoltAdapter::~JoltAdapter()
     JPH::BodyInterface& Interface = Solver.GetBodyInterface();
     for (const JPH::BodyID& Body : Bodies)
     {
+        if (Body.IsInvalid()) continue;
         Interface.RemoveBody(Body);
         Interface.DestroyBody(Body);
     }
@@ -71,19 +75,143 @@ JoltAdapter::~JoltAdapter()
 
 JPH::RefConst<JPH::Shape> JoltAdapter::ConstructShape(const PhysicsBodyDescriptor& Descriptor) const
 {
+    constexpr double Pi = 3.14159265358979323846;
     switch (Descriptor.Shape)
     {
         case PhysicsShape::Sphere:
         {
-            if (!(Descriptor.HalfExtentMetres[0] > 1.0e-3)) return nullptr;
-            return new JPH::SphereShape(static_cast<float>(Descriptor.HalfExtentMetres[0]));
+            const double Hx = Descriptor.HalfExtentMetres[0];
+            const double Hy = Descriptor.HalfExtentMetres[1] > 1.0e-3 ? Descriptor.HalfExtentMetres[1] : Hx;
+            const double Hz = Descriptor.HalfExtentMetres[2] > 1.0e-3 ? Descriptor.HalfExtentMetres[2] : Hx;
+            if (!(Hx > 1.0e-3)) return nullptr;
+            if (std::abs(Hx - Hy) < 1.0e-4 && std::abs(Hx - Hz) < 1.0e-4)
+            {
+                return new JPH::SphereShape(static_cast<float>(Hx));
+            }
+            JPH::Array<JPH::Vec3> Points;
+            Points.reserve(162);
+            Points.push_back(JPH::Vec3(0.0f, 0.0f, static_cast<float>(Hz)));
+            Points.push_back(JPH::Vec3(0.0f, 0.0f, static_cast<float>(-Hz)));
+            for (int Ring = 1; Ring < 10; ++Ring)
+            {
+                const double V  = Pi * static_cast<double>(Ring) / 10.0;
+                const double Sv = std::sin(V), Cv = std::cos(V);
+                for (int Seg = 0; Seg < 18; ++Seg)
+                {
+                    const double U = 2.0 * Pi * static_cast<double>(Seg) / 18.0;
+                    Points.push_back(JPH::Vec3(static_cast<float>(Hx * Sv * std::cos(U)),
+                                               static_cast<float>(Hy * Sv * std::sin(U)),
+                                               static_cast<float>(Hz * Cv)));
+                }
+            }
+            const float MinAxis = static_cast<float>(std::min({ Hx, Hy, Hz }));
+            JPH::ConvexHullShapeSettings Settings(Points, std::min(JPH::cDefaultConvexRadius, 0.25f * MinAxis));
+            const JPH::ShapeSettings::ShapeResult Result = Settings.Create();
+            return Result.IsValid() ? Result.Get() : nullptr;
         }
         case PhysicsShape::Box:
         {
-            const JPH::Vec3 Half = ToVector(Descriptor.HalfExtentMetres);
-            if (!(Half.ReduceMin() > 1.0e-3f)) return nullptr;
+            const JPH::Vec3 Half(std::max(0.005f, static_cast<float>(Descriptor.HalfExtentMetres[0])),
+                                 std::max(0.005f, static_cast<float>(Descriptor.HalfExtentMetres[1])),
+                                 std::max(0.005f, static_cast<float>(Descriptor.HalfExtentMetres[2])));
+            if (!(Descriptor.HalfExtentMetres[0] > 1.0e-4 && Descriptor.HalfExtentMetres[1] > 1.0e-4 && Descriptor.HalfExtentMetres[2] > 1.0e-4))
+                return nullptr;
             // 📝 The convex radius rounds the box's edges; it must stay below half the smallest side.
-            return new JPH::BoxShape(Half, std::min(JPH::cDefaultConvexRadius, 0.5f * Half.ReduceMin()));
+            return new JPH::BoxShape(Half, std::min(JPH::cDefaultConvexRadius, 0.45f * Half.ReduceMin()));
+        }
+        case PhysicsShape::Cylinder:
+        {
+            const double Hx = Descriptor.HalfExtentMetres[0];
+            const double Hy = Descriptor.HalfExtentMetres[1];
+            const double Hz = std::max(0.005, Descriptor.HalfExtentMetres[2]);
+            if (!(Hx > 1.0e-3 && Hy > 1.0e-3)) return nullptr;
+            if (std::abs(Hx - Hy) < 1.0e-4 && Hx >= 0.02 && Hz >= 0.02)
+            {
+                const float Convex = std::min(JPH::cDefaultConvexRadius, static_cast<float>(0.35 * std::min(Hx, Hz)));
+                JPH::CylinderShapeSettings CylSettings(static_cast<float>(Hz), static_cast<float>(Hx), Convex);
+                const JPH::ShapeSettings::ShapeResult CylResult = CylSettings.Create();
+                if (CylResult.IsValid())
+                {
+                    JPH::RotatedTranslatedShapeSettings ZAligned(
+                        JPH::Vec3::sZero(), JPH::Quat::sRotation(JPH::Vec3::sAxisX(), 0.5f * JPH::JPH_PI), CylResult.Get());
+                    const JPH::ShapeSettings::ShapeResult RotResult = ZAligned.Create();
+                    if (RotResult.IsValid()) return RotResult.Get();
+                }
+            }
+            JPH::Array<JPH::Vec3> Points;
+            Points.reserve(48);
+            for (int Seg = 0; Seg < 24; ++Seg)
+            {
+                const double Angle = 2.0 * Pi * static_cast<double>(Seg) / 24.0;
+                const float  Px    = static_cast<float>(Hx * std::cos(Angle));
+                const float  Py    = static_cast<float>(Hy * std::sin(Angle));
+                Points.push_back(JPH::Vec3(Px, Py, static_cast<float>(-Hz)));
+                Points.push_back(JPH::Vec3(Px, Py, static_cast<float>(Hz)));
+            }
+            const float MinAxis = static_cast<float>(std::min({ Hx, Hy, Hz }));
+            JPH::ConvexHullShapeSettings Settings(Points, std::min(JPH::cDefaultConvexRadius, 0.25f * MinAxis));
+            const JPH::ShapeSettings::ShapeResult Result = Settings.Create();
+            return Result.IsValid() ? Result.Get() : nullptr;
+        }
+        case PhysicsShape::Cone:
+        {
+            const double Hx = Descriptor.HalfExtentMetres[0];
+            const double Hy = Descriptor.HalfExtentMetres[1];
+            const double Hz = std::max(0.005, Descriptor.HalfExtentMetres[2]);
+            if (!(Hx > 1.0e-3 && Hy > 1.0e-3)) return nullptr;
+            JPH::Array<JPH::Vec3> Points;
+            Points.reserve(25);
+            Points.push_back(JPH::Vec3(0.0f, 0.0f, static_cast<float>(Hz)));
+            for (int Seg = 0; Seg < 24; ++Seg)
+            {
+                const double Angle = 2.0 * Pi * static_cast<double>(Seg) / 24.0;
+                Points.push_back(JPH::Vec3(static_cast<float>(Hx * std::cos(Angle)),
+                                           static_cast<float>(Hy * std::sin(Angle)),
+                                           static_cast<float>(-Hz)));
+            }
+            const float MinAxis = static_cast<float>(std::min({ Hx, Hy, Hz }));
+            JPH::ConvexHullShapeSettings Settings(Points, std::min(JPH::cDefaultConvexRadius, 0.2f * MinAxis));
+            const JPH::ShapeSettings::ShapeResult Result = Settings.Create();
+            return Result.IsValid() ? Result.Get() : nullptr;
+        }
+        case PhysicsShape::Torus:
+        {
+            // 📝 ShapeArchive Torus: outer radius = HalfExtent[0,1], tube_ratio = 0.3 → ring radius = 0.7 * outer, tube = HalfExtent[2].
+            const double Hx = Descriptor.HalfExtentMetres[0];
+            const double Hy = Descriptor.HalfExtentMetres[1];
+            const double Hz = std::max(0.005, Descriptor.HalfExtentMetres[2]);
+            if (!(Hx > 1.0e-3 && Hy > 1.0e-3)) return nullptr;
+            constexpr int Segments   = 16;
+            const double  RingX      = 0.70 * Hx;
+            const double  RingY      = 0.70 * Hy;
+            const double  TubeX      = 0.30 * Hx;
+            const double  TubeY      = 0.30 * Hy;
+            const float   Convex     = std::min(JPH::cDefaultConvexRadius, static_cast<float>(0.2f * std::min({ TubeX, TubeY, Hz })));
+            JPH::StaticCompoundShapeSettings Compound;
+            for (int Seg = 0; Seg < Segments; ++Seg)
+            {
+                const double U0 = 2.0 * Pi * static_cast<double>(Seg) / static_cast<double>(Segments);
+                const double U1 = 2.0 * Pi * static_cast<double>(Seg + 1) / static_cast<double>(Segments);
+                JPH::Array<JPH::Vec3> Wedge;
+                Wedge.reserve(16);
+                for (double U : { U0, U1 })
+                {
+                    const double Cu = std::cos(U), Su = std::sin(U);
+                    for (int RingPt = 0; RingPt < 8; ++RingPt)
+                    {
+                        const double V  = 2.0 * Pi * static_cast<double>(RingPt) / 8.0;
+                        const double Cv = std::cos(V), Sv = std::sin(V);
+                        Wedge.push_back(JPH::Vec3(static_cast<float>((RingX + TubeX * Cv) * Cu),
+                                                  static_cast<float>((RingY + TubeY * Cv) * Su),
+                                                  static_cast<float>(Hz * Sv)));
+                    }
+                }
+                JPH::ConvexHullShapeSettings WedgeSettings(Wedge, Convex);
+                const JPH::ShapeSettings::ShapeResult WedgeResult = WedgeSettings.Create();
+                if (WedgeResult.IsValid()) Compound.AddShape(JPH::Vec3::sZero(), JPH::Quat::sIdentity(), WedgeResult.Get());
+            }
+            const JPH::ShapeSettings::ShapeResult Result = Compound.Create();
+            return Result.IsValid() ? Result.Get() : nullptr;
         }
         case PhysicsShape::Hull:
         {
@@ -171,6 +299,18 @@ uint32_t JoltAdapter::AddBody(const PhysicsBodyDescriptor& Descriptor)
     return Index;
 }
 
+void JoltAdapter::RemoveBody(uint32_t Index)
+{
+    if (Index >= Bodies.size()) return;
+    const JPH::BodyID Body = Bodies[Index];
+    if (Body.IsInvalid()) return;
+    if (Body.GetIndex() < BodyIndices.size()) BodyIndices[Body.GetIndex()] = PhysicsNoBody;
+    JPH::BodyInterface& Interface = Solver.GetBodyInterface();
+    Interface.RemoveBody(Body);
+    Interface.DestroyBody(Body);
+    Bodies[Index] = JPH::BodyID();
+}
+
 void JoltAdapter::Prepare()
 {
     Solver.OptimizeBroadPhase();
@@ -186,7 +326,7 @@ void JoltAdapter::Step(double Seconds, uint32_t CollisionSteps)
 PhysicsBodyReading JoltAdapter::ReadBody(uint32_t Index) const
 {
     PhysicsBodyReading Reading;
-    if (Index >= Bodies.size()) return Reading;
+    if (Index >= Bodies.size() || Bodies[Index].IsInvalid()) return Reading;
     const JPH::BodyInterface& Interface = Solver.GetBodyInterfaceNoLock();
     const JPH::BodyID         Body      = Bodies[Index];
     JPH::RVec3                Position;
@@ -204,7 +344,7 @@ PhysicsBodyReading JoltAdapter::ReadBody(uint32_t Index) const
 
 void JoltAdapter::PlaceBody(uint32_t Index, const PhysicsBodyReading& Pose)
 {
-    if (Index >= Bodies.size()) return;
+    if (Index >= Bodies.size() || Bodies[Index].IsInvalid()) return;
     JPH::BodyInterface& Interface = Solver.GetBodyInterfaceNoLock();
     Interface.SetPositionAndRotation(Bodies[Index], ToPosition(Pose.PositionMetres), ToRotation(Pose.Orientation), JPH::EActivation::Activate);
     Interface.SetLinearAndAngularVelocity(Bodies[Index], ToVector(Pose.LinearVelocityMps), ToVector(Pose.AngularVelocityRads));
@@ -212,13 +352,13 @@ void JoltAdapter::PlaceBody(uint32_t Index, const PhysicsBodyReading& Pose)
 
 void JoltAdapter::ApplyForce(uint32_t Index, const std::array<double, 3>& Force, const std::array<double, 3>& Point)
 {
-    if (Index >= Bodies.size()) return;
+    if (Index >= Bodies.size() || Bodies[Index].IsInvalid()) return;
     Solver.GetBodyInterfaceNoLock().AddForce(Bodies[Index], ToVector(Force), ToPosition(Point));
 }
 
 void JoltAdapter::ApplyTorque(uint32_t Index, const std::array<double, 3>& Torque)
 {
-    if (Index >= Bodies.size()) return;
+    if (Index >= Bodies.size() || Bodies[Index].IsInvalid()) return;
     Solver.GetBodyInterfaceNoLock().AddTorque(Bodies[Index], ToVector(Torque));
 }
 
@@ -229,7 +369,7 @@ bool JoltAdapter::CastRay(const PhysicsRay& Ray, PhysicsRayHit& Hit) const
     const JPH::RRayCast Cast{ ToPosition(Ray.OriginMetres), Direction.Normalized() * static_cast<float>(Ray.LengthMetres) };
     JPH::RayCastResult  Result;
     bool                Met = false;
-    if (Ray.IgnoredBody < Bodies.size())
+    if (Ray.IgnoredBody < Bodies.size() && !Bodies[Ray.IgnoredBody].IsInvalid())
     {
         const JPH::IgnoreSingleBodyFilter Filter(Bodies[Ray.IgnoredBody]);
         Met = Solver.GetNarrowPhaseQueryNoLock().CastRay(Cast, Result, {}, {}, Filter);
@@ -255,7 +395,7 @@ bool JoltAdapter::CastRay(const PhysicsRay& Ray, PhysicsRayHit& Hit) const
 
 void JoltAdapter::AssignMass(uint32_t Index, double MassKilograms, const std::array<double, 3>& InertiaKgm2)
 {
-    if (Index >= Bodies.size() || !(MassKilograms > 0.0)) return;
+    if (Index >= Bodies.size() || Bodies[Index].IsInvalid() || !(MassKilograms > 0.0)) return;
     JPH::BodyLockWrite Lock(Solver.GetBodyLockInterfaceNoLock(), Bodies[Index]);
     if (!Lock.Succeeded() || !Lock.GetBody().IsDynamic()) return;
     JPH::MotionProperties* Motion = Lock.GetBody().GetMotionProperties();

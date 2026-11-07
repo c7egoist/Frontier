@@ -311,6 +311,35 @@ int main(int ArgumentCount, char** Arguments)
         Audit.Check(Camera.QueryRig() == Frontier::VehicleCameraRig::Chase,
                     "All 8 VehicleHMI camera rigs (Chase, Orbit, Cockpit, HMI, Passenger, Hood, Tyre FL, Tyre RL) cycle cleanly");
 
+        // Verify 1:1 DOM VehicleHMI HMI-tablet & Cockpit framing against BodyOrigin (0.41715 m) + Editor/Game camera switching.
+        Frontier::VehicleSubjectKinematics BodySubject{};
+        BodySubject.PositionMetres = {0.0, 0.0, 0.41715};
+        Camera.ConfigureRigImmediate(Frontier::VehicleCameraRig::Hmi, BodySubject);
+        const auto HmiPose = Camera.QueryLastSolution();
+        Audit.Check(std::abs(HmiPose.TargetMetres[0] - 0.9672) < 1.0e-4 &&
+                        std::abs(HmiPose.TargetMetres[1] - 0.0) < 1.0e-4 &&
+                        std::abs(HmiPose.TargetMetres[2] - (0.41715 + 0.5129)) < 1.0e-4 &&
+                        HmiPose.PositionMetres[0] < HmiPose.TargetMetres[0],
+                    "HMI Tablet rig frames the authored dashboard screen [0.9672, 0.0, 0.5129] at 0.42 rad tilt");
+
+        Camera.ConfigureRigImmediate(Frontier::VehicleCameraRig::Cockpit, BodySubject);
+        const auto CockpitPose = Camera.QueryLastSolution();
+        Audit.Check(std::abs(CockpitPose.PositionMetres[2] - 1.4243) < 1.0e-3 &&
+                        std::abs(CockpitPose.PositionMetres[1] - 0.42) < 1.0e-3,
+                    "Cockpit rig sits at seated driver eye height (1.424 m world Z) inside cabin");
+
+        Workspace.ConfigureGameCameraMode(true);
+        const auto GameEye = Workspace.AccessViewportFlight().Position;
+        Audit.Check(Workspace.QueryGameCameraMode(), "ConfigureGameCameraMode(true) activates Game camera mode");
+        Workspace.ConfigureGameCameraMode(false);
+        const auto EditorEye = Workspace.AccessViewportFlight().Position;
+        Audit.Check(!Workspace.QueryGameCameraMode() &&
+                        Workspace.AccessViewportNavigation().Mode == Everest::SceneCameraMode::Free &&
+                        std::abs(EditorEye[0] - GameEye[0]) < 1.0e-5 &&
+                        std::abs(EditorEye[1] - GameEye[1]) < 1.0e-5 &&
+                        std::abs(EditorEye[2] - GameEye[2]) < 1.0e-5,
+                    "Switching Game -> Editor camera preserves exact camera pose and hands off cleanly to Free Editor mode");
+
         // ④ Two Distinct Session Placement Policies: Lobby (Stand, brake hold) vs Proving Ground (TerrainEquilibrium, 12.68 deg Jump Ramp).
         const Frontier::SessionPolicy LobbyPolicy  = Everest::QueryLobbySessionPolicy();
         const Frontier::SessionPolicy CoursePolicy = Everest::QueryProvingGroundSessionPolicy();

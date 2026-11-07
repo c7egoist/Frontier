@@ -10,9 +10,12 @@
 #include "Frontier/Engine/Scene/WorldSpace.h"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
+#include <cstring>
 #include <limits>
+#include <string_view>
 
 namespace Frontier
 {
@@ -28,6 +31,127 @@ std::array<double, 3> ToDouble(const float Coordinates[3])
 std::array<double, 3> Conjugated(const std::array<double, 4>& Q, const std::array<double, 3>& Vector)
 {
     return RotatePhysicsVector({ -Q[0], -Q[1], -Q[2], Q[3] }, Vector);
+}
+
+bool EqualsIgnoreAsciiCase(std::string_view Left, std::string_view Right) noexcept
+{
+    if (Left.size() != Right.size()) return false;
+    for (size_t Index = 0; Index < Left.size(); ++Index)
+    {
+        if (std::tolower(static_cast<unsigned char>(Left[Index])) != std::tolower(static_cast<unsigned char>(Right[Index]))) return false;
+    }
+    return true;
+}
+
+bool ResolveEngineShapeInfo(std::string_view ShapeName, PhysicsShape& OutShape, std::array<double, 3>& OutUnitSize) noexcept
+{
+    if (ShapeName.empty()) return false;
+    if (EqualsIgnoreAsciiCase(ShapeName, "Sphere"))
+    {
+        OutShape    = PhysicsShape::Sphere;
+        OutUnitSize = { 1.0, 1.0, 1.0 };
+        return true;
+    }
+    if (EqualsIgnoreAsciiCase(ShapeName, "Cylinder"))
+    {
+        OutShape    = PhysicsShape::Cylinder;
+        OutUnitSize = { 1.0, 1.0, 1.0 };
+        return true;
+    }
+    if (EqualsIgnoreAsciiCase(ShapeName, "Cone"))
+    {
+        OutShape    = PhysicsShape::Cone;
+        OutUnitSize = { 1.0, 1.0, 1.0 };
+        return true;
+    }
+    if (EqualsIgnoreAsciiCase(ShapeName, "Torus"))
+    {
+        OutShape    = PhysicsShape::Torus;
+        OutUnitSize = { 1.0, 1.0, 0.30 };
+        return true;
+    }
+    if (EqualsIgnoreAsciiCase(ShapeName, "Plane"))
+    {
+        OutShape    = PhysicsShape::Box;
+        OutUnitSize = { 1.0, 1.0, 0.01 };
+        return true;
+    }
+    if (EqualsIgnoreAsciiCase(ShapeName, "Cube") || EqualsIgnoreAsciiCase(ShapeName, "Box"))
+    {
+        OutShape    = PhysicsShape::Box;
+        OutUnitSize = { 1.0, 1.0, 1.0 };
+        return true;
+    }
+    OutShape    = PhysicsShape::Box;
+    OutUnitSize = { 1.0, 1.0, 1.0 };
+    return true;
+}
+
+void HashCombine64(uint64_t& Hash, uint64_t Value) noexcept
+{
+    Hash ^= Value + 0x9E3779B97F4A7C15ull + (Hash << 6u) + (Hash >> 2u);
+}
+
+void HashFloat(uint64_t& Hash, float Value) noexcept
+{
+    const float Canonical = (std::abs(Value) < 1.0e-6f) ? 0.0f : Value;
+    uint32_t    Bits      = 0u;
+    std::memcpy(&Bits, &Canonical, sizeof(Bits));
+    HashCombine64(Hash, Bits);
+}
+
+uint64_t ComputeGeometrySignature(const GeometryConfiguration& Geometry, bool PreserveMovingTransform) noexcept
+{
+    uint64_t Hash = 0xCBF29CE484222325ull;
+    HashCombine64(Hash, Geometry.Visible ? 1u : 0u);
+    HashCombine64(Hash, Geometry.Physics ? 2u : 0u);
+    HashCombine64(Hash, Geometry.Fracture.Enabled ? 4u : 0u);
+    for (unsigned char Ch : Geometry.ShapeName) HashCombine64(Hash, Ch);
+    HashCombine64(Hash, Geometry.Resolved.Bound ? 8u : 0u);
+    HashCombine64(Hash, Geometry.Resolved.Shown);
+    HashCombine64(Hash, Geometry.Resolved.WorldTriangles.size());
+    for (int Axis = 0; Axis < 3; ++Axis)
+    {
+        HashFloat(Hash, Geometry.Resolved.Extent[Axis]);
+        HashFloat(Hash, Geometry.Spatial.Scale[Axis]);
+    }
+    if (!(PreserveMovingTransform && Geometry.Physics && !Geometry.Fracture.Enabled))
+    {
+        for (int Axis = 0; Axis < 3; ++Axis)
+        {
+            HashFloat(Hash, Geometry.Spatial.PositionMetres[Axis]);
+            HashFloat(Hash, Geometry.Spatial.OrientationDegrees[Axis]);
+            HashFloat(Hash, Geometry.Resolved.BoundsMinimum[Axis]);
+            HashFloat(Hash, Geometry.Resolved.BoundsMaximum[Axis]);
+        }
+        HashCombine64(Hash, Geometry.Modifiers.size());
+        for (const auto& Mod : Geometry.Modifiers)
+        {
+            HashCombine64(Hash, Mod.Enabled ? 1u : 0u);
+            HashCombine64(Hash, Mod.Count);
+        }
+    }
+    return Hash;
+}
+
+uint64_t ComputeRigidBodySignature(const RigidBodyRecord& Record, bool PreserveMovingTransform) noexcept
+{
+    const PhysicsConfiguration& Physics = Record.QueryPhysics();
+    const SpatialConfiguration& Spatial = Record.QuerySpatial();
+    uint64_t                    Hash    = 0x84222325CBF29CE4ull;
+    HashCombine64(Hash, Physics.Enabled ? 1u : 0u);
+    HashCombine64(Hash, Physics.DynamicBody ? 2u : 0u);
+    HashFloat(Hash, Physics.Mass.MassKilograms);
+    HashFloat(Hash, Physics.Mass.DensityKgPerCubicMetre);
+    if (!(PreserveMovingTransform && Physics.DynamicBody))
+    {
+        for (int Axis = 0; Axis < 3; ++Axis)
+        {
+            HashFloat(Hash, Spatial.PositionMetres[Axis]);
+            HashFloat(Hash, Spatial.OrientationDegrees[Axis]);
+        }
+    }
+    return Hash;
 }
 
 } // namespace
@@ -46,11 +170,327 @@ size_t PhysicsExtension::Begin(WorldSpace& World, const PhysicsSpaceSettings& Se
     return Begin(World, Inline);
 }
 
+PhysicsExtension::RecordBinding PhysicsExtension::BuildGeometryCollider(
+    WorldSpace&, SceneRecordBase& RecordBase, uint64_t Signature, WorldRegisterEntry* Entry)
+{
+    auto&                                    Record = static_cast<GeometryRecord&>(RecordBase);
+    RecordBinding                            Binding{};
+    Binding.Record                           = Record.QueryToken();
+    Binding.Signature                        = Signature;
+    Binding.Geometry                         = true;
+    GeometryConfiguration&                   Geometry = Record.AccessConfiguration();
+    const GeometryConfiguration::Resolution& Resolved = Geometry.Resolved;
+    const std::array<double, 3>              Minimum  = ToDouble(Resolved.BoundsMinimum);
+    const std::array<double, 3>              Maximum  = ToDouble(Resolved.BoundsMaximum);
+    const std::array<double, 3>              World3   = { Maximum[0] - Minimum[0], Maximum[1] - Minimum[1], Maximum[2] - Minimum[2] };
+    const bool                               Bounded  = (World3[0] > 1.0e-4 && World3[1] > 1.0e-4 && World3[2] > 1.0e-4) &&
+                                                        (World3[0] > 1.0e-2 || World3[1] > 1.0e-2 || World3[2] > 1.0e-2);
+
+    PhysicsShape          PrimitiveShape = PhysicsShape::Box;
+    std::array<double, 3> UnitShapeSize  = { 1.0, 1.0, 1.0 };
+    const bool            IsEngineShape  = ResolveEngineShapeInfo(Geometry.ShapeName, PrimitiveShape, UnitShapeSize);
+
+    auto AssignEntry = [&](PhysicsParticipation Part, uint32_t BodyId, std::string Remark = {})
+    {
+        Binding.Participation = Part;
+        Binding.Body          = BodyId;
+        Binding.Signature     = ComputeGeometrySignature(Geometry, Part == PhysicsParticipation::Moving);
+        if (Entry != nullptr)
+        {
+            Entry->Physics = Part;
+            Entry->Body    = BodyId;
+            if (!Remark.empty()) Entry->Remark = std::move(Remark);
+        }
+    };
+
+    if (!Geometry.Visible)
+    {
+        AssignEntry(PhysicsParticipation::Skipped, PhysicsNoBody, "hidden");
+        return Binding;
+    }
+
+    if (Geometry.Fracture.Enabled)
+    {
+        if (Resolved.Shown > 1 && Resolved.WorldTriangles.empty())
+        {
+            AssignEntry(PhysicsParticipation::Held, PhysicsNoBody,
+                        std::to_string(Resolved.Shown) + " copies share one transform, so they keep their place");
+            return Binding;
+        }
+        uint32_t BodyId = PhysicsNoBody;
+        if (Resolved.WorldTriangles.size() >= 3u && (Resolved.WorldTriangles.size() % 3u) == 0u)
+        {
+            PhysicsBodyDescriptor MeshCollider;
+            MeshCollider.Record   = Record.QueryToken().Value;
+            MeshCollider.Shape    = PhysicsShape::Triangles;
+            MeshCollider.Motion   = PhysicsMotion::Fixed;
+            MeshCollider.Friction = 0.85;
+            MeshCollider.Points.reserve(Resolved.WorldTriangles.size());
+            MeshCollider.Triangles.reserve(Resolved.WorldTriangles.size());
+            for (size_t Index = 0u; Index < Resolved.WorldTriangles.size(); ++Index)
+            {
+                MeshCollider.Points.push_back(Resolved.WorldTriangles[Index]);
+                MeshCollider.Triangles.push_back(static_cast<uint32_t>(Index));
+            }
+            BodyId = Space->AddBody(MeshCollider);
+        }
+        if (BodyId == PhysicsNoBody && Bounded)
+        {
+            PhysicsBodyDescriptor Collider;
+            Collider.Record           = Record.QueryToken().Value;
+            Collider.HalfExtentMetres = { std::max(0.01, 0.5 * World3[0]), std::max(0.01, 0.5 * World3[1]), std::max(0.01, 0.5 * World3[2]) };
+            Collider.PositionMetres   = { 0.5 * (Minimum[0] + Maximum[0]), 0.5 * (Minimum[1] + Maximum[1]), 0.5 * (Minimum[2] + Maximum[2]) };
+            Collider.Motion           = PhysicsMotion::Fixed;
+            BodyId                    = Space->AddBody(Collider);
+        }
+        if (BodyId != PhysicsNoBody)
+        {
+            AssignEntry(PhysicsParticipation::Fracture, BodyId, "fracture deferred: a fixed collider over its bounds");
+        }
+        else
+        {
+            AssignEntry(PhysicsParticipation::Skipped, PhysicsNoBody, "not resolved against the scene (no bounds)");
+        }
+        return Binding;
+    }
+
+    if (Geometry.Physics && Resolved.Shown <= 1)
+    {
+        const SpatialConfiguration& Spatial = Geometry.Spatial;
+        std::array<double, 3>       Size    = {
+            Resolved.Extent[0] * std::abs(Spatial.Scale[0]),
+            Resolved.Extent[1] * std::abs(Spatial.Scale[1]),
+            Resolved.Extent[2] * std::abs(Spatial.Scale[2]),
+        };
+        if (!(Size[0] > 1.0e-4 && Size[1] > 1.0e-4 && Size[2] > 1.0e-4))
+        {
+            if (IsEngineShape)
+            {
+                Size = {
+                    UnitShapeSize[0] * std::max(1.0e-3, static_cast<double>(std::abs(Spatial.Scale[0]))),
+                    UnitShapeSize[1] * std::max(1.0e-3, static_cast<double>(std::abs(Spatial.Scale[1]))),
+                    UnitShapeSize[2] * std::max(1.0e-3, static_cast<double>(std::abs(Spatial.Scale[2]))),
+                };
+            }
+            else if (Bounded)
+            {
+                Size = World3;
+            }
+            else
+            {
+                AssignEntry(PhysicsParticipation::Skipped, PhysicsNoBody, "not resolved against the scene (no bounds)");
+                return Binding;
+            }
+        }
+        const std::array<double, 3> Origin      = ToDouble(Spatial.PositionMetres);
+        const std::array<double, 4> Orientation = ResolvePhysicsOrientation(ToDouble(Spatial.OrientationDegrees));
+        const std::array<double, 3> Centre =
+            (!IsEngineShape && Bounded)
+                ? std::array<double, 3>{ 0.5 * (Minimum[0] + Maximum[0]), 0.5 * (Minimum[1] + Maximum[1]), 0.5 * (Minimum[2] + Maximum[2]) }
+                : Origin;
+        const std::array<double, 3> Offset =
+            IsEngineShape ? std::array<double, 3>{ 0.0, 0.0, 0.0 }
+                          : Conjugated(Orientation, { Centre[0] - Origin[0], Centre[1] - Origin[1], Centre[2] - Origin[2] });
+
+        PhysicsBodyDescriptor Body;
+        Body.Record           = Record.QueryToken().Value;
+        Body.Shape            = IsEngineShape ? PrimitiveShape : PhysicsShape::Box;
+        Body.HalfExtentMetres = { std::max(0.005, 0.5 * Size[0]), std::max(0.005, 0.5 * Size[1]), std::max(0.005, 0.5 * Size[2]) };
+        Body.PositionMetres   = Centre;
+        Body.Orientation      = Orientation;
+        Body.Motion           = PhysicsMotion::Moving;
+        const uint32_t Index  = Space->AddBody(Body);
+        if (Index == PhysicsNoBody)
+        {
+            AssignEntry(PhysicsParticipation::Skipped, PhysicsNoBody, "degenerate shape");
+            return Binding;
+        }
+        Links.push_back({ Index, Record.QueryToken(), true, Offset, Spatial, Geometry.Dynamic });
+        Geometry.Dynamic = true;
+        AssignEntry(PhysicsParticipation::Moving, Index, IsEngineShape ? ("moving " + Geometry.ShapeName + " shape") : std::string{});
+        return Binding;
+    }
+
+    // Static Geometry collider: exact per-instance triangle mesh first (single or multi-copy), else primitive shape, else bounds box.
+    if (IsEngineShape && Resolved.Shown <= 1 && Geometry.Modifiers.empty())
+    {
+        const SpatialConfiguration& Spatial = Geometry.Spatial;
+        std::array<double, 3>       Size    = {
+            (Resolved.Extent[0] > 1.0e-4 ? Resolved.Extent[0] : UnitShapeSize[0]) * std::max(1.0e-3, static_cast<double>(std::abs(Spatial.Scale[0]))),
+            (Resolved.Extent[1] > 1.0e-4 ? Resolved.Extent[1] : UnitShapeSize[1]) * std::max(1.0e-3, static_cast<double>(std::abs(Spatial.Scale[1]))),
+            (Resolved.Extent[2] > 1.0e-4 ? Resolved.Extent[2] : UnitShapeSize[2]) * std::max(1.0e-3, static_cast<double>(std::abs(Spatial.Scale[2]))),
+        };
+        PhysicsBodyDescriptor ShapeCollider;
+        ShapeCollider.Record           = Record.QueryToken().Value;
+        ShapeCollider.Shape            = PrimitiveShape;
+        ShapeCollider.HalfExtentMetres = { std::max(0.005, 0.5 * Size[0]), std::max(0.005, 0.5 * Size[1]), std::max(0.005, 0.5 * Size[2]) };
+        ShapeCollider.PositionMetres   = ToDouble(Spatial.PositionMetres);
+        ShapeCollider.Orientation      = ResolvePhysicsOrientation(ToDouble(Spatial.OrientationDegrees));
+        ShapeCollider.Motion           = PhysicsMotion::Fixed;
+        ShapeCollider.Friction         = 0.85;
+        const uint32_t BodyId          = Space->AddBody(ShapeCollider);
+        if (BodyId != PhysicsNoBody)
+        {
+            AssignEntry(PhysicsParticipation::Fixed, BodyId, "fixed " + Geometry.ShapeName + " shape collider");
+            return Binding;
+        }
+    }
+
+    if (Resolved.WorldTriangles.size() >= 3u && (Resolved.WorldTriangles.size() % 3u) == 0u)
+    {
+        PhysicsBodyDescriptor MeshCollider;
+        MeshCollider.Record   = Record.QueryToken().Value;
+        MeshCollider.Shape    = PhysicsShape::Triangles;
+        MeshCollider.Motion   = PhysicsMotion::Fixed;
+        MeshCollider.Friction = 0.85;
+        MeshCollider.Points.reserve(Resolved.WorldTriangles.size());
+        MeshCollider.Triangles.reserve(Resolved.WorldTriangles.size());
+        for (size_t Index = 0u; Index < Resolved.WorldTriangles.size(); ++Index)
+        {
+            MeshCollider.Points.push_back(Resolved.WorldTriangles[Index]);
+            MeshCollider.Triangles.push_back(static_cast<uint32_t>(Index));
+        }
+        const uint32_t BodyId = Space->AddBody(MeshCollider);
+        if (BodyId != PhysicsNoBody)
+        {
+            AssignEntry(PhysicsParticipation::Fixed, BodyId,
+                        std::to_string(Resolved.WorldTriangles.size() / 3u) + "-facet static triangle mesh (" +
+                            std::to_string(std::max(1u, Resolved.Shown)) + (Resolved.Shown == 1u ? " copy)" : " copies)"));
+            return Binding;
+        }
+    }
+
+    if (Resolved.Shown > 1)
+    {
+        AssignEntry(PhysicsParticipation::Held, PhysicsNoBody,
+                    std::to_string(Resolved.Shown) + " copies share one transform, so they keep their place");
+        return Binding;
+    }
+
+    if (Resolved.Shown == 1 && Bounded)
+    {
+        PhysicsBodyDescriptor Collider;
+        Collider.Record           = Record.QueryToken().Value;
+        Collider.HalfExtentMetres = { std::max(0.01, 0.5 * World3[0]), std::max(0.01, 0.5 * World3[1]), std::max(0.01, 0.5 * World3[2]) };
+        Collider.PositionMetres   = { 0.5 * (Minimum[0] + Maximum[0]), 0.5 * (Minimum[1] + Maximum[1]), 0.5 * (Minimum[2] + Maximum[2]) };
+        Collider.Motion           = PhysicsMotion::Fixed;
+        const uint32_t BodyId     = Space->AddBody(Collider);
+        if (BodyId != PhysicsNoBody)
+        {
+            AssignEntry(PhysicsParticipation::Fixed, BodyId);
+            return Binding;
+        }
+    }
+
+    AssignEntry(PhysicsParticipation::Skipped, PhysicsNoBody, "not resolved against the scene (no bounds)");
+    return Binding;
+}
+
+PhysicsExtension::RecordBinding PhysicsExtension::BuildRigidBodyCollider(
+    SceneRecordBase& RecordBase, uint64_t Signature, WorldRegisterEntry* Entry)
+{
+    auto&         Record = static_cast<RigidBodyRecord&>(RecordBase);
+    RecordBinding Binding{};
+    Binding.Record    = Record.QueryToken();
+    Binding.Signature = Signature;
+    Binding.Geometry  = false;
+    if (!Record.QueryPhysics().Enabled)
+    {
+        Binding.Participation = PhysicsParticipation::Skipped;
+        if (Entry != nullptr) Entry->Physics = PhysicsParticipation::Skipped;
+        return Binding;
+    }
+    const PhysicsConfiguration& Physics = Record.QueryPhysics();
+    const double                Volume  = Physics.Mass.MassKilograms / std::max(1.0e-3f, Physics.Mass.DensityKgPerCubicMetre);
+    PhysicsBodyDescriptor       Body;
+    Body.Record              = Record.QueryToken().Value;
+    Body.Shape               = PhysicsShape::Sphere;
+    Body.HalfExtentMetres[0] = std::clamp(std::cbrt(3.0 * Volume / (4.0 * 3.14159265358979323846)), 0.05, 50.0);
+    Body.PositionMetres      = ToDouble(Record.QuerySpatial().PositionMetres);
+    Body.Orientation         = ResolvePhysicsOrientation(ToDouble(Record.QuerySpatial().OrientationDegrees));
+    Body.Motion              = Physics.DynamicBody ? PhysicsMotion::Moving : PhysicsMotion::Fixed;
+    Body.MassKilograms       = Physics.Mass.MassKilograms;
+    Body.Friction            = Physics.DynamicFriction;
+    Body.Restitution         = Physics.Restitution;
+    Body.LinearDamping       = Physics.LinearDamping;
+    Body.LinearVelocityMps   = ToDouble(Physics.LinearVelocityMps);
+    Body.AngularVelocityRads = ToDouble(Physics.AngularVelocityRadSec);
+    const uint32_t Index     = Space->AddBody(Body);
+    if (Index == PhysicsNoBody)
+    {
+        Binding.Participation = PhysicsParticipation::Skipped;
+        if (Entry != nullptr) Entry->Physics = PhysicsParticipation::Skipped;
+        return Binding;
+    }
+    Binding.Body = Index;
+    if (Entry != nullptr) Entry->Body = Index;
+    if (Body.Motion == PhysicsMotion::Moving)
+    {
+        Links.push_back({ Index, Record.QueryToken(), false, {}, Record.QuerySpatial(), false });
+        Binding.Participation = PhysicsParticipation::Moving;
+        if (Entry != nullptr) Entry->Physics = PhysicsParticipation::Moving;
+    }
+    else
+    {
+        Binding.Participation = PhysicsParticipation::Fixed;
+        if (Entry != nullptr) Entry->Physics = PhysicsParticipation::Fixed;
+    }
+    Binding.Signature = ComputeRigidBodySignature(Record, Binding.Participation == PhysicsParticipation::Moving);
+    return Binding;
+}
+
+void PhysicsExtension::RecomputeTally()
+{
+    const double PrevStepHz   = Tally.StepHz;
+    const bool   PrevThreaded = Tally.Threaded;
+    const double PrevStepMs   = Tally.StepMilliseconds;
+    Tally                     = {};
+    Tally.StepHz              = PrevStepHz;
+    Tally.Threaded            = PrevThreaded;
+    Tally.StepMilliseconds    = PrevStepMs;
+    if (Space && Space->QueryBodyCount() > 0) ++Tally.Fixed;   // ground slab
+    for (const RecordBinding& Binding : Bindings)
+    {
+        switch (Binding.Participation)
+        {
+            case PhysicsParticipation::Moving:   ++Tally.Moving; break;
+            case PhysicsParticipation::Fixed:    ++Tally.Fixed; break;
+            case PhysicsParticipation::Held:     ++Tally.Held; break;
+            case PhysicsParticipation::Fracture: ++Tally.Fracture; break;
+            case PhysicsParticipation::Skipped:  ++Tally.Skipped; break;
+            default: break;
+        }
+    }
+    for (const WorldRegisterEntry& Entry : Register.QueryEntries())
+    {
+        if (Entry.Type == "Vehicle" && Entry.Physics == PhysicsParticipation::Skipped) ++Tally.Skipped;
+    }
+    Tally.Vehicles = Vehicles.size();
+}
+
+void PhysicsExtension::StartPhysicsThread()
+{
+    if (!Threaded || !Space) return;
+    PhysicsThreadConfiguration Configuration;
+    Configuration.StepHz              = Tally.StepHz > 0.0 ? Tally.StepHz : (1.0 / StepSeconds);
+    Configuration.MaximumCatchUpSteps = ActiveSettings.MaximumCatchUpSteps;
+    Threaded = Thread.Start(
+        Configuration, [this](uint64_t, double Seconds) { StepOnce(Seconds); },
+        [this](uint64_t)
+        {
+            FillSnapshot(Snapshots.AccessProduced());
+            Snapshots.Publish();
+        });
+    Tally.Threaded = Threaded;
+}
+
 size_t PhysicsExtension::Begin(WorldSpace& World, const PhysicsExtensionSettings& Settings)
 {
     if (Space) End(World);
-    Space = std::make_unique<PhysicsSpace>(Settings.Space);
+    ActiveSettings = Settings;
+    Space          = std::make_unique<PhysicsSpace>(Settings.Space);
     Links.clear();
+    Bindings.clear();
     Vehicles.clear();
     Tally        = {};
     Remainder    = 0.0;
@@ -68,141 +508,15 @@ size_t PhysicsExtension::Begin(WorldSpace& World, const PhysicsExtensionSettings
     Ground.PositionMetres   = { 0.0, 0.0, -1.0 };
     Ground.Motion           = PhysicsMotion::Fixed;
     Ground.Friction         = 0.8;
-    if (Space->AddBody(Ground) != PhysicsNoBody) ++Tally.Fixed;
+    (void)Space->AddBody(Ground);
 
-    // ② Geometry records: Physics on → a moving box; fracturable or a single shown copy → a fixed box over its world bounds
+    // ② Geometry records: environment triangle meshes, engine shapes, fracturable colliders, and moving rigid bodies
     for (WorldRegisterEntry& Entry : Register.AccessEntries())
     {
         auto* Record = dynamic_cast<GeometryRecord*>(World.FindRecord(Entry.Token));
         if (Record == nullptr) continue;
-        GeometryConfiguration&                   Geometry = Record->AccessConfiguration();
-        const GeometryConfiguration::Resolution& Resolved = Geometry.Resolved;
-        const std::array<double, 3> Minimum = ToDouble(Resolved.BoundsMinimum), Maximum = ToDouble(Resolved.BoundsMaximum);
-        const std::array<double, 3> World3  = { Maximum[0] - Minimum[0], Maximum[1] - Minimum[1], Maximum[2] - Minimum[2] };
-        const bool                  Bounded = World3[0] > 1.0e-3 && World3[1] > 1.0e-3 && World3[2] > 1.0e-3;
-        if (Resolved.Shown > 1)
-        {
-            Entry.Physics = PhysicsParticipation::Held;
-            Entry.Remark  = std::to_string(Resolved.Shown) + " copies share one transform, so they keep their place";
-            ++Tally.Held;
-            continue;
-        }
-        if (Geometry.Fracture.Enabled)
-        {
-            // 📝 No fracture yet: a fracturable object is a fixed collider over its bounds, whatever its Physics switch says.
-            if (Geometry.Visible && Bounded)
-            {
-                PhysicsBodyDescriptor Collider;
-                Collider.Record           = Record->QueryToken().Value;
-                Collider.HalfExtentMetres = { 0.5 * World3[0], 0.5 * World3[1], 0.5 * World3[2] };
-                Collider.PositionMetres   = { 0.5 * (Minimum[0] + Maximum[0]), 0.5 * (Minimum[1] + Maximum[1]), 0.5 * (Minimum[2] + Maximum[2]) };
-                Collider.Motion           = PhysicsMotion::Fixed;
-                Entry.Body                = Space->AddBody(Collider);
-                if (Entry.Body != PhysicsNoBody)
-                {
-                    Entry.Physics = PhysicsParticipation::Fracture;
-                    Entry.Remark  = "fracture deferred: a fixed collider over its bounds";
-                    ++Tally.Fracture;
-                    continue;
-                }
-            }
-            Entry.Physics = PhysicsParticipation::Skipped;
-            ++Tally.Skipped;
-            continue;
-        }
-        if (Geometry.Physics)
-        {
-            const SpatialConfiguration& Spatial = Geometry.Spatial;
-            std::array<double, 3> Size = { Resolved.Extent[0] * std::abs(Spatial.Scale[0]), Resolved.Extent[1] * std::abs(Spatial.Scale[1]),
-                                           Resolved.Extent[2] * std::abs(Spatial.Scale[2]) };
-            if (!(Size[0] > 1.0e-3 && Size[1] > 1.0e-3 && Size[2] > 1.0e-3))
-            {
-                // 📝 Not resolved against the scene yet (no extent): its world bounds, or nothing to simulate.
-                if (!Bounded)
-                {
-                    Entry.Physics = PhysicsParticipation::Skipped;
-                    ++Tally.Skipped;
-                    continue;
-                }
-                Size = World3;
-            }
-            const std::array<double, 3> Origin      = ToDouble(Spatial.PositionMetres);
-            const std::array<double, 4> Orientation = ResolvePhysicsOrientation(ToDouble(Spatial.OrientationDegrees));
-            // 📝 The world bounds' centre is the shape's centre: its offset from the origin, in the object's own axes.
-            const std::array<double, 3> Centre = Bounded ? std::array<double, 3>{ 0.5 * (Minimum[0] + Maximum[0]), 0.5 * (Minimum[1] + Maximum[1]),
-                                                                                  0.5 * (Minimum[2] + Maximum[2]) }
-                                                         : Origin;
-            const std::array<double, 3> Offset = Conjugated(Orientation, { Centre[0] - Origin[0], Centre[1] - Origin[1], Centre[2] - Origin[2] });
-            PhysicsBodyDescriptor Body;
-            Body.Record           = Record->QueryToken().Value;
-            Body.Shape            = PhysicsShape::Box;
-            Body.HalfExtentMetres = { 0.5 * Size[0], 0.5 * Size[1], 0.5 * Size[2] };
-            Body.PositionMetres   = Centre;
-            Body.Orientation      = Orientation;
-            Body.Motion           = PhysicsMotion::Moving;
-            const uint32_t Index  = Space->AddBody(Body);
-            if (Index == PhysicsNoBody)
-            {
-                Entry.Physics = PhysicsParticipation::Skipped;
-                ++Tally.Skipped;
-                continue;
-            }
-            Links.push_back({ Index, Record->QueryToken(), true, Offset, Spatial, Geometry.Dynamic });
-            Geometry.Dynamic = true;   // 📝 its cards relight every refresh while it moves
-            Entry.Physics    = PhysicsParticipation::Moving;
-            Entry.Body       = Index;
-            ++Tally.Moving;
-        }
-        else if (Geometry.Visible && Resolved.Shown == 1 && Bounded)
-        {
-            Entry.Body = PhysicsNoBody;
-            if (Resolved.WorldTriangles.size() >= 3u && (Resolved.WorldTriangles.size() % 3u) == 0u)
-            {
-                PhysicsBodyDescriptor MeshCollider;
-                MeshCollider.Record   = Record->QueryToken().Value;
-                MeshCollider.Shape    = PhysicsShape::Triangles;
-                MeshCollider.Motion   = PhysicsMotion::Fixed;
-                MeshCollider.Friction = 0.85;
-                MeshCollider.Points.reserve(Resolved.WorldTriangles.size());
-                MeshCollider.Triangles.reserve(Resolved.WorldTriangles.size());
-                for (size_t Index = 0u; Index < Resolved.WorldTriangles.size(); ++Index)
-                {
-                    const auto& Corner = Resolved.WorldTriangles[Index];
-                    MeshCollider.Points.push_back(Corner);
-                    MeshCollider.Triangles.push_back(static_cast<uint32_t>(Index));
-                }
-                Entry.Body = Space->AddBody(MeshCollider);
-                if (Entry.Body != PhysicsNoBody)
-                {
-                    Entry.Remark = std::to_string(Resolved.WorldTriangles.size() / 3u) + "-facet static triangle mesh";
-                }
-            }
-            if (Entry.Body == PhysicsNoBody)
-            {
-                PhysicsBodyDescriptor Collider;
-                Collider.Record           = Record->QueryToken().Value;
-                Collider.HalfExtentMetres = { 0.5 * World3[0], 0.5 * World3[1], 0.5 * World3[2] };
-                Collider.PositionMetres   = { 0.5 * (Minimum[0] + Maximum[0]), 0.5 * (Minimum[1] + Maximum[1]), 0.5 * (Minimum[2] + Maximum[2]) };
-                Collider.Motion           = PhysicsMotion::Fixed;
-                Entry.Body                = Space->AddBody(Collider);
-            }
-            if (Entry.Body != PhysicsNoBody)
-            {
-                Entry.Physics = PhysicsParticipation::Fixed;
-                ++Tally.Fixed;
-            }
-            else
-            {
-                Entry.Physics = PhysicsParticipation::Skipped;
-                ++Tally.Skipped;
-            }
-        }
-        else
-        {
-            Entry.Physics = PhysicsParticipation::Skipped;
-            Entry.Remark  = Geometry.Visible ? "not resolved against the scene (no bounds)" : "hidden";
-            ++Tally.Skipped;
-        }
+        const uint64_t Signature = ComputeGeometrySignature(Record->QueryConfiguration(), false);
+        Bindings.push_back(BuildGeometryCollider(World, *Record, Signature, &Entry));
     }
 
     // ③ RigidBody records: spheres of their volume
@@ -210,46 +524,8 @@ size_t PhysicsExtension::Begin(WorldSpace& World, const PhysicsExtensionSettings
     {
         auto* Record = dynamic_cast<RigidBodyRecord*>(World.FindRecord(Entry.Token));
         if (Record == nullptr) continue;
-        if (!Record->QueryPhysics().Enabled)
-        {
-            Entry.Physics = PhysicsParticipation::Skipped;
-            ++Tally.Skipped;
-            continue;
-        }
-        const PhysicsConfiguration& Physics = Record->QueryPhysics();
-        const double Volume = Physics.Mass.MassKilograms / std::max(1.0e-3f, Physics.Mass.DensityKgPerCubicMetre);
-        PhysicsBodyDescriptor Body;
-        Body.Record              = Record->QueryToken().Value;
-        Body.Shape               = PhysicsShape::Sphere;
-        Body.HalfExtentMetres[0] = std::clamp(std::cbrt(3.0 * Volume / (4.0 * 3.14159265358979323846)), 0.05, 50.0);
-        Body.PositionMetres      = ToDouble(Record->QuerySpatial().PositionMetres);
-        Body.Orientation         = ResolvePhysicsOrientation(ToDouble(Record->QuerySpatial().OrientationDegrees));
-        Body.Motion              = Physics.DynamicBody ? PhysicsMotion::Moving : PhysicsMotion::Fixed;
-        Body.MassKilograms       = Physics.Mass.MassKilograms;
-        Body.Friction            = Physics.DynamicFriction;
-        Body.Restitution         = Physics.Restitution;
-        Body.LinearDamping       = Physics.LinearDamping;
-        Body.LinearVelocityMps   = ToDouble(Physics.LinearVelocityMps);
-        Body.AngularVelocityRads = ToDouble(Physics.AngularVelocityRadSec);
-        const uint32_t Index     = Space->AddBody(Body);
-        if (Index == PhysicsNoBody)
-        {
-            Entry.Physics = PhysicsParticipation::Skipped;
-            ++Tally.Skipped;
-            continue;
-        }
-        Entry.Body = Index;
-        if (Body.Motion == PhysicsMotion::Moving)
-        {
-            Links.push_back({ Index, Record->QueryToken(), false, {}, Record->QuerySpatial(), false });
-            Entry.Physics = PhysicsParticipation::Moving;
-            ++Tally.Moving;
-        }
-        else
-        {
-            Entry.Physics = PhysicsParticipation::Fixed;
-            ++Tally.Fixed;
-        }
+        const uint64_t Signature = ComputeRigidBodySignature(*Record, false);
+        Bindings.push_back(BuildRigidBodyCollider(*Record, Signature, &Entry));
     }
 
     // ④ Vehicles (the fixed colliders are in and indexed, so a chassis finds its road or ramp on 4-corner equilibrium probes)
@@ -257,6 +533,7 @@ size_t PhysicsExtension::Begin(WorldSpace& World, const PhysicsExtensionSettings
     for (WorldRegisterEntry& Entry : Register.AccessEntries())
         if (dynamic_cast<VehicleRecord*>(World.FindRecord(Entry.Token)) != nullptr) AddVehicle(World, Entry.Token, &Entry);
     Space->Prepare();
+    RecomputeTally();
 
     // ⑤ the register document beside the level
     if (Settings.WriteRegister && !World.QueryLoadedLevelPath().empty())
@@ -285,20 +562,7 @@ size_t PhysicsExtension::Begin(WorldSpace& World, const PhysicsExtensionSettings
     Tally.Threaded    = Threaded;
     FillSnapshot(Latest);
     (void)ApplySnapshot(World, Latest);
-    if (Threaded)
-    {
-        PhysicsThreadConfiguration Configuration;
-        Configuration.StepHz              = Rate;
-        Configuration.MaximumCatchUpSteps = Settings.MaximumCatchUpSteps;
-        Threaded = Thread.Start(
-            Configuration, [this](uint64_t, double Seconds) { StepOnce(Seconds); },
-            [this](uint64_t)
-            {
-                FillSnapshot(Snapshots.AccessProduced());
-                Snapshots.Publish();
-            });
-        Tally.Threaded = Threaded;
-    }
+    if (Threaded) StartPhysicsThread();
     return Tally.Moving + Tally.Vehicles;
 }
 
@@ -450,10 +714,202 @@ void PhysicsExtension::AdvanceSteps(uint32_t Count)
     FillSnapshot(Latest);
 }
 
+bool PhysicsExtension::SynchronizeWorld(WorldSpace& World)
+{
+    if (!Space) return false;
+
+    const auto GeometryRecords  = World.FindAllByType("Geometry");
+    const auto RigidBodyRecords = World.FindAllByType("RigidBody");
+    const size_t ExpectedCount  = GeometryRecords.size() + RigidBodyRecords.size();
+
+    auto FindBinding = [&](RecordToken Token) -> const RecordBinding*
+    {
+        for (const RecordBinding& Binding : Bindings)
+        {
+            if (Binding.Record == Token) return &Binding;
+        }
+        return nullptr;
+    };
+
+    bool NeedsSync = (ExpectedCount != Bindings.size());
+    if (!NeedsSync)
+    {
+        for (const SceneRecordBase* Candidate : GeometryRecords)
+        {
+            const auto* GeometryRec = dynamic_cast<const GeometryRecord*>(Candidate);
+            if (GeometryRec == nullptr) continue;
+            const RecordBinding* Existing = FindBinding(Candidate->QueryToken());
+            if (Existing == nullptr || !Existing->Geometry)
+            {
+                NeedsSync = true;
+                break;
+            }
+            const bool MovingNow = (Existing->Participation == PhysicsParticipation::Moving);
+            if (ComputeGeometrySignature(GeometryRec->QueryConfiguration(), MovingNow) != Existing->Signature)
+            {
+                NeedsSync = true;
+                break;
+            }
+        }
+    }
+    if (!NeedsSync)
+    {
+        for (const SceneRecordBase* Candidate : RigidBodyRecords)
+        {
+            const auto* RigidRec = dynamic_cast<const RigidBodyRecord*>(Candidate);
+            if (RigidRec == nullptr) continue;
+            const RecordBinding* Existing = FindBinding(Candidate->QueryToken());
+            if (Existing == nullptr || Existing->Geometry)
+            {
+                NeedsSync = true;
+                break;
+            }
+            const bool MovingNow = (Existing->Participation == PhysicsParticipation::Moving);
+            if (ComputeRigidBodySignature(*RigidRec, MovingNow) != Existing->Signature)
+            {
+                NeedsSync = true;
+                break;
+            }
+        }
+    }
+    if (!NeedsSync) return false;
+
+    const bool WasThreaded = Threaded;
+    if (WasThreaded)
+    {
+        Thread.Stop();
+        if (Snapshots.Acquire()) Latest = Snapshots.QueryConsumed();
+        else FillSnapshot(Latest);
+        (void)ApplySnapshot(World, Latest);
+    }
+
+    auto RemoveLinkedBody = [&](RecordToken Token)
+    {
+        for (auto It = Links.begin(); It != Links.end(); ++It)
+        {
+            if (It->Record == Token)
+            {
+                if (It->Geometry)
+                {
+                    if (auto* Record = dynamic_cast<GeometryRecord*>(World.FindRecord(Token)))
+                    {
+                        Record->AccessConfiguration().Dynamic = It->SavedDynamic;
+                    }
+                }
+                Links.erase(It);
+                break;
+            }
+        }
+    };
+
+    std::vector<RecordBinding> NextBindings;
+    NextBindings.reserve(ExpectedCount);
+    Register.Survey(World);
+
+    // Update or build Geometry records
+    for (const SceneRecordBase* Candidate : GeometryRecords)
+    {
+        auto* GeometryRec = dynamic_cast<GeometryRecord*>(World.FindRecord(Candidate->QueryToken()));
+        if (GeometryRec == nullptr) continue;
+        const RecordBinding* Existing  = FindBinding(Candidate->QueryToken());
+        const bool           MovingNow = (Existing != nullptr && Existing->Participation == PhysicsParticipation::Moving);
+        const uint64_t       Sig       = ComputeGeometrySignature(GeometryRec->QueryConfiguration(), MovingNow);
+        WorldRegisterEntry*  RegEntry  = Register.Find(Candidate->QueryToken());
+        if (Existing != nullptr && Existing->Geometry && Existing->Signature == Sig)
+        {
+            if (RegEntry != nullptr)
+            {
+                RegEntry->Physics = Existing->Participation;
+                RegEntry->Body    = Existing->Body;
+            }
+            NextBindings.push_back(*Existing);
+            continue;
+        }
+        if (Existing != nullptr)
+        {
+            if (Existing->Body != PhysicsNoBody) Space->RemoveBody(Existing->Body);
+            if (Existing->Participation == PhysicsParticipation::Moving) RemoveLinkedBody(Existing->Record);
+        }
+        const uint64_t FreshSig = ComputeGeometrySignature(GeometryRec->QueryConfiguration(), false);
+        NextBindings.push_back(BuildGeometryCollider(World, *GeometryRec, FreshSig, RegEntry));
+    }
+
+    // Update or build RigidBody records
+    for (const SceneRecordBase* Candidate : RigidBodyRecords)
+    {
+        auto* RigidRec = dynamic_cast<RigidBodyRecord*>(World.FindRecord(Candidate->QueryToken()));
+        if (RigidRec == nullptr) continue;
+        const RecordBinding* Existing  = FindBinding(Candidate->QueryToken());
+        const bool           MovingNow = (Existing != nullptr && Existing->Participation == PhysicsParticipation::Moving);
+        const uint64_t       Sig       = ComputeRigidBodySignature(*RigidRec, MovingNow);
+        WorldRegisterEntry*  RegEntry  = Register.Find(Candidate->QueryToken());
+        if (Existing != nullptr && !Existing->Geometry && Existing->Signature == Sig)
+        {
+            if (RegEntry != nullptr)
+            {
+                RegEntry->Physics = Existing->Participation;
+                RegEntry->Body    = Existing->Body;
+            }
+            NextBindings.push_back(*Existing);
+            continue;
+        }
+        if (Existing != nullptr)
+        {
+            if (Existing->Body != PhysicsNoBody) Space->RemoveBody(Existing->Body);
+            if (Existing->Participation == PhysicsParticipation::Moving) RemoveLinkedBody(Existing->Record);
+        }
+        const uint64_t FreshSig = ComputeRigidBodySignature(*RigidRec, false);
+        NextBindings.push_back(BuildRigidBodyCollider(*RigidRec, FreshSig, RegEntry));
+    }
+
+    // Remove bodies for deleted records
+    for (const RecordBinding& OldBinding : Bindings)
+    {
+        bool StillPresent = false;
+        for (const RecordBinding& NewBinding : NextBindings)
+        {
+            if (NewBinding.Record == OldBinding.Record)
+            {
+                StillPresent = true;
+                break;
+            }
+        }
+        if (!StillPresent)
+        {
+            if (OldBinding.Body != PhysicsNoBody) Space->RemoveBody(OldBinding.Body);
+            if (OldBinding.Participation == PhysicsParticipation::Moving) RemoveLinkedBody(OldBinding.Record);
+        }
+    }
+
+    // Preserve Vehicle / Tyre entries in Register
+    for (const VehicleLink& Veh : Vehicles)
+    {
+        if (WorldRegisterEntry* VehEntry = Register.Find(Veh.Record))
+        {
+            VehEntry->Physics = PhysicsParticipation::Vehicle;
+            VehEntry->Body    = Veh.Physics->QueryBody();
+        }
+        for (const RecordToken& TyreTok : Veh.Tyres)
+        {
+            if (WorldRegisterEntry* TyreEntry = Register.Find(TyreTok)) TyreEntry->Physics = PhysicsParticipation::Tyre;
+        }
+    }
+
+    Bindings = std::move(NextBindings);
+    Space->Prepare();
+    RecomputeTally();
+    if (ActiveSettings.WriteRegister && !World.QueryLoadedLevelPath().empty())
+        (void)Register.WriteMarkdown(WorldRegister::ResolveDocumentPath(World.QueryLoadedLevelPath()));
+    FillSnapshot(Latest);
+    if (WasThreaded) StartPhysicsThread();
+    return true;
+}
+
 size_t PhysicsExtension::Step(WorldSpace& World, double DeltaSeconds)
 {
     if (!Space) return 0;
     const auto Start = std::chrono::steady_clock::now();
+    (void)SynchronizeWorld(World);
     if (Threaded)
     {
         Commands.Write(Pending);
@@ -605,6 +1061,7 @@ void PhysicsExtension::End(WorldSpace& World)
         for (const RecordToken& Tyre : Link.Tyres) PublishVehicleReading(Tyre, Stopped);
     }
     Links.clear();
+    Bindings.clear();
     Vehicles.clear();
     Space.reset();
     Remainder = 0.0;

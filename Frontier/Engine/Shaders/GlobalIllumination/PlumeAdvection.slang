@@ -80,6 +80,18 @@ float3 ResolveCurlSwirl(float3 Position, float ElapsedTime)
     return CurlA * 0.68 + CurlB * 0.32;
 }
 
+// 📝 Evaluates the outward unit gradient of the combined scene + ground signed distance field.
+float3 EvaluateSceneGradient(float3 Position, float Step)
+{
+    let Eval = (float3 P) => min(SampleSceneDistance(P).x, P.z - Plume.FlameTerms.w);
+    let Grad = float3(
+        Eval(Position + float3(Step, 0.0, 0.0)) - Eval(Position - float3(Step, 0.0, 0.0)),
+        Eval(Position + float3(0.0, Step, 0.0)) - Eval(Position - float3(0.0, Step, 0.0)),
+        Eval(Position + float3(0.0, 0.0, Step)) - Eval(Position - float3(0.0, 0.0, Step)));
+    let Len  = length(Grad);
+    return SelectBranch(float3(0.0, 0.0, 1.0), Grad / Len, Len > 1.0e-5);
+}
+
 // 📝 Queries the live 4-cascade scene signed distance field and reconstructs rigid-body velocity from the nearest occupant.
 float4 ResolveObstacleState(float3 Position, float DeltaTime)
 {
@@ -90,8 +102,11 @@ float4 ResolveObstacleState(float3 Position, float DeltaTime)
     let Level          = uint(Sample.y + 0.5);
     if (Level < Distance.ClipCount && Sample.x < GroundDistance)
     {
+        uint OccupantCount  = 0u;
+        uint OccupantStride = 0u;
+        Occupants.GetDimensions(OccupantCount, OccupantStride);
         let Identity = ResolveClipIdentity(Level, Position);
-        if (Identity != GroundIdentity && Identity != SkyIdentity && Identity < 512u)
+        if (Identity != GroundIdentity && Identity != SkyIdentity && Identity < OccupantCount)
         {
             let Occupant      = Occupants[Identity];
             let LocalPoint    = mul(float4(Position, 1.0), Occupant.WorldToLocal);
@@ -126,7 +141,7 @@ void AdvectVelocity(uint3 Cell : SV_DispatchThreadID)
     let Position    = ProjectVelocityWorld(Plume, Cell);
     let Obstacle    = ResolveObstacleState(Position, DeltaTime);
     let CoarseSize  = Plume.CellMetrics.z;
-    if (Obstacle.w < -CoarseSize * 0.35)
+    if (Obstacle.w <= 0.0)
     {
         VelocityWrite[OutTexel] = float4(Obstacle.xyz, 1.0);
         return;
@@ -178,10 +193,16 @@ void AdvectVelocity(uint3 Cell : SV_DispatchThreadID)
         }
     }
 
-    if (Obstacle.w < CoarseSize * 0.65)
+    if (Obstacle.w < CoarseSize * 0.85)
     {
-        let Skin = saturate(1.0 - max(Obstacle.w, 0.0) / (CoarseSize * 0.65));
-        Advected = lerp(Advected, Obstacle.xyz, Skin * 0.65);
+        let Normal = EvaluateSceneGradient(Position, CoarseSize * 0.35);
+        let Inward = dot(Advected - Obstacle.xyz, Normal);
+        if (Inward < 0.0)
+        {
+            Advected -= Normal * Inward;
+        }
+        let Skin = saturate(1.0 - Obstacle.w / (CoarseSize * 0.85));
+        Advected = lerp(Advected, Obstacle.xyz, Skin * 0.35);
     }
 
     let Speed = length(Advected);
@@ -189,8 +210,7 @@ void AdvectVelocity(uint3 Cell : SV_DispatchThreadID)
     {
         Advected *= 42.0 / Speed;
     }
-    let SolidMask = SelectBranch(0.0, 1.0, Obstacle.w <= 0.0);
-    VelocityWrite[OutTexel] = float4(Advected, SolidMask);
+    VelocityWrite[OutTexel] = float4(Advected, 0.0);
 }
 
 [shader("compute")]
@@ -230,8 +250,22 @@ void AdvectThermo(uint3 Cell : SV_DispatchThreadID, uint LocalIndex : SV_GroupIn
                                          ClassifyPreviousThermo(Plume, Position));
             let SubgridUp = 0.0085 * LocalNow.y + 2.4 * LocalNow.w;
             Flow.z       += SubgridUp;
-            var Backtrace = Position - DeltaTime * Flow;
+
+            let Midpoint  = Position - 0.5 * DeltaTime * Flow;
+            var MidFlow   = SelectBranch(Plume.WindVector.xyz,
+                                         VelocityRead.SampleLevel(LinearRepeat, ProjectVelocityCoordinates(Plume, Midpoint), 0.0).xyz,
+                                         ClassifyPreviousVelocity(Plume, Midpoint));
+            MidFlow.z    += SubgridUp;
+            var Backtrace = Position - DeltaTime * MidFlow;
             Backtrace.z   = max(Backtrace.z, Plume.FlameTerms.w + VoxelSize * 0.35);
+
+            let BackSigned = min(SampleSceneDistance(Backtrace).x, Backtrace.z - Plume.FlameTerms.w);
+            if (BackSigned < 0.0)
+            {
+                let Normal = EvaluateSceneGradient(Backtrace, VoxelSize * 0.5);
+                Backtrace += Normal * (-BackSigned + VoxelSize * 0.15);
+                Backtrace.z = max(Backtrace.z, Plume.FlameTerms.w + VoxelSize * 0.35);
+            }
 
             if (ClassifyPreviousThermo(Plume, Backtrace))
             {

@@ -90,40 +90,36 @@ float3 EvaluateFluidCurl3(float3 Query)
     return float3(N1 - N2, N2 - N3 + M1 * 0.4, N3 - N1 + M2 * 0.4) / (2.0 * Step);
 }
 
-// 📝 Signed distance in normalized UVW [0..1]³ for all 6 collider types (1:1 with shaders-glsl.js obstacleSDF).
+// 📝 Signed distance in world-scaled domain units for all 6 collider types (1:1 with shaders-glsl.js sdObstacle).
 //    Category: 0 = None, 1 = Sphere, 2 = Pillar, 3 = Horizontal cylinder, 4 = Deflector slab, 5 = Tyre ring.
-float EvaluateColliderSignedDistance(float3 Uvw, int Category, float3 Centre, float Radius)
+float EvaluateColliderSignedDistance(float3 Uvw, int Category, float3 Centre, float Radius, float3 DomainScale)
 {
     if (Category <= 0 || Radius <= 0.001)
     {
         return 10.0;
     }
-    let Offset = Uvw - Centre;
+    let Scaled = (Uvw - Centre) * DomainScale;
     if (Category == 1)
     {
-        return length(Offset) - Radius;
+        return length(Scaled) - Radius;
     }
     if (Category == 2)
     {
-        let Radial   = length(Offset.xz) - Radius * 0.72;
-        let Vertical = abs(Uvw.y - 0.36) - 0.36;
-        return max(Radial, Vertical);
+        let W = float2(length(Scaled.xz) - Radius * 0.75, abs(Uvw.y - (Centre.y * 0.5)) * DomainScale.y - Radius * 1.4);
+        return min(max(W.x, W.y), 0.0) + length(max(W, float2(0.0)));
     }
     if (Category == 3)
     {
-        let Radial = length(Offset.yz) - Radius * 0.78;
-        let Axial  = abs(Offset.x) - Radius * 1.9;
-        return max(Radial, Axial);
+        let W = float2(length(Scaled.yz) - Radius * 0.72, abs(Scaled.x) - Radius * 1.9);
+        return min(max(W.x, W.y), 0.0) + length(max(W, float2(0.0)));
     }
     if (Category == 5)
     {
-        let Major = Radius * 0.78;
-        let Minor = Radius * 0.36;
-        let Torus = float2(length(Offset.yz) - Major, Offset.x);
-        return length(Torus) - Minor;
+        // Rounded treaded tyre: ring in the X/Y plane, axle along Z (1:1 with shaders-glsl.js sdObstacle).
+        return length(float2(length(Scaled.xy) - Radius * 0.76, Scaled.z)) - Radius * 0.24;
     }
-    let HalfExtents = float3(Radius * 1.55, Radius * 0.36, Radius * 1.25);
-    let Delta       = abs(Offset) - HalfExtents;
+    let HalfExtents = float3(Radius * 1.5, Radius * 0.45, Radius * 1.5);
+    let Delta       = abs(Scaled) - HalfExtents;
     return length(max(Delta, float3(0.0))) + min(max(Delta.x, max(Delta.y, Delta.z)), 0.0);
 }
 

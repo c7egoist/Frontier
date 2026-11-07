@@ -27,10 +27,10 @@ constexpr double   CinematicShotSeconds = 6.5;
 constexpr double   CinematicFadeSeconds = 0.7;
 constexpr uint32_t CinematicShotCount   = 6u;
 constexpr double   ChaseFollowDistance  = 7.0;
-constexpr double   ChaseFollowHeight    = 2.6;
-constexpr double   ChaseLookAtHeight    = 0.8;
+constexpr double   ChaseFollowHeight    = 2.71;
+constexpr double   ChaseLookAtHeight    = 0.91;
 constexpr double   ChasePositionSpring  = 6.0;
-constexpr double   ChaseYawDecayRate    = 0.35;
+constexpr double   ChaseYawDecayRate    = 0.0;
 
 std::array<double, 3> Add3(const std::array<double, 3>& A, const std::array<double, 3>& B) noexcept
 {
@@ -89,21 +89,21 @@ void ResolveHmiTabletView(const VehicleSubjectKinematics& Subject,
                           std::array<double, 3>&          OutUp,
                           double&                         OutFieldOfViewRadians) noexcept
 {
-    constexpr std::array<double, 3> ScreenCentre = {0.46, 0.0, 0.625};
-    constexpr double                TiltRadians  = 20.0 * DegreesToRadians;
+    constexpr std::array<double, 3> ScreenCentre = {0.9672, 0.0, 0.5129};
+    constexpr double                TiltRadians  = 0.42;
     const std::array<double, 3>     NormalLocal  = {-std::cos(TiltRadians), 0.0, std::sin(TiltRadians)};
     const std::array<double, 3>     UpLocal      = {std::sin(TiltRadians), 0.0, std::cos(TiltRadians)};
 
     const double     Scale          = std::clamp(Subject.HmiScale, 0.5, 2.0);
-    const double     TabletWidth    = 0.24 * Scale;
-    const double     TabletHeight   = 0.135 * Scale;
+    const double     TabletWidth    = 0.30 * Scale;
+    const double     TabletHeight   = 0.1875 * Scale;
     const double     FieldOfViewRad = 40.0 * DegreesToRadians;
     const double     HalfTan        = std::tan(0.5 * FieldOfViewRad);
     const double     Aspect         = std::max(0.25, Subject.AspectRatio);
     constexpr double Margin         = 0.86;
     const double     DistanceV      = (0.5 * TabletHeight / Margin) / HalfTan;
     const double     DistanceH      = (0.5 * TabletWidth / Margin) / (HalfTan * Aspect);
-    const double     Distance       = std::max(DistanceV, DistanceH) / std::clamp(Zoom, 0.65, 2.0);
+    const double     Distance       = std::max(DistanceV, DistanceH) * std::clamp(Zoom, 0.65, 2.0);
 
     const std::array<double, 3> EyeLocal = {
         ScreenCentre[0] + NormalLocal[0] * Distance,
@@ -216,6 +216,10 @@ void VehicleCameraSolver::ConfigureRigImmediate(VehicleCameraRig NextRig, const 
     RigBlend            = {};
     HeadYawRadians      = 0.0;
     HeadPitchRadians    = 0.0;
+    ChaseOrbitYawRad    = 0.0;
+    ChaseOrbitPitchRad  = 0.22;
+    ChaseDistanceScale  = 1.0;
+    HmiZoom             = 1.0;
     LagInitialized      = false;
     ChaseInitialized    = false;
     if (LobbyStudio && Rig == VehicleCameraRig::Orbit)
@@ -236,6 +240,12 @@ void VehicleCameraSolver::TransitionToRig(VehicleCameraRig NextRig)
     IdleElapsedSeconds          = 0.0;
     HeadYawRadians              = 0.0;
     HeadPitchRadians            = 0.0;
+    if (NextRig == VehicleCameraRig::Chase)
+    {
+        ChaseOrbitYawRad   = 0.0;
+        ChaseOrbitPitchRad = 0.22;
+        ChaseDistanceScale = 1.0;
+    }
     RigBlend.Active             = true;
     RigBlend.FromPositionMetres = LastSolution.PositionMetres;
     RigBlend.FromTargetMetres   = LastSolution.TargetMetres;
@@ -498,7 +508,7 @@ VehicleCameraSolution VehicleCameraSolver::Advance(const VehicleSubjectKinematic
     {
         if (std::abs(Input.WheelNotches) > 0.0)
         {
-            HmiZoom = std::clamp(HmiZoom * std::exp(Input.WheelNotches * 0.10), 0.65, 2.0);
+            HmiZoom = std::clamp(HmiZoom * std::exp(-Input.WheelNotches * 0.10), 0.65, 2.0);
         }
     }
 
@@ -593,7 +603,7 @@ VehicleCameraSolution VehicleCameraSolver::Advance(const VehicleSubjectKinematic
 
     if (Rig == VehicleCameraRig::Orbit)
     {
-        DesiredTarget         = {Subject.PositionMetres[0], Subject.PositionMetres[1], Subject.PositionMetres[2] + 0.35};
+        DesiredTarget         = {Subject.PositionMetres[0], Subject.PositionMetres[1], Subject.PositionMetres[2] + 0.46};
         const double CosPitch = std::cos(Orbit.PitchRadians);
         DesiredEye            = {
             DesiredTarget[0] + Orbit.DistanceMetres * CosPitch * std::cos(Orbit.YawRadians),
@@ -641,8 +651,8 @@ VehicleCameraSolution VehicleCameraSolver::Advance(const VehicleSubjectKinematic
     else if (Rig == VehicleCameraRig::Cockpit || Rig == VehicleCameraRig::Passenger)
     {
         const bool Driver  = (Rig == VehicleCameraRig::Cockpit);
-        DesiredEye         = TransformLocalPoint(Subject, Driver ? -0.20 : -0.22, Driver ? 0.42 : -0.42, Driver ? 1.12 : 1.10);
-        const double Pitch = (Driver ? 0.14 : 0.12) + HeadPitchRadians;
+        DesiredEye         = TransformLocalPoint(Subject, Driver ? -0.20 : -0.22, Driver ? 0.42 : -0.42, Driver ? 1.00715 : 0.98715);
+        const double Pitch = (Driver ? 0.08 : 0.07) + HeadPitchRadians;
         const double Yaw   = HeadYawRadians;
         const std::array<double, 3> LookLocal = {std::cos(Pitch) * std::cos(Yaw), std::cos(Pitch) * std::sin(Yaw), -std::sin(Pitch)};
         DesiredTarget      = Add3(DesiredEye, Scale3(TransformLocalDirection(Subject, LookLocal), 10.0));
@@ -652,7 +662,7 @@ VehicleCameraSolution VehicleCameraSolver::Advance(const VehicleSubjectKinematic
     }
     else if (Rig == VehicleCameraRig::Hood)
     {
-        DesiredEye                            = TransformLocalPoint(Subject, 1.62, 0.00, 0.70);
+        DesiredEye                            = TransformLocalPoint(Subject, 1.45, 0.00, 0.72);
         const std::array<double, 3> LookLocal = {std::cos(0.05), 0.0, -std::sin(0.05)};
         DesiredTarget                         = Add3(DesiredEye, Scale3(TransformLocalDirection(Subject, LookLocal), 10.0));
         DesiredUp                             = Subject.UpUnit;
@@ -660,15 +670,15 @@ VehicleCameraSolution VehicleCameraSolver::Advance(const VehicleSubjectKinematic
     }
     else if (Rig == VehicleCameraRig::TyreFrontLeft)
     {
-        DesiredEye    = TransformLocalPoint(Subject, 2.95, 2.05, -0.12);
-        DesiredTarget = TransformLocalPoint(Subject, 1.7274, 1.0475, -0.38);
+        DesiredEye    = TransformLocalPoint(Subject, 2.85, 1.95, 0.04);
+        DesiredTarget = TransformLocalPoint(Subject, 1.7274, 1.0475, -0.08);
         DesiredUp     = Subject.UpUnit;
         DesiredFovRad = 38.0 * DegreesToRadians;
     }
     else if (Rig == VehicleCameraRig::TyreRearLeft)
     {
-        DesiredEye    = TransformLocalPoint(Subject, -0.55, 2.15, -0.15);
-        DesiredTarget = TransformLocalPoint(Subject, -1.6686, 1.0475, -0.38);
+        DesiredEye    = TransformLocalPoint(Subject, -3.05, 1.95, 0.04);
+        DesiredTarget = TransformLocalPoint(Subject, -1.6686, 1.0475, -0.08);
         DesiredUp     = Subject.UpUnit;
         DesiredFovRad = 38.0 * DegreesToRadians;
     }

@@ -156,6 +156,46 @@ bool WriteUncompressedRgbaPng(const std::filesystem::path& FilePath, uint32_t Wi
     return Output.good();
 }
 
+bool WriteFlipbookMetadata(const std::filesystem::path& PngPath, const FluidDynamics::FluidSceneDocument& Scene,
+                           int Frames, int Columns, int Rows, int TileSize, int FramesPerSecond,
+                           float WarmupSeconds, bool Transparent, bool BurstOnStart)
+{
+    auto JsonEscape = [](std::string_view Value)
+    {
+        std::string Result;
+        Result.reserve(Value.size() + 8u);
+        for (char Character : Value)
+        {
+            if (Character == '\\' || Character == '"') Result.push_back('\\');
+            if (Character == '\n') Result += "\\n";
+            else if (Character == '\r') Result += "\\r";
+            else Result.push_back(Character);
+        }
+        return Result;
+    };
+    std::filesystem::path MetadataPath = PngPath;
+    MetadataPath.replace_extension(".json");
+    std::error_code Error;
+    if (MetadataPath.has_parent_path()) std::filesystem::create_directories(MetadataPath.parent_path(), Error);
+    std::ofstream Output(MetadataPath, std::ios::trunc);
+    if (!Output) return false;
+    Output << "{\n"
+           << "  \"format\": \"frontier-fluid-flipbook\",\n"
+           << "  \"version\": 1,\n"
+           << "  \"scene\": \"" << JsonEscape(Scene.Name) << "\",\n"
+           << "  \"image\": \"" << JsonEscape(PngPath.filename().string()) << "\",\n"
+           << "  \"frames\": " << Frames << ",\n"
+           << "  \"columns\": " << Columns << ",\n"
+           << "  \"rows\": " << Rows << ",\n"
+           << "  \"tileSize\": " << TileSize << ",\n"
+           << "  \"framesPerSecond\": " << FramesPerSecond << ",\n"
+           << "  \"warmupSeconds\": " << WarmupSeconds << ",\n"
+           << "  \"transparent\": " << (Transparent ? "true" : "false") << ",\n"
+           << "  \"burstOnStart\": " << (BurstOnStart ? "true" : "false") << "\n"
+           << "}\n";
+    return Output.good();
+}
+
 //------------------------------------------------------------------------------------------------------------------------
 //                                             DOCUMENT & EDITOR SESSION STATE
 //------------------------------------------------------------------------------------------------------------------------
@@ -187,17 +227,24 @@ struct FluidDocumentTab
 
 struct FlipbookExportState
 {
-    bool                  DialogOpen    = false;
-    bool                  Recording     = false;
-    int                   Columns       = 4;
-    int                   Rows          = 4;
-    int                   FrameWidth    = 256;
-    int                   FrameHeight   = 256;
-    float                 DurationSec   = 2.0f;
-    bool                  DetonateStart = true;
-    int                   Captured      = 0;
+    bool                  DialogOpen       = false;
+    bool                  Recording        = false;
+    int                   FrameCount       = 16;
+    int                   Columns          = 4;
+    int                   Rows             = 4;
+    int                   FrameWidth       = 256;
+    int                   FrameHeight      = 256;
+    int                   FramesPerSecond  = 24;
+    float                 WarmupSeconds    = 0.0f;
+    float                 DurationSec      = 2.0f;
+    float                 WarmupRemaining  = 0.0f;
+    bool                  Transparent      = true;
+    bool                  DetonateStart    = true;
+    bool                  RestartIssued    = false;
+    bool                  BurstIssued      = false;
+    int                   Captured         = 0;
     std::vector<uint8_t>  SheetRgba{};
-    char                  OutputPath[256] = "FlipbookExplosion_4x4.png";
+    char                  OutputPath[256]  = "FluidFlipbook.png";
     std::string           LastMessage{};
 };
 
@@ -207,8 +254,17 @@ struct FluidEditorSession
     std::vector<FluidDocumentTab>   Tabs{};
     int                             ActiveTab            = 0;
     int                             ActiveInspector      = 0;   // 0 = Source, 1 = Simulation, 2 = Rendering
-    int                             ActiveViewportTool   = 1;   // 0 = Orbit, 1 = Flame Brush, 2 = Blast, 3 = Collider
+    int                             ActiveViewportTool   = 0;   // 0 = Orbit, 1 = Flame Brush, 2 = Blast, 3 = Collider
+    int                             CameraView           = 0;   // 0 = Perspective, 1 = Front, 2 = Side, 3 = Top
     OutlinerNodeId                  SelectedNode         = OutlinerNodeId::Source;
+    bool                            ShowPresetsView      = false;
+    bool                            MaximizeViewport     = false;
+    bool                            ShowShortcuts        = false;
+    bool                            DiagnosticsOpen      = false;
+    bool                            CollectionExpanded   = true;
+    float                           PlaybackSpeed        = 1.0f;
+    char                            DocumentName[96]     = {};
+    std::string                     DocumentNameForTab{};
     int                             RenamingNode         = -1;
     char                            RenameField[96]      = {};
     char                            OutlinerSearch[96]   = {};
@@ -481,7 +537,17 @@ bool FluidPropertyGroup(const EditorTypefaces& Faces, const char* Id, const char
     }
     ImDrawList* Draw = ImGui::GetWindowDrawList();
     if (Hovered) Draw->AddRectFilled(Origin, ImVec2(Origin.x + Width, Origin.y + HeaderHeight), IM_COL32(255, 255, 255, 8), 18.0f);
-    Draw->AddText(Faces.Regular, 15.0f, ImVec2(Origin.x + 11.0f, Origin.y + 22.0f), IM_COL32(102, 102, 102, 255), CurrentOpen ? "⌄" : "›");
+    const ImVec2 ChevronCentre(Origin.x + 16.0f, Origin.y + 30.0f);
+    if (CurrentOpen)
+    {
+        Draw->AddLine(ImVec2(ChevronCentre.x - 4.0f, ChevronCentre.y - 2.0f), ChevronCentre, IM_COL32(110, 110, 110, 255), 1.4f);
+        Draw->AddLine(ChevronCentre, ImVec2(ChevronCentre.x + 4.0f, ChevronCentre.y - 2.0f), IM_COL32(110, 110, 110, 255), 1.4f);
+    }
+    else
+    {
+        Draw->AddLine(ImVec2(ChevronCentre.x - 2.0f, ChevronCentre.y - 4.0f), ImVec2(ChevronCentre.x + 2.0f, ChevronCentre.y), IM_COL32(110, 110, 110, 255), 1.4f);
+        Draw->AddLine(ImVec2(ChevronCentre.x + 2.0f, ChevronCentre.y), ImVec2(ChevronCentre.x - 2.0f, ChevronCentre.y + 4.0f), IM_COL32(110, 110, 110, 255), 1.4f);
+    }
     Draw->AddText(Faces.Regular, 18.0f, ImVec2(Origin.x + 34.0f, Origin.y + 19.0f), IM_COL32(224, 224, 224, 255), Title);
     if (Badge != nullptr && Badge[0] != '\0')
     {
@@ -610,7 +676,9 @@ bool FluidSelectableRow(const char* Label, OutlinerNodeId Id, bool Selected, boo
                           : Id == OutlinerNodeId::Domain ? IM_COL32(90, 169, 255, 255)
                           : Id == OutlinerNodeId::Source || Id == OutlinerNodeId::Sun ? IM_COL32(255, 180, 84, 255)
                                                                                      : IM_COL32(180, 180, 180, 255);
-    Draw->AddText(ImGui::GetFont(), 11.0f, ImVec2(Min.x + 9.0f, Min.y + (Height - 11.0f) * 0.5f), IM_COL32(112, 112, 112, 255), "›");
+    const ImVec2 ChevronCentre(Min.x + 15.0f, Min.y + Height * 0.5f);
+    Draw->AddLine(ImVec2(ChevronCentre.x - 2.0f, ChevronCentre.y - 4.0f), ImVec2(ChevronCentre.x + 2.0f, ChevronCentre.y), IM_COL32(112, 112, 112, 255), 1.2f);
+    Draw->AddLine(ImVec2(ChevronCentre.x + 2.0f, ChevronCentre.y), ImVec2(ChevronCentre.x - 2.0f, ChevronCentre.y + 4.0f), IM_COL32(112, 112, 112, 255), 1.2f);
     const ImVec2 IconOrigin(Min.x + 36.0f, Min.y + (Height - 16.0f) * 0.5f);
     if (Id == OutlinerNodeId::Domain)
         PanelChrome::DrawGlyph("M3 7.5 12 3l9 4.5v9L12 21l-9-4.5v-9ZM12 3v18m9-13.5-9 4.5-9-4.5", IconOrigin, 16.0f, IconInk, 1.5f);
@@ -714,18 +782,23 @@ bool FluidPresetCard(const FluidDynamics::FluidPresetDescriptor& Preset, bool Se
     const bool Clicked = ImGui::InvisibleButton("##PresetCard", ImVec2(Width, Height));
     const bool Hovered = ImGui::IsItemHovered();
     ImDrawList* Draw = ImGui::GetWindowDrawList();
-    const ImU32 Fill = Selected ? IM_COL32(52, 51, 41, 255) : (Hovered ? IM_COL32(43, 42, 34, 255) : IM_COL32(35, 35, 30, 255));
-    Draw->AddRectFilled(Min, ImVec2(Min.x + Width, Min.y + Height), Fill, 18.0f);
-    Draw->AddRect(Min, ImVec2(Min.x + Width, Min.y + Height), IM_COL32(232, 199, 139, Selected ? 38 : 15), 18.0f);
+    const ImU32 Fill = Selected ? IM_COL32(42, 42, 42, 255) : (Hovered ? IM_COL32(34, 34, 34, 255) : IM_COL32(26, 26, 26, 255));
+    Draw->AddRectFilled(Min, ImVec2(Min.x + Width, Min.y + Height), Fill, 16.0f);
+    Draw->AddRect(Min, ImVec2(Min.x + Width, Min.y + Height), IM_COL32(255, 255, 255, Selected ? 24 : 12), 16.0f);
+    Draw->PushClipRect(Min, ImVec2(Min.x + Width, Min.y + Height), true);
     const ImVec2 IconMin(Min.x + 12.0f, Min.y + 10.0f);
-    Draw->AddRectFilled(IconMin, ImVec2(IconMin.x + 38.0f, IconMin.y + 42.0f), IM_COL32(45, 44, 36, 255), 12.0f);
-    const uint32_t Tint = Preset.Category == FluidDynamics::FluidPresetCategory::Smoke ? 0xA8B0B8u :
-                          Preset.Category == FluidDynamics::FluidPresetCategory::Blast ? 0xE8B66Eu : 0xFFB454u;
+    Draw->AddRectFilled(IconMin, ImVec2(IconMin.x + 38.0f, IconMin.y + 42.0f), IM_COL32(255, 255, 255, 8), 12.0f);
+    const uint32_t Tint = Preset.Category == FluidDynamics::FluidPresetCategory::Smoke ? 0xAEBAC6u :
+                          Preset.Category == FluidDynamics::FluidPresetCategory::Blast ? 0xE0E0E0u : 0xFF9838u;
     const char* FlamePath = "M12 22a8 8 0 0 0 8-8c0-3-2-5-4-7-1 3-2 4-4 5-1-3-3-5-5-8-1 4-3 6-3 10a8 8 0 0 0 8 8Z";
     PanelChrome::DrawGlyph(FlamePath, ImVec2(IconMin.x + 10.0f, IconMin.y + 10.0f), 18.0f, Tint, 1.6f);
-    Draw->AddText(ImGui::GetFont(), 12.0f, ImVec2(Min.x + 62.0f, Min.y + 14.0f), IM_COL32(231, 223, 205, 255), Preset.Title);
-    Draw->AddText(ImGui::GetFont(), 10.0f, ImVec2(Min.x + 62.0f, Min.y + 36.0f), IM_COL32(163, 151, 126, 255), Preset.Summary);
-    Draw->AddText(ImGui::GetFont(), 12.0f, ImVec2(Min.x + Width - 21.0f, Min.y + 24.0f), IM_COL32(161, 150, 125, 255), "\xE2\x86\x97");
+    Draw->AddText(ImGui::GetFont(), 12.0f, ImVec2(Min.x + 62.0f, Min.y + 14.0f), IM_COL32(224, 224, 224, 255), Preset.Title);
+    Draw->AddText(ImGui::GetFont(), 10.0f, ImVec2(Min.x + 62.0f, Min.y + 36.0f), IM_COL32(125, 125, 125, 255), Preset.Summary);
+    const ImVec2 ArrowTip(Min.x + Width - 14.0f, Min.y + 20.0f);
+    Draw->AddLine(ImVec2(ArrowTip.x - 9.0f, ArrowTip.y + 9.0f), ArrowTip, IM_COL32(146, 146, 146, 255), 1.1f);
+    Draw->AddLine(ArrowTip, ImVec2(ArrowTip.x - 1.0f, ArrowTip.y + 5.0f), IM_COL32(146, 146, 146, 255), 1.1f);
+    Draw->AddLine(ArrowTip, ImVec2(ArrowTip.x - 5.0f, ArrowTip.y + 1.0f), IM_COL32(146, 146, 146, 255), 1.1f);
+    Draw->PopClipRect();
     ImGui::PopID();
     return Clicked;
 }
@@ -738,31 +811,29 @@ ControlKitPalette ResolveFluidControlPalette()
                           static_cast<float>(Rgb & 255u) / 255.0f, Alpha };
     };
     ControlKitPalette P{};
-    // 📝 Match the Sun inspector/outliner capture: warm charcoal surfaces, muted champagne labels, olive selected states,
-    //    and restrained gold controls instead of the detached editor's former neutral gray palette.
-    P.TabBackground = C(0x11110F);
-    P.Panel = C(0x191917);
-    P.Inset = C(0x24231D);
-    P.Field = C(0x171612);
-    P.Raised = C(0x292820);
-    P.Selected = C(0x343329);
-    P.Stroke = C(0xE8C78B, 0.08f);
-    P.StrokeStrong = C(0x464334);
-    P.Divider = C(0xE8C78B, 0.10f);
-    P.Card = C(0x23231E);
-    P.CardSub = C(0x2A2922);
-    P.Text = C(0xE8E7DF);
-    P.TextDim = C(0xA19786);
-    P.TextFaint = C(0x716D61);
-    P.Primary = C(0xD7DBB8);
-    P.PrimaryInk = C(0x292E20);
-    P.Accent = C(0xE3D2A6);
-    P.AccentInk = C(0x292820);
-    P.AccentSoft = C(0xE8C78B, 0.12f);
-    P.SliderTrack = C(0x34332B);
-    P.SliderFill = C(0xE3D2A6);
-    P.SliderThumb = C(0xD7DBB8);
-    P.SwitchKnobOff = C(0xC6BFAE);
+    P.TabBackground = C(0x0B0B0B);
+    P.Panel = C(0x121212);
+    P.Inset = C(0x0B0B0B);
+    P.Field = C(0x000000);
+    P.Raised = C(0x1A1A1A);
+    P.Selected = C(0x2A2A2A);
+    P.Stroke = C(0xFFFFFF, 0.07f);
+    P.StrokeStrong = C(0xFFFFFF, 0.13f);
+    P.Divider = C(0xFFFFFF, 0.07f);
+    P.Card = C(0x1A1A1A);
+    P.CardSub = C(0x222222);
+    P.Text = C(0xF0F0F0);
+    P.TextDim = C(0xA0A0A0);
+    P.TextFaint = C(0x707070);
+    P.Primary = C(0xE0E0E0);
+    P.PrimaryInk = C(0x111111);
+    P.Accent = C(0xE0E0E0);
+    P.AccentInk = C(0x111111);
+    P.AccentSoft = C(0xFFFFFF, 0.08f);
+    P.SliderTrack = C(0x222222);
+    P.SliderFill = C(0x4A4A4A);
+    P.SliderThumb = C(0xE0E0E0);
+    P.SwitchKnobOff = C(0xBDBDBD);
     return P;
 }
 
@@ -918,7 +989,27 @@ void BindSessionToRecord(FluidEditorSession& Session, RecordToken Token, FluidPl
     }
     Session.BoundToken = Token;
     Session.Tabs.clear();
-    Session.ActiveTab  = 0;
+    Session.ActiveTab = 0;
+    Session.ActiveInspector = 0;
+    Session.ActiveViewportTool = 0;
+    Session.CameraView = 0;
+    Session.ShowPresetsView = false;
+    Session.MaximizeViewport = false;
+    Session.ShowShortcuts = false;
+    Session.DiagnosticsOpen = false;
+    Session.ShowImportModal = false;
+    Session.SelectedNode = OutlinerNodeId::Source;
+    Session.RenamingNode = -1;
+    Session.DocumentName[0] = '\0';
+    Session.DocumentNameForTab.clear();
+    Session.HasPreviousBrush = false;
+    Session.Flipbook.DialogOpen = false;
+    Session.Flipbook.Recording = false;
+    Session.Flipbook.RestartIssued = false;
+    Session.Flipbook.BurstIssued = false;
+    Session.Flipbook.WarmupRemaining = 0.0f;
+    Session.Flipbook.Captured = 0;
+    Session.Flipbook.SheetRgba.clear();
 
     FluidDocumentTab MainTab{};
     MainTab.GpuSlot        = 0u;
@@ -965,34 +1056,37 @@ void FluidPlumeEditor::ConstructInterface(RecordToken Token, FluidPlumeInspector
     const ControlKitPalette PreviousControlPalette = ControlKit::Palette();
     ControlKit::ConfigurePalette(ResolveFluidControlPalette());
     InspectorPalette Palette = InspectorPalette::Resolve();
-    Palette.ViewportBg = IM_COL32(25, 25, 23, 255);
-    Palette.ColumnBg = IM_COL32(25, 25, 23, 255);
-    Palette.StatusBarBg = IM_COL32(20, 20, 18, 255);
-    Palette.ViewportBarBg = IM_COL32(22, 22, 20, 255);
-    Palette.EdgeBorder = IM_COL32(232, 199, 139, 18);
-    Palette.CountCardBg = IM_COL32(38, 39, 32, 255);
-    Palette.CountCardBorder = IM_COL32(232, 199, 139, 22);
-    Palette.SearchBg = IM_COL32(29, 28, 24, 255);
-    Palette.SearchBorder = IM_COL32(232, 199, 139, 24);
-    Palette.RowHoverBg = IM_COL32(37, 36, 30, 255);
-    Palette.RowSelectedTop = IM_COL32(52, 51, 41, 255);
-    Palette.RowSelectedBottom = IM_COL32(41, 41, 34, 255);
-    Palette.RowSelectedBorder = IM_COL32(232, 199, 139, 50);
-    Palette.InsetFieldBg = IM_COL32(23, 22, 18, 255);
-    Palette.InsetFieldBorder = IM_COL32(232, 199, 139, 24);
-    Palette.SliderTrackBg = IM_COL32(52, 51, 43, 255);
-    Palette.SliderFillBg = IM_COL32(227, 210, 166, 255);
-    Palette.SliderThumbBg = IM_COL32(215, 219, 184, 255);
-    Palette.ToggleOnBg = IM_COL32(105, 200, 132, 255);
-    Palette.ToggleOffBg = IM_COL32(204, 118, 115, 255);
-    Palette.SegmentedBg = IM_COL32(26, 25, 21, 255);
-    Palette.SegmentedActiveBg = IM_COL32(52, 51, 41, 255);
-    Palette.TextPrimary = IM_COL32(232, 231, 223, 255);
-    Palette.TextSecondary = IM_COL32(184, 173, 150, 255);
-    Palette.TextMuted = IM_COL32(154, 152, 142, 255);
-    Palette.TextFaint = IM_COL32(113, 109, 97, 255);
-    Palette.ThemeAccent = IM_COL32(227, 210, 166, 255);
-    Palette.WarmAmber = IM_COL32(232, 199, 139, 255);
+    Palette.ViewportBg = IM_COL32(11, 11, 11, 255);
+    Palette.ColumnBg = IM_COL32(18, 18, 18, 255);
+    Palette.StatusBarBg = IM_COL32(11, 11, 11, 255);
+    Palette.ViewportBarBg = IM_COL32(23, 23, 23, 255);
+    Palette.InspectorTopBg = IM_COL32(18, 18, 18, 255);
+    Palette.InspectorBottomBg = IM_COL32(18, 18, 18, 255);
+    Palette.EdgeBorder = IM_COL32(255, 255, 255, 18);
+    Palette.CountCardBg = IM_COL32(255, 255, 255, 9);
+    Palette.CountCardBorder = IM_COL32(255, 255, 255, 18);
+    Palette.SearchBg = IM_COL32(255, 255, 255, 11);
+    Palette.SearchBorder = IM_COL32(255, 255, 255, 18);
+    Palette.RowHoverBg = IM_COL32(255, 255, 255, 11);
+    Palette.RowSelectedTop = IM_COL32(255, 255, 255, 18);
+    Palette.RowSelectedBottom = IM_COL32(255, 255, 255, 13);
+    Palette.RowSelectedBorder = IM_COL32(255, 255, 255, 28);
+    Palette.InsetFieldBg = IM_COL32(0, 0, 0, 255);
+    Palette.InsetFieldBorder = IM_COL32(255, 255, 255, 18);
+    Palette.SliderTrackBg = IM_COL32(34, 34, 34, 255);
+    Palette.SliderFillBg = IM_COL32(74, 74, 74, 255);
+    Palette.SliderThumbBg = IM_COL32(224, 224, 224, 255);
+    Palette.ToggleOnBg = IM_COL32(224, 224, 224, 255);
+    Palette.ToggleOffBg = IM_COL32(34, 34, 34, 255);
+    Palette.SegmentedBg = IM_COL32(8, 8, 8, 255);
+    Palette.SegmentedActiveBg = IM_COL32(41, 41, 41, 255);
+    Palette.TextPrimary = IM_COL32(240, 240, 240, 255);
+    Palette.TextSecondary = IM_COL32(190, 190, 190, 255);
+    Palette.TextMuted = IM_COL32(142, 142, 142, 255);
+    Palette.TextFaint = IM_COL32(102, 102, 102, 255);
+    Palette.LiveGreen = IM_COL32(52, 199, 89, 255);
+    Palette.ThemeAccent = IM_COL32(224, 224, 224, 255);
+    Palette.WarmAmber = IM_COL32(255, 152, 56, 255);
     const EditorTypefaces  Faces   = EditorTypefaces::Resolve();
     ImGuiIO&               Io      = ImGui::GetIO();
 
@@ -1002,9 +1096,8 @@ void FluidPlumeEditor::ConstructInterface(RecordToken Token, FluidPlumeInspector
     InspectorRuntime&    Runtime      = InspectorRuntime::Instance();
     const float          Scale        = Runtime.ResolveInterfaceScale();
     const ImGuiViewport* Main         = ImGui::GetMainViewport();
-    const ImVec2         Margin(28.0f * Scale, 24.0f * Scale);
-    const ImVec2         Position(Main->WorkPos.x + Margin.x, Main->WorkPos.y + Margin.y);
-    const ImVec2         Size(std::max(1100.0f, Main->WorkSize.x - Margin.x * 2.0f), std::max(640.0f, Main->WorkSize.y - Margin.y * 2.0f));
+    const ImVec2         Position    = Main->WorkPos;
+    const ImVec2         Size         = Main->WorkSize;
 
     constexpr const char* WindowName = "##FluidPlumeEditorWindow";
     if (!ImGui::IsPopupOpen(WindowName))
@@ -1014,7 +1107,7 @@ void FluidPlumeEditor::ConstructInterface(RecordToken Token, FluidPlumeInspector
     ImGui::SetNextWindowPos(Position, ImGuiCond_Always);
     ImGui::SetNextWindowSize(Size, ImGuiCond_Always);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 16.0f * Scale);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
     ImGui::PushStyleColor(ImGuiCol_PopupBg, ImGui::ColorConvertU32ToFloat4(Palette.ViewportBg));
     ImGui::PushStyleColor(ImGuiCol_ModalWindowDimBg, ImVec4(0.02f, 0.02f, 0.03f, 0.58f));
@@ -1035,33 +1128,50 @@ void FluidPlumeEditor::ConstructInterface(RecordToken Token, FluidPlumeInspector
     {
         if (ImGui::IsKeyPressed(ImGuiKey_Escape))
         {
-            ClosingModal = true;
+            if (Session.ShowShortcuts) Session.ShowShortcuts = false;
+            else if (Session.Flipbook.DialogOpen) Session.Flipbook.DialogOpen = false;
+            else if (Session.ShowImportModal) Session.ShowImportModal = false;
+            else if (Session.MaximizeViewport || Session.ShowPresetsView)
+            {
+                Session.MaximizeViewport = false;
+                Session.ShowPresetsView = false;
+            }
+            else ClosingModal = true;
         }
-        if (ImGui::IsKeyPressed(ImGuiKey_Space))
-        {
-            Params.Paused = !Params.Paused;
-        }
-        if (ImGui::IsKeyPressed(ImGuiKey_Period))
-        {
-            Tab.StepOncePending = true;
-        }
-        if (ImGui::IsKeyPressed(ImGuiKey_C))
+        if (ImGui::IsKeyPressed(ImGuiKey_Space)) Params.Paused = !Params.Paused;
+        if (ImGui::IsKeyPressed(ImGuiKey_Period) || ImGui::IsKeyPressed(ImGuiKey_S)) Tab.StepOncePending = true;
+        if (ImGui::IsKeyPressed(ImGuiKey_R) || ImGui::IsKeyPressed(ImGuiKey_C))
         {
             Tab.RestartPending   = true;
-            Session.StatusNotice = "Cleared 3D Eulerian solver grid";
+            Session.StatusNotice = "Restarted the live simulation";
         }
         if (ImGui::IsKeyPressed(ImGuiKey_E) || ImGui::IsKeyPressed(ImGuiKey_D))
         {
             EnqueueBurstPattern(Tab, Tab.BurstPattern);
             ++Config.BurstGeneration;
             Config.AdvanceRevision();
-            Session.StatusNotice = "Detonated pyrotechnic burst";
+            Session.StatusNotice = "Triggered the selected burst";
         }
         if (ImGui::IsKeyPressed(ImGuiKey_F))
         {
             Tab.Scene.Camera.Reset();
             Tab.Scene.Camera.SnapToTarget();
-            Session.StatusNotice = "Framed simulation domain";
+            Session.StatusNotice = "Focused the simulation volume";
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_B)) Session.ShowDomainWire = !Session.ShowDomainWire;
+        if (ImGui::IsKeyPressed(ImGuiKey_T))
+        {
+            Params.AutoTurntable = !Params.AutoTurntable;
+            Tab.Scene.Camera.AutoTurntable = Params.AutoTurntable;
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_1)) Session.ActiveViewportTool = 0;
+        if (ImGui::IsKeyPressed(ImGuiKey_2)) Session.ActiveViewportTool = 1;
+        if (ImGui::IsKeyPressed(ImGuiKey_3)) Session.ActiveViewportTool = 2;
+        if (Io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S))
+        {
+            SyncDocumentToRecord(Tab, Token, Config, true);
+            Tab.Dirty = false;
+            Session.StatusNotice = "Saved scene settings and camera";
         }
         if (Io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Z) && !Tab.UndoStack.empty())
         {
@@ -1079,44 +1189,223 @@ void FluidPlumeEditor::ConstructInterface(RecordToken Token, FluidPlumeInspector
         }
     }
 
-    // Modal Studio Header Bar (matching ParticleEditor modal window architecture)
-    ImDrawList*  ModalInk = ImGui::GetWindowDrawList();
-    const float  HeaderH  = 48.0f * Scale;
-    ModalInk->AddRect(Position, ImVec2(Position.x + Size.x, Position.y + Size.y), Palette.EdgeBorder, 16.0f * Scale, 0, 1.5f);
-    ModalInk->AddRectFilled(Position, ImVec2(Position.x + Size.x, Position.y + HeaderH), Palette.InspectorTopBg, 16.0f * Scale, ImDrawFlags_RoundCornersTop);
-    ModalInk->AddLine(ImVec2(Position.x, Position.y + HeaderH), ImVec2(Position.x + Size.x, Position.y + HeaderH), Palette.EdgeBorder, 1.0f);
-    PanelChrome::DrawGlyph("M12 22a8 8 0 0 0 8-8c0-3-2-5-4-7-1 3-2 4-4 5-1-3-3-5-5-8-1 4-3 6-3 10a8 8 0 0 0 8 8Z",
-                           ImVec2(Position.x + 16.0f * Scale, Position.y + 16.0f * Scale), 16.0f * Scale,
-                           0x34C759u, 1.5f);
-    ModalInk->AddText(Faces.Medium, 14.0f * Scale, ImVec2(Position.x + 42.0f * Scale, Position.y + 15.5f * Scale), Palette.TextPrimary,
-                      "Frontier \xC2\xB7 Fluid & Pyrotechnic Editor");
+    ImDrawList* ModalInk = ImGui::GetWindowDrawList();
+    const float HeaderH = 68.0f * Scale;
+    const float DocumentBarH = 35.0f * Scale;
+    const float HeaderPad = 24.0f * Scale;
+    ModalInk->AddRectFilled(Position, ImVec2(Position.x + Size.x, Position.y + Size.y), Palette.ViewportBg);
+    ModalInk->AddRectFilled(Position, ImVec2(Position.x + Size.x, Position.y + HeaderH), Palette.ViewportBg);
+    ModalInk->AddLine(ImVec2(Position.x, Position.y + HeaderH), ImVec2(Position.x + Size.x, Position.y + HeaderH), IM_COL32(255, 255, 255, 10));
+
+    auto DrawPillButton = [&](const char* Id, const char* Label, const ImVec2& Min, const ImVec2& ButtonSize,
+                              bool Selected = false, bool Primary = false) -> bool
     {
-        char HeaderReadout[256]{};
-        const std::string SidecarLabel = Config.SpaceFile.empty() ? std::string("unsaved.fluidspace") : Config.SpaceFile;
-        std::snprintf(HeaderReadout, sizeof(HeaderReadout), "LIVE \xC2\xB7 %s \xC2\xB7 %d\xC2\xB3 EULERIAN GRID \xC2\xB7 %s%s",
-                      SceneDirectory::Instance().QueryName(Token).c_str(),
-                      Params.GridResolution,
-                      SidecarLabel.c_str(),
-                      Tab.Dirty ? " \xC2\xB7 UNSAVED" : "");
-        ModalInk->AddText(Faces.Monospace, 10.5f * Scale, ImVec2(Position.x + 336.0f * Scale, Position.y + 18.5f * Scale), Palette.LiveGreen, HeaderReadout);
-    }
-    {
-        const float  CloseW = 108.0f * Scale;
-        const ImVec2 CloseMin(Position.x + Size.x - CloseW - 14.0f * Scale, Position.y + 9.0f * Scale);
-        ImGui::SetCursorScreenPos(CloseMin);
-        if (ImGui::InvisibleButton("##CloseFluidPlumeEditorHeader", ImVec2(CloseW, 30.0f * Scale)))
-        {
-            ClosingModal = true;
-        }
+        ImGui::SetCursorScreenPos(Min);
+        const bool Pressed = ImGui::InvisibleButton(Id, ButtonSize);
         const bool Hovered = ImGui::IsItemHovered();
-        ModalInk->AddRectFilled(CloseMin, ImVec2(CloseMin.x + CloseW, CloseMin.y + 30.0f * Scale),
-                                Hovered ? Palette.SegmentedActiveBg : Palette.CountCardBg, 9.0f * Scale);
-        ModalInk->AddRect(CloseMin, ImVec2(CloseMin.x + CloseW, CloseMin.y + 30.0f * Scale), Palette.InsetFieldBorder, 9.0f * Scale);
-        ModalInk->AddText(Faces.Medium, 11.0f * Scale, ImVec2(CloseMin.x + 18.0f * Scale, CloseMin.y + 8.5f * Scale), Palette.TextPrimary, "Close Editor");
+        const ImU32 Fill = Primary ? IM_COL32(224, 224, 224, 255) :
+                           Selected ? IM_COL32(42, 42, 42, 255) :
+                           Hovered ? IM_COL32(36, 36, 36, 255) : IM_COL32(255, 255, 255, 8);
+        const ImU32 Ink = Primary ? IM_COL32(17, 17, 17, 255) :
+                          Selected || Hovered ? IM_COL32(240, 240, 240, 255) : IM_COL32(156, 156, 156, 255);
+        ModalInk->AddRectFilled(Min, ImVec2(Min.x + ButtonSize.x, Min.y + ButtonSize.y), Fill, ButtonSize.y * 0.5f);
+        if (!Primary) ModalInk->AddRect(Min, ImVec2(Min.x + ButtonSize.x, Min.y + ButtonSize.y), IM_COL32(255, 255, 255, Selected ? 18 : 10), ButtonSize.y * 0.5f);
+        const ImVec2 TextSize = ImGui::CalcTextSize(Label);
+        ModalInk->AddText(Faces.Regular, 12.0f * Scale,
+                          ImVec2(Min.x + (ButtonSize.x - TextSize.x * Scale) * 0.5f,
+                                 Min.y + (ButtonSize.y - TextSize.y * Scale) * 0.5f), Ink, Label);
+        return Pressed;
+    };
+
+    auto CreateNewDocument = [&]()
+    {
+        if (Session.Tabs.size() >= 4u) return;
+        FluidDocumentTab Fresh{};
+        Fresh.GpuSlot          = static_cast<uint32_t>(Session.Tabs.size());
+        Fresh.Title            = "Document_" + std::to_string(Session.Tabs.size() + 1u) + ".fluidspace";
+        Fresh.PresetIdentity   = "ue5_pyro_default";
+        Fresh.Scene.Name       = "New fluid scene";
+        Fresh.Scene.Parameters = FluidDynamics::ConstructPresetParameters(Fresh.PresetIdentity);
+        Fresh.Scene.Camera.SnapToTarget();
+        Fresh.RestartPending   = true;
+        Session.Tabs.push_back(std::move(Fresh));
+        Session.ActiveTab = static_cast<int>(Session.Tabs.size()) - 1;
+        Session.DocumentNameForTab.clear();
+        Session.StatusNotice = "Created a new fluid document";
+    };
+    auto LoadSampleScene = [&](FluidDocumentTab& Target, const FluidDynamics::FluidSampleDescriptor& Sample)
+    {
+        PushUndoSnapshot(Target);
+        Target.Scene          = FluidDynamics::ConstructSampleFluidScene(Sample.Identity);
+        Target.PresetIdentity = Sample.PresetKey;
+        Target.RestartPending = true;
+        if (const auto* Preset = FluidDynamics::FindFluidPreset(Sample.PresetKey); Preset && Preset->TriggerExplosionOnLoad)
+            EnqueueBurstPattern(Target, Target.BurstPattern);
+        SyncDocumentToRecord(Target, Token, Config, false);
+        Session.DocumentNameForTab.clear();
+        Session.StatusNotice = std::string("Loaded sample: ") + Sample.Name;
+    };
+    auto SaveActiveScene = [&](FluidDocumentTab& Target)
+    {
+        SyncDocumentToRecord(Target, Token, Config, true);
+        Target.Dirty = false;
+        Session.StatusNotice = Config.SpaceFile.empty() ? "Saved scene settings" : "Saved scene to " + Config.SpaceFile;
+    };
+
+    // App header: overlapping slanted document tabs, workspace navigation, live compute badge and scene actions.
+    const float TabHeight = 24.0f * Scale;
+    const float TabWidth = 190.0f * Scale;
+    const float DockX = Position.x + HeaderPad;
+    const float DockY = Position.y + (HeaderH - TabHeight) * 0.5f;
+    for (int TabIndex = 0; TabIndex < static_cast<int>(Session.Tabs.size()); ++TabIndex)
+    {
+        const bool Selected = TabIndex == Session.ActiveTab;
+        const float TabX = DockX + static_cast<float>(TabIndex) * (TabWidth - 24.0f * Scale);
+        const ImVec2 TabMin(TabX, DockY);
+        ImGui::SetCursorScreenPos(TabMin);
+        ImGui::PushID(TabIndex);
+        const bool Clicked = ImGui::InvisibleButton("##FluidDocumentTab", ImVec2(TabWidth, TabHeight));
+        const bool Hovered = ImGui::IsItemHovered();
+        const ImVec2 Polygon[4] = {
+            { TabX + 14.0f * Scale, DockY }, { TabX + TabWidth - 14.0f * Scale, DockY },
+            { TabX + TabWidth, DockY + TabHeight }, { TabX, DockY + TabHeight }
+        };
+        const ImU32 TabFill = Selected ? IM_COL32(26, 26, 26, 255) :
+                              Hovered ? IM_COL32(35, 35, 35, 255) : IM_COL32(255, 255, 255, 7);
+        ModalInk->AddConvexPolyFilled(Polygon, 4, TabFill);
+        std::string TabLabel = Session.Tabs[TabIndex].Title;
+        const size_t Extension = TabLabel.rfind(".fluidspace");
+        if (Extension != std::string::npos) TabLabel.resize(Extension);
+        else if (const size_t Dot = TabLabel.rfind('.'); Dot != std::string::npos) TabLabel.resize(Dot);
+        const float TextX = TabX + 24.0f * Scale;
+        ModalInk->PushClipRect(TabMin, ImVec2(TabX + TabWidth, DockY + TabHeight), true);
+        ModalInk->AddText(Faces.Regular, 11.0f * Scale, ImVec2(TextX, DockY + 6.0f * Scale),
+                          Selected ? IM_COL32(238, 238, 238, 255) : IM_COL32(142, 142, 142, 255), TabLabel.c_str());
+        ModalInk->PopClipRect();
+        if (Clicked) Session.ActiveTab = TabIndex;
+        bool CloseTab = false;
+        if (Session.Tabs.size() > 1u && (Selected || Hovered))
+        {
+            const ImVec2 TabCloseMin(TabX + TabWidth - 21.0f * Scale, DockY + 4.0f * Scale);
+            ImGui::SetCursorScreenPos(TabCloseMin);
+            CloseTab = ImGui::InvisibleButton("##CloseFluidDocumentTab", ImVec2(16.0f * Scale, 16.0f * Scale));
+            const bool CloseHovered = ImGui::IsItemHovered();
+            if (Session.Tabs[TabIndex].Dirty)
+                ModalInk->AddCircleFilled(ImVec2(TabX + TabWidth - 30.0f * Scale, DockY + 12.0f * Scale), 2.0f * Scale, IM_COL32(224, 224, 224, 255));
+            ModalInk->AddText(Faces.Regular, 12.0f * Scale, ImVec2(TabCloseMin.x + 4.0f * Scale, TabCloseMin.y + 1.0f * Scale),
+                              CloseHovered ? IM_COL32(235, 235, 235, 255) : IM_COL32(121, 121, 121, 255), "x");
+        }
+        ImGui::PopID();
+        if (CloseTab)
+        {
+            Session.Tabs.erase(Session.Tabs.begin() + TabIndex);
+            Session.ActiveTab = std::clamp(Session.ActiveTab, 0, static_cast<int>(Session.Tabs.size()) - 1);
+            Session.DocumentNameForTab.clear();
+            break;
+        }
+    }
+    const float AddTabX = DockX + static_cast<float>(Session.Tabs.size()) * (TabWidth - 24.0f * Scale) + 5.0f * Scale;
+    if (DrawPillButton("##FluidAddDocument", "+", ImVec2(AddTabX, DockY), ImVec2(28.0f * Scale, TabHeight), false, false)) CreateNewDocument();
+
+    const float NavX = Position.x + std::min(820.0f * Scale, Size.x * 0.44f);
+    const float NavY = Position.y + (HeaderH - 38.0f * Scale) * 0.5f;
+    if (DrawPillButton("##FluidWorkspaceNav", "Workspace", ImVec2(NavX, NavY), ImVec2(112.0f * Scale, 38.0f * Scale), !Session.ShowPresetsView))
+        Session.ShowPresetsView = false;
+    if (DrawPillButton("##FluidPresetsNav", "Presets", ImVec2(NavX + 118.0f * Scale, NavY), ImVec2(94.0f * Scale, 38.0f * Scale), Session.ShowPresetsView))
+        Session.ShowPresetsView = true;
+
+    const float CloseX = Position.x + Size.x - HeaderPad - 30.0f * Scale;
+    const ImVec2 CloseMin(CloseX, Position.y + (HeaderH - 28.0f * Scale) * 0.5f);
+    ImGui::SetCursorScreenPos(CloseMin);
+    const bool ClosePressed = ImGui::InvisibleButton("##CloseFluidPlumeEditorHeader", ImVec2(28.0f * Scale, 28.0f * Scale));
+    const bool CloseHovered = ImGui::IsItemHovered();
+    if (CloseHovered) ModalInk->AddCircleFilled(ImVec2(CloseMin.x + 14.0f * Scale, CloseMin.y + 14.0f * Scale), 14.0f * Scale, IM_COL32(255, 255, 255, 15));
+    ModalInk->AddLine(ImVec2(CloseMin.x + 9.0f * Scale, CloseMin.y + 9.0f * Scale), ImVec2(CloseMin.x + 19.0f * Scale, CloseMin.y + 19.0f * Scale), IM_COL32(190, 190, 190, 255), 1.4f * Scale);
+    ModalInk->AddLine(ImVec2(CloseMin.x + 19.0f * Scale, CloseMin.y + 9.0f * Scale), ImVec2(CloseMin.x + 9.0f * Scale, CloseMin.y + 19.0f * Scale), IM_COL32(190, 190, 190, 255), 1.4f * Scale);
+    if (ClosePressed) ClosingModal = true;
+
+    const float SaveX = CloseX - 118.0f * Scale;
+    if (DrawPillButton("##FluidSaveScene", "Save scene", ImVec2(SaveX, NavY + 2.0f * Scale), ImVec2(108.0f * Scale, 34.0f * Scale), false, true))
+    {
+        FluidDocumentTab& Current = Session.Tabs[std::clamp(Session.ActiveTab, 0, static_cast<int>(Session.Tabs.size()) - 1)];
+        SaveActiveScene(Current);
+    }
+    const float HelpX = SaveX - 42.0f * Scale;
+    if (DrawPillButton("##FluidShortcutsButton", "?", ImVec2(HelpX, NavY + 5.0f * Scale), ImVec2(32.0f * Scale, 28.0f * Scale)))
+        Session.ShowShortcuts = true;
+    const float BadgeX = HelpX - 174.0f * Scale;
+    ModalInk->AddCircleFilled(ImVec2(BadgeX + 5.0f * Scale, Position.y + HeaderH * 0.5f), 3.0f * Scale, IM_COL32(52, 199, 89, 255));
+    ModalInk->AddText(Faces.Regular, 11.0f * Scale, ImVec2(BadgeX + 15.0f * Scale, Position.y + (HeaderH - 13.0f * Scale) * 0.5f),
+                      IM_COL32(144, 144, 144, 255), "Vulkan Compute \xC2\xB7 Live");
+
+    // 35 px document bar: scene name, format, dirty state, import, sample and TOML export.
+    const ImVec2 DocumentBarMin(Position.x, Position.y + HeaderH);
+    const ImVec2 DocumentBarMax(Position.x + Size.x, DocumentBarMin.y + DocumentBarH);
+    ModalInk->AddRectFilled(DocumentBarMin, DocumentBarMax, IM_COL32(11, 11, 11, 255));
+    ModalInk->AddLine(ImVec2(DocumentBarMin.x, DocumentBarMax.y), DocumentBarMax, IM_COL32(255, 255, 255, 11));
+    ModalInk->AddRect(ImVec2(Position.x + 25.0f * Scale, DocumentBarMin.y + 11.0f * Scale),
+                      ImVec2(Position.x + 37.0f * Scale, DocumentBarMin.y + 24.0f * Scale), IM_COL32(138, 138, 138, 255), 2.0f * Scale, 0, 1.0f * Scale);
+    ModalInk->AddLine(ImVec2(Position.x + 28.0f * Scale, DocumentBarMin.y + 15.0f * Scale), ImVec2(Position.x + 34.0f * Scale, DocumentBarMin.y + 15.0f * Scale), IM_COL32(138, 138, 138, 255));
+    ModalInk->AddLine(ImVec2(Position.x + 28.0f * Scale, DocumentBarMin.y + 19.0f * Scale), ImVec2(Position.x + 34.0f * Scale, DocumentBarMin.y + 19.0f * Scale), IM_COL32(138, 138, 138, 255));
+
+    FluidDocumentTab& Document = Session.Tabs[std::clamp(Session.ActiveTab, 0, static_cast<int>(Session.Tabs.size()) - 1)];
+    const std::string NameKey = Document.Title + "\n" + Document.Scene.Name;
+    if (Session.DocumentNameForTab != NameKey)
+    {
+        std::snprintf(Session.DocumentName, sizeof(Session.DocumentName), "%s", Document.Scene.Name.c_str());
+        Session.DocumentNameForTab = NameKey;
+    }
+    ImGui::SetCursorScreenPos(ImVec2(Position.x + 45.0f * Scale, DocumentBarMin.y + 4.0f * Scale));
+    ImGui::SetNextItemWidth(132.0f * Scale);
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0.0f, 3.0f * Scale));
+    ImGui::PushStyleColor(ImGuiCol_FrameBg, IM_COL32(0, 0, 0, 0));
+    ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, IM_COL32(255, 255, 255, 8));
+    ImGui::PushStyleColor(ImGuiCol_FrameBgActive, IM_COL32(255, 255, 255, 12));
+    ImGui::PushStyleColor(ImGuiCol_Border, IM_COL32(0, 0, 0, 0));
+    if (ImGui::InputText("##FluidDocumentName", Session.DocumentName, sizeof(Session.DocumentName)))
+    {
+        Document.Scene.Name = Session.DocumentName;
+        Document.Dirty = true;
+        Session.DocumentNameForTab = Document.Title + "\n" + Document.Scene.Name;
+    }
+    ImGui::PopStyleColor(4);
+    ImGui::PopStyleVar();
+    ModalInk->AddText(Faces.Regular, 11.0f * Scale, ImVec2(Position.x + 184.0f * Scale, DocumentBarMin.y + 11.0f * Scale), IM_COL32(111, 111, 111, 255), ".fluid");
+    if (Document.Dirty) ModalInk->AddCircleFilled(ImVec2(Position.x + 229.0f * Scale, DocumentBarMin.y + 17.0f * Scale), 2.5f * Scale, IM_COL32(224, 224, 224, 255));
+    ModalInk->AddLine(ImVec2(Position.x + 246.0f * Scale, DocumentBarMin.y + 8.0f * Scale), ImVec2(Position.x + 246.0f * Scale, DocumentBarMin.y + 27.0f * Scale), IM_COL32(255, 255, 255, 18));
+    ModalInk->AddText(Faces.Regular, 10.0f * Scale, ImVec2(Position.x + 259.0f * Scale, DocumentBarMin.y + 12.0f * Scale), IM_COL32(102, 102, 102, 255), "Smoke / fire authoring");
+
+    const float DocActionY = DocumentBarMin.y + 4.0f * Scale;
+    const float TomlX = Position.x + Size.x - HeaderPad - 118.0f * Scale;
+    const float SampleX = TomlX - 175.0f * Scale;
+    const float OpenX = SampleX - 113.0f * Scale;
+    if (DrawPillButton("##FluidOpenScene", "Open scene", ImVec2(OpenX, DocActionY), ImVec2(105.0f * Scale, 27.0f * Scale)))
+        Session.ShowImportModal = true;
+    if (DrawPillButton("##FluidLoadSample", "Load a sample...", ImVec2(SampleX, DocActionY), ImVec2(164.0f * Scale, 27.0f * Scale)))
+        ImGui::OpenPopup("##FluidDocumentSamples");
+    if (DropdownControlSurface::BeginMenu("##FluidDocumentSamples", Scale))
+    {
+        for (const auto& Sample : FluidDynamics::EnumerateSampleFluidScenes())
+        {
+            if (ImGui::MenuItem(Sample.Name))
+                LoadSampleScene(Session.Tabs[std::clamp(Session.ActiveTab, 0, static_cast<int>(Session.Tabs.size()) - 1)], Sample);
+        }
+        DropdownControlSurface::EndMenu();
+    }
+    if (DrawPillButton("##FluidSaveToml", "Save as TOML", ImVec2(TomlX, DocActionY), ImVec2(118.0f * Scale, 27.0f * Scale)))
+    {
+        const auto Sidecar = ResolveSidecarPath(Token, Config);
+        if (!Sidecar.empty())
+        {
+            auto ExportPath = Sidecar;
+            ExportPath.replace_extension(".gasscene.toml");
+            if (FluidDynamics::SaveFluidSpaceFile(ExportPath, Document.Scene))
+                Session.StatusNotice = "Exported " + ExportPath.filename().string();
+        }
     }
 
-    const ImVec2 BodyMin(Position.x + 8.0f * Scale, Position.y + HeaderH + 6.0f * Scale);
-    const ImVec2 BodySize(Size.x - 16.0f * Scale, Size.y - HeaderH - 14.0f * Scale);
+    const ImVec2 BodyMin(Position.x, Position.y + HeaderH + DocumentBarH);
+    const ImVec2 BodySize(Size.x, std::max(120.0f, Size.y - HeaderH - DocumentBarH));
     ImGui::SetCursorScreenPos(BodyMin);
 
     ImGui::PushStyleColor(ImGuiCol_ChildBg, ImGui::ColorConvertU32ToFloat4(Palette.ColumnBg));
@@ -1130,417 +1419,109 @@ void FluidPlumeEditor::ConstructInterface(RecordToken Token, FluidPlumeInspector
     if (ImGui::BeginChild("##FluidPlumeEditorRoot", BodySize, ImGuiChildFlags_None,
                           ImGuiWindowFlags_NoScrollbar))
     {
-        //----------------------------------------------------------------------------------------------------------------
-        // 1. COMPACT ACTION MENU STRIP (kept separate from the document tabs)
-        //----------------------------------------------------------------------------------------------------------------
-        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10.0f, 6.0f));
-        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8.0f);
-        ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
-        ImGui::PushStyleColor(ImGuiCol_Button, Palette.SegmentedBg);
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Palette.SegmentedActiveBg);
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, Palette.SegmentedActiveBg);
-        ImGui::PushStyleColor(ImGuiCol_Border, Palette.InsetFieldBorder);
-        ImGui::PushStyleColor(ImGuiCol_Text, Palette.TextSecondary);
-        if (ImGui::Button("File")) ImGui::OpenPopup("File");
-        ImGui::SameLine(0.0f, 6.0f);
-        if (ImGui::Button("Edit")) ImGui::OpenPopup("Edit");
-        ImGui::SameLine(0.0f, 6.0f);
-        if (ImGui::Button("View")) ImGui::OpenPopup("View");
-        ImGui::SameLine(0.0f, 6.0f);
-        if (ImGui::Button("Simulation")) ImGui::OpenPopup("Simulation");
-        ImGui::SameLine(0.0f, 10.0f);
-        ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(Palette.TextMuted), "GPU fluid workspace");
-        ImGui::PopStyleColor(5);
-        ImGui::PopStyleVar(3);
-
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8.0f, 6.0f));
-        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8.0f, 5.0f));
-
-        if (DropdownControlSurface::BeginMenu("File", Scale))
-            {
-                if (ImGui::MenuItem("New Fluid Document") && Session.Tabs.size() < 4u)
-                {
-                    FluidDocumentTab Fresh{};
-                    Fresh.GpuSlot          = static_cast<uint32_t>(Session.Tabs.size());
-                    Fresh.Title            = "Document_" + std::to_string(Session.Tabs.size() + 1u) + ".fluidspace";
-                    Fresh.PresetIdentity   = "camp_fire";
-                    Fresh.Scene.Name       = "Camp Fire";
-                    Fresh.Scene.Parameters = FluidDynamics::ConstructPresetParameters("camp_fire");
-                    Fresh.Scene.Camera.SnapToTarget();
-                    Fresh.RestartPending   = true;
-                    Session.Tabs.push_back(std::move(Fresh));
-                    Session.ActiveTab    = static_cast<int>(Session.Tabs.size()) - 1;
-                    Session.StatusNotice = "Created new simulation tab";
-                }
-                if (DropdownControlSurface::BeginMenu("Load Sample Scene", Scale))
-                {
-                    for (const auto& Sample : FluidDynamics::EnumerateSampleFluidScenes())
-                    {
-                        if (ImGui::MenuItem(Sample.Name))
-                        {
-                            PushUndoSnapshot(Tab);
-                            Tab.Scene          = FluidDynamics::ConstructSampleFluidScene(Sample.Identity);
-                            Tab.PresetIdentity = Sample.PresetKey;
-                            Tab.RestartPending = true;
-                            if (const auto* Preset = FluidDynamics::FindFluidPreset(Sample.PresetKey);
-                                Preset && Preset->TriggerExplosionOnLoad)
-                            {
-                                EnqueueBurstPattern(Tab, Tab.BurstPattern);
-                            }
-                            SyncDocumentToRecord(Tab, Token, Config, false);
-                            Session.StatusNotice = std::string("Loaded sample: ") + Sample.Name;
-                        }
-                    }
-                    DropdownControlSurface::EndMenu();
-                }
-                if (ImGui::MenuItem("Open .fluidspace / .gasscene.toml..."))
-                {
-                    Session.ShowImportModal = true;
-                }
-                ImGui::Separator();
-                if (ImGui::MenuItem("Save Sidecar (.fluidspace)", "Ctrl+S"))
-                {
-                    SyncDocumentToRecord(Tab, Token, Config, true);
-                    Tab.Dirty            = false;
-                    Session.StatusNotice = "Saved sidecar to " + Config.SpaceFile;
-                }
-                if (ImGui::MenuItem("Export .gasscene.toml Beside Level"))
-                {
-                    const auto Sidecar = ResolveSidecarPath(Token, Config);
-                    if (!Sidecar.empty())
-                    {
-                        auto ExportPath = Sidecar;
-                        ExportPath.replace_extension(".gasscene.toml");
-                        if (FluidDynamics::SaveFluidSpaceFile(ExportPath, Tab.Scene))
-                        {
-                            Session.StatusNotice = "Exported " + ExportPath.filename().string();
-                        }
-                    }
-                }
-                if (ImGui::MenuItem("Bake Flipbook Sprite Sheet..."))
-                {
-                    Session.Flipbook.DialogOpen = true;
-                }
-                ImGui::Separator();
-                if (ImGui::MenuItem("Close Fluid Editor", "Esc"))
-                {
-                    ClosingModal = true;
-                }
-                DropdownControlSurface::EndMenu();
-            }
-
-            if (DropdownControlSurface::BeginMenu("Edit", Scale))
-            {
-                if (ImGui::MenuItem("Undo", "Ctrl+Z", false, !Tab.UndoStack.empty()))
-                {
-                    Tab.RedoStack.push_back(Tab.Scene);
-                    Tab.Scene = Tab.UndoStack.back();
-                    Tab.UndoStack.pop_back();
-                }
-                if (ImGui::MenuItem("Redo", "Ctrl+Y", false, !Tab.RedoStack.empty()))
-                {
-                    Tab.UndoStack.push_back(Tab.Scene);
-                    Tab.Scene = Tab.RedoStack.back();
-                    Tab.RedoStack.pop_back();
-                }
-                ImGui::Separator();
-                if (ImGui::MenuItem("Reset Parameters to Preset"))
-                {
-                    PushUndoSnapshot(Tab);
-                    Tab.Scene.Parameters = FluidDynamics::ConstructPresetParameters(Tab.PresetIdentity);
-                    Tab.RestartPending   = true;
-                }
-                DropdownControlSurface::EndMenu();
-            }
-
-            if (DropdownControlSurface::BeginMenu("View", Scale))
-            {
-                ImGui::MenuItem("Outliner Panel", nullptr, &Session.ShowOutliner);
-                ImGui::MenuItem("Inspector Panel", nullptr, &Session.ShowInspector);
-                ImGui::MenuItem("Status Bar", nullptr, &Session.ShowStatusBar);
-                ImGui::Separator();
-                ImGui::MenuItem("Domain Bounds Wireframe", nullptr, &Session.ShowDomainWire);
-                ImGui::MenuItem("Viewport Telemetry HUD", nullptr, &Session.ShowHudOverlay);
-                ImGui::MenuItem("2D Voxel Atlas Minimap", nullptr, &Params.ShowAtlasMinimap);
-                ImGui::MenuItem("Floor Reference Grid", nullptr, &Params.ShowFloorGrid);
-                ImGui::MenuItem("Voxel Slice Grid Lines", nullptr, &Params.ShowVoxelGridLines);
-                ImGui::MenuItem("Active Voxel Wireframe", nullptr, &Params.ShowActiveVoxelCells);
-                ImGui::Separator();
-                if (ImGui::MenuItem("Front Camera")) Tab.Scene.Camera.ConfigureViewPreset("front");
-                if (ImGui::MenuItem("Side Camera"))  Tab.Scene.Camera.ConfigureViewPreset("side");
-                if (ImGui::MenuItem("Top Camera"))   Tab.Scene.Camera.ConfigureViewPreset("top");
-                if (ImGui::MenuItem("Reset Camera", "F")) Tab.Scene.Camera.Reset();
-                DropdownControlSurface::EndMenu();
-            }
-
-            if (DropdownControlSurface::BeginMenu("Simulation", Scale))
-            {
-                if (ImGui::MenuItem(Params.Paused ? "Resume Simulation" : "Pause Simulation", "Space"))
-                {
-                    Params.Paused = !Params.Paused;
-                }
-                if (ImGui::MenuItem("Step Single Frame", "."))
-                {
-                    Tab.StepOncePending = true;
-                }
-                if (ImGui::MenuItem("Clear 3D Grid", "C"))
-                {
-                    Tab.RestartPending = true;
-                }
-                if (ImGui::MenuItem("Detonate Burst", "E"))
-                {
-                    EnqueueBurstPattern(Tab, Tab.BurstPattern);
-                }
-                ImGui::Separator();
-                if (ImGui::MenuItem("Sync Wind from Level ForceField"))
-                {
-                    if (const auto& Flow = InspectorRuntime::Instance().QueryLevelFlowSampler())
-                    {
-                        const std::array<double, 3> SamplePos = {
-                            Config.PositionMetres[0], Config.PositionMetres[1], Config.PositionMetres[2] + 2.0
-                        };
-                        if (const auto Air = Flow(SamplePos); Air.has_value())
-                        {
-                            PushUndoSnapshot(Tab);
-                            Params.WindX         = std::clamp(static_cast<float>((*Air)[0]) * 0.25f, -4.0f, 4.0f);
-                            Params.WindZ         = std::clamp(static_cast<float>((*Air)[1]) * 0.25f, -4.0f, 4.0f);
-                            Session.StatusNotice = "Synced wind vector from level ForceField";
-                        }
-                    }
-                }
-                if (ImGui::MenuItem("Sync Sun Elevation from Level"))
-                {
-                    PushUndoSnapshot(Tab);
-                    Params.SunElevation  = std::clamp(InspectorRuntime::Instance().QuerySolarElevation(), 2.0f, 88.0f);
-                    Session.StatusNotice = "Synced solar elevation from level Sun";
-                }
-                DropdownControlSurface::EndMenu();
-            }
-
-            ImGui::PopStyleVar(2);
-
         FluidDocumentTab& ActiveDoc = Session.Tabs[std::clamp(Session.ActiveTab, 0, static_cast<int>(Session.Tabs.size()) - 1)];
-        auto&             P         = ActiveDoc.Scene.Parameters;
-
-        //----------------------------------------------------------------------------------------------------------------
-        // 2. DOCUMENT TAB BAR + TOOLBAR
-        //----------------------------------------------------------------------------------------------------------------
+        auto& P = ActiveDoc.Scene.Parameters;
         const float TotalWidth = ImGui::GetContentRegionAvail().x;
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10.0f, 5.0f));
-        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(6.0f, 4.0f));
-        if (ImGui::BeginChild("##FluidToolbarStrip", ImVec2(TotalWidth, 68.0f), ImGuiChildFlags_None,
-                              ImGuiWindowFlags_NoScrollbar))
-        {
-            ImDrawList*  BarDraw = ImGui::GetWindowDrawList();
-            const ImVec2 BarMin  = ImGui::GetWindowPos();
-            const ImVec2 BarMax  = ImVec2(BarMin.x + TotalWidth, BarMin.y + 68.0f);
-            BarDraw->AddRectFilled(BarMin, BarMax, Palette.ViewportBarBg);
-            BarDraw->AddLine(ImVec2(BarMin.x, BarMax.y - 1.0f), ImVec2(BarMax.x, BarMax.y - 1.0f), Palette.EdgeBorder);
-
-            // Row A: Document tabs + Save & Sync + Close
-            ImGui::SetCursorPos(ImVec2(10.0f, 5.0f));
-            for (int TabIdx = 0; TabIdx < static_cast<int>(Session.Tabs.size()); ++TabIdx)
-            {
-                ImGui::PushID(TabIdx);
-                const bool  Selected = (TabIdx == Session.ActiveTab);
-                std::string Label    = Session.Tabs[TabIdx].Title + (Session.Tabs[TabIdx].Dirty ? " *" : "");
-                ImGui::PushStyleColor(ImGuiCol_Button, ImGui::ColorConvertU32ToFloat4(Selected ? Palette.SegmentedActiveBg : Palette.InsetFieldBg));
-                ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(Selected ? Palette.WarmAmber : Palette.TextMuted));
-                if (ImGui::Button(Label.c_str(), ImVec2(0.0f, 24.0f)))
-                {
-                    Session.ActiveTab = TabIdx;
-                }
-                ImGui::PopStyleColor(2);
-                if (Session.Tabs.size() > 1u)
-                {
-                    ImGui::SameLine(0.0f, 2.0f);
-                    if (ImGui::SmallButton("x"))
-                    {
-                        Session.Tabs.erase(Session.Tabs.begin() + TabIdx);
-                        Session.ActiveTab = std::clamp(Session.ActiveTab, 0, static_cast<int>(Session.Tabs.size()) - 1);
-                        ImGui::PopID();
-                        break;
-                    }
-                }
-                ImGui::SameLine(0.0f, 6.0f);
-                ImGui::PopID();
-            }
-            if (Session.Tabs.size() < 4u)
-            {
-                if (ImGui::Button("+##AddFluidDoc", ImVec2(24.0f, 24.0f)))
-                {
-                    FluidDocumentTab Extra{};
-                    Extra.GpuSlot          = static_cast<uint32_t>(Session.Tabs.size());
-                    Extra.Title            = "Scratch_" + std::to_string(Session.Tabs.size() + 1u) + ".fluidspace";
-                    Extra.PresetIdentity   = "fireball_burst";
-                    Extra.Scene.Name       = "Fireball Burst";
-                    Extra.Scene.Parameters = FluidDynamics::ConstructPresetParameters("fireball_burst");
-                    Extra.Scene.Camera.SnapToTarget();
-                    Extra.RestartPending   = true;
-                    EnqueueBurstPattern(Extra, Extra.BurstPattern);
-                    Session.Tabs.push_back(std::move(Extra));
-                    Session.ActiveTab = static_cast<int>(Session.Tabs.size()) - 1;
-                }
-            }
-
-            const float RightCloseX = std::max(360.0f, TotalWidth - 500.0f);
-            ImGui::SetCursorPos(ImVec2(RightCloseX, 5.0f));
-            if (ImGui::Button("Open scene", ImVec2(72.0f, 24.0f))) Session.ShowImportModal = true;
-            ImGui::SameLine(0.0f, 5.0f);
-            if (ImGui::Button("Load a sample...", ImVec2(120.0f, 24.0f))) ImGui::OpenPopup("##ToolbarFluidSamples");
-            if (DropdownControlSurface::BeginMenu("##ToolbarFluidSamples", Scale))
-            {
-                for (const auto& Sample : FluidDynamics::EnumerateSampleFluidScenes())
-                {
-                    if (!ImGui::MenuItem(Sample.Name)) continue;
-                    PushUndoSnapshot(ActiveDoc);
-                    ActiveDoc.Scene = FluidDynamics::ConstructSampleFluidScene(Sample.Identity);
-                    ActiveDoc.PresetIdentity = Sample.PresetKey;
-                    ActiveDoc.RestartPending = true;
-                    if (const auto* Preset = FluidDynamics::FindFluidPreset(Sample.PresetKey); Preset && Preset->TriggerExplosionOnLoad)
-                        EnqueueBurstPattern(ActiveDoc, ActiveDoc.BurstPattern);
-                    SyncDocumentToRecord(ActiveDoc, Token, Config, false);
-                    Session.StatusNotice = std::string("Loaded sample: ") + Sample.Name;
-                }
-                DropdownControlSurface::EndMenu();
-            }
-            ImGui::SameLine(0.0f, 5.0f);
-            if (ImGui::Button("Save as TOML", ImVec2(90.0f, 24.0f)))
-            {
-                const auto Sidecar = ResolveSidecarPath(Token, Config);
-                if (!Sidecar.empty())
-                {
-                    auto ExportPath = Sidecar;
-                    ExportPath.replace_extension(".gasscene.toml");
-                    if (FluidDynamics::SaveFluidSpaceFile(ExportPath, ActiveDoc.Scene))
-                        Session.StatusNotice = "Exported " + ExportPath.filename().string();
-                }
-            }
-            ImGui::SameLine(0.0f, 5.0f);
-            if (ImGui::Button("Save & Sync", ImVec2(92.0f, 24.0f)))
-            {
-                SyncDocumentToRecord(ActiveDoc, Token, Config, true);
-                ActiveDoc.Dirty      = false;
-                Session.StatusNotice = "Synced parameters & saved " + Config.SpaceFile;
-            }
-            ImGui::SameLine(0.0f, 5.0f);
-            if (ImGui::Button("Close [Esc]", ImVec2(80.0f, 24.0f))) ClosingModal = true;
-
-            // Row B: Preset Combo | Burst Pattern + Detonate | Play/Step/Clear | 4 Viewport Tools | Flipbook
-            ImGui::SetCursorPos(ImVec2(10.0f, 36.0f));
-            ImGui::SetNextItemWidth(175.0f);
-            const auto* ActivePreset = FluidDynamics::FindFluidPreset(ActiveDoc.PresetIdentity);
-            ImGui::PushID("FluidPresetSelect");
-            if (DropdownControlSurface::BeginSelection("##ToolbarPreset", ActivePreset ? ActivePreset->Title : "Custom Preset", Scale))
-            {
-                for (const auto& Entry : FluidDynamics::EnumerateFluidPresets())
-                {
-                    const bool IsSel = (ActiveDoc.PresetIdentity == Entry.Identity);
-                    if (DropdownControlSurface::Option(Entry.Title, IsSel, Scale))
-                    {
-                        PushUndoSnapshot(ActiveDoc);
-                        ActiveDoc.PresetIdentity   = Entry.Identity;
-                        ActiveDoc.Scene.Name       = Entry.Title;
-                        ActiveDoc.Scene.Parameters = FluidDynamics::ConstructPresetParameters(Entry.Identity);
-                        ActiveDoc.RestartPending   = true;
-                        if (Entry.TriggerExplosionOnLoad) EnqueueBurstPattern(ActiveDoc, ActiveDoc.BurstPattern);
-                        SyncDocumentToRecord(ActiveDoc, Token, Config, false);
-                        Session.StatusNotice = std::string("Loaded preset: ") + Entry.Title;
-                    }
-                }
-                DropdownControlSurface::EndSelection();
-            }
-            ImGui::PopID();
-
-            ImGui::SameLine(0.0f, 8.0f);
-            static const char* const BurstNames[5] = {
-                "Single Burst", "Shrapnel Burst", "Cluster Salvo", "Colliding Waves", "Mushroom Cloud"
-            };
-            int PatIdx = static_cast<int>(ActiveDoc.BurstPattern);
-            if (FluidSelect("ToolbarBurstPattern", nullptr, &PatIdx, BurstNames, 5, 132.0f))
-            {
-                ActiveDoc.BurstPattern = static_cast<FluidDynamics::FluidBurstPattern>(PatIdx);
-                Config.BurstPattern    = static_cast<uint32_t>(PatIdx);
-                Config.AdvanceRevision();
-            }
-
-            ImGui::SameLine(0.0f, 6.0f);
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.76f, 0.31f, 0.08f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.88f, 0.39f, 0.12f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.97f, 0.90f, 1.0f));
-            if (ImGui::Button("Detonate [D]", ImVec2(98.0f, 24.0f)))
-            {
-                EnqueueBurstPattern(ActiveDoc, ActiveDoc.BurstPattern);
-                ++Config.BurstGeneration;
-                Config.AdvanceRevision();
-                Session.StatusNotice = "Detonated " + std::string(BurstNames[PatIdx]);
-            }
-            ImGui::PopStyleColor(3);
-
-            ImGui::SameLine(0.0f, 10.0f);
-            if (ImGui::Button(P.Paused ? "Play" : "Pause", ImVec2(54.0f, 24.0f)))
-            {
-                P.Paused = !P.Paused;
-            }
-            ImGui::SameLine(0.0f, 4.0f);
-            if (ImGui::Button("Step", ImVec2(46.0f, 24.0f)))
-            {
-                ActiveDoc.StepOncePending = true;
-            }
-            ImGui::SameLine(0.0f, 4.0f);
-            if (ImGui::Button("Clear", ImVec2(50.0f, 24.0f)))
-            {
-                ActiveDoc.RestartPending = true;
-            }
-
-            ImGui::SameLine(0.0f, 12.0f);
-            static const char* const ToolNames[4] = { "Orbit", "Flame", "Blast", "Collider" };
-            for (int ToolIdx = 0; ToolIdx < 4; ++ToolIdx)
-            {
-                const bool ActiveTool = (Session.ActiveViewportTool == ToolIdx);
-                ImGui::PushStyleColor(ImGuiCol_Button, ImGui::ColorConvertU32ToFloat4(ActiveTool ? Palette.WarmAmber : Palette.InsetFieldBg));
-                ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(ActiveTool ? Palette.ViewportBg : Palette.TextPrimary));
-                if (ImGui::Button(ToolNames[ToolIdx], ImVec2(58.0f, 24.0f)))
-                {
-                    Session.ActiveViewportTool = ToolIdx;
-                    if (ToolIdx <= 2)
-                    {
-                        P.InteractionTool = static_cast<FluidDynamics::FluidInteractionTool>(ToolIdx);
-                    }
-                }
-                ImGui::PopStyleColor(2);
-                if (ToolIdx < 3) ImGui::SameLine(0.0f, 3.0f);
-            }
-
-            ImGui::SameLine(0.0f, 12.0f);
-            if (ImGui::Button("Flipbook...", ImVec2(80.0f, 24.0f)))
-            {
-                Session.Flipbook.DialogOpen = true;
-            }
-        }
-        ImGui::EndChild();
-        ImGui::PopStyleVar(2);
 
         //----------------------------------------------------------------------------------------------------------------
         // 3. THREE-COLUMN WORKSPACE: OUTLINER | 3D VOLUMETRIC VIEWPORT | 3-TAB INSPECTOR
         //----------------------------------------------------------------------------------------------------------------
-        const float StatusHeight   = Session.ShowStatusBar ? 26.0f : 0.0f;
-        const float BodyHeight     = std::max(120.0f, ImGui::GetContentRegionAvail().y - StatusHeight);
-        constexpr float WorkspacePadding = 16.0f;
-        constexpr float ColumnGap = 12.0f;
-        const float ColumnGaps = ColumnGap * static_cast<float>((Session.ShowOutliner ? 1 : 0) + (Session.ShowInspector ? 1 : 0));
-        const float ColumnAreaWidth = std::max(320.0f, TotalWidth - WorkspacePadding * 2.0f - ColumnGaps);
-        const float SideWidthScale = std::min(1.0f, std::max(0.0f, ColumnAreaWidth - 320.0f) / (300.0f + 368.0f));
-        const float OutlinerWidth = Session.ShowOutliner ? 300.0f * SideWidthScale : 0.0f;
-        const float InspectorWidth = Session.ShowInspector ? 368.0f * SideWidthScale : 0.0f;
-        const float ViewportWidth = std::max(160.0f, ColumnAreaWidth - OutlinerWidth - InspectorWidth);
-        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + WorkspacePadding);
+        const float StatusHeight = Session.ShowStatusBar ? 26.0f * Scale : 0.0f;
+        const float WorkspacePadding = 12.0f * Scale;
+        const float ColumnGap = 10.0f * Scale;
+        const float BodyHeight = std::max(140.0f, ImGui::GetContentRegionAvail().y - StatusHeight - 9.0f * Scale);
+        const bool ShowOutliner = Session.ShowOutliner && !Session.MaximizeViewport && !Session.ShowPresetsView;
+        const bool ShowInspector = Session.ShowInspector && !Session.MaximizeViewport && !Session.ShowPresetsView;
+        const int VisibleGaps = (ShowOutliner ? 1 : 0) + (ShowInspector ? 1 : 0);
+        const float MinimumViewportWidth = 320.0f * Scale;
+        const float ColumnAreaWidth = std::max(MinimumViewportWidth,
+            TotalWidth - WorkspacePadding * 2.0f - ColumnGap * static_cast<float>(VisibleGaps));
+        const float SideScale = (ShowOutliner && ShowInspector)
+            ? std::min(1.0f, std::max(0.0f, ColumnAreaWidth - MinimumViewportWidth) / (316.0f + 368.0f) / Scale)
+            : 1.0f;
+        const float OutlinerWidth = ShowOutliner ? 316.0f * Scale * SideScale : 0.0f;
+        const float InspectorWidth = ShowInspector ? 368.0f * Scale * SideScale : 0.0f;
+        const float ViewportWidth = std::max(MinimumViewportWidth, ColumnAreaWidth - OutlinerWidth - InspectorWidth);
+        const ImVec2 WorkspaceMin(Position.x + WorkspacePadding, BodyMin.y);
+        ImGui::SetCursorScreenPos(WorkspaceMin);
 
-        // --- LEFT COLUMN: SCENE OUTLINER ---
-        if (Session.ShowOutliner)
+        if (Session.ShowPresetsView)
         {
-            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(14.0f, 16.0f));
-            ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8.0f, 8.0f));
+            const ImVec2 PresetPanelMax(WorkspaceMin.x + TotalWidth - WorkspacePadding * 2.0f, WorkspaceMin.y + BodyHeight);
+            ImDrawList* PresetDraw = ImGui::GetWindowDrawList();
+            PresetDraw->AddRectFilled(WorkspaceMin, PresetPanelMax, IM_COL32(18, 18, 18, 255), 22.0f * Scale);
+            PresetDraw->AddRect(WorkspaceMin, PresetPanelMax, IM_COL32(255, 255, 255, 14), 22.0f * Scale);
+            PresetDraw->AddText(Faces.Light ? Faces.Light : Faces.Regular, 26.0f * Scale,
+                                ImVec2(WorkspaceMin.x + 28.0f * Scale, WorkspaceMin.y + 25.0f * Scale), IM_COL32(238, 238, 238, 255), "Preset library");
+            PresetDraw->AddText(Faces.Regular, 12.0f * Scale,
+                                ImVec2(WorkspaceMin.x + 29.0f * Scale, WorkspaceMin.y + 61.0f * Scale), IM_COL32(125, 125, 125, 255),
+                                "Start from a tuned scene, then continue authoring in the live workspace.");
+            ImGui::SetCursorScreenPos(ImVec2(WorkspaceMin.x + 28.0f * Scale, WorkspaceMin.y + 91.0f * Scale));
+            ImGui::SetNextItemWidth(320.0f * Scale);
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(12.0f * Scale, 9.0f * Scale));
+            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 18.0f * Scale);
+            ImGui::PushStyleColor(ImGuiCol_FrameBg, IM_COL32(255, 255, 255, 10));
+            ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, IM_COL32(255, 255, 255, 14));
+            ImGui::PushStyleColor(ImGuiCol_Border, IM_COL32(255, 255, 255, 17));
+            ImGui::InputTextWithHint("##FluidFullPresetSearch", "Find an effect...", Session.PresetSearch, sizeof(Session.PresetSearch));
+            ImGui::PopStyleColor(3);
+            ImGui::PopStyleVar(2);
+            const char* PresetFilterLabels[] = { "All", "Fire", "Smoke", "Blast" };
+            const float PresetFilterWidth[] = { 42.0f, 52.0f, 60.0f, 52.0f };
+            float FilterX = WorkspaceMin.x + 374.0f * Scale;
+            for (int FilterIndex = 0; FilterIndex < 4; ++FilterIndex)
+            {
+                const float Width = PresetFilterWidth[FilterIndex] * Scale;
+                ImGui::SetCursorScreenPos(ImVec2(FilterX, WorkspaceMin.y + 93.0f * Scale));
+                if (FluidChip(PresetFilterLabels[FilterIndex], Session.PresetFilter == FilterIndex, Width))
+                    Session.PresetFilter = FilterIndex;
+                FilterX += Width + 8.0f * Scale;
+            }
+
+            std::string Needle = Session.PresetSearch;
+            std::transform(Needle.begin(), Needle.end(), Needle.begin(), [](unsigned char Ch) { return static_cast<char>(std::tolower(Ch)); });
+            const auto Presets = FluidDynamics::EnumerateFluidPresets();
+            const float GridLeft = WorkspaceMin.x + 28.0f * Scale;
+            const float GridTop = WorkspaceMin.y + 145.0f * Scale;
+            const float GridWidth = PresetPanelMax.x - GridLeft - 28.0f * Scale;
+            const float CardGap = 12.0f * Scale;
+            const int GridColumns = 3;
+            const float CardWidth = (GridWidth - CardGap * (GridColumns - 1)) / GridColumns;
+            int VisiblePresetIndex = 0;
+            for (const auto& Preset : Presets)
+            {
+                if (Session.PresetFilter != 0 && static_cast<int>(Preset.Category) != Session.PresetFilter) continue;
+                std::string Haystack = std::string(Preset.Title) + " " + Preset.Summary + " " + Preset.Description;
+                std::transform(Haystack.begin(), Haystack.end(), Haystack.begin(), [](unsigned char Ch) { return static_cast<char>(std::tolower(Ch)); });
+                if (!Needle.empty() && Haystack.find(Needle) == std::string::npos) continue;
+                const int Column = VisiblePresetIndex % GridColumns;
+                const int Row = VisiblePresetIndex / GridColumns;
+                ImGui::SetCursorScreenPos(ImVec2(GridLeft + Column * (CardWidth + CardGap), GridTop + Row * (76.0f * Scale)));
+                if (FluidPresetCard(Preset, ActiveDoc.PresetIdentity == Preset.Identity, CardWidth))
+                {
+                    PushUndoSnapshot(ActiveDoc);
+                    ActiveDoc.PresetIdentity = Preset.Identity;
+                    ActiveDoc.Scene.Name = Preset.Title;
+                    ActiveDoc.Scene.Parameters = FluidDynamics::ConstructPresetParameters(Preset.Identity);
+                    ActiveDoc.RestartPending = true;
+                    Session.DocumentNameForTab.clear();
+                    if (Preset.TriggerExplosionOnLoad) EnqueueBurstPattern(ActiveDoc, ActiveDoc.BurstPattern);
+                    SyncDocumentToRecord(ActiveDoc, Token, Config, false);
+                    Session.ShowPresetsView = false;
+                    Session.StatusNotice = std::string("Loaded preset: ") + Preset.Title;
+                }
+                ++VisiblePresetIndex;
+            }
+            if (VisiblePresetIndex == 0)
+                PresetDraw->AddText(Faces.Regular, 13.0f * Scale, ImVec2(GridLeft, GridTop), IM_COL32(135, 135, 135, 255), "No matching effects. Clear the search or choose another category.");
+        }
+        else
+        {
+        // --- LEFT COLUMN: SCENE OUTLINER ---
+        if (ShowOutliner)
+        {
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+            ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));
             if (ImGui::BeginChild("##FluidOutlinerColumn", ImVec2(OutlinerWidth, BodyHeight), ImGuiChildFlags_None,
                                   ImGuiWindowFlags_NoBackground))
             {
@@ -1548,65 +1529,58 @@ void FluidPlumeEditor::ConstructInterface(RecordToken Token, FluidPlumeInspector
                 const ImVec2 ColMin = ImGui::GetWindowPos();
                 const bool ColliderVisible = P.ObstacleCategory != 0 || Session.SelectedNode == OutlinerNodeId::Collider;
                 const size_t ObjectCount = 3u + (ColliderVisible ? 1u : 0u);
-                const ImVec2 OutlinerHeading = ImGui::GetCursorScreenPos();
-                ColDraw->AddText(Faces.Medium, 13.0f, OutlinerHeading, IM_COL32(214, 211, 198, 255), "Outliner");
-                char CountText[12]{};
-                std::snprintf(CountText, sizeof(CountText), "%zu", ObjectCount);
-                const ImVec2 CountSize = ImGui::CalcTextSize(CountText);
-                const float CountX = OutlinerHeading.x + 64.0f;
-                ColDraw->AddRectFilled(ImVec2(CountX, OutlinerHeading.y - 1.0f), ImVec2(CountX + CountSize.x + 10.0f, OutlinerHeading.y + 17.0f),
-                                       IM_COL32(48, 47, 39, 255), 8.0f);
-                ColDraw->AddText(Faces.Regular, 10.0f, ImVec2(CountX + 5.0f, OutlinerHeading.y + 2.0f), IM_COL32(161, 156, 139, 255), CountText);
-                const ImVec2 AddMin(ColMin.x + OutlinerWidth - 42.0f, OutlinerHeading.y - 4.0f);
-                ImGui::SetCursorScreenPos(AddMin);
-                ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 7.0f);
-                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0.0f, 0.0f));
-                ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(39, 38, 31, 255));
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(60, 57, 44, 255));
-                ImGui::PushStyleColor(ImGuiCol_Border, IM_COL32(232, 199, 139, 25));
-                ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
-                const bool AddPressed = ImGui::Button("+##FluidOutlinerAdd", ImVec2(24.0f, 24.0f));
-                ImGui::PopStyleVar(3);
-                ImGui::PopStyleColor(3);
-                if (AddPressed) ImGui::OpenPopup("##FluidOutlinerAddMenu");
-                if (ImGui::BeginPopup("##FluidOutlinerAddMenu"))
+                const int EnabledCount = 1 + (P.SourceEnabled ? 1 : 0) + (P.ObstacleCategory != 0 ? 1 : 0) + (P.SunIntensity > 0.0f ? 1 : 0);
+                const int DisabledCount = std::max(0, static_cast<int>(ObjectCount) - EnabledCount);
+                ColDraw->AddRectFilled(ColMin, ImVec2(ColMin.x + OutlinerWidth, ColMin.y + BodyHeight), IM_COL32(18, 18, 18, 255), 22.0f);
+                ColDraw->AddRect(ColMin, ImVec2(ColMin.x + OutlinerWidth, ColMin.y + BodyHeight), IM_COL32(255, 255, 255, 13), 22.0f);
+                const ImVec2 OutlinerHeading(ColMin.x + 22.0f * Scale, ColMin.y + 20.0f * Scale);
+                ColDraw->AddText(Faces.Light ? Faces.Light : Faces.Regular, 20.0f * Scale, OutlinerHeading, IM_COL32(232, 232, 232, 255), "Outliner");
+                char CountText[64]{};
+                std::snprintf(CountText, sizeof(CountText), "Scene \xC2\xB7 %zu nodes", ObjectCount);
+                ColDraw->AddText(Faces.Regular, 11.0f * Scale, ImVec2(OutlinerHeading.x, OutlinerHeading.y + 27.0f * Scale), IM_COL32(115, 115, 115, 255), CountText);
+
+                const float StatY = ColMin.y + 70.0f * Scale;
+                const float StatGap = 8.0f * Scale;
+                const float StatW = (OutlinerWidth - 28.0f * Scale - StatGap) * 0.5f;
+                for (int StatIndex = 0; StatIndex < 2; ++StatIndex)
                 {
-                    if (ImGui::MenuItem(P.SourceEnabled ? "Hide source" : "Add source"))
+                    const float X = ColMin.x + 14.0f * Scale + static_cast<float>(StatIndex) * (StatW + StatGap);
+                    const ImVec2 StatMin(X, StatY);
+                    const ImVec2 StatMax(X + StatW, StatY + 64.0f * Scale);
+                    ColDraw->AddRectFilled(StatMin, StatMax, IM_COL32(255, 255, 255, 9), 18.0f * Scale);
+                    ColDraw->AddRect(StatMin, StatMax, IM_COL32(255, 255, 255, 16), 18.0f * Scale);
+                    const bool Enabled = StatIndex == 0;
+                    ColDraw->AddCircleFilled(ImVec2(X + 25.0f * Scale, StatY + 24.0f * Scale), 11.0f * Scale,
+                                             Enabled ? IM_COL32(52, 199, 89, 255) : IM_COL32(255, 255, 255, 15));
+                    if (Enabled)
                     {
-                        PushUndoSnapshot(ActiveDoc);
-                        P.SourceEnabled = !P.SourceEnabled;
-                        ActiveDoc.Dirty = true;
-                        SyncDocumentToRecord(ActiveDoc, Token, Config, false);
+                        ColDraw->AddLine(ImVec2(X + 20.0f * Scale, StatY + 24.0f * Scale), ImVec2(X + 24.0f * Scale, StatY + 28.0f * Scale), IM_COL32(10, 26, 16, 255), 1.6f * Scale);
+                        ColDraw->AddLine(ImVec2(X + 24.0f * Scale, StatY + 28.0f * Scale), ImVec2(X + 31.0f * Scale, StatY + 20.0f * Scale), IM_COL32(10, 26, 16, 255), 1.6f * Scale);
                     }
-                    if (ImGui::MenuItem(ColliderVisible ? "Remove collider" : "Add collider"))
+                    else
                     {
-                        PushUndoSnapshot(ActiveDoc);
-                        P.ObstacleCategory = ColliderVisible ? 0 : 1;
-                        ActiveDoc.Dirty = true;
-                        SyncDocumentToRecord(ActiveDoc, Token, Config, false);
+                        ColDraw->AddLine(ImVec2(X + 21.0f * Scale, StatY + 24.0f * Scale), ImVec2(X + 29.0f * Scale, StatY + 24.0f * Scale), IM_COL32(135, 135, 135, 255), 1.2f * Scale);
                     }
-                    if (ImGui::MenuItem(P.SunIntensity > 0.0f ? "Hide sunlight" : "Add sunlight"))
-                    {
-                        PushUndoSnapshot(ActiveDoc);
-                        P.SunIntensity = P.SunIntensity > 0.0f ? 0.0f : 2.2f;
-                        ActiveDoc.Dirty = true;
-                        SyncDocumentToRecord(ActiveDoc, Token, Config, false);
-                    }
-                    ImGui::EndPopup();
+                    ColDraw->AddText(Faces.Regular, 11.0f * Scale, ImVec2(X + 14.0f * Scale, StatY + 39.0f * Scale), IM_COL32(150, 150, 150, 255), Enabled ? "Enabled" : "Disabled");
+                    char StatCount[8]{};
+                    std::snprintf(StatCount, sizeof(StatCount), "%d", Enabled ? EnabledCount : DisabledCount);
+                    ColDraw->AddText(Faces.Light ? Faces.Light : Faces.Regular, 27.0f * Scale,
+                                     ImVec2(X + StatW - 37.0f * Scale, StatY + 20.0f * Scale), IM_COL32(232, 232, 232, 255), StatCount);
                 }
-                ImGui::SetCursorScreenPos(ImVec2(OutlinerHeading.x, OutlinerHeading.y + 32.0f));
-                ImGui::SetNextItemWidth(OutlinerWidth - 28.0f);
-                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10.0f, 8.0f));
-                ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8.0f);
-                ImGui::PushStyleColor(ImGuiCol_FrameBg, IM_COL32(29, 28, 24, 255));
-                ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, IM_COL32(37, 35, 29, 255));
-                ImGui::PushStyleColor(ImGuiCol_Border, IM_COL32(232, 199, 139, 18));
+
+                const ImVec2 SearchMin(ColMin.x + 14.0f * Scale, ColMin.y + 144.0f * Scale);
+                ImGui::SetCursorScreenPos(SearchMin);
+                ImGui::SetNextItemWidth(OutlinerWidth - 28.0f * Scale);
+                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(12.0f * Scale, 10.0f * Scale));
+                ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 20.0f * Scale);
+                ImGui::PushStyleColor(ImGuiCol_FrameBg, IM_COL32(255, 255, 255, 11));
+                ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, IM_COL32(255, 255, 255, 15));
+                ImGui::PushStyleColor(ImGuiCol_Border, IM_COL32(255, 255, 255, 18));
                 ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
-                ImGui::InputTextWithHint("##FluidOutlinerFilter", "Find an object...", Session.OutlinerSearch,
-                                         sizeof(Session.OutlinerSearch));
+                ImGui::InputTextWithHint("##FluidOutlinerFilter", "Search scene...", Session.OutlinerSearch, sizeof(Session.OutlinerSearch));
                 ImGui::PopStyleVar(3);
                 ImGui::PopStyleColor(3);
-                ImGui::Dummy(ImVec2(1.0f, 4.0f));
+                ImGui::SetCursorScreenPos(ImVec2(ColMin.x + 14.0f * Scale, ColMin.y + 193.0f * Scale));
                 static constexpr std::array<const char*, 4> OutlinerFilters = { "All", "Gas", "Geometry", "Lights" };
                 static constexpr std::array<float, 4> OutlinerFilterWidths = { 36.0f, 38.0f, 66.0f, 48.0f };
                 for (int FilterIndex = 0; FilterIndex < static_cast<int>(OutlinerFilters.size()); ++FilterIndex)
@@ -1615,6 +1589,76 @@ void FluidPlumeEditor::ConstructInterface(RecordToken Token, FluidPlumeInspector
                     if (FluidChip(OutlinerFilters[FilterIndex], Session.OutlinerFilter == FilterIndex, OutlinerFilterWidths[FilterIndex]))
                         Session.OutlinerFilter = FilterIndex;
                 }
+
+                const ImVec2 CollectionMin(ColMin.x + 14.0f * Scale, ColMin.y + 225.0f * Scale);
+                ImGui::SetCursorScreenPos(CollectionMin);
+                const bool CollectionPressed = ImGui::InvisibleButton("##FluidSceneCollection", ImVec2(OutlinerWidth - 60.0f * Scale, 28.0f * Scale));
+                if (CollectionPressed) Session.CollectionExpanded = !Session.CollectionExpanded;
+                const ImVec2 CollectionChevron(CollectionMin.x + 8.0f * Scale, CollectionMin.y + 14.0f * Scale);
+                if (Session.CollectionExpanded)
+                {
+                    ColDraw->AddLine(ImVec2(CollectionChevron.x - 4.0f * Scale, CollectionChevron.y - 2.0f * Scale), CollectionChevron, IM_COL32(121, 121, 121, 255), 1.3f * Scale);
+                    ColDraw->AddLine(CollectionChevron, ImVec2(CollectionChevron.x + 4.0f * Scale, CollectionChevron.y - 2.0f * Scale), IM_COL32(121, 121, 121, 255), 1.3f * Scale);
+                }
+                else
+                {
+                    ColDraw->AddLine(ImVec2(CollectionChevron.x - 2.0f * Scale, CollectionChevron.y - 4.0f * Scale), ImVec2(CollectionChevron.x + 2.0f * Scale, CollectionChevron.y), IM_COL32(121, 121, 121, 255), 1.3f * Scale);
+                    ColDraw->AddLine(ImVec2(CollectionChevron.x + 2.0f * Scale, CollectionChevron.y), ImVec2(CollectionChevron.x - 2.0f * Scale, CollectionChevron.y + 4.0f * Scale), IM_COL32(121, 121, 121, 255), 1.3f * Scale);
+                }
+                PanelChrome::DrawGlyph("M3 7.5 12 3l9 4.5v9L12 21l-9-4.5v-9Z", ImVec2(CollectionMin.x + 22.0f * Scale, CollectionMin.y + 5.0f * Scale),
+                                       15.0f * Scale, IM_COL32(150, 150, 150, 255), 1.4f);
+                ColDraw->AddText(Faces.Regular, 11.0f * Scale, ImVec2(CollectionMin.x + 45.0f * Scale, CollectionMin.y + 7.0f * Scale), IM_COL32(177, 177, 177, 255), "Scene collection");
+                const ImVec2 AddMin(ColMin.x + OutlinerWidth - 42.0f * Scale, CollectionMin.y + 1.0f * Scale);
+                ImGui::SetCursorScreenPos(AddMin);
+                ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 14.0f * Scale);
+                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0.0f, 0.0f));
+                ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
+                ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(255, 255, 255, 7));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(255, 255, 255, 15));
+                ImGui::PushStyleColor(ImGuiCol_Border, IM_COL32(255, 255, 255, 18));
+                const bool AddPressed = ImGui::Button("+##FluidOutlinerAdd", ImVec2(26.0f * Scale, 26.0f * Scale));
+                ImGui::PopStyleColor(3);
+                ImGui::PopStyleVar(3);
+                if (AddPressed) ImGui::OpenPopup("##FluidOutlinerAddMenu");
+                auto AddObject = [&](int Kind)
+                {
+                    PushUndoSnapshot(ActiveDoc);
+                    if (Kind == 0)
+                    {
+                        P.SourceEnabled = true;
+                        ActiveDoc.Scene.Names.Source = "Fire source";
+                        Session.SelectedNode = OutlinerNodeId::Source;
+                    }
+                    else if (Kind == 1)
+                    {
+                        P.SourceEnabled = true;
+                        P.SourceTemperature = 0.0f;
+                        P.SourceFuel = 0.0f;
+                        P.SourceSmoke = std::max(P.SourceSmoke, 2.0f);
+                        ActiveDoc.Scene.Names.Source = "Smoke plume";
+                        Session.SelectedNode = OutlinerNodeId::Source;
+                    }
+                    else
+                    {
+                        P.ObstacleCategory = Kind == 2 ? 1 : Kind == 3 ? 2 : 4;
+                        ActiveDoc.Scene.Names.Collider = Kind == 2 ? "Sphere collider" : Kind == 3 ? "Cylinder collider" : "Slab collider";
+                        Session.SelectedNode = OutlinerNodeId::Collider;
+                        Session.ActiveInspector = 1;
+                    }
+                    ActiveDoc.Dirty = true;
+                    SyncDocumentToRecord(ActiveDoc, Token, Config, false);
+                };
+                if (ImGui::BeginPopup("##FluidOutlinerAddMenu"))
+                {
+                    if (ImGui::MenuItem("Fire source")) AddObject(0);
+                    if (ImGui::MenuItem("Smoke plume")) AddObject(1);
+                    ImGui::Separator();
+                    if (ImGui::MenuItem("Sphere collider")) AddObject(2);
+                    if (ImGui::MenuItem("Cylinder collider")) AddObject(3);
+                    if (ImGui::MenuItem("Slab collider")) AddObject(4);
+                    ImGui::EndPopup();
+                }
+                ImGui::SetCursorScreenPos(ImVec2(ColMin.x + 21.0f * Scale, ColMin.y + 260.0f * Scale));
 
                 auto MatchesFilter = [&](const std::string& Name) -> bool {
                     if (Session.OutlinerSearch[0] == '\0') return true;
@@ -1648,6 +1692,7 @@ void FluidPlumeEditor::ConstructInterface(RecordToken Token, FluidPlumeInspector
                 ImGui::Dummy(ImVec2(1.0f, 4.0f));
                 for (size_t Idx = 0; Idx < Nodes.size(); ++Idx)
                 {
+                    if (!Session.CollectionExpanded) break;
                     auto& Node = Nodes[Idx];
                     if (Node.Id == OutlinerNodeId::Collider && !ColliderVisible) continue;
                     if (!MatchesFilter(*Node.MutableName)) continue;
@@ -1703,37 +1748,67 @@ void FluidPlumeEditor::ConstructInterface(RecordToken Token, FluidPlumeInspector
                     ImGui::PopID();
                 }
 
-                ImGui::Dummy(ImVec2(1.0f, 10.0f));
-                InspectorControls::ConstructSectionDivider(Palette, Faces, "PRESET LIBRARY", "18 effects");
-                ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+                ImGui::SetCursorScreenPos(ImVec2(ColMin.x + 18.0f * Scale, ImGui::GetCursorScreenPos().y + 10.0f * Scale));
+                const ImVec2 PresetHeading = ImGui::GetCursorScreenPos();
+                ColDraw->AddText(Faces.Regular, 15.0f * Scale, PresetHeading, IM_COL32(224, 224, 224, 255), "Preset library");
+                char PresetCount[16]{};
+                std::snprintf(PresetCount, sizeof(PresetCount), "%zu", FluidDynamics::EnumerateFluidPresets().size());
+                ColDraw->AddText(Faces.Regular, 10.0f * Scale, ImVec2(PresetHeading.x + 111.0f * Scale, PresetHeading.y + 4.0f * Scale), IM_COL32(115, 115, 115, 255), PresetCount);
+                ImGui::SetCursorScreenPos(ImVec2(ColMin.x + 14.0f * Scale, PresetHeading.y + 29.0f * Scale));
+                ImGui::SetNextItemWidth(OutlinerWidth - 28.0f * Scale);
+                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(11.0f * Scale, 8.0f * Scale));
+                ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 18.0f * Scale);
+                ImGui::PushStyleColor(ImGuiCol_FrameBg, IM_COL32(255, 255, 255, 10));
+                ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, IM_COL32(255, 255, 255, 14));
+                ImGui::PushStyleColor(ImGuiCol_Border, IM_COL32(255, 255, 255, 17));
+                ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
                 ImGui::InputTextWithHint("##FluidPresetFilter", "Find an effect...", Session.PresetSearch, sizeof(Session.PresetSearch));
+                ImGui::PopStyleVar(3);
+                ImGui::PopStyleColor(3);
+                ImGui::SetCursorScreenPos(ImVec2(ColMin.x + 14.0f * Scale, PresetHeading.y + 75.0f * Scale));
                 static constexpr std::array<const char*, 4> PresetFilters = { "All", "Fire", "Smoke", "Blast" };
                 static constexpr std::array<float, 4> PresetFilterWidths = { 38.0f, 46.0f, 54.0f, 48.0f };
                 for (int FilterIndex = 0; FilterIndex < static_cast<int>(PresetFilters.size()); ++FilterIndex)
                 {
-                    if (FilterIndex > 0) ImGui::SameLine(0.0f, 4.0f);
-                    if (FluidChip(PresetFilters[FilterIndex], Session.PresetFilter == FilterIndex, PresetFilterWidths[FilterIndex]))
+                    if (FilterIndex > 0) ImGui::SameLine(0.0f, 4.0f * Scale);
+                    if (FluidChip(PresetFilters[FilterIndex], Session.PresetFilter == FilterIndex, PresetFilterWidths[FilterIndex] * Scale))
                         Session.PresetFilter = FilterIndex;
                 }
-                const auto Presets = FluidDynamics::EnumerateFluidPresets();
-                std::string Needle = Session.PresetSearch;
-                std::transform(Needle.begin(), Needle.end(), Needle.begin(), [](unsigned char Ch) { return static_cast<char>(std::tolower(Ch)); });
-                for (const auto& Preset : Presets)
+                const ImVec2 PresetListMin(ColMin.x + 12.0f * Scale, PresetHeading.y + 107.0f * Scale);
+                const float FooterHeight = 32.0f * Scale;
+                const float PresetListHeight = std::max(80.0f * Scale, ColMin.y + BodyHeight - FooterHeight - PresetListMin.y - 1.0f * Scale);
+                ImGui::SetCursorScreenPos(PresetListMin);
+                if (ImGui::BeginChild("##FluidPresetCards", ImVec2(OutlinerWidth - 24.0f * Scale, PresetListHeight),
+                                      ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoScrollbar))
                 {
-                    if (Session.PresetFilter != 0 && static_cast<int>(Preset.Category) != Session.PresetFilter) continue;
-                    std::string Haystack = std::string(Preset.Title) + " " + Preset.Summary + " " + Preset.Description;
-                    std::transform(Haystack.begin(), Haystack.end(), Haystack.begin(), [](unsigned char Ch) { return static_cast<char>(std::tolower(Ch)); });
-                    if (!Needle.empty() && Haystack.find(Needle) == std::string::npos) continue;
-                    if (!FluidPresetCard(Preset, ActiveDoc.PresetIdentity == Preset.Identity, ImGui::GetContentRegionAvail().x)) continue;
-                    PushUndoSnapshot(ActiveDoc);
-                    ActiveDoc.PresetIdentity   = Preset.Identity;
-                    ActiveDoc.Scene.Name       = Preset.Title;
-                    ActiveDoc.Scene.Parameters = FluidDynamics::ConstructPresetParameters(Preset.Identity);
-                    ActiveDoc.RestartPending   = true;
-                    if (Preset.TriggerExplosionOnLoad) EnqueueBurstPattern(ActiveDoc, ActiveDoc.BurstPattern);
-                    SyncDocumentToRecord(ActiveDoc, Token, Config, false);
-                    Session.StatusNotice = std::string("Loaded preset: ") + Preset.Title;
+                    const auto Presets = FluidDynamics::EnumerateFluidPresets();
+                    std::string Needle = Session.PresetSearch;
+                    std::transform(Needle.begin(), Needle.end(), Needle.begin(), [](unsigned char Ch) { return static_cast<char>(std::tolower(Ch)); });
+                    for (const auto& Preset : Presets)
+                    {
+                        if (Session.PresetFilter != 0 && static_cast<int>(Preset.Category) != Session.PresetFilter) continue;
+                        std::string Haystack = std::string(Preset.Title) + " " + Preset.Summary + " " + Preset.Description;
+                        std::transform(Haystack.begin(), Haystack.end(), Haystack.begin(), [](unsigned char Ch) { return static_cast<char>(std::tolower(Ch)); });
+                        if (!Needle.empty() && Haystack.find(Needle) == std::string::npos) continue;
+                        if (!FluidPresetCard(Preset, ActiveDoc.PresetIdentity == Preset.Identity, ImGui::GetContentRegionAvail().x)) continue;
+                        PushUndoSnapshot(ActiveDoc);
+                        ActiveDoc.PresetIdentity   = Preset.Identity;
+                        ActiveDoc.Scene.Name       = Preset.Title;
+                        ActiveDoc.Scene.Parameters = FluidDynamics::ConstructPresetParameters(Preset.Identity);
+                        ActiveDoc.RestartPending   = true;
+                        Session.DocumentNameForTab.clear();
+                        if (Preset.TriggerExplosionOnLoad) EnqueueBurstPattern(ActiveDoc, ActiveDoc.BurstPattern);
+                        SyncDocumentToRecord(ActiveDoc, Token, Config, false);
+                        Session.StatusNotice = std::string("Loaded preset: ") + Preset.Title;
+                    }
                 }
+                ImGui::EndChild();
+                const ImVec2 FooterMin(ColMin.x, ColMin.y + BodyHeight - FooterHeight);
+                ColDraw->AddLine(FooterMin, ImVec2(ColMin.x + OutlinerWidth, FooterMin.y), IM_COL32(255, 255, 255, 12));
+                PanelChrome::DrawGlyph("M4 7h16M4 12h16M4 17h16", ImVec2(ColMin.x + 15.0f * Scale, FooterMin.y + 9.0f * Scale),
+                                       12.0f * Scale, IM_COL32(107, 107, 107, 255), 1.4f);
+                ColDraw->AddText(Faces.Regular, 9.0f * Scale, ImVec2(ColMin.x + 34.0f * Scale, FooterMin.y + 10.0f * Scale),
+                                 IM_COL32(111, 111, 111, 255), "One domain \xC2\xB7 one source \xC2\xB7 one collider");
             }
             ImGui::EndChild();
             ImGui::PopStyleVar(2);
@@ -1749,19 +1824,106 @@ void FluidPlumeEditor::ConstructInterface(RecordToken Token, FluidPlumeInspector
             const ImVec2 ViewportPanelMin = ImGui::GetWindowPos();
             VpDraw->AddRectFilled(ViewportPanelMin, ImVec2(ViewportPanelMin.x + ViewportWidth, ViewportPanelMin.y + BodyHeight), IM_COL32(18, 18, 18, 255), 22.0f);
             VpDraw->AddRect(ViewportPanelMin, ImVec2(ViewportPanelMin.x + ViewportWidth, ViewportPanelMin.y + BodyHeight), IM_COL32(255, 255, 255, 13), 22.0f);
-            constexpr float ViewBarHeight = 40.0f;
+            constexpr float ViewBarHeight = 44.0f;
             constexpr float TransportHeight = 52.0f;
-            constexpr float TimelineHeight = 76.0f;
+            constexpr float TimelineHeight = 88.0f;
             const ImVec2 ViewBarMax(ColumnMin.x + ViewportWidth, ColumnMin.y + ViewBarHeight);
-            VpDraw->AddRectFilled(ColumnMin, ViewBarMax, IM_COL32(23, 23, 23, 255));
-            VpDraw->AddText(Faces.Medium, 12.0f, ImVec2(ColumnMin.x + 14.0f, ColumnMin.y + 13.0f), IM_COL32(226, 226, 226, 255), "Scene view");
-            VpDraw->AddText(Faces.Regular, 11.0f, ImVec2(ColumnMin.x + 100.0f, ColumnMin.y + 14.0f), IM_COL32(136, 136, 136, 255), "Perspective \xE2\x96\xBE");
-            VpDraw->AddText(Faces.Regular, 10.5f, ImVec2(ColumnMin.x + ViewportWidth - 248.0f, ColumnMin.y + 14.0f), IM_COL32(180, 180, 180, 255), "Bake     Diagnostics     Lit volume   \xE2\x96\xBE");
+            VpDraw->AddRectFilled(ColumnMin, ViewBarMax, IM_COL32(23, 23, 23, 255), 22.0f, ImDrawFlags_RoundCornersTop);
+            VpDraw->AddRectFilled(ImVec2(ColumnMin.x, ColumnMin.y + 20.0f), ViewBarMax, IM_COL32(23, 23, 23, 255));
+            PanelChrome::DrawGlyph("M3 4h18v16H3zM3 9h18M8 4v5", ImVec2(ColumnMin.x + 15.0f * Scale, ColumnMin.y + 14.0f * Scale),
+                                   15.0f * Scale, IM_COL32(145, 145, 145, 255), 1.35f);
+            VpDraw->AddText(Faces.Medium, 12.0f * Scale, ImVec2(ColumnMin.x + 38.0f * Scale, ColumnMin.y + 15.0f * Scale), IM_COL32(224, 224, 224, 255), "Scene view");
+            VpDraw->AddLine(ImVec2(ColumnMin.x + 112.0f * Scale, ColumnMin.y + 11.0f * Scale),
+                            ImVec2(ColumnMin.x + 112.0f * Scale, ColumnMin.y + 33.0f * Scale), IM_COL32(255, 255, 255, 15));
+
+            const char* CameraViews[] = { "Perspective", "Front", "Side", "Top", "Reset view" };
+            int CameraIndex = std::clamp(Session.CameraView, 0, 3);
+            ImGui::SetCursorScreenPos(ImVec2(ColumnMin.x + 125.0f * Scale, ColumnMin.y + 8.0f * Scale));
+            ImGui::SetNextItemWidth(112.0f * Scale);
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(9.0f * Scale, 5.0f * Scale));
+            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 14.0f * Scale);
+            ImGui::PushStyleColor(ImGuiCol_FrameBg, IM_COL32(255, 255, 255, 6));
+            ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, IM_COL32(255, 255, 255, 12));
+            ImGui::PushStyleColor(ImGuiCol_Border, IM_COL32(255, 255, 255, 12));
+            if (DropdownControlSurface::BeginSelection("##FluidCameraView", CameraViews[CameraIndex], Scale))
+            {
+                for (int Index = 0; Index < 5; ++Index)
+                {
+                    if (!DropdownControlSurface::Option(CameraViews[Index], Index == CameraIndex, Scale)) continue;
+                    if (Index == 4)
+                    {
+                        ActiveDoc.Scene.Camera.Reset();
+                        Session.CameraView = 0;
+                    }
+                    else
+                    {
+                        Session.CameraView = Index;
+                        if (Index > 0) ActiveDoc.Scene.Camera.ConfigureViewPreset(Index == 1 ? "front" : Index == 2 ? "side" : "top");
+                        else { ActiveDoc.Scene.Camera.Reset(); ActiveDoc.Scene.Camera.SnapToTarget(); }
+                    }
+                }
+                DropdownControlSurface::EndSelection();
+            }
+            ImGui::PopStyleColor(3);
+            ImGui::PopStyleVar(2);
+
+            auto ViewAction = [&](const char* Id, const char* Label, float X, float Width, bool Active = false) -> bool
+            {
+                const ImVec2 Min(X, ColumnMin.y + 8.0f * Scale);
+                ImGui::SetCursorScreenPos(Min);
+                const bool Pressed = ImGui::InvisibleButton(Id, ImVec2(Width, 28.0f * Scale));
+                const bool HoveredButton = ImGui::IsItemHovered();
+                if (Active || HoveredButton)
+                    VpDraw->AddRectFilled(Min, ImVec2(Min.x + Width, Min.y + 28.0f * Scale),
+                                          Active ? IM_COL32(255, 255, 255, 13) : IM_COL32(255, 255, 255, 8), 14.0f * Scale);
+                const ImVec2 LabelSize = ImGui::CalcTextSize(Label);
+                VpDraw->AddText(Faces.Regular, 10.5f * Scale,
+                                ImVec2(Min.x + (Width - LabelSize.x * Scale) * 0.5f, Min.y + 8.0f * Scale),
+                                Active || HoveredButton ? IM_COL32(225, 225, 225, 255) : IM_COL32(145, 145, 145, 255), Label);
+                return Pressed;
+            };
+            const float ActionRight = ColumnMin.x + ViewportWidth - 12.0f * Scale;
+            const float MaxX = ActionRight - 28.0f * Scale;
+            const float FocusX = MaxX - 32.0f * Scale;
+            const float BoundsX = FocusX - 32.0f * Scale;
+            const float ChannelW = 105.0f * Scale;
+            const float ChannelX = BoundsX - ChannelW - 6.0f * Scale;
+            const float DiagnosticX = ChannelX - 31.0f * Scale;
+            const float BakeX = DiagnosticX - 54.0f * Scale;
+            if (ViewAction("##FluidBake", "Bake", BakeX, 49.0f * Scale)) Session.Flipbook.DialogOpen = true;
+            if (ViewAction("##FluidDiagnostics", "...", DiagnosticX, 27.0f * Scale, Session.DiagnosticsOpen)) Session.DiagnosticsOpen = !Session.DiagnosticsOpen;
+            const auto Channels = FluidDynamics::EnumerateFluidDebugChannels();
+            const int RenderIndex = std::clamp(P.RenderChannel, 0, static_cast<int>(Channels.size()) - 1);
+            ImGui::SetCursorScreenPos(ImVec2(ChannelX, ColumnMin.y + 8.0f * Scale));
+            ImGui::SetNextItemWidth(ChannelW);
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8.0f * Scale, 5.0f * Scale));
+            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 14.0f * Scale);
+            ImGui::PushStyleColor(ImGuiCol_FrameBg, IM_COL32(255, 255, 255, 6));
+            ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, IM_COL32(255, 255, 255, 12));
+            ImGui::PushStyleColor(ImGuiCol_Border, IM_COL32(255, 255, 255, 12));
+            if (DropdownControlSurface::BeginSelection("##FluidRenderChannel", Channels[RenderIndex], Scale))
+            {
+                for (int Index = 0; Index < static_cast<int>(Channels.size()); ++Index)
+                    if (DropdownControlSurface::Option(Channels[Index], Index == P.RenderChannel, Scale)) P.RenderChannel = Index;
+                DropdownControlSurface::EndSelection();
+            }
+            ImGui::PopStyleColor(3);
+            ImGui::PopStyleVar(2);
+            if (ViewAction("##FluidBoundsToggle", "B", BoundsX, 26.0f * Scale, Session.ShowDomainWire))
+                Session.ShowDomainWire = !Session.ShowDomainWire;
+            if (ViewAction("##FluidFocus", "F", FocusX, 26.0f * Scale))
+            {
+                ActiveDoc.Scene.Camera.Reset();
+                ActiveDoc.Scene.Camera.SnapToTarget();
+                Session.CameraView = 0;
+            }
+            if (ViewAction("##FluidMaximize", "[]", MaxX, 28.0f * Scale, Session.MaximizeViewport))
+                Session.MaximizeViewport = !Session.MaximizeViewport;
             VpDraw->AddLine(ImVec2(ColumnMin.x, ViewBarMax.y), ViewBarMax, IM_COL32(255, 255, 255, 14), 1.0f);
 
             const ImVec2 CanvasMin(ColumnMin.x, ColumnMin.y + ViewBarHeight);
-            const float CanvasHeight = std::max(64.0f, BodyHeight - ViewBarHeight - TransportHeight - TimelineHeight);
-            const ImVec2 CanvasSize(std::max(64.0f, ViewportWidth), CanvasHeight);
+            const float CanvasHeight = std::max(64.0f * Scale, BodyHeight - ViewBarHeight - TransportHeight - TimelineHeight);
+            const ImVec2 CanvasSize(std::max(64.0f * Scale, ViewportWidth), CanvasHeight);
             ImGui::SetCursorScreenPos(CanvasMin);
             ImGui::InvisibleButton("##Fluid3DCanvasHitbox", CanvasSize,
                                    ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight | ImGuiButtonFlags_MouseButtonMiddle);
@@ -1858,25 +2020,38 @@ void FluidPlumeEditor::ConstructInterface(RecordToken Token, FluidPlumeInspector
                     BakeReq.DocumentSlot      = ActiveDoc.GpuSlot;
                     BakeReq.ViewportWidth     = static_cast<uint32_t>(Session.Flipbook.FrameWidth);
                     BakeReq.ViewportHeight    = static_cast<uint32_t>(Session.Flipbook.FrameHeight);
-                    BakeReq.DeltaSeconds      = Session.Flipbook.DurationSec / static_cast<float>(std::max(1, TotalFrames));
+                    const bool Warming = Session.Flipbook.WarmupRemaining > 1.0e-4f;
+                    BakeReq.DeltaSeconds      = 1.0f / static_cast<float>(std::max(1, Session.Flipbook.FramesPerSecond));
                     BakeReq.Parameters        = P;
                     BakeReq.Parameters.Paused = false;
                     BakeReq.Camera            = ActiveDoc.Scene.Camera;
-                    BakeReq.ExportFlipbook    = true;
-                    if (Session.Flipbook.Captured == 0 && Session.Flipbook.DetonateStart)
+                    BakeReq.ExportFlipbook    = !Warming;
+                    if (!Session.Flipbook.RestartIssued)
                     {
                         BakeReq.Restart = true;
-                        FluidBlastImpulse InitBlast{};
-                        InitBlast.Radius      = P.BlastRadius;
-                        InitBlast.Strength    = P.BlastStrength;
-                        InitBlast.Temperature = P.BlastTemperature;
-                        InitBlast.Fuel        = P.BlastFuel;
-                        InitBlast.Smoke       = P.BlastSmoke;
-                        InitBlast.Lobes       = P.BlastLobes;
-                        BakeReq.Blasts.push_back(InitBlast);
+                        Session.Flipbook.RestartIssued = true;
+                    }
+                    if (!Warming && !Session.Flipbook.BurstIssued)
+                    {
+                        if (Session.Flipbook.DetonateStart)
+                        {
+                            FluidBlastImpulse InitBlast{};
+                            InitBlast.Radius      = P.BlastRadius;
+                            InitBlast.Strength    = P.BlastStrength;
+                            InitBlast.Temperature = P.BlastTemperature;
+                            InitBlast.Fuel        = P.BlastFuel;
+                            InitBlast.Smoke       = P.BlastSmoke;
+                            InitBlast.Lobes       = P.BlastLobes;
+                            BakeReq.Blasts.push_back(InitBlast);
+                        }
+                        Session.Flipbook.BurstIssued = true;
                     }
                     FluidViewportImage Baked = Presenter(BakeReq);
-                    if (Baked.ReadbackRgba.size() == static_cast<size_t>(Session.Flipbook.FrameWidth) * Session.Flipbook.FrameHeight * 4u)
+                    if (Warming)
+                    {
+                        Session.Flipbook.WarmupRemaining = std::max(0.0f, Session.Flipbook.WarmupRemaining - BakeReq.DeltaSeconds);
+                    }
+                    else if (Baked.ReadbackRgba.size() == static_cast<size_t>(Session.Flipbook.FrameWidth) * Session.Flipbook.FrameHeight * 4u)
                     {
                         const int Col    = Session.Flipbook.Captured % Session.Flipbook.Columns;
                         const int Row    = Session.Flipbook.Captured / Session.Flipbook.Columns;
@@ -1889,18 +2064,30 @@ void FluidPlumeEditor::ConstructInterface(RecordToken Token, FluidPlumeInspector
                             std::memcpy(Session.Flipbook.SheetRgba.data() + DstOff,
                                         Baked.ReadbackRgba.data() + SrcOff,
                                         static_cast<size_t>(Session.Flipbook.FrameWidth) * 4u);
+                            if (!Session.Flipbook.Transparent)
+                            {
+                                for (int X = 0; X < Session.Flipbook.FrameWidth; ++X)
+                                    Session.Flipbook.SheetRgba[DstOff + static_cast<size_t>(X) * 4u + 3u] = 255u;
+                            }
                         }
                     }
-                    ++Session.Flipbook.Captured;
+                    if (!Warming) ++Session.Flipbook.Captured;
                     if (Session.Flipbook.Captured >= TotalFrames)
                     {
                         Session.Flipbook.Recording = false;
                         const uint32_t SheetW      = static_cast<uint32_t>(Session.Flipbook.Columns * Session.Flipbook.FrameWidth);
                         const uint32_t SheetH      = static_cast<uint32_t>(Session.Flipbook.Rows * Session.Flipbook.FrameHeight);
-                        if (WriteUncompressedRgbaPng(Session.Flipbook.OutputPath, SheetW, SheetH, Session.Flipbook.SheetRgba))
+                        const std::filesystem::path PngPath(Session.Flipbook.OutputPath);
+                        if (WriteUncompressedRgbaPng(PngPath, SheetW, SheetH, Session.Flipbook.SheetRgba))
                         {
-                            Session.Flipbook.LastMessage = std::string("Saved RGBA flipbook: ") + Session.Flipbook.OutputPath;
-                            Session.StatusNotice         = Session.Flipbook.LastMessage;
+                            const bool MetadataSaved = WriteFlipbookMetadata(PngPath, ActiveDoc.Scene, TotalFrames,
+                                Session.Flipbook.Columns, Session.Flipbook.Rows, Session.Flipbook.FrameWidth,
+                                Session.Flipbook.FramesPerSecond, Session.Flipbook.WarmupSeconds,
+                                Session.Flipbook.Transparent, Session.Flipbook.DetonateStart);
+                            Session.Flipbook.LastMessage = MetadataSaved
+                                ? std::string("Saved PNG and JSON metadata: ") + PngPath.string()
+                                : std::string("Saved PNG, but metadata export failed: ") + PngPath.string();
+                            Session.StatusNotice = Session.Flipbook.LastMessage;
                         }
                         else
                         {
@@ -1936,7 +2123,7 @@ void FluidPlumeEditor::ConstructInterface(RecordToken Token, FluidPlumeInspector
             }
 
             const ImVec2 CanvasMax = ImVec2(CanvasMin.x + CanvasSize.x, CanvasMin.y + CanvasSize.y);
-            VpDraw->AddRectFilled(CanvasMin, CanvasMax, IM_COL32(10, 12, 16, 255));
+            VpDraw->AddRectFilled(CanvasMin, CanvasMax, IM_COL32(11, 11, 11, 255));
 
             if (Session.LastImage.Texture != 0u)
             {
@@ -1958,102 +2145,290 @@ void FluidPlumeEditor::ConstructInterface(RecordToken Token, FluidPlumeInspector
                 {
                     VpDraw->AddLine(ImVec2(CanvasMin.x + Seg[0], CanvasMin.y + Seg[1]),
                                     ImVec2(CanvasMin.x + Seg[2], CanvasMin.y + Seg[3]),
-                                    IM_COL32(236, 166, 78, 96), 1.15f);
+                                    IM_COL32(90, 169, 255, 90), 1.15f);
                 }
                 VpDraw->PopClipRect();
             }
 
-            if (Session.ShowHudOverlay)
+            // Viewport status, floating tools, telemetry and world-axis gizmo.
+            const ImVec2 CaptionMin(CanvasMin.x + 18.0f * Scale, CanvasMin.y + 16.0f * Scale);
+            const char* SelectedObject = Session.SelectedNode == OutlinerNodeId::Domain ? ActiveDoc.Scene.Names.Domain.c_str() :
+                                         Session.SelectedNode == OutlinerNodeId::Collider ? ActiveDoc.Scene.Names.Collider.c_str() :
+                                         Session.SelectedNode == OutlinerNodeId::Sun ? ActiveDoc.Scene.Names.Sun.c_str() : ActiveDoc.Scene.Names.Source.c_str();
+            const char* LiveLabel = P.Paused ? "PAUSED" : "LIVE";
+            const ImVec2 LiveSize = ImGui::CalcTextSize(LiveLabel);
+            const float LiveWidth = LiveSize.x * Scale + 35.0f * Scale;
+            VpDraw->AddRectFilled(CaptionMin, ImVec2(CaptionMin.x + LiveWidth, CaptionMin.y + 25.0f * Scale), IM_COL32(18, 18, 18, 225), 14.0f * Scale);
+            VpDraw->AddRect(CaptionMin, ImVec2(CaptionMin.x + LiveWidth, CaptionMin.y + 25.0f * Scale), IM_COL32(255, 255, 255, 18), 14.0f * Scale);
+            VpDraw->AddCircleFilled(ImVec2(CaptionMin.x + 12.0f * Scale, CaptionMin.y + 12.5f * Scale), 3.0f * Scale,
+                                    P.Paused ? IM_COL32(183, 183, 183, 255) : IM_COL32(52, 199, 89, 255));
+            VpDraw->AddText(Faces.Medium, 9.0f * Scale, ImVec2(CaptionMin.x + 21.0f * Scale, CaptionMin.y + 7.0f * Scale), IM_COL32(218, 218, 218, 255), LiveLabel);
+            const ImVec2 ObjectLabelMin(CaptionMin.x + LiveWidth + 8.0f * Scale, CaptionMin.y);
+            const ImVec2 ObjectLabelSize = ImGui::CalcTextSize(SelectedObject);
+            const float ObjectPillW = std::min(CanvasSize.x * 0.34f, ObjectLabelSize.x * Scale + 22.0f * Scale);
+            VpDraw->AddRectFilled(ObjectLabelMin, ImVec2(ObjectLabelMin.x + ObjectPillW, ObjectLabelMin.y + 25.0f * Scale), IM_COL32(18, 18, 18, 225), 14.0f * Scale);
+            VpDraw->AddText(Faces.Regular, 10.0f * Scale, ImVec2(ObjectLabelMin.x + 11.0f * Scale, ObjectLabelMin.y + 7.0f * Scale), IM_COL32(190, 190, 190, 255), SelectedObject);
+            VpDraw->AddText(Faces.Regular, 9.0f * Scale, ImVec2(ObjectLabelMin.x, ObjectLabelMin.y + 33.0f * Scale), IM_COL32(119, 119, 119, 255), "Eulerian volume \xC2\xB7 physically shaded");
+
+            const ImVec2 ToolsMin(CanvasMin.x + 16.0f * Scale, CanvasMin.y + 83.0f * Scale);
+            constexpr float ToolBoxW = 42.0f;
+            constexpr float ToolButtonH = 38.0f;
+            VpDraw->AddRectFilled(ToolsMin, ImVec2(ToolsMin.x + ToolBoxW * Scale, ToolsMin.y + 4.0f * ToolButtonH * Scale + 12.0f * Scale),
+                                  IM_COL32(18, 18, 18, 218), 21.0f * Scale);
+            VpDraw->AddRect(ImVec2(ToolsMin.x, ToolsMin.y), ImVec2(ToolsMin.x + ToolBoxW * Scale, ToolsMin.y + 4.0f * ToolButtonH * Scale + 12.0f * Scale),
+                            IM_COL32(255, 255, 255, 18), 21.0f * Scale);
+            const char* ToolGlyphs[] = {
+                "M12 3a9 9 0 1 0 9 9M12 7v5l3 2",
+                "M14 4 20 10M5 19l2.5-.5L19 7a2.1 2.1 0 0 0-3-3L4.5 15.5 4 18Z",
+                "M12 2v7m0 6v7M2 12h7m6 0h7M5 5l5 5m4 4 5 5m0-14-5 5m-4 4-5 5"
+            };
+            const char* ToolTips[] = { "Orbit camera 1", "Source brush 2", "Place burst 3" };
+            for (int ToolIndex = 0; ToolIndex < 3; ++ToolIndex)
             {
-                const ImVec2 HudMin = ImVec2(CanvasMin.x + 12.0f, CanvasMin.y + 12.0f);
-                const ImVec2 HudMax = ImVec2(HudMin.x + 292.0f, HudMin.y + 62.0f);
-                VpDraw->AddRectFilled(HudMin, HudMax, IM_COL32(12, 14, 19, 196), 5.0f);
-                VpDraw->AddRect(HudMin, HudMax, Palette.EdgeBorder, 5.0f);
+                const ImVec2 ButtonMin(ToolsMin.x + 4.0f * Scale, ToolsMin.y + (4.0f + static_cast<float>(ToolIndex) * ToolButtonH) * Scale);
+                ImGui::SetCursorScreenPos(ButtonMin);
+                const bool Pressed = ImGui::InvisibleButton(ToolTips[ToolIndex], ImVec2(34.0f * Scale, 34.0f * Scale));
+                const bool ToolHovered = ImGui::IsItemHovered();
+                const bool Selected = Session.ActiveViewportTool == ToolIndex;
+                if (Pressed)
+                {
+                    Session.ActiveViewportTool = ToolIndex;
+                    P.InteractionTool = static_cast<FluidDynamics::FluidInteractionTool>(ToolIndex);
+                }
+                if (Selected || ToolHovered)
+                    VpDraw->AddRectFilled(ButtonMin, ImVec2(ButtonMin.x + 34.0f * Scale, ButtonMin.y + 34.0f * Scale),
+                                          Selected ? IM_COL32(255, 255, 255, 15) : IM_COL32(255, 255, 255, 8), 17.0f * Scale);
+                PanelChrome::DrawGlyph(ToolGlyphs[ToolIndex], ImVec2(ButtonMin.x + 9.0f * Scale, ButtonMin.y + 9.0f * Scale),
+                                       16.0f * Scale, Selected ? IM_COL32(235, 235, 235, 255) : IM_COL32(139, 139, 139, 255), 1.5f);
+                if (ToolHovered) ImGui::SetTooltip("%s", ToolTips[ToolIndex]);
+            }
+            const float TurntableY = ToolsMin.y + 4.0f * Scale + 3.0f * ToolButtonH * Scale;
+            VpDraw->AddLine(ImVec2(ToolsMin.x + 10.0f * Scale, TurntableY), ImVec2(ToolsMin.x + 32.0f * Scale, TurntableY), IM_COL32(255, 255, 255, 18));
+            const ImVec2 TurnMin(ToolsMin.x + 4.0f * Scale, TurntableY + 4.0f * Scale);
+            ImGui::SetCursorScreenPos(TurnMin);
+            const bool TurnPressed = ImGui::InvisibleButton("##FluidTurntable", ImVec2(34.0f * Scale, 34.0f * Scale));
+            if (TurnPressed)
+            {
+                P.AutoTurntable = !P.AutoTurntable;
+                ActiveDoc.Scene.Camera.AutoTurntable = P.AutoTurntable;
+            }
+            const bool TurnHovered = ImGui::IsItemHovered();
+            if (P.AutoTurntable || TurnHovered)
+                VpDraw->AddRectFilled(TurnMin, ImVec2(TurnMin.x + 34.0f * Scale, TurnMin.y + 34.0f * Scale),
+                                      P.AutoTurntable ? IM_COL32(255, 255, 255, 15) : IM_COL32(255, 255, 255, 8), 17.0f * Scale);
+            PanelChrome::DrawGlyph("M20 7v5h-5M4 17v-5h5m10-2a7 7 0 0 0-12-3L4 9m16 6-3 2a7 7 0 0 1-12-3", ImVec2(TurnMin.x + 9.0f * Scale, TurnMin.y + 9.0f * Scale),
+                                   16.0f * Scale, P.AutoTurntable ? IM_COL32(232, 232, 232, 255) : IM_COL32(139, 139, 139, 255), 1.5f);
+            if (TurnHovered) ImGui::SetTooltip("Turntable T");
 
-                char Line1[128]{};
-                std::snprintf(Line1, sizeof(Line1), "%d\xC2\xB3 Eulerian Grid  \xC2\xB7  %.2f ms  \xC2\xB7  %u steps",
-                              P.GridResolution, Session.LastImage.RefreshMilliseconds, Session.LastImage.EffectiveRaySteps);
-                VpDraw->AddText(Faces.Medium, 11.5f, ImVec2(HudMin.x + 10.0f, HudMin.y + 8.0f), Palette.TextPrimary, Line1);
+            const float Fps = Io.DeltaTime > 1.0e-4f ? std::min(999.0f, 1.0f / Io.DeltaTime) : 0.0f;
+            char FpsText[24]{};
+            std::snprintf(FpsText, sizeof(FpsText), "%.0f FPS", Fps);
+            char GridBuffer[32]{};
+            std::snprintf(GridBuffer, sizeof(GridBuffer), "%d\xC2\xB3 GRID", P.GridResolution);
+            const float HudY = CanvasMin.y + 16.0f * Scale;
+            const float GridW = ImGui::CalcTextSize(GridBuffer).x * Scale + 18.0f * Scale;
+            const float FpsW = ImGui::CalcTextSize(FpsText).x * Scale + 18.0f * Scale;
+            const float HudRight = CanvasMax.x - 16.0f * Scale;
+            VpDraw->AddRectFilled(ImVec2(HudRight - GridW, HudY), ImVec2(HudRight, HudY + 25.0f * Scale), IM_COL32(18, 18, 18, 205), 14.0f * Scale);
+            VpDraw->AddText(Faces.Regular, 9.0f * Scale, ImVec2(HudRight - GridW + 9.0f * Scale, HudY + 7.0f * Scale), IM_COL32(163, 163, 163, 255), GridBuffer);
+            VpDraw->AddRectFilled(ImVec2(HudRight - GridW - FpsW - 6.0f * Scale, HudY), ImVec2(HudRight - GridW - 6.0f * Scale, HudY + 25.0f * Scale), IM_COL32(18, 18, 18, 205), 14.0f * Scale);
+            VpDraw->AddText(Faces.Regular, 9.0f * Scale, ImVec2(HudRight - GridW - FpsW + 3.0f * Scale, HudY + 7.0f * Scale), IM_COL32(163, 163, 163, 255), FpsText);
 
-                const auto Channels = FluidDynamics::EnumerateFluidDebugChannels();
-                const int  ChanIdx  = std::clamp(P.RenderChannel, 0, static_cast<int>(Channels.size()) - 1);
-                char       Line2[128]{};
-                std::snprintf(Line2, sizeof(Line2), "%s  \xC2\xB7  Bounds %.2f\xC3\x97%.2fm",
-                              Channels[ChanIdx], Session.LastImage.DynamicScale[0], Session.LastImage.DynamicScale[1]);
-                VpDraw->AddText(Faces.Regular, 11.0f, ImVec2(HudMin.x + 10.0f, HudMin.y + 26.0f), Palette.WarmAmber, Line2);
+            const char* MouseHint = "Drag to orbit   \xC2\xB7   Right-drag to pan   \xC2\xB7   Scroll to zoom";
+            const ImVec2 HintSize = ImGui::CalcTextSize(MouseHint);
+            const ImVec2 HintMin(CanvasMin.x + 18.0f * Scale, CanvasMax.y - 32.0f * Scale);
+            VpDraw->AddRectFilled(ImVec2(HintMin.x - 8.0f * Scale, HintMin.y - 4.0f * Scale),
+                                  ImVec2(HintMin.x + HintSize.x * Scale + 8.0f * Scale, HintMin.y + 22.0f * Scale), IM_COL32(18, 18, 18, 176), 12.0f * Scale);
+            VpDraw->AddText(Faces.Regular, 9.0f * Scale, HintMin, IM_COL32(137, 137, 137, 255), MouseHint);
 
-                VpDraw->AddText(Faces.Regular, 10.5f, ImVec2(HudMin.x + 10.0f, HudMin.y + 43.0f), Palette.TextMuted,
-                                "LMB: Tool  \xC2\xB7  RMB: Orbit  \xC2\xB7  MMB: Pan  \xC2\xB7  D / E: Detonate");
+            const ImVec2 GizmoCentre(CanvasMax.x - 52.0f * Scale, CanvasMax.y - 54.0f * Scale);
+            VpDraw->AddCircleFilled(GizmoCentre, 3.0f * Scale, IM_COL32(215, 215, 215, 255));
+            VpDraw->AddLine(GizmoCentre, ImVec2(GizmoCentre.x, GizmoCentre.y - 28.0f * Scale), IM_COL32(105, 208, 109, 230), 1.6f * Scale);
+            VpDraw->AddLine(GizmoCentre, ImVec2(GizmoCentre.x - 26.0f * Scale, GizmoCentre.y + 15.0f * Scale), IM_COL32(239, 83, 80, 230), 1.6f * Scale);
+            VpDraw->AddLine(GizmoCentre, ImVec2(GizmoCentre.x + 26.0f * Scale, GizmoCentre.y + 15.0f * Scale), IM_COL32(91, 140, 255, 230), 1.6f * Scale);
+            VpDraw->AddText(Faces.Medium, 9.0f * Scale, ImVec2(GizmoCentre.x - 3.0f * Scale, GizmoCentre.y - 42.0f * Scale), IM_COL32(105, 208, 109, 255), "Y");
+            VpDraw->AddText(Faces.Medium, 9.0f * Scale, ImVec2(GizmoCentre.x - 37.0f * Scale, GizmoCentre.y + 14.0f * Scale), IM_COL32(239, 83, 80, 255), "X");
+            VpDraw->AddText(Faces.Medium, 9.0f * Scale, ImVec2(GizmoCentre.x + 30.0f * Scale, GizmoCentre.y + 14.0f * Scale), IM_COL32(91, 140, 255, 255), "Z");
+
+            if (Session.DiagnosticsOpen)
+            {
+                const ImVec2 DiagMin(CanvasMax.x - 292.0f * Scale, CanvasMin.y + 54.0f * Scale);
+                const ImVec2 DiagMax(DiagMin.x + 276.0f * Scale, DiagMin.y + 146.0f * Scale);
+                VpDraw->AddRectFilled(DiagMin, DiagMax, IM_COL32(18, 18, 18, 238), 18.0f * Scale);
+                VpDraw->AddRect(DiagMin, DiagMax, IM_COL32(255, 255, 255, 22), 18.0f * Scale);
+                VpDraw->AddText(Faces.Medium, 10.0f * Scale, ImVec2(DiagMin.x + 15.0f * Scale, DiagMin.y + 13.0f * Scale), IM_COL32(196, 196, 196, 255), "LIVE DIAGNOSTICS");
+                char Diagnostics[160]{};
+                std::snprintf(Diagnostics, sizeof(Diagnostics), "Grid       %d x %d x %d\nFrame time %.2f ms\nRay steps   %u\nAdapter     %s",
+                              P.GridResolution, P.GridResolution, P.GridResolution, Session.LastImage.RefreshMilliseconds,
+                              Session.LastImage.EffectiveRaySteps, Session.LastImage.Adapter.empty() ? "Vulkan Compute" : Session.LastImage.Adapter.c_str());
+                VpDraw->AddText(Faces.Monospace, 9.0f * Scale, ImVec2(DiagMin.x + 15.0f * Scale, DiagMin.y + 35.0f * Scale), IM_COL32(142, 142, 142, 255), Diagnostics);
             }
             const float TransportY = CanvasMin.y + CanvasSize.y;
             const ImVec2 TransportMin(ColumnMin.x, TransportY);
             const ImVec2 TransportMax(ColumnMin.x + ViewportWidth, TransportY + TransportHeight);
             VpDraw->AddRectFilled(TransportMin, TransportMax, IM_COL32(22, 22, 22, 255));
-            VpDraw->AddLine(TransportMin, ImVec2(TransportMax.x, TransportMin.y), IM_COL32(255, 255, 255, 14), 1.0f);
-            auto TransportButton = [&](const char* Id, const char* Label, float X, float Width) {
-                ImGui::PushID(Id);
-                const ImVec2 Min(X, TransportY + 11.0f);
+            VpDraw->AddLine(TransportMin, ImVec2(TransportMax.x, TransportMin.y), IM_COL32(255, 255, 255, 15), 1.0f);
+
+            auto TransportButton = [&](const char* Id, const char* Label, float X, float Width, bool Primary = false) -> bool
+            {
+                const ImVec2 Min(X, TransportY + 10.0f * Scale);
                 ImGui::SetCursorScreenPos(Min);
-                const bool Pressed = ImGui::InvisibleButton("##TransportButton", ImVec2(Width, 30.0f));
-                const bool Hovered = ImGui::IsItemHovered();
-                const bool Primary = std::string_view(Label) == "Play" || std::string_view(Label) == "Pause";
-                VpDraw->AddRectFilled(Min, ImVec2(Min.x + Width, Min.y + 30.0f),
-                                      Primary ? IM_COL32(224, 224, 224, 255) : (Hovered ? IM_COL32(44, 44, 44, 255) : IM_COL32(31, 31, 31, 255)), 15.0f);
-                const ImU32 Ink = Primary ? IM_COL32(20, 20, 20, 255) : IM_COL32(216, 216, 216, 255);
-                const ImVec2 TextSize = ImGui::CalcTextSize(Label);
-                VpDraw->AddText(ImVec2(Min.x + (Width - TextSize.x) * 0.5f, Min.y + 8.0f), Ink, Label);
-                ImGui::PopID();
+                const bool Pressed = ImGui::InvisibleButton(Id, ImVec2(Width, 32.0f * Scale));
+                const bool ButtonHovered = ImGui::IsItemHovered();
+                const float Rounding = Primary ? 16.0f * Scale : 16.0f * Scale;
+                const ImU32 Fill = Primary ? IM_COL32(224, 224, 224, 255) : ButtonHovered ? IM_COL32(42, 42, 42, 255) : IM_COL32(31, 31, 31, 255);
+                VpDraw->AddRectFilled(Min, ImVec2(Min.x + Width, Min.y + 32.0f * Scale), Fill, Rounding);
+                if (Primary && (std::string_view(Label) == "play" || std::string_view(Label) == "pause"))
+                {
+                    const ImVec2 C(Min.x + Width * 0.5f, Min.y + 16.0f * Scale);
+                    if (P.Paused)
+                    {
+                        const ImVec2 Triangle[3] = { { C.x - 4.0f * Scale, C.y - 6.0f * Scale }, { C.x - 4.0f * Scale, C.y + 6.0f * Scale }, { C.x + 6.0f * Scale, C.y } };
+                        VpDraw->AddConvexPolyFilled(Triangle, 3, IM_COL32(18, 18, 18, 255));
+                    }
+                    else
+                    {
+                        VpDraw->AddRectFilled(ImVec2(C.x - 5.0f * Scale, C.y - 6.0f * Scale), ImVec2(C.x - 2.0f * Scale, C.y + 6.0f * Scale), IM_COL32(18, 18, 18, 255), 1.0f * Scale);
+                        VpDraw->AddRectFilled(ImVec2(C.x + 2.0f * Scale, C.y - 6.0f * Scale), ImVec2(C.x + 5.0f * Scale, C.y + 6.0f * Scale), IM_COL32(18, 18, 18, 255), 1.0f * Scale);
+                    }
+                }
+                else
+                {
+                    const ImVec2 TextSize = ImGui::CalcTextSize(Label);
+                    VpDraw->AddText(Faces.Regular, 10.0f * Scale,
+                                    ImVec2(Min.x + (Width - TextSize.x * Scale) * 0.5f, Min.y + 10.0f * Scale),
+                                    IM_COL32(204, 204, 204, 255), Label);
+                }
                 return Pressed;
             };
-            float TransportX = ColumnMin.x + 12.0f;
-            (void)TransportButton("Rewind", "|<", TransportX, 30.0f); TransportX += 34.0f;
-            if (TransportButton("TogglePlayback", P.Paused ? "Play" : "Pause", TransportX, 54.0f)) P.Paused = !P.Paused;
-            TransportX += 58.0f;
-            if (TransportButton("StepSimulation", ">|", TransportX, 30.0f)) ActiveDoc.StepOncePending = true;
-            TransportX += 42.0f;
+
+            float TransportX = ColumnMin.x + 14.0f * Scale;
+            if (TransportButton("##FluidRestart", "R", TransportX, 30.0f * Scale))
+            {
+                ActiveDoc.RestartPending = true;
+                Session.StatusNotice = "Restarted live simulation";
+            }
+            TransportX += 36.0f * Scale;
+            if (TransportButton("##FluidPlayback", P.Paused ? "play" : "pause", TransportX, 34.0f * Scale, true))
+                P.Paused = !P.Paused;
+            TransportX += 40.0f * Scale;
+            if (TransportButton("##FluidStep", "S", TransportX, 30.0f * Scale))
+            {
+                P.Paused = true;
+                ActiveDoc.StepOncePending = true;
+            }
+            TransportX += 44.0f * Scale;
             char ClockText[32]{};
             std::snprintf(ClockText, sizeof(ClockText), "%02d:%02d.%03d", static_cast<int>(Session.LastImage.ElapsedSeconds) / 60,
                           static_cast<int>(Session.LastImage.ElapsedSeconds) % 60,
                           static_cast<int>((Session.LastImage.ElapsedSeconds - std::floor(Session.LastImage.ElapsedSeconds)) * 1000.0f));
-            VpDraw->AddText(Faces.Monospace, 10.5f, ImVec2(TransportX, TransportY + 20.0f), IM_COL32(207, 207, 207, 255), ClockText);
-            VpDraw->AddText(Faces.Regular, 10.5f, ImVec2(ColumnMin.x + ViewportWidth - 235.0f, TransportY + 20.0f), IM_COL32(136, 136, 136, 255), "1.0x   \xE2\x80\xA2   Live / uncached");
-            if (TransportButton("Detonate", "Trigger D", ColumnMin.x + ViewportWidth - 108.0f, 96.0f))
+            VpDraw->AddText(Faces.Monospace, 10.0f * Scale, ImVec2(TransportX, TransportY + 20.0f * Scale), IM_COL32(191, 191, 191, 255), ClockText);
+
+            const char* SpeedLabels[] = { "0.25x", "0.5x", "1.0x", "2.0x" };
+            const float SpeedValues[] = { 0.25f, 0.5f, 1.0f, 2.0f };
+            int SpeedIndex = 2;
+            for (int Index = 0; Index < 4; ++Index) if (std::fabs(Session.PlaybackSpeed - SpeedValues[Index]) < 1.0e-4f) SpeedIndex = Index;
+            const float SpeedX = ColumnMin.x + 264.0f * Scale;
+            ImGui::SetCursorScreenPos(ImVec2(SpeedX, TransportY + 10.0f * Scale));
+            ImGui::SetNextItemWidth(75.0f * Scale);
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8.0f * Scale, 6.0f * Scale));
+            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 15.0f * Scale);
+            ImGui::PushStyleColor(ImGuiCol_FrameBg, IM_COL32(31, 31, 31, 255));
+            ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, IM_COL32(42, 42, 42, 255));
+            ImGui::PushStyleColor(ImGuiCol_Border, IM_COL32(255, 255, 255, 14));
+            if (DropdownControlSurface::BeginSelection("##FluidSimulationSpeed", SpeedLabels[SpeedIndex], Scale))
+            {
+                for (int Index = 0; Index < 4; ++Index)
+                {
+                    if (!DropdownControlSurface::Option(SpeedLabels[Index], Index == SpeedIndex, Scale)) continue;
+                    SpeedIndex = Index;
+                    Session.PlaybackSpeed = SpeedValues[Index];
+                    P.TimeScale = SpeedValues[Index];
+                }
+                DropdownControlSurface::EndSelection();
+            }
+            ImGui::PopStyleColor(3);
+            ImGui::PopStyleVar(2);
+            const float LiveX = SpeedX + 90.0f * Scale;
+            VpDraw->AddCircleFilled(ImVec2(LiveX + 3.0f * Scale, TransportY + 26.0f * Scale), 3.0f * Scale, IM_COL32(52, 199, 89, 255));
+            VpDraw->AddText(Faces.Regular, 9.0f * Scale, ImVec2(LiveX + 12.0f * Scale, TransportY + 21.0f * Scale), IM_COL32(135, 135, 135, 255), "Live / uncached");
+
+            const char* BurstNames[] = { "Single burst", "Shrapnel", "Cluster salvo", "Colliding waves", "Mushroom cloud" };
+            int BurstIndex = std::clamp(static_cast<int>(ActiveDoc.BurstPattern), 0, 4);
+            const float TriggerWidth = 92.0f * Scale;
+            const float TriggerX = ColumnMin.x + ViewportWidth - 14.0f * Scale - TriggerWidth;
+            const float BurstSelectWidth = std::min(150.0f * Scale, std::max(92.0f * Scale, TriggerX - (LiveX + 132.0f * Scale)));
+            const float BurstSelectX = TriggerX - 8.0f * Scale - BurstSelectWidth;
+            ImGui::SetCursorScreenPos(ImVec2(BurstSelectX, TransportY + 10.0f * Scale));
+            ImGui::SetNextItemWidth(BurstSelectWidth);
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8.0f * Scale, 6.0f * Scale));
+            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 15.0f * Scale);
+            ImGui::PushStyleColor(ImGuiCol_FrameBg, IM_COL32(31, 31, 31, 255));
+            ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, IM_COL32(42, 42, 42, 255));
+            ImGui::PushStyleColor(ImGuiCol_Border, IM_COL32(255, 255, 255, 14));
+            if (DropdownControlSurface::BeginSelection("##FluidBurstKind", BurstNames[BurstIndex], Scale))
+            {
+                for (int Index = 0; Index < 5; ++Index)
+                {
+                    if (!DropdownControlSurface::Option(BurstNames[Index], Index == BurstIndex, Scale)) continue;
+                    BurstIndex = Index;
+                    ActiveDoc.BurstPattern = static_cast<FluidDynamics::FluidBurstPattern>(Index);
+                    Config.BurstPattern = static_cast<uint32_t>(Index);
+                    Config.AdvanceRevision();
+                }
+                DropdownControlSurface::EndSelection();
+            }
+            ImGui::PopStyleColor(3);
+            ImGui::PopStyleVar(2);
+            if (TransportButton("##FluidTriggerBurst", "Trigger  D", TriggerX, TriggerWidth))
             {
                 EnqueueBurstPattern(ActiveDoc, ActiveDoc.BurstPattern);
                 ++Config.BurstGeneration;
                 Config.AdvanceRevision();
+                Session.StatusNotice = "Triggered " + std::string(BurstNames[BurstIndex]);
             }
 
             const float TimelineY = TransportY + TransportHeight;
             const ImVec2 TimelineMin(ColumnMin.x, TimelineY);
             const ImVec2 TimelineMax(ColumnMin.x + ViewportWidth, TimelineY + TimelineHeight);
             VpDraw->AddRectFilled(TimelineMin, TimelineMax, IM_COL32(17, 17, 17, 255));
-            VpDraw->AddText(Faces.Medium, 9.0f, ImVec2(TimelineMin.x + 14.0f, TimelineMin.y + 8.0f), IM_COL32(136, 136, 136, 255), "SIMULATION");
+            VpDraw->AddLine(TimelineMin, ImVec2(TimelineMax.x, TimelineMin.y), IM_COL32(255, 255, 255, 13));
+            VpDraw->AddText(Faces.Medium, 9.0f * Scale, ImVec2(TimelineMin.x + 16.0f * Scale, TimelineMin.y + 10.0f * Scale), IM_COL32(135, 135, 135, 255), "SIMULATION");
             char FrameText[32]{};
             std::snprintf(FrameText, sizeof(FrameText), "FRAME %04llu", static_cast<unsigned long long>(Session.LastImage.StepCount));
-            VpDraw->AddText(Faces.Monospace, 9.0f, ImVec2(TimelineMax.x - 90.0f, TimelineMin.y + 8.0f), IM_COL32(136, 136, 136, 255), FrameText);
-            const float RulerX = TimelineMin.x + 16.0f;
-            const float RulerW = std::max(40.0f, ViewportWidth - 32.0f);
-            VpDraw->AddLine(ImVec2(RulerX, TimelineMin.y + 38.0f), ImVec2(RulerX + RulerW, TimelineMin.y + 38.0f), IM_COL32(78, 78, 78, 255), 1.0f);
+            const ImVec2 FrameSize = ImGui::CalcTextSize(FrameText);
+            VpDraw->AddText(Faces.Monospace, 9.0f * Scale, ImVec2(TimelineMax.x - FrameSize.x * Scale - 16.0f * Scale, TimelineMin.y + 10.0f * Scale), IM_COL32(121, 121, 121, 255), FrameText);
+            const float RulerX = TimelineMin.x + 18.0f * Scale;
+            const float RulerW = std::max(50.0f * Scale, ViewportWidth - 36.0f * Scale);
+            const float RulerY = TimelineMin.y + 39.0f * Scale;
+            VpDraw->AddLine(ImVec2(RulerX, RulerY), ImVec2(RulerX + RulerW, RulerY), IM_COL32(75, 75, 75, 255), 1.0f * Scale);
             for (int Tick = 0; Tick <= 6; ++Tick)
             {
                 const float TickX = RulerX + RulerW * (static_cast<float>(Tick) / 6.0f);
-                VpDraw->AddLine(ImVec2(TickX, TimelineMin.y + 34.0f), ImVec2(TickX, TimelineMin.y + 42.0f), IM_COL32(102, 102, 102, 255), 1.0f);
+                VpDraw->AddLine(ImVec2(TickX, RulerY - 4.0f * Scale), ImVec2(TickX, RulerY + 4.0f * Scale), IM_COL32(104, 104, 104, 255), 1.0f * Scale);
                 char Mark[12]{};
                 std::snprintf(Mark, sizeof(Mark), "%ds", Tick * 5);
-                VpDraw->AddText(Faces.Regular, 8.5f, ImVec2(TickX - 5.0f, TimelineMin.y + 44.0f), IM_COL32(112, 112, 112, 255), Mark);
+                const ImVec2 MarkSize = ImGui::CalcTextSize(Mark);
+                VpDraw->AddText(Faces.Regular, 8.5f * Scale, ImVec2(TickX - MarkSize.x * 0.5f * Scale, TimelineMin.y + 47.0f * Scale), IM_COL32(114, 114, 114, 255), Mark);
             }
-            VpDraw->AddRectFilled(ImVec2(RulerX, TimelineMin.y + 60.0f), ImVec2(RulerX + RulerW, TimelineMin.y + 72.0f), IM_COL32(35, 35, 35, 255), 6.0f);
-            VpDraw->AddRectFilled(ImVec2(RulerX, TimelineMin.y + 60.0f), ImVec2(RulerX + std::min(180.0f, RulerW), TimelineMin.y + 72.0f), IM_COL32(67, 67, 67, 255), 6.0f);
+            const float TrackY = TimelineMin.y + 67.0f * Scale;
+            VpDraw->AddRectFilled(ImVec2(RulerX, TrackY), ImVec2(RulerX + RulerW, TrackY + 13.0f * Scale), IM_COL32(36, 36, 36, 255), 6.0f * Scale);
+            const float TrackFill = Session.LastImage.ElapsedSeconds > 0.0f
+                                        ? std::fmod(Session.LastImage.ElapsedSeconds, 30.0f) / 30.0f * RulerW : 0.0f;
+            VpDraw->AddRectFilled(ImVec2(RulerX, TrackY), ImVec2(RulerX + std::max(2.0f * Scale, TrackFill), TrackY + 13.0f * Scale), IM_COL32(61, 61, 61, 255), 6.0f * Scale);
+            VpDraw->AddText(Faces.Regular, 8.0f * Scale, ImVec2(RulerX + 8.0f * Scale, TrackY + 2.0f * Scale), IM_COL32(159, 159, 159, 255), P.SourceEnabled ? "Continuous emission" : "Source disabled");
+            const float PlayheadX = std::clamp(RulerX + TrackFill, RulerX, RulerX + RulerW);
+            VpDraw->AddLine(ImVec2(PlayheadX, RulerY - 5.0f * Scale), ImVec2(PlayheadX, TrackY + 16.0f * Scale), IM_COL32(218, 218, 218, 230), 1.0f * Scale);
+            VpDraw->AddCircleFilled(ImVec2(PlayheadX, RulerY - 5.0f * Scale), 3.0f * Scale, IM_COL32(218, 218, 218, 255));
         }
         ImGui::EndChild();
 
         // --- RIGHT COLUMN: 3-TAB INSPECTOR (Source | Simulation | Rendering) ---
-        if (Session.ShowInspector)
+        if (ShowInspector)
         {
             ImGui::SameLine(0.0f, 10.0f);
-            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12.0f, 8.0f));
-            ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(6.0f, 5.0f));
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(22.0f * Scale, 15.0f * Scale));
+            ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(6.0f * Scale, 5.0f * Scale));
             if (ImGui::BeginChild("##FluidInspectorColumn", ImVec2(InspectorWidth, BodyHeight), ImGuiChildFlags_None,
                                   ImGuiWindowFlags_NoBackground))
             {
@@ -2062,8 +2437,8 @@ void FluidPlumeEditor::ConstructInterface(RecordToken Token, FluidPlumeInspector
                 ColDraw->AddRectFilled(ColMin, ImVec2(ColMin.x + InspectorWidth, ColMin.y + BodyHeight), IM_COL32(18, 18, 18, 255), 22.0f);
                 ColDraw->AddRect(ColMin, ImVec2(ColMin.x + InspectorWidth, ColMin.y + BodyHeight), IM_COL32(255, 255, 255, 13), 22.0f);
                 const ImVec2 InspectorHeading = ImGui::GetCursorScreenPos();
-                ColDraw->AddText(Faces.Medium, 16.0f, InspectorHeading, IM_COL32(143, 143, 143, 255), "Inspector");
-                ImGui::SetCursorScreenPos(ImVec2(InspectorHeading.x + InspectorWidth - 78.0f, InspectorHeading.y - 2.0f));
+                ColDraw->AddText(Faces.Light ? Faces.Light : Faces.Regular, 16.0f * Scale, InspectorHeading, IM_COL32(224, 224, 224, 255), "Inspector");
+                ImGui::SetCursorScreenPos(ImVec2(InspectorHeading.x + InspectorWidth - 102.0f, InspectorHeading.y - 2.0f));
                 ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 12.0f);
                 ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
                 ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(25, 25, 25, 255));
@@ -2101,13 +2476,23 @@ void FluidPlumeEditor::ConstructInterface(RecordToken Token, FluidPlumeInspector
                 ImGui::SetCursorScreenPos(ImVec2(ObjectMin.x, ObjectMax.y + 12.0f));
 
                 FluidInspectorTabStrip(Faces, Session.ActiveInspector);
-                ColDraw->ChannelsSplit(2);
-                ColDraw->ChannelsSetCurrent(1);
-
                 FluidSectionCardBounds SectionCards{};
                 float SectionCardTop = -1.0f;
                 bool CurrentGroupOpen = false;
                 bool Edited = false;
+                ColDraw->ChannelsSplit(2);
+                ColDraw->ChannelsSetCurrent(1);
+                const float PropertyStartY = ImGui::GetCursorScreenPos().y;
+                const float RemoveReserve = Session.SelectedNode == OutlinerNodeId::Domain ? 0.0f : 48.0f * Scale;
+                const float PropertiesHeight = std::max(100.0f * Scale,
+                    ColMin.y + BodyHeight - PropertyStartY - RemoveReserve - 34.0f * Scale - 5.0f * Scale);
+                ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+                ImGui::SetCursorScreenPos(ImVec2(ColMin.x + 22.0f * Scale, PropertyStartY));
+                const bool PropertyBodyOpen = ImGui::BeginChild("##FluidInspectorProperties",
+                    ImVec2(std::max(100.0f * Scale, InspectorWidth - 44.0f * Scale), PropertiesHeight),
+                    ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoScrollbar);
+                if (PropertyBodyOpen)
+                {
 
                 auto DrawColliderGroup = [&](const char* GroupId, bool DefaultOpen)
                 {
@@ -2291,15 +2676,48 @@ void FluidPlumeEditor::ConstructInterface(RecordToken Token, FluidPlumeInspector
                     ActiveDoc.Dirty = true;
                     SyncDocumentToRecord(ActiveDoc, Token, Config, false);
                 }
+                }
+                ImGui::EndChild();
+                ImGui::PopStyleVar();
+                if (Session.SelectedNode != OutlinerNodeId::Domain)
+                {
+                    const ImVec2 RemoveMin(ColMin.x + 18.0f * Scale, ColMin.y + BodyHeight - 76.0f * Scale);
+                    ImGui::SetCursorScreenPos(RemoveMin);
+                    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 18.0f * Scale);
+                    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10.0f * Scale, 8.0f * Scale));
+                    ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(255, 255, 255, 7));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(255, 255, 255, 14));
+                    ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(180, 180, 180, 255));
+                    const bool RemoveObject = ImGui::Button("Remove object##remove-object", ImVec2(InspectorWidth - 36.0f * Scale, 34.0f * Scale));
+                    ImGui::PopStyleColor(3);
+                    ImGui::PopStyleVar(2);
+                    if (RemoveObject)
+                    {
+                        PushUndoSnapshot(ActiveDoc);
+                        if (Session.SelectedNode == OutlinerNodeId::Source) P.SourceEnabled = false;
+                        else if (Session.SelectedNode == OutlinerNodeId::Collider) P.ObstacleCategory = 0;
+                        else if (Session.SelectedNode == OutlinerNodeId::Sun) P.SunIntensity = 0.0f;
+                        Session.SelectedNode = OutlinerNodeId::Domain;
+                        ActiveDoc.Dirty = true;
+                        SyncDocumentToRecord(ActiveDoc, Token, Config, false);
+                    }
+                }
             ColDraw->ChannelsSetCurrent(0);
             for (const auto& [Top, Bottom] : SectionCards)
             {
                 if (Bottom <= Top) continue;
                 const ImVec2 CardMin(ColMin.x + 18.0f, Top);
                 const ImVec2 CardMax(ColMin.x + InspectorWidth - 18.0f, Bottom);
-                ColDraw->AddRectFilled(CardMin, CardMax, IM_COL32(35, 35, 30, 255), 20.0f);
-                ColDraw->AddRect(CardMin, CardMax, IM_COL32(232, 199, 139, 12), 20.0f);
+                ColDraw->AddRectFilled(CardMin, CardMax, IM_COL32(26, 26, 26, 255), 20.0f);
+                ColDraw->AddRect(CardMin, CardMax, IM_COL32(255, 255, 255, 13), 20.0f);
             }
+            const ImVec2 InspectorFooterMin(ColMin.x, ColMin.y + BodyHeight - 31.0f * Scale);
+            ColDraw->AddRectFilled(InspectorFooterMin, ImVec2(ColMin.x + InspectorWidth, ColMin.y + BodyHeight), IM_COL32(18, 18, 18, 255));
+            ColDraw->AddLine(InspectorFooterMin, ImVec2(ColMin.x + InspectorWidth, InspectorFooterMin.y), IM_COL32(255, 255, 255, 12));
+            PanelChrome::DrawGlyph("M10 13a5 5 0 0 0 7.1 0l2-2a5 5 0 0 0-7.1-7.1L11 5m3 6a5 5 0 0 0-7.1 0l-2 2A5 5 0 0 0 9 20.1L13 16", ImVec2(ColMin.x + 19.0f * Scale, InspectorFooterMin.y + 10.0f * Scale),
+                                   12.0f * Scale, IM_COL32(112, 112, 112, 255), 1.4f);
+            ColDraw->AddText(Faces.Regular, 9.0f * Scale, ImVec2(ColMin.x + 38.0f * Scale, InspectorFooterMin.y + 11.0f * Scale),
+                             IM_COL32(115, 115, 115, 255), "Changes apply while rendering");
             ColDraw->ChannelsSetCurrent(1);
             ColDraw->ChannelsMerge();
             }
@@ -2307,9 +2725,13 @@ void FluidPlumeEditor::ConstructInterface(RecordToken Token, FluidPlumeInspector
             ImGui::PopStyleVar(2);
         }
 
+        }
+
         //----------------------------------------------------------------------------------------------------------------
         // 4. STATUS BAR
         //----------------------------------------------------------------------------------------------------------------
+        if (Session.ShowStatusBar)
+            ImGui::SetCursorScreenPos(ImVec2(Position.x, BodyMin.y + BodySize.y - StatusHeight));
         if (Session.ShowStatusBar)
         {
             if (ImGui::BeginChild("##FluidStatusBar", ImVec2(TotalWidth, StatusHeight), ImGuiChildFlags_None,
@@ -2348,49 +2770,156 @@ void FluidPlumeEditor::ConstructInterface(RecordToken Token, FluidPlumeInspector
     //--------------------------------------------------------------------------------------------------------------------
     // 5. MODAL DIALOGS: FLIPBOOK SPRITE SHEET BAKER & .FLUIDSPACE / .GASSCENE.TOML FILE IMPORT
     //--------------------------------------------------------------------------------------------------------------------
-    if (Session.Flipbook.DialogOpen)
+    if (Session.ShowShortcuts)
+        ImGui::OpenPopup("Fluid editor shortcuts");
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 20.0f * Scale);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(24.0f * Scale, 22.0f * Scale));
+    ImGui::PushStyleColor(ImGuiCol_PopupBg, IM_COL32(26, 26, 26, 255));
+    ImGui::PushStyleColor(ImGuiCol_Border, IM_COL32(255, 255, 255, 20));
+    if (ImGui::BeginPopupModal("Fluid editor shortcuts", &Session.ShowShortcuts,
+                               ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings))
     {
-        ImGui::OpenPopup("Bake Flipbook Sprite Sheet");
+        if (!Session.ShowShortcuts) ImGui::CloseCurrentPopup();
+        ImGui::TextColored(ImVec4(0.88f, 0.88f, 0.88f, 1.0f), "Keyboard shortcuts");
+        ImGui::SameLine();
+        if (ImGui::SmallButton("x##CloseShortcuts"))
+        {
+            Session.ShowShortcuts = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::Separator();
+        const char* ShortcutNames[] = { "Play / pause", "Single step", "Trigger selected burst", "Restart simulation",
+                                        "Focus volume", "Orbit / brush / place burst", "Domain bounds", "Turntable", "Save scene" };
+        const char* ShortcutKeys[] = { "Space", "S", "D", "R", "F", "1 / 2 / 3", "B", "T", "Ctrl S" };
+        for (int Index = 0; Index < 9; ++Index)
+        {
+            ImGui::TextDisabled("%s", ShortcutNames[Index]);
+            ImGui::SameLine(265.0f * Scale);
+            ImGui::Text("%s", ShortcutKeys[Index]);
+        }
+        ImGui::Separator();
+        ImGui::TextWrapped("Scene files save authoring settings and camera position, not simulation fields. The timeline reports live simulation time; it is not a seekable cache.");
+        ImGui::Dummy(ImVec2(1.0f, 4.0f * Scale));
+        if (ImGui::Button("Done", ImVec2(110.0f * Scale, 32.0f * Scale)))
+        {
+            Session.ShowShortcuts = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
     }
-    if (ImGui::BeginPopupModal("Bake Flipbook Sprite Sheet", &Session.Flipbook.DialogOpen, ImGuiWindowFlags_AlwaysAutoResize))
+    ImGui::PopStyleColor(2);
+    ImGui::PopStyleVar(2);
+
+    if (Session.Flipbook.DialogOpen)
+        ImGui::OpenPopup("Bake flipbook");
+    ImGui::SetNextWindowSize(ImVec2(620.0f * Scale, 0.0f), ImGuiCond_Appearing);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 20.0f * Scale);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(24.0f * Scale, 22.0f * Scale));
+    ImGui::PushStyleColor(ImGuiCol_PopupBg, IM_COL32(26, 26, 26, 255));
+    ImGui::PushStyleColor(ImGuiCol_Border, IM_COL32(255, 255, 255, 20));
+    if (ImGui::BeginPopupModal("Bake flipbook", &Session.Flipbook.DialogOpen,
+                               ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings))
     {
-        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8.0f, 6.0f));
-        ImGui::TextUnformatted("Export premultiplied-alpha RGBA sprite sheet from 3D volumetric solver:");
-        (void)SliderIntRow(Palette, Faces, "##FlipColumns", "Columns", Session.Flipbook.Columns, 2, 8);
-        (void)SliderIntRow(Palette, Faces, "##FlipRows", "Rows", Session.Flipbook.Rows, 2, 8);
-        (void)SliderIntRow(Palette, Faces, "##FlipWidth", "Tile Width (px)", Session.Flipbook.FrameWidth, 64, 512);
-        (void)SliderIntRow(Palette, Faces, "##FlipHeight", "Tile Height (px)", Session.Flipbook.FrameHeight, 64, 512);
-        (void)FluidSliderRow(Palette, Faces, "##FlipDuration", "Total Duration", Session.Flipbook.DurationSec, 0.4f, 6.0f, "%.2f s");
-        FluidSwitch("Clear & Detonate Blast on Frame 0", &Session.Flipbook.DetonateStart);
+        if (!Session.Flipbook.DialogOpen) ImGui::CloseCurrentPopup();
+        const ImVec2 DialogOrigin = ImGui::GetCursorScreenPos();
+        ImDrawList* DialogDraw = ImGui::GetWindowDrawList();
+        DialogDraw->AddText(Faces.Light ? Faces.Light : Faces.Regular, 24.0f * Scale, DialogOrigin,
+                            IM_COL32(238, 238, 238, 255), "Bake flipbook");
+        ImGui::SameLine(0.0f, 16.0f * Scale);
+        if (ImGui::SmallButton("x##CloseFlipbook"))
+        {
+            Session.Flipbook.DialogOpen = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SetCursorScreenPos(ImVec2(DialogOrigin.x, DialogOrigin.y + 36.0f * Scale));
+        ImGui::TextColored(ImVec4(0.72f, 0.72f, 0.72f, 1.0f), "%s", Document.Scene.Name.c_str());
+        ImGui::TextWrapped("Bake a rendered PNG sequence from these scene settings. The live scene remains available while frames are exported.");
+        ImGui::Dummy(ImVec2(1.0f, 8.0f * Scale));
+
+        static const char* const FrameOptions[] = { "4", "16", "32", "64" };
+        static const int FrameCounts[] = { 4, 16, 32, 64 };
+        int FrameIndex = 1;
+        for (int Index = 0; Index < 4; ++Index) if (Session.Flipbook.FrameCount == FrameCounts[Index]) FrameIndex = Index;
+        static const char* const SizeOptions[] = { "64 x 64", "128 x 128", "256 x 256", "512 x 512" };
+        static const int TileSizes[] = { 64, 128, 256, 512 };
+        int TileIndex = 2;
+        for (int Index = 0; Index < 4; ++Index) if (Session.Flipbook.FrameWidth == TileSizes[Index]) TileIndex = Index;
+        static const char* const RateOptions[] = { "12 fps", "24 fps", "30 fps", "60 fps" };
+        static const int FrameRates[] = { 12, 24, 30, 60 };
+        int RateIndex = 1;
+        for (int Index = 0; Index < 4; ++Index) if (Session.Flipbook.FramesPerSecond == FrameRates[Index]) RateIndex = Index;
+
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 16.0f * Scale);
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10.0f * Scale, 8.0f * Scale));
+        ImGui::PushStyleColor(ImGuiCol_FrameBg, IM_COL32(9, 9, 9, 255));
+        ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, IM_COL32(25, 25, 25, 255));
+        ImGui::PushStyleColor(ImGuiCol_Border, IM_COL32(255, 255, 255, 17));
+        const float HalfWidth = 265.0f * Scale;
+        ImGui::SetNextItemWidth(HalfWidth);
+        if (ImGui::Combo("Frames", &FrameIndex, FrameOptions, 4)) Session.Flipbook.FrameCount = FrameCounts[FrameIndex];
+        ImGui::SameLine(0.0f, 14.0f * Scale);
+        ImGui::SetNextItemWidth(HalfWidth);
+        if (ImGui::Combo("Tile resolution", &TileIndex, SizeOptions, 4))
+        {
+            Session.Flipbook.FrameWidth = TileSizes[TileIndex];
+            Session.Flipbook.FrameHeight = TileSizes[TileIndex];
+        }
+        ImGui::SetNextItemWidth(HalfWidth);
+        if (ImGui::Combo("Frame rate", &RateIndex, RateOptions, 4)) Session.Flipbook.FramesPerSecond = FrameRates[RateIndex];
+        ImGui::SameLine(0.0f, 14.0f * Scale);
+        ImGui::SetNextItemWidth(HalfWidth);
         ImGui::InputText("Output PNG", Session.Flipbook.OutputPath, sizeof(Session.Flipbook.OutputPath));
+        ImGui::PopStyleColor(3);
+        ImGui::PopStyleVar(2);
+
+        (void)FluidSliderRow(Palette, Faces, "##FlipWarmup", "Warm-up before capture", Session.Flipbook.WarmupSeconds, 0.0f, 3.0f, "%.1f s");
+        (void)FluidSwitch("Transparent background", &Session.Flipbook.Transparent);
+        (void)FluidSwitch("Trigger selected burst on first frame", &Session.Flipbook.DetonateStart);
+        ImGui::TextDisabled("Exports a sprite-sheet PNG and matching JSON metadata.");
 
         if (Session.Flipbook.Recording)
         {
             const int Total = Session.Flipbook.Columns * Session.Flipbook.Rows;
             ImGui::ProgressBar(static_cast<float>(Session.Flipbook.Captured) / static_cast<float>(std::max(1, Total)),
-                               ImVec2(320.0f, 20.0f));
+                               ImVec2(540.0f * Scale, 6.0f * Scale), "");
+            ImGui::TextDisabled("Rendering frame %d of %d...", Session.Flipbook.Captured, Total);
         }
-        else if (ImGui::Button("Start Flipbook Bake", ImVec2(170.0f, 28.0f)))
+        else
         {
-            const size_t SheetPixels = static_cast<size_t>(Session.Flipbook.Columns * Session.Flipbook.FrameWidth) *
-                                       static_cast<size_t>(Session.Flipbook.Rows * Session.Flipbook.FrameHeight) * 4u;
-            Session.Flipbook.SheetRgba.assign(SheetPixels, 0u);
-            Session.Flipbook.Captured  = 0;
-            Session.Flipbook.Recording = true;
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Close", ImVec2(90.0f, 28.0f)))
-        {
-            Session.Flipbook.DialogOpen = false;
-            ImGui::CloseCurrentPopup();
+            if (ImGui::Button("Bake PNG + JSON", ImVec2(170.0f * Scale, 36.0f * Scale)))
+            {
+                Session.Flipbook.Columns = Session.Flipbook.FrameCount == 4 ? 2 : Session.Flipbook.FrameCount == 32 ? 8 :
+                                           Session.Flipbook.FrameCount == 64 ? 8 : 4;
+                Session.Flipbook.Rows = Session.Flipbook.FrameCount / Session.Flipbook.Columns;
+                Session.Flipbook.FrameHeight = Session.Flipbook.FrameWidth;
+                Session.Flipbook.DurationSec = static_cast<float>(Session.Flipbook.FrameCount) /
+                                               static_cast<float>(std::max(1, Session.Flipbook.FramesPerSecond));
+                const size_t SheetPixels = static_cast<size_t>(Session.Flipbook.Columns * Session.Flipbook.FrameWidth) *
+                                           static_cast<size_t>(Session.Flipbook.Rows * Session.Flipbook.FrameHeight) * 4u;
+                Session.Flipbook.SheetRgba.assign(SheetPixels, 0u);
+                Session.Flipbook.Captured = 0;
+                Session.Flipbook.RestartIssued = false;
+                Session.Flipbook.BurstIssued = false;
+                Session.Flipbook.WarmupRemaining = Session.Flipbook.WarmupSeconds;
+                Session.Flipbook.Recording = true;
+                Session.Flipbook.LastMessage.clear();
+            }
+            ImGui::SameLine(0.0f, 10.0f * Scale);
+            if (ImGui::Button("Cancel##CloseFlipbook", ImVec2(100.0f * Scale, 36.0f * Scale)))
+            {
+                Session.Flipbook.DialogOpen = false;
+                ImGui::CloseCurrentPopup();
+            }
         }
         if (!Session.Flipbook.LastMessage.empty())
         {
+            ImGui::Separator();
             ImGui::TextWrapped("%s", Session.Flipbook.LastMessage.c_str());
         }
-        ImGui::PopStyleVar();
         ImGui::EndPopup();
     }
+    ImGui::PopStyleColor(2);
+    ImGui::PopStyleVar(2);
 
     if (Session.ShowImportModal)
     {

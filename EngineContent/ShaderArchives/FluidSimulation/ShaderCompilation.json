@@ -22,7 +22,7 @@
     },
     {
       "file": "FluidRaymarch.RaymarchFragment.spv",
-      "spirv_sha256": "c335dd8e61a8789612f5c9934331a2c72a13222146389b35b826776c4db6f6f0"
+      "spirv_sha256": "b3a8dda7b543ff47c159ebff175f3636c54a1ea8ac5c96c63a25235331c05030"
     },
     {
       "file": "FluidRaymarch.RaymarchVertex.spv",
@@ -30,7 +30,7 @@
     },
     {
       "file": "FluidSimulation.AdvectFields.spv",
-      "spirv_sha256": "b0bd5f7219e6ebbec244c5cd6b723a2df6efe25a899df742e82e5e2b82fffdcd"
+      "spirv_sha256": "18d1e2ad8717e569680926c767bced88814b5f59c17d586a02dbf04172d9d757"
     },
     {
       "file": "FluidSimulation.EvaluateCurl.spv",
@@ -42,7 +42,7 @@
     },
     {
       "file": "FluidSimulation.InjectSources.spv",
-      "spirv_sha256": "cc0cc7938cd32851e2d3205b4b02245a49077b7659a18365765cd021f63af747"
+      "spirv_sha256": "0cf57781775e3c0067ea35e5372e6e0f30ac24c6d6a00abbfc1c22634635fadd"
     },
     {
       "file": "FluidSimulation.IntegrateForces.spv",
@@ -60,7 +60,7 @@
   "sources": [
     {
       "file": "Frontier/Engine/Shaders/FluidSimulation/FluidLayouts.slang",
-      "sha256": "231ea27e8bd1f6fcfcc1ca9a7fd30b57fb007179cd34da89c8183e86437a7df3"
+      "sha256": "8784d058bed1854d96624415291f24519a24b8b3a2af60df9a41e1827a729341"
     },
     {
       "file": "Frontier/Engine/Shaders/FluidSimulation/FluidOverlayRasterization.slang",
@@ -68,11 +68,11 @@
     },
     {
       "file": "Frontier/Engine/Shaders/FluidSimulation/FluidRaymarch.slang",
-      "sha256": "4d1308ad956f07a8eee7730eceb4c9e147bc887c7a8a324ec29956fdf208a3ff"
+      "sha256": "d6186ee95776956e1c2c66524a0646f9f1079b86633e85f13304e5ed73c0c4da"
     },
     {
       "file": "Frontier/Engine/Shaders/FluidSimulation/FluidSimulation.slang",
-      "sha256": "9f281b084781390c8892270947d3c34452544cfd833c4153297d084339e57596"
+      "sha256": "a38f99afe94427628b373ad1a1e24ba5b4342c6c3969ef6039067c3e9cd39b55"
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/IntrinsicParity.slang",
