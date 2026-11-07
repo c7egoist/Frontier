@@ -76,6 +76,8 @@ void EncodeVehicleConfiguration(const VehicleConfiguration& Configuration, toml:
     OutTable.insert_or_assign("possessed", Configuration.Possessed);
     OutTable.insert_or_assign("chase_camera", Configuration.ChaseCamera);
     OutTable.insert_or_assign("threaded_physics", Configuration.ThreadedPhysics);
+    OutTable.insert_or_assign("equilibrium_placement", Configuration.EquilibriumPlacement);
+    OutTable.insert_or_assign("engage_brakes_on_placement", Configuration.EngageBrakesOnPlacement);
     OutTable.insert_or_assign("physics_step_hz", Rounded(Configuration.PhysicsStepHz));
     OutTable.insert_or_assign("collision_steps", static_cast<int64_t>(Configuration.CollisionSteps));
     OutTable.insert_or_assign("solver_substeps", static_cast<int64_t>(Configuration.SolverSubsteps));
@@ -114,9 +116,11 @@ void DecodeVehicleConfiguration(const toml::table& InTable, VehicleConfiguration
     Configuration.Visible         = InTable["visible"].value_or(Configuration.Visible);
     Configuration.Physics         = InTable["physics"].value_or(Configuration.Physics);
     Configuration.Possessed       = InTable["possessed"].value_or(Configuration.Possessed);
-    Configuration.ChaseCamera     = InTable["chase_camera"].value_or(Configuration.ChaseCamera);
-    Configuration.ThreadedPhysics = InTable["threaded_physics"].value_or(Configuration.ThreadedPhysics);
-    Configuration.PhysicsStepHz   = static_cast<float>(InTable["physics_step_hz"].value_or(static_cast<double>(Configuration.PhysicsStepHz)));
+    Configuration.ChaseCamera             = InTable["chase_camera"].value_or(Configuration.ChaseCamera);
+    Configuration.ThreadedPhysics         = InTable["threaded_physics"].value_or(Configuration.ThreadedPhysics);
+    Configuration.EquilibriumPlacement    = InTable["equilibrium_placement"].value_or(Configuration.EquilibriumPlacement);
+    Configuration.EngageBrakesOnPlacement = InTable["engage_brakes_on_placement"].value_or(Configuration.EngageBrakesOnPlacement);
+    Configuration.PhysicsStepHz           = static_cast<float>(InTable["physics_step_hz"].value_or(static_cast<double>(Configuration.PhysicsStepHz)));
     Configuration.CollisionSteps  = static_cast<int>(InTable["collision_steps"].value_or(static_cast<int64_t>(Configuration.CollisionSteps)));
     Configuration.SolverSubsteps  = static_cast<int>(InTable["solver_substeps"].value_or(static_cast<int64_t>(Configuration.SolverSubsteps)));
     Configuration.GroupName       = InTable["group"].value_or(Configuration.GroupName);

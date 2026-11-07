@@ -128,6 +128,21 @@ Frontier::VehicleSubjectKinematics SampleRuntimeVehicleSubject(const Frontier::W
     return Subject;
 }
 
+void PublishGeometryResolutions(Frontier::WorldSpace& World, const std::shared_ptr<const Frontier::GeometryResolutions>& Resolutions)
+{
+    if (!Resolutions)
+    {
+        return;
+    }
+    for (const auto& [TokenValue, Resolved] : *Resolutions)
+    {
+        if (auto* Geometry = dynamic_cast<Frontier::GeometryRecord*>(World.FindRecord(Frontier::RecordToken{TokenValue})))
+        {
+            Geometry->AccessConfiguration().Resolved = Resolved;
+        }
+    }
+}
+
 void StartCoursePhysics(Frontier::PhysicsExtension& Physics, Frontier::WorldSpace& World)
 {
     if (Physics.QueryRunning())
@@ -172,9 +187,11 @@ int main(int, char**)
     std::unique_ptr<Frontier::PhysicsExtension>   Physics;
     Frontier::ViewportTexture                     SceneTexture;
     Frontier::Vehicle::DriverInputIntegrator      DriverInput{};
-    bool                                          HudHidden        = false;
+    bool                                          HudHidden               = false;
     std::filesystem::path                         PendingRoutePath{};
-    bool                                          PendingRouteDrive = false;
+    bool                                          PendingRouteDrive       = false;
+    bool                                          PendingCoursePhysicsBoot = false;
+    uint64_t                                      PublishedGeometryGen    = 0u;
 
     Frontier::ApplicationWindowCallbacks Callbacks{};
     Callbacks.Title          = "Everest — Studio Lobby";
@@ -258,10 +275,11 @@ int main(int, char**)
 
             const auto Command = DriverInput.Advance(static_cast<float>(DeltaSeconds));
             Frontier::PhysicsVehicleInput VehicleInput{};
-            VehicleInput.Throttle  = Command.Drive.Throttle;
-            VehicleInput.Brake     = Command.Drive.Brake;
-            VehicleInput.Steer     = Command.Drive.Steer;
-            VehicleInput.Handbrake = Command.Drive.Handbrake;
+            VehicleInput.Throttle    = Command.Drive.Throttle;
+            VehicleInput.Brake       = Command.Drive.Brake;
+            VehicleInput.Steer       = Command.Drive.Steer;
+            VehicleInput.Handbrake   = Command.Drive.Handbrake;
+            VehicleInput.ClutchPedal = (!IO.WantTextInput && ImGui::IsKeyDown(ImGuiKey_LeftShift)) ? 1.0f : 0.0f;
             Physics->AssignVehicleInput(VehicleInput);
             (void)Physics->Step(World, DeltaSeconds);
         }
@@ -294,10 +312,8 @@ int main(int, char**)
             const std::filesystem::path TargetPath = std::exchange(PendingRoutePath, {});
             if (Workspace->OpenLevel(TargetPath, false))
             {
-                if (PendingRouteDrive && Physics)
-                {
-                    StartCoursePhysics(*Physics, World);
-                }
+                PublishedGeometryGen     = 0u;
+                PendingCoursePhysicsBoot = PendingRouteDrive;
                 if (MainWindow != nullptr)
                 {
                     glfwSetWindowTitle(MainWindow, Workspace->QueryLobbyActive() ? "Everest — Studio Lobby" : "Everest — Proving Grounds");
@@ -327,6 +343,16 @@ int main(int, char**)
             Request.DeltaSeconds        = DeltaSeconds;
             const auto Refresh          = SceneRenderer->Render(Request, World, Workspace->QueryElapsedSeconds());
             TextureHandle               = SceneTexture.Resolve(Refresh.View);
+            if (Refresh.Readout.Geometry && Refresh.Readout.GeometryGeneration != PublishedGeometryGen)
+            {
+                PublishGeometryResolutions(World, Refresh.Readout.Geometry);
+                PublishedGeometryGen = Refresh.Readout.GeometryGeneration;
+            }
+            if (PendingCoursePhysicsBoot && Physics && Refresh.Readout.Geometry)
+            {
+                StartCoursePhysics(*Physics, World);
+                PendingCoursePhysicsBoot = false;
+            }
         }
 
         // ④ Fullscreen canvas + clean standalone game HUD + fade veil.
@@ -400,11 +426,11 @@ int main(int, char**)
                 if (ImGui::Button("- Leave##RuntimeLeave")) (void)Lobby.LeaveLastGuest(World);
                 ImGui::EndDisabled();
                 ImGui::SameLine();
-                if (ImGui::Button("Orbit")) Camera.TransitionToMode(Frontier::VehicleCameraMode::Orbit);
+                if (ImGui::Button("Orbit")) Camera.TransitionToRig(Frontier::VehicleCameraRig::Orbit);
                 ImGui::SameLine();
-                if (ImGui::Button("Cabin")) Camera.TransitionToMode(Frontier::VehicleCameraMode::Cockpit);
+                if (ImGui::Button("Cabin")) Camera.TransitionToRig(Frontier::VehicleCameraRig::Cockpit);
                 ImGui::SameLine();
-                if (ImGui::Button("HMI")) Camera.TransitionToMode(Frontier::VehicleCameraMode::Hmi);
+                if (ImGui::Button("HMI")) Camera.TransitionToRig(Frontier::VehicleCameraRig::Hmi);
 
                 ImGui::SetCursorScreenPos(ImVec2(CardMin.x + 12.0f, CardMin.y + 194.0f));
                 if (ImGui::Button("Enter Proving Grounds  (Enter)", ImVec2(286.0f, 34.0f)) && !Camera.QueryRouteTransitionActive())
@@ -424,14 +450,29 @@ int main(int, char**)
                     Camera.BeginRouteTransition(0.48, 0.58);
                 }
                 ImGui::SameLine();
-                const std::string CamText = "Camera: " + std::string(Frontier::QueryVehicleCameraModeLabel(Camera.QueryMode())) + " (C)";
+                const std::string CamText = "Camera: " + std::string(Frontier::QueryVehicleCameraRigLabel(Camera.QueryRig())) + " (C)";
                 if (ImGui::Button(CamText.c_str()))
                 {
                     Camera.CycleRig(false);
                 }
+                static constexpr std::array<const char*, 5> StationButtons = {
+                    "Straight##RtSt0", "Slope Ramp 12.7\xC2\xB0##RtSt1", "Skidpad##RtSt2", "Slalom##RtSt3", "Hangar##RtSt4"};
+                for (uint32_t StationIdx = 0u; StationIdx < StationButtons.size(); ++StationIdx)
+                {
+                    ImGui::SameLine();
+                    if (ImGui::Button(StationButtons[StationIdx]) && Physics)
+                    {
+                        if (Physics->QueryRunning()) Physics->End(World);
+                        if (Lobby.DeployProvingGroundStation(World, StationIdx))
+                        {
+                            DriverInput = Frontier::Vehicle::DriverInputIntegrator{};
+                            StartCoursePhysics(*Physics, World);
+                        }
+                    }
+                }
                 ImGui::SameLine();
-                char SpeedText[64];
-                std::snprintf(SpeedText, sizeof(SpeedText), "%.0f km/h  |  WASD/Space Drive  |  R Reset", Subject.SpeedMetresPerSecond * 3.6);
+                char SpeedText[80];
+                std::snprintf(SpeedText, sizeof(SpeedText), "%.0f km/h  |  WASD/Space/Shift Drive  |  R Reset", Subject.SpeedMetresPerSecond * 3.6);
                 ImGui::TextUnformatted(SpeedText);
             }
         }

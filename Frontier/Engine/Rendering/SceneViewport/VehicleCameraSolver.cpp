@@ -118,18 +118,18 @@ void ResolveHmiTabletView(const VehicleSubjectKinematics& Subject,
 
 } // namespace
 
-std::string_view QueryVehicleCameraModeLabel(VehicleCameraMode Mode) noexcept
+std::string_view QueryVehicleCameraRigLabel(VehicleCameraRig Rig) noexcept
 {
-    switch (Mode)
+    switch (Rig)
     {
-        case VehicleCameraMode::Chase:         return "Chase";
-        case VehicleCameraMode::Orbit:         return "Orbit";
-        case VehicleCameraMode::Cockpit:       return "Cockpit";
-        case VehicleCameraMode::Hmi:           return "HMI Tablet";
-        case VehicleCameraMode::Passenger:     return "Passenger";
-        case VehicleCameraMode::Hood:          return "Hood";
-        case VehicleCameraMode::TyreFrontLeft: return "Tyre FL";
-        case VehicleCameraMode::TyreRearLeft:  return "Tyre RL";
+        case VehicleCameraRig::Chase:         return "Chase";
+        case VehicleCameraRig::Orbit:         return "Orbit";
+        case VehicleCameraRig::Cockpit:       return "Cockpit";
+        case VehicleCameraRig::Hmi:           return "HMI Tablet";
+        case VehicleCameraRig::Passenger:     return "Passenger";
+        case VehicleCameraRig::Hood:          return "Hood";
+        case VehicleCameraRig::TyreFrontLeft: return "Tyre FL";
+        case VehicleCameraRig::TyreRearLeft:  return "Tyre RL";
     }
     return "Orbit";
 }
@@ -190,7 +190,7 @@ void VehicleCameraSolver::ConfigureEnvironment(bool InLobbyStudio, const Vehicle
 
     if (LobbyStudio)
     {
-        Mode                        = VehicleCameraMode::Orbit;
+        Rig                        = VehicleCameraRig::Orbit;
         EntranceDollyActive         = true;
         EntranceDollyElapsedSeconds = 0.0;
         Orbit                       = EntranceFrom;
@@ -198,7 +198,7 @@ void VehicleCameraSolver::ConfigureEnvironment(bool InLobbyStudio, const Vehicle
     }
     else
     {
-        Mode                 = VehicleCameraMode::Chase;
+        Rig                 = VehicleCameraRig::Chase;
         EntranceDollyActive  = false;
         Orbit.YawRadians     = Pi + 0.4;
         Orbit.PitchRadians   = 0.30;
@@ -208,9 +208,9 @@ void VehicleCameraSolver::ConfigureEnvironment(bool InLobbyStudio, const Vehicle
     (void)Advance(InitialSubject, VehicleCameraInput{}, 0.0);
 }
 
-void VehicleCameraSolver::ConfigureModeImmediate(VehicleCameraMode NextMode, const VehicleSubjectKinematics& Subject)
+void VehicleCameraSolver::ConfigureRigImmediate(VehicleCameraRig NextRig, const VehicleSubjectKinematics& Subject)
 {
-    Mode                = NextMode;
+    Rig                = NextRig;
     EntranceDollyActive = false;
     TourPhase           = CinematicPhase::Inactive;
     RigBlend            = {};
@@ -218,16 +218,16 @@ void VehicleCameraSolver::ConfigureModeImmediate(VehicleCameraMode NextMode, con
     HeadPitchRadians    = 0.0;
     LagInitialized      = false;
     ChaseInitialized    = false;
-    if (LobbyStudio && Mode == VehicleCameraMode::Orbit)
+    if (LobbyStudio && Rig == VehicleCameraRig::Orbit)
     {
         Orbit = EntranceTo;
     }
     (void)Advance(Subject, VehicleCameraInput{}, 0.0);
 }
 
-void VehicleCameraSolver::TransitionToMode(VehicleCameraMode NextMode)
+void VehicleCameraSolver::TransitionToRig(VehicleCameraRig NextRig)
 {
-    if (NextMode == Mode && TourPhase == CinematicPhase::Inactive)
+    if (NextRig == Rig && TourPhase == CinematicPhase::Inactive)
     {
         return;
     }
@@ -244,8 +244,8 @@ void VehicleCameraSolver::TransitionToMode(VehicleCameraMode NextMode)
     RigBlend.ElapsedSeconds     = 0.0;
     if (LobbyStudio)
     {
-        RigBlend.DurationSeconds = (NextMode == VehicleCameraMode::Hmi) ? 2.1 : 1.7;
-        if (NextMode == VehicleCameraMode::Orbit && Orbit.DistanceMetres > 6.9)
+        RigBlend.DurationSeconds = (NextRig == VehicleCameraRig::Hmi) ? 2.1 : 1.7;
+        if (NextRig == VehicleCameraRig::Orbit && Orbit.DistanceMetres > 6.9)
         {
             Orbit = EntranceTo;
         }
@@ -254,7 +254,7 @@ void VehicleCameraSolver::TransitionToMode(VehicleCameraMode NextMode)
     {
         RigBlend.DurationSeconds = 0.85;
     }
-    Mode           = NextMode;
+    Rig           = NextRig;
     LagInitialized = false;
 }
 
@@ -262,15 +262,15 @@ void VehicleCameraSolver::CycleRig(bool Reverse)
 {
     if (LobbyStudio)
     {
-        static constexpr std::array<VehicleCameraMode, 3> StudioRigs = {
-            VehicleCameraMode::Orbit,
-            VehicleCameraMode::Cockpit,
-            VehicleCameraMode::Hmi,
+        static constexpr std::array<VehicleCameraRig, 3> StudioRigs = {
+            VehicleCameraRig::Orbit,
+            VehicleCameraRig::Cockpit,
+            VehicleCameraRig::Hmi,
         };
         size_t CurrentIndex = 0u;
         for (size_t Index = 0u; Index < StudioRigs.size(); ++Index)
         {
-            if (StudioRigs[Index] == Mode)
+            if (StudioRigs[Index] == Rig)
             {
                 CurrentIndex = Index;
                 break;
@@ -278,14 +278,14 @@ void VehicleCameraSolver::CycleRig(bool Reverse)
         }
         const size_t NextIndex = Reverse ? (CurrentIndex + StudioRigs.size() - 1u) % StudioRigs.size()
                                          : (CurrentIndex + 1u) % StudioRigs.size();
-        TransitionToMode(StudioRigs[NextIndex]);
+        TransitionToRig(StudioRigs[NextIndex]);
         return;
     }
 
     constexpr uint32_t TotalRigs = 8u;
-    const uint32_t     Index     = static_cast<uint32_t>(Mode);
+    const uint32_t     Index     = static_cast<uint32_t>(Rig);
     const uint32_t     NextIndex = Reverse ? (Index + TotalRigs - 1u) % TotalRigs : (Index + 1u) % TotalRigs;
-    TransitionToMode(static_cast<VehicleCameraMode>(NextIndex));
+    TransitionToRig(static_cast<VehicleCameraRig>(NextIndex));
 }
 
 void VehicleCameraSolver::BeginRouteTransition(double CoverDurationSeconds, double RevealDurationSeconds)
@@ -336,7 +336,7 @@ VehicleCameraSolution VehicleCameraSolver::EvaluateCinematicShotPose(const Vehic
     VehicleCameraSolution Shot{};
     Shot.UpUnit             = {0.0, 0.0, 1.0};
     Shot.NearClipMetres     = 0.03;
-    Shot.ActiveMode         = VehicleCameraMode::Orbit;
+    Shot.ActiveRig         = VehicleCameraRig::Orbit;
     Shot.CinematicActive    = true;
     Shot.CinematicShotIndex = ShotIndex % CinematicShotCount;
 
@@ -448,8 +448,8 @@ VehicleCameraSolution VehicleCameraSolver::Advance(const VehicleSubjectKinematic
         CycleRig(true);
     }
 
-    const bool InteriorRig = (Mode == VehicleCameraMode::Cockpit || Mode == VehicleCameraMode::Passenger);
-    if (Mode == VehicleCameraMode::Orbit)
+    const bool InteriorRig = (Rig == VehicleCameraRig::Cockpit || Rig == VehicleCameraRig::Passenger);
+    if (Rig == VehicleCameraRig::Orbit)
     {
         if (Input.PrimaryDrag)
         {
@@ -462,7 +462,7 @@ VehicleCameraSolution VehicleCameraSolver::Advance(const VehicleSubjectKinematic
             Orbit.DistanceMetres         = std::clamp(Orbit.DistanceMetres * std::exp(-Input.WheelNotches * 0.12), 4.5, MaximumDistance);
         }
     }
-    else if (Mode == VehicleCameraMode::Chase)
+    else if (Rig == VehicleCameraRig::Chase)
     {
         if (Input.PrimaryDrag)
         {
@@ -494,7 +494,7 @@ VehicleCameraSolution VehicleCameraSolver::Advance(const VehicleSubjectKinematic
             InteriorFovDegrees = std::clamp(InteriorFovDegrees - Input.WheelNotches * 3.0, 30.0, 90.0);
         }
     }
-    else if (Mode == VehicleCameraMode::Hmi)
+    else if (Rig == VehicleCameraRig::Hmi)
     {
         if (std::abs(Input.WheelNotches) > 0.0)
         {
@@ -503,7 +503,7 @@ VehicleCameraSolution VehicleCameraSolver::Advance(const VehicleSubjectKinematic
     }
 
     double Veil = 0.0;
-    if (LobbyStudio && Mode == VehicleCameraMode::Orbit)
+    if (LobbyStudio && Rig == VehicleCameraRig::Orbit)
     {
         if (EntranceDollyActive)
         {
@@ -591,7 +591,7 @@ VehicleCameraSolution VehicleCameraSolver::Advance(const VehicleSubjectKinematic
     double                DesiredFovRad = 60.0 * DegreesToRadians;
     double                DesiredNear   = LobbyStudio ? 0.03 : 0.05;
 
-    if (Mode == VehicleCameraMode::Orbit)
+    if (Rig == VehicleCameraRig::Orbit)
     {
         DesiredTarget         = {Subject.PositionMetres[0], Subject.PositionMetres[1], Subject.PositionMetres[2] + 0.35};
         const double CosPitch = std::cos(Orbit.PitchRadians);
@@ -601,7 +601,7 @@ VehicleCameraSolution VehicleCameraSolver::Advance(const VehicleSubjectKinematic
             std::max(Subject.GroundFloorMetres + 0.20, DesiredTarget[2] + Orbit.DistanceMetres * std::sin(Orbit.PitchRadians)),
         };
     }
-    else if (Mode == VehicleCameraMode::Chase)
+    else if (Rig == VehicleCameraRig::Chase)
     {
         const double Heading  = std::atan2(Subject.ForwardUnit[1], Subject.ForwardUnit[0]) + ChaseOrbitYawRad;
         const double Distance = ChaseFollowDistance * ChaseDistanceScale;
@@ -633,14 +633,14 @@ VehicleCameraSolution VehicleCameraSolver::Advance(const VehicleSubjectKinematic
         DesiredTarget = ChaseTargetMetres;
         DesiredFovRad = 60.0 * DegreesToRadians + SpeedFovRadians;
     }
-    else if (Mode == VehicleCameraMode::Hmi)
+    else if (Rig == VehicleCameraRig::Hmi)
     {
         ResolveHmiTabletView(Subject, HmiZoom, DesiredEye, DesiredTarget, DesiredUp, DesiredFovRad);
         DesiredNear = 0.01;
     }
-    else if (Mode == VehicleCameraMode::Cockpit || Mode == VehicleCameraMode::Passenger)
+    else if (Rig == VehicleCameraRig::Cockpit || Rig == VehicleCameraRig::Passenger)
     {
-        const bool Driver  = (Mode == VehicleCameraMode::Cockpit);
+        const bool Driver  = (Rig == VehicleCameraRig::Cockpit);
         DesiredEye         = TransformLocalPoint(Subject, Driver ? -0.20 : -0.22, Driver ? 0.42 : -0.42, Driver ? 1.12 : 1.10);
         const double Pitch = (Driver ? 0.14 : 0.12) + HeadPitchRadians;
         const double Yaw   = HeadYawRadians;
@@ -650,7 +650,7 @@ VehicleCameraSolution VehicleCameraSolver::Advance(const VehicleSubjectKinematic
         DesiredFovRad      = InteriorFovDegrees * DegreesToRadians + 0.35 * SpeedFovRadians;
         DesiredNear        = 0.02;
     }
-    else if (Mode == VehicleCameraMode::Hood)
+    else if (Rig == VehicleCameraRig::Hood)
     {
         DesiredEye                            = TransformLocalPoint(Subject, 1.62, 0.00, 0.70);
         const std::array<double, 3> LookLocal = {std::cos(0.05), 0.0, -std::sin(0.05)};
@@ -658,14 +658,14 @@ VehicleCameraSolution VehicleCameraSolver::Advance(const VehicleSubjectKinematic
         DesiredUp                             = Subject.UpUnit;
         DesiredFovRad                         = 62.0 * DegreesToRadians + 0.5 * SpeedFovRadians;
     }
-    else if (Mode == VehicleCameraMode::TyreFrontLeft)
+    else if (Rig == VehicleCameraRig::TyreFrontLeft)
     {
         DesiredEye    = TransformLocalPoint(Subject, 2.95, 2.05, -0.12);
         DesiredTarget = TransformLocalPoint(Subject, 1.7274, 1.0475, -0.38);
         DesiredUp     = Subject.UpUnit;
         DesiredFovRad = 38.0 * DegreesToRadians;
     }
-    else if (Mode == VehicleCameraMode::TyreRearLeft)
+    else if (Rig == VehicleCameraRig::TyreRearLeft)
     {
         DesiredEye    = TransformLocalPoint(Subject, -0.55, 2.15, -0.15);
         DesiredTarget = TransformLocalPoint(Subject, -1.6686, 1.0475, -0.38);
@@ -674,11 +674,11 @@ VehicleCameraSolution VehicleCameraSolver::Advance(const VehicleSubjectKinematic
     }
 
     VehicleCameraSolution Resolved{};
-    Resolved.ActiveMode          = Mode;
-    Resolved.EntranceDollyActive = LobbyStudio && EntranceDollyActive && Mode == VehicleCameraMode::Orbit;
+    Resolved.ActiveRig          = Rig;
+    Resolved.EntranceDollyActive = LobbyStudio && EntranceDollyActive && Rig == VehicleCameraRig::Orbit;
     Resolved.NearClipMetres      = DesiredNear;
 
-    if (LobbyStudio && Mode == VehicleCameraMode::Orbit)
+    if (LobbyStudio && Rig == VehicleCameraRig::Orbit)
     {
         DesiredEye = ClampLobbyStudioEye(DesiredEye);
     }
@@ -692,7 +692,7 @@ VehicleCameraSolution VehicleCameraSolver::Advance(const VehicleSubjectKinematic
         Resolved.UpUnit                     = Normalize3(Lerp3(RigBlend.FromUpUnit, DesiredUp, Ease));
         Resolved.VerticalFieldOfViewRadians = RigBlend.FromFieldOfViewRad + (DesiredFovRad - RigBlend.FromFieldOfViewRad) * Ease;
         Resolved.TransitionActive           = true;
-        if (LobbyStudio && Mode == VehicleCameraMode::Orbit)
+        if (LobbyStudio && Rig == VehicleCameraRig::Orbit)
         {
             Resolved.PositionMetres = ClampLobbyStudioEye(Resolved.PositionMetres);
         }
@@ -704,7 +704,7 @@ VehicleCameraSolution VehicleCameraSolver::Advance(const VehicleSubjectKinematic
             LagInitialized     = true;
         }
     }
-    else if (LobbyStudio && TourPhase != CinematicPhase::Inactive && Mode == VehicleCameraMode::Orbit)
+    else if (LobbyStudio && TourPhase != CinematicPhase::Inactive && Rig == VehicleCameraRig::Orbit)
     {
         Resolved           = TourPose;
         Veil               = std::max(Veil, TourPose.VeilOpacity);
@@ -712,7 +712,7 @@ VehicleCameraSolution VehicleCameraSolver::Advance(const VehicleSubjectKinematic
         LaggedTargetMetres = Resolved.TargetMetres;
         LagInitialized     = true;
     }
-    else if (LobbyStudio && Mode == VehicleCameraMode::Orbit)
+    else if (LobbyStudio && Rig == VehicleCameraRig::Orbit)
     {
         if (!LagInitialized)
         {

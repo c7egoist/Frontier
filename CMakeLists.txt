@@ -981,7 +981,7 @@ target_compile_definitions(Everest PRIVATE
     FRONTIER_UI_VULKAN=1 VK_NO_PROTOTYPES GLFW_INCLUDE_NONE
     FRONTIER_BUILD_COMMIT=\"${FRONTIER_BUILD_COMMIT}\"
     FRONTIER_BUILD_REVISION="${FRONTIER_BUILD_REVISION}")
-target_link_libraries(Everest PRIVATE EverestProjectRuntime FrontierSceneViewport FrontierEditorUI Jolt glfw)
+target_link_libraries(Everest PRIVATE EverestProjectRuntime FrontierSceneViewport FrontierInterface Jolt glfw)
 if(WIN32)
     target_compile_definitions(Everest PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
     target_link_libraries(Everest PRIVATE comdlg32 shell32 ole32)

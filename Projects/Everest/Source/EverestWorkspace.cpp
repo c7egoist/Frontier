@@ -1440,7 +1440,7 @@ void EverestWorkspace::IntegrateViewportCamera(bool Hovered, bool Active, double
             ApplyVehicleCameraSolution(Solution);
             if (CameraInput.CycleNextRig || CameraInput.CyclePreviousRig)
             {
-                AnnounceViewportNotice("Studio camera: " + std::string(Frontier::QueryVehicleCameraModeLabel(VehicleCamera.QueryMode())) + " (C)");
+                AnnounceViewportNotice("Studio camera: " + std::string(Frontier::QueryVehicleCameraRigLabel(VehicleCamera.QueryRig())) + " (C)");
             }
             if (VehicleCamera.ConsumeRouteSwitchPoint() && !PendingTransitionLevel.empty())
             {
@@ -1682,7 +1682,7 @@ void EverestWorkspace::ConstructViewportBar(const ImVec2& Min,const ImVec2& Max,
         if (QueryLobbyActive())
         {
             StudioCameraEngaged = true;
-            VehicleCamera.ConfigureModeImmediate(Frontier::VehicleCameraMode::Orbit, ResolveVehicleKinematics());
+            VehicleCamera.ConfigureRigImmediate(Frontier::VehicleCameraRig::Orbit, ResolveVehicleKinematics());
             ApplyVehicleCameraSolution(VehicleCamera.QueryLastSolution());
         }
         else
@@ -1836,10 +1836,24 @@ void EverestWorkspace::ConstructSessionViewportOverlay(const ImVec2& StageMin, c
             BeginLevelTransition(ProjectRoot / "Content" / "Levels" / "Lobby.levelspace", false);
         }
         ImGui::SameLine(0.0f, 6.0f * Scale);
-        const std::string RigLabel = "Cam: " + std::string(Frontier::QueryVehicleCameraModeLabel(VehicleCamera.QueryMode())) + " (C)##DriveRig";
+        const std::string RigLabel = "Cam: " + std::string(Frontier::QueryVehicleCameraRigLabel(VehicleCamera.QueryRig())) + " (C)##DriveRig";
         if (ImGui::Button(RigLabel.c_str()))
         {
             VehicleCamera.CycleRig(false);
+        }
+        static constexpr std::array<const char*, 2> QuickStations = {"Straight##PgSt0", "Slope Ramp 12.7\xC2\xB0##PgSt1"};
+        for (uint32_t StationIdx = 0u; StationIdx < QuickStations.size(); ++StationIdx)
+        {
+            ImGui::SameLine(0.0f, 5.0f * Scale);
+            if (ImGui::Button(QuickStations[StationIdx]))
+            {
+                const bool WasSimulating = Physics && Physics->QueryRunning();
+                if (WasSimulating) Physics->End(QueryWorldSpace());
+                if (Lobby.DeployProvingGroundStation(QueryWorldSpace(), StationIdx) && WasSimulating)
+                {
+                    ToggleSimulation();
+                }
+            }
         }
         const auto Subject = ResolveVehicleKinematics();
         if (Subject.Available)
@@ -1865,21 +1879,21 @@ void EverestWorkspace::ConstructSessionViewportOverlay(const ImVec2& StageMin, c
     DrawList->AddRectFilled(CardMin, CardMax, IM_COL32(12, 16, 22, 214), 10.0f * Scale);
     DrawList->AddRect(CardMin, CardMax, IM_COL32(96, 122, 152, 92), 10.0f * Scale, 0, 1.0f);
 
-    const auto&    SessionState = Lobby.QuerySession();
-    const uint32_t ActiveCount  = Lobby.QueryActiveVehicleCount();
-    const auto&    CameraState  = VehicleCamera.QueryLastSolution();
+    const auto&    SessionRoster = Lobby.QuerySession();
+    const uint32_t ActiveCount   = Lobby.QueryActiveVehicleCount();
+    const auto&    CameraFrame   = VehicleCamera.QueryLastSolution();
 
     char HeaderLine[96];
-    if (CameraState.CinematicActive)
+    if (CameraFrame.CinematicActive)
     {
         std::snprintf(HeaderLine, sizeof(HeaderLine), "STUDIO LOBBY  \xC2\xB7  %u/5  \xC2\xB7  TOUR %u/6",
-                      ActiveCount, CameraState.CinematicShotIndex + 1u);
+                      ActiveCount, CameraFrame.CinematicShotIndex + 1u);
     }
-    else if (CameraState.EntranceDollyActive)
+    else if (CameraFrame.EntranceDollyActive)
     {
         std::snprintf(HeaderLine, sizeof(HeaderLine), "STUDIO LOBBY  \xC2\xB7  %u/5  \xC2\xB7  ENTRANCE", ActiveCount);
     }
-    else if (CameraState.TransitionActive)
+    else if (CameraFrame.TransitionActive)
     {
         std::snprintf(HeaderLine, sizeof(HeaderLine), "STUDIO LOBBY  \xC2\xB7  %u/5  \xC2\xB7  TRANSITION", ActiveCount);
     }
@@ -1893,7 +1907,7 @@ void EverestWorkspace::ConstructSessionViewportOverlay(const ImVec2& StageMin, c
     for (uint32_t Slot = 0u; Slot < 5u; ++Slot)
     {
         const float                         RowY        = CardMin.y + (34.0f + static_cast<float>(Slot) * 21.0f) * Scale;
-        const Frontier::SessionParticipant* Participant = SessionState.FindParticipantInSlot(Slot);
+        const Frontier::SessionParticipant* Participant = SessionRoster.FindParticipantInSlot(Slot);
         char                                RowText[96];
         ImU32                               RowTint = IM_COL32(118, 130, 146, 175);
         if (Participant != nullptr)
@@ -1937,20 +1951,20 @@ void EverestWorkspace::ConstructSessionViewportOverlay(const ImVec2& StageMin, c
     ImGui::EndDisabled();
 
     ImGui::SameLine(0.0f, 8.0f * Scale);
-    static constexpr std::array<std::pair<Frontier::VehicleCameraMode, const char*>, 3> StudioRigs = {{
-        {Frontier::VehicleCameraMode::Orbit, "Orbit"},
-        {Frontier::VehicleCameraMode::Cockpit, "Cabin"},
-        {Frontier::VehicleCameraMode::Hmi, "HMI"},
+    static constexpr std::array<std::pair<Frontier::VehicleCameraRig, const char*>, 3> StudioRigs = {{
+        {Frontier::VehicleCameraRig::Orbit, "Orbit"},
+        {Frontier::VehicleCameraRig::Cockpit, "Cabin"},
+        {Frontier::VehicleCameraRig::Hmi, "HMI"},
     }};
     for (size_t RigIdx = 0u; RigIdx < StudioRigs.size(); ++RigIdx)
     {
         if (RigIdx > 0u) ImGui::SameLine(0.0f, 4.0f * Scale);
-        const bool SelectedRig = StudioCameraEngaged && VehicleCamera.QueryMode() == StudioRigs[RigIdx].first;
+        const bool SelectedRig = StudioCameraEngaged && VehicleCamera.QueryRig() == StudioRigs[RigIdx].first;
         if (SelectedRig) ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(52, 92, 138, 245));
         if (ImGui::Button(StudioRigs[RigIdx].second))
         {
             StudioCameraEngaged = true;
-            VehicleCamera.TransitionToMode(StudioRigs[RigIdx].first);
+            VehicleCamera.TransitionToRig(StudioRigs[RigIdx].first);
         }
         if (SelectedRig) ImGui::PopStyleColor();
     }
@@ -1959,7 +1973,7 @@ void EverestWorkspace::ConstructSessionViewportOverlay(const ImVec2& StageMin, c
     ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(36, 108, 78, 238));
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(48, 136, 98, 250));
     ImGui::PushStyleColor(ImGuiCol_ButtonActive, IM_COL32(62, 162, 116, 255));
-    if (ImGui::Button("Enter Proving Grounds  \xE2\x96\xB8##EnterCourse", ImVec2(CardWidth - 20.0f * Scale, 32.0f * Scale)) &&
+    if (ImGui::Button("Enter Proving Grounds  (L)##EnterCourse", ImVec2(CardWidth - 20.0f * Scale, 32.0f * Scale)) &&
         !VehicleCamera.QueryRouteTransitionActive())
     {
         BeginLevelTransition(ProjectRoot / "Content" / "Levels" / "ProvingGroundVehicle.levelspace", true);
@@ -2077,7 +2091,7 @@ void EverestWorkspace::IntegrateDrivingControls(double DeltaSeconds)
                 {
                     VehicleRec->AccessConfiguration().ChaseCamera = true;
                     VehicleCamera.CycleRig(IO.KeyShift);
-                    AnnounceViewportNotice("Driving camera: " + std::string(Frontier::QueryVehicleCameraModeLabel(VehicleCamera.QueryMode())) + " (C)");
+                    AnnounceViewportNotice("Driving camera: " + std::string(Frontier::QueryVehicleCameraRigLabel(VehicleCamera.QueryRig())) + " (C)");
                     break;
                 }
             }
@@ -2094,10 +2108,11 @@ void EverestWorkspace::IntegrateDrivingControls(double DeltaSeconds)
 
     const Frontier::Vehicle::DriverCommand Command = DriverControls.Advance(static_cast<float>(std::clamp(DeltaSeconds, 0.0, 0.1)));
     Frontier::PhysicsVehicleInput          Input{};
-    Input.Throttle  = Command.Drive.Throttle;
-    Input.Brake     = Command.Drive.Brake;
-    Input.Steer     = Command.Drive.Steer;
-    Input.Handbrake = Command.Drive.Handbrake;
+    Input.Throttle    = Command.Drive.Throttle;
+    Input.Brake       = Command.Drive.Brake;
+    Input.Steer       = Command.Drive.Steer;
+    Input.Handbrake   = Command.Drive.Handbrake;
+    Input.ClutchPedal = (!ImGui::GetIO().WantTextInput && ImGui::IsKeyDown(ImGuiKey_LeftShift) && !ImGui::IsMouseDown(ImGuiMouseButton_Right)) ? 1.0f : 0.0f;
     Physics->AssignVehicleInput(Input);
 }
 

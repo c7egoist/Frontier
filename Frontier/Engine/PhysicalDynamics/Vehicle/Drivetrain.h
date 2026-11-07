@@ -76,7 +76,10 @@ struct TurbochargerParameters
     float InvTurboInertia = 50.0f;
     float TurboFrictionCoeff = 0.002f;
     float TurboFrictionQuadratic = 0.00005f;
-    float WastegateMaxBoost = 1.2f;        // [Bar] (race: 1.6)
+    float WastegateMaxBoost = 1.2f;        // [Bar] pump-fuel wastegate ceiling
+    float WastegateMaxBoost_Race = 1.6f;   // [Bar] race-fuel wastegate ceiling (when RaceWastegateEnabled)
+    bool  RaceWastegateEnabled = false;    // [-]   honours RaceTune on the turbo wastegate ceiling
+    float CompressorChokeFlow_KgPerS = 0.0f; // [kg/s] compressor map choke limit (<= 0 disables choke falloff)
     float BovPressureReleaseRate = 10.0f;  // [Bar/s]
     float TurbineEfficiency = 0.65f;
     float CompressorEfficiency = 0.70f;
@@ -172,7 +175,32 @@ struct ClutchParameters
     float LockupRPM               = 3000.0f; // [rpm] turbine speed that engages the lockup clutch (above stall: locking earlier lugs the unspooled engine and the car never breaks through)
     float LockupDropRPM           = 300.0f;  // [rpm] hysteresis below LockupRPM that releases it
     float LockupRate              = 2.0f;    // [1/s] lockup engagement slew (a progressive ~0.5 s grab; slamming it chatters)
+    // 📝 GRIT source-only closed-loop bite/flare launch law, smooth C∞ slip saturation and clutch-lining thermal fade.
+    bool  ProgressiveLaunchEnabled = false;  // [-]   closed-loop RPM/throttle launch modulation (off keeps legacy instant/timer path)
+    bool  SmoothSaturationEnabled  = false;  // [-]   C∞ algebraic saturation Δω / √(Δω² + ω_b²) instead of hard clamp
+    float LaunchBiteEngagement     = 0.18f;  // [-]   initial launch bite fraction
+    float LaunchFlareRpmDelta      = 3200.0f;// [rpm] target launch flare above IdleRPM at wide-open throttle
+    float LaunchTorqueShare        = 0.58f;  // [-]   fraction of live engine gross torque transferred while flaring to target RPM
+    float LaunchSpeedThreshold     = 8.5f;   // [m/s] speed ceiling of the progressive launch window
+    float LaunchEngagementRate     = 18.0f;  // [1/s] closing rate inside the launch window
+    float CruiseEngagementRate     = 25.0f;  // [1/s] closing rate above the launch window
+    float DisengagementTime        = 0.04f;  // [s]   hydraulic release time under braking or anti-stall
+    bool  ThermalEnabled           = false;  // [-]   tracks friction-disc slip power, temperature and hot glaze fade
+    float HeatCapacity_JK          = 2800.0f;// [J/K] clutch pack thermal capacity
+    float CoolingConductance_WK    = 18.0f;  // [W/K] bellhousing convection conductance at rest
+    float AmbientTemperature_K     = 293.15f;// [K]
+    float FadeStartTemperature_K   = 550.0f; // [K]   lining fade onset (~277 °C)
+    float FadeEndTemperature_K     = 750.0f; // [K]   full glaze fade (~477 °C)
+    float MinimumFadeFactor        = 0.35f;  // [-]   residual torque capacity floor when overheated
 };
+
+[[nodiscard]] inline float ResolveClutchThermalScale(const ClutchParameters& Clutch, float Temperature_K) noexcept
+{
+    if (!Clutch.ThermalEnabled || Temperature_K <= Clutch.FadeStartTemperature_K) return 1.0f;
+    const float Span = std::max(1.0f, Clutch.FadeEndTemperature_K - Clutch.FadeStartTemperature_K);
+    const float Frac = std::clamp((Temperature_K - Clutch.FadeStartTemperature_K) / Span, 0.0f, 1.0f);
+    return 1.0f - Frac * (1.0f - std::clamp(Clutch.MinimumFadeFactor, 0.05f, 1.0f));
+}
 
 enum class DifferentialMode
 {
@@ -210,7 +238,8 @@ struct DrivetrainInputs
     bool  LockupAllowed       = true;  // converter lockup permission from the gearbox servo
     float Brake               = 0.0f;  // [0..1] brake pedal (regen authority on the electric drive)
     float RegenDemand_Nm      = -1.0f; // [Nm] motor-shaft regen the pedal asks for (< 0: pedal × the regen peak)
-    float VehicleSpeed        = 0.0f;  // [m/s] (regen fades out near rest)
+    float VehicleSpeed        = 0.0f;  // [m/s] (regen fades out near rest; ram-air intake & intercooler airflow)
+    float ClutchCapacityScale = 1.0f;  // [-]   thermal fade multiplier on friction clutch capacity (1 while cool)
 };
 
 struct DrivetrainOutputs
@@ -224,12 +253,16 @@ struct DrivetrainOutputs
     float ClutchTorque_Nm = 0.0f;     // torque transmitted through clutch
     bool  ClutchLocked = false;
     float ClutchEngagement = 0.0f;   // [-] 0 open … 1 rigid (the lockup level on the converter; the servo engagement staged)
+    float ClutchSlipRPM = 0.0f;      // [rpm] engine − gearbox input shaft speed
+    float ClutchSlipPower_W = 0.0f;  // [W]   instantaneous friction-disc heat dissipation |τ_c · Δω|
     float GearboxOutputTorque_Nm = 0.0f;   // after gear × final drive × efficiency
     float LeftDriveTorque_Nm = 0.0f;       // differential outputs
     float RightDriveTorque_Nm = 0.0f;
     float ChargeTemperature_K = 0.0f;      // intercooled charge air (0 while ChargeAir is off)
     // 📝 Beyond Project Drive (intake manifold, converter, electric drive; 0/unset while off).
     float ManifoldPressure_Bar   = 0.0f;  // [bar] absolute plenum pressure
+    float IntakeMassFlow_KgPerS  = 0.0f;  // [kg/s] air mass aspirated into cylinders
+    float RamBoost_Bar           = 0.0f;  // [bar] aerodynamic ram-air pressure recovery net of filter loss
     float ConverterSlipRPM       = 0.0f;  // [rpm] pump − turbine (converter only)
     float MotorRPM               = 0.0f;  // [rpm] traction motor shaft
     float MotorTorque_Nm         = 0.0f;  // [Nm] motor shaft torque (+ motoring)
@@ -283,7 +316,8 @@ private:
     void  Differentiate(float driveTorque, float leftRPM, float rightRPM, float& outL, float& outR) const noexcept;
     // 📝 Beyond Project Drive: plenum filling (returns the air ratio ρ_m/ρ_up), the fluid converter (pump load and
     //    turbine torque, blended with the lockup clutch), and the electric drive (motor + battery, full outputs).
-    float StepIntake(float upstream_Bar, float engineRPM, float throttle, float dt) noexcept;
+    float StepIntake(float upstream_Bar, float chargeTemperature_K, float vehicleSpeed_mps, float engineRPM, float throttle, float dt,
+                     float& outMassFlow_KgPerS, float& outRamDelta_Bar) noexcept;
     void  StepConverter(float pumpRPM, float turbineRPM, bool lockupAllowed, float dt, float& pumpTorque_Nm, float& turbineTorque_Nm) noexcept;
     void  StepElectric(const DrivetrainInputs& In, float dt, DrivetrainOutputs& Out) noexcept;
 

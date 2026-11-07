@@ -12,7 +12,7 @@
 namespace Frontier
 {
 
-enum class VehicleCameraMode : uint8_t
+enum class VehicleCameraRig : uint8_t
 {
     Chase         = 0,   // [-] - Spring-damped chase camera behind the driven chassis
     Orbit         = 1,   // [-] - Spherical turntable / exterior inspection orbit
@@ -24,7 +24,7 @@ enum class VehicleCameraMode : uint8_t
     TyreRearLeft  = 7    // [-] - Low trailing rig aimed at rear-left tyre contact patch
 };
 
-[[nodiscard]] std::string_view QueryVehicleCameraModeLabel(VehicleCameraMode Mode) noexcept;
+[[nodiscard]] std::string_view QueryVehicleCameraRigLabel(VehicleCameraRig Rig) noexcept;
 
 struct VehicleSubjectKinematics
 {
@@ -60,7 +60,7 @@ struct VehicleCameraSolution
     double                VerticalFieldOfViewRadians = 1.0471975511965976;
     double                NearClipMetres             = 0.05;
     double                VeilOpacity                = 0.0;
-    VehicleCameraMode     ActiveMode                 = VehicleCameraMode::Orbit;
+    VehicleCameraRig     ActiveRig                 = VehicleCameraRig::Orbit;
     bool                  EntranceDollyActive        = false;
     bool                  CinematicActive            = false;
     uint32_t              CinematicShotIndex         = 0u;
@@ -77,8 +77,8 @@ public:
     VehicleCameraSolver();
 
     void ConfigureEnvironment(bool InLobbyStudio, const VehicleSubjectKinematics& InitialSubject = {});
-    void ConfigureModeImmediate(VehicleCameraMode NextMode, const VehicleSubjectKinematics& Subject);
-    void TransitionToMode(VehicleCameraMode NextMode);
+    void ConfigureRigImmediate(VehicleCameraRig NextRig, const VehicleSubjectKinematics& Subject);
+    void TransitionToRig(VehicleCameraRig NextRig);
     void CycleRig(bool Reverse = false);
 
     void               BeginRouteTransition(double CoverDurationSeconds = 0.55, double RevealDurationSeconds = 0.65);
@@ -89,7 +89,7 @@ public:
     VehicleCameraSolution Advance(const VehicleSubjectKinematics& Subject, const VehicleCameraInput& Input, double DeltaSeconds);
 
     [[nodiscard]] bool                         QueryLobbyStudio() const noexcept { return LobbyStudio; }
-    [[nodiscard]] VehicleCameraMode            QueryMode() const noexcept { return Mode; }
+    [[nodiscard]] VehicleCameraRig            QueryRig() const noexcept { return Rig; }
     [[nodiscard]] const VehicleCameraSolution& QueryLastSolution() const noexcept { return LastSolution; }
 
 private:
@@ -132,7 +132,7 @@ private:
     void                                AdvanceLobbyCinematic(const VehicleSubjectKinematics& Subject, double DeltaSeconds) noexcept;
 
     bool                  LobbyStudio                 = true;
-    VehicleCameraMode     Mode                        = VehicleCameraMode::Orbit;
+    VehicleCameraRig     Rig                        = VehicleCameraRig::Orbit;
     OrbitPose             Orbit{};
     double                OrbitHoldRemainingSeconds   = 5.0;
     bool                  EntranceDollyActive         = true;

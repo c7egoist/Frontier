@@ -56,6 +56,7 @@ struct FuelSpecification
     float SpecificConsumption_gPerKWh = 270.0f;  // [g/kWh]   brake-specific fuel consumption
     float IdleFlow_gPerS             = 0.25f;    // [g/s]
     float LowerHeatingValue_MJkg     = 44.0f;    // [MJ/kg]   petrol (energy audits: fuel mass × LHV)
+    float BoostEnrichmentPerBar      = 0.0f;     // [1/bar]   mixture enrichment under positive boost (knock protection)
 };
 
 // 📝 Engine coolant and oil, two lumped heat capacities (GRIT CoolantSpecifications, EngineOilSpecifications): the share of fuel heat
@@ -86,30 +87,35 @@ struct EngineFluidSpecification
 //    With DensityCorrection the boost's torque gain scales by ReferenceTemperature / T (warmer charge, thinner air).
 struct ChargeAirSpecification
 {
-    bool  Enabled                  = false;
-    float AmbientTemperature_K     = 293.15f;   // [K]
-    float AmbientPressure_Bar      = 1.01325f;  // [bar]
-    float IntercoolerEffectiveness = 0.75f;     // [-]
-    float ReferenceTemperature_K   = 318.15f;   // [K] charge temperature the boost curves were measured at
-    bool  DensityCorrection        = false;
+    bool  Enabled                      = false;
+    float AmbientTemperature_K         = 293.15f;   // [K]
+    float AmbientPressure_Bar          = 1.01325f;  // [bar]
+    float IntercoolerEffectiveness     = 0.75f;     // [-]
+    float ReferenceTemperature_K       = 318.15f;   // [K] charge temperature the boost curves were measured at
+    bool  DensityCorrection            = false;
+    bool  AirflowEffectivenessEnabled  = false;     // [-]   modulates intercooler effectiveness with ram airflow speed
+    float StandstillEffectivenessShare = 0.45f;     // [-]   fraction of IntercoolerEffectiveness retained at 0 m/s
+    float AirflowReferenceSpeed_mps    = 25.0f;     // [m/s] e-folding airspeed for full intercooler effectiveness
 };
 
 // 📝 Intake manifold (mean-value filling dynamics): the throttle meters air into the plenum through a compressible orifice
 //    (choked below the critical pressure ratio), the engine gulps it by speed-density, and the manifold density relative
 //    to upstream sets the torque ratio — vacuum, not the pedal, meters the air at part throttle. Off by default; on, the
 //    pumping loss follows the vacuum instead of (1 − throttle). Upstream is ambient on NA engines, ambient + boost with a
-//    blow-through throttle on forced induction (density at ambient temperature; the charge-air correction stays separate).
+//    blow-through throttle on forced induction, plus optional ram-air dynamic pressure recovery less air-filter restriction.
 struct IntakeManifoldSpecification
 {
-    bool  Enabled                 = false;
-    float PlenumVolume_L          = 3.5f;    // [L]   plenum + runners
-    float ThrottleBore_mm         = 65.0f;   // [mm]
-    float DischargeCoefficient    = 0.75f;   // [-]
-    float IdleThrottle            = 0.012f;  // [-]   bypass opening at zero pedal (the idle governor trims around it)
-    float Displacement_L          = 3.8f;    // [L]   swept volume (4-stroke gulp)
-    float VolumetricEfficiency    = 0.85f;   // [-]   at VolumetricPeakRPM
-    float VolumetricPeakRPM       = 4500.0f; // [rpm]
-    float VolumetricFalloff       = 0.15f;   // [-]   fractional loss at ±4000 rpm from the peak (quadratic)
+    bool  Enabled                      = false;
+    float PlenumVolume_L               = 3.5f;    // [L]   plenum + runners
+    float ThrottleBore_mm              = 65.0f;   // [mm]
+    float DischargeCoefficient         = 0.75f;   // [-]
+    float IdleThrottle                 = 0.012f;  // [-]   bypass opening at zero pedal (the idle governor trims around it)
+    float Displacement_L               = 3.8f;    // [L]   swept volume (4-stroke gulp)
+    float VolumetricEfficiency         = 0.85f;   // [-]   at VolumetricPeakRPM
+    float VolumetricPeakRPM            = 4500.0f; // [rpm]
+    float VolumetricFalloff            = 0.15f;   // [-]   fractional loss at ±4000 rpm from the peak (quadratic)
+    float RamAirRecovery               = 0.0f;    // [-]   fraction of ½·ρ·v² dynamic pressure recovered at the airbox
+    float FilterRestriction_BarPerKg2S2 = 0.0f;   // [bar/(kg/s)²] quadratic air-filter pressure drop
 };
 
 // 📝 Traction motor (permanent-magnet synchronous): torque cap, power cap past the base speed, overspeed ceiling,
@@ -150,13 +156,23 @@ struct BatteryParameters
 };
 
 // 📝 Compressor outlet and intercooled charge temperatures for a gauge boost (bar) at one compressor efficiency.
-inline float ResolveChargeTemperature(const ChargeAirSpecification& Charge, float BoostBar, float CompressorEfficiency) noexcept
+inline float ResolveChargeTemperature(const ChargeAirSpecification& Charge,
+                                      float                         BoostBar,
+                                      float                         CompressorEfficiency,
+                                      float                         VehicleSpeed_mps = 0.0f) noexcept
 {
     constexpr float γ        = 1.4f;
     const float     Ratio    = std::max(1.0f, (Charge.AmbientPressure_Bar + std::max(0.0f, BoostBar)) / Charge.AmbientPressure_Bar);
     const float     η        = std::clamp(CompressorEfficiency, 0.2f, 1.0f);
     const float     Outlet   = Charge.AmbientTemperature_K * (1.0f + (std::pow(Ratio, (γ - 1.0f) / γ) - 1.0f) / η);
-    const float     Removed  = std::clamp(Charge.IntercoolerEffectiveness, 0.0f, 1.0f) * (Outlet - Charge.AmbientTemperature_K);
+    float           EffectiveIntercooler = std::clamp(Charge.IntercoolerEffectiveness, 0.0f, 1.0f);
+    if (Charge.AirflowEffectivenessEnabled)
+    {
+        const float FloorShare = std::clamp(Charge.StandstillEffectivenessShare, 0.0f, 1.0f);
+        const float Airflow    = 1.0f - std::exp(-std::max(0.0f, VehicleSpeed_mps) / std::max(1.0f, Charge.AirflowReferenceSpeed_mps));
+        EffectiveIntercooler *= (FloorShare + (1.0f - FloorShare) * Airflow);
+    }
+    const float Removed = EffectiveIntercooler * (Outlet - Charge.AmbientTemperature_K);
     return Outlet - Removed;
 }
 

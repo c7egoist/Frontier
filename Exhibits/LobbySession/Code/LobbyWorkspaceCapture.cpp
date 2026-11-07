@@ -1,17 +1,19 @@
 /*==========================================================================================================================================
                                                        LOBBYWORKSPACECAPTURE.CPP
 ==========================================================================================================================================*/
-// 🧩 Offscreen Vulkan/SwiftShader GPU + Frontier Editor UI capture of Studio Lobby:
-//      01-EverestLobbySoloStartup.png       — Default startup: 1 hero car on centre turntable, empty ring stands, full Editor UI
-//      02-EverestLobbyThreeDrivers.png      — Dynamic join: 3/5 drivers (NOVA-7 + KESTREL + MIRAGE)
-//      03-EverestLobbyFullFiveDrivers.png   — Full 5/5 studio roster on turntable + 4 ring plinths
-//      04-EverestLobbyCinematicTour.png     — Lobby-only cinematic camera tour shot framing
-//      05-EverestProvingGroundTransition.png — Live archive switch (Lobby -> ProvingGround) on the same RenderingExtension
+// 🧩 Offscreen Vulkan/SwiftShader GPU + Frontier Editor UI capture of Studio Lobby & Proving Ground Slope Equilibrium:
+//      01-EverestLobbySoloStartup.png                 — Default startup: 1 hero car on centre turntable, empty ring stands, full Editor UI
+//      02-EverestLobbyThreeDrivers.png                — Dynamic join: 3/5 drivers (FALCON-1 + KESTREL + HARRIER)
+//      03-EverestLobbyFullFiveDrivers.png             — Full 5/5 studio roster on turntable + 4 ring plinths
+//      04-EverestLobbyCinematicTour.png               — Lobby-only cinematic camera tour shot framing
+//      05-EverestProvingGroundTransition.png          — Live archive switch (Lobby -> ProvingGround) on the same RenderingExtension
+//      06-EverestProvingGroundSlopeRampEquilibrium.png — 4-corner 12.68 deg slope equilibrium + brake hold on Proving Ground Jump ramp
 
 #include "Engine/Interface/IconPresentation.h"
 #include "Engine/Interface/InspectorRuntime.h"
 #include "EverestWorkspace.h"
 #include "Exhibits/ControlCentre/Code/CpuRasterization.h"
+#include "Frontier/Extensions/Physics/PhysicsExtension.h"
 #include "Frontier/Extensions/Rendering/RenderingExtension.h"
 #include "UI/Editor/ControlCentrePanel.h"
 
@@ -153,7 +155,7 @@ int main(int ArgumentCount, char** Arguments)
         {
             Workspace.QueryOutliner().Select(HeroRec->QueryToken());
         }
-        Workspace.AccessVehicleCamera().ConfigureModeImmediate(Frontier::VehicleCameraMode::Orbit, Frontier::VehicleSubjectKinematics{});
+        Workspace.AccessVehicleCamera().ConfigureRigImmediate(Frontier::VehicleCameraRig::Orbit, Frontier::VehicleSubjectKinematics{});
         RenderFrames(6);
         WriteCapture(OutputDir / "01-EverestLobbySoloStartup.png");
 
@@ -206,6 +208,24 @@ int main(int ArgumentCount, char** Arguments)
         ConfigureMediumQuality();
         RenderFrames(6, 1.0 / 30.0);
         WriteCapture(OutputDir / "05-EverestProvingGroundTransition.png");
+
+        // 06: Proving Ground TerrainEquilibrium station 1 ("Slope Ramp (12.7 deg)") — 4-corner slope alignment + brake hold!
+        if (Workspace.AccessPhysics() && Workspace.AccessPhysics()->QueryRunning()) Workspace.ToggleSimulation();
+        Require(Workspace.AccessLobbySession().DeployProvingGroundStation(Workspace.QueryWorldSpace(), 1u),
+                "Failed deploying Proving Ground Slope Ramp station");
+        Workspace.ToggleSimulation();
+        // Frame a 3/4 side-profile orbit view so the 12.68 deg uphill ramp angle and wheel contact read clearly!
+        Workspace.AccessVehicleCamera().TransitionToRig(Frontier::VehicleCameraRig::Orbit);
+        for (int Step = 0; Step < 25; ++Step)
+        {
+            Frontier::VehicleCameraInput SidePan{};
+            SidePan.PointerDeltaPixels = {Step == 0 ? 220.0 : 0.0, 0.0};
+            SidePan.PrimaryDrag        = (Step == 0);
+            (void)Workspace.AccessVehicleCamera().Advance(Frontier::VehicleSubjectKinematics{}, SidePan, 0.1);
+        }
+        RenderFrames(10, 1.0 / 30.0);
+        WriteCapture(OutputDir / "06-EverestProvingGroundSlopeRampEquilibrium.png");
+        if (Workspace.AccessPhysics() && Workspace.AccessPhysics()->QueryRunning()) Workspace.ToggleSimulation();
 
         std::filesystem::remove(ScratchPrefs);
         Ownership.reset();

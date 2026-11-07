@@ -320,6 +320,8 @@ type = 'Vehicle'
     [records.configuration]
     chase_camera = false
     collision_steps = 1
+    engage_brakes_on_placement = true
+    equilibrium_placement = false
     group = 'Vehicles'
     orientation_deg = [ 0.0, 0.0, 0.0 ]
     physics = false

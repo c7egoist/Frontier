@@ -27,6 +27,7 @@ LobbySession::LobbySession()
 void LobbySession::ResetSolo(Frontier::WorldSpace& World)
 {
     Session.ConfigurePolicy(QueryLobbySessionPolicy());
+    ActiveStationIndex    = 0u;
     const auto& Presets   = QueryLobbyPresetCallsigns();
     LocalDriverIdentifier = Session.JoinParticipant(Presets[0].Callsign, Presets[0].RankBadge, true).value_or(0u);
     (void)SynchronizeWorldVisibility(World);
@@ -122,6 +123,37 @@ void LobbySession::ConfigureTargetDriverCount(Frontier::WorldSpace& World, uint3
     (void)SynchronizeWorldVisibility(World);
 }
 
+bool LobbySession::DeployProvingGroundStation(Frontier::WorldSpace& World, uint32_t StationIndex)
+{
+    const Frontier::SessionPolicy Policy = QueryProvingGroundSessionPolicy();
+    if (Policy.Slots.empty())
+    {
+        return false;
+    }
+    const uint32_t ClampedStation = std::min<uint32_t>(StationIndex, static_cast<uint32_t>(Policy.Slots.size() - 1u));
+    ActiveStationIndex            = ClampedStation;
+
+    auto* Vehicle = dynamic_cast<Frontier::VehicleRecord*>(World.FindFirstByType("Vehicle"));
+    if (Vehicle == nullptr)
+    {
+        return false;
+    }
+    const Frontier::SessionSlotSpecification& Slot          = Policy.Slots[ClampedStation];
+    Frontier::VehicleConfiguration&           Configuration = Vehicle->AccessConfiguration();
+    Configuration.Spatial.PositionMetres[0]                 = Slot.PositionMetres[0];
+    Configuration.Spatial.PositionMetres[1]                 = Slot.PositionMetres[1];
+    Configuration.Spatial.PositionMetres[2]                 = Slot.PositionMetres[2];
+    Configuration.Spatial.OrientationDegrees[0]             = 0.0f;
+    Configuration.Spatial.OrientationDegrees[1]             = 0.0f;
+    Configuration.Spatial.OrientationDegrees[2]             = Slot.YawDegrees;
+    Configuration.EquilibriumPlacement                      = Policy.EquilibriumPlacement;
+    Configuration.EngageBrakesOnPlacement                   = Policy.EngageBrakesOnPlacement;
+    Configuration.Physics                                   = Policy.PhysicsSimulated;
+    Configuration.Visible                                   = true;
+    ++Configuration.Revision;
+    return true;
+}
+
 bool LobbySession::ToggleLocalReady()
 {
     for (const Frontier::SessionParticipant& Entry : Session.QueryParticipants())
@@ -152,14 +184,30 @@ bool LobbySession::SynchronizeWorldVisibility(Frontier::WorldSpace& World)
 
     bool Changed = false;
 
-    // ① Slot 0: Hero ControlVehicle on the centre turntable.
-    const bool HeroOccupied = (Session.FindParticipantInSlot(0u) != nullptr);
+    // ① Slot 0: Hero ControlVehicle on the centre turntable (Stand policy: authored plinth pose + brake hold).
+    const Frontier::SessionPolicy& Policy       = Session.QueryPolicy();
+    const bool                     HeroOccupied = (Session.FindParticipantInSlot(0u) != nullptr);
     if (auto* Vehicle = dynamic_cast<Frontier::VehicleRecord*>(World.FindFirstByType("Vehicle")))
     {
         Frontier::VehicleConfiguration& Configuration = Vehicle->AccessConfiguration();
+        bool                            VehicleDirty  = false;
         if (Configuration.Visible != HeroOccupied)
         {
             Configuration.Visible = HeroOccupied;
+            VehicleDirty          = true;
+        }
+        if (Configuration.EquilibriumPlacement != Policy.EquilibriumPlacement)
+        {
+            Configuration.EquilibriumPlacement = Policy.EquilibriumPlacement;
+            VehicleDirty                       = true;
+        }
+        if (Configuration.EngageBrakesOnPlacement != Policy.EngageBrakesOnPlacement)
+        {
+            Configuration.EngageBrakesOnPlacement = Policy.EngageBrakesOnPlacement;
+            VehicleDirty                          = true;
+        }
+        if (VehicleDirty)
+        {
             ++Configuration.Revision;
             Changed = true;
         }

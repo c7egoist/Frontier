@@ -46,14 +46,19 @@ struct ThermalSpecification
     double ColdWindowTemperature     = 341.15;       // [K]     - 68 °C, the bottom of a medium compound's window
     double ColdGripSensitivity       = 0.005;        // [1/K]
     double ColdGripFloor             = 0.75;         // [-]
+    // 📝 Viscoelastic rolling hysteresis in the carcass belt and rim/hub thermal coupling from glowing brake discs.
+    double RollingHeatShare          = 0.0;          // [-]     - share of rolling-resistance power entering bulk carcass
+    double BrakeCarcassConductance   = 0.0;          // [W/K]   - brake rotor to rim/carcass thermal conductance
 };
 
 struct ThermalContact
 {
-    double SlidingPower = 0.0;     // [W]   - final dissipated tangential work, never normal impact work
-    double Airspeed     = 0.0;     // [m/s] - tyre travel relative to ambient air
-    double Volume       = 0.0;     // [m³]  - gas volume this step
-    bool   InContact    = false;   // [-]   - ground cooling admitted only while touching road
+    double SlidingPower         = 0.0;     // [W]   - final dissipated tangential work, never normal impact work
+    double RollingPower         = 0.0;     // [W]   - viscoelastic rolling deflection power at the hub
+    double BrakeDiscTemperature = 0.0;     // [K]   - corner brake rotor temperature (<= 0 disables coupling)
+    double Airspeed             = 0.0;     // [m/s] - tyre travel relative to ambient air
+    double Volume               = 0.0;     // [m³]  - gas volume this step
+    bool   InContact            = false;   // [-]   - ground cooling admitted only while touching road
 };
 
 struct ThermalMetrics
@@ -70,7 +75,10 @@ struct ThermalMetrics
     double GaugePressure          = 0.0;        // [Pa]  - current thermal/volume pressure
     double GripFactor             = 1.0;        // [-]   - one wheel's condition multiplier
     double SlidingPower           = 0.0;        // [W]   - nonnegative final contact dissipation
+    double RollingPower           = 0.0;        // [W]   - nonnegative carcass viscoelastic hysteresis power
     double SlidingHeatJoules      = 0.0;        // [J]   - accumulated heat admitted to rubber
+    double RollingHeatJoules      = 0.0;        // [J]   - accumulated rolling hysteresis heat in carcass
+    double BrakeHeatJoules        = 0.0;        // [J]   - signed heat conducted from brake disc into carcass
     double AmbientHeatJoules      = 0.0;        // [J]   - signed energy transferred to ambient/road
     double CompressionWorkJoules  = 0.0;        // [J]   - adiabatic gas compression/expansion work
     double CombustionHeatJoules   = 0.0;        // [J]   - burn heat admitted to tyre
@@ -96,9 +104,10 @@ inline bool ResolveThermalSpecification(const ThermalSpecification& Specificatio
     const double Nonnegative[] = {Specification.SurfaceCarcassConductance, Specification.CarcassGasConductance,
         Specification.SurfaceAirConductance, Specification.CarcassAirConductance, Specification.RoadConductance,
         Specification.PressureGripSensitivity, Specification.CombustibleMass, Specification.BurnRate,
-        Specification.HeatOfCombustion};
+        Specification.HeatOfCombustion, Specification.BrakeCarcassConductance};
     for (double Reading : Nonnegative) if (!std::isfinite(Reading) || Reading < 0.0) return false;
-    const double Shares[] = {Specification.SlidingHeatShare, Specification.CombustionHeatShare, Specification.MinimumGripFactor};
+    const double Shares[] = {Specification.SlidingHeatShare, Specification.CombustionHeatShare,
+        Specification.MinimumGripFactor, Specification.RollingHeatShare};
     for (double Share : Shares) if (!std::isfinite(Share) || Share < 0.0 || Share > 1.0) return false;
     return Specification.GripFadeTemperature > Specification.OptimumTemperature &&
            Specification.IgnitionTemperature > Specification.ExtinctionTemperature;
@@ -153,10 +162,12 @@ inline bool IntegrateThermal(
     double                      Seconds) noexcept
 {
     if (!ResolveThermalSpecification(Specification) || !Reading.Valid || !std::isfinite(Seconds) || Seconds <= 0.0 ||
-        !std::isfinite(Contact.SlidingPower) || !std::isfinite(Contact.Airspeed) ||
+        !std::isfinite(Contact.SlidingPower) || !std::isfinite(Contact.RollingPower) ||
+        !std::isfinite(Contact.BrakeDiscTemperature) || !std::isfinite(Contact.Airspeed) ||
         !std::isfinite(Contact.Volume) || Contact.Volume <= 0.0) return false;
     ThermalMetrics Candidate = Reading;
     Candidate.SlidingPower = Contact.InContact ? std::max(0.0, Contact.SlidingPower) : 0.0;
+    Candidate.RollingPower = Contact.InContact ? std::max(0.0, Contact.RollingPower) : 0.0;
     Candidate.CombustionPower = 0.0;
     const double GasCapacity = Candidate.AirMass * Specification.AirSpecificHeat;
     const double Capacity[3] = {Specification.SurfaceHeatCapacity, Specification.CarcassHeatCapacity, GasCapacity};
@@ -164,7 +175,7 @@ inline bool IntegrateThermal(
     double Temperatures[3] = {Initial[0], Initial[1], Initial[2]};
     if (Specification.Enabled)
     {
-        // 📝 Adiabatic volume work precedes conduction; no heat is borrowed from brake discs or normal impacts.
+        // 📝 Adiabatic volume work precedes implicit conduction across tread, carcass, enclosed air and optional rim brake heat.
         const double γ = 1.0 + Specification.AirSpecificGasConstant / Specification.AirSpecificHeat;
         Temperatures[2] *= std::pow(Candidate.PreviousVolume / Contact.Volume, γ - 1.0);
         Candidate.CompressionWorkJoules += GasCapacity * (Temperatures[2] - Initial[2]);
@@ -182,8 +193,10 @@ inline bool IntegrateThermal(
             Candidate.CombustionPower = Burned * std::max(0.0, Specification.HeatOfCombustion) / Seconds;
         }
         const double SlidingHeat = Candidate.SlidingPower * std::clamp(Specification.SlidingHeatShare, 0.0, 1.0) * Seconds;
+        const double RollingHeat = Candidate.RollingPower * std::clamp(Specification.RollingHeatShare, 0.0, 1.0) * Seconds;
         const double BurnHeat = Candidate.CombustionPower * std::clamp(Specification.CombustionHeatShare, 0.0, 1.0) * Seconds;
         Candidate.SlidingHeatJoules += SlidingHeat;
+        Candidate.RollingHeatJoules += RollingHeat;
         Candidate.CombustionHeatJoules += BurnHeat;
         const double AirFactor = 1.0 + 0.35 * std::sqrt(std::max(0.0, Contact.Airspeed));
         const double AirSurface = std::max(0.0, Specification.SurfaceAirConductance) * AirFactor;
@@ -191,12 +204,14 @@ inline bool IntegrateThermal(
         const double Road = Contact.InContact ? std::max(0.0, Specification.RoadConductance) : 0.0;
         const double SurfaceCarcass = std::max(0.0, Specification.SurfaceCarcassConductance);
         const double CarcassGas = std::max(0.0, Specification.CarcassGasConductance);
+        const double BrakeCarcass = Contact.BrakeDiscTemperature > 0.0 ? std::max(0.0, Specification.BrakeCarcassConductance) : 0.0;
         double Equations[3][4] = {
             {Capacity[0] / Seconds + AirSurface + Road + SurfaceCarcass, -SurfaceCarcass, 0.0,
                 Capacity[0] * Temperatures[0] / Seconds + (SlidingHeat + BurnHeat) / Seconds +
                 AirSurface * Specification.AmbientTemperature + Road * Specification.RoadTemperature},
-            {-SurfaceCarcass, Capacity[1] / Seconds + AirCarcass + SurfaceCarcass + CarcassGas, -CarcassGas,
-                Capacity[1] * Temperatures[1] / Seconds + AirCarcass * Specification.AmbientTemperature},
+            {-SurfaceCarcass, Capacity[1] / Seconds + AirCarcass + SurfaceCarcass + CarcassGas + BrakeCarcass, -CarcassGas,
+                Capacity[1] * Temperatures[1] / Seconds + RollingHeat / Seconds +
+                AirCarcass * Specification.AmbientTemperature + BrakeCarcass * Contact.BrakeDiscTemperature},
             {0.0, -CarcassGas, Capacity[2] / Seconds + CarcassGas, Capacity[2] * Temperatures[2] / Seconds}
         };
         for (uint32_t Pivot = 0u; Pivot < 3u; ++Pivot)
@@ -213,6 +228,7 @@ inline bool IntegrateThermal(
             }
         }
         for (uint32_t Row = 0u; Row < 3u; ++Row) Temperatures[Row] = Equations[Row][3];
+        Candidate.BrakeHeatJoules += Seconds * BrakeCarcass * (Contact.BrakeDiscTemperature - Temperatures[1]);
         Candidate.AmbientHeatJoules += Seconds * (AirSurface * (Temperatures[0] - Specification.AmbientTemperature) +
             Road * (Temperatures[0] - Specification.RoadTemperature) + AirCarcass * (Temperatures[1] - Specification.AmbientTemperature));
     }
@@ -226,8 +242,8 @@ inline bool IntegrateThermal(
     Candidate.StoredHeatJoules = 0.0;
     for (uint32_t Index = 0u; Index < 3u; ++Index)
         Candidate.StoredHeatJoules += Capacity[Index] * (Temperatures[Index] - Candidate.ReferenceTemperature);
-    Candidate.EnergyResidualJoules = Candidate.StoredHeatJoules - Candidate.SlidingHeatJoules -
-        Candidate.CompressionWorkJoules - Candidate.CombustionHeatJoules + Candidate.AmbientHeatJoules;
+    Candidate.EnergyResidualJoules = Candidate.StoredHeatJoules - Candidate.SlidingHeatJoules - Candidate.RollingHeatJoules -
+        Candidate.BrakeHeatJoules - Candidate.CompressionWorkJoules - Candidate.CombustionHeatJoules + Candidate.AmbientHeatJoules;
     Candidate.GripFactor = 1.0;
     if (Specification.Enabled)
     {

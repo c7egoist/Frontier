@@ -9,6 +9,7 @@
 #include "Frontier/Engine/Geometry/ShapeArchive.h"
 #include "Frontier/Engine/Rendering/GlobalIllumination/LuminaireRegister.h"
 #include "Frontier/Engine/Rendering/GlobalIllumination/SceneStructure.h"
+#include "Frontier/Extensions/Physics/PhysicsExtension.h"
 #include "Frontier/Extensions/Rendering/SceneGeometryOccupancy.h"
 #include "UI/Editor/ControlCentrePanel.h"
 
@@ -258,9 +259,9 @@ int main(int ArgumentCount, char** Arguments)
         Audit.Check(!Camera.QueryLastSolution().CinematicActive, "Visitor activity immediately stands down Lobby cinematic tour");
 
         // Rig transition camera (LobbyBlend): Orbit -> Cockpit -> HMI Tablet.
-        Camera.TransitionToMode(Frontier::VehicleCameraMode::Hmi);
+        Camera.TransitionToRig(Frontier::VehicleCameraRig::Hmi);
         const auto MidBlend = Camera.Advance(Subject, Frontier::VehicleCameraInput{}, 0.8);
-        Audit.Check(MidBlend.TransitionActive && MidBlend.ActiveMode == Frontier::VehicleCameraMode::Hmi,
+        Audit.Check(MidBlend.TransitionActive && MidBlend.ActiveRig == Frontier::VehicleCameraRig::Hmi,
                     "Rig transition camera eases smoothly toward HMI Tablet framing (2.1 s EaseCinematic)");
         for (int Step = 0; Step < 20; ++Step)
         {
@@ -292,7 +293,7 @@ int main(int ArgumentCount, char** Arguments)
         {
             OutdoorCinematicEverTriggered |= Camera.Advance(Subject, Frontier::VehicleCameraInput{}, 0.1).CinematicActive;
         }
-        Camera.ConfigureModeImmediate(Frontier::VehicleCameraMode::Orbit, Subject);
+        Camera.ConfigureRigImmediate(Frontier::VehicleCameraRig::Orbit, Subject);
         for (int Step = 0; Step < 700; ++Step)
         {
             OutdoorCinematicEverTriggered |= Camera.Advance(Subject, Frontier::VehicleCameraInput{}, 0.1).CinematicActive;
@@ -301,14 +302,79 @@ int main(int ArgumentCount, char** Arguments)
                     "Lobby cinematic camera is strictly Lobby-only and never engages on Proving Grounds (even after 130 s idle)");
 
         // Verify all 8 VehicleHMI rigs cycle cleanly outdoors.
-        Camera.ConfigureModeImmediate(Frontier::VehicleCameraMode::Chase, Subject);
+        Camera.ConfigureRigImmediate(Frontier::VehicleCameraRig::Chase, Subject);
         for (int RigStep = 0; RigStep < 8; ++RigStep)
         {
             Camera.CycleRig(false);
             (void)Camera.Advance(Subject, Frontier::VehicleCameraInput{}, 0.9);
         }
-        Audit.Check(Camera.QueryMode() == Frontier::VehicleCameraMode::Chase,
+        Audit.Check(Camera.QueryRig() == Frontier::VehicleCameraRig::Chase,
                     "All 8 VehicleHMI camera rigs (Chase, Orbit, Cockpit, HMI, Passenger, Hood, Tyre FL, Tyre RL) cycle cleanly");
+
+        // ④ Two Distinct Session Placement Policies: Lobby (Stand, brake hold) vs Proving Ground (TerrainEquilibrium, 12.68 deg Jump Ramp).
+        const Frontier::SessionPolicy LobbyPolicy  = Everest::QueryLobbySessionPolicy();
+        const Frontier::SessionPolicy CoursePolicy = Everest::QueryProvingGroundSessionPolicy();
+        Audit.Check(LobbyPolicy.Placement == Frontier::SessionPlacementKind::Stand && !LobbyPolicy.EquilibriumPlacement &&
+                        LobbyPolicy.EngageBrakesOnPlacement &&
+                        CoursePolicy.Placement == Frontier::SessionPlacementKind::TerrainEquilibrium && CoursePolicy.EquilibriumPlacement &&
+                        CoursePolicy.EngageBrakesOnPlacement && CoursePolicy.Slots.size() == 5u,
+                    "Lobby uses Stand placement (brake hold) while Proving Grounds uses 5-station TerrainEquilibrium placement (brake hold)");
+
+        Frontier::GlobalIllumination::SceneStructure CourseScene;
+        std::string                                  CourseDiag;
+        Audit.Check(CourseScene.LoadFacetSpace(ContentRoot / "EnvironmentArchives/ProvingGround/ProvingGround.facetspace", &CourseDiag),
+                    "ProvingGround.facetspace decodes cleanly for mesh collision & slope-equilibrium verification");
+        std::ifstream CourseMatStream(ContentRoot / "EnvironmentArchives/ProvingGround/Materials.bin", std::ios::binary);
+        const std::vector<uint8_t> CourseMatBytes((std::istreambuf_iterator<char>(CourseMatStream)), std::istreambuf_iterator<char>());
+        CourseScene.ConvertStressReserve(64u);
+
+        Frontier::SceneGeometryOccupancy CourseOccupancy;
+        CourseOccupancy.Reset(&CourseScene, CourseMatBytes);
+        (void)CourseOccupancy.ResolvePlacements(World);
+        if (const auto CourseResolutions = CourseOccupancy.QueryResolutions())
+        {
+            for (const auto& [TokenVal, Res] : *CourseResolutions)
+            {
+                if (auto* Geom = dynamic_cast<Frontier::GeometryRecord*>(World.FindRecord(Frontier::RecordToken{TokenVal})))
+                {
+                    Geom->AccessConfiguration().Resolved = Res;
+                }
+            }
+        }
+        const auto* JumpRampRec = FindGeometryByName(World, "Jump ramp");
+        Audit.Check(JumpRampRec != nullptr && JumpRampRec->QueryConfiguration().Resolved.WorldTriangles.size() >= 18u,
+                    "Jump ramp resolves exact world-space triangles for Jolt MeshShape slope collision");
+
+        // Deploy Station 1 ("Slope Ramp (12.7 deg)" at [23.6, 0.0, 0.36]) and verify inline Jolt hold + uphill throttle launch!
+        Audit.Check(Lobby.DeployProvingGroundStation(World, 1u),
+                    "DeployProvingGroundStation(1) configures ControlVehicle onto the 12.68 deg Jump ramp station");
+        Frontier::PhysicsExtension        CoursePhysics;
+        Frontier::PhysicsExtensionSettings PhysSettings{};
+        PhysSettings.Threaded      = false;
+        PhysSettings.WriteRegister = false;
+        PhysSettings.StepHz        = 240.0;
+        (void)CoursePhysics.Begin(World, PhysSettings);
+        const Frontier::PhysicsVehicle* SimCar = CoursePhysics.QueryVehicle(0u);
+        Audit.Check(SimCar != nullptr && SimCar->QueryParkedBrakeLatched() && SimCar->QueryFittedGroundNormal().x < -0.20f,
+                    "Proving Ground Jump ramp station pitches ControlVehicle to 12.68 deg slope normal with brake hold latched");
+
+        CoursePhysics.AdvanceSteps(480u);   // 2.0 s untouched on the 12.68 deg ramp
+        const float HeldX     = SimCar ? SimCar->QuerySolver().Telemetry().Chassis.Position.x : 0.0f;
+        const float HeldZ     = SimCar ? SimCar->QuerySolver().Telemetry().Chassis.Position.z : 0.0f;
+        const float HeldSpeed = SimCar ? SimCar->QuerySolver().Telemetry().Chassis.LinearVelocity.Length() : 99.0f;
+        Audit.Check(SimCar != nullptr && SimCar->QueryParkedBrakeLatched() && HeldSpeed < 0.03f,
+                    "ControlVehicle holds stationary (< 0.03 m/s) on Proving Ground Jump ramp until throttle is applied");
+
+        Frontier::PhysicsVehicleInput ClimbInput{};
+        ClimbInput.Throttle = 1.0f;
+        CoursePhysics.AssignVehicleInput(ClimbInput);
+        CoursePhysics.AdvanceSteps(380u);   // 1.58 s full-throttle uphill climb up the 12.68 deg Jump ramp deck
+        const auto* ClimbTel = SimCar ? &SimCar->QuerySolver().Telemetry() : nullptr;
+        Audit.Check(SimCar != nullptr && ClimbTel != nullptr && !SimCar->QueryParkedBrakeLatched() &&
+                        ClimbTel->Chassis.Position.x > HeldX + 2.2f && ClimbTel->Chassis.Position.z > HeldZ + 0.45f &&
+                        ClimbTel->ForwardSpeed > 2.5f && ClimbTel->EngineRPM >= 680.0f,
+                    "Throttle releases brake hold and progressive clutch climbs ControlVehicle up Proving Ground Jump ramp");
+        CoursePhysics.End(World);
 
         // Switch back to Studio Lobby.
         Audit.Check(Workspace.OpenLevel(EverestRoot / "Content/Levels/Lobby.levelspace", false) && Workspace.QueryLobbyActive(),

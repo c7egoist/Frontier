@@ -476,6 +476,10 @@ void SceneGeometryOccupancy::Resolve(Occupancy& Entry, const Frontier::GeometryC
         Resolution.Diagnostic = "The reserve is exhausted: " + std::to_string(Usable) + " of " + std::to_string(Copies.size()) + " copies can be shown.";
     // ⑤ placements: an archive copy at the archive's own placement keeps the archive's transforms exactly; a reserve copy takes its
     //    template's shape when it shows another
+    Resolution.WorldTriangles.clear();
+    const bool EmitMeshTriangles = Configuration.Visible && !Configuration.Physics && !Configuration.Fracture.Enabled && Usable == 1u &&
+                                   Resolution.Facets > 0u && Resolution.Facets <= 4096u;
+    if (EmitMeshTriangles) Resolution.WorldTriangles.reserve(static_cast<size_t>(Resolution.Facets) * 3u);
     GlobalIllumination::WorldBounds Bounds{{1.0e30, 1.0e30, 1.0e30}, {-1.0e30, -1.0e30, -1.0e30}};
     auto Emit = [&](uint32_t Occupant, const OccupantEntry& Base, const PlacementMatrix& Placement, bool Active, bool Reserve, size_t Part) {
         OccupantPlacement Entrant{Occupant, Placement, Active};
@@ -492,6 +496,18 @@ void SceneGeometryOccupancy::Resolve(Occupancy& Entry, const Frontier::GeometryC
         const uint32_t  SetIndex = Reserve ? Entry.Templates[Part].FacetSet : Base.FacetSet;
         const FacetSet& Set      = Scene_->FacetSets[SetIndex];
         Entry.Shown.push_back({Occupant, SetIndex, Placement});
+        if (EmitMeshTriangles)
+        {
+            for (const GlobalIllumination::FacetEntry& Facet : Set.Facets)
+            {
+                for (const GlobalIllumination::Vector3& Corner : Facet.Corners)
+                {
+                    const GlobalIllumination::Vector3 WorldCorner = GlobalIllumination::TransformPoint(Placement, Corner);
+                    Resolution.WorldTriangles.push_back(
+                        {static_cast<float>(WorldCorner[0]), static_cast<float>(WorldCorner[1]), static_cast<float>(WorldCorner[2])});
+                }
+            }
+        }
         const auto Extent = GlobalIllumination::TransformBounds(Placement, Set.LocalMinimum, Set.LocalMaximum);
         for (size_t Axis = 0; Axis < 3; ++Axis)
         {

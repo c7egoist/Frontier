@@ -392,14 +392,17 @@ bool VehicleInspector::ConstructOverview(ControlColumn& Page)
     Changed |= Switch(Page, "VehicleWear", "Tread wear degradation", Solver.TyreWear.Enabled);
     Changed |= Switch(Page, "VehicleFuel", "Fuel burn and live chassis mass reduction", Solver.Fuel.Enabled);
     Changed |= Switch(Page, "VehicleFluids", "Coolant and oil thermal loop", Solver.Fluids.Enabled);
-    Changed |= Switch(Page, "VehicleRace", "Race fuel calibration (+6% torque)", Solver.RaceTune);
+    Changed |= Switch(Page, "VehicleProgressiveClutch", "Closed-loop progressive clutch launch and anti-stall", Solver.Clutch.ProgressiveLaunchEnabled);
+    Changed |= Switch(Page, "VehicleRace", "Race fuel calibration (+6% torque and race wastegate)", Solver.RaceTune);
     EndSection(Page);
 
     BeginSection(Page, "Simulation, driving and PhysicsThread", "Cpu", Parameters.ThreadedPhysics ? "240 Hz thread" : "inline",
-                 "Possession, chase camera, dedicated fixed-cadence physics thread, Jolt collision substeps and start pose.");
+                 "Possession, chase camera, slope-aligned equilibrium placement, brake hold, dedicated physics thread and start pose.");
     Changed |= Switch(Page, "VehicleVisible", "Visible in Scene Viewport", Parameters.Visible);
     Changed |= Switch(Page, "VehiclePossessed", "Possessed (W/S/A/D/Space/R drive while simulating)", Parameters.Possessed);
     Changed |= Switch(Page, "VehicleChase", "Chase camera follows behind vehicle (C toggles)", Parameters.ChaseCamera);
+    Changed |= Switch(Page, "VehicleEquilibrium", "4-corner slope-aligned equilibrium placement", Parameters.EquilibriumPlacement);
+    Changed |= Switch(Page, "VehicleBrakeHold", "Hold service and parking brakes on placement until throttle", Parameters.EngageBrakesOnPlacement);
     Changed |= Switch(Page, "VehicleThreaded", "Run on dedicated fixed-rate PhysicsThread", Parameters.ThreadedPhysics);
 
     double StepHz = Parameters.PhysicsStepHz;

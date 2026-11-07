@@ -25,10 +25,17 @@ namespace Frontier
 // 📝 Driver controls for one fixed step.
 struct PhysicsVehicleInput
 {
-    float Throttle  = 0.0f;   // [0, 1]
-    float Brake     = 0.0f;   // [0, 1]
-    float Steer     = 0.0f;   // [−1, 1] +1 turns left
-    bool  Handbrake = false;
+    float Throttle    = 0.0f;   // [0, 1]
+    float Brake       = 0.0f;   // [0, 1]
+    float Steer       = 0.0f;   // [−1, 1] +1 turns left
+    bool  Handbrake   = false;
+    float ClutchPedal = 0.0f;   // [0, 1] 0: automatic clutch servo; 1: manual clutch fully disengaged
+};
+
+struct PhysicsVehiclePlacementOptions
+{
+    bool EquilibriumPlacement    = true;    // [-] fit 4-corner slope plane + static sag + radial tyre deflection
+    bool EngageBrakesOnPlacement = false;   // [-] latch service + parking brakes at spawn/reset until throttle > 0.02
 };
 
 // 📝 One vehicle as a refresh sees it. Transforms are column-major 4 × 4 (world from local): the body in the ControlVehicle's
@@ -58,7 +65,7 @@ class PhysicsVehicle
     //    solver. Returns false (with Error) when the space refuses the body.
     bool Construct(PhysicsSpace& Space, RecordToken Record, const Vehicle::VehicleSpecification& Specification,
                    const Vehicle::VehicleSolverConfiguration& Configuration, const std::array<double, 3>& StartMetres, double StartYawDegrees,
-                   std::string* Error = nullptr);
+                   std::string* Error = nullptr, PhysicsVehiclePlacementOptions Placement = {});
 
     void AssignInput(const PhysicsVehicleInput& Input) noexcept { Controls = Input; }
     // 📝 The solver's step: reads the chassis, applies its forces to the body; the space's step follows.
@@ -72,18 +79,28 @@ class PhysicsVehicle
     [[nodiscard]] const Vehicle::VehicleSolver&  QuerySolver() const noexcept { return *Solver; }
     [[nodiscard]] Vehicle::ChassisKinematics     ReadChassis() const;
     [[nodiscard]] double                         QueryAuthoredOriginBelowCentre() const noexcept { return OriginBelowCentre; }
+    [[nodiscard]] bool                           QueryParkedBrakeLatched() const noexcept { return ParkedBrakeLatched; }
+    [[nodiscard]] Vehicle::Vec3                  QueryFittedGroundNormal() const noexcept { return FittedGroundNormal; }
 
   private:
     void BuildSolver(const Vehicle::ChassisKinematics& Start);
+    [[nodiscard]] Vehicle::ChassisKinematics ResolveEquilibriumPose(const std::array<double, 3>& StartMetres, double StartYawDegrees,
+                                                                    double FallbackCoMHeight, Vehicle::Vec3& OutNormal) const;
     [[nodiscard]] bool QueryGround(const Vehicle::Vec3& Point, Vehicle::Vec3& Surface, Vehicle::Vec3& Normal) const;
 
     PhysicsSpace*                            Space = nullptr;
     RecordToken                              Record{};
     uint32_t                                 Body = PhysicsNoBody;
     Vehicle::VehicleSolverConfiguration      Configuration{};
+    PhysicsVehiclePlacementOptions           PlacementOptions{};
+    std::array<double, 3>                    AuthoredStartMetres{};
+    double                                   AuthoredStartYawDegrees = 0.0;
+    double                                   AuthoredCoMHeight = 0.53;
     std::unique_ptr<Vehicle::VehicleSolver>  Solver;
     Vehicle::ChassisKinematics               Start{};
+    Vehicle::Vec3                            FittedGroundNormal{ 0.0f, 0.0f, 1.0f };
     PhysicsVehicleInput                      Controls{};
+    bool                                     ParkedBrakeLatched = false;
     double                                   OriginBelowCentre = 0.0;   // [m] the authored model's origin below the centre of mass
     float                                    LastMass = 0.0f;           // [kg] chassis mass the body last carried (fuel burns)
 };
