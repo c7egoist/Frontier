@@ -23,6 +23,7 @@ add_library(FrontierGlobalIllumination STATIC
     Frontier/Engine/Rendering/GlobalIllumination/RefreshEncoding.cpp
     Frontier/Engine/Rendering/GlobalIllumination/EnvironmentEncoding.cpp
     Frontier/Engine/Rendering/GlobalIllumination/LuminaireRegister.cpp
+    Frontier/Engine/Rendering/GlobalIllumination/PlumeSpace.cpp
     Frontier/Engine/Rendering/GlobalIllumination/IlluminationHost.cpp
     Frontier/Engine/Rendering/GlobalIllumination/OccupantRelocation.cpp
     Frontier/Engine/Rendering/GlobalIllumination/PickProjection.cpp
@@ -34,7 +35,7 @@ target_include_directories(FrontierGlobalIllumination PUBLIC
     "${CMAKE_SOURCE_DIR}/ExternalPackages/vulkan-headers/include")
 target_compile_definitions(FrontierGlobalIllumination PUBLIC VK_NO_PROTOTYPES)
 target_compile_features(FrontierGlobalIllumination PUBLIC cxx_std_20)
-target_link_libraries(FrontierGlobalIllumination PUBLIC ${CMAKE_DL_LIBS} Threads::Threads FrontierVirtualizedGeometry)
+target_link_libraries(FrontierGlobalIllumination PUBLIC ${CMAKE_DL_LIBS} Threads::Threads FrontierVirtualizedGeometry FrontierFluidDynamics)
 
 # 📝 Only the pinned compiler (Automation/PrepareVulkanCompute.py) rebuilds these units by default, so every build presents the
 #    SPIR-V the parity validation measured. Without it the editor uses the stored archives in
@@ -90,7 +91,17 @@ set(FRONTIER_GLOBAL_ILLUMINATION_ENTRIES
     "EnvironmentLighting:ProjectCloudShadow:compute"
     # 📝 Beyond the demo: the editor's GPU picking (PickProjection).
     "PickRaster:PickVertex:vertex"
-    "PickRaster:PickFragment:fragment")
+    "PickRaster:PickFragment:fragment"
+    # 📝 World-anchored toroidal smoke & fire plume solver + shadow transmittance + volumetric raymarch (PlumeSpace).
+    "PlumeAdvection:AdvectVelocity:compute"
+    "PlumeAdvection:AdvectThermo:compute"
+    "PlumeAdvection:ResolveSunTransmittance:compute"
+    "PlumeVorticity:ResolveCurl:compute"
+    "PlumeVorticity:ConfineVorticity:compute"
+    "PlumePressure:ResolveDivergence:compute"
+    "PlumePressure:RelaxPressure:compute"
+    "PlumePressure:ProjectVelocity:compute"
+    "PlumeMarch:MarchPlume:compute")
 
 set(FRONTIER_GLOBAL_ILLUMINATION_SPV_OUTPUTS)
 if(FRONTIER_GLOBAL_ILLUMINATION_SLANGC)

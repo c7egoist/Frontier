@@ -11,6 +11,7 @@
 #include "IlluminationConstants.h"
 #include "LuminaireRegister.h"
 #include "OccupantDistanceSpace.h"
+#include "PlumeSpace.h"
 #include "RefreshEncoding.h"
 #include "RayTracingSpace.h"
 #include "ResamplingSequence.h"
@@ -175,6 +176,7 @@ class IlluminationHost
     std::unique_ptr<VarianceIntegrator> Diffuse{};
     std::unique_ptr<VarianceIntegrator> Glossy{};
     std::unique_ptr<DisplayProjection>  Display{};
+    std::unique_ptr<PlumeSpace>         Plume{};
 
     std::shared_ptr<DeviceRegion>       VertexRegion{}, MaterialRegion{}, RefreshRegion{}, LuminaireRegion{}, OccupantRegion{};
     std::shared_ptr<DeviceRegion>       VehicleRegion{}, EffectRegion{}, CloudShadowParams{}, CloudParams{};

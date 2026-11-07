@@ -1,7 +1,9 @@
 /*==========================================================================================================================================
-                                                        FLUIDPLUMEEDITOR.H
+                                                           FLUIDPLUMEEDITOR.H
 ==========================================================================================================================================*/
-// 🧩 Standalone Eulerian fluid plume & blackbody combustion authoring editor bound to FluidPlumeInspector.
+// 🧩 Full-window 1:1 Gas & Explosion Fluid Editor (ported from Experimental/Fluid): multi-document tabs, scene outliner, 3D
+//    volumetric raymarched viewport with interactive flame/explosion/wind/collider brush, 3-tab inspector, .fluidspace /
+//    .gasscene.toml sidecar persistence, and transparent RGBA flipbook sprite-sheet baker.
 
 #pragma once
 
@@ -13,12 +15,14 @@ namespace Frontier
 
 #if FRONTIER_EDITOR
 
-class RecordInspector;
+class FluidPlumeInspector;
 
-class FluidPlumeEditor
+class FluidPlumeEditor final
 {
   public:
-    static void ConstructInterface(RecordToken Token, RecordInspector& Inspector);
+    FluidPlumeEditor() = delete;
+
+    static void ConstructInterface(RecordToken Token, FluidPlumeInspector& Inspector);
 };
 
 #endif // FRONTIER_EDITOR

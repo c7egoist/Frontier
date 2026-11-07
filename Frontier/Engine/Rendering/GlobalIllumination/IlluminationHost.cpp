@@ -221,6 +221,8 @@ bool IlluminationHost::Construct(const IlluminationAssets& Assets, const Illumin
     Display = std::make_unique<DisplayProjection>(Exchange, Shaders);
     Display->ConstructPrograms(RefreshRegion, MaterialRegion, OccupantRegion, TextureFormat::Rgba8UnormSrgb);
     Display->ConstructInspection(Distance->MarchLayout, Cards->SamplingLayout, RayTracing->MarchLayout);
+    Plume = std::make_unique<PlumeSpace>(Exchange, Shaders);
+    Plume->ConstructPrograms(RefreshRegion, OccupantRegion, Distance->MarchLayout);
     for (const auto& [Offset, Bytes] : Assets.MaterialRewrites)
     {
         Exchange.WriteRegion(MaterialRegion, Offset, Bytes.data(), Bytes.size());
@@ -249,8 +251,14 @@ void IlluminationHost::ReconstructScreenTargets(std::array<uint32_t, 2> Extent)
     Diffuse->ConstructTargets(TraceExtent, ScreenExtent, *Surface, {Resampling->IrradianceView, Resampling->IrradianceView}, Resampling->GuideViews);
     Glossy->ConstructTargets(TraceExtent, ScreenExtent, *Surface, {Resampling->ReflectionView, Resampling->ReflectionView}, Resampling->GuideViews,
                              Resampling->MirrorView);
+    if (Plume)
+    {
+        Plume->ResizeTargets(TraceExtent[0], TraceExtent[1], Surface->DepthView, Shadow->LayeredView, Shadow->ComparisonSampler,
+                             Shadow->ReceiverRegion, Atmosphere->SkyView, Atmosphere->SkySampler);
+    }
     auto CloudColour = Exchange.ConstructView(CloudColourTexture);
-    DisplayNeutralResources Neutral{CloudParams, CloudColour, Exchange.ConstructView(CloudGuideTexture), CloudColour};
+    DisplayNeutralResources Neutral{CloudParams, CloudColour, Exchange.ConstructView(CloudGuideTexture), CloudColour,
+                                    Plume ? Plume->MarchView : nullptr};
     Display->ConstructTargets(ScreenExtent, *Surface, *Resampling, *Diffuse, *Glossy, *Cards, Neutral);
     PriorValid = false;
     TextureSpecification Capture;
@@ -473,6 +481,7 @@ bool IlluminationHost::AdvanceRefresh(const RefreshInputs* Inputs, const Refresh
     if (Inputs != nullptr)
     {
         Distance->RecordUnion(Begin("distance union"), Scene.QueryUnionCount(), RefreshIndex);
+        if (Plume && Plume->Active()) Plume->RecordTransport(Begin("plume transport"), Distance->MarchGroup);
     }
     else
     {
@@ -526,6 +535,7 @@ bool IlluminationHost::AdvanceRefresh(const RefreshInputs* Inputs, const Refresh
         Surface->Virtualized->RecordInspectionView(Begin("cluster inspection"), Display->InspectionView, Inputs->Toggles.Inspection);
     else if (Surface->Virtualized)
         Surface->Virtualized->DismissInspectionStatus();
+    if (Plume && Plume->Active()) Plume->RecordMarch(Begin("plume march"));
     if (Interlude == nullptr)
     {
         Display->RecordResolve(Begin("resolve"), Parity);

@@ -30,6 +30,8 @@ VehicleSpecification ConstructControlVehicleSpecification()
     //    (Delft-Tyre MF-Tyre 6.2, PPX1–4, PPY1, PPY3–4, PPZ1; its PPY2 shapes a load curve this formula does not have).
     Solver.TyreThermal.Enabled         = true;
     Solver.TyreThermal.ColdGripEnabled = true;
+    Solver.TyreThermal.RollingHeatShare        = 0.65;
+    Solver.TyreThermal.BrakeCarcassConductance = 1.6;
     Solver.PressureSensitiveTyre       = true;
     Solver.TyrePacejka.NominalPressure = Solver.Tyre.InflationPressure;
     Solver.TyrePacejka.ppx1 = -0.3489f; Solver.TyrePacejka.ppx2 = 0.382f;
@@ -47,6 +49,10 @@ VehicleSpecification ConstructControlVehicleSpecification()
     Solver.Turbo.TurboFrictionCoeff     = 5.0e-5f;
     Solver.Turbo.TurboFrictionQuadratic = 1.0e-9f;
     Solver.Turbo.TurboInertia           = 2.0e-4f;
+    Solver.Turbo.RaceWastegateEnabled   = true;
+    Solver.Clutch.ProgressiveLaunchEnabled = true;
+    Solver.Clutch.SmoothSaturationEnabled  = true;
+    Solver.Clutch.ThermalEnabled           = true;
     // 📝 Cycled ABS (dump fast, reapply in small steps, hold inside the band) instead of the hunting proportional loop.
     //    The dump is solenoid-fast (~5 ms: these brakes lock a wheel in ~10 ms past the peak) while the reapply creeps at
     //    ~3 %/step — a coarse reapply overshoots the narrow stable band and lock-recovery wastes the stop (F6).
@@ -65,6 +71,9 @@ VehicleSpecification ConstructControlVehicleSpecification()
     Solver.Fuel.Enabled            = true;
     Solver.Fluids.Enabled          = true;
     Solver.ChargeAir.Enabled       = true;
+    Solver.ChargeAir.AirflowEffectivenessEnabled = true;
+    Solver.Intake.RamAirRecovery                 = 0.72f;
+    Solver.Intake.FilterRestriction_BarPerKg2S2  = 0.015f;
     Solver.AckermannShare          = 0.8f;
     Solver.Carcass                 = TyreCarcassCategory::Spring;
     return Specification;
@@ -292,6 +301,9 @@ std::vector<VehicleFigure> EnumerateVehicleFigures(VehicleSpecification& S)
     Real("turbo", "friction", "Shaft friction", "", 0.0, 0.05, C.Turbo.TurboFrictionCoeff);
     Real("turbo", "friction_quadratic", "Shaft friction, quadratic", "", 0.0, 0.001, C.Turbo.TurboFrictionQuadratic);
     Real("turbo", "wastegate_bar", "Wastegate limit", "bar", 0.2, 4.0, C.Turbo.WastegateMaxBoost);
+    Real("turbo", "wastegate_race_bar", "Wastegate limit, race fuel", "bar", 0.2, 4.0, C.Turbo.WastegateMaxBoost_Race);
+    Switch("turbo", "race_wastegate", "Race tune raises wastegate", C.Turbo.RaceWastegateEnabled);
+    Real("turbo", "choke_flow_kgps", "Compressor choke flow", "kg/s", 0.0, 2.0, C.Turbo.CompressorChokeFlow_KgPerS);
     Real("turbo", "blowoff_bar_per_s", "Blow-off rate", "bar/s", 0.5, 60.0, C.Turbo.BovPressureReleaseRate);
     Real("turbo", "turbine_efficiency", "Turbine efficiency", "", 0.2, 1.0, C.Turbo.TurbineEfficiency);
     Real("turbo", "compressor_efficiency", "Compressor efficiency", "", 0.2, 1.0, C.Turbo.CompressorEfficiency);
@@ -312,6 +324,9 @@ std::vector<VehicleFigure> EnumerateVehicleFigures(VehicleSpecification& S)
     Real("charge", "intercooler", "Intercooler effectiveness", "", 0.0, 1.0, C.ChargeAir.IntercoolerEffectiveness);
     Real("charge", "reference_k", "Curves' charge temperature", "°C", 0.0, 120.0, C.ChargeAir.ReferenceTemperature_K, 1.0, Celsius);
     Switch("charge", "density_correction", "Warm charge thins the boost", C.ChargeAir.DensityCorrection);
+    Switch("charge", "airflow_intercooler", "Airspeed modulates intercooler", C.ChargeAir.AirflowEffectivenessEnabled);
+    Real("charge", "standstill_share", "Still-air intercooler share", "", 0.1, 1.0, C.ChargeAir.StandstillEffectivenessShare);
+    Real("charge", "airflow_mps", "Intercooler reference airspeed", "m/s", 2.0, 80.0, C.ChargeAir.AirflowReferenceSpeed_mps);
     // 📝 Driveline
     Real("gearbox", "final_drive", "Final drive", "×", 1.5, 8.0, C.Transmission.FinalDriveRatio);
     Real("gearbox", "efficiency", "Driveline efficiency", "", 0.5, 1.0, C.Transmission.DriveEfficiency);
@@ -332,6 +347,15 @@ std::vector<VehicleFigure> EnumerateVehicleFigures(VehicleSpecification& S)
     Real("clutch", "converter_lockup_rpm", "Converter lock-up speed", "rpm", 400.0, 6000.0, C.Clutch.LockupRPM);
     Real("clutch", "converter_lockup_drop_rpm", "Lock-up hysteresis", "rpm", 50.0, 2000.0, C.Clutch.LockupDropRPM);
     Real("clutch", "converter_lockup_rate", "Lock-up rate", "1/s", 0.5, 20.0, C.Clutch.LockupRate);
+    Switch("clutch", "progressive_launch", "Closed-loop bite/flare launch", C.Clutch.ProgressiveLaunchEnabled);
+    Switch("clutch", "smooth_saturation", "Smooth algebraic slip saturation", C.Clutch.SmoothSaturationEnabled);
+    Real("clutch", "bite_engagement", "Launch bite engagement", "", 0.05, 0.6, C.Clutch.LaunchBiteEngagement);
+    Real("clutch", "flare_rpm", "Launch flare above idle", "rpm", 300.0, 4500.0, C.Clutch.LaunchFlareRpmDelta);
+    Real("clutch", "launch_torque_share", "Flare torque transfer share", "", 0.25, 0.95, C.Clutch.LaunchTorqueShare);
+    Real("clutch", "launch_window_mps", "Launch window speed", "m/s", 1.0, 15.0, C.Clutch.LaunchSpeedThreshold);
+    Switch("clutch", "thermal_enabled", "Clutch plate thermal fade", C.Clutch.ThermalEnabled);
+    Real("clutch", "heat_capacity_jk", "Clutch heat capacity", "kJ/K", 0.5, 20.0, C.Clutch.HeatCapacity_JK, Kilo);
+    Real("clutch", "cooling_wk", "Bellhousing cooling", "W/K", 1.0, 150.0, C.Clutch.CoolingConductance_WK);
     Choose("propulsion", "type", "Propulsion", { "Combustion", "Electric" }, C.Propulsion);
     Choose("differential", "mode", "Differential", { "Open", "Locked", "Limited slip", "Torque vectoring" }, C.Differential.Mode);
     Real("differential", "locking", "Locking factor", "", 0.0, 1.0, C.Differential.LockingFactor);
@@ -445,6 +469,8 @@ std::vector<VehicleFigure> EnumerateVehicleFigures(VehicleSpecification& S)
         Wide("thermal", "carcass_air", "Carcass to air", "W/K", 0.0, 50.0, T.CarcassAirConductance);
         Wide("thermal", "road", "Tread to road", "W/K", 0.0, 100.0, T.RoadConductance);
         Wide("thermal", "sliding_share", "Sliding heat into the tyre", "", 0.0, 1.0, T.SlidingHeatShare);
+        Wide("thermal", "rolling_share", "Rolling hysteresis heat into carcass", "", 0.0, 1.0, T.RollingHeatShare);
+        Wide("thermal", "brake_carcass_wk", "Brake disc to carcass conductance", "W/K", 0.0, 20.0, T.BrakeCarcassConductance);
         Wide("thermal", "optimum_k", "Window top", "°C", 40.0, 150.0, T.OptimumTemperature, 1.0, Celsius);
         Wide("thermal", "fade_k", "Grip fully faded", "°C", 80.0, 300.0, T.GripFadeTemperature, 1.0, Celsius);
         Wide("thermal", "minimum_grip", "Hot grip floor", "", 0.1, 1.0, T.MinimumGripFactor);
@@ -475,6 +501,7 @@ std::vector<VehicleFigure> EnumerateVehicleFigures(VehicleSpecification& S)
     Real("fuel", "bsfc", "Specific consumption", "g/kWh", 150.0, 500.0, C.Fuel.SpecificConsumption_gPerKWh);
     Real("fuel", "idle_gps", "Idle flow", "g/s", 0.0, 3.0, C.Fuel.IdleFlow_gPerS);
     Real("fuel", "lhv_mjkg", "Lower heating value", "MJ/kg", 20.0, 60.0, C.Fuel.LowerHeatingValue_MJkg);
+    Real("fuel", "boost_enrichment_per_bar", "Boost enrichment per bar", "1/bar", 0.0, 0.5, C.Fuel.BoostEnrichmentPerBar);
     Switch("intake", "enabled", "Intake manifold filling", C.Intake.Enabled);
     Real("intake", "plenum_l", "Plenum volume", "L", 0.5, 12.0, C.Intake.PlenumVolume_L);
     Real("intake", "throttle_mm", "Throttle bore", "mm", 20.0, 120.0, C.Intake.ThrottleBore_mm);
@@ -482,6 +509,8 @@ std::vector<VehicleFigure> EnumerateVehicleFigures(VehicleSpecification& S)
     Real("intake", "idle_throttle", "Idle bypass", "", 0.0, 0.1, C.Intake.IdleThrottle);
     Real("intake", "displacement_l", "Swept volume", "L", 0.5, 10.0, C.Intake.Displacement_L);
     Real("intake", "volumetric_efficiency", "Volumetric efficiency", "", 0.4, 1.2, C.Intake.VolumetricEfficiency);
+    Real("intake", "ram_air_recovery", "Ram-air dynamic pressure recovery", "", 0.0, 1.0, C.Intake.RamAirRecovery);
+    Real("intake", "filter_restriction", "Air-filter flow restriction", "bar·s²/kg²", 0.0, 0.5, C.Intake.FilterRestriction_BarPerKg2S2);
     Real("motor", "peak_torque_nm", "Peak torque", "N·m", 50.0, 1500.0, C.ElectricMotor.PeakTorque_Nm);
     Real("motor", "peak_power_kw", "Peak power", "kW", 20.0, 600.0, C.ElectricMotor.PeakPower_W, Kilo);
     Real("motor", "regen_nm", "Regen cap", "N·m", 0.0, 800.0, C.ElectricMotor.RegenerativeTorque_Nm);

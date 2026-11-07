@@ -89,10 +89,11 @@ struct ChassisKinematics
 
 struct DriverInput
 {
-    float Throttle = 0.0f;  // [0..1]
-    float Brake    = 0.0f;  // [0..1]
-    float Steer    = 0.0f;  // [-1..1]  +1 = steer left (+Y)
-    bool  Handbrake = false;
+    float Throttle    = 0.0f;  // [0..1]
+    float Brake       = 0.0f;  // [0..1]
+    float Steer       = 0.0f;  // [-1..1]  +1 = steer left (+Y)
+    bool  Handbrake   = false;
+    float ClutchPedal = 0.0f;  // [0..1]  0 = clutch engaged, 1 = pedal fully depressed (manual override / clutch-kick)
 };
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -305,9 +306,14 @@ struct VehicleTelemetry
     float    ChargeTemperature_K  = 0.0f;
     float    EnginePower_W     = 0.0f;   // [W]    brake power
     float    ManifoldPressure_Bar = 0.0f;   // [bar] absolute plenum pressure (0 while the intake is off)
+    float    IntakeMassFlow_KgPerS = 0.0f;  // [kg/s] aspirated air mass flow
+    float    RamBoost_Bar       = 0.0f;     // [bar] aerodynamic ram-air pressure recovery net of filter restriction
     bool     ShiftActive       = false; // [-]    a staged shift/handoff is in progress this step
     float    HandoffBlend      = -1.0f; // [-]    dual-clutch overlap 0..1 (-1 while idle/legacy)
     float    ClutchEngagement  = 1.0f;  // [-]    staged single-plate engagement (1 while legacy)
+    float    ClutchSlipRPM     = 0.0f;  // [rpm]  engine − gearbox input shaft slip
+    float    ClutchSlipPower_W = 0.0f;  // [W]    friction-disc thermal slip dissipation
+    float    ClutchTemperature_K = 293.15f; // [K] friction-disc temperature
     float    ConverterSlipRPM  = 0.0f;  // [rpm]  pump − turbine (converter only)
     float    MotorRPM          = 0.0f;  // [rpm]  traction motor shaft (electric only)
     float    MotorTorque_Nm    = 0.0f;  // [Nm]   motor shaft torque (electric only)
@@ -398,6 +404,8 @@ private:
     bool                              ShiftDown = false;       // the staged shift is a downshift (rev-match blip)
     int                               PreselectGear = -1;      // dual-clutch preselected gear mid-handoff
     float                             LaunchTimer = 0.0f;      // [s] staged single-plate launch ramp
+    float                             SlewedClutchEngagement = 0.0f; // [-] hydraulic-rate-limited closed-loop clutch servo
+    float                             ClutchTemperature = 293.15f;   // [K] friction clutch pack temperature
     bool                              LockupAllowed = false;   // converter lockup permission this step
     // Beyond Project Drive:
     [[nodiscard]] float WheelSteer(size_t Wheel) const noexcept;   // the angle this wheel turns (Ackermann share)

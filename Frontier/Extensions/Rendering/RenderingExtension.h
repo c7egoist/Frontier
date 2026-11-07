@@ -16,6 +16,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <unordered_map>
 
 namespace Frontier
 {
@@ -54,12 +55,14 @@ class RenderingExtension
 
   private:
     void SynchronizeVehicleVisuals(const Frontier::WorldSpace& World);
+    void SynchronizePlumeSources(const Frontier::WorldSpace& World, float DeltaSeconds, double ElapsedSeconds);
 
     std::filesystem::path                                        ProjectRoot_;
     std::filesystem::path                                        ShaderRoot_;
     bool                                                         HostDeviceAttached_ = false;
     Frontier::VulkanDeviceAccess                                 Device_{};
     std::unique_ptr<Frontier::GlobalIllumination::SceneViewport> Viewport_{};
+    std::string                                                  SceneArchive_{};
     std::string                                                  Quality_{};
     bool                                                         RayTracing_ = true;
     std::string                                                  Failure_{};
@@ -74,6 +77,8 @@ class RenderingExtension
     RecordToken                                                  ActiveVehicleToken_{};       // [-] shown vehicle record for viewport picking
     std::array<RecordToken, 4>                                   ActiveCornerTokens_{};       // [-] enclosed FL/FR/RL/RR tyre tokens
     uint64_t                                                     AuthoringSignature_ = 0;     // [-] memoized revision digest while stopped
+    FluidDynamics::PlumeSourceProjector                          PlumeProjector_{};
+    std::unordered_map<std::string, FluidDynamics::FluidSceneDocument> LoadedFluidSpaces_{};
 };
 
 } // namespace Frontier

@@ -23,6 +23,7 @@ struct DisplayNeutralResources
     std::shared_ptr<DeviceTextureView> CloudColour{};
     std::shared_ptr<DeviceTextureView> CloudGuide{};
     std::shared_ptr<DeviceTextureView> Lightning{};
+    std::shared_ptr<DeviceTextureView> Smoke{};
 };
 
 class DisplayProjection

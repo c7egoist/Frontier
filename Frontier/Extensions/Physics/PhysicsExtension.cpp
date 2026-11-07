@@ -155,12 +155,37 @@ size_t PhysicsExtension::Begin(WorldSpace& World, const PhysicsExtensionSettings
         }
         else if (Geometry.Visible && Resolved.Shown == 1 && Bounded)
         {
-            PhysicsBodyDescriptor Collider;
-            Collider.Record           = Record->QueryToken().Value;
-            Collider.HalfExtentMetres = { 0.5 * World3[0], 0.5 * World3[1], 0.5 * World3[2] };
-            Collider.PositionMetres   = { 0.5 * (Minimum[0] + Maximum[0]), 0.5 * (Minimum[1] + Maximum[1]), 0.5 * (Minimum[2] + Maximum[2]) };
-            Collider.Motion           = PhysicsMotion::Fixed;
-            Entry.Body                = Space->AddBody(Collider);
+            Entry.Body = PhysicsNoBody;
+            if (Resolved.WorldTriangles.size() >= 3u && (Resolved.WorldTriangles.size() % 3u) == 0u)
+            {
+                PhysicsBodyDescriptor MeshCollider;
+                MeshCollider.Record   = Record->QueryToken().Value;
+                MeshCollider.Shape    = PhysicsShape::Triangles;
+                MeshCollider.Motion   = PhysicsMotion::Fixed;
+                MeshCollider.Friction = 0.85;
+                MeshCollider.Points.reserve(Resolved.WorldTriangles.size());
+                MeshCollider.Triangles.reserve(Resolved.WorldTriangles.size());
+                for (size_t Index = 0u; Index < Resolved.WorldTriangles.size(); ++Index)
+                {
+                    const auto& Corner = Resolved.WorldTriangles[Index];
+                    MeshCollider.Points.push_back(Corner);
+                    MeshCollider.Triangles.push_back(static_cast<uint32_t>(Index));
+                }
+                Entry.Body = Space->AddBody(MeshCollider);
+                if (Entry.Body != PhysicsNoBody)
+                {
+                    Entry.Remark = std::to_string(Resolved.WorldTriangles.size() / 3u) + "-facet static triangle mesh";
+                }
+            }
+            if (Entry.Body == PhysicsNoBody)
+            {
+                PhysicsBodyDescriptor Collider;
+                Collider.Record           = Record->QueryToken().Value;
+                Collider.HalfExtentMetres = { 0.5 * World3[0], 0.5 * World3[1], 0.5 * World3[2] };
+                Collider.PositionMetres   = { 0.5 * (Minimum[0] + Maximum[0]), 0.5 * (Minimum[1] + Maximum[1]), 0.5 * (Minimum[2] + Maximum[2]) };
+                Collider.Motion           = PhysicsMotion::Fixed;
+                Entry.Body                = Space->AddBody(Collider);
+            }
             if (Entry.Body != PhysicsNoBody)
             {
                 Entry.Physics = PhysicsParticipation::Fixed;
@@ -227,7 +252,8 @@ size_t PhysicsExtension::Begin(WorldSpace& World, const PhysicsExtensionSettings
         }
     }
 
-    // ④ Vehicles (the fixed colliders are in, so a chassis finds its road)
+    // ④ Vehicles (the fixed colliders are in and indexed, so a chassis finds its road or ramp on 4-corner equilibrium probes)
+    Space->Prepare();
     for (WorldRegisterEntry& Entry : Register.AccessEntries())
         if (dynamic_cast<VehicleRecord*>(World.FindRecord(Entry.Token)) != nullptr) AddVehicle(World, Entry.Token, &Entry);
     Space->Prepare();
@@ -337,9 +363,12 @@ void PhysicsExtension::AddVehicle(WorldSpace& World, RecordToken Token, WorldReg
     Link.Carcass        = Solver.Carcass;
     Link.CornerFitted   = CornerFitted;
     Link.SolverSubsteps = std::max(1, Configuration.SolverSubsteps);
+    PhysicsVehiclePlacementOptions PlacementOptions;
+    PlacementOptions.EquilibriumPlacement    = Configuration.EquilibriumPlacement;
+    PlacementOptions.EngageBrakesOnPlacement = Configuration.EngageBrakesOnPlacement;
     std::string Error;
     if (!Link.Physics->Construct(*Space, Token, Configuration.Specification, Solver, ToDouble(Configuration.Spatial.PositionMetres),
-                                 Configuration.Spatial.OrientationDegrees[2], &Error))
+                                 Configuration.Spatial.OrientationDegrees[2], &Error, PlacementOptions))
     {
         if (Entry)
         {

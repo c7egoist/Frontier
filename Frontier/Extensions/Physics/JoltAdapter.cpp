@@ -27,19 +27,19 @@ namespace Frontier
 namespace
 {
 
-JPH::Vec3 ToVector(const std::array<double, 3>& Value)
+JPH::Vec3 ToVector(const std::array<double, 3>& Vector)
 {
-    return JPH::Vec3(static_cast<float>(Value[0]), static_cast<float>(Value[1]), static_cast<float>(Value[2]));
+    return JPH::Vec3(static_cast<float>(Vector[0]), static_cast<float>(Vector[1]), static_cast<float>(Vector[2]));
 }
 
-JPH::RVec3 ToPosition(const std::array<double, 3>& Value)
+JPH::RVec3 ToPosition(const std::array<double, 3>& Position)
 {
-    return JPH::RVec3(static_cast<JPH::Real>(Value[0]), static_cast<JPH::Real>(Value[1]), static_cast<JPH::Real>(Value[2]));
+    return JPH::RVec3(static_cast<JPH::Real>(Position[0]), static_cast<JPH::Real>(Position[1]), static_cast<JPH::Real>(Position[2]));
 }
 
-JPH::Quat ToRotation(const std::array<double, 4>& Value)
+JPH::Quat ToRotation(const std::array<double, 4>& Rotation)
 {
-    return JPH::Quat(static_cast<float>(Value[0]), static_cast<float>(Value[1]), static_cast<float>(Value[2]), static_cast<float>(Value[3]))
+    return JPH::Quat(static_cast<float>(Rotation[0]), static_cast<float>(Rotation[1]), static_cast<float>(Rotation[2]), static_cast<float>(Rotation[3]))
         .Normalized();
 }
 

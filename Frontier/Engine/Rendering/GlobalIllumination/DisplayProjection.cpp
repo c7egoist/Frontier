@@ -90,11 +90,11 @@ void DisplayProjection::ConstructTargets(std::array<uint32_t, 2> Extent, const S
     auto FlareVisibility   = Exchange_.ConstructView(FlareVisibilityTexture_);
     auto FlareImage        = Exchange_.ConstructView(FlareImageTexture_);
     auto FlareTransmission = Exchange_.ConstructView(FlareTransmissionTexture_);
-    auto IdleSmoke         = Exchange_.ConstructView(IdleSmokeTexture_);
+    auto SmokeView         = Neutral.Smoke ? Neutral.Smoke : Exchange_.ConstructView(IdleSmokeTexture_);
     if (InspectionLayout_) InspectionGroup_ = Exchange_.ConstructDescriptorGroup(InspectionLayout_, {RefreshRegion_, InspectionView}, "Inspection march");
     RecombineGroup_ = Exchange_.ConstructDescriptorGroup(RecombineLayout_, {RefreshRegion_, MaterialRegion_, Surface.AttributeView, Surface.DepthView,
                                                                             Surface.DirectView, Diffuse.ScreenView, Glossy.ScreenView, Resampling.IrradianceView,
-                                                                            InspectionView, Cards.FinalView, RecombinedView, OccupantRegion_, IdleSmoke, LinearClamp,
+                                                                            InspectionView, Cards.FinalView, RecombinedView, OccupantRegion_, SmokeView, LinearClamp,
                                                                             Resampling.MirrorView},
                                                          "Display recombination");
     for (uint32_t Parity = 0; Parity < 2; ++Parity)

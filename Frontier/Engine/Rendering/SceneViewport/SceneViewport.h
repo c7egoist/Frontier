@@ -7,6 +7,7 @@
 #pragma once
 
 #include "EnvironmentOverlay.h"
+#include "Engine/PhysicalDynamics/FluidDynamics/PlumeSourceProjection.h"
 #include "Rendering/AnalyticIllumination/AnalyticIlluminationSequence.h"
 #include "Rendering/GlobalIllumination/OccupantRelocation.h"
 #include "Rendering/GlobalIllumination/PickProjection.h"
@@ -16,6 +17,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -61,6 +63,7 @@ struct ViewportRendering
     bool     VirtualizedGeometry  = false;   // [-] the cluster nesting takeover (the demo's ?hierarchy=1)
     uint32_t VirtualizedStreamSlots = 0;     // [-] arena slots the pages stream through (0: one per page)
     bool     AnalyticIllumination = false;   // [-] the fast closed-form renderer (AnalyticIllumination) instead of the GI
+    double   MotionBlurStrength   = 0.0;     // [-] camera component; zero disables the velocity-aligned blur
     uint32_t Refinements          = 0;       // [-] RefinementBit mask of options beyond the demo (0: the demo)
     // 📝 The rest of the Render settings record. Every default is the demo's, so a caller that sets only the fields above refreshes
     //    exactly as before; the fields above overwrite Toggles' Indirect, Antialias, ExposureCompensation, Inspection and Refinements,
@@ -115,6 +118,10 @@ class SceneViewport
     [[nodiscard]] bool QueryEnvironmentActive() const noexcept { return static_cast<bool>(Overlay_); }
     [[nodiscard]] const std::string& QueryAdapter() const noexcept { return Adapter_; }
     [[nodiscard]] ViewportStatistics QueryStatistics() const noexcept;
+    [[nodiscard]] double QuerySubmissionWaitMilliseconds() const noexcept { return SubmissionWaitMilliseconds_; }
+    [[nodiscard]] double QuerySlowestSubmissionWaitMilliseconds() const noexcept { return SlowestSubmissionWaitMilliseconds_; }
+    [[nodiscard]] const std::string& QuerySlowestSubmissionLabel() const noexcept { return SlowestSubmissionLabel_; }
+    [[nodiscard]] uint32_t QuerySubmissionCount() const noexcept { return SubmissionCount_; }
     [[nodiscard]] const SceneViewportConfiguration& QueryConfiguration() const noexcept { return Configuration_; }
     bool ReadPresented(std::vector<uint8_t>& OutRgba);
 
@@ -135,6 +142,11 @@ class SceneViewport
     void WriteVehicleState(float SteeringAngle, const std::array<bool, 4>& CarcassFieldActive,
                            const std::array<std::array<float, 4>, 4>& Deformation,
                            const std::array<const float*, 4>& CarcassFields);
+    // 📝 Supplies live world-grid plume sources (tyre smoke/fire, FluidPlume emitters & explosions) and GI fire light.
+    void AssignPlumeState(const FluidDynamics::PlumeSettings& Settings,
+                          std::span<const FluidDynamics::PlumeSourceEntry> Sources,
+                          const FluidDynamics::PlumeFireLightEntry& FireLight,
+                          std::optional<std::array<float, 3>> FocusOverride = std::nullopt);
     // 📝 Beyond the demo: GPU picking (PickProjection). The occupants drawn at and around a point of the last refreshed image (a
     //    fraction of its width and height from the top-left), seen through that refresh's camera, unjittered, with the occupants
     //    where that refresh drew them; false while nothing has been refreshed or when the pick program is unavailable.
@@ -167,7 +179,17 @@ class SceneViewport
     std::shared_ptr<DeviceTextureView>     PresentedView_{};
     std::string                            Adapter_{};
     double                                 ElapsedSeconds_ = 0.0;
+    double                                 SubmissionWaitMilliseconds_ = 0.0; // [ms] CPU wall from queue submit through completion fence
+    double                                 SlowestSubmissionWaitMilliseconds_ = 0.0;
+    std::string                            SlowestSubmissionLabel_{};
+    uint32_t                               SubmissionCount_ = 0;
     std::vector<float>                     BaseVehicleProfile_{};            // [-] VehicleProfile.bin baseline (cabin, steering column, tablet)
+    FluidDynamics::PlumeSettings           PlumeSettings_{};
+    std::vector<FluidDynamics::PlumeSourceEntry> PlumeSources_{};
+    FluidDynamics::PlumeFireLightEntry     PlumeFireLight_{};
+    std::optional<std::array<float, 3>>    PlumeFocusOverride_{};
+    float                                  PriorFireIntensity_ = 0.0f;
+    std::array<float, 3>                   PriorFirePosition_  = {0.0f, 0.0f, 0.0f};
 };
 
 } // namespace Frontier::GlobalIllumination

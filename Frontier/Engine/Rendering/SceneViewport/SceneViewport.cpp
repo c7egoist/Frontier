@@ -39,7 +39,8 @@ SceneViewport::SceneViewport() = default;
 
 SceneViewport::~SceneViewport()
 {
-    // 📝 Device resources die before their exchanges; the borrowed environment views before the environment images.
+    // 📝 Device resources die before their exchanges; retire in-flight work before tearing down borrowed views and host buffers.
+    if (Exchange_) Exchange_->AwaitIdle();
     PresentedView_.reset();
     Pick_.reset();
     Overlay_.reset();
@@ -66,6 +67,15 @@ bool SceneViewport::Construct(const VulkanDeviceAccess* HostDevice, const SceneV
     Exchange_      = std::make_unique<DeviceExchange>();
     if (HostDevice != nullptr ? !Exchange_->AttachDevice(*HostDevice, OutDiagnostic) : !Exchange_->Initialize("", OutDiagnostic)) return false;
     Adapter_ = Exchange_->AdapterDescription();
+    Exchange_->SubmissionTiming = [this](const std::string& Label, double Milliseconds) {
+        SubmissionWaitMilliseconds_ += Milliseconds;
+        ++SubmissionCount_;
+        if (Milliseconds > SlowestSubmissionWaitMilliseconds_)
+        {
+            SlowestSubmissionWaitMilliseconds_ = Milliseconds;
+            SlowestSubmissionLabel_ = Label;
+        }
+    };
     if (Configuration.Journal)
     {
         Exchange_->FaultObserver = [Journal = Configuration.Journal](const std::string& Fault) { Journal("device fault: " + Fault); };
@@ -82,9 +92,28 @@ bool SceneViewport::Construct(const VulkanDeviceAccess* HostDevice, const SceneV
     }
     if (Configuration.Journal) Configuration.Journal("bring-up on " + Adapter_ + " (" + (HostDevice != nullptr ? "the editor's device" : "an own device") + ")");
 
-    // ① the proving ground exactly as the demo built it, the vehicle deactivated (no car yet)
+    // ① resolve <ArchiveStem>.facetspace dynamically (falling back to ProvingGround.facetspace or first *.facetspace)
     IlluminationAssets Assets;
-    Assets.FacetSpace  = Configuration.SceneArchive / "ProvingGround.facetspace";
+    const std::string  ArchiveStem   = Configuration.SceneArchive.filename().string();
+    std::filesystem::path FacetCandidate = Configuration.SceneArchive / (ArchiveStem + ".facetspace");
+    std::error_code       FacetError;
+    if (!std::filesystem::is_regular_file(FacetCandidate, FacetError))
+    {
+        FacetCandidate = Configuration.SceneArchive / "ProvingGround.facetspace";
+        if (!std::filesystem::is_regular_file(FacetCandidate, FacetError) &&
+            std::filesystem::is_directory(Configuration.SceneArchive, FacetError))
+        {
+            for (const auto& Entry : std::filesystem::directory_iterator(Configuration.SceneArchive, FacetError))
+            {
+                if (Entry.is_regular_file() && Entry.path().extension() == ".facetspace")
+                {
+                    FacetCandidate = Entry.path();
+                    break;
+                }
+            }
+        }
+    }
+    Assets.FacetSpace  = FacetCandidate;
     Assets.OmitVehicle = true;
     if (!ReadArchive(Configuration.SceneArchive / "Materials.bin", Assets.MaterialProfiles, OutDiagnostic)) return false;
     // 📝 Beyond the demo: the engine shapes (EngineContent/ShapeArchives) and the editor's reserve of occupants for copies and
@@ -111,6 +140,14 @@ bool SceneViewport::Construct(const VulkanDeviceAccess* HostDevice, const SceneV
     Host_->Journal = Configuration.Journal;
     ScreenExtent = {std::max(64u, ScreenExtent[0]), std::max(64u, ScreenExtent[1])};
     if (!Host_->Construct(Assets, Settings, ScreenExtent, OutDiagnostic)) return false;
+    if (ArchiveStem == "Lobby")
+    {
+        Host_->StreetLampPoles.clear();
+        Host_->PointLampPosts.clear();
+        Host_->Luminaires.StudioLuminaires = QueryLobbyStudioLuminaires();
+        Host_->Luminaires.VehicleBeam      = AutomotiveBeam::Off;
+        Host_->Luminaires.RoofLightEnabled = false;
+    }
 
     // ② idle profiles of the parts the editor does not run yet (vehicle visual, effects, the demo's own clouds)
     const std::pair<const char*, std::shared_ptr<DeviceRegion>> Profiles[] = {{"VehicleProfile.bin", Host_->VehicleRegion},
@@ -225,6 +262,10 @@ bool SceneViewport::Refresh(const ViewportCamera& Camera, const SceneEnvironment
                             std::array<uint32_t, 2> ScreenExtent, std::string* OutDiagnostic)
 {
     if (!Host_) return false;
+    SubmissionWaitMilliseconds_ = 0.0;
+    SlowestSubmissionWaitMilliseconds_ = 0.0;
+    SlowestSubmissionLabel_.clear();
+    SubmissionCount_ = 0;
     ScreenExtent = {std::max(64u, ScreenExtent[0]), std::max(64u, ScreenExtent[1])};
     // 📝 Render settings › Trace resolution: the resampling targets follow it as they follow the screen extent.
     const uint32_t TraceScale = Rendering.TraceScale != 0 ? std::clamp(Rendering.TraceScale, 1u, 4u) : std::max(1u, Configuration_.TraceScale);
@@ -309,11 +350,30 @@ bool SceneViewport::Refresh(const ViewportCamera& Camera, const SceneEnvironment
         VirtualizedConfigured_   = Rendering.VirtualizedGeometry;
         Virtualized.StreamSlots  = Rendering.VirtualizedStreamSlots;
     }
-    // 📝 Idle inputs of the parts outside the port, as the demo writes them with no cabin and nothing burning; bit 0 of the
-    //    presentation word carries only exposure/scale metadata.
+    // 📝 World-grid plume transport & raymarch + live fire illumination feeding DirectRadiance, CardDirect & RayIntersection.
     Inputs.External.ElapsedSeconds = ElapsedSeconds_;
-    Inputs.External.PresentationControl        = (1u << 8) | (1000u << 20);
-    Inputs.External.FireBlock      = {0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.46f, 0.14f, 14.0f};
+    const uint32_t MotionBlurByte = static_cast<uint32_t>(std::lround(std::clamp(Rendering.MotionBlurStrength, 0.0, 1.0) * 255.0));
+    Inputs.External.PresentationControl = (1u << 8) | (1000u << 20) | MotionBlurByte;
+    const std::array<float, 3> PlumeFocus = PlumeFocusOverride_.value_or(
+        std::array<float, 3>{ static_cast<float>(Inputs.Focus[0]), static_cast<float>(Inputs.Focus[1]), static_cast<float>(Inputs.Focus[2]) });
+    const bool SmokeActive = Host_->Plume && Host_->Plume->PrepareRefresh(
+        PlumeSettings_, PlumeSources_, PlumeFireLight_, PlumeFocus,
+        static_cast<float>(std::max(DeltaSeconds, 1.0 / 120.0)), ElapsedSeconds_);
+    Inputs.External.SmokeResident = SmokeActive;
+    Inputs.External.FireBlock     = {
+        PlumeFireLight_.Position[0], PlumeFireLight_.Position[1], PlumeFireLight_.Position[2], PlumeFireLight_.Intensity,
+        PlumeFireLight_.Colour[0], PlumeFireLight_.Colour[1], PlumeFireLight_.Colour[2], PlumeFireLight_.Reach
+    };
+    const float FireMoveSq = (PlumeFireLight_.Position[0] - PriorFirePosition_[0]) * (PlumeFireLight_.Position[0] - PriorFirePosition_[0]) +
+                             (PlumeFireLight_.Position[1] - PriorFirePosition_[1]) * (PlumeFireLight_.Position[1] - PriorFirePosition_[1]) +
+                             (PlumeFireLight_.Position[2] - PriorFirePosition_[2]) * (PlumeFireLight_.Position[2] - PriorFirePosition_[2]);
+    if (Host_->Cards && (std::fabs(PlumeFireLight_.Intensity - PriorFireIntensity_) > 6.0f ||
+                         (PlumeFireLight_.Intensity > 1.0f && FireMoveSq > 0.36f)))
+    {
+        Host_->Cards->InvalidateLighting();
+        PriorFireIntensity_ = PlumeFireLight_.Intensity;
+        PriorFirePosition_  = PlumeFireLight_.Position;
+    }
     Inputs.Environment             = &Sky;
     Inputs.CelestialDelta          = std::max(0.0, DeltaSeconds);
     Inputs.LuminairesLive          = true;
@@ -446,6 +506,17 @@ Transform SceneViewport::ResolveViewProjection(const ViewportCamera& Camera, std
     const double Aspect = static_cast<double>(ScreenExtent[0]) / static_cast<double>(std::max(1u, ScreenExtent[1]));
     return MultiplyTransform(ConstructPerspectiveTransform(Camera.VerticalFieldOfView, Aspect, Camera.Near),
                              ConstructViewTransform(Camera.Position, Camera.Target, Camera.Up));
+}
+
+void SceneViewport::AssignPlumeState(const FluidDynamics::PlumeSettings& Settings,
+                                     std::span<const FluidDynamics::PlumeSourceEntry> Sources,
+                                     const FluidDynamics::PlumeFireLightEntry& FireLight,
+                                     std::optional<std::array<float, 3>> FocusOverride)
+{
+    PlumeSettings_      = Settings;
+    PlumeSources_.assign(Sources.begin(), Sources.end());
+    PlumeFireLight_     = FireLight;
+    PlumeFocusOverride_ = FocusOverride;
 }
 
 bool SceneViewport::PickOccupants(std::array<double, 2> Point, OccupantPick& Outcome, std::string* OutDiagnostic)

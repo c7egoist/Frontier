@@ -1221,18 +1221,52 @@ template <>
 void FluidPlumeRecord::SerializeConfiguration(toml::table& OutTable) const
 {
     OutTable.insert_or_assign("enabled", Parameters.Enabled);
+    OutTable.insert_or_assign("combustion_enabled", Parameters.CombustionEnabled);
+    OutTable.insert_or_assign("self_shadow_enabled", Parameters.SelfShadowing);
     OutTable.insert_or_assign("buoyancy_lift", static_cast<double>(Parameters.BuoyancyLift));
     OutTable.insert_or_assign("vorticity", static_cast<double>(Parameters.VorticityConfinement));
+    OutTable.insert_or_assign("dissipation_rate", static_cast<double>(Parameters.DissipationRate));
+    OutTable.insert_or_assign("fuel_injection_rate", static_cast<double>(Parameters.FuelInjectionRate));
     OutTable.insert_or_assign("blackbody_k", static_cast<double>(Parameters.BlackbodyCoreKelvin));
+    OutTable.insert_or_assign("soot_extinction", static_cast<double>(Parameters.SootExtinction));
+    OutTable.insert_or_assign("domain_scale", static_cast<double>(Parameters.DomainScale));
+    OutTable.insert_or_assign("burst_pattern", static_cast<int64_t>(Parameters.BurstPattern));
+    if (!Parameters.SpaceFile.empty()) OutTable.insert_or_assign("space_file", Parameters.SpaceFile);
+    if (!Parameters.PresetIdentity.empty()) OutTable.insert_or_assign("preset", Parameters.PresetIdentity);
+    toml::array PositionArray;
+    for (int Axis = 0; Axis < 3; ++Axis)
+    {
+        PositionArray.push_back(std::round(static_cast<double>(Parameters.PositionMetres[Axis]) * 1.0e4) / 1.0e4);
+    }
+    OutTable.insert_or_assign("position", std::move(PositionArray));
 }
 
 template <>
 void FluidPlumeRecord::DeserializeConfiguration(const toml::table& InTable)
 {
     Parameters.Enabled              = ReadBool(InTable, "enabled", Parameters.Enabled);
+    Parameters.CombustionEnabled    = ReadBool(InTable, "combustion_enabled", Parameters.CombustionEnabled);
+    Parameters.SelfShadowing        = ReadBool(InTable, "self_shadow_enabled", Parameters.SelfShadowing);
     Parameters.BuoyancyLift         = ReadFloat(InTable, "buoyancy_lift", Parameters.BuoyancyLift);
     Parameters.VorticityConfinement = ReadFloat(InTable, "vorticity", Parameters.VorticityConfinement);
+    Parameters.DissipationRate      = ReadFloat(InTable, "dissipation_rate", Parameters.DissipationRate);
+    Parameters.FuelInjectionRate    = ReadFloat(InTable, "fuel_injection_rate", Parameters.FuelInjectionRate);
     Parameters.BlackbodyCoreKelvin  = ReadFloat(InTable, "blackbody_k", Parameters.BlackbodyCoreKelvin);
+    Parameters.SootExtinction       = ReadFloat(InTable, "soot_extinction", Parameters.SootExtinction);
+    Parameters.DomainScale          = ReadFloat(InTable, "domain_scale", Parameters.DomainScale);
+    if (const auto Pattern = InTable["burst_pattern"].value<int64_t>())
+    {
+        Parameters.BurstPattern = static_cast<uint32_t>(std::clamp<int64_t>(*Pattern, 0, 4));
+    }
+    if (const auto File = InTable["space_file"].value<std::string>()) Parameters.SpaceFile = *File;
+    if (const auto Preset = InTable["preset"].value<std::string>()) Parameters.PresetIdentity = *Preset;
+    if (const toml::array* Pos = InTable["position"].as_array(); Pos && Pos->size() == 3)
+    {
+        for (size_t Axis = 0; Axis < 3; ++Axis)
+        {
+            Parameters.PositionMetres[Axis] = static_cast<float>((*Pos)[Axis].value_or<double>(0.0));
+        }
+    }
     Parameters.AdvanceRevision();
 }
 
@@ -1901,13 +1935,18 @@ bool WorldSpace::LoadLevelSpace(const std::filesystem::path& LevelSpacePath, std
     }
 
     Clear();
-    LoadedLevelPath = LevelSpacePath;
+    LoadedLevelPath    = LevelSpacePath;
+    EnvironmentArchive = "ProvingGround";
 
     if (const toml::table* LevelHeader = Document["level"].as_table())
     {
         if (const auto Name = (*LevelHeader)["name"].value<std::string>())
         {
             WorldName = *Name;
+        }
+        if (const auto Archive = (*LevelHeader)["environment_archive"].value<std::string>(); Archive && !Archive->empty())
+        {
+            EnvironmentArchive = *Archive;
         }
     }
 
@@ -1982,6 +2021,10 @@ bool WorldSpace::SaveLevelSpace(const std::filesystem::path& LevelSpacePath, std
     toml::table Header;
     Header.insert_or_assign("format_version", int64_t{1});
     Header.insert_or_assign("name", WorldName);
+    if (!EnvironmentArchive.empty() && EnvironmentArchive != "ProvingGround")
+    {
+        Header.insert_or_assign("environment_archive", EnvironmentArchive);
+    }
     Root.insert_or_assign("level", std::move(Header));
 
     std::unordered_map<uint64_t, std::string> TokenIdentities;

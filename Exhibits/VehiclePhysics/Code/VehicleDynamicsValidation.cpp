@@ -1734,6 +1734,293 @@ void ValidateEndToEnd()
     }
 }
 
+//------------------------------------------------------------------------------------------------------------------------
+//                      J · PROGRESSIVE CLUTCH, FORCED INDUCTION, THERMAL COUPLING & SLOPE EQUILIBRIUM
+//------------------------------------------------------------------------------------------------------------------------
+
+void ValidateClutchBoostThermalAndSlopeEquilibrium(const std::filesystem::path& Results)
+{
+    Heading("J · Closed-loop clutch, forced-induction physics, carcass heat & 4-corner slope equilibrium");
+    const float dt = 1.0f / 240.0f;
+
+    // J1a progressive part-throttle uphill launch on 22.5 % (12.68°) grade without stalling
+    {
+        SolverRig Car;
+        Car.Build(ControlConfig(), SlopedGround(-0.225f), { 0.0f, 0.0f, 0.40f });
+        Car.Run(V::DriverInput{ 0.0f, 1.0f, 0.0f, true }, 0.8f, dt);
+        float LowestRpm    = 1.0e9f;
+        float MidEngage    = 0.0f;
+        for (int Step = 0; Step < static_cast<int>(3.5f / dt); ++Step)
+        {
+            Car.Solver.AssignInput(V::DriverInput{ 0.55f, 0.0f, 0.0f, false, 0.0f });
+            Car.Solver.Step(dt);
+            Car.Chassis.Integrate(dt);
+            LowestRpm = std::min(LowestRpm, Car.Telemetry().EngineRPM);
+            if (Step == 36) MidEngage = Car.Telemetry().ClutchEngagement;
+        }
+        const float IdleRpm = Car.Solver.QueryConfiguration().Engine.IdleRPM;
+        Report(LowestRpm >= IdleRpm * 0.92f && Car.Telemetry().ForwardSpeed > 3.5f && MidEngage > 0.10f && MidEngage < 0.99f,
+               Format("progressive clutch uphill (22.5 %% grade, 55 %% throttle): min %.0f rpm (idle %.0f), engagement %.2f at 0.15 s, climbs to %.1f m/s",
+                      LowestRpm, IdleRpm, MidEngage, Car.Telemetry().ForwardSpeed));
+    }
+
+    // J1b manual ClutchPedal override (clutch kick) + clutch plate thermal fade under sustained slip
+    {
+        SolverRig Car;
+        Car.Build(ControlConfig([](V::VehicleSpecification& S)
+                                {
+                                    S.Solver.Clutch.HeatCapacity_JK        = 280.0f;
+                                    S.Solver.Clutch.FadeStartTemperature_K = 296.0f;
+                                    S.Solver.Clutch.FadeEndTemperature_K   = 460.0f;
+                                }),
+                  SlopedGround(-0.25f), { 0.0f, 0.0f, 0.40f });
+        Car.Run(V::DriverInput{ 0.0f, 1.0f, 0.0f, true }, 0.5f, dt);
+        // Depress ClutchPedal = 1.0 under full throttle for 1.2 s: crank spins up freely while wheels stay braked.
+        Car.Run(V::DriverInput{ 1.0f, 1.0f, 0.0f, false, 1.0f }, 1.20f, dt);
+        const float KickRpm  = Car.Telemetry().EngineRPM;
+        const float KickSlip = Car.Telemetry().ClutchSlipRPM;
+        // Release pedal partially (0.52) against uphill load to generate sustained slip power & lining temperature rise.
+        float PeakSlipPower = 0.0f;
+        for (int Step = 0; Step < static_cast<int>(2.0f / dt); ++Step)
+        {
+            Car.Solver.AssignInput(V::DriverInput{ 1.0f, 0.0f, 0.0f, false, 0.52f });
+            Car.Solver.Step(dt);
+            Car.Chassis.Integrate(dt);
+            PeakSlipPower = std::max(PeakSlipPower, Car.Telemetry().ClutchSlipPower_W);
+        }
+        const float HeatedPlate_K = Car.Telemetry().ClutchTemperature_K;
+        const float Capacity      = V::ResolveClutchThermalScale(Car.Solver.QueryConfiguration().Clutch, HeatedPlate_K);
+        Report(KickRpm > 2400.0f && KickSlip > 2000.0f && PeakSlipPower > 5000.0f && HeatedPlate_K > 305.0f && Capacity < 0.96f,
+               Format("clutch kick & lining fade: %.0f rpm on kick (slip %.0f rpm), peak slip %.1f kW heats plate to %.1f °C (capacity ×%.2f)",
+                      KickRpm, KickSlip, PeakSlipPower * 0.001f, HeatedPlate_K - 273.15f, Capacity));
+    }
+
+    // J2 forced induction: compressor choke, race wastegate, airspeed-modulated intercooler, ram-air & boost fuel enrichment
+    {
+        auto MeasureTurboBoost = [&](bool RaceFuel, float ChokeKgPerS)
+        {
+            V::VehicleSpecification Spec = V::ConstructControlVehicleSpecification();
+            Spec.Solver.RaceTune                         = RaceFuel;
+            Spec.Solver.Turbo.RaceWastegateEnabled       = true;
+            Spec.Solver.Turbo.WastegateMaxBoost          = 1.15f;
+            Spec.Solver.Turbo.WastegateMaxBoost_Race     = 1.40f;
+            Spec.Solver.Turbo.CompressorChokeFlow_KgPerS = ChokeKgPerS;
+            for (float& Y : Spec.Solver.Turbo.BoostPressureCurve.Y) Y *= 1.25f;
+            const V::VehicleSolverConfiguration Cfg = V::ResolveSolverConfiguration(Spec);
+            V::Drivetrain Drive;
+            Drive.AssignEngine(Cfg.Engine);
+            Drive.AssignTransmission(Cfg.Transmission);
+            Drive.AssignInduction(V::InductionType::Turbocharged);
+            Drive.AssignTurbo(Cfg.Turbo);
+            Drive.AssignChargeAir(Cfg.ChargeAir);
+            Drive.AssignRaceTune(RaceFuel);
+            Drive.Reset(5600.0f);
+            V::DrivetrainInputs In{};
+            In.dt             = dt;
+            In.GearIndex      = 4;
+            In.Throttle       = 1.0f;
+            const float TotalRatio = Cfg.Transmission.GearRatios[4] * Cfg.Transmission.FinalDriveRatio;
+            In.DrivenWheelRPM = 5600.0f / TotalRatio;
+            In.LeftWheelRPM   = In.DrivenWheelRPM;
+            In.RightWheelRPM  = In.DrivenWheelRPM;
+            In.VehicleSpeed   = 45.0f;
+            V::DrivetrainOutputs Out{};
+            for (int Step = 0; Step < 2400; ++Step) Out = Drive.Step(In);
+            return Out.BoostPressure_Bar;
+        };
+        const float PumpBoost   = MeasureTurboBoost(false, 0.0f);
+        const float RaceBoost   = MeasureTurboBoost(true, 0.0f);
+        const float ChokedBoost = MeasureTurboBoost(true, 0.28f);
+        Report(RaceBoost > PumpBoost + 0.15f && ChokedBoost < RaceBoost * 0.90f,
+               Format("turbo ceiling & choke: %.2f bar pump, %.2f bar race wastegate, %.2f bar above compressor choke",
+                      PumpBoost, RaceBoost, ChokedBoost));
+
+        V::ChargeAirSpecification AirSpec;
+        AirSpec.Enabled                      = true;
+        AirSpec.IntercoolerEffectiveness     = 0.72f;
+        AirSpec.AirflowEffectivenessEnabled  = true;
+        AirSpec.StandstillEffectivenessShare = 0.30f;
+        AirSpec.AirflowReferenceSpeed_mps    = 28.0f;
+        const float ChargeStill = V::ResolveChargeTemperature(AirSpec, 1.1f, 0.72f, 0.0f);
+        const float ChargeSpeed = V::ResolveChargeTemperature(AirSpec, 1.1f, 0.72f, 55.0f);
+        Report(ChargeSpeed < ChargeStill - 12.0f,
+               Format("airspeed intercooler: %.1f °C soaked at standstill cools to %.1f °C at 55 m/s",
+                      ChargeStill - 273.15f, ChargeSpeed - 273.15f));
+
+        auto MeasureIntake = [&](float SpeedMps, float FilterRestriction, V::DrivetrainOutputs& Out)
+        {
+            V::VehicleSpecification Spec = V::ConstructControlVehicleSpecification();
+            V::IntakeManifoldSpecification IntakeSpec;
+            IntakeSpec.Enabled                       = true;
+            IntakeSpec.RamAirRecovery                = 0.80f;
+            IntakeSpec.FilterRestriction_BarPerKg2S2 = FilterRestriction;
+            V::Drivetrain Drive;
+            Drive.AssignEngine(Spec.Solver.Engine);
+            Drive.AssignTransmission(Spec.Solver.Transmission);
+            Drive.AssignInduction(V::InductionType::NaturallyAspirated);
+            Drive.AssignIntake(IntakeSpec);
+            Drive.Reset(5500.0f);
+            V::DrivetrainInputs In{};
+            In.dt             = dt;
+            In.GearIndex      = 4;
+            In.Throttle       = 1.0f;
+            const float Ratio = Spec.Solver.Transmission.GearRatios[4] * Spec.Solver.Transmission.FinalDriveRatio;
+            In.DrivenWheelRPM = 5500.0f / Ratio;
+            In.LeftWheelRPM   = In.DrivenWheelRPM;
+            In.RightWheelRPM  = In.DrivenWheelRPM;
+            In.VehicleSpeed   = SpeedMps;
+            for (int Step = 0; Step < 480; ++Step) Out = Drive.Step(In);
+        };
+        V::DrivetrainOutputs StillOut{}, RamOut{}, RestrictedOut{};
+        MeasureIntake(0.0f, 0.02f, StillOut);
+        MeasureIntake(75.0f, 0.02f, RamOut);
+        MeasureIntake(0.0f, 1.20f, RestrictedOut);
+        Report(RamOut.RamBoost_Bar > 0.020f && RamOut.ManifoldPressure_Bar > StillOut.ManifoldPressure_Bar + 0.015f &&
+                   RestrictedOut.ManifoldPressure_Bar < StillOut.ManifoldPressure_Bar - 0.02f &&
+                   RamOut.IntakeMassFlow_KgPerS > StillOut.IntakeMassFlow_KgPerS,
+               Format("intake aero & filter: +%.0f mbar ram recovery at 75 m/s (MAP %.3f vs %.3f bar; clogged filter %.3f bar)",
+                      RamOut.RamBoost_Bar * 1000.0f, RamOut.ManifoldPressure_Bar, StillOut.ManifoldPressure_Bar,
+                      RestrictedOut.ManifoldPressure_Bar));
+
+        SolverRig LeanRig, RichRig;
+        LeanRig.Build(ControlConfig([](V::VehicleSpecification& S) { S.Solver.Fuel.BoostEnrichmentPerBar = 0.0f; }), FlatGround(), { 0.0f, 0.0f, 0.40f });
+        RichRig.Build(ControlConfig([](V::VehicleSpecification& S) { S.Solver.Fuel.BoostEnrichmentPerBar = 0.25f; }), FlatGround(), { 0.0f, 0.0f, 0.40f });
+        LeanRig.Run(V::DriverInput{ 1.0f, 0.0f, 0.0f, false }, 5.0f, dt);
+        RichRig.Run(V::DriverInput{ 1.0f, 0.0f, 0.0f, false }, 5.0f, dt);
+        const double BurnLean = LeanRig.Telemetry().FuelBurnt;
+        const double BurnRich = RichRig.Telemetry().FuelBurnt;
+        Report(BurnRich > BurnLean * 1.10,
+               Format("boost fuel enrichment: %.1f g burned under boost enrichment vs %.1f g stoichiometric (+%.0f %%)",
+                      BurnRich * 1000.0, BurnLean * 1000.0, (BurnRich / std::max(1.0e-6, BurnLean) - 1.0) * 100.0));
+    }
+
+    // J3 carcass rolling hysteresis & brake-disc rim conduction obey the first law of thermodynamics
+    {
+        V::ThermalSpecification Spec;
+        Spec.Enabled                 = true;
+        Spec.RollingHeatShare        = 0.70;
+        Spec.BrakeCarcassConductance = 3.5;
+        V::ThermalMetrics RollOnly, RollPlusHotDisc;
+        (void)V::ConstructThermal(RollOnly, Spec, 0.17, 110000.0, 101325.0);
+        (void)V::ConstructThermal(RollPlusHotDisc, Spec, 0.17, 110000.0, 101325.0);
+        for (int Step = 0; Step < 9600; ++Step)
+        {
+            V::ThermalContact ContactCold{};
+            ContactCold.InContact            = true;
+            ContactCold.Volume               = 0.17;
+            ContactCold.Airspeed             = 35.0;
+            ContactCold.RollingPower         = 1400.0;
+            ContactCold.BrakeDiscTemperature = Spec.AmbientTemperature;
+            (void)V::IntegrateThermal(RollOnly, Spec, ContactCold, 1.0 / 240.0);
+
+            V::ThermalContact ContactHot  = ContactCold;
+            ContactHot.BrakeDiscTemperature = 680.0;
+            (void)V::IntegrateThermal(RollPlusHotDisc, Spec, ContactHot, 1.0 / 240.0);
+        }
+        Report(RollOnly.CarcassTemperature > Spec.AmbientTemperature + 1.5 &&
+                   RollPlusHotDisc.CarcassTemperature > RollOnly.CarcassTemperature + 2.5 &&
+                   std::fabs(RollOnly.EnergyResidualJoules) < 1.0e-4 &&
+                   std::fabs(RollPlusHotDisc.EnergyResidualJoules) < 1.0e-4,
+               Format("carcass rolling & brake conduction: %.2f °C rolling alone, %.2f °C next to 407 °C brake disc (1st-law residual %.2e J)",
+                      RollOnly.CarcassTemperature - 273.15, RollPlusHotDisc.CarcassTemperature - 273.15, RollPlusHotDisc.EnergyResidualJoules));
+    }
+
+    // J4 Jolt 4-corner slope-aligned equilibrium placement + brake-hold latch & uphill ramp climb (12.68° / 22.5 % triangle-mesh ramp)
+    {
+        PhysicsSpace Space;
+        PhysicsBodyDescriptor Ground;
+        Ground.Shape            = PhysicsShape::Box;
+        Ground.HalfExtentMetres = { 500.0, 500.0, 1.0 };
+        Ground.PositionMetres   = { 0.0, 0.0, -1.0 };
+        Ground.Motion           = PhysicsMotion::Fixed;
+        Ground.Friction         = 0.85;
+        (void)Space.AddBody(Ground);
+
+        // Exact Proving Ground 'Jump ramp' slope (x in [22, 28], z rising 0 -> 1.35 m at 12.68°) feeding a 1.35 m crest deck
+        // (x in [28, 35]) so the car climbs the full 12.68° grade and drives onto the upper plateau without cliff belly-beaching.
+        PhysicsBodyDescriptor Ramp;
+        Ramp.Shape    = PhysicsShape::Triangles;
+        Ramp.Motion   = PhysicsMotion::Fixed;
+        Ramp.Friction = 0.90;
+        Ramp.Points   = {
+            { 22.0f, -3.2f, 0.0f },  { 28.0f, -3.2f, 1.35f }, { 28.0f, 3.2f, 1.35f },
+            { 22.0f, -3.2f, 0.0f },  { 28.0f, 3.2f, 1.35f },  { 22.0f, 3.2f, 0.0f },
+            { 28.0f, -3.2f, 1.35f }, { 35.0f, -3.2f, 1.35f }, { 35.0f, 3.2f, 1.35f },
+            { 28.0f, -3.2f, 1.35f }, { 35.0f, 3.2f, 1.35f },  { 28.0f, 3.2f, 1.35f },
+        };
+        for (uint32_t Idx = 0u; Idx < static_cast<uint32_t>(Ramp.Points.size()); ++Idx) Ramp.Triangles.push_back(Idx);
+        const uint32_t RampBody = Space.AddBody(Ramp);
+        Space.Prepare();
+
+        const V::VehicleSpecification       Spec   = V::ConstructControlVehicleSpecification();
+        const V::VehicleSolverConfiguration Config = V::ResolveSolverConfiguration(Spec);
+        PhysicsVehicle                      Car;
+        PhysicsVehiclePlacementOptions      Placement{};
+        Placement.EquilibriumPlacement    = true;
+        Placement.EngageBrakesOnPlacement = true;
+        std::string Error;
+        const bool  Built = Car.Construct(Space, RecordToken{ 1u }, Spec, Config, { 23.6, 0.0, 0.36 }, 0.0, &Error, Placement);
+        Space.Prepare();
+
+        const V::Vec3  FittedNormal  = Car.QueryFittedGroundNormal();
+        const float    ExpectedSlope = std::atan2(1.35f, 6.0f);   // 0.22131 rad = 12.6804°
+        const V::Vec3  ExpectedNorm{ -std::sin(ExpectedSlope), 0.0f, std::cos(ExpectedSlope) };
+        const float    NormalDot     = V::Dot(FittedNormal, ExpectedNorm);
+        const V::Vec3  NoseAtSpawn   = Car.ReadChassis().Orientation.Rotate({ 1.0f, 0.0f, 0.0f });
+        const float    PitchDeg      = std::asin(std::clamp(NoseAtSpawn.z, -1.0f, 1.0f)) * 57.2957795f;
+
+        Report(Built && RampBody != PhysicsNoBody && NormalDot > 0.9998f && std::fabs(PitchDeg - 12.6804f) < 0.25f && Car.QueryParkedBrakeLatched(),
+               Format("4-corner slope equilibrium on 12.68° mesh ramp: pitch %.2f°, normal dot %.5f, brake hold latched", PitchDeg, NormalDot));
+
+        // Hold for 3.0 s with zero player input: must remain stationary on the 12.68° ramp with 4 wheels in contact and engine idling.
+        std::ofstream RampTrace(Results / "RampEquilibriumLaunch.csv");
+        RampTrace << "t_s,phase,x_m,z_m,speed_mps,rpm,clutch_eng,brake_latched\n";
+        for (int Step = 0; Step < 720; ++Step)
+        {
+            Car.AssignInput(PhysicsVehicleInput{});
+            Car.Step(1.0 / 240.0);
+            Space.Step(1.0 / 240.0, 1);
+            if ((Step % 24) == 0)
+            {
+                const auto& T = Car.QuerySolver().Telemetry();
+                RampTrace << Step / 240.0 << ",hold," << T.Chassis.Position.x << "," << T.Chassis.Position.z << ","
+                          << T.ForwardSpeed << "," << T.EngineRPM << "," << T.ClutchEngagement << "," << (Car.QueryParkedBrakeLatched() ? 1 : 0) << "\n";
+            }
+        }
+        const V::VehicleTelemetry& HeldTelemetry = Car.QuerySolver().Telemetry();
+        const float                HeldSpeed     = HeldTelemetry.Chassis.LinearVelocity.Length();
+        Report(Car.QueryParkedBrakeLatched() && HeldTelemetry.WheelsInContact == 4 && HeldSpeed < 0.03f &&
+                   HeldTelemetry.EngineRPM >= Config.Engine.IdleRPM * 0.95f,
+               Format("parked on 12.68° ramp for 3 s: speed %.4f m/s, %u wheels in contact, engine idling at %.0f rpm",
+                      HeldSpeed, HeldTelemetry.WheelsInContact, HeldTelemetry.EngineRPM));
+
+        // Apply throttle: brake latch releases automatically and progressive clutch launches the car cleanly up & over the 1.35 m crest!
+        float LowestClimbRpm = 1.0e9f;
+        float PeakCrestZ     = HeldTelemetry.Chassis.Position.z;
+        for (int Step = 0; Step < 840; ++Step)
+        {
+            PhysicsVehicleInput Drive{};
+            Drive.Throttle = 1.0f;
+            Car.AssignInput(Drive);
+            Car.Step(1.0 / 240.0);
+            Space.Step(1.0 / 240.0, 1);
+            const auto& T  = Car.QuerySolver().Telemetry();
+            LowestClimbRpm = std::min(LowestClimbRpm, T.EngineRPM);
+            PeakCrestZ     = std::max(PeakCrestZ, T.Chassis.Position.z);
+            if ((Step % 24) == 0)
+            {
+                RampTrace << (3.0 + Step / 240.0) << ",climb," << T.Chassis.Position.x << "," << T.Chassis.Position.z << ","
+                          << T.ForwardSpeed << "," << T.EngineRPM << "," << T.ClutchEngagement << "," << (Car.QueryParkedBrakeLatched() ? 1 : 0) << "\n";
+            }
+        }
+        const auto& Climbed = Car.QuerySolver().Telemetry();
+        Report(!Car.QueryParkedBrakeLatched() && LowestClimbRpm >= Config.Engine.IdleRPM * 0.92f &&
+                   Climbed.Chassis.Position.x > 28.5f && PeakCrestZ > 1.75f,
+               Format("throttle releases brake hold & climbs 12.68° ramp crest: min %.0f rpm, peak CoM z %.2f m, clears lip to x = %.1f m",
+                      LowestClimbRpm, PeakCrestZ, Climbed.Chassis.Position.x));
+    }
+}
+
 } // namespace
 
 int main(int ArgumentCount, char** Arguments)
@@ -1750,6 +2037,7 @@ int main(int ArgumentCount, char** Arguments)
     ValidateClutches(Results);
     ValidateElectricIntake(Results);
     ValidateEndToEnd();
+    ValidateClutchBoostThermalAndSlopeEquilibrium(Results);
     const std::string Summary = Format("\n%s %d / %d assertions\n", Failed == 0 ? "🟢" : "🔴", Passed, Passed + Failed);
     std::printf("%s", Summary.c_str());
     Log << Summary;

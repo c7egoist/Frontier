@@ -2,6 +2,14 @@
 
 Single progress and violation tracker. Detailed evidence belongs in Exhibits, not competing progress reports.
 
+## Fluid Plume Editor parity pass (2026-11-07, branch `arena/8ff1f043-frontier`)
+
+- `FluidPlumeInspector` now occupies the inspector column and uses the shared page controls. `FluidPlumeEditor` retains the GPU solver/raymarch path, four document slots, orbit/brush/burst/collider interaction, sidecar/TOML I/O, undo/redo, and RGBA flipbook export.
+- Replaced the rejected default ImGui combo/checkbox/slider/selectable/menu-bar controls with the shared dropdown surface, ControlKit switches/palette, and custom native selection rows. SVG glyphs/panels route through `PanelChrome` → `PixelSpace`/`GlyphSpace`.
+- Modal layout now includes document/preset controls, outliner visibility cards and preset cards, viewport chrome, transport/timeline, and a named inspector header. Both `D` and legacy `E` detonate shortcuts are supported.
+- **Verified:** `FluidDynamicsValidation` passes; `FluidEditorCapture --modal-only` verifies all 8 upstream sample TOML round trips and refreshes captures `02`, `03`, and `06`; shader archive audit reports 0 failures across all 7 sets; `FrontierSceneEditorUI` builds on Linux and Windows Zig; Windows Frontier preview package rebuilt (40.2 MiB, SHA-256 `fdd5fdcd82932f164e42190e5d88bee0bb00c95d4d587d2085b6c8568d78bd29`).
+- **Parity remains open:** inspector sliders now use the shared ControlKit range + value-pill treatment, each inspector section is independently padded/card-backed, and the viewport uses a neutral black-to-gray background/grid instead of blue. Exact pixel comparison is still blocked because the matching Fluid Editor HTML/reference file is not present in this checkout (the tracked `FluidNodeEditor.html` is a different node-graph prototype). The full root CTest set (150 registered tests) was attempted but most unrelated test executables were not built in this fresh host tree; the fluid-specific CTest passes. Windows runtime was not launched here; the package is unsigned and not antivirus-scanned.
+
 ## EngineUpdate status
 
 | ID  | Finding or task                        | Status      | Next action                            |

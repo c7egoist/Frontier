@@ -79,8 +79,8 @@ def VerifyShaderSets(Installation):
         for Entry in Entries:
             VerifySpirv(Installation / 'EngineContent/ShaderArchives' / Manifest.parent.name / Entry['file'])
         Counts[Manifest.parent.name] = len(Entries)
-    if set(Counts) != {'GlobalIllumination', 'Environment', 'VirtualizedGeometry', 'AnalyticIllumination', 'ParticleSimulation', 'Surface'}:
-        raise RuntimeError('Expected the GlobalIllumination, Environment, VirtualizedGeometry, AnalyticIllumination, ParticleSimulation and '
+    if set(Counts) != {'GlobalIllumination', 'Environment', 'VirtualizedGeometry', 'AnalyticIllumination', 'ParticleSimulation', 'FluidSimulation', 'Surface'}:
+        raise RuntimeError('Expected the GlobalIllumination, Environment, VirtualizedGeometry, AnalyticIllumination, ParticleSimulation, FluidSimulation and '
                            'Surface shader sets, found ' +
                            ', '.join(sorted(Counts)))
     return Counts
@@ -113,9 +113,17 @@ def Main():
     VerifyExecutable(Executable)
     SolidArcExecutable = LocateSolidArcExecutable(Executable, Arguments.solidarc_executable)
     TextureExecutable = LocateTextureExecutable(Executable, Arguments.texture_executable)
+    EverestExecutable = Executable.with_name('Everest.exe')
+    if EverestExecutable.is_file():
+        VerifyExecutable(EverestExecutable)
+    else:
+        EverestExecutable = None
     BuildContent = Executable.parent / 'EngineContent'
     StagedProject = RepositoryRoot / 'Projects/Everest/Content'
-    for Required in [BuildContent / 'FontArchives/FontCatalogue.json', StagedProject / 'EnvironmentArchives/ProvingGround/ProvingGround.facetspace',
+    for Required in [BuildContent / 'FontArchives/FontCatalogue.json',
+                     StagedProject / 'EnvironmentArchives/Lobby/Lobby.facetspace',
+                     StagedProject / 'EnvironmentArchives/ProvingGround/ProvingGround.facetspace',
+                     StagedProject / 'Levels/Lobby.levelspace',
                      StagedProject / 'EnvironmentArchives/CelestialMaps/Hipparcos8.csv']:
         if not Required.is_file():
             raise RuntimeError('Missing (build Frontier first; it stages the project content): ' + str(Required))
@@ -124,6 +132,8 @@ def Main():
     with tempfile.TemporaryDirectory(dir=Scratch, prefix='editor-preview-') as Temporary:
         Installation = Path(Temporary)
         shutil.copy2(Executable, Installation / 'Frontier.exe')
+        if EverestExecutable is not None:
+            shutil.copy2(EverestExecutable, Installation / 'Everest.exe')
         if SolidArcExecutable is not None:
             shutil.copy2(SolidArcExecutable, Installation / 'SolidArcWorkspace.exe')
             shutil.copy2(RepositoryRoot / 'Experimental/SolidArc/Native/Package/SolidArcWorkspace.toml',

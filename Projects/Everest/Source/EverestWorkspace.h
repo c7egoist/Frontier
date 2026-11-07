@@ -8,6 +8,8 @@
 #include "Engine/Diagnostics/BuildConfiguration.h"
 #include "EverestApplication.h"
 #include "EverestSimulationRecords.h"
+#include "Frontier/Engine/Rendering/SceneViewport/VehicleCameraSolver.h"
+#include "Session/LobbySession.h"
 
 #if FRONTIER_EDITOR && defined(FRONTIER_WITH_INTERFACE_SDK)
 struct ImDrawList;
@@ -143,6 +145,14 @@ class EverestWorkspace
     EverestWorkspace& operator=(const EverestWorkspace&) = delete;
 
     void IntegrateSimulation(double DeltaSeconds);
+    bool OpenLevel(const std::filesystem::path& LevelPath, bool StartDrivingSimulation = false);
+    void BeginLevelTransition(const std::filesystem::path& LevelPath, bool StartDrivingSimulation = false);
+
+    [[nodiscard]] bool                                 QueryLobbyActive() const noexcept;
+    [[nodiscard]] LobbySession&                        AccessLobbySession() noexcept { return Lobby; }
+    [[nodiscard]] const LobbySession&                  QueryLobbySession() const noexcept { return Lobby; }
+    [[nodiscard]] Frontier::VehicleCameraSolver&       AccessVehicleCamera() noexcept { return VehicleCamera; }
+    [[nodiscard]] const Frontier::VehicleCameraSolver& QueryVehicleCamera() const noexcept { return VehicleCamera; }
 
 #if FRONTIER_EDITOR && defined(FRONTIER_WITH_INTERFACE_SDK)
     bool ConfigurePlatform() noexcept;
@@ -189,6 +199,10 @@ class EverestWorkspace
     // 📝 The Quick Controls "Networking" toggle: enables the session's replication (loopback until a provider links).
     void                  ToggleNetworking();
     [[nodiscard]] bool    QueryNetworkingEnabled() const noexcept;
+    void                  TogglePerformanceLogging() noexcept { PerformanceLoggingEnabled = !PerformanceLoggingEnabled; }
+    [[nodiscard]] bool    QueryPerformanceLoggingEnabled() const noexcept { return PerformanceLoggingEnabled; }
+    void                  ToggleMotionBlur() noexcept { CameraMotionBlur.Enabled = !CameraMotionBlur.Enabled; }
+    [[nodiscard]] bool    QueryMotionBlurEnabled() const noexcept { return CameraMotionBlur.Enabled; }
     [[nodiscard]] Frontier::PhysicsExtension* AccessPhysics() noexcept { return Physics.get(); }
     [[nodiscard]] Frontier::NetworkingSession* AccessNetworking() noexcept { return Network.get(); }
 #endif
@@ -204,6 +218,10 @@ class EverestWorkspace
 
   private:
     void InitializeWorld();
+    void SynchronizeActiveLevelState(bool ResetOutdoorEditorCamera, bool StartDrivingSimulation);
+    void CheckExternalLevelReload();
+    [[nodiscard]] Frontier::VehicleSubjectKinematics ResolveVehicleKinematics(double AspectRatio = 16.0 / 9.0) const;
+    void ApplyVehicleCameraSolution(const Frontier::VehicleCameraSolution& Solution);
 
 #if FRONTIER_EDITOR && defined(FRONTIER_WITH_INTERFACE_SDK)
     void ServiceDynamicSceneRequests();
@@ -223,6 +241,7 @@ class EverestWorkspace
     void ReleasePointerConstraint();
     void ConstructViewportBar(const ImVec2& Min, const ImVec2& Max, float Scale);
     void ConstructViewportOverlays(const ImVec2& StageMin, const ImVec2& StageMax, const SceneViewportImage& Image, float Scale);
+    void ConstructSessionViewportOverlay(const ImVec2& StageMin, const ImVec2& StageMax, float Scale);
     void ConstructViewportFooter(float Scale);
     SceneCameraSubject ResolveCameraSubject() const;
     void ConstructFullscreenViewport(float Scale);
@@ -245,6 +264,8 @@ class EverestWorkspace
     // 📝 The Force Field page's list of forces and the Field view's readings, and the page's workspace actions.
     void PublishFieldReadings(Frontier::EnvironmentEditAccess& Access, double DeltaSeconds);
     void ServiceFieldActions();
+    [[nodiscard]] bool IsVehicleHmiTrainingGround() const noexcept;
+    void RecordPerformanceSample(double DeltaSeconds, double WorkspaceUpdateMs, double PhysicsStepMs, double RenderSubmitMs);
     Frontier::RecordToken ConstructForceRecord(const std::string& Identifier, const std::string& Name, bool Visible);
 
     Frontier::ControlCentrePanel& Centre;
@@ -257,6 +278,8 @@ class EverestWorkspace
     SceneViewportFlight           Flight{};
     SceneViewportNavigation Navigation{};
     double                        ViewportDeltaSeconds   = 0.0;
+    double                        LastSimulationCpuMs     = 0.0;
+    double                        LastPhysicsStepCpuMs   = 0.0;
     void*                         ConstrainedWindow      = nullptr;   // [-] platform window holding the pointer, or null
     int                           ConstraintSettleTicks  = 0;         // [-] ticks whose motion is dropped after a lock
     SceneViewportOverlays         Overlays{};
@@ -282,13 +305,35 @@ class EverestWorkspace
     std::unique_ptr<Frontier::PhysicsExtension>  Physics;
     std::unique_ptr<Frontier::NetworkingSession> Network;   // [-] - the replication session the Networking toggle drives
     Frontier::Vehicle::DriverInputIntegrator     DriverControls{};
+    Frontier::CameraMotionBlurComponent          CameraMotionBlur{true, 0.45f}; // camera component, gated by level below
+    bool                                         PerformanceLoggingEnabled = true;
+    double                                       PerformanceWindowSeconds = 0.0;
+    double                                       PerformanceFrameMsTotal = 0.0;
+    double                                       PerformanceFrameMsMax = 0.0;
+    double                                       PerformanceWorkspaceMsTotal = 0.0;
+    double                                       PerformancePhysicsMsTotal = 0.0;
+    double                                       PerformanceRenderMsTotal = 0.0;
+    double                                       PerformanceRenderMsMax = 0.0;
+    double                                       PerformanceSubmitWaitMsTotal = 0.0;
+    double                                       PerformanceSubmitWaitMsMax = 0.0;
+    double                                       PerformanceSlowestStageMs = 0.0;
+    std::string                                  PerformanceSlowestStage{};
+    uint32_t                                     PerformanceFrameCount = 0;
 #endif
 
-    std::filesystem::path ProjectRoot;
-    std::filesystem::path ActiveLevelPath;
-    EverestApplication    Application;
-    std::string           Diagnostic;
-    double                ElapsedSeconds = 0.0;
+    std::filesystem::path          ProjectRoot;
+    std::filesystem::path          ActiveLevelPath;
+    EverestApplication             Application;
+    LobbySession                   Lobby{};
+    Frontier::VehicleCameraSolver  VehicleCamera{};
+    bool                           StudioCameraEngaged      = false;
+    std::array<double, 3>          LastAppliedStudioEye     = {0.0, 0.0, 0.0};
+    double                         ActiveNearClipMetres     = 0.05;
+    double                         ActiveVeilOpacity        = 0.0;
+    std::filesystem::path          PendingTransitionLevel{};
+    bool                           PendingTransitionDrive   = false;
+    std::string                    Diagnostic;
+    double                         ElapsedSeconds           = 0.0;
 };
 
 } // namespace Everest

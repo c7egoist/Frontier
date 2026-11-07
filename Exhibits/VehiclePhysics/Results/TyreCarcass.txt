@@ -20,8 +20,8 @@ C · Hex8 finite elements: its own physics
   🟢 authored FemYoungModulus ×1.5 stiffens 3D Hex8 load (8015 N → 9183 N at 25 mm)
 
 D · The whole car on each carcass (Jolt chassis, 240 Hz)
-  🟢 Spring: settles at 12.3 mm mean deflection (spring 12.3 mm), drives to 13.6 m/s in 4 s; 0.086 ms per vehicle step
-  🟢 XPBD: settles at 12.8 mm mean deflection (spring 12.3 mm), drives to 13.5 m/s in 4 s; 0.690 ms per vehicle step
-  🟢 3D FEM: settles at 13.8 mm mean deflection (spring 12.3 mm), drives to 13.6 m/s in 4 s; 0.200 ms per vehicle step
+  🟢 Spring: settles at 12.3 mm mean deflection (spring 12.3 mm), drives to 15.5 m/s in 4 s; 0.056 ms per vehicle step
+  🟢 XPBD: settles at 12.8 mm mean deflection (spring 12.3 mm), drives to 15.6 m/s in 4 s; 0.455 ms per vehicle step
+  🟢 3D FEM: settles at 13.8 mm mean deflection (spring 12.3 mm), drives to 15.6 m/s in 4 s; 0.129 ms per vehicle step
 
 🟢 17 / 17 assertions

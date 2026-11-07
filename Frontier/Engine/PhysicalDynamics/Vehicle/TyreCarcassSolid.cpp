@@ -395,9 +395,9 @@ std::shared_ptr<const TyreCarcassCompliance> ConstructCompliance(double Radius, 
     for (int Level = 0; Level < LevelCount; ++Level)
     {
         const double Ratio = 0.5 * Level;
-        std::vector<double> System(static_cast<size_t>(Freedom) * Freedom);
-        for (size_t Index = 0; Index < System.size(); ++Index) System[Index] = Material[Index] + Design.PrestressScale * Ratio * Prestress[Index];
-        if (!FactorCholesky(System, Freedom)) return Tables;
+        std::vector<double> StiffnessOperator(static_cast<size_t>(Freedom) * Freedom);
+        for (size_t Index = 0; Index < StiffnessOperator.size(); ++Index) StiffnessOperator[Index] = Material[Index] + Design.PrestressScale * Ratio * Prestress[Index];
+        if (!FactorCholesky(StiffnessOperator, Freedom)) return Tables;
         for (int Ring = 0; Ring < 3; ++Ring)
             for (int Axis = 0; Axis < 3; ++Axis) Tables->Inflation[static_cast<size_t>(Level)][static_cast<size_t>(Ring)][static_cast<size_t>(Axis)] =
                     (Ratio - 1.0) * Growth * Inflated[static_cast<size_t>(MobileIndex(0, Ring + 1, 1) * 3 + Axis)];
@@ -407,7 +407,7 @@ std::shared_ptr<const TyreCarcassCompliance> ConstructCompliance(double Radius, 
                 // 📝 At sector 0 the cylindrical axes are the wheel axes (e_r = x, e_y = y, e_t = z).
                 std::vector<double> Column(static_cast<size_t>(Freedom), 0.0);
                 Column[static_cast<size_t>(MobileIndex(0, Source + 1, 1) * 3 + Axis)] = 1.0;
-                SolveCholesky(System, Freedom, Column);
+                SolveCholesky(StiffnessOperator, Freedom, Column);
                 for (int Offset = 0; Offset < TyreCarcassSolid::SectorCount; ++Offset)
                 {
                     double Axes[3][3];

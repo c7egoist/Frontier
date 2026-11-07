@@ -10,6 +10,7 @@
 #include "Engine/Diagnostics/LogCategories.h"
 #include "Engine/Diagnostics/LogStream.h"
 #include "Engine/Interface/ProjectContent.h"
+#include "Engine/PhysicalDynamics/FluidDynamics/FluidSpaceCodec.h"
 #include "Engine/PhysicalDynamics/Vehicle/TraceContactTyre.h"
 #include "Engine/PhysicalDynamics/Vehicle/TyreCarcass.h"
 #include "Engine/Scene/VehicleReadings.h"
@@ -184,24 +185,35 @@ SceneViewportRefresh RenderingExtension::Render(const SceneViewportRequest& Requ
         return Outcome;
     }
 
-    // ① (re)build when the tiers change; a failed bring-up is not retried until they change again
-    if (!Viewport_ || Quality != Quality_ || RayTracing != RayTracing_)
+    const std::string RequestedArchive = World.QueryEnvironmentArchive().empty() ? "ProvingGround" : World.QueryEnvironmentArchive();
+    const bool        IndoorLobby      = (RequestedArchive == "Lobby");
+
+    // ① (re)build when the scene archive or rendering tiers change; a failed bring-up is not retried until they change again
+    if (!Viewport_ || RequestedArchive != SceneArchive_ || Quality != Quality_ || RayTracing != RayTracing_)
     {
-        if (!Failure_.empty() && Quality == Quality_ && RayTracing == RayTracing_)
+        if (!Failure_.empty() && RequestedArchive == SceneArchive_ && Quality == Quality_ && RayTracing == RayTracing_)
         {
             Outcome.Status          = Failure_;
-            Outcome.Readout.Failure = Failure_;
+            Outcome.Readout.Failure = Outcome.Status;
             return Outcome;
         }
         Viewport_.reset();
-        Quality_    = Quality;
-        RayTracing_ = RayTracing;
+        GeometryScene_ = nullptr;
+        Held_          = {};
+        Pick_          = {};
+        SceneArchive_  = RequestedArchive;
+        Quality_       = Quality;
+        RayTracing_    = RayTracing;
         Failure_.clear();
         Frontier::GlobalIllumination::SceneViewportConfiguration Configuration;
         Configuration.GlobalIlluminationShaders = ShaderRoot_ / "GlobalIllumination";
-        Configuration.EnvironmentShaders        = ShaderRoot_ / "Environment";
-        Configuration.SceneArchive              = ResolveArchive(ProjectRoot_, "ProvingGround");
-        Configuration.CelestialMaps             = ResolveArchive(ProjectRoot_, "CelestialMaps");
+        if (!IndoorLobby)
+        {
+            Configuration.EnvironmentShaders = ShaderRoot_ / "Environment";
+        }
+        Configuration.EnvironmentLighting = !IndoorLobby;
+        Configuration.SceneArchive        = ResolveArchive(ProjectRoot_, SceneArchive_.c_str());
+        Configuration.CelestialMaps       = ResolveArchive(ProjectRoot_, "CelestialMaps");
         // 📝 The engine shapes sit beside the shader archives (EngineContent/ShapeArchives); shaders compiled into a build folder
         //    have none beside them, so the engine content's own folder serves (the Construct dialog lists the same one).
         const std::filesystem::path ShaderFolder = ShaderRoot_.has_filename() ? ShaderRoot_ : ShaderRoot_.parent_path();
@@ -255,7 +267,10 @@ SceneViewportRefresh RenderingExtension::Render(const SceneViewportRequest& Requ
             Pick_.Record   = Geometry_.ResolvePickedRecord(Seen);
             if (!Pick_.Record.has_value() && VehicleShown_)
             {
-                if (Pick_.Occupant == 0u && ActiveVehicleToken_.IsValid())
+                const bool HeroPlate = Pick_.Occupant == 5u && Viewport_->QueryScene() != nullptr &&
+                                       Viewport_->QueryScene()->Occupants.size() > 5u &&
+                                       Viewport_->QueryScene()->Occupants[5].Name == "Hero plates";
+                if ((Pick_.Occupant == 0u || HeroPlate) && ActiveVehicleToken_.IsValid())
                 {
                     Pick_.Record = ActiveVehicleToken_.Value;
                 }
@@ -292,6 +307,7 @@ SceneViewportRefresh RenderingExtension::Render(const SceneViewportRequest& Requ
         (void)Viewport_->RelocateOccupants(Placements);
     }
     SynchronizeVehicleVisuals(World);
+    SynchronizePlumeSources(World, Request.DeltaSeconds, ElapsedSeconds);
 
     // ③ one refresh through the level's records; with live refresh off the last image stays (Render settings › Refresh timing)
     if (!Pipeline.LiveRefresh && Held_.View != VK_NULL_HANDLE && Held_.View == Viewport_->QueryPresentedView())
@@ -308,6 +324,7 @@ SceneViewportRefresh RenderingExtension::Render(const SceneViewportRequest& Requ
     Camera.Position            = {Request.CameraPosition[0], Request.CameraPosition[1], Request.CameraPosition[2]};
     Camera.Target              = {Request.CameraTarget[0], Request.CameraTarget[1], Request.CameraTarget[2]};
     Camera.VerticalFieldOfView = Request.VerticalFieldOfView;
+    Camera.Near                = std::max(0.005, Request.CameraNear);
     Camera.Up = Request.CameraUp;
     Frontier::GlobalIllumination::ViewportRendering Rendering;
     Rendering.GlobalIllumination   = Pipeline.GlobalIllumination;
@@ -317,6 +334,7 @@ SceneViewportRefresh RenderingExtension::Render(const SceneViewportRequest& Requ
     Rendering.VirtualizedGeometry  = Pipeline.VirtualizedGeometry;
     Rendering.VirtualizedStreamSlots = static_cast<uint32_t>(std::max(0, Pipeline.VirtualizedStreamSlots));
     Rendering.AnalyticIllumination   = Pipeline.AnalyticIllumination;
+    Rendering.MotionBlurStrength = Request.CameraMotionBlur.Enabled ? std::clamp(static_cast<double>(Request.CameraMotionBlur.Strength), 0.0, 1.0) : 0.0;
     namespace Bit = Frontier::GlobalIllumination::RefinementBit;
     Rendering.Refinements = (Pipeline.SolarDisc ? Bit::SolarDisc : 0u) | (Pipeline.StratifiedSun ? Bit::StratifiedSun : 0u) |
                             (Pipeline.PenumbraFilter ? Bit::PenumbraFilter : 0u) | (Pipeline.MirrorFilter ? Bit::MirrorFilter : 0u) |
@@ -379,6 +397,10 @@ SceneViewportRefresh RenderingExtension::Render(const SceneViewportRequest& Requ
     const double Milliseconds = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - Start).count();
     RefreshMilliseconds_      = RefreshMilliseconds_ <= 0.0 ? Milliseconds : RefreshMilliseconds_ * 0.9 + Milliseconds * 0.1;
     Outcome.Readout.LatestMilliseconds = Milliseconds;
+    Outcome.Readout.SubmissionWaitMs = Viewport_->QuerySubmissionWaitMilliseconds();
+    Outcome.Readout.SlowestSubmitWaitMs = Viewport_->QuerySlowestSubmissionWaitMilliseconds();
+    Outcome.Readout.SlowestSubmitLabel = Viewport_->QuerySlowestSubmissionLabel();
+    Outcome.Readout.SubmissionCount = Viewport_->QuerySubmissionCount();
     if (auto* Overlay = Viewport_->AccessOverlay()) Outcome.Readout.Environment = Overlay->QueryReadout();
     Outcome.View   = Viewport_->QueryPresentedView();
     Outcome.Extent = Viewport_->QueryScreenExtent();
@@ -433,6 +455,9 @@ SceneViewportRefresh RenderingExtension::Render(const SceneViewportRequest& Requ
 void RenderingExtension::SynchronizeVehicleVisuals(const Frontier::WorldSpace& World)
 {
     if (!Viewport_ || Viewport_->QueryScene() == nullptr || Viewport_->QueryScene()->Occupants.size() < 5u) return;
+    const auto& SceneOccupants  = Viewport_->QueryScene()->Occupants;
+    const bool  HasHeroPlates   = SceneOccupants.size() > 5u && SceneOccupants[5].Name == "Hero plates";
+    const uint32_t VehicleCount = HasHeroPlates ? 6u : 5u;
 
     const Frontier::VehicleRecord* ShownVehicle = nullptr;
     for (const Frontier::SceneRecordBase* Candidate : World.FindAllByType("Vehicle"))
@@ -450,8 +475,8 @@ void RenderingExtension::SynchronizeVehicleVisuals(const Frontier::WorldSpace& W
         if (VehicleShown_)
         {
             std::vector<Frontier::GlobalIllumination::OccupantPlacement> Hidden;
-            Hidden.reserve(5u);
-            for (uint32_t Index = 0u; Index < 5u; ++Index)
+            Hidden.reserve(VehicleCount);
+            for (uint32_t Index = 0u; Index < VehicleCount; ++Index)
             {
                 Frontier::GlobalIllumination::OccupantPlacement Placement;
                 Placement.Occupant = Index;
@@ -540,7 +565,7 @@ void RenderingExtension::SynchronizeVehicleVisuals(const Frontier::WorldSpace& W
             Configuration.Spatial.PositionMetres[2] };
 
         std::vector<Frontier::GlobalIllumination::OccupantPlacement> Placements;
-        Placements.reserve(5u);
+        Placements.reserve(VehicleCount);
 
         Frontier::GlobalIllumination::OccupantPlacement BodyPlacement;
         BodyPlacement.Occupant  = 0u;
@@ -548,6 +573,12 @@ void RenderingExtension::SynchronizeVehicleVisuals(const Frontier::WorldSpace& W
         BodyPlacement.Active    = true;
         BodyPlacement.Recapture = FirstActivation;
         Placements.push_back(BodyPlacement);
+        if (HasHeroPlates)
+        {
+            Frontier::GlobalIllumination::OccupantPlacement PlatePlacement = BodyPlacement;
+            PlatePlacement.Occupant = 5u;
+            Placements.push_back(PlatePlacement);
+        }
 
         std::array<bool, 4>                   FieldActive{};
         std::array<std::array<float, 4>, 4>   Deformation{};
@@ -669,7 +700,7 @@ void RenderingExtension::SynchronizeVehicleVisuals(const Frontier::WorldSpace& W
         GroundBase + Orientation.Rotate({ 0.0f, 0.0f, Geometry.AuthoredGroundOffset() - MeanDeflection });
 
     std::vector<Frontier::GlobalIllumination::OccupantPlacement> Placements;
-    Placements.reserve(5u);
+    Placements.reserve(VehicleCount);
 
     Frontier::GlobalIllumination::OccupantPlacement BodyPlacement;
     BodyPlacement.Occupant  = 0u;
@@ -677,6 +708,12 @@ void RenderingExtension::SynchronizeVehicleVisuals(const Frontier::WorldSpace& W
     BodyPlacement.Active    = true;
     BodyPlacement.Recapture = FirstActivation;
     Placements.push_back(BodyPlacement);
+    if (HasHeroPlates)
+    {
+        Frontier::GlobalIllumination::OccupantPlacement PlatePlacement = BodyPlacement;
+        PlatePlacement.Occupant = 5u;
+        Placements.push_back(PlatePlacement);
+    }
 
     const float AxleX[4] = { Geometry.FrontAxleX(), Geometry.FrontAxleX(), -Geometry.RearAxleX(), -Geometry.RearAxleX() };
     const float AxleY[4] = { +0.5f * Geometry.TrackFront, -0.5f * Geometry.TrackFront, +0.5f * Geometry.TrackRear, -0.5f * Geometry.TrackRear };
@@ -706,6 +743,106 @@ void RenderingExtension::SynchronizeVehicleVisuals(const Frontier::WorldSpace& W
 
     (void)Viewport_->RelocateOccupants(Placements);
     Viewport_->WriteVehicleState(0.0f, FieldActive, Deformation, FieldPointers);
+}
+
+void RenderingExtension::SynchronizePlumeSources(const Frontier::WorldSpace& World, float DeltaSeconds, double ElapsedSeconds)
+{
+    if (!Viewport_) return;
+
+    FluidDynamics::PlumeSettings Settings{};
+    if (Quality_ == "low") Settings.QualityGrade = 0;
+    else if (Quality_ == "medium") Settings.QualityGrade = 1;
+    else if (Quality_ == "ultra") Settings.QualityGrade = 3;
+    else Settings.QualityGrade = 2;
+
+    if (const auto* WindEntry = FindEntry<Frontier::WindRecord>(World, "Wind"))
+    {
+        const auto& Wind = WindEntry->QueryConfiguration();
+        if (Wind.Enabled && Wind.AdvectPlumes)
+        {
+            const float Radians = Wind.DirectionDegrees * (3.14159265358979323846f / 180.0f);
+            const float Gust    = Wind.GustAmplitude * 0.35f *
+                                  std::sin(static_cast<float>(ElapsedSeconds) * Wind.GustFrequencyHz * 6.2831853f);
+            const float Speed   = std::clamp(Wind.SpeedMetresPerSecond * 0.25f + Gust, 0.0f, 9.0f);
+            Settings.WindVector = { std::cos(Radians) * Speed, std::sin(Radians) * Speed, 0.0f };
+        }
+        else
+        {
+            Settings.WindVector = { 0.0f, 0.0f, 0.0f };
+        }
+    }
+
+    const float ClampedDt = std::clamp(DeltaSeconds, 1.0f / 240.0f, 0.1f);
+    PlumeProjector_.BeginStep(ClampedDt);
+    FluidDynamics::PlumeProjectionOutput Output{};
+
+    for (const Frontier::SceneRecordBase* Base : World.FindAllByType("Vehicle"))
+    {
+        const auto* Entry = dynamic_cast<const Frontier::VehicleRecord*>(Base);
+        if (!Entry) continue;
+        Frontier::VehicleReading Reading{};
+        if (Frontier::QueryVehicleReading(Entry->QueryToken(), Reading) && Reading.Simulating && Reading.VisualValid)
+        {
+            PlumeProjector_.ProjectVehicle(Entry->QueryToken().Value, Reading.Telemetry, Reading.Throttle[0],
+                                           Settings, ClampedDt, Output);
+        }
+    }
+
+    for (const Frontier::SceneRecordBase* Base : World.FindAllByType("FluidPlume"))
+    {
+        const auto* Entry = dynamic_cast<const Frontier::FluidPlumeRecord*>(Base);
+        if (!Entry || !Entry->QueryConfiguration().Enabled) continue;
+        const auto& Config = Entry->QueryConfiguration();
+
+        FluidDynamics::FluidParameters Params = FluidDynamics::FluidParameters::ConstructInitialParameters();
+        bool TriggerOnFirst = false;
+
+        if (!Config.SpaceFile.empty())
+        {
+            const std::filesystem::path Candidate = ProjectRoot_ / "Content" / "Levels" / Config.SpaceFile;
+            const std::string Key                 = Candidate.string();
+            auto Found                            = LoadedFluidSpaces_.find(Key);
+            if (Found == LoadedFluidSpaces_.end() && std::filesystem::exists(Candidate))
+            {
+                FluidDynamics::FluidSceneDocument Doc{};
+                if (FluidDynamics::LoadFluidSpaceFile(Candidate, Doc))
+                {
+                    Found = LoadedFluidSpaces_.emplace(Key, std::move(Doc)).first;
+                }
+            }
+            if (Found != LoadedFluidSpaces_.end())
+            {
+                Params = Found->second.Parameters;
+            }
+        }
+        else if (const auto* Preset = FluidDynamics::FindFluidPreset(Config.PresetIdentity))
+        {
+            Params         = FluidDynamics::ConstructPresetParameters(Preset->Identity);
+            TriggerOnFirst = Preset->TriggerExplosionOnLoad;
+        }
+        else
+        {
+            Params         = FluidDynamics::ConstructPresetParameters("camp_fire");
+            TriggerOnFirst = false;
+        }
+
+        if (!Config.CombustionEnabled)
+        {
+            Params.SourceFuel = 0.0f;
+            Params.BlastFuel  = 0.0f;
+        }
+
+        const std::array<float, 3> Pos = { Config.PositionMetres[0], Config.PositionMetres[1], Config.PositionMetres[2] };
+        PlumeProjector_.ProjectFluidPlume(
+            Entry->QueryToken().Value, Pos, Config.DomainScale, Params, TriggerOnFirst,
+            Config.BurstGeneration, static_cast<FluidDynamics::FluidBurstPattern>(Config.BurstPattern),
+            static_cast<float>(ElapsedSeconds), Output);
+    }
+
+    PlumeProjector_.FinalizeStep(Output);
+    Viewport_->AssignPlumeState(
+        Settings, Output.Sources, Output.PrimaryFireLight,
+        Output.HasFocus ? std::optional<std::array<float, 3>>(Output.FocusPosition) : std::nullopt);
 }
 
 } // namespace Frontier

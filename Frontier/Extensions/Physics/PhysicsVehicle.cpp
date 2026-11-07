@@ -42,34 +42,38 @@ PhysicsVehicle::~PhysicsVehicle() = default;
 
 bool PhysicsVehicle::Construct(PhysicsSpace& InSpace, RecordToken InRecord, const Vehicle::VehicleSpecification& Specification,
                                const Vehicle::VehicleSolverConfiguration& InConfiguration, const std::array<double, 3>& StartMetres,
-                               double StartYawDegrees, std::string* Error)
+                               double StartYawDegrees, std::string* Error, PhysicsVehiclePlacementOptions Placement)
 {
-    Space         = &InSpace;
-    Record        = InRecord;
-    Configuration = InConfiguration;
+    Space                   = &InSpace;
+    Record                  = InRecord;
+    Configuration           = InConfiguration;
+    PlacementOptions        = Placement;
+    AuthoredStartMetres     = StartMetres;
+    AuthoredStartYawDegrees = StartYawDegrees;
     const Vehicle::VehicleGeometry& Geometry = Specification.Geometry;
+    AuthoredCoMHeight = Geometry.CoMHeight;
     OriginBelowCentre = Geometry.CoMAuthoredZ();
+    Body              = PhysicsNoBody;
 
-    // ① the road under the start: a long ray down (the start's height is the ground's, not the record's z)
-    double         Ground = StartMetres[2];
-    PhysicsRayHit  Hit;
-    if (Space->CastRay(PhysicsRay{ { StartMetres[0], StartMetres[1], StartMetres[2] + 50.0 }, { 0.0, 0.0, -1.0 }, 100.0, PhysicsNoBody }, Hit))
-        Ground = Hit.PointMetres[2];
+    // ① 4-corner slope-aligned equilibrium pose (or vertical ray drop when EquilibriumPlacement is off)
+    Start              = ResolveEquilibriumPose(StartMetres, StartYawDegrees, Geometry.CoMHeight, FittedGroundNormal);
+    ParkedBrakeLatched = PlacementOptions.EngageBrakesOnPlacement;
 
-    // ② the chassis hull about the centre of mass: the ControlVehicle's wedge (floor 0.15 m clear of the road so kerbs pass under
-    //    it, bonnet, cabin and tail), heights from the ground at rest
+    // ② the chassis hull about the centre of mass: flat floor pan between the axles (0.18 m clearance, ~15° breakover) with
+    //    upswept front splitter & rear diffuser overhangs (±2.28 m, 0.36 m clearance, ~22° approach/departure) so kerbs and
+    //    12.7° proving-ground ramps clear cleanly without grounding the bumpers, heights from the ground at rest
     struct Corner { float X, Y, Height; };
-    const Corner Wedge[] = { { 2.95f, 1.0f, 0.15f },  { 2.95f, -1.0f, 0.15f },  { -2.95f, 1.0f, 0.15f },  { -2.95f, -1.0f, 0.15f },
-                             { 2.95f, 0.95f, 0.55f }, { 2.95f, -0.95f, 0.55f }, { 1.0f, 1.0f, 0.85f },    { 1.0f, -1.0f, 0.85f },
-                             { 0.6f, 0.75f, 1.35f },  { 0.6f, -0.75f, 1.35f },  { -1.8f, 0.75f, 1.35f },  { -1.8f, -0.75f, 1.35f },
-                             { -2.95f, 0.95f, 0.95f }, { -2.95f, -0.95f, 0.95f } };
+    const Corner Wedge[] = { { 1.42f, 0.96f, 0.18f },  { 1.42f, -0.96f, 0.18f },  { -1.42f, 0.96f, 0.18f },  { -1.42f, -0.96f, 0.18f },
+                             { 2.28f, 0.92f, 0.36f },  { 2.28f, -0.92f, 0.36f },  { -2.28f, 0.92f, 0.36f },  { -2.28f, -0.92f, 0.36f },
+                             { 2.28f, 0.92f, 0.62f },  { 2.28f, -0.92f, 0.62f },  { 1.0f, 0.98f, 0.85f },    { 1.0f, -0.98f, 0.85f },
+                             { 0.6f, 0.75f, 1.35f },   { 0.6f, -0.75f, 1.35f },   { -1.8f, 0.75f, 1.35f },   { -1.8f, -0.75f, 1.35f },
+                             { -2.28f, 0.92f, 0.95f }, { -2.28f, -0.92f, 0.95f } };
     PhysicsBodyDescriptor Chassis;
     Chassis.Record = Record.Value;
     Chassis.Shape  = PhysicsShape::Hull;
     for (const Corner& Point : Wedge) Chassis.Points.push_back({ Point.X, Point.Y, Point.Height - Geometry.CoMHeight });
-    const double Yaw = StartYawDegrees * 3.14159265358979323846 / 180.0;
-    Chassis.PositionMetres = { StartMetres[0], StartMetres[1], Ground + Geometry.CoMHeight + 0.01 };
-    Chassis.Orientation    = { 0.0, 0.0, std::sin(0.5 * Yaw), std::cos(0.5 * Yaw) };
+    Chassis.PositionMetres = ToArray(Start.Position);
+    Chassis.Orientation    = { Start.Orientation.x, Start.Orientation.y, Start.Orientation.z, Start.Orientation.w };
     Chassis.Motion         = PhysicsMotion::Moving;
     Chassis.MassKilograms  = Configuration.ChassisMass;
     // 📝 The solver predicts the chassis from ChassisMass, InvChassisInertia and gravity alone, so the body carries exactly those
@@ -91,12 +95,146 @@ bool PhysicsVehicle::Construct(PhysicsSpace& InSpace, RecordToken InRecord, cons
     LastMass = Configuration.ChassisMass;
 
     // ③ the solver, starting at the chassis' pose at rest
-    Start.Position        = ToVec(Chassis.PositionMetres);
-    Start.Orientation     = Quat{ 0.0f, 0.0f, static_cast<float>(std::sin(0.5 * Yaw)), static_cast<float>(std::cos(0.5 * Yaw)) };
-    Start.LinearVelocity  = Vec3{};
-    Start.AngularVelocity = Vec3{};
     BuildSolver(Start);
     return Solver && Solver->Constructed();
+}
+
+Vehicle::ChassisKinematics PhysicsVehicle::ResolveEquilibriumPose(const std::array<double, 3>& StartMetres, double StartYawDegrees,
+                                                                  double FallbackCoMHeight, Vec3& OutNormal) const
+{
+    const double YawRad = StartYawDegrees * 3.14159265358979323846 / 180.0;
+    const Quat   YawOrientation{ 0.0f, 0.0f, static_cast<float>(std::sin(0.5 * YawRad)), static_cast<float>(std::cos(0.5 * YawRad)) };
+
+    Vehicle::ChassisKinematics Pose;
+    Pose.Orientation     = YawOrientation;
+    Pose.LinearVelocity  = Vec3{};
+    Pose.AngularVelocity = Vec3{};
+    OutNormal            = Vec3{ 0.0f, 0.0f, 1.0f };
+
+    if (!PlacementOptions.EquilibriumPlacement || Configuration.Wheels.empty())
+    {
+        double        Ground = StartMetres[2];
+        PhysicsRayHit Hit;
+        if (Space && Space->CastRay(PhysicsRay{ { StartMetres[0], StartMetres[1], StartMetres[2] + 50.0 }, { 0.0, 0.0, -1.0 }, 100.0, Body }, Hit))
+            Ground = Hit.PointMetres[2];
+        Pose.Position = Vec3{ static_cast<float>(StartMetres[0]), static_cast<float>(StartMetres[1]),
+                              static_cast<float>(Ground + FallbackCoMHeight + 0.01) };
+        return Pose;
+    }
+
+    // 📝 Cast 4 downward probes at the yaw-rotated wheel mounts to fit the local terrain plane (slope pitch + banking roll).
+    const size_t WheelCount = std::min<size_t>(4u, Configuration.Wheels.size());
+    const double CosYaw     = std::cos(YawRad);
+    const double SinYaw     = std::sin(YawRad);
+
+    std::array<Vec3, 4> HitPoints{};
+    std::array<Vec3, 4> HitNormals{};
+    std::array<bool, 4> HitValid{};
+    size_t              ValidCount = 0u;
+    Vec3                Centroid{};
+    Vec3                AverageNormal{};
+
+    for (size_t CornerIdx = 0u; CornerIdx < WheelCount; ++CornerIdx)
+    {
+        const Vehicle::WheelMount& Mount = Configuration.Wheels[CornerIdx];
+        const Vec3 LocalAnchor = Configuration.SuspensionEnabled ? Mount.SuspensionMount : Mount.LocalOffset;
+        const double WorldX    = StartMetres[0] + static_cast<double>(LocalAnchor.x) * CosYaw - static_cast<double>(LocalAnchor.y) * SinYaw;
+        const double WorldY    = StartMetres[1] + static_cast<double>(LocalAnchor.x) * SinYaw + static_cast<double>(LocalAnchor.y) * CosYaw;
+
+        PhysicsRayHit Hit;
+        if (Space && Space->CastRay(PhysicsRay{ { WorldX, WorldY, StartMetres[2] + 30.0 }, { 0.0, 0.0, -1.0 }, 70.0, Body }, Hit))
+        {
+            HitPoints[CornerIdx]  = ToVec(Hit.PointMetres);
+            HitNormals[CornerIdx] = ToVec(Hit.Normal).Normalized();
+            HitValid[CornerIdx]   = true;
+            Centroid += HitPoints[CornerIdx];
+            AverageNormal += HitNormals[CornerIdx];
+            ++ValidCount;
+        }
+    }
+
+    if (ValidCount == 0u)
+    {
+        Pose.Position = Vec3{ static_cast<float>(StartMetres[0]), static_cast<float>(StartMetres[1]),
+                              static_cast<float>(StartMetres[2] + FallbackCoMHeight) };
+        return Pose;
+    }
+
+    Centroid = Centroid * (1.0f / static_cast<float>(ValidCount));
+    Vec3 PlaneNormal{ 0.0f, 0.0f, 1.0f };
+    if (WheelCount >= 4u && HitValid[0] && HitValid[1] && HitValid[2] && HitValid[3])
+    {
+        // Symmetric bilinear quad diagonal cross product across FL(0), FR(1), RL(2), RR(3):
+        const Vec3 DiagA = HitPoints[1] - HitPoints[2];   // FR - RL
+        const Vec3 DiagB = HitPoints[0] - HitPoints[3];   // FL - RR
+        Vec3       Cross = Vehicle::Cross(DiagA, DiagB);
+        if (Cross.LengthSq() > 1.0e-8f)
+        {
+            if (Cross.z < 0.0f) Cross = Cross * -1.0f;
+            PlaneNormal = Cross.Normalized();
+        }
+        else if (AverageNormal.LengthSq() > 1.0e-8f)
+        {
+            PlaneNormal = AverageNormal.Normalized();
+        }
+    }
+    else if (AverageNormal.LengthSq() > 1.0e-8f)
+    {
+        PlaneNormal = AverageNormal.Normalized();
+    }
+    if (PlaneNormal.z < 0.0f) PlaneNormal = PlaneNormal * -1.0f;
+    OutNormal = PlaneNormal;
+
+    // 📝 Shortest-arc tilt from world +Z onto PlaneNormal composed with StartYawDegrees (zero heading twist).
+    const Vec3 WorldUp{ 0.0f, 0.0f, 1.0f };
+    const Vec3 TiltAxis  = Vehicle::Cross(WorldUp, PlaneNormal);
+    const float TiltW    = 1.0f + Vehicle::Dot(WorldUp, PlaneNormal);
+    const Quat TiltQuat  = (TiltW > 1.0e-5f) ? Quat{ TiltAxis.x, TiltAxis.y, TiltAxis.z, TiltW }.Normalized() : Quat{};
+    Pose.Orientation     = (TiltQuat * YawOrientation).Normalized();
+
+    // 📝 Static equilibrium CoM position: place hubs at authored StaticCompression sag and tyres at static normal deflection.
+    const float CosSlope  = std::max(0.25f, PlaneNormal.z);
+    const float RimMass   = std::max(1.0f, Configuration.UnsprungMass - Configuration.Tyre.TotalMass);
+    const float TotalLoad = (Configuration.ChassisMass + static_cast<float>(WheelCount) * RimMass) * Configuration.Gravity.Length() * CosSlope;
+    const float CornerLoad = TotalLoad / static_cast<float>(WheelCount);
+
+    const float TyreRadius = Configuration.Tyre.Radius;
+    Vec3        MeanHubLocal{};
+    float       MeanDeflection = 0.0f;
+    for (size_t CornerIdx = 0u; CornerIdx < WheelCount; ++CornerIdx)
+    {
+        const Vehicle::WheelMount& Mount = Configuration.Wheels[CornerIdx];
+        Vec3 HubLocal = Mount.LocalOffset;
+        if (Configuration.SuspensionEnabled)
+        {
+            const Vehicle::SuspensionSpecification& Strut =
+                (Mount.Steered || Mount.LocalOffset.x > 0.0f) ? Configuration.FrontStrut : Configuration.RearStrut;
+            const float Mirror    = (Mount.LocalOffset.y < 0.0f) ? -1.0f : 1.0f;
+            const Vec3  AxisLocal = Vec3{ Strut.AxisX, Strut.AxisY * Mirror, Strut.AxisZ }.Normalized();
+            HubLocal              = Mount.SuspensionMount + AxisLocal * (Strut.FreeLength - Strut.StaticCompression);
+        }
+        MeanHubLocal += HubLocal;
+
+        const float ColdPa    = (CornerIdx < Configuration.CornerPressures.size()) ? Configuration.CornerPressures[CornerIdx]
+                                                                                   : Configuration.Tyre.InflationPressure;
+        const float Stiffness = std::max(50000.0f, Vehicle::PressureStiffness(Configuration.TraceContact, ColdPa));
+        MeanDeflection += std::clamp(CornerLoad / Stiffness, 0.0f, TyreRadius * 0.25f);
+    }
+    MeanHubLocal   = MeanHubLocal * (1.0f / static_cast<float>(WheelCount));
+    MeanDeflection = MeanDeflection / static_cast<float>(WheelCount);
+
+    // Keep horizontal (StartX, StartY) anchored over the requested station while matching the fitted plane height & normal offset:
+    Vec3 GroundAnchor = Centroid;
+    if (PlaneNormal.z > 0.25f)
+    {
+        const float TargetX = static_cast<float>(StartMetres[0]);
+        const float TargetY = static_cast<float>(StartMetres[1]);
+        const float PlaneZ  = Centroid.z - (PlaneNormal.x * (TargetX - Centroid.x) + PlaneNormal.y * (TargetY - Centroid.y)) / PlaneNormal.z;
+        GroundAnchor        = Vec3{ TargetX, TargetY, PlaneZ };
+    }
+    const Vec3 HubOffsetWorld = Pose.Orientation.Rotate(MeanHubLocal);
+    Pose.Position = GroundAnchor + PlaneNormal * (TyreRadius - MeanDeflection) - HubOffsetWorld;
+    return Pose;
 }
 
 void PhysicsVehicle::BuildSolver(const Vehicle::ChassisKinematics& At)
@@ -128,7 +266,7 @@ Vehicle::ChassisKinematics PhysicsVehicle::ReadChassis() const
 bool PhysicsVehicle::QueryGround(const Vec3& Point, Vec3& Surface, Vec3& Normal) const
 {
     PhysicsRayHit Hit;
-    if (!Space->CastRay(PhysicsRay{ { Point.x, Point.y, Point.z + 1.0 }, { 0.0, 0.0, -1.0 }, 2.0, Body }, Hit)) return false;
+    if (!Space->CastRay(PhysicsRay{ { Point.x, Point.y, Point.z + 1.5 }, { 0.0, 0.0, -1.0 }, 3.0, Body }, Hit)) return false;
     Surface = ToVec(Hit.PointMetres);
     Normal  = ToVec(Hit.Normal);
     return true;
@@ -137,11 +275,16 @@ bool PhysicsVehicle::QueryGround(const Vec3& Point, Vec3& Surface, Vec3& Normal)
 void PhysicsVehicle::Step(double Seconds)
 {
     if (!Solver) return;
+    if (ParkedBrakeLatched && Controls.Throttle > 0.02f)
+    {
+        ParkedBrakeLatched = false;
+    }
     Vehicle::DriverInput Input;
-    Input.Throttle  = std::clamp(Controls.Throttle, 0.0f, 1.0f);
-    Input.Brake     = std::clamp(Controls.Brake, 0.0f, 1.0f);
-    Input.Steer     = std::clamp(Controls.Steer, -1.0f, 1.0f);
-    Input.Handbrake = Controls.Handbrake;
+    Input.Throttle    = std::clamp(Controls.Throttle, 0.0f, 1.0f);
+    Input.Brake       = ParkedBrakeLatched ? 1.0f : std::clamp(Controls.Brake, 0.0f, 1.0f);
+    Input.Steer       = std::clamp(Controls.Steer, -1.0f, 1.0f);
+    Input.Handbrake   = ParkedBrakeLatched ? true : Controls.Handbrake;
+    Input.ClutchPedal = std::clamp(Controls.ClutchPedal, 0.0f, 1.0f);
     Solver->AssignInput(Input);
     Solver->Step(static_cast<float>(Seconds));
     // 📝 Fuel leaves the chassis: the body follows the solver's sprung mass (inertia at the same radii of gyration).
@@ -157,6 +300,8 @@ void PhysicsVehicle::Step(double Seconds)
 
 void PhysicsVehicle::Reset()
 {
+    Start              = ResolveEquilibriumPose(AuthoredStartMetres, AuthoredStartYawDegrees, AuthoredCoMHeight, FittedGroundNormal);
+    ParkedBrakeLatched = PlacementOptions.EngageBrakesOnPlacement;
     PhysicsBodyReading Pose;
     Pose.PositionMetres      = ToArray(Start.Position);
     Pose.Orientation         = { Start.Orientation.x, Start.Orientation.y, Start.Orientation.z, Start.Orientation.w };
