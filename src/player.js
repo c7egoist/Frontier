@@ -38,8 +38,9 @@ function buildCraft(mats) {
   add(new THREE.BoxGeometry(0.22, 0.3, 3.6), bodyMat, -1.0, -0.06, 0);
   add(new THREE.BoxGeometry(0.22, 0.3, 3.6), bodyMat, 1.0, -0.06, 0);
   // board light strips
-  add(new THREE.BoxGeometry(0.1, 0.06, 3.5), glowC, -0.82, 0.15, 0);
-  add(new THREE.BoxGeometry(0.1, 0.06, 3.5), glowM, 0.82, 0.15, 0);
+  add(new THREE.BoxGeometry(0.15, 0.08, 3.6), glowC, -0.82, 0.15, 0);
+  add(new THREE.BoxGeometry(0.15, 0.08, 3.6), glowM, 0.82, 0.15, 0);
+  add(new THREE.BoxGeometry(0.36, 0.06, 4.0), glowC, 0, 0.2, 0);
   add(new THREE.BoxGeometry(1.25, 0.05, 0.12), glowL, 0, 0.2, 1.65);
   // engine pods
   for (const sx of [-0.62, 0.62]) {
@@ -82,7 +83,7 @@ function buildCraft(mats) {
   radd(new THREE.BoxGeometry(0.16, 0.62, 0.16), suitMat, 0.42, 1.12, 0.12, -0.5, 0, -0.5);
   // head + visor
   radd(new THREE.SphereGeometry(0.26, 12, 10), bodyMat, 0, 1.66, -0.02);
-  radd(new THREE.BoxGeometry(0.36, 0.14, 0.1), glowC, 0, 1.68, 0.19, 0.05, 0, 0);
+  radd(new THREE.BoxGeometry(0.4, 0.19, 0.12), glowC, 0, 1.68, 0.19, 0.05, 0, 0);
   radd(new THREE.BoxGeometry(0.46, 0.08, 0.34), bodyMat, 0, 1.82, -0.04);
 
   // ---- shield bubble
@@ -363,7 +364,8 @@ export class Player {
     }
 
     /* ---- drifting visuals --------------------------------------------- */
-    const driftTarget = this.drifting ? -Math.sign(k) * CFG.driftSlipAngle * clamp(this.driftT * 1.6, 0.4, 1) : 0;
+    // nose points into the corner while the tails slide wide
+    const driftTarget = this.drifting ? Math.sign(k) * CFG.driftSlipAngle * clamp(this.driftT * 1.6, 0.4, 1) : 0;
     this.driftAngle = damp(this.driftAngle, driftTarget, 7, dt);
     this.lean = damp(this.lean, this.drifting ? -Math.sign(k) * 0.42 : steer * 0.34, 6, dt);
 

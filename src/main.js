@@ -232,6 +232,20 @@ function tick() {
         );
       }
     }
+    // constant hover trail so speed always reads
+    if (time - lastSpawn > 0.018) {
+      lastSpawn = time;
+      particles.spawn(
+        rear.x + (Math.random() - 0.5) * 0.9,
+        rear.y - 0.15,
+        rear.z + (Math.random() - 0.5) * 0.8,
+        (Math.random() - 0.5) * 1.5 - Math.sin(f.yaw) * 3,
+        Math.random() * 1.5,
+        (Math.random() - 0.5) * 1.5 - Math.cos(f.yaw) * 3,
+        0.26, 0.3,
+        [0.35, 1.0, 1.5], 3.5, 1.5
+      );
+    }
     if (player.grinding) {
       if (time - lastSpawn > 0.03) {
         lastSpawn = time;
