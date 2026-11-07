@@ -13,8 +13,6 @@
 #endif
 
 #include "Engine/Diagnostics/DiagnosticJournal.h"
-#include "Engine/Diagnostics/LogCategories.h"
-#include "Engine/Diagnostics/LogStream.h"
 #include "Engine/Interface/ContentDirectory.h"
 #include "Engine/Interface/VulkanPresentation.h"
 #include "Engine/Interface/WindowsApplication.h"
@@ -30,7 +28,6 @@
 
 #include <algorithm>
 #include <array>
-#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
@@ -172,12 +169,6 @@ void StartCoursePhysics(Frontier::PhysicsExtension& Physics, Frontier::WorldSpac
     (void)Physics.Begin(World, Settings);
 }
 
-bool IsTrainingGroundPath(const std::filesystem::path& LevelPath)
-{
-    const std::string Name = LevelPath.filename().string();
-    return Name.find("ProvingGround") != std::string::npos || Name.find("TrainingGround") != std::string::npos;
-}
-
 } // namespace
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -188,7 +179,6 @@ int main(int, char**)
 {
     const std::filesystem::path ProjectRoot    = LocateEverestProjectRoot();
     const std::filesystem::path ShaderArchives = Frontier::ResolveContentDirectory("EngineContent/ShaderArchives");
-    Frontier::ConfigureLogFile(ProjectRoot / "Saved" / "Logs" / "Frontier.log");
 
     Frontier::VulkanPresentation*                 Presentation = nullptr;
     GLFWwindow*                                   MainWindow   = nullptr;
@@ -202,16 +192,6 @@ int main(int, char**)
     bool                                          PendingRouteDrive       = false;
     bool                                          PendingCoursePhysicsBoot = false;
     uint64_t                                      PublishedGeometryGen    = 0u;
-    bool                                          PerformanceLoggingEnabled = true;
-    bool                                          MotionBlurEnabled = true;
-    double                                        PerfWindowSeconds = 0.0;
-    double                                        PerfFrameMsTotal = 0.0, PerfFrameMsMax = 0.0;
-    double                                        PerfWorkspaceMsTotal = 0.0, PerfPhysicsMsTotal = 0.0;
-    double                                        PerfViewportMsTotal = 0.0, PerfViewportMsMax = 0.0;
-    double                                        PerfSubmitWaitMsTotal = 0.0, PerfSubmitWaitMsMax = 0.0;
-    double                                        PerfSlowestSubmitMs = 0.0;
-    std::string                                   PerfSlowestSubmitLabel{};
-    uint32_t                                      PerfFrameCount = 0u;
 
     Frontier::ApplicationWindowCallbacks Callbacks{};
     Callbacks.Title          = "Everest — Studio Lobby";
@@ -244,22 +224,13 @@ int main(int, char**)
         const float         Height       = std::max(64.0f, Viewport->Size.y);
         const double        Aspect       = static_cast<double>(Width) / static_cast<double>(Height);
 
-        const auto WorkspaceUpdateStart = std::chrono::steady_clock::now();
         Workspace->IntegrateSimulation(DeltaSeconds);
-        const double WorkspaceUpdateMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - WorkspaceUpdateStart).count();
-        double PhysicsStepMs = 0.0;
 
         const bool InLobby = Workspace->QueryLobbyActive();
-        const bool InTrainingGround = IsTrainingGroundPath(Workspace->QueryActiveLevelPath());
         auto&      Camera  = Workspace->AccessVehicleCamera();
         auto&      Lobby   = Workspace->AccessLobbySession();
         auto&      World   = Workspace->QueryWorldSpace();
 
-        if (InTrainingGround && !IO.WantTextInput)
-        {
-            if (ImGui::IsKeyPressed(ImGuiKey_P, false)) PerformanceLoggingEnabled = !PerformanceLoggingEnabled;
-            if (ImGui::IsKeyPressed(ImGuiKey_M, false)) MotionBlurEnabled = !MotionBlurEnabled;
-        }
         if (!IO.WantTextInput && ImGui::IsKeyPressed(ImGuiKey_H, false))
         {
             HudHidden = !HudHidden;
@@ -311,9 +282,7 @@ int main(int, char**)
             VehicleInput.Handbrake   = Command.Drive.Handbrake;
             VehicleInput.ClutchPedal = (!IO.WantTextInput && ImGui::IsKeyDown(ImGuiKey_LeftShift)) ? 1.0f : 0.0f;
             Physics->AssignVehicleInput(VehicleInput);
-            const auto PhysicsStepStart = std::chrono::steady_clock::now();
             (void)Physics->Step(World, DeltaSeconds);
-            PhysicsStepMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - PhysicsStepStart).count();
         }
 
         // ② Advance VehicleHMI + Studio Lobby cinematic + transition camera.
@@ -362,7 +331,6 @@ int main(int, char**)
 
         uint64_t TextureHandle = 0u;
         Frontier::SceneViewportRefresh RenderResult{};
-        double ViewportCallbackMs = 0.0;
         if (SceneRenderer)
         {
             Frontier::SceneViewportRequest Request{};
@@ -375,10 +343,7 @@ int main(int, char**)
             Request.VerticalFieldOfView = Solution.VerticalFieldOfViewRadians;
             Request.CameraNear          = Solution.NearClipMetres;
             Request.DeltaSeconds        = DeltaSeconds;
-            Request.CameraMotionBlur   = {InTrainingGround && MotionBlurEnabled, 0.45f};
-            const auto ViewportStart = std::chrono::steady_clock::now();
             RenderResult = SceneRenderer->Render(Request, World, Workspace->QueryElapsedSeconds());
-            ViewportCallbackMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - ViewportStart).count();
             TextureHandle = SceneTexture.Resolve(RenderResult.View);
             if (RenderResult.Readout.Geometry && RenderResult.Readout.GeometryGeneration != PublishedGeometryGen)
             {
@@ -390,59 +355,6 @@ int main(int, char**)
                 StartCoursePhysics(*Physics, World);
                 PendingCoursePhysicsBoot = false;
             }
-        }
-
-        if (InTrainingGround && PerformanceLoggingEnabled && FrameDeltaSeconds > 0.0)
-        {
-            const auto& Readout = RenderResult.Readout;
-            const double FrameMs = FrameDeltaSeconds * 1000.0;
-            PerfWindowSeconds += FrameDeltaSeconds;
-            PerfFrameMsTotal += FrameMs;
-            PerfFrameMsMax = std::max(PerfFrameMsMax, FrameMs);
-            PerfWorkspaceMsTotal += WorkspaceUpdateMs;
-            PerfPhysicsMsTotal += PhysicsStepMs;
-            PerfViewportMsTotal += ViewportCallbackMs;
-            PerfViewportMsMax = std::max(PerfViewportMsMax, ViewportCallbackMs);
-            PerfSubmitWaitMsTotal += Readout.SubmissionWaitMs;
-            PerfSubmitWaitMsMax = std::max(PerfSubmitWaitMsMax, Readout.SubmissionWaitMs);
-            if (Readout.SlowestSubmitWaitMs > PerfSlowestSubmitMs)
-            {
-                PerfSlowestSubmitMs = Readout.SlowestSubmitWaitMs;
-                PerfSlowestSubmitLabel = Readout.SlowestSubmitLabel;
-            }
-            ++PerfFrameCount;
-            if (PerfWindowSeconds >= 1.0 && PerfFrameCount > 0u)
-            {
-                const double Samples = static_cast<double>(PerfFrameCount);
-                const uint32_t Category = Frontier::LogCategories().Register("VehicleHMI Perf", Frontier::LogColour::Amber, true);
-                Frontier::WriteLogFormat(Category, Frontier::LogSeverity::Info, Frontier::LogVerbosity::Log, "VehicleHmiRuntime",
-                    "vehiclehmi_perf_v1 window_s=%.2f fps=%.1f frame_dt_avg_ms=%.2f frame_dt_max_ms=%.2f workspace_update_avg_ms=%.3f physics_step_avg_ms=%.3f viewport_callback_avg_ms=%.2f viewport_callback_max_ms=%.2f submit_wait_avg_ms=%.2f submit_wait_max_ms=%.2f slowest_submit_ms=%.2f slowest_submit=\"%s\" submit_count_last=%u screen=%ux%u trace=%ux%u triangles=%u clusters=%u cards=%u tlas=%u vehicles=%u renderer=\"%s\" adapter=\"%s\" gpu_timestamp_ms=unavailable",
-                    PerfWindowSeconds, Samples / PerfWindowSeconds, PerfFrameMsTotal / Samples, PerfFrameMsMax,
-                    PerfWorkspaceMsTotal / Samples, PerfPhysicsMsTotal / Samples, PerfViewportMsTotal / Samples, PerfViewportMsMax,
-                    PerfSubmitWaitMsTotal / Samples, PerfSubmitWaitMsMax, PerfSlowestSubmitMs, PerfSlowestSubmitLabel.c_str(),
-                    Readout.SubmissionCount, Readout.ScreenExtent[0], Readout.ScreenExtent[1], Readout.TraceExtent[0], Readout.TraceExtent[1],
-                    Readout.SceneTriangles, Readout.GeometryClusters, Readout.SurfaceCards, Readout.TlasInstances,
-                    Lobby.QueryActiveVehicleCount(), Readout.RendererTag.c_str(), Readout.Adapter.c_str());
-                PerfWindowSeconds = 0.0;
-                PerfFrameMsTotal = PerfFrameMsMax = 0.0;
-                PerfWorkspaceMsTotal = PerfPhysicsMsTotal = 0.0;
-                PerfViewportMsTotal = PerfViewportMsMax = 0.0;
-                PerfSubmitWaitMsTotal = PerfSubmitWaitMsMax = 0.0;
-                PerfSlowestSubmitMs = 0.0;
-                PerfSlowestSubmitLabel.clear();
-                PerfFrameCount = 0u;
-            }
-        }
-        else
-        {
-            PerfWindowSeconds = 0.0;
-            PerfFrameMsTotal = PerfFrameMsMax = 0.0;
-            PerfWorkspaceMsTotal = PerfPhysicsMsTotal = 0.0;
-            PerfViewportMsTotal = PerfViewportMsMax = 0.0;
-            PerfSubmitWaitMsTotal = PerfSubmitWaitMsMax = 0.0;
-            PerfSlowestSubmitMs = 0.0;
-            PerfSlowestSubmitLabel.clear();
-            PerfFrameCount = 0u;
         }
 
         // ④ Fullscreen canvas + clean standalone game HUD + fade veil.
@@ -561,10 +473,8 @@ int main(int, char**)
                     }
                 }
                 ImGui::SameLine();
-                char SpeedText[192];
-                std::snprintf(SpeedText, sizeof(SpeedText), "%.0f km/h  |  WASD/Space/Shift Drive  |  R Reset  |  M Blur %s  |  P Perf %s",
-                              Subject.SpeedMetresPerSecond * 3.6, MotionBlurEnabled ? "ON" : "OFF",
-                              PerformanceLoggingEnabled ? "ON" : "OFF");
+                char SpeedText[80];
+                std::snprintf(SpeedText, sizeof(SpeedText), "%.0f km/h  |  WASD/Space/Shift Drive  |  R Reset", Subject.SpeedMetresPerSecond * 3.6);
                 ImGui::TextUnformatted(SpeedText);
             }
         }

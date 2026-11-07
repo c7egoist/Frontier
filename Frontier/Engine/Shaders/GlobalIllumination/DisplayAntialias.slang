@@ -37,26 +37,7 @@ float3 ExpandRange(float3 Colour)
     return Colour / max(1.0 - ResolveLuminance(Colour), 1.0e-4);
 }
 
-// 📝 Optional camera-component blur, along the renderer's camera/object motion vector. Four extra taps run only
-//    when the Proving Grounds camera enables the effect; vectors are capped at 24 px to prevent streak outliers.
-float3 ResolveMotionBlur(int2 Pixel, float2 MotionPixels, float Strength)
-{
-    let Speed = length(MotionPixels);
-    if (Strength <= 0.0 || Speed < 0.75)
-    {
-        return LoadTexel(RecombinedRadiance, Pixel, 0).rgb;
-    }
-    let Delta = MotionPixels * min(Strength, 1.0) * min(1.0, 24.0 / Speed);
-    let Uv = (float2(Pixel) + 0.5) * Refresh.InverseScreenExtent;
-    var Sum = LoadTexel(RecombinedRadiance, Pixel, 0).rgb * 0.2;
-    Sum += RecombinedRadiance.SampleLevel(LinearClamp, Uv - Delta * 0.5 * Refresh.InverseScreenExtent, 0.0).rgb * 0.2;
-    Sum += RecombinedRadiance.SampleLevel(LinearClamp, Uv - Delta * Refresh.InverseScreenExtent, 0.0).rgb * 0.2;
-    Sum += RecombinedRadiance.SampleLevel(LinearClamp, Uv + Delta * 0.5 * Refresh.InverseScreenExtent, 0.0).rgb * 0.2;
-    Sum += RecombinedRadiance.SampleLevel(LinearClamp, Uv + Delta * Refresh.InverseScreenExtent, 0.0).rgb * 0.2;
-    return Sum;
-}
 
- 
 [shader("compute")]
 [numthreads(8, 8, 1)]
 void IntegrateAntialias(uint3 Invocation : SV_DispatchThreadID)
@@ -66,9 +47,7 @@ void IntegrateAntialias(uint3 Invocation : SV_DispatchThreadID)
     {
         return;
     }
-    let Motion = LoadTexel(SurfaceMotion, Pixel, 0).xy;
-    let MotionBlurStrength = Refresh.InspectionMode == 0u ? float(Refresh.PresentationControl & 255u) / 255.0 : 0.0;
-    let Current = CompressRange(ResolveMotionBlur(Pixel, Motion, MotionBlurStrength));
+    let Current = CompressRange(LoadTexel(RecombinedRadiance, Pixel, 0).rgb);
     if (!FeatureEnabled(Refresh, FeatureTemporalAntialias) || Refresh.InspectionMode == 6u || Refresh.InspectionMode == 7u)
     {
         AntialiasTarget[Pixel] = float4(ExpandRange(Current), 1.0);
@@ -95,6 +74,7 @@ void IntegrateAntialias(uint3 Invocation : SV_DispatchThreadID)
     Minimum = max(Minimum, Mean - 1.25 * Deviation);
     Maximum = min(Maximum, Mean + 1.25 * Deviation);
 
+    let Motion = LoadTexel(SurfaceMotion, Pixel, 0).xy;
     let PriorCoordinates = (float2(Pixel) + 0.5 - Motion) * Refresh.InverseScreenExtent;
     var Fraction = 0.1;
     var Prior = Current;

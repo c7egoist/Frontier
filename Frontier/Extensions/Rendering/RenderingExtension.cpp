@@ -334,7 +334,6 @@ SceneViewportRefresh RenderingExtension::Render(const SceneViewportRequest& Requ
     Rendering.VirtualizedGeometry  = Pipeline.VirtualizedGeometry;
     Rendering.VirtualizedStreamSlots = static_cast<uint32_t>(std::max(0, Pipeline.VirtualizedStreamSlots));
     Rendering.AnalyticIllumination   = Pipeline.AnalyticIllumination;
-    Rendering.MotionBlurStrength = Request.CameraMotionBlur.Enabled ? std::clamp(static_cast<double>(Request.CameraMotionBlur.Strength), 0.0, 1.0) : 0.0;
     namespace Bit = Frontier::GlobalIllumination::RefinementBit;
     Rendering.Refinements = (Pipeline.SolarDisc ? Bit::SolarDisc : 0u) | (Pipeline.StratifiedSun ? Bit::StratifiedSun : 0u) |
                             (Pipeline.PenumbraFilter ? Bit::PenumbraFilter : 0u) | (Pipeline.MirrorFilter ? Bit::MirrorFilter : 0u) |
@@ -397,10 +396,6 @@ SceneViewportRefresh RenderingExtension::Render(const SceneViewportRequest& Requ
     const double Milliseconds = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - Start).count();
     RefreshMilliseconds_      = RefreshMilliseconds_ <= 0.0 ? Milliseconds : RefreshMilliseconds_ * 0.9 + Milliseconds * 0.1;
     Outcome.Readout.LatestMilliseconds = Milliseconds;
-    Outcome.Readout.SubmissionWaitMs = Viewport_->QuerySubmissionWaitMilliseconds();
-    Outcome.Readout.SlowestSubmitWaitMs = Viewport_->QuerySlowestSubmissionWaitMilliseconds();
-    Outcome.Readout.SlowestSubmitLabel = Viewport_->QuerySlowestSubmissionLabel();
-    Outcome.Readout.SubmissionCount = Viewport_->QuerySubmissionCount();
     if (auto* Overlay = Viewport_->AccessOverlay()) Outcome.Readout.Environment = Overlay->QueryReadout();
     Outcome.View   = Viewport_->QueryPresentedView();
     Outcome.Extent = Viewport_->QueryScreenExtent();

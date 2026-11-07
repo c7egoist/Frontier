@@ -67,15 +67,6 @@ bool SceneViewport::Construct(const VulkanDeviceAccess* HostDevice, const SceneV
     Exchange_      = std::make_unique<DeviceExchange>();
     if (HostDevice != nullptr ? !Exchange_->AttachDevice(*HostDevice, OutDiagnostic) : !Exchange_->Initialize("", OutDiagnostic)) return false;
     Adapter_ = Exchange_->AdapterDescription();
-    Exchange_->SubmissionTiming = [this](const std::string& Label, double Milliseconds) {
-        SubmissionWaitMilliseconds_ += Milliseconds;
-        ++SubmissionCount_;
-        if (Milliseconds > SlowestSubmissionWaitMilliseconds_)
-        {
-            SlowestSubmissionWaitMilliseconds_ = Milliseconds;
-            SlowestSubmissionLabel_ = Label;
-        }
-    };
     if (Configuration.Journal)
     {
         Exchange_->FaultObserver = [Journal = Configuration.Journal](const std::string& Fault) { Journal("device fault: " + Fault); };
@@ -262,10 +253,6 @@ bool SceneViewport::Refresh(const ViewportCamera& Camera, const SceneEnvironment
                             std::array<uint32_t, 2> ScreenExtent, std::string* OutDiagnostic)
 {
     if (!Host_) return false;
-    SubmissionWaitMilliseconds_ = 0.0;
-    SlowestSubmissionWaitMilliseconds_ = 0.0;
-    SlowestSubmissionLabel_.clear();
-    SubmissionCount_ = 0;
     ScreenExtent = {std::max(64u, ScreenExtent[0]), std::max(64u, ScreenExtent[1])};
     // 📝 Render settings › Trace resolution: the resampling targets follow it as they follow the screen extent.
     const uint32_t TraceScale = Rendering.TraceScale != 0 ? std::clamp(Rendering.TraceScale, 1u, 4u) : std::max(1u, Configuration_.TraceScale);
@@ -352,8 +339,7 @@ bool SceneViewport::Refresh(const ViewportCamera& Camera, const SceneEnvironment
     }
     // 📝 World-grid plume transport & raymarch + live fire illumination feeding DirectRadiance, CardDirect & RayIntersection.
     Inputs.External.ElapsedSeconds = ElapsedSeconds_;
-    const uint32_t MotionBlurByte = static_cast<uint32_t>(std::lround(std::clamp(Rendering.MotionBlurStrength, 0.0, 1.0) * 255.0));
-    Inputs.External.PresentationControl = (1u << 8) | (1000u << 20) | MotionBlurByte;
+    Inputs.External.PresentationControl = (1u << 8) | (1000u << 20);
     const std::array<float, 3> PlumeFocus = PlumeFocusOverride_.value_or(
         std::array<float, 3>{ static_cast<float>(Inputs.Focus[0]), static_cast<float>(Inputs.Focus[1]), static_cast<float>(Inputs.Focus[2]) });
     const bool SmokeActive = Host_->Plume && Host_->Plume->PrepareRefresh(

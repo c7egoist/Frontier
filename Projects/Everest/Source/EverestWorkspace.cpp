@@ -395,12 +395,6 @@ EverestWorkspace::EverestWorkspace(Frontier::ControlCentrePanel& ControlCentre,
              }
          },
          [this, Token]() { return !Token.expired() && QueryNetworkingEnabled(); }},
-        {"Performance logging", Frontier::ControlCentreIconCategory::GaugeFrameRate,
-         [this, Token]() { if (!Token.expired() && IsVehicleHmiTrainingGround()) TogglePerformanceLogging(); },
-         [this, Token]() { return !Token.expired() && IsVehicleHmiTrainingGround() && QueryPerformanceLoggingEnabled(); }},
-        {"Motion blur", Frontier::ControlCentreIconCategory::VideoRenderScale,
-         [this, Token]() { if (!Token.expired() && IsVehicleHmiTrainingGround()) ToggleMotionBlur(); },
-         [this, Token]() { return !Token.expired() && IsVehicleHmiTrainingGround() && QueryMotionBlurEnabled(); }},
     });
 
     auto OutlinerSpec=Frontier::MakeSceneDirectoryPanelSpecification(OutlinerPanel);
@@ -1113,20 +1107,13 @@ void EverestWorkspace::ServiceSceneObjectKeys()
 
 void EverestWorkspace::ConstructInterface(double DeltaSeconds)
 {
-    const auto WorkspaceUpdateStart = std::chrono::steady_clock::now();
     IntegrateSimulation(DeltaSeconds);
-    const double SimulationCpuMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - WorkspaceUpdateStart).count();
-    double PhysicsStepCpuMs = 0.0;
     if (Physics && Physics->QueryRunning())
     {
         IntegrateDrivingControls(DeltaSeconds);
-        const auto PhysicsStart = std::chrono::steady_clock::now();
         (void)Physics->Step(QueryWorldSpace(), DeltaSeconds);
-        PhysicsStepCpuMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - PhysicsStart).count();
         IntegrateChaseCamera(DeltaSeconds);
     }
-    LastSimulationCpuMs = SimulationCpuMs;
-    LastPhysicsStepCpuMs = PhysicsStepCpuMs;
     // 📝 The replication session advances over the level while the Networking toggle enables it (silent otherwise).
     if (Network) (void)Network->Advance(QueryWorldSpace());
     ViewportDeltaSeconds = DeltaSeconds;
@@ -1559,7 +1546,6 @@ void EverestWorkspace::ConstructViewportSurface()
 
     // 📝 The host renders the level's scene through its records; the schematic stands in until an image exists.
     SceneViewportImage Image;
-    double RenderSubmitCpuMs = 0.0;
     if (PresentSceneViewport)
     {
         SceneViewportRequest Request;
@@ -1571,13 +1557,10 @@ void EverestWorkspace::ConstructViewportSurface()
         Request.VerticalFieldOfView = Flight.ResolveFieldOfView();
         Request.CameraNear          = ActiveNearClipMetres;
         Request.DeltaSeconds        = ViewportDeltaSeconds;
-        Request.CameraMotionBlur    = IsVehicleHmiTrainingGround() ? CameraMotionBlur : Frontier::CameraMotionBlurComponent{false, CameraMotionBlur.Strength};
         Request.CameraUp = Navigation.Up;
         Request.PickSerial          = PickSerial;
         Request.PickPoint           = PickPoint;
-        const auto RenderSubmitStart = std::chrono::steady_clock::now();
         Image = PresentSceneViewport(Request);
-        RenderSubmitCpuMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - RenderSubmitStart).count();
         LastReadout = Image.Readout;
         // 📝 GPU picking answers a click one interface tick later, from the image the click was made on; a click on the sky or on
         //    nothing a record owns leaves the selection as it is.
@@ -1599,7 +1582,6 @@ void EverestWorkspace::ConstructViewportSurface()
         ApplyPendingSurfaces();
         PublishRenderReadouts(QueryWorldSpace(), LastReadout);
     }
-    RecordPerformanceSample(ViewportDeltaSeconds, LastSimulationCpuMs, LastPhysicsStepCpuMs, RenderSubmitCpuMs);
     if (Image.Texture != 0)
     {
         DrawList->AddImage(static_cast<ImTextureID>(Image.Texture), StageMin, Max);
@@ -2064,60 +2046,6 @@ void EverestWorkspace::ToggleNetworking()
 bool EverestWorkspace::QueryNetworkingEnabled() const noexcept
 {
     return Network && Network->QueryEnabled();
-}
-
-bool EverestWorkspace::IsVehicleHmiTrainingGround() const noexcept
-{
-    const std::string Level = ActiveLevelPath.filename().string();
-    return Level.find("ProvingGround") != std::string::npos || Level.find("TrainingGround") != std::string::npos;
-}
-
-void EverestWorkspace::RecordPerformanceSample(double DeltaSeconds, double WorkspaceUpdateMs, double PhysicsStepMs, double RenderSubmitMs)
-{
-    if (!PerformanceLoggingEnabled || !IsVehicleHmiTrainingGround() || DeltaSeconds <= 0.0) return;
-    const double FrameMs = DeltaSeconds * 1000.0;
-    PerformanceWindowSeconds += DeltaSeconds;
-    PerformanceFrameMsTotal += FrameMs;
-    PerformanceFrameMsMax = std::max(PerformanceFrameMsMax, FrameMs);
-    PerformanceWorkspaceMsTotal += WorkspaceUpdateMs;
-    PerformancePhysicsMsTotal += PhysicsStepMs;
-    PerformanceRenderMsTotal += RenderSubmitMs;
-    PerformanceRenderMsMax = std::max(PerformanceRenderMsMax, RenderSubmitMs);
-    if (!LastReadout.Held)
-    {
-        PerformanceSubmitWaitMsTotal += LastReadout.SubmissionWaitMs;
-        PerformanceSubmitWaitMsMax = std::max(PerformanceSubmitWaitMsMax, LastReadout.SubmissionWaitMs);
-    }
-    if (!LastReadout.Held && LastReadout.SlowestSubmitWaitMs > PerformanceSlowestStageMs)
-    {
-        PerformanceSlowestStageMs = LastReadout.SlowestSubmitWaitMs;
-        PerformanceSlowestStage = LastReadout.SlowestSubmitLabel;
-    }
-    ++PerformanceFrameCount;
-    if (PerformanceWindowSeconds < 1.0 || PerformanceFrameCount == 0u) return;
-
-    const double Samples = static_cast<double>(PerformanceFrameCount);
-    const double Window = PerformanceWindowSeconds;
-    const uint32_t Category = Frontier::LogCategories().Register("VehicleHMI Perf", Frontier::LogColour::Amber, true);
-    Frontier::WriteLogFormat(Category, Frontier::LogSeverity::Info, Frontier::LogVerbosity::Log, "VehicleHmiPerf",
-        "vehiclehmi_perf_v1 window_s=%.2f fps=%.1f frame_dt_avg_ms=%.2f frame_dt_max_ms=%.2f workspace_update_avg_ms=%.3f physics_step_avg_ms=%.3f viewport_callback_avg_ms=%.2f viewport_callback_max_ms=%.2f submit_wait_avg_ms=%.2f submit_wait_max_ms=%.2f slowest_submit_ms=%.2f slowest_submit=\"%s\" submit_count_last=%u screen=%ux%u trace=%ux%u triangles=%u clusters=%u cards=%u tlas=%u vehicles=%u renderer=\"%s\" adapter=\"%s\" gpu_timestamp_ms=unavailable",
-        Window, Samples / Window, PerformanceFrameMsTotal / Samples, PerformanceFrameMsMax,
-        PerformanceWorkspaceMsTotal / Samples, PerformancePhysicsMsTotal / Samples,
-        PerformanceRenderMsTotal / Samples, PerformanceRenderMsMax,
-        PerformanceSubmitWaitMsTotal / Samples, PerformanceSubmitWaitMsMax, PerformanceSlowestStageMs,
-        PerformanceSlowestStage.c_str(), LastReadout.SubmissionCount,
-        LastReadout.ScreenExtent[0], LastReadout.ScreenExtent[1], LastReadout.TraceExtent[0], LastReadout.TraceExtent[1],
-        LastReadout.SceneTriangles, LastReadout.GeometryClusters, LastReadout.SurfaceCards, LastReadout.TlasInstances,
-        Lobby.QueryActiveVehicleCount(), LastReadout.RendererTag.c_str(), LastReadout.Adapter.c_str());
-
-    PerformanceWindowSeconds = 0.0;
-    PerformanceFrameMsTotal = PerformanceFrameMsMax = 0.0;
-    PerformanceWorkspaceMsTotal = PerformancePhysicsMsTotal = 0.0;
-    PerformanceRenderMsTotal = PerformanceRenderMsMax = 0.0;
-    PerformanceSubmitWaitMsTotal = PerformanceSubmitWaitMsMax = 0.0;
-    PerformanceSlowestStageMs = 0.0;
-    PerformanceSlowestStage.clear();
-    PerformanceFrameCount = 0;
 }
 
 bool EverestWorkspace::QueryVehicleDrivingActive() const

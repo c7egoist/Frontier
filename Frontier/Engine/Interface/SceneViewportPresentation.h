@@ -21,14 +21,6 @@ namespace Frontier
 
 // 📝 What the Scene Viewport asks the host application to render and present each interface tick; the host owns the device
 //    and the renderer, the workspace owns the camera (orbit, pan, dolly, fly) and the level records the host reads.
-// 📝 Camera-owned post-process option. The workspace only enables this component in the VehicleHMI Proving Grounds;
-//    the renderer receives strength zero for every other level.
-struct CameraMotionBlurComponent
-{
-    bool  Enabled  = false;
-    float Strength = 0.45f; // [-] fraction of the camera/object motion vector, clamped to one
-};
-
 struct SceneViewportRequest
 {
     float                 PanelWidth          = 0.0f;                 // [px] interface pixels
@@ -40,7 +32,6 @@ struct SceneViewportRequest
     double                CameraNear          = 0.05;                 // [m] near clip distance (0.01 m in HMI rig, 0.02 m cockpit)
     double                DeltaSeconds        = 0.0;                  // [s]
     std::array<double,3> CameraUp = {0,0,1};
-    CameraMotionBlurComponent CameraMotionBlur{}; // [-] camera post-process component; disabled outside training grounds
     // 📝 GPU picking: a click on the stage asks for the record drawn under it in the image the click was made on; the readout's
     //    Pick answers the serial one interface tick later.
     uint64_t              PickSerial          = 0;                    // [-] advances with every click; 0 = nothing asked
@@ -71,10 +62,6 @@ struct SceneViewportReadout
     std::array<uint32_t, 2> TraceExtent         = {0, 0};    // [px]
     double                  RefreshMilliseconds = 0.0;       // [ms] smoothed refresh duration
     double                  LatestMilliseconds  = 0.0;       // [ms] the last refresh alone
-    double                  SubmissionWaitMs    = 0.0;       // [ms] CPU wall: vkQueueSubmit through completion fence (not hardware timestamps)
-    double                  SlowestSubmitWaitMs = 0.0;       // [ms] longest submit/fence interval this refresh
-    std::string             SlowestSubmitLabel{};
-    uint32_t                SubmissionCount     = 0;         // [-] command-buffer submissions this refresh
     bool                    Held                = false;     // [-] live refresh is off: the image is the last one, not refreshed
     std::string             Failure{};                       // [-] why there is no image, if it failed
     bool                    RayTracing          = false;     // [-] RTX ReSTIR path tracer, else GTX distance-field GI
