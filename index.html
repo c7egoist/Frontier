@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover" />
+<meta name="theme-color" content="#06010f" />
+<title>FRONTIER // NEON RIFT</title>
+<link rel="stylesheet" href="./styles.css" />
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three/three.module.js",
+    "three/addons/": "./vendor/addons/"
+  }
+}
+</script>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="app">
+
+  <!-- ============ IN-GAME HUD ============ -->
+  <div id="hud" class="layer hidden">
+    <div class="hud-top">
+      <div class="panel score-panel">
+        <div class="label">SCORE</div>
+        <div id="score" class="big">0</div>
+        <div class="sub">BEST <span id="best">0</span></div>
+      </div>
+
+      <div class="center-stack">
+        <div id="speedwrap" class="speedwrap">
+          <div id="speed" class="speed">000</div>
+          <div class="speedunit">KM/H</div>
+        </div>
+        <div id="combo" class="combo hidden">x1.0</div>
+      </div>
+
+      <div class="panel right-panel">
+        <div class="label">SHIELD</div>
+        <div id="shields" class="shields">
+          <i class="pip on"></i><i class="pip on"></i><i class="pip on"></i>
+        </div>
+        <div class="cells">
+          <span class="cellicon">◆</span><span id="cells">0</span>
+          <span class="dist" id="dist">0 m</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="hud-bottom">
+      <div class="boostwrap">
+        <div class="label">BOOST</div>
+        <div class="boostbar"><div id="boostfill" class="boostfill"></div><div class="notch n1"></div><div class="notch n2"></div><div class="notch n3"></div></div>
+        <div id="boosthint" class="hint">SHIFT / TAP ⚡</div>
+      </div>
+    </div>
+
+    <div id="callout" class="callout"></div>
+    <div id="turnhint" class="turnhint hidden"><span class="arrow">▶</span> DRIFT</div>
+    <div id="trick" class="trick"></div>
+    <div class="speedlines" id="speedlines"></div>
+    <div class="vignette"></div>
+  </div>
+
+  <!-- ============ TITLE / MENU ============ -->
+  <div id="menu" class="layer overlay">
+    <div class="menu-bg"></div>
+    <div class="menu-inner">
+      <div class="kicker">FRONTIER // PROTOCOL 07</div>
+      <h1 class="title">
+        <span class="t1">NEON</span><span class="t2">RIFT</span>
+      </h1>
+      <div class="tagline">RAMP · TUNNEL · OVERPASS · 90° DRIFT</div>
+
+      <button id="startbtn" class="bigbtn">
+        <span>LAUNCH RUN</span>
+        <em>PRESS SPACE</em>
+      </button>
+
+      <div class="controls-grid">
+        <div class="ctrl"><kbd>A</kbd><kbd>D</kbd><span>STEER / DRIFT</span></div>
+        <div class="ctrl"><kbd>SPACE</kbd><span>JUMP</span></div>
+        <div class="ctrl"><kbd>S</kbd><span>SLIDE</span></div>
+        <div class="ctrl"><kbd>SHIFT</kbd><span>BOOST</span></div>
+      </div>
+
+      <div class="fineprint">
+        Hit ramps to get airborne · hold a steer through a 90° corner to <b>drift</b> for score ·
+        grab <b>cells</b> to charge boost
+      </div>
+      <div class="bestline">BEST <span id="best2">0</span></div>
+    </div>
+  </div>
+
+  <!-- ============ GAME OVER ============ -->
+  <div id="over" class="layer overlay hidden">
+    <div class="menu-bg over"></div>
+    <div class="menu-inner">
+      <div class="kicker red">RUN TERMINATED</div>
+      <h2 class="overtitle">SIGNAL LOST</h2>
+      <div class="stats">
+        <div class="stat"><span>SCORE</span><b id="oScore">0</b></div>
+        <div class="stat"><span>DISTANCE</span><b id="oDist">0 m</b></div>
+        <div class="stat"><span>BEST</span><b id="oBest">0</b></div>
+      </div>
+      <div id="newbest" class="newbest hidden">NEW PERSONAL BEST</div>
+      <button id="retrybtn" class="bigbtn"><span>RUN IT BACK</span><em>PRESS R</em></button>
+      <div class="fineprint">Tricks, drifts and near-misses multiply your score. Chase the multiplier.</div>
+    </div>
+  </div>
+
+  <!-- mobile / touch controls -->
+  <div id="touch" class="touch hidden">
+    <div class="tpad tleft">
+      <button data-act="left" class="tbtn">◀</button>
+      <button data-act="right" class="tbtn">▶</button>
+    </div>
+    <div class="tpad tright">
+      <button data-act="slide" class="tbtn small">SLIDE</button>
+      <button data-act="jump" class="tbtn">JUMP</button>
+      <button data-act="boost" class="tbtn small boost">⚡</button>
+    </div>
+  </div>
+
+  <div id="mutebtn" class="mute" title="Audio on/off">♪</div>
+</div>
+
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>

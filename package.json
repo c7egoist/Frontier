@@ -1,0 +1,11 @@
+{
+  "name": "frontier-neon-rift",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "FRONTIER // NEON RIFT — neon drift racer",
+  "scripts": {
+    "start": "node server.mjs",
+    "dev": "node server.mjs"
+  }
+}
