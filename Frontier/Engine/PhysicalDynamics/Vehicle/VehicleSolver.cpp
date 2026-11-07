@@ -24,6 +24,18 @@ namespace {
 }
 } // namespace
 
+Vec3 ResolveRestingHubLocal(const VehicleSolverConfiguration& Configuration, uint32_t Wheel) noexcept
+{
+    if (Wheel >= Configuration.Wheels.size()) return {};
+    const WheelMount& Mount = Configuration.Wheels[Wheel];
+    if (!Configuration.SuspensionEnabled) return Mount.LocalOffset;
+
+    const SuspensionSpecification& Strut = (Mount.Steered || Mount.LocalOffset.x > 0.0f) ? Configuration.FrontStrut : Configuration.RearStrut;
+    const float                   Mirror = Mount.LocalOffset.y < 0.0f ? -1.0f : 1.0f;
+    const Vec3                    Axis   = Vec3{Strut.AxisX, Strut.AxisY * Mirror, Strut.AxisZ}.Normalized();
+    return Mount.SuspensionMount + Axis * (Strut.FreeLength - Strut.StaticCompression);
+}
+
 //------------------------------------------------------------------------------------------------------------------------
 // The wheel contact for this step: every wheel is posed on its end-of-step hub and the sample fan answers its load,
 //    patch and normal. `Reactions[i]` is what the force loop consumes; the wheel keeps a copy for telemetry.

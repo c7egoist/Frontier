@@ -203,17 +203,7 @@ Vehicle::ChassisKinematics PhysicsVehicle::ResolveEquilibriumPose(const std::arr
     float       MeanDeflection = 0.0f;
     for (size_t CornerIdx = 0u; CornerIdx < WheelCount; ++CornerIdx)
     {
-        const Vehicle::WheelMount& Mount = Configuration.Wheels[CornerIdx];
-        Vec3 HubLocal = Mount.LocalOffset;
-        if (Configuration.SuspensionEnabled)
-        {
-            const Vehicle::SuspensionSpecification& Strut =
-                (Mount.Steered || Mount.LocalOffset.x > 0.0f) ? Configuration.FrontStrut : Configuration.RearStrut;
-            const float Mirror    = (Mount.LocalOffset.y < 0.0f) ? -1.0f : 1.0f;
-            const Vec3  AxisLocal = Vec3{ Strut.AxisX, Strut.AxisY * Mirror, Strut.AxisZ }.Normalized();
-            HubLocal              = Mount.SuspensionMount + AxisLocal * (Strut.FreeLength - Strut.StaticCompression);
-        }
-        MeanHubLocal += HubLocal;
+        MeanHubLocal += Vehicle::ResolveRestingHubLocal(Configuration, static_cast<uint32_t>(CornerIdx));
 
         const float ColdPa    = (CornerIdx < Configuration.CornerPressures.size()) ? Configuration.CornerPressures[CornerIdx]
                                                                                    : Configuration.Tyre.InflationPressure;

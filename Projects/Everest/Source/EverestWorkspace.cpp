@@ -340,7 +340,7 @@ EverestWorkspace::EverestWorkspace(Frontier::ControlCentrePanel& ControlCentre,
     // 📝 The scene's entries plus the one Render settings component (the whole renderer, owner's request) and the scene archive's
     //    geometry objects; neither the renderer nor the geometry is constructible (the archive decides what geometry exists).
     const std::vector<std::string> SceneTypes = {"RenderPipeline","Solar","OpticalFlare","Atmosphere","Clouds","Fog","Stars","Moons","Planet","ForceField","Wind",
-                                                 "ForceSource","Geometry","Vehicle","Tyre"};
+                                                 "FluidPlume","Fracture","Particles","ForceSource","Geometry","Vehicle","Tyre"};
     OutlinerPanel.ConfigureVisibleTypes(SceneTypes);
     auto Types = QueryWorldSpace().EnumerateRegisteredTypes();
     std::erase_if(Types,[&](const auto& Entry)
@@ -532,6 +532,9 @@ Frontier::VehicleSubjectKinematics EverestWorkspace::ResolveVehicleKinematics(do
         }
         Subject.Available = true;
         const Frontier::VehicleConfiguration& Configuration = VehicleRec->QueryConfiguration();
+        const Frontier::Vehicle::VehicleGeometry& Geometry = Configuration.Specification.Geometry;
+        const Frontier::Vehicle::VehicleSolverConfiguration Solver =
+            Frontier::Vehicle::ResolveSolverConfiguration(Configuration.Specification);
 
         Frontier::VehicleReading Reading;
         if (Frontier::QueryVehicleReading(Candidate->QueryToken(), Reading) && Reading.Simulating)
@@ -555,7 +558,7 @@ Frontier::VehicleSubjectKinematics EverestWorkspace::ResolveVehicleKinematics(do
                 Subject.RearRightHubMetres = {Reading.WheelTransforms[3][12], Reading.WheelTransforms[3][13], Reading.WheelTransforms[3][14]};
                 return Subject;
             }
-            constexpr double ChassisToBodyZ = 0.11285;
+            const double ChassisToBodyZ = Geometry.CoMAuthoredZ();
             Subject.PositionMetres = {
                 static_cast<double>(Chassis.Position.x) - static_cast<double>(Up.x) * ChassisToBodyZ,
                 static_cast<double>(Chassis.Position.y) - static_cast<double>(Up.y) * ChassisToBodyZ,
@@ -574,8 +577,8 @@ Frontier::VehicleSubjectKinematics EverestWorkspace::ResolveVehicleKinematics(do
             const Frontier::Vehicle::Vec3 Fwd  = Orientation.Rotate({1.0f, 0.0f, 0.0f});
             const Frontier::Vehicle::Vec3 Left = Orientation.Rotate({0.0f, 1.0f, 0.0f});
             const Frontier::Vehicle::Vec3 Up   = Orientation.Rotate({0.0f, 0.0f, 1.0f});
-            constexpr double BodyGroundOffset  = 0.41715;
-            Subject.GroundFloorMetres          = static_cast<double>(Configuration.Spatial.PositionMetres[2]);
+            const double BodyGroundOffset = Geometry.AuthoredGroundOffset();
+            Subject.GroundFloorMetres     = static_cast<double>(Configuration.Spatial.PositionMetres[2]);
             Subject.PositionMetres             = {
                 static_cast<double>(Configuration.Spatial.PositionMetres[0]) + Up.x * BodyGroundOffset,
                 static_cast<double>(Configuration.Spatial.PositionMetres[1]) + Up.y * BodyGroundOffset,
@@ -586,16 +589,22 @@ Frontier::VehicleSubjectKinematics EverestWorkspace::ResolveVehicleKinematics(do
             Subject.UpUnit      = {Up.x, Up.y, Up.z};
         }
 
-        auto TransformWheelOffset = [&](double X, double Y, double Z)
+        const auto ResolveBodyLocalHub = [&](uint32_t Corner)
+        {
+            Frontier::Vehicle::Vec3 Offset = Frontier::Vehicle::ResolveRestingHubLocal(Solver, Corner);
+            Offset.z += Geometry.CoMAuthoredZ(); // solver hub is CoM-local; camera subject position is authored-body-local
+            return Offset;
+        };
+        const auto TransformWheelOffset = [&](const Frontier::Vehicle::Vec3& Offset)
         {
             return std::array<double, 3>{
-                Subject.PositionMetres[0] + Subject.ForwardUnit[0] * X + Subject.LeftUnit[0] * Y + Subject.UpUnit[0] * Z,
-                Subject.PositionMetres[1] + Subject.ForwardUnit[1] * X + Subject.LeftUnit[1] * Y + Subject.UpUnit[1] * Z,
-                Subject.PositionMetres[2] + Subject.ForwardUnit[2] * X + Subject.LeftUnit[2] * Y + Subject.UpUnit[2] * Z,
+                Subject.PositionMetres[0] + Subject.ForwardUnit[0] * Offset.x + Subject.LeftUnit[0] * Offset.y + Subject.UpUnit[0] * Offset.z,
+                Subject.PositionMetres[1] + Subject.ForwardUnit[1] * Offset.x + Subject.LeftUnit[1] * Offset.y + Subject.UpUnit[1] * Offset.z,
+                Subject.PositionMetres[2] + Subject.ForwardUnit[2] * Offset.x + Subject.LeftUnit[2] * Offset.y + Subject.UpUnit[2] * Offset.z,
             };
         };
-        Subject.FrontLeftHubMetres = TransformWheelOffset(1.7274, 1.0475, -0.0215);
-        Subject.RearRightHubMetres = TransformWheelOffset(-1.6686, -1.0475, -0.0215);
+        Subject.FrontLeftHubMetres = TransformWheelOffset(ResolveBodyLocalHub(0u));
+        Subject.RearRightHubMetres = TransformWheelOffset(ResolveBodyLocalHub(3u));
         break;
     }
 
@@ -926,6 +935,7 @@ void EverestWorkspace::ConfigureConstructCatalogue()
         {"Stars", "Environment", "Sparkles"}, {"Moons", "Environment", "Moon"},          {"Planet", "Environment", "Orbit"},
         {"Clouds", "Weather", "CloudFog"},    {"LocalCloud", "Weather", "CloudFog"},     {"Fog", "Weather", "Droplets"},
         {"LocalFog", "Weather", "Droplets"},  {"Wind", "Weather", "Wind"},               {"ForceField", "Weather", "Waves"},
+        {"FluidPlume", "Solvers", "Flame"},    {"Fracture", "Solvers", "Hammer"},          {"Particles", "Solvers", "Sparkles"},
         {"Vehicle", "Geometry", "Car"},       {"Tyre", "Geometry", "CircleDot"},
     };
     for (const auto& [Type, Label] : OutlinerPanel.QueryConstructibleTypes())
@@ -1596,12 +1606,23 @@ void EverestWorkspace::ConstructViewportSurface()
 
     // 📝 The selected scene object's transform handles: a left press on one drags it, a press elsewhere that is released
     //    without moving picks the object under the pointer (Project Zero's viewport selection).
-    const ImVec2                     StageExtent(W, H - BarH);
-    const Frontier::PlacementView    View   = ResolvePlacementView(StageMin, StageExtent);
-    Frontier::GeometryConfiguration* Edited = StudioCameraEngaged ? nullptr : ResolveEditedGeometry();
+    const ImVec2                  StageExtent(W, H - BarH);
+    const Frontier::PlacementView View = ResolvePlacementView(StageMin, StageExtent);
+    Frontier::GeometryConfiguration* EditedGeometry = StudioCameraEngaged ? nullptr : ResolveEditedGeometry();
+    Frontier::VehicleConfiguration* EditedVehicle  = nullptr;
+    if (auto* SelectedVehicle = dynamic_cast<Frontier::VehicleRecord*>(QueryWorldSpace().FindRecord(OutlinerPanel.QuerySelected())))
+    {
+        Frontier::VehicleConfiguration& Configuration = SelectedVehicle->AccessConfiguration();
+        // 📝 Physics owns the live vehicle pose while running. Author the spawn transform only with simulation stopped;
+        //    applying gizmo deltas during a live step would be overwritten by the next physics snapshot.
+        if (Configuration.Visible && (!Physics || !Physics->QueryRunning())) EditedVehicle = &Configuration;
+    }
+    Frontier::SpatialConfiguration* EditedSpatial = EditedGeometry != nullptr ? &EditedGeometry->Spatial
+                                                         : EditedVehicle != nullptr ? &EditedVehicle->Spatial
+                                                                                    : nullptr;
     if (StageHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !IO.KeyAlt && !ImGui::IsMouseDown(ImGuiMouseButton_Right))
     {
-        GizmoPress  = Edited != nullptr && Gizmo.Probe(View, GizmoMode, Edited->Spatial, IO.MousePos, Scale) >= 0;
+        GizmoPress  = EditedSpatial != nullptr && Gizmo.Probe(View, GizmoMode, *EditedSpatial, IO.MousePos, Scale) >= 0;
         PickPending = !GizmoPress && !StudioCameraEngaged;
         PickPress   = IO.MousePos;
     }
@@ -1616,7 +1637,7 @@ void EverestWorkspace::ConstructViewportSurface()
         if (IO.KeyAlt && ImGui::IsKeyPressed(ImGuiKey_S, false)) ToggleSimulation();
     }
     if ((StageHovered || ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) && !IO.WantTextInput && !IO.KeyCtrl &&
-        !ImGui::IsMouseDown(ImGuiMouseButton_Right) && !ModalEditor && !StudioCameraEngaged)
+        !ImGui::IsMouseDown(ImGuiMouseButton_Right) && !ModalEditor && (!StudioCameraEngaged || EditedVehicle != nullptr))
     {
         const std::array<std::pair<ImGuiKey, Frontier::PlacementGizmoMode>, 3> ModeKeys = {{{ImGuiKey_W, Frontier::PlacementGizmoMode::Move},
                                                                                             {ImGuiKey_E, Frontier::PlacementGizmoMode::Rotate},
@@ -1703,14 +1724,19 @@ void EverestWorkspace::ConstructViewportSurface()
     {
         ConstructViewportSchematic(DrawList, StageMin, Max);
     }
-    if (Edited != nullptr && Image.Texture != 0)
+    if (EditedSpatial != nullptr && Image.Texture != 0)
     {
-        const Frontier::PlacementGizmoOutcome Outcome = Gizmo.Construct(DrawList, View, GizmoMode, Edited->Spatial, IO.KeyCtrl, GizmoPress, Scale);
-        if (Outcome.Changed) Edited->AdvanceRevision();
+        const Frontier::PlacementGizmoOutcome Outcome = Gizmo.Construct(DrawList, View, GizmoMode, *EditedSpatial, IO.KeyCtrl, GizmoPress, Scale);
+        if (Outcome.Changed)
+        {
+            if (EditedGeometry != nullptr) EditedGeometry->AdvanceRevision();
+            else if (EditedVehicle != nullptr) EditedVehicle->AdvanceRevision();
+        }
         if (Outcome.Engaged && ImGui::IsKeyPressed(ImGuiKey_Escape, false))
         {
-            Gizmo.Cancel(Edited->Spatial);
-            Edited->AdvanceRevision();
+            Gizmo.Cancel(*EditedSpatial);
+            if (EditedGeometry != nullptr) EditedGeometry->AdvanceRevision();
+            else if (EditedVehicle != nullptr) EditedVehicle->AdvanceRevision();
         }
     }
     if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
@@ -1846,6 +1872,17 @@ void EverestWorkspace::ConstructViewportBar(const ImVec2& Min,const ImVec2& Max,
             Navigation = SceneViewportNavigation{};
         }
         X += Button + Gap;
+        // 📝 Outdoor levels can start in Editor-camera mode, where the Game-camera rig picker is otherwise hidden.
+        //    Keep the authored HMI tablet view one click away rather than inventing a per-level enable flag.
+        if (HasGameCamera && ViewportChromeControls::ConstructIconButton("##QuickHmiRig", {X, Min.y + (Height - Button) * .5f}, Button,
+                                                                         "Focus", VehicleCamera.QueryRig() == Frontier::VehicleCameraRig::Hmi,
+                                                                         true, "Open the vehicle HMI tablet camera"))
+        {
+            ConfigureGameCameraMode(true);
+            VehicleCamera.TransitionToRig(Frontier::VehicleCameraRig::Hmi);
+            AnnounceViewportNotice("HMI Tablet camera (M)");
+        }
+        if (HasGameCamera) X += Button + Gap;
     }
     // 📝 Debug views (Render settings › Debug views): the demo's inspection views and the analytic illumination as a view of its own.
     if (auto* Pipeline=dynamic_cast<Frontier::RenderPipelineRecord*>(QueryWorldSpace().FindFirstByType("RenderPipeline")))

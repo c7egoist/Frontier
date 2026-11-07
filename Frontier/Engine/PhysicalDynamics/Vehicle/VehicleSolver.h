@@ -208,6 +208,10 @@ struct VehicleSolverConfiguration
     std::vector<float>           CornerGrip{};        // [-]  per wheel compound grip; empty: 1
 };
 
+// 📝 Resting hub position in CoM-local axes, including the authored suspension mounts and static strut compression.
+//    Shared by equilibrium spawn, the parked-vehicle visual and camera framing so all three use one wheel/suspension geometry.
+[[nodiscard]] Vec3 ResolveRestingHubLocal(const VehicleSolverConfiguration& Configuration, uint32_t Wheel) noexcept;
+
 //------------------------------------------------------------------------------------------------------------------------
 //                                                     TELEMETRY
 //------------------------------------------------------------------------------------------------------------------------

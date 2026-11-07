@@ -558,6 +558,31 @@ void ValidateConditions()
 {
     Heading("C · The pieces added beyond Project Drive");
     {
+        // C0 equilibrium, parked visuals and camera fallbacks must share the same authored suspension rest hubs.
+        V::VehicleSpecification Authored = V::ConstructControlVehicleSpecification();
+        Authored.Geometry.TyreRadius = 0.55f;
+        Authored.Geometry.FrontWeightFraction = 0.57f;
+        Authored.Geometry.Front.NaturalFrequency = 2.3f;
+        Authored.Geometry.Rear.NaturalFrequency = 1.9f;
+        const V::VehicleSolverConfiguration Solver = V::ResolveSolverConfiguration(Authored);
+        V::Vec3 MeanHub{};
+        float   MaxSocketError = 0.0f;
+        for (uint32_t Wheel = 0u; Wheel < 4u; ++Wheel)
+        {
+            const V::Vec3 RestHub = V::ResolveRestingHubLocal(Solver, Wheel);
+            const V::Vec3 Socket  = Authored.Geometry.AxleMountLocal(Wheel);
+            MaxSocketError = std::max(MaxSocketError, (RestHub - Socket).Length());
+            MeanHub += RestHub;
+        }
+        MeanHub = MeanHub * 0.25f;
+        constexpr float RestTyreDeflection = 0.031f;
+        const float BodyFromEquilibrium = Authored.Geometry.TyreRadius - RestTyreDeflection - MeanHub.z - Authored.Geometry.CoMAuthoredZ();
+        const float BodyFromSockets     = Authored.Geometry.AuthoredGroundOffset() - RestTyreDeflection;
+        Report(MaxSocketError < 2.0e-4f && std::fabs(BodyFromEquilibrium - BodyFromSockets) < 2.0e-4f,
+               Format("rest hub solver matches authored suspension sockets (max %.4f mm); tyre-radius equilibrium preserves body clearance (%.4f m)",
+                      MaxSocketError * 1000.0f, BodyFromEquilibrium));
+    }
+    {
         // C1 supercharger has no lag, the turbo does; drag under load, bypass off throttle; charge air
         auto Rise = [](V::InductionType Induction, float& Settled, float& Drag, float& DragIdle, float& Charge)
         {

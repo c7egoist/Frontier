@@ -72,6 +72,9 @@ Frontier::VehicleSubjectKinematics SampleRuntimeVehicleSubject(const Frontier::W
         }
         Subject.Available = true;
         const Frontier::VehicleConfiguration& Configuration = VehicleRec->QueryConfiguration();
+        const Frontier::Vehicle::VehicleGeometry& Geometry = Configuration.Specification.Geometry;
+        const Frontier::Vehicle::VehicleSolverConfiguration Solver =
+            Frontier::Vehicle::ResolveSolverConfiguration(Configuration.Specification);
 
         Frontier::VehicleReading Reading;
         if (Frontier::QueryVehicleReading(Candidate->QueryToken(), Reading) && Reading.Simulating)
@@ -95,7 +98,7 @@ Frontier::VehicleSubjectKinematics SampleRuntimeVehicleSubject(const Frontier::W
                 Subject.RearRightHubMetres = {Reading.WheelTransforms[3][12], Reading.WheelTransforms[3][13], Reading.WheelTransforms[3][14]};
                 return Subject;
             }
-            constexpr double ChassisToBodyZ = 0.11285;
+            const double ChassisToBodyZ = Geometry.CoMAuthoredZ();
             Subject.PositionMetres = {
                 static_cast<double>(Chassis.Position.x) - static_cast<double>(Up.x) * ChassisToBodyZ,
                 static_cast<double>(Chassis.Position.y) - static_cast<double>(Up.y) * ChassisToBodyZ,
@@ -105,29 +108,44 @@ Frontier::VehicleSubjectKinematics SampleRuntimeVehicleSubject(const Frontier::W
         else
         {
             constexpr double DegToRad = 3.14159265358979323846 / 180.0;
-            const double     YawRad   = static_cast<double>(Configuration.Spatial.OrientationDegrees[2]) * DegToRad;
-            constexpr double OffsetZ  = 0.41715;
-            Subject.GroundFloorMetres = static_cast<double>(Configuration.Spatial.PositionMetres[2]);
-            Subject.PositionMetres    = {
-                static_cast<double>(Configuration.Spatial.PositionMetres[0]),
-                static_cast<double>(Configuration.Spatial.PositionMetres[1]),
-                static_cast<double>(Configuration.Spatial.PositionMetres[2]) + OffsetZ,
+            const double YawRad   = static_cast<double>(Configuration.Spatial.OrientationDegrees[2]) * DegToRad;
+            const double PitchRad = static_cast<double>(Configuration.Spatial.OrientationDegrees[1]) * DegToRad;
+            const double RollRad  = static_cast<double>(Configuration.Spatial.OrientationDegrees[0]) * DegToRad;
+            const Frontier::Vehicle::Quat Orientation =
+                (Frontier::Vehicle::Quat::AxisAngle({0.0f, 0.0f, 1.0f}, static_cast<float>(YawRad)) *
+                 Frontier::Vehicle::Quat::AxisAngle({0.0f, 1.0f, 0.0f}, static_cast<float>(PitchRad)) *
+                 Frontier::Vehicle::Quat::AxisAngle({1.0f, 0.0f, 0.0f}, static_cast<float>(RollRad))).Normalized();
+            const Frontier::Vehicle::Vec3 Fwd  = Orientation.Rotate({1.0f, 0.0f, 0.0f});
+            const Frontier::Vehicle::Vec3 Left = Orientation.Rotate({0.0f, 1.0f, 0.0f});
+            const Frontier::Vehicle::Vec3 Up   = Orientation.Rotate({0.0f, 0.0f, 1.0f});
+            const double BodyGroundOffset = Geometry.AuthoredGroundOffset();
+            Subject.GroundFloorMetres     = static_cast<double>(Configuration.Spatial.PositionMetres[2]);
+            Subject.PositionMetres        = {
+                static_cast<double>(Configuration.Spatial.PositionMetres[0]) + Up.x * BodyGroundOffset,
+                static_cast<double>(Configuration.Spatial.PositionMetres[1]) + Up.y * BodyGroundOffset,
+                static_cast<double>(Configuration.Spatial.PositionMetres[2]) + Up.z * BodyGroundOffset,
             };
-            Subject.ForwardUnit = {std::cos(YawRad), std::sin(YawRad), 0.0};
-            Subject.LeftUnit    = {-std::sin(YawRad), std::cos(YawRad), 0.0};
-            Subject.UpUnit      = {0.0, 0.0, 1.0};
+            Subject.ForwardUnit = {Fwd.x, Fwd.y, Fwd.z};
+            Subject.LeftUnit    = {Left.x, Left.y, Left.z};
+            Subject.UpUnit      = {Up.x, Up.y, Up.z};
         }
 
-        auto OffsetHub = [&](double X, double Y, double Z)
+        const auto ResolveBodyLocalHub = [&](uint32_t Corner)
+        {
+            Frontier::Vehicle::Vec3 Offset = Frontier::Vehicle::ResolveRestingHubLocal(Solver, Corner);
+            Offset.z += Geometry.CoMAuthoredZ(); // solver hub is CoM-local; camera subject position is authored-body-local
+            return Offset;
+        };
+        const auto OffsetHub = [&](const Frontier::Vehicle::Vec3& Offset)
         {
             return std::array<double, 3>{
-                Subject.PositionMetres[0] + Subject.ForwardUnit[0] * X + Subject.LeftUnit[0] * Y + Subject.UpUnit[0] * Z,
-                Subject.PositionMetres[1] + Subject.ForwardUnit[1] * X + Subject.LeftUnit[1] * Y + Subject.UpUnit[1] * Z,
-                Subject.PositionMetres[2] + Subject.ForwardUnit[2] * X + Subject.LeftUnit[2] * Y + Subject.UpUnit[2] * Z,
+                Subject.PositionMetres[0] + Subject.ForwardUnit[0] * Offset.x + Subject.LeftUnit[0] * Offset.y + Subject.UpUnit[0] * Offset.z,
+                Subject.PositionMetres[1] + Subject.ForwardUnit[1] * Offset.x + Subject.LeftUnit[1] * Offset.y + Subject.UpUnit[1] * Offset.z,
+                Subject.PositionMetres[2] + Subject.ForwardUnit[2] * Offset.x + Subject.LeftUnit[2] * Offset.y + Subject.UpUnit[2] * Offset.z,
             };
         };
-        Subject.FrontLeftHubMetres = OffsetHub(1.7274, 1.0475, -0.0215);
-        Subject.RearRightHubMetres = OffsetHub(-1.6686, -1.0475, -0.0215);
+        Subject.FrontLeftHubMetres = OffsetHub(ResolveBodyLocalHub(0u));
+        Subject.RearRightHubMetres = OffsetHub(ResolveBodyLocalHub(3u));
         break;
     }
 

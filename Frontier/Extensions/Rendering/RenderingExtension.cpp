@@ -637,6 +637,14 @@ void RenderingExtension::SynchronizeVehicleVisuals(const Frontier::WorldSpace& W
     std::array<std::array<float, 4>, 4>   Deformation{};
     std::array<const float*, 4>           FieldPointers{};
     std::array<float, 4>                  CornerDeflections{};
+    std::array<Vehicle::Vec3, 4>          RestingHubLocal{};
+    Vehicle::Vec3                         MeanHubLocal{};
+    for (uint32_t Corner = 0u; Corner < 4u; ++Corner)
+    {
+        RestingHubLocal[Corner] = Vehicle::ResolveRestingHubLocal(Solver, Corner);
+        MeanHubLocal += RestingHubLocal[Corner];
+    }
+    MeanHubLocal = MeanHubLocal * 0.25f;
 
     const float TotalWeight = Geometry.Mass * 9.81f;
     for (uint32_t Corner = 0u; Corner < 4u; ++Corner)
@@ -691,8 +699,10 @@ void RenderingExtension::SynchronizeVehicleVisuals(const Frontier::WorldSpace& W
     }
 
     const float MeanDeflection = 0.25f * (CornerDeflections[0] + CornerDeflections[1] + CornerDeflections[2] + CornerDeflections[3]);
-    const Vehicle::Vec3 BodyOrigin =
-        GroundBase + Orientation.Rotate({ 0.0f, 0.0f, Geometry.AuthoredGroundOffset() - MeanDeflection });
+    // 📝 Parked/editor placement follows the same COM + suspension + tyre-radius equilibrium as physics spawn.
+    const Vehicle::Vec3 GroundUp      = Orientation.Rotate({ 0.0f, 0.0f, 1.0f });
+    const Vehicle::Vec3 ChassisCOM    = GroundBase + GroundUp * (Geometry.TyreRadius - MeanDeflection) - Orientation.Rotate(MeanHubLocal);
+    const Vehicle::Vec3 BodyOrigin    = ChassisCOM - Orientation.Rotate({ 0.0f, 0.0f, Geometry.CoMAuthoredZ() });
 
     std::vector<Frontier::GlobalIllumination::OccupantPlacement> Placements;
     Placements.reserve(VehicleCount);
@@ -710,8 +720,6 @@ void RenderingExtension::SynchronizeVehicleVisuals(const Frontier::WorldSpace& W
         Placements.push_back(PlatePlacement);
     }
 
-    const float AxleX[4] = { Geometry.FrontAxleX(), Geometry.FrontAxleX(), -Geometry.RearAxleX(), -Geometry.RearAxleX() };
-    const float AxleY[4] = { +0.5f * Geometry.TrackFront, -0.5f * Geometry.TrackFront, +0.5f * Geometry.TrackRear, -0.5f * Geometry.TrackRear };
     for (uint32_t Corner = 0u; Corner < 4u; ++Corner)
     {
         Frontier::GlobalIllumination::OccupantPlacement WheelPlacement;
@@ -719,8 +727,7 @@ void RenderingExtension::SynchronizeVehicleVisuals(const Frontier::WorldSpace& W
         WheelPlacement.Active   = true;
         if (CornerFitted[Corner])
         {
-            const Vehicle::Vec3 HubWorld =
-                GroundBase + Orientation.Rotate({ AxleX[Corner], AxleY[Corner], Geometry.TyreRadius - CornerDeflections[Corner] });
+            const Vehicle::Vec3 HubWorld = ChassisCOM + Orientation.Rotate(RestingHubLocal[Corner]);
             WheelPlacement.Current = AssembleColumnMajor(HubWorld, Orientation, RadiusScale, WidthScale);
         }
         else
