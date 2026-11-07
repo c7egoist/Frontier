@@ -37,7 +37,7 @@ jobs:
         run: |
           cmake -S . -B Build/Windows -G Ninja -DCMAKE_TOOLCHAIN_FILE=Automation/WindowsToolchain.cmake \
               -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
-          cmake --build Build/Windows --target Frontier --parallel
+          cmake --build Build/Windows --target Frontier TextureStudio --parallel
       - name: Package
         run: |
           python Automation/PackageEditorPreviewWindows.py --executable Build/Windows/Frontier.exe \
@@ -68,7 +68,7 @@ jobs:
       - name: cmake -S . -B Build/Editor -A x64, then the Frontier target
         run: |
           cmake -S . -B Build/Editor -A x64
-          cmake --build Build/Editor --config Release --target Frontier --parallel
+          cmake --build Build/Editor --config Release --target Frontier TextureStudio --parallel
       - name: Package
         run: |
           python Automation/PackageEditorPreviewWindows.py --executable Build/Editor/Release/Frontier.exe \
