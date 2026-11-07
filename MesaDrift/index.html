@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>Mesa Drift</title>
+  <style>
+    :root {
+      --paper: #F3E9D6; --paper2: #E8DCC4; --ink: #2E2622; --oxide: #B5543B; --ochre: #D9A441; --teal: #2F7F7C;
+      --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+      --sans: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #F2BC93; font-family: var(--sans); color: var(--ink); }
+    canvas#c { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+    .hidden { display: none !important; }
+
+    /* filmic finish: faint grain + vignette, no glow */
+    #grain { position: fixed; inset: 0; pointer-events: none; z-index: 5; opacity: .07; mix-blend-mode: multiply;
+      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>"); }
+    #vignette { position: fixed; inset: 0; pointer-events: none; z-index: 4; background: radial-gradient(ellipse at center, transparent 55%, rgba(60,30,15,.35) 100%); }
+    body.hit::after { content: ""; position: fixed; inset: 0; z-index: 6; pointer-events: none; background: rgba(181,84,59,.28); animation: fade .26s linear forwards; }
+    @keyframes fade { to { opacity: 0; } }
+
+    /* HUD */
+    #hud { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
+    .card { background: var(--paper); border: 2px solid var(--ink); box-shadow: 4px 4px 0 var(--ink); padding: 8px 14px; }
+    #score-card { position: absolute; left: 22px; top: 20px; min-width: 150px; }
+    #score { font-family: var(--serif); font-size: 44px; font-weight: 700; line-height: 1; letter-spacing: -1px; font-variant-numeric: tabular-nums; }
+    #score-card small, .label { display: block; font: 700 10px/1 var(--sans); letter-spacing: .25em; text-transform: uppercase; color: var(--oxide); margin-top: 6px; }
+    #mult { position: absolute; left: 190px; top: 28px; font-family: var(--serif); font-style: italic; font-size: 34px; color: var(--teal); transition: transform .15s; }
+    #mult.hot { transform: scale(1.15) rotate(-6deg); }
+    #right { position: absolute; right: 22px; top: 20px; text-align: right; display: flex; flex-direction: column; gap: 10px; align-items: flex-end; }
+    #coins-card { display: flex; align-items: center; gap: 10px; }
+    #coins-card i { width: 18px; height: 18px; border-radius: 50%; background: var(--ochre); border: 2px solid var(--ink); display: inline-block; }
+    #coins { font-family: var(--serif); font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    #hearts { display: flex; gap: 6px; }
+    #hearts i { width: 16px; height: 16px; transform: rotate(45deg); border: 2px solid var(--ink); background: var(--paper2); }
+    #hearts i.on { background: var(--oxide); }
+    #dist { font: 700 11px/1 var(--sans); letter-spacing: .2em; color: var(--ink); opacity: .75; }
+    #speed { position: absolute; left: 22px; bottom: 26px; width: 220px; height: 12px; background: var(--paper); border: 2px solid var(--ink); box-shadow: 3px 3px 0 var(--ink); }
+    #speedbar { height: 100%; width: 0; background: var(--oxide); transition: width .08s linear; }
+    #speedbar.boost { background: var(--teal); }
+    #speed .label { position: absolute; left: 0; top: -18px; margin: 0; color: var(--ink); opacity: .7; }
+    #drift { position: absolute; left: 50%; bottom: 60px; transform: translateX(-50%) translateY(12px); width: 260px; opacity: 0; transition: opacity .2s, transform .2s; text-align: center; }
+    #drift.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    #drift .bar { height: 10px; background: var(--paper); border: 2px solid var(--ink); box-shadow: 3px 3px 0 var(--ink); }
+    #driftbar { height: 100%; width: 0; background: var(--ochre); }
+    #drift.active #driftbar { background: var(--oxide); }
+    #drift .label { margin-top: 8px; color: var(--ink); }
+    #drift.active .label { color: var(--oxide); }
+    #popups { position: absolute; left: 50%; top: 32%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 4px; }
+    .pop { font-family: var(--serif); font-style: italic; font-weight: 700; font-size: 34px; color: var(--paper); -webkit-text-stroke: 1.5px var(--ink); text-shadow: 3px 3px 0 var(--ink); animation: pop 1.3s ease-out forwards; display: flex; gap: 12px; align-items: baseline; white-space: nowrap; }
+    .pop span { font: 700 16px var(--sans); color: var(--ochre); -webkit-text-stroke: 0; text-shadow: 2px 2px 0 var(--ink); }
+    .pop.big { font-size: 48px; color: var(--ochre); }
+    .pop.bad { color: var(--oxide); }
+    .pop.boost, .pop.good { color: #9fe0dc; }
+    @keyframes pop { 0% { transform: translateY(14px) scale(.7); opacity: 0; } 12% { transform: translateY(0) scale(1.08); opacity: 1; } 70% { opacity: 1; } 100% { transform: translateY(-40px); opacity: 0; } }
+    #hint { position: absolute; left: 50%; bottom: 110px; transform: translateX(-50%); font: 700 12px var(--sans); letter-spacing: .3em; color: var(--ink); background: var(--paper); border: 2px solid var(--ink); padding: 8px 16px; opacity: 0; transition: opacity .3s; }
+    #hint.show { opacity: 1; }
+
+    /* touch controls */
+    #touch { position: absolute; right: 18px; bottom: 22px; display: none; gap: 12px; pointer-events: auto; }
+    body.touch #touch { display: flex; }
+    .tc { display: none; } body.touch .tc { display: inline; } body.touch .kb { display: none; }
+    #touch button { width: 72px; height: 72px; border-radius: 50%; border: 2px solid var(--ink); background: var(--paper); box-shadow: 3px 3px 0 var(--ink); font: 700 11px var(--sans); letter-spacing: .15em; color: var(--ink); touch-action: none; user-select: none; -webkit-user-select: none; }
+    #touch button:active { background: var(--ochre); transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--ink); }
+
+    /* screens */
+    .screen { position: fixed; inset: 0; z-index: 20; display: flex; align-items: flex-end; padding: 6vmin; cursor: pointer; }
+    .panel { background: var(--paper); border: 2px solid var(--ink); box-shadow: 8px 8px 0 var(--ink); padding: 34px 40px 28px; max-width: 560px; width: 100%; position: relative; }
+    .panel::before { content: ""; position: absolute; inset: 6px; border: 1px solid rgba(46,38,34,.25); pointer-events: none; }
+    .eyebrow { font: 700 11px var(--sans); letter-spacing: .35em; text-transform: uppercase; color: var(--oxide); margin: 0 0 10px; }
+    h1 { font-family: var(--serif); font-style: italic; font-weight: 700; font-size: clamp(54px, 9vw, 88px); line-height: .9; margin: 0 0 12px; letter-spacing: -2px; }
+    h1 em { font-style: normal; color: var(--oxide); }
+    .tag { font-family: var(--serif); font-style: italic; font-size: 19px; margin: 0 0 22px; color: #5b4a40; }
+    .rules { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 22px; margin: 0 0 22px; font: 13px/1.5 var(--sans); }
+    .rules div { border-top: 1px solid rgba(46,38,34,.25); padding-top: 6px; }
+    .rules b { display: block; font-size: 10px; letter-spacing: .25em; text-transform: uppercase; color: var(--teal); }
+    kbd { display: inline-block; border: 1.5px solid var(--ink); border-radius: 3px; padding: 0 5px; font: 700 11px var(--sans); background: #fff8ea; box-shadow: 1.5px 1.5px 0 var(--ink); margin-right: 2px; }
+    .cta { display: flex; justify-content: space-between; align-items: center; }
+    .cta .go { font: 700 13px var(--sans); letter-spacing: .3em; text-transform: uppercase; background: var(--ink); color: var(--paper); padding: 12px 20px; animation: blink 1.6s ease-in-out infinite; }
+    .cta .best { font: 700 11px var(--sans); letter-spacing: .25em; color: var(--oxide); }
+    @keyframes blink { 50% { opacity: .55; } }
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 0 0 22px; }
+    .stats div { border-top: 2px solid var(--ink); padding-top: 8px; }
+    .stats b { display: block; font-family: var(--serif); font-size: 30px; font-weight: 700; }
+    .stats span { font: 700 10px var(--sans); letter-spacing: .25em; text-transform: uppercase; color: var(--oxide); }
+    #o-best.new { color: var(--teal); }
+    @media (max-width: 640px) {
+      .panel { padding: 24px 22px 20px; }
+      .rules { grid-template-columns: 1fr; }
+      #score { font-size: 32px; } #mult { left: 150px; }
+      #speed { width: 140px; } #drift { width: 180px; bottom: 120px; }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="c"></canvas>
+
+  <div id="hud" class="hidden">
+    <div id="score-card" class="card"><div id="score">0</div><small>Score</small></div>
+    <div id="mult"></div>
+    <div id="right">
+      <div id="coins-card" class="card"><i></i><span id="coins">0</span></div>
+      <div id="hearts"></div>
+      <div id="dist">0 m</div>
+    </div>
+    <div id="speed"><span class="label">Speed</span><div id="speedbar"></div></div>
+    <div id="drift"><div class="bar"><div id="driftbar"></div></div><span class="label"><span class="kb">Drift — hold shift</span><span class="tc">Drift — hold the button</span></span></div>
+    <div id="popups"></div>
+    <div id="hint"></div>
+    <div id="touch">
+      <button id="btn-drift">DRIFT</button>
+      <button id="btn-duck">DUCK</button>
+      <button id="btn-jump">JUMP</button>
+    </div>
+  </div>
+
+  <div id="title" class="screen">
+    <div class="panel">
+      <p class="eyebrow">Canyon Park · Open Session</p>
+      <h1>Mesa <em>Drift</em></h1>
+      <p class="tag">A skatepark the size of a canyon. Ramps, tunnels, flyovers, bowls — and real corners you have to drift.</p>
+      <div class="rules">
+        <div><b>Steer</b><kbd>←</kbd><kbd>→</kbd> or <kbd>A</kbd><kbd>D</kbd> — free movement, ride up bowl walls</div>
+        <div><b>Jump</b><kbd>Space</kbd> / <kbd>↑</kbd> — kickers launch you over gaps</div>
+        <div><b>Duck</b><kbd>↓</kbd> / <kbd>S</kbd> — slide under beams; mid-air it stomps you down</div>
+        <div><b>Drift</b>hold <kbd>Shift</kbd> through a 90° corner — exit with a boost. Skip it and you'll grind the wall</div>
+      </div>
+      <div class="cta"><span class="go">Enter / tap to ride</span><span class="best" id="best-title"></span></div>
+    </div>
+  </div>
+
+  <div id="over" class="screen hidden">
+    <div class="panel">
+      <p class="eyebrow">Session over</p>
+      <h1>Wiped <em>out</em></h1>
+      <div class="stats">
+        <div><b id="o-score">0</b><span>Score</span></div>
+        <div><b id="o-coins">0</b><span>Tokens</span></div>
+        <div><b id="o-dist">0 m</b><span>Distance</span></div>
+        <div><b id="o-tricks">0</b><span>Tricks</span></div>
+      </div>
+      <div class="cta"><span class="go">Enter / tap to ride again</span><span class="best" id="o-best"></span></div>
+    </div>
+  </div>
+
+  <div id="vignette"></div>
+  <div id="grain"></div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
