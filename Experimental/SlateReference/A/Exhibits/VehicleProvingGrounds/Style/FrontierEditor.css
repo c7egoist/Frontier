@@ -2321,3 +2321,96 @@ input[type=range]::-moz-range-thumb
 .drill-row .drill-note { grid-column: 1; font-size: 11.5px; color: #8d8d8d; }
 .drill-row .drill-best { grid-column: 1; font-size: 11.5px; color: #e1d34a; font-variant-numeric: tabular-nums; }
 .drill-row .action-button { grid-row: 1 / span 3; grid-column: 2; }
+
+/* ── interactive 2D + 3D augmented-reality driving HUD ───────────────────────────────────────────────────── */
+
+.ar-hud-canvas
+{
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 4;
+    pointer-events: none;
+}
+
+.ar-hud-controls
+{
+    position: absolute;
+    top: 12px;
+    right: 14px;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 6px;
+    border-radius: 999px;
+    background: rgba(10, 14, 18, 0.74);
+    border: 1px solid rgba(92, 232, 198, 0.28);
+    backdrop-filter: blur(8px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.36);
+    transition: opacity 160ms ease, transform 180ms cubic-bezier(0.2, 0.9, 0.3, 1.1);
+}
+
+.ar-hud-controls.hidden,
+body.workspace-road-studio .ar-hud-canvas,
+body.workspace-road-studio .ar-hud-controls
+{
+    display: none !important;
+}
+
+.ar-hud-pill
+{
+    appearance: none;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(20, 28, 34, 0.78);
+    color: #cde8e2;
+    font: 600 10px/1 var(--mono);
+    letter-spacing: 0.05em;
+    padding: 5px 9px;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: transform 130ms cubic-bezier(0.2, 0.9, 0.3, 1.2), background 130ms ease, border-color 130ms ease, color 130ms ease;
+}
+
+.ar-hud-pill:hover
+{
+    transform: translateY(-1px) scale(1.03);
+    background: rgba(36, 54, 62, 0.92);
+    border-color: rgba(94, 240, 200, 0.65);
+    color: #ffffff;
+}
+
+.ar-hud-pill:active
+{
+    transform: translateY(0) scale(0.96);
+}
+
+.ar-hud-pill.active
+{
+    border-color: rgba(88, 238, 194, 0.72);
+    color: #7ef7cf;
+    background: rgba(22, 48, 44, 0.85);
+}
+
+.ar-hud-pill.warn
+{
+    border-color: rgba(248, 184, 58, 0.85);
+    color: #ffd374;
+    background: rgba(54, 38, 12, 0.86);
+}
+
+.ar-hud-pill.crit
+{
+    border-color: rgba(255, 58, 72, 0.92);
+    color: #ff8a94;
+    background: rgba(62, 16, 22, 0.88);
+    animation: arHudPulseCrit 0.9s ease-in-out infinite alternate;
+}
+
+@keyframes arHudPulseCrit
+{
+    from { box-shadow: 0 0 0 rgba(255, 58, 72, 0.0); }
+    to   { box-shadow: 0 0 10px rgba(255, 58, 72, 0.55); }
+}
+

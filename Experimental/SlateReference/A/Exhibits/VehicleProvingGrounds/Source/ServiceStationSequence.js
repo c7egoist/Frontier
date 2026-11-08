@@ -632,8 +632,8 @@ export class ServiceStationSequence
 
         if (Speed > 3.0)
         {
-            this.FuelLevel   = Math.max(0.12, this.FuelLevel   - Step * Speed * 0.00018);
-            this.ChargeLevel = Math.max(0.12, this.ChargeLevel - Step * Speed * 0.00022);
+            this.FuelLevel   = Math.max(0.04, this.FuelLevel   - Step * Speed * 0.00018);
+            this.ChargeLevel = Math.max(0.04, this.ChargeLevel - Step * Speed * 0.00022);
         }
 
         // ① Advance Station Refueling & 800V Supercharging Industrial Robot Arms

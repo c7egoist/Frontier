@@ -98,6 +98,14 @@ export function ConstructEntities(Host)
           Switches: () => [{ Name: "See-through glass", Glyph: "Eye", Read: () => Host.Cabin.Settings.SeeThroughGlass,
                              Write: (On) => { Host.Cabin.Settings.SeeThroughGlass = On; } },
                            { Name: "Screens", Glyph: "Monitor", Read: () => Host.Cabin.Settings.Screens, Write: (On) => { Host.Cabin.Settings.Screens = On; } }] },
+        ...(Host.DrivingHud ? [{
+            Id: "arhud", Group: "Vehicle", Name: "Interactive AR-HUD", Type: "2D + 3D ADAS HUD", Glyph: "Compass", Colour: Accent.Vehicle, Parent: "vehicle",
+            Description: "Proximity-triggered 3D obstacle/train highlights, low-fuel station beacon & Cockpit combiner HUD",
+            Meta: () => Host.DrivingHud.QuerySummary().ActiveMode.toUpperCase(),
+            State: () => (Host.DrivingHud.BrakeAlertActive ? "warm" : (Host.DrivingHud.Enabled && Host.DrivingHud.QueryDisplayMode() !== "hidden" ? "live" : "")),
+            Toggle: { Read: () => Host.DrivingHud.Enabled, Write: (On) => { Host.DrivingHud.Enabled = On; Host.DrivingHud.SyncControlBarButtons(); } },
+            Build: (C, B) => BuildDrivingHud(Host, C, B)
+        }] : []),
         { Id: "marks", Group: "Vehicle", Name: "Tyre marks", Type: "Rubber deposit", Glyph: "CircleDot", Colour: Accent.Vehicle, Parent: "vehicle",
           Description: "Rubber laid by sliding work", Meta: () => `${Host.Marks.Metrics.LaidMetres.toFixed(0)} m`, State: () => (S.TyreMarks ? "live" : ""),
           Build: (C, B) => BuildMarks(Host, C, B),
@@ -1332,4 +1340,56 @@ function BuildTrafficLights(Host, C, Body)
         )
     );
 }
+
+function BuildDrivingHud(Host, C, Body)
+{
+    const Hud = Host.DrivingHud;
+    const Card = C.Card(Body, "Interactive 2D + 3D Augmented-Reality HUD", "Compass",
+                        { Accent: Accent.Vehicle, Index: 1, Subtitle: "Spatial proximity triggers · Chase Dual-Wing & Cockpit Windshield Combiner" });
+    C.Muted(Card, "Active in Chase/Exterior and Cockpit/Passenger cameras (automatically hidden in F8 Free Camera & Road Studio editor). Uses a 32 m spatial hash + 15 Hz proximity broadphase to highlight obstacles, commuter trains, trams, raised bollards & open pits in 3D, flashes BRAKE with procedural FCW audio, and guides you to the nearest Auto-Fuel or 800V EV bay when low. Click any 3D reticle to lock Δv telemetry, or press U to cycle HUD style.");
+
+    C.Segmented(Card, Hud, "DisplayStyle",
+                [["Full AR", "full"], ["Minimal", "minimal"], ["Off", "off"]],
+                { Label: "HUD display", OnChange: () => { Hud.Audio.PlayUiClick(1.05); Hud.SyncControlBarButtons(); } });
+    C.Segmented(Card, Hud, "SpeedUnit",
+                [["KM/H", "kmh"], ["MPH", "mph"]],
+                { Label: "Speed & range units", OnChange: () => { Hud.Audio.PlayUiClick(1.05); Hud.SyncControlBarButtons(); } });
+    C.Segmented(Card, Hud, "Sensitivity",
+                [["Auto proximity", "auto"], ["Extended (98m)", "high"], ["Warnings only", "warnings"]],
+                { Label: "Sensor trigger mode", OnChange: () => { Hud.ScanAccumulator = 99.0; Hud.Audio.PlayUiClick(1.0); } });
+
+    Toggle(C, Card, Hud.Audio, "Enabled", "UI micro-clicks & ADAS collision chimes", () =>
+    {
+        Hud.Audio.SetEnabled(Hud.Audio.Enabled);
+        Hud.SyncControlBarButtons();
+    });
+    Slider(C, Card, Hud.Audio, "MasterVolume", "HUD audio volume", 0.0, 1.0, 0.05, "", 2);
+
+    C.Stats(Card, [
+        ["Active layout",   () => Hud.QuerySummary().ActiveMode.toUpperCase()],
+        ["Tracked 3D locks", () => Hud.QuerySummary().TrackedCount],
+        ["Spatial cells",   () => Hud.QuerySummary().SpatialCells],
+        ["Collision state", () => Hud.BrakeAlertActive ? "BRAKE!" : "CLEAR"],
+        ["Fuel / 800V EV",  () => `${Hud.QuerySummary().FuelPercent}% / ${Hud.QuerySummary().BatteryPercent}%`],
+        ["Nearest bay",     () => Hud.QuerySummary().NearestStationM !== null ? `${Hud.QuerySummary().NearestStationM} m` : "—"]
+    ]);
+
+    const RowCam = C.ActionRow(Card);
+    C.Button(RowCam, "Chase Wing HUD",    "Car",     () => Host.AssignCameraMode("Chase"));
+    C.Button(RowCam, "Cockpit Windshield", "Monitor", () => Host.AssignCameraMode("Cockpit"));
+
+    const RowTest = C.ActionRow(Card);
+    C.Button(RowTest, "Test Low Fuel (18%)", "AlertTriangle", () =>
+    {
+        Hud.TriggerLowFuelDemo();
+        Hud.SyncControlBarButtons();
+        Host.Shell?.Announce("Simulated 18% low fuel — AR station guidance active when within 235 m!");
+    });
+    C.Button(RowTest, "Jump · Near Fuel Bay", "Zap", () =>
+    {
+        Hud.TriggerLowFuelDemo();
+        Host.TeleportVehicle({ Name: "Track H · Approaching Fuel Bay", Position: [-112.0, 392.0], Yaw: 0.0 });
+    });
+}
+
 

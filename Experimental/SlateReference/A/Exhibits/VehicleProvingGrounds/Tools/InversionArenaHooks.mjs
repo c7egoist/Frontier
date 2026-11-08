@@ -237,6 +237,10 @@ export default
         assert.ok(MinimumDeadEndPitZ < -3.8 && DeadEndBulkheadX < 33.0,
                   `Expected Track G Dead-End Pit descent (${MinimumDeadEndPitZ.toFixed(2)} m) & bulkhead stop at X<=33 m (got ${DeadEndBulkheadX.toFixed(1)})`);
         assert.equal(Host.Drones, undefined, "Expected flying drones to be completely removed");
+        assert.ok(Host.DrivingHud && Host.DrivingHud.SpatialGrid.size >= 15,
+                  "Expected Interactive 2D+3D DrivingHudSequence with O(1) spatial proximity grid");
+        assert.equal(Host.DrivingHud.QueryDisplayMode(), "chase",
+                     "Expected DrivingHudSequence active in Chase camera mode");
         assert.ok(Host.ServiceStations && Host.ServiceStations.FactoryRobots.length === 4,
                   "Expected 4 Megafactory assembly-line industrial robot arms");
         assert.ok(AutoFuelCompleted, "Expected Track H Automatic Fuel Bay industrial robot arm to refill tank to 100%");

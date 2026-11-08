@@ -54,6 +54,7 @@ import { ConstructHullPoints, HullPointRadius } from "./HullStructure.js";
 import { SparkSequence } from "./SparkSequence.js";
 import { CabinSequence } from "./CabinSequence.js?overlay=13";
 import { CabinLayout, CameraRigs, ResolveCockpitFrame, PlaceSeatedEye, ResolveTabletScale, ResolveHmiCamera } from "./CabinStructure.js";
+import { DrivingHudSequence } from "./DrivingHudSequence.js";
 import { VehicleGeometry } from "./VehicleSpecification.js";
 
 
@@ -381,6 +382,7 @@ class IlluminationHost
             this.RoadEditor.AttachHost(this);
         this.ReportProgress("Baking fracture patterns", 0.72);
         this.Fracture = new FractureSequence(this);
+        this.DrivingHud = new DrivingHudSequence(this);
 
         // ⑤ every remaining stage
         this.ReportProgress("Compiling lighting programs", 0.76);
@@ -833,6 +835,8 @@ class IlluminationHost
                 this.ResetArena();
             if (Event.code === "KeyC" && !Event.repeat && !Event.ctrlKey && !Event.metaKey)
                 this.CycleCamera(Event.shiftKey ? -1 : 1);
+            if (Event.code === "KeyU" && !Event.repeat && !Event.ctrlKey && !Event.metaKey && !Event.altKey)
+                this.DrivingHud?.CycleDisplayStyle();
             if (Event.code === "KeyI" && !Event.repeat && !Event.ctrlKey && !Event.metaKey && !Event.altKey)
             {
                 if (this.Lighting)
@@ -1323,6 +1327,7 @@ class IlluminationHost
         const ServiceMoved = this.ServiceStations
             ? this.ServiceStations.Advance(this.Vehicle, Step, this.Sparks)
             : false;
+        this.DrivingHud?.Advance(Step);
         const TrafficLightsMoved = this.TrafficLights
             ? this.TrafficLights.Advance(Step)
             : false;
@@ -1508,6 +1513,7 @@ class IlluminationHost
         this.PriorValid = true;
 
         this.PresentMeasurements(Now, Light);
+        this.DrivingHud?.Render(this.CameraState);
         this.RoadEditor?.RenderViewportGizmos?.(this.CameraState);
         const CpuCallbackMs = performance.now() - CpuFrameStart;
         this.RecordPerformanceSample(FrameDeltaMs, FrameDeltaMs * 0.001, CpuCallbackMs, CpuSceneUpdateMs, CpuCommandEncodeMs, CpuQueueSubmitMs);
@@ -1588,7 +1594,7 @@ class IlluminationHost
         if (Pressures.some((Line) => /burst|rim|leak/.test(Line)) || this.Sparks.Live > 0)
             Lines.push(`Tyres  ${Pressures.join("  ")}${this.Sparks.Live > 0 ? `  · ${this.Sparks.Live} sparks` : ""}`);
         Lines.push("W/S throttle·brake  W+S burnout  A/D steer  Space handbrake  R respawn  T reset arena  F8 free camera  C camera rigs");
-        Lines.push("H readout  I distance slice  P editor  V clean view");
+        Lines.push("H readout  U AR-HUD  J distance slice  P editor  V clean view");
         this.Shell.Present(Now, Lines);
     }
 
