@@ -395,7 +395,7 @@ export class VehicleSolver
                     GroundSurface = this.ResolveGround(Footing[0], Footing[1], Mount[2], Wheel);
                     GroundTravel = (Mount[2] - GroundSurface.Height) / -Axis[2];
                 }
-                if (GroundTravel < -Wheel.Radius)
+                if (GroundTravel < -Wheel.Radius || GroundTravel > MaximumCast + 0.5)
                     GroundTravel = Infinity;
             }
             if (SurfaceHit && (GroundTravel === Infinity || SurfaceHit.Travel <= GroundTravel + 1.0e-4))

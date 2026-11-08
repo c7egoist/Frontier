@@ -235,20 +235,22 @@ test("ChaseCameraSolver tracks 90° vertical and 180° inverted orientations wit
     assert.ok(Chase.Up[2] < -0.7, `Camera Up must invert smoothly with loop crown, got ${Chase.Up[2]}`);
 });
 
-test("LevelCatalog exposes multi-track Inversion Arena (Tracks A, B, C) and Proving Grounds descriptors cleanly", () =>
+test("LevelCatalog exposes multi-track Inversion Arena (Tracks A–F) and Proving Grounds descriptors cleanly", () =>
 {
     assert.equal(LevelCatalog.length, 2);
     const Inversion = ResolveLevelDescriptor("inversion");
     const Proving = ResolveLevelDescriptor("proving");
     assert.equal(Inversion.Title, "Inversion Arena");
     assert.equal(Inversion.Relief, false);
-    assert.equal(Inversion.Tracks.length, 3);
-    assert.deepEqual(Inversion.Tracks.map((T) => T.Id), ["trackA", "trackB", "trackC"]);
-    assert.equal(Inversion.Surfaces.length, 25);
-    assert.equal(Inversion.Zones.length, 14);
-    assert.ok(Inversion.PhysicsCutouts.length >= 2);
-    assert.ok(Inversion.DistanceCutouts.length >= 2);
+    assert.equal(Inversion.Tracks.length, 6);
+    assert.deepEqual(Inversion.Tracks.map((T) => T.Id), ["trackA", "trackB", "trackC", "trackD", "trackE", "trackF"]);
+    assert.equal(Inversion.Surfaces.length, 31);
+    assert.equal(Inversion.Zones.length, 18);
+    assert.ok(Inversion.PhysicsCutouts.length >= 6);
+    assert.equal(Inversion.DistanceCutouts.length, 4);
     assert.equal(Inversion.Bollards().length, 2);
+    assert.equal(Inversion.CollapseSpans().length, 2);
+    assert.equal(Inversion.Trams().length, 6);
     assert.equal(Proving.Title, "Proving Grounds");
     assert.equal(Proving.Relief, true);
     assert.equal(Proving.Surfaces.length, 0);
@@ -440,4 +442,241 @@ test("SweepSpark detects 3D stunt-ramp ceiling and banked ribbon shells", () =>
     assert.ok(Hit, "Spark thrown toward Full-Pipe ceiling must hit the 3D shell");
     assert.ok(Hit.Normal[2] < -0.95, `Expected downward ceiling normal, got ${Hit.Normal[2]}`);
     AssignCourseReliefEnabled(true);
+});
+
+test("Track D Session-Baked CollapseSequence: unique movie cracks, 2-manifold shards, sand effects, and rear-to-front Bridge & Road escape", async () =>
+{
+    const fs = await import("node:fs/promises");
+    const PreviousFetch = globalThis.fetch;
+    globalThis.fetch = async (Url) =>
+    {
+        const Buffer = await fs.readFile(new URL(`../${Url}`, import.meta.url));
+        return { ok: true, arrayBuffer: async () => Buffer.buffer.slice(Buffer.byteOffset, Buffer.byteOffset + Buffer.byteLength) };
+    };
+    AssignCourseReliefEnabled(false);
+    AssignExcavationCutouts(InversionPhysicsCutouts);
+    try
+    {
+        const Scene = new SceneStructure();
+        await Scene.ConstructScene("Archive", 256, "inversion");
+        const Collapse = Scene.Collapse;
+        assert.ok(Collapse && Collapse.Spans.length === 2, "CollapseSequence must initialize both Bridge and Road spans");
+
+        // ① Verify GPU IdentityCeiling (< 2044) AND exact OccupantDistanceSpace 3D SDF Slice Ceiling (< 2048) at 256 stress objects!
+        assert.ok(Scene.DistanceCount <= 2044, `DistanceCount (${Scene.DistanceCount}) must fit within IdentityCeiling = 2044`);
+        const RequiredSets = new Set();
+        for (const Occupant of Scene.Occupants)
+            if (Occupant.Roles & 2) // OccupantRole.Distance
+                RequiredSets.add(Occupant.FacetSet);
+        let AtlasW = 0, AtlasH = 0, StaticSlices = 0;
+        for (const SetIdx of RequiredSets)
+        {
+            const Set = Scene.FacetSets[SetIdx];
+            let Voxel = Set.DistanceVoxel;
+            const Extent = [0, 1, 2].map((Axis) => Set.LocalMaximum[Axis] - Set.LocalMinimum[Axis]);
+            const Margin = () => Math.max(4.0 * Voxel, 0.12);
+            const Longest = Math.max(...Extent.map((L) => L + 2.0 * Margin()));
+            if (Longest / Voxel > 128)
+                Voxel = Longest / 128;
+            const Res = Extent.map((L) => Math.max(8, Math.min(128, Math.ceil((L + 2.0 * Margin()) / Voxel))));
+            AtlasW = Math.max(AtlasW, Res[0]);
+            AtlasH = Math.max(AtlasH, Res[1]);
+            StaticSlices += Res[2] + 1;
+        }
+        const FragPerRow = Math.floor(Math.max(AtlasW, 12) / 12);
+        const FragPerCol = Math.floor(Math.max(AtlasH, 12) / 12);
+        const FragLayers = Math.ceil(256 / (FragPerRow * FragPerCol));
+        const TotalSlices = StaticSlices + FragLayers * 13;
+        assert.ok(TotalSlices < 2048, `Total 3D SDF slices (${TotalSlices}) must stay strictly under WebGPU 2048 ceiling`);
+
+        // ② Every session-baked Voronoi slab, crack prism, and sand clump must be a closed outward-wound 2-manifold!
+        const Quantize = (P) => P.map((C) => Math.round(C * 1.0e4)).join(",");
+        for (let PieceIdx = 0; PieceIdx < Collapse.Pieces.length; ++PieceIdx)
+        {
+            const Piece = Collapse.Pieces[PieceIdx];
+            const Directed = new Set();
+            let SixVol = 0.0;
+            for (const Tri of Piece.Triangles)
+            {
+                const [A, B, C] = Tri.Corners;
+                for (const [P, Q] of [[A, B], [B, C], [C, A]])
+                {
+                    const KP = Quantize(P), KQ = Quantize(Q);
+                    if (KP === KQ) continue;
+                    const Tag = `${KP}->${KQ}`;
+                    assert.ok(!Directed.has(Tag), `Collapse piece ${PieceIdx} has duplicate edge ${Tag}`);
+                    Directed.add(Tag);
+                }
+                SixVol += DotVector(A, CrossVector(SubtractVector(B, A), SubtractVector(C, A)));
+            }
+            for (const Tag of Directed)
+            {
+                const [From, To] = Tag.split("->");
+                assert.ok(Directed.has(`${To}->${From}`), `Collapse piece ${PieceIdx} has open boundary edge ${Tag}`);
+            }
+            assert.ok(SixVol > 1.0e-5, `Collapse piece ${PieceIdx} must have positive outward volume, got ${SixVol}`);
+        }
+
+        // ③ Session-unique baking: distinct seeds produce genuinely distinct faultline crack & Voronoi shard layouts!
+        Collapse.BakeAllSpans(0x13579BDF);
+        const SnapshotA = Collapse.Spans[0].Bays.map((B) => B.Cracks[0].RelY.toFixed(4)).join(",");
+        Collapse.BakeAllSpans(0x2468ACE0);
+        const SnapshotB = Collapse.Spans[0].Bays.map((B) => B.Cracks[0].RelY.toFixed(4)).join(",");
+        assert.notEqual(SnapshotA, SnapshotB, "Different session seeds must bake unique movie crack trajectories");
+        Collapse.BakeAllSpans(0x13579BDF);
+        assert.equal(Collapse.Spans[0].Bays.map((B) => B.Cracks[0].RelY.toFixed(4)).join(","), SnapshotA,
+                     "Identical seed must reproduce exact deterministic fracture layout");
+
+        // ④ Collapsing Sky-Bridge (+5.0 m): fast driver escapes across while rear bays collapse & emit sand/dust plumes!
+        let SparkBursts = 0;
+        const MockSparks = { EmitBurst() { SparkBursts++; } };
+        const BridgeCar = new VehicleSolver([]);
+        BridgeCar.Surfaces = InversionArenaSurfaces;
+        BridgeCar.AeroGripScale = 1.0;
+        BridgeCar.Respawn([-92.0, -250.0, 0.63], 0.0);
+
+        let PeakSmokeEmitters = 0;
+        let ActiveSandSeen = 0;
+        for (let Step = 0; Step < 680; ++Step)
+        {
+            BridgeCar.Advance({ Throttle: 1.0, Brake: 0.0, Steer: 0.0, Handbrake: false }, 1.0 / 60.0);
+            Collapse.Advance(BridgeCar.Position, BridgeCar.LinearVelocity, 1.0 / 60.0, MockSparks);
+            PeakSmokeEmitters = Math.max(PeakSmokeEmitters, Collapse.QuerySmokeEmissions().length);
+            ActiveSandSeen = Math.max(ActiveSandSeen, Collapse.SandShards.filter((S) => S.Active).length);
+            if (BridgeCar.Position[0] > 106.0)
+                break;
+        }
+        const BridgeSpan = Collapse.Spans[0];
+        assert.equal(BridgeSpan.Bays[0].Collapsed, true, "Rear bridge bay must have collapsed behind the escaping car");
+        assert.equal(BridgeSpan.Surface.BayIntact[0], 0, "Collapsed rear bay must drop its analytical wheel support");
+        assert.ok(BridgeSpan.CrackFrontU > BridgeSpan.DropFrontU || BridgeSpan.CrackFrontU >= 1.0,
+                  "Movie faultline cracks must propagate ahead of the collapse drop front");
+        assert.ok(PeakSmokeEmitters >= 1 && ActiveSandSeen >= 2 && SparkBursts > 5,
+                  "Collapse must emit volumetric sand/dust plumes and cascading sand particles");
+        assert.ok(BridgeCar.Position[0] > 100.0 && BridgeCar.Position[2] > 0.2,
+                  `Fast driver must outrun rear-to-front bridge collapse to far ramp, got X=${BridgeCar.Position[0]}, Z=${BridgeCar.Position[2]}`);
+
+        // ⑤ Collapsing Faultline Road (0.0 m over -5.2 m Sinkhole Chasm): fast driver escapes; lingering car plunges into sinkhole!
+        Collapse.ResetAllPoses();
+        const RoadCar = new VehicleSolver([]);
+        RoadCar.Surfaces = InversionArenaSurfaces;
+        RoadCar.AeroGripScale = 1.0;
+        RoadCar.Respawn([82.0, -318.0, 0.63], Math.PI);
+        for (let Step = 0; Step < 520; ++Step)
+        {
+            RoadCar.Advance({ Throttle: 1.0, Brake: 0.0, Steer: 0.0, Handbrake: false }, 1.0 / 60.0);
+            Collapse.Advance(RoadCar.Position, RoadCar.LinearVelocity, 1.0 / 60.0, MockSparks);
+            if (RoadCar.Position[0] < -60.0)
+                break;
+        }
+        const RoadSpan = Collapse.Spans[1];
+        assert.equal(RoadSpan.Bays[0].Collapsed, true, "Rear bay of Collapsing Sinkhole Road must collapse behind car");
+        assert.ok(RoadCar.Position[0] < -56.0 && RoadCar.Position[2] > -0.2,
+                  `Fast driver must clear Collapsing Road to solid ground past X=-56, got X=${RoadCar.Position[0]}, Z=${RoadCar.Position[2]}`);
+
+        // Verify a stationary car parked on Bay 1 of the Sinkhole Road physically plunges into the -5.2 m chasm when overtaken!
+        Collapse.ResetAllPoses();
+        const SlowCar = new VehicleSolver([]);
+        SlowCar.Surfaces = InversionArenaSurfaces;
+        SlowCar.Respawn([44.0, -318.0, 0.63], Math.PI);
+        Collapse.TriggerSpan(RoadSpan);
+        for (let Step = 0; Step < 180; ++Step)
+        {
+            Collapse.Advance(SlowCar.Position, SlowCar.LinearVelocity, 1.0 / 60.0);
+            SlowCar.Advance({ Throttle: 0.0, Brake: 1.0, Steer: 0.0, Handbrake: true }, 1.0 / 60.0);
+        }
+        assert.ok(SlowCar.Position[2] < -2.5, `Stationary car overtaken by road collapse must plunge into sinkhole (Z < -2.5 m), got Z=${SlowCar.Position[2]}`);
+    }
+    finally
+    {
+        AssignExcavationCutouts([]);
+        AssignCourseReliefEnabled(true);
+        globalThis.fetch = PreviousFetch;
+    }
+});
+
+test("Track E 3-Lane Subway ([road][tunnel down][road] -- [road][road][road] -- [road][tunnel up][road]) & Track F Trams/Trains", async () =>
+{
+    const fs = await import("node:fs/promises");
+    const PreviousFetch = globalThis.fetch;
+    globalThis.fetch = async (Url) =>
+    {
+        const Buffer = await fs.readFile(new URL(`../${Url}`, import.meta.url));
+        return { ok: true, arrayBuffer: async () => Buffer.buffer.slice(Buffer.byteOffset, Buffer.byteOffset + Buffer.byteLength) };
+    };
+    AssignCourseReliefEnabled(false);
+    AssignExcavationCutouts(InversionPhysicsCutouts);
+    try
+    {
+        // ① Exact 3-Lane Subway topology checks:
+        //    Entry portal (X = -56): Left [road] (Y = 268.5) & Right [road] (Y = 243.5) at Z = 0; Center (Y = 256.0) diving < 0!
+        assert.equal(ResolveCourseHeight(-56.0, 268.5, 0.5), 0.0, "Left outer lane must remain Z=0 [road] alongside tunnel entry");
+        assert.equal(ResolveCourseHeight(-56.0, 243.5, 0.5), 0.0, "Right outer lane must remain Z=0 [road] alongside tunnel entry");
+        assert.ok(ResolveCourseHeight(-56.0, 256.0, 0.5) < -40.0, "Center portal entry must open downward into subway ramp");
+        const EntryRampHit = CastSurfaceRay(InversionArenaSurfaces, [-56.0, 256.0, 2.0], [0.0, 0.0, -1.0], 10.0);
+        assert.ok(EntryRampHit && EntryRampHit.Point[2] < -1.5 && EntryRampHit.Point[2] > -4.0,
+                  `Center lane at X=-56 must be descending ramp, got Z=${EntryRampHit?.Point[2]}`);
+
+        //    Middle section (X = 0): ALL THREE LANES [road][road][road] at Z = 0, AND -5.20 m subway station directly below center!
+        assert.equal(ResolveCourseHeight(0.0, 268.5, 0.5), 0.0, "Middle section Left [road] at Z=0");
+        assert.equal(ResolveCourseHeight(0.0, 256.0, 0.5), 0.0, "Middle section Center [road] over subway roof at Z=0");
+        assert.equal(ResolveCourseHeight(0.0, 243.5, 0.5), 0.0, "Middle section Right [road] at Z=0");
+        const SubwayFloorHit = CastSurfaceRay(InversionArenaSurfaces, [0.0, 256.0, -1.5], [0.0, 0.0, -1.0], 6.0);
+        assert.ok(SubwayFloorHit && Math.abs(SubwayFloorHit.Point[2] - (-5.2)) < 0.05,
+                  `Underground subway floor must sit at Z=-5.2 m beneath center [road], got ${SubwayFloorHit?.Point[2]}`);
+
+        //    Exit portal (X = +56): Left [road] & Right [road] at Z = 0; Center climbing back up!
+        assert.equal(ResolveCourseHeight(56.0, 268.5, 0.5), 0.0, "Left outer lane must remain Z=0 [road] alongside tunnel exit");
+        assert.equal(ResolveCourseHeight(56.0, 243.5, 0.5), 0.0, "Right outer lane must remain Z=0 [road] alongside tunnel exit");
+        const ExitRampHit = CastSurfaceRay(InversionArenaSurfaces, [56.0, 256.0, 2.0], [0.0, 0.0, -1.0], 10.0);
+        assert.ok(ExitRampHit && ExitRampHit.Point[2] < -1.5 && ExitRampHit.Point[2] > -4.0,
+                  `Center lane at X=+56 must be ascending exit ramp, got Z=${ExitRampHit?.Point[2]}`);
+
+        //    Drive ControlVehicle straight down Center Subway Portal (-5.2 m) and back up between the outer [road] lanes!
+        const SubwayCar = new VehicleSolver([]);
+        SubwayCar.Surfaces = InversionArenaSurfaces;
+        SubwayCar.AeroGripScale = 1.0;
+        SubwayCar.Respawn([-84.0, 256.0, 0.63], 0.0);
+        let MinSubwayZ = 10.0;
+        for (let Step = 0; Step < 520; ++Step)
+        {
+            SubwayCar.Advance({ Throttle: 1.0, Brake: 0.0, Steer: 0.0, Handbrake: false }, 1.0 / 60.0);
+            MinSubwayZ = Math.min(MinSubwayZ, SubwayCar.Position[2]);
+            if (SubwayCar.Position[0] > 76.0)
+                break;
+        }
+        assert.ok(MinSubwayZ < -4.3, `Expected car to descend into -5.2 m 3-Lane Subway gallery, got ${MinSubwayZ}`);
+        assert.ok(SubwayCar.Position[0] > 72.0 && SubwayCar.Position[2] > 0.3,
+                  `Expected car to emerge up the far center ramp to Z>0.3 m, got X=${SubwayCar.Position[0]}, Z=${SubwayCar.Position[2]}`);
+
+        // ② Separate Articulated Streetcar Trams & Express Commuter Trains (TramSequence.js)
+        const Scene = new SceneStructure();
+        await Scene.ConstructScene("Archive", 0, "inversion");
+        const Trams = Scene.Trams;
+        assert.ok(Trams, "TramSequence must be constructed separately on Scene");
+        const Summary = Trams.QuerySummary();
+        assert.equal(Summary.ConsistCount, 6, "Expected 4 articulated trams + 2 express trains");
+        assert.equal(Summary.CarCount, 14, "Expected 8 tram cars + 6 express train coaches = 14 railcars");
+
+        const Obstacles = Scene.QueryObstacleBounds();
+        Trams.RegisterDynamicObstacles(Obstacles);
+        const LeadTramCar = Trams.Consists[0].Cars[0];
+        const StartTramX = LeadTramCar.WorldPosition[0];
+
+        const DummyCar = {
+            Position:       [StartTramX + 6.0, 314.0, 0.63],
+            LinearVelocity: [-8.0, 0.0, 0.0]
+        };
+        for (let Step = 0; Step < 30; ++Step)
+            Trams.Advance(DummyCar, 1.0 / 60.0);
+
+        assert.ok(LeadTramCar.WorldPosition[0] > StartTramX + 1.0, "Eastbound streetcar tram must advance along rail track");
+        assert.ok(DummyCar.LinearVelocity[0] > 0.0, "Colliding head-on with moving Eastbound tram must deflect vehicle velocity Eastward");
+    }
+    finally
+    {
+        AssignExcavationCutouts([]);
+        AssignCourseReliefEnabled(true);
+        globalThis.fetch = PreviousFetch;
+    }
 });

@@ -1,9 +1,10 @@
 //============================================================================================================================================
 //                                                          INVERSIONARENAHOOKS.MJS
 //============================================================================================================================================
-// 🧩 Dawn WebGPU + Jolt WASM + IlluminationHost multi-track validation across [Track A] (360° Loop + Waves),
-//    [Track B] (-5.2 m Subterranean Subway Tunnel + Proximity Linear Bollards) & [Track C] (84 m Travelling-Wave Bollards).
-//    HOOKS=InversionArenaHooks.mjs node HeadlessHarness.mjs .. 660 "?capture=1"
+// 🧩 Dawn WebGPU + Jolt WASM + IlluminationHost 6-track validation across [Track A] (360° Loop + Waves),
+//    [Track B] (-5.2 m Subterranean Subway + Linear Bollards), [Track C] (84 m Wave Bollards),
+//    [Track D] (Session-Baked Collapsing Bridge & Road + Sand Plumes), [Track E] (3-Lane Subway) & [Track F] (Trams/Trains).
+//    HOOKS=InversionArenaHooks.mjs node HeadlessHarness.mjs .. 1180 "?capture=1"
 
 import assert from "node:assert/strict";
 import { RotateVector } from "../Source/TransformProjection.js";
@@ -13,10 +14,15 @@ let MinimumVehicleUpZ = 1.0;
 let MinimumChaseUpZ = 1.0;
 let MaximumAltitudeZ = 0.0;
 let MinimumSubwayZ = 10.0;
+let MinimumThreeLaneSubwayZ = 10.0;
 let MaximumTrackAX = -150.0;
 let InvertedWheelContacts = 0;
 let LinearStripOpened = false;
 let WaveStripOpened = false;
+let BridgeCollapseTriggered = false;
+let RoadCollapseTriggered = false;
+let CollapseSandEmitted = false;
+let StartTramLeadX = null;
 
 export default
 {
@@ -28,6 +34,8 @@ export default
             Host.FixedStep = 1.0 / 60.0;
             Host.Training.Arm(Host.Training.QueryDrill("loop360"));
             Host.ScriptedInput = { Throttle: 1.0, Brake: 0.0, SteerAngle: 0.0, Handbrake: false, Reverse: false };
+            if (Host.Trams && Host.Trams.Consists.length > 0)
+                StartTramLeadX = Host.Trams.Consists[0].Cars[0].WorldPosition[0];
         }
 
         // Phase 2 (Frame 610): Jump to Track B Subterranean Subway Tunnel (-5.2 m below Z = 0)
@@ -48,12 +56,40 @@ export default
             Host.TeleportVehicle({ Position: [-88.0, -94.0], Yaw: 0.0 }, true);
             Host.ScriptedInput = { Throttle: 1.0, Brake: 0.0, SteerAngle: 0.0, Handbrake: false, Reverse: false };
         }
+        // Phase 5a (Frame 930): Rebake unique session cracks on GPU & climb onto Track D Collapsing Sky-Bridge (+5.0 m)
+        else if (Frame === 930)
+        {
+            Host.RebakeCollapseDecks(0x5E15A1C0);
+            Host.TeleportVehicle({ Name: "Collapse Bridge", Position: [-62.0, -250.0], Yaw: 0.0 }, true);
+            Host.ScriptedInput = { Throttle: 1.0, Brake: 0.0, SteerAngle: 0.0, Handbrake: false, Reverse: false };
+        }
+        // Phase 5b (Frame 1220): Trigger Track D Collapsing Sinkhole Road (0.0 m)
+        else if (Frame === 1220)
+        {
+            Host.TeleportVehicle({ Name: "Collapse Road", Position: [53.0, -318.0], Yaw: 180.0 }, true);
+            Host.ScriptedInput = { Throttle: 1.0, Brake: 0.0, SteerAngle: 0.0, Handbrake: false, Reverse: false };
+        }
+        // Phase 6 (Frame 1330): Jump to Track E 3-Lane Center-Portal Subway ([road][tunnel down][road])
+        else if (Frame === 1330)
+        {
+            Host.TeleportVehicle({ Name: "3-Lane Subway", Position: [-72.0, 256.0], Yaw: 0.0 }, true);
+            Host.ScriptedInput = { Throttle: 1.0, Brake: 0.0, SteerAngle: 0.0, Handbrake: false, Reverse: false };
+        }
+        // Phase 7 (Frame 1530): Jump to Track F Articulated Streetcar Tram & Express Rail Boulevard
+        else if (Frame === 1530)
+        {
+            Host.TeleportVehicle({ Name: "Tramway", Position: [-92.0, 314.0], Yaw: 0.0 }, true);
+            Host.ScriptedInput = { Throttle: 1.0, Brake: 0.0, SteerAngle: 0.0, Handbrake: false, Reverse: false };
+        }
 
         const VehicleUp = RotateVector(Host.Vehicle.Orientation, [0.0, 0.0, 1.0]);
         MinimumVehicleUpZ = Math.min(MinimumVehicleUpZ, VehicleUp[2]);
         MinimumChaseUpZ = Math.min(MinimumChaseUpZ, Host.Chase.Up[2]);
         MaximumAltitudeZ = Math.max(MaximumAltitudeZ, Host.Vehicle.Position[2]);
-        MinimumSubwayZ = Math.min(MinimumSubwayZ, Host.Vehicle.Position[2]);
+        if (Frame >= 610 && Frame < 885)
+            MinimumSubwayZ = Math.min(MinimumSubwayZ, Host.Vehicle.Position[2]);
+        if (Frame >= 1330 && Frame < 1530)
+            MinimumThreeLaneSubwayZ = Math.min(MinimumThreeLaneSubwayZ, Host.Vehicle.Position[2]);
         if (Frame < 610)
             MaximumTrackAX = Math.max(MaximumTrackAX, Host.Vehicle.Position[0]);
         if (VehicleUp[2] < -0.75)
@@ -70,6 +106,16 @@ export default
             if (Wave?.Triggered)   WaveStripOpened = true;
         }
 
+        if (Host.Collapse)
+        {
+            if (Host.Collapse.Spans[0]?.State === "collapsing")
+                BridgeCollapseTriggered = true;
+            if (Host.Collapse.Spans[1]?.State === "collapsing")
+                RoadCollapseTriggered = true;
+            if (Host.Collapse.QuerySmokeEmissions().length > 0)
+                CollapseSandEmitted = true;
+        }
+
         if (Host.Camera)
         {
             assert.ok(Host.Camera.Position.every(Number.isFinite), "Camera position must stay finite");
@@ -80,7 +126,7 @@ export default
     Report(Host)
     {
         assert.equal(Host.LevelKey, "inversion");
-        assert.equal(Host.LevelDescriptor.Tracks.length, 3);
+        assert.equal(Host.LevelDescriptor.Tracks.length, 6);
         assert.ok(MinimumVehicleUpZ < -0.85, `Expected Track A upside-down loop inversion, got minUpZ=${MinimumVehicleUpZ.toFixed(3)}`);
         assert.ok(MaximumAltitudeZ > 15.5, `Expected Track A loop apex > 15.5 m, got maxZ=${MaximumAltitudeZ.toFixed(2)}`);
         assert.ok(InvertedWheelContacts >= 2, `Expected >= 2 loaded wheels upside-down, got ${InvertedWheelContacts}`);
@@ -90,6 +136,12 @@ export default
         assert.ok(MinimumSubwayZ < -4.2, `Expected Track B Subway Tunnel descent below Z=-4.2 m, got minZ=${MinimumSubwayZ.toFixed(2)}`);
         assert.ok(LinearStripOpened, "Expected Track B Linear Bollard Strip proximity trigger to activate");
         assert.ok(WaveStripOpened, "Expected Track C Travelling-Wave Bollard Strip proximity trigger to activate");
-        console.log(`multi-track inversion arena: Track A loop (${Host.Training.Best.loop360.Primary.toFixed(2)} s, apex ${MaximumAltitudeZ.toFixed(1)} m) · Track B subway (${MinimumSubwayZ.toFixed(2)} m, linear bollards OPEN) · Track C wave bollards OPEN`);
+        assert.ok(BridgeCollapseTriggered, "Expected Track D Collapsing Sky-Bridge to trigger and fracture");
+        assert.ok(RoadCollapseTriggered, "Expected Track D Collapsing Sinkhole Road to trigger and fracture");
+        assert.ok(CollapseSandEmitted, "Expected Track D collapse to emit volumetric sand plumes");
+        assert.ok(MinimumThreeLaneSubwayZ < -3.5, `Expected Track E 3-Lane Subway center descent < -3.5 m, got ${MinimumThreeLaneSubwayZ.toFixed(2)}`);
+        assert.ok(Host.Trams && Host.Trams.QuerySummary().CarCount === 14, "Expected Track F 14 articulated tram & train cars");
+        assert.notEqual(Host.Trams.Consists[0].Cars[0].WorldPosition[0], StartTramLeadX, "Expected Track F trams to advance along rails");
+        console.log(`6-track inversion arena: Track A loop (${Host.Training.Best.loop360.Primary.toFixed(2)} s) · Track B/C bollards OPEN · Track D bridge+road collapse+sand ACTIVE · Track E 3-lane subway (${MinimumThreeLaneSubwayZ.toFixed(2)} m) · Track F 14 railcars ACTIVE`);
     }
 };

@@ -150,6 +150,28 @@ export function ConstructEntities(Host)
           Description: "Pre-built pool · union, cards & draws under load", Meta: () => `${Host.Stress.QueryActive()}`,
           State: () => (Host.Stress.QueryActive() > 0 ? "warm" : ""), Build: (C, B) => BuildStress(Host, C, B) }
     );
+    if (Host.Collapse)
+    {
+        Entities.push({
+            Id: "collapse", Group: "Destruction", Name: "Collapse bridge & road", Type: "Seismic decks", Glyph: "Zap", Colour: Accent.Destruction,
+            Description: "Session-baked movie cracks · rear-to-front collapse & sand",
+            Meta: () => `0x${(Host.Collapse.SessionSeed >>> 0).toString(16).slice(0, 6).toUpperCase()}`,
+            State: () => (Host.Collapse.Spans.some((Span) => Span.State === "collapsing") ? "warm" : "live"),
+            Toggle: { Read: () => Host.Collapse.Enabled, Write: (On) => { Host.Collapse.Enabled = On; } },
+            Build: (C, B) => BuildCollapse(Host, C, B)
+        });
+    }
+    if (Host.Trams)
+    {
+        Entities.push({
+            Id: "trams", Group: "Level", Name: "Trams & trains", Type: "Rail traffic", Glyph: "Compass", Colour: Accent.Level,
+            Description: "Separate articulated streetcar trams & express rail trains",
+            Meta: () => `${Host.Trams.QuerySummary().CarCount} cars`,
+            State: () => (Host.Trams.Enabled ? "live" : ""),
+            Toggle: { Read: () => Host.Trams.Enabled, Write: (On) => { Host.Trams.Enabled = On; } },
+            Build: (C, B) => BuildTrams(Host, C, B)
+        });
+    }
     return Entities;
 }
 
@@ -890,11 +912,15 @@ function BuildLevel(Host, C, Body)
     if (Host.LevelKey === "inversion" && Host.LevelDescriptor?.Tracks?.length)
     {
         const TracksCard = C.Card(Body, "Open-World Track Wings", "Compass",
-                                  { Accent: Accent.Level, Index: 2, Subtitle: "Drive freely between Track A, Track B & Track C — or jump directly" });
-        C.Muted(TracksCard, "All three tracks share one open interconnected complex connected by North/South boulevards and underpasses. Drive to whichever track you want, or jump straight to a track wing below:");
-        const TrackRow = C.ActionRow(TracksCard);
-        for (const Track of Host.LevelDescriptor.Tracks)
-            C.Button(TrackRow, Track.Label, Track.Icon || "Flag", () => Host.TeleportVehicle(Track));
+                                  { Accent: Accent.Level, Index: 2, Subtitle: "Drive freely across Tracks A–F — or jump directly" });
+        C.Muted(TracksCard, "All six districts share one interconnected open complex linked by North/South boulevards and gateways:");
+        const AllTracks = Host.LevelDescriptor.Tracks;
+        for (let Start = 0; Start < AllTracks.length; Start += 3)
+        {
+            const TrackRow = C.ActionRow(TracksCard);
+            for (const Track of AllTracks.slice(Start, Start + 3))
+                C.Button(TrackRow, Track.Label, Track.Icon || "Flag", () => Host.TeleportVehicle(Track));
+        }
         if (Host.Bollards && Host.Bollards.Zones.length > 0)
         {
             C.Stats(TracksCard, Host.Bollards.Zones.map((Zone) => [
@@ -902,12 +928,22 @@ function BuildLevel(Host, C, Body)
                 () => Zone.Triggered ? "OPEN" : "ARMED"
             ]));
         }
+        if (Host.Collapse && Host.Collapse.Spans.length > 0)
+        {
+            C.Stats(TracksCard, Host.Collapse.Spans.map((Span) => [
+                Span.ShortName || Span.Name,
+                () => Span.State.toUpperCase()
+            ]));
+            const CollapseRow = C.ActionRow(TracksCard);
+            C.Button(CollapseRow, "Rebake unique cracks", "Zap", () => Host.RebakeCollapseDecks());
+            C.Button(CollapseRow, "Reset collapse", "RotateCcw", () => Host.ResetCollapseDecks());
+        }
     }
     const MaxKey = Math.min(9, ActiveZones.length);
     const Zones = C.Card(Body, ActiveTitle, "Map", { Accent: Accent.Level, Index: 3, Subtitle: `Teleport the car (keys 1–${MaxKey})` });
     if (Host.LevelKey === "inversion")
     {
-        C.Muted(Zones, "[Track A] Original 1.05 km Grand Prix stunt circuit (unchanged: 360° Loop → Camelback Waves → Skyline Tabletop → Turn 1 Bowl → Heartline S-Bridge → 360° Full-Pipe → Twin-Wing Split + Infield Spine). [Track B · North Wing] Split Over/Under Subterranean Tunnel (-5.2 m) + Sky-Bridge (+5.0 m) + Ground Underpass, Serpentine Banked Waves & Linear Proximity-Triggered Bollards. [Track C · South Wing] 88 m Travelling-Wave Kinetic Bollards (1 side/end up while opposite goes down), Over/Under Viaduct + Sunken Canyon Tunnel, Westbound 360° Loop & Step-Up Ski-Jump.");
+        C.Muted(Zones, "[Track A] Original 1.05 km Grand Prix stunt circuit (preserved intact). [Track B] Split Over/Under Tunnel + Sky-Bridge & Linear Bollards. [Track C] 84 m Travelling-Wave Bollards & Viaduct Canyon. [Track D] Rear-to-front Collapsing Sky-Bridge (+5 m) & Collapsing Sinkhole Road (0 m) with session-unique movie cracks & sand effects. [Track E] 3-Lane Center-Portal Subway ([road][tunnel down][road] → [road][road][road] → [road][tunnel up][road]). [Track F] Dedicated Streetcar Trams & Express Commuter Trains.");
     }
     else
     {
@@ -938,6 +974,47 @@ function BuildStress(Host, C, Body)
     C.Button(Row2, "Clear", "Trash2", () => Host.ApplySetting("StressClear"), "danger");
     C.Segmented(Stress, S, "StressMotion", StressMotionOptions, { Label: "Motion", OnChange: () => Host.ApplySetting("StressMotion") });
     C.Readout(Stress, () => Host.Stress.QueryReadout());
+}
+
+function BuildCollapse(Host, C, Body)
+{
+    const Collapse = Host.Collapse;
+    const Card = C.Card(Body, "Seismic Collapse Decks", "Zap",
+                        { Accent: Accent.Destruction, Index: 1, Subtitle: "Session-baked Voronoi faultlines · rear-to-front escape" });
+    C.Muted(Card, "Every new session bakes a unique oblique Voronoi fracture pattern and continuous lightning-bolt faultline crack network across both the +5.0 m Sky-Bridge and the 0.0 m Sinkhole Road. Enter at speed to outrun the rear-to-front collapse as cracks & sand plumes race ahead!");
+    C.Stats(Card, [
+        ["Session seed", () => `0x${(Collapse.SessionSeed >>> 0).toString(16).toUpperCase()}`],
+        ["Bakes", () => Collapse.BakeCount]
+    ]);
+    C.Stats(Card, Collapse.Spans.map((Span) => [
+        Span.ShortName || Span.Name,
+        () => Span.State === "collapsing"
+            ? `${Math.min(100, Math.max(0, Span.CrackFrontU * 100)).toFixed(0)}% cracked`
+            : Span.State.toUpperCase()
+    ]));
+    const Row1 = C.ActionRow(Card);
+    C.Button(Row1, "Rebake unique cracks", "Zap", () => Host.RebakeCollapseDecks());
+    C.Button(Row1, "Reset intact", "RotateCcw", () => Host.ResetCollapseDecks());
+    const Row2 = C.ActionRow(Card);
+    C.Button(Row2, "Jump · Bridge", "Flag", () => Host.TeleportVehicle({ Name: "Track D · Collapsing Bridge", Position: [-106.0, -250.0], Yaw: 0.0 }));
+    C.Button(Row2, "Jump · Road", "Flag", () => Host.TeleportVehicle({ Name: "Track D · Collapsing Road", Position: [84.0, -318.0], Yaw: 180.0 }));
+}
+
+function BuildTrams(Host, C, Body)
+{
+    const Trams = Host.Trams;
+    const Card = C.Card(Body, "Tram & Train Traffic", "Compass",
+                        { Accent: Accent.Level, Index: 1, Subtitle: "Separate 4-track streetcar & commuter rail corridor" });
+    C.Muted(Card, "Two-way articulated low-floor streetcar trams share the northern transit avenue (dwelling briefly at the Central Island Platform) alongside high-speed 3-car express commuter trains on dedicated steel rails.");
+    C.Stats(Card, [
+        ["Consists", () => Trams.Consists.length],
+        ["Active railcars", () => Trams.QuerySummary().CarCount],
+        ["State", () => Trams.Enabled ? "RUNNING" : "PAUSED"]
+    ]);
+    Slider(C, Card, Trams, "SpeedScale", "Traffic speed", 0.0, 2.5, 0.05, "×", 2);
+    const Row = C.ActionRow(Card);
+    C.Button(Row, "Jump to Tramway", "Compass", () => Host.TeleportVehicle({ Name: "Track F · Trams & Trains", Position: [-98.0, 314.0], Yaw: 0.0 }));
+    C.Button(Row, "Toggle traffic", "Play", () => { Trams.Enabled = !Trams.Enabled; });
 }
 
 //------------------------------------------------------------------------------------------------------------------------

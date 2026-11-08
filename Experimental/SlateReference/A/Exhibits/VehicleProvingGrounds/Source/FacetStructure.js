@@ -13,6 +13,8 @@ import { VehicleGeometry, ResolveCoMAuthoredZ } from "./VehicleSpecification.js"
 import { ConstructIdentityTransform, ConstructRigidTransform, TransformBounds, InvertTransform, RotateVector, ConjugateQuaternion,
          SubtractVector, CrossVector, NormalizeVector } from "./TransformProjection.js";
 import { StressShapes, ResolveStressPlacements } from "./StressLayout.js";
+import { CollapseSequence } from "./CollapseSequence.js";
+import { TramSequence } from "./TramSequence.js";
 
 // 📝 What an occupant takes part in. A ground tile only owns a surface card; the ground occupant is only rastered,
 //    because the scene distance field carries the ground as its analytic plane rather than as a sampled volume.
@@ -37,9 +39,9 @@ export const GroundLayout = Object.freeze({
     PadMinimum:   Object.freeze([-60.0, -60.0]),   // [m]
     TileExtent:   12.0,                            // [m]
     TileCount:    Object.freeze([18, 10]),         // [-] along x, y
-    OuterExtent:  240.0,                           // [m] half extent of the authored surround quad, about the pad centre
+    OuterExtent:  420.0,                           // [m] half extent of the authored surround quad, about the pad centre
     PadDensity:   6.0,                             // [texel/m]
-    StripDensity: 0.5                              // [texel/m]
+    StripDensity: 0.35                             // [texel/m]
 });
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -168,6 +170,51 @@ export class SceneStructure
         }
         this.BollardBlock = { First: BollardFirst, Count: BollardAfterPosts - BollardFirst, Zones: BuiltBollardZones };
 
+        // ③c seismic collapse bay distance proxies (distance + card occlusion only; visual mesh is session-baked Voronoi slabs!)
+        const RawCollapseSpans = Descriptor.CollapseSpans ? Descriptor.CollapseSpans() : [];
+        const ProxyFirst = this.Occupants.length;
+        if (RawCollapseSpans.length > 0 && ShapeSets.CollapseBayProxy !== undefined)
+        {
+            const ProxyRoles = OccupantRole.Distance | OccupantRole.Cards | OccupantRole.Dynamic;
+            for (const Span of RawCollapseSpans)
+            {
+                const Half = 0.5 * Span.Yaw;
+                const Quat = [0.0, 0.0, Math.sin(Half), Math.cos(Half)];
+                for (let BayIdx = 0; BayIdx < Span.Surface.BayCount; ++BayIdx)
+                {
+                    const RelX = (BayIdx + 0.5) * Span.Surface.BayLength;
+                    const Pos = [
+                        Span.StartWorld[0] + Span.CosineYaw * RelX,
+                        Span.StartWorld[1] + Span.SineYaw * RelX,
+                        Span.DeckZ - 0.60
+                    ];
+                    const Index = this.ConstructOccupant(`${Span.Id} bay proxy ${BayIdx}`, ShapeSets.CollapseBayProxy,
+                                                         ConstructRigidTransform(Pos, Quat), ProxyRoles);
+                    this.Occupants[Index].Moving = false;
+                }
+            }
+        }
+        const ProxyCount = this.Occupants.length - ProxyFirst;
+
+        // ③d dedicated articulated streetcar trams & express rail trains (added separately with dynamic GI, shadows & collision)
+        const RawTrams = Descriptor.Trams ? Descriptor.Trams() : [];
+        const TramFirst = this.Occupants.length;
+        for (const Consist of RawTrams)
+        {
+            if (ShapeSets[Consist.Shape] === undefined)
+                continue;
+            const Yaw = Consist.Direction >= 0.0 ? 0.0 : Math.PI;
+            const Quat = [0.0, 0.0, Math.sin(0.5 * Yaw), Math.cos(0.5 * Yaw)];
+            for (let CarIdx = 0; CarIdx < Consist.CarCount; ++CarIdx)
+            {
+                const Pos = [Consist.StartX, Consist.LaneY, Consist.BaseZ || 0.0];
+                const Index = this.ConstructOccupant(`${Consist.Name} car ${CarIdx}`, ShapeSets[Consist.Shape],
+                                                     ConstructRigidTransform(Pos, Quat), ConeRoles);
+                this.Occupants[Index].Moving = false;
+            }
+        }
+        this.TramBlock = { First: TramFirst, Count: this.Occupants.length - TramFirst, Consists: RawTrams };
+
         // ④ breakable props, whole: rastered, in the field, carded and a collider until they break ------------------------
         const BreakableSets = new Map();
         this.Breakables = Descriptor.Breakables().map((Definition) =>
@@ -279,6 +326,38 @@ export class SceneStructure
             this.Occupants[Index].Obstacle = Placement.Collider;
             this.Occupants[Index].Level = Placement.Shape;
         }
+
+        // ⑨ session-baked fractured collapsing bridge & road composite slabs, propagating movie cracks & sand clumps -----
+        this.CollapseBlock = null;
+        this.Collapse = null;
+        if (RawCollapseSpans.length > 0)
+        {
+            const Budget = CollapseSequence.ComputePieceCapacity(RawCollapseSpans);
+            const CollapseSet = this.ConstructFacetSet("Session collapse decks", [], 0.0, 0.0);
+            this.FacetSets[CollapseSet].LocalMinimum = [-8.0, -8.0, -2.0];
+            this.FacetSets[CollapseSet].LocalMaximum = [ 8.0,  8.0,  2.0];
+            this.FacetSets[CollapseSet].VertexCapacity = Budget.VertexCapacity;
+            this.FacetSets[CollapseSet].Composite = true;
+            const CollapseFirst = this.Occupants.length;
+            const Identity = ConstructIdentityTransform();
+            for (let Slot = 0; Slot < Budget.PieceCount; ++Slot)
+            {
+                const Roles = Slot === 0 ? (OccupantRole.Raster | OccupantRole.Dynamic) : OccupantRole.Dynamic;
+                const Index = this.ConstructOccupant(`Collapse piece ${Slot}`, CollapseSet, Identity, Roles);
+                this.Occupants[Index].Moving = false;
+            }
+            this.CollapseBlock = {
+                CompositeSet: CollapseSet,
+                First:        CollapseFirst,
+                Count:        Budget.PieceCount,
+                ProxyFirst,
+                ProxyCount,
+                Spans:        RawCollapseSpans
+            };
+            this.Collapse = new CollapseSequence(this, RawCollapseSpans);
+        }
+
+        this.Trams = RawTrams.length > 0 ? new TramSequence(this, RawTrams) : null;
 
         this.ConstructDistanceList();
     }

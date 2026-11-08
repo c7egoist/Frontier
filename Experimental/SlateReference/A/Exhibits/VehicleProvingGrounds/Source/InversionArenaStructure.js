@@ -16,15 +16,17 @@ import { ConstructHelicalLoopSurface, ConstructFullPipeSurface, ConstructTwisted
          ConstructTransitionRampSurface, ConstructWaveDeckSurface, ConstructTabletopRampSurface,
          ConstructBankedTurnSurface, ConstructHeartlineRibbonSurface,
          ConstructSubmergedTrenchSurface, ConstructSerpentineWaveSurface,
-         ConstructSurfaceSegmentDescriptors } from "./RampSurfaceProjection.js";
+         ConstructCollapseDeckSurface, ConstructSurfaceSegmentDescriptors } from "./RampSurfaceProjection.js";
+import { ConstructCollapseProxyShapes } from "./CollapseSequence.js";
+import { ConstructTramShapes } from "./TramSequence.js";
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                    MULTI-TRACK COMPLEX BOUNDS & TRACK CATALOG
 //------------------------------------------------------------------------------------------------------------------------
 
 export const InversionArenaBounds = Object.freeze({
-    Minimum: Object.freeze([-156.0, -206.0]),
-    Maximum: Object.freeze([ 222.0,  206.0])
+    Minimum: Object.freeze([-156.0, -364.0]),
+    Maximum: Object.freeze([ 222.0,  364.0])
 });
 
 export const InversionArenaTracks = Object.freeze([
@@ -54,6 +56,33 @@ export const InversionArenaTracks = Object.freeze([
         Position: [-98.0, -94.0],
         Yaw:      0.0,
         Note:     "84 m Travelling-Wave Bollards → Viaduct Over/Under Canyon → Westbound 360° Loop"
+    },
+    {
+        Id:       "trackD",
+        Label:    "Track D · Collapse Run",
+        Name:     "Track D — Collapsing Sky-Bridge & Faultline Road",
+        Icon:     "Zap",
+        Position: [-92.0, -250.0],
+        Yaw:      0.0,
+        Note:     "Rear-to-front Collapsing Bridge (+5 m) & Sinkhole Road (0 m) with unique movie cracks & sand"
+    },
+    {
+        Id:       "trackE",
+        Label:    "Track E · 3-Lane Subway",
+        Name:     "Track E — 3-Lane Center-Portal Subway Boulevard",
+        Icon:     "GitFork",
+        Position: [-104.0,  256.0],
+        Yaw:      0.0,
+        Note:     "[road][tunnel down][road] → [road][road][road] → [road][tunnel up][road]"
+    },
+    {
+        Id:       "trackF",
+        Label:    "Track F · Trams & Trains",
+        Name:     "Track F — Streetcar Trams & Express Rail Traffic",
+        Icon:     "Compass",
+        Position: [-98.0,  314.0],
+        Yaw:      0.0,
+        Note:     "Dedicated 4-track transit corridor with live articulated trams & 3-car express trains"
     }
 ]);
 
@@ -456,6 +485,118 @@ export const InversionArenaSurfaces = Object.freeze([
         CopingLift:     2.2,
         Thickness:      0.68,
         AccentMaterial: CourseMaterial.PaintGreen
+    }),
+
+    // ===================================================================================================================
+    // [TRACK D · SEISMIC COLLAPSE WING] REAR-TO-FRONT COLLAPSING SKY-BRIDGE (+5.0 m) & COLLAPSING SINKHOLE ROAD (0.0 m)
+    // ===================================================================================================================
+
+    // ㉔ Collapsing Sky-Bridge (Eastbound at Y = -250.0, X: -52 -> +112, 112 m fracturing elevated span at Z = +5.0 m)
+    ConstructCollapseDeckSurface({
+        Key:            "CollapseSkyBridge",
+        ShapePrefix:    "SkyBridge50",
+        Origin:         [-52.0, -250.0, 0.0],
+        Yaw:            0.0,
+        UpLength:       26.0,
+        DeckLength:     112.0,
+        DownLength:     26.0,
+        Height:         5.00,
+        Width:          14.0,
+        Thickness:      0.62,
+        BayCount:       14,
+        ChasmDepth:     5.00,
+        AccentMaterial: CourseMaterial.PaintYellow
+    }),
+
+    // ㉕ Track D East Turnaround Bowl (sweeps Y = -250 Eastbound around onto Y = -318 Westbound Collapse Road)
+    ConstructBankedTurnSurface({
+        Key:            "TrackDEastBowl",
+        ShapePrefix:    "VelodromeBowl",
+        Origin:         [156.0, -284.0, 0.0],
+        StartAngle:     -0.5 * Math.PI,
+        SweepAngle:     Math.PI,
+        InnerRadius:    24.0,
+        OuterRadius:    46.0,
+        RampAngle:      0.15 * Math.PI,
+        MinimumSlope:   0.25,
+        PeakSlope:      1.08,
+        CopingWidth:    3.4,
+        CopingLift:     2.2,
+        Thickness:      0.68,
+        AccentMaterial: CourseMaterial.BannerAmber
+    }),
+
+    // ㉖ Subterranean Sand Sinkhole Chasm directly beneath Collapsing Road (X: +56 -> -56, -5.20 m floor + escape ramps!)
+    ConstructSubmergedTrenchSurface({
+        Key:                "CollapseSinkholeChasm",
+        ShapePrefix:        "SubwayTrench52",
+        Origin:             [56.0, -318.0, 0.0],
+        Yaw:                Math.PI,
+        DownLength:         12.0,
+        TunnelLength:       88.0,
+        GalleryTileLength:  44.0,
+        UpLength:           12.0,
+        Width:              13.6,
+        Depth:              5.20,
+        Roofed:             false,
+        GroundDeckOverRoof: false,
+        AccentMaterial:     CourseMaterial.BannerAmber
+    }),
+
+    // ㉗ Collapsing Faultline Road (Westbound at Y = -318.0, X: +56 -> -56, flush Z = 0.0 m highway over the -5.2 m chasm!)
+    ConstructCollapseDeckSurface({
+        Key:            "CollapseSinkholeRoad",
+        ShapePrefix:    "SkyBridge50",
+        Origin:         [56.0, -318.0, 0.0],
+        Yaw:            Math.PI,
+        UpLength:       0.0,
+        DeckLength:     112.0,
+        DownLength:     0.0,
+        Height:         0.0,
+        Width:          14.8,
+        Thickness:      0.62,
+        BayCount:       14,
+        ChasmDepth:     5.20,
+        AccentMaterial: CourseMaterial.KerbRed
+    }),
+
+    // ㉘ Track D West Turnaround Bowl
+    ConstructBankedTurnSurface({
+        Key:            "TrackDWestBowl",
+        ShapePrefix:    "VelodromeBowl",
+        Origin:         [-96.0, -284.0, 0.0],
+        StartAngle:     0.5 * Math.PI,
+        SweepAngle:     Math.PI,
+        InnerRadius:    24.0,
+        OuterRadius:    46.0,
+        RampAngle:      0.15 * Math.PI,
+        MinimumSlope:   0.25,
+        PeakSlope:      1.08,
+        CopingWidth:    3.4,
+        CopingLift:     2.2,
+        Thickness:      0.68,
+        AccentMaterial: CourseMaterial.PaintYellow
+    }),
+
+    // ===================================================================================================================
+    // [TRACK E · 3-LANE SUBWAY BOULEVARD] [road][tunnel down][road] -- [road][road][road] -- [road][tunnel up][road]
+    // ===================================================================================================================
+
+    // ㉙ Centre Subway Portal & Underground Station Gallery flanked by continuous Z = 0 Left & Right surface [road] lanes!
+    ConstructSubmergedTrenchSurface({
+        Key:                "SubwayThreeLaneCenter",
+        ShapePrefix:        "SubwayTrench52",
+        Origin:             [-68.0, 256.0, 0.0],
+        Yaw:                0.0,
+        DownLength:         24.0,
+        TunnelLength:       88.0,
+        GalleryTileLength:  44.0,
+        UpLength:           24.0,
+        Width:              13.6,
+        Depth:              5.20,
+        Roofed:             true,
+        GroundDeckOverRoof: true,
+        AccentMaterial:     CourseMaterial.GateLamp
     })
 ]);
 
@@ -473,6 +614,8 @@ const VisualGroundCutouts = InversionArenaSurfaces.flatMap((Surface) => Surface.
 
 export const InversionArenaShapes = Object.freeze({
     ...SegmentBundle.Shapes,
+    ...ConstructCollapseProxyShapes(),
+    ...ConstructTramShapes(),
     LoopPylon:         { Emit: () => EmitBoxFacets(0.85,  0.85, 18.8, CourseMaterial.SteelDark),      Voxel: 0.25, Cards: 0, Distance: false },
     LoopCrossBeam:     { Emit: () => EmitBoxFacets(0.80, 23.60,  0.75, CourseMaterial.SteelDark),     Voxel: 0.18, Cards: 0, Distance: false },
     LoopCrownLamp:     { Emit: () => EmitBoxFacets(0.45,  9.20,  0.16, CourseMaterial.GateLamp),      Voxel: 0.12, Cards: 0, Distance: false },
@@ -481,6 +624,9 @@ export const InversionArenaShapes = Object.freeze({
     RaceGantryLamp:    { Emit: () => EmitBoxFacets(0.55, 18.00,  0.18, CourseMaterial.GateLamp),      Voxel: 0.14, Cards: 0, Distance: false },
     SpineDeckPylon:    { Emit: () => EmitBoxFacets(0.70, 12.60,  3.40, CourseMaterial.TunnelConcrete), Voxel: 0.22, Cards: 0, Distance: false },
     BridgePier:        { Emit: () => EmitBoxFacets(1.10, 13.40,  4.36, CourseMaterial.TunnelConcrete), Voxel: 0.24, Cards: 0, Distance: false },
+    StationPlatform:   { Emit: () => EmitBoxFacets(32.0,  3.40,  0.42, CourseMaterial.ApronConcrete,
+                         [CourseMaterial.PaintYellow, CourseMaterial.PaintYellow, CourseMaterial.BarrierConcrete,
+                          CourseMaterial.BarrierConcrete, CourseMaterial.ApronConcrete, CourseMaterial.TunnelConcrete]), Voxel: 0.28, Cards: 6 },
     LongBarrier:       { Emit: () => EmitBoxFacets(8.00,  0.65,  0.85, CourseMaterial.BarrierConcrete), Voxel: 0.20, Cards: 6 },
     TunnelCeilingLamp: { Emit: () => EmitBoxFacets(4.60,  0.48,  0.10, CourseMaterial.GateLamp),      Voxel: 0.16, Cards: 0, Distance: false },
     BollardSocket:     { Emit: () => EmitBoxFacets(0.76,  0.76,  0.04, CourseMaterial.SteelDark),     Voxel: 0.12, Cards: 0, Distance: false },
@@ -518,7 +664,11 @@ export const InversionArenaZones = Object.freeze([
     { Name: "Track B · Linear Bollards",  Position: [ 58.0,  166.0], Yaw: 180.0, Note: "Proximity Trigger #1 — Linear Retracting Bollard Strip" },
     { Name: "Track C · Wave Bollards",    Position: [-98.0,  -94.0], Yaw:   0.0, Note: "Proximity Trigger #2 — 84 m Seesaw Travelling-Wave Bollards" },
     { Name: "Track C · Canyon Underpass", Position: [ 78.0,  -46.0], Yaw: -90.0, Note: "Dive -5.2 m UNDER the +5.0 m Track C Viaduct Bridge" },
-    { Name: "Track C · South 360° Loop",  Position: [148.0, -162.0], Yaw: 180.0, Note: "Westbound 360° Loop → 46° Corkscrew Wing → Serpentine Waves" }
+    { Name: "Track C · South 360° Loop",  Position: [148.0, -162.0], Yaw: 180.0, Note: "Westbound 360° Loop → 46° Corkscrew Wing → Serpentine Waves" },
+    { Name: "Track D · Collapsing Bridge", Position: [-92.0, -250.0], Yaw:   0.0, Note: "Outrun rear-to-front +5 m Bridge collapse, movie cracks & sand!" },
+    { Name: "Track D · Collapsing Road",   Position: [  84.0, -318.0], Yaw: 180.0, Note: "Outrun rear-to-front Sinkhole Road collapse & sand fissures!" },
+    { Name: "Track E · 3-Lane Subway",     Position: [-104.0,  256.0], Yaw:   0.0, Note: "[road][tunnel down][road] → [road][road][road] → [road][tunnel up][road]" },
+    { Name: "Track F · Trams & Trains",    Position: [ -98.0,  314.0], Yaw:   0.0, Note: "Two-way Articulated Streetcar Trams & Express Commuter Trains" }
 ]);
 
 export const InversionArenaDrills = Object.freeze([
@@ -580,11 +730,13 @@ export const InversionArenaDrills = Object.freeze([
 export const InversionClearZones = Object.freeze([
     [-148.0,  -52.0, 214.0,  -20.0],   // Track A South Outbound Straight
     [-148.0,   20.0, 214.0,   52.0],   // Track A North Return Straight
-    [ 156.0, -200.0, 216.0,  200.0],   // East Bowls (Tracks A, B, C)
-    [-148.0, -200.0, -76.0,  200.0],   // West Bowls & West Inter-Track Boulevard
+    [ 148.0, -356.0, 218.0,  356.0],   // East Bowls & Inter-Track Avenue (Tracks A..F)
+    [-148.0, -356.0, -76.0,  356.0],   // West Bowls & Inter-Track Avenue (Tracks A..F)
     [ -88.0,  -14.0, 138.0,   14.0],   // Track A Infield Stunt Expressway
     [-148.0,   72.0, 214.0,  184.0],   // Track B Subterranean Split & Return Corridors
     [-148.0, -186.0, 214.0,  -74.0],   // Track C Kinetic Wave & Backstretch Corridors
+    [-148.0, -346.0, 214.0, -228.0],   // Track D Collapsing Bridge & Collapsing Road Corridors
+    [-148.0,  234.0, 214.0,  356.0],   // Track E 3-Lane Subway & Track F Tram/Train Corridors
     [  -4.0,   52.0,  28.0,  140.0],   // North Underpass Connector Boulevard
     [  64.0, -140.0,  92.0,  -52.0]    // South Canyon Underpass Connector
 ]);
@@ -714,7 +866,7 @@ export function EmitInversionGroundFacets()
     const MinX = InversionArenaBounds.Minimum[0], MaxX = InversionArenaBounds.Maximum[0];
     const MinY = InversionArenaBounds.Minimum[1], MaxY = InversionArenaBounds.Maximum[1];
     const CentreX = 0.5 * (MinX + MaxX);
-    const Outer = 340.0;
+    const Outer = 460.0;
 
     // ① Surrounding stadium turf outside the multi-track asphalt pad
     EmitQuad(Facets, [CentreX - Outer, -Outer, -0.02], [CentreX + Outer, -Outer, -0.02],
@@ -730,12 +882,17 @@ export function EmitInversionGroundFacets()
         {
             const X0 = MinX + Row * Cell, X1 = Math.min(MaxX, X0 + Cell);
             const Y0 = MinY + Col * Cell, Y1 = Math.min(MaxY, Y0 + Cell);
+            const UnderCollapseBridge = X1 > -56.0 && X0 < 56.0 && Y1 > -262.0 && Y0 < -238.0;
             const OnRaceCorridor =
                 (Y0 <= -22.0 && Y1 >= -48.0) || (Y0 <= 48.0 && Y1 >= 22.0) || (Y0 <= 12.0 && Y1 >= -12.0) ||
                 (Y0 <= 116.0 && Y1 >= 74.0)  || (Y0 <= 180.0 && Y1 >= 152.0) ||
-                (Y0 <= -80.0 && Y1 >= -108.0) || (Y0 <= -152.0 && Y1 >= -184.0);
+                (Y0 <= -80.0 && Y1 >= -108.0) || (Y0 <= -152.0 && Y1 >= -184.0) ||
+                (Y0 <= -238.0 && Y1 >= -262.0) || (Y0 <= -304.0 && Y1 >= -332.0) ||
+                (Y0 <= 276.0 && Y1 >= 236.0) || (Y0 <= 352.0 && Y1 >= 306.0);
             const Checker = ((Row >> 1) + (Col >> 1)) & 1;
-            const Family = OnRaceCorridor ? CourseMaterial.Asphalt : (Checker ? CourseMaterial.AsphaltPatch : CourseMaterial.Asphalt);
+            const Family = UnderCollapseBridge
+                ? CourseMaterial.Earth
+                : (OnRaceCorridor ? CourseMaterial.Asphalt : (Checker ? CourseMaterial.AsphaltPatch : CourseMaterial.Asphalt));
 
             let Pieces = [[X0, Y0, X1, Y1]];
             for (const Cutout of VisualGroundCutouts)
@@ -870,6 +1027,42 @@ export function EmitInversionGroundFacets()
     for (const X of [146.0, 130.0])
         EmitChevron(X, -162.0, -1.0, 3.4, 1.0, CourseMaterial.KerbRed);
 
+    // ⑨ [Track D] Seismic Collapse Sky-Bridge (Y = -250) & Collapse Faultline Road (Y = -318) Hazard Livery
+    Paint(-94.0, -257.2, -52.0, -256.6, CourseMaterial.BannerAmber, 0.005);
+    Paint(-94.0, -243.4, -52.0, -242.8, CourseMaterial.BannerAmber, 0.005);
+    for (const X of [-82.0, -64.0])
+        EmitChevron(X, -250.0, 1.0, 3.4, 1.0, CourseMaterial.BannerAmber);
+    for (const X of [104.0, 92.0, 68.0])
+        EmitChevron(X, -318.0, -1.0, 3.4, 1.0, CourseMaterial.KerbRed);
+
+    // ⑩ [Track E] 3-Lane Subway Boulevard: [road][tunnel down][road] -- [road][road][road] -- [road][tunnel up][road]
+    //    Outer boundary lines (Y = 238.5 & Y = 273.5) + 3-lane dividers (Y = 248.2 & Y = 263.8)
+    Paint(-112.0, 238.4, 132.0, 239.0, CourseMaterial.PaintWhite, 0.005);
+    Paint(-112.0, 273.0, 132.0, 273.6, CourseMaterial.PaintWhite, 0.005);
+    for (let X = -108.0; X < 128.0; X += 8.0)
+    {
+        Paint(X, 248.0, X + 4.5, 248.5, CourseMaterial.PaintYellow, 0.005);
+        Paint(X, 263.5, X + 4.5, 264.0, CourseMaterial.PaintYellow, 0.005);
+    }
+    //    Approach & middle -- [road][road][road] -- chevrons across all 3 lanes!
+    for (const X of [-92.0, -78.0, 82.0])
+    {
+        EmitChevron(X, 243.5, 1.0, 2.4, 0.9, CourseMaterial.PaintGreen);
+        EmitChevron(X, 256.0, 1.0, 2.8, 1.0, CourseMaterial.GateLamp);
+        EmitChevron(X, 268.5, 1.0, 2.4, 0.9, CourseMaterial.PaintGreen);
+    }
+    for (const X of [-24.0, 0.0, 24.0])
+    {
+        EmitChevron(X, 243.5, 1.0, 2.4, 0.9, CourseMaterial.PaintGreen);
+        EmitChevron(X, 256.0, 1.0, 2.8, 1.0, CourseMaterial.PaintYellow);
+        EmitChevron(X, 268.5, 1.0, 2.4, 0.9, CourseMaterial.PaintGreen);
+    }
+
+    // ⑪ [Track F] Dedicated Streetcar Tram & Express Rail Transit Boulevard (Y = +308 .. +350)
+    Paint(-142.0, 308.2, 206.0, 308.8, CourseMaterial.PaintYellow, 0.005);
+    Paint(-142.0, 330.8, 206.0, 331.4, CourseMaterial.PaintYellow, 0.005);
+    Paint(-142.0, 335.6, 206.0, 350.4, CourseMaterial.TunnelConcrete, 0.002);
+
     return Facets;
 }
 
@@ -895,13 +1088,24 @@ export function ResolveInversionPlacements()
             Add("Jersey", `TrackA South ${X.toFixed(0)}`, [X, -55.5, 0.0], 0.0);
     }
 
-    // Outer Complex Perimeter Walls around the full 3-Track Stadium ([−154..+220] × [−202..+202])
+    // Inner-Wing Divider Walls at Y = ±202.0 with wide 32 m Open-World Gateways into [Track D], [Track E] & [Track F]
     for (let X = -148.0; X <= 216.0; X += 8.0)
     {
-        Add("LongBarrier", `Complex North ${X.toFixed(0)}`, [X,  202.0, 0.0], 0.0);
-        Add("LongBarrier", `Complex South ${X.toFixed(0)}`, [X, -202.0, 0.0], 0.0);
+        const OuterGateway = (X >= -108.0 && X <= -76.0) || (X >= 148.0 && X <= 180.0);
+        if (!OuterGateway)
+        {
+            Add("LongBarrier", `Wing Divider N ${X.toFixed(0)}`, [X,  202.0, 0.0], 0.0);
+            Add("LongBarrier", `Wing Divider S ${X.toFixed(0)}`, [X, -202.0, 0.0], 0.0);
+        }
     }
-    for (let Y = -196.0; Y <= 196.0; Y += 8.0)
+
+    // Outer Complex Perimeter Walls around the full 6-Track Stadium ([−154..+220] × [−360..+360])
+    for (let X = -148.0; X <= 216.0; X += 16.0)
+    {
+        Add("LongBarrier", `Complex North ${X.toFixed(0)}`, [X,  360.0, 0.0], 0.0);
+        Add("LongBarrier", `Complex South ${X.toFixed(0)}`, [X, -360.0, 0.0], 0.0);
+    }
+    for (let Y = -352.0; Y <= 352.0; Y += 16.0)
     {
         Add("LongBarrier", `Complex West ${Y.toFixed(0)}`, [-152.5, Y, 0.0], 90.0 * Degrees);
         Add("LongBarrier", `Complex East ${Y.toFixed(0)}`, [ 220.5, Y, 0.0], 90.0 * Degrees);
@@ -933,6 +1137,10 @@ export function ResolveInversionPlacements()
     AddRaceGantry("Track B Split Portal",    -56.0,   94.0);
     AddRaceGantry("Track B Linear Trigger",   36.0,  166.0);
     AddRaceGantry("Track C Wave Trigger",    -82.0,  -94.0);
+    AddRaceGantry("Track D Collapse Bridge", -54.0, -250.0);
+    AddRaceGantry("Track D Collapse Road",    64.0, -318.0);
+    AddRaceGantry("Track E 3-Lane Subway",   -72.0,  256.0);
+    AddRaceGantry("Track F Tramway Avenue",  -76.0,  319.5);
 
     // ④ Architectural steel A-frame portals cradling BOTH 18 m 360° Helical Loops (Track A & Track C)
     for (const PortalX of [-26.5, -20.0, -13.5])
@@ -968,6 +1176,31 @@ export function ResolveInversionPlacements()
     {
         Add("TunnelCeilingLamp", `Subway lamp L ${X}`, [X, 80.5, -0.86], 0.0, -1, false);
         Add("TunnelCeilingLamp", `Subway lamp R ${X}`, [X, 87.5, -0.86], 0.0, -1, false);
+    }
+
+    // [Track E] 3-Lane Subway Ceiling LED Light Strips inside the 88 m Underground Subway Station Gallery
+    for (let X = -38.0; X <= 38.0; X += 10.0)
+    {
+        Add("TunnelCeilingLamp", `Subway3L lamp L ${X}`, [X, 252.5, -0.86], 0.0, -1, false);
+        Add("TunnelCeilingLamp", `Subway3L lamp R ${X}`, [X, 259.5, -0.86], 0.0, -1, false);
+    }
+
+    // [Track F] Dedicated 4-Track Streetcar Tramway & Express Rail Corridor (steel grooved rails, catenary & island platform)
+    Add("StationPlatform", "Tram Central Island", [16.0, 319.5, 0.0], 0.0);
+    for (let X = -132.0; X <= 198.0; X += 22.0)
+    {
+        for (const TrackCenterY of [314.0, 325.0, 340.0, 346.5])
+        {
+            Add("TramRailBar", `Rail S ${TrackCenterY} ${X}`, [X, TrackCenterY - 0.72, 0.02], 0.0, -1, false);
+            Add("TramRailBar", `Rail N ${TrackCenterY} ${X}`, [X, TrackCenterY + 0.72, 0.02], 0.0, -1, false);
+        }
+    }
+    for (let X = -120.0; X <= 188.0; X += 28.0)
+    {
+        Add("CatenaryPole", `Tram catenary pole ${X}`, [X, 319.5, 0.0], 0.0, -1, false);
+        Add("CatenaryArm",  `Tram catenary arm ${X}`,  [X, 319.5, 6.2], 0.0, -1, false);
+        Add("CatenaryPole", `Train catenary pole ${X}`, [X, 343.25, 0.0], 0.0, -1, false);
+        Add("CatenaryArm",  `Train catenary arm ${X}`,  [X, 343.25, 6.4], 0.0, -1, false);
     }
 
     // Recessed floor sockets under all Linear & Wave Kinetic Bollards
@@ -1067,4 +1300,184 @@ export function ResolveInversionBreakables()
     Add("Paddock Crate 2",        Crate,    "wood",       -4.0,  12.0, -0.20,         { DensityScale: 0.32, Capacity: 28 });
 
     return List;
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+//                      SEISMIC COLLAPSING BRIDGE & COLLAPSING ROAD DESCRIPTORS
+//------------------------------------------------------------------------------------------------------------------------
+
+export function ResolveInversionCollapseSpans()
+{
+    const BridgeSurface = InversionArenaSurfaces.find((S) => S.Key === "CollapseSkyBridge");
+    const RoadSurface   = InversionArenaSurfaces.find((S) => S.Key === "CollapseSinkholeRoad");
+    return [
+        {
+            Id:          "collapseBridge",
+            Name:        "Track D Collapsing Sky-Bridge",
+            ShortName:   "Collapsing Bridge",
+            Kind:        "bridge",
+            Surface:     BridgeSurface,
+            StartWorld:  [BridgeSurface.Origin[0] + BridgeSurface.UpLength * BridgeSurface.CosineYaw,
+                          BridgeSurface.Origin[1] + BridgeSurface.UpLength * BridgeSurface.SineYaw, 0.0],
+            Yaw:         0.0,
+            CosineYaw:   1.0,
+            SineYaw:     0.0,
+            SpanLength:  112.0,
+            DeckZ:       5.00,
+            ChasmDepth:  5.00,
+            CrackSpeed:  26.5,
+            DropSpeed:   15.5,
+            LeadDelay:   0.55,
+            ProxyOffset: 0
+        },
+        {
+            Id:          "collapseRoad",
+            Name:        "Track D Collapsing Sinkhole Road",
+            ShortName:   "Collapsing Road",
+            Kind:        "road",
+            Surface:     RoadSurface,
+            StartWorld:  [56.0, -318.0, 0.0],
+            Yaw:         Math.PI,
+            CosineYaw:   -1.0,
+            SineYaw:     0.0,
+            SpanLength:  112.0,
+            DeckZ:       0.0,
+            ChasmDepth:  5.20,
+            CrackSpeed:  26.5,
+            DropSpeed:   15.5,
+            LeadDelay:   0.55,
+            ProxyOffset: BridgeSurface.BayCount
+        }
+    ];
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+//                     SEPARATE ARTICULATED TRAM & EXPRESS TRAIN TRAFFIC DESCRIPTORS
+//------------------------------------------------------------------------------------------------------------------------
+
+export function ResolveInversionTrams()
+{
+    return [
+        // ① Eastbound Streetcar Line (Y = +314.0): 2 coupled two-car articulated yellow city trams stopping at Central Island
+        {
+            Id:              "tramEast1",
+            Name:            "Streetcar Tram E-101",
+            Kind:            "tram",
+            Shape:           "TramCarBody",
+            CarCount:        2,
+            CarLength:       11.2,
+            CarWidth:        2.65,
+            CarHeight:       3.30,
+            CarSpacing:      11.8,
+            StartX:          -136.0,
+            EndX:             204.0,
+            LaneY:            314.0,
+            BaseZ:            0.0,
+            Direction:        1.0,
+            CruiseSpeed:      12.5,
+            StationX:         22.0,
+            StationDwell:     2.2,
+            InitialProgress:  28.0
+        },
+        {
+            Id:              "tramEast2",
+            Name:            "Streetcar Tram E-102",
+            Kind:            "tram",
+            Shape:           "TramCarBody",
+            CarCount:        2,
+            CarLength:       11.2,
+            CarWidth:        2.65,
+            CarHeight:       3.30,
+            CarSpacing:      11.8,
+            StartX:          -136.0,
+            EndX:             204.0,
+            LaneY:            314.0,
+            BaseZ:            0.0,
+            Direction:        1.0,
+            CruiseSpeed:      12.5,
+            StationX:         22.0,
+            StationDwell:     2.2,
+            InitialProgress:  198.0
+        },
+        // ② Westbound Streetcar Line (Y = +325.0): 2 coupled two-car articulated yellow city trams
+        {
+            Id:              "tramWest1",
+            Name:            "Streetcar Tram W-201",
+            Kind:            "tram",
+            Shape:           "TramCarBody",
+            CarCount:        2,
+            CarLength:       11.2,
+            CarWidth:        2.65,
+            CarHeight:       3.30,
+            CarSpacing:      11.8,
+            StartX:           204.0,
+            EndX:            -136.0,
+            LaneY:            325.0,
+            BaseZ:            0.0,
+            Direction:       -1.0,
+            CruiseSpeed:      12.5,
+            StationX:         10.0,
+            StationDwell:     2.2,
+            InitialProgress:  62.0
+        },
+        {
+            Id:              "tramWest2",
+            Name:            "Streetcar Tram W-202",
+            Kind:            "tram",
+            Shape:           "TramCarBody",
+            CarCount:        2,
+            CarLength:       11.2,
+            CarWidth:        2.65,
+            CarHeight:       3.30,
+            CarSpacing:      11.8,
+            StartX:           204.0,
+            EndX:            -136.0,
+            LaneY:            325.0,
+            BaseZ:            0.0,
+            Direction:       -1.0,
+            CruiseSpeed:      12.5,
+            StationX:         10.0,
+            StationDwell:     2.2,
+            InitialProgress:  232.0
+        },
+        // ③ Express Commuter / Subway Rail Corridor (Y = +340.0 Eastbound & Y = +346.5 Westbound): 3-car heavy rail trains
+        {
+            Id:              "trainExpressEast",
+            Name:            "Express Train R-401",
+            Kind:            "train",
+            Shape:           "TrainCoachBody",
+            CarCount:        3,
+            CarLength:       13.6,
+            CarWidth:        2.92,
+            CarHeight:       3.52,
+            CarSpacing:      14.2,
+            StartX:          -138.0,
+            EndX:             206.0,
+            LaneY:            340.0,
+            BaseZ:            0.0,
+            Direction:        1.0,
+            CruiseSpeed:      21.5,
+            StationX:         null,
+            InitialProgress:  84.0
+        },
+        {
+            Id:              "trainExpressWest",
+            Name:            "Express Train R-402",
+            Kind:            "train",
+            Shape:           "TrainCoachBody",
+            CarCount:        3,
+            CarLength:       13.6,
+            CarWidth:        2.92,
+            CarHeight:       3.52,
+            CarSpacing:      14.2,
+            StartX:           206.0,
+            EndX:            -138.0,
+            LaneY:            346.5,
+            BaseZ:            0.0,
+            Direction:       -1.0,
+            CruiseSpeed:      21.5,
+            StationX:         null,
+            InitialProgress:  156.0
+        }
+    ];
 }

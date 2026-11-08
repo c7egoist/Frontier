@@ -310,6 +310,10 @@ class IlluminationHost
         this.Vehicle.Support = this.Bodies;
         this.Cones = new ConeSequence(this);
         this.Bollards = new BollardSequence(this);
+        this.Collapse = this.Scene.Collapse;
+        this.Trams = this.Scene.Trams;
+        if (this.Trams)
+            this.Trams.RegisterDynamicObstacles(this.Vehicle.Obstacles);
         this.ReportProgress("Baking fracture patterns", 0.72);
         this.Fracture = new FractureSequence(this);
 
@@ -520,6 +524,48 @@ class IlluminationHost
         this.Scene.RetainOccupantTransform(this.Scene.VehicleOccupants.Body);
         for (const Wheel of this.Scene.VehicleOccupants.Wheels)
             this.Scene.RetainOccupantTransform(Wheel);
+        if (this.Collapse)
+            this.ResetCollapseDecks();
+    }
+
+    UploadCollapseOccupants()
+    {
+        if (!this.Collapse || !this.Scene.CollapseBlock || !this.OccupantRecords || !this.Volumes)
+            return;
+        const Device = this.Exchange.Device;
+        const Block = this.Scene.CollapseBlock;
+        if (Block.ProxyCount > 0)
+        {
+            const ProxyScalars = this.Scene.EncodeOccupantRange(this.Volumes, Block.ProxyFirst, Block.ProxyCount);
+            Device.queue.writeBuffer(this.OccupantRecords, Block.ProxyFirst * OccupantStride, ProxyScalars);
+        }
+        if (Block.Count > 0)
+        {
+            const PieceScalars = this.Scene.EncodeOccupantRange(this.Volumes, Block.First, Block.Count);
+            Device.queue.writeBuffer(this.OccupantRecords, Block.First * OccupantStride, PieceScalars);
+        }
+    }
+
+    ResetCollapseDecks()
+    {
+        if (!this.Collapse)
+            return;
+        this.Collapse.ResetAllPoses();
+        this.UploadCollapseOccupants();
+    }
+
+    RebakeCollapseDecks(NewSeed = null)
+    {
+        if (!this.Collapse)
+            return 0;
+        const Seed = (NewSeed !== null && NewSeed !== undefined)
+            ? (NewSeed >>> 0)
+            : (((Math.random() * 0xFFFFFFFF) >>> 0) || 0xC011A95E);
+        this.Collapse.BakeAllSpans(Seed, this.Exchange.Device, this.VertexRecords);
+        this.UploadCollapseOccupants();
+        if (this.Shell)
+            this.Shell.Announce(`Collapse cracks rebaked · seed 0x${this.Collapse.SessionSeed.toString(16).toUpperCase()}`);
+        return this.Collapse.SessionSeed;
     }
 
     // 📝 While derezzed the car leaves the raster, the distance field and the card lists — and the debris ignores it.
@@ -877,6 +923,8 @@ class IlluminationHost
                 this.Fracture.ReassembleProp(Prop);
                 Props++;
             }
+        if (this.Collapse)
+            this.ResetCollapseDecks();
         this.Shell.Announce(`Arena reset — ${Cones} cones, ${Props} props`);
     }
 
@@ -1148,6 +1196,12 @@ class IlluminationHost
         this.Cones.Advance(Step);
         if (this.Bollards)
             this.Bollards.Advance(Step);
+        const CollapseMoved = this.Collapse
+            ? this.Collapse.Advance(this.Vehicle.Position, this.Vehicle.LinearVelocity, Step, this.Sparks)
+            : false;
+        const TramsMoved = this.Trams
+            ? this.Trams.Advance(this.Vehicle, Step)
+            : false;
         this.Stress.Advance(Step);
         this.Effects.Advance(Step);
         this.Training.Advance(Step);
@@ -1179,6 +1233,8 @@ class IlluminationHost
         }
         const Emissions = this.Thermal.ResolveEmissions(Readings, Readings[0].Seconds);
         Emissions.push(...this.ResolveBurstPuffs(Step));
+        if (this.Collapse)
+            Emissions.push(...this.Collapse.QuerySmokeEmissions());
         if (this.Settings.TestPlume > 0)
             Emissions.push(this.ResolveTestPlume(this.Settings.TestPlume === 2));
         this.Marks.Advance(Readings, { Enabled: this.Settings.TyreMarks, Strength: this.Settings.TyreMarkStrength });
@@ -1205,6 +1261,14 @@ class IlluminationHost
             Gas: this.Settings.Gas, Readings, Thermal: this.Thermal });
         this.EncodeFrameRecord(Camera, Light);
         Device.queue.writeBuffer(this.OccupantRecords, 0, this.Scene.EncodeOccupantRecords(this.Volumes, this.Scene.DynamicCount));
+        if (CollapseMoved)
+            this.UploadCollapseOccupants();
+        if (TramsMoved && this.Scene.TramBlock && this.Scene.TramBlock.Count > 0)
+        {
+            const TramBlock = this.Scene.TramBlock;
+            const TramScalars = this.Scene.EncodeOccupantRange(this.Volumes, TramBlock.First, TramBlock.Count);
+            Device.queue.writeBuffer(this.OccupantRecords, TramBlock.First * OccupantStride, TramScalars);
+        }
 
         if (this.Lighting && this.LightRecords)
         {

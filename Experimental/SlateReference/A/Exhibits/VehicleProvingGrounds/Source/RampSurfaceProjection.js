@@ -22,7 +22,8 @@ export const SurfaceCategory = Object.freeze({
     BankedTurn:      6,   // [-] - 180° progressive parabolic superelevated velodrome bowl with C² wall-ride coping
     HeartlineRibbon: 7,   // [-] - Elevated zero-G heartline S-twist sky-bridge (+α -> 0° -> −α)
     SubmergedTrench: 8,   // [-] - Excavated C² underground tunnel & sunken underpass with retaining walls and roof deck
-    SerpentineWave:  9    // [-] - Alternating-camber banked rhythm wave rollers (+α / −α / +α)
+    SerpentineWave:  9,   // [-] - Alternating-camber banked rhythm wave rollers (+α / −α / +α)
+    CollapseDeck:    10   // [-] - Progressive rear-to-front collapsing bridge / sinkhole road with per-bay live state
 });
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -547,6 +548,7 @@ export function ConstructSubmergedTrenchSurface(Configuration)
         RoofBottomZ,
         RoofTopZ,
         KerbWidth:          Configuration.KerbWidth ?? 0.55,
+        GalleryTileLength:  Configuration.GalleryTileLength ?? TunnelLength,
         ShapePrefix:        Configuration.ShapePrefix || Configuration.Key,
         AccentMaterial:     Configuration.AccentMaterial ?? CourseMaterial.GateLamp
     };
@@ -606,6 +608,83 @@ export function ConstructSerpentineWaveSurface(Configuration)
     const MinZ = -Surface.HalfWidth * Math.sin(Math.abs(PeakAngle)) - Thickness - 0.8;
     return FinalizeSurfaceBounds(Surface, [-Surface.HalfLength - 1.0, -Surface.HalfWidth - 1.0, MinZ],
                                  [Surface.HalfLength + 1.0, Surface.HalfWidth + 1.0, MaxZ]);
+}
+
+export function ConstructCollapseDeckSurface(Configuration)
+{
+    const Yaw = Configuration.Yaw || 0.0;
+    const UpLength = Configuration.UpLength ?? 0.0;
+    const DeckLength = Configuration.DeckLength ?? 112.0;
+    const DownLength = Configuration.DownLength ?? 0.0;
+    const TotalLength = UpLength + DeckLength + DownLength;
+    const Width = Configuration.Width ?? 14.0;
+    const Height = Configuration.Height ?? 5.0;
+    const Thickness = Configuration.Thickness ?? 0.62;
+    const BayCount = Math.max(4, Math.round(Configuration.BayCount ?? 14));
+    const BayIntact = new Uint8Array(BayCount);
+    BayIntact.fill(1);
+    const Surface = {
+        Category:       SurfaceCategory.CollapseDeck,
+        Key:            Configuration.Key,
+        Origin:         Configuration.Origin.slice(),
+        Yaw,
+        CosineYaw:      Math.cos(Yaw),
+        SineYaw:        Math.sin(Yaw),
+        UpLength,
+        DeckLength,
+        DownLength,
+        TotalLength,
+        Width,
+        HalfWidth:      0.5 * Width,
+        Height,
+        Thickness,
+        BayCount,
+        BayLength:      DeckLength / BayCount,
+        BayDropZ:       new Float32Array(BayCount),
+        BayPitch:       new Float32Array(BayCount),
+        BayRoll:        new Float32Array(BayCount),
+        BayIntact,
+        ChasmDepth:     Configuration.ChasmDepth ?? 5.6,
+        KerbWidth:      Configuration.KerbWidth ?? 0.60,
+        KerbHeight:     Configuration.KerbHeight ?? 0.24,
+        ShapePrefix:    Configuration.ShapePrefix || Configuration.Key,
+        AccentMaterial: Configuration.AccentMaterial ?? CourseMaterial.PaintYellow
+    };
+    return FinalizeSurfaceBounds(Surface, [-1.0, -Surface.HalfWidth - 1.0, -Thickness - 1.5],
+                                 [TotalLength + 1.0, Surface.HalfWidth + 1.0, Height + Surface.KerbHeight + 1.5]);
+}
+
+export function EvaluateCollapseDeckSpan(Surface, CoordinateX, CoordinateY)
+{
+    if (CoordinateX < 0.0 || CoordinateX > Surface.TotalLength)
+        return null;
+    if (Surface.UpLength > 1.0e-4 && CoordinateX < Surface.UpLength)
+    {
+        const Profile = EvaluateTabletopProfile(Surface, CoordinateX, CoordinateY);
+        return { Supported: true, Height: Profile.Height, SlopeX: Profile.SlopeX, SlopeY: Profile.SlopeY };
+    }
+    const SpanEnd = Surface.UpLength + Surface.DeckLength;
+    if (Surface.DownLength > 1.0e-4 && CoordinateX > SpanEnd)
+    {
+        const Profile = EvaluateTabletopProfile(Surface, CoordinateX, CoordinateY);
+        return { Supported: true, Height: Profile.Height, SlopeX: Profile.SlopeX, SlopeY: Profile.SlopeY };
+    }
+    const RelX = ClampScalar(CoordinateX - Surface.UpLength, 0.0, Surface.DeckLength - 1.0e-5);
+    const BayIndex = Math.min(Surface.BayCount - 1, Math.max(0, Math.floor(RelX / Surface.BayLength)));
+    if (!Surface.BayIntact[BayIndex])
+        return null;
+    const BayCenterX = (BayIndex + 0.5) * Surface.BayLength;
+    const LocalBayX = RelX - BayCenterX;
+    const Pitch = Surface.BayPitch[BayIndex] || 0.0;
+    const Roll = Surface.BayRoll[BayIndex] || 0.0;
+    const Deflection = Math.min(0.0, (Surface.BayDropZ[BayIndex] || 0.0) - (0.5 * Surface.BayLength - LocalBayX) * Pitch);
+    const Kerb = EvaluateLateralKerbLift(CoordinateY, Surface.HalfWidth, Surface.KerbWidth, Surface.KerbHeight, 1.0);
+    return {
+        Supported: true,
+        Height:    Surface.Height + Deflection + CoordinateY * Roll + Kerb.Lift,
+        SlopeX:    Deflection < 0.0 ? Pitch : 0.0,
+        SlopeY:    Roll + Kerb.Slope
+    };
 }
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -1419,6 +1498,53 @@ function CastSerpentineWaveRay(Surface, Origin, Direction, MaximumTravel)
     return null;
 }
 
+function CastCollapseDeckRay(Surface, Origin, Direction, MaximumTravel)
+{
+    const Steps = 20;
+    let PreviousTravel = 0.0;
+    let PreviousSpan = EvaluateCollapseDeckSpan(Surface, Origin[0], Origin[1]);
+    let PreviousResidual = PreviousSpan ? (Origin[2] - PreviousSpan.Height) : null;
+
+    for (let Step = 1; Step <= Steps; ++Step)
+    {
+        const CurrentTravel = (MaximumTravel * Step) / Steps;
+        const X = Origin[0] + Direction[0] * CurrentTravel;
+        const Y = Origin[1] + Direction[1] * CurrentTravel;
+        const Z = Origin[2] + Direction[2] * CurrentTravel;
+        const CurrentSpan = EvaluateCollapseDeckSpan(Surface, X, Y);
+        const CurrentResidual = CurrentSpan ? (Z - CurrentSpan.Height) : null;
+        if (PreviousResidual !== null && CurrentResidual !== null && PreviousResidual >= -0.02 && CurrentResidual <= 0.0)
+        {
+            let Low = PreviousTravel, High = CurrentTravel;
+            for (let Iteration = 0; Iteration < 14; ++Iteration)
+            {
+                const Middle = 0.5 * (Low + High);
+                const MX = Origin[0] + Direction[0] * Middle;
+                const MY = Origin[1] + Direction[1] * Middle;
+                const MZ = Origin[2] + Direction[2] * Middle;
+                const MSpan = EvaluateCollapseDeckSpan(Surface, MX, MY);
+                if (!MSpan || (MZ - MSpan.Height) >= 0.0) Low = Middle;
+                else High = Middle;
+            }
+            const Travel = 0.5 * (Low + High);
+            const HitLocal = MultiplyAddVector(Origin, Direction, Travel);
+            if (HitLocal[0] >= 0.0 && HitLocal[0] <= Surface.TotalLength && Math.abs(HitLocal[1]) <= Surface.HalfWidth)
+            {
+                const Span = EvaluateCollapseDeckSpan(Surface, HitLocal[0], HitLocal[1]);
+                if (Span && Span.Supported)
+                {
+                    const NormalLocal = NormalizeVector([-Span.SlopeX, -Span.SlopeY, 1.0]);
+                    if (DotVector(Direction, NormalLocal) <= -0.15)
+                        return { Travel, LocalPoint: HitLocal, LocalNormal: NormalLocal };
+                }
+            }
+        }
+        PreviousTravel = CurrentTravel;
+        PreviousResidual = CurrentResidual;
+    }
+    return null;
+}
+
 // 📝 Intersects a 3D strut or sensor ray (Origin, Direction) against all active ramp surfaces and returns the closest hit.
 export function CastSurfaceRay(Surfaces, Origin, Direction, MaximumTravel)
 {
@@ -1445,6 +1571,7 @@ export function CastSurfaceRay(Surfaces, Origin, Direction, MaximumTravel)
             case SurfaceCategory.HeartlineRibbon: Candidate = CastHeartlineRibbonRay(Surface, LocalOrigin, LocalDirection, MaximumTravel); break;
             case SurfaceCategory.SubmergedTrench: Candidate = CastSubmergedTrenchRay(Surface, LocalOrigin, LocalDirection, MaximumTravel); break;
             case SurfaceCategory.SerpentineWave:  Candidate = CastSerpentineWaveRay(Surface, LocalOrigin, LocalDirection, MaximumTravel); break;
+            case SurfaceCategory.CollapseDeck:    Candidate = CastCollapseDeckRay(Surface, LocalOrigin, LocalDirection, MaximumTravel); break;
         }
         if (Candidate && (!Closest || Candidate.Travel < Closest.Travel))
         {
@@ -1675,6 +1802,41 @@ function QuerySurfacePointLocal(Surface, LocalPoint, Radius)
         const SignedOffset = (LocalPoint[2] - Profile.Height) * NormalLocal[2];
         return QuerySlabPenetration(SignedOffset, Surface.Thickness, Radius, NormalLocal);
     }
+    if (Surface.Category === SurfaceCategory.CollapseDeck)
+    {
+        if (LocalPoint[0] < -Radius || LocalPoint[0] > Surface.TotalLength + Radius || Math.abs(LocalPoint[1]) > Surface.HalfWidth + Radius)
+            return null;
+        const ClampedX = ClampScalar(LocalPoint[0], 0.0, Surface.TotalLength);
+        const Span = EvaluateCollapseDeckSpan(Surface, ClampedX, ClampScalar(LocalPoint[1], -Surface.HalfWidth, Surface.HalfWidth));
+        if (!Span || !Span.Supported)
+            return null;
+        const NormalLocal = NormalizeVector([-Span.SlopeX, -Span.SlopeY, 1.0]);
+        const SignedOffset = (LocalPoint[2] - Span.Height) * NormalLocal[2];
+        const SlabHit = QuerySlabPenetration(SignedOffset, Surface.Thickness, Radius, NormalLocal);
+        if (!SlabHit)
+            return null;
+        // 📝 Separating-axis ledge check against exposed fracture seams beside collapsed bays so falling hulls slide cleanly off ledges.
+        let Best = SlabHit;
+        const SpanEnd = Surface.UpLength + Surface.DeckLength;
+        if (ClampedX >= Surface.UpLength && ClampedX <= SpanEnd)
+        {
+            const RelX = ClampScalar(ClampedX - Surface.UpLength, 0.0, Surface.DeckLength - 1.0e-5);
+            const BayIndex = Math.min(Surface.BayCount - 1, Math.max(0, Math.floor(RelX / Surface.BayLength)));
+            if (BayIndex > 0 && !Surface.BayIntact[BayIndex - 1])
+            {
+                const RearLedgeDepth = (RelX - BayIndex * Surface.BayLength) + Radius;
+                if (RearLedgeDepth > 0.0 && RearLedgeDepth < Best.Depth)
+                    Best = { LocalNormal: [-1.0, 0.0, 0.0], Depth: RearLedgeDepth };
+            }
+            if (BayIndex + 1 < Surface.BayCount && !Surface.BayIntact[BayIndex + 1])
+            {
+                const FrontLedgeDepth = ((BayIndex + 1) * Surface.BayLength - RelX) + Radius;
+                if (FrontLedgeDepth > 0.0 && FrontLedgeDepth < Best.Depth)
+                    Best = { LocalNormal: [1.0, 0.0, 0.0], Depth: FrontLedgeDepth };
+            }
+        }
+        return Best;
+    }
     return null;
 }
 
@@ -1738,6 +1900,8 @@ export function ConstructSurfaceSegmentDescriptors(Surfaces)
             AppendSubmergedTrenchSegments(Surface, Shapes, Placements);
         else if (Surface.Category === SurfaceCategory.SerpentineWave)
             AppendSerpentineWaveSegments(Surface, Shapes, Placements);
+        else if (Surface.Category === SurfaceCategory.CollapseDeck)
+            AppendCollapseDeckSegments(Surface, Shapes, Placements);
     }
 
     return { Shapes, Placements, TerrainHulls };
@@ -1940,7 +2104,7 @@ function AppendFullPipeSegments(Surface, Shapes, Placements, TerrainHulls)
         return ConstructClosedGridSlabFacets(TopGrid, BottomGrid, TopNormals, TopFamilies,
                                              CourseMaterial.BarrierConcrete, CourseMaterial.BarrierConcrete);
     };
-    Shapes[SkirtKey] = { Emit: BuildSkirtSegment, Voxel: 0.15, Cards: 8 };
+    Shapes[SkirtKey] = { Emit: BuildSkirtSegment, Voxel: 0.24, Cards: 8 };
 
     for (const Side of [1.0, -1.0])
     {
@@ -2092,7 +2256,7 @@ function AppendTransitionRampSegments(Surface, Shapes, Placements, TerrainHulls)
             return ConstructClosedGridSlabFacets(TopGrid, BottomGrid, TopNormals, TopFamilies,
                                                  CourseMaterial.SteelDark, CourseMaterial.TunnelConcrete);
         },
-        Voxel: 0.12,
+        Voxel: 0.18,
         Cards: 10
     };
 
@@ -2246,7 +2410,7 @@ function AppendWaveDeckSegments(Surface, Shapes, Placements)
                                                               CourseMaterial.SteelDark, CourseMaterial.TunnelConcrete);
         Shapes[ShapeKey] = {
             Emit:  () => TransformFacetsToLocalFrame(CanonicalFacets, CanonicalAnchor, CanonicalQuat),
-            Voxel: 0.24,
+            Voxel: 0.34,
             Cards: 8
         };
 
@@ -2548,25 +2712,25 @@ function AppendHeartlineRibbonSegments(Surface, Shapes, Placements)
 
 function AppendSubmergedTrenchSegments(Surface, Shapes, Placements)
 {
-    const StopsX = [
-        0.0,
-        0.5 * Surface.DownLength,
-        Surface.DownLength,
-        Surface.DownLength + 0.5 * Surface.TunnelLength,
-        Surface.DownLength + Surface.TunnelLength,
-        Surface.DownLength + Surface.TunnelLength + 0.5 * Surface.UpLength,
-        Surface.TotalLength
-    ];
+    const GalleryRepeat = Math.max(1, Math.round(Surface.TunnelLength / (Surface.GalleryTileLength || Surface.TunnelLength)));
+    const GalleryFloorTiles = GalleryRepeat * 2;
+    const StopsX = [0.0, 0.5 * Surface.DownLength, Surface.DownLength];
+    for (let Tile = 1; Tile <= GalleryFloorTiles; ++Tile)
+        StopsX.push(Surface.DownLength + (Surface.TunnelLength * Tile) / GalleryFloorTiles);
+    StopsX.push(Surface.DownLength + Surface.TunnelLength + 0.5 * Surface.UpLength, Surface.TotalLength);
+
     const SubSlices = 4;
     const LateralStops = [-Surface.HalfWidth, -(Surface.HalfWidth - Surface.KerbWidth), -0.65, 0.65,
                           Surface.HalfWidth - Surface.KerbWidth, Surface.HalfWidth];
 
     // ① Sub-grade C² dive ramp -> subterranean floor -> daylight ascent ramp (180° Z-symmetry when UpLength === DownLength)
     const SymmetricEnds = Math.abs(Surface.DownLength - Surface.UpLength) < 1.0e-4;
+    const ExitStartSeg = 2 + GalleryFloorTiles;
     for (let Seg = 0; Seg < StopsX.length - 1; ++Seg)
     {
-        const IsMirror = SymmetricEnds && Seg >= 4;
-        const CanonicalSeg = IsMirror ? (5 - Seg) : (Seg === 3 ? 2 : Seg);
+        const IsMirror = SymmetricEnds && Seg >= ExitStartSeg;
+        const IsGalleryFloor = Seg >= 2 && Seg < ExitStartSeg;
+        const CanonicalSeg = IsMirror ? (StopsX.length - 2 - Seg) : (IsGalleryFloor ? 2 : Seg);
         const X0 = StopsX[Seg], X1 = StopsX[Seg + 1], XMid = 0.5 * (X0 + X1);
         const MidFloor = EvaluateSubmergedTrenchFloor(Surface, XMid);
         const Sign = IsMirror ? -1.0 : 1.0;
@@ -2578,7 +2742,7 @@ function AppendSubmergedTrenchSegments(Surface, Shapes, Placements)
             ProjectDirectionFromSurface(Surface, LocalBasis.AxisZ)
         );
         const ShapeKey = `${Surface.ShapePrefix}_Floor_${CanonicalSeg}`;
-        if (!IsMirror && Seg !== 3 && !Shapes[ShapeKey])
+        if (!IsMirror && (!IsGalleryFloor || Seg === 2) && !Shapes[ShapeKey])
         {
             const TopGrid = [], BottomGrid = [], TopNormals = [], TopFamilies = [];
             for (let StepU = 0; StepU <= SubSlices; ++StepU)
@@ -2630,19 +2794,21 @@ function AppendSubmergedTrenchSegments(Surface, Shapes, Placements)
         });
     }
 
-    // ② Left & right concrete subterranean retaining walls (180° Z-symmetry reuses Wall_0 for Wall_2)
-    const WallSpans = [
-        [1.2, Surface.DownLength],
-        [Surface.DownLength, Surface.DownLength + Surface.TunnelLength],
-        [Surface.DownLength + Surface.TunnelLength, Surface.TotalLength - 1.2]
-    ];
+    // ② Left & right concrete subterranean retaining walls (180° Z-symmetry reuses Wall_0 for exit wall; GalleryRepeat tiles middle wall)
+    const WallSpans = [[1.2, Surface.DownLength, 0, false]];
+    for (let Tile = 0; Tile < GalleryRepeat; ++Tile)
+    {
+        const GX0 = Surface.DownLength + (Surface.TunnelLength * Tile) / GalleryRepeat;
+        const GX1 = Surface.DownLength + (Surface.TunnelLength * (Tile + 1)) / GalleryRepeat;
+        WallSpans.push([GX0, GX1, 1, false]);
+    }
+    WallSpans.push([Surface.DownLength + Surface.TunnelLength, Surface.TotalLength - 1.2, SymmetricEnds ? 0 : 2, SymmetricEnds]);
+
     for (let SpanIndex = 0; SpanIndex < WallSpans.length; ++SpanIndex)
     {
-        const IsMirrorWall = SymmetricEnds && SpanIndex === 2;
-        const CanonicalSpan = IsMirrorWall ? 0 : SpanIndex;
-        const [WX0, WX1] = WallSpans[SpanIndex];
+        const [WX0, WX1, CanonicalSpan, IsMirrorWall] = WallSpans[SpanIndex];
         const WXMid = 0.5 * (WX0 + WX1);
-        const FlushMidWall = SpanIndex === 1 && Surface.Roofed && Surface.GroundDeckOverRoof;
+        const FlushMidWall = CanonicalSpan === 1 && Surface.Roofed && Surface.GroundDeckOverRoof;
         const SpanTopZ = FlushMidWall ? Surface.RoofTopZ : Surface.WallTopZ;
         const WallShapeKey = FlushMidWall ? `${Surface.ShapePrefix}_RoofWall_1` : `${Surface.ShapePrefix}_Wall_${CanonicalSpan}`;
         const Sign = IsMirrorWall ? -1.0 : 1.0;
@@ -2678,7 +2844,7 @@ function AppendSubmergedTrenchSegments(Surface, Shapes, Placements)
                     BottomGrid.push(RowBottom);
                     TopNormals.push(RowNormals);
                     if (StepU < SubSlices)
-                        TopFamilies.push([SpanIndex === 1 ? CourseMaterial.WallCobalt : CourseMaterial.BarrierConcrete]);
+                        TopFamilies.push([CanonicalSpan === 1 ? CourseMaterial.WallCobalt : CourseMaterial.BarrierConcrete]);
                 }
                 const WorldFacets = ConstructClosedGridSlabFacets(TopGrid, BottomGrid, TopNormals, TopFamilies,
                                                                   CourseMaterial.TunnelConcrete, CourseMaterial.TunnelConcrete);
@@ -2700,64 +2866,68 @@ function AppendSubmergedTrenchSegments(Surface, Shapes, Placements)
         }
     }
 
-    // ③ Subterranean tunnel roof ceiling deck + glowing portal headers
+    // ③ Subterranean tunnel roof ceiling deck + glowing portal headers (tiled across GalleryRepeat)
     if (Surface.Roofed)
     {
-        const RX0 = Surface.DownLength, RX1 = Surface.DownLength + Surface.TunnelLength;
-        const RXMid = 0.5 * (RX0 + RX1);
         const SpanY = Surface.HalfWidth + Surface.WallThickness;
         const RoofKey = `${Surface.ShapePrefix}_Roof`;
-        const RoofOrigin = ProjectPointFromSurface(Surface, [RXMid, 0.0, 0.5 * (Surface.RoofTopZ + Surface.RoofBottomZ)]);
         const RoofQuat = ConstructBasisQuaternion(
             ProjectDirectionFromSurface(Surface, [1.0, 0.0, 0.0]),
             ProjectDirectionFromSurface(Surface, [0.0, 1.0, 0.0]),
             ProjectDirectionFromSurface(Surface, [0.0, 0.0, 1.0])
         );
-        if (!Shapes[RoofKey])
+        for (let Tile = 0; Tile < GalleryRepeat; ++Tile)
         {
-            const RoofStopsY = [-SpanY, -SpanY + 0.8, -1.2, 1.2, SpanY - 0.8, SpanY];
-            const TopGrid = [], BottomGrid = [], TopNormals = [], TopFamilies = [];
-            for (let StepU = 0; StepU <= 2; ++StepU)
+            const RX0 = Surface.DownLength + (Surface.TunnelLength * Tile) / GalleryRepeat;
+            const RX1 = Surface.DownLength + (Surface.TunnelLength * (Tile + 1)) / GalleryRepeat;
+            const RXMid = 0.5 * (RX0 + RX1);
+            const RoofOrigin = ProjectPointFromSurface(Surface, [RXMid, 0.0, 0.5 * (Surface.RoofTopZ + Surface.RoofBottomZ)]);
+            if (!Shapes[RoofKey])
             {
-                const X = RX0 + (RX1 - RX0) * (StepU / 2);
-                const RowTop = [], RowBottom = [], RowNormals = [], RowFamilies = [];
-                for (let StepV = 0; StepV < RoofStopsY.length; ++StepV)
+                const RoofStopsY = [-SpanY, -SpanY + 0.8, -1.2, 1.2, SpanY - 0.8, SpanY];
+                const TopGrid = [], BottomGrid = [], TopNormals = [], TopFamilies = [];
+                for (let StepU = 0; StepU <= 2; ++StepU)
                 {
-                    const Y = RoofStopsY[StepV];
-                    RowTop.push(ProjectPointFromSurface(Surface, [X, Y, Surface.RoofTopZ]));
-                    RowBottom.push(ProjectPointFromSurface(Surface, [X, Y, Surface.RoofBottomZ]));
-                    RowNormals.push([0.0, 0.0, 1.0]);
-                    if (StepV < RoofStopsY.length - 1)
+                    const X = RX0 + (RX1 - RX0) * (StepU / 2);
+                    const RowTop = [], RowBottom = [], RowNormals = [], RowFamilies = [];
+                    for (let StepV = 0; StepV < RoofStopsY.length; ++StepV)
                     {
-                        const Edge = StepV === 0 || StepV === RoofStopsY.length - 2;
-                        const Centre = StepV === 2;
-                        RowFamilies.push(Edge ? CourseMaterial.PaintWhite
-                                              : (Centre ? CourseMaterial.PaintYellow : CourseMaterial.Asphalt));
+                        const Y = RoofStopsY[StepV];
+                        RowTop.push(ProjectPointFromSurface(Surface, [X, Y, Surface.RoofTopZ]));
+                        RowBottom.push(ProjectPointFromSurface(Surface, [X, Y, Surface.RoofBottomZ]));
+                        RowNormals.push([0.0, 0.0, 1.0]);
+                        if (StepV < RoofStopsY.length - 1)
+                        {
+                            const Edge = StepV === 0 || StepV === RoofStopsY.length - 2;
+                            const Centre = StepV === 2;
+                            RowFamilies.push(Edge ? CourseMaterial.PaintWhite
+                                                  : (Centre ? CourseMaterial.PaintYellow : CourseMaterial.Asphalt));
+                        }
                     }
+                    TopGrid.push(RowTop);
+                    BottomGrid.push(RowBottom);
+                    TopNormals.push(RowNormals);
+                    if (StepU < 2)
+                        TopFamilies.push(RowFamilies);
                 }
-                TopGrid.push(RowTop);
-                BottomGrid.push(RowBottom);
-                TopNormals.push(RowNormals);
-                if (StepU < 2)
-                    TopFamilies.push(RowFamilies);
+                const WorldFacets = ConstructClosedGridSlabFacets(TopGrid, BottomGrid, TopNormals, TopFamilies,
+                                                                  CourseMaterial.WallCobalt, CourseMaterial.TunnelConcrete);
+                Shapes[RoofKey] = {
+                    Emit:  () => TransformFacetsToLocalFrame(WorldFacets, RoofOrigin, RoofQuat),
+                    Voxel: 0.24,
+                    Cards: 8
+                };
             }
-            const WorldFacets = ConstructClosedGridSlabFacets(TopGrid, BottomGrid, TopNormals, TopFamilies,
-                                                              CourseMaterial.WallCobalt, CourseMaterial.TunnelConcrete);
-            Shapes[RoofKey] = {
-                Emit:  () => TransformFacetsToLocalFrame(WorldFacets, RoofOrigin, RoofQuat),
-                Voxel: 0.24,
-                Cards: 8
-            };
+            Placements.push({
+                Shape:       RoofKey,
+                Name:        `${Surface.Key} subway roof ${Tile}`,
+                Position:    RoofOrigin,
+                Orientation: RoofQuat,
+                Yaw:         0.0,
+                Material:    -1,
+                Collider:    false
+            });
         }
-        Placements.push({
-            Shape:       RoofKey,
-            Name:        `${Surface.Key} subway roof`,
-            Position:    RoofOrigin,
-            Orientation: RoofQuat,
-            Yaw:         0.0,
-            Material:    -1,
-            Collider:    false
-        });
     }
 }
 
@@ -2829,6 +2999,92 @@ function AppendSerpentineWaveSegments(Surface, Shapes, Placements)
         Placements.push({
             Shape:       ShapeKey,
             Name:        `${Surface.Key} serpentine ${Seg}`,
+            Position:    FrameOrigin,
+            Orientation: FrameQuaternion,
+            Yaw:         0.0,
+            Material:    -1,
+            Collider:    false
+        });
+    }
+}
+
+// 📝 Emits solid approach & exit ramps for elevated CollapseDecks while leaving the fracturing middle span to CollapseSequence.
+function AppendCollapseDeckSegments(Surface, Shapes, Placements)
+{
+    if (Surface.UpLength <= 1.0e-4 && Surface.DownLength <= 1.0e-4)
+        return;
+    const SubSlices = 4;
+    const LateralStops = [-Surface.HalfWidth, -(Surface.HalfWidth - Surface.KerbWidth), -0.65, 0.65,
+                          Surface.HalfWidth - Surface.KerbWidth, Surface.HalfWidth];
+    const SymmetricEnds = Math.abs(Surface.UpLength - Surface.DownLength) < 1.0e-4;
+    const RampSpans = [];
+    if (Surface.UpLength > 1.0e-4)
+    {
+        RampSpans.push([0.0, 0.5 * Surface.UpLength, 0, false]);
+        RampSpans.push([0.5 * Surface.UpLength, Surface.UpLength, 1, false]);
+    }
+    if (Surface.DownLength > 1.0e-4)
+    {
+        const ExitStart = Surface.UpLength + Surface.DeckLength;
+        RampSpans.push([ExitStart, ExitStart + 0.5 * Surface.DownLength, SymmetricEnds ? 1 : 2, SymmetricEnds]);
+        RampSpans.push([ExitStart + 0.5 * Surface.DownLength, Surface.TotalLength, SymmetricEnds ? 0 : 3, SymmetricEnds]);
+    }
+    for (let Index = 0; Index < RampSpans.length; ++Index)
+    {
+        const [X0, X1, CanonicalSeg, IsMirror] = RampSpans[Index];
+        const Sign = IsMirror ? -1.0 : 1.0;
+        const XMid = 0.5 * (X0 + X1);
+        const MidProfile = EvaluateTabletopProfile(Surface, XMid, 0.0);
+        const LocalBasis = BuildOrthonormalTangentBasis([Sign, 0.0, Sign * MidProfile.SlopeX], [0.0, Sign, 0.0]);
+        const FrameOrigin = ProjectPointFromSurface(Surface, [XMid, 0.0, MidProfile.Height]);
+        const FrameQuaternion = ConstructBasisQuaternion(
+            ProjectDirectionFromSurface(Surface, LocalBasis.AxisX),
+            ProjectDirectionFromSurface(Surface, LocalBasis.AxisY),
+            ProjectDirectionFromSurface(Surface, LocalBasis.AxisZ)
+        );
+        const ShapeKey = `${Surface.ShapePrefix}_Sec_${CanonicalSeg}`;
+        if (!IsMirror && !Shapes[ShapeKey])
+        {
+            const TopGrid = [], BottomGrid = [], TopNormals = [], TopFamilies = [];
+            for (let StepU = 0; StepU <= SubSlices; ++StepU)
+            {
+                const X = X0 + (X1 - X0) * (StepU / SubSlices);
+                const RowTop = [], RowBottom = [], RowNormals = [], RowFamilies = [];
+                for (let StepV = 0; StepV < LateralStops.length; ++StepV)
+                {
+                    const Y = LateralStops[StepV];
+                    const Profile = EvaluateTabletopProfile(Surface, X, Y);
+                    const NormalWorld = ProjectDirectionFromSurface(Surface, NormalizeVector([-Profile.SlopeX, -Profile.SlopeY, 1.0]));
+                    const TopWorld = ProjectPointFromSurface(Surface, [X, Y, Profile.Height]);
+                    const BotWorld = MultiplyAddVector(TopWorld, NormalWorld, -Surface.Thickness);
+                    RowTop.push(TopWorld);
+                    RowBottom.push(BotWorld);
+                    RowNormals.push(NormalWorld);
+                    if (StepV < LateralStops.length - 1)
+                    {
+                        const Edge = StepV === 0 || StepV === LateralStops.length - 2;
+                        const Centre = StepV === 2;
+                        RowFamilies.push(Edge ? ((CanonicalSeg & 1) ? CourseMaterial.PaintWhite : CourseMaterial.KerbRed)
+                                              : (Centre ? Surface.AccentMaterial : CourseMaterial.ApronConcrete));
+                    }
+                }
+                TopGrid.push(RowTop);
+                BottomGrid.push(RowBottom);
+                TopNormals.push(RowNormals);
+                if (StepU < SubSlices)
+                    TopFamilies.push(RowFamilies);
+            }
+            const WorldFacets = ConstructClosedGridSlabFacets(TopGrid, BottomGrid, TopNormals, TopFamilies,
+                                                              CourseMaterial.SteelDark, CourseMaterial.TunnelConcrete);
+            Shapes[ShapeKey] = {
+                Emit:  () => TransformFacetsToLocalFrame(WorldFacets, FrameOrigin, FrameQuaternion),
+                Voxel: 0.38,
+                Cards: 8
+            };
+        }
+        Placements.push({
+            Shape:       ShapeKey,
+            Name:        `${Surface.Key} approach ${Index}`,
             Position:    FrameOrigin,
             Orientation: FrameQuaternion,
             Yaw:         0.0,

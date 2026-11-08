@@ -24,7 +24,7 @@ struct DistanceRecord
     FrameIndex            : u32,     // [-]  stamped into every rewritten brick
     BricksPerAxis         : u32,     // [-]  Resolution / BrickEdge
     CutoutCount           : u32,     // [-]  subterranean ground excavation boxes [minX, minY, maxX, maxY]
-    Cutouts               : array<vec4f, 4>,
+    Cutouts               : array<vec4f, 8>,
 }
 
 const BrickEdge      : u32 = 8u;

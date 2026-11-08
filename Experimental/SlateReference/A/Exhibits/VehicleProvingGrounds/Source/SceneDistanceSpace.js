@@ -60,7 +60,7 @@ export class SceneDistanceSpace
         const BrickSlots = 4 * this.BricksPerAxis ** 3;
         this.BrickRecords  = this.Exchange.ConstructRecords(BrickSlots * 16, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST, "Invalidated bricks");
         this.EpochRecords  = this.Exchange.ConstructRecords(BrickSlots * 4, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST, "Brick stamps");
-        this.UniformRecords = this.Exchange.ConstructRecords(224, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST, "Distance record");
+        this.UniformRecords = this.Exchange.ConstructRecords(288, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST, "Distance record");
         // 📝 The union's active list: occupant indices, at most one per identity.
         this.ListRecords = this.Exchange.ConstructRecords(IdentityCeiling * 4, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST, "Distance list");
         Device.queue.writeBuffer(this.EpochRecords, 0, new Uint32Array(BrickSlots).fill(0xFFFFFFFF));
@@ -161,7 +161,7 @@ export class SceneDistanceSpace
 
     EncodeDistanceRecord(DistanceOccupantCount, FrameIndex)
     {
-        const Bytes = new ArrayBuffer(224);
+        const Bytes = new ArrayBuffer(288);
         const Integers = new Int32Array(Bytes);
         const Unsigned = new Uint32Array(Bytes);
         const Scalars = new Float32Array(Bytes);
@@ -179,7 +179,7 @@ export class SceneDistanceSpace
             Scalars[Offset + 5] = Clip.Band;
             Scalars[Offset + 6] = 1.0 / (Resolution * Clip.VoxelExtent);
         }
-        const Cutouts = (this.Cutouts || []).slice(0, 4);
+        const Cutouts = (this.Cutouts || []).slice(0, 8);
         Unsigned[32] = this.Configuration.ClipCount;
         Unsigned[33] = DistanceOccupantCount;
         Scalars[34]  = 0.0;

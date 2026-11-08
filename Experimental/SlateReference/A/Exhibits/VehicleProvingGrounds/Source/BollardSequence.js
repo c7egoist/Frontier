@@ -175,7 +175,11 @@ export class BollardSequence
             this.ApplyTransforms(Step, false);
 
         if (ObstaclesChanged && this.Host.Vehicle)
+        {
             this.Host.Vehicle.AssignObstacles(this.Host.Scene.QueryObstacleBounds());
+            if (this.Host.Trams)
+                this.Host.Trams.RegisterDynamicObstacles(this.Host.Vehicle.Obstacles);
+        }
     }
 
     ApplyTransforms(_Step, Initial)

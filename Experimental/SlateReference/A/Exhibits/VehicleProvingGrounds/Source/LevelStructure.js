@@ -9,6 +9,7 @@ import { CourseConstants, KerbConstants, SpawnPoint, EmitQuad, EmitBoxFacets, Em
 import { InversionArenaBounds, InversionArenaTracks, InversionArenaSurfaces, InversionArenaShapes, InversionArenaTerrainHulls,
          InversionArenaSpawn, InversionArenaZones, InversionArenaDrills, InversionClearZones, InversionPhysicsCutouts,
          InversionDistanceCutouts, EmitInversionGroundFacets, ResolveInversionPlacements, ResolveInversionBollards,
+         ResolveInversionCollapseSpans, ResolveInversionTrams,
          ResolveInversionCones, ResolveInversionBreakables } from "./InversionArenaStructure.js";
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -459,7 +460,7 @@ export const LevelClearZones = Object.freeze([
 //------------------------------------------------------------------------------------------------------------------------
 
 export const LevelCatalog = Object.freeze([
-    { Key: "inversion", Title: "Inversion Arena", Subtitle: "Tracks A/B/C: Grand Prix loop, underground split tunnels & kinetic bollards" },
+    { Key: "inversion", Title: "Inversion Arena", Subtitle: "Tracks A–F: Stunt loops, collapsing bridge/road, 3-lane subway & trams/trains" },
     { Key: "proving",   Title: "Proving Grounds", Subtitle: "Skidpad, jump wedge, smash alley, tunnel & slalom" }
 ]);
 
@@ -500,6 +501,8 @@ export function ResolveLevelDescriptor(LevelKey = "proving")
             Shapes:          ResolveLevelShapes("inversion"),
             Placements:      ResolveInversionPlacements,
             Bollards:        ResolveInversionBollards,
+            CollapseSpans:   ResolveInversionCollapseSpans,
+            Trams:           ResolveInversionTrams,
             Cones:           ResolveInversionCones,
             Breakables:      ResolveInversionBreakables,
             EmitGround:      EmitInversionGroundFacets
