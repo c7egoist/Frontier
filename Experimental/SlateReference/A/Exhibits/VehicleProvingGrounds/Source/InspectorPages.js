@@ -183,6 +183,21 @@ export function ConstructEntities(Host)
             Build: (C, B) => BuildDrones(Host, C, B)
         });
     }
+    if (Host.ServiceStations)
+    {
+        Entities.push({
+            Id: "service", Group: "Level", Name: "Factory & Auto-Fuel / EV", Type: "Service robotics", Glyph: "Zap", Colour: Accent.Level,
+            Description: "Drive-through megafactory + automatic butler robot & drone refuel / 800V EV charging stations",
+            Meta: () =>
+            {
+                const S = Host.ServiceStations.QuerySummary();
+                return S.ActiveKind ? S.ActiveState.toUpperCase() : `F:${S.FuelPercent}% E:${S.BatteryPercent}%`;
+            },
+            State: () => (Host.ServiceStations.QuerySummary().ActiveKind ? "warm" : (Host.ServiceStations.Enabled ? "live" : "")),
+            Toggle: { Read: () => Host.ServiceStations.Enabled, Write: (On) => { Host.ServiceStations.Enabled = On; } },
+            Build: (C, B) => BuildServiceStations(Host, C, B)
+        });
+    }
     return Entities;
 }
 
@@ -954,7 +969,7 @@ function BuildLevel(Host, C, Body)
     const Zones = C.Card(Body, ActiveTitle, "Map", { Accent: Accent.Level, Index: 3, Subtitle: `Teleport the car (keys 1–${MaxKey})` });
     if (Host.LevelKey === "inversion")
     {
-        C.Muted(Zones, "[Track A] Original 1.05 km Grand Prix stunt circuit (preserved intact). [Track B] Split Over/Under Tunnel + Sky-Bridge & Linear Bollards. [Track C] 84 m Travelling-Wave Bollards & Viaduct Canyon. [Track D] Rear-to-front Collapsing Sky-Bridge (+5 m) & Collapsing Sinkhole Road (0 m) with session-unique movie cracks & sand effects. [Track E] 3-Lane Center-Portal Subway ([road][tunnel down][road] → [road][road][road] → [road][tunnel up][road]). [Track F] Dedicated Streetcar Trams & Express Commuter Trains.");
+        C.Muted(Zones, "[Track A] Original 1.05 km Grand Prix stunt circuit (preserved intact). [Track B] Split Over/Under Tunnel + Sky-Bridge & Linear Bollards. [Track C] 84 m Travelling-Wave Bollards & Viaduct Canyon. [Track D] Rear-to-front Collapsing Sky-Bridge (+5 m) & Collapsing Sinkhole Road (0 m) with session-unique movie cracks & sand effects. [Track E] 3-Lane Center-Portal Subway. [Track F] Streetcar Trams & Express Commuter Trains. [Track G] Underground Construction Site (Thru-Trench & Dead-End Pit). [Track H] Drive-Through Megafactory + Automatic Fuel & 800V EV Charging Stations.");
     }
     else
     {
@@ -1044,6 +1059,34 @@ function BuildDrones(Host, C, Body)
     const Row = C.ActionRow(Card);
     C.Button(Row, "Jump · Construction Site", "AlertTriangle", () => Host.TeleportVehicle({ Name: "Track G · Thru Trench", Position: [-108.0, -386.0], Yaw: 0.0 }));
     C.Button(Row, "Jump · Dead-End Pit", "Flag", () => Host.TeleportVehicle({ Name: "Track G · Dead-End Pit", Position: [-108.0, -418.0], Yaw: 0.0 }));
+}
+
+function BuildServiceStations(Host, C, Body)
+{
+    const Service = Host.ServiceStations;
+    const Card = C.Card(Body, "Automatic Fuel, 800V EV & Megafactory", "Zap",
+                        { Accent: Accent.Level, Index: 1, Subtitle: "Wheeled butler robot + nozzle arm + drone · Web Audio" });
+    C.Muted(Card, "Pull into the crimson Octane-100 Fuel Bay or emerald/cobalt 800V Supercharger Bay on Track H and stop: a wheeled butler robot rolls out from dock, extends its articulated nozzle arm onto your rear fuel/charge port while a helper drone scans overhead, fills to 100% with synthesized audio, and retracts. Then drive straight through the Megafactory Hall past stamping presses, conveyors, storage racks, silos & smashable crates!");
+    C.Stats(Card, [
+        ["Octane-100 tank", () => `${Service.QuerySummary().FuelPercent}%`],
+        ["800V EV battery", () => `${Service.QuerySummary().BatteryPercent}%`],
+        ["Active bay",      () => Service.QuerySummary().ActiveName || "STANDBY"],
+        ["Butler state",    () => Service.QuerySummary().ActiveState.toUpperCase()],
+        ["Completed fills", () => Service.QuerySummary().CompletedServices]
+    ]);
+    Toggle(C, Card, Service.Audio, "Enabled", "Procedural station & robot audio", () => Service.Audio.SetEnabled(Service.Audio.Enabled));
+    Slider(C, Card, Service.Audio, "MasterVolume", "Station audio volume", 0.0, 1.0, 0.05, "", 2);
+    const Row1 = C.ActionRow(Card);
+    C.Button(Row1, "Park in Auto-Fuel Bay", "Compass", () => Host.TeleportVehicle({ Name: "Track H · Auto-Fuel Bay", Position: [-56.0, 392.0], Yaw: 0.0 }));
+    C.Button(Row1, "Park in Auto-EV Bay",   "Zap",     () => Host.TeleportVehicle({ Name: "Track H · Auto-EV Bay",   Position: [-56.0, 420.0], Yaw: 0.0 }));
+    const Row2 = C.ActionRow(Card);
+    C.Button(Row2, "Jump · Factory Hall",   "Boxes",   () => Host.TeleportVehicle({ Name: "Track H · Factory Hall",  Position: [ -4.0, 408.0], Yaw: 0.0 }));
+    C.Button(Row2, "Drain to 25%",          "RotateCcw", () =>
+    {
+        Service.FuelLevel = 0.25;
+        Service.BatteryLevel = 0.25;
+        Host.Shell?.Announce("Fuel tank & 800V battery set to 25% for station test");
+    });
 }
 
 //------------------------------------------------------------------------------------------------------------------------

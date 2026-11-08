@@ -280,6 +280,28 @@ class IlluminationHost
                     Phase: Index * 0.7
                 });
             }
+            else if (P.Shape === "StationCanopyLamp")
+            {
+                this.StreetLampPoles.push({
+                    X: P.Position[0],
+                    Y: P.Position[1],
+                    Z: P.Position[2] - 0.12,
+                    Colour: P.Name.includes("EV") ? [0.76, 0.94, 1.0] : [1.0, 0.92, 0.80],
+                    Intensity: 68.0,
+                    Reach: 28.0
+                });
+            }
+            else if (P.Shape === "FactoryHighBayLamp")
+            {
+                this.StreetLampPoles.push({
+                    X: P.Position[0],
+                    Y: P.Position[1],
+                    Z: P.Position[2] - 0.16,
+                    Colour: [0.95, 0.96, 1.0],
+                    Intensity: 74.0,
+                    Reach: 34.0
+                });
+            }
         }
         this.Constants = {
             MaximumTraversalSteps: { Type: "u32", Value: this.Grade.Steps },
@@ -348,6 +370,9 @@ class IlluminationHost
         this.Drones = this.Scene.Drones;
         if (this.Drones)
             this.Drones.RegisterDynamicObstacles(this.Vehicle.Obstacles);
+        this.ServiceStations = this.Scene.ServiceStations;
+        if (this.ServiceStations)
+            this.ServiceStations.OnAnnounce = (Message) => this.Shell?.Announce(Message);
         this.ReportProgress("Baking fracture patterns", 0.72);
         this.Fracture = new FractureSequence(this);
 
@@ -560,6 +585,21 @@ class IlluminationHost
             this.Scene.RetainOccupantTransform(Wheel);
         if (this.Collapse)
             this.ResetCollapseDecks();
+        if (this.ServiceStations)
+            this.ResetServiceStations(false);
+    }
+
+    ResetServiceStations(ResetLevels = false)
+    {
+        if (!this.ServiceStations)
+            return;
+        this.ServiceStations.Reset(ResetLevels);
+        if (this.Scene.ServiceBlock && this.Scene.ServiceBlock.Count > 0 && this.OccupantRecords && this.Volumes)
+        {
+            const Block = this.Scene.ServiceBlock;
+            const Scalars = this.Scene.EncodeOccupantRange(this.Volumes, Block.First, Block.Count);
+            this.Exchange.Device.queue.writeBuffer(this.OccupantRecords, Block.First * OccupantStride, Scalars);
+        }
     }
 
     UploadCollapseOccupants()
@@ -738,6 +778,7 @@ class IlluminationHost
         if (this.Canvas.style) this.Canvas.style.touchAction = "none";
         window.addEventListener("keydown", (Event) =>
         {
+            this.ServiceStations?.Audio?.Unlock();
             if (Event.target instanceof HTMLInputElement || Event.target instanceof HTMLSelectElement)
                 return;
             if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "F8"].includes(Event.code))
@@ -803,6 +844,7 @@ class IlluminationHost
         };
         this.Canvas.addEventListener("pointerdown", (Event) =>
         {
+            this.ServiceStations?.Audio?.Unlock();
             Dragging = true;
             LastX = Event.clientX;
             LastY = Event.clientY;
@@ -959,6 +1001,8 @@ class IlluminationHost
             }
         if (this.Collapse)
             this.ResetCollapseDecks();
+        if (this.ServiceStations)
+            this.ResetServiceStations(true);
         this.Shell.Announce(`Arena reset — ${Cones} cones, ${Props} props`);
     }
 
@@ -1239,6 +1283,9 @@ class IlluminationHost
         const DronesMoved = this.Drones
             ? this.Drones.Advance(this.Vehicle, Step)
             : false;
+        const ServiceMoved = this.ServiceStations
+            ? this.ServiceStations.Advance(this.Vehicle, Step, this.Sparks)
+            : false;
         this.Stress.Advance(Step);
         this.Effects.Advance(Step);
         this.Training.Advance(Step);
@@ -1311,6 +1358,12 @@ class IlluminationHost
             const DroneBlock = this.Scene.DroneBlock;
             const DroneScalars = this.Scene.EncodeOccupantRange(this.Volumes, DroneBlock.First, DroneBlock.Count);
             Device.queue.writeBuffer(this.OccupantRecords, DroneBlock.First * OccupantStride, DroneScalars);
+        }
+        if (ServiceMoved && this.Scene.ServiceBlock && this.Scene.ServiceBlock.Count > 0)
+        {
+            const ServiceBlock = this.Scene.ServiceBlock;
+            const ServiceScalars = this.Scene.EncodeOccupantRange(this.Volumes, ServiceBlock.First, ServiceBlock.Count);
+            Device.queue.writeBuffer(this.OccupantRecords, ServiceBlock.First * OccupantStride, ServiceScalars);
         }
 
         if (this.Lighting && this.LightRecords)

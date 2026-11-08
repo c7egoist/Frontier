@@ -18,6 +18,10 @@ let MinimumThreeLaneSubwayZ = 10.0;
 let MinimumConstructionTrenchZ = 10.0;
 let ConstructionTrenchExitedUp = false;
 let MinimumDeadEndPitZ = 10.0;
+let DeadEndBulkheadX = 999.0;
+let MaximumFactoryHallX = -150.0;
+let AutoFuelCompleted = false;
+let AutoEVCompleted = false;
 let MaximumTrackAX = -150.0;
 let InvertedWheelContacts = 0;
 let LinearStripOpened = false;
@@ -96,6 +100,26 @@ export default
             Host.TeleportVehicle({ Name: "Track G Dead-End Pit", Position: [-62.0, -418.0], Yaw: 0.0 }, true);
             Host.ScriptedInput = { Throttle: 0.85, Brake: 0.0, SteerAngle: 0.0, Handbrake: false, Reverse: false };
         }
+        // Phase 9a (Frame 2450): Park in Track H Automatic Octane-100 Fuel Station Bay -> Butler Robot + Nozzle + Drone Refuel!
+        else if (Frame === 2450)
+        {
+            if (Host.ServiceStations) Host.ServiceStations.FuelLevel = 0.25;
+            Host.TeleportVehicle({ Name: "Track H Auto-Fuel Bay", Position: [-56.0, 392.0], Yaw: 0.0 }, true);
+            Host.ScriptedInput = { Throttle: 0.0, Brake: 1.0, SteerAngle: 0.0, Handbrake: true, Reverse: false };
+        }
+        // Phase 9b (Frame 2840): Park in Track H Automatic 800V EV Station Bay -> Butler Robot + Nozzle + Drone Supercharge!
+        else if (Frame === 2840)
+        {
+            if (Host.ServiceStations) Host.ServiceStations.BatteryLevel = 0.25;
+            Host.TeleportVehicle({ Name: "Track H Auto-EV Bay", Position: [-56.0, 420.0], Yaw: 0.0 }, true);
+            Host.ScriptedInput = { Throttle: 0.0, Brake: 1.0, SteerAngle: 0.0, Handbrake: true, Reverse: false };
+        }
+        // Phase 9c (Frame 3230): Drive straight through Track H Industrial Megafactory Hall (West Portal X=12 -> East Portal X=124)!
+        else if (Frame === 3230)
+        {
+            Host.TeleportVehicle({ Name: "Track H Factory Hall", Position: [6.0, 408.0], Yaw: 0.0 }, true);
+            Host.ScriptedInput = { Throttle: 1.0, Brake: 0.0, SteerAngle: 0.0, Handbrake: false, Reverse: false };
+        }
 
         const VehicleUp = RotateVector(Host.Vehicle.Orientation, [0.0, 0.0, 1.0]);
         MinimumVehicleUpZ = Math.min(MinimumVehicleUpZ, VehicleUp[2]);
@@ -111,8 +135,18 @@ export default
             if (MinimumConstructionTrenchZ < -3.5 && Host.Vehicle.Position[0] > 54.0 && Host.Vehicle.Position[2] > 0.2)
                 ConstructionTrenchExitedUp = true;
         }
-        if (Frame >= 2095)
+        if (Frame >= 2095 && Frame < 2450)
+        {
             MinimumDeadEndPitZ = Math.min(MinimumDeadEndPitZ, Host.Vehicle.Position[2]);
+            if (Frame === 2449)
+                DeadEndBulkheadX = Host.Vehicle.Position[0];
+        }
+        if (Frame >= 2450 && Frame < 2840 && Host.ServiceStations?.QuerySummary().FuelPercent === 100)
+            AutoFuelCompleted = true;
+        if (Frame >= 2840 && Frame < 3230 && Host.ServiceStations?.QuerySummary().BatteryPercent === 100)
+            AutoEVCompleted = true;
+        if (Frame >= 3230)
+            MaximumFactoryHallX = Math.max(MaximumFactoryHallX, Host.Vehicle.Position[0]);
         if (Frame < 610)
             MaximumTrackAX = Math.max(MaximumTrackAX, Host.Vehicle.Position[0]);
         if (VehicleUp[2] < -0.75)
@@ -149,7 +183,7 @@ export default
     Report(Host)
     {
         assert.equal(Host.LevelKey, "inversion");
-        assert.equal(Host.LevelDescriptor.Tracks.length, 7);
+        assert.equal(Host.LevelDescriptor.Tracks.length, 8);
         assert.ok(MinimumVehicleUpZ < -0.85, `Expected Track A upside-down loop inversion, got minUpZ=${MinimumVehicleUpZ.toFixed(3)}`);
         assert.ok(MaximumAltitudeZ > 15.5, `Expected Track A loop apex > 15.5 m, got maxZ=${MaximumAltitudeZ.toFixed(2)}`);
         assert.ok(InvertedWheelContacts >= 2, `Expected >= 2 loaded wheels upside-down, got ${InvertedWheelContacts}`);
@@ -167,9 +201,13 @@ export default
         assert.notEqual(Host.Trams.Consists[0].Cars[0].WorldPosition[0], StartTramLeadX, "Expected Track F trams to advance along rails");
         assert.ok(MinimumConstructionTrenchZ < -3.8 && ConstructionTrenchExitedUp,
                   `Expected Track G Construction Through-Trench descent (${MinimumConstructionTrenchZ.toFixed(2)} m) AND surface exit`);
-        assert.ok(MinimumDeadEndPitZ < -3.8 && Host.Vehicle.Position[0] < 33.0,
-                  `Expected Track G Dead-End Pit descent (${MinimumDeadEndPitZ.toFixed(2)} m) & bulkhead stop at X<=33 m`);
-        assert.ok(Host.Drones && Host.Drones.QuerySummary().DroneCount === 14, "Expected 14 floating midair robot drones");
-        console.log(`7-track inversion arena: Track A loop (${Host.Training.Best.loop360.Primary.toFixed(2)} s) · Track B/C boolean bollards · Track D collapse+sand · Track E 3-lane subway · Track F 14 railcars · Track G construction thru-trench + dead-end pit · 14 midair robot drones ACTIVE`);
+        assert.ok(MinimumDeadEndPitZ < -3.8 && DeadEndBulkheadX < 33.0,
+                  `Expected Track G Dead-End Pit descent (${MinimumDeadEndPitZ.toFixed(2)} m) & bulkhead stop at X<=33 m (got ${DeadEndBulkheadX.toFixed(1)})`);
+        assert.ok(Host.Drones && Host.Drones.QuerySummary().DroneCount === 15, "Expected 15 floating midair robot drones");
+        assert.ok(AutoFuelCompleted, "Expected Track H Automatic Fuel Station butler robot + drone to refill tank to 100%");
+        assert.ok(AutoEVCompleted, "Expected Track H Automatic 800V EV Station butler robot + drone to charge battery to 100%");
+        assert.ok(MaximumFactoryHallX > 124.0,
+                  `Expected Track H Megafactory drive-through past East portal X=124 m, got maxX=${MaximumFactoryHallX.toFixed(1)}`);
+        console.log(`8-track inversion arena: Track A loop (${Host.Training.Best.loop360.Primary.toFixed(2)} s) · Track B/C boolean bollards · Track D collapse+sand · Track E 3-lane subway · Track F 14 railcars · Track G construction thru-trench + dead-end pit · Track H megafactory + auto-fuel (100%) + auto-EV (100%) · 15 midair robot drones ACTIVE`);
     }
 };

@@ -9,7 +9,7 @@ import { CourseConstants, KerbConstants, SpawnPoint, EmitQuad, EmitBoxFacets, Em
 import { InversionArenaBounds, InversionArenaTracks, InversionArenaSurfaces, InversionArenaShapes, InversionArenaTerrainHulls,
          InversionArenaSpawn, InversionArenaZones, InversionArenaDrills, InversionClearZones, InversionPhysicsCutouts,
          InversionDistanceCutouts, EmitInversionGroundFacets, ResolveInversionPlacements, ResolveInversionBollards,
-         ResolveInversionCollapseSpans, ResolveInversionTrams, ResolveInversionDrones,
+         ResolveInversionCollapseSpans, ResolveInversionTrams, ResolveInversionDrones, ResolveInversionServiceStations,
          ResolveInversionCones, ResolveInversionBreakables } from "./InversionArenaStructure.js";
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -512,6 +512,7 @@ export function ResolveLevelDescriptor(LevelKey = "proving")
             CollapseSpans:   ResolveInversionCollapseSpans,
             Trams:           ResolveInversionTrams,
             Drones:          ResolveInversionDrones,
+            ServiceStations: ResolveInversionServiceStations,
             Cones:           ResolveInversionCones,
             Breakables:      ResolveInversionBreakables,
             EmitGround:      EmitInversionGroundFacets

@@ -21,6 +21,7 @@ import { ConstructCollapseProxyShapes } from "./CollapseSequence.js";
 import { ConstructTramShapes } from "./TramSequence.js";
 import { ConstructDroneShapes } from "./DroneSequence.js";
 import { ConstructInfrastructureShapes, EmitSignPanelOverlay } from "./SignageBuilder.js";
+import { ConstructFactoryAndServiceShapes } from "./ServiceStationSequence.js";
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                    MULTI-TRACK COMPLEX BOUNDS & TRACK CATALOG
@@ -28,7 +29,7 @@ import { ConstructInfrastructureShapes, EmitSignPanelOverlay } from "./SignageBu
 
 export const InversionArenaBounds = Object.freeze({
     Minimum: Object.freeze([-156.0, -452.0]),
-    Maximum: Object.freeze([ 222.0,  364.0])
+    Maximum: Object.freeze([ 222.0,  452.0])
 });
 
 export const InversionArenaTracks = Object.freeze([
@@ -94,6 +95,15 @@ export const InversionArenaTracks = Object.freeze([
         Position: [-106.0, -402.0],
         Yaw:      0.0,
         Note:     "CONSTRUCTION AHEAD signs & amber lights → Boolean road holes (Through-Trench + Dead-End Pit)"
+    },
+    {
+        Id:       "trackH",
+        Label:    "Track H · Factory & Auto-Fuel",
+        Name:     "Track H — Drive-Through Megafactory & Automatic Fuel + EV Stations",
+        Icon:     "Zap",
+        Position: [-88.0,  406.0],
+        Yaw:      0.0,
+        Note:     "Stop at Auto-Fuel or 800V EV Station for Butler Robot + Drone refuel, then drive inside the Factory!"
     }
 ]);
 
@@ -667,6 +677,7 @@ export const InversionArenaShapes = Object.freeze({
     ...ConstructTramShapes(),
     ...ConstructDroneShapes(),
     ...ConstructInfrastructureShapes(),
+    ...ConstructFactoryAndServiceShapes(),
     LoopPylon:         { Emit: () => EmitBoxFacets(0.85,  0.85, 18.8, CourseMaterial.SteelDark),      Voxel: 0.0,  Cards: 0, Distance: false },
     LoopCrossBeam:     { Emit: () => EmitBoxFacets(0.80, 23.60,  0.75, CourseMaterial.SteelDark),     Voxel: 0.0,  Cards: 0, Distance: false },
     LoopCrownLamp:     { Emit: () => EmitBoxFacets(0.45,  9.20,  0.16, CourseMaterial.GateLamp),      Voxel: 0.0,  Cards: 0, Distance: false },
@@ -721,7 +732,10 @@ export const InversionArenaZones = Object.freeze([
     { Name: "Track E · 3-Lane Subway",     Position: [-104.0,  256.0], Yaw:   0.0, Note: "[road][tunnel down][road] → [road][road][road] → [road][tunnel up][road]" },
     { Name: "Track F · Trams & Trains",    Position: [ -98.0,  314.0], Yaw:   0.0, Note: "Two-way Articulated Streetcar Trams & Express Commuter Trains" },
     { Name: "Track G · Thru Trench",       Position: [-108.0, -386.0], Yaw:   0.0, Note: "CONSTRUCTION AHEAD & Amber Lights → Open Hole Trench (comes back up!)" },
-    { Name: "Track G · Dead-End Pit",      Position: [-108.0, -418.0], Yaw:   0.0, Note: "CONSTRUCTION AHEAD & Amber Lights → Underground Dead-End Pit!" }
+    { Name: "Track G · Dead-End Pit",      Position: [-108.0, -418.0], Yaw:   0.0, Note: "CONSTRUCTION AHEAD & Amber Lights → Underground Dead-End Pit!" },
+    { Name: "Track H · Auto Fuel Bay",     Position: [ -74.0,  392.0], Yaw:   0.0, Note: "Pull into crimson bay & stop — Butler Robot + Drone refuel your tank!" },
+    { Name: "Track H · Auto EV Charge",    Position: [ -74.0,  420.0], Yaw:   0.0, Note: "Pull into cobalt/green bay & stop — Butler Robot + Drone 800V charge!" },
+    { Name: "Track H · Factory Hall",      Position: [  -4.0,  408.0], Yaw:   0.0, Note: "Drive straight inside the Megafactory (presses, conveyors, racks & crates!)" }
 ]);
 
 export const InversionArenaDrills = Object.freeze([
@@ -783,14 +797,15 @@ export const InversionArenaDrills = Object.freeze([
 export const InversionClearZones = Object.freeze([
     [-148.0,  -52.0, 214.0,  -20.0],   // Track A South Outbound Straight
     [-148.0,   20.0, 214.0,   52.0],   // Track A North Return Straight
-    [ 148.0, -444.0, 218.0,  356.0],   // East Bowls & Inter-Track Avenue (Tracks A..G)
-    [-148.0, -444.0, -76.0,  356.0],   // West Bowls & Inter-Track Avenue (Tracks A..G)
+    [ 148.0, -444.0, 218.0,  444.0],   // East Bowls & Inter-Track Avenue (Tracks A..H)
+    [-148.0, -444.0, -76.0,  444.0],   // West Bowls & Inter-Track Avenue (Tracks A..H)
     [ -88.0,  -14.0, 138.0,   14.0],   // Track A Infield Stunt Expressway
     [-148.0,   72.0, 214.0,  184.0],   // Track B Subterranean Split & Return Corridors
     [-148.0, -186.0, 214.0,  -74.0],   // Track C Kinetic Wave & Backstretch Corridors
     [-148.0, -346.0, 214.0, -228.0],   // Track D Collapsing Bridge & Collapsing Road Corridors
     [-148.0,  234.0, 214.0,  356.0],   // Track E 3-Lane Subway & Track F Tram/Train Corridors
     [-148.0, -442.0, 214.0, -370.0],   // Track G Underground Construction Site Corridors
+    [-148.0,  372.0, 214.0,  442.0],   // Track H Drive-Through Factory & Automatic Service Plaza
     [  -4.0,   52.0,  28.0,  140.0],   // North Underpass Connector Boulevard
     [  64.0, -140.0,  92.0,  -52.0]    // South Canyon Underpass Connector
 ]);
@@ -971,6 +986,18 @@ const HighwayOverheadGantries = Object.freeze([
             { OffsetY:   0.0, Shape: "WaypointBoardAmber", Width: 10.6, Height: 2.45, Line1: "CONSTRUCTION AHEAD", Line2: "OPEN ROAD HOLES", Border: CourseMaterial.SteelDark, Text: CourseMaterial.SteelDark },
             { OffsetY: -14.0, Shape: "WaypointBoardAmber", Width: 10.6, Height: 2.45, Line1: "CONSTRUCTION AHEAD", Line2: "DEAD END PIT !",  Border: CourseMaterial.SteelDark, Text: CourseMaterial.SteelDark }
         ]
+    },
+    {
+        Label:   "Track H Factory & Auto-Service Portal",
+        X:       -84.0,
+        CentreY:  406.0,
+        Yaw:      0.0,
+        SpanHalf: 22.4,
+        Boards: [
+            { OffsetY:  14.0, Shape: "WaypointBoardGreen", Width: 9.8,  Height: 2.50, Line1: "AUTO EV CHARGE ^",   Line2: "STOP FOR ROBOT",  Border: CourseMaterial.PaintWhite, Text: CourseMaterial.PaintWhite },
+            { OffsetY:   0.0, Shape: "WaypointBoardBlue",  Width: 9.2,  Height: 2.50, Line1: "FRONTIER FACTORY ^", Line2: "ASSEMBLY HALL 1", Border: CourseMaterial.PaintWhite, Text: CourseMaterial.PaintWhite },
+            { OffsetY: -14.0, Shape: "WaypointBoardAmber", Width: 10.6, Height: 2.45, Line1: "AUTO FUEL BAY ^",    Line2: "STOP FOR ROBOT",  Border: CourseMaterial.SteelDark,  Text: CourseMaterial.SteelDark }
+        ]
     }
 ]);
 
@@ -991,7 +1018,12 @@ const RoadsideSigns = Object.freeze([
     { Name: "South Waypoint",   X: -48.0, Y: -237.5,Z: 0.0,  Yaw: 0.0,          Shape: "RoadsideBoardGreen", Width: 4.2, Height: 1.55, Line1: "500 KM AIRPORT >",   Line2: "500 M COAST CITY", Text: CourseMaterial.PaintWhite },
     { Name: "Tram Xing Sign",   X: -88.0, Y:  306.5,Z: 0.0,  Yaw: 0.0,          Shape: "RoadsideBoardAmber", Width: 4.2, Height: 1.55, Line1: "LIVE TRAMS XING !",  Line2: "EXPRESS TRAINS ^", Text: CourseMaterial.SteelDark },
     { Name: "North Waypoint",   X:  18.0, Y:  238.5,Z: 0.0,  Yaw: 0.0,          Shape: "RoadsideBoardGreen", Width: 4.2, Height: 1.55, Line1: "500 KM SKYPORT ^",   Line2: "500 M METRO CITY", Text: CourseMaterial.PaintWhite },
-    { Name: "Bowl Chevron E",   X: 178.0, Y:  -12.0,Z: 0.0,  Yaw: 0.0,          Shape: "ChevronHazardBoard", Width: 2.8, Height: 1.25, Line1: ">>> BANK 47 >>>",    Line2: "",                 Text: CourseMaterial.SteelDark }
+    { Name: "Bowl Chevron E",   X: 178.0, Y:  -12.0,Z: 0.0,  Yaw: 0.0,          Shape: "ChevronHazardBoard", Width: 2.8, Height: 1.25, Line1: ">>> BANK 47 >>>",    Line2: "",                 Text: CourseMaterial.SteelDark },
+    // Track H Automatic Fuel Station, 800V EV Charging Station & Megafactory Signs!
+    { Name: "Auto Fuel Sign",   X: -66.5, Y:  384.5,Z: 0.0,  Yaw: 0.0,          Shape: "RoadsideBoardAmber", Width: 4.2, Height: 1.55, Line1: "AUTO FUEL BAY",      Line2: "STOP FOR BUTLER",  Text: CourseMaterial.SteelDark },
+    { Name: "Auto EV Sign",     X: -66.5, Y:  429.5,Z: 0.0,  Yaw: 0.0,          Shape: "RoadsideBoardGreen", Width: 4.2, Height: 1.55, Line1: "AUTO 800V EV BAY",   Line2: "STOP FOR BUTLER",  Text: CourseMaterial.PaintWhite },
+    { Name: "Factory West Sign",X:   6.0, Y:  396.0,Z: 0.0,  Yaw: 0.0,          Shape: "RoadsideBoardGreen", Width: 4.2, Height: 1.55, Line1: "FRONTIER FACTORY",   Line2: "DRIVE THRU HALL",  Text: CourseMaterial.PaintWhite },
+    { Name: "Factory East Sign",X: 130.0, Y:  420.0,Z: 0.0,  Yaw: Math.PI,      Shape: "RoadsideBoardGreen", Width: 4.2, Height: 1.55, Line1: "FRONTIER FACTORY",   Line2: "STAMPING LINE 1",  Text: CourseMaterial.PaintWhite }
 ]);
 
 export function EmitInversionGroundFacets()
@@ -1265,6 +1297,28 @@ export function EmitInversionGroundFacets()
     for (const X of [64.0, 78.0, 92.0])
         EmitChevron(X, -386.0, 1.0, 3.0, 1.0, CourseMaterial.PaintGreen);
 
+    // ⑫b [Track H · Drive-Through Megafactory & Automatic Fuel + 800V EV Service Plaza] Floor & Stop-Bay Livery!
+    //     Polished industrial concrete factory slab (X = +12 .. +124, Y = +380 .. +436) + OSHA safety walkways
+    Paint( 12.0, 380.2, 124.0, 435.8, CourseMaterial.ApronConcrete, 0.002);
+    Paint( 12.0, 398.4, 124.0, 399.0, CourseMaterial.PaintYellow,   0.005);
+    Paint( 12.0, 417.0, 124.0, 417.6, CourseMaterial.PaintYellow,   0.005);
+    for (const X of [24.0, 48.0, 72.0, 96.0, 114.0])
+        EmitChevron(X, 408.0, 1.0, 2.8, 0.9, CourseMaterial.PaintYellow);
+
+    //     Automatic Octane-100 Fuel Stop Bay (X = -56, Y = +392)
+    Paint(-63.8, 387.8, -48.2, 396.2, CourseMaterial.ApronConcrete, 0.002);
+    Paint(-63.8, 387.8, -48.2, 388.4, CourseMaterial.KerbRed,       0.005);
+    Paint(-63.8, 395.6, -48.2, 396.2, CourseMaterial.BannerAmber,   0.005);
+    Paint(-48.8, 387.8, -48.2, 396.2, CourseMaterial.PaintWhite,    0.005);
+    EmitChevron(-58.0, 392.0, 1.0, 2.2, 0.8, CourseMaterial.BannerAmber);
+
+    //     Automatic 800V Electric Supercharger Stop Bay (X = -56, Y = +420)
+    Paint(-63.8, 415.8, -48.2, 424.2, CourseMaterial.ApronConcrete, 0.002);
+    Paint(-63.8, 415.8, -48.2, 416.4, CourseMaterial.PaintGreen,    0.005);
+    Paint(-63.8, 423.6, -48.2, 424.2, CourseMaterial.GateLamp,      0.005);
+    Paint(-48.8, 415.8, -48.2, 424.2, CourseMaterial.PaintWhite,    0.005);
+    EmitChevron(-58.0, 420.0, 1.0, 2.2, 0.8, CourseMaterial.PaintGreen);
+
     // ⑬ Crisp 3D Vector Sign Lettering & Borders on ALL Overhead Highway Waypoint Gantries & Roadside Signs!
     for (const Gantry of HighwayOverheadGantries)
     {
@@ -1326,16 +1380,19 @@ export function ResolveInversionPlacements()
         }
     }
 
-    // Outer Complex Perimeter Walls around the full 7-Track Stadium ([−154..+220] × [−448..+360]) + Wing Divider into [Track G]
+    // Outer Complex Perimeter Walls around the full 8-Track Stadium ([−154..+220] × [−448..+448]) + Wing Dividers into [Track G] & [Track H]
     for (let X = -148.0; X <= 216.0; X += 16.0)
     {
-        Add("LongBarrier", `Complex North ${X.toFixed(0)}`, [X,  360.0, 0.0], 0.0);
+        Add("LongBarrier", `Complex North ${X.toFixed(0)}`, [X,  448.0, 0.0], 0.0);
         Add("LongBarrier", `Complex South ${X.toFixed(0)}`, [X, -448.0, 0.0], 0.0);
-        const ConstructionGateway = (X >= -112.0 && X <= -74.0) || (X >= 144.0 && X <= 184.0);
-        if (!ConstructionGateway)
+        const OuterWingGateway = (X >= -112.0 && X <= -74.0) || (X >= 144.0 && X <= 184.0);
+        if (!OuterWingGateway)
+        {
             Add("LongBarrier", `Construction Divider ${X.toFixed(0)}`, [X, -360.0, 0.0], 0.0);
+            Add("LongBarrier", `Factory Divider ${X.toFixed(0)}`,      [X,  360.0, 0.0], 0.0);
+        }
     }
-    for (let Y = -440.0; Y <= 352.0; Y += 16.0)
+    for (let Y = -440.0; Y <= 440.0; Y += 16.0)
     {
         Add("LongBarrier", `Complex West ${Y.toFixed(0)}`, [-152.5, Y, 0.0], 90.0 * Degrees);
         Add("LongBarrier", `Complex East ${Y.toFixed(0)}`, [ 220.5, Y, 0.0], 90.0 * Degrees);
@@ -1543,6 +1600,75 @@ export function ResolveInversionPlacements()
     AddGuardrailRun("Sinkhole Guard L",  60.0,  76.0, -310.0, -1.0);
     AddGuardrailRun("Sinkhole Guard R",  60.0,  76.0, -326.0,  1.0);
 
+    // ⑪ [Track H] Automatic Octane-100 Fuel Station & Automatic 800V Electric Charging Station!
+    //   Fuel Station Canopy & Twin Pumps (Bay center: X = -56, Y = +392; Island along Y = +398.2)
+    Add("StationCanopyPillar", "AutoFuel Pillar W", [-62.5, 398.2, 0.0],  0.0);
+    Add("StationCanopyPillar", "AutoFuel Pillar E", [-49.5, 398.2, 0.0],  0.0);
+    Add("StationCanopyFuel",   "AutoFuel Canopy",   [-56.0, 393.5, 5.40], 0.0, -1, false);
+    Add("StationCanopyLamp",   "AutoFuel Lamp",     [-56.0, 393.5, 5.28], 0.0, -1, false);
+    Add("FuelDispenserPump",   "AutoFuel Pump W",   [-57.8, 398.2, 0.0],  0.0);
+    Add("FuelDispenserPump",   "AutoFuel Pump E",   [-54.2, 398.2, 0.0],  0.0);
+    Add("FactoryTankSilo",     "Fuel Storage Tank", [-71.5, 399.5, 0.0],  0.0);
+
+    //   800V Electric Supercharger Canopy & Twin Pods (Bay center: X = -56, Y = +420; Island along Y = +426.2)
+    Add("StationCanopyPillar", "AutoEV Pillar W",   [-62.5, 426.2, 0.0],  0.0);
+    Add("StationCanopyPillar", "AutoEV Pillar E",   [-49.5, 426.2, 0.0],  0.0);
+    Add("StationCanopyEV",     "AutoEV Canopy",     [-56.0, 421.5, 5.40], 0.0, -1, false);
+    Add("StationCanopyLamp",   "AutoEV Lamp",       [-56.0, 421.5, 5.28], 0.0, -1, false);
+    Add("ElectricChargerPod",  "AutoEV Pod W",      [-57.8, 426.2, 0.0],  0.0);
+    Add("ElectricChargerPod",  "AutoEV Pod E",      [-54.2, 426.2, 0.0],  0.0);
+
+    // ⑫ [Track H] Drive-Through Industrial Automotive Megafactory Hall (X = +12 .. +124, Y = +380 .. +436) + Interior Props!
+    //   Exterior Perimeter Curtain Walls, Steel I-Columns, Open West/East Drive-Through Portals (Y = 398 .. 418) & Roof!
+    for (let Bay = 0; Bay < 8; ++Bay)
+    {
+        const BX = 19.0 + Bay * 14.0;
+        Add("FactoryWallPanel", `Factory Wall S ${Bay}`, [BX, 380.4, 0.0], 0.0);
+        Add("FactoryWallPanel", `Factory Wall N ${Bay}`, [BX, 435.6, 0.0], 0.0);
+        Add("FactoryColumn",    `Factory Col S ${Bay}`,  [BX - 6.8, 381.2, 0.0], 0.0);
+        Add("FactoryColumn",    `Factory Col N ${Bay}`,  [BX - 6.8, 434.8, 0.0], 0.0);
+    }
+    Add("FactoryColumn", "Factory Col SE", [124.0, 381.2, 0.0], 0.0);
+    Add("FactoryColumn", "Factory Col NE", [124.0, 434.8, 0.0], 0.0);
+
+    //   West (X = +12) & East (X = +124) Portal Facades with 20 m wide Open Drive-Through Doors!
+    for (const [Label, FX] of [["West", 12.0], ["East", 124.0]])
+    {
+        Add("FactoryEndWall",    `Factory ${Label} Facade S`, [FX, 389.2, 0.0],  0.0);
+        Add("FactoryEndWall",    `Factory ${Label} Facade N`, [FX, 426.8, 0.0],  0.0);
+        Add("FactoryColumn",     `Factory ${Label} Jamb S`,   [FX, 398.2, 0.0],  0.0);
+        Add("FactoryColumn",     `Factory ${Label} Jamb N`,   [FX, 417.8, 0.0],  0.0);
+        Add("FactoryDoorHeader", `Factory ${Label} Header`,   [FX, 408.0, 7.20], 0.0, -1, false);
+    }
+    //   Spanning Factory Roof Decks + High-Bay LED Strip Lighting + Twin Rooftop Smokestacks!
+    for (let Span = 0; Span < 6; ++Span)
+    {
+        const RX = 21.3 + Span * 18.68;
+        Add("FactoryRoofSlab",    `Factory Roof ${Span}`,   [RX, 408.0, 10.60], 0.0, -1, false);
+        Add("FactoryHighBayLamp", `Factory Lamp S ${Span}`, [RX, 396.0, 10.42], 0.0, -1, false);
+        Add("FactoryHighBayLamp", `Factory Lamp C ${Span}`, [RX, 408.0, 10.42], 0.0, -1, false);
+        Add("FactoryHighBayLamp", `Factory Lamp N ${Span}`, [RX, 420.0, 10.42], 0.0, -1, false);
+    }
+    Add("FactoryChimney", "Factory Smokestack W", [ 96.0, 431.0, 11.20], 0.0, -1, false);
+    Add("FactoryChimney", "Factory Smokestack E", [112.0, 431.0, 11.20], 0.0, -1, false);
+
+    //   INTERIOR FACTORY PROPS: Hydraulic Stamping Presses, Automated Conveyors, Multi-Tier Storage Racks & Silos!
+    Add("FactoryStampingPress", "Factory Press N1",     [ 30.0, 423.5, 0.0], 0.0);
+    Add("FactoryStampingPress", "Factory Press N2",     [ 52.0, 423.5, 0.0], 0.0);
+    Add("FactoryStampingPress", "Factory Press S1",     [ 30.0, 392.5, 0.0], 0.0);
+    Add("FactoryStampingPress", "Factory Press S2",     [ 52.0, 392.5, 0.0], 0.0);
+    Add("FactoryConveyorLine",  "Factory Conveyor N1",  [ 76.0, 421.5, 0.0], 0.0);
+    Add("FactoryConveyorLine",  "Factory Conveyor N2",  [ 98.0, 421.5, 0.0], 0.0);
+    Add("FactoryConveyorLine",  "Factory Conveyor S1",  [ 76.0, 394.5, 0.0], 0.0);
+    Add("FactoryConveyorLine",  "Factory Conveyor S2",  [ 98.0, 394.5, 0.0], 0.0);
+    for (const RX of [26.0, 66.0, 104.0])
+    {
+        Add("FactoryStorageRack", `Factory Rack N ${RX}`, [RX, 432.2, 0.0], 0.0);
+        Add("FactoryStorageRack", `Factory Rack S ${RX}`, [RX, 383.8, 0.0], 0.0);
+    }
+    Add("FactoryTankSilo", "Factory Silo NE", [115.5, 426.5, 0.0], 0.0);
+    Add("FactoryTankSilo", "Factory Silo SE", [115.5, 389.5, 0.0], 0.0);
+
     return List;
 }
 
@@ -1619,7 +1745,16 @@ export function ResolveInversionCones()
         [ -48.0,  309.5, 0.0,   "ShortWorkCone"],
         [  58.0,  330.2, 0.0,   "Cone"],
         [  72.0, -392.0, 0.0,   "SlimPylonCone"],
-        [   6.0, -418.0, -5.20, "Cone"]
+        [   6.0, -418.0, -5.20, "Cone"],
+        // Track H — Factory Floor Safety Cones/Drums & Auto-Fuel / Auto-EV Bay Guide Pylons
+        [ -64.4,  388.2, 0.0,   "ShortWorkCone"],
+        [ -47.6,  388.2, 0.0,   "ShortWorkCone"],
+        [ -64.4,  416.2, 0.0,   "SlimPylonCone"],
+        [ -47.6,  416.2, 0.0,   "SlimPylonCone"],
+        [  20.0,  399.5, 0.0,   "ConstructionDrum"],
+        [  20.0,  416.5, 0.0,   "ConstructionDrum"],
+        [  58.0,  416.5, 0.0,   "ShortWorkCone"],
+        [  94.0,  399.5, 0.0,   "SlimPylonCone"]
     ];
     for (const [LX, LY, LZ, LShape] of LoneCones)
         Push(LX, LY, "lone", LShape, LZ);
@@ -1666,6 +1801,11 @@ export function ResolveInversionBreakables()
     // Smashable construction crates down inside the -5.20 m Underground Dead-End Pit!
     Add("Dead-End Pit Crate 1",   Crate,    "wood",       22.0, -415.5, 0.15,         { Z: -5.20, DensityScale: 0.32, Capacity: 24 });
     Add("Dead-End Pit Crate 2",   Crate,    "wood",       22.0, -420.5,-0.18,         { Z: -5.20, DensityScale: 0.32, Capacity: 24 });
+    // Smashable interior Factory Parts Crates & QA Inspection Glass Panes INSIDE the Megafactory Hall!
+    Add("Factory Parts Crate 1",  Crate,    "wood",       41.0,  415.5, 0.12,         { DensityScale: 0.32, Capacity: 24 });
+    Add("Factory Parts Crate 2",  Crate,    "wood",       64.0,  400.5,-0.16,         { DensityScale: 0.32, Capacity: 24 });
+    Add("Factory Parts Crate 3",  Crate,    "wood",       88.0,  415.5, 0.22,         { DensityScale: 0.32, Capacity: 24 });
+    Add("Factory QA Glass Gate",  Tempered, "tempered",   68.0,  413.2, 0.0,          { Capacity: 36, StrengthScale: 0.60 });
 
     return List;
 }
@@ -1876,6 +2016,38 @@ export function ResolveInversionDrones()
         // Track G — Underground Construction Site Inspection Robot Drones (hovering over "CONSTRUCTION AHEAD", Thru-Trench & Dead-End Pit!)
         { Id: "drone_constSign",  Name: "Construction Ahead Drone D-12",Role: "construction", Anchor: [-74.0, -402.0, 4.3], OrbitRadiusX: 11.0, OrbitRadiusY: 13.0, OrbitFreq: 0.46, FigureEight: true,  HoverAmpZ: 0.48, Phase: 0.9 },
         { Id: "drone_thruTrench", Name: "Open Trench Drone D-13",       Role: "construction", Anchor: [  0.0, -386.0, 3.6], OrbitRadiusX: 18.0, OrbitRadiusY:  5.2, OrbitFreq: 0.44, FigureEight: false, HoverAmpZ: 0.55, Phase: 2.1 },
-        { Id: "drone_deadEndPit", Name: "Dead-End Pit Drone D-14",      Role: "construction", Anchor: [  8.0, -418.0, 3.4], OrbitRadiusX: 15.0, OrbitRadiusY:  5.8, OrbitFreq: 0.47, FigureEight: true,  HoverAmpZ: 0.58, Phase: 3.3 }
+        { Id: "drone_deadEndPit", Name: "Dead-End Pit Drone D-14",      Role: "construction", Anchor: [  8.0, -418.0, 3.4], OrbitRadiusX: 15.0, OrbitRadiusY:  5.8, OrbitFreq: 0.47, FigureEight: true,  HoverAmpZ: 0.58, Phase: 3.3 },
+        // Track H — Interior Megafactory Assembly Floor Inspection Drone (flies inside the factory under the 10.6 m roof!)
+        { Id: "drone_factoryH",   Name: "Factory Floor Drone D-15",     Role: "factory-qa",   Anchor: [ 68.0,  408.0, 5.2], OrbitRadiusX: 28.0, OrbitRadiusY:  5.5, OrbitFreq: 0.36, FigureEight: true,  HoverAmpZ: 0.45, Phase: 1.4 }
+    ];
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+//            AUTOMATIC FUEL & 800V ELECTRIC CHARGING STATIONS (BUTLER ROBOT + NOZZLE ARM + DRONE)
+//------------------------------------------------------------------------------------------------------------------------
+
+export function ResolveInversionServiceStations()
+{
+    return [
+        {
+            Id:            "autoFuelStation",
+            Name:          "Auto-Fuel Octane-100 Station",
+            Kind:          "fuel",
+            BayCenter:     [-56.0, 392.0, 0.0],
+            BayHalfExtent: [  7.8,   4.4],
+            DockPosition:  [-60.6, 397.4, 0.0],
+            DockYaw:       -0.5 * Math.PI,
+            DronePerch:    [-56.0, 397.2, 3.35]
+        },
+        {
+            Id:            "autoElectricStation",
+            Name:          "Auto-EV 800V Supercharger",
+            Kind:          "electric",
+            BayCenter:     [-56.0, 420.0, 0.0],
+            BayHalfExtent: [  7.8,   4.4],
+            DockPosition:  [-60.6, 425.4, 0.0],
+            DockYaw:       -0.5 * Math.PI,
+            DronePerch:    [-56.0, 425.2, 3.35]
+        }
     ];
 }

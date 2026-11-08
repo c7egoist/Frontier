@@ -17,6 +17,7 @@ import { SceneStructure } from "../Source/FacetStructure.js";
 import { VehicleSolver } from "../Source/VehicleSolver.js";
 import { ChaseCameraSolver } from "../Source/ChaseCameraSolver.js";
 import { SweepSpark } from "../Source/SparkCollision.js";
+import { ServiceAudio } from "../Source/ServiceAudio.js";
 import { RotateVector, CrossVector, DotVector, SubtractVector } from "../Source/TransformProjection.js";
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -235,23 +236,24 @@ test("ChaseCameraSolver tracks 90° vertical and 180° inverted orientations wit
     assert.ok(Chase.Up[2] < -0.7, `Camera Up must invert smoothly with loop crown, got ${Chase.Up[2]}`);
 });
 
-test("LevelCatalog exposes multi-track Inversion Arena (Tracks A–G) and Proving Grounds descriptors cleanly", () =>
+test("LevelCatalog exposes multi-track Inversion Arena (Tracks A–H) and Proving Grounds descriptors cleanly", () =>
 {
     assert.equal(LevelCatalog.length, 2);
     const Inversion = ResolveLevelDescriptor("inversion");
     const Proving = ResolveLevelDescriptor("proving");
     assert.equal(Inversion.Title, "Inversion Arena");
     assert.equal(Inversion.Relief, false);
-    assert.equal(Inversion.Tracks.length, 7);
-    assert.deepEqual(Inversion.Tracks.map((T) => T.Id), ["trackA", "trackB", "trackC", "trackD", "trackE", "trackF", "trackG"]);
+    assert.equal(Inversion.Tracks.length, 8);
+    assert.deepEqual(Inversion.Tracks.map((T) => T.Id), ["trackA", "trackB", "trackC", "trackD", "trackE", "trackF", "trackG", "trackH"]);
     assert.equal(Inversion.Surfaces.length, 33);
-    assert.equal(Inversion.Zones.length, 20);
+    assert.equal(Inversion.Zones.length, 23);
     assert.ok(Inversion.PhysicsCutouts.length >= 8);
     assert.equal(Inversion.DistanceCutouts.length, 6);
     assert.equal(Inversion.Bollards().length, 2);
     assert.equal(Inversion.CollapseSpans().length, 2);
     assert.equal(Inversion.Trams().length, 6);
-    assert.equal(Inversion.Drones().length, 14);
+    assert.equal(Inversion.Drones().length, 15);
+    assert.equal(Inversion.ServiceStations().length, 2);
     assert.equal(Proving.Title, "Proving Grounds");
     assert.equal(Proving.Relief, true);
     assert.equal(Proving.Surfaces.length, 0);
@@ -790,12 +792,170 @@ test("True Road Boolean Holes (Underground Portals & Wavy Bollard Shafts), Track
 
         const Scene = new SceneStructure();
         await Scene.ConstructScene("Archive", 0, "inversion");
-        assert.ok(Scene.Drones && Scene.Drones.QuerySummary().DroneCount === 14, "Expected 14 floating midair robot drones");
+        assert.ok(Scene.Drones && Scene.Drones.QuerySummary().DroneCount === 15, "Expected 15 floating midair robot drones");
         const NearCar = { Position: [-70.0, -402.0, 0.63], LinearVelocity: [0.0, 0.0, 0.0] };
         for (let Step = 0; Step < 20; ++Step)
             Scene.Drones.Advance(NearCar, 1.0 / 60.0);
         assert.ok(Scene.Drones.Units.every((D) => D.WorldPosition[2] > 2.4), "Every robot drone must float in midair above the roadway");
         assert.ok(Scene.Drones.QuerySummary().TrackingCount >= 1, "Nearby construction scout drone must optically lock onto ControlVehicle");
+    }
+    finally
+    {
+        AssignExcavationCutouts([]);
+        AssignCourseReliefEnabled(true);
+        globalThis.fetch = PreviousFetch;
+    }
+});
+
+test("Track H Drive-Through Megafactory (Interior Presses, Conveyors, Racks, Silos & Crates), Automatic Fuel & 800V EV Stations (Butler Robot + Nozzle Arm + Drone) & Procedural Web Audio", async () =>
+{
+    const { readFile } = await import("node:fs/promises");
+    const PreviousFetch = globalThis.fetch;
+    globalThis.fetch = async (Resource) =>
+    {
+        const Clean = String(Resource).replace(/^\.\//, "");
+        const Raw = await readFile(new URL(`../${Clean}`, import.meta.url));
+        return { ok: true, status: 200, arrayBuffer: async () => Raw.buffer.slice(Raw.byteOffset, Raw.byteOffset + Raw.byteLength) };
+    };
+    AssignCourseReliefEnabled(false);
+    AssignExcavationCutouts(InversionPhysicsCutouts);
+    try
+    {
+        const Inversion = ResolveLevelDescriptor("inversion");
+        const Placements = Inversion.Placements();
+        const Breakables = Inversion.Breakables();
+
+        // ① Verify Drive-Through Megafactory Building + Interior Machinery Props & Smashable Crates/Glass!
+        assert.equal(Placements.filter((P) => P.Shape === "FactoryStampingPress").length, 4, "Expected 4 hydraulic stamping presses inside factory");
+        assert.equal(Placements.filter((P) => P.Shape === "FactoryConveyorLine").length,  4, "Expected 4 automated conveyor lines inside factory");
+        assert.equal(Placements.filter((P) => P.Shape === "FactoryStorageRack").length,   6, "Expected 6 multi-tier storage racks inside factory");
+        assert.ok(Placements.filter((P) => P.Shape === "FactoryTankSilo").length >= 3,       "Expected >= 3 industrial tank silos");
+        assert.equal(Placements.filter((P) => P.Shape === "FactoryRoofSlab").length,      6, "Expected 6 spanning roof decks over factory hall");
+        assert.equal(Placements.filter((P) => P.Shape === "FactoryHighBayLamp").length,  18, "Expected 18 interior high-bay LED lamps");
+        assert.ok(Breakables.filter((B) => B.Name.startsWith("Factory ")).length >= 4,       "Expected smashable crates & QA glass inside factory");
+
+        const Scene = new SceneStructure();
+        await Scene.ConstructScene("Archive", 0, "inversion");
+
+        // Drive ControlVehicle straight through the Megafactory Hall central aisle (X = 0 -> +132 along Y = +408)!
+        const FactoryCar = new VehicleSolver(Scene.QueryObstacleBounds());
+        FactoryCar.Surfaces = InversionArenaSurfaces;
+        FactoryCar.AeroGripScale = 1.0;
+        FactoryCar.Respawn([0.0, 408.0, 0.63], 0.0);
+        for (let Step = 0; Step < 500; ++Step)
+            FactoryCar.Advance({ Throttle: 0.95, Brake: 0.0, Steer: 0.0, Handbrake: false }, 1.0 / 60.0);
+        assert.ok(FactoryCar.Position[0] > 124.0,
+                  `Car must drive cleanly through West (X=12) and East (X=124) Megafactory portals, reached X=${FactoryCar.Position[0].toFixed(1)}`);
+        assert.ok(Math.abs(FactoryCar.Position[1] - 408.0) < 2.5, "Car must stay centered on the OSHA factory assembly aisle");
+
+        // ② Verify Automatic Octane-100 Fuel Station full cycle: stop -> butler rollout -> nozzle latch -> 100% refuel -> retract!
+        const Service = Scene.ServiceStations;
+        assert.ok(Service && Service.Stations.length === 2, "Expected 2 automatic service stations (Fuel + 800V EV)");
+        assert.equal(Scene.ServiceBlock.Count, 6, "Expected 6 dynamic occupants (butler + nozzle arm + helper drone × 2 stations)");
+
+        const Messages = [];
+        Service.OnAnnounce = (M) => Messages.push(M);
+        Service.FuelLevel = 0.25;
+        const FuelStation = Service.Stations.find((S) => S.Kind === "fuel");
+        const DockDistBefore = Math.hypot(FuelStation.ButlerPos[0] - (-56.0), FuelStation.ButlerPos[1] - 392.0);
+        assert.ok(DockDistBefore > 5.0, "Fuel butler robot must start parked in its dock");
+
+        const ParkedFuelCar = {
+            Position:       [-56.0, 392.0, 0.63],
+            Orientation:    [0.0, 0.0, 0.0, 1.0],
+            LinearVelocity: [0.0, 0.0, 0.0]
+        };
+        const SeenFuelStates = new Set();
+        let MinButlerDistToPort = Infinity;
+        let MinArmTipDistToPort = Infinity;
+        for (let Step = 0; Step < 460; ++Step)
+        {
+            Service.Advance(ParkedFuelCar, 1.0 / 60.0);
+            SeenFuelStates.add(FuelStation.State);
+            const Port = FuelStation.TargetPortPos;
+            MinButlerDistToPort = Math.min(MinButlerDistToPort, Math.hypot(FuelStation.ButlerPos[0] - Port[0], FuelStation.ButlerPos[1] - Port[1]));
+            // Arm tip is +0.44 m forward along local +X from ArmPos
+            const TipFwd = RotateVector(FuelStation.ArmQuat, [0.44, 0.0, 0.0]);
+            const TipWorld = [FuelStation.ArmPos[0] + TipFwd[0], FuelStation.ArmPos[1] + TipFwd[1], FuelStation.ArmPos[2] + TipFwd[2]];
+            MinArmTipDistToPort = Math.min(MinArmTipDistToPort, Math.hypot(TipWorld[0] - Port[0], TipWorld[1] - Port[1], TipWorld[2] - Port[2]));
+        }
+        for (const Expected of ["stopping", "deploying", "coupling", "dispensing", "retracting", "complete"])
+            assert.ok(SeenFuelStates.has(Expected), `Auto-Fuel cycle must pass through '${Expected}', saw [${[...SeenFuelStates].join(", ")}]`);
+        assert.equal(Service.QuerySummary().FuelPercent, 100, "Auto-Fuel station must refill vehicle fuel tank to 100%");
+        assert.ok(MinButlerDistToPort < 1.05, `Wheeled butler robot must roll right up beside car fuel flap, got ${MinButlerDistToPort.toFixed(3)} m`);
+        assert.ok(MinArmTipDistToPort < 0.06, `Articulated nozzle arm tip must couple onto car fuel port within 6 cm, got ${MinArmTipDistToPort.toFixed(3)} m`);
+        assert.ok(Math.hypot(FuelStation.ButlerPos[0] - FuelStation.DockPosition[0], FuelStation.ButlerPos[1] - FuelStation.DockPosition[1]) < 0.05,
+                  "Butler robot must return cleanly to its dock once refueling completes");
+
+        // ③ Verify Automatic 800V Electric Charging Station full cycle + coupling sparks + drive-away abort!
+        Service.BatteryLevel = 0.22;
+        const EVStation = Service.Stations.find((S) => S.Kind === "electric");
+        let EmittedSparks = 0;
+        const MockSparks = { EmitBurst(Desc) { EmittedSparks += (Desc?.Count || 0); } };
+        const ParkedEVCar = {
+            Position:       [-56.0, 420.0, 0.63],
+            Orientation:    [0.0, 0.0, 0.0, 1.0],
+            LinearVelocity: [0.0, 0.0, 0.0]
+        };
+        for (let Step = 0; Step < 460; ++Step)
+            Service.Advance(ParkedEVCar, 1.0 / 60.0, MockSparks);
+        assert.equal(EVStation.State, "complete", "Auto-EV 800V station must complete full charge cycle");
+        assert.equal(Service.QuerySummary().BatteryPercent, 100, "Auto-EV station must charge 800V battery to 100%");
+        assert.ok(EmittedSparks >= 20, `Expected coupling & 800V arc sparks during EV charge, got ${EmittedSparks}`);
+        assert.equal(Service.ServicedCount, 2, "Completed services counter must equal 2 (Fuel + EV)");
+        assert.ok(Messages.length >= 4, "Service stations must emit HUD status announcements");
+
+        // Drive-away emergency abort test: enter bay, reach dispensing, then floor throttle!
+        Service.Reset(true);
+        const AbortCar = {
+            Position:       [-56.0, 392.0, 0.63],
+            Orientation:    [0.0, 0.0, 0.0, 1.0],
+            LinearVelocity: [0.0, 0.0, 0.0]
+        };
+        for (let Step = 0; Step < 180 && FuelStation.State !== "dispensing"; ++Step)
+            Service.Advance(AbortCar, 1.0 / 60.0);
+        assert.equal(FuelStation.State, "dispensing", "Expected FuelStation in dispensing state prior to drive-away");
+        AbortCar.LinearVelocity = [9.5, 0.0, 0.0];
+        AbortCar.Position = [-44.0, 392.0, 0.63];
+        Service.Advance(AbortCar, 1.0 / 60.0);
+        assert.equal(FuelStation.State, "retracting", "Driving away mid-refuel must immediately unlatch & retract butler robot");
+
+        // ④ Verify Procedural Web Audio (safe headless no-op + full oscillator/filter graph synthesis with mock AudioContext)!
+        let OscCount = 0, GainCount = 0, FilterCount = 0;
+        const MockParam = () => ({ value: 0, setValueAtTime() {}, setTargetAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {} });
+        const PrevAudioCtx = globalThis.AudioContext;
+        globalThis.AudioContext = class MockAudioContext
+        {
+            constructor()
+            {
+                this.state = "running";
+                this.currentTime = 1.0;
+                this.destination = {};
+            }
+            resume() { return Promise.resolve(); }
+            createOscillator() { OscCount++; return { type: "sine", frequency: MockParam(), connect() {}, start() {}, stop() {}, disconnect() {} }; }
+            createGain() { GainCount++; return { gain: MockParam(), connect() {}, disconnect() {} }; }
+            createBiquadFilter() { FilterCount++; return { type: "lowpass", frequency: MockParam(), Q: MockParam(), connect() {}, disconnect() {} }; }
+        };
+        try
+        {
+            const Synth = new ServiceAudio();
+            assert.equal(Synth.Unlock(), true);
+            Synth.PlayStationWelcome("fuel");
+            Synth.PlayCouplerLatch("fuel");
+            Synth.StartDispensing("fuel");
+            Synth.UpdateDispensing(0.30);
+            Synth.UpdateDispensing(0.60);
+            Synth.StopDispensing();
+            Synth.PlayCompletionChime("electric");
+            Synth.PlayAbortRelease();
+            assert.ok(OscCount >= 12 && GainCount >= 10 && FilterCount >= 1,
+                      `Expected procedural Web Audio synthesis nodes, got osc=${OscCount}, gain=${GainCount}, filter=${FilterCount}`);
+        }
+        finally
+        {
+            globalThis.AudioContext = PrevAudioCtx;
+        }
     }
     finally
     {

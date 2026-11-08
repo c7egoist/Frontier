@@ -16,6 +16,7 @@ import { StressShapes, ResolveStressPlacements } from "./StressLayout.js";
 import { CollapseSequence } from "./CollapseSequence.js";
 import { TramSequence } from "./TramSequence.js";
 import { DroneSequence } from "./DroneSequence.js";
+import { ServiceStationSequence } from "./ServiceStationSequence.js";
 
 // 📝 What an occupant takes part in. A ground tile only owns a surface card; the ground occupant is only rastered,
 //    because the scene distance field carries the ground as its analytic plane rather than as a sampled volume.
@@ -233,6 +234,25 @@ export class SceneStructure
         }
         this.DroneBlock = { First: DroneFirst, Count: this.Occupants.length - DroneFirst, Units: RawDrones };
 
+        // ③f automatic fuel & 800V EV charging stations (wheeled butler robot + robotic nozzle arm + helper drone per station)
+        const RawStations = Descriptor.ServiceStations ? Descriptor.ServiceStations() : [];
+        const ServiceFirst = this.Occupants.length;
+        for (let StIdx = 0; StIdx < RawStations.length; ++StIdx)
+        {
+            const St = RawStations[StIdx];
+            const ButlerShape = St.Kind === "electric" ? "ServiceButlerEV" : "ServiceButlerFuel";
+            if (ShapeSets[ButlerShape] === undefined || ShapeSets.ServiceNozzleArm === undefined || ShapeSets.ServiceHelperDrone === undefined)
+                continue;
+            const IdQuat = [0.0, 0.0, 0.0, 1.0];
+            const BIdx = this.ConstructOccupant(`${St.Name} butler`, ShapeSets[ButlerShape], ConstructRigidTransform(St.DockPosition, IdQuat), ConeRoles);
+            const AIdx = this.ConstructOccupant(`${St.Name} nozzle arm`, ShapeSets.ServiceNozzleArm, ConstructRigidTransform(St.DockPosition, IdQuat), ConeRoles);
+            const DIdx = this.ConstructOccupant(`${St.Name} helper drone`, ShapeSets.ServiceHelperDrone, ConstructRigidTransform(St.DronePerch || St.DockPosition, IdQuat), ConeRoles);
+            this.Occupants[BIdx].Moving = false;
+            this.Occupants[AIdx].Moving = false;
+            this.Occupants[DIdx].Moving = false;
+        }
+        this.ServiceBlock = { First: ServiceFirst, Count: this.Occupants.length - ServiceFirst, Stations: RawStations };
+
         // ④ breakable props, whole: rastered, in the field, carded and a collider until they break ------------------------
         const BreakableSets = new Map();
         this.Breakables = Descriptor.Breakables().map((Definition) =>
@@ -377,6 +397,7 @@ export class SceneStructure
 
         this.Trams = RawTrams.length > 0 ? new TramSequence(this, RawTrams) : null;
         this.Drones = RawDrones.length > 0 ? new DroneSequence(this, RawDrones) : null;
+        this.ServiceStations = RawStations.length > 0 ? new ServiceStationSequence(this, RawStations) : null;
 
         this.ConstructDistanceList();
     }
