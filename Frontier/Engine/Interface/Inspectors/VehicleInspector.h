@@ -10,11 +10,13 @@
 #pragma once
 
 #include "Engine/Diagnostics/BuildConfiguration.h"
+#include "Engine/Interface/Controls/CurveEditor.h"
 #include "Engine/Interface/InspectorRuntime.h"
 #include "Engine/Scene/EngineConfigurations.h"
 
 #include <array>
 #include <cstdint>
+#include <string>
 
 namespace Frontier
 {
@@ -58,8 +60,10 @@ class VehicleInspector final : public RecordInspector
     int                                    ActiveSection      = 0;
     bool                                   FormulaOpen        = false;
     int                                    SelectedCurveIndex = 0;
-    int                                    SelectedCurvePoint = 0;
-    int                                    DraggedCurvePoint  = -1;
+    CurveEditorState                       CurveState{};
+    char                                   CurvePackPath[512] = "Projects/Everest/Content/VehicleCurves.vcurves";
+    std::string                            CurvePackStatus{};
+    bool                                   CurvePackStatusError = false;
     uint64_t                               LastTraceSteps     = 0;
     size_t                                 TraceCount         = 0;
     size_t                                 TraceCursor        = 0;

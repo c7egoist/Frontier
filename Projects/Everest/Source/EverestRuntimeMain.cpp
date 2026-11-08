@@ -33,6 +33,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace
 {
@@ -243,6 +244,7 @@ int main(int, char**)
         const ImGuiIO&      IO                 = ImGui::GetIO();
         const double        FrameDeltaSeconds  = std::max(0.0, static_cast<double>(IO.DeltaTime));
         const double        DeltaSeconds       = std::clamp(FrameDeltaSeconds, 1.0 / 240.0, 0.1);
+        std::vector<Frontier::SceneImpactSpark> ImpactSparks;
         const ImGuiViewport* Viewport    = ImGui::GetMainViewport();
         const float         Width        = std::max(64.0f, Viewport->Size.x);
         const float         Height       = std::max(64.0f, Viewport->Size.y);
@@ -307,6 +309,17 @@ int main(int, char**)
             VehicleInput.ClutchPedal = (!IO.WantTextInput && ImGui::IsKeyDown(ImGuiKey_LeftShift)) ? 1.0f : 0.0f;
             Physics->AssignVehicleInput(VehicleInput);
             (void)Physics->Step(World, DeltaSeconds);
+            for (const Frontier::PhysicsImpactEvent& Event : Physics->DrainImpactEvents())
+            {
+                if (Event.Surface != Frontier::PhysicsImpactSurface::Metal && Event.Surface != Frontier::PhysicsImpactSurface::Concrete) continue;
+                Frontier::SceneImpactSpark Spark;
+                Spark.Surface = Event.Surface == Frontier::PhysicsImpactSurface::Metal ? Frontier::SceneImpactSurface::Metal
+                                                                                       : Frontier::SceneImpactSurface::Concrete;
+                Spark.PointMetres = Event.PointMetres;
+                Spark.Normal = Event.Normal;
+                Spark.ClosingSpeedMps = Event.ClosingSpeedMps;
+                ImpactSparks.push_back(Spark);
+            }
         }
 
         // ② Advance VehicleHMI + Studio Lobby cinematic + transition camera.
@@ -372,6 +385,7 @@ int main(int, char**)
             Request.VerticalFieldOfView = Solution.VerticalFieldOfViewRadians;
             Request.CameraNear          = Solution.NearClipMetres;
             Request.DeltaSeconds        = DeltaSeconds;
+            Request.ImpactSparks        = std::move(ImpactSparks);
             RenderResult = SceneRenderer->Render(Request, World, Workspace->QueryElapsedSeconds());
             TextureHandle = SceneTexture.Resolve(RenderResult.View);
             if (RenderResult.Readout.Geometry && RenderResult.Readout.GeometryGeneration != PublishedGeometryGen)

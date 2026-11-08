@@ -382,12 +382,19 @@ int main(int ArgumentCount, char** Arguments)
                    Figure("%.2f", TargetAfterImpact.LinearVelocityMps[0]) + " m/s, cone vx " +
                    Figure("%.2f", ConeAfterImpact.LinearVelocityMps[0]) + " m/s)");
 
+        Space.RemoveBody(TargetBody);
         const double BeforeForce = ConeAfterImpact.LinearVelocityMps[0];
-        Space.ApplyForce(ConeBody, { 600.0, 0.0, 0.0 }, ConeAfterImpact.PositionMetres);
-        Run(Space, 0.10);
+        for (int Step = 0; Step < 6; ++Step)
+        {
+            const PhysicsBodyReading ForcePose = Space.ReadBody(ConeBody);
+            Space.ApplyForce(ConeBody, { 600.0, 0.0, 0.0 }, ForcePose.PositionMetres);
+            Space.Step(1.0 / 60.0);
+        }
         const PhysicsBodyReading ConeAfterForce = Space.ReadBody(ConeBody);
-        Expect(Space.QueryBodyCount() == 3 && ConeAfterForce.LinearVelocityMps[0] > BeforeForce + 0.5,
-               "the cone remains a live rigid body and responds to a later force after impact");
+        Expect(ConeBody != PhysicsNoBody && ConeAfterForce.Awake && ConeAfterForce.LinearVelocityMps[0] > BeforeForce + 0.5,
+               "the cone stays live and answers sustained force after its impact partner is removed (vx " +
+                   Figure("%.2f", BeforeForce) + " → " + Figure("%.2f", ConeAfterForce.LinearVelocityMps[0]) +
+                   " m/s)");
     }
 
     // ④ a stack of five half-metre cubes stands

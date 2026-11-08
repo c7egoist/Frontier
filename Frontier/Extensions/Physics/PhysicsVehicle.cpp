@@ -70,6 +70,7 @@ bool PhysicsVehicle::Construct(PhysicsSpace& InSpace, RecordToken InRecord, cons
                              { -2.28f, 0.92f, 0.95f }, { -2.28f, -0.92f, 0.95f } };
     PhysicsBodyDescriptor Chassis;
     Chassis.Record = Record.Value;
+    Chassis.VehicleChassis = true;
     Chassis.Shape  = PhysicsShape::Hull;
     for (const Corner& Point : Wedge) Chassis.Points.push_back({ Point.X, Point.Y, Point.Height - Geometry.CoMHeight });
     Chassis.PositionMetres = ToArray(Start.Position);

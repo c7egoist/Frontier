@@ -84,6 +84,8 @@ class PhysicsExtension
     // 📝 Driver controls for the possessed vehicles, and a request to put them back at their start.
     void AssignVehicleInput(const PhysicsVehicleInput& Input);
     void RequestVehicleReset();
+    // 📝 Transfers debounced hard-impact events from Jolt to the viewport/effect renderer without blocking its physics thread.
+    [[nodiscard]] std::vector<PhysicsImpactEvent> DrainImpactEvents();
     // 📝 Validations: Count fixed steps on the caller's thread now (inline mode only), then a snapshot.
     void AdvanceSteps(uint32_t Count);
 

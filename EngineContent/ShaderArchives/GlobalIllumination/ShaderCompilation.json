@@ -1,7 +1,7 @@
 {
   "format": 1,
   "set": "GlobalIllumination",
-  "compiler": "unrecorded",
+  "compiler": "slangc 2026.14.1",
   "refresh": "python Automation/StoreShaderArchives.py --build <build> --compiler <slangc or slang-wasm.js> --sets GlobalIllumination",
   "entries": [
     {
@@ -91,6 +91,14 @@
     {
       "file": "GeometryClusterCull.CullGeometryClusters.spv",
       "spirv_sha256": "58b58b3ba880588a38ba79332ec22b098e77b9d687e1ebe9c40bc7b93b5eba2a"
+    },
+    {
+      "file": "ImpactSpark.ImpactSparkFragment.spv",
+      "spirv_sha256": "5e0b8b1615d3f28823e073f595da97f5dab7790cc0a2306f652762d0584ef1c8"
+    },
+    {
+      "file": "ImpactSpark.ImpactSparkVertex.spv",
+      "spirv_sha256": "19c6689777b13c9d88ee4f83a826cae90b2b2c3b427281609db2d9db6f23a9ce"
     },
     {
       "file": "InspectionMarch.MarchInspection.spv",
@@ -341,6 +349,14 @@
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/HostConstants.slang",
       "sha256": "e7db94f4ed7070df8437a5462c47a95ddabf41c3498825c44675364fd631b3f1"
+    },
+    {
+      "file": "Frontier/Engine/Shaders/GlobalIllumination/ImpactSpark.slang",
+      "sha256": "b748120c6203787fb45d6f9c00d92389e3c8723480f2584aa4c8928f8651007d"
+    },
+    {
+      "file": "Frontier/Engine/Shaders/GlobalIllumination/ImpactSparkLayouts.slang",
+      "sha256": "a34790224a021b91f861d118e66cafc835a04c367382820ab4460c754b370263"
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/InspectionMarch.slang",

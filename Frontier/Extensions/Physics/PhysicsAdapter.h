@@ -38,6 +38,24 @@ enum class PhysicsMotion : uint8_t
     Moving,   // falls, collides and is pushed
 };
 
+enum class PhysicsImpactSurface : uint8_t
+{
+    Other,
+    Metal,
+    Concrete,
+};
+
+// 📝 A new high-speed hard-surface contact involving a vehicle chassis, with a world-space point and a normal toward the vehicle.
+struct PhysicsImpactEvent
+{
+    uint64_t              VehicleRecord = 0;
+    uint64_t              SurfaceRecord = 0;
+    PhysicsImpactSurface  Surface = PhysicsImpactSurface::Other;
+    std::array<double, 3> PointMetres{};
+    std::array<double, 3> Normal{};
+    float                 ClosingSpeedMps = 0.0f;
+};
+
 inline constexpr uint32_t PhysicsNoBody = std::numeric_limits<uint32_t>::max();
 
 // 📝 One body as it enters the space (z up, metres). Orientation is a unit quaternion (x, y, z, w). Points and the body's position
@@ -62,6 +80,8 @@ struct PhysicsBodyDescriptor
     std::array<double, 3>            AngularVelocityRads = { 0.0, 0.0, 0.0 };       // [rad/s]
     bool                             Sleeps              = true;                    // [-] false keeps a driven body awake
     bool                             Swept               = false;                   // [-] continuous collision for fast bodies
+    PhysicsImpactSurface             ImpactSurface       = PhysicsImpactSurface::Other;
+    bool                             VehicleChassis      = false;
 };
 
 struct PhysicsBodyReading
@@ -134,6 +154,8 @@ class PhysicsAdapter
     [[nodiscard]] virtual uint64_t QueryContactsAdded() const noexcept = 0;
     [[nodiscard]] virtual uint32_t QueryWorkers() const noexcept     = 0;
     [[nodiscard]] virtual const char* QuerySolverName() const noexcept = 0;
+    // 📝 Drains hard vehicle impacts accumulated by the solver; adapters without contact events return an empty list.
+    virtual std::vector<PhysicsImpactEvent> DrainImpactEvents() { return {}; }
 };
 
 // 📝 The Jolt adapter (JoltAdapter.cpp): the only solver today.

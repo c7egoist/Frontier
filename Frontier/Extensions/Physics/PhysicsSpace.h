@@ -47,6 +47,7 @@ class PhysicsSpace
     [[nodiscard]] size_t                       QueryBodyCount() const noexcept { return Descriptors.size(); }
     [[nodiscard]] size_t                       QueryAwakeCount() const;
     [[nodiscard]] uint64_t                     QueryContactsAdded() const noexcept;
+    [[nodiscard]] std::vector<PhysicsImpactEvent> DrainImpactEvents();
     [[nodiscard]] double                       QuerySimulatedSeconds() const noexcept { return SimulatedSeconds; }
     [[nodiscard]] uint32_t                     QueryWorkers() const noexcept;
     [[nodiscard]] const char*                  QuerySolverName() const noexcept;

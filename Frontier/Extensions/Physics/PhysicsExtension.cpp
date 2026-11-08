@@ -43,6 +43,41 @@ bool EqualsIgnoreAsciiCase(std::string_view Left, std::string_view Right) noexce
     return true;
 }
 
+bool ContainsIgnoreAsciiCase(std::string_view Text, std::string_view Term) noexcept
+{
+    if (Term.empty() || Text.size() < Term.size()) return false;
+    for (size_t Start = 0; Start + Term.size() <= Text.size(); ++Start)
+    {
+        bool Equal = true;
+        for (size_t Offset = 0; Offset < Term.size(); ++Offset)
+        {
+            if (std::tolower(static_cast<unsigned char>(Text[Start + Offset])) != std::tolower(static_cast<unsigned char>(Term[Offset])))
+            {
+                Equal = false;
+                break;
+            }
+        }
+        if (Equal) return true;
+    }
+    return false;
+}
+
+PhysicsImpactSurface ResolveImpactSurface(const GeometryConfiguration& Geometry, std::string_view RecordName) noexcept
+{
+    bool Metal = false;
+    bool Concrete = false;
+    const auto Inspect = [&](std::string_view Name) {
+        Metal = Metal || ContainsIgnoreAsciiCase(Name, "metal") || ContainsIgnoreAsciiCase(Name, "steel") ||
+                ContainsIgnoreAsciiCase(Name, "iron") || ContainsIgnoreAsciiCase(Name, "aluminium") || ContainsIgnoreAsciiCase(Name, "aluminum");
+        Concrete = Concrete || ContainsIgnoreAsciiCase(Name, "concrete") || ContainsIgnoreAsciiCase(Name, "cement");
+    };
+    for (const std::string& Name : Geometry.Resolved.FamilyNames) Inspect(Name);
+    if (!Metal && !Concrete) Inspect(RecordName);
+    if (Metal) return PhysicsImpactSurface::Metal;
+    if (Concrete) return PhysicsImpactSurface::Concrete;
+    return PhysicsImpactSurface::Other;
+}
+
 bool ResolveEngineShapeInfo(std::string_view ShapeName, PhysicsShape& OutShape, std::array<double, 3>& OutUnitSize) noexcept
 {
     if (ShapeName.empty()) return false;
@@ -110,6 +145,8 @@ uint64_t ComputeGeometrySignature(const GeometryConfiguration& Geometry, bool Pr
     HashCombine64(Hash, Geometry.Resolved.Bound ? 8u : 0u);
     HashCombine64(Hash, Geometry.Resolved.Shown);
     HashCombine64(Hash, Geometry.Resolved.WorldTriangles.size());
+    for (const std::string& Family : Geometry.Resolved.FamilyNames)
+        for (unsigned char Ch : Family) HashCombine64(Hash, Ch);
     for (int Axis = 0; Axis < 3; ++Axis)
     {
         HashFloat(Hash, Geometry.Resolved.Extent[Axis]);
@@ -185,6 +222,8 @@ PhysicsExtension::RecordBinding PhysicsExtension::BuildGeometryCollider(
     const std::array<double, 3>              World3   = { Maximum[0] - Minimum[0], Maximum[1] - Minimum[1], Maximum[2] - Minimum[2] };
     const bool                               Bounded  = (World3[0] > 1.0e-4 && World3[1] > 1.0e-4 && World3[2] > 1.0e-4) &&
                                                         (World3[0] > 1.0e-2 || World3[1] > 1.0e-2 || World3[2] > 1.0e-2);
+    const PhysicsImpactSurface ImpactSurface = ResolveImpactSurface(Geometry, Record.QueryRecordName());
+    const auto AnnotateImpactSurface = [ImpactSurface](PhysicsBodyDescriptor& Collider) { Collider.ImpactSurface = ImpactSurface; };
 
     PhysicsShape          PrimitiveShape = PhysicsShape::Box;
     std::array<double, 3> UnitShapeSize  = { 1.0, 1.0, 1.0 };
@@ -232,6 +271,7 @@ PhysicsExtension::RecordBinding PhysicsExtension::BuildGeometryCollider(
                 MeshCollider.Points.push_back(Resolved.WorldTriangles[Index]);
                 MeshCollider.Triangles.push_back(static_cast<uint32_t>(Index));
             }
+            AnnotateImpactSurface(MeshCollider);
             BodyId = Space->AddBody(MeshCollider);
         }
         if (BodyId == PhysicsNoBody && Bounded)
@@ -241,6 +281,7 @@ PhysicsExtension::RecordBinding PhysicsExtension::BuildGeometryCollider(
             Collider.HalfExtentMetres = { std::max(0.01, 0.5 * World3[0]), std::max(0.01, 0.5 * World3[1]), std::max(0.01, 0.5 * World3[2]) };
             Collider.PositionMetres   = { 0.5 * (Minimum[0] + Maximum[0]), 0.5 * (Minimum[1] + Maximum[1]), 0.5 * (Minimum[2] + Maximum[2]) };
             Collider.Motion           = PhysicsMotion::Fixed;
+            AnnotateImpactSurface(Collider);
             BodyId                    = Space->AddBody(Collider);
         }
         if (BodyId != PhysicsNoBody)
@@ -299,6 +340,7 @@ PhysicsExtension::RecordBinding PhysicsExtension::BuildGeometryCollider(
         Body.PositionMetres   = Centre;
         Body.Orientation      = Orientation;
         Body.Motion           = PhysicsMotion::Moving;
+        AnnotateImpactSurface(Body);
         const uint32_t Index  = Space->AddBody(Body);
         if (Index == PhysicsNoBody)
         {
@@ -328,6 +370,7 @@ PhysicsExtension::RecordBinding PhysicsExtension::BuildGeometryCollider(
         ShapeCollider.Orientation      = ResolvePhysicsOrientation(ToDouble(Spatial.OrientationDegrees));
         ShapeCollider.Motion           = PhysicsMotion::Fixed;
         ShapeCollider.Friction         = 0.85;
+        AnnotateImpactSurface(ShapeCollider);
         const uint32_t BodyId          = Space->AddBody(ShapeCollider);
         if (BodyId != PhysicsNoBody)
         {
@@ -350,6 +393,7 @@ PhysicsExtension::RecordBinding PhysicsExtension::BuildGeometryCollider(
             MeshCollider.Points.push_back(Resolved.WorldTriangles[Index]);
             MeshCollider.Triangles.push_back(static_cast<uint32_t>(Index));
         }
+        AnnotateImpactSurface(MeshCollider);
         const uint32_t BodyId = Space->AddBody(MeshCollider);
         if (BodyId != PhysicsNoBody)
         {
@@ -374,6 +418,7 @@ PhysicsExtension::RecordBinding PhysicsExtension::BuildGeometryCollider(
         Collider.HalfExtentMetres = { std::max(0.01, 0.5 * World3[0]), std::max(0.01, 0.5 * World3[1]), std::max(0.01, 0.5 * World3[2]) };
         Collider.PositionMetres   = { 0.5 * (Minimum[0] + Maximum[0]), 0.5 * (Minimum[1] + Maximum[1]), 0.5 * (Minimum[2] + Maximum[2]) };
         Collider.Motion           = PhysicsMotion::Fixed;
+        AnnotateImpactSurface(Collider);
         const uint32_t BodyId     = Space->AddBody(Collider);
         if (BodyId != PhysicsNoBody)
         {
@@ -661,6 +706,11 @@ void PhysicsExtension::AssignVehicleInput(const PhysicsVehicleInput& Input)
 void PhysicsExtension::RequestVehicleReset()
 {
     ++Pending.ResetSerial;
+}
+
+std::vector<PhysicsImpactEvent> PhysicsExtension::DrainImpactEvents()
+{
+    return Space ? Space->DrainImpactEvents() : std::vector<PhysicsImpactEvent>{};
 }
 
 // 📝 One fixed step, on the physics thread or inline: the controls, each vehicle's forces, then the space.

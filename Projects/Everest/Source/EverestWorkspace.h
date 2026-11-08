@@ -44,6 +44,7 @@ class PhysicsExtension;
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace Everest
 {
@@ -258,6 +259,7 @@ class EverestWorkspace
     [[nodiscard]] std::optional<std::array<double, 3>> SampleLevelFlow(const std::array<double, 3>& LevelMetres);
     void ConstructFieldViewport(const ImVec2& StageMin, const ImVec2& StageMax, float Scale);
     void ConstructForceFieldWorkspace(float Scale);
+    void ConstructVehicleWorkbench(float Scale);
     void ConstructFieldTimeline(const ImVec2& Min, const ImVec2& Max, float Scale);
     void ConstructFieldBar(const ImVec2& Min, const ImVec2& Max, float Scale);
     void ConstructFieldOverlay(const ImVec2& StageMin, const ImVec2& StageMax, float Scale);
@@ -300,6 +302,7 @@ class EverestWorkspace
     std::unordered_map<uint64_t, std::array<float, 3>> PendingAlbedo{};   // [-] constructed shapes waiting for their family
     FieldViewport                                Field{};
     std::unique_ptr<Frontier::PhysicsExtension>  Physics;
+    std::vector<Frontier::SceneImpactSpark>      PendingImpactSparks{};
     std::unique_ptr<Frontier::NetworkingSession> Network;   // [-] - the replication session the Networking toggle drives
     Frontier::Vehicle::DriverInputIntegrator     DriverControls{};
 #endif

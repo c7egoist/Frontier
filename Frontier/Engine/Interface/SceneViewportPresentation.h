@@ -15,9 +15,26 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace Frontier
 {
+
+enum class SceneImpactSurface : uint32_t
+{
+    Metal,
+    Concrete,
+};
+
+// 📝 One debounced hard-impact spark transferred from Jolt; AgeSeconds advances in the renderer until its short afterglow ends.
+struct SceneImpactSpark
+{
+    SceneImpactSurface  Surface = SceneImpactSurface::Metal;
+    std::array<double, 3> PointMetres{};
+    std::array<double, 3> Normal{0.0, 0.0, 1.0};
+    float                 ClosingSpeedMps = 0.0f;
+    float                 AgeSeconds = 0.0f;
+};
 
 // 📝 What the Scene Viewport asks the host application to render and present each interface tick; the host owns the device
 //    and the renderer, the workspace owns the camera (orbit, pan, dolly, fly) and the level records the host reads.
@@ -36,6 +53,7 @@ struct SceneViewportRequest
     //    Pick answers the serial one interface tick later.
     uint64_t              PickSerial          = 0;                    // [-] advances with every click; 0 = nothing asked
     std::array<double, 2> PickPoint           = {0.0, 0.0};           // [-] fraction of the stage's width and height, from the top-left
+    std::vector<SceneImpactSpark> ImpactSparks{};                    // [-] newly generated Jolt hard-impact effects
 };
 
 // 📝 The answer to the stage's last click (GPU picking, PickProjection): the Geometry record drawn at the clicked pixel, or the

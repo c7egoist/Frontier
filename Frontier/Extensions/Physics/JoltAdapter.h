@@ -13,21 +13,39 @@
 #include <Jolt/Physics/PhysicsSystem.h>
 
 #include <atomic>
+#include <chrono>
+#include <mutex>
+#include <unordered_map>
 #include <vector>
 
 namespace Frontier
 {
 
-// 📝 Counts the contacts Jolt adds (callbacks arrive on the job threads).
+// 📝 Counts contacts and emits debounced, high-speed vehicle-to-metal/concrete impacts from Jolt's job-thread callbacks.
 class JoltContactTally final : public JPH::ContactListener
 {
   public:
-    void OnContactAdded(const JPH::Body&, const JPH::Body&, const JPH::ContactManifold&, JPH::ContactSettings&) override
-    {
-        Added.fetch_add(1, std::memory_order_relaxed);
-    }
+    void ConfigureBody(uint32_t BodyIndex, uint64_t Record, PhysicsImpactSurface Surface, bool VehicleChassis);
+    void RemoveBody(uint32_t BodyIndex);
+    void ClearImpactEvents();
+    [[nodiscard]] std::vector<PhysicsImpactEvent> DrainImpactEvents();
+
+    void OnContactAdded(const JPH::Body& Body1, const JPH::Body& Body2, const JPH::ContactManifold& Manifold, JPH::ContactSettings& Settings) override;
 
     std::atomic<uint64_t> Added{ 0 };
+
+  private:
+    struct BodyMetadata
+    {
+        uint64_t Record = 0;
+        PhysicsImpactSurface Surface = PhysicsImpactSurface::Other;
+        bool VehicleChassis = false;
+    };
+
+    std::mutex Mutex;
+    std::vector<BodyMetadata> Metadata;
+    std::vector<PhysicsImpactEvent> PendingImpacts;
+    std::unordered_map<uint64_t, std::chrono::steady_clock::time_point> LastImpactByPair;
 };
 
 class JoltAdapter final : public PhysicsAdapter
@@ -56,6 +74,7 @@ class JoltAdapter final : public PhysicsAdapter
     [[nodiscard]] uint64_t    QueryContactsAdded() const noexcept override { return Contacts.Added.load(std::memory_order_relaxed); }
     [[nodiscard]] uint32_t    QueryWorkers() const noexcept override { return Backend.QueryWorkers(); }
     [[nodiscard]] const char* QuerySolverName() const noexcept override { return "Jolt"; }
+    [[nodiscard]] std::vector<PhysicsImpactEvent> DrainImpactEvents() override { return Contacts.DrainImpactEvents(); }
 
   private:
     [[nodiscard]] JPH::RefConst<JPH::Shape> ConstructShape(const PhysicsBodyDescriptor& Descriptor) const;

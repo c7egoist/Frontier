@@ -23,6 +23,7 @@
 
 #include <filesystem>
 #include <functional>
+#include <span>
 
 namespace Frontier::GlobalIllumination
 {
@@ -89,6 +90,13 @@ constexpr uint32_t MaterialStride        = 48;   // [B] MaterialSpecification
 //    supplies them from a capture, the editor from its own scene.
 using RefreshWriteSupplier = std::function<void(uint32_t RefreshIndex)>;
 
+struct ImpactSparkGpuRecord
+{
+    std::array<float, 4> PositionAge{};
+    std::array<float, 4> NormalSpeed{};
+    std::array<float, 4> ColourSize{};
+};
+
 // 📝 Live inputs of one refresh: the camera the editor (or a capture) resolved, its cascade focus, and the inputs owned
 //    by systems outside the port. Without them the refresh is a pure device replay of supplied writes.
 //    With Environment set the host runs the demo's own sky path: AdvanceCelestial → ResolveLight → EncodeEnvironment
@@ -137,6 +145,8 @@ class IlluminationHost
     // 📝 One refresh in the demo's recording order; the supplier runs after the host's own writes (later writes win).
     bool AdvanceRefresh(const RefreshInputs* Inputs, const RefreshWriteSupplier& Prepare, const RefreshWriteSupplier& Supplier,
                         std::string* OutDiagnostic = nullptr, const RefreshInterlude* Interlude = nullptr);
+    // 📝 Writes the current viewport's bounded, short-lived spark list to the GI display pass.
+    void AssignImpactSparks(std::span<const ImpactSparkGpuRecord> Sparks);
 
     // 📝 Street-lamp heads and lamp-post lanterns of the loaded scene, in placement order (LevelStructure.js); an inactive
     //    head or lantern keeps its slot unlit.
@@ -179,7 +189,7 @@ class IlluminationHost
     std::unique_ptr<PlumeSpace>         Plume{};
 
     std::shared_ptr<DeviceRegion>       VertexRegion{}, MaterialRegion{}, RefreshRegion{}, LuminaireRegion{}, OccupantRegion{};
-    std::shared_ptr<DeviceRegion>       VehicleRegion{}, EffectRegion{}, CloudShadowParams{}, CloudParams{};
+    std::shared_ptr<DeviceRegion>       VehicleRegion{}, EffectRegion{}, ImpactSparkRegion{}, CloudShadowParams{}, CloudParams{};
     std::shared_ptr<DeviceTexture>      MoonAtlasTexture{}, StarCatalogueTexture{}, TyreMarkTexture{}, CloudShadowTexture{}, CloudColourTexture{},
                                         CloudGuideTexture{}, CaptureTexture{};
     std::shared_ptr<DeviceTextureView>  CaptureView{};

@@ -7,6 +7,7 @@
 #pragma once
 
 #include "EnvironmentOverlay.h"
+#include "Engine/Interface/SceneViewportPresentation.h"
 #include "Engine/PhysicalDynamics/FluidDynamics/PlumeSourceProjection.h"
 #include "Rendering/AnalyticIllumination/AnalyticIlluminationSequence.h"
 #include "Rendering/GlobalIllumination/OccupantRelocation.h"
@@ -72,6 +73,7 @@ struct ViewportRendering
     uint32_t         CardTileBudget = 0;       // [-] static surface-card tiles relit per refresh; 0 = the quality grade's
     VarianceSettings DiffuseFilter{0.08f, 24, 3, 4.0f};
     VarianceSettings GlossyFilter{0.12f, 12, 2, 3.0f};
+    std::vector<SceneImpactSpark> ImpactSparks{};   // [-] the short-lived, screen-space glow emitted by hard Jolt impacts
 };
 
 // 📝 What the refresh ran with, for the viewport's readout (the demo's PresentMeasurements).

@@ -9,6 +9,9 @@
 
 #include "Engine/Scene/EngineConfigurations.h"
 
+#include <string>
+#include <string_view>
+
 namespace toml
 {
 inline namespace v3
@@ -24,5 +27,9 @@ void EncodeVehicleConfiguration(const VehicleConfiguration& Configuration, toml:
 void DecodeVehicleConfiguration(const toml::table& InTable, VehicleConfiguration& Configuration);
 void EncodeTyreConfiguration(const TyreConfiguration& Configuration, toml::table& OutTable);
 void DecodeTyreConfiguration(const toml::table& InTable, TyreConfiguration& Configuration);
+
+// 📝 A standalone partial-overrides pack for vehicle response curves (.vcurves), independent of a levelspace record.
+[[nodiscard]] bool EncodeVehicleCurvePack(const VehicleConfiguration& Configuration, std::string& OutText, std::string& OutError);
+[[nodiscard]] bool DecodeVehicleCurvePack(std::string_view Text, VehicleConfiguration& Configuration, std::string& OutError);
 
 } // namespace Frontier

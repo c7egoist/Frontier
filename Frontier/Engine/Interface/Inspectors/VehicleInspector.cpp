@@ -10,6 +10,7 @@
 #if FRONTIER_EDITOR && defined(FRONTIER_WITH_INTERFACE_SDK)
 
 #include "Engine/Interface/Controls/ActionRow.h"
+#include "Engine/Interface/Controls/CurveEditor.h"
 #include "Engine/Interface/Controls/CaptionText.h"
 #include "Engine/Interface/Controls/ControlColumn.h"
 #include "Engine/Interface/Controls/ControlTheme.h"
@@ -25,6 +26,7 @@
 #include "Engine/PhysicalDynamics/Vehicle/TraceContactTyre.h"
 #include "Engine/Scene/SceneDirectory.h"
 #include "Engine/Scene/VehicleReadings.h"
+#include "Engine/Scene/VehicleRecordCodec.h"
 
 #include <imgui.h>
 
@@ -33,6 +35,9 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -458,211 +463,103 @@ bool VehicleInspector::ConstructCurveEditor(ControlColumn& Page)
     CurveLabels.reserve(Curves.size());
     for (const Vehicle::VehicleCurve& Entry : Curves) CurveLabels.push_back(Entry.Label.c_str());
 
-    BeginSection(Page, "Interactive curve authoring", "TrendingUp", Curves[static_cast<size_t>(SelectedCurveIndex)].Section.c_str(),
-                 "Drag handles to reshape any engine, turbocharger or supercharger map; double-click canvas to insert, right-click a handle to remove.");
+    const Vehicle::VehicleCurve& ActiveEntry = Curves[static_cast<size_t>(SelectedCurveIndex)];
+    BeginSection(Page, "Interactive curve authoring", "TrendingUp", ActiveEntry.Section.c_str(),
+                 "Drag handles to reshape the response; double-click inserts a sampled knot, right-click removes one. X values stay ordered and within the authored limits.");
     if (SelectRow::Construct(Page, "VehicleCurveSelect", "Authored map", CurveLabels.data(), static_cast<int>(CurveLabels.size()), SelectedCurveIndex))
     {
-        SelectedCurvePoint = 0;
-        DraggedCurvePoint  = -1;
+        CurveState = {};
     }
 
-    Vehicle::VehicleCurve& ActiveEntry = Curves[static_cast<size_t>(SelectedCurveIndex)];
-    Vehicle::Curve&        TargetCurve = *ActiveEntry.Target;
-    if (TargetCurve.X.size() < 2u || TargetCurve.Y.size() < 2u)
+    Vehicle::VehicleCurve& SelectedEntry = Curves[static_cast<size_t>(SelectedCurveIndex)];
+    if (SelectedEntry.Target != nullptr)
     {
-        TargetCurve = Vehicle::Curve{};
-        TargetCurve.Add(0.0f, 1.0f);
-        TargetCurve.Add(7000.0f, 1.0f);
-    }
-    SelectedCurvePoint = std::clamp(SelectedCurvePoint, 0, static_cast<int>(TargetCurve.X.size()) - 1);
-
-    float MinX = TargetCurve.X.front(), MaxX = TargetCurve.X.back();
-    if (MaxX - MinX < 1.0e-3f) MaxX = MinX + 1.0f;
-    float MinY = 0.0f, MaxY = 1.0f;
-    for (const float SampleY : TargetCurve.Y)
-    {
-        MinY = std::min(MinY, SampleY);
-        MaxY = std::max(MaxY, SampleY);
-    }
-    const float SpanY = std::max(1.0e-2f, (MaxY - MinY) * 1.18f);
-    MaxY = MinY + SpanY;
-
-    const float  Scale  = Page.QueryScale();
-    const ImVec2 Origin = Page.Space(172.0f, 4.0f, 8.0f);
-    const float  Width  = Page.QueryWidth();
-    const float  Height = 172.0f * Scale;
-    ImDrawList*  Draw   = ImGui::GetWindowDrawList();
-
-    Draw->AddRectFilled(Origin, ImVec2(Origin.x + Width, Origin.y + Height), IM_COL32(24, 26, 31, 255), 10.0f * Scale);
-    Draw->AddRect(Origin, ImVec2(Origin.x + Width, Origin.y + Height), IM_COL32(255, 255, 255, 22), 10.0f * Scale);
-
-    const float Left = Origin.x + 38.0f * Scale, Right = Origin.x + Width - 18.0f * Scale;
-    const float Top  = Origin.y + 24.0f * Scale, Bottom = Origin.y + Height - 22.0f * Scale;
-
-    for (int Grid = 1; Grid <= 3; ++Grid)
-    {
-        const float Y = Bottom - (Bottom - Top) * static_cast<float>(Grid) / 4.0f;
-        Draw->AddLine(ImVec2(Left, Y), ImVec2(Right, Y), IM_COL32(255, 255, 255, 16), 1.0f);
+        const CurveEditorOptions Options{
+            .Caption = SelectedEntry.Label.c_str(),
+            .AxisX = SelectedEntry.AxisX.c_str(),
+            .AxisY = SelectedEntry.AxisY.c_str(),
+            .MinimumX = static_cast<float>(SelectedEntry.MinimumX),
+            .MaximumX = static_cast<float>(SelectedEntry.MaximumX),
+            .MinimumY = static_cast<float>(SelectedEntry.MinimumY),
+            .MaximumY = static_cast<float>(SelectedEntry.MaximumY),
+            .Height = 172.0f,
+            .MaximumKnots = 20u,
+        };
+        Changed |= CurveEditor::Construct(Page, "VehicleCurve", *SelectedEntry.Target, Options, CurveState);
     }
 
-    const auto ToScreen = [&](float X, float Y)
+    ImGui::TextDisabled("Standalone curve pack (.vcurves)");
+    ImGui::SetNextItemWidth(-1.0f);
+    ImGui::InputText("##VehicleCurvePackPath", CurvePackPath, sizeof(CurvePackPath));
+    const std::array<ActionEntry, 2> PackActions = {{
+        { "##VehicleCurvePackImport", "Import curves", true, "Validate and apply known curves without changing other vehicle settings." },
+        { "##VehicleCurvePackExport", "Export curves", true, "Write all registered response curves as a versioned .vcurves TOML file." },
+    }};
+    const int PackAction = ActionRow::Construct(Page, PackActions, ActionRowLook{ .MarginTop = 6.0f, .MarginBottom = 4.0f });
+    if (PackAction >= 0)
     {
-        const float NormX = std::clamp((X - MinX) / (MaxX - MinX), 0.0f, 1.0f);
-        const float NormY = std::clamp((Y - MinY) / (MaxY - MinY), 0.0f, 1.0f);
-        return ImVec2(Left + (Right - Left) * NormX, Bottom - (Bottom - Top) * NormY);
-    };
-
-    ImGui::SetCursorScreenPos(Origin);
-    ImGui::InvisibleButton("##VehicleCurveCanvas", ImVec2(Width, Height),
-                           ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
-    const bool   Hovered = ImGui::IsItemHovered();
-    const ImVec2 Mouse   = ImGui::GetIO().MousePos;
-
-    if (Hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
-    {
-        int   BestPoint    = -1;
-        float BestDistSq   = (12.0f * Scale) * (12.0f * Scale);
-        for (size_t Index = 0; Index < TargetCurve.X.size(); ++Index)
+        const std::filesystem::path PackPath(CurvePackPath);
+        const bool IsCurvePack = PackPath.extension() == ".vcurves";
+        if (PackPath.empty() || !IsCurvePack)
         {
-            const ImVec2 Handle = ToScreen(TargetCurve.X[Index], TargetCurve.Y[Index]);
-            const float  Dx     = Mouse.x - Handle.x;
-            const float  Dy     = Mouse.y - Handle.y;
-            if (Dx * Dx + Dy * Dy <= BestDistSq)
+            CurvePackStatus = "Choose a file path ending in .vcurves.";
+            CurvePackStatusError = true;
+        }
+        else if (PackAction == 0)
+        {
+            std::ifstream Input(PackPath, std::ios::binary);
+            if (!Input)
             {
-                BestDistSq = Dx * Dx + Dy * Dy;
-                BestPoint  = static_cast<int>(Index);
+                CurvePackStatus = "Could not open " + PackPath.string();
+                CurvePackStatusError = true;
+            }
+            else
+            {
+                const std::string Text((std::istreambuf_iterator<char>(Input)), std::istreambuf_iterator<char>());
+                std::string Error;
+                if (DecodeVehicleCurvePack(Text, Parameters, Error))
+                {
+                    CurvePackStatus = "Imported curves from " + PackPath.string();
+                    CurvePackStatusError = false;
+                    Changed = true;
+                }
+                else
+                {
+                    CurvePackStatus = std::move(Error);
+                    CurvePackStatusError = true;
+                }
             }
         }
-        if (BestPoint >= 0)
+        else
         {
-            SelectedCurvePoint = BestPoint;
-            DraggedCurvePoint  = BestPoint;
-        }
-    }
-    if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) DraggedCurvePoint = -1;
-
-    if (DraggedCurvePoint >= 0 && static_cast<size_t>(DraggedCurvePoint) < TargetCurve.X.size() && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0.0f))
-    {
-        const size_t PointIdx = static_cast<size_t>(DraggedCurvePoint);
-        const float  NormX    = std::clamp((Mouse.x - Left) / std::max(1.0f, Right - Left), 0.0f, 1.0f);
-        const float  NormY    = std::clamp((Bottom - Mouse.y) / std::max(1.0f, Bottom - Top), 0.0f, 1.0f);
-        float        NewX     = MinX + NormX * (MaxX - MinX);
-        const float  MarginX  = (MaxX - MinX) * 0.01f;
-        if (PointIdx > 0u) NewX = std::max(NewX, TargetCurve.X[PointIdx - 1u] + MarginX);
-        if (PointIdx + 1u < TargetCurve.X.size()) NewX = std::min(NewX, TargetCurve.X[PointIdx + 1u] - MarginX);
-        if (PointIdx > 0u && PointIdx + 1u < TargetCurve.X.size()) TargetCurve.X[PointIdx] = NewX;
-        TargetCurve.Y[PointIdx] = std::max(0.0f, MinY + NormY * (MaxY - MinY));
-        Changed                 = true;
-    }
-
-    if (Hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && TargetCurve.X.size() < 20u)
-    {
-        const float NormX = std::clamp((Mouse.x - Left) / std::max(1.0f, Right - Left), 0.02f, 0.98f);
-        const float NormY = std::clamp((Bottom - Mouse.y) / std::max(1.0f, Bottom - Top), 0.0f, 1.0f);
-        const float NewX  = MinX + NormX * (MaxX - MinX);
-        const float NewY  = std::max(0.0f, MinY + NormY * (MaxY - MinY));
-        auto InsertAt = std::lower_bound(TargetCurve.X.begin(), TargetCurve.X.end(), NewX);
-        const size_t Offset = static_cast<size_t>(std::distance(TargetCurve.X.begin(), InsertAt));
-        if (Offset > 0u && Offset < TargetCurve.X.size() &&
-            std::fabs(TargetCurve.X[Offset] - NewX) > (MaxX - MinX) * 0.01f &&
-            std::fabs(TargetCurve.X[Offset - 1u] - NewX) > (MaxX - MinX) * 0.01f)
-        {
-            TargetCurve.X.insert(TargetCurve.X.begin() + static_cast<std::ptrdiff_t>(Offset), NewX);
-            TargetCurve.Y.insert(TargetCurve.Y.begin() + static_cast<std::ptrdiff_t>(Offset), NewY);
-            SelectedCurvePoint = static_cast<int>(Offset);
-            Changed            = true;
-        }
-    }
-
-    if (Hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right) && TargetCurve.X.size() > 2u)
-    {
-        for (size_t Index = 0; Index < TargetCurve.X.size(); ++Index)
-        {
-            const ImVec2 Handle = ToScreen(TargetCurve.X[Index], TargetCurve.Y[Index]);
-            const float  Dx     = Mouse.x - Handle.x;
-            const float  Dy     = Mouse.y - Handle.y;
-            if (Dx * Dx + Dy * Dy <= (12.0f * Scale) * (12.0f * Scale))
+            std::string Text, Error;
+            if (!EncodeVehicleCurvePack(Parameters, Text, Error))
             {
-                TargetCurve.X.erase(TargetCurve.X.begin() + static_cast<std::ptrdiff_t>(Index));
-                TargetCurve.Y.erase(TargetCurve.Y.begin() + static_cast<std::ptrdiff_t>(Index));
-                SelectedCurvePoint = std::clamp(SelectedCurvePoint, 0, static_cast<int>(TargetCurve.X.size()) - 1);
-                Changed            = true;
-                break;
+                CurvePackStatus = std::move(Error);
+                CurvePackStatusError = true;
+            }
+            else
+            {
+                std::error_code FileError;
+                if (!PackPath.parent_path().empty()) std::filesystem::create_directories(PackPath.parent_path(), FileError);
+                std::ofstream Output(PackPath, std::ios::binary | std::ios::trunc);
+                if (FileError || !Output || !Output.write(Text.data(), static_cast<std::streamsize>(Text.size())))
+                {
+                    CurvePackStatus = "Could not write " + PackPath.string();
+                    CurvePackStatusError = true;
+                }
+                else
+                {
+                    CurvePackStatus = "Exported curves to " + PackPath.string();
+                    CurvePackStatusError = false;
+                }
             }
         }
     }
-
-    ImVec2 PreviousSample{};
-    for (int Step = 0; Step <= 100; ++Step)
+    if (!CurvePackStatus.empty())
     {
-        const float  SampleX = MinX + (MaxX - MinX) * static_cast<float>(Step) / 100.0f;
-        const float  SampleY = TargetCurve.Sample(SampleX);
-        const ImVec2 Current = ToScreen(SampleX, SampleY);
-        if (Step > 0) Draw->AddLine(PreviousSample, Current, IM_COL32(236, 174, 78, 255), 2.1f * Scale);
-        PreviousSample = Current;
-    }
-
-    for (size_t Index = 0; Index < TargetCurve.X.size(); ++Index)
-    {
-        const ImVec2 Handle = ToScreen(TargetCurve.X[Index], TargetCurve.Y[Index]);
-        const bool   Chosen = static_cast<int>(Index) == SelectedCurvePoint;
-        Draw->AddCircleFilled(Handle, (Chosen ? 5.5f : 4.0f) * Scale,
-                              Chosen ? IM_COL32(92, 220, 160, 255) : IM_COL32(236, 174, 78, 255));
-        Draw->AddCircle(Handle, (Chosen ? 7.0f : 5.0f) * Scale, IM_COL32(16, 18, 22, 240), 0, 1.5f * Scale);
-    }
-
-    char Caption[128];
-    std::snprintf(Caption, sizeof(Caption), "%s (%s → %s) · %zu knots",
-                  ActiveEntry.Label.c_str(), ActiveEntry.AxisX.c_str(), ActiveEntry.AxisY.c_str(), TargetCurve.X.size());
-    Draw->AddText(ImVec2(Origin.x + 12.0f * Scale, Origin.y + 5.0f * Scale), IM_COL32(170, 175, 184, 255), Caption);
-    std::snprintf(Caption, sizeof(Caption), "%.2g – %.0f %s", MinX, MaxX, ActiveEntry.AxisX.c_str());
-    Draw->AddText(ImVec2(Left, Bottom + 4.0f * Scale), IM_COL32(142, 146, 154, 255), Caption);
-    std::snprintf(Caption, sizeof(Caption), "%.2g", MaxY);
-    Draw->AddText(ImVec2(Origin.x + 6.0f * Scale, Top - 5.0f * Scale), IM_COL32(236, 174, 78, 255), Caption);
-
-    SelectedCurvePoint = std::clamp(SelectedCurvePoint, 0, static_cast<int>(TargetCurve.X.size()) - 1);
-    const size_t Knot  = static_cast<size_t>(SelectedCurvePoint);
-    int KnotNumber     = SelectedCurvePoint + 1;
-    if (SectionRows::Count(Page, "VehicleCurveKnotIdx", "Selected knot", KnotNumber, 1, static_cast<int>(TargetCurve.X.size()), ""))
-        SelectedCurvePoint = std::clamp(KnotNumber - 1, 0, static_cast<int>(TargetCurve.X.size()) - 1);
-
-    const double LowerX = Knot > 0u ? static_cast<double>(TargetCurve.X[Knot - 1u]) + 1.0e-3 : ActiveEntry.MinimumX;
-    const double UpperX = Knot + 1u < TargetCurve.X.size() ? static_cast<double>(TargetCurve.X[Knot + 1u]) - 1.0e-3
-                                                           : std::max(ActiveEntry.MaximumX, static_cast<double>(MaxX) * 1.25);
-    double KnotX        = TargetCurve.X[Knot];
-    double KnotY        = TargetCurve.Y[Knot];
-    if (UpperX > LowerX + 1.0e-3 && Measure(Page, "VehicleCurveKnotX", "Knot X", KnotX, LowerX, UpperX, (UpperX - LowerX) / 250.0, ActiveEntry.AxisX.c_str()))
-    {
-        TargetCurve.X[Knot] = static_cast<float>(std::clamp(KnotX, LowerX, UpperX));
-        Changed             = true;
-    }
-    const double UpperY = std::max(ActiveEntry.MaximumY, static_cast<double>(MaxY) * 1.4);
-    if (Measure(Page, "VehicleCurveKnotY", "Knot Y", KnotY, ActiveEntry.MinimumY, UpperY, std::max(1.0e-3, (UpperY - ActiveEntry.MinimumY) / 300.0), ActiveEntry.AxisY.c_str()))
-    {
-        TargetCurve.Y[Knot] = static_cast<float>(std::max(ActiveEntry.MinimumY, KnotY));
-        Changed             = true;
-    }
-
-    const std::array<ActionEntry, 2> KnotActions = { {
-        { "##VehicleCurveInsert", "+ Insert knot after selected", TargetCurve.X.size() < 20u, nullptr },
-        { "##VehicleCurveDelete", "- Remove selected knot", TargetCurve.X.size() > 2u, nullptr } } };
-    const int KnotAction = ActionRow::Construct(Page, KnotActions, ActionRowLook{ .MarginTop = 8.0f, .MarginBottom = 10.0f });
-    if (KnotAction == 0 && TargetCurve.X.size() < 20u)
-    {
-        const size_t LeftIdx  = Knot + 1u < TargetCurve.X.size() ? Knot : (TargetCurve.X.size() - 2u);
-        const float  MidX     = 0.5f * (TargetCurve.X[LeftIdx] + TargetCurve.X[LeftIdx + 1u]);
-        const float  MidY     = TargetCurve.Sample(MidX);
-        TargetCurve.X.insert(TargetCurve.X.begin() + static_cast<std::ptrdiff_t>(LeftIdx + 1u), MidX);
-        TargetCurve.Y.insert(TargetCurve.Y.begin() + static_cast<std::ptrdiff_t>(LeftIdx + 1u), MidY);
-        SelectedCurvePoint = static_cast<int>(LeftIdx + 1u);
-        Changed            = true;
-    }
-    else if (KnotAction == 1 && TargetCurve.X.size() > 2u)
-    {
-        TargetCurve.X.erase(TargetCurve.X.begin() + static_cast<std::ptrdiff_t>(Knot));
-        TargetCurve.Y.erase(TargetCurve.Y.begin() + static_cast<std::ptrdiff_t>(Knot));
-        SelectedCurvePoint = std::clamp(SelectedCurvePoint, 0, static_cast<int>(TargetCurve.X.size()) - 1);
-        Changed            = true;
+        const ImVec4 StatusColour = CurvePackStatusError ? ImVec4(0.95f, 0.42f, 0.35f, 1.0f) : ImVec4(0.42f, 0.80f, 0.62f, 1.0f);
+        ImGui::TextColored(StatusColour, "%s", CurvePackStatus.c_str());
     }
     EndSection(Page);
     return Changed;

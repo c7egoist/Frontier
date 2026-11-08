@@ -92,6 +92,11 @@ uint64_t PhysicsSpace::QueryContactsAdded() const noexcept
     return Adapter->QueryContactsAdded();
 }
 
+std::vector<PhysicsImpactEvent> PhysicsSpace::DrainImpactEvents()
+{
+    return Adapter->DrainImpactEvents();
+}
+
 uint32_t PhysicsSpace::QueryWorkers() const noexcept
 {
     return Adapter->QueryWorkers();

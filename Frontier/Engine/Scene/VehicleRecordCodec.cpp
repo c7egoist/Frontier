@@ -145,14 +145,30 @@ void DecodeVehicleConfiguration(const toml::table& InTable, VehicleConfiguration
         const toml::array* Samples = Section != nullptr ? (*Section)[Entry.Key].as_array() : nullptr;
         if (Samples == nullptr || Samples->size() < 2) continue;
         Vehicle::Curve Loaded;
+        bool Valid = true;
         for (const toml::node& Sample : *Samples)
         {
             const toml::array* Pair = Sample.as_array();
-            if (Pair == nullptr || Pair->size() != 2) continue;
+            if (Pair == nullptr || Pair->size() != 2)
+            {
+                Valid = false;
+                break;
+            }
             const auto X = (*Pair)[0].value<double>(), Y = (*Pair)[1].value<double>();
-            if (X && Y && (Loaded.X.empty() || *X > Loaded.X.back())) Loaded.Add(static_cast<float>(*X), static_cast<float>(*Y));
+            if (!X || !Y || !std::isfinite(*X) || !std::isfinite(*Y))
+            {
+                Valid = false;
+                break;
+            }
+            const float RuntimeX = static_cast<float>(*X), RuntimeY = static_cast<float>(*Y);
+            if (!std::isfinite(RuntimeX) || !std::isfinite(RuntimeY) || (!Loaded.X.empty() && !(RuntimeX > Loaded.X.back())))
+            {
+                Valid = false;
+                break;
+            }
+            Loaded.Add(RuntimeX, RuntimeY);
         }
-        if (Loaded.X.size() >= 2) *Entry.Target = Loaded;
+        if (Valid && Loaded.X.size() >= 2) *Entry.Target = std::move(Loaded);
     }
     if (const toml::table* Gearbox = FindSection(InTable, "gearbox"))
         if (const toml::array* Ratios = (*Gearbox)["ratios"].as_array())
@@ -182,6 +198,148 @@ void DecodeTyreConfiguration(const toml::table& InTable, TyreConfiguration& Conf
     Configuration.ColdPressure = static_cast<float>(InTable["cold_pressure_pa"].value_or(static_cast<double>(Configuration.ColdPressure)));
     Configuration.SetName      = InTable["set"].value_or(Configuration.SetName);
     Configuration.AdvanceRevision();
+}
+
+
+bool EncodeVehicleCurvePack(const VehicleConfiguration& Configuration, std::string& OutText, std::string& OutError)
+{
+    OutText.clear();
+    OutError.clear();
+    Vehicle::VehicleSpecification Specification = Configuration.Specification;
+    toml::table CurvesTable;
+    for (const Vehicle::VehicleCurve& Entry : Vehicle::EnumerateVehicleCurves(Specification))
+    {
+        if (Entry.Target == nullptr || Entry.Target->X.size() < 2u || Entry.Target->X.size() != Entry.Target->Y.size())
+        {
+            OutError = "Curve " + Entry.Section + "." + Entry.Key + " must contain at least two matching knots.";
+            return false;
+        }
+        toml::array Points;
+        for (size_t Index = 0; Index < Entry.Target->X.size(); ++Index)
+        {
+            const float X = Entry.Target->X[Index];
+            const float Y = Entry.Target->Y[Index];
+            if (!std::isfinite(X) || !std::isfinite(Y) || (Index > 0u && !(X > Entry.Target->X[Index - 1u])))
+            {
+                OutError = "Curve " + Entry.Section + "." + Entry.Key + " contains a non-finite or unordered knot.";
+                return false;
+            }
+            Points.push_back(toml::array{static_cast<double>(X), static_cast<double>(Y)});
+        }
+        ResolveSection(CurvesTable, Entry.Section).insert_or_assign(Entry.Key, std::move(Points));
+    }
+
+    toml::table Root;
+    Root.insert_or_assign("format", "frontier.vehicle-curves");
+    Root.insert_or_assign("version", static_cast<int64_t>(1));
+    Root.insert_or_assign("vehicle", Configuration.Specification.Name);
+    Root.insert_or_assign("curves", std::move(CurvesTable));
+    std::ostringstream Output;
+    Output << Root << '\n';
+    OutText = std::move(Output).str();
+    return true;
+}
+
+bool DecodeVehicleCurvePack(std::string_view Text, VehicleConfiguration& Configuration, std::string& OutError)
+{
+    OutError.clear();
+    toml::table Root;
+    try
+    {
+        Root = toml::parse(std::string(Text));
+    }
+    catch (const toml::parse_error& Error)
+    {
+        OutError = std::string("Invalid .vcurves TOML: ") + std::string(Error.description());
+        return false;
+    }
+
+    const auto Format = Root["format"].value<std::string>();
+    if (!Format || *Format != "frontier.vehicle-curves")
+    {
+        OutError = "The file is not a Frontier vehicle-curves pack.";
+        return false;
+    }
+    const auto Version = Root["version"].value<int64_t>();
+    if (!Version)
+    {
+        OutError = "The vehicle-curves pack is missing its integer version.";
+        return false;
+    }
+    if (*Version != 1)
+    {
+        OutError = "Unsupported .vcurves version " + std::to_string(*Version) + ".";
+        return false;
+    }
+    const toml::table* CurvesTable = Root["curves"].as_table();
+    if (CurvesTable == nullptr)
+    {
+        OutError = "The .vcurves pack has no [curves] table.";
+        return false;
+    }
+
+    struct PendingCurve
+    {
+        Vehicle::Curve* Target = nullptr;
+        Vehicle::Curve  Value{};
+        std::string     Name{};
+    };
+    std::vector<PendingCurve> Pending;
+    for (const Vehicle::VehicleCurve& Entry : Vehicle::EnumerateVehicleCurves(Configuration.Specification))
+    {
+        const toml::table* Section = FindSection(*CurvesTable, Entry.Section);
+        const toml::node*  Node = Section != nullptr ? Section->get(Entry.Key) : nullptr;
+        if (Node == nullptr) continue; // 📝 Known but omitted curves keep their current values; future curve names are ignored.
+        const toml::array* Points = Node->as_array();
+        if (Points == nullptr || Points->size() < 2u || Points->size() > 4096u)
+        {
+            OutError = "Curve " + Entry.Section + "." + Entry.Key + " must be an array of 2 to 4096 knots.";
+            return false;
+        }
+
+        PendingCurve Candidate;
+        Candidate.Target = Entry.Target;
+        Candidate.Name = Entry.Section + "." + Entry.Key;
+        Candidate.Value.X.reserve(Points->size());
+        Candidate.Value.Y.reserve(Points->size());
+        for (size_t Index = 0; Index < Points->size(); ++Index)
+        {
+            const toml::array* Pair = (*Points)[Index].as_array();
+            if (Pair == nullptr || Pair->size() != 2u)
+            {
+                OutError = "Curve " + Candidate.Name + " knot " + std::to_string(Index + 1u) + " must contain exactly [x, y].";
+                return false;
+            }
+            const auto X = (*Pair)[0].value<double>();
+            const auto Y = (*Pair)[1].value<double>();
+            if (!X || !Y || !std::isfinite(*X) || !std::isfinite(*Y))
+            {
+                OutError = "Curve " + Candidate.Name + " knot " + std::to_string(Index + 1u) + " must contain finite numbers.";
+                return false;
+            }
+            const float RuntimeX = static_cast<float>(*X);
+            const float RuntimeY = static_cast<float>(*Y);
+            if (!std::isfinite(RuntimeX) || !std::isfinite(RuntimeY) ||
+                (Index > 0u && !(RuntimeX > Candidate.Value.X.back())))
+            {
+                OutError = "Curve " + Candidate.Name + " X knots must remain strictly increasing after conversion to runtime floats.";
+                return false;
+            }
+            Candidate.Value.Add(RuntimeX, RuntimeY);
+        }
+        Pending.push_back(std::move(Candidate));
+    }
+
+    if (Pending.empty())
+    {
+        OutError = "The .vcurves pack contains no curves recognized by this vehicle.";
+        return false;
+    }
+
+    // 📝 Validation is transactional: no authored curve or revision changes until every recognized entry has passed.
+    for (PendingCurve& Candidate : Pending) *Candidate.Target = std::move(Candidate.Value);
+    Configuration.AdvanceRevision();
+    return true;
 }
 
 } // namespace Frontier

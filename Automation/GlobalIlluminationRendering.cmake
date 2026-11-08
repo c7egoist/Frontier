@@ -85,6 +85,8 @@ set(FRONTIER_GLOBAL_ILLUMINATION_ENTRIES
     "DisplayExposure:IntegrateExposure:compute"
     "DisplayPresent:PresentVertex:vertex"
     "DisplayPresent:PresentFragment:fragment"
+    "ImpactSpark:ImpactSparkVertex:vertex"
+    "ImpactSpark:ImpactSparkFragment:fragment"
     "EnvironmentVisibility:ProjectEnvironmentVisibility:compute"
     "EnvironmentVisibility:RestoreEnvironmentRadiance:compute"
     "EnvironmentLighting:ProjectEnvironmentSky:compute"

@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace Frontier
 {
@@ -47,6 +48,93 @@ JPH::Quat ToRotation(const std::array<double, 4>& Rotation)
 }
 
 } // namespace
+
+void JoltContactTally::ConfigureBody(uint32_t BodyIndex, uint64_t Record, PhysicsImpactSurface Surface, bool VehicleChassis)
+{
+    std::lock_guard Lock(Mutex);
+    if (Metadata.size() <= BodyIndex) Metadata.resize(static_cast<size_t>(BodyIndex) + 1u);
+    Metadata[BodyIndex] = BodyMetadata{ Record, Surface, VehicleChassis };
+}
+
+void JoltContactTally::RemoveBody(uint32_t BodyIndex)
+{
+    std::lock_guard Lock(Mutex);
+    if (BodyIndex < Metadata.size()) Metadata[BodyIndex] = {};
+}
+
+void JoltContactTally::ClearImpactEvents()
+{
+    std::lock_guard Lock(Mutex);
+    PendingImpacts.clear();
+    LastImpactByPair.clear();
+}
+
+std::vector<PhysicsImpactEvent> JoltContactTally::DrainImpactEvents()
+{
+    std::lock_guard Lock(Mutex);
+    std::vector<PhysicsImpactEvent> Events;
+    Events.swap(PendingImpacts);
+    return Events;
+}
+
+void JoltContactTally::OnContactAdded(const JPH::Body& Body1, const JPH::Body& Body2, const JPH::ContactManifold& Manifold,
+                                     JPH::ContactSettings& Settings)
+{
+    Added.fetch_add(1, std::memory_order_relaxed);
+    (void)Settings;
+
+    const float ClosingSpeed = std::abs((Body1.GetLinearVelocity() - Body2.GetLinearVelocity()).Dot(Manifold.mWorldSpaceNormal));
+    constexpr float ImpactSpeedThresholdMps = 4.5f;
+    if (!(ClosingSpeed >= ImpactSpeedThresholdMps)) return;
+
+    if (Manifold.mRelativeContactPointsOn1.size() == 0 || Manifold.mRelativeContactPointsOn2.size() == 0) return;
+    const uint32_t Index1 = Body1.GetID().GetIndex();
+    const uint32_t Index2 = Body2.GetID().GetIndex();
+    const JPH::Vec3 Normal12 = Manifold.mWorldSpaceNormal;
+    const JPH::Vec3 RelativePoint = 0.5f * (Manifold.mRelativeContactPointsOn1[0] + Manifold.mRelativeContactPointsOn2[0]);
+    const JPH::RVec3 Point = Manifold.mBaseOffset + RelativePoint;
+    const auto Now = std::chrono::steady_clock::now();
+
+    std::lock_guard Lock(Mutex);
+    if (Index1 >= Metadata.size() || Index2 >= Metadata.size()) return;
+    const BodyMetadata& Meta1 = Metadata[Index1];
+    const BodyMetadata& Meta2 = Metadata[Index2];
+    const bool VehicleFirst = Meta1.VehicleChassis && (Meta2.Surface == PhysicsImpactSurface::Metal || Meta2.Surface == PhysicsImpactSurface::Concrete);
+    const bool VehicleSecond = Meta2.VehicleChassis && (Meta1.Surface == PhysicsImpactSurface::Metal || Meta1.Surface == PhysicsImpactSurface::Concrete);
+    if (!VehicleFirst && !VehicleSecond) return;
+
+    const uint64_t VehicleRecord = VehicleFirst ? Meta1.Record : Meta2.Record;
+    const uint64_t SurfaceRecord = VehicleFirst ? Meta2.Record : Meta1.Record;
+    const PhysicsImpactSurface Surface = VehicleFirst ? Meta2.Surface : Meta1.Surface;
+    if (VehicleRecord == 0 || SurfaceRecord == 0) return;
+    const uint64_t LowRecord = std::min(VehicleRecord, SurfaceRecord);
+    const uint64_t HighRecord = std::max(VehicleRecord, SurfaceRecord);
+    uint64_t PairKey = LowRecord + 0x9E3779B97F4A7C15ull;
+    PairKey ^= HighRecord + (PairKey << 6u) + (PairKey >> 2u);
+    if (const auto Last = LastImpactByPair.find(PairKey); Last != LastImpactByPair.end() && Now - Last->second < std::chrono::milliseconds(250)) return;
+    LastImpactByPair[PairKey] = Now;
+
+    // 📝 Keep the queue bounded if a scene contains many simultaneously colliding vehicles.
+    if (PendingImpacts.size() >= 64u) PendingImpacts.erase(PendingImpacts.begin());
+    PhysicsImpactEvent Event;
+    Event.VehicleRecord = VehicleRecord;
+    Event.SurfaceRecord = SurfaceRecord;
+    Event.Surface = Surface;
+    Event.PointMetres = { static_cast<double>(Point.GetX()), static_cast<double>(Point.GetY()), static_cast<double>(Point.GetZ()) };
+    const float Direction = VehicleFirst ? -1.0f : 1.0f;
+    Event.Normal = { Direction * static_cast<double>(Normal12.GetX()), Direction * static_cast<double>(Normal12.GetY()),
+                     Direction * static_cast<double>(Normal12.GetZ()) };
+    Event.ClosingSpeedMps = ClosingSpeed;
+    PendingImpacts.push_back(Event);
+
+    if (LastImpactByPair.size() > 512u)
+    {
+        for (auto It = LastImpactByPair.begin(); It != LastImpactByPair.end();)
+            if (Now - It->second > std::chrono::seconds(2)) It = LastImpactByPair.erase(It);
+            else ++It;
+        while (LastImpactByPair.size() > 512u) LastImpactByPair.erase(LastImpactByPair.begin());
+    }
+}
 
 std::unique_ptr<PhysicsAdapter> ConstructJoltAdapter(const PhysicsSpaceSettings& Settings)
 {
@@ -296,6 +384,7 @@ uint32_t JoltAdapter::AddBody(const PhysicsBodyDescriptor& Descriptor)
     const uint32_t Index = static_cast<uint32_t>(Bodies.size());
     Bodies.push_back(Body);
     if (Body.GetIndex() < BodyIndices.size()) BodyIndices[Body.GetIndex()] = Index;
+    Contacts.ConfigureBody(Body.GetIndex(), Descriptor.Record, Descriptor.ImpactSurface, Descriptor.VehicleChassis);
     return Index;
 }
 
@@ -305,6 +394,7 @@ void JoltAdapter::RemoveBody(uint32_t Index)
     const JPH::BodyID Body = Bodies[Index];
     if (Body.IsInvalid()) return;
     if (Body.GetIndex() < BodyIndices.size()) BodyIndices[Body.GetIndex()] = PhysicsNoBody;
+    Contacts.RemoveBody(Body.GetIndex());
     JPH::BodyInterface& Interface = Solver.GetBodyInterface();
     Interface.RemoveBody(Body);
     Interface.DestroyBody(Body);

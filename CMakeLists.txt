@@ -178,6 +178,7 @@ add_library(FrontierSceneEditorUI STATIC
     Frontier/Engine/Interface/ParticleEditor/ParticleEditorWorkspace.cpp
     Frontier/Engine/Interface/Controls/ControlTheme.cpp
     Frontier/Engine/Interface/Controls/ControlColumn.cpp
+    Frontier/Engine/Interface/Controls/CurveEditor.cpp
     Frontier/Engine/Interface/Controls/GlyphRun.cpp
     Frontier/Engine/Interface/Controls/GlyphSymbol.cpp
     Frontier/Engine/Interface/Controls/DiagramPen.cpp
@@ -839,6 +840,10 @@ if(BUILD_TESTING)
     target_link_libraries(PhysicsSpaceValidation PRIVATE FrontierPhysicsExtension)
     add_test(NAME PhysicsSpaceValidation COMMAND PhysicsSpaceValidation "${CMAKE_SOURCE_DIR}/Exhibits/Physics")
     set_tests_properties(PhysicsSpaceValidation PROPERTIES TIMEOUT 300)
+    add_executable(VehicleImpactEventValidation Exhibits/Physics/Code/VehicleImpactEventValidation.cpp)
+    target_link_libraries(VehicleImpactEventValidation PRIVATE FrontierPhysicsExtension)
+    add_test(NAME VehicleImpactEventValidation COMMAND VehicleImpactEventValidation)
+    set_tests_properties(VehicleImpactEventValidation PROPERTIES TIMEOUT 60)
 
     # 📝 Vehicle physics: physics checks of the slip, tyre and powertrain models on the Jolt-hosted car, the three tyre carcasses,
     #    and Project Drive's own suites run against the renamed core (RunProjectDriveIdentity.sh compares them with the source).
@@ -850,6 +855,13 @@ if(BUILD_TESTING)
     target_link_libraries(TyreCarcassValidation PRIVATE FrontierPhysicsExtension)
     add_test(NAME TyreCarcassValidation COMMAND TyreCarcassValidation "${CMAKE_SOURCE_DIR}/Exhibits/VehiclePhysics")
     set_tests_properties(TyreCarcassValidation PROPERTIES TIMEOUT 900)
+    add_executable(VehicleCurvePackValidation
+        Exhibits/VehiclePhysics/Code/VehicleCurvePackValidation.cpp
+        Frontier/Engine/Scene/VehicleRecordCodec.cpp)
+    target_include_directories(VehicleCurvePackValidation PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/tomlpp/include")
+    target_link_libraries(VehicleCurvePackValidation PRIVATE FrontierVehicleDynamics)
+    add_test(NAME VehicleCurvePackValidation COMMAND VehicleCurvePackValidation)
+    set_tests_properties(VehicleCurvePackValidation PROPERTIES TIMEOUT 60)
     add_executable(VehicleWorkspaceCapture
         Exhibits/VehiclePhysics/Code/VehicleWorkspaceCapture.cpp
         Engine/Render/StbImageWriteImplementation.cpp)

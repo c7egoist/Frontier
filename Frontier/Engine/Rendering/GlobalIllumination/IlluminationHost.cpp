@@ -18,9 +18,11 @@ namespace Frontier::GlobalIllumination
 namespace
 {
 constexpr uint32_t RefreshConstantsBytes = 1072;    // [B] RefreshConstants (268 floats)
-constexpr uint32_t VehicleProfileBytes   = 10448;   // [B] VehicleProfile
-constexpr uint32_t EffectProfileBytes    = 1120;    // [B] EffectProfile
-constexpr double   Pi                    = 3.141592653589793;
+constexpr uint32_t VehicleProfileBytes    = 10448;   // [B] VehicleProfile
+constexpr uint32_t EffectProfileBytes     = 1120;    // [B] EffectProfile
+constexpr uint32_t ImpactSparkCapacity    = 32;
+constexpr uint32_t ImpactSparkProfileBytes = 16 + ImpactSparkCapacity * 48;
+constexpr double   Pi                     = 3.141592653589793;
 
 // 📝 The demo's EnvironmentSettings is one object: the keys AtmosphereIntegrator reads mirror the environment's own.
 void SynchronizeAtmosphere(EnvironmentSettings& Environment)
@@ -191,6 +193,7 @@ bool IlluminationHost::Construct(const IlluminationAssets& Assets, const Illumin
     auto DepositSampler = Exchange.ConstructSampler(DepositSampling);
     VehicleRegion     = Exchange.ConstructRegion(VehicleProfileBytes, "Vehicle record");
     EffectRegion      = Exchange.ConstructRegion(EffectProfileBytes, "Effect record");
+    ImpactSparkRegion = Exchange.ConstructRegion(ImpactSparkProfileBytes, "Jolt impact sparks");
     CloudShadowParams = Exchange.ConstructRegion(48, "Projected cloud shadows");
     CloudParams       = Exchange.ConstructRegion(544, "Cloud renderer v2");
     TextureSpecification CloudShadow;
@@ -219,7 +222,7 @@ bool IlluminationHost::Construct(const IlluminationAssets& Assets, const Illumin
     Glossy = std::make_unique<VarianceIntegrator>(Exchange, Shaders, "Glossy", VarianceSettings{0.12f, 12, 2, 3.0f});
     Glossy->ConstructPrograms(RefreshRegion);
     Display = std::make_unique<DisplayProjection>(Exchange, Shaders);
-    Display->ConstructPrograms(RefreshRegion, MaterialRegion, OccupantRegion, TextureFormat::Rgba8UnormSrgb);
+    Display->ConstructPrograms(RefreshRegion, MaterialRegion, OccupantRegion, TextureFormat::Rgba8UnormSrgb, ImpactSparkRegion);
     Display->ConstructInspection(Distance->MarchLayout, Cards->SamplingLayout, RayTracing->MarchLayout);
     Plume = std::make_unique<PlumeSpace>(Exchange, Shaders);
     Plume->ConstructPrograms(RefreshRegion, OccupantRegion, Distance->MarchLayout);
@@ -368,6 +371,22 @@ bool IlluminationHost::WriteMaterialBlock(uint32_t Block, const std::vector<uint
     const size_t Bytes = std::min<size_t>(Records.size(), static_cast<size_t>(MaterialFamilyCount) * MaterialStride);
     Exchange.WriteRegion(MaterialRegion, static_cast<VkDeviceSize>(QueryMaterialBlockBase(Block)) * MaterialStride, Records.data(), Bytes);
     return true;
+}
+
+void IlluminationHost::AssignImpactSparks(std::span<const ImpactSparkGpuRecord> Sparks)
+{
+    if (!ImpactSparkRegion) return;
+    struct alignas(16) ImpactSparkProfile
+    {
+        std::array<uint32_t, 4> Header{};
+        std::array<ImpactSparkGpuRecord, ImpactSparkCapacity> Sparks{};
+    } Profile;
+    static_assert(sizeof(ImpactSparkGpuRecord) == 48);
+    static_assert(sizeof(ImpactSparkProfile) == ImpactSparkProfileBytes);
+    const size_t Count = std::min<size_t>(Sparks.size(), ImpactSparkCapacity);
+    Profile.Header[0] = static_cast<uint32_t>(Count);
+    std::copy_n(Sparks.begin(), Count, Profile.Sparks.begin());
+    Exchange.WriteRegion(ImpactSparkRegion, 0, &Profile, sizeof(Profile));
 }
 
 bool IlluminationHost::AdvanceRefresh(const RefreshInputs* Inputs, const RefreshWriteSupplier& Prepare, const RefreshWriteSupplier& Supplier,
@@ -539,6 +558,7 @@ bool IlluminationHost::AdvanceRefresh(const RefreshInputs* Inputs, const Refresh
     if (Interlude == nullptr)
     {
         Display->RecordResolve(Begin("resolve"), Parity);
+        Display->RecordImpactSparks(Begin("impact sparks"), Parity);
         Display->RecordPresent(Begin("present"), Parity, CaptureView);
         if (!SubmitSeries()) return false;
     }
@@ -558,6 +578,7 @@ bool IlluminationHost::AdvanceRefresh(const RefreshInputs* Inputs, const Refresh
         CommandSequence& Presentation = Begin("antialias and present");
         if (Interlude->BeforeAntialias) Interlude->BeforeAntialias(Presentation, Parity);
         Display->RecordAntialias(Presentation, Parity, Interlude->AntialiasSource);
+        Display->RecordImpactSparks(Presentation, Parity);
         Display->RecordPresent(Presentation, Parity, CaptureView);
         Presentation.OrderAfterEarlierWork();
         if (!SubmitSeries()) return false;

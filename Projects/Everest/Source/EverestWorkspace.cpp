@@ -53,6 +53,24 @@ uint32_t EnsureProjectLogCategory(std::string_view CategoryName)
     return Frontier::LogCategories().Register(CategoryName, Frontier::LogColour::Mint, true);
 }
 
+#if FRONTIER_EDITOR && defined(FRONTIER_WITH_INTERFACE_SDK)
+void AppendVehicleImpactSparks(Frontier::PhysicsExtension& Physics, std::vector<Frontier::SceneImpactSpark>& Pending)
+{
+    for (const Frontier::PhysicsImpactEvent& Event : Physics.DrainImpactEvents())
+    {
+        if (Event.Surface != Frontier::PhysicsImpactSurface::Metal && Event.Surface != Frontier::PhysicsImpactSurface::Concrete) continue;
+        Frontier::SceneImpactSpark Spark;
+        Spark.Surface = Event.Surface == Frontier::PhysicsImpactSurface::Metal ? Frontier::SceneImpactSurface::Metal
+                                                                               : Frontier::SceneImpactSurface::Concrete;
+        Spark.PointMetres = Event.PointMetres;
+        Spark.Normal = Event.Normal;
+        Spark.ClosingSpeedMps = Event.ClosingSpeedMps;
+        Pending.push_back(Spark);
+    }
+    if (Pending.size() > 32u) Pending.erase(Pending.begin(), Pending.begin() + static_cast<std::ptrdiff_t>(Pending.size() - 32u));
+}
+#endif
+
 } // namespace
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -395,6 +413,11 @@ EverestWorkspace::EverestWorkspace(Frontier::ControlCentrePanel& ControlCentre,
              }
          },
          [this, Token]() { return !Token.expired() && QueryNetworkingEnabled(); }},
+        {"Vehicle workbench", Frontier::ControlCentreIconCategory::SlidersQuality,
+         [this, Token]() {
+             if (!Token.expired()) (void)Dockspace.ConfigureOpen("VehicleWorkbench", !Dockspace.QueryOpen("VehicleWorkbench"));
+         },
+         [this, Token]() { return !Token.expired() && Dockspace.QueryOpen("VehicleWorkbench"); }},
     });
 
     auto OutlinerSpec=Frontier::MakeSceneDirectoryPanelSpecification(OutlinerPanel);
@@ -466,6 +489,29 @@ EverestWorkspace::EverestWorkspace(Frontier::ControlCentrePanel& ControlCentre,
     };
     if (!Dockspace.Register(std::move(ForceFieldWorkspaceSpec)))
         throw std::runtime_error("EverestWorkspace Force Field workspace registration refused.");
+
+    // 📝 The vehicle workbench puts component inspection, driver-aid quick controls and the live test loop in one dockable place.
+    Frontier::DockPanelSpecification VehicleWorkbenchSpec;
+    VehicleWorkbenchSpec.Key = "VehicleWorkbench";
+    VehicleWorkbenchSpec.Caption = "Vehicle workbench";
+    VehicleWorkbenchSpec.ConstructContent = [this]() {
+        ConstructVehicleWorkbench(Frontier::InspectorRuntime::Instance().ResolveInterfaceScale());
+    };
+    VehicleWorkbenchSpec.Open = false;
+    VehicleWorkbenchSpec.WheelScrollOnly = true;
+    VehicleWorkbenchSpec.Available = [this]() { return !QueryWorldSpace().FindAllByType("Vehicle").empty(); };
+    VehicleWorkbenchSpec.ConstructFooter = [this, Footer]() {
+        const auto Vehicles = QueryWorldSpace().FindAllByType("Vehicle");
+        Frontier::VehicleReading Reading{};
+        const bool Live = !Vehicles.empty() && Frontier::QueryVehicleReading(Vehicles.front()->QueryToken(), Reading) && Reading.Simulating;
+        char Speed[32];
+        if (Live) std::snprintf(Speed, sizeof(Speed), "%.0f km/h", Reading.Telemetry.SpeedMetresPerSecond * 3.6f);
+        else std::snprintf(Speed, sizeof(Speed), "Stopped");
+        Footer({{"VEHICLES", std::to_string(Vehicles.size()), IM_COL32(152, 200, 181, 255), "Car"},
+                {"TEST LOOP", Speed, Live ? IM_COL32(93, 215, 159, 255) : IM_COL32(165, 171, 182, 255), "Gauge"}});
+    };
+    if (!Dockspace.Register(std::move(VehicleWorkbenchSpec)))
+        throw std::runtime_error("EverestWorkspace vehicle workbench registration refused.");
 
     ImGui::GetIO().IniFilename = nullptr;
     ObservedLayoutRevision     = Centre.QueryLayoutResetRevision();
@@ -784,6 +830,7 @@ bool EverestWorkspace::OpenLevel(const std::filesystem::path& LevelPath, bool St
         Physics->End(QueryWorldSpace());
         DriverControls = Frontier::Vehicle::DriverInputIntegrator{};
     }
+    PendingImpactSparks.clear();
     Frontier::ClearVehicleReadings();
 #endif
 
@@ -1213,6 +1260,7 @@ void EverestWorkspace::ConstructInterface(double DeltaSeconds)
     {
         IntegrateDrivingControls(DeltaSeconds);
         (void)Physics->Step(QueryWorldSpace(), DeltaSeconds);
+        AppendVehicleImpactSparks(*Physics, PendingImpactSparks);
         if (!PresentSceneViewport && StudioCameraEngaged)
         {
             IntegrateChaseCamera(DeltaSeconds);
@@ -1228,6 +1276,7 @@ void EverestWorkspace::ConstructInterface(double DeltaSeconds)
         ObservedLayoutRevision = Centre.QueryLayoutResetRevision();
         Dockspace.ResetLayout();
         (void)Dockspace.ConfigureOpen("ForceFieldWorkspace", false);
+        (void)Dockspace.ConfigureOpen("VehicleWorkbench", false);
         Field.CameraPreview = false;
         (void)Dockspace.ConfigureStackedPanels("Viewport", "LogStream", 520.0f);
         (void)Dockspace.ConfigureColumns({
@@ -1707,6 +1756,7 @@ void EverestWorkspace::ConstructViewportSurface()
         Request.CameraUp = Navigation.Up;
         Request.PickSerial          = PickSerial;
         Request.PickPoint           = PickPoint;
+        Request.ImpactSparks        = std::exchange(PendingImpactSparks, {});
         Image = PresentSceneViewport(Request);
         LastReadout = Image.Readout;
         // 📝 GPU picking answers a click one interface tick later, from the image the click was made on; a click on the sky or on
@@ -2236,6 +2286,150 @@ void EverestWorkspace::ConstructSessionViewportOverlay(const ImVec2& StageMin, c
     }
     ImGui::PopStyleColor(6);
     ImGui::PopStyleVar(2);
+}
+
+void EverestWorkspace::ConstructVehicleWorkbench(float Scale)
+{
+    const std::vector<const Frontier::SceneRecordBase*> Vehicles = QueryWorldSpace().FindAllByType("Vehicle");
+    if (Vehicles.empty())
+    {
+        ImGui::TextDisabled("VEHICLE / WORKBENCH");
+        ImGui::TextWrapped("Construct a Vehicle record to author its components, driver aids and proving-ground test flow.");
+        return;
+    }
+
+    Frontier::VehicleRecord* VehicleEntry = nullptr;
+    const Frontier::RecordToken Selected = OutlinerPanel.QuerySelected();
+    if (auto* Candidate = dynamic_cast<Frontier::VehicleRecord*>(QueryWorldSpace().FindRecord(Selected))) VehicleEntry = Candidate;
+    if (VehicleEntry == nullptr) VehicleEntry = dynamic_cast<Frontier::VehicleRecord*>(QueryWorldSpace().FindRecord(Vehicles.front()->QueryToken()));
+    if (VehicleEntry == nullptr) return;
+
+    for (const Frontier::SceneRecordBase* Candidate : Vehicles)
+    {
+        const bool IsSelected = Candidate->QueryToken() == VehicleEntry->QueryToken();
+        if (ImGui::Selectable(Candidate->QueryRecordName().c_str(), IsSelected, 0, ImVec2(0.0f, 24.0f * Scale)))
+        {
+            VehicleEntry = dynamic_cast<Frontier::VehicleRecord*>(QueryWorldSpace().FindRecord(Candidate->QueryToken()));
+            OutlinerPanel.Select(Candidate->QueryToken());
+        }
+    }
+    if (VehicleEntry == nullptr) return;
+
+    Frontier::VehicleConfiguration& Configuration = VehicleEntry->AccessConfiguration();
+    Frontier::Vehicle::VehicleSolverConfiguration& Solver = Configuration.Specification.Solver;
+    const bool SimulationRunning = Physics && Physics->QueryRunning();
+    bool Changed = false;
+
+    ImGui::Separator();
+    ImGui::TextColored(ImVec4(0.56f, 0.84f, 0.70f, 1.0f), "%s", VehicleEntry->QueryRecordName().c_str());
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Inspect vehicle")) OutlinerPanel.Select(VehicleEntry->QueryToken());
+
+    if (ImGui::BeginTable("##VehicleWorkbenchComponents", 2, ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_BordersInnerV))
+    {
+        ImGui::TableSetupColumn("Component", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("Specification", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        ImGui::TextDisabled("POWERTRAIN");
+        ImGui::Text("%s", Solver.Induction == Frontier::Vehicle::InductionType::NaturallyAspirated ? "Naturally aspirated" :
+                           Solver.Induction == Frontier::Vehicle::InductionType::Turbocharged ? "Turbocharged" : "Supercharged");
+        ImGui::Text("%.1f L  /  %.0f rpm redline", Solver.Intake.Displacement_L, Solver.Engine.RedlineRPM);
+        ImGui::TableNextColumn();
+        ImGui::TextDisabled("DRIVELINE");
+        ImGui::Text("%zu forward gears  /  %.2f final drive", Frontier::Vehicle::QueryForwardRatios(Configuration.Specification).size(),
+                    Solver.Transmission.FinalDriveRatio);
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        ImGui::TextDisabled("CHASSIS & SUSPENSION");
+        ImGui::Text("%.0f kg  /  %.0f%% front", Configuration.Specification.Geometry.Mass,
+                    Configuration.Specification.Geometry.FrontWeightFraction * 100.0f);
+        ImGui::Text("%s carcass  /  equilibrium %s", Frontier::Vehicle::TyreCarcassName(Solver.Carcass),
+                    Configuration.EquilibriumPlacement ? "on" : "off");
+        ImGui::TableNextColumn();
+        ImGui::TextDisabled("TYRES & DRIVER AIDS");
+        ImGui::Text("ABS %s  /  traction %s", Solver.Abs.Enabled ? "on" : "off", Solver.TractionControl.Enabled ? "on" : "off");
+        ImGui::TextUnformatted("Four-corner tyre set");
+        ImGui::EndTable();
+    }
+    static constexpr const char* TyreCorners[] = { "Front left", "Front right", "Rear left", "Rear right" };
+    bool FoundTyreRecord = false;
+    for (const Frontier::SceneRecordBase* Candidate : QueryWorldSpace().FindAllByType("Tyre"))
+    {
+        const auto* TyreEntry = dynamic_cast<const Frontier::TyreRecord*>(Candidate);
+        if (TyreEntry == nullptr || Candidate->QueryParentToken() != VehicleEntry->QueryToken()) continue;
+        FoundTyreRecord = true;
+        const Frontier::TyreConfiguration& Fit = TyreEntry->QueryConfiguration();
+        const char* Corner = TyreCorners[Fit.Corner & 3u];
+        const Frontier::TyreCompound& Compound = Frontier::ResolveTyreCompound(Fit.Compound);
+        ImGui::PushID(static_cast<int>(Candidate->QueryToken().Value & 0x7fffffff));
+        ImGui::Text("%s  ·  %s  ·  %.0f kPa  ·  %s", Corner, Compound.Name, Fit.ColdPressure / 1000.0f, Fit.Enclosed ? "fitted" : "detached");
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Open tyre inspector")) OutlinerPanel.Select(Candidate->QueryToken());
+        ImGui::PopID();
+    }
+    if (!FoundTyreRecord) ImGui::TextDisabled("No individual Tyre records — using the vehicle's built-in four-corner setup.");
+    ImGui::Separator();
+    ImGui::TextDisabled("QUICK CONFIGURATION  ·  [units as shown]");
+    ImGui::BeginDisabled(SimulationRunning);
+    Changed |= ImGui::Checkbox("Visible in scene", &Configuration.Visible);
+    ImGui::SameLine();
+    Changed |= ImGui::Checkbox("Physics enabled", &Configuration.Physics);
+    Changed |= ImGui::Checkbox("Equilibrium placement", &Configuration.EquilibriumPlacement);
+    Changed |= ImGui::Checkbox("Physics thread", &Configuration.ThreadedPhysics);
+    ImGui::EndDisabled();
+    Changed |= ImGui::Checkbox("Possess for driving", &Configuration.Possessed);
+    ImGui::SameLine();
+    Changed |= ImGui::Checkbox("Chase camera", &Configuration.ChaseCamera);
+    ImGui::BeginDisabled(SimulationRunning);
+    Changed |= ImGui::Checkbox("ABS", &Solver.Abs.Enabled);
+    ImGui::SameLine();
+    Changed |= ImGui::Checkbox("Traction control", &Solver.TractionControl.Enabled);
+    static constexpr const char* CarcassNames[] = { "Spring", "XPBD lattice", "3D FEM" };
+    int Carcass = static_cast<int>(Solver.Carcass);
+    if (ImGui::Combo("Tyre carcass", &Carcass, CarcassNames, 3))
+    {
+        Solver.Carcass = static_cast<Frontier::Vehicle::TyreCarcassCategory>(Carcass);
+        Changed = true;
+    }
+    ImGui::EndDisabled();
+    if (Changed) Configuration.AdvanceRevision();
+
+    ImGui::Separator();
+    ImGui::TextDisabled("TEST FLOW");
+    if (ImGui::Button(SimulationRunning ? "Stop simulation" : "Start simulation", ImVec2(142.0f * Scale, 30.0f * Scale))) ToggleSimulation();
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!SimulationRunning);
+    const bool ResetPressed = ImGui::Button("Reset to start  (R)", ImVec2(150.0f * Scale, 30.0f * Scale));
+    ImGui::EndDisabled();
+    if (ResetPressed && SimulationRunning) Physics->RequestVehicleReset();
+    ImGui::SameLine();
+    if (ImGui::Button("Open Proving Ground", ImVec2(160.0f * Scale, 30.0f * Scale)) && !VehicleCamera.QueryRouteTransitionActive())
+        BeginLevelTransition(ProjectRoot / "Content" / "Levels" / "ProvingGroundVehicle.levelspace", true);
+    ImGui::TextWrapped("Drive: W/S throttle and brake · A/D steer · Space handbrake · R reset · C camera rig · M HMI · Alt+S stop.");
+
+    Frontier::VehicleReading Reading{};
+    if (Frontier::QueryVehicleReading(VehicleEntry->QueryToken(), Reading) && Reading.Simulating)
+    {
+        const Frontier::Vehicle::VehicleTelemetry& Telemetry = Reading.Telemetry;
+        char SpeedText[24], RpmText[24], GearText[24], BoostText[24], ContactsText[24], AbsText[24];
+        std::snprintf(SpeedText, sizeof(SpeedText), "%.0f", Telemetry.SpeedMetresPerSecond * 3.6f);
+        std::snprintf(RpmText, sizeof(RpmText), "%.0f", Telemetry.EngineRPM);
+        std::snprintf(GearText, sizeof(GearText), "%s%d", Telemetry.GearIndex < 0 ? "R" : "", std::abs(Telemetry.GearIndex));
+        std::snprintf(BoostText, sizeof(BoostText), "%.2f", Telemetry.BoostBar);
+        std::snprintf(ContactsText, sizeof(ContactsText), "%u/4", Telemetry.WheelsInContact);
+        uint32_t AbsCount = 0;
+        for (const Frontier::Vehicle::WheelTelemetry& Wheel : Telemetry.Wheels) if (Wheel.AbsActive) ++AbsCount;
+        std::snprintf(AbsText, sizeof(AbsText), "%u active", AbsCount);
+        ImGui::Text("LIVE  ·  %s km/h  ·  %s rpm  ·  gear %s  ·  %s bar  ·  %s wheels  ·  ABS %s", SpeedText, RpmText, GearText, BoostText,
+                    ContactsText, AbsText);
+        ImGui::Text("Throttle %.0f%%  ·  brake %.0f%%  ·  steer %.0f%%  ·  %llu fixed steps", Reading.Throttle[0] * 100.0f,
+                    Reading.Throttle[1] * 100.0f, Reading.Throttle[2] * 100.0f, static_cast<unsigned long long>(Reading.Steps));
+    }
+    else
+    {
+        ImGui::TextDisabled("Live telemetry appears here while this vehicle is simulating.");
+    }
 }
 
 void EverestWorkspace::ToggleSimulation()
