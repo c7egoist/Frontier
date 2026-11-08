@@ -567,6 +567,8 @@ class IlluminationHost
     //    once (Instant — scripts and the harness).
     TeleportVehicle(Zone, Instant = false, Done = null)
     {
+        if (!Done && this.Training?.Active && this.Training.Active.Phase !== "armed")
+            this.Training.Cancel();
         if (Zone?.Id === "trackI" && this.RoadEditor && this.RoadEditor.Project?.name !== "Spline & Highway Bridge Demo")
         {
             this.RoadEditor.DriveOnSelectedRoad();

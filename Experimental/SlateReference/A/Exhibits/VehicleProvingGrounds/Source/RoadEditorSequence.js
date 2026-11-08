@@ -1896,6 +1896,7 @@ export class RoadEditorSequence
     {
         if (!this.Host || !this.Compiled)
             return null;
+        this.Host.Training?.Cancel?.();
         const Pose = ResolveSpawnPoseForSelection(this.Compiled, this.Project, CustomSelection || this.Selection);
         this.Host.Vehicle.Respawn(Pose.Position, Pose.YawRad);
         if (this.Host.Recovery)

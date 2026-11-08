@@ -751,18 +751,6 @@ export const InversionArenaZones = Object.freeze([
 
 export const InversionArenaDrills = Object.freeze([
     {
-        Id:       "grandprix",
-        Name:     "Track A GP Lap",
-        Glyph:    "Flag",
-        Note:     "Full 1.05 km Track A lap: Loop → Waves → Tabletop → Bowl 1 → Heartline → Pipe → V-Wings → Bowl 2",
-        Groups:   ["circuit"],
-        Teleport: { Position: [-92.0, -38.3], Yaw: 0.0 },
-        Start:    { Axis: "x", At: -82.0, From: -47.0, To: -23.0, Direction:  1.0 },
-        Sector1:  { Axis: "x", At: 154.0, From: -47.0, To: -23.0, Direction:  1.0 },
-        Sector2:  { Axis: "x", At:  -4.0, From:  23.0, To:  47.0, Direction: -1.0 },
-        Finish:   { Axis: "x", At: -82.0, From: -47.0, To: -23.0, Direction:  1.0 }
-    },
-    {
         Id:       "loop360",
         Name:     "360° Inversion Loop",
         Glyph:    "RefreshCw",

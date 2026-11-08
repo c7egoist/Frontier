@@ -266,18 +266,19 @@ export function CreateStarterStudioProject(LevelKey = "inversion")
 
     const NEntryN = AddWorldNode("n01", "Arena North-East Gateway",  166.0,   66.0, 0.0, 7.0, false, false);
     const NCross  = AddWorldNode("n02", "Showcase Crossroads",       272.0,    0.0, 0.0, 9.5, true,  true);
-    const NEast   = AddWorldNode("n03", "East Loop Turnaround",      396.0,    0.0, 0.0, 8.0, true,  false);
-    const NRampN  = AddWorldNode("n04", "Bridge North Approach",     334.0,  106.0, 0.0, 7.5, false, false);
+    const NEast   = AddWorldNode("n03", "East Loop Turnaround",      396.0,    0.0, 0.0, 8.5, true,  false);
+    const NRampN  = AddWorldNode("n04", "Bridge North Approach",     334.0,   96.0, 0.0, 7.0, false, false);
     const NAbutN  = AddWorldNode("n05", "North Bridge Abutment",     334.0,   38.0, 6.2, 6.0, false, false);
     const NAbutS  = AddWorldNode("n06", "South Bridge Abutment",     334.0,  -38.0, 6.2, 6.0, false, false);
-    const NRampS  = AddWorldNode("n07", "Bridge South Approach",     334.0, -106.0, 0.0, 7.5, false, false);
+    const NRampS  = AddWorldNode("n07", "Bridge South Approach",     334.0,  -96.0, 0.0, 8.0, false, false);
     const NEntryS = AddWorldNode("n08", "Arena South-East Gateway",  166.0,  -66.0, 0.0, 7.0, false, false);
+    const NSouthJ = AddWorldNode("n09", "South Return Junction",     272.0,  -66.0, 0.0, 8.5, true,  true);
 
-    // r01: Sweeping cubic Bézier S-curve from inside the Arena into Showcase Crossroads
+    // r01: Sweeping cubic Bézier S-curve from inside the Arena into Showcase Crossroads (enters pure West -> East)
     AddSpline("r01", NEntryN, NCross, "Gateway S-Curve Spline", {
         lanes: 2, laneWidth: 3.6, sidewalk: 2.2, cycleMode: "protected", cycleWidth: 1.8,
         curbStyle: "granite", markingStyle: "urban", pattern: "ashlar", speedLimit: 50, signs: false
-    }, [46.0, 0.0, 4.0], [-42.0, 0.0, -30.0]);
+    }, [48.0, 0.0, 0.0], [-48.0, 0.0, 0.0]);
 
     // r02: Underpass Boulevard passing cleanly beneath the +6.2 m Steel I-Girder Highway Bridge
     AddSpline("r02", NCross, NEast, "Underpass Boulevard", {
@@ -289,7 +290,7 @@ export function CreateStarterStudioProject(LevelKey = "inversion")
     AddSpline("r03", NRampN, NAbutN, "North Bridge Embankment", {
         lanes: 2, laneWidth: 3.75, shoulderWidth: 1.2, sidewalk: 0.7, markingStyle: "motorway",
         guardrails: true, railStyle: "wbeam", embankment: true, drainage: false, manholes: false, signs: false
-    }, [0.0, 2.2, 22.0], [0.0, 0.0, -22.0]);
+    }, [0.0, 1.8, 20.0], [0.0, 0.0, -20.0]);
 
     AddSpline("r04", NAbutN, NAbutS, "Steel I-Girder Viaduct", {
         lanes: 2, laneWidth: 3.75, shoulderWidth: 1.2, sidewalk: 0.9, markingStyle: "motorway",
@@ -300,31 +301,37 @@ export function CreateStarterStudioProject(LevelKey = "inversion")
     AddSpline("r05", NAbutS, NRampS, "South Bridge Embankment", {
         lanes: 2, laneWidth: 3.75, shoulderWidth: 1.2, sidewalk: 0.7, markingStyle: "motorway",
         guardrails: true, railStyle: "wbeam", embankment: true, drainage: false, manholes: false, signs: false
-    }, [0.0, 0.0, 22.0], [0.0, 2.2, -22.0]);
+    }, [0.0, 0.0, 20.0], [0.0, 1.8, -20.0]);
 
-    // r06: Curved North Loop linking Crossroads -> Bridge North Approach
+    // r06: Wide 180° Northern Highway Arch leaving Crossroads due North and entering NRampN due South (180° C¹ colinear with r03!)
     AddSpline("r06", NCross, NRampN, "North Bridge Loop", {
-        lanes: 2, laneWidth: 3.5, sidewalk: 1.8, markingStyle: "urban",
+        lanes: 2, laneWidth: 3.6, sidewalk: 1.6, markingStyle: "urban",
         guardrails: true, railStyle: "railing", drainage: false, manholes: false, signs: false
-    }, [4.0, 0.0, -48.0], [-42.0, 0.0, 2.0]);
+    }, [0.0, 0.0, -76.0], [0.0, 0.0, -44.0]);
 
-    // r07: Sweeping East Highway Curve linking East Turnaround -> Bridge South Approach
+    // r07: Wide Sweeping East Curve from East Turnaround around the South-East into Bridge South Approach
     AddSpline("r07", NEast, NRampS, "East Sweeper Curve", {
         lanes: 2, laneWidth: 3.75, shoulderWidth: 1.0, sidewalk: 0.8, markingStyle: "motorway",
         guardrails: true, railStyle: "concrete", drainage: false, manholes: false, signs: false
-    }, [0.0, 0.0, 56.0], [48.0, 0.0, 0.0]);
+    }, [0.0, 0.0, 56.0], [44.0, 0.0, 0.0]);
 
-    // r08: South Connector linking Bridge South Approach -> Showcase Crossroads
-    AddSpline("r08", NRampS, NCross, "South Bridge Loop", {
-        lanes: 2, laneWidth: 3.5, sidewalk: 1.8, markingStyle: "urban",
+    // r08: Wide Southern Arch from Bridge South Approach into South Return Junction
+    AddSpline("r08", NRampS, NSouthJ, "South Bridge Loop", {
+        lanes: 2, laneWidth: 3.6, sidewalk: 1.6, markingStyle: "urban",
         drainage: false, manholes: false, signs: false
-    }, [-42.0, 0.0, -2.0], [4.0, 0.0, 48.0]);
+    }, [0.0, 0.0, 38.0], [34.0, 0.0, 24.0]);
 
-    // r09: Grand Prix Red/White Race-Kerb Return Spline back into the Arena!
-    AddSpline("r09", NCross, NEntryS, "Grand Prix Kerb Return", {
+    // r09: Orthogonal South-North Connector from South Return Junction up into Showcase Crossroads
+    AddSpline("r09", NSouthJ, NCross, "Crossroads South Avenue", {
+        lanes: 2, laneWidth: 3.6, sidewalk: 2.0, markingStyle: "urban",
+        drainage: false, manholes: false, signs: false
+    }, [0.0, 0.0, -22.0], [0.0, 0.0, 22.0]);
+
+    // r10: Grand Prix Red/White Race-Kerb Return Straight back through the South-East Arena Gateway!
+    AddSpline("r10", NSouthJ, NEntryS, "Grand Prix Kerb Return", {
         lanes: 2, laneWidth: 4.0, sidewalk: 0.8, curbStyle: "race", markingStyle: "center-only",
         guardrails: true, railStyle: "thrie", drainage: false, manholes: false, signs: false
-    }, [-42.0, 0.0, 30.0], [46.0, 0.0, -4.0]);
+    }, [-36.0, 0.0, 0.0], [36.0, 0.0, 0.0]);
 
     return Project;
 }
@@ -563,9 +570,9 @@ function BuildSpanPhysicsSurface(Span, Anchor)
                 if (SegLenSq < 1.0e-5)
                     continue;
                 const RawU = ((SphereCenter[0] - A.P[0]) * SegX + (SphereCenter[1] - A.P[1]) * SegY) / SegLenSq;
-                if (RawU < -0.02 || RawU > 1.02)
+                if (RawU < 0.02 || RawU > 0.98)
                     continue;
-                const U = Math.max(0.0, Math.min(1.0, RawU));
+                const U = RawU;
                 const CX = A.P[0] + SegX * U, CY = A.P[1] + SegY * U;
                 const BaseZ = A.P[2] + (B.P[2] - A.P[2]) * U + A.CrownRise;
                 if (SphereCenter[2] < BaseZ - 0.3 || SphereCenter[2] > BaseZ + RailHeight + SphereRadius)
@@ -595,15 +602,179 @@ function BuildSpanPhysicsSurface(Span, Anchor)
     };
 }
 
-function BuildJunctionPhysicsSurface(Junction, Anchor)
-{
-    const Ring = (Junction.outer && Junction.outer.length >= 3) ? Junction.outer : Junction.boundary;
-    if (!Ring || Ring.length < 3)
-        return null;
+const DrivableNodeMeshKinds = new Set([
+    "asphalt", "paving", "curb", "cycle", "parking", "shoulder", "median"
+]);
 
-    const Poly2D = [];
+function BuildNodeMeshPhysicsSurface(NodeId, NodeMeshes, Anchor, FallbackJunction = null)
+{
+    const Tris = [];
     let MinX = Infinity, MinY = Infinity, MinZ = Infinity;
     let MaxX = -Infinity, MaxY = -Infinity, MaxZ = -Infinity;
+
+    if (NodeMeshes && NodeMeshes.length > 0)
+    {
+        for (const Mesh of NodeMeshes)
+        {
+            if (!DrivableNodeMeshKinds.has(Mesh.kind))
+                continue;
+            const Pos = Mesh.positions;
+            const Idx = Mesh.indices;
+            for (let T = 0; T + 2 < Idx.length; T += 3)
+            {
+                const I0 = Idx[T], I1 = Idx[T + 1], I2 = Idx[T + 2];
+                const AX = Anchor[0] + Pos[I0 * 3], AY = Anchor[1] - Pos[I0 * 3 + 2], AZ = Anchor[2] + Pos[I0 * 3 + 1];
+                const BX = Anchor[0] + Pos[I1 * 3], BY = Anchor[1] - Pos[I1 * 3 + 2], BZ = Anchor[2] + Pos[I1 * 3 + 1];
+                const CX = Anchor[0] + Pos[I2 * 3], CY = Anchor[1] - Pos[I2 * 3 + 2], CZ = Anchor[2] + Pos[I2 * 3 + 1];
+
+                const E1X = BX - AX, E1Y = BY - AY, E1Z = BZ - AZ;
+                const E2X = CX - AX, E2Y = CY - AY, E2Z = CZ - AZ;
+                let NX = E1Y * E2Z - E1Z * E2Y;
+                let NY = E1Z * E2X - E1X * E2Z;
+                let NZ = E1X * E2Y - E1Y * E2X;
+                const NLen = Math.hypot(NX, NY, NZ);
+                if (NLen < 1.0e-8)
+                    continue;
+                NX /= NLen; NY /= NLen; NZ /= NLen;
+                // Only upward-facing drivable carriageway, kerb ramp, cycleway & sidewalk triangles (exclude vertical kerb risers)
+                if (NZ < 0.62)
+                    continue;
+
+                Tris.push({
+                    AX, AY, AZ,
+                    E1X, E1Y, E1Z,
+                    E2X, E2Y, E2Z,
+                    NX, NY, NZ,
+                    TMinX: Math.min(AX, BX, CX), TMaxX: Math.max(AX, BX, CX),
+                    TMinY: Math.min(AY, BY, CY), TMaxY: Math.max(AY, BY, CY)
+                });
+                MinX = Math.min(MinX, AX, BX, CX); MaxX = Math.max(MaxX, AX, BX, CX);
+                MinY = Math.min(MinY, AY, BY, CY); MaxY = Math.max(MaxY, AY, BY, CY);
+                MinZ = Math.min(MinZ, AZ, BZ, CZ); MaxZ = Math.max(MaxZ, AZ, BZ, CZ);
+            }
+        }
+    }
+
+    if (Tris.length > 0)
+    {
+        const GridN = 6;
+        const SpanX = Math.max(1.0, MaxX - MinX);
+        const SpanY = Math.max(1.0, MaxY - MinY);
+        const Buckets = Array.from({ length: GridN * GridN }, () => []);
+        for (let K = 0; K < Tris.length; ++K)
+        {
+            const Tri = Tris[K];
+            const GX0 = Math.max(0, Math.min(GridN - 1, Math.floor(((Tri.TMinX - MinX) / SpanX) * GridN)));
+            const GX1 = Math.max(0, Math.min(GridN - 1, Math.floor(((Tri.TMaxX - MinX) / SpanX) * GridN)));
+            const GY0 = Math.max(0, Math.min(GridN - 1, Math.floor(((Tri.TMinY - MinY) / SpanY) * GridN)));
+            const GY1 = Math.max(0, Math.min(GridN - 1, Math.floor(((Tri.TMaxY - MinY) / SpanY) * GridN)));
+            for (let GY = GY0; GY <= GY1; ++GY)
+                for (let GX = GX0; GX <= GX1; ++GX)
+                    Buckets[GY * GridN + GX].push(K);
+        }
+
+        const PadMin = [MinX - 0.4, MinY - 0.4, MinZ - 1.0];
+        const PadMax = [MaxX + 0.4, MaxY + 0.4, MaxZ + 1.8];
+        let StampCounter = 1;
+        const TestedStamp = new Int32Array(Tris.length);
+
+        return {
+            Key:          `studio_junction_${NodeId}`,
+            Category:     SurfaceCategory.SplineRoad,
+            Origin:       [0.0, 0.0, 0.0],
+            CosineYaw:    1.0,
+            SineYaw:      0.0,
+            Yaw:          0.0,
+            Friction:     1.04,
+            WorldMinimum: PadMin,
+            WorldMaximum: PadMax,
+            Bounds:       { Minimum: PadMin, Maximum: PadMax },
+            CastRay(RayOrigin, RayDir, MaxTravel)
+            {
+                const EndX = RayOrigin[0] + RayDir[0] * MaxTravel;
+                const EndY = RayOrigin[1] + RayDir[1] * MaxTravel;
+                const EndZ = RayOrigin[2] + RayDir[2] * MaxTravel;
+                const RMinX = Math.min(RayOrigin[0], EndX) - 0.15;
+                const RMaxX = Math.max(RayOrigin[0], EndX) + 0.15;
+                const RMinY = Math.min(RayOrigin[1], EndY) - 0.15;
+                const RMaxY = Math.max(RayOrigin[1], EndY) + 0.15;
+                const RMinZ = Math.min(RayOrigin[2], EndZ) - 0.15;
+                const RMaxZ = Math.max(RayOrigin[2], EndZ) + 0.15;
+                if (RMaxX < PadMin[0] || RMinX > PadMax[0] ||
+                    RMaxY < PadMin[1] || RMinY > PadMax[1] ||
+                    RMaxZ < PadMin[2] || RMinZ > PadMax[2])
+                    return null;
+
+                const GX0 = Math.max(0, Math.min(GridN - 1, Math.floor(((RMinX - MinX) / SpanX) * GridN)));
+                const GX1 = Math.max(0, Math.min(GridN - 1, Math.floor(((RMaxX - MinX) / SpanX) * GridN)));
+                const GY0 = Math.max(0, Math.min(GridN - 1, Math.floor(((RMinY - MinY) / SpanY) * GridN)));
+                const GY1 = Math.max(0, Math.min(GridN - 1, Math.floor(((RMaxY - MinY) / SpanY) * GridN)));
+
+                const Stamp = (StampCounter = (StampCounter + 1) | 0) || (StampCounter = 1);
+                let BestHit = null;
+
+                for (let GY = GY0; GY <= GY1; ++GY)
+                {
+                    for (let GX = GX0; GX <= GX1; ++GX)
+                    {
+                        const Cell = Buckets[GY * GridN + GX];
+                        for (let C = 0; C < Cell.length; ++C)
+                        {
+                            const K = Cell[C];
+                            if (TestedStamp[K] === Stamp)
+                                continue;
+                            TestedStamp[K] = Stamp;
+                            const Tri = Tris[K];
+                            if (RayDir[0] * Tri.NX + RayDir[1] * Tri.NY + RayDir[2] * Tri.NZ >= -1.0e-5)
+                                continue;
+
+                            // Möller–Trumbore ray-triangle intersection with tiny edge-seam tolerance
+                            const PX = RayDir[1] * Tri.E2Z - RayDir[2] * Tri.E2Y;
+                            const PY = RayDir[2] * Tri.E2X - RayDir[0] * Tri.E2Z;
+                            const PZ = RayDir[0] * Tri.E2Y - RayDir[1] * Tri.E2X;
+                            const Det = Tri.E1X * PX + Tri.E1Y * PY + Tri.E1Z * PZ;
+                            if (Math.abs(Det) < 1.0e-9)
+                                continue;
+                            const InvDet = 1.0 / Det;
+                            const TX = RayOrigin[0] - Tri.AX;
+                            const TY = RayOrigin[1] - Tri.AY;
+                            const TZ = RayOrigin[2] - Tri.AZ;
+                            const U = (TX * PX + TY * PY + TZ * PZ) * InvDet;
+                            if (U < -2.0e-3 || U > 1.002)
+                                continue;
+                            const QX = TY * Tri.E1Z - TZ * Tri.E1Y;
+                            const QY = TZ * Tri.E1X - TX * Tri.E1Z;
+                            const QZ = TX * Tri.E1Y - TY * Tri.E1X;
+                            const V = (RayDir[0] * QX + RayDir[1] * QY + RayDir[2] * QZ) * InvDet;
+                            if (V < -2.0e-3 || U + V > 1.002)
+                                continue;
+                            const T = (Tri.E2X * QX + Tri.E2Y * QY + Tri.E2Z * QZ) * InvDet;
+                            if (T >= 0.0 && T <= MaxTravel && (!BestHit || T < BestHit.Travel))
+                            {
+                                BestHit = {
+                                    Travel:      T,
+                                    LocalPoint:  [
+                                        RayOrigin[0] + RayDir[0] * T,
+                                        RayOrigin[1] + RayDir[1] * T,
+                                        RayOrigin[2] + RayDir[2] * T
+                                    ],
+                                    LocalNormal: [Tri.NX, Tri.NY, Tri.NZ]
+                                };
+                            }
+                        }
+                    }
+                }
+                return BestHit;
+            }
+        };
+    }
+
+    if (!FallbackJunction)
+        return null;
+    const Ring = (FallbackJunction.outer && FallbackJunction.outer.length >= 3) ? FallbackJunction.outer : FallbackJunction.boundary;
+    if (!Ring || Ring.length < 3)
+        return null;
+    const Poly2D = [];
     for (const P of Ring)
     {
         const W = StudioPointToWorld(P, Anchor);
@@ -612,67 +783,31 @@ function BuildJunctionPhysicsSurface(Junction, Anchor)
         MinY = Math.min(MinY, W[1]); MaxY = Math.max(MaxY, W[1]);
         MinZ = Math.min(MinZ, W[2]); MaxZ = Math.max(MaxZ, W[2]);
     }
-    const NodeW = StudioPointToWorld(Junction.node.position, Anchor);
+    const NodeW = StudioPointToWorld(FallbackJunction.node.position, Anchor);
     const CenterZ = NodeW[2] + 0.12;
-    MinZ = Math.min(MinZ, CenterZ) - 1.2;
-    MaxZ = Math.max(MaxZ, CenterZ) + 1.8;
-
-    // Fit gentle longitudinal/lateral slope across arm mouths so sloped junctions match arm crowns smoothly
-    let SlopeX = 0.0, SlopeY = 0.0;
-    if (Junction.arms && Junction.arms.length >= 2)
-    {
-        let SumXX = 0.0, SumYY = 0.0, SumXZ = 0.0, SumYZ = 0.0;
-        for (const Arm of Junction.arms)
-        {
-            const AW = StudioPointToWorld(Arm.center, Anchor);
-            const DX = AW[0] - NodeW[0];
-            const DY = AW[1] - NodeW[1];
-            const DZ = AW[2] - CenterZ;
-            SumXX += DX * DX;
-            SumYY += DY * DY;
-            SumXZ += DX * DZ;
-            SumYZ += DY * DZ;
-        }
-        if (SumXX > 1.0) SlopeX = Math.max(-0.14, Math.min(0.14, SumXZ / SumXX));
-        if (SumYY > 1.0) SlopeY = Math.max(-0.14, Math.min(0.14, SumYZ / SumYY));
-    }
-    const NLen = Math.hypot(-SlopeX, -SlopeY, 1.0) || 1.0;
-    const PlaneNormal = [-SlopeX / NLen, -SlopeY / NLen, 1.0 / NLen];
-
     return {
-        Key:          `studio_junction_${Junction.node.id}`,
+        Key:          `studio_junction_${NodeId}`,
         Category:     SurfaceCategory.SplineRoad,
         Origin:       [0.0, 0.0, 0.0],
         CosineYaw:    1.0,
         SineYaw:      0.0,
         Yaw:          0.0,
         Friction:     1.04,
-        WorldMinimum: [MinX - 0.5, MinY - 0.5, MinZ],
-        WorldMaximum: [MaxX + 0.5, MaxY + 0.5, MaxZ],
-        Bounds:       { Minimum: [MinX - 0.5, MinY - 0.5, MinZ], Maximum: [MaxX + 0.5, MaxY + 0.5, MaxZ] },
+        WorldMinimum: [MinX - 0.5, MinY - 0.5, CenterZ - 1.2],
+        WorldMaximum: [MaxX + 0.5, MaxY + 0.5, CenterZ + 1.8],
+        Bounds:       { Minimum: [MinX - 0.5, MinY - 0.5, CenterZ - 1.2], Maximum: [MaxX + 0.5, MaxY + 0.5, CenterZ + 1.8] },
         CastRay(RayOrigin, RayDir, MaxTravel)
         {
-            const Denom = RayDir[0] * PlaneNormal[0] + RayDir[1] * PlaneNormal[1] + RayDir[2] * PlaneNormal[2];
-            if (Denom >= -1.0e-5)
+            if (RayDir[2] >= -1.0e-5)
                 return null;
-            const RelX = RayOrigin[0] - NodeW[0];
-            const RelY = RayOrigin[1] - NodeW[1];
-            const RelZ = RayOrigin[2] - CenterZ;
-            const T = -(RelX * PlaneNormal[0] + RelY * PlaneNormal[1] + RelZ * PlaneNormal[2]) / Denom;
+            const T = (CenterZ - RayOrigin[2]) / RayDir[2];
             if (T < 0.0 || T > MaxTravel)
                 return null;
             const HX = RayOrigin[0] + RayDir[0] * T;
             const HY = RayOrigin[1] + RayDir[1] * T;
-            if (HX < MinX - 0.25 || HX > MaxX + 0.25 || HY < MinY - 0.25 || HY > MaxY + 0.25)
-                return null;
             if (!PointInPolygon2D(HX, HY, Poly2D))
                 return null;
-            const HZ = CenterZ + (HX - NodeW[0]) * SlopeX + (HY - NodeW[1]) * SlopeY;
-            return {
-                Travel:      T,
-                LocalPoint:  [HX, HY, HZ],
-                LocalNormal: PlaneNormal
-            };
+            return { Travel: T, LocalPoint: [HX, HY, CenterZ], LocalNormal: [0.0, 0.0, 1.0] };
         }
     };
 }
@@ -757,9 +892,26 @@ export function CompileStudioProjectForWorld(Project, Options = {})
         if (Surf)
             PhysicsSurfaces.push(Surf);
     }
-    for (const Junc of Network.junctions)
+
+    // Group node meshes (both at-grade junctions AND elevated bridgeJoints!) by owner node id
+    const NodeMeshesById = new Map();
+    for (const Mesh of Network.meshes)
     {
-        const Surf = BuildJunctionPhysicsSurface(Junc, Anchor);
+        if (Mesh.ownerKind !== "node")
+            continue;
+        let List = NodeMeshesById.get(Mesh.owner);
+        if (!List)
+        {
+            List = [];
+            NodeMeshesById.set(Mesh.owner, List);
+        }
+        List.push(Mesh);
+    }
+    const JuncById = new Map(Network.junctions.map((J) => [J.node.id, J]));
+    const AllNodeIds = new Set([...NodeMeshesById.keys(), ...JuncById.keys()]);
+    for (const NodeId of AllNodeIds)
+    {
+        const Surf = BuildNodeMeshPhysicsSurface(NodeId, NodeMeshesById.get(NodeId), Anchor, JuncById.get(NodeId));
         if (Surf)
             PhysicsSurfaces.push(Surf);
     }
