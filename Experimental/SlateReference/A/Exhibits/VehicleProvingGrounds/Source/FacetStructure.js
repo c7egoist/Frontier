@@ -17,6 +17,8 @@ import { CollapseSequence } from "./CollapseSequence.js";
 import { TramSequence } from "./TramSequence.js";
 import { DroneSequence } from "./DroneSequence.js";
 import { ServiceStationSequence } from "./ServiceStationSequence.js";
+import { TrafficLightSequence } from "./TrafficLightSequence.js";
+import { RoadEditorSequence, RoadEditorVertexCapacity } from "./RoadEditorSequence.js";
 
 // 📝 What an occupant takes part in. A ground tile only owns a surface card; the ground occupant is only rastered,
 //    because the scene distance field carries the ground as its analytic plane rather than as a sampled volume.
@@ -253,6 +255,29 @@ export class SceneStructure
         }
         this.ServiceBlock = { First: ServiceFirst, Count: this.Occupants.length - ServiceFirst, Stations: RawStations };
 
+        // ③g pole-less hovering robotic intersection traffic signal housings (+ 4 reserve slots for custom spline junctions)
+        const RawTrafficLights = Descriptor.TrafficLights ? Descriptor.TrafficLights() : [];
+        const DynamicSignalSlots = 4;
+        const TotalTrafficSlots = RawTrafficLights.length > 0 ? (RawTrafficLights.length + DynamicSignalSlots) : 0;
+        const TrafficHousingFirst = this.Occupants.length;
+        if (TotalTrafficSlots > 0 && ShapeSets.HoverTrafficHousing !== undefined)
+        {
+            const Parked = ConstructRigidTransform([0.0, 0.0, -40.0], [0.0, 0.0, 0.0, 1.0]);
+            for (let SigIdx = 0; SigIdx < TotalTrafficSlots; ++SigIdx)
+            {
+                const Spec = RawTrafficLights[SigIdx];
+                const Half = 0.5 * (Spec?.Yaw || 0.0);
+                const Initial = Spec
+                    ? ConstructRigidTransform(Spec.Anchor, [0.0, 0.0, Math.sin(Half), Math.cos(Half)])
+                    : Parked;
+                const OccIdx = this.ConstructOccupant(Spec?.Name || `Spline Junction Signal ${SigIdx - RawTrafficLights.length + 1}`,
+                                                      ShapeSets.HoverTrafficHousing, Initial, ConeRoles);
+                this.Occupants[OccIdx].Moving = false;
+                if (!Spec)
+                    this.Occupants[OccIdx].Inactive = true;
+            }
+        }
+
         // ④ breakable props, whole: rastered, in the field, carded and a collider until they break ------------------------
         const BreakableSets = new Map();
         this.Breakables = Descriptor.Breakables().map((Definition) =>
@@ -398,6 +423,49 @@ export class SceneStructure
         this.Trams = RawTrams.length > 0 ? new TramSequence(this, RawTrams) : null;
         this.Drones = RawDrones.length > 0 ? new DroneSequence(this, RawDrones) : null;
         this.ServiceStations = RawStations.length > 0 ? new ServiceStationSequence(this, RawStations) : null;
+
+        // ⑩ hovering robotic traffic light optical aspect pucks (Red / Orange / Yellow / Green) — rastered + dynamic!
+        this.TrafficBlock = null;
+        this.TrafficLights = null;
+        if (TotalTrafficSlots > 0 && ShapeSets.HoverTrafficHousing !== undefined && ShapeSets.TrafficAspectRed !== undefined)
+        {
+            const LensFirst = this.Occupants.length;
+            const LensShapes = [
+                ShapeSets.TrafficAspectRed,
+                ShapeSets.TrafficAspectOrange,
+                ShapeSets.TrafficAspectYellow,
+                ShapeSets.TrafficAspectGreen
+            ];
+            const Parked = ConstructRigidTransform([0.0, 0.0, -40.0], [0.0, 0.0, 0.0, 1.0]);
+            for (let SigIdx = 0; SigIdx < TotalTrafficSlots; ++SigIdx)
+            {
+                for (let Aspect = 0; Aspect < 4; ++Aspect)
+                {
+                    const Occ = this.ConstructOccupant(`Traffic signal ${SigIdx} aspect ${Aspect}`, LensShapes[Aspect],
+                                                       Parked, OccupantRole.Raster | OccupantRole.Dynamic);
+                    this.Occupants[Occ].Moving = false;
+                    if (SigIdx >= RawTrafficLights.length)
+                        this.Occupants[Occ].Inactive = true;
+                }
+            }
+            this.TrafficBlock = {
+                HousingFirst: TrafficHousingFirst,
+                LensFirst,
+                BaseCount:    RawTrafficLights.length,
+                DynamicSlots: DynamicSignalSlots,
+                TotalCount:   TotalTrafficSlots
+            };
+            this.TrafficLights = new TrafficLightSequence(this, RawTrafficLights, DynamicSignalSlots);
+        }
+
+        // ⑪ live-streamed cubic Bézier spline road network (editable at runtime via RoadEditorSequence) ----------------
+        const RoadEditorSet = this.ConstructFacetSet("Spline road network", [], 0.0, 0.0);
+        this.FacetSets[RoadEditorSet].LocalMinimum   = [-600.0, -600.0, -20.0];
+        this.FacetSets[RoadEditorSet].LocalMaximum   = [ 600.0,  600.0,  60.0];
+        this.FacetSets[RoadEditorSet].VertexCapacity = RoadEditorVertexCapacity;
+        const RoadEditorOcc = this.ConstructOccupant("Spline road network", RoadEditorSet, ConstructIdentityTransform(), OccupantRole.Raster);
+        this.RoadEditorBlock = { FacetSet: RoadEditorSet, Occupant: RoadEditorOcc };
+        this.RoadEditor = new RoadEditorSequence(this, LevelKey);
 
         this.ConstructDistanceList();
     }

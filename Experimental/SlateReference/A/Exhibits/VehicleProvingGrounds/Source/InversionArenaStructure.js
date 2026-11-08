@@ -22,6 +22,7 @@ import { ConstructTramShapes } from "./TramSequence.js";
 import { ConstructDroneShapes } from "./DroneSequence.js";
 import { ConstructInfrastructureShapes, EmitSignPanelOverlay } from "./SignageBuilder.js";
 import { ConstructFactoryAndServiceShapes } from "./ServiceStationSequence.js";
+import { ConstructTrafficLightShapes } from "./TrafficLightSequence.js";
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                    MULTI-TRACK COMPLEX BOUNDS & TRACK CATALOG
@@ -104,6 +105,15 @@ export const InversionArenaTracks = Object.freeze([
         Position: [-88.0,  406.0],
         Yaw:      0.0,
         Note:     "Stop at Auto-Fuel or 800V EV Station for Butler Robot + Drone refuel, then drive inside the Factory!"
+    },
+    {
+        Id:       "trackI",
+        Label:    "Track I · Spline Road Studio",
+        Name:     "Track I — Live Cubic Bézier Spline Road Network & Flyover Overlook",
+        Icon:     "Compass",
+        Position: [134.0,  408.0],
+        Yaw:      0.0,
+        Note:     "Custom spline curves & elevated bridge loop — open Road Editor (E) to sculpt & add spline roads live!"
     }
 ]);
 
@@ -678,6 +688,7 @@ export const InversionArenaShapes = Object.freeze({
     ...ConstructDroneShapes(),
     ...ConstructInfrastructureShapes(),
     ...ConstructFactoryAndServiceShapes(),
+    ...ConstructTrafficLightShapes(),
     LoopPylon:         { Emit: () => EmitBoxFacets(0.85,  0.85, 18.8, CourseMaterial.SteelDark),      Voxel: 0.0,  Cards: 0, Distance: false },
     LoopCrossBeam:     { Emit: () => EmitBoxFacets(0.80, 23.60,  0.75, CourseMaterial.SteelDark),     Voxel: 0.0,  Cards: 0, Distance: false },
     LoopCrownLamp:     { Emit: () => EmitBoxFacets(0.45,  9.20,  0.16, CourseMaterial.GateLamp),      Voxel: 0.0,  Cards: 0, Distance: false },
@@ -2049,5 +2060,24 @@ export function ResolveInversionServiceStations()
             DockYaw:       -0.5 * Math.PI,
             DronePerch:    [-56.0, 425.2, 3.35]
         }
+    ];
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+//      POLE-LESS HOVERING ROBOTIC INTERSECTION TRAFFIC LIGHTS (RED / ORANGE / YELLOW / GREEN)
+//------------------------------------------------------------------------------------------------------------------------
+
+export function ResolveInversionTrafficLights()
+{
+    return [
+        // Stationed in midair right over major road intersections (no ground pole, hovers in place — never chases player!)
+        { Id: "tl_start_cross",   Name: "Start Grid & Paddock Signal",     Anchor: [-76.0,  -36.0, 4.45], Yaw: 0.0,           PhaseOffset:  0.0 },
+        { Id: "tl_north_gate",    Name: "North Gateway Intersection",      Anchor: [ 12.0,   55.5, 4.45], Yaw: 0.5 * Math.PI, PhaseOffset:  4.2 },
+        { Id: "tl_south_gate",    Name: "South Canyon Crossroads",         Anchor: [ 78.0,  -55.5, 4.45], Yaw: 0.5 * Math.PI, PhaseOffset:  8.4 },
+        { Id: "tl_west_avenue",   Name: "West Grand Avenue Junction",      Anchor: [-90.0,  202.0, 4.45], Yaw: 0.5 * Math.PI, PhaseOffset: 12.6 },
+        { Id: "tl_tram_xing",     Name: "Track F Tramway Crossing Signal", Anchor: [-78.0,  314.0, 4.55], Yaw: 0.0,           PhaseOffset:  2.5 },
+        { Id: "tl_const_gate",    Name: "Track G Construction Crossroads", Anchor: [-90.0, -360.0, 4.45], Yaw: 0.5 * Math.PI, PhaseOffset:  6.8 },
+        { Id: "tl_factory_plaza", Name: "Track H Factory & Service Signal",Anchor: [-36.0,  408.0, 4.45], Yaw: 0.0,           PhaseOffset: 10.5 },
+        { Id: "tl_east_avenue",   Name: "East Grand Avenue Crossroads",    Anchor: [164.0,  360.0, 4.45], Yaw: 0.5 * Math.PI, PhaseOffset: 14.2 }
     ];
 }

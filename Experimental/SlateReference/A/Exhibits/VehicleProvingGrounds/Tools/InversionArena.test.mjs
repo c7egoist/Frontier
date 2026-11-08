@@ -18,6 +18,8 @@ import { VehicleSolver } from "../Source/VehicleSolver.js";
 import { ChaseCameraSolver } from "../Source/ChaseCameraSolver.js";
 import { SweepSpark } from "../Source/SparkCollision.js";
 import { ServiceAudio } from "../Source/ServiceAudio.js";
+import { BuildSplineNetworkGeometry, RoadPresetTemplates, CreateRoadNode, CreateSplineRoad,
+         SplitSplineRoadAt, AutoSmoothNodeTangents } from "../Source/RoadSplineBuilder.js";
 import { RotateVector, CrossVector, DotVector, SubtractVector } from "../Source/TransformProjection.js";
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -236,15 +238,16 @@ test("ChaseCameraSolver tracks 90° vertical and 180° inverted orientations wit
     assert.ok(Chase.Up[2] < -0.7, `Camera Up must invert smoothly with loop crown, got ${Chase.Up[2]}`);
 });
 
-test("LevelCatalog exposes multi-track Inversion Arena (Tracks A–H) and Proving Grounds descriptors cleanly", () =>
+test("LevelCatalog exposes multi-track Inversion Arena (Tracks A–I) and Proving Grounds descriptors cleanly", () =>
 {
     assert.equal(LevelCatalog.length, 2);
     const Inversion = ResolveLevelDescriptor("inversion");
     const Proving = ResolveLevelDescriptor("proving");
     assert.equal(Inversion.Title, "Inversion Arena");
     assert.equal(Inversion.Relief, false);
-    assert.equal(Inversion.Tracks.length, 8);
-    assert.deepEqual(Inversion.Tracks.map((T) => T.Id), ["trackA", "trackB", "trackC", "trackD", "trackE", "trackF", "trackG", "trackH"]);
+    assert.equal(Inversion.Tracks.length, 9);
+    assert.deepEqual(Inversion.Tracks.map((T) => T.Id),
+                     ["trackA", "trackB", "trackC", "trackD", "trackE", "trackF", "trackG", "trackH", "trackI"]);
     assert.equal(Inversion.Surfaces.length, 33);
     assert.equal(Inversion.Zones.length, 23);
     assert.ok(Inversion.PhysicsCutouts.length >= 8);
@@ -254,9 +257,11 @@ test("LevelCatalog exposes multi-track Inversion Arena (Tracks A–H) and Provin
     assert.equal(Inversion.Trams().length, 6);
     assert.equal(Inversion.Drones().length, 15);
     assert.equal(Inversion.ServiceStations().length, 2);
+    assert.equal(Inversion.TrafficLights().length, 8);
     assert.equal(Proving.Title, "Proving Grounds");
     assert.equal(Proving.Relief, true);
     assert.equal(Proving.Surfaces.length, 0);
+    assert.equal(Proving.TrafficLights().length, 2);
 });
 
 test("Track B Split Over/Under: car drives -5.2 m underground through Subway Tunnel, +5.0 m over Sky-Bridge, and across Z=0 Underpass Road", () =>
@@ -544,7 +549,12 @@ test("Track D Session-Baked CollapseSequence: unique movie cracks, 2-manifold sh
         {
             BridgeCar.Advance({ Throttle: 1.0, Brake: 0.0, Steer: 0.0, Handbrake: false }, 1.0 / 60.0);
             Collapse.Advance(BridgeCar.Position, BridgeCar.LinearVelocity, 1.0 / 60.0, MockSparks);
-            PeakSmokeEmitters = Math.max(PeakSmokeEmitters, Collapse.QuerySmokeEmissions().length);
+            const SmokeVents = Collapse.QuerySmokeEmissions();
+            PeakSmokeEmitters = Math.max(PeakSmokeEmitters, SmokeVents.length);
+            for (const Vent of SmokeVents)
+            {
+                assert.ok(Vent.Radius <= 0.35, `Crack smoke vent must be tightly bound to the crack seam (Radius <= 0.35 m), got ${Vent.Radius}`);
+            }
             ActiveSandSeen = Math.max(ActiveSandSeen, Collapse.SandShards.filter((S) => S.Active).length);
             if (BridgeCar.Position[0] > 106.0)
                 break;
@@ -956,6 +966,173 @@ test("Track H Drive-Through Megafactory (Interior Presses, Conveyors, Racks, Sil
         {
             globalThis.AudioContext = PrevAudioCtx;
         }
+    }
+    finally
+    {
+        AssignExcavationCutouts([]);
+        AssignCourseReliefEnabled(true);
+        globalThis.fetch = PreviousFetch;
+    }
+});
+
+test("Pole-less Hovering Robotic Intersection Traffic Lights (Red/Orange/Yellow/Green) & Cubic Bézier Spline Road Editor (Watertight 2-Manifold + Live 480 Hz Driving)", async () =>
+{
+    const fs = await import("node:fs/promises");
+    const PreviousFetch = globalThis.fetch;
+    globalThis.fetch = async (Url) =>
+    {
+        const Buffer = await fs.readFile(new URL(`../${Url}`, import.meta.url));
+        return { ok: true, arrayBuffer: async () => Buffer.buffer.slice(Buffer.byteOffset, Buffer.byteOffset + Buffer.byteLength) };
+    };
+    AssignCourseReliefEnabled(false);
+    AssignExcavationCutouts(InversionPhysicsCutouts);
+    try
+    {
+        const Scene = new SceneStructure();
+        await Scene.ConstructScene("Archive", 0, "inversion");
+
+        // ① Pole-less Hovering Robotic Intersection Traffic Lights:
+        //    - Housing has NO pole (local Z stays strictly inside [-0.70, +1.15]),
+        //    - Hovers in place above intersections (Z ≈ 4.45 m) without following the vehicle,
+        //    - Cycles cleanly through GREEN -> YELLOW -> ORANGE -> RED and emits matching colored light poles!
+        const HousingFacets = InversionArenaShapes.HoverTrafficHousing.Emit();
+        const HousingMinZ = Math.min(...HousingFacets.flatMap((F) => F.Corners.map((C) => C[2])));
+        const HousingMaxZ = Math.max(...HousingFacets.flatMap((F) => F.Corners.map((C) => C[2])));
+        assert.ok(HousingMinZ > -1.30 && HousingMaxZ < 1.35 && (4.45 + HousingMinZ) > 3.0,
+                  `HoverTrafficHousing must be a compact pole-less hovering unit (>3m ground clearance), got Z=[${HousingMinZ}, ${HousingMaxZ}]`);
+
+        const TL = Scene.TrafficLights;
+        assert.ok(TL, "SceneStructure must instantiate TrafficLightSequence");
+        assert.equal(TL.QuerySummary().ActiveCount, 8);
+
+        const Sig0 = TL.Units[0]; // PhaseOffset = 0.0 -> GREEN (6.5s), YELLOW (2.2s), ORANGE (1.8s), RED (6.0s)
+        TL.Clock = 0.0;
+        const StepAdvance = (TotalSec) =>
+        {
+            const Steps = Math.ceil(TotalSec / 0.05);
+            for (let S = 0; S < Steps; ++S)
+                TL.Advance(TotalSec / Steps);
+        };
+        StepAdvance(0.5); // 0.5s -> GREEN
+        assert.equal(Sig0.CurrentAspect, "GREEN");
+        assert.ok(Math.abs(Sig0.WorldPosition[0] - Sig0.Anchor[0]) < 0.01 && Math.abs(Sig0.WorldPosition[1] - Sig0.Anchor[1]) < 0.01,
+                  "Intersection traffic light must hover steadily at its intersection anchor, never chase the player");
+        assert.ok(Sig0.WorldPosition[2] > 4.2, `Traffic light must hover in midair above intersection, got Z=${Sig0.WorldPosition[2]}`);
+
+        StepAdvance(6.6); // 7.1s -> YELLOW (6.5..8.7s)
+        assert.equal(Sig0.CurrentAspect, "YELLOW");
+
+        StepAdvance(2.4); // 9.5s -> ORANGE (8.7..10.5s)
+        assert.equal(Sig0.CurrentAspect, "ORANGE");
+
+        StepAdvance(2.0); // 11.5s -> RED (10.5..16.5s)
+        assert.equal(Sig0.CurrentAspect, "RED");
+
+        const LightPoles = TL.QueryLightPoles();
+        assert.equal(LightPoles.length, 8, "Every active hovering intersection signal must emit a colored clustered light");
+        assert.ok(LightPoles[0].Colour[0] > 0.9 && LightPoles[0].Colour[1] < 0.25, "RED aspect light pole must emit red radiance");
+
+        // Verify manual override & custom spline road junction signal slot!
+        TL.OverrideMode = "ORANGE";
+        TL.Advance(0.04);
+        assert.ok(TL.Units.slice(0, 8).every((S) => S.CurrentAspect === "ORANGE"), "OverrideMode='ORANGE' must set all active signals to ORANGE");
+        TL.OverrideMode = "AUTO";
+        TL.SyncEditorJunctionSignals([{ Name: "Custom Spline Crossroads", Position: [180.0, 408.0, 0.0], Yaw: 0.0 }]);
+        assert.equal(TL.QuerySummary().ActiveCount, 9, "Custom spline junction signal must activate dynamically");
+        assert.ok(TL.Units[8].Anchor[2] > 4.2, "Custom spline junction signal must hover above the road");
+
+        // ② Watertight 2-Manifold Verification across ALL Spline Road Styles & Preset Templates (Cloverleaf, Trumpet, Roundabout, S-Curve)!
+        const VerifyClosedManifold = (Facets, Label) =>
+        {
+            const Quantize = (V) => V.map((X) => Math.round(X * 10000)).join(",");
+            const Directed = new Set();
+            let SixVol = 0.0;
+            for (const F of Facets)
+            {
+                const [A, B, C] = F.Corners;
+                const Keys = [Quantize(A), Quantize(B), Quantize(C)];
+                if (Keys[0] === Keys[1] || Keys[1] === Keys[2] || Keys[2] === Keys[0])
+                    continue;
+                for (let E = 0; E < 3; ++E)
+                {
+                    const Tag = `${Keys[E]}->${Keys[(E + 1) % 3]}`;
+                    assert.ok(!Directed.has(Tag), `${Label} has duplicate/non-manifold directed edge ${Tag}`);
+                    Directed.add(Tag);
+                }
+                SixVol += DotVector(A, CrossVector(SubtractVector(B, A), SubtractVector(C, A)));
+            }
+            for (const Tag of Directed)
+            {
+                const [From, To] = Tag.split("->");
+                assert.ok(Directed.has(`${To}->${From}`), `${Label} has open boundary edge ${Tag}`);
+            }
+            assert.ok(SixVol > 1.0, `${Label} must have positive outward signed volume, got ${SixVol}`);
+        };
+
+        const Editor = Scene.RoadEditor;
+        assert.ok(Editor, "SceneStructure must instantiate RoadEditorSequence");
+        const StarterBuilt = BuildSplineNetworkGeometry(Editor.Project);
+        VerifyClosedManifold(StarterBuilt.Facets, "Starter Spline Road & Flyover Network");
+
+        for (const Preset of RoadPresetTemplates)
+        {
+            const SubProject = { Nodes: [], Roads: [] };
+            Preset.Build(SubProject, [0.0, 0.0]);
+            const Built = BuildSplineNetworkGeometry(SubProject);
+            assert.ok(Built.Facets.length > 80, `${Preset.Id} must emit rich road, kerb & hub geometry`);
+            VerifyClosedManifold(Built.Facets, `Preset ${Preset.Id}`);
+        }
+
+        // Verify tight hairpin curvature guard produces zero bowtie flips AND remains a closed 2-manifold!
+        const HairpinProj = { Nodes: [], Roads: [] };
+        const HN0 = CreateRoadNode([0.0, 0.0, 0.0], "HP0");
+        const HN1 = CreateRoadNode([12.0, 0.0, 0.0], "HP1");
+        HairpinProj.Nodes.push(HN0, HN1);
+        HairpinProj.Roads.push(CreateSplineRoad(HairpinProj, HN0.Id, HN1.Id, {
+            Width: 16.0, Style: "race", BankDeg: 14.0, Guardrails: true,
+            H1: [0.0, 26.0, 0.0], H2: [0.0, 26.0, 0.0]
+        }));
+        VerifyClosedManifold(BuildSplineNetworkGeometry(HairpinProj).Facets, "Extreme Tight Hairpin Spline");
+
+        // ③ Live Spline Editing Ops (Split, Smooth C¹, Undo/Redo, Export/Import)
+        const InitialRoadCount = Editor.Project.Roads.length;
+        const SplitNode = Editor.SplitSelectedRoadMidpoint();
+        assert.ok(SplitNode, "SplitSelectedRoadMidpoint must insert a shared junction node via de Casteljau subdivision");
+        assert.equal(Editor.Project.Roads.length, InitialRoadCount + 1);
+        Editor.SmoothSelectedTangents();
+        const Exported = Editor.ExportJson();
+        assert.equal(Editor.Undo(), true); // Undo smooth
+        assert.equal(Editor.Undo(), true); // Undo split
+        assert.equal(Editor.Project.Roads.length, InitialRoadCount);
+        assert.equal(Editor.Redo(), true);
+        assert.equal(Editor.Project.Roads.length, InitialRoadCount + 1);
+        Editor.ImportJson(Exported);
+
+        // ④ Live 480 Hz VehicleSolver Driving Over Custom Cubic Bézier Arched Bridge!
+        const BridgeProj = { Nodes: [], Roads: [] };
+        const BN0 = CreateRoadNode([200.0, 0.0, 0.0], "Bridge West");
+        const BN1 = CreateRoadNode([290.0, 0.0, 0.0], "Bridge East");
+        BridgeProj.Nodes.push(BN0, BN1);
+        BridgeProj.Roads.push(CreateSplineRoad(BridgeProj, BN0.Id, BN1.Id, {
+            Name: "Test Flyover", Width: 12.0, Style: "bridge", ArchHeight: 4.8, Guardrails: true,
+            H1: [30.0, 0.0, 0.0], H2: [-30.0, 0.0, 0.0]
+        }));
+        const BridgeBuilt = BuildSplineNetworkGeometry(BridgeProj);
+        VerifyClosedManifold(BridgeBuilt.Facets, "Test Flyover Bridge");
+
+        const Car = new VehicleSolver([]);
+        Car.Surfaces = [BridgeBuilt.PhysicsSurface];
+        Car.AeroGripScale = 1.0;
+        Car.Respawn([204.0, 0.0, 0.72], 0.0);
+        let PeakZ = 0.0;
+        for (let Step = 0; Step < 450; ++Step)
+        {
+            Car.Advance({ Throttle: 1.0, Brake: 0.0, Steer: 0.0, Handbrake: false }, 1.0 / 60.0);
+            PeakZ = Math.max(PeakZ, Car.Position[2]);
+            assert.ok(Car.Position.every(Number.isFinite), "Vehicle pose on custom spline bridge must stay finite");
+        }
+        assert.ok(Car.Position[0] > 272.0, `Car must drive smoothly across the curved spline flyover, reached X=${Car.Position[0]}`);
+        assert.ok(PeakZ > 4.2, `Car must climb the 4.8 m cubic Bézier arched flyover crest, peak Z=${PeakZ}`);
     }
     finally
     {

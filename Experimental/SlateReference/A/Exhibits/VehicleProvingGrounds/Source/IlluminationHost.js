@@ -373,6 +373,15 @@ class IlluminationHost
         this.ServiceStations = this.Scene.ServiceStations;
         if (this.ServiceStations)
             this.ServiceStations.OnAnnounce = (Message) => this.Shell?.Announce(Message);
+        this.TrafficLights = this.Scene.TrafficLights;
+        if (this.TrafficLights)
+        {
+            this.TrafficLights.Advance(0.0);
+            this.UploadTrafficLightOccupants();
+        }
+        this.RoadEditor = this.Scene.RoadEditor;
+        if (this.RoadEditor)
+            this.RoadEditor.AttachHost(this);
         this.ReportProgress("Baking fracture patterns", 0.72);
         this.Fracture = new FractureSequence(this);
 
@@ -602,6 +611,22 @@ class IlluminationHost
         }
     }
 
+    UploadTrafficLightOccupants()
+    {
+        if (!this.TrafficLights || !this.Scene.TrafficBlock || !this.OccupantRecords || !this.Volumes)
+            return;
+        const Device = this.Exchange.Device;
+        const Block = this.Scene.TrafficBlock;
+        if (Block.TotalCount > 0)
+        {
+            const HousingScalars = this.Scene.EncodeOccupantRange(this.Volumes, Block.HousingFirst, Block.TotalCount);
+            Device.queue.writeBuffer(this.OccupantRecords, Block.HousingFirst * OccupantStride, HousingScalars);
+            const LensCount = Block.TotalCount * 4;
+            const LensScalars = this.Scene.EncodeOccupantRange(this.Volumes, Block.LensFirst, LensCount);
+            Device.queue.writeBuffer(this.OccupantRecords, Block.LensFirst * OccupantStride, LensScalars);
+        }
+    }
+
     UploadCollapseOccupants()
     {
         if (!this.Collapse || !this.Scene.CollapseBlock || !this.OccupantRecords || !this.Volumes)
@@ -793,6 +818,16 @@ class IlluminationHost
                 this.ResetArena();
             if (Event.code === "KeyC" && !Event.repeat && !Event.ctrlKey && !Event.metaKey)
                 this.CycleCamera(Event.shiftKey ? -1 : 1);
+            if (Event.code === "KeyE" && !Event.repeat && !Event.ctrlKey && !Event.metaKey && !Event.altKey)
+            {
+                if (this.Shell)
+                    this.Shell.Select("roadeditor");
+                if (this.RoadEditor)
+                {
+                    const Opened = this.RoadEditor.ToggleFloatingStudio();
+                    this.Shell?.Announce(Opened ? "Spline Road Studio opened (E)" : "Spline Road Studio closed");
+                }
+            }
             if (Event.code === "KeyI" && !Event.repeat && !Event.ctrlKey && !Event.metaKey && !Event.altKey)
             {
                 if (this.Lighting)
@@ -845,6 +880,26 @@ class IlluminationHost
         this.Canvas.addEventListener("pointerdown", (Event) =>
         {
             this.ServiceStations?.Audio?.Unlock();
+            if (this.RoadEditor?.ViewportPickEnabled && Event.button === 0 && !Event.altKey && this.CameraState)
+            {
+                const Bounds = this.Canvas.getBoundingClientRect();
+                const NX = ((Event.clientX - Bounds.left) / Math.max(Bounds.width, 1.0)) * 2.0 - 1.0;
+                const NY = 1.0 - ((Event.clientY - Bounds.top) / Math.max(Bounds.height, 1.0)) * 2.0;
+                const C = this.CameraState;
+                const Dir = NormalizeVector(AddVector(C.Forward, AddVector(ScaleVector(C.Right, NX * C.TanY * C.Aspect), ScaleVector(C.Up, NY * C.TanY))));
+                if (Math.abs(Dir[2]) > 1.0e-4)
+                {
+                    const T = -C.Position[2] / Dir[2];
+                    if (T > 0.5 && T < 900.0)
+                    {
+                        const WorldXY = [C.Position[0] + Dir[0] * T, C.Position[1] + Dir[1] * T];
+                        this.RoadEditor.HandleWorldClick(WorldXY, 5.0);
+                        this.RoadEditor.FloatingRedraw?.();
+                        Dragging = false;
+                        return;
+                    }
+                }
+            }
             Dragging = true;
             LastX = Event.clientX;
             LastY = Event.clientY;
@@ -1286,6 +1341,9 @@ class IlluminationHost
         const ServiceMoved = this.ServiceStations
             ? this.ServiceStations.Advance(this.Vehicle, Step, this.Sparks)
             : false;
+        const TrafficLightsMoved = this.TrafficLights
+            ? this.TrafficLights.Advance(Step)
+            : false;
         this.Stress.Advance(Step);
         this.Effects.Advance(Step);
         this.Training.Advance(Step);
@@ -1365,10 +1423,15 @@ class IlluminationHost
             const ServiceScalars = this.Scene.EncodeOccupantRange(this.Volumes, ServiceBlock.First, ServiceBlock.Count);
             Device.queue.writeBuffer(this.OccupantRecords, ServiceBlock.First * OccupantStride, ServiceScalars);
         }
+        if (TrafficLightsMoved)
+            this.UploadTrafficLightOccupants();
 
         if (this.Lighting && this.LightRecords)
         {
-            const LightData = this.Lighting.Update(this.Vehicle.QueryBodyTransform(), this.StreetLampPoles, this.Clock);
+            const ActivePoles = this.TrafficLights
+                ? [...this.StreetLampPoles, ...this.TrafficLights.QueryLightPoles()]
+                : this.StreetLampPoles;
+            const LightData = this.Lighting.Update(this.Vehicle.QueryBodyTransform(), ActivePoles, this.Clock);
             Device.queue.writeBuffer(this.LightRecords, 0, LightData);
             Device.queue.writeBuffer(this.ClusterRecords.Cells, 0, this.Lighting.ClusterCells);
             Device.queue.writeBuffer(this.ClusterRecords.Indices, 0, this.Lighting.ClusterIndices);
@@ -1516,6 +1579,14 @@ class IlluminationHost
                 + (Telemetry.Burnout ? ` · BURNOUT ${(Math.abs(Telemetry.RearSpin) * 3.6).toFixed(0)} km/h wheelspin` : ""),
             `GDF bricks rewritten  ${Rewritten}${this.Distance.Frozen ? "  (frozen)" : ""} · card tiles ${this.Cards.ScheduledTiles}`
         ];
+        if (this.TrafficLights)
+        {
+            const NearSig = this.TrafficLights.QueryNearestSignal(this.Vehicle.Position);
+            if (NearSig && NearSig.Distance < 95.0)
+            {
+                Lines.push(`Intersection signal  ${NearSig.Name} (${NearSig.Distance.toFixed(0)} m) · ${NearSig.Aspect} ${NearSig.RemainingSeconds.toFixed(1)}s`);
+            }
+        }
         if (this.Stress.QueryActive() > 0)
             Lines.push(`Stress objects  ${this.Stress.QueryActive()} (${this.Stress.Moving.length} moving) · ${this.Scene.DrawRuns.length} draw runs`);
         if (this.Fracture.Metrics.ActiveFragments > 0)

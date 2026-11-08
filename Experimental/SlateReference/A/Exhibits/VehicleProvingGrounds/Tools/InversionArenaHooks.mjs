@@ -30,6 +30,9 @@ let BridgeCollapseTriggered = false;
 let RoadCollapseTriggered = false;
 let CollapseSandEmitted = false;
 let StartTramLeadX = null;
+let PeakSplineBridgeZ = 0.0;
+let RoadEditorStreamed = false;
+const SeenTrafficAspects = new Set();
 
 export default
 {
@@ -120,6 +123,31 @@ export default
             Host.TeleportVehicle({ Name: "Track H Factory Hall", Position: [6.0, 408.0], Yaw: 0.0 }, true);
             Host.ScriptedInput = { Throttle: 1.0, Brake: 0.0, SteerAngle: 0.0, Handbrake: false, Reverse: false };
         }
+        // Phase 10 (Frame 3700): Open Sun-UI Road Editor & Hover Traffic Lights pages, live-edit spline network on GPU, and climb Track I Flyover!
+        else if (Frame === 3700)
+        {
+            if (Host.Shell)
+            {
+                Host.Shell.Select("trafficlights");
+                Host.Shell.Select("roadeditor");
+            }
+            if (Host.RoadEditor)
+            {
+                Host.RoadEditor.AddPresetTemplate("roundabout");
+                Host.RoadEditor.SplitSelectedRoadMidpoint();
+                Host.RoadEditor.SmoothSelectedTangents();
+                Host.RoadEditor.ResetToDefault();
+                Host.RoadEditor.AddPresetTemplate("cloverleaf");
+                RoadEditorStreamed = Host.Scene.FacetSets[Host.Scene.RoadEditorBlock.FacetSet].VertexCount > 600;
+                const OverpassRoad = Host.RoadEditor.Project.Roads.find((R) => R.Name === "Cloverleaf Overpass") || Host.RoadEditor.Project.Roads[1];
+                if (OverpassRoad)
+                {
+                    Host.RoadEditor.Selection = { Kind: "road", Id: OverpassRoad.Id };
+                    Host.RoadEditor.DriveOnSelectedRoad();
+                }
+            }
+            Host.ScriptedInput = { Throttle: 0.85, Brake: 0.0, SteerAngle: 0.0, Handbrake: false, Reverse: false };
+        }
 
         const VehicleUp = RotateVector(Host.Vehicle.Orientation, [0.0, 0.0, 1.0]);
         MinimumVehicleUpZ = Math.min(MinimumVehicleUpZ, VehicleUp[2]);
@@ -145,8 +173,16 @@ export default
             AutoFuelCompleted = true;
         if (Frame >= 2840 && Frame < 3230 && Host.ServiceStations?.QuerySummary().BatteryPercent === 100)
             AutoEVCompleted = true;
-        if (Frame >= 3230)
+        if (Frame >= 3230 && Frame < 3700)
             MaximumFactoryHallX = Math.max(MaximumFactoryHallX, Host.Vehicle.Position[0]);
+        if (Frame >= 3700)
+            PeakSplineBridgeZ = Math.max(PeakSplineBridgeZ, Host.Vehicle.Position[2]);
+        if (Host.TrafficLights)
+        {
+            for (const Unit of Host.TrafficLights.Units)
+                if (Unit.Active)
+                    SeenTrafficAspects.add(Unit.CurrentAspect);
+        }
         if (Frame < 610)
             MaximumTrackAX = Math.max(MaximumTrackAX, Host.Vehicle.Position[0]);
         if (VehicleUp[2] < -0.75)
@@ -169,8 +205,13 @@ export default
                 BridgeCollapseTriggered = true;
             if (Host.Collapse.Spans[1]?.State === "collapsing")
                 RoadCollapseTriggered = true;
-            if (Host.Collapse.QuerySmokeEmissions().length > 0)
+            const Vents = Host.Collapse.QuerySmokeEmissions();
+            if (Vents.length > 0)
+            {
                 CollapseSandEmitted = true;
+                for (const V of Vents)
+                    assert.ok(V.Radius <= 0.35, `Expected crack-bound smoke vent Radius <= 0.35 m, got ${V.Radius}`);
+            }
         }
 
         if (Host.Camera)
@@ -183,7 +224,7 @@ export default
     Report(Host)
     {
         assert.equal(Host.LevelKey, "inversion");
-        assert.equal(Host.LevelDescriptor.Tracks.length, 8);
+        assert.equal(Host.LevelDescriptor.Tracks.length, 9);
         assert.ok(MinimumVehicleUpZ < -0.85, `Expected Track A upside-down loop inversion, got minUpZ=${MinimumVehicleUpZ.toFixed(3)}`);
         assert.ok(MaximumAltitudeZ > 15.5, `Expected Track A loop apex > 15.5 m, got maxZ=${MaximumAltitudeZ.toFixed(2)}`);
         assert.ok(InvertedWheelContacts >= 2, `Expected >= 2 loaded wheels upside-down, got ${InvertedWheelContacts}`);
@@ -208,6 +249,10 @@ export default
         assert.ok(AutoEVCompleted, "Expected Track H Automatic 800V EV Station butler robot + drone to charge battery to 100%");
         assert.ok(MaximumFactoryHallX > 124.0,
                   `Expected Track H Megafactory drive-through past East portal X=124 m, got maxX=${MaximumFactoryHallX.toFixed(1)}`);
-        console.log(`8-track inversion arena: Track A loop (${Host.Training.Best.loop360.Primary.toFixed(2)} s) · Track B/C boolean bollards · Track D collapse+sand · Track E 3-lane subway · Track F 14 railcars · Track G construction thru-trench + dead-end pit · Track H megafactory + auto-fuel (100%) + auto-EV (100%) · 15 midair robot drones ACTIVE`);
+        assert.ok(RoadEditorStreamed, "Expected Sun-UI RoadEditorSequence to stream edited spline road vertices to GPU");
+        assert.ok(PeakSplineBridgeZ > 3.0, `Expected ControlVehicle to climb Track I custom spline flyover bridge (>3.0 m), got peakZ=${PeakSplineBridgeZ.toFixed(2)}`);
+        for (const ExpectedAspect of ["GREEN", "YELLOW", "ORANGE", "RED"])
+            assert.ok(SeenTrafficAspects.has(ExpectedAspect), `Expected Hovering Intersection Traffic Lights to display ${ExpectedAspect}`);
+        console.log(`9-track inversion arena: Track A loop (${Host.Training.Best.loop360.Primary.toFixed(2)} s) · Track B/C boolean bollards · Track D Voronoi collapse+crack-bound smoke · Track E 3-lane subway · Track F 14 railcars · Track G construction thru-trench + dead-end pit · Track H megafactory + auto-fuel (100%) + auto-EV (100%) · Track I Sun-UI spline road editor (peak Z=${PeakSplineBridgeZ.toFixed(2)} m) · hovering 4-lamp traffic lights (R/O/Y/G) · 15 midair robot drones ACTIVE`);
     }
 };

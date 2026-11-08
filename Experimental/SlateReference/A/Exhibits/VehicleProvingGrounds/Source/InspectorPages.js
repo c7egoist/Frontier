@@ -19,6 +19,7 @@ import { DerezPresets } from "./EffectSequence.js";
 import { FormatPrimary } from "./TrainingSequence.js";
 import { CameraRigs } from "./CabinStructure.js";
 import { AutomotiveMode, RoofFixtureType } from "./LightingSystem.js";
+import { RoadPresetTemplates } from "./RoadSplineBuilder.js";
 
 export const InspectionModes = [
     ["Final image", 0], ["Direct sun only", 1], ["Indirect diffuse (GI)", 2], ["Indirect irradiance (denoised)", 3],
@@ -196,6 +197,38 @@ export function ConstructEntities(Host)
             State: () => (Host.ServiceStations.QuerySummary().ActiveKind ? "warm" : (Host.ServiceStations.Enabled ? "live" : "")),
             Toggle: { Read: () => Host.ServiceStations.Enabled, Write: (On) => { Host.ServiceStations.Enabled = On; } },
             Build: (C, B) => BuildServiceStations(Host, C, B)
+        });
+    }
+    if (Host.RoadEditor)
+    {
+        Entities.push({
+            Id: "roadeditor", Group: "Level", Name: "Road editor", Type: "Cubic Bézier splines", Glyph: "Route", Colour: Accent.Environment,
+            Description: "Sculpt spline roads, banked curves, bridges & interchanges live",
+            Meta: () => `${Host.RoadEditor.Project.Roads.length} roads`,
+            State: () => (Host.RoadEditor.Enabled ? "live" : ""),
+            Toggle: { Read: () => Host.RoadEditor.Enabled, Write: (On) => { Host.RoadEditor.Enabled = On; Host.RoadEditor.CommitChanges(null); } },
+            Switches: () => [
+                { Name: "Snap nodes", Glyph: "Target", Read: () => Host.RoadEditor.SnapEnabled,
+                  Write: (On) => { Host.RoadEditor.SnapEnabled = On; } },
+                { Name: "3D viewport pick", Glyph: "MoveSpace", Read: () => Host.RoadEditor.ViewportPickEnabled,
+                  Write: (On) => { Host.RoadEditor.ViewportPickEnabled = On; } }
+            ],
+            Build: (C, B) => BuildRoadEditor(Host, C, B)
+        });
+    }
+    if (Host.TrafficLights)
+    {
+        Entities.push({
+            Id: "trafficlights", Group: "Level", Name: "Hover traffic lights", Type: "Intersection robotics", Glyph: "Lightbulb", Colour: Accent.Environment,
+            Description: "Pole-less hovering robotic intersection signals (Red · Orange · Yellow · Green)",
+            Meta: () =>
+            {
+                const Near = Host.TrafficLights.QueryNearestSignal(Host.Vehicle.Position);
+                return Near ? Near.Aspect : `${Host.TrafficLights.QuerySummary().ActiveCount} active`;
+            },
+            State: () => (Host.TrafficLights.Enabled ? "live" : ""),
+            Toggle: { Read: () => Host.TrafficLights.Enabled, Write: (On) => { Host.TrafficLights.Enabled = On; } },
+            Build: (C, B) => BuildTrafficLights(Host, C, B)
         });
     }
     return Entities;
@@ -1198,3 +1231,156 @@ function Distance(Left, Right)
 {
     return Math.hypot(Left[0] - Right[0], Left[1] - Right[1]);
 }
+
+//------------------------------------------------------------------------------------------------------------------------
+//                      SUN-UI-STYLED CUBIC BÉZIER SPLINE ROAD EDITOR & HOVERING TRAFFIC LIGHTS
+//------------------------------------------------------------------------------------------------------------------------
+
+function BuildRoadEditor(Host, C, Body)
+{
+    const R = Host.RoadEditor;
+
+    // ① Card 01: Spline Tool Mode & Track / Interchange Templates (clean Sun-UI preset card aesthetic)
+    const ToolsCard = C.Card(Body, "Spline tool & templates", "Route",
+                             { Accent: Accent.Environment, Index: 1, Subtitle: "Select · Draw · Split · Delete" });
+    C.Segmented(ToolsCard, R, "ToolMode",
+                [["Select", "select"], ["Draw", "draw"], ["Split", "split"], ["Delete", "delete"]],
+                { Label: "Tool", OnChange: () => { R.DrawChainNodeId = null; C.Synchronise(); R.FloatingRedraw?.(); } });
+    C.Segmented(ToolsCard, R, "NewRoadStyle",
+                [["Motorway", "motorway"], ["Race kerb", "race"], ["Urban", "urban"], ["Bridge", "bridge"]],
+                { Label: "New road", OnChange: () => C.Synchronise() });
+
+    const PresetRow1 = C.ActionRow(ToolsCard);
+    for (const Preset of RoadPresetTemplates.slice(0, 2))
+        C.Button(PresetRow1, Preset.Label, "Plus", () => R.AddPresetTemplate(Preset.Id));
+    const PresetRow2 = C.ActionRow(ToolsCard);
+    for (const Preset of RoadPresetTemplates.slice(2, 4))
+        C.Button(PresetRow2, Preset.Label, "Plus", () => R.AddPresetTemplate(Preset.Id));
+
+    const EditRow = C.ActionRow(ToolsCard);
+    C.Button(EditRow, "Add curve", "Plus", () => R.AddQuickStraightOrCurve(true));
+    C.Button(EditRow, "Drive here", "Car", () => R.DriveOnSelectedRoad());
+    C.Button(EditRow, "Undo", "Undo2", () => R.Undo());
+
+    // ② Card 02: Sun-UI Interactive Spline Alignment Instrument (drag nodes & glowing sun-gold Bézier handles!)
+    const CurveCard = C.Card(Body, "Spline alignment", "Compass",
+                             { Accent: Accent.Environment, Index: 2, Subtitle: "Cubic Bézier · C¹ tangents" });
+    C.Metric(CurveCard,
+             () => R.QuerySummary().ActiveLength,
+             "m",
+             1,
+             () =>
+             {
+                 const S = R.QuerySummary();
+                 return [`min R ${S.MinRadius > 900 ? "∞" : `${S.MinRadius.toFixed(0)} m`}`, S.MinRadius < 18.0 ? "warm" : ""];
+             });
+    const RedrawPlan = C.Instrument(CurveCard, 204, (Ctx, W, H) => R.DrawSunStyleSplineInstrument(Ctx, W, H), true);
+    const PlanCanvas = CurveCard.lastElementChild || (CurveCard.children && CurveCard.children[CurveCard.children.length - 1]);
+    R.AttachInteractiveCanvas(PlanCanvas, RedrawPlan);
+
+    const StudioRow = C.ActionRow(CurveCard);
+    C.Button(StudioRow, "Large studio (E)", "Scan", () => R.ToggleFloatingStudio());
+    C.Button(StudioRow, "Smooth C¹", "Sparkles", () => { R.SmoothSelectedTangents(); RedrawPlan(); });
+    C.Button(StudioRow, "Split ½", "Plus", () => { R.SplitSelectedRoadMidpoint(); RedrawPlan(); });
+
+    const ViewRow = C.ActionRow(CurveCard);
+    C.Button(ViewRow, "Fit network", "Map", () => { R.FitViewToNetwork(); RedrawPlan(); });
+    C.Button(ViewRow, "Focus car", "Target", () => { R.FocusViewOnCar(); RedrawPlan(); });
+    C.Button(ViewRow, "Delete", "Trash2", () => { R.DeleteSelected(); RedrawPlan(); }, "danger");
+
+    // ③ Card 03: Selected Road Cross-Section, Bridge Elevation & Junction Hover Signal
+    const CrossCard = C.Card(Body, "Cross-section & elevation", "SlidersHorizontal",
+                             { Accent: Accent.Environment, Index: 3, Subtitle: "Watertight 2-manifold deck" });
+
+    const Proxy = {
+        get Width()      { return R.GetSelectedRoad()?.Width ?? R.NewRoadWidth; },
+        set Width(V)     { const Rd = R.GetSelectedRoad(); if (Rd) Rd.Width = V; R.NewRoadWidth = V; },
+        get BankDeg()    { return R.GetSelectedRoad()?.BankDeg ?? 0.0; },
+        set BankDeg(V)   { const Rd = R.GetSelectedRoad(); if (Rd) Rd.BankDeg = V; },
+        get ArchHeight() { return R.GetSelectedRoad()?.ArchHeight ?? 0.0; },
+        set ArchHeight(V){ const Rd = R.GetSelectedRoad(); if (Rd) Rd.ArchHeight = V; },
+        get ElevationZ() { return R.GetSelectedNode()?.Position[2] ?? 0.0; },
+        set ElevationZ(V){ const Nd = R.GetSelectedNode(); if (Nd) Nd.Position[2] = V; },
+        get Guardrails() { return !!(R.GetSelectedRoad()?.Guardrails); },
+        set Guardrails(V){ const Rd = R.GetSelectedRoad(); if (Rd) Rd.Guardrails = !!V; },
+        get Markings()   { return R.GetSelectedRoad()?.Markings !== false; },
+        set Markings(V)  { const Rd = R.GetSelectedRoad(); if (Rd) Rd.Markings = !!V; },
+        get JunctionSignal() { return !!(R.GetSelectedNode()?.TrafficLight); },
+        set JunctionSignal(V){ const Nd = R.GetSelectedNode(); if (Nd) Nd.TrafficLight = !!V; }
+    };
+
+    const CommitLive = () => { R.CommitChanges(null); RedrawPlan(); R.FloatingRedraw?.(); };
+    Slider(C, CrossCard, Proxy, "Width",      "Carriageway width",  6.0,  22.0, 0.5, "m", 1, ["Single", "4-lane"], CommitLive);
+    Slider(C, CrossCard, Proxy, "BankDeg",    "Superelevation bank",-28.0, 28.0, 0.5, "°", 1, ["−28°", "+28°"],   CommitLive);
+    Slider(C, CrossCard, Proxy, "ArchHeight", "Flyover arch crest",  0.0,  14.0, 0.25,"m", 2, ["Flat", "Bridge"], CommitLive);
+    Slider(C, CrossCard, Proxy, "ElevationZ", "Junction height Z",   0.0,  16.0, 0.25,"m", 2, ["Ground", "Sky"],  CommitLive);
+
+    C.Switch(CrossCard, Proxy, "Guardrails",     { Label: "Safety guardrails & bridge piers", OnChange: CommitLive });
+    C.Switch(CrossCard, Proxy, "Markings",       { Label: "Procedural kerbs & lane markings", OnChange: CommitLive });
+    C.Switch(CrossCard, Proxy, "JunctionSignal", { Label: "Hovering traffic light at junction",
+                                                   Detail: "Stations a pole-less 4-lamp signal above this node", OnChange: CommitLive });
+
+    C.Stats(CrossCard, [
+        ["Spline roads", () => R.Project.Roads.length, "", 0],
+        ["Junctions",    () => R.Project.Nodes.length, "", 0],
+        ["Total length", () => R.QuerySummary().TotalLength, "m", 0]
+    ]);
+
+    const FooterRow = C.ActionRow(CrossCard);
+    C.Button(FooterRow, "Copy JSON", "Check", () =>
+    {
+        if (navigator.clipboard?.writeText)
+            navigator.clipboard.writeText(R.ExportJson()).then(() => Host.Shell?.Announce("Copied spline road JSON"));
+    });
+    C.Button(FooterRow, "Reset default", "RotateCcw", () => { R.ResetToDefault(); RedrawPlan(); });
+}
+
+function BuildTrafficLights(Host, C, Body)
+{
+    const TL = Host.TrafficLights;
+
+    const Card1 = C.Card(Body, "Hovering intersection signals", "Lightbulb",
+                         { Accent: Accent.Environment, Index: 1, Subtitle: "Pole-less robotic 4-aspect heads" });
+    C.Metric(Card1,
+             () =>
+             {
+                 const Near = TL.QueryNearestSignal(Host.Vehicle.Position);
+                 return Near ? Near.RemainingSeconds : 0.0;
+             },
+             "s",
+             1,
+             () =>
+             {
+                 const Near = TL.QueryNearestSignal(Host.Vehicle.Position);
+                 const Name = Near ? Near.Aspect : "IDLE";
+                 return [Name, (Name === "RED" || Name === "ORANGE") ? "warm" : ""];
+             });
+    C.Muted(Card1, "Autonomous pole-less traffic signal heads hover in place at major intersections on dual side antigrav thrusters, cycling GREEN → YELLOW → ORANGE → RED and projecting real clustered light onto the road below.");
+
+    C.Segmented(Card1, TL, "OverrideMode",
+                [["Auto", "AUTO"], ["Green", "GREEN"], ["Yellow", "YELLOW"], ["Orange", "ORANGE"], ["Red", "RED"]],
+                { Label: "Signal phase", OnChange: () => { TL.UpdateAllPoses(false); Host.UploadTrafficLightOccupants(); } });
+    Slider(C, Card1, TL, "CycleSpeed", "Cycle tempo", 0.25, 3.0, 0.05, "×", 2, ["Slow", "Rapid"]);
+
+    C.Stats(Card1, [
+        ["Green",  () => TL.QuerySummary().Counts.GREEN,  "", 0],
+        ["Yellow", () => TL.QuerySummary().Counts.YELLOW, "", 0],
+        ["Orange", () => TL.QuerySummary().Counts.ORANGE, "", 0],
+        ["Red",    () => TL.QuerySummary().Counts.RED,    "", 0]
+    ], 4);
+
+    const Card2 = C.Card(Body, "Intersection roster", "Map",
+                         { Accent: Accent.Level, Index: 2, Subtitle: "Click to inspect or teleport" });
+    const JumpRow = C.ActionRow(Card2);
+    for (const Sig of TL.Units.filter((U) => U.Active).slice(0, 3))
+    {
+        C.Button(JumpRow, Sig.Name.split(" ")[0], "Target", () =>
+            Host.TeleportVehicle({ Name: Sig.Name, Position: [Sig.Anchor[0] - 14.0, Sig.Anchor[1]], Yaw: 0 }));
+    }
+    C.Readout(Card2, () =>
+        TL.Units.filter((U) => U.Active).map((U) =>
+            `${U.Name.padEnd(32)}  ${U.CurrentAspect.padEnd(7)} ${U.RemainingSeconds.toFixed(1).padStart(4)}s  Z=${U.WorldPosition[2].toFixed(2)}m`
+        )
+    );
+}
+

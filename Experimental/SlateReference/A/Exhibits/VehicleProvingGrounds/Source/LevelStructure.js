@@ -10,7 +10,8 @@ import { InversionArenaBounds, InversionArenaTracks, InversionArenaSurfaces, Inv
          InversionArenaSpawn, InversionArenaZones, InversionArenaDrills, InversionClearZones, InversionPhysicsCutouts,
          InversionDistanceCutouts, EmitInversionGroundFacets, ResolveInversionPlacements, ResolveInversionBollards,
          ResolveInversionCollapseSpans, ResolveInversionTrams, ResolveInversionDrones, ResolveInversionServiceStations,
-         ResolveInversionCones, ResolveInversionBreakables } from "./InversionArenaStructure.js";
+         ResolveInversionTrafficLights, ResolveInversionCones, ResolveInversionBreakables } from "./InversionArenaStructure.js";
+import { ConstructTrafficLightShapes } from "./TrafficLightSequence.js";
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                                      SHAPES
@@ -78,7 +79,8 @@ export const LevelShapes = Object.freeze({
     GardenMirror:    { Emit: () => EmitBoxFacets(2.4, 0.15, 2.0, CourseMaterial.SteelDark,
                                                 [CourseMaterial.SteelDark, CourseMaterial.SteelDark, CourseMaterial.SteelDark,
                                                  CourseMaterial.SteelDark, CourseMaterial.SteelDark, CourseMaterial.Mirror]),
-                       Voxel: 0.08, Cards: 12 }
+                       Voxel: 0.08, Cards: 12 },
+    ...ConstructTrafficLightShapes()
 });
 
 // 📝 Shapes the car collides with (as world boxes)
@@ -487,6 +489,14 @@ export function ResolveLevelShapes(LevelKey = "proving")
     return LevelShapes;
 }
 
+export function ResolveProvingTrafficLights()
+{
+    return [
+        { Id: "tl_proving_west", Name: "Start Straight Crossroads Signal", Anchor: [ 18.0,  0.0, 4.35], Yaw: 0.0, PhaseOffset: 0.0 },
+        { Id: "tl_proving_east", Name: "Training Arena Junction Signal",   Anchor: [ 82.0,  0.0, 4.35], Yaw: 0.0, PhaseOffset: 7.5 }
+    ];
+}
+
 export function ResolveLevelDescriptor(LevelKey = "proving")
 {
     if (LevelKey === "inversion")
@@ -513,27 +523,29 @@ export function ResolveLevelDescriptor(LevelKey = "proving")
             Trams:           ResolveInversionTrams,
             Drones:          ResolveInversionDrones,
             ServiceStations: ResolveInversionServiceStations,
+            TrafficLights:   ResolveInversionTrafficLights,
             Cones:           ResolveInversionCones,
             Breakables:      ResolveInversionBreakables,
             EmitGround:      EmitInversionGroundFacets
         };
     }
     return {
-        Key:          "proving",
-        Title:        "Proving Grounds",
-        Relief:       true,
-        AeroGrip:     0.0,
-        Spawn:        SpawnPoint,
-        Zones:        ArenaZones,
-        Drills:       TrainingDrills,
-        ClearZones:   LevelClearZones,
-        Surfaces:     [],
-        TerrainHulls: null,
-        Shapes:       LevelShapes,
-        Placements:   ResolveLevelPlacements,
-        Cones:        ResolveConePlacements,
-        Breakables:   ResolveBreakables,
-        EmitGround:   EmitLevelGroundFacets
+        Key:           "proving",
+        Title:         "Proving Grounds",
+        Relief:        true,
+        AeroGrip:      0.0,
+        Spawn:         SpawnPoint,
+        Zones:         ArenaZones,
+        Drills:        TrainingDrills,
+        ClearZones:    LevelClearZones,
+        Surfaces:      [],
+        TerrainHulls:  null,
+        Shapes:        LevelShapes,
+        Placements:    ResolveLevelPlacements,
+        TrafficLights: ResolveProvingTrafficLights,
+        Cones:         ResolveConePlacements,
+        Breakables:    ResolveBreakables,
+        EmitGround:    EmitLevelGroundFacets
     };
 }
 

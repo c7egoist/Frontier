@@ -17,7 +17,7 @@ const ShardsPerBay         = 3;       // [-] - Convex Voronoi/faultline deck chu
 const CracksPerBay         = 4;       // [-] - Zigzagging faultline crack prisms per bay (continuous spine + branch)
 const SandPoolCount        = 48;      // [-] - Pooled cascading sand/grit clumps pouring from active cracks & drops
 const VertexStrideBytes    = 32;      // [B] - 8 × 4-byte scalars/uints per vertex in Scene.VertexRecords
-const MaxTrianglesPerPiece = 48;      // [-] - Upper bound per convex clipped slab or crack prism
+const MaxTrianglesPerPiece = 64;      // [-] - Upper bound per multi-sided Voronoi slab or lightning fissure prism
 const GravityAcceleration  = 9.81;    // [m/s²]
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -80,28 +80,51 @@ function ConvertClippedPartToPiece(Part, TopMaterial, UndersideMaterial, CutMate
     return { Centroid, Triangles };
 }
 
-// 📝 Builds an oriented watertight 6-face crack fissure prism between local 2D endpoints P0 -> P1.
+// 📝 Builds a sharp-tipped, jagged 8-vertex lightning fissure polyhedron between P0 -> P1 (ZERO 90° square/box corners!).
+//    Endpoints P0 and P1 taper to razor spear points while two staggered interior stations form crooked jagged walls.
 function ConstructCrackSegmentPiece(P0, P1, Width, Height, MaterialTop, MaterialSide)
 {
     const DeltaX = P1[0] - P0[0];
     const DeltaY = P1[1] - P0[1];
-    const Length = Math.max(0.25, Math.hypot(DeltaX, DeltaY));
-    const Yaw = Math.atan2(DeltaY, DeltaX);
-    const Cos = Math.cos(Yaw), Sin = Math.sin(Yaw);
-    // 📝 EmitBoxFacets FaceFamilies order: [top, bottom, +X, -X, +Y, -Y], Z ∈ [0, Height] -> shift to [-H/2, +H/2]
-    const BoxFacets = EmitBoxFacets(Length + 0.06, Width, Height, MaterialSide, [
-        MaterialTop, MaterialSide, MaterialSide, MaterialSide, MaterialSide, MaterialSide
-    ]);
-    const HalfH = 0.5 * Height;
-    const Rotated = BoxFacets.map((Facet) => ({
-        Family:  Facet.Family,
-        Corners: Facet.Corners.map((C) => [Cos * C[0] - Sin * C[1], Sin * C[0] + Cos * C[1], C[2] - HalfH])
-    }));
+    const Length = Math.max(0.32, Math.hypot(DeltaX, DeltaY));
+    const TX = DeltaX / Length, TY = DeltaY / Length;
+    const NX = -TY, NY = TX;
+
     const Midpoint = [0.5 * (P0[0] + P1[0]), 0.5 * (P0[1] + P1[1]), 0.0];
-    return {
-        Centroid:  Midpoint,
-        Triangles: PackFacetsAsPiece(Rotated, [0.0, 0.0, 0.0])
-    };
+    const HalfL = 0.5 * Length;
+    const HalfW = Math.max(0.045, 0.5 * Width);
+    const HalfH = 0.5 * Height;
+
+    // Asymmetric crooked lightning kinks at s = -0.18*L and s = +0.20*L; razor tips at -HalfL and +HalfL (no 90° corners!)
+    const KinkA = 0.28 * HalfW;
+    const KinkB = -0.24 * HalfW;
+    const Ring2D = [
+        [-HalfL - 0.03,  0.0],                // 0: rear razor spear tip
+        [-0.20 * Length, -HalfW * 0.92 + KinkA], // 1: right-rear jagged shoulder
+        [ 0.22 * Length, -HalfW * 0.78 + KinkB], // 2: right-front jagged shoulder
+        [ HalfL + 0.03,  0.0],                // 3: front razor spear tip
+        [ 0.18 * Length,  HalfW * 0.88 + KinkB], // 4: left-front jagged shoulder
+        [-0.22 * Length,  HalfW * 0.82 + KinkA]  // 5: left-rear jagged shoulder
+    ].map(([S, L]) => [S * TX + L * NX, S * TY + L * NY]);
+
+    const N = Ring2D.length;
+    const TopV = Ring2D.map(([X, Y]) => [X, Y,  HalfH]);
+    const BotV = Ring2D.map(([X, Y]) => [X, Y, -HalfH]);
+    const Triangles = [];
+
+    // Outward +Z top polygon fan & outward -Z bottom polygon fan (convex/star-convex around origin [0, 0, ±HalfH])
+    const TopCenter = [0.0, 0.0,  HalfH];
+    const BotCenter = [0.0, 0.0, -HalfH];
+    for (let I = 0; I < N; ++I)
+    {
+        const Next = (I + 1) % N;
+        Triangles.push({ Corners: [TopCenter, TopV[I], TopV[Next]], Family: MaterialTop });
+        Triangles.push({ Corners: [BotCenter, BotV[Next], BotV[I]], Family: MaterialSide });
+        Triangles.push({ Corners: [BotV[I], BotV[Next], TopV[Next]], Family: MaterialSide });
+        Triangles.push({ Corners: [BotV[I], TopV[Next], TopV[I]],    Family: MaterialSide });
+    }
+
+    return { Centroid: Midpoint, Triangles };
 }
 
 // 📝 Projects a span-local 3D point [RelX, RelY, RelZ] (where RelX ∈ [0, SpanLength]) into world space.
@@ -202,94 +225,121 @@ export class CollapseSequence
             Span.DropFrontU = -0.08;
             Span.Bays = [];
 
-            // 📝 Continuous movie-style lightning spine Y coordinate threading across all bays from rear (u=0) to front (u=1)
+            // 📝 1) TRUE CONTINUOUS 3D VORONOI DECK PARTITIONING ACROSS THE ENTIRE SPAN (NO rectangular bay boxes!):
+            //    Generate BayCount × ShardsPerBay staggered Voronoi seed points across the full SpanLength × Width slab
+            //    and clip each cell against oblique bisector planes of neighboring sites so every shard is an organic
+            //    5- to 7-sided irregular tectonic polygon with oblique triple-junction seams (never 90° squares!).
+            const TotalShardTarget = BayCount * ShardsPerBay;
+            const HalfSpan = 0.5 * Span.SpanLength;
+            const VoronoiSites = [];
+            for (let BayIdx = 0; BayIdx < BayCount; ++BayIdx)
+            {
+                const BaseX = -HalfSpan + (BayIdx + 0.5) * BayLength;
+                const LaneAnchors = [-0.31 * Width, (Random() - 0.5) * 0.14 * Width, 0.31 * Width];
+                for (let Sub = 0; Sub < ShardsPerBay; ++Sub)
+                {
+                    const LaneStagger = (Sub === 1 ? 0.34 : (Sub === 2 ? -0.28 : 0.05)) * BayLength * ((BayIdx & 1) ? -1.0 : 1.0);
+                    const JitterX = (Random() - 0.5) * 0.48 * BayLength;
+                    const JitterY = (Random() - 0.5) * 0.16 * Width;
+                    VoronoiSites.push({
+                        Sub,
+                        X:     ClampScalar(BaseX + LaneStagger + JitterX, -HalfSpan + 1.2, HalfSpan - 1.2),
+                        Y:     ClampScalar(LaneAnchors[Sub] + JitterY, -0.43 * Width, 0.43 * Width),
+                        TiltZ: (Random() - 0.5) * 0.20
+                    });
+                }
+            }
+
+            const TopMat = Span.Kind === "road" ? CourseMaterial.Asphalt : CourseMaterial.ApronConcrete;
+            const BayShardBuckets = Array.from({ length: BayCount }, () => []);
+
+            for (let SiteIdx = 0; SiteIdx < TotalShardTarget; ++SiteIdx)
+            {
+                const SiteA = VoronoiSites[SiteIdx];
+                let Cell = ConstructBox(Span.SpanLength, Width, Thickness);
+
+                for (let OtherIdx = 0; OtherIdx < TotalShardTarget; ++OtherIdx)
+                {
+                    if (OtherIdx === SiteIdx)
+                        continue;
+                    const SiteB = VoronoiSites[OtherIdx];
+                    const DX = SiteB.X - SiteA.X;
+                    const DY = SiteB.Y - SiteA.Y;
+                    if (Math.abs(DX) > 2.8 * BayLength)
+                        continue;
+                    const DistXY = Math.hypot(DX, DY);
+                    if (DistXY < 0.25)
+                        continue;
+                    const MidX = 0.5 * (SiteA.X + SiteB.X);
+                    const MidY = 0.5 * (SiteA.Y + SiteB.Y);
+                    const PairSign = SiteIdx < OtherIdx ? 1.0 : -1.0;
+                    const BevelZ = (SiteIdx < OtherIdx ? SiteA.TiltZ : -SiteB.TiltZ) * 0.65 * PairSign;
+                    const Normal = NormalizeVector([DX / DistXY, DY / DistXY, BevelZ]);
+                    const PlaneOffset = Normal[0] * MidX + Normal[1] * MidY - 0.008;
+                    const Clipped = SplitPart(Cell, Normal, PlaneOffset);
+                    if (Clipped)
+                        Cell = Clipped[1];
+                }
+
+                const CutMat = (SiteIdx & 1) ? CourseMaterial.StoneInterior : CourseMaterial.ConcreteInterior;
+                const PieceGeom = ConvertClippedPartToPiece(Cell, TopMat, CourseMaterial.TunnelConcrete, CutMat);
+                const RelX = HalfSpan + PieceGeom.Centroid[0];
+                const RelY = PieceGeom.Centroid[1];
+                const RelZ = PieceGeom.Centroid[2] - 0.5 * Thickness;
+                const RestWorld = SpanLocalToWorld(Span, RelX, RelY, RelZ);
+                const OutwardY = Math.abs(RelY) > 0.2 ? Math.sign(RelY) : (SiteA.Sub === 0 ? -1.0 : 1.0);
+                const AssignedBay = Math.min(BayCount - 1, Math.max(0, Math.floor(RelX / BayLength)));
+
+                const ShardRecord = {
+                    Slot:          SlotCursor++,
+                    Occupant:      Block.First + SlotCursor - 1,
+                    Triangles:     PieceGeom.Triangles,
+                    RelX,
+                    RelY,
+                    RelZ,
+                    RestWorld,
+                    NormalizedU:   ClampScalar(RelX / Span.SpanLength + (Random() - 0.5) * 0.015, 0.005, 0.995),
+                    OutwardDir:    NormalizeVector([(Random() - 0.35) * 0.45, OutwardY, 0.0]),
+                    PitchRate:     (Random() - 0.5) * 2.4,
+                    RollRate:      OutwardY * (0.55 + Random() * 1.45),
+                    YawRate:       (Random() - 0.5) * 0.85,
+                    TremorPhase:   Random() * Math.PI * 2.0,
+                    Detached:      false,
+                    DropTime:      0.0,
+                    DropZ:         0.0,
+                    VelocityZ:     0.0,
+                    WorldPosition: RestWorld.slice()
+                };
+                BayShardBuckets[AssignedBay].push(ShardRecord);
+                AllPieces.push(ShardRecord);
+            }
+
+            // 📝 2) CONTINUOUS JAGGED LIGHTNING FAULTLINE CRACK SPINE + FORKED BRANCHES (tapered spear-tip polyhedra, zero square corners!)
             let SpineY = (Random() - 0.5) * (Width * 0.28);
 
             for (let BayIdx = 0; BayIdx < BayCount; ++BayIdx)
             {
                 const BayCenterRelX = (BayIdx + 0.5) * BayLength;
-                const BayBaseSolid = ConstructBox(BayLength - 0.02, Width, Thickness);
+                const BayShards = BayShardBuckets[BayIdx];
+                const FallbackShard = AllPieces[Math.max(0, AllPieces.length - 1)];
 
-                // ① Two oblique session-seeded fault planes splitting each bay into 3 unique convex polygonal Voronoi slabs
-                const CutAngleA = (Random() - 0.5) * 1.18;
-                const CutTiltA = (Random() - 0.5) * 0.28;
-                const NormalA = NormalizeVector([Math.sin(CutAngleA), Math.cos(CutAngleA), CutTiltA]);
-                const AnchorA = [(Random() - 0.5) * (BayLength * 0.28), -Width * (0.06 + 0.16 * Random()), 0.0];
-                const SplitA = SplitPart(BayBaseSolid, NormalA, DotVector(NormalA, AnchorA));
-
-                let RawParts;
-                if (SplitA)
-                {
-                    const [FrontA, BackA] = SplitA;
-                    const Target = FrontA.Vertices.length >= BackA.Vertices.length ? FrontA : BackA;
-                    const Keep = Target === FrontA ? BackA : FrontA;
-                    const CutAngleB = (Random() - 0.5) * 1.24;
-                    const CutTiltB = (Random() - 0.5) * 0.28;
-                    const NormalB = NormalizeVector([Math.sin(CutAngleB), Math.cos(CutAngleB), CutTiltB]);
-                    const AnchorB = [(Random() - 0.5) * (BayLength * 0.30), Width * (0.08 + 0.18 * Random()), 0.0];
-                    const SplitB = SplitPart(Target, NormalB, DotVector(NormalB, AnchorB));
-                    RawParts = SplitB ? [Keep, SplitB[1], SplitB[0]] : [BackA, FrontA, ConstructBox(1.2, 1.2, 0.3)];
-                }
-                else
-                {
-                    RawParts = [BayBaseSolid];
-                }
-
-                const TopMat = Span.Kind === "road" ? CourseMaterial.Asphalt : CourseMaterial.ApronConcrete;
-                const CutMat = (BayIdx & 1) ? CourseMaterial.StoneInterior : CourseMaterial.ConcreteInterior;
-                const BayShards = [];
-
-                for (let Sub = 0; Sub < ShardsPerBay; ++Sub)
-                {
-                    const Part = RawParts[Math.min(Sub, RawParts.length - 1)];
-                    const PieceGeom = ConvertClippedPartToPiece(Part, TopMat, CourseMaterial.TunnelConcrete, CutMat);
-                    const RelX = BayCenterRelX + PieceGeom.Centroid[0];
-                    const RelY = PieceGeom.Centroid[1];
-                    const RelZ = PieceGeom.Centroid[2] - 0.5 * Thickness;
-                    const RestWorld = SpanLocalToWorld(Span, RelX, RelY, RelZ);
-                    const OutwardY = Math.abs(RelY) > 0.2 ? Math.sign(RelY) : (Sub === 0 ? -1.0 : 1.0);
-                    const ShardRecord = {
-                        Slot:          SlotCursor++,
-                        Occupant:      Block.First + SlotCursor - 1,
-                        Triangles:     PieceGeom.Triangles,
-                        RelX,
-                        RelY,
-                        RelZ,
-                        RestWorld,
-                        NormalizedU:   ClampScalar(RelX / Span.SpanLength + (Random() - 0.5) * 0.018, 0.005, 0.995),
-                        OutwardDir:    NormalizeVector([(Random() - 0.35) * 0.45, OutwardY, 0.0]),
-                        PitchRate:     (Random() - 0.5) * 2.4,
-                        RollRate:      OutwardY * (0.55 + Random() * 1.45),
-                        YawRate:       (Random() - 0.5) * 0.85,
-                        TremorPhase:   Random() * Math.PI * 2.0,
-                        Detached:      false,
-                        DropTime:      0.0,
-                        DropZ:         0.0,
-                        VelocityZ:     0.0,
-                        WorldPosition: RestWorld.slice()
-                    };
-                    BayShards.push(ShardRecord);
-                    AllPieces.push(ShardRecord);
-                }
-
-                // ② Movie-style jagged lightning crack spine + oblique branching fissures across this bay
                 const HalfBay = 0.5 * BayLength;
-                const MidY1 = ClampScalar(SpineY + (Random() - 0.5) * 3.4, -0.36 * Width, 0.36 * Width);
-                const NextSpineY = ClampScalar(MidY1 + (Random() - 0.5) * 3.6, -0.36 * Width, 0.36 * Width);
+                const MidY1 = ClampScalar(SpineY + (Random() - 0.5) * 3.8, -0.38 * Width, 0.38 * Width);
+                const NextSpineY = ClampScalar(MidY1 + (Random() - 0.5) * 4.0, -0.38 * Width, 0.38 * Width);
                 const BranchSide = (Random() > 0.5 ? 1.0 : -1.0);
                 const BranchTip1 = [
-                    (Random() - 0.2) * (BayLength * 0.38),
-                    ClampScalar(MidY1 + BranchSide * (2.6 + Random() * 2.8), -0.45 * Width, 0.45 * Width)
+                    (Random() - 0.15) * (BayLength * 0.42),
+                    ClampScalar(MidY1 + BranchSide * (2.8 + Random() * 3.0), -0.45 * Width, 0.45 * Width)
                 ];
                 const BranchTip2 = [
-                    (Random() - 0.2) * (BayLength * 0.38),
-                    ClampScalar(SpineY - BranchSide * (2.4 + Random() * 2.8), -0.45 * Width, 0.45 * Width)
+                    (Random() - 0.15) * (BayLength * 0.42),
+                    ClampScalar(SpineY - BranchSide * (2.5 + Random() * 2.9), -0.45 * Width, 0.45 * Width)
                 ];
                 const CrackChains = [
-                    [[-HalfBay, SpineY], [0.0, MidY1], 0.24],
-                    [[0.0, MidY1], [HalfBay, NextSpineY], 0.24],
-                    [[0.0, MidY1], BranchTip1, 0.17],
-                    [[-0.22 * BayLength, 0.5 * (SpineY + MidY1)], BranchTip2, 0.16]
+                    [[-HalfBay, SpineY], [0.0, MidY1], 0.13],
+                    [[0.0, MidY1], [HalfBay, NextSpineY], 0.13],
+                    [[0.0, MidY1], BranchTip1, 0.09],
+                    [[-0.22 * BayLength, 0.5 * (SpineY + MidY1)], BranchTip2, 0.085]
                 ];
                 SpineY = NextSpineY;
 
@@ -297,11 +347,11 @@ export class CollapseSequence
                 for (let CIdx = 0; CIdx < CracksPerBay; ++CIdx)
                 {
                     const [P0, P1, CrackWidth] = CrackChains[CIdx];
-                    const CrackMatTop = (CIdx < 2) ? CourseMaterial.StoneInterior : CourseMaterial.ConcreteInterior;
-                    const CrackGeom = ConstructCrackSegmentPiece(P0, P1, CrackWidth, 0.14, CrackMatTop, CourseMaterial.Asphalt);
+                    const CrackGeom = ConstructCrackSegmentPiece(P0, P1, CrackWidth, 0.11, CourseMaterial.Tyre, CourseMaterial.StoneInterior);
                     const RelX = BayCenterRelX + CrackGeom.Centroid[0];
                     const RelY = CrackGeom.Centroid[1];
                     const HiddenWorld = SpanLocalToWorld(Span, RelX, RelY, -0.22);
+                    const ParentShard = BayShards.length > 0 ? BayShards[CIdx % BayShards.length] : FallbackShard;
                     const CrackRecord = {
                         Slot:        SlotCursor++,
                         Occupant:    Block.First + SlotCursor - 1,
@@ -309,7 +359,9 @@ export class CollapseSequence
                         RelX,
                         RelY,
                         NormalizedU: ClampScalar(RelX / Span.SpanLength, 0.002, 0.998),
-                        ParentShard: BayShards[CIdx % BayShards.length],
+                        ParentShard,
+                        Opened:      false,
+                        WorldPoint:  SpanLocalToWorld(Span, RelX, RelY, 0.02),
                         RestWorld:   HiddenWorld
                     };
                     BayCracks.push(CrackRecord);
@@ -455,6 +507,7 @@ export class CollapseSequence
             }
             for (const Crack of Bay.Cracks)
             {
+                Crack.Opened = false;
                 const Occupant = this.Scene.Occupants[Crack.Occupant];
                 Occupant.Transform = ConstructRigidTransform(Crack.RestWorld, BaseQuat);
                 Occupant.PreviousTransform = Occupant.Transform.slice();
@@ -571,23 +624,20 @@ export class CollapseSequence
             const FloorWorldZ = Span.DeckZ - Span.ChasmDepth + 0.36;
             let AllResting = Span.DropFrontU >= 1.08;
 
-            // ② Spawn cascading sand clumps & warm sand-grit streaks along the racing crack front and collapse edge
-            if (Span.CrackFrontU > 0.0 && Span.CrackFrontU < 1.02)
+            // ② Spawn cascading sand clumps & sparks strictly FROM THE ACTUAL CRACK SEAMS (never randomly across intact asphalt!)
+            for (const Bay of Span.Bays)
             {
-                const CrackX = Span.CrackFrontU * Span.SpanLength;
-                const JitterY = Math.sin(this.Clock * 31.0 + Span.Yaw) * (Span.Surface.HalfWidth * 0.55);
-                const CrackWorld = SpanLocalToWorld(Span, CrackX, JitterY, 0.06);
-                this.SpawnSandClump(CrackWorld, [-Span.SineYaw, Span.CosineYaw, 0.0], 1.15, FloorWorldZ);
-                this.EmitSandSparks(Sparks, CrackWorld, 5, 2.8);
-            }
-            if (Span.DropFrontU > 0.0 && Span.DropFrontU < 1.02)
-            {
-                const DropX = Span.DropFrontU * Span.SpanLength;
-                const CascadeY = Math.cos(this.Clock * 23.0) * (Span.Surface.HalfWidth * 0.62);
-                const DropWorld = SpanLocalToWorld(Span, DropX, CascadeY, -0.25);
-                this.SpawnSandClump(DropWorld, [Span.CosineYaw * -0.4, Span.SineYaw * -0.4, 0.0], -0.35, FloorWorldZ);
-                this.SpawnSandClump(DropWorld, [Span.SineYaw, -Span.CosineYaw, 0.0], 0.45, FloorWorldZ);
-                this.EmitSandSparks(Sparks, DropWorld, 7, 1.2);
+                for (const Crack of Bay.Cracks)
+                {
+                    if (!Crack.Opened && Span.CrackFrontU >= Crack.NormalizedU)
+                    {
+                        Crack.Opened = true;
+                        const CrackWorld = SpanLocalToWorld(Span, Crack.RelX, Crack.RelY, 0.04);
+                        Crack.WorldPoint = CrackWorld;
+                        this.SpawnSandClump(CrackWorld, [-Span.SineYaw * 0.4, Span.CosineYaw * 0.4, 0.0], 0.95, FloorWorldZ);
+                        this.EmitSandSparks(Sparks, CrackWorld, 4, 2.2);
+                    }
+                }
             }
 
             // ③ Update every bay's 3 Voronoi convex slabs + 4 movie crack ribbons + analytical support state
@@ -679,15 +729,17 @@ export class CollapseSequence
                     }
                     else if (Span.CrackFrontU >= Crack.NormalizedU)
                     {
-                        // 📝 Erupts onto the top asphalt surface (+0.02 m) so jagged dark fissures race visibly ahead of the car!
+                        // 📝 Erupts cleanly at the road fissure seam (+0.009 m) as a razor-tipped lightning tear!
                         const OpenT = ClampScalar((Span.CrackFrontU - Crack.NormalizedU) / 0.05, 0.0, 1.0);
-                        const LiftZ = -0.052 + 0.068 * OpenT + Parent.DropZ;
+                        const LiftZ = -0.048 + 0.057 * OpenT + Parent.DropZ;
                         const Pos = SpanLocalToWorld(Span, Crack.RelX, Crack.RelY, LiftZ);
+                        Crack.WorldPoint = Pos;
                         Occupant.Transform = ConstructRigidTransform(Pos, ConstructAxisQuaternion([0.0, 0.0, 1.0], Span.Yaw));
                     }
                 }
 
-                const AvgDrop = SumDrop / Bay.Shards.length;
+                const ShardCount = Math.max(1, Bay.Shards.length);
+                const AvgDrop = SumDrop / ShardCount;
                 Span.Surface.BayDropZ[Bay.Index] = DetachedCount > 0 ? AvgDrop : 0.0;
                 Span.Surface.BayPitch[Bay.Index] = DetachedCount > 0 ? Math.min(-AvgDrop * 0.35, 0.14) : 0.0;
                 Span.Surface.BayRoll[Bay.Index] = 0.0;
@@ -744,7 +796,7 @@ export class CollapseSequence
         return ActiveMotion;
     }
 
-    // 📝 Volumetric sand/dust plume emitters fed directly into SmokeSequence during active crack propagation & collapse!
+    // 📝 Tight fissure-bound smoke vents positioned DIRECTLY on the opened jagged crack seams (Radius 0.24 m — never a 7 m fog blanket!):
     QuerySmokeEmissions()
     {
         const Emissions = [];
@@ -752,43 +804,40 @@ export class CollapseSequence
         {
             if (Span.State !== "collapsing")
                 continue;
-            if (Span.CrackFrontU > 0.0 && Span.CrackFrontU < 1.04)
+
+            const ActiveCracks = [];
+            for (const Bay of Span.Bays)
             {
-                const CrackPos = SpanLocalToWorld(Span, Span.CrackFrontU * Span.SpanLength, 0.0, 0.25);
-                Emissions.push({
-                    Active:          true,
-                    Burning:         false,
-                    Strength:        0.85,
-                    Position:        CrackPos,
-                    Hub:             CrackPos,
-                    Radius:          2.4,
-                    Expansion:       2.8,
-                    SmokeRate:       2.2,
-                    SootRate:        0.0,
-                    FlameRate:       0.0,
-                    HeatRate:        0.25,
-                    Velocity:        [0.0, 0.0, 2.2],
-                    Plume:           null,
-                    CombustionPower: 0.0,
-                    Tread:           [0.0, 0.0, 0.0]
-                });
+                for (const Crack of Bay.Cracks)
+                {
+                    if (!Crack.Opened)
+                        continue;
+                    if (Crack.ParentShard.Detached && Crack.ParentShard.DropTime > 0.55)
+                        continue;
+                    ActiveCracks.push(Crack);
+                }
             }
-            if (Span.DropFrontU > 0.0 && Span.DropFrontU < 1.05)
+
+            const StepStride = Math.max(1, Math.ceil(ActiveCracks.length / 9));
+            for (let Idx = Math.max(0, ActiveCracks.length - 9 * StepStride); Idx < ActiveCracks.length; Idx += StepStride)
             {
-                const DropPos = SpanLocalToWorld(Span, Span.DropFrontU * Span.SpanLength, 0.0, -0.8);
+                const Crack = ActiveCracks[Idx];
+                const AgeU = Math.max(0.0, Span.CrackFrontU - Crack.NormalizedU);
+                const Freshness = ClampScalar(1.0 - AgeU * 2.4, 0.30, 1.0);
+                const Pos = [Crack.WorldPoint[0], Crack.WorldPoint[1], Crack.WorldPoint[2] + 0.02];
                 Emissions.push({
                     Active:          true,
                     Burning:         false,
-                    Strength:        1.0,
-                    Position:        DropPos,
-                    Hub:             DropPos,
-                    Radius:          3.6,
-                    Expansion:       3.8,
-                    SmokeRate:       3.8,
+                    Strength:        0.55 * Freshness,
+                    Position:        Pos,
+                    Hub:             Pos,
+                    Radius:          0.24,
+                    Expansion:       0.32,
+                    SmokeRate:       0.78 * Freshness,
                     SootRate:        0.0,
                     FlameRate:       0.0,
-                    HeatRate:        0.45,
-                    Velocity:        [-Span.CosineYaw * 2.5, -Span.SineYaw * 2.5, 3.1],
+                    HeatRate:        0.14 * Freshness,
+                    Velocity:        [0.0, 0.0, 1.35 + 0.55 * Freshness],
                     Plume:           null,
                     CombustionPower: 0.0,
                     Tread:           [0.0, 0.0, 0.0]

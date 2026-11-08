@@ -341,7 +341,24 @@ export class EditorShell
         }
         Display.addEventListener("change", () => { Host.Settings.Inspection = Number(Display.value); Host.ApplySetting("Inspection"); this.Controls.Synchronise(); });
         this.DisplaySelect = Display;
-        Bar.append(Display, Construct("span", "bar-fill"));
+        Bar.appendChild(Display);
+
+        // Clean Sun-UI pill button to open the Cubic Bézier Spline Road Editor in 1 click!
+        const RoadBtn = Construct("button", "action-button");
+        RoadBtn.title = "Open Spline Road Editor & Curve Sculptor (E)";
+        RoadBtn.style.cssText = "height:28px;padding:0 10px;border-radius:8px;display:inline-flex;align-items:center;gap:6px;font-size:12px;";
+        RoadBtn.append(ConstructGlyph("Route", 14, 1.7), Construct("span", "", "Road Editor"));
+        RoadBtn.addEventListener("click", () =>
+        {
+            if (!Host.Dock.QueryVisible("Panel"))
+                Host.Dock.Toggle("Panel");
+            if (this.Selected === "roadeditor" && Host.RoadEditor)
+                Host.RoadEditor.ToggleFloatingStudio();
+            else
+                this.Select("roadeditor");
+        });
+        this.RoadEditorButton = RoadBtn;
+        Bar.append(RoadBtn, Construct("span", "bar-fill"));
         const Icon = (Glyph, Title, Action) =>
         {
             const Button = Construct("button", "icon-button");
@@ -376,6 +393,7 @@ export class EditorShell
         Item("Quality", "QUALITY");
         Item("Sun", "SUN");
         Item("Speed", "SPEED");
+        Item("Signal", "SIGNAL");
         Item("Smoke", "SMOKE");
         Item("Fragments", "FRAGMENTS");
         Item("Camera", "CAM");
@@ -398,6 +416,15 @@ export class EditorShell
         Items.Quality.textContent = Host.GradeName;
         Items.Sun.textContent = `${Host.Settings.SunElevation.toFixed(1)}°`;
         Items.Speed.textContent = `${Math.abs(Telemetry.Speed * 3.6).toFixed(0)} km/h${Telemetry.Burnout ? " · burnout" : ""}`;
+        if (Host.TrafficLights)
+        {
+            const Near = Host.TrafficLights.QueryNearestSignal(Host.Vehicle.Position);
+            Items.Signal.textContent = Near ? `${Near.Aspect} · ${Near.RemainingSeconds.toFixed(0)}s` : "–";
+        }
+        else
+        {
+            Items.Signal.textContent = "–";
+        }
         Items.Smoke.textContent = Host.Smoke.Resident ? `resident · ${Host.Smoke.Metrics.Sources} src` : "idle";
         Items.Fragments.textContent = String(Host.Fracture.Metrics.ActiveFragments);
         const Eye = Host.CameraEye || [0, 0, 0];
@@ -408,6 +435,8 @@ export class EditorShell
         this.DisplaySelect.value = String(Host.Settings.Inspection);
         this.HudButton.classList.toggle("active", Host.Dock.QueryVisible("Hud"));
         this.InsetButton.classList.toggle("active", Host.Dock.QueryVisible("Inset"));
+        if (this.RoadEditorButton)
+            this.RoadEditorButton.classList.toggle("active", this.Selected === "roadeditor" || !!Host.RoadEditor?.FloatingOpen);
         this.Controls.RefreshLive();
         this.RefreshRows();
     }

@@ -23,7 +23,8 @@ export const SurfaceCategory = Object.freeze({
     HeartlineRibbon: 7,   // [-] - Elevated zero-G heartline S-twist sky-bridge (+α -> 0° -> −α)
     SubmergedTrench: 8,   // [-] - Excavated C² underground tunnel & sunken underpass with retaining walls and roof deck
     SerpentineWave:  9,   // [-] - Alternating-camber banked rhythm wave rollers (+α / −α / +α)
-    CollapseDeck:    10   // [-] - Progressive rear-to-front collapsing bridge / sinkhole road with per-bay live state
+    CollapseDeck:    10,  // [-] - Progressive rear-to-front collapsing bridge / sinkhole road with per-bay live state
+    SplineRoad:      11   // [-] - Real-time editable cubic Bézier spline road & flyover network
 });
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -1582,6 +1583,7 @@ export function CastSurfaceRay(Surfaces, Origin, Direction, MaximumTravel)
             case SurfaceCategory.SubmergedTrench: Candidate = CastSubmergedTrenchRay(Surface, LocalOrigin, LocalDirection, MaximumTravel); break;
             case SurfaceCategory.SerpentineWave:  Candidate = CastSerpentineWaveRay(Surface, LocalOrigin, LocalDirection, MaximumTravel); break;
             case SurfaceCategory.CollapseDeck:    Candidate = CastCollapseDeckRay(Surface, LocalOrigin, LocalDirection, MaximumTravel); break;
+            case SurfaceCategory.SplineRoad:      Candidate = Surface.CastRay ? Surface.CastRay(LocalOrigin, LocalDirection, MaximumTravel) : null; break;
         }
         if (Candidate && (!Closest || Candidate.Travel < Closest.Travel))
         {
@@ -1862,6 +1864,8 @@ function QuerySurfacePointLocal(Surface, LocalPoint, Radius)
         }
         return Best;
     }
+    if (Surface.Category === SurfaceCategory.SplineRoad && typeof Surface.QueryHullContact === "function")
+        return Surface.QueryHullContact(LocalPoint, Radius);
     return null;
 }
 
