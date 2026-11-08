@@ -55,6 +55,7 @@ import { SparkSequence } from "./SparkSequence.js";
 import { CabinSequence } from "./CabinSequence.js?overlay=13";
 import { CabinLayout, CameraRigs, ResolveCockpitFrame, PlaceSeatedEye, ResolveTabletScale, ResolveHmiCamera } from "./CabinStructure.js";
 import { DrivingHudSequence } from "./DrivingHudSequence.js";
+import { PolicePursuitSequence } from "./PolicePursuitSequence.js";
 import { VehicleGeometry } from "./VehicleSpecification.js";
 
 
@@ -383,6 +384,8 @@ class IlluminationHost
         this.ReportProgress("Baking fracture patterns", 0.72);
         this.Fracture = new FractureSequence(this);
         this.DrivingHud = new DrivingHudSequence(this);
+        this.Police = new PolicePursuitSequence(this);
+        this.UploadPoliceOccupants();
 
         // ⑤ every remaining stage
         this.ReportProgress("Compiling lighting programs", 0.76);
@@ -635,6 +638,24 @@ class IlluminationHost
         }
     }
 
+    UploadPoliceOccupants()
+    {
+        if (!this.Police || !this.Scene.PoliceBlock || !this.OccupantRecords || !this.Volumes)
+            return;
+        const Device = this.Exchange.Device;
+        const Block  = this.Scene.PoliceBlock;
+        if (Block.CruiserCount > 0)
+        {
+            const CruiserScalars = this.Scene.EncodeOccupantRange(this.Volumes, Block.CruiserFirst, Block.CruiserCount);
+            Device.queue.writeBuffer(this.OccupantRecords, Block.CruiserFirst * OccupantStride, CruiserScalars);
+        }
+        if (Block.AerialFirst >= 0 && Block.AerialCount > 0)
+        {
+            const AerialScalars = this.Scene.EncodeOccupantRange(this.Volumes, Block.AerialFirst, Block.AerialCount);
+            Device.queue.writeBuffer(this.OccupantRecords, Block.AerialFirst * OccupantStride, AerialScalars);
+        }
+    }
+
     UploadCollapseOccupants()
     {
         if (!this.Collapse || !this.Scene.CollapseBlock || !this.OccupantRecords || !this.Volumes)
@@ -837,6 +858,10 @@ class IlluminationHost
                 this.CycleCamera(Event.shiftKey ? -1 : 1);
             if (Event.code === "KeyU" && !Event.repeat && !Event.ctrlKey && !Event.metaKey && !Event.altKey)
                 this.DrivingHud?.CycleDisplayStyle();
+            if (Event.code === "KeyB" && !Event.repeat && !Event.ctrlKey && !Event.metaKey && !Event.altKey)
+                this.Police?.ToggleManualPursuit();
+            if (Event.code === "KeyG" && !Event.repeat && !Event.ctrlKey && !Event.metaKey && !Event.altKey)
+                this.Police?.ToggleSelfPlayMode();
             if (Event.code === "KeyI" && !Event.repeat && !Event.ctrlKey && !Event.metaKey && !Event.altKey)
             {
                 if (this.Lighting)
@@ -1141,10 +1166,14 @@ class IlluminationHost
 
     ResolveCamera(Δτ)
     {
+        const SpecPose = !this.FreeCamera && this.Police ? this.Police.QuerySpectatorPose() : null;
         const Telemetry = this.Vehicle.QueryTelemetry();
         const VehicleUp = RotateVector(this.Vehicle.Orientation, [0.0, 0.0, 1.0]);
         const SurfaceContact = this.Vehicle.Wheels.some((Wheel) => Wheel.Contact);
-        this.Chase.AdvanceChase(this.Vehicle.Position, this.Vehicle.QueryForward(), Telemetry.Speed, Δτ, VehicleUp, SurfaceContact);
+        if (SpecPose?.Position)
+            this.Chase.AdvanceChase(SpecPose.Position, SpecPose.Forward, SpecPose.Speed, Δτ, [0.0, 0.0, 1.0], true);
+        else
+            this.Chase.AdvanceChase(this.Vehicle.Position, this.Vehicle.QueryForward(), Telemetry.Speed, Δτ, VehicleUp, SurfaceContact);
         let Eye, Target, FieldOfView, Up = [0.0, 0.0, 1.0], Near = 0.05;
         const Rig = CameraRigs[this.Settings.CameraMode];
         if (this.FreeCamera)
@@ -1153,6 +1182,20 @@ class IlluminationHost
             Eye = this.Flight.Eye;
             Target = MultiplyAddVector(Eye, this.Flight.ResolveForward(), 10.0);
             FieldOfView = this.Flight.FieldOfView;
+        }
+        else if (SpecPose?.Eye)
+        {
+            Eye = SpecPose.Eye;
+            Target = SpecPose.Target;
+            Up = SpecPose.Up;
+            FieldOfView = SpecPose.Fov;
+        }
+        else if (SpecPose?.Position)
+        {
+            Eye = this.Chase.Eye;
+            Target = this.Chase.Target;
+            Up = this.Chase.Up || [0.0, 0.0, 1.0];
+            FieldOfView = 62;
         }
         else if (Rig?.OrbitVehicle) {
             const View = this.Orbit.Resolve(this.Vehicle.Position, ResolveCourseHeight);
@@ -1307,10 +1350,14 @@ class IlluminationHost
             Command = { Throttle: 0.0, Brake: 0.0, Steer: 0.0, Handbrake: false };
         const Step = this.FixedStep ? this.FixedStep : Δτ;
         this.Vehicle.AssignAssists({ LineLock: this.Settings.LineLock });
-        this.Recovery.Advance(Step);
-        this.Fracture.ResolveImpacts(this.Vehicle, Step);
-        this.Vehicle.Advance(Command, Step);
-        this.Vehicle.AdvanceTyreWear(Step);
+        if (this.Police?.ControlMode !== "selfplay")
+        {
+            this.Recovery.Advance(Step);
+            this.Fracture.ResolveImpacts(this.Vehicle, Step);
+            this.Vehicle.Advance(Command, Step);
+            this.Vehicle.AdvanceTyreWear(Step);
+        }
+        const PoliceMoved = this.Police ? this.Police.Advance(Step) : false;
         const VehicleEvents = this.Vehicle.ResolveEvents();
         this.PositionVehicle();
         this.Bodies.Advance(Step, this.Vehicle);
@@ -1406,12 +1453,16 @@ class IlluminationHost
         }
         if (TrafficLightsMoved)
             this.UploadTrafficLightOccupants();
+        if (PoliceMoved)
+            this.UploadPoliceOccupants();
 
         if (this.Lighting && this.LightRecords)
         {
-            const ActivePoles = this.TrafficLights
-                ? [...this.StreetLampPoles, ...this.TrafficLights.QueryLightPoles()]
-                : this.StreetLampPoles;
+            const ActivePoles = [
+                ...this.StreetLampPoles,
+                ...(this.TrafficLights ? this.TrafficLights.QueryLightPoles() : []),
+                ...(this.Police ? this.Police.QueryDynamicLightRecords() : [])
+            ];
             const LightData = this.Lighting.Update(this.Vehicle.QueryBodyTransform(), ActivePoles, this.Clock);
             Device.queue.writeBuffer(this.LightRecords, 0, LightData);
             Device.queue.writeBuffer(this.ClusterRecords.Cells, 0, this.Lighting.ClusterCells);

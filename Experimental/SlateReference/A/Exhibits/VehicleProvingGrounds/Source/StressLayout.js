@@ -156,6 +156,8 @@ export function ResolveStressPlacements(Capacity, Zones = ClearZones)
                 Cells.push([X, Y]);
         }
     }
+    if (Cells.length === 0)
+        Cells.push([PadReach, PadReach]);
     for (let Index = Cells.length - 1; Index > 0; --Index)
     {
         const Other = Math.floor(Random() * (Index + 1));

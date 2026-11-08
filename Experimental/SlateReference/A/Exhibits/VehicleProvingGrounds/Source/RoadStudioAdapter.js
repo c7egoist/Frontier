@@ -106,6 +106,8 @@ export function StudioDirectionToWorld(Dir)
 
 export function ComputeWorldAnchorForBounds(Bounds, LevelKey = "inversion")
 {
+    if (LevelKey === "city")
+        return [0.0, 0.0, 0.0];
     const MinStudioX = Bounds && Number.isFinite(Bounds.min?.[0]) ? Bounds.min[0] : -85.0;
     if (LevelKey === "inversion")
     {
@@ -229,8 +231,122 @@ export function PlaceTemplateInWorld(Project, LevelKey = "inversion")
     return Project;
 }
 
+export function CreateCityPursuitStudioProject()
+{
+    // Connected Downtown 3×3 City Street Grid + Elevated 4-Lane Highway Overpass (Z = +6.4 m) + Interchange Ramps + East Clover Beltway!
+    const Project = {
+        version:    1,
+        worldSpace: true,
+        name:       "City Blocks, Alleys & Highway Interchange",
+        nodes:      [],
+        roads:      [],
+        sites:      []
+    };
+
+    const AddWorldNode = (Id, Name, WorldX, WorldY, WorldZ = 0.0, Radius = 8.0, Signals = false, Crossings = false) =>
+    {
+        const N = makeNode([WorldX, WorldZ, -WorldY], Name);
+        N.id = Id;
+        N.radius = Radius;
+        N.signals = Signals;
+        N.crossings = Crossings;
+        Project.nodes.push(N);
+        return N;
+    };
+
+    const AddSpline = (Id, From, To, Name, Settings, H1 = null, H2 = null) =>
+    {
+        const R = makeRoad(From, To, Name, Settings, H1 ?? undefined, H2 ?? undefined);
+        R.id = Id;
+        Project.roads.push(R);
+        return R;
+    };
+
+    // 3×3 Downtown Grid Nodes (X = -150, -55, +40; Y = +90, 0, -90)
+    const NW = AddWorldNode("cn_nw", "West & North Junction",   -150.0,   90.0, 0.0, 8.0, false, true);
+    const NM = AddWorldNode("cn_nm", "Midtown & North Signal",   -55.0,   90.0, 0.0, 8.5, true,  true);
+    const NE = AddWorldNode("cn_ne", "Frontage & North Signal",   40.0,   90.0, 0.0, 8.5, true,  true);
+
+    const CW = AddWorldNode("cn_cw", "West & Central Junction", -150.0,    0.0, 0.0, 8.5, true,  true);
+    const CM = AddWorldNode("cn_cm", "Midtown Central Plaza",    -55.0,    0.0, 0.0, 9.5, true,  true);
+    const CE = AddWorldNode("cn_ce", "Frontage & Central Signal", 40.0,    0.0, 0.0, 9.5, true,  true);
+
+    const SW = AddWorldNode("cn_sw", "West & South Junction",   -150.0,  -90.0, 0.0, 8.0, false, true);
+    const SM = AddWorldNode("cn_sm", "Midtown & South Signal",   -55.0,  -90.0, 0.0, 8.5, true,  true);
+    const SE = AddWorldNode("cn_se", "Frontage & South Signal",   40.0,  -90.0, 0.0, 8.5, true,  true);
+
+    // Highway Overpass & Interchange Nodes (X = +105 m overpass above Central Ave; X = +165 m East Clover Beltway)
+    const HwN  = AddWorldNode("cn_hwn",  "North Highway Interchange", 105.0,  136.0, 0.0, 9.0, false, false);
+    const AbN  = AddWorldNode("cn_abn",  "North Viaduct Abutment",    105.0,   52.0, 6.4, 6.5, false, false);
+    const AbS  = AddWorldNode("cn_abs",  "South Viaduct Abutment",    105.0,  -52.0, 6.4, 6.5, false, false);
+    const HwS  = AddWorldNode("cn_hws",  "South Highway Interchange", 105.0, -136.0, 0.0, 9.0, false, false);
+    const CloverE = AddWorldNode("cn_clv","East Highway Clover",      165.0,    0.0, 0.0, 9.5, true,  false);
+
+    const Urban2L = { lanes: 2, laneWidth: 3.6, sidewalk: 1.8, curbStyle: "granite", markingStyle: "urban", speedLimit: 60, drainage: false, manholes: false, signs: false };
+    const Blvd4L  = { lanes: 4, laneWidth: 3.4, median: 1.2, sidewalk: 2.0, curbStyle: "granite", markingStyle: "urban", speedLimit: 60, drainage: false, manholes: false, signs: false };
+
+    // East-West Downtown Avenues
+    AddSpline("cr_n1", NW, NM, "North Boulevard West", Urban2L);
+    AddSpline("cr_n2", NM, NE, "North Boulevard East", Urban2L);
+    AddSpline("cr_c1", CW, CM, "Central Avenue West",  Blvd4L);
+    AddSpline("cr_c2", CM, CE, "Central Avenue Mid",   Blvd4L);
+    AddSpline("cr_c3", CE, CloverE, "Central Underpass Expressway", Blvd4L);
+    AddSpline("cr_s1", SW, SM, "South Boulevard West", Urban2L);
+    AddSpline("cr_s2", SM, SE, "South Boulevard East", Urban2L);
+
+    // North-South Cross Streets
+    AddSpline("cr_w1", SW, CW, "West Avenue South",    Urban2L);
+    AddSpline("cr_w2", CW, NW, "West Avenue North",    Urban2L);
+    AddSpline("cr_m1", SM, CM, "Midtown Street South", Urban2L);
+    AddSpline("cr_m2", CM, NM, "Midtown Street North", Urban2L);
+    AddSpline("cr_f1", SE, CE, "Frontage Road South",  Urban2L);
+    AddSpline("cr_f2", CE, NE, "Frontage Road North",  Urban2L);
+
+    // Elevated Highway Overpass (Embankment -> Steel I-Girder Bridge at Z=+6.4m over Central Ave -> Embankment)
+    AddSpline("cr_hwrn", HwN, AbN, "North Highway Embankment", {
+        lanes: 2, laneWidth: 3.8, shoulderWidth: 1.2, sidewalk: 0.7, markingStyle: "motorway",
+        guardrails: true, railStyle: "wbeam", embankment: true, speedLimit: 110, drainage: false, manholes: false, signs: false
+    }, [0.0, 1.8, 26.0], [0.0, 0.0, -26.0]);
+
+    AddSpline("cr_hwbr", AbN, AbS, "City Highway Viaduct", {
+        lanes: 2, laneWidth: 3.8, shoulderWidth: 1.2, sidewalk: 0.8, markingStyle: "motorway",
+        bridge: true, bridgeFrom: 0.0, bridgeTo: 1.0, structure: "steel", bridgeDepth: 1.45, pierSpacing: 26.0,
+        guardrails: true, railStyle: "parapet", speedLimit: 110, drainage: false, manholes: false, signs: false
+    }, [0.0, 0.0, 32.0], [0.0, 0.0, -32.0]);
+
+    AddSpline("cr_hwrs", AbS, HwS, "South Highway Embankment", {
+        lanes: 2, laneWidth: 3.8, shoulderWidth: 1.2, sidewalk: 0.7, markingStyle: "motorway",
+        guardrails: true, railStyle: "wbeam", embankment: true, speedLimit: 110, drainage: false, manholes: false, signs: false
+    }, [0.0, 0.0, 26.0], [0.0, 1.8, -26.0]);
+
+    // Sweeping Highway Interchange Ramps & Eastern Clover Beltway
+    AddSpline("cr_rmpn", NE, HwN, "North Interchange Ramp", {
+        lanes: 2, laneWidth: 3.7, shoulderWidth: 1.0, sidewalk: 0.6, markingStyle: "motorway",
+        guardrails: true, railStyle: "wbeam", speedLimit: 90, drainage: false, manholes: false, signs: false
+    }, [28.0, 0.0, -14.0], [-24.0, 0.0, 18.0]);
+
+    AddSpline("cr_rmps", HwS, SE, "South Interchange Ramp", {
+        lanes: 2, laneWidth: 3.7, shoulderWidth: 1.0, sidewalk: 0.6, markingStyle: "motorway",
+        guardrails: true, railStyle: "wbeam", speedLimit: 90, drainage: false, manholes: false, signs: false
+    }, [-24.0, 0.0, -18.0], [28.0, 0.0, 14.0]);
+
+    AddSpline("cr_clvn", HwN, CloverE, "North-East Clover Beltway", {
+        lanes: 2, laneWidth: 3.8, shoulderWidth: 1.1, sidewalk: 0.6, markingStyle: "motorway",
+        guardrails: true, railStyle: "wbeam", speedLimit: 110, drainage: false, manholes: false, signs: false
+    }, [38.0, 0.0, 12.0], [0.0, 0.0, -48.0]);
+
+    AddSpline("cr_clvs", CloverE, HwS, "South-East Clover Beltway", {
+        lanes: 2, laneWidth: 3.8, shoulderWidth: 1.1, sidewalk: 0.6, markingStyle: "motorway",
+        guardrails: true, railStyle: "wbeam", speedLimit: 110, drainage: false, manholes: false, signs: false
+    }, [0.0, 0.0, 48.0], [38.0, 0.0, -12.0]);
+
+    return Project;
+}
+
 export function CreateStarterStudioProject(LevelKey = "inversion")
 {
+    if (LevelKey === "city")
+        return CreateCityPursuitStudioProject();
     // Built-in Live-Editable Demonstration Showcase right in the level:
     // Connects directly into the Arena through the North-East & South-East gateways ([166, +66] & [166, -66]),
     // showcasing cubic Bézier S-curves, a 4-arm tangent-filleted crossroads with hovering traffic signal,

@@ -12,6 +12,9 @@ import { InversionArenaBounds, InversionArenaTracks, InversionArenaSurfaces, Inv
          ResolveInversionCollapseSpans, ResolveInversionTrams, ResolveInversionServiceStations, ResolveInversionFactoryRobots,
          ResolveInversionTrafficLights, ResolveInversionCones, ResolveInversionBreakables } from "./InversionArenaStructure.js";
 import { ConstructTrafficLightShapes } from "./TrafficLightSequence.js";
+import { CityPursuitShapes, CityPursuitSpawn, CityPursuitZones, CityClearZones,
+         ResolveCityPlacements, ResolveCityTrafficLights, ResolveCityCones, ResolveCityBreakables, EmitCityGroundFacets,
+         PolicePursuitShapes } from "./CityPursuitStructure.js";
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                                      SHAPES
@@ -462,12 +465,31 @@ export const LevelClearZones = Object.freeze([
 //------------------------------------------------------------------------------------------------------------------------
 
 export const LevelCatalog = Object.freeze([
-    { Key: "inversion", Title: "Inversion Arena", Subtitle: "Tracks A–F: Stunt loops, collapsing bridge/road, 3-lane subway & trams/trains" },
-    { Key: "proving",   Title: "Proving Grounds", Subtitle: "Skidpad, jump wedge, smash alley, tunnel & slalom" }
+    { Key: "inversion", Title: "Inversion Arena",       Subtitle: "Tracks A–I: Stunt loops, collapsing bridge/road, 3-lane subway, trams & robot factory" },
+    { Key: "city",      Title: "City Pursuit & AI Lab", Subtitle: "Highway interchange, city blocks, narrow alleys, police chase & fast self-play RL" },
+    { Key: "proving",   Title: "Proving Grounds",       Subtitle: "Skidpad, jump wedge, smash alley, tunnel & slalom" }
 ]);
 
 export function ResolveLevelShapes(LevelKey = "proving")
 {
+    if (LevelKey === "city")
+    {
+        const { Cone, Jersey, Pole, PoleHead,
+                HoverTrafficHousing, TrafficAspectRed, TrafficAspectOrange, TrafficAspectYellow, TrafficAspectGreen } = LevelShapes;
+        return {
+            Cone:   { ...Cone,   Voxel: 0.05 },
+            Jersey: { ...Jersey, Voxel: 0.09 },
+            Pole,
+            PoleHead,
+            HoverTrafficHousing,
+            TrafficAspectRed,
+            TrafficAspectOrange,
+            TrafficAspectYellow,
+            TrafficAspectGreen,
+            ...CityPursuitShapes,
+            ...PolicePursuitShapes
+        };
+    }
     if (LevelKey === "inversion")
     {
         const { Cone, Jersey, TrafficPost, TrafficHead, Pole, PoleHead,
@@ -483,10 +505,14 @@ export function ResolveLevelShapes(LevelKey = "proving")
             GardenGold:      { ...GardenGold,      Voxel: 0.08 },
             GardenGlass:     { ...GardenGlass,     Voxel: 0.08 },
             GardenMirror:    { ...GardenMirror,    Voxel: 0.06 },
-            ...InversionArenaShapes
+            ...InversionArenaShapes,
+            ...PolicePursuitShapes
         };
     }
-    return LevelShapes;
+    return {
+        ...LevelShapes,
+        ...PolicePursuitShapes
+    };
 }
 
 export function ResolveProvingTrafficLights()
@@ -499,6 +525,28 @@ export function ResolveProvingTrafficLights()
 
 export function ResolveLevelDescriptor(LevelKey = "proving")
 {
+    if (LevelKey === "city")
+    {
+        return {
+            Key:           "city",
+            Title:         "City Pursuit & AI Lab",
+            Relief:        false,
+            AeroGrip:      0.35,
+            PolicePursuit: true,
+            Spawn:         CityPursuitSpawn,
+            Zones:         CityPursuitZones,
+            Drills:        [],
+            ClearZones:    CityClearZones,
+            Surfaces:      [],
+            TerrainHulls:  null,
+            Shapes:        ResolveLevelShapes("city"),
+            Placements:    ResolveCityPlacements,
+            TrafficLights: ResolveCityTrafficLights,
+            Cones:         ResolveCityCones,
+            Breakables:    ResolveCityBreakables,
+            EmitGround:    EmitCityGroundFacets
+        };
+    }
     if (LevelKey === "inversion")
     {
         return {

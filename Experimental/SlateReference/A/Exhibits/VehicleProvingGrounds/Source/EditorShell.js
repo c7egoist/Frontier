@@ -311,7 +311,7 @@ export class EditorShell
         Bar.appendChild(Camera);
         const LevelSelect = document.createElement("select");
         LevelSelect.className = "select-field";
-        LevelSelect.style.width = "164px";
+        LevelSelect.style.width = "186px";
         LevelSelect.title = "Switch arena level";
         for (const Entry of LevelCatalog)
         {

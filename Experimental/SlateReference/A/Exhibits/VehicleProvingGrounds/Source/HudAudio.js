@@ -14,12 +14,15 @@ export class HudAudioSynthesizer
         this.MasterGain   = null;
         this.Cooldowns    = new Map();
         this.Counts       = {
-            UiClick:    0,
-            ModeSwitch: 0,
-            TargetLock: 0,
-            BrakeAlert: 0,
-            LowFuel:    0
+            UiClick:     0,
+            ModeSwitch:  0,
+            TargetLock:  0,
+            BrakeAlert:  0,
+            LowFuel:     0,
+            PoliceAlert: 0
         };
+        this.SirenOsc     = null;
+        this.SirenGain    = null;
     }
 
     EnsureContext()
@@ -58,6 +61,8 @@ export class HudAudioSynthesizer
         this.Enabled = Boolean(On);
         if (this.MasterGain && this.Context)
             this.MasterGain.gain.setTargetAtTime(this.Enabled ? this.MasterVolume : 0.0, this.Context.currentTime, 0.03);
+        if (!this.Enabled)
+            this.StopSiren();
     }
 
     CheckCooldown(Key, MinIntervalSeconds, NowSeconds)
@@ -193,5 +198,69 @@ export class HudAudioSynthesizer
             this.ScheduleTone(Ctx, 523.25, 523.25, T0 + 0.13, 0.16, 0.16, "sine");
         }
         return true;
+    }
+
+    // 📝 Police pursuit dispatch chirp + short yelp when traffic law violation triggers a chase.
+    PlayPoliceAlert(NowSeconds = 0.0)
+    {
+        if (!this.Enabled || !this.CheckCooldown("police:dispatch", 2.0, NowSeconds))
+            return false;
+        this.Counts.PoliceAlert++;
+        const Ctx = this.EnsureContext();
+        if (!Ctx)
+            return true;
+        const T0 = Ctx.currentTime;
+        this.ScheduleTone(Ctx, 680.0,  1480.0, T0,        0.14, 0.18, "sawtooth");
+        this.ScheduleTone(Ctx, 1480.0, 680.0,  T0 + 0.14, 0.14, 0.16, "sawtooth");
+        this.ScheduleTone(Ctx, 720.0,  1520.0, T0 + 0.28, 0.16, 0.18, "triangle");
+        return true;
+    }
+
+    // 📝 Continuous distance-attenuated police wail/yelp siren oscillator during active pursuits.
+    UpdatePoliceSiren(Active, DistanceMeters = 25.0, ClockSeconds = 0.0, Yelp = false)
+    {
+        if (!Active || !this.Enabled)
+        {
+            this.StopSiren();
+            return;
+        }
+        const Ctx = this.EnsureContext();
+        if (!Ctx)
+            return;
+        if (!this.SirenOsc)
+        {
+            try
+            {
+                this.SirenOsc  = Ctx.createOscillator();
+                this.SirenGain = Ctx.createGain();
+                this.SirenOsc.type = "triangle";
+                this.SirenGain.gain.value = 0.0001;
+                this.SirenOsc.connect(this.SirenGain);
+                this.SirenGain.connect(this.MasterGain);
+                this.SirenOsc.start();
+            }
+            catch (_Err)
+            {
+                this.SirenOsc = null;
+                return;
+            }
+        }
+        const Rate = Yelp ? 4.4 : 0.42;
+        const Mod  = 0.5 + 0.5 * Math.sin(ClockSeconds * Math.PI * 2.0 * Rate);
+        const Freq = 630.0 + Mod * 740.0;
+        const Atten = Math.max(0.0, Math.min(1.0, 1.0 / (1.0 + (DistanceMeters / 36.0) ** 2)));
+        const GainVal = 0.085 * Atten;
+        this.SirenOsc.frequency.setTargetAtTime(Freq, Ctx.currentTime, 0.025);
+        this.SirenGain.gain.setTargetAtTime(GainVal, Ctx.currentTime, 0.05);
+    }
+
+    StopSiren()
+    {
+        if (this.SirenOsc)
+        {
+            try { this.SirenOsc.stop(); this.SirenOsc.disconnect(); } catch (_E) { /* ignore */ }
+            this.SirenOsc = null;
+            this.SirenGain = null;
+        }
     }
 }

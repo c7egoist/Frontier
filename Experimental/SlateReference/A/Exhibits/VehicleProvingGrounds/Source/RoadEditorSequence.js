@@ -146,6 +146,26 @@ export class RoadEditorSequence
                     this.DriveOnSelectedRoad();
                 });
             }
+
+            const CityBtn = Bar.querySelector("[data-workspace-action='open-city-pursuit']");
+            if (CityBtn)
+            {
+                if (this.LevelKey === "city")
+                    CityBtn.textContent = "🧠 AI Self-Train";
+                CityBtn.addEventListener("click", () =>
+                {
+                    this.CloseWorkspace();
+                    if (this.LevelKey === "city")
+                    {
+                        this.Host?.Police?.ToggleSelfPlayMode();
+                    }
+                    else if (this.Host)
+                    {
+                        this.Host.Settings.Level = "city";
+                        this.Host.ApplySetting("Level");
+                    }
+                });
+            }
         }
 
         const FitBtn = document.getElementById("studio-plan-fit");

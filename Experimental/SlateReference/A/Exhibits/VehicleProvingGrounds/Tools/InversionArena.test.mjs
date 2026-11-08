@@ -244,12 +244,18 @@ test("ChaseCameraSolver tracks 90° vertical and 180° inverted orientations wit
     assert.ok(Chase.Up[2] < -0.7, `Camera Up must invert smoothly with loop crown, got ${Chase.Up[2]}`);
 });
 
-test("LevelCatalog exposes multi-track Inversion Arena (Tracks A–I) and Proving Grounds descriptors cleanly", () =>
+test("LevelCatalog exposes Inversion Arena, City Pursuit & AI Lab, and Proving Grounds descriptors cleanly", () =>
 {
-    assert.equal(LevelCatalog.length, 2);
+    assert.equal(LevelCatalog.length, 3);
+    assert.deepEqual(LevelCatalog.map((L) => L.Key), ["inversion", "city", "proving"]);
     const Inversion = ResolveLevelDescriptor("inversion");
-    const Proving = ResolveLevelDescriptor("proving");
+    const City      = ResolveLevelDescriptor("city");
+    const Proving   = ResolveLevelDescriptor("proving");
     assert.equal(Inversion.Title, "Inversion Arena");
+    assert.equal(City.Title, "City Pursuit & AI Lab");
+    assert.equal(City.Relief, false);
+    assert.ok(City.Placements().length >= 30);
+    assert.ok(City.Zones.length >= 6);
     assert.equal(Inversion.Relief, false);
     assert.equal(Inversion.Tracks.length, 9);
     assert.deepEqual(Inversion.Tracks.map((T) => T.Id),

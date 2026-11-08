@@ -18,6 +18,7 @@ import { TramSequence } from "./TramSequence.js";
 import { ServiceStationSequence } from "./ServiceStationSequence.js";
 import { TrafficLightSequence } from "./TrafficLightSequence.js";
 import { RoadEditorSequence, RoadEditorVertexCapacity } from "./RoadEditorSequence.js";
+import { ConstructPoliceVehicleBodyFacets } from "./CityPursuitStructure.js";
 
 // 📝 What an occupant takes part in. A ground tile only owns a surface card; the ground occupant is only rastered,
 //    because the scene distance field carries the ground as its analytic plane rather than as a sampled volume.
@@ -89,8 +90,11 @@ export class SceneStructure
 
         // ① facet sets ------------------------------------------------------------------------------------------------
         // 📝 The cabin (CabinStructure.js) and roof fixture (LightingSystem.js) are part of the body: they move, shade, derez and enter the field with it.
-        const BodySet       = this.ConstructFacetSet("ControlVehicle body", [...ProjectBodyFacets(Body), ...ConstructCabinFacets(), ...ConstructRoofFixtureFacets(0)], 0.05, 40.0);
+        const ProjectedBody = ProjectBodyFacets(Body);
+        const BodySet       = this.ConstructFacetSet("ControlVehicle body", [...ProjectedBody, ...ConstructCabinFacets(), ...ConstructRoofFixtureFacets(0)], 0.05, 40.0);
         this.VehicleBodySet = BodySet;
+        const PoliceBodySet = this.ConstructFacetSet("Police ControlVehicle body", [...ConstructPoliceVehicleBodyFacets(ProjectedBody), ...ConstructCabinFacets()], 0.05, 40.0);
+        this.PoliceBodySet  = PoliceBodySet;
         const WheelLeftSet  = this.ConstructFacetSet("ControlVehicle wheel (left)", ProjectWheelFacets(Tyre, Rim, false), 0.025, 40.0);
         const WheelRightSet = this.ConstructFacetSet("ControlVehicle wheel (right)", ProjectWheelFacets(Tyre, Rim, true), 0.025, 40.0);
         const GroundSet     = this.ConstructFacetSet(Descriptor.Title, Descriptor.EmitGround(), 0.0, 0.0);
@@ -268,7 +272,7 @@ export class SceneStructure
 
         // ③g pole-less hovering robotic intersection traffic signal housings (+ 4 reserve slots for custom spline junctions)
         const RawTrafficLights = Descriptor.TrafficLights ? Descriptor.TrafficLights() : [];
-        const DynamicSignalSlots = 4;
+        const DynamicSignalSlots = 6;
         const TotalTrafficSlots = RawTrafficLights.length > 0 ? (RawTrafficLights.length + DynamicSignalSlots) : 0;
         const TrafficHousingFirst = this.Occupants.length;
         if (TotalTrafficSlots > 0 && ShapeSets.HoverTrafficHousing !== undefined)
@@ -344,9 +348,20 @@ export class SceneStructure
             }
         }
 
+        // ⑤b Police Interceptor Cruiser (same ControlVehicle chassis + 4 wheels, full GDF distance & cards) ------------
+        const ParkedBelow   = ConstructRigidTransform([0.0, 0.0, -45.0], [0.0, 0.0, 0.0, 1.0]);
+        const CruiserFirst  = this.Occupants.length;
+        const CruiserBody   = this.ConstructOccupant("Police ControlVehicle", PoliceBodySet, ParkedBelow, VehicleRoles);
+        const CruiserWheels = [-1, -1, -1, -1];
+        for (let Wheel = 0; Wheel < 4; ++Wheel)
+        {
+            const Set = (Wheel & 1) ? WheelRightSet : WheelLeftSet;
+            CruiserWheels[Wheel] = this.ConstructOccupant(`Police ${WheelNames[Wheel]}`, Set, ParkedBelow, VehicleRoles);
+        }
+
         // ⑥ the stress pool: shaped in runs, placed by slot, inactive until enabled -----------------------------------
         this.BaseDistanceCount = this.Occupants.length;
-        const GroundOccupants = 1 + GroundLayout.TileCount[0] * GroundLayout.TileCount[1] + 4;
+        const GroundOccupants = 1 + GroundLayout.TileCount[0] * GroundLayout.TileCount[1] + 4 + 128;
         const Capacity = Math.max(0, Math.min(Math.floor(StressCapacity), IdentityCeiling - this.BaseDistanceCount - GroundOccupants));
         const StressSets = StressShapes.map((Shape) => this.ConstructFacetSet(Shape.Name, Shape.Emit(), Shape.DistanceVoxel, Shape.CardDensity));
         this.StressPool = { First: this.Occupants.length, Capacity, Active: 0, Placements: ResolveStressPlacements(Capacity, Descriptor.ClearZones), FacetSets: StressSets };
@@ -469,6 +484,32 @@ export class SceneStructure
             };
             this.TrafficLights = new TrafficLightSequence(this, RawTrafficLights, DynamicSignalSlots);
         }
+
+        // ⑩b Police Aerial Pursuit Units (Pursuit Helicopter + rotors + 3 Police Interceptor Drones — dynamic raster) --
+        let AerialFirst = -1, HeliBody = -1, HeliMainRotor = -1, HeliTailRotor = -1;
+        const PoliceDrones = [-1, -1, -1];
+        if (ShapeSets.PoliceHelicopterBody !== undefined && ShapeSets.PoliceInterceptorDrone !== undefined)
+        {
+            const AerialRoles = OccupantRole.Raster | OccupantRole.Dynamic;
+            AerialFirst   = this.Occupants.length;
+            HeliBody      = this.ConstructOccupant("Police Helicopter Body",       ShapeSets.PoliceHelicopterBody,      ParkedBelow, AerialRoles);
+            HeliMainRotor = this.ConstructOccupant("Police Helicopter Main Rotor", ShapeSets.PoliceHelicopterMainRotor, ParkedBelow, AerialRoles);
+            HeliTailRotor = this.ConstructOccupant("Police Helicopter Tail Rotor", ShapeSets.PoliceHelicopterTailRotor, ParkedBelow, AerialRoles);
+            for (let D = 0; D < 3; ++D)
+                PoliceDrones[D] = this.ConstructOccupant(`Police Interceptor Drone ${D}`, ShapeSets.PoliceInterceptorDrone, ParkedBelow, AerialRoles);
+        }
+        this.PoliceBlock = {
+            CruiserFirst,
+            CruiserCount: 5,
+            CruiserBody,
+            CruiserWheels,
+            AerialFirst,
+            AerialCount:  AerialFirst >= 0 ? 6 : 0,
+            HeliBody,
+            HeliMainRotor,
+            HeliTailRotor,
+            Drones:       PoliceDrones
+        };
 
         // ⑪ live-streamed Road Studio road, junction & highway bridge network (editable in Road Studio workspace) ------
         const RoadEditorSet = this.ConstructFacetSet("Road Studio network", [], 0.0, 0.0);

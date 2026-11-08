@@ -230,12 +230,13 @@ export class VehicleSolver
             this.AngularVelocity = [0.0, 0.0, 0.0];
             return;
         }
+        const StepDt = this.SubstepOverride || SubstepSeconds;
         this.NearObstacles = this.ResolveNearObstacles();
-        this.Accumulator = Math.min(this.Accumulator + Math.max(0.0, Seconds), SubstepSeconds * MaximumSubsteps);
-        while (this.Accumulator >= SubstepSeconds)
+        this.Accumulator = Math.min(this.Accumulator + Math.max(0.0, Seconds), StepDt * MaximumSubsteps);
+        while (this.Accumulator >= StepDt)
         {
-            this.Step(Command, SubstepSeconds);
-            this.Accumulator -= SubstepSeconds;
+            this.Step(Command, StepDt);
+            this.Accumulator -= StepDt;
         }
     }
 

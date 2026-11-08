@@ -282,7 +282,7 @@ export class DrivingHudSequence
         {
             if (Event.button !== 0 || this.QueryDisplayMode() === "hidden")
                 return;
-            if (Event.target && Event.target.closest && Event.target.closest("#ar-hud-controls"))
+            if (Event.target && Event.target.closest && Event.target.closest("#ar-hud-controls, #pursuit-rl-controls"))
                 return;
             const Rect = Stage.getBoundingClientRect();
             const SX = Event.clientX - Rect.left;
@@ -365,6 +365,7 @@ export class DrivingHudSequence
 
     SyncControlBarButtons()
     {
+        this.Host?.Police?.RefreshControlStrip?.();
         if (!this.ControlBar)
             return;
         const B = this.Buttons;
@@ -447,11 +448,11 @@ export class DrivingHudSequence
         const Mode = this.QueryDisplayMode();
         const EffectiveVisible = Mode !== "hidden" && this.DisplayStyle !== "off";
 
+        const ShowControls = Mode !== "hidden";
         if (this.ControlBar)
-        {
-            const ShowControls = Mode !== "hidden";
             this.ControlBar.classList.toggle("hidden", !ShowControls);
-        }
+        if (this.Host?.Police?.ControlStrip)
+            this.Host.Police.ControlStrip.classList.toggle("hidden", !ShowControls);
 
         if (Mode !== this.LastActiveMode)
         {
@@ -1090,7 +1091,7 @@ export class DrivingHudSequence
         if (Mode === "hidden" || this.DisplayStyle === "off" || !CameraState)
             return;
 
-        // ① 3D Ground-Projected ADAS Radar Lane Carpet + Adjacent-Lane Red Hazard Glow + Station Guidance Chevrons
+        // ① Smart Context-Aware 3D Trajectory Ribbon (only appears when closing on a target, navigating, or in active pursuit — never stuck straight ahead!)
         if (this.DisplayStyle === "full")
         {
             this.Render3DGroundRadarCarpet(Ctx, W, H, CameraState, Mode);
@@ -1101,7 +1102,10 @@ export class DrivingHudSequence
         // ② 3D World-Space Object Silhouette Highlights + Warning Triangles (▽) + Chevrons (∨) + Distance Callouts
         this.Render3DTargetHighlights(Ctx, W, H, CameraState, Mode);
 
-        // ③ Camera-Specific 2D + 2.5D HUD Overlay:
+        // ②b Police Pursuit & RL Self-Play 3D Lidar Rays / Aerial Lock / Holographic Telemetry (zero black boxes)
+        this.Host?.Police?.RenderHudOverlay?.(Ctx, W, H, CameraState, Mode);
+
+        // ③ Camera-Specific 2D + 2.5D HUD Overlay (pure optical light-on-glass, zero black background boxes):
         //    • "cockpit" -> Collimated Windshield Combiner Trapezoidal AR-HUD (Screenshots 1 & 2)
         //    • "chase"   -> Curved Dual-Wing ADAS Telemetry HUD (Screenshot 3)
         if (Mode === "cockpit")
@@ -1109,7 +1113,7 @@ export class DrivingHudSequence
         else
             this.RenderChaseDualWingHud(Ctx, W, H);
 
-        // ④ Top Low-Fuel / Low-800V-Battery Advisory Banner when far from stations (or active robot refueling ring!)
+        // ④ Top Low-Fuel / Low-800V-Battery Optical Advisory (or active robot refueling telemetry)
         this.RenderResourceAndServiceOverlay(Ctx, W, H, Mode);
     }
 
@@ -1123,113 +1127,113 @@ export class DrivingHudSequence
         if (!Vehicle)
             return;
         const CarPos = Vehicle.Position;
+        const Vel    = Vehicle.LinearVelocity || [0.0, 0.0, 0.0];
+        const Speed  = Math.hypot(Vel[0], Vel[1], Vel[2]);
         const Fwd    = Vehicle.QueryForward ? Vehicle.QueryForward() : RotateVector(Vehicle.Orientation, [1.0, 0.0, 0.0]);
         const Up     = RotateVector(Vehicle.Orientation, [0.0, 0.0, 1.0]);
         if (Up[2] < 0.25)
-            return; // suppress flat ground carpet while inverted at the top of the 360° loop
+            return;
 
         const Right = [Fwd[1] * Up[2] - Fwd[2] * Up[1], Fwd[2] * Up[0] - Fwd[0] * Up[2], Fwd[0] * Up[1] - Fwd[1] * Up[0]];
-        const Steer = ClampScalar(Vehicle.SteeringAngle || 0.0, -0.55, 0.55);
-        const GroundOffsetZ = -0.46; // wheel contact plane relative to chassis CoM
+        const GroundOffsetZ = -0.46;
 
-        const MaxCarpet = ClampScalar(this.LeadCorridorDist, 8.0, Mode === "cockpit" ? 36.0 : 42.0);
-        const IsBrake   = this.BrakeAlertActive;
-        const IsCaution = MaxCarpet < 24.0;
+        // Only fade in the forward radar chevrons when approaching an in-lane target (< 38 m) or braking alert!
+        // No more rigid green straight lines permanently glued in front of the vehicle on empty open roads.
+        const HasLeadLock = this.LeadCorridorDist < 38.0 || this.BrakeAlertActive;
+        const FlankActive = this.LeftFlankThreat > 0.08 || this.RightFlankThreat > 0.08;
+        if (!HasLeadLock && !FlankActive)
+            return;
+
+        // Curve along actual physical velocity + angular yaw-rate arc (ω_z) rather than rigid nose line
+        const AngVel = Vehicle.AngularVelocity || [0.0, 0.0, 0.0];
+        const YawRate = ClampScalar(AngVel[2] || -(Vehicle.SteeringAngle || 0.0) * Math.min(Speed, 22.0) * 0.18, -1.3, 1.3);
+        const EffSpeed = Math.max(Speed, 8.0);
 
         const WorldCarpetPt = (ForwardM, LateralM) =>
         {
-            const CurveY = -Steer * 0.016 * ForwardM * ForwardM;
-            const Lat = LateralM + CurveY;
+            const T = ForwardM / EffSpeed;
+            const HeadingDelta = YawRate * T;
+            // Arc integration: x(s) = sin(θ)/κ, y(s) = (1-cos(θ))/κ
+            let LocalFwd = ForwardM;
+            let CurveLat = 0.0;
+            if (Math.abs(HeadingDelta) > 0.02)
+            {
+                const Radius = EffSpeed / YawRate;
+                LocalFwd = Radius * Math.sin(HeadingDelta);
+                CurveLat = Radius * (1.0 - Math.cos(HeadingDelta));
+            }
+            const Lat = LateralM - CurveLat;
             return [
-                CarPos[0] + Fwd[0] * ForwardM + Right[0] * Lat + Up[0] * GroundOffsetZ,
-                CarPos[1] + Fwd[1] * ForwardM + Right[1] * Lat + Up[1] * GroundOffsetZ,
-                CarPos[2] + Fwd[2] * ForwardM + Right[2] * Lat + Up[2] * GroundOffsetZ
+                CarPos[0] + Fwd[0] * LocalFwd + Right[0] * Lat + Up[0] * GroundOffsetZ,
+                CarPos[1] + Fwd[1] * LocalFwd + Right[1] * Lat + Up[1] * GroundOffsetZ,
+                CarPos[2] + Fwd[2] * LocalFwd + Right[2] * Lat + Up[2] * GroundOffsetZ
             ];
         };
 
-        // Perspective lane boundary rails (subtle white/cyan rails flanking the carpet, matching Screenshot 3)
-        for (const Side of [-1.15, 1.15])
+        if (HasLeadLock)
         {
-            Ctx.beginPath();
-            let Started = false;
-            for (let D = 4.8; D <= MaxCarpet; D += 3.5)
+            const MaxCarpet = ClampScalar(this.LeadCorridorDist, 7.0, Mode === "cockpit" ? 32.0 : 36.0);
+            const IsBrake   = this.BrakeAlertActive;
+            const ContextFade = ClampScalar((38.0 - this.LeadCorridorDist) / 12.0, IsBrake ? 1.0 : 0.0, 1.0);
+            const WavePhase = (this.Clock * 2.4) % 1.0;
+            const BarCount  = 4;
+
+            for (let I = 0; I < BarCount; ++I)
             {
-                const P = this.ProjectWorld(WorldCarpetPt(D, Side), W, H, Cam);
-                if (!P) continue;
-                if (!Started) { Ctx.moveTo(P[0], P[1]); Started = true; }
-                else Ctx.lineTo(P[0], P[1]);
-            }
-            if (Started)
-            {
-                Ctx.strokeStyle = IsBrake ? "rgba(255, 72, 88, 0.52)" : "rgba(180, 238, 255, 0.30)";
-                Ctx.lineWidth = 1.5;
+                const D0 = 6.5 + I * 6.4;
+                const D1 = D0 + 3.8;
+                if (D0 >= MaxCarpet)
+                    break;
+                const EndD = Math.min(D1, MaxCarpet);
+                const HalfW0 = Lerp(0.88, 0.64, I / BarCount);
+                const HalfW1 = Lerp(0.84, 0.60, (I + 0.7) / BarCount);
+
+                const P0 = this.ProjectWorld(WorldCarpetPt(D0,   -HalfW0), W, H, Cam);
+                const P1 = this.ProjectWorld(WorldCarpetPt(D0,    HalfW0), W, H, Cam);
+                const P2 = this.ProjectWorld(WorldCarpetPt(EndD,  HalfW1), W, H, Cam);
+                const P3 = this.ProjectWorld(WorldCarpetPt(EndD, -HalfW1), W, H, Cam);
+                if (!P0 || !P1 || !P2 || !P3)
+                    continue;
+
+                const NormIdx = I / BarCount;
+                const Pulse   = Math.exp(-14.0 * ((NormIdx - WavePhase) ** 2));
+                const Alpha   = ContextFade * (0.14 + 0.14 * (1.0 - NormIdx) + 0.14 * Pulse) * this.ModeTransition;
+
+                Ctx.beginPath();
+                Ctx.moveTo(P0[0], P0[1]);
+                Ctx.lineTo(P1[0], P1[1]);
+                Ctx.lineTo(P2[0], P2[1]);
+                Ctx.lineTo(P3[0], P3[1]);
+                Ctx.closePath();
+
+                if (IsBrake)
+                {
+                    Ctx.fillStyle   = `rgba(255, 52, 68, ${(Alpha * 1.35).toFixed(3)})`;
+                    Ctx.strokeStyle = `rgba(255, 110, 120, ${(Alpha * 2.1).toFixed(3)})`;
+                }
+                else
+                {
+                    Ctx.fillStyle   = `rgba(246, 188, 62, ${(Alpha * 1.10).toFixed(3)})`;
+                    Ctx.strokeStyle = `rgba(255, 214, 96, ${(Alpha * 1.80).toFixed(3)})`;
+                }
+                Ctx.fill();
+                Ctx.lineWidth = 1.1;
                 Ctx.stroke();
             }
         }
 
-        // Segmented perspective radar bars with animated forward pulse wave (Screenshot 3!)
-        const WavePhase = (this.Clock * 2.4) % 1.0;
-        const BarCount  = 5;
-        for (let I = 0; I < BarCount; ++I)
-        {
-            const D0 = 6.2 + I * 6.4;
-            const D1 = D0 + 4.3;
-            if (D0 >= MaxCarpet)
-                break;
-            const EndD = Math.min(D1, MaxCarpet);
-            const HalfW0 = Lerp(0.96, 0.72, I / BarCount);
-            const HalfW1 = Lerp(0.92, 0.68, (I + 0.7) / BarCount);
-
-            const P0 = this.ProjectWorld(WorldCarpetPt(D0,   -HalfW0), W, H, Cam);
-            const P1 = this.ProjectWorld(WorldCarpetPt(D0,    HalfW0), W, H, Cam);
-            const P2 = this.ProjectWorld(WorldCarpetPt(EndD,  HalfW1), W, H, Cam);
-            const P3 = this.ProjectWorld(WorldCarpetPt(EndD, -HalfW1), W, H, Cam);
-            if (!P0 || !P1 || !P2 || !P3)
-                continue;
-
-            const NormIdx = I / BarCount;
-            const Pulse   = Math.exp(-14.0 * ((NormIdx - WavePhase) ** 2));
-            const Alpha   = (0.16 + 0.16 * (1.0 - NormIdx) + 0.16 * Pulse) * this.ModeTransition;
-
-            Ctx.beginPath();
-            Ctx.moveTo(P0[0], P0[1]);
-            Ctx.lineTo(P1[0], P1[1]);
-            Ctx.lineTo(P2[0], P2[1]);
-            Ctx.lineTo(P3[0], P3[1]);
-            Ctx.closePath();
-
-            if (IsBrake)
-            {
-                Ctx.fillStyle   = `rgba(255, 52, 68, ${(Alpha * 1.35).toFixed(3)})`;
-                Ctx.strokeStyle = `rgba(255, 110, 120, ${(Alpha * 2.1).toFixed(3)})`;
-            }
-            else if (IsCaution)
-            {
-                Ctx.fillStyle   = `rgba(246, 188, 62, ${(Alpha * 1.15).toFixed(3)})`;
-                Ctx.strokeStyle = `rgba(255, 214, 96, ${(Alpha * 1.85).toFixed(3)})`;
-            }
-            else
-            {
-                Ctx.fillStyle   = `rgba(92, 226, 152, ${Alpha.toFixed(3)})`;
-                Ctx.strokeStyle = `rgba(136, 248, 190, ${(Alpha * 1.75).toFixed(3)})`;
-            }
-            Ctx.fill();
-            Ctx.lineWidth = 1.1;
-            Ctx.stroke();
-        }
-
-        // Adjacent-lane crimson hazard wedge (Screenshot 3 red blind-spot / adjacent-lane train warning!)
+        // Adjacent-lane crimson hazard wedge when a train, police cruiser, or obstacle encroaches alongside
         for (const [SideSign, Threat] of [[-1.0, this.LeftFlankThreat], [1.0, this.RightFlankThreat]])
         {
             if (Threat <= 0.08)
                 continue;
             const W0 = this.ProjectWorld(WorldCarpetPt(5.0,  SideSign * 1.35), W, H, Cam);
             const W1 = this.ProjectWorld(WorldCarpetPt(5.0,  SideSign * 4.20), W, H, Cam);
-            const W2 = this.ProjectWorld(WorldCarpetPt(32.0, SideSign * 3.80), W, H, Cam);
-            const W3 = this.ProjectWorld(WorldCarpetPt(32.0, SideSign * 1.25), W, H, Cam);
+            const W2 = this.ProjectWorld(WorldCarpetPt(30.0, SideSign * 3.80), W, H, Cam);
+            const W3 = this.ProjectWorld(WorldCarpetPt(30.0, SideSign * 1.25), W, H, Cam);
             if (!W0 || !W1 || !W2 || !W3)
                 continue;
-            const PulseA = Threat * (0.26 + 0.10 * Math.sin(this.Clock * 9.0));
+            const PulseA = Threat * (0.24 + 0.10 * Math.sin(this.Clock * 9.0));
             Ctx.beginPath();
             Ctx.moveTo(W0[0], W0[1]);
             Ctx.lineTo(W1[0], W1[1]);
@@ -1449,8 +1453,8 @@ export class DrivingHudSequence
             }
             else
             {
-                // 🟢 Screenshot 1 & 3 Style: Downward Chevron (∨) + Bracketed [ 48M · LABEL ] Target Lock!
-                const ChevY = CYScreen - 6 + Bob;
+                // 🟢 Screenshot 1 Style: Pure Floating Chevron (∨) + Optical Glowing Text (ZERO black textbox!)
+                const ChevY = CYScreen - 5 + Bob;
                 Ctx.beginPath();
                 Ctx.moveTo(CXScreen - 9, ChevY - 7);
                 Ctx.lineTo(CXScreen,     ChevY + 1);
@@ -1460,47 +1464,48 @@ export class DrivingHudSequence
                 Ctx.stroke();
 
                 const BadgeText = `${T.Label} · ${DistText}`;
-                Ctx.font = "600 11px 'JetBrains Mono', monospace";
-                const TW = Ctx.measureText(BadgeText).width + 16;
+                Ctx.font = "700 12px 'DM Sans', system-ui, sans-serif";
+                const TW = Ctx.measureText(BadgeText).width + 14;
                 const BX = CXScreen - TW * 0.5;
-                const BY = ChevY - 31;
+                const BY = ChevY - 26;
 
-                Ctx.fillStyle   = "rgba(8, 14, 18, 0.76)";
-                Ctx.strokeStyle = `rgba(${RGB}, 0.85)`;
-                Ctx.lineWidth   = IsPinned ? 2.0 : 1.25;
-                Ctx.beginPath();
-                Ctx.roundRect(BX, BY, TW, 20, 4);
-                Ctx.fill();
-                Ctx.stroke();
-
-                Ctx.fillStyle = "#eefaf6";
-                Ctx.textAlign = "center";
+                Ctx.shadowColor = "rgba(0, 0, 0, 0.72)";
+                Ctx.shadowBlur  = 6;
+                Ctx.fillStyle   = `rgb(${RGB})`;
+                Ctx.textAlign   = "center";
                 Ctx.textBaseline = "middle";
-                Ctx.fillText(BadgeText, CXScreen, BY + 10.5);
+                Ctx.fillText(BadgeText, CXScreen, BY + 8);
+                Ctx.shadowBlur  = 0;
 
-                this.ScreenHitBoxes.push({ Id: T.Id, X: BX, Y: BY, W: TW, H: 32 });
+                if (IsPinned)
+                {
+                    // Open hairline corner ticks only — no filled dark box
+                    Ctx.strokeStyle = "#ffffff";
+                    Ctx.lineWidth = 1.4;
+                    Ctx.beginPath();
+                    Ctx.moveTo(BX, BY + 4); Ctx.lineTo(BX, BY); Ctx.lineTo(BX + 6, BY);
+                    Ctx.moveTo(BX + TW - 6, BY); Ctx.lineTo(BX + TW, BY); Ctx.lineTo(BX + TW, BY + 4);
+                    Ctx.stroke();
+                }
+
+                this.ScreenHitBoxes.push({ Id: T.Id, X: BX, Y: BY, W: TW, H: 28 });
             }
 
-            // Expanded telemetry pill when user clicks/pins a 3D target!
+            // Expanded floating optical telemetry when user clicks/pins a 3D target (zero black box!)
             if (IsPinned)
             {
                 const ClosingKmh = Math.round(T.ClosingVel * (this.SpeedUnit === "mph" ? 2.23694 : 3.6));
                 const UnitLbl    = this.SpeedUnit === "mph" ? "MPH" : "KM/H";
-                const PinLine    = `LOCKED · ΔV ${ClosingKmh >= 0 ? "+" : ""}${ClosingKmh} ${UnitLbl}`
+                const PinLine    = `LOCK · ΔV ${ClosingKmh >= 0 ? "+" : ""}${ClosingKmh} ${UnitLbl}`
                                  + (T.TTC < 19.0 ? ` · TTC ${T.TTC.toFixed(1)}S` : (T.SubLabel ? ` · ${T.SubLabel}` : ""));
-                Ctx.font = "600 10px 'JetBrains Mono', monospace";
-                const PW = Ctx.measureText(PinLine).width + 14;
-                Ctx.fillStyle   = "rgba(10, 18, 24, 0.88)";
-                Ctx.strokeStyle = "#ffffff";
-                Ctx.lineWidth   = 1.2;
-                Ctx.beginPath();
-                Ctx.roundRect(CXScreen - PW * 0.5, MaxY + 6, PW, 19, 4);
-                Ctx.fill();
-                Ctx.stroke();
-                Ctx.fillStyle = "#ffffff";
-                Ctx.textAlign = "center";
+                Ctx.font = "700 10.5px 'JetBrains Mono', monospace";
+                Ctx.shadowColor = "rgba(0, 0, 0, 0.78)";
+                Ctx.shadowBlur  = 6;
+                Ctx.fillStyle   = "#ffffff";
+                Ctx.textAlign   = "center";
                 Ctx.textBaseline = "middle";
-                Ctx.fillText(PinLine, CXScreen, MaxY + 15.5);
+                Ctx.fillText(PinLine, CXScreen, MaxY + 14);
+                Ctx.shadowBlur  = 0;
             }
 
             Ctx.restore();
@@ -1527,13 +1532,8 @@ export class DrivingHudSequence
 
         Ctx.save();
         Ctx.globalAlpha = ClampScalar(this.ModeTransition, 0.0, 1.0);
-
-        // Subtle dark vignette plate behind lower wings for crisp readability against bright sunlit concrete
-        const BgGrad = Ctx.createLinearGradient(0, BaseY - 68, 0, H);
-        BgGrad.addColorStop(0.0, "rgba(6, 10, 14, 0.0)");
-        BgGrad.addColorStop(1.0, "rgba(6, 10, 14, 0.58)");
-        Ctx.fillStyle = BgGrad;
-        Ctx.fillRect(CX - WingSpan - 40, BaseY - 68, (WingSpan + 40) * 2, 108);
+        Ctx.shadowColor = "rgba(0, 0, 0, 0.65)";
+        Ctx.shadowBlur  = 6;
 
         const AccentRGB = this.BrakeAlertActive ? "255, 58, 72" : "58, 224, 210";
 
@@ -1564,21 +1564,23 @@ export class DrivingHudSequence
         Ctx.fillStyle = "rgba(210, 236, 245, 0.82)";
         Ctx.fillText(UnitStr, LeftX0 + 22 + SpdW, BaseY - 14);
 
-        // Circular Gear / Speed-Zone Ring (Screenshot 3 "(90)" ring)
+        // Circular Gear / Speed-Limit Ring (open optical ring — no dark fill!)
         const RingX = LeftX0 + 96 + Math.max(0, SpdW - 42);
         const RingY = BaseY - 25;
+        const LimitKmh = this.Host?.Police?.QueryPostedSpeedLimitKmh?.() || null;
         Ctx.beginPath();
         Ctx.arc(RingX, RingY, 15.5, 0, Math.PI * 2);
-        Ctx.fillStyle = "rgba(10, 16, 22, 0.82)";
-        Ctx.fill();
-        Ctx.strokeStyle = this.BrakeAlertActive ? "#ff4858" : "#f2ad42";
+        Ctx.strokeStyle = this.BrakeAlertActive ? "#ff4858" : (LimitKmh ? "#ff5262" : "#f2ad42");
         Ctx.lineWidth = 2.4;
         Ctx.stroke();
         Ctx.fillStyle = "#ffffff";
-        Ctx.font = "700 12px 'JetBrains Mono', monospace";
+        Ctx.font = "700 11.5px 'JetBrains Mono', monospace";
         Ctx.textAlign = "center";
         Ctx.textBaseline = "middle";
-        Ctx.fillText(`G${Telemetry.Gear ?? "D"}`, RingX, RingY + 0.5);
+        const RingLabel = LimitKmh
+            ? String(this.SpeedUnit === "mph" ? Math.round(LimitKmh * 0.621371) : LimitKmh)
+            : `G${Telemetry.Gear ?? "D"}`;
+        Ctx.fillText(RingLabel, RingX, RingY + 0.5);
 
         // Under-wing Fuel Tank & 800V EV Battery Telemetry Bars
         const DrawMiniBar = (BX, Label, Pct, ColNormal) =>
@@ -1618,17 +1620,17 @@ export class DrivingHudSequence
 
         if (this.BrakeAlertActive)
         {
-            // Flashing crimson BRAKE banner!
+            // Pure glowing crimson BRAKE projection (zero opaque box!)
             const Flash = 0.72 + 0.28 * Math.sin(this.Clock * 18.0);
-            Ctx.fillStyle = `rgba(255, 38, 56, ${(0.88 * Flash).toFixed(3)})`;
-            Ctx.beginPath();
-            Ctx.roundRect(CX - 58, CenterY - 15, 116, 28, 5);
-            Ctx.fill();
-            Ctx.fillStyle = "#ffffff";
-            Ctx.font = "800 15px 'JetBrains Mono', monospace";
+            Ctx.fillStyle   = `rgba(255, 62, 74, ${Flash.toFixed(3)})`;
+            Ctx.shadowColor = "rgba(255, 32, 48, 0.90)";
+            Ctx.shadowBlur  = 14;
+            Ctx.font = "800 18px 'DM Sans', system-ui, sans-serif";
             Ctx.textAlign = "center";
             Ctx.textBaseline = "middle";
             Ctx.fillText("B R A K E", CX, CenterY);
+            Ctx.shadowColor = "rgba(0, 0, 0, 0.65)";
+            Ctx.shadowBlur  = 6;
         }
         else
         {
@@ -1746,28 +1748,18 @@ export class DrivingHudSequence
         else
         {
             // Subtle collimator header tag
+            const LimitTag = this.Host?.Police?.QueryPostedSpeedLimitKmh?.();
+            const HeaderStr = LimitTag
+                ? `WINDSHIELD AR · LIMIT ${LimitTag} · ${this.ActiveSectorName.slice(0, 18)}`
+                : `WINDSHIELD AR · ${this.ActiveSectorName.slice(0, 24)}`;
             Ctx.font = "600 9.5px 'JetBrains Mono', monospace";
             Ctx.textAlign = "center";
             Ctx.textBaseline = "bottom";
             Ctx.fillStyle = "rgba(128, 246, 204, 0.62)";
-            Ctx.fillText(`WINDSHIELD AR · ${this.ActiveSectorName.slice(0, 24)}`, CX, TopY - 5);
+            Ctx.fillText(HeaderStr, CX, TopY - 5);
         }
 
-        // ② Perspective Trapezoidal Windshield Combiner Frame (`/‾‾‾‾‾‾‾‾‾‾\`)
-        const CombinerGrad = Ctx.createLinearGradient(0, TopY, 0, BaseY);
-        CombinerGrad.addColorStop(0.0, `rgba(${FrameRGB}, ${IsBrake ? 0.18 : 0.09})`);
-        CombinerGrad.addColorStop(1.0, "rgba(8, 20, 18, 0.30)");
-
-        Ctx.beginPath();
-        Ctx.moveTo(CX - BotHalfW, BaseY);
-        Ctx.lineTo(CX - TopHalfW, TopY);
-        Ctx.lineTo(CX + TopHalfW, TopY);
-        Ctx.lineTo(CX + BotHalfW, BaseY);
-        Ctx.closePath();
-        Ctx.fillStyle = CombinerGrad;
-        Ctx.fill();
-
-        // Crisp glowing open-bottom trapezoid outline (exact silhouette of Screenshots 1 & 2!)
+        // ② Perspective Trapezoidal Windshield Combiner Frame (`/‾‾‾‾‾‾‾‾‾‾\` — pure optical glass line, zero dark tint!)
         Ctx.beginPath();
         Ctx.moveTo(CX - BotHalfW, BaseY);
         Ctx.lineTo(CX - TopHalfW, TopY);
@@ -1777,7 +1769,7 @@ export class DrivingHudSequence
         Ctx.lineWidth   = IsBrake ? 2.8 : 2.0;
         Ctx.stroke();
 
-        // ③ LEFT ZONE INSIDE TRAPEZOID: Live Rotating Vector Mini-Radar Grid (Screenshot 1 green street grid + route arrow!)
+        // ③ LEFT ZONE INSIDE TRAPEZOID: Live Rotating Vector Mini-Radar Grid (pure glowing green/white lines, zero dark box!)
         const MapCX = CX - TopHalfW * 0.66;
         const MapCY = TopY + FrameH * 0.50;
         const MapW  = 78, MapH = 48;
@@ -1785,9 +1777,6 @@ export class DrivingHudSequence
         Ctx.beginPath();
         Ctx.rect(MapCX - MapW * 0.5, MapCY - MapH * 0.5, MapW, MapH);
         Ctx.clip();
-
-        Ctx.fillStyle = "rgba(6, 18, 16, 0.42)";
-        Ctx.fillRect(MapCX - MapW * 0.5, MapCY - MapH * 0.5, MapW, MapH);
 
         // Grid lines scrolling with vehicle world coordinates
         const CarPos = Vehicle?.Position || [0, 0, 0];
@@ -1951,46 +1940,38 @@ export class DrivingHudSequence
         const Service = this.Host?.ServiceStations;
         const Summary = Service ? Service.QuerySummary() : null;
 
-        // ① Active 6-Axis Industrial Robot Arm Refueling / 800V Charging HUD Card
+        // ① Active 6-Axis Industrial Robot Arm Refueling / 800V Charging Optical Telemetry (zero black box!)
         if (Summary && Summary.ActiveKind)
         {
             const IsEV  = Summary.ActiveKind === "electric";
             const Pct   = IsEV ? Summary.BatteryPercent : Summary.FuelPercent;
             const Col   = IsEV ? "#46e8d2" : "#ffba42";
             const Title = IsEV ? "⚡ 6-AXIS ROBOT · 800V SUPERCHARGING" : "⛽ 6-AXIS ROBOT · OCTANE-100 REFUELING";
-            const Sub   = `ARM STATE: ${Summary.ActiveState.toUpperCase()} · TANK ${Pct}%`;
+            const Sub   = `${Summary.ActiveState.toUpperCase()} · ${Pct}%`;
 
-            const BX = W * 0.5 - 165, BY = 54;
+            const BX = W * 0.5 - 150, BY = 54;
             Ctx.save();
-            Ctx.fillStyle   = "rgba(8, 15, 20, 0.86)";
-            Ctx.strokeStyle = Col;
-            Ctx.lineWidth   = 1.8;
-            Ctx.beginPath();
-            Ctx.roundRect(BX, BY, 330, 48, 8);
-            Ctx.fill();
-            Ctx.stroke();
-
-            Ctx.fillStyle = Col;
-            Ctx.font = "700 11.5px 'JetBrains Mono', monospace";
+            Ctx.shadowColor = "rgba(0, 0, 0, 0.75)";
+            Ctx.shadowBlur  = 8;
+            Ctx.fillStyle   = Col;
+            Ctx.font = "700 13px 'DM Sans', system-ui, sans-serif";
             Ctx.textAlign = "center";
-            Ctx.fillText(Title, W * 0.5, BY + 18);
+            Ctx.fillText(Title, W * 0.5, BY + 14);
 
-            Ctx.fillStyle = "#e9f7f5";
-            Ctx.font = "600 10.5px 'JetBrains Mono', monospace";
-            Ctx.fillText(Sub, W * 0.5, BY + 33);
+            Ctx.fillStyle = "#ffffff";
+            Ctx.font = "600 11px 'JetBrains Mono', monospace";
+            Ctx.fillText(Sub, W * 0.5, BY + 30);
 
-            // Animated fill progress bar
-            Ctx.fillStyle = "rgba(255, 255, 255, 0.14)";
-            Ctx.fillRect(BX + 18, BY + 39, 294, 4);
+            Ctx.shadowBlur = 0;
+            Ctx.fillStyle = "rgba(255, 255, 255, 0.22)";
+            Ctx.fillRect(BX + 20, BY + 36, 260, 3.5);
             Ctx.fillStyle = Col;
-            Ctx.fillRect(BX + 18, BY + 39, 294 * ClampScalar(Pct / 100.0, 0.0, 1.0), 4);
+            Ctx.fillRect(BX + 20, BY + 36, 260 * ClampScalar(Pct / 100.0, 0.0, 1.0), 3.5);
             Ctx.restore();
             return;
         }
 
-        // ② Low-Fuel / Low-800V-Battery Advisory Banner:
-        //    • If nearest station is CLOSE (<= 235 m): shows live distance & turn direction + 3D AR beacon active!
-        //    • If nearest station is FAR (> 235 m) or no station on level: shows crisp low-resource warning banner!
+        // ② Low-Fuel / Low-800V-Battery Floating Optical Advisory (zero black box!):
         const FuelPct = Math.round(this.SmoothFuel * 100);
         const BattPct = Math.round(this.SmoothBattery * 100);
         if (FuelPct > 25 && BattPct > 25)
@@ -1998,40 +1979,43 @@ export class DrivingHudSequence
 
         const IsCrit  = FuelPct <= 14 || BattPct <= 14;
         const Guide   = this.StationGuidance;
-        const LowName = FuelPct <= BattPct ? `LOW FUEL (${FuelPct}%)` : `LOW 800V BATTERY (${BattPct}%)`;
-        let DetailTxt = "RESERVE WARNING — REDUCE LOAD OR VISIT SERVICE BAY";
+        const LowName = FuelPct <= BattPct ? `LOW FUEL · ${FuelPct}%` : `LOW 800V BATTERY · ${BattPct}%`;
+        let DetailTxt = "RESERVE WARNING — VISIT SERVICE BAY";
         if (Guide)
         {
             const DF = this.FormatDistance(Guide.Dist);
             const DirStr = Math.abs(Guide.BearingRad) < 0.35 ? "AHEAD" : (Guide.BearingRad > 0 ? "RIGHT ↱" : "LEFT ↰");
             DetailTxt = Guide.IsClose
-                ? `NEAREST ${Guide.Kind === "electric" ? "800V EV" : "FUEL"} BAY IN RANGE · ${DF.Value}${DF.Unit} ${DirStr}`
-                : `NEAREST STATION ${DF.Value}${DF.Unit} (${DirStr}) · TRACK H NORTH`;
+                ? `NEAREST ${Guide.Kind === "electric" ? "800V EV" : "FUEL"} BAY · ${DF.Value}${DF.Unit} ${DirStr}`
+                : `NEAREST STATION ${DF.Value}${DF.Unit} (${DirStr})`;
         }
 
-        const Pulse = 0.78 + 0.22 * Math.sin(this.Clock * (IsCrit ? 10.0 : 5.0));
-        const ColRGB = IsCrit ? "255, 58, 72" : "248, 184, 58";
-        const CardW = Math.min(410, W - 40);
-        const BX = W * 0.5 - CardW * 0.5;
+        const Pulse = 0.76 + 0.24 * Math.sin(this.Clock * (IsCrit ? 10.0 : 5.0));
+        const ColRGB = IsCrit ? "255, 68, 82" : "255, 196, 72";
         const BY = Mode === "cockpit" ? 50 : 52;
 
         Ctx.save();
-        Ctx.fillStyle   = "rgba(12, 14, 18, 0.82)";
-        Ctx.strokeStyle = `rgba(${ColRGB}, ${Pulse.toFixed(3)})`;
-        Ctx.lineWidth   = IsCrit ? 2.0 : 1.5;
-        Ctx.beginPath();
-        Ctx.roundRect(BX, BY, CardW, 38, 7);
-        Ctx.fill();
-        Ctx.stroke();
+        Ctx.globalAlpha = Pulse;
+        Ctx.shadowColor = "rgba(0, 0, 0, 0.78)";
+        Ctx.shadowBlur  = 8;
 
         Ctx.fillStyle = `rgb(${ColRGB})`;
-        Ctx.font = "700 11px 'JetBrains Mono', monospace";
+        Ctx.font = "700 13px 'DM Sans', system-ui, sans-serif";
         Ctx.textAlign = "center";
-        Ctx.fillText(`⚠ ${LowName}`, W * 0.5, BY + 15);
+        Ctx.fillText(`⚠ ${LowName}`, W * 0.5, BY + 14);
 
-        Ctx.fillStyle = "rgba(238, 244, 248, 0.90)";
-        Ctx.font = "500 10px 'JetBrains Mono', monospace";
-        Ctx.fillText(DetailTxt, W * 0.5, BY + 29);
+        Ctx.fillStyle = "#f2faf8";
+        Ctx.font = "600 10.5px 'JetBrains Mono', monospace";
+        Ctx.fillText(DetailTxt, W * 0.5, BY + 30);
+
+        // Crisp hairline optical underline instead of a dark box
+        Ctx.shadowBlur = 0;
+        Ctx.strokeStyle = `rgba(${ColRGB}, 0.75)`;
+        Ctx.lineWidth = 1.5;
+        Ctx.beginPath();
+        Ctx.moveTo(W * 0.5 - 115, BY + 36);
+        Ctx.lineTo(W * 0.5 + 115, BY + 36);
+        Ctx.stroke();
         Ctx.restore();
     }
 
