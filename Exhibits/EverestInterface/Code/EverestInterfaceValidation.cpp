@@ -216,6 +216,32 @@ int main(int ArgumentCount, char** Arguments)
         {
             Require(false, "Fracture record must be the typed FractureRecord.");
         }
+        if (auto* TypedGeometry = dynamic_cast<GeometryRecord*>(World.FindFirstByType("Geometry")))
+        {
+            GeometryConfiguration& Geometry = TypedGeometry->AccessConfiguration();
+            const GeometryConfiguration Original = Geometry;
+            Geometry.Fracture.VoronoiCellCount = 96;
+            Geometry.Fracture.ImpulseThresholdNs = 75.0f;
+            Geometry.Fracture.ImpactRadialBias = 0.625f;
+            Geometry.Fracture.DebrisLifetimeSeconds = 12.5f;
+            Geometry.Fracture.SleepLinearVelocity = 0.5f;
+            Geometry.Fracture.FractureArmed = true;
+            Geometry.Fracture.ImpactDustBurst = true;
+            toml::table Encoded;
+            TypedGeometry->SerializeConfiguration(Encoded);
+            Geometry.Fracture = FractureConfiguration{};
+            TypedGeometry->DeserializeConfiguration(Encoded);
+            const FractureConfiguration& Restored = TypedGeometry->QueryConfiguration().Fracture;
+            Require(Restored.VoronoiCellCount == 96 && Restored.ImpulseThresholdNs == 75.0f && Restored.ImpactRadialBias == 0.625f &&
+                        Restored.DebrisLifetimeSeconds == 12.5f && Restored.SleepLinearVelocity == 0.5f && Restored.FractureArmed &&
+                        Restored.ImpactDustBurst,
+                    "Geometry's embedded Fracture settings must survive the levelspace configuration round trip.");
+            Geometry = Original;
+        }
+        else
+        {
+            Require(false, "the Simulation fixture must contain a typed Geometry record.");
+        }
 
         const auto RenderFrames = [&](int Count) {
             for (int FrameIdx = 0; FrameIdx < Count; ++FrameIdx)

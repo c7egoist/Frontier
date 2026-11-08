@@ -3,8 +3,8 @@
 ==========================================================================================================================================*/
 // 🧩 The Particle editor in the Everest workspace, captured offscreen: a Particles record constructed and selected, its editor
 //    opened through the Inspector runtime, the GPU particle engine on an own device (read back into the captured image), and
-//    the editor walked through as a user would (Force Field page with the overlay, an effect, Wind, an attractor, Lightning, the
-//    preset library, a preset from it, the wind arrows). Every capture checks what it shows.
+//    the editor walked through as a user would (Force Field page with the overlay, Wind, attractor, Lightning, black-hole lensing,
+//    Derez cube shards, the preset library and wind arrows). Every capture checks the relevant viewport telemetry.
 
 #include "Engine/Interface/IconPresentation.h"
 #include "Engine/Interface/InspectorRuntime.h"
@@ -43,6 +43,20 @@ constexpr uint64_t ParticleTag   = 0x9A27C1u;   // [-] ImTextureID the capture r
 void Require(bool Condition, const std::string& Message)
 {
     if (!Condition) throw std::runtime_error(Message);
+}
+
+size_t CountDifferentPixels(const std::vector<uint8_t>& Left, const std::vector<uint8_t>& Right)
+{
+    if (Left.size() != Right.size() || Left.size() % 4u != 0u) return 0;
+    size_t Changed = 0;
+    for (size_t Pixel = 0; Pixel < Left.size(); Pixel += 4u)
+    {
+        const int Difference = std::abs(static_cast<int>(Left[Pixel]) - static_cast<int>(Right[Pixel])) +
+                               std::abs(static_cast<int>(Left[Pixel + 1u]) - static_cast<int>(Right[Pixel + 1u])) +
+                               std::abs(static_cast<int>(Left[Pixel + 2u]) - static_cast<int>(Right[Pixel + 2u]));
+        if (Difference > 12) ++Changed;
+    }
+    return Changed;
 }
 
 } // namespace
@@ -135,7 +149,7 @@ int main(int ArgumentCount, char** Arguments)
                     Editor->AccessSpace().Effects.size(), Editor->AccessSpace().Fields.size());
 
         std::ofstream Ledger(OutputDir / "Captures.tsv");
-        Ledger << "capture\tselected\teffects\talive\tfields\toverlay\tlattice\tlightning_segments\tlensing_holes\theat_shimmers\tmean_ms\textent\n";
+        Ledger << "capture\tselected\teffects\talive\tfields\toverlay\tlattice\tlightning_segments\tlensing_holes\theat_shimmers\tshard_raster_effects\tshard_particle_capacity\tmean_ms\textent\n";
         const auto WriteCapture = [&](const std::string& Name) {
             const ParticleViewportImage& Image = Editor->QueryImage();
             Require(Image.Failure.empty(), Name + ": " + Image.Failure);
@@ -155,14 +169,16 @@ int main(int ArgumentCount, char** Arguments)
             const std::filesystem::path Target = OutputDir / (Name + ".png");
             Require(stbi_write_png(Target.string().c_str(), CaptureWidth, CaptureHeight, 3, Pixels.data(), CaptureWidth * 3) != 0, "PNG write failed");
             const double Mean = RefreshTimes.empty() ? 0.0 : std::accumulate(RefreshTimes.begin(), RefreshTimes.end(), 0.0) / RefreshTimes.size();
-            std::printf("[ParticleEditorCapture] %s: %s selected, %zu effects, %u alive, overlay %s, lattice %s, lightning %u seg, lens %u, shimmer %u, %u x %u image, %.1f ms mean refresh\n",
+            std::printf("[ParticleEditorCapture] %s: %s selected, %zu effects, %u alive, overlay %s, lattice %s, lightning %u seg, lens %u, shimmer %u, shard pass %u/%u slots, %u x %u image, %.1f ms mean refresh\n",
                         Target.string().c_str(), Editor->AccessSpace().Selected.c_str(), Editor->AccessSpace().Effects.size(), Alive,
                         Editor->Overlay.Settings.Enabled ? "on" : "off", Image.Lattice ? "read" : "none", Image.LightningSegmentCount,
-                        Image.LensingHoleCount, Image.HeatShimmerCount, ParticleExtent[0], ParticleExtent[1], Mean);
+                        Image.LensingHoleCount, Image.HeatShimmerCount, Image.ShardRasterEffectCount, Image.ShardRasterParticleCapacity,
+                        ParticleExtent[0], ParticleExtent[1], Mean);
             Ledger << Name << '\t' << Editor->AccessSpace().Selected << '\t' << Editor->AccessSpace().Effects.size() << '\t' << Alive << '\t'
                   << Editor->AccessSpace().Fields.size() << '\t' << (Editor->Overlay.Settings.Enabled ? "on" : "off") << '\t'
                   << (Image.Lattice ? "read" : "none") << '\t' << Image.LightningSegmentCount << '\t' << Image.LensingHoleCount << '\t'
-                  << Image.HeatShimmerCount << '\t' << Mean << '\t' << ParticleExtent[0] << 'x' << ParticleExtent[1] << '\n';
+                  << Image.HeatShimmerCount << '\t' << Image.ShardRasterEffectCount << '\t' << Image.ShardRasterParticleCapacity << '\t' << Mean << '\t'
+                  << ParticleExtent[0] << 'x' << ParticleExtent[1] << '\n';
             RefreshTimes.clear();
             return Alive;
         };
@@ -263,6 +279,11 @@ int main(int ArgumentCount, char** Arguments)
         Space.Playing = true;
         Space.TimeScale = 1.0;
         Space.Wind.ShowArrows = false;
+        Editor->Perform("overlay:off");
+        Editor->Perform("camera:0.45,0.35,5.5");
+        Tick(1);
+        const std::vector<uint8_t> DerezBaseline = ParticlePixels;
+        Require(!DerezBaseline.empty(), "DerezCube: the no-effect baseline image is empty");
         Require(Editor->Perform("add:derez-cube"), "the Derez cube preset could not be added");
         const ParticleEffectInstance* Derez = Space.ResolveEffect(Space.Effects.back().Token);
         Require(Derez != nullptr && Derez->Parameters.Appearance == ParticleAppearance::Cube && Derez->Parameters.Transition &&
@@ -270,29 +291,35 @@ int main(int ArgumentCount, char** Arguments)
                 "Derez cube is missing its cube or shard transition path");
         const std::string DerezToken = Derez->Token;
         Editor->Perform("select:" + DerezToken);
-        Editor->Perform("camera:0.45,0.35,5.5");
-        Tick(84);
+        Tick(93);   // hold completes, cubes reach the floor, and recent shard bursts remain visible
         if (Wanted("DerezCube"))
         {
             Require(AliveFor(DerezToken) > 0, "DerezCube: no transition particles reached the GPU census");
+            Require(Editor->QueryImage().ShardRasterEffectCount > 0 && Editor->QueryImage().ShardRasterParticleCapacity > 0,
+                    "DerezCube: the procedural shard raster pass had no draw instances");
+            Require(CountDifferentPixels(ParticlePixels, DerezBaseline) > 16, "DerezCube: the GPU image did not change from its empty baseline");
             WriteCapture("DerezCubeTransition");
             ++Captured;
         }
 
         // ⑩ Black-hole runtime path: the native preset must reach the acceleration and screen-space lensing dispatches.
         ClearEffects();
+        Editor->Perform("camera:0.0,0.3,7.0");
+        Tick(1);
+        const std::vector<uint8_t> BlackHoleBaseline = ParticlePixels;
+        Require(!BlackHoleBaseline.empty(), "BlackHole: the no-effect baseline image is empty");
         Require(Editor->Perform("add:black-hole"), "the Black hole preset could not be added");
         const ParticleEffectInstance* BlackHole = Space.ResolveEffect(Space.Effects.back().Token);
         Require(BlackHole != nullptr && BlackHole->Parameters.Attractor && BlackHole->Parameters.Lensing,
                 "Black hole is missing its attractor or lensing payload");
         const std::string BlackHoleToken = BlackHole->Token;
         Editor->Perform("select:" + BlackHoleToken);
-        Editor->Perform("camera:0.0,0.3,7.0");
         Tick(84);
         if (Wanted("BlackHole"))
         {
             Require(AliveFor(BlackHoleToken) > 0, "BlackHole: no accretion particles reached the GPU census");
             Require(Editor->QueryImage().LensingHoleCount > 0, "BlackHole: no screen-space lens reached the GPU pass");
+            Require(CountDifferentPixels(ParticlePixels, BlackHoleBaseline) > 16, "BlackHole: the GPU image did not change from its empty baseline");
             WriteCapture("BlackHoleLensing");
             ++Captured;
         }
