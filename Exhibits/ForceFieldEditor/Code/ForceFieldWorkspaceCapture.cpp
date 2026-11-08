@@ -337,7 +337,7 @@ int main(int ArgumentCount, char** Arguments)
         }
         // ⑧ The workspace links (checked, not captured): the Outliner lists every force, the Construct dialog's Forces group holds
         //    the sixteen types, the dialog's order and the pages' actions add forces where the view is, select and show.
-        if (Wanted("Workspace"))
+        if (Wanted("Workspace") || Wanted("ForceFieldWorkbench"))
         {
             const auto ForceTokens = [&]() {
                 std::vector<uint64_t> Tokens;
@@ -412,6 +412,22 @@ int main(int ArgumentCount, char** Arguments)
             std::printf("[ForceFieldWorkspaceCapture] Workspace: %d forces listed, 16 force types to construct; add-force, the dialog's order, select, "
                         "field-span, field-view and the dialog's Forces group all answered\n",
                         Listed);
+
+            // The dockable workbench is a separate entry point, but it reuses this selected record's inspector and the existing field timeline.
+            InspectorRuntime::Instance().RequestWorkspaceAction("field-workspace:on");
+            Settle();
+            Require(Workspace.QueryDockspace().QueryOpen("ForceFieldWorkspace"), "Workspace: the Force Field / Wind dockable panel did not open");
+            Require(!Workspace.AccessFieldViewport().Shown && Workspace.AccessFieldViewport().Slice != nullptr,
+                    "Workspace: the dockable workbench did not host the field canvas");
+            Require(InspectorRuntime::Instance().FindInspector(Tornado->QueryToken()) != nullptr,
+                    "Workspace: selecting a source discarded its existing Inspector entry point");
+            Require(InspectorRuntime::Instance().QueryEnvironmentAccess().FieldReadings.Measured,
+                    "Workspace: the dockable canvas did not publish field readings");
+            WriteCapture("ForceFieldWorkbench");
+            Require(Workspace.QueryDockspace().ConfigureOpen("ForceFieldWorkspace", false), "Workspace: the workbench could not close");
+            Tick(1);
+            Require(!Workspace.QueryDockspace().QueryOpen("ForceFieldWorkspace"), "Workspace: the dockable panel stayed open after closing");
+
             for (const RecordToken Token : {Added->QueryToken(), Ordered->QueryToken()}) (void)World.DestroyRecord(Token);
             ++Captured;
         }

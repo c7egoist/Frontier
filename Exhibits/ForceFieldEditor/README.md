@@ -21,12 +21,20 @@ The Construct dialog has a **Forces** group (16 types). A force made from the di
 *Add a localized force* lands under the Force Field: in the middle of the Field view while it shows, otherwise on the
 ground where the camera looks.
 
+An opt-in **Force Field / Wind** dockable workbench is also implemented. It hosts the existing analytic field canvas and
+timeline beside the Inspector for the selected ForceField, Wind, or ForceSource record; it does not replace the ordinary
+inspector or merge field/particle solvers. The current dockable workbench and its new capture coverage have not been built
+or checked in the native UI.
+
 ### Results (C++)
+
+The green results below are historical measurements from an earlier source snapshot; they do not validate the current,
+unbuilt dockable workbench or its expanded capture scenario.
 
 | Check | Program | Result |
 |---|---|---|
 | Catalogue, profiles, budget against the prototype | `ForceFieldCatalogueValidation` | 🟢 23 of 23 |
-| Field captures, scene overlay, pages, workspace links | `ForceFieldWorkspaceCapture` | 🟢 22 captures, workspace stage passed |
+| Field captures, scene overlay, pages, workspace links | `ForceFieldWorkspaceCapture` | 🟡 22 historical captures; dockable-workbench capture added but not rerun |
 | Environment pages; the compass's *Home* key | `EnvironmentInspectorValidation` | 🟢 |
 | The eight regression tests (list below) | `ctest` | 🟢 8 of 8 |
 
@@ -49,7 +57,8 @@ The **Workspace** stage asserts:
 - `add-force:attractor` with the Field view showing makes *Attractor 2* under the Force Field, at the view's centre;
 - the dialog's order for a thermal updraft gives the type's defaults;
 - `select:`, `field-span:1000`, `field-view:off` and `add-force` (the dialog opens on Forces) all take effect;
-- the page reads the Field view's measurement and lists every force.
+- the page reads the Field view's measurement and lists every force;
+- current code additionally opens and closes the dockable Force Field / Wind workbench, checks the existing selected-record Inspector remains available, and checks the dockable canvas publishes field readings. This new scenario has not been run.
 
 ### Captures (C++)
 
@@ -64,6 +73,7 @@ The **Workspace** stage asserts:
 | `EditorForceFieldPage.jpg` | Force Field page: hero, tiles, quick controls, then all seven sections |
 | `EditorWindPage.jpg` | Wind page: hero over the last 12 s, compass, gusts, altitude and hodograph, eddies, mesoscale |
 | `EditorForceSourcePage.jpg` | The Tornado's page: radial profile and the four sections |
+| `ForceFieldWorkbench.png` (pending) | The opt-in dockable panel: map/oblique/3D selector, existing timeline, selected-source inspector |
 
 ![Force Field page](Images/EditorForceFieldPage.jpg)
 
@@ -85,8 +95,9 @@ _ClaudeScratch/build/UI/ForceFieldWorkspaceCapture EngineContent Projects/Everes
   <OutputFolder> [Only]
 ```
 
-`Only` picks one stage: a capture name (`FieldMap6km` …), `Page` or `Workspace`. The full run took 535 s here; most
-of it is the scene overlay's eight SwiftShader frames of about 35 s each.
+`Only` picks one stage: a capture name (`FieldMap6km` … or `ForceFieldWorkbench`), `Page` or `Workspace`. The previously
+recorded full run took 535 s here; most of it is the scene overlay's eight SwiftShader frames of about 35 s each. The expanded
+workbench scenario has not been built or timed.
 
 The regression set is `ForceFieldCatalogueValidation`, `ForceFieldTriggerValidation`, `EverestInterfaceValidation`,
 `EverestShippingValidation`, `CelestialWorkspaceValidation`, `EnvironmentInspectorValidation`,
@@ -96,8 +107,8 @@ The regression set is `ForceFieldCatalogueValidation`, `ForceFieldTriggerValidat
 
 - Captured offscreen on Linux. The Windows build is cross-compiled and was not run on Windows here.
 - The hero's history fills while the Field view shows, so the captures (a few refreshes) show a short line.
-- The cascades are budgeted and drawn; the GPU lattice itself comes with the particles (the Particle editor's C++
-  port is the next phase).
+- The cascades are budgeted and drawn. ParticleSpace has its own GPU lattice and consumes level wind only when its explicit
+  `Follow` input is enabled; this does not merge its solver with ForceFieldSpace.
 
 ## Prototypes
 

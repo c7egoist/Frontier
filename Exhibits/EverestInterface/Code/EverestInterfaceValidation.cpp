@@ -216,32 +216,29 @@ int main(int ArgumentCount, char** Arguments)
         {
             Require(false, "Fracture record must be the typed FractureRecord.");
         }
-        if (auto* TypedGeometry = dynamic_cast<GeometryRecord*>(World.FindFirstByType("Geometry")))
-        {
-            GeometryConfiguration& Geometry = TypedGeometry->AccessConfiguration();
-            const GeometryConfiguration Original = Geometry;
-            Geometry.Fracture.VoronoiCellCount = 96;
-            Geometry.Fracture.ImpulseThresholdNs = 75.0f;
-            Geometry.Fracture.ImpactRadialBias = 0.625f;
-            Geometry.Fracture.DebrisLifetimeSeconds = 12.5f;
-            Geometry.Fracture.SleepLinearVelocity = 0.5f;
-            Geometry.Fracture.FractureArmed = true;
-            Geometry.Fracture.ImpactDustBurst = true;
-            toml::table Encoded;
-            TypedGeometry->SerializeConfiguration(Encoded);
-            Geometry.Fracture = FractureConfiguration{};
-            TypedGeometry->DeserializeConfiguration(Encoded);
-            const FractureConfiguration& Restored = TypedGeometry->QueryConfiguration().Fracture;
-            Require(Restored.VoronoiCellCount == 96 && Restored.ImpulseThresholdNs == 75.0f && Restored.ImpactRadialBias == 0.625f &&
-                        Restored.DebrisLifetimeSeconds == 12.5f && Restored.SleepLinearVelocity == 0.5f && Restored.FractureArmed &&
-                        Restored.ImpactDustBurst,
-                    "Geometry's embedded Fracture settings must survive the levelspace configuration round trip.");
-            Geometry = Original;
-        }
-        else
-        {
-            Require(false, "the Simulation fixture must contain a typed Geometry record.");
-        }
+        const RecordToken GeometryTestToken = World.ConstructRecord("Geometry", "Fracture Serialization Check");
+        auto*                TypedGeometry = dynamic_cast<GeometryRecord*>(World.FindRecord(GeometryTestToken));
+        Require(TypedGeometry != nullptr, "the Geometry type must construct a typed GeometryRecord.");
+        GeometryConfiguration& Geometry = TypedGeometry->AccessConfiguration();
+        const GeometryConfiguration Original = Geometry;
+        Geometry.Fracture.VoronoiCellCount = 96;
+        Geometry.Fracture.ImpulseThresholdNs = 75.0f;
+        Geometry.Fracture.ImpactRadialBias = 0.625f;
+        Geometry.Fracture.DebrisLifetimeSeconds = 12.5f;
+        Geometry.Fracture.SleepLinearVelocity = 0.5f;
+        Geometry.Fracture.FractureArmed = true;
+        Geometry.Fracture.ImpactDustBurst = true;
+        toml::table GeometryEncoded;
+        TypedGeometry->SerializeConfiguration(GeometryEncoded);
+        Geometry.Fracture = FractureConfiguration{};
+        TypedGeometry->DeserializeConfiguration(GeometryEncoded);
+        const FractureConfiguration& GeometryRestored = TypedGeometry->QueryConfiguration().Fracture;
+        Require(GeometryRestored.VoronoiCellCount == 96 && GeometryRestored.ImpulseThresholdNs == 75.0f && GeometryRestored.ImpactRadialBias == 0.625f &&
+                    GeometryRestored.DebrisLifetimeSeconds == 12.5f && GeometryRestored.SleepLinearVelocity == 0.5f && GeometryRestored.FractureArmed &&
+                    GeometryRestored.ImpactDustBurst,
+                "Geometry's embedded Fracture settings must survive the levelspace configuration round trip.");
+        Geometry = Original;
+        Require(World.DestroyRecord(GeometryTestToken), "the temporary Geometry serialization record could not be removed.");
 
         const auto RenderFrames = [&](int Count) {
             for (int FrameIdx = 0; FrameIdx < Count; ++FrameIdx)
@@ -306,6 +303,22 @@ int main(int ArgumentCount, char** Arguments)
         WritePngCapture(OutputDir / "05-EverestFractureEditor.png");
         InspectorRuntime::Instance().CloseActiveEditor();
 
+        // Exhibit 05b: Open the same native geometry-preview editor from an enabled Geometry record.
+        const RecordToken GeometryToken = World.ConstructRecord("Geometry", "Fracture Preview Geometry");
+        auto*             GeometryEntry = dynamic_cast<GeometryRecord*>(World.FindRecord(GeometryToken));
+        Require(GeometryEntry != nullptr, "the Geometry type must construct a typed record for the Fracture editor entry point.");
+        GeometryEntry->AccessConfiguration().Fracture.Enabled = true;
+        GeometryEntry->AccessConfiguration().Fracture.AdvanceRevision();
+        Workspace.QueryOutliner().Select(GeometryToken);
+        Require(InspectorRuntime::Instance().QueryHasEditor(GeometryToken),
+                "an enabled Geometry record must expose its existing Fracture editor entry point.");
+        Require(InspectorRuntime::Instance().RequestEditorOpen(GeometryToken),
+                "the Geometry record could not open its Fracture editor.");
+        RenderFrames(4);
+        WritePngCapture(OutputDir / "05b-EverestGeometryFractureEditor.png");
+        InspectorRuntime::Instance().CloseActiveEditor();
+        Require(World.DestroyRecord(GeometryToken), "the temporary Geometry preview record could not be removed.");
+
         // Exhibit 06: Dynamic scene mutation via Outliner + ControlCentrePanel Appearance & Settings modal
         Workspace.QueryOutliner().RequestConstructRecord("ChemicalVessel");
         RenderFrames(2);
@@ -330,7 +343,7 @@ int main(int ArgumentCount, char** Arguments)
         ImGui::GetIO().BackendFlags = 0;
         ImGui::DestroyContext();
 
-        std::cout << "[EverestInterfaceValidation] Passed (ProjectGenerator C++ scaffolding, .levelspace, composable inspectors, 8 PNG exhibits and "
+        std::cout << "[EverestInterfaceValidation] Passed (ProjectGenerator C++ scaffolding, .levelspace, composable inspectors, Fracture and Geometry editor entry points, "
                   << PageCaptures << " environment page captures verified).\n";
         return 0;
     }
