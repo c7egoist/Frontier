@@ -9,6 +9,7 @@
 #include "Engine/Scene/EngineConfigurations.h"
 
 #include <array>
+#include <cstdint>
 #include <span>
 #include <string_view>
 
@@ -56,6 +57,7 @@ struct ForceSourceDescriptor
     std::span<const ForceParameterDescriptor> Parameters{};
     std::span<const ForceBearingDescriptor>   Bearings{};
     bool                                      Spin         = false;
+    uint32_t                                  ColourRgb    = 0;   // stable source-specific outline/glow colour, 0xRRGGBB
 };
 
 struct ForceContributionDescriptor

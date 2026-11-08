@@ -135,6 +135,10 @@ add_library(FrontierVehicleDynamics STATIC
     Frontier/Engine/PhysicalDynamics/Vehicle/TyreCarcassSolid.cpp
     Frontier/Engine/PhysicalDynamics/Vehicle/VehicleSpecification.cpp)
 target_include_directories(FrontierVehicleDynamics PUBLIC "${CMAKE_SOURCE_DIR}" "${CMAKE_SOURCE_DIR}/Frontier")
+add_library(FrontierFractureDynamics STATIC
+    Frontier/Engine/PhysicalDynamics/FractureDynamics/VoronoiFracture.cpp)
+target_include_directories(FrontierFractureDynamics PUBLIC "${CMAKE_SOURCE_DIR}" "${CMAKE_SOURCE_DIR}/Frontier")
+target_compile_features(FrontierFractureDynamics PUBLIC cxx_std_20)
 add_library(FrontierFluidDynamics STATIC
     Frontier/Engine/PhysicalDynamics/FluidDynamics/FluidSceneSpecification.cpp
     Frontier/Engine/PhysicalDynamics/FluidDynamics/FluidSpaceCodec.cpp
@@ -287,7 +291,7 @@ target_include_directories(FrontierSceneEditorUI PUBLIC
     "${CMAKE_SOURCE_DIR}/Frontier")
 target_compile_definitions(FrontierSceneEditorUI PUBLIC FRONTIER_WITH_INTERFACE_SDK=1 FRONTIER_EDITOR_PROFILE=1 FRONTIER_EDITOR=1)
 target_include_directories(FrontierSceneEditorUI PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
-target_link_libraries(FrontierSceneEditorUI PUBLIC FrontierEditorUI FrontierAuthoringControls FrontierInterfaceExtension FrontierVehicleDynamics FrontierFluidDynamics FrontierSession Threads::Threads PRIVATE FrontierSurfaceRasterization FrontierEnvironmentRendering)
+target_link_libraries(FrontierSceneEditorUI PUBLIC FrontierEditorUI FrontierAuthoringControls FrontierInterfaceExtension FrontierVehicleDynamics FrontierFractureDynamics FrontierFluidDynamics FrontierSession Threads::Threads PRIVATE FrontierSurfaceRasterization FrontierEnvironmentRendering)
 
 include(Automation/StageProjectContent.cmake)
 
@@ -820,6 +824,13 @@ if(BUILD_TESTING)
     target_link_libraries(ParticleLibraryValidation PRIVATE FrontierEnvironmentRendering)
     add_test(NAME ParticleLibraryValidation COMMAND ParticleLibraryValidation "${CMAKE_SOURCE_DIR}")
     set_tests_properties(ParticleLibraryValidation PROPERTIES TIMEOUT 60)
+
+    # 📝 Deterministic convex Voronoi fracture authoring: closed manifolds, shared cut-token faces, convexity, source-volume closure and bias.
+    add_executable(FractureGeometryValidation
+        Exhibits/Fracture/Code/FractureGeometryValidation.cpp)
+    target_link_libraries(FractureGeometryValidation PRIVATE FrontierFractureDynamics)
+    add_test(NAME FractureGeometryValidation COMMAND FractureGeometryValidation)
+    set_tests_properties(FractureGeometryValidation PROPERTIES TIMEOUT 120)
 
     add_executable(PhysicsSpaceValidation
         Exhibits/Physics/Code/PhysicsSpaceValidation.cpp

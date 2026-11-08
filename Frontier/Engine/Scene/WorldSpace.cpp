@@ -199,6 +199,30 @@ void DeserializeSpatialSubtable(const toml::table& InTable, SpatialConfiguration
     Spatial.AdvanceRevision();
 }
 
+void SerializeFractureConfiguration(toml::table& Table, const FractureConfiguration& Fracture, const char* EnabledKey)
+{
+    Table.insert_or_assign(EnabledKey, Fracture.Enabled);
+    Table.insert_or_assign("voronoi_cells", static_cast<int64_t>(Fracture.VoronoiCellCount));
+    Table.insert_or_assign("impulse_threshold_ns", static_cast<double>(Fracture.ImpulseThresholdNs));
+    Table.insert_or_assign("impact_radial_bias", static_cast<double>(Fracture.ImpactRadialBias));
+    Table.insert_or_assign("debris_lifetime_seconds", static_cast<double>(Fracture.DebrisLifetimeSeconds));
+    Table.insert_or_assign("sleep_linear_velocity_mps", static_cast<double>(Fracture.SleepLinearVelocity));
+    Table.insert_or_assign("fracture_armed", Fracture.FractureArmed);
+    Table.insert_or_assign("impact_dust_burst", Fracture.ImpactDustBurst);
+}
+
+void DeserializeFractureConfiguration(const toml::table& Table, FractureConfiguration& Fracture, const char* EnabledKey)
+{
+    Fracture.Enabled = ReadBool(Table, EnabledKey, Fracture.Enabled);
+    Fracture.VoronoiCellCount = std::clamp(ReadUint32(Table, "voronoi_cells", Fracture.VoronoiCellCount), 4u, 256u);
+    Fracture.ImpulseThresholdNs = std::clamp(ReadFloat(Table, "impulse_threshold_ns", Fracture.ImpulseThresholdNs), 1.0f, 500.0f);
+    Fracture.ImpactRadialBias = std::clamp(ReadFloat(Table, "impact_radial_bias", Fracture.ImpactRadialBias), 0.0f, 1.0f);
+    Fracture.DebrisLifetimeSeconds = std::clamp(ReadFloat(Table, "debris_lifetime_seconds", Fracture.DebrisLifetimeSeconds), 1.0f, 60.0f);
+    Fracture.SleepLinearVelocity = std::clamp(ReadFloat(Table, "sleep_linear_velocity_mps", Fracture.SleepLinearVelocity), 0.01f, 2.0f);
+    Fracture.FractureArmed = ReadBool(Table, "fracture_armed", Fracture.FractureArmed);
+    Fracture.ImpactDustBurst = ReadBool(Table, "impact_dust_burst", Fracture.ImpactDustBurst);
+}
+
 void SerializePhysicsSubtable(toml::table& OutTable, const PhysicsConfiguration& Physics)
 {
     OutTable.insert_or_assign("physics_enabled", Physics.Enabled);
@@ -1273,17 +1297,13 @@ void FluidPlumeRecord::DeserializeConfiguration(const toml::table& InTable)
 template <>
 void FractureRecord::SerializeConfiguration(toml::table& OutTable) const
 {
-    OutTable.insert_or_assign("enabled", Parameters.Enabled);
-    OutTable.insert_or_assign("voronoi_cells", static_cast<int64_t>(Parameters.VoronoiCellCount));
-    OutTable.insert_or_assign("impulse_threshold_ns", static_cast<double>(Parameters.ImpulseThresholdNs));
+    SerializeFractureConfiguration(OutTable, Parameters, "enabled");
 }
 
 template <>
 void FractureRecord::DeserializeConfiguration(const toml::table& InTable)
 {
-    Parameters.Enabled            = ReadBool(InTable, "enabled", Parameters.Enabled);
-    Parameters.VoronoiCellCount   = ReadUint32(InTable, "voronoi_cells", Parameters.VoronoiCellCount);
-    Parameters.ImpulseThresholdNs = ReadFloat(InTable, "impulse_threshold_ns", Parameters.ImpulseThresholdNs);
+    DeserializeFractureConfiguration(InTable, Parameters, "enabled");
     Parameters.AdvanceRevision();
 }
 
@@ -1367,12 +1387,7 @@ void GeometryRecord::SerializeConfiguration(toml::table& OutTable) const
     WriteRoundedFloat3(OutTable, "position_m", Parameters.Spatial.PositionMetres);
     WriteRoundedFloat3(OutTable, "orientation_deg", Parameters.Spatial.OrientationDegrees);
     WriteRoundedFloat3(OutTable, "scale", Parameters.Spatial.Scale);
-    OutTable.insert_or_assign("fracture", Parameters.Fracture.Enabled);
-    if (Parameters.Fracture.Enabled)
-    {
-        OutTable.insert_or_assign("voronoi_cells", static_cast<int64_t>(Parameters.Fracture.VoronoiCellCount));
-        OutTable.insert_or_assign("impulse_threshold_ns", static_cast<double>(Parameters.Fracture.ImpulseThresholdNs));
-    }
+    SerializeFractureConfiguration(OutTable, Parameters.Fracture, "fracture");
     toml::array Stack;
     for (const ArrayModifierConfiguration& Modifier : Parameters.Modifiers)
     {
@@ -1437,9 +1452,7 @@ void GeometryRecord::DeserializeConfiguration(const toml::table& InTable)
     Parameters.Physics            = ReadBool(InTable, "physics", Parameters.Physics);
     Parameters.Locked             = ReadBool(InTable, "locked", Parameters.Locked);
     DeserializeSpatialSubtable(InTable, Parameters.Spatial);
-    Parameters.Fracture.Enabled            = ReadBool(InTable, "fracture", false);
-    Parameters.Fracture.VoronoiCellCount   = ReadUint32(InTable, "voronoi_cells", Parameters.Fracture.VoronoiCellCount);
-    Parameters.Fracture.ImpulseThresholdNs = ReadFloat(InTable, "impulse_threshold_ns", Parameters.Fracture.ImpulseThresholdNs);
+    DeserializeFractureConfiguration(InTable, Parameters.Fracture, "fracture");
     Parameters.Modifiers.clear();
     if (const toml::array* Stack = InTable["modifiers"].as_array())
     {

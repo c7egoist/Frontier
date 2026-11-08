@@ -399,6 +399,17 @@ EverestWorkspace::EverestWorkspace(Frontier::ControlCentrePanel& ControlCentre,
 
     auto OutlinerSpec=Frontier::MakeSceneDirectoryPanelSpecification(OutlinerPanel);
     auto InspectorSpec=Frontier::MakeSceneInspectorPanelSpecification(InspectorPanel);
+    InspectorSpec.ConstructContent = [this]() {
+        if (!Dockspace.QueryOpen("ForceFieldWorkspace"))
+        {
+            InspectorPanel.ConstructInterface();
+            return;
+        }
+        ImGui::Dummy(ImVec2(1.0f, 18.0f));
+        ImGui::TextDisabled("Force Field / Wind workspace");
+        ImGui::TextWrapped("Record inspection is hosted beside the field canvas while that workspace is open.");
+        if (ImGui::SmallButton("Close Force Field workspace")) (void)Dockspace.ConfigureOpen("ForceFieldWorkspace", false);
+    };
     auto LogSpec=Frontier::MakeLogStreamPanelSpecification(LogPanel);
     Frontier::DockPanelSpecification ViewportSpec{"Viewport","Viewport",[this]() { ConstructViewportSurface(); },true,{},{},true};
     ViewportSpec.ConstructFooter=[this]() { ConstructViewportFooter(Frontier::InspectorRuntime::Instance().ResolveInterfaceScale()); };
@@ -431,6 +442,30 @@ EverestWorkspace::EverestWorkspace(Frontier::ControlCentrePanel& ControlCentre,
         {"LogStream", 0.545f},
         {"Inspector", 0.255f},
     });
+
+    // 📝 An opt-in dockable workbench: the existing field canvas/timeline and the selected ForceField, Wind or ForceSource inspector.
+    Frontier::DockPanelSpecification ForceFieldWorkspaceSpec;
+    ForceFieldWorkspaceSpec.Key              = "ForceFieldWorkspace";
+    ForceFieldWorkspaceSpec.Caption          = "Force Field / Wind";
+    ForceFieldWorkspaceSpec.ConstructContent = [this]() {
+        ConstructForceFieldWorkspace(Frontier::InspectorRuntime::Instance().ResolveInterfaceScale());
+    };
+    ForceFieldWorkspaceSpec.Open            = false;
+    ForceFieldWorkspaceSpec.WheelScrollOnly = true;
+    ForceFieldWorkspaceSpec.Available = [this]() { return QueryWorldSpace().FindFirstByType("ForceField") != nullptr; };
+    ForceFieldWorkspaceSpec.ConstructFooter = [this, Footer]() {
+        const auto* FieldRecord = dynamic_cast<const Frontier::ForceFieldRecord*>(QueryWorldSpace().FindFirstByType("ForceField"));
+        const auto* WindRecord  = dynamic_cast<const Frontier::WindRecord*>(QueryWorldSpace().FindFirstByType("Wind"));
+        const size_t Sources    = QueryWorldSpace().FindAllByType("ForceSource").size();
+        char         Clock[24];
+        if (FieldRecord != nullptr) std::snprintf(Clock, sizeof(Clock), "%.1f s", FieldRecord->QueryConfiguration().TimelineSeconds);
+        else std::snprintf(Clock, sizeof(Clock), "—");
+        Footer({{"SOURCES", std::to_string(Sources), IM_COL32(0, 194, 168, 255), "Waves"},
+                {"WIND", WindRecord != nullptr && WindRecord->QueryConfiguration().Enabled ? "On" : "Off / absent", IM_COL32(255, 138, 91, 255), "Wind"},
+                {"CLOCK", Clock, IM_COL32(173, 181, 189, 255), nullptr}});
+    };
+    if (!Dockspace.Register(std::move(ForceFieldWorkspaceSpec)))
+        throw std::runtime_error("EverestWorkspace Force Field workspace registration refused.");
 
     ImGui::GetIO().IniFilename = nullptr;
     ObservedLayoutRevision     = Centre.QueryLayoutResetRevision();
@@ -1192,6 +1227,8 @@ void EverestWorkspace::ConstructInterface(double DeltaSeconds)
     {
         ObservedLayoutRevision = Centre.QueryLayoutResetRevision();
         Dockspace.ResetLayout();
+        (void)Dockspace.ConfigureOpen("ForceFieldWorkspace", false);
+        Field.CameraPreview = false;
         (void)Dockspace.ConfigureStackedPanels("Viewport", "LogStream", 520.0f);
         (void)Dockspace.ConfigureColumns({
             {"Outliner", 0.200f},
@@ -1586,9 +1623,10 @@ void EverestWorkspace::ConstructViewportSurface()
     const ImVec2 Min   = ImGui::GetCursorScreenPos();
     const ImVec2 Max(Min.x + W, Min.y + H);
     const ImVec2 StageMin(Min.x, Min.y + BarH);
+    if (!Dockspace.QueryOpen("ForceFieldWorkspace")) Field.CameraPreview = false;
 
-    // 📝 The Field view takes the stage instead of the scene: the Force Field's slice, its HUD and timeline lanes.
-    if (Field.Shown)
+    // 📝 When the dockable Force Field workspace is open, its own canvas hosts the slice and timeline; keep this viewport on the scene.
+    if (Field.Shown && !Dockspace.QueryOpen("ForceFieldWorkspace"))
     {
         ReleasePointerConstraint();
         ConstructFieldViewport(StageMin, Max, Scale);
@@ -1777,7 +1815,7 @@ void EverestWorkspace::ConstructViewportBar(const ImVec2& Min,const ImVec2& Max,
     auto* Ink=ImGui::GetWindowDrawList();
     ViewportChromeControls::ConstructBarBackground(Ink,Min,Max,Scale);
     Ink->PushClipRect(Min,Max,true);
-    if (Field.Shown)
+    if (Field.Shown && !Dockspace.QueryOpen("ForceFieldWorkspace"))
     {
         ConstructFieldBar(Min,Max,Scale);
         Ink->PopClipRect();
@@ -1906,12 +1944,21 @@ void EverestWorkspace::ConstructViewportBar(const ImVec2& Min,const ImVec2& Max,
         }
     }
     const float Right=Max.x-12*Scale;
-    // 📝 Scene | Field: the Force Field's view of the level (the slice from 100 m to 100 km) in place of the scene.
+    // 📝 Scene | Field swaps this viewport unless the dockable Force Field workspace already owns the slice.
     static constexpr const char* SceneFieldLabels[]={"Scene","Field"};
-    int Shown=0;
-    if (ViewportChromeControls::ConstructSegmentedSwitch("##SceneField",Faces,{Right-2*Button-2*Gap-132*Scale,Min.y+(Height-Button)*.5f},{132*Scale,Button},
-        SceneFieldLabels,2,Shown,nullptr,nullptr,Scale))
-        Field.Shown=Shown==1;
+    const ImVec2 ViewModePos(Right-2*Button-2*Gap-132*Scale,Min.y+(Height-Button)*.5f);
+    if (!Dockspace.QueryOpen("ForceFieldWorkspace"))
+    {
+        int Shown = Field.Shown ? 1 : 0;
+        if (ViewportChromeControls::ConstructSegmentedSwitch("##SceneField",Faces,ViewModePos,{132*Scale,Button},SceneFieldLabels,2,Shown,nullptr,nullptr,Scale))
+            Field.Shown=Shown==1;
+    }
+    else
+    {
+        Ink->AddRectFilled(ViewModePos, ImVec2(ViewModePos.x+132*Scale,ViewModePos.y+Button), IM_COL32(0,194,168,24), 10*Scale);
+        Ink->AddRect(ViewModePos, ImVec2(ViewModePos.x+132*Scale,ViewModePos.y+Button), IM_COL32(0,194,168,90), 10*Scale, 0, Scale);
+        Ink->AddText(Faces.Medium, 10.0f*Scale, ImVec2(ViewModePos.x+12*Scale,ViewModePos.y+10*Scale), IM_COL32(140,225,206,255), "FIELD WORKSPACE");
+    }
     const bool Simulating=Physics && Physics->QueryRunning();
     if (ViewportChromeControls::ConstructIconButton("##Simulate",{Right-3*Button-3*Gap-132*Scale,Min.y+(Height-Button)*.5f},Button,Simulating?"Pause":"Play",Simulating,true,
         Simulating?"Stop simulating and restore the objects (Alt+S)":"Simulate: objects with Physics on fall and collide (Alt+S)")) ToggleSimulation();

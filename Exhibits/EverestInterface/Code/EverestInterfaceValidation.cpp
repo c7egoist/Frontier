@@ -2,7 +2,7 @@
                                                    EVERESTINTERFACEVALIDATION.CPP
 ==========================================================================================================================================*/
 // 🧩 End-to-end validation + 1920x1080 CPU-rasterized PNG Exhibits for ProjectGenerator C++ scaffolding, .levelspace containers,
-//    composable physics/thermal/chemical inspectors, generic DiagramControls, standalone <Domain>Editors, and EverestWorkspace.
+//    composable physics/thermal/chemical inspectors, generic DiagramControls, dockable domain editors, and EverestWorkspace.
 
 #include "Engine/ContentInterchange/ProjectGenerator.h"
 #include "Engine/ContentInterchange/ProjectSpaceCodec.h"
@@ -11,6 +11,7 @@
 #include "Engine/Interface/InspectorRuntime.h"
 #include "Engine/Scene/RecordStore.h"
 #include "Engine/Scene/SceneDirectory.h"
+#include "Engine/Scene/WorldSpace.h"
 #include "EverestWorkspace.h"
 #include "Exhibits/ControlCentre/Code/CpuRasterization.h"
 #include "UI/Editor/ControlCentrePanel.h"
@@ -18,6 +19,7 @@
 
 #include <imgui.h>
 #include <stb_image_write.h>
+#include <toml++/toml.hpp>
 
 #include <algorithm>
 #include <filesystem>
@@ -188,6 +190,32 @@ int main(int ArgumentCount, char** Arguments)
                 "HarmonicOscillatorRecord must attach 3 modular inspectors (Spatial + Physics + HarmonicOscillator).");
         Require(InspectorRuntime::Instance().QueryHasEditor(FractureRec->QueryToken()),
                 "FractureRecord must expose standalone FractureEditor.");
+        if (auto* TypedFracture = dynamic_cast<FractureRecord*>(FractureRec))
+        {
+            const FractureConfiguration Original = TypedFracture->QueryConfiguration();
+            FractureConfiguration& Fracture = TypedFracture->AccessConfiguration();
+            Fracture.VoronoiCellCount = 137;
+            Fracture.ImpulseThresholdNs = 125.0f;
+            Fracture.ImpactRadialBias = 0.375f;
+            Fracture.DebrisLifetimeSeconds = 31.25f;
+            Fracture.SleepLinearVelocity = 0.75f;
+            Fracture.FractureArmed = false;
+            Fracture.ImpactDustBurst = false;
+            toml::table Encoded;
+            TypedFracture->SerializeConfiguration(Encoded);
+            Fracture = FractureConfiguration{};
+            TypedFracture->DeserializeConfiguration(Encoded);
+            const FractureConfiguration& Restored = TypedFracture->QueryConfiguration();
+            Require(Restored.VoronoiCellCount == 137 && Restored.ImpulseThresholdNs == 125.0f && Restored.ImpactRadialBias == 0.375f &&
+                        Restored.DebrisLifetimeSeconds == 31.25f && Restored.SleepLinearVelocity == 0.75f && !Restored.FractureArmed &&
+                        !Restored.ImpactDustBurst,
+                    "Fracture authoring fields must survive the levelspace configuration round trip.");
+            Fracture = Original;
+        }
+        else
+        {
+            Require(false, "Fracture record must be the typed FractureRecord.");
+        }
 
         const auto RenderFrames = [&](int Count) {
             for (int FrameIdx = 0; FrameIdx < Count; ++FrameIdx)
@@ -245,7 +273,7 @@ int main(int ArgumentCount, char** Arguments)
             Page->ConfigureSection(0);
         }
 
-        // Exhibit 05: Open standalone FractureEditor modal
+        // Exhibit 05: Open the standalone dockable Fracture authoring window
         Workspace.QueryOutliner().Select(FractureRec->QueryToken());
         InspectorRuntime::Instance().RequestEditorOpen(FractureRec->QueryToken());
         RenderFrames(4);

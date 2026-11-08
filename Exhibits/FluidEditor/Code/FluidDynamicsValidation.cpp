@@ -2,8 +2,8 @@
                                                       FLUIDDYNAMICSVALIDATION.CPP
 ==========================================================================================================================================*/
 // 🧩 Deterministic CTest validation for FrontierFluidDynamics, .fluidspace / .gasscene.toml codec parity across all 8 upstream
-//    samples, all 18 pyrotechnic presets, PlumeSourceProjection tyre smoke/fire + world FluidPlume projection, and WorldSpace
-//    FluidPlumeRecord TOML persistence.
+//    samples, all 18 pyrotechnic presets, PlumeSourceProjection tyre smoke/fire + world FluidPlume projection, explicit tyre
+//    no-contact/zero-slip/wheelspin/decay cases, and WorldSpace FluidPlumeRecord TOML persistence.
 
 #include "Engine/PhysicalDynamics/FluidDynamics/FluidSceneSpecification.h"
 #include "Engine/PhysicalDynamics/FluidDynamics/FluidSpaceCodec.h"
@@ -174,7 +174,102 @@ int main(int ArgumentCount, char** Arguments)
                     "Expected non-burning skid smoke instead of a flame source");
         }
 
-        // 6. Verify WorldSpace FluidPlumeRecord creation & TOML round-trip persistence
+        // 6. Zero slip and missing contact must not create tyre smoke, even if an unweighted wheel reports large slip values.
+        {
+            FluidDynamics::PlumeSourceProjector Projector;
+            FluidDynamics::PlumeSettings Settings{};
+            Vehicle::VehicleTelemetry Telemetry{};
+            auto& Wheel = Telemetry.Wheels[0];
+            Wheel.SlipRatio = 0.9f;
+            Wheel.SlipAngleRad = 0.55f;
+            Wheel.SpinSlipSpeed = 12.0f;
+            Wheel.SlidingPower_W = 12000.0f;
+            Wheel.InContact = false;
+            Wheel.VerticalLoad = 2500.0f;
+
+            FluidDynamics::PlumeProjectionOutput NoContact{};
+            Projector.BeginStep(1.0f / 30.0f);
+            Projector.ProjectVehicle(1001u, Telemetry, 0.0f, Settings, 1.0f / 30.0f, NoContact);
+            Require(NoContact.Sources.empty() && NoContact.FireLights.empty(),
+                    "a wheel without contact must not emit smoke or fire despite high vertical load and extreme slip telemetry");
+
+            Wheel.InContact = true;
+            Wheel.VerticalLoad = 0.0f;
+            FluidDynamics::PlumeProjectionOutput NoLoad{};
+            Projector.BeginStep(1.0f / 30.0f);
+            Projector.ProjectVehicle(1002u, Telemetry, 0.0f, Settings, 1.0f / 30.0f, NoLoad);
+            Require(NoLoad.Sources.empty() && NoLoad.FireLights.empty(),
+                    "a wheel without vertical load must not emit smoke or fire despite contact and extreme slip telemetry");
+
+            Wheel.VerticalLoad = 2500.0f;
+            Wheel.SlipRatio = 0.0f;
+            Wheel.SlipAngleRad = 0.0f;
+            Wheel.SlipVelocity = {};
+            Wheel.SpinSlipSpeed = 0.0f;
+            Wheel.SlidingPower_W = 0.0f;
+            Wheel.ContactVelocity = {};
+            FluidDynamics::PlumeProjectionOutput ZeroSlip{};
+            Projector.BeginStep(1.0f / 30.0f);
+            Projector.ProjectVehicle(1003u, Telemetry, 0.0f, Settings, 1.0f / 30.0f, ZeroSlip);
+            Require(ZeroSlip.Sources.empty() && ZeroSlip.FireLights.empty(),
+                    "a loaded wheel with zero longitudinal/lateral slip and zero dissipated power must not emit tyre effects");
+        }
+
+        // 7. Longitudinal wheelspin emits contact-patch smoke, which fades out once the wheel returns to zero slip.
+        {
+            constexpr float Delta = 1.0f / 30.0f;
+            FluidDynamics::PlumeSourceProjector Projector;
+            FluidDynamics::PlumeSettings Settings{};
+            Vehicle::VehicleTelemetry Telemetry{};
+            Telemetry.Chassis.Position = { 0.0f, 0.0f, 0.5f };
+            Telemetry.Chassis.LinearVelocity = { 6.0f, 0.0f, 0.0f };
+            auto& Wheel = Telemetry.Wheels[0];
+            Wheel.InContact = true;
+            Wheel.VerticalLoad = 3200.0f;
+            Wheel.ContactPoint = { 0.0f, 0.8f, 0.03f };
+            Wheel.HubPosition = { 0.0f, 0.8f, 0.36f };
+            Wheel.ContactVelocity = { 6.0f, 0.0f, 0.0f };
+            Wheel.WheelOmega = 24.0f;
+            Wheel.SlipRatio = 0.82f;
+            Wheel.Thermal.SurfaceTemperature = 320.0;
+
+            FluidDynamics::PlumeProjectionOutput Burnout{};
+            Projector.BeginStep(Delta);
+            Projector.ProjectVehicle(2001u, Telemetry, 0.0f, Settings, Delta, Burnout);
+            Require(!Burnout.Sources.empty() && Burnout.Sources.front().VelocityRate[3] > 0.0f &&
+                        Burnout.Sources.front().ThermalPayload[1] == 0.0f && Burnout.FireLights.empty(),
+                    "loaded longitudinal wheelspin must emit non-burning contact-patch smoke");
+            const float InitialRate = Burnout.Sources.front().VelocityRate[3];
+
+            Wheel.SlipRatio = 0.0f;
+            Wheel.SlipAngleRad = 0.0f;
+            Wheel.SpinSlipSpeed = 0.0f;
+            Wheel.SlidingPower_W = 0.0f;
+            Wheel.SlipVelocity = {};
+            bool  ObservedDecay = false;
+            bool  ReachedNoSmoke = false;
+            float FirstDecayRate = InitialRate;
+            for (int Step = 0; Step < 90; ++Step)
+            {
+                FluidDynamics::PlumeProjectionOutput Fade{};
+                Projector.BeginStep(Delta);
+                Projector.ProjectVehicle(2001u, Telemetry, 0.0f, Settings, Delta, Fade);
+                if (Step == 0 && !Fade.Sources.empty())
+                {
+                    FirstDecayRate = Fade.Sources.front().VelocityRate[3];
+                    ObservedDecay = FirstDecayRate < InitialRate;
+                }
+                if (Fade.Sources.empty())
+                {
+                    ReachedNoSmoke = true;
+                    break;
+                }
+            }
+            Require(ObservedDecay, "tyre smoke rate should decrease immediately after longitudinal slip ends");
+            Require(ReachedNoSmoke, "tyre smoke should decay below its emission threshold after sustained zero slip");
+        }
+
+        // 8. Verify WorldSpace FluidPlumeRecord creation & TOML round-trip persistence
         {
             WorldSpace        Original;
             const RecordToken Token   = Original.ConstructRecord("FluidPlume", "Rig Alpha");

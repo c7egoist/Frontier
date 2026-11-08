@@ -46,6 +46,9 @@ struct ParticleViewportImage
     std::string                               Failure;
     double                                    RefreshMilliseconds = 0.0;
     uint64_t                                  StoreBytes          = 0;
+    uint32_t                                  LightningSegmentCount = 0;   // segments submitted to the GPU raster pass this refresh
+    uint32_t                                  LensingHoleCount = 0;        // black-hole screen-space lenses packed this refresh
+    uint32_t                                  HeatShimmerCount = 0;       // heat-shimmer screen-space lenses packed this refresh
     std::vector<ParticleEffectCensus>         Census;
     bool                                      ProbeValid = false;
     std::array<float, 4>                      Probe{};       // velocity [m/s], magnitude

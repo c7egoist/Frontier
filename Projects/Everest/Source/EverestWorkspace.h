@@ -176,6 +176,7 @@ class EverestWorkspace
     struct FieldViewport
     {
         bool                                               Shown = false;
+        bool                                               CameraPreview = false; // [-] temporary live editor-camera projection in the Force Field workspace
         std::unique_ptr<Frontier::ForceFieldVisualization> Slice;
         std::unique_ptr<Frontier::ForceFieldVisualization> Overlay;
         bool                                               Hovering = false;
@@ -256,6 +257,7 @@ class EverestWorkspace
     //    Force Field record.
     [[nodiscard]] std::optional<std::array<double, 3>> SampleLevelFlow(const std::array<double, 3>& LevelMetres);
     void ConstructFieldViewport(const ImVec2& StageMin, const ImVec2& StageMax, float Scale);
+    void ConstructForceFieldWorkspace(float Scale);
     void ConstructFieldTimeline(const ImVec2& Min, const ImVec2& Max, float Scale);
     void ConstructFieldBar(const ImVec2& Min, const ImVec2& Max, float Scale);
     void ConstructFieldOverlay(const ImVec2& StageMin, const ImVec2& StageMax, float Scale);

@@ -135,7 +135,7 @@ int main(int ArgumentCount, char** Arguments)
                     Editor->AccessSpace().Effects.size(), Editor->AccessSpace().Fields.size());
 
         std::ofstream Ledger(OutputDir / "Captures.tsv");
-        Ledger << "capture\tselected\teffects\talive\tfields\toverlay\tlattice\tmean_ms\textent\n";
+        Ledger << "capture\tselected\teffects\talive\tfields\toverlay\tlattice\tlightning_segments\tlensing_holes\theat_shimmers\tmean_ms\textent\n";
         const auto WriteCapture = [&](const std::string& Name) {
             const ParticleViewportImage& Image = Editor->QueryImage();
             Require(Image.Failure.empty(), Name + ": " + Image.Failure);
@@ -155,16 +155,27 @@ int main(int ArgumentCount, char** Arguments)
             const std::filesystem::path Target = OutputDir / (Name + ".png");
             Require(stbi_write_png(Target.string().c_str(), CaptureWidth, CaptureHeight, 3, Pixels.data(), CaptureWidth * 3) != 0, "PNG write failed");
             const double Mean = RefreshTimes.empty() ? 0.0 : std::accumulate(RefreshTimes.begin(), RefreshTimes.end(), 0.0) / RefreshTimes.size();
-            std::printf("[ParticleEditorCapture] %s: %s selected, %zu effects, %u alive, overlay %s, lattice %s, %u x %u image, %.1f ms mean refresh\n",
+            std::printf("[ParticleEditorCapture] %s: %s selected, %zu effects, %u alive, overlay %s, lattice %s, lightning %u seg, lens %u, shimmer %u, %u x %u image, %.1f ms mean refresh\n",
                         Target.string().c_str(), Editor->AccessSpace().Selected.c_str(), Editor->AccessSpace().Effects.size(), Alive,
-                        Editor->Overlay.Settings.Enabled ? "on" : "off", Image.Lattice ? "read" : "none", ParticleExtent[0], ParticleExtent[1], Mean);
+                        Editor->Overlay.Settings.Enabled ? "on" : "off", Image.Lattice ? "read" : "none", Image.LightningSegmentCount,
+                        Image.LensingHoleCount, Image.HeatShimmerCount, ParticleExtent[0], ParticleExtent[1], Mean);
             Ledger << Name << '\t' << Editor->AccessSpace().Selected << '\t' << Editor->AccessSpace().Effects.size() << '\t' << Alive << '\t'
                   << Editor->AccessSpace().Fields.size() << '\t' << (Editor->Overlay.Settings.Enabled ? "on" : "off") << '\t'
-                  << (Image.Lattice ? "read" : "none") << '\t' << Mean << '\t' << ParticleExtent[0] << 'x' << ParticleExtent[1] << '\n';
+                  << (Image.Lattice ? "read" : "none") << '\t' << Image.LightningSegmentCount << '\t' << Image.LensingHoleCount << '\t'
+                  << Image.HeatShimmerCount << '\t' << Mean << '\t' << ParticleExtent[0] << 'x' << ParticleExtent[1] << '\n';
             RefreshTimes.clear();
             return Alive;
         };
         const auto Wanted = [&](const std::string& Name) { return Only.empty() || Name.find(Only) != std::string::npos; };
+        const auto ClearEffects = [&] {
+            ParticleSpace& Space = Editor->AccessSpace();
+            while (!Space.Effects.empty()) (void)Space.RemoveEffect(Space.Effects.back().Token);
+        };
+        const auto AliveFor = [&](const std::string& EffectToken) {
+            for (const ParticleEffectCensus& Census : Editor->QueryImage().Census)
+                if (Census.Token == EffectToken) return Census.Alive;
+            return 0u;
+        };
 
         int Captured = 0;
         // ① The editor as it opens: the default scene (sparks, leaves, atoms, chemicals) after 2.5 s, the Force Field page and the
@@ -210,6 +221,7 @@ int main(int ArgumentCount, char** Arguments)
         Tick(3);
         if (Wanted("LightningPage"))
         {
+            Require(Editor->QueryImage().LightningSegmentCount > 0, "LightningPage: the strike produced no GPU segments");
             WriteCapture("LightningPage");
             ++Captured;
         }
@@ -245,7 +257,47 @@ int main(int ArgumentCount, char** Arguments)
             WriteCapture("WindArrows");
             ++Captured;
         }
-        // ⑨ Closing: the editor's Close button returns to the workspace.
+        // ⑨ Derez runtime path: the transition preset releases surface cubes and dispatches its procedural shard raster pass.
+        ClearEffects();
+        ParticleSpace& Space = Editor->AccessSpace();
+        Space.Playing = true;
+        Space.TimeScale = 1.0;
+        Space.Wind.ShowArrows = false;
+        Require(Editor->Perform("add:derez-cube"), "the Derez cube preset could not be added");
+        const ParticleEffectInstance* Derez = Space.ResolveEffect(Space.Effects.back().Token);
+        Require(Derez != nullptr && Derez->Parameters.Appearance == ParticleAppearance::Cube && Derez->Parameters.Transition &&
+                    Derez->Parameters.Transition->Fragment,
+                "Derez cube is missing its cube or shard transition path");
+        const std::string DerezToken = Derez->Token;
+        Editor->Perform("select:" + DerezToken);
+        Editor->Perform("camera:0.45,0.35,5.5");
+        Tick(84);
+        if (Wanted("DerezCube"))
+        {
+            Require(AliveFor(DerezToken) > 0, "DerezCube: no transition particles reached the GPU census");
+            WriteCapture("DerezCubeTransition");
+            ++Captured;
+        }
+
+        // ⑩ Black-hole runtime path: the native preset must reach the acceleration and screen-space lensing dispatches.
+        ClearEffects();
+        Require(Editor->Perform("add:black-hole"), "the Black hole preset could not be added");
+        const ParticleEffectInstance* BlackHole = Space.ResolveEffect(Space.Effects.back().Token);
+        Require(BlackHole != nullptr && BlackHole->Parameters.Attractor && BlackHole->Parameters.Lensing,
+                "Black hole is missing its attractor or lensing payload");
+        const std::string BlackHoleToken = BlackHole->Token;
+        Editor->Perform("select:" + BlackHoleToken);
+        Editor->Perform("camera:0.0,0.3,7.0");
+        Tick(84);
+        if (Wanted("BlackHole"))
+        {
+            Require(AliveFor(BlackHoleToken) > 0, "BlackHole: no accretion particles reached the GPU census");
+            Require(Editor->QueryImage().LensingHoleCount > 0, "BlackHole: no screen-space lens reached the GPU pass");
+            WriteCapture("BlackHoleLensing");
+            ++Captured;
+        }
+
+        // ⑪ Closing: the editor's Close button returns to the workspace.
         InspectorRuntime::Instance().CloseActiveEditor();
         Tick(2);
         Require(!InspectorRuntime::Instance().QueryActiveEditorToken().IsValid(), "the editor did not close");

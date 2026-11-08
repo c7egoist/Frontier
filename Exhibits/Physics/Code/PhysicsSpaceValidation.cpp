@@ -2,8 +2,8 @@
                                                          PHYSICSSPACEVALIDATION.CPP
 ==========================================================================================================================================*/
 // 🧩 PhysicsSpace (Jolt behind Frontier/Extensions/Physics) against closed forms and its own repeat runs: free fall, a box coming
-//    to rest and sleeping, a sphere knocking a box, a stable stack, bit-identical repeat runs, the Euler convention, the level
-//    bridge (a Geometry record falls onto a pedestal and is put back) and a 1000-box timing. Then the capture: a side view of
+//    to rest and sleeping, sphere/box and cone/rigid-body impulse transfer, fracture participation toggles, a stable stack,
+//    bit-identical repeat runs, the Euler convention, the level bridge, and a 1000-box timing. Then the capture: a side view of
 //    13 bodies falling and colliding over 5 s, drawn at seven instants with their tracks.
 //
 //     PhysicsSpaceValidation <Exhibits/Physics>     (writes Results/PhysicsSpaceValidation.md and Images/PhysicsSpaceFalling.png)
@@ -346,6 +346,50 @@ int main(int ArgumentCount, char** Arguments)
         Expect(Pushed > 0.05, "the sphere pushes the box " + Figure("%.2f", Pushed) + " m along x");
     }
 
+    // ③b A dynamic cone transfers collision impulse to a separate rigid body without any fracture path.
+    {
+        PhysicsSpace Space;
+        (void)Space.AddBody(GroundSlab());
+
+        PhysicsBodyDescriptor Cone;
+        Cone.Shape = PhysicsShape::Cone;
+        Cone.HalfExtentMetres = { 0.45, 0.45, 0.50 };
+        Cone.PositionMetres = { -1.0, 0.0, 0.50 };
+        Cone.MassKilograms = 30.0;
+        Cone.Friction = 0.45;
+        Cone.Restitution = 0.15;
+        Cone.LinearDamping = 0.0;
+        Cone.AngularDamping = 0.0;
+        Cone.LinearVelocityMps = { 7.0, 0.0, 0.0 };
+        Cone.Swept = true;
+        const uint32_t ConeBody = Space.AddBody(Cone);
+
+        PhysicsBodyDescriptor Target = Cube(0.45, { 0.0, 0.0, 0.45 });
+        Target.MassKilograms = 45.0;
+        Target.Friction = 0.45;
+        Target.Restitution = 0.10;
+        Target.LinearDamping = 0.0;
+        Target.AngularDamping = 0.0;
+        const uint32_t TargetBody = Space.AddBody(Target);
+        Space.Prepare();
+        Run(Space, 0.30);
+
+        const PhysicsBodyReading ConeAfterImpact = Space.ReadBody(ConeBody);
+        const PhysicsBodyReading TargetAfterImpact = Space.ReadBody(TargetBody);
+        Expect(ConeBody != PhysicsNoBody && TargetBody != PhysicsNoBody && Space.QueryContactsAdded() > 0 &&
+                   TargetAfterImpact.LinearVelocityMps[0] > 0.10 && ConeAfterImpact.LinearVelocityMps[0] < 6.0,
+               "non-fracturing cone collision transfers an impulse to the rigid-body target (target vx " +
+                   Figure("%.2f", TargetAfterImpact.LinearVelocityMps[0]) + " m/s, cone vx " +
+                   Figure("%.2f", ConeAfterImpact.LinearVelocityMps[0]) + " m/s)");
+
+        const double BeforeForce = ConeAfterImpact.LinearVelocityMps[0];
+        Space.ApplyForce(ConeBody, { 600.0, 0.0, 0.0 }, ConeAfterImpact.PositionMetres);
+        Run(Space, 0.10);
+        const PhysicsBodyReading ConeAfterForce = Space.ReadBody(ConeBody);
+        Expect(Space.QueryBodyCount() == 3 && ConeAfterForce.LinearVelocityMps[0] > BeforeForce + 0.5,
+               "the cone remains a live rigid body and responds to a later force after impact");
+    }
+
     // ④ a stack of five half-metre cubes stands
     {
         PhysicsSpace Space;
@@ -496,7 +540,61 @@ int main(int ArgumentCount, char** Arguments)
         Bridge.End(World);
     }
 
-    // ⑧ 1000 boxes falling onto the ground: the cost of a step
+    // ⑧ Fracture participation is independent from ordinary dynamics: off → moving collider, on → fixed fracture proxy, off → moving again.
+    {
+        WorldSpace World;
+        const auto AddShape = [&](const std::string& Name, const std::string& Shape, double X)
+        {
+            const RecordToken Token = World.ConstructRecord("Geometry", Name);
+            auto* Record = dynamic_cast<GeometryRecord*>(World.FindRecord(Token));
+            if (Record == nullptr) return static_cast<GeometryRecord*>(nullptr);
+            GeometryConfiguration& Configuration = Record->AccessConfiguration();
+            Configuration.ShapeName = Shape;
+            Configuration.Physics = true;
+            Configuration.Fracture.Enabled = false;
+            Configuration.Spatial.PositionMetres[0] = static_cast<float>(X);
+            Configuration.Spatial.PositionMetres[1] = 0.0f;
+            Configuration.Spatial.PositionMetres[2] = 0.5f;
+            Configuration.Resolved.Bound = true;
+            Configuration.Resolved.Shown = 1;
+            Configuration.Resolved.Extent[0] = Configuration.Resolved.Extent[1] = Configuration.Resolved.Extent[2] = 1.0f;
+            Configuration.Resolved.BoundsMinimum[0] = static_cast<float>(X - 0.5);
+            Configuration.Resolved.BoundsMinimum[1] = -0.5f;
+            Configuration.Resolved.BoundsMinimum[2] = 0.0f;
+            Configuration.Resolved.BoundsMaximum[0] = static_cast<float>(X + 0.5);
+            Configuration.Resolved.BoundsMaximum[1] = 0.5f;
+            Configuration.Resolved.BoundsMaximum[2] = 1.0f;
+            Configuration.AdvanceRevision();
+            return Record;
+        };
+
+        GeometryRecord* Cone = AddShape("Toggle Cone", "Cone", -1.0);
+        GeometryRecord* Box = AddShape("Unaffected Box", "Cube", 1.0);
+        PhysicsExtension Bridge;
+        (void)Bridge.Begin(World);
+        const bool StartsDynamic = Cone != nullptr && Box != nullptr && Bridge.QueryTally().Moving == 2 && Bridge.QueryTally().Fracture == 0;
+
+        if (Cone != nullptr)
+        {
+            Cone->AccessConfiguration().Fracture.Enabled = true;
+            Cone->AccessConfiguration().AdvanceRevision();
+        }
+        const bool FractureEnabledSynced = Bridge.SynchronizeWorld(World);
+        const bool FractureProxy = Bridge.QueryTally().Moving == 1 && Bridge.QueryTally().Fracture == 1;
+
+        if (Cone != nullptr)
+        {
+            Cone->AccessConfiguration().Fracture.Enabled = false;
+            Cone->AccessConfiguration().AdvanceRevision();
+        }
+        const bool FractureDisabledSynced = Bridge.SynchronizeWorld(World);
+        const bool DynamicRestored = Bridge.QueryTally().Moving == 2 && Bridge.QueryTally().Fracture == 0;
+        Bridge.End(World);
+        Expect(StartsDynamic && FractureEnabledSynced && FractureProxy && FractureDisabledSynced && DynamicRestored,
+               "fracture on/off changes only its proxy participation; ordinary dynamic geometry is restored when fracture is disabled");
+    }
+
+    // ⑨ 1000 boxes falling onto the ground: the cost of a step
     double StepMilliseconds = 0.0;
     {
         PhysicsSpace Space;
@@ -510,7 +608,7 @@ int main(int ArgumentCount, char** Arguments)
                                            " workers (this sandbox, Debug build of the extension)");
     }
 
-    // ⑨ the capture
+    // ⑩ the capture
     const std::filesystem::path Image = Exhibit / "Images" / "PhysicsSpaceFalling.png";
     Expect(WriteCapture(Image, Fonts), "capture written: " + Image.filename().string());
 
