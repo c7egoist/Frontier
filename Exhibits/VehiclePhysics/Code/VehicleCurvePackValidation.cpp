@@ -103,6 +103,21 @@ torque_curve = [[0.0, 1.0], [1000.0, 2.0], [500.0, 3.0]]
     Passed &= Check(UnorderedRejected && Unordered.Revision == UnorderedRevision && SameCurves(UnorderedAfter, UnorderedExpected),
                     "unordered knots are rejected transactionally without mutating the vehicle");
 
+    VehicleConfiguration OutOfRange;
+    const Vehicle::VehicleSpecification OutOfRangeBefore = OutOfRange.Specification;
+    const uint64_t OutOfRangeRevision = OutOfRange.Revision;
+    const std::string OutOfRangePack = R"TOML(format = "frontier.vehicle-curves"
+version = 1
+[curves.engine]
+torque_curve = [[0.0, 72.0], [1000.0, 180.0]]
+exhaust_flow_curve = [[0.0, 0.1], [1000.0, -0.01]]
+)TOML";
+    const bool RangeRejected = !DecodeVehicleCurvePack(OutOfRangePack, OutOfRange, Error);
+    Vehicle::VehicleSpecification OutOfRangeAfter = OutOfRange.Specification;
+    Vehicle::VehicleSpecification OutOfRangeExpected = OutOfRangeBefore;
+    Passed &= Check(RangeRejected && OutOfRange.Revision == OutOfRangeRevision && SameCurves(OutOfRangeAfter, OutOfRangeExpected),
+                    "authored value limits reject the whole pack without applying earlier valid overrides");
+
     VehicleConfiguration Future;
     const Vehicle::VehicleSpecification FutureBefore = Future.Specification;
     const uint64_t FutureRevision = Future.Revision;

@@ -209,9 +209,10 @@ bool EncodeVehicleCurvePack(const VehicleConfiguration& Configuration, std::stri
     toml::table CurvesTable;
     for (const Vehicle::VehicleCurve& Entry : Vehicle::EnumerateVehicleCurves(Specification))
     {
-        if (Entry.Target == nullptr || Entry.Target->X.size() < 2u || Entry.Target->X.size() != Entry.Target->Y.size())
+        if (Entry.Target == nullptr || Entry.Target->X.size() < 2u || Entry.Target->X.size() > 4096u ||
+            Entry.Target->X.size() != Entry.Target->Y.size())
         {
-            OutError = "Curve " + Entry.Section + "." + Entry.Key + " must contain at least two matching knots.";
+            OutError = "Curve " + Entry.Section + "." + Entry.Key + " must contain 2 to 4096 matching knots.";
             return false;
         }
         toml::array Points;
@@ -222,6 +223,11 @@ bool EncodeVehicleCurvePack(const VehicleConfiguration& Configuration, std::stri
             if (!std::isfinite(X) || !std::isfinite(Y) || (Index > 0u && !(X > Entry.Target->X[Index - 1u])))
             {
                 OutError = "Curve " + Entry.Section + "." + Entry.Key + " contains a non-finite or unordered knot.";
+                return false;
+            }
+            if (X < Entry.MinimumX || X > Entry.MaximumX || Y < Entry.MinimumY || Y > Entry.MaximumY)
+            {
+                OutError = "Curve " + Entry.Section + "." + Entry.Key + " contains a knot outside its authored limits.";
                 return false;
             }
             Points.push_back(toml::array{static_cast<double>(X), static_cast<double>(Y)});
@@ -287,6 +293,11 @@ bool DecodeVehicleCurvePack(std::string_view Text, VehicleConfiguration& Configu
     std::vector<PendingCurve> Pending;
     for (const Vehicle::VehicleCurve& Entry : Vehicle::EnumerateVehicleCurves(Configuration.Specification))
     {
+        if (Entry.Target == nullptr)
+        {
+            OutError = "Curve registry entry " + Entry.Section + "." + Entry.Key + " has no target.";
+            return false;
+        }
         const toml::table* Section = FindSection(*CurvesTable, Entry.Section);
         const toml::node*  Node = Section != nullptr ? Section->get(Entry.Key) : nullptr;
         if (Node == nullptr) continue; // 📝 Known but omitted curves keep their current values; future curve names are ignored.
@@ -315,6 +326,11 @@ bool DecodeVehicleCurvePack(std::string_view Text, VehicleConfiguration& Configu
             if (!X || !Y || !std::isfinite(*X) || !std::isfinite(*Y))
             {
                 OutError = "Curve " + Candidate.Name + " knot " + std::to_string(Index + 1u) + " must contain finite numbers.";
+                return false;
+            }
+            if (*X < Entry.MinimumX || *X > Entry.MaximumX || *Y < Entry.MinimumY || *Y > Entry.MaximumY)
+            {
+                OutError = "Curve " + Candidate.Name + " knot " + std::to_string(Index + 1u) + " is outside its authored limits.";
                 return false;
             }
             const float RuntimeX = static_cast<float>(*X);
