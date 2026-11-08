@@ -343,9 +343,9 @@ export class EditorShell
         this.DisplaySelect = Display;
         Bar.appendChild(Display);
 
-        // Dedicated Road Studio workspace launcher button in the viewport bar
+        // Dedicated Road Studio workspace launcher button in the viewport bar (Q/E reserved strictly for camera)
         const RoadBtn = Construct("button", "action-button");
-        RoadBtn.title = "Switch to the dedicated Road Studio workspace (E)";
+        RoadBtn.title = "Switch to the in-world Road Studio workspace";
         RoadBtn.style.cssText = "height:28px;padding:0 10px;border-radius:8px;display:inline-flex;align-items:center;gap:6px;font-size:12px;";
         RoadBtn.append(ConstructGlyph("Route", 14, 1.7), Construct("span", "", "Road Studio"));
         RoadBtn.addEventListener("click", () =>

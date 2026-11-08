@@ -136,7 +136,7 @@ export default
                 Host.RoadEditor.LoadTemplate("diamond");
                 Host.RoadEditor.ResetToDefault();
                 RoadEditorStreamed = Host.Scene.FacetSets[Host.Scene.RoadEditorBlock.FacetSet].VertexCount > 100000;
-                Host.RoadEditor.DriveOnSelectedRoad({ kind: "road", id: "r09" });
+                Host.RoadEditor.DriveOnSelectedRoad({ kind: "road", id: "r04" });
             }
             Host.ScriptedInput = { Throttle: 1.0, Brake: 0.0, SteerAngle: 0.0, Handbrake: false, Reverse: false };
         }
@@ -242,8 +242,8 @@ export default
         assert.ok(MaximumFactoryHallX > 124.0,
                   `Expected Track H Megafactory drive-through past East portal X=124 m, got maxX=${MaximumFactoryHallX.toFixed(1)}`);
         assert.ok(RoadEditorStreamed, "Expected RoadEditorSequence to stream >100k Road Studio vertices to WebGPU");
-        assert.ok(PeakSplineBridgeZ > 6.5 && Host.Vehicle.Position[2] > 6.0 && Host.Vehicle.Position[1] < 8.0,
-                  `Expected ControlVehicle to drive supported across elevated Road Studio Canal Viaduct (>6.0 m), got peakZ=${PeakSplineBridgeZ.toFixed(2)}, endPos=[${Host.Vehicle.Position.map((V) => V.toFixed(1)).join(", ")}]`);
+        assert.ok(PeakSplineBridgeZ > 6.5 && Host.Vehicle.Position[2] > 6.0 && Host.Vehicle.Position[1] < -8.0,
+                  `Expected ControlVehicle to drive supported across elevated Road Studio Steel I-Girder Viaduct (>6.0 m), got peakZ=${PeakSplineBridgeZ.toFixed(2)}, endPos=[${Host.Vehicle.Position.map((V) => V.toFixed(1)).join(", ")}]`);
         for (const ExpectedAspect of ["GREEN", "YELLOW", "ORANGE", "RED"])
             assert.ok(SeenTrafficAspects.has(ExpectedAspect), `Expected Hovering Intersection Traffic Lights to display ${ExpectedAspect}`);
         console.log(`9-track inversion arena: Track A loop (${Host.Training.Best.loop360.Primary.toFixed(2)} s) · Track B/C boolean bollards · Track D Voronoi collapse+crack-bound smoke · Track E 3-lane subway · Track F 14 railcars · Track G construction thru-trench + dead-end pit · Track H megafactory + auto-fuel (100%) + auto-EV (100%) · Track I Road Studio workspace & highway viaduct (peak Z=${PeakSplineBridgeZ.toFixed(2)} m) · hovering 4-lamp traffic lights (R/O/Y/G) · 15 midair robot drones ACTIVE`);

@@ -108,12 +108,12 @@ export const InversionArenaTracks = Object.freeze([
     },
     {
         Id:       "trackI",
-        Label:    "Track I · Road Studio District",
-        Name:     "Track I — Road Studio Northbank District & Steel I-Girder Viaduct",
+        Label:    "Track I · Spline & Bridge Demo",
+        Name:     "Track I — Live Editable Spline S-Curve, Crossroads & Steel I-Girder Bridge",
         Icon:     "Compass",
-        Position: [322.0, -2.5],
-        Yaw:      7.0,
-        Note:     "Live Road Studio network (junction fillets, steel I-girder highway bridge & hovering signals) — open Road Studio (E)!"
+        Position: [174.0, 66.0],
+        Yaw:      -8.0,
+        Note:     "Connected Arena gateway into the live-editable spline & steel I-girder bridge showcase — edit directly in Road Studio!"
     }
 ]);
 
@@ -1406,7 +1406,9 @@ export function ResolveInversionPlacements()
     for (let Y = -440.0; Y <= 440.0; Y += 16.0)
     {
         Add("LongBarrier", `Complex West ${Y.toFixed(0)}`, [-152.5, Y, 0.0], 90.0 * Degrees);
-        Add("LongBarrier", `Complex East ${Y.toFixed(0)}`, [ 220.5, Y, 0.0], 90.0 * Degrees);
+        const EastStudioGateway = (Y >= 50.0 && Y <= 82.0) || (Y >= -82.0 && Y <= -50.0);
+        if (!EastStudioGateway)
+            Add("LongBarrier", `Complex East ${Y.toFixed(0)}`, [ 220.5, Y, 0.0], 90.0 * Degrees);
     }
 
     // ② [Track A] Pit-wall divider islands (preserved intact)

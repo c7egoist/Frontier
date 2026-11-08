@@ -212,7 +212,7 @@ export function ConstructEntities(Host)
             State: () => (Host.RoadEditor.Enabled ? "live" : ""),
             Toggle: { Read: () => Host.RoadEditor.Enabled, Write: (On) => { Host.RoadEditor.Enabled = On; Host.RoadEditor.CommitChanges(); } },
             Switches: () => [
-                { Name: "Open Road Studio workspace (E)", Glyph: "Scan",
+                { Name: "Open Road Studio workspace", Glyph: "Scan",
                   Read: () => Host.RoadEditor.ActiveWorkspace === "roadstudio",
                   Write: (On) => { if (On) Host.RoadEditor.OpenWorkspace(); else Host.RoadEditor.CloseWorkspace(); } }
             ],
@@ -1258,8 +1258,8 @@ function BuildRoadEditor(Host, C, Body)
     C.Muted(WorkspaceCard, "Author multi-lane roads, tangent-filleted junctions, steel I-girder & concrete girder highway bridges, bearings, piers, 2:1 embankments, cycleways, kerbs, and interchanges in the dedicated Road Studio workspace — synced live to Proving Grounds.");
 
     const LaunchRow = C.ActionRow(WorkspaceCard);
-    C.Button(LaunchRow, "Open Road Studio (E)", "Scan", () => R.OpenWorkspace());
-    C.Button(LaunchRow, "Drive on network", "Car", () => R.DriveOnSelectedRoad());
+    C.Button(LaunchRow, "Open Road Studio", "Scan", () => R.OpenWorkspace());
+    C.Button(LaunchRow, "Drive showcase", "Car", () => R.DriveOnSelectedRoad());
 
     C.Stats(WorkspaceCard, [
         ["Junctions",       () => R.QuerySummary().NodeCount,     "", 0],
@@ -1272,13 +1272,16 @@ function BuildRoadEditor(Host, C, Body)
     const TemplateCard = C.Card(Body, "Interchange & street templates", "Map",
                                 { Accent: Accent.Environment, Index: 2, Subtitle: "15 complete road & bridge networks" });
 
-    const TemplateState = { Selected: "district" };
-    const TemplateOptions = templateCatalog.map((Entry) => [Entry.name, Entry.id]);
+    const TemplateState = { Selected: "demo" };
+    const TemplateOptions = [
+        ["Spline & Highway Bridge Demo (Connected)", "demo"],
+        ...templateCatalog.map((Entry) => [Entry.name, Entry.id])
+    ];
     C.Select(TemplateCard, TemplateState, "Selected", TemplateOptions,
              { Label: "Template", OnChange: (Id) => { R.LoadTemplate(Id); C.Synchronise(); } });
 
     const QuickRow1 = C.ActionRow(TemplateCard);
-    C.Button(QuickRow1, "Northbank district", "Building2", () => { TemplateState.Selected = "district"; R.LoadTemplate("district"); C.Synchronise(); });
+    C.Button(QuickRow1, "Connected Demo", "Sparkles", () => { TemplateState.Selected = "demo"; R.LoadTemplate("demo"); C.Synchronise(); });
     C.Button(QuickRow1, "Highway bridge", "GitFork", () => { TemplateState.Selected = "bridge"; R.LoadTemplate("bridge"); C.Synchronise(); });
 
     const QuickRow2 = C.ActionRow(TemplateCard);

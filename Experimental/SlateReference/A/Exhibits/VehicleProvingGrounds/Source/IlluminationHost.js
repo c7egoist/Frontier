@@ -567,7 +567,7 @@ class IlluminationHost
     //    once (Instant — scripts and the harness).
     TeleportVehicle(Zone, Instant = false, Done = null)
     {
-        if (Zone?.Id === "trackI" && this.RoadEditor && this.RoadEditor.Project?.name !== "Northbank district")
+        if (Zone?.Id === "trackI" && this.RoadEditor && this.RoadEditor.Project?.name !== "Spline & Highway Bridge Demo")
         {
             this.RoadEditor.DriveOnSelectedRoad();
             if (Done)
@@ -811,12 +811,15 @@ class IlluminationHost
         window.addEventListener("keydown", (Event) =>
         {
             this.ServiceStations?.Audio?.Unlock();
-            if (Event.target instanceof HTMLInputElement || Event.target instanceof HTMLSelectElement)
+            if (Event.target instanceof HTMLInputElement ||
+                Event.target instanceof HTMLSelectElement ||
+                Event.target instanceof HTMLTextAreaElement)
                 return;
             if (this.RoadEditor?.ActiveWorkspace === "roadstudio")
             {
-                if (Event.code === "Escape" && !Event.repeat)
-                    this.RoadEditor.CloseWorkspace();
+                if (this.RoadEditor.HandleStudioKeyDown(Event))
+                    return;
+                this.Keys.add(Event.code);
                 return;
             }
             if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "F8"].includes(Event.code))
@@ -831,16 +834,6 @@ class IlluminationHost
                 this.ResetArena();
             if (Event.code === "KeyC" && !Event.repeat && !Event.ctrlKey && !Event.metaKey)
                 this.CycleCamera(Event.shiftKey ? -1 : 1);
-            if (Event.code === "KeyE" && !Event.repeat && !Event.ctrlKey && !Event.metaKey && !Event.altKey)
-            {
-                if (this.RoadEditor)
-                {
-                    const Opened = this.RoadEditor.ToggleWorkspace();
-                    if (!Opened)
-                        this.Shell?.Announce("Returned to Proving Grounds — Road Studio synced");
-                }
-                return;
-            }
             if (Event.code === "KeyI" && !Event.repeat && !Event.ctrlKey && !Event.metaKey && !Event.altKey)
             {
                 if (this.Lighting)
@@ -1288,15 +1281,6 @@ class IlluminationHost
             requestAnimationFrame((Next) => this.AdvanceFrame(Next));
             return;
         }
-        // Yield GPU & input cleanly while the user is authoring inside the dedicated Road Studio workspace
-        if (!this.CaptureMode && this.RoadEditor?.ActiveWorkspace === "roadstudio")
-        {
-            this.Keys.clear();
-            this.LastTime = Now;
-            this.PriorFrameTime = Now;
-            requestAnimationFrame((Next) => this.AdvanceFrame(Next));
-            return;
-        }
         const CpuFrameStart = performance.now();
         const FrameDeltaMs = Math.max(0.0, Now - (this.PriorFrameTime || Now));
         const Δτ = Math.min(0.1, Math.max(0.0, (Now - this.LastTime) * 0.001));
@@ -1534,6 +1518,7 @@ class IlluminationHost
         this.PriorValid = true;
 
         this.PresentMeasurements(Now, Light);
+        this.RoadEditor?.RenderViewportGizmos?.(this.CameraState);
         const CpuCallbackMs = performance.now() - CpuFrameStart;
         this.RecordPerformanceSample(FrameDeltaMs, FrameDeltaMs * 0.001, CpuCallbackMs, CpuSceneUpdateMs, CpuCommandEncodeMs, CpuQueueSubmitMs);
         this.FrameIndex++;

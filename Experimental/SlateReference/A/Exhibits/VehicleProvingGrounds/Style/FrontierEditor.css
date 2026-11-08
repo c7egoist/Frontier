@@ -253,28 +253,420 @@ input, select
     grid-template-areas: "outliner viewport inspector" "status status status";
 }
 
-#road-studio-workspace
+.studio-only
 {
-    position: fixed;
-    inset: 38px 0 0 0;
-    z-index: 30;
-    background: #101010;
-    display: flex;
+    display: none !important;
 }
 
-#road-studio-frame
+body.workspace-road-studio #outliner,
+body.workspace-road-studio #inspector,
+body.workspace-road-studio #viewport-bar
 {
+    display: none !important;
+}
+
+body.workspace-road-studio #studio-outliner
+{
+    display: flex !important;
+    grid-area: outliner;
+    border-right: 1px solid var(--edge);
+}
+
+body.workspace-road-studio #studio-inspector
+{
+    display: flex !important;
+    grid-area: inspector;
+    border-left: 1px solid var(--edge);
+}
+
+body.workspace-road-studio #studio-toolbar
+{
+    display: flex !important;
+}
+
+body.workspace-road-studio #road-studio-gizmo
+{
+    display: block !important;
+    position: absolute;
+    inset: 0;
     width: 100%;
     height: 100%;
-    border: 0;
-    display: block;
-    background: #101010;
+    z-index: 6;
+    cursor: crosshair;
 }
 
-body.workspace-road-studio #shell
+body.workspace-road-studio #studio-viewport-hint
 {
-    visibility: hidden;
+    display: block !important;
+    position: absolute;
+    left: 12px;
+    bottom: 10px;
+    z-index: 7;
     pointer-events: none;
+    padding: 5px 10px;
+    border-radius: 999px;
+    background: rgba(14, 14, 14, 0.82);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: var(--soft);
+    font-size: 11px;
+    backdrop-filter: blur(6px);
+}
+
+/* Road Studio Hierarchy & 2D World Plan Dock (No Asset Library) */
+.studio-hierarchy
+{
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 10px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.studio-group-label
+{
+    font-size: 10.5px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding: 2px 8px;
+    display: flex;
+    justify-content: space-between;
+}
+
+.studio-item
+{
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: 8px;
+    cursor: pointer;
+    color: var(--soft);
+    background: transparent;
+    border: 1px solid transparent;
+}
+
+.studio-item:hover
+{
+    background: #1d1d1d;
+    color: var(--text);
+}
+
+.studio-item.active
+{
+    background: #232018;
+    border-color: rgba(232, 184, 92, 0.42);
+    color: #f6e7c1;
+}
+
+.studio-item-dot
+{
+    width: 7px;
+    height: 7px;
+    border-radius: 999px;
+    background: #6a6a6a;
+    flex: none;
+}
+
+.studio-item-dot.bridge
+{
+    background: #e8b85c;
+}
+
+.studio-item-dot.node
+{
+    background: #3ec46d;
+}
+
+.studio-item-name
+{
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+}
+
+.studio-item-meta
+{
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--muted);
+}
+
+.studio-item-focus
+{
+    font-size: 10.5px;
+    padding: 2px 6px;
+    border-radius: 5px;
+    background: #252525;
+    color: var(--soft);
+    border: 1px solid #333;
+}
+
+.studio-item-focus:hover
+{
+    color: #fff;
+    border-color: #555;
+}
+
+.studio-plan-dock
+{
+    flex: none;
+    border-top: 1px solid var(--edge);
+    background: #121212;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.studio-plan-header
+{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--soft);
+}
+
+.studio-plan-actions button
+{
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 6px;
+    background: #1f1f1f;
+    border: 1px solid #303030;
+    color: var(--soft);
+}
+
+.studio-plan-actions button:hover
+{
+    color: #fff;
+    border-color: #4a4a4a;
+}
+
+#studio-plan-canvas
+{
+    width: 100%;
+    height: 214px;
+    border-radius: 10px;
+    background: #0d0f12;
+    border: 1px solid #262626;
+    display: block;
+    cursor: crosshair;
+}
+
+/* Road Studio Center Toolbar */
+.studio-toolbar
+{
+    gap: 6px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+}
+
+.studio-tool-btn
+{
+    height: 26px;
+    padding: 0 10px;
+    border-radius: 7px;
+    font-size: 12px;
+    color: var(--soft);
+    background: #1b1b1b;
+    border: 1px solid #2c2c2c;
+    white-space: nowrap;
+}
+
+.studio-tool-btn:hover
+{
+    color: var(--text);
+    background: #242424;
+}
+
+.studio-tool-btn.active
+{
+    color: #161209;
+    background: #e8b85c;
+    border-color: #f0c975;
+    font-weight: 500;
+}
+
+.studio-tool-btn.danger:hover
+{
+    color: #ff8e8e;
+    border-color: #6b2d2d;
+}
+
+.studio-select
+{
+    height: 26px;
+    padding: 0 8px;
+    border-radius: 7px;
+    background: #1b1b1b;
+    border: 1px solid #2c2c2c;
+    color: var(--text);
+    font-size: 12px;
+}
+
+/* Road Studio 4-Tab Inspector */
+.studio-inspector-tabs
+{
+    flex: none;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 4px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--edge);
+    background: #131313;
+}
+
+.studio-insp-tab
+{
+    height: 28px;
+    border-radius: 7px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--muted);
+    background: #1b1b1b;
+    border: 1px solid #282828;
+}
+
+.studio-insp-tab.active
+{
+    color: #f5e6c3;
+    background: #252118;
+    border-color: rgba(232, 184, 92, 0.45);
+}
+
+.studio-inspector-body
+{
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    overflow-y: auto;
+}
+
+.studio-card
+{
+    background: linear-gradient(180deg, #212121 0%, #1c1c1c 100%);
+    border: 1px solid #2d2d2d;
+    border-radius: 14px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+}
+
+.studio-card-title
+{
+    font-size: 12px;
+    font-weight: 500;
+    color: #ececec;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.studio-card-sub
+{
+    font-size: 11px;
+    color: var(--muted);
+}
+
+.studio-field
+{
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.studio-field-head
+{
+    display: flex;
+    justify-content: space-between;
+    font-size: 11.5px;
+    color: var(--soft);
+}
+
+.studio-field-val
+{
+    font-family: var(--mono);
+    font-size: 11px;
+    color: #e8b85c;
+}
+
+.studio-field input[type="range"]
+{
+    width: 100%;
+    accent-color: #e8b85c;
+}
+
+.studio-field input[type="text"],
+.studio-field select
+{
+    height: 28px;
+    border-radius: 7px;
+    background: #151515;
+    border: 1px solid #2e2e2e;
+    padding: 0 8px;
+    color: var(--text);
+    font-size: 12px;
+}
+
+.studio-check-row
+{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 12px;
+    color: var(--soft);
+    padding: 2px 0;
+}
+
+.studio-check-row input[type="checkbox"]
+{
+    accent-color: #e8b85c;
+    width: 15px;
+    height: 15px;
+}
+
+.studio-btn-row
+{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.studio-btn
+{
+    flex: 1 1 auto;
+    height: 28px;
+    padding: 0 10px;
+    border-radius: 8px;
+    font-size: 11.5px;
+    font-weight: 500;
+    background: #252525;
+    border: 1px solid #353535;
+    color: var(--text);
+}
+
+.studio-btn:hover
+{
+    background: #2f2f2f;
+    border-color: #4a4a4a;
+}
+
+.studio-btn.gold
+{
+    color: #161209;
+    background: linear-gradient(180deg, #f0c975 0%, #dca84b 100%);
+    border-color: #ebb95d;
 }
 
 @media (max-width: 1100px)

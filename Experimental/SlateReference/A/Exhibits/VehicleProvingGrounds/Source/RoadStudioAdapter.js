@@ -32,11 +32,14 @@ import {
 } from "./RoadStudio/Core/geometry.js";
 import {
     insertRoad,
+    splitRoad,
+    findSnap,
     moveNode,
     translateRoad,
     resolveCrossings,
     deleteSelection
 } from "./RoadStudio/Core/editing.js";
+import { sampleAlignment, closestOnAlignment } from "./RoadStudio/Core/curves.js";
 import { insertConnectedBridge } from "./RoadStudio/Core/bridge-insertion.js";
 
 export {
@@ -57,6 +60,10 @@ export {
     controlPoints,
     buildNetwork,
     insertRoad,
+    splitRoad,
+    findSnap,
+    sampleAlignment,
+    closestOnAlignment,
     moveNode,
     translateRoad,
     resolveCrossings,
@@ -201,20 +208,124 @@ function ResolveDecalLift(MeshKind, MaterialKey)
 }
 
 //------------------------------------------------------------------------------------------------------------------------
-//                                  STARTER PROJECT & PRESET PREPARATION
+//                      STARTER IN-LEVEL DEMONSTRATION SHOWCASE & WORLD-SPACE TEMPLATE PLACEMENT
 //------------------------------------------------------------------------------------------------------------------------
+
+export function PlaceTemplateInWorld(Project, LevelKey = "inversion")
+{
+    if (Project.worldSpace)
+        return Project;
+    let MinX = Infinity;
+    for (const N of Project.nodes)
+        MinX = Math.min(MinX, N.position[0]);
+    const ShiftX = LevelKey === "inversion"
+        ? Math.max(360.0, Math.ceil((262.0 - (Number.isFinite(MinX) ? MinX : -85.0)) / 10.0) * 10.0)
+        : Math.max(220.0, Math.ceil((135.0 - (Number.isFinite(MinX) ? MinX : -85.0)) / 10.0) * 10.0);
+    for (const N of Project.nodes)
+        N.position[0] += ShiftX;
+    for (const S of Project.sites ?? [])
+        S.position[0] += ShiftX;
+    Project.worldSpace = true;
+    return Project;
+}
 
 export function CreateStarterStudioProject(LevelKey = "inversion")
 {
-    // Start with the full Northbank district (connected urban streets + highway overpass bridge + signalized boulevard +
-    // parallel parking + crosswalks + corner ramps), identical to RoadStudio.html's makeDemo() so both workspaces match!
-    const Project = makeDemo();
-    if (Project.nodes[0])
-        Project.nodes[0].signals = true;
-    if (Project.nodes[4])
-        Project.nodes[4].signals = true;
-    if (LevelKey !== "inversion")
-        Project.name = "Proving Grounds · Northbank District";
+    // Built-in Live-Editable Demonstration Showcase right in the level:
+    // Connects directly into the Arena through the North-East & South-East gateways ([166, +66] & [166, -66]),
+    // showcasing cubic Bézier S-curves, a 4-arm tangent-filleted crossroads with hovering traffic signal,
+    // a 3-span Steel I-Girder Highway Bridge (+6.2 m) over an underpass avenue, protected cycleways, and race kerbs.
+    const ShiftX = LevelKey === "inversion" ? 0.0 : -62.0;
+    const Project = {
+        version:    1,
+        worldSpace: true,
+        name:       "Spline & Highway Bridge Demo",
+        nodes:      [],
+        roads:      [],
+        sites:      []
+    };
+
+    const AddWorldNode = (Id, Name, WorldX, WorldY, WorldZ = 0.0, Radius = 7.0, Signals = false, Crossings = false) =>
+    {
+        const N = makeNode([WorldX + ShiftX, WorldZ, -WorldY], Name);
+        N.id = Id;
+        N.radius = Radius;
+        N.signals = Signals;
+        N.crossings = Crossings;
+        Project.nodes.push(N);
+        return N;
+    };
+
+    const AddSpline = (Id, From, To, Name, Settings, H1 = null, H2 = null) =>
+    {
+        const R = makeRoad(From, To, Name, Settings, H1 ?? undefined, H2 ?? undefined);
+        R.id = Id;
+        Project.roads.push(R);
+        return R;
+    };
+
+    const NEntryN = AddWorldNode("n01", "Arena North-East Gateway",  166.0,   66.0, 0.0, 7.0, false, false);
+    const NCross  = AddWorldNode("n02", "Showcase Crossroads",       272.0,    0.0, 0.0, 9.5, true,  true);
+    const NEast   = AddWorldNode("n03", "East Loop Turnaround",      396.0,    0.0, 0.0, 8.0, true,  false);
+    const NRampN  = AddWorldNode("n04", "Bridge North Approach",     334.0,  106.0, 0.0, 7.5, false, false);
+    const NAbutN  = AddWorldNode("n05", "North Bridge Abutment",     334.0,   38.0, 6.2, 6.0, false, false);
+    const NAbutS  = AddWorldNode("n06", "South Bridge Abutment",     334.0,  -38.0, 6.2, 6.0, false, false);
+    const NRampS  = AddWorldNode("n07", "Bridge South Approach",     334.0, -106.0, 0.0, 7.5, false, false);
+    const NEntryS = AddWorldNode("n08", "Arena South-East Gateway",  166.0,  -66.0, 0.0, 7.0, false, false);
+
+    // r01: Sweeping cubic Bézier S-curve from inside the Arena into Showcase Crossroads
+    AddSpline("r01", NEntryN, NCross, "Gateway S-Curve Spline", {
+        lanes: 2, laneWidth: 3.6, sidewalk: 2.2, cycleMode: "protected", cycleWidth: 1.8,
+        curbStyle: "granite", markingStyle: "urban", pattern: "ashlar", speedLimit: 50, signs: false
+    }, [46.0, 0.0, 4.0], [-42.0, 0.0, -30.0]);
+
+    // r02: Underpass Boulevard passing cleanly beneath the +6.2 m Steel I-Girder Highway Bridge
+    AddSpline("r02", NCross, NEast, "Underpass Boulevard", {
+        lanes: 4, laneWidth: 3.4, median: 1.4, sidewalk: 2.4,
+        curbStyle: "granite", markingStyle: "urban", pattern: "linear", speedLimit: 60, signs: false
+    }, [40.0, 0.0, 0.0], [-40.0, 0.0, 0.0]);
+
+    // r03 -> r04 -> r05: Connected 3-span Highway Bridge (2:1 North Embankment -> Steel I-Girder Viaduct -> 2:1 South Embankment)
+    AddSpline("r03", NRampN, NAbutN, "North Bridge Embankment", {
+        lanes: 2, laneWidth: 3.75, shoulderWidth: 1.2, sidewalk: 0.7, markingStyle: "motorway",
+        guardrails: true, railStyle: "wbeam", embankment: true, drainage: false, manholes: false, signs: false
+    }, [0.0, 2.2, 22.0], [0.0, 0.0, -22.0]);
+
+    AddSpline("r04", NAbutN, NAbutS, "Steel I-Girder Viaduct", {
+        lanes: 2, laneWidth: 3.75, shoulderWidth: 1.2, sidewalk: 0.9, markingStyle: "motorway",
+        bridge: true, bridgeFrom: 0.0, bridgeTo: 1.0, structure: "steel", bridgeDepth: 1.45, pierSpacing: 25.0,
+        guardrails: true, railStyle: "parapet", drainage: false, manholes: false, signs: false
+    }, [0.0, 0.0, 25.0], [0.0, 0.0, -25.0]);
+
+    AddSpline("r05", NAbutS, NRampS, "South Bridge Embankment", {
+        lanes: 2, laneWidth: 3.75, shoulderWidth: 1.2, sidewalk: 0.7, markingStyle: "motorway",
+        guardrails: true, railStyle: "wbeam", embankment: true, drainage: false, manholes: false, signs: false
+    }, [0.0, 0.0, 22.0], [0.0, 2.2, -22.0]);
+
+    // r06: Curved North Loop linking Crossroads -> Bridge North Approach
+    AddSpline("r06", NCross, NRampN, "North Bridge Loop", {
+        lanes: 2, laneWidth: 3.5, sidewalk: 1.8, markingStyle: "urban",
+        guardrails: true, railStyle: "railing", drainage: false, manholes: false, signs: false
+    }, [4.0, 0.0, -48.0], [-42.0, 0.0, 2.0]);
+
+    // r07: Sweeping East Highway Curve linking East Turnaround -> Bridge South Approach
+    AddSpline("r07", NEast, NRampS, "East Sweeper Curve", {
+        lanes: 2, laneWidth: 3.75, shoulderWidth: 1.0, sidewalk: 0.8, markingStyle: "motorway",
+        guardrails: true, railStyle: "concrete", drainage: false, manholes: false, signs: false
+    }, [0.0, 0.0, 56.0], [48.0, 0.0, 0.0]);
+
+    // r08: South Connector linking Bridge South Approach -> Showcase Crossroads
+    AddSpline("r08", NRampS, NCross, "South Bridge Loop", {
+        lanes: 2, laneWidth: 3.5, sidewalk: 1.8, markingStyle: "urban",
+        drainage: false, manholes: false, signs: false
+    }, [-42.0, 0.0, -2.0], [4.0, 0.0, 48.0]);
+
+    // r09: Grand Prix Red/White Race-Kerb Return Spline back into the Arena!
+    AddSpline("r09", NCross, NEntryS, "Grand Prix Kerb Return", {
+        lanes: 2, laneWidth: 4.0, sidewalk: 0.8, curbStyle: "race", markingStyle: "center-only",
+        guardrails: true, railStyle: "thrie", drainage: false, manholes: false, signs: false
+    }, [-42.0, 0.0, 30.0], [46.0, 0.0, -4.0]);
+
     return Project;
 }
 
@@ -576,7 +687,7 @@ export function CompileStudioProjectForWorld(Project, Options = {})
     const VertexCapacity = Options.VertexCapacity ?? RoadStudioVertexCapacity;
     const Prepared = PrepareProjectForGpuBudget(Project);
     const Network = buildNetwork(Prepared, { detail: "editing" });
-    const Anchor = Options.Anchor ?? ComputeWorldAnchorForBounds(Network.bounds, LevelKey);
+    const Anchor = Options.Anchor ?? (Project.worldSpace ? [0.0, 0.0, 0.0] : ComputeWorldAnchorForBounds(Network.bounds, LevelKey));
 
     // Sort meshes so essential road/bridge/curb/paving/marking/barrier geometry always streams first
     const OrderedMeshes = [...Network.meshes].sort((A, B) =>

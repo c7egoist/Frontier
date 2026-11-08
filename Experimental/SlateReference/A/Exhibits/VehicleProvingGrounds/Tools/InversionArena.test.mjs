@@ -1043,25 +1043,51 @@ test("Pole-less Hovering Robotic Intersection Traffic Lights (Red/Orange/Yellow/
         assert.ok(TL.Units.slice(0, 8).every((S) => S.CurrentAspect === "ORANGE"), "OverrideMode='ORANGE' must set all active signals to ORANGE");
         TL.OverrideMode = "AUTO";
         Scene.RoadEditor.SyncTrafficSignals();
-        assert.equal(TL.QuerySummary().ActiveCount, 10, "Northbank district's 2 signalized junctions must activate hovering signals (8 + 2 = 10)");
-        TL.SyncEditorJunctionSignals([{ Name: "Custom Studio Crossroads", Position: [360.0, 0.0, 0.0], Yaw: 0.0 }]);
+        assert.equal(TL.QuerySummary().ActiveCount, 11, "Connected Demo's 3 signalized junctions must activate hovering signals (8 + 3 = 11)");
+        TL.SyncEditorJunctionSignals([{ Name: "Custom Studio Crossroads", Position: [272.0, 0.0, 0.0], Yaw: 0.0 }]);
         assert.equal(TL.QuerySummary().ActiveCount, 9, "Custom Road Studio junction signal must activate dynamically");
         assert.ok(TL.Units[8].Anchor[2] > 4.2, "Custom Road Studio junction signal must hover above the road");
 
-        // ② Road Studio Core + Adapter + Dedicated Workspace Verification across Interchange & Bridge Templates!
+        // ② Road Studio Core + Adapter + Dedicated In-World Workspace Verification!
         const Editor = Scene.RoadEditor;
         assert.ok(Editor, "SceneStructure must instantiate RoadEditorSequence");
         const StarterSummary = Editor.QuerySummary();
-        assert.equal(StarterSummary.Name, "Northbank district");
-        assert.ok(StarterSummary.RoadCount >= 10, "Northbank district must include >= 10 urban & bridge roads");
-        assert.ok(StarterSummary.BridgeCount >= 1, "Northbank district must include the Canal viaduct steel I-girder highway bridge");
-        assert.ok(StarterSummary.TriangleCount > 45000, `Expected rich Road Studio mesh (>45k tris), got ${StarterSummary.TriangleCount}`);
-        assert.ok(StarterSummary.PhysicsCount >= 10, `Expected span + junction physics surfaces, got ${StarterSummary.PhysicsCount}`);
+        assert.equal(StarterSummary.Name, "Spline & Highway Bridge Demo");
+        assert.deepEqual(StarterSummary.Anchor, [0.0, 0.0, 0.0], "Connected starter demo must live in 1:1 world coordinates");
+        assert.equal(StarterSummary.RoadCount, 9, "Connected demo must include 9 spline roads & bridge approaches");
+        assert.ok(StarterSummary.BridgeCount >= 1, "Connected demo must include the Steel I-Girder Viaduct highway bridge");
+        assert.ok(StarterSummary.TriangleCount > 60000, `Expected rich Road Studio mesh (>60k tris), got ${StarterSummary.TriangleCount}`);
+        assert.ok(StarterSummary.PhysicsCount >= 12, `Expected span + junction physics surfaces, got ${StarterSummary.PhysicsCount}`);
 
-        // Verify workspace mode toggle (`proving` <-> `roadstudio`)
+        // Verify workspace mode toggle (`proving` <-> `roadstudio`) & 3D projection / raycasting math
         assert.equal(Editor.ActiveWorkspace, "proving");
         assert.equal(Editor.ToggleWorkspace(), true);
         assert.equal(Editor.ActiveWorkspace, "roadstudio");
+        const FwdRaw = [0.72, 0.56, -0.41];
+        const FwdLen = Math.hypot(...FwdRaw);
+        const Fwd = FwdRaw.map((V) => V / FwdLen);
+        const RgtRaw = [Fwd[1], -Fwd[0], 0.0];
+        const RgtLen = Math.hypot(...RgtRaw);
+        const Rgt = RgtRaw.map((V) => V / RgtLen);
+        const UpVec = [
+            Rgt[1] * Fwd[2] - Rgt[2] * Fwd[1],
+            Rgt[2] * Fwd[0] - Rgt[0] * Fwd[2],
+            Rgt[0] * Fwd[1] - Rgt[1] * Fwd[0]
+        ];
+        const MockCam = {
+            Position: [200.0, -70.0, 50.0],
+            Forward:  Fwd,
+            Right:    Rgt,
+            Up:       UpVec,
+            TanY:     Math.tan((55.0 * Math.PI) / 360.0),
+            Aspect:   16.0 / 9.0
+        };
+        const ProjPt = Editor.ProjectWorldPoint([272.0, 0.0, 0.0], 1280, 720, MockCam);
+        assert.ok(ProjPt && ProjPt.every(Number.isFinite), "ProjectWorldPoint must project world junction onto viewport");
+        const Ray = Editor.ScreenToWorldRay(ProjPt[0], ProjPt[1], 1280, 720, MockCam);
+        const RayGround = Editor.IntersectRayPlaneZ(Ray, 0.0);
+        assert.ok(RayGround && Math.hypot(RayGround[0] - 272.0, RayGround[1] - 0.0) < 1.0e-6,
+                  `ScreenToWorldRay -> IntersectRayPlaneZ must round-trip to 1e-6 m, got ${RayGround}`);
         assert.equal(Editor.ToggleWorkspace(), false);
         assert.equal(Editor.ActiveWorkspace, "proving");
 
@@ -1078,35 +1104,49 @@ test("Pole-less Hovering Robotic Intersection Traffic Lights (Red/Orange/Yellow/
                       `Template ${TemplateId} must emit physics surfaces for road spans & junctions`);
         }
 
-        // ③ Live Road Studio Authoring Ops (AddRoadBetween, MoveJunction, InsertBridgeOnRoad, ExportJson/ImportJson)
+        // ③ Live In-World Authoring Ops (AddRoadBetween, MoveJunction, InsertBridgeOnRoad, ExportJson/ImportJson)
         const BaseRoadCount = Editor.Project.roads.length;
-        const AddedRoad = Editor.AddRoadBetween([-340.0, 0.0, 160.0], [340.0, 0.0, 160.0]);
-        assert.ok(AddedRoad && AddedRoad.id, "AddRoadBetween must insert a connected road alignment");
+        const AddedRoad = Editor.AddRoadBetween([210.0, 0.0, -145.0], [890.0, 0.0, -145.0]);
+        assert.ok(AddedRoad && AddedRoad.id, "AddRoadBetween must insert a connected world-space road alignment");
         assert.equal(Editor.Project.roads.length, BaseRoadCount + 1);
-        assert.equal(Editor.MoveJunction(AddedRoad.end, [360.0, 0.0, 160.0]), true, "MoveJunction must translate node cleanly");
+        assert.equal(Editor.MoveJunction(AddedRoad.end, [910.0, 0.0, -145.0]), true, "MoveJunction must translate node cleanly");
         assert.ok(Editor.InsertBridgeOnRoad(AddedRoad.id), "InsertBridgeOnRoad must atomically split approaches & elevate bridge span");
         const Exported = Editor.ExportJson();
         Editor.ResetToDefault();
         assert.equal(Editor.Project.roads.length, BaseRoadCount);
-        assert.equal(Editor.ImportJson(Exported), true, "ImportJson must restore full Road Studio project");
+        assert.equal(Editor.ImportJson(Exported), true, "ImportJson must restore full world-space Road Studio project");
         assert.ok(Editor.QuerySummary().BridgeCount >= 2, "Imported project must retain newly inserted highway bridge");
         Editor.ResetToDefault();
 
-        // ④ Live 480 Hz VehicleSolver Driving Up 2:1 Embankment Approach & Across Steel I-Girder Highway Bridge!
-        const DemoCompiled = CompileStudioProjectForWorld(makeDemo(), { LevelKey: "inversion" });
-        const Car = new VehicleSolver([]);
-        Car.Surfaces = DemoCompiled.PhysicsSurfaces;
-        Car.AeroGripScale = 1.0;
-        Car.Respawn([410.5, 102.0, 1.30], -Math.PI / 2 - 0.03);
-        let PeakZ = 0.0;
-        for (let Step = 0; Step < 360; ++Step)
+        // ④ Live 480 Hz VehicleSolver Driving:
+        //    (a) Straight out of the Inversion Arena (`X = 174, Y = +66`) through the open East Gateway (`X = 220.5`) onto `Arena Gateway Boulevard`!
+        const CombinedSurfaces = [...InversionArenaSurfaces, ...Editor.Compiled.PhysicsSurfaces];
+        const GatewayCar = new VehicleSolver(Scene.QueryObstacleBounds());
+        GatewayCar.Surfaces = CombinedSurfaces;
+        GatewayCar.AeroGripScale = 1.0;
+        GatewayCar.Respawn([174.0, 66.0, 0.78], (-4.0 * Math.PI) / 180.0);
+        for (let Step = 0; Step < 340; ++Step)
         {
-            Car.Advance({ Throttle: 1.0, Brake: 0.0, Steer: 0.0, Handbrake: false }, 1.0 / 60.0);
-            PeakZ = Math.max(PeakZ, Car.Position[2]);
-            assert.ok(Car.Position.every(Number.isFinite), "Vehicle pose on Road Studio embankment & highway bridge must stay finite");
+            GatewayCar.Advance({ Throttle: 1.0, Brake: 0.0, Steer: 0.0, Handbrake: false }, 1.0 / 60.0);
+            assert.ok(GatewayCar.Position.every(Number.isFinite), "Vehicle pose across East Gateway spline must stay finite");
         }
-        assert.ok(Car.Position[1] < 55.0, `Car must climb North embankment & cross onto Canal viaduct, reached Y=${Car.Position[1]}`);
-        assert.ok(PeakZ > 6.0, `Car must climb smoothly onto the +6.1 m Canal viaduct highway bridge deck, peak Z=${PeakZ}`);
+        assert.ok(GatewayCar.Position[0] > 232.0,
+                  `Car must drive seamlessly from Arena (X=174) through East Gateway (X=220.5) onto Road Studio spline, reached X=${GatewayCar.Position[0].toFixed(1)}`);
+
+        //    (b) Up the 2:1 `North Bridge Embankment` (`r03`, `X = 334, Y = +104 -> +38`) onto the `+6.2 m` `Steel I-Girder Viaduct` (`r04`)!
+        const BridgeCar = new VehicleSolver([]);
+        BridgeCar.Surfaces = CombinedSurfaces;
+        BridgeCar.AeroGripScale = 1.0;
+        BridgeCar.Respawn([334.0, 104.0, 1.05], -Math.PI / 2);
+        let PeakZ = 0.0;
+        for (let Step = 0; Step < 440; ++Step)
+        {
+            BridgeCar.Advance({ Throttle: 1.0, Brake: 0.0, Steer: 0.0, Handbrake: false }, 1.0 / 60.0);
+            PeakZ = Math.max(PeakZ, BridgeCar.Position[2]);
+            assert.ok(BridgeCar.Position.every(Number.isFinite), "Vehicle pose on Road Studio embankment & highway bridge must stay finite");
+        }
+        assert.ok(BridgeCar.Position[1] < 32.0, `Car must climb North embankment (Y=104->38) & cross onto Steel I-Girder Viaduct, reached Y=${BridgeCar.Position[1]}`);
+        assert.ok(PeakZ > 6.5, `Car must climb smoothly onto the +6.2 m Steel I-Girder Viaduct deck, peak Z=${PeakZ}`);
     }
     finally
     {
