@@ -294,6 +294,9 @@ RayTracingSpace::RayTracingSpace(DeviceExchange& Exchange) : Exchange_(Exchange)
 
 void RayTracingSpace::BuildHostHierarchy(const SceneStructure& Scene)
 {
+    // 📝 Rebuilding the acceleration structure replaces the retained TLAS bytes.
+    RetainedTlasValid_ = false;
+    UsedTlasEntries = 0;
     uint32_t EntryCursor    = TlasEntryCapacity;
     uint32_t TriangleCursor = 0;
     std::vector<FacetBlas> Results;
@@ -359,7 +362,7 @@ void RayTracingSpace::AttachHmiTextures(const std::shared_ptr<DeviceTextureView>
                                                     "Ray tracing march");
 }
 
-// 📝 Rebuilds the TLAS over every active, drawable occupant (ground first when present) and uploads entries [0, used).
+// 📝 Retains or rebuilds the TLAS over active drawable occupants (ground first), then uploads entries [0, used).
 void RayTracingSpace::RefreshTlas(SceneStructure& Scene, const std::array<bool, 4>* ShreddedWheels)
 {
     if (ShreddedWheels != nullptr)
@@ -372,34 +375,62 @@ void RayTracingSpace::RefreshTlas(SceneStructure& Scene, const std::array<bool, 
             else Scene.Occupants[Index].Participation &= ~OccupantParticipation::Shredded;
         }
     }
-    const auto&   Occupants = Scene.Occupants;
+    const auto& Occupants = Scene.Occupants;
     const int32_t GroundIndex = Scene.GroundOccupant;
-    const size_t  Capacity  = Occupants.size();
-    std::vector<uint32_t> Order(Capacity), OccupantIndices(Capacity);
-    std::vector<float> MinX(Capacity), MinY(Capacity), MinZ(Capacity), MaxX(Capacity), MaxY(Capacity), MaxZ(Capacity);
-    std::vector<float> CentX(Capacity), CentY(Capacity), CentZ(Capacity);
-    uint32_t ObjectCount = 0;
+    const bool HasGround = GroundIndex >= 0 && !Occupants[GroundIndex].Inactive && OccupantBlasRoot[GroundIndex] >= 0;
+    CurrentPlacements_.clear();
+    CurrentPlacements_.reserve(Occupants.size());
+    auto Include = [&](uint32_t Index) {
+        const WorldBounds Bounds = Scene.QueryWorldBounds(Index);
+        TlasPlacement Placement;
+        Placement.Occupant = Index;
+        Placement.BlasRoot = OccupantBlasRoot[Index];
+        for (size_t Axis = 0; Axis < 3; ++Axis)
+        {
+            Placement.Minimum[Axis] = static_cast<float>(Bounds.Minimum[Axis]);
+            Placement.Maximum[Axis] = static_cast<float>(Bounds.Maximum[Axis]);
+            Placement.Centre[Axis] = static_cast<float>(0.5 * (Bounds.Minimum[Axis] + Bounds.Maximum[Axis]));
+        }
+        CurrentPlacements_.push_back(Placement);
+    };
+    if (HasGround) Include(static_cast<uint32_t>(GroundIndex));
     for (uint32_t Index = 0; Index < Occupants.size(); ++Index)
     {
         if (static_cast<int32_t>(Index) == GroundIndex) continue;
         const OccupantEntry& Occupant = Occupants[Index];
-        if (Occupant.Inactive) continue;
-        if (OccupantBlasRoot[Index] < 0) continue;
-        const bool Drawable = (Occupant.Participation & OccupantParticipation::Raster) != 0 || Occupant.Fragment;
-        if (!Drawable) continue;
-        const WorldBounds Bounds = Scene.QueryWorldBounds(Index);
-        const uint32_t    K      = ObjectCount++;
-        Order[K]           = K;
-        OccupantIndices[K] = Index;
-        MinX[K] = static_cast<float>(Bounds.Minimum[0]);
-        MinY[K] = static_cast<float>(Bounds.Minimum[1]);
-        MinZ[K] = static_cast<float>(Bounds.Minimum[2]);
-        MaxX[K] = static_cast<float>(Bounds.Maximum[0]);
-        MaxY[K] = static_cast<float>(Bounds.Maximum[1]);
-        MaxZ[K] = static_cast<float>(Bounds.Maximum[2]);
-        CentX[K] = static_cast<float>(0.5 * (Bounds.Minimum[0] + Bounds.Maximum[0]));
-        CentY[K] = static_cast<float>(0.5 * (Bounds.Minimum[1] + Bounds.Maximum[1]));
-        CentZ[K] = static_cast<float>(0.5 * (Bounds.Minimum[2] + Bounds.Maximum[2]));
+        if (Occupant.Inactive || OccupantBlasRoot[Index] < 0) continue;
+        if ((Occupant.Participation & OccupantParticipation::Raster) == 0 && !Occupant.Fragment) continue;
+        Include(Index);
+    }
+    auto Identical = [](const TlasPlacement& Left, const TlasPlacement& Right) {
+        return Left.Occupant == Right.Occupant && Left.BlasRoot == Right.BlasRoot &&
+               std::memcmp(Left.Minimum.data(), Right.Minimum.data(), sizeof(Left.Minimum)) == 0 &&
+               std::memcmp(Left.Maximum.data(), Right.Maximum.data(), sizeof(Left.Maximum)) == 0 &&
+               std::memcmp(Left.Centre.data(), Right.Centre.data(), sizeof(Left.Centre)) == 0;
+    };
+    const int32_t EffectiveGround = HasGround ? GroundIndex : -1;
+    if (RetainedTlasValid_ && EffectiveGround == RetainedGround_ && CurrentPlacements_.size() == RetainedPlacements_.size() &&
+        std::equal(CurrentPlacements_.begin(), CurrentPlacements_.end(), RetainedPlacements_.begin(), Identical))
+    {
+        // 📝 Preserve the host-write notification and the device contents even on the unchanged path.
+        UploadTlas();
+        return;
+    }
+    RetainedPlacements_.swap(CurrentPlacements_);
+    RetainedGround_ = EffectiveGround;
+    RetainedTlasValid_ = true;
+    const uint32_t ObjectCount = static_cast<uint32_t>(RetainedPlacements_.size()) - (HasGround ? 1u : 0u);
+    std::vector<uint32_t> Order(ObjectCount), OccupantIndices(ObjectCount);
+    std::vector<float> MinX(ObjectCount), MinY(ObjectCount), MinZ(ObjectCount), MaxX(ObjectCount), MaxY(ObjectCount), MaxZ(ObjectCount);
+    std::vector<float> CentX(ObjectCount), CentY(ObjectCount), CentZ(ObjectCount);
+    for (uint32_t K = 0; K < ObjectCount; ++K)
+    {
+        const TlasPlacement& Placement = RetainedPlacements_[K + (HasGround ? 1u : 0u)];
+        Order[K] = K;
+        OccupantIndices[K] = Placement.Occupant;
+        MinX[K] = Placement.Minimum[0]; MinY[K] = Placement.Minimum[1]; MinZ[K] = Placement.Minimum[2];
+        MaxX[K] = Placement.Maximum[0]; MaxY[K] = Placement.Maximum[1]; MaxZ[K] = Placement.Maximum[2];
+        CentX[K] = Placement.Centre[0]; CentY[K] = Placement.Centre[1]; CentZ[K] = Placement.Centre[2];
     }
     auto WriteLeafEntry = [&](uint32_t EntryIndex, uint32_t K) {
         const uint32_t OccupantIndex = OccupantIndices[K];
@@ -411,7 +442,6 @@ void RayTracingSpace::RefreshTlas(SceneStructure& Scene, const std::array<bool, 
         StoreEntry(AllEntryBytes, EntryIndex, Bounds.Minimum, static_cast<uint32_t>(OccupantBlasRoot[OccupantIndex]), Bounds.Maximum,
                    TlasLeafBit | OccupantIndex);
     };
-    const bool HasGround = GroundIndex >= 0 && !Occupants[GroundIndex].Inactive && OccupantBlasRoot[GroundIndex] >= 0;
     ActiveInstances = ObjectCount + (HasGround ? 1u : 0u);
     if (ObjectCount == 0 && !HasGround)
     {
@@ -500,38 +530,48 @@ void RayTracingSpace::RefreshTlas(SceneStructure& Scene, const std::array<bool, 
                 if (MaxY[K] > BinMaxY[B]) BinMaxY[B] = MaxY[K];
                 if (MaxZ[K] > BinMaxZ[B]) BinMaxZ[B] = MaxZ[K];
             }
+            struct BinSpan
+            {
+                uint32_t Count = 0;
+                double MinX = INFINITY, MinY = INFINITY, MinZ = INFINITY;
+                double MaxX = -INFINITY, MaxY = -INFINITY, MaxZ = -INFINITY;
+            };
+            auto IncludeBin = [&](BinSpan& Span, int Bin, bool Earlier) {
+                if (BinCounts[Bin] == 0) return;
+                Span.Count += BinCounts[Bin];
+                // 📝 The suffix is scanned backwards, so an earlier equal value wins, matching the original ascending scan.
+                if (BinMinX[Bin] < Span.MinX || (Earlier && BinMinX[Bin] == Span.MinX)) Span.MinX = BinMinX[Bin];
+                if (BinMinY[Bin] < Span.MinY || (Earlier && BinMinY[Bin] == Span.MinY)) Span.MinY = BinMinY[Bin];
+                if (BinMinZ[Bin] < Span.MinZ || (Earlier && BinMinZ[Bin] == Span.MinZ)) Span.MinZ = BinMinZ[Bin];
+                if (BinMaxX[Bin] > Span.MaxX || (Earlier && BinMaxX[Bin] == Span.MaxX)) Span.MaxX = BinMaxX[Bin];
+                if (BinMaxY[Bin] > Span.MaxY || (Earlier && BinMaxY[Bin] == Span.MaxY)) Span.MaxY = BinMaxY[Bin];
+                if (BinMaxZ[Bin] > Span.MaxZ || (Earlier && BinMaxZ[Bin] == Span.MaxZ)) Span.MaxZ = BinMaxZ[Bin];
+            };
+            std::array<BinSpan, TlasBinCount> Prefix{}, Suffix{};
+            BinSpan Span;
+            for (int Bin = 0; Bin < TlasBinCount; ++Bin)
+            {
+                IncludeBin(Span, Bin, false);
+                Prefix[Bin] = Span;
+            }
+            Span = BinSpan{};
+            for (int Bin = TlasBinCount - 1; Bin >= 0; --Bin)
+            {
+                IncludeBin(Span, Bin, true);
+                Suffix[Bin] = Span;
+            }
             double BestCost  = INFINITY;
             double BestSplit = 0.5 * (Low + High);
             for (int Split = 1; Split < TlasBinCount; ++Split)
             {
-                uint32_t LC = 0, RC = 0;
-                double LMinX = INFINITY, LMinY = INFINITY, LMinZ = INFINITY, LMaxX = -INFINITY, LMaxY = -INFINITY, LMaxZ = -INFINITY;
-                double RMinX = INFINITY, RMinY = INFINITY, RMinZ = INFINITY, RMaxX = -INFINITY, RMaxY = -INFINITY, RMaxZ = -INFINITY;
-                for (int B = 0; B < TlasBinCount; ++B)
-                {
-                    if (BinCounts[B] == 0) continue;
-                    if (B < Split)
-                    {
-                        LC += BinCounts[B];
-                        if (BinMinX[B] < LMinX) LMinX = BinMinX[B];
-                        if (BinMinY[B] < LMinY) LMinY = BinMinY[B];
-                        if (BinMinZ[B] < LMinZ) LMinZ = BinMinZ[B];
-                        if (BinMaxX[B] > LMaxX) LMaxX = BinMaxX[B];
-                        if (BinMaxY[B] > LMaxY) LMaxY = BinMaxY[B];
-                        if (BinMaxZ[B] > LMaxZ) LMaxZ = BinMaxZ[B];
-                    }
-                    else
-                    {
-                        RC += BinCounts[B];
-                        if (BinMinX[B] < RMinX) RMinX = BinMinX[B];
-                        if (BinMinY[B] < RMinY) RMinY = BinMinY[B];
-                        if (BinMinZ[B] < RMinZ) RMinZ = BinMinZ[B];
-                        if (BinMaxX[B] > RMaxX) RMaxX = BinMaxX[B];
-                        if (BinMaxY[B] > RMaxY) RMaxY = BinMaxY[B];
-                        if (BinMaxZ[B] > RMaxZ) RMaxZ = BinMaxZ[B];
-                    }
-                }
+                const BinSpan& Left = Prefix[Split - 1];
+                const BinSpan& Right = Suffix[Split];
+                const uint32_t LC = Left.Count, RC = Right.Count;
                 if (LC == 0 || RC == 0) continue;
+                const double LMinX = Left.MinX, LMinY = Left.MinY, LMinZ = Left.MinZ;
+                const double LMaxX = Left.MaxX, LMaxY = Left.MaxY, LMaxZ = Left.MaxZ;
+                const double RMinX = Right.MinX, RMinY = Right.MinY, RMinZ = Right.MinZ;
+                const double RMaxX = Right.MaxX, RMaxY = Right.MaxY, RMaxZ = Right.MaxZ;
                 const double Lx = std::max(0.0, LMaxX - LMinX), Ly = std::max(0.0, LMaxY - LMinY), Lz = std::max(0.0, LMaxZ - LMinZ);
                 const double Rx = std::max(0.0, RMaxX - RMinX), Ry = std::max(0.0, RMaxY - RMinY), Rz = std::max(0.0, RMaxZ - RMinZ);
                 const double Cost = (Lx * Ly + Ly * Lz + Lz * Lx) * LC + (Rx * Ry + Ry * Rz + Rz * Rx) * RC;

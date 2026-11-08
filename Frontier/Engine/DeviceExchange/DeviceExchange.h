@@ -501,6 +501,10 @@ class DeviceExchange
     bool EnsureStaging(VkDeviceSize ByteCount);
     void TransitionToGeneral(VkCommandBuffer Stream, DeviceTexture& Texture);
     bool ExecuteImmediately(const std::function<void(VkCommandBuffer)>& Record, std::string* OutFailure = nullptr);
+    [[nodiscard]] bool HasPendingWrites() const noexcept;
+    void RecordPendingWrites(VkCommandBuffer Stream);
+    void ClearPendingWrites() noexcept;
+    bool ConstructWriteSequence(VkCommandBuffer& OutStream, std::string* OutFailure);
     std::string DescribeSubmissionPoint() const;
 
     struct PendingRegionWrite

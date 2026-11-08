@@ -63,7 +63,17 @@ class RayTracingSpace
     std::shared_ptr<DescriptorGroup>   MarchGroup{};
 
   private:
+    struct TlasPlacement
+    {
+        uint32_t Occupant = 0;
+        int64_t BlasRoot = -1;
+        std::array<float, 3> Minimum{}, Maximum{}, Centre{};
+    };
     DeviceExchange& Exchange_;
+    std::vector<TlasPlacement> RetainedPlacements_{};
+    std::vector<TlasPlacement> CurrentPlacements_{};
+    int32_t RetainedGround_ = -1;
+    bool RetainedTlasValid_ = false;
 };
 
 } // namespace Frontier::GlobalIllumination

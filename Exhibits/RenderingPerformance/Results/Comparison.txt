@@ -1,0 +1,81 @@
+Baseline: 7dee22cc8a09243e50daedde114a82f203d50d88
+Platform: Linux-6.1.158+-x86_64-with-glibc2.36
+Compiler: g++ (Debian 12.2.0-14+deb12u1) 12.2.0 -std=c++20 -O3 -DNDEBUG
+Vulkan driver: /home/user/Frontier/ExternalPackages/VulkanCompute/SwiftShader/libvulkan.so.1
+device: SwiftShader Device (Subzero)
+[PASS] submit overlapping and disjoint writes
+  upload plus command submissions: 2
+[PASS] copy observes the last overlapping write
+[PASS] submit image transitions and layered writes
+[PASS] overlapping image writes retain order
+[PASS] independent image layer intact
+[PASS] submit dependent command series
+  upload plus two series submissions: 3
+[PASS] series dependencies preserve data
+[PASS] explicit flush reaches device
+[PASS] empty series flushes writes
+[PASS] readback flushes pending writes
+[PASS] submit without writes uses one submission
+[PASS] pending write retains texture
+[PASS] texture released after completion
+[PASS] no exchange faults
+DeviceSubmissionValidation: 0 failures
+device: SwiftShader Device (Subzero)
+[PASS] submit overlapping and disjoint writes
+  upload plus command submissions: 1
+[PASS] uploads and commands use one submission
+[PASS] copy observes the last overlapping write
+[PASS] submit image transitions and layered writes
+[PASS] overlapping image writes retain order
+[PASS] independent image layer intact
+[PASS] submit dependent command series
+  upload plus two series submissions: 2
+[PASS] series attaches uploads to first sequence
+[PASS] series dependencies preserve data
+[PASS] explicit flush reaches device
+[PASS] empty series flushes writes
+[PASS] readback flushes pending writes
+[PASS] submit without writes uses one submission
+[PASS] pending write retains texture
+[PASS] texture released after completion
+[PASS] no exchange faults
+DeviceSubmissionValidation: 0 failures
+device: SwiftShader Device (Subzero)
+[PASS] submit overlapping and disjoint writes
+  upload plus command submissions: 1
+[PASS] copy observes the last overlapping write
+[PASS] submit image transitions and layered writes
+[PASS] overlapping image writes retain order
+[PASS] independent image layer intact
+[PASS] submit dependent command series
+  upload plus two series submissions: 2
+[PASS] series dependencies preserve data
+[PASS] explicit flush reaches device
+[PASS] empty series flushes writes
+[PASS] readback flushes pending writes
+[PASS] submit without writes uses one submission
+[PASS] pending write retains texture
+[PASS] texture released after completion
+[PASS] staging growth flushes earlier writes
+[PASS] pre-growth upload reaches recorded copy
+[PASS] grown zero fill complete
+[PASS] no exchange faults
+DeviceSubmissionValidation: 0 failures
+[PASS] unchanged TLAS notifies the write observer
+[PASS] unchanged TLAS reaches device
+[PASS] replacement region receives TLAS
+[PASS] moved TLAS reaches device
+RayTracingRefreshValidation: 0 failures
+TLAS snapshots: 151 baseline and 151 current cases; identical 3892248 bytes; SHA-256 73f6cbcf9da49806c3d0004bf83ad91c9030f0b8acddef293976b7b1d3eb30af
+Measurements: medians of 3 alternating process pairs, 7 timed rounds each
+submission: baseline=0.287939 ms, current=0.111543 ms, ratio=2.58x
+  baseline samples: 0.211913, 0.287939, 0.291706
+  current samples:  0.085481, 0.119201, 0.111543
+unchanged: baseline=0.193936 ms, current=0.023511 ms, ratio=8.25x
+  baseline samples: 0.193936, 0.213401, 0.181095
+  current samples:  0.023857, 0.023511, 0.019114
+moving: baseline=0.212703 ms, current=0.195016 ms, ratio=1.09x
+  baseline samples: 0.217611, 0.212703, 0.181257
+  current samples:  0.200745, 0.195016, 0.161709
+Each submission round: 500 x 16 KiB upload + copy, including the fence wait.
+Each TLAS round: 200 host refreshes, ProvingGround, 2,094 occupants.

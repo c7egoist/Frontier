@@ -166,6 +166,18 @@ if(TARGET Frontier)
 endif()
 
 if(BUILD_TESTING)
+    add_executable(DeviceSubmissionValidation Exhibits/RenderingPerformance/Code/DeviceSubmissionValidation.cpp)
+    target_link_libraries(DeviceSubmissionValidation PRIVATE FrontierGlobalIllumination)
+    add_test(NAME DeviceSubmissionValidation COMMAND DeviceSubmissionValidation --expect-batched)
+    set_tests_properties(DeviceSubmissionValidation PROPERTIES RUN_SERIAL TRUE)
+    add_executable(RayTracingRefreshValidation Exhibits/RenderingPerformance/Code/RayTracingRefreshValidation.cpp)
+    target_link_libraries(RayTracingRefreshValidation PRIVATE FrontierGlobalIllumination)
+    add_test(NAME RayTracingRefreshValidation COMMAND RayTracingRefreshValidation
+        "${CMAKE_SOURCE_DIR}/EngineContent/EnvironmentArchives/ProvingGround/ProvingGround.facetspace")
+    add_test(NAME RayTracingTransferValidation COMMAND RayTracingRefreshValidation
+        "${CMAKE_SOURCE_DIR}/EngineContent/EnvironmentArchives/ProvingGround/ProvingGround.facetspace" --vulkan)
+    set_tests_properties(RayTracingTransferValidation PROPERTIES RUN_SERIAL TRUE)
+
     # 📝 Offscreen scene viewport frames (own device, same code path as the editor) — Exhibits/SceneViewport/README.md.
     add_executable(SceneViewportValidation
         Exhibits/SceneViewport/Code/SceneViewportValidation.cpp

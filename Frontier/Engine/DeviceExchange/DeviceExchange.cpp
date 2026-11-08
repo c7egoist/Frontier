@@ -1405,60 +1405,102 @@ VkResult DeviceExchange::ProbeDevice() noexcept
     return Functions_->vkQueueWaitIdle(Queue_);
 }
 
-bool DeviceExchange::FlushWrites(std::string* OutDiagnostic)
+bool DeviceExchange::HasPendingWrites() const noexcept
 {
-    if (PendingRegions_.empty() && PendingTextures_.empty() && PendingTransitions_.empty()) return true;
-    auto Transitions = std::move(PendingTransitions_);
-    auto Regions     = std::move(PendingRegions_);
-    auto Textures    = std::move(PendingTextures_);
+    return !PendingRegions_.empty() || !PendingTextures_.empty() || !PendingTransitions_.empty();
+}
+
+void DeviceExchange::RecordPendingWrites(VkCommandBuffer Stream)
+{
+    RecordGlobalDependency(*Functions_, Stream);
+    for (auto& Texture : PendingTransitions_)
+    {
+        if (Texture && Texture->Image != VK_NULL_HANDLE) TransitionToGeneral(Stream, *Texture);
+    }
+    RecordGlobalDependency(*Functions_, Stream);
+    // 📝 Queue writes land in the order they were issued (a region's zero fill, then its contents). Copies without a
+    //    barrier between them may run concurrently on a GPU, so a write that overlaps an earlier one of this flush
+    //    waits for it; writes to disjoint ranges still run together.
+    std::vector<std::tuple<VkBuffer, VkDeviceSize, VkDeviceSize>> Written;
+    for (const auto& Write : PendingRegions_)
+    {
+        if (!Write.Region || Write.Region->Handle == VK_NULL_HANDLE) continue;
+        if (Write.StagingOffset + Write.ByteCount > StagingCapacity_) continue;
+        const VkDeviceSize Start = Write.TargetOffset, End = Write.TargetOffset + Write.ByteCount;
+        const bool Overlaps = std::any_of(Written.begin(), Written.end(), [&](const auto& Earlier) {
+            return std::get<0>(Earlier) == Write.Region->Handle && Start < std::get<2>(Earlier) && std::get<1>(Earlier) < End;
+        });
+        if (Overlaps)
+        {
+            RecordGlobalDependency(*Functions_, Stream);
+            Written.clear();
+        }
+        Written.emplace_back(Write.Region->Handle, Start, End);
+        VkBufferCopy Copy{Write.StagingOffset, Write.TargetOffset, Write.ByteCount};
+        Functions_->vkCmdCopyBuffer(Stream, StagingHandle_, Write.Region->Handle, 1, &Copy);
+    }
+    std::vector<VkImage> Imaged;
+    for (const auto& Write : PendingTextures_)
+    {
+        if (!Write.Texture || Write.Texture->Image == VK_NULL_HANDLE) continue;
+        if (std::find(Imaged.begin(), Imaged.end(), Write.Texture->Image) != Imaged.end())
+        {
+            RecordGlobalDependency(*Functions_, Stream);
+            Imaged.clear();
+        }
+        Imaged.push_back(Write.Texture->Image);
+        Functions_->vkCmdCopyBufferToImage(Stream, StagingHandle_, Write.Texture->Image, VK_IMAGE_LAYOUT_GENERAL, 1, &Write.Copy);
+    }
+    RecordGlobalDependency(*Functions_, Stream);
+}
+
+void DeviceExchange::ClearPendingWrites() noexcept
+{
     PendingTransitions_.clear();
     PendingRegions_.clear();
     PendingTextures_.clear();
-    std::string Failure;
-    const bool Executed = ExecuteImmediately([&](VkCommandBuffer Stream) {
-        RecordGlobalDependency(*Functions_, Stream);
-        for (auto& Texture : Transitions)
-        {
-            if (Texture && Texture->Image != VK_NULL_HANDLE) TransitionToGeneral(Stream, *Texture);
-        }
-        RecordGlobalDependency(*Functions_, Stream);
-        // 📝 Queue writes land in the order they were issued (a region's zero fill, then its contents). Copies without a
-        //    barrier between them may run concurrently on a GPU, so a write that overlaps an earlier one of this flush
-        //    waits for it; writes to disjoint ranges still run together.
-        std::vector<std::tuple<VkBuffer, VkDeviceSize, VkDeviceSize>> Written;
-        for (const auto& Write : Regions)
-        {
-            if (!Write.Region || Write.Region->Handle == VK_NULL_HANDLE) continue;
-            if (Write.StagingOffset + Write.ByteCount > StagingCapacity_) continue;
-            const VkDeviceSize Start = Write.TargetOffset, End = Write.TargetOffset + Write.ByteCount;
-            const bool Overlaps = std::any_of(Written.begin(), Written.end(), [&](const auto& Earlier) {
-                return std::get<0>(Earlier) == Write.Region->Handle && Start < std::get<2>(Earlier) && std::get<1>(Earlier) < End;
-            });
-            if (Overlaps)
-            {
-                RecordGlobalDependency(*Functions_, Stream);
-                Written.clear();
-            }
-            Written.emplace_back(Write.Region->Handle, Start, End);
-            VkBufferCopy Copy{Write.StagingOffset, Write.TargetOffset, Write.ByteCount};
-            Functions_->vkCmdCopyBuffer(Stream, StagingHandle_, Write.Region->Handle, 1, &Copy);
-        }
-        std::vector<VkImage> Imaged;
-        for (const auto& Write : Textures)
-        {
-            if (!Write.Texture || Write.Texture->Image == VK_NULL_HANDLE) continue;
-            if (std::find(Imaged.begin(), Imaged.end(), Write.Texture->Image) != Imaged.end())
-            {
-                RecordGlobalDependency(*Functions_, Stream);
-                Imaged.clear();
-            }
-            Imaged.push_back(Write.Texture->Image);
-            Functions_->vkCmdCopyBufferToImage(Stream, StagingHandle_, Write.Texture->Image, VK_IMAGE_LAYOUT_GENERAL, 1, &Write.Copy);
-        }
-        RecordGlobalDependency(*Functions_, Stream);
-    }, &Failure);
     StagingCursor_ = 0;
-    if (!Executed)
+}
+
+bool DeviceExchange::ConstructWriteSequence(VkCommandBuffer& OutStream, std::string* OutFailure)
+{
+    OutStream = VK_NULL_HANDLE;
+    if (!HasPendingWrites()) return true;
+    VkCommandBufferAllocateInfo Allocate{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+    Allocate.commandPool = CommandPool_;
+    Allocate.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    Allocate.commandBufferCount = 1;
+    VkResult Result = Functions_->vkAllocateCommandBuffers(Device_, &Allocate, &OutStream);
+    if (Result != VK_SUCCESS)
+    {
+        ReportDiagnostic(OutFailure, "vkAllocateCommandBuffers returned " + NameResult(Result));
+        return false;
+    }
+    VkCommandBufferBeginInfo Begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    Begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    Result = Functions_->vkBeginCommandBuffer(OutStream, &Begin);
+    if (Result == VK_SUCCESS)
+    {
+        RecordPendingWrites(OutStream);
+        Result = Functions_->vkEndCommandBuffer(OutStream);
+    }
+    if (Result != VK_SUCCESS)
+    {
+        Functions_->vkFreeCommandBuffers(Device_, CommandPool_, 1, &OutStream);
+        OutStream = VK_NULL_HANDLE;
+        ReportDiagnostic(OutFailure, "recording staged writes returned " + NameResult(Result));
+        return false;
+    }
+    return true;
+}
+
+bool DeviceExchange::FlushWrites(std::string* OutDiagnostic)
+{
+    if (!HasPendingWrites()) return true;
+    std::string Failure;
+    const bool Executed = ExecuteImmediately([&](VkCommandBuffer Stream) { RecordPendingWrites(Stream); }, &Failure);
+    if (Executed) ClearPendingWrites();
+    else
     {
         const std::string Report = "staged write submission failed: " + Failure + " — " + DescribeSubmissionPoint();
         RecordFault(Report);
@@ -1487,36 +1529,64 @@ CommandSequence DeviceExchange::BeginSequence()
 
 bool DeviceExchange::Submit(CommandSequence& Sequence, std::string* OutDiagnostic)
 {
-    // ① staged writes execute first (they were issued before this submission), ② then the recorded commands.
-    if (!FlushWrites(OutDiagnostic)) return false;
-    VkCommandBuffer Stream = Sequence.Stream();
-    Functions_->vkEndCommandBuffer(Stream);
+    VkCommandBuffer RenderStream = Sequence.Stream();
+    VkCommandBuffer WriteStream = VK_NULL_HANDLE;
+    std::string Failure;
+    if (!ConstructWriteSequence(WriteStream, &Failure))
+    {
+        Functions_->vkEndCommandBuffer(RenderStream);
+        Functions_->vkFreeCommandBuffers(Device_, CommandPool_, 1, &RenderStream);
+        const std::string Report = "staged write recording failed: " + Failure + " — " + DescribeSubmissionPoint();
+        RecordFault(Report);
+        ReportDiagnostic(OutDiagnostic, Report);
+        return false;
+    }
+    // 📝 Both sequences use one submission and fence; the final upload dependency orders the recorded commands.
+    //    Pending resources and the staging allocation remain retained until that fence signals.
+    std::array<VkCommandBuffer, 2> Streams{RenderStream, VK_NULL_HANDLE};
+    uint32_t StreamCount = 1;
+    if (WriteStream != VK_NULL_HANDLE)
+    {
+        Streams = {WriteStream, RenderStream};
+        StreamCount = 2;
+    }
+    auto ReleaseStreams = [&]() { Functions_->vkFreeCommandBuffers(Device_, CommandPool_, StreamCount, Streams.data()); };
+    VkResult Result = Functions_->vkEndCommandBuffer(RenderStream);
+    if (Result == VK_SUCCESS) Result = Functions_->vkResetFences(Device_, 1, &SubmitFence_);
+    if (Result != VK_SUCCESS)
+    {
+        ReleaseStreams();
+        const std::string Report = "preparing the submission returned " + NameResult(Result) + " — " + DescribeSubmissionPoint();
+        RecordFault(Report);
+        ReportDiagnostic(OutDiagnostic, Report);
+        return false;
+    }
     VkSubmitInfo Submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
-    Submit.commandBufferCount = 1;
-    Submit.pCommandBuffers    = &Stream;
-    Functions_->vkResetFences(Device_, 1, &SubmitFence_);
-    // 🔍 FRONTIER_DEVICE_TRACE=1 names every submission on stderr before it runs (a driver crash then names its work).
+    Submit.commandBufferCount = StreamCount;
+    Submit.pCommandBuffers = Streams.data();
+    // 🔍 FRONTIER_DEVICE_TRACE=1 names every submission on stderr before it runs.
     static const bool Trace = std::getenv("FRONTIER_DEVICE_TRACE") != nullptr;
     if (Trace) std::fprintf(stderr, "[DeviceExchange] submission %llu: %s\n", static_cast<unsigned long long>(CompletedSubmissions_ + 1), SubmissionLabel_.c_str());
-    const VkResult Submitted = Functions_->vkQueueSubmit(Queue_, 1, &Submit, SubmitFence_);
-    if (Submitted != VK_SUCCESS)
+    Result = Functions_->vkQueueSubmit(Queue_, 1, &Submit, SubmitFence_);
+    if (Result != VK_SUCCESS)
     {
-        Functions_->vkFreeCommandBuffers(Device_, CommandPool_, 1, &Stream);
-        const std::string Report = "vkQueueSubmit returned " + NameResult(Submitted) + " — " + DescribeSubmissionPoint();
+        ReleaseStreams();
+        const std::string Report = "vkQueueSubmit returned " + NameResult(Result) + " — " + DescribeSubmissionPoint();
         RecordFault(Report);
         ReportDiagnostic(OutDiagnostic, Report);
         return false;
     }
-    VkResult Waited = Functions_->vkWaitForFences(Device_, 1, &SubmitFence_, VK_TRUE, UINT64_MAX);
-    if (Waited == VK_SUCCESS) Waited = Functions_->vkGetFenceStatus(Device_, SubmitFence_);
-    Functions_->vkFreeCommandBuffers(Device_, CommandPool_, 1, &Stream);
-    if (Waited != VK_SUCCESS)
+    Result = Functions_->vkWaitForFences(Device_, 1, &SubmitFence_, VK_TRUE, UINT64_MAX);
+    if (Result == VK_SUCCESS) Result = Functions_->vkGetFenceStatus(Device_, SubmitFence_);
+    ReleaseStreams();
+    if (Result != VK_SUCCESS)
     {
-        const std::string Report = "the submission's fence wait returned " + NameResult(Waited) + " — " + DescribeSubmissionPoint();
+        const std::string Report = "the submission's fence wait returned " + NameResult(Result) + " — " + DescribeSubmissionPoint();
         RecordFault(Report);
         ReportDiagnostic(OutDiagnostic, Report);
         return false;
     }
+    if (WriteStream != VK_NULL_HANDLE) ClearPendingWrites();
     ++CompletedSubmissions_;
     CompletedLabel_ = SubmissionLabel_;
     return true;
@@ -1524,7 +1594,8 @@ bool DeviceExchange::Submit(CommandSequence& Sequence, std::string* OutDiagnosti
 
 bool DeviceExchange::SubmitSeries(std::span<CommandSequence* const> Series, std::span<const std::string> Labels, std::string* OutDiagnostic)
 {
-    bool Healthy = FlushWrites(OutDiagnostic);
+    // 📝 An empty series still acts as an explicit flush; otherwise the first sequence carries the uploads.
+    bool Healthy = Series.empty() ? FlushWrites(OutDiagnostic) : true;
     for (size_t Index = 0; Index < Series.size(); ++Index)
     {
         if (!Healthy)

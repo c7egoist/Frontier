@@ -2,6 +2,12 @@
 
 Single progress and violation tracker. Detailed evidence belongs in Exhibits, not competing progress reports.
 
+## Vulkan submission and TLAS refresh (2026-11-08)
+
+- Combined queued uploads with the next command submission and retained unchanged TLAS inputs; changed-scene SAH scans use ordered bin spans. No rendering-quality settings changed.
+- Focused SwiftShader validation and 151 byte-identical original/current TLAS snapshots pass. CPU/software-driver measurements and reproduction commands: [RenderingPerformance](../Exhibits/RenderingPerformance/README.md).
+- Hardware-GPU frame profiling, the native Windows runtime, Vulkan validation layers and the full repository suite remain unverified for this commit.
+
 ## Fluid Plume Editor parity pass (2026-11-07, branch `arena/8ff1f043-frontier`)
 
 - `FluidPlumeInspector` now occupies the inspector column and uses the shared page controls. `FluidPlumeEditor` retains the GPU solver/raymarch path, four document slots, orbit/brush/burst/collider interaction, sidecar/TOML I/O, undo/redo, and RGBA flipbook export.
