@@ -17,7 +17,7 @@ import { TyreMarkDepot, TyreMarkLayout } from "./TyreMarkDepot.js";
 import { OccupantDistanceSpace } from "./OccupantDistanceSpace.js";
 import { SceneDistanceSpace, ResolveMovedBounds } from "./SceneDistanceSpace.js";
 import { RayTracingSpace } from "./RayTracingSpace.js";
-import { ResolveLevelPlacements } from "./LevelStructure.js";
+import { LevelCatalog, ResolveLevelDescriptor } from "./LevelStructure.js";
 import { SurfaceCardDepot } from "./SurfaceCardDepot.js";
 import { AtmosphereIntegrator } from "./AtmosphereIntegrator.js";
 import { ShadowProjection } from "./ShadowProjection.js";
@@ -39,7 +39,8 @@ import { ConeSequence } from "./ConeSequence.js";
 import { EffectSequence } from "./EffectSequence.js";
 import { RecoveryDirector, RecoveryReasons } from "./RecoveryDirector.js";
 import { TrainingSequence } from "./TrainingSequence.js";
-import { SpawnPoint, ResolveCourseHeight } from "./CourseStructure.js";
+import { SpawnPoint, ResolveCourseHeight, AssignCourseReliefEnabled, AssignExcavationCutouts } from "./CourseStructure.js";
+import { BollardSequence } from "./BollardSequence.js";
 import { TyreThermalSolver, IgnitionModes } from "./TyreThermalSolver.js";
 import { SmokeSequence, ConstructGasParameters } from "./SmokeSequence.js";
 import { VehicleSolver } from "./VehicleSolver.js";
@@ -47,7 +48,7 @@ import { DriverInputIntegrator } from "./DriverInputIntegrator.js";
 import { ChaseCameraSolver, FreeCameraSolver } from "./ChaseCameraSolver.js";
 import { ConstructViewTransform, ConstructPerspectiveTransform, MultiplyTransform, InvertTransform, NormalizeVector,
          SubtractVector, MultiplyAddVector, ProjectRadicalInverse, TransformPoint, TransformDirection, CrossVector, AddVector,
-         ScaleVector, LengthVector } from "./TransformProjection.js";
+         ScaleVector, LengthVector, RotateVector } from "./TransformProjection.js";
 import { VehicleVisualState, VehicleRecordBytes } from "./VehicleVisualState.js";
 import { ConstructHullPoints, HullPointRadius } from "./HullStructure.js";
 import { SparkSequence } from "./SparkSequence.js";
@@ -102,11 +103,20 @@ class IlluminationHost
     constructor()
     {
         const Query = new URLSearchParams(location.search);
+        const RequestedLevel = Query.get("level");
+        this.LevelKey = LevelCatalog.some((Entry) => Entry.Key === RequestedLevel) ? RequestedLevel : "inversion";
+        this.LevelDescriptor = ResolveLevelDescriptor(this.LevelKey);
+        this.Spawn = this.LevelDescriptor.Spawn;
+        this.LevelZones = this.LevelDescriptor.Zones;
+        AssignCourseReliefEnabled(this.LevelDescriptor.Relief);
+        AssignExcavationCutouts(this.LevelDescriptor.PhysicsCutouts || []);
         this.GradeName = QualityGrades[Query.get("quality")] ? Query.get("quality") : "high";
         this.Grade = { ...QualityGrades[this.GradeName] };
         if (Query.has("scale"))
             this.Grade.RenderScale = Math.max(0.25, Math.min(2.0, Number(Query.get("scale"))));
         this.Settings = {
+            Level: this.LevelKey,
+            AeroGripScale: this.LevelDescriptor.AeroGrip,
             Inspection: Number(Query.get("inspection") || 0), DistanceInspection: 1, InsetEnabled: false, SliceHeight: 0.6,
             HudVisible: false, PanelVisible: true,
             SmokeEnabled: true, SmokeResolution: 2, IgnitionMode: 0, ThermalGrip: false, LineLock: true,
@@ -191,8 +201,11 @@ class IlluminationHost
         this.Shaders = new ShaderInterchange(this.Exchange, "Shader");
         await this.Shaders.RetrieveSources(ShaderSources);
         this.Scene = new SceneStructure();
-        await this.Scene.ConstructScene("Archive", this.StressCapacity);
+        await this.Scene.ConstructScene("Archive", this.StressCapacity, this.LevelKey);
         this.Vehicle = new VehicleSolver(this.Scene.QueryObstacleBounds());
+        this.Vehicle.Surfaces = this.LevelDescriptor.Surfaces;
+        this.Vehicle.AeroGripScale = this.Settings.AeroGripScale;
+        this.Vehicle.Respawn([this.Spawn.Position[0], this.Spawn.Position[1], VehicleGeometry.CoMHeight + 0.02], this.Spawn.Yaw);
         // 📝 The body's own hull: ~700 points ray-cast from its facets (HullStructure.js) meet the course and the boxes.
         this.Vehicle.AssignHullPoints(ConstructHullPoints(this.Scene.FacetSets[this.Scene.VehicleBodySet].Facets), HullPointRadius);
         this.PositionVehicle();
@@ -234,7 +247,7 @@ class IlluminationHost
         this.RayTracing = new RayTracingSpace(this.Exchange);
         this.RayTracing.ConstructResources(this.Scene);
 
-        this.StreetLampPoles = ResolveLevelPlacements()
+        this.StreetLampPoles = this.LevelDescriptor.Placements()
             .filter((P) => P.Shape === "PoleHead")
             .map((P) => ({ X: P.Position[0], Y: P.Position[1], Z: P.Position[2] }));
         this.Constants = {
@@ -283,15 +296,20 @@ class IlluminationHost
         this.ReportProgress("Building the scene distance field cascades", 0.70);
         this.Distance = new SceneDistanceSpace(this.Exchange, this.Shaders, { ClipCount: 4, Resolution: this.Grade.ClipResolution,
                                                                              FinestVoxel: this.Grade.FinestVoxel, BandVoxels: 6, HitFraction: 0.2 });
+        this.Distance.Cutouts = this.LevelDescriptor.DistanceCutouts || [];
         await this.Distance.ConstructResources(this.Volumes.TextureView, this.OccupantRecords);
         this.Distance.UploadDistanceList(this.Scene.DistanceList);
         await this.Volumes.ConstructFragmentProgram();
         this.Stress = new StressSequence(this);
         // 📝 The rigid-body world every loose thing shares: debris and cones; the car's wheels can ride heavy pieces.
-        this.Bodies = await JoltWorld.Create();
+        this.Bodies = await JoltWorld.Create({
+            CourseRelief: this.LevelDescriptor.Relief,
+            TerrainHulls: this.LevelDescriptor.TerrainHulls
+        });
         this.Bodies.AssignObstacles(this.Scene.QueryObstacleBounds());
         this.Vehicle.Support = this.Bodies;
         this.Cones = new ConeSequence(this);
+        this.Bollards = new BollardSequence(this);
         this.ReportProgress("Baking fracture patterns", 0.72);
         this.Fracture = new FractureSequence(this);
 
@@ -354,6 +372,7 @@ class IlluminationHost
         this.Cards.CaptureCards(this.Scene, this.VertexRecords);
         this.Driver = new DriverInputIntegrator();
         this.Chase = new ChaseCameraSolver();
+        this.Chase.Surfaces = this.LevelDescriptor.Surfaces || [];
         this.Orbit = new VehicleOrbitCamera();
         this.Flight = new FreeCameraSolver();
         this.Training = new TrainingSequence(this);
@@ -441,6 +460,17 @@ class IlluminationHost
             this.Cabin.Settings.SeeThroughGlass = !!this.Settings.SeeThroughGlass;
         else if (Key === "ClearSmoke")
             this.Smoke.Clear();
+        else if (Key === "Level")
+        {
+            const Query = new URLSearchParams(location.search);
+            Query.set("level", this.Settings.Level);
+            location.search = Query.toString();
+        }
+        else if (Key === "AeroGripScale")
+        {
+            if (this.Vehicle)
+                this.Vehicle.AeroGripScale = this.Settings.AeroGripScale;
+        }
         else if (Key === "Quality")
         {
             const Query = new URLSearchParams(location.search);
@@ -664,6 +694,12 @@ class IlluminationHost
                     this.PriorValid = false;
                 }
             }
+            if (Event.code.startsWith("Digit") && !Event.repeat && !Event.ctrlKey && !Event.metaKey && !Event.altKey)
+            {
+                const ZoneSlot = Number(Event.code.slice(5)) - 1;
+                if (ZoneSlot >= 0 && this.LevelZones && ZoneSlot < this.LevelZones.length)
+                    this.TeleportVehicle(this.LevelZones[ZoneSlot]);
+            }
             for (const [Name, Code] of Object.entries(OverlayKeys))
                 if (Event.code === Code && !Event.repeat && !Event.ctrlKey && !Event.metaKey && !Event.altKey)
                     this.Dock.Toggle(Name);
@@ -816,8 +852,9 @@ class IlluminationHost
     RespawnVehicle(Instant = false)
     {
         const Drill = this.Training ? this.Training.QueryActiveDrill() : null;
+        const BaseSpawn = this.Spawn || SpawnPoint;
         const Destination = Drill ? { Position: Drill.Teleport.Position.slice(), Yaw: Drill.Teleport.Yaw * Math.PI / 180.0 }
-                                  : { Position: SpawnPoint.Position.slice(0, 2), Yaw: SpawnPoint.Yaw };
+                                  : { Position: BaseSpawn.Position.slice(0, 2), Yaw: BaseSpawn.Yaw };
         // 📝 The rez puts fresh tyres on (RecoveryDirector → RestoreTyres); an instant respawn does it here.
         if (!Instant && this.Recovery && this.Recovery.Begin(RecoveryReasons.Respawn, Destination, () => { if (this.Training) this.Training.OnRespawn(); }))
             return;
@@ -935,7 +972,9 @@ class IlluminationHost
     ResolveCamera(Δτ)
     {
         const Telemetry = this.Vehicle.QueryTelemetry();
-        this.Chase.AdvanceChase(this.Vehicle.Position, this.Vehicle.QueryForward(), Telemetry.Speed, Δτ);
+        const VehicleUp = RotateVector(this.Vehicle.Orientation, [0.0, 0.0, 1.0]);
+        const SurfaceContact = this.Vehicle.Wheels.some((Wheel) => Wheel.Contact);
+        this.Chase.AdvanceChase(this.Vehicle.Position, this.Vehicle.QueryForward(), Telemetry.Speed, Δτ, VehicleUp, SurfaceContact);
         let Eye, Target, FieldOfView, Up = [0.0, 0.0, 1.0], Near = 0.05;
         const Rig = CameraRigs[this.Settings.CameraMode];
         if (this.FreeCamera)
@@ -978,6 +1017,7 @@ class IlluminationHost
         {
             Eye = this.Chase.Eye;
             Target = this.Chase.Target;
+            Up = this.Chase.Up || [0.0, 0.0, 1.0];
             FieldOfView = 60; // speed widening is smoothed once below for all driving cameras
         }
         this.CameraMotion ||= new DrivingCameraMotion();
@@ -1106,6 +1146,8 @@ class IlluminationHost
         this.Bodies.Advance(Step, this.Vehicle);
         this.Fracture.Advance(Step, this.Vehicle);
         this.Cones.Advance(Step);
+        if (this.Bollards)
+            this.Bollards.Advance(Step);
         this.Stress.Advance(Step);
         this.Effects.Advance(Step);
         this.Training.Advance(Step);
@@ -1127,7 +1169,7 @@ class IlluminationHost
             this.OnTyreShred(Wheel);
         this.Sparks.Settings.Enabled = this.Settings.Sparks;
         this.Sparks.Emit(VehicleEvents.Sparks, Step);
-        this.Sparks.Advance(Step, this.Vehicle.Obstacles, this.Bodies.Bodies);
+        this.Sparks.Advance(Step, this.Vehicle.Obstacles, this.Bodies.Bodies, this.Vehicle.Surfaces);
         Device.queue.writeBuffer(this.VehicleRecords, 0, this.VehicleVisual.EncodeRecord(this.QueryCabinHeader(), this.Vehicle.Wheels, this.Vehicle.Orientation));
         const Pumped = this.Cabin.Advance(Δτ, this.QueryTyreLive());
         if (Pumped !== null)

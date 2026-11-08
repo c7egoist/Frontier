@@ -10,6 +10,7 @@
 //    P hides both columns (the viewport takes the window), V hides everything, as before.
 
 import { ConstructEntities, InspectionModes } from "./InspectorPages.js";
+import { LevelCatalog } from "./LevelStructure.js";
 import { EditorControls, ClearElement, AssignStyle } from "./EditorControls.js";
 import { ConstructGlyph } from "./EditorIcons.js";
 
@@ -47,7 +48,7 @@ export class EditorShell
         {
             Stored = null;
         }
-        this.Selected = Stored && this.Entities.some((Entity) => Entity.Id === Stored.Selected) ? Stored.Selected : "gas";
+        this.Selected = Stored && this.Entities.some((Entity) => Entity.Id === Stored.Selected) ? Stored.Selected : "level";
         this.ConstructOutliner();
         this.ConstructViewportBar();
         this.ConstructStatus();
@@ -78,7 +79,8 @@ export class EditorShell
         const Label = Construct("div", "scene-label", "WORKSPACE");
         Label.appendChild(Construct("span", "status-dot"));
         Body.appendChild(Label);
-        const Title = Construct("div", "scene-title", "Proving Grounds");
+        const ActiveTitle = this.Host.LevelDescriptor ? this.Host.LevelDescriptor.Title : "Proving Grounds";
+        const Title = Construct("div", "scene-title", ActiveTitle);
         Title.appendChild(Construct("span", "scene-extension", ".scene"));
         Body.appendChild(Title);
 
@@ -307,6 +309,26 @@ export class EditorShell
             return [Button, Free];
         });
         Bar.appendChild(Camera);
+        const LevelSelect = document.createElement("select");
+        LevelSelect.className = "select-field";
+        LevelSelect.style.width = "164px";
+        LevelSelect.title = "Switch arena level";
+        for (const Entry of LevelCatalog)
+        {
+            const Choice = document.createElement("option");
+            Choice.value = Entry.Key;
+            Choice.textContent = Entry.Title;
+            if (Entry.Key === Host.LevelKey)
+                Choice.selected = true;
+            LevelSelect.appendChild(Choice);
+        }
+        LevelSelect.addEventListener("change", () =>
+        {
+            Host.Settings.Level = LevelSelect.value;
+            Host.ApplySetting("Level");
+        });
+        this.LevelSelect = LevelSelect;
+        Bar.appendChild(LevelSelect);
         const Display = document.createElement("select");
         Display.className = "select-field";
         Display.style.width = "210px";

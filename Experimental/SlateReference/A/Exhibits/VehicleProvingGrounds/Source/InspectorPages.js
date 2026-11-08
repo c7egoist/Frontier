@@ -13,7 +13,8 @@ import { GasParameterCatalogue, ConstructGasParameters } from "./SmokeSequence.j
 import { FractureMaterials, FractureMaterialOrder } from "./FractureStructure.js";
 import { FractureModes } from "./FractureSequence.js";
 import { VehicleGeometry } from "./VehicleSpecification.js";
-import { ArenaZones, TrainingDrills } from "./LevelStructure.js";
+import { ArenaZones, TrainingDrills, LevelCatalog } from "./LevelStructure.js";
+import { RotateVector } from "./TransformProjection.js";
 import { DerezPresets } from "./EffectSequence.js";
 import { FormatPrimary } from "./TrainingSequence.js";
 import { CameraRigs } from "./CabinStructure.js";
@@ -135,14 +136,16 @@ export function ConstructEntities(Host)
           Description: "Particle Editor presets · recovery & respawn", Meta: () => Host.Effects.Settings.Preset,
           State: () => (Host.Recovery.Busy || Host.Effects.Metrics.Live > 0 ? "warm" : "live"), Build: (C, B) => BuildDerez(Host, C, B),
           Switches: () => [Feature("Auto recovery", "Shield", Host.Recovery.Settings, "Enabled")] },
-        { Id: "training", Group: "Level", Name: "Training arena", Type: "Drills", Glyph: "Flag", Colour: Accent.Level,
-          Description: "Ten timed stations · best times", Meta: () => (Host.Training.Active ? Host.Training.Active.Drill.Name : `${TrainingDrills.length} drills`),
+        { Id: "training", Group: "Level", Name: Host.LevelKey === "inversion" ? "Stunt runs" : "Training arena", Type: "Drills", Glyph: "Flag", Colour: Accent.Level,
+          Description: "Timed stunt & precision runs · best times",
+          Meta: () => (Host.Training.Active ? Host.Training.Active.Drill.Name : `${Host.Training.Drills.length} runs`),
           State: () => (Host.Training.Active && Host.Training.Active.Phase === "running" ? "warm" : "live"), Build: (C, B) => BuildTraining(Host, C, B) },
         { Id: "cones", Group: "Level", Name: "Cones", Type: "Rigid bodies", Glyph: "TrafficCone", Colour: Accent.Level, Parent: "training",
           Description: "Knockable cones · rez back on reset", Meta: () => `${Host.Cones.Cones.length}`,
           State: () => (Host.Cones.Metrics.Moving > 0 ? "warm" : "live"), Build: (C, B) => BuildCones(Host, C, B) },
-        { Id: "level", Group: "Level", Name: "Proving grounds", Type: "Level", Glyph: "Map", Colour: Accent.Level,
-          Description: "Zones, teleports & scene budget", Meta: () => `${LevelZones.length} zones`, State: () => "live", Build: (C, B) => BuildLevel(Host, C, B) },
+        { Id: "level", Group: "Level", Name: Host.LevelDescriptor ? Host.LevelDescriptor.Title : "Proving grounds", Type: "Level", Glyph: "Map", Colour: Accent.Level,
+          Description: "Level selection, ramp teleports & scene budget",
+          Meta: () => `${(Host.LevelZones || LevelZones).length} zones`, State: () => "live", Build: (C, B) => BuildLevel(Host, C, B) },
         { Id: "stress", Group: "Level", Name: "Stress test", Type: "Object pool", Glyph: "Boxes", Colour: Accent.Level,
           Description: "Pre-built pool · union, cards & draws under load", Meta: () => `${Host.Stress.QueryActive()}`,
           State: () => (Host.Stress.QueryActive() > 0 ? "warm" : ""), Build: (C, B) => BuildStress(Host, C, B) }
@@ -865,12 +868,55 @@ function HexToRgb(Hex)
 
 function BuildLevel(Host, C, Body)
 {
-    const Zones = C.Card(Body, "Proving grounds", "Map", { Accent: Accent.Level, Index: 1, Subtitle: "Teleport the car" });
-    C.Muted(Zones, "A 216 × 120 m asphalt pad in a grass surround. West: the main straight with kerbs and a jump, a skidpad, a concrete burnout box, a smash alley of breakable props, a slatted hangar for bounce light, a container yard and a lit tunnel. East: the training arena — launch strip, slalom, moose test, cone bowling, spin box and a figure-8.");
-    for (const Zone of LevelZones)
-        C.LinkButton(Zones, `${Zone.Name} · ${Zone.Note}`, () => Host.TeleportVehicle(Zone));
+    const Selector = C.Card(Body, "Level arena", "Layers", { Accent: Accent.Level, Index: 1, Subtitle: "Switch active environment" });
+    C.Segmented(Selector, Host.Settings, "Level", LevelCatalog.map((Entry) => [Entry.Title, Entry.Key]),
+                { Label: "Arena", OnChange: () => Host.ApplySetting("Level") });
+    if (Host.LevelKey === "inversion")
+    {
+        Slider(C, Selector, Host.Settings, "AeroGripScale", "Ground-effect downforce", 0.0, 2.5, 0.05, "×", 2, ["Pure mass", "High aero"]);
+        C.Stats(Selector, [
+            ["Surface tilt", () =>
+            {
+                const Upward = RotateVector(Host.Vehicle.Orientation, [0.0, 0.0, 1.0]);
+                return Math.acos(Math.max(-1.0, Math.min(1.0, Upward[2]))) * (180.0 / Math.PI);
+            }, "°", 1],
+            ["Tyres planted", () => Host.Vehicle.Wheels.filter((Wheel) => Wheel.Contact).length, "/ 4", 0],
+            ["Altitude", () => Host.Vehicle.Position[2], "m", 1]
+        ]);
+    }
 
-    const Budget = C.Card(Body, "Scene budget", "Cpu", { Accent: Accent.Level, Index: 2 });
+    const ActiveZones = Host.LevelZones || LevelZones;
+    const ActiveTitle = Host.LevelDescriptor ? Host.LevelDescriptor.Title : "Proving grounds";
+    if (Host.LevelKey === "inversion" && Host.LevelDescriptor?.Tracks?.length)
+    {
+        const TracksCard = C.Card(Body, "Open-World Track Wings", "Compass",
+                                  { Accent: Accent.Level, Index: 2, Subtitle: "Drive freely between Track A, Track B & Track C — or jump directly" });
+        C.Muted(TracksCard, "All three tracks share one open interconnected complex connected by North/South boulevards and underpasses. Drive to whichever track you want, or jump straight to a track wing below:");
+        const TrackRow = C.ActionRow(TracksCard);
+        for (const Track of Host.LevelDescriptor.Tracks)
+            C.Button(TrackRow, Track.Label, Track.Icon || "Flag", () => Host.TeleportVehicle(Track));
+        if (Host.Bollards && Host.Bollards.Zones.length > 0)
+        {
+            C.Stats(TracksCard, Host.Bollards.Zones.map((Zone) => [
+                Zone.ShortName || Zone.Name,
+                () => Zone.Triggered ? "OPEN" : "ARMED"
+            ]));
+        }
+    }
+    const MaxKey = Math.min(9, ActiveZones.length);
+    const Zones = C.Card(Body, ActiveTitle, "Map", { Accent: Accent.Level, Index: 3, Subtitle: `Teleport the car (keys 1–${MaxKey})` });
+    if (Host.LevelKey === "inversion")
+    {
+        C.Muted(Zones, "[Track A] Original 1.05 km Grand Prix stunt circuit (unchanged: 360° Loop → Camelback Waves → Skyline Tabletop → Turn 1 Bowl → Heartline S-Bridge → 360° Full-Pipe → Twin-Wing Split + Infield Spine). [Track B · North Wing] Split Over/Under Subterranean Tunnel (-5.2 m) + Sky-Bridge (+5.0 m) + Ground Underpass, Serpentine Banked Waves & Linear Proximity-Triggered Bollards. [Track C · South Wing] 88 m Travelling-Wave Kinetic Bollards (1 side/end up while opposite goes down), Over/Under Viaduct + Sunken Canyon Tunnel, Westbound 360° Loop & Step-Up Ski-Jump.");
+    }
+    else
+    {
+        C.Muted(Zones, "A 216 × 120 m asphalt pad in a grass surround. West: the main straight with kerbs and a jump, a skidpad, a concrete burnout box, a smash alley of breakable props, a slatted hangar for bounce light, a container yard and a lit tunnel. East: the training arena — launch strip, slalom, moose test, cone bowling, spin box and a figure-8.");
+    }
+    ActiveZones.forEach((Zone, Slot) =>
+        C.LinkButton(Zones, `${Slot < 9 ? `${Slot + 1}. ` : "• "}${Zone.Name} · ${Zone.Note}`, () => Host.TeleportVehicle(Zone)));
+
+    const Budget = C.Card(Body, "Scene budget", "Cpu", { Accent: Accent.Level, Index: 4 });
     C.Stats(Budget, [["Occupants", () => Host.Scene.Occupants.length], ["In the field", () => Host.Scene.QueryUnionCount()],
                      ["Volumes", () => Host.Volumes.Volumes.length]]);
     C.Stats(Budget, [["Cards", () => Host.Cards.Cards.length], ["Draw runs", () => Host.Scene.DrawRuns.length],
@@ -909,7 +955,7 @@ function BuildTraining(Host, C, Body)
     C.Button(Row, "Stop drill", "Pause", () => T.Cancel());
 
     const List = C.Card(Body, "Stations", "Flag", { Accent: Accent.Level, Index: 2, Subtitle: "Best times are kept in this browser" });
-    for (const Drill of TrainingDrills)
+    for (const Drill of T.Drills)
     {
         const Row = document.createElement("div");
         Row.className = "drill-row";

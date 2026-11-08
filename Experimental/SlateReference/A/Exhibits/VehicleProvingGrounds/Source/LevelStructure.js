@@ -6,6 +6,10 @@
 import { CourseMaterial } from "./MaterialSpecification.js";
 import { CourseConstants, KerbConstants, SpawnPoint, EmitQuad, EmitBoxFacets, EmitPanelFacets, EmitPrismFacets,
          EmitExtrusionFacets, EmitConeFacets, EmitRampFacets, EmitTyreBarrierFacets, EmitSphereFacets } from "./CourseStructure.js";
+import { InversionArenaBounds, InversionArenaTracks, InversionArenaSurfaces, InversionArenaShapes, InversionArenaTerrainHulls,
+         InversionArenaSpawn, InversionArenaZones, InversionArenaDrills, InversionClearZones, InversionPhysicsCutouts,
+         InversionDistanceCutouts, EmitInversionGroundFacets, ResolveInversionPlacements, ResolveInversionBollards,
+         ResolveInversionCones, ResolveInversionBreakables } from "./InversionArenaStructure.js";
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                                      SHAPES
@@ -449,5 +453,75 @@ export const LevelClearZones = Object.freeze([
     [-60.0, -16.0, -47.0, -6.0],   // control tower
     [60.0, -58.0, 154.0, 58.0]     // east training grounds
 ]);
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                   LEVEL CATALOG
+//------------------------------------------------------------------------------------------------------------------------
+
+export const LevelCatalog = Object.freeze([
+    { Key: "inversion", Title: "Inversion Arena", Subtitle: "Tracks A/B/C: Grand Prix loop, underground split tunnels & kinetic bollards" },
+    { Key: "proving",   Title: "Proving Grounds", Subtitle: "Skidpad, jump wedge, smash alley, tunnel & slalom" }
+]);
+
+export function ResolveLevelShapes(LevelKey = "proving")
+{
+    if (LevelKey === "inversion")
+    {
+        const { Cone, Jersey, TrafficPost, TrafficHead, Pole, PoleHead,
+                GardenAluminium, GardenGold, GardenGlass, GardenMirror } = LevelShapes;
+        return {
+            Cone, Jersey, TrafficPost, TrafficHead, Pole, PoleHead,
+            GardenAluminium, GardenGold, GardenGlass, GardenMirror,
+            ...InversionArenaShapes
+        };
+    }
+    return LevelShapes;
+}
+
+export function ResolveLevelDescriptor(LevelKey = "proving")
+{
+    if (LevelKey === "inversion")
+    {
+        return {
+            Key:             "inversion",
+            Title:           "Inversion Arena",
+            Relief:          false,
+            AeroGrip:        1.0,
+            Bounds:          InversionArenaBounds,
+            Tracks:          InversionArenaTracks,
+            Spawn:           InversionArenaSpawn,
+            Zones:           InversionArenaZones,
+            Drills:          InversionArenaDrills,
+            ClearZones:      InversionClearZones,
+            Surfaces:        InversionArenaSurfaces,
+            TerrainHulls:    InversionArenaTerrainHulls,
+            PhysicsCutouts:  InversionPhysicsCutouts,
+            DistanceCutouts: InversionDistanceCutouts,
+            Shapes:          ResolveLevelShapes("inversion"),
+            Placements:      ResolveInversionPlacements,
+            Bollards:        ResolveInversionBollards,
+            Cones:           ResolveInversionCones,
+            Breakables:      ResolveInversionBreakables,
+            EmitGround:      EmitInversionGroundFacets
+        };
+    }
+    return {
+        Key:          "proving",
+        Title:        "Proving Grounds",
+        Relief:       true,
+        AeroGrip:     0.0,
+        Spawn:        SpawnPoint,
+        Zones:        ArenaZones,
+        Drills:       TrainingDrills,
+        ClearZones:   LevelClearZones,
+        Surfaces:     [],
+        TerrainHulls: null,
+        Shapes:       LevelShapes,
+        Placements:   ResolveLevelPlacements,
+        Cones:        ResolveConePlacements,
+        Breakables:   ResolveBreakables,
+        EmitGround:   EmitLevelGroundFacets
+    };
+}
 
 export { SpawnPoint };

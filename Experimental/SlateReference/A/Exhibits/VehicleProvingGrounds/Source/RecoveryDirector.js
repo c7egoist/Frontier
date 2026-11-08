@@ -18,7 +18,7 @@
 //    hard for 0.9 s; outside the grounds (35 m past the pad) or below them. The old 3 s overturn respawn in the
 //    vehicle solver is gone — this replaces it.
 
-import { CourseConstants, SpawnPoint } from "./CourseStructure.js";
+import { CourseConstants, SpawnPoint, ResolveCourseHeight } from "./CourseStructure.js";
 import { VehicleGeometry } from "./VehicleSpecification.js";
 import { RotateVector, LengthVector } from "./TransformProjection.js";
 
@@ -46,7 +46,8 @@ export class RecoveryDirector
         this.Overturned = 0.0;
         this.Airborne = 0.0;
         this.Tumbling = 0.0;
-        this.Safe     = { Position: SpawnPoint.Position.slice(), Yaw: SpawnPoint.Yaw };
+        const InitialSpawn = (Host && Host.Spawn) || SpawnPoint;
+        this.Safe     = { Position: InitialSpawn.Position.slice(), Yaw: InitialSpawn.Yaw };
         this.SafeTimer = 0.0;
         this.Pending  = null;
         this.Metrics  = { Recoveries: 0, Last: "" };
@@ -112,9 +113,9 @@ export class RecoveryDirector
         const Spin = LengthVector(Vehicle.AngularVelocity);
         const Contacts = Vehicle.Wheels.filter((Wheel) => Wheel.Contact).length;
         const P = Vehicle.Position;
-        // 📝 The last place the car sat squarely on the pad, every half second.
+        // 📝 The last place the car sat squarely on the flat plaza pad, every half second.
         this.SafeTimer += Seconds;
-        if (this.SafeTimer > 0.5 && Contacts === 4 && Up[2] > 0.9 && this.WithinPad(P, 0.0))
+        if (this.SafeTimer > 0.5 && Contacts === 4 && Up[2] > 0.9 && P[2] < 1.2 && this.WithinPad(P, 0.0))
         {
             this.SafeTimer = 0.0;
             const Forward = RotateVector(Vehicle.Orientation, [1.0, 0.0, 0.0]);
@@ -122,22 +123,26 @@ export class RecoveryDirector
         }
         if (!this.Settings.Enabled)
             return;
-        this.Overturned = Up[2] < 0.3 && Speed < 2.5 ? this.Overturned + Seconds : 0.0;
+        this.Overturned = Up[2] < 0.3 && Speed < 2.5 && Contacts < 2 ? this.Overturned + Seconds : 0.0;
         this.Airborne = Contacts === 0 ? this.Airborne + Seconds : 0.0;
         this.Tumbling = Contacts === 0 && Spin > this.Settings.TumbleRate ? this.Tumbling + Seconds : 0.0;
+        const AirborneLimit = P[2] > 2.0 ? Math.max(3.6, this.Settings.AirborneSeconds) : this.Settings.AirborneSeconds;
+        const FallbackSpot = P[2] > 2.2 ? this.Safe : this.ResolveUpright(Vehicle);
         if (this.Overturned > this.Settings.OverturnSeconds)
-            this.Begin(RecoveryReasons.Overturned, this.ResolveUpright(Vehicle));
-        else if (this.Airborne > this.Settings.AirborneSeconds || this.Tumbling > this.Settings.TumbleSeconds)
-            this.Begin(RecoveryReasons.SpinOut, this.WithinPad(P, 0.0) ? this.ResolveUpright(Vehicle) : this.Safe);
-        else if (!this.WithinPad(P, 35.0) || P[2] < -3.0)
+            this.Begin(RecoveryReasons.Overturned, FallbackSpot);
+        else if (this.Airborne > AirborneLimit || this.Tumbling > this.Settings.TumbleSeconds)
+            this.Begin(RecoveryReasons.SpinOut, this.WithinPad(P, 0.0) ? FallbackSpot : this.Safe);
+        else if (!this.WithinPad(P, 35.0) || P[2] < ResolveCourseHeight(P[0], P[1], P[2]) - 3.0 || P[2] > 65.0)
             this.Begin(RecoveryReasons.OutOfBounds, this.Safe);
     }
 
     WithinPad(Position, Margin)
     {
-        const C = CourseConstants;
-        return Position[0] > C.PadMinimum[0] - Margin && Position[0] < C.PadMaximum[0] + Margin &&
-               Position[1] > C.PadMinimum[1] - Margin && Position[1] < C.PadMaximum[1] + Margin;
+        const CustomBounds = this.Host?.LevelDescriptor?.Bounds;
+        const Min = CustomBounds ? CustomBounds.Minimum : CourseConstants.PadMinimum;
+        const Max = CustomBounds ? CustomBounds.Maximum : CourseConstants.PadMaximum;
+        return Position[0] > Min[0] - Margin && Position[0] < Max[0] + Margin &&
+               Position[1] > Min[1] - Margin && Position[1] < Max[1] + Margin;
     }
 
     // 📝 Upright where it lies, keeping its heading.

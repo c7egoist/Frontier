@@ -7,7 +7,7 @@ import { CourseMaterial } from "./MaterialSpecification.js";
 import { RetrieveFacetStream } from "./FacetCodec.js";
 import { ConstructCabinFacets } from "./CabinStructure.js";
 import { ConstructRoofFixtureFacets } from "./LightingSystem.js";
-import { LevelShapes, ResolveLevelPlacements, ResolveConePlacements, ResolveBreakables, EmitLevelGroundFacets } from "./LevelStructure.js";
+import { ResolveLevelDescriptor } from "./LevelStructure.js";
 import { ConstructSolid, TriangulateFace, FractureMaterials, FragmentTriangleBudget } from "./FractureStructure.js";
 import { VehicleGeometry, ResolveCoMAuthoredZ } from "./VehicleSpecification.js";
 import { ConstructIdentityTransform, ConstructRigidTransform, TransformBounds, InvertTransform, RotateVector, ConjugateQuaternion,
@@ -72,8 +72,10 @@ export class SceneStructure
 
     // 📝 StressCapacity reserves that many stress-test occupants (inactive until the stress sequence enables them) in
     //    the distance span, after the level and before the ground tiles, clamped to the identity ceiling.
-    async ConstructScene(ArchiveFolder, StressCapacity = 0)
+    async ConstructScene(ArchiveFolder, StressCapacity = 0, LevelKey = "proving")
     {
+        const Descriptor = ResolveLevelDescriptor(LevelKey);
+        const ActiveShapes = Descriptor.Shapes;
         const [Body, Tyre, Rim] = await Promise.all([
             RetrieveFacetStream(`${ArchiveFolder}/ControlVehicleBody.facet`),
             RetrieveFacetStream(`${ArchiveFolder}/ControlVehicleTyre.facet`),
@@ -86,9 +88,9 @@ export class SceneStructure
         this.VehicleBodySet = BodySet;
         const WheelLeftSet  = this.ConstructFacetSet("ControlVehicle wheel (left)", ProjectWheelFacets(Tyre, Rim, false), 0.025, 40.0);
         const WheelRightSet = this.ConstructFacetSet("ControlVehicle wheel (right)", ProjectWheelFacets(Tyre, Rim, true), 0.025, 40.0);
-        const GroundSet     = this.ConstructFacetSet("Proving ground", EmitLevelGroundFacets(), 0.0, 0.0);
+        const GroundSet     = this.ConstructFacetSet(Descriptor.Title, Descriptor.EmitGround(), 0.0, 0.0);
         const ShapeSets = {};
-        for (const [Key, Shape] of Object.entries(LevelShapes))
+        for (const [Key, Shape] of Object.entries(ActiveShapes))
             ShapeSets[Key] = this.ConstructFacetSet(Key, Shape.Emit(), Shape.Voxel, Shape.Cards);
 
         // ② the vehicle --------------------------------------------------------------------------------------------------
@@ -105,9 +107,9 @@ export class SceneStructure
 
         // ③ the level's distance occupants; rastered-only shapes wait until after the ground ----------------------------
         const RasterOnly = [];
-        for (const Placement of ResolveLevelPlacements())
+        for (const Placement of Descriptor.Placements())
         {
-            if (LevelShapes[Placement.Shape].Distance === false)
+            if (ActiveShapes[Placement.Shape].Distance === false)
             {
                 RasterOnly.push(Placement);
                 continue;
@@ -121,7 +123,7 @@ export class SceneStructure
         // ③ cones: rigid bodies at rest — in the field and carded like any static occupant (Dynamic only so a knocked
         //    cone's motion invalidates the field; Moving lifts it onto the every-frame relighting list while it moves)
         const ConeRoles = StaticRoles | OccupantRole.Dynamic;
-        const ConePlacements = ResolveConePlacements();
+        const ConePlacements = Descriptor.Cones();
         this.ConeBlock = { First: this.Occupants.length, Count: ConePlacements.length, Placements: ConePlacements, FacetSet: ShapeSets.Cone };
         ConePlacements.forEach((Placement, Cone) =>
         {
@@ -133,9 +135,42 @@ export class SceneStructure
             this.Occupants[Index].RestTransform = Transform;
         });
 
+        // ③b proximity-triggered kinetic bollards (linear retracting gates & travelling seesaw wave strips)
+        const RawBollardZones = Descriptor.Bollards ? Descriptor.Bollards() : [];
+        const BollardFirst = this.Occupants.length;
+        const BuiltBollardZones = RawBollardZones.map((Zone) =>
+        {
+            for (let PostIndex = 0; PostIndex < Zone.Posts.length; ++PostIndex)
+            {
+                const Post = Zone.Posts[PostIndex];
+                const Half = 0.5 * (Post.Yaw || 0.0);
+                const Transform = ConstructRigidTransform(Post.Position, [0.0, 0.0, Math.sin(Half), Math.cos(Half)]);
+                const Index = this.ConstructOccupant(`${Zone.Id} bollard ${PostIndex}`, ShapeSets[Post.Shape], Transform, ConeRoles, Post.Material ?? -1);
+                this.Occupants[Index].Obstacle = true;
+                this.Occupants[Index].Bollard = true;
+                this.Occupants[Index].Moving = false;
+                this.Occupants[Index].RestTransform = Transform;
+            }
+            return Zone;
+        });
+        const BollardAfterPosts = this.Occupants.length;
+        for (const Zone of BuiltBollardZones)
+        {
+            if (Zone.Beacon && ShapeSets[Zone.Beacon.Shape] !== undefined)
+            {
+                const Half = 0.5 * (Zone.Beacon.Yaw || 0.0);
+                const Transform = ConstructRigidTransform(Zone.Beacon.Position, [0.0, 0.0, Math.sin(Half), Math.cos(Half)]);
+                const BeaconIdx = this.ConstructOccupant(`${Zone.Name} beacon`, ShapeSets[Zone.Beacon.Shape], Transform, ConeRoles, CourseMaterial.WallCrimson);
+                this.Occupants[BeaconIdx].Obstacle = false;
+                this.Occupants[BeaconIdx].Moving = false;
+                Zone.BeaconOccupant = BeaconIdx;
+            }
+        }
+        this.BollardBlock = { First: BollardFirst, Count: BollardAfterPosts - BollardFirst, Zones: BuiltBollardZones };
+
         // ④ breakable props, whole: rastered, in the field, carded and a collider until they break ------------------------
         const BreakableSets = new Map();
-        this.Breakables = ResolveBreakables().map((Definition) =>
+        this.Breakables = Descriptor.Breakables().map((Definition) =>
         {
             const Material = FractureMaterials[Definition.Material];
             const Key = Definition.Material + JSON.stringify(Definition.Shape);
@@ -193,7 +228,7 @@ export class SceneStructure
         const GroundOccupants = 1 + GroundLayout.TileCount[0] * GroundLayout.TileCount[1] + 4;
         const Capacity = Math.max(0, Math.min(Math.floor(StressCapacity), IdentityCeiling - this.BaseDistanceCount - GroundOccupants));
         const StressSets = StressShapes.map((Shape) => this.ConstructFacetSet(Shape.Name, Shape.Emit(), Shape.DistanceVoxel, Shape.CardDensity));
-        this.StressPool = { First: this.Occupants.length, Capacity, Active: 0, Placements: ResolveStressPlacements(Capacity), FacetSets: StressSets };
+        this.StressPool = { First: this.Occupants.length, Capacity, Active: 0, Placements: ResolveStressPlacements(Capacity, Descriptor.ClearZones), FacetSets: StressSets };
         this.StressPool.Placements.forEach((Placement, Slot) =>
         {
             const Half = 0.5 * Placement.Yaw;
@@ -408,7 +443,7 @@ export class SceneStructure
         const Bounds = [];
         this.Occupants.forEach((Occupant, Index) =>
         {
-            if (Occupant.Obstacle && !Occupant.Inactive && !(Occupant.Roles & OccupantRole.Dynamic))
+            if (Occupant.Obstacle && !Occupant.Inactive && (Occupant.Bollard || !(Occupant.Roles & OccupantRole.Dynamic)))
                 Bounds.push(this.QueryWorldBounds(Index));
         });
         return Bounds;
@@ -545,9 +580,11 @@ export function ProjectWheelFacets(Tyre, Rim, Mirrored)
     return Facets;
 }
 
-function ResolvePlacementTransform(Placement)
+export function ResolvePlacementTransform(Placement)
 {
-    const Half = 0.5 * Placement.Yaw;
+    if (Placement.Orientation)
+        return ConstructRigidTransform(Placement.Position, Placement.Orientation);
+    const Half = 0.5 * (Placement.Yaw || 0.0);
     return ConstructRigidTransform(Placement.Position, [0.0, 0.0, Math.sin(Half), Math.cos(Half)]);
 }
 
