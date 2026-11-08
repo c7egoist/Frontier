@@ -88,7 +88,7 @@ Continue from the committed Fluid Editor / physics workspace work. Implement the
 - [x] Shared resting-hub placement path, vehicle gizmo access, direct HMI toolbar action, and construct catalogue access implemented on the session branch.
 - [x] Native editor/runtime/validation builds completed; focused `VehicleDynamicsValidation` and `LobbySessionValidation` CTests passed.
 - [ ] Manual native viewport checks/captures for Lobby/Proving Ground placement, gizmo and HMI remain outstanding.
-- [x] Committed and pushed the current dockable-authoring/fracture-preview WIP on the intended branch as `d61d653`; this does not mark the unbuilt Batch 4 edits as validated. Continue all follow-up work on `arena/ff6cc303-frontier`.
+- [x] Committed and pushed the dockable-authoring/fracture-preview WIP in `d61d653`, the Particle VFX/persistence refinements in `f7da694`, and the dockable-workbench/Geometry-entry capture additions in `66ebb05`, all on the intended branch. This does not mark the unbuilt Batch 4 edits as validated; continue on `arena/ff6cc303-frontier`.
 - [x] Added targeted plume checks for no-contact, no-load, zero-slip, longitudinal wheelspin, and smoke decay; added non-fracture cone/rigid-body impulse/continued-force and fracture participation-toggle checks. These are implementation-stage edits and have not been built or run.
 - [x] Switched the Particle Editor host from modal to a normal in-app dockable window without changing its workspace/file model; build and docking behavior remain unverified.
 - [x] Added stable distinct category colours for all 16 ForceSource types, source-specific viewport/minimap/timeline glows, and Oblique/Camera 3D reach outlines; added palette uniqueness validation. Current edits are unbuilt.
