@@ -1,0 +1,35 @@
+import { test, expect } from '@playwright/test';
+
+test('garden entry, eruption, vehicle swallowing, hazard pause and area retry',async({page})=>{
+  test.setTimeout(150000);
+  const errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')errors.push(m.text());});
+  await page.goto('/?scene=garden');await page.waitForFunction(()=>window.deadwood);
+  await expect(page.locator('h1')).toHaveText('THEHUNGER.');
+  expect((await page.evaluate(()=>window.deadwood.snapshot())).worldIndex).toBe(1);
+  await page.screenshot({path:'test-results/garden-intro.png'});
+  await page.click('#start-button');await page.keyboard.down('w');
+  await page.waitForFunction(()=>window.deadwood.snapshot().car.z>2602,{},{timeout:30000});await page.keyboard.up('w');
+  await page.keyboard.press('v');await expect(page.locator('#garden-lab')).toBeVisible();await expect(page.locator('#root-lab')).toBeHidden();
+  await page.click('#plant-demo');
+  await page.waitForFunction(()=>window.deadwood.snapshot().garden.eruptions>0,{},{timeout:30000});
+  expect((await page.evaluate(()=>window.deadwood.snapshot())).emittedParticles).toBeGreaterThanOrEqual(140);
+  await page.click('#firefly-demo');
+  await page.waitForFunction(()=>window.deadwood.snapshot().garden.spentFireflies>0,{},{timeout:30000});
+  const blast=await page.evaluate(()=>window.deadwood.snapshot());expect(blast.garden.hull).toBeLessThan(100);expect(blast.emittedParticles).toBeGreaterThanOrEqual(150);
+  await page.screenshot({path:'test-results/firefly-burst.png'});
+  await page.click('#feeding-demo');
+  await page.waitForFunction(()=>window.deadwood.snapshot().captured!==null,{},{timeout:30000});
+  await expect(page.locator('#run-label')).toHaveText('VEHICLE CONSUMED');
+  await page.waitForFunction(()=>!window.deadwood.snapshot().vehicleVisible,{},{timeout:30000});
+  await page.screenshot({path:'test-results/garden-capture.png'});
+  await page.keyboard.press('r');const restarted=await page.evaluate(()=>window.deadwood.snapshot());
+  expect(restarted.worldIndex).toBe(1);expect(restarted.failed).toBe(false);expect(restarted.captured).toBeNull();expect(restarted.vehicleVisible).toBe(true);expect(restarted.car.z).toBe(2600);expect(restarted.garden.hull).toBe(100);expect(restarted.garden.roofsVisible).toBe(true);
+  await page.keyboard.press('v');expect((await page.evaluate(()=>window.deadwood.snapshot())).garden.roofsVisible).toBe(false);await page.click('#pause-roots');const frozen=await page.evaluate(()=>window.deadwood.snapshot().garden.time);
+  await page.waitForTimeout(400);expect(await page.evaluate(()=>window.deadwood.snapshot().garden.time)).toBe(frozen);
+  await page.screenshot({path:'test-results/garden-overview.png'});
+  await page.locator('#beat-list button').nth(3).click();await page.click('#return-drive');
+  await page.keyboard.down('w');await page.waitForFunction(()=>window.deadwood.snapshot().worldIndex===2,{},{timeout:30000});await page.keyboard.up('w');
+  const crossed=await page.evaluate(()=>window.deadwood.snapshot());expect(crossed.complete).toBe(false);expect(crossed.car.x).toBe(1600);
+  await page.keyboard.press('r');expect((await page.evaluate(()=>window.deadwood.snapshot())).worldIndex).toBe(2);
+  expect(errors).toEqual([]);
+});

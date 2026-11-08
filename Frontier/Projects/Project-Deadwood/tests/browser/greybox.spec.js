@@ -1,0 +1,27 @@
+import { test, expect } from '@playwright/test';
+test('loads, drives, inspects, tests a section, freezes roots and restarts cleanly',async({page})=>{
+ const errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')errors.push(m.text());});
+ await page.goto('/?scene=forest');await page.waitForFunction(()=>window.deadwood);
+ await expect(page.locator('h1')).toHaveText('DEADWOOD.');
+ await page.click('#start-button');await page.keyboard.down('w');
+ await page.waitForFunction(()=>window.deadwood.snapshot().car.z>2,{},{timeout:30000});
+ await page.keyboard.up('w');expect((await page.evaluate(()=>window.deadwood.snapshot())).car.speed).toBeGreaterThan(0);
+ await page.keyboard.press('v');await expect(page.locator('#map-panel')).toBeVisible();
+ await page.locator('#beat-list button').nth(3).click();
+ const section=await page.evaluate(()=>window.deadwood.snapshot());expect(section.car.z).toBe(1285);expect(section.sectionTest).toBe(true);
+ await page.click('#root-demo');
+ await page.locator('#growth-rate').evaluate(el=>{el.value='3';el.dispatchEvent(new Event('input',{bubbles:true}));});
+ await page.waitForFunction(()=>window.deadwood.snapshot().emittedParticles>=110,{},{timeout:30000});
+ expect((await page.evaluate(()=>window.deadwood.snapshot())).particles).toBeGreaterThan(0);
+ expect((await page.evaluate(()=>window.deadwood.snapshot())).rootSettings.growth).toBe(3);
+ await page.waitForFunction(()=>window.deadwood.snapshot().rootTime>3,{},{timeout:30000});
+ await page.screenshot({path:'test-results/root-eruption.png'});
+ await page.click('#shuffle-roots');expect((await page.evaluate(()=>window.deadwood.snapshot())).forestSeed).not.toBe(7419);
+ await page.click('#pause-roots');const frozen=await page.evaluate(()=>window.deadwood.snapshot().rootTime);
+ await page.waitForTimeout(400);expect(await page.evaluate(()=>window.deadwood.snapshot().rootTime)).toBe(frozen);
+ await page.click('#return-drive');await expect(page.locator('#map-panel')).toBeHidden();
+ await page.click('#help-button');await expect(page.locator('#help')).toBeVisible();await page.click('#close-help');
+ await page.keyboard.press('r');const reset=await page.evaluate(()=>window.deadwood.snapshot());
+ expect(reset.car.z).toBe(0);expect(reset.sectionTest).toBe(false);expect(reset.rootsPaused).toBe(false);expect(reset.runTime).toBe(0);expect(errors).toEqual([]);
+ await page.screenshot({path:'test-results/drive.png'});
+});
