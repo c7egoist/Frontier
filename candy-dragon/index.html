@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Sucré — the Candy Dragon</title>
+  <meta name="description" content="A majestic dragon sculpted from candy, rendered in real-time 3D." />
+</head>
+<body>
+  <canvas id="stage"></canvas>
+
+  <div class="vignette" aria-hidden="true"></div>
+  <div class="grain" aria-hidden="true"></div>
+
+  <header class="brand">
+    <span class="brand__mark">Sucré</span>
+    <span class="brand__sub">the candy dragon</span>
+  </header>
+
+  <section class="hero" id="hero">
+    <p class="hero__kicker">Hand-sculpted confection · No. 001</p>
+    <h1 class="hero__title">Sucré</h1>
+    <p class="hero__lede">
+      A dragon boiled from raspberry sugar, spun into wings of pulled candy,
+      and scaled in opal mint crystal.
+    </p>
+  </section>
+
+  <div class="hint" id="hint">
+    <span class="hint__dot"></span> drag to orbit · scroll to zoom
+  </div>
+
+  <nav class="dock" id="dock" aria-label="Controls">
+    <button class="dock__btn" data-act="majesty" title="Majesty pose">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l2.2 4.9 5.3.6-4 3.6 1.1 5.2L12 14.7 7.4 17.3l1.1-5.2-4-3.6 5.3-.6z"/></svg>
+      <span>Majesty</span>
+    </button>
+    <button class="dock__btn" data-act="roar" title="Roar">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9c0-2 1.6-3.6 3.6-3.6h4.2L20 3v18l-8.2-2.4H7.6C5.6 18.6 4 17 4 15z"/></svg>
+      <span>Roar</span>
+    </button>
+    <button class="dock__btn" data-act="orbit" title="Auto orbit">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 108 8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M20 4v5h-5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>Orbit</span>
+    </button>
+    <button class="dock__btn" data-act="bloom" title="Sugar bloom">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l1.8 5.4L19 5l-2.4 5.2L22 12l-5.4 1.8L19 19l-5.2-2.4L12 22l-1.8-5.4L5 19l2.4-5.2L2 12l5.4-1.8L5 5l5.2 2.4z"/></svg>
+      <span>Bloom</span>
+    </button>
+  </nav>
+
+  <div class="stats" id="stats" aria-hidden="true">
+    <div><b id="fps">–</b><span>fps</span></div>
+  </div>
+
+  <div class="loader" id="loader">
+    <div class="loader__inner">
+      <div class="loader__ring"></div>
+      <p class="loader__text">Boiling sugar…</p>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
