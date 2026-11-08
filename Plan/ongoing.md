@@ -2,7 +2,7 @@
 
 **Updated:** 2026-11-07
 **Branch:** `arena/ff6cc303-frontier`
-**Baseline commit:** `a10a299` (`Batch 5 vehicle curves and impact sparks`, pushed on `arena/ff6cc303-frontier`)
+**Baseline commit:** `7adaddf` (`Validate vehicle curve pack domains transactionally`, pushed on `arena/ff6cc303-frontier`)
 
 ## Goal and verification rules
 
@@ -97,7 +97,7 @@ Continue from the committed Fluid Editor / physics workspace work. Implement the
 - [x] Replaced Fracture's modal schematic with a normal dockable editor window while preserving both FractureRecord and Geometry inspector entry points; added a native deterministic Voronoi convex-cell preview, click-to-place preview impact, stable shared cut tokens, volume/manifold/convexity validation, full Fracture settings persistence, with record-codec validation and captures of both editor entry points still pending. This is preview geometry, not runtime fracture physics.
 - [x] Added Particle viewport diagnostics for GPU-submitted lightning segments, lensing holes, heat shimmers and procedural shard draw capacity; extended native captures to check Lightning, Derez cube and Black hole telemetry/image deltas. Fixed Derez shard instancing to index each particle instance instead of reusing slot zero. These are VFX presentation changes, not Particle physics-algorithm edits; dedicated capture/visual validation remains unrun.
 - [x] Selected **Project Designer** as the Blueprint Editor alternative umbrella name and documented project-owned C++ class inspectors/icons/editors, Workflow Editor and Configuration Editor scope in `Docs/ProjectDesigner.md`; the API/UI is a future plan, not implemented.
-- [x] Batch 5 vehicle curves, `.vcurves`, workbench/reset wiring, and hard-impact sparks committed and pushed as `a10a299`; follow-up hardening adds curve-domain checks and an atomic multi-override regression.
+- [x] Batch 5 vehicle curves, `.vcurves`, workbench/reset wiring, and hard-impact sparks committed and pushed as `a10a299`; authored-domain validation and an atomic multi-override regression followed in pushed commit `7adaddf`.
 - [x] Host C++ builds for `Everest`, `EverestProjectEditor`, and focused validation targets completed. Headless configuration disabled GLFW X11/Wayland backends because system development packages are absent.
 - [x] Compiled and stored 50 GlobalIllumination SPIR-V archives from 65 Slang sources; archive/source/hash verification reports 0 failures.
 - [x] Focused physics/vehicle CTests passed 5/5 (`PhysicsSpaceValidation`, `VehicleImpactEventValidation`, `VehicleDynamicsValidation`, `TyreCarcassValidation`, `VehicleCurvePackValidation`); after authored-range hardening, `VehicleCurvePackValidation` passed again 1/1.
