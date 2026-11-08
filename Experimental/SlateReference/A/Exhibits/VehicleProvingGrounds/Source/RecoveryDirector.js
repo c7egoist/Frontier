@@ -132,17 +132,29 @@ export class RecoveryDirector
             this.Begin(RecoveryReasons.Overturned, FallbackSpot);
         else if (this.Airborne > AirborneLimit || this.Tumbling > this.Settings.TumbleSeconds)
             this.Begin(RecoveryReasons.SpinOut, this.WithinPad(P, 0.0) ? FallbackSpot : this.Safe);
-        else if (!this.WithinPad(P, 35.0) || P[2] < ResolveCourseHeight(P[0], P[1], P[2]) - 3.0 || P[2] > 65.0)
+        else if (!this.WithinPad(P, 35.0) || P[2] < ResolveCourseHeight(P[0], P[1], P[2]) - 3.0 || P[2] > 95.0)
             this.Begin(RecoveryReasons.OutOfBounds, this.Safe);
     }
 
     WithinPad(Position, Margin)
     {
         const CustomBounds = this.Host?.LevelDescriptor?.Bounds;
-        const Min = CustomBounds ? CustomBounds.Minimum : CourseConstants.PadMinimum;
-        const Max = CustomBounds ? CustomBounds.Maximum : CourseConstants.PadMaximum;
-        return Position[0] > Min[0] - Margin && Position[0] < Max[0] + Margin &&
-               Position[1] > Min[1] - Margin && Position[1] < Max[1] + Margin;
+        const BaseMin = CustomBounds ? CustomBounds.Minimum : CourseConstants.PadMinimum;
+        const BaseMax = CustomBounds ? CustomBounds.Maximum : CourseConstants.PadMaximum;
+        let MinX = BaseMin[0], MinY = BaseMin[1];
+        let MaxX = BaseMax[0], MaxY = BaseMax[1];
+        const Studio = this.Host?.RoadEditor;
+        if (Studio?.Enabled && Studio.Compiled?.Network?.bounds)
+        {
+            const Anchor = Studio.Compiled.Anchor || [360.0, 0.0, 0.0];
+            const B = Studio.Compiled.Network.bounds;
+            MinX = Math.min(MinX, Anchor[0] + B.min[0] - 80.0);
+            MaxX = Math.max(MaxX, Anchor[0] + B.max[0] + 80.0);
+            MinY = Math.min(MinY, Anchor[1] - B.max[2] - 80.0);
+            MaxY = Math.max(MaxY, Anchor[1] - B.min[2] + 80.0);
+        }
+        return Position[0] > MinX - Margin && Position[0] < MaxX + Margin &&
+               Position[1] > MinY - Margin && Position[1] < MaxY + Margin;
     }
 
     // 📝 Upright where it lies, keeping its heading.

@@ -123,7 +123,7 @@ export default
             Host.TeleportVehicle({ Name: "Track H Factory Hall", Position: [6.0, 408.0], Yaw: 0.0 }, true);
             Host.ScriptedInput = { Throttle: 1.0, Brake: 0.0, SteerAngle: 0.0, Handbrake: false, Reverse: false };
         }
-        // Phase 10 (Frame 3700): Open Sun-UI Road Editor & Hover Traffic Lights pages, live-edit spline network on GPU, and climb Track I Flyover!
+        // Phase 10 (Frame 3700): Verify dedicated Road Studio workspace & templates, stream to WebGPU, and drive across Canal Viaduct!
         else if (Frame === 3700)
         {
             if (Host.Shell)
@@ -133,20 +133,12 @@ export default
             }
             if (Host.RoadEditor)
             {
-                Host.RoadEditor.AddPresetTemplate("roundabout");
-                Host.RoadEditor.SplitSelectedRoadMidpoint();
-                Host.RoadEditor.SmoothSelectedTangents();
+                Host.RoadEditor.LoadTemplate("diamond");
                 Host.RoadEditor.ResetToDefault();
-                Host.RoadEditor.AddPresetTemplate("cloverleaf");
-                RoadEditorStreamed = Host.Scene.FacetSets[Host.Scene.RoadEditorBlock.FacetSet].VertexCount > 600;
-                const OverpassRoad = Host.RoadEditor.Project.Roads.find((R) => R.Name === "Cloverleaf Overpass") || Host.RoadEditor.Project.Roads[1];
-                if (OverpassRoad)
-                {
-                    Host.RoadEditor.Selection = { Kind: "road", Id: OverpassRoad.Id };
-                    Host.RoadEditor.DriveOnSelectedRoad();
-                }
+                RoadEditorStreamed = Host.Scene.FacetSets[Host.Scene.RoadEditorBlock.FacetSet].VertexCount > 100000;
+                Host.RoadEditor.DriveOnSelectedRoad({ kind: "road", id: "r09" });
             }
-            Host.ScriptedInput = { Throttle: 0.85, Brake: 0.0, SteerAngle: 0.0, Handbrake: false, Reverse: false };
+            Host.ScriptedInput = { Throttle: 1.0, Brake: 0.0, SteerAngle: 0.0, Handbrake: false, Reverse: false };
         }
 
         const VehicleUp = RotateVector(Host.Vehicle.Orientation, [0.0, 0.0, 1.0]);
@@ -249,10 +241,11 @@ export default
         assert.ok(AutoEVCompleted, "Expected Track H Automatic 800V EV Station butler robot + drone to charge battery to 100%");
         assert.ok(MaximumFactoryHallX > 124.0,
                   `Expected Track H Megafactory drive-through past East portal X=124 m, got maxX=${MaximumFactoryHallX.toFixed(1)}`);
-        assert.ok(RoadEditorStreamed, "Expected Sun-UI RoadEditorSequence to stream edited spline road vertices to GPU");
-        assert.ok(PeakSplineBridgeZ > 3.0, `Expected ControlVehicle to climb Track I custom spline flyover bridge (>3.0 m), got peakZ=${PeakSplineBridgeZ.toFixed(2)}`);
+        assert.ok(RoadEditorStreamed, "Expected RoadEditorSequence to stream >100k Road Studio vertices to WebGPU");
+        assert.ok(PeakSplineBridgeZ > 6.5 && Host.Vehicle.Position[2] > 6.0 && Host.Vehicle.Position[1] < 8.0,
+                  `Expected ControlVehicle to drive supported across elevated Road Studio Canal Viaduct (>6.0 m), got peakZ=${PeakSplineBridgeZ.toFixed(2)}, endPos=[${Host.Vehicle.Position.map((V) => V.toFixed(1)).join(", ")}]`);
         for (const ExpectedAspect of ["GREEN", "YELLOW", "ORANGE", "RED"])
             assert.ok(SeenTrafficAspects.has(ExpectedAspect), `Expected Hovering Intersection Traffic Lights to display ${ExpectedAspect}`);
-        console.log(`9-track inversion arena: Track A loop (${Host.Training.Best.loop360.Primary.toFixed(2)} s) · Track B/C boolean bollards · Track D Voronoi collapse+crack-bound smoke · Track E 3-lane subway · Track F 14 railcars · Track G construction thru-trench + dead-end pit · Track H megafactory + auto-fuel (100%) + auto-EV (100%) · Track I Sun-UI spline road editor (peak Z=${PeakSplineBridgeZ.toFixed(2)} m) · hovering 4-lamp traffic lights (R/O/Y/G) · 15 midair robot drones ACTIVE`);
+        console.log(`9-track inversion arena: Track A loop (${Host.Training.Best.loop360.Primary.toFixed(2)} s) · Track B/C boolean bollards · Track D Voronoi collapse+crack-bound smoke · Track E 3-lane subway · Track F 14 railcars · Track G construction thru-trench + dead-end pit · Track H megafactory + auto-fuel (100%) + auto-EV (100%) · Track I Road Studio workspace & highway viaduct (peak Z=${PeakSplineBridgeZ.toFixed(2)} m) · hovering 4-lamp traffic lights (R/O/Y/G) · 15 midair robot drones ACTIVE`);
     }
 };

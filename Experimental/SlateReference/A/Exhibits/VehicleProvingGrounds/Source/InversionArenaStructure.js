@@ -108,12 +108,12 @@ export const InversionArenaTracks = Object.freeze([
     },
     {
         Id:       "trackI",
-        Label:    "Track I · Spline Road Studio",
-        Name:     "Track I — Live Cubic Bézier Spline Road Network & Flyover Overlook",
+        Label:    "Track I · Road Studio District",
+        Name:     "Track I — Road Studio Northbank District & Steel I-Girder Viaduct",
         Icon:     "Compass",
-        Position: [134.0,  408.0],
-        Yaw:      0.0,
-        Note:     "Custom spline curves & elevated bridge loop — open Road Editor (E) to sculpt & add spline roads live!"
+        Position: [322.0, -2.5],
+        Yaw:      7.0,
+        Note:     "Live Road Studio network (junction fillets, steel I-girder highway bridge & hovering signals) — open Road Studio (E)!"
     }
 ]);
 
@@ -1043,7 +1043,7 @@ export function EmitInversionGroundFacets()
     const MinX = InversionArenaBounds.Minimum[0], MaxX = InversionArenaBounds.Maximum[0];
     const MinY = InversionArenaBounds.Minimum[1], MaxY = InversionArenaBounds.Maximum[1];
     const CentreX = 0.5 * (MinX + MaxX);
-    const Outer = 460.0;
+    const Outer = 1850.0;
 
     // Collect true 3D boolean ground cutouts for ALL underground portals AND all 60 Wavy & Linear Bollard shafts!
     const BollardSocketHalf = 0.39;

@@ -18,8 +18,13 @@ import { VehicleSolver } from "../Source/VehicleSolver.js";
 import { ChaseCameraSolver } from "../Source/ChaseCameraSolver.js";
 import { SweepSpark } from "../Source/SparkCollision.js";
 import { ServiceAudio } from "../Source/ServiceAudio.js";
-import { BuildSplineNetworkGeometry, RoadPresetTemplates, CreateRoadNode, CreateSplineRoad,
-         SplitSplineRoadAt, AutoSmoothNodeTangents } from "../Source/RoadSplineBuilder.js";
+import {
+    RoadStudioVertexCapacity,
+    CompileStudioProjectForWorld,
+    makeDemo,
+    makeTemplate,
+    templateCatalog
+} from "../Source/RoadStudioAdapter.js";
 import { RotateVector, CrossVector, DotVector, SubtractVector } from "../Source/TransformProjection.js";
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -1029,110 +1034,79 @@ test("Pole-less Hovering Robotic Intersection Traffic Lights (Red/Orange/Yellow/
         assert.equal(Sig0.CurrentAspect, "RED");
 
         const LightPoles = TL.QueryLightPoles();
-        assert.equal(LightPoles.length, 8, "Every active hovering intersection signal must emit a colored clustered light");
+        assert.equal(LightPoles.length, 8, "Every active base hovering intersection signal must emit a colored clustered light");
         assert.ok(LightPoles[0].Colour[0] > 0.9 && LightPoles[0].Colour[1] < 0.25, "RED aspect light pole must emit red radiance");
 
-        // Verify manual override & custom spline road junction signal slot!
+        // Verify manual override & Road Studio junction signal activation!
         TL.OverrideMode = "ORANGE";
         TL.Advance(0.04);
         assert.ok(TL.Units.slice(0, 8).every((S) => S.CurrentAspect === "ORANGE"), "OverrideMode='ORANGE' must set all active signals to ORANGE");
         TL.OverrideMode = "AUTO";
-        TL.SyncEditorJunctionSignals([{ Name: "Custom Spline Crossroads", Position: [180.0, 408.0, 0.0], Yaw: 0.0 }]);
-        assert.equal(TL.QuerySummary().ActiveCount, 9, "Custom spline junction signal must activate dynamically");
-        assert.ok(TL.Units[8].Anchor[2] > 4.2, "Custom spline junction signal must hover above the road");
+        Scene.RoadEditor.SyncTrafficSignals();
+        assert.equal(TL.QuerySummary().ActiveCount, 10, "Northbank district's 2 signalized junctions must activate hovering signals (8 + 2 = 10)");
+        TL.SyncEditorJunctionSignals([{ Name: "Custom Studio Crossroads", Position: [360.0, 0.0, 0.0], Yaw: 0.0 }]);
+        assert.equal(TL.QuerySummary().ActiveCount, 9, "Custom Road Studio junction signal must activate dynamically");
+        assert.ok(TL.Units[8].Anchor[2] > 4.2, "Custom Road Studio junction signal must hover above the road");
 
-        // ② Watertight 2-Manifold Verification across ALL Spline Road Styles & Preset Templates (Cloverleaf, Trumpet, Roundabout, S-Curve)!
-        const VerifyClosedManifold = (Facets, Label) =>
-        {
-            const Quantize = (V) => V.map((X) => Math.round(X * 10000)).join(",");
-            const Directed = new Set();
-            let SixVol = 0.0;
-            for (const F of Facets)
-            {
-                const [A, B, C] = F.Corners;
-                const Keys = [Quantize(A), Quantize(B), Quantize(C)];
-                if (Keys[0] === Keys[1] || Keys[1] === Keys[2] || Keys[2] === Keys[0])
-                    continue;
-                for (let E = 0; E < 3; ++E)
-                {
-                    const Tag = `${Keys[E]}->${Keys[(E + 1) % 3]}`;
-                    assert.ok(!Directed.has(Tag), `${Label} has duplicate/non-manifold directed edge ${Tag}`);
-                    Directed.add(Tag);
-                }
-                SixVol += DotVector(A, CrossVector(SubtractVector(B, A), SubtractVector(C, A)));
-            }
-            for (const Tag of Directed)
-            {
-                const [From, To] = Tag.split("->");
-                assert.ok(Directed.has(`${To}->${From}`), `${Label} has open boundary edge ${Tag}`);
-            }
-            assert.ok(SixVol > 1.0, `${Label} must have positive outward signed volume, got ${SixVol}`);
-        };
-
+        // ② Road Studio Core + Adapter + Dedicated Workspace Verification across Interchange & Bridge Templates!
         const Editor = Scene.RoadEditor;
         assert.ok(Editor, "SceneStructure must instantiate RoadEditorSequence");
-        const StarterBuilt = BuildSplineNetworkGeometry(Editor.Project);
-        VerifyClosedManifold(StarterBuilt.Facets, "Starter Spline Road & Flyover Network");
+        const StarterSummary = Editor.QuerySummary();
+        assert.equal(StarterSummary.Name, "Northbank district");
+        assert.ok(StarterSummary.RoadCount >= 10, "Northbank district must include >= 10 urban & bridge roads");
+        assert.ok(StarterSummary.BridgeCount >= 1, "Northbank district must include the Canal viaduct steel I-girder highway bridge");
+        assert.ok(StarterSummary.TriangleCount > 45000, `Expected rich Road Studio mesh (>45k tris), got ${StarterSummary.TriangleCount}`);
+        assert.ok(StarterSummary.PhysicsCount >= 10, `Expected span + junction physics surfaces, got ${StarterSummary.PhysicsCount}`);
 
-        for (const Preset of RoadPresetTemplates)
+        // Verify workspace mode toggle (`proving` <-> `roadstudio`)
+        assert.equal(Editor.ActiveWorkspace, "proving");
+        assert.equal(Editor.ToggleWorkspace(), true);
+        assert.equal(Editor.ActiveWorkspace, "roadstudio");
+        assert.equal(Editor.ToggleWorkspace(), false);
+        assert.equal(Editor.ActiveWorkspace, "proving");
+
+        // Verify major Road Studio templates compile cleanly within GPU vertex capacity & East-sector clearance
+        assert.ok(templateCatalog.length >= 15, "Expected full 15-template Road Studio catalog");
+        for (const TemplateId of ["district", "bridge", "diamond", "roundabout", "race", "europe", "signal", "trumpet", "cloverleaf"])
         {
-            const SubProject = { Nodes: [], Roads: [] };
-            Preset.Build(SubProject, [0.0, 0.0]);
-            const Built = BuildSplineNetworkGeometry(SubProject);
-            assert.ok(Built.Facets.length > 80, `${Preset.Id} must emit rich road, kerb & hub geometry`);
-            VerifyClosedManifold(Built.Facets, `Preset ${Preset.Id}`);
+            const Proj = TemplateId === "district" ? makeDemo() : makeTemplate(TemplateId);
+            const Compiled = CompileStudioProjectForWorld(Proj, { LevelKey: "inversion" });
+            assert.ok(Compiled.VertexCount > 3000 && Compiled.VertexCount <= RoadStudioVertexCapacity,
+                      `Template ${TemplateId} vertex count ${Compiled.VertexCount} must fit within GPU budget ${RoadStudioVertexCapacity}`);
+            assert.ok(Compiled.Anchor[0] >= 360.0, `Template ${TemplateId} AnchorX ${Compiled.Anchor[0]} must clear Tracks A-H`);
+            assert.ok(Compiled.PhysicsSurfaces.length >= Proj.roads.length,
+                      `Template ${TemplateId} must emit physics surfaces for road spans & junctions`);
         }
 
-        // Verify tight hairpin curvature guard produces zero bowtie flips AND remains a closed 2-manifold!
-        const HairpinProj = { Nodes: [], Roads: [] };
-        const HN0 = CreateRoadNode([0.0, 0.0, 0.0], "HP0");
-        const HN1 = CreateRoadNode([12.0, 0.0, 0.0], "HP1");
-        HairpinProj.Nodes.push(HN0, HN1);
-        HairpinProj.Roads.push(CreateSplineRoad(HairpinProj, HN0.Id, HN1.Id, {
-            Width: 16.0, Style: "race", BankDeg: 14.0, Guardrails: true,
-            H1: [0.0, 26.0, 0.0], H2: [0.0, 26.0, 0.0]
-        }));
-        VerifyClosedManifold(BuildSplineNetworkGeometry(HairpinProj).Facets, "Extreme Tight Hairpin Spline");
-
-        // ③ Live Spline Editing Ops (Split, Smooth C¹, Undo/Redo, Export/Import)
-        const InitialRoadCount = Editor.Project.Roads.length;
-        const SplitNode = Editor.SplitSelectedRoadMidpoint();
-        assert.ok(SplitNode, "SplitSelectedRoadMidpoint must insert a shared junction node via de Casteljau subdivision");
-        assert.equal(Editor.Project.Roads.length, InitialRoadCount + 1);
-        Editor.SmoothSelectedTangents();
+        // ③ Live Road Studio Authoring Ops (AddRoadBetween, MoveJunction, InsertBridgeOnRoad, ExportJson/ImportJson)
+        const BaseRoadCount = Editor.Project.roads.length;
+        const AddedRoad = Editor.AddRoadBetween([-340.0, 0.0, 160.0], [340.0, 0.0, 160.0]);
+        assert.ok(AddedRoad && AddedRoad.id, "AddRoadBetween must insert a connected road alignment");
+        assert.equal(Editor.Project.roads.length, BaseRoadCount + 1);
+        assert.equal(Editor.MoveJunction(AddedRoad.end, [360.0, 0.0, 160.0]), true, "MoveJunction must translate node cleanly");
+        assert.ok(Editor.InsertBridgeOnRoad(AddedRoad.id), "InsertBridgeOnRoad must atomically split approaches & elevate bridge span");
         const Exported = Editor.ExportJson();
-        assert.equal(Editor.Undo(), true); // Undo smooth
-        assert.equal(Editor.Undo(), true); // Undo split
-        assert.equal(Editor.Project.Roads.length, InitialRoadCount);
-        assert.equal(Editor.Redo(), true);
-        assert.equal(Editor.Project.Roads.length, InitialRoadCount + 1);
-        Editor.ImportJson(Exported);
+        Editor.ResetToDefault();
+        assert.equal(Editor.Project.roads.length, BaseRoadCount);
+        assert.equal(Editor.ImportJson(Exported), true, "ImportJson must restore full Road Studio project");
+        assert.ok(Editor.QuerySummary().BridgeCount >= 2, "Imported project must retain newly inserted highway bridge");
+        Editor.ResetToDefault();
 
-        // ④ Live 480 Hz VehicleSolver Driving Over Custom Cubic Bézier Arched Bridge!
-        const BridgeProj = { Nodes: [], Roads: [] };
-        const BN0 = CreateRoadNode([200.0, 0.0, 0.0], "Bridge West");
-        const BN1 = CreateRoadNode([290.0, 0.0, 0.0], "Bridge East");
-        BridgeProj.Nodes.push(BN0, BN1);
-        BridgeProj.Roads.push(CreateSplineRoad(BridgeProj, BN0.Id, BN1.Id, {
-            Name: "Test Flyover", Width: 12.0, Style: "bridge", ArchHeight: 4.8, Guardrails: true,
-            H1: [30.0, 0.0, 0.0], H2: [-30.0, 0.0, 0.0]
-        }));
-        const BridgeBuilt = BuildSplineNetworkGeometry(BridgeProj);
-        VerifyClosedManifold(BridgeBuilt.Facets, "Test Flyover Bridge");
-
+        // ④ Live 480 Hz VehicleSolver Driving Up 2:1 Embankment Approach & Across Steel I-Girder Highway Bridge!
+        const DemoCompiled = CompileStudioProjectForWorld(makeDemo(), { LevelKey: "inversion" });
         const Car = new VehicleSolver([]);
-        Car.Surfaces = [BridgeBuilt.PhysicsSurface];
+        Car.Surfaces = DemoCompiled.PhysicsSurfaces;
         Car.AeroGripScale = 1.0;
-        Car.Respawn([204.0, 0.0, 0.72], 0.0);
+        Car.Respawn([410.5, 102.0, 1.30], -Math.PI / 2 - 0.03);
         let PeakZ = 0.0;
-        for (let Step = 0; Step < 450; ++Step)
+        for (let Step = 0; Step < 360; ++Step)
         {
             Car.Advance({ Throttle: 1.0, Brake: 0.0, Steer: 0.0, Handbrake: false }, 1.0 / 60.0);
             PeakZ = Math.max(PeakZ, Car.Position[2]);
-            assert.ok(Car.Position.every(Number.isFinite), "Vehicle pose on custom spline bridge must stay finite");
+            assert.ok(Car.Position.every(Number.isFinite), "Vehicle pose on Road Studio embankment & highway bridge must stay finite");
         }
-        assert.ok(Car.Position[0] > 272.0, `Car must drive smoothly across the curved spline flyover, reached X=${Car.Position[0]}`);
-        assert.ok(PeakZ > 4.2, `Car must climb the 4.8 m cubic Bézier arched flyover crest, peak Z=${PeakZ}`);
+        assert.ok(Car.Position[1] < 55.0, `Car must climb North embankment & cross onto Canal viaduct, reached Y=${Car.Position[1]}`);
+        assert.ok(PeakZ > 6.0, `Car must climb smoothly onto the +6.1 m Canal viaduct highway bridge deck, peak Z=${PeakZ}`);
     }
     finally
     {

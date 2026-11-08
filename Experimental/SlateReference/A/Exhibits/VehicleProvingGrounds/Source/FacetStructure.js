@@ -458,12 +458,12 @@ export class SceneStructure
             this.TrafficLights = new TrafficLightSequence(this, RawTrafficLights, DynamicSignalSlots);
         }
 
-        // ⑪ live-streamed cubic Bézier spline road network (editable at runtime via RoadEditorSequence) ----------------
-        const RoadEditorSet = this.ConstructFacetSet("Spline road network", [], 0.0, 0.0);
-        this.FacetSets[RoadEditorSet].LocalMinimum   = [-600.0, -600.0, -20.0];
-        this.FacetSets[RoadEditorSet].LocalMaximum   = [ 600.0,  600.0,  60.0];
+        // ⑪ live-streamed Road Studio road, junction & highway bridge network (editable in Road Studio workspace) ------
+        const RoadEditorSet = this.ConstructFacetSet("Road Studio network", [], 0.0, 0.0);
+        this.FacetSets[RoadEditorSet].LocalMinimum   = [-2200.0, -2200.0, -40.0];
+        this.FacetSets[RoadEditorSet].LocalMaximum   = [ 2400.0,  2200.0, 120.0];
         this.FacetSets[RoadEditorSet].VertexCapacity = RoadEditorVertexCapacity;
-        const RoadEditorOcc = this.ConstructOccupant("Spline road network", RoadEditorSet, ConstructIdentityTransform(), OccupantRole.Raster);
+        const RoadEditorOcc = this.ConstructOccupant("Road Studio network", RoadEditorSet, ConstructIdentityTransform(), OccupantRole.Raster);
         this.RoadEditorBlock = { FacetSet: RoadEditorSet, Occupant: RoadEditorOcc };
         this.RoadEditor = new RoadEditorSequence(this, LevelKey);
 

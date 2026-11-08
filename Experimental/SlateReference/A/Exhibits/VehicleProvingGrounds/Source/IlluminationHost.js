@@ -444,7 +444,7 @@ class IlluminationHost
         this.Cards.CaptureCards(this.Scene, this.VertexRecords);
         this.Driver = new DriverInputIntegrator();
         this.Chase = new ChaseCameraSolver();
-        this.Chase.Surfaces = this.LevelDescriptor.Surfaces || [];
+        this.Chase.Surfaces = this.Vehicle?.Surfaces || this.LevelDescriptor.Surfaces || [];
         this.Orbit = new VehicleOrbitCamera();
         this.Flight = new FreeCameraSolver();
         this.Training = new TrainingSequence(this);
@@ -567,6 +567,13 @@ class IlluminationHost
     //    once (Instant — scripts and the harness).
     TeleportVehicle(Zone, Instant = false, Done = null)
     {
+        if (Zone?.Id === "trackI" && this.RoadEditor && this.RoadEditor.Project?.name !== "Northbank district")
+        {
+            this.RoadEditor.DriveOnSelectedRoad();
+            if (Done)
+                Done();
+            return;
+        }
         const Destination = { Position: Zone.Position.slice(0, 2), Yaw: Zone.Yaw * Math.PI / 180.0 };
         if (this.FreeCamera)
             this.AssignCamera(false);
@@ -806,6 +813,12 @@ class IlluminationHost
             this.ServiceStations?.Audio?.Unlock();
             if (Event.target instanceof HTMLInputElement || Event.target instanceof HTMLSelectElement)
                 return;
+            if (this.RoadEditor?.ActiveWorkspace === "roadstudio")
+            {
+                if (Event.code === "Escape" && !Event.repeat)
+                    this.RoadEditor.CloseWorkspace();
+                return;
+            }
             if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "F8"].includes(Event.code))
                 Event.preventDefault();
             if (Event.code === "F8" || (Event.code === "KeyF" && !Event.repeat))
@@ -820,13 +833,13 @@ class IlluminationHost
                 this.CycleCamera(Event.shiftKey ? -1 : 1);
             if (Event.code === "KeyE" && !Event.repeat && !Event.ctrlKey && !Event.metaKey && !Event.altKey)
             {
-                if (this.Shell)
-                    this.Shell.Select("roadeditor");
                 if (this.RoadEditor)
                 {
-                    const Opened = this.RoadEditor.ToggleFloatingStudio();
-                    this.Shell?.Announce(Opened ? "Spline Road Studio opened (E)" : "Spline Road Studio closed");
+                    const Opened = this.RoadEditor.ToggleWorkspace();
+                    if (!Opened)
+                        this.Shell?.Announce("Returned to Proving Grounds — Road Studio synced");
                 }
+                return;
             }
             if (Event.code === "KeyI" && !Event.repeat && !Event.ctrlKey && !Event.metaKey && !Event.altKey)
             {
@@ -880,26 +893,6 @@ class IlluminationHost
         this.Canvas.addEventListener("pointerdown", (Event) =>
         {
             this.ServiceStations?.Audio?.Unlock();
-            if (this.RoadEditor?.ViewportPickEnabled && Event.button === 0 && !Event.altKey && this.CameraState)
-            {
-                const Bounds = this.Canvas.getBoundingClientRect();
-                const NX = ((Event.clientX - Bounds.left) / Math.max(Bounds.width, 1.0)) * 2.0 - 1.0;
-                const NY = 1.0 - ((Event.clientY - Bounds.top) / Math.max(Bounds.height, 1.0)) * 2.0;
-                const C = this.CameraState;
-                const Dir = NormalizeVector(AddVector(C.Forward, AddVector(ScaleVector(C.Right, NX * C.TanY * C.Aspect), ScaleVector(C.Up, NY * C.TanY))));
-                if (Math.abs(Dir[2]) > 1.0e-4)
-                {
-                    const T = -C.Position[2] / Dir[2];
-                    if (T > 0.5 && T < 900.0)
-                    {
-                        const WorldXY = [C.Position[0] + Dir[0] * T, C.Position[1] + Dir[1] * T];
-                        this.RoadEditor.HandleWorldClick(WorldXY, 5.0);
-                        this.RoadEditor.FloatingRedraw?.();
-                        Dragging = false;
-                        return;
-                    }
-                }
-            }
             Dragging = true;
             LastX = Event.clientX;
             LastY = Event.clientY;
@@ -1292,6 +1285,15 @@ class IlluminationHost
         //    controls lag by seconds. A swapchain throttles on its own; a capture target does not.
         if ((this.FramesInFlight || 0) >= 2)
         {
+            requestAnimationFrame((Next) => this.AdvanceFrame(Next));
+            return;
+        }
+        // Yield GPU & input cleanly while the user is authoring inside the dedicated Road Studio workspace
+        if (!this.CaptureMode && this.RoadEditor?.ActiveWorkspace === "roadstudio")
+        {
+            this.Keys.clear();
+            this.LastTime = Now;
+            this.PriorFrameTime = Now;
             requestAnimationFrame((Next) => this.AdvanceFrame(Next));
             return;
         }

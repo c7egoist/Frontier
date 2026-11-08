@@ -3,17 +3,45 @@
 ==============================================================================================================================================
                                                                   INDEX.HTML
 ==============================================================================================================================================
- 🧩 Distance-field GI exhibit in the Frontier Editor: outliner, WebGPU viewport, inspector — render settings, smoke + fire, fracture.
+ 🧩 Distance-field GI exhibit & dedicated Road Studio workspace in the Frontier Editor.
 -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Frontier · Proving Grounds — distance-field GI, smoke + fire, fracture</title>
+<title>Frontier · Proving Grounds &amp; Road Studio</title>
 <link rel="stylesheet" href="Style/FrontierEditor.css">
 <link rel="stylesheet" href="Style/InspectorReference.css">
 </head>
 <body>
+    <header id="workspace-bar" aria-label="Frontier Workspaces">
+        <div class="workspace-brand">
+            <span class="workspace-brand-mark">frontier<span class="workspace-brand-dot">.</span></span>
+        </div>
+        <nav class="workspace-tabs" role="tablist">
+            <button type="button" class="workspace-tab active" data-workspace-tab="proving" role="tab" aria-selected="true">
+                <span class="workspace-tab-dot"></span>
+                <span class="workspace-tab-title">Proving Grounds</span>
+                <span class="workspace-tab-sub">3D Driving · GI · Physics</span>
+            </button>
+            <button type="button" class="workspace-tab" data-workspace-tab="roadstudio" role="tab" aria-selected="false">
+                <span class="workspace-tab-dot studio"></span>
+                <span class="workspace-tab-title">Road Studio</span>
+                <span class="workspace-tab-sub">2D / 3D Roads · Bridges · Interchanges</span>
+            </button>
+        </nav>
+        <div class="workspace-bar-fill"></div>
+        <div class="workspace-meta" id="workspace-network-meta">Northbank district · 10 roads · 1 bridge</div>
+        <div class="workspace-actions">
+            <button type="button" class="workspace-action-btn" data-workspace-action="open-studio" title="Switch to the dedicated Road Studio workspace (E)">
+                Road Studio Workspace
+            </button>
+            <button type="button" class="workspace-action-btn primary" data-workspace-action="drive-network" title="Teleport vehicle onto the Road Studio network in Proving Grounds">
+                Drive on Network
+            </button>
+        </div>
+    </header>
+
     <div id="shell">
         <aside id="outliner" class="column editor-column">
             <div class="column-tabs">
@@ -58,6 +86,11 @@
         </aside>
         <footer id="status"></footer>
     </div>
-    <script type="module" src="Source/IlluminationHost.js?v=lighting-training-2"></script>
+
+    <section id="road-studio-workspace" class="hidden" aria-label="Road Studio Workspace">
+        <iframe id="road-studio-frame" title="Frontier Road Studio — Roads, Bridges &amp; Interchanges" src="RoadStudio.html?embedded=1"></iframe>
+    </section>
+
+    <script type="module" src="Source/IlluminationHost.js?v=road-studio-workspace-1"></script>
 </body>
 </html>

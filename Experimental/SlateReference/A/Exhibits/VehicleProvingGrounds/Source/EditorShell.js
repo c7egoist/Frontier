@@ -343,17 +343,15 @@ export class EditorShell
         this.DisplaySelect = Display;
         Bar.appendChild(Display);
 
-        // Clean Sun-UI pill button to open the Cubic Bézier Spline Road Editor in 1 click!
+        // Dedicated Road Studio workspace launcher button in the viewport bar
         const RoadBtn = Construct("button", "action-button");
-        RoadBtn.title = "Open Spline Road Editor & Curve Sculptor (E)";
+        RoadBtn.title = "Switch to the dedicated Road Studio workspace (E)";
         RoadBtn.style.cssText = "height:28px;padding:0 10px;border-radius:8px;display:inline-flex;align-items:center;gap:6px;font-size:12px;";
-        RoadBtn.append(ConstructGlyph("Route", 14, 1.7), Construct("span", "", "Road Editor"));
+        RoadBtn.append(ConstructGlyph("Route", 14, 1.7), Construct("span", "", "Road Studio"));
         RoadBtn.addEventListener("click", () =>
         {
-            if (!Host.Dock.QueryVisible("Panel"))
-                Host.Dock.Toggle("Panel");
-            if (this.Selected === "roadeditor" && Host.RoadEditor)
-                Host.RoadEditor.ToggleFloatingStudio();
+            if (Host.RoadEditor)
+                Host.RoadEditor.OpenWorkspace();
             else
                 this.Select("roadeditor");
         });

@@ -19,7 +19,7 @@ import { DerezPresets } from "./EffectSequence.js";
 import { FormatPrimary } from "./TrainingSequence.js";
 import { CameraRigs } from "./CabinStructure.js";
 import { AutomotiveMode, RoofFixtureType } from "./LightingSystem.js";
-import { RoadPresetTemplates } from "./RoadSplineBuilder.js";
+import { templateCatalog } from "./RoadStudioAdapter.js";
 
 export const InspectionModes = [
     ["Final image", 0], ["Direct sun only", 1], ["Indirect diffuse (GI)", 2], ["Indirect irradiance (denoised)", 3],
@@ -202,16 +202,19 @@ export function ConstructEntities(Host)
     if (Host.RoadEditor)
     {
         Entities.push({
-            Id: "roadeditor", Group: "Level", Name: "Road editor", Type: "Cubic Bézier splines", Glyph: "Route", Colour: Accent.Environment,
-            Description: "Sculpt spline roads, banked curves, bridges & interchanges live",
-            Meta: () => `${Host.RoadEditor.Project.Roads.length} roads`,
+            Id: "roadeditor", Group: "Level", Name: "Road Studio", Type: "Roads · bridges · junctions", Glyph: "Route", Colour: Accent.Environment,
+            Description: "Dedicated 2D/3D Road Studio workspace — filleted junctions, steel I-girder bridges & interchanges",
+            Meta: () =>
+            {
+                const S = Host.RoadEditor.QuerySummary();
+                return `${S.RoadCount} rd · ${S.BridgeCount} br`;
+            },
             State: () => (Host.RoadEditor.Enabled ? "live" : ""),
-            Toggle: { Read: () => Host.RoadEditor.Enabled, Write: (On) => { Host.RoadEditor.Enabled = On; Host.RoadEditor.CommitChanges(null); } },
+            Toggle: { Read: () => Host.RoadEditor.Enabled, Write: (On) => { Host.RoadEditor.Enabled = On; Host.RoadEditor.CommitChanges(); } },
             Switches: () => [
-                { Name: "Snap nodes", Glyph: "Target", Read: () => Host.RoadEditor.SnapEnabled,
-                  Write: (On) => { Host.RoadEditor.SnapEnabled = On; } },
-                { Name: "3D viewport pick", Glyph: "MoveSpace", Read: () => Host.RoadEditor.ViewportPickEnabled,
-                  Write: (On) => { Host.RoadEditor.ViewportPickEnabled = On; } }
+                { Name: "Open Road Studio workspace (E)", Glyph: "Scan",
+                  Read: () => Host.RoadEditor.ActiveWorkspace === "roadstudio",
+                  Write: (On) => { if (On) Host.RoadEditor.OpenWorkspace(); else Host.RoadEditor.CloseWorkspace(); } }
             ],
             Build: (C, B) => BuildRoadEditor(Host, C, B)
         });
@@ -1233,106 +1236,77 @@ function Distance(Left, Right)
 }
 
 //------------------------------------------------------------------------------------------------------------------------
-//                      SUN-UI-STYLED CUBIC BÉZIER SPLINE ROAD EDITOR & HOVERING TRAFFIC LIGHTS
+//                      DEDICATED ROAD STUDIO WORKSPACE LINK & INTERCHANGE / BRIDGE STREAMER
 //------------------------------------------------------------------------------------------------------------------------
 
 function BuildRoadEditor(Host, C, Body)
 {
     const R = Host.RoadEditor;
 
-    // ① Card 01: Spline Tool Mode & Track / Interchange Templates (clean Sun-UI preset card aesthetic)
-    const ToolsCard = C.Card(Body, "Spline tool & templates", "Route",
-                             { Accent: Accent.Environment, Index: 1, Subtitle: "Select · Draw · Split · Delete" });
-    C.Segmented(ToolsCard, R, "ToolMode",
-                [["Select", "select"], ["Draw", "draw"], ["Split", "split"], ["Delete", "delete"]],
-                { Label: "Tool", OnChange: () => { R.DrawChainNodeId = null; C.Synchronise(); R.FloatingRedraw?.(); } });
-    C.Segmented(ToolsCard, R, "NewRoadStyle",
-                [["Motorway", "motorway"], ["Race kerb", "race"], ["Urban", "urban"], ["Bridge", "bridge"]],
-                { Label: "New road", OnChange: () => C.Synchronise() });
-
-    const PresetRow1 = C.ActionRow(ToolsCard);
-    for (const Preset of RoadPresetTemplates.slice(0, 2))
-        C.Button(PresetRow1, Preset.Label, "Plus", () => R.AddPresetTemplate(Preset.Id));
-    const PresetRow2 = C.ActionRow(ToolsCard);
-    for (const Preset of RoadPresetTemplates.slice(2, 4))
-        C.Button(PresetRow2, Preset.Label, "Plus", () => R.AddPresetTemplate(Preset.Id));
-
-    const EditRow = C.ActionRow(ToolsCard);
-    C.Button(EditRow, "Add curve", "Plus", () => R.AddQuickStraightOrCurve(true));
-    C.Button(EditRow, "Drive here", "Car", () => R.DriveOnSelectedRoad());
-    C.Button(EditRow, "Undo", "Undo2", () => R.Undo());
-
-    // ② Card 02: Sun-UI Interactive Spline Alignment Instrument (drag nodes & glowing sun-gold Bézier handles!)
-    const CurveCard = C.Card(Body, "Spline alignment", "Compass",
-                             { Accent: Accent.Environment, Index: 2, Subtitle: "Cubic Bézier · C¹ tangents" });
-    C.Metric(CurveCard,
-             () => R.QuerySummary().ActiveLength,
-             "m",
-             1,
+    // ① Card 01: Dedicated Road Studio Workspace Launcher & Live GPU Network Telemetry
+    const WorkspaceCard = C.Card(Body, "Road Studio workspace", "Route",
+                                 { Accent: Accent.Environment, Index: 1, Subtitle: "Linked 2D Plan + 3D Orbit · Live GPU Sync" });
+    C.Metric(WorkspaceCard,
+             () => R.QuerySummary().RoadCount,
+             "roads",
+             0,
              () =>
              {
                  const S = R.QuerySummary();
-                 return [`min R ${S.MinRadius > 900 ? "∞" : `${S.MinRadius.toFixed(0)} m`}`, S.MinRadius < 18.0 ? "warm" : ""];
+                 return [`${S.BridgeCount} bridge${S.BridgeCount === 1 ? "" : "s"} · ${(S.TriangleCount / 1000).toFixed(1)}k tris`, "live"];
              });
-    const RedrawPlan = C.Instrument(CurveCard, 204, (Ctx, W, H) => R.DrawSunStyleSplineInstrument(Ctx, W, H), true);
-    const PlanCanvas = CurveCard.lastElementChild || (CurveCard.children && CurveCard.children[CurveCard.children.length - 1]);
-    R.AttachInteractiveCanvas(PlanCanvas, RedrawPlan);
+    C.Muted(WorkspaceCard, "Author multi-lane roads, tangent-filleted junctions, steel I-girder & concrete girder highway bridges, bearings, piers, 2:1 embankments, cycleways, kerbs, and interchanges in the dedicated Road Studio workspace — synced live to Proving Grounds.");
 
-    const StudioRow = C.ActionRow(CurveCard);
-    C.Button(StudioRow, "Large studio (E)", "Scan", () => R.ToggleFloatingStudio());
-    C.Button(StudioRow, "Smooth C¹", "Sparkles", () => { R.SmoothSelectedTangents(); RedrawPlan(); });
-    C.Button(StudioRow, "Split ½", "Plus", () => { R.SplitSelectedRoadMidpoint(); RedrawPlan(); });
+    const LaunchRow = C.ActionRow(WorkspaceCard);
+    C.Button(LaunchRow, "Open Road Studio (E)", "Scan", () => R.OpenWorkspace());
+    C.Button(LaunchRow, "Drive on network", "Car", () => R.DriveOnSelectedRoad());
 
-    const ViewRow = C.ActionRow(CurveCard);
-    C.Button(ViewRow, "Fit network", "Map", () => { R.FitViewToNetwork(); RedrawPlan(); });
-    C.Button(ViewRow, "Focus car", "Target", () => { R.FocusViewOnCar(); RedrawPlan(); });
-    C.Button(ViewRow, "Delete", "Trash2", () => { R.DeleteSelected(); RedrawPlan(); }, "danger");
-
-    // ③ Card 03: Selected Road Cross-Section, Bridge Elevation & Junction Hover Signal
-    const CrossCard = C.Card(Body, "Cross-section & elevation", "SlidersHorizontal",
-                             { Accent: Accent.Environment, Index: 3, Subtitle: "Watertight 2-manifold deck" });
-
-    const Proxy = {
-        get Width()      { return R.GetSelectedRoad()?.Width ?? R.NewRoadWidth; },
-        set Width(V)     { const Rd = R.GetSelectedRoad(); if (Rd) Rd.Width = V; R.NewRoadWidth = V; },
-        get BankDeg()    { return R.GetSelectedRoad()?.BankDeg ?? 0.0; },
-        set BankDeg(V)   { const Rd = R.GetSelectedRoad(); if (Rd) Rd.BankDeg = V; },
-        get ArchHeight() { return R.GetSelectedRoad()?.ArchHeight ?? 0.0; },
-        set ArchHeight(V){ const Rd = R.GetSelectedRoad(); if (Rd) Rd.ArchHeight = V; },
-        get ElevationZ() { return R.GetSelectedNode()?.Position[2] ?? 0.0; },
-        set ElevationZ(V){ const Nd = R.GetSelectedNode(); if (Nd) Nd.Position[2] = V; },
-        get Guardrails() { return !!(R.GetSelectedRoad()?.Guardrails); },
-        set Guardrails(V){ const Rd = R.GetSelectedRoad(); if (Rd) Rd.Guardrails = !!V; },
-        get Markings()   { return R.GetSelectedRoad()?.Markings !== false; },
-        set Markings(V)  { const Rd = R.GetSelectedRoad(); if (Rd) Rd.Markings = !!V; },
-        get JunctionSignal() { return !!(R.GetSelectedNode()?.TrafficLight); },
-        set JunctionSignal(V){ const Nd = R.GetSelectedNode(); if (Nd) Nd.TrafficLight = !!V; }
-    };
-
-    const CommitLive = () => { R.CommitChanges(null); RedrawPlan(); R.FloatingRedraw?.(); };
-    Slider(C, CrossCard, Proxy, "Width",      "Carriageway width",  6.0,  22.0, 0.5, "m", 1, ["Single", "4-lane"], CommitLive);
-    Slider(C, CrossCard, Proxy, "BankDeg",    "Superelevation bank",-28.0, 28.0, 0.5, "°", 1, ["−28°", "+28°"],   CommitLive);
-    Slider(C, CrossCard, Proxy, "ArchHeight", "Flyover arch crest",  0.0,  14.0, 0.25,"m", 2, ["Flat", "Bridge"], CommitLive);
-    Slider(C, CrossCard, Proxy, "ElevationZ", "Junction height Z",   0.0,  16.0, 0.25,"m", 2, ["Ground", "Sky"],  CommitLive);
-
-    C.Switch(CrossCard, Proxy, "Guardrails",     { Label: "Safety guardrails & bridge piers", OnChange: CommitLive });
-    C.Switch(CrossCard, Proxy, "Markings",       { Label: "Procedural kerbs & lane markings", OnChange: CommitLive });
-    C.Switch(CrossCard, Proxy, "JunctionSignal", { Label: "Hovering traffic light at junction",
-                                                   Detail: "Stations a pole-less 4-lamp signal above this node", OnChange: CommitLive });
-
-    C.Stats(CrossCard, [
-        ["Spline roads", () => R.Project.Roads.length, "", 0],
-        ["Junctions",    () => R.Project.Nodes.length, "", 0],
-        ["Total length", () => R.QuerySummary().TotalLength, "m", 0]
+    C.Stats(WorkspaceCard, [
+        ["Junctions",       () => R.QuerySummary().NodeCount,     "", 0],
+        ["Highway bridges", () => R.QuerySummary().BridgeCount,   "", 0],
+        ["Physics spans",   () => R.QuerySummary().PhysicsCount,  "", 0],
+        ["Hover signals",   () => R.QuerySummary().SignalCount,   "", 0]
     ]);
 
-    const FooterRow = C.ActionRow(CrossCard);
-    C.Button(FooterRow, "Copy JSON", "Check", () =>
+    // ② Card 02: Interchange, Bridge & Urban District Templates (1-click load & live WebGPU stream)
+    const TemplateCard = C.Card(Body, "Interchange & street templates", "Map",
+                                { Accent: Accent.Environment, Index: 2, Subtitle: "15 complete road & bridge networks" });
+
+    const TemplateState = { Selected: "district" };
+    const TemplateOptions = templateCatalog.map((Entry) => [Entry.name, Entry.id]);
+    C.Select(TemplateCard, TemplateState, "Selected", TemplateOptions,
+             { Label: "Template", OnChange: (Id) => { R.LoadTemplate(Id); C.Synchronise(); } });
+
+    const QuickRow1 = C.ActionRow(TemplateCard);
+    C.Button(QuickRow1, "Northbank district", "Building2", () => { TemplateState.Selected = "district"; R.LoadTemplate("district"); C.Synchronise(); });
+    C.Button(QuickRow1, "Highway bridge", "GitFork", () => { TemplateState.Selected = "bridge"; R.LoadTemplate("bridge"); C.Synchronise(); });
+
+    const QuickRow2 = C.ActionRow(TemplateCard);
+    C.Button(QuickRow2, "Cloverleaf", "Compass", () => { TemplateState.Selected = "cloverleaf"; R.LoadTemplate("cloverleaf"); C.Synchronise(); });
+    C.Button(QuickRow2, "Trumpet", "Route", () => { TemplateState.Selected = "trumpet"; R.LoadTemplate("trumpet"); C.Synchronise(); });
+
+    const QuickRow3 = C.ActionRow(TemplateCard);
+    C.Button(QuickRow3, "Diamond bridge", "TrendingUp", () => { TemplateState.Selected = "diamond"; R.LoadTemplate("diamond"); C.Synchronise(); });
+    C.Button(QuickRow3, "Grand Prix circuit", "Flag", () => { TemplateState.Selected = "race"; R.LoadTemplate("race"); C.Synchronise(); });
+
+    // ③ Card 03: Atomic Highway Bridge Insertion & Network JSON
+    const BridgeCard = C.Card(Body, "Bridge & network actions", "SlidersHorizontal",
+                              { Accent: Accent.Environment, Index: 3, Subtitle: "Grade-continuous bridge spans & JSON" });
+
+    const BridgeRow = C.ActionRow(BridgeCard);
+    C.Button(BridgeRow, "Insert bridge on road", "Plus", () =>
+    {
+        const TargetRoad = R.Project.roads.find((Rd) => !Rd.bridge) || R.Project.roads[0];
+        if (TargetRoad && R.InsertBridgeOnRoad(TargetRoad.id))
+            Host.Shell?.Announce(`Inserted connected highway bridge on ${TargetRoad.name}`);
+        C.Synchronise();
+    });
+    C.Button(BridgeRow, "Copy JSON", "Check", () =>
     {
         if (navigator.clipboard?.writeText)
-            navigator.clipboard.writeText(R.ExportJson()).then(() => Host.Shell?.Announce("Copied spline road JSON"));
+            navigator.clipboard.writeText(R.ExportJson()).then(() => Host.Shell?.Announce("Copied Road Studio JSON"));
     });
-    C.Button(FooterRow, "Reset default", "RotateCcw", () => { R.ResetToDefault(); RedrawPlan(); });
+    C.Button(BridgeRow, "Reset default", "RotateCcw", () => { R.ResetToDefault(); C.Synchronise(); });
 }
 
 function BuildTrafficLights(Host, C, Body)
