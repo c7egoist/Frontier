@@ -9,7 +9,7 @@ import { CourseConstants, KerbConstants, SpawnPoint, EmitQuad, EmitBoxFacets, Em
 import { InversionArenaBounds, InversionArenaTracks, InversionArenaSurfaces, InversionArenaShapes, InversionArenaTerrainHulls,
          InversionArenaSpawn, InversionArenaZones, InversionArenaDrills, InversionClearZones, InversionPhysicsCutouts,
          InversionDistanceCutouts, EmitInversionGroundFacets, ResolveInversionPlacements, ResolveInversionBollards,
-         ResolveInversionCollapseSpans, ResolveInversionTrams,
+         ResolveInversionCollapseSpans, ResolveInversionTrams, ResolveInversionDrones,
          ResolveInversionCones, ResolveInversionBreakables } from "./InversionArenaStructure.js";
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -471,8 +471,16 @@ export function ResolveLevelShapes(LevelKey = "proving")
         const { Cone, Jersey, TrafficPost, TrafficHead, Pole, PoleHead,
                 GardenAluminium, GardenGold, GardenGlass, GardenMirror } = LevelShapes;
         return {
-            Cone, Jersey, TrafficPost, TrafficHead, Pole, PoleHead,
-            GardenAluminium, GardenGold, GardenGlass, GardenMirror,
+            Cone:            { ...Cone,            Voxel: 0.05 },
+            Jersey:          { ...Jersey,          Voxel: 0.09 },
+            TrafficPost,
+            TrafficHead,
+            Pole,
+            PoleHead,
+            GardenAluminium: { ...GardenAluminium, Voxel: 0.08 },
+            GardenGold:      { ...GardenGold,      Voxel: 0.08 },
+            GardenGlass:     { ...GardenGlass,     Voxel: 0.08 },
+            GardenMirror:    { ...GardenMirror,    Voxel: 0.06 },
             ...InversionArenaShapes
         };
     }
@@ -503,6 +511,7 @@ export function ResolveLevelDescriptor(LevelKey = "proving")
             Bollards:        ResolveInversionBollards,
             CollapseSpans:   ResolveInversionCollapseSpans,
             Trams:           ResolveInversionTrams,
+            Drones:          ResolveInversionDrones,
             Cones:           ResolveInversionCones,
             Breakables:      ResolveInversionBreakables,
             EmitGround:      EmitInversionGroundFacets

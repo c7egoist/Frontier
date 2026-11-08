@@ -226,6 +226,7 @@ class IlluminationHost
         this.OccupantRecords = this.Exchange.ConstructRecords(this.Scene.Occupants.length * OccupantStride,
                                                               GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST, "Occupant records");
         this.Lighting        = new LightingSystem();
+        this.Lighting.ScrollingGrid = this.LevelKey === "inversion";
 
         // ② per-occupant distance volumes (the analogue of mesh distance fields), transferred on the device
         this.Volumes = new OccupantDistanceSpace(this.Exchange, this.Shaders);
@@ -247,9 +248,39 @@ class IlluminationHost
         this.RayTracing = new RayTracingSpace(this.Exchange);
         this.RayTracing.ConstructResources(this.Scene);
 
-        this.StreetLampPoles = this.LevelDescriptor.Placements()
-            .filter((P) => P.Shape === "PoleHead")
-            .map((P) => ({ X: P.Position[0], Y: P.Position[1], Z: P.Position[2] }));
+        this.StreetLampPoles = [];
+        for (let Index = 0; Index < this.LevelDescriptor.Placements().length; ++Index)
+        {
+            const P = this.LevelDescriptor.Placements()[Index];
+            if (P.Shape === "PoleHead")
+            {
+                this.StreetLampPoles.push({ X: P.Position[0], Y: P.Position[1], Z: P.Position[2] });
+            }
+            else if (P.Shape === "WorkLightTower")
+            {
+                this.StreetLampPoles.push({
+                    X: P.Position[0],
+                    Y: P.Position[1],
+                    Z: P.Position[2] + 4.45,
+                    Colour: [1.0, 0.66, 0.16],
+                    Intensity: 82.0,
+                    Reach: 38.0
+                });
+            }
+            else if (P.Shape === "AmberBeaconPost")
+            {
+                this.StreetLampPoles.push({
+                    X: P.Position[0],
+                    Y: P.Position[1],
+                    Z: P.Position[2] + 1.25,
+                    Colour: [1.0, 0.52, 0.05],
+                    Intensity: 34.0,
+                    Reach: 18.0,
+                    PulseFreq: 5.2,
+                    Phase: Index * 0.7
+                });
+            }
+        }
         this.Constants = {
             MaximumTraversalSteps: { Type: "u32", Value: this.Grade.Steps },
             ScreenTraversalSteps:  { Type: "u32", Value: this.Grade.ScreenSteps },
@@ -314,6 +345,9 @@ class IlluminationHost
         this.Trams = this.Scene.Trams;
         if (this.Trams)
             this.Trams.RegisterDynamicObstacles(this.Vehicle.Obstacles);
+        this.Drones = this.Scene.Drones;
+        if (this.Drones)
+            this.Drones.RegisterDynamicObstacles(this.Vehicle.Obstacles);
         this.ReportProgress("Baking fracture patterns", 0.72);
         this.Fracture = new FractureSequence(this);
 
@@ -1202,6 +1236,9 @@ class IlluminationHost
         const TramsMoved = this.Trams
             ? this.Trams.Advance(this.Vehicle, Step)
             : false;
+        const DronesMoved = this.Drones
+            ? this.Drones.Advance(this.Vehicle, Step)
+            : false;
         this.Stress.Advance(Step);
         this.Effects.Advance(Step);
         this.Training.Advance(Step);
@@ -1269,10 +1306,16 @@ class IlluminationHost
             const TramScalars = this.Scene.EncodeOccupantRange(this.Volumes, TramBlock.First, TramBlock.Count);
             Device.queue.writeBuffer(this.OccupantRecords, TramBlock.First * OccupantStride, TramScalars);
         }
+        if (DronesMoved && this.Scene.DroneBlock && this.Scene.DroneBlock.Count > 0)
+        {
+            const DroneBlock = this.Scene.DroneBlock;
+            const DroneScalars = this.Scene.EncodeOccupantRange(this.Volumes, DroneBlock.First, DroneBlock.Count);
+            Device.queue.writeBuffer(this.OccupantRecords, DroneBlock.First * OccupantStride, DroneScalars);
+        }
 
         if (this.Lighting && this.LightRecords)
         {
-            const LightData = this.Lighting.Update(this.Vehicle.QueryBodyTransform(), this.StreetLampPoles);
+            const LightData = this.Lighting.Update(this.Vehicle.QueryBodyTransform(), this.StreetLampPoles, this.Clock);
             Device.queue.writeBuffer(this.LightRecords, 0, LightData);
             Device.queue.writeBuffer(this.ClusterRecords.Cells, 0, this.Lighting.ClusterCells);
             Device.queue.writeBuffer(this.ClusterRecords.Indices, 0, this.Lighting.ClusterIndices);

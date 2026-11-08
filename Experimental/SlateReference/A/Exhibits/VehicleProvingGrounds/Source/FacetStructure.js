@@ -15,6 +15,7 @@ import { ConstructIdentityTransform, ConstructRigidTransform, TransformBounds, I
 import { StressShapes, ResolveStressPlacements } from "./StressLayout.js";
 import { CollapseSequence } from "./CollapseSequence.js";
 import { TramSequence } from "./TramSequence.js";
+import { DroneSequence } from "./DroneSequence.js";
 
 // 📝 What an occupant takes part in. A ground tile only owns a surface card; the ground occupant is only rastered,
 //    because the scene distance field carries the ground as its analytic plane rather than as a sampled volume.
@@ -93,7 +94,7 @@ export class SceneStructure
         const GroundSet     = this.ConstructFacetSet(Descriptor.Title, Descriptor.EmitGround(), 0.0, 0.0);
         const ShapeSets = {};
         for (const [Key, Shape] of Object.entries(ActiveShapes))
-            ShapeSets[Key] = this.ConstructFacetSet(Key, Shape.Emit(), Shape.Voxel, Shape.Cards);
+            ShapeSets[Key] = this.ConstructFacetSet(Key, Shape.Emit(), Shape.Distance === false ? 0.0 : Shape.Voxel, Shape.Cards);
 
         // ② the vehicle --------------------------------------------------------------------------------------------------
         const VehicleRoles = OccupantRole.Raster | OccupantRole.Distance | OccupantRole.Cards | OccupantRole.Dynamic;
@@ -129,9 +130,11 @@ export class SceneStructure
         this.ConeBlock = { First: this.Occupants.length, Count: ConePlacements.length, Placements: ConePlacements, FacetSet: ShapeSets.Cone };
         ConePlacements.forEach((Placement, Cone) =>
         {
+            const ShapeKey = (Placement.Shape && ShapeSets[Placement.Shape] !== undefined) ? Placement.Shape : "Cone";
+            const BaseZ = Placement.Position[2] ?? 0.0;
             const Half = 0.5 * Placement.Yaw;
-            const Transform = ConstructRigidTransform([Placement.Position[0], Placement.Position[1], 0.0], [0.0, 0.0, Math.sin(Half), Math.cos(Half)]);
-            const Index = this.ConstructOccupant(Placement.Name, ShapeSets.Cone, Transform, ConeRoles);
+            const Transform = ConstructRigidTransform([Placement.Position[0], Placement.Position[1], BaseZ], [0.0, 0.0, Math.sin(Half), Math.cos(Half)]);
+            const Index = this.ConstructOccupant(Placement.Name, ShapeSets[ShapeKey], Transform, ConeRoles);
             this.Occupants[Index].Cone = Cone;
             this.Occupants[Index].Moving = false;
             this.Occupants[Index].RestTransform = Transform;
@@ -214,6 +217,21 @@ export class SceneStructure
             }
         }
         this.TramBlock = { First: TramFirst, Count: this.Occupants.length - TramFirst, Consists: RawTrams };
+
+        // ③e autonomous floating midair robot drones (6-DOF aerial patrol, dynamic GI, shadows & midair collision)
+        const RawDrones = Descriptor.Drones ? Descriptor.Drones() : [];
+        const DroneFirst = this.Occupants.length;
+        for (let DroneIdx = 0; DroneIdx < RawDrones.length; ++DroneIdx)
+        {
+            const Spec = RawDrones[DroneIdx];
+            const ShapeKey = Spec.Shape || "SurveyDroneBody";
+            if (ShapeSets[ShapeKey] === undefined)
+                continue;
+            const Index = this.ConstructOccupant(Spec.Name || `Robot Drone ${DroneIdx + 1}`, ShapeSets[ShapeKey],
+                                                 ConstructRigidTransform(Spec.Anchor, [0.0, 0.0, 0.0, 1.0]), ConeRoles);
+            this.Occupants[Index].Moving = false;
+        }
+        this.DroneBlock = { First: DroneFirst, Count: this.Occupants.length - DroneFirst, Units: RawDrones };
 
         // ④ breakable props, whole: rastered, in the field, carded and a collider until they break ------------------------
         const BreakableSets = new Map();
@@ -358,6 +376,7 @@ export class SceneStructure
         }
 
         this.Trams = RawTrams.length > 0 ? new TramSequence(this, RawTrams) : null;
+        this.Drones = RawDrones.length > 0 ? new DroneSequence(this, RawDrones) : null;
 
         this.ConstructDistanceList();
     }

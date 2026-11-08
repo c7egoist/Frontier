@@ -172,6 +172,17 @@ export function ConstructEntities(Host)
             Build: (C, B) => BuildTrams(Host, C, B)
         });
     }
+    if (Host.Drones)
+    {
+        Entities.push({
+            Id: "drones", Group: "Level", Name: "Robot drones", Type: "Aerial robotics", Glyph: "Activity", Colour: Accent.Level,
+            Description: "Floating midair quad-rotor survey & construction-inspection drones",
+            Meta: () => `${Host.Drones.QuerySummary().DroneCount} airborne`,
+            State: () => (Host.Drones.QuerySummary().TrackingCount > 0 ? "warm" : (Host.Drones.Enabled ? "live" : "")),
+            Toggle: { Read: () => Host.Drones.Enabled, Write: (On) => { Host.Drones.Enabled = On; } },
+            Build: (C, B) => BuildDrones(Host, C, B)
+        });
+    }
     return Entities;
 }
 
@@ -1015,6 +1026,24 @@ function BuildTrams(Host, C, Body)
     const Row = C.ActionRow(Card);
     C.Button(Row, "Jump to Tramway", "Compass", () => Host.TeleportVehicle({ Name: "Track F · Trams & Trains", Position: [-98.0, 314.0], Yaw: 0.0 }));
     C.Button(Row, "Toggle traffic", "Play", () => { Trams.Enabled = !Trams.Enabled; });
+}
+
+function BuildDrones(Host, C, Body)
+{
+    const Drones = Host.Drones;
+    const Card = C.Card(Body, "Floating Midair Robot Drones", "Activity",
+                        { Accent: Accent.Level, Index: 1, Subtitle: "6-DOF autonomous quad-rotor patrol & construction scouts" });
+    C.Muted(Card, "Fourteen hovering robot drones fly figure-eight & elliptical midair patrols over the Construction Site open holes, 3-Lane Subway, Collapsing Bridge, and Wavy Bollards — banking into turns and optically tracking the car within 44 m.");
+    C.Stats(Card, [
+        ["Airborne drones", () => Drones.QuerySummary().DroneCount],
+        ["Tracking vehicle", () => Drones.QuerySummary().TrackingCount],
+        ["State", () => Drones.Enabled ? "HOVERING" : "PAUSED"]
+    ]);
+    Slider(C, Card, Drones, "SpeedScale", "Patrol speed", 0.0, 2.5, 0.05, "×", 2);
+    Toggle(C, Card, Drones, "TrackVehicle", "Optical vehicle tracking");
+    const Row = C.ActionRow(Card);
+    C.Button(Row, "Jump · Construction Site", "AlertTriangle", () => Host.TeleportVehicle({ Name: "Track G · Thru Trench", Position: [-108.0, -386.0], Yaw: 0.0 }));
+    C.Button(Row, "Jump · Dead-End Pit", "Flag", () => Host.TeleportVehicle({ Name: "Track G · Dead-End Pit", Position: [-108.0, -418.0], Yaw: 0.0 }));
 }
 
 //------------------------------------------------------------------------------------------------------------------------

@@ -15,6 +15,9 @@ let MinimumChaseUpZ = 1.0;
 let MaximumAltitudeZ = 0.0;
 let MinimumSubwayZ = 10.0;
 let MinimumThreeLaneSubwayZ = 10.0;
+let MinimumConstructionTrenchZ = 10.0;
+let ConstructionTrenchExitedUp = false;
+let MinimumDeadEndPitZ = 10.0;
 let MaximumTrackAX = -150.0;
 let InvertedWheelContacts = 0;
 let LinearStripOpened = false;
@@ -81,6 +84,18 @@ export default
             Host.TeleportVehicle({ Name: "Tramway", Position: [-92.0, 314.0], Yaw: 0.0 }, true);
             Host.ScriptedInput = { Throttle: 1.0, Brake: 0.0, SteerAngle: 0.0, Handbrake: false, Reverse: false };
         }
+        // Phase 8a (Frame 1565): Jump to Track G Construction Site ("CONSTRUCTION AHEAD" -> Through-Trench -> Comes Back Up!)
+        else if (Frame === 1565)
+        {
+            Host.TeleportVehicle({ Name: "Track G Thru Trench", Position: [-62.0, -386.0], Yaw: 0.0 }, true);
+            Host.ScriptedInput = { Throttle: 1.0, Brake: 0.0, SteerAngle: 0.0, Handbrake: false, Reverse: false };
+        }
+        // Phase 8b (Frame 2095): Jump to Track G Construction Site ("CONSTRUCTION AHEAD" -> Underground Dead-End Pit!)
+        else if (Frame === 2095)
+        {
+            Host.TeleportVehicle({ Name: "Track G Dead-End Pit", Position: [-62.0, -418.0], Yaw: 0.0 }, true);
+            Host.ScriptedInput = { Throttle: 0.85, Brake: 0.0, SteerAngle: 0.0, Handbrake: false, Reverse: false };
+        }
 
         const VehicleUp = RotateVector(Host.Vehicle.Orientation, [0.0, 0.0, 1.0]);
         MinimumVehicleUpZ = Math.min(MinimumVehicleUpZ, VehicleUp[2]);
@@ -90,6 +105,14 @@ export default
             MinimumSubwayZ = Math.min(MinimumSubwayZ, Host.Vehicle.Position[2]);
         if (Frame >= 1330 && Frame < 1530)
             MinimumThreeLaneSubwayZ = Math.min(MinimumThreeLaneSubwayZ, Host.Vehicle.Position[2]);
+        if (Frame >= 1565 && Frame < 2095)
+        {
+            MinimumConstructionTrenchZ = Math.min(MinimumConstructionTrenchZ, Host.Vehicle.Position[2]);
+            if (MinimumConstructionTrenchZ < -3.5 && Host.Vehicle.Position[0] > 54.0 && Host.Vehicle.Position[2] > 0.2)
+                ConstructionTrenchExitedUp = true;
+        }
+        if (Frame >= 2095)
+            MinimumDeadEndPitZ = Math.min(MinimumDeadEndPitZ, Host.Vehicle.Position[2]);
         if (Frame < 610)
             MaximumTrackAX = Math.max(MaximumTrackAX, Host.Vehicle.Position[0]);
         if (VehicleUp[2] < -0.75)
@@ -126,7 +149,7 @@ export default
     Report(Host)
     {
         assert.equal(Host.LevelKey, "inversion");
-        assert.equal(Host.LevelDescriptor.Tracks.length, 6);
+        assert.equal(Host.LevelDescriptor.Tracks.length, 7);
         assert.ok(MinimumVehicleUpZ < -0.85, `Expected Track A upside-down loop inversion, got minUpZ=${MinimumVehicleUpZ.toFixed(3)}`);
         assert.ok(MaximumAltitudeZ > 15.5, `Expected Track A loop apex > 15.5 m, got maxZ=${MaximumAltitudeZ.toFixed(2)}`);
         assert.ok(InvertedWheelContacts >= 2, `Expected >= 2 loaded wheels upside-down, got ${InvertedWheelContacts}`);
@@ -142,6 +165,11 @@ export default
         assert.ok(MinimumThreeLaneSubwayZ < -3.5, `Expected Track E 3-Lane Subway center descent < -3.5 m, got ${MinimumThreeLaneSubwayZ.toFixed(2)}`);
         assert.ok(Host.Trams && Host.Trams.QuerySummary().CarCount === 14, "Expected Track F 14 articulated tram & train cars");
         assert.notEqual(Host.Trams.Consists[0].Cars[0].WorldPosition[0], StartTramLeadX, "Expected Track F trams to advance along rails");
-        console.log(`6-track inversion arena: Track A loop (${Host.Training.Best.loop360.Primary.toFixed(2)} s) · Track B/C bollards OPEN · Track D bridge+road collapse+sand ACTIVE · Track E 3-lane subway (${MinimumThreeLaneSubwayZ.toFixed(2)} m) · Track F 14 railcars ACTIVE`);
+        assert.ok(MinimumConstructionTrenchZ < -3.8 && ConstructionTrenchExitedUp,
+                  `Expected Track G Construction Through-Trench descent (${MinimumConstructionTrenchZ.toFixed(2)} m) AND surface exit`);
+        assert.ok(MinimumDeadEndPitZ < -3.8 && Host.Vehicle.Position[0] < 33.0,
+                  `Expected Track G Dead-End Pit descent (${MinimumDeadEndPitZ.toFixed(2)} m) & bulkhead stop at X<=33 m`);
+        assert.ok(Host.Drones && Host.Drones.QuerySummary().DroneCount === 14, "Expected 14 floating midair robot drones");
+        console.log(`7-track inversion arena: Track A loop (${Host.Training.Best.loop360.Primary.toFixed(2)} s) · Track B/C boolean bollards · Track D collapse+sand · Track E 3-lane subway · Track F 14 railcars · Track G construction thru-trench + dead-end pit · 14 midair robot drones ACTIVE`);
     }
 };

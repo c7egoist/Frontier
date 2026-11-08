@@ -11,7 +11,7 @@
     "validate:slate": "HOOKS=SlateIntegrationHooks.mjs node HeadlessHarness.mjs .. 48 \"?capture=1\"",
     "validate:orbit": "HOOKS=VehicleOrbitHooks.mjs node HeadlessHarness.mjs .. 30 \"?capture=1\"",
     "validate:garden": "HOOKS=GardenIorHooks.mjs node HeadlessHarness.mjs .. 12 \"?capture=1&screentraces&triangles\"",
-    "validate:inversion": "HOOKS=InversionArenaHooks.mjs node HeadlessHarness.mjs .. 1550 \"?capture=1\""
+    "validate:inversion": "HOOKS=InversionArenaHooks.mjs node HeadlessHarness.mjs .. 2450 \"?capture=1\""
   },
   "devDependencies": {
     "webgpu": "0.6.2"

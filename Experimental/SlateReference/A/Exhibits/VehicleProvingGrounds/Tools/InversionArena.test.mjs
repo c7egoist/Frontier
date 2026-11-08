@@ -235,22 +235,23 @@ test("ChaseCameraSolver tracks 90° vertical and 180° inverted orientations wit
     assert.ok(Chase.Up[2] < -0.7, `Camera Up must invert smoothly with loop crown, got ${Chase.Up[2]}`);
 });
 
-test("LevelCatalog exposes multi-track Inversion Arena (Tracks A–F) and Proving Grounds descriptors cleanly", () =>
+test("LevelCatalog exposes multi-track Inversion Arena (Tracks A–G) and Proving Grounds descriptors cleanly", () =>
 {
     assert.equal(LevelCatalog.length, 2);
     const Inversion = ResolveLevelDescriptor("inversion");
     const Proving = ResolveLevelDescriptor("proving");
     assert.equal(Inversion.Title, "Inversion Arena");
     assert.equal(Inversion.Relief, false);
-    assert.equal(Inversion.Tracks.length, 6);
-    assert.deepEqual(Inversion.Tracks.map((T) => T.Id), ["trackA", "trackB", "trackC", "trackD", "trackE", "trackF"]);
-    assert.equal(Inversion.Surfaces.length, 31);
-    assert.equal(Inversion.Zones.length, 18);
-    assert.ok(Inversion.PhysicsCutouts.length >= 6);
-    assert.equal(Inversion.DistanceCutouts.length, 4);
+    assert.equal(Inversion.Tracks.length, 7);
+    assert.deepEqual(Inversion.Tracks.map((T) => T.Id), ["trackA", "trackB", "trackC", "trackD", "trackE", "trackF", "trackG"]);
+    assert.equal(Inversion.Surfaces.length, 33);
+    assert.equal(Inversion.Zones.length, 20);
+    assert.ok(Inversion.PhysicsCutouts.length >= 8);
+    assert.equal(Inversion.DistanceCutouts.length, 6);
     assert.equal(Inversion.Bollards().length, 2);
     assert.equal(Inversion.CollapseSpans().length, 2);
     assert.equal(Inversion.Trams().length, 6);
+    assert.equal(Inversion.Drones().length, 14);
     assert.equal(Proving.Title, "Proving Grounds");
     assert.equal(Proving.Relief, true);
     assert.equal(Proving.Surfaces.length, 0);
@@ -672,6 +673,129 @@ test("Track E 3-Lane Subway ([road][tunnel down][road] -- [road][road][road] -- 
 
         assert.ok(LeadTramCar.WorldPosition[0] > StartTramX + 1.0, "Eastbound streetcar tram must advance along rail track");
         assert.ok(DummyCar.LinearVelocity[0] > 0.0, "Colliding head-on with moving Eastbound tram must deflect vehicle velocity Eastward");
+    }
+    finally
+    {
+        AssignExcavationCutouts([]);
+        AssignCourseReliefEnabled(true);
+        globalThis.fetch = PreviousFetch;
+    }
+});
+
+test("True Road Boolean Holes (Underground Portals & Wavy Bollard Shafts), Track G Construction Site (Through-Trench + Dead-End Pit), Waypoint Gantries, Railguards, 4 Cone Types & Floating Robot Drones", async () =>
+{
+    const fs = await import("node:fs/promises");
+    const PreviousFetch = globalThis.fetch;
+    globalThis.fetch = async (Url) =>
+    {
+        const Buffer = await fs.readFile(new URL(`../${Url}`, import.meta.url));
+        return { ok: true, arrayBuffer: async () => Buffer.buffer.slice(Buffer.byteOffset, Buffer.byteOffset + Buffer.byteLength) };
+    };
+    AssignCourseReliefEnabled(false);
+    AssignExcavationCutouts(InversionPhysicsCutouts);
+    try
+    {
+        const Inversion = ResolveLevelDescriptor("inversion");
+        const GroundFacets = Inversion.EmitGround();
+
+        // ① True Road Boolean Cutouts: verify NO horizontal ground/turf/paint facet (Z in [-0.05, +0.05]) covers the center of
+        //    ANY underground portal hole OR ANY Wavy/Linear Bollard shaft, while sunken -1.92 m bollard floors DO exist!
+        const PointInTriangle2D = (PX, PY, A, B, C) =>
+        {
+            const D1 = (PX - B[0]) * (A[1] - B[1]) - (A[0] - B[0]) * (PY - B[1]);
+            const D2 = (PX - C[0]) * (B[1] - C[1]) - (B[0] - C[0]) * (PY - C[1]);
+            const D3 = (PX - A[0]) * (C[1] - A[1]) - (C[0] - A[0]) * (PY - A[1]);
+            const HasNeg = (D1 < -1e-5) || (D2 < -1e-5) || (D3 < -1e-5);
+            const HasPos = (D1 >  1e-5) || (D2 >  1e-5) || (D3 >  1e-5);
+            return !(HasNeg && HasPos);
+        };
+        const HasRoadSheetAt = (TestX, TestY) => GroundFacets.some((F) =>
+        {
+            const [A, B, C] = F.Corners;
+            if (Math.abs(A[2]) > 0.06 || Math.abs(B[2]) > 0.06 || Math.abs(C[2]) > 0.06)
+                return false;
+            return PointInTriangle2D(TestX, TestY, A, B, C);
+        });
+
+        // Check Track B Subway portal, Track C Canyon, Track E 3-Lane Subway entry/exit, Track G Through-Trench, Track G Dead-End Pit!
+        for (const [Label, X, Y] of [
+            ["Track B Subway Entry",          -24.0,   84.0],
+            ["Track C Canyon Underpass",       78.0,  -80.0],
+            ["Track E 3-Lane Subway Entry",   -56.0,  256.0],
+            ["Track E 3-Lane Subway Exit",     56.0,  256.0],
+            ["Track G Construction Trench",     0.0, -386.0],
+            ["Track G Construction Dead-End",   0.0, -418.0]
+        ])
+        {
+            assert.equal(HasRoadSheetAt(X, Y), false, `${Label} at (${X}, ${Y}) must be a true open boolean hole with zero blocking grass/asphalt/paint facets`);
+        }
+
+        // Check Wavy Bollard & Linear Bollard recessed boolean shafts!
+        const BollardZones = Inversion.Bollards();
+        const WaveSamplePost = BollardZones[1].Posts[0];
+        const LinearSamplePost = BollardZones[0].Posts[0];
+        assert.equal(HasRoadSheetAt(WaveSamplePost.Position[0], WaveSamplePost.Position[1]), false,
+                     "Wavy bollard must sit inside a true boolean hole cut through all Z=0/-0.02 road layers");
+        assert.equal(HasRoadSheetAt(LinearSamplePost.Position[0], LinearSamplePost.Position[1]), false,
+                     "Linear bollard must sit inside a true boolean hole cut through all Z=0/-0.02 road layers");
+        const SunkenShaftFloors = GroundFacets.filter((F) => F.Corners.every((C) => Math.abs(C[2] - (-1.92)) < 0.02));
+        assert.ok(SunkenShaftFloors.length >= 120, `Expected recessed -1.92 m mechanical shaft floors for all 60 bollards, got ${SunkenShaftFloors.length}`);
+
+        // ② [Track G · ConstructionThroughTrench] (North Construction Lane, Y = -386): drives down -5.2 m AND comes back up!
+        const TrenchCar = new VehicleSolver([]);
+        TrenchCar.Surfaces = InversionArenaSurfaces;
+        TrenchCar.AeroGripScale = 1.0;
+        TrenchCar.Respawn([-84.0, -386.0, 0.63], 0.0);
+        let MinTrenchZ = 10.0;
+        for (let Step = 0; Step < 560; ++Step)
+        {
+            TrenchCar.Advance({ Throttle: 1.0, Brake: 0.0, Steer: 0.0, Handbrake: false }, 1.0 / 60.0);
+            MinTrenchZ = Math.min(MinTrenchZ, TrenchCar.Position[2]);
+            if (TrenchCar.Position[0] > 66.0)
+                break;
+        }
+        assert.ok(MinTrenchZ < -4.3, `Expected Track G Through-Trench descent < -4.3 m, got ${MinTrenchZ}`);
+        assert.ok(TrenchCar.Position[0] > 62.0 && TrenchCar.Position[2] > 0.3,
+                  `Expected Track G Through-Trench to come cleanly back up onto surface road, got X=${TrenchCar.Position[0]}, Z=${TrenchCar.Position[2]}`);
+
+        // ③ [Track G · ConstructionDeadEndPit] (South Construction Lane, Y = -418): drives down -5.2 m into Dead-End Pit & hits bulkhead wall at X = +32!
+        const PitCar = new VehicleSolver([]);
+        PitCar.Surfaces = InversionArenaSurfaces;
+        PitCar.AeroGripScale = 1.0;
+        PitCar.Respawn([-78.0, -418.0, 0.63], 0.0);
+        let MinPitZ = 10.0;
+        for (let Step = 0; Step < 420; ++Step)
+        {
+            PitCar.Advance({ Throttle: 0.85, Brake: 0.0, Steer: 0.0, Handbrake: false }, 1.0 / 60.0);
+            MinPitZ = Math.min(MinPitZ, PitCar.Position[2]);
+        }
+        assert.ok(MinPitZ < -4.3, `Expected Track G Dead-End Pit descent < -4.3 m, got ${MinPitZ}`);
+        assert.ok(PitCar.Position[0] > 18.0 && PitCar.Position[0] < 32.5,
+                  `Dead-End Bulkhead Wall at X=+32 m must stop car underground without tunnelling, got X=${PitCar.Position[0]}`);
+
+        // ④ Signage, Highway Waypoint Gantries, Construction Lights, Railguards, 4 Cone Types (incl. Lone Cones) & Floating Robot Drones!
+        const Placements = Inversion.Placements();
+        assert.ok(Placements.filter((P) => P.Shape.startsWith("WaypointBoard")).length >= 11, "Expected >= 11 overhead highway & construction waypoint boards");
+        assert.ok(Placements.filter((P) => P.Shape === "WorkLightTower" || P.Shape === "AmberBeaconPost").length >= 28,
+                  "Expected >= 28 construction floodlights & amber warning beacons");
+        assert.ok(Placements.filter((P) => P.Shape === "GuardrailSection").length >= 80,
+                  "Expected >= 80 corrugated steel W-beam highway railguard sections");
+
+        const Cones = Inversion.Cones();
+        const ConeShapes = new Set(Cones.map((C) => C.Shape || "Cone"));
+        for (const Variant of ["Cone", "ConstructionDrum", "SlimPylonCone", "ShortWorkCone"])
+            assert.ok(ConeShapes.has(Variant), `Expected cone variant ${Variant} in InversionArena`);
+        assert.ok(Cones.filter((C) => C.Group === "lone").length >= 20, "Expected >= 20 scattered solitary lone cones");
+        assert.ok(Cones.some((C) => (C.Position[2] ?? 0) < -4.5), "Expected knockable cones placed down inside the -5.2 m underground pits");
+
+        const Scene = new SceneStructure();
+        await Scene.ConstructScene("Archive", 0, "inversion");
+        assert.ok(Scene.Drones && Scene.Drones.QuerySummary().DroneCount === 14, "Expected 14 floating midair robot drones");
+        const NearCar = { Position: [-70.0, -402.0, 0.63], LinearVelocity: [0.0, 0.0, 0.0] };
+        for (let Step = 0; Step < 20; ++Step)
+            Scene.Drones.Advance(NearCar, 1.0 / 60.0);
+        assert.ok(Scene.Drones.Units.every((D) => D.WorldPosition[2] > 2.4), "Every robot drone must float in midair above the roadway");
+        assert.ok(Scene.Drones.QuerySummary().TrackingCount >= 1, "Nearby construction scout drone must optically lock onto ControlVehicle");
     }
     finally
     {

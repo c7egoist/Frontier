@@ -513,9 +513,10 @@ function ComputeWorldSpanBox(Surface, X0, X1, HalfSpanY)
 export function ConstructSubmergedTrenchSurface(Configuration)
 {
     const Yaw = Configuration.Yaw || 0.0;
+    const DeadEnd = Boolean(Configuration.DeadEnd);
     const DownLength = Configuration.DownLength ?? 28.0;
     const TunnelLength = Configuration.TunnelLength ?? 48.0;
-    const UpLength = Configuration.UpLength ?? 28.0;
+    const UpLength = DeadEnd ? 0.0 : (Configuration.UpLength ?? 28.0);
     const TotalLength = DownLength + TunnelLength + UpLength;
     const Width = Configuration.Width ?? 13.6;
     const Depth = Configuration.Depth ?? 5.2;
@@ -533,6 +534,7 @@ export function ConstructSubmergedTrenchSurface(Configuration)
         Yaw,
         CosineYaw:          Math.cos(Yaw),
         SineYaw:            Math.sin(Yaw),
+        DeadEnd,
         DownLength,
         TunnelLength,
         UpLength,
@@ -554,25 +556,31 @@ export function ConstructSubmergedTrenchSurface(Configuration)
     };
     const InnerSpanY = Surface.HalfWidth + 0.05;
     const OuterSpanY = Surface.HalfWidth + WallThickness + 0.10;
-    const FullBox = ComputeWorldSpanBox(Surface, 0.8, TotalLength - 0.8, OuterSpanY);
+    const FarVisualX = DeadEnd ? (TotalLength + WallThickness) : (TotalLength - 0.4);
+    const FarPhysX   = DeadEnd ? (TotalLength + 0.2) : (TotalLength - 0.8);
+    const FullBox = ComputeWorldSpanBox(Surface, 0.8, FarPhysX, OuterSpanY);
     const EntryBox = ComputeWorldSpanBox(Surface, 0.8, DownLength, InnerSpanY);
     const MiddleBox = ComputeWorldSpanBox(Surface, DownLength, DownLength + TunnelLength, InnerSpanY);
-    const ExitBox = ComputeWorldSpanBox(Surface, DownLength + TunnelLength, TotalLength - 0.8, InnerSpanY);
 
     Surface.DistanceCutout = FullBox;
     Surface.VisualCutouts = GroundDeckOverRoof
-        ? [ComputeWorldSpanBox(Surface, 0.4, DownLength + 0.2, OuterSpanY),
-           ComputeWorldSpanBox(Surface, DownLength + TunnelLength - 0.2, TotalLength - 0.4, OuterSpanY)]
-        : [ComputeWorldSpanBox(Surface, 0.4, TotalLength - 0.4, OuterSpanY)];
+        ? (DeadEnd
+            ? [ComputeWorldSpanBox(Surface, 0.4, DownLength + 0.2, OuterSpanY)]
+            : [ComputeWorldSpanBox(Surface, 0.4, DownLength + 0.2, OuterSpanY),
+               ComputeWorldSpanBox(Surface, DownLength + TunnelLength - 0.2, FarVisualX, OuterSpanY)])
+        : [ComputeWorldSpanBox(Surface, 0.4, FarVisualX, OuterSpanY)];
     const SubFloor = -50.0;
     Surface.PhysicsCutouts = GroundDeckOverRoof
-        ? [[...EntryBox, SubFloor, Infinity],
-           [...MiddleBox, SubFloor, RoofBottomZ + 0.25],
-           [...ExitBox, SubFloor, Infinity]]
-        : [[...ComputeWorldSpanBox(Surface, 0.8, TotalLength - 0.8, InnerSpanY), SubFloor, Infinity]];
+        ? (DeadEnd
+            ? [[...EntryBox, SubFloor, Infinity],
+               [...MiddleBox, SubFloor, RoofBottomZ + 0.25]]
+            : [[...EntryBox, SubFloor, Infinity],
+               [...MiddleBox, SubFloor, RoofBottomZ + 0.25],
+               [...ComputeWorldSpanBox(Surface, DownLength + TunnelLength, FarPhysX, InnerSpanY), SubFloor, Infinity]])
+        : [[...ComputeWorldSpanBox(Surface, 0.8, FarPhysX, InnerSpanY), SubFloor, Infinity]];
 
     return FinalizeSurfaceBounds(Surface, [-1.0, -(Surface.HalfWidth + WallThickness + 1.0), -Depth - Thickness - 1.0],
-                                 [TotalLength + 1.0, Surface.HalfWidth + WallThickness + 1.0, WallTopZ + 1.0]);
+                                 [TotalLength + WallThickness + 1.0, Surface.HalfWidth + WallThickness + 1.0, WallTopZ + 1.0]);
 }
 
 export function ConstructSerpentineWaveSurface(Configuration)
@@ -893,6 +901,8 @@ export function EvaluateSubmergedTrenchFloor(Surface, CoordinateX)
         };
     }
     const AscentStart = Surface.DownLength + Surface.TunnelLength;
+    if (Surface.DeadEnd || Surface.UpLength <= 1.0e-4)
+        return { Height: -Surface.Depth, SlopeX: 0.0 };
     if (CoordinateX <= AscentStart)
         return { Height: -Surface.Depth, SlopeX: 0.0 };
     if (CoordinateX < Surface.TotalLength)
@@ -1791,6 +1801,21 @@ function QuerySurfacePointLocal(Surface, LocalPoint, Radius)
             if (RoofHit && (!Best || RoofHit.Depth > Best.Depth))
                 Best = RoofHit;
         }
+
+        // ④ Dead-end subterranean bulkhead wall at far end of excavation pit
+        if (Surface.DeadEnd &&
+            LocalPoint[0] > Surface.TotalLength - Radius &&
+            LocalPoint[0] < Surface.TotalLength + Surface.WallThickness + Radius &&
+            AbsY <= Surface.HalfWidth + Surface.WallThickness &&
+            LocalPoint[2] >= -Surface.Depth - 0.25 && LocalPoint[2] <= Surface.WallTopZ + Radius)
+        {
+            const InnerX = Radius - (Surface.TotalLength - LocalPoint[0]);
+            const OuterX = (Surface.TotalLength + Surface.WallThickness + Radius) - LocalPoint[0];
+            if (InnerX > 0.0 && InnerX <= OuterX && (!Best || InnerX > Best.Depth))
+                Best = { Depth: InnerX, LocalNormal: [-1.0, 0.0, 0.0] };
+            else if (OuterX > 0.0 && OuterX < InnerX && (!Best || OuterX > Best.Depth))
+                Best = { Depth: OuterX, LocalNormal: [1.0, 0.0, 0.0] };
+        }
         return Best;
     }
     if (Surface.Category === SurfaceCategory.SerpentineWave)
@@ -2590,7 +2615,7 @@ function AppendBankedTurnSegments(Surface, Shapes, Placements)
                                                                   CourseMaterial.SteelDark, CourseMaterial.BarrierConcrete);
             Shapes[ShapeKey] = {
                 Emit:  () => TransformFacetsToLocalFrame(CanonicalFacets, CanonicalAnchor, CanonicalQuat),
-                Voxel: 0.46,
+                Voxel: 0.56,
                 Cards: 8
             };
         }
@@ -2717,14 +2742,16 @@ function AppendSubmergedTrenchSegments(Surface, Shapes, Placements)
     const StopsX = [0.0, 0.5 * Surface.DownLength, Surface.DownLength];
     for (let Tile = 1; Tile <= GalleryFloorTiles; ++Tile)
         StopsX.push(Surface.DownLength + (Surface.TunnelLength * Tile) / GalleryFloorTiles);
-    StopsX.push(Surface.DownLength + Surface.TunnelLength + 0.5 * Surface.UpLength, Surface.TotalLength);
+    const HasExit = !Surface.DeadEnd && Surface.UpLength > 1.0e-4;
+    if (HasExit)
+        StopsX.push(Surface.DownLength + Surface.TunnelLength + 0.5 * Surface.UpLength, Surface.TotalLength);
 
     const SubSlices = 4;
     const LateralStops = [-Surface.HalfWidth, -(Surface.HalfWidth - Surface.KerbWidth), -0.65, 0.65,
                           Surface.HalfWidth - Surface.KerbWidth, Surface.HalfWidth];
 
     // ① Sub-grade C² dive ramp -> subterranean floor -> daylight ascent ramp (180° Z-symmetry when UpLength === DownLength)
-    const SymmetricEnds = Math.abs(Surface.DownLength - Surface.UpLength) < 1.0e-4;
+    const SymmetricEnds = HasExit && Math.abs(Surface.DownLength - Surface.UpLength) < 1.0e-4;
     const ExitStartSeg = 2 + GalleryFloorTiles;
     for (let Seg = 0; Seg < StopsX.length - 1; ++Seg)
     {
@@ -2802,7 +2829,8 @@ function AppendSubmergedTrenchSegments(Surface, Shapes, Placements)
         const GX1 = Surface.DownLength + (Surface.TunnelLength * (Tile + 1)) / GalleryRepeat;
         WallSpans.push([GX0, GX1, 1, false]);
     }
-    WallSpans.push([Surface.DownLength + Surface.TunnelLength, Surface.TotalLength - 1.2, SymmetricEnds ? 0 : 2, SymmetricEnds]);
+    if (HasExit)
+        WallSpans.push([Surface.DownLength + Surface.TunnelLength, Surface.TotalLength - 1.2, SymmetricEnds ? 0 : 2, SymmetricEnds]);
 
     for (let SpanIndex = 0; SpanIndex < WallSpans.length; ++SpanIndex)
     {
@@ -2929,6 +2957,64 @@ function AppendSubmergedTrenchSegments(Surface, Shapes, Placements)
             });
         }
     }
+
+    // ④ Subterranean Dead-End Bulkhead Wall (when DeadEnd: true — seals the far end of an underground construction pit!)
+    if (Surface.DeadEnd)
+    {
+        const SpanY = Surface.HalfWidth + Surface.WallThickness;
+        const BulkheadKey = `${Surface.ShapePrefix}_DeadEndWall`;
+        const BX0 = Surface.TotalLength;
+        const BX1 = Surface.TotalLength + Surface.WallThickness;
+        const BotZ = -Surface.Depth - 0.35;
+        const TopZ = Surface.WallTopZ;
+        const BulkheadOrigin = ProjectPointFromSurface(Surface, [0.5 * (BX0 + BX1), 0.0, 0.5 * (TopZ + BotZ)]);
+        // 📝 Orient local Z along the thin 0.65 m bulkhead thickness so 3D SDF uses ~8 Z-slices!
+        const BulkheadQuat = ConstructBasisQuaternion(
+            ProjectDirectionFromSurface(Surface, [0.0, 1.0, 0.0]),
+            ProjectDirectionFromSurface(Surface, [0.0, 0.0, 1.0]),
+            ProjectDirectionFromSurface(Surface, [1.0, 0.0, 0.0])
+        );
+        if (!Shapes[BulkheadKey])
+        {
+            const BulkStopsY = [-SpanY, -SpanY + 1.2, -2.8, 0.0, 2.8, SpanY - 1.2, SpanY];
+            const TopGrid = [], BottomGrid = [], TopNormals = [], TopFamilies = [];
+            for (let StepU = 0; StepU <= 2; ++StepU)
+            {
+                const X = BX0 + (BX1 - BX0) * (StepU / 2);
+                const RowTop = [], RowBottom = [], RowNormals = [], RowFamilies = [];
+                for (let StepV = 0; StepV < BulkStopsY.length; ++StepV)
+                {
+                    const Y = BulkStopsY[StepV];
+                    RowTop.push(ProjectPointFromSurface(Surface, [X, Y, TopZ]));
+                    RowBottom.push(ProjectPointFromSurface(Surface, [X, Y, BotZ]));
+                    RowNormals.push([0.0, 0.0, 1.0]);
+                    if (StepV < BulkStopsY.length - 1)
+                        RowFamilies.push((StepV & 1) ? CourseMaterial.BannerAmber : CourseMaterial.SteelDark);
+                }
+                TopGrid.push(RowTop);
+                BottomGrid.push(RowBottom);
+                TopNormals.push(RowNormals);
+                if (StepU < 2)
+                    TopFamilies.push(RowFamilies);
+            }
+            const WorldFacets = ConstructClosedGridSlabFacets(TopGrid, BottomGrid, TopNormals, TopFamilies,
+                                                              CourseMaterial.BannerAmber, CourseMaterial.TunnelConcrete);
+            Shapes[BulkheadKey] = {
+                Emit:  () => TransformFacetsToLocalFrame(WorldFacets, BulkheadOrigin, BulkheadQuat),
+                Voxel: 0.24,
+                Cards: 8
+            };
+        }
+        Placements.push({
+            Shape:       BulkheadKey,
+            Name:        `${Surface.Key} dead-end bulkhead`,
+            Position:    BulkheadOrigin,
+            Orientation: BulkheadQuat,
+            Yaw:         0.0,
+            Material:    -1,
+            Collider:    false
+        });
+    }
 }
 
 function AppendSerpentineWaveSegments(Surface, Shapes, Placements)
@@ -2992,7 +3078,7 @@ function AppendSerpentineWaveSegments(Surface, Shapes, Placements)
                                                               CourseMaterial.SteelDark, CourseMaterial.TunnelConcrete);
             Shapes[ShapeKey] = {
                 Emit:  () => TransformFacetsToLocalFrame(WorldFacets, FrameOrigin, FrameQuaternion),
-                Voxel: 0.46,
+                Voxel: 0.56,
                 Cards: 8
             };
         }

@@ -19,13 +19,15 @@ import { ConstructHelicalLoopSurface, ConstructFullPipeSurface, ConstructTwisted
          ConstructCollapseDeckSurface, ConstructSurfaceSegmentDescriptors } from "./RampSurfaceProjection.js";
 import { ConstructCollapseProxyShapes } from "./CollapseSequence.js";
 import { ConstructTramShapes } from "./TramSequence.js";
+import { ConstructDroneShapes } from "./DroneSequence.js";
+import { ConstructInfrastructureShapes, EmitSignPanelOverlay } from "./SignageBuilder.js";
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                    MULTI-TRACK COMPLEX BOUNDS & TRACK CATALOG
 //------------------------------------------------------------------------------------------------------------------------
 
 export const InversionArenaBounds = Object.freeze({
-    Minimum: Object.freeze([-156.0, -364.0]),
+    Minimum: Object.freeze([-156.0, -452.0]),
     Maximum: Object.freeze([ 222.0,  364.0])
 });
 
@@ -83,6 +85,15 @@ export const InversionArenaTracks = Object.freeze([
         Position: [-98.0,  314.0],
         Yaw:      0.0,
         Note:     "Dedicated 4-track transit corridor with live articulated trams & 3-car express trains"
+    },
+    {
+        Id:       "trackG",
+        Label:    "Track G · Construction Pit",
+        Name:     "Track G — Underground Construction Site (Through-Trench & Dead-End Pit)",
+        Icon:     "AlertTriangle",
+        Position: [-106.0, -402.0],
+        Yaw:      0.0,
+        Note:     "CONSTRUCTION AHEAD signs & amber lights → Boolean road holes (Through-Trench + Dead-End Pit)"
     }
 ]);
 
@@ -597,6 +608,44 @@ export const InversionArenaSurfaces = Object.freeze([
         Roofed:             true,
         GroundDeckOverRoof: true,
         AccentMaterial:     CourseMaterial.GateLamp
+    }),
+
+    // ===================================================================================================================
+    // [TRACK G · UNDERGROUND CONSTRUCTION SITE] OPEN BOOLEAN HOLES: THROUGH-TRENCH (COMES BACK UP) + DEAD-END PIT
+    // ===================================================================================================================
+
+    // ㉚ North Construction Lane (Y = -386.0): Open Boolean Road Hole -> -5.2 m Shored Utility Trench -> Comes Back Up!
+    ConstructSubmergedTrenchSurface({
+        Key:                "ConstructionThroughTrench",
+        ShapePrefix:        "SubwayTrench52",
+        Origin:             [-56.0, -386.0, 0.0],
+        Yaw:                0.0,
+        DownLength:         24.0,
+        TunnelLength:       64.0,
+        GalleryTileLength:  32.0,
+        UpLength:           24.0,
+        Width:              13.6,
+        Depth:              5.20,
+        Roofed:             false,
+        GroundDeckOverRoof: false,
+        AccentMaterial:     CourseMaterial.BannerAmber
+    }),
+
+    // ㉛ South Construction Lane (Y = -418.0): Open Boolean Road Hole -> -5.2 m Dead-End Underground Excavation Pit!
+    ConstructSubmergedTrenchSurface({
+        Key:                "ConstructionDeadEndPit",
+        ShapePrefix:        "SubwayTrench52",
+        Origin:             [-56.0, -418.0, 0.0],
+        Yaw:                0.0,
+        DeadEnd:            true,
+        DownLength:         24.0,
+        TunnelLength:       64.0,
+        GalleryTileLength:  32.0,
+        Width:              15.6,
+        Depth:              5.20,
+        Roofed:             false,
+        GroundDeckOverRoof: false,
+        AccentMaterial:     CourseMaterial.BannerAmber
     })
 ]);
 
@@ -616,27 +665,29 @@ export const InversionArenaShapes = Object.freeze({
     ...SegmentBundle.Shapes,
     ...ConstructCollapseProxyShapes(),
     ...ConstructTramShapes(),
-    LoopPylon:         { Emit: () => EmitBoxFacets(0.85,  0.85, 18.8, CourseMaterial.SteelDark),      Voxel: 0.25, Cards: 0, Distance: false },
-    LoopCrossBeam:     { Emit: () => EmitBoxFacets(0.80, 23.60,  0.75, CourseMaterial.SteelDark),     Voxel: 0.18, Cards: 0, Distance: false },
-    LoopCrownLamp:     { Emit: () => EmitBoxFacets(0.45,  9.20,  0.16, CourseMaterial.GateLamp),      Voxel: 0.12, Cards: 0, Distance: false },
-    RaceGantryPost:    { Emit: () => EmitBoxFacets(0.75,  0.75,  7.60, CourseMaterial.SteelDark),     Voxel: 0.22, Cards: 0, Distance: false },
-    RaceGantryBeam:    { Emit: () => EmitBoxFacets(1.10, 24.40,  0.90, CourseMaterial.WallCobalt),    Voxel: 0.20, Cards: 0, Distance: false },
-    RaceGantryLamp:    { Emit: () => EmitBoxFacets(0.55, 18.00,  0.18, CourseMaterial.GateLamp),      Voxel: 0.14, Cards: 0, Distance: false },
-    SpineDeckPylon:    { Emit: () => EmitBoxFacets(0.70, 12.60,  3.40, CourseMaterial.TunnelConcrete), Voxel: 0.22, Cards: 0, Distance: false },
-    BridgePier:        { Emit: () => EmitBoxFacets(1.10, 13.40,  4.36, CourseMaterial.TunnelConcrete), Voxel: 0.24, Cards: 0, Distance: false },
+    ...ConstructDroneShapes(),
+    ...ConstructInfrastructureShapes(),
+    LoopPylon:         { Emit: () => EmitBoxFacets(0.85,  0.85, 18.8, CourseMaterial.SteelDark),      Voxel: 0.0,  Cards: 0, Distance: false },
+    LoopCrossBeam:     { Emit: () => EmitBoxFacets(0.80, 23.60,  0.75, CourseMaterial.SteelDark),     Voxel: 0.0,  Cards: 0, Distance: false },
+    LoopCrownLamp:     { Emit: () => EmitBoxFacets(0.45,  9.20,  0.16, CourseMaterial.GateLamp),      Voxel: 0.0,  Cards: 0, Distance: false },
+    RaceGantryPost:    { Emit: () => EmitBoxFacets(0.75,  0.75,  7.60, CourseMaterial.SteelDark),     Voxel: 0.0,  Cards: 0, Distance: false },
+    RaceGantryBeam:    { Emit: () => EmitBoxFacets(1.10, 24.40,  0.90, CourseMaterial.WallCobalt),    Voxel: 0.0,  Cards: 0, Distance: false },
+    RaceGantryLamp:    { Emit: () => EmitBoxFacets(0.55, 18.00,  0.18, CourseMaterial.GateLamp),      Voxel: 0.0,  Cards: 0, Distance: false },
+    SpineDeckPylon:    { Emit: () => EmitBoxFacets(0.70, 12.60,  3.40, CourseMaterial.TunnelConcrete), Voxel: 0.0,  Cards: 0, Distance: false },
+    BridgePier:        { Emit: () => EmitBoxFacets(1.10, 13.40,  4.36, CourseMaterial.TunnelConcrete), Voxel: 0.0,  Cards: 0, Distance: false },
     StationPlatform:   { Emit: () => EmitBoxFacets(32.0,  3.40,  0.42, CourseMaterial.ApronConcrete,
                          [CourseMaterial.PaintYellow, CourseMaterial.PaintYellow, CourseMaterial.BarrierConcrete,
                           CourseMaterial.BarrierConcrete, CourseMaterial.ApronConcrete, CourseMaterial.TunnelConcrete]), Voxel: 0.28, Cards: 6 },
     LongBarrier:       { Emit: () => EmitBoxFacets(8.00,  0.65,  0.85, CourseMaterial.BarrierConcrete), Voxel: 0.20, Cards: 6 },
-    TunnelCeilingLamp: { Emit: () => EmitBoxFacets(4.60,  0.48,  0.10, CourseMaterial.GateLamp),      Voxel: 0.16, Cards: 0, Distance: false },
-    BollardSocket:     { Emit: () => EmitBoxFacets(0.76,  0.76,  0.04, CourseMaterial.SteelDark),     Voxel: 0.12, Cards: 0, Distance: false },
+    TunnelCeilingLamp: { Emit: () => EmitBoxFacets(4.60,  0.48,  0.10, CourseMaterial.GateLamp),      Voxel: 0.0,  Cards: 0, Distance: false },
+    BollardSocket:     { Emit: () => EmitBoxFacets(0.76,  0.76,  0.04, CourseMaterial.SteelDark),     Voxel: 0.0,  Cards: 0, Distance: false },
     KineticBollard:    { Emit: () => EmitBoxFacets(0.46,  0.46,  1.42, CourseMaterial.SteelDark,
                          [CourseMaterial.PaintYellow, CourseMaterial.GateLamp, CourseMaterial.PaintYellow,
-                          CourseMaterial.GateLamp, CourseMaterial.GateLamp, CourseMaterial.SteelDark]), Voxel: 0.11, Cards: 10 },
+                          CourseMaterial.GateLamp, CourseMaterial.GateLamp, CourseMaterial.SteelDark]), Voxel: 0.15, Cards: 10 },
     WaveBollard:       { Emit: () => EmitBoxFacets(0.54,  0.54,  1.76, CourseMaterial.WallCobalt,
                          [CourseMaterial.BannerAmber, CourseMaterial.GateLamp, CourseMaterial.BannerAmber,
-                          CourseMaterial.GateLamp, CourseMaterial.GateLamp, CourseMaterial.SteelDark]), Voxel: 0.13, Cards: 10 },
-    TriggerBeacon:     { Emit: () => EmitBoxFacets(0.95,  0.95,  4.20, CourseMaterial.WallCrimson),   Voxel: 0.24, Cards: 8 }
+                          CourseMaterial.GateLamp, CourseMaterial.GateLamp, CourseMaterial.SteelDark]), Voxel: 0.17, Cards: 10 },
+    TriggerBeacon:     { Emit: () => EmitBoxFacets(0.95,  0.95,  4.20, CourseMaterial.WallCrimson),   Voxel: 0.34, Cards: 8 }
 });
 
 export const InversionArenaTerrainHulls = Object.freeze(SegmentBundle.TerrainHulls);
@@ -668,7 +719,9 @@ export const InversionArenaZones = Object.freeze([
     { Name: "Track D · Collapsing Bridge", Position: [-92.0, -250.0], Yaw:   0.0, Note: "Outrun rear-to-front +5 m Bridge collapse, movie cracks & sand!" },
     { Name: "Track D · Collapsing Road",   Position: [  84.0, -318.0], Yaw: 180.0, Note: "Outrun rear-to-front Sinkhole Road collapse & sand fissures!" },
     { Name: "Track E · 3-Lane Subway",     Position: [-104.0,  256.0], Yaw:   0.0, Note: "[road][tunnel down][road] → [road][road][road] → [road][tunnel up][road]" },
-    { Name: "Track F · Trams & Trains",    Position: [ -98.0,  314.0], Yaw:   0.0, Note: "Two-way Articulated Streetcar Trams & Express Commuter Trains" }
+    { Name: "Track F · Trams & Trains",    Position: [ -98.0,  314.0], Yaw:   0.0, Note: "Two-way Articulated Streetcar Trams & Express Commuter Trains" },
+    { Name: "Track G · Thru Trench",       Position: [-108.0, -386.0], Yaw:   0.0, Note: "CONSTRUCTION AHEAD & Amber Lights → Open Hole Trench (comes back up!)" },
+    { Name: "Track G · Dead-End Pit",      Position: [-108.0, -418.0], Yaw:   0.0, Note: "CONSTRUCTION AHEAD & Amber Lights → Underground Dead-End Pit!" }
 ]);
 
 export const InversionArenaDrills = Object.freeze([
@@ -730,13 +783,14 @@ export const InversionArenaDrills = Object.freeze([
 export const InversionClearZones = Object.freeze([
     [-148.0,  -52.0, 214.0,  -20.0],   // Track A South Outbound Straight
     [-148.0,   20.0, 214.0,   52.0],   // Track A North Return Straight
-    [ 148.0, -356.0, 218.0,  356.0],   // East Bowls & Inter-Track Avenue (Tracks A..F)
-    [-148.0, -356.0, -76.0,  356.0],   // West Bowls & Inter-Track Avenue (Tracks A..F)
+    [ 148.0, -444.0, 218.0,  356.0],   // East Bowls & Inter-Track Avenue (Tracks A..G)
+    [-148.0, -444.0, -76.0,  356.0],   // West Bowls & Inter-Track Avenue (Tracks A..G)
     [ -88.0,  -14.0, 138.0,   14.0],   // Track A Infield Stunt Expressway
     [-148.0,   72.0, 214.0,  184.0],   // Track B Subterranean Split & Return Corridors
     [-148.0, -186.0, 214.0,  -74.0],   // Track C Kinetic Wave & Backstretch Corridors
     [-148.0, -346.0, 214.0, -228.0],   // Track D Collapsing Bridge & Collapsing Road Corridors
     [-148.0,  234.0, 214.0,  356.0],   // Track E 3-Lane Subway & Track F Tram/Train Corridors
+    [-148.0, -442.0, 214.0, -370.0],   // Track G Underground Construction Site Corridors
     [  -4.0,   52.0,  28.0,  140.0],   // North Underpass Connector Boulevard
     [  64.0, -140.0,  92.0,  -52.0]    // South Canyon Underpass Connector
 ]);
@@ -860,6 +914,86 @@ function SubtractCutoutFromRects(Rects, Cutout)
     return Result;
 }
 
+//------------------------------------------------------------------------------------------------------------------------
+//                      SHARED HIGHWAY WAYPOINT GANTRY & ROADSIDE SIGNAGE MANIFEST
+//------------------------------------------------------------------------------------------------------------------------
+
+const HighwayOverheadGantries = Object.freeze([
+    {
+        Label:   "Main Straight Airport/City Waypoint",
+        X:        42.0,
+        CentreY: -35.0,
+        Yaw:      0.0,
+        Boards: [
+            { OffsetY:  5.4, Shape: "WaypointBoardGreen", Width: 9.8, Height: 2.5, Line1: "AIRPORT 500 KM ^",     Line2: "INTL EXPRESSWAY",  Border: CourseMaterial.PaintWhite, Text: CourseMaterial.PaintWhite },
+            { OffsetY: -5.4, Shape: "WaypointBoardBlue",  Width: 9.2, Height: 2.5, Line1: "FRONTIER CITY 500 M >", Line2: "DOWNTOWN EXIT 2",  Border: CourseMaterial.PaintWhite, Text: CourseMaterial.PaintWhite }
+        ]
+    },
+    {
+        Label:   "North Return Ring-Road Waypoint",
+        X:        34.0,
+        CentreY:  35.0,
+        Yaw:      Math.PI,
+        Boards: [
+            { OffsetY:  5.4, Shape: "WaypointBoardGreen", Width: 9.8, Height: 2.5, Line1: "METRO CITY 500 M ^",    Line2: "WEST RING ROAD",   Border: CourseMaterial.PaintWhite, Text: CourseMaterial.PaintWhite },
+            { OffsetY: -5.4, Shape: "WaypointBoardGreen", Width: 9.8, Height: 2.5, Line1: "SKYPORT 500 KM ^",      Line2: "CARGO TERMINAL",   Border: CourseMaterial.PaintWhite, Text: CourseMaterial.PaintWhite }
+        ]
+    },
+    {
+        Label:   "Track B Split Tunnel/Sky Waypoint",
+        X:       -44.0,
+        CentreY:  94.0,
+        Yaw:      0.0,
+        Boards: [
+            { OffsetY: -5.4, Shape: "WaypointBoardBlue",  Width: 9.2, Height: 2.5, Line1: "SUBWAY TUNNEL v",       Line2: "UNDERGROUND -5M",  Border: CourseMaterial.PaintWhite, Text: CourseMaterial.PaintWhite },
+            { OffsetY:  5.4, Shape: "WaypointBoardGreen", Width: 9.8, Height: 2.5, Line1: "APEX CITY 500 M ^",     Line2: "SKY BRIDGE +5M",   Border: CourseMaterial.PaintWhite, Text: CourseMaterial.PaintWhite }
+        ]
+    },
+    {
+        Label:   "Track E 3-Lane Subway & Airport Waypoint",
+        X:       -82.0,
+        CentreY:  256.0,
+        Yaw:      0.0,
+        Boards: [
+            { OffsetY:  9.2, Shape: "WaypointBoardGreen", Width: 9.8, Height: 2.5, Line1: "HARBOR CITY 500 M ^",   Line2: "LEFT SURFACE RD",  Border: CourseMaterial.PaintWhite, Text: CourseMaterial.PaintWhite },
+            { OffsetY:  0.0, Shape: "WaypointBoardBlue",  Width: 9.2, Height: 2.5, Line1: "SUBWAY DOWN 15 M v",    Line2: "CENTER TUNNEL",    Border: CourseMaterial.PaintWhite, Text: CourseMaterial.PaintWhite },
+            { OffsetY: -9.2, Shape: "WaypointBoardGreen", Width: 9.8, Height: 2.5, Line1: "AIRPORT 500 KM ^",      Line2: "RIGHT SURFACE RD", Border: CourseMaterial.PaintWhite, Text: CourseMaterial.PaintWhite }
+        ]
+    },
+    {
+        Label:   "Track G Construction Site Portal",
+        X:       -82.0,
+        CentreY: -402.0,
+        Yaw:      0.0,
+        SpanHalf: 22.4,
+        Boards: [
+            { OffsetY:  14.0, Shape: "WaypointBoardAmber", Width: 10.6, Height: 2.45, Line1: "CONSTRUCTION AHEAD", Line2: "THRU TRENCH ^",   Border: CourseMaterial.SteelDark, Text: CourseMaterial.SteelDark },
+            { OffsetY:   0.0, Shape: "WaypointBoardAmber", Width: 10.6, Height: 2.45, Line1: "CONSTRUCTION AHEAD", Line2: "OPEN ROAD HOLES", Border: CourseMaterial.SteelDark, Text: CourseMaterial.SteelDark },
+            { OffsetY: -14.0, Shape: "WaypointBoardAmber", Width: 10.6, Height: 2.45, Line1: "CONSTRUCTION AHEAD", Line2: "DEAD END PIT !",  Border: CourseMaterial.SteelDark, Text: CourseMaterial.SteelDark }
+        ]
+    }
+]);
+
+const RoadsideSigns = Object.freeze([
+    // Construction Site Advance Warning Signs ("CONSTRUCTION AHEAD" before BOTH underground holes!)
+    { Name: "Const Ahead N1", X: -98.0, Y: -375.5, Z: 0.0,   Yaw: 0.0,          Shape: "RoadsideBoardAmber", Width: 4.2, Height: 1.55, Line1: "CONSTRUCTION AHEAD", Line2: "OPEN TRENCH 40M",  Text: CourseMaterial.SteelDark },
+    { Name: "Const Ahead N2", X: -66.0, Y: -375.5, Z: 0.0,   Yaw: 0.0,          Shape: "RoadsideBoardAmber", Width: 4.2, Height: 1.55, Line1: "THRU TRENCH ^",      Line2: "COMES BACK UP",    Text: CourseMaterial.SteelDark },
+    { Name: "Const Ahead S1", X: -98.0, Y: -429.5, Z: 0.0,   Yaw: 0.0,          Shape: "RoadsideBoardAmber", Width: 4.2, Height: 1.55, Line1: "CONSTRUCTION AHEAD", Line2: "DEAD END PIT !",   Text: CourseMaterial.SteelDark },
+    { Name: "Const Ahead S2", X: -66.0, Y: -429.5, Z: 0.0,   Yaw: 0.0,          Shape: "RoadsideBoardAmber", Width: 4.2, Height: 1.55, Line1: "CAUTION -5.2 M !",   Line2: "NO EXIT BELOW",    Text: CourseMaterial.SteelDark },
+    // Underground Dead-End Pit Bulkhead Sign (mounted inside the -5.2 m subterranean dead-end chamber!)
+    { Name: "DeadEnd Pit Sign", X: 30.8, Y: -418.0, Z: -5.20, Yaw: 0.0,         Shape: "RoadsideBoardAmber", Width: 4.2, Height: 1.55, Line1: "DEAD END PIT !",     Line2: "TURN AROUND <<",   Text: CourseMaterial.SteelDark },
+    // Highway Waypoint & Distance Signs across the Complex ("500 KM TO AIRPORT", "500 M TO X CITY", hazards & limits)
+    { Name: "Start Waypoint",   X: -62.0, Y: -48.5, Z: 0.0,  Yaw: 0.0,          Shape: "RoadsideBoardGreen", Width: 4.2, Height: 1.55, Line1: "500 KM AIRPORT ^",   Line2: "500 M NEXUS CITY", Text: CourseMaterial.PaintWhite },
+    { Name: "Wave Bollard Sign",X: -88.0, Y: -103.5,Z: 0.0,  Yaw: 0.0,          Shape: "RoadsideBoardAmber", Width: 4.2, Height: 1.55, Line1: "WAVE BOLLARDS !",    Line2: "MOVING ROAD PITS", Text: CourseMaterial.SteelDark },
+    { Name: "Canyon Dive Sign", X:  87.5, Y: -48.0, Z: 0.0,  Yaw: -0.5*Math.PI, Shape: "RoadsideBoardGreen", Width: 4.2, Height: 1.55, Line1: "CANYON TUNNEL v",    Line2: "500 M SOLAR CITY", Text: CourseMaterial.PaintWhite },
+    { Name: "Bridge Sign",      X: -72.0, Y: -260.5,Z: 0.0,  Yaw: 0.0,          Shape: "RoadsideBoardAmber", Width: 4.2, Height: 1.55, Line1: "FALLING BRIDGE !",   Line2: "FULL THROTTLE ^",  Text: CourseMaterial.SteelDark },
+    { Name: "Sinkhole Sign",    X:  72.0, Y: -306.5,Z: 0.0,  Yaw: Math.PI,      Shape: "RoadsideBoardAmber", Width: 4.2, Height: 1.55, Line1: "SINKHOLE ROAD !",    Line2: "FLOOR DROPS -5M",  Text: CourseMaterial.SteelDark },
+    { Name: "South Waypoint",   X: -48.0, Y: -237.5,Z: 0.0,  Yaw: 0.0,          Shape: "RoadsideBoardGreen", Width: 4.2, Height: 1.55, Line1: "500 KM AIRPORT >",   Line2: "500 M COAST CITY", Text: CourseMaterial.PaintWhite },
+    { Name: "Tram Xing Sign",   X: -88.0, Y:  306.5,Z: 0.0,  Yaw: 0.0,          Shape: "RoadsideBoardAmber", Width: 4.2, Height: 1.55, Line1: "LIVE TRAMS XING !",  Line2: "EXPRESS TRAINS ^", Text: CourseMaterial.SteelDark },
+    { Name: "North Waypoint",   X:  18.0, Y:  238.5,Z: 0.0,  Yaw: 0.0,          Shape: "RoadsideBoardGreen", Width: 4.2, Height: 1.55, Line1: "500 KM SKYPORT ^",   Line2: "500 M METRO CITY", Text: CourseMaterial.PaintWhite },
+    { Name: "Bowl Chevron E",   X: 178.0, Y:  -12.0,Z: 0.0,  Yaw: 0.0,          Shape: "ChevronHazardBoard", Width: 2.8, Height: 1.25, Line1: ">>> BANK 47 >>>",    Line2: "",                 Text: CourseMaterial.SteelDark }
+]);
+
 export function EmitInversionGroundFacets()
 {
     const Facets = [];
@@ -868,11 +1002,31 @@ export function EmitInversionGroundFacets()
     const CentreX = 0.5 * (MinX + MaxX);
     const Outer = 460.0;
 
-    // ① Surrounding stadium turf outside the multi-track asphalt pad
-    EmitQuad(Facets, [CentreX - Outer, -Outer, -0.02], [CentreX + Outer, -Outer, -0.02],
-             [CentreX + Outer, Outer, -0.02], [CentreX - Outer, Outer, -0.02], CourseMaterial.Grass);
+    // Collect true 3D boolean ground cutouts for ALL underground portals AND all 60 Wavy & Linear Bollard shafts!
+    const BollardSocketHalf = 0.39;
+    const BollardSocketDepth = 1.92;
+    const BollardPosts = ResolveInversionBollards().flatMap((Zone) => Zone.Posts);
+    const BollardCutouts = BollardPosts.map((Post) => [
+        Post.Position[0] - BollardSocketHalf,
+        Post.Position[1] - BollardSocketHalf,
+        Post.Position[0] + BollardSocketHalf,
+        Post.Position[1] + BollardSocketHalf
+    ]);
+    const AllGroundCutouts = [...VisualGroundCutouts, ...BollardCutouts];
 
-    // ② Multi-track asphalt & concrete grid with exact aperture cutouts over subterranean tunnel portals
+    const SubtractAllCutouts = (InitialRects) =>
+    {
+        let Pieces = InitialRects;
+        for (const Cutout of AllGroundCutouts)
+            Pieces = SubtractCutoutFromRects(Pieces, Cutout);
+        return Pieces;
+    };
+
+    // ① Surrounding sub-grade turf (Z = -0.02) WITH boolean cutouts subtracted so NO grass sheet blocks any underground hole!
+    for (const [TX0, TY0, TX1, TY1] of SubtractAllCutouts([[CentreX - Outer, -Outer, CentreX + Outer, Outer]]))
+        EmitQuad(Facets, [TX0, TY0, -0.02], [TX1, TY0, -0.02], [TX1, TY1, -0.02], [TX0, TY1, -0.02], CourseMaterial.Grass);
+
+    // ② Multi-track asphalt & concrete grid with true boolean holes for every underground passage & bollard shaft
     const Cell = 12.0;
     const Rows = Math.ceil((MaxX - MinX) / Cell);
     const Cols = Math.ceil((MaxY - MinY) / Cell);
@@ -888,23 +1042,58 @@ export function EmitInversionGroundFacets()
                 (Y0 <= 116.0 && Y1 >= 74.0)  || (Y0 <= 180.0 && Y1 >= 152.0) ||
                 (Y0 <= -80.0 && Y1 >= -108.0) || (Y0 <= -152.0 && Y1 >= -184.0) ||
                 (Y0 <= -238.0 && Y1 >= -262.0) || (Y0 <= -304.0 && Y1 >= -332.0) ||
-                (Y0 <= 276.0 && Y1 >= 236.0) || (Y0 <= 352.0 && Y1 >= 306.0);
+                (Y0 <= 276.0 && Y1 >= 236.0) || (Y0 <= 352.0 && Y1 >= 306.0) ||
+                (Y0 <= -372.0 && Y1 >= -434.0);
             const Checker = ((Row >> 1) + (Col >> 1)) & 1;
             const Family = UnderCollapseBridge
                 ? CourseMaterial.Earth
                 : (OnRaceCorridor ? CourseMaterial.Asphalt : (Checker ? CourseMaterial.AsphaltPatch : CourseMaterial.Asphalt));
 
-            let Pieces = [[X0, Y0, X1, Y1]];
-            for (const Cutout of VisualGroundCutouts)
-                Pieces = SubtractCutoutFromRects(Pieces, Cutout);
-            for (const [PX0, PY0, PX1, PY1] of Pieces)
+            for (const [PX0, PY0, PX1, PY1] of SubtractAllCutouts([[X0, Y0, X1, Y1]]))
                 EmitQuad(Facets, [PX0, PY0, 0.0], [PX1, PY0, 0.0], [PX1, PY1, 0.0], [PX0, PY1, 0.0], Family);
         }
     }
 
+    // ②b 3D Road-Slab Cut Thickness Collars (Z: 0.0 -> -0.46 m) around every Underground Portal & Construction Hole!
+    for (const [CX0, CY0, CX1, CY1] of VisualGroundCutouts)
+    {
+        const SlabBot = -0.46;
+        // 4 inward-facing vertical road-slab cut faces so the boolean cut through the highway has crisp 46 cm slab thickness
+        EmitQuad(Facets, [CX0, CY0, SlabBot], [CX0, CY1, SlabBot], [CX0, CY1, 0.0], [CX0, CY0, 0.0], CourseMaterial.TunnelConcrete);
+        EmitQuad(Facets, [CX1, CY1, SlabBot], [CX1, CY0, SlabBot], [CX1, CY0, 0.0], [CX1, CY1, 0.0], CourseMaterial.TunnelConcrete);
+        EmitQuad(Facets, [CX1, CY0, SlabBot], [CX0, CY0, SlabBot], [CX0, CY0, 0.0], [CX1, CY0, 0.0], CourseMaterial.TunnelConcrete);
+        EmitQuad(Facets, [CX0, CY1, SlabBot], [CX1, CY1, SlabBot], [CX1, CY1, 0.0], [CX0, CY1, 0.0], CourseMaterial.TunnelConcrete);
+    }
+
+    // ②c True Recessed -1.92 m Sunken Steel Mechanical Shafts for ALL Wavy & Linear Kinetic Bollards!
+    for (const Post of BollardPosts)
+    {
+        const BX0 = Post.Position[0] - BollardSocketHalf, BX1 = Post.Position[0] + BollardSocketHalf;
+        const BY0 = Post.Position[1] - BollardSocketHalf, BY1 = Post.Position[1] + BollardSocketHalf;
+        const BotZ = -BollardSocketDepth;
+        // Shaft bottom floor (+Z normal) + 4 inward-facing mechanical shaft walls
+        EmitQuad(Facets, [BX0, BY0, BotZ], [BX1, BY0, BotZ], [BX1, BY1, BotZ], [BX0, BY1, BotZ], CourseMaterial.SteelDark);
+        EmitQuad(Facets, [BX0, BY0, BotZ], [BX0, BY1, BotZ], [BX0, BY1, 0.0],  [BX0, BY0, 0.0],  CourseMaterial.SteelDark);
+        EmitQuad(Facets, [BX1, BY1, BotZ], [BX1, BY0, BotZ], [BX1, BY0, 0.0],  [BX1, BY1, 0.0],  CourseMaterial.SteelDark);
+        EmitQuad(Facets, [BX1, BY0, BotZ], [BX0, BY0, BotZ], [BX0, BY0, 0.0],  [BX1, BY0, 0.0],  CourseMaterial.SteelDark);
+        EmitQuad(Facets, [BX0, BY1, BotZ], [BX1, BY1, BotZ], [BX1, BY1, 0.0],  [BX0, BY1, 0.0],  CourseMaterial.SteelDark);
+        // Flush yellow/steel collar bezel around the boolean shaft opening at Z = +0.004
+        const Lip = 0.11;
+        const RimMat = Post.Shape === "WaveBollard" ? CourseMaterial.BannerAmber : CourseMaterial.PaintYellow;
+        EmitQuad(Facets, [BX0 - Lip, BY1, 0.004], [BX1 + Lip, BY1, 0.004], [BX1 + Lip, BY1 + Lip, 0.004], [BX0 - Lip, BY1 + Lip, 0.004], RimMat);
+        EmitQuad(Facets, [BX0 - Lip, BY0 - Lip, 0.004], [BX1 + Lip, BY0 - Lip, 0.004], [BX1 + Lip, BY0, 0.004], [BX0 - Lip, BY0, 0.004], RimMat);
+        EmitQuad(Facets, [BX0 - Lip, BY0, 0.004], [BX0, BY0, 0.004], [BX0, BY1, 0.004], [BX0 - Lip, BY1, 0.004], CourseMaterial.SteelDark);
+        EmitQuad(Facets, [BX1, BY0, 0.004], [BX1 + Lip, BY0, 0.004], [BX1 + Lip, BY1, 0.004], [BX1, BY1, 0.004], CourseMaterial.SteelDark);
+    }
+
+    // Paint helper ALSO boolean-subtracts AllGroundCutouts so road stripes never float across open underground holes!
     const Paint = (X0, Y0, X1, Y1, Family, Lift = PaintLift) =>
-        EmitQuad(Facets, [Math.min(X0, X1), Math.min(Y0, Y1), Lift], [Math.max(X0, X1), Math.min(Y0, Y1), Lift],
-                 [Math.max(X0, X1), Math.max(Y0, Y1), Lift], [Math.min(X0, X1), Math.max(Y0, Y1), Lift], Family);
+    {
+        const RX0 = Math.min(X0, X1), RX1 = Math.max(X0, X1);
+        const RY0 = Math.min(Y0, Y1), RY1 = Math.max(Y0, Y1);
+        for (const [PX0, PY0, PX1, PY1] of SubtractAllCutouts([[RX0, RY0, RX1, RY1]]))
+            EmitQuad(Facets, [PX0, PY0, Lift], [PX1, PY0, Lift], [PX1, PY1, Lift], [PX0, PY1, Lift], Family);
+    };
 
     const EmitChevron = (TipX, CentreY, DirSign, SpanY, ThicknessX, Family) =>
     {
@@ -1063,6 +1252,44 @@ export function EmitInversionGroundFacets()
     Paint(-142.0, 330.8, 206.0, 331.4, CourseMaterial.PaintYellow, 0.005);
     Paint(-142.0, 335.6, 206.0, 350.4, CourseMaterial.TunnelConcrete, 0.002);
 
+    // ⑫ [Track G · Underground Construction Site] Approach Hazard Markings & Open-Hole Apron Striping (Y = -386 & Y = -418)
+    Paint(-136.0, -377.4, 168.0, -376.8, CourseMaterial.PaintYellow, 0.005);
+    Paint(-136.0, -395.2, 168.0, -394.6, CourseMaterial.PaintYellow, 0.005);
+    Paint(-136.0, -408.8, 168.0, -408.2, CourseMaterial.BannerAmber, 0.005);
+    Paint(-136.0, -427.8, 168.0, -427.2, CourseMaterial.BannerAmber, 0.005);
+    for (let X = -104.0; X <= -60.0; X += 11.0)
+    {
+        EmitChevron(X, -386.0, 1.0, 3.0, 1.0, CourseMaterial.BannerAmber);
+        EmitChevron(X, -418.0, 1.0, 3.2, 1.0, CourseMaterial.KerbRed);
+    }
+    for (const X of [64.0, 78.0, 92.0])
+        EmitChevron(X, -386.0, 1.0, 3.0, 1.0, CourseMaterial.PaintGreen);
+
+    // ⑬ Crisp 3D Vector Sign Lettering & Borders on ALL Overhead Highway Waypoint Gantries & Roadside Signs!
+    for (const Gantry of HighwayOverheadGantries)
+    {
+        const CosY = Math.cos(Gantry.Yaw), SinY = Math.sin(Gantry.Yaw);
+        for (const Board of Gantry.Boards)
+        {
+            const BX = Gantry.X - Board.OffsetY * SinY - 0.105 * CosY;
+            const BY = Gantry.CentreY + Board.OffsetY * CosY - 0.105 * SinY;
+            EmitSignPanelOverlay(Facets, [BX, BY, 7.35 + 0.5 * Board.Height], Gantry.Yaw,
+                                 Board.Width, Board.Height, Board.Border, Board.Text, Board.Line1, Board.Line2);
+        }
+    }
+    for (const Sign of RoadsideSigns)
+    {
+        const CosY = Math.cos(Sign.Yaw), SinY = Math.sin(Sign.Yaw);
+        const FaceCenter = [
+            Sign.X - 0.075 * CosY,
+            Sign.Y - 0.075 * SinY,
+            Sign.Z + 2.25 + 0.5 * Sign.Height
+        ];
+        const BorderMat = Sign.Shape === "RoadsideBoardGreen" ? CourseMaterial.PaintWhite : CourseMaterial.SteelDark;
+        EmitSignPanelOverlay(Facets, FaceCenter, Sign.Yaw, Sign.Width, Sign.Height,
+                             BorderMat, Sign.Text, Sign.Line1, Sign.Line2);
+    }
+
     return Facets;
 }
 
@@ -1099,13 +1326,16 @@ export function ResolveInversionPlacements()
         }
     }
 
-    // Outer Complex Perimeter Walls around the full 6-Track Stadium ([−154..+220] × [−360..+360])
+    // Outer Complex Perimeter Walls around the full 7-Track Stadium ([−154..+220] × [−448..+360]) + Wing Divider into [Track G]
     for (let X = -148.0; X <= 216.0; X += 16.0)
     {
         Add("LongBarrier", `Complex North ${X.toFixed(0)}`, [X,  360.0, 0.0], 0.0);
-        Add("LongBarrier", `Complex South ${X.toFixed(0)}`, [X, -360.0, 0.0], 0.0);
+        Add("LongBarrier", `Complex South ${X.toFixed(0)}`, [X, -448.0, 0.0], 0.0);
+        const ConstructionGateway = (X >= -112.0 && X <= -74.0) || (X >= 144.0 && X <= 184.0);
+        if (!ConstructionGateway)
+            Add("LongBarrier", `Construction Divider ${X.toFixed(0)}`, [X, -360.0, 0.0], 0.0);
     }
-    for (let Y = -352.0; Y <= 352.0; Y += 16.0)
+    for (let Y = -440.0; Y <= 352.0; Y += 16.0)
     {
         Add("LongBarrier", `Complex West ${Y.toFixed(0)}`, [-152.5, Y, 0.0], 90.0 * Degrees);
         Add("LongBarrier", `Complex East ${Y.toFixed(0)}`, [ 220.5, Y, 0.0], 90.0 * Degrees);
@@ -1231,35 +1461,169 @@ export function ResolveInversionPlacements()
     Add("GardenGlass",     "Glass sphere",     [-61.0, -17.0, 0.0], 0.0);
     Add("GardenMirror",    "Standing mirror",  [-57.0, -17.5, 0.0], 0.0);
 
+    // ⑧ Highway Overhead Waypoint Gantries ("500 KM TO AIRPORT", "500 M TO X CITY", "CONSTRUCTION AHEAD") & Roadside Signs
+    for (const Gantry of HighwayOverheadGantries)
+    {
+        const CosY = Math.cos(Gantry.Yaw), SinY = Math.sin(Gantry.Yaw);
+        const SpanHalf = Gantry.SpanHalf ?? 13.0;
+        Add("WaypointGantryLeg",  `${Gantry.Label} leg L`, [Gantry.X - SpanHalf * SinY, Gantry.CentreY + SpanHalf * CosY, 0.0], Gantry.Yaw);
+        Add("WaypointGantryLeg",  `${Gantry.Label} leg R`, [Gantry.X + SpanHalf * SinY, Gantry.CentreY - SpanHalf * CosY, 0.0], Gantry.Yaw);
+        Add("WaypointGantryBeam", `${Gantry.Label} truss`, [Gantry.X, Gantry.CentreY, 7.20], Gantry.Yaw, -1, false);
+        if (SpanHalf > 15.0)
+        {
+            Add("WaypointGantryBeam", `${Gantry.Label} truss L`, [Gantry.X - 9.0 * SinY, Gantry.CentreY + 9.0 * CosY, 7.20], Gantry.Yaw, -1, false);
+            Add("WaypointGantryBeam", `${Gantry.Label} truss R`, [Gantry.X + 9.0 * SinY, Gantry.CentreY - 9.0 * CosY, 7.20], Gantry.Yaw, -1, false);
+        }
+        for (let BIdx = 0; BIdx < Gantry.Boards.length; ++BIdx)
+        {
+            const Board = Gantry.Boards[BIdx];
+            const BX = Gantry.X - Board.OffsetY * SinY;
+            const BY = Gantry.CentreY + Board.OffsetY * CosY;
+            Add(Board.Shape, `${Gantry.Label} board ${BIdx}`, [BX, BY, 7.35], Gantry.Yaw, -1, false);
+        }
+    }
+    for (const Sign of RoadsideSigns)
+    {
+        Add("RoadsideSignPost", `${Sign.Name} post`,  [Sign.X, Sign.Y, Sign.Z],        Sign.Yaw, -1, false);
+        Add(Sign.Shape,         `${Sign.Name} board`, [Sign.X, Sign.Y, Sign.Z + 2.25], Sign.Yaw, -1, false);
+    }
+
+    // ⑨ [Track G · Underground Construction Site] Barricades, Shoring Struts & Glowing Amber Construction Lights!
+    for (const X of [-96.0, -76.0, -60.0])
+    {
+        Add("ConstructionAFrame", `Const AFrame N ${X}`, [X, -376.2, 0.0], 0.0);
+        Add("ConstructionAFrame", `Const AFrame M ${X}`, [X, -402.0, 0.0], 0.0);
+        Add("ConstructionAFrame", `Const AFrame S ${X}`, [X, -428.8, 0.0], 0.0);
+    }
+    // Portable 4.6 m Construction Floodlight Towers before going down AND down inside the -5.2 m pits!
+    Add("WorkLightTower", "Const Tower Approach N", [-88.0, -374.5,  0.0],  0.0,           -1, false);
+    Add("WorkLightTower", "Const Tower Approach C", [-68.0, -402.0,  0.0],  0.0,           -1, false);
+    Add("WorkLightTower", "Const Tower Approach S", [-88.0, -430.5,  0.0],  0.0,           -1, false);
+    Add("WorkLightTower", "Const Tower Trench Mid", [  0.0, -391.2, -5.20], 90.0 * Degrees,-1, false);
+    Add("WorkLightTower", "Const Tower Pit End L",  [ 26.0, -412.2, -5.20],  0.0,          -1, false);
+    Add("WorkLightTower", "Const Tower Pit End R",  [ 26.0, -423.8, -5.20],  0.0,          -1, false);
+    // Glowing Amber Trench-Rim Warning Beacon Posts flanking the approach & boolean holes
+    for (const X of [-92.0, -72.0, -56.0, -28.0, 0.0, 28.0])
+    {
+        Add("AmberBeaconPost", `Trench Beacon NL ${X}`, [X, -378.2, 0.0], 0.0, -1, false);
+        Add("AmberBeaconPost", `Trench Beacon NR ${X}`, [X, -393.8, 0.0], 0.0, -1, false);
+        Add("AmberBeaconPost", `Pit Beacon SL ${X}`,    [X, -409.2, 0.0], 0.0, -1, false);
+        Add("AmberBeaconPost", `Pit Beacon SR ${X}`,    [X, -426.8, 0.0], 0.0, -1, false);
+    }
+    // Heavy Steel Shoring Struts spanning overhead across the Open Construction Trench & Dead-End Pit!
+    for (const X of [-24.0, -4.0, 16.0])
+    {
+        Add("TrenchShoringStrut", `ThruTrench Strut ${X}`, [X, -386.0, -0.32], 0.0, -1, false);
+        Add("TrenchShoringStrut", `DeadEndPit Strut ${X}`, [X, -418.0, -0.32], 0.0, -1, false);
+    }
+
+    // ⑩ Corrugated Steel W-Beam Highway Railguards along Portals, Construction Approaches, Subway Ramps & Bridges!
+    const AddGuardrailRun = (Label, StartX, EndX, Y, FaceSign = 1.0) =>
+    {
+        const Yaw = FaceSign >= 0.0 ? 0.0 : Math.PI;
+        Add("GuardrailTerminal", `${Label} term W`, [StartX - 2.4, Y, 0.0], Yaw);
+        for (let X = StartX; X <= EndX + 0.01; X += 4.0)
+            Add("GuardrailSection", `${Label} ${X.toFixed(0)}`, [X, Y, 0.0], Yaw);
+        Add("GuardrailTerminal", `${Label} term E`, [EndX + 2.4, Y, 0.0], Yaw);
+    };
+    // Construction Site approach & trench-rim W-beam highway railguards
+    AddGuardrailRun("ConstGuard NL", -92.0,  56.0, -377.6, -1.0);
+    AddGuardrailRun("ConstGuard NR", -92.0,  56.0, -394.4,  1.0);
+    AddGuardrailRun("ConstGuard SL", -92.0,  32.0, -408.8, -1.0);
+    AddGuardrailRun("ConstGuard SR", -92.0,  32.0, -427.2,  1.0);
+    // 3-Lane Subway outer-road portal divider railguards (protecting [road][tunnel down][road] & [road][tunnel up][road]!)
+    AddGuardrailRun("Subway3L Guard SW", -84.0, -48.0, 248.2, -1.0);
+    AddGuardrailRun("Subway3L Guard NW", -84.0, -48.0, 263.8,  1.0);
+    AddGuardrailRun("Subway3L Guard SE",  48.0,  84.0, 248.2, -1.0);
+    AddGuardrailRun("Subway3L Guard NE",  48.0,  84.0, 263.8,  1.0);
+    // Track A & Track D highway shoulder railguards
+    AddGuardrailRun("TrackA Guard S",   -64.0, -36.0, -47.2,  1.0);
+    AddGuardrailRun("Bridge Guard L",   -72.0, -56.0, -242.2, -1.0);
+    AddGuardrailRun("Bridge Guard R",   -72.0, -56.0, -257.8,  1.0);
+    AddGuardrailRun("Sinkhole Guard L",  60.0,  76.0, -310.0, -1.0);
+    AddGuardrailRun("Sinkhole Guard R",  60.0,  76.0, -326.0,  1.0);
+
     return List;
 }
 
 export function ResolveInversionCones()
 {
     const List = [];
-    const Push = (X, Y, Group) => List.push({ Position: [X, Y, 0.0], Yaw: 0.0, Group });
+    const Push = (X, Y, Group, Shape = "Cone", Z = 0.0) =>
+        List.push({ Shape, Name: `${Shape} ${List.length + 1}`, Position: [X, Y, Z], Yaw: 0.0, Group });
 
+    // ① [Track A] Original Grand Prix Slalom, Loop, Pipe & Spine Cones (preserved intact)
     for (let X = -76.0; X <= -36.0; X += 10.0)
     {
-        Push(X, -43.8, "loop");
-        Push(X, -32.8, "loop");
+        Push(X, -43.8, "loop", "Cone");
+        Push(X, -32.8, "loop", "Cone");
     }
     for (let Deg = -60; Deg <= 60; Deg += 30)
     {
         const Rad = (Deg * Math.PI) / 180.0;
-        Push(164.0 + 23.2 * Math.cos(Rad), 23.2 * Math.sin(Rad), "circuit");
-        Push(-96.0 - 23.2 * Math.cos(Rad), 23.2 * Math.sin(Rad), "circuit");
+        Push(164.0 + 23.2 * Math.cos(Rad), 23.2 * Math.sin(Rad), "circuit", "Cone");
+        Push(-96.0 - 23.2 * Math.cos(Rad), 23.2 * Math.sin(Rad), "circuit", "Cone");
     }
     for (const X of [64.0, 58.0])
     {
-        Push(X, 28.8, "pipe");
-        Push(X, 41.2, "pipe");
+        Push(X, 28.8, "pipe", "SlimPylonCone");
+        Push(X, 41.2, "pipe", "SlimPylonCone");
     }
     for (const X of [-66.0, -54.0])
     {
-        Push(X, -6.4, "spine");
-        Push(X,  6.4, "spine");
+        Push(X, -6.4, "spine", "ShortWorkCone");
+        Push(X,  6.4, "spine", "ShortWorkCone");
     }
+
+    // ② [Track G · Construction Site] Channelizer Tapers (Drums, Slim Pylons, Stubby Work Cones & Classic Cones)
+    const WorkShapes = ["ConstructionDrum", "Cone", "SlimPylonCone", "ShortWorkCone"];
+    for (let Step = 0; Step < 6; ++Step)
+    {
+        const X = -102.0 + Step * 8.0;
+        const S = WorkShapes[Step % WorkShapes.length];
+        Push(X, -379.6, "construction", S, 0.0);
+        Push(X, -392.4, "construction", S, 0.0);
+        Push(X, -411.2, "construction", WorkShapes[(Step + 1) % 4], 0.0);
+        Push(X, -424.8, "construction", WorkShapes[(Step + 2) % 4], 0.0);
+    }
+    // Knockable drums & cones down INSIDE the -5.20 m Underground Through-Trench & Dead-End Pit!
+    Push(-12.0, -382.2, "construction", "ConstructionDrum", -5.20);
+    Push( 12.0, -389.8, "construction", "ShortWorkCone",    -5.20);
+    Push( -6.0, -413.5, "construction", "ConstructionDrum", -5.20);
+    Push( 18.0, -422.5, "construction", "ConstructionDrum", -5.20);
+    Push( 27.5, -416.0, "construction", "Cone",             -5.20);
+    Push( 27.5, -420.0, "construction", "SlimPylonCone",    -5.20);
+
+    // ③ Scattered Solitary "Lone Cones" of all 4 types across shoulders, portals, bridges, trams & underground!
+    const LoneCones = [
+        [ -18.0,  -46.8, 0.0,   "Cone"],
+        [  32.0,  -22.8, 0.0,   "ConstructionDrum"],
+        [  98.0,  -46.5, 0.0,   "SlimPylonCone"],
+        [ 128.0,   22.8, 0.0,   "ShortWorkCone"],
+        [ -34.0,   46.8, 0.0,   "Cone"],
+        [  18.0,    9.8, 0.0,   "SlimPylonCone"],
+        [ -62.0,   76.2, 0.0,   "ConstructionDrum"],
+        [  62.0,  111.5, 0.0,   "Cone"],
+        [   4.0,  173.8, 0.0,   "ShortWorkCone"],
+        [ -92.0,  -86.5, 0.0,   "SlimPylonCone"],
+        [  14.0, -101.5, 0.0,   "ConstructionDrum"],
+        [  71.2,  -52.0, 0.0,   "Cone"],
+        [  48.0, -158.0, 0.0,   "ShortWorkCone"],
+        [ -64.0, -258.5, 0.0,   "ConstructionDrum"],
+        [ 122.0, -243.0, 0.0,   "Cone"],
+        [  68.0, -326.5, 0.0,   "SlimPylonCone"],
+        [ -68.0, -310.5, 0.0,   "ShortWorkCone"],
+        [ -96.0,  241.5, 0.0,   "Cone"],
+        [  -2.0,  270.8, 0.0,   "ConstructionDrum"],
+        [  86.0,  269.2, 0.0,   "SlimPylonCone"],
+        [ -48.0,  309.5, 0.0,   "ShortWorkCone"],
+        [  58.0,  330.2, 0.0,   "Cone"],
+        [  72.0, -392.0, 0.0,   "SlimPylonCone"],
+        [   6.0, -418.0, -5.20, "Cone"]
+    ];
+    for (const [LX, LY, LZ, LShape] of LoneCones)
+        Push(LX, LY, "lone", LShape, LZ);
+
     return List;
 }
 
@@ -1268,13 +1632,14 @@ export function ResolveInversionBreakables()
     const List = [];
     const Add = (Name, Shape, Material, X, Y, Yaw = 0.0, Options = {}) =>
     {
+        const BaseZ = Options.Z ?? 0.0;
         const Approach = {
             Position: [X - 18.0 * Math.cos(Yaw), Y - 18.0 * Math.sin(Yaw)],
             Yaw:      Yaw * 180.0 / Math.PI
         };
         List.push({
             Name, Shape, Material,
-            Position:      [X, Y, 0.0],
+            Position:      [X, Y, BaseZ],
             Yaw,
             Approach,
             Capacity:      Options.Capacity || 40,
@@ -1298,6 +1663,9 @@ export function ResolveInversionBreakables()
     Add("Infield Chicane B",      Barrier,  "plastic",    86.0,   2.2, Math.PI * 0.5, { Capacity: 24 });
     Add("Paddock Crate 1",        Crate,    "wood",       -4.0, -12.0,  0.20,         { DensityScale: 0.32, Capacity: 28 });
     Add("Paddock Crate 2",        Crate,    "wood",       -4.0,  12.0, -0.20,         { DensityScale: 0.32, Capacity: 28 });
+    // Smashable construction crates down inside the -5.20 m Underground Dead-End Pit!
+    Add("Dead-End Pit Crate 1",   Crate,    "wood",       22.0, -415.5, 0.15,         { Z: -5.20, DensityScale: 0.32, Capacity: 24 });
+    Add("Dead-End Pit Crate 2",   Crate,    "wood",       22.0, -420.5,-0.18,         { Z: -5.20, DensityScale: 0.32, Capacity: 24 });
 
     return List;
 }
@@ -1479,5 +1847,35 @@ export function ResolveInversionTrams()
             StationX:         null,
             InitialProgress:  156.0
         }
+    ];
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+//                      AUTONOMOUS FLOATING MIDAIR ROBOT DRONES (DRONESEQUENCE.JS)
+//------------------------------------------------------------------------------------------------------------------------
+
+export function ResolveInversionDrones()
+{
+    return [
+        // Track A — Start Grid, 360° Helical Loop & Central Infield Camera Robot Drones
+        { Id: "drone_grid",       Name: "Grid Scout Drone D-01",        Role: "broadcast",    Anchor: [-68.0,  -35.0, 4.4], OrbitRadiusX: 14.0, OrbitRadiusY:  6.5, OrbitFreq: 0.45, FigureEight: true,  HoverAmpZ: 0.55, Phase: 0.0 },
+        { Id: "drone_tabletop",   Name: "Tabletop Relay Drone D-02",    Role: "broadcast",    Anchor: [ 72.0,  -31.0, 6.2], OrbitRadiusX: 18.0, OrbitRadiusY:  7.0, OrbitFreq: 0.38, FigureEight: false, HoverAmpZ: 0.65, Phase: 1.1 },
+        { Id: "drone_infield",    Name: "Infield Spine Drone D-03",     Role: "telemetry",    Anchor: [-20.0,    0.0, 5.4], OrbitRadiusX: 16.0, OrbitRadiusY:  8.0, OrbitFreq: 0.42, FigureEight: true,  HoverAmpZ: 0.60, Phase: 2.2 },
+        // Track B — Underground Split Portal & Linear Bollard Gate Robot Drones
+        { Id: "drone_subwayB",    Name: "Subway Portal Drone D-04",     Role: "portal-scan",  Anchor: [-34.0,   92.0, 4.6], OrbitRadiusX: 12.0, OrbitRadiusY:  8.5, OrbitFreq: 0.44, FigureEight: false, HoverAmpZ: 0.50, Phase: 0.7 },
+        { Id: "drone_linearB",    Name: "Gate Sentinel Drone D-05",     Role: "gate-watch",   Anchor: [  6.0,  166.0, 4.2], OrbitRadiusX: 15.0, OrbitRadiusY:  5.5, OrbitFreq: 0.48, FigureEight: true,  HoverAmpZ: 0.45, Phase: 1.9 },
+        // Track C — Travelling-Wave Bollards & Canyon Crossover Robot Drones
+        { Id: "drone_waveC",      Name: "Wave Bollard Drone D-06",      Role: "wave-scan",    Anchor: [-36.0,  -94.0, 4.1], OrbitRadiusX: 18.0, OrbitRadiusY:  6.0, OrbitFreq: 0.50, FigureEight: true,  HoverAmpZ: 0.50, Phase: 2.8 },
+        { Id: "drone_canyonC",    Name: "Canyon Viaduct Drone D-07",    Role: "canyon-scan",  Anchor: [ 78.0,  -72.0, 6.8], OrbitRadiusX: 10.0, OrbitRadiusY: 12.0, OrbitFreq: 0.36, FigureEight: false, HoverAmpZ: 0.70, Phase: 3.6 },
+        // Track D — Collapsing Sky-Bridge & Collapsing Faultline Road Seismic Survey Robot Drones
+        { Id: "drone_bridgeD",    Name: "Seismic Bridge Drone D-08",    Role: "seismic",      Anchor: [  4.0, -250.0, 8.4], OrbitRadiusX: 22.0, OrbitRadiusY:  6.5, OrbitFreq: 0.40, FigureEight: true,  HoverAmpZ: 0.65, Phase: 0.4 },
+        { Id: "drone_sinkholeD",  Name: "Sinkhole Chasm Drone D-09",    Role: "seismic",      Anchor: [  0.0, -318.0, 3.8], OrbitRadiusX: 20.0, OrbitRadiusY:  6.0, OrbitFreq: 0.43, FigureEight: false, HoverAmpZ: 0.55, Phase: 1.6 },
+        // Track E & Track F — 3-Lane Subway Portal & Streetcar Tramway Robot Drones
+        { Id: "drone_subway3L",   Name: "3-Lane Subway Drone D-10",     Role: "transit",      Anchor: [-62.0,  256.0, 4.5], OrbitRadiusX: 14.0, OrbitRadiusY:  9.0, OrbitFreq: 0.41, FigureEight: true,  HoverAmpZ: 0.50, Phase: 2.5 },
+        { Id: "drone_tramF",      Name: "Tram Station Drone D-11",      Role: "transit",      Anchor: [ 16.0,  325.0, 7.6], OrbitRadiusX: 18.0, OrbitRadiusY:  7.5, OrbitFreq: 0.37, FigureEight: false, HoverAmpZ: 0.60, Phase: 3.9 },
+        // Track G — Underground Construction Site Inspection Robot Drones (hovering over "CONSTRUCTION AHEAD", Thru-Trench & Dead-End Pit!)
+        { Id: "drone_constSign",  Name: "Construction Ahead Drone D-12",Role: "construction", Anchor: [-74.0, -402.0, 4.3], OrbitRadiusX: 11.0, OrbitRadiusY: 13.0, OrbitFreq: 0.46, FigureEight: true,  HoverAmpZ: 0.48, Phase: 0.9 },
+        { Id: "drone_thruTrench", Name: "Open Trench Drone D-13",       Role: "construction", Anchor: [  0.0, -386.0, 3.6], OrbitRadiusX: 18.0, OrbitRadiusY:  5.2, OrbitFreq: 0.44, FigureEight: false, HoverAmpZ: 0.55, Phase: 2.1 },
+        { Id: "drone_deadEndPit", Name: "Dead-End Pit Drone D-14",      Role: "construction", Anchor: [  8.0, -418.0, 3.4], OrbitRadiusX: 15.0, OrbitRadiusY:  5.8, OrbitFreq: 0.47, FigureEight: true,  HoverAmpZ: 0.58, Phase: 3.3 }
     ];
 }
