@@ -1,8 +1,8 @@
 //============================================================================================================================================
 //                                                       SERVICESTATIONSEQUENCE.JS
 //============================================================================================================================================
-// 🧩 Industrial Automotive Megafactory (with interior presses, conveyors, silos & racks) + Automatic Fuel & 800V Electric Charging
-//    Stations served by Wheeled Butler Service Robots, Articulated Fuel/Charge Nozzle Arms, Helper Drones & WebAudio synthesis.
+// 🧩 Industrial Automotive Megafactory (with interior presses, conveyors, silos, racks & live 6-axis welding robot arms)
+//    + Automatic Fuel & 800V Electric Charging Bays served by bolted Multi-Axis Industrial Robot Arms & WebAudio synthesis.
 
 import { CourseMaterial } from "./MaterialSpecification.js";
 import { EmitBoxFacets, EmitCornerBoxFacets } from "./CourseStructure.js";
@@ -10,8 +10,17 @@ import { ConstructAxisQuaternion, MultiplyQuaternion, ConstructRigidTransform, R
 import { ServiceAudio } from "./ServiceAudio.js";
 
 //------------------------------------------------------------------------------------------------------------------------
-//                  WATERTIGHT 2-MANIFOLD ROBOTICS, STATION & FACTORY PROP GEOMETRY
+//                  INDUSTRIAL ROBOT KINEMATIC CONSTANTS & WATERTIGHT 2-MANIFOLD GEOMETRY
 //------------------------------------------------------------------------------------------------------------------------
+
+export const IndustrialRobotSpec = Object.freeze({
+    TurretBaseZ:    0.62,   // [m] Height of rotating J1 waist slew-ring above floor pedestal
+    ShoulderFwdX:   0.16,   // [m] Forward radial offset of J2 shoulder trunnion on turret
+    ShoulderLiftZ:  0.52,   // [m] Height of J2 shoulder trunnion above turret slew-ring (World Z = 1.14 m)
+    UpperArmLen:    2.15,   // [m] J2 -> J3 cast-alloy lower/upper boom length
+    ForearmLen:     1.95,   // [m] J3 -> J4 tubular elbow forearm length
+    WristTipLen:    0.48    // [m] J4 -> active coupler / welding electrode tip along local +X
+});
 
 function EmitOctagonalCylinder(CenterX, CenterY, Z0, Z1, Radius, SideMat, TopMat, BotMat = CourseMaterial.SteelDark, Sides = 12)
 {
@@ -36,48 +45,129 @@ function EmitOctagonalCylinder(CenterX, CenterY, Z0, Z1, Radius, SideMat, TopMat
     return Facets;
 }
 
-// 📝 Closed 2-manifold Wheeled Butler Service Robot (rubber drive wheels + mobile base + tuxedo/livery torso + glowing visor head).
-export function EmitServiceButlerFacets(PrimaryMat, AccentMat)
+// Closed 2-manifold octagonal cylinder aligned along the Y axis (for J2 shoulder & J3 elbow servo joint drums).
+function EmitYAxisCylinder(CenterX, Y0, Y1, CenterZ, Radius, SideMat, PosYMat, NegYMat = CourseMaterial.SteelDark, Sides = 10)
 {
     const Facets = [];
-    // ① Left & right rubber drive wheels (Y = ±0.33 m) + central wheeled drive chassis
-    Facets.push(...EmitCornerBoxFacets([-0.22, -0.38, 0.00], [ 0.22, -0.28, 0.28], CourseMaterial.Tyre));
-    Facets.push(...EmitCornerBoxFacets([-0.22,  0.28, 0.00], [ 0.22,  0.38, 0.28], CourseMaterial.Tyre));
-    Facets.push(...EmitCornerBoxFacets([-0.28, -0.27, 0.05], [ 0.28,  0.27, 0.24], CourseMaterial.SteelDark));
-    // ② Upright butler torso + glowing chest meter screen + butler tray collar (disjoint by >= 6 mm for exact 2-manifoldness)
-    Facets.push(...EmitCornerBoxFacets([-0.21, -0.23, 0.25], [ 0.21,  0.23, 0.96], PrimaryMat));
-    Facets.push(...EmitCornerBoxFacets([ 0.22, -0.15, 0.56], [ 0.25,  0.15, 0.84], AccentMat));
-    Facets.push(...EmitCornerBoxFacets([-0.24, -0.28, 0.97], [ 0.26,  0.28, 1.05], CourseMaterial.SteelDark));
-    // ③ Friendly robotic butler head + glowing optical visor + status beacon crown
-    Facets.push(...EmitCornerBoxFacets([-0.16, -0.17, 1.06], [ 0.16,  0.17, 1.32], PrimaryMat));
-    Facets.push(...EmitCornerBoxFacets([ 0.17, -0.13, 1.13], [ 0.20,  0.13, 1.25], CourseMaterial.GateLamp));
-    Facets.push(...EmitCornerBoxFacets([-0.06, -0.06, 1.33], [ 0.06,  0.06, 1.41], AccentMat));
+    for (let Seg = 0; Seg < Sides; ++Seg)
+    {
+        const A0 = (2.0 * Math.PI * Seg) / Sides;
+        const A1 = (2.0 * Math.PI * (Seg + 1)) / Sides;
+        const S0 = Math.sin(A0), C0 = Math.cos(A0);
+        const S1 = Math.sin(A1), C1 = Math.cos(A1);
+        const P00 = [CenterX + Radius * S0, Y0, CenterZ + Radius * C0];
+        const P10 = [CenterX + Radius * S1, Y0, CenterZ + Radius * C1];
+        const P11 = [CenterX + Radius * S1, Y1, CenterZ + Radius * C1];
+        const P01 = [CenterX + Radius * S0, Y1, CenterZ + Radius * C0];
+        const N0 = [S0, 0.0, C0], N1 = [S1, 0.0, C1];
+
+        // -Y cap (outward normal [0, -1, 0])
+        Facets.push({ Corners: [[CenterX, Y0, CenterZ], P10, P00], Normals: [[0, -1, 0], [0, -1, 0], [0, -1, 0]], Family: NegYMat });
+        // Radial side quads (outward normal [+sin A, 0, +cos A])
+        Facets.push({ Corners: [P00, P10, P11], Normals: [N0, N1, N1], Family: SideMat });
+        Facets.push({ Corners: [P00, P11, P01], Normals: [N0, N1, N0], Family: SideMat });
+        // +Y cap (outward normal [0, +1, 0])
+        Facets.push({ Corners: [[CenterX, Y1, CenterZ], P01, P11], Normals: [[0, 1, 0], [0, 1, 0], [0, 1, 0]], Family: PosYMat });
+    }
     return Facets;
 }
 
-// 📝 Closed 2-manifold Articulated Robotic Fuel / 800V EV Nozzle Arm (extends from Butler chest into the vehicle's tank port!).
-export function EmitServiceNozzleArmFacets()
+// 📝 Link 0: Heavy Bolted Industrial Robot Pedestal Base (concrete plinth + cast-iron slew column + servo controller box).
+export function EmitIndustrialRobotPedestalFacets()
 {
     const Facets = [];
-    // Rear shoulder actuator housing -> telescopic carbon boom -> glowing magnetic fuel/EV nozzle tip at +X = +0.46 m
-    Facets.push(...EmitCornerBoxFacets([-0.46, -0.09, -0.09], [-0.14,  0.09, 0.09], CourseMaterial.SteelDark));
-    Facets.push(...EmitCornerBoxFacets([-0.13, -0.055,-0.055],[ 0.28,  0.055,0.055],CourseMaterial.PaintYellow));
-    Facets.push(...EmitCornerBoxFacets([ 0.29, -0.085,-0.085],[ 0.46,  0.085,0.085],CourseMaterial.GateLamp));
+    Facets.push(...EmitCornerBoxFacets([-0.64, -0.64, 0.00], [ 0.64,  0.64, 0.14], CourseMaterial.BarrierConcrete));
+    Facets.push(...EmitOctagonalCylinder(0.0, 0.0, 0.15, 0.27, 0.50, CourseMaterial.SteelDark, CourseMaterial.SteelDark, CourseMaterial.SteelDark, 12));
+    Facets.push(...EmitOctagonalCylinder(0.0, 0.0, 0.28, 0.60, 0.36, CourseMaterial.SteelDark, CourseMaterial.Aluminium, CourseMaterial.SteelDark, 12));
+    // Rear high-voltage servo junction & pneumatic manifold box
+    Facets.push(...EmitCornerBoxFacets([-0.60, -0.24, 0.16], [-0.40,  0.24, 0.56], CourseMaterial.PaintYellow));
     return Facets;
 }
 
-// 📝 Compact Station Fuel/Charge Precision Drone (guides & places the fuel/charge coupler at the vehicle's tank port!).
-export function EmitServiceHelperDroneFacets()
+// 📝 Link 1: Rotating Waist Turret / J1 Carousel & J2 Shoulder Trunnion Yoke (local origin at [0, 0, TurretBaseZ]).
+export function EmitIndustrialRobotTurretFacets()
 {
     const Facets = [];
-    Facets.push(...EmitCornerBoxFacets([-0.28, -0.22, -0.07], [0.28, 0.22,  0.12], CourseMaterial.PaintWhite));
-    Facets.push(...EmitCornerBoxFacets([ 0.29, -0.14, -0.02], [0.34, 0.14,  0.08], CourseMaterial.GateLamp));
-    // Underside fuel-cap alignment manipulator claw / inductive ring
-    Facets.push(...EmitCornerBoxFacets([-0.10, -0.10, -0.22], [0.10, 0.10, -0.08], CourseMaterial.BannerAmber));
-    for (const SX of [-1.0, 1.0])
-        for (const SY of [-1.0, 1.0])
-            Facets.push(...EmitOctagonalCylinder(SX * 0.38, SY * 0.40, -0.02, 0.11, 0.17,
-                                                 CourseMaterial.WallCobalt, CourseMaterial.GateLamp, CourseMaterial.BannerAmber, 8));
+    // Rotating slew carousel drum
+    Facets.push(...EmitOctagonalCylinder(0.0, 0.0, 0.00, 0.20, 0.37, CourseMaterial.ConeOrange, CourseMaterial.ConeOrange, CourseMaterial.SteelDark, 12));
+    // Heavy rear cast-iron counterweight block + amber safety stripe
+    Facets.push(...EmitCornerBoxFacets([-0.54, -0.24, 0.22], [-0.17,  0.24, 0.58], CourseMaterial.SteelDark));
+    Facets.push(...EmitCornerBoxFacets([-0.58, -0.18, 0.34], [-0.55,  0.18, 0.46], CourseMaterial.BannerAmber));
+    // Left & right cast-alloy shoulder yoke cheek plates supporting J2 pivot at [0.16, 0, 0.52]
+    Facets.push(...EmitCornerBoxFacets([-0.14, -0.27, 0.22], [ 0.30, -0.17, 0.68], CourseMaterial.ConeOrange));
+    Facets.push(...EmitCornerBoxFacets([-0.14,  0.17, 0.22], [ 0.30,  0.27, 0.68], CourseMaterial.ConeOrange));
+    // Outboard J2 AC servo drive motor housing
+    Facets.push(...EmitYAxisCylinder(0.16, 0.29, 0.47, 0.52, 0.15, CourseMaterial.SteelDark, CourseMaterial.PaintYellow, CourseMaterial.SteelDark, 10));
+    return Facets;
+}
+
+// 📝 Link 2: Articulated Lower/Upper Boom Arm (J2 at [0,0,0] -> J3 at [+UpperArmLen, 0, 0]).
+export function EmitIndustrialRobotUpperArmFacets()
+{
+    const L1 = IndustrialRobotSpec.UpperArmLen;
+    const Facets = [];
+    // Shoulder trunnion barrel
+    Facets.push(...EmitYAxisCylinder(0.0, -0.15, 0.15, 0.0, 0.16, CourseMaterial.SteelDark, CourseMaterial.PaintYellow, CourseMaterial.PaintYellow, 10));
+    // Twin parallel KUKA-orange structural cast-alloy spars
+    Facets.push(...EmitCornerBoxFacets([0.18, -0.14, -0.11], [L1 - 0.18, -0.05, 0.11], CourseMaterial.ConeOrange));
+    Facets.push(...EmitCornerBoxFacets([0.18,  0.05, -0.11], [L1 - 0.18,  0.14, 0.11], CourseMaterial.ConeOrange));
+    // Central cross-brace web & top flexible hydraulic/cable dress-pack conduit
+    Facets.push(...EmitCornerBoxFacets([0.85, -0.04, -0.08], [1.30,  0.04, 0.08], CourseMaterial.SteelDark));
+    Facets.push(...EmitCornerBoxFacets([0.32, -0.045, 0.125],[L1 - 0.32, 0.045, 0.195], CourseMaterial.Tyre));
+    // Elbow joint barrel at +L1
+    Facets.push(...EmitYAxisCylinder(L1, -0.15, 0.15, 0.0, 0.14, CourseMaterial.SteelDark, CourseMaterial.PaintYellow, CourseMaterial.PaintYellow, 10));
+    return Facets;
+}
+
+// 📝 Link 3: Articulated Elbow Forearm (J3 at [0,0,0] -> J4 Wrist at [+ForearmLen, 0, 0]).
+export function EmitIndustrialRobotForearmFacets()
+{
+    const L2 = IndustrialRobotSpec.ForearmLen;
+    const Facets = [];
+    // Rear 3-axis wrist servo motor bank behind the elbow pivot
+    Facets.push(...EmitCornerBoxFacets([-0.42, -0.14, -0.12], [-0.16,  0.14, 0.16], CourseMaterial.SteelDark));
+    Facets.push(...EmitYAxisCylinder(0.0, -0.32, -0.17, 0.0, 0.12, CourseMaterial.SteelDark, CourseMaterial.SteelDark, CourseMaterial.PaintYellow, 10));
+    // Tapered industrial orange forearm tube
+    Facets.push(...EmitCornerBoxFacets([0.16, -0.095, -0.095], [L2 - 0.16, 0.095, 0.095], CourseMaterial.ConeOrange));
+    // Looped black umbilical dress-pack along top of forearm
+    Facets.push(...EmitCornerBoxFacets([0.28, -0.045, 0.105], [L2 - 0.28, 0.045, 0.175], CourseMaterial.Tyre));
+    // Spherical-wrist gearbox collar at +L2
+    Facets.push(...EmitCornerBoxFacets([L2 - 0.14, -0.08, -0.08], [L2, 0.08, 0.08], CourseMaterial.SteelDark));
+    return Facets;
+}
+
+// 📝 Link 4a: 6-Axis Wrist + Automated Octane-100 Fuel Coupler End-Effector (tip at +0.48 m).
+export function EmitIndustrialRobotCouplerFuelFacets()
+{
+    const Facets = [];
+    Facets.push(...EmitCornerBoxFacets([0.02, -0.075, -0.075], [0.14, 0.075, 0.075], CourseMaterial.Aluminium));
+    Facets.push(...EmitCornerBoxFacets([0.15, -0.090, -0.090], [0.34, 0.090, 0.090], CourseMaterial.WallCrimson));
+    Facets.push(...EmitCornerBoxFacets([0.19, -0.095,  0.100], [0.32, 0.095, 0.150], CourseMaterial.BannerAmber));
+    Facets.push(...EmitCornerBoxFacets([0.35, -0.055, -0.055], [0.48, 0.055, 0.055], CourseMaterial.GateLamp));
+    return Facets;
+}
+
+// 📝 Link 4b: 6-Axis Wrist + 800V Megawatt CCS Liquid-Cooled EV Charge Coupler (tip at +0.48 m).
+export function EmitIndustrialRobotCouplerEVFacets()
+{
+    const Facets = [];
+    Facets.push(...EmitCornerBoxFacets([0.02, -0.075, -0.075], [0.14, 0.075, 0.075], CourseMaterial.Aluminium));
+    Facets.push(...EmitCornerBoxFacets([0.15, -0.095, -0.095], [0.34, 0.095, 0.095], CourseMaterial.PaintWhite));
+    Facets.push(...EmitCornerBoxFacets([0.19, -0.095,  0.105], [0.32, 0.095, 0.155], CourseMaterial.PaintGreen));
+    Facets.push(...EmitCornerBoxFacets([0.35, -0.060, -0.060], [0.48, 0.060, 0.060], CourseMaterial.GateLamp));
+    return Facets;
+}
+
+// 📝 Link 4c: 6-Axis Wrist + Automotive Body-in-White Servo Spot-Welding Gun (tip at +0.48 m).
+export function EmitIndustrialRobotWelderFacets()
+{
+    const Facets = [];
+    Facets.push(...EmitCornerBoxFacets([0.02, -0.075, -0.075], [0.14, 0.075, 0.075], CourseMaterial.Aluminium));
+    Facets.push(...EmitCornerBoxFacets([0.15, -0.085, -0.105], [0.32, 0.085, 0.105], CourseMaterial.SteelDark));
+    // Upper & lower copper spot-welding C-jaws + glowing weld electrode tip
+    Facets.push(...EmitCornerBoxFacets([0.33, -0.040,  0.025], [0.48, 0.040,  0.080], CourseMaterial.BannerAmber));
+    Facets.push(...EmitCornerBoxFacets([0.33, -0.040, -0.080], [0.48, 0.040, -0.025], CourseMaterial.BannerAmber));
+    Facets.push(...EmitCornerBoxFacets([0.43, -0.025, -0.015], [0.48, 0.025,  0.015], CourseMaterial.GateLamp));
     return Facets;
 }
 
@@ -98,7 +188,6 @@ export function EmitElectricChargerPodFacets()
     const Facets = [];
     Facets.push(...EmitCornerBoxFacets([-0.62, -0.42, 0.00], [0.62, 0.42, 0.18], CourseMaterial.BarrierConcrete));
     Facets.push(...EmitCornerBoxFacets([-0.46, -0.26, 0.19], [0.46, 0.26, 2.12], CourseMaterial.PaintWhite));
-    // Glowing cyan/emerald high-voltage power core column
     Facets.push(...EmitCornerBoxFacets([-0.24, -0.29, 0.52], [0.24, 0.29, 1.86], CourseMaterial.GateLamp));
     Facets.push(...EmitCornerBoxFacets([-0.50, -0.30, 2.13], [0.50, 0.30, 2.38], CourseMaterial.PaintGreen));
     return Facets;
@@ -112,7 +201,6 @@ export function EmitFactoryStampingPressFacets()
     Facets.push(...EmitCornerBoxFacets([-1.95, -1.45, 0.76], [-1.25,  1.45, 5.20], CourseMaterial.PaintYellow));
     Facets.push(...EmitCornerBoxFacets([ 1.25, -1.45, 0.76], [ 1.95,  1.45, 5.20], CourseMaterial.PaintYellow));
     Facets.push(...EmitCornerBoxFacets([-2.15, -1.55, 5.21], [ 2.15,  1.55, 6.25], CourseMaterial.WallCobalt));
-    // Hydraulic ram platen & glowing laser work-cell bar
     Facets.push(...EmitCornerBoxFacets([-1.10, -1.15, 2.15], [ 1.10,  1.15, 3.35], CourseMaterial.SteelDark));
     Facets.push(...EmitCornerBoxFacets([-1.18, -1.20, 1.96], [ 1.18,  1.20, 2.12], CourseMaterial.BannerAmber));
     return Facets;
@@ -122,12 +210,10 @@ export function EmitFactoryStampingPressFacets()
 export function EmitFactoryConveyorLineFacets()
 {
     const Facets = [];
-    // Support legs + 10 m conveyor bed + yellow safety side-rails
     for (const LX of [-4.2, -1.4, 1.4, 4.2])
         Facets.push(...EmitCornerBoxFacets([LX - 0.22, -1.05, 0.00], [LX + 0.22, 1.05, 0.88], CourseMaterial.SteelDark));
     Facets.push(...EmitCornerBoxFacets([-5.00, -1.18, 0.89], [ 5.00,  1.18, 1.12], CourseMaterial.PaintYellow));
     Facets.push(...EmitCornerBoxFacets([-4.85, -0.96, 1.13], [ 4.85,  0.96, 1.20], CourseMaterial.Tyre));
-    // Two unfinished EV battery / chassis sub-assemblies riding on the belt
     Facets.push(...EmitCornerBoxFacets([-3.20, -0.72, 1.21], [-0.80,  0.72, 1.78], CourseMaterial.Aluminium));
     Facets.push(...EmitCornerBoxFacets([ 0.80, -0.72, 1.21], [ 3.20,  0.72, 1.78], CourseMaterial.WallCobalt));
     Facets.push(...EmitCornerBoxFacets([ 1.20, -0.52, 1.79], [ 2.80,  0.52, 2.02], CourseMaterial.GateLamp));
@@ -143,7 +229,6 @@ export function EmitFactoryStorageRackFacets()
             Facets.push(...EmitCornerBoxFacets([SX - 0.12, SY - 0.12, 0.00], [SX + 0.12, SY + 0.12, 4.60], CourseMaterial.WallCobalt));
     for (const BeamZ of [1.45, 3.05])
         Facets.push(...EmitCornerBoxFacets([-2.95, -1.08, BeamZ], [2.95, 1.08, BeamZ + 0.16], CourseMaterial.ConeOrange));
-    // Palletized cargo boxes on shelves
     Facets.push(...EmitCornerBoxFacets([-2.45, -0.82, 0.01], [-0.45, 0.82, 1.32], CourseMaterial.PaintYellow));
     Facets.push(...EmitCornerBoxFacets([ 0.45, -0.82, 0.01], [ 2.45, 0.82, 1.32], CourseMaterial.WallCrimson));
     Facets.push(...EmitCornerBoxFacets([-2.35, -0.78, 1.62], [-0.35, 0.78, 2.92], CourseMaterial.PaintGreen));
@@ -165,11 +250,14 @@ export function EmitFactoryTankSiloFacets()
 export function ConstructFactoryAndServiceShapes()
 {
     return {
-        // Dynamic Automatic Station Robotics (in 3D SDF + GI Cards + Dynamic!)
-        ServiceButlerFuel:    { Emit: () => EmitServiceButlerFacets(CourseMaterial.WallCrimson, CourseMaterial.BannerAmber), Voxel: 0.22, Cards: 6 },
-        ServiceButlerEV:      { Emit: () => EmitServiceButlerFacets(CourseMaterial.PaintWhite,  CourseMaterial.PaintGreen),  Voxel: 0.22, Cards: 6 },
-        ServiceNozzleArm:     { Emit: EmitServiceNozzleArmFacets,     Voxel: 0.16, Cards: 6 },
-        ServiceHelperDrone:   { Emit: EmitServiceHelperDroneFacets,   Voxel: 0.18, Cards: 6 },
+        // Multi-Axis Articulated Industrial Robot Arm Links (3D SDF + GI Cards + Dynamic!)
+        IndustrialRobotPedestal:    { Emit: EmitIndustrialRobotPedestalFacets,    Voxel: 0.24, Cards: 6 },
+        IndustrialRobotTurret:      { Emit: EmitIndustrialRobotTurretFacets,      Voxel: 0.22, Cards: 6 },
+        IndustrialRobotUpperArm:    { Emit: EmitIndustrialRobotUpperArmFacets,    Voxel: 0.22, Cards: 6 },
+        IndustrialRobotForearm:     { Emit: EmitIndustrialRobotForearmFacets,     Voxel: 0.20, Cards: 6 },
+        IndustrialRobotCouplerFuel: { Emit: EmitIndustrialRobotCouplerFuelFacets, Voxel: 0.16, Cards: 6 },
+        IndustrialRobotCouplerEV:   { Emit: EmitIndustrialRobotCouplerEVFacets,   Voxel: 0.16, Cards: 6 },
+        IndustrialRobotWelder:      { Emit: EmitIndustrialRobotWelderFacets,      Voxel: 0.16, Cards: 6 },
 
         // Station Dispenser Islands & Canopies
         FuelDispenserPump:    { Emit: EmitFuelDispenserPumpFacets,    Voxel: 0.34, Cards: 6 },
@@ -195,12 +283,27 @@ export function ConstructFactoryAndServiceShapes()
 }
 
 //------------------------------------------------------------------------------------------------------------------------
-//            AUTOMATIC FUEL & 800V ELECTRIC CHARGING SEQUENCE (BUTLER ROBOT + NOZZLE ARM + HELPER DRONE)
+//                      CLOSED-FORM ELBOW-UP 4-LINK INDUSTRIAL ROBOT INVERSE KINEMATICS
 //------------------------------------------------------------------------------------------------------------------------
 
 function LerpScalar(A, B, T)
 {
     return A + (B - A) * T;
+}
+
+function LerpVec3(A, B, T)
+{
+    return [
+        A[0] + (B[0] - A[0]) * T,
+        A[1] + (B[1] - A[1]) * T,
+        A[2] + (B[2] - A[2]) * T
+    ];
+}
+
+function NormalizeVec3(V)
+{
+    const Len = Math.hypot(V[0], V[1], V[2]) || 1.0;
+    return [V[0] / Len, V[1] / Len, V[2] / Len];
 }
 
 function SmoothStep01(T)
@@ -209,60 +312,210 @@ function SmoothStep01(T)
     return U * U * (3.0 - 2.0 * U);
 }
 
+// Given fixed floor BasePos [BX, BY, BZ], desired ToolTipWorld [TX, TY, TZ], and unit ToolDir [UX, UY, UZ],
+// solves exact elbow-up industrial robot joint transforms for Pedestal, Turret, UpperArm, Forearm, and Wrist!
+export function SolveIndustrialRobotArmIK(BasePos, BaseYaw, ToolTipWorld, ToolDir)
+{
+    const { TurretBaseZ, ShoulderFwdX, ShoulderLiftZ, UpperArmLen, ForearmLen, WristTipLen } = IndustrialRobotSpec;
+    const Dir = NormalizeVec3(ToolDir);
+
+    // Wrist pivot J4 sits WristTipLen behind the desired tool tip along -Dir
+    const WristGoal = [
+        ToolTipWorld[0] - Dir[0] * WristTipLen,
+        ToolTipWorld[1] - Dir[1] * WristTipLen,
+        ToolTipWorld[2] - Dir[2] * WristTipLen
+    ];
+
+    const DX = WristGoal[0] - BasePos[0];
+    const DY = WristGoal[1] - BasePos[1];
+    const WaistYaw = Math.hypot(DX, DY) > 1.0e-4 ? Math.atan2(DY, DX) : BaseYaw;
+    const CosW = Math.cos(WaistYaw), SinW = Math.sin(WaistYaw);
+
+    const TurretPos = [BasePos[0], BasePos[1], BasePos[2] + TurretBaseZ];
+    const ShoulderPos = [
+        BasePos[0] + CosW * ShoulderFwdX,
+        BasePos[1] + SinW * ShoulderFwdX,
+        TurretPos[2] + ShoulderLiftZ
+    ];
+
+    // Planar radial & vertical coordinates from J2 shoulder to J4 wrist in the waist half-plane
+    const RadialDist = Math.hypot(DX, DY) - ShoulderFwdX;
+    const VertDist   = WristGoal[2] - ShoulderPos[2];
+    const RawChord   = Math.hypot(RadialDist, VertDist);
+    const MinReach   = Math.abs(UpperArmLen - ForearmLen) + 0.06;
+    const MaxReach   = UpperArmLen + ForearmLen - 0.02;
+    const Chord      = ClampScalar(RawChord, MinReach, MaxReach);
+
+    // Elbow-up Law of Cosines
+    const CosShoulder = ClampScalar(
+        (UpperArmLen * UpperArmLen + Chord * Chord - ForearmLen * ForearmLen) / (2.0 * UpperArmLen * Chord),
+        -1.0, 1.0
+    );
+    const BaseElev = Math.atan2(VertDist, RadialDist);
+    const Elev1    = BaseElev + Math.acos(CosShoulder);
+
+    const ElbowPos = [
+        ShoulderPos[0] + UpperArmLen * Math.cos(Elev1) * CosW,
+        ShoulderPos[1] + UpperArmLen * Math.sin(Elev1) * 0.0 + UpperArmLen * Math.cos(Elev1) * SinW,
+        ShoulderPos[2] + UpperArmLen * Math.sin(Elev1)
+    ];
+
+    // Forearm points from ElbowPos toward WristGoal (clamped cleanly if target exceeds max reach)
+    const ForeDX = WristGoal[0] - ElbowPos[0];
+    const ForeDY = WristGoal[1] - ElbowPos[1];
+    const ForeDZ = WristGoal[2] - ElbowPos[2];
+    const ForeRad = (ForeDX * CosW + ForeDY * SinW);
+    const Elev2   = Math.atan2(ForeDZ, ForeRad);
+
+    const WristPos = [
+        ElbowPos[0] + ForearmLen * Math.cos(Elev2) * CosW,
+        ElbowPos[1] + ForearmLen * Math.cos(Elev2) * SinW,
+        ElbowPos[2] + ForearmLen * Math.sin(Elev2)
+    ];
+    const ActualTip = [
+        WristPos[0] + Dir[0] * WristTipLen,
+        WristPos[1] + Dir[1] * WristTipLen,
+        WristPos[2] + Dir[2] * WristTipLen
+    ];
+
+    const QPedestal = ConstructAxisQuaternion([0.0, 0.0, 1.0], BaseYaw);
+    const QTurret   = ConstructAxisQuaternion([0.0, 0.0, 1.0], WaistYaw);
+    const QUpper    = MultiplyQuaternion(QTurret, ConstructAxisQuaternion([0.0, 1.0, 0.0], -Elev1));
+    const QForearm  = MultiplyQuaternion(QTurret, ConstructAxisQuaternion([0.0, 1.0, 0.0], -Elev2));
+
+    const WristYaw  = Math.atan2(Dir[1], Dir[0]);
+    const WristElev = Math.asin(ClampScalar(Dir[2], -1.0, 1.0));
+    const QWrist    = MultiplyQuaternion(
+        ConstructAxisQuaternion([0.0, 0.0, 1.0], WristYaw),
+        ConstructAxisQuaternion([0.0, 1.0, 0.0], -WristElev)
+    );
+
+    return {
+        PedestalPos: BasePos,
+        QPedestal,
+        TurretPos,
+        QTurret,
+        ShoulderPos,
+        QUpper,
+        ElbowPos,
+        QForearm,
+        WristPos,
+        QWrist,
+        ActualTip,
+        WaistYaw,
+        ShoulderElev: Elev1,
+        ForearmElev:  Elev2
+    };
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+//         AUTOMATIC FUEL & 800V EV INDUSTRIAL ROBOT ARMS + MEGAFACTORY ASSEMBLY WELDING ROBOTS
+//------------------------------------------------------------------------------------------------------------------------
+
 export class ServiceStationSequence
 {
-    constructor(Scene, RawStations = [], AnnounceCallback = null)
+    constructor(Scene, RawStations = [], RawFactoryRobots = [], AnnounceCallback = null)
     {
-        this.Scene       = Scene;
-        this.Enabled     = true;
-        this.Audio       = new ServiceAudio();
-        this.Announce    = AnnounceCallback;
-        this.Clock       = 0.0;
-        this.FuelLevel   = 0.34;   // [0..1] simulated vehicle fuel tank level (refilled to 100% at Auto-Fuel Station!)
-        this.ChargeLevel = 0.28;   // [0..1] simulated 800V EV battery SoC (charged to 100% at Auto-EV Station!)
+        this.Scene         = Scene;
+        this.Enabled       = true;
+        this.Audio         = new ServiceAudio();
+        this.Announce      = AnnounceCallback;
+        this.Clock         = 0.0;
+        this.FuelLevel     = 0.34;   // [0..1] simulated vehicle fuel tank level (refilled to 100% at Auto-Fuel Station!)
+        this.ChargeLevel   = 0.28;   // [0..1] simulated 800V EV battery SoC (charged to 100% at Auto-EV Station!)
         this.ServicedCount = 0;
-        this.Stations    = [];
-        this.BuildStations(RawStations);
+        this.Stations      = [];
+        this.FactoryRobots = [];
+        this.BuildRobots(RawStations, RawFactoryRobots);
     }
 
-    BuildStations(RawStations)
+    BuildRobots(RawStations, RawFactoryRobots)
     {
         if (!this.Scene || !this.Scene.ServiceBlock)
             return;
         let Cursor = this.Scene.ServiceBlock.First;
+
         this.Stations = RawStations.map((Spec) =>
         {
-            const ButlerOccupant = Cursor++;
-            const ArmOccupant    = Cursor++;
-            const DroneOccupant  = Cursor++;
+            const PedestalOccupant = Cursor++;
+            const TurretOccupant   = Cursor++;
+            const UpperArmOccupant = Cursor++;
+            const ForearmOccupant  = Cursor++;
+            const WristOccupant    = Cursor++;
+            const BasePos = (Spec.BasePosition || Spec.DockPosition).slice();
+            const BaseYaw = Spec.BaseYaw ?? Spec.DockYaw ?? (-0.5 * Math.PI);
+            const Home = this.ComputeHomeTip(BasePos, BaseYaw, 0.0);
+
             return {
-                Id:             Spec.Id,
-                Name:           Spec.Name,
-                Kind:           Spec.Kind,   // "fuel" | "electric"
-                BayCenter:      Spec.BayCenter.slice(),
-                BayHalfExtent:  Spec.BayHalfExtent || [7.8, 4.4],
-                DockPosition:   Spec.DockPosition.slice(),
-                DockYaw:        Spec.DockYaw ?? -0.5 * Math.PI,
-                DronePerch:     Spec.DronePerch ? Spec.DronePerch.slice() : [Spec.DockPosition[0] + 2.2, Spec.DockPosition[1], 3.35],
-                ButlerOccupant,
-                ArmOccupant,
-                DroneOccupant,
-                State:          "idle",      // "idle" | "stopping" | "deploying" | "coupling" | "dispensing" | "retracting" | "complete"
-                StateTimer:     0.0,
-                Progress:       0.0,
-                StartLevel:     0.25,
-                AnchorCarPos:   [0.0, 0.0, 0.0],
-                TargetStandPos: Spec.DockPosition.slice(),
-                TargetPortPos:  [Spec.BayCenter[0], Spec.BayCenter[1], 0.85],
-                ButlerPos:      Spec.DockPosition.slice(),
-                ButlerYaw:      Spec.DockYaw ?? -0.5 * Math.PI,
-                DronePos:       Spec.DronePerch ? Spec.DronePerch.slice() : [Spec.DockPosition[0] + 2.2, Spec.DockPosition[1], 3.35],
-                DroneYaw:       0.0,
-                ArmPos:         [Spec.DockPosition[0], Spec.DockPosition[1], 0.82],
-                ArmQuat:        [0.0, 0.0, 0.0, 1.0]
+                Id:               Spec.Id,
+                Name:             Spec.Name,
+                Kind:             Spec.Kind,   // "fuel" | "electric"
+                BayCenter:        Spec.BayCenter.slice(),
+                BayHalfExtent:    Spec.BayHalfExtent || [7.8, 4.4],
+                BasePosition:     BasePos,
+                BaseYaw,
+                PedestalOccupant,
+                TurretOccupant,
+                UpperArmOccupant,
+                ForearmOccupant,
+                WristOccupant,
+                State:            "idle",      // "idle" | "stopping" | "deploying" | "coupling" | "dispensing" | "retracting" | "complete"
+                StateTimer:       0.0,
+                Progress:         0.0,
+                StartLevel:       0.25,
+                AnchorCarPos:     [0.0, 0.0, 0.0],
+                TargetPortPos:    [Spec.BayCenter[0], Spec.BayCenter[1], 0.85],
+                PrePortPos:       Home.TipPos.slice(),
+                PortOutward:      [0.0, 1.0, 0.0],
+                RetractFromTip:   Home.TipPos.slice(),
+                RetractFromDir:   Home.ToolDir.slice(),
+                CurrentTipPos:    Home.TipPos.slice(),
+                CurrentToolDir:   Home.ToolDir.slice(),
+                LastIK:           null
             };
         });
+
+        this.FactoryRobots = RawFactoryRobots.map((Spec, Idx) =>
+        {
+            const PedestalOccupant = Cursor++;
+            const TurretOccupant   = Cursor++;
+            const UpperArmOccupant = Cursor++;
+            const ForearmOccupant  = Cursor++;
+            const WristOccupant    = Cursor++;
+            return {
+                Id:               Spec.Id || `factory_robot_${Idx + 1}`,
+                Name:             Spec.Name || `Factory Industrial Robot ${Idx + 1}`,
+                BasePosition:     Spec.BasePosition.slice(),
+                BaseYaw:          Spec.BaseYaw ?? (0.5 * Math.PI),
+                WeldTargets:      Spec.WeldTargets.map((T) => T.slice()),
+                PhaseOffset:      Spec.PhaseOffset ?? (Idx * 1.55),
+                CycleDuration:    Spec.CycleDuration ?? 4.8,
+                SparkCooldown:    0.0,
+                PedestalOccupant,
+                TurretOccupant,
+                UpperArmOccupant,
+                ForearmOccupant,
+                WristOccupant,
+                CurrentTipPos:    Spec.BasePosition.slice(),
+                CurrentToolDir:   [Math.cos(Spec.BaseYaw ?? 0.0), Math.sin(Spec.BaseYaw ?? 0.0), -0.5],
+                LastIK:           null
+            };
+        });
+
         this.ApplyTransforms(true);
+    }
+
+    ComputeHomeTip(BasePos, BaseYaw, BreathPhase = 0.0)
+    {
+        const C = Math.cos(BaseYaw), S = Math.sin(BaseYaw);
+        return {
+            TipPos: [
+                BasePos[0] + C * 1.18,
+                BasePos[1] + S * 1.18,
+                BasePos[2] + 2.32 + 0.035 * Math.sin(BreathPhase)
+            ],
+            ToolDir: NormalizeVec3([C * 0.78, S * 0.78, -0.62])
+        };
     }
 
     Notify(Message)
@@ -274,19 +527,32 @@ export class ServiceStationSequence
 
     EmitCouplerSparks(Sparks, WorldPoint, Count, Temperature = 2100.0)
     {
-        if (!Sparks || typeof Sparks.EmitBurst !== "function")
+        if (!Sparks)
             return;
-        Sparks.EmitBurst({
-            Origin:      WorldPoint,
-            Normal:      [0.0, 0.0, 1.0],
-            Tangent:     [1.0, 0.0, 0.25],
-            Velocity:    [0.0, 0.0, 1.6],
-            Count,
-            Speed:       4.2,
-            Spread:      1.05,
-            Lifetime:    0.55,
-            Temperature
-        });
+        if (typeof Sparks.EmitBurst === "function")
+        {
+            Sparks.EmitBurst({
+                Origin:      WorldPoint,
+                Normal:      [0.0, 0.0, 1.0],
+                Tangent:     [1.0, 0.0, 0.25],
+                Velocity:    [0.0, 0.0, 1.6],
+                Count,
+                Speed:       4.2,
+                Spread:      1.05,
+                Lifetime:    0.55,
+                Temperature
+            });
+        }
+        else if (typeof Sparks.Emit === "function")
+        {
+            Sparks.Emit([{
+                Point:    WorldPoint.slice(),
+                Velocity: [0.0, 0.0, 3.2],
+                Normal:   [0.0, 0.0, 1.0],
+                Strength: Math.max(1.2, Count * 0.25),
+                Rim:      null
+            }], 1.0 / 60.0);
+        }
     }
 
     get BatteryLevel()
@@ -309,12 +575,12 @@ export class ServiceStationSequence
         }
         for (const Station of this.Stations)
         {
-            Station.State      = "idle";
-            Station.StateTimer = 0.0;
-            Station.Progress   = 0.0;
-            Station.ButlerPos  = Station.DockPosition.slice();
-            Station.ButlerYaw  = Station.DockYaw;
-            Station.DronePos   = Station.DronePerch.slice();
+            const Home = this.ComputeHomeTip(Station.BasePosition, Station.BaseYaw, 0.0);
+            Station.State          = "idle";
+            Station.StateTimer     = 0.0;
+            Station.Progress       = 0.0;
+            Station.CurrentTipPos  = Home.TipPos;
+            Station.CurrentToolDir = Home.ToolDir;
         }
         this.ApplyTransforms(true);
     }
@@ -327,32 +593,33 @@ export class ServiceStationSequence
         const Left    = RotateVector(CarQuat, [0.0, 1.0, 0.0]);
         const Up      = RotateVector(CarQuat, [0.0, 0.0, 1.0]);
 
-        // Choose whichever flank of the vehicle faces the station's dispenser dock so the butler never crosses through the car!
-        const ToDockX  = Station.DockPosition[0] - CarPos[0];
-        const ToDockY  = Station.DockPosition[1] - CarPos[1];
-        const SideSign = (ToDockX * Left[0] + ToDockY * Left[1]) >= 0.0 ? 1.0 : -1.0;
+        // Choose whichever flank of the vehicle faces the industrial robot pedestal so the arm never crosses over the roof!
+        const ToBaseX  = Station.BasePosition[0] - CarPos[0];
+        const ToBaseY  = Station.BasePosition[1] - CarPos[1];
+        const SideSign = (ToBaseX * Left[0] + ToBaseY * Left[1]) >= 0.0 ? 1.0 : -1.0;
         const Outward  = [Left[0] * SideSign, Left[1] * SideSign, Left[2] * SideSign];
 
-        // Rear quarter-panel fuel tank / 800V charge port in world space
-        const PortWorld = [
-            CarPos[0] - 1.24 * Fwd[0] + 0.94 * Outward[0] + 0.24 * Up[0],
-            CarPos[1] - 1.24 * Fwd[1] + 0.94 * Outward[1] + 0.24 * Up[1],
-            Math.max(0.55, CarPos[2] - 1.24 * Fwd[2] + 0.94 * Outward[2] + 0.24 * Up[2])
+        // Rear quarter-panel fuel tank / 800V charge port in world space (clamped cleanly within arm reach)
+        const RawPort = [
+            CarPos[0] - 1.18 * Fwd[0] + 0.94 * Outward[0] + 0.24 * Up[0],
+            CarPos[1] - 1.18 * Fwd[1] + 0.94 * Outward[1] + 0.24 * Up[1],
+            Math.max(0.58, CarPos[2] - 1.18 * Fwd[2] + 0.94 * Outward[2] + 0.24 * Up[2])
         ];
-        // Butler wheeled robot stands 0.96 m outboard of the tank port on the tarmac (Z = 0)
+
         const OutLen = Math.hypot(Outward[0], Outward[1]) || 1.0;
         const NX = Outward[0] / OutLen, NY = Outward[1] / OutLen;
-        const StandWorld = [
-            PortWorld[0] + NX * 0.96,
-            PortWorld[1] + NY * 0.96,
-            0.0
+        const PrePort = [
+            RawPort[0] + NX * 0.42,
+            RawPort[1] + NY * 0.42,
+            RawPort[2] + 0.12
         ];
-        return { PortWorld, StandWorld, Outward: [NX, NY, 0.0] };
+        const InsertDir = NormalizeVec3([-NX, -NY, -0.14]);
+        return { PortWorld: RawPort, PrePortWorld: PrePort, Outward: [NX, NY, 0.0], InsertDir };
     }
 
     Advance(Vehicle, DeltaSeconds, Sparks = null)
     {
-        if (!this.Scene || this.Stations.length === 0)
+        if (!this.Scene || (this.Stations.length === 0 && this.FactoryRobots.length === 0))
             return false;
         const Step = Math.min(Math.max(DeltaSeconds, 0.0), 0.05);
         if (!this.Enabled || Step <= 0.0)
@@ -363,13 +630,13 @@ export class ServiceStationSequence
         const CarVel = Vehicle?.LinearVelocity || [0.0, 0.0, 0.0];
         const Speed  = Math.hypot(CarVel[0], CarVel[1], CarVel[2]);
 
-        // Gentle fuel/charge consumption while driving at speed so returning to a station always tops up meaningfully!
         if (Speed > 3.0)
         {
             this.FuelLevel   = Math.max(0.12, this.FuelLevel   - Step * Speed * 0.00018);
             this.ChargeLevel = Math.max(0.12, this.ChargeLevel - Step * Speed * 0.00022);
         }
 
+        // ① Advance Station Refueling & 800V Supercharging Industrial Robot Arms
         for (const Station of this.Stations)
         {
             const InBay =
@@ -377,18 +644,16 @@ export class ServiceStationSequence
                 Math.abs(CarPos[1] - Station.BayCenter[1]) <= Station.BayHalfExtent[1] &&
                 Math.abs(CarPos[2]) < 2.2;
 
+            const Home = this.ComputeHomeTip(
+                Station.BasePosition,
+                Station.BaseYaw,
+                this.Clock * 1.6 + (Station.Kind === "electric" ? 1.5 : 0.0)
+            );
+
             if (Station.State === "idle")
             {
-                // Idle hover orbit for helper drone above station canopy
-                const Phase = this.Clock * 1.4 + (Station.Kind === "electric" ? 1.6 : 0.0);
-                Station.ButlerPos = Station.DockPosition.slice();
-                Station.ButlerYaw = Station.DockYaw;
-                Station.DronePos = [
-                    Station.DronePerch[0] + 0.85 * Math.cos(Phase),
-                    Station.DronePerch[1] + 0.55 * Math.sin(Phase),
-                    Station.DronePerch[2] + 0.14 * Math.sin(Phase * 1.7)
-                ];
-                Station.DroneYaw = Phase + 0.5 * Math.PI;
+                Station.CurrentTipPos  = Home.TipPos;
+                Station.CurrentToolDir = Home.ToolDir;
                 if (InBay && Speed < 1.45)
                 {
                     Station.State = "stopping";
@@ -397,6 +662,8 @@ export class ServiceStationSequence
             }
             else if (Station.State === "stopping")
             {
+                Station.CurrentTipPos  = Home.TipPos;
+                Station.CurrentToolDir = Home.ToolDir;
                 if (!InBay || Speed > 1.85)
                 {
                     Station.State = "idle";
@@ -408,17 +675,18 @@ export class ServiceStationSequence
                     if (Station.StateTimer >= 0.28)
                     {
                         const Targets = this.ComputeVehiclePortTargets(Station, Vehicle);
-                        Station.AnchorCarPos   = CarPos.slice();
-                        Station.TargetPortPos  = Targets.PortWorld;
-                        Station.TargetStandPos = Targets.StandWorld;
-                        Station.StartLevel     = Station.Kind === "electric" ? this.ChargeLevel : this.FuelLevel;
-                        Station.Progress       = 0.0;
-                        Station.State          = "deploying";
-                        Station.StateTimer     = 0.0;
+                        Station.AnchorCarPos  = CarPos.slice();
+                        Station.TargetPortPos = Targets.PortWorld;
+                        Station.PrePortPos    = Targets.PrePortWorld;
+                        Station.PortOutward   = Targets.Outward;
+                        Station.StartLevel    = Station.Kind === "electric" ? this.ChargeLevel : this.FuelLevel;
+                        Station.Progress      = 0.0;
+                        Station.State         = "deploying";
+                        Station.StateTimer    = 0.0;
                         this.Audio.PlayStationWelcome(Station.Kind);
                         this.Notify(Station.Kind === "electric"
-                            ? "⚡ Auto-EV Station: Butler Robot & Drone deploying to charge port..."
-                            : "⛽ Auto-Fuel Station: Butler Robot & Drone deploying to fuel tank...");
+                            ? "⚡ Auto-EV Bay: 6-Axis Industrial Robot Arm deploying to 800V port..."
+                            : "⛽ Auto-Fuel Bay: 6-Axis Industrial Robot Arm deploying to fuel port...");
                     }
                 }
             }
@@ -431,40 +699,23 @@ export class ServiceStationSequence
                     continue;
                 }
                 const Targets = this.ComputeVehiclePortTargets(Station, Vehicle);
-                Station.TargetPortPos  = Targets.PortWorld;
-                Station.TargetStandPos = Targets.StandWorld;
-                Station.StateTimer += Step;
-                const T = SmoothStep01(Station.StateTimer / 1.10);
+                Station.TargetPortPos = Targets.PortWorld;
+                Station.PrePortPos    = Targets.PrePortWorld;
+                Station.PortOutward   = Targets.Outward;
+                Station.StateTimer   += Step;
+                const T = SmoothStep01(Station.StateTimer / 1.05);
 
-                // Wheeled Butler Robot rolls out from DockPosition -> TargetStandPos!
-                Station.ButlerPos = [
-                    LerpScalar(Station.DockPosition[0], Station.TargetStandPos[0], T),
-                    LerpScalar(Station.DockPosition[1], Station.TargetStandPos[1], T),
-                    0.0
-                ];
-                const FaceYaw = Math.atan2(Station.TargetPortPos[1] - Station.ButlerPos[1],
-                                           Station.TargetPortPos[0] - Station.ButlerPos[0]);
-                Station.ButlerYaw = FaceYaw;
+                // Smooth arched swing from Home pose to PrePort staging position aligned with the port axis
+                const MidLift = 0.35 * Math.sin(Math.PI * T);
+                const Pos = LerpVec3(Home.TipPos, Station.PrePortPos, T);
+                Pos[2] += MidLift;
+                Station.CurrentTipPos  = Pos;
+                Station.CurrentToolDir = NormalizeVec3(LerpVec3(Home.ToolDir, Targets.InsertDir, T));
 
-                // Helper Drone swoops down from canopy perch right over the car's fuel tank to place/guide the nozzle!
-                const HoverGoal = [
-                    Station.TargetPortPos[0] + Targets.Outward[0] * 0.28,
-                    Station.TargetPortPos[1] + Targets.Outward[1] * 0.28,
-                    Station.TargetPortPos[2] + 0.44
-                ];
-                Station.DronePos = [
-                    LerpScalar(Station.DronePerch[0], HoverGoal[0], T),
-                    LerpScalar(Station.DronePerch[1], HoverGoal[1], T),
-                    LerpScalar(Station.DronePerch[2], HoverGoal[2], T)
-                ];
-                Station.DroneYaw = FaceYaw;
-
-                if (Station.StateTimer >= 1.10)
+                if (Station.StateTimer >= 1.05)
                 {
                     Station.State = "coupling";
                     Station.StateTimer = 0.0;
-                    this.Audio.PlayCouplerLatch(Station.Kind);
-                    this.EmitCouplerSparks(Sparks, Station.TargetPortPos, 10, Station.Kind === "electric" ? 2600.0 : 1850.0);
                 }
             }
             else if (Station.State === "coupling")
@@ -476,23 +727,23 @@ export class ServiceStationSequence
                     continue;
                 }
                 const Targets = this.ComputeVehiclePortTargets(Station, Vehicle);
-                Station.TargetPortPos  = Targets.PortWorld;
-                Station.TargetStandPos = Targets.StandWorld;
-                Station.ButlerPos      = Station.TargetStandPos.slice();
-                Station.ButlerYaw      = Math.atan2(Station.TargetPortPos[1] - Station.ButlerPos[1],
-                                                    Station.TargetPortPos[0] - Station.ButlerPos[0]);
-                Station.DronePos = [
-                    Station.TargetPortPos[0] + Targets.Outward[0] * 0.24,
-                    Station.TargetPortPos[1] + Targets.Outward[1] * 0.24,
-                    Station.TargetPortPos[2] + 0.36 + 0.04 * Math.sin(this.Clock * 6.0)
-                ];
-                Station.DroneYaw = Station.ButlerYaw;
-                Station.StateTimer += Step;
-                if (Station.StateTimer >= 0.60)
+                Station.TargetPortPos = Targets.PortWorld;
+                Station.PrePortPos    = Targets.PrePortWorld;
+                Station.PortOutward   = Targets.Outward;
+                Station.StateTimer   += Step;
+                const T = SmoothStep01(Station.StateTimer / 0.55);
+
+                // Precision linear Cartesian insertion along -Outward straight into the vehicle's port!
+                Station.CurrentTipPos  = LerpVec3(Station.PrePortPos, Station.TargetPortPos, T);
+                Station.CurrentToolDir = Targets.InsertDir;
+
+                if (Station.StateTimer >= 0.55)
                 {
                     Station.State = "dispensing";
                     Station.StateTimer = 0.0;
+                    this.Audio.PlayCouplerLatch(Station.Kind);
                     this.Audio.StartDispensing(Station.Kind);
+                    this.EmitCouplerSparks(Sparks, Station.TargetPortPos, 10, Station.Kind === "electric" ? 2600.0 : 1850.0);
                 }
             }
             else if (Station.State === "dispensing")
@@ -505,16 +756,10 @@ export class ServiceStationSequence
                 }
                 const Targets = this.ComputeVehiclePortTargets(Station, Vehicle);
                 Station.TargetPortPos  = Targets.PortWorld;
-                Station.TargetStandPos = Targets.StandWorld;
-                Station.ButlerPos      = Station.TargetStandPos.slice();
-                Station.ButlerYaw      = Math.atan2(Station.TargetPortPos[1] - Station.ButlerPos[1],
-                                                    Station.TargetPortPos[0] - Station.ButlerPos[0]);
-                Station.DronePos = [
-                    Station.TargetPortPos[0] + Targets.Outward[0] * 0.24,
-                    Station.TargetPortPos[1] + Targets.Outward[1] * 0.24,
-                    Station.TargetPortPos[2] + 0.36 + 0.05 * Math.sin(this.Clock * 7.0)
-                ];
-                Station.DroneYaw = Station.ButlerYaw;
+                Station.PrePortPos     = Targets.PrePortWorld;
+                Station.PortOutward    = Targets.Outward;
+                Station.CurrentTipPos  = Station.TargetPortPos.slice();
+                Station.CurrentToolDir = Targets.InsertDir;
 
                 Station.StateTimer += Step;
                 Station.Progress = ClampScalar(Station.StateTimer / 2.60, 0.0, 1.0);
@@ -527,31 +772,47 @@ export class ServiceStationSequence
 
                 if (Station.Progress >= 1.0)
                 {
-                    Station.State = "retracting";
-                    Station.StateTimer = 0.0;
+                    Station.RetractFromTip = Station.CurrentTipPos.slice();
+                    Station.RetractFromDir = Station.CurrentToolDir.slice();
+                    Station.State          = "retracting";
+                    Station.StateTimer     = 0.0;
                     this.ServicedCount++;
                     this.Audio.PlayCompletionChime(Station.Kind);
                     this.EmitCouplerSparks(Sparks, Station.TargetPortPos, 14, Station.Kind === "electric" ? 2800.0 : 1950.0);
                     this.Notify(Station.Kind === "electric"
-                        ? "⚡ 800V Battery 100% Charged (85 kWh) — Auto-EV Butler returning to dock!"
-                        : "⛽ Octane-100 Tank 100% Full (60 L) — Auto-Fuel Butler returning to dock!");
+                        ? "⚡ 800V Battery 100% Charged (85 kWh) — Industrial Robot Arm retracting!"
+                        : "⛽ Octane-100 Tank 100% Full (60 L) — Industrial Robot Arm retracting!");
                 }
             }
             else if (Station.State === "retracting")
             {
                 Station.StateTimer += Step;
-                const T = SmoothStep01(Station.StateTimer / 1.10);
-                Station.ButlerPos = [
-                    LerpScalar(Station.TargetStandPos[0], Station.DockPosition[0], T),
-                    LerpScalar(Station.TargetStandPos[1], Station.DockPosition[1], T),
-                    0.0
-                ];
-                Station.ButlerYaw = LerpScalar(Station.ButlerYaw, Station.DockYaw, T);
-                Station.DronePos = [
-                    LerpScalar(Station.TargetPortPos[0], Station.DronePerch[0], T),
-                    LerpScalar(Station.TargetPortPos[1], Station.DronePerch[1], T),
-                    LerpScalar(Station.TargetPortPos[2] + 0.42, Station.DronePerch[2], T)
-                ];
+                if (Station.StateTimer < 0.30)
+                {
+                    // Linear pull-back clear of fender before folding upward
+                    const U = SmoothStep01(Station.StateTimer / 0.30);
+                    const SafeClear = [
+                        Station.RetractFromTip[0] + Station.PortOutward[0] * 0.42,
+                        Station.RetractFromTip[1] + Station.PortOutward[1] * 0.42,
+                        Station.RetractFromTip[2] + 0.16
+                    ];
+                    Station.CurrentTipPos  = LerpVec3(Station.RetractFromTip, SafeClear, U);
+                    Station.CurrentToolDir = Station.RetractFromDir;
+                }
+                else
+                {
+                    const U = SmoothStep01((Station.StateTimer - 0.30) / 0.80);
+                    const SafeClear = [
+                        Station.RetractFromTip[0] + Station.PortOutward[0] * 0.42,
+                        Station.RetractFromTip[1] + Station.PortOutward[1] * 0.42,
+                        Station.RetractFromTip[2] + 0.16
+                    ];
+                    const Pos = LerpVec3(SafeClear, Home.TipPos, U);
+                    Pos[2] += 0.30 * Math.sin(Math.PI * U);
+                    Station.CurrentTipPos  = Pos;
+                    Station.CurrentToolDir = NormalizeVec3(LerpVec3(Station.RetractFromDir, Home.ToolDir, U));
+                }
+
                 if (Station.StateTimer >= 1.10)
                 {
                     Station.State = InBay ? "complete" : "idle";
@@ -560,23 +821,63 @@ export class ServiceStationSequence
             }
             else if (Station.State === "complete")
             {
-                const Phase = this.Clock * 1.4;
-                Station.ButlerPos = Station.DockPosition.slice();
-                Station.ButlerYaw = Station.DockYaw;
-                Station.DronePos = [
-                    Station.DronePerch[0] + 0.85 * Math.cos(Phase),
-                    Station.DronePerch[1] + 0.55 * Math.sin(Phase),
-                    Station.DronePerch[2] + 0.14 * Math.sin(Phase * 1.7)
-                ];
-                Station.DroneYaw = Phase + 0.5 * Math.PI;
+                Station.CurrentTipPos  = Home.TipPos;
+                Station.CurrentToolDir = Home.ToolDir;
                 if (!InBay)
                 {
                     Station.State = "idle";
                     Station.Progress = 0.0;
                 }
             }
+        }
 
-            this.ComputeNozzleArmPose(Station);
+        // ② Advance Megafactory Assembly-Line Industrial Spot-Welding Robot Arms
+        for (const Robot of this.FactoryRobots)
+        {
+            Robot.SparkCooldown = Math.max(0.0, Robot.SparkCooldown - Step);
+            const Targets = Robot.WeldTargets;
+            if (!Targets || Targets.length === 0)
+                continue;
+
+            const CyclePos = ((this.Clock + Robot.PhaseOffset) / Robot.CycleDuration) * Targets.length;
+            const SegIdx   = Math.floor(CyclePos) % Targets.length;
+            const NextIdx  = (SegIdx + 1) % Targets.length;
+            const SubT     = CyclePos - Math.floor(CyclePos);
+
+            const CurWeld  = Targets[SegIdx];
+            const NextWeld = Targets[NextIdx];
+
+            // Dwell on chassis seam (SubT < 0.42) -> spot-weld spark -> arched index to next seam (SubT 0.42..1.0)!
+            if (SubT < 0.42)
+            {
+                const MicroWeave = 0.04 * Math.sin(SubT * Math.PI * 4.0);
+                Robot.CurrentTipPos = [CurWeld[0] + MicroWeave, CurWeld[1], CurWeld[2]];
+                const ToSeam = [CurWeld[0] - Robot.BasePosition[0], CurWeld[1] - Robot.BasePosition[1]];
+                const HLen = Math.hypot(ToSeam[0], ToSeam[1]) || 1.0;
+                Robot.CurrentToolDir = NormalizeVec3([(ToSeam[0] / HLen) * 0.65, (ToSeam[1] / HLen) * 0.65, -0.76]);
+
+                // Emit welding sparks when car is nearby inside/approaching Track H so we don't waste particles across the map
+                if (SubT > 0.14 && SubT < 0.22 && Robot.SparkCooldown <= 0.0 &&
+                    Math.hypot(CarPos[0] - Robot.BasePosition[0], CarPos[1] - Robot.BasePosition[1]) < 95.0)
+                {
+                    Robot.SparkCooldown = 0.75;
+                    this.EmitCouplerSparks(Sparks, CurWeld, 8, 2500.0);
+                }
+            }
+            else
+            {
+                const MoveU = SmoothStep01((SubT - 0.42) / 0.58);
+                const Pos = LerpVec3(CurWeld, NextWeld, MoveU);
+                Pos[2] += 0.62 * Math.sin(Math.PI * MoveU);
+                Robot.CurrentTipPos = Pos;
+                const ToSeam = [Pos[0] - Robot.BasePosition[0], Pos[1] - Robot.BasePosition[1]];
+                const HLen = Math.hypot(ToSeam[0], ToSeam[1]) || 1.0;
+                Robot.CurrentToolDir = NormalizeVec3([
+                    (ToSeam[0] / HLen) * 0.72,
+                    (ToSeam[1] / HLen) * 0.72,
+                    -0.69 + 0.25 * Math.sin(Math.PI * MoveU)
+                ]);
+            }
         }
 
         this.ApplyTransforms(false);
@@ -589,79 +890,57 @@ export class ServiceStationSequence
         this.Notify(Station.Kind === "electric"
             ? "⚡ Auto-EV Charge released — vehicle departed bay"
             : "⛽ Auto-Fuel Coupler released — vehicle departed bay");
-        Station.TargetStandPos = Station.ButlerPos.slice();
+        Station.RetractFromTip = Station.CurrentTipPos.slice();
+        Station.RetractFromDir = Station.CurrentToolDir.slice();
         Station.State = "retracting";
         Station.StateTimer = 0.0;
-        this.ComputeNozzleArmPose(Station);
     }
 
-    ComputeNozzleArmPose(Station)
+    WriteRobotOccupants(Robot, IK, InitialSnap)
     {
-        const CosB = Math.cos(Station.ButlerYaw), SinB = Math.sin(Station.ButlerYaw);
-        const Shoulder = [
-            Station.ButlerPos[0] + CosB * 0.20,
-            Station.ButlerPos[1] + SinB * 0.20,
-            0.84
-        ];
+        const Write = (OccupantIdx, Pos, Quat, MovingFlag) =>
+        {
+            const Occ = this.Scene.Occupants[OccupantIdx];
+            if (!Occ)
+                return;
+            if (!InitialSnap)
+                Occ.PreviousTransform.set(Occ.Transform);
+            Occ.Transform = ConstructRigidTransform(Pos, Quat);
+            if (InitialSnap)
+                Occ.PreviousTransform = Occ.Transform.slice();
+            Occ.Moving = !InitialSnap && MovingFlag;
+        };
 
-        let Reach = 0.0;
-        if (Station.State === "coupling")
-            Reach = SmoothStep01(Station.StateTimer / 0.60);
-        else if (Station.State === "dispensing")
-            Reach = 1.0;
-        else if (Station.State === "retracting")
-            Reach = 1.0 - SmoothStep01(Math.min(1.0, Station.StateTimer / 0.35));
-
-        const TipGoal = [
-            LerpScalar(Shoulder[0] + CosB * 0.34, Station.TargetPortPos[0], Reach),
-            LerpScalar(Shoulder[1] + SinB * 0.34, Station.TargetPortPos[1], Reach),
-            LerpScalar(0.84, Station.TargetPortPos[2], Reach)
-        ];
-        const DX = TipGoal[0] - Shoulder[0];
-        const DY = TipGoal[1] - Shoulder[1];
-        const DZ = TipGoal[2] - Shoulder[2];
-        const Horiz = Math.hypot(DX, DY) || 1.0e-4;
-        const Yaw   = Math.atan2(DY, DX);
-        const Pitch = -Math.atan2(DZ, Horiz);
-
-        const QYaw   = ConstructAxisQuaternion([0.0, 0.0, 1.0], Yaw);
-        const QPitch = ConstructAxisQuaternion([0.0, 1.0, 0.0], Pitch);
-        Station.ArmQuat = MultiplyQuaternion(QYaw, QPitch);
-
-        // Position arm center so its +0.46 m glowing nozzle tip lands right at TipGoal!
-        const DirLen = Math.hypot(DX, DY, DZ) || 1.0;
-        const UX = DX / DirLen, UY = DY / DirLen, UZ = DZ / DirLen;
-        Station.ArmPos = [
-            TipGoal[0] - UX * 0.44,
-            TipGoal[1] - UY * 0.44,
-            TipGoal[2] - UZ * 0.44
-        ];
+        Write(Robot.PedestalOccupant, IK.PedestalPos, IK.QPedestal, false);
+        Write(Robot.TurretOccupant,   IK.TurretPos,   IK.QTurret,   true);
+        Write(Robot.UpperArmOccupant, IK.ShoulderPos, IK.QUpper,    true);
+        Write(Robot.ForearmOccupant,  IK.ElbowPos,    IK.QForearm,  true);
+        Write(Robot.WristOccupant,    IK.WristPos,    IK.QWrist,    true);
     }
 
     ApplyTransforms(InitialSnap = false)
     {
         for (const Station of this.Stations)
         {
-            this.ComputeNozzleArmPose(Station);
-            const QButler = ConstructAxisQuaternion([0.0, 0.0, 1.0], Station.ButlerYaw);
-            const QDrone  = ConstructAxisQuaternion([0.0, 0.0, 1.0], Station.DroneYaw);
-
-            const Write = (OccupantIdx, Pos, Quat) =>
-            {
-                const Occ = this.Scene.Occupants[OccupantIdx];
-                if (!Occ)
-                    return;
-                if (!InitialSnap)
-                    Occ.PreviousTransform.set(Occ.Transform);
-                Occ.Transform = ConstructRigidTransform(Pos, Quat);
-                if (InitialSnap)
-                    Occ.PreviousTransform = Occ.Transform.slice();
-                Occ.Moving = !InitialSnap;
-            };
-
-            Write(Station.ButlerOccupant, Station.ButlerPos, QButler);
-            Write(Station.ArmOccupant,    Station.ArmPos,    Station.ArmQuat);
-            Write(Station.DroneOccupant,  Station.DronePos,  QDrone);
+            const IK = SolveIndustrialRobotArmIK(
+                Station.BasePosition,
+                Station.BaseYaw,
+                Station.CurrentTipPos,
+                Station.CurrentToolDir
+            );
+            Station.LastIK = IK;
+            this.WriteRobotOccupants(Station, IK, InitialSnap);
+        }
+        for (const Robot of this.FactoryRobots)
+        {
+            const IK = SolveIndustrialRobotArmIK(
+                Robot.BasePosition,
+                Robot.BaseYaw,
+                Robot.CurrentTipPos,
+                Robot.CurrentToolDir
+            );
+            Robot.LastIK = IK;
+            this.WriteRobotOccupants(Robot, IK, InitialSnap);
         }
     }
 
@@ -670,6 +949,8 @@ export class ServiceStationSequence
         const Active = this.Stations.find((S) => S.State !== "idle" && S.State !== "complete");
         return {
             StationCount:      this.Stations.length,
+            FactoryRobotCount: this.FactoryRobots.length,
+            TotalRobotCount:   this.Stations.length + this.FactoryRobots.length,
             ActiveKind:        Active ? Active.Kind : null,
             ActiveName:        Active ? Active.Name : null,
             ActiveState:       Active ? Active.State : "idle",

@@ -367,9 +367,6 @@ class IlluminationHost
         this.Trams = this.Scene.Trams;
         if (this.Trams)
             this.Trams.RegisterDynamicObstacles(this.Vehicle.Obstacles);
-        this.Drones = this.Scene.Drones;
-        if (this.Drones)
-            this.Drones.RegisterDynamicObstacles(this.Vehicle.Obstacles);
         this.ServiceStations = this.Scene.ServiceStations;
         if (this.ServiceStations)
             this.ServiceStations.OnAnnounce = (Message) => this.Shell?.Announce(Message);
@@ -1323,9 +1320,6 @@ class IlluminationHost
         const TramsMoved = this.Trams
             ? this.Trams.Advance(this.Vehicle, Step)
             : false;
-        const DronesMoved = this.Drones
-            ? this.Drones.Advance(this.Vehicle, Step)
-            : false;
         const ServiceMoved = this.ServiceStations
             ? this.ServiceStations.Advance(this.Vehicle, Step, this.Sparks)
             : false;
@@ -1398,12 +1392,6 @@ class IlluminationHost
             const TramBlock = this.Scene.TramBlock;
             const TramScalars = this.Scene.EncodeOccupantRange(this.Volumes, TramBlock.First, TramBlock.Count);
             Device.queue.writeBuffer(this.OccupantRecords, TramBlock.First * OccupantStride, TramScalars);
-        }
-        if (DronesMoved && this.Scene.DroneBlock && this.Scene.DroneBlock.Count > 0)
-        {
-            const DroneBlock = this.Scene.DroneBlock;
-            const DroneScalars = this.Scene.EncodeOccupantRange(this.Volumes, DroneBlock.First, DroneBlock.Count);
-            Device.queue.writeBuffer(this.OccupantRecords, DroneBlock.First * OccupantStride, DroneScalars);
         }
         if (ServiceMoved && this.Scene.ServiceBlock && this.Scene.ServiceBlock.Count > 0)
         {

@@ -19,7 +19,6 @@ import { ConstructHelicalLoopSurface, ConstructFullPipeSurface, ConstructTwisted
          ConstructCollapseDeckSurface, ConstructSurfaceSegmentDescriptors } from "./RampSurfaceProjection.js";
 import { ConstructCollapseProxyShapes } from "./CollapseSequence.js";
 import { ConstructTramShapes } from "./TramSequence.js";
-import { ConstructDroneShapes } from "./DroneSequence.js";
 import { ConstructInfrastructureShapes, EmitSignPanelOverlay } from "./SignageBuilder.js";
 import { ConstructFactoryAndServiceShapes } from "./ServiceStationSequence.js";
 import { ConstructTrafficLightShapes } from "./TrafficLightSequence.js";
@@ -100,11 +99,11 @@ export const InversionArenaTracks = Object.freeze([
     {
         Id:       "trackH",
         Label:    "Track H · Factory & Auto-Fuel",
-        Name:     "Track H — Drive-Through Megafactory & Automatic Fuel + EV Stations",
+        Name:     "Track H — Drive-Through Megafactory & Industrial Robot Fuel + EV Bays",
         Icon:     "Zap",
         Position: [-88.0,  406.0],
         Yaw:      0.0,
-        Note:     "Stop at Auto-Fuel or 800V EV Station for Butler Robot + Drone refuel, then drive inside the Factory!"
+        Note:     "Stop at Auto-Fuel or 800V EV Bay for 6-Axis Industrial Robot Arm coupling, then drive inside the Megafactory!"
     },
     {
         Id:       "trackI",
@@ -685,7 +684,6 @@ export const InversionArenaShapes = Object.freeze({
     ...SegmentBundle.Shapes,
     ...ConstructCollapseProxyShapes(),
     ...ConstructTramShapes(),
-    ...ConstructDroneShapes(),
     ...ConstructInfrastructureShapes(),
     ...ConstructFactoryAndServiceShapes(),
     ...ConstructTrafficLightShapes(),
@@ -744,9 +742,9 @@ export const InversionArenaZones = Object.freeze([
     { Name: "Track F · Trams & Trains",    Position: [ -98.0,  314.0], Yaw:   0.0, Note: "Two-way Articulated Streetcar Trams & Express Commuter Trains" },
     { Name: "Track G · Thru Trench",       Position: [-108.0, -386.0], Yaw:   0.0, Note: "CONSTRUCTION AHEAD & Amber Lights → Open Hole Trench (comes back up!)" },
     { Name: "Track G · Dead-End Pit",      Position: [-108.0, -418.0], Yaw:   0.0, Note: "CONSTRUCTION AHEAD & Amber Lights → Underground Dead-End Pit!" },
-    { Name: "Track H · Auto Fuel Bay",     Position: [ -74.0,  392.0], Yaw:   0.0, Note: "Pull into crimson bay & stop — Butler Robot + Drone refuel your tank!" },
-    { Name: "Track H · Auto EV Charge",    Position: [ -74.0,  420.0], Yaw:   0.0, Note: "Pull into cobalt/green bay & stop — Butler Robot + Drone 800V charge!" },
-    { Name: "Track H · Factory Hall",      Position: [  -4.0,  408.0], Yaw:   0.0, Note: "Drive straight inside the Megafactory (presses, conveyors, racks & crates!)" }
+    { Name: "Track H · Auto Fuel Bay",     Position: [ -74.0,  392.0], Yaw:   0.0, Note: "Pull into crimson bay & stop — 6-Axis Industrial Robot Arm refuels tank!" },
+    { Name: "Track H · Auto EV Charge",    Position: [ -74.0,  420.0], Yaw:   0.0, Note: "Pull into cobalt/green bay & stop — 6-Axis Industrial Robot Arm 800V charge!" },
+    { Name: "Track H · Factory Hall",      Position: [  -4.0,  408.0], Yaw:   0.0, Note: "Drive straight inside the Megafactory (industrial welding robots, presses & conveyors!)" }
 ]);
 
 export const InversionArenaDrills = Object.freeze([
@@ -1019,8 +1017,8 @@ const RoadsideSigns = Object.freeze([
     { Name: "North Waypoint",   X:  18.0, Y:  238.5,Z: 0.0,  Yaw: 0.0,          Shape: "RoadsideBoardGreen", Width: 4.2, Height: 1.55, Line1: "500 KM SKYPORT ^",   Line2: "500 M METRO CITY", Text: CourseMaterial.PaintWhite },
     { Name: "Bowl Chevron E",   X: 178.0, Y:  -12.0,Z: 0.0,  Yaw: 0.0,          Shape: "ChevronHazardBoard", Width: 2.8, Height: 1.25, Line1: ">>> BANK 47 >>>",    Line2: "",                 Text: CourseMaterial.SteelDark },
     // Track H Automatic Fuel Station, 800V EV Charging Station & Megafactory Signs!
-    { Name: "Auto Fuel Sign",   X: -66.5, Y:  384.5,Z: 0.0,  Yaw: 0.0,          Shape: "RoadsideBoardAmber", Width: 4.2, Height: 1.55, Line1: "AUTO FUEL BAY",      Line2: "STOP FOR BUTLER",  Text: CourseMaterial.SteelDark },
-    { Name: "Auto EV Sign",     X: -66.5, Y:  429.5,Z: 0.0,  Yaw: 0.0,          Shape: "RoadsideBoardGreen", Width: 4.2, Height: 1.55, Line1: "AUTO 800V EV BAY",   Line2: "STOP FOR BUTLER",  Text: CourseMaterial.PaintWhite },
+    { Name: "Auto Fuel Sign",   X: -66.5, Y:  384.5,Z: 0.0,  Yaw: 0.0,          Shape: "RoadsideBoardAmber", Width: 4.2, Height: 1.55, Line1: "AUTO FUEL BAY",      Line2: "ROBOT ARM BAY",    Text: CourseMaterial.SteelDark },
+    { Name: "Auto EV Sign",     X: -66.5, Y:  429.5,Z: 0.0,  Yaw: 0.0,          Shape: "RoadsideBoardGreen", Width: 4.2, Height: 1.55, Line1: "AUTO 800V EV BAY",   Line2: "ROBOT ARM BAY",    Text: CourseMaterial.PaintWhite },
     { Name: "Factory West Sign",X:   6.0, Y:  396.0,Z: 0.0,  Yaw: 0.0,          Shape: "RoadsideBoardGreen", Width: 4.2, Height: 1.55, Line1: "FRONTIER FACTORY",   Line2: "DRIVE THRU HALL",  Text: CourseMaterial.PaintWhite },
     { Name: "Factory East Sign",X: 130.0, Y:  420.0,Z: 0.0,  Yaw: Math.PI,      Shape: "RoadsideBoardGreen", Width: 4.2, Height: 1.55, Line1: "FRONTIER FACTORY",   Line2: "STAMPING LINE 1",  Text: CourseMaterial.PaintWhite }
 ]);
@@ -1992,39 +1990,8 @@ export function ResolveInversionTrams()
 }
 
 //------------------------------------------------------------------------------------------------------------------------
-//                      AUTONOMOUS FLOATING MIDAIR ROBOT DRONES (DRONESEQUENCE.JS)
 //------------------------------------------------------------------------------------------------------------------------
-
-export function ResolveInversionDrones()
-{
-    return [
-        // Track A — Start Grid, 360° Helical Loop & Central Infield Camera Robot Drones
-        { Id: "drone_grid",       Name: "Grid Scout Drone D-01",        Role: "broadcast",    Anchor: [-68.0,  -35.0, 4.4], OrbitRadiusX: 14.0, OrbitRadiusY:  6.5, OrbitFreq: 0.45, FigureEight: true,  HoverAmpZ: 0.55, Phase: 0.0 },
-        { Id: "drone_tabletop",   Name: "Tabletop Relay Drone D-02",    Role: "broadcast",    Anchor: [ 72.0,  -31.0, 6.2], OrbitRadiusX: 18.0, OrbitRadiusY:  7.0, OrbitFreq: 0.38, FigureEight: false, HoverAmpZ: 0.65, Phase: 1.1 },
-        { Id: "drone_infield",    Name: "Infield Spine Drone D-03",     Role: "telemetry",    Anchor: [-20.0,    0.0, 5.4], OrbitRadiusX: 16.0, OrbitRadiusY:  8.0, OrbitFreq: 0.42, FigureEight: true,  HoverAmpZ: 0.60, Phase: 2.2 },
-        // Track B — Underground Split Portal & Linear Bollard Gate Robot Drones
-        { Id: "drone_subwayB",    Name: "Subway Portal Drone D-04",     Role: "portal-scan",  Anchor: [-34.0,   92.0, 4.6], OrbitRadiusX: 12.0, OrbitRadiusY:  8.5, OrbitFreq: 0.44, FigureEight: false, HoverAmpZ: 0.50, Phase: 0.7 },
-        { Id: "drone_linearB",    Name: "Gate Sentinel Drone D-05",     Role: "gate-watch",   Anchor: [  6.0,  166.0, 4.2], OrbitRadiusX: 15.0, OrbitRadiusY:  5.5, OrbitFreq: 0.48, FigureEight: true,  HoverAmpZ: 0.45, Phase: 1.9 },
-        // Track C — Travelling-Wave Bollards & Canyon Crossover Robot Drones
-        { Id: "drone_waveC",      Name: "Wave Bollard Drone D-06",      Role: "wave-scan",    Anchor: [-36.0,  -94.0, 4.1], OrbitRadiusX: 18.0, OrbitRadiusY:  6.0, OrbitFreq: 0.50, FigureEight: true,  HoverAmpZ: 0.50, Phase: 2.8 },
-        { Id: "drone_canyonC",    Name: "Canyon Viaduct Drone D-07",    Role: "canyon-scan",  Anchor: [ 78.0,  -72.0, 6.8], OrbitRadiusX: 10.0, OrbitRadiusY: 12.0, OrbitFreq: 0.36, FigureEight: false, HoverAmpZ: 0.70, Phase: 3.6 },
-        // Track D — Collapsing Sky-Bridge & Collapsing Faultline Road Seismic Survey Robot Drones
-        { Id: "drone_bridgeD",    Name: "Seismic Bridge Drone D-08",    Role: "seismic",      Anchor: [  4.0, -250.0, 8.4], OrbitRadiusX: 22.0, OrbitRadiusY:  6.5, OrbitFreq: 0.40, FigureEight: true,  HoverAmpZ: 0.65, Phase: 0.4 },
-        { Id: "drone_sinkholeD",  Name: "Sinkhole Chasm Drone D-09",    Role: "seismic",      Anchor: [  0.0, -318.0, 3.8], OrbitRadiusX: 20.0, OrbitRadiusY:  6.0, OrbitFreq: 0.43, FigureEight: false, HoverAmpZ: 0.55, Phase: 1.6 },
-        // Track E & Track F — 3-Lane Subway Portal & Streetcar Tramway Robot Drones
-        { Id: "drone_subway3L",   Name: "3-Lane Subway Drone D-10",     Role: "transit",      Anchor: [-62.0,  256.0, 4.5], OrbitRadiusX: 14.0, OrbitRadiusY:  9.0, OrbitFreq: 0.41, FigureEight: true,  HoverAmpZ: 0.50, Phase: 2.5 },
-        { Id: "drone_tramF",      Name: "Tram Station Drone D-11",      Role: "transit",      Anchor: [ 16.0,  325.0, 7.6], OrbitRadiusX: 18.0, OrbitRadiusY:  7.5, OrbitFreq: 0.37, FigureEight: false, HoverAmpZ: 0.60, Phase: 3.9 },
-        // Track G — Underground Construction Site Inspection Robot Drones (hovering over "CONSTRUCTION AHEAD", Thru-Trench & Dead-End Pit!)
-        { Id: "drone_constSign",  Name: "Construction Ahead Drone D-12",Role: "construction", Anchor: [-74.0, -402.0, 4.3], OrbitRadiusX: 11.0, OrbitRadiusY: 13.0, OrbitFreq: 0.46, FigureEight: true,  HoverAmpZ: 0.48, Phase: 0.9 },
-        { Id: "drone_thruTrench", Name: "Open Trench Drone D-13",       Role: "construction", Anchor: [  0.0, -386.0, 3.6], OrbitRadiusX: 18.0, OrbitRadiusY:  5.2, OrbitFreq: 0.44, FigureEight: false, HoverAmpZ: 0.55, Phase: 2.1 },
-        { Id: "drone_deadEndPit", Name: "Dead-End Pit Drone D-14",      Role: "construction", Anchor: [  8.0, -418.0, 3.4], OrbitRadiusX: 15.0, OrbitRadiusY:  5.8, OrbitFreq: 0.47, FigureEight: true,  HoverAmpZ: 0.58, Phase: 3.3 },
-        // Track H — Interior Megafactory Assembly Floor Inspection Drone (flies inside the factory under the 10.6 m roof!)
-        { Id: "drone_factoryH",   Name: "Factory Floor Drone D-15",     Role: "factory-qa",   Anchor: [ 68.0,  408.0, 5.2], OrbitRadiusX: 28.0, OrbitRadiusY:  5.5, OrbitFreq: 0.36, FigureEight: true,  HoverAmpZ: 0.45, Phase: 1.4 }
-    ];
-}
-
-//------------------------------------------------------------------------------------------------------------------------
-//            AUTOMATIC FUEL & 800V ELECTRIC CHARGING STATIONS (BUTLER ROBOT + NOZZLE ARM + DRONE)
+//      MULTI-AXIS INDUSTRIAL ROBOT ARMS: AUTO-FUEL, 800V EV & MEGAFACTORY WELDING CELLS
 //------------------------------------------------------------------------------------------------------------------------
 
 export function ResolveInversionServiceStations()
@@ -2036,9 +2003,8 @@ export function ResolveInversionServiceStations()
             Kind:          "fuel",
             BayCenter:     [-56.0, 392.0, 0.0],
             BayHalfExtent: [  7.8,   4.4],
-            DockPosition:  [-60.6, 397.4, 0.0],
-            DockYaw:       -0.5 * Math.PI,
-            DronePerch:    [-56.0, 397.2, 3.35]
+            BasePosition:  [-56.8, 395.35, 0.0],
+            BaseYaw:       -0.5 * Math.PI
         },
         {
             Id:            "autoElectricStation",
@@ -2046,9 +2012,68 @@ export function ResolveInversionServiceStations()
             Kind:          "electric",
             BayCenter:     [-56.0, 420.0, 0.0],
             BayHalfExtent: [  7.8,   4.4],
-            DockPosition:  [-60.6, 425.4, 0.0],
-            DockYaw:       -0.5 * Math.PI,
-            DronePerch:    [-56.0, 425.2, 3.35]
+            BasePosition:  [-56.8, 423.35, 0.0],
+            BaseYaw:       -0.5 * Math.PI
+        }
+    ];
+}
+
+export function ResolveInversionFactoryRobots()
+{
+    return [
+        // North Assembly Line Industrial Spot-Welding Robots (tending Factory Conveyor N1 at [76, 421.5] & N2 at [98, 421.5])
+        {
+            Id:            "factoryRobotN1",
+            Name:          "Factory Welding Robot N-01",
+            BasePosition:  [75.5, 418.5, 0.0],
+            BaseYaw:       0.5 * Math.PI,
+            PhaseOffset:   0.0,
+            CycleDuration: 4.8,
+            WeldTargets:   [
+                [74.0, 421.3, 1.80],
+                [76.0, 421.5, 1.82],
+                [77.8, 421.3, 2.02]
+            ]
+        },
+        {
+            Id:            "factoryRobotN2",
+            Name:          "Factory Welding Robot N-02",
+            BasePosition:  [97.5, 418.5, 0.0],
+            BaseYaw:       0.5 * Math.PI,
+            PhaseOffset:   1.35,
+            CycleDuration: 4.5,
+            WeldTargets:   [
+                [96.0, 421.3, 1.80],
+                [98.0, 421.5, 1.82],
+                [99.8, 421.3, 2.02]
+            ]
+        },
+        // South Assembly Line Industrial Spot-Welding Robots (tending Factory Conveyor S1 at [76, 394.5] & S2 at [98, 394.5])
+        {
+            Id:            "factoryRobotS1",
+            Name:          "Factory Welding Robot S-01",
+            BasePosition:  [75.5, 397.5, 0.0],
+            BaseYaw:      -0.5 * Math.PI,
+            PhaseOffset:   2.40,
+            CycleDuration: 5.0,
+            WeldTargets:   [
+                [74.0, 394.7, 1.80],
+                [76.0, 394.5, 1.82],
+                [77.8, 394.7, 2.02]
+            ]
+        },
+        {
+            Id:            "factoryRobotS2",
+            Name:          "Factory Welding Robot S-02",
+            BasePosition:  [97.5, 397.5, 0.0],
+            BaseYaw:      -0.5 * Math.PI,
+            PhaseOffset:   3.65,
+            CycleDuration: 4.6,
+            WeldTargets:   [
+                [96.0, 394.7, 1.80],
+                [98.0, 394.5, 1.82],
+                [99.8, 394.7, 2.02]
+            ]
         }
     ];
 }

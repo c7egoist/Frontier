@@ -261,8 +261,9 @@ test("LevelCatalog exposes multi-track Inversion Arena (Tracks A–I) and Provin
     assert.equal(Inversion.Bollards().length, 2);
     assert.equal(Inversion.CollapseSpans().length, 2);
     assert.equal(Inversion.Trams().length, 6);
-    assert.equal(Inversion.Drones().length, 15);
+    assert.equal(Inversion.Drones, undefined);
     assert.equal(Inversion.ServiceStations().length, 2);
+    assert.equal(Inversion.FactoryRobots().length, 4);
     assert.equal(Inversion.TrafficLights().length, 8);
     assert.equal(Proving.Title, "Proving Grounds");
     assert.equal(Proving.Relief, true);
@@ -700,7 +701,7 @@ test("Track E 3-Lane Subway ([road][tunnel down][road] -- [road][road][road] -- 
     }
 });
 
-test("True Road Boolean Holes (Underground Portals & Wavy Bollard Shafts), Track G Construction Site (Through-Trench + Dead-End Pit), Waypoint Gantries, Railguards, 4 Cone Types & Floating Robot Drones", async () =>
+test("True Road Boolean Holes (Underground Portals & Wavy Bollard Shafts), Track G Construction Site (Through-Trench + Dead-End Pit), Waypoint Gantries, Railguards & 4 Cone Types", async () =>
 {
     const fs = await import("node:fs/promises");
     const PreviousFetch = globalThis.fetch;
@@ -808,12 +809,7 @@ test("True Road Boolean Holes (Underground Portals & Wavy Bollard Shafts), Track
 
         const Scene = new SceneStructure();
         await Scene.ConstructScene("Archive", 0, "inversion");
-        assert.ok(Scene.Drones && Scene.Drones.QuerySummary().DroneCount === 15, "Expected 15 floating midair robot drones");
-        const NearCar = { Position: [-70.0, -402.0, 0.63], LinearVelocity: [0.0, 0.0, 0.0] };
-        for (let Step = 0; Step < 20; ++Step)
-            Scene.Drones.Advance(NearCar, 1.0 / 60.0);
-        assert.ok(Scene.Drones.Units.every((D) => D.WorldPosition[2] > 2.4), "Every robot drone must float in midair above the roadway");
-        assert.ok(Scene.Drones.QuerySummary().TrackingCount >= 1, "Nearby construction scout drone must optically lock onto ControlVehicle");
+        assert.equal(Scene.Drones, undefined, "Flying robot drones must be completely removed");
     }
     finally
     {
@@ -823,7 +819,7 @@ test("True Road Boolean Holes (Underground Portals & Wavy Bollard Shafts), Track
     }
 });
 
-test("Track H Drive-Through Megafactory (Interior Presses, Conveyors, Racks, Silos & Crates), Automatic Fuel & 800V EV Stations (Butler Robot + Nozzle Arm + Drone) & Procedural Web Audio", async () =>
+test("Track H Drive-Through Megafactory (Presses, Conveyors, Racks, Silos & 4 Welding Industrial Robot Arms), Auto-Fuel & 800V EV Industrial Robot Arms & Procedural Web Audio", async () =>
 {
     const { readFile } = await import("node:fs/promises");
     const PreviousFetch = globalThis.fetch;
@@ -864,17 +860,23 @@ test("Track H Drive-Through Megafactory (Interior Presses, Conveyors, Racks, Sil
                   `Car must drive cleanly through West (X=12) and East (X=124) Megafactory portals, reached X=${FactoryCar.Position[0].toFixed(1)}`);
         assert.ok(Math.abs(FactoryCar.Position[1] - 408.0) < 2.5, "Car must stay centered on the OSHA factory assembly aisle");
 
-        // ② Verify Automatic Octane-100 Fuel Station full cycle: stop -> butler rollout -> nozzle latch -> 100% refuel -> retract!
+        // ② Verify Automatic Octane-100 Fuel Bay full cycle with bolted Multi-Axis Industrial Robot Arm (zero butler / zero drones)!
         const Service = Scene.ServiceStations;
-        assert.ok(Service && Service.Stations.length === 2, "Expected 2 automatic service stations (Fuel + 800V EV)");
-        assert.equal(Scene.ServiceBlock.Count, 6, "Expected 6 dynamic occupants (butler + nozzle arm + helper drone × 2 stations)");
+        assert.ok(Service && Service.Stations.length === 2, "Expected 2 automatic industrial robot service bays (Fuel + 800V EV)");
+        assert.equal(Service.FactoryRobots.length, 4, "Expected 4 Megafactory assembly-line industrial welding robot arms");
+        assert.equal(Scene.ServiceBlock.Count, 30, "Expected 30 dynamic occupants (6 industrial robots × 5 links: pedestal/turret/upper/forearm/wrist)");
 
         const Messages = [];
         Service.OnAnnounce = (M) => Messages.push(M);
         Service.FuelLevel = 0.25;
         const FuelStation = Service.Stations.find((S) => S.Kind === "fuel");
-        const DockDistBefore = Math.hypot(FuelStation.ButlerPos[0] - (-56.0), FuelStation.ButlerPos[1] - 392.0);
-        assert.ok(DockDistBefore > 5.0, "Fuel butler robot must start parked in its dock");
+        const PedestalStart = FuelStation.LastIK.PedestalPos.slice();
+        const HomeTipBefore = FuelStation.CurrentTipPos.slice();
+        assert.ok(HomeTipBefore[2] > 2.0, "Industrial robot arm must start poised in its elevated home stance");
+
+        // Record initial Megafactory welding robot tip positions to prove live assembly-line articulation
+        const FactoryInitialTips = Service.FactoryRobots.map((R) => R.CurrentTipPos.slice());
+        let MaxFactoryRobotMotion = 0.0;
 
         const ParkedFuelCar = {
             Position:       [-56.0, 392.0, 0.63],
@@ -882,26 +884,39 @@ test("Track H Drive-Through Megafactory (Interior Presses, Conveyors, Racks, Sil
             LinearVelocity: [0.0, 0.0, 0.0]
         };
         const SeenFuelStates = new Set();
-        let MinButlerDistToPort = Infinity;
-        let MinArmTipDistToPort = Infinity;
+        let MinCouplerTipDistToPort = Infinity;
         for (let Step = 0; Step < 460; ++Step)
         {
             Service.Advance(ParkedFuelCar, 1.0 / 60.0);
             SeenFuelStates.add(FuelStation.State);
             const Port = FuelStation.TargetPortPos;
-            MinButlerDistToPort = Math.min(MinButlerDistToPort, Math.hypot(FuelStation.ButlerPos[0] - Port[0], FuelStation.ButlerPos[1] - Port[1]));
-            // Arm tip is +0.44 m forward along local +X from ArmPos
-            const TipFwd = RotateVector(FuelStation.ArmQuat, [0.44, 0.0, 0.0]);
-            const TipWorld = [FuelStation.ArmPos[0] + TipFwd[0], FuelStation.ArmPos[1] + TipFwd[1], FuelStation.ArmPos[2] + TipFwd[2]];
-            MinArmTipDistToPort = Math.min(MinArmTipDistToPort, Math.hypot(TipWorld[0] - Port[0], TipWorld[1] - Port[1], TipWorld[2] - Port[2]));
+            const IK = FuelStation.LastIK;
+            // Verify bolted floor pedestal never translates (industrial robot arm, not a wheeled butler!)
+            assert.ok(Math.hypot(IK.PedestalPos[0] - PedestalStart[0], IK.PedestalPos[1] - PedestalStart[1]) < 1.0e-6,
+                      "Industrial robot pedestal must stay bolted to its concrete plinth");
+            // Verify actual 3D wrist end-effector tip (+0.48 m along local +X of Wrist) couples onto vehicle fuel port
+            const TipFwd = RotateVector(IK.QWrist, [0.48, 0.0, 0.0]);
+            const TipWorld = [IK.WristPos[0] + TipFwd[0], IK.WristPos[1] + TipFwd[1], IK.WristPos[2] + TipFwd[2]];
+            MinCouplerTipDistToPort = Math.min(MinCouplerTipDistToPort,
+                Math.hypot(TipWorld[0] - Port[0], TipWorld[1] - Port[1], TipWorld[2] - Port[2]));
+
+            for (let RIdx = 0; RIdx < Service.FactoryRobots.length; ++RIdx)
+            {
+                const Cur = Service.FactoryRobots[RIdx].CurrentTipPos;
+                const Ref = FactoryInitialTips[RIdx];
+                MaxFactoryRobotMotion = Math.max(MaxFactoryRobotMotion,
+                    Math.hypot(Cur[0] - Ref[0], Cur[1] - Ref[1], Cur[2] - Ref[2]));
+            }
         }
         for (const Expected of ["stopping", "deploying", "coupling", "dispensing", "retracting", "complete"])
             assert.ok(SeenFuelStates.has(Expected), `Auto-Fuel cycle must pass through '${Expected}', saw [${[...SeenFuelStates].join(", ")}]`);
-        assert.equal(Service.QuerySummary().FuelPercent, 100, "Auto-Fuel station must refill vehicle fuel tank to 100%");
-        assert.ok(MinButlerDistToPort < 1.05, `Wheeled butler robot must roll right up beside car fuel flap, got ${MinButlerDistToPort.toFixed(3)} m`);
-        assert.ok(MinArmTipDistToPort < 0.06, `Articulated nozzle arm tip must couple onto car fuel port within 6 cm, got ${MinArmTipDistToPort.toFixed(3)} m`);
-        assert.ok(Math.hypot(FuelStation.ButlerPos[0] - FuelStation.DockPosition[0], FuelStation.ButlerPos[1] - FuelStation.DockPosition[1]) < 0.05,
-                  "Butler robot must return cleanly to its dock once refueling completes");
+        assert.equal(Service.QuerySummary().FuelPercent, 100, "Auto-Fuel industrial robot arm must refill vehicle fuel tank to 100%");
+        assert.ok(MinCouplerTipDistToPort < 0.01,
+                  `6-axis industrial robot coupler tip must mate onto car fuel port within 1 cm, got ${MinCouplerTipDistToPort.toFixed(4)} m`);
+        assert.ok(FuelStation.CurrentTipPos[2] > 2.0,
+                  "Industrial robot arm must fold cleanly back up to its home pose once refueling completes");
+        assert.ok(MaxFactoryRobotMotion > 1.2,
+                  `Megafactory industrial welding robot arms must actively articulate across conveyor chassis seams, moved ${MaxFactoryRobotMotion.toFixed(2)} m`);
 
         // ③ Verify Automatic 800V Electric Charging Station full cycle + coupling sparks + drive-away abort!
         Service.BatteryLevel = 0.22;

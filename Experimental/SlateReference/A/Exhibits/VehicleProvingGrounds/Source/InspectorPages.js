@@ -173,22 +173,11 @@ export function ConstructEntities(Host)
             Build: (C, B) => BuildTrams(Host, C, B)
         });
     }
-    if (Host.Drones)
-    {
-        Entities.push({
-            Id: "drones", Group: "Level", Name: "Robot drones", Type: "Aerial robotics", Glyph: "Activity", Colour: Accent.Level,
-            Description: "Floating midair quad-rotor survey & construction-inspection drones",
-            Meta: () => `${Host.Drones.QuerySummary().DroneCount} airborne`,
-            State: () => (Host.Drones.QuerySummary().TrackingCount > 0 ? "warm" : (Host.Drones.Enabled ? "live" : "")),
-            Toggle: { Read: () => Host.Drones.Enabled, Write: (On) => { Host.Drones.Enabled = On; } },
-            Build: (C, B) => BuildDrones(Host, C, B)
-        });
-    }
     if (Host.ServiceStations)
     {
         Entities.push({
-            Id: "service", Group: "Level", Name: "Factory & Auto-Fuel / EV", Type: "Service robotics", Glyph: "Zap", Colour: Accent.Level,
-            Description: "Drive-through megafactory + automatic butler robot & drone refuel / 800V EV charging stations",
+            Id: "service", Group: "Level", Name: "Factory & Industrial Robots", Type: "Industrial robotics", Glyph: "Zap", Colour: Accent.Level,
+            Description: "Drive-through megafactory + 6-axis industrial robot arms (assembly welding + Auto-Fuel / 800V EV)",
             Meta: () =>
             {
                 const S = Host.ServiceStations.QuerySummary();
@@ -1079,36 +1068,19 @@ function BuildTrams(Host, C, Body)
     C.Button(Row, "Toggle traffic", "Play", () => { Trams.Enabled = !Trams.Enabled; });
 }
 
-function BuildDrones(Host, C, Body)
-{
-    const Drones = Host.Drones;
-    const Card = C.Card(Body, "Floating Midair Robot Drones", "Activity",
-                        { Accent: Accent.Level, Index: 1, Subtitle: "6-DOF autonomous quad-rotor patrol & construction scouts" });
-    C.Muted(Card, "Fourteen hovering robot drones fly figure-eight & elliptical midair patrols over the Construction Site open holes, 3-Lane Subway, Collapsing Bridge, and Wavy Bollards — banking into turns and optically tracking the car within 44 m.");
-    C.Stats(Card, [
-        ["Airborne drones", () => Drones.QuerySummary().DroneCount],
-        ["Tracking vehicle", () => Drones.QuerySummary().TrackingCount],
-        ["State", () => Drones.Enabled ? "HOVERING" : "PAUSED"]
-    ]);
-    Slider(C, Card, Drones, "SpeedScale", "Patrol speed", 0.0, 2.5, 0.05, "×", 2);
-    Toggle(C, Card, Drones, "TrackVehicle", "Optical vehicle tracking");
-    const Row = C.ActionRow(Card);
-    C.Button(Row, "Jump · Construction Site", "AlertTriangle", () => Host.TeleportVehicle({ Name: "Track G · Thru Trench", Position: [-108.0, -386.0], Yaw: 0.0 }));
-    C.Button(Row, "Jump · Dead-End Pit", "Flag", () => Host.TeleportVehicle({ Name: "Track G · Dead-End Pit", Position: [-108.0, -418.0], Yaw: 0.0 }));
-}
-
 function BuildServiceStations(Host, C, Body)
 {
     const Service = Host.ServiceStations;
-    const Card = C.Card(Body, "Automatic Fuel, 800V EV & Megafactory", "Zap",
-                        { Accent: Accent.Level, Index: 1, Subtitle: "Wheeled butler robot + nozzle arm + drone · Web Audio" });
-    C.Muted(Card, "Pull into the crimson Octane-100 Fuel Bay or emerald/cobalt 800V Supercharger Bay on Track H and stop: a wheeled butler robot rolls out from dock, extends its articulated nozzle arm onto your rear fuel/charge port while a helper drone scans overhead, fills to 100% with synthesized audio, and retracts. Then drive straight through the Megafactory Hall past stamping presses, conveyors, storage racks, silos & smashable crates!");
+    const Card = C.Card(Body, "Industrial Robots · Auto-Fuel, 800V EV & Megafactory", "Zap",
+                        { Accent: Accent.Level, Index: 1, Subtitle: "Bolted multi-axis industrial robot arms · IK coupling & spot-welding" });
+    C.Muted(Card, "Pull into the crimson Octane-100 Fuel Bay or cobalt/emerald 800V Supercharger Bay on Track H and stop: a bolted multi-axis industrial robot arm solves elbow-up inverse kinematics to swing its waist turret, shoulder boom, forearm & 6-axis wrist coupler into your fuel/charge port, refills to 100% with synthesized audio, and folds back to its home stance. Inside the Megafactory Hall, 4 articulated industrial spot-welding robot arms weld chassis along the automated conveyor lines!");
     C.Stats(Card, [
-        ["Octane-100 tank", () => `${Service.QuerySummary().FuelPercent}%`],
-        ["800V EV battery", () => `${Service.QuerySummary().BatteryPercent}%`],
-        ["Active bay",      () => Service.QuerySummary().ActiveName || "STANDBY"],
-        ["Butler state",    () => Service.QuerySummary().ActiveState.toUpperCase()],
-        ["Completed fills", () => Service.QuerySummary().CompletedServices]
+        ["Industrial robots", () => `${Service.QuerySummary().TotalRobotCount} (${Service.QuerySummary().StationCount} bay · ${Service.QuerySummary().FactoryRobotCount} factory)`],
+        ["Octane-100 tank",   () => `${Service.QuerySummary().FuelPercent}%`],
+        ["800V EV battery",   () => `${Service.QuerySummary().BatteryPercent}%`],
+        ["Active bay",        () => Service.QuerySummary().ActiveName || "STANDBY"],
+        ["Arm state",         () => Service.QuerySummary().ActiveState.toUpperCase()],
+        ["Completed fills",   () => Service.QuerySummary().CompletedServices]
     ]);
     Toggle(C, Card, Service.Audio, "Enabled", "Procedural station & robot audio", () => Service.Audio.SetEnabled(Service.Audio.Enabled));
     Slider(C, Card, Service.Audio, "MasterVolume", "Station audio volume", 0.0, 1.0, 0.05, "", 2);

@@ -15,7 +15,6 @@ import { ConstructIdentityTransform, ConstructRigidTransform, TransformBounds, I
 import { StressShapes, ResolveStressPlacements } from "./StressLayout.js";
 import { CollapseSequence } from "./CollapseSequence.js";
 import { TramSequence } from "./TramSequence.js";
-import { DroneSequence } from "./DroneSequence.js";
 import { ServiceStationSequence } from "./ServiceStationSequence.js";
 import { TrafficLightSequence } from "./TrafficLightSequence.js";
 import { RoadEditorSequence, RoadEditorVertexCapacity } from "./RoadEditorSequence.js";
@@ -221,39 +220,51 @@ export class SceneStructure
         }
         this.TramBlock = { First: TramFirst, Count: this.Occupants.length - TramFirst, Consists: RawTrams };
 
-        // ③e autonomous floating midair robot drones (6-DOF aerial patrol, dynamic GI, shadows & midair collision)
-        const RawDrones = Descriptor.Drones ? Descriptor.Drones() : [];
-        const DroneFirst = this.Occupants.length;
-        for (let DroneIdx = 0; DroneIdx < RawDrones.length; ++DroneIdx)
-        {
-            const Spec = RawDrones[DroneIdx];
-            const ShapeKey = Spec.Shape || "SurveyDroneBody";
-            if (ShapeSets[ShapeKey] === undefined)
-                continue;
-            const Index = this.ConstructOccupant(Spec.Name || `Robot Drone ${DroneIdx + 1}`, ShapeSets[ShapeKey],
-                                                 ConstructRigidTransform(Spec.Anchor, [0.0, 0.0, 0.0, 1.0]), ConeRoles);
-            this.Occupants[Index].Moving = false;
-        }
-        this.DroneBlock = { First: DroneFirst, Count: this.Occupants.length - DroneFirst, Units: RawDrones };
-
-        // ③f automatic fuel & 800V EV charging stations (wheeled butler robot + robotic nozzle arm + helper drone per station)
+        // ③e multi-axis industrial robot arms: Auto-Fuel / 800V EV bays + Megafactory spot-welding assembly cells
         const RawStations = Descriptor.ServiceStations ? Descriptor.ServiceStations() : [];
+        const RawFactoryRobots = Descriptor.FactoryRobots ? Descriptor.FactoryRobots() : [];
         const ServiceFirst = this.Occupants.length;
+        const ConstructIndustrialRobotOccupants = (Label, BasePos, EndEffectorShapeKey) =>
+        {
+            if (ShapeSets.IndustrialRobotPedestal === undefined ||
+                ShapeSets.IndustrialRobotTurret === undefined ||
+                ShapeSets.IndustrialRobotUpperArm === undefined ||
+                ShapeSets.IndustrialRobotForearm === undefined ||
+                ShapeSets[EndEffectorShapeKey] === undefined)
+            {
+                return;
+            }
+            const IdQuat = [0.0, 0.0, 0.0, 1.0];
+            const BaseXform = ConstructRigidTransform(BasePos, IdQuat);
+            const PIdx = this.ConstructOccupant(`${Label} pedestal`,  ShapeSets.IndustrialRobotPedestal,    BaseXform, ConeRoles);
+            const TIdx = this.ConstructOccupant(`${Label} turret`,    ShapeSets.IndustrialRobotTurret,      BaseXform, ConeRoles);
+            const UIdx = this.ConstructOccupant(`${Label} upper arm`, ShapeSets.IndustrialRobotUpperArm,    BaseXform, ConeRoles);
+            const FIdx = this.ConstructOccupant(`${Label} forearm`,   ShapeSets.IndustrialRobotForearm,     BaseXform, ConeRoles);
+            const WIdx = this.ConstructOccupant(`${Label} wrist`,     ShapeSets[EndEffectorShapeKey],       BaseXform, ConeRoles);
+            this.Occupants[PIdx].Obstacle = true;
+            this.Occupants[PIdx].Moving   = false;
+            this.Occupants[TIdx].Moving   = false;
+            this.Occupants[UIdx].Moving   = false;
+            this.Occupants[FIdx].Moving   = false;
+            this.Occupants[WIdx].Moving   = false;
+        };
         for (let StIdx = 0; StIdx < RawStations.length; ++StIdx)
         {
             const St = RawStations[StIdx];
-            const ButlerShape = St.Kind === "electric" ? "ServiceButlerEV" : "ServiceButlerFuel";
-            if (ShapeSets[ButlerShape] === undefined || ShapeSets.ServiceNozzleArm === undefined || ShapeSets.ServiceHelperDrone === undefined)
-                continue;
-            const IdQuat = [0.0, 0.0, 0.0, 1.0];
-            const BIdx = this.ConstructOccupant(`${St.Name} butler`, ShapeSets[ButlerShape], ConstructRigidTransform(St.DockPosition, IdQuat), ConeRoles);
-            const AIdx = this.ConstructOccupant(`${St.Name} nozzle arm`, ShapeSets.ServiceNozzleArm, ConstructRigidTransform(St.DockPosition, IdQuat), ConeRoles);
-            const DIdx = this.ConstructOccupant(`${St.Name} helper drone`, ShapeSets.ServiceHelperDrone, ConstructRigidTransform(St.DronePerch || St.DockPosition, IdQuat), ConeRoles);
-            this.Occupants[BIdx].Moving = false;
-            this.Occupants[AIdx].Moving = false;
-            this.Occupants[DIdx].Moving = false;
+            const CouplerKey = St.Kind === "electric" ? "IndustrialRobotCouplerEV" : "IndustrialRobotCouplerFuel";
+            ConstructIndustrialRobotOccupants(St.Name, St.BasePosition || St.DockPosition, CouplerKey);
         }
-        this.ServiceBlock = { First: ServiceFirst, Count: this.Occupants.length - ServiceFirst, Stations: RawStations };
+        for (let RbIdx = 0; RbIdx < RawFactoryRobots.length; ++RbIdx)
+        {
+            const Rb = RawFactoryRobots[RbIdx];
+            ConstructIndustrialRobotOccupants(Rb.Name, Rb.BasePosition, "IndustrialRobotWelder");
+        }
+        this.ServiceBlock = {
+            First:         ServiceFirst,
+            Count:         this.Occupants.length - ServiceFirst,
+            Stations:      RawStations,
+            FactoryRobots: RawFactoryRobots
+        };
 
         // ③g pole-less hovering robotic intersection traffic signal housings (+ 4 reserve slots for custom spline junctions)
         const RawTrafficLights = Descriptor.TrafficLights ? Descriptor.TrafficLights() : [];
@@ -421,8 +432,9 @@ export class SceneStructure
         }
 
         this.Trams = RawTrams.length > 0 ? new TramSequence(this, RawTrams) : null;
-        this.Drones = RawDrones.length > 0 ? new DroneSequence(this, RawDrones) : null;
-        this.ServiceStations = RawStations.length > 0 ? new ServiceStationSequence(this, RawStations) : null;
+        this.ServiceStations = (RawStations.length > 0 || RawFactoryRobots.length > 0)
+            ? new ServiceStationSequence(this, RawStations, RawFactoryRobots)
+            : null;
 
         // ⑩ hovering robotic traffic light optical aspect pucks (Red / Orange / Yellow / Green) — rastered + dynamic!
         this.TrafficBlock = null;

@@ -236,9 +236,11 @@ export default
                   `Expected Track G Construction Through-Trench descent (${MinimumConstructionTrenchZ.toFixed(2)} m) AND surface exit`);
         assert.ok(MinimumDeadEndPitZ < -3.8 && DeadEndBulkheadX < 33.0,
                   `Expected Track G Dead-End Pit descent (${MinimumDeadEndPitZ.toFixed(2)} m) & bulkhead stop at X<=33 m (got ${DeadEndBulkheadX.toFixed(1)})`);
-        assert.ok(Host.Drones && Host.Drones.QuerySummary().DroneCount === 15, "Expected 15 floating midair robot drones");
-        assert.ok(AutoFuelCompleted, "Expected Track H Automatic Fuel Station butler robot + drone to refill tank to 100%");
-        assert.ok(AutoEVCompleted, "Expected Track H Automatic 800V EV Station butler robot + drone to charge battery to 100%");
+        assert.equal(Host.Drones, undefined, "Expected flying drones to be completely removed");
+        assert.ok(Host.ServiceStations && Host.ServiceStations.FactoryRobots.length === 4,
+                  "Expected 4 Megafactory assembly-line industrial robot arms");
+        assert.ok(AutoFuelCompleted, "Expected Track H Automatic Fuel Bay industrial robot arm to refill tank to 100%");
+        assert.ok(AutoEVCompleted, "Expected Track H Automatic 800V EV Bay industrial robot arm to charge battery to 100%");
         assert.ok(MaximumFactoryHallX > 124.0,
                   `Expected Track H Megafactory drive-through past East portal X=124 m, got maxX=${MaximumFactoryHallX.toFixed(1)}`);
         assert.ok(RoadEditorStreamed, "Expected RoadEditorSequence to stream >100k Road Studio vertices to WebGPU");
@@ -246,6 +248,6 @@ export default
                   `Expected ControlVehicle to drive supported across elevated Road Studio Steel I-Girder Viaduct (>6.0 m), got peakZ=${PeakSplineBridgeZ.toFixed(2)}, endPos=[${Host.Vehicle.Position.map((V) => V.toFixed(1)).join(", ")}]`);
         for (const ExpectedAspect of ["GREEN", "YELLOW", "ORANGE", "RED"])
             assert.ok(SeenTrafficAspects.has(ExpectedAspect), `Expected Hovering Intersection Traffic Lights to display ${ExpectedAspect}`);
-        console.log(`9-track inversion arena: Track A loop (${Host.Training.Best.loop360.Primary.toFixed(2)} s) · Track B/C boolean bollards · Track D Voronoi collapse+crack-bound smoke · Track E 3-lane subway · Track F 14 railcars · Track G construction thru-trench + dead-end pit · Track H megafactory + auto-fuel (100%) + auto-EV (100%) · Track I Road Studio workspace & highway viaduct (peak Z=${PeakSplineBridgeZ.toFixed(2)} m) · hovering 4-lamp traffic lights (R/O/Y/G) · 15 midair robot drones ACTIVE`);
+        console.log(`9-track inversion arena: Track A loop (${Host.Training.Best.loop360.Primary.toFixed(2)} s) · Track B/C boolean bollards · Track D Voronoi collapse+crack-bound smoke · Track E 3-lane subway · Track F 14 railcars · Track G construction thru-trench + dead-end pit · Track H megafactory (4 welding industrial robots) + auto-fuel (100%) + auto-EV (100%) industrial robot arms · Track I Road Studio workspace & highway viaduct (peak Z=${PeakSplineBridgeZ.toFixed(2)} m) · hovering 4-lamp traffic lights (R/O/Y/G) ACTIVE`);
     }
 };
