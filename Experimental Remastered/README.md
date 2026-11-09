@@ -8,6 +8,30 @@ Unified **Sun Inspector + Fluid Editor** studio interface across Frontier's inte
 - **ForceFieldEditor (`Experimental Remastered/ForceFieldEditor/`)** — Unified **Force Field & Wind Studio** supporting direct scene placement of **Wind Generators** and 16 bounded forcefield classes, strict finite spatial influence envelopes (`Sphere`, `Column`, `Box` + falloff), anti-clutter **RK2 Flow Lines** + **sparse Vector Field** visualization, and a **3D Field Stage** alongside `Map 2D` (no Oblique view).
 - **Vehicle Lab (`Experimental Remastered/AssetInspector/`)** — A standalone vehicle studio with a prominent WebGL viewport showing the actual Vehicle HMI `ControlVehicle` body, tyre and rim FCT1 assets; a component Outliner, categorized Inspector, engine/turbo/Pacejka curves with selectable interpolation, ten exterior debug channels, addable vehicle components, and a throttle/brake drive-simulation preview.
 
+## Studio screenshots
+
+These are genuine captures of the five Remastered studio apps in this branch, included as visual version references.
+
+### Particle Studio
+
+![Particle Studio — Remastered UI](./screenshots/particle.png)
+
+### Fracture Studio
+
+![Fracture Studio — Remastered UI](./screenshots/fracture.png)
+
+### Photometric & Light Studio
+
+![Photometric & Light Studio — Remastered UI](./screenshots/photometric.png)
+
+### Force Field & Wind Studio
+
+![Force Field & Wind Studio — Remastered UI](./screenshots/force-field.png)
+
+### Vehicle Lab
+
+![Vehicle Lab — Remastered UI](./screenshots/vehicle-lab.png)
+
 ## Quick start
 
 ```bash
