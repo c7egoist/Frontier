@@ -855,6 +855,7 @@ if(BUILD_TESTING)
 endif()
 
 include(Automation/EnvironmentRendering.cmake)
+include(Automation/FluidSimulation.cmake)
 include(Automation/VirtualizedGeometryRendering.cmake)
 include(Automation/DirectShadingRendering.cmake)
 include(Automation/ParticleSimulationRendering.cmake)

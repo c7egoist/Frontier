@@ -2,6 +2,20 @@
 
 Single progress and violation tracker. Detailed evidence belongs in Exhibits, not competing progress reports.
 
+## Modular foundation — Phase 3 checkpoint (2026-11-09)
+
+- Added a first headless CPU Eulerian fluid foundation in `Frontier/Engine/PhysicalDynamics/FluidDynamics/`:
+  `.fluidspace` profile/configuration schema, bounded grid allocation, rotated/scaled cell coordinates, radial source projection,
+  semi-Lagrangian velocity/density advection, configurable implicit smoke/vapor diffusion, buoyancy, `IFieldSampler` wind
+  coupling, Jacobi pressure projection, and ranked `FluidBurstTriggerEvent` extraction for the particle router.
+- Added `FluidSpaceValidation` for `.fluidspace` file/text round trips, `.toml` rejection, source injection, diffusion-enabled
+  stepping, wind coupling, pressure-field finiteness, and burst events.
+- Verification: GCC 12.2 Debug target build succeeded; `FluidSpaceValidation` and the adjacent
+  `ParticleSpaceValidation` CTests passed (2/2) on Linux. Build tooling and prerequisite details are in the session report.
+- Partial foundation only: fluid replication/release-state transport, fluid extension/editor integration, boundary profiles,
+  richer thermal transport, GPU execution, and broader numerical convergence analysis remain open. Phase 3 Rendering/Gizmo
+  cleanup is also outstanding.
+
 ## EngineUpdate status
 
 | ID  | Finding or task                        | Status      | Next action                            |
