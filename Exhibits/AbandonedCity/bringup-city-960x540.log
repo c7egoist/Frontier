@@ -1,0 +1,34 @@
+{
+ "out": "/tmp/scratch/city_try1.png",
+ "seconds": 103.663,
+ "state": {
+  "bringUpHidden": true,
+  "failure": "",
+  "hud": "10000 fps · 0.0 ms · 1% low – fps · 228×255 · trace 114×128\nControlVehicle    0 km/h · gear 1 · 700 rpm · 0/4 contact\nGDF bricks rewritten  C0: 512  C1: 512  C2: 512  C3: 512 · card tiles 13910\nW/S throttle·brake  W+S burnout  A/D steer  Space handbrake  R respawn  T reset arena  F8 free camera  C c"
+ }
+}
+[info] [bring-up] 29.20 s · Transferring distance volume: CityBuildingB37
+[info] [bring-up] 29.69 s · Transferring distance volume: CityBuildingB38
+[info] [bring-up] 30.10 s · Transferring distance volume: CityBuildingB39
+[info] [bring-up] 30.56 s · Transferring distance volume: CityBuildingB40
+[info] [bring-up] 30.86 s · Transferring distance volume: CityBuildingB41
+[info] [bring-up] 31.03 s · Transferring distance volume: CityRubble
+[info] [bring-up] 31.35 s · Transferring distance volume: Cone
+[info] [bring-up] 31.46 s · Transferring distance volume: Glass box
+[info] [bring-up] 31.57 s · Transferring distance volume: Concrete box
+[info] [bring-up] 31.70 s · Transferring distance volume: Wood box
+[info] [bring-up] 31.81 s · Transferring distance volume: Stone box
+[info] [bring-up] 32.00 s · Transferring distance volume: Stress crate
+[info] [bring-up] 32.19 s · Transferring distance volume: Stress pillar
+[info] [bring-up] 32.39 s · Transferring distance volume: Stress drum
+[info] [bring-up] 32.75 s · Transferring distance volume: Stress ball
+[info] [bring-up] 32.75 s · Allocating surface cards
+[info] [bring-up] 32.78 s · Building the triangle hierarchy
+[info] [bring-up] 33.26 s · Building the scene distance field cascades
+[info] [bring-up] 34.44 s · Baking fracture patterns
+[info] [bring-up] 34.52 s · Compiling lighting programs
+[info] [bring-up] 35.76 s · Compiling surface and resampling programs
+[info] [bring-up] 56.10 s · Compiling the cabin, mirrors and sparks
+[info] [bring-up] 56.38 s · Compiling drift smoke programs
+[info] [bring-up] 57.13 s · Capturing surface cards
+[info] [bring-up] 59.44 s · Ready
