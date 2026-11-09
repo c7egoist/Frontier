@@ -681,10 +681,12 @@ class IlluminationHost
     {
         if (!this.CandyVillage?.Enabled || !this.Scene.CandyBlock || !this.OccupantRecords || !this.Volumes)
             return;
-        const Block = this.Scene.CandyBlock;
-        if (Block.Count > 0)
+        const Block      = this.Scene.CandyBlock;
+        const ExtraMeshes = (this.Scene.CandyWormBlock ? 1 : 0) + (this.Scene.CandyWaterBlock ? 1 : 0);
+        const TotalCount = Block.Count + ExtraMeshes;
+        if (TotalCount > 0)
         {
-            const Scalars = this.Scene.EncodeOccupantRange(this.Volumes, Block.First, Block.Count);
+            const Scalars = this.Scene.EncodeOccupantRange(this.Volumes, Block.First, TotalCount);
             this.Exchange.Device.queue.writeBuffer(this.OccupantRecords, Block.First * OccupantStride, Scalars);
         }
     }

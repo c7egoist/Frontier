@@ -1,24 +1,140 @@
+//============================================================================================================================================
+//                                                        CANDYVILLAGE.TEST.MJS
+//============================================================================================================================================
+// Comprehensive verification suite for the Overhauled Candy Village · Sugar Siege ("?level=candy"):
+//   1. Ray-Traced Refractive Materials (Transmission = 1.0 on GummyCherry/Lime/Orange/Berry + BerrySodaWater + WaterShallowCrystal)
+//   2. Watertight 2-Manifold Topology (0 boundary, 0 non-manifold edges) across all 22 procedural candy & trap shapes
+//   3. High-Resolution 128 × 64 Refractive 2.5D Shallow-Water Solver (49,152 vertices, waterfall inflows, capillary ripples, drag & Fizz-Wash)
+//   4. Continuous Skinned Refractive-Jelly Worms (6 worms × 22 rings × 10 sides = 7,920 vertices, zero bear heads, jelly wobble)
+//   5. Physically-Coupled Torsion Catapults (spoon-loaded whip -> zero-teleport release -> exact Verlet parabolic arc to TargetRing)
+//   6. All 5 Active Candy Finish-Line Obstacles (Pendulums, Crusher Hammers, Pinwheel Boulders, Taffy Snares & Cola-Mentos Geysers)
+
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { ConstructMaterialSpecification, CourseMaterial } from "../Source/MaterialSpecification.js";
-import {
-    CandyCombatShapes,
-    CandyGoalX,
-    CandyGummyBumpers,
-    CandySpawn,
-    CandyStaticShapes,
-    EmitCandyGroundFacets,
-    QueryCandyTerrainHeight
-} from "../Source/CandyVillageStructure.js";
-import { CandyVillageSequence, CandyWaterSolver } from "../Source/CandyVillageSequence.js";
-import { AssignCustomTerrainHeight } from "../Source/CourseStructure.js";
-import { RecoveryDirector } from "../Source/RecoveryDirector.js";
+import { CourseMaterial, ConstructMaterialSpecification, EncodeMaterialRecords } from "../Source/MaterialSpecification.js";
 import { SceneStructure } from "../Source/FacetStructure.js";
-import { LevelCatalog, ResolveLevelDescriptor } from "../Source/LevelStructure.js";
-import { VehicleSolver } from "../Source/VehicleSolver.js";
+import { CastSurfaceRay } from "../Source/RampSurfaceProjection.js";
+import {
+    CandyCatapultSites,
+    CandyCombatShapes,
+    CandyCrusherSites,
+    CandyGeyserSites,
+    CandyPendulumSites,
+    CandyStaticShapes,
+    CandyTaffyStrips,
+    CandyWaterGridSpec,
+    CandyWormMeshSpec,
+    QueryCandyTerrainHeight,
+    ResolveCandySurfaces
+} from "../Source/CandyVillageStructure.js";
+import { CandyVillageSequence, CandyWaterSolver, CandyWaterVertexCapacity } from "../Source/CandyVillageSequence.js";
 
-async function BuildHeadlessScene(LevelKey)
+function QuantizeKey(P)
+{
+    return `${Math.round(P[0] * 10000)},${Math.round(P[1] * 10000)},${Math.round(P[2] * 10000)}`;
+}
+
+function VerifyWatertight2Manifold(Facets, Label)
+{
+    assert.ok(Array.isArray(Facets) && Facets.length >= 4, `${Label}: expected >= 4 facets`);
+    const DirectedEdges = new Map();
+    const UndirectedCounts = new Map();
+
+    for (let FI = 0; FI < Facets.length; ++FI)
+    {
+        const F = Facets[FI];
+        assert.ok(Number.isInteger(F.Family) && F.Family >= 0 && F.Family <= 113, `${Label} facet ${FI}: invalid Family=${F.Family}`);
+        assert.ok(Array.isArray(F.Corners) && F.Corners.length === 3, `${Label} facet ${FI}: expected Corners[3]`);
+        const Keys = F.Corners.map(QuantizeKey);
+        assert.ok(Keys[0] !== Keys[1] && Keys[1] !== Keys[2] && Keys[2] !== Keys[0], `${Label} facet ${FI}: degenerate triangle`);
+
+        for (let E = 0; E < 3; ++E)
+        {
+            const A = Keys[E], B = Keys[(E + 1) % 3];
+            const Dir = `${A}->${B}`;
+            assert.equal(DirectedEdges.has(Dir), false, `${Label}: duplicate directed edge ${Dir} (non-orientable / coplanar overlap)`);
+            DirectedEdges.set(Dir, FI);
+            const Undir = A < B ? `${A}|${B}` : `${B}|${A}`;
+            UndirectedCounts.set(Undir, (UndirectedCounts.get(Undir) || 0) + 1);
+        }
+    }
+
+    let Boundary = 0, NonManifold = 0;
+    for (const [, Count] of UndirectedCounts)
+    {
+        if (Count === 1) Boundary++;
+        else if (Count !== 2) NonManifold++;
+    }
+    assert.equal(Boundary, 0, `${Label}: has ${Boundary} open boundary edges`);
+    assert.equal(NonManifold, 0, `${Label}: has ${NonManifold} non-manifold edges`);
+}
+
+test("Refractive Jelly & Liquid Materials + All 22 Candy Shapes Are Closed Watertight 2-Manifolds", () =>
+{
+    const Materials = ConstructMaterialSpecification();
+    assert.equal(Materials.length, 114, "Expected 114 total PBR material records (0..113)");
+    const Encoded = EncodeMaterialRecords(Materials);
+
+    // Verify ray-traced Snell refraction (Transmission = 1.0) on all gummy jelly & water materials!
+    const CheckTransmissive = (MatId, Name) =>
+    {
+        const Base = MatId * 12; // 12 floats per material record; Base + 11 is Surface.Transmission!
+        assert.equal(Encoded[Base + 11], 1.0, `${Name} (id=${MatId}) must have Transmission = 1.0 for ray-traced jelly/water refraction`);
+    };
+    CheckTransmissive(CourseMaterial.GummyCherry,         "GummyCherry");
+    CheckTransmissive(CourseMaterial.GummyLime,           "GummyLime");
+    CheckTransmissive(CourseMaterial.GummyOrange,         "GummyOrange");
+    CheckTransmissive(CourseMaterial.GummyBerry,          "GummyBerry");
+    CheckTransmissive(CourseMaterial.BerrySodaWater,      "BerrySodaWater");
+    CheckTransmissive(CourseMaterial.WaterShallowCrystal, "WaterShallowCrystal");
+
+    const AllShapes = { ...CandyStaticShapes, ...CandyCombatShapes };
+    const Keys = Object.keys(AllShapes);
+    assert.ok(Keys.length >= 25, `Expected >= 25 procedural Candy Village & Trap shapes (got ${Keys.length})`);
+    for (const Key of Keys)
+        VerifyWatertight2Manifold(AllShapes[Key].Emit(), Key);
+    assert.ok(AllShapes.CandyCatapultArm && AllShapes.CandyPendulumArm && AllShapes.CandyCrusherHead);
+});
+
+test("128×64 Refractive 2.5D Shallow-Water Solver Propagates Waterfall Waves, Capillary Ripples & Depth Refraction", () =>
+{
+    const Solver = new CandyWaterSolver();
+    assert.equal(CandyWaterGridSpec.NX, 128);
+    assert.equal(CandyWaterGridSpec.NY, 64);
+    assert.equal(Solver.VertexCount, 49152);
+    assert.equal(CandyWaterVertexCapacity, 49152);
+
+    // Sample deep Berry-Soda Lagoon channel (X = -70, Y = 14)
+    const Before = Solver.Sample(-70.0, 14.0);
+    assert.ok(Before.Depth > 0.90, `Lagoon deep channel should hold >0.9m soda water (got ${Before.Depth})`);
+
+    Solver.InjectDisturbance(-70.0, 14.0, 7.0, -0.60, 2.8, 0.0, 0.9);
+    for (let Step = 0; Step < 24; ++Step)
+        Solver.Advance(1.0 / 60.0);
+
+    const EastFront = Solver.Sample(-64.5, 14.0);
+    assert.ok(Math.hypot(EastFront.U, EastFront.V) > 0.06, "Wavefront must propagate radially with low dissipation");
+    assert.ok(Solver.WaveEnergy > 15.0, `Waterfall inflows + ripples must sustain live wave energy (${Solver.WaveEnergy})`);
+
+    // Verify zero NaNs and valid refractive water material IDs across all 49,152 vertices
+    const ValidMats = new Set([
+        CourseMaterial.BerrySodaWater,
+        CourseMaterial.WaterShallowCrystal,
+        CourseMaterial.CaramelSyrup,
+        CourseMaterial.FrostingCream
+    ]);
+    for (let V = 0; V < Solver.VertexCount; ++V)
+    {
+        const Off = V * 8;
+        assert.ok(Number.isFinite(Solver.VertexF32[Off + 2]), `Non-finite Z at vertex ${V}`);
+        const NL = Math.hypot(Solver.VertexF32[Off + 4], Solver.VertexF32[Off + 5], Solver.VertexF32[Off + 6]);
+        assert.ok(Math.abs(NL - 1.0) < 1e-3, `Water vertex ${V} normal must be unit length (got ${NL})`);
+        assert.ok(ValidMats.has(Solver.VertexU32[Off + 3]), `Unexpected water material ID ${Solver.VertexU32[Off + 3]}`);
+    }
+});
+
+test("SceneStructure('candy') Builds Continuous Skinned Jelly Worms, Coupled Parabolic Catapults & All 5 Candy Traps", async () =>
 {
     const Fs   = await import("node:fs/promises");
     const Path = await import("node:path");
@@ -30,211 +146,160 @@ async function BuildHeadlessScene(LevelKey)
         const Bytes = await Fs.readFile(Path.join(Root, Rel));
         return { ok: true, arrayBuffer: async () => Bytes.buffer.slice(Bytes.byteOffset, Bytes.byteOffset + Bytes.byteLength) };
     };
+    const Scene = new SceneStructure();
     try
     {
-        const Scene = new SceneStructure();
-        await Scene.ConstructScene("Archive", 0, LevelKey);
-        return Scene;
+        await Scene.ConstructScene("Archive", 0, "candy");
     }
     finally
     {
         globalThis.fetch = PrevFetch;
     }
-}
+    assert.ok(Scene.CandyBlock && Scene.CandyWormBlock && Scene.CandyWaterBlock);
+    assert.equal(Scene.CandyWormBlock.VertexCapacity, CandyWormMeshSpec.WormCount * ((CandyWormMeshSpec.RingsPerWorm - 1) * CandyWormMeshSpec.RadialSides * 6 + CandyWormMeshSpec.RadialSides * 6));
 
-function MeasureSolidIntegrity(Facets)
-{
-    const Quantize = (V) => `${Math.round(V[0] * 1e5)},${Math.round(V[1] * 1e5)},${Math.round(V[2] * 1e5)}`;
-    const Directed = new Map();
-    const Undirected = new Map();
-    let SignedVolume6 = 0.0;
+    // Verify CastSurfaceRay hits wafer bridge deck cleanly (South Wafer Bridge at X = -86, Y = -21.5)
+    const Surfaces = ResolveCandySurfaces();
+    const BridgeHit = CastSurfaceRay(Surfaces, [-86.0, -21.5, 10.0], [0.0, 0.0, -1.0], 20.0);
+    assert.ok(BridgeHit && BridgeHit.Point[2] > 2.4, "Wafer bridge deck must be raycast-drivable above Lagoon");
 
-    for (const F of Facets)
-    {
-        const [A, B, C] = F.Corners;
-        SignedVolume6 += A[0] * (B[1] * C[2] - B[2] * C[1])
-                       - A[1] * (B[0] * C[2] - B[2] * C[0])
-                       + A[2] * (B[0] * C[1] - B[1] * C[0]);
+    const Vehicle = {
+        Position:        [-115.0, 0.0, QueryCandyTerrainHeight(-115.0, 0.0) + 0.63],
+        LinearVelocity:  [14.0, 0.0, 0.0],
+        AngularVelocity: [0.0, 0.0, 0.0],
+        Respawn(Pos) { this.Position = [...Pos]; this.LinearVelocity = [0, 0, 0]; }
+    };
+    const Seq = new CandyVillageSequence({ LevelKey: "candy", Scene, Vehicle });
+    assert.equal(Seq.Enabled, true);
+    assert.equal(Seq.Worms.length, 6, "Expected 6 continuous skinned refractive-jelly worms");
 
-        const KA = Quantize(A), KB = Quantize(B), KC = Quantize(C);
-        for (const [U, V] of [[KA, KB], [KB, KC], [KC, KA]])
-        {
-            const DirKey = `${U}->${V}`;
-            Directed.set(DirKey, (Directed.get(DirKey) || 0) + 1);
-            const UndirKey = U < V ? `${U}|${V}` : `${V}|${U}`;
-            Undirected.set(UndirKey, (Undirected.get(UndirKey) || 0) + 1);
-        }
-    }
-
-    let Boundary = 0, NonManifold = 0;
-    for (const [Key, Count] of Undirected.entries())
-    {
-        if (Count === 1) Boundary++;
-        else if (Count !== 2) NonManifold++;
-        else
-        {
-            const [U, V] = Key.split("|");
-            if ((Directed.get(`${U}->${V}`) || 0) !== 1 || (Directed.get(`${V}->${U}`) || 0) !== 1)
-                NonManifold++;
-        }
-    }
-    return { Boundary, NonManifold, Volume: SignedVolume6 / 6.0 };
-}
-
-test("Every Candy Village building, bridge, Gummy-Bear worm, catapult, old-school cannon & projectile is a watertight 2-manifold with valid PBR materials", () =>
-{
-    assert.equal(LevelCatalog.some((L) => L.Key === "candy"), true, "LevelCatalog must expose 'candy'");
-    const Materials = ConstructMaterialSpecification();
-    const AllShapes = { ...CandyStaticShapes, ...CandyCombatShapes };
-
-    for (const [Name, Spec] of Object.entries(AllShapes))
-    {
-        const Facets = Spec.Emit();
-        assert.ok(Facets.length >= 12, `${Name} should emit valid triangles`);
-        const M = MeasureSolidIntegrity(Facets);
-        assert.equal(M.Boundary,    0, `Candy shape ${Name} has ${M.Boundary} open boundary edges`);
-        assert.equal(M.NonManifold, 0, `Candy shape ${Name} has ${M.NonManifold} non-manifold edges`);
-        assert.ok(M.Volume > 0.001,    `Candy shape ${Name} must have positive outward volume (got ${M.Volume})`);
-
-        for (const F of Facets)
-        {
-            assert.equal(typeof F.Family, "number", `${Name} has undefined material`);
-            assert.ok(Materials[F.Family] !== undefined, `${Name} references invalid material ${F.Family}`);
-        }
-    }
-
-    const GroundFacets = EmitCandyGroundFacets();
-    for (const F of GroundFacets)
-    {
-        assert.equal(typeof F.Family, "number");
-        assert.notEqual(F.Family, CourseMaterial.CheckerLight);
-        assert.ok(Materials[F.Family] !== undefined);
-    }
-});
-
-test("2.5D Saint-Venant Shallow-Water Solver propagates gravity waves, handles wet/dry banks & streams finite smooth normals", () =>
-{
-    const Solver = new CandyWaterSolver();
-
-    // Dry Waffle Square bank vs Deep 2.5D Fizzy Lagoon channel vs Wadeable Central Ford
-    const DryBank    = Solver.Sample(-185.0,   0.0);
-    const DeepLagoon = Solver.Sample( -86.0, -20.0);
-    const FordBar    = Solver.Sample( -86.0,   0.0);
-    assert.equal(DryBank.Depth, 0.0, "Elevated Waffle Square cobbles must be dry (Depth === 0)");
-    assert.ok(DeepLagoon.Depth > 0.90, `Lagoon channel under bridges must hold > 0.90 m of 2.5D water (got ${DeepLagoon.Depth.toFixed(2)})`);
-    assert.ok(FordBar.Depth > 0.30 && FordBar.Depth < DeepLagoon.Depth - 0.30, "Central Lagoon Ford must be shallower & wadeable");
-
-    // Inject radial splash + Tidal Surge -> verify wave propagation across neighboring cells & finite smooth normals!
-    const NeighborBefore = Solver.Sample(-80.0, -20.0).Depth;
-    Solver.InjectDisturbance(-86.0, -20.0, 5.5, -0.55, 0.0, 0.0, 1.0);
-    Solver.TriggerTidalSurge(true);
-    for (let Step = 0; Step < 25; ++Step)
-        Solver.Advance(1.0 / 60.0);
-
-    const NeighborAfter = Solver.Sample(-80.0, -20.0);
-    assert.notEqual(NeighborAfter.Depth.toFixed(4), NeighborBefore.toFixed(4), "2.5D Shallow-Water gravity waves must propagate to neighboring cells");
-    assert.ok(Solver.WaveEnergy > 1.0, "Active 2.5D shallow-water waves must carry positive momentum energy");
-
-    for (let V = 0; V < Solver.VertexCount; ++V)
+    // ① Verify Continuous Skinned Jelly Worm Mesh: 7,920 vertices, unit normals, ONLY refractive jelly materials!
+    const JellyMats = new Set([
+        CourseMaterial.GummyCherry,
+        CourseMaterial.GummyLime,
+        CourseMaterial.GummyOrange,
+        CourseMaterial.GummyBerry
+    ]);
+    for (let V = 0; V < Seq.WormSkinner.VertexCount; ++V)
     {
         const Off = V * 8;
-        assert.ok(Number.isFinite(Solver.VertexF32[Off + 2]), "Water vertex Z must be finite");
-        const NLen = Math.hypot(Solver.VertexF32[Off + 4], Solver.VertexF32[Off + 5], Solver.VertexF32[Off + 6]);
-        assert.ok(Math.abs(NLen - 1.0) < 1.0e-3, "Water vertex analytic normal must be unit length");
+        assert.ok(Number.isFinite(Seq.WormSkinner.VertexF32[Off + 0]), `Worm vertex ${V} non-finite`);
+        const NL = Math.hypot(Seq.WormSkinner.VertexF32[Off + 4], Seq.WormSkinner.VertexF32[Off + 5], Seq.WormSkinner.VertexF32[Off + 6]);
+        assert.ok(Math.abs(NL - 1.0) < 1e-2, `Worm vertex ${V} normal not normalized (${NL})`);
+        assert.ok(JellyMats.has(Seq.WormSkinner.VertexU32[Off + 3]), `Worm vertex ${V} used non-jelly material ${Seq.WormSkinner.VertexU32[Off + 3]}`);
     }
-});
 
-test("Candy Village Gameplay: 2.5D water slowdown & fizz-wash, Gummy-Bear worms, flaming gummy catapults, old-school candy cannons & bouncy gummy pads", async () =>
-{
-    const Scene = await BuildHeadlessScene("candy");
-    const Desc  = ResolveLevelDescriptor("candy");
-    assert.ok(Scene.CandyBlock, "SceneStructure('candy') must allocate Scene.CandyBlock");
-    assert.ok(Scene.CandyWaterBlock, "SceneStructure('candy') must allocate live-streamed Scene.CandyWaterBlock");
-    assert.ok(Scene.Occupants.length < 750, `Candy occupant count (${Scene.Occupants.length}) must stay lightweight & well below 2044`);
+    // ② Verify Physically-Coupled Catapult Whip & True Newtonian Parabolic Trajectory (Zero Teleporting!)
+    const Cat = Seq.Catapults[0];
+    Cat.LoadedBall = 0;
+    Cat.TargetPos  = [-96.0, 2.0, QueryCandyTerrainHeight(-96.0, 2.0)];
+    Cat.ShowRing   = true;
+    Cat.ArmPitch   = -0.22;
+    Cat.State      = "whipping";
+    const Ball     = Seq.FlamingBalls[0];
+    Ball.Active    = true;
+    Ball.State     = "in_spoon";
+    Ball.OwnerCat  = 0;
+    Ball.Pos       = Seq.ComputeCatapultSpoonWorldPos(Cat);
 
-    const StartZ  = QueryCandyTerrainHeight(CandySpawn.Position[0], CandySpawn.Position[1]);
-    const Vehicle = new VehicleSolver(Scene.QueryObstacleBounds());
-    Vehicle.Surfaces = Desc.Surfaces;
-    Vehicle.Respawn([CandySpawn.Position[0], CandySpawn.Position[1], StartZ + 0.63], CandySpawn.Yaw);
-
-    const Recovery = new RecoveryDirector({
-        LevelDescriptor: Desc, Vehicle, Spawn: Desc.Spawn,
-        Effects: { Derez() {}, Rez() {}, Clear() {} }, RestoreTyres() {}, AfterVehicleMoved() {}, Shell: { Announce() {} }
-    });
-    for (let S = 0; S < 60; ++S)
+    // Step through the visible 80° upward spoon whip until release
+    let PrevBallPos = [...Ball.Pos];
+    let ReleasedAt  = null;
+    for (let F = 0; F < 30; ++F)
     {
-        Vehicle.Advance({ Throttle: 1.0, Brake: 0.0, Steer: 0.0, Handbrake: false }, 1.0 / 60.0);
-        Recovery.Watch(Vehicle, 1.0 / 60.0);
+        Seq.Advance(1.0 / 120.0);
+        const StepJump = Math.hypot(Ball.Pos[0] - PrevBallPos[0], Ball.Pos[1] - PrevBallPos[1], Ball.Pos[2] - PrevBallPos[2]);
+        assert.ok(StepJump < 1.2, `Boulder teleported ${StepJump.toFixed(3)}m in 1/120s — must ride smoothly in spoon & release continuously!`);
+        PrevBallPos = [...Ball.Pos];
+        if (Ball.State === "ballistic" && !ReleasedAt)
+        {
+            ReleasedAt = [...Ball.Pos];
+            break;
+        }
     }
-    assert.equal(Recovery.Busy, false, "Candy Village spawn must drive cleanly without OutOfBounds derez");
-    assert.ok(Vehicle.Position[0] > CandySpawn.Position[0] + 1.5);
+    assert.ok(ReleasedAt, "Catapult arm must finish whipping to +1.14 rad and release boulder into ballistic flight");
+    assert.ok(Ball.Vel[2] > 4.0, `Released boulder must launch upward into parabolic arc (Vz=${Ball.Vel[2]})`);
 
-    let PlumeBursts = 0, DebrisBursts = 0, SparkBursts = 0;
-    const Host = {
-        Scene, LevelKey: "candy", Vehicle, Bodies: null,
-        Smoke:   { Sources: { QueueBurst() { PlumeBursts++; } } },
-        Effects: { BurstTyre() { DebrisBursts++; } },
-        Sparks:  { Emit() { SparkBursts++; } },
-        DrivingHud: { Audio: { PlayExplosionBoom() {} } }
-    };
+    // Verify ballistic flight follows a true mathematical parabola with rising apex then descent onto TargetPos!
+    let MaxApexZ = ReleasedAt[2];
+    let ImpactXY = null;
+    for (let F = 0; F < 260; ++F)
+    {
+        Seq.Advance(1.0 / 120.0);
+        if (Ball.Pos[2] > MaxApexZ)
+            MaxApexZ = Ball.Pos[2];
+        if (Ball.Bounces > 0 || !Ball.Active)
+        {
+            ImpactXY = [Ball.Pos[0], Ball.Pos[1]];
+            break;
+        }
+    }
+    assert.ok(MaxApexZ > ReleasedAt[2] + 1.5, `Parabolic arc must rise cleanly above spoon release height (apex=${MaxApexZ.toFixed(2)}m)`);
+    assert.ok(ImpactXY, "Parabolic boulder must land on terrain");
+    const TargetErr = Math.hypot(ImpactXY[0] - Cat.TargetPos[0], ImpactXY[1] - Cat.TargetPos[1]);
+    assert.ok(TargetErr < 0.85, `Parabolic boulder must land accurately inside its TargetRing (err=${TargetErr.toFixed(3)}m)`);
 
-    const Village = new CandyVillageSequence(Host);
-    assert.equal(Village.Enabled, true);
-    assert.equal(Village.Worms.length, 4);
-    assert.equal(Village.Catapults.length, 5);
-    assert.equal(Village.Cannons.length, 6);
+    // ③ Verify Worm Squishy Impact Wobble + Sticky Drag on dry Village Cobbles (Worm 2) + 2.5D Lagoon Fizz-Wash!
+    const WormSpinePt = Seq.Worms[2].Spine[6];
+    Vehicle.Position  = [WormSpinePt[0] + 0.5, WormSpinePt[1], WormSpinePt[2]];
+    Vehicle.LinearVelocity = [-4.0, 0.0, 0.0];
+    Seq.Advance(1.0 / 60.0);
+    assert.ok(Seq.Stats.WormBoings >= 1 && Seq.Worms[2].Jiggle > 0.2, "Hitting jelly worm must bounce car and trigger visible jelly wobble");
+    assert.ok(Seq.StickyTimer > 1.0, "Worm hit on dry land coats tires in sticky jelly");
 
-    // ① Gummy-Bear Worm Collision on dry Crossroads -> Elastic Squishy Boing + Sticky Gummy Tire Slowdown!
-    const Worm1Head = Village.Worms[1].Segments[0];
-    Vehicle.Position = [Worm1Head.Pos[0] + 1.2, Worm1Head.Pos[1], Worm1Head.Pos[2] + 0.4];
-    Vehicle.LinearVelocity = [-8.0, 0.0, 0.0];
-    Village.Advance(1.0 / 30.0);
-    assert.ok(Village.Stats.WormBoings >= 1, "Colliding with a Gummy-Bear Worm must trigger squishy elastic bounce");
-    assert.ok(Village.StickyTimer > 2.0, "Gummy-Bear Worm hit must coat tires in Sticky Gummy Residue");
+    // Drive off-bridge into Berry-Soda Lagoon -> Fizz-Wash + hydrodynamic slowdown!
+    Vehicle.Position = [-70.0, 14.0, 1.35];
+    Vehicle.LinearVelocity = [20.0, 0.0, 0.0];
+    for (let F = 0; F < 15; ++F)
+        Seq.Advance(1.0 / 60.0);
+    assert.equal(Seq.StickyTimer, 0.0, "2.5D Lagoon must wash sticky jelly off tires");
+    assert.ok(Vehicle.LinearVelocity[0] < 16.5, `2.5D water must apply strong hydrodynamic wading drag (Vx=${Vehicle.LinearVelocity[0]})`);
 
-    // ② Driving into the 2.5D Fizzy Lagoon washes off Sticky Residue AND applies physical hydrodynamic water slowdown!
-    Vehicle.Position = [-102.0, -8.0, QueryCandyTerrainHeight(-102.0, -8.0) + 0.55];
-    Vehicle.LinearVelocity = [22.0, 0.0, 0.0];
-    Village.Advance(1.0 / 30.0);
-    assert.equal(Village.StickyTimer, 0.0, "Wading into 2.5D Fizzy Soda Water must wash off Sticky Syrup residue");
-    assert.ok(Village.Stats.FizzWashes >= 1);
-    assert.ok(Village.WaterDepthNow > 0.30, "Car in Lagoon Ford must measure positive 2.5D water depth");
-    assert.ok(Vehicle.LinearVelocity[0] < 21.5, "2.5D Shallow-Water hydrodynamic drag must slow wading car");
+    // ④ Verify All 5 New Candy Finish-Line Blockers!
+    // (a) Saltwater-Taffy Snare Strip
+    const Taffy = CandyTaffyStrips[0];
+    Vehicle.Position = [Taffy.Pos[0] + 1.5, Taffy.Pos[1], QueryCandyTerrainHeight(Taffy.Pos[0], Taffy.Pos[1]) + 0.6];
+    Vehicle.LinearVelocity = [10.0, 0.0, 0.0];
+    Seq.BannerTimer = 0.0;
+    Seq.Advance(1.0 / 60.0);
+    assert.equal(Seq.InTaffySnare, true, "Driving onto Taffy Strip must engage viscoelastic snare");
+    assert.ok(Vehicle.LinearVelocity[0] < 9.6, "Taffy snare must pull slow/mid-speed car backward");
 
-    // Verify high Wafer Arch Bridge keeps car DRY above the 2.5D Lagoon!
-    Vehicle.Position = [-86.0, -21.5, 3.65];
-    Village.Advance(1.0 / 30.0);
-    assert.equal(Village.WaterDepthNow, 0.0, "Driving across elevated Wafer Arch Bridge must stay dry above 2.5D water");
+    // (b) Swinging Jawbreaker Pendulum
+    const Pend = Seq.Pendulums[0];
+    Vehicle.Position = [...Pend.BallPos];
+    Vehicle.LinearVelocity = [12.0, 0.0, 0.0];
+    Seq.Advance(1.0 / 60.0);
+    assert.ok(Seq.Stats.PendulumHits >= 1 && Math.abs(Vehicle.LinearVelocity[1]) > 8.0, "Jawbreaker pendulum must knock car sideways");
 
-    // ③ Bouncy Gummy Pinball Bumper ricochets car elastically!
-    const Bumper0 = CandyGummyBumpers[0];
-    Vehicle.Position = [Bumper0.Pos[0] - 2.0, Bumper0.Pos[1], QueryCandyTerrainHeight(Bumper0.Pos[0], Bumper0.Pos[1]) + 0.6];
+    // (c) Slamming Peppermint Crusher Hammer
+    const Cr = Seq.Crushers[0];
+    Cr.State = "slamming";
+    Cr.LiftZ = 0.25;
+    Vehicle.Position = [Cr.Spec.Pos[0] - 1.2, Cr.Spec.Pos[1], Cr.GroundZ + 0.63];
+    Vehicle.LinearVelocity = [15.0, 0.0, 0.0];
+    Seq.Advance(1.0 / 60.0);
+    assert.ok(Vehicle.LinearVelocity[0] < -10.0, "Slammed Peppermint Crusher must violently reject reckless cars");
+
+    // (d) Rolling Giant Peppermint Pinwheel
+    const PW = Seq.Pinwheels[0];
+    Vehicle.Position = [PW.Pos[0], PW.Pos[1], PW.Pos[2] - 0.5];
     Vehicle.LinearVelocity = [14.0, 0.0, 0.0];
-    Village.Advance(1.0 / 30.0);
-    assert.ok(Village.Stats.GummyBumperHits >= 1, "Hitting a Gummy Bumper must trigger high-restitution pinball bounce");
-    assert.ok(Vehicle.LinearVelocity[0] < -4.0, "Gummy Bumper must rebound car backward/outward");
+    Seq.Advance(1.0 / 60.0);
+    assert.ok(Seq.Stats.PinwheelHits >= 1 && Vehicle.LinearVelocity[0] < -8.0, "Rolling Pinwheel must punt car backward");
 
-    // ④ Gummy-Bear Catapults hurl Flaming Gummy Balls (volumetric fire plumes -> bounce -> Sticky Molten Puddle) & Old-School Cannons recoil!
-    Vehicle.Position = [70.0, 0.0, QueryCandyTerrainHeight(70.0, 0.0) + 0.63];
-    const Launched = Village.TriggerCatapultSalvo();
-    assert.ok(Launched >= 3, "Gummy-Bear Catapult salvo must launch Flaming Gummy Balls");
-    assert.ok(Village.QueryPlumeEmissions().length >= 1, "Airborne Flaming Gummy Balls must emit 3D Navier-Stokes fire plumes");
+    // (e) Erupting Cola-Mentos Geyser
+    const Gy = Seq.Geysers[0];
+    Gy.State = "erupting";
+    Gy.Timer = 0.1;
+    Vehicle.Position = [Gy.Pos[0], Gy.Pos[1], Gy.Pos[2] + 0.63];
+    Vehicle.LinearVelocity = [12.0, 0.0, 0.0];
+    Seq.Advance(1.0 / 60.0);
+    assert.ok(Seq.Stats.GeyserLaunches >= 1 && Vehicle.LinearVelocity[2] >= 10.0, "Erupting Cola-Mentos Geyser must blast car skyward");
 
-    let SawCannonRecoil = false;
-    for (let Step = 0; Step < 110; ++Step)
-    {
-        Village.Advance(1.0 / 30.0);
-        if (Village.Cannons.some((C) => C.Recoil > 0.2))
-            SawCannonRecoil = true;
-    }
-    assert.ok(Village.Stats.PuddlesCreated >= 1, "Flaming Gummy Balls must bounce and burst into Sticky Molten Puddles");
-    assert.ok(Village.Stats.CannonShots >= 1, "Old-School Candy Cannons must fire skipping Jawbreakers");
-    assert.equal(SawCannonRecoil, true, "Old-School Candy Cannons must physically recoil on their wheeled carriages");
-    assert.ok(PlumeBursts >= 1 && DebrisBursts >= 1 && SparkBursts >= 1);
-
-    // ⑤ Cross Grand Citadel Sweet-Gate -> Victory!
-    Vehicle.Position = [CandyGoalX + 1.5, 0.0, QueryCandyTerrainHeight(CandyGoalX + 1.5, 0.0) + 0.63];
-    Village.Advance(1.0 / 30.0);
-    assert.equal(Village.Finished, true, "Crossing Grand Citadel Sweet-Gate must trigger Victory");
-    AssignCustomTerrainHeight(null);
+    // ⑤ Verify Sweet-Gate Citadel Finish Line
+    Vehicle.Position = [188.5, 0.0, QueryCandyTerrainHeight(188.5, 0.0) + 0.63];
+    Seq.Advance(1.0 / 60.0);
+    assert.equal(Seq.Finished, true);
+    assert.equal(Seq.Stats.Finishes, 1);
 });

@@ -133,7 +133,9 @@ export const CourseMaterial = Object.freeze({
     BerrySodaWater:  108,
     WaferCrisp:      109,
     LicoriceBlack:   110,
-    SugarCobble:     111
+    SugarCobble:     111,
+    WaterShallowCrystal: 112,
+    TaffyPink:       113
 });
 
 export const MarkedFamilyFirst = CourseMaterial.Asphalt;   // [-]
@@ -385,27 +387,45 @@ export function ConstructMaterialSpecification()
     Materials[CourseMaterial.RustSteel]     = Metal(0.24, 0.14, 0.09, 0.60);         // Salt-corroded Czech hedgehog & barbed wire steel
     Materials[CourseMaterial.SandbagBurlap] = Dielectric(0.275, 0.232, 0.152, 0.96); // Stacked khaki burlap sandbags
 
-    // Candy Village ("candy") physical confectionery PBR palette:
+    // Candy Village ("candy") physical confectionery PBR palette (with REAL Snell-law ray-traced Transmission on Jelly & 2.5D Water!):
     Materials[CourseMaterial.Gingerbread]   = Dielectric(0.355, 0.155, 0.052, 0.88); // Warm spiced baked gingerbread brick
-    Materials[CourseMaterial.FrostingCream] = Dielectric(0.865, 0.825, 0.755, 0.58); // Whipped royal-icing snow & soda foam
+    Materials[CourseMaterial.FrostingCream] = Dielectric(0.865, 0.825, 0.755, 0.58); // Whipped royal-icing snow & breaking wave whitecaps
     const Peppermint = Dielectric(0.740, 0.042, 0.062, 0.16);
     Peppermint.CoatWeight = 1.0; Peppermint.CoatRoughness = 0.03; Peppermint.SpecularLevel = IorToF0(1.50);
     Materials[CourseMaterial.PeppermintRed] = Peppermint;
-    const MakeGummy = (R, G, B) => {
-        const Gm = Dielectric(R, G, B, 0.14);
-        Gm.CoatWeight = 1.0; Gm.CoatRoughness = 0.035; Gm.SpecularLevel = IorToF0(1.48);
-        return Gm;
+
+    // Translucent Refractive Fruit Jelly (Transmission = 1.0 -> real Snell refraction + Fresnel reflection + soft subsurface fruit glow!):
+    const MakeJelly = (R, G, B) => {
+        const Jl = Dielectric(R * 0.38, G * 0.38, B * 0.38, 0.055);
+        Jl.SpecularLevel = IorToF0(1.49);
+        Jl.Transmission  = 1.0;
+        Jl.Emission      = [R * 0.28, G * 0.28, B * 0.28];
+        return Jl;
     };
-    Materials[CourseMaterial.GummyCherry]   = MakeGummy(0.78, 0.038, 0.085);
-    Materials[CourseMaterial.GummyLime]     = MakeGummy(0.075, 0.680, 0.115);
-    Materials[CourseMaterial.GummyOrange]   = MakeGummy(0.880, 0.255, 0.028);
-    Materials[CourseMaterial.GummyBerry]    = MakeGummy(0.048, 0.245, 0.790);
-    const Syrup = Dielectric(0.420, 0.165, 0.024, 0.06);
-    Syrup.CoatWeight = 1.0; Syrup.CoatRoughness = 0.02; Syrup.SpecularLevel = IorToF0(1.49);
+    Materials[CourseMaterial.GummyCherry]   = MakeJelly(0.88, 0.045, 0.11);
+    Materials[CourseMaterial.GummyLime]     = MakeJelly(0.09, 0.820, 0.15);
+    Materials[CourseMaterial.GummyOrange]   = MakeJelly(0.95, 0.280, 0.03);
+    Materials[CourseMaterial.GummyBerry]    = MakeJelly(0.06, 0.300, 0.92);
+
+    const Syrup = Dielectric(0.340, 0.125, 0.018, 0.045);
+    Syrup.CoatWeight = 1.0; Syrup.CoatRoughness = 0.02; Syrup.SpecularLevel = IorToF0(1.50);
     Materials[CourseMaterial.CaramelSyrup]   = Syrup;
-    const SodaWater = Dielectric(0.038, 0.345, 0.460, 0.045);
-    SodaWater.CoatWeight = 1.0; SodaWater.CoatRoughness = 0.015; SodaWater.SpecularLevel = IorToF0(1.35);
-    Materials[CourseMaterial.BerrySodaWater] = SodaWater;
+
+    // Refractive 2.5D Fizzy Lagoon Water (deep sapphire-turquoise + shallow aquamarine crystal, Transmission = 1.0!):
+    const SodaDeep = Dielectric(0.014, 0.135, 0.220, 0.032);
+    SodaDeep.SpecularLevel = IorToF0(1.335);
+    SodaDeep.Transmission  = 1.0;
+    Materials[CourseMaterial.BerrySodaWater] = SodaDeep;
+
+    const SodaShallow = Dielectric(0.055, 0.235, 0.245, 0.035);
+    SodaShallow.SpecularLevel = IorToF0(1.335);
+    SodaShallow.Transmission  = 1.0;
+    Materials[CourseMaterial.WaterShallowCrystal] = SodaShallow;
+
+    const Taffy = Dielectric(0.840, 0.210, 0.460, 0.15);
+    Taffy.CoatWeight = 1.0; Taffy.CoatRoughness = 0.03; Taffy.SpecularLevel = IorToF0(1.48);
+    Materials[CourseMaterial.TaffyPink]      = Taffy;
+
     Materials[CourseMaterial.WaferCrisp]     = Dielectric(0.545, 0.365, 0.150, 0.80); // Golden waffle-wafer bridge & catapult timber
     const Licorice = Dielectric(0.022, 0.020, 0.026, 0.22);
     Licorice.CoatWeight = 0.85; Licorice.CoatRoughness = 0.06;

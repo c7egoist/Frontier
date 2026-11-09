@@ -20,7 +20,7 @@ import { ServiceStationSequence } from "./ServiceStationSequence.js";
 import { TrafficLightSequence } from "./TrafficLightSequence.js";
 import { RoadEditorSequence, RoadEditorVertexCapacity } from "./RoadEditorSequence.js";
 import { ConstructPoliceVehicleBodyFacets } from "./CityPursuitStructure.js";
-import { CandyWaterGridSpec } from "./CandyVillageStructure.js";
+import { CandyWaterGridSpec, CandyWormMeshSpec } from "./CandyVillageStructure.js";
 
 // 📝 What an occupant takes part in. A ground tile only owns a surface card; the ground occupant is only rastered,
 //    because the scene distance field carries the ground as its analytic plane rather than as a sampled volume.
@@ -546,10 +546,11 @@ export class SceneStructure
             this.DDayBlock.Count = this.Occupants.length - DDayFirst;
         }
 
-        // ⑩d Candy Village Dynamic Siege Units + Live-Streamed 2.5D Shallow-Water Fluid Surface ------------------------
+        // ⑩d Candy Village Siege Units + Live-Skinned Jelly Worms + Live 128×64 Refractive 2.5D Shallow Water ----------
         this.CandyBlock      = null;
+        this.CandyWormBlock  = null;
         this.CandyWaterBlock = null;
-        if (ShapeSets.CandyWormHead !== undefined)
+        if (ShapeSets.CandyCatapultBase !== undefined)
         {
             const CandyFirst  = this.Occupants.length;
             const CombatRoles = OccupantRole.Raster | OccupantRole.Dynamic;
@@ -560,24 +561,31 @@ export class SceneStructure
                     Arr.push(this.ConstructOccupant(`${Prefix} ${I}`, ShapeIdx, ParkedBelow, CombatRoles));
                 return Arr;
             };
-            const SegShapes = [ShapeSets.CandyWormSegLime, ShapeSets.CandyWormSegOrange, ShapeSets.CandyWormSegBerry];
-            const WormSegments = [];
-            for (let I = 0; I < 28; ++I)
-                WormSegments.push(this.ConstructOccupant(`Candy Worm Seg ${I}`, SegShapes[I % 3], ParkedBelow, CombatRoles));
 
             this.CandyBlock = {
                 First:         CandyFirst,
-                WormHeads:     AllocPool("Candy Worm Head",        ShapeSets.CandyWormHead,      4),
-                WormSegments,
                 CatapultBases: AllocPool("Candy Catapult Base",    ShapeSets.CandyCatapultBase,  5),
                 CatapultArms:  AllocPool("Candy Catapult Arm",     ShapeSets.CandyCatapultArm,   5),
+                TargetRings:   AllocPool("Candy Target Ring",      ShapeSets.CandyTargetRing,    5),
                 Cannons:       AllocPool("Candy Old Cannon",       ShapeSets.CandyOldCannon,     6),
                 FlamingBalls:  AllocPool("Candy Flaming Ball",     ShapeSets.CandyFlamingBall,  10),
                 Jawbreakers:   AllocPool("Candy Jawbreaker Ball",  ShapeSets.CandyJawbreaker,   12),
                 StickyPuddles: AllocPool("Candy Sticky Puddle",    ShapeSets.CandyStickyPuddle, 12),
+                PendulumArms:  AllocPool("Candy Pendulum Arm",     ShapeSets.CandyPendulumArm,   4),
+                CrusherHeads:  AllocPool("Candy Crusher Head",     ShapeSets.CandyCrusherHead,   4),
+                PinwheelDiscs: AllocPool("Candy Pinwheel Disc",    ShapeSets.CandyPinwheelDisc,  6),
+                GeyserColumns: AllocPool("Candy Geyser Column",    ShapeSets.CandyGeyserColumn,  8),
                 Count:         0
             };
             this.CandyBlock.Count = this.Occupants.length - CandyFirst;
+
+            const WormVertCap = CandyWormMeshSpec.WormCount * ((CandyWormMeshSpec.RingsPerWorm - 1) * CandyWormMeshSpec.RadialSides * 6 + CandyWormMeshSpec.RadialSides * 6);
+            const WormSet = this.ConstructFacetSet("Candy Skinned Jelly Worms", [], 0.0, 0.0);
+            this.FacetSets[WormSet].LocalMinimum   = [-210.0, -60.0, -2.0];
+            this.FacetSets[WormSet].LocalMaximum   = [ 210.0,  60.0, 12.0];
+            this.FacetSets[WormSet].VertexCapacity = WormVertCap;
+            const WormOcc = this.ConstructOccupant("Candy Skinned Jelly Worms", WormSet, ConstructIdentityTransform(), OccupantRole.Raster);
+            this.CandyWormBlock = { FacetSet: WormSet, Occupant: WormOcc, VertexCapacity: WormVertCap };
 
             const WaterSet = this.ConstructFacetSet("Candy 2.5D Shallow Water", [], 0.0, 0.0);
             this.FacetSets[WaterSet].LocalMinimum   = [CandyWaterGridSpec.XMin, CandyWaterGridSpec.YMin, -2.0];
