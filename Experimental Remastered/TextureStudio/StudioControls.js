@@ -1,0 +1,427 @@
+/*==========================================================================================================================================
+                                                          STUDIOCONTROLS.JS
+==========================================================================================================================================*/
+// Unified Frontier Experimental Remastered UI component kit for Texture Studio:
+//   SectionCard, SliderRow (scrubbable black value-pill + 26px track), SwitchRow, SelectRow, SegmentedRow,
+//   ColorRow, TextRow, ActionRow, MetricTrio, SmoothScroll, Scope lifecycle, Toast.
+
+const SvgNamespace = 'http://www.w3.org/2000/svg';
+const Refreshers = new Set();
+const ScopeStack = [];
+
+export const GlyphPaths = {
+    Grid:       '<rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5"/>',
+    Layers:     '<path d="M12 3 3 8l9 5 9-5z"/><path d="M3 12.5l9 5 9-5"/><path d="M3 17l9 5 9-5"/>',
+    Folder:     '<path d="M3 7a2 2 0 0 1 2-2h4.2l2 2.2H19a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+    Brush:      '<path d="M18.5 2.5a2.8 2.8 0 0 1 3 3L11.8 15.2l-3.6.6.6-3.6z"/><path d="M6.2 15.4c-1.8 0-3.2 1.4-3.2 3.2 0 .9-.7 1.6-1.5 1.9 1.3.7 3.3.9 4.8.2 1.3-.6 2.1-1.9 2.1-3.3a2.2 2.2 0 0 0-2.2-2z"/>',
+    Eraser:     '<path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/>',
+    Fill:       '<path d="m19 11-8-8-8.6 8.6a2 2 0 0 0 0 2.8l5.2 5.2c.8.8 2 .8 2.8 0L19 11Z"/><path d="m5 2 5 5"/><path d="M2 13h15"/><path d="M22 20a2 2 0 1 1-4 0c0-1.6 1.7-2.4 2-4 .3 1.6 2 2.4 2 4Z"/>',
+    Stamp:      '<path d="M5 18h14v3H5z"/><path d="M7 14h10a2 2 0 0 1 2 2v2H5v-2a2 2 0 0 1 2-2z"/><path d="M12 14V9.5c0-1.2 2.2-2.2 2.2-4.2a2.2 2.2 0 1 0-4.4 0c0 2 2.2 3 2.2 4.2"/>',
+    Pipette:    '<path d="m2 22 1-1h3l9-9"/><path d="M3 21v-3l9-9"/><path d="m15 6 3.4-3.4a2.1 2.1 0 1 1 3 3L18 9"/><path d="m14 5 5 5"/>',
+    Material:   '<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18"/><path d="M12 3c2.8 0 5 4 5 9s-2.2 9-5 9"/>',
+    Pattern:    '<rect x="3" y="3" width="18" height="18" rx="2.5"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/>',
+    Bake:       '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12 4 7.5"/><circle cx="12" cy="7.5" r="1.4"/>',
+    Volume:     '<rect x="4" y="4" width="12" height="12" rx="2"/><path d="M8 16v2a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-2"/>',
+    Noise:      '<path d="M3 13c2.5-6 4.5-6 6 0s3.5 6 6 0 3.5-6 6 0"/><path d="M3 8c1.5-2.5 3-2.5 4.5 0s3 2.5 4.5 0 3-2.5 4.5 0 3 2.5 4.5 0"/>',
+    Modifier:   '<path d="M12 3v3M12 18v3M3 12h3M18 12h3"/><circle cx="12" cy="12" r="4"/>',
+    Move:       '<path d="M12 3v18M3 12h18M9.5 5.5 12 3l2.5 2.5M9.5 18.5 12 21l2.5-2.5M5.5 9.5 3 12l2.5 2.5M18.5 9.5 21 12l-2.5 2.5"/>',
+    Rotate:     '<path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 4.5V9h-4.5"/>',
+    Scale:      '<path d="M15 4h5v5M9 20H4v-5M20 4l-6 6M4 20l6-6"/>',
+    Mirror:     '<path d="M12 3v18M8 7 4 12l4 5zM16 7l4 5-4 5z"/>',
+    Search:     '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.8-3.8"/>',
+    Eye:        '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+    EyeOff:     '<path d="M3 3l18 18"/><path d="M10.6 5.1A10.4 10.4 0 0 1 12 5c6.4 0 10 7 10 7a17.6 17.6 0 0 1-2.6 3.5M6.2 6.3C3.6 8.1 2 12 2 12s3.6 7 10 7c1.7 0 3.2-.5 4.5-1.2"/>',
+    Lock:       '<rect x="5" y="11" width="14" height="9.5" rx="2"/><path d="M8 11V7.5a4 4 0 0 1 8 0V11"/>',
+    Plus:       '<path d="M12 5v14M5 12h14"/>',
+    Close:      '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
+    Trash:      '<path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13"/>',
+    Undo:       '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
+    Redo:       '<path d="M15 14l5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/>',
+    Download:   '<path d="M12 3v12m0 0-4-4m4 4 4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>',
+    Upload:     '<path d="M12 15V3m0 0-4 4m4-4 4 4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>',
+    Help:       '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 0 1 5 .5c0 2-2.5 2-2.5 4M12 17.5h.01"/>',
+    Focus:      '<path d="M4 9V5h4M16 5h4v4M20 15v4h-4M8 19H4v-4"/><circle cx="12" cy="12" r="2.2"/>',
+    Check:      '<path d="M5 12.5l4.2 4.2L19 7"/>',
+    Sparkles:   '<path d="M11 3.5l1.7 4.6 4.6 1.7-4.6 1.7L11 16.1l-1.7-4.6-4.6-1.7 4.6-1.7z"/><path d="M18.5 14.5v5M16 17h5"/>',
+    Sliders:    '<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',
+    Reset:      '<path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"/><path d="M3.5 4.5v4.6h4.6"/>',
+    Sun:        '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+    Cube:       '<path d="M12 3 4 7.5v9L12 21l8-4.5v-9z"/><path d="m12 12 8-4.5M12 12v9M12 12 4 7.5"/>',
+    Copy:       '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+    ArrowRight: '<path d="M5 12h14M13 5l7 7-7 7"/>',
+    Dot:        '<circle cx="12" cy="12" r="3"/>'
+};
+
+export function ConstructGlyph(Name, ClassName = 'glyph')
+{
+    const Svg = document.createElementNS(SvgNamespace, 'svg');
+    Svg.setAttribute('viewBox', '0 0 24 24');
+    Svg.setAttribute('class', ClassName);
+    Svg.innerHTML = GlyphPaths[Name] || GlyphPaths.Dot;
+    return Svg;
+}
+
+export function Construct(Tag, ClassName, Content)
+{
+    const Element = document.createElement(Tag);
+    if (ClassName) Element.className = ClassName;
+    if (Content === undefined || Content === null) return Element;
+    if (typeof Content === 'string' || typeof Content === 'number') Element.textContent = String(Content);
+    else if (Array.isArray(Content)) Content.forEach(Part => { if (Part !== null && Part !== undefined) Element.append(Part); });
+    else Element.append(Content);
+    return Element;
+}
+
+export function OpenScope() { const Scope = new Set(); ScopeStack.push(Scope); return Scope; }
+export function CloseScope(Scope) { const Top = ScopeStack.pop(); if (Top !== Scope && Scope) { const idx = ScopeStack.indexOf(Scope); if (idx >= 0) ScopeStack.splice(idx, 1); } }
+export function ReleaseScope(Scope) { if (!Scope) return; for (const R of Scope) Refreshers.delete(R); Scope.clear(); }
+export function Register(Refresher) { Refreshers.add(Refresher); if (ScopeStack.length) ScopeStack[ScopeStack.length - 1].add(Refresher); }
+export function Broadcast() { for (const Refresher of Refreshers) Refresher(); }
+
+function ResolveState(Binding)
+{
+    return Binding.Availability ? Binding.Availability() : { Enabled: true };
+}
+
+function ApplyAvailability(Node, Binding, Extra)
+{
+    const State = ResolveState(Binding);
+    Node.classList.toggle('unavailable', !State.Enabled);
+    if (Extra) Extra(State);
+    if (!State.Enabled && State.Reason) Node.title = State.Reason;
+    else Node.removeAttribute('title');
+    return State;
+}
+
+export function SectionCard(Parent, { Id, Title, Glyph, Status, Badge, Hint, Open = true })
+{
+    const Details = Construct('details', 'property-group');
+    if (Open) Details.open = true;
+    if (Id) Details.dataset.section = Id;
+    const StatusNode = Status ? Construct('span', 'section-badge') : null;
+    const Summary = Construct('summary', null, [
+        Glyph ? ConstructGlyph(Glyph, 'glyph section-glyph') : null,
+        Construct('span', 'section-title', Title),
+        StatusNode || (Badge ? Construct('span', 'section-badge', Badge) : null)
+    ]);
+    const Content = Construct('div', 'group-content');
+    if (Hint) Content.append(Construct('p', 'property-hint', Hint));
+    Details.append(Summary, Content);
+    Parent.append(Details);
+    if (StatusNode) Register(() => { StatusNode.textContent = typeof Status === 'function' ? Status() : Status; });
+    return { Card: Details, Inner: Content };
+}
+
+export function SliderRow(Parent, Binding)
+{
+    const Step = Binding.Step ?? 0.01;
+    const Digits = Binding.Digits ?? (Step >= 1 ? 0 : Step >= 0.1 ? 1 : Step >= 0.01 ? 2 : 3);
+    const Label = Construct('label', 'property-label', Binding.Label);
+    const NumberInput = Construct('input', 'pill-number');
+    NumberInput.type = 'number';
+    NumberInput.min = String(Binding.Minimum);
+    NumberInput.max = String(Binding.Maximum);
+    NumberInput.step = String(Step);
+    const UnitCell = Construct('span', 'unit-cell', Binding.Unit || '—');
+    const ValuePill = Construct('div', 'value-pill', [NumberInput, UnitCell]);
+
+    const Range = Construct('input', 'pill-range');
+    Range.type = 'range';
+    Range.min = String(Binding.Minimum);
+    Range.max = String(Binding.Maximum);
+    Range.step = String(Step);
+    Range.setAttribute('aria-label', Binding.Label);
+
+    const Control = Construct('div', 'slider-control', [ValuePill, Range]);
+    const Row = Construct('div', 'property-row slider-row', [Label, Control]);
+    Parent.append(Row);
+
+    const Snap = Raw =>
+    {
+        const Clamped = Math.min(Binding.Maximum, Math.max(Binding.Minimum, Raw));
+        const Precision = Math.pow(10, Digits + 2);
+        return Math.round(Clamped * Precision) / Precision;
+    };
+    const SyncFraction = Value =>
+    {
+        const Span = (Binding.Maximum - Binding.Minimum) || 1;
+        const Frac = Math.max(0, Math.min(1, (Value - Binding.Minimum) / Span));
+        Range.style.setProperty('--fraction', Frac.toFixed(4));
+    };
+
+    const Commit = Raw =>
+    {
+        if (!Number.isFinite(Raw)) return;
+        const Value = Snap(Raw);
+        Binding.Write(Value);
+        SyncFraction(Value);
+        Broadcast();
+    };
+
+    Range.addEventListener('input', () => Commit(Number(Range.value)));
+    NumberInput.addEventListener('change', () => Commit(Number(NumberInput.value)));
+
+    let Scrub = null;
+    NumberInput.addEventListener('pointerdown', Event =>
+    {
+        if (document.activeElement === NumberInput) return;
+        Scrub = { X: Event.clientX, Moved: false, Start: Number(Binding.Read()) || 0 };
+        NumberInput.setPointerCapture(Event.pointerId);
+    });
+    NumberInput.addEventListener('pointermove', Event =>
+    {
+        if (!Scrub) return;
+        const Dx = Event.clientX - Scrub.X;
+        if (!Scrub.Moved && Math.abs(Dx) < 3) return;
+        if (!Scrub.Moved) { Scrub.Moved = true; NumberInput.classList.add('scrubbing'); }
+        const Span = Binding.Maximum - Binding.Minimum;
+        const Factor = Event.shiftKey ? 0.15 : Event.altKey ? 4.0 : 1.0;
+        const Next = Scrub.Start + (Dx / 180) * Span * Factor;
+        Commit(Math.round(Next / Step) * Step);
+    });
+    const EndScrub = Event =>
+    {
+        if (!Scrub) return;
+        const WasMoved = Scrub.Moved;
+        Scrub = null;
+        NumberInput.classList.remove('scrubbing');
+        if (WasMoved) Event.preventDefault();
+    };
+    NumberInput.addEventListener('pointerup', EndScrub);
+    NumberInput.addEventListener('pointercancel', EndScrub);
+
+    Register(() =>
+    {
+        const Value = Number(Binding.Read());
+        Range.value = String(Value);
+        if (document.activeElement !== NumberInput) NumberInput.value = Number.isFinite(Value) ? Value.toFixed(Digits) : '0';
+        SyncFraction(Number.isFinite(Value) ? Value : Binding.Minimum);
+        ApplyAvailability(Row, Binding, State => { Range.disabled = NumberInput.disabled = !State.Enabled; });
+    });
+    return Row;
+}
+
+export function SwitchRow(Parent, Binding)
+{
+    const Input = Construct('input');
+    Input.type = 'checkbox';
+    Input.setAttribute('aria-label', Binding.Label);
+    const Track = Construct('span');
+    const Switch = Construct('label', 'switch', [Input, Track]);
+    const Copy = Construct('div', 'switch-copy', [Construct('span', 'property-label', Binding.Label)]);
+    if (Binding.Detail) Copy.append(Construct('small', 'property-detail', Binding.Detail));
+    const Row = Construct('div', 'property-row toggle-row', [Copy, Switch]);
+    Parent.append(Row);
+
+    Input.addEventListener('change', () => { Binding.Write(Input.checked); Broadcast(); });
+    Register(() =>
+    {
+        Input.checked = !!Binding.Read();
+        ApplyAvailability(Row, Binding, State => { Input.disabled = !State.Enabled; });
+    });
+    return Row;
+}
+
+export function SelectRow(Parent, Binding)
+{
+    const Select = Construct('select');
+    for (const [Label, Value] of Binding.Options)
+    {
+        const Option = Construct('option', null, Label);
+        Option.value = String(Value);
+        Select.append(Option);
+    }
+    const Row = Construct('div', 'property-row select-row', [Construct('label', 'property-label', Binding.Label), Select]);
+    Parent.append(Row);
+    Select.addEventListener('change', () =>
+    {
+        const Found = Binding.Options.find(([, Value]) => String(Value) === Select.value);
+        Binding.Write(Found ? Found[1] : Select.value);
+        Broadcast();
+    });
+    Register(() =>
+    {
+        Select.value = String(Binding.Read());
+        ApplyAvailability(Row, Binding, State => { Select.disabled = !State.Enabled; });
+    });
+    return Row;
+}
+
+export function SegmentedRow(Parent, Binding)
+{
+    const Track = Construct('div', 'segmented-track');
+    const Buttons = Binding.Options.map(([Label, Value]) =>
+    {
+        const Btn = Construct('button', null, Label);
+        Btn.type = 'button';
+        Btn.addEventListener('click', () => { Binding.Write(Value); Broadcast(); });
+        Track.append(Btn);
+        return [Btn, Value];
+    });
+    const Row = Construct('div', 'property-row select-row', [Construct('span', 'property-label', Binding.Label), Track]);
+    Parent.append(Row);
+    Register(() =>
+    {
+        const Current = Binding.Read();
+        for (const [Btn, Value] of Buttons) Btn.classList.toggle('active', Current === Value);
+        ApplyAvailability(Row, Binding);
+    });
+    return Row;
+}
+
+export function ColorRow(Parent, Binding)
+{
+    const Picker = Construct('input', 'color-native');
+    Picker.type = 'color';
+    Picker.setAttribute('aria-label', Binding.Label);
+    const Hex = Construct('input', 'color-hex');
+    Hex.type = 'text';
+    Hex.maxLength = 7;
+    const Control = Construct('div', 'color-pill-wrap', [Picker, Hex]);
+    const Row = Construct('div', 'property-row color-row', [
+        Construct('span', 'property-label', Binding.Label),
+        Control
+    ]);
+    Parent.append(Row);
+
+    const CommitHex = Raw =>
+    {
+        const Clean = String(Raw || '').trim();
+        if (/^#[0-9a-fA-F]{6}$/.test(Clean)) {
+            Binding.Write(Clean.toLowerCase());
+            Broadcast();
+        }
+    };
+    Picker.addEventListener('input', () => { Binding.Write(Picker.value.toLowerCase()); Broadcast(); });
+    Hex.addEventListener('change', () => CommitHex(Hex.value));
+
+    Register(() =>
+    {
+        const Val = String(Binding.Read() || '#ffffff').toLowerCase();
+        if (/^#[0-9a-f]{6}$/.test(Val)) Picker.value = Val;
+        if (document.activeElement !== Hex) Hex.value = Val;
+        ApplyAvailability(Row, Binding);
+    });
+    return Row;
+}
+
+export function TextRow(Parent, Binding)
+{
+    const Input = Construct('input', 'pill-text-input');
+    Input.type = 'text';
+    if (Binding.Placeholder) Input.placeholder = Binding.Placeholder;
+    const Row = Construct('div', 'property-row text-row', [
+        Construct('label', 'property-label', Binding.Label),
+        Input
+    ]);
+    Parent.append(Row);
+    Input.addEventListener('input', () => { Binding.Write(Input.value); Broadcast(); });
+    Register(() =>
+    {
+        const Val = String(Binding.Read() ?? '');
+        if (document.activeElement !== Input && Input.value !== Val) Input.value = Val;
+        ApplyAvailability(Row, Binding);
+    });
+    return Row;
+}
+
+export function ActionRow(Parent, Actions)
+{
+    const Row = Construct('div', 'action-row');
+    for (const Act of Actions)
+    {
+        const Btn = Construct('button', 'action-button' + (Act.Tone ? ' ' + Act.Tone : ''), [
+            Act.Glyph ? ConstructGlyph(Act.Glyph) : null,
+            Construct('span', null, Act.Label)
+        ]);
+        Btn.type = 'button';
+        Btn.addEventListener('click', () => { if (!Btn.disabled) { Act.Act(); Broadcast(); } });
+        Row.append(Btn);
+        if (Act.Availability)
+        {
+            Register(() =>
+            {
+                const St = Act.Availability();
+                Btn.disabled = !St.Enabled;
+                if (!St.Enabled && St.Reason) Btn.title = St.Reason;
+                else Btn.removeAttribute('title');
+            });
+        }
+    }
+    Parent.append(Row);
+    return Row;
+}
+
+export function MetricTrio(Parent, Items)
+{
+    const Grid = Construct('div', 'kpi-trio');
+    Items.forEach(Item =>
+    {
+        const Val = Construct('strong', 'kpi-val');
+        const Foot = Construct('small', 'kpi-sub');
+        const Cell = Construct('div', 'kpi-card' + (Item.Highlight ? ' highlight' : ''), [
+            Construct('span', 'kpi-label', Item.Label),
+            Val,
+            Foot
+        ]);
+        Grid.append(Cell);
+        Register(() =>
+        {
+            const Res = Item.Read();
+            Val.textContent = Res.value;
+            Foot.textContent = Res.sub || '';
+        });
+    });
+    Parent.append(Grid);
+    return Grid;
+}
+
+export function SmoothScroll(Scroller, Content)
+{
+    if (!Scroller || !Content) return { ScrollTo() {} };
+    let Target = Scroller.scrollTop, Current = Target, Running = false, LastWheel = 0;
+    const Limit = () => Math.max(0, Scroller.scrollHeight - Scroller.clientHeight);
+    const Advance = Now =>
+    {
+        const Max = Limit();
+        Target = Now - LastWheel > 120 ? Math.min(Math.max(Target, 0), Max) : Math.min(Math.max(Target, -72), Max + 72);
+        Current += (Target - Current) * 0.2;
+        if (Math.abs(Target - Current) < 0.25) Current = Target;
+        const Clamped = Math.min(Math.max(Current, 0), Max);
+        Scroller.scrollTop = Clamped;
+        const Stretch = Current - Clamped;
+        Content.style.transform = Stretch ? `translateY(${(-Stretch * 0.4).toFixed(2)}px)` : '';
+        if (Current !== Target || Stretch !== 0) requestAnimationFrame(Advance);
+        else Running = false;
+    };
+    const Start = () => { if (!Running) { Running = true; requestAnimationFrame(Advance); } };
+    Scroller.addEventListener('wheel', Event =>
+    {
+        if (Event.ctrlKey || Math.abs(Event.deltaX) > Math.abs(Event.deltaY)) return;
+        Event.preventDefault();
+        if (!Running) Current = Target = Scroller.scrollTop;
+        Target += Event.deltaMode === 1 ? Event.deltaY * 18 : Event.deltaY;
+        LastWheel = performance.now();
+        Start();
+    }, { passive: false });
+    Scroller.addEventListener('scroll', () => { if (!Running) Current = Target = Scroller.scrollTop; });
+    return {
+        ScrollTo(Position)
+        {
+            if (!Running) Current = Scroller.scrollTop;
+            Target = Math.min(Math.max(Position, 0), Limit());
+            LastWheel = 0;
+            Start();
+        }
+    };
+}
+
+export function Toast(Text)
+{
+    let Element = document.querySelector('.toast');
+    if (!Element) { Element = Construct('div', 'toast'); document.body.append(Element); }
+    Element.textContent = Text;
+    Element.classList.add('shown');
+    clearTimeout(Toast.Timer);
+    Toast.Timer = setTimeout(() => Element.classList.remove('shown'), 2400);
+}
