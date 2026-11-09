@@ -52,6 +52,19 @@ export const GlyphPaths = {
     ArrowUp:    '<path d="M12 19V5M5 12l7-7 7 7"/>',
     ArrowDown:  '<path d="M12 5v14M19 12l-7 7-7-7"/>',
     Grip:       '<circle cx="9" cy="6" r="1.3"/><circle cx="15" cy="6" r="1.3"/><circle cx="9" cy="12" r="1.3"/><circle cx="15" cy="12" r="1.3"/><circle cx="9" cy="18" r="1.3"/><circle cx="15" cy="18" r="1.3"/>',
+    Pointer:    '<path d="M5 3l14 7-6 2-2 6z"/>',
+    Square:     '<rect x="4" y="4" width="16" height="16" rx="2"/>',
+    Circle:     '<circle cx="12" cy="12" r="8.5"/>',
+    Diamond:    '<path d="M12 3l9 9-9 9-9-9z"/>',
+    Triangle:   '<path d="M12 4l9 16H3z"/>',
+    Star:       '<path d="m12 3 2.7 5.6 6.2.9-4.5 4.4 1.1 6.1L12 17l-5.5 3 1.1-6.1-4.5-4.4 6.2-.9z"/>',
+    Hexagon:    '<path d="M12 3l7.8 4.5v9L12 21l-7.8-4.5v-9z"/>',
+    Stripe:     '<path d="M4 9h16v6H4z"/>',
+    Type:       '<path d="M5 6V4h14v2M12 4v16M9 20h6"/>',
+    Hand:       '<path d="M18 11V6a1.5 1.5 0 0 0-3 0v4M15 10V4.5a1.5 1.5 0 0 0-3 0V10M12 10V5.5a1.5 1.5 0 0 0-3 0v6.5L7.3 10.3a1.5 1.5 0 0 0-2.1 2.1l4.1 5.8A4.5 4.5 0 0 0 13 20h2.5a4.5 4.5 0 0 0 4.5-4.5V11a1.5 1.5 0 0 0-2 0z"/>',
+    ChevronUp:  '<path d="m6 15 6-6 6 6"/>',
+    ChevronDown:'<path d="m6 9 6 6 6-6"/>',
+    Pin:        '<path d="M12 17v5M9 10.8a3 3 0 0 1 1-2.2l1-.9V4h2v3.7l1 .9a3 3 0 0 1 1 2.2V14H9z"/>',
     Dot:        '<circle cx="12" cy="12" r="3"/>'
 };
 

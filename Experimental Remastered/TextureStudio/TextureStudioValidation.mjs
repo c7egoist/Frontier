@@ -37,12 +37,14 @@ const {
   createArtworkDocument,
   createArtworkLayer,
   createDefaultModifier,
+  artworkDocumentToSvgString,
   evaluateArtworkDocument,
 } = await import("./Engine/Patterns/ArtworkStackEngine.js");
 const {
   listPatternStarterCatalog,
   listStampStarterCatalog,
   loadStarterAsArtworkDocument,
+  getArtworkPreviewSvg,
 } = await import("./Engine/Patterns/StarterCatalogBridge.js");
 
 const {
@@ -227,6 +229,7 @@ if (baseUrl) {
       "/Experimental%20Remastered/TextureStudio/",
       "/Experimental%20Remastered/TextureStudio/TextureStudio.css",
       "/Experimental%20Remastered/TextureStudio/TextureStudio.js",
+      "/Experimental%20Remastered/TextureStudio/AssetBrowser.js",
       "/Experimental%20Remastered/TextureStudio/StudioControls.js",
       "/Experimental%20Remastered/TextureStudio/Workspaces/MaterialWorkspace.js",
       "/Experimental%20Remastered/TextureStudio/Workspaces/ArtworkStackWorkspace.js",
@@ -303,10 +306,11 @@ await suite("7. Full TextureStudio Shell & All 5 Workspaces Mount & Switch Clean
 
   function makeEl(tag = "div") {
     const listeners = new Map();
+    const attrs = new Map();
     const el = {
       tagName: String(tag).toUpperCase(),
       className: "",
-      style: { setProperty() {}, cssText: "" },
+      style: { setProperty() {}, cssText: "", height: "" },
       classList: {
         toggle(c, f) {
           const set = new Set(String(el.className || "").split(/\s+/).filter(Boolean));
@@ -346,20 +350,48 @@ await suite("7. Full TextureStudio Shell & All 5 Workspaces Mount & Switch Clean
         if (target === el) return true;
         return el.children.some((c) => typeof c.contains === "function" && c.contains(target));
       },
+      closest(sel) {
+        let cur = el;
+        while (cur) {
+          if (sel.startsWith(".") && cur.classList?.contains(sel.slice(1))) return cur;
+          if (sel.startsWith("[")) {
+            const attrName = sel.slice(1, -1).split("=")[0];
+            const camel = attrName.replace(/^data-/, "").replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+            if (cur.hasAttribute?.(attrName) || cur.dataset?.[camel] !== undefined) return cur;
+          }
+          cur = cur.parentNode;
+        }
+        return null;
+      },
       querySelector(sel) { return el.querySelectorAll(sel)[0] || null; },
       querySelectorAll(sel) {
         const out = [];
         const walk = (node) => {
           for (const ch of node.children || []) {
             const cls = String(ch.className || "");
-            if (sel.startsWith(".") ? cls.split(/\s+/).includes(sel.slice(1)) : String(ch.tagName).toLowerCase() === sel.toLowerCase()) out.push(ch);
+            const match = sel.startsWith(".")
+              ? cls.split(/\s+/).includes(sel.slice(1))
+              : sel.startsWith("[")
+                ? ch.hasAttribute?.(sel.slice(1, -1).split("=")[0])
+                : String(ch.tagName).toLowerCase() === sel.toLowerCase();
+            if (match) out.push(ch);
             walk(ch);
           }
         };
         walk(el);
         return out;
       },
-      setAttribute() {}, removeAttribute() {},
+      setAttribute(k, v) {
+        attrs.set(k, String(v));
+        if (k === "class") el.className = String(v);
+        if (k.startsWith("data-")) {
+          const camel = k.slice(5).replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+          el.dataset[camel] = String(v);
+        }
+      },
+      getAttribute(k) { return attrs.get(k) ?? null; },
+      hasAttribute(k) { return attrs.has(k); },
+      removeAttribute(k) { attrs.delete(k); },
       addEventListener(type, fn) {
         if (!listeners.has(type)) listeners.set(type, []);
         listeners.get(type).push(fn);
@@ -388,7 +420,9 @@ await suite("7. Full TextureStudio Shell & All 5 Workspaces Mount & Switch Clean
         createLinearGradient: () => ({ addColorStop() {} }),
         createRadialGradient: () => ({ addColorStop() {} }),
       },
-      getBoundingClientRect: () => ({ left: 0, top: 0, width: 640, height: 480 }),
+      getBoundingClientRect: () => ({
+        left: 0, top: 0, width: 640, height: parseFloat(el.style.height) || 480,
+      }),
       clientWidth: 640, clientHeight: 480, scrollTop: 0, scrollHeight: 480,
       set innerHTML(v) { el._html = v; if (v === "") el.children = []; },
       get innerHTML() { return el._html || ""; },
@@ -397,6 +431,7 @@ await suite("7. Full TextureStudio Shell & All 5 Workspaces Mount & Switch Clean
   }
 
   const mainEl = makeEl("main");
+  const browserHostEl = makeEl("div");
   const winListeners = new Map();
   globalThis.window = {
     location: { hash: "#material" },
@@ -408,9 +443,9 @@ await suite("7. Full TextureStudio Shell & All 5 Workspaces Mount & Switch Clean
     dispatchEvent(evt) { for (const fn of [...(winListeners.get(evt.type) || [])]) fn(Object.assign({ preventDefault() {}, stopPropagation() {} }, evt)); },
   };
   globalThis.document = {
-    getElementById: (id) => id === "studio-main" ? mainEl : makeEl("div"),
-    querySelector: (sel) => globalThis.document.body.querySelector(sel) || mainEl.querySelector(sel),
-    querySelectorAll: (sel) => [...mainEl.querySelectorAll(sel), ...globalThis.document.body.querySelectorAll(sel)],
+    getElementById: (id) => id === "studio-main" ? mainEl : id === "asset-browser-host" ? browserHostEl : makeEl("div"),
+    querySelector: (sel) => globalThis.document.body.querySelector(sel) || mainEl.querySelector(sel) || browserHostEl.querySelector(sel),
+    querySelectorAll: (sel) => [...mainEl.querySelectorAll(sel), ...browserHostEl.querySelectorAll(sel), ...globalThis.document.body.querySelectorAll(sel)],
     createElement: (tag) => makeEl(tag),
     createElementNS: (ns, tag) => makeEl(tag),
     addEventListener() {}, removeEventListener() {},
@@ -514,6 +549,162 @@ await suite("8. GPU Bake/Paint Shaders, Q/Tab/Right-Click Tool Popups & Draggabl
   globalThis.window.dispatchEvent({ type: "keydown", key: "q" });
   assert(globalThis.document.body.querySelectorAll(".tool-popup-menu").length === 1, "Q did not open Baking Studio Quick Menu");
   globalThis.window.dispatchEvent({ type: "keydown", key: "Escape" });
+});
+
+// ----------------------------------------------------------------- 9. AFRICAN PATTERNS & SVG VECTOR EXPORT
+await suite("9. African Patterns Catalog (36+ Studies), SVG Paths & Vector Rendering", async () => {
+  const patCatalog = listPatternStarterCatalog();
+  const african = patCatalog.filter((p) => p.group === "African Patterns");
+  assert(african.length >= 34, `Expected >=34 African Patterns, got ${african.length}`);
+  const keyNames = ["Asante Kente Blocks", "Ndebele Painted Chevrons", "Bamana Bogolanfini Dashes", "Kuba Raffia Steps", "Yoruba Adire Rings", "African Diamond Carpet"];
+  for (const kn of keyNames) {
+    assert(african.some((a) => a.name === kn), `Missing African Pattern: ${kn}`);
+  }
+  for (const entry of african) {
+    const doc = loadStarterAsArtworkDocument(entry);
+    assert(doc.layers.length >= 1, `Empty layers in ${entry.name}`);
+    const svg = artworkDocumentToSvgString(doc, { width: 512, height: 512 });
+    assert(svg.includes("<svg") && (svg.includes("<path") || svg.includes("<polygon") || svg.includes("<rect") || svg.includes("<ellipse")), `Invalid SVG output for ${entry.name}`);
+    const thumb = getArtworkPreviewSvg(entry, "pattern", 60);
+    assert(thumb.includes("<svg"), `Missing preview SVG for ${entry.name}`);
+  }
+});
+
+// ----------------------------------------------------------------- 10. INTERACTIVE SVG CANVAS + ASSET BROWSER DRAWER + AUTO-TAB + CANVAS DRAG-DROP
+await suite("10. Interactive SVG Vector Canvas, Bottom Resizable Asset Browser & Auto-Category Drop", async () => {
+  const api = globalThis.window.__frontierTextureStudio;
+
+  // 10a. Verify decluttered Layer Stacks (preset grids moved out of workspace left columns into Asset Browser)
+  for (const ws of ["material", "pattern", "stamp"]) {
+    api.switchWorkspace(ws);
+    const leftCards = globalThis.document.querySelectorAll(".preset-card");
+    assert.equal(leftCards.length, 0, `Workspace ${ws} should keep asset cards in bottom Asset Browser, not left stack`);
+  }
+
+  // 10b. Verify Workspace -> Asset Browser auto-category switching unless user specifies otherwise
+  api.switchWorkspace("material");
+  assert.equal(api.getAssetBrowser().activeCategory, "materials");
+  api.switchWorkspace("pattern");
+  assert.equal(api.getAssetBrowser().activeCategory, "patterns");
+  api.switchWorkspace("stamp");
+  assert.equal(api.getAssetBrowser().activeCategory, "stamps");
+  api.switchWorkspace("bake");
+  assert.equal(api.getAssetBrowser().activeCategory, "meshes");
+
+  // User manually selects Patterns tab while on Bake -> should stay pinned when switching workspaces!
+  const patCatBtn = globalThis.document.querySelectorAll(".cb-cat-tab").find((b) => b.dataset.category === "patterns");
+  assert(patCatBtn, "Missing Patterns tab in Asset Browser");
+  patCatBtn.click();
+  assert.equal(api.getAssetBrowser().userSpecifiedCategory, true);
+  api.switchWorkspace("material");
+  assert.equal(api.getAssetBrowser().activeCategory, "patterns", "User-specified category should remain pinned across workspace switches");
+
+  // Clicking Auto Reset button restores automatic category matching
+  const autoResetBtn = globalThis.document.querySelector(".cb-auto-pill");
+  assert(autoResetBtn, "Missing Auto/Pinned toggle pill");
+  autoResetBtn.click();
+  assert.equal(api.getAssetBrowser().userSpecifiedCategory, false);
+  assert.equal(api.getAssetBrowser().activeCategory, "materials");
+
+  // 10c. Verify draggable notch resize + collapse/expand
+  const notch = globalThis.document.querySelector(".cb-resize");
+  assert(notch, "Missing Asset Browser resize notch (.cb-resize)");
+  const initialH = api.getAssetBrowser().heightPx;
+  notch.dispatchEvent({ type: "pointerdown", button: 0, clientY: 600 });
+  globalThis.window.dispatchEvent({ type: "pointermove", clientY: 480 }); // drag UP +120px
+  globalThis.window.dispatchEvent({ type: "pointerup" });
+  assert(api.getAssetBrowser().heightPx > initialH + 60, `Expected drawer height increase after dragging notch up, got ${api.getAssetBrowser().heightPx}`);
+  notch.dispatchEvent({ type: "dblclick" });
+  assert.equal(api.getAssetBrowser().collapsed, true, "Double-click on notch should collapse Asset Browser");
+  notch.dispatchEvent({ type: "dblclick" });
+  assert.equal(api.getAssetBrowser().collapsed, false, "Second double-click should expand Asset Browser");
+
+  // 10d. Interactive SVG Vector Canvas + Toolbar + Direct Move / Resize / Rotate + Draw Tool in Pattern & Stamp Studio
+  api.switchWorkspace("pattern");
+  const patSnap = api.getSnapshot();
+  assert.equal(patSnap.viewChannel, "vector", "Pattern Studio should open in Interactive Vector SVG mode");
+  assert.equal(patSnap.showGrid, true, "Vector grid should be enabled by default");
+  const svgCanvas = globalThis.document.querySelector(".se-canvas");
+  assert(svgCanvas && svgCanvas.innerHTML.includes('id="se-grid"'), "SVG canvas missing grid defs");
+  assert(svgCanvas.innerHTML.includes('data-handle="rotate"'), "SVG canvas missing rotation handle");
+  assert(svgCanvas.innerHTML.includes('data-handle="se"'), "SVG canvas missing SE resize handle");
+
+  // Drop an African Pattern directly onto the SVG viewport!
+  const seViewport = globalThis.document.querySelector(".se-viewport");
+  const kentePayload = JSON.stringify({ assetKind: "pattern", id: "legacy:Asante Kente Blocks", name: "Asante Kente Blocks" });
+  seViewport.dispatchEvent({
+    type: "drop",
+    clientX: 256,
+    clientY: 256,
+    dataTransfer: { getData: (t) => (t === "application/x-frontier-asset" ? kentePayload : "") },
+  });
+  assert.equal(api.getSnapshot().name, "Asante Kente Blocks", "Dropping Asante Kente Blocks onto Pattern canvas should load it");
+  assert(globalThis.document.querySelector(".se-canvas").innerHTML.includes("<path"), "African Kente SVG paths should render directly in .se-canvas");
+
+  // Draw a brand-new Diamond vector shape right on the SVG canvas using the Diamond toolbar tool!
+  const diamondBtn = globalThis.document.querySelectorAll(".se-tool-btn").find((b) => b.dataset.vectorTool === "diamond");
+  assert(diamondBtn, "Missing Diamond vector tool button in toolbar");
+  diamondBtn.click();
+  const layersBeforeDraw = api.getSnapshot().layers;
+  svgCanvas.dispatchEvent({ type: "pointerdown", button: 0, clientX: 160, clientY: 160 });
+  svgCanvas.dispatchEvent({ type: "pointermove", clientX: 280, clientY: 280 });
+  svgCanvas.dispatchEvent({ type: "pointerup", clientX: 280, clientY: 280 });
+  assert.equal(api.getSnapshot().layers, layersBeforeDraw + 1, "Drawing Diamond shape on SVG canvas should create a new layer");
+
+  // Directly move, resize & rotate that selected layer on the SVG canvas!
+  const beforeMove = api.getSnapshot().selectedLayer;
+  const layerGroupMock = globalThis.document.createElementNS("http://www.w3.org/2000/svg", "g");
+  layerGroupMock.dataset = { layerId: beforeMove.id };
+  svgCanvas.dispatchEvent({ type: "pointerdown", button: 0, clientX: 200, clientY: 200, target: layerGroupMock });
+  svgCanvas.dispatchEvent({ type: "pointermove", clientX: 264, clientY: 232 });
+  svgCanvas.dispatchEvent({ type: "pointerup", clientX: 264, clientY: 232 });
+  const afterMove = api.getSnapshot().selectedLayer;
+  assert(afterMove.x !== beforeMove.x || afterMove.y !== beforeMove.y, "Dragging SVG layer should update its (x, y) coordinates");
+
+  const resizeHandleMock = globalThis.document.createElementNS("http://www.w3.org/2000/svg", "rect");
+  resizeHandleMock.dataset = { handle: "se" };
+  svgCanvas.dispatchEvent({ type: "pointerdown", button: 0, clientX: 280, clientY: 280, target: resizeHandleMock });
+  svgCanvas.dispatchEvent({ type: "pointermove", clientX: 340, clientY: 340 });
+  svgCanvas.dispatchEvent({ type: "pointerup", clientX: 340, clientY: 340 });
+  assert(api.getSnapshot().selectedLayer.width !== afterMove.width, "Dragging SE handle should resize active layer width");
+
+  const rotHandleMock = globalThis.document.createElementNS("http://www.w3.org/2000/svg", "circle");
+  rotHandleMock.dataset = { handle: "rotate" };
+  svgCanvas.dispatchEvent({ type: "pointerdown", button: 0, clientX: 300, clientY: 100, target: rotHandleMock });
+  svgCanvas.dispatchEvent({ type: "pointermove", clientX: 420, clientY: 240 });
+  svgCanvas.dispatchEvent({ type: "pointerup", clientX: 420, clientY: 240 });
+  assert(api.getSnapshot().selectedLayer.rotation !== beforeMove.rotation, "Dragging rotate handle should rotate active layer");
+
+  // 10e. Verify Stamp Studio interactive SVG canvas & Material/Bake Asset Drops
+  api.switchWorkspace("stamp");
+  assert.equal(api.getSnapshot().viewChannel, "vector", "Stamp Studio should also use interactive Vector SVG canvas");
+  api.switchWorkspace("material");
+  const matStage = globalThis.document.querySelector(".viewport-stage");
+  const matDropPayload = JSON.stringify({ assetKind: "material", id: materials[2].id, name: materials[2].name });
+  matStage.dispatchEvent({
+    type: "drop",
+    dataTransfer: { getData: (t) => (t === "application/x-frontier-asset" ? matDropPayload : "") },
+  });
+  assert.equal(api.getSnapshot().id, materials[2].id, "Dropping Material onto Material 3D stage should apply it");
+
+  api.switchWorkspace("paint");
+  const paintPane = globalThis.document.querySelector(".viewport-split-pane");
+  assert(paintPane, "Missing paint pane for asset drop");
+  const paintLayersBefore = api.getSnapshot().layers;
+  paintPane.dispatchEvent({
+    type: "drop",
+    dataTransfer: { getData: (t) => (t === "application/x-frontier-asset" ? kentePayload : "") },
+  });
+  assert.equal(api.getSnapshot().layers, paintLayersBefore + 1, "Dropping African Pattern onto Paint viewport should add Pattern Fill layer");
+
+  api.switchWorkspace("bake");
+  const bakeStage = globalThis.document.querySelector(".viewport-stage");
+  const meshDropPayload = JSON.stringify({ assetKind: "mesh", id: "torus", name: "Torus Knot Study" });
+  bakeStage.dispatchEvent({
+    type: "drop",
+    dataTransfer: { getData: (t) => (t === "application/x-frontier-asset" ? meshDropPayload : "") },
+  });
+  assert.equal(api.getSnapshot().studyId, "torus", "Dropping Bake Study Mesh onto Baking viewport should load it");
 });
 
 console.log(`\nALL ${results.length} VALIDATION SUITES PASSED CLEANLY`);

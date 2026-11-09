@@ -1,12 +1,15 @@
 /*==========================================================================================================================================
                                                          STARTERCATALOGBRIDGE.JS
 ==========================================================================================================================================*/
-/* Bridges all reusable Frontier pattern archives (Geometric, Heritage, Textiles, Stitches, Rugs, Ornamental) plus new Noise-Scaled Patterns
-   and Stamp/Decal starter kits into unified ArtworkStackEngine layer+modifier documents. */
+/* Bridges all reusable Frontier pattern archives (Geometric, African Heritage & Inlay, Islamic Heritage, Textiles, Stitches, Rugs,
+   Collections, and Noise-Scaled Procedural Patterns) plus Stamp/Decal starter kits into unified ArtworkStackEngine documents. */
 
 import { patternStarterCatalog, patternStarter } from "./patternDocument.js";
+import { ornamentalCatalog } from "./ornamentalConstructions.js";
+import { collectionPatterns } from "./patternCollections.js";
 import {
   ARTWORK_SIZE,
+  artworkDocumentToSvgString,
   createArtworkDocument,
   createArtworkLayer,
   createDefaultModifier,
@@ -121,6 +124,71 @@ export const NOISE_SCALED_STARTERS = [
       return doc;
     },
   },
+  {
+    id: "african-procedural-kente-loom",
+    name: "African Kente Noise Loom",
+    group: "African Patterns",
+    description: "Procedural African Kente warp bands and supplementary-weft diamond blocks modulated by weave noise.",
+    build: () => {
+      const doc = createArtworkDocument("pattern");
+      doc.name = "African Kente Noise Loom";
+      doc.background = { enabled: true, color: "#191512", opacity: 1, finish: "cotton", roughness: 0.86, metalness: 0, height: 0 };
+      doc.layers = [
+        createArtworkLayer("motif", {
+          name: "Gold & Rust Warp Blocks",
+          transform: { x: 256, y: 256, width: 52, height: 42, rotation: 0 },
+          shape: { motifType: "square", color: "#e1a82e", colorB: "#b83b28", strokeWidth: 2, strokeColor: "#14110f" },
+          surface: { finish: "cotton", roughness: 0.78, metalness: 0, height: 0.34, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+          modifiers: [
+            { ...createDefaultModifier("array-grid"), layout: "brick", columns: 8, rows: 8, spanX: 512, spanY: 512, alternateColor: true, colorB: "#1d5d46" },
+            { ...createDefaultModifier("noise-scale"), noiseType: "fbm", target: "scale-color", minScale: 0.68, maxScale: 1.15, frequency: 3, colorB: "#b83b28", seamless: true },
+          ],
+        }),
+        createArtworkLayer("motif", {
+          name: "Kente Diamond Inlay",
+          transform: { x: 256, y: 256, width: 32, height: 32, rotation: 0 },
+          shape: { motifType: "diamond", color: "#f6e7c1", strokeWidth: 3, strokeColor: "#12100e" },
+          surface: { finish: "foil", roughness: 0.35, metalness: 0.35, height: 0.48, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+          modifiers: [
+            { ...createDefaultModifier("array-grid"), layout: "grid", columns: 4, rows: 4, spanX: 512, spanY: 512 },
+          ],
+        }),
+      ];
+      return doc;
+    },
+  },
+  {
+    id: "african-procedural-ndebele-chevrons",
+    name: "Ndebele Stepped Geometry",
+    group: "African Patterns",
+    description: "African Ndebele-inspired crisp architectural chevron bands with contrasting chalk borders and stepped lozenges.",
+    build: () => {
+      const doc = createArtworkDocument("pattern");
+      doc.name = "Ndebele Stepped Geometry";
+      doc.background = { enabled: true, color: "#f2eadb", opacity: 1, finish: "ceramic", roughness: 0.72, metalness: 0, height: 0 };
+      doc.layers = [
+        createArtworkLayer("motif", {
+          name: "Primary Ochre Chevrons",
+          transform: { x: 256, y: 256, width: 96, height: 84, rotation: 0 },
+          shape: { motifType: "chevron", color: "#c9492f", strokeWidth: 6, strokeColor: "#15171a" },
+          surface: { finish: "ink", roughness: 0.58, metalness: 0, height: 0.32, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+          modifiers: [
+            { ...createDefaultModifier("array-grid"), layout: "grid", columns: 4, rows: 4, spanX: 512, spanY: 512, alternateColor: true, colorB: "#25667d" },
+          ],
+        }),
+        createArtworkLayer("motif", {
+          name: "Accent Lozenge Center",
+          transform: { x: 256, y: 256, width: 38, height: 38, rotation: 0 },
+          shape: { motifType: "diamond", color: "#e8b43c", strokeWidth: 4, strokeColor: "#15171a" },
+          surface: { finish: "ceramic", roughness: 0.36, metalness: 0, height: 0.42, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+          modifiers: [
+            { ...createDefaultModifier("array-grid"), layout: "grid", columns: 4, rows: 4, spanX: 512, spanY: 512 },
+          ],
+        }),
+      ];
+      return doc;
+    },
+  },
 ];
 
 export const STAMP_STARTERS = [
@@ -183,6 +251,42 @@ export const STAMP_STARTERS = [
     },
   },
   {
+    id: "stamp-african-adire-seal",
+    name: "African Adire Concentric Stamp",
+    group: "African Motifs",
+    build: () => {
+      const doc = createArtworkDocument("stamp");
+      doc.name = "African Adire Concentric Stamp";
+      doc.layers = [
+        createArtworkLayer("motif", {
+          name: "Indigo Halo Ring",
+          transform: { x: 256, y: 256, width: 340, height: 340, rotation: 0 },
+          shape: { motifType: "ring", innerRatio: 0.78, color: "#5e8ab8", strokeWidth: 4, strokeColor: "#e6dec8" },
+          surface: { finish: "ink", roughness: 0.74, metalness: 0, height: 0.14, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+          modifiers: [
+            { ...createDefaultModifier("inset-echo"), copies: 3, stepPx: 74, alternateColor: true, colorB: "#d6c89d" },
+          ],
+        }),
+        createArtworkLayer("motif", {
+          name: "Resist Bead Dots",
+          transform: { x: 256, y: 256, width: 16, height: 16, rotation: 0 },
+          shape: { motifType: "circle", color: "#f1e8d0" },
+          surface: { finish: "ink", roughness: 0.7, metalness: 0, height: 0.22, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+          modifiers: [
+            { ...createDefaultModifier("array-radial"), count: 16, radius: 132, rings: 1 },
+          ],
+        }),
+        createArtworkLayer("motif", {
+          name: "Central Kola Star",
+          transform: { x: 256, y: 256, width: 92, height: 92, rotation: 45 },
+          shape: { motifType: "star", points: 4, innerRatio: 0.42, color: "#e8c27a" },
+          surface: { finish: "ink", roughness: 0.65, metalness: 0, height: 0.25, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+        }),
+      ];
+      return doc;
+    },
+  },
+  {
     id: "stamp-scuff-cluster",
     name: "Noise Scuff & Abrasion",
     group: "Surface Wear",
@@ -232,20 +336,77 @@ export const STAMP_STARTERS = [
   },
 ];
 
+function normalizePatternGroup(rawGroup = "", name = "") {
+  const g = String(rawGroup || "");
+  const n = String(name || "");
+  if (
+    /african/i.test(g) ||
+    /african/i.test(n) ||
+    /kente|bogolanfini|kuba|ndebele|yoruba|ndop|tibeb|kanga/i.test(n)
+  ) {
+    return "African Patterns";
+  }
+  return g || "Archive";
+}
+
 export function listPatternStarterCatalog() {
-  const legacy = patternStarterCatalog.map((entry) => ({
-    id: `legacy:${entry.name}`,
-    name: entry.name,
-    group: entry.group || "Archive",
-    legacyName: entry.name,
-  }));
-  const noiseOnes = NOISE_SCALED_STARTERS.map((s) => ({
-    id: s.id,
-    name: s.name,
-    group: s.group,
-    starter: s,
-  }));
-  return [...noiseOnes, ...legacy];
+  const seen = new Set();
+  const entries = [];
+  const push = (item) => {
+    if (!item?.name || item.name === "Blank") return;
+    const key = item.name.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    entries.push(item);
+  };
+
+  // Surface Noise-Scaled Procedural + Featured African Loom first
+  for (const s of NOISE_SCALED_STARTERS) {
+    push({
+      id: s.id,
+      name: s.name,
+      group: normalizePatternGroup(s.group, s.name),
+      subGroup: s.group,
+      description: s.description || "",
+      starter: s,
+    });
+  }
+
+  // Merge Heritage (African traditional + Islamic geometry) & African Inlay / Collections
+  for (const entry of patternStarterCatalog) {
+    push({
+      id: `legacy:${entry.name}`,
+      name: entry.name,
+      group: normalizePatternGroup(entry.group, entry.name),
+      subGroup: entry.group || "Archive",
+      description: entry.description || "",
+      legacyName: entry.name,
+    });
+  }
+
+  for (const entry of ornamentalCatalog) {
+    push({
+      id: `ornamental:${entry.name}`,
+      name: entry.name,
+      group: normalizePatternGroup(entry.group, entry.name),
+      subGroup: entry.group || "Architectural Inlay",
+      description: entry.description || "",
+      legacyName: entry.name,
+    });
+  }
+
+  for (const entry of collectionPatterns) {
+    push({
+      id: `collection:${entry.name}`,
+      name: entry.name,
+      group: normalizePatternGroup(entry.group, entry.name),
+      subGroup: entry.group || "Collections",
+      description: entry.description || "",
+      legacyName: entry.name,
+    });
+  }
+
+  return entries;
 }
 
 export function listStampStarterCatalog() {
@@ -259,7 +420,10 @@ export function listStampStarterCatalog() {
 
 function mapLegacyKind(kind) {
   switch (kind) {
+    case "path": return "svg-path";
+    case "flower": return "flower";
     case "circle": return "circle";
+    case "ellipse": return "circle";
     case "ring": return "ring";
     case "rect": return "square";
     case "diamond": return "diamond";
@@ -274,10 +438,10 @@ function mapLegacyKind(kind) {
 }
 
 export function loadStarterAsArtworkDocument(entry) {
-  if (entry.starter) return structuredClone(entry.starter.build());
-  const legacy = patternStarter(entry.legacyName || entry.name);
+  if (entry?.starter) return structuredClone(entry.starter.build());
+  const legacy = patternStarter(entry?.legacyName || entry?.name);
   const doc = createArtworkDocument("pattern");
-  doc.name = legacy.name || entry.name;
+  doc.name = legacy.name || entry?.name || "Pattern";
   doc.background = {
     enabled: true,
     color: legacy.background || "#eee8dc",
@@ -293,12 +457,16 @@ export function loadStarterAsArtworkDocument(entry) {
     showGrid: false,
   };
 
-  // Convert legacy flat layers into clean ArtworkStackEngine layers (preserving colors, positions, finishes, and geometry)
-  doc.layers = (legacy.layers || []).slice(0, 48).map((l, idx) => {
+  doc.layers = (legacy.layers || []).slice(0, 256).map((l, idx) => {
     const fin = l.finish || "ink";
     const roughMap = { ink: 0.62, cotton: 0.84, wool: 0.94, ceramic: 0.2, foil: 0.26 };
     const metalMap = { ink: 0, cotton: 0, wool: 0, ceramic: 0, foil: 1 };
     const isText = l.kind === "text";
+    const strokeW = Number(l.strokeWidth || 0);
+    const fillEnabled = l.fillEnabled !== undefined
+      ? l.fillEnabled !== false
+      : !(l.kind === "path" && strokeW > 0 && !l.fillSource && l.color === "#222222");
+    const motifType = l.kind === "path" && !l.path ? "square" : mapLegacyKind(l.kind);
     return createArtworkLayer(isText ? "text" : "motif", {
       name: l.name || `Layer ${idx + 1}`,
       visible: l.visible !== false,
@@ -312,21 +480,35 @@ export function loadStarterAsArtworkDocument(entry) {
         rotation: l.rotation ?? 0,
       },
       shape: {
-        motifType: mapLegacyKind(l.kind),
+        motifType,
+        svgPath: l.path || "",
         sides: l.sides || 6,
-        points: l.points || 5,
-        innerRatio: l.innerRatio ?? 0.46,
-        cornerRadius: l.radius ? Math.min(0.5, l.radius / Math.max(1, l.width || 64)) : 0.12,
-        strokeWidth: l.strokeWidth || 0,
-        strokeColor: l.stroke || "#16181c",
+        points: l.starPoints || l.points || 5,
+        innerRatio: l.innerRadius ?? l.innerRatio ?? 0.46,
+        cornerRadius: l.cornerRadius ? Math.min(0.5, l.cornerRadius / 100) : l.radius ? Math.min(0.5, l.radius / Math.max(1, l.width || 64)) : 0.0,
+        strokeWidth: strokeW,
+        strokeColor: l.stroke || l.color || "#16181c",
+        fillEnabled,
+        fillRule: l.fillRule || "evenodd",
+        flipX: !!l.flipX,
+        flipY: !!l.flipY,
         color: l.color || "#e8c27a",
         fillMode: "solid",
       },
-      ...(isText && l.text ? { text: { ...l.text } } : {}),
+      ...(isText && l.text ? {
+        text: {
+          value: l.text.value || "Text",
+          fontFamily: l.text.fontFamily || "DM Sans",
+          fontWeight: l.text.fontWeight || 600,
+          fontSize: l.text.fontSize || 48,
+          letterSpacing: l.text.letterSpacing || 0,
+          align: l.text.align || "center",
+        },
+      } : {}),
       surface: {
         finish: fin,
-        roughness: roughMap[fin] ?? 0.6,
-        metalness: metalMap[fin] ?? 0,
+        roughness: l.roughness ?? roughMap[fin] ?? 0.6,
+        metalness: l.metalness ?? metalMap[fin] ?? 0,
         height: l.relief ?? 0.16,
         enableAlbedo: true,
         enableRoughness: true,
@@ -336,4 +518,21 @@ export function loadStarterAsArtworkDocument(entry) {
     });
   });
   return doc;
+}
+
+const _svgPreviewCache = new Map();
+
+export function getArtworkPreviewSvg(entry, mode = "pattern", size = 72) {
+  const cacheKey = `${mode}:${entry?.id || entry?.name}:${size}`;
+  if (_svgPreviewCache.has(cacheKey)) return _svgPreviewCache.get(cacheKey);
+  let svg = "";
+  try {
+    const doc = loadStarterAsArtworkDocument(entry);
+    svg = artworkDocumentToSvgString(doc, { width: size, height: size, showBg: mode !== "stamp" });
+  } catch {
+    svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 64 64"><rect x="8" y="8" width="48" height="48" rx="8" fill="#46525a"/></svg>`;
+  }
+  if (_svgPreviewCache.size > 400) _svgPreviewCache.clear();
+  _svgPreviewCache.set(cacheKey, svg);
+  return svg;
 }

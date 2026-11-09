@@ -31,7 +31,10 @@ export const MOTIF_TYPES = [
   { id: "arc", label: "Arc" },
   { id: "teardrop", label: "Teardrop" },
   { id: "leaf", label: "Botanical Leaf" },
+  { id: "flower", label: "5-Petal Flower" },
   { id: "gear", label: "Cog / Gear" },
+  { id: "line", label: "Line / Stroke" },
+  { id: "svg-path", label: "Vector Path" },
 ];
 
 export const MODIFIER_DEFINITIONS = [
@@ -222,6 +225,10 @@ export function createArtworkLayer(kind = "motif", overrides = {}) {
       innerRatio: 0.46,
       cornerRadius: 0.18,
       strokeWidth: 0,
+      fillEnabled: true,
+      fillRule: "evenodd",
+      flipX: false,
+      flipY: false,
       fillMode: "solid", // "solid" | "linear" | "radial"
       color: "#e8c27a",
       colorB: "#5a7692",
@@ -369,6 +376,10 @@ export function evaluateLayerInstances(layer, docSize = ARTWORK_SIZE, mode = "pa
     metalness: layer.surface.metalness ?? 0.0,
     outlineWidth: layer.shape.strokeWidth || 0,
     outlineColor: layer.shape.strokeColor || "#16181c",
+    fillEnabled: layer.shape.fillEnabled !== false,
+    fillRule: layer.shape.fillRule || "evenodd",
+    flipX: !!layer.shape.flipX,
+    flipY: !!layer.shape.flipY,
     chipAmount: 0,
     chipScale: 10,
     chipSeed: 707,
@@ -718,6 +729,17 @@ function drawMotifPath(ctx, inst) {
     ctx.quadraticCurveTo(hw, -hh * 0.2, 0, hh);
     ctx.quadraticCurveTo(-hw, -hh * 0.2, 0, -hh);
     ctx.closePath();
+  } else if (t === "flower") {
+    for (let p = 0; p < 5; p++) {
+      const a = (p * 72 * Math.PI) / 180;
+      const cx = Math.sin(a) * hh * 0.46;
+      const cy = -Math.cos(a) * hh * 0.46;
+      ctx.ellipse(cx, cy, hw * 0.36, hh * 0.54, a, 0, Math.PI * 2);
+      ctx.moveTo(0, 0);
+    }
+  } else if (t === "line") {
+    ctx.moveTo(-hw, 0);
+    ctx.lineTo(hw, 0);
   } else if (t === "gear") {
     const teeth = Math.max(6, Math.min(20, Math.round(inst.points || 8)));
     const innerR = hw * clamp(inst.innerRatio ?? 0.72, 0.45, 0.9);
@@ -894,6 +916,7 @@ export function renderArtworkDocument(doc, targetSize = 512, { tileMode = "singl
           ctx.scale(scale, scale);
           ctx.translate(px, py);
           ctx.rotate((inst.rotation * Math.PI) / 180);
+          ctx.scale(inst.flipX ? -1 : 1, inst.flipY ? -1 : 1);
           ctx.globalAlpha = clamp(inst.opacity, 0, 1);
 
           if (layer.kind === "text" && inst.text) {
@@ -908,13 +931,34 @@ export function renderArtworkDocument(doc, targetSize = 512, { tileMode = "singl
               ctx.strokeStyle = inst.outlineColor || "#141619";
               ctx.strokeText(t.value || "", 0, 0);
             }
+          } else if (inst.motifType === "svg-path" && inst.svgPath && typeof Path2D !== "undefined") {
+            ctx.save();
+            ctx.scale(inst.width / 100, inst.height / 100);
+            ctx.translate(-50, -50);
+            const p2d = new Path2D(inst.svgPath);
+            if (inst.fillEnabled !== false) {
+              ctx.fillStyle = fillStyle;
+              ctx.fill(p2d, inst.fillRule === "nonzero" ? "nonzero" : "evenodd");
+            }
+            if (inst.outlineWidth > 0) {
+              ctx.lineCap = "round";
+              ctx.lineJoin = "round";
+              ctx.lineWidth = inst.outlineWidth;
+              ctx.strokeStyle = isAlbedo ? (inst.outlineColor || inst.color || "#141619") : fillStyle;
+              ctx.stroke(p2d);
+            }
+            ctx.restore();
           } else {
             drawMotifPath(ctx, inst);
-            ctx.fillStyle = fillStyle;
-            ctx.fill("evenodd");
-            if (isAlbedo && inst.outlineWidth > 0) {
-              ctx.lineWidth = inst.outlineWidth;
-              ctx.strokeStyle = inst.outlineColor || "#141619";
+            if (inst.fillEnabled !== false && inst.motifType !== "line") {
+              ctx.fillStyle = fillStyle;
+              ctx.fill("evenodd");
+            }
+            if (inst.outlineWidth > 0 || inst.motifType === "line") {
+              ctx.lineCap = "round";
+              ctx.lineJoin = "round";
+              ctx.lineWidth = Math.max(1, inst.outlineWidth || 4);
+              ctx.strokeStyle = isAlbedo ? (inst.outlineColor || "#141619") : fillStyle;
               ctx.stroke();
             }
           }
@@ -1230,3 +1274,166 @@ export function evaluateArtworkDocument(doc, targetSize = 384) {
     },
   };
 }
+
+function escapeXml(s) {
+  return String(s || "").replace(/[&<>'"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", "\"": "&quot;" }[c]));
+}
+
+function buildSvgMotifMarkup(inst, fillAttr, strokeAttr, strokeW, gradDefs, gid) {
+  const w = Math.max(1, inst.width), h = Math.max(1, inst.height);
+  const hw = w * 0.5, hh = h * 0.5;
+  const t = inst.motifType || "circle";
+  let effectiveFill = inst.fillEnabled === false || t === "line" ? "none" : fillAttr;
+  if (effectiveFill !== "none" && (inst.fillMode === "linear" || inst.fillMode === "radial")) {
+    const id = `${gid}-g`;
+    if (inst.fillMode === "radial") {
+      gradDefs.push(`<radialGradient id="${id}"><stop offset="0%" stop-color="${inst.color}"/><stop offset="100%" stop-color="${inst.colorB || "#1a1e24"}"/></radialGradient>`);
+    } else {
+      const a = ((inst.gradientAngle ?? 45) * Math.PI) / 180;
+      const x1 = (50 - Math.cos(a) * 50).toFixed(1), y1 = (50 - Math.sin(a) * 50).toFixed(1);
+      const x2 = (50 + Math.cos(a) * 50).toFixed(1), y2 = (50 + Math.sin(a) * 50).toFixed(1);
+      gradDefs.push(`<linearGradient id="${id}" x1="${x1}%" y1="${y1}%" x2="${x2}%" y2="${y2}%"><stop offset="0%" stop-color="${inst.color}"/><stop offset="100%" stop-color="${inst.colorB || "#1a1e24"}"/></linearGradient>`);
+    }
+    effectiveFill = `url(#${id})`;
+  }
+  const common = `fill="${effectiveFill}" fill-rule="${inst.fillRule === "nonzero" ? "nonzero" : "evenodd"}" stroke="${strokeW > 0 || t === "line" ? strokeAttr : "none"}" stroke-width="${t === "line" ? Math.max(1, strokeW || 4) : strokeW}" stroke-linecap="round" stroke-linejoin="round"`;
+
+  if (t === "svg-path" && inst.svgPath) {
+    return `<path d="${escapeXml(inst.svgPath)}" transform="scale(${(w / 100).toFixed(4)} ${(h / 100).toFixed(4)}) translate(-50 -50)" ${common}/>`;
+  }
+  if (t === "circle") return `<ellipse cx="0" cy="0" rx="${hw}" ry="${hh}" ${common}/>`;
+  if (t === "ring") {
+    const inner = clamp(inst.innerRatio ?? 0.5, 0.1, 0.92);
+    const rxI = hw * inner, ryI = hh * inner;
+    const d = `M${-hw} 0 A${hw} ${hh} 0 1 0 ${hw} 0 A${hw} ${hh} 0 1 0 ${-hw} 0 Z M${-rxI} 0 A${rxI} ${ryI} 0 1 1 ${rxI} 0 A${rxI} ${ryI} 0 1 1 ${-rxI} 0 Z`;
+    return `<path d="${d}" ${common}/>`;
+  }
+  if (t === "square") return `<rect x="${-hw}" y="${-hh}" width="${w}" height="${h}" ${common}/>`;
+  if (t === "roundedRect") {
+    const r = Math.min(hw, hh) * clamp(inst.cornerRadius ?? 0.22, 0, 1);
+    return `<rect x="${-hw}" y="${-hh}" width="${w}" height="${h}" rx="${r}" ry="${r}" ${common}/>`;
+  }
+  if (t === "diamond") return `<polygon points="0,${-hh} ${hw},0 0,${hh} ${-hw},0" ${common}/>`;
+  if (t === "triangle") return `<polygon points="0,${-hh} ${hw},${hh} ${-hw},${hh}" ${common}/>`;
+  if (t === "hexagon") {
+    const sides = Math.max(3, Math.min(12, Math.round(inst.sides || 6)));
+    const pts = Array.from({ length: sides }, (_, i) => {
+      const a = (i / sides) * Math.PI * 2 - Math.PI * 0.5;
+      return `${(Math.cos(a) * hw).toFixed(2)},${(Math.sin(a) * hh).toFixed(2)}`;
+    }).join(" ");
+    return `<polygon points="${pts}" ${common}/>`;
+  }
+  if (t === "star") {
+    const n = Math.max(3, Math.min(16, Math.round(inst.points || 5)));
+    const inner = clamp(inst.innerRatio ?? 0.45, 0.15, 0.85);
+    const pts = Array.from({ length: n * 2 }, (_, i) => {
+      const a = (i / (n * 2)) * Math.PI * 2 - Math.PI * 0.5;
+      const r = i % 2 === 0 ? 1 : inner;
+      return `${(Math.cos(a) * hw * r).toFixed(2)},${(Math.sin(a) * hh * r).toFixed(2)}`;
+    }).join(" ");
+    return `<polygon points="${pts}" ${common}/>`;
+  }
+  if (t === "cross") {
+    const arm = clamp(inst.innerRatio ?? 0.34, 0.1, 0.8);
+    const aw = hw * arm, ah = hh * arm;
+    return `<polygon points="${-aw},${-hh} ${aw},${-hh} ${aw},${-ah} ${hw},${-ah} ${hw},${ah} ${aw},${ah} ${aw},${hh} ${-aw},${hh} ${-aw},${ah} ${-hw},${ah} ${-hw},${-ah} ${-aw},${-ah}" ${common}/>`;
+  }
+  if (t === "chevron") {
+    const th = hh * 0.48;
+    const midY = -hh + (hh * 2 - th);
+    return `<polygon points="${-hw},${th} 0,${-hh} ${hw},${th} ${hw},${hh} 0,${midY} ${-hw},${hh}" ${common}/>`;
+  }
+  if (t === "stripe") return `<rect x="${-hw}" y="${(-hh * 0.28).toFixed(2)}" width="${w}" height="${(h * 0.56).toFixed(2)}" ${common}/>`;
+  if (t === "line") return `<line x1="${-hw}" y1="0" x2="${hw}" y2="0" ${common}/>`;
+  if (t === "flower") {
+    return [0, 72, 144, 216, 288].map((a) => `<ellipse cx="0" cy="${(-hh * 0.46).toFixed(2)}" rx="${(hw * 0.36).toFixed(2)}" ry="${(hh * 0.54).toFixed(2)}" transform="rotate(${a})" ${common}/>`).join("");
+  }
+  if (t === "arc") {
+    const inner = clamp(inst.innerRatio ?? 0.55, 0.2, 0.85);
+    const ri = hw * inner;
+    const d = `M${-hw} 0 A${hw} ${hw} 0 0 1 ${hw} 0 L${ri} 0 A${ri} ${ri} 0 0 0 ${-ri} 0 Z`;
+    return `<path d="${d}" ${common}/>`;
+  }
+  if (t === "teardrop") {
+    const d = `M0 ${-hh} C${hw * 0.85} ${-hh * 0.15} ${hw} ${hh * 0.55} 0 ${hh} C${-hw} ${hh * 0.55} ${-hw * 0.85} ${-hh * 0.15} 0 ${-hh} Z`;
+    return `<path d="${d}" ${common}/>`;
+  }
+  if (t === "leaf") {
+    const d = `M0 ${-hh} Q${hw} ${-hh * 0.2} 0 ${hh} Q${-hw} ${-hh * 0.2} 0 ${-hh} Z`;
+    return `<path d="${d}" ${common}/>`;
+  }
+  if (t === "gear") {
+    const teeth = Math.max(6, Math.min(20, Math.round(inst.points || 8)));
+    const innerR = hw * clamp(inst.innerRatio ?? 0.72, 0.45, 0.9);
+    const holeR = hw * 0.32;
+    let d = "";
+    for (let i = 0; i < teeth * 2; i++) {
+      const a0 = (i / (teeth * 2)) * Math.PI * 2;
+      const a1 = ((i + 0.65) / (teeth * 2)) * Math.PI * 2;
+      const r = i % 2 === 0 ? hw : innerR;
+      d += `${i === 0 ? "M" : "L"}${(Math.cos(a0) * r).toFixed(2)} ${(Math.sin(a0) * r).toFixed(2)} L${(Math.cos(a1) * r).toFixed(2)} ${(Math.sin(a1) * r).toFixed(2)} `;
+    }
+    d += `Z M${holeR} 0 A${holeR} ${holeR} 0 1 0 ${-holeR} 0 A${holeR} ${holeR} 0 1 0 ${holeR} 0 Z`;
+    return `<path d="${d}" ${common}/>`;
+  }
+  return `<ellipse cx="0" cy="0" rx="${hw}" ry="${hh}" ${common}/>`;
+}
+
+export function artworkDocumentLayersSvg(doc, { idPrefix = "art" } = {}) {
+  const size = doc.size || ARTWORK_SIZE;
+  const gradDefs = [];
+  const groups = [];
+  const folderMap = new Map((doc.layers || []).filter((l) => l.kind === "folder").map((f) => [f.id, f]));
+  const isVisible = (lyr) => {
+    if (!lyr.visible) return false;
+    if (lyr.parentId && folderMap.has(lyr.parentId)) return isVisible(folderMap.get(lyr.parentId));
+    return true;
+  };
+  const wraps = doc.mode === "pattern"
+    ? [[0, 0], [-size, 0], [size, 0], [0, -size], [0, size], [-size, -size], [size, -size], [-size, size], [size, size]]
+    : [[0, 0]];
+
+  let instSeq = 0;
+  for (const layer of doc.layers || []) {
+    if (layer.kind === "folder" || !isVisible(layer)) continue;
+    const instances = layer.kind === "gradient"
+      ? [{
+          x: size * 0.5, y: size * 0.5, width: size, height: size, rotation: 0,
+          motifType: "square", fillMode: layer.shape.fillMode || "linear",
+          color: layer.shape.color, colorB: layer.shape.colorB, gradientAngle: layer.shape.gradientAngle ?? 45,
+          opacity: 1, fillEnabled: true, outlineWidth: 0,
+        }]
+      : evaluateLayerInstances(layer, size, doc.mode);
+
+    const parts = [];
+    for (const inst of instances) {
+      for (const [wx, wy] of wraps) {
+        const px = inst.x + wx, py = inst.y + wy;
+        const margin = Math.max(inst.width || 64, inst.height || 64) * 0.8 + 40;
+        if (px < -margin || px > size + margin || py < -margin || py > size + margin) continue;
+        const xf = `translate(${px.toFixed(2)} ${py.toFixed(2)}) rotate(${(inst.rotation || 0).toFixed(2)}) scale(${inst.flipX ? -1 : 1} ${inst.flipY ? -1 : 1})`;
+        if (layer.kind === "text" && inst.text) {
+          const t = inst.text;
+          const anchor = t.align === "left" ? "start" : t.align === "right" ? "end" : "middle";
+          parts.push(`<text transform="${xf}" opacity="${clamp(inst.opacity, 0, 1)}" text-anchor="${anchor}" dominant-baseline="central" font-family="${escapeXml(t.fontFamily || "DM Sans")}, sans-serif" font-weight="${t.fontWeight || 600}" font-size="${t.fontSize || 48}" letter-spacing="${t.letterSpacing || 0}" fill="${inst.color}" ${inst.outlineWidth > 0 ? `stroke="${inst.outlineColor || "#141619"}" stroke-width="${inst.outlineWidth}"` : ""}>${escapeXml(t.value || "")}</text>`);
+        } else {
+          const markup = buildSvgMotifMarkup(inst, inst.color || "#e8c27a", inst.outlineColor || inst.color || "#141619", inst.outlineWidth || 0, gradDefs, `${idPrefix}-${instSeq++}`);
+          parts.push(`<g transform="${xf}" opacity="${clamp(inst.opacity, 0, 1)}">${markup}</g>`);
+        }
+      }
+    }
+    groups.push(`<g data-layer-id="${escapeXml(layer.id)}" opacity="${clamp(layer.opacity ?? 1, 0, 1)}" style="mix-blend-mode:${(layer.blend || "Normal").toLowerCase()};cursor:${layer.locked ? "default" : "move"}">${parts.join("")}</g>`);
+  }
+  return { defs: gradDefs.join(""), body: groups.join("") };
+}
+
+export function artworkDocumentToSvgString(doc, { width = 512, height = 512, showBg = true } = {}) {
+  const size = doc.size || ARTWORK_SIZE;
+  const { defs, body } = artworkDocumentLayersSvg(doc);
+  const bg = doc.background || {};
+  const bgRect = showBg && bg.enabled
+    ? `<rect width="${size}" height="${size}" fill="${bg.color || "#171a1f"}" opacity="${clamp(bg.opacity ?? 1, 0, 1)}"/>`
+    : "";
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${size} ${size}"><defs>${defs}</defs>${bgRect}${body}</svg>`;
+}
+

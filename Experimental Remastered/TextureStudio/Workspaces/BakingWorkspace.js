@@ -827,8 +827,52 @@ export function mountBakingWorkspace(root, appBridge) {
   };
   rafId = requestAnimationFrame(tick);
 
+  function applyAsset(payload) {
+    if (!payload) return false;
+    if (payload.assetKind === "mesh") {
+      const mId = payload.raw?.bakeId || payload.id;
+      if (BAKE_STUDY_SHAPES.some((s) => s.id === mId)) {
+        state.studyId = mId;
+        studySelect.value = mId;
+        studyPair = createBakeStudyPair(state.studyId);
+        state.bakedSurface = null;
+        state.bakedSdf = null;
+        if (bakedTex) { bakedTex.dispose(); bakedTex = null; }
+        rebuildPreviewMeshes();
+        updateInspectedMapView();
+        renderLeftColumn();
+        rebuildInspector();
+        Toast(`Loaded High/Low study "${payload.name}" for baking`);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  stage.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+    stage.classList.add("canvas-drop-active");
+  });
+  stage.addEventListener("dragleave", () => stage.classList.remove("canvas-drop-active"));
+  stage.addEventListener("drop", (e) => {
+    e.preventDefault();
+    stage.classList.remove("canvas-drop-active");
+    let payload = null;
+    try {
+      const rawJson = e.dataTransfer?.getData("application/x-frontier-asset") || e.dataTransfer?.getData("text/plain");
+      if (rawJson) {
+        const parsed = JSON.parse(rawJson);
+        payload = parsed.raw ? parsed : appBridge.resolveAssetPayload?.(parsed.assetKind, parsed.id);
+      }
+    } catch {}
+    if (!payload) payload = appBridge.activeDragAsset;
+    if (payload) applyAsset(payload);
+  });
+
   return {
     name: "Baking",
+    applyAsset,
     getSnapshot: () => ({ studyId: state.studyId, selected: [...state.selectedChannels], hasSdf: !!state.bakedSdf, hasSurface: !!state.bakedSurface }),
     dispose() {
       disposed = true;

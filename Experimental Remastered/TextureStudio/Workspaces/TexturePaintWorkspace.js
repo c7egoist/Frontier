@@ -1536,8 +1536,137 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   };
   rafId = requestAnimationFrame(tick);
 
+  const resolveDropPayload = (e) => {
+    let payload = null;
+    try {
+      const rawJson = e.dataTransfer?.getData("application/x-frontier-asset") || e.dataTransfer?.getData("text/plain");
+      if (rawJson) {
+        const parsed = JSON.parse(rawJson);
+        payload = parsed.raw ? parsed : appBridge.resolveAssetPayload?.(parsed.assetKind, parsed.id);
+      }
+    } catch {}
+    return payload || appBridge.activeDragAsset || null;
+  };
+
+  function applyAsset(payload, dropInfo = {}) {
+    if (!payload) return false;
+    if (payload.assetKind === "material") {
+      const m = payload.raw;
+      const l = createPaintLayer("material", {
+        res,
+        name: m.name || "Material Layer",
+        material: { presetId: m.id, presetName: m.name, color: m.color, roughness: m.roughness, metalness: m.metalness, height: 0, grainScale: 10, grainStrength: 0.08 },
+      });
+      state.doc.layers.push(l);
+      state.doc.selectedLayerId = l.id;
+      renderLeftColumn();
+      rebuildInspector();
+      refreshComposite();
+      Toast(`Applied Material "${m.name}" to Paint Stack`);
+      return true;
+    }
+    if (payload.assetKind === "pattern") {
+      const doc = loadStarterAsArtworkDocument(payload.raw);
+      const ev = evaluateArtworkDocument(doc, 512);
+      const l = createPaintLayer("fill", {
+        res,
+        name: doc.name || "Pattern Fill",
+        fill: { color: "#ffffff", roughness: 0.45, metalness: 0.1, height: 0, patternRepeats: 2, patternData: { ...ev, name: doc.name } },
+      });
+      state.doc.layers.push(l);
+      state.doc.selectedLayerId = l.id;
+      renderLeftColumn();
+      rebuildInspector();
+      refreshComposite();
+      Toast(`Applied Pattern "${doc.name}" to Paint Mesh`);
+      return true;
+    }
+    if (payload.assetKind === "stamp") {
+      const doc = loadStarterAsArtworkDocument(payload.raw);
+      const ev = evaluateArtworkDocument(doc, 192);
+      state.brush.stampData = ev;
+      state.brush.stampName = doc.name || payload.name;
+      if (gpuPaint.isActive) gpuPaint.ensureStampTexture(ev);
+      selectTool("stamp");
+
+      // If dropped directly over 3D/2D canvas, place the stamp immediately at drop target!
+      if (dropInfo.event) {
+        const evDrop = dropInfo.event;
+        let hitUv = null;
+        if (dropInfo.pane === "2d") hitUv = uvFromPaneEvent(evDrop);
+        else {
+          const hit = raycastMeshFromEvent(evDrop);
+          if (hit?.uv) hitUv = { u: hit.uv.x, v: hit.uv.y };
+        }
+        if (hitUv) {
+          const layer = getTargetPaintableLayer(true);
+          if (layer && !layer.locked) {
+            const snap = snapshotSelectedLayer();
+            let committed = false;
+            if (gpuPaint.isActive) {
+              gpuPaint.beginStroke();
+              gpuPaint.dabStroke({ mode: "2d", uv: hitUv, uvRadius: Math.max(0.05, state.brush.pixelRadius / res), brush: state.brush, partFilter: layer.partFilter ?? -1, seed: strokeSeedCounter++ });
+              committed = gpuPaint.commitStrokeToLayer(layer, state.brush, state.doc.editingMask);
+            } else {
+              const acc = createStrokeAccumulator(res);
+              applyBrushDabUV({ strokeAccum: acc, cues: meshCues, u: hitUv.u, v: hitUv.v, pixelRadius: Math.max(20, state.brush.pixelRadius), brush: state.brush, activePartFilter: layer.partFilter ?? -1 });
+              committed = commitStrokeAccumulator(layer, acc, state.brush, state.doc.editingMask);
+            }
+            if (committed && snap) pushUndoSnapshot(snap);
+            else gpuPaint.disposeSnapshot(snap);
+            refreshComposite();
+            Toast(`Stamped "${state.brush.stampName}" at UV (${hitUv.u.toFixed(2)}, ${hitUv.v.toFixed(2)})`);
+            return true;
+          }
+        }
+      }
+      Toast(`Loaded Stamp "${state.brush.stampName}" into Brush`);
+      return true;
+    }
+    if (payload.assetKind === "brush") {
+      const b = payload.raw;
+      if (b.tool) selectTool(b.tool);
+      else if (b.tip) {
+        state.brush.tip = b.tip;
+        if (b.hardness) state.brush.hardness = b.hardness;
+        selectTool("paint");
+      }
+      rebuildInspector();
+      Toast(`Equipped "${b.name}"`);
+      return true;
+    }
+    if (payload.assetKind === "mesh") {
+      const mId = payload.raw?.paintId || payload.id;
+      if (PAINT_MESH_LIST.some((p) => p.id === mId)) {
+        state.meshId = mId;
+        state.customGeo = null;
+        meshSelect.value = mId;
+        rebuildPaintMesh();
+        Toast(`Switched paint mesh to "${payload.name}"`);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  for (const [paneName, paneEl] of [["3d", pane3D], ["2d", pane2D]]) {
+    paneEl.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+      stage.classList.add("canvas-drop-active");
+    });
+    paneEl.addEventListener("dragleave", () => stage.classList.remove("canvas-drop-active"));
+    paneEl.addEventListener("drop", (e) => {
+      e.preventDefault();
+      stage.classList.remove("canvas-drop-active");
+      const payload = resolveDropPayload(e);
+      if (payload) applyAsset(payload, { source: "drop", pane: paneName, event: e });
+    });
+  }
+
   return {
     name: "Texture Paint",
+    applyAsset,
     applyBridgedMaterial(matParams) {
       const l = createPaintLayer("material", {
         res,

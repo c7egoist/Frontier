@@ -103,35 +103,24 @@ export function mountMaterialWorkspace(root, appBridge) {
 
   const grid = Construct("div", "studio-grid");
 
-  // ----------------------------------------------------------------- LEFT: LIBRARY
+  // ----------------------------------------------------------------- LEFT: SCENE & SHADER STRATA OUTLINER (CATALOG MOVED TO BOTTOM ASSET BROWSER)
   const leftCol = Construct("aside", "studio-column");
   leftCol.append(
     Construct("div", "panel-heading", [
-      Construct("h2", null, "Material Library"),
-      Construct("span", "panel-heading-meta", `${MATERIAL_CATALOG.length} PRESETS`),
+      Construct("h2", null, "Material Scene & Strata"),
+      Construct("span", "panel-heading-meta", "LOOK-DEV STAGE"),
     ]),
   );
   const leftScroll = Construct("div", "panel-scroll");
   const leftInner = Construct("div", "panel-scroll-inner");
-
-  const searchInput = Construct("input");
-  searchInput.type = "search";
-  searchInput.placeholder = "Filter materials (metal, paint, denim…)";
-  const searchBar = Construct("div", "search-bar", [ConstructGlyph("Search"), searchInput]);
-  leftInner.append(searchBar);
-
-  const categories = ["All", ...new Set(MATERIAL_CATALOG.map((m) => m.category || "Surface"))].slice(0, 9);
-  const catStrip = Construct("div", "chip-strip");
-  leftInner.append(catStrip);
-
-  const listWrap = Construct("div");
-  leftInner.append(listWrap);
+  const sceneSummaryWrap = Construct("div");
+  leftInner.append(sceneSummaryWrap);
   leftScroll.append(leftInner);
   leftCol.append(
     leftScroll,
     Construct("div", "panel-footer", [
       Construct("span", null, "Procedural Multi-Strata Shader"),
-      Construct("span", null, "TOML v1 Ready"),
+      Construct("span", null, "Materials in Bottom Browser"),
     ]),
   );
 
@@ -308,57 +297,94 @@ export function mountMaterialWorkspace(root, appBridge) {
   }
 
   // ----------------------------------------------------------------- UI RENDERERS
-  function renderCategoryChips() {
-    catStrip.innerHTML = "";
-    for (const cat of categories) {
-      const btn = Construct("button", "chip-btn" + (state.category === cat ? " active" : ""), cat);
-      btn.type = "button";
+  function renderLeftOutliner() {
+    sceneSummaryWrap.innerHTML = "";
+    const p = state.params;
+
+    const activeRow = Construct("div", "stack-row active", [
+      (() => {
+        const t = Construct("div", "stack-row-thumb");
+        t.style.background = p.color || "#888";
+        return t;
+      })(),
+      Construct("div", "stack-row-info", [
+        Construct("span", "stack-row-title", p.name || "Procedural Material"),
+        Construct("span", "stack-row-sub", `${p.category || "Surface"} · ${Math.round((p.roughness ?? 0.3) * 100)}% R · ${Math.round((p.metalness ?? 0) * 100)}% M`),
+      ]),
+    ]);
+    sceneSummaryWrap.append(Construct("div", "property-label", "Active Material Layer"), activeRow);
+
+    sceneSummaryWrap.append(Construct("div", "property-label", "Preview Mesh Geometry"));
+    const meshList = Construct("div");
+    for (const [label, id] of shapeOptions) {
+      const btn = Construct("div", "stack-row" + (state.shape === id ? " active" : ""), [
+        Construct("div", "stack-row-thumb", ConstructGlyph("Cube")),
+        Construct("div", "stack-row-info", [
+          Construct("span", "stack-row-title", label),
+          Construct("span", "stack-row-sub", id === "shaderball" ? "Multi-cavity look-dev target" : "UV-mapped surface sample"),
+        ]),
+      ]);
       btn.addEventListener("click", () => {
-        state.category = cat;
-        renderCategoryChips();
-        renderCatalogList();
+        state.shape = id;
+        shapeSelect.value = id;
+        rebuildMeshAndMaterial();
+        renderLeftOutliner();
       });
-      catStrip.append(btn);
+      meshList.append(btn);
     }
+    sceneSummaryWrap.append(meshList);
+
+    sceneSummaryWrap.append(Construct("div", "property-label", "Studio Lighting Backdrop"));
+    const envStrip = Construct("div", "chip-strip");
+    for (const [label, val, hex] of backdropOptions) {
+      const cb = Construct("button", "chip-btn" + (state.backdrop === val ? " active" : ""), label);
+      cb.type = "button";
+      cb.addEventListener("click", () => {
+        state.backdrop = val;
+        bgSelect.value = val;
+        scene.background = new THREE.Color(hex);
+        renderLeftOutliner();
+      });
+      envStrip.append(cb);
+    }
+    sceneSummaryWrap.append(envStrip);
+
+    const browseBtn = Construct("button", "action-button warm", [
+      ConstructGlyph("Grid"),
+      Construct("span", null, `Browse ${MATERIAL_CATALOG.length} Materials in Asset Browser`),
+    ]);
+    browseBtn.type = "button";
+    browseBtn.style.width = "100%";
+    browseBtn.style.marginTop = "10px";
+    browseBtn.addEventListener("click", () => appBridge.focusAssetCategory?.("materials"));
+    sceneSummaryWrap.append(browseBtn);
   }
 
-  function renderCatalogList() {
-    listWrap.innerHTML = "";
-    const q = state.search.trim().toLowerCase();
-    const filtered = MATERIAL_CATALOG.filter((m) => {
-      if (state.category !== "All" && m.category !== state.category) return false;
-      if (!q) return true;
-      return (
-        m.name.toLowerCase().includes(q) ||
-        (m.category || "").toLowerCase().includes(q) ||
-        (m.label || "").toLowerCase().includes(q)
-      );
-    });
-
-    const gridCards = Construct("div", "swatch-grid");
-    for (const item of filtered) {
-      const card = Construct("button", "preset-card" + (item.id === state.selectedId ? " active" : ""));
-      card.type = "button";
-
-      const thumb = Construct("div", "preset-thumb");
-      const sphere = document.createElement("div");
-      const metalBoost = item.metalness > 0.6 ? "radial-gradient(circle at 34% 28%, rgba(255,255,255,0.68), transparent 46%)," : "radial-gradient(circle at 34% 28%, rgba(255,255,255,0.34), transparent 52%),";
-      const coatGlaze = item.coat > 0.4 ? "linear-gradient(135deg, rgba(255,255,255,0.22), transparent 60%)," : "";
-      sphere.style.cssText = `width:40px;height:40px;border-radius:50%;background:${metalBoost}${coatGlaze}${item.color};box-shadow:inset -6px -8px 14px rgba(0,0,0,0.55), 0 4px 12px rgba(0,0,0,0.45);`;
-      thumb.append(sphere);
-
-      card.append(thumb, Construct("strong", null, item.name), Construct("small", null, item.category || "Surface"));
-      card.addEventListener("click", () => {
-        state.selectedId = item.id;
-        state.params = normalizeMaterial(item);
-        rebuildInspector();
-        syncMaterialLive();
-        renderCatalogList();
-        Broadcast();
-      });
-      gridCards.append(card);
+  function applyAsset(payload) {
+    if (!payload) return false;
+    if (payload.assetKind === "material") {
+      const item = payload.raw || MATERIAL_CATALOG.find((m) => m.id === payload.id);
+      if (!item) return false;
+      state.selectedId = item.id;
+      state.params = normalizeMaterial(item);
+      rebuildInspector();
+      syncMaterialLive();
+      renderLeftOutliner();
+      Broadcast();
+      Toast(`Applied "${item.name}" onto Material Stage`);
+      return true;
     }
-    listWrap.append(gridCards);
+    if (payload.assetKind === "mesh") {
+      const mId = payload.id;
+      const mapped = shapeOptions.some(([, id]) => id === mId) ? mId : "shaderball";
+      state.shape = mapped;
+      shapeSelect.value = mapped;
+      rebuildMeshAndMaterial();
+      renderLeftOutliner();
+      Toast(`Previewing ${mapped} geometry`);
+      return true;
+    }
+    return false;
   }
 
   function rebuildInspector() {
@@ -510,19 +536,38 @@ export function mountMaterialWorkspace(root, appBridge) {
     Broadcast();
   }
 
-  // ----------------------------------------------------------------- EVENTS & LOOP
-  searchInput.addEventListener("input", () => {
-    state.search = searchInput.value;
-    renderCatalogList();
+  // ----------------------------------------------------------------- EVENTS, DROP & LOOP
+  stage.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+    stage.classList.add("canvas-drop-active");
   });
+  stage.addEventListener("dragleave", () => stage.classList.remove("canvas-drop-active"));
+  stage.addEventListener("drop", (e) => {
+    e.preventDefault();
+    stage.classList.remove("canvas-drop-active");
+    let payload = null;
+    try {
+      const rawJson = e.dataTransfer?.getData("application/x-frontier-asset") || e.dataTransfer?.getData("text/plain");
+      if (rawJson) {
+        const parsed = JSON.parse(rawJson);
+        payload = parsed.raw ? parsed : appBridge.resolveAssetPayload?.(parsed.assetKind, parsed.id);
+      }
+    } catch {}
+    if (!payload) payload = appBridge.activeDragAsset;
+    if (payload) applyAsset(payload);
+  });
+
   shapeSelect.addEventListener("change", () => {
     state.shape = shapeSelect.value;
     rebuildMeshAndMaterial();
+    renderLeftOutliner();
   });
   bgSelect.addEventListener("change", () => {
     state.backdrop = bgSelect.value;
     const found = backdropOptions.find(([, val]) => val === state.backdrop);
     scene.background = new THREE.Color(found ? found[2] : "#0d0e11");
+    renderLeftOutliner();
   });
   btnRotate.addEventListener("click", () => {
     state.autoRotate = !state.autoRotate;
@@ -546,8 +591,7 @@ export function mountMaterialWorkspace(root, appBridge) {
 
   updateLights();
   rebuildMeshAndMaterial();
-  renderCategoryChips();
-  renderCatalogList();
+  renderLeftOutliner();
   rebuildInspector();
 
   const tick = () => {
@@ -561,7 +605,8 @@ export function mountMaterialWorkspace(root, appBridge) {
 
   return {
     name: "Material",
-    getSnapshot: () => ({ id: state.params.id, name: state.params.name }),
+    applyAsset,
+    getSnapshot: () => ({ id: state.params.id, name: state.params.name, shape: state.shape }),
     dispose() {
       disposed = true;
       cancelAnimationFrame(rafId);
