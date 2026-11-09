@@ -1,11 +1,19 @@
 #!/usr/bin/env python3
-"""Standalone HTTP preview for the Remastered Asset Inspector."""
+"""Run the standalone Vehicle Blueprint editor preview on 0.0.0.0:8086."""
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 
-class InspectorHandler(SimpleHTTPRequestHandler):
+class AssetBlueprintHandler(SimpleHTTPRequestHandler):
+    def do_GET(self):
+        if self.path in ("/", "/index.html"):
+            self.send_response(302)
+            self.send_header("Location", "/Experimental%20Remastered/AssetInspector/")
+            self.end_headers()
+            return
+        super().do_GET()
+
     def end_headers(self):
         self.send_header("Cache-Control", "no-store")
         super().end_headers()
@@ -13,7 +21,7 @@ class InspectorHandler(SimpleHTTPRequestHandler):
 
 if __name__ == "__main__":
     root = Path(__file__).resolve().parents[2]
-    handler = partial(InspectorHandler, directory=str(root))
+    handler = partial(AssetBlueprintHandler, directory=str(root))
     server = ThreadingHTTPServer(("0.0.0.0", 8086), handler)
-    print(f"Asset Inspector serving {root} on http://0.0.0.0:8086/Experimental%20Remastered/AssetInspector/", flush=True)
+    print(f"Standalone ControlVehicle Blueprint Editor serving on http://0.0.0.0:8086/", flush=True)
     server.serve_forever()
