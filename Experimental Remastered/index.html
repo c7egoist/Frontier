@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Experimental Remastered — Frontier</title>
+    <link rel="stylesheet" href="./UVEditor/UVEditor.css" />
+    <style>
+        html, body { overflow: auto; }
+        body { display: grid; place-items: center; padding: 24px; }
+        .hub { width: min(860px, 100%); background: #121212; border: 1px solid rgba(255,255,255,0.08); border-radius: 26px; padding: 28px; }
+        .hub-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+        .hub-head h1 { font-size: 28px; font-weight: 300; letter-spacing: -0.6px; }
+        .hub-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+        .hub-card { display: flex; flex-direction: column; gap: 8px; padding: 20px; border-radius: 20px; background: #1b1b1b; border: 1px solid rgba(255,255,255,0.07); text-decoration: none; color: inherit; }
+        .hub-card:hover { background: #232323; border-color: rgba(232, 194, 122, 0.45); }
+        .hub-card strong { font-size: 18px; font-weight: 400; color: #f2f2f2; }
+        .hub-card p { font-size: 12px; color: #8c8c8c; line-height: 1.5; }
+        .hub-tag { align-self: flex-start; padding: 3px 9px; border-radius: 999px; font-size: 9.5px; letter-spacing: 0.9px; background: rgba(239, 244, 207, 0.14); color: #eff4cf; }
+    </style>
+</head>
+<body>
+    <main class="hub">
+        <div class="hub-head">
+            <div>
+                <span class="brand-mark">Frontier<span class="brand-dot">.</span></span>
+                <h1>Experimental Remastered</h1>
+            </div>
+            <span class="experimental">SUN + FLUID STUDIO SYSTEM</span>
+        </div>
+        <div class="hub-grid">
+            <a class="hub-card" href="./UVEditor/">
+                <span class="hub-tag">UV STUDIO · BLENDER + IMPORTANCE + UDIM</span>
+                <strong>UV Editor &amp; Importance Packer</strong>
+                <p>Synchronized 2D UV/UDIM Atlas &amp; 3D WebGL2 Mesh Viewport, LSCM conformal unwrapping, full Blender UV editing tools &amp; hotkeys, multi-UDIM management (1001+), and importance-based target space allocation packing.</p>
+            </a>
+        </div>
+    </main>
+</body>
+</html>
