@@ -1,6 +1,6 @@
 # Experimental Remastered
 
-Unified **Sun Inspector + Fluid Editor** studio interface across Frontier's interactive simulation tools:
+Unified **Sun Inspector + Fluid Editor** studio interface across Frontier's interactive simulation tools. For shared component/layout patterns, see the [Experimental Remastered UI Component Guidelines](./UI_COMPONENT_GUIDELINES.md); `CLAUDE.md` points contributors there and uses Vehicle Lab as the Outliner / Stage / Inspector reference.
 
 - **EditorInterface (`Experimental Remastered/EditorInterface/`)** — Redesigned **Particle Studio** wrapping the unmodified `eos` WebGPU particle, light fibre, molecular physics, lightning, and 3D force-field engine (`ForceFieldVisualization` + `ParticleFieldReadback` + `SoftwarePreviewEngine`).
 - **FractureEditor (`Experimental Remastered/FractureEditor/`)** — Redesigned **Fracture Studio** wrapping all 6 `eb353da2` fracture engines (`EngineeringBakedFracture`, `FastRuntimeFracture`, `ConvexPartitioning` Griffith/LEFM/Voronoi/Dendritic, `Piece SDF`, `RigidBodyDynamics`, and `CelestialAtmosphereModel` Sun/Atmosphere/Clouds) under the identical Sun + Fluid studio system.

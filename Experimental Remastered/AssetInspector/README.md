@@ -1,6 +1,6 @@
 # Vehicle Lab
 
-A standalone vehicle inspection studio using the same dark, rounded-panel, outliner-plus-inspector design language as the Particle and Photometric studios. The centerpiece is a real-time 3D render of the Vehicle HMI's authored **ControlVehicle**; the right inspector exposes its engineering parameters, and a compact response dock below the Stage edits the engine, turbo and tyre curves.
+A standalone vehicle inspection studio using the same dark, rounded-panel, Outliner / Stage / Inspector design language as the Particle and Photometric studios. This is the reference implementation for new remastered UI components; see the [shared UI Component Guidelines](../UI_COMPONENT_GUIDELINES.md). The centerpiece is a real-time 3D render of the Vehicle HMI's authored **ControlVehicle**; the right inspector exposes its engineering parameters, and a compact response dock below the Stage edits the engine, turbo and tyre curves.
 
 ## Launch
 
