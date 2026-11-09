@@ -27,6 +27,9 @@ import {
   compositePaintDocument,
   sampleCompositedAtUV,
   CURVE_PRESETS,
+  COLOUR_DYNAMIC_MODES,
+  COLOUR_GRADIENT_PRESETS,
+  OPACITY_DYNAMIC_MODES,
   getToolChannels,
   resolveDabVariation,
   rgbaPixelsToSurfaceMaps,
@@ -51,6 +54,8 @@ import {
   ActionRow,
   MetricTrio,
   ChannelMaskRow,
+  FilterDropdownPill,
+  MultiColourRow,
   CurveRow,
   SmoothScroll,
   OpenScope,
@@ -190,6 +195,17 @@ export function mountTexturePaintWorkspace(root, appBridge) {
         flow: 0.0,
       },
       colourDynamics: {
+        mode: "solid", // "solid" | "stroke-gradient" | "multicolour" | "multicolour-cycle" | "temperature" | "rainbow" | "velocity"
+        gradientPreset: "ember",
+        gradientStops: ["#ff3d2e", "#ff9d3b", "#ffe38e"],
+        paletteColors: ["#ff3d2e", "#2fe6a7", "#63a8ff", "#ffd166"],
+        gradientLength: 36,
+        gradientWrap: "pingpong", // "clamp" | "loop" | "pingpong"
+        temperatureShift: 0.35,
+        opacityMode: "constant", // "constant" | "fade-out" | "fade-in" | "bell" | "pulse" | "velocity" | "curve"
+        opacityJitter: 0.0,
+        opacityMin: 0.18,
+        opacityPulseFreq: 0.45,
         hueJitter: 0.0,
         satJitter: 0.0,
         valJitter: 0.0,
@@ -824,10 +840,15 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       ? (Math.atan2(dir.dot(bitang), dir.dot(tang)) * 180) / Math.PI
       : 0;
 
+    const strokeSpeed = Math.min(1, dist / Math.max(0.02, state.brush.size * 2.2));
     for (let s = 0; s <= steps; s++) {
       temp.lerpVectors(pStart, pEnd, steps === 0 ? 1 : s / steps);
-      const strokeT = Math.min(1, (strokeDabIndex++) / 48);
-      const dabBrush = resolveDabVariation(state.brush, strokeT, strokeSeedCounter++, followAngleDeg);
+      const curIdx = strokeDabIndex++;
+      const strokeT = Math.min(1, curIdx / Math.max(8, state.brush.colourDynamics.gradientLength || 48));
+      const dabBrush = resolveDabVariation(state.brush, strokeT, strokeSeedCounter++, followAngleDeg, {
+        dabIndex: curIdx,
+        speed: strokeSpeed,
+      });
       const dabPos = temp.clone()
         .addScaledVector(tang, dabBrush.scatterU * state.brush.size)
         .addScaledVector(bitang, dabBrush.scatterV * state.brush.size);
@@ -871,12 +892,17 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       ? (Math.atan2(-(uvEnd.v - uvStart.v), uvEnd.u - uvStart.u) * 180) / Math.PI
       : 0;
 
+    const strokeSpeed = Math.min(1, distUv / Math.max(0.006, baseUvRad * 2.2));
     for (let s = 0; s <= steps; s++) {
       const f = steps === 0 ? 1 : s / steps;
       const mu = uvStart.u + (uvEnd.u - uvStart.u) * f;
       const mv = uvStart.v + (uvEnd.v - uvStart.v) * f;
-      const strokeT = Math.min(1, (strokeDabIndex++) / 48);
-      const dabBrush = resolveDabVariation(state.brush, strokeT, strokeSeedCounter++, followAngleDeg);
+      const curIdx = strokeDabIndex++;
+      const strokeT = Math.min(1, curIdx / Math.max(8, state.brush.colourDynamics.gradientLength || 48));
+      const dabBrush = resolveDabVariation(state.brush, strokeT, strokeSeedCounter++, followAngleDeg, {
+        dabIndex: curIdx,
+        speed: strokeSpeed,
+      });
       const du = Math.max(0, Math.min(1, mu + dabBrush.scatterU * baseUvRad));
       const dv = Math.max(0, Math.min(1, mv + dabBrush.scatterV * baseUvRad));
       const dabUvRad = Math.max(0.004, baseUvRad * dabBrush.sizeScale);
@@ -1199,9 +1225,9 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     const tool = state.brush.tool;
 
     if (tool === "paint" || tool === "erase") {
-      // Sub-tabs: Main | Dynamics | Curves
+      // Sub-tabs: Tip & PBR | Jitter & Colour | Curves
       const subTabs = Construct("div", "tool-popup-subtabs");
-      for (const [sid, sLabel] of [["main", "Tip & PBR"], ["dynamics", "Jitter & Color"], ["curves", "Curves"]]) {
+      for (const [sid, sLabel] of [["main", "Tip & PBR"], ["dynamics", "Colour Dynamics"], ["curves", "Curves"]]) {
         const sb = Construct("button", "tool-popup-subtab" + (state.popupSubTab === sid ? " active" : ""), sLabel);
         sb.type = "button";
         sb.addEventListener("click", () => {
@@ -1291,6 +1317,85 @@ export function mountTexturePaintWorkspace(root, appBridge) {
 
         if (tool === "paint") {
           pop.append(Construct("div", "property-label", "Colour Dynamics"));
+          FilterDropdownPill(pop, {
+            Label: "Colour Mode",
+            Prefix: "Mode:",
+            Placeholder: "Filter colour modes...",
+            Transient: true,
+            Options: COLOUR_DYNAMIC_MODES,
+            Read: () => state.brush.colourDynamics.mode,
+            Write: (v) => {
+              state.brush.colourDynamics.mode = v;
+              Broadcast();
+              openToolPopup(null, null, true);
+            },
+          });
+
+          const cdMode = state.brush.colourDynamics.mode;
+          if (cdMode === "stroke-gradient" || cdMode === "multicolour" || cdMode === "multicolour-cycle") {
+            FilterDropdownPill(pop, {
+              Label: "Gradient / Palette Preset",
+              Prefix: "Palette:",
+              Placeholder: "Filter palettes...",
+              Transient: true,
+              Options: COLOUR_GRADIENT_PRESETS,
+              Read: () => state.brush.colourDynamics.gradientPreset,
+              Write: (id, opt) => {
+                state.brush.colourDynamics.gradientPreset = id;
+                if (opt?.stops) {
+                  state.brush.colourDynamics.gradientStops = [...opt.stops];
+                  state.brush.colourDynamics.paletteColors = [...opt.stops];
+                }
+                Broadcast();
+                openToolPopup(null, null, true);
+              },
+            });
+            MultiColourRow(pop, {
+              Label: cdMode === "stroke-gradient" ? "Gradient Colour Stops" : "Multicolour Palette",
+              Transient: true,
+              Read: () => (cdMode === "stroke-gradient" ? state.brush.colourDynamics.gradientStops : state.brush.colourDynamics.paletteColors),
+              Write: (list) => {
+                if (cdMode === "stroke-gradient") state.brush.colourDynamics.gradientStops = list;
+                else state.brush.colourDynamics.paletteColors = list;
+                Broadcast();
+              },
+            });
+            if (cdMode === "stroke-gradient") {
+              makePopupSlider(pop, "Gradient Span (Dabs)", 6, 120, 1, "", () => state.brush.colourDynamics.gradientLength, (v) => { state.brush.colourDynamics.gradientLength = v; });
+              const wrapRow = Construct("div", "chip-strip");
+              for (const [wLabel, wKey] of [["Ping-Pong", "pingpong"], ["Loop", "loop"], ["Clamp", "clamp"]]) {
+                const wb = Construct("button", "chip-btn" + (state.brush.colourDynamics.gradientWrap === wKey ? " active" : ""), wLabel);
+                wb.type = "button";
+                wb.addEventListener("click", () => {
+                  state.brush.colourDynamics.gradientWrap = wKey;
+                  Broadcast();
+                  openToolPopup(null, null, true);
+                });
+                wrapRow.append(wb);
+              }
+              pop.append(Construct("div", "property-label", "Gradient Wrap"), wrapRow);
+            }
+          } else if (cdMode === "temperature") {
+            makePopupSlider(pop, "Warm ↔ Cool Shift", 0, 1, 0.02, "", () => state.brush.colourDynamics.temperatureShift, (v) => { state.brush.colourDynamics.temperatureShift = v; });
+          }
+
+          FilterDropdownPill(pop, {
+            Label: "Opacity Dynamics",
+            Prefix: "Opacity:",
+            Placeholder: "Filter opacity modes...",
+            Transient: true,
+            Options: OPACITY_DYNAMIC_MODES,
+            Read: () => state.brush.colourDynamics.opacityMode,
+            Write: (v) => {
+              state.brush.colourDynamics.opacityMode = v;
+              Broadcast();
+              openToolPopup(null, null, true);
+            },
+          });
+          makePopupSlider(pop, "Opacity Jitter", 0, 0.95, 0.01, "", () => state.brush.colourDynamics.opacityJitter, (v) => { state.brush.colourDynamics.opacityJitter = v; });
+          if (state.brush.colourDynamics.opacityMode !== "constant") {
+            makePopupSlider(pop, "Min Opacity Floor", 0.02, 1, 0.01, "", () => state.brush.colourDynamics.opacityMin, (v) => { state.brush.colourDynamics.opacityMin = v; });
+          }
           makePopupSlider(pop, "Hue Jitter", 0, 1, 0.01, "", () => state.brush.colourDynamics.hueJitter, (v) => { state.brush.colourDynamics.hueJitter = v; });
           makePopupSlider(pop, "Saturation Jitter", 0, 0.8, 0.01, "", () => state.brush.colourDynamics.satJitter, (v) => { state.brush.colourDynamics.satJitter = v; });
           makePopupSlider(pop, "Value Jitter", 0, 0.8, 0.01, "", () => state.brush.colourDynamics.valJitter, (v) => { state.brush.colourDynamics.valJitter = v; });
@@ -1698,6 +1803,79 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     SliderRow(dynSec.Inner, { Label: "Angle Jitter", Minimum: 0, Maximum: 180, Step: 1, Unit: "°", Read: () => state.brush.jitter.angle, Write: (v) => { state.brush.jitter.angle = v; } });
     SliderRow(dynSec.Inner, { Label: "Position Scatter", Minimum: 0, Maximum: 1.5, Step: 0.02, Unit: "r", Read: () => state.brush.jitter.scatter, Write: (v) => { state.brush.jitter.scatter = v; } });
     SliderRow(dynSec.Inner, { Label: "Flow Jitter", Minimum: 0, Maximum: 0.8, Step: 0.01, Read: () => state.brush.jitter.flow, Write: (v) => { state.brush.jitter.flow = v; } });
+
+    FilterDropdownPill(dynSec.Inner, {
+      Label: "Colour Dynamics Mode",
+      Prefix: "Mode:",
+      Placeholder: "Filter colour modes...",
+      Options: COLOUR_DYNAMIC_MODES,
+      Read: () => state.brush.colourDynamics.mode,
+      Write: (v) => { state.brush.colourDynamics.mode = v; rebuildInspector(); },
+    });
+    if (state.brush.colourDynamics.mode === "stroke-gradient" || state.brush.colourDynamics.mode === "multicolour" || state.brush.colourDynamics.mode === "multicolour-cycle") {
+      FilterDropdownPill(dynSec.Inner, {
+        Label: "Gradient / Palette Preset",
+        Prefix: "Preset:",
+        Placeholder: "Filter gradient palettes...",
+        Options: COLOUR_GRADIENT_PRESETS,
+        Read: () => state.brush.colourDynamics.gradientPreset,
+        Write: (id, opt) => {
+          state.brush.colourDynamics.gradientPreset = id;
+          if (opt?.stops) {
+            state.brush.colourDynamics.gradientStops = [...opt.stops];
+            state.brush.colourDynamics.paletteColors = [...opt.stops];
+          }
+          rebuildInspector();
+        },
+      });
+      MultiColourRow(dynSec.Inner, {
+        Label: state.brush.colourDynamics.mode === "stroke-gradient" ? "Gradient Stops" : "Multicolour Swatches",
+        Read: () => (state.brush.colourDynamics.mode === "stroke-gradient" ? state.brush.colourDynamics.gradientStops : state.brush.colourDynamics.paletteColors),
+        Write: (list) => {
+          if (state.brush.colourDynamics.mode === "stroke-gradient") state.brush.colourDynamics.gradientStops = list;
+          else state.brush.colourDynamics.paletteColors = list;
+        },
+      });
+      if (state.brush.colourDynamics.mode === "stroke-gradient") {
+        SliderRow(dynSec.Inner, { Label: "Gradient Span (Dabs)", Minimum: 6, Maximum: 120, Step: 1, Read: () => state.brush.colourDynamics.gradientLength, Write: (v) => { state.brush.colourDynamics.gradientLength = v; } });
+        SegmentedRow(dynSec.Inner, {
+          Label: "Gradient Wrap",
+          Options: [["Ping-Pong", "pingpong"], ["Loop", "loop"], ["Clamp", "clamp"]],
+          Read: () => state.brush.colourDynamics.gradientWrap,
+          Write: (v) => { state.brush.colourDynamics.gradientWrap = v; },
+        });
+      }
+    } else if (state.brush.colourDynamics.mode === "temperature") {
+      SliderRow(dynSec.Inner, { Label: "Warm ↔ Cool Shift", Minimum: 0, Maximum: 1, Step: 0.02, Read: () => state.brush.colourDynamics.temperatureShift, Write: (v) => { state.brush.colourDynamics.temperatureShift = v; } });
+    }
+
+    FilterDropdownPill(dynSec.Inner, {
+      Label: "Opacity Dynamics Mode",
+      Prefix: "Opacity:",
+      Placeholder: "Filter opacity modes...",
+      Options: OPACITY_DYNAMIC_MODES,
+      Read: () => state.brush.colourDynamics.opacityMode,
+      Write: (v) => { state.brush.colourDynamics.opacityMode = v; rebuildInspector(); },
+    });
+    SliderRow(dynSec.Inner, { Label: "Opacity Jitter", Minimum: 0, Maximum: 0.95, Step: 0.01, Read: () => state.brush.colourDynamics.opacityJitter, Write: (v) => { state.brush.colourDynamics.opacityJitter = v; } });
+    SliderRow(dynSec.Inner, {
+      Label: "Min Opacity Floor",
+      Minimum: 0.02,
+      Maximum: 1.0,
+      Step: 0.01,
+      When: () => state.brush.colourDynamics.opacityMode !== "constant",
+      Read: () => state.brush.colourDynamics.opacityMin,
+      Write: (v) => { state.brush.colourDynamics.opacityMin = v; },
+    });
+    SliderRow(dynSec.Inner, {
+      Label: "Pulse Frequency",
+      Minimum: 0.08,
+      Maximum: 2.0,
+      Step: 0.02,
+      When: () => state.brush.colourDynamics.opacityMode === "pulse",
+      Read: () => state.brush.colourDynamics.opacityPulseFreq,
+      Write: (v) => { state.brush.colourDynamics.opacityPulseFreq = v; },
+    });
     SliderRow(dynSec.Inner, { Label: "Hue Jitter", Minimum: 0, Maximum: 1.0, Step: 0.01, Read: () => state.brush.colourDynamics.hueJitter, Write: (v) => { state.brush.colourDynamics.hueJitter = v; } });
     SliderRow(dynSec.Inner, { Label: "Saturation Jitter", Minimum: 0, Maximum: 0.8, Step: 0.01, Read: () => state.brush.colourDynamics.satJitter, Write: (v) => { state.brush.colourDynamics.satJitter = v; } });
     SliderRow(dynSec.Inner, { Label: "Value Jitter", Minimum: 0, Maximum: 0.8, Step: 0.01, Read: () => state.brush.colourDynamics.valJitter, Write: (v) => { state.brush.colourDynamics.valJitter = v; } });

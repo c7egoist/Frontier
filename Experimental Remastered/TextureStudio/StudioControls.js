@@ -343,46 +343,483 @@ export function TextRow(Parent, Binding)
     return Row;
 }
 
+export function FilterDropdownPill(Parent, Binding)
+{
+    const Dropdown = Construct('div', 'pill-dropdown');
+    const Dot = Construct('span', 'row-dot');
+    const GradSw = Construct('span', 'pill-grad-swatch');
+    const DimSpan = Construct('span', 'trigger-dim');
+    const LabelSpan = Construct('span', 'trigger-label');
+    const Chev = ConstructGlyph('ChevronDown', 'glyph chev');
+
+    const Trigger = Construct('button', 'pill-trigger', [Dot, GradSw, DimSpan, LabelSpan, Chev]);
+    Trigger.type = 'button';
+    Trigger.setAttribute('aria-haspopup', 'menu');
+    Trigger.setAttribute('aria-expanded', 'false');
+
+    const Menu = Construct('div', 'pill-menu' + (Binding.AlignRight ? ' align-right' : ''));
+    const SearchInput = document.createElement('input');
+    SearchInput.type = 'text';
+    SearchInput.className = 'pill-menu-search-input';
+    SearchInput.placeholder = Binding.Placeholder || 'Filter...';
+    const SearchBox = Construct('div', 'pill-menu-search', [
+        ConstructGlyph('Search'),
+        SearchInput,
+    ]);
+    const MenuLabel = Construct('div', 'menu-label', Binding.MenuLabel || Binding.Label || 'Select Option');
+    const MenuList = Construct('div', 'pill-menu-list');
+    Menu.append(SearchBox, MenuLabel, MenuList);
+    Dropdown.append(Trigger, Menu);
+
+    const Row = Binding.Compact
+        ? Dropdown
+        : Construct('div', 'property-row dropdown-pill-row', [
+            Binding.Label ? Construct('span', 'property-label', Binding.Label) : null,
+            Dropdown,
+        ]);
+    Parent.append(Row);
+
+    let IsOpen = false;
+    const PositionMenu = () =>
+    {
+        const rect = Trigger.getBoundingClientRect?.();
+        if (!rect || rect.width <= 0) return;
+        const vw = window.innerWidth || 1280;
+        const vh = window.innerHeight || 800;
+        const mw = Math.max(236, Math.min(300, rect.width));
+        Menu.style.position = 'fixed';
+        Menu.style.width = `${mw}px`;
+        Menu.style.left = `${Math.max(8, Math.min(rect.left, vw - mw - 8))}px`;
+        const below = vh - rect.bottom - 12;
+        if (below >= 220 || below >= rect.top)
+        {
+            Menu.style.top = `${Math.min(vh - 60, rect.bottom + 6)}px`;
+            Menu.style.bottom = 'auto';
+        }
+        else
+        {
+            Menu.style.top = 'auto';
+            Menu.style.bottom = `${Math.max(8, vh - rect.top + 6)}px`;
+        }
+    };
+
+    const SetOpen = (Next) =>
+    {
+        IsOpen = !!Next;
+        Menu.classList.toggle('open', IsOpen);
+        Trigger.setAttribute('aria-expanded', IsOpen ? 'true' : 'false');
+        if (IsOpen)
+        {
+            RenderMenu();
+            PositionMenu();
+            if (typeof SearchInput.focus === 'function') SearchInput.focus();
+        }
+    };
+
+    const RenderMenu = () =>
+    {
+        MenuList.innerHTML = '';
+        const q = (SearchInput.value || '').trim().toLowerCase();
+        const opts = (typeof Binding.Options === 'function' ? Binding.Options() : Binding.Options) || [];
+        const cur = Binding.Read ? Binding.Read() : null;
+        let shown = 0;
+
+        for (const opt of opts)
+        {
+            const text = `${opt.label || ''} ${opt.sub || ''}`.toLowerCase();
+            if (q && !text.includes(q)) continue;
+            shown++;
+            const item = Construct('button', 'menu-item');
+            item.type = 'button';
+            item.dataset.optionId = String(opt.id);
+            item.setAttribute('aria-checked', opt.id === cur ? 'true' : 'false');
+
+            if (Array.isArray(opt.stops) && opt.stops.length >= 2)
+            {
+                const bar = Construct('span', 'menu-grad-bar');
+                bar.style.background = `linear-gradient(90deg, ${opt.stops.join(', ')})`;
+                item.append(bar);
+            }
+            else if (opt.dot)
+            {
+                const d = Construct('span', 'row-dot');
+                d.style.background = opt.dot;
+                item.append(d);
+            }
+            const copy = Construct('span', 'menu-item-copy', [
+                Construct('span', 'menu-item-title', opt.label),
+                opt.sub ? Construct('small', 'menu-item-sub', opt.sub) : null,
+            ]);
+            item.append(copy);
+            if (opt.id === cur)
+            {
+                const rad = Construct('span', 'menu-radio');
+                item.append(rad);
+            }
+            item.addEventListener('click', (e) =>
+            {
+                e.stopPropagation();
+                Binding.Write?.(opt.id, opt);
+                SetOpen(false);
+                if (!Binding.Transient) Broadcast();
+                else Sync();
+            });
+            MenuList.append(item);
+        }
+        if (!shown)
+        {
+            MenuList.append(Construct('div', 'menu-empty-hint', 'No matching items'));
+        }
+    };
+
+    const Sync = () =>
+    {
+        const opts = (typeof Binding.Options === 'function' ? Binding.Options() : Binding.Options) || [];
+        const cur = Binding.Read ? Binding.Read() : null;
+        const found = opts.find((o) => o.id === cur) || opts[0];
+        DimSpan.textContent = Binding.Prefix ? `${Binding.Prefix} ` : '';
+        DimSpan.style.display = Binding.Prefix ? '' : 'none';
+        LabelSpan.textContent = found ? found.label : (Binding.TriggerText || 'Choose...');
+
+        if (found?.stops && found.stops.length >= 2)
+        {
+            Dot.style.display = 'none';
+            GradSw.style.display = '';
+            GradSw.style.background = `linear-gradient(90deg, ${found.stops.join(', ')})`;
+        }
+        else if (found?.dot)
+        {
+            GradSw.style.display = 'none';
+            Dot.style.display = '';
+            Dot.style.background = found.dot;
+        }
+        else
+        {
+            Dot.style.display = 'none';
+            GradSw.style.display = 'none';
+        }
+        if (IsOpen) RenderMenu();
+        ApplyAvailability(Row, Binding);
+    };
+
+    Trigger.addEventListener('click', (e) =>
+    {
+        e.stopPropagation();
+        SetOpen(!IsOpen);
+    });
+    SearchInput.addEventListener('input', RenderMenu);
+    SearchInput.addEventListener('click', (e) => e.stopPropagation());
+
+    const onDocDown = (e) =>
+    {
+        if (Dropdown.isConnected === false)
+        {
+            document.removeEventListener('pointerdown', onDocDown);
+            if (typeof window !== 'undefined') window.removeEventListener('keydown', onDocKey);
+            return;
+        }
+        if (IsOpen && !Dropdown.contains?.(e.target)) SetOpen(false);
+    };
+    const onDocKey = (e) =>
+    {
+        if (Dropdown.isConnected === false)
+        {
+            document.removeEventListener('pointerdown', onDocDown);
+            if (typeof window !== 'undefined') window.removeEventListener('keydown', onDocKey);
+            return;
+        }
+        if (IsOpen && e.key === 'Escape') { SetOpen(false); }
+    };
+    document.addEventListener('pointerdown', onDocDown);
+    if (typeof window !== 'undefined') window.addEventListener('keydown', onDocKey);
+
+    if (Binding.Transient) Sync();
+    else Register(Sync);
+    return Row;
+}
+
 export function ChannelMaskRow(Parent, Binding)
 {
     const Channels = [
-        ['albedo', 'Color', 'albedo'],
-        ['roughness', 'Rough', 'rough'],
-        ['metalness', 'Metal', 'metal'],
-        ['height', 'Height', 'height'],
+        ['albedo', 'Albedo', 'Base Colour', 'albedo', '#e8c27a'],
+        ['roughness', 'Roughness', 'Surface Gloss', 'rough', '#2fe6a7'],
+        ['metalness', 'Metalness', 'Conductor Mask', 'metal', '#63a8ff'],
+        ['height', 'Height', 'Relief / Bump', 'height', '#e686b8'],
     ];
-    const Strip = Construct('div', 'pbr-chan-strip');
-    const Buttons = Channels.map(([Key, Title, Kind]) =>
-    {
-        const Btn = Construct('button', `pbr-chan-pill chan-${Kind}`, [
-            Construct('i', 'pbr-chan-dot'),
-            Construct('span', null, Title),
-        ]);
-        Btn.type = 'button';
-        Btn.dataset.channel = Key;
-        Btn.addEventListener('click', () =>
-        {
-            const Current = { ...(Binding.Read() || { albedo: true, roughness: true, metalness: true, height: true }) };
-            Current[Key] = !Current[Key];
-            Binding.Write(Current);
-            if (!Binding.Transient) Broadcast();
-            else Sync();
-        });
-        Strip.append(Btn);
-        return [Key, Btn];
-    });
+
+    const PillsWrap = Construct('div', 'pbr-pill-wrap');
+    const Dropdown = Construct('div', 'pill-dropdown pbr-add-dropdown');
+    const TriggerCount = Construct('span', 'trigger-dim');
+    const Trigger = Construct('button', 'pill-trigger pbr-add-trigger', [
+        ConstructGlyph('Plus', 'glyph'),
+        Construct('span', null, 'Channel'),
+        TriggerCount,
+        ConstructGlyph('ChevronDown', 'glyph chev'),
+    ]);
+    Trigger.type = 'button';
+    Trigger.setAttribute('aria-haspopup', 'menu');
+    Trigger.setAttribute('aria-expanded', 'false');
+
+    const Menu = Construct('div', 'pill-menu pbr-chan-menu');
+    const SearchInput = document.createElement('input');
+    SearchInput.type = 'text';
+    SearchInput.className = 'pill-menu-search-input';
+    SearchInput.placeholder = 'Filter channels...';
+    const SearchBox = Construct('div', 'pill-menu-search', [ConstructGlyph('Search'), SearchInput]);
+    const MenuLabel = Construct('div', 'menu-label', 'Available Channels to Add');
+    const MenuList = Construct('div', 'pill-menu-list');
+
+    const BtnAddAll = Construct('button', null, 'Add All');
+    BtnAddAll.type = 'button';
+    const BtnClearAll = Construct('button', null, 'Clear');
+    BtnClearAll.type = 'button';
+    const QuickBar = Construct('div', 'menu-quick', [BtnAddAll, BtnClearAll]);
+
+    Menu.append(SearchBox, MenuLabel, MenuList, Construct('div', 'menu-sep'), QuickBar);
+    Dropdown.append(Trigger, Menu);
+
+    const Strip = Construct('div', 'pbr-chan-strip', [PillsWrap, Dropdown]);
     const Row = Construct('div', 'property-row channel-mask-row', [
         Construct('span', 'property-label', Binding.Label || 'PBR Channels'),
         Strip,
     ]);
     Parent.append(Row);
 
+    let IsOpen = false;
+    const Commit = (NextMap) =>
+    {
+        Binding.Write(NextMap);
+        if (!Binding.Transient) Broadcast();
+        else Sync();
+    };
+
+    const RenderDropdownOptions = (MapObj) =>
+    {
+        MenuList.innerHTML = '';
+        const q = (SearchInput.value || '').trim().toLowerCase();
+        const available = Channels.filter(([Key, Title, Sub]) =>
+        {
+            if (MapObj[Key] !== false) return false; // already added -> lives as active pill!
+            return !q || `${Title} ${Sub} ${Key}`.toLowerCase().includes(q);
+        });
+
+        for (const [Key, Title, Sub, Kind, DotColor] of available)
+        {
+            const item = Construct('button', `menu-item chan-${Kind}`);
+            item.type = 'button';
+            item.dataset.channel = Key;
+            const dot = Construct('span', 'row-dot');
+            dot.style.background = DotColor;
+            item.append(
+                dot,
+                Construct('span', 'menu-item-copy', [
+                    Construct('span', 'menu-item-title', Title),
+                    Construct('small', 'menu-item-sub', Sub),
+                ]),
+                Construct('span', 'menu-state', '+ Add'),
+            );
+            item.addEventListener('click', (e) =>
+            {
+                e.stopPropagation();
+                const next = { albedo: true, roughness: true, metalness: true, height: true, ...MapObj, [Key]: true };
+                Commit(next);
+            });
+            MenuList.append(item);
+        }
+
+        if (!available.length)
+        {
+            const anyRemaining = Channels.some(([Key]) => MapObj[Key] === false);
+            MenuList.append(
+                Construct(
+                    'div',
+                    'menu-empty-hint',
+                    anyRemaining ? 'No matching channels' : 'All channels added — click × on a pill to return here',
+                ),
+            );
+        }
+    };
+
     const Sync = () =>
     {
-        const MapObj = Binding.Read() || {};
-        Buttons.forEach(([Key, Btn]) => Btn.classList.toggle('active', MapObj[Key] !== false));
+        const MapObj = Binding.Read() || { albedo: true, roughness: true, metalness: true, height: true };
+        PillsWrap.innerHTML = '';
+        let inactiveCount = 0;
+
+        for (const [Key, Title, , Kind, DotColor] of Channels)
+        {
+            const isAdded = MapObj[Key] !== false;
+            if (!isAdded) { inactiveCount++; continue; }
+
+            const Dot = Construct('i', 'pbr-chan-dot');
+            Dot.style.background = DotColor;
+            const RemoveX = Construct('span', 'pbr-chan-remove', ConstructGlyph('Close'));
+            const Pill = Construct('button', `pbr-chan-pill active chan-${Kind}`, [
+                Dot,
+                Construct('span', null, Title),
+                RemoveX,
+            ]);
+            Pill.type = 'button';
+            Pill.dataset.channel = Key;
+            Pill.title = `Remove ${Title} (moves back to Add Channel dropdown)`;
+            Pill.addEventListener('click', (e) =>
+            {
+                e.stopPropagation();
+                const next = { albedo: true, roughness: true, metalness: true, height: true, ...MapObj, [Key]: false };
+                Commit(next);
+            });
+            PillsWrap.append(Pill);
+        }
+
+        if (inactiveCount === Channels.length)
+        {
+            PillsWrap.append(Construct('span', 'pbr-none-hint', 'None selected — add from dropdown'));
+        }
+
+        TriggerCount.textContent = inactiveCount > 0 ? `(${inactiveCount})` : '✓';
+        Trigger.classList.toggle('all-added', inactiveCount === 0);
+        if (IsOpen) RenderDropdownOptions(MapObj);
         ApplyAvailability(Row, Binding);
     };
+
+    const PositionChanMenu = () =>
+    {
+        const rect = Trigger.getBoundingClientRect?.();
+        if (!rect || rect.width <= 0) return;
+        const vw = window.innerWidth || 1280;
+        const vh = window.innerHeight || 800;
+        const mw = 246;
+        Menu.style.position = 'fixed';
+        Menu.style.width = `${mw}px`;
+        Menu.style.left = `${Math.max(8, Math.min(rect.left, vw - mw - 8))}px`;
+        const below = vh - rect.bottom - 12;
+        if (below >= 220 || below >= rect.top)
+        {
+            Menu.style.top = `${Math.min(vh - 60, rect.bottom + 6)}px`;
+            Menu.style.bottom = 'auto';
+        }
+        else
+        {
+            Menu.style.top = 'auto';
+            Menu.style.bottom = `${Math.max(8, vh - rect.top + 6)}px`;
+        }
+    };
+
+    const SetOpen = (Next) =>
+    {
+        IsOpen = !!Next;
+        Menu.classList.toggle('open', IsOpen);
+        Trigger.setAttribute('aria-expanded', IsOpen ? 'true' : 'false');
+        if (IsOpen)
+        {
+            RenderDropdownOptions(Binding.Read() || {});
+            PositionChanMenu();
+            if (typeof SearchInput.focus === 'function') SearchInput.focus();
+        }
+    };
+
+    Trigger.addEventListener('click', (e) =>
+    {
+        e.stopPropagation();
+        SetOpen(!IsOpen);
+    });
+    SearchInput.addEventListener('input', () => RenderDropdownOptions(Binding.Read() || {}));
+    SearchInput.addEventListener('click', (e) => e.stopPropagation());
+    BtnAddAll.addEventListener('click', (e) =>
+    {
+        e.stopPropagation();
+        Commit({ albedo: true, roughness: true, metalness: true, height: true });
+        SetOpen(false);
+    });
+    BtnClearAll.addEventListener('click', (e) =>
+    {
+        e.stopPropagation();
+        Commit({ albedo: false, roughness: false, metalness: false, height: false });
+    });
+
+    const onDocDown = (e) =>
+    {
+        if (Dropdown.isConnected === false) { document.removeEventListener('pointerdown', onDocDown); return; }
+        if (IsOpen && !Dropdown.contains?.(e.target)) SetOpen(false);
+    };
+    document.addEventListener('pointerdown', onDocDown);
+
+    if (Binding.Transient) Sync();
+    else Register(Sync);
+    return Row;
+}
+
+export function MultiColourRow(Parent, Binding)
+{
+    const Strip = Construct('div', 'colour-stops-strip');
+    const PillsWrap = Construct('div', 'colour-stops-pills');
+    const AddBtn = Construct('button', 'pbr-add-trigger pill-trigger colour-add-btn', [
+        ConstructGlyph('Plus'),
+        Construct('span', null, 'Colour'),
+    ]);
+    AddBtn.type = 'button';
+    Strip.append(PillsWrap, AddBtn);
+
+    const Row = Construct('div', 'property-row channel-mask-row', [
+        Construct('span', 'property-label', Binding.Label || 'Palette Stops'),
+        Strip,
+    ]);
+    Parent.append(Row);
+
+    const Sync = () =>
+    {
+        const list = Array.isArray(Binding.Read()) ? [...Binding.Read()] : ['#ff3d2e', '#ff9d3b', '#2fe6a7'];
+        PillsWrap.innerHTML = '';
+        list.forEach((hex, idx) =>
+        {
+            const cInp = document.createElement('input');
+            cInp.type = 'color';
+            cInp.className = 'colour-stop-native';
+            cInp.value = /^#[0-9a-f]{6}$/i.test(hex) ? hex : '#e8c27a';
+            cInp.addEventListener('input', () =>
+            {
+                const next = [...list];
+                next[idx] = cInp.value;
+                Binding.Write(next);
+                if (!Binding.Transient) Broadcast();
+            });
+
+            const chip = Construct('div', 'colour-stop-pill', [
+                cInp,
+                Construct('span', 'colour-stop-hex', cInp.value.toUpperCase()),
+            ]);
+
+            if (list.length > 2)
+            {
+                const rm = Construct('button', 'colour-stop-remove', ConstructGlyph('Close'));
+                rm.type = 'button';
+                rm.title = 'Remove colour stop';
+                rm.addEventListener('click', (e) =>
+                {
+                    e.stopPropagation();
+                    const next = list.filter((_, i) => i !== idx);
+                    Binding.Write(next);
+                    if (!Binding.Transient) Broadcast();
+                    else Sync();
+                });
+                chip.append(rm);
+            }
+            PillsWrap.append(chip);
+        });
+        ApplyAvailability(Row, Binding);
+    };
+
+    AddBtn.addEventListener('click', () =>
+    {
+        const list = Array.isArray(Binding.Read()) ? [...Binding.Read()] : ['#ff3d2e', '#2fe6a7'];
+        const fallbacks = ['#ff3d2e', '#2fe6a7', '#63a8ff', '#ffd166', '#d97aff', '#ff6d6d', '#e8c27a'];
+        const nextHex = fallbacks[list.length % fallbacks.length];
+        list.push(nextHex);
+        Binding.Write(list);
+        if (!Binding.Transient) Broadcast();
+        else Sync();
+    });
+
     if (Binding.Transient) Sync();
     else Register(Sync);
     return Row;

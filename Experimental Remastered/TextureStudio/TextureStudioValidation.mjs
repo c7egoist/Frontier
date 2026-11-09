@@ -61,6 +61,9 @@ const {
   compositePaintDocument,
   sampleCompositedAtUV,
   CURVE_PRESETS,
+  COLOUR_DYNAMIC_MODES,
+  COLOUR_GRADIENT_PRESETS,
+  OPACITY_DYNAMIC_MODES,
   sampleCurve,
   getToolChannels,
   resolveDabVariation,
@@ -227,6 +230,39 @@ await suite("4. Texture Paint Engine: Packed UVs, 3D Strokes, 2D UV Strokes, Flo
   const v1 = resolveDabVariation(dynBrush, 0.9, 102, 25);
   assert.notEqual(v0.color, v1.color, "Colour Dynamics should produce color variation along stroke");
   assert(v0.sizeScale !== v1.sizeScale, "Size Jitter / Stroke Curve should vary dab scale");
+
+  // Stroke Gradient, Multicolour Palette, Rainbow, Temperature & Changing Opacity Dynamics
+  assert(COLOUR_DYNAMIC_MODES.length >= 6 && COLOUR_GRADIENT_PRESETS.length >= 8 && OPACITY_DYNAMIC_MODES.length >= 6);
+  const gradBrush = {
+    tool: "paint", tip: "round", color: "#ffffff", flow: 0.9,
+    colourDynamics: {
+      mode: "stroke-gradient",
+      gradientStops: ["#ff0000", "#0000ff"],
+      gradientLength: 20,
+      gradientWrap: "clamp",
+      opacityMode: "fade-out",
+      opacityMin: 0.1,
+    },
+  };
+  const gStart = resolveDabVariation(gradBrush, 0, 1, 0, { dabIndex: 0 });
+  const gEnd = resolveDabVariation(gradBrush, 1, 2, 0, { dabIndex: 20 });
+  assert.equal(gStart.color, "#ff0000", "Stroke Gradient start must match first stop");
+  assert.equal(gEnd.color, "#0000ff", "Stroke Gradient end must match last stop");
+  assert(gStart.flow > gEnd.flow + 0.5, "Opacity Fade-Out should reduce dab flow/opacity along stroke");
+
+  const multiBrush = {
+    tool: "paint", tip: "round", color: "#ffffff", flow: 0.8,
+    colourDynamics: {
+      mode: "multicolour-cycle",
+      paletteColors: ["#ff2244", "#22eeaa", "#4488ff"],
+      opacityMode: "pulse",
+      opacityMin: 0.2,
+      opacityPulseFreq: 0.5,
+    },
+  };
+  assert.equal(resolveDabVariation(multiBrush, 0, 1, 0, { dabIndex: 0 }).color, "#ff2244");
+  assert.equal(resolveDabVariation(multiBrush, 0, 2, 0, { dabIndex: 1 }).color, "#22eeaa");
+  assert.equal(resolveDabVariation(multiBrush, 0, 3, 0, { dabIndex: 2 }).color, "#4488ff");
 
   const customImgRgba = new Uint8ClampedArray(16 * 16 * 4);
   for (let i = 0; i < 16 * 16; i++) {
@@ -446,15 +482,28 @@ await suite("7. Full TextureStudio Shell & All 5 Workspaces Mount & Switch Clean
       },
       querySelector(sel) { return el.querySelectorAll(sel)[0] || null; },
       querySelectorAll(sel) {
+        const parts = String(sel || "").trim().split(/\s+/).filter(Boolean);
+        if (parts.length > 1) {
+          let pool = [el];
+          for (const p of parts) {
+            const next = [];
+            for (const root of pool) {
+              for (const hit of root.querySelectorAll(p)) if (!next.includes(hit)) next.push(hit);
+            }
+            pool = next;
+          }
+          return pool;
+        }
+        const one = parts[0] || "";
         const out = [];
         const walk = (node) => {
           for (const ch of node.children || []) {
             const cls = String(ch.className || "");
-            const match = sel.startsWith(".")
-              ? cls.split(/\s+/).includes(sel.slice(1))
-              : sel.startsWith("[")
-                ? ch.hasAttribute?.(sel.slice(1, -1).split("=")[0])
-                : String(ch.tagName).toLowerCase() === sel.toLowerCase();
+            const match = one.startsWith(".")
+              ? cls.split(/\s+/).includes(one.slice(1))
+              : one.startsWith("[")
+                ? ch.hasAttribute?.(one.slice(1, -1).split("=")[0])
+                : String(ch.tagName).toLowerCase() === one.toLowerCase();
             if (match) out.push(ch);
             walk(ch);
           }
@@ -679,10 +728,43 @@ await suite("8. GPU Bake/Paint Shaders, Q/Tab/Right-Click Tool Popups & Draggabl
   splitPanes[0].dispatchEvent({ type: "contextmenu", clientX: 221, clientY: 181 });
   let rightPop = globalThis.document.body.querySelectorAll(".tool-popup-menu")[0];
   assert(rightPop, "Right-click on paint viewport did not open Active Tool Popup");
-  assert(rightPop.querySelectorAll(".pbr-chan-pill").length === 4, "Right-click Brush popup must expose PBR channel toggles");
+  assert(rightPop.querySelectorAll(".pbr-chan-pill").length === 4, "Right-click Brush popup must display active PBR channel pills");
+
+  // Verify PBR Pill Removal -> Moves Back Into Filterable Dropdown -> Re-Add Returns as Pill!
+  const popupPillsBefore = rightPop.querySelectorAll(".pbr-chan-pill");
+  const roughPill = popupPillsBefore.find((p) => p.dataset.channel === "roughness");
+  assert(roughPill, "Expected Roughness active pill");
+  roughPill.click(); // Remove Roughness pill!
+  assert.equal(rightPop.querySelectorAll(".pbr-chan-pill").length, 3, "Removing PBR pill must decrease active pills");
+  const addTrigger = rightPop.querySelector(".pbr-add-trigger");
+  assert(addTrigger, "Missing + Channel dropdown trigger in popup");
+  addTrigger.click(); // Open dropdown!
+  const chanMenuItems = rightPop.querySelectorAll(".pbr-chan-menu .menu-item");
+  assert.equal(chanMenuItems.length, 1, "Removed channel (Roughness) must move back into Add Channel dropdown");
+  assert.equal(chanMenuItems[0].dataset.channel, "roughness");
+  // Filter search in dropdown
+  const chanSearch = rightPop.querySelector(".pbr-chan-menu .pill-menu-search-input");
+  chanSearch.value = "rough";
+  chanSearch.dispatchEvent({ type: "input" });
+  assert.equal(rightPop.querySelectorAll(".pbr-chan-menu .menu-item").length, 1, "Dropdown filter should retain Roughness");
+  rightPop.querySelector(".pbr-chan-menu .menu-item").click(); // Re-add!
+  assert.equal(rightPop.querySelectorAll(".pbr-chan-pill").length, 4, "Re-adding from dropdown must restore pill");
+
   const subTabs = rightPop.querySelectorAll(".tool-popup-subtab");
-  assert.equal(subTabs.length, 3, "Right-click Brush popup must expose Tip & PBR / Jitter & Color / Curves subtabs");
-  subTabs[2].click(); // Curves subtab
+  assert.equal(subTabs.length, 3, "Right-click Brush popup must expose Tip & PBR / Colour Dynamics / Curves subtabs");
+  subTabs[1].click(); // Colour Dynamics subtab
+  rightPop = globalThis.document.body.querySelectorAll(".tool-popup-menu")[0];
+  const cdDropdowns = rightPop.querySelectorAll(".pill-dropdown");
+  assert(cdDropdowns.length >= 2, "Colour Dynamics subtab must render filterable Colour Mode & Opacity dropdown chips");
+  const cdTrigger = cdDropdowns[0].querySelector(".pill-trigger");
+  cdTrigger.click();
+  const cdModes = cdDropdowns[0].querySelectorAll(".menu-item");
+  assert(cdModes.some((m) => m.dataset.optionId === "stroke-gradient") && cdModes.some((m) => m.dataset.optionId === "multicolour"), "Colour Dynamics dropdown must offer Stroke Gradient & Multicolour");
+  cdModes.find((m) => m.dataset.optionId === "stroke-gradient").click();
+  rightPop = globalThis.document.body.querySelectorAll(".tool-popup-menu")[0];
+  assert(rightPop.querySelectorAll(".colour-stop-pill").length >= 2, "Selecting Stroke Gradient must expose editable multi-colour gradient stop pills");
+
+  rightPop.querySelectorAll(".tool-popup-subtab")[2].click(); // Curves subtab
   rightPop = globalThis.document.body.querySelectorAll(".tool-popup-menu")[0];
   assert(rightPop.querySelectorAll(".curve-editor-svg").length === 1, "Curves subtab in right-click popup must render SVG curve editor");
 
