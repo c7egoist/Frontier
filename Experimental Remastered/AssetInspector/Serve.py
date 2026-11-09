@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Run the standalone Vehicle Blueprint editor preview on 0.0.0.0:8086."""
+"""Run the standalone Vehicle Lab preview on 0.0.0.0:8086."""
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 
-class AssetBlueprintHandler(SimpleHTTPRequestHandler):
+class VehicleLabHandler(SimpleHTTPRequestHandler):
     def do_GET(self):
         if self.path in ("/", "/index.html"):
             self.send_response(302)
@@ -21,7 +21,7 @@ class AssetBlueprintHandler(SimpleHTTPRequestHandler):
 
 if __name__ == "__main__":
     root = Path(__file__).resolve().parents[2]
-    handler = partial(AssetBlueprintHandler, directory=str(root))
+    handler = partial(VehicleLabHandler, directory=str(root))
     server = ThreadingHTTPServer(("0.0.0.0", 8086), handler)
-    print(f"Standalone ControlVehicle Blueprint Editor serving on http://0.0.0.0:8086/", flush=True)
+    print(f"Vehicle Lab serving on http://0.0.0.0:8086/", flush=True)
     server.serve_forever()
