@@ -25,9 +25,10 @@ test('Outliner inspector exposes authored chassis, powertrain, suspension, tyre 
  for(const token of ['ControlVehicleSockets','VehicleGeometry','EngineSheet','TurbochargerSheet','TransmissionSheet','ChassisSheet','PacejkaParameters','ThermalSpecification','springHz','dampingRatio','coldPressure','surfaceHeat'])assert.ok(Js.includes(token),`missing control/spec ${token}`);
  assert.equal(EngineSheet.TorqueCurve.length,18);assert.equal(TurbochargerSheet.TorqueMultiplierCurve.length,4);assert.equal(PacejkaParameters.pDy1,1.85);
 });
-test('The response dock has editable torque, turbo and Pacejka curves',()=>{
- for(const token of ['data-curve="Torque"','data-curve="Boost"','data-curve="Pacejka"','CurveCanvas','ResetCurve','ExportCurve'])assert.ok(Html.includes(token),`missing curve control ${token}`);
- for(const token of ['pointerdown','pointermove','dblclick','samplePacejka','EngineSheet.TorqueCurve','TurbochargerSheet.TorqueMultiplierCurve'])assert.ok(Js.includes(token),`missing curve behavior ${token}`);
+test('The response dock has editable torque, turbo and Pacejka curves with selectable interpolation',()=>{
+ for(const token of ['data-curve="Torque"','data-curve="Boost"','data-curve="Pacejka"','CurveCanvas','ResetCurve','ExportCurve','id="CurveInterpolation"'])assert.ok(Html.includes(token),`missing curve control ${token}`);
+ for(const mode of ['linear','smooth','ease','step'])assert.ok(Html.includes(`value="${mode}"`),`missing interpolation choice ${mode}`);
+ for(const token of ['pointerdown','pointermove','dblclick','samplePacejka','EngineSheet.TorqueCurve','TurbochargerSheet.TorqueMultiplierCurve','function traceCurve','ctx.bezierCurveTo','mode===\'ease\'','mode===\'step\'','state.interpolation'])assert.ok(Js.includes(token),`missing curve behavior ${token}`);
 });
 test('Ten selectable inspection channels have distinct Stage overlays',()=>{
  const channels=['Thermal','Contact','Slip','Suspension','Normals','BrakeTemp','WheelLoad','RideHeight','AeroLoad','Drivetrain'];
@@ -39,9 +40,9 @@ test('Vehicle components can be attached, tuned, toggled, saved and removed',()=
  for(const token of ['createUserComponent','updateUserComponentMesh','removeUserComponent','componentAnchor','makeUserComponentObject','components:state.components'])assert.ok(Js.includes(token),`missing component action ${token}`);
  for(const type of ['Sensor','Camera','Ballast','Aero Surface','Light'])assert.ok(Html.includes(`value="${type}"`),`missing addable type ${type}`);
 });
-test('Flat SVG studio icons, no 2D viewport grid, and the shared charcoal-card slider styling are present',()=>{
- for(const token of ['--bg-canvas:#0b0b0b','--radius-column:22px','.property-card','.pill-range','.value-pill','.outliner-column','.inspector-column','.tree-glyph svg','.component-dialog'])assert.ok(Css.includes(token),`missing studio style ${token}`);
+test('Font Awesome icons are bundled locally; the 2D viewport grid stays removed',()=>{
+ for(const token of ['--bg-canvas:#0b0b0b','--radius-column:22px','.property-card','.pill-range','.value-pill','.outliner-column','.inspector-column','.fa-icon','.component-dialog','Font Awesome 6 Free'])assert.ok(Css.includes(token),`missing studio style ${token}`);
  assert.ok(!Css.includes('.viewport-stage-wrap::before'),'the flat CSS grid overlay should stay removed');
- assert.ok(Js.includes('const IconPaths='));assert.ok(Read('README.md').includes('Ten selectable Stage inspection channels'));
+ assert.ok(Js.includes('const IconCodes='));assert.ok(fs.existsSync(path.join(Dir,'Fonts/fa-solid-900.woff2')));assert.ok(fs.existsSync(path.join(Dir,'Fonts/LICENSE-Font-Awesome.txt')));assert.ok(Read('README.md').includes('Ten selectable Stage inspection channels'));
 });
 console.log(`ALL PASSED (${Passed}/${Passed})`);

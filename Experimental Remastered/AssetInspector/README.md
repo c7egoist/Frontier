@@ -18,9 +18,10 @@ The WebGL viewport loads the actual ControlVehicle body, tyre and rim FCT1 strea
 ## Inspector features
 
 - Chassis, powertrain, suspension, tyres, thermal and MF6.1 Pacejka values in editable pill sliders.
-- Draggable engine-torque, turbo-multiplier and lateral Pacejka response curves.
+- Draggable engine-torque, turbo-multiplier and lateral Pacejka response curves with per-curve Linear, Smooth spline, Ease in/out or Step/hold interpolation between control points.
 - Ten selectable Stage inspection channels: tyre and brake temperatures, contact patches, slip vectors, suspension travel, surface normals, wheel loads, ride height, aero load and drivetrain torque.
 - Add Sensor, Camera, Ballast, Aero Surface and Light child components; choose a parent and mount point, tune their offsets, toggle visibility, and remove them without changing the shared source mesh.
+- Font Awesome Free solid icons are self-hosted for offline use; see `Fonts/LICENSE-Font-Awesome.txt` for attribution and license terms.
 - Local autosave and JSON setup / CSV curve export.
 
 Run verification:
