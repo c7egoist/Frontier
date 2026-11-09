@@ -105,10 +105,20 @@ export class ForceField3DViewport
             this.SourceGroup = new THREE.Group();
             this.VectorGroup = new THREE.Group();
             this.FlowLineGroup = new THREE.Group();
+            this.HeatmapCanvas = document.createElement('canvas');
+            this.HeatmapCanvas.width = 128;
+            this.HeatmapCanvas.height = 128;
+            this.HeatmapTexture = new THREE.CanvasTexture(this.HeatmapCanvas);
+            this.HeatmapTexture.colorSpace = THREE.SRGBColorSpace;
+            this.HeatmapTexture.minFilter = THREE.LinearFilter;
+            this.HeatmapTexture.magFilter = THREE.LinearFilter;
+            this.HeatmapMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: this.HeatmapTexture, transparent: true, opacity: 0.88, depthWrite: false, side: THREE.DoubleSide }));
+            this.HeatmapMesh.rotation.x = -Math.PI / 2;
+            this.HeatmapMesh.visible = false;
             this.PlacementGhost = this._BuildGhost();
             this.PlacementGhost.visible = false;
             this.MoteSystem = this._BuildMotes();
-            this.Scene.add(this.SourceGroup, this.VectorGroup, this.FlowLineGroup, this.PlacementGhost, this.MoteSystem);
+            this.Scene.add(this.SourceGroup, this.VectorGroup, this.FlowLineGroup, this.HeatmapMesh, this.PlacementGhost, this.MoteSystem);
             this._BindPointer();
         }
 
@@ -277,6 +287,7 @@ export class ForceField3DViewport
 
         const Prepared = F.Prepare(SceneState, TimeSeconds);
         const SliceY = (SceneState.Visualization?.SliceHeight || 10) * S;
+        this._SyncHeatmap(SceneState, Prepared, Span, S, SliceY);
 
         for (const Entry of Prepared.Entries)
         {
@@ -450,6 +461,68 @@ export class ForceField3DViewport
         }
     }
 
+    _SyncHeatmap(SceneState, Prepared, Span, Scale, SliceY)
+    {
+        if (!this.HeatmapMesh || !this.HeatmapCanvas) return;
+        const Enabled = Boolean(SceneState.Visualization?.Heatmap);
+        this.HeatmapMesh.visible = Enabled;
+        if (!Enabled) return;
+
+        const Width = this.HeatmapCanvas.width, Height = this.HeatmapCanvas.height;
+        const Ctx = this.HeatmapCanvas.getContext('2d');
+        const Image = Ctx.createImageData(Width, Height);
+        const Pixels = Image.data;
+        const HalfSpan = Span * 0.44;
+        const WorldY = SceneState.Visualization?.SliceHeight || 10;
+        const Contribution = SceneState.Visualization?.Contribution || 'Flow';
+        const Output = new Float64Array(3);
+        let Peak = 0;
+        const Values = new Float32Array(Width * Height);
+        for (let Row = 0; Row < Height; ++Row)
+        {
+            const Z = HalfSpan - (Row / (Height - 1)) * HalfSpan * 2;
+            for (let Column = 0; Column < Width; ++Column)
+            {
+                const X = -HalfSpan + (Column / (Width - 1)) * HalfSpan * 2;
+                Output[0] = Output[1] = Output[2] = 0;
+                F.EvaluatePrepared(SceneState, Prepared, Contribution, X, WorldY, Z, 2, Output, SceneState.Visualization?.Solo);
+                const Magnitude = Contribution === 'Damp' ? Math.max(0, Output[0]) : Math.hypot(Output[0], Output[1], Output[2]);
+                const Index = Row * Width + Column;
+                Values[Index] = Magnitude;
+                Peak = Math.max(Peak, Magnitude);
+            }
+        }
+        const ScaleValue = Math.max(Peak * 0.72, Contribution === 'Damp' ? 0.01 : 0.5);
+        for (let Index = 0; Index < Values.length; ++Index)
+        {
+            const T = Clamp(Values[Index] / ScaleValue, 0, 1);
+            const Smooth = T * T * (3 - 2 * T);
+            const Offset = Index * 4;
+            // Deep blue -> teal -> amber -> coral, preserving dark negative space between field envelopes.
+            if (Smooth < 0.5)
+            {
+                const U = Smooth * 2;
+                Pixels[Offset] = 24 + 18 * U;
+                Pixels[Offset + 1] = 96 + 126 * U;
+                Pixels[Offset + 2] = 190 - 82 * U;
+            }
+            else
+            {
+                const U = (Smooth - 0.5) * 2;
+                Pixels[Offset] = 42 + 213 * U;
+                Pixels[Offset + 1] = 222 - 148 * U;
+                Pixels[Offset + 2] = 108 - 74 * U;
+            }
+            Pixels[Offset + 3] = Math.round(Clamp(Smooth * 0.78, 0, 0.66) * 255);
+        }
+        Ctx.putImageData(Image, 0, 0);
+        this.HeatmapTexture.needsUpdate = true;
+        const PlaneSpan = Span * 0.88 * Scale;
+        this.HeatmapMesh.geometry.dispose();
+        this.HeatmapMesh.geometry = new THREE.PlaneGeometry(PlaneSpan, PlaneSpan);
+        this.HeatmapMesh.position.set(0, SliceY + 0.12, 0);
+    }
+
     Resize()
     {
         const W = Math.max(320, this.MountEl?.clientWidth || 800);
@@ -521,6 +594,9 @@ export class ForceField3DViewport
     {
         this.Disposed = true;
         this._ResizeObserver?.disconnect();
+        this.HeatmapTexture?.dispose?.();
+        this.HeatmapMesh?.geometry?.dispose?.();
+        this.HeatmapMesh?.material?.dispose?.();
         this.Renderer?.dispose?.();
     }
 }

@@ -21,4 +21,7 @@ python3 "Experimental Remastered/PhotometricEditor/Serve.py"
 
 # Force Field & Wind Studio (port 8085)
 python3 "Experimental Remastered/ForceFieldEditor/Serve.py"
+
+# Asset Inspector (port 8086)
+python3 -m http.server 8086 --directory "Experimental Remastered/AssetInspector"
 ```

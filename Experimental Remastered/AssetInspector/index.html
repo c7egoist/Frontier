@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Asset Inspector · Frontier</title>
+<link rel="stylesheet" href="./AssetInspector.css">
+</head>
+<body>
+<div class="app-shell">
+  <header class="topbar">
+    <a class="brand" href="../">frontier<span>.</span></a><span class="divider"></span>
+    <div class="project-title"><strong>ASSET INSPECTOR</strong><small>VEHICLE ASSEMBLY / CONTROL VEHICLE GT</small></div>
+    <div class="top-spacer"></div>
+    <span class="saved-state" id="SavedState"><i></i> ALL CHANGES SAVED</span>
+    <button class="top-action" id="ResetBtn" type="button">Reset</button><button class="top-action primary" id="ExportBtn" type="button">Export setup ↗</button>
+  </header>
+  <div class="workspace">
+    <aside class="left-panel">
+      <div class="panel-head"><span>ASSET HIERARCHY</span><button class="tiny-button" id="AddAsset" title="Add inspection asset">＋</button></div>
+      <div class="search-wrap"><span>⌕</span><input id="AssetSearch" placeholder="Filter assets…" aria-label="Filter assets"></div>
+      <div class="tree-group"><span class="tree-label">VEHICLE · CONTROL VEHICLE GT</span>
+        <button class="tree-row active" data-asset="Vehicle"><span class="tree-icon car-icon">▰</span><span>Control Vehicle GT</span><em>ROOT</em></button>
+        <button class="tree-row" data-asset="Powertrain"><span class="tree-icon">◉</span><span>Powertrain</span><em>02</em></button>
+        <button class="tree-row" data-asset="Chassis"><span class="tree-icon">◇</span><span>Chassis &amp; aero</span><em>08</em></button>
+        <button class="tree-row" data-asset="Suspension"><span class="tree-icon">⌁</span><span>Suspension</span><em>04</em></button>
+        <button class="tree-row" data-asset="Tyres"><span class="tree-icon tyre-icon">◉</span><span>Tyres · 4 corners</span><em>LIVE</em></button>
+        <div class="nested-row"><button class="tree-row wheel-row" data-asset="Tyres"><span class="corner-dot front"></span><span>Front left</span></button><button class="tree-row wheel-row" data-asset="Tyres"><span class="corner-dot front"></span><span>Front right</span></button><button class="tree-row wheel-row" data-asset="Tyres"><span class="corner-dot rear"></span><span>Rear left</span></button><button class="tree-row wheel-row" data-asset="Tyres"><span class="corner-dot rear"></span><span>Rear right</span></button></div>
+        <button class="tree-row" data-asset="Materials"><span class="tree-icon">◈</span><span>Materials</span><em>03</em></button>
+      </div>
+      <div class="left-bottom"><div class="asset-thumb"><span class="thumb-car">▰</span><div><b>ControlVehicle</b><small>Facet mesh · FCT1</small></div><span class="online-dot"></span></div><div class="left-meta"><span>INSPECTOR BUILD</span><b>0.8.4 <span>·</span> LIVE PREVIEW</b></div></div>
+    </aside>
+    <main class="center-panel">
+      <div class="center-toolbar"><div class="breadcrumbs"><span>Assets</span><b>/</b><strong id="Breadcrumb">Control Vehicle GT</strong></div><div class="view-switch"><button class="view-btn active" data-view="Side">SIDE</button><button class="view-btn" data-view="Front">FRONT</button><button class="view-btn" data-view="Top">TOP</button></div><button class="icon-action" id="ScreenshotBtn" title="Refresh preview">⟳</button></div>
+      <section class="stage" id="Stage">
+        <canvas id="VehicleCanvas" aria-label="Interactive vehicle preview"></canvas>
+        <div class="stage-topline"><span class="live-chip"><i></i> LIVE ASSET PREVIEW</span><span class="stage-coords" id="StageMode">SIDE ELEVATION <b>·</b> MM</span></div>
+        <div class="stage-readouts"><div><small>SPRUNG MASS</small><strong id="MassReadout">1,300 <i>kg</i></strong></div><div><small>TYRE TEMP</small><strong id="TempReadout">82.4 <i>°C</i></strong></div><div><small>GRIP FACTOR</small><strong id="GripReadout">0.96 <i>μ</i></strong></div></div>
+        <div class="stage-scale"><span>0</span><i></i><span>1 m</span></div>
+        <div class="stage-watermark">FRONTIER <span>·</span> PHYSICS ASSET</div>
+      </section>
+      <section class="debug-strip"><div class="debug-label"><span class="pulse"></span><div><b>DEBUG CHANNELS</b><small>VIEWPORT OVERLAYS</small></div></div><div class="debug-channels" id="DebugChannels"><button class="debug-chip active" data-debug="Thermal">Thermal</button><button class="debug-chip" data-debug="Contact">Contact patch</button><button class="debug-chip" data-debug="Slip">Slip angle</button><button class="debug-chip" data-debug="Suspension">Suspension</button><button class="debug-chip" data-debug="Normals">Normals</button></div><div class="frame-readout"><span class="green-dot"></span> 60 FPS</div></section>
+      <section class="curve-panel">
+        <div class="curve-heading"><div class="curve-title"><span class="eyebrow">RESPONSE PROFILE</span><h2 id="CurveTitle">Engine torque curve <span>· WOT</span></h2></div><div class="curve-tools"><select id="CurveSelect" aria-label="Select response curve"><option value="Torque">Engine torque</option><option value="Boost">Turbo boost</option><option value="Pacejka">Lateral Pacejka</option></select><button class="curve-tool" id="FitCurve" title="Fit curve to view">Fit</button><button class="curve-tool" id="ResetCurve" title="Reset curve">Reset ↺</button></div></div>
+        <div class="chart-layout"><div class="axis-y" id="AxisY">TORQUE · N·m</div><div class="chart-wrap"><canvas id="CurveCanvas" aria-label="Editable response curve; drag points to modify"></canvas><div class="chart-hover" id="PointReadout">DRAG POINTS TO AUTHOR CURVE</div></div><div class="axis-x" id="AxisX">ENGINE SPEED · RPM</div></div>
+        <div class="curve-footer"><span><i class="legend-dot"></i><span id="LegendName">Torque output</span></span><span class="curve-hint">DRAG TO EDIT <b>·</b> DOUBLE-CLICK TO ADD POINT</span><span id="CurveCount">18 CONTROL POINTS</span></div>
+      </section>
+    </main>
+    <aside class="inspector-panel">
+      <div class="inspector-header"><div><span class="eyebrow">PROPERTY INSPECTOR</span><h1 id="InspectorTitle">Control Vehicle GT</h1></div><button id="MoreBtn" class="more-button" aria-label="More options">•••</button></div>
+      <div class="inspector-sub"><span class="asset-badge">VEHICLE ASSET</span><span class="version">DIRTY <i></i></span></div>
+      <div class="inspector-tabs" id="CategoryTabs"><button class="category-tab active" data-category="Geometry">Geometry</button><button class="category-tab" data-category="Powertrain">Powertrain</button><button class="category-tab" data-category="Tyres">Tyres</button><button class="category-tab" data-category="Debug">Debug</button></div>
+      <div class="property-scroll" id="Properties"></div>
+      <div class="inspector-footer"><span><i class="sync-icon">⟳</i> LIVE PARAMETERS</span><span id="ParamCount">08 PROPERTIES</span></div>
+    </aside>
+  </div>
+</div>
+<script type="module" src="./AssetInspector.js"></script>
+</body>
+</html>

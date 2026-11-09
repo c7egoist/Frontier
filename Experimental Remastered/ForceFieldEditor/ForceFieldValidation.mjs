@@ -132,6 +132,12 @@ Test('Studio index.html, CSS, ESM modules, fonts, vendor libs, and icons are int
     const Css = fs.readFileSync(path.join(Here, 'ForceFieldEditor.css'), 'utf8');
     assert.ok(Css.includes('[hidden]') && Css.includes('display: none !important'), 'CSS missing explicit [hidden] override');
     assert.ok(Css.includes('.pill-range') && Css.includes('.value-pill') && Css.includes('--card-top'), 'CSS missing Sun+Fluid cards & pill slider styling');
+    const Stage3D = fs.readFileSync(path.join(Here, 'Engine/ForceField3DViewport.js'), 'utf8');
+    assert.ok(Stage3D.includes('_SyncHeatmap') && Stage3D.includes('HeatmapTexture') && Stage3D.includes('HeatmapMesh.visible = Enabled'), '3D Stage must support field heatmap rendering');
+    assert.ok(Html.includes('id="HeatmapLegend"'), '3D Stage heatmap must expose its legend');
+    const EditorJs = fs.readFileSync(path.join(Here, 'ForceFieldEditor.js'), 'utf8');
+    assert.ok(!EditorJs.includes('SymbolBox.style.boxShadow') && !EditorJs.includes('Swatch.style.boxShadow'), 'UI entity icons must stay flat-coloured');
+    assert.ok(!Css.includes('box-shadow: 0 0 12px rgba(62, 196, 109'), 'Active feature icon must not glow');
 
     assert.equal(F.ResolveSourceColour('Attractor'), '#ff4757');
     assert.equal(F.ResolveSourceColour('Repulsor'), '#3b8eff');

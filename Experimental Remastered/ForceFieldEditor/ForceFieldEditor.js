@@ -532,7 +532,6 @@ function ConstructTreeRow(Host, Row)
     const Glyph = C.Construct('div', 'row-glyph', C.ConstructGlyph(Row.Glyph));
     Glyph.style.color = Row.Colour;
     Glyph.style.background = Row.Colour + '22';
-    Glyph.style.boxShadow = `0 0 12px ${Row.Colour}44`;
     const Status = C.Construct('span', 'row-status');
     const Toggle = C.Construct('button', 'row-toggle', C.ConstructGlyph('Eye'));
     Toggle.type = 'button';
@@ -918,7 +917,6 @@ function ConstructSourcePage(Page, Source)
     SymbolBox.style.color = Col;
     SymbolBox.style.background = Col + '20';
     SymbolBox.style.borderColor = Col + '44';
-    SymbolBox.style.boxShadow = `0 0 18px ${Col}38`;
 
     const NameInput = C.Construct('input', 'object-name-input');
     NameInput.type = 'text';
@@ -1055,7 +1053,6 @@ function OpenLibrary()
             const Swatch = C.Construct('span', 'library-swatch', C.ConstructGlyph(Type.Glyph));
             Swatch.style.color = GlowCol;
             Swatch.style.background = GlowCol + '20';
-            Swatch.style.boxShadow = `0 0 14px ${GlowCol}38`;
             const Card = C.Construct('button', 'library-card', [
                 C.Construct('div', 'library-card-top', [
                     Swatch,
@@ -1103,6 +1100,8 @@ function SyncTopUi()
     document.getElementById('ToggleFlowLines')?.classList.toggle('is-active', V.FlowLines !== false);
     document.getElementById('ToggleInfluence')?.classList.toggle('is-active', V.ShowInfluence !== false);
     document.getElementById('ToggleHeatmap')?.classList.toggle('is-active', Boolean(V.Heatmap));
+    const HeatmapLegend = document.getElementById('HeatmapLegend');
+    if (HeatmapLegend) HeatmapLegend.hidden = !(ViewMode === 'Stage3D' && V.Heatmap);
     document.getElementById('ToggleMinimal')?.classList.toggle('is-active', Boolean(V.MinimalLabels) && V.ArrowSpacing >= 64);
 
     const MinLabel = document.getElementById('MinimapLabel');
@@ -1141,7 +1140,7 @@ function SetupEvents()
     document.getElementById('ToggleVectors')?.addEventListener('click', ToggleViz('Arrows', 'Vector field'));
     document.getElementById('ToggleFlowLines')?.addEventListener('click', ToggleViz('FlowLines', 'RK2 Flow lines'));
     document.getElementById('ToggleInfluence')?.addEventListener('click', ToggleViz('ShowInfluence', 'Influence bounds'));
-    document.getElementById('ToggleHeatmap')?.addEventListener('click', () => { Viz.Heatmap = !Viz.Heatmap; Visualization?.Invalidate(); SyncTopUi(); C.Broadcast(); });
+    document.getElementById('ToggleHeatmap')?.addEventListener('click', () => { Viz.Heatmap = !Viz.Heatmap; Visualization?.Invalidate(); SyncTopUi(); Sync3DIfVisible(); C.Broadcast(); });
     document.getElementById('ToggleMinimal')?.addEventListener('click', () =>
     {
         const Minimal = !(Boolean(Viz.MinimalLabels) && Viz.ArrowSpacing >= 64);
@@ -1152,6 +1151,7 @@ function SetupEvents()
         Viz.Heatmap = Minimal ? false : Viz.Heatmap;
         Visualization?.Invalidate();
         SyncTopUi();
+        Sync3DIfVisible();
         C.Broadcast();
     });
 
