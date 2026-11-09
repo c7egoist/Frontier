@@ -18,6 +18,7 @@ import {
   bakeMeshMaps,
   bakeVolumeSdf,
 } from "../Engine/BakingEngine.js";
+import { GpuBakeSession } from "../Engine/GpuBakeEngine.js";
 import { buildPaintTargetGeometry } from "../Engine/TexturePaintEngine.js";
 import {
   Construct,
@@ -112,6 +113,9 @@ export function mountBakingWorkspace(root, appBridge) {
     sdfSliceAxis: "z",
     sdfSlicePos: 0.5,
     baking: false,
+    deviceMode: "auto", // "auto" | "gpu" | "cpu"
+    lastDevice: "Detecting GPU…",
+    lastElapsedMs: 0,
     progress: 0,
     progressText: "Ready to bake",
     bakedSurface: null, // { res, maps, bridgeData }
@@ -122,6 +126,7 @@ export function mountBakingWorkspace(root, appBridge) {
   let inspectorScope = null;
   let rafId = 0;
   let disposed = false;
+  let activePopup = null;
 
   // ----------------------------------------------------------------- LAYOUT
   const grid = Construct("div", "studio-grid");
@@ -176,10 +181,13 @@ export function mountBakingWorkspace(root, appBridge) {
   const btnSendToPaint = Construct("button", "pill-btn warm", [ConstructGlyph("Brush"), Construct("span", null, "Send to Paint")]);
   btnSendToPaint.type = "button";
 
+  const gpuPill = Construct("span", "gpu-badge", [document.createElement("i"), Construct("span", null, "GPU Baker Ready")]);
+
   toolbar.append(
     studySelect,
     btnLoadLow, lowInp,
     btnLoadHigh, highInp,
+    gpuPill,
     Construct("div", "toolbar-spacer"),
     btnSendToPaint,
     btnBakeNow,
@@ -234,6 +242,18 @@ export function mountBakingWorkspace(root, appBridge) {
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.05;
   pane3D.prepend(renderer.domElement);
+  const isRealGl = !!renderer.capabilities?.isWebGL2 && renderer.getContext()?.getParameter?.(0x1F01) !== "MockGPU";
+  const gpuBaker = new GpuBakeSession(renderer);
+  state.lastDevice = isRealGl ? "WebGL2 GPU Ready" : "CPU Fallback";
+  const gpuLabelSpan = gpuPill.querySelector("span");
+  if (gpuLabelSpan) gpuLabelSpan.textContent = state.lastDevice;
+  gpuBaker.ensureWebGPU().then((dev) => {
+    if (disposed) return;
+    if (dev) {
+      state.lastDevice = `WebGPU (${gpuBaker.webgpuAdapterName})`;
+      if (gpuLabelSpan) gpuLabelSpan.textContent = "WebGPU Compute";
+    }
+  });
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color("#0d0e11");
@@ -350,7 +370,7 @@ export function mountBakingWorkspace(root, appBridge) {
     }
     state.baking = true;
     state.progress = 0.04;
-    state.progressText = "Building spatial AABB grid…";
+    state.progressText = "Initializing GPU baker…";
     btnBakeNow.disabled = true;
     Broadcast();
 
@@ -358,56 +378,84 @@ export function mountBakingWorkspace(root, appBridge) {
       const chList = [...state.selectedChannels];
       const surfaceChannels = chList.filter((c) => c !== "volumeSdf");
       const wantSdf = chList.includes("volumeSdf");
+      const tStart = performance.now();
+      let deviceUsed = "CPU Reference";
+
+      const surfaceCfg = {
+        resolution: state.resolution,
+        channels: surfaceChannels,
+        samples: state.samples,
+        frontDistance: state.frontDistance,
+        rearDistance: state.rearDistance,
+        aoDistance: state.aoDistance,
+        thicknessRange: state.thicknessRange,
+        padding: state.padding,
+        normalY: state.normalY,
+      };
+
+      const onSurfProg = (p, msg) => {
+        state.progress = wantSdf ? p * 0.65 : p;
+        state.progressText = msg;
+        updateProgressUi();
+      };
 
       if (surfaceChannels.length) {
-        const res = await bakeMeshMaps(
-          studyPair.low,
-          studyPair.high,
-          {
-            resolution: state.resolution,
-            channels: surfaceChannels,
-            samples: state.samples,
-            frontDistance: state.frontDistance,
-            rearDistance: state.rearDistance,
-            aoDistance: state.aoDistance,
-            thicknessRange: state.thicknessRange,
-            padding: state.padding,
-            normalY: state.normalY,
-          },
-          (p, msg) => {
-            state.progress = wantSdf ? p * 0.65 : p;
-            state.progressText = msg;
-            updateProgressUi();
-          },
-        );
+        let res = null;
+        if (state.deviceMode !== "cpu" && isRealGl) {
+          res = await gpuBaker.bakeMeshMapsWebGPU(studyPair.low, studyPair.high, surfaceCfg, onSurfProg);
+          if (!res) res = await gpuBaker.bakeMeshMapsWebGL2(studyPair.low, studyPair.high, surfaceCfg, onSurfProg);
+        }
+        if (!res) {
+          res = await bakeMeshMaps(studyPair.low, studyPair.high, surfaceCfg, onSurfProg);
+          res.deviceUsed = "CPU Reference";
+        }
+        deviceUsed = res.deviceUsed || deviceUsed;
         state.bakedSurface = res;
       }
 
       if (wantSdf) {
-        state.bakedSdf = await bakeVolumeSdf(
-          studyPair.high,
-          { nx: state.sdfRes, ny: state.sdfRes, nz: state.sdfRes, padding: state.sdfPadding, signMode: state.sdfSigned ? "signed" : "unsigned" },
-          (p, msg) => {
-            state.progress = surfaceChannels.length ? 0.65 + p * 0.35 : p;
-            state.progressText = msg;
-            updateProgressUi();
-          },
-        );
+        const sdfCfg = {
+          nx: state.sdfRes,
+          ny: state.sdfRes,
+          nz: state.sdfRes,
+          padding: state.sdfPadding,
+          signMode: state.sdfSigned ? "signed" : "unsigned",
+        };
+        const onSdfProg = (p, msg) => {
+          state.progress = surfaceChannels.length ? 0.65 + p * 0.35 : p;
+          state.progressText = msg;
+          updateProgressUi();
+        };
+        let sdfRes = null;
+        if (state.deviceMode !== "cpu" && isRealGl) {
+          sdfRes = await gpuBaker.bakeVolumeSdfWebGPU(studyPair.high, sdfCfg, onSdfProg);
+          if (!sdfRes) sdfRes = await gpuBaker.bakeVolumeSdfWebGL2(studyPair.high, sdfCfg, onSdfProg);
+        }
+        if (!sdfRes) {
+          sdfRes = await bakeVolumeSdf(studyPair.high, sdfCfg, onSdfProg);
+          sdfRes.deviceUsed = "CPU Reference";
+        }
+        deviceUsed = sdfRes.deviceUsed || deviceUsed;
+        state.bakedSdf = sdfRes;
       }
+
+      state.lastElapsedMs = Math.round(performance.now() - tStart);
+      state.lastDevice = `${deviceUsed} · ${state.lastElapsedMs} ms`;
+      if (gpuLabelSpan) gpuLabelSpan.textContent = state.lastDevice;
 
       // Ensure inspectChannel shows a map that actually baked
       if (!chList.includes(state.inspectChannel)) state.inspectChannel = chList[0];
       updateInspectedMapView();
       renderLeftColumn();
       rebuildInspector();
-      Toast("Baking completed cleanly!");
+      Toast(`Baked cleanly via ${state.lastDevice}`);
     } catch (err) {
       Toast(`Bake failed: ${err.message}`);
     } finally {
       state.baking = false;
       btnBakeNow.disabled = false;
       state.progress = 1;
-      state.progressText = "Bake complete";
+      state.progressText = state.lastElapsedMs ? `Done · ${state.lastDevice}` : "Bake complete";
       updateProgressUi();
       Broadcast();
     }
@@ -524,10 +572,16 @@ export function mountBakingWorkspace(root, appBridge) {
     updateProgressUi();
 
     // 1. Surface Baker Settings
-    const sSec = SectionCard(rightInner, { Title: "Surface Cage & Ray Settings", Glyph: "Sliders" });
+    const sSec = SectionCard(rightInner, { Title: "GPU Device & Surface Ray Settings", Glyph: "Sliders" });
+    SegmentedRow(sSec.Inner, {
+      Label: "Compute Backend",
+      Options: [["Auto GPU", "auto"], ["WebGL2 / WebGPU", "gpu"], ["CPU Ref", "cpu"]],
+      Read: () => state.deviceMode,
+      Write: (v) => { state.deviceMode = v; },
+    });
     SegmentedRow(sSec.Inner, {
       Label: "Map Resolution",
-      Options: [["256", 256], ["512", 512], ["1024", 1024]],
+      Options: [["256", 256], ["512", 512], ["1024", 1024], ["2048", 2048]],
       Read: () => state.resolution,
       Write: (v) => { state.resolution = v; },
     });
@@ -686,6 +740,81 @@ export function mountBakingWorkspace(root, appBridge) {
   });
   ro.observe(stage);
 
+  // ----------------------------------------------------------------- RIGHT-CLICK / Q / TAB QUICK BAKE MENU
+  function closeBakePopup() {
+    if (activePopup) {
+      activePopup.remove();
+      activePopup = null;
+    }
+  }
+
+  function openBakePopup(clientX, clientY) {
+    if (activePopup) { closeBakePopup(); return; }
+    const box = stage.getBoundingClientRect();
+    const x = clientX ?? (box.left + box.width * 0.5 - 160);
+    const y = clientY ?? (box.top + 80);
+    const pop = Construct("div", "tool-popup-menu");
+    pop.style.left = `${Math.max(12, Math.min(x, window.innerWidth - 356))}px`;
+    pop.style.top = `${Math.max(12, Math.min(y, window.innerHeight - 380))}px`;
+
+    const closeBtn = Construct("button", "stack-mini-btn", ConstructGlyph("Close"));
+    closeBtn.type = "button";
+    closeBtn.addEventListener("click", closeBakePopup);
+    pop.append(
+      Construct("div", "tool-popup-head", [
+        ConstructGlyph("Bake"),
+        Construct("strong", null, "Baking Quick Menu"),
+        Construct("small", null, state.lastDevice),
+        closeBtn,
+      ]),
+    );
+
+    const resRow = Construct("div", "chip-strip");
+    for (const r of [256, 512, 1024, 2048]) {
+      const b = Construct("button", "chip-btn" + (state.resolution === r ? " active" : ""), `${r}px`);
+      b.type = "button";
+      b.addEventListener("click", () => { state.resolution = r; closeBakePopup(); rebuildInspector(); });
+      resRow.append(b);
+    }
+    pop.append(Construct("div", "property-label", "Map Resolution"), resRow);
+
+    const actRow = Construct("div", "action-row");
+    const runBtn = Construct("button", "action-button accent", [ConstructGlyph("Bake"), Construct("span", null, "Bake Selected Maps")]);
+    runBtn.type = "button";
+    runBtn.addEventListener("click", () => { closeBakePopup(); runBake(); });
+    const bridgeBtn = Construct("button", "action-button warm", [ConstructGlyph("Brush"), Construct("span", null, "Send to Paint")]);
+    bridgeBtn.type = "button";
+    bridgeBtn.addEventListener("click", () => { closeBakePopup(); btnSendToPaint.click(); });
+    actRow.append(runBtn, bridgeBtn);
+    pop.append(actRow);
+
+    document.body.append(pop);
+    activePopup = pop;
+  }
+
+  let rDown = null;
+  stage.addEventListener("pointerdown", (e) => {
+    if (e.button === 2) rDown = { x: e.clientX, y: e.clientY };
+    else if (activePopup && !activePopup.contains(e.target)) closeBakePopup();
+  });
+  stage.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    if (!rDown || Math.hypot(e.clientX - rDown.x, e.clientY - rDown.y) < 5) {
+      openBakePopup(e.clientX, e.clientY);
+    }
+    rDown = null;
+  });
+
+  const onBakeKeyDown = (e) => {
+    if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)) return;
+    if (e.key === "Escape") { closeBakePopup(); return; }
+    if (e.key.toLowerCase() === "q" || e.key === "Tab") {
+      e.preventDefault();
+      openBakePopup();
+    }
+  };
+  window.addEventListener("keydown", onBakeKeyDown);
+
   renderLeftColumn();
   rebuildInspector();
   updateInspectedMapView();
@@ -704,9 +833,12 @@ export function mountBakingWorkspace(root, appBridge) {
     dispose() {
       disposed = true;
       cancelAnimationFrame(rafId);
+      closeBakePopup();
+      window.removeEventListener("keydown", onBakeKeyDown);
       ro.disconnect();
       if (inspectorScope) ReleaseScope(inspectorScope);
       orbit.dispose();
+      gpuBaker.dispose();
       if (bakedTex) bakedTex.dispose();
       renderer.dispose();
       root.innerHTML = "";

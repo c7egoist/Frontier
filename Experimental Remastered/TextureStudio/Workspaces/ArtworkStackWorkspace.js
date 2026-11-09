@@ -323,10 +323,44 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     const stackBox = Construct("div");
     stackBox.style.marginBottom = "14px";
     const sel = getSelectedLayer();
+    let dragLayerId = null;
+
+    const moveLayerByOffset = (layerId, deltaUp) => {
+      const idx = state.doc.layers.findIndex((l) => l.id === layerId);
+      if (idx < 0) return false;
+      const nextIdx = idx + (deltaUp > 0 ? 1 : -1);
+      if (nextIdx < 0 || nextIdx >= state.doc.layers.length) return false;
+      const [item] = state.doc.layers.splice(idx, 1);
+      state.doc.layers.splice(nextIdx, 0, item);
+      evaluateAndRender(true);
+      rebuildInspector();
+      return true;
+    };
+
+    const moveLayerRelativeTo = (sourceId, targetId, dropAboveInVisual) => {
+      if (!sourceId || sourceId === targetId) return false;
+      const srcIdx = state.doc.layers.findIndex((l) => l.id === sourceId);
+      const tgtIdx = state.doc.layers.findIndex((l) => l.id === targetId);
+      if (srcIdx < 0 || tgtIdx < 0) return false;
+      const [item] = state.doc.layers.splice(srcIdx, 1);
+      const newTgtIdx = state.doc.layers.findIndex((l) => l.id === targetId);
+      const insertAt = dropAboveInVisual ? newTgtIdx + 1 : newTgtIdx;
+      state.doc.layers.splice(insertAt, 0, item);
+      evaluateAndRender(true);
+      rebuildInspector();
+      return true;
+    };
+
     const layersTopDown = [...state.doc.layers].reverse();
-    for (const layer of layersTopDown) {
+    for (let vIdx = 0; vIdx < layersTopDown.length; vIdx++) {
+      const layer = layersTopDown[vIdx];
       const isActive = sel && layer.id === sel.id;
       const row = Construct("div", "stack-row" + (isActive ? " active" : "") + (layer.parentId ? " nested" : ""));
+      row.draggable = true;
+      row.dataset.layerId = layer.id;
+
+      const handle = Construct("span", "stack-drag-handle", ConstructGlyph("Grip"));
+      handle.title = "Drag to reorder layer";
 
       const thumb = Construct("div", "stack-row-thumb");
       if (layer.kind === "folder") thumb.append(ConstructGlyph("Folder"));
@@ -342,6 +376,20 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
         Construct("span", "stack-row-title", layer.name),
         Construct("span", "stack-row-sub", subParts.join(" · ")),
       ]);
+
+      const orderBox = Construct("div", "stack-order-btns");
+      const upBtn = Construct("button", "stack-order-btn", ConstructGlyph("ArrowUp"));
+      upBtn.type = "button";
+      upBtn.title = "Move layer up";
+      upBtn.disabled = vIdx === 0;
+      upBtn.addEventListener("click", (e) => { e.stopPropagation(); moveLayerByOffset(layer.id, +1); });
+
+      const dnBtn = Construct("button", "stack-order-btn", ConstructGlyph("ArrowDown"));
+      dnBtn.type = "button";
+      dnBtn.title = "Move layer down";
+      dnBtn.disabled = vIdx === layersTopDown.length - 1;
+      dnBtn.addEventListener("click", (e) => { e.stopPropagation(); moveLayerByOffset(layer.id, -1); });
+      orderBox.append(upBtn, dnBtn);
 
       const maskBtn = Construct("button", "mask-pill" + (layer.mask?.enabled ? " active" : ""), "MSK");
       maskBtn.type = "button";
@@ -380,7 +428,39 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
         rebuildInspector();
       });
 
-      row.append(thumb, info, maskBtn, visBtn, delBtn);
+      row.addEventListener("dragstart", (e) => {
+        dragLayerId = layer.id;
+        row.classList.add("dragging");
+        if (e.dataTransfer) {
+          e.dataTransfer.effectAllowed = "move";
+          e.dataTransfer.setData("text/plain", layer.id);
+        }
+      });
+      row.addEventListener("dragend", () => {
+        dragLayerId = null;
+        row.classList.remove("dragging", "drop-above", "drop-below");
+      });
+      row.addEventListener("dragover", (e) => {
+        if (!dragLayerId || dragLayerId === layer.id) return;
+        e.preventDefault();
+        const r = row.getBoundingClientRect();
+        const above = e.clientY < r.top + r.height * 0.5;
+        row.classList.toggle("drop-above", above);
+        row.classList.toggle("drop-below", !above);
+      });
+      row.addEventListener("dragleave", () => {
+        row.classList.remove("drop-above", "drop-below");
+      });
+      row.addEventListener("drop", (e) => {
+        e.preventDefault();
+        const src = dragLayerId || e.dataTransfer?.getData("text/plain");
+        const r = row.getBoundingClientRect();
+        const above = e.clientY < r.top + r.height * 0.5;
+        row.classList.remove("drop-above", "drop-below");
+        if (src && src !== layer.id) moveLayerRelativeTo(src, layer.id, above);
+      });
+
+      row.append(handle, thumb, info, orderBox, maskBtn, visBtn, delBtn);
       row.addEventListener("click", () => {
         state.doc.selectedLayerId = layer.id;
         renderLeftColumn();
@@ -861,6 +941,117 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     else appBridge.sendStampToPaint(payload);
   });
 
+  // Right-click / Q / Tab quick modifier & layer popup + Alt+Up/Down reordering
+  let activeArtPopup = null;
+  function closeArtPopup() {
+    if (activeArtPopup) {
+      activeArtPopup.remove?.();
+      activeArtPopup = null;
+    }
+  }
+  function openArtPopup(clientX = null, clientY = null) {
+    if (activeArtPopup) { closeArtPopup(); return; }
+    const box = stage.getBoundingClientRect();
+    const px = clientX ?? (box.left + box.width * 0.5 - 165);
+    const py = clientY ?? (box.top + 70);
+    const vw = window.innerWidth || 1280;
+    const vh = window.innerHeight || 800;
+    const pop = Construct("div", "tool-popup-menu");
+    pop.style.left = `${Math.max(12, Math.min(px, vw - 356))}px`;
+    pop.style.top = `${Math.max(12, Math.min(py, vh - 360))}px`;
+
+    const closeBtn = Construct("button", "stack-mini-btn", ConstructGlyph("Close"));
+    closeBtn.type = "button";
+    closeBtn.addEventListener("click", closeArtPopup);
+    const selLayer = getSelectedLayer();
+    pop.append(
+      Construct("div", "tool-popup-head", [
+        ConstructGlyph(isPattern ? "Pattern" : "Stamp"),
+        Construct("strong", null, selLayer ? `${selLayer.name} Quick Menu` : "Artwork Quick Menu"),
+        Construct("small", null, "Q / Tab / Esc"),
+        closeBtn,
+      ]),
+    );
+
+    const chanRow = Construct("div", "chip-strip");
+    for (const [label, val] of [["Composite", "composite"], ["Albedo", "albedo"], ["Rough", "roughness"], ["Metal", "metalness"], ["Normal", "normal"]]) {
+      const cb = Construct("button", "chip-btn" + (state.viewChannel === val ? " active" : ""), label);
+      cb.type = "button";
+      cb.addEventListener("click", () => {
+        state.viewChannel = val;
+        viewSelect.value = val;
+        updatePreviewDisplay();
+        closeArtPopup();
+      });
+      chanRow.append(cb);
+    }
+    pop.append(Construct("div", "property-label", "Preview Channel"), chanRow);
+
+    const modRow = Construct("div", "chip-strip");
+    for (const [label, kind] of [["+ Noise Scale", "noise-scale"], ["+ Array Grid", "array-grid"], ["+ Radial", "array-radial"], ["+ Warp", "warp"]]) {
+      const mb = Construct("button", "chip-btn", label);
+      mb.type = "button";
+      mb.addEventListener("click", () => {
+        const l = getSelectedLayer();
+        if (l) {
+          l.modifiers = l.modifiers || [];
+          l.modifiers.push(createDefaultModifier(kind));
+          evaluateAndRender(true);
+          rebuildInspector();
+          Toast(`Added ${label.slice(2)} modifier`);
+        }
+        closeArtPopup();
+      });
+      modRow.append(mb);
+    }
+    pop.append(Construct("div", "property-label", "Quick Add Modifier"), modRow);
+
+    const actBtn = Construct("button", "action-button accent", [
+      ConstructGlyph("Brush"),
+      Construct("span", null, isPattern ? "Send Pattern to Paint" : "Send Stamp to Paint"),
+    ]);
+    actBtn.type = "button";
+    actBtn.style.width = "100%";
+    actBtn.addEventListener("click", () => { closeArtPopup(); btnSendToPaint.click(); });
+    pop.append(actBtn);
+
+    document.body.append(pop);
+    activeArtPopup = pop;
+  }
+
+  let artRDown = null;
+  stage.addEventListener("pointerdown", (e) => {
+    if (e.button === 2) artRDown = { x: e.clientX, y: e.clientY };
+    else if (activeArtPopup && !activeArtPopup.contains(e.target)) closeArtPopup();
+  });
+  stage.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    if (!artRDown || Math.hypot(e.clientX - artRDown.x, e.clientY - artRDown.y) < 5) {
+      openArtPopup(e.clientX, e.clientY);
+    }
+    artRDown = null;
+  });
+
+  const onArtKeyDown = (e) => {
+    if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)) return;
+    if (e.key === "Escape") { closeArtPopup(); return; }
+    if (e.key.toLowerCase() === "q" || e.key === "Tab") { e.preventDefault(); openArtPopup(); return; }
+    if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+      e.preventDefault();
+      const sel = getSelectedLayer();
+      if (!sel) return;
+      const idx = state.doc.layers.findIndex((l) => l.id === sel.id);
+      const nextIdx = idx + (e.key === "ArrowUp" ? 1 : -1);
+      if (nextIdx >= 0 && nextIdx < state.doc.layers.length) {
+        const [item] = state.doc.layers.splice(idx, 1);
+        state.doc.layers.splice(nextIdx, 0, item);
+        evaluateAndRender(true);
+        rebuildInspector();
+      }
+    }
+  };
+  window.addEventListener("keydown", onArtKeyDown);
+
   evaluateAndRender(true);
   rebuildInspector();
 
@@ -869,6 +1060,8 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     getSnapshot: () => ({ mode, name: state.doc.name, layers: state.doc.layers.length, stats: state.lastStats }),
     dispose() {
       disposed = true;
+      closeArtPopup();
+      window.removeEventListener("keydown", onArtKeyDown);
       if (inspectorScope) ReleaseScope(inspectorScope);
       root.innerHTML = "";
     },

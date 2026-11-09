@@ -302,20 +302,78 @@ await suite("7. Full TextureStudio Shell & All 5 Workspaces Mount & Switch Clean
   }
 
   function makeEl(tag = "div") {
+    const listeners = new Map();
     const el = {
       tagName: String(tag).toUpperCase(),
+      className: "",
       style: { setProperty() {}, cssText: "" },
-      classList: { toggle() {}, add() {}, remove() {}, contains: () => false },
+      classList: {
+        toggle(c, f) {
+          const set = new Set(String(el.className || "").split(/\s+/).filter(Boolean));
+          const on = f !== undefined ? !!f : !set.has(c);
+          if (on) set.add(c); else set.delete(c);
+          el.className = [...set].join(" ");
+        },
+        add(...cs) { cs.forEach((c) => el.classList.toggle(c, true)); },
+        remove(...cs) { cs.forEach((c) => el.classList.toggle(c, false)); },
+        contains: (c) => String(el.className || "").split(/\s+/).includes(c),
+      },
       dataset: {},
       children: [],
+      parentNode: null,
       options: [{ text: "Default" }, { text: "Opt1" }],
       selectedIndex: 0,
       getRootNode: () => globalThis.document,
       get ownerDocument() { return globalThis.document; },
-      append(...args) { el.children.push(...args); },
-      prepend(...args) { el.children.unshift(...args); },
+      append(...args) {
+        for (const a of args) {
+          if (a && typeof a === "object") { a.parentNode = el; el.children.push(a); }
+        }
+      },
+      prepend(...args) {
+        for (let i = args.length - 1; i >= 0; i--) {
+          const a = args[i];
+          if (a && typeof a === "object") { a.parentNode = el; el.children.unshift(a); }
+        }
+      },
+      remove() {
+        if (el.parentNode?.children) {
+          el.parentNode.children = el.parentNode.children.filter((c) => c !== el);
+          el.parentNode = null;
+        }
+      },
+      contains(target) {
+        if (target === el) return true;
+        return el.children.some((c) => typeof c.contains === "function" && c.contains(target));
+      },
+      querySelector(sel) { return el.querySelectorAll(sel)[0] || null; },
+      querySelectorAll(sel) {
+        const out = [];
+        const walk = (node) => {
+          for (const ch of node.children || []) {
+            const cls = String(ch.className || "");
+            if (sel.startsWith(".") ? cls.split(/\s+/).includes(sel.slice(1)) : String(ch.tagName).toLowerCase() === sel.toLowerCase()) out.push(ch);
+            walk(ch);
+          }
+        };
+        walk(el);
+        return out;
+      },
       setAttribute() {}, removeAttribute() {},
-      addEventListener() {}, removeEventListener() {},
+      addEventListener(type, fn) {
+        if (!listeners.has(type)) listeners.set(type, []);
+        listeners.get(type).push(fn);
+      },
+      removeEventListener(type, fn) {
+        if (!listeners.has(type)) return;
+        listeners.set(type, listeners.get(type).filter((f) => f !== fn));
+      },
+      dispatchEvent(evt) {
+        const ev = Object.assign({ target: el, preventDefault() {}, stopPropagation() {}, clientX: 200, clientY: 200 }, evt);
+        for (const fn of [...(listeners.get(ev.type) || [])]) fn(ev);
+        return true;
+      },
+      click() { el.dispatchEvent({ type: "click" }); },
       setPointerCapture() {}, releasePointerCapture() {},
       getContext: (kind) => (kind && kind.includes("webgl")) ? makeWebGLMock() : {
         fillStyle: "", strokeStyle: "", lineWidth: 1, globalAlpha: 1, globalCompositeOperation: "source-over",
@@ -339,11 +397,20 @@ await suite("7. Full TextureStudio Shell & All 5 Workspaces Mount & Switch Clean
   }
 
   const mainEl = makeEl("main");
-  globalThis.window = { location: { hash: "#material" }, addEventListener() {}, removeEventListener() {}, devicePixelRatio: 1 };
+  const winListeners = new Map();
+  globalThis.window = {
+    location: { hash: "#material" },
+    innerWidth: 1440,
+    innerHeight: 900,
+    devicePixelRatio: 1,
+    addEventListener(t, fn) { if (!winListeners.has(t)) winListeners.set(t, []); winListeners.get(t).push(fn); },
+    removeEventListener(t, fn) { if (winListeners.has(t)) winListeners.set(t, winListeners.get(t).filter((f) => f !== fn)); },
+    dispatchEvent(evt) { for (const fn of [...(winListeners.get(evt.type) || [])]) fn(Object.assign({ preventDefault() {}, stopPropagation() {} }, evt)); },
+  };
   globalThis.document = {
     getElementById: (id) => id === "studio-main" ? mainEl : makeEl("div"),
-    querySelector: () => null,
-    querySelectorAll: () => [],
+    querySelector: (sel) => globalThis.document.body.querySelector(sel) || mainEl.querySelector(sel),
+    querySelectorAll: (sel) => [...mainEl.querySelectorAll(sel), ...globalThis.document.body.querySelectorAll(sel)],
     createElement: (tag) => makeEl(tag),
     createElementNS: (ns, tag) => makeEl(tag),
     addEventListener() {}, removeEventListener() {},
@@ -362,6 +429,91 @@ await suite("7. Full TextureStudio Shell & All 5 Workspaces Mount & Switch Clean
     const snap = globalThis.window.__frontierTextureStudio.getSnapshot();
     assert(snap && typeof snap === "object", `Workspace ${ws} did not mount cleanly`);
   }
+});
+
+// ----------------------------------------------------------------- 8. GPU BAKE / GPU PAINT / TOOL POPUPS / DRAG-DROP STACKS
+await suite("8. GPU Bake/Paint Shaders, Q/Tab/Right-Click Tool Popups & Draggable/Up-Down Layer Stacks", async () => {
+  const gpuBake = await import("./Engine/GpuBakeEngine.js");
+  const gpuPaintMod = await import("./Engine/GpuPaintEngine.js");
+  const bakeEng = await import("./Engine/BakingEngine.js");
+
+  assert(gpuBake.BAKE_GLSL3_SHADERS.CORE_RAY_FRAG.includes("uGridMetaTex"), "Missing GLSL3 ray bake shader");
+  assert(gpuBake.BAKE_GLSL3_SHADERS.DERIVE_CHANNEL_FRAG.includes("calcCurvature"), "Missing GLSL3 derive channel shader");
+  assert(gpuBake.BAKE_WGSL_SHADERS.MESH_RAY_WGSL.includes("@compute"), "Missing WebGPU compute ray bake shader");
+  assert(gpuBake.BAKE_WGSL_SHADERS.SDF_WGSL.includes("@compute"), "Missing WebGPU compute SDF shader");
+  assert(gpuPaintMod.PAINT_GLSL3_SHADERS.DAB_COMMON.includes("tipCoverage("), "Missing GPU Paint dab shader");
+  assert(gpuPaintMod.PAINT_GLSL3_SHADERS.COMPOSITE_LAYER_FRAG.includes("blendRgb("), "Missing GPU Paint composite shader");
+
+  const studyPair = bakeEng.createBakeStudyPair("teapot");
+  const packed = gpuBake.packBakeGeometryForGpu(studyPair.low, studyPair.high);
+  assert(packed.triCount > 100 && packed.gridMeta.length === 16 * 16 * 16 * 2, "GPU geometry spatial grid packing failed");
+  const gbuf = gpuBake.rasterizeLowMeshGBuffer(studyPair.low, 64);
+  assert(gbuf.posCov.length === 64 * 64 * 4 && gbuf.normPart.length === 64 * 64 * 4, "Low-poly G-buffer rasterization failed");
+
+  // Switch back to Texture Paint & exercise Q/Tab/Right-click popup + layer stack drag/up/down
+  globalThis.window.__frontierTextureStudio.switchWorkspace("paint");
+  const paintRowsBefore = globalThis.document.querySelectorAll(".stack-row");
+  assert(paintRowsBefore.length >= 2, "Expected paint workspace stack rows");
+  assert(paintRowsBefore.every((r) => r.draggable === true), "All paint stack rows must be draggable");
+
+  const firstTitleBefore = paintRowsBefore[0].querySelector(".stack-row-title")?.textContent;
+  const secondTitleBefore = paintRowsBefore[1].querySelector(".stack-row-title")?.textContent;
+  const orderBtns = paintRowsBefore[0].querySelectorAll(".stack-order-btn");
+  assert(orderBtns.length === 2, "Expected Up/Down reorder buttons on each paint layer row");
+  orderBtns[1].click(); // Move top visual layer down 1 slot
+  const paintRowsAfterBtn = globalThis.document.querySelectorAll(".stack-row");
+  assert(
+    paintRowsAfterBtn[0].querySelector(".stack-row-title")?.textContent === secondTitleBefore &&
+    paintRowsAfterBtn[1].querySelector(".stack-row-title")?.textContent === firstTitleBefore,
+    "Up/Down button did not reorder paint layer stack",
+  );
+
+  // Test Drag-and-Drop reordering back
+  const dragSrc = paintRowsAfterBtn[1];
+  const dragTgt = paintRowsAfterBtn[0];
+  dragSrc.dispatchEvent({ type: "dragstart", dataTransfer: { effectAllowed: "", setData() {} } });
+  dragTgt.dispatchEvent({ type: "dragover", clientY: 5 }); // top half -> drop-above
+  dragTgt.dispatchEvent({ type: "drop", clientY: 5, dataTransfer: { getData: () => dragSrc.dataset.layerId } });
+  const paintRowsAfterDrag = globalThis.document.querySelectorAll(".stack-row");
+  assert(
+    paintRowsAfterDrag[0].querySelector(".stack-row-title")?.textContent === firstTitleBefore,
+    "Drag-and-drop did not reorder paint layer stack back",
+  );
+
+  // Test Q hotkey & Right-click popup menu
+  globalThis.window.dispatchEvent({ type: "keydown", key: "q" });
+  let popups = globalThis.document.body.querySelectorAll(".tool-popup-menu");
+  assert(popups.length === 1, "Pressing Q did not open Active Tool Popup menu");
+  globalThis.window.dispatchEvent({ type: "keydown", key: "Escape" });
+  popups = globalThis.document.body.querySelectorAll(".tool-popup-menu");
+  assert(popups.length === 0, "Escape did not close Active Tool Popup menu");
+
+  globalThis.window.dispatchEvent({ type: "keydown", key: "Tab" });
+  popups = globalThis.document.body.querySelectorAll(".tool-popup-menu");
+  assert(popups.length === 1, "Pressing Tab did not open Active Tool Popup menu");
+  globalThis.window.dispatchEvent({ type: "keydown", key: "Tab" });
+  assert(globalThis.document.body.querySelectorAll(".tool-popup-menu").length === 0, "Pressing Tab again did not toggle popup closed");
+
+  const splitPanes = globalThis.document.querySelectorAll(".viewport-split-pane");
+  assert(splitPanes.length >= 1, "Missing paint viewport split panes");
+  splitPanes[0].dispatchEvent({ type: "pointerdown", button: 2, clientX: 220, clientY: 180 });
+  splitPanes[0].dispatchEvent({ type: "contextmenu", clientX: 221, clientY: 181 });
+  assert(globalThis.document.body.querySelectorAll(".tool-popup-menu").length === 1, "Right-click on paint viewport did not open Active Tool Popup");
+  globalThis.window.dispatchEvent({ type: "keydown", key: "Escape" });
+
+  // Verify Pattern Studio layer drag-drop & popup as well
+  globalThis.window.__frontierTextureStudio.switchWorkspace("pattern");
+  const artRows = globalThis.document.querySelectorAll(".stack-row");
+  assert(artRows.length >= 2 && artRows.every((r) => r.draggable === true), "Pattern Studio stack rows must be draggable");
+  globalThis.window.dispatchEvent({ type: "keydown", key: "q" });
+  assert(globalThis.document.body.querySelectorAll(".tool-popup-menu").length === 1, "Q did not open Pattern Studio Quick Menu");
+  globalThis.window.dispatchEvent({ type: "keydown", key: "Escape" });
+
+  // Verify Baking Studio Q popup as well
+  globalThis.window.__frontierTextureStudio.switchWorkspace("bake");
+  globalThis.window.dispatchEvent({ type: "keydown", key: "q" });
+  assert(globalThis.document.body.querySelectorAll(".tool-popup-menu").length === 1, "Q did not open Baking Studio Quick Menu");
+  globalThis.window.dispatchEvent({ type: "keydown", key: "Escape" });
 });
 
 console.log(`\nALL ${results.length} VALIDATION SUITES PASSED CLEANLY`);

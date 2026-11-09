@@ -49,6 +49,9 @@ export const GlyphPaths = {
     Cube:       '<path d="M12 3 4 7.5v9L12 21l8-4.5v-9z"/><path d="m12 12 8-4.5M12 12v9M12 12 4 7.5"/>',
     Copy:       '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
     ArrowRight: '<path d="M5 12h14M13 5l7 7-7 7"/>',
+    ArrowUp:    '<path d="M12 19V5M5 12l7-7 7 7"/>',
+    ArrowDown:  '<path d="M12 5v14M19 12l-7 7-7-7"/>',
+    Grip:       '<circle cx="9" cy="6" r="1.3"/><circle cx="15" cy="6" r="1.3"/><circle cx="9" cy="12" r="1.3"/><circle cx="15" cy="12" r="1.3"/><circle cx="9" cy="18" r="1.3"/><circle cx="15" cy="18" r="1.3"/>',
     Dot:        '<circle cx="12" cy="12" r="3"/>'
 };
 
