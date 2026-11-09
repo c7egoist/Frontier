@@ -104,7 +104,21 @@ export const CourseMaterial = Object.freeze({
     Mirror:          82,
     Aluminium:       83,
     Gold:            84,
-    ShowcaseGlass:   85
+    ShowcaseGlass:   85,
+    // 📝 The abandoned city (CityLevel*.js). Appended after 85: 86–98 are free, the proving grounds never use them.
+    Facade:          86,   // weathered render, grey-brown
+    FacadeStained:   87,   // the damp lower band: darker, rain-streaked
+    WindowGlassDark: 88,   // an intact pane: dim, faintly reflective
+    WindowVoid:      89,   // a broken window: near-black opening
+    Ivy:             90,   // climbing foliage on the lower walls
+    RoofTar:         91,   // flat roof membrane, cracked and bare
+    AsphaltCracked:  92,   // road surface with map cracking
+    Pothole:         93,   // the pit's dark, wet floor
+    FloodWater:      94,   // standing water: dark, glossy
+    GrassDry:        95,   // dead grass on the verge
+    Foliage:         96,   // rooftop and tree canopy
+    TreeBark:        97,   // trunks and bare branches
+    RustMetal:       98    // rusted rails, pipes and bins
 });
 
 export const MarkedFamilyFirst = CourseMaterial.Asphalt;   // [-]
@@ -328,6 +342,26 @@ export function ConstructMaterialSpecification()
     Showcase.SpecularLevel = IorToF0(1.5);
     Showcase.Transmission = 1.0;
     Materials[CourseMaterial.ShowcaseGlass] = Showcase;
+
+    // 📝 The abandoned city. Dielectric(r, g, b, roughness) as elsewhere: albedos in the measured ranges for
+    //    weathered render (≈ 0.2–0.35), dark asphalt (≈ 0.05–0.08), vegetation (≈ 0.03–0.12), dark standing water.
+    Materials[CourseMaterial.Facade]        = Dielectric(0.30, 0.28, 0.25, 0.85);
+    Materials[CourseMaterial.FacadeStained] = Dielectric(0.13, 0.12, 0.10, 0.70);
+    const WindowDark = Dielectric(0.04, 0.05, 0.06, 0.08);
+    WindowDark.SpecularLevel = IorToF0(1.5);
+    Materials[CourseMaterial.WindowGlassDark] = WindowDark;
+    Materials[CourseMaterial.WindowVoid]      = Dielectric(0.012, 0.012, 0.012, 0.95);
+    Materials[CourseMaterial.Ivy]             = Dielectric(0.06, 0.13, 0.04, 0.60);
+    Materials[CourseMaterial.RoofTar]         = Dielectric(0.035, 0.035, 0.035, 0.80);
+    Materials[CourseMaterial.AsphaltCracked]  = Dielectric(0.055, 0.055, 0.058, 0.75);
+    Materials[CourseMaterial.Pothole]         = Dielectric(0.025, 0.024, 0.024, 0.45);
+    const Flood = Dielectric(0.012, 0.018, 0.020, 0.04);
+    Flood.SpecularLevel = IorToF0(1.33);
+    Materials[CourseMaterial.FloodWater]      = Flood;
+    Materials[CourseMaterial.GrassDry]        = Dielectric(0.14, 0.12, 0.06, 0.85);
+    Materials[CourseMaterial.Foliage]         = Dielectric(0.05, 0.11, 0.035, 0.60);
+    Materials[CourseMaterial.TreeBark]        = Dielectric(0.07, 0.06, 0.05, 0.85);
+    Materials[CourseMaterial.RustMetal]       = Dielectric(0.20, 0.09, 0.04, 0.70);
     return Materials;
 }
 

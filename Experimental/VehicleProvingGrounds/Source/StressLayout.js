@@ -9,7 +9,7 @@
 //    handful of instanced draws, and placed through a seeded shuffle so any prefix of the pool spreads over the pad.
 
 import { EmitBoxFacets } from "./CourseStructure.js";
-import { LevelClearZones } from "./LevelStructure.js";
+import { LevelClearZones } from "./LevelCatalogue.js";
 import { CourseMaterial } from "./MaterialSpecification.js";
 
 export const StressShapeRun = 16;   // [slot] - consecutive slots sharing one shape

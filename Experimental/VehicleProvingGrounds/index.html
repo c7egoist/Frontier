@@ -10,6 +10,18 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Frontier · Proving Grounds — distance-field GI, smoke + fire, fracture</title>
+<script>
+    // 📝 ?level=city retitles the window and the viewport pill; the engine itself is unchanged (LevelCatalogue.js picks the level).
+    if (new URLSearchParams(location.search).get("level") === "city")
+    {
+        document.title = "Frontier · Abandoned City — procedural, flooded, overgrown";
+        document.addEventListener("DOMContentLoaded", () =>
+        {
+            const Pill = document.querySelector(".scene-pill");
+            if (Pill) Pill.textContent = "Abandoned City";
+        });
+    }
+</script>
 <link rel="stylesheet" href="Style/FrontierEditor.css">
 </head>
 <body>

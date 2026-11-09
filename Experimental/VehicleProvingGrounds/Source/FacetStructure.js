@@ -7,7 +7,7 @@ import { CourseMaterial } from "./MaterialSpecification.js";
 import { RetrieveFacetStream } from "./FacetCodec.js";
 import { ConstructCabinFacets } from "./CabinStructure.js";
 import { ConstructRoofFixtureFacets } from "./LightingSystem.js";
-import { LevelShapes, ResolveLevelPlacements, ResolveConePlacements, ResolveBreakables, EmitLevelGroundFacets } from "./LevelStructure.js";
+import { LevelShapes, ResolveLevelPlacements, ResolveConePlacements, ResolveBreakables, EmitLevelGroundFacets } from "./LevelCatalogue.js";
 import { ConstructSolid, TriangulateFace, FractureMaterials, FragmentTriangleBudget } from "./FractureStructure.js";
 import { VehicleGeometry, ResolveCoMAuthoredZ } from "./VehicleSpecification.js";
 import { ConstructIdentityTransform, ConstructRigidTransform, TransformBounds, InvertTransform, RotateVector, ConjugateQuaternion,

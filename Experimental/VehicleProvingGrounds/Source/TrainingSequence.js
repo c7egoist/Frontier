@@ -19,7 +19,7 @@
 //      smash    props broken and impact energy, alley entrance to exit
 //      burnout  seconds of held burnout and the hottest tyre
 
-import { TrainingDrills } from "./LevelStructure.js";
+import { TrainingDrills } from "./LevelCatalogue.js";
 import { RotateVector, LengthVector } from "./TransformProjection.js";
 
 const StorageKey = "FrontierRange.Best";

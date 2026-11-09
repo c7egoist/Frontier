@@ -13,7 +13,7 @@ import { GasParameterCatalogue, ConstructGasParameters } from "./SmokeSequence.j
 import { FractureMaterials, FractureMaterialOrder } from "./FractureStructure.js";
 import { FractureModes } from "./FractureSequence.js";
 import { VehicleGeometry } from "./VehicleSpecification.js";
-import { ArenaZones, TrainingDrills } from "./LevelStructure.js";
+import { ArenaZones, TrainingDrills } from "./LevelCatalogue.js";
 import { DerezPresets } from "./EffectSequence.js";
 import { FormatPrimary } from "./TrainingSequence.js";
 import { CameraRigs } from "./CabinStructure.js";

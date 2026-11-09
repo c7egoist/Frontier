@@ -17,7 +17,7 @@ import { TyreMarkDepot, TyreMarkLayout } from "./TyreMarkDepot.js";
 import { OccupantDistanceSpace } from "./OccupantDistanceSpace.js";
 import { SceneDistanceSpace, ResolveMovedBounds } from "./SceneDistanceSpace.js";
 import { RayTracingSpace } from "./RayTracingSpace.js";
-import { ResolveLevelPlacements } from "./LevelStructure.js";
+import { ResolveLevelPlacements } from "./LevelCatalogue.js";
 import { SurfaceCardDepot } from "./SurfaceCardDepot.js";
 import { AtmosphereIntegrator } from "./AtmosphereIntegrator.js";
 import { ShadowProjection } from "./ShadowProjection.js";
