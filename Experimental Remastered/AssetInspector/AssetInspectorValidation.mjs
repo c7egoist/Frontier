@@ -30,15 +30,22 @@ test('The response dock has editable torque, turbo and Pacejka curves with selec
  for(const mode of ['linear','smooth','ease','step'])assert.ok(Html.includes(`value="${mode}"`),`missing interpolation choice ${mode}`);
  for(const token of ['pointerdown','pointermove','dblclick','samplePacejka','EngineSheet.TorqueCurve','TurbochargerSheet.TorqueMultiplierCurve','function traceCurve','ctx.bezierCurveTo','mode===\'ease\'','mode===\'step\'','state.interpolation'])assert.ok(Js.includes(token),`missing curve behavior ${token}`);
 });
-test('Ten selectable inspection channels have distinct Stage overlays',()=>{
+test('Ten inspection channels render beside the vehicle and wheel stations',()=>{
  const channels=['Thermal','Contact','Slip','Suspension','Normals','BrakeTemp','WheelLoad','RideHeight','AeroLoad','Drivetrain'];
  for(const channel of channels){assert.ok(Html.includes(`data-channel="${channel}"`),`missing Outliner channel ${channel}`);assert.ok(Js.includes(`'${channel}'`),`missing Stage overlay ${channel}`)}
+ for(const token of ['TubeGeometry(springCurve','slipRing','outerZ','DebugLegendLow','DebugLegendHigh'])assert.ok(Js.includes(token),`missing exterior diagnostic ${token}`);
  assert.ok(Js.includes('DebugChannels.map(channel=>channel.id)'));assert.ok(Js.includes('function addDebugObject'));
 });
 test('Vehicle components can be attached, tuned, toggled, saved and removed',()=>{
  for(const id of ['AddComponentDialog','AddComponentForm','NewComponentType','NewComponentAttach','NewComponentParent','UserComponentTree'])assert.ok(Html.includes(`id="${id}"`),`missing component control ${id}`);
  for(const token of ['createUserComponent','updateUserComponentMesh','removeUserComponent','componentAnchor','makeUserComponentObject','components:state.components'])assert.ok(Js.includes(token),`missing component action ${token}`);
  for(const type of ['Sensor','Camera','Ballast','Aero Surface','Light'])assert.ok(Html.includes(`value="${type}"`),`missing addable type ${type}`);
+ assert.ok(Html.includes('locked-status')&&Html.includes('id="VehicleWarning"'));
+ assert.ok(Js.includes('hidden-status')&&Js.includes("setIcon(warningBadge,'warning')"));
+});
+test('Simulation runs the editable torque curve with throttle and brake inputs',()=>{
+ for(const id of ['SimulateBtn','SimulationHud','ThrottleInput','BrakeInput','SimSpeed','SimRpm','SimAcceleration','ResetSimulation'])assert.ok(Html.includes(`id="${id}"`),`missing simulation control ${id}`);
+ for(const token of ['function stepSimulation','sampleCurveValue(curve,Simulation.rpm,state.interpolation.Torque)','Simulation.wheelAngle','Simulation.brake','Simulation.throttle','setSimulation(!Simulation.running)'])assert.ok(Js.includes(token),`missing simulation behavior ${token}`);
 });
 test('Font Awesome icons are bundled locally; the 2D viewport grid stays removed',()=>{
  for(const token of ['--bg-canvas:#0b0b0b','--radius-column:22px','.property-card','.pill-range','.value-pill','.outliner-column','.inspector-column','.fa-icon','.component-dialog','Font Awesome 6 Free'])assert.ok(Css.includes(token),`missing studio style ${token}`);
