@@ -26,10 +26,18 @@ import {
   applyFloodFill,
   compositePaintDocument,
   sampleCompositedAtUV,
+  CURVE_PRESETS,
+  getToolChannels,
+  resolveDabVariation,
+  rgbaPixelsToSurfaceMaps,
 } from "../Engine/TexturePaintEngine.js";
 import { GpuPaintSession } from "../Engine/GpuPaintEngine.js";
 import { evaluateArtworkDocument } from "../Engine/Patterns/ArtworkStackEngine.js";
-import { listStampStarterCatalog, loadStarterAsArtworkDocument } from "../Engine/Patterns/StarterCatalogBridge.js";
+import {
+  listStampStarterCatalog,
+  loadStarterAsArtworkDocument,
+  getArtworkPreviewSvg,
+} from "../Engine/Patterns/StarterCatalogBridge.js";
 import {
   Construct,
   ConstructGlyph,
@@ -42,6 +50,8 @@ import {
   TextRow,
   ActionRow,
   MetricTrio,
+  ChannelMaskRow,
+  CurveRow,
   SmoothScroll,
   OpenScope,
   CloseScope,
@@ -106,6 +116,21 @@ function downloadRgbaPng(rgba, res, filename, isGray = false) {
   a.click();
 }
 
+function rgbaToPreviewDataUrl(albedo, width, heightPx) {
+  if (!albedo || !width || typeof document === "undefined") return null;
+  try {
+    const c = document.createElement("canvas");
+    c.width = width;
+    c.height = heightPx || width;
+    const cx = c.getContext("2d", { willReadFrequently: true });
+    if (!cx?.putImageData || typeof ImageData === "undefined") return null;
+    cx.putImageData(new ImageData(new Uint8ClampedArray(albedo), width, c.height), 0, 0);
+    return c.toDataURL?.("image/png") || null;
+  } catch {
+    return null;
+  }
+}
+
 const TOOL_LABELS = {
   paint: "Brush",
   erase: "Eraser",
@@ -122,9 +147,12 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   const stampPreviews = defaultStampCatalog.map((entry) => {
     const doc = loadStarterAsArtworkDocument(entry);
     const evaluated = evaluateArtworkDocument(doc, 192);
-    return { entry, name: doc.name, evaluated };
+    const previewSvg = getArtworkPreviewSvg(entry, "stamp", 76);
+    return { entry, name: doc.name, evaluated, previewSvg, previewDataUrl: null };
   });
   const defaultStamp = stampPreviews[0];
+
+  const defaultChannels = () => ({ albedo: true, roughness: true, metalness: true, height: true });
 
   let state = {
     doc: createPaintDocument(res),
@@ -133,9 +161,11 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     viewportMode: "3d", // "3d" | "split" | "2d"
     viewChannel: "lit", // "lit" | "baseColor" | "roughness" | "metalness" | "height" | "mask"
     fillScope: "part", // "part" | "island" | "all"
+    popupSubTab: "main", // "main" | "dynamics" | "curves"
+    activeCurveKey: "falloff", // "falloff" | "sizeOverStroke" | "opacityOverStroke" | "hueOverStroke"
     brush: {
       tool: "paint", // "paint" | "erase" | "fill" | "stamp" | "eyedropper"
-      tip: "round", // "round" | "chisel" | "chalk" | "splatter" | "sponge"
+      tip: "round", // "round" | "chisel" | "chalk" | "splatter" | "sponge" | "custom"
       color: "#e8c27a",
       roughness: 0.34,
       metalness: 0.12,
@@ -147,9 +177,34 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       hardness: 0.72,
       roundness: 1.0,
       angle: 0,
-      channels: { albedo: true, roughness: true, metalness: true, height: true },
+      spacing: 0.22,
+      followDirection: false,
+      stabilizer: 0.18,
+      paintChannels: defaultChannels(),
+      eraseChannels: defaultChannels(),
+      fillChannels: defaultChannels(),
+      jitter: {
+        size: 0.0,
+        angle: 0.0,
+        scatter: 0.0,
+        flow: 0.0,
+      },
+      colourDynamics: {
+        hueJitter: 0.0,
+        satJitter: 0.0,
+        valJitter: 0.0,
+        strokeGradient: false,
+      },
+      curves: {
+        falloff: CURVE_PRESETS.ease.map((p) => [...p]),
+        sizeOverStroke: CURVE_PRESETS.flat.map((p) => [...p]),
+        opacityOverStroke: CURVE_PRESETS.flat.map((p) => [...p]),
+        hueOverStroke: [[0, 0.5], [1, 0.5]],
+      },
       stampName: defaultStamp.name,
       stampData: defaultStamp.evaluated,
+      customTipName: "",
+      customTipData: null,
     },
     undoStack: [],
     redoStack: [],
@@ -171,6 +226,10 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   let activeCpuStroke = null;
   let hasLiveStroke = false;
   let lastHitPos = null;
+  let lastUv2D = null;
+  let smoothedHit3D = null;
+  let smoothedUv2D = null;
+  let strokeDabIndex = 0;
   let isPainting3D = false;
   let isPainting2D = false;
   let inspectorScope = null;
@@ -179,6 +238,123 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   let strokeSeedCounter = 1;
   let activeToolPopup = null;
   let dragLayerId = null;
+
+  // Shared image uploader for Stamps, Custom Brush Alpha Tips & Fill Image Textures
+  const imageFileInput = document.createElement("input");
+  imageFileInput.type = "file";
+  imageFileInput.accept = "image/png,image/jpeg,image/webp,image/svg+xml";
+  let pendingImageRole = "stamp"; // "stamp" | "tip" | "fill"
+
+  async function importImageFile(file, role = "stamp") {
+    if (!file) return;
+    try {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = () => reject(new Error("Could not decode image"));
+        img.src = url;
+      });
+      const maxDim = 256;
+      const scale = Math.min(1, maxDim / Math.max(1, img.width, img.height));
+      const w = Math.max(8, Math.round(img.width * scale));
+      const h = Math.max(8, Math.round(img.height * scale));
+      const cv = document.createElement("canvas");
+      cv.width = w;
+      cv.height = h;
+      const cx = cv.getContext("2d", { willReadFrequently: true });
+      cx.drawImage(img, 0, 0, w, h);
+      const rgba = cx.getImageData(0, 0, w, h).data;
+      const previewDataUrl = cv.toDataURL("image/png");
+      URL.revokeObjectURL(url);
+
+      const cleanName = file.name.replace(/\.[^.]+$/, "") || "Custom Image";
+      const evaluated = rgbaPixelsToSurfaceMaps(rgba, w, h, { name: cleanName, previewDataUrl });
+
+      if (role === "tip") {
+        state.brush.customTipData = evaluated;
+        state.brush.customTipName = cleanName;
+        state.brush.tip = "custom";
+        if (gpuPaint.isActive) gpuPaint.ensureStampTexture(evaluated, true);
+        if (state.brush.tool === "stamp" || state.brush.tool === "fill" || state.brush.tool === "eyedropper") {
+          selectTool("paint");
+        }
+        rebuildInspector();
+        if (activeToolPopup) openToolPopup(null, null, true);
+        Toast(`Equipped "${cleanName}" as Custom Brush Tip`);
+      } else if (role === "fill") {
+        let targetFill = state.doc.layers.find((l) => l.id === state.doc.selectedLayerId && l.kind === "fill");
+        if (!targetFill) {
+          targetFill = createPaintLayer("fill", {
+            res,
+            name: `${cleanName} Fill`,
+            fill: { color: "#ffffff", roughness: state.brush.roughness, metalness: state.brush.metalness, height: 0, patternRepeats: 2, patternData: evaluated },
+          });
+          state.doc.layers.push(targetFill);
+          state.doc.selectedLayerId = targetFill.id;
+        } else {
+          targetFill.fill.patternData = evaluated;
+          targetFill.fill.color = "#ffffff";
+        }
+        renderLeftColumn();
+        rebuildInspector();
+        refreshComposite();
+        if (activeToolPopup) openToolPopup(null, null, true);
+        Toast(`Applied "${cleanName}" to Fill Layer`);
+      } else {
+        stampPreviews.unshift({
+          entry: { group: "Imported Image" },
+          name: cleanName,
+          evaluated,
+          previewSvg: null,
+          previewDataUrl,
+        });
+        state.brush.stampData = evaluated;
+        state.brush.stampName = cleanName;
+        if (gpuPaint.isActive) gpuPaint.ensureStampTexture(evaluated, false);
+        selectTool("stamp");
+        rebuildInspector();
+        if (activeToolPopup) openToolPopup(null, null, true);
+        Toast(`Added Stamp Image "${cleanName}"`);
+      }
+    } catch (err) {
+      Toast(`Image import failed: ${err.message}`);
+    }
+  }
+
+  imageFileInput.addEventListener("change", async () => {
+    const f = imageFileInput.files?.[0];
+    imageFileInput.value = "";
+    if (f) await importImageFile(f, pendingImageRole);
+  });
+
+  function triggerAddImage(role = "stamp") {
+    pendingImageRole = role;
+    imageFileInput.click();
+  }
+
+  function createStampPreviewCard(sp, isActive, onPick) {
+    const card = Construct("button", "preset-card stamp-preview-card" + (isActive ? " active" : ""));
+    card.type = "button";
+    const thumb = Construct("div", "stamp-preview-thumb");
+    if (sp.previewDataUrl) {
+      const im = document.createElement("img");
+      im.src = sp.previewDataUrl;
+      im.alt = sp.name;
+      thumb.append(im);
+    } else if (sp.previewSvg) {
+      thumb.innerHTML = sp.previewSvg;
+    } else {
+      thumb.append(ConstructGlyph("Stamp"));
+    }
+    card.append(
+      thumb,
+      Construct("small", null, sp.entry?.group || "Stamp Decal"),
+      Construct("strong", null, sp.name),
+    );
+    card.addEventListener("click", onPick);
+    return card;
+  }
 
   // ----------------------------------------------------------------- DOM LAYOUT
   const grid = Construct("div", "studio-grid");
@@ -635,31 +811,94 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     const layer = getTargetPaintableLayer(true);
     const partFilter = layer?.partFilter ?? -1;
     const dist = pStart.distanceTo(pEnd);
-    const step = Math.max(0.015, state.brush.size * 0.24);
-    const steps = Math.max(1, Math.min(20, Math.ceil(dist / step)));
+    const spFrac = Math.max(0.06, Math.min(1.0, state.brush.spacing ?? 0.22));
+    const step = Math.max(0.01, state.brush.size * spFrac);
+    const steps = Math.max(1, Math.min(24, Math.ceil(dist / step)));
     const temp = new THREE.Vector3();
+    const dir = new THREE.Vector3().subVectors(pEnd, pStart);
+    const nUnit = normal.clone().normalize();
+    const upRef = Math.abs(nUnit.y) > 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
+    const tang = new THREE.Vector3().crossVectors(upRef, nUnit).normalize();
+    const bitang = new THREE.Vector3().crossVectors(nUnit, tang).normalize();
+    const followAngleDeg = dir.lengthSq() > 1e-6
+      ? (Math.atan2(dir.dot(bitang), dir.dot(tang)) * 180) / Math.PI
+      : 0;
 
     for (let s = 0; s <= steps; s++) {
       temp.lerpVectors(pStart, pEnd, steps === 0 ? 1 : s / steps);
+      const strokeT = Math.min(1, (strokeDabIndex++) / 48);
+      const dabBrush = resolveDabVariation(state.brush, strokeT, strokeSeedCounter++, followAngleDeg);
+      const dabPos = temp.clone()
+        .addScaledVector(tang, dabBrush.scatterU * state.brush.size)
+        .addScaledVector(bitang, dabBrush.scatterV * state.brush.size);
+      const dabRadius = Math.max(0.012, state.brush.size * dabBrush.sizeScale);
+
       if (gpuPaint.isActive) {
         gpuPaint.dabStroke({
           mode: "3d",
-          hitPos: temp,
+          hitPos: dabPos,
           hitNormal: normal,
-          worldRadius: state.brush.size,
-          brush: state.brush,
+          worldRadius: dabRadius,
+          brush: dabBrush,
           partFilter,
-          seed: strokeSeedCounter++,
+          seed: strokeSeedCounter,
         });
       } else {
         applyBrushDab3D({
           strokeAccum: activeCpuStroke,
           meshIndex,
           cues: meshCues,
-          hitPos: temp,
+          hitPos: dabPos,
           hitNormal: normal,
-          worldRadius: state.brush.size,
-          brush: state.brush,
+          worldRadius: dabRadius,
+          brush: dabBrush,
+          activePartFilter: partFilter,
+        });
+      }
+    }
+    refreshComposite();
+  }
+
+  function dabAlongSegment2D(uvStart, uvEnd) {
+    const layer = getTargetPaintableLayer(false);
+    const partFilter = layer?.partFilter ?? -1;
+    const baseUvRad = state.brush.pixelRadius / res;
+    const distUv = Math.hypot(uvEnd.u - uvStart.u, uvEnd.v - uvStart.v);
+    const spFrac = Math.max(0.06, Math.min(1.0, state.brush.spacing ?? 0.22));
+    const stepUv = Math.max(0.004, baseUvRad * spFrac);
+    const steps = Math.max(1, Math.min(24, Math.ceil(distUv / stepUv)));
+    const followAngleDeg = distUv > 1e-5
+      ? (Math.atan2(-(uvEnd.v - uvStart.v), uvEnd.u - uvStart.u) * 180) / Math.PI
+      : 0;
+
+    for (let s = 0; s <= steps; s++) {
+      const f = steps === 0 ? 1 : s / steps;
+      const mu = uvStart.u + (uvEnd.u - uvStart.u) * f;
+      const mv = uvStart.v + (uvEnd.v - uvStart.v) * f;
+      const strokeT = Math.min(1, (strokeDabIndex++) / 48);
+      const dabBrush = resolveDabVariation(state.brush, strokeT, strokeSeedCounter++, followAngleDeg);
+      const du = Math.max(0, Math.min(1, mu + dabBrush.scatterU * baseUvRad));
+      const dv = Math.max(0, Math.min(1, mv + dabBrush.scatterV * baseUvRad));
+      const dabUvRad = Math.max(0.004, baseUvRad * dabBrush.sizeScale);
+      const dabPxRad = Math.max(2, state.brush.pixelRadius * dabBrush.sizeScale);
+
+      if (gpuPaint.isActive) {
+        gpuPaint.dabStroke({
+          mode: "2d",
+          uv: { x: du, y: dv },
+          uvRadius: dabUvRad,
+          brush: dabBrush,
+          partFilter,
+          seed: strokeSeedCounter,
+        });
+      } else if (activeCpuStroke) {
+        applyBrushDabUV({
+          strokeAccum: activeCpuStroke,
+          cues: meshCues,
+          u: du,
+          v: dv,
+          pixelRadius: dabPxRad,
+          brush: dabBrush,
           activePartFilter: partFilter,
         });
       }
@@ -738,9 +977,11 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     orbit.enabled = false;
     isPainting3D = true;
     hasLiveStroke = true;
+    strokeDabIndex = 0;
     pendingUndoSnap = snapshotSelectedLayer();
     if (gpuPaint.isActive) gpuPaint.beginStroke();
     else activeCpuStroke = createStrokeAccumulator(res);
+    smoothedHit3D = hit.point.clone();
     lastHitPos = hit.point.clone();
     const norm = hit.face ? hit.face.normal.clone().transformDirection(paintMesh.matrixWorld) : new THREE.Vector3(0, 1, 0);
     dabAlongSegment3D(hit.point, hit.point, norm);
@@ -757,9 +998,11 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       state.hoverInfo = `${partName} · UV (${hit.uv.x.toFixed(2)}, ${hit.uv.y.toFixed(2)})`;
     }
     if (!isPainting3D || !hit) return;
+    const stab = Math.max(0, Math.min(0.85, state.brush.stabilizer ?? 0));
+    smoothedHit3D = smoothedHit3D ? smoothedHit3D.lerp(hit.point, 1 - stab) : hit.point.clone();
     const norm = hit.face ? hit.face.normal.clone().transformDirection(paintMesh.matrixWorld) : new THREE.Vector3(0, 1, 0);
-    dabAlongSegment3D(lastHitPos || hit.point, hit.point, norm);
-    lastHitPos = hit.point.clone();
+    dabAlongSegment3D(lastHitPos || smoothedHit3D, smoothedHit3D, norm);
+    lastHitPos = smoothedHit3D.clone();
   });
 
   const endStroke3D = () => {
@@ -777,6 +1020,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     hasLiveStroke = false;
     activeCpuStroke = null;
     lastHitPos = null;
+    smoothedHit3D = null;
     pendingUndoSnap = null;
     refreshComposite();
   };
@@ -809,42 +1053,25 @@ export function mountTexturePaintWorkspace(root, appBridge) {
 
     isPainting2D = true;
     hasLiveStroke = true;
+    strokeDabIndex = 0;
     pendingUndoSnap = snapshotSelectedLayer();
-    if (gpuPaint.isActive) {
-      gpuPaint.beginStroke();
-      gpuPaint.dabStroke({
-        mode: "2d",
-        uv: { x: u, y: v },
-        uvRadius: state.brush.pixelRadius / res,
-        brush: state.brush,
-        partFilter: layer.partFilter ?? -1,
-        seed: strokeSeedCounter++,
-      });
-    } else {
-      activeCpuStroke = createStrokeAccumulator(res);
-      applyBrushDabUV({ strokeAccum: activeCpuStroke, cues: meshCues, u, v, pixelRadius: state.brush.pixelRadius, brush: state.brush, activePartFilter: layer.partFilter ?? -1 });
-    }
-    refreshComposite();
+    smoothedUv2D = { u, v };
+    lastUv2D = { u, v };
+    if (gpuPaint.isActive) gpuPaint.beginStroke();
+    else activeCpuStroke = createStrokeAccumulator(res);
+    dabAlongSegment2D({ u, v }, { u, v });
     pane2D.setPointerCapture(e.pointerId);
   });
 
   pane2D.addEventListener("pointermove", (e) => {
     if (!isPainting2D) return;
-    const { u, v } = uvFromPaneEvent(e);
-    const layer = getTargetPaintableLayer(false);
-    if (gpuPaint.isActive) {
-      gpuPaint.dabStroke({
-        mode: "2d",
-        uv: { x: u, y: v },
-        uvRadius: state.brush.pixelRadius / res,
-        brush: state.brush,
-        partFilter: layer?.partFilter ?? -1,
-        seed: strokeSeedCounter++,
-      });
-    } else if (activeCpuStroke) {
-      applyBrushDabUV({ strokeAccum: activeCpuStroke, cues: meshCues, u, v, pixelRadius: state.brush.pixelRadius, brush: state.brush, activePartFilter: layer?.partFilter ?? -1 });
-    }
-    refreshComposite();
+    const pt = uvFromPaneEvent(e);
+    const stab = Math.max(0, Math.min(0.85, state.brush.stabilizer ?? 0));
+    smoothedUv2D = smoothedUv2D
+      ? { u: smoothedUv2D.u + (pt.u - smoothedUv2D.u) * (1 - stab), v: smoothedUv2D.v + (pt.v - smoothedUv2D.v) * (1 - stab) }
+      : pt;
+    dabAlongSegment2D(lastUv2D || smoothedUv2D, smoothedUv2D);
+    lastUv2D = { ...smoothedUv2D };
   });
 
   const endStroke2D = () => {
@@ -860,6 +1087,8 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     else gpuPaint.disposeSnapshot(pendingUndoSnap);
     hasLiveStroke = false;
     activeCpuStroke = null;
+    lastUv2D = null;
+    smoothedUv2D = null;
     pendingUndoSnap = null;
     refreshComposite();
   };
@@ -914,12 +1143,12 @@ export function mountTexturePaintWorkspace(root, appBridge) {
 
     const box = stage.getBoundingClientRect();
     const pop = Construct("div", "tool-popup-menu");
-    const px = clientX ?? (box.left + box.width * 0.5 - 170);
-    const py = clientY ?? (box.top + 68);
+    const px = clientX ?? (box.left + box.width * 0.5 - 188);
+    const py = clientY ?? (box.top + 56);
     const vw = window.innerWidth || 1280;
     const vh = window.innerHeight || 800;
-    pop.style.left = forceRefresh && prevLeft ? prevLeft : `${Math.max(12, Math.min(px, vw - 356))}px`;
-    pop.style.top = forceRefresh && prevTop ? prevTop : `${Math.max(12, Math.min(py, vh - 460))}px`;
+    pop.style.left = forceRefresh && prevLeft ? prevLeft : `${Math.max(12, Math.min(px, vw - 392))}px`;
+    pop.style.top = forceRefresh && prevTop ? prevTop : `${Math.max(12, Math.min(py, vh - 540))}px`;
 
     const closeBtn = Construct("button", "stack-mini-btn", ConstructGlyph("Close"));
     closeBtn.type = "button";
@@ -955,50 +1184,137 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     }
     pop.append(tabs);
 
+    const makePopupToggle = (parent, label, getVal, setVal) => {
+      const Row = Construct("div", "property-row toggle-row", [
+        Construct("span", "property-label", label),
+      ]);
+      const Input = document.createElement("input");
+      Input.type = "checkbox";
+      Input.checked = !!getVal();
+      Input.addEventListener("change", () => { setVal(Input.checked); Broadcast(); });
+      Row.append(Construct("label", "switch", [Input, Construct("span")]));
+      parent.append(Row);
+    };
+
     const tool = state.brush.tool;
 
     if (tool === "paint" || tool === "erase") {
-      const tipRow = Construct("div", "chip-strip");
-      for (const [label, key] of [["Round", "round"], ["Chisel", "chisel"], ["Chalk", "chalk"], ["Splatter", "splatter"], ["Sponge", "sponge"]]) {
-        const cb = Construct("button", "chip-btn" + (state.brush.tip === key ? " active" : ""), label);
-        cb.type = "button";
-        cb.addEventListener("click", () => {
-          state.brush.tip = key;
-          Broadcast();
+      // Sub-tabs: Main | Dynamics | Curves
+      const subTabs = Construct("div", "tool-popup-subtabs");
+      for (const [sid, sLabel] of [["main", "Tip & PBR"], ["dynamics", "Jitter & Color"], ["curves", "Curves"]]) {
+        const sb = Construct("button", "tool-popup-subtab" + (state.popupSubTab === sid ? " active" : ""), sLabel);
+        sb.type = "button";
+        sb.addEventListener("click", () => {
+          state.popupSubTab = sid;
           openToolPopup(null, null, true);
         });
-        tipRow.append(cb);
+        subTabs.append(sb);
       }
-      pop.append(Construct("div", "property-label", "Brush Tip Shape"), tipRow);
+      pop.append(subTabs);
 
-      if (tool === "paint") {
-        const swRow = Construct("div", "tool-popup-swatches");
-        for (const hex of QUICK_SWATCHES) {
-          const sw = Construct("button", "tool-popup-swatch" + (state.brush.color.toLowerCase() === hex ? " active" : ""));
-          sw.type = "button";
-          sw.style.background = hex;
-          sw.title = hex;
-          sw.addEventListener("click", () => {
-            state.brush.color = hex;
+      if (state.popupSubTab === "main") {
+        ChannelMaskRow(pop, {
+          Label: tool === "erase" ? "Erase PBR Channels" : "Paint PBR Channels",
+          Transient: true,
+          Read: () => getToolChannels(state.brush, tool),
+          Write: (next) => {
+            if (tool === "erase") state.brush.eraseChannels = next;
+            else state.brush.paintChannels = next;
+            Broadcast();
+          },
+        });
+
+        const tipRow = Construct("div", "chip-strip");
+        for (const [label, key] of [["Round", "round"], ["Chisel", "chisel"], ["Chalk", "chalk"], ["Splatter", "splatter"], ["Sponge", "sponge"], ["Custom Img", "custom"]]) {
+          const cb = Construct("button", "chip-btn" + (state.brush.tip === key ? " active" : ""), label);
+          cb.type = "button";
+          cb.addEventListener("click", () => {
+            if (key === "custom" && !state.brush.customTipData) {
+              triggerAddImage("tip");
+              return;
+            }
+            state.brush.tip = key;
             Broadcast();
             openToolPopup(null, null, true);
           });
-          swRow.append(sw);
+          tipRow.append(cb);
         }
-        const cInp = document.createElement("input");
-        cInp.type = "color"; cInp.value = state.brush.color; cInp.className = "color-native";
-        cInp.addEventListener("input", () => { state.brush.color = cInp.value; Broadcast(); });
-        swRow.append(cInp);
-        pop.append(Construct("div", "property-label", "Ink Color"), swRow);
-      }
+        const addTipBtn = Construct("button", "chip-btn", [ConstructGlyph("Image"), Construct("span", null, "+ Image")]);
+        addTipBtn.type = "button";
+        addTipBtn.addEventListener("click", () => triggerAddImage("tip"));
+        tipRow.append(addTipBtn);
+        pop.append(Construct("div", "property-label", state.brush.tip === "custom" && state.brush.customTipName ? `Brush Tip (${state.brush.customTipName})` : "Brush Tip Shape"), tipRow);
 
-      makePopupSlider(pop, "Brush Size", 0.03, 0.9, 0.01, "m", () => state.brush.size, (v) => { state.brush.size = v; state.brush.pixelRadius = Math.round(v * 110); });
-      makePopupSlider(pop, "Opacity", 0.05, 1, 0.01, "", () => state.brush.opacity, (v) => { state.brush.opacity = v; });
-      makePopupSlider(pop, "Flow", 0.05, 1, 0.01, "", () => state.brush.flow, (v) => { state.brush.flow = v; });
-      makePopupSlider(pop, "Hardness", 0.05, 0.98, 0.01, "", () => state.brush.hardness, (v) => { state.brush.hardness = v; });
-      if (tool === "paint") {
-        makePopupSlider(pop, "Roughness", 0.02, 1, 0.01, "", () => state.brush.roughness, (v) => { state.brush.roughness = v; });
-        makePopupSlider(pop, "Metalness", 0, 1, 0.01, "", () => state.brush.metalness, (v) => { state.brush.metalness = v; });
+        if (tool === "paint") {
+          const swRow = Construct("div", "tool-popup-swatches");
+          for (const hex of QUICK_SWATCHES) {
+            const sw = Construct("button", "tool-popup-swatch" + (state.brush.color.toLowerCase() === hex ? " active" : ""));
+            sw.type = "button";
+            sw.style.background = hex;
+            sw.title = hex;
+            sw.addEventListener("click", () => {
+              state.brush.color = hex;
+              Broadcast();
+              openToolPopup(null, null, true);
+            });
+            swRow.append(sw);
+          }
+          const cInp = document.createElement("input");
+          cInp.type = "color"; cInp.value = state.brush.color; cInp.className = "color-native";
+          cInp.addEventListener("input", () => { state.brush.color = cInp.value; Broadcast(); });
+          swRow.append(cInp);
+          pop.append(Construct("div", "property-label", "Ink Color"), swRow);
+        }
+
+        makePopupSlider(pop, "Brush Size", 0.03, 0.9, 0.01, "m", () => state.brush.size, (v) => { state.brush.size = v; state.brush.pixelRadius = Math.round(v * 110); });
+        makePopupSlider(pop, "Opacity", 0.05, 1, 0.01, "", () => state.brush.opacity, (v) => { state.brush.opacity = v; });
+        makePopupSlider(pop, "Flow", 0.05, 1, 0.01, "", () => state.brush.flow, (v) => { state.brush.flow = v; });
+        makePopupSlider(pop, "Hardness", 0.05, 0.98, 0.01, "", () => state.brush.hardness, (v) => { state.brush.hardness = v; });
+        makePopupSlider(pop, "Tip Angle", -180, 180, 1, "°", () => state.brush.angle, (v) => { state.brush.angle = v; });
+        makePopupSlider(pop, "Tip Roundness", 0.15, 1.0, 0.01, "", () => state.brush.roundness, (v) => { state.brush.roundness = v; });
+        if (tool === "paint") {
+          makePopupSlider(pop, "Roughness", 0.02, 1, 0.01, "", () => state.brush.roughness, (v) => { state.brush.roughness = v; });
+          makePopupSlider(pop, "Metalness", 0, 1, 0.01, "", () => state.brush.metalness, (v) => { state.brush.metalness = v; });
+          makePopupSlider(pop, "Height Relief", -1, 1, 0.02, "", () => state.brush.height, (v) => { state.brush.height = v; });
+        }
+      } else if (state.popupSubTab === "dynamics") {
+        pop.append(Construct("div", "property-label", "Stroke & Lazy Mouse"));
+        makePopupSlider(pop, "Spacing", 0.06, 1.0, 0.01, "", () => state.brush.spacing, (v) => { state.brush.spacing = v; });
+        makePopupSlider(pop, "Stabilizer", 0, 0.85, 0.02, "", () => state.brush.stabilizer, (v) => { state.brush.stabilizer = v; });
+        makePopupToggle(pop, "Follow Stroke Direction", () => state.brush.followDirection, (v) => { state.brush.followDirection = v; });
+
+        pop.append(Construct("div", "property-label", "Tip Jitter & Scatter"));
+        makePopupSlider(pop, "Size Jitter", 0, 0.9, 0.01, "", () => state.brush.jitter.size, (v) => { state.brush.jitter.size = v; });
+        makePopupSlider(pop, "Angle Jitter", 0, 180, 1, "°", () => state.brush.jitter.angle, (v) => { state.brush.jitter.angle = v; });
+        makePopupSlider(pop, "Position Scatter", 0, 1.5, 0.02, "r", () => state.brush.jitter.scatter, (v) => { state.brush.jitter.scatter = v; });
+        makePopupSlider(pop, "Flow Jitter", 0, 0.8, 0.01, "", () => state.brush.jitter.flow, (v) => { state.brush.jitter.flow = v; });
+
+        if (tool === "paint") {
+          pop.append(Construct("div", "property-label", "Colour Dynamics"));
+          makePopupSlider(pop, "Hue Jitter", 0, 1, 0.01, "", () => state.brush.colourDynamics.hueJitter, (v) => { state.brush.colourDynamics.hueJitter = v; });
+          makePopupSlider(pop, "Saturation Jitter", 0, 0.8, 0.01, "", () => state.brush.colourDynamics.satJitter, (v) => { state.brush.colourDynamics.satJitter = v; });
+          makePopupSlider(pop, "Value Jitter", 0, 0.8, 0.01, "", () => state.brush.colourDynamics.valJitter, (v) => { state.brush.colourDynamics.valJitter = v; });
+          makePopupToggle(pop, "Hue Shift Over Stroke Curve", () => state.brush.colourDynamics.strokeGradient, (v) => { state.brush.colourDynamics.strokeGradient = v; });
+        }
+      } else {
+        const cTabs = Construct("div", "chip-strip");
+        for (const [ck, cLabel] of [["falloff", "Tip Falloff"], ["sizeOverStroke", "Size"], ["opacityOverStroke", "Opacity"], ["hueOverStroke", "Hue Shift"]]) {
+          const cb = Construct("button", "chip-btn" + (state.activeCurveKey === ck ? " active" : ""), cLabel);
+          cb.type = "button";
+          cb.addEventListener("click", () => {
+            state.activeCurveKey = ck;
+            openToolPopup(null, null, true);
+          });
+          cTabs.append(cb);
+        }
+        pop.append(Construct("div", "property-label", "Response Curve Target"), cTabs);
+        CurveRow(pop, {
+          Label: state.activeCurveKey === "falloff" ? "Radial Tip Falloff" : state.activeCurveKey === "sizeOverStroke" ? "Size Over Stroke" : state.activeCurveKey === "opacityOverStroke" ? "Opacity Over Stroke" : "Hue Shift Over Stroke",
+          Detail: "Drag points · Click add · Right-click del",
+          Transient: true,
+          Read: () => state.brush.curves[state.activeCurveKey],
+          Write: (pts) => { state.brush.curves[state.activeCurveKey] = pts; Broadcast(); },
+        });
       }
     } else if (tool === "fill") {
       const scRow = Construct("div", "chip-strip");
@@ -1009,6 +1325,13 @@ export function mountTexturePaintWorkspace(root, appBridge) {
         scRow.append(b);
       }
       pop.append(Construct("div", "property-label", "Flood Fill Scope"), scRow);
+
+      ChannelMaskRow(pop, {
+        Label: "Fill PBR Channels",
+        Transient: true,
+        Read: () => state.brush.fillChannels,
+        Write: (next) => { state.brush.fillChannels = next; Broadcast(); },
+      });
 
       const swRow = Construct("div", "tool-popup-swatches");
       for (const hex of QUICK_SWATCHES) {
@@ -1021,30 +1344,46 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       makePopupSlider(pop, "Opacity", 0.05, 1, 0.01, "", () => state.brush.opacity, (v) => { state.brush.opacity = v; });
       makePopupSlider(pop, "Roughness", 0.02, 1, 0.01, "", () => state.brush.roughness, (v) => { state.brush.roughness = v; });
       makePopupSlider(pop, "Metalness", 0, 1, 0.01, "", () => state.brush.metalness, (v) => { state.brush.metalness = v; });
+      makePopupSlider(pop, "Height Relief", -1, 1, 0.02, "", () => state.brush.height, (v) => { state.brush.height = v; });
+      const addFillImg = Construct("button", "action-button warm", [ConstructGlyph("Image"), Construct("span", null, "+ Add Fill Image Texture")]);
+      addFillImg.type = "button";
+      addFillImg.style.width = "100%";
+      addFillImg.addEventListener("click", () => triggerAddImage("fill"));
+      pop.append(addFillImg);
     } else if (tool === "stamp") {
+      ChannelMaskRow(pop, {
+        Label: "Stamp PBR Channels",
+        Transient: true,
+        Read: () => state.brush.paintChannels,
+        Write: (next) => { state.brush.paintChannels = next; Broadcast(); },
+      });
+      const stampHead = Construct("div", null);
+      stampHead.style.cssText = "display:flex;align-items:center;justify-content:space-between;margin:6px 0 4px;";
+      const addStampImg = Construct("button", "chip-btn", [ConstructGlyph("Image"), Construct("span", null, "+ Add Image")]);
+      addStampImg.type = "button";
+      addStampImg.addEventListener("click", () => triggerAddImage("stamp"));
+      stampHead.append(Construct("div", "property-label", `Stamp: ${state.brush.stampName}`), addStampImg);
+      pop.append(stampHead);
+
       const gridBox = Construct("div", "tool-popup-stamp-grid");
       for (const sp of stampPreviews) {
-        const card = Construct("button", "preset-card" + (state.brush.stampName === sp.name ? " active" : ""));
-        card.type = "button";
-        card.append(
-          Construct("small", null, sp.entry.group || "Stamp Decal"),
-          Construct("strong", null, sp.name),
+        gridBox.append(
+          createStampPreviewCard(sp, state.brush.stampName === sp.name, () => {
+            state.brush.stampData = sp.evaluated;
+            state.brush.stampName = sp.name;
+            if (gpuPaint.isActive) gpuPaint.ensureStampTexture(sp.evaluated, false);
+            Broadcast();
+            openToolPopup(null, null, true);
+            Toast(`Loaded stamp "${sp.name}"`);
+          }),
         );
-        card.addEventListener("click", () => {
-          state.brush.stampData = sp.evaluated;
-          state.brush.stampName = sp.name;
-          if (gpuPaint.isActive) gpuPaint.ensureStampTexture(sp.evaluated);
-          Broadcast();
-          openToolPopup(null, null, true);
-          Toast(`Loaded stamp "${sp.name}"`);
-        });
-        gridBox.append(card);
       }
-      pop.append(Construct("div", "property-label", `Active Stamp: ${state.brush.stampName}`), gridBox);
+      pop.append(gridBox);
       makePopupSlider(pop, "Decal Scale", 0.04, 0.9, 0.01, "m", () => state.brush.size, (v) => { state.brush.size = v; state.brush.pixelRadius = Math.round(v * 110); });
       makePopupSlider(pop, "Rotation", -180, 180, 1, "°", () => state.brush.angle, (v) => { state.brush.angle = v; });
       makePopupSlider(pop, "Opacity", 0.05, 1, 0.01, "", () => state.brush.opacity, (v) => { state.brush.opacity = v; });
       makePopupSlider(pop, "Relief Height", -1, 1, 0.02, "", () => state.brush.height, (v) => { state.brush.height = v; });
+      makePopupSlider(pop, "Scatter Jitter", 0, 1.5, 0.02, "r", () => state.brush.jitter.scatter, (v) => { state.brush.jitter.scatter = v; });
     } else if (tool === "eyedropper") {
       const sampleCard = Construct("div", "object-heading");
       const dot = Construct("div", "object-symbol");
@@ -1304,16 +1643,43 @@ export function mountTexturePaintWorkspace(root, appBridge) {
 
     const bSec = SectionCard(rightInner, { Title: "Brush & Tool Parameters", Glyph: "Brush" });
     SegmentedRow(bSec.Inner, {
-      Label: "Brush Tip",
-      Options: [["Round", "round"], ["Chisel", "chisel"], ["Chalk", "chalk"], ["Splatter", "splatter"], ["Sponge", "sponge"]],
+      Label: "Brush Tip Shape",
+      Options: [["Round", "round"], ["Chisel", "chisel"], ["Chalk", "chalk"], ["Splatter", "splatter"], ["Sponge", "sponge"], ["Custom", "custom"]],
       Read: () => state.brush.tip,
-      Write: (v) => { state.brush.tip = v; },
+      Write: (v) => {
+        if (v === "custom" && !state.brush.customTipData) {
+          triggerAddImage("tip");
+          return;
+        }
+        state.brush.tip = v;
+      },
+    });
+    ActionRow(bSec.Inner, [
+      { Label: "+ Add Tip Image", Glyph: "Image", Act: () => triggerAddImage("tip") },
+      { Label: "+ Add Fill Image", Glyph: "Image", Tone: "warm", Act: () => triggerAddImage("fill") },
+    ]);
+    ChannelMaskRow(bSec.Inner, {
+      Label: "Paint & Stamp Channels",
+      Read: () => state.brush.paintChannels,
+      Write: (next) => { state.brush.paintChannels = next; },
+    });
+    ChannelMaskRow(bSec.Inner, {
+      Label: "Eraser PBR Channels",
+      Read: () => state.brush.eraseChannels,
+      Write: (next) => { state.brush.eraseChannels = next; },
+    });
+    ChannelMaskRow(bSec.Inner, {
+      Label: "Fill Tool PBR Channels",
+      Read: () => state.brush.fillChannels,
+      Write: (next) => { state.brush.fillChannels = next; },
     });
     ColorRow(bSec.Inner, { Label: "Paint Color", Read: () => state.brush.color, Write: (hex) => { state.brush.color = hex; } });
     SliderRow(bSec.Inner, { Label: "3D Radius", Minimum: 0.03, Maximum: 0.9, Step: 0.01, Unit: "m", Read: () => state.brush.size, Write: (v) => { state.brush.size = v; state.brush.pixelRadius = Math.round(v * 110); } });
     SliderRow(bSec.Inner, { Label: "Opacity", Minimum: 0.05, Maximum: 1, Step: 0.01, Read: () => state.brush.opacity, Write: (v) => { state.brush.opacity = v; } });
     SliderRow(bSec.Inner, { Label: "Flow", Minimum: 0.05, Maximum: 1, Step: 0.01, Read: () => state.brush.flow, Write: (v) => { state.brush.flow = v; } });
     SliderRow(bSec.Inner, { Label: "Hardness", Minimum: 0.05, Maximum: 0.98, Step: 0.01, Read: () => state.brush.hardness, Write: (v) => { state.brush.hardness = v; } });
+    SliderRow(bSec.Inner, { Label: "Tip Angle", Minimum: -180, Maximum: 180, Step: 1, Unit: "°", Read: () => state.brush.angle, Write: (v) => { state.brush.angle = v; } });
+    SliderRow(bSec.Inner, { Label: "Tip Roundness", Minimum: 0.15, Maximum: 1.0, Step: 0.01, Read: () => state.brush.roundness, Write: (v) => { state.brush.roundness = v; } });
     SliderRow(bSec.Inner, { Label: "Brush Roughness", Minimum: 0.02, Maximum: 1, Step: 0.01, Read: () => state.brush.roughness, Write: (v) => { state.brush.roughness = v; } });
     SliderRow(bSec.Inner, { Label: "Brush Metalness", Minimum: 0, Maximum: 1, Step: 0.01, Read: () => state.brush.metalness, Write: (v) => { state.brush.metalness = v; } });
     SliderRow(bSec.Inner, { Label: "Brush Height Relief", Minimum: -1, Maximum: 1, Step: 0.02, Read: () => state.brush.height, Write: (v) => { state.brush.height = v; } });
@@ -1323,6 +1689,50 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       Read: () => state.fillScope,
       Write: (v) => { state.fillScope = v; },
     });
+
+    const dynSec = SectionCard(rightInner, { Title: "Stroke, Jitter & Colour Dynamics", Glyph: "Sparkles", Open: true });
+    SliderRow(dynSec.Inner, { Label: "Stroke Spacing", Minimum: 0.06, Maximum: 1.0, Step: 0.01, Read: () => state.brush.spacing, Write: (v) => { state.brush.spacing = v; } });
+    SliderRow(dynSec.Inner, { Label: "Lazy Mouse Stabilizer", Minimum: 0, Maximum: 0.85, Step: 0.02, Read: () => state.brush.stabilizer, Write: (v) => { state.brush.stabilizer = v; } });
+    SwitchRow(dynSec.Inner, { Label: "Follow Stroke Direction", Read: () => state.brush.followDirection, Write: (v) => { state.brush.followDirection = v; } });
+    SliderRow(dynSec.Inner, { Label: "Size Jitter", Minimum: 0, Maximum: 0.9, Step: 0.01, Read: () => state.brush.jitter.size, Write: (v) => { state.brush.jitter.size = v; } });
+    SliderRow(dynSec.Inner, { Label: "Angle Jitter", Minimum: 0, Maximum: 180, Step: 1, Unit: "°", Read: () => state.brush.jitter.angle, Write: (v) => { state.brush.jitter.angle = v; } });
+    SliderRow(dynSec.Inner, { Label: "Position Scatter", Minimum: 0, Maximum: 1.5, Step: 0.02, Unit: "r", Read: () => state.brush.jitter.scatter, Write: (v) => { state.brush.jitter.scatter = v; } });
+    SliderRow(dynSec.Inner, { Label: "Flow Jitter", Minimum: 0, Maximum: 0.8, Step: 0.01, Read: () => state.brush.jitter.flow, Write: (v) => { state.brush.jitter.flow = v; } });
+    SliderRow(dynSec.Inner, { Label: "Hue Jitter", Minimum: 0, Maximum: 1.0, Step: 0.01, Read: () => state.brush.colourDynamics.hueJitter, Write: (v) => { state.brush.colourDynamics.hueJitter = v; } });
+    SliderRow(dynSec.Inner, { Label: "Saturation Jitter", Minimum: 0, Maximum: 0.8, Step: 0.01, Read: () => state.brush.colourDynamics.satJitter, Write: (v) => { state.brush.colourDynamics.satJitter = v; } });
+    SliderRow(dynSec.Inner, { Label: "Value Jitter", Minimum: 0, Maximum: 0.8, Step: 0.01, Read: () => state.brush.colourDynamics.valJitter, Write: (v) => { state.brush.colourDynamics.valJitter = v; } });
+    SwitchRow(dynSec.Inner, { Label: "Hue Shift Over Stroke Curve", Read: () => state.brush.colourDynamics.strokeGradient, Write: (v) => { state.brush.colourDynamics.strokeGradient = v; } });
+
+    const curveSec = SectionCard(rightInner, { Title: "Brush & Stroke Curves", Glyph: "Curve", Open: true });
+    SegmentedRow(curveSec.Inner, {
+      Label: "Curve Target",
+      Options: [["Tip Falloff", "falloff"], ["Size", "sizeOverStroke"], ["Opacity", "opacityOverStroke"], ["Hue", "hueOverStroke"]],
+      Read: () => state.activeCurveKey,
+      Write: (v) => { state.activeCurveKey = v; },
+    });
+    CurveRow(curveSec.Inner, {
+      Label: "Response Spline",
+      Detail: "Click add · Drag · Right-click del",
+      Read: () => state.brush.curves[state.activeCurveKey],
+      Write: (pts) => { state.brush.curves[state.activeCurveKey] = pts; },
+    });
+
+    const stSec = SectionCard(rightInner, { Title: "Stamps & Custom Images", Glyph: "Stamp", Badge: String(stampPreviews.length), Open: false });
+    ActionRow(stSec.Inner, [{ Label: "+ Add Stamp Image", Glyph: "Image", Tone: "warm", Act: () => triggerAddImage("stamp") }]);
+    const stampGrid = Construct("div", "stamp-preview-grid");
+    for (const sp of stampPreviews) {
+      stampGrid.append(
+        createStampPreviewCard(sp, state.brush.stampName === sp.name && state.brush.tool === "stamp", () => {
+          state.brush.stampData = sp.evaluated;
+          state.brush.stampName = sp.name;
+          if (gpuPaint.isActive) gpuPaint.ensureStampTexture(sp.evaluated, false);
+          selectTool("stamp");
+          rebuildInspector();
+          Toast(`Equipped stamp "${sp.name}"`);
+        }),
+      );
+    }
+    stSec.Inner.append(stampGrid);
 
     if (layer) {
       const lSec = SectionCard(rightInner, { Title: "Active Layer Modifier & Target", Glyph: "Layers", Badge: layer.kind.toUpperCase() });
@@ -1338,17 +1748,22 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       SelectRow(lSec.Inner, { Label: "Target Part Filter", Options: partOpts, Read: () => layer.partFilter ?? -1, Write: (v) => { layer.partFilter = Number(v); refreshComposite(); renderLeftColumn(); } });
 
       if (layer.kind === "fill") {
+        ChannelMaskRow(lSec.Inner, {
+          Label: "Fill Layer PBR Channels",
+          Read: () => layer.channels,
+          Write: (next) => { layer.channels = next; refreshComposite(); renderLeftColumn(); },
+        });
         ColorRow(lSec.Inner, { Label: "Fill Color", Read: () => layer.fill.color, Write: (v) => { layer.fill.color = v; refreshComposite(); renderLeftColumn(); } });
         SliderRow(lSec.Inner, { Label: "Roughness", Minimum: 0.02, Maximum: 1, Step: 0.01, Read: () => layer.fill.roughness, Write: (v) => { layer.fill.roughness = v; refreshComposite(); } });
         SliderRow(lSec.Inner, { Label: "Metalness", Minimum: 0, Maximum: 1, Step: 0.01, Read: () => layer.fill.metalness, Write: (v) => { layer.fill.metalness = v; refreshComposite(); } });
-        if (appBridge?.shared?.patternData) {
-          ActionRow(lSec.Inner, [{
-            Label: "Apply Pattern Studio Tile",
+        ActionRow(lSec.Inner, [
+          { Label: "+ Add Image Tile", Glyph: "Image", Tone: "warm", Act: () => triggerAddImage("fill") },
+          ...(appBridge?.shared?.patternData ? [{
+            Label: "Apply Pattern Tile",
             Glyph: "Pattern",
-            Tone: "warm",
             Act: () => { layer.fill.patternData = appBridge.shared.patternData; refreshComposite(); Toast("Applied Pattern Studio tile to Fill layer"); },
-          }]);
-        }
+          }] : []),
+        ]);
         if (layer.fill.patternData) {
           SliderRow(lSec.Inner, { Label: "Pattern Repeats", Minimum: 1, Maximum: 12, Step: 1, Read: () => layer.fill.patternRepeats || 3, Write: (v) => { layer.fill.patternRepeats = v; refreshComposite(); } });
         }
@@ -1659,6 +2074,11 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     paneEl.addEventListener("drop", (e) => {
       e.preventDefault();
       stage.classList.remove("canvas-drop-active");
+      const files = e.dataTransfer?.files;
+      if (files?.length && files[0].type?.startsWith("image/")) {
+        importImageFile(files[0], state.brush.tool === "fill" ? "fill" : "stamp");
+        return;
+      }
       const payload = resolveDropPayload(e);
       if (payload) applyAsset(payload, { source: "drop", pane: paneName, event: e });
     });
@@ -1703,10 +2123,21 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       Toast(`Applied "${patternEval.name}" as Pattern Fill layer`);
     },
     applyBridgedStamp(stampEval) {
+      const name = stampEval.name || "Stamp Decal";
+      if (!stampPreviews.some((sp) => sp.name === name && sp.evaluated === stampEval)) {
+        stampPreviews.unshift({
+          entry: { group: "Stamp Studio" },
+          name,
+          evaluated: stampEval,
+          previewSvg: null,
+          previewDataUrl: rgbaToPreviewDataUrl(stampEval.albedo || stampEval.rgba, stampEval.width, stampEval.heightPx),
+        });
+      }
       state.brush.stampData = stampEval;
-      state.brush.stampName = stampEval.name || "Stamp Decal";
+      state.brush.stampName = name;
       if (gpuPaint.isActive) gpuPaint.ensureStampTexture(stampEval);
       selectTool("stamp");
+      rebuildInspector();
       Toast(`Loaded "${state.brush.stampName}" into Stamp Brush`);
     },
     applyBakedMaps(bridgeData) {

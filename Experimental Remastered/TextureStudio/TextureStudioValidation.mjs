@@ -60,6 +60,11 @@ const {
   applyFloodFill,
   compositePaintDocument,
   sampleCompositedAtUV,
+  CURVE_PRESETS,
+  sampleCurve,
+  getToolChannels,
+  resolveDabVariation,
+  rgbaPixelsToSurfaceMaps,
 } = await import("./Engine/TexturePaintEngine.js");
 
 const {
@@ -194,6 +199,82 @@ await suite("4. Texture Paint Engine: Packed UVs, 3D Strokes, 2D UV Strokes, Flo
   const comp = compositePaintDocument(doc, cues);
   const sample = sampleCompositedAtUV(comp, 0.5, 0.5);
   assert(/^#[0-9a-f]{6}$/.test(sample.color), `Invalid sampled color ${sample.color}`);
+
+  // Curve sampling, Colour Dynamics, Jitter, Custom Image Surface Maps & Selective PBR Channels
+  assert(Math.abs(sampleCurve(CURVE_PRESETS.linear, 0.5) - 0.5) < 0.05, "Linear curve failed midpoint");
+  assert(sampleCurve(CURVE_PRESETS.bell, 0.5) > sampleCurve(CURVE_PRESETS.bell, 0.05), "Bell curve should peak near center");
+
+  const dynBrush = {
+    tool: "paint",
+    tip: "round",
+    color: "#cc4422",
+    roughness: 0.3,
+    metalness: 0.2,
+    height: 0.8,
+    opacity: 1,
+    flow: 0.9,
+    angle: 15,
+    jitter: { size: 0.5, angle: 45, scatter: 0.4, flow: 0.3 },
+    colourDynamics: { hueJitter: 0.6, satJitter: 0.3, valJitter: 0.25, strokeGradient: true },
+    curves: {
+      falloff: CURVE_PRESETS.ease,
+      sizeOverStroke: CURVE_PRESETS.bell,
+      opacityOverStroke: CURVE_PRESETS.punch,
+      hueOverStroke: [[0, 0.2], [1, 0.9]],
+    },
+  };
+  const v0 = resolveDabVariation(dynBrush, 0.1, 101, 25);
+  const v1 = resolveDabVariation(dynBrush, 0.9, 102, 25);
+  assert.notEqual(v0.color, v1.color, "Colour Dynamics should produce color variation along stroke");
+  assert(v0.sizeScale !== v1.sizeScale, "Size Jitter / Stroke Curve should vary dab scale");
+
+  const customImgRgba = new Uint8ClampedArray(16 * 16 * 4);
+  for (let i = 0; i < 16 * 16; i++) {
+    customImgRgba[i * 4] = 240; customImgRgba[i * 4 + 1] = 180; customImgRgba[i * 4 + 2] = 90;
+    customImgRgba[i * 4 + 3] = i % 2 === 0 ? 255 : 0;
+  }
+  const imgMaps = rgbaPixelsToSurfaceMaps(customImgRgba, 16, 16, { name: "Test Alpha Image" });
+  assert.equal(imgMaps.tipAlpha.length, 16 * 16 * 4);
+
+  // Height-only paint layer test: Albedo MUST stay untouched (no black color bleed!)
+  const chDoc = createPaintDocument(res);
+  const baseOnly = compositePaintDocument(chDoc, cues);
+  const hLayer = chDoc.layers[1];
+  const hOnlyBrush = {
+    tool: "paint",
+    tip: "custom",
+    customTipData: imgMaps,
+    color: "#000000",
+    roughness: 0.1,
+    metalness: 1.0,
+    height: 1.0,
+    opacity: 1,
+    flow: 1,
+    hardness: 0.8,
+    paintChannels: { albedo: false, roughness: false, metalness: false, height: true },
+  };
+  assert.equal(getToolChannels(hOnlyBrush).height, true);
+  assert.equal(getToolChannels(hOnlyBrush).albedo, false);
+  const hAcc = createStrokeAccumulator(res);
+  applyBrushDabUV({ strokeAccum: hAcc, cues, u: 0.5, v: 0.5, pixelRadius: 12, brush: hOnlyBrush });
+  assert.equal(commitStrokeAccumulator(hLayer, hAcc, hOnlyBrush, false), true);
+  const afterHeight = compositePaintDocument(chDoc, cues);
+  const cMid = (Math.floor(0.5 * res) * res + Math.floor(0.5 * res)) * 4;
+  assert.equal(afterHeight.albedo[cMid], baseOnly.albedo[cMid], "Height-only brush must not darken base albedo");
+
+  // Full color paint then selective height-only erase test
+  const fullBrush = { tool: "paint", tip: "round", color: "#44aa88", roughness: 0.2, metalness: 0.1, height: 0.9, opacity: 1, flow: 1, paintChannels: { albedo: true, roughness: true, metalness: true, height: true } };
+  const fAcc = createStrokeAccumulator(res);
+  applyBrushDabUV({ strokeAccum: fAcc, cues, u: 0.25, v: 0.25, pixelRadius: 8, brush: fullBrush });
+  commitStrokeAccumulator(hLayer, fAcc, fullBrush, false);
+  const pCheck = (Math.floor(0.75 * res) * res + Math.floor(0.25 * res)) * 4;
+  const albBeforeErase = hLayer.pixels.albedo[pCheck + 3];
+  const eraseHeightOnly = { tool: "erase", tip: "round", opacity: 1, flow: 1, eraseChannels: { albedo: false, roughness: false, metalness: false, height: true } };
+  const eAcc = createStrokeAccumulator(res);
+  applyBrushDabUV({ strokeAccum: eAcc, cues, u: 0.25, v: 0.25, pixelRadius: 8, brush: eraseHeightOnly });
+  commitStrokeAccumulator(hLayer, eAcc, eraseHeightOnly, false);
+  assert.equal(hLayer.pixels.albedo[pCheck + 3], albBeforeErase, "Height-only erase must preserve albedo coverage");
+  assert(hLayer.pixels.heightAlpha[Math.floor(0.75 * res) * res + Math.floor(0.25 * res)] < 10, "Height-only erase must erase height alpha");
 
   // Part Flood Fill
   assert.equal(applyFloodFill({ layer: paintLayer, cues, hitTriIndex: 0, scope: "part", brush }), true);
@@ -523,11 +604,33 @@ await suite("8. GPU Bake/Paint Shaders, Q/Tab/Right-Click Tool Popups & Draggabl
   const patLayer = createPaintLayer("fill", { res: 64, fill: { color: "#ffffff", roughness: 0.4, metalness: 0.1, height: 0, patternRepeats: 2, patternData: patEval } });
   const patGpu = gpuSess.ensureLayerTargets(patLayer);
   assert(patGpu.patternTex, "ensureLayerTargets must upload Pattern Fill .albedo buffer");
+
+  // Verify GPU Brush Curves, Roundness, Custom Tip & Selective PBR Channel Commit
+  const gpuPaintLyr = createPaintLayer("paint", { res: 64 });
+  gpuSess.beginStroke();
+  gpuSess.dabStroke({
+    mode: "2d",
+    uv: { x: 0.5, y: 0.5 },
+    uvRadius: 0.15,
+    brush: {
+      tool: "paint",
+      tip: "custom",
+      customTipData: stampEval,
+      color: "#d48842",
+      roundness: 0.65,
+      angle: 22,
+      curves: { falloff: CURVE_PRESETS.bell },
+      paintChannels: { albedo: true, roughness: false, metalness: false, height: true },
+    },
+  });
+  assert.equal(gpuSess.commitStrokeToLayer(gpuPaintLyr, { tool: "paint", paintChannels: { albedo: true, roughness: false, metalness: false, height: true }, opacity: 1 }, false), true);
   gpuSess.dispose();
   testGeo.dispose();
 
-  // Switch back to Texture Paint & exercise Q/Tab/Right-click popup + layer stack drag/up/down
+  // Switch back to Texture Paint & exercise Q/Tab/Right-click popup + Stamp Previews + Curves + PBR Channels + layer stack drag/up/down
   globalThis.window.__frontierTextureStudio.switchWorkspace("paint");
+  assert(globalThis.document.querySelectorAll(".pbr-chan-pill").length >= 12, "Inspector must display Paint/Erase/Fill PBR channel toggles");
+  assert(globalThis.document.querySelectorAll(".curve-editor-svg").length >= 1, "Inspector must render interactive SVG Curve editor");
   const paintRowsBefore = globalThis.document.querySelectorAll(".stack-row");
   assert(paintRowsBefore.length >= 2, "Expected paint workspace stack rows");
   assert(paintRowsBefore.every((r) => r.draggable === true), "All paint stack rows must be draggable");
@@ -574,7 +677,24 @@ await suite("8. GPU Bake/Paint Shaders, Q/Tab/Right-Click Tool Popups & Draggabl
   assert(splitPanes.length >= 1, "Missing paint viewport split panes");
   splitPanes[0].dispatchEvent({ type: "pointerdown", button: 2, clientX: 220, clientY: 180 });
   splitPanes[0].dispatchEvent({ type: "contextmenu", clientX: 221, clientY: 181 });
-  assert(globalThis.document.body.querySelectorAll(".tool-popup-menu").length === 1, "Right-click on paint viewport did not open Active Tool Popup");
+  let rightPop = globalThis.document.body.querySelectorAll(".tool-popup-menu")[0];
+  assert(rightPop, "Right-click on paint viewport did not open Active Tool Popup");
+  assert(rightPop.querySelectorAll(".pbr-chan-pill").length === 4, "Right-click Brush popup must expose PBR channel toggles");
+  const subTabs = rightPop.querySelectorAll(".tool-popup-subtab");
+  assert.equal(subTabs.length, 3, "Right-click Brush popup must expose Tip & PBR / Jitter & Color / Curves subtabs");
+  subTabs[2].click(); // Curves subtab
+  rightPop = globalThis.document.body.querySelectorAll(".tool-popup-menu")[0];
+  assert(rightPop.querySelectorAll(".curve-editor-svg").length === 1, "Curves subtab in right-click popup must render SVG curve editor");
+
+  // Switch to Stamp tab inside right-click popup and verify visual Stamp Previews!
+  const popupToolTabs = rightPop.querySelectorAll(".tool-popup-tab");
+  const stampPopupTab = popupToolTabs[3]; // Stamp
+  assert(stampPopupTab, "Missing Stamp tab inside right-click popup");
+  stampPopupTab.click();
+  rightPop = globalThis.document.body.querySelectorAll(".tool-popup-menu")[0];
+  const popupStampThumbs = rightPop.querySelectorAll(".stamp-preview-thumb");
+  assert(popupStampThumbs.length >= 5, `Right-click Stamp tool must display stamp thumbnail previews, got ${popupStampThumbs.length}`);
+  assert(popupStampThumbs[0]._html?.includes("<svg") || popupStampThumbs[0].children?.length >= 1, "Stamp preview thumbnail in right-click popup must render artwork SVG or image");
   globalThis.window.dispatchEvent({ type: "keydown", key: "Escape" });
 
   // Verify Pattern Studio layer drag-drop & popup as well

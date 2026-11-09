@@ -42,6 +42,199 @@ function rgb01ToHex(r, g, b) {
   return `#${toH(r)}${toH(g)}${toH(b)}`;
 }
 
+export const CURVE_PRESETS = {
+  linear: [[0, 0], [1, 1]],
+  flat: [[0, 1], [1, 1]],
+  ease: [[0, 0], [0.35, 0.14], [0.7, 0.82], [1, 1]],
+  punch: [[0, 0], [0.22, 0.72], [0.62, 0.94], [1, 1]],
+  scurve: [[0, 0], [0.28, 0.08], [0.72, 0.92], [1, 1]],
+  bell: [[0, 0], [0.22, 0.86], [0.5, 1], [0.78, 0.86], [1, 0]],
+  inverse: [[0, 1], [1, 0]],
+};
+
+export function sampleCurve(points, t) {
+  const x = clamp(t, 0, 1);
+  if (!Array.isArray(points) || points.length === 0) return x;
+  if (points.length === 1) return clamp(points[0][1], 0, 1);
+  const pts = [...points].sort((a, b) => a[0] - b[0]);
+  if (x <= pts[0][0]) return clamp(pts[0][1], 0, 1);
+  if (x >= pts[pts.length - 1][0]) return clamp(pts[pts.length - 1][1], 0, 1);
+  for (let i = 0; i < pts.length - 1; i++) {
+    const [x0, y0] = pts[i];
+    const [x1, y1] = pts[i + 1];
+    if (x >= x0 && x <= x1) {
+      const span = Math.max(1e-5, x1 - x0);
+      const u = (x - x0) / span;
+      // Smooth Catmull-Rom tangent estimate for responsive spline shape
+      const pPrev = pts[Math.max(0, i - 1)];
+      const pNext = pts[Math.min(pts.length - 1, i + 2)];
+      const m0 = ((y1 - pPrev[1]) / Math.max(1e-4, x1 - pPrev[0])) * span * 0.5;
+      const m1 = ((pNext[1] - y0) / Math.max(1e-4, pNext[0] - x0)) * span * 0.5;
+      const u2 = u * u;
+      const u3 = u2 * u;
+      const h00 = 2 * u3 - 3 * u2 + 1;
+      const h10 = u3 - 2 * u2 + u;
+      const h01 = -2 * u3 + 3 * u2;
+      const h11 = u3 - u2;
+      return clamp(h00 * y0 + h10 * m0 + h01 * y1 + h11 * m1, 0, 1);
+    }
+  }
+  return clamp(pts[pts.length - 1][1], 0, 1);
+}
+
+export function sampleCurveLut(points, count = 17) {
+  const out = new Array(count);
+  for (let i = 0; i < count; i++) {
+    out[i] = sampleCurve(points, count <= 1 ? 1 : i / (count - 1));
+  }
+  return out;
+}
+
+export function getToolChannels(brush, toolOverride = null) {
+  const t = toolOverride || brush?.tool || "paint";
+  if (t === "erase") return brush?.eraseChannels || brush?.channels || { albedo: true, roughness: true, metalness: true, height: true };
+  if (t === "fill") return brush?.fillChannels || brush?.channels || { albedo: true, roughness: true, metalness: true, height: true };
+  return brush?.paintChannels || brush?.channels || { albedo: true, roughness: true, metalness: true, height: true };
+}
+
+function rgbToHsl(r, g, b) {
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h = 0, s = 0;
+  const l = (max + min) * 0.5;
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+    else if (max === g) h = ((b - r) / d + 2) / 6;
+    else h = ((r - g) / d + 4) / 6;
+  }
+  return [h, s, l];
+}
+
+function hslToRgb(h, s, l) {
+  const hue = ((h % 1) + 1) % 1;
+  if (s <= 1e-4) return [l, l, l];
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+  const tc = (t) => {
+    const x = ((t % 1) + 1) % 1;
+    if (x < 1 / 6) return p + (q - p) * 6 * x;
+    if (x < 0.5) return q;
+    if (x < 2 / 3) return p + (q - p) * (2 / 3 - x) * 6;
+    return p;
+  };
+  return [tc(hue + 1 / 3), tc(hue), tc(hue - 1 / 3)];
+}
+
+export function shiftHslHex(hex, hDelta = 0, sDelta = 0, lDelta = 0) {
+  const [r, g, b] = hexToRgb01(hex);
+  const [h, s, l] = rgbToHsl(r, g, b);
+  const [nr, ng, nb] = hslToRgb(h + hDelta, clamp(s + sDelta, 0, 1), clamp(l + lDelta, 0, 1));
+  return rgb01ToHex(nr, ng, nb);
+}
+
+function prngHash(seed, salt = 0) {
+  let x = (Math.imul(Math.floor(seed) | 0, 374761393) + Math.imul(salt | 0, 668265263)) | 0;
+  x = Math.imul(x ^ (x >>> 13), 1274126177);
+  return ((x ^ (x >>> 16)) >>> 0) / 4294967295;
+}
+
+/**
+ * Resolve per-dab brush geometry & colour dynamics from Stroke Curves + Jitter + Colour Dynamics.
+ */
+export function resolveDabVariation(brush, strokeT = 0, seed = 1, followAngleDeg = null) {
+  const j = brush.jitter || {};
+  const cd = brush.colourDynamics || {};
+  const curves = brush.curves || {};
+
+  const t = clamp(strokeT, 0, 1);
+  const sizeCurve = curves.sizeOverStroke ? sampleCurve(curves.sizeOverStroke, t) : 1;
+  const flowCurve = curves.opacityOverStroke ? sampleCurve(curves.opacityOverStroke, t) : 1;
+  const hueCurveVal = curves.hueOverStroke ? sampleCurve(curves.hueOverStroke, t) : 0.5;
+
+  const rSize = prngHash(seed, 1) * 2 - 1;
+  const rAngle = prngHash(seed, 2) * 2 - 1;
+  const rScatA = prngHash(seed, 3) * Math.PI * 2;
+  const rScatR = Math.sqrt(prngHash(seed, 4));
+  const rFlow = prngHash(seed, 5);
+  const rHue = prngHash(seed, 6) * 2 - 1;
+  const rSat = prngHash(seed, 7) * 2 - 1;
+  const rVal = prngHash(seed, 8) * 2 - 1;
+
+  const sizeScale = clamp(sizeCurve * (1 + rSize * (j.size || 0) * 0.75), 0.12, 2.4);
+  const flowScale = clamp(flowCurve * (1 - rFlow * (j.flow || 0)), 0.03, 1.0);
+  const baseAngle = (brush.angle || 0) + (followAngleDeg !== null && brush.followDirection ? followAngleDeg : 0);
+  const angle = baseAngle + rAngle * (j.angle || 0);
+  const scatterMag = rScatR * (j.scatter || 0);
+  const scatterU = Math.cos(rScatA) * scatterMag;
+  const scatterV = Math.sin(rScatA) * scatterMag;
+
+  const hCurveShift = cd.strokeGradient ? (hueCurveVal - 0.5) * 1.0 : 0;
+  const hDelta = hCurveShift + rHue * (cd.hueJitter || 0) * 0.5;
+  const sDelta = rSat * (cd.satJitter || 0) * 0.75;
+  const vDelta = rVal * (cd.valJitter || 0) * 0.65;
+  const color = (hDelta !== 0 || sDelta !== 0 || vDelta !== 0)
+    ? shiftHslHex(brush.color || "#e8c27a", hDelta, sDelta, vDelta)
+    : (brush.color || "#e8c27a");
+
+  return {
+    ...brush,
+    color,
+    angle,
+    flow: clamp((brush.flow ?? 0.78) * flowScale, 0.02, 1.0),
+    sizeScale,
+    scatterU,
+    scatterV,
+  };
+}
+
+/**
+ * Convert raw RGBA pixels from an uploaded PNG/JPG/WebP/SVG into multi-channel surface maps
+ * (useful both as a Stamp Decal, Custom Brush Alpha Tip, or Fill Texture).
+ */
+export function rgbaPixelsToSurfaceMaps(rgba, width, heightPx, { name = "Uploaded Image", previewDataUrl = "" } = {}) {
+  const n = width * heightPx;
+  const albedo = new Uint8ClampedArray(n * 4);
+  const tipAlpha = new Uint8ClampedArray(n * 4);
+  const roughness = new Uint8ClampedArray(n * 4);
+  const metalness = new Uint8ClampedArray(n * 4);
+  const height = new Uint8ClampedArray(n * 4);
+
+  let hasAlphaVariance = false;
+  for (let i = 3; i < rgba.length; i += 4) {
+    if (rgba[i] < 245) { hasAlphaVariance = true; break; }
+  }
+
+  for (let i = 0; i < n; i++) {
+    const i4 = i * 4;
+    const r = rgba[i4], g = rgba[i4 + 1], b = rgba[i4 + 2], a = rgba[i4 + 3];
+    const lum = Math.round(r * 0.299 + g * 0.587 + b * 0.114);
+    const alphaVal = hasAlphaVariance ? a : lum;
+
+    albedo[i4] = r; albedo[i4 + 1] = g; albedo[i4 + 2] = b; albedo[i4 + 3] = a;
+    tipAlpha[i4] = 255; tipAlpha[i4 + 1] = 255; tipAlpha[i4 + 2] = 255; tipAlpha[i4 + 3] = alphaVal;
+
+    const rVal = clamp(Math.round(170 - lum * 0.45), 16, 245);
+    roughness[i4] = rVal; roughness[i4 + 1] = rVal; roughness[i4 + 2] = rVal; roughness[i4 + 3] = 255;
+    metalness[i4] = 18; metalness[i4 + 1] = 18; metalness[i4 + 2] = 18; metalness[i4 + 3] = 255;
+    const hVal = clamp(Math.round(128 + (lum - 128) * 0.7), 0, 255);
+    height[i4] = hVal; height[i4 + 1] = hVal; height[i4 + 2] = hVal; height[i4 + 3] = 255;
+  }
+
+  return {
+    name,
+    width,
+    heightPx,
+    albedo,
+    tipAlpha,
+    roughness,
+    metalness,
+    height,
+    previewDataUrl,
+    isCustomImage: true,
+  };
+}
+
 /**
  * Build a clean non-overlapping [0..1]x[0..1] UV geometry for each target mesh,
  * tagging vertices with `surfacePart` (0..N-1) and UV island `chartId` so both
@@ -324,10 +517,13 @@ export function createLayerPixelBuffer(res) {
   const n = res * res;
   return {
     res,
-    albedo: new Uint8ClampedArray(n * 4), // RGBA 0..255 (alpha = layer coverage)
+    albedo: new Uint8ClampedArray(n * 4), // RGBA 0..255 (alpha = Albedo coverage)
     roughness: new Uint8ClampedArray(n).fill(140),
     metalness: new Uint8ClampedArray(n).fill(0),
     height: new Uint8ClampedArray(n).fill(128), // 128 = 0 displacement
+    roughAlpha: new Uint8ClampedArray(n),
+    metalAlpha: new Uint8ClampedArray(n),
+    heightAlpha: new Uint8ClampedArray(n),
   };
 }
 
@@ -519,20 +715,39 @@ function sampleBrushTip(dxNorm, dyNorm, brush, px, py) {
     u = ru;
     v = rv;
   }
-  const roundness = clamp(brush.roundness ?? 1.0, 0.2, 1.0);
+  const roundness = clamp(brush.roundness ?? 1.0, 0.15, 1.0);
   v /= roundness;
+
+  const tip = brush.tip || "round";
+  if (tip === "custom" && brush.customTipData) {
+    const su = u * 0.5 + 0.5;
+    const sv = v * 0.5 + 0.5;
+    if (su < 0 || su > 1 || sv < 0 || sv > 1) return 0;
+    const ct = brush.customTipData;
+    const ctH = ct.heightPx || ct.width;
+    const ix = Math.min(ct.width - 1, Math.max(0, Math.floor(su * ct.width)));
+    const iy = Math.min(ctH - 1, Math.max(0, Math.floor(sv * ctH)));
+    const buf = ct.tipAlpha || ct.albedo || ct.rgba;
+    const si = (iy * ct.width + ix) * 4;
+    const tipA = (buf[si + 3] ?? 255) / 255;
+    const dist = Math.hypot(u, v);
+    const edgeFall = dist > 1 ? 0 : sampleCurve(brush.curves?.falloff || [[0, 0], [0.5, 0.55], [1, 1]], 1 - dist);
+    return clamp(tipA * (brush.curves?.falloff ? edgeFall : 1) * (brush.flow ?? 1), 0, 1);
+  }
 
   const dist = Math.hypot(u, v);
   if (dist > 1) return 0;
 
   const hardness = clamp(brush.hardness ?? 0.72, 0.02, 0.99);
-  let falloff = dist <= hardness ? 1 : 1 - (dist - hardness) / Math.max(0.01, 1 - hardness);
-  falloff = falloff * falloff * (3 - 2 * falloff);
+  const linearEdge = dist <= hardness ? 1 : 1 - (dist - hardness) / Math.max(0.01, 1 - hardness);
+  let falloff = brush.curves?.falloff
+    ? sampleCurve(brush.curves.falloff, linearEdge)
+    : linearEdge * linearEdge * (3 - 2 * linearEdge);
 
-  const tip = brush.tip || "round";
   if (tip === "chisel") {
     const boxD = Math.max(Math.abs(u), Math.abs(v) * 1.4);
-    falloff = boxD <= 0.85 ? 1 : clamp((1 - boxD) / 0.15, 0, 1);
+    const cEdge = boxD <= 0.85 ? 1 : clamp((1 - boxD) / 0.15, 0, 1);
+    falloff = brush.curves?.falloff ? sampleCurve(brush.curves.falloff, cEdge) : cEdge;
   } else if (tip === "chalk") {
     const grain = fbm3D(px * 0.25, py * 0.25, 1.3, 2, 17);
     falloff *= clamp(0.35 + grain * 1.15, 0, 1);
@@ -625,23 +840,32 @@ export function applyBrushDab3D({
 
         if (brush.tool === "stamp" && brush.stampData) {
           // Sample stamp pixel at (uLocal*0.5+0.5, vLocal*0.5+0.5)
-          const su = uLocal * 0.5 + 0.5;
-          const sv = 1 - (vLocal * 0.5 + 0.5);
+          let rotU = uLocal, rotV = vLocal;
+          if (brush.angle) {
+            const rad = (-brush.angle * Math.PI) / 180;
+            const c = Math.cos(rad), s = Math.sin(rad);
+            rotU = uLocal * c - vLocal * s;
+            rotV = uLocal * s + vLocal * c;
+          }
+          const su = rotU * 0.5 + 0.5;
+          const sv = 1 - (rotV * 0.5 + 0.5);
           if (su >= 0 && su <= 1 && sv >= 0 && sv <= 1) {
             const st = brush.stampData;
             const stH = st.heightPx || st.width;
+            const stAlb = st.albedo || st.rgba;
             const ix = Math.min(st.width - 1, Math.max(0, Math.floor(su * st.width)));
             const iy = Math.min(stH - 1, Math.max(0, Math.floor(sv * stH)));
             const si = (iy * st.width + ix) * 4;
-            const sa = (st.albedo[si + 3] / 255) * (brush.flow ?? 1);
+            const sa = (stAlb[si + 3] / 255) * (brush.flow ?? 1);
             if (sa > strokeAccum.alpha[pid]) {
+              strokeAccum.hasPerPixelPbr = true;
               strokeAccum.alpha[pid] = sa;
-              strokeAccum.color[pid * 3] = st.albedo[si];
-              strokeAccum.color[pid * 3 + 1] = st.albedo[si + 1];
-              strokeAccum.color[pid * 3 + 2] = st.albedo[si + 2];
-              strokeAccum.rough[pid] = st.roughness[si];
-              strokeAccum.metal[pid] = st.metalness[si];
-              strokeAccum.height[pid] = st.height[si];
+              strokeAccum.color[pid * 3] = stAlb[si];
+              strokeAccum.color[pid * 3 + 1] = stAlb[si + 1];
+              strokeAccum.color[pid * 3 + 2] = stAlb[si + 2];
+              strokeAccum.rough[pid] = st.roughness ? st.roughness[si] : Math.round(clamp(brush.roughness ?? 0.45) * 255);
+              strokeAccum.metal[pid] = st.metalness ? st.metalness[si] : Math.round(clamp(brush.metalness ?? 0) * 255);
+              strokeAccum.height[pid] = st.height ? st.height[si] : Math.round(clamp((brush.height ?? 0.25) * 0.5 + 0.5) * 255);
               strokeAccum.dirtyMinX = Math.min(strokeAccum.dirtyMinX, px);
               strokeAccum.dirtyMaxX = Math.max(strokeAccum.dirtyMaxX, px);
               strokeAccum.dirtyMinY = Math.min(strokeAccum.dirtyMinY, py);
@@ -652,7 +876,23 @@ export function applyBrushDab3D({
           // Accumulation builds smoothly via flow without exceeding 1, and opacity applies at stroke commit/display!
           const next = clamp(strokeAccum.alpha[pid] + alpha * (1 - strokeAccum.alpha[pid] * 0.72));
           if (next > strokeAccum.alpha[pid]) {
+            const [dr, dg, db] = hexToRgb01(brush.color || "#e8c27a").map((v) => Math.round(v * 255));
+            const prevA = strokeAccum.alpha[pid];
+            const dw = next > 1e-4 ? clamp(alpha / next, 0, 1) : 1;
+            strokeAccum.hasPerPixelPbr = true;
             strokeAccum.alpha[pid] = next;
+            if (prevA < 0.005) {
+              strokeAccum.color[pid * 3] = dr;
+              strokeAccum.color[pid * 3 + 1] = dg;
+              strokeAccum.color[pid * 3 + 2] = db;
+            } else {
+              strokeAccum.color[pid * 3] = Math.round(strokeAccum.color[pid * 3] * (1 - dw) + dr * dw);
+              strokeAccum.color[pid * 3 + 1] = Math.round(strokeAccum.color[pid * 3 + 1] * (1 - dw) + dg * dw);
+              strokeAccum.color[pid * 3 + 2] = Math.round(strokeAccum.color[pid * 3 + 2] * (1 - dw) + db * dw);
+            }
+            strokeAccum.rough[pid] = Math.round(clamp(brush.roughness ?? 0.45) * 255);
+            strokeAccum.metal[pid] = Math.round(clamp(brush.metalness ?? 0) * 255);
+            strokeAccum.height[pid] = Math.round(clamp((brush.height ?? 0.25) * 0.5 + 0.5) * 255);
             strokeAccum.dirtyMinX = Math.min(strokeAccum.dirtyMinX, px);
             strokeAccum.dirtyMaxX = Math.max(strokeAccum.dirtyMaxX, px);
             strokeAccum.dirtyMinY = Math.min(strokeAccum.dirtyMinY, py);
@@ -676,6 +916,10 @@ export function applyBrushDabUV({ strokeAccum, cues, u, v, pixelRadius, brush, a
   const maxX = Math.min(res - 1, Math.ceil(cx + r));
   const minY = Math.max(0, Math.floor(cy - r));
   const maxY = Math.min(res - 1, Math.ceil(cy + r));
+  const [dr, dg, db] = hexToRgb01(brush.color || "#e8c27a").map((c) => Math.round(c * 255));
+  const dRough = Math.round(clamp(brush.roughness ?? 0.45) * 255);
+  const dMetal = Math.round(clamp(brush.metalness ?? 0) * 255);
+  const dHeight = Math.round(clamp((brush.height ?? 0.25) * 0.5 + 0.5) * 255);
 
   for (let py = minY; py <= maxY; py++) {
     for (let px = minX; px <= maxX; px++) {
@@ -687,28 +931,54 @@ export function applyBrushDabUV({ strokeAccum, cues, u, v, pixelRadius, brush, a
       if (alpha <= 0.001) continue;
 
       if (brush.tool === "stamp" && brush.stampData) {
-        const su = dx * 0.5 + 0.5;
-        const sv = dy * 0.5 + 0.5;
+        let rotU = dx, rotV = dy;
+        if (brush.angle) {
+          const rad = (-brush.angle * Math.PI) / 180;
+          const c = Math.cos(rad), s = Math.sin(rad);
+          rotU = dx * c - dy * s;
+          rotV = dx * s + dy * c;
+        }
+        const su = rotU * 0.5 + 0.5;
+        const sv = rotV * 0.5 + 0.5;
         if (su >= 0 && su <= 1 && sv >= 0 && sv <= 1) {
           const st = brush.stampData;
           const stH = st.heightPx || st.width;
+          const stAlb = st.albedo || st.rgba;
           const ix = Math.min(st.width - 1, Math.max(0, Math.floor(su * st.width)));
           const iy = Math.min(stH - 1, Math.max(0, Math.floor(sv * stH)));
           const si = (iy * st.width + ix) * 4;
-          const sa = (st.albedo[si + 3] / 255) * (brush.flow ?? 1);
+          const sa = (stAlb[si + 3] / 255) * (brush.flow ?? 1);
           if (sa > strokeAccum.alpha[pid]) {
+            strokeAccum.hasPerPixelPbr = true;
             strokeAccum.alpha[pid] = sa;
-            strokeAccum.color[pid * 3] = st.albedo[si];
-            strokeAccum.color[pid * 3 + 1] = st.albedo[si + 1];
-            strokeAccum.color[pid * 3 + 2] = st.albedo[si + 2];
-            strokeAccum.rough[pid] = st.roughness[si];
-            strokeAccum.metal[pid] = st.metalness[si];
-            strokeAccum.height[pid] = st.height[si];
+            strokeAccum.color[pid * 3] = stAlb[si];
+            strokeAccum.color[pid * 3 + 1] = stAlb[si + 1];
+            strokeAccum.color[pid * 3 + 2] = stAlb[si + 2];
+            strokeAccum.rough[pid] = st.roughness ? st.roughness[si] : dRough;
+            strokeAccum.metal[pid] = st.metalness ? st.metalness[si] : dMetal;
+            strokeAccum.height[pid] = st.height ? st.height[si] : dHeight;
           }
         }
       } else {
         const next = clamp(strokeAccum.alpha[pid] + alpha * (1 - strokeAccum.alpha[pid] * 0.72));
-        if (next > strokeAccum.alpha[pid]) strokeAccum.alpha[pid] = next;
+        if (next > strokeAccum.alpha[pid]) {
+          const prevA = strokeAccum.alpha[pid];
+          const dw = next > 1e-4 ? clamp(alpha / next, 0, 1) : 1;
+          strokeAccum.hasPerPixelPbr = true;
+          strokeAccum.alpha[pid] = next;
+          if (prevA < 0.005) {
+            strokeAccum.color[pid * 3] = dr;
+            strokeAccum.color[pid * 3 + 1] = dg;
+            strokeAccum.color[pid * 3 + 2] = db;
+          } else {
+            strokeAccum.color[pid * 3] = Math.round(strokeAccum.color[pid * 3] * (1 - dw) + dr * dw);
+            strokeAccum.color[pid * 3 + 1] = Math.round(strokeAccum.color[pid * 3 + 1] * (1 - dw) + dg * dw);
+            strokeAccum.color[pid * 3 + 2] = Math.round(strokeAccum.color[pid * 3 + 2] * (1 - dw) + db * dw);
+          }
+          strokeAccum.rough[pid] = dRough;
+          strokeAccum.metal[pid] = dMetal;
+          strokeAccum.height[pid] = dHeight;
+        }
       }
       strokeAccum.dirtyMinX = Math.min(strokeAccum.dirtyMinX, px);
       strokeAccum.dirtyMaxX = Math.max(strokeAccum.dirtyMaxX, px);
@@ -722,6 +992,7 @@ export function createStrokeAccumulator(res) {
   const n = res * res;
   return {
     res,
+    hasPerPixelPbr: false,
     alpha: new Float32Array(n),
     color: new Uint8ClampedArray(n * 3),
     rough: new Uint8ClampedArray(n),
@@ -747,7 +1018,7 @@ export function commitStrokeAccumulator(layer, strokeAccum, brush, editingMask =
   const heightByte = Math.round(clamp((brush.height ?? 0.25) * 0.5 + 0.5, 0, 1) * 255);
 
   const isErase = brush.tool === "erase";
-  const isStamp = brush.tool === "stamp" && !!brush.stampData;
+  const useAccumPbr = strokeAccum.hasPerPixelPbr || (brush.tool === "stamp" && !!brush.stampData);
 
   if (editingMask && layer.mask?.pixels) {
     const maskPx = layer.mask.pixels;
@@ -765,7 +1036,10 @@ export function commitStrokeAccumulator(layer, strokeAccum, brush, editingMask =
 
   if (!layer.pixels) return false;
   const px = layer.pixels;
-  const ch = brush.channels || { albedo: true, roughness: true, metalness: true, height: true };
+  if (!px.roughAlpha) px.roughAlpha = new Uint8ClampedArray(res * res);
+  if (!px.metalAlpha) px.metalAlpha = new Uint8ClampedArray(res * res);
+  if (!px.heightAlpha) px.heightAlpha = new Uint8ClampedArray(res * res);
+  const ch = getToolChannels(brush);
 
   for (let y = strokeAccum.dirtyMinY; y <= strokeAccum.dirtyMaxY; y++) {
     for (let x = strokeAccum.dirtyMinX; x <= strokeAccum.dirtyMaxX; x++) {
@@ -775,36 +1049,48 @@ export function commitStrokeAccumulator(layer, strokeAccum, brush, editingMask =
       const i4 = pid * 4;
 
       if (isErase) {
-        px.albedo[i4 + 3] = Math.round(px.albedo[i4 + 3] * (1 - sa));
+        if (ch.albedo) px.albedo[i4 + 3] = Math.round(px.albedo[i4 + 3] * (1 - sa));
+        if (ch.roughness) px.roughAlpha[pid] = Math.round(px.roughAlpha[pid] * (1 - sa));
+        if (ch.metalness) px.metalAlpha[pid] = Math.round(px.metalAlpha[pid] * (1 - sa));
+        if (ch.height) px.heightAlpha[pid] = Math.round(px.heightAlpha[pid] * (1 - sa));
         continue;
       }
 
-      const sr = isStamp ? strokeAccum.color[pid * 3] : cr;
-      const sg = isStamp ? strokeAccum.color[pid * 3 + 1] : cg;
-      const sb = isStamp ? strokeAccum.color[pid * 3 + 2] : cb;
-      const sRough = isStamp ? strokeAccum.rough[pid] : roughByte;
-      const sMetal = isStamp ? strokeAccum.metal[pid] : metalByte;
-      const sHeight = isStamp ? strokeAccum.height[pid] : heightByte;
+      const sr = useAccumPbr ? strokeAccum.color[pid * 3] : cr;
+      const sg = useAccumPbr ? strokeAccum.color[pid * 3 + 1] : cg;
+      const sb = useAccumPbr ? strokeAccum.color[pid * 3 + 2] : cb;
+      const sRough = useAccumPbr ? strokeAccum.rough[pid] : roughByte;
+      const sMetal = useAccumPbr ? strokeAccum.metal[pid] : metalByte;
+      const sHeight = useAccumPbr ? strokeAccum.height[pid] : heightByte;
 
-      const oldA = px.albedo[i4 + 3] / 255;
-      const outA = sa + oldA * (1 - sa);
-      if (outA > 1e-4) {
-        if (ch.albedo) {
+      if (ch.albedo) {
+        const oldA = px.albedo[i4 + 3] / 255;
+        const outA = sa + oldA * (1 - sa);
+        if (outA > 1e-4) {
           px.albedo[i4] = Math.round((sr * sa + px.albedo[i4] * oldA * (1 - sa)) / outA);
           px.albedo[i4 + 1] = Math.round((sg * sa + px.albedo[i4 + 1] * oldA * (1 - sa)) / outA);
           px.albedo[i4 + 2] = Math.round((sb * sa + px.albedo[i4 + 2] * oldA * (1 - sa)) / outA);
         }
-        if (ch.roughness) {
-          px.roughness[pid] = Math.round((sRough * sa + px.roughness[pid] * oldA * (1 - sa)) / outA);
-        }
-        if (ch.metalness) {
-          px.metalness[pid] = Math.round((sMetal * sa + px.metalness[pid] * oldA * (1 - sa)) / outA);
-        }
-        if (ch.height) {
-          px.height[pid] = Math.round((sHeight * sa + px.height[pid] * oldA * (1 - sa)) / outA);
-        }
+        px.albedo[i4 + 3] = Math.round(clamp(outA, 0, 1) * 255);
       }
-      px.albedo[i4 + 3] = Math.round(clamp(outA, 0, 1) * 255);
+      if (ch.roughness) {
+        const oldR = px.roughAlpha[pid] / 255;
+        const outR = sa + oldR * (1 - sa);
+        if (outR > 1e-4) px.roughness[pid] = Math.round((sRough * sa + px.roughness[pid] * oldR * (1 - sa)) / outR);
+        px.roughAlpha[pid] = Math.round(clamp(outR, 0, 1) * 255);
+      }
+      if (ch.metalness) {
+        const oldM = px.metalAlpha[pid] / 255;
+        const outM = sa + oldM * (1 - sa);
+        if (outM > 1e-4) px.metalness[pid] = Math.round((sMetal * sa + px.metalness[pid] * oldM * (1 - sa)) / outM);
+        px.metalAlpha[pid] = Math.round(clamp(outM, 0, 1) * 255);
+      }
+      if (ch.height) {
+        const oldH = px.heightAlpha[pid] / 255;
+        const outH = sa + oldH * (1 - sa);
+        if (outH > 1e-4) px.height[pid] = Math.round((sHeight * sa + px.height[pid] * oldH * (1 - sa)) / outH);
+        px.heightAlpha[pid] = Math.round(clamp(outH, 0, 1) * 255);
+      }
     }
   }
   return true;
@@ -905,6 +1191,7 @@ export function compositePaintDocument(doc, cues, { liveStroke = null, liveBrush
     if (layer.kind === "paint" && layer.pixels) {
       const px = layer.pixels;
       const isLive = liveStroke && liveBrush && doc.selectedLayerId === layer.id && !doc.editingMask;
+      const bch = isLive ? getToolChannels(liveBrush) : { albedo: true, roughness: true, metalness: true, height: true };
       const [lr, lg, lb] = isLive ? hexToRgb01(liveBrush.color).map((v) => Math.round(v * 255)) : [0, 0, 0];
       const lRough = isLive ? Math.round((liveBrush.roughness ?? 0.45) * 255) : 0;
       const lMetal = isLive ? Math.round((liveBrush.metalness ?? 0) * 255) : 0;
@@ -913,56 +1200,79 @@ export function compositePaintDocument(doc, cues, { liveStroke = null, liveBrush
       for (let i = 0; i < n; i++) {
         if (partFilter >= 0 && cues.partAt[i] >= 0 && cues.partAt[i] !== partFilter) continue;
         const i4 = i * 4;
-        let a = (px.albedo[i4 + 3] / 255);
+        let aAlb = px.albedo[i4 + 3] / 255;
+        let aRough = px.roughAlpha ? (px.roughAlpha[i] / 255) : aAlb;
+        let aMetal = px.metalAlpha ? (px.metalAlpha[i] / 255) : aAlb;
+        let aHeight = px.heightAlpha ? (px.heightAlpha[i] / 255) : aAlb;
         let sr = px.albedo[i4], sg = px.albedo[i4 + 1], sb = px.albedo[i4 + 2];
         let sRough = px.roughness[i], sMetal = px.metalness[i], sHeight = px.height[i];
 
         if (isLive && liveStroke.alpha[i] > 0.001) {
           const sa = liveStroke.alpha[i] * (liveBrush.opacity ?? 1);
           if (liveBrush.tool === "erase") {
-            a *= (1 - sa);
+            if (bch.albedo) aAlb *= (1 - sa);
+            if (bch.roughness) aRough *= (1 - sa);
+            if (bch.metalness) aMetal *= (1 - sa);
+            if (bch.height) aHeight *= (1 - sa);
           } else {
-            const isSt = liveBrush.tool === "stamp" && !!liveBrush.stampData;
-            const brR = isSt ? liveStroke.color[i * 3] : lr;
-            const brG = isSt ? liveStroke.color[i * 3 + 1] : lg;
-            const brB = isSt ? liveStroke.color[i * 3 + 2] : lb;
-            const brRough = isSt ? liveStroke.rough[i] : lRough;
-            const brMetal = isSt ? liveStroke.metal[i] : lMetal;
-            const brHeight = isSt ? liveStroke.height[i] : lHeight;
+            const useLiveBuf = liveStroke.hasPerPixelPbr || (liveBrush.tool === "stamp" && !!liveBrush.stampData);
+            const brR = useLiveBuf ? liveStroke.color[i * 3] : lr;
+            const brG = useLiveBuf ? liveStroke.color[i * 3 + 1] : lg;
+            const brB = useLiveBuf ? liveStroke.color[i * 3 + 2] : lb;
+            const brRough = useLiveBuf ? liveStroke.rough[i] : lRough;
+            const brMetal = useLiveBuf ? liveStroke.metal[i] : lMetal;
+            const brHeight = useLiveBuf ? liveStroke.height[i] : lHeight;
 
-            const outA2 = sa + a * (1 - sa);
-            if (outA2 > 1e-4) {
-              sr = Math.round((brR * sa + sr * a * (1 - sa)) / outA2);
-              sg = Math.round((brG * sa + sg * a * (1 - sa)) / outA2);
-              sb = Math.round((brB * sa + sb * a * (1 - sa)) / outA2);
-              sRough = Math.round((brRough * sa + sRough * a * (1 - sa)) / outA2);
-              sMetal = Math.round((brMetal * sa + sMetal * a * (1 - sa)) / outA2);
-              sHeight = Math.round((brHeight * sa + sHeight * a * (1 - sa)) / outA2);
+            if (bch.albedo) {
+              const outA2 = sa + aAlb * (1 - sa);
+              if (outA2 > 1e-4) {
+                sr = Math.round((brR * sa + sr * aAlb * (1 - sa)) / outA2);
+                sg = Math.round((brG * sa + sg * aAlb * (1 - sa)) / outA2);
+                sb = Math.round((brB * sa + sb * aAlb * (1 - sa)) / outA2);
+              }
+              aAlb = outA2;
             }
-            a = outA2;
+            if (bch.roughness) {
+              const outR2 = sa + aRough * (1 - sa);
+              if (outR2 > 1e-4) sRough = Math.round((brRough * sa + sRough * aRough * (1 - sa)) / outR2);
+              aRough = outR2;
+            }
+            if (bch.metalness) {
+              const outM2 = sa + aMetal * (1 - sa);
+              if (outM2 > 1e-4) sMetal = Math.round((brMetal * sa + sMetal * aMetal * (1 - sa)) / outM2);
+              aMetal = outM2;
+            }
+            if (bch.height) {
+              const outH2 = sa + aHeight * (1 - sa);
+              if (outH2 > 1e-4) sHeight = Math.round((brHeight * sa + sHeight * aHeight * (1 - sa)) / outH2);
+              aHeight = outH2;
+            }
           }
         }
 
-        if (a <= 0.001) continue;
+        if (aAlb <= 0.001 && aRough <= 0.001 && aMetal <= 0.001 && aHeight <= 0.001) continue;
+        let maskMul = 1;
         if (maskPixels) {
           let m = maskPixels[i] / 255;
           if (maskInvert) m = 1 - m;
-          a *= m;
+          maskMul = m;
         }
-        const eff = clamp(a * op, 0, 1);
-        if (eff <= 0.001) continue;
+        const effAlb = clamp(aAlb * op * maskMul, 0, 1);
+        const effRough = clamp(aRough * op * maskMul, 0, 1);
+        const effMetal = clamp(aMetal * op * maskMul, 0, 1);
+        const effHeight = clamp(aHeight * op * maskMul, 0, 1);
 
-        if (ch.albedo) {
+        if (ch.albedo && effAlb > 0.001) {
           const br = blendChannelByte(outA[i4], sr, layer.blend);
           const bg = blendChannelByte(outA[i4 + 1], sg, layer.blend);
           const bb = blendChannelByte(outA[i4 + 2], sb, layer.blend);
-          outA[i4] = Math.round(outA[i4] * (1 - eff) + br * eff);
-          outA[i4 + 1] = Math.round(outA[i4 + 1] * (1 - eff) + bg * eff);
-          outA[i4 + 2] = Math.round(outA[i4 + 2] * (1 - eff) + bb * eff);
+          outA[i4] = Math.round(outA[i4] * (1 - effAlb) + br * effAlb);
+          outA[i4 + 1] = Math.round(outA[i4 + 1] * (1 - effAlb) + bg * effAlb);
+          outA[i4 + 2] = Math.round(outA[i4 + 2] * (1 - effAlb) + bb * effAlb);
         }
-        if (ch.roughness) outR[i] = Math.round(outR[i] * (1 - eff) + sRough * eff);
-        if (ch.metalness) outM[i] = Math.round(outM[i] * (1 - eff) + sMetal * eff);
-        if (ch.height) outH[i] = Math.round(outH[i] * (1 - eff) + sHeight * eff);
+        if (ch.roughness && effRough > 0.001) outR[i] = Math.round(outR[i] * (1 - effRough) + sRough * effRough);
+        if (ch.metalness && effMetal > 0.001) outM[i] = Math.round(outM[i] * (1 - effMetal) + sMetal * effMetal);
+        if (ch.height && effHeight > 0.001) outH[i] = Math.round(outH[i] * (1 - effHeight) + sHeight * effHeight);
       }
     } else if (layer.kind === "fill") {
       const f = layer.fill;

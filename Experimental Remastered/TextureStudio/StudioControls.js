@@ -65,6 +65,8 @@ export const GlyphPaths = {
     ChevronUp:  '<path d="m6 15 6-6 6 6"/>',
     ChevronDown:'<path d="m6 9 6 6 6-6"/>',
     Pin:        '<path d="M12 17v5M9 10.8a3 3 0 0 1 1-2.2l1-.9V4h2v3.7l1 .9a3 3 0 0 1 1 2.2V14H9z"/>',
+    Image:      '<rect x="3" y="4" width="18" height="16" rx="2.5"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="M21 15l-4.5-4.5L9 18"/>',
+    Curve:      '<path d="M4 18C9 18 10 6 20 6"/><circle cx="4" cy="18" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="20" cy="6" r="1.8"/>',
     Dot:        '<circle cx="12" cy="12" r="3"/>'
 };
 
@@ -339,6 +341,253 @@ export function TextRow(Parent, Binding)
         ApplyAvailability(Row, Binding);
     });
     return Row;
+}
+
+export function ChannelMaskRow(Parent, Binding)
+{
+    const Channels = [
+        ['albedo', 'Color', 'albedo'],
+        ['roughness', 'Rough', 'rough'],
+        ['metalness', 'Metal', 'metal'],
+        ['height', 'Height', 'height'],
+    ];
+    const Strip = Construct('div', 'pbr-chan-strip');
+    const Buttons = Channels.map(([Key, Title, Kind]) =>
+    {
+        const Btn = Construct('button', `pbr-chan-pill chan-${Kind}`, [
+            Construct('i', 'pbr-chan-dot'),
+            Construct('span', null, Title),
+        ]);
+        Btn.type = 'button';
+        Btn.dataset.channel = Key;
+        Btn.addEventListener('click', () =>
+        {
+            const Current = { ...(Binding.Read() || { albedo: true, roughness: true, metalness: true, height: true }) };
+            Current[Key] = !Current[Key];
+            Binding.Write(Current);
+            if (!Binding.Transient) Broadcast();
+            else Sync();
+        });
+        Strip.append(Btn);
+        return [Key, Btn];
+    });
+    const Row = Construct('div', 'property-row channel-mask-row', [
+        Construct('span', 'property-label', Binding.Label || 'PBR Channels'),
+        Strip,
+    ]);
+    Parent.append(Row);
+
+    const Sync = () =>
+    {
+        const MapObj = Binding.Read() || {};
+        Buttons.forEach(([Key, Btn]) => Btn.classList.toggle('active', MapObj[Key] !== false));
+        ApplyAvailability(Row, Binding);
+    };
+    if (Binding.Transient) Sync();
+    else Register(Sync);
+    return Row;
+}
+
+const DEFAULT_CURVE_PRESETS = [
+    ['Linear', [[0, 0], [1, 1]]],
+    ['Ease', [[0, 0], [0.35, 0.14], [0.7, 0.82], [1, 1]]],
+    ['Punch', [[0, 0], [0.22, 0.72], [0.62, 0.94], [1, 1]]],
+    ['S-Curve', [[0, 0], [0.28, 0.08], [0.72, 0.92], [1, 1]]],
+    ['Bell', [[0, 0], [0.22, 0.86], [0.5, 1], [0.78, 0.86], [1, 0]]],
+    ['Flat', [[0, 1], [1, 1]]],
+];
+
+function EvalCurveLocal(Pts, t)
+{
+    const x = Math.max(0, Math.min(1, t));
+    if (!Array.isArray(Pts) || !Pts.length) return x;
+    if (Pts.length === 1) return Math.max(0, Math.min(1, Pts[0][1]));
+    const S = [...Pts].sort((a, b) => a[0] - b[0]);
+    if (x <= S[0][0]) return Math.max(0, Math.min(1, S[0][1]));
+    if (x >= S[S.length - 1][0]) return Math.max(0, Math.min(1, S[S.length - 1][1]));
+    for (let i = 0; i < S.length - 1; i++)
+    {
+        const [x0, y0] = S[i], [x1, y1] = S[i + 1];
+        if (x >= x0 && x <= x1)
+        {
+            const Span = Math.max(1e-5, x1 - x0);
+            const u = (x - x0) / Span;
+            const P0 = S[Math.max(0, i - 1)], P3 = S[Math.min(S.length - 1, i + 2)];
+            const m0 = ((y1 - P0[1]) / Math.max(1e-4, x1 - P0[0])) * Span * 0.5;
+            const m1 = ((P3[1] - y0) / Math.max(1e-4, P3[0] - x0)) * Span * 0.5;
+            const u2 = u * u, u3 = u2 * u;
+            return Math.max(0, Math.min(1, (2 * u3 - 3 * u2 + 1) * y0 + (u3 - 2 * u2 + u) * m0 + (-2 * u3 + 3 * u2) * y1 + (u3 - u2) * m1));
+        }
+    }
+    return Math.max(0, Math.min(1, S[S.length - 1][1]));
+}
+
+export function CurveRow(Parent, Binding)
+{
+    const W = 200, H = 92, Pad = 8;
+    const Svg = document.createElementNS(SvgNamespace, 'svg');
+    Svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    Svg.setAttribute('class', 'curve-editor-svg');
+
+    const Grid = document.createElementNS(SvgNamespace, 'g');
+    Grid.setAttribute('class', 'curve-grid');
+    for (const f of [0.25, 0.5, 0.75])
+    {
+        const gx = Pad + f * (W - Pad * 2), gy = Pad + f * (H - Pad * 2);
+        const lx = document.createElementNS(SvgNamespace, 'line');
+        lx.setAttribute('x1', String(gx)); lx.setAttribute('x2', String(gx));
+        lx.setAttribute('y1', String(Pad)); lx.setAttribute('y2', String(H - Pad));
+        const ly = document.createElementNS(SvgNamespace, 'line');
+        ly.setAttribute('x1', String(Pad)); ly.setAttribute('x2', String(W - Pad));
+        ly.setAttribute('y1', String(gy)); ly.setAttribute('y2', String(gy));
+        Grid.append(lx, ly);
+    }
+    const Diag = document.createElementNS(SvgNamespace, 'line');
+    Diag.setAttribute('x1', String(Pad)); Diag.setAttribute('y1', String(H - Pad));
+    Diag.setAttribute('x2', String(W - Pad)); Diag.setAttribute('y2', String(Pad));
+    Diag.setAttribute('class', 'curve-diag');
+
+    const Area = document.createElementNS(SvgNamespace, 'path');
+    Area.setAttribute('class', 'curve-area');
+    const Stroke = document.createElementNS(SvgNamespace, 'path');
+    Stroke.setAttribute('class', 'curve-path');
+    const Handles = document.createElementNS(SvgNamespace, 'g');
+
+    Svg.append(Grid, Diag, Area, Stroke, Handles);
+
+    const PresetsStrip = Construct('div', 'chip-strip curve-presets');
+    for (const [PName, PPoints] of (Binding.Presets || DEFAULT_CURVE_PRESETS))
+    {
+        const Btn = Construct('button', 'chip-btn', PName);
+        Btn.type = 'button';
+        Btn.addEventListener('click', () =>
+        {
+            Binding.Write(PPoints.map(([x, y]) => [x, y]));
+            if (!Binding.Transient) Broadcast();
+            else Draw();
+        });
+        PresetsStrip.append(Btn);
+    }
+
+    const Box = Construct('div', 'curve-editor-box', [
+        Binding.Label ? Construct('div', 'curve-editor-head', [
+            Construct('span', 'property-label', Binding.Label),
+            Binding.Detail ? Construct('small', null, Binding.Detail) : null,
+        ]) : null,
+        Svg,
+        PresetsStrip,
+    ]);
+    Parent.append(Box);
+
+    let DragIndex = -1;
+    const ToSvgCoords = (nx, ny) => [Pad + nx * (W - Pad * 2), H - Pad - ny * (H - Pad * 2)];
+    const FromClient = Event =>
+    {
+        const Rect = Svg.getBoundingClientRect();
+        const rw = Math.max(1, Rect.width), rh = Math.max(1, Rect.height);
+        const sx = ((Event.clientX - Rect.left) / rw) * W;
+        const sy = ((Event.clientY - Rect.top) / rh) * H;
+        return [
+            Math.max(0, Math.min(1, (sx - Pad) / (W - Pad * 2))),
+            Math.max(0, Math.min(1, 1 - (sy - Pad) / (H - Pad * 2))),
+        ];
+    };
+
+    const Draw = () =>
+    {
+        const Pts = [...(Binding.Read() || [[0, 0], [1, 1]])].sort((a, b) => a[0] - b[0]);
+        let dLine = '';
+        for (let i = 0; i <= 32; i++)
+        {
+            const tx = i / 32;
+            const ty = EvalCurveLocal(Pts, tx);
+            const [vx, vy] = ToSvgCoords(tx, ty);
+            dLine += (i === 0 ? `M ${vx.toFixed(1)} ${vy.toFixed(1)}` : ` L ${vx.toFixed(1)} ${vy.toFixed(1)}`);
+        }
+        Stroke.setAttribute('d', dLine);
+        Area.setAttribute('d', `${dLine} L ${W - Pad} ${H - Pad} L ${Pad} ${H - Pad} Z`);
+
+        Handles.innerHTML = '';
+        Pts.forEach(([px, py], idx) =>
+        {
+            const [cx, cy] = ToSvgCoords(px, py);
+            const C = document.createElementNS(SvgNamespace, 'circle');
+            C.setAttribute('cx', String(cx.toFixed(1)));
+            C.setAttribute('cy', String(cy.toFixed(1)));
+            C.setAttribute('r', idx === DragIndex ? '5.5' : '4.2');
+            C.setAttribute('class', 'curve-handle' + (idx === DragIndex ? ' active' : ''));
+            C.dataset.ptIndex = String(idx);
+            Handles.append(C);
+        });
+    };
+
+    Svg.addEventListener('pointerdown', Event =>
+    {
+        const Pts = [...(Binding.Read() || [[0, 0], [1, 1]])].sort((a, b) => a[0] - b[0]).map(([x, y]) => [x, y]);
+        const [nx, ny] = FromClient(Event);
+        let BestIdx = -1, BestDist = 0.085;
+        Pts.forEach(([px, py], i) =>
+        {
+            const d = Math.hypot(px - nx, py - ny);
+            if (d < BestDist) { BestDist = d; BestIdx = i; }
+        });
+
+        if (Event.button === 2)
+        {
+            Event.preventDefault();
+            if (BestIdx > 0 && BestIdx < Pts.length - 1 && Pts.length > 2)
+            {
+                Pts.splice(BestIdx, 1);
+                Binding.Write(Pts);
+                if (!Binding.Transient) Broadcast(); else Draw();
+            }
+            return;
+        }
+
+        if (BestIdx < 0)
+        {
+            Pts.push([nx, ny]);
+            Pts.sort((a, b) => a[0] - b[0]);
+            BestIdx = Pts.findIndex(p => p[0] === nx && p[1] === ny);
+            Binding.Write(Pts);
+        }
+        DragIndex = BestIdx;
+        Svg.setPointerCapture?.(Event.pointerId);
+        Draw();
+    });
+
+    Svg.addEventListener('pointermove', Event =>
+    {
+        if (DragIndex < 0) return;
+        const Pts = [...(Binding.Read() || [[0, 0], [1, 1]])].sort((a, b) => a[0] - b[0]).map(([x, y]) => [x, y]);
+        if (DragIndex >= Pts.length) return;
+        const [nx, ny] = FromClient(Event);
+        if (DragIndex === 0) Pts[0] = [0, ny];
+        else if (DragIndex === Pts.length - 1) Pts[Pts.length - 1] = [1, ny];
+        else
+        {
+            const lo = Pts[DragIndex - 1][0] + 0.02;
+            const hi = Pts[DragIndex + 1][0] - 0.02;
+            Pts[DragIndex] = [Math.max(lo, Math.min(hi, nx)), ny];
+        }
+        Binding.Write(Pts);
+        if (!Binding.Transient) Broadcast(); else Draw();
+    });
+
+    const EndDrag = Event =>
+    {
+        if (DragIndex < 0) return;
+        DragIndex = -1;
+        Svg.releasePointerCapture?.(Event.pointerId);
+        Draw();
+    };
+    Svg.addEventListener('pointerup', EndDrag);
+    Svg.addEventListener('pointercancel', EndDrag);
+    Svg.addEventListener('contextmenu', e => e.preventDefault());
+
+    if (Binding.Transient) Draw();
+    else Register(Draw);
+    return Box;
 }
 
 export function ActionRow(Parent, Actions)

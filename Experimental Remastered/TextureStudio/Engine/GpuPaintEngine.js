@@ -8,6 +8,7 @@
    - GPU-resident Undo/Redo target snapshots (readPixels runs ONLY on PNG Export or Eyedropper sample). */
 
 import * as THREE from "three";
+import { sampleCurveLut, getToolChannels } from "./TexturePaintEngine.js";
 
 function hexToRgb(hex) {
   const s = String(hex || "#ffffff").replace(/^#/, "");
@@ -48,7 +49,7 @@ uniform sampler2D uPosPartTex;
 uniform sampler2D uNormIslandTex;
 uniform sampler2D uStampTex;
 uniform int uMode; // 0 = 3D brush, 1 = 2D UV brush
-uniform int uTip; // 0=round,1=chisel,2=chalk,3=splatter,4=sponge,5=stamp
+uniform int uTip; // 0=round,1=chisel,2=chalk,3=splatter,4=sponge,5=stamp,6=custom
 uniform int uHasStamp;
 uniform int uPartFilter;
 uniform vec3 uHitPos;
@@ -61,6 +62,8 @@ uniform float uUvRadius;
 uniform float uHardness;
 uniform float uFlow;
 uniform float uAngle;
+uniform float uRoundness;
+uniform float uFalloffCurve[17];
 uniform vec3 uBrushColor;
 uniform float uBrushRough;
 uniform float uBrushMetal;
@@ -76,39 +79,57 @@ float hash21(vec2 p) {
   return fract(p.x * p.y);
 }
 
+float sampleFalloff(float x) {
+  float cx = clamp(x, 0.0, 1.0) * 16.0;
+  int i0 = clamp(int(floor(cx)), 0, 16);
+  int i1 = clamp(i0 + 1, 0, 16);
+  return mix(uFalloffCurve[i0], uFalloffCurve[i1], fract(cx));
+}
+
 float tipCoverage(vec2 local, float distNorm, vec2 noiseCoord, out vec4 stampSample) {
   stampSample = vec4(uBrushColor, 1.0);
+  float c = cos(uAngle), s = sin(uAngle);
+  vec2 r = vec2(local.x * c + local.y * s, -local.x * s + local.y * c);
+  float roundness = clamp(uRoundness, 0.15, 1.0);
+  vec2 rq = vec2(r.x, r.y / roundness);
+
   if (uTip == 5 && uHasStamp != 0) {
-    float c = cos(uAngle), s = sin(uAngle);
-    vec2 r = vec2(local.x * c + local.y * s, -local.x * s + local.y * c);
     vec2 suv = r * 0.5 + 0.5;
     if (suv.x < 0.0 || suv.x > 1.0 || suv.y < 0.0 || suv.y > 1.0) return 0.0;
-    // Flip Y for top-down ImageData uploaded with flipY=true
     vec4 st = texture(uStampTex, vec2(suv.x, suv.y));
     stampSample = st;
     return st.a;
   }
 
-  float d = distNorm;
+  if (uTip == 6 && uHasStamp != 0) {
+    vec2 suv = rq * 0.5 + 0.5;
+    if (suv.x < 0.0 || suv.x > 1.0 || suv.y < 0.0 || suv.y > 1.0) return 0.0;
+    vec4 st = texture(uStampTex, vec2(suv.x, suv.y));
+    float dCustom = length(rq);
+    if (dCustom >= 1.0) return 0.0;
+    float edgeFade = sampleFalloff(clamp(1.0 - dCustom, 0.0, 1.0));
+    stampSample = vec4(uBrushColor, 1.0);
+    return clamp(st.a * edgeFade, 0.0, 1.0);
+  }
+
+  float d = uMode == 0 && abs(uRoundness - 1.0) < 0.01 && abs(uAngle) < 0.01 ? distNorm : length(rq);
   if (uTip == 1) { // chisel
-    float c = cos(uAngle), s = sin(uAngle);
-    vec2 r = vec2(local.x * c + local.y * s, -local.x * s + local.y * c);
-    d = length(vec2(r.x * 2.2, r.y * 0.6));
+    d = max(abs(rq.x), abs(rq.y) * 1.4);
   }
   if (d >= 1.0) return 0.0;
 
   float edge = mix(1.0, 0.02, clamp(uHardness, 0.0, 0.99));
   float t = clamp((1.0 - d) / max(0.02, edge), 0.0, 1.0);
-  float alpha = t * t * (3.0 - 2.0 * t);
+  float alpha = sampleFalloff(t);
 
   if (uTip == 2) { // chalk
     float n = hash21(floor(noiseCoord * 360.0));
     alpha *= smoothstep(0.2, 0.85, n + (1.0 - d) * 0.35);
   } else if (uTip == 3) { // splatter
-    vec2 cell = floor(local * 5.0 + 10.0);
+    vec2 cell = floor(rq * 5.0 + 10.0);
     float drop = hash21(cell + uSeed * 0.17);
     if (drop < 0.48) alpha = 0.0;
-    else alpha *= smoothstep(0.55, 0.08, length(fract(local * 5.0) - 0.5));
+    else alpha *= smoothstep(0.55, 0.08, length(fract(rq * 5.0) - 0.5));
   } else if (uTip == 4) { // sponge
     float n = hash21(floor(noiseCoord * 160.0));
     if (n < 0.36) alpha *= 0.14;
@@ -185,10 +206,12 @@ const COMMIT_STROKE_FRAG = /* glsl */ `
 precision highp float;
 uniform sampler2D uBaseTex;
 uniform sampler2D uStrokeTex;
+uniform sampler2D uPrevChanAlphaTex;
 uniform float uOpacity;
+uniform vec4 uChanMask; // (albedo, rough, metal, height)
 uniform int uIsErase;
 uniform int uIsMask;
-uniform int uIsOrmh;
+uniform int uPassKind; // 0=albedo, 1=ormh, 2=chanAlpha
 in vec2 vUv;
 out vec4 fragColor;
 
@@ -207,16 +230,60 @@ void main() {
     fragColor = vec4(m, m, m, 1.0);
     return;
   }
-  if (uIsErase != 0) {
-    float na = dst.a * (1.0 - sa);
-    fragColor = vec4(dst.rgb, na);
+  if (uPassKind == 2) {
+    if (uIsErase != 0) {
+      fragColor = vec4(
+        uChanMask.x > 0.5 ? dst.r * (1.0 - sa) : dst.r,
+        uChanMask.y > 0.5 ? dst.g * (1.0 - sa) : dst.g,
+        uChanMask.z > 0.5 ? dst.b * (1.0 - sa) : dst.b,
+        uChanMask.w > 0.5 ? dst.a * (1.0 - sa) : dst.a
+      );
+    } else {
+      fragColor = vec4(
+        uChanMask.x > 0.5 ? sa + dst.r * (1.0 - sa) : dst.r,
+        uChanMask.y > 0.5 ? sa + dst.g * (1.0 - sa) : dst.g,
+        uChanMask.z > 0.5 ? sa + dst.b * (1.0 - sa) : dst.b,
+        uChanMask.w > 0.5 ? sa + dst.a * (1.0 - sa) : dst.a
+      );
+    }
     return;
   }
-  float outA = sa + dst.a * (1.0 - sa);
-  vec3 outRgb = outA > 1e-4
-    ? (src.rgb * sa + dst.rgb * dst.a * (1.0 - sa)) / outA
-    : dst.rgb;
-  fragColor = vec4(outRgb, outA);
+  if (uIsErase != 0) {
+    if (uPassKind == 0 && uChanMask.x > 0.5) {
+      fragColor = vec4(dst.rgb, dst.a * (1.0 - sa));
+    } else {
+      fragColor = dst;
+    }
+    return;
+  }
+  vec4 oldCA = texelFetch(uPrevChanAlphaTex, px, 0);
+  if (uPassKind == 0) {
+    if (uChanMask.x < 0.5) {
+      fragColor = dst;
+      return;
+    }
+    float oldA = oldCA.r;
+    float outA = sa + oldA * (1.0 - sa);
+    vec3 outRgb = outA > 1e-4 ? (src.rgb * sa + dst.rgb * oldA * (1.0 - sa)) / outA : dst.rgb;
+    fragColor = vec4(outRgb, outA);
+  } else {
+    float rVal = dst.r;
+    if (uChanMask.y > 0.5) {
+      float outR = sa + oldCA.g * (1.0 - sa);
+      rVal = outR > 1e-4 ? (src.r * sa + dst.r * oldCA.g * (1.0 - sa)) / outR : dst.r;
+    }
+    float mVal = dst.g;
+    if (uChanMask.z > 0.5) {
+      float outM = sa + oldCA.b * (1.0 - sa);
+      mVal = outM > 1e-4 ? (src.g * sa + dst.g * oldCA.b * (1.0 - sa)) / outM : dst.g;
+    }
+    float hVal = dst.b;
+    if (uChanMask.w > 0.5) {
+      float outH = sa + oldCA.a * (1.0 - sa);
+      hVal = outH > 1e-4 ? (src.b * sa + dst.b * oldCA.a * (1.0 - sa)) / outH : dst.b;
+    }
+    fragColor = vec4(rVal, mVal, hVal, max(dst.a, sa));
+  }
 }
 `;
 
@@ -229,6 +296,7 @@ uniform sampler2D uPosPartTex;
 uniform sampler2D uAuxCueTex;
 uniform sampler2D uLayerAlbedo;
 uniform sampler2D uLayerOrmh;
+uniform sampler2D uLayerChanAlpha;
 uniform sampler2D uLayerMask;
 uniform sampler2D uStrokeAlbedo;
 uniform sampler2D uStrokeOrmh;
@@ -243,6 +311,8 @@ uniform int uHasLiveStroke;
 uniform int uLiveErase;
 uniform int uLiveMaskStroke;
 uniform float uLiveOpacity;
+uniform vec4 uLiveChanMask;
+uniform vec4 uLayerChanMask;
 uniform int uHasPattern;
 uniform float uPatternRepeats;
 uniform vec3 uColorA;
@@ -298,31 +368,45 @@ void main() {
   float srcRough = uRoughA;
   float srcMetal = uMetalA;
   float srcHeight = uHeightA;
-  float srcAlpha = 1.0;
+  vec4 srcChAlpha = vec4(1.0);
 
   if (uLayerKind == 0) {
     vec4 la = texelFetch(uLayerAlbedo, px, 0);
     vec4 lo = texelFetch(uLayerOrmh, px, 0);
+    vec4 ca = texelFetch(uLayerChanAlpha, px, 0);
     srcRgb = la.rgb;
-    srcAlpha = la.a;
     srcRough = lo.r;
     srcMetal = lo.g;
     srcHeight = lo.b;
+    srcChAlpha = ca;
     if (uHasLiveStroke != 0 && uLiveMaskStroke == 0) {
       vec4 stA = texelFetch(uStrokeAlbedo, px, 0);
       vec4 stO = texelFetch(uStrokeOrmh, px, 0);
       float sa = clamp(stA.a * uLiveOpacity, 0.0, 1.0);
       if (sa > 0.001) {
         if (uLiveErase != 0) {
-          srcAlpha *= (1.0 - sa);
+          srcChAlpha *= (1.0 - sa * uLiveChanMask);
         } else {
-          float na = sa + srcAlpha * (1.0 - sa);
-          if (na > 1e-4) {
-            srcRgb = (stA.rgb * sa + srcRgb * srcAlpha * (1.0 - sa)) / na;
-            vec3 mixO = (stO.rgb * sa + vec3(srcRough, srcMetal, srcHeight) * srcAlpha * (1.0 - sa)) / na;
-            srcRough = mixO.r; srcMetal = mixO.g; srcHeight = mixO.b;
+          if (uLiveChanMask.x > 0.5) {
+            float na = sa + srcChAlpha.r * (1.0 - sa);
+            if (na > 1e-4) srcRgb = (stA.rgb * sa + srcRgb * srcChAlpha.r * (1.0 - sa)) / na;
+            srcChAlpha.r = na;
           }
-          srcAlpha = na;
+          if (uLiveChanMask.y > 0.5) {
+            float nr = sa + srcChAlpha.g * (1.0 - sa);
+            if (nr > 1e-4) srcRough = (stO.r * sa + srcRough * srcChAlpha.g * (1.0 - sa)) / nr;
+            srcChAlpha.g = nr;
+          }
+          if (uLiveChanMask.z > 0.5) {
+            float nm = sa + srcChAlpha.b * (1.0 - sa);
+            if (nm > 1e-4) srcMetal = (stO.g * sa + srcMetal * srcChAlpha.b * (1.0 - sa)) / nm;
+            srcChAlpha.b = nm;
+          }
+          if (uLiveChanMask.w > 0.5) {
+            float nh = sa + srcChAlpha.a * (1.0 - sa);
+            if (nh > 1e-4) srcHeight = (stO.b * sa + srcHeight * srcChAlpha.a * (1.0 - sa)) / nh;
+            srcChAlpha.a = nh;
+          }
         }
       }
     }
@@ -330,8 +414,7 @@ void main() {
     if (uHasPattern != 0) {
       vec2 puv = fract(vUv * max(1.0, uPatternRepeats));
       vec4 pt = texture(uPatternTex, puv);
-      srcRgb = pt.rgb;
-      srcAlpha = pt.a;
+      srcRgb = mix(uColorA, pt.rgb, pt.a);
     }
   } else if (uLayerKind == 2) {
     float n = vnoise(vUv * max(1.0, uParamA)) * 0.65 + vnoise(vUv * max(1.0, uParamA) * 2.7) * 0.35;
@@ -347,7 +430,7 @@ void main() {
     else signal = clamp(cue.b, 0.0, 1.0);
     float n = vnoise(vUv * 12.0) * 0.65 + vnoise(vUv * 29.0) * 0.35;
     signal = clamp(mix(signal, signal * (0.4 + n * 0.9), uParamC), 0.0, 1.0);
-    srcAlpha = smoothstep(uParamA - uParamB * 0.5, uParamA + uParamB * 0.5, signal);
+    srcChAlpha = vec4(smoothstep(uParamA - uParamB * 0.5, uParamA + uParamB * 0.5, signal));
   }
 
   float maskMul = 1.0;
@@ -355,25 +438,25 @@ void main() {
     float m = texelFetch(uLayerMask, px, 0).r;
     if (uHasLiveStroke != 0 && uLiveMaskStroke != 0) {
       float sa = clamp(texelFetch(uStrokeAlbedo, px, 0).a * uLiveOpacity, 0.0, 1.0);
-      float ink = uLiveErase != 0 ? 1.0 : 0.0;
+      float ink = uLiveErase != 0 ? 0.0 : 1.0;
       m = mix(m, ink, sa);
     }
     maskMul = uInvertMask != 0 ? (1.0 - m) : m;
   }
 
-  float w = clamp(srcAlpha * uOpacity * maskMul, 0.0, 1.0);
-  if (w <= 0.001) {
+  vec4 w4 = clamp(srcChAlpha * uLayerChanMask * uOpacity * maskMul, 0.0, 1.0);
+  if (w4.r <= 0.001 && w4.g <= 0.001 && w4.b <= 0.001 && w4.a <= 0.001) {
     fragColor = uOutTarget == 0 ? dstA : dstO;
     return;
   }
 
   if (uOutTarget == 0) {
     vec3 bRgb = blendRgb(dstA.rgb, srcRgb, uBlendMode);
-    fragColor = vec4(mix(dstA.rgb, bRgb, w), max(dstA.a, w));
+    fragColor = vec4(mix(dstA.rgb, bRgb, w4.r), max(dstA.a, w4.r));
   } else {
-    float r = mix(dstO.g, srcRough, w);
-    float m = mix(dstO.b, srcMetal, w);
-    float h = clamp(mix(dstO.a, srcHeight, w), 0.0, 1.0);
+    float r = mix(dstO.g, srcRough, w4.g);
+    float m = mix(dstO.b, srcMetal, w4.b);
+    float h = clamp(mix(dstO.a, srcHeight, w4.a), 0.0, 1.0);
     fragColor = vec4(dstO.r, r, m, h);
   }
 }
@@ -461,7 +544,7 @@ void main() {
 `;
 
 const BLEND_INDEX = { Normal: 0, Multiply: 1, Screen: 2, Overlay: 3, Add: 4, Darken: 5 };
-const TIP_INDEX = { round: 0, chisel: 1, chalk: 2, splatter: 3, sponge: 4, stamp: 5 };
+const TIP_INDEX = { round: 0, chisel: 1, chalk: 2, splatter: 3, sponge: 4, stamp: 5, custom: 6 };
 const GEN_INDEX = { "edge-wear": 0, "crevice-dirt": 1, "top-dust": 2 };
 const CHAN_VIEW_INDEX = { lit: 0, baseColor: 0, roughness: 1, metalness: 2, height: 3, mask: 4 };
 
@@ -549,6 +632,8 @@ export class GpuPaintSession {
         uHardness: { value: 0.7 },
         uFlow: { value: 0.8 },
         uAngle: { value: 0 },
+        uRoundness: { value: 1.0 },
+        uFalloffCurve: { value: sampleCurveLut([[0, 0], [0.5, 0.55], [1, 1]], 17) },
         uBrushColor: { value: new THREE.Vector3(1, 1, 1) },
         uBrushRough: { value: 0.4 },
         uBrushMetal: { value: 0.1 },
@@ -566,10 +651,12 @@ export class GpuPaintSession {
       uniforms: {
         uBaseTex: { value: null },
         uStrokeTex: { value: null },
+        uPrevChanAlphaTex: { value: this.dummyTex },
         uOpacity: { value: 1 },
+        uChanMask: { value: new THREE.Vector4(1, 1, 1, 1) },
         uIsErase: { value: 0 },
         uIsMask: { value: 0 },
-        uIsOrmh: { value: 0 },
+        uPassKind: { value: 0 },
       },
       depthTest: false, depthWrite: false,
     });
@@ -585,6 +672,7 @@ export class GpuPaintSession {
         uAuxCueTex: { value: this.dummyTex },
         uLayerAlbedo: { value: this.dummyTex },
         uLayerOrmh: { value: this.dummyTex },
+        uLayerChanAlpha: { value: this.dummyTex },
         uLayerMask: { value: this.dummyTex },
         uStrokeAlbedo: { value: this.dummyTex },
         uStrokeOrmh: { value: this.dummyTex },
@@ -599,6 +687,8 @@ export class GpuPaintSession {
         uLiveErase: { value: 0 },
         uLiveMaskStroke: { value: 0 },
         uLiveOpacity: { value: 1 },
+        uLiveChanMask: { value: new THREE.Vector4(1, 1, 1, 1) },
+        uLayerChanMask: { value: new THREE.Vector4(1, 1, 1, 1) },
         uHasPattern: { value: 0 },
         uPatternRepeats: { value: 3 },
         uColorA: { value: new THREE.Vector3(1, 1, 1) },
@@ -646,6 +736,7 @@ export class GpuPaintSession {
     });
 
     this.scratchMaskRT = new THREE.WebGLRenderTarget(res, res, rtOpts);
+    this.scratchChanAlphaRT = new THREE.WebGLRenderTarget(res, res, rtOpts);
     this._clearRT(this.strokeAlbedoA, 0, 0, 0, 0);
     this._clearRT(this.strokeAlbedoB, 0, 0, 0, 0);
     this._clearRT(this.strokeOrmhA, 0.5, 0, 0.5, 0);
@@ -790,8 +881,10 @@ export class GpuPaintSession {
     this.normalMat.uniforms.uHasBakedNormal.value = this.hasBakedNormal ? 1 : 0;
   }
 
-  ensureStampTexture(stampData) {
-    const srcPix = stampData?.albedo || stampData?.rgba;
+  ensureStampTexture(stampData, preferTipAlpha = false) {
+    const srcPix = preferTipAlpha
+      ? (stampData?.tipAlpha || stampData?.albedo || stampData?.rgba)
+      : (stampData?.albedo || stampData?.rgba);
     if (!srcPix || !stampData?.width) {
       this.hasStamp = false;
       return;
@@ -819,9 +912,11 @@ export class GpuPaintSession {
   ensureLayerTargets(layer) {
     if (!layer._gpu) {
       const opts = this._rtOpts();
+      const isPaint = layer.kind === "paint" || layer.kind === "decal";
       layer._gpu = {
-        albedoRT: layer.kind === "paint" || layer.kind === "decal" ? new THREE.WebGLRenderTarget(this.res, this.res, opts) : null,
-        ormhRT: layer.kind === "paint" || layer.kind === "decal" ? new THREE.WebGLRenderTarget(this.res, this.res, opts) : null,
+        albedoRT: isPaint ? new THREE.WebGLRenderTarget(this.res, this.res, opts) : null,
+        ormhRT: isPaint ? new THREE.WebGLRenderTarget(this.res, this.res, opts) : null,
+        chanAlphaRT: isPaint ? new THREE.WebGLRenderTarget(this.res, this.res, opts) : null,
         maskRT: null,
         patternTex: null,
       };
@@ -832,6 +927,10 @@ export class GpuPaintSession {
       if (layer._gpu.ormhRT) {
         this._clearRT(layer._gpu.ormhRT, 0.5, 0, 0.5, 0);
         this.layerTargetRegistry.add(layer._gpu.ormhRT);
+      }
+      if (layer._gpu.chanAlphaRT) {
+        this._clearRT(layer._gpu.chanAlphaRT, 0, 0, 0, 0);
+        this.layerTargetRegistry.add(layer._gpu.chanAlphaRT);
       }
       // If CPU pixels already have data (e.g. from bridge/decal/mask fill), upload once
       if (layer.pixels && layer._gpu.albedoRT) this.syncCpuPixelsToLayerGpu(layer);
@@ -867,6 +966,10 @@ export class GpuPaintSession {
     const n = res * res;
     const alb = new Uint8Array(n * 4);
     const orm = new Uint8Array(n * 4);
+    const cal = new Uint8Array(n * 4);
+    const ra = layer.pixels.roughAlpha;
+    const ma = layer.pixels.metalAlpha;
+    const ha = layer.pixels.heightAlpha;
     for (let py = 0; py < res; py++) {
       const sRow = (res - 1 - py) * res;
       const dRow = py * res;
@@ -875,21 +978,28 @@ export class GpuPaintSession {
         const dp = dRow + px;
         const o = dp * 4;
         const si = sp * 4;
+        const aByte = layer.pixels.albedo[si + 3];
         alb[o] = layer.pixels.albedo[si];
         alb[o + 1] = layer.pixels.albedo[si + 1];
         alb[o + 2] = layer.pixels.albedo[si + 2];
-        alb[o + 3] = layer.pixels.albedo[si + 3];
+        alb[o + 3] = aByte;
         orm[o] = layer.pixels.roughness[sp];
         orm[o + 1] = layer.pixels.metalness[sp];
         orm[o + 2] = layer.pixels.height[sp];
-        orm[o + 3] = layer.pixels.albedo[si + 3];
+        orm[o + 3] = aByte;
+        cal[o] = aByte;
+        cal[o + 1] = ra ? ra[sp] : aByte;
+        cal[o + 2] = ma ? ma[sp] : aByte;
+        cal[o + 3] = ha ? ha[sp] : aByte;
       }
     }
     const tA = new THREE.DataTexture(alb, res, res, THREE.RGBAFormat); tA.flipY = false; tA.needsUpdate = true;
     const tO = new THREE.DataTexture(orm, res, res, THREE.RGBAFormat); tO.flipY = false; tO.needsUpdate = true;
+    const tC = new THREE.DataTexture(cal, res, res, THREE.RGBAFormat); tC.flipY = false; tC.needsUpdate = true;
     this._blit(tA, gpu.albedoRT);
     this._blit(tO, gpu.ormhRT);
-    tA.dispose(); tO.dispose();
+    if (gpu.chanAlphaRT) this._blit(tC, gpu.chanAlphaRT);
+    tA.dispose(); tO.dispose(); tC.dispose();
   }
 
   syncMaskCpuToGpu(layer) {
@@ -933,7 +1043,8 @@ export class GpuPaintSession {
     u.uMode.value = mode === "3d" ? 0 : 1;
     const tipKey = brush.tool === "stamp" ? "stamp" : (brush.tip || "round");
     u.uTip.value = TIP_INDEX[tipKey] ?? 0;
-    if (tipKey === "stamp" && brush.stampData) this.ensureStampTexture(brush.stampData);
+    if (tipKey === "stamp" && brush.stampData) this.ensureStampTexture(brush.stampData, false);
+    else if (tipKey === "custom" && brush.customTipData) this.ensureStampTexture(brush.customTipData, true);
     u.uHasStamp.value = this.hasStamp ? 1 : 0;
     u.uPartFilter.value = partFilter;
     if (hitPos) u.uHitPos.value.set(hitPos.x, hitPos.y, hitPos.z);
@@ -949,6 +1060,8 @@ export class GpuPaintSession {
     u.uHardness.value = brush.hardness ?? 0.72;
     u.uFlow.value = brush.flow ?? 0.78;
     u.uAngle.value = ((brush.angle || 0) * Math.PI) / 180;
+    u.uRoundness.value = Math.max(0.15, Math.min(1.0, brush.roundness ?? 1.0));
+    u.uFalloffCurve.value = sampleCurveLut(brush.curves?.falloff || [[0, 0], [0.5, 0.55], [1, 1]], 17);
     u.uBrushColor.value.set(r / 255, g / 255, b / 255);
     u.uBrushRough.value = brush.roughness ?? 0.4;
     u.uBrushMetal.value = brush.metalness ?? 0.1;
@@ -984,39 +1097,50 @@ export class GpuPaintSession {
     const gpu = this.ensureLayerTargets(layer);
     const st = this.currentStrokeTargets();
     const isErase = brush.tool === "erase";
+    const ch = getToolChannels(brush);
 
     if (editingMask && layer.mask) {
       this._blit(gpu.maskRT.texture, this.scratchMaskRT);
       const u = this.commitMat.uniforms;
       u.uBaseTex.value = this.scratchMaskRT.texture;
       u.uStrokeTex.value = st.albedoRT.texture;
+      u.uPrevChanAlphaTex.value = this.dummyTex;
       u.uOpacity.value = brush.opacity ?? 0.9;
+      u.uChanMask.value.set(1, 1, 1, 1);
       u.uIsErase.value = isErase ? 1 : 0;
       u.uIsMask.value = 1;
-      u.uIsOrmh.value = 0;
+      u.uPassKind.value = 0;
       this._renderPass(this.commitMat, gpu.maskRT);
       this.beginStroke();
       return true;
     }
 
-    if (!gpu.albedoRT || !gpu.ormhRT) return false;
+    if (!gpu.albedoRT || !gpu.ormhRT || !gpu.chanAlphaRT) return false;
     this._blit(gpu.albedoRT.texture, this.compAlbedoA);
     this._blit(gpu.ormhRT.texture, this.compOrmhA);
+    this._blit(gpu.chanAlphaRT.texture, this.scratchChanAlphaRT);
 
     const u = this.commitMat.uniforms;
     u.uOpacity.value = brush.opacity ?? 0.9;
+    u.uChanMask.value.set(ch.albedo ? 1 : 0, ch.roughness ? 1 : 0, ch.metalness ? 1 : 0, ch.height ? 1 : 0);
+    u.uPrevChanAlphaTex.value = this.scratchChanAlphaRT.texture;
     u.uIsErase.value = isErase ? 1 : 0;
     u.uIsMask.value = 0;
 
     u.uBaseTex.value = this.compAlbedoA.texture;
     u.uStrokeTex.value = st.albedoRT.texture;
-    u.uIsOrmh.value = 0;
+    u.uPassKind.value = 0;
     this._renderPass(this.commitMat, gpu.albedoRT);
 
     u.uBaseTex.value = this.compOrmhA.texture;
     u.uStrokeTex.value = st.ormhRT.texture;
-    u.uIsOrmh.value = 1;
+    u.uPassKind.value = 1;
     this._renderPass(this.commitMat, gpu.ormhRT);
+
+    u.uBaseTex.value = this.scratchChanAlphaRT.texture;
+    u.uStrokeTex.value = st.albedoRT.texture;
+    u.uPassKind.value = 2;
+    this._renderPass(this.commitMat, gpu.chanAlphaRT);
 
     this.beginStroke();
     return true;
@@ -1026,7 +1150,7 @@ export class GpuPaintSession {
     if (!this.isActive || !layer) return null;
     const gpu = this.ensureLayerTargets(layer);
     const opts = this._rtOpts();
-    const snap = { layerId: layer.id, editingMask, albedoRT: null, ormhRT: null, maskRT: null };
+    const snap = { layerId: layer.id, editingMask, albedoRT: null, ormhRT: null, chanAlphaRT: null, maskRT: null };
     if (gpu.albedoRT) {
       snap.albedoRT = new THREE.WebGLRenderTarget(this.res, this.res, opts);
       this._blit(gpu.albedoRT.texture, snap.albedoRT);
@@ -1034,6 +1158,10 @@ export class GpuPaintSession {
     if (gpu.ormhRT) {
       snap.ormhRT = new THREE.WebGLRenderTarget(this.res, this.res, opts);
       this._blit(gpu.ormhRT.texture, snap.ormhRT);
+    }
+    if (gpu.chanAlphaRT) {
+      snap.chanAlphaRT = new THREE.WebGLRenderTarget(this.res, this.res, opts);
+      this._blit(gpu.chanAlphaRT.texture, snap.chanAlphaRT);
     }
     if (gpu.maskRT) {
       snap.maskRT = new THREE.WebGLRenderTarget(this.res, this.res, opts);
@@ -1047,12 +1175,14 @@ export class GpuPaintSession {
     const gpu = this.ensureLayerTargets(layer);
     if (snap.albedoRT && gpu.albedoRT) this._blit(snap.albedoRT.texture, gpu.albedoRT);
     if (snap.ormhRT && gpu.ormhRT) this._blit(snap.ormhRT.texture, gpu.ormhRT);
+    if (snap.chanAlphaRT && gpu.chanAlphaRT) this._blit(snap.chanAlphaRT.texture, gpu.chanAlphaRT);
     if (snap.maskRT && gpu.maskRT) this._blit(snap.maskRT.texture, gpu.maskRT);
   }
 
   disposeSnapshot(snap) {
     snap?.albedoRT?.dispose();
     snap?.ormhRT?.dispose();
+    snap?.chanAlphaRT?.dispose();
     snap?.maskRT?.dispose();
   }
 
@@ -1073,6 +1203,8 @@ export class GpuPaintSession {
     u.uLiveErase.value = liveBrush?.tool === "erase" ? 1 : 0;
     u.uLiveMaskStroke.value = doc.editingMask ? 1 : 0;
     u.uLiveOpacity.value = liveBrush?.opacity ?? 0.9;
+    const liveCh = liveBrush ? getToolChannels(liveBrush) : { albedo: true, roughness: true, metalness: true, height: true };
+    u.uLiveChanMask.value.set(liveCh.albedo ? 1 : 0, liveCh.roughness ? 1 : 0, liveCh.metalness ? 1 : 0, liveCh.height ? 1 : 0);
 
     const folderHidden = new Set();
     for (const l of doc.layers) if (l.kind === "folder" && !l.visible) folderHidden.add(l.id);
@@ -1083,6 +1215,7 @@ export class GpuPaintSession {
 
       const gpu = this.ensureLayerTargets(layer);
       const isLive = hasLiveStroke && layer.id === doc.selectedLayerId;
+      const lCh = layer.channels || { albedo: true, roughness: true, metalness: true, height: true };
 
       u.uAccAlbedo.value = accAlb.texture;
       u.uAccOrmh.value = accOrm.texture;
@@ -1093,11 +1226,13 @@ export class GpuPaintSession {
       u.uHasMask.value = layer.mask?.enabled && gpu.maskRT ? 1 : 0;
       u.uInvertMask.value = layer.mask?.invert ? 1 : 0;
       u.uLayerMask.value = gpu.maskRT?.texture || this.dummyTex;
+      u.uLayerChanMask.value.set(lCh.albedo ? 1 : 0, lCh.roughness ? 1 : 0, lCh.metalness ? 1 : 0, lCh.height ? 1 : 0);
 
       if (layer.kind === "paint" || layer.kind === "decal") {
         u.uLayerKind.value = 0;
         u.uLayerAlbedo.value = gpu.albedoRT?.texture || this.dummyTex;
         u.uLayerOrmh.value = gpu.ormhRT?.texture || this.dummyTex;
+        u.uLayerChanAlpha.value = gpu.chanAlphaRT?.texture || this.dummyTex;
       } else if (layer.kind === "fill") {
         u.uLayerKind.value = 1;
         const [r, g, b] = hexToRgb(layer.fill?.color || "#cccccc");
@@ -1226,6 +1361,7 @@ export class GpuPaintSession {
     this.finalAlbedoRT.dispose(); this.finalOrmhRT.dispose();
     this.finalNormalRT.dispose(); this.displayAlbedoRT.dispose();
     this.scratchMaskRT.dispose();
+    this.scratchChanAlphaRT.dispose();
     this.posPartTex?.dispose(); this.normIslandTex?.dispose();
     this.auxCueTex?.dispose(); this.bakedNormalTex?.dispose();
     this.stampTex?.dispose(); this.dummyTex?.dispose();
