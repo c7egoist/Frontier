@@ -4,13 +4,17 @@ Unified **Sun Inspector + Fluid Editor** studio interface across Frontier's inte
 
 - **EditorInterface (`Experimental Remastered/EditorInterface/`)** — Redesigned **Particle Studio** wrapping the unmodified `eos` WebGPU particle, light fibre, molecular physics, lightning, and 3D force-field engine (`ForceFieldVisualization` + `ParticleFieldReadback` + `SoftwarePreviewEngine`).
 - **FractureEditor (`Experimental Remastered/FractureEditor/`)** — Redesigned **Fracture Studio** wrapping all 6 `eb353da2` fracture engines (`EngineeringBakedFracture`, `FastRuntimeFracture`, `ConvexPartitioning` Griffith/LEFM/Voronoi/Dendritic, `Piece SDF`, `RigidBodyDynamics`, and `CelestialAtmosphereModel` Sun/Atmosphere/Clouds) under the identical Sun + Fluid studio system.
+- **PhotometricEditor (`Experimental Remastered/PhotometricEditor/`)** — Unified **Photometric & Light Studio** combining Project Zero's 7 physical light inspectors (`pointlight`, `spotlight`, `ieslight`, `arealight`, `tubelight`, `ledlight`, `ledstrip`), real LM-63 Type-C `.ies` candela profiles & custom import/export, Environment Lights (`envdome`, `sun`, `moon`, `stars`, `lensflare`, `atmosphere`, `post`), and a Three.js WebGL2 ACES / False-Colour Isolux 3D calibration stage.
 
 ## Quick start
 
 ```bash
-# Particle Studio (port 8082 standalone) or root hub
+# Particle Studio (port 8083)
 python3 "Experimental Remastered/EditorInterface/Serve.py"
 
 # Fracture Studio (port 8082)
 python3 "Experimental Remastered/FractureEditor/Serve.py"
+
+# Photometric & Light Studio (port 8084)
+python3 "Experimental Remastered/PhotometricEditor/Serve.py"
 ```
