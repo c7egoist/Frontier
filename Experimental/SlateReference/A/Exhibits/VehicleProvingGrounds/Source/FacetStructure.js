@@ -8,6 +8,7 @@ import { RetrieveFacetStream } from "./FacetCodec.js";
 import { ConstructCabinFacets } from "./CabinStructure.js";
 import { ConstructRoofFixtureFacets } from "./LightingSystem.js";
 import { ResolveLevelDescriptor } from "./LevelStructure.js";
+import { AssignCourseReliefEnabled, AssignCustomTerrainHeight } from "./CourseStructure.js";
 import { ConstructSolid, TriangulateFace, FractureMaterials, FragmentTriangleBudget } from "./FractureStructure.js";
 import { VehicleGeometry, ResolveCoMAuthoredZ } from "./VehicleSpecification.js";
 import { ConstructIdentityTransform, ConstructRigidTransform, TransformBounds, InvertTransform, RotateVector, ConjugateQuaternion,
@@ -81,6 +82,8 @@ export class SceneStructure
     async ConstructScene(ArchiveFolder, StressCapacity = 0, LevelKey = "proving")
     {
         const Descriptor = ResolveLevelDescriptor(LevelKey);
+        AssignCourseReliefEnabled(Descriptor.Relief);
+        AssignCustomTerrainHeight(Descriptor.TerrainHeight || null);
         const ActiveShapes = Descriptor.Shapes;
         const [Body, Tyre, Rim] = await Promise.all([
             RetrieveFacetStream(`${ArchiveFolder}/ControlVehicleBody.facet`),
@@ -534,9 +537,8 @@ export class SceneStructure
                 Propellers:  AllocPool("DDay Propeller",         ShapeSets.DDayPropeller,         4),
                 Mines:       AllocPool("DDay Landmine",          ShapeSets.DDayLandmine,         28),
                 Bombs:       AllocPool("DDay Aerial Bomb",       ShapeSets.DDayAerialBomb,        8),
-                Shells:      AllocPool("DDay Artillery Shell",   ShapeSets.DDayArtilleryShell,    8),
-                Tracers:     AllocPool("DDay Tracer Bolt",       ShapeSets.DDayTracerBolt,       16),
-                Explosions:  AllocPool("DDay Explosion Fireball",ShapeSets.DDayExplosionFireball,10),
+                Shells:      AllocPool("DDay Artillery Shell",   ShapeSets.DDayArtilleryShell,   10),
+                Tracers:     AllocPool("DDay Tracer Bolt",       ShapeSets.DDayTracerBolt,       20),
                 Count:       0
             };
             this.DDayBlock.Count = this.Occupants.length - DDayFirst;

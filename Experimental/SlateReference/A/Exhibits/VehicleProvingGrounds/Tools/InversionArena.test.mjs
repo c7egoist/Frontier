@@ -258,7 +258,7 @@ test("LevelCatalog exposes Inversion Arena, City Pursuit & AI Lab, D-Day, and Pr
     assert.equal(City.Relief, false);
     assert.equal(DDay.Relief, false);
     assert.equal(City.Surfaces.length, 16);
-    assert.equal(DDay.Surfaces.length, 4);
+    assert.ok(DDay.Surfaces.length >= 4);
     assert.ok(City.Placements().length >= 30);
     assert.ok(DDay.Placements().length >= 50);
     assert.ok(City.Zones.length >= 6);

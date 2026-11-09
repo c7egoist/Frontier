@@ -58,6 +58,8 @@ export const SpawnPoint = Object.freeze({ Position: [-40.0, 0.0], Yaw: 0.0 });
 
 let CourseReliefEnabled = true;
 
+let CustomTerrainHeightFn = null;
+
 let ExcavationCutouts = [];
 
 export function AssignCourseReliefEnabled(Enabled)
@@ -68,6 +70,16 @@ export function AssignCourseReliefEnabled(Enabled)
 export function QueryCourseReliefEnabled()
 {
     return CourseReliefEnabled;
+}
+
+export function AssignCustomTerrainHeight(HeightFn = null)
+{
+    CustomTerrainHeightFn = typeof HeightFn === "function" ? HeightFn : null;
+}
+
+export function QueryCustomTerrainHeight()
+{
+    return CustomTerrainHeightFn;
 }
 
 export function AssignExcavationCutouts(Cutouts = [])
@@ -101,6 +113,8 @@ export function ResolveCourseHeight(PositionX, PositionY, PositionZ = Infinity)
         if (PositionX >= Cutout[0] && PositionX <= Cutout[2] && PositionY >= Cutout[1] && PositionY <= Cutout[3] && PositionZ <= CeilingLimit)
             return Cutout[4];
     }
+    if (CustomTerrainHeightFn)
+        return CustomTerrainHeightFn(PositionX, PositionY);
     if (!CourseReliefEnabled)
         return 0.0;
     const C = CourseConstants;
@@ -114,7 +128,7 @@ export function ResolveCourseHeight(PositionX, PositionY, PositionZ = Infinity)
 // 📝 CourseNormal(): central differences over ±0.15 m.
 export function ResolveCourseNormal(PositionX, PositionY)
 {
-    if (!CourseReliefEnabled)
+    if (!CourseReliefEnabled && !CustomTerrainHeightFn)
         return [0.0, 0.0, 1.0];
     const Step = 0.15;
     const SlopeX = (ResolveCourseHeight(PositionX + Step, PositionY) - ResolveCourseHeight(PositionX - Step, PositionY)) / (2.0 * Step);

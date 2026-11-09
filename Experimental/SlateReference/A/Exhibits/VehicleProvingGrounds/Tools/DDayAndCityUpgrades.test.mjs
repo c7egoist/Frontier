@@ -9,8 +9,12 @@ import {
 import {
     DDayStaticShapes,
     DDayCombatShapes,
-    DDayWallGoalX
+    DDayShellCraters,
+    DDayWallGoalX,
+    QueryDDayTerrainHeight
 } from "../Source/DDayStructure.js";
+import { AssignCustomTerrainHeight, ResolveCourseHeight, ResolveCourseNormal } from "../Source/CourseStructure.js";
+import { RecoveryDirector } from "../Source/RecoveryDirector.js";
 import { SceneStructure } from "../Source/FacetStructure.js";
 import { ResolveLevelDescriptor } from "../Source/LevelStructure.js";
 import { VehicleSolver } from "../Source/VehicleSolver.js";
@@ -185,19 +189,59 @@ test("D-Day Battlefield: advancing tank cover shields car, cannons blow up tanks
     const Scene = await BuildHeadlessScene("dday");
     const Desc  = ResolveLevelDescriptor("dday");
     assert.ok(Scene.DDayBlock, "SceneStructure('dday') must allocate Scene.DDayBlock");
+    assert.equal("DDayExplosionFireball" in DDayCombatShapes, false, "Fake box explosion shape must NOT exist");
+    assert.equal("Explosions" in Scene.DDayBlock, false, "DDayBlock must NOT allocate fake explosion box instances");
     assert.ok(Scene.Occupants.length < 1800, `DDay occupant count (${Scene.Occupants.length}) must stay well within 2044 ceiling`);
+
+    // Verify uneven 3D battlefield terrain (coastal rise + ridges + 26 sunken shell craters with raised rims!)
+    const BeachZ  = QueryDDayTerrainHeight(-194.0, 0.0);
+    const GlacisZ = QueryDDayTerrainHeight(175.0, 0.0);
+    const Crater0 = DDayShellCraters[0];
+    const CraterCenterZ = QueryDDayTerrainHeight(Crater0[0], Crater0[1]);
+    const CraterRimZ    = QueryDDayTerrainHeight(Crater0[0] + Crater0[2] * 0.92, Crater0[1]);
+    assert.ok(GlacisZ > BeachZ + 0.85, "D-Day terrain must climb from Beachhead up toward Fortress Glacis");
+    assert.ok(CraterRimZ - CraterCenterZ > 0.55, `Shell crater must have raised blast rim & concave bowl (got rim=${CraterRimZ.toFixed(2)}, center=${CraterCenterZ.toFixed(2)})`);
+    assert.equal(ResolveCourseHeight(Crater0[0], Crater0[1]), CraterCenterZ, "ResolveCourseHeight must sample uneven D-Day terrain");
+    const SlopeNormal = ResolveCourseNormal(Crater0[0] + Crater0[2] * 0.45, Crater0[1]);
+    assert.ok(Math.hypot(SlopeNormal[0], SlopeNormal[1]) > 0.05, "ResolveCourseNormal must reflect uneven crater wall slope");
 
     const Vehicle = new VehicleSolver(Scene.QueryObstacleBounds());
     Vehicle.Surfaces = Desc.Surfaces;
-    Vehicle.Respawn([-194.0, 0.0, 0.63], 0.0);
+    Vehicle.Respawn([-194.0, 0.0, BeachZ + 0.63], 0.0);
+
+    // Verify RecoveryDirector does NOT derez-freeze the car at D-Day spawn [-194, 0] and car drives freely!
+    const RecoveryHost = {
+        LevelDescriptor: Desc,
+        Vehicle,
+        Spawn: Desc.Spawn,
+        Effects: { Derez() {}, Rez() {}, Clear() {} },
+        RestoreTyres() {},
+        AfterVehicleMoved() {},
+        Shell: { Announce() {} }
+    };
+    const Recovery = new RecoveryDirector(RecoveryHost);
+    const StartDriveX = Vehicle.Position[0];
+    for (let S = 0; S < 90; ++S)
+    {
+        Vehicle.Advance({ Throttle: 1.0, Brake: 0.0, Steer: 0.0, Handbrake: false }, 1.0 / 60.0);
+        Recovery.Watch(Vehicle, 1.0 / 60.0);
+    }
+    assert.equal(Recovery.Busy, false, "D-Day Beachhead spawn [-194, 0] must NOT trigger OutOfBounds derez");
+    assert.equal(Boolean(Vehicle.Hidden), false, "Player vehicle must remain visible and drivable on D-Day");
+    assert.ok(Vehicle.Position[0] > StartDriveX + 2.5, "Throttle on D-Day must accelerate car forward across uneven terrain");
 
     let ExplosionSounds = 0;
+    let PlumeBursts     = 0;
+    let DebrisBursts    = 0;
+    let SparkBursts     = 0;
     const Host = {
         Scene,
         LevelKey: "dday",
         Vehicle,
         Bodies: null,
-        Sparks: { Emit() {} },
+        Smoke:   { Sources: { QueueBurst() { PlumeBursts++; } } },
+        Effects: { BurstTyre() { DebrisBursts++; } },
+        Sparks:  { Emit() { SparkBursts++; } },
         DrivingHud: { Audio: { PlayExplosionBoom() { ExplosionSounds++; } } }
     };
 
@@ -206,31 +250,39 @@ test("D-Day Battlefield: advancing tank cover shields car, cannons blow up tanks
     assert.equal(Combat.Tanks.length, 5);
     assert.equal(Combat.Mines.length, 28);
 
-    // ① Tuck car directly behind Tank #0 -> verify active Tank Cover & line-of-fire shielding!
+    // ① Tuck car directly behind Tank #0 -> verify active Tank Cover, line-of-fire shielding & ZERO turrets targeting car!
     const T0 = Combat.Tanks[0];
     const StartTankX = T0.Pos[0];
     Vehicle.Position[0] = T0.Pos[0] - 6.5;
     Vehicle.Position[1] = T0.Pos[1];
+    Vehicle.Position[2] = T0.Pos[2] + 0.63;
     Combat.Advance(1.0 / 30.0);
     assert.ok(T0.Pos[0] > StartTankX, "Assault Tank must advance toward The Wall (+X)");
     assert.equal(Combat.InTankCover, true, "Car tucked behind advancing Tank must register InTankCover === true");
+    assert.equal(Combat.MgTurrets.filter((M) => M.TargetingCar).length, 0, "Zero Bunker MG Turrets should target a car in Tank Cover");
     assert.equal(
         Combat.FindBlockingTankAlongSegment(T0.Pos[0] + 40.0, T0.Pos[1], Vehicle.Position[0], Vehicle.Position[1]),
         0,
         "Tank #0 hull must block incoming fire from ahead of the Tank"
     );
 
-    // ② Cannon hits destroy Tank -> catastrophic cook-off explosion & turret pop-off!
-    Combat.DamageTank(0, 110.0);
+    // ② Multi-hit Cannon damage triggers 1.5s cook-off warning, and catastrophic hit pops turret + emits real Volumetric Plume!
+    Combat.DamageTank(1, 105.0, false); // >= 100 instant catastrophic
+    Combat.DamageTank(0, 55.0);
+    Combat.DamageTank(0, 55.0); // two 55-pt shell hits -> enters 1.5s CookingOff warning!
+    assert.equal(T0.CookingOff, true, "Repeated cannon hits must enter 1.5s ammo cook-off warning before exploding");
+    Combat.DamageTank(0, 110.0, true);
     assert.equal(T0.Alive, false);
     assert.ok(Combat.Stats.TanksExploded >= 1);
     assert.ok(T0.TurretVel[2] > 8.0, "Exploding Tank must launch its turret upward");
+    assert.ok(PlumeBursts >= 1 && DebrisBursts >= 1 && SparkBursts >= 1, "Explosions must trigger real SmokeSequence PlumeBurst + EffectSequence Debris + Sparks");
+    assert.ok(Combat.QueryPlumeEmissions().length >= 1, "Destroyed/burning tanks & craters must emit continuous volumetric plumes");
 
     // ③ Landmine explodes when car drives over armed mine!
     const ArmedMine = Combat.Mines.find((M) => M.Armed);
     Vehicle.Position[0] = ArmedMine.Pos[0];
     Vehicle.Position[1] = ArmedMine.Pos[1];
-    Vehicle.Position[2] = 0.63;
+    Vehicle.Position[2] = ArmedMine.Pos[2] + 0.55;
     Vehicle.LinearVelocity = [12.0, 0.0, 0.0];
     Combat.Advance(1.0 / 30.0);
     assert.equal(ArmedMine.Armed, false, "Landmine must detonate on car proximity");
@@ -238,14 +290,15 @@ test("D-Day Battlefield: advancing tank cover shields car, cannons blow up tanks
     assert.ok(Vehicle.LinearVelocity[2] > 2.5, "Mine blast must apply upward impulse to car");
     assert.ok(ExplosionSounds >= 1, "Battlefield explosions must trigger procedural explosion audio");
 
-    // ④ Aircraft drops bombs & executes flaming crash-dive into ground explosion!
+    // ④ Aircraft drops bombs, Allied Tanks fire 105mm return shells at Bunkers, & Plane executes crash-dive!
     const CrashingPlane = Combat.TriggerAircraftCrashDive();
     assert.ok(CrashingPlane && CrashingPlane.State === "crashing");
     for (let Step = 0; Step < 150; ++Step)
         Combat.Advance(1.0 / 30.0);
     assert.ok(Combat.Stats.BombsDropped >= 1, "Attack aircraft must drop aerial bombs during gauntlet passes");
     assert.ok(Combat.Stats.PlanesCrashed >= 1, "Stricken aircraft must complete crash dive and explode");
-    assert.ok(Combat.Stats.ShellsFired >= 1, "Heavy 155mm cannons must fire artillery shells");
+    assert.ok(Combat.Stats.ShellsFired >= 1, "Heavy 155mm cannons must fire artillery shells at advancing armor");
+    assert.ok(Combat.Stats.TankShotsFired >= 1, "Advancing Allied Tanks must return 105mm fire at Enemy Bunkers");
 
     // ⑤ Sprint through THE WALL Central Breach Gate -> Victory!
     Combat.KnockedOut = false;
@@ -255,4 +308,5 @@ test("D-Day Battlefield: advancing tank cover shields car, cannons blow up tanks
     Combat.Advance(1.0 / 30.0);
     assert.equal(Combat.Breached, true, "Crossing The Wall Breach Gate must trigger Victory");
     assert.ok(Combat.BestBreachSec > 0.0);
+    AssignCustomTerrainHeight(null);
 });

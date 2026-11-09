@@ -255,17 +255,26 @@ test("City Pursuit Scene constructs Police ControlVehicle + Helicopter + 3 Drone
     assert.ok(Impulse > 1.0, "Police cruiser PIT contact must exchange chassis collision impulse");
     assert.ok(Math.abs(Vehicle.AngularVelocity[2]) > 0.05, "Rear-quarter PIT impact must impart yaw angular velocity");
 
-    // ④ Hands-Free Fast RL Self-Training Mode ("selfplay"): trains dual 16->20->3 policies rapidly!
+    // ④ Hands-Free Fast RL Self-Training Mode ("selfplay"): Antithetic Mirror NES + CEM-RL genuinely improves driving!
     Police.ToggleSelfPlayMode(true);
     assert.equal(Police.ControlMode, "selfplay");
     assert.equal(Police.EvaderBrain.Generation, 1);
 
     const InitialSigma = Police.EvaderBrain.Sigma;
-    Police.FastTrainGenerations(8);
-    assert.equal(Police.EvaderBrain.Generation, 9, "FastTrainGenerations(8) must complete 8 full CEM-RL generations (48 episodes)");
-    assert.equal(Police.EvaderBrain.RewardHistory.length, 8);
-    assert.equal(Police.PoliceBrain.RewardHistory.length, 8);
+    const UntrainedBench = Police.EvaluatePolicyBenchmark(8.0);
+    Police.FastTrainGenerations(10);
+    const TrainedBench = Police.EvaluatePolicyBenchmark(8.0);
+
+    assert.equal(Police.EvaderBrain.Generation, 11, "FastTrainGenerations(10) must complete 10 full RL generations (60 episodes)");
+    assert.equal(Police.EvaderBrain.RewardHistory.length, 10);
+    assert.equal(Police.PoliceBrain.RewardHistory.length, 10);
     assert.ok(Police.EvaderBrain.Sigma < InitialSigma, "Exploration noise Sigma must anneal across RL generations");
+    assert.ok(
+        TrainedBench.CleanRoadMeters > UntrainedBench.CleanRoadMeters * 1.45 &&
+        TrainedBench.WaypointsCleared >= UntrainedBench.WaypointsCleared + 3 &&
+        Police.EvaderBrain.BestEverReturn > Police.EvaderBrain.RewardHistory[0] + 80.0,
+        `Trained RL policy must dramatically outperform untrained Gen-1 (Before=${JSON.stringify(UntrainedBench)}, After=${JSON.stringify(TrainedBench)}, Hist=${JSON.stringify(Police.EvaderBrain.RewardHistory)})`
+    );
     assert.ok(Number.isFinite(Police.EvaderBrain.LastBestReturn) && Number.isFinite(Police.PoliceBrain.LastBestReturn));
     }
     finally

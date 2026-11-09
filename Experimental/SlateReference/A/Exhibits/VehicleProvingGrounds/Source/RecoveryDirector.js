@@ -84,7 +84,8 @@ export class RecoveryDirector
         else if (this.Stage === "hidden")
         {
             const Destination = this.Pending.Destination;
-            Vehicle.Respawn([Destination.Position[0], Destination.Position[1], VehicleGeometry.CoMHeight + 0.02], Destination.Yaw);
+            const BaseZ = ResolveCourseHeight(Destination.Position[0], Destination.Position[1]);
+            Vehicle.Respawn([Destination.Position[0], Destination.Position[1], BaseZ + VehicleGeometry.CoMHeight + 0.02], Destination.Yaw);
             Vehicle.Frozen = true;
             if (this.Host.RestoreTyres)
                 this.Host.RestoreTyres();
@@ -114,8 +115,9 @@ export class RecoveryDirector
         const Contacts = Vehicle.Wheels.filter((Wheel) => Wheel.Contact).length;
         const P = Vehicle.Position;
         // 📝 The last place the car sat squarely on the flat plaza pad, every half second.
+        const GroundAtCar = ResolveCourseHeight(P[0], P[1], P[2]);
         this.SafeTimer += Seconds;
-        if (this.SafeTimer > 0.5 && Contacts === 4 && Up[2] > 0.9 && P[2] < 1.2 && this.WithinPad(P, 0.0))
+        if (this.SafeTimer > 0.5 && Contacts === 4 && Up[2] > 0.85 && P[2] < GroundAtCar + 1.25 && this.WithinPad(P, 0.0))
         {
             this.SafeTimer = 0.0;
             const Forward = RotateVector(Vehicle.Orientation, [1.0, 0.0, 0.0]);

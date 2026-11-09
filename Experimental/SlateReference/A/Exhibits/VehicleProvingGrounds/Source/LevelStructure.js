@@ -15,7 +15,7 @@ import { ConstructTrafficLightShapes } from "./TrafficLightSequence.js";
 import { CityPursuitShapes, CityPursuitSpawn, CityPursuitZones, CityClearZones,
          ResolveCityPlacements, ResolveCitySurfaces, ResolveCityTrafficLights, ResolveCityCones, ResolveCityBreakables, EmitCityGroundFacets,
          PolicePursuitShapes } from "./CityPursuitStructure.js";
-import { DDayStaticShapes, DDayCombatShapes, DDaySpawn, DDayZones,
+import { DDayStaticShapes, DDayCombatShapes, DDayBounds, DDaySpawn, DDayZones, QueryDDayTerrainHeight,
          ResolveDDayPlacements, ResolveDDaySurfaces, ResolveDDayCones, ResolveDDayBreakables,
          EmitDDayGroundFacets } from "./DDayStructure.js";
 
@@ -545,11 +545,13 @@ export function ResolveLevelDescriptor(LevelKey = "proving")
             Key:           "dday",
             Title:         "D-Day · Race to The Wall",
             Relief:        false,
+            TerrainHeight: QueryDDayTerrainHeight,
+            Bounds:        DDayBounds,
             AeroGrip:      0.35,
             Spawn:         DDaySpawn,
             Zones:         DDayZones,
             Drills:        [],
-            ClearZones:    [[-65.0, -24.0, 65.0, 24.0]],
+            ClearZones:    [[-65.0, -28.0, 65.0, 28.0]],
             Surfaces:      ResolveDDaySurfaces(),
             TerrainHulls:  null,
             Shapes:        ResolveLevelShapes("dday"),
@@ -566,6 +568,7 @@ export function ResolveLevelDescriptor(LevelKey = "proving")
             Key:           "city",
             Title:         "City Pursuit & AI Lab",
             Relief:        false,
+            Bounds:        { Minimum: [-230.0, -175.0], Maximum: [225.0, 175.0] },
             AeroGrip:      0.35,
             PolicePursuit: true,
             Spawn:         CityPursuitSpawn,

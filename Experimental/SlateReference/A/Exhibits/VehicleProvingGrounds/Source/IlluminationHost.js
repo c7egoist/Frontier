@@ -39,7 +39,7 @@ import { ConeSequence } from "./ConeSequence.js";
 import { EffectSequence } from "./EffectSequence.js";
 import { RecoveryDirector, RecoveryReasons } from "./RecoveryDirector.js";
 import { TrainingSequence } from "./TrainingSequence.js";
-import { SpawnPoint, ResolveCourseHeight, AssignCourseReliefEnabled, AssignExcavationCutouts } from "./CourseStructure.js";
+import { SpawnPoint, ResolveCourseHeight, AssignCourseReliefEnabled, AssignCustomTerrainHeight, AssignExcavationCutouts } from "./CourseStructure.js";
 import { BollardSequence } from "./BollardSequence.js";
 import { TyreThermalSolver, IgnitionModes } from "./TyreThermalSolver.js";
 import { SmokeSequence, ConstructGasParameters } from "./SmokeSequence.js";
@@ -112,6 +112,7 @@ class IlluminationHost
         this.Spawn = this.LevelDescriptor.Spawn;
         this.LevelZones = this.LevelDescriptor.Zones;
         AssignCourseReliefEnabled(this.LevelDescriptor.Relief);
+        AssignCustomTerrainHeight(this.LevelDescriptor.TerrainHeight || null);
         AssignExcavationCutouts(this.LevelDescriptor.PhysicsCutouts || []);
         this.GradeName = QualityGrades[Query.get("quality")] ? Query.get("quality") : "high";
         this.Grade = { ...QualityGrades[this.GradeName] };
@@ -208,7 +209,8 @@ class IlluminationHost
         this.Vehicle = new VehicleSolver(this.Scene.QueryObstacleBounds());
         this.Vehicle.Surfaces = this.LevelDescriptor.Surfaces;
         this.Vehicle.AeroGripScale = this.Settings.AeroGripScale;
-        this.Vehicle.Respawn([this.Spawn.Position[0], this.Spawn.Position[1], VehicleGeometry.CoMHeight + 0.02], this.Spawn.Yaw);
+        const SpawnBaseZ = ResolveCourseHeight(this.Spawn.Position[0], this.Spawn.Position[1]);
+        this.Vehicle.Respawn([this.Spawn.Position[0], this.Spawn.Position[1], SpawnBaseZ + VehicleGeometry.CoMHeight + 0.02], this.Spawn.Yaw);
         // 📝 The body's own hull: ~700 points ray-cast from its facets (HullStructure.js) meet the course and the boxes.
         this.Vehicle.AssignHullPoints(ConstructHullPoints(this.Scene.FacetSets[this.Scene.VehicleBodySet].Facets), HullPointRadius);
         this.PositionVehicle();
@@ -589,7 +591,8 @@ class IlluminationHost
             this.Recovery.Begin(RecoveryReasons.Teleport, Destination, () => { this.Shell.Announce(`${Zone.Name}`); if (Done) Done(); });
             return;
         }
-        this.Vehicle.Respawn([Destination.Position[0], Destination.Position[1], 0.63], Destination.Yaw);
+        const DestBaseZ = ResolveCourseHeight(Destination.Position[0], Destination.Position[1]);
+        this.Vehicle.Respawn([Destination.Position[0], Destination.Position[1], DestBaseZ + 0.63], Destination.Yaw);
         this.AfterVehicleMoved();
         this.Shell.Announce(`${Zone.Name}`);
         if (Done)
@@ -1066,7 +1069,8 @@ class IlluminationHost
             return;
         if (Instant || !this.Recovery || !this.Recovery.Busy)
         {
-            this.Vehicle.Respawn([Destination.Position[0], Destination.Position[1], 0.55], Destination.Yaw);
+            const RespBaseZ = ResolveCourseHeight(Destination.Position[0], Destination.Position[1]);
+            this.Vehicle.Respawn([Destination.Position[0], Destination.Position[1], RespBaseZ + 0.58], Destination.Yaw);
             this.RestoreTyres();
             this.AfterVehicleMoved();
         }
@@ -1427,6 +1431,8 @@ class IlluminationHost
         Emissions.push(...this.ResolveBurstPuffs(Step));
         if (this.Collapse)
             Emissions.push(...this.Collapse.QuerySmokeEmissions());
+        if (this.DDayCombat)
+            Emissions.push(...this.DDayCombat.QueryPlumeEmissions());
         if (this.Settings.TestPlume > 0)
             Emissions.push(this.ResolveTestPlume(this.Settings.TestPlume === 2));
         this.Marks.Advance(Readings, { Enabled: this.Settings.TyreMarks, Strength: this.Settings.TyreMarkStrength });
