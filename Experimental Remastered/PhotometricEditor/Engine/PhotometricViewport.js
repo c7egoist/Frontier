@@ -644,7 +644,8 @@ export class PhotometricViewportController {
     this.SceneState = null;
     this.LoadedIes = {};
     this.VolumeShaders = [];
-    this.MoonTexture = null;
+    this._MoonTexCache = {};
+    this._TextureLoader = null;
     this._Disposed = false;
     this._ClockStart = performance.now();
 
@@ -665,13 +666,22 @@ export class PhotometricViewportController {
 
     try {
       this.Renderer = new THREE.WebGLRenderer({ canvas: this.Canvas, antialias: true, powerPreference: "high-performance" });
+    } catch {
+      try {
+        this.Renderer = new THREE.WebGLRenderer({ canvas: this.Canvas, antialias: true });
+      } catch {
+        this.Renderer = null;
+      }
+    }
+
+    if (this.Renderer) {
       this.Renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
       this.Renderer.shadowMap.enabled = true;
       this.Renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       this.Renderer.toneMapping = THREE.ACESFilmicToneMapping;
       this.Renderer.toneMappingExposure = 1.15;
       this.Backend = "WebGL2 Volumetric";
-    } catch {
+    } else {
       this.Backend = "Software 2D Fallback";
     }
     this.OnBackendChange?.(this.Backend);
@@ -684,20 +694,33 @@ export class PhotometricViewportController {
       this.Controls.maxPolarAngle = Math.PI * 0.495;
       this.Controls.update();
 
-      const Loader = new THREE.TextureLoader();
-      Loader.load("./Textures/Moons/luna_2k.jpg", (Tex) => {
-        Tex.colorSpace = THREE.SRGBColorSpace;
-        this.MoonTexture = Tex;
-        if (this.SceneState) this.SyncScene(this.SceneState, this.LoadedIes);
-      });
+      this._TextureLoader = new THREE.TextureLoader();
+      this._EnsureMoonTexture("luna_2k.jpg");
 
       this._BuildDarkRoom();
       this.DustSystem = CreateDustParticleSystem();
       this.Scene.add(this.DarkRoomGroup, this.EnvironmentGroup, this.LuminaireGroup, this.DustSystem);
     }
 
+    if (typeof ResizeObserver !== "undefined" && MountEl) {
+      this._ResizeObserver = new ResizeObserver(() => this.Resize());
+      this._ResizeObserver.observe(MountEl);
+    }
+
     this.Resize();
     this._Animate();
+  }
+
+  _EnsureMoonTexture(File) {
+    if (!File || !this._TextureLoader) return null;
+    if (this._MoonTexCache[File]) return this._MoonTexCache[File];
+    this._MoonTexCache[File] = "loading";
+    this._TextureLoader.load(`./Textures/Moons/${File}`, (Tex) => {
+      Tex.colorSpace = THREE.SRGBColorSpace;
+      this._MoonTexCache[File] = Tex;
+      if (this.SceneState) this.SyncScene(this.SceneState, this.LoadedIes);
+    });
+    return null;
   }
 
   _BuildDarkRoom() {
@@ -858,9 +881,11 @@ export class PhotometricViewportController {
         const MAz = (Moon.AzimuthDeg ?? 78) * DEG2RAD;
         const MEl = (Moon.ElevationDeg ?? 28) * DEG2RAD;
         const MV = new THREE.Vector3(Math.sin(MAz) * Math.cos(MEl), Math.sin(MEl), -Math.cos(MAz) * Math.cos(MEl));
+        const TexOrNull = this._EnsureMoonTexture(Moon.TextureFile || "luna_2k.jpg");
+        const LoadedMoonTex = TexOrNull && TexOrNull !== "loading" ? TexOrNull : null;
         const MMat = new THREE.MeshStandardMaterial({
-          map: this.MoonTexture || null,
-          color: this.MoonTexture ? "#eef3fb" : "#c6d3e3",
+          map: LoadedMoonTex,
+          color: LoadedMoonTex ? "#eef3fb" : "#c6d3e3",
           emissive: "#8ca4c4",
           emissiveIntensity: 0.25 + Night * 0.55,
           roughness: 0.9,
