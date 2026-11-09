@@ -1,964 +1,946 @@
-/*==========================================================================================================================================
-                                                        PHOTOMETRICVIEWPORT.JS
-==========================================================================================================================================*/
-// Real-time 3D Photometric Calibration Stage & Roadway Homologation Bay using bundled Three.js (three@0.187.0) + OrbitControls,
-// with real LM-63 .ies CanvasTexture beam projection, 7 luminaire gizmos, HDR sky dome, Sun, Moon, Stars, Fog, False-Colour Lux contours,
-// and automatic Software 3D fallback when WebGL2 is unavailable.
+// PhotometricViewport.js — Dark-Room Volumetric Fog Lighting Stage & Switchable Sky Chamber
+// Custom GLSL Volumetric Light Scattering + Measured/Analytical IES DataTexture Lookup +
+// 1,400 Illuminated Airborne Dust Motes + Machined Physical 3D Light Fixtures +
+// Recessed Obsidian Distance Stage Floor (only revealed by real physical light).
 
-import {
-    Clamp,
-    ResolveEmissionRgb,
-    EvaluateIesIntensity,
-    ComputeFlux,
-    KelvinToRgb,
-    SolveMoonMetrics,
-    MoonCatalogue
-} from './PhotometryEngine.js';
+import * as THREE from "../Vendor/three.esm.min.js";
+import { OrbitControls } from "../Vendor/orbit-controls.esm.min.js";
+import { EvaluateIesIntensity, KelvinToRgb, SampleIes } from "./PhotometryEngine.js";
+import { PresetIesNames } from "./PhotometryEngine.js";
+import { IesWeight } from "./ProjectZeroLightProjection.js";
 
-let ThreeModulePromise = null;
+const DEG2RAD = Math.PI / 180;
+const Clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const MAX_DUST_LIGHTS = 6;
 
-async function LoadThree()
-{
-    if (!ThreeModulePromise) {
-        ThreeModulePromise = Promise.all([
-            import('../Vendor/three.esm.min.js'),
-            import('../Vendor/orbit-controls.esm.min.js')
-        ]).then(([THREE, Controls]) => ({ THREE, OrbitControls: Controls.OrbitControls }));
+const GLSL_NOISE = `
+  float hash31(vec3 p) {
+    p = fract(p * 0.1031);
+    p += dot(p, p.yzx + 33.33);
+    return fract((p.x + p.y) * p.z);
+  }
+  float noise3(vec3 p) {
+    vec3 i = floor(p);
+    vec3 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    float n000 = hash31(i + vec3(0.0, 0.0, 0.0));
+    float n100 = hash31(i + vec3(1.0, 0.0, 0.0));
+    float n010 = hash31(i + vec3(0.0, 1.0, 0.0));
+    float n110 = hash31(i + vec3(1.0, 1.0, 0.0));
+    float n001 = hash31(i + vec3(0.0, 0.0, 1.0));
+    float n101 = hash31(i + vec3(1.0, 0.0, 1.0));
+    float n011 = hash31(i + vec3(0.0, 1.0, 1.0));
+    float n111 = hash31(i + vec3(1.0, 1.0, 1.0));
+    float nx00 = mix(n000, n100, f.x);
+    float nx10 = mix(n010, n110, f.x);
+    float nx01 = mix(n001, n101, f.x);
+    float nx11 = mix(n011, n111, f.x);
+    return mix(mix(nx00, nx10, f.y), mix(nx01, nx11, f.y), f.z);
+  }
+  float fbm3(vec3 p) {
+    float v = 0.0;
+    float a = 0.52;
+    for (int i = 0; i < 3; i++) {
+      v += a * noise3(p);
+      p = p * 2.07 + vec3(13.1, 7.7, 5.3);
+      a *= 0.48;
     }
-    return ThreeModulePromise;
+    return v;
+  }
+`;
+
+function CreateVolumetricConeMaterial() {
+  return new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    blending: THREE.AdditiveBlending,
+    uniforms: {
+      uColor: { value: new THREE.Color("#ffd9a0") },
+      uIntensity: { value: 1.0 },
+      uPenumbra: { value: 0.45 },
+      uDecay: { value: 1.75 },
+      uRangeM: { value: 26.0 },
+      uFogDensity: { value: 1.0 },
+      uShellWeight: { value: 1.0 },
+      uTime: { value: 0.0 },
+      uHasIes: { value: 0.0 },
+      uIesTex: { value: null },
+    },
+    vertexShader: `
+      varying vec3 vWorldPos;
+      varying vec3 vNormalView;
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vWorldPos = wp.xyz;
+        vNormalView = normalize(normalMatrix * normal);
+        gl_Position = projectionMatrix * viewMatrix * wp;
+      }
+    `,
+    fragmentShader: `
+      uniform vec3 uColor;
+      uniform float uIntensity;
+      uniform float uPenumbra;
+      uniform float uDecay;
+      uniform float uRangeM;
+      uniform float uFogDensity;
+      uniform float uShellWeight;
+      uniform float uTime;
+      uniform float uHasIes;
+      uniform sampler2D uIesTex;
+      varying vec3 vWorldPos;
+      varying vec3 vNormalView;
+      varying vec2 vUv;
+      ${GLSL_NOISE}
+      void main() {
+        // Cylinder rotated +PI/2 around X puts top (uv.y = 1) at fixture origin (+Z=0) and base (uv.y = 0) at Z=+ReachM
+        float axial = clamp(1.0 - vUv.y, 0.0, 1.0);
+
+        // Soft Fresnel silhouette vanish so polygon boundaries NEVER look like an SVG triangle
+        float rim = abs(dot(normalize(vNormalView), vec3(0.0, 0.0, 1.0)));
+        float edgePow = mix(3.4, 1.65, clamp(uPenumbra, 0.0, 1.0));
+        float edgeFade = pow(smoothstep(0.025, 0.9, rim), edgePow);
+
+        float lensClear = smoothstep(0.0, 0.045, axial);
+        float distM = axial * max(1.0, uRangeM);
+        float invSq = 1.0 / (1.0 + pow(distM * 0.22, max(0.35, uDecay * 0.85)));
+        float farFade = pow(clamp(1.0 - axial, 0.0, 1.0), 1.3);
+
+        vec3 flowPos = vWorldPos * vec3(0.34, 0.44, 0.34) + vec3(uTime * 0.11, -uTime * 0.035, uTime * 0.06);
+        float mist = 0.64 + 0.56 * fbm3(flowPos);
+
+        float iesGain = 1.0;
+        if (uHasIes > 0.5) {
+          float phiU = fract(vUv.x + 0.25);
+          float shellThetaU = clamp(1.0 - uShellWeight * 0.65, 0.05, 0.98);
+          float samp = texture2D(uIesTex, vec2(shellThetaU, phiU)).r;
+          iesGain = 0.12 + samp * 1.48;
+        }
+
+        float scatter = lensClear * edgeFade * invSq * farFade * mist * iesGain;
+        float alpha = clamp(scatter * uIntensity * uFogDensity * uShellWeight * 0.36, 0.0, 0.55);
+        if (alpha < 0.0015) discard;
+        gl_FragColor = vec4(uColor * (1.0 + (1.0 - axial) * 0.3), alpha);
+      }
+    `,
+  });
 }
 
-function BuildIesProjectionCanvas(Props, LoadedProfiles)
-{
-    const Size = 128;
-    const Canvas = document.createElement('canvas');
-    Canvas.width = Size;
-    Canvas.height = Size;
-    const Ctx = Canvas.getContext('2d');
-    const Img = Ctx.createImageData(Size, Size);
-    const ConeHalfRad = Math.max(0.08, ((Number(Props.cone ?? 58) * 0.5) * Math.PI) / 180);
-    const CutoffShift = (Number(Props.cutoff ?? 0) * Math.PI) / 180;
-
-    for (let y = 0; y < Size; y++) {
-        for (let x = 0; x < Size; x++) {
-            const U = (x / (Size - 1)) * 2 - 1;
-            const V = ((y / (Size - 1)) * 2 - 1) + Math.sin(CutoffShift) * 0.6;
-            const R = Math.hypot(U, V);
-            let Val = 0;
-            if (R <= 1.05) {
-                const PolarDeg = Clamp(R * (ConeHalfRad * (180 / Math.PI)) * 1.35, 0, 179);
-                const AzDeg = ((Math.atan2(U, -V) * 180) / Math.PI + 360) % 360;
-                Val = EvaluateIesIntensity(Props, LoadedProfiles, AzDeg, PolarDeg);
-                const Edge = Clamp(1 - Math.pow(R / 1.02, 6), 0, 1);
-                Val *= Edge;
-            }
-            const Lum = Clamp(Math.round(Math.pow(Val, 0.72) * 255), 0, 255);
-            const Idx = (y * Size + x) * 4;
-            Img.data[Idx] = Lum;
-            Img.data[Idx + 1] = Lum;
-            Img.data[Idx + 2] = Lum;
-            Img.data[Idx + 3] = 255;
-        }
-    }
-    Ctx.putImageData(Img, 0, 0);
-    return Canvas;
+function CreateVolumetricSphereMaterial() {
+  return new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    side: THREE.FrontSide,
+    blending: THREE.AdditiveBlending,
+    uniforms: {
+      uColor: { value: new THREE.Color("#ffd9a0") },
+      uIntensity: { value: 1.0 },
+      uDecay: { value: 2.0 },
+      uShellFrac: { value: 0.7 },
+      uFogDensity: { value: 1.0 },
+      uTime: { value: 0.0 },
+    },
+    vertexShader: `
+      varying vec3 vWorldPos;
+      varying vec3 vNormalView;
+      void main() {
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vWorldPos = wp.xyz;
+        vNormalView = normalize(normalMatrix * normal);
+        gl_Position = projectionMatrix * viewMatrix * wp;
+      }
+    `,
+    fragmentShader: `
+      uniform vec3 uColor;
+      uniform float uIntensity;
+      uniform float uDecay;
+      uniform float uShellFrac;
+      uniform float uFogDensity;
+      uniform float uTime;
+      varying vec3 vWorldPos;
+      varying vec3 vNormalView;
+      ${GLSL_NOISE}
+      void main() {
+        float facing = clamp(dot(normalize(vNormalView), vec3(0.0, 0.0, 1.0)), 0.0, 1.0);
+        float glow = pow(facing, 2.3 + uDecay * 0.35);
+        float mist = 0.65 + 0.5 * fbm3(vWorldPos * 0.4 + vec3(uTime * 0.08, uTime * 0.03, 0.0));
+        float shellAtten = pow(1.0 - clamp(uShellFrac, 0.0, 0.94), max(0.7, uDecay * 0.8));
+        float alpha = clamp(glow * mist * shellAtten * uIntensity * uFogDensity * 0.24, 0.0, 0.45);
+        if (alpha < 0.0012) discard;
+        gl_FragColor = vec4(uColor, alpha);
+      }
+    `,
+  });
 }
 
-function LuxToFalseColour(Lux)
-{
-    // Architectural false-colour isolux palette: 0.1 -> violet, 5 -> blue, 25 -> cyan, 100 -> green, 300 -> amber, 800+ -> magenta/white
-    const T = Clamp((Math.log10(Math.max(0.05, Lux)) + 1.1) / 4.2, 0, 1);
-    const Stops = [
-        [0.0,  [14, 14, 34]],
-        [0.2,  [36, 68, 196]],
-        [0.4,  [28, 184, 214]],
-        [0.6,  [104, 224, 92]],
-        [0.8,  [245, 202, 68]],
-        [0.95, [242, 72, 130]],
-        [1.0,  [255, 245, 250]]
-    ];
-    for (let i = 1; i < Stops.length; i++) {
-        if (T <= Stops[i][0]) {
-            const F = (T - Stops[i - 1][0]) / Math.max(1e-4, Stops[i][0] - Stops[i - 1][0]);
-            const A = Stops[i - 1][1];
-            const B = Stops[i][1];
-            return [
-                Math.round(A[0] + (B[0] - A[0]) * F),
-                Math.round(A[1] + (B[1] - A[1]) * F),
-                Math.round(A[2] + (B[2] - A[2]) * F)
-            ];
+function CreateDustParticleSystem() {
+  const Count = 1400;
+  const Positions = new Float32Array(Count * 3);
+  const Seeds = new Float32Array(Count * 3);
+  for (let i = 0; i < Count; i++) {
+    Positions[i * 3] = (Math.random() - 0.5) * 26;
+    Positions[i * 3 + 1] = 0.15 + Math.random() * 6.5;
+    Positions[i * 3 + 2] = -22 + Math.random() * 30;
+    Seeds[i * 3] = Math.random() * 6.283;
+    Seeds[i * 3 + 1] = 0.5 + Math.random() * 1.4;
+    Seeds[i * 3 + 2] = Math.random();
+  }
+  const Geo = new THREE.BufferGeometry();
+  Geo.setAttribute("position", new THREE.BufferAttribute(Positions, 3));
+  Geo.setAttribute("aSeed", new THREE.BufferAttribute(Seeds, 3));
+
+  const Mat = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    uniforms: {
+      uTime: { value: 0 },
+      uLightPos: { value: Array.from({ length: MAX_DUST_LIGHTS }, () => new THREE.Vector3()) },
+      uLightDir: { value: Array.from({ length: MAX_DUST_LIGHTS }, () => new THREE.Vector3(0, 0, -1)) },
+      uLightCol: { value: Array.from({ length: MAX_DUST_LIGHTS }, () => new THREE.Color("#000000")) },
+      uLightParam: { value: Array.from({ length: MAX_DUST_LIGHTS }, () => new THREE.Vector4(0, 10, -1, 2)) },
+      uFogDensity: { value: 1.0 },
+    },
+    vertexShader: `
+      attribute vec3 aSeed;
+      uniform float uTime;
+      uniform vec3 uLightPos[${MAX_DUST_LIGHTS}];
+      uniform vec3 uLightDir[${MAX_DUST_LIGHTS}];
+      uniform vec3 uLightCol[${MAX_DUST_LIGHTS}];
+      uniform vec4 uLightParam[${MAX_DUST_LIGHTS}];
+      varying vec3 vColor;
+      varying float vLit;
+      void main() {
+        vec3 p = position;
+        p.x += sin(uTime * 0.24 * aSeed.y + aSeed.x) * 0.42;
+        p.y += cos(uTime * 0.18 * aSeed.y + aSeed.x * 1.3) * 0.25;
+        p.z += sin(uTime * 0.20 + aSeed.x * 0.7) * 0.42;
+
+        vec3 accum = vec3(0.0);
+        for (int i = 0; i < ${MAX_DUST_LIGHTS}; i++) {
+          float pwr = uLightParam[i].x;
+          if (pwr <= 0.001) continue;
+          vec3 toP = p - uLightPos[i];
+          float d = length(toP);
+          float rangeM = max(1.0, uLightParam[i].y);
+          if (d > rangeM) continue;
+          vec3 dir = toP / max(0.001, d);
+          float cosCone = uLightParam[i].z;
+          float coneFactor = 1.0;
+          if (cosCone > -0.9) {
+            float align = dot(dir, normalize(uLightDir[i]));
+            coneFactor = smoothstep(cosCone - 0.12, min(0.99, cosCone + 0.18), align);
+          }
+          float falloff = pow(clamp(1.0 - d / rangeM, 0.0, 1.0), 1.5) / (1.0 + 0.1 * d * d);
+          accum += uLightCol[i] * pwr * coneFactor * falloff;
         }
-    }
-    return [255, 245, 250];
+
+        vColor = accum;
+        vLit = clamp(max(accum.r, max(accum.g, accum.b)) * 1.3, 0.0, 1.0);
+        vec4 mvPos = modelViewMatrix * vec4(p, 1.0);
+        gl_PointSize = clamp((13.0 + aSeed.z * 16.0) / max(1.0, -mvPos.z), 1.4, 5.2) * step(0.015, vLit);
+        gl_Position = projectionMatrix * mvPos;
+      }
+    `,
+    fragmentShader: `
+      uniform float uFogDensity;
+      varying vec3 vColor;
+      varying float vLit;
+      void main() {
+        vec2 c = gl_PointCoord - 0.5;
+        float r2 = dot(c, c);
+        if (r2 > 0.25) discard;
+        float soft = pow(1.0 - r2 * 4.0, 2.0);
+        float a = clamp(soft * vLit * (0.28 + uFogDensity * 0.5), 0.0, 0.72);
+        if (a < 0.004) discard;
+        gl_FragColor = vec4(vColor, a);
+      }
+    `,
+  });
+
+  const Pts = new THREE.Points(Geo, Mat);
+  Pts.frustumCulled = false;
+  return Pts;
 }
 
-export class PhotometricViewportController
-{
-    constructor(ContainerElement, Hooks = {})
-    {
-        this.Container = ContainerElement;
-        this.Hooks = Hooks;
-        this.Mode = 'initializing';
-        this.ShadingMode = 'pbr'; // 'pbr' | 'lux' | 'goniometer' | 'homologation'
-        this.ShowGizmos = true;
-        this.ShowGrid = true;
-        this.CurrentState = null;
-        this.LoadedProfiles = {};
-        this.Three = null;
-        this.Renderer = null;
-        this.Scene = null;
-        this.Camera = null;
-        this.Controls = null;
-        this.DynamicLightGroup = null;
-        this.GizmoGroup = null;
-        this.StageMaterials = [];
-        this.SunLight = null;
-        this.MoonLight = null;
-        this.HemiLight = null;
-        this.SkyMesh = null;
-        this.StarPoints = null;
-        this.MoonMesh = null;
-        this.SunMesh = null;
-        this.FloorLuxCanvas = null;
-        this.FloorLuxTexture = null;
-        this.FloorMaterial = null;
-        this.FloorStdMap = null;
-        this.WallLuxCanvas = null;
-        this.WallLuxTexture = null;
-        this.WallMaterial = null;
-        this.FallbackCanvas = null;
-        this.FallbackCamera = { Yaw: 0.56, Pitch: 0.36, Distance: 11.8 };
-        this.FrameId = null;
-        this.Destroyed = false;
-        this.Init();
+function CreateObsidianFloorTexture() {
+  const Canvas = document.createElement("canvas");
+  Canvas.width = 1024;
+  Canvas.height = 1024;
+  const Ctx = Canvas.getContext("2d");
+  Ctx.fillStyle = "#0b0c0f";
+  Ctx.fillRect(0, 0, 1024, 1024);
+
+  for (let i = 0; i < 6000; i++) {
+    const v = 10 + Math.floor(Math.random() * 8);
+    Ctx.fillStyle = `rgb(${v},${v + 1},${v + 2})`;
+    Ctx.fillRect(Math.random() * 1024, Math.random() * 1024, 2 + Math.random() * 4, 2 + Math.random() * 4);
+  }
+  Ctx.strokeStyle = "#13161c";
+  Ctx.lineWidth = 1.2;
+  for (let k = 0; k <= 16; k++) {
+    const p = (k / 16) * 1024;
+    Ctx.beginPath();
+    Ctx.moveTo(p, 0); Ctx.lineTo(p, 1024);
+    Ctx.moveTo(0, p); Ctx.lineTo(1024, p);
+    Ctx.stroke();
+  }
+  const Tex = new THREE.CanvasTexture(Canvas);
+  Tex.wrapS = Tex.wrapT = THREE.RepeatWrapping;
+  Tex.repeat.set(5, 5);
+  Tex.colorSpace = THREE.SRGBColorSpace;
+  return Tex;
+}
+
+function CreateDistanceOverlayTexture() {
+  const Canvas = document.createElement("canvas");
+  Canvas.width = 1024;
+  Canvas.height = 2048;
+  const Ctx = Canvas.getContext("2d");
+  Ctx.clearRect(0, 0, 1024, 2048);
+
+  const MtoY = (z) => ((z + 68) / 80) * 2048;
+  Ctx.strokeStyle = "rgba(185,200,220,0.16)";
+  Ctx.fillStyle = "rgba(195,208,224,0.24)";
+  Ctx.font = "500 22px monospace";
+  Ctx.textAlign = "center";
+
+  const OriginY = MtoY(2);
+  for (let d = 5; d <= 45; d += 5) {
+    const RadiusPx = (d / 50) * 1024;
+    Ctx.beginPath();
+    Ctx.arc(512, OriginY, RadiusPx, 0, Math.PI * 2);
+    Ctx.stroke();
+    const LY = MtoY(2 - d);
+    if (LY > 24 && LY < 2020) {
+      Ctx.fillText(`${d} m`, 512, LY - 8);
     }
+  }
+  const Tex = new THREE.CanvasTexture(Canvas);
+  Tex.anisotropy = 4;
+  return Tex;
+}
 
-    async Init()
-    {
-        try {
-            const { THREE, OrbitControls } = await LoadThree();
-            if (this.Destroyed) return;
-            this.Three = THREE;
-            const W = Math.max(320, this.Container.clientWidth || 720);
-            const H = Math.max(240, this.Container.clientHeight || 520);
+function BuildIesDataTexture(P, LoadedIes) {
+  const W = 64;
+  const H = 64;
+  const Data = new Uint8Array(W * H * 4);
+  const ProfileIndex = Math.max(0, PresetIesNames.indexOf(P.profile || "ECE Low Beam"));
+  const ActiveKey = P.customIesKey && LoadedIes?.[P.customIesKey] ? P.customIesKey
+    : P.useMeasuredIes && P.measuredProfile && LoadedIes?.[P.measuredProfile] ? P.measuredProfile : null;
+  const Parsed = ActiveKey ? LoadedIes[ActiveKey] : null;
 
-            const Renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-            Renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
-            Renderer.setSize(W, H);
-            Renderer.shadowMap.enabled = true;
-            Renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-            Renderer.toneMapping = THREE.ACESFilmicToneMapping;
-            Renderer.toneMappingExposure = 1.15;
-            Renderer.outputColorSpace = THREE.SRGBColorSpace;
-
-            this.Container.innerHTML = '';
-            this.Container.appendChild(Renderer.domElement);
-            Renderer.domElement.style.width = '100%';
-            Renderer.domElement.style.height = '100%';
-            Renderer.domElement.style.display = 'block';
-
-            const Scene = new THREE.Scene();
-            Scene.background = new THREE.Color('#090b0f');
-
-            const Camera = new THREE.PerspectiveCamera(44, W / H, 0.1, 450);
-            Camera.position.set(6.2, 4.2, 8.6);
-
-            const Controls = new OrbitControls(Camera, Renderer.domElement);
-            Controls.enableDamping = true;
-            Controls.dampingFactor = 0.08;
-            Controls.target.set(0, 1.0, -1.2);
-            Controls.minDistance = 2.0;
-            Controls.maxDistance = 42.0;
-            Controls.maxPolarAngle = Math.PI * 0.49;
-
-            this.Renderer = Renderer;
-            this.Scene = Scene;
-            this.Camera = Camera;
-            this.Controls = Controls;
-
-            this.BuildStageGeometry();
-            this.BuildEnvironmentRig();
-
-            this.DynamicLightGroup = new THREE.Group();
-            this.GizmoGroup = new THREE.Group();
-            Scene.add(this.DynamicLightGroup);
-            Scene.add(this.GizmoGroup);
-
-            this.Mode = 'webgl';
-            this.Hooks.onBackendChange?.('Three.js WebGL2 ACES');
-            if (this.CurrentState) this.SyncScene(this.CurrentState, this.LoadedProfiles);
-            this.Resize();
-            this.Animate();
-        } catch (Err) {
-            console.warn('WebGL photometric stage unavailable, using software 3D renderer:', Err);
-            this.InitSoftwareFallback();
-        }
-    }
-
-    InitSoftwareFallback()
-    {
-        this.Mode = 'software';
-        const Canvas = document.createElement('canvas');
-        Canvas.style.width = '100%';
-        Canvas.style.height = '100%';
-        Canvas.style.display = 'block';
-        this.Container.innerHTML = '';
-        this.Container.appendChild(Canvas);
-        this.FallbackCanvas = Canvas;
-
-        let Dragging = false;
-        let LastX = 0;
-        let LastY = 0;
-        Canvas.addEventListener('pointerdown', (E) => {
-            Dragging = true;
-            LastX = E.clientX;
-            LastY = E.clientY;
-            Canvas.setPointerCapture(E.pointerId);
-        });
-        Canvas.addEventListener('pointermove', (E) => {
-            if (!Dragging) return;
-            this.FallbackCamera.Yaw -= (E.clientX - LastX) * 0.008;
-            this.FallbackCamera.Pitch = Clamp(this.FallbackCamera.Pitch + (E.clientY - LastY) * 0.006, 0.08, 1.35);
-            LastX = E.clientX;
-            LastY = E.clientY;
-            this.RenderSoftwareFrame();
-        });
-        Canvas.addEventListener('pointerup', () => (Dragging = false));
-        Canvas.addEventListener('wheel', (E) => {
-            E.preventDefault();
-            this.FallbackCamera.Distance = Clamp(this.FallbackCamera.Distance + E.deltaY * 0.01, 4.5, 24);
-            this.RenderSoftwareFrame();
-        }, { passive: false });
-
-        this.Hooks.onBackendChange?.('Software Photometric 3D');
-        this.Resize();
-        this.RenderSoftwareFrame();
-    }
-
-    BuildStageGeometry()
-    {
-        const THREE = this.Three;
-        const Scene = this.Scene;
-
-        // Polar floor calibration texture (concentric 1m/2m/5m/10m rings + roadway lanes)
-        const FloorCanvas = document.createElement('canvas');
-        FloorCanvas.width = 1024;
-        FloorCanvas.height = 1024;
-        const FCtx = FloorCanvas.getContext('2d');
-        FCtx.fillStyle = '#1b1d22';
-        FCtx.fillRect(0, 0, 1024, 1024);
-        // Subtle matte concrete grain
-        for (let g = 0; g < 6000; g++) {
-            const X = (Math.sin(g * 19.3) * 43758.5 % 1 + 1) % 1 * 1024;
-            const Y = (Math.sin(g * 43.7) * 29831.2 % 1 + 1) % 1 * 1024;
-            FCtx.fillStyle = g % 2 ? 'rgba(255,255,255,0.025)' : 'rgba(0,0,0,0.03)';
-            FCtx.fillRect(X, Y, 2, 2);
-        }
-        // Grid lines every 1 m across 24x24 m floor
-        FCtx.strokeStyle = 'rgba(255,255,255,0.06)';
-        FCtx.lineWidth = 1;
-        for (let i = 0; i <= 24; i++) {
-            const P = (i / 24) * 1024;
-            FCtx.beginPath(); FCtx.moveTo(P, 0); FCtx.lineTo(P, 1024); FCtx.stroke();
-            FCtx.beginPath(); FCtx.moveTo(0, P); FCtx.lineTo(1024, P); FCtx.stroke();
-        }
-        // Polar rings at 1m, 2m, 5m, 10m centered at (0,0)
-        [1, 2, 5, 10].forEach(Rm => {
-            FCtx.strokeStyle = Rm === 5 ? 'rgba(239,244,207,0.22)' : 'rgba(255,255,255,0.12)';
-            FCtx.lineWidth = Rm === 5 ? 2 : 1.2;
-            FCtx.beginPath();
-            FCtx.arc(512, 512, (Rm / 12) * 512, 0, Math.PI * 2);
-            FCtx.stroke();
-        });
-        // Roadway lane markers toward homologation screen
-        FCtx.strokeStyle = 'rgba(239,244,207,0.18)';
-        FCtx.setLineDash([18, 16]);
-        FCtx.lineWidth = 3;
-        FCtx.beginPath(); FCtx.moveTo(512 - 74, 0); FCtx.lineTo(512 - 74, 1024); FCtx.stroke();
-        FCtx.beginPath(); FCtx.moveTo(512 + 74, 0); FCtx.lineTo(512 + 74, 1024); FCtx.stroke();
-        FCtx.setLineDash([]);
-
-        this.FloorStdMap = new THREE.CanvasTexture(FloorCanvas);
-        this.FloorStdMap.colorSpace = THREE.SRGBColorSpace;
-        this.FloorStdMap.anisotropy = 4;
-
-        this.FloorLuxCanvas = document.createElement('canvas');
-        this.FloorLuxCanvas.width = 160;
-        this.FloorLuxCanvas.height = 160;
-        this.FloorLuxTexture = new THREE.CanvasTexture(this.FloorLuxCanvas);
-        this.FloorLuxTexture.colorSpace = THREE.SRGBColorSpace;
-
-        this.FloorMaterial = new THREE.MeshStandardMaterial({
-            map: this.FloorStdMap,
-            roughness: 0.78,
-            metalness: 0.08
-        });
-        const FloorMesh = new THREE.Mesh(new THREE.PlaneGeometry(24, 24), this.FloorMaterial);
-        FloorMesh.rotation.x = -Math.PI / 2;
-        FloorMesh.receiveShadow = true;
-        Scene.add(FloorMesh);
-
-        // Homologation projection wall at Z = -5.4 m (ideal for inspecting ECE Low Beam / Spot / Area patterns!)
-        const WallCanvas = document.createElement('canvas');
-        WallCanvas.width = 1024;
-        WallCanvas.height = 512;
-        const WC = WallCanvas.getContext('2d');
-        WC.fillStyle = '#c8cbd2';
-        WC.fillRect(0, 0, 1024, 512);
-        WC.strokeStyle = 'rgba(25,30,38,0.22)';
-        WC.lineWidth = 2;
-        for (let wx = 0; wx <= 10; wx++) {
-            const X = (wx / 10) * 1024;
-            WC.beginPath(); WC.moveTo(X, 0); WC.lineTo(X, 512); WC.stroke();
-        }
-        // Horizon 0 deg & -1 deg ECE cut-off rule lines
-        WC.strokeStyle = 'rgba(220,72,56,0.45)';
-        WC.setLineDash([10, 8]);
-        WC.beginPath(); WC.moveTo(0, 340); WC.lineTo(1024, 340); WC.stroke();
-        WC.strokeStyle = 'rgba(25,30,38,0.45)';
-        WC.beginPath(); WC.moveTo(0, 315); WC.lineTo(1024, 315); WC.stroke();
-        WC.setLineDash([]);
-        this.WallStdMap = new THREE.CanvasTexture(WallCanvas);
-        this.WallStdMap.colorSpace = THREE.SRGBColorSpace;
-
-        this.WallLuxCanvas = document.createElement('canvas');
-        this.WallLuxCanvas.width = 160;
-        this.WallLuxCanvas.height = 80;
-        this.WallLuxTexture = new THREE.CanvasTexture(this.WallLuxCanvas);
-        this.WallLuxTexture.colorSpace = THREE.SRGBColorSpace;
-
-        this.WallMaterial = new THREE.MeshStandardMaterial({
-            map: this.WallStdMap,
-            roughness: 0.86,
-            metalness: 0.04
-        });
-        const WallMesh = new THREE.Mesh(new THREE.BoxGeometry(11.0, 4.4, 0.24), this.WallMaterial);
-        WallMesh.position.set(0, 2.2, -5.4);
-        WallMesh.receiveShadow = true;
-        WallMesh.castShadow = true;
-        Scene.add(WallMesh);
-
-        // Architectural calibration plinth, matte reference sphere, chrome specular probe, and architectural baffles
-        const PlinthMat = new THREE.MeshStandardMaterial({ color: 0x3b3e45, roughness: 0.62, metalness: 0.14 });
-        const MatteMat = new THREE.MeshStandardMaterial({ color: 0xd9dade, roughness: 0.85, metalness: 0.0 });
-        const ChromeMat = new THREE.MeshStandardMaterial({ color: 0xeaf0f7, roughness: 0.08, metalness: 0.94 });
-        const DarkPedestalMat = new THREE.MeshStandardMaterial({ color: 0x202227, roughness: 0.48, metalness: 0.35 });
-
-        const Plinth = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.42, 1.4), PlinthMat);
-        Plinth.position.set(0, 0.21, -0.6);
-        Plinth.castShadow = true;
-        Plinth.receiveShadow = true;
-        Scene.add(Plinth);
-
-        const MatteSphere = new THREE.Mesh(new THREE.SphereGeometry(0.56, 36, 28), MatteMat);
-        MatteSphere.position.set(-0.62, 0.98, -0.6);
-        MatteSphere.castShadow = true;
-        MatteSphere.receiveShadow = true;
-        Scene.add(MatteSphere);
-
-        const ChromeSphere = new THREE.Mesh(new THREE.SphereGeometry(0.56, 36, 28), ChromeMat);
-        ChromeSphere.position.set(0.65, 0.98, -0.6);
-        ChromeSphere.castShadow = true;
-        ChromeSphere.receiveShadow = true;
-        Scene.add(ChromeSphere);
-
-        // Headlamp calibration tripod/stand at (-1.15, 0..0.88, 3.6)
-        const StandPost = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.08, 0.88, 16), DarkPedestalMat);
-        StandPost.position.set(-1.15, 0.44, 3.6);
-        StandPost.castShadow = true;
-        Scene.add(StandPost);
-
-        // Two architectural vertical baffle pillars for oblique shadow & IES wall-wash inspection
-        [-3.4, 3.4].forEach((BX) => {
-            const Pillar = new THREE.Mesh(new THREE.BoxGeometry(0.5, 3.4, 0.5), PlinthMat);
-            Pillar.position.set(BX, 1.7, -2.9);
-            Pillar.castShadow = true;
-            Pillar.receiveShadow = true;
-            Scene.add(Pillar);
-        });
-    }
-
-    BuildEnvironmentRig()
-    {
-        const THREE = this.Three;
-        const Scene = this.Scene;
-
-        this.HemiLight = new THREE.HemisphereLight(0x6e90b8, 0x222320, 0.65);
-        Scene.add(this.HemiLight);
-
-        this.SunLight = new THREE.DirectionalLight(0xfff4de, 1.2);
-        this.SunLight.castShadow = true;
-        this.SunLight.shadow.mapSize.set(1024, 1024);
-        this.SunLight.shadow.camera.near = 0.5;
-        this.SunLight.shadow.camera.far = 45;
-        const D = 9;
-        this.SunLight.shadow.camera.left = -D;
-        this.SunLight.shadow.camera.right = D;
-        this.SunLight.shadow.camera.top = D;
-        this.SunLight.shadow.camera.bottom = -D;
-        this.SunLight.shadow.bias = -0.0005;
-        Scene.add(this.SunLight);
-
-        this.MoonLight = new THREE.DirectionalLight(0xa8c2e8, 0.2);
-        Scene.add(this.MoonLight);
-
-        // Sky gradient dome shader
-        const SkyUniforms = {
-            uZenith: { value: new THREE.Color('#203859') },
-            uHorizon: { value: new THREE.Color('#6f859e') },
-            uGround: { value: new THREE.Color('#131417') },
-            uPower: { value: 1.0 }
-        };
-        const SkyMat = new THREE.ShaderMaterial({
-            side: THREE.BackSide,
-            depthWrite: false,
-            uniforms: SkyUniforms,
-            vertexShader: 'varying vec3 vWorldPos; void main(){ vec4 p = modelMatrix * vec4(position,1.0); vWorldPos = p.xyz; gl_Position = projectionMatrix * viewMatrix * p; }',
-            fragmentShader: `
-                uniform vec3 uZenith, uHorizon, uGround;
-                uniform float uPower;
-                varying vec3 vWorldPos;
-                void main() {
-                    float h = normalize(vWorldPos).y;
-                    vec3 col = h >= 0.0
-                        ? mix(uHorizon, uZenith, pow(clamp(h, 0.0, 1.0), 0.55))
-                        : mix(uHorizon * 0.45, uGround, pow(clamp(-h, 0.0, 1.0), 0.4));
-                    gl_FragColor = vec4(col * uPower, 1.0);
-                }
-            `
-        });
-        this.SkyMesh = new THREE.Mesh(new THREE.SphereGeometry(180, 32, 20), SkyMat);
-        Scene.add(this.SkyMesh);
-
-        // Star field buffer geometry on sky sphere
-        const StarPositions = new Float32Array(300 * 3);
-        const StarMagnitudes = new Float32Array(300);
-        for (let i = 0; i < 300; i++) {
-            const U = ((Math.sin(i * 12.9898) * 43758.5) % 1 + 1) % 1;
-            const V = ((Math.sin(i * 78.233) * 29831.2) % 1 + 1) % 1;
-            const Theta = U * Math.PI * 2;
-            const Phi = Math.acos(Clamp(V * 0.92 + 0.06, 0.05, 0.99));
-            const R = 155;
-            StarPositions[i * 3] = R * Math.sin(Phi) * Math.cos(Theta);
-            StarPositions[i * 3 + 1] = R * Math.cos(Phi);
-            StarPositions[i * 3 + 2] = R * Math.sin(Phi) * Math.sin(Theta);
-            StarMagnitudes[i] = ((Math.sin(i * 39.42) * 19283.7) % 1 + 1) % 1 * 7.8;
-        }
-        this.StarMagnitudes = StarMagnitudes;
-        this.StarPositionsBase = StarPositions;
-        const StarGeo = new THREE.BufferGeometry();
-        StarGeo.setAttribute('position', new THREE.BufferAttribute(StarPositions.slice(), 3));
-        const StarMat = new THREE.PointsMaterial({ color: 0xe6f0ff, size: 1.1, sizeAttenuation: false, transparent: true, opacity: 0.7 });
-        this.StarPoints = new THREE.Points(StarGeo, StarMat);
-        Scene.add(this.StarPoints);
-
-        // Sun & Moon sky disc markers
-        this.SunMesh = new THREE.Mesh(
-            new THREE.SphereGeometry(2.6, 16, 12),
-            new THREE.MeshBasicMaterial({ color: 0xfff3d4 })
+  for (let py = 0; py < H; py++) {
+    const Phi = (py / H) * 360;
+    for (let px = 0; px < W; px++) {
+      const Theta = (px / (W - 1)) * 90;
+      let val = 0;
+      if (Parsed) {
+        val = Clamp(SampleIes(Parsed, Phi, Theta), 0, 1);
+      } else {
+        const SignedTheta = Phi > 90 && Phi < 270 ? -Theta : Theta;
+        val = IesWeight(
+          { "Profile type": ProfileIndex, "Field angle": P.cone ?? 58, "Cut-off pitch": P.cutoff ?? -1 },
+          SignedTheta,
+          Phi,
         );
-        Scene.add(this.SunMesh);
+      }
+      const B = Math.round(Clamp(val, 0, 1) * 255);
+      const O = (py * W + px) * 4;
+      Data[O] = B;
+      Data[O + 1] = B;
+      Data[O + 2] = B;
+      Data[O + 3] = 255;
+    }
+  }
+  const Tex = new THREE.DataTexture(Data, W, H, THREE.RGBAFormat);
+  Tex.minFilter = THREE.LinearFilter;
+  Tex.magFilter = THREE.LinearFilter;
+  Tex.wrapS = THREE.ClampToEdgeWrapping;
+  Tex.wrapT = THREE.RepeatWrapping;
+  Tex.needsUpdate = true;
+  return Tex;
+}
 
-        this.MoonMesh = new THREE.Mesh(
-            new THREE.SphereGeometry(2.4, 16, 12),
-            new THREE.MeshBasicMaterial({ color: 0xdce4f0 })
-        );
-        Scene.add(this.MoonMesh);
+function BuildFixture(Light, HexTint, LoadedIes, FogDensityNorm, ShowVolumes) {
+  const P = Light.Props;
+  const Type = Light.Type;
+  const Root = new THREE.Group();
+  const Pos = P.pos || [0, 2.2, 0];
+  const Rot = P.rot || [0, 0, 0];
+  const Scale = P.scale || [1, 1, 1];
+  Root.position.set(Pos[0], Pos[1], Pos[2]);
+  Root.scale.set(Scale[0], Scale[1], Scale[2]);
+
+  const MatteBlack = new THREE.MeshStandardMaterial({ color: "#0e1013", roughness: 0.42, metalness: 0.78 });
+  const AnodizedGrey = new THREE.MeshStandardMaterial({ color: "#22262c", roughness: 0.34, metalness: 0.86 });
+  const MachinedBrass = new THREE.MeshStandardMaterial({ color: "#7f6f4c", roughness: 0.32, metalness: 0.88 });
+  const EmitterMat = new THREE.MeshStandardMaterial({
+    color: HexTint,
+    emissive: HexTint,
+    emissiveIntensity: 3.4,
+    roughness: 0.15,
+  });
+  const GlassShellMat = new THREE.MeshPhysicalMaterial({
+    color: "#e6eff8",
+    roughness: 0.08,
+    transmission: 0.65,
+    transparent: true,
+    opacity: 0.38,
+  });
+
+  const VolumeShaders = [];
+  let DustInfo = null;
+
+  if (Type === "pointlight") {
+    const Cord = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 1.4, 8), MatteBlack);
+    Cord.position.y = 0.82;
+    const Collar = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.068, 0.11, 16), MachinedBrass);
+    Collar.position.y = 0.11;
+    const Bulb = new THREE.Mesh(new THREE.SphereGeometry(0.085, 20, 16), GlassShellMat);
+    const Filament = new THREE.Mesh(new THREE.TorusKnotGeometry(0.028, 0.006, 28, 6, 2, 3), EmitterMat);
+    Root.add(Cord, Collar, Bulb, Filament);
+    for (let i = 0; i < 4; i++) {
+      const Rib = new THREE.Mesh(new THREE.TorusGeometry(0.115, 0.005, 6, 20), MatteBlack);
+      Rib.rotation.y = (i * Math.PI) / 4;
+      Root.add(Rib);
     }
 
-    SetShadingMode(Mode)
-    {
-        this.ShadingMode = Mode;
-        if (this.Mode === 'webgl' && this.CurrentState) {
-            this.SyncScene(this.CurrentState, this.LoadedProfiles);
-        } else if (this.Mode === 'software') {
-            this.RenderSoftwareFrame();
-        }
+    const Reach = Clamp(Number(P.distance ?? 26), 2, 120);
+    const Decay = Clamp(Number(P.decay ?? 2), 0.1, 4);
+    const PowerScale = Clamp(Number(P.intensity ?? 14) / 14, 0.15, 8);
+    const Pt = new THREE.PointLight(HexTint, PowerScale * 54, Reach, Clamp(Decay * 0.8, 0.5, 2.2));
+    Pt.castShadow = !!P.shadows;
+    Pt.shadow.mapSize.set(1024, 1024);
+    Root.add(Pt);
+
+    if (ShowVolumes && P.gizmoGlow !== false) {
+      [0.24, 0.52, 0.85, 1.0].forEach((frac, idx) => {
+        const Mat = CreateVolumetricSphereMaterial();
+        Mat.uniforms.uColor.value.set(HexTint);
+        Mat.uniforms.uIntensity.value = Clamp(PowerScale * 0.9, 0.2, 3.2);
+        Mat.uniforms.uDecay.value = Decay;
+        Mat.uniforms.uShellFrac.value = frac * 0.88;
+        Mat.uniforms.uFogDensity.value = FogDensityNorm;
+        const R = Math.max(0.9, Math.min(26, Reach * 0.42 * frac));
+        const Sph = new THREE.Mesh(new THREE.SphereGeometry(R, 30, 22), Mat);
+        Sph.renderOrder = 10 + idx;
+        Root.add(Sph);
+        VolumeShaders.push(Mat);
+      });
+    }
+    DustInfo = { Pos: new THREE.Vector3(...Pos), Dir: new THREE.Vector3(0, -1, 0), Reach, CosCone: -1.0 };
+  } else if (Type === "spotlight" || Type === "ieslight" || Type === "ledlight" || Type === "arealight") {
+    const Aim = new THREE.Group();
+    if (Array.isArray(P.target)) {
+      const Dir = new THREE.Vector3(
+        P.target[0] - Pos[0],
+        P.target[1] - Pos[1],
+        P.target[2] - Pos[2],
+      );
+      if (Dir.lengthSq() > 1e-6) {
+        Dir.normalize();
+        const RefUp = Math.abs(Dir.y) > 0.99 ? new THREE.Vector3(0, 0, -1) : new THREE.Vector3(0, 1, 0);
+        const Right = new THREE.Vector3().crossVectors(RefUp, Dir).normalize();
+        const TrueUp = new THREE.Vector3().crossVectors(Dir, Right).normalize();
+        const Basis = new THREE.Matrix4().makeBasis(Right, TrueUp, Dir);
+        Aim.quaternion.setFromRotationMatrix(Basis);
+      }
+    } else {
+      Aim.rotation.set(Rot[0] * DEG2RAD, Rot[1] * DEG2RAD, Rot[2] * DEG2RAD);
     }
 
-    SetCameraView(Preset)
-    {
-        if (this.Mode === 'software') {
-            if (Preset === 'top') this.FallbackCamera = { Yaw: 0, Pitch: 1.32, Distance: 13.5 };
-            else if (Preset === 'wall') this.FallbackCamera = { Yaw: 0, Pitch: 0.14, Distance: 9.2 };
-            else if (Preset === 'roadway') this.FallbackCamera = { Yaw: 0.12, Pitch: 0.12, Distance: 7.4 };
-            else this.FallbackCamera = { Yaw: 0.56, Pitch: 0.36, Distance: 11.8 };
-            this.RenderSoftwareFrame();
-            return;
-        }
-        if (!this.Camera || !this.Controls) return;
-        if (Preset === 'top') {
-            this.Camera.position.set(0.01, 14.2, 0.2);
-            this.Controls.target.set(0, 0, -1.2);
-        } else if (Preset === 'wall') {
-            this.Camera.position.set(0, 2.1, 3.8);
-            this.Controls.target.set(0, 1.8, -5.4);
-        } else if (Preset === 'roadway') {
-            this.Camera.position.set(-0.6, 1.15, 6.2);
-            this.Controls.target.set(-0.2, 0.7, -5.4);
-        } else {
-            this.Camera.position.set(6.2, 4.2, 8.6);
-            this.Controls.target.set(0, 1.0, -1.2);
-        }
-        this.Controls.update();
+    if (Type === "spotlight") {
+      // Barrel & lens pointing along +Z
+      const Barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.135, 0.148, 0.34, 24), MatteBlack);
+      Barrel.rotation.x = Math.PI / 2;
+      Barrel.position.z = -0.14;
+      const Bezel = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.05, 24), AnodizedGrey);
+      Bezel.rotation.x = Math.PI / 2;
+      Bezel.position.z = 0.03;
+      const Lens = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.02, 24), EmitterMat);
+      Lens.rotation.x = Math.PI / 2;
+      Lens.position.z = 0.05;
+      Aim.add(Barrel, Bezel, Lens);
+      for (let d = 0; d < 4; d++) {
+        const Flap = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.14, 0.012), MatteBlack);
+        const Ang = (d * Math.PI) / 2;
+        Flap.position.set(Math.sin(Ang) * 0.16, Math.cos(Ang) * 0.16, 0.11);
+        Flap.rotation.z = -Ang;
+        Flap.rotation.x = 0.38;
+        Aim.add(Flap);
+      }
+    } else if (Type === "ieslight") {
+      const Pod = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.22, 0.28), MatteBlack);
+      Pod.position.z = -0.12;
+      const Bezel = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.13, 0.1, 24), AnodizedGrey);
+      Bezel.rotation.x = Math.PI / 2;
+      Bezel.position.z = 0.03;
+      const Eye = new THREE.Mesh(new THREE.SphereGeometry(0.105, 20, 14), EmitterMat);
+      Eye.scale.z = 0.45;
+      Eye.position.z = 0.06;
+      Aim.add(Pod, Bezel, Eye);
+    } else if (Type === "ledlight") {
+      const Can = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.11, 0.2, 20), AnodizedGrey);
+      Can.rotation.x = Math.PI / 2;
+      Can.position.z = -0.09;
+      Aim.add(Can);
+      for (let f = 0; f < 5; f++) {
+        const Fin = new THREE.Mesh(new THREE.CylinderGeometry(0.122, 0.122, 0.008, 20), MatteBlack);
+        Fin.rotation.x = Math.PI / 2;
+        Fin.position.z = -0.14 + f * 0.032;
+        Aim.add(Fin);
+      }
+      const Cob = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.09, 0.015), EmitterMat);
+      Cob.position.z = 0.02;
+      Aim.add(Cob);
+    } else {
+      const W = Clamp(Number(P.width ?? 2), 0.4, 6);
+      const H = Clamp(Number(P.height ?? 1), 0.3, 4);
+      const Frame = new THREE.Mesh(new THREE.BoxGeometry(W + 0.08, H + 0.08, 0.12), MatteBlack);
+      Frame.position.z = -0.06;
+      const Cloth = new THREE.Mesh(new THREE.PlaneGeometry(W, H), EmitterMat);
+      Cloth.position.z = 0.01;
+      Aim.add(Frame, Cloth);
     }
 
-    SyncScene(State, LoadedProfiles = {})
-    {
-        this.CurrentState = State;
-        this.LoadedProfiles = LoadedProfiles;
-        if (this.Mode === 'software') {
-            this.RenderSoftwareFrame();
-            return;
+    const ReachM = Clamp(
+      Type === "ieslight" ? Number(P.range ?? 42) : Type === "spotlight" ? Number(P.distance ?? 32) : 22,
+      4,
+      80,
+    );
+    const HalfConeRad =
+      Type === "ieslight"
+        ? Clamp(((Number(P.cone ?? 58) * 0.5) * DEG2RAD), 0.08, Math.PI * 0.44)
+        : Type === "arealight"
+          ? Clamp(((Number(P.spread ?? 120) * 0.45) * DEG2RAD), 0.22, Math.PI * 0.45)
+          : Type === "ledlight"
+            ? Clamp(((Number(P.angle ?? 90) * 0.5) * DEG2RAD), 0.08, Math.PI * 0.44)
+            : Clamp(Number(P.angle ?? 28) * DEG2RAD, 0.05, Math.PI * 0.44);
+
+    const Penumbra = Type === "spotlight" ? Clamp(Number(P.penumbra ?? 0.42), 0, 1) : 0.55;
+    const Lumens =
+      Type === "ieslight"
+        ? Number(P.lumens ?? 1650) * Number(P.multiplier ?? 1)
+        : Type === "ledlight"
+          ? Number(P.watts ?? 18) * Number(P.efficacy ?? 125) * Number(P.dimmer ?? 1)
+          : Type === "arealight"
+            ? Number(P.lumens ?? 2400)
+            : Number(P.intensity ?? 88) * 28;
+    const PowerScale = Clamp(Lumens / 1600, 0.2, 6.5);
+
+    const Sp = new THREE.SpotLight(HexTint, PowerScale * 95, ReachM, HalfConeRad, Clamp(Penumbra, 0.18, 1), 1.4);
+    Sp.position.set(0, 0, 0.06);
+    Sp.target.position.set(0, 0, 10);
+    Sp.castShadow = !!P.shadows;
+    Sp.shadow.mapSize.set(2048, 2048);
+    Sp.shadow.bias = -0.00025;
+    Aim.add(Sp, Sp.target);
+
+    const ShowFlag =
+      Type === "ieslight" ? P.showDistribution !== false
+        : Type === "spotlight" ? P.showCone !== false
+        : P.showShape !== false;
+
+    if (ShowVolumes && ShowFlag) {
+      const IesTex = Type === "ieslight" ? BuildIesDataTexture(P, LoadedIes) : null;
+      const Shells = [
+        { radMul: 0.48, weight: 1.0 },
+        { radMul: 0.78, weight: 0.62 },
+        { radMul: 1.05, weight: 0.34 },
+      ];
+      Shells.forEach((S, idx) => {
+        const BottomR = Math.max(0.28, Math.tan(HalfConeRad) * ReachM * S.radMul);
+        const TopR = Type === "arealight" ? Clamp(Number(P.width ?? 2) * 0.42, 0.2, 1.5) : 0.06;
+        const ConeGeo = new THREE.CylinderGeometry(TopR, BottomR, ReachM, 42, 24, true);
+        // Orient top (uv.y=1) at z=0, bottom (uv.y=0) at z=+ReachM
+        ConeGeo.rotateX(Math.PI / 2);
+        ConeGeo.translate(0, 0, ReachM * 0.5 + 0.04);
+
+        const Mat = CreateVolumetricConeMaterial();
+        Mat.uniforms.uColor.value.set(HexTint);
+        Mat.uniforms.uIntensity.value = Clamp(PowerScale * 0.92, 0.22, 3.0);
+        Mat.uniforms.uPenumbra.value = Penumbra;
+        Mat.uniforms.uDecay.value = Type === "ieslight" ? 1.5 : 1.75;
+        Mat.uniforms.uRangeM.value = ReachM;
+        Mat.uniforms.uFogDensity.value = FogDensityNorm;
+        Mat.uniforms.uShellWeight.value = S.weight;
+        if (IesTex) {
+          Mat.uniforms.uHasIes.value = 1.0;
+          Mat.uniforms.uIesTex.value = IesTex;
         }
-        if (this.Mode !== 'webgl' || !this.Three) return;
-
-        const THREE = this.Three;
-        const { Lights, SelectedId, Env, SunState } = State;
-
-        // Clear old dynamic lights & gizmos cleanly
-        while (this.DynamicLightGroup.children.length > 0) {
-            const Child = this.DynamicLightGroup.children.pop();
-            if (Child.target) this.DynamicLightGroup.remove(Child.target);
-            Child.geometry?.dispose?.();
-            Child.material?.map?.dispose?.();
-            Child.material?.dispose?.();
-        }
-        while (this.GizmoGroup.children.length > 0) {
-            const G = this.GizmoGroup.children.pop();
-            G.geometry?.dispose?.();
-            G.material?.dispose?.();
-        }
-
-        // Environment: HDR Dome + Sun + Moon + Stars + Fog + Post
-        const EnvDome = Env.EnvDome;
-        const SkyUniforms = this.SkyMesh.material.uniforms;
-        const SunEl = SunState?.ElevationDeg ?? 28;
-        const DayFactor = Clamp((SunEl + 6) / 28, 0.06, 1);
-
-        const DomMult = this.ShadingMode === 'goniometer' ? 0.14 : (EnvDome.Enabled ? EnvDome.SkylightIntensity * EnvDome.DiffuseMultiplier : 0.08);
-        this.HemiLight.intensity = Clamp(0.55 * DomMult * (0.28 + 0.72 * DayFactor), 0.04, 2.2);
-        this.HemiLight.color.set(EnvDome.ZenithColor);
-        this.HemiLight.groundColor.set(EnvDome.GroundColor);
-
-        SkyUniforms.uZenith.value.set(EnvDome.ZenithColor);
-        SkyUniforms.uHorizon.value.set(EnvDome.HorizonColor);
-        SkyUniforms.uGround.value.set(EnvDome.GroundColor);
-        SkyUniforms.uPower.value = this.ShadingMode === 'goniometer' ? 0.16 : Clamp((0.18 + 0.82 * DayFactor) * EnvDome.SkylightIntensity, 0.08, 2.0);
-        this.SkyMesh.visible = EnvDome.Enabled;
-
-        // Sun light
-        const SunDir = SunState?.Direction || [0.4, 0.6, 0.4];
-        const SunActive = Boolean(SunState?.Enabled) && SunEl > -6 && this.ShadingMode !== 'goniometer';
-        this.SunLight.visible = SunActive;
-        this.SunMesh.visible = Boolean(SunState?.Enabled) && SunEl > -12;
-        if (SunState) {
-            this.SunLight.position.set(SunDir[0] * 18, Math.max(0.5, SunDir[1] * 18), SunDir[2] * 18);
-            this.SunLight.intensity = SunActive ? Clamp((SunState.Intensity ?? 12) * 0.14 * DayFactor, 0, 4.5) : 0;
-            this.SunLight.color.setRGB(...(SunState.TintRgb || [1, 0.94, 0.85]));
-            this.SunMesh.position.set(SunDir[0] * 140, SunDir[1] * 140, SunDir[2] * 140);
-            const DiscScale = Clamp((SunState.DiameterDeg ?? 0.53) * 1.4, 0.5, 4);
-            this.SunMesh.scale.setScalar(DiscScale);
-        }
-
-        // Moon light
-        const Moon = Env.Moon;
-        const MoonM = SolveMoonMetrics(Moon);
-        const MoonBody = MoonCatalogue[Clamp(Moon.Slot | 0, 0, MoonCatalogue.length - 1)];
-        this.MoonLight.visible = Boolean(Moon.Visible) && Boolean(Moon.CastMoonlight) && Moon.ElevationDeg > -2;
-        this.MoonLight.position.set(MoonM.Direction[0] * 16, Math.max(0.4, MoonM.Direction[1] * 16), MoonM.Direction[2] * 16);
-        this.MoonLight.intensity = this.MoonLight.visible ? Clamp(Moon.Brightness * 0.18 * (0.2 + 0.8 * MoonM.Illumination), 0, 1.5) : 0;
-        this.MoonLight.color.set(MoonBody.Tint);
-        this.MoonMesh.visible = Boolean(Moon.Visible) && Moon.ElevationDeg > -6;
-        this.MoonMesh.position.set(MoonM.Direction[0] * 135, MoonM.Direction[1] * 135, MoonM.Direction[2] * 135);
-        this.MoonMesh.material.color.set(MoonBody.Tint);
-        this.MoonMesh.scale.setScalar(Clamp(Moon.AngularDiameterDeg * 1.2, 0.4, 5));
-
-        // Stars
-        const Stars = Env.Stars;
-        this.StarPoints.visible = Boolean(Stars.Visible) && DayFactor < 0.72;
-        this.StarPoints.material.opacity = Clamp((1 - DayFactor) * Stars.Brightness, 0, 1);
-        this.StarPoints.material.size = Clamp(Stars.PointSize * 1.5, 0.5, 4.0);
-        this.StarPoints.rotation.y = (Stars.CelestialRotationDeg * Math.PI) / 180;
-
-        // Fog
-        const Fog = Env.Fog;
-        this.Scene.fog = Fog.Enabled ? new THREE.FogExp2(Fog.Tint, Fog.Density) : null;
-
-        // Post / Exposure
-        const Post = Env.Post;
-        this.Renderer.toneMappingExposure = Clamp(Math.pow(2, Post.ExposureEv || 0) * 1.1, 0.15, 6.0);
-        this.Renderer.toneMapping = Post.Tonemap === 'Neutral'
-            ? THREE.NeutralToneMapping
-            : Post.Tonemap === 'Reinhard'
-                ? THREE.ReinhardToneMapping
-                : THREE.ACESFilmicToneMapping;
-
-        // Render all scene lights + gizmos
-        const GizmosVisible = this.ShowGizmos || this.ShadingMode === 'goniometer';
-        for (const Item of Lights) {
-            if (!Item.Visible) continue;
-            const P = Item.Props;
-            const ColArr = ResolveEmissionRgb(P);
-            const Col = new THREE.Color(ColArr[0] / 255, ColArr[1] / 255, ColArr[2] / 255);
-            const Pos = Array.isArray(P.pos) ? P.pos : [0, 2, 0];
-            const Rot = Array.isArray(P.rot) ? P.rot : [0, 0, 0];
-            const Selected = Item.Id === SelectedId;
-
-            if (Item.Type === 'pointlight' || Item.Type === 'tubelight') {
-                const Int = Item.Type === 'tubelight' ? (Number(P.lumens ?? 1800) / 160) : Number(P.intensity ?? 14);
-                const PL = new THREE.PointLight(Col, Int * 0.48, Number(P.distance ?? 25), Number(P.decay ?? 1.6));
-                PL.position.set(Pos[0], Pos[1], Pos[2]);
-                PL.castShadow = Boolean(P.shadows);
-                this.DynamicLightGroup.add(PL);
-
-                if (Item.Type === 'tubelight') {
-                    const Len = Clamp(Number(P.length ?? 1.8), 0.2, 10);
-                    const Rad = Clamp(Number(P.radius ?? 0.04), 0.015, 0.35);
-                    const Tube = new THREE.Mesh(
-                        new THREE.CylinderGeometry(Rad, Rad, Len, 12),
-                        new THREE.MeshBasicMaterial({ color: Col })
-                    );
-                    Tube.position.set(Pos[0], Pos[1], Pos[2]);
-                    Tube.rotation.set(0, (Rot[1] * Math.PI) / 180, Math.PI / 2);
-                    this.GizmoGroup.add(Tube);
-                } else if (GizmosVisible || P.gizmoGlow) {
-                    const Core = new THREE.Mesh(new THREE.SphereGeometry(0.11, 14, 10), new THREE.MeshBasicMaterial({ color: Col }));
-                    Core.position.set(Pos[0], Pos[1], Pos[2]);
-                    this.GizmoGroup.add(Core);
-                    const Ring = new THREE.Mesh(
-                        new THREE.SphereGeometry(Selected ? 0.42 : 0.28, 16, 12),
-                        new THREE.MeshBasicMaterial({ color: Col, wireframe: true, transparent: true, opacity: Selected ? 0.55 : 0.22 })
-                    );
-                    Ring.position.set(Pos[0], Pos[1], Pos[2]);
-                    this.GizmoGroup.add(Ring);
-                }
-            } else if (Item.Type === 'spotlight' || Item.Type === 'ieslight' || Item.Type === 'ledlight') {
-                const IsIes = Item.Type === 'ieslight';
-                const Flux = IsIes
-                    ? (Number(P.lumens ?? 1650) * Number(P.multiplier ?? 1)) / 24
-                    : Item.Type === 'ledlight'
-                        ? ComputeFlux('ledlight', P) / 36
-                        : Number(P.intensity ?? 60);
-                const HalfConeDeg = IsIes ? Number(P.cone ?? 58) * 0.5 : Item.Type === 'ledlight' ? Number(P.angle ?? 110) * 0.42 : Number(P.angle ?? 30);
-                const Pen = IsIes ? 0.55 : Item.Type === 'ledlight' ? 0.72 : Number(P.penumbra ?? 0.42);
-                const Range = Number(P.range ?? P.distance ?? 40);
-
-                const Spot = new THREE.SpotLight(Col, Flux * 0.65, Range, Clamp((HalfConeDeg * Math.PI) / 180, 0.05, 1.38), Pen, 1.4);
-                Spot.position.set(Pos[0], Pos[1], Pos[2]);
-                Spot.castShadow = Boolean(P.shadows);
-                Spot.shadow.mapSize.set(1024, 1024);
-                Spot.shadow.bias = -0.0004;
-
-                if (IsIes) {
-                    const MapCanvas = BuildIesProjectionCanvas(P, LoadedProfiles);
-                    const Tex = new THREE.CanvasTexture(MapCanvas);
-                    Tex.colorSpace = THREE.SRGBColorSpace;
-                    Spot.map = Tex;
-                }
-
-                // Aim target derived from target property or euler rot
-                const TargetPt = Array.isArray(P.target)
-                    ? new THREE.Vector3(P.target[0], P.target[1], P.target[2])
-                    : new THREE.Vector3(
-                        Pos[0] + Math.sin((Rot[1] * Math.PI) / 180) * 5,
-                        Math.max(-2, Pos[1] + Math.sin((Rot[0] * Math.PI) / 180) * 5 - 3),
-                        Pos[2] - Math.cos((Rot[1] * Math.PI) / 180) * 5
-                    );
-                if (IsIes && Number(P.cutoff)) {
-                    TargetPt.y += Math.tan((Number(P.cutoff) * Math.PI) / 180) * Pos.reduce((a, b) => Math.max(a, Math.abs(b)), 3);
-                }
-                Spot.target.position.copy(TargetPt);
-                this.DynamicLightGroup.add(Spot.target);
-                this.DynamicLightGroup.add(Spot);
-
-                if (GizmosVisible && (Selected || P.showCone !== false || P.showDistribution !== false)) {
-                    const Bulb = new THREE.Mesh(new THREE.SphereGeometry(0.11, 14, 10), new THREE.MeshBasicMaterial({ color: Col }));
-                    Bulb.position.copy(Spot.position);
-                    this.GizmoGroup.add(Bulb);
-
-                    const Dir = new THREE.Vector3().subVectors(TargetPt, Spot.position);
-                    const Dist = Math.max(1.2, Math.min(8.0, Dir.length()));
-                    Dir.normalize();
-                    const ConeR = Math.tan(Clamp((HalfConeDeg * Math.PI) / 180, 0.08, 1.2)) * Dist;
-                    const ConeGeo = new THREE.ConeGeometry(ConeR, Dist, 20, 1, true);
-                    ConeGeo.translate(0, -Dist * 0.5, 0);
-                    ConeGeo.rotateX(Math.PI / 2);
-                    const ConeMat = new THREE.MeshBasicMaterial({
-                        color: Col,
-                        wireframe: !Selected,
-                        transparent: true,
-                        opacity: Selected ? 0.14 : 0.09,
-                        side: THREE.DoubleSide,
-                        depthWrite: false
-                    });
-                    const ConeMesh = new THREE.Mesh(ConeGeo, ConeMat);
-                    ConeMesh.position.copy(Spot.position);
-                    ConeMesh.lookAt(TargetPt);
-                    this.GizmoGroup.add(ConeMesh);
-
-                    // Target aim line
-                    const LineGeo = new THREE.BufferGeometry().setFromPoints([Spot.position.clone(), TargetPt.clone()]);
-                    const Line = new THREE.Line(
-                        LineGeo,
-                        new THREE.LineBasicMaterial({ color: Col, transparent: true, opacity: Selected ? 0.72 : 0.25 })
-                    );
-                    this.GizmoGroup.add(Line);
-                }
-            } else if (Item.Type === 'arealight') {
-                const W = Clamp(Number(P.width ?? 2), 0.2, 12);
-                const H_ = Clamp(Number(P.height ?? 1), 0.2, 12);
-                const Flux = Number(P.lumens ?? 2400) / 55;
-                const AreaSpot = new THREE.SpotLight(Col, Flux, 28, Clamp(((Number(P.spread ?? 120) * 0.5) * Math.PI) / 180, 0.2, 1.42), 0.85, 1.2);
-                AreaSpot.position.set(Pos[0], Pos[1], Pos[2]);
-                const TargetPt = Array.isArray(P.target) ? new THREE.Vector3(...P.target) : new THREE.Vector3(0, 0.6, 0);
-                AreaSpot.target.position.copy(TargetPt);
-                this.DynamicLightGroup.add(AreaSpot.target);
-                this.DynamicLightGroup.add(AreaSpot);
-
-                const PanelGeo = P.aperture === 'Disk' ? new THREE.CircleGeometry(W * 0.5, 24) : new THREE.PlaneGeometry(W, H_);
-                const Panel = new THREE.Mesh(
-                    PanelGeo,
-                    new THREE.MeshBasicMaterial({ color: Col, side: THREE.DoubleSide, transparent: true, opacity: 0.88 })
-                );
-                Panel.position.set(Pos[0], Pos[1], Pos[2]);
-                Panel.lookAt(TargetPt);
-                this.GizmoGroup.add(Panel);
-            } else if (Item.Type === 'ledstrip') {
-                const Len = Clamp(Number(P.length ?? 3.6), 0.2, 12);
-                const Flux = ComputeFlux('ledstrip', P) / 220;
-                const Taps = 3;
-                for (let t = 0; t < Taps; t++) {
-                    const F = ((t + 0.5) / Taps - 0.5) * Len;
-                    const Tap = new THREE.PointLight(Col, Flux / Taps, 10, 1.8);
-                    Tap.position.set(Pos[0] + F, Pos[1] + 0.1, Pos[2]);
-                    this.DynamicLightGroup.add(Tap);
-                }
-                const StripMesh = new THREE.Mesh(
-                    new THREE.BoxGeometry(Len, 0.04, 0.05),
-                    new THREE.MeshBasicMaterial({ color: Col })
-                );
-                StripMesh.position.set(Pos[0], Pos[1], Pos[2]);
-                StripMesh.rotation.y = (Rot[1] * Math.PI) / 180;
-                this.GizmoGroup.add(StripMesh);
-            }
-        }
-
-        // Update Floor/Wall False-Colour Lux Heatmap if ShadingMode === 'lux'
-        if (this.ShadingMode === 'lux') {
-            this.UpdateLuxHeatmapTextures(State, LoadedProfiles);
-            this.FloorMaterial.map = this.FloorLuxTexture;
-            this.WallMaterial.map = this.WallLuxTexture;
-        } else {
-            this.FloorMaterial.map = this.FloorStdMap;
-            this.WallMaterial.map = this.WallStdMap;
-        }
-        this.FloorMaterial.needsUpdate = true;
-        this.WallMaterial.needsUpdate = true;
+        const Mesh = new THREE.Mesh(ConeGeo, Mat);
+        Mesh.renderOrder = 10 + idx;
+        Aim.add(Mesh);
+        VolumeShaders.push(Mat);
+      });
     }
 
-    SampleStagePointLux(WX, WY, WZ, State, LoadedProfiles)
-    {
-        let TotalLux = State.Env.EnvDome.Enabled ? 0.8 * State.Env.EnvDome.SkylightIntensity : 0.05;
-        for (const Item of State.Lights) {
-            if (!Item.Visible) continue;
-            const P = Item.Props;
-            const Pos = Array.isArray(P.pos) ? P.pos : [0, 2, 0];
-            const DX = WX - Pos[0];
-            const DY = WY - Pos[1];
-            const DZ = WZ - Pos[2];
-            const DistSq = Math.max(0.25, DX * DX + DY * DY + DZ * DZ);
-            const Dist = Math.sqrt(DistSq);
+    Root.add(Aim);
+    const DirWorld = new THREE.Vector3(0, 0, 1).applyQuaternion(Aim.quaternion).normalize();
+    DustInfo = { Pos: new THREE.Vector3(...Pos), Dir: DirWorld, Reach: ReachM, CosCone: Math.cos(HalfConeRad) };
+  } else {
+    // TubeLight / LEDStrip
+    const Len = Clamp(Number(P.length ?? 2.4), 0.4, 8);
+    const Rad = Type === "tubelight" ? Clamp(Number(P.radius ?? 0.04), 0.015, 0.14) : 0.022;
+    const Reach = Clamp(Number(P.distance ?? 18), 4, 48);
+    const Rail = new THREE.Mesh(new THREE.BoxGeometry(Len + 0.06, 0.05, 0.06), AnodizedGrey);
+    Rail.position.y = 0.03;
+    Root.add(Rail);
 
-            if (Item.Type === 'pointlight' || Item.Type === 'tubelight') {
-                const Reach = Number(P.distance ?? 25);
-                if (Dist > Reach) continue;
-                const Base = Item.Type === 'tubelight' ? Number(P.lumens ?? 1800) * 0.14 : Number(P.intensity ?? 14);
-                TotalLux += (Base * 4.5) / Math.pow(Dist, Number(P.decay ?? 2));
-            } else if (Item.Type === 'ledstrip') {
-                TotalLux += (ComputeFlux('ledstrip', P) * 0.04) / DistSq;
-            } else {
-                const Target = Array.isArray(P.target) ? P.target : [Pos[0], 0, Pos[2] - 4];
-                const TX = Target[0] - Pos[0];
-                const TY = Target[1] - Pos[1];
-                const TZ = Target[2] - Pos[2];
-                const TLen = Math.max(0.01, Math.hypot(TX, TY, TZ));
-                const Cos = Clamp((DX * TX + DY * TY + DZ * TZ) / (Dist * TLen), -1, 1);
-                if (Cos <= 0.05) continue;
-                const AngleDeg = (Math.acos(Cos) * 180) / Math.PI;
-                if (Item.Type === 'ieslight') {
-                    const HalfCone = Number(P.cone ?? 58) * 0.55;
-                    if (AngleDeg > HalfCone * 1.45) continue;
-                    const AzDeg = ((Math.atan2(DX, -DY) * 180) / Math.PI + 360) % 360;
-                    const IesVal = EvaluateIesIntensity(P, LoadedProfiles, AzDeg, AngleDeg * (90 / Math.max(10, HalfCone)));
-                    TotalLux += (Number(P.lumens ?? 1650) * Number(P.multiplier ?? 1) * 0.18 * IesVal) / DistSq;
-                } else {
-                    const Cone = Item.Type === 'spotlight' ? Number(P.angle ?? 30) : Item.Type === 'ledlight' ? Number(P.angle ?? 110) * 0.5 : Number(P.spread ?? 120) * 0.5;
-                    if (AngleDeg > Cone) continue;
-                    const Fall = Math.pow(Clamp(1 - AngleDeg / Math.max(2, Cone), 0, 1), 1.4);
-                    const Gain = Item.Type === 'spotlight' ? Number(P.intensity ?? 60) * 3.8 : ComputeFlux(Item.Type, P) * 0.16;
-                    TotalLux += (Gain * Fall) / DistSq;
-                }
-            }
-        }
-        return TotalLux;
+    if (Type === "tubelight") {
+      const Tube = new THREE.Mesh(new THREE.CylinderGeometry(Rad, Rad, Len, 18), EmitterMat);
+      Tube.rotation.z = Math.PI / 2;
+      Tube.position.y = -0.02;
+      Root.add(Tube);
+    } else if (P.diffuser) {
+      const Opal = new THREE.Mesh(new THREE.BoxGeometry(Len, 0.022, 0.03), EmitterMat);
+      Opal.position.y = -0.005;
+      Root.add(Opal);
+    } else {
+      const Nodes = Math.min(36, Math.max(8, Math.round(Len * 12)));
+      for (let i = 0; i < Nodes; i++) {
+        const Dot = new THREE.Mesh(new THREE.BoxGeometry(0.018, 0.014, 0.018), EmitterMat);
+        Dot.position.set(-Len / 2 + ((i + 0.5) / Nodes) * Len, -0.004, 0);
+        Root.add(Dot);
+      }
     }
 
-    UpdateLuxHeatmapTextures(State, LoadedProfiles)
-    {
-        const FCtx = this.FloorLuxCanvas.getContext('2d');
-        const FW = 160;
-        const FImg = FCtx.createImageData(FW, FW);
-        for (let y = 0; y < FW; y++) {
-            const WZ = ((y / (FW - 1)) - 0.5) * 24;
-            for (let x = 0; x < FW; x++) {
-                const WX = ((x / (FW - 1)) - 0.5) * 24;
-                const Lux = this.SampleStagePointLux(WX, 0.02, WZ, State, LoadedProfiles);
-                const C = LuxToFalseColour(Lux);
-                const Idx = (y * FW + x) * 4;
-                FImg.data[Idx] = C[0];
-                FImg.data[Idx + 1] = C[1];
-                FImg.data[Idx + 2] = C[2];
-                FImg.data[Idx + 3] = 255;
-            }
-        }
-        FCtx.putImageData(FImg, 0, 0);
-        this.FloorLuxTexture.needsUpdate = true;
+    const Lumens = Type === "tubelight" ? Number(P.lumens ?? 1800) : Number(P.lumensPerMetre ?? 1000) * Len * Number(P.dimmer ?? 0.9);
+    const PowerScale = Clamp(Lumens / 1800, 0.2, 5.5);
+    const L1 = new THREE.PointLight(HexTint, PowerScale * 26, Reach, 1.5);
+    L1.position.set(-Len * 0.28, -0.1, 0);
+    const L2 = new THREE.PointLight(HexTint, PowerScale * 26, Reach, 1.5);
+    L2.position.set(Len * 0.28, -0.1, 0);
+    Root.add(L1, L2);
 
-        const WCtx = this.WallLuxCanvas.getContext('2d');
-        const WW = 160;
-        const WH = 80;
-        const WImg = WCtx.createImageData(WW, WH);
-        for (let y = 0; y < WH; y++) {
-            const WY = (1 - y / (WH - 1)) * 4.4;
-            for (let x = 0; x < WW; x++) {
-                const WX = ((x / (WW - 1)) - 0.5) * 11.0;
-                const Lux = this.SampleStagePointLux(WX, WY, -5.25, State, LoadedProfiles);
-                const C = LuxToFalseColour(Lux);
-                const Idx = (y * WW + x) * 4;
-                WImg.data[Idx] = C[0];
-                WImg.data[Idx + 1] = C[1];
-                WImg.data[Idx + 2] = C[2];
-                WImg.data[Idx + 3] = 255;
-            }
-        }
-        WCtx.putImageData(WImg, 0, 0);
-        this.WallLuxTexture.needsUpdate = true;
+    if (ShowVolumes && P.showShape !== false) {
+      const Mat = CreateVolumetricSphereMaterial();
+      Mat.uniforms.uColor.value.set(HexTint);
+      Mat.uniforms.uIntensity.value = Clamp(PowerScale * 0.72, 0.2, 2.5);
+      Mat.uniforms.uDecay.value = 1.6;
+      Mat.uniforms.uShellFrac.value = 0.55;
+      Mat.uniforms.uFogDensity.value = FogDensityNorm;
+      const Halo = new THREE.Mesh(new THREE.SphereGeometry(1.0, 24, 18), Mat);
+      Halo.scale.set(Len * 1.4, 2.6, 2.6);
+      Root.add(Halo);
+      VolumeShaders.push(Mat);
+    }
+    DustInfo = { Pos: new THREE.Vector3(...Pos), Dir: new THREE.Vector3(0, -1, 0), Reach, CosCone: -1.0 };
+  }
+
+  return { Root, VolumeShaders, DustInfo };
+}
+
+export class PhotometricViewportController {
+  constructor(MountEl, Options = {}) {
+    this.MountEl = MountEl;
+    this.OnBackendChange = Options.onBackendChange;
+    this.ShadingMode = "pbr";
+    this.ShowGizmos = true;
+    this.DarkRoomOnly = true;
+    this.SceneState = null;
+    this.LoadedIes = {};
+    this.VolumeShaders = [];
+    this.MoonTexture = null;
+    this._Disposed = false;
+    this._ClockStart = performance.now();
+
+    this.Canvas = document.createElement("canvas");
+    this.Canvas.className = "viewport-webgl-canvas";
+    MountEl.replaceChildren(this.Canvas);
+
+    this.Scene = new THREE.Scene();
+    this.Scene.background = new THREE.Color("#020203");
+    this.Scene.fog = new THREE.FogExp2("#020305", 0.024);
+
+    this.Camera = new THREE.PerspectiveCamera(44, 16 / 9, 0.1, 320);
+    this.Camera.position.set(6.4, 3.2, 8.2);
+
+    this.LuminaireGroup = new THREE.Group();
+    this.EnvironmentGroup = new THREE.Group();
+    this.DarkRoomGroup = new THREE.Group();
+
+    try {
+      this.Renderer = new THREE.WebGLRenderer({ canvas: this.Canvas, antialias: true, powerPreference: "high-performance" });
+      this.Renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+      this.Renderer.shadowMap.enabled = true;
+      this.Renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      this.Renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      this.Renderer.toneMappingExposure = 1.15;
+      this.Backend = "WebGL2 Volumetric";
+    } catch {
+      this.Backend = "Software 2D Fallback";
+    }
+    this.OnBackendChange?.(this.Backend);
+
+    if (this.Renderer) {
+      this.Controls = new OrbitControls(this.Camera, this.Canvas);
+      this.Controls.enableDamping = true;
+      this.Controls.dampingFactor = 0.08;
+      this.Controls.target.set(0, 1.0, -4.5);
+      this.Controls.maxPolarAngle = Math.PI * 0.495;
+      this.Controls.update();
+
+      const Loader = new THREE.TextureLoader();
+      Loader.load("./Textures/Moons/luna_2k.jpg", (Tex) => {
+        Tex.colorSpace = THREE.SRGBColorSpace;
+        this.MoonTexture = Tex;
+        if (this.SceneState) this.SyncScene(this.SceneState, this.LoadedIes);
+      });
+
+      this._BuildDarkRoom();
+      this.DustSystem = CreateDustParticleSystem();
+      this.Scene.add(this.DarkRoomGroup, this.EnvironmentGroup, this.LuminaireGroup, this.DustSystem);
     }
 
-    RenderSoftwareFrame()
-    {
-        if (this.Mode !== 'software' || !this.FallbackCanvas || !this.CurrentState) return;
-        const Canvas = this.FallbackCanvas;
-        const W = Math.max(320, this.Container.clientWidth || 720);
-        const H = Math.max(240, this.Container.clientHeight || 520);
-        if (Canvas.width !== W || Canvas.height !== H) {
-            Canvas.width = W;
-            Canvas.height = H;
-        }
-        const Ctx = Canvas.getContext('2d');
-        const { Env, Lights, SelectedId } = this.CurrentState;
-        const Sky = Ctx.createLinearGradient(0, 0, 0, H);
-        Sky.addColorStop(0, Env.EnvDome.ZenithColor);
-        Sky.addColorStop(0.45, Env.EnvDome.HorizonColor);
-        Sky.addColorStop(0.48, '#14161b');
-        Sky.addColorStop(1, '#090b0f');
-        Ctx.fillStyle = Sky;
-        Ctx.fillRect(0, 0, W, H);
+    this.Resize();
+    this._Animate();
+  }
 
-        const Cam = this.FallbackCamera;
-        const CY = Math.cos(Cam.Yaw);
-        const SY = Math.sin(Cam.Yaw);
-        const CP = Math.cos(Cam.Pitch);
-        const SP = Math.sin(Cam.Pitch);
-        const Project = (X, Y, Z) => {
-            const TX = X * CY - (Z + 1.2) * SY;
-            const TZ = X * SY + (Z + 1.2) * CY;
-            const RX = TX;
-            const RY = (Y - 0.8) * CP - TZ * SP;
-            const RZ = (Y - 0.8) * SP + TZ * CP + Cam.Distance;
-            if (RZ < 0.4) return null;
-            const F = (H * 0.9) / RZ;
-            return [W * 0.5 + RX * F, H * 0.5 - RY * F, RZ];
-        };
+  _BuildDarkRoom() {
+    this.DarkRoomGroup.clear();
+    this.RoomAmbient = new THREE.AmbientLight("#0a0c10", 0.045);
+    this.DarkRoomGroup.add(this.RoomAmbient);
 
-        // Perspective grid floor lines
-        Ctx.strokeStyle = 'rgba(255,255,255,0.08)';
-        Ctx.lineWidth = 1;
-        for (let g = -6; g <= 6; g++) {
-            const A = Project(g, 0, -6);
-            const B = Project(g, 0, 6);
-            if (A && B) { Ctx.beginPath(); Ctx.moveTo(A[0], A[1]); Ctx.lineTo(B[0], B[1]); Ctx.stroke(); }
-            const C = Project(-6, 0, g);
-            const D = Project(6, 0, g);
-            if (C && D) { Ctx.beginPath(); Ctx.moveTo(C[0], C[1]); Ctx.lineTo(D[0], D[1]); Ctx.stroke(); }
-        }
+    const FloorMat = new THREE.MeshStandardMaterial({
+      color: "#ffffff",
+      map: CreateObsidianFloorTexture(),
+      roughness: 0.34,
+      metalness: 0.12,
+    });
+    const Floor = new THREE.Mesh(new THREE.PlaneGeometry(54, 80), FloorMat);
+    Floor.rotation.x = -Math.PI / 2;
+    Floor.position.set(0, 0, -28);
+    Floor.receiveShadow = true;
+    this.DarkRoomGroup.add(Floor);
 
-        // Light beams & badges in 3D space
-        for (const Item of Lights) {
-            if (!Item.Visible) continue;
-            const P = Item.Props;
-            const Pos = Array.isArray(P.pos) ? P.pos : [0, 2, 0];
-            const SP_ = Project(Pos[0], Pos[1], Pos[2]);
-            if (!SP_) continue;
-            const Col = ResolveEmissionRgb(P);
-            const ColStr = `rgb(${Col[0]},${Col[1]},${Col[2]})`;
-            const Sel = Item.Id === SelectedId;
-            if (Array.isArray(P.target)) {
-                const TP = Project(P.target[0], P.target[1], P.target[2]);
-                if (TP) {
-                    const G = Ctx.createLinearGradient(SP_[0], SP_[1], TP[0], TP[1]);
-                    G.addColorStop(0, `rgba(${Col[0]},${Col[1]},${Col[2]},0.55)`);
-                    G.addColorStop(1, `rgba(${Col[0]},${Col[1]},${Col[2]},0.04)`);
-                    Ctx.fillStyle = G;
-                    Ctx.beginPath();
-                    Ctx.moveTo(SP_[0], SP_[1]);
-                    Ctx.lineTo(TP[0] - 58, TP[1]);
-                    Ctx.lineTo(TP[0] + 58, TP[1]);
-                    Ctx.closePath();
-                    Ctx.fill();
-                }
-            }
-            const Rad = Sel ? 22 : 15;
-            const Glow = Ctx.createRadialGradient(SP_[0], SP_[1], 2, SP_[0], SP_[1], Rad * 2.5);
-            Glow.addColorStop(0, ColStr);
-            Glow.addColorStop(1, 'rgba(0,0,0,0)');
-            Ctx.fillStyle = Glow;
-            Ctx.beginPath();
-            Ctx.arc(SP_[0], SP_[1], Rad * 2.5, 0, Math.PI * 2);
-            Ctx.fill();
+    const Overlay = new THREE.Mesh(
+      new THREE.PlaneGeometry(50, 80),
+      new THREE.MeshStandardMaterial({
+        map: CreateDistanceOverlayTexture(),
+        transparent: true,
+        roughness: 0.7,
+        depthWrite: false,
+      }),
+    );
+    Overlay.rotation.x = -Math.PI / 2;
+    Overlay.position.set(0, 0.004, -28);
+    Overlay.receiveShadow = true;
+    this.DarkRoomGroup.add(Overlay);
+
+    const Stone = new THREE.MeshStandardMaterial({ color: "#15181e", roughness: 0.78, metalness: 0.08 });
+    const PillarL = new THREE.Mesh(new THREE.BoxGeometry(0.65, 4.6, 0.65), Stone);
+    PillarL.position.set(-2.5, 2.3, -6.5);
+    PillarL.castShadow = PillarL.receiveShadow = true;
+    const PillarR = new THREE.Mesh(new THREE.BoxGeometry(0.75, 5.2, 0.75), Stone);
+    PillarR.position.set(2.9, 2.6, -12.5);
+    PillarR.castShadow = PillarR.receiveShadow = true;
+    const CalibrationOrb = new THREE.Mesh(
+      new THREE.SphereGeometry(0.45, 36, 28),
+      new THREE.MeshStandardMaterial({ color: "#1f232b", roughness: 0.36, metalness: 0.22 }),
+    );
+    CalibrationOrb.position.set(0, 0.45, -2.5);
+    CalibrationOrb.castShadow = CalibrationOrb.receiveShadow = true;
+    const Wall = new THREE.Mesh(new THREE.PlaneGeometry(54, 18), Stone);
+    Wall.position.set(0, 9, -28);
+    Wall.receiveShadow = true;
+    this.DarkRoomGroup.add(PillarL, PillarR, CalibrationOrb, Wall);
+  }
+
+  _ClearGroup(G) {
+    while (G.children.length > 0) {
+      const C = G.children[0];
+      G.remove(C);
+      C.traverse?.((O) => {
+        O.geometry?.dispose?.();
+        if (O.material) {
+          O.material.uniforms?.uIesTex?.value?.dispose?.();
+          O.material.dispose?.();
         }
+      });
+    }
+  }
+
+  SetShadingMode(Mode) {
+    this.ShadingMode = Mode;
+    if (this.SceneState) this.SyncScene(this.SceneState, this.LoadedIes);
+  }
+
+  SetDarkRoomOnly(Only) {
+    this.DarkRoomOnly = !!Only;
+    if (this.SceneState) this.SyncScene(this.SceneState, this.LoadedIes);
+  }
+
+  SetCameraView(View) {
+    if (!this.Controls) return;
+    if (View === "top") {
+      this.Camera.position.set(0, 20, -6);
+      this.Controls.target.set(0, 0, -6);
+    } else if (View === "wall") {
+      this.Camera.position.set(0, 2.2, 4.0);
+      this.Controls.target.set(0, 1.4, -18);
+    } else if (View === "roadway") {
+      this.Camera.position.set(6.4, 3.2, 8.4);
+      this.Controls.target.set(0, 1.0, -6.0);
+    } else {
+      this.Camera.position.set(6.2, 3.3, 7.6);
+      this.Controls.target.set(0, 1.1, -3.5);
+    }
+    this.Controls.update();
+  }
+
+  SampleStagePointLux(X, Y, Z, SceneState, LoadedIes) {
+    let Sum = 0;
+    for (const L of SceneState.Lights || []) {
+      if (!L.Visible) continue;
+      const P = L.Props;
+      const dx = X - (P.pos?.[0] ?? 0);
+      const dy = Y - (P.pos?.[1] ?? 2);
+      const dz = Z - (P.pos?.[2] ?? 0);
+      const R2 = Math.max(0.25, dx * dx + dy * dy + dz * dz);
+      const Int =
+        L.Type === "ieslight"
+          ? Number(P.lumens ?? 1650) * Number(P.multiplier ?? 1) * 0.25 * (EvaluateIesIntensity(P, LoadedIes, 0, 15) + 0.05)
+          : L.Type === "spotlight"
+            ? Number(P.intensity ?? 80) * 1.4
+            : Number(P.intensity ?? P.lumens ?? 500) * 0.1;
+      Sum += Int / R2;
+    }
+    return Sum;
+  }
+
+  SyncScene(SceneState, LoadedIes = {}) {
+    this.SceneState = SceneState;
+    this.LoadedIes = LoadedIes;
+    if (!this.Renderer) return;
+
+    this._ClearGroup(this.LuminaireGroup);
+    this._ClearGroup(this.EnvironmentGroup);
+    this.VolumeShaders = [];
+
+    const Post = SceneState.Env?.Post || {};
+    this.Renderer.toneMappingExposure = Clamp(Math.pow(2, (Post.ExposureEv ?? 0) * 0.25) * 1.15, 0.35, 3.6);
+    const Fog = SceneState.Env?.Fog || {};
+    const FogDensityNorm = Clamp((Fog.Density ?? 0.024) / 0.024, 0.2, 2.5);
+
+    const SelId = SceneState.SelectedId || "";
+    const IsSkySelection = ["env:sun", "env:moon", "env:stars", "env:envdome", "env:lensflare", "env:atmosphere"].includes(SelId);
+    const ShowSky = !this.DarkRoomOnly || IsSkySelection;
+
+    if (ShowSky) {
+      const Sun = SceneState.SunState || { ElevationDeg: 25, AzimuthDeg: 180, Direction: [0, 0.4, -0.9], Intensity: 8, TintRgb: [1, 0.95, 0.88] };
+      const Day = Clamp((Sun.ElevationDeg + 4) / 38, 0, 1);
+      const Night = Clamp(-Sun.ElevationDeg / 18, 0, 1);
+      const SkyCol = new THREE.Color("#04060d").lerp(new THREE.Color("#1f3a5c"), Day * 0.72);
+      this.Scene.background = SkyCol;
+      this.Scene.fog = new THREE.FogExp2(SkyCol.getHex(), Clamp((Fog.Density ?? 0.014) * 0.8, 0.002, 0.08));
+      this.RoomAmbient.intensity = 0.06 + Day * 0.55;
+
+      if (Sun.Enabled !== false && Sun.ElevationDeg > -10) {
+        const SCol = new THREE.Color(...(Sun.TintRgb || [1, 0.95, 0.85]));
+        const Dir = new THREE.DirectionalLight(SCol, Clamp(Sun.Intensity * 0.14, 0.1, 4) * Day);
+        const Az = (Sun.AzimuthDeg || 180) * DEG2RAD;
+        const El = (Sun.ElevationDeg || 25) * DEG2RAD;
+        const V = new THREE.Vector3(Math.sin(Az) * Math.cos(El), Math.sin(El), -Math.cos(Az) * Math.cos(El));
+        Dir.position.copy(V).multiplyScalar(36);
+        Dir.castShadow = true;
+        this.EnvironmentGroup.add(Dir);
+        const Disc = new THREE.Mesh(new THREE.SphereGeometry(2.4, 24, 24), new THREE.MeshBasicMaterial({ color: SCol }));
+        Disc.position.copy(V).multiplyScalar(115);
+        this.EnvironmentGroup.add(Disc);
+      }
+
+      const Moon = SceneState.Env?.Moon || {};
+      if (Moon.Visible !== false) {
+        const MAz = (Moon.AzimuthDeg ?? 78) * DEG2RAD;
+        const MEl = (Moon.ElevationDeg ?? 28) * DEG2RAD;
+        const MV = new THREE.Vector3(Math.sin(MAz) * Math.cos(MEl), Math.sin(MEl), -Math.cos(MAz) * Math.cos(MEl));
+        const MMat = new THREE.MeshStandardMaterial({
+          map: this.MoonTexture || null,
+          color: this.MoonTexture ? "#eef3fb" : "#c6d3e3",
+          emissive: "#8ca4c4",
+          emissiveIntensity: 0.25 + Night * 0.55,
+          roughness: 0.9,
+        });
+        const MMesh = new THREE.Mesh(new THREE.SphereGeometry(3.8, 32, 32), MMat);
+        MMesh.position.copy(MV).multiplyScalar(92);
+        this.EnvironmentGroup.add(MMesh);
+      }
+    } else {
+      // Dark Volumetric Fog Bay — zero distracting sky ambient; purely real light through fog!
+      this.Scene.background = new THREE.Color("#020203");
+      this.Scene.fog = new THREE.FogExp2("#020305", Clamp((Fog.Density ?? 0.024) * 0.9, 0.004, 0.07));
+      this.RoomAmbient.intensity = 0.035;
     }
 
-    Resize()
-    {
-        if (!this.Container) return;
-        const W = Math.max(320, this.Container.clientWidth || 720);
-        const H = Math.max(240, this.Container.clientHeight || 520);
-        if (this.Mode === 'webgl' && this.Renderer && this.Camera) {
-            this.Camera.aspect = W / H;
-            this.Camera.updateProjectionMatrix();
-            this.Renderer.setSize(W, H, false);
-        } else if (this.Mode === 'software') {
-            this.RenderSoftwareFrame();
-        }
+    const DustUniforms = this.DustSystem?.material?.uniforms;
+    let DustIdx = 0;
+
+    for (const Light of SceneState.Lights || []) {
+      if (!Light.Visible) continue;
+      const HasTemp = ["ieslight", "tubelight", "ledlight", "ledstrip"].includes(Light.Type);
+      const K = KelvinToRgb(Light.Props.temperature ?? 4300);
+      const KCol = new THREE.Color(K[0] / 255, K[1] / 255, K[2] / 255);
+      const TCol = new THREE.Color(Light.Props.color || "#ffffff");
+      const FinalCol = HasTemp ? KCol.clone().lerp(TCol, 0.35) : TCol;
+      const HexTint = "#" + FinalCol.getHexString();
+
+      const { Root, VolumeShaders, DustInfo } = BuildFixture(
+        Light,
+        HexTint,
+        LoadedIes,
+        FogDensityNorm,
+        this.ShowGizmos,
+      );
+      this.LuminaireGroup.add(Root);
+      this.VolumeShaders.push(...VolumeShaders);
+
+      if (DustUniforms && DustInfo && DustIdx < MAX_DUST_LIGHTS) {
+        DustUniforms.uLightPos.value[DustIdx].copy(DustInfo.Pos);
+        DustUniforms.uLightDir.value[DustIdx].copy(DustInfo.Dir);
+        DustUniforms.uLightCol.value[DustIdx].copy(FinalCol);
+        DustUniforms.uLightParam.value[DustIdx].set(1.3, DustInfo.Reach, DustInfo.CosCone, Light.Props.decay ?? 2.0);
+        DustIdx++;
+      }
     }
 
-    Animate()
-    {
-        if (this.Destroyed) return;
-        this.FrameId = requestAnimationFrame(() => this.Animate());
-        if (this.Controls) this.Controls.update();
-        if (this.Renderer && this.Scene && this.Camera) {
-            this.Renderer.render(this.Scene, this.Camera);
-        }
+    if (DustUniforms) {
+      for (let i = DustIdx; i < MAX_DUST_LIGHTS; i++) {
+        DustUniforms.uLightParam.value[i].set(0, 10, -1, 2);
+      }
+      DustUniforms.uFogDensity.value = FogDensityNorm;
     }
+  }
 
-    Dispose()
-    {
-        this.Destroyed = true;
-        if (this.FrameId) cancelAnimationFrame(this.FrameId);
-        this.Controls?.dispose?.();
-        this.Renderer?.dispose?.();
+  Resize() {
+    const W = Math.max(320, this.MountEl?.clientWidth || 800);
+    const H = Math.max(240, this.MountEl?.clientHeight || 520);
+    if (this.Renderer) {
+      this.Renderer.setSize(W, H, false);
+      this.Camera.aspect = W / H;
+      this.Camera.updateProjectionMatrix();
+    } else {
+      this.Canvas.width = W;
+      this.Canvas.height = H;
     }
+  }
+
+  _Animate() {
+    if (this._Disposed) return;
+    requestAnimationFrame(() => this._Animate());
+    const TimeSec = (performance.now() - this._ClockStart) * 0.001;
+    if (this.Renderer) {
+      for (const M of this.VolumeShaders) {
+        if (M.uniforms?.uTime) M.uniforms.uTime.value = TimeSec;
+      }
+      if (this.DustSystem?.material?.uniforms?.uTime) {
+        this.DustSystem.material.uniforms.uTime.value = TimeSec;
+      }
+      this.Controls?.update();
+      this.Renderer.render(this.Scene, this.Camera);
+    }
+  }
 }

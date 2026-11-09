@@ -1,1104 +1,769 @@
-/*==========================================================================================================================================
-                                                        PHOTOMETRICDIAGRAMS.JS
-==========================================================================================================================================*/
-// Analytical photometric, goniometric, and environment-light canvas plots matching Project Zero LightProjection.js + Native Cards.
+// PhotometricDiagrams.js — Verbatim Project Zero Editor illustrations & diagrams
+// for Luminaires (LightProjection.js), Sun (SunGizmo + IlluminanceCurve),
+// Moon (LunarSphere + MoonDisc), Stars (300-star field + TwinkleSignal),
+// Lens Flare, Atmosphere (ScatteringGraph), and Fog (FogBeamChamber).
 
 import {
-    Clamp,
-    ResolveEmissionRgb,
-    EvaluateIesIntensity,
-    MoonCatalogue,
-    SolveMoonMetrics,
-    KelvinToRgb
-} from './PhotometryEngine.js';
+  BlendColour,
+  Clamp,
+  KelvinRgb,
+  MixTint,
+  ProjectLight,
+  ProjectResponse,
+  Rgba,
+} from "./ProjectZeroLightProjection.js";
+import { EvaluateSolarEphemeris } from "./CelestialAtmosphereModel.js";
+import { PresetIesNames, SampleIes, SolveMoonMetrics } from "./PhotometryEngine.js";
 
-import {
-    EvaluateSolarEphemeris,
-    EvaluateSkyRayRadiance,
-    ToneMapReinhardSrgb,
-    CreateDefaultAtmosphereParameters
-} from './CelestialAtmosphereModel.js';
-
-const Rgb = (C, A = 1) => `rgba(${C[0]},${C[1]},${C[2]},${A})`;
-
-function FitCanvas(Canvas, LogicalW, LogicalH)
-{
-    if (!Canvas) return null;
-    const Dpr = Math.min(2, (typeof window !== 'undefined' ? window.devicePixelRatio : 1) || 1);
-    const W = Math.round(LogicalW * Dpr);
-    const H = Math.round(LogicalH * Dpr);
-    if (Canvas.width !== W || Canvas.height !== H) {
-        Canvas.width = W;
-        Canvas.height = H;
-    }
-    const Ctx = Canvas.getContext('2d');
-    if (!Ctx) return null;
-    Ctx.save();
-    Ctx.scale(Dpr, Dpr);
-    Ctx.clearRect(0, 0, LogicalW, LogicalH);
-    return { Ctx, W: LogicalW, H: LogicalH };
+function EnsureHiDpiCanvas(Canvas, LogicalW, LogicalH) {
+  const Ratio = Math.min(2, (typeof window !== "undefined" ? window.devicePixelRatio : 1) || 1);
+  const PixelW = Math.round(LogicalW * Ratio);
+  const PixelH = Math.round(LogicalH * Ratio);
+  if (Canvas.width !== PixelW || Canvas.height !== PixelH) {
+    Canvas.width = PixelW;
+    Canvas.height = PixelH;
+  }
+  const Ctx = Canvas.getContext("2d");
+  Ctx.setTransform(Ratio, 0, 0, Ratio, 0, 0);
+  return { Ctx, W: LogicalW, H: LogicalH };
 }
 
-function GridFloor(Ctx, W, H)
-{
-    Ctx.strokeStyle = 'rgba(255,255,255,0.06)';
-    Ctx.lineWidth = 1;
-    const Mid = W / 2;
-    for (let x = Mid % 28; x < W; x += 28) {
-        Ctx.beginPath();
-        Ctx.moveTo(x, H * 0.72);
-        Ctx.lineTo(Mid + (x - Mid) * 3.1, H);
-        Ctx.stroke();
-    }
-    for (let r = 0; r < 5; r++) {
-        const y = H * 0.72 + Math.pow(r / 4, 1.45) * H * 0.28;
-        Ctx.beginPath();
-        Ctx.moveTo(0, y);
-        Ctx.lineTo(W, y);
-        Ctx.stroke();
-    }
+function PropsToProjectZeroModel(Type, P = {}, LoadedIes = {}) {
+  const ProfileName = P.profile || "ECE Low Beam";
+  const ProfileIdx = Math.max(0, PresetIesNames.indexOf(ProfileName));
+  const Properties = {
+    Distance: P.distance ?? 26,
+    Decay: P.decay ?? 2,
+    Intensity: P.intensity ?? (Type === "spotlight" ? 62 : 14),
+    "Outer cone": (P.angle ?? 13) * 2,
+    Penumbra: P.penumbra ?? 0.42,
+    "Profile type": ProfileIdx,
+    "Field angle": P.cone ?? 58,
+    "Cut-off pitch": P.cutoff ?? -1,
+    "Luminous flux": P.lumens ?? 1650,
+    "Profile scale": P.multiplier ?? 1,
+    Width: P.width ?? 2,
+    Height: P.height ?? 1,
+    "Disk radius": (P.width ?? 1.8) * 0.5,
+    Shape: P.aperture === "Disk" ? 1 : 0,
+    Spread: P.spread ?? 120,
+    "Two sided": !!P.twoSided,
+    Length: P.length ?? 1.8,
+    Radius: P.radius ?? 0.04,
+    "Driver watts": P.watts ?? 18,
+    Efficacy: P.efficacy ?? 125,
+    Dimmer: P.dimmer ?? 1,
+    "Package diameter": P.diameter ?? 40,
+    "Emission angle": P.angle ?? 120,
+    "Flux per metre": P.lumensPerMetre ?? 1000,
+    "Watts per metre": P.wattsPerMetre ?? 14.4,
+    "LED density": P.ledsPerMetre ?? 60,
+    Voltage: P.voltage ?? 24,
+    Opal: !!P.diffuser,
+    "Colour temperature": P.temperature ?? 4300,
+    Tint: P.color || "#ffffff",
+  };
+
+  const ActiveIesKey =
+    P.customIesKey && LoadedIes?.[P.customIesKey]
+      ? P.customIesKey
+      : P.useMeasuredIes && P.measuredProfile && LoadedIes?.[P.measuredProfile]
+        ? P.measuredProfile
+        : null;
+
+  if (ActiveIesKey) {
+    const Parsed = LoadedIes[ActiveIesKey];
+    Properties.MeasuredName = `${ActiveIesKey}.ies`;
+    Properties.MeasuredSampleFn = (AngleDeg, PhiDeg) =>
+      Clamp(SampleIes(Parsed, PhiDeg, AngleDeg), 0, 1);
+  }
+
+  const Read = (Key, Fallback) => {
+    const V = Properties[Key];
+    return V === undefined ? Fallback : V;
+  };
+  const HasTemp = ["ieslight", "tubelight", "ledlight", "ledstrip"].includes(Type);
+  const Tint = BlendColour(Properties.Tint, Properties["Colour temperature"], HasTemp);
+  const Flux =
+    Type === "pointlight" || Type === "spotlight"
+      ? Read("Intensity", 14)
+      : Type === "ieslight"
+        ? Read("Luminous flux", 1650) * Read("Profile scale", 1)
+        : Type === "ledlight"
+          ? Read("Driver watts", 10) * Read("Efficacy", 110) * Read("Dimmer", 1)
+          : Type === "ledstrip"
+            ? Read("Flux per metre", 1000) * Read("Length", 2.4) * Read("Dimmer", 1)
+            : Read("Luminous flux", 2400);
+
+  return { Style: Type, Read, Properties, Tint, Flux };
 }
 
-function LightBadge(Ctx, X, Y, R, Col, Intensity)
-{
-    const G = Ctx.createRadialGradient(X, Y, 1, X, Y, R * 3.8);
-    G.addColorStop(0, Rgb(Col, Math.min(0.95, 0.35 + Intensity * 0.2)));
-    G.addColorStop(0.28, Rgb(Col, 0.28));
-    G.addColorStop(1, 'rgba(0,0,0,0)');
-    Ctx.fillStyle = G;
-    Ctx.beginPath();
-    Ctx.arc(X, Y, R * 3.8, 0, Math.PI * 2);
-    Ctx.fill();
-
-    Ctx.fillStyle = '#fff';
-    Ctx.beginPath();
-    Ctx.arc(X, Y, R * 0.55, 0, Math.PI * 2);
-    Ctx.fill();
+// ── 1. VERBATIM PROJECT ZERO PREVIEW ILLUSTRATION ─────────────────────────────
+export function DrawHeroLightCanvas(Canvas, Type, P, LoadedIes) {
+  const { Ctx, W, H } = EnsureHiDpiCanvas(Canvas, 380, 260);
+  const Model = PropsToProjectZeroModel(Type, P, LoadedIes);
+  ProjectLight(Ctx, W, H, Model);
 }
 
-//------------------------------------------------------------------------------------------------------------------------
-//                                  HERO PROJECTOR STUDY CANVAS (260px HIGH — 7 LIGHT TYPES)
-//------------------------------------------------------------------------------------------------------------------------
+// ── 2. VERBATIM PROJECT ZERO ANALYTICAL CURVE & TABLE ─────────────────────────
+export function DrawResponseCurveCanvas(Canvas, Type, P, LoadedIes) {
+  const LogicalH = Type === "pointlight" ? 160 : 98;
+  const { Ctx, W, H } = EnsureHiDpiCanvas(Canvas, 340, LogicalH);
+  const Model = PropsToProjectZeroModel(Type, P, LoadedIes);
+  ProjectResponse(Ctx, W, H, Model);
 
-export function DrawHeroLightCanvas(Canvas, Type, Props, LoadedProfiles)
-{
-    const Width = Canvas?.clientWidth || 340;
-    const Height = Canvas?.clientHeight || 228;
-    const Frame = FitCanvas(Canvas, Width, Height);
-    if (!Frame) return;
-    const { Ctx, W, H } = Frame;
+  const Int = Math.max(0.01, Number(P.intensity ?? 14));
+  const Dec = Number(P.decay ?? 2);
 
-    const Bg = Ctx.createRadialGradient(W * 0.5, H * 0.35, 10, W * 0.5, H * 0.5, W * 0.75);
-    Bg.addColorStop(0, '#14171d');
-    Bg.addColorStop(1, '#090b0f');
-    Ctx.fillStyle = Bg;
-    Ctx.fillRect(0, 0, W, H);
-    GridFloor(Ctx, W, H);
-
-    const Col = ResolveEmissionRgb(Props);
-    const CX = W * 0.5;
-    const CY = H * 0.28;
-    const Num = (K, D) => Number.isFinite(Number(Props[K])) ? Number(Props[K]) : D;
-
-    if (Type === 'pointlight') {
-        const Reach = Num('distance', 25);
-        const Dec = Num('decay', 2);
-        const Int = Num('intensity', 14);
-        const MaxR = H * 0.62;
-        const Grad = Ctx.createRadialGradient(CX, CY + 18, 2, CX, CY + 18, MaxR);
-        Grad.addColorStop(0, Rgb(Col, 0.92));
-        Grad.addColorStop(0.24, Rgb(Col, 0.42 * Clamp(1 / (0.6 + Dec * 0.2), 0.1, 1)));
-        Grad.addColorStop(1, 'rgba(0,0,0,0)');
-        Ctx.fillStyle = Grad;
-        Ctx.beginPath();
-        Ctx.arc(CX, CY + 18, MaxR, 0, Math.PI * 2);
-        Ctx.fill();
-        Ctx.setLineDash([3, 4]);
-        [0.35, 0.65, 0.95].forEach((F, Idx) => {
-            Ctx.strokeStyle = Rgb(Col, 0.32 - Idx * 0.08);
-            Ctx.beginPath();
-            Ctx.arc(CX, CY + 18, MaxR * F, 0, Math.PI * 2);
-            Ctx.stroke();
-        });
-        Ctx.setLineDash([]);
-        LightBadge(Ctx, CX, CY + 18, 10, Col, Int / 20);
-        Ctx.fillStyle = 'rgba(255,255,255,0.52)';
-        Ctx.font = '500 10px "DM Sans", sans-serif';
-        Ctx.fillText(`OMNIDIRECTIONAL · DECAY ${Dec.toFixed(1)} · R ${Reach.toFixed(0)} m`, 12, H - 10);
-    } else if (Type === 'spotlight') {
-        const Angle = (Num('angle', 30) * Math.PI) / 180;
-        const Pen = Num('penumbra', 0.42);
-        const ConeLen = H * 0.68;
-        const OuterX = Math.tan(Angle) * ConeLen;
-        const InnerX = OuterX * (1 - Pen);
-        const FloorY = CY + ConeLen;
-        const Gr = Ctx.createLinearGradient(CX, CY, CX, FloorY);
-        Gr.addColorStop(0, Rgb(Col, 0.56));
-        Gr.addColorStop(1, Rgb(Col, 0.04));
-        Ctx.fillStyle = Gr;
-        Ctx.beginPath();
-        Ctx.moveTo(CX, CY);
-        Ctx.lineTo(CX - OuterX, FloorY);
-        Ctx.lineTo(CX + OuterX, FloorY);
-        Ctx.closePath();
-        Ctx.fill();
-
-        const InnerGr = Ctx.createLinearGradient(CX, CY, CX, FloorY);
-        InnerGr.addColorStop(0, Rgb(Col, 0.72));
-        InnerGr.addColorStop(1, Rgb(Col, 0.14));
-        Ctx.fillStyle = InnerGr;
-        Ctx.beginPath();
-        Ctx.moveTo(CX, CY);
-        Ctx.lineTo(CX - InnerX, FloorY);
-        Ctx.lineTo(CX + InnerX, FloorY);
-        Ctx.closePath();
-        Ctx.fill();
-
-        Ctx.strokeStyle = Rgb(Col, 0.5);
-        Ctx.setLineDash([4, 3]);
-        Ctx.beginPath();
-        Ctx.moveTo(CX, CY);
-        Ctx.lineTo(CX - OuterX, FloorY);
-        Ctx.moveTo(CX, CY);
-        Ctx.lineTo(CX + OuterX, FloorY);
-        Ctx.stroke();
-        Ctx.setLineDash([]);
-
-        Ctx.fillStyle = Rgb(Col, 0.34);
-        Ctx.beginPath();
-        Ctx.ellipse(CX, FloorY, Math.max(8, OuterX), 11, 0, 0, Math.PI * 2);
-        Ctx.fill();
-        LightBadge(Ctx, CX, CY, 8, Col, Num('intensity', 32) / 40);
-        Ctx.fillStyle = 'rgba(255,255,255,0.52)';
-        Ctx.font = '500 10px "DM Sans", sans-serif';
-        Ctx.fillText(`CONE ${(Num('angle', 30) * 2).toFixed(0)} deg · PENUMBRA ${Math.round(Pen * 100)}%`, 12, H - 10);
-    } else if (Type === 'ieslight') {
-        const MaxR = H * 0.68;
-        const Cutoff = ((Num('cutoff', 0) * Math.PI) / 180) * 1.4;
-        const DrawPlane = (AzimuthDeg, Alpha, Fill) => {
-            Ctx.beginPath();
-            for (let Step = 0; Step <= 180; Step++) {
-                const Theta = -Math.PI + (Step / 180) * Math.PI * 2;
-                const PolarDeg = Math.abs(Theta) * (180 / Math.PI);
-                const SampleAz = Theta < 0 ? (AzimuthDeg + 180) % 360 : AzimuthDeg;
-                const Val = EvaluateIesIntensity(Props, LoadedProfiles, SampleAz, Clamp(PolarDeg, 0, 180));
-                const R = Val * MaxR;
-                const X = CX + Math.sin(Theta + Cutoff) * R;
-                const Y = CY + Math.cos(Theta + Cutoff) * R;
-                if (Step === 0) Ctx.moveTo(X, Y);
-                else Ctx.lineTo(X, Y);
-            }
-            Ctx.closePath();
-            if (Fill) {
-                const G = Ctx.createRadialGradient(CX, CY, 2, CX, CY, MaxR);
-                G.addColorStop(0, Rgb(Col, 0.56));
-                G.addColorStop(0.55, Rgb(Col, 0.18));
-                G.addColorStop(1, Rgb(Col, 0.03));
-                Ctx.fillStyle = G;
-                Ctx.fill();
-            }
-            Ctx.strokeStyle = Rgb(Col, Alpha);
-            Ctx.lineWidth = Fill ? 1.6 : 1.05;
-            if (!Fill) Ctx.setLineDash([4, 3]);
-            Ctx.stroke();
-            Ctx.setLineDash([]);
-        };
-        // Concentric goniometer rings
-        Ctx.strokeStyle = 'rgba(255,255,255,0.08)';
-        Ctx.lineWidth = 1;
-        [0.25, 0.5, 0.75, 1].forEach(R => {
-            Ctx.beginPath();
-            Ctx.arc(CX, CY, MaxR * R, 0, Math.PI * 2);
-            Ctx.stroke();
-        });
-        DrawPlane(90, 0.48, false);
-        DrawPlane(0, 0.92, true);
-        LightBadge(Ctx, CX, CY, 7, Col, Num('multiplier', 1));
-        const ActiveName = Props.customIesKey
-            ? `IES FILE: ${Props.customIesKey}`
-            : Props.useMeasuredIes
-                ? `LM-63 ${Props.measuredProfile?.toUpperCase() || 'MEASURED'}`
-                : (Props.profile || 'Downlight').toUpperCase();
-        Ctx.fillStyle = 'rgba(255,255,255,0.58)';
-        Ctx.font = '500 10px "DM Sans", sans-serif';
-        Ctx.fillText(`${ActiveName} · C0 SOLID / C90 DASHED`, 12, H - 10);
-    } else if (Type === 'arealight') {
-        const AW = Num('width', 2);
-        const AH = Num('height', 1);
-        const Scale = Math.min(180 / Math.max(AW, 0.4), 76 / Math.max(AH, 0.4));
-        const W2 = Clamp(AW * Scale, 28, W * 0.62);
-        const H2 = Clamp(AH * Scale, 18, H * 0.38);
-        const BoxY = H * 0.34;
-        const Spread = ((Num('spread', 120) / 180) * H) * 0.35;
-        const FloorG = Ctx.createLinearGradient(0, BoxY + H2 / 2, 0, H * 0.92);
-        FloorG.addColorStop(0, Rgb(Col, 0.44));
-        FloorG.addColorStop(1, 'rgba(0,0,0,0)');
-        Ctx.fillStyle = FloorG;
-        Ctx.beginPath();
-        Ctx.moveTo(CX - W2 / 2, BoxY + H2 / 2);
-        Ctx.lineTo(CX + W2 / 2, BoxY + H2 / 2);
-        Ctx.lineTo(CX + W2 / 2 + Spread, H * 0.92);
-        Ctx.lineTo(CX - W2 / 2 - Spread, H * 0.92);
-        Ctx.closePath();
-        Ctx.fill();
-
-        const Face = Ctx.createRadialGradient(CX, BoxY, 4, CX, BoxY, Math.max(W2, H2));
-        Face.addColorStop(0, '#fff');
-        Face.addColorStop(0.55, Rgb(Col, 0.85));
-        Face.addColorStop(1, Rgb(Col, 0.25));
-        Ctx.fillStyle = Face;
-        Ctx.strokeStyle = Rgb(Col, 0.95);
-        Ctx.lineWidth = 1.5;
-        if (Props.aperture === 'Disk') {
-            Ctx.beginPath();
-            Ctx.ellipse(CX, BoxY, W2 * 0.5, H2 * 0.5, 0, 0, Math.PI * 2);
-            Ctx.fill();
-            Ctx.stroke();
-        } else {
-            Ctx.fillRect(CX - W2 / 2, BoxY - H2 / 2, W2, H2);
-            Ctx.strokeRect(CX - W2 / 2, BoxY - H2 / 2, W2, H2);
-            Ctx.strokeStyle = 'rgba(0,0,0,0.28)';
-            for (let gx = 1; gx < 5; gx++) {
-                const X = CX - W2 / 2 + (W2 * gx) / 5;
-                Ctx.beginPath();
-                Ctx.moveTo(X, BoxY - H2 / 2);
-                Ctx.lineTo(X, BoxY + H2 / 2);
-                Ctx.stroke();
-            }
-        }
-        Ctx.fillStyle = 'rgba(255,255,255,0.52)';
-        Ctx.font = '500 10px "DM Sans", sans-serif';
-        Ctx.fillText(`${(Props.aperture || 'RECTANGLE').toUpperCase()} · ${AW.toFixed(1)} x ${AH.toFixed(1)} m · SPREAD ${Num('spread', 120)} deg`, 12, H - 10);
-    } else if (Type === 'tubelight') {
-        const TL = Clamp(Num('length', 1.8) * 90, 64, W * 0.72);
-        const Rad = Clamp(Num('radius', 0.04) * 180, 4, 18);
-        const Ty = H * 0.45;
-        const Halo = Ctx.createRadialGradient(CX, Ty, Rad, CX, Ty, TL * 0.65);
-        Halo.addColorStop(0, Rgb(Col, 0.55));
-        Halo.addColorStop(0.5, Rgb(Col, 0.14));
-        Halo.addColorStop(1, 'rgba(0,0,0,0)');
-        Ctx.fillStyle = Halo;
-        Ctx.fillRect(0, 0, W, H);
-        Ctx.lineCap = 'round';
-        Ctx.strokeStyle = Rgb(Col, 0.35);
-        Ctx.lineWidth = Rad * 2 + 12;
-        Ctx.beginPath();
-        Ctx.moveTo(CX - TL / 2, Ty);
-        Ctx.lineTo(CX + TL / 2, Ty);
-        Ctx.stroke();
-        Ctx.strokeStyle = '#fff';
-        Ctx.lineWidth = Math.max(3, Rad * 1.1);
-        Ctx.beginPath();
-        Ctx.moveTo(CX - TL / 2, Ty);
-        Ctx.lineTo(CX + TL / 2, Ty);
-        Ctx.stroke();
-        Ctx.fillStyle = 'rgba(255,255,255,0.52)';
-        Ctx.font = '500 10px "DM Sans", sans-serif';
-        Ctx.fillText(`LINEAR FLUORESCENT · ${Num('length', 1.8).toFixed(2)} m · ${Math.round(Num('radius', 0.04) * 1000)} mm`, 12, H - 10);
-    } else if (Type === 'ledlight') {
-        const Diam = Num('diameter', 40);
-        const Ang = (Num('angle', 110) * Math.PI) / 180;
-        const DieR = Clamp(Diam * 0.42, 10, 32);
-        const LY = H * 0.36;
-        const SpreadX = Math.tan(Math.min(Math.PI * 0.46, Ang * 0.5)) * (H * 0.48);
-        const ConeG = Ctx.createLinearGradient(CX, LY, CX, H * 0.9);
-        ConeG.addColorStop(0, Rgb(Col, 0.5));
-        ConeG.addColorStop(1, 'rgba(0,0,0,0)');
-        Ctx.fillStyle = ConeG;
-        Ctx.beginPath();
-        Ctx.moveTo(CX - DieR, LY + 6);
-        Ctx.lineTo(CX + DieR, LY + 6);
-        Ctx.lineTo(CX + SpreadX, H * 0.9);
-        Ctx.lineTo(CX - SpreadX, H * 0.9);
-        Ctx.closePath();
-        Ctx.fill();
-
-        Ctx.fillStyle = '#262b34';
-        Ctx.strokeStyle = 'rgba(255,255,255,0.22)';
-        Ctx.lineWidth = 1.5;
-        Ctx.fillRect(CX - DieR - 8, LY - 12, (DieR + 8) * 2, 22);
-        Ctx.strokeRect(CX - DieR - 8, LY - 12, (DieR + 8) * 2, 22);
-        for (let dy = 0; dy < 3; dy++) {
-            for (let dx = 0; dx < 4; dx++) {
-                Ctx.fillStyle = '#f3b749';
-                Ctx.fillRect(CX - DieR + dx * (DieR * 0.48) + 2, LY - 7 + dy * 5, DieR * 0.34, 3);
-            }
-        }
-        LightBadge(Ctx, CX, LY + 12, 6, Col, Num('dimmer', 1));
-        Ctx.fillStyle = 'rgba(255,255,255,0.52)';
-        Ctx.font = '500 10px "DM Sans", sans-serif';
-        Ctx.fillText(`COB PHOSPHOR ARRAY · ${Num('watts', 18).toFixed(1)} W · ${Diam} mm`, 12, H - 10);
-    } else if (Type === 'ledstrip') {
-        const Len = Num('length', 3.6);
-        const Lpm = Num('ledsPerMetre', 60);
-        const Diff = Boolean(Props.diffuser);
-        const BarW = Clamp(Len * 64, 110, W * 0.8);
-        const Sy = H * 0.46;
-        const Halo = Ctx.createLinearGradient(0, Sy - 36, 0, Sy + 46);
-        Halo.addColorStop(0, 'rgba(0,0,0,0)');
-        Halo.addColorStop(0.5, Rgb(Col, Diff ? 0.56 : 0.36));
-        Halo.addColorStop(1, 'rgba(0,0,0,0)');
-        Ctx.fillStyle = Halo;
-        Ctx.fillRect(CX - BarW / 2 - 20, Sy - 36, BarW + 40, 82);
-        Ctx.fillStyle = '#2c2214';
-        Ctx.fillRect(CX - BarW / 2, Sy - 6, BarW, 12);
-        if (Diff) {
-            Ctx.fillStyle = Rgb(Col, 0.94);
-            Ctx.fillRect(CX - BarW / 2, Sy - 4, BarW, 8);
-        } else {
-            const Count = Math.min(48, Math.max(6, Math.round((Lpm * Len) / 8)));
-            for (let idx = 0; idx < Count; idx++) {
-                const Dx = CX - BarW / 2 + ((idx + 0.5) / Count) * BarW;
-                Ctx.fillStyle = Rgb(Col, 0.96);
-                Ctx.fillRect(Dx - 2, Sy - 3, 4, 6);
-            }
-        }
-        Ctx.fillStyle = 'rgba(255,255,255,0.52)';
-        Ctx.font = '500 10px "DM Sans", sans-serif';
-        Ctx.fillText(`PCB RIBBON · ${Math.round(Lpm * Len)} LEDS · ${Diff ? 'OPAL DIFFUSER' : 'EXPOSED DIES'}`, 12, H - 10);
-    }
-    Ctx.restore();
-}
-
-//------------------------------------------------------------------------------------------------------------------------
-//                                      ANALYTICAL OUTPUT RESPONSE PLOTS (EMBEDDED CARD)
-//------------------------------------------------------------------------------------------------------------------------
-
-export function DrawResponseCurveCanvas(Canvas, Type, Props, LoadedProfiles)
-{
-    const Width = Canvas?.clientWidth || 310;
-    const Height = Canvas?.clientHeight || 110;
-    const Frame = FitCanvas(Canvas, Width, Height);
-    if (!Frame) return { Kind: 'Response', Rows: [] };
-    const { Ctx, W, H } = Frame;
-    const Col = ResolveEmissionRgb(Props);
-    const Num = (K, D) => Number.isFinite(Number(Props[K])) ? Number(Props[K]) : D;
-
-    Ctx.fillStyle = 'rgba(255,255,255,0.02)';
-    Ctx.fillRect(0, 0, W, H);
-    Ctx.strokeStyle = 'rgba(255,255,255,0.06)';
-    Ctx.lineWidth = 1;
-    for (let i = 1; i < 4; i++) {
-        const Y = (H * i) / 4;
-        Ctx.beginPath();
-        Ctx.moveTo(0, Y);
-        Ctx.lineTo(W, Y);
-        Ctx.stroke();
-    }
-
-    const PadX = 10;
-    const PadY = 10;
-    const PW = W - PadX * 2;
-    const PH = H - PadY * 2;
-
-    if (Type === 'pointlight') {
-        const Int = Num('intensity', 14);
-        const Dec = Num('decay', 2);
-        const Reach = Num('distance', 25);
-        const Samples = [1, 2, 5, 10];
-        Ctx.strokeStyle = Rgb(Col, 0.95);
-        Ctx.lineWidth = 2;
-        Ctx.beginPath();
-        for (let s = 0; s <= 40; s++) {
-            const D = 0.5 + (s / 40) * Math.max(12, Reach);
-            const Atten = Clamp(1 - Math.pow(D / Math.max(1, Reach), 4), 0, 1);
-            const Lux = (Int / Math.pow(Math.max(0.5, D), Dec)) * Atten;
-            const YNorm = Clamp(Lux / Math.max(0.1, Int), 0, 1);
-            const X = PadX + (s / 40) * PW;
-            const Y = PadY + (1 - Math.sqrt(YNorm)) * PH;
-            if (s === 0) Ctx.moveTo(X, Y);
-            else Ctx.lineTo(X, Y);
-        }
-        Ctx.stroke();
-        Ctx.restore();
-        return {
-            Kind: 'Distance response',
-            Rows: Samples.map(D => ({
-                Label: `${D} m`,
-                Value: `${((Int / Math.pow(D, Dec)) * Clamp(1 - Math.pow(D / Math.max(1, Reach), 4), 0, 1)).toFixed(2)} lx`
-            }))
-        };
-    }
-
-    if (Type === 'spotlight') {
-        const AngleRad = (Num('angle', 30) * Math.PI) / 180;
-        const Pen = Num('penumbra', 0.42);
-        const Int = Num('intensity', 88);
-        const HalfW = Math.tan(AngleRad) * 5;
-        Ctx.strokeStyle = Rgb(Col, 0.96);
-        Ctx.lineWidth = 2;
-        Ctx.beginPath();
-        for (let s = 0; s <= 60; s++) {
-            const U = (s / 60) * 2 - 1;
-            const AbsU = Math.abs(U);
-            const Inner = 1 - Pen;
-            const Falloff = AbsU <= Inner ? 1 : AbsU >= 1 ? 0 : Math.pow(1 - (AbsU - Inner) / Math.max(1e-4, 1 - Inner), 1.6);
-            const X = PadX + (s / 60) * PW;
-            const Y = PadY + (1 - Falloff) * PH;
-            if (s === 0) Ctx.moveTo(X, Y);
-            else Ctx.lineTo(X, Y);
-        }
-        Ctx.stroke();
-        Ctx.restore();
-        return {
-            Kind: 'Beam section @ 5 m',
-            Rows: [
-                { Label: 'Core Ø', Value: `${(HalfW * (1 - Pen) * 2).toFixed(2)} m` },
-                { Label: 'Full Ø', Value: `${(HalfW * 2).toFixed(2)} m` },
-                { Label: '5m Axis', Value: `${(Int / 25).toFixed(2)} lx` }
-            ]
-        };
-    }
-
-    if (Type === 'ieslight') {
-        const Mult = Num('multiplier', 1);
-        const Lumens = Num('lumens', 1650);
-        const DrawPlaneCurve = (AzDeg, Stroke, Fill) => {
-            Ctx.beginPath();
-            for (let s = 0; s <= 72; s++) {
-                const Deg = -90 + (s / 72) * 180;
-                const UseAz = Deg < 0 ? (AzDeg + 180) % 360 : AzDeg;
-                const Val = EvaluateIesIntensity(Props, LoadedProfiles, UseAz, Math.abs(Deg));
-                const X = PadX + (s / 72) * PW;
-                const Y = PadY + (1 - Clamp(Val, 0, 1)) * PH;
-                if (s === 0) Ctx.moveTo(X, Y);
-                else Ctx.lineTo(X, Y);
-            }
-            Ctx.strokeStyle = Stroke;
-            Ctx.lineWidth = Fill ? 2 : 1.3;
-            if (!Fill) Ctx.setLineDash([4, 3]);
-            Ctx.stroke();
-            Ctx.setLineDash([]);
-        };
-        DrawPlaneCurve(90, 'rgba(130, 195, 255, 0.72)', false);
-        DrawPlaneCurve(0, Rgb(Col, 0.96), true);
-        Ctx.restore();
-        const Peak0 = EvaluateIesIntensity(Props, LoadedProfiles, 0, 0) * Lumens * Mult * 0.32;
-        return {
-            Kind: 'Angular response (-90..+90 deg)',
-            Rows: [
-                { Label: 'Nadir 0°', Value: `${Peak0.toFixed(0)} cd` },
-                { Label: 'C0 @ 30°', Value: `${(EvaluateIesIntensity(Props, LoadedProfiles, 0, 30) * 100).toFixed(0)} %` },
-                { Label: 'C90 @ 30°', Value: `${(EvaluateIesIntensity(Props, LoadedProfiles, 90, 30) * 100).toFixed(0)} %` }
-            ]
-        };
-    }
-
-    // Area, Tube, LED, Strip cosine / linear / efficiency curve
-    Ctx.strokeStyle = Rgb(Col, 0.95);
-    Ctx.lineWidth = 2;
-    Ctx.beginPath();
-    for (let s = 0; s <= 48; s++) {
-        const T = s / 48;
-        const Rad = (T - 0.5) * Math.PI;
-        const V = Type === 'arealight'
-            ? Math.pow(Math.max(0, Math.cos(Rad)), Math.max(0.4, 180 / Math.max(15, Num('spread', 120))))
-            : Math.cos(Rad * 0.85);
-        const X = PadX + T * PW;
-        const Y = PadY + (1 - Clamp(V, 0, 1)) * PH;
-        if (s === 0) Ctx.moveTo(X, Y);
-        else Ctx.lineTo(X, Y);
-    }
-    Ctx.stroke();
-    Ctx.restore();
-
-    if (Type === 'arealight') {
-        const W = Num('width', 2);
-        const H_ = Num('height', 1);
-        const Area = Props.aperture === 'Disk' ? Math.PI * (W * 0.5) * (H_ * 0.5) : W * H_;
-        const Exit = Num('lumens', 2400) / Math.max(0.01, Area);
-        return {
-            Kind: 'Aperture balance',
-            Rows: [
-                { Label: 'Area', Value: `${Area.toFixed(2)} m²` },
-                { Label: 'Exitance', Value: `${Exit.toFixed(0)} lm/m²` }
-            ]
-        };
-    }
-    if (Type === 'tubelight') {
-        const Len = Math.max(0.1, Num('length', 1.8));
-        return {
-            Kind: 'Linear output',
-            Rows: [
-                { Label: 'Density', Value: `${(Num('lumens', 1800) / Len).toFixed(0)} lm/m` },
-                { Label: 'Reach', Value: `${Num('distance', 24).toFixed(0)} m` }
-            ]
-        };
-    }
-    if (Type === 'ledlight') {
-        const Flux = Num('watts', 18) * Num('efficacy', 125) * Num('dimmer', 1);
-        return {
-            Kind: 'Conversion budget',
-            Rows: [
-                { Label: 'Flux', Value: `${Flux.toFixed(0)} lm` },
-                { Label: 'Drive', Value: `${(Num('watts', 18) * Num('dimmer', 1)).toFixed(1)} W` }
-            ]
-        };
-    }
-    const Len = Num('length', 3.6);
-    const Watts = Num('wattsPerMetre', 14.4) * Len * Num('dimmer', 0.9);
-    const Amps = Watts / Math.max(5, Num('voltage', 24));
+  if (Type === "pointlight") {
     return {
-        Kind: 'Electrical budget',
-        Rows: [
-            { Label: 'Load', Value: `${Watts.toFixed(1)} W` },
-            { Label: 'Current', Value: `${Amps.toFixed(2)} A` }
-        ]
+      Kind: "Distance response",
+      Lead: `${(Int / Math.pow(5, Dec)).toFixed(2)} lx`,
+      Caption: "Authored decay at 5 m · free-space estimate",
+      Rows: [1, 2, 5, 10].map((D) => {
+        const E = Int / Math.pow(D, Dec);
+        const Pct = (E / Int) * 100;
+        return { Label: `${D} m`, Value: `${E.toFixed(2)} lx`, Rel: `${Pct.toFixed(1)}%` };
+      }),
     };
-}
-
-//------------------------------------------------------------------------------------------------------------------------
-//                                         DEDICATED GONIOMETRIC POLAR WEB (MODAL / INSPECTOR)
-//------------------------------------------------------------------------------------------------------------------------
-
-export function DrawIesPolarWebCanvas(Canvas, Props, LoadedProfiles)
-{
-    const Width = Canvas?.clientWidth || 320;
-    const Height = Canvas?.clientHeight || 220;
-    const Frame = FitCanvas(Canvas, Width, Height);
-    if (!Frame) return;
-    const { Ctx, W, H } = Frame;
-    const CX = W * 0.5;
-    const CY = H * 0.42;
-    const RMax = Math.min(W * 0.36, H * 0.48);
-    const Col = ResolveEmissionRgb(Props);
-
-    Ctx.fillStyle = '#0c0d10';
-    Ctx.fillRect(0, 0, W, H);
-    Ctx.strokeStyle = 'rgba(255,255,255,0.08)';
-    Ctx.lineWidth = 1;
-    [0.25, 0.5, 0.75, 1].forEach(R => {
-        Ctx.beginPath();
-        Ctx.arc(CX, CY, RMax * R, 0, Math.PI * 2);
-        Ctx.stroke();
-    });
-    for (let deg = 0; deg < 360; deg += 30) {
-        const A = (deg * Math.PI) / 180;
-        Ctx.beginPath();
-        Ctx.moveTo(CX, CY);
-        Ctx.lineTo(CX + Math.sin(A) * RMax, CY + Math.cos(A) * RMax);
-        Ctx.stroke();
-    }
-
-    const Plot = (Az, Color, Dashed) => {
-        Ctx.beginPath();
-        for (let i = 0; i <= 180; i++) {
-            const Signed = -Math.PI + (i / 180) * Math.PI * 2;
-            const Polar = Math.abs(Signed) * (180 / Math.PI);
-            const Plane = Signed < 0 ? (Az + 180) % 360 : Az;
-            const V = EvaluateIesIntensity(Props, LoadedProfiles, Plane, Clamp(Polar, 0, 180));
-            const X = CX + Math.sin(Signed) * RMax * V;
-            const Y = CY + Math.cos(Signed) * RMax * V;
-            if (i === 0) Ctx.moveTo(X, Y);
-            else Ctx.lineTo(X, Y);
-        }
-        Ctx.closePath();
-        Ctx.strokeStyle = Color;
-        Ctx.lineWidth = Dashed ? 1.4 : 2.1;
-        if (Dashed) Ctx.setLineDash([4, 3]);
-        Ctx.stroke();
-        Ctx.setLineDash([]);
+  }
+  if (Type === "spotlight") {
+    const D5 = 2 * 5 * Math.tan((Clamp(Number(P.angle ?? 13), 1, 80) * Math.PI) / 180);
+    return {
+      Kind: "Beam section",
+      Lead: `${D5.toFixed(2)} m`,
+      Caption: "Beam diameter on a perpendicular plane at 5 m",
+      Rows: [],
     };
-
-    Plot(90, 'rgba(130, 195, 255, 0.85)', true);
-    Plot(0, Rgb(Col, 0.96), false);
-
-    Ctx.fillStyle = 'rgba(239,244,207,0.72)';
-    Ctx.font = '500 10px "DM Sans", sans-serif';
-    Ctx.fillText('0 deg NADIR', CX - 28, CY + RMax + 14);
-    Ctx.fillText('C0°', 12, 18);
-    Ctx.fillStyle = 'rgba(130,195,255,0.85)';
-    Ctx.fillText('C90°', 42, 18);
-    Ctx.restore();
-}
-
-//------------------------------------------------------------------------------------------------------------------------
-//                                  ENVIRONMENT LIGHT CANVASES (HDR DOME, MOON, STARS, FLARE, FOG)
-//------------------------------------------------------------------------------------------------------------------------
-
-export function DrawHdrDomeCanvas(Canvas, EnvDome, SunDir)
-{
-    const Width = Canvas?.clientWidth || 320;
-    const Height = Canvas?.clientHeight || 160;
-    const Frame = FitCanvas(Canvas, Width, Height);
-    if (!Frame) return;
-    const { Ctx, W, H } = Frame;
-
-    const G = Ctx.createLinearGradient(0, 0, 0, H);
-    G.addColorStop(0.0, EnvDome.ZenithColor);
-    G.addColorStop(0.52, EnvDome.HorizonColor);
-    G.addColorStop(0.54, EnvDome.GroundColor);
-    G.addColorStop(1.0, '#101112');
-    Ctx.fillStyle = G;
-    Ctx.fillRect(0, 0, W, H);
-
-    // Sun lobe hot spot in equirectangular projection
-    const Az = Math.atan2(SunDir[0], -SunDir[2]);
-    const El = Math.asin(Clamp(SunDir[1], -1, 1));
-    const SX = (((Az / (Math.PI * 2) + EnvDome.RotationDeg / 360 + 1.5) % 1) * W);
-    const SY = Clamp((0.5 - El / Math.PI) * H, 8, H * 0.52);
-    const SunGlow = Ctx.createRadialGradient(SX, SY, 2, SX, SY, 56);
-    SunGlow.addColorStop(0, 'rgba(255, 250, 228, 0.96)');
-    SunGlow.addColorStop(0.35, 'rgba(255, 224, 156, 0.42)');
-    SunGlow.addColorStop(1, 'rgba(0,0,0,0)');
-    Ctx.fillStyle = SunGlow;
-    Ctx.beginPath();
-    Ctx.arc(SX, SY, 56, 0, Math.PI * 2);
-    Ctx.fill();
-
-    // Horizon line & calibration spheres (chrome mirror + matte Lambert)
-    Ctx.strokeStyle = 'rgba(255,255,255,0.16)';
-    Ctx.beginPath();
-    Ctx.moveTo(0, H * 0.53);
-    Ctx.lineTo(W, H * 0.53);
-    Ctx.stroke();
-
-    const Probe = (X, Y, R, Mirror) => {
-        const P = Ctx.createRadialGradient(X - R * 0.35, Y - R * 0.35, 2, X, Y, R);
-        if (Mirror) {
-            P.addColorStop(0, '#ffffff');
-            P.addColorStop(0.45, EnvDome.HorizonColor);
-            P.addColorStop(0.7, '#222428');
-            P.addColorStop(1, '#0d0e11');
-        } else {
-            P.addColorStop(0, '#f2eee6');
-            P.addColorStop(0.6, '#75757a');
-            P.addColorStop(1, '#1e1f22');
-        }
-        Ctx.fillStyle = P;
-        Ctx.beginPath();
-        Ctx.arc(X, Y, R, 0, Math.PI * 2);
-        Ctx.fill();
-        Ctx.strokeStyle = 'rgba(255,255,255,0.25)';
-        Ctx.stroke();
+  }
+  if (Type === "ieslight") {
+    return {
+      Kind: "Angular response",
+      Lead: `${Math.round(Number(P.cone ?? 58))}°`,
+      Caption: P.useMeasuredIes || P.customIesKey
+        ? "Measured LM-63 Type-C C0 plane · peak normalized"
+        : "Normalized preset sections · not measured candela",
+      Rows: [],
     };
-    Probe(W * 0.72, H * 0.76, 17, true);
-    Probe(W * 0.86, H * 0.76, 17, false);
-
-    Ctx.fillStyle = 'rgba(255,255,255,0.72)';
-    Ctx.font = '500 10px "DM Sans", sans-serif';
-    Ctx.fillText(`2:1 IBL EQUIRECTANGULAR · ${EnvDome.CubemapResolution} px · ROT ${Math.round(EnvDome.RotationDeg)}°`, 10, 16);
-    Ctx.restore();
+  }
+  if (Type === "arealight") {
+    const Area = Math.max(
+      0.01,
+      P.aperture === "Disk"
+        ? Math.PI * ((P.width ?? 1.8) * 0.5) ** 2
+        : (P.width ?? 2) * (P.height ?? 1),
+    );
+    return {
+      Kind: "Aperture balance",
+      Lead: `${Math.round((P.lumens ?? 2400) / Area).toLocaleString()} lm/m²`,
+      Caption: "Flux per aperture area · not surface luminance",
+      Rows: [],
+    };
+  }
+  if (Type === "tubelight") {
+    const L = Math.max(0.1, Number(P.length ?? 1.8));
+    return {
+      Kind: "Linear output",
+      Lead: `${Math.round((P.lumens ?? 1800) / L).toLocaleString()} lm/m`,
+      Caption: "Authored source flux per metre",
+      Rows: [],
+    };
+  }
+  if (Type === "ledlight") {
+    return {
+      Kind: "Conversion budget",
+      Lead: `${Math.round((P.dimmer ?? 1) * 100)} %`,
+      Caption: "Authored dimmer · estimated output ignores thermal losses",
+      Rows: [],
+    };
+  }
+  const Amps = ((P.wattsPerMetre ?? 14.4) * (P.length ?? 2.4) * (P.dimmer ?? 1)) / Math.max(1, P.voltage ?? 24);
+  return {
+    Kind: "Electrical budget",
+    Lead: `${Amps.toFixed(2)} A`,
+    Caption: "Connected watts ÷ supply volts · ideal full-load current",
+    Rows: [],
+  };
 }
 
-export function DrawMoonPreviewAndDialCanvas(Canvas, Moon)
-{
-    const Width = Canvas?.clientWidth || 320;
-    const Height = Canvas?.clientHeight || 168;
-    const Frame = FitCanvas(Canvas, Width, Height);
-    if (!Frame) return;
-    const { Ctx, W, H } = Frame;
-    const Body = MoonCatalogue[Clamp(Moon.Slot | 0, 0, MoonCatalogue.length - 1)];
-    const Metrics = SolveMoonMetrics(Moon);
-
-    Ctx.fillStyle = '#090b10';
-    Ctx.fillRect(0, 0, W, H);
-
-    // Left: Lunar Phase Disc
-    const DiscX = W * 0.28;
-    const DiscY = H * 0.48;
-    const R = Math.min(46, H * 0.34);
-    const Halo = Ctx.createRadialGradient(DiscX, DiscY, R * 0.5, DiscX, DiscY, R * 1.9);
-    Halo.addColorStop(0, `${Body.Tint}33`);
-    Halo.addColorStop(1, 'rgba(0,0,0,0)');
-    Ctx.fillStyle = Halo;
-    Ctx.beginPath();
-    Ctx.arc(DiscX, DiscY, R * 1.9, 0, Math.PI * 2);
-    Ctx.fill();
-
-    // Moon base disc + craters + phase terminator
-    Ctx.save();
-    Ctx.beginPath();
-    Ctx.arc(DiscX, DiscY, R, 0, Math.PI * 2);
-    Ctx.clip();
-    Ctx.fillStyle = Body.Core;
-    Ctx.fillRect(DiscX - R, DiscY - R, R * 2, R * 2);
-
-    // Phase illumination half
-    const Theta = Metrics.PhaseFrac * Math.PI * 2;
-    const CosT = Math.cos(Theta);
-    Ctx.fillStyle = Body.Tint;
-    Ctx.beginPath();
-    for (let y = -R; y <= R; y += 2) {
-        const Edge = Math.sqrt(Math.max(0, R * R - y * y));
-        const Term = Edge * CosT;
-        const X0 = Theta <= Math.PI ? DiscX - Term : DiscX - Edge;
-        const X1 = Theta <= Math.PI ? DiscX + Edge : DiscX + Term;
-        if (X1 > X0) Ctx.rect(X0, DiscY + y, X1 - X0, 2.2);
-    }
-    Ctx.fill();
-
-    // Subtle procedural crater rings
-    Ctx.strokeStyle = Body.Cr;
-    Ctx.globalAlpha = 0.32;
-    [[-0.32, -0.22, 0.16], [0.22, -0.18, 0.22], [-0.14, 0.28, 0.2], [0.35, 0.24, 0.12]].forEach(([cx, cy, cr]) => {
-        Ctx.beginPath();
-        Ctx.arc(DiscX + cx * R, DiscY + cy * R, cr * R, 0, Math.PI * 2);
-        Ctx.stroke();
-    });
-    Ctx.restore();
-
-    // Right: Spherical Horizon Azimuth / Elevation Dial
-    const DialX = W * 0.74;
-    const DialY = H * 0.48;
-    const DialR = Math.min(54, H * 0.38);
-    Ctx.strokeStyle = 'rgba(255,255,255,0.16)';
-    Ctx.lineWidth = 1;
-    Ctx.beginPath();
-    Ctx.arc(DialX, DialY, DialR, 0, Math.PI * 2);
-    Ctx.stroke();
-    Ctx.beginPath();
-    Ctx.arc(DialX, DialY, DialR * 0.5, 0, Math.PI * 2);
-    Ctx.stroke();
-
-    ['N', 'E', 'S', 'W'].forEach((Dir, idx) => {
-        const A = (idx * Math.PI) / 2 - Math.PI / 2;
-        Ctx.fillStyle = 'rgba(255,255,255,0.42)';
-        Ctx.font = '500 9px "DM Sans", sans-serif';
-        Ctx.fillText(Dir, DialX + Math.cos(A) * (DialR + 8) - 3, DialY + Math.sin(A) * (DialR + 8) + 3);
-    });
-    const AzR = ((Moon.AzimuthDeg - 90) * Math.PI) / 180;
-    const Radial = (1 - Clamp(Moon.ElevationDeg, 0, 90) / 90) * DialR;
-    const MX = DialX + Math.cos(AzR) * Radial;
-    const MY = DialY + Math.sin(AzR) * Radial;
-    Ctx.fillStyle = Body.Tint;
-    Ctx.beginPath();
-    Ctx.arc(MX, MY, 5.5, 0, Math.PI * 2);
-    Ctx.fill();
-
-    Ctx.fillStyle = 'rgba(255,255,255,0.58)';
-    Ctx.font = '500 10px "DM Sans", sans-serif';
-    Ctx.fillText(`${Body.Name} · ${Metrics.PhaseLabel} (${Metrics.IlluminationPct.toFixed(0)}%)`, 10, H - 8);
-    Ctx.restore();
+// Used exclusively inside the full Goniometer Matrix modal
+export function DrawIesPolarWebCanvas(Canvas, P, LoadedIes) {
+  DrawHeroLightCanvas(Canvas, "ieslight", P, LoadedIes);
 }
 
-export function DrawStarsAndTwinkleCanvas(Canvas, Stars, TimeSec = 0)
-{
-    const Width = Canvas?.clientWidth || 320;
-    const Height = Canvas?.clientHeight || 168;
-    const Frame = FitCanvas(Canvas, Width, Height);
-    if (!Frame) return;
-    const { Ctx, W, H } = Frame;
+// ── 3. VERBATIM PROJECT ZERO SUN ORBIT & ILLUMINANCE CURVE ────────────────────
+export function DrawSolarArcCanvas(Canvas, Observer) {
+  const { Ctx, W, H } = EnsureHiDpiCanvas(Canvas, 360, 260);
+  Ctx.clearRect(0, 0, W, H);
+  const Ephem = EvaluateSolarEphemeris(Observer);
+  const Az = Ephem?.AzimuthDeg ?? 180;
+  const El = Ephem?.ElevationDeg ?? 35;
 
-    Ctx.fillStyle = '#07090e';
-    Ctx.fillRect(0, 0, W, H);
-    const StarW = W * 0.66;
-    const PoleX = StarW * 0.5;
-    const PoleY = H * 0.5;
-    const RotRad = (Stars.CelestialRotationDeg * Math.PI) / 180;
+  const R = 96;
+  const CX = 180;
+  const CY = 132;
+  const Angle = ((Az - 135) * Math.PI) / 180;
+  const Point = (T) => [
+    CX - R * Math.cos(T) * Math.cos(Angle),
+    CY - R * Math.sin(T) + R * 0.45 * Math.cos(T) * Math.sin(Angle),
+  ];
 
-    // 260 deterministic catalog stars filtered by LimitingMagnitude
-    for (let i = 0; i < 260; i++) {
-        const S1 = Math.sin(i * 12.9898) * 43758.5453;
-        const S2 = Math.sin(i * 78.233) * 29831.231;
-        const S3 = Math.sin(i * 39.425) * 19283.719;
-        const F1 = S1 - Math.floor(S1);
-        const F2 = S2 - Math.floor(S2);
-        const F3 = S3 - Math.floor(S3);
-        const Mag = F3 * 7.8;
-        if (Mag > Stars.LimitingMagnitude) continue;
-        const R = Math.sqrt(F1) * Math.min(StarW * 0.48, H * 0.48);
-        const A = F2 * Math.PI * 2 + RotRad;
-        const X = PoleX + Math.cos(A) * R;
-        const Y = PoleY + Math.sin(A) * R;
-        const Twinkle = Stars.TwinkleEnabled
-            ? 1 - (Stars.TwinkleDepthPct / 100) * (0.5 + 0.5 * Math.sin(TimeSec * Stars.TwinkleRateHz * 6.28 + i))
-            : 1;
-        const Alpha = Clamp((1 - Mag / 8.5) * Stars.Brightness * Twinkle, 0.08, 1);
-        const Kelvin = 3400 + ((i % 7) / 6) * 7000;
-        const KCol = KelvinToRgb(Kelvin);
-        Ctx.fillStyle = Rgb(KCol, Alpha);
-        const Size = Math.max(0.7, (1.9 - Mag * 0.18) * Stars.PointSize);
-        Ctx.beginPath();
-        Ctx.arc(X, Y, Size, 0, Math.PI * 2);
-        Ctx.fill();
+  Ctx.save();
+  Ctx.beginPath();
+  Ctx.ellipse(CX, CY, R, 46, 0, 0, Math.PI * 2);
+  Ctx.fillStyle = "rgba(21,21,21,0.62)";
+  Ctx.fill();
+  Ctx.clip();
+  Ctx.strokeStyle = "rgba(255,255,255,0.05)";
+  Ctx.lineWidth = 0.65;
+  for (let i = 0; i < 16; i++) {
+    Ctx.beginPath();
+    Ctx.moveTo(84 + i * 12, 86);
+    Ctx.lineTo(84 + i * 12, 178);
+    Ctx.moveTo(84, 86 + i * 12);
+    Ctx.lineTo(276, 86 + i * 12);
+    Ctx.stroke();
+  }
+  Ctx.restore();
+
+  Ctx.strokeStyle = "rgba(112,112,112,0.65)";
+  Ctx.lineWidth = 0.9;
+  Ctx.beginPath();
+  Ctx.ellipse(CX, CY, R, 46, 0, 0, Math.PI * 2);
+  Ctx.stroke();
+
+  Ctx.save();
+  Ctx.setLineDash([2, 3]);
+  Ctx.strokeStyle = "rgba(119,115,107,0.5)";
+  Ctx.lineWidth = 1;
+  Ctx.beginPath();
+  for (let i = 0; i <= 80; i++) {
+    const [px, py] = Point(Math.PI + (i * Math.PI) / 80);
+    if (i === 0) Ctx.moveTo(px, py);
+    else Ctx.lineTo(px, py);
+  }
+  Ctx.stroke();
+  Ctx.setLineDash([]);
+
+  Ctx.strokeStyle = "#e2ac5b";
+  Ctx.lineWidth = 1.8;
+  Ctx.beginPath();
+  for (let i = 0; i <= 80; i++) {
+    const [px, py] = Point((i * Math.PI) / 80);
+    if (i === 0) Ctx.moveTo(px, py);
+    else Ctx.lineTo(px, py);
+  }
+  Ctx.stroke();
+  Ctx.restore();
+
+  const [X, Y] = Point((El * Math.PI) / 180);
+  const [HX, HY] = Point(0);
+  const Night = El < 0;
+
+  Ctx.save();
+  Ctx.setLineDash([2, 4]);
+  Ctx.strokeStyle = "rgba(184,170,142,0.55)";
+  Ctx.lineWidth = 0.8;
+  Ctx.beginPath();
+  Ctx.moveTo(X, Y);
+  Ctx.lineTo(HX, HY);
+  Ctx.stroke();
+  Ctx.restore();
+
+  Ctx.fillStyle = "rgba(197,192,182,0.32)";
+  Ctx.beginPath();
+  Ctx.ellipse(X, HY, 6, 2.3, 0, 0, Math.PI * 2);
+  Ctx.fill();
+
+  Ctx.fillStyle = "#181818";
+  Ctx.strokeStyle = "#f1efe7";
+  Ctx.lineWidth = 1.7;
+  Ctx.beginPath();
+  Ctx.arc(HX, HY, 5.5, 0, Math.PI * 2);
+  Ctx.fill();
+  Ctx.stroke();
+
+  if (!Night) {
+    const Glow = Ctx.createRadialGradient(X, Y, 2, X, Y, 22);
+    Glow.addColorStop(0, "rgba(255,218,135,0.35)");
+    Glow.addColorStop(1, "rgba(255,218,135,0)");
+    Ctx.fillStyle = Glow;
+    Ctx.beginPath();
+    Ctx.arc(X, Y, 22, 0, Math.PI * 2);
+    Ctx.fill();
+  }
+
+  Ctx.fillStyle = Night ? "#9b805c" : "#f4cd75";
+  Ctx.strokeStyle = Night ? "#9b805c" : "#b89045";
+  Ctx.lineWidth = 1;
+  Ctx.beginPath();
+  Ctx.arc(X, Y, 7.5, 0, Math.PI * 2);
+  Ctx.fill();
+  Ctx.stroke();
+
+  Ctx.fillStyle = "rgba(190,196,184,0.6)";
+  Ctx.font = "9px 'IBM Plex Mono', monospace";
+  Ctx.textAlign = "center";
+  Ctx.fillText("12h", CX, 20);
+  Ctx.fillText("24h", CX, 250);
+  Ctx.fillText("N", CX, 74);
+  Ctx.fillText("S", CX, 194);
+  Ctx.fillText("W", 56, 136);
+  Ctx.fillText("E", 304, 136);
+}
+
+export function DrawSunDiscChromaticityCanvas(Canvas, Sun) {
+  const { Ctx, W, H } = EnsureHiDpiCanvas(Canvas, 340, 100);
+  Ctx.clearRect(0, 0, W, H);
+  const T = Clamp((Sun?.Intensity ?? 18) / 60, 0, 1);
+  const YFn = (x) => 76 - 56 * (1 - Math.cos((x * Math.PI) / 2));
+
+  Ctx.save();
+  Ctx.setLineDash([2, 5]);
+  Ctx.strokeStyle = "rgba(255,255,255,0.06)";
+  [24, 50, 77].forEach((y) => {
+    Ctx.beginPath();
+    Ctx.moveTo(14, y);
+    Ctx.lineTo(W - 14, y);
+    Ctx.stroke();
+  });
+  Ctx.restore();
+
+  Ctx.strokeStyle = "#595246";
+  Ctx.lineWidth = 1.2;
+  Ctx.beginPath();
+  for (let i = 0; i <= 60; i++) {
+    const x = i / 60;
+    const px = 14 + x * (W - 28);
+    const py = YFn(x);
+    if (i === 0) Ctx.moveTo(px, py);
+    else Ctx.lineTo(px, py);
+  }
+  Ctx.stroke();
+
+  const EndX = 14 + T * (W - 28);
+  const EndY = YFn(T);
+  const Fill = Ctx.createLinearGradient(0, 18, 0, 88);
+  Fill.addColorStop(0, "rgba(216,189,130,0.22)");
+  Fill.addColorStop(1, "rgba(216,189,130,0)");
+  Ctx.beginPath();
+  for (let i = 0; i <= 60; i++) {
+    const x = (T * i) / 60;
+    const px = 14 + x * (W - 28);
+    const py = YFn(x);
+    if (i === 0) Ctx.moveTo(px, py);
+    else Ctx.lineTo(px, py);
+  }
+  Ctx.lineTo(EndX, 88);
+  Ctx.lineTo(14, 88);
+  Ctx.closePath();
+  Ctx.fillStyle = Fill;
+  Ctx.fill();
+
+  Ctx.strokeStyle = "#dac18b";
+  Ctx.lineWidth = 1.6;
+  Ctx.beginPath();
+  for (let i = 0; i <= 60; i++) {
+    const x = (T * i) / 60;
+    const px = 14 + x * (W - 28);
+    const py = YFn(x);
+    if (i === 0) Ctx.moveTo(px, py);
+    else Ctx.lineTo(px, py);
+  }
+  Ctx.stroke();
+
+  Ctx.fillStyle = "rgba(232,199,106,0.1)";
+  Ctx.beginPath();
+  Ctx.arc(EndX, EndY, 10, 0, Math.PI * 2);
+  Ctx.fill();
+  Ctx.fillStyle = "#efe2c2";
+  Ctx.beginPath();
+  Ctx.arc(EndX, EndY, 3.4, 0, Math.PI * 2);
+  Ctx.fill();
+}
+
+// ── 4. VERBATIM PROJECT ZERO HDRI EQURECTANGULAR PROBE ────────────────────────
+export function DrawHdrDomeCanvas(Canvas, Dome, SunDir = [0, 0.5, -0.8]) {
+  const { Ctx, W, H } = EnsureHiDpiCanvas(Canvas, 340, 152);
+  Ctx.clearRect(0, 0, W, H);
+  const G = Ctx.createLinearGradient(0, 0, 0, H);
+  G.addColorStop(0, Dome?.ZenithColor || "#3d6394");
+  G.addColorStop(0.54, Dome?.HorizonColor || "#98adc4");
+  G.addColorStop(0.56, Dome?.GroundColor || "#252624");
+  G.addColorStop(1, "#121316");
+  Ctx.fillStyle = G;
+  Ctx.fillRect(0, 0, W, H);
+
+  Ctx.strokeStyle = "rgba(255,255,255,0.16)";
+  Ctx.setLineDash([3, 5]);
+  Ctx.beginPath();
+  Ctx.moveTo(0, H * 0.55);
+  Ctx.lineTo(W, H * 0.55);
+  Ctx.stroke();
+  Ctx.setLineDash([]);
+
+  const Rot = ((Dome?.RotationDeg ?? 0) % 360) / 360;
+  const SX = ((Rot + 0.5 + (SunDir[0] || 0) * 0.25) % 1) * W;
+  const SY = Clamp(H * 0.55 - (SunDir[1] || 0.4) * (H * 0.45), 14, H - 14);
+  const Glow = Ctx.createRadialGradient(SX, SY, 2, SX, SY, 34);
+  Glow.addColorStop(0, "rgba(255,244,205,0.92)");
+  Glow.addColorStop(0.4, "rgba(255,214,135,0.35)");
+  Glow.addColorStop(1, "rgba(255,214,135,0)");
+  Ctx.fillStyle = Glow;
+  Ctx.beginPath();
+  Ctx.arc(SX, SY, 34, 0, Math.PI * 2);
+  Ctx.fill();
+}
+
+// ── 5. VERBATIM PROJECT ZERO LUNAR SPHERE & MOON DISC DIAL ────────────────────
+export function DrawMoonPreviewAndDialCanvas(Canvas, Moon) {
+  const { Ctx, W, H } = EnsureHiDpiCanvas(Canvas, 360, 236);
+  Ctx.clearRect(0, 0, W, H);
+  const Metrics = SolveMoonMetrics(Moon);
+
+  // Left: Lit lunar disc silhouette matching MoonDisc in moon-controls.jsx
+  const DiscX = 94;
+  const DiscY = 114;
+  const DiscR = 54;
+  Ctx.fillStyle = "#202834";
+  Ctx.strokeStyle = "rgba(131,151,179,0.35)";
+  Ctx.beginPath();
+  Ctx.arc(DiscX, DiscY, DiscR, 0, Math.PI * 2);
+  Ctx.fill();
+  Ctx.stroke();
+
+  const Frac = Clamp((Moon.PhaseDays ?? 8.9) / 29.53, 0, 1);
+  const Wax = Frac < 0.5;
+  const RX = Math.max(0.01, Math.abs(Math.cos(Frac * Math.PI * 2)) * DiscR);
+  Ctx.save();
+  Ctx.beginPath();
+  Ctx.arc(DiscX, DiscY, DiscR, -Math.PI / 2, Math.PI / 2, !Wax);
+  Ctx.ellipse(DiscX, DiscY, RX, DiscR, 0, Math.PI / 2, -Math.PI / 2, !(Wax ? Frac < 0.25 : Frac >= 0.75));
+  Ctx.closePath();
+  Ctx.clip();
+  const MBody = Ctx.createRadialGradient(DiscX - 18, DiscY - 22, 4, DiscX, DiscY, DiscR * 1.2);
+  MBody.addColorStop(0, "#dce2e4");
+  MBody.addColorStop(0.65, "#a5b0bc");
+  MBody.addColorStop(1, "#596b81");
+  Ctx.fillStyle = MBody;
+  Ctx.fillRect(DiscX - DiscR, DiscY - DiscR, DiscR * 2, DiscR * 2);
+  Ctx.restore();
+
+  Ctx.fillStyle = "#869bb6";
+  Ctx.font = "9px 'IBM Plex Mono', monospace";
+  Ctx.textAlign = "center";
+  Ctx.fillText(`${Metrics.PhaseLabel} · ${(Moon.AngularDiameterDeg ?? 0.52).toFixed(2)}°`, DiscX, 198);
+
+  // Right: Verbatim LunarSphere celestial orbital dial
+  const CX = 258;
+  const CY = 114;
+  const R = 74;
+  const Tilt = 0.34;
+  const Project = (lon, lat) => {
+    const a = (lon * Math.PI) / 180;
+    const b = (lat * Math.PI) / 180;
+    const x = Math.sin(a) * Math.cos(b);
+    const z = Math.cos(a) * Math.cos(b);
+    const y = Math.sin(b);
+    return [
+      CX + R * x,
+      CY - R * (y * Math.cos(Tilt) - z * Math.sin(Tilt)),
+      z * Math.cos(Tilt) + y * Math.sin(Tilt),
+    ];
+  };
+
+  const Globe = Ctx.createRadialGradient(CX - R * 0.4, CY - R * 0.4, 4, CX, CY, R);
+  Globe.addColorStop(0, "#455263");
+  Globe.addColorStop(0.6, "#252f3c");
+  Globe.addColorStop(1, "#151b25");
+  Ctx.fillStyle = Globe;
+  Ctx.strokeStyle = "rgba(120,151,186,0.34)";
+  Ctx.beginPath();
+  Ctx.arc(CX, CY, R, 0, Math.PI * 2);
+  Ctx.fill();
+  Ctx.stroke();
+
+  [-60, -30, 0, 30, 60].forEach((lat) => {
+    Ctx.strokeStyle = lat === 0 ? "rgba(181,213,240,0.55)" : "rgba(122,153,181,0.2)";
+    Ctx.lineWidth = lat === 0 ? 1.1 : 0.6;
+    Ctx.beginPath();
+    for (let i = 0; i <= 60; i++) {
+      const [px, py] = Project(i * 6, lat);
+      if (i === 0) Ctx.moveTo(px, py);
+      else Ctx.lineTo(px, py);
     }
+    Ctx.stroke();
+  });
 
-    // Right column: Twinkle waveform & pole compass
-    const RX = W * 0.68;
-    Ctx.strokeStyle = 'rgba(255,255,255,0.12)';
-    Ctx.strokeRect(RX, 12, W - RX - 10, H * 0.42);
-    Ctx.strokeStyle = '#9ecfff';
+  const [MX, MY, MZ] = Project(Moon.AzimuthDeg ?? 78, Moon.ElevationDeg ?? 28);
+  Ctx.save();
+  if (MZ < 0) Ctx.setLineDash([3, 3]);
+  Ctx.strokeStyle = "#aacfeb";
+  Ctx.lineWidth = 1.3;
+  Ctx.beginPath();
+  for (let i = 0; i <= 24; i++) {
+    const [px, py] = Project(Moon.AzimuthDeg ?? 78, (i * (Moon.ElevationDeg ?? 28)) / 24);
+    if (i === 0) Ctx.moveTo(px, py);
+    else Ctx.lineTo(px, py);
+  }
+  Ctx.stroke();
+  Ctx.restore();
+
+  Ctx.fillStyle = "#e3edf5";
+  Ctx.beginPath();
+  Ctx.arc(MX, MY, 5.5, 0, Math.PI * 2);
+  Ctx.fill();
+  Ctx.fillText(`Az ${Math.round(Moon.AzimuthDeg ?? 78)}° · El ${Math.round(Moon.ElevationDeg ?? 28)}°`, CX, 198);
+}
+
+// ── 6. VERBATIM PROJECT ZERO 300-STAR FIELD & TWINKLE SIGNAL ──────────────────
+export function DrawStarsAndTwinkleCanvas(Canvas, Stars, TimeSec = 0) {
+  const { Ctx, W, H } = EnsureHiDpiCanvas(Canvas, 360, 224);
+  Ctx.clearRect(0, 0, W, H);
+
+  // Top half: 300-star equatorial field
+  Ctx.fillStyle = "#16171a";
+  Ctx.beginPath();
+  Ctx.roundRect(8, 8, W - 16, 114, 8);
+  Ctx.fill();
+
+  const Limit = Clamp(Stars?.LimitingMagnitude ?? 5.5, 0.5, 9);
+  const Rot = ((Stars?.CelestialRotationDeg ?? 45) * Math.PI) / 180;
+  const CX = W / 2;
+  const CY = 65;
+
+  for (let Index = 0; Index < 300; Index++) {
+    const H1 = (Index * 0.61803398875) % 1;
+    const H2 = (Index * 0.7548776662) % 1;
+    const H3 = (Index * 0.5698402909) % 1;
+    const Mag = 0.5 + H3 * 8.2;
+    if (Mag > Limit) continue;
+    const Dx = (H1 - 0.5) * (W - 44);
+    const Dy = (H2 - 0.5) * 94;
+    const X = CX + Dx * Math.cos(Rot) - Dy * Math.sin(Rot);
+    const Y = CY + Dx * Math.sin(Rot) + Dy * Math.cos(Rot);
+    if (Y < 12 || Y > 118) continue;
+    Ctx.globalAlpha = Clamp(1 - Mag / (Limit + 0.5), 0.15, 1);
+    Ctx.fillStyle = Index % 7 === 0 ? "#ffd9a8" : Index % 5 === 0 ? "#b8d6ff" : "#ebe6f6";
+    Ctx.beginPath();
+    Ctx.arc(X, Y, Mag < 2.4 ? 1.8 : 0.9, 0, Math.PI * 2);
+    Ctx.fill();
+  }
+  Ctx.globalAlpha = 1;
+
+  // Bottom half: Verbatim TwinkleSignal trace
+  const Depth = Stars?.TwinkleEnabled ? Stars?.TwinkleDepthPct ?? 30 : 0;
+  const Rate = Stars?.TwinkleRateHz ?? 1.2;
+  const FluxAt = (t) => 1 - (Depth / 100) * (0.5 + 0.3 * Math.sin(t * Math.PI * 2 * Rate) + 0.2 * Math.sin(t * Math.PI * 2 * Rate * 0.47 + 0.8));
+
+  Ctx.fillStyle = "#19171d";
+  Ctx.strokeStyle = "rgba(255,255,255,0.06)";
+  Ctx.beginPath();
+  Ctx.roundRect(8, 130, W - 16, 72, 8);
+  Ctx.fill();
+  Ctx.stroke();
+
+  Ctx.strokeStyle = "#c8a4df";
+  Ctx.lineWidth = 1.4;
+  Ctx.beginPath();
+  for (let i = 0; i <= 100; i++) {
+    const V = FluxAt(TimeSec - 4 + i / 25);
+    const X = 18 + (i / 100) * (W - 36);
+    const Y = 142 + (1 - V) * 46;
+    if (i === 0) Ctx.moveTo(X, Y);
+    else Ctx.lineTo(X, Y);
+  }
+  Ctx.stroke();
+
+  const NowF = FluxAt(TimeSec);
+  Ctx.fillStyle = "#e0d1ea";
+  Ctx.font = "9px 'IBM Plex Mono', monospace";
+  Ctx.fillText(`TWINKLE FLUX · ${Math.round(NowF * 100)}%`, 16, 218);
+}
+
+// ── 7. VERBATIM PROJECT ZERO LENS FLARE COMPOSITE DIAGRAM ─────────────────────
+export function DrawLensFlareCanvas(Canvas, Flare) {
+  const { Ctx, W, H } = EnsureHiDpiCanvas(Canvas, 340, 158);
+  Ctx.clearRect(0, 0, W, H);
+  Ctx.fillStyle = "#16171a";
+  Ctx.fillRect(0, 0, W, H);
+  if (Flare?.Enabled === false) return;
+
+  const SX = (Flare?.PreviewX ?? 0.28) * W;
+  const SY = (Flare?.PreviewY ?? 0.43) * H;
+  const CX = W * 0.5;
+  const CY = H * 0.5;
+  const DX = CX - SX;
+  const DY = CY - SY;
+  const Bright = Clamp((Flare?.Intensity ?? 1) * 0.7, 0.15, 1);
+
+  const SunG = Ctx.createRadialGradient(SX, SY, 1, SX, SY, 52 * Bright);
+  SunG.addColorStop(0, `rgba(255,244,210,${0.9 * Bright})`);
+  SunG.addColorStop(0.28, `rgba(255,210,145,${0.42 * Bright})`);
+  SunG.addColorStop(1, "rgba(183,69,40,0)");
+  Ctx.fillStyle = SunG;
+  Ctx.beginPath();
+  Ctx.arc(SX, SY, 52 * Bright, 0, Math.PI * 2);
+  Ctx.fill();
+
+  if (Flare?.Anamorphic) {
+    const Str = Ctx.createLinearGradient(0, SY, W, SY);
+    Str.addColorStop(0, "rgba(130,167,203,0)");
+    Str.addColorStop(Clamp(SX / W, 0.1, 0.9), `rgba(255,248,229,${0.88 * Bright})`);
+    Str.addColorStop(1, "rgba(113,141,187,0)");
+    Ctx.strokeStyle = Str;
     Ctx.lineWidth = 1.5;
     Ctx.beginPath();
-    for (let s = 0; s <= 40; s++) {
-        const T = s / 40;
-        const Amp = Stars.TwinkleEnabled ? (Stars.TwinkleDepthPct / 100) * 0.42 : 0;
-        const Y = 12 + H * 0.21 - Math.sin(T * Math.PI * 2 * Stars.TwinkleRateHz + TimeSec * 4) * (H * 0.18) * Amp;
-        const X = RX + 4 + T * (W - RX - 18);
-        if (s === 0) Ctx.moveTo(X, Y);
-        else Ctx.lineTo(X, Y);
-    }
+    Ctx.moveTo(8, SY);
+    Ctx.lineTo(W - 8, SY);
     Ctx.stroke();
+  }
 
-    Ctx.fillStyle = 'rgba(255,255,255,0.6)';
-    Ctx.font = '500 10px "DM Sans", sans-serif';
-    Ctx.fillText(`LIMIT ${Stars.LimitingMagnitude.toFixed(1)} mag · POLE ${Math.round(Stars.CelestialRotationDeg)}°`, 10, H - 8);
-    Ctx.restore();
-}
-
-export function DrawLensFlareCanvas(Canvas, Flare)
-{
-    const Width = Canvas?.clientWidth || 320;
-    const Height = Canvas?.clientHeight || 168;
-    const Frame = FitCanvas(Canvas, Width, Height);
-    if (!Frame) return;
-    const { Ctx, W, H } = Frame;
-
-    Ctx.fillStyle = '#07090d';
-    Ctx.fillRect(0, 0, W, H);
-    const SX = W * Flare.PreviewX;
-    const SY = H * Flare.PreviewY;
-    const CX = W * 0.5;
-    const CY = H * 0.5;
-
-    // Halo ring
-    if (Flare.HaloBrightness > 0.01) {
-        const HR = Flare.HaloRadius * Math.min(W, H) * 1.1;
-        Ctx.strokeStyle = `rgba(180,220,255,${Clamp(Flare.HaloBrightness * 0.28, 0, 0.7)})`;
-        Ctx.lineWidth = Math.max(2, Flare.HaloWidth * 180);
-        Ctx.beginPath();
-        Ctx.arc(CX, CY, HR, 0, Math.PI * 2);
-        Ctx.stroke();
-    }
-
-    // Ghosts across optical axis
-    const DX = CX - SX;
-    const DY = CY - SY;
-    for (let g = 1; g <= Flare.GhostCount; g++) {
-        const Step = ((g / Flare.GhostCount) * 2 - 0.4) * Flare.GhostSpacing;
-        const GX = SX + DX * Step;
-        const GY = SY + DY * Step;
-        const GR = 8 + (g % 3) * 6 * Flare.Spread;
-        const Hue = 180 + g * 28 * Flare.Chromatic;
-        Ctx.fillStyle = `hsla(${Hue}, 75%, 72%, ${Clamp(Flare.GhostBrightness * 0.35, 0.04, 0.55)})`;
-        Ctx.beginPath();
-        if (Flare.GhostShape === 'Round') {
-            Ctx.arc(GX, GY, GR, 0, Math.PI * 2);
-        } else {
-            const Sides = Flare.GhostShape === 'Octagon' ? 8 : 6;
-            for (let s = 0; s <= Sides; s++) {
-                const A = (s / Sides) * Math.PI * 2;
-                const PX = GX + Math.cos(A) * GR;
-                const PY = GY + Math.sin(A) * GR;
-                if (s === 0) Ctx.moveTo(PX, PY);
-                else Ctx.lineTo(PX, PY);
-            }
-        }
-        Ctx.fill();
-    }
-
-    // Anamorphic cyan bar
-    if (Flare.Anamorphic) {
-        const BarG = Ctx.createLinearGradient(0, SY, W, SY);
-        BarG.addColorStop(0, 'rgba(90,175,255,0)');
-        BarG.addColorStop(Flare.PreviewX, `rgba(140,210,255,${Clamp(Flare.Intensity * 0.65, 0, 0.9)})`);
-        BarG.addColorStop(1, 'rgba(90,175,255,0)');
-        Ctx.fillStyle = BarG;
-        Ctx.fillRect(0, SY - 2.5, W, 5);
-    }
-
-    // Starburst rays
-    if (Flare.Starburst) {
-        const Pairs = Math.max(2, Flare.RayPairs | 0);
-        const Rot = (Flare.RotationDeg * Math.PI) / 180;
-        Ctx.strokeStyle = `rgba(255,244,210,${Clamp(Flare.Intensity * 0.55, 0.1, 0.85)})`;
-        Ctx.lineWidth = 1.25;
-        for (let r = 0; r < Pairs; r++) {
-            const A = Rot + (r / Pairs) * Math.PI;
-            const Len = 28 + (r % 2) * 16 * Flare.Spread;
-            Ctx.beginPath();
-            Ctx.moveTo(SX - Math.cos(A) * Len, SY - Math.sin(A) * Len);
-            Ctx.lineTo(SX + Math.cos(A) * Len, SY + Math.sin(A) * Len);
-            Ctx.stroke();
-        }
-    }
-
-    // Primary glare core
-    const Core = Ctx.createRadialGradient(SX, SY, 1, SX, SY, 24);
-    Core.addColorStop(0, '#fff');
-    Core.addColorStop(0.35, 'rgba(255,236,196,0.6)');
-    Core.addColorStop(1, 'rgba(0,0,0,0)');
-    Ctx.fillStyle = Core;
+  const Ghosts = Flare?.GhostCount ?? 6;
+  for (let i = 1; i <= Ghosts; i++) {
+    const T = (i / Math.max(1, Ghosts)) * 1.9;
+    const GX = SX + DX * T;
+    const GY = SY + DY * T;
+    const R = 6 + ((i * 5) % 18) * (Flare?.HaloRadius ?? 0.28) * 2.5;
+    Ctx.fillStyle = i % 2 === 0 ? `rgba(121,184,220,${0.18 * (Flare?.GhostBrightness ?? 0.35) * 2})` : `rgba(182,204,131,${0.16 * (Flare?.GhostBrightness ?? 0.35) * 2})`;
     Ctx.beginPath();
-    Ctx.arc(SX, SY, 24, 0, Math.PI * 2);
+    Ctx.arc(GX, GY, R, 0, Math.PI * 2);
     Ctx.fill();
-    Ctx.restore();
+  }
 }
 
-export function DrawHeightFogBeamCanvas(Canvas, Fog)
-{
-    const Width = Canvas?.clientWidth || 320;
-    const Height = Canvas?.clientHeight || 168;
-    const Frame = FitCanvas(Canvas, Width, Height);
-    if (!Frame) return;
-    const { Ctx, W, H } = Frame;
+// ── 8. VERBATIM PROJECT ZERO SCATTERING GRAPH & FOG BEAM CHAMBER ──────────────
+export function DrawAtmosphereScatteringCanvas(Canvas, Atmo) {
+  const { Ctx, W, H } = EnsureHiDpiCanvas(Canvas, 340, 146);
+  Ctx.clearRect(0, 0, W, H);
+  const Rayleigh = Clamp(Atmo?.Rayleigh ?? 1.0, 0, 3);
+  const Mie = Clamp(Atmo?.Mie ?? 1.0, 0, 3);
 
-    Ctx.fillStyle = '#0b0e13';
-    Ctx.fillRect(0, 0, W, H);
-    const HorizonY = H * 0.65;
-    const FogGrad = Ctx.createLinearGradient(0, 0, 0, HorizonY);
-    FogGrad.addColorStop(0, 'rgba(0,0,0,0)');
-    FogGrad.addColorStop(1, Fog.Tint);
-    Ctx.globalAlpha = Clamp(Fog.Density * 28, 0.15, 0.82);
-    Ctx.fillStyle = FogGrad;
-    Ctx.fillRect(0, 0, W, HorizonY);
-    Ctx.globalAlpha = 1;
-
-    // Volumetric scatter beam rays inside beam chamber
-    for (let r = 0; r < 5; r++) {
-        const StartX = W * (0.2 + r * 0.14);
-        const RG = Ctx.createLinearGradient(StartX, 0, StartX + 60, HorizonY);
-        RG.addColorStop(0, `rgba(255,244,210,${Clamp(Fog.SunScatter * 0.25, 0.04, 0.45)})`);
-        RG.addColorStop(1, 'rgba(0,0,0,0)');
-        Ctx.fillStyle = RG;
-        Ctx.beginPath();
-        Ctx.moveTo(StartX, 0);
-        Ctx.lineTo(StartX + 26, 0);
-        Ctx.lineTo(StartX + 94, HorizonY);
-        Ctx.lineTo(StartX + 36, HorizonY);
-        Ctx.closePath();
-        Ctx.fill();
-    }
-
-    // Transmission curve bottom strip
-    const Trans = Math.exp(-Fog.Density * Fog.ProbeDistanceM);
-    Ctx.strokeStyle = '#d8e8ff';
-    Ctx.lineWidth = 1.6;
+  Ctx.save();
+  Ctx.setLineDash([2, 6]);
+  Ctx.strokeStyle = "rgba(255,255,255,0.08)";
+  [24, 52, 80, 108].forEach((y) => {
     Ctx.beginPath();
-    for (let s = 0; s <= 40; s++) {
-        const D = (s / 40) * 1000;
-        const T = Math.exp(-Fog.Density * D);
-        const X = 10 + (s / 40) * (W - 20);
-        const Y = H - 14 - T * (H * 0.25);
-        if (s === 0) Ctx.moveTo(X, Y);
-        else Ctx.lineTo(X, Y);
-    }
+    Ctx.moveTo(16, y);
+    Ctx.lineTo(W - 16, y);
     Ctx.stroke();
+  });
+  Ctx.restore();
 
-    Ctx.fillStyle = 'rgba(255,255,255,0.68)';
-    Ctx.font = '500 10px "DM Sans", sans-serif';
-    Ctx.fillText(`T(${Fog.ProbeDistanceM} m) = ${(Trans * 100).toFixed(1)}% · FALLOFF ${Fog.FalloffHeightM} m`, 10, 16);
-    Ctx.restore();
+  const Fill = Ctx.createLinearGradient(0, 18, 0, 114);
+  Fill.addColorStop(0, "rgba(145,175,210,0.22)");
+  Fill.addColorStop(1, "rgba(145,175,210,0)");
+  const StartY = 104 - Rayleigh * 28;
+  Ctx.beginPath();
+  Ctx.moveTo(16, StartY);
+  Ctx.bezierCurveTo(82, StartY + 6, 94, 92, 186, 100);
+  Ctx.bezierCurveTo(250, 106, 290, 108, W - 16, 109);
+  Ctx.lineTo(W - 16, 114);
+  Ctx.lineTo(16, 114);
+  Ctx.closePath();
+  Ctx.fillStyle = Fill;
+  Ctx.fill();
+
+  Ctx.strokeStyle = "#a1b9d8";
+  Ctx.lineWidth = 1.8;
+  Ctx.beginPath();
+  Ctx.moveTo(16, StartY);
+  Ctx.bezierCurveTo(82, StartY + 6, 94, 92, 186, 100);
+  Ctx.bezierCurveTo(250, 106, 290, 108, W - 16, 109);
+  Ctx.stroke();
+
+  Ctx.save();
+  Ctx.setLineDash([5, 5]);
+  Ctx.strokeStyle = "#ccba95";
+  Ctx.lineWidth = 1.2;
+  Ctx.beginPath();
+  Ctx.moveTo(16, 108 - Mie * 20);
+  Ctx.quadraticCurveTo(W / 2, 110 - Mie * 16, W - 16, 112 - Mie * 12);
+  Ctx.stroke();
+  Ctx.restore();
+
+  const Spec = Ctx.createLinearGradient(16, 0, W - 16, 0);
+  Spec.addColorStop(0, "#927fb0");
+  Spec.addColorStop(0.25, "#7f9dc9");
+  Spec.addColorStop(0.5, "#94b5a9");
+  Spec.addColorStop(0.75, "#c5b27e");
+  Spec.addColorStop(1, "#c28b7c");
+  Ctx.fillStyle = Spec;
+  Ctx.fillRect(16, 122, W - 32, 3);
+
+  Ctx.fillStyle = "#858585";
+  Ctx.font = "9px 'IBM Plex Mono', monospace";
+  Ctx.fillText("380 nm", 16, 138);
+  Ctx.textAlign = "center";
+  Ctx.fillText("Visible spectrum", W / 2, 138);
+  Ctx.textAlign = "right";
+  Ctx.fillText("780 nm", W - 16, 138);
 }
 
-export function DrawSunDiscChromaticityCanvas(Canvas, Sun)
-{
-    const Width = Canvas?.clientWidth || 320;
-    const Height = Canvas?.clientHeight || 168;
-    const Frame = FitCanvas(Canvas, Width, Height);
-    if (!Frame) return;
-    const { Ctx, W, H } = Frame;
+export function DrawHeightFogBeamCanvas(Canvas, Fog) {
+  const { Ctx, W, H } = EnsureHiDpiCanvas(Canvas, 320, 104);
+  Ctx.clearRect(0, 0, W, H);
+  const Extinction = Math.max(0.0005, Fog?.Density ?? 0.024);
+  const Spread = Clamp(Fog?.SunScatter ?? 0.6, 0, 1);
+  const DistMax = 120;
+  const Tint = MixTint(Fog?.Tint || "#d4e3ec", null, 0);
+  const Range = -Math.log(0.02) / Extinction;
+  const Marker = 14 + Clamp(Range / DistMax, 0, 1) * (W - 28);
 
-    const ElNorm = Clamp((Sun.ElevationDeg + 8) / 70, 0, 1);
-    const SkyGrad = Ctx.createLinearGradient(0, 0, 0, H);
-    SkyGrad.addColorStop(0, ElNorm < 0.2 ? '#0b1020' : '#183254');
-    SkyGrad.addColorStop(0.75, ElNorm < 0.25 ? '#4c2d2e' : '#537396');
-    SkyGrad.addColorStop(1, '#121317');
-    Ctx.fillStyle = SkyGrad;
-    Ctx.fillRect(0, 0, W, H);
-
-    const Col = Sun.ColorMode === 'RGB'
-        ? [1, 3, 5].map(i => parseInt((Sun.TintHex || '#fff5e4').slice(i, i + 2), 16))
-        : KelvinToRgb(Sun.TemperatureK || 5600);
-    const CX = W * 0.5;
-    const CY = H * (0.72 - ElNorm * 0.42);
-    const DiscR = Clamp((Sun.DiameterDeg || 0.53) * 14, 8, 34);
-
-    const Corona = Ctx.createRadialGradient(CX, CY, DiscR * 0.5, CX, CY, DiscR * 3.8);
-    Corona.addColorStop(0, Rgb(Col, 0.96));
-    Corona.addColorStop(0.28, Rgb(Col, 0.35));
-    Corona.addColorStop(1, 'rgba(0,0,0,0)');
-    Ctx.fillStyle = Corona;
+  Ctx.save();
+  Ctx.setLineDash([2, 5]);
+  Ctx.strokeStyle = "rgba(255,255,255,0.06)";
+  [26, 52, 78].forEach((y) => {
     Ctx.beginPath();
-    Ctx.arc(CX, CY, DiscR * 3.8, 0, Math.PI * 2);
-    Ctx.fill();
-
-    Ctx.fillStyle = '#fff';
-    Ctx.beginPath();
-    Ctx.arc(CX, CY, DiscR * 0.72, 0, Math.PI * 2);
-    Ctx.fill();
-
-    Ctx.fillStyle = 'rgba(255,255,255,0.72)';
-    Ctx.font = '500 10px "DM Sans", sans-serif';
-    Ctx.fillText(`SOLAR DISC ${Number(Sun.DiameterDeg).toFixed(2)}° · ${Sun.TemperatureK || 5600} K · ${Number(Sun.Intensity).toFixed(1)}x`, 10, H - 8);
-    Ctx.restore();
-}
-
-export function DrawSolarArcCanvas(Canvas, Params)
-{
-    const Width = Canvas?.clientWidth || 320;
-    const Height = Canvas?.clientHeight || 168;
-    const Frame = FitCanvas(Canvas, Width, Height);
-    if (!Frame) return;
-    const { Ctx, W, H } = Frame;
-    const Ephem = EvaluateSolarEphemeris(Params);
-
-    Ctx.fillStyle = '#090b0f';
-    Ctx.fillRect(0, 0, W, H);
-    const HorizonY = H * 0.68;
-    Ctx.strokeStyle = 'rgba(255,255,255,0.18)';
-    Ctx.setLineDash([4, 3]);
-    Ctx.beginPath();
-    Ctx.moveTo(10, HorizonY);
-    Ctx.lineTo(W - 10, HorizonY);
+    Ctx.moveTo(14, y);
+    Ctx.lineTo(W - 14, y);
     Ctx.stroke();
-    Ctx.setLineDash([]);
+  });
+  Ctx.restore();
 
-    Ctx.strokeStyle = '#f3c46c';
-    Ctx.lineWidth = 1.8;
-    Ctx.beginPath();
-    Ephem.DiurnalCurve.forEach((Pt, idx) => {
-        const X = 12 + (Pt.Hour / 24) * (W - 24);
-        const Y = HorizonY - (Pt.ElevationDeg / 90) * (H * 0.56);
-        if (idx === 0) Ctx.moveTo(X, Y);
-        else Ctx.lineTo(X, Y);
-    });
-    Ctx.stroke();
+  for (let i = 0; i < 68; i++) {
+    const Frac = i / 67;
+    const D = Frac * DistMax;
+    const T = Math.exp(-Extinction * D);
+    const Exp = 0.32 + 0.68 * Math.pow(T, 0.15);
+    const Half = 3 + Frac * Frac * (11 + Spread * 24);
+    Ctx.fillStyle = Rgba(Tint, (0.12 + Spread * 0.22) * Exp);
+    Ctx.fillRect(14 + Frac * (W - 32), 52 - Half, 4.5, Half * 2);
+  }
 
-    const CurX = 12 + (Params.LocalHours / 24) * (W - 24);
-    const CurY = HorizonY - (Ephem.ElevationDeg / 90) * (H * 0.56);
-    Ctx.fillStyle = '#eff4cf';
-    Ctx.beginPath();
-    Ctx.arc(CurX, CurY, 5, 0, Math.PI * 2);
-    Ctx.fill();
+  Ctx.strokeStyle = Rgba(Tint, 0.85);
+  Ctx.lineWidth = 1.5;
+  Ctx.beginPath();
+  Ctx.moveTo(14, 52);
+  Ctx.lineTo(W - 14, 52);
+  Ctx.stroke();
 
-    Ctx.fillStyle = 'rgba(255,255,255,0.68)';
-    Ctx.font = '500 10px "DM Sans", sans-serif';
-    Ctx.fillText(`${Ephem.PhaseLabel} · Az ${Ephem.AzimuthDeg.toFixed(0)}° · AM ${Ephem.AirMass.toFixed(1)}`, 10, H - 8);
-    Ctx.restore();
+  Ctx.save();
+  Ctx.setLineDash([3, 3]);
+  Ctx.strokeStyle = "rgba(237,143,143,0.78)";
+  Ctx.beginPath();
+  Ctx.moveTo(Marker, 18);
+  Ctx.lineTo(Marker, 86);
+  Ctx.stroke();
+  Ctx.restore();
+
+  Ctx.fillStyle = "#fff1ca";
+  Ctx.beginPath();
+  Ctx.arc(14, 52, 4, 0, Math.PI * 2);
+  Ctx.fill();
+
+  Ctx.fillStyle = "rgba(255,255,255,0.5)";
+  Ctx.font = "8.5px 'IBM Plex Mono', monospace";
+  Ctx.fillText(`SCATTER · ${Spread.toFixed(2)}`, 12, 13);
+  Ctx.textAlign = "right";
+  Ctx.fillText(`2% · ${Range >= 1000 ? (Range / 1000).toFixed(1) + " km" : Range.toFixed(0) + " m"}`, W - 12, 13);
+  Ctx.fillText(`${Math.round(Math.exp(-Extinction * DistMax) * 100)}% AT ${DistMax} m`, W - 12, 98);
 }
 
-export function DrawAtmosphereScatteringCanvas(Canvas, AtmosInput)
-{
-    const Width = Canvas?.clientWidth || 320;
-    const Height = Canvas?.clientHeight || 168;
-    const Frame = FitCanvas(Canvas, Width, Height);
-    if (!Frame) return;
-    const { Ctx, W, H } = Frame;
-    const Atmos = {
-        ...CreateDefaultAtmosphereParameters(),
-        RayleighMultiplier: AtmosInput.Rayleigh ?? 1,
-        MieMultiplier: AtmosInput.Mie ?? 1,
-        MiePhaseG: AtmosInput.MieAnisotropy ?? 0.78,
-        OzoneMultiplier: AtmosInput.Ozone ?? 1.2
-    };
-    const ElRad = ((AtmosInput.ElevationDeg ?? 25) * Math.PI) / 180;
-    const SunDir = [0, Math.sin(ElRad), -Math.cos(ElRad)];
-
-    const Bands = 24;
-    for (let b = 0; b < Bands; b++) {
-        const Mu = 0.96 - (b / (Bands - 1)) * 1.1;
-        const ViewDir = [0, Mu, -Math.sqrt(Math.max(0, 1 - Mu * Mu))];
-        const Rad = EvaluateSkyRayRadiance(Atmos, ViewDir, SunDir, [1, 0.96, 0.9], 1.0);
-        const Srgb = ToneMapReinhardSrgb(Rad);
-        Ctx.fillStyle = `rgb(${Srgb[0]},${Srgb[1]},${Srgb[2]})`;
-        const Y0 = (b / Bands) * H;
-        Ctx.fillRect(0, Y0, W, H / Bands + 1);
-    }
-
-    Ctx.fillStyle = 'rgba(255,255,255,0.82)';
-    Ctx.font = '500 10px "DM Sans", sans-serif';
-    Ctx.fillText(`BRUNETON-HILLAIRE LUT · R ${Atmos.RayleighMultiplier.toFixed(2)}x · M ${Atmos.MieMultiplier.toFixed(2)}x · O3 ${Atmos.OzoneMultiplier.toFixed(2)}x`, 10, 16);
-    Ctx.restore();
-}
+// Keep alias exports cleanly
+export const DrawLightPreviewDiagram = DrawHeroLightCanvas;
+export const DrawLightResponseCurve = DrawResponseCurveCanvas;
+export const DrawPolarPhotometry = DrawIesPolarWebCanvas;
+export const DrawSunOrbitGizmo = DrawSolarArcCanvas;
+export const DrawAtmosphereScatterChart = DrawAtmosphereScatteringCanvas;
+export const DrawFogChamberCanvas = DrawHeightFogBeamCanvas;

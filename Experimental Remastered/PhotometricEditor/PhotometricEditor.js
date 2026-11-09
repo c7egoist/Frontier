@@ -52,14 +52,23 @@ import {
 } from './StudioControls.js';
 
 const EnvironmentNodes = [
-    { Id: 'env:envdome',    Name: 'HDRI / Sky Dome',     Type: 'envdome',    Glyph: 'EnvDome',    Meta: 'IBL · Equirectangular' },
-    { Id: 'env:sun',        Name: 'Directional Sun',     Type: 'sun',        Glyph: 'Sun',        Meta: 'NOAA Solar Ephemeris' },
-    { Id: 'env:moon',       Name: 'Lunar Bodies',        Type: 'moon',       Glyph: 'Moon',       Meta: '6 Worlds · Phase Dial' },
-    { Id: 'env:stars',      Name: 'Star Field',          Type: 'stars',      Glyph: 'Stars',      Meta: '300 Stars · Twinkle' },
-    { Id: 'env:lensflare',  Name: 'Lens Flare',          Type: 'lensflare',  Glyph: 'LensFlare',  Meta: 'Anamorphic · Ghosts' },
-    { Id: 'env:atmosphere', Name: 'Atmosphere & Fog',    Type: 'atmosphere', Glyph: 'Atmosphere', Meta: 'Rayleigh · Mie · Fog' },
-    { Id: 'env:post',       Name: 'Post Exposure & Lux', Type: 'post',       Glyph: 'Post',       Meta: 'ACES · Isolux Scale' }
+    { Id: 'env:envdome',    Name: 'HDRI / Sky Dome',     Type: 'envdome',    Glyph: 'EnvDome',    IconFile: 'editor-hdri-light',    Meta: 'IBL · Equirectangular' },
+    { Id: 'env:sun',        Name: 'Directional Sun',     Type: 'sun',        Glyph: 'Sun',        IconFile: 'sun',                  Meta: 'NOAA Solar Ephemeris' },
+    { Id: 'env:moon',       Name: 'Lunar Bodies',        Type: 'moon',       Glyph: 'Moon',       IconFile: 'moon',                 Meta: '6 Worlds · Phase Dial' },
+    { Id: 'env:stars',      Name: 'Star Field',          Type: 'stars',      Glyph: 'Stars',      IconFile: 'outliner-stars',       HeaderIcon: 'stars', Meta: '300 Stars · Twinkle' },
+    { Id: 'env:lensflare',  Name: 'Lens Flare',          Type: 'lensflare',  Glyph: 'LensFlare',  IconFile: 'lens-flare',           Meta: 'Anamorphic · Ghosts' },
+    { Id: 'env:atmosphere', Name: 'Atmosphere & Fog',    Type: 'atmosphere', Glyph: 'Atmosphere', IconFile: 'sky-scattering',       Meta: 'Rayleigh · Mie · Fog' },
+    { Id: 'env:post',       Name: 'Post Exposure & Lux', Type: 'post',       Glyph: 'Post',       IconFile: 'environment-exposure', Meta: 'ACES · Isolux Scale' }
 ];
+
+function CreatePzIcon(IconFile, Alt = '')
+{
+    const Img = document.createElement('img');
+    Img.className = 'pz-icon';
+    Img.src = `./Icons/${IconFile}.svg`;
+    Img.alt = Alt;
+    return Img;
+}
 
 const State = {
     Scenario: 'roadway',
@@ -260,8 +269,7 @@ function RenderOutliner()
 
         const IconBox = document.createElement('span');
         IconBox.className = 'tree-item-icon';
-        IconBox.style.color = Spec.Accent;
-        IconBox.appendChild(CreateSvgGlyph(Spec.Glyph, 'st-icon'));
+        IconBox.appendChild(CreatePzIcon(Spec.IconFile, Spec.Label));
 
         const Body = document.createElement('div');
         Body.className = 'tree-item-body';
@@ -300,8 +308,7 @@ function RenderOutliner()
         if (Node.Id === State.SelectedId) Li.classList.add('is-selected');
         const IconBox = document.createElement('span');
         IconBox.className = 'tree-item-icon';
-        IconBox.style.color = '#9ecfff';
-        IconBox.appendChild(CreateSvgGlyph(Node.Glyph, 'st-icon'));
+        IconBox.appendChild(CreatePzIcon(Node.IconFile, Node.Name));
 
         const Body = document.createElement('div');
         Body.className = 'tree-item-body';
@@ -358,46 +365,69 @@ function ComputeLightHeroAndReadings(Light)
         const Dec = Number(P.decay ?? 2);
         return {
             PreviewName: 'Radial falloff',
-            HeroVal: Int.toFixed(1),
+            HeroInt: Math.floor(Int).toLocaleString(),
+            HeroDec: (Int % 1).toFixed(1).slice(1),
             HeroUnit: 'cd',
+            Caption: 'Authored luminous intensity',
+            Descriptor: `Omnidirectional / decay ${Dec.toFixed(1)}`,
+            Note: 'Source study · HTML authoring',
             Readings: [
                 { Key: 'At 5 m · estimate', Val: `${(Int / Math.pow(5, Dec)).toFixed(2)} lx` },
-                { Key: 'Reach', Val: `${Reach.toFixed(1)} m` }
+                { Key: 'Reach', Val: `${Reach.toFixed(0)} m` }
             ]
         };
     }
     if (Type === 'spotlight') {
         const Int = Number(P.intensity ?? 88);
+        const FullDeg = Number(P.angle ?? 13) * 2;
+        const PenPct = Math.round(Number(P.penumbra ?? 0.42) * 100);
         return {
             PreviewName: 'Beam envelope',
-            HeroVal: Int.toFixed(1),
+            HeroInt: Math.floor(Int).toLocaleString(),
+            HeroDec: (Int % 1).toFixed(1).slice(1),
             HeroUnit: 'cd',
+            Caption: 'Authored luminous intensity',
+            Descriptor: `${FullDeg.toFixed(0)}° cone / ${PenPct}% soft edge`,
+            Note: 'Source study · HTML authoring',
             Readings: [
-                { Key: 'Full cone', Val: `${(Number(P.angle ?? 30) * 2).toFixed(1)} °` },
-                { Key: 'Soft edge', Val: `${Math.round(Number(P.penumbra ?? 0.42) * 100)} %` }
+                { Key: 'Full cone', Val: `${FullDeg.toFixed(1)}°` },
+                { Key: 'Soft edge', Val: `${PenPct} %` }
             ]
         };
     }
     if (Type === 'ieslight') {
         const Mult = Number(P.multiplier ?? 1);
+        const RawLm = Number(P.lumens ?? 1650);
+        const ProfileLabel = P.customIesKey ? `${P.customIesKey}.ies`
+            : P.useMeasuredIes && P.measuredProfile ? `${P.measuredProfile}.ies`
+            : (P.profile || 'ECE Low Beam');
         return {
             PreviewName: 'Photometric distribution',
-            HeroVal: Math.round(Number(P.lumens ?? 1650)).toString(),
+            HeroInt: Math.floor(RawLm).toLocaleString(),
+            HeroDec: (RawLm % 1).toFixed(1).slice(1),
             HeroUnit: 'lm',
+            Caption: 'Profile source flux',
+            Descriptor: `${ProfileLabel} / ${P.useMeasuredIes || P.customIesKey ? 'measured LM-63 Type-C' : 'synthetic polar study'}`,
+            Note: P.useMeasuredIes || P.customIesKey ? 'Measured LM-63 .ies candela grid active' : 'Illustrative preset · no measured IES data',
             Readings: [
-                { Key: 'Scaled output', Val: `${Math.round(Number(P.lumens ?? 1650) * Mult)} lm` },
-                { Key: 'Field angle', Val: `${Number(P.cone ?? 58).toFixed(0)} °` }
+                { Key: 'Scaled output', Val: `${Math.round(RawLm * Mult).toLocaleString()} lm` },
+                { Key: 'Field angle', Val: `${Number(P.cone ?? 58).toFixed(1)}°` }
             ]
         };
     }
     if (Type === 'arealight') {
         const W = Number(P.width ?? 2);
         const H = Number(P.height ?? 1);
-        const Area = P.aperture === 'Disk' ? Math.PI * (W * 0.5) * (H * 0.5) : W * H;
+        const Area = P.aperture === 'Disk' ? Math.PI * (W * 0.5) ** 2 : W * H;
+        const RawLm = Number(P.lumens ?? 2400);
         return {
             PreviewName: 'Luminous surface',
-            HeroVal: Math.round(Number(P.lumens ?? 2400)).toString(),
+            HeroInt: Math.floor(RawLm).toLocaleString(),
+            HeroDec: (RawLm % 1).toFixed(1).slice(1),
             HeroUnit: 'lm',
+            Caption: 'Authored luminous flux',
+            Descriptor: `${P.aperture || 'Rectangle'} / ${W.toFixed(1)} × ${H.toFixed(1)} m aperture`,
+            Note: 'Source study · HTML authoring',
             Readings: [
                 { Key: 'Aperture', Val: `${Area.toFixed(2)} m²` },
                 { Key: 'Emission', Val: P.twoSided ? 'Two-sided' : 'One-sided' }
@@ -406,12 +436,17 @@ function ComputeLightHeroAndReadings(Light)
     }
     if (Type === 'tubelight') {
         const Len = Math.max(0.1, Number(P.length ?? 1.8));
+        const RawLm = Number(P.lumens ?? 1800);
         return {
             PreviewName: 'Linear radiance',
-            HeroVal: Math.round(Number(P.lumens ?? 1800)).toString(),
+            HeroInt: Math.floor(RawLm).toLocaleString(),
+            HeroDec: (RawLm % 1).toFixed(1).slice(1),
             HeroUnit: 'lm',
+            Caption: 'Authored luminous flux',
+            Descriptor: `${Len.toFixed(1)} m linear emitter`,
+            Note: 'Source study · HTML authoring',
             Readings: [
-                { Key: 'Linear output', Val: `${Math.round(Number(P.lumens ?? 1800) / Len)} lm/m` },
+                { Key: 'Linear output', Val: `${Math.round(RawLm / Len).toLocaleString()} lm/m` },
                 { Key: 'Tube radius', Val: `${Math.round(Number(P.radius ?? 0.04) * 1000)} mm` }
             ]
         };
@@ -419,8 +454,12 @@ function ComputeLightHeroAndReadings(Light)
     if (Type === 'ledlight') {
         return {
             PreviewName: 'LED emitter',
-            HeroVal: Math.round(Flux).toString(),
+            HeroInt: Math.floor(Flux).toLocaleString(),
+            HeroDec: (Flux % 1).toFixed(1).slice(1),
             HeroUnit: 'lm',
+            Caption: 'Estimated luminous flux',
+            Descriptor: `${Number(P.diameter ?? 40).toFixed(0)} mm package / ${Number(P.temperature ?? 4000).toFixed(0)} K`,
+            Note: 'Source study · HTML authoring',
             Readings: [
                 { Key: 'Driver power', Val: `${(Number(P.watts ?? 18) * Number(P.dimmer ?? 1)).toFixed(1)} W` },
                 { Key: 'Efficacy target', Val: `${Number(P.efficacy ?? 125).toFixed(0)} lm/W` }
@@ -432,8 +471,12 @@ function ComputeLightHeroAndReadings(Light)
     const Lpm = Number(P.ledsPerMetre ?? 60);
     return {
         PreviewName: 'Ribbon light',
-        HeroVal: Math.round(Flux).toString(),
+        HeroInt: Math.floor(Flux).toLocaleString(),
+        HeroDec: (Flux % 1).toFixed(1).slice(1),
         HeroUnit: 'lm',
+        Caption: 'Estimated luminous flux',
+        Descriptor: `Horizontal / ${Len.toFixed(1)} m run`,
+        Note: 'Source study · HTML authoring',
         Readings: [
             { Key: 'Connected load', Val: `${(Number(P.wattsPerMetre ?? 14.4) * Len * Number(P.dimmer ?? 0.9)).toFixed(1)} W` },
             { Key: 'Emitter count', Val: `${Math.round(Lpm * Len)} LEDs` }
@@ -533,7 +576,7 @@ function RenderLightInspector(Light)
     const P = Light.Props;
     const Type = Light.Type;
     const Spec = LightCatalogue[Type];
-    Dom.InspectorGlyph.replaceChildren(CreateSvgGlyph(Spec.Glyph, 'st-icon'));
+    Dom.InspectorGlyph.replaceChildren(CreatePzIcon(Spec.IconFile, Spec.Label));
     Dom.InspectorEntityName.textContent = Light.Name;
     Dom.InspectorEntitySubtitle.textContent = `${Spec.Label.toUpperCase()} · PROJECT ZERO PHOTOMETRY`;
     Dom.BtnDuplicateLight.style.display = '';
@@ -544,22 +587,29 @@ function RenderLightInspector(Light)
 
     const Summary = ComputeLightHeroAndReadings(Light);
 
-    // 1. Preview Card (lp-preview)
+    // 1. Preview Card (lp-preview — Verbatim Project Zero structure)
     const PreviewCard = document.createElement('section');
     PreviewCard.className = 'lp-preview';
     PreviewCard.innerHTML = `
         <div class="lp-preview-head">
-            <span class="lp-preview-label">${Summary.PreviewName}</span>
-            <div class="lp-hero-readout">
-                <strong id="HeroValueReadout" class="lp-hero-value">${Summary.HeroVal}</strong>
-                <span class="lp-hero-unit">${Summary.HeroUnit}</span>
-            </div>
+            <span class="lp-source-icon"><img src="./Icons/${Spec.IconFile}.svg" alt=""></span>
+            <span class="lp-preview-title">${Summary.PreviewName}</span>
+            <span class="lp-preview-badge">LIGHT STUDY</span>
         </div>
+        <div class="lp-hero-readout">
+            <span id="HeroIntPart">${Summary.HeroInt}</span><span id="HeroDecPart" class="lp-decimal">${Summary.HeroDec}</span>
+            <small class="lp-hero-unit">${Summary.HeroUnit}</small>
+        </div>
+        <p class="lp-primary-caption">${Summary.Caption}</p>
+        <p id="PreviewDescriptor" class="lp-descriptor">${Summary.Descriptor}</p>
     `;
     const HeroCanvas = document.createElement('canvas');
     HeroCanvas.id = 'LightPreviewCanvas';
     HeroCanvas.className = 'lp-preview-canvas';
-    PreviewCard.appendChild(HeroCanvas);
+    const NoteP = document.createElement('p');
+    NoteP.className = 'lp-study-note';
+    NoteP.textContent = Summary.Note;
+    PreviewCard.append(HeroCanvas, NoteP);
     Host.appendChild(PreviewCard);
 
     // 2. Readings Rail (lp-readings)
@@ -567,8 +617,12 @@ function RenderLightInspector(Light)
     Readings.className = 'lp-readings';
     const UpdateReadingsDom = () => {
         const S = ComputeLightHeroAndReadings(Light);
-        const HV = PreviewCard.querySelector('#HeroValueReadout');
-        if (HV) HV.textContent = S.HeroVal;
+        const HI = PreviewCard.querySelector('#HeroIntPart');
+        const HD = PreviewCard.querySelector('#HeroDecPart');
+        const Desc = PreviewCard.querySelector('#PreviewDescriptor');
+        if (HI) HI.textContent = S.HeroInt;
+        if (HD) HD.textContent = S.HeroDec;
+        if (Desc) Desc.textContent = S.Descriptor;
         Readings.innerHTML = S.Readings.map(R => `
             <div class="lp-reading-tile">
                 <span class="lp-reading-key">${R.Key}</span>
@@ -582,7 +636,8 @@ function RenderLightInspector(Light)
     let ResponseCanvas = null;
     let ResponseTableEl = null;
     let ResponseHeadTitle = null;
-    let PolarCanvas = null;
+    let ResponseLeadEl = null;
+    let ResponseCapEl = null;
 
     const MutateLight = (RebuildPanel = false) => {
         if (RebuildPanel) {
@@ -594,13 +649,20 @@ function RenderLightInspector(Light)
         if (ResponseCanvas) {
             const Info = DrawResponseCurveCanvas(ResponseCanvas, Type, P, State.LoadedIes);
             if (ResponseHeadTitle) ResponseHeadTitle.textContent = Info.Kind;
+            if (ResponseLeadEl) ResponseLeadEl.textContent = Info.Lead || '';
+            if (ResponseCapEl) ResponseCapEl.textContent = Info.Caption || '';
             if (ResponseTableEl) {
-                ResponseTableEl.innerHTML = Info.Rows.map(R => `
-                    <div class="lp-response-cell"><span>${R.Label}</span><strong>${R.Value}</strong></div>
-                `).join('');
+                if (Info.Rows.length > 0) {
+                    ResponseTableEl.style.display = 'grid';
+                    ResponseTableEl.innerHTML =
+                        `<span class="lp-response-th">Distance</span><span class="lp-response-th">Estimate</span><span class="lp-response-th">Relative</span>` +
+                        Info.Rows.map(R => `<span class="lp-response-td is-muted">${R.Label}</span><span class="lp-response-td">${R.Value}</span><span class="lp-response-td is-muted">${R.Rel}</span>`).join('');
+                } else {
+                    ResponseTableEl.style.display = 'none';
+                    ResponseTableEl.innerHTML = '';
+                }
             }
         }
-        if (PolarCanvas) DrawIesPolarWebCanvas(PolarCanvas, P, State.LoadedIes);
         RenderOutliner();
         SyncViewport();
     };
@@ -637,25 +699,25 @@ function RenderLightInspector(Light)
             Value: Number(P.watts ?? 18), Min: 0.1, Max: 100, Step: 0.5, Precision: 1, Suffix: 'W',
             OnChange: (V) => { P.watts = V; MutateLight(false); }
         }).Element));
-        OutSec.Body.appendChild(CreatePropertyRow('Efficacy', CreateSliderPill({
+        OutSec.Body.appendChild(CreatePropertyRow('Efficacy target', CreateSliderPill({
             Value: Number(P.efficacy ?? 125), Min: 10, Max: 250, Step: 1, Precision: 0, Suffix: 'lm/W',
             OnChange: (V) => { P.efficacy = V; MutateLight(false); }
         }).Element));
         OutSec.Body.appendChild(CreatePropertyRow('Dimmer', CreateSliderPill({
-            Value: Number(P.dimmer ?? 1), Min: 0, Max: 1, Step: 0.01, Precision: 2, Suffix: '×',
+            Value: Number(P.dimmer ?? 1), Min: 0, Max: 1, Step: 0.01, Precision: 2, Suffix: '',
             OnChange: (V) => { P.dimmer = V; MutateLight(false); }
         }).Element));
     } else if (Type === 'ledstrip') {
-        OutSec.Body.appendChild(CreatePropertyRow('Flux / metre', CreateSliderPill({
+        OutSec.Body.appendChild(CreatePropertyRow('Flux per metre', CreateSliderPill({
             Value: Number(P.lumensPerMetre ?? 1000), Min: 10, Max: 4000, Step: 10, Precision: 0, Suffix: 'lm/m',
             OnChange: (V) => { P.lumensPerMetre = V; MutateLight(false); }
         }).Element));
-        OutSec.Body.appendChild(CreatePropertyRow('Load / metre', CreateSliderPill({
+        OutSec.Body.appendChild(CreatePropertyRow('Load per metre', CreateSliderPill({
             Value: Number(P.wattsPerMetre ?? 14.4), Min: 1, Max: 50, Step: 0.2, Precision: 1, Suffix: 'W/m',
             OnChange: (V) => { P.wattsPerMetre = V; MutateLight(false); }
         }).Element));
         OutSec.Body.appendChild(CreatePropertyRow('Dimmer', CreateSliderPill({
-            Value: Number(P.dimmer ?? 0.9), Min: 0, Max: 1, Step: 0.01, Precision: 2, Suffix: '×',
+            Value: Number(P.dimmer ?? 0.9), Min: 0, Max: 1, Step: 0.01, Precision: 2, Suffix: '',
             OnChange: (V) => { P.dimmer = V; MutateLight(false); }
         }).Element));
     } else {
@@ -666,58 +728,60 @@ function RenderLightInspector(Light)
         }).Element));
     }
 
-    if (Type === 'pointlight' || Type === 'spotlight' || Type === 'arealight') {
-        OutSec.Body.appendChild(CreatePropertyRow('Emission colour', BuildColorControl(P, MutateLight), { Compact: true }));
-    }
     if (P.temperature !== undefined || ['ieslight', 'tubelight', 'ledlight', 'ledstrip'].includes(Type)) {
         OutSec.Body.appendChild(CreatePropertyRow('Colour temperature', CreateSliderPill({
             Value: Number(P.temperature ?? 4300), Min: 1800, Max: 12000, Step: 50, Precision: 0, Suffix: 'K',
             OnChange: (V) => { P.temperature = V; MutateLight(false); }
         }).Element));
     }
+    OutSec.Body.appendChild(CreatePropertyRow('Emission tint', BuildColorControl(P, MutateLight), { Compact: true }));
 
     const RespBox = document.createElement('div');
     RespBox.className = 'lp-response';
-    RespBox.innerHTML = `<div class="lp-response-head"><span id="RespTitle">Analytical curve</span><span>ANALYTICAL</span></div>`;
+    RespBox.innerHTML = `
+        <div class="lp-response-head"><span id="RespTitle">Analytical curve</span><span>ANALYTICAL</span></div>
+        <div id="RespLead" class="lp-response-lead"></div>
+        <div id="RespCap" class="lp-response-caption"></div>
+    `;
     ResponseHeadTitle = RespBox.querySelector('#RespTitle');
+    ResponseLeadEl = RespBox.querySelector('#RespLead');
+    ResponseCapEl = RespBox.querySelector('#RespCap');
     ResponseCanvas = document.createElement('canvas');
-    ResponseCanvas.className = 'lp-response-canvas';
+    ResponseCanvas.className = 'lp-response-canvas' + (Type === 'pointlight' ? ' is-tall' : '');
     ResponseTableEl = document.createElement('div');
     ResponseTableEl.className = 'lp-response-table';
     RespBox.append(ResponseCanvas, ResponseTableEl);
     OutSec.Body.appendChild(RespBox);
     Host.appendChild(OutSec.Section);
 
-    // 5. Shape (OPTICS)
-    const ShapeSec = CreateCollapsibleSection({ Title: 'Shape & Optics', Badge: 'OPTICS', Open: true });
+    // 5. Shape (OPTICS — exact Project Zero fields & titles)
+    const ShapeTitle = Type === 'pointlight' ? 'Attenuation'
+        : Type === 'spotlight' ? 'Beam shaping'
+        : Type === 'ieslight' ? 'Distribution profile'
+        : Type === 'ledlight' ? 'Package & optic'
+        : Type === 'ledstrip' ? 'Layout & segments'
+        : 'Emitter dimensions';
+    const ShapeSec = CreateCollapsibleSection({ Title: ShapeTitle, Badge: 'OPTICS', Open: true });
 
     if (Type === 'pointlight') {
-        ShapeSec.Body.appendChild(CreatePropertyRow('Reach radius', CreateSliderPill({
-            Value: Number(P.distance ?? 25), Min: 1, Max: 120, Step: 0.5, Precision: 1, Suffix: 'm',
+        ShapeSec.Body.appendChild(CreatePropertyRow('Reach', CreateSliderPill({
+            Value: Number(P.distance ?? 25), Min: 1, Max: 120, Step: 0.5, Precision: 0, Suffix: 'm',
             OnChange: (V) => { P.distance = V; MutateLight(false); }
         }).Element));
         ShapeSec.Body.appendChild(CreatePropertyRow('Decay exponent', CreateSliderPill({
-            Value: Number(P.decay ?? 2), Min: 0, Max: 4, Step: 0.1, Precision: 1, Suffix: '',
+            Value: Number(P.decay ?? 2), Min: 0, Max: 4, Step: 0.1, Precision: 2, Suffix: '',
             OnChange: (V) => { P.decay = V; MutateLight(false); }
         }).Element));
     } else if (Type === 'spotlight') {
-        ShapeSec.Body.appendChild(CreatePropertyRow('Half-cone angle', CreateSliderPill({
-            Value: Number(P.angle ?? 30), Min: 2, Max: 80, Step: 0.5, Precision: 1, Suffix: 'deg',
-            OnChange: (V) => { P.angle = V; MutateLight(false); }
+        ShapeSec.Body.appendChild(CreatePropertyRow('Full cone angle', CreateSliderPill({
+            Value: Number(P.angle ?? 13) * 2, Min: 4, Max: 160, Step: 0.5, Precision: 1, Suffix: '°',
+            OnChange: (V) => { P.angle = V * 0.5; MutateLight(false); }
         }).Element));
-        ShapeSec.Body.appendChild(CreatePropertyRow('Penumbra softness', CreateSliderPill({
+        ShapeSec.Body.appendChild(CreatePropertyRow('Penumbra', CreateSliderPill({
             Value: Number(P.penumbra ?? 0.42), Min: 0, Max: 1, Step: 0.01, Precision: 2, Suffix: '',
             OnChange: (V) => { P.penumbra = V; MutateLight(false); }
         }).Element));
-        ShapeSec.Body.appendChild(CreatePropertyRow('Throw range', CreateSliderPill({
-            Value: Number(P.distance ?? 32), Min: 1, Max: 150, Step: 1, Precision: 0, Suffix: 'm',
-            OnChange: (V) => { P.distance = V; MutateLight(false); }
-        }).Element));
     } else if (Type === 'ieslight') {
-        // Project Zero 8 IES Preset Chips
-        const PresetLabel = document.createElement('div');
-        PresetLabel.className = 'prop-label';
-        PresetLabel.textContent = 'Project Zero analytical presets';
         const PresetGrid = document.createElement('div');
         PresetGrid.className = 'ies-chip-grid';
         for (const Name of PresetIesNames) {
@@ -735,60 +799,50 @@ function RenderLightInspector(Light)
             });
             PresetGrid.appendChild(Btn);
         }
-        ShapeSec.Body.append(PresetLabel, PresetGrid);
+        ShapeSec.Body.appendChild(PresetGrid);
 
-        // Measured LM-63 Type-C .ies Profiles (734ca2e5/Profiles/*.ies)
-        const LmLabel = document.createElement('div');
-        LmLabel.className = 'prop-label';
-        LmLabel.textContent = 'Measured LM-63 .ies candela profiles';
-        const LmGrid = document.createElement('div');
-        LmGrid.className = 'ies-chip-grid';
-        for (const Name of MeasuredIesProfileNames) {
-            const Btn = document.createElement('button');
-            Btn.type = 'button';
-            Btn.className = 'chip-btn';
-            if (P.useMeasuredIes && !P.customIesKey && P.measuredProfile === Name) Btn.classList.add('is-active');
-            Btn.textContent = `${Name}.ies`;
-            Btn.addEventListener('click', () => {
-                P.useMeasuredIes = true;
-                P.customIesKey = null;
-                P.measuredProfile = Name;
+        // Compact Measured LM-63 Type-C .ies selector strip
+        const IesOptions = [
+            { Value: '', Label: '(Analytical preset active)' },
+            ...MeasuredIesProfileNames.map(N => ({ Value: N, Label: `${N}.ies (LM-63)` })),
+            ...Object.keys(State.LoadedIes).filter(K => !MeasuredIesProfileNames.includes(K)).map(K => ({ Value: `custom:${K}`, Label: `${K}.ies (Uploaded)` }))
+        ];
+        const CurrentVal = P.customIesKey ? `custom:${P.customIesKey}` : (P.useMeasuredIes ? (P.measuredProfile || '') : '');
+        ShapeSec.Body.appendChild(CreatePropertyRow('LM-63 .ies file', CreateSelectPill({
+            Value: CurrentVal,
+            Options: IesOptions,
+            OnChange: (V) => {
+                if (!V) {
+                    P.useMeasuredIes = false;
+                    P.customIesKey = null;
+                } else if (V.startsWith('custom:')) {
+                    P.useMeasuredIes = true;
+                    P.customIesKey = V.slice(7);
+                } else {
+                    P.useMeasuredIes = true;
+                    P.customIesKey = null;
+                    P.measuredProfile = V;
+                }
                 MutateLight(true);
-            });
-            LmGrid.appendChild(Btn);
-        }
-        ShapeSec.Body.append(LmLabel, LmGrid);
-
-        // Custom loaded .ies badge if active
-        const CustomKeys = Object.keys(State.LoadedIes).filter(K => !MeasuredIesProfileNames.includes(K));
-        if (CustomKeys.length > 0) {
-            ShapeSec.Body.appendChild(CreatePropertyRow('Uploaded .ies', CreateSelectPill({
-                Value: P.customIesKey || '',
-                Options: [{ Value: '', Label: '(None)' }, ...CustomKeys.map(K => ({ Value: K, Label: K }))],
-                OnChange: (V) => { P.customIesKey = V || null; MutateLight(true); }
-            }).Element, { Compact: true }));
-        }
+            }
+        }).Element, { Compact: true }));
 
         ShapeSec.Body.appendChild(CreatePropertyRow('Profile multiplier', CreateSliderPill({
             Value: Number(P.multiplier ?? 1), Min: 0, Max: 4, Step: 0.05, Precision: 2, Suffix: '×',
             OnChange: (V) => { P.multiplier = V; MutateLight(false); }
         }).Element));
         ShapeSec.Body.appendChild(CreatePropertyRow('Field angle', CreateSliderPill({
-            Value: Number(P.cone ?? 58), Min: 5, Max: 100, Step: 1, Precision: 0, Suffix: 'deg',
+            Value: Number(P.cone ?? 58), Min: 5, Max: 100, Step: 1, Precision: 1, Suffix: '°',
             OnChange: (V) => { P.cone = V; MutateLight(false); }
         }).Element));
         ShapeSec.Body.appendChild(CreatePropertyRow('Cut-off pitch', CreateSliderPill({
-            Value: Number(P.cutoff ?? 0), Min: -5, Max: 5, Step: 0.1, Precision: 1, Suffix: 'deg',
+            Value: Number(P.cutoff ?? -1), Min: -5, Max: 5, Step: 0.1, Precision: 1, Suffix: '°',
             OnChange: (V) => { P.cutoff = V; MutateLight(false); }
         }).Element));
         ShapeSec.Body.appendChild(CreatePropertyRow('Photometric range', CreateSliderPill({
             Value: Number(P.range ?? 120), Min: 1, Max: 250, Step: 1, Precision: 0, Suffix: 'm',
             OnChange: (V) => { P.range = V; MutateLight(false); }
         }).Element));
-
-        PolarCanvas = document.createElement('canvas');
-        PolarCanvas.className = 'ies-polar-canvas';
-        ShapeSec.Body.appendChild(PolarCanvas);
     } else if (Type === 'arealight') {
         ShapeSec.Body.appendChild(CreatePropertyRow('Aperture', CreateSelectPill({
             Value: P.aperture || 'Rectangle',
@@ -796,15 +850,15 @@ function RenderLightInspector(Light)
             OnChange: (V) => { P.aperture = V; MutateLight(false); }
         }).Element, { Compact: true }));
         ShapeSec.Body.appendChild(CreatePropertyRow('Width', CreateSliderPill({
-            Value: Number(P.width ?? 2), Min: 0.1, Max: 20, Step: 0.1, Precision: 2, Suffix: 'm',
+            Value: Number(P.width ?? 2), Min: 0.1, Max: 20, Step: 0.1, Precision: 1, Suffix: 'm',
             OnChange: (V) => { P.width = V; MutateLight(false); }
         }).Element));
         ShapeSec.Body.appendChild(CreatePropertyRow('Height', CreateSliderPill({
-            Value: Number(P.height ?? 1), Min: 0.1, Max: 20, Step: 0.1, Precision: 2, Suffix: 'm',
+            Value: Number(P.height ?? 1), Min: 0.1, Max: 20, Step: 0.1, Precision: 1, Suffix: 'm',
             OnChange: (V) => { P.height = V; MutateLight(false); }
         }).Element));
         ShapeSec.Body.appendChild(CreatePropertyRow('Beam spread', CreateSliderPill({
-            Value: Number(P.spread ?? 120), Min: 1, Max: 180, Step: 1, Precision: 0, Suffix: 'deg',
+            Value: Number(P.spread ?? 120), Min: 1, Max: 180, Step: 1, Precision: 0, Suffix: '°',
             OnChange: (V) => { P.spread = V; MutateLight(false); }
         }).Element));
         ShapeSec.Body.appendChild(CreatePropertyRow('Two-sided emission', CreateTogglePill({
@@ -813,7 +867,7 @@ function RenderLightInspector(Light)
         }).Element, { Compact: true }));
     } else if (Type === 'tubelight') {
         ShapeSec.Body.appendChild(CreatePropertyRow('Length', CreateSliderPill({
-            Value: Number(P.length ?? 1.8), Min: 0.1, Max: 20, Step: 0.1, Precision: 2, Suffix: 'm',
+            Value: Number(P.length ?? 1.8), Min: 0.1, Max: 20, Step: 0.1, Precision: 1, Suffix: 'm',
             OnChange: (V) => { P.length = V; MutateLight(false); }
         }).Element));
         ShapeSec.Body.appendChild(CreatePropertyRow('Tube radius', CreateSliderPill({
@@ -867,7 +921,7 @@ function RenderLightInspector(Light)
 
 function RenderEnvironmentInspector(Node)
 {
-    Dom.InspectorGlyph.replaceChildren(CreateSvgGlyph(Node.Glyph, 'st-icon'));
+    Dom.InspectorGlyph.replaceChildren(CreatePzIcon(Node.HeaderIcon || Node.IconFile, Node.Name));
     Dom.InspectorEntityName.textContent = Node.Name;
     Dom.InspectorEntitySubtitle.textContent = `${Node.Meta.toUpperCase()} · ENVIRONMENT LIGHT`;
     Dom.BtnDuplicateLight.style.display = 'none';
@@ -1017,7 +1071,7 @@ function RenderEnvironmentInspector(Node)
             Btn.type = 'button';
             Btn.className = 'lunar-slot-btn' + (M.Slot === Idx ? ' is-active' : '');
             Btn.title = Body.Subtitle;
-            Btn.innerHTML = `<span class="lunar-swatch" style="background:${Body.Tint}"></span><span>${Body.Name}</span>`;
+            Btn.innerHTML = `<img class="lunar-tex-thumb" src="./Textures/Moons/${Body.TexFile}" alt=""><span>${Body.Name}</span>`;
             Btn.addEventListener('click', () => {
                 M.Slot = Idx;
                 M.AngularDiameterDeg = Body.NaturalDeg;
@@ -1327,7 +1381,7 @@ function SetupDomAndEvents()
         const Btn = document.createElement('button');
         Btn.type = 'button';
         Btn.className = 'add-light-type-btn';
-        Btn.appendChild(CreateSvgGlyph(Spec.Glyph, 'st-icon'));
+        Btn.appendChild(CreatePzIcon(Spec.IconFile, Spec.Label));
         const Sp = document.createElement('span');
         Sp.textContent = Spec.Label;
         Btn.appendChild(Sp);
@@ -1405,6 +1459,13 @@ function SetupDomAndEvents()
     });
     document.querySelectorAll('[data-cam]').forEach(Btn => {
         Btn.addEventListener('click', () => Viewport?.SetCameraView(Btn.dataset.cam));
+    });
+    const DarkRoomBtn = document.getElementById('BtnToggleDarkRoom');
+    DarkRoomBtn?.addEventListener('click', () => {
+        if (!Viewport) return;
+        Viewport.SetDarkRoomOnly(!Viewport.DarkRoomOnly);
+        DarkRoomBtn.classList.toggle('is-active', Viewport.DarkRoomOnly);
+        DarkRoomBtn.textContent = Viewport.DarkRoomOnly ? 'Dark Fog Room' : 'Environment Sky';
     });
     const GizmoBtn = document.getElementById('BtnToggleGizmos');
     GizmoBtn.addEventListener('click', () => {

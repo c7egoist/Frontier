@@ -175,22 +175,22 @@ export function EncodeSyntheticIesFile(Label, Props, LoadedProfiles)
 //------------------------------------------------------------------------------------------------------------------------
 
 export const LightCatalogue = Object.freeze({
-    pointlight: { Label: 'Point Light', ShortLabel: 'Point', Glyph: 'PointLight', Accent: '#ffd9a0', Unit: 'cd' },
-    spotlight:  { Label: 'Spot Light', ShortLabel: 'Spot', Glyph: 'SpotLight', Accent: '#e8f0ff', Unit: 'cd' },
-    ieslight:   { Label: 'IES Photometric', ShortLabel: 'IES', Glyph: 'IesLight', Accent: '#e8c27a', Unit: 'lm' },
-    arealight:  { Label: 'Area / Softbox', ShortLabel: 'Area', Glyph: 'AreaLight', Accent: '#fff1d6', Unit: 'lm' },
-    tubelight:  { Label: 'Tube Light', ShortLabel: 'Tube', Glyph: 'TubeLight', Accent: '#bfe3ff', Unit: 'lm' },
-    ledlight:   { Label: 'LED Emitter', ShortLabel: 'LED', Glyph: 'LedLight', Accent: '#d8ef9f', Unit: 'lm' },
-    ledstrip:   { Label: 'LED Strip', ShortLabel: 'Strip', Glyph: 'LedStrip', Accent: '#ffcf99', Unit: 'lm' }
+    pointlight: { Label: 'Point Light', ShortLabel: 'Point', Glyph: 'PointLight', IconFile: 'editor-point-light', Accent: '#ffd9a0', Unit: 'cd' },
+    spotlight:  { Label: 'Spot Light', ShortLabel: 'Spot', Glyph: 'SpotLight', IconFile: 'editor-spotlight', Accent: '#e8f0ff', Unit: 'cd' },
+    ieslight:   { Label: 'IES Photometric', ShortLabel: 'IES', Glyph: 'IesLight', IconFile: 'editor-dome-light', Accent: '#e8c27a', Unit: 'lm' },
+    arealight:  { Label: 'Area / Softbox', ShortLabel: 'Area', Glyph: 'AreaLight', IconFile: 'editor-area-light', Accent: '#fff1d6', Unit: 'lm' },
+    tubelight:  { Label: 'Tube Light', ShortLabel: 'Tube', Glyph: 'TubeLight', IconFile: 'light-area-2d', Accent: '#bfe3ff', Unit: 'lm' },
+    ledlight:   { Label: 'LED Emitter', ShortLabel: 'LED', Glyph: 'LedLight', IconFile: 'light-point-2d', Accent: '#d8ef9f', Unit: 'lm' },
+    ledstrip:   { Label: 'LED Strip', ShortLabel: 'Strip', Glyph: 'LedStrip', IconFile: 'slate-ring-light', Accent: '#ffcf99', Unit: 'lm' }
 });
 
 export const MoonCatalogue = Object.freeze([
-    { Id: 'Luna',    Name: 'Luna',    Subtitle: 'Silicate highlands & maria albedo 0.12', Tint: '#dce2ec', Core: '#9ca4b4', Cr: '#59606f', NaturalDeg: 0.52 },
-    { Id: 'Ember',   Name: 'Ember',   Subtitle: 'Basalt magma crust · warm volcanic scatter', Tint: '#f0b08a', Core: '#b55635', Cr: '#4f2218', NaturalDeg: 1.60 },
-    { Id: 'Glacier', Name: 'Glacier', Subtitle: 'Europa lineated water-ice albedo 0.67', Tint: '#dcebf7', Core: '#9ab6cc', Cr: '#7a4f3b', NaturalDeg: 1.20 },
-    { Id: 'Sulfur',  Name: 'Sulfur',  Subtitle: 'Io sulfuric caldera plumes · high frost reflectance', Tint: '#ece188', Core: '#bfa745', Cr: '#6c5a26', NaturalDeg: 1.10 },
-    { Id: 'Shroud',  Name: 'Shroud',  Subtitle: 'Titan nitrogen-methane dense haze limb', Tint: '#e5bc82', Core: '#b2864d', Cr: '#7a5d34', NaturalDeg: 2.40 },
-    { Id: 'Shard',   Name: 'Shard',   Subtitle: 'Fractured carbonaceous chondrite moonlet', Tint: '#a7aab0', Core: '#686b72', Cr: '#33363c', NaturalDeg: 0.60 }
+    { Id: 'Luna',    Name: 'Luna',    TexFile: 'luna_2k.jpg',    Subtitle: 'Silicate highlands & maria albedo 0.12', Tint: '#dce2ec', Core: '#9ca4b4', Cr: '#59606f', NaturalDeg: 0.52 },
+    { Id: 'Ember',   Name: 'Ember',   TexFile: 'ember_2k.jpg',   Subtitle: 'Basalt magma crust · warm volcanic scatter', Tint: '#f0b08a', Core: '#b55635', Cr: '#4f2218', NaturalDeg: 1.60 },
+    { Id: 'Glacier', Name: 'Glacier', TexFile: 'glacier_2k.jpg', Subtitle: 'Europa lineated water-ice albedo 0.67', Tint: '#dcebf7', Core: '#9ab6cc', Cr: '#7a4f3b', NaturalDeg: 1.20 },
+    { Id: 'Sulfur',  Name: 'Sulfur',  TexFile: 'sulfur_2k.jpg',  Subtitle: 'Io sulfuric caldera plumes · high frost reflectance', Tint: '#ece188', Core: '#bfa745', Cr: '#6c5a26', NaturalDeg: 1.10 },
+    { Id: 'Shroud',  Name: 'Shroud',  TexFile: 'shroud_2k.jpg',  Subtitle: 'Titan nitrogen-methane dense haze limb', Tint: '#e5bc82', Core: '#b2864d', Cr: '#7a5d34', NaturalDeg: 2.40 },
+    { Id: 'Shard',   Name: 'Shard',   TexFile: 'shard_2k.jpg',   Subtitle: 'Fractured carbonaceous chondrite moonlet', Tint: '#a7aab0', Core: '#686b72', Cr: '#33363c', NaturalDeg: 0.60 }
 ]);
 
 export function ComputeFlux(Type, Props)
@@ -370,13 +370,13 @@ export function CreateDefaultEnvironmentLights()
             PreviewY: 0.43
         },
         Fog: {
-            Enabled: false,
+            Enabled: true,
             Mode: 'Height Fog',
-            Density: 0.006,
+            Density: 0.024,
             FalloffHeightM: 400,
             SunScatter: 0.60,
             Tint: '#9eadc1',
-            ProbeDistanceM: 200
+            ProbeDistanceM: 120
         },
         Post: {
             Enabled: true,

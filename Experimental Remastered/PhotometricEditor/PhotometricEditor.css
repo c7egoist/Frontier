@@ -807,60 +807,117 @@ button, input, select {
     scrollbar-width: thin;
 }
 
-/* Project Zero lp-preview card */
+/* Project Zero Outliner & Card SVG Image Icons */
+.pz-icon {
+    width: 18px;
+    height: 18px;
+    object-fit: contain;
+    display: block;
+    flex-shrink: 0;
+}
+.inspector-glyph .pz-icon {
+    width: 20px;
+    height: 20px;
+}
+.add-light-type-btn .pz-icon {
+    width: 22px;
+    height: 22px;
+}
+
+/* Project Zero lp-preview card (verbatim layout) */
 .lp-preview {
-    background: var(--bg-card);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-card);
-    padding: 12px;
+    background: radial-gradient(ellipse at 55% 65%, #242925 0%, #191c1a 68%);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 14px;
+    padding: 16px 14px 12px;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 6px;
 }
 .lp-preview-head {
     display: flex;
-    justify-content: space-between;
-    align-items: baseline;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
 }
-.lp-preview-label {
-    font-size: 11px;
-    font-weight: 500;
-    color: var(--text-muted);
-    letter-spacing: 0.04em;
+.lp-source-icon {
+    width: 24px;
+    height: 24px;
+    display: inline-flex;
+    flex: none;
+}
+.lp-source-icon img {
+    width: 24px;
+    height: 24px;
+    object-fit: contain;
+}
+.lp-preview-title {
+    font-size: 13.5px;
+    font-weight: 400;
+    color: #d3d9d0;
+    flex: 1;
+}
+.lp-preview-badge {
+    font-size: 8px;
+    letter-spacing: 1px;
+    color: #7c887c;
     text-transform: uppercase;
 }
 .lp-hero-readout {
     display: flex;
+    flex-wrap: wrap;
     align-items: baseline;
-    gap: 5px;
-}
-.lp-hero-value {
     font-size: 40px;
-    line-height: 1;
+    line-height: 1.04;
     font-weight: 300;
+    letter-spacing: -1.6px;
+    color: #edf0e7;
     font-variant-numeric: tabular-nums;
-    color: var(--accent-lime);
+}
+.lp-hero-readout .lp-decimal {
+    color: #768074;
 }
 .lp-hero-unit {
-    font-size: 13px;
-    color: var(--text-muted);
+    font-size: 14px;
+    letter-spacing: 0;
+    color: #a9b3a4;
+    margin-left: 7px;
+    font-weight: 300;
+}
+.lp-primary-caption {
+    font-size: 10px;
+    color: #98a091;
+    margin: 2px 0 0;
+}
+.lp-descriptor {
+    font-size: 10px;
+    color: #b1b9a8;
+    line-height: 1.45;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    margin-top: 8px;
+    padding-top: 9px;
+}
+.lp-study-note {
+    font-size: 9px;
+    color: #828d7e;
+    margin: 2px 0 0;
+    line-height: 1.45;
 }
 
 .lp-preview-canvas {
     width: 100%;
-    height: 224px;
-    border-radius: 10px;
-    border: 1px solid var(--border-subtle);
+    height: 248px;
+    border-radius: 6px;
     display: block;
-    background: #090b0f;
+    background: transparent;
 }
 .env-preview-canvas {
     width: 100%;
-    height: 168px;
-    border-radius: 10px;
+    height: 180px;
+    border-radius: 8px;
     border: 1px solid var(--border-subtle);
     display: block;
-    background: #090b0f;
+    background: #141517;
     cursor: crosshair;
 }
 
@@ -1097,42 +1154,74 @@ button, input, select {
 
 /* Embedded Analytical Response Sub-Card */
 .lp-response {
-    margin-top: 4px;
-    padding: 9px;
-    border-radius: 11px;
-    background: #111317;
-    border: 1px solid var(--border-subtle);
+    margin-top: 8px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 5px;
 }
 .lp-response-head {
     display: flex;
     justify-content: space-between;
-    font-size: 10.5px;
-    color: var(--text-dim);
+    align-items: baseline;
+    font-size: 12px;
+    color: #d3d9d0;
+}
+.lp-response-head span:last-child {
+    font-size: 8.5px;
+    letter-spacing: 0.9px;
+    color: #7c887c;
+}
+.lp-response-lead {
+    font-size: 20px;
+    font-weight: 300;
+    color: #edf0e7;
+    font-variant-numeric: tabular-nums;
+}
+.lp-response-caption {
+    font-size: 9.5px;
+    color: #828d7e;
 }
 .lp-response-canvas {
     width: 100%;
-    height: 98px;
-    border-radius: 8px;
+    height: 110px;
+    border-radius: 6px;
     display: block;
 }
-.lp-response-table {
-    display: flex;
-    justify-content: space-between;
-    gap: 6px;
-    border-top: 1px solid var(--border-subtle);
-    padding-top: 6px;
+.lp-response-canvas.is-tall {
+    height: 168px;
 }
-.lp-response-cell {
-    display: flex;
-    flex-direction: column;
-    font-size: 10.5px;
+.lp-response-table {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 4px 10px;
+    border-top: 1px solid var(--border-subtle);
+    padding-top: 8px;
+    margin-top: 2px;
+    font-size: 10px;
     font-variant-numeric: tabular-nums;
 }
-.lp-response-cell span { color: var(--text-dim); }
-.lp-response-cell strong { color: var(--text-primary); font-weight: 500; }
+.lp-response-th {
+    color: var(--text-dim);
+    font-size: 9px;
+    text-transform: none;
+    padding-bottom: 2px;
+}
+.lp-response-td {
+    color: var(--text-primary);
+}
+.lp-response-td.is-muted {
+    color: var(--text-muted);
+}
+
+.lunar-tex-thumb {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+}
 
 /* IES Profile Chip Matrix inside Shape Section */
 .ies-chip-grid {
