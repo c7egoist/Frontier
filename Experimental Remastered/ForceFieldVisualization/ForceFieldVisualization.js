@@ -135,20 +135,24 @@ const ForceFieldVisualization = (() =>
         const Options = {
             Quantity: 'Speed', Contribution: 'Flow', ScaleMode: 'Automatic', FixedScale: 20,
             Heatmap: true, HeatmapStyle: 'Smooth', Opacity: 1, Arrows: true, ArrowSpacing: 40, ArrowWeight: 1,
+            FlowLines: false, FlowLineSpacing: 46, FlowLineLength: 22, FlowLinePulse: true, QuietCutoff: 0.025,
             Tracers: true, TracerCount: 360, SliceHeight: 10, CellPixels: 6, CameraCells: 48,
-            ShowScaleBar: true, ShowLegend: true, ShowSources: true, ShowLabels: true, ShowCascades: false, ShowGroundGrid: true,
+            ShowScaleBar: true, ShowLegend: true, ShowSources: true, ShowLabels: true, MinimalLabels: false, ShowCascades: false, ShowGroundGrid: true,
             Cascades: [], CascadeFocus: [0, 0], Sources: [], Extent: null, ClipToExtent: false, ProbePoint: null,
+            PlacementMode: false, PlacementPreview: null,
             Background: '#050b12', RefreshInterval: 66, Animated: true, Minimap: null, MinimapExtent: null, LegendTitle: ''
         };
         const View = { Mode: 'Map', CentreX: 0, CentreZ: 0, Span: 2000, Yaw: Math.PI / 4, Pitch: 0.62, ViewProjection: null };
-        const Statistics = { Samples: 0, Milliseconds: 0, CellSpan: 1, Scale: 1, Peak: 0, Columns: 0, Rows: 0, ArrowSpan: 1, Refreshes: 0 };
+        const Statistics = { Samples: 0, Milliseconds: 0, CellSpan: 1, Scale: 1, Peak: 0, Columns: 0, Rows: 0, ArrowSpan: 1, Streamlines: 0, Refreshes: 0 };
         const Probe = new Float64Array(3);
         const Lattice = { Columns: 0, Rows: 0, OriginX: 0, OriginZ: 0, CellSpan: 1, MedianVertical: 0, Vectors: new Float32Array(0), Quantity: new Float32Array(0),
                           Inside: new Uint8Array(0), Image: null, ImageCanvas: document.createElement('canvas'), Stamp: '', Time: -1, RefreshedAt: 0,
                           Unit: 'm/s' };
         const Offscreen = document.createElement('canvas');
         const Tracers = [];
-        let Width = 1, Height = 1, Ratio = 1, LastRender = 0, Dirty = true, ScaleReading = 0;
+        const Streamlines = [];
+        let StreamlinesStamp = '';
+        let Width = 1, Height = 1, Ratio = 1, LastRender = 0, Dirty = true, ScaleReading = 0, ElapsedDisplay = 0;
         let Inverse = null;
         let MinimapStamp = 0, MinimapTime = -1;
         const MinimapLattice = { Canvas: document.createElement('canvas'), Size: 72 };
@@ -630,7 +634,7 @@ const ForceFieldVisualization = (() =>
                     if (!Interpolate(X, Z, Vector)) continue;
                     const Horizontal = Math.hypot(Vector[0], Vector[2]);
                     const Magnitude = Math.hypot(Horizontal, Vector[1] - Lattice.MedianVertical);
-                    if (Magnitude < Scale * 0.02) continue;
+                    if (Magnitude < Scale * (Options.QuietCutoff ?? 0.025)) continue;
                     const Tail = Project(X, SliceY, Z);
                     if (!Tail || Tail[0] < -40 || Tail[1] < -40 || Tail[0] > Width + 40 || Tail[1] > Height + 40) continue;
                     const Lifted = Vector[1] - Lattice.MedianVertical;
@@ -664,8 +668,10 @@ const ForceFieldVisualization = (() =>
             Context.strokeStyle = 'rgba(0,0,0,0.35)';
             Context.lineWidth = 2.6;
             Context.stroke(Strokes);
-            Context.strokeStyle = 'rgba(239,255,255,0.78)';
-            Context.lineWidth = 1.1;
+            Context.strokeStyle = Options.Heatmap
+                ? 'rgba(239,255,255,0.82)'
+                : Options.Contribution === 'Accelerate' ? 'rgba(232,194,122,0.88)' : 'rgba(143,211,196,0.88)';
+            Context.lineWidth = 1.15;
             Context.stroke(Strokes);
             Context.lineWidth = 1.2;
             Context.stroke(Rising);
@@ -773,6 +779,175 @@ const ForceFieldVisualization = (() =>
         }
 
         //--------------------------------------------------------------------------------------------------------------------
+        //                                          RK2 FLOW LINES (STREAMLINES)
+        //--------------------------------------------------------------------------------------------------------------------
+
+        // 📝 Anti-clutter smooth RK2 streamlines: seeded on a world-snapped sparse grid only inside active field regions,
+        //    prevented from piling up by screen-space occupancy bins, and animated with subtle downstream phase pulses.
+        function BuildFlowLines()
+        {
+            Streamlines.length = 0;
+            Statistics.Streamlines = 0;
+            if (!Options.FlowLines || Options.Contribution === 'Damp') return;
+            const Coverage = ResolveCoverage();
+            const Scale = ScaleReading || 1;
+            const MinMag = Scale * Math.max(0.035, Options.QuietCutoff ?? 0.025);
+            const CellPx = Math.max(22, Options.FlowLineSpacing || 46);
+            const SeedSpan = View.Mode === 'Camera'
+                ? Math.max(Coverage.MaximumX - Coverage.MinimumX, Coverage.MaximumZ - Coverage.MinimumZ) / 11
+                : Math.max(Lattice.CellSpan * 2, (View.Span / Math.max(1, Width)) * CellPx);
+            const BinPx = Math.max(14, CellPx * 0.56);
+            const BinCols = Math.max(4, Math.ceil(Width / BinPx) + 2);
+            const BinRows = Math.max(4, Math.ceil(Height / BinPx) + 2);
+            const Occupied = new Uint8Array(BinCols * BinRows);
+
+            const MarkScreen = (X, Z) =>
+            {
+                const P = Project(X, Options.SliceHeight, Z);
+                if (!P || P[0] < -12 || P[1] < -12 || P[0] > Width + 12 || P[1] > Height + 12) return false;
+                const C = Math.floor(P[0] / BinPx), R = Math.floor(P[1] / BinPx);
+                if (C < 0 || R < 0 || C >= BinCols || R >= BinRows) return false;
+                Occupied[R * BinCols + C] = 1;
+                return true;
+            };
+            const IsFreeScreen = (X, Z) =>
+            {
+                const P = Project(X, Options.SliceHeight, Z);
+                if (!P || P[0] < 0 || P[1] < 0 || P[0] > Width || P[1] > Height) return false;
+                const C = Math.floor(P[0] / BinPx), R = Math.floor(P[1] / BinPx);
+                if (C < 0 || R < 0 || C >= BinCols || R >= BinRows) return false;
+                return !Occupied[R * BinCols + C];
+            };
+
+            const V1 = new Float64Array(3), V2 = new Float64Array(3);
+            const MaxHalfSteps = Math.max(6, Math.round((Options.FlowLineLength || 22) * 0.55));
+            const WorldStep = View.Mode === 'Camera'
+                ? Math.max(Coverage.MaximumX - Coverage.MinimumX, Coverage.MaximumZ - Coverage.MinimumZ) / 72
+                : Math.max(Lattice.CellSpan * 0.65, (View.Span / Math.max(1, Width)) * 8);
+
+            const TraceDir = (StartX, StartZ, Sign, OwnBins) =>
+            {
+                const Pts = [];
+                let X = StartX, Z = StartZ;
+                let MagSum = 0;
+                for (let Step = 0; Step < MaxHalfSteps; ++Step)
+                {
+                    if (!Interpolate(X, Z, V1)) break;
+                    const H1 = Math.hypot(V1[0], V1[2]);
+                    if (H1 < MinMag) break;
+                    const DX1 = (V1[0] / H1) * Sign, DZ1 = (V1[2] / H1) * Sign;
+                    const MX = X + DX1 * WorldStep * 0.5, MZ = Z + DZ1 * WorldStep * 0.5;
+                    if (!Interpolate(MX, MZ, V2)) break;
+                    const H2 = Math.hypot(V2[0], V2[2]);
+                    if (H2 < MinMag) break;
+                    const NX = X + (V2[0] / H2) * Sign * WorldStep;
+                    const NZ = Z + (V2[2] / H2) * Sign * WorldStep;
+                    if (NX < Coverage.MinimumX || NX > Coverage.MaximumX || NZ < Coverage.MinimumZ || NZ > Coverage.MaximumZ) break;
+                    const P = Project(NX, Options.SliceHeight, NZ);
+                    if (!P || P[0] < -20 || P[1] < -20 || P[0] > Width + 20 || P[1] > Height + 20) break;
+                    const C = Math.floor(P[0] / BinPx), R = Math.floor(P[1] / BinPx);
+                    if (C >= 0 && R >= 0 && C < BinCols && R < BinRows)
+                    {
+                        const Key = R * BinCols + C;
+                        if (Occupied[Key] && !OwnBins.has(Key)) break;
+                        OwnBins.add(Key);
+                    }
+                    X = NX; Z = NZ;
+                    MagSum += H2;
+                    Pts.push([X, Z]);
+                }
+                return { Pts, AvgMag: Pts.length ? MagSum / Pts.length : 0 };
+            };
+
+            const StartX = Math.floor(Coverage.MinimumX / SeedSpan) * SeedSpan + SeedSpan * 0.5;
+            const StartZ = Math.floor(Coverage.MinimumZ / SeedSpan) * SeedSpan + SeedSpan * 0.5;
+            let RowIdx = 0;
+            for (let Z = StartZ; Z <= Coverage.MaximumZ && Streamlines.length < 360; Z += SeedSpan, ++RowIdx)
+            {
+                const Stagger = (RowIdx & 1) ? SeedSpan * 0.5 : 0;
+                for (let X = StartX + Stagger; X <= Coverage.MaximumX && Streamlines.length < 360; X += SeedSpan)
+                {
+                    if (!Interpolate(X, Z, V1)) continue;
+                    const H0 = Math.hypot(V1[0], V1[2]);
+                    if (H0 < MinMag) continue;
+                    if (!IsFreeScreen(X, Z)) continue;
+                    const Own = new Set();
+                    const Back = TraceDir(X, Z, -1, Own);
+                    const Fwd = TraceDir(X, Z, +1, Own);
+                    const Combined = [...Back.Pts.reverse(), [X, Z], ...Fwd.Pts];
+                    if (Combined.length < 3) continue;
+                    for (const [PX, PZ] of Combined) MarkScreen(PX, PZ);
+                    const AvgMag = (H0 + Back.AvgMag + Fwd.AvgMag) / (1 + (Back.Pts.length ? 1 : 0) + (Fwd.Pts.length ? 1 : 0));
+                    Streamlines.push({ Points: Combined, NormMag: Math.min(1.4, AvgMag / Scale), Phase: (Math.abs(Math.sin(X * 0.13 + Z * 0.29))) });
+                }
+            }
+            Statistics.Streamlines = Streamlines.length;
+        }
+
+        function RenderFlowLines()
+        {
+            if (!Options.FlowLines || Options.Contribution === 'Damp' || !Streamlines.length) return;
+            const SliceY = Options.SliceHeight;
+            const Palette = Options.Contribution === 'Accelerate'
+                ? ['rgba(232,194,122,0.18)', 'rgba(255,222,148,0.85)']
+                : Options.Heatmap
+                    ? ['rgba(218,248,255,0.20)', 'rgba(255,255,255,0.88)']
+                    : ['rgba(143,211,196,0.20)', 'rgba(182,250,236,0.92)'];
+
+            Context.save();
+            Context.lineCap = 'round';
+            Context.lineJoin = 'round';
+            const BasePath = new Path2D();
+            const PulsePath = new Path2D();
+
+            for (const Line of Streamlines)
+            {
+                const Projected = [];
+                for (const [WX, WZ] of Line.Points)
+                {
+                    const P = Project(WX, SliceY, WZ);
+                    if (P) Projected.push(P);
+                }
+                if (Projected.length < 3) continue;
+
+                BasePath.moveTo(Projected[0][0], Projected[0][1]);
+                for (let I = 1; I < Projected.length - 1; ++I)
+                {
+                    const MX = (Projected[I][0] + Projected[I + 1][0]) * 0.5;
+                    const MY = (Projected[I][1] + Projected[I + 1][1]) * 0.5;
+                    BasePath.quadraticCurveTo(Projected[I][0], Projected[I][1], MX, MY);
+                }
+                const Last = Projected[Projected.length - 1];
+                BasePath.lineTo(Last[0], Last[1]);
+
+                if (Options.FlowLinePulse)
+                {
+                    const Head = ((Line.Phase + ElapsedDisplay * (0.42 + Line.NormMag * 0.72)) % 1.0);
+                    const Span = 0.28;
+                    const Count = Projected.length - 1;
+                    const StartIdx = Math.max(0, Math.floor((Head - Span) * Count));
+                    const EndIdx = Math.min(Count, Math.ceil(Head * Count));
+                    if (EndIdx > StartIdx)
+                    {
+                        PulsePath.moveTo(Projected[StartIdx][0], Projected[StartIdx][1]);
+                        for (let I = StartIdx + 1; I <= EndIdx; ++I) PulsePath.lineTo(Projected[I][0], Projected[I][1]);
+                    }
+                }
+            }
+
+            Context.strokeStyle = Palette[0];
+            Context.lineWidth = 1.25;
+            Context.stroke(BasePath);
+            if (Options.FlowLinePulse)
+            {
+                Context.strokeStyle = Palette[1];
+                Context.lineWidth = 1.9;
+                Context.stroke(PulsePath);
+            }
+            Context.restore();
+        }
+
+        //--------------------------------------------------------------------------------------------------------------------
         //                                                    SOURCES
         //--------------------------------------------------------------------------------------------------------------------
 
@@ -815,10 +990,10 @@ const ForceFieldVisualization = (() =>
             {
                 const Colour = Source.Colour || ContributionColours[Source.Contribution] || '#dfe7f3';
                 const Active = Source.Active ?? 1;
-                Context.globalAlpha = (0.45 + 0.55 * Math.min(1, Active + (Source.Selected ? 0.4 : 0))) * (Source.Dim && !Source.Selected ? 0.4 : 1);
+                Context.globalAlpha = (Source.Selected ? 0.96 : 0.34 + 0.42 * Math.min(1, Active)) * (Source.Dim && !Source.Selected ? 0.35 : 1);
                 Context.strokeStyle = Colour;
-                Context.lineWidth = Source.Selected ? 2 : 1.2;
-                Context.setLineDash(Active > 0.01 ? [] : [5, 5]);
+                Context.lineWidth = Source.Selected ? 2 : 1.1;
+                Context.setLineDash(Source.Selected ? [] : [4, 5]);
                 if (Source.Track && Source.Track.length > 1)
                 {
                     Context.save();
@@ -859,7 +1034,7 @@ const ForceFieldVisualization = (() =>
                 if (Source.Bearing !== undefined && Source.Bearing !== null)
                 {
                     const Turn = Source.Bearing * Math.PI / 180;
-                    const Reach = PixelsPerMetre ? 46 / PixelsPerMetre : Math.max(0.6, (Source.Radius || 1) * 0.5);
+                    const Reach = PixelsPerMetre ? Math.min(Source.Radius * 0.85 || 56 / PixelsPerMetre, 48 / PixelsPerMetre) : Math.max(0.6, (Source.Radius || 1) * 0.5);
                     const Tip = Project(Source.X + Math.sin(Turn) * Reach, SliceY, Source.Z - Math.cos(Turn) * Reach);
                     if (Tip)
                     {
@@ -873,6 +1048,30 @@ const ForceFieldVisualization = (() =>
                         Context.moveTo(Tip[0] - Math.cos(Angle - 0.5) * 8, Tip[1] - Math.sin(Angle - 0.5) * 8);
                         Context.lineTo(Tip[0], Tip[1]);
                         Context.lineTo(Tip[0] - Math.cos(Angle + 0.5) * 8, Tip[1] - Math.sin(Angle + 0.5) * 8);
+                        Context.stroke();
+                        if (Source.Selected && View.Mode !== 'Camera')
+                        {
+                            Context.fillStyle = '#ffffff';
+                            Context.beginPath();
+                            Context.arc(Tip[0], Tip[1], 4.5, 0, Math.PI * 2);
+                            Context.fill();
+                        }
+                        Context.restore();
+                    }
+                }
+                if (Source.Selected && Source.Shape !== 'Everywhere' && Source.Radius > 0 && View.Mode !== 'Camera')
+                {
+                    const Rim = Project(Source.X + Source.Radius, SliceY, Source.Z);
+                    if (Rim)
+                    {
+                        Context.save();
+                        Context.setLineDash([]);
+                        Context.fillStyle = Colour;
+                        Context.strokeStyle = '#0c0e12';
+                        Context.lineWidth = 1.5;
+                        Context.beginPath();
+                        Context.arc(Rim[0], Rim[1], 5.2, 0, Math.PI * 2);
+                        Context.fill();
                         Context.stroke();
                         Context.restore();
                     }
@@ -890,9 +1089,10 @@ const ForceFieldVisualization = (() =>
                     Context.arc(Centre[0], Centre[1], 9, 0, Math.PI * 2);
                     Context.stroke();
                 }
-                // 📝 At large spans a source smaller than a few pixels keeps its dot but not its label, so a 100 km view stays legible.
+                // 📝 At large spans or when MinimalLabels is enabled, keep clutter away by showing labels only on selected/active major sources.
                 const Tiny = PixelsPerMetre && Source.Shape !== 'Everywhere' && Math.max(Source.Radius || 0, Source.HalfX || 0, Source.HalfZ || 0) * PixelsPerMetre < 6;
-                if (Options.ShowLabels && Source.Label && (!Tiny || Source.Selected) && (!Source.Dim || Source.Selected)) Labels.push([Source, Centre, Colour]);
+                const AllowLabel = Options.MinimalLabels ? Source.Selected : (!Tiny || Source.Selected);
+                if (Options.ShowLabels && Source.Label && AllowLabel && (!Source.Dim || Source.Selected)) Labels.push([Source, Centre, Colour]);
             }
             Context.globalAlpha = 1;
             Context.font = '500 11px "DM Sans", sans-serif';
@@ -1138,21 +1338,82 @@ const ForceFieldVisualization = (() =>
 
         // 📝 One refresh of the canvas. The lattice is re-sampled when the view or slice changed, when Invalidate() was called,
         //    or every RefreshInterval while time advances; arrows, tracers and overlays are redrawn every call.
+        function RenderPlacementPreview()
+        {
+            const P = Options.PlacementPreview;
+            if (!Options.PlacementMode || !P || View.Mode === 'Camera') return;
+            const SliceY = Options.SliceHeight;
+            const Colour = ContributionColours[P.Contribution] || '#d1f773';
+            Context.save();
+            Context.strokeStyle = Colour;
+            Context.lineWidth = 1.8;
+            Context.setLineDash([6, 5]);
+            if (P.Shape === 'Box')
+            {
+                StrokeWorldPolygon(BoxOutline({ X: P.X, Z: P.Z, HalfX: P.HalfX || P.Radius || 120, HalfZ: P.HalfZ || P.Radius || 80, Rotation: P.Bearing || 0 }, SliceY), true);
+            }
+            else
+            {
+                StrokeWorldPolygon(CircleOutline(P.X, SliceY, P.Z, P.Radius || 120, 64), true);
+            }
+            const C = Project(P.X, SliceY, P.Z);
+            if (C)
+            {
+                Context.setLineDash([]);
+                Context.fillStyle = Colour;
+                Context.beginPath();
+                Context.arc(C[0], C[1], 5, 0, Math.PI * 2);
+                Context.fill();
+                if (P.Bearing !== undefined && P.Bearing !== null)
+                {
+                    const Turn = P.Bearing * Math.PI / 180;
+                    const Reach = Math.max(30, (P.Radius || 120) * 0.48);
+                    const Tip = Project(P.X + Math.sin(Turn) * Reach, SliceY, P.Z - Math.cos(Turn) * Reach);
+                    if (Tip)
+                    {
+                        Context.beginPath();
+                        Context.moveTo(C[0], C[1]);
+                        Context.lineTo(Tip[0], Tip[1]);
+                        Context.stroke();
+                    }
+                }
+                const Tag = P.Label ? `Place ${P.Label} · ${FormatDistance(P.Radius || 120)}` : 'Click to place';
+                Context.font = '500 11px "DM Sans", sans-serif';
+                const W = Context.measureText(Tag).width + 14;
+                Context.fillStyle = 'rgba(10,12,16,0.88)';
+                Context.beginPath();
+                Context.roundRect(C[0] + 12, C[1] - 24, W, 20, 8);
+                Context.fill();
+                Context.fillStyle = Colour;
+                Context.fillText(Tag, C[0] + 19, C[1] - 10);
+            }
+            Context.restore();
+        }
+
         function Render(Time)
         {
             const Now = performance.now();
             const Delta = LastRender ? Math.min(0.1, (Now - LastRender) / 1000) : 0;
             LastRender = Now;
+            if (Options.Animated) ElapsedDisplay += Delta;
             Resize();
             if (View.Mode === 'Camera' && View.ViewProjection) Inverse = InvertProjection(View.ViewProjection);
             const Stamp = ResolveStamp();
             const TimeMoved = Options.Animated && Time !== Lattice.Time && Now - Lattice.RefreshedAt >= Options.RefreshInterval;
+            let RefreshedLattice = false;
             if (Dirty || Stamp !== Lattice.Stamp || TimeMoved)
             {
                 SampleLattice(Time);
                 ColourLattice();
                 Lattice.Stamp = Stamp;
                 Lattice.RefreshedAt = Now;
+                RefreshedLattice = true;
+            }
+            const LineStamp = [Options.FlowLines, Options.FlowLineSpacing, Options.FlowLineLength, Options.QuietCutoff, Options.Contribution].join('|');
+            if (Options.FlowLines && (RefreshedLattice || LineStamp !== StreamlinesStamp))
+            {
+                BuildFlowLines();
+                StreamlinesStamp = LineStamp;
             }
             AdvanceTracers(Delta);
             Context.setTransform(1, 0, 0, 1, 0, 0);
@@ -1164,9 +1425,11 @@ const ForceFieldVisualization = (() =>
             RenderCascades();
             Context.save();
             ClipToExtent();
+            RenderFlowLines();
             RenderArrows();
             RenderTracers();
             RenderSources();
+            RenderPlacementPreview();
             Context.restore();
             RenderProbe();
             RenderLegend();
@@ -1177,10 +1440,10 @@ const ForceFieldVisualization = (() =>
 
         function Configure(Changes)
         {
-            const Before = JSON.stringify([Options.Quantity, Options.ScaleMode, Options.FixedScale, Options.HeatmapStyle, Options.Contribution]);
+            const Before = JSON.stringify([Options.Quantity, Options.ScaleMode, Options.FixedScale, Options.HeatmapStyle, Options.Contribution, Options.SliceHeight]);
             Object.assign(Options, Changes);
             if (Changes.Minimap) AttachMinimap();
-            if (JSON.stringify([Options.Quantity, Options.ScaleMode, Options.FixedScale, Options.HeatmapStyle, Options.Contribution]) !== Before)
+            if (JSON.stringify([Options.Quantity, Options.ScaleMode, Options.FixedScale, Options.HeatmapStyle, Options.Contribution, Options.SliceHeight]) !== Before)
             {
                 if (Changes.Contribution !== undefined || Changes.Quantity !== undefined) ScaleReading = 0;
                 Dirty = true;
@@ -1239,8 +1502,30 @@ const ForceFieldVisualization = (() =>
             return Best;
         }
 
-        // 📝 Map / Oblique navigation: drag empty ground to pan, drag a source's centre to move it, right-drag (or Alt-drag)
-        //    to turn and tilt the oblique view, wheel to zoom about the cursor, double-click to centre.
+        function HitSourceHandle(ScreenX, ScreenY)
+        {
+            const PixelsPerMetre = View.Mode === 'Camera' ? 0 : ResolveAffine().PixelsPerMetre;
+            for (const Source of Options.Sources)
+            {
+                if (!Source.Selected || View.Mode === 'Camera') continue;
+                if (Source.Bearing !== undefined && Source.Bearing !== null)
+                {
+                    const Turn = Source.Bearing * Math.PI / 180;
+                    const Reach = PixelsPerMetre ? Math.min(Source.Radius * 0.85 || 56 / PixelsPerMetre, 48 / PixelsPerMetre) : 1;
+                    const Tip = Project(Source.X + Math.sin(Turn) * Reach, Options.SliceHeight, Source.Z - Math.cos(Turn) * Reach);
+                    if (Tip && Math.hypot(Tip[0] - ScreenX, Tip[1] - ScreenY) < 11) return { Source, Part: 'Bearing' };
+                }
+                if (Source.Shape !== 'Everywhere' && Source.Radius > 0)
+                {
+                    const Rim = Project(Source.X + Source.Radius, Options.SliceHeight, Source.Z);
+                    if (Rim && Math.hypot(Rim[0] - ScreenX, Rim[1] - ScreenY) < 11) return { Source, Part: 'Radius' };
+                }
+            }
+            return null;
+        }
+
+        // 📝 Map / Oblique navigation: drag empty ground to pan, drag a source's centre/rim/bearing handle to move/resize/aim it,
+        //    click in PlacementMode to place a new source, right-drag (or Alt-drag) to turn/tilt oblique view, wheel to zoom.
         function AttachNavigation()
         {
             let Drag = null;
@@ -1250,9 +1535,25 @@ const ForceFieldVisualization = (() =>
                 if (View.Mode === 'Camera') return;
                 const Bounds = Canvas.getBoundingClientRect();
                 const X = Event.clientX - Bounds.left, Y = Event.clientY - Bounds.top;
-                const Hit = Event.button === 0 && !Event.altKey ? HitSource(X, Y) : null;
+                if (Options.PlacementMode && Event.button === 0 && !Event.altKey)
+                {
+                    const Point = ScreenToPlane(X, Y);
+                    if (Point)
+                    {
+                        Canvas.setPointerCapture(Event.pointerId);
+                        Drag = { Mode: 'Place', StartX: Point[0], StartZ: Point[1], CurX: Point[0], CurZ: Point[1] };
+                        if (Specification.OnPlacementHover) Specification.OnPlacementHover(Point[0], Point[1], null);
+                    }
+                    return;
+                }
+                const Handle = Event.button === 0 && !Event.altKey ? HitSourceHandle(X, Y) : null;
+                const Hit = Handle ? Handle.Source : (Event.button === 0 && !Event.altKey ? HitSource(X, Y) : null);
                 Canvas.setPointerCapture(Event.pointerId);
-                if (Hit)
+                if (Handle)
+                {
+                    Drag = { Mode: Handle.Part, Id: Handle.Source.Id, SourceX: Handle.Source.X, SourceZ: Handle.Source.Z };
+                }
+                else if (Hit)
                 {
                     if (Specification.OnSourcePick) Specification.OnSourcePick(Hit.Id);
                     const Start = ScreenToPlane(X, Y);
@@ -1269,8 +1570,51 @@ const ForceFieldVisualization = (() =>
                 const X = Event.clientX - Bounds.left, Y = Event.clientY - Bounds.top;
                 if (!Drag)
                 {
-                    Canvas.style.cursor = HitSource(X, Y) ? 'grab' : 'crosshair';
+                    if (Options.PlacementMode)
+                    {
+                        Canvas.style.cursor = 'crosshair';
+                        const P = ScreenToPlane(X, Y);
+                        if (P && Specification.OnPlacementHover) Specification.OnPlacementHover(P[0], P[1], null);
+                    }
+                    else
+                    {
+                        const H = HitSourceHandle(X, Y);
+                        Canvas.style.cursor = H ? (H.Part === 'Radius' ? 'ew-resize' : 'pointer') : HitSource(X, Y) ? 'grab' : 'crosshair';
+                    }
                     if (Specification.OnHover) Specification.OnHover({ ScreenX: X, ScreenY: Y });
+                    return;
+                }
+                if (Drag.Mode === 'Place')
+                {
+                    const P = ScreenToPlane(X, Y);
+                    if (P)
+                    {
+                        Drag.CurX = P[0]; Drag.CurZ = P[1];
+                        const Dx = P[0] - Drag.StartX, Dz = P[1] - Drag.StartZ;
+                        const Dist = Math.hypot(Dx, Dz);
+                        const DragBearing = Dist > (View.Span * 0.015) ? ((Math.atan2(Dx, -Dz) * 180 / Math.PI) + 360) % 360 : null;
+                        if (Specification.OnPlacementHover) Specification.OnPlacementHover(Drag.StartX, Drag.StartZ, Dist > (View.Span * 0.025) ? { Radius: Dist, Bearing: DragBearing } : null);
+                    }
+                    return;
+                }
+                if (Drag.Mode === 'Radius')
+                {
+                    const P = ScreenToPlane(X, Y);
+                    if (P && Specification.OnSourceRadiusChange)
+                    {
+                        const NewR = Math.max(5, Math.hypot(P[0] - Drag.SourceX, P[1] - Drag.SourceZ));
+                        Specification.OnSourceRadiusChange(Drag.Id, NewR);
+                    }
+                    return;
+                }
+                if (Drag.Mode === 'Bearing')
+                {
+                    const P = ScreenToPlane(X, Y);
+                    if (P && Specification.OnSourceBearingChange)
+                    {
+                        const Deg = ((Math.atan2(P[0] - Drag.SourceX, -(P[1] - Drag.SourceZ)) * 180 / Math.PI) + 360) % 360;
+                        Specification.OnSourceBearingChange(Drag.Id, Deg);
+                    }
                     return;
                 }
                 if (Drag.Mode === 'Source')
@@ -1296,7 +1640,18 @@ const ForceFieldVisualization = (() =>
                     if (Specification.OnViewChange) Specification.OnViewChange();
                 }
             });
-            const Release = () => { Drag = null; Canvas.classList.remove('dragging'); };
+            const Release = () =>
+            {
+                if (Drag && Drag.Mode === 'Place' && Specification.OnPlace)
+                {
+                    const Dx = Drag.CurX - Drag.StartX, Dz = Drag.CurZ - Drag.StartZ;
+                    const Dist = Math.hypot(Dx, Dz);
+                    const DragBearing = Dist > (View.Span * 0.015) ? ((Math.atan2(Dx, -Dz) * 180 / Math.PI) + 360) % 360 : null;
+                    const DragRadius = Dist > (View.Span * 0.025) ? Dist : null;
+                    Specification.OnPlace(Drag.StartX, Drag.StartZ, DragBearing, DragRadius);
+                }
+                Drag = null; Canvas.classList.remove('dragging');
+            };
             Canvas.addEventListener('pointerup', Release);
             Canvas.addEventListener('pointercancel', Release);
             Canvas.addEventListener('pointerleave', () => { if (!Drag && Specification.OnHover) Specification.OnHover(null); });
@@ -1328,3 +1683,6 @@ const ForceFieldVisualization = (() =>
         NiceLength, Smooth01, InvertProjection
     };
 })();
+if (typeof globalThis !== 'undefined') globalThis.ForceFieldVisualization = ForceFieldVisualization;
+if (typeof module !== 'undefined' && module.exports) module.exports = ForceFieldVisualization;
+
