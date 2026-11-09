@@ -43,10 +43,10 @@ async function ReadRaster(Row, Parameters)
         const Image = new globalThis.Image(); Image.src = Row.Source.Texture.dataUrl; await Image.decode();
         if (Image.width > 256 || Image.height > 256) throw Error("Channel image exceeds 256px.");
         Canvas = document.createElement("canvas"); Canvas.width = Image.width; Canvas.height = Image.height;
-        Canvas.getContext("2d").drawImage(Image, 0, 0);
+        Canvas.getContext("2d", { willReadFrequently: true }).drawImage(Image, 0, 0);
     }
     else return null;
-    return { Width: Canvas.width, Height: Canvas.height, Pixels: Canvas.getContext("2d").getImageData(0, 0, Canvas.width, Canvas.height).data };
+    return { Width: Canvas.width, Height: Canvas.height, Pixels: Canvas.getContext("2d", { willReadFrequently: true }).getImageData(0, 0, Canvas.width, Canvas.height).data };
 }
 export function SamplePbrField(Row, Horizontal, Vertical, Raster)
 {

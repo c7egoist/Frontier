@@ -485,6 +485,47 @@ await suite("8. GPU Bake/Paint Shaders, Q/Tab/Right-Click Tool Popups & Draggabl
   const gbuf = gpuBake.rasterizeLowMeshGBuffer(studyPair.low, 64);
   assert(gbuf.posCov.length === 64 * 64 * 4 && gbuf.normPart.length === 64 * 64 * 4, "Low-poly G-buffer rasterization failed");
 
+  // Exercise GpuPaintSession WebGL2 mesh-cue upload, stamp upload & pattern fill upload against real buildDefaultMeshCues output!
+  const mockGpuRenderer = {
+    capabilities: { isWebGL2: true },
+    extensions: { get: () => ({}) },
+    getContext: () => ({ getParameter: () => "ValidatedWebGL2" }),
+    autoClear: true,
+    getRenderTarget: () => null,
+    getScissorTest: () => false,
+    setScissorTest() {},
+    setRenderTarget() {},
+    render() {},
+    getClearColor: (c) => c.set(0, 0, 0),
+    getClearAlpha: () => 1,
+    setClearColor() {},
+    clear() {},
+  };
+  const gpuSess = new gpuPaintMod.GpuPaintSession(mockGpuRenderer, 64);
+  assert.equal(gpuSess.isActive, true, "Mock WebGL2 GpuPaintSession should activate");
+  const testGeo = buildPaintTargetGeometry("teapot");
+  const testIdx = buildMeshPaintIndex(testGeo);
+  const testCues = buildDefaultMeshCues(testGeo, testIdx, 64);
+  gpuSess.uploadMeshCues(testCues, null);
+  assert(gpuSess.posPartTex && gpuSess.auxCueTex, "uploadMeshCues must upload worldPos/worldNormal without throwing");
+  assert(gpuSess.auxCueTex.image.data.some((v) => v > 100), "auxCueTex AO/Curvature bytes should be normalized 0..255");
+
+  // Upload baked Float32 (CPU bake) and Uint8 (GPU bake) bridgeData
+  gpuSess.uploadMeshCues(testCues, { res: 64, ao: new Float32Array(64 * 64).fill(0.75), curvature: new Float32Array(64 * 64).fill(0.6) });
+  gpuSess.uploadMeshCues(testCues, { res: 64, ao: new Uint8ClampedArray(64 * 64).fill(180), curvature: new Uint8ClampedArray(64 * 64).fill(140) });
+
+  // Verify Stamp & Pattern Fill texture uploads work with ArtworkStackEngine .albedo buffers
+  const stampEval = evaluateArtworkDocument(createArtworkDocument("stamp"), 64);
+  gpuSess.ensureStampTexture(stampEval);
+  assert.equal(gpuSess.hasStamp, true, "ensureStampTexture must accept ArtworkStackEngine .albedo buffer");
+
+  const patEval = evaluateArtworkDocument(createArtworkDocument("pattern"), 64);
+  const patLayer = createPaintLayer("fill", { res: 64, fill: { color: "#ffffff", roughness: 0.4, metalness: 0.1, height: 0, patternRepeats: 2, patternData: patEval } });
+  const patGpu = gpuSess.ensureLayerTargets(patLayer);
+  assert(patGpu.patternTex, "ensureLayerTargets must upload Pattern Fill .albedo buffer");
+  gpuSess.dispose();
+  testGeo.dispose();
+
   // Switch back to Texture Paint & exercise Q/Tab/Right-click popup + layer stack drag/up/down
   globalThis.window.__frontierTextureStudio.switchWorkspace("paint");
   const paintRowsBefore = globalThis.document.querySelectorAll(".stack-row");

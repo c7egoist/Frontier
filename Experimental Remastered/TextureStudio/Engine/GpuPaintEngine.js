@@ -703,31 +703,48 @@ export class GpuPaintSession {
   uploadMeshCues(cues, bakedMaps = null) {
     const res = this.res;
     const n = res * res;
+    const posSrc = cues.worldPos || cues.pos;
+    const normSrc = cues.worldNormal || cues.norm;
     const posPart = new Float32Array(n * 4);
     const normIsland = new Float32Array(n * 4);
     const auxCue = new Uint8Array(n * 4);
 
+    const toByte = (arr, idx, fallbackByte) => {
+      if (!arr) return fallbackByte;
+      const v = arr[idx];
+      return arr instanceof Float32Array
+        ? Math.max(0, Math.min(255, Math.round(v * 255)))
+        : Math.max(0, Math.min(255, Math.round(v)));
+    };
+    const bRes = bakedMaps?.res || 0;
+    const hasBakedAo = !!(bakedMaps?.ao && bRes > 0);
+    const hasBakedCurv = !!(bakedMaps?.curvature && bRes > 0);
+
     // Flip top-down meshCues rows -> bottom-up UV space (v=0 at row 0) so flipY=false matches 100% natively!
     for (let py = 0; py < res; py++) {
-      const srcRow = (res - 1 - py) * res;
+      const topY = res - 1 - py;
+      const srcRow = topY * res;
       const dstRow = py * res;
+      const bY = bRes > 0 ? Math.min(bRes - 1, Math.floor((topY / res) * bRes)) : 0;
       for (let px = 0; px < res; px++) {
         const sp = srcRow + px;
         const dp = dstRow + px;
         const o4 = dp * 4;
-        posPart[o4] = cues.pos[sp * 3];
-        posPart[o4 + 1] = cues.pos[sp * 3 + 1];
-        posPart[o4 + 2] = cues.pos[sp * 3 + 2];
+        posPart[o4] = posSrc[sp * 3];
+        posPart[o4 + 1] = posSrc[sp * 3 + 1];
+        posPart[o4 + 2] = posSrc[sp * 3 + 2];
         posPart[o4 + 3] = cues.partAt[sp];
 
-        normIsland[o4] = cues.norm[sp * 3];
-        normIsland[o4 + 1] = cues.norm[sp * 3 + 1];
-        normIsland[o4 + 2] = cues.norm[sp * 3 + 2];
+        const nx = normSrc[sp * 3], ny = normSrc[sp * 3 + 1], nz = normSrc[sp * 3 + 2];
+        normIsland[o4] = nx;
+        normIsland[o4 + 1] = ny;
+        normIsland[o4 + 2] = nz;
         normIsland[o4 + 3] = cues.islandAt[sp];
 
-        const aoVal = bakedMaps?.ao && bakedMaps.res === res ? bakedMaps.ao[sp] : cues.ao[sp];
-        const curvVal = bakedMaps?.curvature && bakedMaps.res === res ? bakedMaps.curvature[sp] : cues.curvature[sp];
-        const dustVal = Math.max(0, Math.min(255, Math.round((cues.norm[sp * 3 + 1] * 0.5 + 0.5) * 255)));
+        const bp = bRes > 0 ? bY * bRes + Math.min(bRes - 1, Math.floor((px / res) * bRes)) : sp;
+        const aoVal = hasBakedAo ? toByte(bakedMaps.ao, bp, 217) : toByte(cues.ao, sp, 217);
+        const curvVal = hasBakedCurv ? toByte(bakedMaps.curvature, bp, 128) : toByte(cues.curvature, sp, 128);
+        const dustVal = Math.max(0, Math.min(255, Math.round((ny * 0.5 + 0.5) * 255)));
         auxCue[o4] = aoVal;
         auxCue[o4 + 1] = curvVal;
         auxCue[o4 + 2] = dustVal;
@@ -774,21 +791,22 @@ export class GpuPaintSession {
   }
 
   ensureStampTexture(stampData) {
-    if (!stampData?.rgba || !stampData.width) {
+    const srcPix = stampData?.albedo || stampData?.rgba;
+    if (!srcPix || !stampData?.width) {
       this.hasStamp = false;
       return;
     }
     const w = stampData.width;
     const h = stampData.heightPx || w;
-    if (this._stampRef === stampData.rgba && this.stampTex) {
+    if (this._stampRef === srcPix && this.stampTex) {
       this.hasStamp = true;
       return;
     }
-    this._stampRef = stampData.rgba;
+    this._stampRef = srcPix;
     if (this.stampTex) this.stampTex.dispose();
     const flipped = new Uint8Array(w * h * 4);
     const stride = w * 4;
-    for (let y = 0; y < h; y++) flipped.set(stampData.rgba.subarray((h - 1 - y) * stride, (h - y) * stride), y * stride);
+    for (let y = 0; y < h; y++) flipped.set(srcPix.subarray((h - 1 - y) * stride, (h - y) * stride), y * stride);
     this.stampTex = new THREE.DataTexture(flipped, w, h, THREE.RGBAFormat);
     this.stampTex.minFilter = THREE.LinearFilter;
     this.stampTex.magFilter = THREE.LinearFilter;
@@ -823,19 +841,20 @@ export class GpuPaintSession {
       this.layerTargetRegistry.add(layer._gpu.maskRT);
       this.syncMaskCpuToGpu(layer);
     }
-    if (layer.kind === "fill" && layer.fill?.patternData?.rgba && layer._gpu.patternRef !== layer.fill.patternData.rgba) {
+    const pd = layer.fill?.patternData;
+    const patPix = pd?.albedo || pd?.rgba;
+    if (layer.kind === "fill" && patPix && pd?.width && layer._gpu.patternRef !== patPix) {
       if (layer._gpu.patternTex) layer._gpu.patternTex.dispose();
-      const pd = layer.fill.patternData;
       const pw = pd.width, ph = pd.heightPx || pd.width;
       const flipped = new Uint8Array(pw * ph * 4);
       const stride = pw * 4;
-      for (let y = 0; y < ph; y++) flipped.set(pd.rgba.subarray((ph - 1 - y) * stride, (ph - y) * stride), y * stride);
+      for (let y = 0; y < ph; y++) flipped.set(patPix.subarray((ph - 1 - y) * stride, (ph - y) * stride), y * stride);
       const tex = new THREE.DataTexture(flipped, pw, ph, THREE.RGBAFormat);
       tex.wrapS = THREE.RepeatWrapping; tex.wrapT = THREE.RepeatWrapping;
       tex.minFilter = THREE.LinearFilter; tex.magFilter = THREE.LinearFilter;
       tex.flipY = false; tex.needsUpdate = true;
       layer._gpu.patternTex = tex;
-      layer._gpu.patternRef = pd.rgba;
+      layer._gpu.patternRef = patPix;
     }
     return layer._gpu;
   }

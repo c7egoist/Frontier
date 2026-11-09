@@ -874,9 +874,24 @@ export function compositePaintDocument(doc, cues, { liveStroke = null, liveBrush
     return op;
   };
 
+  const bakedRes = doc.bakedMaps?.res || res;
   const bakedAo = doc.bakedMaps?.ao;
   const bakedCurv = doc.bakedMaps?.curvature;
   const bakedNorm = doc.bakedMaps?.worldNormal;
+  const bakedAoIsFloat = bakedAo instanceof Float32Array || bakedAo instanceof Float64Array;
+  const bakedCurvIsFloat = bakedCurv instanceof Float32Array || bakedCurv instanceof Float64Array;
+  const sampleBakedScalar = (arr, isFloat, pixelIndex) => {
+    let bi = pixelIndex;
+    if (bakedRes !== res) {
+      const px = pixelIndex % res;
+      const py = (pixelIndex - px) / res;
+      const bx = Math.min(bakedRes - 1, Math.floor((px / res) * bakedRes));
+      const by = Math.min(bakedRes - 1, Math.floor((py / res) * bakedRes));
+      bi = by * bakedRes + bx;
+    }
+    const v = arr[bi] ?? 0;
+    return isFloat ? v : v / 255;
+  };
 
   for (const layer of doc.layers) {
     if (layer.kind === "folder" || !isVisible(layer)) continue;
@@ -1049,13 +1064,22 @@ export function compositePaintDocument(doc, cues, { liveStroke = null, liveBrush
 
         let metric = 0;
         if (g.preset === "edge-wear") {
-          const curv = bakedCurv ? bakedCurv[i] : cues.curvature[i];
+          const curv = bakedCurv ? sampleBakedScalar(bakedCurv, bakedCurvIsFloat, i) : cues.curvature[i];
           metric = clamp((curv - 0.5) * 2.2, 0, 1);
         } else if (g.preset === "crevice-dirt") {
-          const occ = bakedAo ? bakedAo[i] : cues.ao[i];
+          const occ = bakedAo ? sampleBakedScalar(bakedAo, bakedAoIsFloat, i) : cues.ao[i];
           metric = clamp(1 - occ, 0, 1);
         } else if (g.preset === "top-dust") {
-          const ny = bakedNorm ? bakedNorm[i * 3 + 1] : cues.worldNormal[i * 3 + 1];
+          let ny = cues.worldNormal[i * 3 + 1];
+          if (bakedNorm) {
+            let bi = i;
+            if (bakedRes !== res) {
+              const px = i % res;
+              const py = (i - px) / res;
+              bi = Math.min(bakedRes - 1, Math.floor((py / res) * bakedRes)) * bakedRes + Math.min(bakedRes - 1, Math.floor((px / res) * bakedRes));
+            }
+            ny = bakedNorm[bi * 3 + 1];
+          }
           metric = clamp(ny, 0, 1);
         } else {
           metric = 0.5;

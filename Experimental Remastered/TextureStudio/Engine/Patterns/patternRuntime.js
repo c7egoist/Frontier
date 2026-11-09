@@ -22,7 +22,7 @@ export async function rasterPatternSVG(svg, width, height) {
       canvas = document.createElement("canvas");
     canvas.width = width;
     canvas.height = height;
-    canvas.getContext("2d").drawImage(image, 0, 0, width, height);
+    canvas.getContext("2d", { willReadFrequently: true }).drawImage(image, 0, 0, width, height);
     return canvas;
   } finally {
     URL.revokeObjectURL(url);
@@ -126,7 +126,7 @@ export function attachSurfaceSources(material, p) {
       const [color, roughness, metalness, height, occlusion, finish, normals] = await Promise.all(
         ["color", "roughness", "metalness", "normalHeight", "occlusion", "finish", "normal"].map(mode => rasterPatternSVG(patternSVG(doc, mode), w * scale, h * scale)),
       );
-      const Read = Canvas => Canvas.getContext("2d").getImageData(0, 0, Canvas.width, Canvas.height).data;
+      const Read = Canvas => Canvas.getContext("2d", { willReadFrequently: true }).getImageData(0, 0, Canvas.width, Canvas.height).data;
       const Roughness = Read(roughness), Metalness = Read(metalness), Height = Read(height), Occlusion = Read(occlusion);
       const Packed = new Uint8Array(Roughness.length), Coverage = new Uint8Array(Roughness.length);
       for (let Offset = 0; Offset < Packed.length; Offset += 4)

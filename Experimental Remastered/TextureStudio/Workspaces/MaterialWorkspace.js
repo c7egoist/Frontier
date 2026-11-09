@@ -207,7 +207,7 @@ export function mountMaterialWorkspace(root, appBridge) {
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = state.exposure;
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.type = THREE.PCFShadowMap;
   stage.prepend(renderer.domElement);
 
   const scene = new THREE.Scene();

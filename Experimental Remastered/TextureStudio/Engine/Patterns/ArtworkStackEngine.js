@@ -813,10 +813,10 @@ export function renderArtworkDocument(doc, targetSize = 512, { tileMode = "singl
   const metalness = makeScratchCanvas(targetSize);
   const height = makeScratchCanvas(targetSize);
 
-  const aCtx = albedo.getContext("2d");
-  const rCtx = roughness.getContext("2d");
-  const mCtx = metalness.getContext("2d");
-  const hCtx = height.getContext("2d");
+  const aCtx = albedo.getContext("2d", { willReadFrequently: true });
+  const rCtx = roughness.getContext("2d", { willReadFrequently: true });
+  const mCtx = metalness.getContext("2d", { willReadFrequently: true });
+  const hCtx = height.getContext("2d", { willReadFrequently: true });
 
   const bg = doc.background || {};
   if (bg.enabled) {
@@ -851,10 +851,10 @@ export function renderArtworkDocument(doc, targetSize = 512, { tileMode = "singl
   const layerScratchH = makeScratchCanvas(targetSize);
   const maskScratch = makeScratchCanvas(targetSize);
 
-  const lACtx = layerScratchA.getContext("2d");
-  const lRCtx = layerScratchR.getContext("2d");
-  const lMCtx = layerScratchM.getContext("2d");
-  const lHCtx = layerScratchH.getContext("2d");
+  const lACtx = layerScratchA.getContext("2d", { willReadFrequently: true });
+  const lRCtx = layerScratchR.getContext("2d", { willReadFrequently: true });
+  const lMCtx = layerScratchM.getContext("2d", { willReadFrequently: true });
+  const lHCtx = layerScratchH.getContext("2d", { willReadFrequently: true });
 
   const folderMap = new Map(doc.layers.filter((l) => l.kind === "folder").map((f) => [f.id, f]));
   const isEffectiveVisible = (lyr) => {
@@ -1115,9 +1115,9 @@ function applyLayerMask(aCtx, rCtx, mCtx, hCtx, maskCanvas, size, mask, seamless
 export function buildNormalFromHeightCanvas(heightCanvas, strength = 2.6) {
   const w = heightCanvas.width;
   const h = heightCanvas.height;
-  const src = heightCanvas.getContext("2d").getImageData(0, 0, w, h).data;
+  const src = heightCanvas.getContext("2d", { willReadFrequently: true }).getImageData(0, 0, w, h).data;
   const outCanvas = makeScratchCanvas(w);
-  const oCtx = outCanvas.getContext("2d");
+  const oCtx = outCanvas.getContext("2d", { willReadFrequently: true });
   const out = oCtx.createImageData(w, h);
   const dst = out.data;
 
@@ -1176,11 +1176,11 @@ export function evaluateArtworkDocument(doc, targetSize = 384) {
   if (canCanvas) {
     const rendered = renderArtworkDocument(doc, targetSize);
     const normCanvas = buildNormalFromHeightCanvas(rendered.height, 2.6);
-    const albedo = rendered.albedo.getContext("2d").getImageData(0, 0, targetSize, targetSize).data;
-    const roughness = rendered.roughness.getContext("2d").getImageData(0, 0, targetSize, targetSize).data;
-    const metalness = rendered.metalness.getContext("2d").getImageData(0, 0, targetSize, targetSize).data;
-    const height = rendered.height.getContext("2d").getImageData(0, 0, targetSize, targetSize).data;
-    const normal = normCanvas.getContext("2d").getImageData(0, 0, targetSize, targetSize).data;
+    const albedo = rendered.albedo.getContext("2d", { willReadFrequently: true }).getImageData(0, 0, targetSize, targetSize).data;
+    const roughness = rendered.roughness.getContext("2d", { willReadFrequently: true }).getImageData(0, 0, targetSize, targetSize).data;
+    const metalness = rendered.metalness.getContext("2d", { willReadFrequently: true }).getImageData(0, 0, targetSize, targetSize).data;
+    const height = rendered.height.getContext("2d", { willReadFrequently: true }).getImageData(0, 0, targetSize, targetSize).data;
+    const normal = normCanvas.getContext("2d", { willReadFrequently: true }).getImageData(0, 0, targetSize, targetSize).data;
 
     let opaque = 0;
     for (let i = 3; i < albedo.length; i += 4) if (albedo[i] > 18) opaque++;
