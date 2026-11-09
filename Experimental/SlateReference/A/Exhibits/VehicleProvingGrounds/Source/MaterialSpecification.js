@@ -120,7 +120,20 @@ export const CourseMaterial = Object.freeze({
     ScorchedMud:     96,
     ChannelWater:    97,
     RustSteel:       98,
-    SandbagBurlap:   99
+    SandbagBurlap:   99,
+    // 📝 Candy Village ("candy") physical confectionery palette (clearcoated gummies, glossy 2.5D soda/syrup, baked gingerbread & icing).
+    Gingerbread:     100,
+    FrostingCream:   101,
+    PeppermintRed:   102,
+    GummyCherry:     103,
+    GummyLime:       104,
+    GummyOrange:     105,
+    GummyBerry:      106,
+    CaramelSyrup:    107,
+    BerrySodaWater:  108,
+    WaferCrisp:      109,
+    LicoriceBlack:   110,
+    SugarCobble:     111
 });
 
 export const MarkedFamilyFirst = CourseMaterial.Asphalt;   // [-]
@@ -371,6 +384,33 @@ export function ConstructMaterialSpecification()
     Materials[CourseMaterial.ChannelWater]  = SurfWater;                             // Cold English Channel surf
     Materials[CourseMaterial.RustSteel]     = Metal(0.24, 0.14, 0.09, 0.60);         // Salt-corroded Czech hedgehog & barbed wire steel
     Materials[CourseMaterial.SandbagBurlap] = Dielectric(0.275, 0.232, 0.152, 0.96); // Stacked khaki burlap sandbags
+
+    // Candy Village ("candy") physical confectionery PBR palette:
+    Materials[CourseMaterial.Gingerbread]   = Dielectric(0.355, 0.155, 0.052, 0.88); // Warm spiced baked gingerbread brick
+    Materials[CourseMaterial.FrostingCream] = Dielectric(0.865, 0.825, 0.755, 0.58); // Whipped royal-icing snow & soda foam
+    const Peppermint = Dielectric(0.740, 0.042, 0.062, 0.16);
+    Peppermint.CoatWeight = 1.0; Peppermint.CoatRoughness = 0.03; Peppermint.SpecularLevel = IorToF0(1.50);
+    Materials[CourseMaterial.PeppermintRed] = Peppermint;
+    const MakeGummy = (R, G, B) => {
+        const Gm = Dielectric(R, G, B, 0.14);
+        Gm.CoatWeight = 1.0; Gm.CoatRoughness = 0.035; Gm.SpecularLevel = IorToF0(1.48);
+        return Gm;
+    };
+    Materials[CourseMaterial.GummyCherry]   = MakeGummy(0.78, 0.038, 0.085);
+    Materials[CourseMaterial.GummyLime]     = MakeGummy(0.075, 0.680, 0.115);
+    Materials[CourseMaterial.GummyOrange]   = MakeGummy(0.880, 0.255, 0.028);
+    Materials[CourseMaterial.GummyBerry]    = MakeGummy(0.048, 0.245, 0.790);
+    const Syrup = Dielectric(0.420, 0.165, 0.024, 0.06);
+    Syrup.CoatWeight = 1.0; Syrup.CoatRoughness = 0.02; Syrup.SpecularLevel = IorToF0(1.49);
+    Materials[CourseMaterial.CaramelSyrup]   = Syrup;
+    const SodaWater = Dielectric(0.038, 0.345, 0.460, 0.045);
+    SodaWater.CoatWeight = 1.0; SodaWater.CoatRoughness = 0.015; SodaWater.SpecularLevel = IorToF0(1.35);
+    Materials[CourseMaterial.BerrySodaWater] = SodaWater;
+    Materials[CourseMaterial.WaferCrisp]     = Dielectric(0.545, 0.365, 0.150, 0.80); // Golden waffle-wafer bridge & catapult timber
+    const Licorice = Dielectric(0.022, 0.020, 0.026, 0.22);
+    Licorice.CoatWeight = 0.85; Licorice.CoatRoughness = 0.06;
+    Materials[CourseMaterial.LicoriceBlack]  = Licorice;
+    Materials[CourseMaterial.SugarCobble]    = Dielectric(0.485, 0.395, 0.285, 0.78); // Warm biscuit-sugar village cobblestones
     return Materials;
 }
 

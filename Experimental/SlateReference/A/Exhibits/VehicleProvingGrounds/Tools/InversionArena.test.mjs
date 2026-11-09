@@ -244,25 +244,31 @@ test("ChaseCameraSolver tracks 90° vertical and 180° inverted orientations wit
     assert.ok(Chase.Up[2] < -0.7, `Camera Up must invert smoothly with loop crown, got ${Chase.Up[2]}`);
 });
 
-test("LevelCatalog exposes Inversion Arena, City Pursuit & AI Lab, D-Day, and Proving Grounds descriptors cleanly", () =>
+test("LevelCatalog exposes Inversion Arena, City Pursuit & AI Lab, D-Day, Candy Village, and Proving Grounds descriptors cleanly", () =>
 {
-    assert.equal(LevelCatalog.length, 4);
-    assert.deepEqual(LevelCatalog.map((L) => L.Key), ["inversion", "city", "dday", "proving"]);
+    assert.equal(LevelCatalog.length, 5);
+    assert.deepEqual(LevelCatalog.map((L) => L.Key), ["inversion", "city", "dday", "candy", "proving"]);
     const Inversion = ResolveLevelDescriptor("inversion");
     const City      = ResolveLevelDescriptor("city");
     const DDay      = ResolveLevelDescriptor("dday");
+    const Candy     = ResolveLevelDescriptor("candy");
     const Proving   = ResolveLevelDescriptor("proving");
     assert.equal(Inversion.Title, "Inversion Arena");
     assert.equal(City.Title, "City Pursuit & AI Lab");
     assert.equal(DDay.Title, "D-Day · Race to The Wall");
+    assert.equal(Candy.Title, "Candy Village · Sugar Siege");
     assert.equal(City.Relief, false);
     assert.equal(DDay.Relief, false);
+    assert.equal(Candy.Relief, false);
     assert.equal(City.Surfaces.length, 16);
     assert.ok(DDay.Surfaces.length >= 4);
+    assert.ok(Candy.Surfaces.length >= 4);
     assert.ok(City.Placements().length >= 30);
     assert.ok(DDay.Placements().length >= 50);
+    assert.ok(Candy.Placements().length >= 30);
     assert.ok(City.Zones.length >= 6);
     assert.ok(DDay.Zones.length >= 5);
+    assert.ok(Candy.Zones.length >= 5);
     assert.equal(Inversion.Relief, false);
     assert.equal(Inversion.Tracks.length, 9);
     assert.deepEqual(Inversion.Tracks.map((T) => T.Id),

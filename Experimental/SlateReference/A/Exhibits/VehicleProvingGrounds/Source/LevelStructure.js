@@ -18,6 +18,9 @@ import { CityPursuitShapes, CityPursuitSpawn, CityPursuitZones, CityClearZones,
 import { DDayStaticShapes, DDayCombatShapes, DDayBounds, DDaySpawn, DDayZones, QueryDDayTerrainHeight,
          ResolveDDayPlacements, ResolveDDaySurfaces, ResolveDDayCones, ResolveDDayBreakables,
          EmitDDayGroundFacets } from "./DDayStructure.js";
+import { CandyStaticShapes, CandyCombatShapes, CandyBounds, CandySpawn, CandyZones, QueryCandyTerrainHeight,
+         ResolveCandyPlacements, ResolveCandySurfaces, ResolveCandyCones, ResolveCandyBreakables,
+         EmitCandyGroundFacets } from "./CandyVillageStructure.js";
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                                      SHAPES
@@ -468,14 +471,25 @@ export const LevelClearZones = Object.freeze([
 //------------------------------------------------------------------------------------------------------------------------
 
 export const LevelCatalog = Object.freeze([
-    { Key: "inversion", Title: "Inversion Arena",         Subtitle: "Tracks A–I: Stunt loops, collapsing bridge/road, 3-lane subway, trams & robot factory" },
-    { Key: "city",      Title: "City Pursuit & AI Lab",   Subtitle: "Highway interchange, city blocks, sloped alley ramps, smart drones & self-play RL" },
-    { Key: "dday",      Title: "D-Day · Race to The Wall", Subtitle: "Bunkers, MG turrets, 155mm cannons, exploding mines, cover tanks & crashing aircraft" },
-    { Key: "proving",   Title: "Proving Grounds",         Subtitle: "Skidpad, jump wedge, smash alley, tunnel & slalom" }
+    { Key: "inversion", Title: "Inversion Arena",            Subtitle: "Tracks A–I: Stunt loops, collapsing bridge/road, 3-lane subway, trams & robot factory" },
+    { Key: "city",      Title: "City Pursuit & AI Lab",      Subtitle: "Highway interchange, city blocks, sloped alley ramps, smart drones & self-play RL" },
+    { Key: "dday",      Title: "D-Day · Race to The Wall",    Subtitle: "Omaha Beach bluffs, sunken trenches, barbed wire, Sherman tanks & crashing aircraft" },
+    { Key: "candy",     Title: "Candy Village · Sugar Siege", Subtitle: "2.5D fizzy soda lagoon, Gummy-Bear worms, flaming gummy catapults & old-school candy cannons" },
+    { Key: "proving",   Title: "Proving Grounds",            Subtitle: "Skidpad, jump wedge, smash alley, tunnel & slalom" }
 ]);
 
 export function ResolveLevelShapes(LevelKey = "proving")
 {
+    if (LevelKey === "candy")
+    {
+        const { Cone, Jersey } = LevelShapes;
+        return {
+            Cone:   { ...Cone,   Voxel: 0.05 },
+            Jersey: { ...Jersey, Voxel: 0.09 },
+            ...CandyStaticShapes,
+            ...CandyCombatShapes
+        };
+    }
     if (LevelKey === "dday")
     {
         const { Cone, Jersey } = LevelShapes;
@@ -539,6 +553,29 @@ export function ResolveProvingTrafficLights()
 
 export function ResolveLevelDescriptor(LevelKey = "proving")
 {
+    if (LevelKey === "candy")
+    {
+        return {
+            Key:           "candy",
+            Title:         "Candy Village · Sugar Siege",
+            Relief:        false,
+            TerrainHeight: QueryCandyTerrainHeight,
+            Bounds:        CandyBounds,
+            AeroGrip:      0.35,
+            Spawn:         CandySpawn,
+            Zones:         CandyZones,
+            Drills:        [],
+            ClearZones:    [[-70.0, -30.0, 70.0, 30.0]],
+            Surfaces:      ResolveCandySurfaces(),
+            TerrainHulls:  null,
+            Shapes:        ResolveLevelShapes("candy"),
+            Placements:    ResolveCandyPlacements,
+            TrafficLights: () => [],
+            Cones:         ResolveCandyCones,
+            Breakables:    ResolveCandyBreakables,
+            EmitGround:    EmitCandyGroundFacets
+        };
+    }
     if (LevelKey === "dday")
     {
         return {

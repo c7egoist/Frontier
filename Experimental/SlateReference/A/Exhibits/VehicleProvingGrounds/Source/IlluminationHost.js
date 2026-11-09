@@ -57,6 +57,7 @@ import { CabinLayout, CameraRigs, ResolveCockpitFrame, PlaceSeatedEye, ResolveTa
 import { DrivingHudSequence } from "./DrivingHudSequence.js";
 import { PolicePursuitSequence } from "./PolicePursuitSequence.js";
 import { DDayCombatSequence } from "./DDayCombatSequence.js";
+import { CandyVillageSequence } from "./CandyVillageSequence.js";
 import { VehicleGeometry } from "./VehicleSpecification.js";
 
 
@@ -391,6 +392,8 @@ class IlluminationHost
         this.UploadPoliceOccupants();
         this.DDayCombat = new DDayCombatSequence(this);
         this.UploadDDayOccupants();
+        this.CandyVillage = new CandyVillageSequence(this);
+        this.UploadCandyOccupants();
 
         // ⑤ every remaining stage
         this.ReportProgress("Compiling lighting programs", 0.76);
@@ -667,6 +670,18 @@ class IlluminationHost
         if (!this.DDayCombat?.Enabled || !this.Scene.DDayBlock || !this.OccupantRecords || !this.Volumes)
             return;
         const Block = this.Scene.DDayBlock;
+        if (Block.Count > 0)
+        {
+            const Scalars = this.Scene.EncodeOccupantRange(this.Volumes, Block.First, Block.Count);
+            this.Exchange.Device.queue.writeBuffer(this.OccupantRecords, Block.First * OccupantStride, Scalars);
+        }
+    }
+
+    UploadCandyOccupants()
+    {
+        if (!this.CandyVillage?.Enabled || !this.Scene.CandyBlock || !this.OccupantRecords || !this.Volumes)
+            return;
+        const Block = this.Scene.CandyBlock;
         if (Block.Count > 0)
         {
             const Scalars = this.Scene.EncodeOccupantRange(this.Volumes, Block.First, Block.Count);
@@ -1378,6 +1393,7 @@ class IlluminationHost
         }
         const PoliceMoved = this.Police ? this.Police.Advance(Step) : false;
         const DDayMoved   = this.DDayCombat ? this.DDayCombat.Advance(Step) : false;
+        const CandyMoved  = this.CandyVillage ? this.CandyVillage.Advance(Step) : false;
         const VehicleEvents = this.Vehicle.ResolveEvents();
         this.PositionVehicle();
         this.Bodies.Advance(Step, this.Vehicle);
@@ -1433,6 +1449,8 @@ class IlluminationHost
             Emissions.push(...this.Collapse.QuerySmokeEmissions());
         if (this.DDayCombat)
             Emissions.push(...this.DDayCombat.QueryPlumeEmissions());
+        if (this.CandyVillage)
+            Emissions.push(...this.CandyVillage.QueryPlumeEmissions());
         if (this.Settings.TestPlume > 0)
             Emissions.push(this.ResolveTestPlume(this.Settings.TestPlume === 2));
         this.Marks.Advance(Readings, { Enabled: this.Settings.TyreMarks, Strength: this.Settings.TyreMarkStrength });
@@ -1479,6 +1497,8 @@ class IlluminationHost
             this.UploadPoliceOccupants();
         if (DDayMoved)
             this.UploadDDayOccupants();
+        if (CandyMoved)
+            this.UploadCandyOccupants();
 
         if (this.Lighting && this.LightRecords)
         {
@@ -1486,7 +1506,8 @@ class IlluminationHost
                 ...this.StreetLampPoles,
                 ...(this.TrafficLights ? this.TrafficLights.QueryLightPoles() : []),
                 ...(this.Police ? this.Police.QueryDynamicLightRecords() : []),
-                ...(this.DDayCombat ? this.DDayCombat.QueryDynamicLightRecords() : [])
+                ...(this.DDayCombat ? this.DDayCombat.QueryDynamicLightRecords() : []),
+                ...(this.CandyVillage ? this.CandyVillage.QueryDynamicLightRecords() : [])
             ];
             const LightData = this.Lighting.Update(this.Vehicle.QueryBodyTransform(), ActivePoles, this.Clock);
             Device.queue.writeBuffer(this.LightRecords, 0, LightData);

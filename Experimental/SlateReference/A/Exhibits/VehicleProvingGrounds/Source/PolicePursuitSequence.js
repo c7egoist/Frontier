@@ -472,8 +472,8 @@ export class PolicePursuitSequence
         this.Host                  = Host;
         this.Scene                 = Host.Scene;
         this.LevelKey              = Host.LevelKey || "proving";
-        this.Enabled               = this.LevelKey !== "dday";
-        this.LawEnforcementEnabled = this.LevelKey !== "dday";
+        this.Enabled               = this.LevelKey !== "dday" && this.LevelKey !== "candy";
+        this.LawEnforcementEnabled = this.LevelKey !== "dday" && this.LevelKey !== "candy";
 
         // Modes: "player" (you drive; police chases if you speed/break traffic laws) | "selfplay" (hands-free RL training!)
         this.ControlMode           = "player";

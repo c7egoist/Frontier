@@ -106,7 +106,7 @@ export function StudioDirectionToWorld(Dir)
 
 export function ComputeWorldAnchorForBounds(Bounds, LevelKey = "inversion")
 {
-    if (LevelKey === "city" || LevelKey === "dday")
+    if (LevelKey === "city" || LevelKey === "dday" || LevelKey === "candy")
         return [0.0, 0.0, 0.0];
     const MinStudioX = Bounds && Number.isFinite(Bounds.min?.[0]) ? Bounds.min[0] : -85.0;
     if (LevelKey === "inversion")
@@ -347,12 +347,12 @@ export function CreateStarterStudioProject(LevelKey = "inversion")
 {
     if (LevelKey === "city")
         return CreateCityPursuitStudioProject();
-    if (LevelKey === "dday")
+    if (LevelKey === "dday" || LevelKey === "candy")
     {
         return {
             version:    1,
             worldSpace: true,
-            name:       "D-Day Combat Sector Roads",
+            name:       LevelKey === "candy" ? "Candy Village Lanes" : "D-Day Combat Sector Roads",
             nodes:      [],
             roads:      [],
             sites:      []

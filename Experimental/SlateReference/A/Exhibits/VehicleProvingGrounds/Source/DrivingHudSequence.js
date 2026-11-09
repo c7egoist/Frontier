@@ -455,6 +455,8 @@ export class DrivingHudSequence
             this.Host.Police.ControlStrip.classList.toggle("hidden", !ShowControls || !this.Host.Police.Enabled);
         if (this.Host?.DDayCombat?.ControlStrip)
             this.Host.DDayCombat.ControlStrip.classList.toggle("hidden", !ShowControls || !this.Host.DDayCombat.Enabled);
+        if (this.Host?.CandyVillage?.ControlStrip)
+            this.Host.CandyVillage.ControlStrip.classList.toggle("hidden", !ShowControls || !this.Host.CandyVillage.Enabled);
 
         if (Mode !== this.LastActiveMode)
         {
@@ -1107,6 +1109,7 @@ export class DrivingHudSequence
         // ②b Police Pursuit & RL Self-Play + D-Day Battlefield 3D Callouts / Holographic Telemetry (zero black boxes)
         this.Host?.Police?.RenderHudOverlay?.(Ctx, W, H, CameraState, Mode);
         this.Host?.DDayCombat?.RenderHudOverlay?.(Ctx, W, H, CameraState, Mode);
+        this.Host?.CandyVillage?.RenderHudOverlay?.(Ctx, W, H, CameraState, Mode);
 
         // ③ Camera-Specific 2D + 2.5D HUD Overlay (pure optical light-on-glass, zero black background boxes):
         //    • "cockpit" -> Collimated Windshield Combiner Trapezoidal AR-HUD (Screenshots 1 & 2)

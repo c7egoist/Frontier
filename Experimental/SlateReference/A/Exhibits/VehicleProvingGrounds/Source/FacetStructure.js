@@ -20,6 +20,7 @@ import { ServiceStationSequence } from "./ServiceStationSequence.js";
 import { TrafficLightSequence } from "./TrafficLightSequence.js";
 import { RoadEditorSequence, RoadEditorVertexCapacity } from "./RoadEditorSequence.js";
 import { ConstructPoliceVehicleBodyFacets } from "./CityPursuitStructure.js";
+import { CandyWaterGridSpec } from "./CandyVillageStructure.js";
 
 // 📝 What an occupant takes part in. A ground tile only owns a surface card; the ground occupant is only rastered,
 //    because the scene distance field carries the ground as its analytic plane rather than as a sampled volume.
@@ -543,6 +544,47 @@ export class SceneStructure
                 Count:       0
             };
             this.DDayBlock.Count = this.Occupants.length - DDayFirst;
+        }
+
+        // ⑩d Candy Village Dynamic Siege Units + Live-Streamed 2.5D Shallow-Water Fluid Surface ------------------------
+        this.CandyBlock      = null;
+        this.CandyWaterBlock = null;
+        if (ShapeSets.CandyWormHead !== undefined)
+        {
+            const CandyFirst  = this.Occupants.length;
+            const CombatRoles = OccupantRole.Raster | OccupantRole.Dynamic;
+            const AllocPool = (Prefix, ShapeIdx, Count) =>
+            {
+                const Arr = [];
+                for (let I = 0; I < Count; ++I)
+                    Arr.push(this.ConstructOccupant(`${Prefix} ${I}`, ShapeIdx, ParkedBelow, CombatRoles));
+                return Arr;
+            };
+            const SegShapes = [ShapeSets.CandyWormSegLime, ShapeSets.CandyWormSegOrange, ShapeSets.CandyWormSegBerry];
+            const WormSegments = [];
+            for (let I = 0; I < 28; ++I)
+                WormSegments.push(this.ConstructOccupant(`Candy Worm Seg ${I}`, SegShapes[I % 3], ParkedBelow, CombatRoles));
+
+            this.CandyBlock = {
+                First:         CandyFirst,
+                WormHeads:     AllocPool("Candy Worm Head",        ShapeSets.CandyWormHead,      4),
+                WormSegments,
+                CatapultBases: AllocPool("Candy Catapult Base",    ShapeSets.CandyCatapultBase,  5),
+                CatapultArms:  AllocPool("Candy Catapult Arm",     ShapeSets.CandyCatapultArm,   5),
+                Cannons:       AllocPool("Candy Old Cannon",       ShapeSets.CandyOldCannon,     6),
+                FlamingBalls:  AllocPool("Candy Flaming Ball",     ShapeSets.CandyFlamingBall,  10),
+                Jawbreakers:   AllocPool("Candy Jawbreaker Ball",  ShapeSets.CandyJawbreaker,   12),
+                StickyPuddles: AllocPool("Candy Sticky Puddle",    ShapeSets.CandyStickyPuddle, 12),
+                Count:         0
+            };
+            this.CandyBlock.Count = this.Occupants.length - CandyFirst;
+
+            const WaterSet = this.ConstructFacetSet("Candy 2.5D Shallow Water", [], 0.0, 0.0);
+            this.FacetSets[WaterSet].LocalMinimum   = [CandyWaterGridSpec.XMin, CandyWaterGridSpec.YMin, -2.0];
+            this.FacetSets[WaterSet].LocalMaximum   = [CandyWaterGridSpec.XMax, CandyWaterGridSpec.YMax,  8.0];
+            this.FacetSets[WaterSet].VertexCapacity = CandyWaterGridSpec.NX * CandyWaterGridSpec.NY * 6;
+            const WaterOcc = this.ConstructOccupant("Candy 2.5D Shallow Water", WaterSet, ConstructIdentityTransform(), OccupantRole.Raster);
+            this.CandyWaterBlock = { FacetSet: WaterSet, Occupant: WaterOcc };
         }
 
         // ⑪ live-streamed Road Studio road, junction & highway bridge network (editable in Road Studio workspace) ------
