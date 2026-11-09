@@ -127,9 +127,16 @@ Test('Studio index.html, CSS, ESM modules, fonts, vendor libs, and icons are int
         assert.ok(Html.includes(`id="${Id}"`), `index.html missing #${Id}`);
     }
     assert.ok(Html.includes('"three": "./Vendor/three.esm.min.js"'), 'Missing three importmap');
+    assert.ok(!Html.includes('BtnModeOblique') && !Html.includes('data-mode="Oblique"'), 'Oblique button must be removed');
 
     const Css = fs.readFileSync(path.join(Here, 'ForceFieldEditor.css'), 'utf8');
     assert.ok(Css.includes('[hidden]') && Css.includes('display: none !important'), 'CSS missing explicit [hidden] override');
+    assert.ok(Css.includes('.pill-range') && Css.includes('.value-pill') && Css.includes('--card-top'), 'CSS missing Sun+Fluid cards & pill slider styling');
+
+    assert.equal(F.ResolveSourceColour('Attractor'), '#ff4757');
+    assert.equal(F.ResolveSourceColour('Repulsor'), '#3b8eff');
+    assert.equal(F.ResolveSourceColour('GustFront'), '#ff8c32');
+    for (const T of F.Types) assert.ok(/^#[0-9a-f]{6}$/i.test(F.ResolveSourceColour(T.Id)), `Missing colour on ${T.Id}`);
 
     const OrbitJs = fs.readFileSync(path.join(Here, 'Vendor/orbit-controls.esm.min.js'), 'utf8');
     assert.ok(!OrbitJs.includes("from 'three'") && !OrbitJs.includes('from "three"'), 'orbit-controls has unrewritten bare three import');

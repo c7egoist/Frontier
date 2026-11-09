@@ -138,6 +138,7 @@ const ForceFieldVisualization = (() =>
             FlowLines: false, FlowLineSpacing: 46, FlowLineLength: 22, FlowLinePulse: true, QuietCutoff: 0.025,
             Tracers: true, TracerCount: 360, SliceHeight: 10, CellPixels: 6, CameraCells: 48,
             ShowScaleBar: true, ShowLegend: true, ShowSources: true, ShowLabels: true, MinimalLabels: false, ShowCascades: false, ShowGroundGrid: true,
+            AllowOblique: true,
             Cascades: [], CascadeFocus: [0, 0], Sources: [], Extent: null, ClipToExtent: false, ProbePoint: null,
             PlacementMode: false, PlacementPreview: null,
             Background: '#050b12', RefreshInterval: 66, Animated: true, Minimap: null, MinimapExtent: null, LegendTitle: ''
@@ -884,21 +885,37 @@ const ForceFieldVisualization = (() =>
             Statistics.Streamlines = Streamlines.length;
         }
 
+        function HexToRgba(Hex, Alpha)
+        {
+            const Clean = (Hex || '#8fd3c4').replace('#', '');
+            if (Clean.length !== 6) return `rgba(143,211,196,${Alpha})`;
+            const Num = parseInt(Clean, 16);
+            return `rgba(${(Num >> 16) & 255},${(Num >> 8) & 255},${Num & 255},${Alpha})`;
+        }
+
+        function DominantSourceColour(WX, WZ)
+        {
+            const Default = Options.Contribution === 'Accelerate' ? '#e8c27a' : '#8fd3c4';
+            let Best = null, BestScore = 0;
+            for (const Src of Options.Sources)
+            {
+                if (Src.Dim && Options.Contribution !== 'Flow' && Src.Contribution !== Options.Contribution) continue;
+                if ((Src.Active ?? 1) <= 0.01) continue;
+                const R = Math.max(20, Src.Radius || Math.max(Src.HalfX || 120, Src.HalfZ || 120));
+                const D = Math.hypot(WX - (Src.OutlineX ?? Src.X), WZ - (Src.OutlineZ ?? Src.Z));
+                if (D > R * 1.05) continue;
+                const Score = (1 - D / (R * 1.05)) * (Src.Contribution === Options.Contribution ? 1.4 : 0.7);
+                if (Score > BestScore) { BestScore = Score; Best = Src.Colour || null; }
+            }
+            return Best || Default;
+        }
+
         function RenderFlowLines()
         {
             if (!Options.FlowLines || Options.Contribution === 'Damp' || !Streamlines.length) return;
             const SliceY = Options.SliceHeight;
-            const Palette = Options.Contribution === 'Accelerate'
-                ? ['rgba(232,194,122,0.18)', 'rgba(255,222,148,0.85)']
-                : Options.Heatmap
-                    ? ['rgba(218,248,255,0.20)', 'rgba(255,255,255,0.88)']
-                    : ['rgba(143,211,196,0.20)', 'rgba(182,250,236,0.92)'];
-
-            Context.save();
-            Context.lineCap = 'round';
-            Context.lineJoin = 'round';
-            const BasePath = new Path2D();
-            const PulsePath = new Path2D();
+            const Buckets = new Map();
+            const PulseBuckets = new Map();
 
             for (const Line of Streamlines)
             {
@@ -909,6 +926,11 @@ const ForceFieldVisualization = (() =>
                     if (P) Projected.push(P);
                 }
                 if (Projected.length < 3) continue;
+
+                const Mid = Line.Points[Math.floor(Line.Points.length * 0.5)];
+                const Tint = DominantSourceColour(Mid[0], Mid[1]);
+                let BasePath = Buckets.get(Tint);
+                if (!BasePath) { BasePath = new Path2D(); Buckets.set(Tint, BasePath); }
 
                 BasePath.moveTo(Projected[0][0], Projected[0][1]);
                 for (let I = 1; I < Projected.length - 1; ++I)
@@ -922,6 +944,8 @@ const ForceFieldVisualization = (() =>
 
                 if (Options.FlowLinePulse)
                 {
+                    let PulsePath = PulseBuckets.get(Tint);
+                    if (!PulsePath) { PulsePath = new Path2D(); PulseBuckets.set(Tint, PulsePath); }
                     const Head = ((Line.Phase + ElapsedDisplay * (0.42 + Line.NormMag * 0.72)) % 1.0);
                     const Span = 0.28;
                     const Count = Projected.length - 1;
@@ -935,14 +959,25 @@ const ForceFieldVisualization = (() =>
                 }
             }
 
-            Context.strokeStyle = Palette[0];
-            Context.lineWidth = 1.25;
-            Context.stroke(BasePath);
+            Context.save();
+            Context.lineCap = 'round';
+            Context.lineJoin = 'round';
+            for (const [Tint, BasePath] of Buckets)
+            {
+                Context.strokeStyle = HexToRgba(Tint, Options.Heatmap ? 0.34 : 0.28);
+                Context.lineWidth = 1.3;
+                Context.stroke(BasePath);
+            }
             if (Options.FlowLinePulse)
             {
-                Context.strokeStyle = Palette[1];
-                Context.lineWidth = 1.9;
-                Context.stroke(PulsePath);
+                for (const [Tint, PulsePath] of PulseBuckets)
+                {
+                    Context.shadowColor = Tint;
+                    Context.shadowBlur = 7;
+                    Context.strokeStyle = HexToRgba(Tint, 0.92);
+                    Context.lineWidth = 2.05;
+                    Context.stroke(PulsePath);
+                }
             }
             Context.restore();
         }
@@ -990,10 +1025,52 @@ const ForceFieldVisualization = (() =>
             {
                 const Colour = Source.Colour || ContributionColours[Source.Contribution] || '#dfe7f3';
                 const Active = Source.Active ?? 1;
-                Context.globalAlpha = (Source.Selected ? 0.96 : 0.34 + 0.42 * Math.min(1, Active)) * (Source.Dim && !Source.Selected ? 0.35 : 1);
+                const BaseAlpha = (Source.Selected ? 0.98 : 0.42 + 0.44 * Math.min(1, Active)) * (Source.Dim && !Source.Selected ? 0.48 : 1);
+                const Centre = Project(Source.X, SliceY, Source.Z);
+
+                // Soft glowing area wash inside finite influence bounds
+                if (Centre && Source.Shape !== 'Everywhere' && Active > 0.01)
+                {
+                    Context.save();
+                    Context.globalAlpha = Source.Dim && !Source.Selected ? 0.45 : 1;
+                    if (Source.Shape === 'Box')
+                    {
+                        const Corners = BoxOutline(Source, SliceY).map(([X, Y, Z]) => Project(X, Y, Z)).filter(Boolean);
+                        if (Corners.length === 4)
+                        {
+                            Context.fillStyle = HexToRgba(Colour, Source.Selected ? 0.14 : 0.08);
+                            Context.beginPath();
+                            Context.moveTo(Corners[0][0], Corners[0][1]);
+                            for (let I = 1; I < 4; ++I) Context.lineTo(Corners[I][0], Corners[I][1]);
+                            Context.closePath();
+                            Context.fill();
+                        }
+                    }
+                    else if (Source.Radius > 0)
+                    {
+                        const RimPt = Project(Source.X + Source.Radius, SliceY, Source.Z);
+                        const ScreenR = RimPt ? Math.hypot(RimPt[0] - Centre[0], RimPt[1] - Centre[1]) : 0;
+                        if (ScreenR >= 4 && typeof Context.createRadialGradient === 'function')
+                        {
+                            const Grad = Context.createRadialGradient(Centre[0], Centre[1], Math.min(4, ScreenR * 0.1), Centre[0], Centre[1], ScreenR);
+                            Grad.addColorStop(0, HexToRgba(Colour, Source.Selected ? 0.24 : 0.15));
+                            Grad.addColorStop(0.55, HexToRgba(Colour, Source.Selected ? 0.09 : 0.05));
+                            Grad.addColorStop(1, HexToRgba(Colour, 0));
+                            Context.fillStyle = Grad;
+                            Context.beginPath();
+                            Context.arc(Centre[0], Centre[1], ScreenR, 0, Math.PI * 2);
+                            Context.fill();
+                        }
+                    }
+                    Context.restore();
+                }
+
+                Context.globalAlpha = BaseAlpha;
+                Context.shadowColor = Colour;
+                Context.shadowBlur = Source.Selected ? 20 : 10;
                 Context.strokeStyle = Colour;
-                Context.lineWidth = Source.Selected ? 2 : 1.1;
-                Context.setLineDash(Source.Selected ? [] : [4, 5]);
+                Context.lineWidth = Source.Selected ? 2.1 : 1.25;
+                Context.setLineDash(Source.Selected ? [] : [5, 5]);
                 if (Source.Track && Source.Track.length > 1)
                 {
                     Context.save();
@@ -1010,26 +1087,12 @@ const ForceFieldVisualization = (() =>
                     if (Source.InnerRadius && (!PixelsPerMetre || Source.InnerRadius * PixelsPerMetre >= 3))
                     {
                         Context.save();
-                        Context.globalAlpha *= 0.6;
+                        Context.globalAlpha *= 0.65;
                         Context.setLineDash([2, 3]);
                         StrokeWorldPolygon(CircleOutline(Source.X, SliceY, Source.Z, Source.InnerRadius, 48), true);
                         Context.restore();
                     }
                 }
-                if (View.Mode === 'Oblique' && Source.Height > 0)
-                {
-                    Context.save();
-                    Context.setLineDash([]);
-                    Context.lineWidth = 1.4;
-                    StrokeWorldPolygon([[Source.X, Source.Y, Source.Z], [Source.X, Source.Y + Source.Height, Source.Z]], false);
-                    if (Source.Radius * PixelsPerMetre >= 3)
-                    {
-                        Context.globalAlpha *= 0.5;
-                        StrokeWorldPolygon(CircleOutline(Source.X, Source.Y + Source.Height, Source.Z, Math.max(Source.InnerRadius || 0, Source.Radius * 0.3), 48), true);
-                    }
-                    Context.restore();
-                }
-                const Centre = Project(Source.X, SliceY, Source.Z);
                 if (!Centre) continue;
                 if (Source.Bearing !== undefined && Source.Bearing !== null)
                 {
@@ -1095,22 +1158,30 @@ const ForceFieldVisualization = (() =>
                 if (Options.ShowLabels && Source.Label && AllowLabel && (!Source.Dim || Source.Selected)) Labels.push([Source, Centre, Colour]);
             }
             Context.globalAlpha = 1;
+            Context.shadowBlur = 0;
             Context.font = '500 11px "DM Sans", sans-serif';
             const Placed = [];
-            for (const [Source, Centre] of Labels)
+            for (const [Source, Centre, Colour] of Labels)
             {
                 const Text = Source.Label;
                 const Measure = Context.measureText(Text).width;
                 let X = Centre[0] + 10, Y = Centre[1] - 9;
                 // 📝 Labels step down until they no longer overlap one already placed (crowded large-scale views).
-                for (let Attempt = 0; Attempt < 6 && Placed.some(([A, B, C, D]) => X < C && X + Measure + 10 > A && Y - 12 < D && Y + 5 > B); ++Attempt) Y += 17;
-                Placed.push([X - 5, Y - 12, X + Measure + 5, Y + 5]);
-                Context.fillStyle = Source.Selected ? 'rgba(30,34,40,0.92)' : 'rgba(8,10,14,0.72)';
+                for (let Attempt = 0; Attempt < 6 && Placed.some(([A, B, C, D]) => X < C && X + Measure + 18 > A && Y - 12 < D && Y + 5 > B); ++Attempt) Y += 17;
+                Placed.push([X - 5, Y - 12, X + Measure + 16, Y + 5]);
+                Context.fillStyle = Source.Selected ? 'rgba(22,24,28,0.94)' : 'rgba(10,12,16,0.78)';
+                Context.strokeStyle = Source.Selected ? Colour : HexToRgba(Colour, 0.35);
+                Context.lineWidth = 1;
                 Context.beginPath();
-                Context.roundRect(X - 6, Y - 12, Measure + 12, 17, 8);
+                Context.roundRect(X - 6, Y - 12, Measure + 22, 18, 9);
                 Context.fill();
-                Context.fillStyle = Source.Selected ? '#ffffff' : (Source.Active ?? 1) > 0.01 ? '#e6e6e6' : '#8a8a8a';
-                Context.fillText(Text, X, Y);
+                Context.stroke();
+                Context.fillStyle = Colour;
+                Context.beginPath();
+                Context.arc(X + 1.5, Y - 3, 2.8, 0, Math.PI * 2);
+                Context.fill();
+                Context.fillStyle = Source.Selected ? '#ffffff' : (Source.Active ?? 1) > 0.01 ? '#e9ecef' : '#8a8a8a';
+                Context.fillText(Text, X + 8, Y);
             }
             Context.restore();
         }
@@ -1624,7 +1695,7 @@ const ForceFieldVisualization = (() =>
                 }
                 else if (Drag.Mode === 'Turn')
                 {
-                    if (View.Mode === 'Oblique')
+                    if (View.Mode === 'Oblique' && Options.AllowOblique !== false)
                     {
                         View.Yaw += (X - Drag.X) * 0.008;
                         View.Pitch = Math.min(1.55, Math.max(0.18, View.Pitch + (Y - Drag.Y) * 0.006));

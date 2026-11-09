@@ -283,16 +283,16 @@ export class ForceField3DViewport
             const Src = Entry.Source;
             const Type = Entry.Type;
             const Selected = Src.Token === SelectedToken;
-            const ColourHex = CONTRIB_HEX[Type.Contribution] || '#8fd3c4';
+            const ColourHex = F.ResolveSourceColour(Src);
             const Col = new THREE.Color(ColourHex);
             const Root = new THREE.Group();
             Root.userData.token = Src.Token;
             const PosX = Entry.Centre[0] * S, PosY = Math.max(0.4, Entry.Centre[1] * S), PosZ = Entry.Centre[2] * S;
             Root.position.set(PosX, PosY, PosZ);
 
-            // Physical Emitter Fixture
+            // Physical Emitter Fixture with Entity Glow
             const Metal = new THREE.MeshStandardMaterial({ color: '#1b2028', roughness: 0.36, metalness: 0.82 });
-            const GlowMat = new THREE.MeshBasicMaterial({ color: Col, transparent: true, opacity: Src.Enabled ? (Selected ? 0.98 : 0.72) : 0.24 });
+            const GlowMat = new THREE.MeshBasicMaterial({ color: Col, transparent: true, opacity: Src.Enabled ? (Selected ? 0.98 : 0.82) : 0.24 });
 
             if (Src.Type === 'WindGenerator')
             {
@@ -329,18 +329,18 @@ export class ForceField3DViewport
             }
             else
             {
-                const Orb = new THREE.Mesh(new THREE.SphereGeometry(0.55, 18, 14), Metal);
-                const Collar = new THREE.Mesh(new THREE.TorusGeometry(0.82, 0.06, 10, 28), GlowMat);
+                const Orb = new THREE.Mesh(new THREE.SphereGeometry(0.55, 18, 14), new THREE.MeshStandardMaterial({ color: Col, emissive: Col, emissiveIntensity: Src.Enabled ? 0.55 : 0.1, roughness: 0.35, metalness: 0.35 }));
+                const Collar = new THREE.Mesh(new THREE.TorusGeometry(0.9, 0.07, 10, 28), GlowMat);
                 Collar.rotation.x = Math.PI / 2;
                 Root.add(Orb, Collar);
             }
 
-            // Minimalist Finite Influence Boundary Shell
+            // Minimalist Finite Influence Boundary Shell + Soft Glowing Area Floor Disc
             const ShowBounds = SceneState.Visualization?.ShowInfluence !== false;
             if (ShowBounds)
             {
                 const R = Clamp((Src.Radius || 180) * S, 1.5, 95);
-                const EnvOpacity = Selected ? 0.56 : 0.15;
+                const EnvOpacity = Selected ? 0.68 : 0.28;
                 const EnvMat = new THREE.LineBasicMaterial({ color: Col, transparent: true, opacity: EnvOpacity });
                 if (Src.Reach === 'Box')
                 {
@@ -352,16 +352,23 @@ export class ForceField3DViewport
                     const Wire = new THREE.LineSegments(BoxGeo, EnvMat);
                     Wire.position.y = BoxH * 0.5 - PosY;
                     Wire.rotation.y = -(Src.Bearing || 0) * Radian;
-                    Root.add(Wire);
+                    const Pad = new THREE.Mesh(new THREE.PlaneGeometry(BoxW, BoxD), new THREE.MeshBasicMaterial({ color: Col, transparent: true, opacity: Selected ? 0.14 : 0.06, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+                    Pad.rotation.x = -Math.PI / 2;
+                    Pad.rotation.z = (Src.Bearing || 0) * Radian;
+                    Pad.position.y = 0.05 - PosY;
+                    Root.add(Wire, Pad);
                 }
                 else
                 {
                     const BaseRing = new THREE.Line(CreateRingPoints(R, 64), EnvMat);
                     BaseRing.position.y = SliceY - PosY;
-                    Root.add(BaseRing);
+                    const GlowDisc = new THREE.Mesh(new THREE.CircleGeometry(R, 48), new THREE.MeshBasicMaterial({ color: Col, transparent: true, opacity: Selected ? 0.15 : 0.07, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+                    GlowDisc.rotation.x = -Math.PI / 2;
+                    GlowDisc.position.y = 0.05 - PosY;
+                    Root.add(BaseRing, GlowDisc);
                     if (Selected)
                     {
-                        const Meridian = new THREE.Line(CreateRingPoints(R, 48), new THREE.LineBasicMaterial({ color: Col, transparent: true, opacity: 0.25 }));
+                        const Meridian = new THREE.Line(CreateRingPoints(R, 48), new THREE.LineBasicMaterial({ color: Col, transparent: true, opacity: 0.32 }));
                         Meridian.rotation.z = Math.PI / 2;
                         Root.add(Meridian);
                     }
@@ -405,14 +412,14 @@ export class ForceField3DViewport
             }
         }
 
-        // Smooth 3D RK2 Curved Flow Lines seeded around active sources
+        // Smooth 3D RK2 Curved Flow Lines seeded around active sources (glowing in entity colour!)
         if (ShowFlowLines && Contrib !== 'Damp')
         {
-            const LineMat = new THREE.LineBasicMaterial({ color: Contrib === 'Accelerate' ? '#e8c27a' : '#8fd3c4', transparent: true, opacity: 0.72 });
             const StepWorld = Span * 0.028;
             for (const Entry of Prepared.Entries)
             {
                 if (!Entry.Source.Enabled) continue;
+                const LineMat = new THREE.LineBasicMaterial({ color: new THREE.Color(F.ResolveSourceColour(Entry.Source)), transparent: true, opacity: 0.78 });
                 const R = Math.min(HalfW * 0.8, Entry.Source.Radius || 160);
                 for (let AIdx = 0; AIdx < 6; ++AIdx)
                 {

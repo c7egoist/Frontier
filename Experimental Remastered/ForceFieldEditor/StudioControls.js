@@ -243,12 +243,14 @@ export function ToggleTile(Host, B)
 
 export function SliderRow(Host, B)
 {
-    const Row = Construct('div', 'control-row slider-row');
-    const LabelEl = Construct('span', 'control-label', B.Label);
-    const ValInput = Construct('input', 'num-pill');
+    const Row = Construct('div', 'property-row slider-row');
+    const LabelEl = Construct('span', 'property-label', B.Label);
+    const ValInput = Construct('input', 'num-input');
     ValInput.type = 'text';
-    const Head = Construct('div', 'slider-head', [LabelEl, ValInput]);
-    const Range = Construct('input', 'range-input');
+    const UnitCell = Construct('span', 'unit-cell', B.Unit || '');
+    const ValPill = Construct('div', 'value-pill', [ValInput, UnitCell]);
+
+    const Range = Construct('input', 'pill-range');
     Range.type = 'range';
     const Min = B.Minimum ?? 0, Max = B.Maximum ?? 100;
     const Log = B.Scale === 'Logarithmic' && Min > 0;
@@ -264,12 +266,16 @@ export function SliderRow(Host, B)
         Range.max = String(Max);
         Range.step = String(B.Step ?? 0.1);
     }
-    const ToSlider = (V) => Log ? Math.round((Math.log(Clamp(V, Min, Max) / Min) / Math.log(Max / Min)) * 1000) : V;
+    const ToSlider = (V) => Log ? Math.round((Math.log(Clamp(V, Min, Max) / Min) / Math.log(Max / Min)) * 1000) : Clamp(V, Min, Max);
     const FromSlider = (S) => Log ? Min * Math.pow(Max / Min, Clamp(S, 0, 1000) / 1000) : S;
+    const FractionOf = (V) => Log
+        ? Clamp(Math.log(Clamp(V, Min, Max) / Min) / Math.max(1e-6, Math.log(Max / Min)), 0, 1)
+        : Clamp((V - Min) / Math.max(1e-6, Max - Min), 0, 1);
 
     Range.addEventListener('input', () =>
     {
         const Val = FromSlider(parseFloat(Range.value));
+        Range.style?.setProperty?.('--fraction', FractionOf(Val).toFixed(4));
         B.Write(Log ? Number(Val.toPrecision(3)) : Val);
         Broadcast();
     });
@@ -279,7 +285,9 @@ export function SliderRow(Host, B)
         if (Number.isFinite(Parsed)) { B.Write(Clamp(Parsed, Min, Max)); Broadcast(); }
         else Broadcast();
     });
-    Row.append(Head, Range);
+
+    const Control = Construct('div', 'slider-control', [ValPill, Range]);
+    Row.append(LabelEl, Control);
     if (B.Labels) Row.append(Construct('div', 'slider-ends', [Construct('span', null, B.Labels[0]), Construct('span', null, B.Labels[1])]));
     Host.append(Row);
 
@@ -287,17 +295,24 @@ export function SliderRow(Host, B)
     {
         const Cur = Number(B.Read() ?? 0);
         const Avail = B.Availability ? B.Availability() : { Enabled: true };
+        Row.classList.toggle('unavailable', !Avail.Enabled);
         Row.classList.toggle('disabled', !Avail.Enabled);
         Range.disabled = !Avail.Enabled;
         Range.value = String(ToSlider(Cur));
+        Range.style?.setProperty?.('--fraction', FractionOf(Cur).toFixed(4));
         if (document.activeElement !== ValInput)
         {
             if (B.Format)
             {
                 const [Text, Unit] = B.Format(Cur);
-                ValInput.value = `${Text} ${Unit}`;
+                ValInput.value = Text;
+                UnitCell.textContent = Unit;
             }
-            else ValInput.value = `${Cur.toFixed(B.Digits ?? 1)}${B.Unit ? ' ' + B.Unit : ''}`;
+            else
+            {
+                ValInput.value = Cur.toFixed(B.Digits ?? 1);
+                UnitCell.textContent = B.Unit || '';
+            }
         }
     });
 }

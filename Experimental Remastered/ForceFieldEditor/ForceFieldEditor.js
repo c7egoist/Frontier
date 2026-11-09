@@ -2,7 +2,7 @@
                                                            FORCEFIELDEDITOR.JS
 ==========================================================================================================================================*/
 // 🧩 Force Field & Wind Studio: interactive placement of Wind Generators + 16 bounded force fields, anti-clutter RK2 Flow Lines
-//    + sparse Vector Field + finite Influence envelopes, across Map 2D, Oblique Slice, and 3D Field Stage.
+//    + sparse Vector Field + finite glowing Influence envelopes, across Map 2D and 3D Field Stage.
 
 import { ForceFieldCatalogue as F, Radian } from './Engine/ForceFieldCatalogue.js';
 import { StudioControls as C } from './StudioControls.js';
@@ -21,7 +21,7 @@ let PageScope = null, OutlinerScope = null;
 let Selected = Scene.Sources[0]?.Token || 'Field';
 let PlacementType = null;
 let PlacementDragPreview = null;
-let ViewMode = 'Map'; // 'Map' | 'Oblique' | 'Stage3D'
+let ViewMode = 'Map'; // 'Map' | 'Stage3D'
 let Visualization = null;
 let Stage3D = null;
 let HoverPoint = null;
@@ -331,8 +331,9 @@ function SwitchViewMode(Mode)
         Mount3D.hidden = true;
         Canvas2D.hidden = false;
         Minimap.classList.add('shown');
-        Scene.Visualization.Mode = Mode;
-        if (Visualization) { Visualization.View.Mode = Mode; Visualization.Resize(); Visualization.Invalidate(); }
+        Scene.Visualization.Mode = 'Map';
+        ViewMode = 'Map';
+        if (Visualization) { Visualization.View.Mode = 'Map'; Visualization.Resize(); Visualization.Invalidate(); }
     }
     SyncTopUi();
     C.Broadcast();
@@ -373,7 +374,7 @@ function DescribeSources()
         const Source = Entry.Source;
         const Dec = {
             Id: Source.Token, X: Entry.Centre[0], Y: Entry.Centre[1], Z: Entry.Centre[2],
-            Contribution: Entry.Contribution, Label: Source.Name, Active: Entry.Envelope,
+            Contribution: Entry.Contribution, Colour: F.ResolveSourceColour(Source), Label: Source.Name, Active: Entry.Envelope,
             Selected: Selected === Source.Token, Dim: Entry.Contribution !== Shown,
             Shape: Source.Reach === 'Box' ? 'Box' : 'Circle', Radius: Source.Radius
         };
@@ -416,11 +417,13 @@ function ApplyVisualization()
             HalfZ: T.Defaults.HalfZ || T.Defaults.Radius || 140,
             Bearing: PlacementDragPreview.Bearing ?? T.Defaults.Bearing,
             Contribution: T.Contribution,
+            Colour: F.ResolveSourceColour(PlacementType),
             Label: T.Name
         };
     }
 
     Visualization.Configure({
+        AllowOblique: false,
         Quantity: Settings.Quantity,
         Contribution: Settings.Contribution,
         ScaleMode: Settings.ScaleMode,
@@ -528,7 +531,8 @@ function ConstructTreeRow(Host, Row)
     const Meta = C.Construct('div', 'row-meta');
     const Glyph = C.Construct('div', 'row-glyph', C.ConstructGlyph(Row.Glyph));
     Glyph.style.color = Row.Colour;
-    Glyph.style.background = Row.Colour + '1f';
+    Glyph.style.background = Row.Colour + '22';
+    Glyph.style.boxShadow = `0 0 12px ${Row.Colour}44`;
     const Status = C.Construct('span', 'row-status');
     const Toggle = C.Construct('button', 'row-toggle', C.ConstructGlyph('Eye'));
     Toggle.type = 'button';
@@ -538,6 +542,7 @@ function ConstructTreeRow(Host, Row)
         Row.Status ? Status : null,
         Toggle
     ]);
+    TreeRow.style?.setProperty?.('--row-accent', Row.Colour);
     TreeRow.addEventListener('click', () => { Selected = Row.Id; ConstructInspectorPage(); C.Broadcast(); Sync3DIfVisible(); });
     Toggle.addEventListener('click', (E) => { E.stopPropagation(); Row.Flip(); C.Broadcast(); Sync3DIfVisible(); });
     C.Register(() =>
@@ -604,7 +609,7 @@ function ConstructOutliner()
         {
             const Type = F.TypeById[S.Type];
             ConstructTreeRow(Host, {
-                Id: S.Token, Depth: 1, Glyph: Type.Glyph, Colour: F.Contributions.Flow.Colour,
+                Id: S.Token, Depth: 1, Glyph: Type.Glyph, Colour: F.ResolveSourceColour(S),
                 Name: () => S.Name,
                 Meta: () => DescribeSourceMeta(S),
                 Enabled: () => S.Enabled,
@@ -620,7 +625,7 @@ function ConstructOutliner()
         for (const S of OtherSources)
         {
             const Type = F.TypeById[S.Type];
-            const Col = F.Contributions[Type.Contribution].Colour;
+            const Col = F.ResolveSourceColour(S);
             ConstructTreeRow(Host, {
                 Id: S.Token, Depth: 1, Glyph: Type.Glyph, Colour: Col,
                 Name: () => S.Name,
@@ -905,13 +910,28 @@ function ConstructWindPage(Page)
 function ConstructSourcePage(Page, Source)
 {
     const Type = F.TypeById[Source.Type] || F.TypeById.WindGenerator;
-    const Col = F.Contributions[Type.Contribution].Colour;
+    const Col = F.ResolveSourceColour(Source);
 
-    Page.append(
-        C.Construct('div', 'breadcrumb-row', `Inspector / ${Type.Contribution} / ${Type.Native}`),
-        C.Construct('div', 'page-title', [C.Construct('h2', null, Source.Name), C.Construct('span', 'guest-pill', Type.Contribution.toUpperCase())]),
-        C.Construct('div', 'page-subtitle', Type.Blurb)
-    );
+    Page.append(C.Construct('div', 'breadcrumb-row', `Inspector / ${Type.Contribution} / ${Type.Native}`));
+
+    const SymbolBox = C.Construct('div', 'object-symbol', C.ConstructGlyph(Type.Glyph));
+    SymbolBox.style.color = Col;
+    SymbolBox.style.background = Col + '20';
+    SymbolBox.style.borderColor = Col + '44';
+    SymbolBox.style.boxShadow = `0 0 18px ${Col}38`;
+
+    const NameInput = C.Construct('input', 'object-name-input');
+    NameInput.type = 'text';
+    NameInput.value = Source.Name;
+    NameInput.addEventListener('change', () => { Source.Name = NameInput.value.trim() || Type.Name; ConstructOutliner(); ConstructTimeline(); C.Broadcast(); });
+
+    const ObjectCard = C.Construct('div', 'object-heading', [
+        SymbolBox,
+        C.Construct('div', 'object-heading-copy', [NameInput, C.Construct('span', null, `${Type.Native} · ${Type.Contribution} · ${Source.Reach}`)]),
+        C.Construct('span', 'entity-glow-pill', 'BOUNDED')
+    ]);
+    ObjectCard.style?.setProperty?.('--entity-glow', Col);
+    Page.append(ObjectCard, C.Construct('div', 'page-subtitle', Type.Blurb));
 
     // Live radial influence profile plot (clearly drops to 0.00 at influence boundary!)
     const Metric = C.Construct('div', 'metric-big');
@@ -1031,14 +1051,21 @@ function OpenLibrary()
         const Grid = C.Construct('div', 'library-grid');
         for (const Type of F.Types.filter((T) => T.Contribution === Contrib))
         {
+            const GlowCol = F.ResolveSourceColour(Type.Id);
+            const Swatch = C.Construct('span', 'library-swatch', C.ConstructGlyph(Type.Glyph));
+            Swatch.style.color = GlowCol;
+            Swatch.style.background = GlowCol + '20';
+            Swatch.style.boxShadow = `0 0 14px ${GlowCol}38`;
             const Card = C.Construct('button', 'library-card', [
                 C.Construct('div', 'library-card-top', [
+                    Swatch,
                     C.Construct('span', 'library-card-title', Type.Name),
                     C.Construct('span', 'library-card-meta', `${Type.Reach} · ${FormatDistance(Type.Defaults.Radius || 180)}`)
                 ]),
                 C.Construct('div', 'library-card-blurb', Type.Blurb)
             ]);
             Card.type = 'button';
+            Card.style?.setProperty?.('--card-glow', GlowCol);
             Card.addEventListener('click', () => StartPlacement(Type.Id));
             Grid.append(Card);
         }
@@ -1061,7 +1088,12 @@ function CloseLibrary()
 function SyncTopUi()
 {
     document.querySelectorAll('#ScenarioTabs .doc-tab').forEach((Btn) => Btn.classList.toggle('is-active', Btn.dataset.scenario === Scene.Scenario));
-    document.querySelectorAll('#QuickPlaceGroup [data-place-type]').forEach((Btn) => Btn.classList.toggle('is-placing', Btn.dataset.placeType === PlacementType));
+    document.querySelectorAll('#QuickPlaceGroup [data-place-type]').forEach((Btn) =>
+    {
+        const Glow = F.ResolveSourceColour(Btn.dataset.placeType);
+        Btn.style?.setProperty?.('--pill-glow', Glow);
+        Btn.classList.toggle('is-placing', Btn.dataset.placeType === PlacementType);
+    });
     document.querySelectorAll('#ViewportBar [data-mode]').forEach((Btn) => Btn.classList.toggle('is-active', Btn.dataset.mode === ViewMode));
     const CurSpan = Visualization?.View?.Span || Scene.Visualization.Span || 1400;
     document.querySelectorAll('#SpanPresetGroup [data-span]').forEach((Btn) => Btn.classList.toggle('is-active', Math.abs(Number(Btn.dataset.span) - CurSpan) < CurSpan * 0.25));

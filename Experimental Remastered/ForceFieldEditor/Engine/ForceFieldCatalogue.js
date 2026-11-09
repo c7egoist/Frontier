@@ -62,7 +62,7 @@ const DistanceParam = (Minimum, Maximum, Step, Unit) => ({ Minimum, Maximum, Ste
 
 export const Types = [
     {
-        Id: 'WindGenerator', Name: 'Wind generator', Contribution: 'Flow', Glyph: 'Wind', Native: 'LocalizedWindGenerator', Reach: 'Column',
+        Id: 'WindGenerator', Name: 'Wind generator', Contribution: 'Flow', Glyph: 'Wind', Colour: '#4ae4e8', Native: 'LocalizedWindGenerator', Reach: 'Column',
         Blurb: 'Placeable bounded wind generator: produces directional air flow with coherent gusts and curl turbulence strictly inside its finite influence envelope.',
         Defaults: { Strength: 16, Bearing: 60, GustStrength: 0.25, GustFrequency: 0.14, Turbulence: 0.35, TurbulenceScale: 42, Radius: 240, Height: 160, HalfX: 220, HalfZ: 140, Falloff: 'Smooth', CentreY: 0 },
         Parameters: [
@@ -75,7 +75,7 @@ export const Types = [
         Bearings: [['Bearing', 'Blows toward']]
     },
     {
-        Id: 'Tornado', Name: 'Tornado column', Contribution: 'Flow', Glyph: 'Tornado', Native: 'VortexColumn', Reach: 'Column',
+        Id: 'Tornado', Name: 'Tornado column', Contribution: 'Flow', Glyph: 'Tornado', Colour: '#32e6a4', Native: 'VortexColumn', Reach: 'Column',
         Blurb: 'Burgers–Rott vortex column with tangential spin peaking at the inner radius, ground boundary inflow, helical core updraft, and finite outer influence.',
         Defaults: { Strength: 46, InnerRadius: 22, CollarRadius: 72, Inflow: 14, Updraft: 26, Height: 480, Spin: 1, TrackBearing: 90, TrackSpeed: 0, Radius: 260, Falloff: 'Smooth' },
         Parameters: [
@@ -90,7 +90,7 @@ export const Types = [
         Bearings: [['TrackBearing', 'Track toward']], Spin: true
     },
     {
-        Id: 'Jet', Name: 'Jet corridor', Contribution: 'Flow', Glyph: 'Jet', Native: 'DirectionalJetCorridor', Reach: 'Box',
+        Id: 'Jet', Name: 'Jet corridor', Contribution: 'Flow', Glyph: 'Jet', Colour: '#38b6ff', Native: 'DirectionalJetCorridor', Reach: 'Box',
         Blurb: 'Bounded Venturi wind corridor along an axis, tapering smoothly at its sides and downstream limit.',
         Defaults: { Strength: 22, Length: 180, InnerRadius: 24, Bearing: 95, Radius: 180, HalfX: 90, HalfZ: 140, Height: 80, Falloff: 'Smooth', CentreY: 8 },
         Parameters: [
@@ -101,7 +101,7 @@ export const Types = [
         Bearings: [['Bearing', 'Axis toward']]
     },
     {
-        Id: 'GustFront', Name: 'Gust front', Contribution: 'Flow', Glyph: 'Front', Native: 'TravelingGustFront', Reach: 'Box',
+        Id: 'GustFront', Name: 'Gust front', Contribution: 'Flow', Glyph: 'Front', Colour: '#ff8c32', Native: 'TravelingGustFront', Reach: 'Box',
         Blurb: 'Bounded travelling surge wave with lifting nose and decaying wake, confined inside its finite front corridor.',
         Defaults: { Strength: 26, FrontSpeed: 12, CrestDepth: 85, Height: 140, HalfWidth: 700, Bearing: 113, Radius: 750, HalfX: 700, HalfZ: 320, Falloff: 'Smooth' },
         Parameters: [
@@ -114,7 +114,7 @@ export const Types = [
         Bearings: [['Bearing', 'Travels toward']]
     },
     {
-        Id: 'Microburst', Name: 'Microburst', Contribution: 'Flow', Glyph: 'Downburst', Native: 'RadialMicroburst', Reach: 'Column',
+        Id: 'Microburst', Name: 'Microburst', Contribution: 'Flow', Glyph: 'Downburst', Colour: '#7e8cff', Native: 'RadialMicroburst', Reach: 'Column',
         Blurb: 'Convective downdraft shaft spreading into an outward radial ring at the ground within its bounded radius.',
         Defaults: { Strength: 28, Downdraft: 22, InnerRadius: 48, RingRadius: 120, Height: 340, Radius: 360, Falloff: 'Smooth', CentreY: 220 },
         Parameters: [
@@ -125,7 +125,7 @@ export const Types = [
         ]
     },
     {
-        Id: 'Thermal', Name: 'Thermal updraft', Contribution: 'Flow', Glyph: 'Thermal', Native: 'ThermalUpdraftPlume', Reach: 'Column',
+        Id: 'Thermal', Name: 'Thermal updraft', Contribution: 'Flow', Glyph: 'Thermal', Colour: '#ffb838', Native: 'ThermalUpdraftPlume', Reach: 'Column',
         Blurb: 'Buoyant rising chimney with ground-level radial entrainment and upper turret divergence inside a finite radius.',
         Defaults: { Strength: 14.5, Inflow: 4.8, InnerRadius: 48, Height: 480, Radius: 180, Falloff: 'Smooth' },
         Parameters: [
@@ -136,7 +136,7 @@ export const Types = [
         ]
     },
     {
-        Id: 'Puff', Name: 'Gust puff', Contribution: 'Flow', Glyph: 'Puff', Native: 'LocalizedGustPuff', Reach: 'Sphere',
+        Id: 'Puff', Name: 'Gust puff', Contribution: 'Flow', Glyph: 'Puff', Colour: '#ff9f43', Native: 'LocalizedGustPuff', Reach: 'Sphere',
         Blurb: 'Bounded Gaussian air packet drifting downstream with ambient wind.',
         Defaults: { Strength: 14, Lift: 0.8, Radius: 95, RadiusY: 36, Drift: 0.6, Bearing: 112, Falloff: 'Smooth', CentreY: 12 },
         Parameters: [
@@ -148,7 +148,7 @@ export const Types = [
         Bearings: [['Bearing', 'Surge toward']]
     },
     {
-        Id: 'Blast', Name: 'Blast wave', Contribution: 'Flow', Glyph: 'Blast', Native: 'SphericalImpulseShell', Reach: 'Sphere',
+        Id: 'Blast', Name: 'Blast wave', Contribution: 'Flow', Glyph: 'Blast', Colour: '#ff5d38', Native: 'SphericalImpulseShell', Reach: 'Sphere',
         Blurb: 'Expanding pressure shell r(t) = r₀ + c·t within a strict outer blast radius.',
         Defaults: { Strength: 42, Expansion: 110, Thickness: 18, InitialRadius: 4, Radius: 420, Falloff: 'Smooth', Activation: 'Window', Begins: 4, Lasts: 12, Repeats: 24, RampIn: 0, RampOut: 2, CentreY: 2 },
         Parameters: [
@@ -159,7 +159,7 @@ export const Types = [
         ]
     },
     {
-        Id: 'Wake', Name: 'Vehicle wake', Contribution: 'Flow', Glyph: 'Wake', Native: 'AerodynamicWake', Reach: 'Box',
+        Id: 'Wake', Name: 'Vehicle wake', Contribution: 'Flow', Glyph: 'Wake', Colour: '#5cb3ff', Native: 'AerodynamicWake', Reach: 'Box',
         Blurb: 'Bounded slipstream wake behind a moving body: forward tow + counter-rotating upwash roll.',
         Defaults: { Strength: 13.5, Circulation: 7.5, Speed: 22, HalfWidth: 2.2, Length: 48, Height: 6, Bearing: 0, Radius: 90, Falloff: 'Smooth', CentreY: 1.2 },
         Parameters: [
@@ -173,14 +173,14 @@ export const Types = [
         Bearings: [['Bearing', 'Body travels toward']]
     },
     {
-        Id: 'Current', Name: 'Current zone', Contribution: 'Flow', Glyph: 'Current', Native: 'current', Reach: 'Box',
+        Id: 'Current', Name: 'Current zone', Contribution: 'Flow', Glyph: 'Current', Colour: '#2fd6c6', Native: 'current', Reach: 'Box',
         Blurb: 'Uniform steady stream strictly inside its oriented box bounds (air duct, river, ventilation stream).',
         Defaults: { Strength: 12, Bearing: 90, HalfX: 80, HalfZ: 140, Height: 40, Radius: 140, Falloff: 'Smooth' },
         Parameters: [{ Key: 'Strength', Label: 'Flow speed', Minimum: 0, Maximum: 40, Step: 0.1, Unit: 'm/s', Digits: 1 }],
         Bearings: [['Bearing', 'Flows toward']]
     },
     {
-        Id: 'Attractor', Name: 'Attractor', Contribution: 'Accelerate', Glyph: 'Attract', Native: 'attract', Reach: 'Sphere',
+        Id: 'Attractor', Name: 'Attractor', Contribution: 'Accelerate', Glyph: 'Attract', Colour: '#ff4757', Native: 'attract', Reach: 'Sphere',
         Blurb: 'Pulls toward centre with optional azimuthal swirl inside a finite spherical influence radius.',
         Defaults: { Strength: 10, Swirl: 4.5, Swallow: 0, Radius: 200, Falloff: 'Smooth', CentreY: 10 },
         Parameters: [
@@ -190,37 +190,37 @@ export const Types = [
         ]
     },
     {
-        Id: 'Repulsor', Name: 'Repulsor', Contribution: 'Accelerate', Glyph: 'Repel', Native: 'repel', Reach: 'Sphere',
+        Id: 'Repulsor', Name: 'Repulsor', Contribution: 'Accelerate', Glyph: 'Repel', Colour: '#3b8eff', Native: 'repel', Reach: 'Sphere',
         Blurb: 'Radial outward push confined strictly within its influence sphere — deflects approaching flow streams.',
         Defaults: { Strength: 12, Radius: 170, Falloff: 'Smooth', CentreY: 10 },
         Parameters: [{ Key: 'Strength', Label: 'Outward push', Minimum: 0, Maximum: 60, Step: 0.1, Unit: 'm/s²', Digits: 1 }]
     },
     {
-        Id: 'Orbit', Name: 'Orbit ring', Contribution: 'Accelerate', Glyph: 'Orbit', Native: 'orbit', Reach: 'Sphere',
+        Id: 'Orbit', Name: 'Orbit ring', Contribution: 'Accelerate', Glyph: 'Orbit', Colour: '#b374ff', Native: 'orbit', Reach: 'Sphere',
         Blurb: 'Pure tangential acceleration around world up inside a bounded sphere.',
         Defaults: { Strength: 7, Radius: 190, Falloff: 'Smooth', CentreY: 10 },
         Parameters: [{ Key: 'Strength', Label: 'Tangential pull', Minimum: 0, Maximum: 40, Step: 0.1, Unit: 'm/s²', Digits: 1 }]
     },
     {
-        Id: 'Lift', Name: 'Lift zone', Contribution: 'Accelerate', Glyph: 'Lift', Native: 'lift', Reach: 'Column',
+        Id: 'Lift', Name: 'Lift zone', Contribution: 'Accelerate', Glyph: 'Lift', Colour: '#d8f25a', Native: 'lift', Reach: 'Column',
         Blurb: 'Bounded upward acceleration column fading smoothly to zero at its outer boundary.',
         Defaults: { Strength: 8, Radius: 130, Height: 240, Falloff: 'Smooth', CentreY: 0 },
         Parameters: [{ Key: 'Strength', Label: 'Upward acceleration', Minimum: 0, Maximum: 40, Step: 0.1, Unit: 'm/s²', Digits: 1 }]
     },
     {
-        Id: 'Magnetic', Name: 'Magnetic dipole', Contribution: 'Accelerate', Glyph: 'Magnet', Native: 'magnetic', Reach: 'Sphere',
+        Id: 'Magnetic', Name: 'Magnetic dipole', Contribution: 'Accelerate', Glyph: 'Magnet', Colour: '#ef63d8', Native: 'magnetic', Reach: 'Sphere',
         Blurb: 'Dipole field lines along world Z, bounded inside a finite spherical region.',
         Defaults: { Strength: 6, Radius: 160, Falloff: 'Smooth', CentreY: 10 },
         Parameters: [{ Key: 'Strength', Label: 'Dipole drive', Minimum: 0, Maximum: 30, Step: 0.1, Unit: 'm/s²', Digits: 1 }]
     },
     {
-        Id: 'Gravity', Name: 'Gravity zone', Contribution: 'Accelerate', Glyph: 'Gravity', Native: 'gravity', Reach: 'Sphere',
+        Id: 'Gravity', Name: 'Gravity zone', Contribution: 'Accelerate', Glyph: 'Gravity', Colour: '#f5b041', Native: 'gravity', Reach: 'Sphere',
         Blurb: 'Localized gravity well or low-g pocket strictly bounded to its finite sphere/box influence.',
         Defaults: { Strength: 9.81, Radius: 280, Falloff: 'Smooth', CentreY: 0 },
         Parameters: [{ Key: 'Strength', Label: 'Gravity', Minimum: 0, Maximum: 30, Step: 0.01, Unit: 'm/s²', Digits: 2 }]
     },
     {
-        Id: 'Drag', Name: 'Drag volume', Contribution: 'Damp', Glyph: 'Damp', Native: 'drag', Reach: 'Box',
+        Id: 'Drag', Name: 'Drag volume', Contribution: 'Damp', Glyph: 'Damp', Colour: '#c084fc', Native: 'drag', Reach: 'Box',
         Blurb: 'Exponential damping zone — slows particles, gusts, and debris smoothly inside its oriented volume.',
         Defaults: { Strength: 1.2, HalfX: 120, HalfZ: 80, Height: 60, Radius: 120, Falloff: 'Smooth', Bearing: 0 },
         Parameters: [{ Key: 'Strength', Label: 'Damping rate', Minimum: 0, Maximum: 10, Step: 0.01, Unit: '1/s', Digits: 2 }]
@@ -228,6 +228,12 @@ export const Types = [
 ];
 
 export const TypeById = Object.fromEntries(Types.map((Type) => [Type.Id, Type]));
+
+export function ResolveSourceColour(SourceOrTypeId)
+{
+    const Key = typeof SourceOrTypeId === 'string' ? SourceOrTypeId : SourceOrTypeId?.Type;
+    return TypeById[Key]?.Colour || Contributions[TypeById[Key]?.Contribution]?.Colour || '#8fd3c4';
+}
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                                 FIELD CONSTRUCTION
@@ -977,7 +983,7 @@ export function ResolveBudget(Scene)
 }
 
 export const ForceFieldCatalogue = {
-    Contributions, Channels, Reaches, Falloffs, Activations, Types, TypeById, Falls,
+    Contributions, Channels, Reaches, Falloffs, Activations, Types, TypeById, Falls, ResolveSourceColour,
     ConstructSource, ConstructDefaultField, ConstructScenario,
     EvaluateWind, WindSpeedAt, ResolveActivation, ResolveCentre, ResolveReach, ResolveBoxExtents,
     EvaluateSource, Evaluate, Prepare, PrepareSource, EvaluatePrepared, EvaluateEntry,
