@@ -230,8 +230,8 @@ export class PolicePursuitSequence
         this.Host                  = Host;
         this.Scene                 = Host.Scene;
         this.LevelKey              = Host.LevelKey || "proving";
-        this.Enabled               = true;
-        this.LawEnforcementEnabled = true;
+        this.Enabled               = this.LevelKey !== "dday";
+        this.LawEnforcementEnabled = this.LevelKey !== "dday";
 
         // Modes: "player" (you drive; police chases if you speed/break traffic laws) | "selfplay" (hands-free RL training!)
         this.ControlMode           = "player";
@@ -258,11 +258,12 @@ export class PolicePursuitSequence
         this.HeliSpotTarget        = [-90.0, 0.0, 0.0];
         this.HeliLosClear          = true;
         this.DroneStates           = [
-            { Pos: [-115.0,  6.0, 3.2], Vel: [0, 0, 0], Yaw: 0 },
-            { Pos: [-115.0, -6.0, 3.2], Vel: [0, 0, 0], Yaw: 0 },
-            { Pos: [-105.0,  0.0, 3.5], Vel: [0, 0, 0], Yaw: 0 }
+            { Role: "RECON",  Label: "RECON SCOUT",   Pos: [-115.0,  6.0, 3.2], Vel: [0, 0, 0], Yaw: 0, Roll: 0, EmpCharge: 0, Cooldown: 0, HasLos: false },
+            { Role: "CUTOFF", Label: "CUT-OFF BLOCK", Pos: [-115.0, -6.0, 3.2], Vel: [0, 0, 0], Yaw: 0, Roll: 0, EmpCharge: 0, Cooldown: 0, HasLos: false },
+            { Role: "EMP",    Label: "EMP DISRUPTOR", Pos: [-105.0,  0.0, 3.5], Vel: [0, 0, 0], Yaw: 0, Roll: 0, EmpCharge: 0, Cooldown: 0, HasLos: false }
         ];
         this.DroneLockActive       = false;
+        this.DroneEmpCharge        = 0.0;
 
         // Second real ControlVehicle physics instance for the Police Interceptor Cruiser!
         this.PoliceVehicle         = new VehicleSolver(this.Scene.QueryObstacleBounds());
@@ -414,7 +415,7 @@ export class PolicePursuitSequence
     {
         if (!this.ControlStrip || !this.DomBtns)
             return;
-        const Hidden = Boolean(this.Host?.FreeCamera) || this.Host?.RoadEditor?.ActiveWorkspace === "roadstudio" || Boolean(this.Host?.Dock?.Clean);
+        const Hidden = !this.Enabled || Boolean(this.Host?.FreeCamera) || this.Host?.RoadEditor?.ActiveWorkspace === "roadstudio" || Boolean(this.Host?.Dock?.Clean);
         this.ControlStrip.classList.toggle("hidden", Hidden);
 
         const IsRL = this.ControlMode === "selfplay";
@@ -778,11 +779,122 @@ export class PolicePursuitSequence
     //                       HELICOPTER & 3 POLICE INTERCEPTOR DRONE AERIAL PURSUIT SOLVER
     //--------------------------------------------------------------------------------------------------------------------
 
+    HasLineOfSight2D(AX, AY, BX, BY)
+    {
+        const DX = BX - AX, DY = BY - AY;
+        const Dist = Math.hypot(DX, DY);
+        if (Dist < 1.0e-3)
+            return true;
+        const InvX = Math.abs(DX) > 1.0e-6 ? (1.0 / DX) : 1.0e6;
+        const InvY = Math.abs(DY) > 1.0e-6 ? (1.0 / DY) : 1.0e6;
+        const Boxes = this.FlatObstacleBoxes;
+        for (let B = 0; B < Boxes.length; B += 4)
+        {
+            const T1 = (Boxes[B]     - AX) * InvX;
+            const T2 = (Boxes[B + 2] - AX) * InvX;
+            const T3 = (Boxes[B + 1] - AY) * InvY;
+            const T4 = (Boxes[B + 3] - AY) * InvY;
+            const TMin = Math.max(Math.min(T1, T2), Math.min(T3, T4));
+            const TMax = Math.min(Math.max(T1, T2), Math.max(T3, T4));
+            if (TMax >= 0.0 && TMin <= TMax && TMin < 1.0 && TMax > 0.02)
+                return false;
+        }
+        return true;
+    }
+
+    SteerDroneAroundBuildings(D, GoalX, GoalY, MaxSpd, Step)
+    {
+        const ToGX = GoalX - D.Pos[0];
+        const ToGY = GoalY - D.Pos[1];
+        const GoalDist = Math.hypot(ToGX, ToGY) || 0.001;
+        const BaseAng  = Math.atan2(ToGY, ToGX);
+
+        // 9-ray obstacle-avoidance fan around desired goal direction so drones thread alleys & bank around buildings!
+        const FanOffsets = [0.0, 0.36, -0.36, 0.76, -0.76, 1.22, -1.22, 1.75, -1.75];
+        const ProbeRange = Math.min(24.0, Math.max(8.0, GoalDist + 4.0));
+        const Boxes      = this.FlatObstacleBoxes;
+        let BestAng      = BaseAng;
+        let BestScore    = -1.0e9;
+
+        for (let R = 0; R < FanOffsets.length; ++R)
+        {
+            const Off = FanOffsets[R];
+            const Ang = BaseAng + Off;
+            const DX  = Math.cos(Ang);
+            const DY  = Math.sin(Ang);
+            const InvX = Math.abs(DX) > 1.0e-6 ? (1.0 / DX) : 1.0e6;
+            const InvY = Math.abs(DY) > 1.0e-6 ? (1.0 / DY) : 1.0e6;
+
+            let HitT = ProbeRange;
+            for (let B = 0; B < Boxes.length; B += 4)
+            {
+                const T1 = (Boxes[B]     - D.Pos[0]) * InvX;
+                const T2 = (Boxes[B + 2] - D.Pos[0]) * InvX;
+                const T3 = (Boxes[B + 1] - D.Pos[1]) * InvY;
+                const T4 = (Boxes[B + 3] - D.Pos[1]) * InvY;
+                const TMin = Math.max(Math.min(T1, T2), Math.min(T3, T4));
+                const TMax = Math.min(Math.max(T1, T2), Math.max(T3, T4));
+                if (TMax >= 0.0 && TMin <= TMax && TMin >= 0.0 && TMin < HitT)
+                    HitT = TMin;
+            }
+            const ClearFrac = HitT / ProbeRange;
+            // Strongly penalize rays blocked within 5.5 m, reward goal alignment + heading continuity
+            const ContAlign = Math.cos(Ang - D.Yaw) * 0.14;
+            const Score = (HitT < 4.5 ? -8.0 + HitT : ClearFrac * 2.2) + Math.cos(Off) * 1.45 + ContAlign;
+            if (Score > BestScore)
+            {
+                BestScore = Score;
+                BestAng   = Ang;
+            }
+        }
+
+        const DesiredSpeed = Math.min(MaxSpd, GoalDist * 3.8 + 4.0);
+        const VX = Math.cos(BestAng) * DesiredSpeed;
+        const VY = Math.sin(BestAng) * DesiredSpeed;
+        const PrevVX = D.Vel[0], PrevVY = D.Vel[1];
+        const Blend = Math.min(1.0, Step * 6.8);
+        D.Vel[0] += (VX - D.Vel[0]) * Blend;
+        D.Vel[1] += (VY - D.Vel[1]) * Blend;
+
+        D.Pos[0] += D.Vel[0] * Step;
+        D.Pos[1] += D.Vel[1] * Step;
+
+        // Hard building-wall exclusion margin (1.4 m) so drones never clip inside architectural facades
+        const Margin = 1.4;
+        for (let B = 0; B < Boxes.length; B += 4)
+        {
+            const MinX = Boxes[B] - Margin, MinY = Boxes[B + 1] - Margin;
+            const MaxX = Boxes[B + 2] + Margin, MaxY = Boxes[B + 3] + Margin;
+            if (D.Pos[0] > MinX && D.Pos[0] < MaxX && D.Pos[1] > MinY && D.Pos[1] < MaxY)
+            {
+                const PushLeft  = D.Pos[0] - MinX;
+                const PushRight = MaxX - D.Pos[0];
+                const PushDown  = D.Pos[1] - MinY;
+                const PushUp    = MaxY - D.Pos[1];
+                const MinPush   = Math.min(PushLeft, PushRight, PushDown, PushUp);
+                if (MinPush === PushLeft)       { D.Pos[0] = MinX; D.Vel[0] = Math.min(0.0, D.Vel[0]); }
+                else if (MinPush === PushRight) { D.Pos[0] = MaxX; D.Vel[0] = Math.max(0.0, D.Vel[0]); }
+                else if (MinPush === PushDown)  { D.Pos[1] = MinY; D.Vel[1] = Math.min(0.0, D.Vel[1]); }
+                else                            { D.Pos[1] = MaxY; D.Vel[1] = Math.max(0.0, D.Vel[1]); }
+            }
+        }
+
+        const SpdNow = Math.hypot(D.Vel[0], D.Vel[1]);
+        if (SpdNow > 0.6)
+        {
+            const NewYaw = Math.atan2(D.Vel[1], D.Vel[0]);
+            const AccLat = (-(D.Vel[0] - PrevVX) * Math.sin(NewYaw) + (D.Vel[1] - PrevVY) * Math.cos(NewYaw)) / Math.max(Step, 1.0e-3);
+            D.Yaw  = NewYaw;
+            D.Roll += (ClampScalar(-AccLat * 0.022, -0.58, 0.58) - (D.Roll || 0.0)) * Math.min(1.0, Step * 8.0);
+        }
+    }
+
     AdvanceAerialUnits(Step, Evader)
     {
         const EvPos = Evader.Position;
         const EvVel = Evader.LinearVelocity;
         const Fwd   = Evader.QueryForward();
+        const Right = [Fwd[1], -Fwd[0]];
 
         // ① Police Pursuit Helicopter: overhead tracking + alley/bridge LOS occlusion check!
         this.HeliRotorAngle = (this.HeliRotorAngle + Step * 44.0) % (Math.PI * 2.0);
@@ -811,7 +923,6 @@ export class PolicePursuitSequence
         }
         else
         {
-            // Routine high-altitude city patrol orbit
             DesiredHeliX = -45.0 + Math.cos(this.Clock * 0.22) * 75.0;
             DesiredHeliY = Math.sin(this.Clock * 0.22) * 65.0;
             this.HeliSpotTarget = [DesiredHeliX + 18.0, DesiredHeliY, 0.0];
@@ -829,67 +940,121 @@ export class PolicePursuitSequence
         this.HeliPosition[1] += this.HeliVelocity[1] * Step;
         this.HeliPosition[2] += this.HeliVelocity[2] * Step;
 
-        // ② 3 Fast Police Interceptor Drones: low-altitude street & alley pursuit formation!
-        let AnyDroneClose = false;
-        const Formation = [
-            [-6.5,  4.2, 2.8],  // Left flank pursuit drone
-            [-6.5, -4.2, 2.8],  // Right flank pursuit drone
-            [ 9.5,  0.0, 3.2]   // Forward cut-off interceptor drone!
-        ];
-        const Right = [Fwd[1], -Fwd[0]];
+        // ② 3 Autonomous Tactical Police Drones (Obstacle-Avoiding + Role-Coordinated Swarm!):
+        //    • Drone 0 ("RECON"):  Threads covered alleys when Helicopter loses LOS to relay live suspect coordinates!
+        //    • Drone 1 ("CUTOFF"): Sprints 22 m ahead along the road tangent to form a low-altitude weaving aerial roadblock!
+        //    • Drone 2 ("EMP"):    Dives onto rear flank (< 10.5 m) to charge & fire a tactical EMP disruption pulse!
+        let ReconLock = false;
+        const RoadFrame = QueryNearestCityRoadFrame(EvPos[0], EvPos[1]);
+        const AlignSign = (RoadFrame.Tangent[0] * Fwd[0] + RoadFrame.Tangent[1] * Fwd[1]) >= 0.0 ? 1.0 : -1.0;
+        const RoadDir   = [RoadFrame.Tangent[0] * AlignSign, RoadFrame.Tangent[1] * AlignSign];
 
+        this.DroneEmpCharge = 0.0;
         for (let I = 0; I < 3; ++I)
         {
             const D = this.DroneStates[I];
-            let GoalX, GoalY, GoalZ;
+            D.Cooldown = Math.max(0.0, (D.Cooldown || 0.0) - Step);
+            let GoalX, GoalY, GoalZ, MaxDroneSpd = 38.0;
+
             if (this.PursuitActive)
             {
-                const [FOff, ROff, ZOff] = Formation[I];
-                const Weave = Math.sin(this.Clock * 3.2 + I * 2.1) * 1.4;
-                GoalX = EvPos[0] + Fwd[0] * FOff + Right[0] * (ROff + Weave);
-                GoalY = EvPos[1] + Fwd[1] * FOff + Right[1] * (ROff + Weave);
-                GoalZ = Math.max(2.4, EvPos[2] + ZOff);
+                if (I === 0)
+                {
+                    // RECON SCOUT: dives straight down alley axis when occluded, or orbits high-angle nose-left spotter!
+                    if (RawOccluded)
+                    {
+                        GoalX = EvPos[0] + EvVel[0] * 0.35;
+                        GoalY = EvPos[1] + EvVel[1] * 0.35;
+                        GoalZ = Math.max(2.35, EvPos[2] + 1.85);
+                        MaxDroneSpd = 42.0;
+                    }
+                    else
+                    {
+                        GoalX = EvPos[0] + Fwd[0] * 9.0 - Right[0] * 4.8;
+                        GoalY = EvPos[1] + Fwd[1] * 9.0 - Right[1] * 4.8;
+                        GoalZ = Math.max(3.2, EvPos[2] + 2.8);
+                    }
+                }
+                else if (I === 1)
+                {
+                    // CUT-OFF BLOCK: sprints 21 m ahead along street/alley tangent and weaves across windshield lane!
+                    const Weave = Math.sin(this.Clock * 4.6) * 2.8;
+                    GoalX = EvPos[0] + RoadDir[0] * 21.0 + (-RoadDir[1]) * Weave;
+                    GoalY = EvPos[1] + RoadDir[1] * 21.0 + ( RoadDir[0]) * Weave;
+                    GoalZ = Math.max(1.85, EvPos[2] + 1.25);
+                    MaxDroneSpd = 45.0;
+                }
+                else
+                {
+                    // EMP DISRUPTOR: peels wide during cooldown, otherwise dives tight onto rear-right quarter!
+                    if (D.Cooldown > 0.0)
+                    {
+                        GoalX = EvPos[0] - Fwd[0] * 14.0 + Right[0] * 9.5;
+                        GoalY = EvPos[1] - Fwd[1] * 14.0 + Right[1] * 9.5;
+                        GoalZ = Math.max(4.0, EvPos[2] + 3.6);
+                    }
+                    else
+                    {
+                        GoalX = EvPos[0] - Fwd[0] * 3.8 + Right[0] * 3.0;
+                        GoalY = EvPos[1] - Fwd[1] * 3.8 + Right[1] * 3.0;
+                        GoalZ = Math.max(2.05, EvPos[2] + 1.45);
+                        MaxDroneSpd = 41.0;
+                    }
+                }
             }
             else
             {
-                // Escort patrol above Police Cruiser when not in active chase
                 const PPos = this.PoliceVehicle.Position;
-                GoalX = PPos[0] + Math.cos(this.Clock * 1.2 + I * 2.09) * 6.0;
-                GoalY = PPos[1] + Math.sin(this.Clock * 1.2 + I * 2.09) * 6.0;
+                GoalX = PPos[0] + Math.cos(this.Clock * 1.2 + I * 2.09) * 6.5;
+                GoalY = PPos[1] + Math.sin(this.Clock * 1.2 + I * 2.09) * 6.5;
                 GoalZ = PPos[2] + 3.8;
+                MaxDroneSpd = 24.0;
             }
 
-            const MaxDroneSpd = 34.0;
-            let VX = (GoalX - D.Pos[0]) * 3.4;
-            let VY = (GoalY - D.Pos[1]) * 3.4;
-            const VLen = Math.hypot(VX, VY);
-            if (VLen > MaxDroneSpd)
-            {
-                VX = (VX / VLen) * MaxDroneSpd;
-                VY = (VY / VLen) * MaxDroneSpd;
-            }
-            D.Vel[0] += (VX - D.Vel[0]) * Math.min(1.0, Step * 6.0);
-            D.Vel[1] += (VY - D.Vel[1]) * Math.min(1.0, Step * 6.0);
-            D.Vel[2]  = (GoalZ - D.Pos[2]) * 4.0;
-
-            D.Pos[0] += D.Vel[0] * Step;
-            D.Pos[1] += D.Vel[1] * Step;
+            this.SteerDroneAroundBuildings(D, GoalX, GoalY, MaxDroneSpd, Step);
+            D.Vel[2]  = (GoalZ - D.Pos[2]) * 4.5;
             D.Pos[2] += D.Vel[2] * Step;
-            if (Math.hypot(D.Vel[0], D.Vel[1]) > 0.5)
-                D.Yaw = Math.atan2(D.Vel[1], D.Vel[0]);
 
             const DistToEv = Math.hypot(D.Pos[0] - EvPos[0], D.Pos[1] - EvPos[1]);
-            if (this.PursuitActive && DistToEv < 15.0)
-                AnyDroneClose = true;
-            // Mild tactical EMP drag pulse when lead interceptor drone holds tight < 5.2 m lock
-            if (this.PursuitActive && DistToEv < 5.2)
+            D.HasLos = this.PursuitActive && DistToEv < 24.0 && this.HasLineOfSight2D(D.Pos[0], D.Pos[1], EvPos[0], EvPos[1]);
+            if (D.HasLos && DistToEv < 20.0)
+                ReconLock = true;
+
+            // EMP Disruptor Charge & Discharge Mechanic on Drone #2!
+            if (I === 2)
             {
-                const Drag = Math.max(0.96, 1.0 - Step * 0.35);
-                Evader.LinearVelocity[0] *= Drag;
-                Evader.LinearVelocity[1] *= Drag;
+                if (this.PursuitActive && D.Cooldown <= 0.0 && D.HasLos && DistToEv < 10.5)
+                {
+                    D.EmpCharge = Math.min(1.0, (D.EmpCharge || 0.0) + Step / 1.50);
+                    if (D.EmpCharge >= 1.0)
+                    {
+                        D.EmpCharge = 0.0;
+                        D.Cooldown  = 4.2;
+                        Evader.LinearVelocity[0] *= 0.79;
+                        Evader.LinearVelocity[1] *= 0.79;
+                        Evader.AngularVelocity[2] += (Math.sin(this.Clock * 17.0) >= 0 ? 1 : -1) * 0.55;
+                        if (this.ControlMode === "player")
+                        {
+                            this.BannerMessage = "⚡ POLICE DRONE EMP PULSE HIT — SHAKE THEM IN THE ALLEYS!";
+                            this.BannerTimer   = 2.6;
+                        }
+                        this.Host?.Sparks?.Emit?.([{
+                            Point:    [EvPos[0], EvPos[1], EvPos[2] + 0.55],
+                            Velocity: [EvVel[0] * 0.4, EvVel[1] * 0.4, 3.8],
+                            Normal:   [0.0, 0.0, 1.0],
+                            Strength: 3.4,
+                            Rim:      null
+                        }], 1.0 / 60.0);
+                    }
+                }
+                else
+                {
+                    D.EmpCharge = Math.max(0.0, (D.EmpCharge || 0.0) - Step * 1.4);
+                }
+                this.DroneEmpCharge = D.EmpCharge;
             }
         }
-        this.DroneLockActive = AnyDroneClose;
+        this.DroneLockActive = ReconLock;
     }
 
     //--------------------------------------------------------------------------------------------------------------------
@@ -1187,14 +1352,16 @@ export class PolicePursuitSequence
         const QTail = MultiplyQuaternion(QHeli, ConstructAxisQuaternion([0, 1, 0], this.HeliTailAngle));
         UpdateOcc(Block.HeliTailRotor, ConstructRigidTransform(TailWorld, QTail));
 
-        // ③ 3 Police Interceptor Drones
+        // ③ 3 Police Interceptor Drones (with dynamic pitch & banking roll!)
         for (let I = 0; I < 3; ++I)
         {
             const D = this.DroneStates[I];
-            const QD = MultiplyQuaternion(
-                ConstructAxisQuaternion([0, 0, 1], D.Yaw),
-                ConstructAxisQuaternion([0, 1, 0], ClampScalar(Math.hypot(D.Vel[0], D.Vel[1]) * 0.014, 0.0, 0.28))
+            const Pitch = ClampScalar(Math.hypot(D.Vel[0], D.Vel[1]) * 0.012, 0.0, 0.32);
+            const QYawPitch = MultiplyQuaternion(
+                ConstructAxisQuaternion([0, 0, 1], D.Yaw || 0.0),
+                ConstructAxisQuaternion([0, 1, 0], Pitch)
             );
+            const QD = MultiplyQuaternion(QYawPitch, ConstructAxisQuaternion([1, 0, 0], D.Roll || 0.0));
             UpdateOcc(Block.Drones[I], ConstructRigidTransform(D.Pos, QD));
         }
     }
@@ -1354,6 +1521,42 @@ export class PolicePursuitSequence
                     Ctx.setLineDash?.([6, 4]);
                     Ctx.stroke();
                     Ctx.setLineDash?.([]);
+                }
+
+                // 3D Tactical Drone Role Callouts + Active EMP Tether Beam
+                const CarScreen = Hud.ProjectWorld([this.Host.Vehicle.Position[0], this.Host.Vehicle.Position[1], this.Host.Vehicle.Position[2] + 0.45], W, H, Cam);
+                for (let I = 0; I < 3; ++I)
+                {
+                    const D  = this.DroneStates[I];
+                    const DP = Hud.ProjectWorld([D.Pos[0], D.Pos[1], D.Pos[2] + 0.55], W, H, Cam);
+                    if (!DP)
+                        continue;
+                    const IsEmpCharging = I === 2 && D.EmpCharge > 0.06;
+                    const TagCol = IsEmpCharging ? "#ffbe42" : (D.HasLos ? "#6ef7c8" : "#78b8ff");
+
+                    if (IsEmpCharging && CarScreen)
+                    {
+                        Ctx.beginPath();
+                        Ctx.moveTo(DP[0], DP[1] + 6);
+                        Ctx.lineTo(CarScreen[0], CarScreen[1]);
+                        Ctx.strokeStyle = `rgba(255, 198, 68, ${(0.35 + 0.55 * D.EmpCharge).toFixed(2)})`;
+                        Ctx.lineWidth   = 1.8 + D.EmpCharge * 1.8;
+                        Ctx.setLineDash?.([5, 4]);
+                        Ctx.stroke();
+                        Ctx.setLineDash?.([]);
+                    }
+
+                    Ctx.save();
+                    Ctx.shadowColor = "rgba(0, 0, 0, 0.85)";
+                    Ctx.shadowBlur  = 5;
+                    Ctx.fillStyle   = TagCol;
+                    Ctx.font        = "700 10px 'JetBrains Mono', monospace";
+                    Ctx.textAlign   = "center";
+                    const Caption   = IsEmpCharging
+                        ? `⚡ EMP LOCK ${Math.round(D.EmpCharge * 100)}%`
+                        : `DRONE · ${D.Role}`;
+                    Ctx.fillText(Caption, DP[0], DP[1] - 8);
+                    Ctx.restore();
                 }
             }
         }

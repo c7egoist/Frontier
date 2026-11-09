@@ -106,7 +106,7 @@ export function StudioDirectionToWorld(Dir)
 
 export function ComputeWorldAnchorForBounds(Bounds, LevelKey = "inversion")
 {
-    if (LevelKey === "city")
+    if (LevelKey === "city" || LevelKey === "dday")
         return [0.0, 0.0, 0.0];
     const MinStudioX = Bounds && Number.isFinite(Bounds.min?.[0]) ? Bounds.min[0] : -85.0;
     if (LevelKey === "inversion")
@@ -262,25 +262,25 @@ export function CreateCityPursuitStudioProject()
         return R;
     };
 
-    // 3×3 Downtown Grid Nodes (X = -150, -55, +40; Y = +90, 0, -90)
+    // 3×3 Downtown Grid Nodes (X = -150, -55, +40; Y = +90, 0, -90; signals handled by Hovering Robotic Traffic Lights!)
     const NW = AddWorldNode("cn_nw", "West & North Junction",   -150.0,   90.0, 0.0, 8.0, false, true);
-    const NM = AddWorldNode("cn_nm", "Midtown & North Signal",   -55.0,   90.0, 0.0, 8.5, true,  true);
-    const NE = AddWorldNode("cn_ne", "Frontage & North Signal",   40.0,   90.0, 0.0, 8.5, true,  true);
+    const NM = AddWorldNode("cn_nm", "Midtown & North Signal",   -55.0,   90.0, 0.0, 8.5, false, true);
+    const NE = AddWorldNode("cn_ne", "Frontage & North Signal",   40.0,   90.0, 0.0, 8.5, false, true);
 
-    const CW = AddWorldNode("cn_cw", "West & Central Junction", -150.0,    0.0, 0.0, 8.5, true,  true);
-    const CM = AddWorldNode("cn_cm", "Midtown Central Plaza",    -55.0,    0.0, 0.0, 9.5, true,  true);
-    const CE = AddWorldNode("cn_ce", "Frontage & Central Signal", 40.0,    0.0, 0.0, 9.5, true,  true);
+    const CW = AddWorldNode("cn_cw", "West & Central Junction", -150.0,    0.0, 0.0, 8.5, false, true);
+    const CM = AddWorldNode("cn_cm", "Midtown Central Plaza",    -55.0,    0.0, 0.0, 9.5, false, true);
+    const CE = AddWorldNode("cn_ce", "Frontage & Central Signal", 40.0,    0.0, 0.0, 9.5, false, true);
 
     const SW = AddWorldNode("cn_sw", "West & South Junction",   -150.0,  -90.0, 0.0, 8.0, false, true);
-    const SM = AddWorldNode("cn_sm", "Midtown & South Signal",   -55.0,  -90.0, 0.0, 8.5, true,  true);
-    const SE = AddWorldNode("cn_se", "Frontage & South Signal",   40.0,  -90.0, 0.0, 8.5, true,  true);
+    const SM = AddWorldNode("cn_sm", "Midtown & South Signal",   -55.0,  -90.0, 0.0, 8.5, false, true);
+    const SE = AddWorldNode("cn_se", "Frontage & South Signal",   40.0,  -90.0, 0.0, 8.5, false, true);
 
     // Highway Overpass & Interchange Nodes (X = +105 m overpass above Central Ave; X = +165 m East Clover Beltway)
     const HwN  = AddWorldNode("cn_hwn",  "North Highway Interchange", 105.0,  136.0, 0.0, 9.0, false, false);
     const AbN  = AddWorldNode("cn_abn",  "North Viaduct Abutment",    105.0,   52.0, 6.4, 6.5, false, false);
     const AbS  = AddWorldNode("cn_abs",  "South Viaduct Abutment",    105.0,  -52.0, 6.4, 6.5, false, false);
     const HwS  = AddWorldNode("cn_hws",  "South Highway Interchange", 105.0, -136.0, 0.0, 9.0, false, false);
-    const CloverE = AddWorldNode("cn_clv","East Highway Clover",      165.0,    0.0, 0.0, 9.5, true,  false);
+    const CloverE = AddWorldNode("cn_clv","East Highway Clover",      165.0,    0.0, 0.0, 9.5, false, false);
 
     const Urban2L = { lanes: 2, laneWidth: 3.6, sidewalk: 1.8, curbStyle: "granite", markingStyle: "urban", speedLimit: 60, drainage: false, manholes: false, signs: false };
     const Blvd4L  = { lanes: 4, laneWidth: 3.4, median: 1.2, sidewalk: 2.0, curbStyle: "granite", markingStyle: "urban", speedLimit: 60, drainage: false, manholes: false, signs: false };
@@ -347,6 +347,17 @@ export function CreateStarterStudioProject(LevelKey = "inversion")
 {
     if (LevelKey === "city")
         return CreateCityPursuitStudioProject();
+    if (LevelKey === "dday")
+    {
+        return {
+            version:    1,
+            worldSpace: true,
+            name:       "D-Day Combat Sector Roads",
+            nodes:      [],
+            roads:      [],
+            sites:      []
+        };
+    }
     // Built-in Live-Editable Demonstration Showcase right in the level:
     // Connects directly into the Arena through the North-East & South-East gateways ([166, +66] & [166, -66]),
     // showcasing cubic Bézier S-curves, a 4-arm tangent-filleted crossroads with hovering traffic signal,

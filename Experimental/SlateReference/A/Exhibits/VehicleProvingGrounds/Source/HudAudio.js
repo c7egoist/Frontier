@@ -19,7 +19,8 @@ export class HudAudioSynthesizer
             TargetLock:  0,
             BrakeAlert:  0,
             LowFuel:     0,
-            PoliceAlert: 0
+            PoliceAlert: 0,
+            Explosions:  0
         };
         this.SirenOsc     = null;
         this.SirenGain    = null;
@@ -252,6 +253,23 @@ export class HudAudioSynthesizer
         const GainVal = 0.085 * Atten;
         this.SirenOsc.frequency.setTargetAtTime(Freq, Ctx.currentTime, 0.025);
         this.SirenGain.gain.setTargetAtTime(GainVal, Ctx.currentTime, 0.05);
+    }
+
+    // 📝 Deep sub-bass concussion + crack transient for D-Day landmine, shell, tank & aircraft crash explosions.
+    PlayExplosionBoom(Intensity = 0.7)
+    {
+        if (!this.Enabled)
+            return false;
+        this.Counts.Explosions++;
+        const Ctx = this.EnsureContext();
+        if (!Ctx)
+            return true;
+        const T0  = Ctx.currentTime;
+        const Vol = Math.max(0.05, Math.min(0.45, 0.30 * Intensity));
+        this.ScheduleTone(Ctx, 155.0, 28.0, T0,        0.42, Vol,        "sawtooth");
+        this.ScheduleTone(Ctx,  92.0, 22.0, T0 + 0.02, 0.55, Vol * 1.15, "triangle");
+        this.ScheduleTone(Ctx, 420.0, 65.0, T0,        0.09, Vol * 0.65, "square");
+        return true;
     }
 
     StopSiren()

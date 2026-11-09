@@ -511,6 +511,37 @@ export class SceneStructure
             Drones:       PoliceDrones
         };
 
+        // ⑩c D-Day Battlefield Combat Units (Tanks, MG Turrets, Cannons, Aircraft, Mines, Bombs, Shells, Tracers, Explosions)
+        this.DDayBlock = null;
+        if (ShapeSets.DDayTankHull !== undefined)
+        {
+            const DDayFirst   = this.Occupants.length;
+            const CombatRoles = OccupantRole.Raster | OccupantRole.Dynamic;
+            const AllocPool = (Prefix, ShapeIdx, Count) =>
+            {
+                const Arr = [];
+                for (let I = 0; I < Count; ++I)
+                    Arr.push(this.ConstructOccupant(`${Prefix} ${I}`, ShapeIdx, ParkedBelow, CombatRoles));
+                return Arr;
+            };
+            this.DDayBlock = {
+                First:       DDayFirst,
+                TankHulls:   AllocPool("DDay Tank Hull",         ShapeSets.DDayTankHull,          5),
+                TankTurrets: AllocPool("DDay Tank Turret",       ShapeSets.DDayTankTurret,        5),
+                MgTurrets:   AllocPool("DDay MG Turret",         ShapeSets.DDayMgTurret,          6),
+                Cannons:     AllocPool("DDay Heavy Cannon",      ShapeSets.DDayHeavyCannon,       6),
+                Aircraft:    AllocPool("DDay Attack Aircraft",   ShapeSets.DDayAircraft,          4),
+                Propellers:  AllocPool("DDay Propeller",         ShapeSets.DDayPropeller,         4),
+                Mines:       AllocPool("DDay Landmine",          ShapeSets.DDayLandmine,         28),
+                Bombs:       AllocPool("DDay Aerial Bomb",       ShapeSets.DDayAerialBomb,        8),
+                Shells:      AllocPool("DDay Artillery Shell",   ShapeSets.DDayArtilleryShell,    8),
+                Tracers:     AllocPool("DDay Tracer Bolt",       ShapeSets.DDayTracerBolt,       16),
+                Explosions:  AllocPool("DDay Explosion Fireball",ShapeSets.DDayExplosionFireball,10),
+                Count:       0
+            };
+            this.DDayBlock.Count = this.Occupants.length - DDayFirst;
+        }
+
         // ⑪ live-streamed Road Studio road, junction & highway bridge network (editable in Road Studio workspace) ------
         const RoadEditorSet = this.ConstructFacetSet("Road Studio network", [], 0.0, 0.0);
         this.FacetSets[RoadEditorSet].LocalMinimum   = [-2200.0, -2200.0, -40.0];

@@ -13,8 +13,11 @@ import { InversionArenaBounds, InversionArenaTracks, InversionArenaSurfaces, Inv
          ResolveInversionTrafficLights, ResolveInversionCones, ResolveInversionBreakables } from "./InversionArenaStructure.js";
 import { ConstructTrafficLightShapes } from "./TrafficLightSequence.js";
 import { CityPursuitShapes, CityPursuitSpawn, CityPursuitZones, CityClearZones,
-         ResolveCityPlacements, ResolveCityTrafficLights, ResolveCityCones, ResolveCityBreakables, EmitCityGroundFacets,
+         ResolveCityPlacements, ResolveCitySurfaces, ResolveCityTrafficLights, ResolveCityCones, ResolveCityBreakables, EmitCityGroundFacets,
          PolicePursuitShapes } from "./CityPursuitStructure.js";
+import { DDayStaticShapes, DDayCombatShapes, DDaySpawn, DDayZones,
+         ResolveDDayPlacements, ResolveDDaySurfaces, ResolveDDayCones, ResolveDDayBreakables,
+         EmitDDayGroundFacets } from "./DDayStructure.js";
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                                      SHAPES
@@ -465,13 +468,24 @@ export const LevelClearZones = Object.freeze([
 //------------------------------------------------------------------------------------------------------------------------
 
 export const LevelCatalog = Object.freeze([
-    { Key: "inversion", Title: "Inversion Arena",       Subtitle: "Tracks A–I: Stunt loops, collapsing bridge/road, 3-lane subway, trams & robot factory" },
-    { Key: "city",      Title: "City Pursuit & AI Lab", Subtitle: "Highway interchange, city blocks, narrow alleys, police chase & fast self-play RL" },
-    { Key: "proving",   Title: "Proving Grounds",       Subtitle: "Skidpad, jump wedge, smash alley, tunnel & slalom" }
+    { Key: "inversion", Title: "Inversion Arena",         Subtitle: "Tracks A–I: Stunt loops, collapsing bridge/road, 3-lane subway, trams & robot factory" },
+    { Key: "city",      Title: "City Pursuit & AI Lab",   Subtitle: "Highway interchange, city blocks, sloped alley ramps, smart drones & self-play RL" },
+    { Key: "dday",      Title: "D-Day · Race to The Wall", Subtitle: "Bunkers, MG turrets, 155mm cannons, exploding mines, cover tanks & crashing aircraft" },
+    { Key: "proving",   Title: "Proving Grounds",         Subtitle: "Skidpad, jump wedge, smash alley, tunnel & slalom" }
 ]);
 
 export function ResolveLevelShapes(LevelKey = "proving")
 {
+    if (LevelKey === "dday")
+    {
+        const { Cone, Jersey } = LevelShapes;
+        return {
+            Cone:   { ...Cone,   Voxel: 0.05 },
+            Jersey: { ...Jersey, Voxel: 0.09 },
+            ...DDayStaticShapes,
+            ...DDayCombatShapes
+        };
+    }
     if (LevelKey === "city")
     {
         const { Cone, Jersey, Pole, PoleHead,
@@ -525,6 +539,27 @@ export function ResolveProvingTrafficLights()
 
 export function ResolveLevelDescriptor(LevelKey = "proving")
 {
+    if (LevelKey === "dday")
+    {
+        return {
+            Key:           "dday",
+            Title:         "D-Day · Race to The Wall",
+            Relief:        false,
+            AeroGrip:      0.35,
+            Spawn:         DDaySpawn,
+            Zones:         DDayZones,
+            Drills:        [],
+            ClearZones:    [[-65.0, -24.0, 65.0, 24.0]],
+            Surfaces:      ResolveDDaySurfaces(),
+            TerrainHulls:  null,
+            Shapes:        ResolveLevelShapes("dday"),
+            Placements:    ResolveDDayPlacements,
+            TrafficLights: () => [],
+            Cones:         ResolveDDayCones,
+            Breakables:    ResolveDDayBreakables,
+            EmitGround:    EmitDDayGroundFacets
+        };
+    }
     if (LevelKey === "city")
     {
         return {
@@ -537,7 +572,7 @@ export function ResolveLevelDescriptor(LevelKey = "proving")
             Zones:         CityPursuitZones,
             Drills:        [],
             ClearZones:    CityClearZones,
-            Surfaces:      [],
+            Surfaces:      ResolveCitySurfaces(),
             TerrainHulls:  null,
             Shapes:        ResolveLevelShapes("city"),
             Placements:    ResolveCityPlacements,
