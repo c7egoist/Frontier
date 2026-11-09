@@ -1,0 +1,3 @@
+# Installed locally with `npm ci` (jolt-physics, Dawn for Node); never committed.
+node_modules/
+Tools/node_modules/
