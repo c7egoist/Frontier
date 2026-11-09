@@ -110,7 +110,17 @@ export const CourseMaterial = Object.freeze({
     TrafficYellow:   87,
     TrafficOrange:   88,
     TrafficGreen:    89,
-    BannerAmber:     90
+    BannerAmber:     90,
+    // 📝 Authentic WWII Normandy D-Day palette (Omaha Beach sand/shingle/mud, US Army OD#9 Olive Drab, Channel surf, rust & burlap).
+    OliveDrab:       91,
+    OliveDrabDark:   92,
+    WetBeachSand:    93,
+    DryBeachSand:    94,
+    ShinglePebble:   95,
+    ScorchedMud:     96,
+    ChannelWater:    97,
+    RustSteel:       98,
+    SandbagBurlap:   99
 });
 
 export const MarkedFamilyFirst = CourseMaterial.Asphalt;   // [-]
@@ -346,6 +356,21 @@ export function ConstructMaterialSpecification()
     Materials[CourseMaterial.TrafficOrange] = Emitter(0.95, 0.30, 0.02, 14.2,  3.10, 0.06);
     Materials[CourseMaterial.TrafficGreen]  = Emitter(0.04, 0.85, 0.18,  0.16, 13.80, 1.95);
     Materials[CourseMaterial.BannerAmber]   = Dielectric(0.86, 0.46, 0.03, 0.38);
+
+    // WWII Normandy D-Day measured linear reflectance palette:
+    Materials[CourseMaterial.OliveDrab]     = Dielectric(0.102, 0.114, 0.058, 0.86); // US Army OD#9 FS-34087 matte olive drab
+    Materials[CourseMaterial.OliveDrabDark] = Dielectric(0.058, 0.066, 0.036, 0.90); // Mud-darkened lower olive drab / Wehrmacht drab
+    const WetSand = Dielectric(0.155, 0.132, 0.098, 0.22);
+    WetSand.SpecularLevel = 0.055;
+    Materials[CourseMaterial.WetBeachSand]  = WetSand;                               // Glossy low-tide wet Normandy sand
+    Materials[CourseMaterial.DryBeachSand]  = Dielectric(0.320, 0.272, 0.194, 0.92); // Paleochre dry Normandy sand
+    Materials[CourseMaterial.ShinglePebble] = Dielectric(0.205, 0.190, 0.168, 0.94); // Flint/cobble Omaha shingle bank
+    Materials[CourseMaterial.ScorchedMud]   = Dielectric(0.078, 0.064, 0.048, 0.72); // Blast-churned wet crater & trench mud
+    const SurfWater = Dielectric(0.028, 0.052, 0.058, 0.09);
+    SurfWater.SpecularLevel = 0.06;
+    Materials[CourseMaterial.ChannelWater]  = SurfWater;                             // Cold English Channel surf
+    Materials[CourseMaterial.RustSteel]     = Metal(0.24, 0.14, 0.09, 0.60);         // Salt-corroded Czech hedgehog & barbed wire steel
+    Materials[CourseMaterial.SandbagBurlap] = Dielectric(0.275, 0.232, 0.152, 0.96); // Stacked khaki burlap sandbags
     return Materials;
 }
 

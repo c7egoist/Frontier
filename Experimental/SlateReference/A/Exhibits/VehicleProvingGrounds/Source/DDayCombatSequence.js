@@ -1,16 +1,18 @@
 //============================================================================================================================================
 //                                                       DDAYCOMBATSEQUENCE.JS
 //============================================================================================================================================
-// ⚔️ Real-Time Combined-Arms Battlefield Simulation for "D-Day · Race to The Wall" ("dday"):
-//    • Uses the engine's REAL 3D Navier-Stokes Volumetric Plume Solver (SmokeSequence.Sources.QueueBurst + QueryPlumeEmissions),
-//      EffectSequence 216-chunk physical debris bursts, and swept-collision Sparks — ZERO fake box explosions!
-//    • Terrain-conforming Assault Tanks pitch & roll across the uneven 3D shell-cratered battlefield toward THE WALL,
-//      drawing enemy Bunker MG & 155mm Cannon aggro, physically shielding players in their armored lee, and firing 105mm
-//      shells back at Enemy Bunkers to suppress MG fire — until repeated Cannon hits cook off a Tank and pop its turret!
-//    • Sectorized Threat Rules: Enemy MG Turrets & Cannons engage Advancing Tanks first; at most 1 nearby MG + 1 Cannon
-//      swing onto a player who breaks Tank Cover into open ground.
-//    • Overhead Fighter-Bombers drop 500-lb bombs and take AA flak hits into flaming, smoking crash-dives toward the gauntlet!
-//    • 28 Armed Teller Landmines detonate on car or tank contact with real volumetric fire/soot plumes & stunt impulse.
+// ⚔️ Authentic Omaha Beach / Vierville Draw Combined-Arms Simulation ("dday"):
+//    • 100% Real Engine Explosions: SmokeSequence 3D Navier-Stokes Volumetric Plumes + EffectSequence 216-chunk physical
+//      shrapnel/earth bursts + swept-collision Sparks (ZERO fake box fireballs!).
+//    • Natural 4-Stage Aircraft Shoot-Down & Belly-Skid Crash Physics:
+//      AA flak airburst rocks an overhead Invasion-Striped Fighter-Bomber -> gravity-driven banking death-spiral trailing
+//      engine fire & oil smoke -> high-speed belly impact shears off propeller & skids 35 m across uneven sand/craters
+//      throwing dirt clods & sparks -> secondary fuel-tank detonation leaves a sloped, smouldering fuselage hulk!
+//    • Winding Multi-Waypoint OD#9 Sherman Tanks: punch through Shingle Bangalore Breaches & Bluff Draws, recoil on 75mm
+//      cannon fire, crush Barbed Wire entanglements, clear Tellermines, draw German Casemate aggro & suppress Bunkers!
+//    • Tactical Cover & Kill-Zone Counterplay:
+//      1. Sherman Tank Armored Lee   2. -1.42 m Sunken Zig-Zag Trenches (tracers fly overhead!)
+//      3. Shingle Seawall / Craters  4. Enfilade Kill Zones with 0.7s stitched-sand warning bursts before chassis hits!
 
 import { CourseMaterial } from "./MaterialSpecification.js";
 import {
@@ -22,13 +24,17 @@ import {
 } from "./TransformProjection.js";
 import { LightType } from "./LightingSystem.js";
 import {
+    DDayBarbedWirePlacements,
     DDayBunkerSites,
     DDayCannonMounts,
+    DDayKillZones,
     DDayMgMounts,
     DDayMineCoordinates,
     DDaySpawn,
+    DDayTankWaypoints,
     DDayWallGoalX,
-    QueryDDayTerrainHeight
+    QueryDDayTerrainHeight,
+    QueryDDayTrenchDepth
 } from "./DDayStructure.js";
 
 function AngleDelta(From, To)
@@ -47,39 +53,47 @@ export class DDayCombatSequence
 {
     constructor(Host)
     {
-        this.Host           = Host;
-        this.Scene          = Host.Scene;
-        this.Enabled        = (Host.LevelKey === "dday") && Boolean(this.Scene?.DDayBlock);
+        this.Host              = Host;
+        this.Scene             = Host.Scene;
+        this.Enabled           = (Host.LevelKey === "dday") && Boolean(this.Scene?.DDayBlock);
 
-        this.Clock          = 0.0;
-        this.RunTimer       = 0.0;
-        this.BestBreachSec  = null;
-        this.Breached       = false;
-        this.VehicleArmor   = 100.0;
-        this.KnockedOut     = false;
-        this.KnockoutTimer  = 0.0;
-        this.InTankCover    = false;
-        this.InCraterCover  = false;
-        this.CoverTankIdx   = -1;
-        this.ExposedSeconds = 0.0;
+        this.Clock             = 0.0;
+        this.RunTimer          = 0.0;
+        this.BestBreachSec     = null;
+        this.Breached          = false;
+        this.VehicleArmor      = 100.0;
+        this.KnockedOut        = false;
+        this.KnockoutTimer     = 0.0;
 
-        this.BannerMessage  = "";
-        this.BannerTimer    = 0.0;
-        this.NextCrashSortieClock = 4.6;
+        // Tactical Cover & Kill-Zone State
+        this.InTankCover       = false;
+        this.InTrenchCover     = false;
+        this.InDefiladeCover   = false; // Shingle seawall lee or deep shell crater
+        this.CoverTankIdx      = -1;
+        this.ActiveKillZone    = null;
+        this.ExposedSeconds    = 0.0;
+        this.NearMineDist      = 99.0;
+        this.NearMinePos       = null;
 
-        // Dynamic Combat Pools (mapped to Scene.DDayBlock) + Real Volumetric Plume & Flash Light Emitters
-        this.Tanks        = [];
-        this.MgTurrets    = [];
-        this.Cannons      = [];
-        this.Aircraft     = [];
-        this.Mines        = [];
-        this.Bombs        = [];
-        this.Shells       = [];
-        this.Tracers      = [];
-        this.CraterFires  = []; // Lingering real volumetric smoke/flame vents & flash lights (NO fake meshes!)
+        this.BannerMessage     = "";
+        this.BannerTimer       = 0.0;
+        this.NextFlakDownClock = 4.8;
+
+        // Dynamic Battlefield Pools
+        this.Tanks             = [];
+        this.MgTurrets         = [];
+        this.Cannons           = [];
+        this.Aircraft          = [];
+        this.Mines             = [];
+        this.BarbedWires       = [];
+        this.Bombs             = [];
+        this.Shells            = [];
+        this.Tracers           = [];
+        this.CraterFires       = [];
 
         this.Stats = {
             MinesDetonated:    0,
+            WireCrushed:       0,
             TanksExploded:     0,
             TankShotsFired:    0,
             BunkersSuppressed: 0,
@@ -93,8 +107,8 @@ export class DDayCombatSequence
         {
             this.InitializeBattlefield();
             this.MountQuickControls();
-            this.BannerMessage = "⚔️ RACE TO THE WALL — TUCK BEHIND ADVANCING TANKS WHILE THEY DRAW ENEMY FIRE!";
-            this.BannerTimer   = 4.8;
+            this.BannerMessage = "⚔️ OMAHA BEACH — USE SHERMAN TANKS, THE SHINGLE SEAWALL & SUNKEN TRENCHES TO BREACH THE WALL!";
+            this.BannerTimer   = 5.2;
         }
     }
 
@@ -104,72 +118,82 @@ export class DDayCombatSequence
 
     InitializeBattlefield()
     {
-        // ① 5 Advancing Allied Assault Tanks along staggered lanes (Tank #0 starts right ahead of Beachhead spawn at X = -172 m!)
-        const Lanes = [
-            { StartX: -172.0, Y:  -6.5, Speed: 9.2 },
-            { StartX: -124.0, Y:   7.5, Speed: 8.8 },
-            { StartX:  -68.0, Y:  -1.0, Speed: 8.5 },
-            { StartX:  -10.0, Y: -15.5, Speed: 8.9 },
-            { StartX:   48.0, Y:  14.5, Speed: 8.3 }
-        ];
-        this.Tanks = Lanes.map((L, I) =>
+        // ① 5 OD#9 M4 Sherman Assault Tanks steering along winding multi-waypoint beach-to-draw routes!
+        const BaseSpeeds = [9.4, 8.9, 8.6, 8.8, 9.1];
+        this.Tanks = DDayTankWaypoints.map((Route, I) =>
         {
-            const GZ = QueryDDayTerrainHeight(L.StartX, L.Y);
+            const [SX, SY] = Route[0];
+            const [NX, NY] = Route[1];
+            const InitYaw  = Math.atan2(NY - SY, NX - SX);
+            const GZ       = QueryDDayTerrainHeight(SX, SY);
             return {
                 Index:        I,
-                Pos:          [L.StartX, L.Y, GZ],
-                LaneY:        L.Y,
-                BaseSpeed:    L.Speed,
-                Speed:        L.Speed,
-                Yaw:          0.0,
+                Route,
+                WpIndex:      1,
+                Pos:          [SX, SY, GZ],
+                BaseSpeed:    BaseSpeeds[I],
+                Speed:        BaseSpeeds[I],
+                Yaw:          InitYaw,
                 Pitch:        0.0,
                 Roll:         0.0,
+                RecoilPitch:  0.0,
+                HitRockRoll:  0.0,
                 TurretYaw:    0.0,
-                FireCooldown: 1.0 + I * 0.65,
+                FireCooldown: 0.9 + I * 0.62,
                 Hp:           100.0,
                 Alive:        true,
                 CookingOff:   false,
                 CookTimer:    0.0,
                 WreckTimer:   0.0,
-                TurretPos:    [L.StartX, L.Y, GZ + 1.52],
+                TurretPos:    [SX, SY, GZ + 1.52],
                 TurretVel:    [0.0, 0.0, 0.0],
                 TurretPitch:  0.0,
                 TurretRoll:   0.0
             };
         });
 
-        // ② 6 Rotating Bunker Machine Gun Turrets (engage Tanks first; suppressible by Allied Tank fire!)
+        // ② 6 Elevated Enfilade Casemate MG-42 Cupolas
         this.MgTurrets = DDayMgMounts.map((Pos, I) => ({
             Index:           I,
             BunkerPos:       DDayBunkerSites[I].Pos,
+            DefaultYaw:      DDayBunkerSites[I].Yaw,
             Pos:             [...Pos],
-            Yaw:             Math.PI,
-            Cooldown:        0.22 * I,
-            BurstRem:        5,
+            Yaw:             DDayBunkerSites[I].Yaw,
+            Cooldown:        0.18 * I,
+            BurstRem:        6,
             SuppressedTimer: 0.0,
             TargetingCar:    false
         }));
 
-        // ③ 6 Heavy 155mm Fortress Coastal Cannons (engage Advancing Tanks primarily!)
+        // ③ 6 Bluff & Headland 155mm Coastal Artillery Guns
         this.Cannons = DDayCannonMounts.map((Pos, I) => ({
             Index:    I,
             Pos:      [...Pos],
             Yaw:      Math.PI,
-            Cooldown: 0.75 + I * 0.52,
+            Cooldown: 0.70 + I * 0.50,
             SalvoIdx: I
         }));
 
-        // ④ 4 Low-Altitude Fighter-Bomber Attack Aircraft
+        // ④ 4 Invasion-Striped Fighter-Bombers on Sweeping Combat Sorties
         this.Aircraft = [0, 1, 2, 3].map((I) => this.CreateFreshAircraftSortie(I, true));
 
-        // ⑤ 28 Terrain-Grounded Armed Teller Landmines
+        // ⑤ 28 Subtle Partially-Buried Tellermines (flush in soil along un-cleared shoulders/shortcuts!)
         this.Mines = DDayMineCoordinates.map(([X, Y], I) => ({
             Index: I,
-            Pos:   [X, Y, QueryDDayTerrainHeight(X, Y) + 0.02],
+            Pos:   [X, Y, QueryDDayTerrainHeight(X, Y) + 0.005],
             Armed: true
         }));
 
-        // ⑥ Ordnance Pools
+        // ⑥ 24 Interactive Crushable/Snaggable Concertina Barbed Wire Entanglements!
+        const WireCount = Math.min(DDayBarbedWirePlacements.length, this.Scene.DDayBlock.BarbedWire?.length || 0);
+        this.BarbedWires = DDayBarbedWirePlacements.slice(0, WireCount).map(([X, Y, Yaw], I) => ({
+            Index:  I,
+            Pos:    [X, Y, QueryDDayTerrainHeight(X, Y) - 0.04],
+            Yaw,
+            Intact: true
+        }));
+
+        // ⑦ Ordnance & Volumetric Crater Fire Pools
         const Block = this.Scene.DDayBlock;
         this.Bombs   = Array.from({ length: Block.Bombs.length },   () => ({ Active: false, Pos: [0, 0, -200], Vel: [0, 0, 0], Target: [0, 0] }));
         this.Shells  = Array.from({ length: Block.Shells.length },  () => ({ Active: false, Friendly: false, Pos: [0, 0, -200], Vel: [0, 0, 0], Target: [0, 0], TargetBunker: -1 }));
@@ -181,29 +205,33 @@ export class DDayCombatSequence
 
     CreateFreshAircraftSortie(Slot, Initial = false)
     {
-        const CarX = this.Host?.Vehicle?.Position?.[0] ?? -180.0;
         const FromEast = (Slot % 2) === 0;
-        const StartX = FromEast ? (Initial ? 185.0 - Slot * 82.0 : Math.min(265.0, CarX + 205.0)) : (CarX - 175.0);
-        const StartY = ((Slot - 1.5) * 15.0) + Math.sin(this.Clock * 1.7 + Slot) * 7.5;
-        const Alt    = 26.0 + (Slot % 3) * 4.5;
-        const DirX   = FromEast ? -1.0 : 1.0;
-        const DirY   = (Slot & 1) ? 0.09 : -0.09;
-        const Norm   = Math.hypot(DirX, DirY);
-        const Speed  = 56.0 + Slot * 3.5;
+        const StartX   = FromEast ? (Initial ? 165.0 - Slot * 75.0 : 272.0) : (Initial ? -215.0 + Slot * 55.0 : -268.0);
+        const StartY   = ((Slot - 1.5) * 16.5) + Math.sin(this.Clock * 1.3 + Slot * 1.9) * 8.0;
+        const Alt      = 27.0 + (Slot % 3) * 4.2;
+        const DirX     = FromEast ? -1.0 : 1.0;
+        const DirY     = (Slot & 1) ? 0.11 : -0.11;
+        const Norm     = Math.hypot(DirX, DirY);
+        const Speed    = 54.0 + Slot * 3.2;
 
         return {
             Slot,
-            State:       "flying", // "flying" | "crashing" | "wreck"
-            Pos:         [StartX, StartY, Alt],
-            Vel:         [(DirX / Norm) * Speed, (DirY / Norm) * Speed, 0.0],
-            Yaw:         Math.atan2(DirY, DirX),
-            Pitch:       0.0,
-            Roll:        0.0,
-            PropAngle:   Slot * 1.1,
-            BombTimer:   Initial ? (0.8 + Slot * 0.65) : 1.0,
-            BombsLeft:   3,
-            WreckTimer:  0.0,
-            CrashTarget: [0.0, 0.0]
+            State:        "flying", // "flying" | "diving" | "skidding" | "wreck"
+            PropAttached: true,
+            Pos:          [StartX, StartY, Alt],
+            Vel:          [(DirX / Norm) * Speed, (DirY / Norm) * Speed, 0.0],
+            Yaw:          Math.atan2(DirY, DirX),
+            Pitch:        0.02,
+            Roll:         0.0,
+            RollRate:     0.0,
+            SkidYawRate:  0.0,
+            SkidTimer:    0.0,
+            ClodCooldown: 0.0,
+            PropAngle:    Slot * 1.1,
+            BombTimer:    Initial ? (0.85 + Slot * 0.65) : 1.1,
+            BombsLeft:    3,
+            WreckTimer:   0.0,
+            CrashTarget:  [0.0, 0.0]
         };
     }
 
@@ -220,8 +248,8 @@ export class DDayCombatSequence
         const GZ = QueryDDayTerrainHeight(DDaySpawn.Position[0], DDaySpawn.Position[1]);
         this.Host.Vehicle.Respawn([DDaySpawn.Position[0], DDaySpawn.Position[1], GZ + 0.63], DDaySpawn.Yaw);
         this.InitializeBattlefield();
-        this.BannerMessage = "⚔️ ASSAULT RELAUNCHED — STAY WITH THE ARMORED SPEARHEAD TO THE WALL!";
-        this.BannerTimer   = 3.5;
+        this.BannerMessage = "⚔️ SECOND WAVE LANDED — THREAD THE SHINGLE GAP OR DIVE INTO THE DOG-GREEN TRENCH!";
+        this.BannerTimer   = 3.8;
     }
 
     MountQuickControls()
@@ -275,13 +303,13 @@ export class DDayCombatSequence
             return Btn;
         };
 
-        MakePill("🔄 NEW ASSAULT RUN", "rgba(110, 247, 200, 0.65)", () => this.RestartGauntlet());
-        MakePill("✈️ CRASH-DIVE AIRCRAFT", "rgba(255, 112, 92, 0.72)", () => this.TriggerAircraftCrashDive());
+        MakePill("🔄 NEW WAVE ASSAULT", "rgba(110, 247, 200, 0.65)", () => this.RestartGauntlet());
+        MakePill("💥 FLAK SHOOT-DOWN",  "rgba(255, 112, 92, 0.72)",  () => this.TriggerAircraftCrashDive());
         MakePill("🛡️ FIELD ARMOR +100%", "rgba(255, 198, 82, 0.65)", () =>
         {
             this.VehicleArmor = 100.0;
             this.KnockedOut   = false;
-            this.BannerMessage = "🛡️ ENGINEER REPAIR — ARMOR RESTORED TO 100%!";
+            this.BannerMessage = "🛡️ COMBAT ENGINEERS PATCHED HULL ARMOR TO 100%!";
             this.BannerTimer   = 2.2;
         });
 
@@ -290,84 +318,95 @@ export class DDayCombatSequence
     }
 
     //--------------------------------------------------------------------------------------------------------------------
-    //             REAL ENGINE VOLUMETRIC PLUME + 216-CHUNK DEBRIS + SPARK EXPLOSIONS (ZERO FAKE BOXES!)
+    //          REAL ENGINE VOLUMETRIC PLUMES + 216-CHUNK DEBRIS + SPARKS + SUSPENSION CONCUSSION SHOCKWAVES
     //--------------------------------------------------------------------------------------------------------------------
 
-    TriggerExplosion(X, Y, Z, Scale = 1.4, BlastRadius = 8.5, BlastImpulse = 8.0, MaxCarDamage = 22.0, DebrisMat = CourseMaterial.Dirt)
+    TriggerExplosion(X, Y, Z, Scale = 1.4, BlastRadius = 8.5, BlastImpulse = 8.0, MaxCarDamage = 22.0, DebrisMat = CourseMaterial.ScorchedMud)
     {
         const GroundZ = Math.max(Z, QueryDDayTerrainHeight(X, Y));
 
-        // ① REAL 3D Navier-Stokes Volumetric Blackbody Fire + Heat + Soot + Smoke Burst in PlumeSpace!
+        // ① Real 3D Navier-Stokes Volumetric Fire + Heat + Soot + Smoke Burst!
         this.Host?.Smoke?.Sources?.QueueBurst?.({
-            Position: [X, Y, GroundZ + 0.38],
+            Position: [X, Y, GroundZ + 0.36],
             Radius:   0.62 * Scale,
             Velocity: [0.0, 0.0, 4.8 * Scale],
             Smoke:    34.0 * Scale,
             Heat:     62.0 * Scale,
             Flame:    54.0 * Scale,
-            Soot:     42.0 * Scale,
-            Seconds:  0.65 + 0.25 * Scale
+            Soot:     44.0 * Scale,
+            Seconds:  0.68 + 0.25 * Scale
         });
 
-        // ② Lingering Volumetric Crater Fire & Rising Black Soot Column (fed into SmokeSequence Emissions!)
+        // ② Lingering Volumetric Crater Smoke & Embers
         this.CraterFires.push({
-            Pos:      [X, Y, GroundZ + 0.25],
+            Pos:      [X, Y, GroundZ + 0.22],
             Age:      0.0,
-            Duration: 2.2 + 0.6 * Scale,
+            Duration: 2.4 + 0.65 * Scale,
             Scale
         });
         if (this.CraterFires.length > 10)
             this.CraterFires.shift();
 
-        // ③ REAL 216-Chunk Physical Shrapnel & Earth Clod Burst via EffectSequence (EffectKind.Debris)!
+        // ③ Real 216-Chunk Physical Earth/Shrapnel Fountain (EffectKind.Debris)
         this.Host?.Effects?.BurstTyre?.(
-            ConstructRigidTransform([X, Y, GroundZ + 0.32], [0.0, 0.0, 0.0, 1.0]),
+            ConstructRigidTransform([X, Y, GroundZ + 0.30], [0.0, 0.0, 0.0, 1.0]),
             [0.85 * Scale, 0.85 * Scale, 0.55 * Scale],
-            [0.0, 0.0, 4.5 * Scale],
+            [0.0, 0.0, 4.6 * Scale],
             DebrisMat
         );
 
-        // ④ Radial Fountain of Swept-Collision Incandescent Sparks Bouncing Across Uneven Terrain!
+        // ④ Swept-Collision Bouncing Sparks
         const SparkEvents = [];
         for (let K = 0; K < 8; ++K)
         {
             const Ang = (K / 8) * Math.PI * 2.0 + this.Clock * 3.1;
             const OutSpd = (5.5 + (K % 3) * 2.4) * Scale;
             SparkEvents.push({
-                Point:    [X + Math.cos(Ang) * 0.35, Y + Math.sin(Ang) * 0.35, GroundZ + 0.45],
+                Point:    [X + Math.cos(Ang) * 0.35, Y + Math.sin(Ang) * 0.35, GroundZ + 0.44],
                 Velocity: [Math.cos(Ang) * OutSpd, Math.sin(Ang) * OutSpd, (5.5 + (K % 2) * 3.0) * Scale],
                 Normal:   [0.0, 0.0, 1.0],
-                Strength: 3.2 * Scale,
+                Strength: 3.1 * Scale,
                 Rim:      null
             });
         }
         this.Host?.Sparks?.Emit?.(SparkEvents, 1.0 / 60.0);
 
-        // ⑤ Procedural Sub-Bass Concussion Audio + Shielded Radial Shockwave Impulse on Player Car
+        // ⑤ Procedural Sub-Bass Concussion + Tactile Chassis Suspension Shockwave!
         const Car = this.Host?.Vehicle;
         if (Car)
         {
             const DistToCar = Math.hypot(Car.Position[0] - X, Car.Position[1] - Y);
-            if (DistToCar < 145.0)
+            if (DistToCar < 150.0)
             {
                 this.Host?.DrivingHud?.Audio?.PlayExplosionBoom?.(
-                    ClampScalar(1.0 - DistToCar / 145.0, 0.12, 1.0) * ClampScalar(Scale * 0.65, 0.5, 1.35)
+                    ClampScalar(1.0 - DistToCar / 150.0, 0.12, 1.0) * ClampScalar(Scale * 0.65, 0.5, 1.35)
                 );
+            }
+
+            // Near-miss artillery shockwave rocks the car's suspension roll/pitch so explosions FEEL physical!
+            if (DistToCar < BlastRadius * 2.2 && !this.KnockedOut)
+            {
+                const Shock = ClampScalar(1.0 - DistToCar / (BlastRadius * 2.2), 0.0, 1.0) * Scale;
+                const SideSign = (Car.Position[1] - Y) >= 0 ? 1.0 : -1.0;
+                Car.AngularVelocity[0] += SideSign * 0.65 * Shock;
+                Car.AngularVelocity[1] -= 0.42 * Shock;
             }
 
             if (DistToCar < BlastRadius && !this.KnockedOut && MaxCarDamage > 0.0)
             {
                 const ShieldTank = this.FindBlockingTankAlongSegment(X, Y, Car.Position[0], Car.Position[1], -1);
+                // Sunken Trench walls also halve blast wave from surface impacts outside the trench!
+                const TrenchFactor = (this.InTrenchCover && DistToCar > 3.2) ? 0.35 : 1.0;
                 if (ShieldTank < 0)
                 {
-                    const Falloff = 1.0 - (DistToCar / BlastRadius);
+                    const Falloff = (1.0 - (DistToCar / BlastRadius)) * TrenchFactor;
                     const DirX = DistToCar > 0.25 ? (Car.Position[0] - X) / DistToCar : -1.0;
                     const DirY = DistToCar > 0.25 ? (Car.Position[1] - Y) / DistToCar :  0.3;
                     Car.LinearVelocity[0] += DirX * BlastImpulse * Falloff;
                     Car.LinearVelocity[1] += DirY * BlastImpulse * Falloff;
                     Car.LinearVelocity[2] += BlastImpulse * 0.72 * Falloff;
                     Car.AngularVelocity[2] += (DirY >= 0 ? 1 : -1) * 0.95 * Falloff;
-                    this.ApplyCarDamage(MaxCarDamage * Falloff, "EXPLOSION BLAST");
+                    this.ApplyCarDamage(MaxCarDamage * Falloff, "ARTILLERY BLAST");
                 }
             }
         }
@@ -382,7 +421,7 @@ export class DDayCombatSequence
         {
             this.KnockedOut    = true;
             this.KnockoutTimer = 2.6;
-            this.BannerMessage = `💥 VEHICLE KNOCKED OUT BY ${SourceLabel} — REDEPLOYING ON BEACHHEAD!`;
+            this.BannerMessage = `💥 VEHICLE KNOCKED OUT BY ${SourceLabel} — REDEPLOYING AT LCVP RAMP!`;
             this.BannerTimer   = 2.8;
             const P = this.Host.Vehicle.Position;
             this.TriggerExplosion(P[0], P[1], P[2], 1.75, 3.0, 3.0, 0.0, CourseMaterial.SteelDark);
@@ -390,7 +429,7 @@ export class DDayCombatSequence
     }
 
     //--------------------------------------------------------------------------------------------------------------------
-    //                       COMBINED-ARMS TANK SHIELDING, COOK-OFF & DESTRUCTION
+    //                 SHERMAN TANK SHIELDING, BARBED WIRE CRUSHING, TRENCH DEFILADE & KILL ZONES
     //--------------------------------------------------------------------------------------------------------------------
 
     FindBlockingTankAlongSegment(AX, AY, BX, BY, IgnoreTankIdx = -1)
@@ -408,7 +447,7 @@ export class DDayCombatSequence
                 continue;
             const T = this.Tanks[I];
             const MinX = T.Pos[0] - 3.65, MaxX = T.Pos[0] + 3.65;
-            const MinY = T.Pos[1] - 2.05, MaxY = T.Pos[1] + 2.05;
+            const MinY = T.Pos[1] - 2.10, MaxY = T.Pos[1] + 2.10;
             const T1 = (MinX - AX) * InvX, T2 = (MaxX - AX) * InvX;
             const T3 = (MinY - AY) * InvY, T4 = (MaxY - AY) * InvY;
             const TMin = Math.max(Math.min(T1, T2), Math.min(T3, T4));
@@ -428,6 +467,7 @@ export class DDayCombatSequence
         if (!T || !T.Alive)
             return;
         T.Hp = Math.max(0.0, T.Hp - Damage);
+        T.HitRockRoll = (TankIdx % 2 === 0 ? 1.0 : -1.0) * 0.085;
         if (InstantDetonate || Damage >= 100.0)
         {
             this.DetonateTankCatastrophic(TankIdx);
@@ -435,14 +475,13 @@ export class DDayCombatSequence
         }
         if (T.Hp <= 0.0 && !T.CookingOff)
         {
-            // 1.5 s dramatic ammo cook-off fire warning so player in cover can floor it to the next Tank!
             T.CookingOff = true;
-            T.CookTimer  = 1.50;
-            T.Speed      = T.BaseSpeed * 0.28;
+            T.CookTimer  = 1.55;
+            T.Speed      = T.BaseSpeed * 0.25;
             if (this.CoverTankIdx === TankIdx)
             {
-                this.BannerMessage = "⚠️ COVER TANK AMMO COOKING OFF — BREAK COVER NOW!";
-                this.BannerTimer   = 2.2;
+                this.BannerMessage = "⚠️ SHERMAN AMMO COOKING OFF — BREAK COVER TO TRENCH OR NEXT TANK!";
+                this.BannerTimer   = 2.3;
             }
         }
     }
@@ -458,82 +497,164 @@ export class DDayCombatSequence
         T.WreckTimer = 8.5;
         T.TurretPos  = [T.Pos[0], T.Pos[1], T.Pos[2] + 1.62];
         T.TurretVel  = [
-            Math.sin(this.Clock * 13.0 + TankIdx) * 4.4,
-            (TankIdx % 2 === 0 ? 4.0 : -4.0),
-            12.4
+            Math.sin(this.Clock * 13.0 + TankIdx) * 4.2,
+            (TankIdx % 2 === 0 ? 3.8 : -3.8),
+            12.2
         ];
         this.Stats.TanksExploded++;
-        this.TriggerExplosion(T.Pos[0], T.Pos[1], T.Pos[2] + 0.8, 2.25, 10.2, 9.2, 26.0, CourseMaterial.SteelDark);
-        if (this.CoverTankIdx === TankIdx)
+        this.TriggerExplosion(T.Pos[0], T.Pos[1], T.Pos[2] + 0.8, 2.25, 10.2, 9.2, 25.0, CourseMaterial.OliveDrabDark);
+    }
+
+    BreakBarbedWire(Wire, ByCar = false)
+    {
+        if (!Wire.Intact)
+            return;
+        Wire.Intact = false;
+        this.Stats.WireCrushed++;
+        this.Host?.Effects?.BurstTyre?.(
+            ConstructRigidTransform([Wire.Pos[0], Wire.Pos[1], Wire.Pos[2] + 0.55], [0, 0, 0, 1]),
+            [0.55, 1.85, 0.45],
+            [2.0, 0.0, 2.8],
+            CourseMaterial.Wood
+        );
+        this.Host?.Sparks?.Emit?.([
+            { Point: [Wire.Pos[0], Wire.Pos[1] - 0.8, Wire.Pos[2] + 0.5], Velocity: [2.5, -2.2, 3.2], Normal: [0, 0, 1], Strength: 2.2, Rim: null },
+            { Point: [Wire.Pos[0], Wire.Pos[1] + 0.8, Wire.Pos[2] + 0.5], Velocity: [2.5,  2.2, 3.2], Normal: [0, 0, 1], Strength: 2.2, Rim: null }
+        ], 1.0 / 60.0);
+
+        if (ByCar && this.Host?.Vehicle)
         {
-            this.BannerMessage = "💥 COVER TANK EXPLODED — SPRINT TO THE NEXT ALLIED TANK!";
-            this.BannerTimer   = 2.8;
+            const Car = this.Host.Vehicle;
+            Car.LinearVelocity[0] *= 0.56;
+            Car.LinearVelocity[1] *= 0.56;
+            this.ApplyCarDamage(5.5, "BARBED WIRE SNAG");
+            if (this.BannerTimer <= 0.2)
+            {
+                this.BannerMessage = "🪡 BARBED WIRE SNAGGED CHASSIS — THREAD BANGALORE GAPS OR FOLLOW TANK RUTS!";
+                this.BannerTimer   = 2.1;
+            }
         }
     }
 
-    ResolveCarTankCollisionsAndCover(Car, Step)
+    ResolveCoverKillZonesAndWire(Car, Step)
     {
-        this.InTankCover   = false;
-        this.InCraterCover = false;
-        this.CoverTankIdx  = -1;
+        this.InTankCover     = false;
+        this.InTrenchCover   = false;
+        this.InDefiladeCover = false;
+        this.CoverTankIdx    = -1;
+        this.ActiveKillZone  = null;
 
         const CX = Car.Position[0], CY = Car.Position[1];
+
+        // ① Check Sherman Tank Armored Lee (oriented in the Tank's local frame so winding routes work cleanly!)
         for (let I = 0; I < this.Tanks.length; ++I)
         {
             const T = this.Tanks[I];
-            const RelX = CX - T.Pos[0];
-            const RelY = CY - T.Pos[1];
+            const DX = CX - T.Pos[0], DY = CY - T.Pos[1];
+            const CosY = Math.cos(T.Yaw), SinY = Math.sin(T.Yaw);
+            const LocalX =  DX * CosY + DY * SinY;
+            const LocalY = -DX * SinY + DY * CosY;
 
-            // Generous tactical Tank Cover envelope: behind (-17.5 .. -3.5 m) OR tucked alongside (±4.8 m) a live Tank!
-            if (T.Alive && ((RelX >= -17.5 && RelX <= -3.4 && Math.abs(RelY) <= 4.2) || (Math.abs(RelX) <= 4.8 && Math.abs(RelY) <= 5.2)))
+            if (T.Alive && ((LocalX >= -18.0 && LocalX <= -3.3 && Math.abs(LocalY) <= 4.5) || (Math.abs(LocalX) <= 5.0 && Math.abs(LocalY) <= 5.4)))
             {
                 this.InTankCover  = true;
                 this.CoverTankIdx = I;
             }
 
-            // Solid 2D chassis push-out against Tank hull (3.55 m × 1.88 m)
-            const HalfX = 5.60, HalfY = 2.92;
-            if (Math.abs(RelX) < HalfX && Math.abs(RelY) < HalfY && Car.Position[2] < T.Pos[2] + 2.35)
+            // Solid Tank Hull Push-Out in Tank's oriented frame
+            const HalfX = 5.55, HalfY = 2.90;
+            if (Math.abs(LocalX) < HalfX && Math.abs(LocalY) < HalfY && Car.Position[2] < T.Pos[2] + 2.35)
             {
-                const PenX = HalfX - Math.abs(RelX);
-                const PenY = HalfY - Math.abs(RelY);
+                const PenX = HalfX - Math.abs(LocalX);
+                const PenY = HalfY - Math.abs(LocalY);
                 if (PenX < PenY)
                 {
-                    const S = RelX >= 0 ? 1.0 : -1.0;
-                    Car.Position[0] = T.Pos[0] + S * HalfX;
-                    Car.LinearVelocity[0] = S < 0
-                        ? Math.min(Car.LinearVelocity[0], T.Speed - 0.8)
-                        : Math.max(Car.LinearVelocity[0], T.Speed + 1.8);
+                    const S = LocalX >= 0 ? 1.0 : -1.0;
+                    const PushX = (LocalX + S * PenX) * CosY - LocalY * SinY;
+                    const PushY = (LocalX + S * PenX) * SinY + LocalY * CosY;
+                    Car.Position[0] = T.Pos[0] + PushX;
+                    Car.Position[1] = T.Pos[1] + PushY;
                 }
                 else
                 {
-                    const S = RelY >= 0 ? 1.0 : -1.0;
-                    Car.Position[1] = T.Pos[1] + S * HalfY;
-                    Car.LinearVelocity[1] = S * Math.max(2.2, Math.abs(Car.LinearVelocity[1]) * 0.45);
+                    const S = LocalY >= 0 ? 1.0 : -1.0;
+                    const PushX = LocalX * CosY - (LocalY + S * PenY) * SinY;
+                    const PushY = LocalX * SinY + (LocalY + S * PenY) * CosY;
+                    Car.Position[0] = T.Pos[0] + PushX;
+                    Car.Position[1] = T.Pos[1] + PushY;
                 }
-                this.Host?.Sparks?.Emit?.([{
-                    Point:    [Car.Position[0], Car.Position[1], Car.Position[2] + 0.3],
-                    Velocity: [T.Speed, 0.0, 2.4],
-                    Normal:   [0.0, 0.0, 1.0],
-                    Strength: 1.6,
-                    Rim:      null
-                }], 1.0 / 60.0);
             }
         }
 
-        // Natural Terrain Defilade: hunkering deep inside a sunken 3D shell crater (< 1.12 m elevation) also gives low-angle MG cover!
-        const LocalGround = QueryDDayTerrainHeight(CX, CY);
-        if (CX > -150.0 && CX < 175.0 && LocalGround < 1.12)
-            this.InCraterCover = true;
+        // ② Sunken Zig-Zag Trench Hull-Down Defilade (-1.42 m below surrounding plateau!)
+        const TrenchDepth = QueryDDayTrenchDepth(CX, CY);
+        if (TrenchDepth > 0.62)
+            this.InTrenchCover = true;
 
-        if (this.InTankCover || this.InCraterCover)
-            this.ExposedSeconds = Math.max(0.0, this.ExposedSeconds - Step * 2.4);
+        // ③ Shingle Seawall Lee (tucked right on the seaward slope X ∈ [-153..-142] outside gaps) or Deep Bomb Crater!
+        const SurroundZ = 0.25 * (
+            QueryDDayTerrainHeight(CX + 5.0, CY) + QueryDDayTerrainHeight(CX - 5.0, CY) +
+            QueryDDayTerrainHeight(CX, CY + 5.0) + QueryDDayTerrainHeight(CX, CY - 5.0)
+        );
+        const LocalZ = QueryDDayTerrainHeight(CX, CY);
+        if ((CX >= -153.5 && CX <= -141.5 && QueryDDayTerrainHeight(CX + 3.5, CY) - LocalZ > 0.45) || (SurroundZ - LocalZ > 0.36))
+            this.InDefiladeCover = true;
+
+        // ④ Check Active Interlocking Enfilade Kill Zones
+        for (const KZ of DDayKillZones)
+        {
+            const NX = (CX - KZ.Center[0]) / KZ.RadiusX;
+            const NY = (CY - KZ.Center[1]) / KZ.RadiusY;
+            if (NX * NX + NY * NY <= 1.0)
+            {
+                this.ActiveKillZone = KZ.Name;
+                break;
+            }
+        }
+
+        if (this.InTankCover || this.InTrenchCover || this.InDefiladeCover)
+            this.ExposedSeconds = Math.max(0.0, this.ExposedSeconds - Step * 2.6);
         else
-            this.ExposedSeconds += Step;
+            this.ExposedSeconds += Step * (this.ActiveKillZone ? 1.35 : 0.85);
+
+        // ⑤ Interactive Barbed Wire Collisions (Sherman Tanks crush wire free; Player Car snags & rips through!)
+        for (const W of this.BarbedWires)
+        {
+            if (!W.Intact)
+                continue;
+            if (!this.KnockedOut && Math.abs(CX - W.Pos[0]) < 1.65 && Math.abs(CY - W.Pos[1]) < 2.95)
+            {
+                this.BreakBarbedWire(W, true);
+                continue;
+            }
+            for (const T of this.Tanks)
+            {
+                if (T.Alive && Math.abs(T.Pos[0] - W.Pos[0]) < 3.6 && Math.abs(T.Pos[1] - W.Pos[1]) < 3.2)
+                {
+                    this.BreakBarbedWire(W, false);
+                    break;
+                }
+            }
+        }
+
+        // ⑥ Close-Range Metallic Mine Detector Warning (< 8.0 m)
+        this.NearMineDist = 99.0;
+        this.NearMinePos  = null;
+        for (const M of this.Mines)
+        {
+            if (!M.Armed)
+                continue;
+            const D = Math.hypot(CX - M.Pos[0], CY - M.Pos[1]);
+            if (D < this.NearMineDist)
+            {
+                this.NearMineDist = D;
+                this.NearMinePos  = M.Pos;
+            }
+        }
     }
 
     //--------------------------------------------------------------------------------------------------------------------
-    //                       AIRCRAFT BOMBING RUNS & SHOT-DOWN CRASH DIVES TOWARD CARS
+    //       NATURAL 4-STAGE AIRCRAFT FLAK HIT -> GRAVITY SPIRAL -> 35m BELLY SKID -> FUEL COOK-OFF BREAKUP!
     //--------------------------------------------------------------------------------------------------------------------
 
     TriggerAircraftCrashDive()
@@ -541,30 +662,53 @@ export class DDayCombatSequence
         const Car = this.Host?.Vehicle;
         if (!Car)
             return null;
-        const Candidate = this.Aircraft.find((A) => A.State === "flying");
-        if (!Candidate)
+
+        // Pick an already-flying plane in the sky (never teleport instantaneously onto the car!)
+        let Plane = this.Aircraft.find((A) => A.State === "flying" && Math.abs(A.Pos[0] - Car.Position[0]) < 165.0);
+        if (!Plane)
+            Plane = this.Aircraft.find((A) => A.State === "flying");
+        if (!Plane)
             return null;
 
-        Candidate.State = "crashing";
-        const LeadX = ClampScalar(Car.Position[0] + Car.LinearVelocity[0] * 1.15 + 15.0, -185.0, 185.0);
-        const DodgeOffset = (Math.sin(this.Clock * 9.3) >= 0 ? 1 : -1) * 4.5;
-        const LeadY = ClampScalar(Car.Position[1] + Car.LinearVelocity[1] * 0.85 + DodgeOffset, -22.0, 22.0);
-        Candidate.CrashTarget = [LeadX, LeadY];
+        // Position high on an authentic combat pass ahead/flanking the car if it was far off-screen at the horizon
+        if (Math.abs(Plane.Pos[0] - Car.Position[0]) > 145.0)
+        {
+            Plane.Pos = [
+                ClampScalar(Car.Position[0] + 95.0, -185.0, 205.0),
+                ClampScalar(Car.Position[1] + (Plane.Slot % 2 === 0 ? 28.0 : -28.0), -36.0, 36.0),
+                31.0
+            ];
+        }
 
-        Candidate.Pos = [LeadX + 68.0, LeadY + (Candidate.Slot % 2 === 0 ? 22.0 : -22.0), 30.0];
-        const ImpactZ = QueryDDayTerrainHeight(LeadX, LeadY) + 0.5;
-        const FlightTime = 1.48;
-        Candidate.Vel = [
-            (LeadX - Candidate.Pos[0]) / FlightTime,
-            (LeadY - Candidate.Pos[1]) / FlightTime,
-            (ImpactZ - Candidate.Pos[2]) / FlightTime
+        Plane.State = "diving";
+        const AimX = ClampScalar(Car.Position[0] + Car.LinearVelocity[0] * 1.35 + 22.0, -185.0, 182.0);
+        const AimY = ClampScalar(Car.Position[1] + (Plane.Slot % 2 === 0 ? -5.5 : 5.5), -24.0, 24.0);
+        Plane.CrashTarget = [AimX, AimY];
+
+        // Compute natural ballistic entry velocity under gravity (-13.5 m/s²) so it arcs smoothly into a shallow belly-skid angle!
+        const ImpactZ = QueryDDayTerrainHeight(AimX, AimY) + 0.42;
+        const Gravity = 13.5;
+        const FlightT = 1.65;
+        Plane.Vel = [
+            (AimX - Plane.Pos[0]) / FlightT,
+            (AimY - Plane.Pos[1]) / FlightT,
+            (ImpactZ - Plane.Pos[2] + 0.5 * Gravity * FlightT * FlightT) / FlightT
         ];
-        Candidate.Yaw   = Math.atan2(Candidate.Vel[1], Candidate.Vel[0]);
-        Candidate.Pitch = 0.40;
+        Plane.Yaw      = Math.atan2(Plane.Vel[1], Plane.Vel[0]);
+        Plane.RollRate = (Plane.Slot % 2 === 0 ? 1.0 : -1.0) * 2.35;
 
-        this.BannerMessage = "✈️ AIRCRAFT HIT BY FLAK — FLAMING PLANE CRASHING AHEAD, SWERVE!";
-        this.BannerTimer   = 2.5;
-        return Candidate;
+        // Visible AA Flak Airburst Puff in the sky right off the wingtip!
+        this.Host?.Smoke?.Sources?.QueueBurst?.({
+            Position: [Plane.Pos[0], Plane.Pos[1] + 2.2, Plane.Pos[2] - 0.5],
+            Radius:   1.35,
+            Velocity: [Plane.Vel[0] * 0.2, Plane.Vel[1] * 0.2, 2.2],
+            Smoke:    42.0, Heat: 55.0, Flame: 46.0, Soot: 48.0, Seconds: 0.55
+        });
+        this.Host?.DrivingHud?.Audio?.PlayExplosionBoom?.(0.55);
+
+        this.BannerMessage = "💥 FIGHTER-BOMBER HIT BY FLAK OVERHEAD — WATCH FOR SKIDDING WRECKAGE!";
+        this.BannerTimer   = 2.6;
+        return Plane;
     }
 
     DropAerialBomb(Plane)
@@ -574,7 +718,7 @@ export class DDayCombatSequence
             return;
         Slot.Active = true;
         Slot.Pos    = [Plane.Pos[0], Plane.Pos[1], Plane.Pos[2] - 0.85];
-        Slot.Vel    = [Plane.Vel[0] * 0.40, Plane.Vel[1] * 0.40, -3.2];
+        Slot.Vel    = [Plane.Vel[0] * 0.42, Plane.Vel[1] * 0.42, -3.2];
         const G = 18.0;
         const EstGround = QueryDDayTerrainHeight(Slot.Pos[0], Slot.Pos[1]);
         const DropH = Math.max(1.5, Slot.Pos[2] - EstGround);
@@ -615,11 +759,11 @@ export class DDayCombatSequence
             this.Stats.Breaches++;
             if (this.BestBreachSec === null || this.RunTimer < this.BestBreachSec)
                 this.BestBreachSec = this.RunTimer;
-            this.BannerMessage = `🏆 THE WALL BREACHED IN ${this.RunTimer.toFixed(1)}s! CLICK [NEW ASSAULT RUN] TO BEAT YOUR TIME!`;
+            this.BannerMessage = `🏆 ATLANTIC WALL BREACHED IN ${this.RunTimer.toFixed(1)}s! CLICK [NEW WAVE ASSAULT] TO RACE AGAIN!`;
             this.BannerTimer   = 8.0;
         }
 
-        // ① Advance the 5 Allied Assault Tanks (conforming to 3D uneven terrain + firing 105mm shells at Enemy Bunkers!)
+        // ① Advance the 5 Winding OD#9 Sherman Assault Tanks (terrain pitch/roll + gun recoil + bunker suppression!)
         for (let I = 0; I < this.Tanks.length; ++I)
         {
             const T = this.Tanks[I];
@@ -635,48 +779,74 @@ export class DDayCombatSequence
                     }
                 }
 
-                T.Pos[0] += T.Speed * Step;
-                // Conform Tank hull Z, Pitch & Roll to the exact uneven 3D shell-cratered terrain!
-                const ZF = QueryDDayTerrainHeight(T.Pos[0] + 2.6, T.Pos[1]);
-                const ZR = QueryDDayTerrainHeight(T.Pos[0] - 2.6, T.Pos[1]);
-                const ZL = QueryDDayTerrainHeight(T.Pos[0], T.Pos[1] + 1.4);
-                const ZRt= QueryDDayTerrainHeight(T.Pos[0], T.Pos[1] - 1.4);
-                T.Pos[2] = 0.25 * (ZF + ZR + ZL + ZRt);
-                T.Pitch  = Math.atan2(ZR - ZF, 5.2);
-                T.Roll   = Math.atan2(ZL - ZRt, 2.8);
-                T.TurretPos = [T.Pos[0], T.Pos[1], T.Pos[2] + 1.52];
-
-                // Aim Allied Tank 105mm Turret at nearest active Enemy Bunker ahead & fire return shells!
-                let BestBunker = -1, BestBDist = 118.0;
-                for (let B = 0; B < 6; ++B)
+                // Steer smoothly along winding tactical route waypoints!
+                const TargetWP = T.Route[T.WpIndex];
+                const WDX = TargetWP[0] - T.Pos[0], WDY = TargetWP[1] - T.Pos[1];
+                const WDist = Math.hypot(WDX, WDY);
+                if (WDist < 6.5)
                 {
-                    const BP = DDayBunkerSites[B].Pos;
-                    if (BP[0] < T.Pos[0] - 8.0)
-                        continue;
-                    const D = Math.hypot(BP[0] - T.Pos[0], BP[1] - T.Pos[1]);
-                    if (D < BestBDist)
+                    T.WpIndex++;
+                    if (T.WpIndex >= T.Route.length)
                     {
-                        BestBDist  = D;
-                        BestBunker = B;
+                        T.WpIndex = 1;
+                        T.Pos[0]  = T.Route[0][0];
+                        T.Pos[1]  = T.Route[0][1];
+                        T.Hp      = 100.0;
                     }
                 }
-                const DesiredTYaw = BestBunker >= 0
+                else
+                {
+                    const DesiredHullYaw = Math.atan2(WDY, WDX);
+                    T.Yaw += ClampScalar(AngleDelta(T.Yaw, DesiredHullYaw), -0.85 * Step, 0.85 * Step);
+                }
+
+                T.Pos[0] += Math.cos(T.Yaw) * T.Speed * Step;
+                T.Pos[1] += Math.sin(T.Yaw) * T.Speed * Step;
+
+                // Decay physical gun-recoil pitch & shell-impact roll shudder
+                T.RecoilPitch *= Math.exp(-5.5 * Step);
+                T.HitRockRoll *= Math.exp(-6.0 * Step);
+
+                // Sample 4 track corners in Tank's oriented frame for authentic terrain pitch & roll!
+                const CosY = Math.cos(T.Yaw), SinY = Math.sin(T.Yaw);
+                const ZF  = QueryDDayTerrainHeight(T.Pos[0] + CosY * 2.6, T.Pos[1] + SinY * 2.6);
+                const ZR  = QueryDDayTerrainHeight(T.Pos[0] - CosY * 2.6, T.Pos[1] - SinY * 2.6);
+                const ZL  = QueryDDayTerrainHeight(T.Pos[0] - SinY * 1.4, T.Pos[1] + CosY * 1.4);
+                const ZRt = QueryDDayTerrainHeight(T.Pos[0] + SinY * 1.4, T.Pos[1] - CosY * 1.4);
+                T.Pos[2]    = 0.25 * (ZF + ZR + ZL + ZRt);
+                T.Pitch     = Math.atan2(ZR - ZF, 5.2) + T.RecoilPitch;
+                T.Roll      = Math.atan2(ZL - ZRt, 2.8) + T.HitRockRoll;
+                T.TurretPos = [T.Pos[0], T.Pos[1], T.Pos[2] + 1.52];
+
+                // Slew 75mm Sherman Turret onto nearest German Bluff Casemate & fire suppressing HE shells!
+                let BestBunker = -1, BestBDist = 122.0;
+                for (let B = 0; B < DDayBunkerSites.length; ++B)
+                {
+                    const BP = DDayBunkerSites[B].Pos;
+                    if (BP[0] < T.Pos[0] - 12.0)
+                        continue;
+                    const D = Math.hypot(BP[0] - T.Pos[0], BP[1] - T.Pos[1]);
+                    if (D < BestBDist) { BestBDist = D; BestBunker = B; }
+                }
+                const DesiredWorldTYaw = BestBunker >= 0
                     ? Math.atan2(DDayBunkerSites[BestBunker].Pos[1] - T.Pos[1], DDayBunkerSites[BestBunker].Pos[0] - T.Pos[0])
-                    : Math.sin(this.Clock * 0.8 + I) * 0.25;
-                T.TurretYaw += ClampScalar(AngleDelta(T.TurretYaw, DesiredTYaw), -1.8 * Step, 1.8 * Step);
+                    : (T.Yaw + Math.sin(this.Clock * 0.8 + I) * 0.22);
+                const DesiredRelTYaw = AngleDelta(T.Yaw, DesiredWorldTYaw);
+                T.TurretYaw += ClampScalar(AngleDelta(T.TurretYaw, DesiredRelTYaw), -1.9 * Step, 1.9 * Step);
 
                 T.FireCooldown -= Step;
                 if (!T.CookingOff && BestBunker >= 0 && T.FireCooldown <= 0.0)
                 {
-                    T.FireCooldown = 3.3 + (I % 3) * 0.55;
+                    T.FireCooldown = 3.2 + (I % 3) * 0.55;
                     const Shell = this.Shells.find((S) => !S.Active);
                     if (Shell)
                     {
+                        const WorldAim = T.Yaw + T.TurretYaw;
                         const BP = DDayBunkerSites[BestBunker].Pos;
-                        const MuzzleX = T.Pos[0] + Math.cos(T.TurretYaw) * 5.2;
-                        const MuzzleY = T.Pos[1] + Math.sin(T.TurretYaw) * 5.2;
-                        const MuzzleZ = T.Pos[2] + 1.94;
-                        const FlightT = ClampScalar(BestBDist / 92.0, 0.35, 1.25);
+                        const MuzzleX = T.Pos[0] + Math.cos(WorldAim) * 5.1;
+                        const MuzzleY = T.Pos[1] + Math.sin(WorldAim) * 5.1;
+                        const MuzzleZ = T.Pos[2] + 1.92;
+                        const FlightT = ClampScalar(BestBDist / 95.0, 0.35, 1.25);
                         Shell.Active       = true;
                         Shell.Friendly     = true;
                         Shell.TargetBunker = BestBunker;
@@ -685,27 +855,21 @@ export class DDayCombatSequence
                         Shell.Vel          = [
                             (BP[0] - MuzzleX) / FlightT,
                             (BP[1] - MuzzleY) / FlightT,
-                            ((BP[2] + 2.1) - MuzzleZ) / FlightT + 0.5 * 16.0 * FlightT
+                            ((BP[2] + 2.0) - MuzzleZ) / FlightT + 0.5 * 16.0 * FlightT
                         ];
+                        T.RecoilPitch = -0.078; // visible physical 75mm cannon recoil!
                         this.Stats.TankShotsFired++;
                         this.Host?.Smoke?.Sources?.QueueBurst?.({
                             Position: [MuzzleX, MuzzleY, MuzzleZ],
-                            Radius:   0.45,
-                            Velocity: [Math.cos(T.TurretYaw) * 9.0, Math.sin(T.TurretYaw) * 9.0, 1.5],
-                            Smoke:    18.0, Heat: 32.0, Flame: 28.0, Soot: 14.0, Seconds: 0.28
+                            Radius:   0.46,
+                            Velocity: [Math.cos(WorldAim) * 9.5, Math.sin(WorldAim) * 9.5, 1.5],
+                            Smoke:    20.0, Heat: 34.0, Flame: 30.0, Soot: 14.0, Seconds: 0.28
                         });
                     }
-                }
-
-                if (T.Pos[0] > 180.0)
-                {
-                    T.Pos[0] = -198.0;
-                    T.Hp     = 100.0;
                 }
             }
             else
             {
-                // Popped-off turret ballistic arc onto uneven terrain!
                 const GroundUnderTurret = QueryDDayTerrainHeight(T.TurretPos[0], T.TurretPos[1]) + 0.16;
                 if (T.TurretPos[2] > GroundUnderTurret || T.TurretVel[2] > 0.0)
                 {
@@ -724,61 +888,66 @@ export class DDayCombatSequence
                 T.WreckTimer -= Step;
                 if (T.WreckTimer <= 0.0)
                 {
-                    const StartZ = QueryDDayTerrainHeight(-198.0, T.LaneY);
-                    T.Alive       = true;
-                    T.CookingOff  = false;
-                    T.Hp          = 100.0;
-                    T.Speed       = T.BaseSpeed;
-                    T.Pos         = [-198.0, T.LaneY, StartZ];
-                    T.TurretPos   = [-198.0, T.LaneY, StartZ + 1.52];
-                    T.TurretPitch = 0.0;
-                    T.TurretRoll  = 0.0;
+                    const [SX, SY] = T.Route[0];
+                    const StartZ   = QueryDDayTerrainHeight(SX, SY);
+                    T.Alive        = true;
+                    T.CookingOff   = false;
+                    T.Hp           = 100.0;
+                    T.WpIndex      = 1;
+                    T.Speed        = T.BaseSpeed;
+                    T.Pos          = [SX, SY, StartZ];
+                    T.TurretPos    = [SX, SY, StartZ + 1.52];
+                    T.TurretPitch  = 0.0;
+                    T.TurretRoll   = 0.0;
                 }
             }
         }
 
-        // Update Car-Tank collision & cover status
-        this.ResolveCarTankCollisionsAndCover(Car, Step);
+        // Update Cover, Sunken Trenches, Kill Zones & Barbed Wire
+        this.ResolveCoverKillZonesAndWire(Car, Step);
 
-        // ② Landmines: Detonate on Car (< 2.50 m) OR Advancing Tank (< 2.85 m) with REAL Volumetric Explosion!
+        // ② Subtle Buried Tellermines: Detonate on Car (< 2.35 m) OR Sherman Plow (< 3.10 m)!
         for (const M of this.Mines)
         {
             if (!M.Armed)
                 continue;
             const CarDist = Math.hypot(Car.Position[0] - M.Pos[0], Car.Position[1] - M.Pos[1]);
-            if (!this.KnockedOut && CarDist < 2.50 && (Car.Position[2] - M.Pos[2]) < 1.75)
+            if (!this.KnockedOut && CarDist < 2.35 && (Car.Position[2] - M.Pos[2]) < 1.70)
             {
                 M.Armed = false;
                 this.Stats.MinesDetonated++;
-                this.BannerMessage = "💥 TELLER LANDMINE DETONATED — FOLLOW TANK TRACKS OR STEER CLEAR OF RED FUZES!";
-                this.BannerTimer   = 2.4;
-                this.TriggerExplosion(M.Pos[0], M.Pos[1], M.Pos[2], 1.45, 7.2, 9.8, 24.0, CourseMaterial.Dirt);
+                this.BannerMessage = "💥 BURIED TELLERMINE DETONATED — WATCH FOR WOODEN 'ACHTUNG MINEN' STAKES ON SHOULDERS!";
+                this.BannerTimer   = 2.6;
+                this.TriggerExplosion(M.Pos[0], M.Pos[1], M.Pos[2], 1.45, 7.2, 9.6, 24.0, CourseMaterial.ScorchedMud);
                 continue;
             }
             for (let TI = 0; TI < this.Tanks.length; ++TI)
             {
                 const T = this.Tanks[TI];
-                if (T.Alive && Math.hypot(T.Pos[0] - M.Pos[0], T.Pos[1] - M.Pos[1]) < 2.90)
+                if (T.Alive && Math.hypot(T.Pos[0] - M.Pos[0], T.Pos[1] - M.Pos[1]) < 3.15)
                 {
                     M.Armed = false;
                     this.Stats.MinesDetonated++;
-                    this.TriggerExplosion(M.Pos[0], M.Pos[1], M.Pos[2], 1.35, 6.2, 5.5, 8.0, CourseMaterial.Dirt);
-                    this.DamageTank(TI, 20.0);
+                    this.TriggerExplosion(M.Pos[0], M.Pos[1], M.Pos[2], 1.30, 5.8, 4.8, 6.0, CourseMaterial.ScorchedMud);
+                    this.DamageTank(TI, 16.0);
                     break;
                 }
             }
         }
 
-        // ③ Sectorized Bunker MG Turrets: ENGAGE ADVANCING TANKS FIRST!
-        //    At most ONE nearest non-suppressed MG may swing onto the Player Car, and ONLY if Car is exposed (> 0.85 s out of cover)!
+        // ③ Enfilade Bluff Casemate MG-42 Turrets:
+        //    • Engage Advancing Sherman Tanks first!
+        //    • If Car enters an open Kill Zone out of Tank/Trench/Seawall cover:
+        //      - First 0.70 s (`ExposedSeconds < 0.95`): stitches a dramatic WARNING BURST in the sand 4.5 m ahead of the car!
+        //      - Only after 0.95 s of ignoring cover does 1 nearest Casemate walk rounds onto the car!
         let AllowedCarMgIdx = -1;
-        if (!this.InTankCover && !this.InCraterCover && this.ExposedSeconds > 0.85 && !this.KnockedOut)
+        if (!this.InTankCover && !this.InTrenchCover && !this.InDefiladeCover && this.ExposedSeconds > 0.35 && !this.KnockedOut)
         {
-            let NearestD = 84.0;
+            let NearestD = 88.0;
             for (let MI = 0; MI < this.MgTurrets.length; ++MI)
             {
                 const MG = this.MgTurrets[MI];
-                if (MG.SuppressedTimer > 0.0 || Car.Position[0] > MG.Pos[0] + 10.0)
+                if (MG.SuppressedTimer > 0.0 || Car.Position[0] > MG.Pos[0] + 12.0)
                     continue;
                 const D = Math.hypot(Car.Position[0] - MG.Pos[0], Car.Position[1] - MG.Pos[1]);
                 if (D < NearestD) { NearestD = D; AllowedCarMgIdx = MI; }
@@ -795,26 +964,32 @@ export class DDayCombatSequence
                 continue;
             }
 
-            // Find nearest live Advancing Tank inside this Bunker's forward sector (Range <= 105 m)!
             let TargetPos = null;
             MG.TargetingCar = false;
             if (MI === AllowedCarMgIdx)
             {
-                TargetPos = [Car.Position[0] + Car.LinearVelocity[0] * 0.22, Car.Position[1] + Car.LinearVelocity[1] * 0.22, Car.Position[2] + 0.38];
                 MG.TargetingCar = true;
+                // Warning sand-stitch burst ahead of bumper for first 0.65 s so player can reactively dive into a trench!
+                const WarningLead = this.ExposedSeconds < 1.0 ? 4.8 : 0.24;
+                const Fwd = Car.QueryForward();
+                const AimX = Car.Position[0] + Fwd[0] * WarningLead + Car.LinearVelocity[0] * 0.18;
+                const AimY = Car.Position[1] + Fwd[1] * WarningLead + Car.LinearVelocity[1] * 0.18;
+                const AimZ = this.ExposedSeconds < 1.0 ? (QueryDDayTerrainHeight(AimX, AimY) + 0.08) : (Car.Position[2] + 0.36);
+                TargetPos = [AimX, AimY, AimZ];
             }
             else
             {
-                let BestTDist = 112.0;
+                // Otherwise sweep enfilade fire onto nearest Sherman Tank (or across Sunken Trench lips overhead!)
+                let BestTDist = 115.0;
                 for (const T of this.Tanks)
                 {
-                    if (!T.Alive || T.Pos[0] > MG.Pos[0] + 14.0)
+                    if (!T.Alive || T.Pos[0] > MG.Pos[0] + 15.0)
                         continue;
                     const D = Math.hypot(T.Pos[0] - MG.Pos[0], T.Pos[1] - MG.Pos[1]);
                     if (D < BestTDist)
                     {
                         BestTDist = D;
-                        TargetPos = [T.Pos[0] + T.Speed * 0.20, T.Pos[1], T.Pos[2] + 1.05];
+                        TargetPos = [T.Pos[0] + Math.cos(T.Yaw) * 1.5, T.Pos[1] + Math.sin(T.Yaw) * 1.5, T.Pos[2] + 1.08];
                     }
                 }
             }
@@ -825,38 +1000,38 @@ export class DDayCombatSequence
             const DX = TargetPos[0] - MG.Pos[0], DY = TargetPos[1] - MG.Pos[1];
             const Dist = Math.hypot(DX, DY) || 1.0;
             const DesiredYaw = Math.atan2(DY, DX);
-            MG.Yaw += ClampScalar(AngleDelta(MG.Yaw, DesiredYaw), -2.0 * Step, 2.0 * Step);
+            MG.Yaw += ClampScalar(AngleDelta(MG.Yaw, DesiredYaw), -2.1 * Step, 2.1 * Step);
 
             MG.Cooldown -= Step;
-            if (MG.Cooldown <= 0.0 && Math.abs(AngleDelta(MG.Yaw, DesiredYaw)) < 0.35)
+            if (MG.Cooldown <= 0.0 && Math.abs(AngleDelta(MG.Yaw, DesiredYaw)) < 0.36)
             {
                 const Tracer = this.Tracers.find((Tr) => !Tr.Active);
                 if (Tracer)
                 {
-                    const Spread = Math.sin(this.Clock * 41.0 + MI * 2.7) * 0.045;
+                    const Spread = Math.sin(this.Clock * 43.0 + MI * 2.7) * 0.045;
                     const AimYaw = MG.Yaw + Spread;
-                    const Spd    = 108.0;
+                    const Spd    = 112.0;
                     const ZDir   = (TargetPos[2] - (MG.Pos[2] + 0.38)) / Math.max(12.0, Dist);
                     Tracer.Active   = true;
                     Tracer.Friendly = false;
-                    Tracer.Pos      = [MG.Pos[0] + Math.cos(AimYaw) * 2.5, MG.Pos[1] + Math.sin(AimYaw) * 2.5, MG.Pos[2] + 0.38];
+                    Tracer.Pos      = [MG.Pos[0] + Math.cos(AimYaw) * 2.4, MG.Pos[1] + Math.sin(AimYaw) * 2.4, MG.Pos[2] + 0.38];
                     Tracer.Vel      = [Math.cos(AimYaw) * Spd, Math.sin(AimYaw) * Spd, ZDir * Spd];
                     Tracer.Life     = 1.15;
                 }
                 MG.BurstRem--;
                 if (MG.BurstRem <= 0)
                 {
-                    MG.BurstRem = 5;
-                    MG.Cooldown = 1.15;
+                    MG.BurstRem = 6;
+                    MG.Cooldown = 1.08;
                 }
                 else
                 {
-                    MG.Cooldown = 0.12;
+                    MG.Cooldown = 0.11;
                 }
             }
         }
 
-        // Advance 3D Tracer Bolts (ricochet off Tanks with sparks; chip Car Armor only if unshielded!)
+        // Advance MG-42 Tracer Streams (stitch sparks in sand, ricochet off Sherman armor, fly harmlessly over Sunken Trenches!)
         for (const Tr of this.Tracers)
         {
             if (!Tr.Active)
@@ -867,7 +1042,23 @@ export class DDayCombatSequence
             Tr.Pos[2] += Tr.Vel[2] * Step;
             Tr.Life   -= Step;
             const TerrZ = QueryDDayTerrainHeight(Tr.Pos[0], Tr.Pos[1]);
-            if (Tr.Life <= 0.0 || Tr.Pos[2] <= TerrZ)
+            if (Tr.Pos[2] <= TerrZ)
+            {
+                Tr.Active = false;
+                // Sand-stitch spark kickup when MG rounds chew into the beach!
+                if (Math.hypot(Tr.Pos[0] - Car.Position[0], Tr.Pos[1] - Car.Position[1]) < 28.0)
+                {
+                    this.Host?.Sparks?.Emit?.([{
+                        Point:    [Tr.Pos[0], Tr.Pos[1], TerrZ + 0.08],
+                        Velocity: [Tr.Vel[0] * 0.04, Tr.Vel[1] * 0.04, 3.2],
+                        Normal:   [0, 0, 1],
+                        Strength: 1.5,
+                        Rim:      null
+                    }], 1.0 / 60.0);
+                }
+                continue;
+            }
+            if (Tr.Life <= 0.0)
             {
                 Tr.Active = false;
                 continue;
@@ -876,22 +1067,21 @@ export class DDayCombatSequence
             if (HitTank >= 0)
             {
                 Tr.Active = false;
-                // Armor ricochet sparks off the Tank hull!
                 this.Host?.Sparks?.Emit?.([{
                     Point:    [...Tr.Pos],
-                    Velocity: [-Tr.Vel[0] * 0.10, -Tr.Vel[1] * 0.10, 3.6],
+                    Velocity: [-Tr.Vel[0] * 0.10, -Tr.Vel[1] * 0.10, 3.8],
                     Normal:   [0, 0, 1],
-                    Strength: 2.0,
+                    Strength: 2.1,
                     Rim:      null
                 }], 1.0 / 60.0);
                 continue;
             }
-            if (!this.KnockedOut && !this.InTankCover &&
-                Math.hypot(Tr.Pos[0] - Car.Position[0], Tr.Pos[1] - Car.Position[1]) < 2.05 &&
-                Math.abs(Tr.Pos[2] - Car.Position[2]) < 1.15)
+            if (!this.KnockedOut && !this.InTankCover && !this.InTrenchCover && !this.InDefiladeCover &&
+                Math.hypot(Tr.Pos[0] - Car.Position[0], Tr.Pos[1] - Car.Position[1]) < 2.0 &&
+                Math.abs(Tr.Pos[2] - Car.Position[2]) < 1.05)
             {
                 Tr.Active = false;
-                this.ApplyCarDamage(1.8, "BUNKER MG BURST");
+                this.ApplyCarDamage(1.8, "ENFILADE MG-42 CROSSFIRE");
                 this.Host?.Sparks?.Emit?.([{
                     Point:    [...Tr.Pos],
                     Velocity: [Car.LinearVelocity[0], Car.LinearVelocity[1], 3.4],
@@ -902,23 +1092,22 @@ export class DDayCombatSequence
             }
         }
 
-        // ④ 6 Heavy 155mm Fortress Cannons: 80% of salvos shell Advancing Allied Tanks (blowing up Tanks!);
-        //    only 1 Cannon salvo leads the Player when the Player sprints exposed ahead of cover!
+        // ④ 6 Bluff & Headland 155mm Coastal Cannons (shelling Advancing Shermans primarily!)
         for (let CI = 0; CI < this.Cannons.length; ++CI)
         {
             const C = this.Cannons[CI];
             C.Cooldown -= Step;
 
-            const LiveTanksInArc = this.Tanks.filter((T) => T.Alive && T.Pos[0] < C.Pos[0] - 10.0 && Math.hypot(T.Pos[0] - C.Pos[0], T.Pos[1] - C.Pos[1]) < 215.0);
-            const AimAtCar = (!this.InTankCover && this.ExposedSeconds > 1.2 && (C.SalvoIdx % 4 === 0)) || LiveTanksInArc.length === 0;
+            const LiveTanksInArc = this.Tanks.filter((T) => T.Alive && T.Pos[0] < C.Pos[0] - 8.0 && Math.hypot(T.Pos[0] - C.Pos[0], T.Pos[1] - C.Pos[1]) < 225.0);
+            const AimAtCar = (!this.InTankCover && !this.InTrenchCover && this.ExposedSeconds > 1.3 && (C.SalvoIdx % 4 === 0)) || LiveTanksInArc.length === 0;
 
             let TargetX, TargetY;
             if (!AimAtCar && LiveTanksInArc.length > 0)
             {
                 const Pick = LiveTanksInArc[(C.SalvoIdx + CI) % LiveTanksInArc.length];
-                const EstT = ClampScalar(Math.hypot(Pick.Pos[0] - C.Pos[0], Pick.Pos[1] - C.Pos[1]) / 88.0, 0.45, 1.65);
-                TargetX = Pick.Pos[0] + Pick.Speed * EstT;
-                TargetY = Pick.Pos[1];
+                const EstT = ClampScalar(Math.hypot(Pick.Pos[0] - C.Pos[0], Pick.Pos[1] - C.Pos[1]) / 90.0, 0.45, 1.65);
+                TargetX = Pick.Pos[0] + Math.cos(Pick.Yaw) * Pick.Speed * EstT;
+                TargetY = Pick.Pos[1] + Math.sin(Pick.Yaw) * Pick.Speed * EstT;
             }
             else
             {
@@ -930,17 +1119,17 @@ export class DDayCombatSequence
             C.Yaw += ClampScalar(AngleDelta(C.Yaw, DesiredYaw), -1.4 * Step, 1.4 * Step);
 
             const Range = Math.hypot(TargetX - C.Pos[0], TargetY - C.Pos[1]);
-            if (C.Cooldown <= 0.0 && Range > 20.0 && Range < 225.0)
+            if (C.Cooldown <= 0.0 && Range > 20.0 && Range < 235.0)
             {
                 const Shell = this.Shells.find((S) => !S.Active);
                 if (Shell)
                 {
-                    const FlightT = ClampScalar(Range / 88.0, 0.45, 1.65);
+                    const FlightT = ClampScalar(Range / 90.0, 0.45, 1.65);
                     const G = 16.0;
-                    const StartX = C.Pos[0] + Math.cos(C.Yaw) * 7.2;
-                    const StartY = C.Pos[1] + Math.sin(C.Yaw) * 7.2;
+                    const StartX = C.Pos[0] + Math.cos(C.Yaw) * 7.1;
+                    const StartY = C.Pos[1] + Math.sin(C.Yaw) * 7.1;
                     const StartZ = C.Pos[2] + 0.74;
-                    const DestZ  = QueryDDayTerrainHeight(TargetX, TargetY) + 0.35;
+                    const DestZ  = QueryDDayTerrainHeight(TargetX, TargetY) + 0.30;
                     Shell.Active       = true;
                     Shell.Friendly     = false;
                     Shell.TargetBunker = -1;
@@ -952,7 +1141,6 @@ export class DDayCombatSequence
                         (DestZ - StartZ) / FlightT + 0.5 * G * FlightT
                     ];
                     this.Stats.ShellsFired++;
-                    // Real 155mm Cannon Muzzle Smoke & Flame Puff!
                     this.Host?.Smoke?.Sources?.QueueBurst?.({
                         Position: [StartX, StartY, StartZ],
                         Radius:   0.55,
@@ -965,7 +1153,7 @@ export class DDayCombatSequence
             }
         }
 
-        // Advance Friendly 105mm Tank Shells & Enemy 155mm Coastal Artillery Shells
+        // Advance Friendly 75mm Sherman Shells & Enemy 155mm Coastal Shells
         for (const S of this.Shells)
         {
             if (!S.Active)
@@ -978,14 +1166,13 @@ export class DDayCombatSequence
 
             if (S.Friendly)
             {
-                // Friendly Allied Tank shell hitting an Enemy Bunker -> suppresses its MG Turret!
                 const BP = DDayBunkerSites[S.TargetBunker]?.Pos;
-                if (BP && Math.hypot(S.Pos[0] - BP[0], S.Pos[1] - BP[1]) < 4.5)
+                if (BP && Math.hypot(S.Pos[0] - BP[0], S.Pos[1] - BP[1]) < 4.8)
                 {
                     S.Active = false;
                     if (this.MgTurrets[S.TargetBunker])
                     {
-                        this.MgTurrets[S.TargetBunker].SuppressedTimer = 4.5;
+                        this.MgTurrets[S.TargetBunker].SuppressedTimer = 4.6;
                         this.Stats.BunkersSuppressed++;
                     }
                     this.TriggerExplosion(S.Pos[0], S.Pos[1], BP[2] + 2.0, 1.25, 4.0, 2.0, 0.0, CourseMaterial.Concrete);
@@ -996,7 +1183,6 @@ export class DDayCombatSequence
                 continue;
             }
 
-            // Enemy 155mm Shell hitting an Advancing Allied Tank!
             const TerrZ = QueryDDayTerrainHeight(S.Pos[0], S.Pos[1]);
             let HitTank = -1;
             if (S.Pos[2] < TerrZ + 2.55)
@@ -1013,7 +1199,8 @@ export class DDayCombatSequence
             if (S.Pos[2] <= TerrZ + 0.12)
             {
                 S.Active = false;
-                this.TriggerExplosion(S.Pos[0], S.Pos[1], TerrZ, 1.65, 8.8, 8.2, 22.0, CourseMaterial.Dirt);
+                const GroundMat = S.Pos[0] < -150.0 ? CourseMaterial.WetBeachSand : CourseMaterial.ScorchedMud;
+                this.TriggerExplosion(S.Pos[0], S.Pos[1], TerrZ, 1.65, 8.8, 8.2, 22.0, GroundMat);
                 for (let TI = 0; TI < this.Tanks.length; ++TI)
                 {
                     const T = this.Tanks[TI];
@@ -1023,23 +1210,24 @@ export class DDayCombatSequence
             }
         }
 
-        // ⑤ 4 Fighter-Bomber Aircraft: Bombing Runs + Flaming Crash-Dives Toward Cars!
-        if (this.Clock >= this.NextCrashSortieClock)
+        // ⑤ 4 Invasion-Striped Fighter-Bombers: Natural Combat Sorties -> AA Flak Hit -> Gravity Dive -> 35m Belly Skid -> Breakup!
+        if (this.Clock >= this.NextFlakDownClock)
         {
             this.TriggerAircraftCrashDive();
-            this.NextCrashSortieClock = this.Clock + 6.8;
+            this.NextFlakDownClock = this.Clock + 7.2;
         }
 
         for (let AI = 0; AI < this.Aircraft.length; ++AI)
         {
             const A = this.Aircraft[AI];
-            A.PropAngle = (A.PropAngle + Step * 58.0) % (Math.PI * 2.0);
+            if (A.PropAttached)
+                A.PropAngle = (A.PropAngle + Step * 58.0) % (Math.PI * 2.0);
 
             if (A.State === "flying")
             {
                 A.Pos[0] += A.Vel[0] * Step;
                 A.Pos[1] += A.Vel[1] * Step;
-                A.Roll    = Math.sin(this.Clock * 1.4 + AI) * 0.18;
+                A.Roll    = Math.sin(this.Clock * 1.35 + AI) * 0.22;
                 A.Pitch   = 0.03;
 
                 A.BombTimer -= Step;
@@ -1047,40 +1235,113 @@ export class DDayCombatSequence
                 {
                     this.DropAerialBomb(A);
                     A.BombsLeft--;
-                    A.BombTimer = 0.76;
+                    A.BombTimer = 0.78;
                 }
-                if (A.Pos[0] < -280.0 || A.Pos[0] > 300.0)
+                if (A.Pos[0] < -285.0 || A.Pos[0] > 295.0)
                     this.Aircraft[AI] = this.CreateFreshAircraftSortie(AI, false);
             }
-            else if (A.State === "crashing")
+            else if (A.State === "diving")
             {
+                // Natural ballistic gravity arc + wounded aileron roll spiral!
+                A.Vel[2] -= 13.5 * Step;
                 A.Pos[0] += A.Vel[0] * Step;
                 A.Pos[1] += A.Vel[1] * Step;
                 A.Pos[2] += A.Vel[2] * Step;
-                A.Vel[2] -= 5.2 * Step;
-                A.Roll   += 6.2 * Step;
-                A.Pitch   = 0.46;
+                const HorizSpd = Math.hypot(A.Vel[0], A.Vel[1]) || 1.0;
+                A.Yaw   = Math.atan2(A.Vel[1], A.Vel[0]);
+                A.Pitch = ClampScalar(Math.atan2(-A.Vel[2], HorizSpd), -0.25, 0.72);
+                A.Roll += A.RollRate * Step;
 
                 if ((Math.floor(this.Clock * 30) + AI) % 2 === 0)
                 {
                     this.Host?.Sparks?.Emit?.([{
                         Point:    [A.Pos[0], A.Pos[1], A.Pos[2]],
-                        Velocity: [-A.Vel[0] * 0.15, -A.Vel[1] * 0.15, 3.8],
+                        Velocity: [-A.Vel[0] * 0.14, -A.Vel[1] * 0.14, 3.4],
                         Normal:   [0, 0, 1],
-                        Strength: 2.8,
+                        Strength: 2.6,
                         Rim:      null
                     }], 1.0 / 60.0);
                 }
 
-                const TerrZ  = QueryDDayTerrainHeight(A.Pos[0], A.Pos[1]);
-                const HitCar = !this.KnockedOut && Math.hypot(A.Pos[0] - Car.Position[0], A.Pos[1] - Car.Position[1]) < 4.2 && A.Pos[2] < Car.Position[2] + 2.2;
-                if (A.Pos[2] <= TerrZ + 0.55 || HitCar)
+                // Transition into HIGH-SPEED BELLY SKID on ground contact (NEVER freeze nose-in!)
+                const TerrZ = QueryDDayTerrainHeight(A.Pos[0], A.Pos[1]);
+                if (A.Pos[2] <= TerrZ + 0.42)
                 {
-                    A.Pos[2]     = TerrZ + 0.45;
+                    A.Pos[2]       = TerrZ + 0.36;
+                    A.State        = "skidding";
+                    A.PropAttached = false; // propeller shears off on ground strike!
+                    A.SkidTimer    = 0.0;
+                    A.ClodCooldown = 0.0;
+                    A.SkidYawRate  = (AI % 2 === 0 ? 1.0 : -1.0) * 1.45;
+                    // Retain 68% horizontal momentum so it ploughs a 30–40 m furrow across the beach!
+                    A.Vel[0]      *= 0.68;
+                    A.Vel[1]      *= 0.68;
+                    A.Vel[2]       = 0.0;
+                    A.Roll         = ClampScalar(A.Roll, -0.35, 0.35);
+
+                    this.TriggerExplosion(A.Pos[0], A.Pos[1], TerrZ + 0.25, 1.65, 8.5, 8.0, 22.0, CourseMaterial.ScorchedMud);
+                }
+            }
+            else if (A.State === "skidding")
+            {
+                // High-speed belly-skid across uneven Normandy sand/craters with ground friction, yaw spin & dirt clods!
+                A.SkidTimer += Step;
+                const Drag = Math.exp(-1.25 * Step);
+                A.Vel[0] *= Drag;
+                A.Vel[1] *= Drag;
+                A.Pos[0] += A.Vel[0] * Step;
+                A.Pos[1] += A.Vel[1] * Step;
+                A.Yaw    += A.SkidYawRate * Step;
+                A.SkidYawRate *= Math.exp(-1.1 * Step);
+
+                // Conform fuselage Pitch & Roll cleanly to the uneven ground slope so it slides flat on its belly!
+                const CosY = Math.cos(A.Yaw), SinY = Math.sin(A.Yaw);
+                const ZF  = QueryDDayTerrainHeight(A.Pos[0] + CosY * 2.5, A.Pos[1] + SinY * 2.5);
+                const ZR  = QueryDDayTerrainHeight(A.Pos[0] - CosY * 2.5, A.Pos[1] - SinY * 2.5);
+                const ZL  = QueryDDayTerrainHeight(A.Pos[0] - SinY * 1.8, A.Pos[1] + CosY * 1.8);
+                const ZRt = QueryDDayTerrainHeight(A.Pos[0] + SinY * 1.8, A.Pos[1] - CosY * 1.8);
+                A.Pos[2] = 0.25 * (ZF + ZR + ZL + ZRt) + 0.30;
+                A.Pitch  = Math.atan2(ZR - ZF, 5.0);
+                A.Roll   = Math.atan2(ZL - ZRt, 3.6) + 0.16;
+
+                // Plough up continuous flying sand/mud clods & grinding belly sparks!
+                A.ClodCooldown -= Step;
+                if (A.ClodCooldown <= 0.0)
+                {
+                    A.ClodCooldown = 0.14;
+                    this.Host?.Effects?.BurstTyre?.(
+                        ConstructRigidTransform([A.Pos[0], A.Pos[1], A.Pos[2] + 0.15], [0, 0, 0, 1]),
+                        [0.65, 0.65, 0.35],
+                        [-A.Vel[0] * 0.22, -A.Vel[1] * 0.22, 3.6],
+                        CourseMaterial.ScorchedMud
+                    );
+                    this.Host?.Sparks?.Emit?.([
+                        { Point: [A.Pos[0], A.Pos[1], A.Pos[2] + 0.1], Velocity: [-A.Vel[0] * 0.25, -A.Vel[1] * 0.25, 4.2], Normal: [0, 0, 1], Strength: 3.0, Rim: null }
+                    ], 1.0 / 60.0);
+                }
+
+                // Tear through Barbed Wire in the skidding plane's wake!
+                for (const W of this.BarbedWires)
+                    if (W.Intact && Math.hypot(A.Pos[0] - W.Pos[0], A.Pos[1] - W.Pos[1]) < 4.2)
+                        this.BreakBarbedWire(W, false);
+
+                // Push/damage Car if skidding burning fuselage slides into it
+                if (!this.KnockedOut && Math.hypot(A.Pos[0] - Car.Position[0], A.Pos[1] - Car.Position[1]) < 4.0)
+                {
+                    Car.LinearVelocity[0] += A.Vel[0] * 0.45;
+                    Car.LinearVelocity[1] += A.Vel[1] * 0.45;
+                    Car.LinearVelocity[2] += 4.5;
+                    this.ApplyCarDamage(18.0, "SKIDDING AIRCRAFT WRECK");
+                }
+
+                // Secondary wing fuel-tank detonation as airframe grinds to a halt!
+                const RemSpeed = Math.hypot(A.Vel[0], A.Vel[1]);
+                if (RemSpeed < 4.2 || A.SkidTimer >= 1.75)
+                {
                     A.State      = "wreck";
                     A.WreckTimer = 3.2;
                     this.Stats.PlanesCrashed++;
-                    this.TriggerExplosion(A.Pos[0], A.Pos[1], TerrZ + 0.4, 2.35, 11.5, 10.8, 32.0, CourseMaterial.SteelDark);
+                    this.TriggerExplosion(A.Pos[0], A.Pos[1], A.Pos[2], 2.20, 10.5, 9.8, 26.0, CourseMaterial.OliveDrabDark);
                 }
             }
             else
@@ -1091,7 +1352,7 @@ export class DDayCombatSequence
             }
         }
 
-        // Advance Falling 500-lb Bombs onto Uneven Terrain
+        // Advance Falling 500-lb Bombs
         for (const B of this.Bombs)
         {
             if (!B.Active)
@@ -1104,11 +1365,10 @@ export class DDayCombatSequence
             if (B.Pos[2] <= TerrZ + 0.18)
             {
                 B.Active = false;
-                this.TriggerExplosion(B.Pos[0], B.Pos[1], TerrZ, 1.85, 9.6, 9.2, 26.0, CourseMaterial.Dirt);
+                this.TriggerExplosion(B.Pos[0], B.Pos[1], TerrZ, 1.85, 9.5, 9.0, 25.0, CourseMaterial.ScorchedMud);
             }
         }
 
-        // Age Lingering Volumetric Crater Smoke/Fire Vents
         for (let I = this.CraterFires.length - 1; I >= 0; --I)
         {
             this.CraterFires[I].Age += Step;
@@ -1130,80 +1390,58 @@ export class DDayCombatSequence
             return [];
         const Out = [];
 
-        // ① Damaged, Cooking-Off & Destroyed Tank Volumetric Fire & Black Soot Columns
         for (const T of this.Tanks)
         {
             if (!T.Alive)
             {
                 Out.push({
-                    Active:    true,
-                    Position:  [T.Pos[0] - 0.5, T.Pos[1], T.Pos[2] + 1.45],
-                    Radius:    0.72,
-                    Velocity:  [0.0, 0.0, 3.8],
-                    SmokeRate: 22.0,
-                    HeatRate:  36.0,
-                    FlameRate: 28.0,
-                    SootRate:  34.0
+                    Active: true, Position: [T.Pos[0] - 0.5, T.Pos[1], T.Pos[2] + 1.45],
+                    Radius: 0.72, Velocity: [0.0, 0.0, 3.8],
+                    SmokeRate: 22.0, HeatRate: 36.0, FlameRate: 28.0, SootRate: 34.0
                 });
             }
             else if (T.CookingOff)
             {
                 Out.push({
-                    Active:    true,
-                    Position:  [T.Pos[0], T.Pos[1], T.Pos[2] + 1.65],
-                    Radius:    0.65,
-                    Velocity:  [0.0, 0.0, 5.2],
-                    SmokeRate: 26.0,
-                    HeatRate:  48.0,
-                    FlameRate: 44.0,
-                    SootRate:  30.0
+                    Active: true, Position: [T.Pos[0], T.Pos[1], T.Pos[2] + 1.65],
+                    Radius: 0.65, Velocity: [0.0, 0.0, 5.2],
+                    SmokeRate: 26.0, HeatRate: 48.0, FlameRate: 44.0, SootRate: 30.0
                 });
             }
             else if (T.Hp < 68.0)
             {
                 const DmgFrac = 1.0 - T.Hp / 68.0;
                 Out.push({
-                    Active:    true,
-                    Position:  [T.Pos[0] - 2.2, T.Pos[1], T.Pos[2] + 1.55],
-                    Radius:    0.42,
-                    Velocity:  [-1.5, 0.0, 2.6],
-                    SmokeRate: 10.0 + 14.0 * DmgFrac,
-                    HeatRate:  12.0 + 18.0 * DmgFrac,
-                    FlameRate: DmgFrac > 0.55 ? 12.0 : 0.0,
-                    SootRate:  14.0 + 16.0 * DmgFrac
+                    Active: true, Position: [T.Pos[0] - Math.cos(T.Yaw) * 2.1, T.Pos[1] - Math.sin(T.Yaw) * 2.1, T.Pos[2] + 1.55],
+                    Radius: 0.42, Velocity: [-1.2, 0.0, 2.6],
+                    SmokeRate: 10.0 + 14.0 * DmgFrac, HeatRate: 12.0 + 18.0 * DmgFrac,
+                    FlameRate: DmgFrac > 0.55 ? 12.0 : 0.0, SootRate: 14.0 + 16.0 * DmgFrac
                 });
             }
         }
 
-        // ② Flaming Shot-Down Crashing Aircraft & Wreck Plumes
         for (const A of this.Aircraft)
         {
             if (A.State !== "flying")
             {
                 Out.push({
-                    Active:    true,
-                    Position:  [A.Pos[0], A.Pos[1], A.Pos[2] + 0.6],
-                    Radius:    0.75,
-                    Velocity:  A.State === "crashing" ? [-A.Vel[0] * 0.12, -A.Vel[1] * 0.12, 3.5] : [0.0, 0.0, 4.2],
-                    SmokeRate: 24.0,
-                    HeatRate:  42.0,
-                    FlameRate: 36.0,
-                    SootRate:  32.0
+                    Active: true, Position: [A.Pos[0], A.Pos[1], A.Pos[2] + 0.55],
+                    Radius: 0.76,
+                    Velocity: (A.State === "diving" || A.State === "skidding")
+                        ? [-A.Vel[0] * 0.14, -A.Vel[1] * 0.14, 3.6]
+                        : [0.0, 0.0, 4.2],
+                    SmokeRate: 26.0, HeatRate: 44.0, FlameRate: 38.0, SootRate: 34.0
                 });
             }
         }
 
-        // ③ Lingering Volumetric Bomb / Mine / 155mm Shell Blast Plumes
         for (const CF of this.CraterFires)
         {
             const Fade = Math.max(0.0, 1.0 - CF.Age / CF.Duration);
             Out.push({
-                Active:    true,
-                Position:  CF.Pos,
-                Radius:    0.58 * CF.Scale,
-                Velocity:  [0.0, 0.0, (2.2 + 2.8 * Fade) * CF.Scale],
-                SmokeRate: 18.0 * Fade * CF.Scale,
-                HeatRate:  28.0 * Fade * CF.Scale,
+                Active: true, Position: CF.Pos, Radius: 0.58 * CF.Scale,
+                Velocity: [0.0, 0.0, (2.2 + 2.8 * Fade) * CF.Scale],
+                SmokeRate: 18.0 * Fade * CF.Scale, HeatRate: 28.0 * Fade * CF.Scale,
                 FlameRate: CF.Age < 0.55 ? (38.0 * (1.0 - CF.Age / 0.55) * CF.Scale) : 0.0,
                 SootRate:  22.0 * Fade * CF.Scale
             });
@@ -1224,7 +1462,7 @@ export class DDayCombatSequence
 
         const SetOcc = (Idx, Xform, Visible = true) =>
         {
-            if (Idx < 0 || !this.Scene.Occupants[Idx])
+            if (Idx === undefined || Idx < 0 || !this.Scene.Occupants[Idx])
                 return false;
             const Occ = this.Scene.Occupants[Idx];
             const VisChanged = Boolean(Occ.Inactive) !== !Visible;
@@ -1241,7 +1479,7 @@ export class DDayCombatSequence
         let DrawChanged = false;
         const Parked = ConstructRigidTransform([0.0, 0.0, -320.0], [0.0, 0.0, 0.0, 1.0]);
 
-        // ① 5 Terrain-Conforming Tanks (Hull + Rotating / Popped-Off Turret)
+        // ① 5 Winding OD#9 Sherman Tanks
         for (let I = 0; I < this.Tanks.length; ++I)
         {
             const T = this.Tanks[I];
@@ -1254,37 +1492,22 @@ export class DDayCombatSequence
             );
             DrawChanged = SetOcc(Block.TankHulls[I], ConstructRigidTransform(T.Pos, QHull), true) || DrawChanged;
 
-            let QTurret;
-            if (T.Alive)
-            {
-                QTurret = MultiplyQuaternion(QHull, ConstructAxisQuaternion([0, 0, 1], T.TurretYaw));
-            }
-            else
-            {
-                QTurret = MultiplyQuaternion(
-                    ConstructAxisQuaternion([0, 0, 1], T.TurretYaw),
-                    MultiplyQuaternion(
-                        ConstructAxisQuaternion([0, 1, 0], T.TurretPitch),
-                        ConstructAxisQuaternion([1, 0, 0], T.TurretRoll)
-                    )
+            const QTurret = T.Alive
+                ? MultiplyQuaternion(QHull, ConstructAxisQuaternion([0, 0, 1], T.TurretYaw))
+                : MultiplyQuaternion(
+                    ConstructAxisQuaternion([0, 0, 1], T.Yaw + T.TurretYaw),
+                    MultiplyQuaternion(ConstructAxisQuaternion([0, 1, 0], T.TurretPitch), ConstructAxisQuaternion([1, 0, 0], T.TurretRoll))
                 );
-            }
             DrawChanged = SetOcc(Block.TankTurrets[I], ConstructRigidTransform(T.TurretPos, QTurret), true) || DrawChanged;
         }
 
-        // ② 6 Bunker MG Turrets & 6 Heavy Coastal Cannons
+        // ② 6 Casemate MG-42 Turrets & 6 Heavy 155mm Coastal Guns
         for (let I = 0; I < this.MgTurrets.length; ++I)
-        {
-            const M = this.MgTurrets[I];
-            DrawChanged = SetOcc(Block.MgTurrets[I], ConstructRigidTransform(M.Pos, ConstructAxisQuaternion([0, 0, 1], M.Yaw)), true) || DrawChanged;
-        }
+            DrawChanged = SetOcc(Block.MgTurrets[I], ConstructRigidTransform(this.MgTurrets[I].Pos, ConstructAxisQuaternion([0, 0, 1], this.MgTurrets[I].Yaw)), true) || DrawChanged;
         for (let I = 0; I < this.Cannons.length; ++I)
-        {
-            const C = this.Cannons[I];
-            DrawChanged = SetOcc(Block.Cannons[I], ConstructRigidTransform(C.Pos, ConstructAxisQuaternion([0, 0, 1], C.Yaw)), true) || DrawChanged;
-        }
+            DrawChanged = SetOcc(Block.Cannons[I], ConstructRigidTransform(this.Cannons[I].Pos, ConstructAxisQuaternion([0, 0, 1], this.Cannons[I].Yaw)), true) || DrawChanged;
 
-        // ③ 4 Aircraft + 4-Blade Spinning Propellers
+        // ③ 4 Fighter-Bombers + Detachable Propellers (hidden during belly-skid/wreck!)
         for (let I = 0; I < this.Aircraft.length; ++I)
         {
             const A = this.Aircraft[I];
@@ -1294,25 +1517,40 @@ export class DDayCombatSequence
             );
             DrawChanged = SetOcc(Block.Aircraft[I], ConstructRigidTransform(A.Pos, QPlane), true) || DrawChanged;
 
-            const NoseOff = RotateVector(QPlane, [3.85, 0.0, 0.58]);
-            const NosePos = [A.Pos[0] + NoseOff[0], A.Pos[1] + NoseOff[1], A.Pos[2] + NoseOff[2]];
-            const QProp   = MultiplyQuaternion(QPlane, ConstructAxisQuaternion([1, 0, 0], A.PropAngle));
-            DrawChanged = SetOcc(Block.Propellers[I], ConstructRigidTransform(NosePos, QProp), A.State !== "wreck") || DrawChanged;
+            if (A.PropAttached)
+            {
+                const NoseOff = RotateVector(QPlane, [3.70, 0.0, 0.58]);
+                const NosePos = [A.Pos[0] + NoseOff[0], A.Pos[1] + NoseOff[1], A.Pos[2] + NoseOff[2]];
+                const QProp   = MultiplyQuaternion(QPlane, ConstructAxisQuaternion([1, 0, 0], A.PropAngle));
+                DrawChanged = SetOcc(Block.Propellers[I], ConstructRigidTransform(NosePos, QProp), true) || DrawChanged;
+            }
+            else
+            {
+                DrawChanged = SetOcc(Block.Propellers[I], Parked, false) || DrawChanged;
+            }
         }
 
-        // ④ 28 Armed Teller Landmines
+        // ④ 28 Subtle Buried Tellermines & 24 Crushable Barbed Wire Entanglements
         for (let I = 0; I < this.Mines.length; ++I)
         {
             const M = this.Mines[I];
             DrawChanged = SetOcc(Block.Mines[I], M.Armed ? ConstructRigidTransform(M.Pos, [0, 0, 0, 1]) : Parked, M.Armed) || DrawChanged;
         }
+        if (Block.BarbedWire)
+        {
+            for (let I = 0; I < this.BarbedWires.length; ++I)
+            {
+                const W = this.BarbedWires[I];
+                const Xf = W.Intact ? ConstructRigidTransform(W.Pos, ConstructAxisQuaternion([0, 0, 1], W.Yaw)) : Parked;
+                DrawChanged = SetOcc(Block.BarbedWire[I], Xf, W.Intact) || DrawChanged;
+            }
+        }
 
-        // ⑤ Falling Bombs, 155mm/105mm Shells & Tracer Bolts
+        // ⑤ Bombs, Shells & Tracers
         for (let I = 0; I < this.Bombs.length; ++I)
         {
             const B = this.Bombs[I];
-            if (!B.Active)
-                DrawChanged = SetOcc(Block.Bombs[I], Parked, false) || DrawChanged;
+            if (!B.Active) DrawChanged = SetOcc(Block.Bombs[I], Parked, false) || DrawChanged;
             else
             {
                 const Spd = Math.hypot(B.Vel[0], B.Vel[1], B.Vel[2]) || 1.0;
@@ -1323,12 +1561,10 @@ export class DDayCombatSequence
                 DrawChanged = SetOcc(Block.Bombs[I], ConstructRigidTransform(B.Pos, Q), true) || DrawChanged;
             }
         }
-
         for (let I = 0; I < this.Shells.length; ++I)
         {
             const S = this.Shells[I];
-            if (!S.Active)
-                DrawChanged = SetOcc(Block.Shells[I], Parked, false) || DrawChanged;
+            if (!S.Active) DrawChanged = SetOcc(Block.Shells[I], Parked, false) || DrawChanged;
             else
             {
                 const Spd = Math.hypot(S.Vel[0], S.Vel[1], S.Vel[2]) || 1.0;
@@ -1339,12 +1575,10 @@ export class DDayCombatSequence
                 DrawChanged = SetOcc(Block.Shells[I], ConstructRigidTransform(S.Pos, Q), true) || DrawChanged;
             }
         }
-
         for (let I = 0; I < this.Tracers.length; ++I)
         {
             const Tr = this.Tracers[I];
-            if (!Tr.Active)
-                DrawChanged = SetOcc(Block.Tracers[I], Parked, false) || DrawChanged;
+            if (!Tr.Active) DrawChanged = SetOcc(Block.Tracers[I], Parked, false) || DrawChanged;
             else
             {
                 const Yaw = Math.atan2(Tr.Vel[1], Tr.Vel[0]);
@@ -1365,12 +1599,12 @@ export class DDayCombatSequence
             {
                 X: 189.5, Y:  10.5, Z: GateZ + 4.5,
                 Type: LightType.StreetLamp, Direction: [0, 0, -1],
-                Colour: [0.18, 1.0, 0.58], Intensity: 115.0, Reach: 42.0, Params: [0.1, -0.5, 0, 1]
+                Colour: [1.0, 0.78, 0.42], Intensity: 110.0, Reach: 42.0, Params: [0.1, -0.5, 0, 1]
             },
             {
                 X: 189.5, Y: -10.5, Z: GateZ + 4.5,
                 Type: LightType.StreetLamp, Direction: [0, 0, -1],
-                Colour: [0.18, 1.0, 0.58], Intensity: 115.0, Reach: 42.0, Params: [0.1, -0.5, 0, 1]
+                Colour: [1.0, 0.78, 0.42], Intensity: 110.0, Reach: 42.0, Params: [0.1, -0.5, 0, 1]
             }
         ];
 
@@ -1382,14 +1616,14 @@ export class DDayCombatSequence
             Out.push({
                 X: CF.Pos[0], Y: CF.Pos[1], Z: CF.Pos[2] + 2.2,
                 Type: LightType.StreetLamp, Direction: [0, 0, -1],
-                Colour: [1.0, 0.54, 0.16], Intensity: 215.0 * Flash * CF.Scale, Reach: 48.0 * CF.Scale, Params: [0.1, -0.5, 0, 1]
+                Colour: [1.0, 0.52, 0.14], Intensity: 215.0 * Flash * CF.Scale, Reach: 48.0 * CF.Scale, Params: [0.1, -0.5, 0, 1]
             });
         }
         return Out;
     }
 
     //--------------------------------------------------------------------------------------------------------------------
-    //                  ZERO-BLACK-BOX 3D + 2D HOLOGRAPHIC D-DAY BATTLEFIELD HUD OVERLAY
+    //                  TACTICAL D-DAY BATTLEFIELD HUD (ZERO BLACK BOXES · SUBTLE CLOSE-PROXIMITY CUES)
     //--------------------------------------------------------------------------------------------------------------------
 
     RenderHudOverlay(Ctx, W, H, Cam)
@@ -1401,7 +1635,7 @@ export class DDayCombatSequence
         if (!Hud || !Car)
             return;
 
-        // ① 3D Objective Beacon on THE WALL — Central Breach Gate
+        // ① 3D Objective Beacon on THE ATLANTIC WALL Breach Gate
         const DistToWall = Math.max(0, Math.round(DDayWallGoalX - Car.Position[0]));
         const GateZ = QueryDDayTerrainHeight(191.0, 0.0);
         const GateScreen = Hud.ProjectWorld([191.0, 0.0, GateZ + 7.2], W, H, Cam);
@@ -1410,148 +1644,116 @@ export class DDayCombatSequence
             Ctx.save();
             Ctx.shadowColor = "rgba(0, 0, 0, 0.88)";
             Ctx.shadowBlur  = 8;
-            Ctx.strokeStyle = "#5cf7b8";
-            Ctx.lineWidth   = 2.6;
+            Ctx.strokeStyle = "#ffd26a";
+            Ctx.lineWidth   = 2.4;
             const GX = GateScreen[0], GY = GateScreen[1];
             Ctx.beginPath();
-            Ctx.moveTo(GX, GY - 11); Ctx.lineTo(GX + 11, GY);
-            Ctx.lineTo(GX, GY + 11); Ctx.lineTo(GX - 11, GY);
+            Ctx.moveTo(GX, GY - 10); Ctx.lineTo(GX + 10, GY);
+            Ctx.lineTo(GX, GY + 10); Ctx.lineTo(GX - 10, GY);
             Ctx.closePath();
             Ctx.stroke();
 
-            Ctx.fillStyle = "#6ef7c8";
-            Ctx.font      = "800 13px 'DM Sans', system-ui, sans-serif";
+            Ctx.fillStyle = "#ffe298";
+            Ctx.font      = "800 12.5px 'DM Sans', system-ui, sans-serif";
             Ctx.textAlign = "center";
-            Ctx.fillText(`🎯 THE WALL · BREACH GATE (${DistToWall}m)`, GX, GY - 18);
+            Ctx.fillText(`🎯 ATLANTIC WALL BREACH (${DistToWall}m)`, GX, GY - 16);
             Ctx.restore();
         }
 
-        // ② 3D Allied Tank Cover Callouts + Suppressed Bunker Callouts
+        // ② Sherman Tank Tactical Callouts (only nearby within 85 m)
         for (let I = 0; I < this.Tanks.length; ++I)
         {
             const T = this.Tanks[I];
             if (!T.Alive)
                 continue;
             const Dist = Math.hypot(T.Pos[0] - Car.Position[0], T.Pos[1] - Car.Position[1]);
-            if (Dist > 105.0)
+            if (Dist > 85.0)
                 continue;
-            const TP = Hud.ProjectWorld([T.Pos[0], T.Pos[1], T.Pos[2] + 3.05], W, H, Cam);
+            const TP = Hud.ProjectWorld([T.Pos[0], T.Pos[1], T.Pos[2] + 2.95], W, H, Cam);
             if (!TP)
                 continue;
-            const Col = T.CookingOff ? "#ff4d5e" : (this.CoverTankIdx === I ? "#6ef7c8" : "#ffd26a");
+            const Col = T.CookingOff ? "#ff4d5e" : (this.CoverTankIdx === I ? "#6ef7c8" : "#d8e2b8");
             Ctx.save();
             Ctx.shadowColor = "rgba(0, 0, 0, 0.86)";
             Ctx.shadowBlur  = 6;
             Ctx.fillStyle   = Col;
-            Ctx.font        = "700 11px 'JetBrains Mono', monospace";
+            Ctx.font        = "700 10.5px 'JetBrains Mono', monospace";
             Ctx.textAlign   = "center";
             const Tag = T.CookingOff
-                ? "⚠️ COOKING OFF — BREAK COVER!"
-                : (this.CoverTankIdx === I ? `🛡️ SHIELDED BY TANK · ${Math.round(T.Hp)}%` : `🛡️ COVER TANK · ${Math.round(T.Hp)}%`);
+                ? "⚠️ AMMO COOK-OFF — CLEAR OUT!"
+                : (this.CoverTankIdx === I ? `🛡️ SHERMAN LEE · ${Math.round(T.Hp)}%` : `🛡️ M4 SHERMAN · ${Math.round(T.Hp)}%`);
             Ctx.fillText(Tag, TP[0], TP[1]);
             Ctx.restore();
         }
 
-        for (const MG of this.MgTurrets)
+        // ③ Close-Range Metallic Mine Detector Alert ONLY when < 7.8 m from a buried Tellermine! (Mines stay subtle at range!)
+        if (this.NearMineDist < 7.8 && this.NearMinePos)
         {
-            if (MG.SuppressedTimer <= 0.0)
-                continue;
-            const BP = Hud.ProjectWorld([MG.Pos[0], MG.Pos[1], MG.Pos[2] + 1.4], W, H, Cam);
-            if (BP)
+            const MP = Hud.ProjectWorld([this.NearMinePos[0], this.NearMinePos[1], this.NearMinePos[2] + 0.45], W, H, Cam);
+            if (MP)
             {
                 Ctx.save();
-                Ctx.shadowColor = "rgba(0, 0, 0, 0.85)";
-                Ctx.shadowBlur  = 5;
-                Ctx.fillStyle   = "#7ce8ff";
-                Ctx.font        = "700 10px 'JetBrains Mono', monospace";
+                Ctx.shadowColor = "rgba(0, 0, 0, 0.9)";
+                Ctx.shadowBlur  = 6;
+                Ctx.fillStyle   = "#ffbe42";
+                Ctx.font        = "800 11px 'JetBrains Mono', monospace";
                 Ctx.textAlign   = "center";
-                Ctx.fillText(`💥 BUNKER SUPPRESSED (${MG.SuppressedTimer.toFixed(1)}s)`, BP[0], BP[1]);
+                Ctx.fillText(`⚠️ BURIED MINE ${this.NearMineDist.toFixed(1)}m!`, MP[0], MP[1]);
                 Ctx.restore();
             }
         }
 
-        // ③ Crashing Aircraft Warning & Terrain-Conforming Incoming Shell/Bomb Danger Rings
+        // ④ Diving / Skidding Aircraft Callout
         for (const A of this.Aircraft)
         {
-            if (A.State !== "crashing")
+            if (A.State !== "diving" && A.State !== "skidding")
                 continue;
-            const AP = Hud.ProjectWorld([A.Pos[0], A.Pos[1], A.Pos[2] + 1.9], W, H, Cam);
+            const AP = Hud.ProjectWorld([A.Pos[0], A.Pos[1], A.Pos[2] + 1.8], W, H, Cam);
             if (AP)
             {
                 Ctx.save();
                 Ctx.shadowColor = "rgba(0, 0, 0, 0.88)";
                 Ctx.shadowBlur  = 7;
-                Ctx.fillStyle   = "#ff4d5e";
-                Ctx.font        = "800 12px 'DM Sans', system-ui, sans-serif";
+                Ctx.fillStyle   = "#ff584e";
+                Ctx.font        = "800 11.5px 'DM Sans', system-ui, sans-serif";
                 Ctx.textAlign   = "center";
-                Ctx.fillText("✈️ CRASHING AIRCRAFT!", AP[0], AP[1]);
+                Ctx.fillText(A.State === "skidding" ? "✈️ SKIDDING WRECK!" : "✈️ STRICKEN FIGHTER!", AP[0], AP[1]);
                 Ctx.restore();
             }
         }
 
-        const DrawDangerRing = (TX, TY, Radius, Color) =>
-        {
-            if (Math.hypot(TX - Car.Position[0], TY - Car.Position[1]) > 105.0)
-                return;
-            Ctx.beginPath();
-            let Started = false;
-            for (let K = 0; K <= 16; ++K)
-            {
-                const Ang = (K / 16) * Math.PI * 2.0;
-                const RX = TX + Math.cos(Ang) * Radius;
-                const RY = TY + Math.sin(Ang) * Radius;
-                const RZ = QueryDDayTerrainHeight(RX, RY) + 0.14;
-                const P  = Hud.ProjectWorld([RX, RY, RZ], W, H, Cam);
-                if (!P) continue;
-                if (!Started) { Ctx.moveTo(P[0], P[1]); Started = true; }
-                else Ctx.lineTo(P[0], P[1]);
-            }
-            if (Started)
-            {
-                Ctx.strokeStyle = Color;
-                Ctx.lineWidth   = 2.0;
-                Ctx.setLineDash?.([6, 4]);
-                Ctx.stroke();
-                Ctx.setLineDash?.([]);
-            }
-        };
-
-        for (const S of this.Shells)
-            if (S.Active && !S.Friendly) DrawDangerRing(S.Target[0], S.Target[1], 4.8, "rgba(255, 76, 92, 0.78)");
-        for (const B of this.Bombs)
-            if (B.Active) DrawDangerRing(B.Target[0], B.Target[1], 5.6, "rgba(255, 192, 68, 0.78)");
-        for (const A of this.Aircraft)
-            if (A.State === "crashing") DrawDangerRing(A.CrashTarget[0], A.CrashTarget[1], 6.8, "rgba(255, 58, 72, 0.90)");
-
-        // ④ Pure Optical Top Battlefield Header (ZERO black background boxes!)
+        // ⑤ Pure Optical Top Combat Header
         Ctx.save();
         Ctx.shadowColor = "rgba(0, 0, 0, 0.88)";
         Ctx.shadowBlur  = 7;
         Ctx.textAlign   = "center";
 
         const ArmorCol = this.VehicleArmor > 55 ? "#6ef7c8" : (this.VehicleArmor > 25 ? "#ffc858" : "#ff4d5e");
-        Ctx.fillStyle = this.Breached ? "#6ef7c8" : "#ffcf6e";
+        Ctx.fillStyle = this.Breached ? "#6ef7c8" : "#f2dfa8";
         Ctx.font      = "800 15px 'DM Sans', system-ui, sans-serif";
         const Header  = this.Breached
-            ? `🏆 THE WALL BREACHED! · TIME ${this.RunTimer.toFixed(1)}s${this.BestBreachSec !== null ? ` (BEST ${this.BestBreachSec.toFixed(1)}s)` : ""}`
-            : `⚔️ OPERATION BREACH · ${DistToWall}m TO THE WALL · ${this.RunTimer.toFixed(1)}s`;
+            ? `🏆 ATLANTIC WALL BREACHED · ${this.RunTimer.toFixed(1)}s${this.BestBreachSec !== null ? ` (BEST ${this.BestBreachSec.toFixed(1)}s)` : ""}`
+            : `⚔️ OMAHA BEACH · ${DistToWall}m TO ATLANTIC WALL · ${this.RunTimer.toFixed(1)}s`;
         Ctx.fillText(Header, W * 0.5, 24);
 
-        const CoverState = this.InTankCover
-            ? "🛡️ IN TANK COVER (TANKS DRAWING FIRE)"
-            : (this.InCraterCover ? "🕳️ SHELL CRATER DEFILADE" : (this.ExposedSeconds > 0.85 ? "⚠️ EXPOSED IN OPEN — FLANK TO A TANK!" : "⚡ SPRINTING BETWEEN COVER"));
-        Ctx.fillStyle = ArmorCol;
+        let CoverState = "⚡ MANEUVERING";
+        if (this.InTankCover)         CoverState = "🛡️ IN SHERMAN TANK COVER";
+        else if (this.InTrenchCover)  CoverState = "🪖 SUNKEN TRENCH DEFILADE (SAFE FROM MG)";
+        else if (this.InDefiladeCover)CoverState = "🪨 SHINGLE / CRATER DEFILADE";
+        else if (this.ActiveKillZone) CoverState = `☠️ ${this.ActiveKillZone} — SEEK TANK OR TRENCH!`;
+
+        Ctx.fillStyle = (this.ActiveKillZone && !this.InTankCover && !this.InTrenchCover && !this.InDefiladeCover) ? "#ff5e6c" : ArmorCol;
         Ctx.font      = "700 12px 'JetBrains Mono', monospace";
         Ctx.fillText(
-            `🛡️ ARMOR ${Math.round(this.VehicleArmor)}%   |   ${CoverState}   |   MINES ${this.Mines.filter((M) => M.Armed).length}/28`,
+            `🛡️ HULL ${Math.round(this.VehicleArmor)}%   |   ${CoverState}`,
             W * 0.5, 42
         );
 
         if (this.BannerTimer > 0.0 && this.BannerMessage)
         {
             Ctx.fillStyle = "#fff4d8";
-            Ctx.font      = "800 16px 'DM Sans', system-ui, sans-serif";
-            Ctx.fillText(this.BannerMessage, W * 0.5, 72);
+            Ctx.font      = "800 15px 'DM Sans', system-ui, sans-serif";
+            Ctx.fillText(this.BannerMessage, W * 0.5, 70);
         }
         Ctx.restore();
     }

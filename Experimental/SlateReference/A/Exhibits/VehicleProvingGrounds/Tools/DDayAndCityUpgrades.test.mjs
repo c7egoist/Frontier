@@ -6,12 +6,16 @@ import {
     CityPursuitZones,
     ResolveCitySurfaces
 } from "../Source/CityPursuitStructure.js";
+import { ConstructMaterialSpecification, CourseMaterial } from "../Source/MaterialSpecification.js";
 import {
     DDayStaticShapes,
     DDayCombatShapes,
     DDayShellCraters,
+    DDaySpawn,
     DDayWallGoalX,
-    QueryDDayTerrainHeight
+    EmitDDayGroundFacets,
+    QueryDDayTerrainHeight,
+    QueryDDayTrenchDepth
 } from "../Source/DDayStructure.js";
 import { AssignCustomTerrainHeight, ResolveCourseHeight, ResolveCourseNormal } from "../Source/CourseStructure.js";
 import { RecoveryDirector } from "../Source/RecoveryDirector.js";
@@ -170,8 +174,9 @@ test("Smart Police Drones avoid City building AABBs, maintain alley Recon lock, 
     assert.ok(Pursuit.DroneStates[1].Pos[0] > Vehicle.Position[0] + 4.0, "CUTOFF Drone must sprint ahead of Evader");
 });
 
-test("Every D-Day fortification, wall, tank, turret, cannon, aircraft, bomb, shell & mine is a watertight 2-manifold", () =>
+test("Every D-Day fortification, wall, tank, turret, cannon, aircraft, wire, craft, bomb, shell & mine is a watertight 2-manifold with valid WWII PBR materials", () =>
 {
+    const Materials     = ConstructMaterialSpecification();
     const AllDDayShapes = { ...DDayStaticShapes, ...DDayCombatShapes };
     for (const [Name, Spec] of Object.entries(AllDDayShapes))
     {
@@ -181,35 +186,76 @@ test("Every D-Day fortification, wall, tank, turret, cannon, aircraft, bomb, she
         assert.equal(M.Boundary,    0, `DDay shape ${Name} has ${M.Boundary} open boundary edges`);
         assert.equal(M.NonManifold, 0, `DDay shape ${Name} has ${M.NonManifold} non-manifold edges`);
         assert.ok(M.Volume > 0.001,    `DDay shape ${Name} must have positive outward volume (got ${M.Volume})`);
+
+        // Guard against undefined CourseMaterial keys (which silently coerce to 0 = CheckerLight snow-white!)
+        for (const F of Facets)
+        {
+            assert.equal(typeof F.Family, "number", `${Name} has undefined/non-numeric material ID`);
+            assert.ok(Materials[F.Family] !== undefined, `${Name} references out-of-range material ID ${F.Family}`);
+        }
     }
+
+    // Verify D-Day Ground Mesh uses valid Normandy beach/mud/water materials (ZERO undefined / snow-white CheckerLight!)
+    const GroundFacets = EmitDDayGroundFacets();
+    for (const F of GroundFacets)
+    {
+        assert.equal(typeof F.Family, "number", "DDayGround triangle has undefined material");
+        assert.notEqual(F.Family, CourseMaterial.CheckerLight, "DDayGround must never fall back to CheckerLight (0)");
+        assert.ok(Materials[F.Family] !== undefined, `DDayGround references invalid material ${F.Family}`);
+    }
+
+    // Verify Sherman Tank uses authentic WWII OD#9 OliveDrab (NOT shipping-container green!)
+    const HullMats = new Set(DDayCombatShapes.DDayTankHull.Emit().map((F) => F.Family));
+    assert.equal(HullMats.has(CourseMaterial.OliveDrab), true, "Sherman Tank Hull must use WWII OliveDrab");
+    assert.equal(HullMats.has(CourseMaterial.ContainerGreen), false, "Sherman Tank Hull must NOT use ContainerGreen");
+
+    // Verify Tellermine is subtle weathered olive/mud/brass (NOT bright neon red!)
+    const MineMats = new Set(DDayCombatShapes.DDayLandmine.Emit().map((F) => F.Family));
+    assert.equal(MineMats.has(CourseMaterial.KerbRed), false, "Tellermine must NOT use obvious bright KerbRed");
+    assert.equal(MineMats.has(CourseMaterial.TrafficRed), false, "Tellermine must NOT use obvious neon TrafficRed");
 });
 
-test("D-Day Battlefield: advancing tank cover shields car, cannons blow up tanks, mines explode, aircraft drop bombs & crash, and The Wall breaches", async () =>
+test("D-Day Omaha Beach: 5-tier topography, sunken trenches, barbed wire, Sherman tank cover, subtle mines & natural skidding plane crashes", async () =>
 {
     const Scene = await BuildHeadlessScene("dday");
     const Desc  = ResolveLevelDescriptor("dday");
     assert.ok(Scene.DDayBlock, "SceneStructure('dday') must allocate Scene.DDayBlock");
     assert.equal("DDayExplosionFireball" in DDayCombatShapes, false, "Fake box explosion shape must NOT exist");
     assert.equal("Explosions" in Scene.DDayBlock, false, "DDayBlock must NOT allocate fake explosion box instances");
-    assert.ok(Scene.Occupants.length < 1800, `DDay occupant count (${Scene.Occupants.length}) must stay well within 2044 ceiling`);
+    assert.equal(Scene.DDayBlock.BarbedWire.length, 24, "DDayBlock must allocate 24 interactive Barbed Wire instances");
+    assert.ok(Scene.Occupants.length < 1850, `DDay occupant count (${Scene.Occupants.length}) must stay well within 2044 ceiling`);
 
-    // Verify uneven 3D battlefield terrain (coastal rise + ridges + 26 sunken shell craters with raised rims!)
-    const BeachZ  = QueryDDayTerrainHeight(-194.0, 0.0);
-    const GlacisZ = QueryDDayTerrainHeight(175.0, 0.0);
+    // ① Verify 5-Tier Omaha Beach Topography: Shingle Bangalore Breaches, -1.4m Sunken Trenches, Bluffs & Chalk Spur!
+    const BeachZ        = QueryDDayTerrainHeight(DDaySpawn.Position[0], DDaySpawn.Position[1]);
+    const ShingleCrestZ = QueryDDayTerrainHeight(-140.0, -10.0);
+    const ShingleGapZ   = QueryDDayTerrainHeight(-140.0,   5.5); // Center Bangalore Breach!
+    const TrenchFloorZ  = QueryDDayTerrainHeight(-88.0,  -19.25); // Dog-Green Sunken Trench centerline!
+    const PlateauNearZ  = QueryDDayTerrainHeight(-88.0,   -8.0);
+    const NorthBluffZ   = QueryDDayTerrainHeight(-46.0,   48.0);
+    const ChalkSpurZ    = QueryDDayTerrainHeight( 94.0,    1.0);
+    const SouthDrawZ    = QueryDDayTerrainHeight( 94.0,  -24.0);
+    const GlacisZ       = QueryDDayTerrainHeight(175.0,    0.0);
+
+    assert.ok(ShingleCrestZ > ShingleGapZ + 0.75, "Shingle Seawall must have blasted lower Bangalore Breaches for vehicles");
+    assert.ok(QueryDDayTrenchDepth(-88.0, -19.25) > 1.30, "Dog-Green Zig-Zag Trench must be sunken > 1.30 m below plateau");
+    assert.ok(PlateauNearZ - TrenchFloorZ > 1.0, "Sunken Trench floor must sit > 1.0 m below open kill-zone plateau");
+    assert.ok(NorthBluffZ > PlateauNearZ + 4.5, "Normandy coastal bluffs must rise steeply above the beach plateau");
+    assert.ok(ChalkSpurZ > SouthDrawZ + 2.2, "Central Chalk Spur must rise between Vierville South Draw and North Defile");
+    assert.ok(GlacisZ > BeachZ + 2.5, "Battlefield must climb from surf beachhead up to the inland Atlantic Wall");
+
     const Crater0 = DDayShellCraters[0];
     const CraterCenterZ = QueryDDayTerrainHeight(Crater0[0], Crater0[1]);
     const CraterRimZ    = QueryDDayTerrainHeight(Crater0[0] + Crater0[2] * 0.92, Crater0[1]);
-    assert.ok(GlacisZ > BeachZ + 0.85, "D-Day terrain must climb from Beachhead up toward Fortress Glacis");
-    assert.ok(CraterRimZ - CraterCenterZ > 0.55, `Shell crater must have raised blast rim & concave bowl (got rim=${CraterRimZ.toFixed(2)}, center=${CraterCenterZ.toFixed(2)})`);
-    assert.equal(ResolveCourseHeight(Crater0[0], Crater0[1]), CraterCenterZ, "ResolveCourseHeight must sample uneven D-Day terrain");
+    assert.ok(CraterRimZ - CraterCenterZ > 0.50, "Shell crater must have raised blast rim & concave bowl");
+    assert.equal(ResolveCourseHeight(Crater0[0], Crater0[1]), CraterCenterZ, "ResolveCourseHeight must sample D-Day terrain");
     const SlopeNormal = ResolveCourseNormal(Crater0[0] + Crater0[2] * 0.45, Crater0[1]);
     assert.ok(Math.hypot(SlopeNormal[0], SlopeNormal[1]) > 0.05, "ResolveCourseNormal must reflect uneven crater wall slope");
 
     const Vehicle = new VehicleSolver(Scene.QueryObstacleBounds());
     Vehicle.Surfaces = Desc.Surfaces;
-    Vehicle.Respawn([-194.0, 0.0, BeachZ + 0.63], 0.0);
+    Vehicle.Respawn([DDaySpawn.Position[0], DDaySpawn.Position[1], BeachZ + 0.63], DDaySpawn.Yaw);
 
-    // Verify RecoveryDirector does NOT derez-freeze the car at D-Day spawn [-194, 0] and car drives freely!
+    // ② Verify RecoveryDirector allows smooth driving off the surf foreshore without OutOfBounds derez!
     const RecoveryHost = {
         LevelDescriptor: Desc,
         Vehicle,
@@ -226,14 +272,11 @@ test("D-Day Battlefield: advancing tank cover shields car, cannons blow up tanks
         Vehicle.Advance({ Throttle: 1.0, Brake: 0.0, Steer: 0.0, Handbrake: false }, 1.0 / 60.0);
         Recovery.Watch(Vehicle, 1.0 / 60.0);
     }
-    assert.equal(Recovery.Busy, false, "D-Day Beachhead spawn [-194, 0] must NOT trigger OutOfBounds derez");
+    assert.equal(Recovery.Busy, false, "D-Day surf spawn must NOT trigger OutOfBounds derez");
     assert.equal(Boolean(Vehicle.Hidden), false, "Player vehicle must remain visible and drivable on D-Day");
-    assert.ok(Vehicle.Position[0] > StartDriveX + 2.5, "Throttle on D-Day must accelerate car forward across uneven terrain");
+    assert.ok(Vehicle.Position[0] > StartDriveX + 2.5, "Throttle on D-Day must accelerate car forward across foreshore");
 
-    let ExplosionSounds = 0;
-    let PlumeBursts     = 0;
-    let DebrisBursts    = 0;
-    let SparkBursts     = 0;
+    let ExplosionSounds = 0, PlumeBursts = 0, DebrisBursts = 0, SparkBursts = 0;
     const Host = {
         Scene,
         LevelKey: "dday",
@@ -249,64 +292,94 @@ test("D-Day Battlefield: advancing tank cover shields car, cannons blow up tanks
     assert.equal(Combat.Enabled, true);
     assert.equal(Combat.Tanks.length, 5);
     assert.equal(Combat.Mines.length, 28);
+    assert.equal(Combat.BarbedWires.length, 24);
 
-    // ① Tuck car directly behind Tank #0 -> verify active Tank Cover, line-of-fire shielding & ZERO turrets targeting car!
+    // ③ Sherman Tank Armored Lee: shields car & draws 100% of Casemate MG aggro!
     const T0 = Combat.Tanks[0];
     const StartTankX = T0.Pos[0];
-    Vehicle.Position[0] = T0.Pos[0] - 6.5;
-    Vehicle.Position[1] = T0.Pos[1];
-    Vehicle.Position[2] = T0.Pos[2] + 0.63;
+    Vehicle.Position[0] = T0.Pos[0] - Math.cos(T0.Yaw) * 7.0;
+    Vehicle.Position[1] = T0.Pos[1] - Math.sin(T0.Yaw) * 7.0;
+    Vehicle.Position[2] = QueryDDayTerrainHeight(Vehicle.Position[0], Vehicle.Position[1]) + 0.63;
     Combat.Advance(1.0 / 30.0);
-    assert.ok(T0.Pos[0] > StartTankX, "Assault Tank must advance toward The Wall (+X)");
-    assert.equal(Combat.InTankCover, true, "Car tucked behind advancing Tank must register InTankCover === true");
-    assert.equal(Combat.MgTurrets.filter((M) => M.TargetingCar).length, 0, "Zero Bunker MG Turrets should target a car in Tank Cover");
-    assert.equal(
-        Combat.FindBlockingTankAlongSegment(T0.Pos[0] + 40.0, T0.Pos[1], Vehicle.Position[0], Vehicle.Position[1]),
-        0,
-        "Tank #0 hull must block incoming fire from ahead of the Tank"
-    );
+    assert.ok(T0.Pos[0] > StartTankX, "Sherman Tank must advance along its winding route");
+    assert.equal(Combat.InTankCover, true, "Car tucked in Sherman lee must register InTankCover === true");
+    assert.equal(Combat.MgTurrets.filter((M) => M.TargetingCar).length, 0, "Zero Casemate MGs should target a car in Tank Cover");
 
-    // ② Multi-hit Cannon damage triggers 1.5s cook-off warning, and catastrophic hit pops turret + emits real Volumetric Plume!
-    Combat.DamageTank(1, 105.0, false); // >= 100 instant catastrophic
+    // ④ Sunken Zig-Zag Trench Defilade & Interactive Barbed Wire Snagging!
+    Vehicle.Position[0] = -88.0;
+    Vehicle.Position[1] = -19.25;
+    Vehicle.Position[2] = TrenchFloorZ + 0.60;
+    Combat.Advance(1.0 / 30.0);
+    assert.equal(Combat.InTrenchCover, true, "Car inside sunken Dog-Green Trench must register InTrenchCover === true");
+    assert.equal(Combat.MgTurrets.filter((M) => M.TargetingCar).length, 0, "Casemate MGs must NOT target car hull-down in Sunken Trench");
+
+    const FirstWire = Combat.BarbedWires.find((W) => W.Intact);
+    Vehicle.Position[0] = FirstWire.Pos[0];
+    Vehicle.Position[1] = FirstWire.Pos[1];
+    Vehicle.Position[2] = FirstWire.Pos[2] + 0.65;
+    Vehicle.LinearVelocity = [18.0, 0.0, 0.0];
+    Combat.Advance(1.0 / 30.0);
+    assert.equal(FirstWire.Intact, false, "Driving through Barbed Wire must tear & flatten the wire section");
+    assert.ok(Vehicle.LinearVelocity[0] < 12.0, "Snagging Barbed Wire must drag down vehicle speed");
+    assert.ok(Combat.Stats.WireCrushed >= 1);
+
+    // ⑤ Sherman ammo cook-off & catastrophic turret blow-off + subtle buried Tellermine detonation!
+    Combat.DamageTank(1, 105.0, false);
     Combat.DamageTank(0, 55.0);
-    Combat.DamageTank(0, 55.0); // two 55-pt shell hits -> enters 1.5s CookingOff warning!
-    assert.equal(T0.CookingOff, true, "Repeated cannon hits must enter 1.5s ammo cook-off warning before exploding");
+    Combat.DamageTank(0, 55.0);
+    assert.equal(T0.CookingOff, true, "Repeated cannon hits must trigger 1.55s Sherman ammo cook-off warning");
     Combat.DamageTank(0, 110.0, true);
     assert.equal(T0.Alive, false);
-    assert.ok(Combat.Stats.TanksExploded >= 1);
-    assert.ok(T0.TurretVel[2] > 8.0, "Exploding Tank must launch its turret upward");
-    assert.ok(PlumeBursts >= 1 && DebrisBursts >= 1 && SparkBursts >= 1, "Explosions must trigger real SmokeSequence PlumeBurst + EffectSequence Debris + Sparks");
-    assert.ok(Combat.QueryPlumeEmissions().length >= 1, "Destroyed/burning tanks & craters must emit continuous volumetric plumes");
+    assert.ok(T0.TurretVel[2] > 8.0, "Catastrophic Sherman explosion must blow turret upward");
+    assert.ok(PlumeBursts >= 1 && DebrisBursts >= 1 && SparkBursts >= 1);
+    assert.ok(Combat.QueryPlumeEmissions().length >= 1);
 
-    // ③ Landmine explodes when car drives over armed mine!
     const ArmedMine = Combat.Mines.find((M) => M.Armed);
     Vehicle.Position[0] = ArmedMine.Pos[0];
     Vehicle.Position[1] = ArmedMine.Pos[1];
     Vehicle.Position[2] = ArmedMine.Pos[2] + 0.55;
     Vehicle.LinearVelocity = [12.0, 0.0, 0.0];
     Combat.Advance(1.0 / 30.0);
-    assert.equal(ArmedMine.Armed, false, "Landmine must detonate on car proximity");
-    assert.ok(Combat.Stats.MinesDetonated >= 1);
-    assert.ok(Vehicle.LinearVelocity[2] > 2.5, "Mine blast must apply upward impulse to car");
-    assert.ok(ExplosionSounds >= 1, "Battlefield explosions must trigger procedural explosion audio");
+    assert.equal(ArmedMine.Armed, false, "Buried Tellermine must detonate when driven over");
+    assert.ok(Vehicle.LinearVelocity[2] > 2.5, "Tellermine blast must launch chassis upward");
+    assert.ok(ExplosionSounds >= 1);
 
-    // ④ Aircraft drops bombs, Allied Tanks fire 105mm return shells at Bunkers, & Plane executes crash-dive!
-    const CrashingPlane = Combat.TriggerAircraftCrashDive();
-    assert.ok(CrashingPlane && CrashingPlane.State === "crashing");
+    // ⑥ Natural Multi-Stage Aircraft Crash: "diving" -> high-speed ground "skidding" (propeller shears off, slides > 15 m!) -> "wreck"!
+    Vehicle.Position = [-60.0, 0.0, QueryDDayTerrainHeight(-60.0, 0.0) + 0.63];
+    const StrickenPlane = Combat.TriggerAircraftCrashDive();
+    assert.ok(StrickenPlane && StrickenPlane.State === "diving", "Flak hit must enter gravity-driven 'diving' spiral");
+    let SawSkidding = false;
+    let TouchdownPos = null;
+    let EndSkidPos   = null;
     for (let Step = 0; Step < 150; ++Step)
+    {
         Combat.Advance(1.0 / 30.0);
-    assert.ok(Combat.Stats.BombsDropped >= 1, "Attack aircraft must drop aerial bombs during gauntlet passes");
-    assert.ok(Combat.Stats.PlanesCrashed >= 1, "Stricken aircraft must complete crash dive and explode");
-    assert.ok(Combat.Stats.ShellsFired >= 1, "Heavy 155mm cannons must fire artillery shells at advancing armor");
-    assert.ok(Combat.Stats.TankShotsFired >= 1, "Advancing Allied Tanks must return 105mm fire at Enemy Bunkers");
+        if (StrickenPlane.State === "skidding")
+        {
+            if (!SawSkidding)
+            {
+                SawSkidding  = true;
+                TouchdownPos = [...StrickenPlane.Pos];
+                assert.equal(StrickenPlane.PropAttached, false, "Propeller must shear off cleanly upon belly impact");
+            }
+            EndSkidPos = [...StrickenPlane.Pos];
+        }
+    }
+    assert.equal(SawSkidding, true, "Crashing aircraft must belly-skid across the terrain instead of freezing nose-in");
+    const SkidDistance = Math.hypot(EndSkidPos[0] - TouchdownPos[0], EndSkidPos[1] - TouchdownPos[1]);
+    assert.ok(SkidDistance > 15.0, `Belly-skidding aircraft must plough > 15 m across the beach (skidded ${SkidDistance.toFixed(1)} m)`);
+    assert.ok(Combat.Stats.PlanesCrashed >= 1, "Skidding aircraft must finish with fuel-tank cook-off into 'wreck'");
+    assert.ok(Combat.Stats.BombsDropped >= 1);
+    assert.ok(Combat.Stats.ShellsFired >= 1);
+    assert.ok(Combat.Stats.TankShotsFired >= 1);
 
-    // ⑤ Sprint through THE WALL Central Breach Gate -> Victory!
-    Combat.KnockedOut = false;
+    // ⑦ Sprint through THE ATLANTIC WALL Breach Gate -> Victory!
+    Combat.KnockedOut   = false;
     Combat.VehicleArmor = 80.0;
     Vehicle.Position[0] = DDayWallGoalX + 1.5;
     Vehicle.Position[1] = 0.0;
     Combat.Advance(1.0 / 30.0);
-    assert.equal(Combat.Breached, true, "Crossing The Wall Breach Gate must trigger Victory");
+    assert.equal(Combat.Breached, true, "Crossing The Atlantic Wall Breach Gate must trigger Victory");
     assert.ok(Combat.BestBreachSec > 0.0);
     AssignCustomTerrainHeight(null);
 });

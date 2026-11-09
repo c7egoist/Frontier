@@ -536,9 +536,10 @@ export class SceneStructure
                 Aircraft:    AllocPool("DDay Attack Aircraft",   ShapeSets.DDayAircraft,          4),
                 Propellers:  AllocPool("DDay Propeller",         ShapeSets.DDayPropeller,         4),
                 Mines:       AllocPool("DDay Landmine",          ShapeSets.DDayLandmine,         28),
+                BarbedWire:  AllocPool("DDay Barbed Wire",       ShapeSets.DDayBarbedWire,       24),
                 Bombs:       AllocPool("DDay Aerial Bomb",       ShapeSets.DDayAerialBomb,        8),
-                Shells:      AllocPool("DDay Artillery Shell",   ShapeSets.DDayArtilleryShell,   10),
-                Tracers:     AllocPool("DDay Tracer Bolt",       ShapeSets.DDayTracerBolt,       20),
+                Shells:      AllocPool("DDay Artillery Shell",   ShapeSets.DDayArtilleryShell,   12),
+                Tracers:     AllocPool("DDay Tracer Bolt",       ShapeSets.DDayTracerBolt,       24),
                 Count:       0
             };
             this.DDayBlock.Count = this.Occupants.length - DDayFirst;
