@@ -2039,28 +2039,32 @@ await suite("18. Reference UI Alignment: Material Look-Dev Stage, Shader Ball Pe
   const matCard = drawer.querySelector(".cb-grid .cb-card");
   assert(matCard?.querySelector(".cb-card-check") && matCard?.querySelector(".cb-card-sub"), "Material card must render selection check badge and category subtitle");
 
-  // 18c. Pattern, Stamp & Texture Paint Circular Tool Dock & Olive Stage (Image 1 / image-3.png)
-  for (const [ws, expectedKicker] of [["pattern", "REPEAT TILE"], ["stamp", "DECAL STAMP"], ["paint", "3D + 2D PAINT"]]) {
+  // 18c. Pattern, Stamp & Texture Paint Circular Tool Dock, Clean Header (No Clutter Text) & Floating Viewport Zoom
+  for (const ws of ["pattern", "stamp", "paint"]) {
     api.switchWorkspace(ws);
-    const eyebrow = globalThis.document.querySelector(".vp-hero-eyebrow");
-    const statusTxt = globalThis.document.querySelector(".vp-draft-status");
+    const metaLine = globalThis.document.querySelector(".vp-hero-meta-line");
     const toolsBar = globalThis.document.querySelector(".vp-tools-bar");
     const moreBtn = toolsBar?.querySelector(".vp-more-tools-btn");
     const moreMenu = toolsBar?.querySelector(".vp-more-tools-menu");
     const stageShell = globalThis.document.querySelector(".se-stage-shell");
-    assert(eyebrow?.textContent.includes(expectedKicker), `${ws} header must display '${expectedKicker}' eyebrow`);
-    assert(statusTxt?.textContent.includes("Unsaved changes"), `${ws} header must show draft status indicator`);
+    assert(!metaLine || metaLine.hidden === true, `${ws} header must omit unnecessary eyebrow/draft clutter`);
+    assert(!stageShell?.querySelector(".se-stage-topbar"), `${ws} stage must not render unnecessary VECTOR/PAINT CANVAS topbar clutter`);
     assert(toolsBar.querySelectorAll(".vp-tool-circle").length >= 6, `${ws} Band 2 must render circular icon tool buttons`);
     assert(moreBtn && moreMenu && moreMenu.hidden === true, `${ws} Band 2 must include collapsed 'More tools' popover`);
     moreBtn.click();
     assert.equal(moreMenu.hidden, false, `Clicking 'More tools' in ${ws} must expand secondary tool menu`);
     moreBtn.click();
-    assert(stageShell?.querySelector(".se-stage-topbar") && stageShell?.querySelector(".se-stage-footer"), `${ws} stage must render topbar and bottom shortcut/selection footer`);
+    assert(stageShell?.querySelector(".se-stage-footer"), `${ws} stage must render bottom shortcut/selection footer`);
+    if (ws !== "paint") {
+      const seVp = stageShell?.querySelector(".se-viewport");
+      const zoomToolbar = seVp?.querySelector(".se-view-controls");
+      assert(zoomToolbar, `${ws} must mount zoom controls (.se-view-controls) directly on .se-viewport`);
+    }
   }
 
-  // Verify olive viewport + circular tool + look-dev stage CSS selectors exist
+  // Verify viewport + circular tool + look-dev stage CSS selectors exist
   const cssText = fs.readFileSync(new URL("./TextureStudio.css", import.meta.url), "utf8");
-  for (const token of [".mw-stage", ".mw-bottom-dock", ".vp-tool-circle", ".vp-more-tools-btn", ".se-stage-topbar", ".se-stage-footer", ".cb-family-pills", ".cb-collection-bar"]) {
+  for (const token of [".mw-stage", ".mw-bottom-dock", ".vp-tool-circle", ".vp-more-tools-btn", ".se-view-controls", ".se-stage-footer", ".cb-family-pills", ".cb-collection-bar"]) {
     assert(cssText.includes(token), `TextureStudio.css missing required selector ${token}`);
   }
 });
@@ -2577,6 +2581,9 @@ await suite("22. UI & Theme Polish: Material Fullscreen, Bigger Hero, Neutral PB
   assert(!cssText.includes("margin: 0 12px 10px;"), "TextureStudio.css must not wrap .vp-tools-bar or .se-stage-shell in extra boxed margins");
   assert(!cssText.includes("border-radius: 13px;\n    background: #141517;"), "TextureStudio.css must not put an extra rounded card box around .vp-tools-bar");
   assert(!cssText.includes("border-radius: 14px;\n    border: 1px solid rgba(255, 255, 255, 0.09);"), "TextureStudio.css must not put an extra rounded card box around .se-stage-shell");
+  // Inspector headings (.object-heading) across all workspaces must be flat (no card box) and enlarged
+  assert(cssText.includes(".object-heading-copy strong {\n    display: block;\n    font-size: 22px;"), "Inspector .object-heading title must be enlarged to 22px");
+  assert(cssText.includes(".object-heading {\n    margin: 2px 0 12px;") && cssText.includes("background: transparent;\n    border: 0;\n    border-bottom: 1px solid var(--line);"), "Inspector .object-heading must not render inside a card box");
 });
 
 console.log(`\nALL ${results.length} VALIDATION SUITES PASSED CLEANLY`);

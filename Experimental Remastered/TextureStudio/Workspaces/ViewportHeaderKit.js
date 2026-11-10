@@ -14,7 +14,7 @@ export function createViewportHeader(parentCol, opts = {}) {
     workspace = "pattern",
     badgeText = "PATTERN",
     eyebrowText = "",
-    draftText = "Unsaved changes",
+    draftText = "",
     iconGlyph = "Pattern",
     canvasName = "Untitled",
     onRename = null,
@@ -40,11 +40,7 @@ export function createViewportHeader(parentCol, opts = {}) {
   const docBar = Construct("div", "viewport-toolbar vp-doc-bar se-header-bar");
   docBar.dataset.workspaceHeader = workspace;
 
-  const eyebrowEl = Construct(
-    "span",
-    "vp-hero-eyebrow",
-    eyebrowText || `${badgeText} / ${resolution} UNITS`,
-  );
+  const eyebrowEl = Construct("span", "vp-hero-eyebrow", eyebrowText || "");
 
   const nameInput = document.createElement("input");
   nameInput.type = "text";
@@ -57,9 +53,18 @@ export function createViewportHeader(parentCol, opts = {}) {
   const sceneIcon = Construct("div", "tp-scene-icon", ConstructGlyph(iconGlyph));
   const docPill = Construct("div", "se-doc-pill", [nameInput, modeBadge]);
 
-  const statusText = Construct("span", "vp-draft-status", draftText);
+  const statusText = Construct("span", "vp-draft-status", draftText || "");
   const statusSep = Construct("span", "vp-hero-meta-sep", "·");
   const metaLine = Construct("div", "vp-hero-meta-line", [eyebrowEl, statusSep, statusText]);
+  const syncMetaVisibility = () => {
+    const hasEye = !!(eyebrowEl.textContent || "").trim();
+    const hasStatus = !!(statusText.textContent || "").trim();
+    eyebrowEl.hidden = !hasEye;
+    statusText.hidden = !hasStatus;
+    statusSep.hidden = !(hasEye && hasStatus);
+    metaLine.hidden = !(hasEye || hasStatus);
+  };
+  syncMetaVisibility();
 
   const heroBlock = Construct("div", "vp-hero-block", [
     metaLine,
@@ -350,10 +355,12 @@ export function createViewportHeader(parentCol, opts = {}) {
       }
     },
     setEyebrow(txt) {
-      eyebrowEl.textContent = txt;
+      eyebrowEl.textContent = txt || "";
+      syncMetaVisibility();
     },
     setDraftStatus(txt) {
-      statusText.textContent = txt;
+      statusText.textContent = txt || "";
+      syncMetaVisibility();
     },
     setResolution(next) {
       const val = Math.max(64, Math.min(4096, Math.round(Number(next) || 512)));

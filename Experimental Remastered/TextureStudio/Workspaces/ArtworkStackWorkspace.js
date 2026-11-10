@@ -350,10 +350,6 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
   const headerUI = createViewportHeader(centerCol, {
     workspace: mode,
     badgeText: isPattern ? "PATTERN" : "STAMP",
-    eyebrowText: isPattern
-      ? `REPEAT TILE / ${state.doc.size || ARTWORK_SIZE} UNITS`
-      : `DECAL STAMP / ${state.doc.size || ARTWORK_SIZE} UNITS`,
-    draftText: "Unsaved changes",
     iconGlyph: isPattern ? "Pattern" : "Stamp",
     canvasName: state.doc.name || (isPattern ? "Untitled pattern" : "Untitled stamp"),
     onRename(next) {
@@ -370,14 +366,8 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
       if (!Number.isFinite(next) || next <= 0) return;
       state.resolution = next;
       headerUI.setResolution(next);
-      headerUI.setEyebrow(
-        isPattern
-          ? `REPEAT TILE / ${state.doc.size || ARTWORK_SIZE} UNITS · ${next}PX`
-          : `DECAL STAMP / ${state.doc.size || ARTWORK_SIZE} UNITS · ${next}PX`,
-      );
       headerUI.setSaveItemMeta("png", `${next}px`);
       headerUI.setSaveItemMeta("pbr", `${Math.min(2048, next)}px`);
-      viewTitle.textContent = `${isPattern ? "VECTOR CANVAS" : "STAMP CANVAS"}   ${next} × ${next}`;
       evaluateAndRender(true);
       Toast(`Resolution set to ${next} × ${next}px`);
     },
@@ -462,13 +452,9 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
   // Interactive SVG Stage Shell
   const stage = Construct("div", "se-stage-shell");
 
-  const stageTopBar = Construct("div", "se-stage-topbar");
-  const viewTitle = Construct(
-    "span",
-    "se-stage-title",
-    `${isPattern ? "VECTOR CANVAS" : "STAMP CANVAS"}   ${state.doc.size || ARTWORK_SIZE} × ${state.doc.size || ARTWORK_SIZE}`,
-  );
   const viewControls = Construct("div", "se-view-controls");
+  viewControls.setAttribute("role", "toolbar");
+  viewControls.setAttribute("aria-label", "Viewport zoom controls");
   const btnZoomOut = Construct("button", null, "−");
   btnZoomOut.type = "button";
   const zoomReadout = Construct("span", "tabular", "100%");
@@ -477,7 +463,6 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
   const btnZoomFit = Construct("button", "se-fit-btn", "Fit");
   btnZoomFit.type = "button";
   viewControls.append(btnZoomOut, zoomReadout, btnZoomIn, btnZoomFit);
-  stageTopBar.append(viewTitle, viewControls);
 
   const seViewport = Construct("div", "se-viewport");
 
@@ -502,14 +487,14 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
   const mainCanvas = document.createElement("canvas");
   pbrWrap.append(mainCanvas);
 
-  seViewport.append(rulerCorner, rulerXWrap, rulerYWrap, svgEl, pbrWrap);
+  seViewport.append(rulerCorner, rulerXWrap, rulerYWrap, svgEl, pbrWrap, viewControls);
 
   const stageFooter = Construct("div", "se-stage-footer");
   const hintText = Construct("span", "se-stage-hints", "Marquee to select · Shift constrain · Alt centred resize · Space pan");
   const selCountEl = Construct("span", "se-sel-count", state.doc.selectedLayerId ? "1 selected" : "0 selected");
   stageFooter.append(hintText, selCountEl);
 
-  stage.append(stageTopBar, seViewport, stageFooter);
+  stage.append(seViewport, stageFooter);
   centerCol.append(stage);
 
   // ----------------------------------------------------------------- RIGHT: LAYER, MASK & MODIFIER STACK
@@ -1062,7 +1047,6 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     }
     headerUI.setName(state.doc.name || (isPattern ? "Pattern" : "Stamp"));
     headerUI.setResolution(state.resolution);
-    viewTitle.textContent = `${isPattern ? "VECTOR CANVAS" : "STAMP VECTOR"} ${state.resolution}×${state.resolution}`;
     if (reRenderLeft) renderLeftColumn();
     Broadcast();
   }
@@ -2198,7 +2182,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
         gp.x = Math.max(-docSize * 0.25, Math.min(docSize * 1.25, snapCoord(pt.x, e.shiftKey ? 0 : state.snapStep)));
         gp.y = Math.max(-docSize * 0.25, Math.min(docSize * 1.25, snapCoord(pt.y, e.shiftKey ? 0 : state.snapStep)));
         pointerInteraction.tgt.setGrad(grad);
-        viewTitle.textContent = `POINT ${pointerInteraction.idx + 1} (${Math.round(gp.x)}, ${Math.round(gp.y)})`;
+        selCountEl.textContent = `Point ${pointerInteraction.idx + 1} (${Math.round(gp.x)}, ${Math.round(gp.y)})`;
         evaluateAndRender(false, { skipPbr: true });
       }
       return;
@@ -2248,7 +2232,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
       const dy = pt.y - pointerInteraction.startY;
       l.transform.x = snapCoord(pointerInteraction.origX + dx, e.shiftKey ? 0 : state.snapStep);
       l.transform.y = snapCoord(pointerInteraction.origY + dy, e.shiftKey ? 0 : state.snapStep);
-      viewTitle.textContent = `${l.name} (${Math.round(l.transform.x)}, ${Math.round(l.transform.y)})`;
+      selCountEl.textContent = `${l.name} (${Math.round(l.transform.x)}, ${Math.round(l.transform.y)})`;
       evaluateAndRender(false, { skipPbr: true });
       Broadcast();
     } else if (pointerInteraction.kind === "resize" && l) {
@@ -2286,7 +2270,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
       l.transform.height = nextH;
       l.transform.x = pointerInteraction.orig.x + shiftX * Math.cos(rotBack) - shiftY * Math.sin(rotBack);
       l.transform.y = pointerInteraction.orig.y + shiftX * Math.sin(rotBack) + shiftY * Math.cos(rotBack);
-      viewTitle.textContent = `${l.name} ${Math.round(nextW)}×${Math.round(nextH)}`;
+      selCountEl.textContent = `${l.name} ${Math.round(nextW)}×${Math.round(nextH)}`;
       evaluateAndRender(false, { skipPbr: true });
       Broadcast();
     } else if (pointerInteraction.kind === "rotate" && l) {
@@ -2296,7 +2280,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
       while (nextRot > 180) nextRot -= 360;
       while (nextRot < -180) nextRot += 360;
       l.transform.rotation = Math.round(nextRot);
-      viewTitle.textContent = `${l.name} ${l.transform.rotation}°`;
+      selCountEl.textContent = `${l.name} ${l.transform.rotation}°`;
       evaluateAndRender(false, { skipPbr: true });
       Broadcast();
     } else if (pointerInteraction.kind === "draw") {

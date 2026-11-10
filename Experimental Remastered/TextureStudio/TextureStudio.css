@@ -635,24 +635,40 @@ svg.glyph { width: 15px; height: 15px; flex: none; stroke: currentColor; fill: n
                                        SUN + FLUID INSPECTOR CARDS & SLIDER PILLS
 ------------------------------------------------------------------------------------------------------------------------*/
 .object-heading {
-    margin: 0 0 10px;
-    padding: 12px 13px;
+    margin: 2px 0 12px;
+    padding: 4px 2px 11px;
     display: flex;
     align-items: center;
-    gap: 11px;
-    border-radius: 18px;
-    background: linear-gradient(135deg, #1d1e21 0%, #16171a 100%);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    gap: 10px;
+    border-radius: 0;
+    background: transparent;
+    border: 0;
+    border-bottom: 1px solid var(--line);
 }
 .object-symbol {
-    width: 34px; height: 34px; flex: none;
-    border-radius: 11px; display: grid; place-items: center;
-    background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.07);
-    color: var(--highlight-bg);
+    display: none;
 }
 .object-heading-copy { flex: 1; min-width: 0; }
-.object-heading-copy strong { display: block; font-size: 15px; font-weight: 400; color: #f4f4f4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.object-heading-copy span { display: block; font-size: 9.5px; letter-spacing: 0.7px; text-transform: uppercase; color: #7e7e7e; }
+.object-heading-copy strong {
+    display: block;
+    font-size: 22px;
+    font-weight: 300;
+    letter-spacing: -0.45px;
+    line-height: 1.2;
+    color: #f4f5f7;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.object-heading-copy span {
+    display: block;
+    margin-top: 3px;
+    font-size: 10px;
+    font-family: var(--mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #7d818a;
+}
 
 .kpi-trio { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; margin-bottom: 10px; }
 .kpi-card { background: #191a1d; border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 15px; padding: 9px 10px; min-width: 0; }
@@ -3997,8 +4013,9 @@ svg.glyph { width: 15px; height: 15px; flex: none; stroke: currentColor; fill: n
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 .mw-strata-title {
-    font-size: 11px;
-    font-weight: 500;
+    font-size: 18px;
+    font-weight: 300;
+    letter-spacing: -0.35px;
     color: #e9ebf1;
 }
 .mw-strata-meta {
@@ -4036,6 +4053,12 @@ svg.glyph { width: 15px; height: 15px; flex: none; stroke: currentColor; fill: n
     align-items: center;
     gap: 6px;
     min-width: 0;
+}
+.vp-hero-meta-line[hidden],
+.vp-hero-eyebrow[hidden],
+.vp-draft-status[hidden],
+.vp-hero-meta-sep[hidden] {
+    display: none !important;
 }
 .vp-hero-meta-sep {
     font-size: 9px;
@@ -4392,33 +4415,52 @@ svg.glyph { width: 15px; height: 15px; flex: none; stroke: currentColor; fill: n
     color: #a4a7b0;
 }
 .se-view-controls {
-    position: static;
-    background: transparent;
-    border: 0;
-    backdrop-filter: none;
-    padding: 0;
-    height: auto;
-    gap: 4px;
+    position: absolute;
+    right: 14px;
+    bottom: 12px;
+    top: auto;
+    z-index: 9;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    height: 30px;
+    padding: 0 5px;
+    border-radius: 999px;
+    background: rgba(14, 15, 18, 0.84);
+    border: 1px solid rgba(255, 255, 255, 0.13);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+}
+.se-view-controls[hidden] {
+    display: none !important;
 }
 .se-view-controls button {
-    min-width: 24px;
+    min-width: 22px;
     height: 22px;
-    border-radius: 6px;
-    background: #1b1c20;
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 0 6px;
+    border-radius: 999px;
+    background: transparent;
+    border: 0;
     color: #cfd2da;
-    font-size: 10.5px;
+    font-size: 11px;
+    cursor: pointer;
+}
+.se-view-controls button:hover {
+    background: rgba(255, 255, 255, 0.09);
+    color: #ffffff;
 }
 .se-view-controls span {
-    min-width: 42px;
+    min-width: 40px;
     height: 22px;
-    border-radius: 6px;
-    background: #1b1c20;
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 999px;
+    background: transparent;
+    border: 0;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    font-size: 10px;
+    font-family: var(--mono);
+    font-size: 10.5px;
     color: #e4e6ed;
 }
 .se-viewport {

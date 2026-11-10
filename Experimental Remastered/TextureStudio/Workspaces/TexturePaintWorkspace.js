@@ -889,8 +889,6 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   const headerUI = createViewportHeader(centerCol, {
     workspace: "paint",
     badgeText: "3D PBR",
-    eyebrowText: `3D + 2D PAINT / ${state.exportResolution} UNITS`,
-    draftText: "Unsaved changes",
     iconGlyph: "Brush",
     canvasName: state.doc.name || "Untitled paint",
     onRename(next) {
@@ -943,10 +941,6 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   });
 
   const stageShell = Construct("div", "se-stage-shell tp-stage-shell");
-  const paintStageTopBar = Construct("div", "se-stage-topbar");
-  const paintStageTitle = Construct("span", "se-stage-title", `PAINT CANVAS   ${state.exportResolution} × ${state.exportResolution}`);
-  const paintStageMeta = Construct("span", "se-stage-meta", `${meshSelect.options?.[meshSelect.selectedIndex]?.text || state.meshId} · Lit PBR`);
-  paintStageTopBar.append(paintStageTitle, paintStageMeta);
 
   const stage = Construct("div", "viewport-stage");
   const splitBox = Construct("div", "viewport-split-2d");
@@ -977,7 +971,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   );
   paintStageFooter.append(paintStageHints, paintToolReadout);
 
-  stageShell.append(paintStageTopBar, stage, paintStageFooter);
+  stageShell.append(stage, paintStageFooter);
   centerCol.append(stageShell);
 
   // RIGHT: LAYER INSPECTOR (Right-click or Q opens Brush & Tool Inspector cleanly without clutter)
@@ -4555,8 +4549,6 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     if (!Number.isFinite(parsed) || parsed <= 0) return;
     state.exportResolution = parsed;
     headerUI.setResolution(parsed);
-    headerUI.setEyebrow(`3D + 2D PAINT / ${parsed} UNITS`);
-    paintStageTitle.textContent = `PAINT CANVAS   ${parsed} × ${parsed}`;
     headerUI.setSaveItemMeta("base", `${parsed}px`);
     headerUI.setSaveItemMeta("normal", `${parsed}px`);
     headerUI.setSaveItemMeta("pbr", `${parsed}px`);
