@@ -1692,6 +1692,7 @@ await suite("16. Unified AlloyStudio Viewport Header ([Canvas; Size; View; Undo/
     assert(header && header.classList.contains("se-header-bar"), `Missing Band 1 .vp-doc-bar (.se-header-bar) in ${ws}`);
     assert(toolsBar && toolsBar.classList.contains("tp-authoring-bar"), `Missing Band 2 .vp-tools-bar (.tp-authoring-bar) in ${ws}`);
     assert.equal(header.querySelectorAll(".se-tool-btn").length, 0, `${ws} Band 1 header must NOT contain tool button clutter`);
+    assert.equal(header.querySelectorAll(".vp-undo-btn, .vp-redo-btn, .se-save-btn, .vp-view-select").length, 0, `${ws} Band 1 header must strictly stay [Title     Resolution]`);
     assert(!globalThis.document.querySelector(".se-canvas-dock"), `${ws} must not render redundant floating .se-canvas-dock over viewport`);
 
     assert(header.querySelector(".tp-scene-icon"), `${ws} Band 1 must render .tp-scene-icon`);
@@ -1705,18 +1706,23 @@ await suite("16. Unified AlloyStudio Viewport Header ([Canvas; Size; View; Undo/
     const toolGroup = toolsBar.querySelector(".tp-tool-group");
     assert(toolGroup && toolGroup.querySelectorAll(".se-tool-btn").length >= 10, `${ws} Band 2 .tp-tool-group capsule must house >=10 vector tools`);
 
+    const resInput = header.querySelector(".vp-res-input");
     const resSelect = header.querySelector(".se-res-select");
-    assert(resSelect, `${ws} Band 1 must include Resolution selector`);
+    assert(resInput && resSelect, `${ws} Band 1 must include editable Resolution input + preset dropdown selector`);
     const resOpts = resSelect.children.map((o) => o.value);
     assert.deepEqual(resOpts, ["512", "1024", "2048", "4096"], `${ws} header Resolution selector must offer 512/1024/2048/4096`);
+    resInput.value = "768";
+    resInput.dispatchEvent({ type: "change" });
+    assert.equal(api.getSnapshot().resolution, 768, `${ws} typing custom resolution in .vp-res-input must update state.resolution`);
     resSelect.value = "2048";
     resSelect.dispatchEvent({ type: "change" });
     assert.equal(api.getSnapshot().resolution, 2048, `${ws} switching Resolution selector to 2048 must update state.resolution`);
+    assert.equal(resInput.value, "2048", `${ws} selecting preset must sync .vp-res-input`);
 
-    // Undo / Redo buttons in Band 1: add a layer -> Undo -> Redo
-    const undoBtn = header.querySelector(".vp-undo-btn");
-    const redoBtn = header.querySelector(".vp-redo-btn");
-    assert(undoBtn && redoBtn, `${ws} Band 1 must expose Undo & Redo buttons`);
+    // Undo / Redo buttons in Band 2: add a layer -> Undo -> Redo
+    const undoBtn = toolsBar.querySelector(".vp-undo-btn");
+    const redoBtn = toolsBar.querySelector(".vp-redo-btn");
+    assert(undoBtn && redoBtn, `${ws} Band 2 must expose Undo & Redo buttons`);
     const layersBefore = api.getSnapshot().layers;
     const dockColPre = globalThis.document.querySelector(".tp-layer-dock");
     dockColPre.querySelector(".tp-add-toggle").click();
@@ -1729,9 +1735,9 @@ await suite("16. Unified AlloyStudio Viewport Header ([Canvas; Size; View; Undo/
     redoBtn.click();
     assert.equal(api.getSnapshot().layers, layersBefore + 1, `${ws} clicking Redo must reapply added layer`);
 
-    const saveBtn = header.querySelector(".se-save-btn");
-    const saveMenu = header.querySelector(".se-save-menu");
-    assert(saveBtn && saveMenu, `${ws} Band 1 must include Save button + dropdown menu`);
+    const saveBtn = toolsBar.querySelector(".se-save-btn");
+    const saveMenu = toolsBar.querySelector(".se-save-menu");
+    assert(saveBtn && saveMenu, `${ws} Band 2 must include Save button + dropdown menu`);
     assert.equal(saveMenu.hidden, true, `${ws} Save menu starts closed`);
     saveBtn.click();
     assert.equal(saveMenu.hidden, false, `Clicking Save button in ${ws} must open Save menu`);
@@ -1773,6 +1779,7 @@ await suite("16. Unified AlloyStudio Viewport Header ([Canvas; Size; View; Undo/
   const paintToolsBar = globalThis.document.querySelector(".vp-tools-bar");
   assert(paintHeader && paintHeader.classList.contains("se-header-bar"), "Texture Paint must render Band 1 .vp-doc-bar (.se-header-bar)");
   assert(paintToolsBar && paintToolsBar.classList.contains("tp-authoring-bar"), "Texture Paint must render Band 2 .vp-tools-bar (.tp-authoring-bar)");
+  assert.equal(paintHeader.querySelectorAll(".vp-undo-btn, .vp-redo-btn, .se-save-btn, .vp-view-select").length, 0, "Texture Paint Band 1 header must strictly stay [Title     Resolution]");
 
   const paintNameInput = paintHeader.querySelector(".vp-name-input");
   assert(paintNameInput && paintHeader.querySelector(".vp-mode-badge"), "Texture Paint Band 1 must display editable canvas name + mode badge");
@@ -1780,8 +1787,12 @@ await suite("16. Unified AlloyStudio Viewport Header ([Canvas; Size; View; Undo/
   paintNameInput.dispatchEvent({ type: "change" });
   assert.equal(api.getSnapshot().name, "Painted Relic", "Texture Paint renaming canvas must update document name");
 
+  const paintResInput = paintHeader.querySelector(".vp-res-input");
   const paintResSel = paintHeader.querySelector(".se-res-select");
-  assert(paintResSel, "Texture Paint Band 1 must include Size selector");
+  assert(paintResInput && paintResSel, "Texture Paint Band 1 must include editable Resolution input + dropdown");
+  paintResInput.value = "768";
+  paintResInput.dispatchEvent({ type: "change" });
+  assert.equal(api.getSnapshot().resolution, 768, "Texture Paint typing custom resolution 768 must update canvas export resolution");
   paintResSel.value = "1024";
   paintResSel.dispatchEvent({ type: "change" });
   assert.equal(api.getSnapshot().resolution, 1024, "Texture Paint changing Size to 1024 must resize canvas resolution");
@@ -1793,9 +1804,9 @@ await suite("16. Unified AlloyStudio Viewport Header ([Canvas; Size; View; Undo/
   paintResSel.value = "512";
   paintResSel.dispatchEvent({ type: "change" });
 
-  const paintSaveBtn = paintHeader.querySelector(".se-save-btn");
-  const paintSaveMenu = paintHeader.querySelector(".se-save-menu");
-  assert(paintSaveBtn && paintSaveMenu, "Texture Paint Band 1 must include Save dropdown menu");
+  const paintSaveBtn = paintToolsBar.querySelector(".se-save-btn");
+  const paintSaveMenu = paintToolsBar.querySelector(".se-save-menu");
+  assert(paintSaveBtn && paintSaveMenu, "Texture Paint Band 2 must include Save dropdown menu");
   paintSaveBtn.click();
   assert.equal(paintSaveMenu.hidden, false, "Texture Paint Save button must open Save menu");
   assert(paintSaveMenu.querySelectorAll(".se-save-item").length >= 5, "Texture Paint Save menu must expose .paint.json Save/Open + Base/Normal/All PBR exports");
@@ -2532,6 +2543,20 @@ await suite("22. UI & Theme Polish: Material Fullscreen, Bigger Hero, Neutral PB
 
   studio.switchWorkspace("bake");
   assert(globalThis.document.querySelector(".viewport-toolbar .select-pill-wrap .pill-caret-divider"), "Baking study selector must use .select-pill-wrap with .pill-caret-divider");
+  assert.equal(studio.getSnapshot().viewMode, "2d", "Baking workspace must default to 2D-only view (not split)");
+  const bakePanes = globalThis.document.querySelectorAll(".viewport-split-pane");
+  assert.equal(bakePanes.length, 2, "Baking workspace holds 3D and 2D panes");
+  assert.equal(bakePanes[0].hidden, true, "Baking workspace 3D pane must be hidden by default");
+  assert.equal(bakePanes[1].hidden, false, "Baking workspace 2D map pane must be visible by default");
+  const bakeViewSel = globalThis.document.querySelector(".vp-bake-view-select");
+  assert(bakeViewSel, "Baking toolbar must offer view mode selector");
+  bakeViewSel.value = "split";
+  bakeViewSel.dispatchEvent({ type: "change" });
+  assert.equal(bakePanes[0].hidden, false, "Switching Baking view mode to split must show 3D pane");
+  assert.equal(bakePanes[1].hidden, false, "Switching Baking view mode to split must keep 2D pane visible");
+  bakeViewSel.value = "2d";
+  bakeViewSel.dispatchEvent({ type: "change" });
+  assert.equal(bakePanes[0].hidden, true, "Switching back to 2d must hide 3D pane again");
 
   // 22c. Neutral PBR Channel Colors (no messy rainbow per-channel colors) & Theme Black Color B / Backgrounds
   assert(PAINT_PBR_CHANNELS.every((ch) => ch.dot === "#9ea2aa"), "All PBR channel specs must use unified neutral theme dot color (#9ea2aa)");

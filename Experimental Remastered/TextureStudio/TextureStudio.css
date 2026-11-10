@@ -334,12 +334,18 @@ svg.glyph { width: 15px; height: 15px; flex: none; stroke: currentColor; fill: n
     gap: 1px;
     background: var(--line);
 }
+.viewport-split-2d.bake-2d-only {
+    grid-template-columns: 1fr;
+}
 .viewport-split-pane {
     position: relative;
     min-width: 0;
     min-height: 0;
     background: #0d0d0f;
     overflow: hidden;
+}
+.viewport-split-pane[hidden] {
+    display: none !important;
 }
 .pane-badge {
     position: absolute;
@@ -4001,20 +4007,36 @@ svg.glyph { width: 15px; height: 15px; flex: none; stroke: currentColor; fill: n
     color: #7d8392;
 }
 
-/* IMAGE 1: Pattern, Stamp & Texture Paint Header + Circular Dock + Olive Stage */
+/* Pattern, Stamp & Texture Paint Header ([ Hero Title     Resolution (editable + dropdown) ]) + Tools Ribbon + Viewport */
 .vp-doc-bar,
 .se-header-bar {
     background: #0f1012;
-    padding: 12px 16px 8px;
+    padding: 14px 16px 10px;
+    min-height: 58px;
     border-bottom: 0;
-    align-items: flex-end;
-    gap: 10px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: nowrap;
+    z-index: 25;
 }
 .vp-hero-block {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 3px;
     min-width: 0;
+    flex: 1 1 auto;
+}
+.vp-hero-meta-line {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+.vp-hero-meta-sep {
+    font-size: 9px;
+    color: #5f646e;
+    flex: none;
 }
 .vp-hero-eyebrow {
     font-family: var(--mono);
@@ -4022,11 +4044,13 @@ svg.glyph { width: 15px; height: 15px; flex: none; stroke: currentColor; fill: n
     letter-spacing: 0.14em;
     text-transform: uppercase;
     color: #7d8473;
+    white-space: nowrap;
 }
 .vp-hero-title-row {
     display: flex;
     align-items: center;
     gap: 8px;
+    min-width: 0;
 }
 .vp-doc-bar .tp-scene-icon,
 .vp-doc-bar .vp-mode-badge {
@@ -4038,38 +4062,125 @@ svg.glyph { width: 15px; height: 15px; flex: none; stroke: currentColor; fill: n
     border-radius: 0;
     padding: 0;
     height: auto;
-    max-width: 340px;
+    width: 100%;
+    max-width: 560px;
+    flex: 1 1 auto;
 }
 .vp-doc-bar .se-doc-pill:focus-within {
     background: transparent;
     border-color: transparent;
 }
 .vp-doc-bar .vp-name-input {
-    font-size: 22px;
+    font-size: 30px;
     font-weight: 300;
-    letter-spacing: -0.45px;
-    color: #e8eae0;
-    width: auto;
-    min-width: 170px;
-    max-width: 300px;
-    height: 28px;
+    letter-spacing: -0.65px;
+    line-height: 1.15;
+    color: #f0f2ea;
+    width: 100%;
+    min-width: 180px;
+    max-width: 540px;
+    height: 36px;
     padding: 0;
 }
 .vp-doc-actions {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     margin-left: auto;
-    flex-wrap: wrap;
+    flex: none;
 }
 .vp-draft-status {
-    font-size: 10.5px;
+    font-size: 10px;
     color: #7a8075;
-    margin-right: 4px;
     white-space: nowrap;
 }
+.vp-res-combo {
+    height: 32px;
+    padding: 0 0 0 11px;
+    gap: 5px;
+    background: var(--bg);
+    border: 1px solid rgba(255, 255, 255, 0.13);
+    border-radius: 999px;
+    overflow: hidden;
+    flex: none;
+}
+.vp-res-combo:focus-within {
+    border-color: rgba(239, 244, 207, 0.42);
+}
+.vp-res-label {
+    font-size: 9px;
+    font-family: var(--mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #7c818a;
+    white-space: nowrap;
+}
+.vp-res-input {
+    width: 50px;
+    background: transparent;
+    border: 0;
+    outline: none;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    font-weight: 500;
+    color: #eff4cf;
+    text-align: right;
+    padding: 0 2px;
+    -moz-appearance: textfield;
+    appearance: textfield;
+}
+.vp-res-input::-webkit-inner-spin-button,
+.vp-res-input::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+.vp-res-unit {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: #7c818a;
+    margin-right: 3px;
+}
+.select-pill-wrap.vp-res-dropdown,
+.vp-res-dropdown {
+    position: relative;
+    width: 30px;
+    height: 100%;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+}
+.select-pill-wrap.vp-res-dropdown:hover,
+.select-pill-wrap.vp-res-dropdown:focus-within {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: transparent;
+}
+.vp-res-dropdown .se-res-select {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: pointer;
+    z-index: 2;
+    padding: 0;
+}
+.vp-res-dropdown .pill-caret-divider {
+    width: 100%;
+    height: 100%;
+    margin-left: 0;
+    border-left: 1px solid rgba(255, 255, 255, 0.11);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #9ea2aa;
+    pointer-events: none;
+}
 
-/* Band 2 Floating Pill Bar with 33px Circular Icon Buttons + More tools */
+/* Band 2 Floating Pill Bar with 33px Circular Icon Buttons + More tools + View/Undo/Save/Actions */
 .vp-tools-bar,
 .tp-authoring-bar {
     margin: 0 12px 10px;
@@ -4080,7 +4191,47 @@ svg.glyph { width: 15px; height: 15px; flex: none; stroke: currentColor; fill: n
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
     overflow: visible;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
+    row-gap: 6px;
+    z-index: 24;
+}
+.vp-tools-bar .se-save-btn {
+    height: 28px;
+    padding: 0 0 0 10px;
+    font-size: 11px;
+    overflow: hidden;
+}
+.vp-tools-bar .se-save-btn .pill-caret-divider {
+    width: 24px;
+    margin-left: 2px;
+}
+.vp-tools-bar .vp-field-chip {
+    height: 28px;
+}
+.vp-tools-bar .vp-mini-icon {
+    width: 28px;
+    height: 28px;
+}
+.vp-tools-bar .vp-tools-tail .pill-btn {
+    height: 28px;
+    padding: 0 10px;
+    font-size: 11px;
+}
+.vp-tools-bar .vp-tools-tail .pill-btn.se-save-btn {
+    padding: 0 0 0 10px;
+}
+.vp-res-combo,
+.vp-res-combo .vp-res-label,
+.vp-res-combo .vp-res-unit {
+    display: inline-flex;
+}
+@media (max-width: 1380px) {
+    .vp-field-chip.vp-res-combo {
+        padding-left: 11px;
+    }
+    .vp-field-chip.vp-res-combo > span {
+        display: inline;
+    }
 }
 .tp-tool-group {
     display: inline-flex;

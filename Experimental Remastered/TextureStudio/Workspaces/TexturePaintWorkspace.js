@@ -4551,16 +4551,17 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   }
 
   function changePaintResolution(nextExportRes) {
-    if (!STUDIO_RESOLUTIONS.includes(nextExportRes)) return;
-    state.exportResolution = nextExportRes;
-    headerUI.setResolution(nextExportRes);
-    headerUI.setEyebrow(`3D + 2D PAINT / ${nextExportRes} UNITS`);
-    paintStageTitle.textContent = `PAINT CANVAS   ${nextExportRes} × ${nextExportRes}`;
-    headerUI.setSaveItemMeta("base", `${nextExportRes}px`);
-    headerUI.setSaveItemMeta("normal", `${nextExportRes}px`);
-    headerUI.setSaveItemMeta("pbr", `${nextExportRes}px`);
+    const parsed = Math.max(64, Math.min(4096, Math.round(Number(nextExportRes) || 0)));
+    if (!Number.isFinite(parsed) || parsed <= 0) return;
+    state.exportResolution = parsed;
+    headerUI.setResolution(parsed);
+    headerUI.setEyebrow(`3D + 2D PAINT / ${parsed} UNITS`);
+    paintStageTitle.textContent = `PAINT CANVAS   ${parsed} × ${parsed}`;
+    headerUI.setSaveItemMeta("base", `${parsed}px`);
+    headerUI.setSaveItemMeta("normal", `${parsed}px`);
+    headerUI.setSaveItemMeta("pbr", `${parsed}px`);
 
-    const nextLiveRes = Math.min(2048, nextExportRes);
+    const nextLiveRes = Math.min(2048, parsed);
     if (nextLiveRes !== res) {
       syncAllLayersToCpuForSaveOrResize();
       clearAllLayerGpuHandles();
@@ -4599,8 +4600,8 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       rebuildInspector();
     }
 
-    const note = nextExportRes > 2048 ? ` (2048px GPU live · ${nextExportRes}px PNG export)` : "";
-    Toast(`Paint canvas set to ${nextExportRes}×${nextExportRes}${note}`);
+    const note = parsed > 2048 ? ` (2048px GPU live · ${parsed}px PNG export)` : "";
+    Toast(`Paint canvas set to ${parsed}×${parsed}${note}`);
   }
 
   function performSavePaintProject() {
@@ -4698,9 +4699,11 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       state.redoStack.length = 0;
       syncUndoButtons();
 
-      const targetExport = STUDIO_RESOLUTIONS.includes(Number(parsed.exportResolution))
-        ? Number(parsed.exportResolution)
-        : (STUDIO_RESOLUTIONS.includes(Number(parsed.resolution)) ? Number(parsed.resolution) : res);
+      const parsedExportRes = Math.round(Number(parsed.exportResolution));
+      const parsedRes = Math.round(Number(parsed.resolution));
+      const targetExport = (Number.isFinite(parsedExportRes) && parsedExportRes >= 64 && parsedExportRes <= 4096)
+        ? parsedExportRes
+        : ((Number.isFinite(parsedRes) && parsedRes >= 64 && parsedRes <= 4096) ? parsedRes : res);
       const nextLiveRes = Math.min(2048, targetExport);
 
       state.doc = docData;

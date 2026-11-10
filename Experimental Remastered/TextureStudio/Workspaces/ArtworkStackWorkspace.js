@@ -366,13 +366,20 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     resolutions: RESOLUTIONS,
     resolution: state.resolution,
     onResolutionChange(val) {
-      if (!RESOLUTIONS.includes(val)) return;
-      state.resolution = val;
-      headerUI.setSaveItemMeta("png", `${val}px`);
-      headerUI.setSaveItemMeta("pbr", `${Math.min(2048, val)}px`);
-      viewTitle.textContent = `${isPattern ? "VECTOR CANVAS" : "STAMP CANVAS"}   ${val} × ${val}`;
+      const next = Math.max(64, Math.min(4096, Math.round(Number(val) || 0)));
+      if (!Number.isFinite(next) || next <= 0) return;
+      state.resolution = next;
+      headerUI.setResolution(next);
+      headerUI.setEyebrow(
+        isPattern
+          ? `REPEAT TILE / ${state.doc.size || ARTWORK_SIZE} UNITS · ${next}PX`
+          : `DECAL STAMP / ${state.doc.size || ARTWORK_SIZE} UNITS · ${next}PX`,
+      );
+      headerUI.setSaveItemMeta("png", `${next}px`);
+      headerUI.setSaveItemMeta("pbr", `${Math.min(2048, next)}px`);
+      viewTitle.textContent = `${isPattern ? "VECTOR CANVAS" : "STAMP CANVAS"}   ${next} × ${next}`;
       evaluateAndRender(true);
-      Toast(`Resolution set to ${val} × ${val}px`);
+      Toast(`Resolution set to ${next} × ${next}px`);
     },
     viewOptions: viewOpts,
     viewValue: state.viewChannel,
@@ -2473,8 +2480,9 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
       if (Array.isArray(docData?.layers) && docData.layers.length) {
         pushUndo();
         state.doc = docData;
-        if (parsed.resolution && RESOLUTIONS.includes(Number(parsed.resolution))) {
-          state.resolution = Number(parsed.resolution);
+        const loadedRes = Math.round(Number(parsed.resolution));
+        if (Number.isFinite(loadedRes) && loadedRes >= 64 && loadedRes <= 4096) {
+          state.resolution = loadedRes;
           headerUI.setResolution(state.resolution);
           headerUI.setSaveItemMeta("png", `${state.resolution}px`);
           headerUI.setSaveItemMeta("pbr", `${Math.min(2048, state.resolution)}px`);

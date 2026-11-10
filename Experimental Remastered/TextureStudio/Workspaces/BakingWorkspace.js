@@ -96,6 +96,7 @@ function renderVolumeSdfSliceToCanvas(canvas, sdf, axis = "z", sliceNorm = 0.5) 
 export function mountBakingWorkspace(root, appBridge) {
   let state = {
     studyId: "teapot",
+    viewMode: "2d", // "2d" (default) | "split" | "3d"
     selectedChannels: new Set(["normalTangent", "ao", "curvature", "height", "volumeSdf"]),
     inspectChannel: "normalTangent",
     resolution: 512,
@@ -165,6 +166,24 @@ export function mountBakingWorkspace(root, appBridge) {
     Construct("span", "pill-caret-divider", ConstructGlyph("ChevronDown", "glyph chev")),
   ]);
 
+  const viewSelect = Construct("select", "se-header-select vp-bake-view-select");
+  viewSelect.setAttribute("aria-label", "Bake Viewport View");
+  viewSelect.title = "Switch Baking Viewport View";
+  for (const [label, val] of [
+    ["2D Map Only", "2d"],
+    ["3D + 2D Split", "split"],
+    ["3D Mesh Only", "3d"],
+  ]) {
+    const o = Construct("option", null, label);
+    o.value = val;
+    viewSelect.append(o);
+  }
+  viewSelect.value = state.viewMode;
+  const viewWrap = Construct("div", "select-pill-wrap vp-compact-select", [
+    viewSelect,
+    Construct("span", "pill-caret-divider", ConstructGlyph("ChevronDown", "glyph chev")),
+  ]);
+
   const lowInp = document.createElement("input");
   lowInp.type = "file"; lowInp.accept = ".obj,.stl"; lowInp.hidden = true;
   const highInp = document.createElement("input");
@@ -188,6 +207,7 @@ export function mountBakingWorkspace(root, appBridge) {
 
   toolbar.append(
     studyWrap,
+    viewWrap,
     btnLoadLow, lowInp,
     btnLoadHigh, highInp,
     gpuPill,
@@ -734,12 +754,45 @@ export function mountBakingWorkspace(root, appBridge) {
     appBridge.sendBakedMapsToPaint(state.bakedSurface.bridgeData);
   });
 
-  const ro = new ResizeObserver(() => {
+  const resizeRenderer3D = () => {
+    if (pane3D.hidden) return;
     const w = pane3D.clientWidth || 400;
     const h = pane3D.clientHeight || 400;
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
+  };
+
+  const syncBakeViewportLayout = () => {
+    const mode = state.viewMode || "2d";
+    if (mode === "2d") {
+      pane3D.hidden = true;
+      pane2D.hidden = false;
+      split.style.gridTemplateColumns = "1fr";
+      split.classList.add("bake-2d-only");
+    } else if (mode === "3d") {
+      pane3D.hidden = false;
+      pane2D.hidden = true;
+      split.style.gridTemplateColumns = "1fr";
+      split.classList.remove("bake-2d-only");
+    } else {
+      pane3D.hidden = false;
+      pane2D.hidden = false;
+      split.style.gridTemplateColumns = "1fr 1fr";
+      split.classList.remove("bake-2d-only");
+    }
+    viewSelect.value = mode;
+    resizeRenderer3D();
+  };
+
+  viewSelect.addEventListener("change", () => {
+    state.viewMode = viewSelect.value || "2d";
+    syncBakeViewportLayout();
+  });
+  syncBakeViewportLayout();
+
+  const ro = new ResizeObserver(() => {
+    resizeRenderer3D();
   });
   ro.observe(stage);
 
@@ -824,8 +877,10 @@ export function mountBakingWorkspace(root, appBridge) {
 
   const tick = () => {
     if (disposed) return;
-    orbit.update();
-    renderer.render(scene, camera);
+    if (!pane3D.hidden) {
+      orbit.update();
+      renderer.render(scene, camera);
+    }
     rafId = requestAnimationFrame(tick);
   };
   rafId = requestAnimationFrame(tick);
@@ -876,7 +931,13 @@ export function mountBakingWorkspace(root, appBridge) {
   return {
     name: "Baking",
     applyAsset,
-    getSnapshot: () => ({ studyId: state.studyId, selected: [...state.selectedChannels], hasSdf: !!state.bakedSdf, hasSurface: !!state.bakedSurface }),
+    getSnapshot: () => ({
+      studyId: state.studyId,
+      viewMode: state.viewMode,
+      selected: [...state.selectedChannels],
+      hasSdf: !!state.bakedSdf,
+      hasSurface: !!state.bakedSurface,
+    }),
     dispose() {
       disposed = true;
       cancelAnimationFrame(rafId);

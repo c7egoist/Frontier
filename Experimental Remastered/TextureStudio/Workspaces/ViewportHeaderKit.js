@@ -1,9 +1,9 @@
 /*==========================================================================================================================================
                                                          VIEWPORTHEADERKIT.JS
 ==========================================================================================================================================*/
-/* Shared two-tier AlloyStudio / Experimental viewport header builder unified across Pattern, Stamp & Texture Paint (matching Image 1):
-   Band 1 (.vp-doc-bar.se-header-bar):  [ Eyebrow + Large Borderless Canvas Name ] ... [ Status ] [ Size ] [ View ] [ Undo/Redo ] [ Save ▾ ] [ CTAs ]
-   Band 2 (.vp-tools-bar.tp-authoring-bar): [ .tp-tool-group: Circular Tool Buttons ] [ More tools ▾ ] ... [ contextual trailing ] */
+/* Shared two-tier AlloyStudio / Experimental viewport header builder unified across Pattern, Stamp & Texture Paint:
+   Band 1 (.vp-doc-bar.se-header-bar):  [ Eyebrow · Status / Appropriately Scaled Canvas Name ] ... [ Editable Resolution + Preset Dropdown ]
+   Band 2 (.vp-tools-bar.tp-authoring-bar): [ .tp-tool-group: Circular Tool Buttons ] [ More tools ▾ ] ... [ View | Undo/Redo | Save ▾ | CTAs ] */
 
 import { Construct, ConstructGlyph } from "../StudioControls.js";
 
@@ -57,8 +57,12 @@ export function createViewportHeader(parentCol, opts = {}) {
   const sceneIcon = Construct("div", "tp-scene-icon", ConstructGlyph(iconGlyph));
   const docPill = Construct("div", "se-doc-pill", [nameInput, modeBadge]);
 
+  const statusText = Construct("span", "vp-draft-status", draftText);
+  const statusSep = Construct("span", "vp-hero-meta-sep", "·");
+  const metaLine = Construct("div", "vp-hero-meta-line", [eyebrowEl, statusSep, statusText]);
+
   const heroBlock = Construct("div", "vp-hero-block", [
-    eyebrowEl,
+    metaLine,
     Construct("div", "vp-hero-title-row", [sceneIcon, docPill]),
   ]);
 
@@ -68,29 +72,65 @@ export function createViewportHeader(parentCol, opts = {}) {
     onRename?.(next);
   });
 
-  const statusText = Construct("span", "vp-draft-status", draftText);
+  // Editable Resolution Input + Preset Dropdown Combo ([ Resolution  [512] px | ▾ ])
+  let committedResolution = Math.max(64, Math.min(4096, Math.round(Number(resolution) || 512)));
+  const resInput = document.createElement("input");
+  resInput.type = "number";
+  resInput.className = "vp-res-input";
+  resInput.min = "64";
+  resInput.max = "4096";
+  resInput.step = "64";
+  resInput.value = String(committedResolution);
+  resInput.setAttribute("aria-label", "Canvas Resolution (px)");
+  resInput.title = "Type custom resolution (64–4096px) or pick from dropdown";
 
-  // Size / Resolution field
   const resSelect = Construct("select", "se-header-select se-res-select");
-  resSelect.setAttribute("aria-label", "Canvas Size");
-  resSelect.title = "Canvas & Export Resolution";
+  resSelect.setAttribute("aria-label", "Canvas Resolution Presets");
+  resSelect.title = "Preset Canvas Resolutions";
   for (const r of resolutions) {
     const opt = Construct("option", null, `${r} × ${r}`);
     opt.value = String(r);
     resSelect.append(opt);
   }
-  resSelect.value = String(resolution);
+  resSelect.value = resolutions.includes(committedResolution) ? String(committedResolution) : "";
+
+  const commitResolution = (nextRaw) => {
+    const parsed = Math.round(Number(nextRaw));
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      resInput.value = String(committedResolution);
+      return;
+    }
+    const clamped = Math.max(64, Math.min(4096, parsed));
+    resInput.value = String(clamped);
+    resSelect.value = resolutions.includes(clamped) ? String(clamped) : "";
+    if (clamped !== committedResolution) {
+      committedResolution = clamped;
+      onResolutionChange?.(clamped);
+    }
+  };
+
+  resInput.addEventListener("change", () => commitResolution(resInput.value));
+  resInput.addEventListener("blur", () => commitResolution(resInput.value));
+  resInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      commitResolution(resInput.value);
+      resInput.blur?.();
+    }
+  });
   resSelect.addEventListener("change", () => {
     const v = Number(resSelect.value);
-    if (Number.isFinite(v) && v > 0) onResolutionChange?.(v);
+    if (Number.isFinite(v) && v > 0) commitResolution(v);
   });
 
-  const sizeWrap = Construct("div", "select-pill-wrap vp-inline-select", [
+  const sizeWrap = Construct("div", "select-pill-wrap vp-res-dropdown", [
     resSelect,
     Construct("span", "pill-caret-divider", ConstructGlyph("ChevronDown", "glyph chev")),
   ]);
-  const sizeField = Construct("label", "vp-field-chip", [
-    Construct("span", null, "Size"),
+  const sizeField = Construct("div", "vp-field-chip vp-res-combo", [
+    Construct("span", "vp-res-label", "Resolution"),
+    resInput,
+    Construct("span", "vp-res-unit", "px"),
     sizeWrap,
   ]);
 
@@ -179,15 +219,8 @@ export function createViewportHeader(parentCol, opts = {}) {
     saveBtn.classList.toggle("active", nextOpen);
   });
 
-  const rightControls = Construct("div", "vp-doc-actions", [
-    statusText,
-    sizeField,
-    viewField,
-    undoBtn,
-    redoBtn,
-    saveWrap,
-    ...primaryActions,
-  ]);
+  // Band 1 contains strictly: [ Document Title (appropriately scaled)      Editable Resolution + Dropdown ]
+  const rightControls = Construct("div", "vp-doc-actions", [sizeField]);
   docBar.append(heroBlock, Construct("div", "toolbar-spacer"), rightControls);
 
   // Band 2: Image 1 Floating Circular Tool Dock ([ circles ] [ More tools ])
@@ -269,10 +302,18 @@ export function createViewportHeader(parentCol, opts = {}) {
     toolsBar.append(moreWrap);
   }
 
-  if (toolTrailing.length) {
+  const tailNodes = [
+    viewField,
+    undoBtn,
+    redoBtn,
+    saveWrap,
+    ...primaryActions,
+    ...toolTrailing,
+  ].filter(Boolean);
+  if (tailNodes.length) {
     const tail = Construct("div", "vp-tools-tail", [
       Construct("span", "vp-bar-divider"),
-      ...toolTrailing,
+      ...tailNodes,
     ]);
     toolsBar.append(tail);
   }
@@ -293,6 +334,7 @@ export function createViewportHeader(parentCol, opts = {}) {
     docPill,
     eyebrowEl,
     statusText,
+    resInput,
     resSelect,
     viewSelect,
     saveBtn,
@@ -314,7 +356,10 @@ export function createViewportHeader(parentCol, opts = {}) {
       statusText.textContent = txt;
     },
     setResolution(next) {
-      resSelect.value = String(next);
+      const val = Math.max(64, Math.min(4096, Math.round(Number(next) || 512)));
+      committedResolution = val;
+      resInput.value = String(val);
+      resSelect.value = resolutions.includes(val) ? String(val) : "";
     },
     setView(val) {
       if (viewSelect) viewSelect.value = val;
