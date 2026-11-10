@@ -943,17 +943,184 @@ svg.glyph { width: 15px; height: 15px; flex: none; stroke: currentColor; fill: n
 .action-button svg.glyph { width: 13px; height: 13px; }
 
 /*------------------------------------------------------------------------------------------------------------------------
-                                                   BAKING MAP CHECKLIST & PROGRESS
+                                                   BAKING MAP TILES & PROGRESS (Alloy Studio Style)
 ------------------------------------------------------------------------------------------------------------------------*/
-.bake-map-row {
-    display: flex; align-items: center; gap: 8px;
-    padding: 7px 10px; border-radius: 13px;
-    background: #16171a; border: 1px solid var(--line);
-    margin-bottom: 5px; cursor: pointer;
+.bk-map-group-title {
+    margin: 10px 0 6px;
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #828690;
 }
-.bake-map-row:hover { background: #1c1d21; }
-.bake-map-row.active { border-color: rgba(239, 244, 207, 0.5); background: #20221c; }
-.bake-map-row input[type="checkbox"] { accent-color: #eff4cf; width: 14px; height: 14px; flex: none; }
+.bk-map-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+.bk-map-tile {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px;
+    border-radius: 13px;
+    border: 1px solid rgba(255, 255, 255, 0.085);
+    background: #141518;
+    text-align: left;
+    cursor: pointer;
+    min-width: 0;
+    transition: border-color 140ms ease, background 140ms ease, transform 140ms ease, box-shadow 140ms ease;
+}
+.bk-map-tile:hover {
+    border-color: rgba(255, 255, 255, 0.19);
+    background: #1a1c20;
+    transform: translateY(-1px);
+}
+.bk-map-tile.is-inspected,
+.bk-map-tile.active {
+    border-color: rgba(239, 244, 207, 0.56);
+    background: #1d1f19;
+    box-shadow: 0 0 0 1px rgba(239, 244, 207, 0.16);
+}
+.bk-map-tile strong {
+    display: block;
+    font-size: 11px;
+    font-weight: 500;
+    color: #eceef4;
+    line-height: 1.25;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.bk-map-tile small {
+    display: block;
+    font-size: 9.5px;
+    color: #848996;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.bk-map-swatch {
+    position: relative;
+    height: 50px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(145deg, #272930, #16171b);
+}
+.bk-map-preview-canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+.bk-swatch-tag {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    color: rgba(244, 246, 250, 0.85);
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: rgba(8, 10, 14, 0.54);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    pointer-events: none;
+}
+.bk-map-check {
+    position: absolute;
+    right: 6px;
+    top: 6px;
+    width: 17px;
+    height: 17px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.28);
+    background: rgba(12, 13, 16, 0.72);
+    color: transparent;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2;
+    cursor: pointer;
+    transition: background 120ms, border-color 120ms, color 120ms;
+}
+.bk-map-check svg.glyph {
+    width: 10px;
+    height: 10px;
+    stroke-width: 2.6;
+}
+.bk-map-check.active {
+    background: var(--highlight-bg);
+    border-color: transparent;
+    color: var(--highlight-ink);
+}
+.bk-swatch-volumeSdf {
+    background:
+        radial-gradient(circle at 38% 42%, rgba(232, 194, 122, 0.85) 0%, rgba(164, 122, 232, 0.55) 38%, rgba(36, 44, 72, 0.9) 72%, #11131a 100%);
+}
+.bk-swatch-normalTangent {
+    background: radial-gradient(circle at 36% 32%, #f1f6ff 0%, #9ab4ff 26%, #6e74ff 62%, #4a45c6 100%);
+}
+.bk-swatch-normalWorld {
+    background: radial-gradient(circle at 36% 32%, #92ffec 0%, #5ea8ff 36%, #9b4dff 72%, #3a235e 100%);
+}
+.bk-swatch-normalObject {
+    background: linear-gradient(135deg, #4b8dff 0%, #b56bff 52%, #ff7ec8 100%);
+}
+.bk-swatch-bentNormal {
+    background: radial-gradient(circle at 44% 38%, #a9ffe9 0%, #649fff 42%, #4d51c9 82%, #292964 100%);
+}
+.bk-swatch-bevelNormal {
+    background:
+        linear-gradient(135deg, rgba(164, 196, 255, 0.65) 0%, transparent 45%),
+        linear-gradient(315deg, rgba(255, 130, 198, 0.55) 0%, transparent 45%),
+        radial-gradient(circle at 50% 50%, #7d86ff 0%, #4b47b8 75%, #272560 100%);
+}
+.bk-swatch-ao {
+    background: radial-gradient(circle at 36% 32%, #f6f6f6 0%, #bababa 42%, #515151 74%, #181818 100%);
+}
+.bk-swatch-secondaryAo {
+    background: radial-gradient(circle at 46% 38%, #dfdfdf 0%, #8b8f98 46%, #34373e 78%, #101114 100%);
+}
+.bk-swatch-curvature {
+    background:
+        linear-gradient(125deg, #272727 28%, #c9c9c9 48%, #e8e8e8 52%, #2b2b2b 72%),
+        radial-gradient(circle at 50% 50%, #868686, #242424);
+}
+.bk-swatch-convexity {
+    background: radial-gradient(circle at 40% 34%, #ffffff 0%, #9b9ea8 36%, #2a2c32 76%, #141518 100%);
+}
+.bk-swatch-concavity {
+    background: radial-gradient(circle at 50% 50%, #141518 0%, #3a3d45 48%, #cfd3dc 82%, #f4f6fa 100%);
+}
+.bk-swatch-thickness {
+    background: radial-gradient(circle at 50% 50%, #f5cfa0 0%, #c46e4e 44%, #3c1e24 84%, #140b0f 100%);
+}
+.bk-swatch-height {
+    background: repeating-radial-gradient(circle at 50% 50%, #e8e8e8 0 2px, #858585 2px 7px, #2b2b2b 7px 12px);
+}
+.bk-swatch-topDust {
+    background: linear-gradient(180deg, #f3e4c5 0%, #b5ab94 34%, #3e3a32 64%, #181715 100%);
+}
+.bk-swatch-uvIslandId {
+    background: conic-gradient(from 40deg, #f68d5f 0 25%, #65d2a8 25% 50%, #6d9bff 50% 75%, #e6c665 75% 100%);
+}
+.bk-swatch-partId {
+    background: linear-gradient(120deg, #74a9ff 0 33%, #ef84c8 33% 66%, #88e6b4 66% 100%);
+}
+.bk-swatch-position {
+    background: linear-gradient(135deg, #ef4444 0%, #22c55e 52%, #3b82f6 100%);
+}
+.bk-swatch-wireframe {
+    background:
+        repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.22) 0 1px, transparent 1px 12px),
+        repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.22) 0 1px, transparent 1px 12px),
+        #16181c;
+}
 .bake-progress-track {
     width: 100%; height: 7px; border-radius: 999px; background: #0a0a0b;
     border: 1px solid var(--line); overflow: hidden; margin: 8px 0;
@@ -1162,14 +1329,14 @@ svg.glyph { width: 15px; height: 15px; flex: none; stroke: currentColor; fill: n
 }
 
 .cb-head {
-    height: 27px;
+    height: 36px;
     flex: none;
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 0 12px;
+    gap: 12px;
+    padding: 0 14px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-    background: rgba(18, 20, 24, 0.92);
+    background: rgba(18, 20, 24, 0.94);
     overflow-x: auto;
     scrollbar-width: none;
 }
@@ -1307,18 +1474,23 @@ svg.glyph { width: 15px; height: 15px; flex: none; stroke: currentColor; fill: n
     border-radius: 999px;
     font-size: 9.5px;
     font-family: var(--mono);
-    border: 1px solid rgba(154, 212, 139, 0.34);
-    background: rgba(154, 212, 139, 0.1);
-    color: #c2ebb5;
+    border: 1px solid rgba(255, 255, 255, 0.11);
+    background: rgba(255, 255, 255, 0.04);
+    color: #8f94a1;
     display: inline-flex;
     align-items: center;
     gap: 4px;
     white-space: nowrap;
     cursor: pointer;
+    transition: border-color 120ms, color 120ms, background 120ms;
+}
+.cb-auto-pill:hover {
+    color: #e4e6ed;
+    border-color: rgba(255, 255, 255, 0.22);
 }
 .cb-auto-pill.pinned {
-    border-color: rgba(232, 194, 122, 0.45);
-    background: rgba(232, 194, 122, 0.14);
+    border-color: rgba(232, 194, 122, 0.42);
+    background: rgba(232, 194, 122, 0.12);
     color: #f3d7a1;
 }
 .cb-collapse-btn,
@@ -1539,8 +1711,7 @@ svg.glyph { width: 15px; height: 15px; flex: none; stroke: currentColor; fill: n
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 7px 13px 4px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    padding: 5px 14px 2px;
 }
 .cb-collection-title {
     font-size: 9.5px;
@@ -1770,15 +1941,15 @@ svg.glyph { width: 15px; height: 15px; flex: none; stroke: currentColor; fill: n
 .cb-insp-hero {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    padding: 12px;
-    border-radius: 15px;
-    background: radial-gradient(circle at 50% 34%, rgba(239, 244, 207, 0.08) 0%, rgba(28, 31, 38, 0.85) 56%, #121419 100%);
+    gap: 6px;
+    padding: 10px;
+    border-radius: 14px;
+    background: radial-gradient(circle at 50% 34%, rgba(239, 244, 207, 0.07) 0%, rgba(28, 31, 38, 0.85) 56%, #121419 100%);
     border: 1px solid rgba(255, 255, 255, 0.09);
     flex: none;
 }
 .cb-insp-hero-stage {
-    height: 126px;
+    height: 88px;
     width: 100%;
     display: flex;
     align-items: center;
@@ -1786,14 +1957,14 @@ svg.glyph { width: 15px; height: 15px; flex: none; stroke: currentColor; fill: n
     background: transparent;
 }
 .cb-insp-hero-stage .cb-asset-icon {
-    width: 120px;
-    height: 120px;
+    width: 82px;
+    height: 82px;
 }
 .cb-insp-hero-stage .cb-mat-baked-img,
 .cb-insp-hero-stage svg {
-    width: 118px;
-    height: 118px;
-    filter: drop-shadow(0 12px 18px rgba(0, 0, 0, 0.58));
+    width: 82px;
+    height: 82px;
+    filter: drop-shadow(0 10px 15px rgba(0, 0, 0, 0.56));
 }
 .cb-insp-meta {
     flex: 1 1 auto;
@@ -3743,13 +3914,17 @@ svg.glyph { width: 15px; height: 15px; flex: none; stroke: currentColor; fill: n
 .cb-family-pills {
     flex: none;
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
     gap: 5px;
-    padding: 8px 13px 6px;
+    padding: 7px 14px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.055);
     background: rgba(12, 13, 16, 0.85);
 }
+.cb-family-pills::-webkit-scrollbar { display: none; }
 .cb-family-chip {
+    flex: none;
     height: 22px;
     padding: 0 9px;
     border-radius: 999px;
@@ -3954,9 +4129,15 @@ svg.glyph { width: 15px; height: 15px; flex: none; stroke: currentColor; fill: n
 .mw-select-caret svg.glyph { width: 11px; height: 11px; }
 
 /* AlloyStudio Material Inspector [Properties | Layer Stack] Tabs & Strata Pane */
+.mw-inspector-summary {
+    display: flex;
+    flex-direction: column;
+}
 .mw-inspector-tabs {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin: 2px -12px 12px;
+    border-top: 1px solid var(--line);
     border-bottom: 1px solid var(--line);
     background: rgba(15, 16, 19, 0.94);
     flex: none;
@@ -4002,7 +4183,7 @@ svg.glyph { width: 15px; height: 15px; flex: none; stroke: currentColor; fill: n
     display: none !important;
 }
 .mw-layers-pane {
-    padding: 10px 12px 14px;
+    padding: 0;
 }
 .mw-strata-head {
     display: flex;

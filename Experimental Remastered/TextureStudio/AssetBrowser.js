@@ -218,9 +218,9 @@ export function createAssetBrowser(hostOrOpts, maybeBridge) {
     userSpecifiedCategory: false,
     activeWorkspace: "material",
     collapsed: false,
-    heightPx: 326,
+    heightPx: 356,
     inspectorItemId: materialCatalog[0]?.id || null,
-    expandedCats: new Set(["materials", "patterns", "stamps", "meshes"]),
+    expandedCats: new Set(["materials"]),
   };
 
   function getItems(cat = state.activeCategory) {
@@ -272,7 +272,7 @@ export function createAssetBrowser(hostOrOpts, maybeBridge) {
   const autoBadge = Construct("button", "cb-auto-pill");
   autoBadge.type = "button";
   const countBadge = Construct("span", "cb-count-badge", "0");
-  headLeft.append(titleWrap, autoBadge, countBadge);
+  headLeft.append(titleWrap, autoBadge);
 
   const catTabsWrap = Construct("div", "cb-cat-tabs");
   const catDefs = [
@@ -293,7 +293,7 @@ export function createAssetBrowser(hostOrOpts, maybeBridge) {
       state.activeFamily = "All";
       state.activeFilter = null;
       state.userSpecifiedCategory = true;
-      state.expandedCats.add(c.id);
+      state.expandedCats = new Set([c.id]);
       if (state.collapsed) {
         state.collapsed = false;
         applyHeight();
@@ -362,7 +362,7 @@ export function createAssetBrowser(hostOrOpts, maybeBridge) {
     state.activeCategory = WORKSPACE_TO_CATEGORY[state.activeWorkspace] || "materials";
     state.activeFamily = "All";
     state.activeFilter = null;
-    state.expandedCats.add(state.activeCategory);
+    state.expandedCats = new Set([state.activeCategory]);
     render();
   });
 
@@ -841,8 +841,8 @@ export function createAssetBrowser(hostOrOpts, maybeBridge) {
       btn.classList.toggle("active", state.activeCategory === id);
     }
     autoBadge.textContent = state.userSpecifiedCategory
-      ? "Pinned · Reset to Auto"
-      : `Auto: ${state.activeWorkspace}`;
+      ? "Pinned · Reset"
+      : `Auto · ${state.activeWorkspace}`;
     autoBadge.classList.toggle("pinned", state.userSpecifiedCategory);
     renderViewButtons();
     renderTreePane();
@@ -857,7 +857,7 @@ export function createAssetBrowser(hostOrOpts, maybeBridge) {
         state.activeCategory = nextCat;
         state.activeFamily = "All";
         state.activeFilter = null;
-        state.expandedCats.add(nextCat);
+        state.expandedCats = new Set([nextCat]);
       }
     }
     render();
@@ -881,7 +881,7 @@ export function createAssetBrowser(hostOrOpts, maybeBridge) {
       state.activeFamily = "All";
       state.activeFilter = null;
       state.userSpecifiedCategory = userPinned;
-      state.expandedCats.add(catId);
+      state.expandedCats = new Set([catId]);
       render();
     },
     setViewMode(mode) {

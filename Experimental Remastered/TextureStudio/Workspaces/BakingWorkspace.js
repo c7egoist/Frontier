@@ -514,41 +514,88 @@ export function mountBakingWorkspace(root, appBridge) {
     leftInner.append(quick);
 
     let lastGroup = "";
+    let currentGrid = null;
     for (const item of BAKE_MAP_CATALOG) {
       if (item.group !== lastGroup) {
         lastGroup = item.group;
-        const head = Construct("div", "property-label", item.group.toUpperCase());
-        head.style.cssText = "margin-top:8px;font-size:10px;letter-spacing:0.08em;color:#787878;";
+        const head = Construct("h3", "bk-map-group-title", item.group);
         leftInner.append(head);
+        currentGrid = Construct("div", "bk-map-grid");
+        leftInner.append(currentGrid);
       }
       const checked = state.selectedChannels.has(item.id);
       const isInspected = state.inspectChannel === item.id;
-      const isDone = item.isVolume ? !!state.bakedSdf : !!state.bakedSurface?.maps?.[item.id];
+      const buf = !item.isVolume ? state.bakedSurface?.maps?.[item.id] : null;
+      const isDone = item.isVolume ? !!state.bakedSdf : !!buf;
 
-      const cb = document.createElement("input");
-      cb.type = "checkbox";
-      cb.checked = checked;
-      cb.addEventListener("click", (e) => {
+      const swatch = Construct("div", `bk-map-swatch bk-swatch-${item.id}`);
+      if (buf && state.bakedSurface?.res) {
+        const prevCanvas = document.createElement("canvas");
+        const sz = 72;
+        prevCanvas.width = sz;
+        prevCanvas.height = sz;
+        prevCanvas.className = "bk-map-preview-canvas";
+        const pCtx = prevCanvas.getContext?.("2d");
+        if (pCtx && typeof pCtx.putImageData === "function") {
+          const srcRes = state.bakedSurface.res;
+          const tmp = document.createElement("canvas");
+          tmp.width = srcRes;
+          tmp.height = srcRes;
+          const tCtx = tmp.getContext?.("2d");
+          if (tCtx) {
+            tCtx.putImageData(new ImageData(new Uint8ClampedArray(buf), srcRes, srcRes), 0, 0);
+            pCtx.drawImage(tmp, 0, 0, sz, sz);
+          }
+        }
+        swatch.append(prevCanvas);
+      } else if (item.isVolume) {
+        if (state.bakedSdf) {
+          const sdfCanvas = document.createElement("canvas");
+          sdfCanvas.className = "bk-map-preview-canvas";
+          renderVolumeSdfSliceToCanvas(sdfCanvas, state.bakedSdf, state.sdfSliceAxis, state.sdfSlicePos);
+          swatch.append(sdfCanvas);
+        } else {
+          swatch.append(Construct("span", "bk-swatch-tag", "SDF"));
+        }
+      }
+
+      const checkBtn = Construct("button", `bk-map-check${checked ? " active" : ""}`, ConstructGlyph("Check", "glyph"));
+      checkBtn.type = "button";
+      checkBtn.setAttribute("aria-pressed", checked ? "true" : "false");
+      checkBtn.title = checked ? `Exclude ${item.label} from bake` : `Include ${item.label} in bake`;
+      checkBtn.addEventListener("click", (e) => {
         e.stopPropagation();
-        if (cb.checked) state.selectedChannels.add(item.id);
-        else state.selectedChannels.delete(item.id);
+        if (state.selectedChannels.has(item.id)) state.selectedChannels.delete(item.id);
+        else state.selectedChannels.add(item.id);
+        renderLeftColumn();
         Broadcast();
       });
+      swatch.append(checkBtn);
 
-      const info = Construct("div", "stack-row-info", [
-        Construct("span", "stack-row-title", item.label),
-        Construct("span", "stack-row-sub", item.short),
+      const tile = Construct("div", `bk-map-tile${isInspected ? " active is-inspected" : ""}`, [
+        swatch,
+        Construct("strong", null, item.label),
+        Construct("small", null, isDone ? "Ready" : item.short),
       ]);
-
-      const badge = Construct("span", "mask-pill" + (isDone ? " active" : ""), isDone ? "READY" : item.isVolume ? "3D SDF" : "2D");
-      const row = Construct("div", "bake-map-row" + (isInspected ? " active" : ""), [cb, info, badge]);
-      row.addEventListener("click", () => {
+      tile.setAttribute("role", "button");
+      tile.tabIndex = 0;
+      tile.dataset.mapId = item.id;
+      tile.setAttribute("aria-pressed", checked ? "true" : "false");
+      tile.title = `${item.label} — Click to inspect · Top-right check toggles bake output`;
+      const inspectThis = () => {
         state.inspectChannel = item.id;
         updateInspectedMapView();
         renderLeftColumn();
         rebuildInspector();
+      };
+      tile.addEventListener("click", inspectThis);
+      tile.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          inspectThis();
+        }
       });
-      leftInner.append(row);
+      currentGrid.append(tile);
     }
   }
 
@@ -934,6 +981,7 @@ export function mountBakingWorkspace(root, appBridge) {
     getSnapshot: () => ({
       studyId: state.studyId,
       viewMode: state.viewMode,
+      inspectChannel: state.inspectChannel,
       selected: [...state.selectedChannels],
       hasSdf: !!state.bakedSdf,
       hasSurface: !!state.bakedSurface,

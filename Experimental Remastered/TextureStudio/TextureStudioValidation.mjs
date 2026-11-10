@@ -2082,6 +2082,12 @@ await suite("19. Look-Dev Polish: Right-Tabbed Strata, Seated Cloth/Pedestal + G
   assert(cols[0].classList.contains("viewport-column"), "First column in Material Workspace must be the full-bleed viewport (no left panel)");
 
   const rightInspector = cols[1];
+  const summaryHost = rightInspector.querySelector(".mw-inspector-summary");
+  const tabsHost = rightInspector.querySelector(".mw-inspector-tabs");
+  const scrollInner = rightInspector.querySelector(".panel-scroll .panel-scroll-inner");
+  assert(summaryHost && tabsHost && scrollInner, "Material Inspector must expose .mw-inspector-summary above .mw-inspector-tabs");
+  assert(summaryHost.querySelector(".kpi-trio") && summaryHost.querySelector(".object-heading"), "Material Inspector summary must hold .object-heading and .kpi-trio cards");
+  assert(scrollInner.children.indexOf(summaryHost) < scrollInner.children.indexOf(tabsHost), "Material Inspector [Properties | Layer Stack] tabs must sit BELOW the summary KPI card");
   const inspTabs = rightInspector.querySelectorAll(".mw-insp-tab");
   const propTab = inspTabs[0];
   const layersTab = inspTabs[1];
@@ -2563,6 +2569,30 @@ await suite("22. UI & Theme Polish: Material Fullscreen, Bigger Hero, Neutral PB
   assert.equal(bakePanes[0].hidden, false, "Switching back to 3d must keep 3D viewport visible");
   assert.equal(bakePanes[1].hidden, true, "Switching back to 3d must hide 2D pane");
 
+  // Baking Bake Map Targets: Alloy Studio icon tile grid (.bk-map-grid / .bk-map-tile / .bk-map-swatch)
+  const bakeTiles = globalThis.document.querySelectorAll(".bk-map-grid .bk-map-tile");
+  assert.equal(globalThis.document.querySelectorAll(".bake-map-row").length, 0, "Baking targets must not use old text-only .bake-map-row rows");
+  assert(bakeTiles.length === 18, `Baking targets must render all 18 visual .bk-map-tile swatches (found ${bakeTiles.length})`);
+  const aoTile = [...bakeTiles].find((t) => t.dataset.mapId === "ao");
+  const curvTile = [...bakeTiles].find((t) => t.dataset.mapId === "curvature");
+  assert(aoTile?.querySelector(".bk-map-swatch") && aoTile?.querySelector(".bk-map-check"), "Each bake map tile must expose visual .bk-map-swatch and .bk-map-check toggle");
+  curvTile.click();
+  assert.equal(studio.getSnapshot().inspectChannel, "curvature", "Clicking a bake map icon tile must inspect that channel");
+  const findCurvCheck = () =>
+    [...globalThis.document.querySelectorAll(".bk-map-tile")].find((t) => t.dataset.mapId === "curvature")?.querySelector(".bk-map-check");
+  const curvCheck = findCurvCheck();
+  const prevPressed = curvCheck.getAttribute("aria-pressed");
+  curvCheck.click();
+  const nextPressed = findCurvCheck()?.getAttribute("aria-pressed");
+  assert.notEqual(prevPressed, nextPressed, "Clicking .bk-map-check must toggle bake channel inclusion");
+  findCurvCheck().click();
+
+  // Decluttered Asset Browser: compact header without redundant count badge & single-line non-wrapping family pills
+  const drawer = globalThis.document.querySelector(".asset-browser");
+  assert(drawer && !drawer.querySelector(".cb-head .cb-count-badge"), "Asset Browser header must not duplicate count badge (.cb-count-badge)");
+  const assetState = studio.getAssetBrowser();
+  assert(Array.isArray(assetState.expandedCats) && assetState.expandedCats.length === 1, "Asset Browser library tree must start with only active category expanded to avoid vertical clutter");
+
   // 22c. Neutral PBR Channel Colors (no messy rainbow per-channel colors) & Theme Black Color B / Backgrounds
   assert(PAINT_PBR_CHANNELS.every((ch) => ch.dot === "#9ea2aa"), "All PBR channel specs must use unified neutral theme dot color (#9ea2aa)");
   const pg2d = createDefaultPointGradient2D("#eff4cf", "#0b0b0b", 512);
@@ -2584,6 +2614,10 @@ await suite("22. UI & Theme Polish: Material Fullscreen, Bigger Hero, Neutral PB
   // Inspector headings (.object-heading) across all workspaces must be flat (no card box) and enlarged
   assert(cssText.includes(".object-heading-copy strong {\n    display: block;\n    font-size: 22px;"), "Inspector .object-heading title must be enlarged to 22px");
   assert(cssText.includes(".object-heading {\n    margin: 2px 0 12px;") && cssText.includes("background: transparent;\n    border: 0;\n    border-bottom: 1px solid var(--line);"), "Inspector .object-heading must not render inside a card box");
+  assert(cssText.includes(".bk-map-grid") && cssText.includes(".bk-map-tile") && cssText.includes(".bk-map-swatch"), "TextureStudio.css must style Alloy Studio bake map icon swatches");
+  const famRuleStart = cssText.indexOf(".cb-family-pills {");
+  const famRuleBlock = cssText.slice(famRuleStart, cssText.indexOf("}", famRuleStart) + 1);
+  assert(famRuleBlock.includes("flex-wrap: nowrap;"), "Asset Browser .cb-family-pills must stay on a clean single non-wrapping row");
 });
 
 console.log(`\nALL ${results.length} VALIDATION SUITES PASSED CLEANLY`);

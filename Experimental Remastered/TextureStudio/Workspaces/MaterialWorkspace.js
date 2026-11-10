@@ -354,12 +354,12 @@ export function mountMaterialWorkspace(root, appBridge) {
   tabPropsBtn.addEventListener("click", () => setInspectorTab("properties"));
   tabLayersBtn.addEventListener("click", () => setInspectorTab("layers"));
   setInspectorTab("properties");
-  rightCol.append(inspectorTabs);
 
+  const summaryHost = Construct("div", "mw-inspector-summary");
   const rightScroll = Construct("div", "panel-scroll");
-  const rightInner = Construct("div", "panel-scroll-inner");
+  const rightInner = Construct("div", "mw-prop-inner");
   propPane.append(rightInner);
-  const rightHostInner = Construct("div", null, [propPane, layersPane]);
+  const rightHostInner = Construct("div", "panel-scroll-inner", [summaryHost, inspectorTabs, propPane, layersPane]);
   rightScroll.append(rightHostInner);
   rightCol.append(
     rightScroll,
@@ -1329,6 +1329,7 @@ export function mountMaterialWorkspace(root, appBridge) {
   function rebuildInspector() {
     if (inspectorScope) ReleaseScope(inspectorScope);
     inspectorScope = OpenScope();
+    summaryHost.innerHTML = "";
     rightInner.innerHTML = "";
 
     ensureAuthoring(state.params);
@@ -1342,7 +1343,7 @@ export function mountMaterialWorkspace(root, appBridge) {
         layers[0]
       : null;
 
-    rightInner.append(
+    summaryHost.append(
       Construct("div", "object-heading", [
         Construct("div", "object-symbol", ConstructGlyph(isPatternSelected ? "Pattern" : "Material")),
         Construct("div", "object-heading-copy", [
@@ -1364,7 +1365,7 @@ export function mountMaterialWorkspace(root, appBridge) {
       ]),
     );
 
-    MetricTrio(rightInner, [
+    MetricTrio(summaryHost, [
       { Label: "Roughness", Highlight: true, Read: () => ({ value: Number(state.params.roughness ?? 0.3).toFixed(2), sub: "Microfacet" }) },
       { Label: "Metalness", Read: () => ({ value: `${Math.round((state.params.metalness ?? 0) * 100)}%`, sub: "Conductor" }) },
       {
