@@ -1866,4 +1866,118 @@ await suite("16. Unified AlloyStudio Viewport Header ([Canvas; Size; View; Undo/
   gpu16.dispose();
 });
 
+await suite("17. Hard-Surface Decal Stamps, Baked Transparent Material Icons & Floating 3-Pane Asset Browser", async () => {
+  const api = globalThis.window.__frontierTextureStudio;
+  const { renderAnalyticalSpherePixels, getBakedMaterialIcon } = await import("./MaterialIconBaker.js");
+  const fs = await import("node:fs");
+
+  // 17a. Verify all 12 Hard Surface Decal Stamps in StarterCatalogBridge
+  const stamps = listStampStarterCatalog();
+  const hardSurfaceStamps = stamps.filter((s) => s.group === "Hard Surface");
+  assert.equal(hardSurfaceStamps.length, 12, `Expected 12 Hard Surface decal stamps, got ${hardSurfaceStamps.length}`);
+  const expectedHardIds = [
+    "stamp-hs-hex-bolt",
+    "stamp-hs-countersunk-screw",
+    "stamp-hs-access-hatch",
+    "stamp-hs-louver-vent",
+    "stamp-hs-honeycomb-grille",
+    "stamp-hs-cam-latch",
+    "stamp-hs-serial-dataplate",
+    "stamp-hs-hydraulic-port",
+    "stamp-hs-rivet-seam",
+    "stamp-hs-warning-placard",
+    "stamp-hs-gusset-bracket",
+    "stamp-hs-knurled-dial",
+  ];
+  for (const id of expectedHardIds) {
+    const entry = hardSurfaceStamps.find((s) => s.id === id);
+    assert(entry, `Missing Hard Surface decal stamp ${id}`);
+    const doc = loadStarterAsArtworkDocument(entry);
+    assert(doc.layers.length >= 2, `Expected multi-layer hard-surface stack for ${id}`);
+    const svg = getArtworkPreviewSvg(entry, "stamp", 64);
+    assert(svg.includes("<svg") && !svg.includes('width="512" height="512" fill="#'), `Stamp preview ${id} must remain background-free transparent SVG`);
+    const evalOut = evaluateArtworkDocument(doc, 128);
+    assert.equal(evalOut.width, 128);
+  }
+
+  // 17b. Verify Baked Transparent PBR Material Sphere pixels (alpha === 0 at corners, alpha === 255 at center)
+  const testMat = materials.find((m) => m.id === "emerald-pcb-copper-circuit") || materials[0];
+  const spherePx = renderAnalyticalSpherePixels(testMat, 64);
+  assert.equal(spherePx.data.length, 64 * 64 * 4);
+  assert.equal(spherePx.data[3], 0, "Corner pixel (0,0) of baked sphere icon must be 100% transparent (alpha=0)");
+  assert.equal(spherePx.data[(63 * 64 + 63) * 4 + 3], 0, "Bottom-right corner pixel of baked sphere icon must be transparent (alpha=0)");
+  const centerIdx = (32 * 64 + 32) * 4;
+  assert.equal(spherePx.data[centerIdx + 3], 255, "Center pixel of baked sphere icon must be opaque (alpha=255)");
+  assert(spherePx.data[centerIdx] + spherePx.data[centerIdx + 1] + spherePx.data[centerIdx + 2] > 20, "Center pixel must contain shaded RGB output");
+  const bakedUrl = getBakedMaterialIcon(testMat);
+  assert(typeof bakedUrl === "string" && bakedUrl.startsWith("data:image/png"), "getBakedMaterialIcon must return PNG data URL");
+
+  // 17c. Verify Floating 3-Pane Asset Browser Structure, Square No-Box Cards, Grid/List Toggle & Tile Inspector
+  api.switchWorkspace("material");
+  const drawer = globalThis.document.querySelector(".asset-browser");
+  assert(drawer, "Missing .asset-browser element");
+  if (api.getAssetBrowser().userSpecifiedCategory) {
+    drawer.querySelector(".cb-auto-pill")?.click();
+  }
+  assert.equal(api.getAssetBrowser().activeCategory, "materials", "Materials category should be active after switching to Material workspace");
+
+  // Left Pane: TreeView with expandable branches, folder buttons (.cb-family-btn) & attribute quick filters
+  const treePane = drawer.querySelector(".cb-tree-pane");
+  assert(treePane, "Missing left .cb-tree-pane TreeView");
+  assert(treePane.querySelectorAll(".cb-tree-branch").length >= 4, "TreeView must display category branches");
+  assert(treePane.querySelectorAll(".cb-family-btn").length >= 5, "TreeView must render nested category folders");
+  const filterPills = treePane.querySelectorAll(".cb-filter-pill");
+  assert(filterPills.length >= 3, "TreeView must provide Quick Attribute Filters");
+
+  // Center Pane: Grid Cards must have .cb-asset-icon (NO .cb-thumb box) and .cb-card-name
+  assert.equal(drawer.querySelectorAll(".cb-thumb").length, 0, "Grid cards must NOT have thumbnail background boxes (.cb-thumb)");
+  const gridEl = drawer.querySelector(".cb-grid");
+  assert(gridEl, "Asset Browser must open in .cb-grid view mode");
+  const firstMatCard = gridEl.querySelector(".cb-card");
+  assert(firstMatCard && firstMatCard.querySelector(".cb-asset-icon") && firstMatCard.querySelector(".cb-card-name"), "Grid card must render transparent .cb-asset-icon + .cb-card-name");
+  const matImgEl = firstMatCard.querySelector(".cb-mat-baked-img");
+  assert(matImgEl && String(matImgEl.tagName).toLowerCase() === "img", "Material grid card must render baked <img> sphere icon");
+
+  // Toggle List <-> Grid View
+  const viewBtns = [...drawer.querySelectorAll(".cb-view-btn")];
+  const listBtn = viewBtns.find((b) => b.dataset.view === "list");
+  const gridBtn = viewBtns.find((b) => b.dataset.view === "grid");
+  assert(listBtn && gridBtn, "Missing Grid/List view toggle buttons");
+  listBtn.click();
+  assert(drawer.querySelector(".cb-list"), "Clicking List toggle must switch center pane to .cb-list");
+  assert.equal(api.getAssetBrowser().viewMode, "list");
+  gridBtn.click();
+  assert(drawer.querySelector(".cb-grid"), "Clicking Grid toggle must restore .cb-grid");
+  assert.equal(api.getAssetBrowser().viewMode, "grid");
+
+  // Right Pane: MetricTrio-style value tiles (.cb-inspector .cb-insp-tiles -> .cb-insp-prop)
+  const inspTiles = drawer.querySelector(".cb-inspector .cb-insp-tiles");
+  assert(inspTiles, "Asset Inspector must render Material-style .kpi-trio.cb-insp-tiles");
+  const propTiles = inspTiles.querySelectorAll(".cb-insp-prop");
+  assert(propTiles.length >= 4, "Asset Inspector must render >=4 MetricTrio-style value tiles");
+  assert(propTiles[0].className.includes("kpi-card"), "Asset Inspector tiles must share .kpi-card styling");
+  assert(propTiles[0].querySelector(".kpi-label") && propTiles[0].querySelector(".kpi-val") && propTiles[0].querySelector(".kpi-sub"),
+    "Each Asset Inspector tile must render .kpi-label, .kpi-val & .kpi-sub matching Material Inspector");
+
+  // Filter Stamps -> Hard Surface folder via TreeView & inspect a Hard Surface Decal Stamp
+  const stampCatBtn = [...drawer.querySelectorAll(".cb-cat-tab")].find((b) => b.dataset.category === "stamps");
+  assert(stampCatBtn, "Missing stamps category tab");
+  stampCatBtn.click();
+  const hardFolderBtn = [...drawer.querySelectorAll(".cb-family-btn")].find((b) => b.dataset.family === "Hard Surface");
+  assert(hardFolderBtn, "TreeView must include Hard Surface folder under Decal Stamps");
+  hardFolderBtn.click();
+  const visibleStampCards = drawer.querySelectorAll(".cb-grid .cb-card");
+  assert.equal(visibleStampCards.length, 12, `Selecting Hard Surface folder should show 12 stamps, got ${visibleStampCards.length}`);
+  const boltCard = [...visibleStampCards].find((c) => c.dataset.assetId === "stamp-hs-hex-bolt");
+  assert(boltCard, "Hex Bolt stamp card missing from Hard Surface folder");
+  boltCard.click();
+  assert(drawer.querySelector(".cb-insp-title")?.textContent.includes("Hex Bolt & Machined Washer"), "Inspector must display clicked Hard Surface stamp");
+
+  // 17d. Verify CSS Floating Overlay + Square Card rules in TextureStudio.css
+  const cssText = fs.readFileSync(new URL("./TextureStudio.css", import.meta.url), "utf8");
+  assert(cssText.includes("position: fixed;") && cssText.includes(".asset-browser"), "CSS must position .asset-browser as a fixed floating pull-up overlay");
+  assert(cssText.includes("aspect-ratio: 1 / 1;"), "CSS must keep .cb-card 1:1 square");
+  assert(cssText.includes(".cb-asset-icon") && cssText.includes("background: transparent;"), "CSS must keep .cb-asset-icon transparent with no box behind icon");
+});
+
 console.log(`\nALL ${results.length} VALIDATION SUITES PASSED CLEANLY`);

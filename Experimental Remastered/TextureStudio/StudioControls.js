@@ -11,6 +11,8 @@ const ScopeStack = [];
 
 export const GlyphPaths = {
     Grid:       '<rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5"/>',
+    List:       '<path d="M9 6h12M9 12h12M9 18h12"/><circle cx="4.5" cy="6" r="1.4"/><circle cx="4.5" cy="12" r="1.4"/><circle cx="4.5" cy="18" r="1.4"/>',
+    Filter:     '<path d="M3 5h18l-7 8v5l-4 2v-7z"/>',
     Layers:     '<path d="M12 3 3 8l9 5 9-5z"/><path d="M3 12.5l9 5 9-5"/><path d="M3 17l9 5 9-5"/>',
     Folder:     '<path d="M3 7a2 2 0 0 1 2-2h4.2l2 2.2H19a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
     Brush:      '<path d="M18.5 2.5a2.8 2.8 0 0 1 3 3L11.8 15.2l-3.6.6.6-3.6z"/><path d="M6.2 15.4c-1.8 0-3.2 1.4-3.2 3.2 0 .9-.7 1.6-1.5 1.9 1.3.7 3.3.9 4.8.2 1.3-.6 2.1-1.9 2.1-3.3a2.2 2.2 0 0 0-2.2-2z"/>',

@@ -1,23 +1,25 @@
 /*==========================================================================================================================================
-                                                          ASSETBROWSER.JS
+                                                            ASSETBROWSER.JS
 ==========================================================================================================================================*/
-/* Shared Bottom Resizable Asset Browser Drawer for Frontier Texture Studio:
-   - Draggable top notch (.cb-resize) to resize vertically between collapsed 38px bar and expanded grid (up to 62vh)
-   - Automatically selects each workspace's matching asset category unless the user explicitly specifies another category
-   - Drag-and-drop (application/x-frontier-asset) + click/apply onto Material, Pattern, Stamp, Paint, and Baking canvases
-   - Surfaces all 36 African Patterns prominently under Patterns -> African Patterns ★ with crisp inline SVG thumbnails. */
+/* Floating Pull-Up Asset Browser Overlay for Frontier Texture Studio:
+   - Anchored as a bottom pull-up overlay above .status-bar so opening/resizing NEVER shrinks the workspace viewport
+   - 3-Pane architecture:
+       [Left: Hierarchical TreeView Categories / Folders / Attribute Filters]
+       [Center: Grid / List Switchable Assets — 1:1 square cards with NO thumbnail background box, transparent baked icon + name below]
+       [Right: Tile-Based Asset Inspector matching Material Inspector MetricTrio tiles]
+   - Pre-baked transparent 3D PBR Material Sphere PNGs via MaterialIconBaker.js
+   - Workspace-aware automatic category switching unless pinned by user */
 
-import { materials as MATERIAL_CATALOG } from "./Engine/Materials/materials.js";
+import { Construct, ConstructGlyph, Toast } from "./StudioControls.js";
+import { materials } from "./Engine/Materials/materials.js";
+import { getBakedMaterialIcon } from "./MaterialIconBaker.js";
 import {
   listPatternStarterCatalog,
   listStampStarterCatalog,
   getArtworkPreviewSvg,
 } from "./Engine/Patterns/StarterCatalogBridge.js";
-import { PAINT_MESH_LIST } from "./Engine/TexturePaintEngine.js";
-import { BAKE_STUDY_SHAPES } from "./Engine/BakingEngine.js";
-import { Construct, ConstructGlyph, Toast } from "./StudioControls.js";
 
-export const WORKSPACE_ASSET_CATEGORY = {
+const WORKSPACE_TO_CATEGORY = {
   material: "materials",
   pattern: "patterns",
   stamp: "stamps",
@@ -25,304 +27,127 @@ export const WORKSPACE_ASSET_CATEGORY = {
   bake: "meshes",
 };
 
-const BRUSH_TIP_ASSETS = [
-  { id: "round", name: "Soft Round Tip", group: "Natural Tips", tip: "round", color: "#eff4cf", hardness: 0.72 },
-  { id: "chisel", name: "Flat Chisel Tip", group: "Hard Surface", tip: "chisel", color: "#e8c27a", hardness: 0.9 },
-  { id: "chalk", name: "Textured Chalk", group: "Grainy & Dry", tip: "chalk", color: "#d6dce6", hardness: 0.52 },
-  { id: "splatter", name: "Weathering Splatter", group: "Wear & Dirt", tip: "splatter", color: "#b68e5e", hardness: 0.6 },
-  { id: "sponge", name: "Porous Sponge Dab", group: "Grainy & Dry", tip: "sponge", color: "#90b88f", hardness: 0.48 },
-  { id: "tool-erase", name: "Soft Eraser", group: "Utility Tools", tool: "erase", color: "#8e94a0" },
-  { id: "tool-fill", name: "Part / UV Flood Fill", group: "Utility Tools", tool: "fill", color: "#6ea8ff" },
+const MESH_PRESETS = [
+  { id: "teapot", name: "Studio Teapot", family: "Standard Study", desc: "Classic curved bevel & spout normals", topo: "High-Poly Tri", complexity: "6.4k tris", role: "Curvature & AO" },
+  { id: "chamfer", name: "Hard-Surface Bevel", family: "Hard Surface", desc: "Machined chamfer plates & crisp edges", topo: "Bevel Quad/Tri", complexity: "3.2k tris", role: "Edge Wear" },
+  { id: "helmet", name: "Visor Armor Study", family: "Hard Surface", desc: "Compound dome visor & neck flange", topo: "Sub-D Hull", complexity: "8.1k tris", role: "Anisotropic Spec" },
+  { id: "torus", name: "Torus Knot Study", family: "Organic", desc: "Continuous braided curvature study", topo: "Procedural Loop", complexity: "5.8k tris", role: "Thin-Film & Sheen" },
+  { id: "shaderball", name: "Frontier Shader Orb", family: "Standard Study", desc: "Nested cutaway studio orb", topo: "Cutaway Multi", complexity: "7.2k tris", role: "SSS & Clearcoat" },
 ];
 
-function buildBrushTipSvg(item) {
-  const col = item.color || "#eff4cf";
-  if (item.tip === "chisel") {
-    return `<svg viewBox="0 0 64 64"><rect x="14" y="22" width="36" height="20" rx="3" transform="rotate(-24 32 32)" fill="${col}"/></svg>`;
-  }
-  if (item.tip === "chalk") {
-    return `<svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="18" fill="${col}" fill-opacity="0.72"/><circle cx="24" cy="24" r="5" fill="#111317" fill-opacity="0.45"/><circle cx="38" cy="35" r="4" fill="#111317" fill-opacity="0.4"/><circle cx="33" cy="21" r="3" fill="#111317" fill-opacity="0.35"/></svg>`;
-  }
-  if (item.tip === "splatter") {
-    return `<svg viewBox="0 0 64 64"><circle cx="30" cy="33" r="10" fill="${col}"/><circle cx="46" cy="20" r="4.5" fill="${col}"/><circle cx="17" cy="22" r="3.5" fill="${col}"/><circle cx="44" cy="45" r="3" fill="${col}"/><circle cx="20" cy="46" r="2.5" fill="${col}"/><circle cx="36" cy="17" r="2" fill="${col}"/></svg>`;
-  }
-  if (item.tip === "sponge") {
-    return `<svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="17" fill="${col}" fill-opacity="0.55" stroke="${col}" stroke-width="2" stroke-dasharray="3 3"/><circle cx="26" cy="28" r="3.5" fill="#111317"/><circle cx="37" cy="27" r="2.8" fill="#111317"/><circle cx="31" cy="38" r="3.2" fill="#111317"/></svg>`;
-  }
-  if (item.tool === "erase") {
-    return `<svg viewBox="0 0 64 64"><path d="M18 44h28M21 38l16-16 9 9-16 16H21z" fill="none" stroke="${col}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-  }
-  if (item.tool === "fill") {
-    return `<svg viewBox="0 0 64 64"><path d="M16 32l14-14 16 16-14 14z" fill="${col}" fill-opacity="0.75"/><circle cx="46" cy="42" r="5" fill="${col}"/></svg>`;
-  }
-  return `<svg viewBox="0 0 64 64"><defs><radialGradient id="rb"><stop offset="0%" stop-color="${col}"/><stop offset="70%" stop-color="${col}" stop-opacity="0.78"/><stop offset="100%" stop-color="${col}" stop-opacity="0"/></radialGradient></defs><circle cx="32" cy="32" r="21" fill="url(#rb)"/></svg>`;
+const CATEGORY_LABELS = {
+  materials: "Materials",
+  patterns: "Patterns",
+  stamps: "Decal Stamps",
+  meshes: "3D Meshes",
+};
+
+const CATEGORY_FILTERS = {
+  materials: [
+    { id: "metallic", label: "Metallic", test: (it) => (it.raw.metalness ?? 0) >= 0.45 },
+    { id: "clearcoat", label: "Clearcoat", test: (it) => (it.raw.coat ?? 0) >= 0.15 },
+    { id: "emissive", label: "Emissive", test: (it) => (it.raw.emissionStrength ?? 0) > 0.05 },
+    { id: "iridescent", label: "Iridescent", test: (it) => (it.raw.iridescence ?? 0) > 0.05 },
+  ],
+  patterns: [
+    { id: "noise", label: "Tileable Noise", test: (it) => it.id.startsWith("noise-") },
+    { id: "african", label: "African Heritage", test: (it) => it.family === "African Patterns" },
+    { id: "multilayer", label: "Multi-Layer", test: (it) => (it.meta?.layers || 1) >= 2 },
+  ],
+  stamps: [
+    { id: "hardsurface", label: "Hard Surface", test: (it) => it.family === "Hard Surface" },
+    { id: "metallic-finish", label: "Metallic Foil", test: (it) => (it.meta?.finishes || []).includes("foil") },
+    { id: "stencil-text", label: "Stencil Text", test: (it) => Boolean(it.meta?.hasText) },
+  ],
+  meshes: [
+    { id: "hard-surface-mesh", label: "Hard Surface", test: (it) => it.family === "Hard Surface" },
+    { id: "organic-mesh", label: "Organic & Study", test: (it) => it.family !== "Hard Surface" },
+  ],
+};
+
+function makeMatIconSvg(item, size = 64) {
+  const m = item.raw;
+  const col = m.color || "#888";
+  const sec = m.secondaryColor || m.colors?.[0] || "#ffffff";
+  const rough = Math.max(0.06, m.roughness ?? 0.4);
+  const metal = m.metalness ?? 0;
+  const uid = `mat-${String(item.id || "x").replace(/[^a-zA-Z0-9_-]/g, "")}`;
+  const specAlpha = (0.28 + (1 - rough) * 0.55).toFixed(2);
+  const rimAlpha = (0.18 + metal * 0.35).toFixed(2);
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 64 64">
+    <defs>
+      <radialGradient id="${uid}-g" cx="35%" cy="29%" r="72%">
+        <stop offset="0%" stop-color="${sec}" stop-opacity="${specAlpha}"/>
+        <stop offset="28%" stop-color="${col}" stop-opacity="1"/>
+        <stop offset="78%" stop-color="${col}" stop-opacity="0.72"/>
+        <stop offset="100%" stop-color="#07080a" stop-opacity="0.96"/>
+      </radialGradient>
+      <radialGradient id="${uid}-rim" cx="72%" cy="76%" r="55%">
+        <stop offset="0%" stop-color="#9cc6ff" stop-opacity="${rimAlpha}"/>
+        <stop offset="65%" stop-color="#9cc6ff" stop-opacity="0"/>
+      </radialGradient>
+    </defs>
+    <circle cx="32" cy="32" r="28" fill="url(#${uid}-g)"/>
+    <circle cx="32" cy="32" r="28" fill="url(#${uid}-rim)"/>
+    <ellipse cx="23.5" cy="20" rx="${(4 + (1 - rough) * 5).toFixed(1)}" ry="${(2.6 + (1 - rough) * 2.5).toFixed(1)}" transform="rotate(-24 23.5 20)" fill="#ffffff" fill-opacity="${((1 - rough) * 0.45).toFixed(2)}"/>
+  </svg>`;
 }
 
-function buildMeshSvg(id) {
-  if (id === "plane") {
-    const accent = "#8fd4ff";
-    return `<svg viewBox="0 0 64 64"><path d="M12 42L26 18h26L38 42z" fill="${accent}" fill-opacity="0.22" stroke="${accent}" stroke-width="2.2" stroke-linejoin="round"/><path d="M19 30h26M27 18L19 42M41 18L33 42" stroke="${accent}" stroke-opacity="0.55" stroke-width="1.3"/></svg>`;
+function makeMeshIconSvg(meshId, size = 64) {
+  const accent = "#eff4cf";
+  const stroke = "#b7c1cf";
+  if (meshId === "torus") {
+    return `<svg width="${size}" height="${size}" viewBox="0 0 64 64" fill="none"><ellipse cx="32" cy="32" rx="22" ry="12" stroke="${stroke}" stroke-width="4" transform="rotate(-25 32 32)"/><ellipse cx="32" cy="32" rx="22" ry="12" stroke="${accent}" stroke-width="2.5" transform="rotate(28 32 32)"/><circle cx="32" cy="32" r="5.5" stroke="${stroke}" stroke-width="2"/></svg>`;
   }
-  const accent = id === "teapot" ? "#eff4cf" : id === "shaderball" ? "#e8c27a" : id === "torusknot" ? "#9ecfff" : "#a8d8a2";
-  return `<svg viewBox="0 0 64 64"><path d="M32 10l18 10v24L32 54 14 44V20z" fill="${accent}" fill-opacity="0.16" stroke="${accent}" stroke-width="2.2" stroke-linejoin="round"/><path d="M32 32l18-12M32 32v22M32 32L14 20" stroke="${accent}" stroke-width="1.8"/></svg>`;
+  if (meshId === "chamfer") {
+    return `<svg width="${size}" height="${size}" viewBox="0 0 64 64" fill="none"><path d="M18 12h28l6 6v28l-6 6H18l-6-6V18z" fill="rgba(255,255,255,0.06)" stroke="${stroke}" stroke-width="2.6"/><path d="M22 22h20v20H22z" stroke="${accent}" stroke-width="1.8" opacity="0.85"/><path d="M12 18l10 4M52 18l-10 4M12 46l10-4M52 46l-10-4" stroke="${stroke}" stroke-width="1.4" opacity="0.5"/></svg>`;
+  }
+  if (meshId === "helmet") {
+    return `<svg width="${size}" height="${size}" viewBox="0 0 64 64" fill="none"><path d="M16 33c0-10.5 7-18 16-18s16 7.5 16 18v12l-6 4H22l-6-4V33z" fill="rgba(255,255,255,0.06)" stroke="${stroke}" stroke-width="2.4"/><path d="M21 29h22l-3 9H24z" fill="rgba(239,244,207,0.22)" stroke="${accent}" stroke-width="1.8"/></svg>`;
+  }
+  if (meshId === "shaderball") {
+    return `<svg width="${size}" height="${size}" viewBox="0 0 64 64" fill="none"><circle cx="32" cy="32" r="20" fill="rgba(255,255,255,0.06)" stroke="${stroke}" stroke-width="2.4"/><path d="M22 22a14 14 0 0 1 20 0v20a14 14 0 0 1-20 0z" stroke="${accent}" stroke-width="1.6" opacity="0.85"/><ellipse cx="32" cy="32" rx="20" ry="7" stroke="${stroke}" stroke-width="1.4" opacity="0.5"/></svg>`;
+  }
+  return `<svg width="${size}" height="${size}" viewBox="0 0 64 64" fill="none"><path d="M32 11l19 10.5v21L32 53 13 42.5v-21z" fill="rgba(255,255,255,0.06)" stroke="${stroke}" stroke-width="2.4"/><path d="M32 32l19-10.5M32 32v21M32 32L13 21.5" stroke="${accent}" stroke-width="1.8"/></svg>`;
 }
 
-export function createAssetBrowser(mountEl, appBridge) {
-  const patternCatalog = listPatternStarterCatalog();
-  const stampCatalog = listStampStarterCatalog();
-
-  const meshAssets = [];
-  const seenMeshes = new Set();
-  for (const m of BAKE_STUDY_SHAPES) {
-    seenMeshes.add(m.id);
-    meshAssets.push({ id: m.id, name: m.label, group: "Bake & Paint Studies", bakeId: m.id, paintId: PAINT_MESH_LIST.some((p) => p.id === m.id) ? m.id : "shaderball" });
-  }
-  for (const p of PAINT_MESH_LIST) {
-    if (!seenMeshes.has(p.id)) {
-      seenMeshes.add(p.id);
-      meshAssets.push({ id: p.id, name: p.label, group: "Paint Meshes", paintId: p.id, bakeId: "teapot" });
-    }
-  }
-  if (!seenMeshes.has("plane")) {
-    meshAssets.push({ id: "plane", name: "Flat Plane", group: "Look-Dev Meshes", paintId: "shaderball", bakeId: "teapot", description: "96x96 UV planar look-dev swatch card tilted toward key light." });
-  }
-
-  const CATEGORIES = [
-    { id: "materials", label: "Materials", count: MATERIAL_CATALOG.length },
-    { id: "patterns", label: "Patterns", count: patternCatalog.length },
-    { id: "stamps", label: "Stamps", count: stampCatalog.length },
-    { id: "brushes", label: "Brush Tips", count: BRUSH_TIP_ASSETS.length },
-    { id: "meshes", label: "3D Meshes", count: meshAssets.length },
-  ];
-
-  const state = {
-    activeWorkspaceId: "material",
-    activeCategory: "materials",
-    userSpecifiedCategory: false,
-    family: "All",
-    search: "",
-    collapsed: false,
-    heightPx: 248,
-    activeAssetKey: null,
+function summarizeArtworkEntry(entry) {
+  let doc = null;
+  try {
+    doc = typeof entry.build === "function" ? entry.build() : null;
+  } catch {}
+  const layers = doc?.layers || [];
+  const finishes = [...new Set(layers.map((l) => l.surface?.finish).filter(Boolean))];
+  const modifiers = layers.reduce((sum, l) => sum + (l.modifiers?.length || 0), 0);
+  const colors = [...new Set(layers.map((l) => l.shape?.color).filter(Boolean))].slice(0, 5);
+  const hasText = layers.some((l) => l.kind === "text");
+  return {
+    layers: layers.length || 1,
+    finishes,
+    primaryFinish: finishes[0] || "ink",
+    modifiers,
+    colors,
+    hasText,
+    width: doc?.width || 512,
+    height: doc?.height || 512,
   };
+}
 
-  const drawer = Construct("section", "asset-browser");
-  drawer.setAttribute("aria-label", "Asset Browser");
-  drawer.style.height = `${state.heightPx}px`;
+export function createAssetBrowser(hostOrOpts, maybeBridge) {
+  const hostEl = hostOrOpts && typeof hostOrOpts.append === "function" ? hostOrOpts : null;
+  const appBridge = maybeBridge || (!hostEl ? hostOrOpts?.appBridge : null);
+  const onSelectAsset = !hostEl ? hostOrOpts?.onSelectAsset : null;
+  const onWorkspaceRoute = !hostEl ? hostOrOpts?.onWorkspaceRoute : null;
 
-  // Top draggable notch (.cb-resize)
-  const resizeNotch = Construct("div", "cb-resize", document.createElement("i"));
-  resizeNotch.setAttribute("role", "separator");
-  resizeNotch.setAttribute("aria-orientation", "horizontal");
-  resizeNotch.setAttribute("aria-label", "Drag to resize Asset Browser");
-  resizeNotch.setAttribute("tabindex", "0");
-  resizeNotch.title = "Drag up/down to resize · Double-click to collapse/expand";
+  const root = Construct("aside", "asset-browser");
+  root.setAttribute("role", "region");
+  root.setAttribute("aria-label", "Asset Browser");
+  if (hostEl) hostEl.append(root);
 
-  // Header bar
-  const head = Construct("div", "cb-head");
-  const titleEl = Construct("span", "cb-title", [ConstructGlyph("Grid"), Construct("span", null, "Asset Browser")]);
-  const catTabsWrap = Construct("div", "cb-cat-tabs");
-
-  const searchInp = Construct("input", "cb-search");
-  searchInp.type = "search";
-  searchInp.placeholder = "Filter assets (African, gold, denim…)";
-
-  const autoBtn = Construct("button", "cb-auto-pill auto-on", [
-    ConstructGlyph("Pin"),
-    Construct("span", null, "Auto: Material"),
-  ]);
-  autoBtn.type = "button";
-  autoBtn.title = "Automatically switch category when changing workspace (click to reset if manually pinned)";
-
-  const toggleBtn = Construct("button", "cb-toggle-btn", ConstructGlyph("ChevronDown"));
-  toggleBtn.type = "button";
-  toggleBtn.title = "Collapse / Expand Asset Browser";
-
-  const headRight = Construct("div", "cb-head-right", [searchInp, autoBtn, toggleBtn]);
-  head.append(titleEl, catTabsWrap, headRight);
-
-  // Body (Families sidebar + Card Grid + Right-Side Asset Inspector)
-  const body = Construct("div", "cb-body");
-  const familyCol = Construct("div", "cb-families");
-  const gridScroll = Construct("div", "cb-grid-scroll");
-  const gridEl = Construct("div", "cb-grid");
-  gridScroll.append(gridEl);
-  const inspectorCol = Construct("aside", "cb-inspector");
-  inspectorCol.setAttribute("aria-label", "Asset Inspector");
-  body.append(familyCol, gridScroll, inspectorCol);
-
-  drawer.append(resizeNotch, head, body);
-  mountEl.append(drawer);
-
-  // ----------------------------------------------------------------- HEIGHT / COLLAPSE / DRAG NOTCH
-  const MIN_H = 38;
-  const DEFAULT_H = 248;
-  function getMaxHeight() {
-    return Math.max(260, Math.min(540, Math.round(window.innerHeight * 0.62)));
-  }
-
-  function applyDrawerGeometry() {
-    drawer.classList.toggle("collapsed", state.collapsed || state.heightPx <= MIN_H + 2);
-    drawer.style.height = state.collapsed ? `${MIN_H}px` : `${state.heightPx}px`;
-    toggleBtn.innerHTML = "";
-    toggleBtn.append(ConstructGlyph(drawer.classList.contains("collapsed") ? "ChevronUp" : "ChevronDown"));
-  }
-
-  function setDrawerHeight(nextH) {
-    const maxH = getMaxHeight();
-    const clamped = Math.max(MIN_H, Math.min(maxH, Math.round(nextH)));
-    if (clamped <= 58) {
-      state.collapsed = true;
-    } else {
-      state.collapsed = false;
-      state.heightPx = clamped;
-    }
-    applyDrawerGeometry();
-  }
-
-  resizeNotch.addEventListener("pointerdown", (e) => {
-    if (e.button !== 0) return;
-    e.preventDefault();
-    const startY = e.clientY;
-    const startH = drawer.classList.contains("collapsed") ? MIN_H : drawer.getBoundingClientRect().height;
-    drawer.classList.add("resizing");
-    resizeNotch.setPointerCapture?.(e.pointerId);
-
-    const onMove = (ev) => {
-      const deltaY = startY - ev.clientY;
-      const next = Math.max(MIN_H, Math.min(getMaxHeight(), Math.round(startH + deltaY)));
-      if (next <= 56) {
-        state.collapsed = true;
-      } else {
-        state.collapsed = false;
-        state.heightPx = next;
-      }
-      applyDrawerGeometry();
-    };
-    const onEnd = () => {
-      drawer.classList.remove("resizing");
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onEnd);
-      window.removeEventListener("pointercancel", onEnd);
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onEnd);
-    window.addEventListener("pointercancel", onEnd);
-  });
-
-  resizeNotch.addEventListener("dblclick", () => {
-    state.collapsed = !state.collapsed;
-    if (!state.collapsed && state.heightPx < 120) state.heightPx = DEFAULT_H;
-    applyDrawerGeometry();
-  });
-
-  resizeNotch.addEventListener("keydown", (e) => {
-    const cur = state.collapsed ? MIN_H : state.heightPx;
-    if (e.key === "ArrowUp") { e.preventDefault(); setDrawerHeight(cur + 28); }
-    else if (e.key === "ArrowDown") { e.preventDefault(); setDrawerHeight(cur - 28); }
-    else if (e.key === "Home") { e.preventDefault(); state.collapsed = true; applyDrawerGeometry(); }
-    else if (e.key === "End") { e.preventDefault(); state.collapsed = false; setDrawerHeight(getMaxHeight()); }
-  });
-
-  toggleBtn.addEventListener("click", () => {
-    state.collapsed = !state.collapsed;
-    if (!state.collapsed && state.heightPx < 120) state.heightPx = DEFAULT_H;
-    applyDrawerGeometry();
-  });
-
-  // ----------------------------------------------------------------- DATA LISTING & RENDERING
-  function getCategoryFamiliesAndItems(cat) {
-    if (cat === "materials") {
-      const fams = ["All", ...new Set(MATERIAL_CATALOG.map((m) => m.category || "Surface"))];
-      const items = MATERIAL_CATALOG.map((m) => ({
-        assetKind: "material",
-        key: `mat:${m.id}`,
-        id: m.id,
-        name: m.name,
-        family: m.category || "Surface",
-        sub: `${Math.round((m.roughness ?? 0.5) * 100)}% R · ${Math.round((m.metalness ?? 0) * 100)}% M`,
-        raw: m,
-      }));
-      return { families: fams, items };
-    }
-    if (cat === "patterns") {
-      const all = patternCatalog;
-      const counts = new Map();
-      for (const p of all) {
-        const fam = p.group || "Archive";
-        counts.set(fam, (counts.get(fam) || 0) + 1);
-      }
-      // Prioritize Candy & Confectionery, African Patterns & Noise & Procedural right at the top!
-      const priority = ["Candy & Confectionery", "African Patterns", "Noise & Procedural", "Art Deco & Architectural", "Tech & Hard-Surface", "Geometric designs", "African traditional", "Islamic geometry", "Fabric weaves", "Stitch patterns", "Originals"];
-      const rest = [...counts.keys()].filter((k) => !priority.includes(k)).sort();
-      const ordered = ["All", ...priority.filter((k) => counts.has(k)), ...rest];
-      const items = all.map((p) => ({
-        assetKind: "pattern",
-        key: `pat:${p.id}`,
-        id: p.id,
-        name: p.name,
-        family: p.group || "Archive",
-        sub: p.subGroup && p.subGroup !== p.group ? p.subGroup : (p.group || "Pattern"),
-        raw: p,
-      }));
-      return { families: ordered, items };
-    }
-    if (cat === "stamps") {
-      const fams = ["All", ...new Set(stampCatalog.map((s) => s.group || "Stamps"))];
-      const items = stampCatalog.map((s) => ({
-        assetKind: "stamp",
-        key: `stp:${s.id}`,
-        id: s.id,
-        name: s.name,
-        family: s.group || "Stamps",
-        sub: s.group || "Decal",
-        raw: s,
-      }));
-      return { families: fams, items };
-    }
-    if (cat === "brushes") {
-      const fams = ["All", ...new Set(BRUSH_TIP_ASSETS.map((b) => b.group))];
-      const items = BRUSH_TIP_ASSETS.map((b) => ({
-        assetKind: "brush",
-        key: `br:${b.id}`,
-        id: b.id,
-        name: b.name,
-        family: b.group,
-        sub: b.tool ? `Tool: ${b.tool}` : `Tip: ${b.tip}`,
-        raw: b,
-      }));
-      return { families: fams, items };
-    }
-    const fams = ["All", ...new Set(meshAssets.map((m) => m.group))];
-    const items = meshAssets.map((m) => ({
-      assetKind: "mesh",
-      key: `mesh:${m.id}`,
-      id: m.id,
-      name: m.name,
-      family: m.group,
-      sub: m.bakeId ? "High/Low Pair" : "Paint Target",
-      raw: m,
-    }));
-    return { families: fams, items };
-  }
-
-  function updateAutoPill() {
-    const expected = WORKSPACE_ASSET_CATEGORY[state.activeWorkspaceId] || "materials";
-    const expectedLabel = CATEGORIES.find((c) => c.id === expected)?.label || expected;
-    autoBtn.innerHTML = "";
-    autoBtn.append(ConstructGlyph("Pin"));
-    if (state.userSpecifiedCategory && state.activeCategory !== expected) {
-      autoBtn.className = "cb-auto-pill pinned";
-      autoBtn.append(Construct("span", null, `Pinned · Reset (${expectedLabel})`));
-    } else {
-      autoBtn.className = "cb-auto-pill auto-on";
-      autoBtn.append(Construct("span", null, `Auto: ${expectedLabel}`));
-    }
-  }
-
-  function buildPayloadForItem(item) {
+  function toPayload(item) {
+    if (!item) return null;
     return {
-      assetKind: item.assetKind,
+      assetKind: item.kind,
       id: item.id,
       name: item.name,
       family: item.family,
@@ -330,420 +155,712 @@ export function createAssetBrowser(mountEl, appBridge) {
     };
   }
 
-  const allItemsByKey = new Map();
-  for (const cat of CATEGORIES) {
-    const { items } = getCategoryFamiliesAndItems(cat.id);
-    for (const it of items) allItemsByKey.set(it.key, it);
-  }
-
-  function findItem(kind, id) {
-    for (const it of allItemsByKey.values()) {
-      if (it.assetKind === kind && (it.id === id || it.name === id)) return it;
-    }
-    return null;
-  }
-
-  function createPreviewVisual(item, sizePx = 64) {
-    if (item.assetKind === "material") {
-      const m = item.raw;
-      const sphere = Construct("div", "cb-mat-sphere");
-      const shine = Math.round((1 - Math.min(0.95, m.roughness ?? 0.5)) * 45 + (m.metalness ?? 0) * 28);
-      sphere.style.background = `radial-gradient(circle at 34% 30%, rgba(255,255,255,${0.14 + shine / 135}) 0%, ${m.color || "#888"} 48%, #101216 100%)`;
-      if ((m.emissionStrength || 0) > 0 && m.emissionColor) {
-        sphere.style.boxShadow = `0 0 14px ${m.emissionColor}66, inset -6px -7px 14px rgba(0,0,0,0.55)`;
+  function dispatchApplyItem(item, opts = {}) {
+    if (!item) return false;
+    if (opts.targetWorkspace === "paint") {
+      if (item.kind === "stamp" && appBridge?.openStampAssetInPaint) {
+        appBridge.openStampAssetInPaint(item.raw);
+        return true;
       }
-      return sphere;
+      if (item.kind === "pattern" && appBridge?.openPatternAssetInPaint) {
+        appBridge.openPatternAssetInPaint(item.raw);
+        return true;
+      }
     }
-    const wrap = document.createElement("div");
-    wrap.style.cssText = "display:flex;align-items:center;justify-content:center;width:100%;height:100%;";
-    if (item.assetKind === "pattern") wrap.innerHTML = getArtworkPreviewSvg(item.raw, "pattern", sizePx);
-    else if (item.assetKind === "stamp") wrap.innerHTML = getArtworkPreviewSvg(item.raw, "stamp", sizePx);
-    else if (item.assetKind === "brush") wrap.innerHTML = buildBrushTipSvg(item.raw);
-    else wrap.innerHTML = buildMeshSvg(item.id);
+    if (opts.targetWorkspace === "material" && item.kind === "pattern" && appBridge?.sendPatternToMaterial) {
+      appBridge.sendPatternToMaterial(item.raw);
+      return true;
+    }
+    if (onSelectAsset) {
+      onSelectAsset(item, opts);
+      return true;
+    }
+    return Boolean(appBridge?.applyAssetToActiveWorkspace?.(toPayload(item)));
+  }
+
+  const patternCatalog = listPatternStarterCatalog().map((p) => ({
+    id: p.id,
+    name: p.name,
+    family: p.group || "Patterns",
+    kind: "pattern",
+    raw: p,
+    meta: summarizeArtworkEntry(p),
+  }));
+  const stampCatalog = listStampStarterCatalog().map((s) => ({
+    id: s.id,
+    name: s.name,
+    family: s.group || "Technical Decals",
+    kind: "stamp",
+    raw: s,
+    meta: summarizeArtworkEntry(s),
+  }));
+  const materialCatalog = materials.map((m) => ({
+    id: m.id,
+    name: m.name,
+    family: m.category || "Materials",
+    kind: "material",
+    raw: m,
+  }));
+  const meshCatalog = MESH_PRESETS.map((m) => ({
+    id: m.id,
+    name: m.name,
+    family: m.family,
+    kind: "mesh",
+    raw: m,
+  }));
+
+  const state = {
+    activeCategory: "materials",
+    activeFamily: "All",
+    activeFilter: null,
+    search: "",
+    viewMode: "grid",
+    userSpecifiedCategory: false,
+    activeWorkspace: "material",
+    collapsed: false,
+    heightPx: 326,
+    inspectorItemId: materialCatalog[0]?.id || null,
+    expandedCats: new Set(["materials", "patterns", "stamps", "meshes"]),
+  };
+
+  function getItems(cat = state.activeCategory) {
+    if (cat === "materials") return materialCatalog;
+    if (cat === "patterns") return patternCatalog;
+    if (cat === "stamps") return stampCatalog;
+    if (cat === "meshes") return meshCatalog;
+    return materialCatalog;
+  }
+
+  function getFamiliesFor(cat) {
+    const items = getItems(cat);
+    const counts = new Map();
+    for (const it of items) {
+      counts.set(it.family, (counts.get(it.family) || 0) + 1);
+    }
+    return [...counts.entries()].map(([name, count]) => ({ name, count }));
+  }
+
+  function getFilteredItems() {
+    const items = getItems();
+    const q = state.search.trim().toLowerCase();
+    const activeFilterDef = (CATEGORY_FILTERS[state.activeCategory] || []).find((f) => f.id === state.activeFilter);
+    return items.filter((it) => {
+      if (state.activeFamily !== "All" && it.family !== state.activeFamily) return false;
+      if (activeFilterDef && !activeFilterDef.test(it)) return false;
+      if (q && !it.name.toLowerCase().includes(q) && !it.family.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }
+
+  function findItemById(id, cat = state.activeCategory) {
+    return getItems(cat).find((it) => it.id === id)
+      || [...materialCatalog, ...patternCatalog, ...stampCatalog, ...meshCatalog].find((it) => it.id === id)
+      || null;
+  }
+
+  // ---- Top Resize Drag Handle ----
+  const resizeNotch = Construct("div", "cb-resize");
+  resizeNotch.title = "Drag to resize Asset Browser overlay · Double-click to collapse/expand";
+  const notchPill = Construct("span", "cb-resize-pill");
+  resizeNotch.append(notchPill);
+
+  // ---- Header Bar ----
+  const header = Construct("div", "cb-head");
+  const headLeft = Construct("div", "cb-head-left");
+  const titleWrap = Construct("div", "cb-title-wrap");
+  titleWrap.append(ConstructGlyph("Folder", "glyph cb-head-glyph"), Construct("span", "cb-title", "Asset Browser"));
+  const autoBadge = Construct("button", "cb-auto-pill");
+  autoBadge.type = "button";
+  const countBadge = Construct("span", "cb-count-badge", "0");
+  headLeft.append(titleWrap, autoBadge, countBadge);
+
+  const catTabsWrap = Construct("div", "cb-cat-tabs");
+  const catDefs = [
+    { id: "materials", label: "Materials", glyph: "Material" },
+    { id: "patterns", label: "Patterns", glyph: "Pattern" },
+    { id: "stamps", label: "Decal Stamps", glyph: "Stamp" },
+    { id: "meshes", label: "3D Meshes", glyph: "Cube" },
+  ];
+  const catBtnMap = new Map();
+  for (const c of catDefs) {
+    const btn = Construct("button", "cb-cat-tab");
+    btn.type = "button";
+    btn.dataset.category = c.id;
+    btn.setAttribute("data-category", c.id);
+    btn.append(ConstructGlyph(c.glyph, "glyph"), Construct("span", null, c.label));
+    btn.addEventListener("click", () => {
+      state.activeCategory = c.id;
+      state.activeFamily = "All";
+      state.activeFilter = null;
+      state.userSpecifiedCategory = true;
+      state.expandedCats.add(c.id);
+      if (state.collapsed) {
+        state.collapsed = false;
+        applyHeight();
+      }
+      render();
+    });
+    catBtnMap.set(c.id, btn);
+    catTabsWrap.append(btn);
+  }
+
+  const headRight = Construct("div", "cb-head-right");
+  const searchWrap = Construct("div", "cb-search-wrap");
+  searchWrap.append(ConstructGlyph("Search", "glyph cb-search-icon"));
+  const searchInp = Construct("input", "cb-search");
+  searchInp.type = "search";
+  searchInp.placeholder = "Filter assets...";
+  searchInp.addEventListener("input", () => {
+    state.search = searchInp.value;
+    renderCenterAndInspector();
+  });
+  searchWrap.append(searchInp);
+
+  // Grid / List View Switcher
+  const viewToggle = Construct("div", "cb-view-toggle");
+  viewToggle.setAttribute("role", "group");
+  viewToggle.setAttribute("aria-label", "Asset View Mode");
+  const gridViewBtn = Construct("button", "cb-view-btn");
+  gridViewBtn.type = "button";
+  gridViewBtn.dataset.view = "grid";
+  gridViewBtn.setAttribute("data-view", "grid");
+  gridViewBtn.title = "Square Grid View";
+  gridViewBtn.append(ConstructGlyph("Grid", "glyph"), Construct("span", null, "Grid"));
+  const listViewBtn = Construct("button", "cb-view-btn");
+  listViewBtn.type = "button";
+  listViewBtn.dataset.view = "list";
+  listViewBtn.setAttribute("data-view", "list");
+  listViewBtn.title = "Compact List View";
+  listViewBtn.append(ConstructGlyph("List", "glyph"), Construct("span", null, "List"));
+
+  gridViewBtn.addEventListener("click", () => {
+    state.viewMode = "grid";
+    renderViewButtons();
+    renderGrid();
+  });
+  listViewBtn.addEventListener("click", () => {
+    state.viewMode = "list";
+    renderViewButtons();
+    renderGrid();
+  });
+  viewToggle.append(gridViewBtn, listViewBtn);
+
+  const collapseBtn = Construct("button", "cb-collapse-btn");
+  collapseBtn.type = "button";
+  collapseBtn.title = "Collapse / Expand Asset Browser Overlay";
+  collapseBtn.append(ConstructGlyph("ChevronDown", "glyph"));
+  collapseBtn.addEventListener("click", () => {
+    state.collapsed = !state.collapsed;
+    applyHeight();
+  });
+
+  headRight.append(searchWrap, viewToggle, collapseBtn);
+  header.append(headLeft, catTabsWrap, headRight);
+
+  autoBadge.addEventListener("click", () => {
+    state.userSpecifiedCategory = false;
+    state.activeCategory = WORKSPACE_TO_CATEGORY[state.activeWorkspace] || "materials";
+    state.activeFamily = "All";
+    state.activeFilter = null;
+    state.expandedCats.add(state.activeCategory);
+    render();
+  });
+
+  // ---- Body: 3 Panes [Left TreeView/Folders/Filters | Center Square Grid/List | Right Tile Inspector] ----
+  const body = Construct("div", "cb-body");
+  const treePane = Construct("aside", "cb-tree-pane");
+  const centerPane = Construct("div", "cb-center-pane");
+  const gridScroll = Construct("div", "cb-grid-scroll");
+  const grid = Construct("div", "cb-grid");
+  gridScroll.append(grid);
+  centerPane.append(gridScroll);
+  const inspectorPane = Construct("aside", "cb-inspector");
+  body.append(treePane, centerPane, inspectorPane);
+  root.append(resizeNotch, header, body);
+
+  const clearNode = (el, ...nodes) => {
+    el.innerHTML = "";
+    if (nodes.length) el.append(...nodes);
+  };
+
+  function applyHeight() {
+    const h = state.collapsed ? 38 : state.heightPx;
+    root.style.height = `${h}px`;
+    root.classList.toggle("collapsed", state.collapsed);
+    clearNode(collapseBtn, ConstructGlyph(state.collapsed ? "ChevronUp" : "ChevronDown", "glyph"));
+    // Intentionally does NOT call window.resize or touch .studio-main so the viewport never resizes.
+  }
+
+  let dragStartY = 0;
+  let dragStartH = 326;
+  let dragging = false;
+  const onPointerMove = (e) => {
+    if (!dragging) return;
+    const dy = dragStartY - e.clientY;
+    const maxH = typeof window !== "undefined" && window.innerHeight ? Math.min(680, Math.floor(window.innerHeight * 0.72)) : 560;
+    state.heightPx = Math.max(196, Math.min(maxH, Math.round(dragStartH + dy)));
+    if (state.collapsed && state.heightPx > 120) state.collapsed = false;
+    applyHeight();
+  };
+  const onPointerUp = () => {
+    if (!dragging) return;
+    dragging = false;
+    root.classList.remove("resizing");
+    window.removeEventListener("pointermove", onPointerMove);
+    window.removeEventListener("pointerup", onPointerUp);
+  };
+  resizeNotch.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    dragging = true;
+    dragStartY = e.clientY;
+    dragStartH = state.collapsed ? 38 : state.heightPx;
+    root.classList.add("resizing");
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+  });
+  resizeNotch.addEventListener("dblclick", () => {
+    state.collapsed = !state.collapsed;
+    applyHeight();
+  });
+
+  function renderViewButtons() {
+    gridViewBtn.classList.toggle("active", state.viewMode === "grid");
+    gridViewBtn.setAttribute("aria-pressed", state.viewMode === "grid" ? "true" : "false");
+    listViewBtn.classList.toggle("active", state.viewMode === "list");
+    listViewBtn.setAttribute("aria-pressed", state.viewMode === "list" ? "true" : "false");
+  }
+
+  function renderTreePane() {
+    clearNode(treePane);
+
+    const treeSectionTitle = Construct("div", "cb-tree-section-head");
+    treeSectionTitle.append(ConstructGlyph("Layers", "glyph"), Construct("span", null, "Library Tree"));
+    treePane.append(treeSectionTitle);
+
+    const treeList = Construct("div", "cb-tree-list");
+    for (const cat of catDefs) {
+      const catItems = getItems(cat.id);
+      const isActiveCat = state.activeCategory === cat.id;
+      const isExpanded = state.expandedCats.has(cat.id);
+
+      const branch = Construct("div", `cb-tree-branch${isActiveCat ? " active-branch" : ""}`);
+      const branchHead = Construct("div", `cb-tree-cat-row${isActiveCat ? " active" : ""}`);
+
+      const caretBtn = Construct("button", "cb-tree-caret");
+      caretBtn.type = "button";
+      caretBtn.title = isExpanded ? "Collapse folder group" : "Expand folder group";
+      caretBtn.append(ConstructGlyph(isExpanded ? "ChevronDown" : "ChevronRight", "glyph"));
+      caretBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (state.expandedCats.has(cat.id)) state.expandedCats.delete(cat.id);
+        else state.expandedCats.add(cat.id);
+        renderTreePane();
+      });
+
+      const catSelectBtn = Construct("button", "cb-tree-cat-btn");
+      catSelectBtn.type = "button";
+      catSelectBtn.append(
+        ConstructGlyph(cat.glyph, "glyph cb-tree-cat-glyph"),
+        Construct("span", "cb-tree-label", cat.label),
+        Construct("span", "cb-tree-count", String(catItems.length)),
+      );
+      catSelectBtn.addEventListener("click", () => {
+        state.activeCategory = cat.id;
+        state.activeFamily = "All";
+        state.activeFilter = null;
+        state.userSpecifiedCategory = true;
+        state.expandedCats.add(cat.id);
+        render();
+      });
+
+      branchHead.append(caretBtn, catSelectBtn);
+      branch.append(branchHead);
+
+      if (isExpanded) {
+        const subTree = Construct("div", "cb-tree-children");
+        const families = getFamiliesFor(cat.id);
+        const allFolders = [{ name: "All", count: catItems.length }, ...families];
+        for (const fam of allFolders) {
+          const isFamActive = isActiveCat && state.activeFamily === fam.name;
+          const famBtn = Construct("button", `cb-family-btn cb-tree-node${isFamActive ? " active" : ""}`);
+          famBtn.type = "button";
+          famBtn.dataset.family = fam.name;
+          famBtn.setAttribute("data-family", fam.name);
+          famBtn.append(
+            ConstructGlyph(fam.name === "All" ? "Layers" : "Folder", "glyph cb-tree-folder-glyph"),
+            Construct("span", "cb-tree-label", fam.name === "All" ? `All ${cat.label}` : fam.name),
+            Construct("span", "cb-tree-count", String(fam.count)),
+          );
+          famBtn.addEventListener("click", () => {
+            state.activeCategory = cat.id;
+            state.activeFamily = fam.name;
+            state.userSpecifiedCategory = cat.id !== (WORKSPACE_TO_CATEGORY[state.activeWorkspace] || "materials")
+              ? true
+              : state.userSpecifiedCategory;
+            render();
+          });
+          subTree.append(famBtn);
+        }
+        branch.append(subTree);
+      }
+      treeList.append(branch);
+    }
+    treePane.append(treeList);
+
+    // Quick Attribute Filters for active category
+    const filterDefs = CATEGORY_FILTERS[state.activeCategory] || [];
+    if (filterDefs.length) {
+      const filterHead = Construct("div", "cb-tree-section-head cb-tree-filter-head");
+      filterHead.append(ConstructGlyph("Filter", "glyph"), Construct("span", null, "Quick Filters"));
+      if (state.activeFilter) {
+        const clearBtn = Construct("button", "cb-filter-clear", "Reset");
+        clearBtn.type = "button";
+        clearBtn.addEventListener("click", () => {
+          state.activeFilter = null;
+          render();
+        });
+        filterHead.append(clearBtn);
+      }
+      treePane.append(filterHead);
+
+      const filterList = Construct("div", "cb-tree-filters");
+      const basePool = getItems().filter((it) => state.activeFamily === "All" || it.family === state.activeFamily);
+      for (const f of filterDefs) {
+        const matchCount = basePool.filter(f.test).length;
+        const active = state.activeFilter === f.id;
+        const pill = Construct("button", `cb-filter-pill${active ? " active" : ""}`);
+        pill.type = "button";
+        pill.dataset.filter = f.id;
+        pill.append(
+          Construct("span", "cb-filter-dot"),
+          Construct("span", "cb-filter-name", f.label),
+          Construct("span", "cb-tree-count", String(matchCount)),
+        );
+        pill.addEventListener("click", () => {
+          state.activeFilter = active ? null : f.id;
+          renderTreePane();
+          renderCenterAndInspector();
+        });
+        filterList.append(pill);
+      }
+      treePane.append(filterList);
+    }
+  }
+
+  function createAssetIconElement(item, size = 64) {
+    const wrap = Construct("div", "cb-asset-icon");
+    if (item.kind === "material") {
+      const img = document.createElement("img");
+      img.className = "cb-mat-baked-img";
+      img.alt = item.name;
+      img.draggable = false;
+      const bakedUrl = getBakedMaterialIcon(item.raw, (upgradedUrl) => {
+        if (img) img.src = upgradedUrl;
+      });
+      if (bakedUrl) {
+        img.src = bakedUrl;
+        wrap.append(img);
+      } else {
+        // Headless fallback (no 2D canvas pixel API): transparent circular inline SVG PBR orb (no box)
+        wrap.innerHTML = makeMatIconSvg(item, size);
+      }
+    } else if (item.kind === "pattern") {
+      wrap.classList.add("cb-icon-pattern");
+      wrap.innerHTML = getArtworkPreviewSvg(item.raw, "pattern", size);
+    } else if (item.kind === "stamp") {
+      wrap.classList.add("cb-icon-stamp");
+      wrap.innerHTML = getArtworkPreviewSvg(item.raw, "stamp", size);
+    } else {
+      wrap.classList.add("cb-icon-mesh");
+      wrap.innerHTML = makeMeshIconSvg(item.id, size);
+    }
     return wrap;
   }
 
-  function collectSwatches(item) {
-    const out = [];
-    const seen = new Set();
-    const push = (hex) => {
-      if (typeof hex !== "string" || !hex.startsWith("#")) return;
-      const norm = hex.toLowerCase();
-      if (seen.has(norm)) return;
-      seen.add(norm);
-      out.push(hex);
-    };
-    if (item.assetKind === "material") {
-      const m = item.raw || {};
-      push(m.color);
-      push(m.secondaryColor);
-      push(m.tertiaryColor);
-      if (Array.isArray(m.colors)) m.colors.slice(0, 4).forEach(push);
-      if ((m.emissionStrength || 0) > 0) push(m.emissionColor);
-    } else if (item.assetKind === "brush") {
-      push(item.raw?.color);
-    }
-    return out.slice(0, 6);
+  function buildInspectorTile(label, value, sub = "", highlight = false) {
+    const tile = Construct("div", `kpi-card cb-insp-prop${highlight ? " highlight" : ""}`);
+    tile.append(
+      Construct("div", "kpi-label", label),
+      Construct("div", "kpi-val", value),
+      Construct("div", "kpi-sub", sub),
+    );
+    return tile;
   }
 
-  function buildInspectorProps(item) {
-    if (item.assetKind === "material") {
-      const m = item.raw || {};
-      const props = [
-        ["Roughness", `${Math.round((m.roughness ?? 0.5) * 100)}%`],
-        ["Metalness", `${Math.round((m.metalness ?? 0) * 100)}%`],
-        ["Clearcoat", `${Math.round((m.coat ?? 0) * 100)}%`],
-        ["IOR", Number(m.ior ?? 1.5).toFixed(2)],
+  function getInspectorTileSpecs(item) {
+    if (item.kind === "material") {
+      const m = item.raw;
+      const rough = Number(m.roughness ?? 0.45);
+      const metal = Number(m.metalness ?? 0);
+      const coat = Number(m.coat ?? 0);
+      const tiles = [
+        { label: "Roughness", val: rough.toFixed(2), sub: rough < 0.25 ? "Glossy Mirror" : rough > 0.7 ? "Matte Diffuse" : "Satin Sheen", highlight: true },
+        { label: "Metalness", val: `${Math.round(metal * 100)}%`, sub: metal >= 0.7 ? "Conductor" : metal > 0.1 ? "Composite" : "Dielectric" },
+        { label: "Clearcoat", val: coat > 0.01 ? coat.toFixed(2) : "None", sub: coat > 0.01 ? `Rough ${(m.coatRoughness ?? 0.1).toFixed(2)}` : `IOR ${(m.ior ?? 1.5).toFixed(2)}` },
+        { label: "Scale", val: `${Number(m.detailScale || 1).toFixed(1)}x`, sub: m.shaderFamily || m.category || "PBR Kernel" },
       ];
-      if ((m.translucency || 0) > 0) props.push(["Translucency", `${Math.round(m.translucency * 100)}%`]);
-      else if ((m.iridescence || 0) > 0) props.push(["Iridescence", `${Math.round(m.iridescence * 100)}%`]);
-      else if ((m.emissionStrength || 0) > 0) props.push(["Emission", `${Number(m.emissionStrength).toFixed(1)} EV`]);
-      else props.push(["Detail Scale", Number(m.detailScale ?? 1).toFixed(1)]);
-      props.push(["Shader Type", `#${m.type ?? 0}`]);
-      return props;
+      if ((m.emissionStrength ?? 0) > 0.01) {
+        tiles.push({ label: "Emission", val: `${Number(m.emissionStrength).toFixed(1)}x`, sub: m.emissionColor || "Self-Lit" });
+      }
+      if ((m.iridescence ?? 0) > 0.01) {
+        tiles.push({ label: "Thin Film", val: Number(m.iridescence).toFixed(2), sub: "Iridescent" });
+      }
+      return tiles;
     }
-    if (item.assetKind === "pattern") {
+    if (item.kind === "pattern" || item.kind === "stamp") {
+      const meta = item.meta || summarizeArtworkEntry(item.raw);
       return [
-        ["Family", item.family],
-        ["Style", item.raw?.subGroup || item.family],
-        ["Format", "Seamless SVG"],
-        ["Channels", "Albedo + PBR"],
+        { label: "Layers", val: String(meta.layers), sub: meta.layers > 1 ? "Vector Stack" : "Single Motif", highlight: true },
+        { label: "Canvas", val: `${meta.width}px`, sub: "Vector Alpha" },
+        { label: "Finish", val: meta.primaryFinish.toUpperCase(), sub: meta.finishes.length > 1 ? `${meta.finishes.length} Finishes` : "Surface Tag" },
+        { label: "Modifiers", val: String(meta.modifiers), sub: meta.hasText ? "Includes Text" : "Procedural" },
       ];
     }
-    if (item.assetKind === "stamp") {
-      return [
-        ["Group", item.family],
-        ["Format", "Alpha Decal"],
-        ["Channel Masks", "4 PBR Maps"],
-        ["Use", "Stamp / Paint"],
-      ];
-    }
-    if (item.assetKind === "brush") {
-      const b = item.raw || {};
-      return [
-        ["Group", item.family],
-        ["Mode", b.tool ? `Tool (${b.tool})` : `Tip (${b.tip})`],
-        ["Hardness", b.hardness !== undefined ? `${Math.round(b.hardness * 100)}%` : "Auto"],
-      ];
-    }
-    const mesh = item.raw || {};
+    const mesh = item.raw;
     return [
-      ["Group", item.family],
-      ["Paint Target", mesh.paintId || "shaderball"],
-      ["Bake Study", mesh.bakeId || "teapot"],
+      { label: "Geometry", val: mesh.name.split(" ")[0], sub: mesh.family, highlight: true },
+      { label: "Topology", val: mesh.topo, sub: mesh.complexity },
+      { label: "Bake Focus", val: mesh.role, sub: "Tangent Space" },
+      { label: "UV Set", val: "0–1", sub: "Packed Studio" },
     ];
   }
 
-  function renderInspector(selectedItem) {
-    inspectorCol.innerHTML = "";
-    inspectorCol.append(
-      Construct("div", "cb-insp-head", [
-        Construct("span", "cb-insp-kicker", "Asset Inspector"),
-        Construct("span", "cb-insp-badge", selectedItem ? selectedItem.family : "None"),
-      ]),
+  function renderInspector() {
+    clearNode(inspectorPane);
+    const inspHead = Construct("div", "cb-insp-head");
+    inspHead.append(
+      Construct("span", "cb-insp-heading", "Asset Inspector"),
+      Construct("span", "cb-insp-cat-pill", CATEGORY_LABELS[state.activeCategory] || "Assets"),
     );
-    if (!selectedItem) {
-      inspectorCol.append(Construct("div", "cb-insp-empty", "Select any asset card to inspect properties and actions."));
+    inspectorPane.append(inspHead);
+
+    const item = findItemById(state.inspectorItemId, state.activeCategory) || getFilteredItems()[0] || getItems()[0];
+    if (!item) {
+      inspectorPane.append(Construct("div", "cb-empty", "Select any asset card to inspect parameters & PBR tiles."));
       return;
     }
+    state.inspectorItemId = item.id;
 
-    const previewBox = Construct("div", "cb-insp-preview");
-    previewBox.append(createPreviewVisual(selectedItem, 64));
+    // Header row: transparent icon + title + folder + short desc
+    const topRow = Construct("div", "cb-insp-top");
+    const previewWrap = Construct("div", "cb-insp-preview-wrap");
+    previewWrap.append(createAssetIconElement(item, 54));
 
-    const kindLabel =
-      selectedItem.assetKind === "material"
-        ? selectedItem.raw?.label || `MATERIAL · ${(selectedItem.family || "").toUpperCase()}`
-        : `${selectedItem.assetKind.toUpperCase()} · ${(selectedItem.sub || "").toUpperCase()}`;
+    const metaCol = Construct("div", "cb-insp-meta");
+    metaCol.append(
+      Construct("div", "cb-insp-title", item.name),
+      Construct("div", "cb-insp-sub", `${item.family} · ${item.kind.toUpperCase()}`),
+    );
+    const desc = item.raw?.description || item.raw?.desc || "";
+    if (desc) metaCol.append(Construct("div", "cb-insp-desc", desc));
+    topRow.append(previewWrap, metaCol);
+    inspectorPane.append(topRow);
 
-    const metaCol = Construct("div", "cb-insp-meta", [
-      Construct("div", "cb-insp-title", selectedItem.name),
-      Construct("div", "cb-insp-sub", kindLabel),
-    ]);
+    // MetricTrio-style Tile Grid (.kpi-trio.cb-insp-tiles -> .kpi-card.cb-insp-prop)
+    const tileSpecs = getInspectorTileSpecs(item);
+    const tilesGrid = Construct("div", "kpi-trio cb-insp-tiles");
+    for (const t of tileSpecs) {
+      tilesGrid.append(buildInspectorTile(t.label, t.val, t.sub, Boolean(t.highlight)));
+    }
+    inspectorPane.append(tilesGrid);
 
-    const swatches = collectSwatches(selectedItem);
-    if (swatches.length) {
-      const swRow = Construct("div", "cb-insp-swatches");
-      for (const hex of swatches) {
-        const sw = Construct("button", "cb-insp-swatch");
-        sw.type = "button";
-        sw.style.background = hex;
-        sw.title = `${hex.toUpperCase()} — Click to copy`;
-        sw.addEventListener("click", () => {
-          try { navigator.clipboard?.writeText(hex.toUpperCase()); } catch {}
-          Toast(`Copied swatch ${hex.toUpperCase()}`);
-        });
-        swRow.append(sw);
+    // Compact palette dots for Materials / Artwork when applicable
+    const swatchHexes = item.kind === "material"
+      ? [item.raw.color, item.raw.secondaryColor, ...(item.raw.colors || [])].filter(Boolean).slice(0, 5)
+      : (item.meta?.colors || []).slice(0, 5);
+    if (swatchHexes.length) {
+      const swatchRow = Construct("div", "cb-insp-swatches");
+      swatchRow.append(Construct("span", "cb-insp-swatch-lbl", "Palette"));
+      for (const hex of swatchHexes) {
+        const dot = Construct("span", "cb-insp-swatch-dot");
+        dot.style.background = hex;
+        dot.title = hex;
+        swatchRow.append(dot);
       }
-      metaCol.append(swRow);
+      inspectorPane.append(swatchRow);
     }
 
-    const hero = Construct("div", "cb-insp-hero", [previewBox, metaCol]);
-    inspectorCol.append(hero);
-
-    const descText =
-      selectedItem.raw?.description ||
-      (selectedItem.assetKind === "material"
-        ? `${selectedItem.name} procedural PBR shader ready for Look-Dev inspection and baking.`
-        : selectedItem.assetKind === "pattern"
-          ? `Tileable procedural vector pattern from ${selectedItem.family}.`
-          : selectedItem.assetKind === "stamp"
-            ? `Vector decal stamp from ${selectedItem.family} with roughness, metalness & height relief.`
-            : selectedItem.assetKind === "brush"
-              ? `Paint brush tip configured for Frontier Texture Paint.`
-              : `3D preview & bake study geometry (${selectedItem.name}).`);
-    inspectorCol.append(Construct("p", "cb-insp-desc", descText));
-
-    const propsGrid = Construct("div", "cb-insp-props");
-    for (const [k, v] of buildInspectorProps(selectedItem)) {
-      propsGrid.append(
-        Construct("div", "cb-insp-prop", [
-          Construct("span", null, k),
-          Construct("strong", null, String(v)),
-        ]),
-      );
-    }
-    inspectorCol.append(propsGrid);
-
-    const actionsRow = Construct("div", "cb-insp-actions");
+    // Action Buttons
+    const actions = Construct("div", "cb-insp-actions");
     const applyBtn = Construct("button", "cb-insp-btn primary", "Apply to Stage");
     applyBtn.type = "button";
     applyBtn.addEventListener("click", () => {
-      appBridge.applyAssetToActiveWorkspace?.(buildPayloadForItem(selectedItem), { source: "inspector" });
+      dispatchApplyItem(item);
+      if (onWorkspaceRoute) {
+        if (item.kind === "material") onWorkspaceRoute("material");
+        else if (item.kind === "pattern") onWorkspaceRoute("pattern");
+        else if (item.kind === "stamp") onWorkspaceRoute("stamp");
+        else if (item.kind === "mesh") onWorkspaceRoute("bake");
+      }
     });
-    actionsRow.append(applyBtn);
+    actions.append(applyBtn);
 
-    if (selectedItem.assetKind === "material") {
+    if (item.kind === "stamp" || item.kind === "pattern") {
       const paintBtn = Construct("button", "cb-insp-btn", "Send to Paint");
       paintBtn.type = "button";
       paintBtn.addEventListener("click", () => {
-        appBridge.sendMaterialToPaint?.(selectedItem.raw);
+        if (onWorkspaceRoute) onWorkspaceRoute("paint");
+        dispatchApplyItem(item, { targetWorkspace: "paint" });
+        Toast(`${item.name} sent to Texture Paint`);
       });
-      actionsRow.append(paintBtn);
-    } else if (selectedItem.assetKind === "pattern") {
-      const matBtn = Construct("button", "cb-insp-btn", "Tile on Material");
-      matBtn.type = "button";
-      matBtn.addEventListener("click", () => {
-        appBridge.openPatternAssetInMaterial?.(selectedItem.raw);
+      actions.append(paintBtn);
+    }
+    if (item.kind === "pattern") {
+      const tileMatBtn = Construct("button", "cb-insp-btn", "Tile on Material");
+      tileMatBtn.type = "button";
+      tileMatBtn.addEventListener("click", () => {
+        if (onWorkspaceRoute) onWorkspaceRoute("material");
+        dispatchApplyItem(item, { targetWorkspace: "material" });
+        Toast(`Tiled ${item.name} onto active Material`);
       });
-      actionsRow.append(matBtn);
-    } else if (selectedItem.assetKind === "stamp") {
-      const paintBtn = Construct("button", "cb-insp-btn", "Use in Paint");
-      paintBtn.type = "button";
-      paintBtn.addEventListener("click", () => {
-        appBridge.openStampAssetInPaint?.(selectedItem.raw);
-      });
-      actionsRow.append(paintBtn);
-    } else if (selectedItem.assetKind === "mesh") {
-      const bakeBtn = Construct("button", "cb-insp-btn", "Open Bake");
-      bakeBtn.type = "button";
-      bakeBtn.addEventListener("click", () => {
-        appBridge.switchWorkspace?.("bake");
-        requestAnimationFrame(() => appBridge.applyAssetToActiveWorkspace?.(buildPayloadForItem(selectedItem)));
-      });
-      actionsRow.append(bakeBtn);
+      actions.append(tileMatBtn);
+    }
+    inspectorPane.append(actions);
+  }
+
+  function renderGrid() {
+    clearNode(grid);
+    grid.className = state.viewMode === "list" ? "cb-list" : "cb-grid";
+
+    const filtered = getFilteredItems();
+    const total = getItems().length;
+    countBadge.textContent = filtered.length === total ? `${total}` : `${filtered.length}/${total}`;
+
+    const visible = filtered.slice(0, 140);
+    if (!visible.length) {
+      grid.append(Construct("div", "cb-empty", "No assets match your current folder, filter, or search."));
+      return;
     }
 
-    inspectorCol.append(actionsRow);
+    for (const item of visible) {
+      const isSelected = state.inspectorItemId === item.id;
+      const isList = state.viewMode === "list";
+      const card = Construct("div", `cb-card${isList ? " cb-card-list" : ""}${isSelected ? " selected active" : ""}`);
+      card.draggable = true;
+      card.dataset.assetKind = item.kind;
+      card.dataset.assetId = item.id;
+      card.setAttribute("data-asset-kind", item.kind);
+      card.setAttribute("data-asset-id", item.id);
+      card.title = `${item.name} (${item.family}) — Click to inspect · Double-click or drag to Stage`;
+
+      const iconEl = createAssetIconElement(item, isList ? 32 : 66);
+      const labelEl = Construct("div", "cb-card-name", item.name);
+
+      if (isList) {
+        const textCol = Construct("div", "cb-list-text");
+        textCol.append(labelEl, Construct("div", "cb-list-sub", item.family));
+        const metricText = item.kind === "material"
+          ? `R ${(item.raw.roughness ?? 0.45).toFixed(2)} · M ${Math.round((item.raw.metalness ?? 0) * 100)}%`
+          : item.kind === "mesh"
+            ? (item.raw.complexity || "Study")
+            : `${item.meta?.layers || 1} ${(item.meta?.layers || 1) === 1 ? "layer" : "layers"}`;
+        const metricEl = Construct("span", "cb-list-metric", metricText);
+        card.append(iconEl, textCol, metricEl);
+      } else {
+        card.append(iconEl, labelEl);
+      }
+
+      card.addEventListener("dragstart", (e) => {
+        if (e.dataTransfer) {
+          e.dataTransfer.effectAllowed = "copy";
+          e.dataTransfer.setData(
+            "application/x-frontier-asset",
+            JSON.stringify({ assetKind: item.kind, id: item.id, name: item.name }),
+          );
+          e.dataTransfer.setData("text/plain", item.name);
+        }
+        card.classList.add("dragging");
+      });
+      card.addEventListener("dragend", () => card.classList.remove("dragging"));
+
+      card.addEventListener("click", () => {
+        state.inspectorItemId = item.id;
+        for (const el of grid.querySelectorAll(".cb-card.selected")) {
+          el.classList.remove("selected");
+          el.classList.remove("active");
+        }
+        card.classList.add("selected");
+        card.classList.add("active");
+        renderInspector();
+      });
+
+      card.addEventListener("dblclick", () => {
+        state.inspectorItemId = item.id;
+        dispatchApplyItem(item);
+        renderInspector();
+        Toast(`Applied ${item.name}`);
+      });
+
+      grid.append(card);
+    }
+  }
+
+  function renderCenterAndInspector() {
+    renderGrid();
+    renderInspector();
   }
 
   function render() {
-    // 1. Category tabs
-    catTabsWrap.innerHTML = "";
-    for (const c of CATEGORIES) {
-      const btn = Construct("button", "cb-cat-tab" + (state.activeCategory === c.id ? " active" : ""), [
-        Construct("span", null, c.label),
-        Construct("span", "cb-count", String(c.count)),
-      ]);
-      btn.type = "button";
-      btn.dataset.category = c.id;
-      btn.addEventListener("click", () => {
-        const expected = WORKSPACE_ASSET_CATEGORY[state.activeWorkspaceId];
-        state.activeCategory = c.id;
-        state.family = "All";
-        state.userSpecifiedCategory = c.id !== expected;
-        if (state.collapsed) {
-          state.collapsed = false;
-          applyDrawerGeometry();
-        }
-        render();
-      });
-      catTabsWrap.append(btn);
+    for (const [id, btn] of catBtnMap.entries()) {
+      btn.classList.toggle("active", state.activeCategory === id);
     }
-    updateAutoPill();
-
-    // 2. Family outliner
-    const { families, items } = getCategoryFamiliesAndItems(state.activeCategory);
-    if (!families.includes(state.family)) state.family = "All";
-
-    const familyCounts = new Map([["All", items.length]]);
-    for (const it of items) familyCounts.set(it.family, (familyCounts.get(it.family) || 0) + 1);
-
-    familyCol.innerHTML = "";
-    for (const fam of families) {
-      const isAfrican = fam === "African Patterns" || fam === "African Motifs";
-      const fb = Construct(
-        "button",
-        "cb-family-btn" + (state.family === fam ? " active" : "") + (isAfrican ? " featured" : ""),
-        [
-          Construct("span", null, isAfrican ? `${fam} ★` : fam),
-          Construct("small", null, String(familyCounts.get(fam) || 0)),
-        ],
-      );
-      fb.type = "button";
-      fb.dataset.family = fam;
-      fb.addEventListener("click", () => {
-        state.family = fam;
-        render();
-      });
-      familyCol.append(fb);
-    }
-
-    // 3. Filtered grid cards
-    const q = state.search.trim().toLowerCase();
-    const filtered = items.filter((it) => {
-      if (state.family !== "All" && it.family !== state.family) return false;
-      if (!q) return true;
-      return (
-        it.name.toLowerCase().includes(q) ||
-        it.family.toLowerCase().includes(q) ||
-        it.sub.toLowerCase().includes(q)
-      );
-    }).slice(0, 120);
-
-    if (!state.activeAssetKey && (filtered[0] || items[0])) {
-      state.activeAssetKey = (filtered[0] || items[0]).key;
-    }
-
-    gridEl.innerHTML = "";
-    for (const item of filtered) {
-      const card = Construct("button", "cb-card" + (state.activeAssetKey === item.key ? " active" : ""));
-      card.type = "button";
-      card.draggable = true;
-      card.dataset.assetKind = item.assetKind;
-      card.dataset.assetId = item.id;
-      card.title = `${item.name} (${item.family}) — Click to apply or drag onto canvas`;
-
-      const thumb = Construct("div", "cb-thumb");
-      thumb.append(createPreviewVisual(item, 60));
-
-      card.append(
-        thumb,
-        Construct("span", "cb-card-name", item.name),
-        Construct("span", "cb-card-sub", item.sub),
-      );
-
-      card.addEventListener("dragstart", (e) => {
-        const payload = buildPayloadForItem(item);
-        appBridge.activeDragAsset = payload;
-        if (e.dataTransfer) {
-          e.dataTransfer.effectAllowed = "copy";
-          try {
-            e.dataTransfer.setData("application/x-frontier-asset", JSON.stringify(payload));
-            e.dataTransfer.setData("text/plain", JSON.stringify({ id: payload.id, assetKind: payload.assetKind, name: payload.name }));
-          } catch {}
-        }
-      });
-      card.addEventListener("dragend", () => {
-        setTimeout(() => {
-          if (appBridge.activeDragAsset?.id === item.id) appBridge.activeDragAsset = null;
-        }, 60);
-      });
-      card.addEventListener("click", () => {
-        state.activeAssetKey = item.key;
-        render();
-        appBridge.applyAssetToActiveWorkspace?.(buildPayloadForItem(item), { source: "click" });
-      });
-
-      gridEl.append(card);
-    }
-
-    // 4. Right-side Asset Inspector for whichever asset is selected
-    const selectedItem =
-      (state.activeAssetKey && allItemsByKey.get(state.activeAssetKey)) ||
-      filtered[0] ||
-      items[0] ||
-      null;
-    renderInspector(selectedItem);
+    autoBadge.textContent = state.userSpecifiedCategory
+      ? "Pinned · Reset to Auto"
+      : `Auto: ${state.activeWorkspace}`;
+    autoBadge.classList.toggle("pinned", state.userSpecifiedCategory);
+    renderViewButtons();
+    renderTreePane();
+    renderCenterAndInspector();
   }
 
-  searchInp.addEventListener("input", () => {
-    state.search = searchInp.value;
+  function syncWorkspace(wsId) {
+    state.activeWorkspace = wsId;
+    if (!state.userSpecifiedCategory) {
+      const nextCat = WORKSPACE_TO_CATEGORY[wsId] || "materials";
+      if (nextCat !== state.activeCategory) {
+        state.activeCategory = nextCat;
+        state.activeFamily = "All";
+        state.activeFilter = null;
+        state.expandedCats.add(nextCat);
+      }
+    }
     render();
-  });
+  }
 
-  autoBtn.addEventListener("click", () => {
-    state.userSpecifiedCategory = false;
-    state.activeCategory = WORKSPACE_ASSET_CATEGORY[state.activeWorkspaceId] || "materials";
-    state.family = "All";
-    render();
-  });
-
+  applyHeight();
   render();
-  applyDrawerGeometry();
 
   return {
-    setActiveWorkspace(wsId) {
-      state.activeWorkspaceId = wsId;
-      if (!state.userSpecifiedCategory) {
-        const nextCat = WORKSPACE_ASSET_CATEGORY[wsId] || "materials";
-        if (state.activeCategory !== nextCat) {
-          state.activeCategory = nextCat;
-          state.family = "All";
-        }
-      }
-      render();
+    element: root,
+    syncWorkspace,
+    setActiveWorkspace: syncWorkspace,
+    getAssetPayload(kind, id) {
+      const catMap = { material: "materials", pattern: "patterns", stamp: "stamps", mesh: "meshes" };
+      const item = findItemById(id, catMap[kind] || state.activeCategory);
+      return toPayload(item);
     },
-    setCategory(catId, { userSpecified = true, family = null } = {}) {
-      if (!CATEGORIES.some((c) => c.id === catId)) return;
+    setCategory(catId, { userPinned = true } = {}) {
+      if (!WORKSPACE_TO_CATEGORY[catId] && !catBtnMap.has(catId)) return;
       state.activeCategory = catId;
-      state.userSpecifiedCategory = userSpecified;
-      if (family !== null) state.family = family;
-      else state.family = "All";
-      if (state.collapsed) {
-        state.collapsed = false;
-        applyDrawerGeometry();
-      }
+      state.activeFamily = "All";
+      state.activeFilter = null;
+      state.userSpecifiedCategory = userPinned;
+      state.expandedCats.add(catId);
       render();
     },
-    setFamily(familyName) {
-      state.family = familyName;
-      render();
-    },
-    selectAsset(kind, id) {
-      const found = findItem(kind, id);
-      if (found) {
-        state.activeAssetKey = found.key;
-        render();
-        return true;
-      }
-      return false;
-    },
-    setHeight(h) {
-      setDrawerHeight(h);
+    setViewMode(mode) {
+      if (mode !== "grid" && mode !== "list") return;
+      state.viewMode = mode;
+      renderViewButtons();
+      renderGrid();
     },
     getState() {
-      const selectedItem = state.activeAssetKey ? allItemsByKey.get(state.activeAssetKey) : null;
-      return {
-        activeWorkspaceId: state.activeWorkspaceId,
-        activeCategory: state.activeCategory,
-        userSpecifiedCategory: state.userSpecifiedCategory,
-        family: state.family,
-        collapsed: state.collapsed,
-        heightPx: state.collapsed ? MIN_H : state.heightPx,
-        renderedCount: gridEl.children.length,
-        africanCount: patternCatalog.filter((p) => p.group === "African Patterns").length,
-        activeAssetKey: state.activeAssetKey,
-        inspectorItemId: selectedItem?.id || null,
-        inspectorItemName: selectedItem?.name || null,
-        inspectorItemKind: selectedItem?.assetKind || null,
-      };
+      return { ...state, expandedCats: [...state.expandedCats] };
     },
-    getAssetPayload(kind, id) {
-      const found = findItem(kind, id);
-      return found ? buildPayloadForItem(found) : null;
-    },
-    dispose() {
-      drawer.remove();
+    setCollapsed(v) {
+      state.collapsed = Boolean(v);
+      applyHeight();
     },
   };
 }

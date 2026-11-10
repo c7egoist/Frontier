@@ -953,6 +953,436 @@ export const STAMP_STARTERS = [
       return doc;
     },
   },
+  // --- HARD SURFACE DECAL STAMPS ---
+  {
+    id: "stamp-hs-hex-bolt",
+    name: "Hex Bolt & Machined Washer",
+    group: "Hard Surface",
+    description: "Machined metallic hex bolt head seated in a beveled washer collar with center tool dimple.",
+    build: () => {
+      const doc = createArtworkDocument("stamp");
+      doc.name = "Hex Bolt & Machined Washer";
+      doc.layers = [
+        createArtworkLayer("motif", {
+          name: "Washer Seat Collar",
+          transform: { x: 256, y: 256, width: 360, height: 360, rotation: 0 },
+          shape: { motifType: "circle", color: "#555d69", strokeWidth: 8, strokeColor: "#1a1e24" },
+          surface: { finish: "foil", roughness: 0.34, metalness: 0.92, height: 0.42, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+        }),
+        createArtworkLayer("motif", {
+          name: "Hex Bolt Head",
+          transform: { x: 256, y: 256, width: 245, height: 245, rotation: 30 },
+          shape: { motifType: "hexagon", color: "#aeb8c6", strokeWidth: 10, strokeColor: "#232830" },
+          surface: { finish: "foil", roughness: 0.22, metalness: 0.96, height: 0.85, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+        }),
+        createArtworkLayer("motif", {
+          name: "Center Tool Recess",
+          transform: { x: 256, y: 256, width: 76, height: 76, rotation: 0 },
+          shape: { motifType: "circle", color: "#2b3038", strokeWidth: 4, strokeColor: "#7c8594" },
+          surface: { finish: "foil", roughness: 0.48, metalness: 0.75, height: 0.18, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+        }),
+      ];
+      return doc;
+    },
+  },
+  {
+    id: "stamp-hs-countersunk-screw",
+    name: "Countersunk Phillips Screw",
+    group: "Hard Surface",
+    description: "Flush-mount countersunk machine screw with chamfered bore ring and recessed cross drive.",
+    build: () => {
+      const doc = createArtworkDocument("stamp");
+      doc.name = "Countersunk Phillips Screw";
+      doc.layers = [
+        createArtworkLayer("motif", {
+          name: "Countersunk Chamfer Ring",
+          transform: { x: 256, y: 256, width: 320, height: 320, rotation: 0 },
+          shape: { motifType: "circle", color: "#8d96a4", strokeWidth: 14, strokeColor: "#1b1e24" },
+          surface: { finish: "foil", roughness: 0.28, metalness: 0.94, height: 0.56, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+        }),
+        createArtworkLayer("motif", {
+          name: "Inner Screw Cap",
+          transform: { x: 256, y: 256, width: 224, height: 224, rotation: 0 },
+          shape: { motifType: "circle", color: "#aeb6c3", strokeWidth: 6, strokeColor: "#363c46" },
+          surface: { finish: "foil", roughness: 0.22, metalness: 0.96, height: 0.68, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+        }),
+        createArtworkLayer("motif", {
+          name: "Phillips Cross Slot",
+          transform: { x: 256, y: 256, width: 152, height: 152, rotation: 45 },
+          shape: { motifType: "cross", innerRatio: 0.28, color: "#1d2128" },
+          surface: { finish: "rubber", roughness: 0.72, metalness: 0.35, height: -0.45, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+        }),
+      ];
+      return doc;
+    },
+  },
+  {
+    id: "stamp-hs-access-hatch",
+    name: "Service Access Hatch",
+    group: "Hard Surface",
+    description: "Beveled hull maintenance hatch plate with 4 corner rivets, recessed seam, and stencil tag.",
+    build: () => {
+      const doc = createArtworkDocument("stamp");
+      doc.name = "Service Access Hatch";
+      doc.layers = [
+        createArtworkLayer("motif", {
+          name: "Outer Bevel Frame",
+          transform: { x: 256, y: 256, width: 410, height: 320, rotation: 0 },
+          shape: { motifType: "roundedRect", cornerRadius: 0.1, color: "#59626e", strokeWidth: 12, strokeColor: "#1a1e24" },
+          surface: { finish: "foil", roughness: 0.36, metalness: 0.86, height: 0.52, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+        }),
+        createArtworkLayer("motif", {
+          name: "Inner Hatch Door",
+          transform: { x: 256, y: 256, width: 356, height: 266, rotation: 0 },
+          shape: { motifType: "roundedRect", cornerRadius: 0.08, color: "#76808d", strokeWidth: 6, strokeColor: "#232830" },
+          surface: { finish: "foil", roughness: 0.32, metalness: 0.88, height: 0.65, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+        }),
+        createArtworkLayer("motif", {
+          name: "Latch Handle Slot",
+          transform: { x: 256, y: 318, width: 130, height: 34, rotation: 0 },
+          shape: { motifType: "roundedRect", cornerRadius: 0.35, color: "#252932", strokeWidth: 4, strokeColor: "#b4becb" },
+          surface: { finish: "rubber", roughness: 0.65, metalness: 0.3, height: -0.22, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+        }),
+        createArtworkLayer("motif", {
+          name: "Corner Rivets",
+          transform: { x: 256, y: 256, width: 26, height: 26, rotation: 0 },
+          shape: { motifType: "circle", color: "#c8d0dc", strokeWidth: 4, strokeColor: "#252a32" },
+          surface: { finish: "foil", roughness: 0.24, metalness: 0.96, height: 0.82, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+          modifiers: [
+            { ...createDefaultModifier("array-grid"), layout: "grid", columns: 2, rows: 2, spanX: 300, spanY: 210 },
+          ],
+        }),
+        createArtworkLayer("text", {
+          name: "Access Stencil",
+          transform: { x: 256, y: 214, width: 240, height: 64, rotation: 0 },
+          shape: { color: "#e8c27a" },
+          text: { value: "ACCESS P-04", fontFamily: "DM Sans", fontWeight: 700, fontSize: 34, letterSpacing: 2, align: "center" },
+          surface: { finish: "ink", roughness: 0.52, metalness: 0.15, height: 0.48, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+        }),
+      ];
+      return doc;
+    },
+  },
+  {
+    id: "stamp-hs-louver-vent",
+    name: "Louvered Cooling Vent",
+    group: "Hard Surface",
+    description: "Machined recessed chassis intake plate with 6 slotted cooling louvers and corner bolts.",
+    build: () => {
+      const doc = createArtworkDocument("stamp");
+      doc.name = "Louvered Cooling Vent";
+      doc.layers = [
+        createArtworkLayer("motif", {
+          name: "Vent Mounting Plate",
+          transform: { x: 256, y: 256, width: 390, height: 340, rotation: 0 },
+          shape: { motifType: "roundedRect", cornerRadius: 0.09, color: "#687280", strokeWidth: 10, strokeColor: "#1b1f26" },
+          surface: { finish: "foil", roughness: 0.34, metalness: 0.88, height: 0.5, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+        }),
+        createArtworkLayer("motif", {
+          name: "Slotted Louver Vents",
+          transform: { x: 256, y: 256, width: 270, height: 34, rotation: 0 },
+          shape: { motifType: "stripe", color: "#15181e", strokeWidth: 3, strokeColor: "#9aa4b4" },
+          surface: { finish: "rubber", roughness: 0.82, metalness: 0.15, height: -0.52, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+          modifiers: [
+            { ...createDefaultModifier("array-grid"), layout: "grid", columns: 1, rows: 6, spanX: 270, spanY: 220 },
+          ],
+        }),
+        createArtworkLayer("motif", {
+          name: "Corner Hex Fasteners",
+          transform: { x: 256, y: 256, width: 26, height: 26, rotation: 30 },
+          shape: { motifType: "hexagon", color: "#c2cbd8", strokeWidth: 3, strokeColor: "#22272f" },
+          surface: { finish: "foil", roughness: 0.24, metalness: 0.96, height: 0.78, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+          modifiers: [
+            { ...createDefaultModifier("array-grid"), layout: "grid", columns: 2, rows: 2, spanX: 320, spanY: 268 },
+          ],
+        }),
+      ];
+      return doc;
+    },
+  },
+  {
+    id: "stamp-hs-honeycomb-grille",
+    name: "Hex Mesh Intake Grille",
+    group: "Hard Surface",
+    description: "Circular heavy machined bezel with hexagonal air intake perforations.",
+    build: () => {
+      const doc = createArtworkDocument("stamp");
+      doc.name = "Hex Mesh Intake Grille";
+      doc.layers = [
+        createArtworkLayer("motif", {
+          name: "Intake Housing",
+          transform: { x: 256, y: 256, width: 370, height: 370, rotation: 0 },
+          shape: { motifType: "circle", color: "#4e5662", strokeWidth: 14, strokeColor: "#181b21" },
+          surface: { finish: "foil", roughness: 0.32, metalness: 0.9, height: 0.58, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+        }),
+        createArtworkLayer("motif", {
+          name: "Hex Perforation Grid",
+          transform: { x: 256, y: 256, width: 42, height: 42, rotation: 0 },
+          shape: { motifType: "hexagon", color: "#15181d", strokeWidth: 3, strokeColor: "#8c96a6" },
+          surface: { finish: "rubber", roughness: 0.85, metalness: 0.1, height: -0.45, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+          modifiers: [
+            { ...createDefaultModifier("array-grid"), layout: "hex", columns: 5, rows: 5, spanX: 210, spanY: 210 },
+          ],
+        }),
+        createArtworkLayer("motif", {
+          name: "Machined Bezel Rim",
+          transform: { x: 256, y: 256, width: 356, height: 356, rotation: 0 },
+          shape: { motifType: "ring", innerRatio: 0.78, color: "#9ba5b4", strokeWidth: 4, strokeColor: "#232830" },
+          surface: { finish: "foil", roughness: 0.24, metalness: 0.95, height: 0.76, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+        }),
+      ];
+      return doc;
+    },
+  },
+  {
+    id: "stamp-hs-cam-latch",
+    name: "Quarter-Turn Cam Latch",
+    group: "Hard Surface",
+    description: "Knurled mechanical quarter-turn fastener lock with slotted keyway and index chevron.",
+    build: () => {
+      const doc = createArtworkDocument("stamp");
+      doc.name = "Quarter-Turn Cam Latch";
+      doc.layers = [
+        createArtworkLayer("motif", {
+          name: "Knurled Collar",
+          transform: { x: 256, y: 256, width: 350, height: 350, rotation: 0 },
+          shape: { motifType: "gear", points: 18, innerRatio: 0.86, color: "#8893a3", strokeWidth: 6, strokeColor: "#1b1f26" },
+          surface: { finish: "foil", roughness: 0.28, metalness: 0.94, height: 0.62, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+        }),
+        createArtworkLayer("motif", {
+          name: "Inner Latch Cylinder",
+          transform: { x: 256, y: 256, width: 220, height: 220, rotation: 0 },
+          shape: { motifType: "circle", color: "#b6c0ce", strokeWidth: 8, strokeColor: "#282e37" },
+          surface: { finish: "foil", roughness: 0.22, metalness: 0.96, height: 0.74, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+        }),
+        createArtworkLayer("motif", {
+          name: "Keyway Slot",
+          transform: { x: 256, y: 256, width: 170, height: 42, rotation: -30 },
+          shape: { motifType: "stripe", color: "#191c22" },
+          surface: { finish: "rubber", roughness: 0.76, metalness: 0.25, height: -0.45, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+        }),
+        createArtworkLayer("motif", {
+          name: "Lock Alignment Pip",
+          transform: { x: 256, y: 112, width: 34, height: 28, rotation: 0 },
+          shape: { motifType: "triangle", color: "#e85c43" },
+          surface: { finish: "ink", roughness: 0.42, metalness: 0.05, height: 0.58, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+        }),
+      ];
+      return doc;
+    },
+  },
+  {
+    id: "stamp-hs-serial-dataplate",
+    name: "Machined Serial Data Plate",
+    group: "Hard Surface",
+    description: "Anodized specification placard with corner rivets, etched ID code, and alignment grid.",
+    build: () => {
+      const doc = createArtworkDocument("stamp");
+      doc.name = "Machined Serial Data Plate";
+      doc.layers = [
+        createArtworkLayer("motif", {
+          name: "Anodized Plate Base",
+          transform: { x: 256, y: 256, width: 420, height: 230, rotation: 0 },
+          shape: { motifType: "roundedRect", cornerRadius: 0.08, color: "#282d36", strokeWidth: 10, strokeColor: "#b4becb" },
+          surface: { finish: "foil", roughness: 0.36, metalness: 0.85, height: 0.46, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+        }),
+        createArtworkLayer("motif", {
+          name: "Corner Pin Rivets",
+          transform: { x: 256, y: 256, width: 22, height: 22, rotation: 0 },
+          shape: { motifType: "circle", color: "#d8dfe8", strokeWidth: 3, strokeColor: "#14171c" },
+          surface: { finish: "foil", roughness: 0.22, metalness: 0.96, height: 0.8, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+          modifiers: [
+            { ...createDefaultModifier("array-grid"), layout: "grid", columns: 2, rows: 2, spanX: 355, spanY: 165 },
+          ],
+        }),
+        createArtworkLayer("text", {
+          name: "Model Code",
+          transform: { x: 256, y: 224, width: 320, height: 64, rotation: 0 },
+          shape: { color: "#eff4cf" },
+          text: { value: "UNIT // MK-07", fontFamily: "DM Sans", fontWeight: 700, fontSize: 38, letterSpacing: 2, align: "center" },
+          surface: { finish: "ink", roughness: 0.38, metalness: 0.25, height: 0.5, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+        }),
+        createArtworkLayer("motif", {
+          name: "Code Matrix Bars",
+          transform: { x: 256, y: 292, width: 24, height: 26, rotation: 90 },
+          shape: { motifType: "stripe", color: "#e8c27a" },
+          surface: { finish: "foil", roughness: 0.3, metalness: 0.88, height: 0.54, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+          modifiers: [
+            { ...createDefaultModifier("array-grid"), layout: "grid", columns: 8, rows: 1, spanX: 250, spanY: 30, alternateColor: true, colorB: "#7d8896" },
+          ],
+        }),
+      ];
+      return doc;
+    },
+  },
+  {
+    id: "stamp-hs-hydraulic-port",
+    name: "Hydraulic Coupler Port",
+    group: "Hard Surface",
+    description: "Machined stepped fluid/pneumatic socket with anodized collar ring and hex boss.",
+    build: () => {
+      const doc = createArtworkDocument("stamp");
+      doc.name = "Hydraulic Coupler Port";
+      doc.layers = [
+        createArtworkLayer("motif", {
+          name: "Hex Boss Seat",
+          transform: { x: 256, y: 256, width: 350, height: 350, rotation: 0 },
+          shape: { motifType: "hexagon", color: "#687280", strokeWidth: 10, strokeColor: "#181b21" },
+          surface: { finish: "foil", roughness: 0.28, metalness: 0.92, height: 0.55, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+        }),
+        createArtworkLayer("motif", {
+          name: "Anodized Seal Collar",
+          transform: { x: 256, y: 256, width: 250, height: 250, rotation: 0 },
+          shape: { motifType: "ring", innerRatio: 0.68, color: "#d6523b", strokeWidth: 5, strokeColor: "#1d2027" },
+          surface: { finish: "foil", roughness: 0.24, metalness: 0.85, height: 0.68, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+        }),
+        createArtworkLayer("motif", {
+          name: "Recessed Port Bore",
+          transform: { x: 256, y: 256, width: 150, height: 150, rotation: 0 },
+          shape: { motifType: "circle", color: "#15181e", strokeWidth: 8, strokeColor: "#aeb8c6" },
+          surface: { finish: "rubber", roughness: 0.8, metalness: 0.2, height: -0.5, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+        }),
+      ];
+      return doc;
+    },
+  },
+  {
+    id: "stamp-hs-rivet-seam",
+    name: "Armor Seam & Rivet Strip",
+    group: "Hard Surface",
+    description: "Linear structural armor butt-strap with twin staggered rows of dome rivets.",
+    build: () => {
+      const doc = createArtworkDocument("stamp");
+      doc.name = "Armor Seam & Rivet Strip";
+      doc.layers = [
+        createArtworkLayer("motif", {
+          name: "Seam Strap Plate",
+          transform: { x: 256, y: 256, width: 440, height: 150, rotation: 0 },
+          shape: { motifType: "roundedRect", cornerRadius: 0.06, color: "#66707d", strokeWidth: 8, strokeColor: "#191c22" },
+          surface: { finish: "foil", roughness: 0.34, metalness: 0.88, height: 0.48, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+        }),
+        createArtworkLayer("motif", {
+          name: "Center Seam Groove",
+          transform: { x: 256, y: 256, width: 420, height: 18, rotation: 0 },
+          shape: { motifType: "stripe", color: "#1a1d24" },
+          surface: { finish: "rubber", roughness: 0.78, metalness: 0.2, height: -0.35, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+        }),
+        createArtworkLayer("motif", {
+          name: "Staggered Dome Rivets",
+          transform: { x: 256, y: 256, width: 26, height: 26, rotation: 0 },
+          shape: { motifType: "circle", color: "#cbd3df", strokeWidth: 4, strokeColor: "#232831" },
+          surface: { finish: "foil", roughness: 0.2, metalness: 0.96, height: 0.86, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+          modifiers: [
+            { ...createDefaultModifier("array-grid"), layout: "grid", columns: 6, rows: 2, spanX: 350, spanY: 82 },
+          ],
+        }),
+      ];
+      return doc;
+    },
+  },
+  {
+    id: "stamp-hs-warning-placard",
+    name: "Caution Stencil Placard",
+    group: "Hard Surface",
+    description: "Industrial caution panel decal with bold delta hazard triangle and warning label.",
+    build: () => {
+      const doc = createArtworkDocument("stamp");
+      doc.name = "Caution Stencil Placard";
+      doc.layers = [
+        createArtworkLayer("motif", {
+          name: "Placard Frame",
+          transform: { x: 256, y: 256, width: 410, height: 240, rotation: 0 },
+          shape: { motifType: "roundedRect", cornerRadius: 0.08, color: "#1d2026", strokeWidth: 10, strokeColor: "#e8b43c" },
+          surface: { finish: "ink", roughness: 0.48, metalness: 0.1, height: 0.32, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+        }),
+        createArtworkLayer("motif", {
+          name: "Hazard Delta",
+          transform: { x: 146, y: 256, width: 105, height: 96, rotation: 0 },
+          shape: { motifType: "triangle", color: "#e8b43c", strokeWidth: 4, strokeColor: "#14161a" },
+          surface: { finish: "ink", roughness: 0.42, metalness: 0, height: 0.4, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+        }),
+        createArtworkLayer("text", {
+          name: "Caution Label",
+          transform: { x: 318, y: 258, width: 220, height: 70, rotation: 0 },
+          shape: { color: "#f4efe0" },
+          text: { value: "CAUTION", fontFamily: "DM Sans", fontWeight: 700, fontSize: 42, letterSpacing: 2, align: "center" },
+          surface: { finish: "ink", roughness: 0.45, metalness: 0, height: 0.38, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+        }),
+      ];
+      return doc;
+    },
+  },
+  {
+    id: "stamp-hs-gusset-bracket",
+    name: "Structural Gusset Bracket",
+    group: "Hard Surface",
+    description: "Machined triangular load-bearing gusset plate with weight-relief bore and bolts.",
+    build: () => {
+      const doc = createArtworkDocument("stamp");
+      doc.name = "Structural Gusset Bracket";
+      doc.layers = [
+        createArtworkLayer("motif", {
+          name: "Gusset Plate",
+          transform: { x: 256, y: 274, width: 340, height: 310, rotation: 0 },
+          shape: { motifType: "triangle", color: "#7c8694", strokeWidth: 12, strokeColor: "#1a1e24" },
+          surface: { finish: "foil", roughness: 0.3, metalness: 0.92, height: 0.62, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+        }),
+        createArtworkLayer("motif", {
+          name: "Lightening Bore",
+          transform: { x: 256, y: 310, width: 92, height: 92, rotation: 0 },
+          shape: { motifType: "circle", color: "#191c22", strokeWidth: 6, strokeColor: "#aeb8c6" },
+          surface: { finish: "rubber", roughness: 0.78, metalness: 0.2, height: -0.35, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+        }),
+        createArtworkLayer("motif", {
+          name: "Apex Mounting Bolt",
+          transform: { x: 256, y: 186, width: 34, height: 34, rotation: 30 },
+          shape: { motifType: "hexagon", color: "#cdd5e0", strokeWidth: 3, strokeColor: "#21262e" },
+          surface: { finish: "foil", roughness: 0.22, metalness: 0.96, height: 0.82, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+        }),
+      ];
+      return doc;
+    },
+  },
+  {
+    id: "stamp-hs-knurled-dial",
+    name: "Machined Rotary Index Dial",
+    group: "Hard Surface",
+    description: "Precision instrumentation rotary knob with radial calibration ticks and pointer marker.",
+    build: () => {
+      const doc = createArtworkDocument("stamp");
+      doc.name = "Machined Rotary Index Dial";
+      doc.layers = [
+        createArtworkLayer("motif", {
+          name: "Calibration Ticks",
+          transform: { x: 256, y: 256, width: 22, height: 8, rotation: 0 },
+          shape: { motifType: "stripe", color: "#eff4cf" },
+          surface: { finish: "ink", roughness: 0.38, metalness: 0.1, height: 0.35, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+          modifiers: [
+            { ...createDefaultModifier("array-radial"), count: 12, radius: 192, rings: 1, alignTangent: true },
+          ],
+        }),
+        createArtworkLayer("motif", {
+          name: "Knurled Dial Rim",
+          transform: { x: 256, y: 256, width: 310, height: 310, rotation: 0 },
+          shape: { motifType: "gear", points: 20, innerRatio: 0.88, color: "#737d8b", strokeWidth: 6, strokeColor: "#181b21" },
+          surface: { finish: "foil", roughness: 0.28, metalness: 0.92, height: 0.65, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+        }),
+        createArtworkLayer("motif", {
+          name: "Matte Face Insert",
+          transform: { x: 256, y: 256, width: 220, height: 220, rotation: 0 },
+          shape: { motifType: "circle", color: "#282d36", strokeWidth: 5, strokeColor: "#aab4c2" },
+          surface: { finish: "rubber", roughness: 0.62, metalness: 0.2, height: 0.72, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+        }),
+        createArtworkLayer("motif", {
+          name: "Index Marker Chevron",
+          transform: { x: 256, y: 184, width: 30, height: 34, rotation: 0 },
+          shape: { motifType: "triangle", color: "#e8c27a" },
+          surface: { finish: "foil", roughness: 0.26, metalness: 0.9, height: 0.8, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+        }),
+      ];
+      return doc;
+    },
+  },
 ];
 
 function normalizePatternGroup(rawGroup = "", name = "") {
