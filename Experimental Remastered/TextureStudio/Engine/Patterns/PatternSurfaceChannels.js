@@ -44,3 +44,37 @@ export function DerivePatternNormalPixels(HeightPixels, Width, Height, Strength 
     }
     return Pixels;
 }
+
+export async function RasterPatternChannel(PatternInput, ChannelName = "Color")
+{
+    if (!PatternInput || typeof document === "undefined") return null;
+    if (PatternInput.schema === "frontier.pattern-surface.v1")
+    {
+        const W = Math.max(16, Number(PatternInput.width) || 256);
+        const H = Math.max(16, Number(PatternInput.height) || 256);
+        const Canvas = document.createElement("canvas");
+        Canvas.width = W;
+        Canvas.height = H;
+        const Ctx = Canvas.getContext("2d", { willReadFrequently: true });
+        const MapSource =
+            ChannelName === "Roughness" ? PatternInput.roughness
+            : ChannelName === "Metalness" ? PatternInput.metalness
+            : ChannelName === "Normal" ? PatternInput.normal
+            : (ChannelName === "Height" || ChannelName === "Opacity") ? (PatternInput.heightMap || PatternInput.albedo)
+            : PatternInput.albedo;
+        if (MapSource && MapSource.length >= W * H * 4)
+        {
+            const Clamped = new Uint8ClampedArray(MapSource.subarray ? MapSource.subarray(0, W * H * 4) : MapSource);
+            Ctx.putImageData(new ImageData(Clamped, W, H), 0, 0);
+        }
+        return Canvas;
+    }
+    const [{ patternSVG, patternDimensions, validatePattern }, { rasterPatternSVG }] = await Promise.all([
+        import("./patternDocument.js"),
+        import("./patternRuntime.js"),
+    ]);
+    const Doc = validatePattern(PatternInput);
+    const [W, H] = patternDimensions(Doc);
+    const ModeMap = { Color: "color", Roughness: "roughness", Metalness: "metalness", Height: "normalHeight", Normal: "normal", Opacity: "color", Occlusion: "occlusion" };
+    return rasterPatternSVG(patternSVG(Doc, ModeMap[ChannelName] || "color"), W, H);
+}

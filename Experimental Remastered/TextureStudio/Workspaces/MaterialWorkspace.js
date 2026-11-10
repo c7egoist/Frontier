@@ -28,12 +28,33 @@ import {
   exportMaterialShader,
 } from "../Engine/Materials/materialExport.js";
 import {
+  AuthoringIdentity,
+  PbrChannels,
+  ChannelAddress,
+  DeclareMaterialAuthoring,
+  ReadMaterialParameter,
+  WriteMaterialParameter,
+  DeclareCodedField,
+  ResolveAddress,
+} from "../Engine/Materials/MaterialSpecification.js";
+import { GeneratorDefinitions, CamouflagePalette } from "../Engine/Materials/FieldSpecification.js";
+import { RasterChannelPreview } from "../Engine/Materials/FieldProjection.js";
+import {
+  listPatternStarterCatalog,
+  buildMaterialPatternDocument,
+} from "../Engine/Patterns/StarterCatalogBridge.js";
+import {
   Construct,
   ConstructGlyph,
   SectionCard,
   SliderRow,
   SwitchRow,
   ColorRow,
+  TextRow,
+  SegmentedRow,
+  FilterDropdownPill,
+  ChannelMaskRow,
+  MultiColourRow,
   ActionRow,
   MetricTrio,
   SmoothScroll,
@@ -84,10 +105,58 @@ function downloadBlob(text, filename, mime = "text/plain") {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+const MATERIAL_PBR_CHANNEL_SPEC = Object.freeze([
+  ["colour", "Colour", "Diffuse / Base Albedo", "albedo", "#e8c27a"],
+  ["roughness", "Roughness", "Microfacet Gloss", "rough", "#2fe6a7"],
+  ["metallic", "Metallic", "Conductor Mask", "metal", "#63a8ff"],
+  ["normal", "Normal", "Surface Tangent", "height", "#c886f2"],
+  ["microNormal", "Micro normal", "Fine Pore / Grain", "height", "#e686b8"],
+  ["coverage", "Coverage", "Layer Mask / Blend", "albedo", "#eff4cf"],
+  ["ior", "IOR", "Fresnel Index", "metal", "#7ad7f0"],
+  ["specular", "Specular", "Dielectric Reflection", "metal", "#a3c6ff"],
+  ["thickness", "Thickness", "Optical Depth", "rough", "#f0b46b"],
+  ["transmission", "Transmission", "Light Scatter", "rough", "#74e2b8"],
+  ["sheen", "Sheen", "Velvet Grazing", "albedo", "#e29fd3"],
+  ["sheenRoughness", "Sheen rough", "Grazing Falloff", "rough", "#c8a0e6"],
+  ["anisotropy", "Anisotropy", "Directional Brushing", "metal", "#80d1ff"],
+]);
+
+const SOURCE_MODES = Object.freeze([
+  { value: "value", label: "Scalar / Constant", sub: "Direct parameter value" },
+  { value: "field", label: "Procedural Field", sub: "Noise, Camo, Checker, Cells, Rings" },
+  { value: "linear", label: "Linear Gradient", sub: "Directional UV ramp" },
+  { value: "radial", label: "Radial Gradient", sub: "Center-to-edge falloff" },
+  { value: "conic", label: "Conic Gradient", sub: "Polar sweep ramp" },
+  { value: "texture", label: "Custom Image Tile", sub: "Upload ≤256px PNG/JPG" },
+  { value: "pattern", label: "Active Pattern", sub: "Sample applied material pattern" },
+]);
+
+const PATTERN_MAPPING_OPTIONS = [
+  ["UV Map", "uv"],
+  ["Triplanar", "object"],
+  ["Cylinder", "cylinder"],
+];
+
+const PATTERN_AXIS_OPTIONS = [
+  ["Both XY", "xy"],
+  ["X Only", "x"],
+  ["Y Only", "y"],
+  ["Single", "none"],
+];
+
 export function mountMaterialWorkspace(root, appBridge) {
+  const patternCatalog = listPatternStarterCatalog();
+  const initialParams = normalizeMaterial(MATERIAL_CATALOG[0]);
+  initialParams.Authoring = initialParams.Authoring || DeclareMaterialAuthoring(initialParams);
+
   let state = {
     selectedId: MATERIAL_CATALOG[0].id,
-    params: normalizeMaterial(MATERIAL_CATALOG[0]),
+    params: initialParams,
+    selectedLayerId:
+      initialParams.Authoring.Layers.find((l) => l.Model === "surface")?.Identity ||
+      initialParams.Authoring.Layers[0]?.Identity,
+    inspectedChannel: "colour",
+    selectedPatternCatalogId: patternCatalog[0]?.id || "",
     category: "All",
     search: "",
     shape: "shaderball",
@@ -96,6 +165,35 @@ export function mountMaterialWorkspace(root, appBridge) {
     lightAzimuth: 38,
     exposure: 1.08,
   };
+
+  let dragLayerId = null;
+
+  function ensureAuthoring(params) {
+    if (!params.Authoring) {
+      params.Authoring = DeclareMaterialAuthoring(params);
+    }
+    const layers = params.Authoring.Layers;
+    if (
+      state.selectedLayerId !== "__pattern__" &&
+      !layers.some((l) => l.Identity === state.selectedLayerId)
+    ) {
+      state.selectedLayerId =
+        layers.find((l) => l.Model === "surface")?.Identity || layers[0]?.Identity || null;
+    }
+    return params;
+  }
+
+  function mutateParamsPreservingPattern(fn) {
+    const savedPattern = state.params.pattern;
+    const savedMask = state.params.patternChannelMask;
+    const clone = { ...state.params, pattern: undefined, patternChannelMask: savedMask };
+    const next = fn(clone);
+    if (next) {
+      next.pattern = savedPattern;
+      if (savedMask) next.patternChannelMask = savedMask;
+      state.params = next;
+    }
+  }
 
   let inspectorScope = null;
   let rafId = 0;
@@ -286,6 +384,7 @@ export function mountMaterialWorkspace(root, appBridge) {
   }
 
   function syncMaterialLive() {
+    ensureAuthoring(state.params);
     state.params = normalizeMaterial(state.params);
     const nextMat = createMaterial(state.params);
     if (sampleMesh) {
@@ -296,23 +395,476 @@ export function mountMaterialWorkspace(root, appBridge) {
     }
   }
 
+  function syncPatternUniformsFast() {
+    const u = activeMaterial?.userData?.patternUniforms;
+    const pat = state.params.pattern;
+    if (!u || !pat) {
+      syncMaterialLive();
+      return;
+    }
+    const ch = state.params.patternChannelMask || {};
+    if (u.uPatternRepeats) u.uPatternRepeats.value = pat.repeats ?? 2;
+    if (u.uPatternAngle) u.uPatternAngle.value = ((pat.rotation || 0) * Math.PI) / 180;
+    if (u.uPatternObject) {
+      u.uPatternObject.value = pat.mapping === "object" ? 1 : pat.mapping === "cylinder" ? 2 : 0;
+    }
+    if (u.uPatternApplyChannels) {
+      u.uPatternApplyChannels.value.set(
+        ch.albedo !== false ? 1 : 0,
+        ch.roughness !== false ? 1 : 0,
+        ch.metalness !== false ? 1 : 0,
+        ch.height !== false ? 1 : 0,
+      );
+    }
+    if (u.uPatternBeads && pat.beadwork) {
+      u.uPatternBeads.value.set(
+        pat.beadwork.columns || 1,
+        pat.beadwork.rows || 1,
+        pat.beadwork.height || 0,
+      );
+    }
+  }
+
+  function applyTileablePatternToMaterial(inputOrEntry, toastMsg = null) {
+    const curPat = state.params.pattern;
+    const patDoc = buildMaterialPatternDocument(inputOrEntry, {
+      repeats: curPat?.repeats ?? 3,
+      rotation: curPat?.rotation ?? 0,
+      mapping: curPat?.mapping ?? "uv",
+      tileAxes: curPat?.tileAxes ?? "xy",
+    });
+    if (!patDoc) return false;
+    state.params = {
+      ...state.params,
+      pattern: patDoc,
+      patternChannelMask: state.params.patternChannelMask || {
+        albedo: true,
+        roughness: true,
+        metalness: true,
+        height: true,
+      },
+    };
+    if (inputOrEntry?.id) state.selectedPatternCatalogId = inputOrEntry.id;
+    state.selectedLayerId = "__pattern__";
+    syncMaterialLive();
+    renderLeftOutliner();
+    rebuildInspector();
+    Broadcast();
+    Toast(toastMsg || `Tiled "${patDoc.name}" onto ${state.params.name}`);
+    return true;
+  }
+
+  function clearTileablePattern() {
+    if (!state.params.pattern) return;
+    const next = { ...state.params };
+    delete next.pattern;
+    state.params = next;
+    ensureAuthoring(state.params);
+    if (state.selectedLayerId === "__pattern__") {
+      state.selectedLayerId =
+        state.params.Authoring.Layers.find((l) => l.Model === "surface")?.Identity ||
+        state.params.Authoring.Layers[0]?.Identity;
+    }
+    syncMaterialLive();
+    renderLeftOutliner();
+    rebuildInspector();
+    Broadcast();
+    Toast("Removed tileable pattern from material");
+  }
+
+  function triggerPatternImageUpload(target = "tile-pattern") {
+    const inp = document.createElement("input");
+    inp.type = "file";
+    inp.accept = "image/png,image/jpeg,image/webp,image/svg+xml";
+    inp.addEventListener("change", () => {
+      const file = inp.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          if (target === "channel-texture") {
+            const c = document.createElement("canvas");
+            const s = Math.min(256, Math.max(img.width, img.height));
+            c.width = s;
+            c.height = s;
+            c.getContext("2d").drawImage(img, 0, 0, s, s);
+            const dataUrl = c.toDataURL("image/png");
+            const layer = state.params.Authoring.Layers.find((l) => l.Identity === state.selectedLayerId);
+            if (!layer) return;
+            const ch = layer.Channels.includes(state.inspectedChannel)
+              ? state.inspectedChannel
+              : layer.Channels[0] || "colour";
+            const addr = ResolveAddress(state.params, ChannelAddress(layer, ch));
+            mutateParamsPreservingPattern((p) => {
+              const copy = structuredClone(p);
+              copy.Authoring.Sources[addr] = {
+                ...(copy.Authoring.Sources[addr] || {}),
+                Mode: "texture",
+                Texture: { name: file.name, dataUrl },
+              };
+              return copy;
+            });
+            syncMaterialLive();
+            rebuildInspector();
+            Toast(`Loaded ${s}×${s} map onto ${layer.Name}.${ch}`);
+            return;
+          }
+          const size = 512;
+          const c = document.createElement("canvas");
+          c.width = size;
+          c.height = size;
+          const ctx = c.getContext("2d");
+          ctx.drawImage(img, 0, 0, size, size);
+          const rgba = ctx.getImageData(0, 0, size, size).data;
+          const rough = new Uint8ClampedArray(rgba.length);
+          const metal = new Uint8ClampedArray(rgba.length);
+          const height = new Uint8ClampedArray(rgba.length);
+          const norm = new Uint8ClampedArray(rgba.length);
+          for (let i = 0; i < rgba.length; i += 4) {
+            const luma = Math.round(0.299 * rgba[i] + 0.587 * rgba[i + 1] + 0.114 * rgba[i + 2]);
+            const rVal = Math.round(60 + (255 - luma) * 0.65);
+            rough[i] = rough[i + 1] = rough[i + 2] = rVal; rough[i + 3] = 255;
+            metal[i] = metal[i + 1] = metal[i + 2] = 0; metal[i + 3] = 255;
+            height[i] = height[i + 1] = height[i + 2] = luma; height[i + 3] = 255;
+          }
+          for (let y = 0; y < size; y++) {
+            for (let x = 0; x < size; x++) {
+              const xm = (x - 1 + size) % size;
+              const xp = (x + 1) % size;
+              const ym = (y - 1 + size) % size;
+              const yp = (y + 1) % size;
+              const dx = (height[(y * size + xm) * 4] - height[(y * size + xp) * 4]) / 128;
+              const dy = (height[(ym * size + x) * 4] - height[(yp * size + x) * 4]) / 128;
+              const len = Math.hypot(dx, dy, 1);
+              const idx = (y * size + x) * 4;
+              norm[idx] = Math.round(((dx / len) * 0.5 + 0.5) * 255);
+              norm[idx + 1] = Math.round(((dy / len) * 0.5 + 0.5) * 255);
+              norm[idx + 2] = Math.round(((1 / len) * 0.5 + 0.5) * 255);
+              norm[idx + 3] = 255;
+            }
+          }
+          applyTileablePatternToMaterial(
+            {
+              schema: "frontier.pattern-surface.v1",
+              sourceId: `upload:${file.name}:${Date.now()}`,
+              name: file.name.replace(/\.[^.]+$/, ""),
+              width: size,
+              height: size,
+              albedo: rgba,
+              roughness: rough,
+              metalness: metal,
+              heightMap: height,
+              normal: norm,
+              version: Date.now(),
+            },
+            `Applied uploaded tileable image "${file.name}"`,
+          );
+        };
+        img.src = reader.result;
+      };
+      reader.readAsDataURL(file);
+    });
+    inp.click();
+  }
+
+  function addStrataLayer(model = "detail") {
+    ensureAuthoring(state.params);
+    if (model === "coat") {
+      const existing = state.params.Authoring.Layers.find((l) => l.Model === "coat");
+      if (existing) {
+        existing.Enabled = true;
+        if (!existing.Channels.includes("coverage")) existing.Channels.unshift("coverage");
+        state.selectedLayerId = existing.Identity;
+        if ((state.params.coat ?? 0) < 0.05) state.params.coat = 0.85;
+        syncMaterialLive();
+        renderLeftOutliner();
+        rebuildInspector();
+        Toast("Activated Clearcoat strata layer");
+        return;
+      }
+      const coatLayer = {
+        Identity: AuthoringIdentity(),
+        Name: "Clearcoat",
+        Model: "coat",
+        Enabled: true,
+        Channels: ["coverage", "roughness", "ior"],
+      };
+      state.params.Authoring.Layers.unshift(coatLayer);
+      if ((state.params.coat ?? 0) < 0.05) state.params.coat = 0.85;
+      state.selectedLayerId = coatLayer.Identity;
+      syncMaterialLive();
+      renderLeftOutliner();
+      rebuildInspector();
+      Toast("Added Clearcoat strata layer");
+      return;
+    }
+
+    if (state.params.Authoring.Layers.length >= 16) {
+      Toast("Material stack supports up to 16 strata layers");
+      return;
+    }
+    const detailNum = state.params.Authoring.Layers.filter((l) => l.Model === "detail").length + 1;
+    const newLayer = {
+      Identity: AuthoringIdentity(),
+      Name: `Detail Strata ${detailNum}`,
+      Model: "detail",
+      Enabled: true,
+      Channels: ["colour", "roughness", "coverage"],
+    };
+    mutateParamsPreservingPattern((p) => {
+      let next = DeclareCodedField(p, "noise", `Detail Field ${detailNum}`, "Detail fields");
+      const gen = next.Authoring.Generators[next.Authoring.Generators.length - 1];
+      next.Authoring.Layers.unshift(newLayer);
+      next.Authoring.Inputs[ChannelAddress(newLayer, "coverage")] = 0.72;
+      next.Authoring.Sources[ChannelAddress(newLayer, "colour")] = {
+        Mode: "field",
+        Generator: gen.Identity,
+        Stops: ["#1f2429", "#d6b87c"],
+        Direct: false,
+      };
+      next.Authoring.Sources[ChannelAddress(newLayer, "coverage")] = {
+        Mode: "field",
+        Generator: gen.Identity,
+        Stops: ["#000000", "#ffffff"],
+        Direct: true,
+      };
+      return next;
+    });
+    state.selectedLayerId = newLayer.Identity;
+    state.inspectedChannel = "colour";
+    syncMaterialLive();
+    renderLeftOutliner();
+    rebuildInspector();
+    Toast(`Added "${newLayer.Name}" with procedural noise field`);
+  }
+
+  function moveAuthoringLayer(layerId, deltaUp) {
+    const layers = state.params.Authoring?.Layers;
+    if (!layers) return;
+    const idx = layers.findIndex((l) => l.Identity === layerId);
+    if (idx < 0) return;
+    // Visual top = index 0! Moving "up" visually -> deltaUp > 0 -> idx - 1
+    const nextIdx = idx + (deltaUp > 0 ? -1 : 1);
+    if (nextIdx < 0 || nextIdx >= layers.length) return;
+    const [item] = layers.splice(idx, 1);
+    layers.splice(nextIdx, 0, item);
+    syncMaterialLive();
+    renderLeftOutliner();
+    rebuildInspector();
+  }
+
   // ----------------------------------------------------------------- UI RENDERERS
   function renderLeftOutliner() {
     sceneSummaryWrap.innerHTML = "";
+    ensureAuthoring(state.params);
     const p = state.params;
+    const layers = p.Authoring.Layers;
 
-    const activeRow = Construct("div", "stack-row active", [
-      (() => {
-        const t = Construct("div", "stack-row-thumb");
-        t.style.background = p.color || "#888";
-        return t;
-      })(),
-      Construct("div", "stack-row-info", [
-        Construct("span", "stack-row-title", p.name || "Procedural Material"),
-        Construct("span", "stack-row-sub", `${p.category || "Surface"} · ${Math.round((p.roughness ?? 0.3) * 100)}% R · ${Math.round((p.metalness ?? 0) * 100)}% M`),
-      ]),
-    ]);
-    sceneSummaryWrap.append(Construct("div", "property-label", "Active Material Layer"), activeRow);
+    // Layer stack creation strip (matching Pattern/Paint stacks)
+    const addStrip = Construct("div", "chip-strip");
+    const btnAddDetail = Construct("button", "chip-btn", "+ Detail Layer");
+    btnAddDetail.type = "button";
+    btnAddDetail.addEventListener("click", () => addStrataLayer("detail"));
+
+    const btnAddCoat = Construct("button", "chip-btn", "+ Coat");
+    btnAddCoat.type = "button";
+    btnAddCoat.addEventListener("click", () => addStrataLayer("coat"));
+
+    const btnTilePat = Construct("button", "chip-btn", p.pattern ? "Inspect Pattern" : "+ Tile Pattern");
+    btnTilePat.type = "button";
+    btnTilePat.addEventListener("click", () => {
+      if (p.pattern) {
+        state.selectedLayerId = "__pattern__";
+        renderLeftOutliner();
+        rebuildInspector();
+      } else {
+        const defaultEntry =
+          patternCatalog.find((e) => e.group === "African Patterns") || patternCatalog[0];
+        if (defaultEntry) applyTileablePatternToMaterial(defaultEntry);
+      }
+    });
+    addStrip.append(btnAddDetail, btnAddCoat, btnTilePat);
+
+    sceneSummaryWrap.append(
+      Construct("div", "property-label", `Material Layer Stack (${layers.length + (p.pattern ? 1 : 0)})`),
+      addStrip,
+    );
+
+    const stackBox = Construct("div");
+
+    // 1) Optional Tileable Pattern Overlay row at top of strata stack
+    if (p.pattern) {
+      const isSelPat = state.selectedLayerId === "__pattern__";
+      const patRow = Construct("div", "stack-row" + (isSelPat ? " active" : ""));
+      const thumb = Construct("div", "stack-row-thumb", ConstructGlyph("Pattern"));
+      thumb.style.background = "linear-gradient(135deg, rgba(232,194,122,0.28), rgba(99,168,255,0.22))";
+      const chMap = p.patternChannelMask || {};
+      const chCount = ["albedo", "roughness", "metalness", "height"].filter((k) => chMap[k] !== false).length;
+      const info = Construct("div", "stack-row-info", [
+        Construct("span", "stack-row-title", p.pattern.name || "Tileable Pattern"),
+        Construct(
+          "span",
+          "stack-row-sub",
+          `PATTERN · ${(p.pattern.repeats ?? 2).toFixed(1)}× · ${(p.pattern.mapping || "uv").toUpperCase()} · ${chCount}ch`,
+        ),
+      ]);
+      const rmBtn = Construct("button", "stack-mini-btn", ConstructGlyph("Trash"));
+      rmBtn.type = "button";
+      rmBtn.title = "Remove pattern overlay";
+      rmBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        clearTileablePattern();
+      });
+      patRow.append(thumb, info, rmBtn);
+      patRow.addEventListener("click", () => {
+        state.selectedLayerId = "__pattern__";
+        renderLeftOutliner();
+        rebuildInspector();
+      });
+      stackBox.append(patRow);
+    }
+
+    // 2) Material Authoring Strata Stack (top-to-bottom)
+    layers.forEach((layer, idx) => {
+      const isSelected = state.selectedLayerId === layer.Identity;
+      const row = Construct("div", "stack-row" + (isSelected ? " active" : "") + (layer.Enabled ? "" : " unavailable"));
+      row.draggable = true;
+      row.dataset.layerId = layer.Identity;
+
+      const handle = Construct("span", "stack-drag-handle", ConstructGlyph("Grip"));
+      handle.title = "Drag to reorder strata";
+
+      const thumb = Construct("div", "stack-row-thumb");
+      if (layer.Model === "surface") {
+        thumb.style.background = p.color || "#888";
+      } else if (layer.Model === "coat") {
+        thumb.append(ConstructGlyph("Sparkles"));
+      } else if (layer.Model === "flakes") {
+        thumb.append(ConstructGlyph("Grid"));
+      } else {
+        thumb.append(ConstructGlyph("Layers"));
+      }
+
+      const activeFieldCount = layer.Channels.filter((ch) => {
+        const addr = ResolveAddress(p, ChannelAddress(layer, ch));
+        const src = p.Authoring.Sources[addr];
+        return src && src.Mode !== "value";
+      }).length;
+
+      const subParts = [
+        layer.Model.toUpperCase(),
+        `${layer.Channels.length} ch`,
+      ];
+      if (activeFieldCount > 0) subParts.push(`${activeFieldCount} field`);
+
+      const info = Construct("div", "stack-row-info", [
+        Construct("span", "stack-row-title", layer.Name || "Layer"),
+        Construct("span", "stack-row-sub", subParts.join(" · ")),
+      ]);
+
+      const orderBox = Construct("div", "stack-order-btns");
+      const upBtn = Construct("button", "stack-order-btn", ConstructGlyph("ArrowUp"));
+      upBtn.type = "button";
+      upBtn.disabled = idx === 0;
+      upBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        moveAuthoringLayer(layer.Identity, +1);
+      });
+      const dnBtn = Construct("button", "stack-order-btn", ConstructGlyph("ArrowDown"));
+      dnBtn.type = "button";
+      dnBtn.disabled = idx === layers.length - 1;
+      dnBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        moveAuthoringLayer(layer.Identity, -1);
+      });
+      orderBox.append(upBtn, dnBtn);
+
+      const visBtn = Construct(
+        "button",
+        "stack-mini-btn" + (layer.Enabled ? " on" : ""),
+        ConstructGlyph(layer.Enabled ? "Eye" : "EyeOff"),
+      );
+      visBtn.type = "button";
+      visBtn.title = "Toggle layer visibility";
+      visBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        layer.Enabled = !layer.Enabled;
+        syncMaterialLive();
+        renderLeftOutliner();
+        rebuildInspector();
+      });
+
+      row.append(handle, thumb, info, orderBox, visBtn);
+
+      if (layer.Model !== "surface" && layers.length > 1) {
+        const delBtn = Construct("button", "stack-mini-btn", ConstructGlyph("Trash"));
+        delBtn.type = "button";
+        delBtn.title = "Remove layer";
+        delBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          p.Authoring.Layers = p.Authoring.Layers.filter((l) => l.Identity !== layer.Identity);
+          if (state.selectedLayerId === layer.Identity) {
+            state.selectedLayerId = p.Authoring.Layers[0]?.Identity || null;
+          }
+          syncMaterialLive();
+          renderLeftOutliner();
+          rebuildInspector();
+        });
+        row.append(delBtn);
+      }
+
+      row.addEventListener("dragstart", (e) => {
+        dragLayerId = layer.Identity;
+        row.classList.add("dragging");
+        if (e.dataTransfer) {
+          e.dataTransfer.effectAllowed = "move";
+          e.dataTransfer.setData("text/plain", layer.Identity);
+        }
+      });
+      row.addEventListener("dragend", () => {
+        dragLayerId = null;
+        row.classList.remove("dragging", "drop-above", "drop-below");
+      });
+      row.addEventListener("dragover", (e) => {
+        if (!dragLayerId || dragLayerId === layer.Identity) return;
+        e.preventDefault();
+        const r = row.getBoundingClientRect();
+        const above = e.clientY < r.top + r.height * 0.5;
+        row.classList.toggle("drop-above", above);
+        row.classList.toggle("drop-below", !above);
+      });
+      row.addEventListener("dragleave", () => row.classList.remove("drop-above", "drop-below"));
+      row.addEventListener("drop", (e) => {
+        e.preventDefault();
+        const src = dragLayerId || e.dataTransfer?.getData("text/plain");
+        const r = row.getBoundingClientRect();
+        const above = e.clientY < r.top + r.height * 0.5;
+        row.classList.remove("drop-above", "drop-below");
+        if (!src || src === layer.Identity) return;
+        const srcIdx = layers.findIndex((l) => l.Identity === src);
+        const tgtIdx = layers.findIndex((l) => l.Identity === layer.Identity);
+        if (srcIdx < 0 || tgtIdx < 0) return;
+        const [item] = layers.splice(srcIdx, 1);
+        const newTgtIdx = layers.findIndex((l) => l.Identity === layer.Identity);
+        layers.splice(above ? newTgtIdx : newTgtIdx + 1, 0, item);
+        syncMaterialLive();
+        renderLeftOutliner();
+        rebuildInspector();
+      });
+
+      row.addEventListener("click", () => {
+        state.selectedLayerId = layer.Identity;
+        if (!layer.Channels.includes(state.inspectedChannel)) {
+          state.inspectedChannel = layer.Channels[0] || "colour";
+        }
+        renderLeftOutliner();
+        rebuildInspector();
+      });
+      stackBox.append(row);
+    });
+
+    sceneSummaryWrap.append(stackBox);
 
     sceneSummaryWrap.append(Construct("div", "property-label", "Preview Mesh Geometry"));
     const meshList = Construct("div");
@@ -349,15 +901,16 @@ export function mountMaterialWorkspace(root, appBridge) {
     }
     sceneSummaryWrap.append(envStrip);
 
-    const browseBtn = Construct("button", "action-button warm", [
-      ConstructGlyph("Grid"),
-      Construct("span", null, `Browse ${MATERIAL_CATALOG.length} Materials in Asset Browser`),
-    ]);
-    browseBtn.type = "button";
-    browseBtn.style.width = "100%";
-    browseBtn.style.marginTop = "10px";
-    browseBtn.addEventListener("click", () => appBridge.focusAssetCategory?.("materials"));
-    sceneSummaryWrap.append(browseBtn);
+    const browseStrip = Construct("div", "chip-strip");
+    browseStrip.style.marginTop = "10px";
+    const browseMatBtn = Construct("button", "chip-btn", `Materials (${MATERIAL_CATALOG.length})`);
+    browseMatBtn.type = "button";
+    browseMatBtn.addEventListener("click", () => appBridge.focusAssetCategory?.("materials"));
+    const browsePatBtn = Construct("button", "chip-btn", `Patterns (${patternCatalog.length})`);
+    browsePatBtn.type = "button";
+    browsePatBtn.addEventListener("click", () => appBridge.focusAssetCategory?.("patterns", "African Patterns"));
+    browseStrip.append(browseMatBtn, browsePatBtn);
+    sceneSummaryWrap.append(browseStrip);
   }
 
   function applyAsset(payload) {
@@ -366,13 +919,29 @@ export function mountMaterialWorkspace(root, appBridge) {
       const item = payload.raw || MATERIAL_CATALOG.find((m) => m.id === payload.id);
       if (!item) return false;
       state.selectedId = item.id;
-      state.params = normalizeMaterial(item);
+      const next = normalizeMaterial(item);
+      if (state.params.pattern) {
+        next.pattern = state.params.pattern;
+        next.patternChannelMask = state.params.patternChannelMask;
+      }
+      ensureAuthoring(next);
+      state.params = next;
+      state.selectedLayerId =
+        next.Authoring.Layers.find((l) => l.Model === "surface")?.Identity ||
+        next.Authoring.Layers[0]?.Identity;
       rebuildInspector();
       syncMaterialLive();
       renderLeftOutliner();
       Broadcast();
       Toast(`Applied "${item.name}" onto Material Stage`);
       return true;
+    }
+    if (payload.assetKind === "pattern") {
+      const entry =
+        payload.raw ||
+        patternCatalog.find((e) => e.id === payload.id || e.name === payload.name) ||
+        payload;
+      return applyTileablePatternToMaterial(entry);
     }
     if (payload.assetKind === "mesh") {
       const mId = payload.id;
@@ -387,20 +956,173 @@ export function mountMaterialWorkspace(root, appBridge) {
     return false;
   }
 
+  function renderPatternSection(parent, openByDefault = false) {
+    const pat = state.params.pattern;
+    const patSec = SectionCard(parent, {
+      Title: "Tileable Pattern Texture",
+      Glyph: "Pattern",
+      Badge: pat ? pat.name : "NONE",
+      Open: openByDefault || !!pat,
+    });
+
+    const patternOptions = patternCatalog.map((entry) => ({
+      value: entry.id,
+      label: entry.name,
+      sub: entry.group || "Pattern",
+      entry,
+    }));
+
+    FilterDropdownPill(patSec.Inner, {
+      Label: "Apply Pattern",
+      Prefix: "Pattern:",
+      Placeholder: "Filter patterns (African, Perlin, Twill...)",
+      Options: patternOptions,
+      Read: () => state.selectedPatternCatalogId || patternOptions[0]?.value,
+      Write: (id, opt) => {
+        state.selectedPatternCatalogId = id;
+        if (opt?.entry) applyTileablePatternToMaterial(opt.entry);
+      },
+    });
+
+    ActionRow(patSec.Inner, [
+      {
+        Label: "+ Upload Image Tile",
+        Glyph: "Image",
+        Tone: "warm",
+        Act: () => triggerPatternImageUpload("tile-pattern"),
+      },
+      {
+        Label: pat ? "Clear Pattern" : "Browse African",
+        Glyph: pat ? "Close" : "Grid",
+        Act: () => {
+          if (pat) clearTileablePattern();
+          else appBridge.focusAssetCategory?.("patterns", "African Patterns");
+        },
+      },
+    ]);
+
+    if (!pat) {
+      patSec.Inner.append(
+        Construct(
+          "p",
+          "property-hint",
+          "Pick a pattern above, click any Pattern in the bottom Asset Browser, drag one onto the 3D stage, or click 'Tile on Material' in Pattern Studio.",
+        ),
+      );
+      return;
+    }
+
+    SliderRow(patSec.Inner, {
+      Label: "Tile Repeats",
+      Minimum: 0.5,
+      Maximum: 16,
+      Step: 0.25,
+      Unit: "×",
+      Read: () => state.params.pattern?.repeats ?? 3,
+      Write: (v) => {
+        if (!state.params.pattern) return;
+        state.params.pattern.repeats = v;
+        syncPatternUniformsFast();
+        renderLeftOutliner();
+      },
+    });
+    SliderRow(patSec.Inner, {
+      Label: "Pattern Rotation",
+      Minimum: -180,
+      Maximum: 180,
+      Step: 1,
+      Unit: "°",
+      Read: () => state.params.pattern?.rotation ?? 0,
+      Write: (v) => {
+        if (!state.params.pattern) return;
+        state.params.pattern.rotation = v;
+        syncPatternUniformsFast();
+      },
+    });
+    SegmentedRow(patSec.Inner, {
+      Label: "Projection",
+      Options: PATTERN_MAPPING_OPTIONS,
+      Read: () => state.params.pattern?.mapping || "uv",
+      Write: (v) => {
+        if (!state.params.pattern) return;
+        state.params.pattern.mapping = v;
+        syncPatternUniformsFast();
+        renderLeftOutliner();
+      },
+    });
+    SegmentedRow(patSec.Inner, {
+      Label: "Tile Axes",
+      Options: PATTERN_AXIS_OPTIONS,
+      Read: () => state.params.pattern?.tileAxes || "xy",
+      Write: (v) => {
+        if (!state.params.pattern) return;
+        state.params.pattern.tileAxes = v;
+        syncMaterialLive();
+        renderLeftOutliner();
+      },
+    });
+    ChannelMaskRow(patSec.Inner, {
+      Label: "Pattern PBR Channels",
+      Read: () => state.params.patternChannelMask || { albedo: true, roughness: true, metalness: true, height: true },
+      Write: (next) => {
+        state.params.patternChannelMask = next;
+        syncPatternUniformsFast();
+        renderLeftOutliner();
+      },
+    });
+    SliderRow(patSec.Inner, {
+      Label: "Beadwork Relief",
+      Minimum: 0,
+      Maximum: 0.012,
+      Step: 0.0005,
+      Digits: 4,
+      Read: () => state.params.pattern?.beadwork?.height ?? 0,
+      Write: (v) => {
+        if (!state.params.pattern) return;
+        if (!state.params.pattern.beadwork) {
+          state.params.pattern.beadwork = { columns: 96, rows: 72, height: v };
+        } else {
+          state.params.pattern.beadwork.height = v;
+        }
+        syncPatternUniformsFast();
+      },
+    });
+  }
+
   function rebuildInspector() {
     if (inspectorScope) ReleaseScope(inspectorScope);
     inspectorScope = OpenScope();
     rightInner.innerHTML = "";
 
+    ensureAuthoring(state.params);
     const p = state.params;
     const recipe = getRecipe(p);
+    const layers = p.Authoring.Layers;
+    const isPatternSelected = state.selectedLayerId === "__pattern__" && !!p.pattern;
+    const selectedLayer = !isPatternSelected
+      ? layers.find((l) => l.Identity === state.selectedLayerId) ||
+        layers.find((l) => l.Model === "surface") ||
+        layers[0]
+      : null;
 
     rightInner.append(
       Construct("div", "object-heading", [
-        Construct("div", "object-symbol", ConstructGlyph("Material")),
+        Construct("div", "object-symbol", ConstructGlyph(isPatternSelected ? "Pattern" : "Material")),
         Construct("div", "object-heading-copy", [
-          Construct("strong", null, p.name || "Procedural Material"),
-          Construct("span", null, `${p.label || recipe.title}`),
+          Construct(
+            "strong",
+            null,
+            isPatternSelected
+              ? p.pattern.name || "Tileable Pattern"
+              : `${p.name || "Material"} · ${selectedLayer?.Name || "Surface"}`,
+          ),
+          Construct(
+            "span",
+            null,
+            isPatternSelected
+              ? "TILEABLE PATTERN LAYER INSPECTOR"
+              : `${(selectedLayer?.Model || "surface").toUpperCase()} STRATA · ${p.label || recipe.title}`,
+          ),
         ]),
       ]),
     );
@@ -408,81 +1130,453 @@ export function mountMaterialWorkspace(root, appBridge) {
     MetricTrio(rightInner, [
       { Label: "Roughness", Highlight: true, Read: () => ({ value: Number(state.params.roughness ?? 0.3).toFixed(2), sub: "Microfacet" }) },
       { Label: "Metalness", Read: () => ({ value: `${Math.round((state.params.metalness ?? 0) * 100)}%`, sub: "Conductor" }) },
-      { Label: "Clearcoat", Read: () => ({ value: `${Math.round((state.params.coat ?? 0) * 100)}%`, sub: `IOR ${Number(state.params.ior ?? 1.5).toFixed(2)}` }) },
+      {
+        Label: isPatternSelected ? "Tile" : "Strata",
+        Read: () =>
+          isPatternSelected
+            ? { value: `${(state.params.pattern?.repeats ?? 2).toFixed(1)}×`, sub: (state.params.pattern?.mapping || "uv").toUpperCase() }
+            : { value: `${layers.filter((l) => l.Enabled).length}/${layers.length}`, sub: `${selectedLayer?.Channels?.length || 0} ch` },
+      },
     ]);
 
-    // Color & Surface Section
-    const baseSec = SectionCard(rightInner, { Title: "Base Color & Optical Strata", Glyph: "Palette", Badge: p.category || "Surface" });
-    ColorRow(baseSec.Inner, {
-      Label: "Base Albedo",
-      Read: () => state.params.color || "#888888",
-      Write: (hex) => {
-        state.params = applyRecipeColor(state.params, "color", hex);
-        syncMaterialLive();
-      },
-    });
-    SliderRow(baseSec.Inner, {
-      Label: "Roughness",
-      Minimum: 0.02, Maximum: 1, Step: 0.01,
-      Read: () => state.params.roughness ?? 0.35,
-      Write: (v) => { state.params.roughness = v; syncMaterialLive(); },
-    });
-    SliderRow(baseSec.Inner, {
-      Label: "Metalness",
-      Minimum: 0, Maximum: 1, Step: 0.01,
-      Read: () => state.params.metalness ?? 0,
-      Write: (v) => { state.params.metalness = v; syncMaterialLive(); },
-    });
-    SliderRow(baseSec.Inner, {
-      Label: "Clearcoat",
-      Minimum: 0, Maximum: 1, Step: 0.01,
-      Read: () => state.params.coat ?? 0,
-      Write: (v) => { state.params.coat = v; syncMaterialLive(); },
-    });
-
-    // Dynamic Procedural Recipe Controls
-    const groups = new Map();
-    for (const ctrl of recipe.controls) {
-      if (ctrl.key === "color") continue;
-      const g = ctrl.group || "surface";
-      if (!groups.has(g)) groups.set(g, []);
-      groups.get(g).push(ctrl);
+    if (isPatternSelected) {
+      renderPatternSection(rightInner, true);
     }
-    for (const [gName, ctrls] of groups.entries()) {
-      const title = gName.charAt(0).toUpperCase() + gName.slice(1) + " Controls";
-      const sec = SectionCard(rightInner, { Title: title, Glyph: "Sliders", Open: gName !== "iridescence" });
-      for (const ctrl of ctrls) {
-        if (ctrl.color) continue;
-        const min = Number.isFinite(ctrl.min) ? ctrl.min : 0;
-        const max = Number.isFinite(ctrl.max) ? ctrl.max : 1;
-        const step = Number.isFinite(ctrl.step) ? ctrl.step : (max - min) > 10 ? 0.5 : 0.01;
-        SliderRow(sec.Inner, {
-          Label: ctrl.label || ctrl.id,
-          Minimum: min,
-          Maximum: max,
-          Step: step,
-          Unit: ctrl.unit || "—",
-          Read: () => {
-            const val = recipeControlValue(state.params, ctrl);
-            return Number.isFinite(val) ? val : min;
-          },
+
+    // Dedicated Layer Stack Inspector for the Selected Material Layer!
+    if (selectedLayer) {
+      const layerSec = SectionCard(rightInner, {
+        Title: `Layer Inspector: ${selectedLayer.Name}`,
+        Glyph: "Layers",
+        Badge: selectedLayer.Model.toUpperCase(),
+        Open: true,
+      });
+
+      TextRow(layerSec.Inner, {
+        Label: "Layer Name",
+        Read: () => selectedLayer.Name,
+        Write: (v) => {
+          selectedLayer.Name = String(v || "Layer").slice(0, 80);
+          renderLeftOutliner();
+        },
+      });
+      SwitchRow(layerSec.Inner, {
+        Label: "Layer Enabled",
+        Read: () => selectedLayer.Enabled,
+        Write: (v) => {
+          selectedLayer.Enabled = !!v;
+          syncMaterialLive();
+          renderLeftOutliner();
+        },
+      });
+
+      // Layer PBR Channels — Filterable Dropdown -> Removable Pills!
+      ChannelMaskRow(layerSec.Inner, {
+        Label: "Layer PBR Channels",
+        AddLabel: "Channel",
+        StrictPresence: true,
+        Channels: MATERIAL_PBR_CHANNEL_SPEC,
+        Read: () => Object.fromEntries(selectedLayer.Channels.map((c) => [c, true])),
+        Write: (mapObj) => {
+          const nextList = MATERIAL_PBR_CHANNEL_SPEC.map(([k]) => k).filter((k) => mapObj[k] === true);
+          if (!nextList.length) nextList.push("colour");
+          selectedLayer.Channels = nextList;
+          if (!nextList.includes(state.inspectedChannel)) {
+            state.inspectedChannel = nextList[0];
+          }
+          syncMaterialLive();
+          renderLeftOutliner();
+          rebuildInspector();
+        },
+      });
+
+      if (selectedLayer.Model === "detail" || selectedLayer.Model === "flakes") {
+        SliderRow(layerSec.Inner, {
+          Label: "Layer Coverage",
+          Minimum: 0,
+          Maximum: 1,
+          Step: 0.01,
+          Read: () => ReadMaterialParameter(state.params, ChannelAddress(selectedLayer, "coverage")) ?? 1,
           Write: (v) => {
-            state.params = applyRecipeControl(state.params, ctrl, v);
+            mutateParamsPreservingPattern((cur) =>
+              WriteMaterialParameter(cur, ChannelAddress(selectedLayer, "coverage"), v),
+            );
             syncMaterialLive();
           },
         });
       }
-      if (recipe.supportsMetalScratches && gName === "finish") {
-        SwitchRow(sec.Inner, {
-          Label: "Metal Micro-Scratches",
-          Read: () => !!state.params.metalScratches,
+
+      // Per-Channel Source & Procedural Field Generator Inspector inside the Selected Layer!
+      const chOptions = selectedLayer.Channels.map((ch) => ({
+        value: ch,
+        label: PbrChannels[ch]?.Caption || ch,
+        sub: ChannelAddress(selectedLayer, ch),
+      }));
+      if (!selectedLayer.Channels.includes(state.inspectedChannel)) {
+        state.inspectedChannel = selectedLayer.Channels[0] || "colour";
+      }
+      const chKey = state.inspectedChannel;
+      const chAddr = ResolveAddress(p, ChannelAddress(selectedLayer, chKey));
+      const chSource = p.Authoring.Sources[chAddr] || { Mode: "value" };
+
+      FilterDropdownPill(layerSec.Inner, {
+        Label: "Inspect Channel Field",
+        Prefix: "Ch:",
+        Placeholder: "Filter layer channels...",
+        Options: chOptions,
+        Read: () => chKey,
+        Write: (nextCh) => {
+          state.inspectedChannel = nextCh;
+          rebuildInspector();
+        },
+      });
+
+      FilterDropdownPill(layerSec.Inner, {
+        Label: `${PbrChannels[chKey]?.Caption || chKey} Source`,
+        Prefix: "Src:",
+        Placeholder: "Filter source modes...",
+        Options: SOURCE_MODES,
+        Read: () => chSource.Mode || "value",
+        Write: (mode) => {
+          mutateParamsPreservingPattern((cur) => {
+            let next = structuredClone(cur);
+            const curSrc = next.Authoring.Sources[chAddr] || {};
+            if (mode === "value") {
+              delete next.Authoring.Sources[chAddr];
+              return next;
+            }
+            if (mode === "field") {
+              let gen =
+                curSrc.Generator &&
+                next.Authoring.Generators.find((g) => g.Identity === curSrc.Generator && g.Coded);
+              if (!gen) {
+                next = DeclareCodedField(next, "noise", `${selectedLayer.Name} ${chKey}`, "Layer field");
+                gen = next.Authoring.Generators[next.Authoring.Generators.length - 1];
+              }
+              next.Authoring.Sources[chAddr] = {
+                Mode: "field",
+                Generator: gen.Identity,
+                Stops: curSrc.Stops || ["#1a1d24", "#e8c27a"],
+                Direct: curSrc.Direct ?? false,
+              };
+            } else {
+              next.Authoring.Sources[chAddr] = {
+                Mode: mode,
+                Stops: curSrc.Stops || ["#1a1d24", "#e8c27a"],
+                Direct: curSrc.Direct ?? false,
+                ...(mode === "texture" && curSrc.Texture ? { Texture: curSrc.Texture } : {}),
+              };
+            }
+            return next;
+          });
+          syncMaterialLive();
+          renderLeftOutliner();
+          rebuildInspector();
+        },
+      });
+
+      if (chSource.Mode && chSource.Mode !== "value") {
+        // Channel preview badge + live field preview thumbnail
+        const prevRow = Construct("div", "property-row");
+        const prevImg = document.createElement("img");
+        prevImg.alt = `${chKey} field preview`;
+        prevImg.style.cssText =
+          "width:44px;height:44px;border-radius:6px;border:1px solid var(--line);background:#0f1115;object-fit:cover;";
+        const prevMeta = Construct(
+          "span",
+          "property-hint",
+          `Live ${chSource.Mode.toUpperCase()} projection on "${selectedLayer.Name}"`,
+        );
+        prevRow.append(Construct("span", "property-label", "Field Preview"), Construct("div", "chip-strip", [prevImg, prevMeta]));
+        layerSec.Inner.append(prevRow);
+        RasterChannelPreview(state.params, selectedLayer.Identity, chKey, 48)
+          .then((url) => { if (url && prevImg.isConnected) prevImg.src = url; })
+          .catch(() => {});
+
+        if (chSource.Mode === "field") {
+          const gen = p.Authoring.Generators.find((g) => g.Identity === chSource.Generator && g.Coded);
+          if (gen) {
+            FilterDropdownPill(layerSec.Inner, {
+              Label: "Field Generator",
+              Prefix: "Gen:",
+              Placeholder: "Filter procedural generators...",
+              Options: GeneratorDefinitions.map((d) => ({ value: d.identity, label: d.label, sub: d.description })),
+              Read: () => gen.Procedure,
+              Write: (proc) => {
+                mutateParamsPreservingPattern((cur) => {
+                  const next = structuredClone(cur);
+                  const targetGen = next.Authoring.Generators.find((g) => g.Identity === gen.Identity);
+                  if (!targetGen) return next;
+                  targetGen.Procedure = proc;
+                  const keys = ["scale", "seed", "angle", "amount", ...(proc.startsWith("camouflage") ? ["colour0", "colour1", "colour2", "colour3", "softness", "pixelSize"] : [])];
+                  targetGen.Inputs = keys.map((k) => `field:${targetGen.Identity}:${k}`);
+                  if (proc.startsWith("camouflage")) {
+                    CamouflagePalette.forEach((col, i) => {
+                      next.Authoring.Inputs[`field:${targetGen.Identity}:colour${i}`] ??= col;
+                    });
+                    next.Authoring.Inputs[`field:${targetGen.Identity}:softness`] ??= 0.012;
+                    next.Authoring.Inputs[`field:${targetGen.Identity}:pixelSize`] ??= 4;
+                  }
+                  return next;
+                });
+                syncMaterialLive();
+                rebuildInspector();
+              },
+            });
+
+            for (const [k, label, min, max, step, unit] of [
+              ["scale", "Field Scale", 1, 64, 0.5, "×"],
+              ["seed", "Random Seed", 0, 200, 1, "—"],
+              ["angle", "Rotation Angle", -180, 180, 1, "°"],
+              ["amount", "Field Contrast", 0, 1, 0.02, "—"],
+            ]) {
+              const addr = `field:${gen.Identity}:${k}`;
+              SliderRow(layerSec.Inner, {
+                Label: label,
+                Minimum: min,
+                Maximum: max,
+                Step: step,
+                Unit: unit,
+                Read: () => ReadMaterialParameter(state.params, addr) ?? (k === "scale" ? 8 : k === "seed" ? 12 : k === "amount" ? 1 : 0),
+                Write: (v) => {
+                  mutateParamsPreservingPattern((cur) => WriteMaterialParameter(cur, addr, v));
+                  syncMaterialLive();
+                },
+              });
+            }
+
+            if (gen.Procedure.startsWith("camouflage")) {
+              MultiColourRow(layerSec.Inner, {
+                Label: "Camo Palette",
+                Read: () => [0, 1, 2, 3].map((i) => ReadMaterialParameter(state.params, `field:${gen.Identity}:colour${i}`) || CamouflagePalette[i]),
+                Write: (cols) => {
+                  mutateParamsPreservingPattern((cur) => {
+                    let next = cur;
+                    cols.slice(0, 6).forEach((hex, idx) => {
+                      next = WriteMaterialParameter(next, `field:${gen.Identity}:colour${idx}`, hex);
+                    });
+                    return next;
+                  });
+                  syncMaterialLive();
+                },
+              });
+            } else {
+              MultiColourRow(layerSec.Inner, {
+                Label: "Field Gradient Stops",
+                Read: () => p.Authoring.Sources[chAddr]?.Stops || ["#1a1d24", "#e8c27a"],
+                Write: (cols) => {
+                  mutateParamsPreservingPattern((cur) => {
+                    const next = structuredClone(cur);
+                    if (next.Authoring.Sources[chAddr]) next.Authoring.Sources[chAddr].Stops = cols.slice(0, 8);
+                    return next;
+                  });
+                  syncMaterialLive();
+                },
+              });
+            }
+          }
+        } else if (["linear", "radial", "conic"].includes(chSource.Mode)) {
+          MultiColourRow(layerSec.Inner, {
+            Label: "Gradient Ramp Stops",
+            Read: () => p.Authoring.Sources[chAddr]?.Stops || ["#1a1d24", "#e8c27a"],
+            Write: (cols) => {
+              mutateParamsPreservingPattern((cur) => {
+                const next = structuredClone(cur);
+                if (next.Authoring.Sources[chAddr]) next.Authoring.Sources[chAddr].Stops = cols.slice(0, 8);
+                return next;
+              });
+              syncMaterialLive();
+            },
+          });
+        } else if (chSource.Mode === "texture") {
+          ActionRow(layerSec.Inner, [
+            { Label: "+ Upload 256px Map", Glyph: "Image", Tone: "warm", Act: () => triggerPatternImageUpload("channel-texture") },
+          ]);
+        }
+
+        SwitchRow(layerSec.Inner, {
+          Label: "Direct Value Override",
+          Read: () => !!p.Authoring.Sources[chAddr]?.Direct,
           Write: (v) => {
-            state.params = { ...state.params, metalScratches: v };
-            rebuildInspector();
+            mutateParamsPreservingPattern((cur) => {
+              const next = structuredClone(cur);
+              if (next.Authoring.Sources[chAddr]) next.Authoring.Sources[chAddr].Direct = !!v;
+              return next;
+            });
             syncMaterialLive();
           },
         });
       }
+    }
+
+    // Layer Model-Specific Optical & Surface Recipe Controls
+    if (!selectedLayer || selectedLayer.Model === "surface") {
+      const baseSec = SectionCard(rightInner, { Title: "Surface Albedo & Microfacet", Glyph: "Palette", Badge: p.category || "Surface" });
+      ColorRow(baseSec.Inner, {
+        Label: "Base Albedo",
+        Read: () => state.params.color || "#888888",
+        Write: (hex) => {
+          state.params = applyRecipeColor(state.params, "color", hex);
+          syncMaterialLive();
+        },
+      });
+      SliderRow(baseSec.Inner, {
+        Label: "Roughness",
+        Minimum: 0.02, Maximum: 1, Step: 0.01,
+        Read: () => state.params.roughness ?? 0.35,
+        Write: (v) => { state.params.roughness = v; syncMaterialLive(); },
+      });
+      SliderRow(baseSec.Inner, {
+        Label: "Metalness",
+        Minimum: 0, Maximum: 1, Step: 0.01,
+        Read: () => state.params.metalness ?? 0,
+        Write: (v) => { state.params.metalness = v; syncMaterialLive(); },
+      });
+      SliderRow(baseSec.Inner, {
+        Label: "Specular / IOR",
+        Minimum: 1, Maximum: 2.8, Step: 0.02,
+        Read: () => state.params.ior ?? 1.5,
+        Write: (v) => { state.params.ior = v; syncMaterialLive(); },
+      });
+
+      // Dynamic Procedural Recipe Controls
+      const groups = new Map();
+      for (const ctrl of recipe.controls) {
+        if (ctrl.key === "color") continue;
+        const g = ctrl.group || "surface";
+        if (!groups.has(g)) groups.set(g, []);
+        groups.get(g).push(ctrl);
+      }
+      for (const [gName, ctrls] of groups.entries()) {
+        const title = gName.charAt(0).toUpperCase() + gName.slice(1) + " Controls";
+        const sec = SectionCard(rightInner, { Title: title, Glyph: "Sliders", Open: gName !== "iridescence" });
+        for (const ctrl of ctrls) {
+          if (ctrl.color) continue;
+          const min = Number.isFinite(ctrl.min) ? ctrl.min : 0;
+          const max = Number.isFinite(ctrl.max) ? ctrl.max : 1;
+          const step = Number.isFinite(ctrl.step) ? ctrl.step : (max - min) > 10 ? 0.5 : 0.01;
+          SliderRow(sec.Inner, {
+            Label: ctrl.label || ctrl.id,
+            Minimum: min,
+            Maximum: max,
+            Step: step,
+            Unit: ctrl.unit || "—",
+            Read: () => {
+              const val = recipeControlValue(state.params, ctrl);
+              return Number.isFinite(val) ? val : min;
+            },
+            Write: (v) => {
+              state.params = applyRecipeControl(state.params, ctrl, v);
+              syncMaterialLive();
+            },
+          });
+        }
+        if (recipe.supportsMetalScratches && gName === "finish") {
+          SwitchRow(sec.Inner, {
+            Label: "Metal Micro-Scratches",
+            Read: () => !!state.params.metalScratches,
+            Write: (v) => {
+              state.params = { ...state.params, metalScratches: v };
+              rebuildInspector();
+              syncMaterialLive();
+            },
+          });
+        }
+      }
+    } else if (selectedLayer.Model === "coat") {
+      const coatSec = SectionCard(rightInner, { Title: "Clearcoat Optical Properties", Glyph: "Sparkles", Open: true });
+      SliderRow(coatSec.Inner, {
+        Label: "Clearcoat Weight",
+        Minimum: 0, Maximum: 1, Step: 0.01,
+        Read: () => state.params.coat ?? 0,
+        Write: (v) => { state.params.coat = v; syncMaterialLive(); },
+      });
+      SliderRow(coatSec.Inner, {
+        Label: "Coat Roughness",
+        Minimum: 0.01, Maximum: 1, Step: 0.01,
+        Read: () => state.params.coatRoughness ?? 0.08,
+        Write: (v) => { state.params.coatRoughness = v; syncMaterialLive(); },
+      });
+      SliderRow(coatSec.Inner, {
+        Label: "Coat IOR",
+        Minimum: 1, Maximum: 2.5, Step: 0.02,
+        Read: () => state.params.coatIor ?? 1.5,
+        Write: (v) => { state.params.coatIor = v; syncMaterialLive(); },
+      });
+      SliderRow(coatSec.Inner, {
+        Label: "Orange Peel Relief",
+        Minimum: 0, Maximum: 1, Step: 0.02,
+        Read: () => state.params.orangePeel ?? 0,
+        Write: (v) => { state.params.orangePeel = v; syncMaterialLive(); },
+      });
+    } else if (selectedLayer.Model === "flakes") {
+      const flSec = SectionCard(rightInner, { Title: "Metallic Flake Dispersion", Glyph: "Grid", Open: true });
+      SliderRow(flSec.Inner, {
+        Label: "Flake Density",
+        Minimum: 0, Maximum: 1, Step: 0.01,
+        Read: () => state.params.flakes ?? 0,
+        Write: (v) => { state.params.flakes = v; syncMaterialLive(); },
+      });
+      SliderRow(flSec.Inner, {
+        Label: "Flake Frequency",
+        Minimum: 4, Maximum: 120, Step: 1,
+        Read: () => state.params.flakeScale ?? 24,
+        Write: (v) => { state.params.flakeScale = v; syncMaterialLive(); },
+      });
+      SliderRow(flSec.Inner, {
+        Label: "Flake Tilt",
+        Minimum: 0, Maximum: 1, Step: 0.02,
+        Read: () => state.params.flakeTilt ?? 0.2,
+        Write: (v) => { state.params.flakeTilt = v; syncMaterialLive(); },
+      });
+      MultiColourRow(flSec.Inner, {
+        Label: "Flake Palette",
+        Read: () => state.params.colors || [state.params.color || "#e8c27a", "#ffffff"],
+        Write: (cols) => {
+          state.params.colors = cols.slice(0, 8);
+          state.params.color = cols[0] || state.params.color;
+          syncMaterialLive();
+        },
+      });
+    } else if (selectedLayer.Model === "detail") {
+      const detSec = SectionCard(rightInner, { Title: "Detail Strata Presets", Glyph: "Sliders", Open: true });
+      const applyDetailPreset = (proc, stops) => {
+        mutateParamsPreservingPattern((cur) => {
+          let next = structuredClone(cur);
+          const curSrc = next.Authoring.Sources[ChannelAddress(selectedLayer, "colour")] || {};
+          let gen =
+            curSrc.Generator &&
+            next.Authoring.Generators.find((g) => g.Identity === curSrc.Generator && g.Coded);
+          if (!gen) {
+            next = DeclareCodedField(next, proc, `${selectedLayer.Name} Field`, "Detail fields");
+            gen = next.Authoring.Generators[next.Authoring.Generators.length - 1];
+          } else {
+            gen.Procedure = proc;
+          }
+          next.Authoring.Sources[ChannelAddress(selectedLayer, "colour")] = {
+            Mode: "field",
+            Generator: gen.Identity,
+            Stops: stops,
+            Direct: false,
+          };
+          return next;
+        });
+        state.inspectedChannel = "colour";
+        syncMaterialLive();
+        rebuildInspector();
+      };
+      ActionRow(detSec.Inner, [
+        { Label: "Fractal Scuffs", Glyph: "Noise", Act: () => applyDetailPreset("noise", ["#14161a", "#c9b89b"]) },
+        { Label: "Camo Patches", Glyph: "Sparkles", Tone: "warm", Act: () => applyDetailPreset("camouflage-smooth", CamouflagePalette) },
+      ]);
+      ActionRow(detSec.Inner, [
+        { Label: "Voronoi Cells", Glyph: "Grid", Act: () => applyDetailPreset("cells", ["#22252b", "#d8aa5b"]) },
+        { Label: "Directional Grain", Glyph: "Sliders", Act: () => applyDetailPreset("stripes", ["#1a1d22", "#a2abb8"]) },
+      ]);
+    }
+
+    if (!isPatternSelected) {
+      renderPatternSection(rightInner, false);
     }
 
     // Look-dev Lighting & Export
@@ -606,7 +1700,15 @@ export function mountMaterialWorkspace(root, appBridge) {
   return {
     name: "Material",
     applyAsset,
-    getSnapshot: () => ({ id: state.params.id, name: state.params.name, shape: state.shape }),
+    getSnapshot: () => ({
+      id: state.params.id,
+      name: state.params.name,
+      shape: state.shape,
+      selectedLayerId: state.selectedLayerId,
+      layerCount: state.params.Authoring?.Layers?.length || 0,
+      hasPattern: !!state.params.pattern,
+      patternName: state.params.pattern?.name || null,
+    }),
     dispose() {
       disposed = true;
       cancelAnimationFrame(rafId);

@@ -540,19 +540,22 @@ export function FilterDropdownPill(Parent, Binding)
 
 export function ChannelMaskRow(Parent, Binding)
 {
-    const Channels = [
+    const Channels = Binding.Channels || [
         ['albedo', 'Albedo', 'Base Colour', 'albedo', '#e8c27a'],
         ['roughness', 'Roughness', 'Surface Gloss', 'rough', '#2fe6a7'],
         ['metalness', 'Metalness', 'Conductor Mask', 'metal', '#63a8ff'],
         ['height', 'Height', 'Relief / Bump', 'height', '#e686b8'],
     ];
+    const Strict = !!Binding.StrictPresence;
+    const MakeMap = (Val) => Object.fromEntries(Channels.map(([Key]) => [Key, Val]));
+    const IsActive = (MapObj, Key) => (Strict ? MapObj?.[Key] === true : MapObj?.[Key] !== false);
 
     const PillsWrap = Construct('div', 'pbr-pill-wrap');
     const Dropdown = Construct('div', 'pill-dropdown pbr-add-dropdown');
     const TriggerCount = Construct('span', 'trigger-dim');
     const Trigger = Construct('button', 'pill-trigger pbr-add-trigger', [
         ConstructGlyph('Plus', 'glyph'),
-        Construct('span', null, 'Channel'),
+        Construct('span', null, Binding.AddLabel || 'Channel'),
         TriggerCount,
         ConstructGlyph('ChevronDown', 'glyph chev'),
     ]);
@@ -599,7 +602,7 @@ export function ChannelMaskRow(Parent, Binding)
         const q = (SearchInput.value || '').trim().toLowerCase();
         const available = Channels.filter(([Key, Title, Sub]) =>
         {
-            if (MapObj[Key] !== false) return false; // already added -> lives as active pill!
+            if (IsActive(MapObj, Key)) return false; // already added -> lives as active pill!
             return !q || `${Title} ${Sub} ${Key}`.toLowerCase().includes(q);
         });
 
@@ -621,7 +624,7 @@ export function ChannelMaskRow(Parent, Binding)
             item.addEventListener('click', (e) =>
             {
                 e.stopPropagation();
-                const next = { albedo: true, roughness: true, metalness: true, height: true, ...MapObj, [Key]: true };
+                const next = { ...(Strict ? MakeMap(false) : MakeMap(true)), ...MapObj, [Key]: true };
                 Commit(next);
             });
             MenuList.append(item);
@@ -629,7 +632,7 @@ export function ChannelMaskRow(Parent, Binding)
 
         if (!available.length)
         {
-            const anyRemaining = Channels.some(([Key]) => MapObj[Key] === false);
+            const anyRemaining = Channels.some(([Key]) => !IsActive(MapObj, Key));
             MenuList.append(
                 Construct(
                     'div',
@@ -642,14 +645,13 @@ export function ChannelMaskRow(Parent, Binding)
 
     const Sync = () =>
     {
-        const MapObj = Binding.Read() || { albedo: true, roughness: true, metalness: true, height: true };
+        const MapObj = Binding.Read() || (Strict ? MakeMap(false) : MakeMap(true));
         PillsWrap.innerHTML = '';
         let inactiveCount = 0;
 
         for (const [Key, Title, , Kind, DotColor] of Channels)
         {
-            const isAdded = MapObj[Key] !== false;
-            if (!isAdded) { inactiveCount++; continue; }
+            if (!IsActive(MapObj, Key)) { inactiveCount++; continue; }
 
             const Dot = Construct('i', 'pbr-chan-dot');
             Dot.style.background = DotColor;
@@ -665,7 +667,7 @@ export function ChannelMaskRow(Parent, Binding)
             Pill.addEventListener('click', (e) =>
             {
                 e.stopPropagation();
-                const next = { albedo: true, roughness: true, metalness: true, height: true, ...MapObj, [Key]: false };
+                const next = { ...(Strict ? MakeMap(false) : MakeMap(true)), ...MapObj, [Key]: false };
                 Commit(next);
             });
             PillsWrap.append(Pill);
@@ -728,13 +730,13 @@ export function ChannelMaskRow(Parent, Binding)
     BtnAddAll.addEventListener('click', (e) =>
     {
         e.stopPropagation();
-        Commit({ albedo: true, roughness: true, metalness: true, height: true });
+        Commit(MakeMap(true));
         SetOpen(false);
     });
     BtnClearAll.addEventListener('click', (e) =>
     {
         e.stopPropagation();
-        Commit({ albedo: false, roughness: false, metalness: false, height: false });
+        Commit(MakeMap(false));
     });
 
     const onDocDown = (e) =>

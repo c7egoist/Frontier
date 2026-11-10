@@ -70,7 +70,7 @@ function acquirePatternTextures(key, build) {
     };
     entry = { refs: 0, textures: [make(), make(), make(), make(), make()], ready: null };
     entry.ready =
-      typeof document === "undefined"
+      typeof document === "undefined" || typeof Image === "undefined"
         ? Promise.resolve()
         : build().then((canvases) =>
             canvases.forEach((c, i) => {
@@ -97,9 +97,25 @@ function acquirePatternTextures(key, build) {
     },
   };
 }
+function applyTileWrap(textures, tileAxes) {
+  for (const texture of textures) {
+    texture.wrapS = ["y", "none"].includes(tileAxes)
+      ? THREE.ClampToEdgeWrapping
+      : THREE.RepeatWrapping;
+    texture.wrapT = ["x", "none"].includes(tileAxes)
+      ? THREE.ClampToEdgeWrapping
+      : THREE.RepeatWrapping;
+  }
+}
+
 export function attachSurfaceSources(material, p) {
-  const leather = p.type === 11 || p.type === 30,
-    doc = p.pattern ? validatePattern(p.pattern) : null;
+  const leather = p.type === 11 || p.type === 30;
+  const isSurfacePattern = p.pattern?.schema === "frontier.pattern-surface.v1";
+  const doc = p.pattern
+    ? isSurfacePattern
+      ? p.pattern
+      : validatePattern(p.pattern)
+    : null;
   const resources = [];
   let hide, pattern;
   if (leather) {
@@ -108,7 +124,71 @@ export function attachSurfaceSources(material, p) {
     ]);
     resources.push(hide);
   }
-  if (doc) {
+  if (doc && isSurfacePattern) {
+    const w = Math.max(16, Math.round(Number(doc.width) || 512));
+    const h = Math.max(16, Math.round(Number(doc.height) || 512));
+    const tileAxes = ["x", "y", "none"].includes(doc.tileAxes) ? doc.tileAxes : "xy";
+    const sourceKey = `surf:${doc.sourceId || doc.name || "pat"}:${doc.version || 1}:${w}x${h}:${tileAxes}`;
+    pattern = acquirePatternTextures(sourceKey, async () => {
+      const len = w * h * 4;
+      const Color = new Uint8Array(len);
+      const Packed = new Uint8Array(len);
+      const Finish = new Uint8Array(len);
+      const Normals = new Uint8Array(len);
+      const Coverage = new Uint8Array(len);
+      const srcA = doc.albedo;
+      const srcR = doc.roughness;
+      const srcM = doc.metalness;
+      const srcH = doc.heightMap;
+      const srcN = doc.normal;
+      const srcF = doc.finishWeights;
+      for (let i = 0; i < len; i += 4) {
+        const alphaByte = srcA ? srcA[i + 3] : 255;
+        const af = alphaByte / 255;
+        // GLSL un-premultiplies patternColorSample.rgb by patternCoverage = patternColorSample.a
+        Color[i] = srcA ? Math.round(srcA[i] * af) : 200;
+        Color[i + 1] = srcA ? Math.round(srcA[i + 1] * af) : 200;
+        Color[i + 2] = srcA ? Math.round(srcA[i + 2] * af) : 200;
+        Color[i + 3] = alphaByte;
+
+        Packed[i] = srcR ? srcR[i] : 140;
+        Packed[i + 1] = srcM ? srcM[i] : 0;
+        Packed[i + 2] = srcH ? srcH[i] : 128;
+        Packed[i + 3] = 255;
+
+        const finCov = srcF ? srcF[i + 3] : 0;
+        Finish[i] = srcF ? srcF[i] : 0;
+        Finish[i + 1] = srcF ? srcF[i + 1] : 0;
+        Finish[i + 2] = srcF ? srcF[i + 2] : 0;
+        Finish[i + 3] = finCov;
+
+        const nx = srcN ? srcN[i] : 128;
+        const ny = srcN ? srcN[i + 1] : 128;
+        const nz = srcN ? srcN[i + 2] : 255;
+        const hasRelief = Math.abs(nx - 128) > 1 || Math.abs(ny - 128) > 1;
+        const nAlpha = hasRelief ? Math.max(alphaByte, 210) : 0;
+        const naf = nAlpha / 255;
+        Normals[i] = Math.round(nx * naf);
+        Normals[i + 1] = Math.round(ny * naf);
+        Normals[i + 2] = Math.round(nz * naf);
+        Normals[i + 3] = nAlpha;
+
+        Coverage[i] = alphaByte;
+        Coverage[i + 1] = alphaByte;
+        Coverage[i + 2] = alphaByte;
+        Coverage[i + 3] = alphaByte;
+      }
+      return [
+        { data: Color, width: w, height: h },
+        { data: Packed, width: w, height: h },
+        { data: Finish, width: w, height: h },
+        { data: Normals, width: w, height: h },
+        { data: Coverage, width: w, height: h },
+      ];
+    });
+    applyTileWrap(pattern.textures, tileAxes);
+    resources.push(pattern);
+  } else if (doc) {
     // Naming, orientation, repeat count and mapping are metadata/uniforms, not
     // raster content. Reuse the same source maps while these are edited live.
     const sourceKey = JSON.stringify({
@@ -137,16 +217,15 @@ export function attachSurfaceSources(material, p) {
       }
       return [color, { data: Packed, width: roughness.width, height: roughness.height }, finish, normals, { data: Coverage, width: roughness.width, height: roughness.height }];
     });
-    for (const texture of pattern.textures) {
-      texture.wrapS = ["y", "none"].includes(doc.tileAxes)
-        ? THREE.ClampToEdgeWrapping
-        : THREE.RepeatWrapping;
-      texture.wrapT = ["x", "none"].includes(doc.tileAxes)
-        ? THREE.ClampToEdgeWrapping
-        : THREE.RepeatWrapping;
-    }
+    applyTileWrap(pattern.textures, doc.tileAxes);
     resources.push(pattern);
   }
+  const chMask = p.patternChannelMask || doc?.channels || {};
+  const dimAspect = doc
+    ? isSurfacePattern
+      ? [Math.max(0.25, (Number(doc.width) || 512) / 512), Math.max(0.25, (Number(doc.height) || 512) / 512)]
+      : patternDimensions(doc).map((v) => v / 512)
+    : [1, 1];
   material.userData.ready = Promise.all(resources.map((r) => r.ready));
   material.addEventListener("dispose", () =>
     resources.forEach((r) => r.release()),
@@ -174,12 +253,18 @@ export function attachSurfaceSources(material, p) {
       uPatternFinish: { value: pattern?.textures[2] || null },
       uPatternNormals: { value: pattern?.textures[3] || null },
       uPatternChannelMask: { value: pattern?.textures[4] || null },
-      uPatternRepeats: { value: doc?.repeats || 1 },
+      uPatternApplyChannels: {
+        value: new THREE.Vector4(
+          chMask.albedo !== false ? 1 : 0,
+          chMask.roughness !== false ? 1 : 0,
+          chMask.metalness !== false ? 1 : 0,
+          chMask.height !== false ? 1 : 0,
+        ),
+      },
+      uPatternRepeats: { value: doc?.repeats ?? 2 },
       uPatternAngle: { value: ((doc?.rotation || 0) * Math.PI) / 180 },
       uPatternAspect: {
-        value: new THREE.Vector2(
-          ...(doc ? patternDimensions(doc).map((v) => v / 512) : [1, 1]),
-        ),
+        value: new THREE.Vector2(...dimAspect),
       },
       uPatternObject: {
         value:
@@ -209,6 +294,7 @@ float vectorHide(vec2 p){
 #endif
 #ifdef ALLOY_PATTERN
 uniform sampler2D uPatternColor,uPatternParams,uPatternFinish,uPatternNormals,uPatternChannelMask;
+uniform vec4 uPatternApplyChannels;
 uniform float uPatternRepeats,uPatternAngle;
 uniform int uPatternObject;
 uniform vec2 uPatternAspect;
@@ -230,13 +316,14 @@ export function patternColorGLSL() {
  patternColorSample=texture2D(uPatternColor,patternUV);
  patternParamsSample=texture2D(uPatternParams,patternUV);
  patternNormalSample=texture2D(uPatternNormals,patternUV);
- patternChannelMaskSample=texture2D(uPatternChannelMask,patternUV);
+ patternChannelMaskSample=texture2D(uPatternChannelMask,patternUV)*vec4(uPatternApplyChannels.y,uPatternApplyChannels.z,uPatternApplyChannels.w,uPatternApplyChannels.w);
  patternNormalSample.rgb/=max(patternNormalSample.a,.00001);
- patternCoverage=patternColorSample.a;
- patternColorSample.rgb/=max(patternCoverage,.00001);
+ patternNormalSample.a*=uPatternApplyChannels.w;
+ patternCoverage=patternColorSample.a*uPatternApplyChannels.x;
+ patternColorSample.rgb/=max(patternColorSample.a,.00001);
 
  vec4 finishSample=texture2D(uPatternFinish,patternUV);
- patternMaterialCoverage=finishSample.a;
+ patternMaterialCoverage=finishSample.a*max(uPatternApplyChannels.x,max(uPatternApplyChannels.y,uPatternApplyChannels.z));
  patternFinishSample=finishSample.rgb/max(finishSample.a,.00001);
  if(uPatternBeads.z>0.){
    vec2 beadGrid=patternUV*uPatternBeads.xy;

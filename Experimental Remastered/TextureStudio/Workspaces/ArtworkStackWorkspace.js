@@ -242,6 +242,17 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
   ]);
   btnSendToPaint.type = "button";
 
+  const btnSendToMaterial = isPattern
+    ? Construct("button", "pill-btn warm", [
+        ConstructGlyph("Material"),
+        Construct("span", null, "Tile on Material"),
+      ])
+    : null;
+  if (btnSendToMaterial) {
+    btnSendToMaterial.type = "button";
+    btnSendToMaterial.title = "Apply this pattern onto the active Material as a tileable PBR texture";
+  }
+
   toolbar.append(
     toolBarEl,
     viewSelect,
@@ -251,6 +262,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     Construct("div", "toolbar-spacer"),
     btnExportSvg,
     btnExportPng,
+    btnSendToMaterial,
     btnSendToPaint,
   );
 
@@ -1432,6 +1444,16 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     if (isPattern) appBridge.sendPatternToPaint(payload);
     else appBridge.sendStampToPaint(payload);
   });
+  if (btnSendToMaterial) {
+    btnSendToMaterial.addEventListener("click", () => {
+      const ev = evaluateArtworkDocument(state.doc, 512);
+      appBridge.sendPatternToMaterial?.({
+        ...ev,
+        name: state.doc.name,
+        repeats: state.doc.tiling?.repeats || 3,
+      });
+    });
+  }
 
   // Right-click (<5px) / Q / Tab quick modifier & tool popup + shortcuts
   let activeArtPopup = null;

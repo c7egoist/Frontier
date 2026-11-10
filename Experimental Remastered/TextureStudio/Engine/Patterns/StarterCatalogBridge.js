@@ -4,7 +4,7 @@
 /* Bridges all reusable Frontier pattern archives (Geometric, African Heritage & Inlay, Islamic Heritage, Textiles, Stitches, Rugs,
    Collections, and Noise-Scaled Procedural Patterns) plus Stamp/Decal starter kits into unified ArtworkStackEngine documents. */
 
-import { patternStarterCatalog, patternStarter } from "./patternDocument.js";
+import { patternStarterCatalog, patternStarter, validatePattern } from "./patternDocument.js";
 import { ornamentalCatalog } from "./ornamentalConstructions.js";
 import { collectionPatterns } from "./patternCollections.js";
 import {
@@ -13,6 +13,7 @@ import {
   createArtworkDocument,
   createArtworkLayer,
   createDefaultModifier,
+  evaluateArtworkDocument,
 } from "./ArtworkStackEngine.js";
 
 export const NOISE_SCALED_STARTERS = [
@@ -535,4 +536,88 @@ export function getArtworkPreviewSvg(entry, mode = "pattern", size = 72) {
   if (_svgPreviewCache.size > 400) _svgPreviewCache.clear();
   _svgPreviewCache.set(cacheKey, svg);
   return svg;
+}
+
+export function buildMaterialPatternDocument(input, overrides = {}) {
+  if (!input) return null;
+  const repeats = overrides.repeats ?? input.repeats ?? input.tiling?.repeats ?? 3;
+  const rotation = overrides.rotation ?? input.rotation ?? 0;
+  const mapping = overrides.mapping ?? input.mapping ?? "uv";
+  const tileAxes = overrides.tileAxes ?? input.tileAxes ?? "xy";
+
+  // 1) Already a frontier.pattern-surface.v1 or alloy.pattern.v1
+  if (input.schema === "frontier.pattern-surface.v1") {
+    return { ...input, repeats, rotation, mapping, tileAxes };
+  }
+  if (input.schema === "alloy.pattern.v1") {
+    return validatePattern({ ...input, repeats, rotation, mapping, tileAxes });
+  }
+
+  // 2) Already evaluated PBR pixel bundle from Pattern Studio (e.g. sendPatternToMaterial)
+  if (input.albedo && input.roughness && input.width) {
+    return {
+      schema: "frontier.pattern-surface.v1",
+      sourceId: input.sourceId || input.id || input.name || "custom-pattern",
+      name: input.name || "Custom Pattern",
+      width: input.width,
+      height: input.heightPx || input.height || input.width,
+      repeats,
+      rotation,
+      mapping,
+      tileAxes,
+      albedo: input.albedo,
+      roughness: input.roughness,
+      metalness: input.metalness,
+      heightMap: input.height,
+      normal: input.normal,
+      version: input.version || Date.now(),
+    };
+  }
+
+  // 3) Legacy catalog entry without custom ArtworkStack noise modifiers -> rich SVG vector shader document
+  const entry = input.raw || input;
+  if (!entry.starter && input.schema !== "frontier.artwork.v2" && !entry.doc) {
+    try {
+      const legacyName = entry.legacyName || entry.name;
+      if (legacyName) {
+        const legacyDoc = patternStarter(legacyName);
+        if (legacyDoc) {
+          return validatePattern({
+            ...legacyDoc,
+            repeats: overrides.repeats ?? legacyDoc.repeats ?? 3,
+            rotation,
+            mapping,
+            tileAxes,
+          });
+        }
+      }
+    } catch {
+      // Fall back to ArtworkStack evaluation
+    }
+  }
+
+  // 4) ArtworkStack v2 doc / Noise-Scaled / African / Custom Pattern -> seamless 512x512 evaluated surface
+  const doc = input.schema === "frontier.artwork.v2"
+    ? input
+    : entry.doc?.schema === "frontier.artwork.v2"
+      ? entry.doc
+      : loadStarterAsArtworkDocument(entry);
+  const ev = evaluateArtworkDocument(doc, 512);
+  return {
+    schema: "frontier.pattern-surface.v1",
+    sourceId: entry.id || doc.id || doc.name || "artwork-pattern",
+    name: doc.name || entry.name || "Pattern Texture",
+    width: ev.width,
+    height: ev.heightPx || ev.width,
+    repeats: overrides.repeats ?? doc.tiling?.repeats ?? 3,
+    rotation,
+    mapping,
+    tileAxes,
+    albedo: ev.albedo,
+    roughness: ev.roughness,
+    metalness: ev.metalness,
+    heightMap: ev.height,
+    normal: ev.normal,
+    version: Date.now(),
+  };
 }

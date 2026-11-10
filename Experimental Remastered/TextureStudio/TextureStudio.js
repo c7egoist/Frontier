@@ -95,6 +95,18 @@ const appBridge = {
       activeWorkspace?.applyBridgedPattern?.(patternEval);
     });
   },
+  sendPatternToMaterial(patternEval) {
+    appBridge.shared.patternData = patternEval;
+    activateWorkspace("material");
+    requestAnimationFrame(() => {
+      activeWorkspace?.applyAsset?.({
+        assetKind: "pattern",
+        id: patternEval.id || patternEval.name || "live-pattern",
+        name: patternEval.name || "Pattern Texture",
+        raw: patternEval,
+      });
+    });
+  },
   sendStampToPaint(stampEval) {
     appBridge.shared.stampData = stampEval;
     activateWorkspace("paint");
@@ -169,6 +181,7 @@ window.__frontierTextureStudio = {
   getSnapshot: () => activeWorkspace?.getSnapshot?.() || null,
   getAssetBrowser: () => assetBrowser?.getState?.() || null,
   applyAsset: (kind, id) => appBridge.applyAssetToActiveWorkspace(assetBrowser?.getAssetPayload(kind, id)),
+  sendPatternToMaterial: (pat) => appBridge.sendPatternToMaterial(pat),
   notify: (msg) => Toast(msg),
 };
 

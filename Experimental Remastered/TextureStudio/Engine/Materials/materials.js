@@ -1002,6 +1002,7 @@ export function createMaterial(input) {
   }
   while (stops.length < 12) stops.push(stops[stops.length - 1]);
   m.userData.params = p;
+  m.userData.patternUniforms = surfaceSources.uniforms;
   m.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, surfaceSources.uniforms);
     const beds =

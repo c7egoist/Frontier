@@ -1913,24 +1913,114 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     stSec.Inner.append(stampGrid);
 
     if (layer) {
-      const lSec = SectionCard(rightInner, { Title: "Active Layer Modifier & Target", Glyph: "Layers", Badge: layer.kind.toUpperCase() });
+      const lSec = SectionCard(rightInner, { Title: `Layer Inspector: ${layer.name}`, Glyph: "Layers", Badge: layer.kind.toUpperCase() });
       TextRow(lSec.Inner, { Label: "Layer Name", Read: () => layer.name, Write: (v) => { layer.name = v; renderLeftColumn(); } });
-      SelectRow(lSec.Inner, {
-        Label: "Blend Mode",
-        Options: ["Normal", "Multiply", "Screen", "Overlay", "Add", "Darken"].map((b) => [b, b]),
-        Read: () => layer.blend,
-        Write: (v) => { layer.blend = v; refreshComposite(); renderLeftColumn(); },
+      SwitchRow(lSec.Inner, {
+        Label: "Layer Visible",
+        Read: () => layer.visible !== false,
+        Write: (v) => { layer.visible = !!v; refreshComposite(); renderLeftColumn(); },
       });
+      SwitchRow(lSec.Inner, {
+        Label: "Lock Layer Edits",
+        Read: () => !!layer.locked,
+        Write: (v) => { layer.locked = !!v; renderLeftColumn(); },
+      });
+      if (layer.kind !== "folder") {
+        FilterDropdownPill(lSec.Inner, {
+          Label: "Blend Mode",
+          Prefix: "Blend:",
+          Placeholder: "Filter blend modes...",
+          Options: ["Normal", "Multiply", "Screen", "Overlay", "Add", "Darken"].map((b) => ({ value: b, label: b })),
+          Read: () => layer.blend,
+          Write: (v) => { layer.blend = v; refreshComposite(); renderLeftColumn(); },
+        });
+      }
       SliderRow(lSec.Inner, { Label: "Layer Opacity", Minimum: 0, Maximum: 1, Step: 0.01, Read: () => layer.opacity, Write: (v) => { layer.opacity = v; refreshComposite(); } });
       const partOpts = [["All Mesh Parts", -1], ...(meshIndex?.partNames || ["Surface"]).map((n, i) => [n, i])];
       SelectRow(lSec.Inner, { Label: "Target Part Filter", Options: partOpts, Read: () => layer.partFilter ?? -1, Write: (v) => { layer.partFilter = Number(v); refreshComposite(); renderLeftColumn(); } });
 
-      if (layer.kind === "fill") {
+      if (layer.kind !== "folder") {
         ChannelMaskRow(lSec.Inner, {
-          Label: "Fill Layer PBR Channels",
+          Label: "Layer PBR Channels",
           Read: () => layer.channels,
           Write: (next) => { layer.channels = next; refreshComposite(); renderLeftColumn(); },
         });
+      }
+
+      if (layer.kind === "folder") {
+        const childLayers = state.doc.layers.filter((c) => c.parentId === layer.id);
+        lSec.Inner.append(Construct("p", "property-hint", `Folder contains ${childLayers.length} nested child layer${childLayers.length === 1 ? "" : "s"}. Group opacity & visibility cascade during compositing.`));
+        ActionRow(lSec.Inner, [
+          {
+            Label: "+ Paint Child",
+            Glyph: "Plus",
+            Tone: "accent",
+            Act: () => {
+              const child = createPaintLayer("paint", {
+                res,
+                name: `${layer.name} Paint ${childLayers.length + 1}`,
+                parentId: layer.id,
+              });
+              state.doc.layers.push(child);
+              state.doc.selectedLayerId = child.id;
+              renderLeftColumn();
+              rebuildInspector();
+              refreshComposite();
+            },
+          },
+          {
+            Label: "Toggle Children",
+            Glyph: "Eye",
+            Act: () => {
+              const nextVis = childLayers.some((c) => !c.visible);
+              childLayers.forEach((c) => { c.visible = nextVis; });
+              refreshComposite();
+              renderLeftColumn();
+            },
+          },
+        ]);
+      } else if (layer.kind === "paint" || layer.kind === "decal") {
+        ActionRow(lSec.Inner, [
+          {
+            Label: "Flood Active Brush",
+            Glyph: "Fill",
+            Tone: "accent",
+            Act: () => {
+              if (layer.locked) { Toast("Layer is locked"); return; }
+              const prevScope = state.fillScope;
+              state.fillScope = "all";
+              performFillAtUv(layer, 0.5, 0.5);
+              state.fillScope = prevScope;
+            },
+          },
+          {
+            Label: "Clear Layer",
+            Glyph: "Trash",
+            Act: () => {
+              if (layer.locked) { Toast("Layer is locked"); return; }
+              const snap = snapshotSelectedLayer();
+              if (gpuPaint.isActive && layer._gpu) {
+                gpuPaint._clearRT(layer._gpu.albedoRT, 0, 0, 0, 0);
+                gpuPaint._clearRT(layer._gpu.ormhRT, 0.5, 0, 0.5, 0);
+                gpuPaint._clearRT(layer._gpu.chanAlphaRT, 0, 0, 0, 0);
+              }
+              if (layer.albedo) {
+                layer.albedo.fill(0);
+                layer.roughness?.fill(0);
+                layer.metalness?.fill(0);
+                layer.height?.fill(0);
+                layer.roughWeight?.fill(0);
+                layer.metalWeight?.fill(0);
+                layer.heightWeight?.fill(0);
+              }
+              if (snap) pushUndoSnapshot(snap);
+              refreshComposite();
+              renderLeftColumn();
+              Toast(`Cleared "${layer.name}"`);
+            },
+          },
+        ]);
+      } else if (layer.kind === "fill") {
         ColorRow(lSec.Inner, { Label: "Fill Color", Read: () => layer.fill.color, Write: (v) => { layer.fill.color = v; refreshComposite(); renderLeftColumn(); } });
         SliderRow(lSec.Inner, { Label: "Roughness", Minimum: 0.02, Maximum: 1, Step: 0.01, Read: () => layer.fill.roughness, Write: (v) => { layer.fill.roughness = v; refreshComposite(); } });
         SliderRow(lSec.Inner, { Label: "Metalness", Minimum: 0, Maximum: 1, Step: 0.01, Read: () => layer.fill.metalness, Write: (v) => { layer.fill.metalness = v; refreshComposite(); } });
@@ -1946,9 +2036,11 @@ export function mountTexturePaintWorkspace(root, appBridge) {
           SliderRow(lSec.Inner, { Label: "Pattern Repeats", Minimum: 1, Maximum: 12, Step: 1, Read: () => layer.fill.patternRepeats || 3, Write: (v) => { layer.fill.patternRepeats = v; refreshComposite(); } });
         }
       } else if (layer.kind === "material") {
-        SelectRow(lSec.Inner, {
+        FilterDropdownPill(lSec.Inner, {
           Label: "Frontier Material",
-          Options: MATERIAL_CATALOG.slice(0, 24).map((m) => [m.name, m.id]),
+          Prefix: "Mat:",
+          Placeholder: "Filter Frontier materials...",
+          Options: MATERIAL_CATALOG.map((m) => ({ value: m.id, label: m.name, sub: m.category || "Material" })),
           Read: () => layer.material.presetId,
           Write: (id) => {
             const found = MATERIAL_CATALOG.find((m) => m.id === id);

@@ -537,6 +537,7 @@ await suite("7. Full TextureStudio Shell & All 5 Workspaces Mount & Switch Clean
       },
       click() { el.dispatchEvent({ type: "click" }); },
       setPointerCapture() {}, releasePointerCapture() {},
+      toDataURL: () => "data:image/png;base64,MOCK",
       getContext: (kind) => (kind && kind.includes("webgl")) ? makeWebGLMock() : {
         fillStyle: "", strokeStyle: "", lineWidth: 1, globalAlpha: 1, globalCompositeOperation: "source-over",
         font: "", textAlign: "center", textBaseline: "middle",
@@ -948,6 +949,130 @@ await suite("10. Interactive SVG Vector Canvas, Bottom Resizable Asset Browser &
     dataTransfer: { getData: (t) => (t === "application/x-frontier-asset" ? meshDropPayload : "") },
   });
   assert.equal(api.getSnapshot().studyId, "torus", "Dropping Bake Study Mesh onto Baking viewport should load it");
+});
+
+// ----------------------------------------------------------------- 11. MATERIAL LAYER STACK INSPECTOR, TILEABLE PATTERNS ON MATERIALS & PAINT LAYER INSPECTORS
+await suite("11. Layer Stack Inspectors & Tileable Patterns Applied to Materials", async () => {
+  const { RasterPatternChannel } = await import("./Engine/Patterns/PatternSurfaceChannels.js");
+  const { buildMaterialPatternDocument } = await import("./Engine/Patterns/StarterCatalogBridge.js");
+  const { EnumerateMaterialFields, RasterChannelPreview } = await import("./Engine/Materials/FieldProjection.js");
+  const { DeclareMaterialAuthoring } = await import("./Engine/Materials/MaterialSpecification.js");
+
+  const api = globalThis.window.__frontierTextureStudio;
+  assert(api, "TextureStudio API not found on window");
+
+  // 11a. Material Layer Stack + Per-Layer Dedicated Inspector
+  api.switchWorkspace("material");
+  const snap0 = api.getSnapshot();
+  assert(snap0.layerCount >= 1, `Expected Material strata layers >= 1, got ${snap0.layerCount}`);
+
+  const stackChips = [...globalThis.document.querySelectorAll(".chip-btn")];
+  const btnDetail = stackChips.find((b) => b.textContent.includes("+ Detail Layer"));
+  assert(btnDetail, "Missing '+ Detail Layer' button in Material layer stack");
+  btnDetail.click();
+
+  const snap1 = api.getSnapshot();
+  assert.equal(snap1.layerCount, snap0.layerCount + 1, "'+ Detail Layer' should add a strata layer to Authoring.Layers");
+
+  // Verify the Dedicated Layer Inspector card reflects the newly selected Detail layer
+  const titlesAfterDetail = [...globalThis.document.querySelectorAll(".section-title")].map((el) => el.textContent);
+  assert(
+    titlesAfterDetail.some((t) => t.startsWith("Layer Inspector: Detail Strata")),
+    `Expected Layer Inspector heading for Detail Strata, got ${titlesAfterDetail.join(", ")}`,
+  );
+
+  // Verify Layer PBR Channels pills + Filterable Dropdown for adding removed channels back
+  const layerChPills = [...globalThis.document.querySelectorAll(".pbr-chan-pill")];
+  assert(layerChPills.some((p) => p.dataset.channel === "colour"), "Material layer inspector should show Colour pill");
+  const metallicPill = layerChPills.find((p) => p.dataset.channel === "metallic");
+  if (!metallicPill) {
+    // Open Material layer's + Channel dropdown & add Metallic!
+    const trigger = globalThis.document.querySelector(".pbr-add-trigger");
+    assert(trigger, "Missing PBR + Channel dropdown trigger in Material Layer Inspector");
+    trigger.click();
+    const metallicOpt = [...globalThis.document.querySelectorAll(".pbr-chan-menu .menu-item")].find((m) => m.dataset.channel === "metallic");
+    assert(metallicOpt, "Metallic should be available to add inside Material layer Channel dropdown");
+    metallicOpt.click();
+    assert(
+      [...globalThis.document.querySelectorAll(".pbr-chan-pill")].some((p) => p.dataset.channel === "metallic"),
+      "Clicking Metallic in dropdown should add it as an active pill on the Material layer",
+    );
+  }
+
+  // Test Authoring Field Projection + RasterPatternChannel cleanly in pure JS (no missing .jsx import!)
+  const authMat = normalizeMaterial(materials[0]);
+  authMat.Authoring = DeclareMaterialAuthoring(authMat);
+  const surfLayer = authMat.Authoring.Layers.find((l) => l.Model === "surface");
+  assert(surfLayer, "Missing surface layer in DeclareMaterialAuthoring");
+  const patSurfaceDoc = buildMaterialPatternDocument(
+    listPatternStarterCatalog().find((e) => e.id.startsWith("noise-")),
+    { repeats: 4, rotation: 30, mapping: "object", tileAxes: "xy" },
+  );
+  assert.equal(patSurfaceDoc.schema, "frontier.pattern-surface.v1", "Noise-scaled starter should build frontier.pattern-surface.v1");
+  authMat.pattern = patSurfaceDoc;
+  authMat.Authoring.Sources[surfLayer.Channels[0] === "colour" ? "color" : surfLayer.Channels[0]] = { Mode: "pattern" };
+  const enumRows = EnumerateMaterialFields(authMat);
+  assert(enumRows.some((r) => r.Source.Mode === "pattern"), "EnumerateMaterialFields should include pattern-sourced channel");
+  const patChanCanvas = await RasterPatternChannel(patSurfaceDoc, "Color");
+  assert(patChanCanvas && patChanCanvas.width >= 16, "RasterPatternChannel must raster frontier.pattern-surface.v1 cleanly");
+  const previewUrl = await RasterChannelPreview(authMat, surfLayer.Identity, "colour", 32);
+  assert(typeof previewUrl === "string" && previewUrl.startsWith("data:image/png"), "RasterChannelPreview must render pattern channel preview without .jsx error");
+
+  // 11b. Apply Pattern directly onto Material Workspace (Asset Drop + Live Pattern Studio Bridge + Texture Uniforms)
+  const kenteMatPayload = JSON.stringify({
+    assetKind: "pattern",
+    id: "legacy:Asante Kente Blocks",
+    name: "Asante Kente Blocks",
+  });
+  const matStage = globalThis.document.querySelector(".viewport-stage");
+  matStage.dispatchEvent({
+    type: "drop",
+    dataTransfer: { getData: (t) => (t === "application/x-frontier-asset" ? kenteMatPayload : "") },
+  });
+  const afterDropSnap = api.getSnapshot();
+  assert.equal(afterDropSnap.hasPattern, true, "Dropping Pattern onto Material stage should attach it to the Material");
+  assert.equal(afterDropSnap.patternName, "Asante Kente Blocks");
+
+  // Also test bridging live Pattern Studio artwork ("Tile on Material") -> produces frontier.pattern-surface.v1 with shader uniforms!
+  api.switchWorkspace("pattern");
+  const noiseEval = evaluateArtworkDocument(
+    loadStarterAsArtworkDocument(listPatternStarterCatalog().find((e) => e.id === "noise-polka-wave")),
+    128,
+  );
+  api.sendPatternToMaterial({ ...noiseEval, name: "Perlin Polka Wave", repeats: 5 });
+  // Run RAF flush isn't automatic in mock, so trigger apply directly as Material handles active mount
+  api.switchWorkspace("material");
+  const directMat = createMaterial({
+    ...normalizeMaterial(materials[1]),
+    pattern: buildMaterialPatternDocument({ ...noiseEval, name: "Perlin Polka Wave", repeats: 5, rotation: 45, mapping: "cylinder" }),
+    patternChannelMask: { albedo: true, roughness: true, metalness: false, height: true },
+  });
+  assert(directMat.userData.patternUniforms, "createMaterial with tileable pattern must expose userData.patternUniforms");
+  assert.equal(directMat.userData.patternUniforms.uPatternRepeats.value, 5);
+  assert.equal(directMat.userData.patternUniforms.uPatternObject.value, 2);
+  assert.equal(directMat.userData.patternUniforms.uPatternApplyChannels.value.z, 0, "Disabled metalness channel must set uPatternApplyChannels.z to 0");
+  directMat.dispose();
+
+  // Also test Material drop when Tileable Pattern is applied (dropping a pattern in UI triggers Tileable Pattern Texture section)
+  const matStageActive = globalThis.document.querySelector(".viewport-stage");
+  matStageActive.dispatchEvent({
+    type: "drop",
+    dataTransfer: { getData: (t) => (t === "application/x-frontier-asset" ? JSON.stringify({ assetKind: "pattern", id: "noise-polka-wave", name: "Perlin Polka Wave" }) : "") },
+  });
+  assert.equal(api.getSnapshot().hasPattern, true);
+  assert.equal(api.getSnapshot().patternName, "Perlin Polka Wave");
+  const patTitleEls = [...globalThis.document.querySelectorAll(".section-title")].map((el) => el.textContent);
+  assert(patTitleEls.some((t) => t.includes("Tileable Pattern Texture")), "Tileable Pattern Texture Inspector section must appear");
+
+  // 11c. Verify Per-Layer Inspector for ALL Texture Paint Layer Stack kinds (+ Fill, + Material, + Wear Gen, + Folder)
+  api.switchWorkspace("paint");
+  for (const btnLabel of ["+ Material", "+ Wear Gen", "+ Folder", "+ Fill"]) {
+    const addBtn = [...globalThis.document.querySelectorAll(".chip-btn")].find((b) => b.textContent === btnLabel);
+    assert(addBtn, `Missing Texture Paint stack button ${btnLabel}`);
+    addBtn.click();
+    const titles = [...globalThis.document.querySelectorAll(".section-title")].map((el) => el.textContent);
+    assert(titles.some((t) => t.startsWith("Layer Inspector:")), `Expected dedicated Layer Inspector for ${btnLabel}`);
+  }
 });
 
 console.log(`\nALL ${results.length} VALIDATION SUITES PASSED CLEANLY`);

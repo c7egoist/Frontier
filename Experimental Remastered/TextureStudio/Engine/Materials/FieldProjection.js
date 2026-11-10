@@ -33,7 +33,7 @@ async function ReadRaster(Row, Parameters)
     if (Row.Source.Mode === "pattern")
     {
         if (!Parameters.pattern) return null;
-        const { RasterPatternChannel } = await import("./PatternSurfaceChannelControls.jsx");
+        const { RasterPatternChannel } = await import("../Patterns/PatternSurfaceChannels.js");
         const Channel = ({ colour: "Color", roughness: "Roughness", metallic: "Metalness", normal: "Normal", microNormal: "Normal", coverage: "Opacity" })[Row.Channel];
         if (!Channel) return null;
         Canvas = await RasterPatternChannel(Parameters.pattern, Channel);
