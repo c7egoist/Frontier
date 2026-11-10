@@ -261,6 +261,14 @@ export function attachSurfaceSources(material, p) {
           chMask.height !== false ? 1 : 0,
         ),
       },
+      uPatternApplyExtra: {
+        value: new THREE.Vector4(
+          chMask.normal !== false ? 1 : 0,
+          chMask.occlusion !== false ? 1 : 0,
+          chMask.coat !== false ? 1 : 0,
+          chMask.sheen !== false ? 1 : 0,
+        ),
+      },
       uPatternRepeats: { value: doc?.repeats ?? 2 },
       uPatternAngle: { value: ((doc?.rotation || 0) * Math.PI) / 180 },
       uPatternAspect: {
@@ -294,7 +302,7 @@ float vectorHide(vec2 p){
 #endif
 #ifdef ALLOY_PATTERN
 uniform sampler2D uPatternColor,uPatternParams,uPatternFinish,uPatternNormals,uPatternChannelMask;
-uniform vec4 uPatternApplyChannels;
+uniform vec4 uPatternApplyChannels,uPatternApplyExtra;
 uniform float uPatternRepeats,uPatternAngle;
 uniform int uPatternObject;
 uniform vec2 uPatternAspect;
@@ -316,9 +324,9 @@ export function patternColorGLSL() {
  patternColorSample=texture2D(uPatternColor,patternUV);
  patternParamsSample=texture2D(uPatternParams,patternUV);
  patternNormalSample=texture2D(uPatternNormals,patternUV);
- patternChannelMaskSample=texture2D(uPatternChannelMask,patternUV)*vec4(uPatternApplyChannels.y,uPatternApplyChannels.z,uPatternApplyChannels.w,uPatternApplyChannels.w);
+ patternChannelMaskSample=texture2D(uPatternChannelMask,patternUV)*vec4(uPatternApplyChannels.y,uPatternApplyChannels.z,uPatternApplyChannels.w,uPatternApplyExtra.y);
  patternNormalSample.rgb/=max(patternNormalSample.a,.00001);
- patternNormalSample.a*=uPatternApplyChannels.w;
+ patternNormalSample.a*=uPatternApplyExtra.x;
  patternCoverage=patternColorSample.a*uPatternApplyChannels.x;
  patternColorSample.rgb/=max(patternColorSample.a,.00001);
 

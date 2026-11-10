@@ -34,7 +34,22 @@ async function ReadRaster(Row, Parameters)
     {
         if (!Parameters.pattern) return null;
         const { RasterPatternChannel } = await import("../Patterns/PatternSurfaceChannels.js");
-        const Channel = ({ colour: "Color", roughness: "Roughness", metallic: "Metalness", normal: "Normal", microNormal: "Normal", coverage: "Opacity" })[Row.Channel];
+        const Channel = ({
+            colour: "Color",
+            roughness: "Roughness",
+            metallic: "Metalness",
+            normal: "Normal",
+            microNormal: "Normal",
+            coatNormal: "Normal",
+            height: "Height",
+            occlusion: "Opacity",
+            opacity: "Opacity",
+            coverage: "Opacity",
+            coat: "Roughness",
+            coatRoughness: "Roughness",
+            sheen: "Roughness",
+            emissive: "Color",
+        })[Row.Channel];
         if (!Channel) return null;
         Canvas = await RasterPatternChannel(Parameters.pattern, Channel);
     }
@@ -142,11 +157,12 @@ export function AttachPbrFields(Material, Parameters)
 {
     const Rows = EnumerateMaterialFields(Parameters);
     if (!Rows.length) return;
-    if (Rows.some(Row => Row.Model === "coat" && Row.Channel === "coverage" && Row.Source.Mode !== "value")) Material.clearcoat = Math.max(Material.clearcoat, .000001);
-    if (Rows.some(Row => Row.Model === "surface" && Row.Channel === "coverage" && (Row.Source.Mode !== "value" || (Row.Constant ?? 1) < 1))) Material.transparent = true;
-    if (Rows.some(Row => ["thickness", "transmission"].includes(Row.Channel))) Material.transmission = Math.max(Material.transmission, .000001);
-    if (Rows.some(Row => ["sheen", "sheenRoughness"].includes(Row.Channel))) Material.sheen = Math.max(Material.sheen, .000001);
-    if (Rows.some(Row => Row.Channel === "anisotropy")) Material.anisotropy = Math.max(Material.anisotropy, .000001);
+    if (Rows.some(Row => ["coat", "coatRoughness", "coatIor", "coatNormal"].includes(Row.Channel) || (Row.Model === "coat" && Row.Channel === "coverage" && Row.Source.Mode !== "value"))) Material.clearcoat = Math.max(Material.clearcoat, .000001);
+    if (Rows.some(Row => Row.Channel === "opacity" || (Row.Model === "surface" && Row.Channel === "coverage" && (Row.Source.Mode !== "value" || (Row.Constant ?? 1) < 1)))) Material.transparent = true;
+    if (Rows.some(Row => ["thickness", "transmission", "attenuationColour"].includes(Row.Channel))) Material.transmission = Math.max(Material.transmission, .000001);
+    if (Rows.some(Row => ["sheen", "sheenRoughness", "sheenColour"].includes(Row.Channel))) Material.sheen = Math.max(Material.sheen, .000001);
+    if (Rows.some(Row => ["anisotropy", "anisotropyRotation"].includes(Row.Channel))) Material.anisotropy = Math.max(Material.anisotropy, .000001);
+    if (Rows.some(Row => ["iridescence", "iridescenceIor", "iridescenceThickness"].includes(Row.Channel))) Material.iridescence = Math.max(Material.iridescence, .000001);
     const Edge = Rows.some(Row => Row.Procedure === "camouflage-smooth") ? 512 : 128, Columns = Math.min(8, Rows.length), Width = Edge * Columns, Height = Edge * Math.ceil(Rows.length / Columns), Atlas = new THREE.DataTexture(new Float32Array(Width * Height * 4), Width, Height, THREE.RGBAFormat, THREE.FloatType);
     Atlas.minFilter = Atlas.magFilter = THREE.NearestFilter; Atlas.needsUpdate = true;
     let Disposed = false;
@@ -166,8 +182,10 @@ export function AttachPbrFields(Material, Parameters)
         Existing.call(Material, Shader);
         Shader.uniforms.uPbrFieldAtlas = { value: Atlas };
         Shader.uniforms.uPbrFieldSheenColour = { value: new THREE.Color(Parameters.sheenColor || "#ffffff") };
+        Shader.uniforms.uPbrFieldEmissiveColour = { value: new THREE.Color(Parameters.emissionColor || "#000000") };
+        Shader.uniforms.uPbrFieldEmissiveIntensity = { value: Number(Parameters.emissionStrength || 0) };
         Shader.vertexShader = `varying vec2 vPbrFieldUV;\n${Shader.vertexShader}`.replace("#include <begin_vertex>", "#include <begin_vertex>\nvPbrFieldUV=uv;");
-        Shader.fragmentShader = `varying vec2 vPbrFieldUV; uniform sampler2D uPbrFieldAtlas; uniform vec3 uPbrFieldSheenColour;\n${Rows.map((Row, Index) => Row.Procedure === "camouflage-smooth" ? `
+        Shader.fragmentShader = `varying vec2 vPbrFieldUV; uniform sampler2D uPbrFieldAtlas; uniform vec3 uPbrFieldSheenColour; uniform vec3 uPbrFieldEmissiveColour; uniform float uPbrFieldEmissiveIntensity;\n${Rows.map((Row, Index) => Row.Procedure === "camouflage-smooth" ? `
 vec4 pbrTexel${Index}(vec2 q){return texture2D(uPbrFieldAtlas,(mod(mod(q,${Edge}.)+${Edge}.,${Edge}.)+vec2(.5)+vec2(${(Index % Columns) * Edge}.,${Math.floor(Index / Columns) * Edge}.))/vec2(${Width}.,${Height}.));}
 vec4 pbrField${Index}(){vec2 q=fract(vPbrFieldUV)*${Edge}.;vec2 f=fract(q);q=floor(q);return mix(mix(pbrTexel${Index}(q),pbrTexel${Index}(q+vec2(1.,0.)),f.x),mix(pbrTexel${Index}(q+vec2(0.,1.)),pbrTexel${Index}(q+vec2(1.,1.)),f.x),f.y);}` : `vec4 pbrField${Index}(){return texture2D(uPbrFieldAtlas,vec2((fract(vPbrFieldUV.x)*${Edge - 1}.+.5+${(Index % Columns) * Edge}.)/${Width}.,(fract(vPbrFieldUV.y)*${Edge - 1}.+.5+${Math.floor(Index / Columns) * Edge}.)/${Height}.));}`).join("\n")}\n${Shader.fragmentShader}`;
         Shader.fragmentShader = Shader.fragmentShader.replace("#include <transmission_fragment>", THREE.ShaderChunk.transmission_fragment);
@@ -186,13 +204,28 @@ vec4 pbrField${Index}(){vec2 q=fract(vPbrFieldUV)*${Edge}.;vec2 f=fract(q);q=flo
                 else Before("#include <metalnessmap_fragment>", Blend("roughnessFactor"));
             }
             if (Row.Channel === "metallic") Row.Model === "surface" && !(Row.Source.Direct && Parameters.type !== 0) ? After("#include <metalnessmap_fragment>", Blend("metalnessFactor")) : Before("#include <normal_fragment_begin>", Blend("metalnessFactor"));
-            if (Row.Channel === "ior") Before("#include <lights_fragment_begin>", Row.Model === "coat" ? `\n#ifdef USE_CLEARCOAT\nmaterial.clearcoatF0=mix(material.clearcoatF0,vec3(pow((${Sample}.r-1.)/(${Sample}.r+1.),2.)),${Sample}.a);\n#endif\n` : `${Blend("material.ior")}material.specularColor=mix(vec3(pow((material.ior-1.)/(material.ior+1.),2.))*specularIntensity,diffuseColor.rgb,metalnessFactor);`);
-            if (Row.Channel === "specular") Before("#include <lights_fragment_begin>", `material.specularColor=mix(material.specularColor,mix(vec3(pow((material.ior-1.)/(material.ior+1.),2.))*${Sample}.r,diffuseColor.rgb,metalnessFactor),${Sample}.a);`);
+            if (Row.Channel === "height") { After("#include <color_fragment>", `surfaceHeight=mix(surfaceHeight,(${Sample}.r-.5)*.012,${Sample}.a${Scope});`); }
+            if (Row.Channel === "occlusion") After("#include <lights_fragment_end>", `reflectedLight.indirectDiffuse*=mix(1.,clamp(${Sample}.r,0.,1.),${Sample}.a${Scope});`);
+            if (Row.Channel === "opacity") Before("#include <opaque_fragment>", `diffuseColor.a*=mix(1.,clamp(${Sample}.r,0.,1.),${Sample}.a${Scope});`);
+            if (Row.Channel === "ior") Before("#include <lights_fragment_begin>", Row.Model === "coat" ? `\n#ifdef USE_CLEARCOAT\nmaterial.clearcoatF0=mix(material.clearcoatF0,vec3(pow((${Sample}.r-1.)/(${Sample}.r+1.),2.)),${Sample}.a);\n#endif\n` : `\n#ifdef IOR\n${Blend("material.ior")}material.specularColor=mix(vec3(pow((material.ior-1.)/(material.ior+1.),2.))*specularIntensity,diffuseColor.rgb,metalnessFactor);material.specularColorBlended=mix(material.specularColor,diffuseColor.rgb,metalnessFactor);\n#endif\n`);
+            if (Row.Channel === "specular") Before("#include <lights_fragment_begin>", `\n#ifdef IOR\nmaterial.specularColor=mix(material.specularColor,mix(vec3(pow((material.ior-1.)/(material.ior+1.),2.))*${Sample}.r,diffuseColor.rgb,metalnessFactor),${Sample}.a${Scope});\n#else\nmaterial.specularColor=mix(material.specularColor,mix(vec3(.04*${Sample}.r),diffuseColor.rgb,metalnessFactor),${Sample}.a${Scope});\n#endif\nmaterial.specularF90=mix(material.specularF90,mix(${Sample}.r,1.,metalnessFactor),${Sample}.a${Scope});material.specularColorBlended=mix(material.specularColor,diffuseColor.rgb,metalnessFactor);`);
+            if (Row.Channel === "specularColour") Before("#include <lights_fragment_begin>", `\n#ifdef IOR\nmaterial.specularColor=mix(material.specularColor,mix(pow((material.ior-1.)/(material.ior+1.),2.)*${Sample}.rgb,diffuseColor.rgb,metalnessFactor),${Sample}.a${Scope});\n#else\nmaterial.specularColor=mix(material.specularColor,mix(.04*${Sample}.rgb,diffuseColor.rgb,metalnessFactor),${Sample}.a${Scope});\n#endif\nmaterial.specularColorBlended=mix(material.specularColor,diffuseColor.rgb,metalnessFactor);`);
+            if (Row.Channel === "coat") Before("#include <lights_fragment_begin>", `\n#ifdef USE_CLEARCOAT\n${Blend("material.clearcoat")}\n#endif\n`);
+            if (Row.Channel === "coatRoughness") Before("#include <lights_fragment_begin>", `\n#ifdef USE_CLEARCOAT\n${Blend("material.clearcoatRoughness")}\n#endif\n`);
+            if (Row.Channel === "coatIor") Before("#include <lights_fragment_begin>", `\n#ifdef USE_CLEARCOAT\nmaterial.clearcoatF0=mix(material.clearcoatF0,vec3(pow((${Sample}.r-1.)/(${Sample}.r+1.),2.)),${Sample}.a${Scope});\n#endif\n`);
             if (Row.Channel === "thickness") After("material.thickness = thickness;", `material.thickness=mix(material.thickness,${Sample}.r*2.,${Sample}.a);`);
             if (Row.Channel === "transmission") After("material.transmission = transmission;", Blend("material.transmission"));
-            if (Row.Channel === "sheen") Before("#include <lights_fragment_begin>", `\n#ifdef USE_SHEEN\nmaterial.sheenColor=mix(material.sheenColor,uPbrFieldSheenColour*${Sample}.r,${Sample}.a);\n#endif\n`);
+            if (Row.Channel === "attenuationColour") After("material.attenuationColor = attenuationColor;", `material.attenuationColor=mix(material.attenuationColor,${Sample}.rgb,${Sample}.a${Scope});`);
+            if (Row.Channel === "sheen") Before("#include <lights_fragment_begin>", `\n#ifdef USE_SHEEN\nmaterial.sheenColor=mix(material.sheenColor,uPbrFieldSheenColour*${Sample}.r,${Sample}.a${Scope});\n#endif\n`);
             if (Row.Channel === "sheenRoughness") Before("#include <lights_fragment_begin>", `\n#ifdef USE_SHEEN\n${Blend("material.sheenRoughness")}\n#endif\n`);
+            if (Row.Channel === "sheenColour") Before("#include <lights_fragment_begin>", `\n#ifdef USE_SHEEN\nmaterial.sheenColor=mix(material.sheenColor,${Sample}.rgb,${Sample}.a${Scope});\n#endif\n`);
             if (Row.Channel === "anisotropy") Before("#include <lights_fragment_begin>", `\n#ifdef USE_ANISOTROPY\n${Blend("material.anisotropy")}material.alphaT=mix(pow2(material.roughness),1.,pow2(material.anisotropy));\n#endif\n`);
+            if (Row.Channel === "anisotropyRotation") Before("#include <lights_fragment_begin>", `\n#ifdef USE_ANISOTROPY\n{float _pbrRot=${Sample}.r*6.2831853;vec3 _aT=normalize(dFdx(-vViewPosition));_aT=normalize(_aT-normal*dot(normal,_aT)+vec3(1e-7));vec3 _aB=normalize(cross(normal,_aT));vec3 _nT=normalize(_aT*cos(_pbrRot)+_aB*sin(_pbrRot));material.anisotropyT=mix(material.anisotropyT,_nT,${Sample}.a${Scope});material.anisotropyB=normalize(cross(normal,material.anisotropyT));}\n#endif\n`);
+            if (Row.Channel === "iridescence") Before("#include <lights_fragment_begin>", `\n#ifdef USE_IRIDESCENCE\n${Blend("material.iridescence")}\n#endif\n`);
+            if (Row.Channel === "iridescenceIor") Before("#include <lights_fragment_begin>", `\n#ifdef USE_IRIDESCENCE\n${Blend("material.iridescenceIOR")}\n#endif\n`);
+            if (Row.Channel === "iridescenceThickness") Before("#include <lights_fragment_begin>", `\n#ifdef USE_IRIDESCENCE\n${Blend("material.iridescenceThickness")}\n#endif\n`);
+            if (Row.Channel === "emissive") Before("#include <lights_fragment_begin>", `totalEmissiveRadiance=mix(totalEmissiveRadiance,${Sample}.rgb*max(1.,uPbrFieldEmissiveIntensity),${Sample}.a${Scope});`);
+            if (Row.Channel === "emissiveIntensity") Before("#include <lights_fragment_begin>", `totalEmissiveRadiance=mix(totalEmissiveRadiance,max(uPbrFieldEmissiveColour,totalEmissiveRadiance)*${Sample}.r,${Sample}.a${Scope});`);
             if (Row.Channel === "coverage" && Row.Model === "surface") Before("#include <opaque_fragment>", `diffuseColor.a*=mix(1.,clamp(${Sample}.r,0.,1.),${Sample}.a);`);
             if (Row.Channel === "coverage" && Row.Model === "flakes") Before("#include <roughnessmap_fragment>", `diffuseColor.rgb=mix(pbrFieldBaseColour,diffuseColor.rgb,mix(1.,${Sample}.r,${Sample}.a));flakeMask*=mix(1.,${Sample}.r,${Sample}.a);`);
             if (Row.Channel === "coverage" && Row.Model === "coat") Before("#include <lights_fragment_begin>", `\n#ifdef USE_CLEARCOAT\n${Blend("material.clearcoat")}\n#endif\n`);
@@ -200,7 +233,7 @@ vec4 pbrField${Index}(){vec2 q=fract(vPbrFieldUV)*${Edge}.;vec2 f=fract(q);q=flo
                 vec3 Qx=dFdx(-vViewPosition),Qy=dFdy(-vViewPosition);vec2 Ux=dFdx(vPbrFieldUV),Uy=dFdy(vPbrFieldUV);float D=Ux.x*Uy.y-Ux.y*Uy.x;
                 if(abs(D)>.00000001){vec3 T=normalize((Qx*Uy.y-Qy*Ux.y)/D);T=normalize(T-normal*dot(normal,T));vec3 B=normalize(cross(normal,T))*sign(D);vec3 N=${Sample}.rgb;N.y=-N.y;normal=normalize(mix(normal,mat3(T,B,normal)*normalize(N+vec3(0.,0.,.000001)),${Sample}.a${Scope}));}
             }`);
-            if (Row.Channel === "normal" && Row.Model === "coat") After("#include <clearcoat_normal_fragment_maps>", `\n#ifdef USE_CLEARCOAT\n{vec3 T=normalize(dFdx(-vViewPosition));vec3 B=normalize(cross(clearcoatNormal,T));clearcoatNormal=normalize(mix(clearcoatNormal,mat3(T,B,clearcoatNormal)*normalize(${Sample}.rgb+vec3(0.,0.,.000001)),${Sample}.a));}\n#endif\n`);
+            if ((Row.Channel === "normal" && Row.Model === "coat") || Row.Channel === "coatNormal") After("#include <clearcoat_normal_fragment_maps>", `\n#ifdef USE_CLEARCOAT\n{vec3 T=normalize(dFdx(-vViewPosition));vec3 B=normalize(cross(clearcoatNormal,T));clearcoatNormal=normalize(mix(clearcoatNormal,mat3(T,B,clearcoatNormal)*normalize(${Sample}.rgb+vec3(0.,0.,.000001)),${Sample}.a));}\n#endif\n`);
         });
     };
 }

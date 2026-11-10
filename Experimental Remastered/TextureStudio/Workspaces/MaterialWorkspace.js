@@ -14,8 +14,6 @@ import {
   createBallGeometry,
 } from "../Engine/Materials/materials.js";
 import { createDrapedClothGeometry } from "../Engine/Materials/clothGeometry.js";
-import { createLeatherSwatchGeometry } from "../Engine/Materials/leatherGeometry.js";
-import { createBotanicalGeometry } from "../Engine/Materials/botanicalGeometry.js";
 import {
   getRecipe,
   recipeControlValue,
@@ -111,14 +109,30 @@ const MATERIAL_PBR_CHANNEL_SPEC = Object.freeze([
   ["metallic", "Metallic", "Conductor Mask", "metal", "#63a8ff"],
   ["normal", "Normal", "Surface Tangent", "height", "#c886f2"],
   ["microNormal", "Micro normal", "Fine Pore / Grain", "height", "#e686b8"],
+  ["height", "Height / Relief", "Displacement Relief", "height", "#f5a3c7"],
+  ["occlusion", "Ambient Occlusion", "Cavity Indirect AO", "rough", "#9aa5b4"],
+  ["opacity", "Opacity", "Cutout / Alpha Weight", "albedo", "#e2e8f0"],
   ["coverage", "Coverage", "Layer Mask / Blend", "albedo", "#eff4cf"],
   ["ior", "IOR", "Fresnel Index", "metal", "#7ad7f0"],
   ["specular", "Specular", "Dielectric Reflection", "metal", "#a3c6ff"],
-  ["thickness", "Thickness", "Optical Depth", "rough", "#f0b46b"],
-  ["transmission", "Transmission", "Light Scatter", "rough", "#74e2b8"],
-  ["sheen", "Sheen", "Velvet Grazing", "albedo", "#e29fd3"],
-  ["sheenRoughness", "Sheen rough", "Grazing Falloff", "rough", "#c8a0e6"],
+  ["specularColour", "Specular Colour", "Edge Specular Tint", "albedo", "#b8d4ff"],
+  ["coat", "Clearcoat", "Candy / Lacquer Topcoat", "rough", "#74e2b8"],
+  ["coatRoughness", "Coat Roughness", "Clearcoat Polish", "rough", "#54d8a6"],
+  ["coatIor", "Coat IOR", "Topcoat Fresnel IOR", "metal", "#6dcff6"],
+  ["coatNormal", "Coat Normal", "Orange-Peel / Coat Normal", "height", "#d79bf8"],
+  ["sheen", "Sheen", "Velvet / Frost Grazing", "albedo", "#e29fd3"],
+  ["sheenRoughness", "Sheen Roughness", "Grazing Falloff", "rough", "#c8a0e6"],
+  ["sheenColour", "Sheen Colour", "Grazing Tint", "albedo", "#f2b8e6"],
   ["anisotropy", "Anisotropy", "Directional Brushing", "metal", "#80d1ff"],
+  ["anisotropyRotation", "Anisotropy Angle", "Grain Direction Angle", "metal", "#59b5eb"],
+  ["iridescence", "Iridescence", "Thin-Film Interference", "albedo", "#ff77c8"],
+  ["iridescenceIor", "Iridescence IOR", "Thin-Film Index", "metal", "#c985ff"],
+  ["iridescenceThickness", "Iridescence NM", "Film Thickness (nm)", "rough", "#ffad66"],
+  ["transmission", "Transmission", "Subsurface / Gel Glass", "rough", "#4ce0c4"],
+  ["thickness", "Thickness / SSS", "Volume Depth", "rough", "#f0b46b"],
+  ["attenuationColour", "Attenuation Colour", "Syrup / Interior Tint", "albedo", "#ff8266"],
+  ["emissive", "Emissive", "Self-Glow Colour", "albedo", "#ffe36e"],
+  ["emissiveIntensity", "Emissive Strength", "HDR Glow Intensity", "rough", "#ffb84d"],
 ]);
 
 const SOURCE_MODES = Object.freeze([
@@ -230,9 +244,7 @@ export function mountMaterialWorkspace(root, appBridge) {
     ["Shader Ball", "shaderball"],
     ["Sphere", "sphere"],
     ["Draped Cloth", "cloth"],
-    ["Leather Swatch", "leather"],
     ["Chamfer Box", "box"],
-    ["Botanical", "leaf"],
   ];
   const shapeGroup = Construct("div", "toolbar-group");
   const shapeSelect = Construct("select");
@@ -354,16 +366,6 @@ export function mountMaterialWorkspace(root, appBridge) {
       g.center();
       return g;
     }
-    if (shape === "leather") {
-      const g = createLeatherSwatchGeometry({ kind: "swatch" });
-      g.center();
-      return g;
-    }
-    if (shape === "leaf") {
-      const g = createBotanicalGeometry("Leaf", 10);
-      g.center();
-      return g;
-    }
     if (shape === "box") return new RoundedBoxGeometry(2.15, 2.15, 2.15, 8, 0.28);
     return new THREE.SphereGeometry(1.42, 96, 64);
   }
@@ -416,6 +418,14 @@ export function mountMaterialWorkspace(root, appBridge) {
         ch.height !== false ? 1 : 0,
       );
     }
+    if (u.uPatternApplyExtra) {
+      u.uPatternApplyExtra.value.set(
+        ch.normal !== false ? 1 : 0,
+        ch.occlusion !== false ? 1 : 0,
+        ch.coat !== false ? 1 : 0,
+        ch.sheen !== false ? 1 : 0,
+      );
+    }
     if (u.uPatternBeads && pat.beadwork) {
       u.uPatternBeads.value.set(
         pat.beadwork.columns || 1,
@@ -442,6 +452,10 @@ export function mountMaterialWorkspace(root, appBridge) {
         roughness: true,
         metalness: true,
         height: true,
+        normal: true,
+        occlusion: true,
+        coat: true,
+        sheen: true,
       },
     };
     if (inputOrEntry?.id) state.selectedPatternCatalogId = inputOrEntry.id;
@@ -700,7 +714,7 @@ export function mountMaterialWorkspace(root, appBridge) {
       const thumb = Construct("div", "stack-row-thumb", ConstructGlyph("Pattern"));
       thumb.style.background = "linear-gradient(135deg, rgba(232,194,122,0.28), rgba(99,168,255,0.22))";
       const chMap = p.patternChannelMask || {};
-      const chCount = ["albedo", "roughness", "metalness", "height"].filter((k) => chMap[k] !== false).length;
+      const chCount = ["albedo", "roughness", "metalness", "height", "normal", "occlusion", "coat", "sheen"].filter((k) => chMap[k] !== false).length;
       const info = Construct("div", "stack-row-info", [
         Construct("span", "stack-row-title", p.pattern.name || "Tileable Pattern"),
         Construct(
@@ -866,25 +880,24 @@ export function mountMaterialWorkspace(root, appBridge) {
 
     sceneSummaryWrap.append(stackBox);
 
-    sceneSummaryWrap.append(Construct("div", "property-label", "Preview Mesh Geometry"));
-    const meshList = Construct("div");
-    for (const [label, id] of shapeOptions) {
-      const btn = Construct("div", "stack-row" + (state.shape === id ? " active" : ""), [
-        Construct("div", "stack-row-thumb", ConstructGlyph("Cube")),
-        Construct("div", "stack-row-info", [
-          Construct("span", "stack-row-title", label),
-          Construct("span", "stack-row-sub", id === "shaderball" ? "Multi-cavity look-dev target" : "UV-mapped surface sample"),
-        ]),
-      ]);
-      btn.addEventListener("click", () => {
+    FilterDropdownPill(sceneSummaryWrap, {
+      Label: "Preview Mesh Geometry",
+      Prefix: "Mesh:",
+      Transient: true,
+      Placeholder: "Filter preview meshes...",
+      Options: shapeOptions.map(([label, id]) => ({
+        value: id,
+        label,
+        sub: id === "shaderball" ? "Multi-cavity look-dev target" : id === "cloth" ? "Woven drape surface" : id === "box" ? "Chamfered hard-edge cube" : "Smooth spherical UV sample",
+      })),
+      Read: () => state.shape,
+      Write: (id) => {
         state.shape = id;
         shapeSelect.value = id;
         rebuildMeshAndMaterial();
         renderLeftOutliner();
-      });
-      meshList.append(btn);
-    }
-    sceneSummaryWrap.append(meshList);
+      },
+    });
 
     sceneSummaryWrap.append(Construct("div", "property-label", "Studio Lighting Backdrop"));
     const envStrip = Construct("div", "chip-strip");
@@ -1063,7 +1076,17 @@ export function mountMaterialWorkspace(root, appBridge) {
     });
     ChannelMaskRow(patSec.Inner, {
       Label: "Pattern PBR Channels",
-      Read: () => state.params.patternChannelMask || { albedo: true, roughness: true, metalness: true, height: true },
+      Channels: [
+        ["albedo", "Albedo", "Pattern Base Colour", "albedo", "#e8c27a"],
+        ["roughness", "Roughness", "Pattern Surface Gloss", "rough", "#2fe6a7"],
+        ["metalness", "Metalness", "Pattern Conductor", "metal", "#63a8ff"],
+        ["height", "Height", "Pattern Relief / Displacement", "height", "#e686b8"],
+        ["normal", "Normal", "Tangent Normal Map", "height", "#c886f2"],
+        ["occlusion", "Occlusion", "Cavity Indirect AO", "rough", "#9aa5b4"],
+        ["coat", "Clearcoat", "Ceramic / Candy Glaze", "rough", "#74e2b8"],
+        ["sheen", "Sheen", "Wool / Velvet Grazing", "albedo", "#e29fd3"],
+      ],
+      Read: () => state.params.patternChannelMask || { albedo: true, roughness: true, metalness: true, height: true, normal: true, occlusion: true, coat: true, sheen: true },
       Write: (next) => {
         state.params.patternChannelMask = next;
         syncPatternUniformsFast();
@@ -1216,6 +1239,7 @@ export function mountMaterialWorkspace(root, appBridge) {
         state.inspectedChannel = selectedLayer.Channels[0] || "colour";
       }
       const chKey = state.inspectedChannel;
+      const chSpec = PbrChannels[chKey];
       const chAddr = ResolveAddress(p, ChannelAddress(selectedLayer, chKey));
       const chSource = p.Authoring.Sources[chAddr] || { Mode: "value" };
 
@@ -1230,6 +1254,32 @@ export function mountMaterialWorkspace(root, appBridge) {
           rebuildInspector();
         },
       });
+
+      if (chSpec?.Type === "colour") {
+        ColorRow(layerSec.Inner, {
+          Label: `${chSpec.Caption} Value`,
+          Read: () => ReadMaterialParameter(state.params, chAddr) ?? chSpec.Default ?? "#ffffff",
+          Write: (hex) => {
+            mutateParamsPreservingPattern((cur) => WriteMaterialParameter(cur, chAddr, hex));
+            syncMaterialLive();
+          },
+        });
+      } else if (chSpec?.Type === "scalar") {
+        const span = (chSpec.Maximum ?? 1) - (chSpec.Minimum ?? 0);
+        const step = span > 100 ? 5 : span > 4 ? 0.05 : 0.01;
+        SliderRow(layerSec.Inner, {
+          Label: `${chSpec.Caption} Value`,
+          Minimum: chSpec.Minimum ?? 0,
+          Maximum: chSpec.Maximum ?? 1,
+          Step: step,
+          Digits: span > 100 ? 0 : 2,
+          Read: () => ReadMaterialParameter(state.params, chAddr) ?? chSpec.Default ?? chSpec.Minimum ?? 0,
+          Write: (v) => {
+            mutateParamsPreservingPattern((cur) => WriteMaterialParameter(cur, chAddr, v));
+            syncMaterialLive();
+          },
+        });
+      }
 
       FilterDropdownPill(layerSec.Inner, {
         Label: `${PbrChannels[chKey]?.Caption || chKey} Source`,

@@ -6,8 +6,9 @@ export function extendedSurfaceGLSL() {
     uniform vec3 uSecondary;
     uniform float uMoisture,uScattering,uFreckles,uPaperRibs,uFiberContrast;
     uniform float uOxidation,uPanelMode,uBusbarWidth,uDimpleDepth,uDenimFade,uSlub,uPixelFill;
-    uniform float uBakeHeightRange,uEmissionScale;
-    float oxideMask=0.,contactMask=0.,emitterMask=0.;
+    uniform float uBakeHeightRange,uEmissionScale,uAoIntensity;
+    float oxideMask=0.,contactMask=0.,emitterMask=0.,candyCrystalMask=0.,candySpeckleMask=0.,candySugarRough=0.;
+    vec3 candyFacetDir=vec3(0.,0.,1.);
     vec3 bakeSRGB(vec3 c){c=max(c,vec3(0.));return mix(c*12.92,1.055*pow(c,vec3(1./2.4))-.055,step(vec3(.0031308),c));}
     vec2 surfaceUV(vec3 p,vec3 w){if(w.x>w.y && w.x>w.z)return p.zy;if(w.y>w.z)return p.xz;return p.xy;}
     float segmentDistance(vec2 p,vec2 a,vec2 b){vec2 d=b-a;return length(p-a-d*clamp(dot(p-a,d)/dot(d,d),0.,1.));}
@@ -138,6 +139,52 @@ export function extendedSurfaceColor() {
       diffuseColor.rgb=mix(diffuseColor.rgb,vec3(.34,.3,.18),die);
       emitterMask=ledLens*(.2+die*(.65+.15*subDies))*(.88+.12*hash31(vec3(floor(uv),19.)));
       surfaceHeight=(housing*.003-recess*.001+ledLens*dome*uLensDome*.012+pads*.002)*uPackageDepth;
+    }
+    if(uType==39){
+      vec4 crystal=cellular3(pp*uScale*1.35,29.7);
+      vec4 fineCrystal=cellular3(pp*uScale*3.1,47.1);
+      float facetEdge=smoothstep(.04,.34,crystal.x);
+      float frost=step(1.-uGrain*.88,crystal.y)*facetEdge;
+      float microGlint=step(1.-uGrain*.55,fineCrystal.y)*smoothstep(.08,.3,fineCrystal.x);
+      candyCrystalMask=clamp(max(frost*.9,microGlint),0.,1.);
+      float sugarAngle=crystal.z*6.2831853;
+      candyFacetDir=vec3(cos(sugarAngle)*sin(crystal.w*1.1),sin(sugarAngle)*sin(crystal.w*1.1),cos(crystal.w*1.1));
+      vec3 glowTint=mix(diffuseColor.rgb,uTertiary,smoothstep(.25,.85,noise3(pp*uScale*.18))*.45);
+      diffuseColor.rgb=mix(glowTint,uSecondary,candyCrystalMask*(.55+.35*crystal.w));
+      surfaceHeight=(crystal.x*frost+fineCrystal.x*microGlint*.5)*uGrain*.012/max(sqrt(uScale*.1),.25);
+    }
+    if(uType==40){
+      float warp=noise3(pp*uScale*.35)*1.45+noise3(pp*uScale*.9)*.42;
+      float phase=(pp.y*1.95+pp.x*1.35+warp)*uScale*2.2;
+      float stripe=sin(phase)*.5+.5;
+      float aa=max(fwidth(phase)*.35,.012);
+      float ribbon=smoothstep(.5-aa*.7,.5+aa*.7,stripe);
+      float secondaryBand=smoothstep(.76-aa,.88+aa,sin(phase*2.+1.1)*.5+.5);
+      vec3 bodyCol=mix(diffuseColor.rgb,uSecondary,ribbon);
+      bodyCol=mix(bodyCol,uTertiary,secondaryBand*.65);
+      float spunMicro=noise3(pp*vec3(uScale*14.,uScale*2.5,uScale*14.));
+      diffuseColor.rgb=bodyCol*(.94+.1*spunMicro);
+      surfaceHeight=(sin(phase)*.0012+(spunMicro-.5)*.001*uGrain);
+    }
+    if(uType==41){
+      vec4 bubbles=cellular3(pp*uScale*.68,51.3);
+      float bubbleRim=1.-smoothstep(.08,.22,bubbles.x);
+      float poreFrost=noise3(pp*uScale*2.4);
+      candyCrystalMask=step(1.-uGrain*.35,poreFrost)*smoothstep(.35,.8,noise3(pp*uScale*4.7));
+      vec3 syrupCore=mix(diffuseColor.rgb,uTertiary,smoothstep(.35,.85,noise3(pp*uScale*.25))*.32);
+      syrupCore=mix(syrupCore,uSecondary,bubbleRim*(.28+bubbles.w*.25)+candyCrystalMask*.48);
+      diffuseColor.rgb=syrupCore;
+      surfaceHeight=(poreFrost-.5)*uGrain*.0025-bubbleRim*.0012;
+    }
+    if(uType==42){
+      vec4 nonpareil=cellular3(pp*uScale*1.15,83.1);
+      float aa=max(fwidth(nonpareil.x)*.55,.01);
+      float bead=1.-smoothstep(.24-aa,.24+aa,nonpareil.x);
+      float occ=step(1.-clamp(uFlakes,.15,1.)*.78,nonpareil.y);
+      candySpeckleMask=bead*occ;
+      vec3 confetti=mix(pickColor(nonpareil.z),mix(uSecondary,uTertiary,step(.5,nonpareil.w)),.28);
+      diffuseColor.rgb=mix(diffuseColor.rgb,confetti,candySpeckleMask);
+      surfaceHeight=candySpeckleMask*max(0.,.24-nonpareil.x)*.012;
     }
   `;
 }

@@ -446,15 +446,24 @@ await suite("7. Full TextureStudio Shell & All 5 Workspaces Mount & Switch Clean
       selectedIndex: 0,
       getRootNode: () => globalThis.document,
       get ownerDocument() { return globalThis.document; },
+      get textContent() {
+        return (el._text || "") + (el.children || []).map((c) => (typeof c === "string" ? c : c.textContent || "")).join("");
+      },
+      set textContent(v) {
+        el._text = v == null ? "" : String(v);
+        el.children = [];
+      },
       append(...args) {
         for (const a of args) {
-          if (a && typeof a === "object") { a.parentNode = el; el.children.push(a); }
+          if (typeof a === "string") el._text = (el._text || "") + a;
+          else if (a && typeof a === "object") { a.parentNode = el; el.children.push(a); }
         }
       },
       prepend(...args) {
         for (let i = args.length - 1; i >= 0; i--) {
           const a = args[i];
-          if (a && typeof a === "object") { a.parentNode = el; el.children.unshift(a); }
+          if (typeof a === "string") el._text = a + (el._text || "");
+          else if (a && typeof a === "object") { a.parentNode = el; el.children.unshift(a); }
         }
       },
       remove() {
@@ -1073,6 +1082,90 @@ await suite("11. Layer Stack Inspectors & Tileable Patterns Applied to Materials
     const titles = [...globalThis.document.querySelectorAll(".section-title")].map((el) => el.textContent);
     assert(titles.some((t) => t.startsWith("Layer Inspector:")), `Expected dedicated Layer Inspector for ${btnLabel}`);
   }
+});
+
+await suite("12. Candy Materials, Expanded Patterns, Full 29 PBR Channels & Mesh Preview Dropdown", async () => {
+  const { PbrChannels, DeclareMaterialAuthoring } = await import("./Engine/Materials/MaterialSpecification.js");
+  const { RasterPbrFields } = await import("./Engine/Materials/FieldProjection.js");
+  const api = globalThis.window.__frontierTextureStudio;
+
+  // 12a. Candy-like materials catalog & procedural kernels uType 39..42
+  const candyItems = materials.filter((m) => m.category === "Candy");
+  assert(candyItems.length >= 16, `Expected >=16 Candy materials, got ${candyItems.length}`);
+  for (const id of ["sour-strawberry-sugar", "peppermint-candy-cane", "peach-ring-gummy", "cosmic-jawbreaker-hologram"]) {
+    const item = materials.find((m) => m.id === id);
+    assert(item, `Missing Candy material ${id}`);
+    const recipe = getRecipe(item);
+    assert(recipe.controls.length >= 3, `Candy recipe missing controls for ${id}`);
+    const threeMat = createMaterial(item);
+    const shaderMock = {
+      uniforms: THREE.UniformsUtils.clone(THREE.ShaderLib.physical.uniforms),
+      vertexShader: THREE.ShaderLib.physical.vertexShader,
+      fragmentShader: THREE.ShaderLib.physical.fragmentShader,
+    };
+    threeMat.onBeforeCompile(shaderMock);
+    assert(shaderMock.fragmentShader.includes("candyCrystalMask"), `Candy crystal shader hook missing for ${id}`);
+    threeMat.dispose();
+  }
+
+  // 12b. Expanded Pattern Starters (Candy & Confectionery, Art Deco, Tech, Noise)
+  const patCatalog = listPatternStarterCatalog();
+  assert(patCatalog.length >= 190, `Expected >=190 pattern starters, got ${patCatalog.length}`);
+  for (const id of ["candy-peppermint-stripe", "candy-sprinkle-confetti", "deco-peacock-fans", "tech-brass-knurling"]) {
+    const entry = patCatalog.find((e) => e.id === id);
+    assert(entry, `Missing expanded pattern starter ${id}`);
+    const svg = getArtworkPreviewSvg(entry, "pattern", 64);
+    assert(svg.includes("<svg"), `SVG failed for pattern ${id}`);
+  }
+
+  // 12c. Full PBR Channels (~20+ -> 29 OpenPBR channels) across MaterialSpecification + FieldProjection + MaterialWorkspace
+  const chanKeys = Object.keys(PbrChannels);
+  assert(chanKeys.length >= 24, `Expected >=24 full PBR channels, got ${chanKeys.length}`);
+  for (const key of ["height", "occlusion", "opacity", "specularColour", "coat", "coatRoughness", "coatIor", "coatNormal", "sheenColour", "anisotropyRotation", "iridescence", "iridescenceIor", "iridescenceThickness", "attenuationColour", "emissive", "emissiveIntensity"]) {
+    assert(PbrChannels[key], `Missing full PBR channel ${key} in PbrChannels`);
+  }
+
+  const allChanMat = normalizeMaterial(materials.find((m) => m.id === "sour-strawberry-sugar"));
+  allChanMat.Authoring = DeclareMaterialAuthoring(allChanMat);
+  allChanMat.Authoring.Layers[allChanMat.Authoring.Layers.length - 1].Channels = chanKeys;
+  const fullRaster = await RasterPbrFields(allChanMat, 32);
+  assert(fullRaster.Rows.length >= 1, "Expected RasterPbrFields rows with full PBR channels");
+
+  // 12d. Material Workspace UI: No Leather Swatch or Botanical previews + Preview Mesh Geometry is a dropdown
+  api.switchWorkspace("material");
+  const allOptionTexts = [...globalThis.document.querySelectorAll("option")].map((o) => o.textContent);
+  assert(!allOptionTexts.includes("Leather Swatch"), "Leather Swatch option must be removed");
+  assert(!allOptionTexts.includes("Botanical"), "Botanical option must be removed");
+
+  const stackTitles = [...globalThis.document.querySelectorAll(".stack-row-title")].map((el) => el.textContent);
+  assert(!stackTitles.includes("Leather Swatch") && !stackTitles.includes("Botanical"), "Mesh preview list rows must not exist");
+  assert(!stackTitles.includes("Chamfer Box") && !stackTitles.includes("Shader Ball"), "Preview Mesh Geometry must be a dropdown, not stack-row list items");
+
+  const meshLabels = [...globalThis.document.querySelectorAll(".property-label")].map((el) => el.textContent);
+  assert(meshLabels.includes("Preview Mesh Geometry"), "Preview Mesh Geometry dropdown label must exist");
+
+  const triggers = [...globalThis.document.querySelectorAll(".pill-trigger")];
+  const meshTrigger = triggers.find((el) => el.textContent.includes("Mesh:") && el.textContent.includes("Shader Ball"));
+  assert(meshTrigger, "Preview Mesh Geometry dropdown trigger must display Mesh: Shader Ball");
+
+  meshTrigger.click();
+  const meshItem = [...globalThis.document.querySelectorAll(".pill-menu .menu-item")].find((el) => el.textContent.includes("Chamfer Box"));
+  assert(meshItem, "Preview Mesh Geometry dropdown menu must contain Chamfer Box");
+  meshItem.click();
+  const updatedTrigger = [...globalThis.document.querySelectorAll(".pill-trigger")].find((el) => el.textContent.includes("Mesh:"));
+  assert(updatedTrigger?.textContent.includes("Chamfer Box"), "Clicking Chamfer Box in mesh dropdown must update preview geometry");
+
+  // Select a Material authoring layer (Surface body / Clearcoat) and verify all 29 PBR channels in its Layer Inspector
+  const matLayerRow = [...globalThis.document.querySelectorAll(".stack-row")].find((r) => !r.textContent.includes("PATTERN"));
+  assert(matLayerRow, "Expected an authoring layer row in Material Layer Stack");
+  matLayerRow.click();
+  const layerChanTriggers = [...globalThis.document.querySelectorAll(".pbr-add-trigger")];
+  assert(layerChanTriggers.length >= 1, "Material Layer Inspector must render + Channel dropdown trigger");
+  layerChanTriggers[layerChanTriggers.length - 1].click();
+  const menuChanItems = globalThis.document.querySelectorAll(".pbr-chan-menu .menu-item");
+  const activeChanPills = globalThis.document.querySelectorAll(".pbr-chan-pill");
+  const totalLayerPbrChannels = menuChanItems.length + activeChanPills.length;
+  assert(totalLayerPbrChannels >= 24, `Expected >=24 PBR channels rendered in Material Layer Inspector, got ${totalLayerPbrChannels}`);
 });
 
 console.log(`\nALL ${results.length} VALIDATION SUITES PASSED CLEANLY`);

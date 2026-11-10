@@ -426,13 +426,14 @@ export function FilterDropdownPill(Parent, Binding)
 
         for (const opt of opts)
         {
+            const optVal = opt.id !== undefined ? opt.id : opt.value;
             const text = `${opt.label || ''} ${opt.sub || ''}`.toLowerCase();
             if (q && !text.includes(q)) continue;
             shown++;
             const item = Construct('button', 'menu-item');
             item.type = 'button';
-            item.dataset.optionId = String(opt.id);
-            item.setAttribute('aria-checked', opt.id === cur ? 'true' : 'false');
+            item.dataset.optionId = String(optVal);
+            item.setAttribute('aria-checked', optVal === cur ? 'true' : 'false');
 
             if (Array.isArray(opt.stops) && opt.stops.length >= 2)
             {
@@ -451,7 +452,7 @@ export function FilterDropdownPill(Parent, Binding)
                 opt.sub ? Construct('small', 'menu-item-sub', opt.sub) : null,
             ]);
             item.append(copy);
-            if (opt.id === cur)
+            if (optVal === cur)
             {
                 const rad = Construct('span', 'menu-radio');
                 item.append(rad);
@@ -459,7 +460,7 @@ export function FilterDropdownPill(Parent, Binding)
             item.addEventListener('click', (e) =>
             {
                 e.stopPropagation();
-                Binding.Write?.(opt.id, opt);
+                Binding.Write?.(optVal, opt);
                 SetOpen(false);
                 if (!Binding.Transient) Broadcast();
                 else Sync();
@@ -476,7 +477,7 @@ export function FilterDropdownPill(Parent, Binding)
     {
         const opts = (typeof Binding.Options === 'function' ? Binding.Options() : Binding.Options) || [];
         const cur = Binding.Read ? Binding.Read() : null;
-        const found = opts.find((o) => o.id === cur) || opts[0];
+        const found = opts.find((o) => (o.id !== undefined ? o.id : o.value) === cur) || opts[0];
         DimSpan.textContent = Binding.Prefix ? `${Binding.Prefix} ` : '';
         DimSpan.style.display = Binding.Prefix ? '' : 'none';
         LabelSpan.textContent = found ? found.label : (Binding.TriggerText || 'Choose...');

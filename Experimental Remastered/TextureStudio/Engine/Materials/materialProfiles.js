@@ -1277,6 +1277,84 @@ Object.assign(recipes, {
 // Preserve settings in older saved tin-labelled presets without rewriting user names.
 recipes.corrugatedTin = recipes.corrugatedZinc;
 
+Object.assign(recipes, {
+  candyCrystal: {
+    title: "Sour sugar & rock candy",
+    caption: "Faceted sugar crystal glints over translucent candy syrup and sour dust.",
+    fixed: { metalness: 0 },
+    colors: [
+      { key: "color", label: "Candy base color" },
+      { key: "secondaryColor", label: "Sugar crystal frost" },
+      { key: "tertiaryColor", label: "Syrup core tint" },
+    ],
+    controls: [
+      rough("Base candy roughness", 0.06, 0.55),
+      direct("grain", "Sugar crystal density", 0, 1, "detail"),
+      scale("detailScale", "Crystal scale"),
+      direct("coat", "Sugar glaze coat", 0, 1, "finish"),
+      direct("translucency", "Syrup translucency", 0, 0.95, "finish"),
+      direct("scattering", "Subsurface glow", 0, 1, "finish"),
+    ],
+  },
+  candySwirl: {
+    title: "Swirled ribbon candy & taffy",
+    caption: "Pulled sugar stripes and soft taffy ribbons with glaze or spun sheen.",
+    fixed: { metalness: 0 },
+    colors: [
+      { key: "color", label: "Primary ribbon color" },
+      { key: "secondaryColor", label: "Stripe / swirl color" },
+      { key: "tertiaryColor", label: "Accent vein color" },
+    ],
+    controls: [
+      rough("Candy gloss roughness", 0.04, 0.85),
+      scale("detailScale", "Swirl band frequency"),
+      direct("grain", "Spun texture grain", 0, 1, "detail"),
+      direct("coat", "Lacquer sugar glaze", 0, 1, "finish"),
+      direct("coatRoughness", "Glaze polish", 0.02, 0.45, "finish"),
+      direct("sheen", "Spun sugar sheen", 0, 1, "finish"),
+      direct("translucency", "Pull translucency", 0, 0.65, "finish"),
+    ],
+  },
+  candyGummy: {
+    title: "Translucent gummy & jelly",
+    caption: "Refractive gelatin core with Beer-Lambert syrup attenuation and dewy sparkle.",
+    fixed: { metalness: 0 },
+    colors: [
+      { key: "color", label: "Outer jelly tint" },
+      { key: "secondaryColor", label: "Dust / bubble highlight" },
+      { key: "attenuationColor", label: "Core syrup attenuation" },
+    ],
+    controls: [
+      rough("Surface wet roughness", 0.06, 0.55),
+      direct("translucency", "Gel transmission", 0.1, 0.96, "finish"),
+      direct("depth", "Syrup thickness", 0.1, 2.0, "finish"),
+      direct("grain", "Frost / salt dusting", 0, 1, "detail"),
+      scale("detailScale", "Micro-bubble scale"),
+      direct("coat", "Wet syrup coat", 0, 1, "finish"),
+      direct("scattering", "Internal rim glow", 0, 1, "finish"),
+    ],
+  },
+  candyPearl: {
+    title: "Iridescent candy pearl & sprinkles",
+    caption: "Thin-film iridescent sugar shell dotted with vibrant confectionery nonpareils.",
+    fixed: { metalness: 0 },
+    colors: [
+      { key: "color", label: "Shell glaze color" },
+      { key: "secondaryColor", label: "Pearl highlight" },
+      { key: "tertiaryColor", label: "Sprinkle accent" },
+    ],
+    controls: [
+      rough("Shell roughness", 0.04, 0.4),
+      direct("coat", "Hard shell glaze", 0.2, 1, "finish"),
+      direct("coatRoughness", "Shell polish", 0.02, 0.25, "finish"),
+      direct("iridescence", "Pearl iridescence", 0, 1, "iridescence"),
+      direct("filmThickness", "Film thickness", 160, 850, "iridescence", "nm"),
+      direct("flakes", "Sprinkle density", 0, 1, "detail"),
+      scale("detailScale", "Sprinkle size"),
+    ],
+  },
+});
+
 export function materialFamily(p) {
   if (p.recipeId && recipes[p.recipeId]) return p.recipeId;
   if (p.type === 0) return "paint";
@@ -1333,6 +1411,10 @@ export function materialFamily(p) {
       36: "stemSurface",
       37: "sand",
       38: "layeredSand",
+      39: "candyCrystal",
+      40: "candySwirl",
+      41: "candyGummy",
+      42: "candyPearl",
     }[p.type] || "paint"
   );
 }

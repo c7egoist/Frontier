@@ -10,21 +10,37 @@ export const AuthoringIdentity = () => globalThis.crypto.randomUUID();
 export const PbrChannels = Object.freeze({
     colour: { Caption: "Colour", Type: "colour", Target: "color", Default: "#ffffff" },
     roughness: { Caption: "Roughness", Type: "scalar", Target: "roughness", Default: .5, Minimum: 0, Maximum: 1 },
-    metallic: { Caption: "Metallic", Type: "scalar", Target: "metalness", Minimum: 0, Maximum: 1 },
+    metallic: { Caption: "Metallic", Type: "scalar", Target: "metalness", Default: 0, Minimum: 0, Maximum: 1 },
     normal: { Caption: "Normal", Type: "vector", Target: "normal", Default: [0, 0, 1] },
     microNormal: { Caption: "Micro normal", Type: "vector", Target: "microNormal", Default: [0, 0, 1] },
+    height: { Caption: "Height / Relief", Type: "scalar", Target: "reliefHeight", Default: .5, Minimum: 0, Maximum: 1 },
+    occlusion: { Caption: "Ambient occlusion", Type: "scalar", Target: "aoIntensity", Default: 1, Minimum: 0, Maximum: 1 },
+    opacity: { Caption: "Opacity", Type: "scalar", Target: "opacity", Default: 1, Minimum: 0, Maximum: 1 },
+    coverage: { Caption: "Coverage", Type: "scalar", Target: "coverage", Default: 1, Minimum: 0, Maximum: 1 },
     ior: { Caption: "IOR", Type: "scalar", Target: "ior", Default: 1.5, Minimum: 1, Maximum: 3 },
     specular: { Caption: "Specular", Type: "scalar", Target: "specular", Default: 1, Minimum: 0, Maximum: 1 },
-    thickness: { Caption: "Thickness", Type: "scalar", Target: "depth", Minimum: 0, Maximum: 10 },
-    transmission: { Caption: "Transmission", Type: "scalar", Target: "translucency", Minimum: 0, Maximum: 1 },
-    coverage: { Caption: "Coverage", Type: "scalar", Target: "coverage", Default: 1, Minimum: 0, Maximum: 1 },
-    sheen: { Caption: "Sheen", Type: "scalar", Target: "sheen", Minimum: 0, Maximum: 1 },
-    sheenRoughness: { Caption: "Sheen roughness", Type: "scalar", Target: "sheenRoughness", Minimum: 0, Maximum: 1 },
-    anisotropy: { Caption: "Anisotropy", Type: "scalar", Target: "anisotropy", Minimum: 0, Maximum: 1 }
+    specularColour: { Caption: "Specular colour", Type: "colour", Target: "specularColor", Default: "#ffffff" },
+    coat: { Caption: "Clearcoat", Type: "scalar", Target: "coat", Default: 0, Minimum: 0, Maximum: 1 },
+    coatRoughness: { Caption: "Coat roughness", Type: "scalar", Target: "coatRoughness", Default: .08, Minimum: .01, Maximum: 1 },
+    coatIor: { Caption: "Coat IOR", Type: "scalar", Target: "coatIor", Default: 1.5, Minimum: 1, Maximum: 2.5 },
+    coatNormal: { Caption: "Coat normal", Type: "vector", Target: "coatNormal", Default: [0, 0, 1] },
+    sheen: { Caption: "Sheen", Type: "scalar", Target: "sheen", Default: 0, Minimum: 0, Maximum: 1 },
+    sheenRoughness: { Caption: "Sheen roughness", Type: "scalar", Target: "sheenRoughness", Default: .55, Minimum: 0, Maximum: 1 },
+    sheenColour: { Caption: "Sheen colour", Type: "colour", Target: "sheenColor", Default: "#ffffff" },
+    anisotropy: { Caption: "Anisotropy", Type: "scalar", Target: "anisotropy", Default: 0, Minimum: 0, Maximum: 1 },
+    anisotropyRotation: { Caption: "Anisotropy angle", Type: "scalar", Target: "anisotropyRotation", Default: 0, Minimum: 0, Maximum: 1 },
+    iridescence: { Caption: "Iridescence", Type: "scalar", Target: "iridescence", Default: 0, Minimum: 0, Maximum: 1 },
+    iridescenceIor: { Caption: "Iridescence IOR", Type: "scalar", Target: "iridescenceIOR", Default: 1.35, Minimum: 1, Maximum: 2.5 },
+    iridescenceThickness: { Caption: "Iridescence thickness", Type: "scalar", Target: "filmThickness", Default: 380, Minimum: 0, Maximum: 1200 },
+    transmission: { Caption: "Transmission", Type: "scalar", Target: "translucency", Default: 0, Minimum: 0, Maximum: 1 },
+    thickness: { Caption: "Thickness", Type: "scalar", Target: "depth", Default: .5, Minimum: 0, Maximum: 10 },
+    attenuationColour: { Caption: "Attenuation colour", Type: "colour", Target: "attenuationColor", Default: "#ffffff" },
+    emissive: { Caption: "Emissive", Type: "colour", Target: "emissionColor", Default: "#000000" },
+    emissiveIntensity: { Caption: "Emissive intensity", Type: "scalar", Target: "emissionStrength", Default: 0, Minimum: 0, Maximum: 10 }
 });
 export function ChannelAddress(Layer, Channel)
 {
-    if (Layer.Model === "coat") return ({ roughness: "coatRoughness", ior: "coatIor", coverage: "coat", normal: "coatNormal" })[Channel] || `layer:${Layer.Identity}:${Channel}`;
+    if (Layer.Model === "coat") return ({ roughness: "coatRoughness", ior: "coatIor", coverage: "coat", coat: "coat", coatRoughness: "coatRoughness", coatIor: "coatIor", normal: "coatNormal", coatNormal: "coatNormal" })[Channel] || `layer:${Layer.Identity}:${Channel}`;
     if (Layer.Model === "flakes") return `flake-output:${Channel}`;
     if (Layer.Model === "surface") return PbrChannels[Channel].Target;
     return `layer:${Layer.Identity}:${Channel}`;
@@ -51,7 +67,14 @@ export function DeclareMaterialAuthoring(Parameters)
 {
     const Generators = GeneratorDeclarations(Parameters);
     const Surface = { Identity: AuthoringIdentity(), Name: Parameters.type === 0 ? "Paint body" : "Surface body", Model: "surface", Enabled: true,
-        Channels: ["colour", "roughness", "metallic", "normal", "ior", "specular", "thickness", ...(Parameters.type === 5 || Parameters.translucency > 0 ? ["transmission"] : []), ...(Parameters.sheen > 0 ? ["sheen", "sheenRoughness"] : []), ...(Parameters.anisotropy > 0 ? ["anisotropy"] : [])] };
+        Channels: [
+            "colour", "roughness", "metallic", "normal", "ior", "specular", "thickness",
+            ...(Parameters.type === 5 || Parameters.translucency > 0 ? ["transmission", ...(Parameters.attenuationColor ? ["attenuationColour"] : [])] : []),
+            ...(Parameters.sheen > 0 ? ["sheen", "sheenRoughness", "sheenColour"] : []),
+            ...(Parameters.anisotropy > 0 ? ["anisotropy"] : []),
+            ...(Parameters.iridescence > 0 ? ["iridescence", "iridescenceIor", "iridescenceThickness"] : []),
+            ...(Parameters.emissionStrength > 0 ? ["emissive", "emissiveIntensity"] : []),
+        ] };
     const Layers = [Surface];
     if (Parameters.type === 0) Layers.unshift({ Identity: AuthoringIdentity(), Name: "Metallic flakes", Model: "flakes", Generator: Generators.find(Generator => Generator.Procedure === "flakes").Identity, Enabled: true, Channels: ["colour", "roughness", "metallic", "normal", "coverage"] });
     if (Parameters.type === 0 || Parameters.coat > 0) Layers.unshift({ Identity: AuthoringIdentity(), Name: "Clearcoat", Model: "coat", Enabled: true, Channels: ["coverage", "roughness", "ior"] });
@@ -187,13 +210,15 @@ export function ResolveAuthoringParameters(Normalized, Input, ProjectionEnabled 
     {
         if (Layer.Model === "surface") for (const [Channel, Specification] of Object.entries(PbrChannels))
         {
-            if (!Layer.Enabled || !Layer.Channels.includes(Channel)) Result[Specification.Target] = Specification.Default ?? Specification.Minimum ?? [0, 0, 1];
+            if (Authoring.Layers.some(Other => Other !== Layer && Other.Enabled && Other.Channels.some(Active => ChannelAddress(Other, Active) === Specification.Target))) continue;
+            if (!Layer.Enabled || (!Layer.Channels.includes(Channel) && !Layer.Channels.some(Active => PbrChannels[Active]?.Target === Specification.Target)))
+                Result[Specification.Target] = Specification.Default ?? Specification.Minimum ?? [0, 0, 1];
         }
         if (Layer.Model === "coat")
         {
-            if (!Layer.Enabled || !Layer.Channels.includes("coverage")) Result.coat = 0;
-            if (!Layer.Channels.includes("roughness")) Result.coatRoughness = .5;
-            if (!Layer.Channels.includes("ior")) Result.coatIor = 1.5;
+            if (!Layer.Enabled || (!Layer.Channels.includes("coverage") && !Layer.Channels.includes("coat"))) Result.coat = 0;
+            if (!Layer.Channels.includes("roughness") && !Layer.Channels.includes("coatRoughness")) Result.coatRoughness = .5;
+            if (!Layer.Channels.includes("ior") && !Layer.Channels.includes("coatIor")) Result.coatIor = 1.5;
         }
         if (Layer.Model === "flakes")
         {

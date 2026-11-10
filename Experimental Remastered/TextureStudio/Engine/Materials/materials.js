@@ -18,6 +18,7 @@ import {
 import { extendedSurfaceGLSL, extendedSurfaceColor } from "./surfaceKernels.js";
 import { sandGLSL, sandColor } from "./sandKernels.js";
 import { granularCatalog } from "./granularCatalog.js";
+import { candyCatalog } from "./candyCatalog.js";
 import { normalizeSandLayers, sandLayerSeed } from "./materialProfiles.js";
 
 export const materials = [
@@ -769,6 +770,7 @@ export const materials = [
   ...architectureCatalog(),
   ...botanicalCatalog(),
   ...granularCatalog(),
+  ...candyCatalog(),
 ].map(normalizeMaterial).flatMap(Parameters => Parameters.camouflage ? [Parameters, { ...Parameters, id: `${Parameters.id}-smooth`, name: `${Parameters.name} · Smooth`, camouflageStyle: "camouflage-smooth" }] : [Parameters]).map(Parameters =>
 {
   if (!Parameters.camouflage) return Parameters;
@@ -844,6 +846,11 @@ export function normalizeMaterial(input) {
     lensDome: 0.7,
     packageDepth: 0.6,
     secondaryColor: "#afa38d",
+    attenuationColor: p.attenuationColor || p.color || "#ffffff",
+    aoIntensity: 1,
+    opacity: 1,
+    reliefHeight: 0.5,
+    anisotropyRotation: 0,
     emissionColor: "#ffffff",
     emissionStrength: 0,
     pixelFill: 0.65,
@@ -957,14 +964,16 @@ export function createMaterial(input) {
     sheenColor: p.sheenColor,
     sheenRoughness: p.sheenRoughness,
     anisotropy: p.anisotropy,
-    anisotropyRotation: (p.weaveAngle * Math.PI) / 180,
+    anisotropyRotation: ((p.anisotropyRotation ?? 0) * Math.PI * 2) + ((p.weaveAngle * Math.PI) / 180),
     transmission: p.Authoring ? p.translucency : p.type === 5 ? 0.97 : p.translucency,
-    emissive: p.type === 20 ? p.emissionColor : "#000000",
+    opacity: p.opacity ?? 1,
+    transparent: (p.opacity ?? 1) < 1,
+    emissive: p.type === 20 || (p.emissionStrength || 0) > 0 ? (p.emissionColor || "#000000") : "#000000",
     emissiveIntensity: p.emissionStrength,
     toneMapped: !p.bakeMode,
     alphaToCoverage: !p.bakeMode && (p.type === 27 || p.type === 28),
     thickness: p.depth * 2,
-    attenuationColor: new THREE.Color(p.color),
+    attenuationColor: new THREE.Color(p.attenuationColor || p.color),
     attenuationDistance: 2.8,
     envMapIntensity: p.type === 4 && p.fabricMode === 4 ? 1.8 : 1.35,
     side: THREE.DoubleSide,
@@ -1112,6 +1121,7 @@ export function createMaterial(input) {
       uDenimFade: p.denimFade,
       uSlub: p.slub,
       uPixelFill: p.pixelFill,
+      uAoIntensity: p.aoIntensity ?? 1,
       uEmissionScale: Math.max(1, p.emissionStrength),
       uAverageFlakeColor: averageColor,
       uType: p.type,
@@ -1404,6 +1414,9 @@ ${patternColorGLSL()}
         roughnessFactor=mix(roughnessFactor,patternParamsSample.r,patternChannelMaskSample.r);
       #endif
       if(uType==34 || uType==35)roughnessFactor=mix(roughnessFactor,min(1.,roughnessFactor+.24),bioPore);
+      if(uType==39)roughnessFactor=mix(roughnessFactor,.05,candyCrystalMask);
+      if(uType==41)roughnessFactor=mix(roughnessFactor,.46,candyCrystalMask);
+      if(uType==42)roughnessFactor=mix(roughnessFactor,.09,candySpeckleMask);
       if(uType==29 || uMetalScratches==1)roughnessFactor=mix(roughnessFactor,min(1.,roughnessFactor+.3),scratchMask);
     `,
     );
@@ -1453,6 +1466,11 @@ ${patternColorGLSL()}
         float angle=flakeRandom*6.283;
         ${p.FlakeOutputs?.normal === false ? "" : "normal=normalize(normal+(tangent*cos(angle)+bitangent*sin(angle))*uFlakeTilt*flakeMask*flakeResolved);"}
       }
+      if(uType==39 && candyCrystalMask>.01){
+        vec3 ct=normalize(cross(normal,abs(normal.y)<.95?vec3(0,1,0):vec3(1,0,0)));
+        vec3 cb=cross(normal,ct);
+        normal=normalize(mix(normal,normalize(ct*candyFacetDir.x+cb*candyFacetDir.y+normal*candyFacetDir.z),candyCrystalMask*.42));
+      }
     `,
     );
     shader.fragmentShader = shader.fragmentShader.replace(
@@ -1479,15 +1497,15 @@ ${patternColorGLSL()}
           material.clearcoatRoughness=clamp(material.clearcoatRoughness+leatherFold*.055+(leatherGrain-.5)*.035,.06,1.);
         }
         #ifdef ALLOY_PATTERN
-          float glaze=patternFinishSample.r;
-          material.clearcoat=mix(material.clearcoat,glaze*.75+material.clearcoat*(1.-clamp(patternFinishSample.r+patternFinishSample.g+patternFinishSample.b,0.,1.)),patternMaterialCoverage);
+          float glaze=patternFinishSample.r*uPatternApplyExtra.z;
+          material.clearcoat=mix(material.clearcoat,glaze*.75+material.clearcoat*(1.-clamp(patternFinishSample.r+patternFinishSample.g+patternFinishSample.b,0.,1.)),patternMaterialCoverage*uPatternApplyExtra.z);
           material.clearcoatRoughness=mix(material.clearcoatRoughness,.16,glaze*patternCoverage);
         #endif
         if(uType==20)material.clearcoat*=ledLens;
         if(uType==22)material.clearcoat*=1.-groutMask;
       #endif
       #if defined(ALLOY_PATTERN) && defined(USE_SHEEN)
-        float wool=patternFinishSample.g;
+        float wool=patternFinishSample.g*uPatternApplyExtra.w;
         material.sheenColor=mix(material.sheenColor,diffuseColor.rgb*.4,patternMaterialCoverage*wool);
         material.sheenRoughness=mix(material.sheenRoughness,.85,patternMaterialCoverage*wool);
       #endif
@@ -1526,7 +1544,9 @@ ${patternColorGLSL()}
       #ifdef ALLOY_PATTERN
         reflectedLight.indirectDiffuse*=mix(1.,patternParamsSample.a,patternChannelMaskSample.a);
       #endif
-      if(uType==13 || uType==14)reflectedLight.indirectDiffuse+=diffuseColor.rgb*ambientLightColor*uScattering*.22*pow(1.-abs(dot(normal,geometryViewDir)),2.)*vec3(1.,.55,.32);`,
+      if(uType==13 || uType==14)reflectedLight.indirectDiffuse+=diffuseColor.rgb*ambientLightColor*uScattering*.22*pow(1.-abs(dot(normal,geometryViewDir)),2.)*vec3(1.,.55,.32);
+      if(uType>=39 && uType<=42)reflectedLight.indirectDiffuse+=diffuseColor.rgb*(ambientLightColor+vec3(.25))*uScattering*.28*pow(1.-abs(dot(normal,geometryViewDir)),1.85);
+      reflectedLight.indirectDiffuse*=uAoIntensity;`,
     );
     // Same procedural field, unlit channel output. Bake colors are encoded sRGB;
     // scalar and normal channels are linear. A flat XY patch gives tangent normals.

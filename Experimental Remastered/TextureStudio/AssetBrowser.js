@@ -242,8 +242,8 @@ export function createAssetBrowser(mountEl, appBridge) {
         const fam = p.group || "Archive";
         counts.set(fam, (counts.get(fam) || 0) + 1);
       }
-      // Prioritize African Patterns right at the top alongside Noise & Procedural!
-      const priority = ["African Patterns", "Noise & Procedural", "Geometric designs", "African traditional", "Islamic geometry", "Fabric weaves", "Stitch patterns", "Originals"];
+      // Prioritize Candy & Confectionery, African Patterns & Noise & Procedural right at the top!
+      const priority = ["Candy & Confectionery", "African Patterns", "Noise & Procedural", "Art Deco & Architectural", "Tech & Hard-Surface", "Geometric designs", "African traditional", "Islamic geometry", "Fabric weaves", "Stitch patterns", "Originals"];
       const rest = [...counts.keys()].filter((k) => !priority.includes(k)).sort();
       const ordered = ["All", ...priority.filter((k) => counts.has(k)), ...rest];
       const items = all.map((p) => ({

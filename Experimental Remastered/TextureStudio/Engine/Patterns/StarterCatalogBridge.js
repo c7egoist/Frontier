@@ -190,6 +190,386 @@ export const NOISE_SCALED_STARTERS = [
       return doc;
     },
   },
+  // --- CANDY & CONFECTIONERY PATTERNS ---
+  {
+    id: "candy-peppermint-stripe",
+    name: "Candy Cane Barber Stripe",
+    group: "Candy & Confectionery",
+    description: "Glossy diagonal peppermint red and ivory sugar stripes with beveled candy glaze.",
+    build: () => {
+      const doc = createArtworkDocument("pattern");
+      doc.name = "Candy Cane Barber Stripe";
+      doc.background = { enabled: true, color: "#faf5f2", opacity: 1, finish: "ceramic", roughness: 0.14, metalness: 0, height: 0.05 };
+      doc.layers = [
+        createArtworkLayer("motif", {
+          name: "Crimson Candy Stripes",
+          transform: { x: 256, y: 256, width: 760, height: 42, rotation: -35 },
+          shape: { motifType: "stripe", color: "#db1832", strokeWidth: 4, strokeColor: "#ffd6dc" },
+          surface: { finish: "ceramic", roughness: 0.12, metalness: 0, height: 0.35, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+          modifiers: [
+            { ...createDefaultModifier("array-grid"), layout: "grid", columns: 1, rows: 6, spanX: 512, spanY: 512 },
+          ],
+        }),
+        createArtworkLayer("motif", {
+          name: "Thin Mint Accent",
+          transform: { x: 256, y: 256, width: 760, height: 10, rotation: -35 },
+          shape: { motifType: "stripe", color: "#5be3b8" },
+          surface: { finish: "ceramic", roughness: 0.16, metalness: 0, height: 0.25, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+          modifiers: [
+            { ...createDefaultModifier("array-grid"), layout: "grid", columns: 1, rows: 6, spanX: 512, spanY: 512 },
+          ],
+        }),
+      ];
+      return doc;
+    },
+  },
+  {
+    id: "candy-sprinkle-confetti",
+    name: "Sprinkle Confetti Party",
+    group: "Candy & Confectionery",
+    description: "Multi-color rainbow pill sprinkles scattered randomly over frosted buttercream glaze.",
+    build: () => {
+      const doc = createArtworkDocument("pattern");
+      doc.name = "Sprinkle Confetti Party";
+      doc.background = { enabled: true, color: "#fff6ee", opacity: 1, finish: "ceramic", roughness: 0.28, metalness: 0, height: 0 };
+      doc.layers = [
+        createArtworkLayer("motif", {
+          name: "Berry & Lemon Sprinkles",
+          transform: { x: 256, y: 256, width: 28, height: 10, rotation: 20 },
+          shape: { motifType: "roundedRect", cornerRadius: 0.5, color: "#ff4f87", colorB: "#ffcb36" },
+          surface: { finish: "ceramic", roughness: 0.15, metalness: 0, height: 0.45, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+          modifiers: [
+            { ...createDefaultModifier("array-grid"), layout: "hex", columns: 10, rows: 10, spanX: 512, spanY: 512, alternateColor: true, colorB: "#ffcb36" },
+            { ...createDefaultModifier("noise-jitter"), posJitter: 18, rotJitter: 165, scaleJitter: 0.25, dropout: 0.15, seed: 404 },
+          ],
+        }),
+        createArtworkLayer("motif", {
+          name: "Mint & Sky Sprinkles",
+          transform: { x: 278, y: 242, width: 26, height: 10, rotation: -32 },
+          shape: { motifType: "roundedRect", cornerRadius: 0.5, color: "#35dca8", colorB: "#5ec0ff" },
+          surface: { finish: "ceramic", roughness: 0.16, metalness: 0, height: 0.42, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+          modifiers: [
+            { ...createDefaultModifier("array-grid"), layout: "grid", columns: 8, rows: 8, spanX: 512, spanY: 512, alternateColor: true, colorB: "#8f75ff" },
+            { ...createDefaultModifier("noise-jitter"), posJitter: 22, rotJitter: 180, scaleJitter: 0.2, dropout: 0.2, seed: 719 },
+          ],
+        }),
+      ];
+      return doc;
+    },
+  },
+  {
+    id: "candy-pastel-checker",
+    name: "Lollipop Pastel Checker",
+    group: "Candy & Confectionery",
+    description: "Beveled strawberry, cream, mint, and lilac hard-candy squares with sugar specular.",
+    build: () => {
+      const doc = createArtworkDocument("pattern");
+      doc.name = "Lollipop Pastel Checker";
+      doc.background = { enabled: true, color: "#fff8f2", opacity: 1, finish: "ceramic", roughness: 0.14, metalness: 0, height: 0 };
+      doc.layers = [
+        createArtworkLayer("motif", {
+          name: "Glazed Sugar Squares",
+          transform: { x: 256, y: 256, width: 58, height: 58, rotation: 0 },
+          shape: { motifType: "roundedRect", cornerRadius: 0.22, color: "#ff6b9d", colorB: "#6ce6c0", strokeWidth: 3, strokeColor: "#ffffff" },
+          surface: { finish: "ceramic", roughness: 0.11, metalness: 0, height: 0.48, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+          modifiers: [
+            { ...createDefaultModifier("array-grid"), layout: "grid", columns: 8, rows: 8, spanX: 512, spanY: 512, alternateColor: true, colorB: "#6ce6c0" },
+          ],
+        }),
+        createArtworkLayer("motif", {
+          name: "Lemon Pearl Drops",
+          transform: { x: 256, y: 256, width: 14, height: 14, rotation: 0 },
+          shape: { motifType: "circle", color: "#fff19e" },
+          surface: { finish: "ceramic", roughness: 0.12, metalness: 0, height: 0.62, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+          modifiers: [
+            { ...createDefaultModifier("array-grid"), layout: "brick", columns: 8, rows: 8, spanX: 512, spanY: 512 },
+          ],
+        }),
+      ];
+      return doc;
+    },
+  },
+  {
+    id: "candy-sour-starburst",
+    name: "Sour Sugar Starburst",
+    group: "Candy & Confectionery",
+    description: "Faceted radial confetti stars in citrus orange, lime, raspberry and grape sugar glazes.",
+    build: () => {
+      const doc = createArtworkDocument("pattern");
+      doc.name = "Sour Sugar Starburst";
+      doc.background = { enabled: true, color: "#291436", opacity: 1, finish: "ceramic", roughness: 0.22, metalness: 0, height: 0 };
+      doc.layers = [
+        createArtworkLayer("motif", {
+          name: "Candy Stars",
+          transform: { x: 256, y: 256, width: 42, height: 42, rotation: 0 },
+          shape: { motifType: "star", points: 5, innerRatio: 0.44, color: "#ff5488", colorB: "#42e39a" },
+          surface: { finish: "ceramic", roughness: 0.18, metalness: 0, height: 0.55, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+          modifiers: [
+            { ...createDefaultModifier("array-grid"), layout: "hex", columns: 9, rows: 9, spanX: 512, spanY: 512, alternateColor: true, colorB: "#ffbc36" },
+            { ...createDefaultModifier("noise-scale"), noiseType: "perlin", target: "scale-color", minScale: 0.55, maxScale: 1.35, frequency: 4, colorB: "#45d4ff", seamless: true },
+          ],
+        }),
+      ];
+      return doc;
+    },
+  },
+  {
+    id: "candy-caramel-waffle",
+    name: "Caramel Waffle Cone",
+    group: "Candy & Confectionery",
+    description: "Crisp toasted waffle grid relief in warm golden caramel and honey glaze.",
+    build: () => {
+      const doc = createArtworkDocument("pattern");
+      doc.name = "Caramel Waffle Cone";
+      doc.background = { enabled: true, color: "#783f12", opacity: 1, finish: "ink", roughness: 0.58, metalness: 0, height: 0 };
+      doc.layers = [
+        createArtworkLayer("motif", {
+          name: "Crisp Wafer Cells",
+          transform: { x: 256, y: 256, width: 42, height: 42, rotation: 45 },
+          shape: { motifType: "roundedRect", cornerRadius: 0.12, color: "#d68f3a", strokeWidth: 5, strokeColor: "#5e2d0c" },
+          surface: { finish: "ceramic", roughness: 0.44, metalness: 0, height: 0.65, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+          modifiers: [
+            { ...createDefaultModifier("array-grid"), layout: "grid", columns: 10, rows: 10, spanX: 512, spanY: 512 },
+          ],
+        }),
+      ];
+      return doc;
+    },
+  },
+  {
+    id: "candy-gingham-sugar",
+    name: "Gingham Picnic Sugar",
+    group: "Candy & Confectionery",
+    description: "Strawberry milk & marshmallow cream crosshatch gingham bands with satin sheen.",
+    build: () => {
+      const doc = createArtworkDocument("pattern");
+      doc.name = "Gingham Picnic Sugar";
+      doc.background = { enabled: true, color: "#fff7fa", opacity: 1, finish: "cotton", roughness: 0.62, metalness: 0, height: 0 };
+      doc.layers = [
+        createArtworkLayer("motif", {
+          name: "Horizontal Ribbon",
+          transform: { x: 256, y: 256, width: 512, height: 32, rotation: 0 },
+          shape: { motifType: "stripe", color: "#ff75a0" },
+          opacity: 0.55,
+          surface: { finish: "cotton", roughness: 0.55, metalness: 0, height: 0.22, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+          modifiers: [
+            { ...createDefaultModifier("array-grid"), layout: "grid", columns: 1, rows: 8, spanX: 512, spanY: 512 },
+          ],
+        }),
+        createArtworkLayer("motif", {
+          name: "Vertical Ribbon",
+          transform: { x: 256, y: 256, width: 32, height: 512, rotation: 0 },
+          shape: { motifType: "stripe", color: "#ff477e" },
+          opacity: 0.5,
+          surface: { finish: "cotton", roughness: 0.52, metalness: 0, height: 0.34, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+          modifiers: [
+            { ...createDefaultModifier("array-grid"), layout: "grid", columns: 8, rows: 1, spanX: 512, spanY: 512 },
+          ],
+        }),
+      ];
+      return doc;
+    },
+  },
+  // --- ART DECO & ARCHITECTURAL ---
+  {
+    id: "deco-peacock-fans",
+    name: "Art Deco Peacock Fans",
+    group: "Art Deco & Architectural",
+    description: "Metallic brushed gold Art Deco concentric scallop fans on deep emerald enamel.",
+    build: () => {
+      const doc = createArtworkDocument("pattern");
+      doc.name = "Art Deco Peacock Fans";
+      doc.background = { enabled: true, color: "#0c2b26", opacity: 1, finish: "ceramic", roughness: 0.18, metalness: 0, height: 0 };
+      doc.layers = [
+        createArtworkLayer("motif", {
+          name: "Gold Scallop Fans",
+          transform: { x: 256, y: 256, width: 92, height: 92, rotation: 0 },
+          shape: { motifType: "arc", color: "#e8c27a", strokeWidth: 4, strokeColor: "#fff1c7" },
+          surface: { finish: "foil", roughness: 0.22, metalness: 0.94, height: 0.5, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+          modifiers: [
+            { ...createDefaultModifier("array-grid"), layout: "brick", columns: 6, rows: 6, spanX: 512, spanY: 512 },
+            { ...createDefaultModifier("inset-echo"), copies: 3, stepPx: 18, alternateColor: true, colorB: "#103a34" },
+          ],
+        }),
+      ];
+      return doc;
+    },
+  },
+  {
+    id: "deco-bauhaus-arcs",
+    name: "Bauhaus Concentric Tiles",
+    group: "Art Deco & Architectural",
+    description: "Terracotta, cobalt, and warm ochre mid-century ceramic quarter-circle relief tiles.",
+    build: () => {
+      const doc = createArtworkDocument("pattern");
+      doc.name = "Bauhaus Concentric Tiles";
+      doc.background = { enabled: true, color: "#ebe3d3", opacity: 1, finish: "ceramic", roughness: 0.5, metalness: 0, height: 0 };
+      doc.layers = [
+        createArtworkLayer("motif", {
+          name: "Geometric Arcs",
+          transform: { x: 256, y: 256, width: 78, height: 78, rotation: 45 },
+          shape: { motifType: "ring", innerRatio: 0.54, color: "#c44b2b", colorB: "#1d4e78" },
+          surface: { finish: "ceramic", roughness: 0.3, metalness: 0, height: 0.44, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+          modifiers: [
+            { ...createDefaultModifier("array-grid"), layout: "grid", columns: 6, rows: 6, spanX: 512, spanY: 512, alternateColor: true, colorB: "#1d4e78" },
+            { ...createDefaultModifier("noise-jitter"), posJitter: 0, rotJitter: 90, scaleJitter: 0, seed: 88 },
+          ],
+        }),
+      ];
+      return doc;
+    },
+  },
+  {
+    id: "deco-zellige-stars",
+    name: "Moroccan Zellige Star Lattice",
+    group: "Art Deco & Architectural",
+    description: "Hand-glazed teal, turquoise, and ivory 8-point geometric tile mosaic.",
+    build: () => {
+      const doc = createArtworkDocument("pattern");
+      doc.name = "Moroccan Zellige Star Lattice";
+      doc.background = { enabled: true, color: "#ede6d6", opacity: 1, finish: "ceramic", roughness: 0.35, metalness: 0, height: 0 };
+      doc.layers = [
+        createArtworkLayer("motif", {
+          name: "Glazed Zellige Stars",
+          transform: { x: 256, y: 256, width: 68, height: 68, rotation: 22.5 },
+          shape: { motifType: "star", points: 8, innerRatio: 0.56, color: "#196f6b", strokeWidth: 3, strokeColor: "#f7f3ea" },
+          surface: { finish: "ceramic", roughness: 0.16, metalness: 0, height: 0.52, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+          modifiers: [
+            { ...createDefaultModifier("array-grid"), layout: "grid", columns: 6, rows: 6, spanX: 512, spanY: 512, alternateColor: true, colorB: "#2589a1" },
+          ],
+        }),
+      ];
+      return doc;
+    },
+  },
+  // --- TECH & HARD-SURFACE ---
+  {
+    id: "tech-brass-knurling",
+    name: "Precision Brass Knurling",
+    group: "Tech & Hard-Surface",
+    description: "Tight micro-pyramid CNC diamond knurl pattern in anodized brass and gunmetal.",
+    build: () => {
+      const doc = createArtworkDocument("pattern");
+      doc.name = "Precision Brass Knurling";
+      doc.background = { enabled: true, color: "#24211b", opacity: 1, finish: "foil", roughness: 0.42, metalness: 0.85, height: 0 };
+      doc.layers = [
+        createArtworkLayer("motif", {
+          name: "Diamond Knurl Facets",
+          transform: { x: 256, y: 256, width: 24, height: 24, rotation: 0 },
+          shape: { motifType: "diamond", color: "#d4af63", strokeWidth: 2, strokeColor: "#382f1f" },
+          surface: { finish: "foil", roughness: 0.25, metalness: 0.96, height: 0.72, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+          modifiers: [
+            { ...createDefaultModifier("array-grid"), layout: "grid", columns: 18, rows: 18, spanX: 512, spanY: 512 },
+          ],
+        }),
+      ];
+      return doc;
+    },
+  },
+  {
+    id: "tech-carbon-twill",
+    name: "Carbon Fiber Micro Twill",
+    group: "Tech & Hard-Surface",
+    description: "Tight diagonal carbon-fiber tow weave with anisotropic sheen and specular contrast.",
+    build: () => {
+      const doc = createArtworkDocument("pattern");
+      doc.name = "Carbon Fiber Micro Twill";
+      doc.background = { enabled: true, color: "#121316", opacity: 1, finish: "ink", roughness: 0.45, metalness: 0.2, height: 0 };
+      doc.layers = [
+        createArtworkLayer("motif", {
+          name: "2x2 Carbon Tows",
+          transform: { x: 256, y: 256, width: 32, height: 14, rotation: 45 },
+          shape: { motifType: "roundedRect", cornerRadius: 0.25, color: "#2c313b", colorB: "#1e2229" },
+          surface: { finish: "foil", roughness: 0.22, metalness: 0.35, height: 0.38, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+          modifiers: [
+            { ...createDefaultModifier("array-grid"), layout: "brick", columns: 14, rows: 14, spanX: 512, spanY: 512, alternateColor: true, colorB: "#1a1d23" },
+          ],
+        }),
+      ];
+      return doc;
+    },
+  },
+  {
+    id: "tech-hex-vent",
+    name: "Hexagonal Vapor Vent",
+    group: "Tech & Hard-Surface",
+    description: "Machined honeycomb ventilation grille over brushed titanium acoustic backing.",
+    build: () => {
+      const doc = createArtworkDocument("pattern");
+      doc.name = "Hexagonal Vapor Vent";
+      doc.background = { enabled: true, color: "#2d323a", opacity: 1, finish: "foil", roughness: 0.32, metalness: 0.9, height: 0.45 };
+      doc.layers = [
+        createArtworkLayer("motif", {
+          name: "Perforated Hex Cells",
+          transform: { x: 256, y: 256, width: 36, height: 36, rotation: 0 },
+          shape: { motifType: "hexagon", color: "#0b0d10", strokeWidth: 3, strokeColor: "#7c8594" },
+          surface: { finish: "ink", roughness: 0.85, metalness: 0.05, height: -0.45, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+          modifiers: [
+            { ...createDefaultModifier("array-grid"), layout: "hex", columns: 11, rows: 11, spanX: 512, spanY: 512 },
+          ],
+        }),
+      ];
+      return doc;
+    },
+  },
+  {
+    id: "tech-terrazzo-confetti",
+    name: "Perlin Terrazzo Confetti",
+    group: "Noise & Procedural",
+    description: "Organic speckled architectural terrazzo mineral chips suspended in polished limestone.",
+    build: () => {
+      const doc = createArtworkDocument("pattern");
+      doc.name = "Perlin Terrazzo Confetti";
+      doc.background = { enabled: true, color: "#ebe6dc", opacity: 1, finish: "ceramic", roughness: 0.25, metalness: 0, height: 0 };
+      doc.layers = [
+        createArtworkLayer("motif", {
+          name: "Coral & Sage Chips",
+          transform: { x: 256, y: 256, width: 26, height: 18, rotation: 15 },
+          shape: { motifType: "triangle", color: "#d46a4e", colorB: "#5a8c76" },
+          surface: { finish: "ceramic", roughness: 0.16, metalness: 0, height: 0.22, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+          modifiers: [
+            { ...createDefaultModifier("array-grid"), layout: "hex", columns: 10, rows: 10, spanX: 512, spanY: 512, alternateColor: true, colorB: "#5a8c76" },
+            { ...createDefaultModifier("noise-jitter"), posJitter: 24, rotJitter: 180, scaleJitter: 0.45, dropout: 0.2, seed: 912 },
+          ],
+        }),
+        createArtworkLayer("motif", {
+          name: "Brass & Charcoal Flecks",
+          transform: { x: 256, y: 256, width: 16, height: 14, rotation: 40 },
+          shape: { motifType: "diamond", color: "#d6a43e", colorB: "#2b2e33" },
+          surface: { finish: "foil", roughness: 0.22, metalness: 0.55, height: 0.28, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+          modifiers: [
+            { ...createDefaultModifier("array-grid"), layout: "grid", columns: 9, rows: 9, spanX: 512, spanY: 512, alternateColor: true, colorB: "#2b2e33" },
+            { ...createDefaultModifier("noise-jitter"), posJitter: 28, rotJitter: 180, scaleJitter: 0.5, dropout: 0.3, seed: 251 },
+          ],
+        }),
+      ];
+      return doc;
+    },
+  },
+  {
+    id: "noise-topographic-contours",
+    name: "Topographic Contour Waves",
+    group: "Noise & Procedural",
+    description: "Warped organic iso-elevation rings with metallic gold ridge contrast.",
+    build: () => {
+      const doc = createArtworkDocument("pattern");
+      doc.name = "Topographic Contour Waves";
+      doc.background = { enabled: true, color: "#151c22", opacity: 1, finish: "ink", roughness: 0.7, metalness: 0, height: 0 };
+      doc.layers = [
+        createArtworkLayer("motif", {
+          name: "Elevation Contours",
+          transform: { x: 256, y: 256, width: 220, height: 220, rotation: 0 },
+          shape: { motifType: "ring", innerRatio: 0.88, color: "#e8c27a", strokeWidth: 2, strokeColor: "#4da6a9" },
+          surface: { finish: "foil", roughness: 0.28, metalness: 0.88, height: 0.42, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+          modifiers: [
+            { ...createDefaultModifier("inset-echo"), copies: 5, stepPx: 32, alternateColor: true, colorB: "#4da6a9" },
+            { ...createDefaultModifier("warp"), warpType: "wave", amplitude: 22, frequency: 3 },
+          ],
+        }),
+      ];
+      return doc;
+    },
+  },
 ];
 
 export const STAMP_STARTERS = [
