@@ -13,7 +13,7 @@ import {
   normalizeMaterial,
   createBallGeometry,
 } from "../Engine/Materials/materials.js";
-import { createDrapedClothGeometry } from "../Engine/Materials/clothGeometry.js";
+import { createDrapedClothGeometry, clothSupport } from "../Engine/Materials/clothGeometry.js";
 import {
   getRecipe,
   recipeControlValue,
@@ -41,7 +41,6 @@ import {
   listPatternStarterCatalog,
   buildMaterialPatternDocument,
 } from "../Engine/Patterns/StarterCatalogBridge.js";
-import { createShaderBallPedestalGeometry } from "../MaterialIconBaker.js";
 import {
   Construct,
   ConstructGlyph,
@@ -178,12 +177,12 @@ export function mountMaterialWorkspace(root, appBridge) {
     backdrop: "softbox",
     inspectorTab: "properties",
     autoRotate: false,
-    lightAzimuth: 38,
-    exposure: 1.08,
+    lightAzimuth: -37,
+    exposure: 1.22,
   };
 
-  const DEFAULT_CAM_POS = new THREE.Vector3(0.0, 0.36, 5.95);
-  const DEFAULT_CAM_TARGET = new THREE.Vector3(0, -0.14, 0);
+  const DEFAULT_CAM_POS = new THREE.Vector3(4.1, 3.25, 6.8);
+  const DEFAULT_CAM_TARGET = new THREE.Vector3(0, 1.65, 0);
   const DEFAULT_CAM_DIST = DEFAULT_CAM_POS.distanceTo(DEFAULT_CAM_TARGET);
 
   let dragLayerId = null;
@@ -382,55 +381,120 @@ export function mountMaterialWorkspace(root, appBridge) {
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color("#1f2022");
-  scene.fog = new THREE.Fog("#1f2022", 11, 30);
+  scene.fog = new THREE.FogExp2("#191a1c", 0.075);
   const envTex = createStudioEnvTexture(renderer);
   scene.environment = envTex;
 
-  const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 80);
+  const camera = new THREE.PerspectiveCamera(37, 1, 0.001, 200);
   camera.position.copy(DEFAULT_CAM_POS);
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
   controls.dampingFactor = 0.08;
   controls.target.copy(DEFAULT_CAM_TARGET);
+  controls.update();
 
-  const keyLight = new THREE.DirectionalLight("#fff8eb", 2.5);
+  const ambientLight = new THREE.AmbientLight("#e0e4ec", 0.5);
+  const keyLight = new THREE.SpotLight("#f1f6f2", 30, 25, 0.65, 0.8, 1.5);
+  keyLight.position.set(-3, 7, 4);
+  keyLight.target.position.set(0, 1, 0);
   keyLight.castShadow = true;
-  keyLight.shadow.mapSize.set(1024, 1024);
-  keyLight.shadow.camera.left = -4.2;
-  keyLight.shadow.camera.right = 4.2;
-  keyLight.shadow.camera.top = 4.2;
-  keyLight.shadow.camera.bottom = -4.2;
-  keyLight.shadow.camera.near = 0.5;
-  keyLight.shadow.camera.far = 18;
-  keyLight.shadow.bias = -0.0004;
-  const fillLight = new THREE.DirectionalLight("#b8d0ff", 1.0);
-  fillLight.position.set(-4, 2.2, -3);
-  const rimLight = new THREE.DirectionalLight("#ffe5c0", 1.25);
-  rimLight.position.set(1, 3.5, -4.5);
-  const hemiLight = new THREE.HemisphereLight("#eef3ff", "#1c1c20", 0.55);
-  scene.add(keyLight, fillLight, rimLight, hemiLight);
+  keyLight.shadow.mapSize.set(2048, 2048);
+  keyLight.shadow.bias = -0.0005;
+  const rimLight = new THREE.DirectionalLight("#dbe3f3", 1.2);
+  rimLight.position.set(3, 4, -3);
+  const fillLight = new THREE.DirectionalLight("#e4edf2", 0.45);
+  fillLight.position.set(-4, 2, 1);
+  scene.add(ambientLight, keyLight, keyLight.target, rimLight, fillLight);
 
-  // AlloyStudio Base & Grey Studio Floor grounded cleanly together
-  const PEDESTAL_Y = -1.415;
-  const FLOOR_Y = -1.56;
-
-  const studioFloor = new THREE.Mesh(
-    new THREE.CircleGeometry(36, 96),
-    new THREE.MeshStandardMaterial({ color: "#2c2e33", roughness: 0.9, metalness: 0.04 }),
-  );
+  // Exact unmodified AlloyStudio grey studio floor, faint ground grid, 3-part pedestal stand & cloth supportBall
+  const floorMaterial = new THREE.MeshStandardMaterial({
+    color: "#242528",
+    roughness: 0.85,
+    metalness: 0.05,
+    envMapIntensity: 0.2,
+    transparent: true,
+    depthWrite: false,
+  });
+  floorMaterial.onBeforeCompile = (shader) => {
+    shader.vertexShader = "varying vec3 vGroundPosition;\n" + shader.vertexShader;
+    shader.vertexShader = shader.vertexShader.replace(
+      "#include <begin_vertex>",
+      "#include <begin_vertex>\nvGroundPosition=position;",
+    );
+    shader.fragmentShader = "varying vec3 vGroundPosition;\n" + shader.fragmentShader;
+    shader.fragmentShader = shader.fragmentShader.replace(
+      "#include <color_fragment>",
+      "#include <color_fragment>\ndiffuseColor.a *= 1. - smoothstep(3.,9.,length(vGroundPosition.xy));",
+    );
+  };
+  const studioFloor = new THREE.Mesh(new THREE.PlaneGeometry(24, 24), floorMaterial);
   studioFloor.rotation.x = -Math.PI / 2;
-  studioFloor.position.y = FLOOR_Y;
+  studioFloor.position.y = -0.015;
   studioFloor.receiveShadow = true;
   scene.add(studioFloor);
 
-  const pedestal = new THREE.Mesh(
-    createShaderBallPedestalGeometry(1.30),
-    new THREE.MeshStandardMaterial({ color: "#3d4047", roughness: 0.36, metalness: 0.72 }),
+  const studioGrid = new THREE.GridHelper(14, 28, "#35363a", "#2b2c30");
+  studioGrid.material.transparent = true;
+  studioGrid.material.opacity = 0.085;
+  studioGrid.position.y = -0.007;
+  scene.add(studioGrid);
+
+  const standGroup = new THREE.Group();
+  const stand = new THREE.Mesh(
+    new THREE.CylinderGeometry(1.2, 1.26, 0.18, 128),
+    new THREE.MeshPhysicalMaterial({
+      color: "#212226",
+      metalness: 0.5,
+      roughness: 0.5,
+      clearcoat: 0.1,
+      envMapIntensity: 0.5,
+    }),
   );
-  pedestal.position.y = PEDESTAL_Y;
-  pedestal.castShadow = true;
-  pedestal.receiveShadow = true;
-  scene.add(pedestal);
+  stand.position.y = 0.115;
+  stand.castShadow = true;
+  stand.receiveShadow = true;
+  standGroup.add(stand);
+
+  const standBottom = new THREE.Mesh(
+    new THREE.CylinderGeometry(1.26, 1.22, 0.055, 128),
+    new THREE.MeshStandardMaterial({
+      color: "#131417",
+      metalness: 0.6,
+      roughness: 0.35,
+    }),
+  );
+  standBottom.position.y = 0.032;
+  standBottom.castShadow = true;
+  standBottom.receiveShadow = true;
+  standGroup.add(standBottom);
+
+  const standRing = new THREE.Mesh(
+    new THREE.TorusGeometry(1.215, 0.012, 12, 128),
+    new THREE.MeshStandardMaterial({
+      color: "#676a71",
+      metalness: 0.85,
+      roughness: 0.32,
+    }),
+  );
+  standRing.rotation.x = Math.PI / 2;
+  standRing.position.y = 0.2;
+  standGroup.add(standRing);
+  scene.add(standGroup);
+
+  const supportBall = new THREE.Mesh(
+    new THREE.SphereGeometry(clothSupport.radius, 96, 64),
+    new THREE.MeshPhysicalMaterial({
+      color: "#16191f",
+      roughness: 0.4,
+      metalness: 0.4,
+      clearcoat: 0.25,
+    }),
+  );
+  supportBall.position.fromArray(clothSupport.center);
+  supportBall.visible = state.shape === "cloth";
+  supportBall.castShadow = true;
+  supportBall.receiveShadow = true;
+  scene.add(supportBall);
 
   let sampleMesh = null;
   let activeMaterial = null;
@@ -452,39 +516,16 @@ export function mountMaterialWorkspace(root, appBridge) {
 
   function updateLights() {
     const rad = (state.lightAzimuth * Math.PI) / 180;
-    keyLight.position.set(Math.cos(rad) * 5.2, 4.4, Math.sin(rad) * 5.2);
+    keyLight.position.set(Math.sin(rad) * 5.0, 7.0, Math.cos(rad) * 5.0);
     renderer.toneMappingExposure = state.exposure;
   }
 
   function buildGeometryForShape(shape) {
     if (shape === "shaderball") return createBallGeometry();
-    if (shape === "cloth") {
-      const g = createDrapedClothGeometry();
-      g.computeBoundingBox();
-      const bb = g.boundingBox;
-      const cx = (bb.min.x + bb.max.x) * 0.5;
-      const cz = (bb.min.z + bb.max.z) * 0.5;
-      const spanXZ = Math.max(bb.max.x - bb.min.x, bb.max.z - bb.min.z) || 3.25;
-      const targetScale = 2.72 / spanXZ;
-      g.translate(-cx, -bb.min.y, -cz);
-      g.scale(targetScale, targetScale, targetScale);
-      g.translate(0, -1.404, 0);
-      g.computeBoundingBox();
-      g.computeBoundingSphere();
-      return g;
-    }
-    if (shape === "box") {
-      const g = new RoundedBoxGeometry(2.05, 2.05, 2.05, 8, 0.26);
-      g.translate(0, -0.39, 0);
-      return g;
-    }
-    if (shape === "plane") {
-      const g = new THREE.PlaneGeometry(2.35, 2.35, 96, 96);
-      g.rotateX(-Math.PI * 0.22);
-      g.translate(0, -0.18, 0);
-      return g;
-    }
-    return new THREE.SphereGeometry(1.42, 96, 64);
+    if (shape === "cloth") return createDrapedClothGeometry();
+    if (shape === "box") return new RoundedBoxGeometry(2.35, 2.35, 2.35, 8, 0.28);
+    if (shape === "plane") return new THREE.PlaneGeometry(2.5, 2.5, 64, 64);
+    return new THREE.SphereGeometry(1.4, 128, 96);
   }
 
   function rebuildMeshAndMaterial() {
@@ -497,10 +538,20 @@ export function mountMaterialWorkspace(root, appBridge) {
     if (activeMaterial) activeMaterial.dispose();
     activeMaterial = mat;
     sampleMesh = new THREE.Mesh(geo, mat);
+    sampleMesh.rotation.set(0, 0, 0);
+    sampleMesh.position.set(0, 1.65, 0);
+    supportBall.visible = state.shape === "cloth";
     if (state.shape === "shaderball") {
-      sampleMesh.rotation.set(0.28, 0.44, -0.34);
+      sampleMesh.rotation.set(0, -0.4, -0.27);
+    } else if (state.shape === "cloth") {
+      sampleMesh.position.set(0, 0, 0);
+    } else if (state.shape === "box") {
+      sampleMesh.rotation.set(0, 0.25, 0);
+      sampleMesh.position.set(0, 1.46, 0);
+    } else if (state.shape === "plane") {
+      sampleMesh.position.set(0, 1.5, 0);
     }
-    sampleMesh.castShadow = true;
+    sampleMesh.castShadow = state.shape !== "plane";
     sampleMesh.receiveShadow = true;
     scene.add(sampleMesh);
     syncStageHeroCopy();
@@ -1908,8 +1959,16 @@ export function mountMaterialWorkspace(root, appBridge) {
       if (activeMaterial) activeMaterial.dispose();
       studioFloor.geometry.dispose();
       studioFloor.material.dispose();
-      pedestal.geometry.dispose();
-      pedestal.material.dispose();
+      studioGrid.geometry.dispose();
+      studioGrid.material.dispose();
+      stand.geometry.dispose();
+      stand.material.dispose();
+      standBottom.geometry.dispose();
+      standBottom.material.dispose();
+      standRing.geometry.dispose();
+      standRing.material.dispose();
+      supportBall.geometry.dispose();
+      supportBall.material.dispose();
       renderer.dispose();
       root.innerHTML = "";
     },

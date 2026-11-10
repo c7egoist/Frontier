@@ -1046,7 +1046,11 @@ export function buildDefaultMeshCues(geo, meshIndex, res) {
     }
   }
 
-  return { res, worldPos, worldNormal, curvature, ao, covered, triAt, partAt, islandAt };
+  geo.computeBoundingSphere();
+  const bs = geo.boundingSphere;
+  const sphereCenter = bs ? [bs.center.x, bs.center.y, bs.center.z] : [0, 0, 0];
+  const sphereRadius = Math.max(0.25, bs?.radius || 1.45);
+  return { res, worldPos, worldNormal, curvature, ao, covered, triAt, partAt, islandAt, sphereCenter, sphereRadius };
 }
 
 /**
@@ -2171,4 +2175,244 @@ export function sampleCompositedAtUV(comp, u, v) {
     metalness: comp.metalness[pid] / 255,
     height: (comp.height[pid] / 255 - 0.5) * 2,
   };
+}
+
+/**
+ * Sample a smooth 3D Catmull-Rom spline along placed 3D surface control points.
+ * Each point is { pos: [x,y,z] | Vector3, normal: [nx,ny,nz] | Vector3 }.
+ */
+export function sampleMeshSurfaceSpline3D(points, { closed = false, tension = 0.5, samplesPerSegment = 18 } = {}) {
+  if (!Array.isArray(points) || points.length === 0) return [];
+  const toArr = (v) => (Array.isArray(v) ? [v[0], v[1], v[2]] : [v?.x || 0, v?.y || 0, v?.z || 0]);
+  const list = points.map((p) => ({ pos: toArr(p.pos || p.position), normal: toArr(p.normal || [0, 1, 0]) }));
+  if (list.length === 1) return [list[0]];
+
+  const segs = closed ? list.length : list.length - 1;
+  const samples = Math.max(4, Math.min(48, Math.round(samplesPerSegment)));
+  const tClamp = clamp(Number(tension ?? 0.5), 0.05, 1.0);
+  const out = [];
+
+  for (let s = 0; s < segs; s++) {
+    const p0 = list[closed ? (s - 1 + list.length) % list.length : Math.max(0, s - 1)];
+    const p1 = list[s];
+    const p2 = list[(s + 1) % list.length];
+    const p3 = list[closed ? (s + 2) % list.length : Math.min(list.length - 1, s + 2)];
+
+    const steps = s === segs - 1 && !closed ? samples : samples;
+    for (let k = 0; k <= steps; k++) {
+      if (s > 0 && k === 0) continue;
+      const u = k / steps;
+      const u2 = u * u;
+      const u3 = u2 * u;
+      const cr = (v0, v1, v2, v3) => {
+        const m1 = (v2 - v0) * tClamp;
+        const m2 = (v3 - v1) * tClamp;
+        const h00 = 2 * u3 - 3 * u2 + 1;
+        const h10 = u3 - 2 * u2 + u;
+        const h01 = -2 * u3 + 3 * u2;
+        const h11 = u3 - u2;
+        return h00 * v1 + h10 * m1 + h01 * v2 + h11 * m2;
+      };
+      const pos = [
+        cr(p0.pos[0], p1.pos[0], p2.pos[0], p3.pos[0]),
+        cr(p0.pos[1], p1.pos[1], p2.pos[1], p3.pos[1]),
+        cr(p0.pos[2], p1.pos[2], p2.pos[2], p3.pos[2]),
+      ];
+      let nx = p1.normal[0] * (1 - u) + p2.normal[0] * u;
+      let ny = p1.normal[1] * (1 - u) + p2.normal[1] * u;
+      let nz = p1.normal[2] * (1 - u) + p2.normal[2] * u;
+      const nl = Math.hypot(nx, ny, nz) || 1;
+      out.push({ pos, normal: [nx / nl, ny / nl, nz / nl] });
+    }
+  }
+  return out;
+}
+
+function srgbToLinear(c) {
+  return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+}
+function linearToSrgb(c) {
+  const v = clamp(c, 0, 1);
+  return v <= 0.0031308 ? v * 12.92 : 1.055 * Math.pow(v, 1 / 2.4) - 0.055;
+}
+
+/**
+ * Normalize an AlloyStudio-compatible 3D object-space multi-point Gaussian gradient.
+ */
+export function normalizePointGradient3D(input) {
+  const rawPts = Array.isArray(input?.points) ? input.points : [];
+  const points = (rawPts.length ? rawPts : [
+    { id: "gp_1", position: [0.65, 0.55, 0.55], color: "#e8c27a", radius: 1.15, weight: 1.0 },
+    { id: "gp_2", position: [-0.65, -0.35, -0.45], color: "#3d74b8", radius: 1.2, weight: 1.0 },
+  ]).slice(0, 12).map((p, idx) => ({
+    id: p.id || `gp_${idx + 1}`,
+    position: [
+      clamp(Number(p.position?.[0] ?? 0), -2, 2),
+      clamp(Number(p.position?.[1] ?? 0), -2, 2),
+      clamp(Number(p.position?.[2] ?? 0), -2, 2),
+    ],
+    color: p.color || "#e8c27a",
+    radius: clamp(Number(p.radius ?? 1.1), 0.12, 3.5),
+    weight: clamp(Number(p.weight ?? 1.0), 0.05, 1.0),
+  }));
+  return {
+    schema: "alloy.point-gradient.v1",
+    space: input?.space || "object-sphere",
+    falloff: clamp(Number(input?.falloff ?? 1.0), 0.2, 3.0),
+    background: input?.background || "#1d222b",
+    points,
+  };
+}
+
+export function evaluatePointGradient3DAt(grad, localPos) {
+  const falloffScale = clamp(grad.falloff ?? 1.0, 0.2, 3.0);
+  const bgRgb = hexToRgb01(grad.background || "#1d222b").map(srgbToLinear);
+  let sumR = 0, sumG = 0, sumB = 0, totalW = 0, peakW = 0;
+
+  for (let i = 0; i < grad.points.length; i++) {
+    const pt = grad.points[i];
+    const dx = localPos[0] - pt.position[0];
+    const dy = localPos[1] - pt.position[1];
+    const dz = localPos[2] - pt.position[2];
+    const rad = Math.max(0.08, pt.radius * falloffScale);
+    const d2 = dx * dx + dy * dy + dz * dz;
+    const w = pt.weight * Math.exp(-d2 / (rad * rad));
+    if (w <= 1e-4) continue;
+    const [pr, pg, pb] = hexToRgb01(pt.color);
+    sumR += srgbToLinear(pr) * w;
+    sumG += srgbToLinear(pg) * w;
+    sumB += srgbToLinear(pb) * w;
+    totalW += w;
+    if (w > peakW) peakW = w;
+  }
+
+  let linR, linG, linB;
+  if (totalW <= 1e-4) {
+    [linR, linG, linB] = bgRgb;
+  } else {
+    const blend = clamp(peakW, 0, 1);
+    const ptR = sumR / totalW;
+    const ptG = sumG / totalW;
+    const ptB = sumB / totalW;
+    linR = bgRgb[0] * (1 - blend) + ptR * blend;
+    linG = bgRgb[1] * (1 - blend) + ptG * blend;
+    linB = bgRgb[2] * (1 - blend) + ptB * blend;
+  }
+
+  return [
+    Math.round(linearToSrgb(linR) * 255),
+    Math.round(linearToSrgb(linG) * 255),
+    Math.round(linearToSrgb(linB) * 255),
+  ];
+}
+
+/**
+ * Evaluate and apply a 3D multi-point interpolated gradient across mesh texels in object-sphere 3D space.
+ */
+export function applyPointGradient3DToLayer({ layer, cues, grad, brush, editingMask = false }) {
+  if (!layer || !cues || layer.locked) return false;
+  const g = normalizePointGradient3D(grad);
+  const res = cues.res;
+  const n = res * res;
+  const cx = cues.sphereCenter?.[0] || 0;
+  const cy = cues.sphereCenter?.[1] || 0;
+  const cz = cues.sphereCenter?.[2] || 0;
+  const invRad = 1 / Math.max(0.25, cues.sphereRadius || 1.45);
+  const partFilter = layer.partFilter ?? -1;
+  const op = clamp(brush?.opacity ?? 1.0, 0.05, 1.0);
+  const fillCh = brush?.fillChannels || createDefaultChannelMap(false);
+  const roughByte = Math.round(clamp(brush?.roughness ?? 0.34, 0.02, 1) * 255);
+  const metalByte = Math.round(clamp(brush?.metalness ?? 0.12, 0, 1) * 255);
+  const heightByte = Math.round(clamp(((brush?.height ?? 0.25) * 0.5 + 0.5), 0, 1) * 255);
+
+  const falloffScale = clamp(g.falloff ?? 1.0, 0.2, 3.0);
+  const bgLin = hexToRgb01(g.background || "#1d222b").map(srgbToLinear);
+  const prePts = g.points.map((pt) => {
+    const rgb = hexToRgb01(pt.color).map(srgbToLinear);
+    const rad = Math.max(0.08, pt.radius * falloffScale);
+    return {
+      x: pt.position[0], y: pt.position[1], z: pt.position[2],
+      r: rgb[0], g: rgb[1], b: rgb[2],
+      invR2: 1 / (rad * rad),
+      weight: pt.weight,
+    };
+  });
+
+  if (editingMask) {
+    if (!layer.mask) layer.mask = { enabled: true, opacity: 1, invert: false, pixels: new Uint8Array(n).fill(255) };
+    layer.mask.enabled = true;
+    const mp = layer.mask.pixels;
+    for (let i = 0; i < n; i++) {
+      if (!cues.covered[i]) continue;
+      if (partFilter >= 0 && cues.partAt[i] >= 0 && cues.partAt[i] !== partFilter) continue;
+      const lx = (cues.worldPos[i * 3] - cx) * invRad;
+      const ly = (cues.worldPos[i * 3 + 1] - cy) * invRad;
+      const lz = (cues.worldPos[i * 3 + 2] - cz) * invRad;
+      let peakW = 0;
+      for (let k = 0; k < prePts.length; k++) {
+        const pt = prePts[k];
+        const d2 = (lx - pt.x) ** 2 + (ly - pt.y) ** 2 + (lz - pt.z) ** 2;
+        const w = pt.weight * Math.exp(-d2 * pt.invR2);
+        if (w > peakW) peakW = w;
+      }
+      const val = Math.round(clamp(peakW, 0, 1) * 255);
+      mp[i] = Math.round(mp[i] * (1 - op) + val * op);
+    }
+    return true;
+  }
+
+  const px = layer.pixels;
+  if (!px) return false;
+  for (let i = 0; i < n; i++) {
+    if (partFilter >= 0 && cues.partAt[i] >= 0 && cues.partAt[i] !== partFilter) continue;
+    const i3 = i * 3;
+    const lx = (cues.worldPos[i3] - cx) * invRad;
+    const ly = (cues.worldPos[i3 + 1] - cy) * invRad;
+    const lz = (cues.worldPos[i3 + 2] - cz) * invRad;
+
+    let sumR = 0, sumG = 0, sumB = 0, totalW = 0, peakW = 0;
+    for (let k = 0; k < prePts.length; k++) {
+      const pt = prePts[k];
+      const d2 = (lx - pt.x) ** 2 + (ly - pt.y) ** 2 + (lz - pt.z) ** 2;
+      const w = pt.weight * Math.exp(-d2 * pt.invR2);
+      if (w <= 1e-4) continue;
+      sumR += pt.r * w;
+      sumG += pt.g * w;
+      sumB += pt.b * w;
+      totalW += w;
+      if (w > peakW) peakW = w;
+    }
+
+    let linR = bgLin[0], linG = bgLin[1], linB = bgLin[2];
+    if (totalW > 1e-4) {
+      const blend = clamp(peakW, 0, 1);
+      linR = bgLin[0] * (1 - blend) + (sumR / totalW) * blend;
+      linG = bgLin[1] * (1 - blend) + (sumG / totalW) * blend;
+      linB = bgLin[2] * (1 - blend) + (sumB / totalW) * blend;
+    }
+    const cr = Math.round(linearToSrgb(linR) * 255);
+    const cg = Math.round(linearToSrgb(linG) * 255);
+    const cb = Math.round(linearToSrgb(linB) * 255);
+
+    const i4 = i * 4;
+    if (fillCh.albedo) {
+      px.albedo[i4] = Math.round(px.albedo[i4] * (1 - op) + cr * op);
+      px.albedo[i4 + 1] = Math.round(px.albedo[i4 + 1] * (1 - op) + cg * op);
+      px.albedo[i4 + 2] = Math.round(px.albedo[i4 + 2] * (1 - op) + cb * op);
+      px.albedo[i4 + 3] = Math.min(255, Math.round(px.albedo[i4 + 3] + (255 - px.albedo[i4 + 3]) * op));
+    }
+    if (fillCh.roughness) {
+      px.roughness[i] = Math.round(px.roughness[i] * (1 - op) + roughByte * op);
+      if (px.roughAlpha) px.roughAlpha[i] = Math.min(255, Math.round(px.roughAlpha[i] + (255 - px.roughAlpha[i]) * op));
+    }
+    if (fillCh.metalness) {
+      px.metalness[i] = Math.round(px.metalness[i] * (1 - op) + metalByte * op);
+      if (px.metalAlpha) px.metalAlpha[i] = Math.min(255, Math.round(px.metalAlpha[i] + (255 - px.metalAlpha[i]) * op));
+    }
+    if (fillCh.height) {
+      px.height[i] = Math.round(px.height[i] * (1 - op) + heightByte * op);
+      if (px.heightAlpha) px.heightAlpha[i] = Math.min(255, Math.round(px.heightAlpha[i] + (255 - px.heightAlpha[i]) * op));
+    }
+  }
+  return true;
 }

@@ -46,6 +46,10 @@ import {
   getToolChannels,
   resolveDabVariation,
   rgbaPixelsToSurfaceMaps,
+  sampleMeshSurfaceSpline3D,
+  normalizePointGradient3D,
+  evaluatePointGradient3DAt,
+  applyPointGradient3DToLayer,
 } from "../Engine/TexturePaintEngine.js";
 import { GpuPaintSession } from "../Engine/GpuPaintEngine.js";
 import { createLayerStackPanel } from "./LayerStackKit.js";
@@ -536,7 +540,9 @@ function buildMaskThumbCanvas(layer, res, gpuPaint) {
 const TOOL_LABELS = {
   paint: "Brush",
   erase: "Eraser",
+  curve: "3D Curve",
   fill: "Fill",
+  gradient: "3D Gradient",
   stamp: "Stamp",
   eyedropper: "Sample",
   move: "Transform Stamp",
@@ -569,8 +575,14 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     popupSubTab: "main", // "main" | "dynamics" | "curves"
     activeCurveKey: "falloff", // "falloff" | "sizeOverStroke" | "opacityOverStroke" | "hueOverStroke"
     stampPlaceMode: "subcomponent", // "subcomponent" | "layer"
+    surfaceCurvePoints: [], // [{ pos: [x,y,z], normal: [nx,ny,nz], uv: {u,v} }]
+    surfaceCurveClosed: false,
+    surfaceCurveTension: 0.5,
+    pointGradient3D: normalizePointGradient3D(),
+    selectedGradientPointId: "gp_1",
+    gradientLiveUpdate: true,
     brush: {
-      tool: "paint", // "paint" | "erase" | "fill" | "stamp" | "eyedropper" | "move"
+      tool: "paint", // "paint" | "erase" | "curve" | "fill" | "gradient" | "stamp" | "eyedropper" | "move"
       tip: "round", // "round" | "chisel" | "chalk" | "splatter" | "sponge" | "custom"
       color: "#e8c27a",
       roughness: 0.34,
@@ -650,6 +662,13 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   let hasLiveStroke = false;
   let lastHitPos = null;
   let lastUv2D = null;
+  let lastPainted3D = null; // { pos: Vector3, normal: Vector3, uv } for Shift straight line
+  let lastPainted2D = null; // { u, v } for Shift straight line in UV pane
+  let shiftStrokeAnchor3D = null;
+  let shiftStrokeAnchor2D = null;
+  let isShiftHeld = false;
+  let activeGradientPointDrag = null;
+  let activeCurvePointDrag = -1;
   let smoothedHit3D = null;
   let smoothedUv2D = null;
   let strokeDabIndex = 0;
@@ -898,7 +917,9 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     tools: [
       { id: "paint", label: "Brush", glyph: "Brush", kbd: "B", title: TOOL_LABELS.paint, active: state.brush.tool === "paint", buttonClass: "pill-btn" },
       { id: "erase", label: "Eraser", glyph: "Eraser", kbd: "E", title: TOOL_LABELS.erase, active: state.brush.tool === "erase", buttonClass: "pill-btn" },
+      { id: "curve", label: "3D Curve", glyph: "Curve", kbd: "U", title: TOOL_LABELS.curve, active: state.brush.tool === "curve", buttonClass: "pill-btn" },
       { id: "fill", label: "Fill", glyph: "Fill", kbd: "G", title: TOOL_LABELS.fill, active: state.brush.tool === "fill", buttonClass: "pill-btn" },
+      { id: "gradient", label: "3D Gradient", glyph: "Gradient", kbd: "D", title: TOOL_LABELS.gradient, active: state.brush.tool === "gradient", buttonClass: "pill-btn" },
       { id: "stamp", label: "Stamp", glyph: "Stamp", kbd: "S", title: TOOL_LABELS.stamp, active: state.brush.tool === "stamp", buttonClass: "pill-btn" },
       { id: "eyedropper", label: "Sample", glyph: "Pipette", kbd: "I", title: TOOL_LABELS.eyedropper, active: state.brush.tool === "eyedropper", buttonClass: "pill-btn" },
       { id: "move", label: "Move", glyph: "Move", kbd: "V", title: TOOL_LABELS.move, active: state.brush.tool === "move", buttonClass: "pill-btn" },
@@ -935,7 +956,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   const paintStageHints = Construct(
     "span",
     "se-stage-hints",
-    "Drag mesh to paint · V move/scale/rotate stamps · Right-click or Q Tool Inspector · B/E/G/S/I/V",
+    "Drag paint · Hold Shift straight line · U 3D Curve · D 3D Gradient · Right-click or Q Inspector",
   );
   const paintToolReadout = Construct(
     "span",
@@ -1091,8 +1112,160 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   stampGizmo3D.visible = false;
   scene.add(stampGizmo3D);
 
+  // 3D Straight-Line Preview (Shift), 3D Surface Curve Overlay (U), & 3D Gradient Handles (D)
+  const shiftLineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+  const shiftLine3D = new THREE.Line(
+    shiftLineGeo,
+    new THREE.LineBasicMaterial({ color: "#eff4cf", transparent: true, opacity: 0.92, depthTest: false }),
+  );
+  shiftLine3D.renderOrder = 997;
+  shiftLine3D.visible = false;
+  scene.add(shiftLine3D);
+
+  const curveOverlayGroup = new THREE.Group();
+  curveOverlayGroup.renderOrder = 996;
+  scene.add(curveOverlayGroup);
+
+  const gradientHandlesGroup = new THREE.Group();
+  gradientHandlesGroup.renderOrder = 995;
+  scene.add(gradientHandlesGroup);
+
   const raycaster = new THREE.Raycaster();
   const pointerNdc = new THREE.Vector2();
+
+  function projectPointOntoMeshSurface(pArr, nArr) {
+    if (!paintMesh) return { pos: pArr, normal: nArr };
+    const p = new THREE.Vector3(pArr[0], pArr[1], pArr[2]);
+    const n = new THREE.Vector3(nArr[0], nArr[1], nArr[2]).normalize();
+    raycaster.set(p.clone().addScaledVector(n, 0.35), n.clone().negate());
+    const hits = raycaster.intersectObject(paintMesh, false);
+    if (hits.length) {
+      let best = hits[0];
+      let bestD = hits[0].point.distanceToSquared(p);
+      for (let i = 1; i < hits.length; i++) {
+        const d = hits[i].point.distanceToSquared(p);
+        if (d < bestD) { best = hits[i]; bestD = d; }
+      }
+      if (bestD < 0.35) {
+        const hn = best.face
+          ? best.face.normal.clone().transformDirection(paintMesh.matrixWorld).normalize()
+          : n;
+        return { pos: [best.point.x, best.point.y, best.point.z], normal: [hn.x, hn.y, hn.z] };
+      }
+    }
+    return { pos: pArr, normal: [n.x, n.y, n.z] };
+  }
+
+  function clearGroupChildren(group) {
+    while (group.children.length) {
+      const c = group.children.pop();
+      c.geometry?.dispose?.();
+      c.material?.dispose?.();
+    }
+  }
+
+  function rebuildCurve3DVisual() {
+    clearGroupChildren(curveOverlayGroup);
+    const pts = state.surfaceCurvePoints;
+    if (!pts || !pts.length || state.brush.tool !== "curve") return;
+
+    const nodeGeo = new THREE.SphereGeometry(0.032, 16, 12);
+    pts.forEach((pt, idx) => {
+      const mat = new THREE.MeshBasicMaterial({
+        color: idx === 0 ? "#7fe39d" : idx === pts.length - 1 ? "#eff4cf" : "#e8c27a",
+        depthTest: false,
+      });
+      const sph = new THREE.Mesh(nodeGeo.clone(), mat);
+      sph.position.set(
+        pt.pos[0] + pt.normal[0] * 0.012,
+        pt.pos[1] + pt.normal[1] * 0.012,
+        pt.pos[2] + pt.normal[2] * 0.012,
+      );
+      sph.userData.curveIndex = idx;
+      sph.renderOrder = 998;
+      curveOverlayGroup.add(sph);
+    });
+    nodeGeo.dispose();
+
+    if (pts.length >= 2) {
+      const sampled = sampleMeshSurfaceSpline3D(pts, {
+        closed: !!state.surfaceCurveClosed,
+        tension: state.surfaceCurveTension ?? 0.5,
+        samplesPerSegment: 18,
+      });
+      const lineVecs = sampled.map((s) => {
+        const proj = projectPointOntoMeshSurface(s.pos, s.normal);
+        return new THREE.Vector3(
+          proj.pos[0] + proj.normal[0] * 0.01,
+          proj.pos[1] + proj.normal[1] * 0.01,
+          proj.pos[2] + proj.normal[2] * 0.01,
+        );
+      });
+      if (state.surfaceCurveClosed && lineVecs.length > 2) lineVecs.push(lineVecs[0].clone());
+      const lineGeo = new THREE.BufferGeometry().setFromPoints(lineVecs);
+      const lineMat = new THREE.LineBasicMaterial({ color: "#eff4cf", transparent: true, opacity: 0.96, depthTest: false });
+      const curveLine = new THREE.Line(lineGeo, lineMat);
+      curveLine.renderOrder = 997;
+      curveOverlayGroup.add(curveLine);
+    }
+  }
+
+  function worldFromGradLocal(pos) {
+    const cx = meshCues?.sphereCenter?.[0] || 0;
+    const cy = meshCues?.sphereCenter?.[1] || 0;
+    const cz = meshCues?.sphereCenter?.[2] || 0;
+    const rad = Math.max(0.25, meshCues?.sphereRadius || 1.45);
+    return new THREE.Vector3(cx + pos[0] * rad, cy + pos[1] * rad, cz + pos[2] * rad);
+  }
+
+  function gradLocalFromWorld(v) {
+    const cx = meshCues?.sphereCenter?.[0] || 0;
+    const cy = meshCues?.sphereCenter?.[1] || 0;
+    const cz = meshCues?.sphereCenter?.[2] || 0;
+    const invRad = 1 / Math.max(0.25, meshCues?.sphereRadius || 1.45);
+    return [
+      Math.max(-2, Math.min(2, (v.x - cx) * invRad)),
+      Math.max(-2, Math.min(2, (v.y - cy) * invRad)),
+      Math.max(-2, Math.min(2, (v.z - cz) * invRad)),
+    ];
+  }
+
+  function rebuildGradient3DHandles() {
+    clearGroupChildren(gradientHandlesGroup);
+    if (state.brush.tool !== "gradient") return;
+    const g = state.pointGradient3D;
+    if (!g?.points?.length) return;
+
+    const sphGeo = new THREE.SphereGeometry(0.068, 20, 14);
+    const haloGeo = new THREE.RingGeometry(0.092, 0.118, 28);
+    for (const pt of g.points) {
+      const worldP = worldFromGradLocal(pt.position);
+      const isSel = pt.id === state.selectedGradientPointId;
+      const handle = new THREE.Mesh(
+        sphGeo.clone(),
+        new THREE.MeshBasicMaterial({ color: pt.color || "#e8c27a", depthTest: false }),
+      );
+      handle.position.copy(worldP);
+      handle.scale.setScalar(isSel ? 1.25 : 0.95);
+      handle.userData.gradientPointId = pt.id;
+      handle.renderOrder = 998;
+      gradientHandlesGroup.add(handle);
+
+      if (isSel) {
+        const ring = new THREE.Mesh(
+          haloGeo.clone(),
+          new THREE.MeshBasicMaterial({ color: "#ffffff", side: THREE.DoubleSide, depthTest: false }),
+        );
+        ring.position.copy(worldP);
+        ring.quaternion.copy(camera.quaternion);
+        ring.userData.isHaloRing = true;
+        ring.renderOrder = 999;
+        gradientHandlesGroup.add(ring);
+      }
+    }
+    sphGeo.dispose();
+    haloGeo.dispose();
+  }
 
   // ----------------------------------------------------------------- MESH & GPU COMPOSITOR
   function buildUvWireGeometry(geo) {
@@ -1150,7 +1323,8 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     if (gpuPaint.isActive) {
       gpuPaint.uploadMeshCues(meshCues, state.doc.bakedMaps);
     }
-
+    rebuildCurve3DVisual();
+    rebuildGradient3DHandles();
     refreshComposite();
     rebuildInspector();
   }
@@ -1562,16 +1736,29 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     return hits.length ? hits[0] : null;
   }
 
-  function updateHoverCursor(hit) {
+  function updateHoverCursor(hit, shiftActive = isShiftHeld) {
     if (!hit || state.brush.tool === "eyedropper" || state.brush.tool === "move") {
       brushRing.visible = false;
+      shiftLine3D.visible = false;
       return;
     }
     const n = hit.face ? hit.face.normal.clone().transformDirection(paintMesh.matrixWorld) : new THREE.Vector3(0, 1, 0);
     brushRing.visible = true;
     brushRing.position.copy(hit.point).addScaledVector(n, 0.008);
     brushRing.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), n);
-    brushRing.scale.setScalar(state.brush.tool === "stamp" ? state.brush.stampScale : state.brush.size);
+    brushRing.scale.setScalar(state.brush.tool === "stamp" ? state.brush.stampScale : state.brush.tool === "gradient" ? 0.14 : state.brush.size);
+
+    if (shiftActive && (state.brush.tool === "paint" || state.brush.tool === "erase") && lastPainted3D?.pos) {
+      const a = lastPainted3D.pos.clone().addScaledVector(lastPainted3D.normal || n, 0.012);
+      const b = hit.point.clone().addScaledVector(n, 0.012);
+      const posAttr = shiftLine3D.geometry.attributes.position;
+      posAttr.setXYZ(0, a.x, a.y, a.z);
+      posAttr.setXYZ(1, b.x, b.y, b.z);
+      posAttr.needsUpdate = true;
+      shiftLine3D.visible = true;
+    } else {
+      shiftLine3D.visible = false;
+    }
   }
 
   function getTargetPaintableLayer(autoCreatePaint = true) {
@@ -1785,6 +1972,119 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     }
   }
 
+  function paintSurfaceLine3D(pStart, nStart, pEnd, nEnd) {
+    const dist = pStart.distanceTo(pEnd);
+    const spFrac = Math.max(0.08, Math.min(0.6, state.brush.spacing ?? 0.22));
+    const step = Math.max(0.015, state.brush.size * spFrac);
+    const segs = Math.max(1, Math.min(48, Math.ceil(dist / step)));
+    let prevPos = pStart.clone();
+    const tmpP = new THREE.Vector3();
+    const tmpN = new THREE.Vector3();
+    for (let i = 1; i <= segs; i++) {
+      const f = i / segs;
+      tmpP.lerpVectors(pStart, pEnd, f);
+      tmpN.lerpVectors(nStart, nEnd, f).normalize();
+      const proj = projectPointOntoMeshSurface([tmpP.x, tmpP.y, tmpP.z], [tmpN.x, tmpN.y, tmpN.z]);
+      const curPos = new THREE.Vector3(proj.pos[0], proj.pos[1], proj.pos[2]);
+      const curN = new THREE.Vector3(proj.normal[0], proj.normal[1], proj.normal[2]);
+      dabAlongSegment3D(prevPos, curPos, curN);
+      prevPos = curPos;
+    }
+  }
+
+  function strokeSurfaceCurve3D({ clearAfter = true } = {}) {
+    if (!state.surfaceCurvePoints || state.surfaceCurvePoints.length < 2) {
+      Toast("Place at least 2 points on the mesh first");
+      return false;
+    }
+    const layer = getTargetPaintableLayer(true);
+    if (!layer || layer.locked) return false;
+    const sampled = sampleMeshSurfaceSpline3D(state.surfaceCurvePoints, {
+      closed: !!state.surfaceCurveClosed,
+      tension: state.surfaceCurveTension ?? 0.5,
+      samplesPerSegment: 20,
+    });
+    if (!sampled.length) return false;
+
+    const snap = snapshotSelectedLayer();
+    strokeDabIndex = 0;
+    hasLiveStroke = true;
+    const prevTool = state.brush.tool;
+    state.brush.tool = "paint";
+    if (gpuPaint.isActive) gpuPaint.beginStroke();
+    else activeCpuStroke = createStrokeAccumulator(res);
+
+    let prev = null;
+    for (let i = 0; i < sampled.length; i++) {
+      const proj = projectPointOntoMeshSurface(sampled[i].pos, sampled[i].normal);
+      const curP = new THREE.Vector3(proj.pos[0], proj.pos[1], proj.pos[2]);
+      const curN = new THREE.Vector3(proj.normal[0], proj.normal[1], proj.normal[2]);
+      dabAlongSegment3D(prev || curP, curP, curN);
+      prev = curP;
+    }
+
+    let committed = false;
+    if (gpuPaint.isActive) committed = gpuPaint.commitStrokeToLayer(layer, state.brush, state.doc.editingMask);
+    else if (activeCpuStroke) committed = commitStrokeAccumulator(layer, activeCpuStroke, state.brush, state.doc.editingMask);
+    state.brush.tool = prevTool;
+    hasLiveStroke = false;
+    activeCpuStroke = null;
+
+    if (committed && snap) pushUndoSnapshot(snap);
+    else gpuPaint.disposeSnapshot(snap);
+
+    if (prev) lastPainted3D = { pos: prev.clone(), normal: new THREE.Vector3(0, 1, 0) };
+    if (clearAfter) {
+      state.surfaceCurvePoints = [];
+      rebuildCurve3DVisual();
+    }
+    refreshComposite();
+    invalidateLayerThumb(layer.id);
+    renderLeftColumn();
+    rebuildInspector();
+    if (activeToolPopup) openToolPopup(null, null, true);
+    Toast("Stroked 3D surface curve onto layer");
+    return committed;
+  }
+
+  function applyPointGradient3D({ pushUndo = true, autoCreate = true } = {}) {
+    if (!meshCues) return false;
+    let layer = getActiveLayer();
+    if (!state.doc.editingMask && (!layer || layer.kind !== "paint")) {
+      if (!autoCreate) return false;
+      layer = state.doc.layers.find((l) => l.kind === "paint" && l.name === "3D Gradient Layer");
+      if (!layer) {
+        layer = createPaintLayer("paint", { res, name: "3D Gradient Layer" });
+        state.doc.layers.push(layer);
+      }
+      state.doc.selectedLayerId = layer.id;
+      renderLeftColumn();
+    }
+    if (!layer || layer.locked) return false;
+    const snap = pushUndo ? snapshotSelectedLayer() : null;
+    const ok = applyPointGradient3DToLayer({
+      layer,
+      cues: meshCues,
+      grad: state.pointGradient3D,
+      brush: state.brush,
+      editingMask: state.doc.editingMask,
+    });
+    if (ok) {
+      if (gpuPaint.isActive) {
+        if (state.doc.editingMask) gpuPaint.syncMaskCpuToGpu(layer);
+        else gpuPaint.syncCpuPixelsToLayerGpu(layer);
+      }
+      if (pushUndo && snap) pushUndoSnapshot(snap);
+      else if (snap) gpuPaint.disposeSnapshot(snap);
+      invalidateLayerThumb(layer.id);
+      renderLeftColumn();
+      refreshComposite();
+    } else if (snap) {
+      gpuPaint.disposeSnapshot(snap);
+    }
+    return ok;
+  }
+
   let pendingUndoSnap = null;
   let rightDownPos3D = null;
   let rightDownPos2D = null;
@@ -1798,8 +2098,87 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     }
     if (e.button !== 0) return;
     if (activeToolPopup && !activeToolPopup.contains(e.target)) closeToolPopup();
+    isShiftHeld = !!e.shiftKey;
+
+    // Gradient 3D handle sphere click / drag check first
+    if (state.brush.tool === "gradient" && gradientHandlesGroup.children.length) {
+      const rect = pane3D.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        pointerNdc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        pointerNdc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+        raycaster.setFromCamera(pointerNdc, camera);
+        const hHits = raycaster.intersectObjects(gradientHandlesGroup.children, false);
+        const gHit = hHits.find((x) => x.object?.userData?.gradientPointId);
+        if (gHit) {
+          orbit.enabled = false;
+          const ptId = gHit.object.userData.gradientPointId;
+          state.selectedGradientPointId = ptId;
+          activeGradientPointDrag = { ptId, undoSnap: snapshotSelectedLayer() };
+          rebuildGradient3DHandles();
+          rebuildInspector();
+          if (activeToolPopup) openToolPopup(null, null, true);
+          pane3D.setPointerCapture(e.pointerId);
+          return;
+        }
+      }
+    }
+
     const hit = raycastMeshFromEvent(e);
     if (!hit) {
+      orbit.enabled = true;
+      return;
+    }
+    const hitNorm = hit.face ? hit.face.normal.clone().transformDirection(paintMesh.matrixWorld).normalize() : new THREE.Vector3(0, 1, 0);
+
+    // 3D Surface Curve Tool: place points directly on 3D mesh & project smooth spline along geometry
+    if (state.brush.tool === "curve") {
+      if (e.altKey) return;
+      orbit.enabled = false;
+      // Check if clicking near an existing node to drag it
+      const nearIdx = state.surfaceCurvePoints.findIndex(
+        (cp) => hit.point.distanceTo(new THREE.Vector3(cp.pos[0], cp.pos[1], cp.pos[2])) < 0.08,
+      );
+      if (nearIdx >= 0) {
+        activeCurvePointDrag = nearIdx;
+        pane3D.setPointerCapture(e.pointerId);
+        return;
+      }
+      state.surfaceCurvePoints.push({
+        pos: [hit.point.x, hit.point.y, hit.point.z],
+        normal: [hitNorm.x, hitNorm.y, hitNorm.z],
+        uv: hit.uv ? { u: hit.uv.x, v: hit.uv.y } : null,
+      });
+      rebuildCurve3DVisual();
+      rebuildInspector();
+      if (activeToolPopup) openToolPopup(null, null, true);
+      Toast(`3D Curve pt #${state.surfaceCurvePoints.length} · Double-click or Enter to stroke`);
+      return;
+    }
+
+    // 3D Multi-Point Gradient Tool: click mesh to add 3D space colour point & interpolate
+    if (state.brush.tool === "gradient") {
+      if (e.altKey) return;
+      orbit.enabled = false;
+      const localPos = gradLocalFromWorld(hit.point);
+      if (state.pointGradient3D.points.length < 12) {
+        const newId = `gp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 5)}`;
+        state.pointGradient3D.points.push({
+          id: newId,
+          position: localPos,
+          color: state.brush.color || "#e8c27a",
+          radius: 1.05,
+          weight: 1.0,
+        });
+        state.selectedGradientPointId = newId;
+        state.pointGradient3D = normalizePointGradient3D(state.pointGradient3D);
+        rebuildGradient3DHandles();
+        if (state.gradientLiveUpdate) applyPointGradient3D({ pushUndo: true });
+        rebuildInspector();
+        if (activeToolPopup) openToolPopup(null, null, true);
+        Toast(`Added 3D gradient point (${state.pointGradient3D.points.length}/12)`);
+      } else {
+        Toast("Maximum 12 3D gradient points reached");
+      }
       orbit.enabled = true;
       return;
     }
@@ -1867,20 +2246,47 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     if (gpuPaint.isActive) gpuPaint.beginStroke();
     else activeCpuStroke = createStrokeAccumulator(res);
     smoothedHit3D = hit.point.clone();
+    const norm = hit.face ? hit.face.normal.clone().transformDirection(paintMesh.matrixWorld).normalize() : new THREE.Vector3(0, 1, 0);
+    if (e.shiftKey && lastPainted3D?.pos) {
+      shiftStrokeAnchor3D = { pos: lastPainted3D.pos.clone(), normal: (lastPainted3D.normal || norm).clone() };
+      paintSurfaceLine3D(shiftStrokeAnchor3D.pos, shiftStrokeAnchor3D.normal, hit.point, norm);
+    } else {
+      shiftStrokeAnchor3D = { pos: hit.point.clone(), normal: norm.clone() };
+      dabAlongSegment3D(hit.point, hit.point, norm);
+    }
     lastHitPos = hit.point.clone();
-    const norm = hit.face ? hit.face.normal.clone().transformDirection(paintMesh.matrixWorld) : new THREE.Vector3(0, 1, 0);
-    dabAlongSegment3D(hit.point, hit.point, norm);
+    lastPainted3D = { pos: hit.point.clone(), normal: norm.clone(), uv: hit.uv ? { u: hit.uv.x, v: hit.uv.y } : null };
     pane3D.setPointerCapture(e.pointerId);
   }, { capture: true });
 
   pane3D.addEventListener("pointermove", (e) => {
+    isShiftHeld = !!e.shiftKey;
     const hit = raycastMeshFromEvent(e);
-    updateHoverCursor(hit);
+    updateHoverCursor(hit, e.shiftKey);
     if (hit && meshIndex && hit.uv) {
       const pid = Math.min(res * res - 1, Math.max(0, Math.floor((1 - hit.uv.y) * res) * res + Math.floor(hit.uv.x * res)));
       const partIdx = meshCues.partAt[pid];
       const partName = partIdx >= 0 ? (meshIndex.partNames[partIdx] || `Part ${partIdx}`) : "Surface";
       state.hoverInfo = `${partName} · UV (${hit.uv.x.toFixed(2)}, ${hit.uv.y.toFixed(2)})`;
+    }
+    if (activeGradientPointDrag && hit) {
+      const pt = state.pointGradient3D.points.find((p) => p.id === activeGradientPointDrag.ptId);
+      if (pt) {
+        pt.position = gradLocalFromWorld(hit.point);
+        rebuildGradient3DHandles();
+        if (state.gradientLiveUpdate) applyPointGradient3D({ pushUndo: false });
+      }
+      return;
+    }
+    if (activeCurvePointDrag >= 0 && hit) {
+      const hn = hit.face ? hit.face.normal.clone().transformDirection(paintMesh.matrixWorld).normalize() : new THREE.Vector3(0, 1, 0);
+      state.surfaceCurvePoints[activeCurvePointDrag] = {
+        pos: [hit.point.x, hit.point.y, hit.point.z],
+        normal: [hn.x, hn.y, hn.z],
+        uv: hit.uv ? { u: hit.uv.x, v: hit.uv.y } : null,
+      };
+      rebuildCurve3DVisual();
+      return;
     }
     if (activeStamp3DDrag) {
       const d = activeStamp3DDrag;
@@ -1901,9 +2307,26 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     if (!isPainting3D || !hit) return;
     const stab = Math.max(0, Math.min(0.85, state.brush.stabilizer ?? 0));
     smoothedHit3D = smoothedHit3D ? smoothedHit3D.lerp(hit.point, 1 - stab) : hit.point.clone();
-    const norm = hit.face ? hit.face.normal.clone().transformDirection(paintMesh.matrixWorld) : new THREE.Vector3(0, 1, 0);
+    const norm = hit.face ? hit.face.normal.clone().transformDirection(paintMesh.matrixWorld).normalize() : new THREE.Vector3(0, 1, 0);
+    if (e.shiftKey && shiftStrokeAnchor3D) {
+      const p0 = shiftStrokeAnchor3D.pos;
+      const dVec = new THREE.Vector3().subVectors(smoothedHit3D, p0);
+      const ax = Math.abs(dVec.x), ay = Math.abs(dVec.y), az = Math.abs(dVec.z);
+      const locked = p0.clone();
+      if (ax >= ay && ax >= az) locked.x += dVec.x;
+      else if (ay >= ax && ay >= az) locked.y += dVec.y;
+      else locked.z += dVec.z;
+      const proj = projectPointOntoMeshSurface([locked.x, locked.y, locked.z], [norm.x, norm.y, norm.z]);
+      const curPos = new THREE.Vector3(proj.pos[0], proj.pos[1], proj.pos[2]);
+      const curN = new THREE.Vector3(proj.normal[0], proj.normal[1], proj.normal[2]);
+      dabAlongSegment3D(lastHitPos || curPos, curPos, curN);
+      lastHitPos = curPos.clone();
+      lastPainted3D = { pos: curPos.clone(), normal: curN.clone(), uv: hit.uv ? { u: hit.uv.x, v: hit.uv.y } : null };
+      return;
+    }
     dabAlongSegment3D(lastHitPos || smoothedHit3D, smoothedHit3D, norm);
     lastHitPos = smoothedHit3D.clone();
+    lastPainted3D = { pos: smoothedHit3D.clone(), normal: norm.clone(), uv: hit.uv ? { u: hit.uv.x, v: hit.uv.y } : null };
   });
 
   pane3D.addEventListener("wheel", (e) => {
@@ -1918,7 +2341,30 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     Broadcast();
   }, { passive: false, capture: true });
 
+  pane3D.addEventListener("dblclick", (e) => {
+    if (state.brush.tool === "curve" && state.surfaceCurvePoints.length >= 2) {
+      e.preventDefault();
+      strokeSurfaceCurve3D();
+    }
+  });
+
   const endStroke3D = () => {
+    if (activeGradientPointDrag) {
+      const undoSnap = activeGradientPointDrag.undoSnap;
+      activeGradientPointDrag = null;
+      orbit.enabled = true;
+      if (state.gradientLiveUpdate && undoSnap) pushUndoSnapshot(undoSnap);
+      else gpuPaint.disposeSnapshot(undoSnap);
+      rebuildInspector();
+      Broadcast();
+      return;
+    }
+    if (activeCurvePointDrag >= 0) {
+      activeCurvePointDrag = -1;
+      orbit.enabled = true;
+      rebuildCurve3DVisual();
+      return;
+    }
     if (activeStamp3DDrag) {
       const draggedId = activeStamp3DDrag.layer?.id;
       activeStamp3DDrag = null;
@@ -1927,7 +2373,10 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       Broadcast();
       return;
     }
-    if (!isPainting3D) return;
+    if (!isPainting3D) {
+      orbit.enabled = true;
+      return;
+    }
     isPainting3D = false;
     orbit.enabled = true;
     const layer = getTargetPaintableLayer(false);
@@ -1942,6 +2391,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     activeCpuStroke = null;
     lastHitPos = null;
     smoothedHit3D = null;
+    shiftStrokeAnchor3D = null;
     pendingUndoSnap = null;
     refreshComposite();
     if (committed && layer) {
@@ -1973,6 +2423,41 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     const { u, v } = uvFromPaneEvent(e);
     const uClamped = Math.max(0, Math.min(1, u));
     const vClamped = Math.max(0, Math.min(1, v));
+
+    if (state.brush.tool === "curve") {
+      const surf = meshCues ? lookupSurfaceAtUv(meshCues, uClamped, vClamped) : null;
+      if (surf) {
+        state.surfaceCurvePoints.push({ pos: surf.pos, normal: surf.normal, uv: { u: uClamped, v: vClamped } });
+        rebuildCurve3DVisual();
+        rebuildInspector();
+        if (activeToolPopup) openToolPopup(null, null, true);
+        Toast(`3D Curve pt #${state.surfaceCurvePoints.length} · Double-click or Enter to stroke`);
+      }
+      return;
+    }
+
+    if (state.brush.tool === "gradient") {
+      const surf = meshCues ? lookupSurfaceAtUv(meshCues, uClamped, vClamped) : null;
+      if (surf && state.pointGradient3D.points.length < 12) {
+        const localPos = gradLocalFromWorld(new THREE.Vector3(surf.pos[0], surf.pos[1], surf.pos[2]));
+        const newId = `gp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 5)}`;
+        state.pointGradient3D.points.push({
+          id: newId,
+          position: localPos,
+          color: state.brush.color || "#e8c27a",
+          radius: 1.05,
+          weight: 1.0,
+        });
+        state.selectedGradientPointId = newId;
+        state.pointGradient3D = normalizePointGradient3D(state.pointGradient3D);
+        rebuildGradient3DHandles();
+        if (state.gradientLiveUpdate) applyPointGradient3D({ pushUndo: true });
+        rebuildInspector();
+        if (activeToolPopup) openToolPopup(null, null, true);
+        Toast(`Added 3D gradient point from UV (${state.pointGradient3D.points.length}/12)`);
+      }
+      return;
+    }
 
     if (state.brush.tool === "move") {
       const found = getSelectedStamp(getActiveLayer(), true);
@@ -2009,10 +2494,17 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     strokeDabIndex = 0;
     pendingUndoSnap = snapshotSelectedLayer();
     smoothedUv2D = { u: uClamped, v: vClamped };
-    lastUv2D = { u: uClamped, v: vClamped };
     if (gpuPaint.isActive) gpuPaint.beginStroke();
     else activeCpuStroke = createStrokeAccumulator(res);
-    dabAlongSegment2D({ u: uClamped, v: vClamped }, { u: uClamped, v: vClamped });
+    if (e.shiftKey && lastPainted2D) {
+      shiftStrokeAnchor2D = { ...lastPainted2D };
+      dabAlongSegment2D(shiftStrokeAnchor2D, { u: uClamped, v: vClamped });
+    } else {
+      shiftStrokeAnchor2D = { u: uClamped, v: vClamped };
+      dabAlongSegment2D({ u: uClamped, v: vClamped }, { u: uClamped, v: vClamped });
+    }
+    lastUv2D = { u: uClamped, v: vClamped };
+    lastPainted2D = { u: uClamped, v: vClamped };
     pane2D.setPointerCapture(e.pointerId);
   });
 
@@ -2030,13 +2522,28 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     }
     if (!isPainting2D) return;
     const rawPt = uvFromPaneEvent(e);
-    const pt = { u: Math.max(0, Math.min(1, rawPt.u)), v: Math.max(0, Math.min(1, rawPt.v)) };
+    let pt = { u: Math.max(0, Math.min(1, rawPt.u)), v: Math.max(0, Math.min(1, rawPt.v)) };
+    if (e.shiftKey && shiftStrokeAnchor2D) {
+      const du = pt.u - shiftStrokeAnchor2D.u;
+      const dv = pt.v - shiftStrokeAnchor2D.v;
+      pt = Math.abs(du) >= Math.abs(dv)
+        ? { u: pt.u, v: shiftStrokeAnchor2D.v }
+        : { u: shiftStrokeAnchor2D.u, v: pt.v };
+    }
     const stab = Math.max(0, Math.min(0.85, state.brush.stabilizer ?? 0));
     smoothedUv2D = smoothedUv2D
       ? { u: smoothedUv2D.u + (pt.u - smoothedUv2D.u) * (1 - stab), v: smoothedUv2D.v + (pt.v - smoothedUv2D.v) * (1 - stab) }
       : pt;
     dabAlongSegment2D(lastUv2D || smoothedUv2D, smoothedUv2D);
     lastUv2D = { ...smoothedUv2D };
+    lastPainted2D = { ...smoothedUv2D };
+  });
+
+  pane2D.addEventListener("dblclick", (e) => {
+    if (state.brush.tool === "curve" && state.surfaceCurvePoints.length >= 2) {
+      e.preventDefault();
+      strokeSurfaceCurve3D();
+    }
   });
 
   const endStroke2D = () => {
@@ -2061,6 +2568,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     activeCpuStroke = null;
     lastUv2D = null;
     smoothedUv2D = null;
+    shiftStrokeAnchor2D = null;
     pendingUndoSnap = null;
     refreshComposite();
     if (committed && layer) {
@@ -2565,6 +3073,61 @@ export function mountTexturePaintWorkspace(root, appBridge) {
         actStrip.append(rstBtn, delBtn);
         pop.append(actStrip);
       }
+    } else if (tool === "curve") {
+      pop.append(Construct("p", "property-hint", `Click mesh or UV to place 3D curve points (${state.surfaceCurvePoints.length} placed). Double-click or press Enter to stroke.`));
+      makePopupToggle(pop, "Closed Loop", () => state.surfaceCurveClosed, (v) => { state.surfaceCurveClosed = !!v; rebuildCurve3DVisual(); });
+      makePopupSlider(pop, "Curve Smoothness", 0.1, 1.0, 0.05, "", () => state.surfaceCurveTension, (v) => { state.surfaceCurveTension = v; rebuildCurve3DVisual(); });
+      makePopupSlider(pop, "Stroke Radius", 0.03, 0.9, 0.01, "m", () => state.brush.size, (v) => { state.brush.size = v; state.brush.pixelRadius = Math.round(v * 110); });
+      makePopupSlider(pop, "Stroke Opacity", 0.05, 1, 0.01, "", () => state.brush.opacity, (v) => { state.brush.opacity = v; });
+      ColorRow(pop, { Label: "Stroke Colour", Transient: true, Read: () => state.brush.color, Write: (v) => { state.brush.color = v; Broadcast(); } });
+      const actRow = Construct("div", "chip-strip");
+      const strokeBtn = Construct("button", "chip-btn active", "Stroke Curve (Enter)");
+      strokeBtn.type = "button";
+      strokeBtn.addEventListener("click", () => strokeSurfaceCurve3D());
+      const undoPtBtn = Construct("button", "chip-btn", "Undo Point");
+      undoPtBtn.type = "button";
+      undoPtBtn.addEventListener("click", () => { state.surfaceCurvePoints.pop(); rebuildCurve3DVisual(); rebuildInspector(); openToolPopup(null, null, true); });
+      const clrBtn = Construct("button", "chip-btn", "Clear");
+      clrBtn.type = "button";
+      clrBtn.addEventListener("click", () => { state.surfaceCurvePoints = []; rebuildCurve3DVisual(); rebuildInspector(); openToolPopup(null, null, true); });
+      actRow.append(strokeBtn, undoPtBtn, clrBtn);
+      pop.append(actRow);
+    } else if (tool === "gradient") {
+      const g = state.pointGradient3D;
+      pop.append(Construct("p", "property-hint", `Click 3D mesh to add colour points (${g.points.length}/12) or drag coloured 3D spheres in space.`));
+      makePopupToggle(pop, "Live Preview on Edit", () => state.gradientLiveUpdate, (v) => { state.gradientLiveUpdate = !!v; });
+      makePopupSlider(pop, "Global Spread", 0.3, 2.5, 0.05, "x", () => g.falloff, (v) => {
+        g.falloff = v;
+        if (state.gradientLiveUpdate) applyPointGradient3D({ pushUndo: false });
+      });
+      ColorRow(pop, {
+        Label: "Background Colour",
+        Transient: true,
+        Read: () => g.background,
+        Write: (v) => { g.background = v; if (state.gradientLiveUpdate) applyPointGradient3D({ pushUndo: false }); },
+      });
+      const selPt = g.points.find((p) => p.id === state.selectedGradientPointId) || g.points[0];
+      if (selPt) {
+        ColorRow(pop, {
+          Label: "Selected 3D Point",
+          Transient: true,
+          Read: () => selPt.color,
+          Write: (v) => { selPt.color = v; rebuildGradient3DHandles(); if (state.gradientLiveUpdate) applyPointGradient3D({ pushUndo: false }); },
+        });
+        makePopupSlider(pop, "Point 3D Radius", 0.15, 3.0, 0.05, "", () => selPt.radius, (v) => {
+          selPt.radius = v;
+          if (state.gradientLiveUpdate) applyPointGradient3D({ pushUndo: false });
+        });
+        makePopupSlider(pop, "Point Weight", 0.05, 1.0, 0.05, "", () => selPt.weight, (v) => {
+          selPt.weight = v;
+          if (state.gradientLiveUpdate) applyPointGradient3D({ pushUndo: false });
+        });
+      }
+      const applyBtn = Construct("button", "action-button accent", [ConstructGlyph("Gradient"), Construct("span", null, "Apply 3D Gradient to Layer")]);
+      applyBtn.type = "button";
+      applyBtn.style.width = "100%";
+      applyBtn.addEventListener("click", () => applyPointGradient3D({ pushUndo: true }));
+      pop.append(applyBtn);
     } else if (tool === "eyedropper") {
       const sampleCard = Construct("div", "object-heading");
       const dot = Construct("div", "object-symbol");
@@ -2645,6 +3208,8 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     state.brush.tool = id;
     headerUI.setActiveTool(id);
     paintToolReadout.textContent = `${TOOL_LABELS[id] || "Brush"} · ${Math.round((state.brush.size || 0.14) * 100)}px`;
+    rebuildCurve3DVisual();
+    rebuildGradient3DHandles();
     rebuildInspector();
     refreshComposite();
     if (activeToolPopup) openToolPopup(null, null, true);
@@ -3013,10 +3578,12 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     const activeSubMeta =
       state.brush.tool === "paint" ? `${state.brush.tip} · ${state.brush.color}`
         : state.brush.tool === "erase" ? `${state.brush.tip} eraser`
-          : state.brush.tool === "fill" ? `${state.fillScope} fill`
-            : state.brush.tool === "stamp" ? (state.brush.stampName || "Stamp")
-              : state.brush.tool === "move" ? (activeStampInfo ? `${activeStampInfo.stamp.name}` : "Drag Stamp")
-                : "Sample surface";
+          : state.brush.tool === "curve" ? `${state.surfaceCurvePoints.length} pts · Dbl-click stroke`
+            : state.brush.tool === "fill" ? `${state.fillScope} fill`
+              : state.brush.tool === "gradient" ? `${state.pointGradient3D.points.length} 3D pts`
+                : state.brush.tool === "stamp" ? (state.brush.stampName || "Stamp")
+                  : state.brush.tool === "move" ? (activeStampInfo ? `${activeStampInfo.stamp.name}` : "Drag Stamp")
+                    : "Sample surface";
     const toolMetaCopy = Construct("div", null, [
       Construct("strong", null, `${activeToolLabel} Active`),
       Construct("div", null, `Right-click or Q for Brush Inspector · ${activeSubMeta}`),
@@ -3032,6 +3599,130 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     });
     toolBarCard.append(toolMetaCopy, openBrushBtn);
     rightInner.append(toolBarCard);
+
+    if (state.brush.tool === "curve") {
+      const cSec = SectionCard(rightInner, { Title: "3D Surface Curve (U)", Glyph: "Curve", Badge: `${state.surfaceCurvePoints.length} PTS`, Open: true });
+      cSec.Inner.append(Construct("p", "property-hint", "Click on the 3D mesh (or 2D UV) to place curve points along the surface, drag existing nodes to adjust, then stroke."));
+      SwitchRow(cSec.Inner, {
+        Label: "Closed Curve Loop",
+        Read: () => !!state.surfaceCurveClosed,
+        Write: (v) => { state.surfaceCurveClosed = !!v; rebuildCurve3DVisual(); },
+      });
+      SliderRow(cSec.Inner, {
+        Label: "Curve Smoothness",
+        Minimum: 0.1, Maximum: 1.0, Step: 0.05,
+        Read: () => state.surfaceCurveTension ?? 0.5,
+        Write: (v) => { state.surfaceCurveTension = v; rebuildCurve3DVisual(); },
+      });
+      ColorRow(cSec.Inner, { Label: "Stroke Colour", Read: () => state.brush.color, Write: (v) => { state.brush.color = v; } });
+      ActionRow(cSec.Inner, [
+        { Label: "Stroke Curve (Enter)", Glyph: "Curve", Tone: "accent", Act: () => strokeSurfaceCurve3D() },
+        { Label: "Undo Pt", Glyph: "Undo", Act: () => { state.surfaceCurvePoints.pop(); rebuildCurve3DVisual(); rebuildInspector(); } },
+        { Label: "Clear", Glyph: "Trash", Act: () => { state.surfaceCurvePoints = []; rebuildCurve3DVisual(); rebuildInspector(); } },
+      ]);
+    } else if (state.brush.tool === "gradient") {
+      const g = state.pointGradient3D;
+      const gSec = SectionCard(rightInner, { Title: "3D Space Gradient (D)", Glyph: "Gradient", Badge: `${g.points.length}/12 PTS`, Open: true });
+      gSec.Inner.append(Construct("p", "property-hint", "Click mesh to place 3D colour nodes or drag spheres in 3D space. Colours smoothly interpolate across 3D coordinates."));
+      SwitchRow(gSec.Inner, {
+        Label: "Live Preview on Edit",
+        Read: () => !!state.gradientLiveUpdate,
+        Write: (v) => { state.gradientLiveUpdate = !!v; },
+      });
+      SliderRow(gSec.Inner, {
+        Label: "Global Falloff Spread",
+        Minimum: 0.25, Maximum: 2.5, Step: 0.05,
+        Read: () => g.falloff,
+        Write: (v) => { g.falloff = v; if (state.gradientLiveUpdate) applyPointGradient3D({ pushUndo: false }); },
+      });
+      ColorRow(gSec.Inner, {
+        Label: "Ambient / Base",
+        Read: () => g.background,
+        Write: (v) => { g.background = v; if (state.gradientLiveUpdate) applyPointGradient3D({ pushUndo: false }); },
+      });
+
+      const ptStrip = Construct("div", "chip-strip");
+      g.points.forEach((pt, pIdx) => {
+        const pb = Construct("button", "chip-btn" + (pt.id === state.selectedGradientPointId ? " active" : ""), [
+          (() => {
+            const dot = Construct("span", "");
+            dot.style.cssText = `display:inline-block;width:9px;height:9px;background:${pt.color};border:1px solid rgba(255,255,255,0.45);`;
+            return dot;
+          })(),
+          Construct("span", null, `P${pIdx + 1}`),
+        ]);
+        pb.type = "button";
+        pb.addEventListener("click", () => {
+          state.selectedGradientPointId = pt.id;
+          rebuildGradient3DHandles();
+          rebuildInspector();
+        });
+        ptStrip.append(pb);
+      });
+      gSec.Inner.append(ptStrip);
+
+      const selPt = g.points.find((p) => p.id === state.selectedGradientPointId) || g.points[0];
+      if (selPt) {
+        ColorRow(gSec.Inner, {
+          Label: "Point Colour",
+          Read: () => selPt.color,
+          Write: (v) => { selPt.color = v; rebuildGradient3DHandles(); if (state.gradientLiveUpdate) applyPointGradient3D({ pushUndo: false }); },
+        });
+        SliderRow(gSec.Inner, {
+          Label: "3D Radius",
+          Minimum: 0.15, Maximum: 3.0, Step: 0.05,
+          Read: () => selPt.radius,
+          Write: (v) => { selPt.radius = v; if (state.gradientLiveUpdate) applyPointGradient3D({ pushUndo: false }); },
+        });
+        SliderRow(gSec.Inner, {
+          Label: "Point Weight",
+          Minimum: 0.05, Maximum: 1.0, Step: 0.05,
+          Read: () => selPt.weight,
+          Write: (v) => { selPt.weight = v; if (state.gradientLiveUpdate) applyPointGradient3D({ pushUndo: false }); },
+        });
+        for (const [axisLbl, axisIdx] of [["Pos X", 0], ["Pos Y", 1], ["Pos Z", 2]]) {
+          SliderRow(gSec.Inner, {
+            Label: axisLbl,
+            Minimum: -1.8, Maximum: 1.8, Step: 0.02,
+            Read: () => selPt.position[axisIdx],
+            Write: (v) => {
+              selPt.position[axisIdx] = v;
+              rebuildGradient3DHandles();
+              if (state.gradientLiveUpdate) applyPointGradient3D({ pushUndo: false });
+            },
+          });
+        }
+      }
+      ActionRow(gSec.Inner, [
+        { Label: "Apply 3D Gradient", Glyph: "Gradient", Tone: "accent", Act: () => applyPointGradient3D({ pushUndo: true }) },
+        {
+          Label: "+ Add 3D Pt",
+          Glyph: "Plus",
+          Act: () => {
+            if (g.points.length >= 12) return;
+            const nid = `gp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 5)}`;
+            const ang = g.points.length * 1.4;
+            g.points.push({ id: nid, position: [Math.cos(ang) * 0.7, Math.sin(ang * 0.7) * 0.6, Math.sin(ang) * 0.7], color: state.brush.color || "#7ac98f", radius: 1.05, weight: 1.0 });
+            state.selectedGradientPointId = nid;
+            rebuildGradient3DHandles();
+            if (state.gradientLiveUpdate) applyPointGradient3D({ pushUndo: true });
+            rebuildInspector();
+          },
+        },
+        {
+          Label: "Del Pt",
+          Glyph: "Trash",
+          Act: () => {
+            if (g.points.length <= 1) return;
+            g.points = g.points.filter((p) => p.id !== selPt?.id);
+            state.selectedGradientPointId = g.points[0]?.id || "";
+            rebuildGradient3DHandles();
+            if (state.gradientLiveUpdate) applyPointGradient3D({ pushUndo: true });
+            rebuildInspector();
+          },
+        },
+      ]);
+    }
 
     if (layer) {
       const lSec = SectionCard(rightInner, { Title: `Layer Inspector: ${layer.name}`, Glyph: "Layers", Badge: layer.kind.toUpperCase(), Open: true });
@@ -3883,17 +4574,41 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   btnExportAll.addEventListener("click", exportAllPbrMaps);
 
   const onKeyDown = (e) => {
+    if (e.key === "Shift") isShiftHeld = true;
     if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)) return;
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") { e.preventDefault(); performSavePaintProject(); }
     else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") { e.preventDefault(); if (e.shiftKey) performRedo(); else performUndo(); }
     else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") { e.preventDefault(); performRedo(); }
     else if (e.altKey && e.key === "ArrowUp") { e.preventDefault(); moveLayerByOffset(state.doc.selectedLayerId, +1); }
     else if (e.altKey && e.key === "ArrowDown") { e.preventDefault(); moveLayerByOffset(state.doc.selectedLayerId, -1); }
-    else if (e.key === "Escape") { closeToolPopup(); headerUI.closeSaveMenu(); }
+    else if (e.key === "Enter" && state.brush.tool === "curve" && state.surfaceCurvePoints.length >= 2) {
+      e.preventDefault();
+      strokeSurfaceCurve3D();
+    }
+    else if (e.key === "Enter" && state.brush.tool === "gradient") {
+      e.preventDefault();
+      applyPointGradient3D({ pushUndo: true });
+    }
+    else if ((e.key === "Backspace" || e.key === "Delete") && state.brush.tool === "curve" && state.surfaceCurvePoints.length) {
+      e.preventDefault();
+      state.surfaceCurvePoints.pop();
+      rebuildCurve3DVisual();
+      rebuildInspector();
+    }
+    else if (e.key === "Escape") {
+      if (state.brush.tool === "curve" && state.surfaceCurvePoints.length) {
+        state.surfaceCurvePoints = [];
+        rebuildCurve3DVisual();
+        rebuildInspector();
+      }
+      closeToolPopup(); headerUI.closeSaveMenu();
+    }
     else if (e.key.toLowerCase() === "q" || e.key === "Tab") { e.preventDefault(); openToolPopup(); }
     else if (e.key.toLowerCase() === "b") selectTool("paint");
     else if (e.key.toLowerCase() === "e") selectTool("erase");
+    else if (e.key.toLowerCase() === "u") selectTool("curve");
     else if (e.key.toLowerCase() === "g") selectTool("fill");
+    else if (e.key.toLowerCase() === "d") selectTool("gradient");
     else if (e.key.toLowerCase() === "s") selectTool("stamp");
     else if (e.key.toLowerCase() === "i") selectTool("eyedropper");
     else if (e.key.toLowerCase() === "v") selectTool("move");
@@ -3909,7 +4624,14 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       Broadcast();
     }
   };
+  const onKeyUp = (e) => {
+    if (e.key === "Shift") {
+      isShiftHeld = false;
+      shiftLine3D.visible = false;
+    }
+  };
   window.addEventListener("keydown", onKeyDown);
+  window.addEventListener("keyup", onKeyUp);
 
   const ro = new ResizeObserver(syncViewportLayout);
   ro.observe(stage);
@@ -3922,6 +4644,11 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   const tick = () => {
     if (disposed) return;
     orbit.update();
+    if (gradientHandlesGroup.children.length) {
+      for (const ch of gradientHandlesGroup.children) {
+        if (ch.userData?.isHaloRing) ch.quaternion.copy(camera.quaternion);
+      }
+    }
 
     const fullW = stage.clientWidth || 800;
     const fullH = stage.clientHeight || 520;
@@ -4148,6 +4875,8 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       viewportMode: state.viewportMode,
       layers: state.doc.layers.length,
       tool: state.brush.tool,
+      surfaceCurvePoints: state.surfaceCurvePoints.length,
+      gradientPoints: state.pointGradient3D.points.length,
       gpu: gpuPaint.isActive,
     }),
     dispose() {
@@ -4158,6 +4887,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       closeToolPopup();
       ro.disconnect();
       window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
       if (inspectorScope) ReleaseScope(inspectorScope);
       orbit.dispose();
       envTex.dispose();
@@ -4165,6 +4895,9 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       fallbackMetalTex.dispose(); fallbackNormalTex.dispose();
       uvQuadMat.dispose(); uvQuadMesh.geometry.dispose();
       stampGizmo3D.geometry.dispose(); stampGizmo3D.material.dispose();
+      shiftLine3D.geometry.dispose(); shiftLine3D.material.dispose();
+      clearGroupChildren(curveOverlayGroup);
+      clearGroupChildren(gradientHandlesGroup);
       paintMat.dispose();
       for (const s of state.undoStack) gpuPaint.disposeSnapshot(s);
       for (const s of state.redoStack) gpuPaint.disposeSnapshot(s);

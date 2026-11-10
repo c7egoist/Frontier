@@ -17,6 +17,10 @@ import {
   createArtworkLayer,
   createDefaultModifier,
   evaluateArtworkDocument,
+  normalizeGradientStops,
+  nodesToNormalizedCurveData,
+  normalizedCurveToCanvasNodes,
+  pathNodesToSvgD,
 } from "../Engine/Patterns/ArtworkStackEngine.js";
 import {
   listPatternStarterCatalog,
@@ -35,6 +39,7 @@ import {
   SegmentedRow,
   ColorRow,
   TextRow,
+  ActionRow,
   MetricTrio,
   SmoothScroll,
   OpenScope,
@@ -48,6 +53,9 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 
 const VECTOR_TOOLS = [
   { id: "select", label: "Select", glyph: "Pointer", key: "V" },
+  { id: "curve", label: "Curve", glyph: "Curve", key: "U" },
+  { id: "pen", label: "Pen", glyph: "Pen", key: "P" },
+  { id: "node", label: "Edit Points", glyph: "Focus", key: "A" },
   { id: "square", label: "Rect", glyph: "Square", key: "R" },
   { id: "circle", label: "Circle", glyph: "Circle", key: "O" },
   { id: "diamond", label: "Diamond", glyph: "Diamond", key: "D" },
@@ -193,7 +201,8 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
   let inspectorScope = null;
   let disposed = false;
   let spacePanning = false;
-  let pointerInteraction = null; // { kind: "move" | "resize" | "rotate" | "draw" | "pan", ... }
+  let pointerInteraction = null; // { kind: "move" | "resize" | "rotate" | "draw" | "pan" | "pen-drag" | "node-drag" | "handle-drag", ... }
+  let activePathSession = null; // { nodes, closed, tension, tool, hoverPt, nearStart, editingLayerId, activeNodeIndex }
   const undoStack = [];
   const redoStack = [];
 
@@ -324,7 +333,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     Toast("Redone");
   }
 
-  const primaryToolIds = new Set(["select", "square", "circle", "diamond", "triangle", "text", "pan"]);
+  const primaryToolIds = new Set(["select", "curve", "square", "circle", "diamond", "triangle", "text", "pan"]);
   const primaryToolList = VECTOR_TOOLS.filter((t) => primaryToolIds.has(t.id));
   const extraToolList = VECTOR_TOOLS.filter((t) => !primaryToolIds.has(t.id));
 
@@ -552,10 +561,120 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     return state.doc.layers.find((l) => l.id === state.doc.selectedLayerId) || state.doc.layers[state.doc.layers.length - 1] || state.doc.layers[0];
   }
 
+  function syncPathSessionHints() {
+    if (activePathSession) {
+      const n = activePathSession.nodes.length;
+      hintText.textContent = activePathSession.editingLayerId
+        ? "Editing curve nodes · Drag points or handles · Dbl-click node to toggle smooth/corner · Enter finish"
+        : `Curve path (${n} pt${n === 1 ? "" : "s"}) · Click add point · Click start or Dbl-click / Enter finish · Backspace undo pt`;
+    } else if (state.vectorTool === "curve" || state.vectorTool === "pen") {
+      hintText.textContent = `${state.vectorTool === "curve" ? "Curve Tool (U)" : "Pen Tool (P)"} · Click canvas to trace smooth Bézier curve · Enter or Dbl-click to commit`;
+    } else if (state.vectorTool === "node") {
+      hintText.textContent = "Point Editor (A) · Select a Curve layer to adjust nodes & Bézier handles";
+    } else {
+      hintText.textContent = "Marquee to select · Shift constrain · Alt centred resize · Space pan · U Curve tool";
+    }
+  }
+
+  function startEditLayerCurveSession(layer) {
+    if (!layer?.shape?.pathNodes?.length) return false;
+    activePathSession = {
+      nodes: normalizedCurveToCanvasNodes(layer.shape.pathNodes, layer.transform),
+      closed: layer.shape.closedPath !== false,
+      tension: layer.shape.curveTension ?? 0.5,
+      tool: "node",
+      hoverPt: null,
+      nearStart: false,
+      editingLayerId: layer.id,
+      activeNodeIndex: -1,
+    };
+    syncPathSessionHints();
+    renderVectorSvgCanvas();
+    return true;
+  }
+
+  function commitActivePathSession({ closeLoop = null } = {}) {
+    if (!activePathSession) return false;
+    const sess = activePathSession;
+    const isClosed = closeLoop !== null ? closeLoop : sess.closed;
+    if (sess.nodes.length < 2) {
+      activePathSession = null;
+      syncPathSessionHints();
+      renderVectorSvgCanvas();
+      return false;
+    }
+    const curveData = nodesToNormalizedCurveData(sess.nodes, isClosed, sess.tension);
+    if (!curveData) {
+      activePathSession = null;
+      syncPathSessionHints();
+      renderVectorSvgCanvas();
+      return false;
+    }
+
+    pushUndo();
+    if (sess.editingLayerId) {
+      const target = state.doc.layers.find((l) => l.id === sess.editingLayerId);
+      if (target) {
+        target.transform = { ...target.transform, ...curveData.transform, rotation: 0 };
+        target.shape.motifType = "svg-path";
+        target.shape.pathNodes = curveData.pathNodes;
+        target.shape.closedPath = curveData.closedPath;
+        target.shape.curveTension = curveData.curveTension;
+        target.shape.svgPath = curveData.svgPath;
+        state.doc.selectedLayerId = target.id;
+      }
+      activePathSession = null;
+      selectVectorTool("select");
+      evaluateAndRender(true);
+      rebuildInspector();
+      Toast("Updated curve geometry");
+      return true;
+    }
+
+    const baseCol = isPattern ? "#eff4cf" : "#e8c27a";
+    const created = createArtworkLayer("motif", {
+      name: sess.tool === "pen" ? "Pen Path" : "Curve Path",
+      transform: curveData.transform,
+      shape: {
+        motifType: "svg-path",
+        color: baseCol,
+        colorB: "#5a7692",
+        fillMode: "solid",
+        fillStops: [{ color: baseCol, offset: 0 }, { color: "#5a7692", offset: 1 }],
+        fillEnabled: isClosed,
+        strokeWidth: isClosed ? 0 : 6,
+        strokeColor: baseCol,
+        pathNodes: curveData.pathNodes,
+        closedPath: curveData.closedPath,
+        curveTension: curveData.curveTension,
+        svgPath: curveData.svgPath,
+      },
+    });
+    state.doc.layers.push(created);
+    state.doc.selectedLayerId = created.id;
+    activePathSession = null;
+    selectVectorTool("select");
+    evaluateAndRender(true);
+    rebuildInspector();
+    Toast(`Created ${created.name} (${sess.nodes.length} points)`);
+    return true;
+  }
+
   function selectVectorTool(id) {
+    if (activePathSession && id !== activePathSession.tool && id !== "node") {
+      commitActivePathSession();
+    }
     state.vectorTool = id;
     headerUI.setActiveTool(id);
+    if (id === "node") {
+      const sel = getSelectedLayer();
+      if (sel?.shape?.motifType === "svg-path" && sel.shape.pathNodes?.length) {
+        startEditLayerCurveSession(sel);
+      }
+    }
     svgEl.style.cursor = id === "pan" ? "grab" : id === "select" ? "default" : "crosshair";
+    syncPathSessionHints();
+    if (state.viewChannel === "vector") renderVectorSvgCanvas();
   }
 
   function getSvgViewMetrics() {
@@ -661,9 +780,23 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     const units = m.vw / Math.max(1, m.w);
     const gridStep = Math.max(8, state.snapStep || 32);
 
-    const tileBg = bg.enabled
-      ? `<rect x="0" y="0" width="${docSize}" height="${docSize}" fill="${bg.color || "#171a1f"}" opacity="${bg.opacity ?? 1}"/>`
-      : "";
+    let tileBg = "";
+    let extraDefs = "";
+    if (bg.enabled) {
+      let bgFill = bg.color || "#171a1f";
+      if (bg.fillMode === "linear" || bg.fillMode === "radial") {
+        const bgStops = normalizeGradientStops(bg.fillStops, bg.color || "#171a1f", bg.colorB || "#2b3340");
+        const stopXml = bgStops.map((s) => `<stop offset="${(s.offset * 100).toFixed(1)}%" stop-color="${s.color}"/>`).join("");
+        if (bg.fillMode === "radial") {
+          extraDefs += `<radialGradient id="se-bg-grad">${stopXml}</radialGradient>`;
+        } else {
+          const a = ((bg.gradientAngle ?? 45) * Math.PI) / 180;
+          extraDefs += `<linearGradient id="se-bg-grad" x1="${(50 - Math.cos(a) * 50).toFixed(1)}%" y1="${(50 - Math.sin(a) * 50).toFixed(1)}%" x2="${(50 + Math.cos(a) * 50).toFixed(1)}%" y2="${(50 + Math.sin(a) * 50).toFixed(1)}%">${stopXml}</linearGradient>`;
+        }
+        bgFill = "url(#se-bg-grad)";
+      }
+      tileBg = `<rect x="0" y="0" width="${docSize}" height="${docSize}" fill="${bgFill}" opacity="${bg.opacity ?? 1}"/>`;
+    }
 
     // Adjacent subtle 2x2 ghost repeat preview in Pattern mode
     let ghostTiles = "";
@@ -720,11 +853,43 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
         </g>`;
     }
 
-    // Live draw preview rect if drawing a shape
+    // Live draw preview rect or live interactive Curve/Pen/Node overlay
     let drawDraftMarkup = "";
     if (pointerInteraction?.kind === "draw" && pointerInteraction.draftRect) {
       const dr = pointerInteraction.draftRect;
       drawDraftMarkup = `<rect x="${dr.x}" y="${dr.y}" width="${dr.w}" height="${dr.h}" fill="rgba(239,244,207,0.12)" stroke="#eff4cf" stroke-width="${units * 1.6}" stroke-dasharray="${units * 5} ${units * 4}" pointer-events="none"/>`;
+    }
+    if (activePathSession && state.viewChannel === "vector") {
+      const sess = activePathSession;
+      const previewNodes = sess.hoverPt && !sess.editingLayerId && !sess.nearStart
+        ? [...sess.nodes, { x: sess.hoverPt.x, y: sess.hoverPt.y, mode: sess.tool === "curve" ? "auto" : "corner" }]
+        : sess.nodes;
+      const previewD = previewNodes.length >= 2 ? pathNodesToSvgD(previewNodes, sess.closed, sess.tension) : "";
+      const committedD = sess.nodes.length >= 2 ? pathNodesToSvgD(sess.nodes, sess.closed, sess.tension) : "";
+      const nr = units * 5.2;
+      const hr = units * 3.8;
+      let nodesSvg = "";
+      sess.nodes.forEach((n, idx) => {
+        const isFirst = idx === 0;
+        const isActive = idx === sess.activeNodeIndex;
+        if (n.in) {
+          nodesSvg += `<line x1="${n.x}" y1="${n.y}" x2="${n.x + n.in.x}" y2="${n.y + n.in.y}" stroke="#7dd3fc" stroke-width="${units * 1.1}" opacity="0.8"/>`;
+          nodesSvg += `<circle cx="${n.x + n.in.x}" cy="${n.y + n.in.y}" r="${hr}" fill="#7dd3fc" stroke="#141619" stroke-width="${units * 1.1}" data-path-handle="in:${idx}" style="cursor:grab;"/>`;
+        }
+        if (n.out) {
+          nodesSvg += `<line x1="${n.x}" y1="${n.y}" x2="${n.x + n.out.x}" y2="${n.y + n.out.y}" stroke="#7dd3fc" stroke-width="${units * 1.1}" opacity="0.8"/>`;
+          nodesSvg += `<circle cx="${n.x + n.out.x}" cy="${n.y + n.out.y}" r="${hr}" fill="#7dd3fc" stroke="#141619" stroke-width="${units * 1.1}" data-path-handle="out:${idx}" style="cursor:grab;"/>`;
+        }
+        const strokeCol = isFirst && sess.nearStart ? "#4ade80" : isActive ? "#eff4cf" : "#e8c27a";
+        const fillCol = isFirst && sess.nearStart ? "#4ade80" : isActive ? "#e8c27a" : "#161915";
+        nodesSvg += `<circle cx="${n.x}" cy="${n.y}" r="${isFirst && sess.nearStart ? nr * 1.45 : nr}" fill="${fillCol}" stroke="${strokeCol}" stroke-width="${units * 1.8}" data-path-node="${idx}" style="cursor:move;"/>`;
+      });
+      drawDraftMarkup += `
+        <g class="se-curve-overlay">
+          ${previewD && previewD !== committedD ? `<path d="${previewD}" fill="none" stroke="rgba(239,244,207,0.45)" stroke-width="${units * 1.6}" stroke-dasharray="${units * 4} ${units * 4}" pointer-events="none"/>` : ""}
+          ${committedD ? `<path d="${committedD}" fill="${sess.closed ? "rgba(232,194,122,0.14)" : "none"}" stroke="#eff4cf" stroke-width="${units * 2.1}" stroke-linecap="round" pointer-events="none"/>` : ""}
+          ${nodesSvg}
+        </g>`;
     }
 
     svgEl.innerHTML = `
@@ -740,6 +905,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
         <clipPath id="se-tile-clip">
           <rect x="0" y="0" width="${docSize}" height="${docSize}"/>
         </clipPath>
+        ${extraDefs}
         ${artDefs}
       </defs>
       ${ghostTiles}
@@ -1045,13 +1211,188 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
       Write: (v) => { layer.name = v; renderLeftColumn(); },
     });
 
+    const appendColourSourceControls = (parentEl, {
+      label = "Fill",
+      allowSolid = true,
+      getMode,
+      setMode,
+      getStops,
+      setStops,
+      getAngle,
+      setAngle,
+      fallbackA = "#e8c27a",
+      fallbackB = "#5a7692",
+    }) => {
+      const modeOpts = allowSolid
+        ? [["Solid", "solid"], ["Linear Grad", "linear"], ["Radial Grad", "radial"]]
+        : [["Linear Grad", "linear"], ["Radial Grad", "radial"]];
+      SegmentedRow(parentEl, {
+        Label: `${label} Source`,
+        Options: modeOpts,
+        Read: () => getMode() || (allowSolid ? "solid" : "linear"),
+        Write: (v) => {
+          setMode(v);
+          if (v !== "solid" && (!getStops() || getStops().length < 2)) {
+            setStops(normalizeGradientStops(getStops(), fallbackA, fallbackB));
+          }
+          evaluateAndRender(true);
+          rebuildInspector();
+        },
+      });
+      const curMode = getMode() || (allowSolid ? "solid" : "linear");
+      if (curMode === "solid") {
+        ColorRow(parentEl, {
+          Label: `${label} Colour`,
+          Read: () => (getStops()?.[0]?.color) || fallbackA,
+          Write: (v) => {
+            const cur = normalizeGradientStops(getStops(), v, fallbackB);
+            cur[0] = { ...cur[0], color: v };
+            setStops(cur, v);
+            evaluateAndRender(true);
+          },
+        });
+        return;
+      }
+
+      const stops = normalizeGradientStops(getStops(), fallbackA, fallbackB);
+      const wrap = Construct("div", "se-gradient-editor");
+      wrap.style.cssText = "display:flex;flex-direction:column;gap:6px;padding:6px 0;";
+
+      const bar = Construct("div", "se-gradient-bar");
+      const cssGrad = stops.map((s) => `${s.color} ${(s.offset * 100).toFixed(1)}%`).join(", ");
+      bar.style.cssText = `height:14px;width:100%;border:1px solid rgba(255,255,255,0.14);background:${
+        curMode === "radial"
+          ? `radial-gradient(circle, ${cssGrad})`
+          : `linear-gradient(${Math.round(getAngle?.() ?? 45)}deg, ${cssGrad})`
+      };`;
+      wrap.append(bar);
+
+      if (curMode === "linear" && getAngle && setAngle) {
+        SliderRow(wrap, {
+          Label: "Gradient Angle",
+          Minimum: -180,
+          Maximum: 180,
+          Step: 1,
+          Unit: "°",
+          Read: () => getAngle() ?? 45,
+          Write: (v) => {
+            setAngle(v);
+            evaluateAndRender(true);
+          },
+        });
+      }
+
+      stops.forEach((stop, sIdx) => {
+        const sRow = Construct("div", "se-gradient-stop-row");
+        sRow.style.cssText = "display:grid;grid-template-columns:28px 1fr 44px 22px;align-items:center;gap:6px;";
+        const colInp = document.createElement("input");
+        colInp.type = "color";
+        colInp.value = stop.color;
+        colInp.style.cssText = "width:26px;height:22px;padding:0;border:1px solid rgba(255,255,255,0.2);background:transparent;cursor:pointer;";
+        colInp.addEventListener("input", () => {
+          const next = stops.map((st, idx) => (idx === sIdx ? { ...st, color: colInp.value } : st));
+          setStops(next);
+          const nextCss = normalizeGradientStops(next).map((s) => `${s.color} ${(s.offset * 100).toFixed(1)}%`).join(", ");
+          bar.style.background = curMode === "radial" ? `radial-gradient(circle, ${nextCss})` : `linear-gradient(${Math.round(getAngle?.() ?? 45)}deg, ${nextCss})`;
+          evaluateAndRender(false, { skipPbr: true });
+        });
+        colInp.addEventListener("change", () => evaluateAndRender(true));
+
+        const posRange = document.createElement("input");
+        posRange.type = "range";
+        posRange.min = "0";
+        posRange.max = "100";
+        posRange.step = "1";
+        posRange.value = String(Math.round(stop.offset * 100));
+        const pctTag = Construct("span", "property-hint", `${Math.round(stop.offset * 100)}%`);
+        pctTag.style.cssText = "font-size:10px;text-align:right;margin:0;";
+        posRange.addEventListener("input", () => {
+          const pct = Math.max(0, Math.min(100, Number(posRange.value)));
+          pctTag.textContent = `${pct}%`;
+          const next = stops.map((st, idx) => (idx === sIdx ? { ...st, offset: pct / 100 } : st));
+          setStops(next);
+          evaluateAndRender(false, { skipPbr: true });
+        });
+        posRange.addEventListener("change", () => {
+          evaluateAndRender(true);
+          rebuildInspector();
+        });
+
+        const delBtn = Construct("button", "stack-mini-btn", "×");
+        delBtn.type = "button";
+        delBtn.disabled = stops.length <= 2;
+        delBtn.title = stops.length <= 2 ? "Minimum 2 gradient stops" : "Remove stop";
+        delBtn.addEventListener("click", () => {
+          if (stops.length <= 2) return;
+          const next = stops.filter((_, idx) => idx !== sIdx);
+          setStops(next);
+          evaluateAndRender(true);
+          rebuildInspector();
+        });
+
+        sRow.append(colInp, posRange, pctTag, delBtn);
+        wrap.append(sRow);
+      });
+
+      const addStopBtn = Construct("button", "chip-btn", `+ Add ${label} Stop`);
+      addStopBtn.type = "button";
+      addStopBtn.disabled = stops.length >= 12;
+      addStopBtn.addEventListener("click", () => {
+        if (stops.length >= 12) return;
+        const last = stops[stops.length - 1];
+        const prev = stops[stops.length - 2] || last;
+        const mid = Math.min(0.95, Math.max(0.05, (prev.offset + last.offset) * 0.5));
+        const next = [...stops.slice(0, -1), { color: "#eff4cf", offset: mid }, last];
+        setStops(next);
+        evaluateAndRender(true);
+        rebuildInspector();
+      });
+      wrap.append(addStopBtn);
+      parentEl.append(wrap);
+    };
+
     if (layer.kind === "motif") {
       SelectRow(lSec.Inner, {
         Label: "Motif Shape",
-        Options: MOTIF_TYPES.map((m) => [m.label, m.id]),
+        Options: [...MOTIF_TYPES.map((m) => [m.label, m.id]), ...(layer.shape.motifType === "svg-path" ? [["Curve / Vector Path", "svg-path"]] : [])],
         Read: () => layer.shape.motifType,
-        Write: (v) => { layer.shape.motifType = v; evaluateAndRender(true); },
+        Write: (v) => { layer.shape.motifType = v; evaluateAndRender(true); rebuildInspector(); },
       });
+      if (layer.shape.motifType === "svg-path" && layer.shape.pathNodes?.length) {
+        SwitchRow(lSec.Inner, {
+          Label: "Closed Curve Loop",
+          Read: () => layer.shape.closedPath !== false,
+          Write: (v) => {
+            layer.shape.closedPath = !!v;
+            layer.shape.svgPath = pathNodesToSvgD(layer.shape.pathNodes, layer.shape.closedPath, layer.shape.curveTension ?? 0.5);
+            evaluateAndRender(true);
+          },
+        });
+        SliderRow(lSec.Inner, {
+          Label: "Curve Smoothness",
+          Minimum: 0.1,
+          Maximum: 1.0,
+          Step: 0.05,
+          Read: () => layer.shape.curveTension ?? 0.5,
+          Write: (v) => {
+            layer.shape.curveTension = v;
+            layer.shape.svgPath = pathNodesToSvgD(layer.shape.pathNodes, layer.shape.closedPath !== false, v);
+            evaluateAndRender(true);
+          },
+        });
+        ActionRow(lSec.Inner, [
+          {
+            Label: "Edit Curve Points (A)",
+            Glyph: "Curve",
+            Tone: "accent",
+            Act: () => {
+              state.vectorTool = "node";
+              headerUI.setActiveTool("node");
+              startEditLayerCurveSession(layer);
+            },
+          },
+        ]);
+      }
     } else if (layer.kind === "text") {
       TextRow(lSec.Inner, {
         Label: "Text Content",
@@ -1064,32 +1405,65 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
         Read: () => layer.text?.fontSize ?? 54,
         Write: (v) => { if (!layer.text) layer.text = {}; layer.text.fontSize = v; evaluateAndRender(true); },
       });
-    } else if (layer.kind === "gradient") {
-      SegmentedRow(lSec.Inner, {
-        Label: "Fill Type",
-        Options: [["Linear", "linear"], ["Radial", "radial"]],
-        Read: () => layer.shape.fillMode || "linear",
-        Write: (v) => { layer.shape.fillMode = v; evaluateAndRender(true); },
-      });
-      ColorRow(lSec.Inner, {
-        Label: "Secondary Color",
-        Read: () => layer.shape.colorB || "#1a1e24",
-        Write: (v) => { layer.shape.colorB = v; evaluateAndRender(true); },
-      });
     }
 
     if (layer.kind !== "folder") {
-      ColorRow(lSec.Inner, {
-        Label: "Primary Color",
-        Read: () => layer.shape.color || "#e8c27a",
-        Write: (v) => { layer.shape.color = v; evaluateAndRender(true); },
-      });
+      if (layer.kind !== "gradient") {
+        SwitchRow(lSec.Inner, {
+          Label: "Fill Enabled",
+          Read: () => layer.shape.fillEnabled !== false,
+          Write: (v) => { layer.shape.fillEnabled = !!v; evaluateAndRender(true); rebuildInspector(); },
+        });
+      }
+      if (layer.shape.fillEnabled !== false || layer.kind === "gradient") {
+        appendColourSourceControls(lSec.Inner, {
+          label: "Fill",
+          allowSolid: layer.kind !== "gradient",
+          getMode: () => layer.shape.fillMode || (layer.kind === "gradient" ? "linear" : "solid"),
+          setMode: (m) => { layer.shape.fillMode = m; },
+          getStops: () => layer.shape.fillStops,
+          setStops: (stops, primaryOverride) => {
+            const norm = normalizeGradientStops(stops, layer.shape.color, layer.shape.colorB);
+            layer.shape.fillStops = norm;
+            layer.shape.color = primaryOverride || norm[0].color;
+            layer.shape.colorB = norm[norm.length - 1].color;
+          },
+          getAngle: () => layer.shape.gradientAngle ?? 45,
+          setAngle: (a) => { layer.shape.gradientAngle = a; },
+          fallbackA: layer.shape.color || "#e8c27a",
+          fallbackB: layer.shape.colorB || "#5a7692",
+        });
+      }
       SliderRow(lSec.Inner, {
         Label: "Stroke Outline",
         Minimum: 0, Maximum: 18, Step: 0.5, Unit: "px",
         Read: () => layer.shape.strokeWidth ?? 0,
-        Write: (v) => { layer.shape.strokeWidth = v; evaluateAndRender(true); },
+        Write: (v) => {
+          const hadStroke = (layer.shape.strokeWidth || 0) > 0;
+          layer.shape.strokeWidth = v;
+          evaluateAndRender(true);
+          if ((v > 0) !== hadStroke) rebuildInspector();
+        },
       });
+      if ((layer.shape.strokeWidth || 0) > 0 || layer.shape.motifType === "line" || layer.shape.fillEnabled === false) {
+        appendColourSourceControls(lSec.Inner, {
+          label: "Stroke",
+          allowSolid: true,
+          getMode: () => layer.shape.strokeMode || "solid",
+          setMode: (m) => { layer.shape.strokeMode = m; },
+          getStops: () => layer.shape.strokeStops,
+          setStops: (stops, primaryOverride) => {
+            const norm = normalizeGradientStops(stops, layer.shape.strokeColor, layer.shape.strokeColorB);
+            layer.shape.strokeStops = norm;
+            layer.shape.strokeColor = primaryOverride || norm[0].color;
+            layer.shape.strokeColorB = norm[norm.length - 1].color;
+          },
+          getAngle: () => layer.shape.strokeGradientAngle ?? 45,
+          setAngle: (a) => { layer.shape.strokeGradientAngle = a; },
+          fallbackA: layer.shape.strokeColor || "#16181c",
+          fallbackB: layer.shape.strokeColorB || "#eff4cf",
+        });
+      }
       SelectRow(lSec.Inner, {
         Label: "Blend Mode",
         Options: ["Normal", "Multiply", "Screen", "Overlay", "Add", "Darken"].map((b) => [b, b]),
@@ -1279,13 +1653,27 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     SwitchRow(bgSec.Inner, {
       Label: "Ground Fill Enabled",
       Read: () => !!state.doc.background?.enabled,
-      Write: (v) => { state.doc.background.enabled = v; evaluateAndRender(); },
+      Write: (v) => { state.doc.background.enabled = v; evaluateAndRender(); rebuildInspector(); },
     });
-    ColorRow(bgSec.Inner, {
-      Label: "Ground Color",
-      Read: () => state.doc.background?.color || "#171a1f",
-      Write: (v) => { state.doc.background.color = v; evaluateAndRender(); },
-    });
+    if (state.doc.background?.enabled) {
+      appendColourSourceControls(bgSec.Inner, {
+        label: "Ground",
+        allowSolid: true,
+        getMode: () => state.doc.background.fillMode || "solid",
+        setMode: (m) => { state.doc.background.fillMode = m; },
+        getStops: () => state.doc.background.fillStops,
+        setStops: (stops, primaryOverride) => {
+          const norm = normalizeGradientStops(stops, state.doc.background.color, state.doc.background.colorB);
+          state.doc.background.fillStops = norm;
+          state.doc.background.color = primaryOverride || norm[0].color;
+          state.doc.background.colorB = norm[norm.length - 1].color;
+        },
+        getAngle: () => state.doc.background.gradientAngle ?? 45,
+        setAngle: (a) => { state.doc.background.gradientAngle = a; },
+        fallbackA: state.doc.background.color || "#171a1f",
+        fallbackB: state.doc.background.colorB || "#2b3340",
+      });
+    }
     if (isPattern) {
       SwitchRow(bgSec.Inner, {
         Label: "Show Ghost Repeat Borders",
@@ -1318,6 +1706,97 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     if (e.button !== 0 || state.viewChannel !== "vector") return;
 
     const pt = clientToSvg(e.clientX, e.clientY);
+
+    // Interactive Curve / Pen / Point-Edit node & Bézier handle dragging
+    const pathHandleEl = e.target.closest?.("[data-path-handle]");
+    if (pathHandleEl && activePathSession) {
+      const [side, idxStr] = String(pathHandleEl.dataset.pathHandle).split(":");
+      const idx = Number(idxStr);
+      if (Number.isInteger(idx) && activePathSession.nodes[idx]) {
+        activePathSession.activeNodeIndex = idx;
+        pointerInteraction = { kind: "path-handle", side, idx };
+        svgEl.setPointerCapture?.(e.pointerId);
+        renderVectorSvgCanvas();
+        return;
+      }
+    }
+    const pathNodeEl = e.target.closest?.("[data-path-node]");
+    if (pathNodeEl && activePathSession) {
+      const idx = Number(pathNodeEl.dataset.pathNode);
+      if (idx === 0 && !activePathSession.editingLayerId && activePathSession.nodes.length >= 3 && (state.vectorTool === "curve" || state.vectorTool === "pen")) {
+        commitActivePathSession({ closeLoop: true });
+        return;
+      }
+      if (Number.isInteger(idx) && activePathSession.nodes[idx]) {
+        activePathSession.activeNodeIndex = idx;
+        pointerInteraction = { kind: "path-node", idx };
+        svgEl.setPointerCapture?.(e.pointerId);
+        renderVectorSvgCanvas();
+        return;
+      }
+    }
+
+    if (state.vectorTool === "curve" || state.vectorTool === "pen") {
+      let sx = snapCoord(pt.x, e.shiftKey ? 0 : state.snapStep);
+      let sy = snapCoord(pt.y, e.shiftKey ? 0 : state.snapStep);
+      if (!activePathSession) {
+        activePathSession = {
+          nodes: [],
+          closed: false,
+          tension: 0.5,
+          tool: state.vectorTool,
+          hoverPt: null,
+          nearStart: false,
+          editingLayerId: null,
+          activeNodeIndex: -1,
+        };
+      }
+      const prev = activePathSession.nodes[activePathSession.nodes.length - 1];
+      if (e.shiftKey && prev) {
+        const dx = sx - prev.x, dy = sy - prev.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist > 1) {
+          const ang = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4);
+          sx = prev.x + Math.cos(ang) * dist;
+          sy = prev.y + Math.sin(ang) * dist;
+        }
+      }
+      const first = activePathSession.nodes[0];
+      if (first && activePathSession.nodes.length >= 3 && Math.hypot(sx - first.x, sy - first.y) <= pt.unitsPerPx * 14) {
+        commitActivePathSession({ closeLoop: true });
+        return;
+      }
+      activePathSession.nodes.push({
+        x: sx,
+        y: sy,
+        mode: state.vectorTool === "curve" ? "auto" : "corner",
+        in: null,
+        out: null,
+      });
+      activePathSession.activeNodeIndex = activePathSession.nodes.length - 1;
+      if (state.vectorTool === "pen") {
+        pointerInteraction = { kind: "pen-pull", idx: activePathSession.nodes.length - 1 };
+        svgEl.setPointerCapture?.(e.pointerId);
+      }
+      syncPathSessionHints();
+      renderVectorSvgCanvas();
+      return;
+    }
+
+    if (state.vectorTool === "node") {
+      const hitNodeGrp = e.target.closest?.("[data-layer-id]");
+      if (hitNodeGrp) {
+        const target = state.doc.layers.find((l) => l.id === hitNodeGrp.dataset.layerId);
+        if (target?.shape?.motifType === "svg-path" && target.shape.pathNodes?.length) {
+          state.doc.selectedLayerId = target.id;
+          startEditLayerCurveSession(target);
+          renderLeftColumn();
+          rebuildInspector();
+          return;
+        }
+      }
+    }
+
     const handleEl = e.target.closest?.("[data-handle]");
     if (handleEl) {
       const sel = getSelectedLayer();
@@ -1391,6 +1870,26 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
   });
 
   svgEl.addEventListener("pointermove", (e) => {
+    if (!pointerInteraction && activePathSession && state.viewChannel === "vector" && (state.vectorTool === "curve" || state.vectorTool === "pen")) {
+      const pt = clientToSvg(e.clientX, e.clientY);
+      let hx = snapCoord(pt.x, e.shiftKey ? 0 : state.snapStep);
+      let hy = snapCoord(pt.y, e.shiftKey ? 0 : state.snapStep);
+      const prev = activePathSession.nodes[activePathSession.nodes.length - 1];
+      if (e.shiftKey && prev) {
+        const dx = hx - prev.x, dy = hy - prev.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist > 1) {
+          const ang = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4);
+          hx = prev.x + Math.cos(ang) * dist;
+          hy = prev.y + Math.sin(ang) * dist;
+        }
+      }
+      const first = activePathSession.nodes[0];
+      activePathSession.nearStart = !!(first && activePathSession.nodes.length >= 3 && Math.hypot(hx - first.x, hy - first.y) <= pt.unitsPerPx * 14);
+      activePathSession.hoverPt = { x: hx, y: hy };
+      renderVectorSvgCanvas();
+      return;
+    }
     if (!pointerInteraction) return;
     if (pointerInteraction.kind === "pan") {
       state.panX = pointerInteraction.startPanX - (e.clientX - pointerInteraction.startClientX) * pointerInteraction.units;
@@ -1400,6 +1899,44 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     }
 
     const pt = clientToSvg(e.clientX, e.clientY);
+    if (pointerInteraction.kind === "pen-pull" && activePathSession) {
+      const node = activePathSession.nodes[pointerInteraction.idx];
+      if (node) {
+        const dx = pt.x - node.x, dy = pt.y - node.y;
+        if (Math.hypot(dx, dy) > 4) {
+          node.mode = "symmetric";
+          node.out = { x: dx, y: dy };
+          node.in = { x: -dx, y: -dy };
+          renderVectorSvgCanvas();
+        }
+      }
+      return;
+    }
+    if (pointerInteraction.kind === "path-node" && activePathSession) {
+      const node = activePathSession.nodes[pointerInteraction.idx];
+      if (node) {
+        node.x = snapCoord(pt.x, e.shiftKey ? 0 : state.snapStep);
+        node.y = snapCoord(pt.y, e.shiftKey ? 0 : state.snapStep);
+        renderVectorSvgCanvas();
+      }
+      return;
+    }
+    if (pointerInteraction.kind === "path-handle" && activePathSession) {
+      const node = activePathSession.nodes[pointerInteraction.idx];
+      if (node) {
+        const dx = pt.x - node.x, dy = pt.y - node.y;
+        node.mode = "smooth";
+        if (pointerInteraction.side === "out") {
+          node.out = { x: dx, y: dy };
+          node.in = { x: -dx, y: -dy };
+        } else {
+          node.in = { x: dx, y: dy };
+          node.out = { x: -dx, y: -dy };
+        }
+        renderVectorSvgCanvas();
+      }
+      return;
+    }
     const l = pointerInteraction.layer;
 
     if (pointerInteraction.kind === "move" && l) {
@@ -1476,6 +2013,21 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     pointerInteraction = null;
     svgEl.style.cursor = state.vectorTool === "pan" ? "grab" : state.vectorTool === "select" ? "default" : "crosshair";
 
+    if (act.kind === "pen-pull" || act.kind === "path-node" || act.kind === "path-handle") {
+      if (activePathSession?.editingLayerId && (act.kind === "path-node" || act.kind === "path-handle")) {
+        const l = state.doc.layers.find((x) => x.id === activePathSession.editingLayerId);
+        const curveData = nodesToNormalizedCurveData(activePathSession.nodes, activePathSession.closed, activePathSession.tension);
+        if (l && curveData) {
+          pushUndo();
+          l.transform = { ...l.transform, ...curveData.transform, rotation: 0 };
+          l.shape.pathNodes = curveData.pathNodes;
+          l.shape.svgPath = curveData.svgPath;
+          evaluateAndRender(true);
+        }
+      }
+      return;
+    }
+
     if (act.kind === "draw") {
       pushUndo();
       const dr = act.draftRect;
@@ -1505,6 +2057,12 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
   };
   svgEl.addEventListener("pointerup", endSvgPointer);
   svgEl.addEventListener("pointercancel", endSvgPointer);
+  svgEl.addEventListener("dblclick", (e) => {
+    if (activePathSession) {
+      e.preventDefault();
+      commitActivePathSession({ closeLoop: activePathSession.closed });
+    }
+  });
 
   svgEl.addEventListener("wheel", (e) => {
     e.preventDefault();
@@ -1792,7 +2350,33 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
       return;
     }
     if (e.code === "Space") { spacePanning = true; return; }
-    if (e.key === "Escape") { closeArtPopup(); headerUI.closeSaveMenu(); return; }
+    if (e.key === "Enter" && activePathSession) {
+      e.preventDefault();
+      commitActivePathSession();
+      return;
+    }
+    if ((e.key === "Backspace" || e.key === "Delete") && activePathSession && !activePathSession.editingLayerId) {
+      e.preventDefault();
+      if (activePathSession.nodes.length > 1) {
+        activePathSession.nodes.pop();
+        syncPathSessionHints();
+        renderVectorSvgCanvas();
+      } else {
+        activePathSession = null;
+        syncPathSessionHints();
+        renderVectorSvgCanvas();
+      }
+      return;
+    }
+    if (e.key === "Escape") {
+      if (activePathSession) {
+        activePathSession = null;
+        syncPathSessionHints();
+        renderVectorSvgCanvas();
+        return;
+      }
+      closeArtPopup(); headerUI.closeSaveMenu(); return;
+    }
     if (e.key.toLowerCase() === "q" || e.key === "Tab") { e.preventDefault(); openArtPopup(); return; }
     if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
       e.preventDefault();

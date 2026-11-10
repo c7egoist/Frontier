@@ -1802,7 +1802,7 @@ await suite("16. Unified AlloyStudio Viewport Header ([Canvas; Size; View; Undo/
   paintSaveBtn.click();
 
   const paintToolCaps = paintToolsBar.querySelector(".tp-tool-group");
-  assert(paintToolCaps && paintToolCaps.querySelectorAll(".pill-btn").length === 6, "Texture Paint Band 2 .tp-tool-group must house the 6 paint tool pills");
+  assert(paintToolCaps && paintToolCaps.querySelectorAll(".pill-btn").length === 8, "Texture Paint Band 2 .tp-tool-group must house the 8 paint tool pills (incl. 3D Curve & 3D Gradient)");
   assert(paintToolsBar.querySelector(".gpu-badge"), "Texture Paint Band 2 trailing strip must keep GPU status badge");
 
   const paintDock = globalThis.document.querySelector(".tp-layer-dock");
@@ -2102,10 +2102,11 @@ await suite("19. Look-Dev Polish: Right-Tabbed Strata, Seated Cloth/Pedestal + G
   const tiles = insp.querySelector(".cb-insp-tiles");
   assert(tiles && insp.children.indexOf(heroCard) < insp.children.indexOf(tiles), "Hero preview card must sit directly above .cb-insp-tiles");
 
-  // 19c. Sharp Square Layer Stacks + Grey Floor / AlloyStudio 1.30 Pedestal checks
+  // 19c. Sharp Square Layer Stacks + Exact Unmodified AlloyStudio 3-part Pedestal, Support Ball & Grey Fading Floor checks
   const mwSrc = fs.readFileSync(new URL("./Workspaces/MaterialWorkspace.js", import.meta.url), "utf8");
-  assert(mwSrc.includes("createShaderBallPedestalGeometry(1.30)"), "MaterialWorkspace must use AlloyStudio 1.30 pedestal geometry");
-  assert(mwSrc.includes("studioFloor") && mwSrc.includes("CircleGeometry"), "MaterialWorkspace 3D scene must include a shadow-receiving grey studioFloor");
+  assert(mwSrc.includes("CylinderGeometry(1.2, 1.26, 0.18, 128)") && mwSrc.includes("standBottom") && mwSrc.includes("standRing"), "MaterialWorkspace must use AlloyStudio 3-part pedestal (stand + standBottom + standRing)");
+  assert(mwSrc.includes("supportBall") && mwSrc.includes("clothSupport"), "MaterialWorkspace must include the cloth inner supportBall from clothSupport");
+  assert(mwSrc.includes("studioFloor") && mwSrc.includes("PlaneGeometry"), "MaterialWorkspace 3D scene must include a fading grey PlaneGeometry studioFloor");
 
   const cssText = fs.readFileSync(new URL("./TextureStudio.css", import.meta.url), "utf8");
   for (const rule of [".stack-row", ".stack-row-thumb", ".tp-layer-row", ".tp-layer-thumbnail", ".tp-mask-row", ".tp-mask-thumb", ".tp-decal-tree-row", ".tp-decal-tree-thumb"]) {
@@ -2115,6 +2116,213 @@ await suite("19. Look-Dev Polish: Right-Tabbed Strata, Seated Cloth/Pedestal + G
     const block = cssText.slice(altIdx, cssText.indexOf("}", altIdx) + 1);
     assert(block.includes("border-radius: 0;"), `${rule} must have crisp square corners (border-radius: 0;)`);
   }
+});
+
+await suite("20. Pattern & Stamp Curve/Pen/Multi-Stop Gradients, Texture Paint Shift-Line/3D Curve/3D Gradient & Material Cloth/Support Ball", async () => {
+  const {
+    automaticPathNodes,
+    pathNodesToSvgD,
+    nodesToNormalizedCurveData,
+    normalizedCurveToCanvasNodes,
+    normalizeGradientStops,
+    createArtworkDocument,
+    createArtworkLayer,
+    artworkDocumentToSvgString,
+    evaluateArtworkDocument,
+  } = await import("./Engine/Patterns/ArtworkStackEngine.js");
+  const {
+    createPaintDocument,
+    buildMeshPaintIndex,
+    buildDefaultMeshCues,
+    sampleMeshSurfaceSpline3D,
+    normalizePointGradient3D,
+    evaluatePointGradient3DAt,
+    applyPointGradient3DToLayer,
+  } = await import("./Engine/TexturePaintEngine.js");
+  const { clothSupport } = await import("./Engine/Materials/clothGeometry.js");
+  const studio = globalThis.window.__frontierTextureStudio;
+
+  // 20a. Engine-level Centripetal Catmull-Rom Curve + Multi-Stop Gradient SVG/PBR verification
+  const rawNodes = automaticPathNodes([
+    { x: 100, y: 120 },
+    { x: 260, y: 80 },
+    { x: 380, y: 240 },
+    { x: 180, y: 360 },
+  ], true, 0.5);
+  assert.equal(rawNodes.length, 4);
+  const svgD = pathNodesToSvgD(rawNodes, true);
+  assert(svgD.startsWith("M ") && svgD.includes(" C ") && svgD.endsWith(" Z"), "Curve path must emit closed smooth cubic Bezier SVG path");
+  const normCurve = nodesToNormalizedCurveData(rawNodes, true, 0.5);
+  assert.equal(normCurve.closedPath, true);
+  assert.equal(normCurve.pathNodes.length, 4);
+  const backNodes = normalizedCurveToCanvasNodes(normCurve.pathNodes, normCurve.transform);
+  assert.equal(backNodes.length, 4);
+
+  const normStops = normalizeGradientStops([
+    { id: "s0", offset: 0, color: "#ff3366", opacity: 1 },
+    { id: "s1", offset: 0.45, color: "#ffdd44", opacity: 0.9 },
+    { id: "s2", offset: 1, color: "#1177ff", opacity: 1 },
+  ]);
+  assert.equal(normStops.length, 3);
+  const patDoc = createArtworkDocument("pattern");
+  patDoc.name = "MultiStop Curve Test";
+  patDoc.background = {
+    enabled: true,
+    color: "#171a1f",
+    opacity: 1,
+    finish: "ink",
+    roughness: 0.7,
+    metalness: 0,
+    height: 0,
+    fillMode: "linear",
+    gradientAngle: 45,
+    fillStops: normStops,
+  };
+  patDoc.layers = [
+    createArtworkLayer("motif", {
+      name: "MultiStop Curve",
+      transform: normCurve.transform,
+      shape: {
+        motifType: "svg-path",
+        svgPath: normCurve.svgPath,
+        pathNodes: normCurve.pathNodes,
+        closedPath: normCurve.closedPath,
+        fillMode: "radial",
+        fillStops: normStops,
+        strokeMode: "linear",
+        strokeStops: normStops,
+        strokeWidth: 4,
+      },
+    }),
+  ];
+  const patSvg = artworkDocumentToSvgString(patDoc, { width: 256, height: 256 });
+  assert(patSvg.includes("<linearGradient") && patSvg.includes("<radialGradient"), "Multi-stop Pattern SVG export must emit linearGradient & radialGradient paint servers");
+  assert(patSvg.includes("#ffdd44") && patSvg.includes("45.0%"), "Multi-stop SVG must preserve intermediate stop color & offset");
+  const evalTex = evaluateArtworkDocument(patDoc, 128);
+  assert.equal(evalTex.albedo.length, 128 * 128 * 4, "Multi-stop Curve Pattern must evaluate cleanly to 128x128 PBR buffers");
+
+  // 20b. Interactive Pattern & Stamp Studio Curve (U), Pen (P), Point Edit (A) + Multi-Stop Gradients UI
+  studio.switchWorkspace("pattern");
+
+  const patCircles = [...globalThis.document.querySelectorAll(".vp-tool-circle")];
+  assert(patCircles.length >= 8, `Pattern primary dock must expose Curve tool alongside existing tools (got ${patCircles.length})`);
+  const btnText = (b) => `${b.title || ""} ${b.textContent || ""}`;
+  const patSeBtns = [...globalThis.document.querySelectorAll(".se-tool-btn")];
+  const curveCircleBtn = [...patCircles, ...patSeBtns].find((b) => /\bCurve\b/i.test(btnText(b)));
+  assert(curveCircleBtn, "Pattern Studio toolbar must provide Curve (U) tool button");
+  const penBtn = [...patCircles, ...patSeBtns].find((b) => /\bPen\b/i.test(btnText(b)));
+  assert(penBtn, "Pattern Studio toolbar must provide Pen (P) tool button");
+
+  // Place 3 points via Curve tool on SVG canvas and commit with Enter
+  const patLayersBefore = studio.getSnapshot().layers;
+  curveCircleBtn.click();
+  const seSvg = globalThis.document.querySelector(".se-canvas");
+  assert(seSvg, "Pattern Studio must mount .se-canvas");
+  seSvg.getBoundingClientRect = () => ({ left: 0, top: 0, width: 512, height: 512 });
+  for (const [cx, cy] of [[120, 140], [340, 120], [280, 340]]) {
+    seSvg.dispatchEvent({ type: "pointerdown", button: 0, clientX: cx, clientY: cy, shiftKey: false, preventDefault() {}, stopPropagation() {} });
+    globalThis.window.dispatchEvent({ type: "pointerup", clientX: cx, clientY: cy });
+  }
+  globalThis.window.dispatchEvent({ type: "keydown", key: "Enter", preventDefault() {}, stopPropagation() {} });
+  const patLayers = studio.getSnapshot().layers;
+  assert(patLayers > patLayersBefore, `Committing Pattern Curve path must add an authored Curve Path layer (before=${patLayersBefore}, after=${patLayers})`);
+
+  // Verify Stamp Studio also has Curve tool and multi-stop fill controls
+  studio.switchWorkspace("stamp");
+  const stampCurveBtn = [...globalThis.document.querySelectorAll(".vp-tool-circle"), ...globalThis.document.querySelectorAll(".se-tool-btn")].find((b) => /\bCurve\b/i.test(btnText(b)));
+  assert(stampCurveBtn, "Stamp Studio toolbar must provide Curve (U) tool button");
+  const linearChip = [...globalThis.document.querySelectorAll(".segmented-track")].flatMap((t) => [...t.children]).find((b) => /Linear Grad/i.test((b.textContent || "").trim()));
+  assert(linearChip, "Pattern/Stamp inspector must expose Multi-Stop Gradient Solid / Linear Grad / Radial Grad segmented buttons");
+  linearChip.click();
+  const addStopBtn = [...globalThis.document.querySelectorAll(".chip-btn")].find((b) => /\+ Add Fill Stop/i.test(b.textContent || ""));
+  assert(addStopBtn, "Switching to Linear Grad Fill Source must reveal '+ Add Fill Stop' multi-stop editor button");
+  addStopBtn.click();
+  assert(globalThis.document.querySelectorAll(".se-gradient-stop-row").length >= 3, "Clicking '+ Add Fill Stop' must append a 3rd editable stop row");
+
+  // 20c. Texture Paint 3D Surface Spline + 3D Object-Space Point Gradient Engine Checks
+  const sphereGeo = new THREE.SphereGeometry(1.15, 24, 16);
+  const cuesIdx = buildMeshPaintIndex(sphereGeo);
+  const cues = buildDefaultMeshCues(sphereGeo, cuesIdx, 128);
+  assert(cues.worldPos && cues.sphereRadius > 0.5, "buildDefaultMeshCues must expose worldPos & sphereRadius for 3D point gradients");
+  const splinePts = sampleMeshSurfaceSpline3D(
+    [
+      { pos: [0, 1.15, 0], normal: [0, 1, 0] },
+      { pos: [1.15, 0, 0], normal: [1, 0, 0] },
+      { pos: [0, -1.15, 0], normal: [0, -1, 0] },
+    ],
+    false,
+    0.5,
+    8,
+  );
+  assert(splinePts.length >= 10, "sampleMeshSurfaceSpline3D must generate smooth dense surface points across 3D anchors");
+
+  const pGrad = normalizePointGradient3D({
+    points: [
+      { id: "gA", position: [-1, 0, 0], color: "#ff2020", radius: 1.5, weight: 1 },
+      { id: "gB", position: [1, 0, 0], color: "#2020ff", radius: 1.5, weight: 1 },
+    ],
+    background: "#202020",
+    falloff: 1.0,
+  });
+  const midRgb = evaluatePointGradient3DAt(pGrad, [0, 0, 0]);
+  assert(midRgb[0] > 0.25 && midRgb[2] > 0.25, "3D Point Gradient midpoint between Red (-X) and Blue (+X) must blend both in linear RGB space");
+
+  const paintDoc = createPaintDocument(128);
+  const targetPaintLayer = paintDoc.layers.find((l) => l.kind === "paint") || paintDoc.layers[0];
+  const gradOk = applyPointGradient3DToLayer({
+    layer: targetPaintLayer,
+    cues,
+    grad: pGrad,
+    brush: { fillChannels: { albedo: true, roughness: true, metalness: true, height: true }, roughness: 0.45, metalness: 0.1 },
+    editingMask: false,
+  });
+  assert(gradOk, "applyPointGradient3DToLayer must succeed cleanly on Texture Paint layer");
+  let paintedPx = 0;
+  for (let i = 0; i < 128 * 128; i++) if (targetPaintLayer.pixels.albedo[i * 4 + 3] > 200) paintedPx++;
+  assert(paintedPx > 128 * 64, "3D Point Gradient must paint dense texels across mesh UV layout");
+
+  // 20d. Texture Paint Workspace Live Interactions (Shift straight line, 3D Curve U, 3D Gradient D)
+  studio.switchWorkspace("paint");
+  const tpCurveBtn = [...globalThis.document.querySelectorAll(".tp-tool-group .pill-btn")].find((b) => /Curve/i.test(b.textContent || ""));
+  const tpGradBtn = [...globalThis.document.querySelectorAll(".tp-tool-group .pill-btn")].find((b) => /Gradient/i.test(b.textContent || ""));
+  assert(tpCurveBtn && tpGradBtn, "Texture Paint Band 2 must include 3D Curve and 3D Gradient buttons");
+
+  const uvCanvas = globalThis.document.querySelector(".tp-uv-pane");
+  assert(uvCanvas, "Texture Paint must render .tp-uv-pane 2D UV canvas");
+  uvCanvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 512, height: 512 });
+  // Shift + click straight line across 2D UV pane
+  uvCanvas.dispatchEvent({ type: "pointerdown", button: 0, clientX: 64, clientY: 256, shiftKey: false, preventDefault() {} });
+  globalThis.window.dispatchEvent({ type: "pointerup", clientX: 64, clientY: 256 });
+  uvCanvas.dispatchEvent({ type: "pointerdown", button: 0, clientX: 448, clientY: 256, shiftKey: true, preventDefault() {} });
+  globalThis.window.dispatchEvent({ type: "pointerup", clientX: 448, clientY: 256 });
+
+  // Tool shortcuts u -> curve, d -> gradient
+  globalThis.window.dispatchEvent({ type: "keydown", key: "u", preventDefault() {} });
+  assert.equal(studio.getSnapshot().tool, "curve", "Shortcut 'u' must switch Texture Paint to 3D Curve tool");
+  uvCanvas.dispatchEvent({ type: "pointerdown", button: 0, clientX: 128, clientY: 160, shiftKey: false, preventDefault() {} });
+  globalThis.window.dispatchEvent({ type: "pointerup", clientX: 128, clientY: 160 });
+  uvCanvas.dispatchEvent({ type: "pointerdown", button: 0, clientX: 256, clientY: 320, shiftKey: false, preventDefault() {} });
+  globalThis.window.dispatchEvent({ type: "pointerup", clientX: 256, clientY: 320 });
+  uvCanvas.dispatchEvent({ type: "pointerdown", button: 0, clientX: 384, clientY: 160, shiftKey: false, preventDefault() {} });
+  globalThis.window.dispatchEvent({ type: "pointerup", clientX: 384, clientY: 160 });
+  globalThis.window.dispatchEvent({ type: "keydown", key: "Enter", preventDefault() {} });
+
+  globalThis.window.dispatchEvent({ type: "keydown", key: "d", preventDefault() {} });
+  assert.equal(studio.getSnapshot().tool, "gradient", "Shortcut 'd' must switch Texture Paint to 3D Gradient tool");
+  const applyGradBtn = [...globalThis.document.querySelectorAll(".action-button")].find((b) => /Apply 3D Gradient/i.test(b.textContent || ""));
+  assert(applyGradBtn, "Active Tool = Gradient must display 'Apply 3D Gradient' action in inspector");
+  applyGradBtn.click();
+
+  // 20e. Material Workspace Draped Cloth inner supportBall & clothSupport bounds check
+  assert.equal(clothSupport.radius, 1.16, "clothSupport radius must match unmodified AlloyStudio sphere radius 1.16");
+  assert.deepEqual(clothSupport.center, [0, 1.39, 0], "clothSupport center must match unmodified AlloyStudio [0, 1.39, 0]");
+  studio.switchWorkspace("material");
+  const matSelect = globalThis.document.querySelector(".mw-select-pill");
+  matSelect.value = "cloth";
+  matSelect.dispatchEvent({ type: "change" });
+  assert.equal(studio.getSnapshot().shape, "cloth");
+
+  sphereGeo.dispose();
 });
 
 console.log(`\nALL ${results.length} VALIDATION SUITES PASSED CLEANLY`);

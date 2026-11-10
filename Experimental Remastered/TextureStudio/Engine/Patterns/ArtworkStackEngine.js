@@ -232,9 +232,27 @@ export function createArtworkLayer(kind = "motif", overrides = {}) {
       fillMode: "solid", // "solid" | "linear" | "radial"
       color: "#e8c27a",
       colorB: "#5a7692",
+      fillStops: Array.isArray(overrides.shape?.fillStops)
+        ? structuredClone(overrides.shape.fillStops)
+        : [
+            { color: overrides.shape?.color || "#e8c27a", offset: 0 },
+            { color: overrides.shape?.colorB || "#5a7692", offset: 1 },
+          ],
       gradientAngle: 45,
       strokeColor: "#16181c",
+      strokeMode: "solid", // "solid" | "linear" | "radial"
+      strokeColorB: "#eff4cf",
+      strokeStops: Array.isArray(overrides.shape?.strokeStops)
+        ? structuredClone(overrides.shape.strokeStops)
+        : [
+            { color: overrides.shape?.strokeColor || "#16181c", offset: 0 },
+            { color: overrides.shape?.strokeColorB || "#eff4cf", offset: 1 },
+          ],
+      strokeGradientAngle: 45,
       svgPath: "",
+      pathNodes: Array.isArray(overrides.shape?.pathNodes) ? structuredClone(overrides.shape.pathNodes) : null,
+      closedPath: overrides.shape?.closedPath ?? true,
+      curveTension: overrides.shape?.curveTension ?? 0.5,
       ...(overrides.shape || {}),
     },
     text: {
@@ -354,28 +372,192 @@ export function createArtworkDocument(mode = "pattern") {
   };
 }
 
+export function normalizeGradientStops(stops, colorA = "#e8c27a", colorB = "#5a7692") {
+  if (!Array.isArray(stops) || stops.length < 2) {
+    return [
+      { color: colorA || "#e8c27a", offset: 0 },
+      { color: colorB || "#5a7692", offset: 1 },
+    ];
+  }
+  return stops
+    .slice(0, 12)
+    .map((s, idx, arr) => ({
+      color: s?.color || (idx === 0 ? colorA : colorB) || "#e8c27a",
+      offset: clamp(Number(s?.offset ?? (arr.length > 1 ? idx / (arr.length - 1) : 0)), 0, 1),
+    }))
+    .sort((a, b) => a.offset - b.offset);
+}
+
+/**
+ * Centripetal Catmull-Rom cubic Bezier tangent fitting (matching AlloyStudio pathEditorGeometry).
+ * Fits smooth `in`/`out` tangent handles on `"auto"` nodes while respecting manually sculpted handles.
+ */
+export function automaticPathNodes(nodes, closed = false, tension = 0.5) {
+  const list = Array.isArray(nodes) ? nodes.map((n) => ({
+    x: Number(n.x || 0),
+    y: Number(n.y || 0),
+    mode: n.mode || "auto",
+    in: n.in ? { x: Number(n.in.x), y: Number(n.in.y) } : null,
+    out: n.out ? { x: Number(n.out.x), y: Number(n.out.y) } : null,
+  })) : [];
+  const count = list.length;
+  if (count < 2) return list;
+  const weight = clamp(Number(tension ?? 0.5), 0.05, 1.0);
+  const scale = weight / 3;
+  const dist = (a, b) => Math.hypot(b.x - a.x, b.y - a.y);
+
+  for (let i = 0; i < count; i++) {
+    const cur = list[i];
+    if (cur.mode !== "auto") continue;
+    const hasPrev = closed || i > 0;
+    const hasNext = closed || i < count - 1;
+    if (!hasPrev && !hasNext) {
+      cur.in = null;
+      cur.out = null;
+      continue;
+    }
+    const prev = list[(i - 1 + count) % count];
+    const next = list[(i + 1) % count];
+    if (!hasPrev && hasNext) {
+      cur.in = null;
+      cur.out = { x: (next.x - cur.x) * (scale * 0.6), y: (next.y - cur.y) * (scale * 0.6) };
+      continue;
+    }
+    if (hasPrev && !hasNext) {
+      cur.in = { x: (prev.x - cur.x) * (scale * 0.6), y: (prev.y - cur.y) * (scale * 0.6) };
+      cur.out = null;
+      continue;
+    }
+    const d1 = Math.max(0.001, Math.pow(dist(prev, cur), 0.5));
+    const d2 = Math.max(0.001, Math.pow(dist(cur, next), 0.5));
+    const dx = next.x - prev.x;
+    const dy = next.y - prev.y;
+    const len = Math.hypot(dx, dy);
+    if (len < 1e-4) {
+      cur.in = null;
+      cur.out = null;
+      continue;
+    }
+    const tx = dx / len;
+    const ty = dy / len;
+    const dPrev = dist(prev, cur);
+    const dNext = dist(cur, next);
+    const handleInLen = dPrev * scale * (d2 / (d1 + d2)) * 1.4;
+    const handleOutLen = dNext * scale * (d1 / (d1 + d2)) * 1.4;
+    cur.in = { x: -tx * handleInLen, y: -ty * handleInLen };
+    cur.out = { x: tx * handleOutLen, y: ty * handleOutLen };
+  }
+  return list;
+}
+
+export function pathNodesToSvgD(nodes, closed = false, tension = 0.5) {
+  const fitted = automaticPathNodes(nodes, closed, tension);
+  if (fitted.length === 0) return "";
+  const f = (n) => Number(n.toFixed(2));
+  let d = `M ${f(fitted[0].x)} ${f(fitted[0].y)}`;
+  const segCount = closed ? fitted.length : fitted.length - 1;
+  for (let i = 0; i < segCount; i++) {
+    const a = fitted[i];
+    const b = fitted[(i + 1) % fitted.length];
+    const c1x = a.x + (a.out?.x || 0);
+    const c1y = a.y + (a.out?.y || 0);
+    const c2x = b.x + (b.in?.x || 0);
+    const c2y = b.y + (b.in?.y || 0);
+    if (!a.out && !b.in) {
+      d += ` L ${f(b.x)} ${f(b.y)}`;
+    } else {
+      d += ` C ${f(c1x)} ${f(c1y)}, ${f(c2x)} ${f(c2y)}, ${f(b.x)} ${f(b.y)}`;
+    }
+  }
+  if (closed && fitted.length > 2) d += " Z";
+  return d;
+}
+
+export function nodesToNormalizedCurveData(canvasNodes, closed = false, tension = 0.5) {
+  const fitted = automaticPathNodes(canvasNodes, closed, tension);
+  if (fitted.length < 2) return null;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const n of fitted) {
+    minX = Math.min(minX, n.x, n.x + (n.in?.x || 0) * 0.5, n.x + (n.out?.x || 0) * 0.5);
+    maxX = Math.max(maxX, n.x, n.x + (n.in?.x || 0) * 0.5, n.x + (n.out?.x || 0) * 0.5);
+    minY = Math.min(minY, n.y, n.y + (n.in?.y || 0) * 0.5, n.y + (n.out?.y || 0) * 0.5);
+    maxY = Math.max(maxY, n.y, n.y + (n.in?.y || 0) * 0.5, n.y + (n.out?.y || 0) * 0.5);
+  }
+  const w = Math.max(12, maxX - minX);
+  const h = Math.max(12, maxY - minY);
+  const cx = (minX + maxX) * 0.5;
+  const cy = (minY + maxY) * 0.5;
+  const x0 = cx - w * 0.5;
+  const y0 = cy - h * 0.5;
+  const normNodes = fitted.map((n) => ({
+    x: ((n.x - x0) / w) * 100,
+    y: ((n.y - y0) / h) * 100,
+    mode: n.mode || "auto",
+    in: n.in ? { x: (n.in.x / w) * 100, y: (n.in.y / h) * 100 } : null,
+    out: n.out ? { x: (n.out.x / w) * 100, y: (n.out.y / h) * 100 } : null,
+  }));
+  return {
+    transform: { x: cx, y: cy, width: w, height: h, rotation: 0 },
+    pathNodes: normNodes,
+    closedPath: !!closed,
+    curveTension: clamp(Number(tension ?? 0.5), 0.05, 1),
+    svgPath: pathNodesToSvgD(normNodes, closed, tension),
+  };
+}
+
+export function normalizedCurveToCanvasNodes(pathNodes, transform) {
+  if (!Array.isArray(pathNodes) || !transform) return [];
+  const w = Math.max(12, transform.width || 100);
+  const h = Math.max(12, transform.height || 100);
+  const x0 = (transform.x || 256) - w * 0.5;
+  const y0 = (transform.y || 256) - h * 0.5;
+  const rot = ((transform.rotation || 0) * Math.PI) / 180;
+  const cos = Math.cos(rot), sin = Math.sin(rot);
+  const rotVec = (dx, dy) => ({ x: dx * cos - dy * sin, y: dx * sin + dy * cos });
+  return pathNodes.map((n) => {
+    const lx = (n.x / 100) * w - w * 0.5;
+    const ly = (n.y / 100) * h - h * 0.5;
+    const rp = rotVec(lx, ly);
+    const ri = n.in ? rotVec((n.in.x / 100) * w, (n.in.y / 100) * h) : null;
+    const ro = n.out ? rotVec((n.out.x / 100) * w, (n.out.y / 100) * h) : null;
+    return {
+      x: (transform.x || 256) + rp.x,
+      y: (transform.y || 256) + rp.y,
+      mode: n.mode || "auto",
+      in: ri,
+      out: ro,
+    };
+  });
+}
+
 /**
  * Evaluate a single layer's non-destructive modifier stack into concrete draw instances.
- * Each instance tracks { x, y, width, height, rotation, color, colorB, fillMode, gradientAngle, opacity, heightValue, roughness, metalness, outlineWidth, outlineColor, chipAmount, chipScale, seed, motifType, innerRatio, cornerRadius, sides, points, strokeWidth, strokeColor, svgPath, text }.
+ * Each instance tracks { x, y, width, height, rotation, color, colorB, fillMode, fillStops, gradientAngle, opacity, heightValue, roughness, metalness, outlineWidth, outlineColor, strokeMode, strokeStops, strokeGradientAngle, chipAmount, chipScale, seed, motifType, innerRatio, cornerRadius, sides, points, strokeWidth, strokeColor, svgPath, text }.
  */
 export function evaluateLayerInstances(layer, docSize = ARTWORK_SIZE, mode = "pattern") {
   const seamless = mode === "pattern";
+  const fillStops = normalizeGradientStops(layer.shape.fillStops, layer.shape.color, layer.shape.colorB);
+  const strokeStops = normalizeGradientStops(layer.shape.strokeStops, layer.shape.strokeColor, layer.shape.strokeColorB);
   const baseInstance = {
     x: layer.transform.x,
     y: layer.transform.y,
     width: layer.transform.width,
     height: layer.transform.height,
     rotation: layer.transform.rotation || 0,
-    color: layer.shape.color || "#e8c27a",
-    colorB: layer.shape.colorB || "#5a7692",
+    color: layer.shape.fillMode && layer.shape.fillMode !== "solid" ? fillStops[0].color : (layer.shape.color || "#e8c27a"),
+    colorB: layer.shape.fillMode && layer.shape.fillMode !== "solid" ? fillStops[fillStops.length - 1].color : (layer.shape.colorB || "#5a7692"),
     fillMode: layer.shape.fillMode || "solid",
+    fillStops,
     gradientAngle: layer.shape.gradientAngle ?? 45,
     opacity: 1,
     heightValue: layer.surface.height ?? 0.2,
     roughness: layer.surface.roughness ?? 0.5,
     metalness: layer.surface.metalness ?? 0.0,
     outlineWidth: layer.shape.strokeWidth || 0,
-    outlineColor: layer.shape.strokeColor || "#16181c",
+    outlineColor: layer.shape.strokeMode && layer.shape.strokeMode !== "solid" ? strokeStops[0].color : (layer.shape.strokeColor || "#16181c"),
+    strokeMode: layer.shape.strokeMode || "solid",
+    strokeStops,
+    strokeGradientAngle: layer.shape.strokeGradientAngle ?? 45,
     fillEnabled: layer.shape.fillEnabled !== false,
     fillRule: layer.shape.fillRule || "evenodd",
     flipX: !!layer.shape.flipX,
@@ -762,24 +944,56 @@ function drawMotifPath(ctx, inst) {
   }
 }
 
+function resolveCanvasGradient(ctx, mode, stops, angle, w, h, fallbackColor, fallbackColorB, cx = 0, cy = 0) {
+  const norm = normalizeGradientStops(stops, fallbackColor, fallbackColorB);
+  if (mode === "radial") {
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(w, h) * 0.5);
+    for (const s of norm) grad.addColorStop(s.offset, s.color);
+    return grad;
+  }
+  if (mode === "linear") {
+    const rad = ((angle ?? 45) * Math.PI) / 180;
+    const dx = Math.cos(rad) * w * 0.5;
+    const dy = Math.sin(rad) * h * 0.5;
+    const grad = ctx.createLinearGradient(cx - dx, cy - dy, cx + dx, cy + dy);
+    for (const s of norm) grad.addColorStop(s.offset, s.color);
+    return grad;
+  }
+  return fallbackColor;
+}
+
 function resolveFillStyle(ctx, inst, overrideColor) {
   if (overrideColor) return overrideColor;
-  if (inst.fillMode === "radial") {
-    const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, Math.max(inst.width, inst.height) * 0.5);
-    grad.addColorStop(0, inst.color);
-    grad.addColorStop(1, inst.colorB || "#1a1e24");
-    return grad;
-  }
-  if (inst.fillMode === "linear") {
-    const rad = ((inst.gradientAngle ?? 45) * Math.PI) / 180;
-    const dx = Math.cos(rad) * inst.width * 0.5;
-    const dy = Math.sin(rad) * inst.height * 0.5;
-    const grad = ctx.createLinearGradient(-dx, -dy, dx, dy);
-    grad.addColorStop(0, inst.color);
-    grad.addColorStop(1, inst.colorB || "#1a1e24");
-    return grad;
+  if (inst.fillMode === "radial" || inst.fillMode === "linear") {
+    return resolveCanvasGradient(
+      ctx,
+      inst.fillMode,
+      inst.fillStops,
+      inst.gradientAngle,
+      inst.width,
+      inst.height,
+      inst.color,
+      inst.colorB || "#1a1e24",
+    );
   }
   return inst.color;
+}
+
+function resolveStrokeStyle(ctx, inst, isAlbedo) {
+  if (!isAlbedo) return inst.color;
+  if (inst.strokeMode === "radial" || inst.strokeMode === "linear") {
+    return resolveCanvasGradient(
+      ctx,
+      inst.strokeMode,
+      inst.strokeStops,
+      inst.strokeGradientAngle,
+      inst.width,
+      inst.height,
+      inst.outlineColor || "#141619",
+      inst.strokeStops?.[inst.strokeStops.length - 1]?.color || "#eff4cf",
+    );
+  }
+  return inst.outlineColor || "#141619";
 }
 
 function canvasBlendOp(blend) {
@@ -820,10 +1034,26 @@ export function renderArtworkDocument(doc, targetSize = 512, { tileMode = "singl
 
   const bg = doc.background || {};
   if (bg.enabled) {
-    aCtx.fillStyle = bg.color || "#171a1f";
+    aCtx.save();
     aCtx.globalAlpha = clamp(bg.opacity ?? 1, 0, 1);
-    aCtx.fillRect(0, 0, targetSize, targetSize);
-    aCtx.globalAlpha = 1;
+    if (bg.fillMode === "linear" || bg.fillMode === "radial") {
+      aCtx.translate(targetSize * 0.5, targetSize * 0.5);
+      aCtx.fillStyle = resolveCanvasGradient(
+        aCtx,
+        bg.fillMode,
+        bg.fillStops,
+        bg.gradientAngle ?? 45,
+        targetSize,
+        targetSize,
+        bg.color || "#171a1f",
+        bg.colorB || "#2b3340",
+      );
+      aCtx.fillRect(-targetSize * 0.5, -targetSize * 0.5, targetSize, targetSize);
+    } else {
+      aCtx.fillStyle = bg.color || "#171a1f";
+      aCtx.fillRect(0, 0, targetSize, targetSize);
+    }
+    aCtx.restore();
 
     const rV = Math.round(clamp(bg.roughness ?? 0.85, 0, 1) * 255);
     const mV = Math.round(clamp(bg.metalness ?? 0, 0, 1) * 255);
@@ -880,6 +1110,7 @@ export function renderArtworkDocument(doc, targetSize = 512, { tileMode = "singl
           rotation: 0,
           motifType: "square",
           fillMode: layer.shape.fillMode || "linear",
+          fillStops: normalizeGradientStops(layer.shape.fillStops, layer.shape.color, layer.shape.colorB),
           color: layer.shape.color,
           colorB: layer.shape.colorB,
           gradientAngle: layer.shape.gradientAngle ?? 45,
@@ -928,23 +1159,31 @@ export function renderArtworkDocument(doc, targetSize = 512, { tileMode = "singl
             ctx.fillText(t.value || "", 0, 0);
             if (isAlbedo && inst.outlineWidth > 0) {
               ctx.lineWidth = inst.outlineWidth;
-              ctx.strokeStyle = inst.outlineColor || "#141619";
+              ctx.strokeStyle = resolveStrokeStyle(ctx, inst, true);
               ctx.strokeText(t.value || "", 0, 0);
             }
           } else if (inst.motifType === "svg-path" && inst.svgPath && typeof Path2D !== "undefined") {
             ctx.save();
-            ctx.scale(inst.width / 100, inst.height / 100);
+            const sx = Math.max(0.01, inst.width / 100);
+            const sy = Math.max(0.01, inst.height / 100);
+            ctx.scale(sx, sy);
             ctx.translate(-50, -50);
             const p2d = new Path2D(inst.svgPath);
             if (inst.fillEnabled !== false) {
-              ctx.fillStyle = fillStyle;
+              ctx.fillStyle = isAlbedo && (inst.fillMode === "linear" || inst.fillMode === "radial")
+                ? resolveCanvasGradient(ctx, inst.fillMode, inst.fillStops, inst.gradientAngle, 100, 100, inst.color, inst.colorB, 50, 50)
+                : fillStyle;
               ctx.fill(p2d, inst.fillRule === "nonzero" ? "nonzero" : "evenodd");
             }
             if (inst.outlineWidth > 0) {
               ctx.lineCap = "round";
               ctx.lineJoin = "round";
-              ctx.lineWidth = inst.outlineWidth;
-              ctx.strokeStyle = isAlbedo ? (inst.outlineColor || inst.color || "#141619") : fillStyle;
+              ctx.lineWidth = inst.outlineWidth / Math.max(0.15, (sx + sy) * 0.5);
+              ctx.strokeStyle = isAlbedo
+                ? (inst.strokeMode === "linear" || inst.strokeMode === "radial"
+                    ? resolveCanvasGradient(ctx, inst.strokeMode, inst.strokeStops, inst.strokeGradientAngle, 100, 100, inst.outlineColor, inst.colorB, 50, 50)
+                    : (inst.outlineColor || inst.color || "#141619"))
+                : fillStyle;
               ctx.stroke(p2d);
             }
             ctx.restore();
@@ -958,7 +1197,7 @@ export function renderArtworkDocument(doc, targetSize = 512, { tileMode = "singl
               ctx.lineCap = "round";
               ctx.lineJoin = "round";
               ctx.lineWidth = Math.max(1, inst.outlineWidth || 4);
-              ctx.strokeStyle = isAlbedo ? (inst.outlineColor || "#141619") : fillStyle;
+              ctx.strokeStyle = resolveStrokeStyle(ctx, inst, isAlbedo);
               ctx.stroke();
             }
           }
@@ -1279,6 +1518,23 @@ function escapeXml(s) {
   return String(s || "").replace(/[&<>'"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", "\"": "&quot;" }[c]));
 }
 
+function pushSvgGradientDef(gradDefs, id, mode, stops, angle = 45, fallbackA = "#e8c27a", fallbackB = "#1a1e24") {
+  const norm = normalizeGradientStops(stops, fallbackA, fallbackB);
+  const stopTags = norm
+    .map((s) => `<stop offset="${(s.offset * 100).toFixed(1)}%" stop-color="${escapeXml(s.color)}"/>`)
+    .join("");
+  if (mode === "radial") {
+    gradDefs.push(`<radialGradient id="${id}">${stopTags}</radialGradient>`);
+  } else {
+    const a = ((angle ?? 45) * Math.PI) / 180;
+    const x1 = (50 - Math.cos(a) * 50).toFixed(1);
+    const y1 = (50 - Math.sin(a) * 50).toFixed(1);
+    const x2 = (50 + Math.cos(a) * 50).toFixed(1);
+    const y2 = (50 + Math.sin(a) * 50).toFixed(1);
+    gradDefs.push(`<linearGradient id="${id}" x1="${x1}%" y1="${y1}%" x2="${x2}%" y2="${y2}%">${stopTags}</linearGradient>`);
+  }
+}
+
 function buildSvgMotifMarkup(inst, fillAttr, strokeAttr, strokeW, gradDefs, gid) {
   const w = Math.max(1, inst.width), h = Math.max(1, inst.height);
   const hw = w * 0.5, hh = h * 0.5;
@@ -1286,20 +1542,19 @@ function buildSvgMotifMarkup(inst, fillAttr, strokeAttr, strokeW, gradDefs, gid)
   let effectiveFill = inst.fillEnabled === false || t === "line" ? "none" : fillAttr;
   if (effectiveFill !== "none" && (inst.fillMode === "linear" || inst.fillMode === "radial")) {
     const id = `${gid}-g`;
-    if (inst.fillMode === "radial") {
-      gradDefs.push(`<radialGradient id="${id}"><stop offset="0%" stop-color="${inst.color}"/><stop offset="100%" stop-color="${inst.colorB || "#1a1e24"}"/></radialGradient>`);
-    } else {
-      const a = ((inst.gradientAngle ?? 45) * Math.PI) / 180;
-      const x1 = (50 - Math.cos(a) * 50).toFixed(1), y1 = (50 - Math.sin(a) * 50).toFixed(1);
-      const x2 = (50 + Math.cos(a) * 50).toFixed(1), y2 = (50 + Math.sin(a) * 50).toFixed(1);
-      gradDefs.push(`<linearGradient id="${id}" x1="${x1}%" y1="${y1}%" x2="${x2}%" y2="${y2}%"><stop offset="0%" stop-color="${inst.color}"/><stop offset="100%" stop-color="${inst.colorB || "#1a1e24"}"/></linearGradient>`);
-    }
+    pushSvgGradientDef(gradDefs, id, inst.fillMode, inst.fillStops, inst.gradientAngle, inst.color, inst.colorB || "#1a1e24");
     effectiveFill = `url(#${id})`;
   }
-  const common = `fill="${effectiveFill}" fill-rule="${inst.fillRule === "nonzero" ? "nonzero" : "evenodd"}" stroke="${strokeW > 0 || t === "line" ? strokeAttr : "none"}" stroke-width="${t === "line" ? Math.max(1, strokeW || 4) : strokeW}" stroke-linecap="round" stroke-linejoin="round"`;
+  let effectiveStroke = strokeAttr;
+  if ((strokeW > 0 || t === "line") && (inst.strokeMode === "linear" || inst.strokeMode === "radial")) {
+    const sid = `${gid}-sg`;
+    pushSvgGradientDef(gradDefs, sid, inst.strokeMode, inst.strokeStops, inst.strokeGradientAngle, strokeAttr, inst.strokeStops?.[inst.strokeStops.length - 1]?.color || "#eff4cf");
+    effectiveStroke = `url(#${sid})`;
+  }
+  const common = `fill="${effectiveFill}" fill-rule="${inst.fillRule === "nonzero" ? "nonzero" : "evenodd"}" stroke="${strokeW > 0 || t === "line" ? effectiveStroke : "none"}" stroke-width="${t === "line" ? Math.max(1, strokeW || 4) : strokeW}" stroke-linecap="round" stroke-linejoin="round"`;
 
   if (t === "svg-path" && inst.svgPath) {
-    return `<path d="${escapeXml(inst.svgPath)}" transform="scale(${(w / 100).toFixed(4)} ${(h / 100).toFixed(4)}) translate(-50 -50)" ${common}/>`;
+    return `<path d="${escapeXml(inst.svgPath)}" transform="scale(${(w / 100).toFixed(4)} ${(h / 100).toFixed(4)}) translate(-50 -50)" vector-effect="non-scaling-stroke" ${common}/>`;
   }
   if (t === "circle") return `<ellipse cx="0" cy="0" rx="${hw}" ry="${hh}" ${common}/>`;
   if (t === "ring") {
@@ -1400,6 +1655,7 @@ export function artworkDocumentLayersSvg(doc, { idPrefix = "art" } = {}) {
       ? [{
           x: size * 0.5, y: size * 0.5, width: size, height: size, rotation: 0,
           motifType: "square", fillMode: layer.shape.fillMode || "linear",
+          fillStops: normalizeGradientStops(layer.shape.fillStops, layer.shape.color, layer.shape.colorB),
           color: layer.shape.color, colorB: layer.shape.colorB, gradientAngle: layer.shape.gradientAngle ?? 45,
           opacity: 1, fillEnabled: true, outlineWidth: 0,
         }]
@@ -1415,7 +1671,13 @@ export function artworkDocumentLayersSvg(doc, { idPrefix = "art" } = {}) {
         if (layer.kind === "text" && inst.text) {
           const t = inst.text;
           const anchor = t.align === "left" ? "start" : t.align === "right" ? "end" : "middle";
-          parts.push(`<text transform="${xf}" opacity="${clamp(inst.opacity, 0, 1)}" text-anchor="${anchor}" dominant-baseline="central" font-family="${escapeXml(t.fontFamily || "DM Sans")}, sans-serif" font-weight="${t.fontWeight || 600}" font-size="${t.fontSize || 48}" letter-spacing="${t.letterSpacing || 0}" fill="${inst.color}" ${inst.outlineWidth > 0 ? `stroke="${inst.outlineColor || "#141619"}" stroke-width="${inst.outlineWidth}"` : ""}>${escapeXml(t.value || "")}</text>`);
+          let textFill = inst.color || "#e8c27a";
+          if (inst.fillMode === "linear" || inst.fillMode === "radial") {
+            const tid = `${idPrefix}-${instSeq++}-tg`;
+            pushSvgGradientDef(gradDefs, tid, inst.fillMode, inst.fillStops, inst.gradientAngle, inst.color, inst.colorB);
+            textFill = `url(#${tid})`;
+          }
+          parts.push(`<text transform="${xf}" opacity="${clamp(inst.opacity, 0, 1)}" text-anchor="${anchor}" dominant-baseline="central" font-family="${escapeXml(t.fontFamily || "DM Sans")}, sans-serif" font-weight="${t.fontWeight || 600}" font-size="${t.fontSize || 48}" letter-spacing="${t.letterSpacing || 0}" fill="${textFill}" ${inst.outlineWidth > 0 ? `stroke="${inst.outlineColor || "#141619"}" stroke-width="${inst.outlineWidth}"` : ""}>${escapeXml(t.value || "")}</text>`);
         } else {
           const markup = buildSvgMotifMarkup(inst, inst.color || "#e8c27a", inst.outlineColor || inst.color || "#141619", inst.outlineWidth || 0, gradDefs, `${idPrefix}-${instSeq++}`);
           parts.push(`<g transform="${xf}" opacity="${clamp(inst.opacity, 0, 1)}">${markup}</g>`);
@@ -1431,9 +1693,15 @@ export function artworkDocumentToSvgString(doc, { width = 512, height = 512, sho
   const size = doc.size || ARTWORK_SIZE;
   const { defs, body } = artworkDocumentLayersSvg(doc);
   const bg = doc.background || {};
+  const extraDefs = [];
+  let bgFill = bg.color || "#171a1f";
+  if (showBg && bg.enabled && (bg.fillMode === "linear" || bg.fillMode === "radial")) {
+    pushSvgGradientDef(extraDefs, "doc-bg-grad", bg.fillMode, bg.fillStops, bg.gradientAngle ?? 45, bg.color || "#171a1f", bg.colorB || "#2b3340");
+    bgFill = "url(#doc-bg-grad)";
+  }
   const bgRect = showBg && bg.enabled
-    ? `<rect width="${size}" height="${size}" fill="${bg.color || "#171a1f"}" opacity="${clamp(bg.opacity ?? 1, 0, 1)}"/>`
+    ? `<rect width="${size}" height="${size}" fill="${bgFill}" opacity="${clamp(bg.opacity ?? 1, 0, 1)}"/>`
     : "";
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${size} ${size}"><defs>${defs}</defs>${bgRect}${body}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${size} ${size}"><defs>${extraDefs.join("")}${defs}</defs>${bgRect}${body}</svg>`;
 }
 

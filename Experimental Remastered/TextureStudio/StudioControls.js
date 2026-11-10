@@ -75,6 +75,8 @@ export const GlyphPaths = {
     Pin:        '<path d="M12 17v5M9 10.8a3 3 0 0 1 1-2.2l1-.9V4h2v3.7l1 .9a3 3 0 0 1 1 2.2V14H9z"/>',
     Image:      '<rect x="3" y="4" width="18" height="16" rx="2.5"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="M21 15l-4.5-4.5L9 18"/>',
     Curve:      '<path d="M4 18C9 18 10 6 20 6"/><circle cx="4" cy="18" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="20" cy="6" r="1.8"/>',
+    Pen:        '<path d="m12 19 7-7 3 3-7 7-3-3z"/><path d="m18 13-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="m2 2 7.586 7.586"/><circle cx="11" cy="11" r="2"/>',
+    Gradient:   '<circle cx="7" cy="17" r="3"/><circle cx="17" cy="7" r="3"/><circle cx="17" cy="17" r="2.2"/><path d="M9.2 14.8 14.8 9.2M10 17h4.5M17 10v4.5"/>',
     Dot:        '<circle cx="12" cy="12" r="3"/>'
 };
 
