@@ -40,20 +40,23 @@ function hash2(x, y, seed = 17) {
 }
 
 /**
- * Shared beveled gunmetal Shader Ball pedestal geometry matching Image 2 & Image 3.
+ * Shared beveled gunmetal AlloyStudio Shader Ball / Draped Cloth pedestal geometry.
+ * Matches image-5.png proportions relative to R=1.43 Shader Ball: compact top lip +
+ * angled silver rim bevel + matte charcoal waist + flared specular bottom flange.
  */
-export function createShaderBallPedestalGeometry(outerRadius = 1.48) {
+export function createShaderBallPedestalGeometry(outerRadius = 1.30) {
   const pts = [
-    new THREE.Vector2(0.001, -0.14),
-    new THREE.Vector2(outerRadius * 0.99, -0.14),
-    new THREE.Vector2(outerRadius, -0.10),
-    new THREE.Vector2(outerRadius * 0.955, -0.02),
-    new THREE.Vector2(outerRadius * 0.88, 0.015),
-    new THREE.Vector2(outerRadius * 0.72, 0.015),
-    new THREE.Vector2(outerRadius * 0.65, -0.005),
-    new THREE.Vector2(0.001, -0.005),
+    new THREE.Vector2(0.001, -0.145),
+    new THREE.Vector2(outerRadius * 0.995, -0.145),
+    new THREE.Vector2(outerRadius, -0.118),
+    new THREE.Vector2(outerRadius * 0.948, -0.092),
+    new THREE.Vector2(outerRadius * 0.915, -0.022),
+    new THREE.Vector2(outerRadius * 0.875, 0.012),
+    new THREE.Vector2(outerRadius * 0.815, 0.012),
+    new THREE.Vector2(outerRadius * 0.56, -0.016),
+    new THREE.Vector2(0.001, -0.018),
   ];
-  return new THREE.LatheGeometry(pts, 72);
+  return new THREE.LatheGeometry(pts, 96);
 }
 
 /**
@@ -103,10 +106,10 @@ export function renderAnalyticalSpherePixels(mat, size = 88) {
   const cosX = Math.cos(0.28);
   const sinX = Math.sin(0.28);
 
-  // Pedestal ellipse geometry in pixel normalized units
+  // Pedestal ellipse geometry matching AlloyStudio 1.30:1.43 ball ratio
   const pedCenterY = cy + radius * 0.94;
-  const pedRx = radius * 0.86;
-  const pedRy = radius * 0.205;
+  const pedRx = radius * 0.905;
+  const pedRy = radius * 0.19;
 
   const tone = (v) => {
     const x = Math.max(0, v);
@@ -332,14 +335,14 @@ function ensureBakerSession(size = 112) {
     mesh.position.set(0, 0.16, 0);
     mesh.rotation.set(0.28, 0.44, -0.34);
 
-    const pedGeo = createShaderBallPedestalGeometry(1.36);
+    const pedGeo = createShaderBallPedestalGeometry(1.30);
     const pedMat = new THREE.MeshStandardMaterial({
-      color: "#33363e",
-      roughness: 0.34,
-      metalness: 0.84,
+      color: "#3d4047",
+      roughness: 0.36,
+      metalness: 0.74,
     });
     const pedMesh = new THREE.Mesh(pedGeo, pedMat);
-    pedMesh.position.set(0, -1.24, 0);
+    pedMesh.position.set(0, -1.255, 0);
     scene.add(pedMesh, mesh);
 
     bakerSession = {

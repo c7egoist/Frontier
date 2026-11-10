@@ -647,10 +647,10 @@ export function createAssetBrowser(hostOrOpts, maybeBridge) {
     }
     state.inspectorItemId = item.id;
 
-    // Header row: transparent icon + title + folder + short desc
-    const topRow = Construct("div", "cb-insp-top");
-    const previewWrap = Construct("div", "cb-insp-preview-wrap");
-    previewWrap.append(createAssetIconElement(item, 54));
+    // Hero Preview Card: large centerpiece showcase icon + title/family/desc above property tiles
+    const heroCard = Construct("div", "cb-insp-hero");
+    const heroStage = Construct("div", "cb-insp-hero-stage");
+    heroStage.append(createAssetIconElement(item, 136));
 
     const metaCol = Construct("div", "cb-insp-meta");
     metaCol.append(
@@ -659,32 +659,16 @@ export function createAssetBrowser(hostOrOpts, maybeBridge) {
     );
     const desc = item.raw?.description || item.raw?.desc || "";
     if (desc) metaCol.append(Construct("div", "cb-insp-desc", desc));
-    topRow.append(previewWrap, metaCol);
-    inspectorPane.append(topRow);
+    heroCard.append(heroStage, metaCol);
+    inspectorPane.append(heroCard);
 
-    // MetricTrio-style Tile Grid (.kpi-trio.cb-insp-tiles -> .kpi-card.cb-insp-prop)
+    // MetricTrio-style Tile Grid (.kpi-trio.cb-insp-tiles -> .kpi-card.cb-insp-prop) below the hero card
     const tileSpecs = getInspectorTileSpecs(item);
     const tilesGrid = Construct("div", "kpi-trio cb-insp-tiles");
     for (const t of tileSpecs) {
       tilesGrid.append(buildInspectorTile(t.label, t.val, t.sub, Boolean(t.highlight)));
     }
     inspectorPane.append(tilesGrid);
-
-    // Compact palette dots for Materials / Artwork when applicable
-    const swatchHexes = item.kind === "material"
-      ? [item.raw.color, item.raw.secondaryColor, ...(item.raw.colors || [])].filter(Boolean).slice(0, 5)
-      : (item.meta?.colors || []).slice(0, 5);
-    if (swatchHexes.length) {
-      const swatchRow = Construct("div", "cb-insp-swatches");
-      swatchRow.append(Construct("span", "cb-insp-swatch-lbl", "Palette"));
-      for (const hex of swatchHexes) {
-        const dot = Construct("span", "cb-insp-swatch-dot");
-        dot.style.background = hex;
-        dot.title = hex;
-        swatchRow.append(dot);
-      }
-      inspectorPane.append(swatchRow);
-    }
 
     // Action Buttons
     const actions = Construct("div", "cb-insp-actions");

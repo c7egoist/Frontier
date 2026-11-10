@@ -2054,4 +2054,67 @@ await suite("18. Reference UI Alignment: Material Look-Dev Stage, Shader Ball Pe
   }
 });
 
+await suite("19. Look-Dev Polish: Right-Tabbed Strata, Seated Cloth/Pedestal + Grey Floor, Hero Asset Card & Sharp Layer Stacks", async () => {
+  const api = globalThis.window.__frontierTextureStudio;
+  const fs = await import("node:fs");
+
+  // 19a. Material Workspace: NOTHING on the left + [Properties | Layer Stack] tabs in right Material Inspector
+  api.switchWorkspace("material");
+  const grid = globalThis.document.querySelector(".studio-grid");
+  assert(grid?.classList.contains("studio-grid-2col"), "Material Workspace must use .studio-grid-2col with no left sidebar");
+  const cols = grid ? grid.children.filter((c) => c.classList.contains("studio-column")) : [];
+  assert.equal(cols.length, 2, `Material Workspace must have exactly 2 columns (viewport + right inspector), got ${cols.length}`);
+  assert(cols[0].classList.contains("viewport-column"), "First column in Material Workspace must be the full-bleed viewport (no left panel)");
+
+  const rightInspector = cols[1];
+  const inspTabs = rightInspector.querySelectorAll(".mw-insp-tab");
+  const propTab = inspTabs[0];
+  const layersTab = inspTabs[1];
+  const propPane = rightInspector.querySelector(".mw-prop-pane");
+  const layersPane = rightInspector.querySelector(".mw-layers-pane");
+  assert(propTab && layersTab && propPane && layersPane, "Material Inspector must expose [Properties | Layer Stack] tabs and panes");
+  assert.equal(propPane.hidden, false, "Properties tab pane must be visible initially");
+  assert.equal(layersPane.hidden, true, "Layer Stack tab pane must start hidden until selected");
+  assert(layersPane.querySelector(".mw-strata-title")?.textContent.includes("Material Scene & Strata"), "Layer Stack tab must house Material Scene & Strata");
+
+  layersTab.click();
+  assert.equal(layersPane.hidden, false, "Clicking Layer Stack tab must reveal Material Scene & Strata");
+  assert.equal(propPane.hidden, true, "Clicking Layer Stack tab must hide Properties pane");
+  propTab.click();
+  assert.equal(propPane.hidden, false, "Clicking Properties tab must switch back to Properties pane");
+
+  // Verify switching to Draped Cloth fits cleanly above the pedestal without error
+  const selectPills = globalThis.document.querySelectorAll(".mw-select-pill");
+  selectPills[0].value = "cloth";
+  selectPills[0].dispatchEvent({ type: "change" });
+  assert.equal(api.getSnapshot().shape, "cloth", "Selecting cloth must update workspace geometry to Draped Cloth");
+  selectPills[0].value = "shaderball";
+  selectPills[0].dispatchEvent({ type: "change" });
+
+  // 19b. Asset Browser Inspector: NO color palette swatches + Large Hero Preview Card above tiles
+  const drawer = globalThis.document.querySelector(".asset-browser");
+  const insp = drawer?.querySelector(".cb-inspector");
+  assert(insp, "Asset Browser must render right-hand .cb-inspector");
+  assert(!insp.querySelector(".cb-insp-swatches"), "Asset Browser Inspector must NOT render .cb-insp-swatches color palette section");
+  const heroCard = insp.querySelector(".cb-insp-hero");
+  const heroStage = heroCard?.querySelector(".cb-insp-hero-stage");
+  assert(heroCard && heroStage, "Asset Browser Inspector must render large .cb-insp-hero showcase card");
+  const tiles = insp.querySelector(".cb-insp-tiles");
+  assert(tiles && insp.children.indexOf(heroCard) < insp.children.indexOf(tiles), "Hero preview card must sit directly above .cb-insp-tiles");
+
+  // 19c. Sharp Square Layer Stacks + Grey Floor / AlloyStudio 1.30 Pedestal checks
+  const mwSrc = fs.readFileSync(new URL("./Workspaces/MaterialWorkspace.js", import.meta.url), "utf8");
+  assert(mwSrc.includes("createShaderBallPedestalGeometry(1.30)"), "MaterialWorkspace must use AlloyStudio 1.30 pedestal geometry");
+  assert(mwSrc.includes("studioFloor") && mwSrc.includes("CircleGeometry"), "MaterialWorkspace 3D scene must include a shadow-receiving grey studioFloor");
+
+  const cssText = fs.readFileSync(new URL("./TextureStudio.css", import.meta.url), "utf8");
+  for (const rule of [".stack-row", ".stack-row-thumb", ".tp-layer-row", ".tp-layer-thumbnail", ".tp-mask-row", ".tp-mask-thumb", ".tp-decal-tree-row", ".tp-decal-tree-thumb"]) {
+    const idx = cssText.indexOf(`${rule} {`);
+    const altIdx = idx !== -1 ? idx : cssText.indexOf(`${rule},\n`);
+    assert(altIdx !== -1, `Expected rule ${rule} in TextureStudio.css`);
+    const block = cssText.slice(altIdx, cssText.indexOf("}", altIdx) + 1);
+    assert(block.includes("border-radius: 0;"), `${rule} must have crisp square corners (border-radius: 0;)`);
+  }
+});
+
 console.log(`\nALL ${results.length} VALIDATION SUITES PASSED CLEANLY`);

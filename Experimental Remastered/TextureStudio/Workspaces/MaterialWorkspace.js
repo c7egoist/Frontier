@@ -176,6 +176,7 @@ export function mountMaterialWorkspace(root, appBridge) {
     search: "",
     shape: "shaderball",
     backdrop: "softbox",
+    inspectorTab: "properties",
     autoRotate: false,
     lightAzimuth: 38,
     exposure: 1.08,
@@ -218,28 +219,14 @@ export function mountMaterialWorkspace(root, appBridge) {
   let rafId = 0;
   let disposed = false;
 
-  const grid = Construct("div", "studio-grid");
+  const grid = Construct("div", "studio-grid studio-grid-2col");
 
-  // ----------------------------------------------------------------- LEFT: SCENE & SHADER STRATA OUTLINER (CATALOG MOVED TO BOTTOM ASSET BROWSER)
-  const leftCol = Construct("aside", "studio-column");
-  leftCol.append(
-    Construct("div", "panel-heading", [
-      Construct("h2", null, "Material Scene & Strata"),
-      Construct("span", "panel-heading-meta", "LOOK-DEV STAGE"),
-    ]),
-  );
-  const leftScroll = Construct("div", "panel-scroll");
-  const leftInner = Construct("div", "panel-scroll-inner");
-  const sceneSummaryWrap = Construct("div");
-  leftInner.append(sceneSummaryWrap);
-  leftScroll.append(leftInner);
-  leftCol.append(
-    leftScroll,
-    Construct("div", "panel-footer", [
-      Construct("span", null, "Procedural Multi-Strata Shader"),
-      Construct("span", null, "Materials in Bottom Browser"),
-    ]),
-  );
+  // Material Scene & Strata container (housed inside right Material Inspector [Properties | Layer Stack] — nothing on the left!)
+  const sceneSummaryWrap = Construct("div", "mw-strata-pane");
+  const propPane = Construct("div", "mw-prop-pane");
+  const layersPane = Construct("div", "mw-layers-pane");
+  layersPane.hidden = true;
+  layersPane.append(sceneSummaryWrap);
 
   // ----------------------------------------------------------------- CENTER: CLEAN LOOK-DEV STAGE (MATCHING IMAGE 3)
   const centerCol = Construct("main", "studio-column viewport-column");
@@ -333,7 +320,7 @@ export function mountMaterialWorkspace(root, appBridge) {
       `${p.label || rec?.title || "PBR"} · Roughness ${(p.roughness ?? 0.4).toFixed(2)}, Metalness ${Math.round((p.metalness ?? 0) * 100)}%.`;
   }
 
-  // ----------------------------------------------------------------- RIGHT: INSPECTOR
+  // ----------------------------------------------------------------- RIGHT: INSPECTOR ([Properties | Layer Stack] matching AlloyStudio)
   const rightCol = Construct("aside", "studio-column");
   rightCol.append(
     Construct("div", "panel-heading", [
@@ -341,9 +328,37 @@ export function mountMaterialWorkspace(root, appBridge) {
       Construct("span", "panel-heading-meta", "LOOK-DEV PBR"),
     ]),
   );
+
+  const layerCountBadge = Construct("span", "mw-tab-count", "1");
+  const tabPropsBtn = Construct("button", "mw-insp-tab active", "Properties");
+  tabPropsBtn.type = "button";
+  tabPropsBtn.dataset.inspectorTab = "properties";
+  const tabLayersBtn = Construct("button", "mw-insp-tab", [
+    Construct("span", null, "Layer Stack"),
+    layerCountBadge,
+  ]);
+  tabLayersBtn.type = "button";
+  tabLayersBtn.dataset.inspectorTab = "layers";
+  const inspectorTabs = Construct("div", "mw-inspector-tabs", [tabPropsBtn, tabLayersBtn]);
+
+  function setInspectorTab(tab) {
+    state.inspectorTab = tab === "layers" ? "layers" : "properties";
+    const isProps = state.inspectorTab === "properties";
+    tabPropsBtn.classList.toggle("active", isProps);
+    tabLayersBtn.classList.toggle("active", !isProps);
+    propPane.hidden = !isProps;
+    layersPane.hidden = isProps;
+  }
+  tabPropsBtn.addEventListener("click", () => setInspectorTab("properties"));
+  tabLayersBtn.addEventListener("click", () => setInspectorTab("layers"));
+  setInspectorTab("properties");
+  rightCol.append(inspectorTabs);
+
   const rightScroll = Construct("div", "panel-scroll");
   const rightInner = Construct("div", "panel-scroll-inner");
-  rightScroll.append(rightInner);
+  propPane.append(rightInner);
+  const rightHostInner = Construct("div", null, [propPane, layersPane]);
+  rightScroll.append(rightHostInner);
   rightCol.append(
     rightScroll,
     Construct("div", "panel-footer", [
@@ -352,10 +367,9 @@ export function mountMaterialWorkspace(root, appBridge) {
     ]),
   );
 
-  grid.append(leftCol, centerCol, rightCol);
+  grid.append(centerCol, rightCol);
   root.append(grid);
-  SmoothScroll(leftScroll, leftInner);
-  SmoothScroll(rightScroll, rightInner);
+  SmoothScroll(rightScroll, rightHostInner);
 
   // ----------------------------------------------------------------- THREE.JS SCENE
   const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
@@ -368,6 +382,7 @@ export function mountMaterialWorkspace(root, appBridge) {
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color("#1f2022");
+  scene.fog = new THREE.Fog("#1f2022", 11, 30);
   const envTex = createStudioEnvTexture(renderer);
   scene.environment = envTex;
 
@@ -381,6 +396,13 @@ export function mountMaterialWorkspace(root, appBridge) {
   const keyLight = new THREE.DirectionalLight("#fff8eb", 2.5);
   keyLight.castShadow = true;
   keyLight.shadow.mapSize.set(1024, 1024);
+  keyLight.shadow.camera.left = -4.2;
+  keyLight.shadow.camera.right = 4.2;
+  keyLight.shadow.camera.top = 4.2;
+  keyLight.shadow.camera.bottom = -4.2;
+  keyLight.shadow.camera.near = 0.5;
+  keyLight.shadow.camera.far = 18;
+  keyLight.shadow.bias = -0.0004;
   const fillLight = new THREE.DirectionalLight("#b8d0ff", 1.0);
   fillLight.position.set(-4, 2.2, -3);
   const rimLight = new THREE.DirectionalLight("#ffe5c0", 1.25);
@@ -388,11 +410,25 @@ export function mountMaterialWorkspace(root, appBridge) {
   const hemiLight = new THREE.HemisphereLight("#eef3ff", "#1c1c20", 0.55);
   scene.add(keyLight, fillLight, rimLight, hemiLight);
 
-  const pedestal = new THREE.Mesh(
-    createShaderBallPedestalGeometry(1.52),
-    new THREE.MeshStandardMaterial({ color: "#34373e", roughness: 0.34, metalness: 0.86 }),
+  // AlloyStudio Base & Grey Studio Floor grounded cleanly together
+  const PEDESTAL_Y = -1.415;
+  const FLOOR_Y = -1.56;
+
+  const studioFloor = new THREE.Mesh(
+    new THREE.CircleGeometry(36, 96),
+    new THREE.MeshStandardMaterial({ color: "#2c2e33", roughness: 0.9, metalness: 0.04 }),
   );
-  pedestal.position.y = -1.42;
+  studioFloor.rotation.x = -Math.PI / 2;
+  studioFloor.position.y = FLOOR_Y;
+  studioFloor.receiveShadow = true;
+  scene.add(studioFloor);
+
+  const pedestal = new THREE.Mesh(
+    createShaderBallPedestalGeometry(1.30),
+    new THREE.MeshStandardMaterial({ color: "#3d4047", roughness: 0.36, metalness: 0.72 }),
+  );
+  pedestal.position.y = PEDESTAL_Y;
+  pedestal.castShadow = true;
   pedestal.receiveShadow = true;
   scene.add(pedestal);
 
@@ -424,14 +460,28 @@ export function mountMaterialWorkspace(root, appBridge) {
     if (shape === "shaderball") return createBallGeometry();
     if (shape === "cloth") {
       const g = createDrapedClothGeometry();
-      g.center();
+      g.computeBoundingBox();
+      const bb = g.boundingBox;
+      const cx = (bb.min.x + bb.max.x) * 0.5;
+      const cz = (bb.min.z + bb.max.z) * 0.5;
+      const spanXZ = Math.max(bb.max.x - bb.min.x, bb.max.z - bb.min.z) || 3.25;
+      const targetScale = 2.72 / spanXZ;
+      g.translate(-cx, -bb.min.y, -cz);
+      g.scale(targetScale, targetScale, targetScale);
+      g.translate(0, -1.404, 0);
+      g.computeBoundingBox();
+      g.computeBoundingSphere();
       return g;
     }
-    if (shape === "box") return new RoundedBoxGeometry(2.15, 2.15, 2.15, 8, 0.28);
+    if (shape === "box") {
+      const g = new RoundedBoxGeometry(2.05, 2.05, 2.05, 8, 0.26);
+      g.translate(0, -0.39, 0);
+      return g;
+    }
     if (shape === "plane") {
-      const g = new THREE.PlaneGeometry(2.65, 2.65, 96, 96);
+      const g = new THREE.PlaneGeometry(2.35, 2.35, 96, 96);
       g.rotateX(-Math.PI * 0.22);
-      g.translate(0, 0.12, 0);
+      g.translate(0, -0.18, 0);
       return g;
     }
     return new THREE.SphereGeometry(1.42, 96, 64);
@@ -746,6 +796,14 @@ export function mountMaterialWorkspace(root, appBridge) {
     ensureAuthoring(state.params);
     const p = state.params;
     const layers = p.Authoring.Layers;
+    layerCountBadge.textContent = String(layers.length + (p.pattern ? 1 : 0));
+
+    sceneSummaryWrap.append(
+      Construct("div", "mw-strata-head", [
+        Construct("span", "mw-strata-title", "Material Scene & Strata"),
+        Construct("span", "mw-strata-meta", "LOOK-DEV STAGE"),
+      ]),
+    );
 
     // Layer stack creation strip (matching Pattern/Paint stacks)
     const addStrip = Construct("div", "chip-strip");
@@ -980,6 +1038,7 @@ export function mountMaterialWorkspace(root, appBridge) {
         state.backdrop = val;
         bgSelect.value = val;
         scene.background = new THREE.Color(hex);
+        if (scene.fog) scene.fog.color.set(hex);
         renderLeftOutliner();
       });
       envStrip.append(cb);
@@ -1403,7 +1462,7 @@ export function mountMaterialWorkspace(root, appBridge) {
         const prevImg = document.createElement("img");
         prevImg.alt = `${chKey} field preview`;
         prevImg.style.cssText =
-          "width:44px;height:44px;border-radius:6px;border:1px solid var(--line);background:#0f1115;object-fit:cover;";
+          "width:44px;height:44px;border-radius:0;border:1px solid var(--line);background:#0f1115;object-fit:cover;";
         const prevMeta = Construct(
           "span",
           "property-hint",
@@ -1782,7 +1841,9 @@ export function mountMaterialWorkspace(root, appBridge) {
   bgSelect.addEventListener("change", () => {
     state.backdrop = bgSelect.value;
     const found = backdropOptions.find(([, val]) => val === state.backdrop);
-    scene.background = new THREE.Color(found ? found[2] : "#1f2022");
+    const hex = found ? found[2] : "#1f2022";
+    scene.background = new THREE.Color(hex);
+    if (scene.fog) scene.fog.color.set(hex);
     renderLeftOutliner();
   });
   btnRotate.addEventListener("click", () => {
@@ -1845,6 +1906,8 @@ export function mountMaterialWorkspace(root, appBridge) {
       envTex.dispose();
       if (sampleMesh) sampleMesh.geometry.dispose();
       if (activeMaterial) activeMaterial.dispose();
+      studioFloor.geometry.dispose();
+      studioFloor.material.dispose();
       pedestal.geometry.dispose();
       pedestal.material.dispose();
       renderer.dispose();
