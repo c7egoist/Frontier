@@ -23,6 +23,92 @@ export const PAINT_MESH_LIST = PAINT_MESH_PRESETS;
 
 export const PAINT_BLENDS = ["Normal", "Multiply", "Screen", "Overlay", "Add", "Darken"];
 
+/**
+ * Full 19-channel PBR channel registry aligned with Frontier MaterialSpecification.js.
+ */
+export const PAINT_PBR_CHANNELS = [
+  { key: "albedo", label: "Albedo", short: "Albedo", sub: "Base Colour", kind: "albedo", dot: "#e8c27a", type: "color", default: "#e8c27a", defaultVal: "#e8c27a", extended: false, isColor: true, min: 0, max: 1, step: 0.01 },
+  { key: "roughness", label: "Roughness", short: "Rough", sub: "Surface Gloss", kind: "rough", dot: "#2fe6a7", type: "scalar", default: 0.34, defaultVal: 0.34, extended: false, isColor: false, min: 0.02, max: 1, step: 0.01 },
+  { key: "metalness", label: "Metalness", short: "Metal", sub: "Conductor Mask", kind: "metal", dot: "#63a8ff", type: "scalar", default: 0.12, defaultVal: 0.12, extended: false, isColor: false, min: 0, max: 1, step: 0.01 },
+  { key: "height", label: "Height", short: "Height", sub: "Relief / Bump", kind: "height", dot: "#e686b8", type: "scalar", default: 0.25, defaultVal: 0.25, extended: false, isColor: false, min: -1, max: 1, step: 0.02 },
+  { key: "normal", label: "Normal Str", short: "Normal", sub: "Bump Intensity", kind: "normal", dot: "#8b9cff", type: "scalar", default: 0.85, defaultVal: 0.85, extended: true, isColor: false, min: 0, max: 2, step: 0.05 },
+  { key: "ao", label: "Occlusion", short: "AO", sub: "Ambient Cavity", kind: "ao", dot: "#9aa3b2", type: "scalar", default: 1.0, defaultVal: 1.0, extended: true, isColor: false, min: 0, max: 1, step: 0.01 },
+  { key: "opacity", label: "Opacity", short: "Opacity", sub: "Cutout / Alpha", kind: "opacity", dot: "#d6dce6", type: "scalar", default: 1.0, defaultVal: 1.0, extended: true, isColor: false, min: 0, max: 1, step: 0.01 },
+  { key: "emissive", label: "Emissive", short: "Emissive", sub: "Glow Colour", kind: "emissive", dot: "#ff6e4a", type: "color", default: "#ff7a3b", defaultVal: "#ff7a3b", extended: true, isColor: true, min: 0, max: 1, step: 0.01 },
+  { key: "emissiveIntensity", label: "Glow Power", short: "Glow", sub: "Emission Gain", kind: "emissive", dot: "#ffb347", type: "scalar", default: 1.0, defaultVal: 1.0, extended: true, isColor: false, min: 0, max: 4, step: 0.05 },
+  { key: "clearcoat", label: "Clearcoat", short: "Coat", sub: "Varnish Coat", kind: "coat", dot: "#63e6ff", type: "scalar", default: 0.8, defaultVal: 0.8, extended: true, isColor: false, min: 0, max: 1, step: 0.01 },
+  { key: "coatRoughness", label: "Coat Rough", short: "CoatRgh", sub: "Varnish Gloss", kind: "coat", dot: "#8ce99a", type: "scalar", default: 0.08, defaultVal: 0.08, extended: true, isColor: false, min: 0.01, max: 1, step: 0.01 },
+  { key: "sheen", label: "Sheen", short: "Sheen", sub: "Fabric Velour", kind: "sheen", dot: "#f3a6ff", type: "scalar", default: 0.65, defaultVal: 0.65, extended: true, isColor: false, min: 0, max: 1, step: 0.01 },
+  { key: "sheenRoughness", label: "Sheen Rough", short: "SheenRgh", sub: "Microfiber Soft", kind: "sheen", dot: "#e599f7", type: "scalar", default: 0.45, defaultVal: 0.45, extended: true, isColor: false, min: 0.01, max: 1, step: 0.01 },
+  { key: "specular", label: "Specular", short: "Spec", sub: "Dielectric F0", kind: "spec", dot: "#fff3bf", type: "scalar", default: 1.0, defaultVal: 1.0, extended: true, isColor: false, min: 0, max: 1, step: 0.01 },
+  { key: "anisotropy", label: "Anisotropy", short: "Aniso", sub: "Brushed Grain", kind: "aniso", dot: "#a5d8ff", type: "scalar", default: 0.5, defaultVal: 0.5, extended: true, isColor: false, min: 0, max: 1, step: 0.01 },
+  { key: "iridescence", label: "Iridescence", short: "Irid", sub: "Thin-Film Pearl", kind: "irid", dot: "#ff87c2", type: "scalar", default: 0.7, defaultVal: 0.7, extended: true, isColor: false, min: 0, max: 1, step: 0.01 },
+  { key: "iridescenceThickness", label: "Irid Film", short: "IridFilm", sub: "Spectrum Shift", kind: "irid", dot: "#faa2c1", type: "scalar", default: 0.45, defaultVal: 0.45, extended: true, isColor: false, min: 0, max: 1, step: 0.01 },
+  { key: "transmission", label: "Transmission", short: "Trans", sub: "Glass / Jelly", kind: "trans", dot: "#74c0fc", type: "scalar", default: 0.65, defaultVal: 0.65, extended: true, isColor: false, min: 0, max: 1, step: 0.01 },
+  { key: "thickness", label: "Subsurface", short: "Depth", sub: "Depth / Scatter", kind: "trans", dot: "#ffa8a8", type: "scalar", default: 0.4, defaultVal: 0.4, extended: true, isColor: false, min: 0, max: 1, step: 0.01 },
+];
+
+export const PAINT_PBR_CHANNEL_ROWS = PAINT_PBR_CHANNELS.map((c) => [c.key, c.label, c.sub, c.kind, c.dot]);
+export const PAINT_PBR_CHANNEL_MAP = Object.fromEntries(PAINT_PBR_CHANNELS.map((c) => [c.key, c]));
+export const EXTENDED_PBR_KEYS = PAINT_PBR_CHANNELS.slice(4).map((c) => c.key);
+
+export function createDefaultChannelMap(includeAll = false, overrides = {}) {
+  const out = {};
+  for (const c of PAINT_PBR_CHANNELS) {
+    out[c.key] = includeAll ? true : (c.key === "albedo" || c.key === "roughness" || c.key === "metalness" || c.key === "height");
+  }
+  return { ...out, ...overrides };
+}
+
+export function createDefaultChannelOpacities(overrides = {}) {
+  const out = {};
+  for (const c of PAINT_PBR_CHANNELS) out[c.key] = 1;
+  return { ...out, ...overrides };
+}
+
+export function createDefaultChannelBlends(overrides = {}) {
+  const out = {};
+  for (const c of PAINT_PBR_CHANNELS) out[c.key] = "Inherit";
+  return { ...out, ...overrides };
+}
+
+export function createDefaultExtendedValues(overrides = {}) {
+  return {
+    normal: 0.85,
+    ao: 1.0,
+    opacity: 1.0,
+    emissive: "#ff7a3b",
+    emissiveIntensity: 1.0,
+    clearcoat: 0.0,
+    coatRoughness: 0.08,
+    sheen: 0.0,
+    sheenRoughness: 0.45,
+    specular: 1.0,
+    anisotropy: 0.0,
+    iridescence: 0.0,
+    iridescenceThickness: 0.45,
+    transmission: 0.0,
+    thickness: 0.0,
+    ...overrides,
+  };
+}
+
+export function encodeScalarChannelByte(key, val) {
+  if (key === "height") return Math.round(clamp(val * 0.5 + 0.5, 0, 1) * 255);
+  if (key === "normal") return Math.round(clamp(val / 2, 0, 1) * 255);
+  if (key === "emissiveIntensity") return Math.round(clamp(val / 4, 0, 1) * 255);
+  return Math.round(clamp(val, 0, 1) * 255);
+}
+
+export function defaultByteForExtChannel(key) {
+  if (key === "ao" || key === "opacity" || key === "specular") return 255;
+  if (key === "normal") return 108; // ~0.85
+  if (key === "coatRoughness") return 20; // ~0.08
+  if (key === "sheenRoughness") return 115; // ~0.45
+  if (key === "iridescenceThickness") return 115;
+  return 0;
+}
+
 function clamp(v, lo = 0, hi = 1) {
   return Math.max(lo, Math.min(hi, v));
 }
@@ -626,17 +712,179 @@ export function createLayerPixelBuffer(res) {
     roughAlpha: new Uint8ClampedArray(n),
     metalAlpha: new Uint8ClampedArray(n),
     heightAlpha: new Uint8ClampedArray(n),
+    extValues: {}, // Lazily populated per extended PBR key
+    extAlphas: {}, // Lazily populated coverage alpha 0..255 per extended key
   };
+}
+
+export function ensureExtPixelChannel(px, key, resOverride = null) {
+  const res = resOverride || px.res;
+  const n = res * res;
+  if (!px.extValues) px.extValues = {};
+  if (!px.extAlphas) px.extAlphas = {};
+  if (!px.extValues[key]) {
+    if (key === "emissive") {
+      px.extValues[key] = new Uint8ClampedArray(n * 3);
+    } else {
+      px.extValues[key] = new Uint8ClampedArray(n).fill(defaultByteForExtChannel(key));
+    }
+  }
+  if (!px.extAlphas[key]) px.extAlphas[key] = new Uint8ClampedArray(n);
+  return { values: px.extValues[key], alpha: px.extAlphas[key] };
 }
 
 export function createMaskBuffer(res, fillValue = 255) {
   return new Uint8ClampedArray(res * res).fill(fillValue);
 }
 
+/**
+ * Look up 3D world position and normal at UV coordinate (u, v) from baked/geometric cues,
+ * falling back to nearest covered texel so moving a 3D stamp in the 2D UV canvas stays anchored on mesh geometry.
+ */
+export function lookupSurfaceAtUv(cues, u, v) {
+  if (!cues?.res) return { pos: [0, 0, 0], normal: [0, 1, 0], anchorPos: [0, 0, 0], anchorNormal: [0, 1, 0], covered: false };
+  const res = cues.res;
+  const cx = Math.min(res - 1, Math.max(0, Math.round(u * (res - 1))));
+  const cy = Math.min(res - 1, Math.max(0, Math.round((1 - v) * (res - 1))));
+  const readIdx = (idx) => {
+    const pos = [cues.worldPos[idx * 3], cues.worldPos[idx * 3 + 1], cues.worldPos[idx * 3 + 2]];
+    const normal = [cues.worldNormal[idx * 3], cues.worldNormal[idx * 3 + 1], cues.worldNormal[idx * 3 + 2]];
+    return { pos, normal, anchorPos: pos, anchorNormal: normal, covered: true };
+  };
+  const pid0 = cy * res + cx;
+  if (cues.covered[pid0]) return readIdx(pid0);
+  for (let rad = 1; rad <= 10; rad++) {
+    for (let dy = -rad; dy <= rad; dy++) {
+      for (let dx = -rad; dx <= rad; dx++) {
+        if (Math.abs(dx) !== rad && Math.abs(dy) !== rad) continue;
+        const nx = cx + dx, ny = cy + dy;
+        if (nx < 0 || nx >= res || ny < 0 || ny >= res) continue;
+        const pid = ny * res + nx;
+        if (cues.covered[pid]) return readIdx(pid);
+      }
+    }
+  }
+  return { pos: [0, 0, 0], normal: [0, 1, 0], anchorPos: [0, 0, 0], anchorNormal: [0, 1, 0], covered: false };
+}
+
+/**
+ * Create a live movable, scalable, rotatable Stamp instance (used either as a Decal layer or as a Subcomponent inside any layer).
+ */
+export function createStampInstance(overrides = {}) {
+  return {
+    id: overrides.id || nextArtworkId("stmp"),
+    name: overrides.name || overrides.stampName || "Stamp Decal",
+    visible: overrides.visible !== false,
+    projection: overrides.projection || "uv", // "uv" | "3d"
+    u: clamp(overrides.u ?? 0.5, 0, 1),
+    v: clamp(overrides.v ?? 0.5, 0, 1),
+    anchorPos: overrides.anchorPos ? [...overrides.anchorPos] : [0, 0.2, 1.0],
+    anchorNormal: overrides.anchorNormal ? [...overrides.anchorNormal] : [0, 0, 1],
+    scale: clamp(overrides.scale ?? 0.28, 0.03, 1.5),
+    scaleX: clamp(overrides.scaleX ?? 1.0, 0.15, 3.0),
+    scaleY: clamp(overrides.scaleY ?? 1.0, 0.15, 3.0),
+    rotation: Number(overrides.rotation ?? 0),
+    opacity: clamp(overrides.opacity ?? 1.0, 0, 1),
+    blend: overrides.blend || "Normal",
+    heightStrength: clamp(overrides.heightStrength ?? 0.5, -1, 1),
+    tint: overrides.tint || "#ffffff",
+    roughness: overrides.roughness ?? null,
+    metalness: overrides.metalness ?? null,
+    stampData: overrides.stampData || overrides.stampMaps || null,
+    channels: overrides.channels || null,
+    extValues: overrides.extValues ? { ...overrides.extValues } : null,
+  };
+}
+
+/**
+ * Generate a 0..255 procedural mask buffer from mesh geometric/baked cues ("edge-wear", "crevice-dirt", "top-dust", "triplanar-grunge").
+ */
+export function generateProceduralMask(preset, cues, opts = {}) {
+  const res = cues.res;
+  const n = res * res;
+  const out = new Uint8ClampedArray(n);
+  const thr = clamp(opts.threshold ?? 0.44, 0.02, 0.98);
+  const soft = Math.max(0.02, opts.softness ?? 0.24);
+  const nMix = clamp(opts.noiseMix ?? 0.35, 0, 1);
+  const nScale = Math.max(0.5, opts.noiseScale ?? 6.0);
+  const invert = !!opts.invert;
+
+  for (let i = 0; i < n; i++) {
+    let metric = 0.5;
+    if (preset === "edge-wear") metric = clamp((cues.curvature[i] - 0.5) * 2, 0, 1);
+    else if (preset === "crevice-dirt") metric = clamp(1 - cues.ao[i], 0, 1);
+    else if (preset === "top-dust") metric = clamp(cues.worldNormal[i * 3 + 1], 0, 1);
+    else if (preset === "triplanar-grunge") {
+      metric = fbm3D(
+        cues.worldPos[i * 3] * nScale * 0.7 + 11.3,
+        cues.worldPos[i * 3 + 1] * nScale * 0.7 + 5.1,
+        cues.worldPos[i * 3 + 2] * nScale * 0.7 + 23.7,
+        3,
+        307,
+      );
+    }
+    const nv = fbm3D(cues.worldPos[i * 3] * nScale, cues.worldPos[i * 3 + 1] * nScale, cues.worldPos[i * 3 + 2] * nScale, 3, 131);
+    const comb = metric * (1 - nMix) + nv * nMix;
+    let m = clamp((comb - (thr - soft * 0.5)) / soft, 0, 1);
+    if (invert) m = 1 - m;
+    out[i] = Math.round(m * 255);
+  }
+  return out;
+}
+
+export function featherMaskPixels(pixels, res, passes = 2) {
+  if (!pixels || res <= 2) return pixels;
+  let cur = new Uint8ClampedArray(pixels);
+  const nxt = new Uint8ClampedArray(pixels.length);
+  for (let p = 0; p < passes; p++) {
+    for (let y = 0; y < res; y++) {
+      for (let x = 0; x < res; x++) {
+        let sum = 0, cnt = 0;
+        for (let dy = -1; dy <= 1; dy++) {
+          const yy = clamp(y + dy, 0, res - 1);
+          for (let dx = -1; dx <= 1; dx++) {
+            const xx = clamp(x + dx, 0, res - 1);
+            sum += cur[yy * res + xx];
+            cnt++;
+          }
+        }
+        nxt[y * res + x] = Math.round(sum / cnt);
+      }
+    }
+    cur.set(nxt);
+  }
+  pixels.set(cur);
+  return pixels;
+}
+
 export function createPaintLayer(kind = "paint", overrides = {}) {
   const res = overrides.res || PAINT_DEFAULT_RES;
   const id = overrides.id || nextArtworkId("tp");
-  const isFolder = kind === "folder";
+  const baseDecal = {
+    stampName: "Industrial Warning Seal",
+    stampMaps: null, // { albedo, roughness, metalness, height, width, heightPx }
+    anchorPos: [0, 0.2, 1.0],
+    anchorNormal: [0, 0, 1],
+    radius: 0.45,
+    rotation: 0,
+    ...(overrides.decal || {}),
+  };
+  let stamps = Array.isArray(overrides.stamps) ? overrides.stamps.map((s) => createStampInstance(s)) : [];
+  if (kind === "decal" && stamps.length === 0) {
+    stamps = [
+      createStampInstance({
+        name: baseDecal.stampName,
+        projection: overrides.decal?.projection || (overrides.decal?.anchorPos ? "3d" : "uv"),
+        u: overrides.decal?.u ?? 0.5,
+        v: overrides.decal?.v ?? 0.5,
+        anchorPos: baseDecal.anchorPos,
+        anchorNormal: baseDecal.anchorNormal,
+        scale: baseDecal.radius ?? 0.35,
+        rotation: baseDecal.rotation ?? 0,
+        stampData: baseDecal.stampMaps,
+      }),
+    ];
+  }
   return {
     id,
     kind, // "paint" | "fill" | "material" | "decal" | "generator" | "folder"
@@ -644,7 +892,7 @@ export function createPaintLayer(kind = "paint", overrides = {}) {
       kind === "paint" ? "Paint Layer" :
       kind === "fill" ? "Fill Layer" :
       kind === "material" ? "Material Layer" :
-      kind === "decal" ? "Stamp Decal" :
+      kind === "decal" ? "Stamp Layer" :
       kind === "generator" ? "Weathering Generator" : "Folder"
     ),
     parentId: overrides.parentId || null,
@@ -653,32 +901,16 @@ export function createPaintLayer(kind = "paint", overrides = {}) {
     blend: overrides.blend || "Normal",
     opacity: clamp(overrides.opacity ?? 1, 0, 1),
     partFilter: overrides.partFilter ?? -1, // -1 = all parts, 0..N = specific part
-    channels: {
-      albedo: true,
-      roughness: true,
-      metalness: true,
-      height: true,
-      ...(overrides.channels || {}),
-    },
-    channelOpacity: {
-      albedo: 1,
-      roughness: 1,
-      metalness: 1,
-      height: 1,
-      ...(overrides.channelOpacity || {}),
-    },
-    channelBlends: {
-      albedo: "Inherit",
-      roughness: "Inherit",
-      metalness: "Inherit",
-      height: "Inherit",
-      ...(overrides.channelBlends || {}),
-    },
+    channels: createDefaultChannelMap(false, overrides.channels || {}),
+    channelOpacity: createDefaultChannelOpacities(overrides.channelOpacity || {}),
+    channelBlends: createDefaultChannelBlends(overrides.channelBlends || {}),
+    extValues: createDefaultExtendedValues(overrides.extValues || {}),
     fill: {
       color: "#c89f68",
       roughness: 0.45,
       metalness: 0.0,
       height: 0.0,
+      ...createDefaultExtendedValues(),
       patternRepeats: 3,
       patternRotation: 0,
       patternHeightStrength: 1.0,
@@ -692,25 +924,21 @@ export function createPaintLayer(kind = "paint", overrides = {}) {
       roughness: 0.24,
       metalness: 0.87,
       height: 0.0,
+      ...createDefaultExtendedValues(),
       grainScale: 10,
       grainStrength: 0.08,
       ...(overrides.material || {}),
     },
-    decal: {
-      stampName: "Industrial Warning Seal",
-      stampMaps: null, // { albedo, roughness, metalness, height, width, heightPx }
-      anchorPos: [0, 0.2, 1.0],
-      anchorNormal: [0, 0, 1],
-      radius: 0.45,
-      rotation: 0,
-      ...(overrides.decal || {}),
-    },
+    decal: baseDecal,
+    stamps,
+    selectedStampId: overrides.selectedStampId || stamps[0]?.id || null,
     generator: {
       preset: "edge-wear", // "edge-wear" | "crevice-dirt" | "top-dust" | "triplanar-grunge"
       color: "#cad4de",
       roughness: 0.28,
       metalness: 0.82,
       height: -0.15,
+      ...createDefaultExtendedValues(),
       threshold: 0.42,
       softness: 0.24,
       noiseMix: 0.35,
@@ -719,7 +947,7 @@ export function createPaintLayer(kind = "paint", overrides = {}) {
       ...(overrides.generator || {}),
     },
     pixels: kind === "paint" ? (overrides.pixels || createLayerPixelBuffer(res)) : null,
-    mask: overrides.mask || null, // { enabled, invert, pixels: Uint8ClampedArray(res*res), editing: false }
+    mask: overrides.mask ? { opacity: 1.0, invert: false, enabled: true, ...overrides.mask } : null,
   };
 }
 
@@ -1141,7 +1369,8 @@ export function commitStrokeAccumulator(layer, strokeAccum, brush, editingMask =
 
   if (editingMask && layer.mask?.pixels) {
     const maskPx = layer.mask.pixels;
-    const targetVal = isErase ? 0 : 255;
+    const lum = Math.round(clamp(0.299 * cr + 0.587 * cg + 0.114 * cb, 0, 255));
+    const targetVal = isErase ? 0 : (brush.maskInk !== undefined ? Math.round(clamp(brush.maskInk, 0, 1) * 255) : lum);
     for (let y = strokeAccum.dirtyMinY; y <= strokeAccum.dirtyMaxY; y++) {
       for (let x = strokeAccum.dirtyMinX; x <= strokeAccum.dirtyMaxX; x++) {
         const pid = y * res + x;
@@ -1159,6 +1388,17 @@ export function commitStrokeAccumulator(layer, strokeAccum, brush, editingMask =
   if (!px.metalAlpha) px.metalAlpha = new Uint8ClampedArray(res * res);
   if (!px.heightAlpha) px.heightAlpha = new Uint8ClampedArray(res * res);
   const ch = getToolChannels(brush);
+  const activeExtKeys = EXTENDED_PBR_KEYS.filter((k) => ch[k]);
+  const brushExtSrc = brush.extValues || {};
+  const extData = activeExtKeys.map((k) => {
+    const buf = ensureExtPixelChannel(px, k, res);
+    if (k === "emissive") {
+      const [er, eg, eb] = hexToRgb01(brushExtSrc.emissive || "#ff7a3b").map((v) => Math.round(v * 255));
+      return { key: k, isRgb: true, er, eg, eb, buf };
+    }
+    const val = brushExtSrc[k] ?? PAINT_PBR_CHANNELS.find((c) => c.key === k)?.default ?? 0;
+    return { key: k, isRgb: false, byteVal: encodeScalarChannelByte(k, Number(val)), buf };
+  });
 
   for (let y = strokeAccum.dirtyMinY; y <= strokeAccum.dirtyMaxY; y++) {
     for (let x = strokeAccum.dirtyMinX; x <= strokeAccum.dirtyMaxX; x++) {
@@ -1172,6 +1412,7 @@ export function commitStrokeAccumulator(layer, strokeAccum, brush, editingMask =
         if (ch.roughness) px.roughAlpha[pid] = Math.round(px.roughAlpha[pid] * (1 - sa));
         if (ch.metalness) px.metalAlpha[pid] = Math.round(px.metalAlpha[pid] * (1 - sa));
         if (ch.height) px.heightAlpha[pid] = Math.round(px.heightAlpha[pid] * (1 - sa));
+        for (const ed of extData) ed.buf.alpha[pid] = Math.round(ed.buf.alpha[pid] * (1 - sa));
         continue;
       }
 
@@ -1209,6 +1450,21 @@ export function commitStrokeAccumulator(layer, strokeAccum, brush, editingMask =
         const outH = sa + oldH * (1 - sa);
         if (outH > 1e-4) px.height[pid] = Math.round((sHeight * sa + px.height[pid] * oldH * (1 - sa)) / outH);
         px.heightAlpha[pid] = Math.round(clamp(outH, 0, 1) * 255);
+      }
+      for (const ed of extData) {
+        const oldE = ed.buf.alpha[pid] / 255;
+        const outE = sa + oldE * (1 - sa);
+        if (outE > 1e-4) {
+          if (ed.isRgb) {
+            const p3 = pid * 3;
+            ed.buf.values[p3] = Math.round((ed.er * sa + ed.buf.values[p3] * oldE * (1 - sa)) / outE);
+            ed.buf.values[p3 + 1] = Math.round((ed.eg * sa + ed.buf.values[p3 + 1] * oldE * (1 - sa)) / outE);
+            ed.buf.values[p3 + 2] = Math.round((ed.eb * sa + ed.buf.values[p3 + 2] * oldE * (1 - sa)) / outE);
+          } else {
+            ed.buf.values[pid] = Math.round((ed.byteVal * sa + ed.buf.values[pid] * oldE * (1 - sa)) / outE);
+          }
+        }
+        ed.buf.alpha[pid] = Math.round(clamp(outE, 0, 1) * 255);
       }
     }
   }
@@ -1258,6 +1514,12 @@ export function compositePaintDocument(doc, cues, { liveStroke = null, liveBrush
   const outR = new Uint8ClampedArray(n).fill(140);
   const outM = new Uint8ClampedArray(n).fill(0);
   const outH = new Uint8ClampedArray(n).fill(128);
+  const outExt = {};
+  for (const k of EXTENDED_PBR_KEYS) {
+    outExt[k] = k === "emissive"
+      ? new Uint8ClampedArray(n * 3)
+      : new Uint8ClampedArray(n).fill(defaultByteForExtChannel(k));
+  }
 
   // Initialize opaque neutral slate base
   for (let i = 0; i < n; i++) {
@@ -1277,6 +1539,26 @@ export function compositePaintDocument(doc, cues, { liveStroke = null, liveBrush
     let op = l.opacity ?? 1;
     if (l.parentId && folderMap.has(l.parentId)) op *= effectiveOpacity(folderMap.get(l.parentId));
     return op;
+  };
+  const collectMaskChain = (l) => {
+    const chain = [];
+    let cur = l;
+    while (cur) {
+      if (cur.mask?.enabled && cur.mask.pixels) chain.push(cur.mask);
+      cur = cur.parentId ? folderMap.get(cur.parentId) : null;
+    }
+    return chain;
+  };
+  const evalMaskChain = (chain, i) => {
+    if (!chain.length) return 1;
+    let m = 1;
+    for (const msk of chain) {
+      let mv = msk.pixels[i] / 255;
+      if (msk.invert) mv = 1 - mv;
+      const mop = clamp(msk.opacity ?? 1, 0, 1);
+      m *= (1 - mop) + mv * mop;
+    }
+    return m;
   };
 
   const bakedRes = doc.bakedMaps?.res || res;
@@ -1302,29 +1584,45 @@ export function compositePaintDocument(doc, cues, { liveStroke = null, liveBrush
     if (layer.kind === "folder" || !isVisible(layer)) continue;
     const op = effectiveOpacity(layer);
     if (op <= 0.001) continue;
-    const ch = layer.channels || { albedo: true, roughness: true, metalness: true, height: true };
-    const chOp = {
-      albedo: clamp(layer.channelOpacity?.albedo ?? 1, 0, 1),
-      roughness: clamp(layer.channelOpacity?.roughness ?? 1, 0, 1),
-      metalness: clamp(layer.channelOpacity?.metalness ?? 1, 0, 1),
-      height: clamp(layer.channelOpacity?.height ?? 1, 0, 1),
-    };
+    const ch = layer.channels || createDefaultChannelMap(false);
+    const chOp = (k) => clamp(layer.channelOpacity?.[k] ?? 1, 0, 1);
     const chBlend = (key) => {
       const b = layer.channelBlends?.[key];
       return b && b !== "Inherit" ? b : layer.blend;
     };
-    const maskPixels = layer.mask?.enabled ? layer.mask.pixels : null;
-    const maskInvert = !!layer.mask?.invert;
+    const maskChain = collectMaskChain(layer);
     const partFilter = layer.partFilter ?? -1;
+    const activeExtLayerKeys = EXTENDED_PBR_KEYS.filter((k) => ch[k] && chOp(k) > 0.001);
+
+    const resolveScalarExtSource = (srcObj) => {
+      const out = [];
+      for (const k of activeExtLayerKeys) {
+        if (k === "emissive") {
+          const [er, eg, eb] = hexToRgb01(srcObj?.extValues?.emissive ?? srcObj?.emissive ?? layer.extValues?.emissive ?? "#ff7a3b").map((v) => Math.round(v * 255));
+          out.push({ key: k, isRgb: true, er, eg, eb, w: chOp(k), b: chBlend(k) });
+        } else {
+          const v = srcObj?.extValues?.[k] ?? srcObj?.[k] ?? layer.extValues?.[k] ?? defaultByteForExtChannel(k) / 255;
+          const bVal = encodeScalarChannelByte(k, Number(v));
+          out.push({ key: k, isRgb: false, bVal, w: chOp(k), b: chBlend(k) });
+        }
+      }
+      return out;
+    };
 
     if (layer.kind === "paint" && layer.pixels) {
       const px = layer.pixels;
       const isLive = liveStroke && liveBrush && doc.selectedLayerId === layer.id && !doc.editingMask;
-      const bch = isLive ? getToolChannels(liveBrush) : { albedo: true, roughness: true, metalness: true, height: true };
+      const bch = isLive ? getToolChannels(liveBrush) : createDefaultChannelMap(false);
       const [lr, lg, lb] = isLive ? hexToRgb01(liveBrush.color).map((v) => Math.round(v * 255)) : [0, 0, 0];
       const lRough = isLive ? Math.round((liveBrush.roughness ?? 0.45) * 255) : 0;
       const lMetal = isLive ? Math.round((liveBrush.metalness ?? 0) * 255) : 0;
       const lHeight = isLive ? Math.round(((liveBrush.height ?? 0.25) * 0.5 + 0.5) * 255) : 128;
+      const wOpA = chOp("albedo"), wOpR = chOp("roughness"), wOpM = chOp("metalness"), wOpH = chOp("height");
+      const paintExtList = activeExtLayerKeys.filter((k) => px.extValues?.[k] || (isLive && bch[k])).map((k) => {
+        const hasBuf = !!px.extValues?.[k];
+        const bVal = isLive ? (k === "emissive" ? hexToRgb01(liveBrush.extValues?.emissive || "#ff7a3b").map((v) => Math.round(v * 255)) : encodeScalarChannelByte(k, Number(liveBrush.extValues?.[k] ?? defaultByteForExtChannel(k) / 255))) : null;
+        return { key: k, isRgb: k === "emissive", hasBuf, bufV: px.extValues?.[k], bufA: px.extAlphas?.[k], liveActive: !!(isLive && bch[k]), bVal, w: chOp(k), b: chBlend(k) };
+      });
 
       for (let i = 0; i < n; i++) {
         if (partFilter >= 0 && cues.partAt[i] >= 0 && cues.partAt[i] !== partFilter) continue;
@@ -1335,14 +1633,14 @@ export function compositePaintDocument(doc, cues, { liveStroke = null, liveBrush
         let aHeight = px.heightAlpha ? (px.heightAlpha[i] / 255) : aAlb;
         let sr = px.albedo[i4], sg = px.albedo[i4 + 1], sb = px.albedo[i4 + 2];
         let sRough = px.roughness[i], sMetal = px.metalness[i], sHeight = px.height[i];
+        const liveSa = (isLive && liveStroke.alpha[i] > 0.001) ? liveStroke.alpha[i] * (liveBrush.opacity ?? 1) : 0;
 
-        if (isLive && liveStroke.alpha[i] > 0.001) {
-          const sa = liveStroke.alpha[i] * (liveBrush.opacity ?? 1);
+        if (liveSa > 0.001) {
           if (liveBrush.tool === "erase") {
-            if (bch.albedo) aAlb *= (1 - sa);
-            if (bch.roughness) aRough *= (1 - sa);
-            if (bch.metalness) aMetal *= (1 - sa);
-            if (bch.height) aHeight *= (1 - sa);
+            if (bch.albedo) aAlb *= (1 - liveSa);
+            if (bch.roughness) aRough *= (1 - liveSa);
+            if (bch.metalness) aMetal *= (1 - liveSa);
+            if (bch.height) aHeight *= (1 - liveSa);
           } else {
             const useLiveBuf = liveStroke.hasPerPixelPbr || (liveBrush.tool === "stamp" && !!liveBrush.stampData);
             const brR = useLiveBuf ? liveStroke.color[i * 3] : lr;
@@ -1353,64 +1651,90 @@ export function compositePaintDocument(doc, cues, { liveStroke = null, liveBrush
             const brHeight = useLiveBuf ? liveStroke.height[i] : lHeight;
 
             if (bch.albedo) {
-              const outA2 = sa + aAlb * (1 - sa);
+              const outA2 = liveSa + aAlb * (1 - liveSa);
               if (outA2 > 1e-4) {
-                sr = Math.round((brR * sa + sr * aAlb * (1 - sa)) / outA2);
-                sg = Math.round((brG * sa + sg * aAlb * (1 - sa)) / outA2);
-                sb = Math.round((brB * sa + sb * aAlb * (1 - sa)) / outA2);
+                sr = Math.round((brR * liveSa + sr * aAlb * (1 - liveSa)) / outA2);
+                sg = Math.round((brG * liveSa + sg * aAlb * (1 - liveSa)) / outA2);
+                sb = Math.round((brB * liveSa + sb * aAlb * (1 - liveSa)) / outA2);
               }
               aAlb = outA2;
             }
             if (bch.roughness) {
-              const outR2 = sa + aRough * (1 - sa);
-              if (outR2 > 1e-4) sRough = Math.round((brRough * sa + sRough * aRough * (1 - sa)) / outR2);
+              const outR2 = liveSa + aRough * (1 - liveSa);
+              if (outR2 > 1e-4) sRough = Math.round((brRough * liveSa + sRough * aRough * (1 - liveSa)) / outR2);
               aRough = outR2;
             }
             if (bch.metalness) {
-              const outM2 = sa + aMetal * (1 - sa);
-              if (outM2 > 1e-4) sMetal = Math.round((brMetal * sa + sMetal * aMetal * (1 - sa)) / outM2);
+              const outM2 = liveSa + aMetal * (1 - liveSa);
+              if (outM2 > 1e-4) sMetal = Math.round((brMetal * liveSa + sMetal * aMetal * (1 - liveSa)) / outM2);
               aMetal = outM2;
             }
             if (bch.height) {
-              const outH2 = sa + aHeight * (1 - sa);
-              if (outH2 > 1e-4) sHeight = Math.round((brHeight * sa + sHeight * aHeight * (1 - sa)) / outH2);
+              const outH2 = liveSa + aHeight * (1 - liveSa);
+              if (outH2 > 1e-4) sHeight = Math.round((brHeight * liveSa + sHeight * aHeight * (1 - liveSa)) / outH2);
               aHeight = outH2;
             }
           }
         }
 
-        if (aAlb <= 0.001 && aRough <= 0.001 && aMetal <= 0.001 && aHeight <= 0.001) continue;
-        let maskMul = 1;
-        if (maskPixels) {
-          let m = maskPixels[i] / 255;
-          if (maskInvert) m = 1 - m;
-          maskMul = m;
-        }
-        const effAlb = clamp(aAlb * op * maskMul * chOp.albedo, 0, 1);
-        const effRough = clamp(aRough * op * maskMul * chOp.roughness, 0, 1);
-        const effMetal = clamp(aMetal * op * maskMul * chOp.metalness, 0, 1);
-        const effHeight = clamp(aHeight * op * maskMul * chOp.height, 0, 1);
+        const maskMul = evalMaskChain(maskChain, i);
+        if (maskMul <= 0.001) continue;
+
+        const effAlb = clamp(aAlb * op * maskMul * wOpA, 0, 1);
+        const effRough = clamp(aRough * op * maskMul * wOpR, 0, 1);
+        const effMetal = clamp(aMetal * op * maskMul * wOpM, 0, 1);
+        const effHeight = clamp(aHeight * op * maskMul * wOpH, 0, 1);
 
         if (ch.albedo && effAlb > 0.001) {
           const bA = chBlend("albedo");
-          const br = blendChannelByte(outA[i4], sr, bA);
-          const bg = blendChannelByte(outA[i4 + 1], sg, bA);
-          const bb = blendChannelByte(outA[i4 + 2], sb, bA);
-          outA[i4] = Math.round(outA[i4] * (1 - effAlb) + br * effAlb);
-          outA[i4 + 1] = Math.round(outA[i4 + 1] * (1 - effAlb) + bg * effAlb);
-          outA[i4 + 2] = Math.round(outA[i4 + 2] * (1 - effAlb) + bb * effAlb);
+          outA[i4] = Math.round(outA[i4] * (1 - effAlb) + blendChannelByte(outA[i4], sr, bA) * effAlb);
+          outA[i4 + 1] = Math.round(outA[i4 + 1] * (1 - effAlb) + blendChannelByte(outA[i4 + 1], sg, bA) * effAlb);
+          outA[i4 + 2] = Math.round(outA[i4 + 2] * (1 - effAlb) + blendChannelByte(outA[i4 + 2], sb, bA) * effAlb);
         }
-        if (ch.roughness && effRough > 0.001) {
-          const vR = blendChannelByte(outR[i], sRough, chBlend("roughness"));
-          outR[i] = Math.round(outR[i] * (1 - effRough) + vR * effRough);
-        }
-        if (ch.metalness && effMetal > 0.001) {
-          const vM = blendChannelByte(outM[i], sMetal, chBlend("metalness"));
-          outM[i] = Math.round(outM[i] * (1 - effMetal) + vM * effMetal);
-        }
-        if (ch.height && effHeight > 0.001) {
-          const vH = blendChannelByte(outH[i], sHeight, chBlend("height"));
-          outH[i] = Math.round(outH[i] * (1 - effHeight) + vH * effHeight);
+        if (ch.roughness && effRough > 0.001) outR[i] = Math.round(outR[i] * (1 - effRough) + blendChannelByte(outR[i], sRough, chBlend("roughness")) * effRough);
+        if (ch.metalness && effMetal > 0.001) outM[i] = Math.round(outM[i] * (1 - effMetal) + blendChannelByte(outM[i], sMetal, chBlend("metalness")) * effMetal);
+        if (ch.height && effHeight > 0.001) outH[i] = Math.round(outH[i] * (1 - effHeight) + blendChannelByte(outH[i], sHeight, chBlend("height")) * effHeight);
+
+        for (const pe of paintExtList) {
+          let ae = pe.hasBuf ? pe.bufA[i] / 255 : 0;
+          if (pe.isRgb) {
+            const p3 = i * 3;
+            let vr = pe.hasBuf ? pe.bufV[p3] : 0, vg = pe.hasBuf ? pe.bufV[p3 + 1] : 0, vb = pe.hasBuf ? pe.bufV[p3 + 2] : 0;
+            if (liveSa > 0.001 && pe.liveActive) {
+              if (liveBrush.tool === "erase") ae *= (1 - liveSa);
+              else {
+                const outAe = liveSa + ae * (1 - liveSa);
+                if (outAe > 1e-4) {
+                  vr = Math.round((pe.bVal[0] * liveSa + vr * ae * (1 - liveSa)) / outAe);
+                  vg = Math.round((pe.bVal[1] * liveSa + vg * ae * (1 - liveSa)) / outAe);
+                  vb = Math.round((pe.bVal[2] * liveSa + vb * ae * (1 - liveSa)) / outAe);
+                }
+                ae = outAe;
+              }
+            }
+            const we = clamp(ae * op * maskMul * pe.w, 0, 1);
+            if (we > 0.001) {
+              const dst = outExt[pe.key];
+              dst[p3] = Math.round(dst[p3] * (1 - we) + blendChannelByte(dst[p3], vr, pe.b) * we);
+              dst[p3 + 1] = Math.round(dst[p3 + 1] * (1 - we) + blendChannelByte(dst[p3 + 1], vg, pe.b) * we);
+              dst[p3 + 2] = Math.round(dst[p3 + 2] * (1 - we) + blendChannelByte(dst[p3 + 2], vb, pe.b) * we);
+            }
+          } else {
+            let v = pe.hasBuf ? pe.bufV[i] : defaultByteForExtChannel(pe.key);
+            if (liveSa > 0.001 && pe.liveActive) {
+              if (liveBrush.tool === "erase") ae *= (1 - liveSa);
+              else {
+                const outAe = liveSa + ae * (1 - liveSa);
+                if (outAe > 1e-4) v = Math.round((pe.bVal * liveSa + v * ae * (1 - liveSa)) / outAe);
+                ae = outAe;
+              }
+            }
+            const we = clamp(ae * op * maskMul * pe.w, 0, 1);
+            if (we > 0.001) {
+              const dst = outExt[pe.key];
+              dst[i] = Math.round(dst[i] * (1 - we) + blendChannelByte(dst[i], v, pe.b) * we);
+            }
+          }
         }
       }
     } else if (layer.kind === "fill") {
@@ -1424,15 +1748,12 @@ export function compositePaintDocument(doc, cues, { liveStroke = null, liveBrush
       const rot = ((f.patternRotation || 0) * Math.PI) / 180;
       const cRot = Math.cos(rot), sRot = Math.sin(rot);
       const patHStr = clamp(f.patternHeightStrength ?? 1.0, 0, 2);
+      const extList = resolveScalarExtSource(f);
+      const wOpA = chOp("albedo"), wOpR = chOp("roughness"), wOpM = chOp("metalness"), wOpH = chOp("height");
 
       for (let i = 0; i < n; i++) {
         if (partFilter >= 0 && cues.partAt[i] >= 0 && cues.partAt[i] !== partFilter) continue;
-        let eff = op;
-        if (maskPixels) {
-          let m = maskPixels[i] / 255;
-          if (maskInvert) m = 1 - m;
-          eff *= m;
-        }
+        const eff = op * evalMaskChain(maskChain, i);
         if (eff <= 0.001) continue;
 
         let sr = fr, sg = fg, sb = fb, sR = fRough, sM = fMetal, sH = fHeight;
@@ -1455,7 +1776,7 @@ export function compositePaintDocument(doc, cues, { liveStroke = null, liveBrush
           sH = clamp(Math.round(128 + ((pat.height[si] - 128) * pa) * patHStr + (fHeight - 128)), 0, 255);
         }
         const i4 = i * 4;
-        const wA = eff * chOp.albedo, wR = eff * chOp.roughness, wM = eff * chOp.metalness, wH = eff * chOp.height;
+        const wA = eff * wOpA, wR = eff * wOpR, wM = eff * wOpM, wH = eff * wOpH;
         if (ch.albedo && wA > 0.001) {
           const bA = chBlend("albedo");
           outA[i4] = Math.round(outA[i4] * (1 - wA) + blendChannelByte(outA[i4], sr, bA) * wA);
@@ -1465,6 +1786,19 @@ export function compositePaintDocument(doc, cues, { liveStroke = null, liveBrush
         if (ch.roughness && wR > 0.001) outR[i] = Math.round(outR[i] * (1 - wR) + blendChannelByte(outR[i], sR, chBlend("roughness")) * wR);
         if (ch.metalness && wM > 0.001) outM[i] = Math.round(outM[i] * (1 - wM) + blendChannelByte(outM[i], sM, chBlend("metalness")) * wM);
         if (ch.height && wH > 0.001) outH[i] = Math.round(outH[i] * (1 - wH) + blendChannelByte(outH[i], sH, chBlend("height")) * wH);
+        for (const es of extList) {
+          const we = eff * es.w;
+          if (we <= 0.001) continue;
+          const dst = outExt[es.key];
+          if (es.isRgb) {
+            const p3 = i * 3;
+            dst[p3] = Math.round(dst[p3] * (1 - we) + blendChannelByte(dst[p3], es.er, es.b) * we);
+            dst[p3 + 1] = Math.round(dst[p3 + 1] * (1 - we) + blendChannelByte(dst[p3 + 1], es.eg, es.b) * we);
+            dst[p3 + 2] = Math.round(dst[p3 + 2] * (1 - we) + blendChannelByte(dst[p3 + 2], es.eb, es.b) * we);
+          } else {
+            dst[i] = Math.round(dst[i] * (1 - we) + blendChannelByte(dst[i], es.bVal, es.b) * we);
+          }
+        }
       }
     } else if (layer.kind === "material") {
       const m = layer.material;
@@ -1474,15 +1808,12 @@ export function compositePaintDocument(doc, cues, { liveStroke = null, liveBrush
       const mHeight = clamp((m.height ?? 0) * 0.5 + 0.5, 0, 1) * 255;
       const gScale = m.grainScale || 10;
       const gStr = m.grainStrength || 0.08;
+      const extList = resolveScalarExtSource(m);
+      const wOpA = chOp("albedo"), wOpR = chOp("roughness"), wOpM = chOp("metalness"), wOpH = chOp("height");
 
       for (let i = 0; i < n; i++) {
         if (partFilter >= 0 && cues.partAt[i] >= 0 && cues.partAt[i] !== partFilter) continue;
-        let eff = op;
-        if (maskPixels) {
-          let mv = maskPixels[i] / 255;
-          if (maskInvert) mv = 1 - mv;
-          eff *= mv;
-        }
+        const eff = op * evalMaskChain(maskChain, i);
         if (eff <= 0.001) continue;
 
         const wx = cues.worldPos[i * 3] * gScale;
@@ -1491,7 +1822,7 @@ export function compositePaintDocument(doc, cues, { liveStroke = null, liveBrush
         const micro = cues.covered[i] ? (fbm3D(wx, wy, wz, 2, 71) - 0.5) * 2 * gStr : 0;
 
         const i4 = i * 4;
-        const wA = eff * chOp.albedo, wR = eff * chOp.roughness, wM = eff * chOp.metalness, wH = eff * chOp.height;
+        const wA = eff * wOpA, wR = eff * wOpR, wM = eff * wOpM, wH = eff * wOpH;
         if (ch.albedo && wA > 0.001) {
           const bA = chBlend("albedo");
           const sr = clamp(mr * (1 + micro), 0, 255);
@@ -1504,6 +1835,19 @@ export function compositePaintDocument(doc, cues, { liveStroke = null, liveBrush
         if (ch.roughness && wR > 0.001) outR[i] = Math.round(outR[i] * (1 - wR) + blendChannelByte(outR[i], clamp(mRough + micro * 90, 0, 255), chBlend("roughness")) * wR);
         if (ch.metalness && wM > 0.001) outM[i] = Math.round(outM[i] * (1 - wM) + blendChannelByte(outM[i], mMetal, chBlend("metalness")) * wM);
         if (ch.height && wH > 0.001) outH[i] = Math.round(outH[i] * (1 - wH) + blendChannelByte(outH[i], clamp(mHeight + micro * 70, 0, 255), chBlend("height")) * wH);
+        for (const es of extList) {
+          const we = eff * es.w;
+          if (we <= 0.001) continue;
+          const dst = outExt[es.key];
+          if (es.isRgb) {
+            const p3 = i * 3;
+            dst[p3] = Math.round(dst[p3] * (1 - we) + blendChannelByte(dst[p3], es.er, es.b) * we);
+            dst[p3 + 1] = Math.round(dst[p3 + 1] * (1 - we) + blendChannelByte(dst[p3 + 1], es.eg, es.b) * we);
+            dst[p3 + 2] = Math.round(dst[p3 + 2] * (1 - we) + blendChannelByte(dst[p3 + 2], es.eb, es.b) * we);
+          } else {
+            dst[i] = Math.round(dst[i] * (1 - we) + blendChannelByte(dst[i], es.bVal, es.b) * we);
+          }
+        }
       }
     } else if (layer.kind === "generator") {
       const g = layer.generator;
@@ -1516,6 +1860,8 @@ export function compositePaintDocument(doc, cues, { liveStroke = null, liveBrush
       const nScale = g.noiseScale ?? 6;
       const nMix = g.noiseMix ?? 0.35;
       const genInvert = !!g.invert;
+      const extList = resolveScalarExtSource(g);
+      const wOpA = chOp("albedo"), wOpR = chOp("roughness"), wOpM = chOp("metalness"), wOpH = chOp("height");
 
       for (let i = 0; i < n; i++) {
         if (!cues.covered[i]) continue;
@@ -1541,7 +1887,6 @@ export function compositePaintDocument(doc, cues, { liveStroke = null, liveBrush
           }
           metric = clamp(ny, 0, 1);
         } else {
-          // True 3D Triplanar Grunge
           metric = fbm3D(
             cues.worldPos[i * 3] * nScale * 0.7,
             cues.worldPos[i * 3 + 1] * nScale * 0.7,
@@ -1561,16 +1906,11 @@ export function compositePaintDocument(doc, cues, { liveStroke = null, liveBrush
         const combined = metric * (1 - nMix) + nVal * nMix;
         let genRaw = clamp((combined - (thr - soft * 0.5)) / soft, 0, 1);
         if (genInvert) genRaw = 1 - genRaw;
-        let genAlpha = genRaw * op;
-        if (maskPixels) {
-          let mv = maskPixels[i] / 255;
-          if (maskInvert) mv = 1 - mv;
-          genAlpha *= mv;
-        }
+        const genAlpha = genRaw * op * evalMaskChain(maskChain, i);
         if (genAlpha <= 0.001) continue;
 
         const i4 = i * 4;
-        const wA = genAlpha * chOp.albedo, wR = genAlpha * chOp.roughness, wM = genAlpha * chOp.metalness, wH = genAlpha * chOp.height;
+        const wA = genAlpha * wOpA, wR = genAlpha * wOpR, wM = genAlpha * wOpM, wH = genAlpha * wOpH;
         if (ch.albedo && wA > 0.001) {
           const bA = chBlend("albedo");
           outA[i4] = Math.round(outA[i4] * (1 - wA) + blendChannelByte(outA[i4], gr, bA) * wA);
@@ -1580,105 +1920,209 @@ export function compositePaintDocument(doc, cues, { liveStroke = null, liveBrush
         if (ch.roughness && wR > 0.001) outR[i] = Math.round(outR[i] * (1 - wR) + blendChannelByte(outR[i], gRough, chBlend("roughness")) * wR);
         if (ch.metalness && wM > 0.001) outM[i] = Math.round(outM[i] * (1 - wM) + blendChannelByte(outM[i], gMetal, chBlend("metalness")) * wM);
         if (ch.height && wH > 0.001) outH[i] = Math.round(outH[i] * (1 - wH) + blendChannelByte(outH[i], gHeight, chBlend("height")) * wH);
+        for (const es of extList) {
+          const we = genAlpha * es.w;
+          if (we <= 0.001) continue;
+          const dst = outExt[es.key];
+          if (es.isRgb) {
+            const p3 = i * 3;
+            dst[p3] = Math.round(dst[p3] * (1 - we) + blendChannelByte(dst[p3], es.er, es.b) * we);
+            dst[p3 + 1] = Math.round(dst[p3 + 1] * (1 - we) + blendChannelByte(dst[p3 + 1], es.eg, es.b) * we);
+            dst[p3 + 2] = Math.round(dst[p3 + 2] * (1 - we) + blendChannelByte(dst[p3 + 2], es.eb, es.b) * we);
+          } else {
+            dst[i] = Math.round(dst[i] * (1 - we) + blendChannelByte(dst[i], es.bVal, es.b) * we);
+          }
+        }
       }
-    } else if (layer.kind === "decal" && layer.decal?.stampMaps) {
-      const dec = layer.decal;
-      const st = dec.stampMaps;
-      const [ax, ay, az] = dec.anchorPos;
-      const [nx, ny, nz] = dec.anchorNormal;
-      const rMax = Math.max(0.05, dec.radius || 0.45);
-      const upRef = Math.abs(ny) < 0.9 ? [0, 1, 0] : [1, 0, 0];
-      let tx = upRef[1] * nz - upRef[2] * ny;
-      let ty = upRef[2] * nx - upRef[0] * nz;
-      let tz = upRef[0] * ny - upRef[1] * nx;
-      const tl = Math.hypot(tx, ty, tz) || 1;
-      tx /= tl; ty /= tl; tz /= tl;
-      const bx = ny * tz - nz * ty, by = nz * tx - nx * tz, bz = nx * ty - ny * tx;
-      const rot = ((dec.rotation || 0) * Math.PI) / 180;
+    }
+
+    // Unified Stamp Subcomponents (+ legacy decal fallback) on ANY visible layer!
+    const stampList = layer.stamps?.length
+      ? layer.stamps
+      : (layer.kind === "decal" && layer.decal?.stampMaps
+        ? [{
+            visible: true,
+            projection: "3d",
+            anchorPos: layer.decal.anchorPos,
+            anchorNormal: layer.decal.anchorNormal,
+            scale: layer.decal.radius || 0.45,
+            scaleX: 1,
+            scaleY: 1,
+            rotation: layer.decal.rotation || 0,
+            opacity: 1,
+            blend: layer.blend,
+            heightStrength: 0.5,
+            tint: "#ffffff",
+            stampData: layer.decal.stampMaps,
+          }]
+        : []);
+
+    for (const stmp of stampList) {
+      if (!stmp?.visible) continue;
+      const st = stmp.stampData || stmp.stampMaps;
+      const stAlb = st?.albedo || st?.rgba;
+      if (!stAlb || !st?.width) continue;
+      const stH = st.heightPx || st.width;
+      const stOp = op * clamp(stmp.opacity ?? 1, 0, 1);
+      if (stOp <= 0.001) continue;
+      const [tr, tg, tb] = hexToRgb01(stmp.tint || "#ffffff");
+      const rot = ((stmp.rotation || 0) * Math.PI) / 180;
       const cr = Math.cos(rot), srRot = Math.sin(rot);
-
-      for (let i = 0; i < n; i++) {
-        if (!cues.covered[i]) continue;
-        if (partFilter >= 0 && cues.partAt[i] >= 0 && cues.partAt[i] !== partFilter) continue;
-        // Normal similarity check prevents projecting onto reverse side
-        const ndot = cues.worldNormal[i * 3] * nx + cues.worldNormal[i * 3 + 1] * ny + cues.worldNormal[i * 3 + 2] * nz;
-        if (ndot < 0.15) continue;
-
-        const vx = cues.worldPos[i * 3] - ax;
-        const vy = cues.worldPos[i * 3 + 1] - ay;
-        const vz = cues.worldPos[i * 3 + 2] - az;
-        const uRaw = (vx * tx + vy * ty + vz * tz) / rMax;
-        const vRaw = (vx * bx + vy * by + vz * bz) / rMax;
-        const uRot = uRaw * cr - vRaw * srRot;
-        const vRot = uRaw * srRot + vRaw * cr;
-        const su = uRot * 0.5 + 0.5;
-        const sv = 1 - (vRot * 0.5 + 0.5);
-        if (su < 0 || su > 1 || sv < 0 || sv > 1) continue;
-
-        const stH = st.heightPx || st.width;
-        const ix = Math.min(st.width - 1, Math.max(0, Math.floor(su * st.width)));
-        const iy = Math.min(stH - 1, Math.max(0, Math.floor(sv * stH)));
-        const si = (iy * st.width + ix) * 4;
-        let eff = (st.albedo[si + 3] / 255) * op * clamp((ndot - 0.15) * 3, 0, 1);
-        if (maskPixels) {
-          let mv = maskPixels[i] / 255;
-          if (maskInvert) mv = 1 - mv;
-          eff *= mv;
+      const sx = Math.max(0.015, (stmp.scale ?? 0.28) * (stmp.scaleX ?? 1.0));
+      const sy = Math.max(0.015, (stmp.scale ?? 0.28) * (stmp.scaleY ?? 1.0));
+      const stCh = stmp.channels || ch;
+      const stBlend = stmp.blend && stmp.blend !== "Inherit" ? stmp.blend : layer.blend;
+      const hGain = stmp.heightStrength ?? 0.5;
+      const wOpA = chOp("albedo"), wOpR = chOp("roughness"), wOpM = chOp("metalness"), wOpH = chOp("height");
+      const extList = EXTENDED_PBR_KEYS.filter((k) => stCh[k] && chOp(k) > 0.001).map((k) => {
+        if (k === "emissive") {
+          const [er, eg, eb] = hexToRgb01(stmp.extValues?.emissive ?? layer.extValues?.emissive ?? "#ff7a3b").map((v) => Math.round(v * 255));
+          return { key: k, isRgb: true, er, eg, eb, w: chOp(k), b: stBlend };
         }
-        if (eff <= 0.001) continue;
+        const v = stmp.extValues?.[k] ?? layer.extValues?.[k] ?? defaultByteForExtChannel(k) / 255;
+        return { key: k, isRgb: false, bVal: encodeScalarChannelByte(k, Number(v)), w: chOp(k), b: stBlend };
+      });
 
-        const i4 = i * 4;
-        const wA = eff * chOp.albedo, wR = eff * chOp.roughness, wM = eff * chOp.metalness, wH = eff * chOp.height;
-        if (ch.albedo && wA > 0.001) {
-          const bA = chBlend("albedo");
-          outA[i4] = Math.round(outA[i4] * (1 - wA) + blendChannelByte(outA[i4], st.albedo[si], bA) * wA);
-          outA[i4 + 1] = Math.round(outA[i4 + 1] * (1 - wA) + blendChannelByte(outA[i4 + 1], st.albedo[si + 1], bA) * wA);
-          outA[i4 + 2] = Math.round(outA[i4 + 2] * (1 - wA) + blendChannelByte(outA[i4 + 2], st.albedo[si + 2], bA) * wA);
+      if (stmp.projection === "3d") {
+        const [ax, ay, az] = stmp.anchorPos || [0, 0.2, 1.0];
+        const [nx, ny, nz] = stmp.anchorNormal || [0, 0, 1];
+        const upRef = Math.abs(ny) < 0.9 ? [0, 1, 0] : [1, 0, 0];
+        let tx = upRef[1] * nz - upRef[2] * ny;
+        let ty = upRef[2] * nx - upRef[0] * nz;
+        let tz = upRef[0] * ny - upRef[1] * nx;
+        const tl = Math.hypot(tx, ty, tz) || 1;
+        tx /= tl; ty /= tl; tz /= tl;
+        const bx = ny * tz - nz * ty, by = nz * tx - nx * tz, bz = nx * ty - ny * tx;
+
+        for (let i = 0; i < n; i++) {
+          if (!cues.covered[i]) continue;
+          if (partFilter >= 0 && cues.partAt[i] >= 0 && cues.partAt[i] !== partFilter) continue;
+          const ndot = cues.worldNormal[i * 3] * nx + cues.worldNormal[i * 3 + 1] * ny + cues.worldNormal[i * 3 + 2] * nz;
+          if (ndot < 0.15) continue;
+
+          const vx = cues.worldPos[i * 3] - ax;
+          const vy = cues.worldPos[i * 3 + 1] - ay;
+          const vz = cues.worldPos[i * 3 + 2] - az;
+          const pxU = vx * tx + vy * ty + vz * tz;
+          const pxV = vx * bx + vy * by + vz * bz;
+          const uRot = (pxU * cr - pxV * srRot) / sx;
+          const vRot = (pxU * srRot + pxV * cr) / sy;
+          const su = uRot * 0.5 + 0.5;
+          const sv = 1 - (vRot * 0.5 + 0.5);
+          if (su < 0 || su > 1 || sv < 0 || sv > 1) continue;
+
+          const ix = Math.min(st.width - 1, Math.max(0, Math.floor(su * st.width)));
+          const iy = Math.min(stH - 1, Math.max(0, Math.floor(sv * stH)));
+          const si = (iy * st.width + ix) * 4;
+          const eff = (stAlb[si + 3] / 255) * stOp * clamp((ndot - 0.15) * 3, 0, 1) * evalMaskChain(maskChain, i);
+          if (eff <= 0.001) continue;
+
+          const i4 = i * 4;
+          const wA = eff * wOpA, wR = eff * wOpR, wM = eff * wOpM, wH = eff * wOpH;
+          if (stCh.albedo && wA > 0.001) {
+            const bA = chBlend("albedo") !== layer.blend ? chBlend("albedo") : stBlend;
+            outA[i4] = Math.round(outA[i4] * (1 - wA) + blendChannelByte(outA[i4], Math.round(stAlb[si] * tr), bA) * wA);
+            outA[i4 + 1] = Math.round(outA[i4 + 1] * (1 - wA) + blendChannelByte(outA[i4 + 1], Math.round(stAlb[si + 1] * tg), bA) * wA);
+            outA[i4 + 2] = Math.round(outA[i4 + 2] * (1 - wA) + blendChannelByte(outA[i4 + 2], Math.round(stAlb[si + 2] * tb), bA) * wA);
+          }
+          if (stCh.roughness && wR > 0.001 && st.roughness) outR[i] = Math.round(outR[i] * (1 - wR) + blendChannelByte(outR[i], st.roughness[si], chBlend("roughness")) * wR);
+          if (stCh.metalness && wM > 0.001 && st.metalness) outM[i] = Math.round(outM[i] * (1 - wM) + blendChannelByte(outM[i], st.metalness[si], chBlend("metalness")) * wM);
+          if (stCh.height && wH > 0.001 && st.height) {
+            const hByte = clamp(Math.round(128 + (st.height[si] - 128) * hGain), 0, 255);
+            outH[i] = Math.round(outH[i] * (1 - wH) + blendChannelByte(outH[i], hByte, chBlend("height")) * wH);
+          }
+          for (const es of extList) {
+            const we = eff * es.w;
+            if (we <= 0.001) continue;
+            const dst = outExt[es.key];
+            if (es.isRgb) {
+              const p3 = i * 3;
+              dst[p3] = Math.round(dst[p3] * (1 - we) + blendChannelByte(dst[p3], es.er, es.b) * we);
+              dst[p3 + 1] = Math.round(dst[p3 + 1] * (1 - we) + blendChannelByte(dst[p3 + 1], es.eg, es.b) * we);
+              dst[p3 + 2] = Math.round(dst[p3 + 2] * (1 - we) + blendChannelByte(dst[p3 + 2], es.eb, es.b) * we);
+            } else {
+              dst[i] = Math.round(dst[i] * (1 - we) + blendChannelByte(dst[i], es.bVal, es.b) * we);
+            }
+          }
         }
-        if (ch.roughness && wR > 0.001) outR[i] = Math.round(outR[i] * (1 - wR) + blendChannelByte(outR[i], st.roughness[si], chBlend("roughness")) * wR);
-        if (ch.metalness && wM > 0.001) outM[i] = Math.round(outM[i] * (1 - wM) + blendChannelByte(outM[i], st.metalness[si], chBlend("metalness")) * wM);
-        if (ch.height && wH > 0.001) outH[i] = Math.round(outH[i] * (1 - wH) + blendChannelByte(outH[i], st.height[si], chBlend("height")) * wH);
+      } else {
+        // 2D UV Projection (smooth dragging & scaling across UV canvas OR 3D surface UV)
+        const cu = stmp.u ?? 0.5, cv = stmp.v ?? 0.5;
+        const maxExtent = Math.hypot(sx, sy);
+        const minX = Math.max(0, Math.floor((cu - maxExtent) * res));
+        const maxX = Math.min(res - 1, Math.ceil((cu + maxExtent) * res));
+        const cyUv = 1 - cv;
+        const minY = Math.max(0, Math.floor((cyUv - maxExtent) * res));
+        const maxY = Math.min(res - 1, Math.ceil((cyUv + maxExtent) * res));
+
+        for (let py = minY; py <= maxY; py++) {
+          const vPx = 1 - (py + 0.5) / res;
+          for (let px = minX; px <= maxX; px++) {
+            const i = py * res + px;
+            if (partFilter >= 0 && cues.partAt[i] >= 0 && cues.partAt[i] !== partFilter) continue;
+            const du = ((px + 0.5) / res) - cu;
+            const dv = vPx - cv;
+            const lu = (du * cr - dv * srRot) / sx;
+            const lv = (du * srRot + dv * cr) / sy;
+            const su = lu * 0.5 + 0.5;
+            const sv = 1 - (lv * 0.5 + 0.5);
+            if (su < 0 || su > 1 || sv < 0 || sv > 1) continue;
+
+            const ix = Math.min(st.width - 1, Math.max(0, Math.floor(su * st.width)));
+            const iy = Math.min(stH - 1, Math.max(0, Math.floor(sv * stH)));
+            const si = (iy * st.width + ix) * 4;
+            const eff = (stAlb[si + 3] / 255) * stOp * evalMaskChain(maskChain, i);
+            if (eff <= 0.001) continue;
+
+            const i4 = i * 4;
+            const wA = eff * wOpA, wR = eff * wOpR, wM = eff * wOpM, wH = eff * wOpH;
+            if (stCh.albedo && wA > 0.001) {
+              const bA = chBlend("albedo") !== layer.blend ? chBlend("albedo") : stBlend;
+              outA[i4] = Math.round(outA[i4] * (1 - wA) + blendChannelByte(outA[i4], Math.round(stAlb[si] * tr), bA) * wA);
+              outA[i4 + 1] = Math.round(outA[i4 + 1] * (1 - wA) + blendChannelByte(outA[i4 + 1], Math.round(stAlb[si + 1] * tg), bA) * wA);
+              outA[i4 + 2] = Math.round(outA[i4 + 2] * (1 - wA) + blendChannelByte(outA[i4 + 2], Math.round(stAlb[si + 2] * tb), bA) * wA);
+            }
+            if (stCh.roughness && wR > 0.001 && st.roughness) outR[i] = Math.round(outR[i] * (1 - wR) + blendChannelByte(outR[i], st.roughness[si], chBlend("roughness")) * wR);
+            if (stCh.metalness && wM > 0.001 && st.metalness) outM[i] = Math.round(outM[i] * (1 - wM) + blendChannelByte(outM[i], st.metalness[si], chBlend("metalness")) * wM);
+            if (stCh.height && wH > 0.001 && st.height) {
+              const hByte = clamp(Math.round(128 + (st.height[si] - 128) * hGain), 0, 255);
+              outH[i] = Math.round(outH[i] * (1 - wH) + blendChannelByte(outH[i], hByte, chBlend("height")) * wH);
+            }
+            for (const es of extList) {
+              const we = eff * es.w;
+              if (we <= 0.001) continue;
+              const dst = outExt[es.key];
+              if (es.isRgb) {
+                const p3 = i * 3;
+                dst[p3] = Math.round(dst[p3] * (1 - we) + blendChannelByte(dst[p3], es.er, es.b) * we);
+                dst[p3 + 1] = Math.round(dst[p3 + 1] * (1 - we) + blendChannelByte(dst[p3 + 1], es.eg, es.b) * we);
+                dst[p3 + 2] = Math.round(dst[p3 + 2] * (1 - we) + blendChannelByte(dst[p3 + 2], es.eb, es.b) * we);
+              } else {
+                dst[i] = Math.round(dst[i] * (1 - we) + blendChannelByte(dst[i], es.bVal, es.b) * we);
+              }
+            }
+          }
+        }
       }
     }
   }
 
-  // Optional active mask overlay / channel solo diagnostic visualization
-  if (viewChannel === "mask") {
-    const sel = doc.layers.find((l) => l.id === doc.selectedLayerId);
-    const mp = sel?.mask?.pixels;
-    for (let i = 0; i < n; i++) {
-      const m = mp ? mp[i] : 255;
-      outA[i * 4] = m; outA[i * 4 + 1] = m; outA[i * 4 + 2] = m;
-    }
-  } else if (viewChannel === "baseColor") {
-    // Albedo unchanged
-  } else if (viewChannel === "roughness") {
-    for (let i = 0; i < n; i++) {
-      outA[i * 4] = outR[i]; outA[i * 4 + 1] = outR[i]; outA[i * 4 + 2] = outR[i];
-    }
-  } else if (viewChannel === "metalness") {
-    for (let i = 0; i < n; i++) {
-      outA[i * 4] = outM[i]; outA[i * 4 + 1] = outM[i]; outA[i * 4 + 2] = outM[i];
-    }
-  } else if (viewChannel === "height") {
-    for (let i = 0; i < n; i++) {
-      outA[i * 4] = outH[i]; outA[i * 4 + 1] = outH[i]; outA[i * 4 + 2] = outH[i];
-    }
-  }
-
-  // Derive tangent-space Normal map from composited height buffer
+  // Derive tangent-space Normal map from composited height + Normal Strength channel
   const outN = new Uint8ClampedArray(n * 4);
   const sampleH = (x, y) => outH[clamp(y, 0, res - 1) * res + clamp(x, 0, res - 1)] / 255;
+  const normArr = outExt.normal;
   for (let y = 0; y < res; y++) {
     for (let x = 0; x < res; x++) {
+      const i = y * res + x;
+      const gain = (normArr[i] / 255) * 2.0 * 2.8;
       const dx = sampleH(x + 1, y) - sampleH(x - 1, y);
       const dy = sampleH(x, y + 1) - sampleH(x, y - 1);
-      let nx = -dx * 2.8;
-      let ny = -dy * 2.8;
+      let nx = -dx * gain;
+      let ny = -dy * gain;
       let nz = 1.0;
       const l = Math.hypot(nx, ny, nz);
       nx /= l; ny /= l; nz /= l;
-      const i4 = (y * res + x) * 4;
+      const i4 = i * 4;
       outN[i4] = Math.round((nx * 0.5 + 0.5) * 255);
       outN[i4 + 1] = Math.round((ny * 0.5 + 0.5) * 255);
       outN[i4 + 2] = Math.round((nz * 0.5 + 0.5) * 255);
@@ -1686,7 +2130,32 @@ export function compositePaintDocument(doc, cues, { liveStroke = null, liveBrush
     }
   }
 
-  return { res, albedo: outA, roughness: outR, metalness: outM, height: outH, normal: outN };
+  // Channel solo diagnostic visualization (supports all 19 PBR channels + active Mask)
+  if (viewChannel === "mask") {
+    const sel = doc.layers.find((l) => l.id === doc.selectedLayerId);
+    const mp = sel?.mask?.pixels;
+    for (let i = 0; i < n; i++) {
+      let m = mp ? mp[i] : 255;
+      if (sel?.mask?.invert) m = 255 - m;
+      outA[i * 4] = m; outA[i * 4 + 1] = m; outA[i * 4 + 2] = m;
+    }
+  } else if (viewChannel === "roughness") {
+    for (let i = 0; i < n; i++) { outA[i * 4] = outR[i]; outA[i * 4 + 1] = outR[i]; outA[i * 4 + 2] = outR[i]; }
+  } else if (viewChannel === "metalness") {
+    for (let i = 0; i < n; i++) { outA[i * 4] = outM[i]; outA[i * 4 + 1] = outM[i]; outA[i * 4 + 2] = outM[i]; }
+  } else if (viewChannel === "height") {
+    for (let i = 0; i < n; i++) { outA[i * 4] = outH[i]; outA[i * 4 + 1] = outH[i]; outA[i * 4 + 2] = outH[i]; }
+  } else if (viewChannel === "normal") {
+    for (let i = 0; i < n * 4; i += 4) { outA[i] = outN[i]; outA[i + 1] = outN[i + 1]; outA[i + 2] = outN[i + 2]; }
+  } else if (viewChannel === "emissive") {
+    const em = outExt.emissive;
+    for (let i = 0; i < n; i++) { outA[i * 4] = em[i * 3]; outA[i * 4 + 1] = em[i * 3 + 1]; outA[i * 4 + 2] = em[i * 3 + 2]; }
+  } else if (outExt[viewChannel]) {
+    const buf = outExt[viewChannel];
+    for (let i = 0; i < n; i++) { outA[i * 4] = buf[i]; outA[i * 4 + 1] = buf[i]; outA[i * 4 + 2] = buf[i]; }
+  }
+
+  return { res, albedo: outA, roughness: outR, metalness: outM, height: outH, normal: outN, ext: outExt, ...outExt };
 }
 
 export function sampleCompositedAtUV(comp, u, v) {

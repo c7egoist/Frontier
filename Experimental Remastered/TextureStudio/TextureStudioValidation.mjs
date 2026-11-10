@@ -48,6 +48,13 @@ const {
 } = await import("./Engine/Patterns/StarterCatalogBridge.js");
 
 const {
+  PAINT_PBR_CHANNELS,
+  EXTENDED_PBR_KEYS,
+  createDefaultExtendedValues,
+  createStampInstance,
+  generateProceduralMask,
+  featherMaskPixels,
+  lookupSurfaceAtUv,
   buildPaintTargetGeometry,
   buildMeshPaintIndex,
   buildDefaultMeshCues,
@@ -750,14 +757,16 @@ await suite("8. GPU Bake/Paint Shaders, Q/Tab/Right-Click Tool Popups & Draggabl
   assert(addTrigger, "Missing + Channel dropdown trigger in popup");
   addTrigger.click(); // Open dropdown!
   const chanMenuItems = rightPop.querySelectorAll(".pbr-chan-menu .menu-item");
-  assert.equal(chanMenuItems.length, 1, "Removed channel (Roughness) must move back into Add Channel dropdown");
-  assert.equal(chanMenuItems[0].dataset.channel, "roughness");
+  assert(chanMenuItems.length >= 16, `Expected >=16 available channels (removed Roughness + 15 extended PBR channels), got ${chanMenuItems.length}`);
+  assert(chanMenuItems.some((m) => m.dataset.channel === "roughness"), "Removed channel (Roughness) must move back into Add Channel dropdown");
+  assert(chanMenuItems.some((m) => m.dataset.channel === "clearcoat") && chanMenuItems.some((m) => m.dataset.channel === "emissive"), "Add Channel dropdown must offer extended PBR channels (clearcoat, emissive, etc.)");
   // Filter search in dropdown
   const chanSearch = rightPop.querySelector(".pbr-chan-menu .pill-menu-search-input");
   chanSearch.value = "rough";
   chanSearch.dispatchEvent({ type: "input" });
-  assert.equal(rightPop.querySelectorAll(".pbr-chan-menu .menu-item").length, 1, "Dropdown filter should retain Roughness");
-  rightPop.querySelector(".pbr-chan-menu .menu-item").click(); // Re-add!
+  const filteredRoughItems = rightPop.querySelectorAll(".pbr-chan-menu .menu-item");
+  assert(filteredRoughItems.some((m) => m.dataset.channel === "roughness"), "Dropdown filter should retain Roughness");
+  filteredRoughItems.find((m) => m.dataset.channel === "roughness").click(); // Re-add!
   assert.equal(rightPop.querySelectorAll(".pbr-chan-pill").length, 4, "Re-adding from dropdown must restore pill");
 
   const subTabs = rightPop.querySelectorAll(".tool-popup-subtab");
@@ -1450,6 +1459,223 @@ await suite("14. Texture Paint Clean Layer Inspector, Right-Click Tool-Specific 
   assert.equal(gpu14.compMat.uniforms.uGenInvert.value, 1, "Composite pass must forward generator invert flag to GPU");
   gpu14.dispose();
   cuesGeo.dispose();
+});
+
+// ----------------------------------------------------------------- 15. FULL 19-CHANNEL PBR, FOLDERS, PROCEDURAL MASKS & MOVABLE STAMPS
+await suite("15. Full 19-Channel PBR, Folder & Procedural Masks, Movable/Scalable/Rotatable Stamps & GLSL3 Sampler Guard", async () => {
+  assert.equal(PAINT_PBR_CHANNELS.length, 19, "Expected 19 PBR channels in PAINT_PBR_CHANNELS");
+  assert.equal(EXTENDED_PBR_KEYS.length, 15, "Expected 15 extended PBR keys");
+
+  const r = 48;
+  const geo = new THREE.SphereGeometry(1, 24, 16);
+  const idx = buildMeshPaintIndex(geo);
+  const cues = buildDefaultMeshCues(geo, idx, r);
+
+  // 15a. Extended PBR Fill + Paint Stroke + Mask Luminance + Procedural Mask + Feathering
+  const doc = createPaintDocument(r);
+  const extFill = createPaintLayer("fill", {
+    res: r,
+    fill: {
+      color: "#d4af37",
+      roughness: 0.22,
+      metalness: 0.9,
+      height: 0.25,
+      extValues: createDefaultExtendedValues({ clearcoat: 0.85, coatRoughness: 0.06, emissive: "#ff4422", emissiveIntensity: 1.5, iridescence: 0.75, anisotropy: 0.65 }),
+    },
+    channels: {
+      albedo: true, roughness: true, metalness: true, height: true,
+      clearcoat: true, coatRoughness: true, emissive: true, emissiveIntensity: true, iridescence: true, anisotropy: true,
+    },
+  });
+  doc.layers.push(extFill);
+
+  const paintExt = createPaintLayer("paint", {
+    res: r,
+    channels: { albedo: true, roughness: true, metalness: true, height: true, sheen: true, transmission: true, opacity: true },
+  });
+  doc.layers.push(paintExt);
+
+  const acc = createStrokeAccumulator(r);
+  const strokeBrush = {
+    tool: "paint",
+    tip: "round",
+    color: "#33aaee",
+    opacity: 0.9,
+    flow: 0.85,
+    hardness: 0.7,
+    roughness: 0.4,
+    metalness: 0.1,
+    height: 0.2,
+    paintChannels: { albedo: true, roughness: true, metalness: true, height: true, sheen: true, transmission: true, opacity: true },
+    extValues: { sheen: 0.9, transmission: 0.7, opacity: 0.5 },
+  };
+  applyBrushDabUV({ strokeAccum: acc, cues, u: 0.5, v: 0.5, pixelRadius: 10, brush: strokeBrush });
+  assert(commitStrokeAccumulator(paintExt, acc, strokeBrush, false), "Extended PBR paint stroke must commit");
+
+  const compExt = compositePaintDocument(doc, cues);
+  const midPx = Math.floor(r * 0.5) * r + Math.floor(r * 0.5);
+  assert(compExt.ext.clearcoat[midPx] > 180, "Composited extended clearcoat buffer must preserve clearcoat value");
+  assert(compExt.ext.emissive[midPx * 3] > 180, "Composited extended emissive RGB buffer must preserve glow color");
+  assert(compExt.ext.anisotropy[midPx] > 120, "Composited extended anisotropy buffer must preserve anisotropy value");
+  assert(compExt.ext.sheen[midPx] > 150, "Painted sheen channel must appear in composited extended output");
+  assert(compExt.ext.transmission[midPx] > 120, "Painted transmission channel must appear in composited extended output");
+
+  // 15b. Folder visibility, opacity & parent mask cascade + Procedural mask + Feathering + Luminance stroke
+  const folder = createPaintLayer("folder", { res: r, name: "Armor Group", opacity: 0.5 });
+  folder.mask = { enabled: true, invert: false, opacity: 1.0, pixels: new Uint8ClampedArray(r * r).fill(255) };
+  // Zero out top-left quadrant of folder mask
+  for (let y = 0; y < r / 2; y++) for (let x = 0; x < r / 2; x++) folder.mask.pixels[y * r + x] = 0;
+  featherMaskPixels(folder.mask.pixels, r, 1);
+
+  const child = createPaintLayer("fill", {
+    res: r,
+    name: "Red Accent Inside Folder",
+    parentId: folder.id,
+    fill: { color: "#ff0000", roughness: 0.5, metalness: 0.0, height: 0 },
+  });
+  // Test procedural mask on child layer + partial luminance mask stroke
+  child.mask = { enabled: true, invert: false, opacity: 0.8, pixels: new Uint8ClampedArray(r * r).fill(255) };
+  generateProceduralMask(child.mask, cues, { preset: "edge-wear", threshold: 0.35, softness: 0.25, noiseScale: 6, noiseMix: 0.2 });
+  const mAcc = createStrokeAccumulator(r);
+  applyBrushDabUV({ strokeAccum: mAcc, cues, u: 0.75, v: 0.25, pixelRadius: 8, brush: { tool: "paint", tip: "round", color: "#808080", opacity: 1, flow: 1, hardness: 0.9 } });
+  commitStrokeAccumulator(child, mAcc, { tool: "paint", color: "#808080", opacity: 1 }, true);
+  assert(child.mask.pixels[Math.floor(r * 0.75) * r + Math.floor(r * 0.75)] < 200, "Grey luminance mask stroke must paint intermediate alpha values onto mask");
+
+  const folderDoc = createPaintDocument(r);
+  folderDoc.layers[0].fill.color = "#303030";
+  folderDoc.layers.push(folder, child);
+  const folderCompA = compositePaintDocument(folderDoc, cues);
+  const hiddenCornerPx = 2 * r + 2;
+  const visibleCornerPx = (r - 4) * r + (r - 4);
+  assert(folderCompA.albedo[hiddenCornerPx * 4] < 80, "Folder mask zero region must suppress nested child layer");
+  folder.visible = false;
+  const folderCompHidden = compositePaintDocument(folderDoc, cues);
+  assert.equal(folderCompHidden.albedo[visibleCornerPx * 4], 48, "Hiding parent folder must hide nested child layers completely");
+
+  // 15c. Unified Movable / Scalable / Rotatable Stamp Subcomponents (UV & 3D)
+  const sw = 32;
+  const sAlb = new Uint8ClampedArray(sw * sw * 4);
+  const sRough = new Uint8ClampedArray(sw * sw * 4);
+  const sMetal = new Uint8ClampedArray(sw * sw * 4);
+  const sHeight = new Uint8ClampedArray(sw * sw * 4);
+  for (let y = 0; y < sw; y++) {
+    for (let x = 0; x < sw; x++) {
+      const i4 = (y * sw + x) * 4;
+      const d = Math.hypot((x + 0.5) / sw - 0.5, (y + 0.5) / sw - 0.5);
+      if (d <= 0.44) {
+        sAlb[i4] = 240; sAlb[i4 + 1] = 110; sAlb[i4 + 2] = 40; sAlb[i4 + 3] = 255;
+        sRough[i4] = 80; sRough[i4 + 3] = 255;
+        sMetal[i4] = 200; sMetal[i4 + 3] = 255;
+        sHeight[i4] = 210; sHeight[i4 + 3] = 255;
+      }
+    }
+  }
+  const patEval = { width: sw, heightPx: sw, albedo: sAlb, roughness: sRough, metalness: sMetal, height: sHeight };
+  const stampDoc = createPaintDocument(r);
+  const stLayer = createPaintLayer("decal", { res: r, name: "Movable Decals" });
+  const st = createStampInstance({
+    name: "Test Emblem",
+    projection: "uv",
+    u: 0.25,
+    v: 0.75,
+    scale: 0.16,
+    rotation: 0,
+    opacity: 1,
+    stampData: patEval,
+  });
+  stLayer.stamps.push(st);
+  stampDoc.layers.push(stLayer);
+  const compStampA = compositePaintDocument(stampDoc, cues);
+  st.u = 0.75;
+  st.v = 0.25;
+  st.scale = 0.28;
+  st.rotation = 45;
+  const compStampB = compositePaintDocument(stampDoc, cues);
+  let stampMoveDiff = 0;
+  for (let i = 0; i < compStampA.albedo.length; i += 4) stampMoveDiff += Math.abs(compStampA.albedo[i] - compStampB.albedo[i]);
+  assert(stampMoveDiff > 300, "Moving/scaling/rotating stamp subcomponent must re-composite pixels at new position");
+
+  // Test 3D projected stamp instance via lookupSurfaceAtUv
+  const surf = lookupSurfaceAtUv(cues, 0.5, 0.5);
+  assert(surf && surf.pos.length === 3 && surf.normal.length === 3, "lookupSurfaceAtUv must recover valid 3D position & normal");
+  st.projection = "3d";
+  st.anchorPos = surf.pos;
+  st.anchorNormal = surf.normal;
+  const compStamp3D = compositePaintDocument(stampDoc, cues);
+  assert(compStamp3D.albedo.length === r * r * 4, "3D stamp projection compositing must succeed");
+
+  // 15d. GPU Shader Sampler Limit Guard (WebGL2 limit is 16 textures/stage; every shader must have <= 15 sampler2D)
+  const { PAINT_GLSL3_SHADERS, GpuPaintSession } = await import("./Engine/GpuPaintEngine.js");
+  for (const [sName, src] of Object.entries(PAINT_GLSL3_SHADERS)) {
+    const count = (src.match(/uniform\s+sampler2D\b/g) || []).length;
+    assert(count <= 15, `GLSL shader ${sName} exceeds safe WebGL2 sampler cap (${count} > 15)`);
+  }
+  const mockGpu15 = {
+    capabilities: { isWebGL2: true },
+    extensions: { get: () => ({}) },
+    getContext: () => ({ getParameter: () => "ValidatedWebGL2" }),
+    autoClear: true,
+    getRenderTarget: () => null,
+    getScissorTest: () => false,
+    setScissorTest() {},
+    setRenderTarget() {},
+    render() {},
+    readRenderTargetPixels(rt, x, y, w, h, out) { out.fill(180); },
+    getClearColor: (c) => c.set(0, 0, 0),
+    getClearAlpha: () => 1,
+    setClearColor() {},
+    clear() {},
+  };
+  const gpu15 = new GpuPaintSession(mockGpu15, r);
+  gpu15.uploadMeshCues(cues, null);
+  gpu15.composite(doc, { viewChannel: "emissive" });
+  const exp15 = gpu15.readExportChannels({ emissive: true, clearcoat: true, anisotropy: true });
+  assert(exp15.ext.emissive && exp15.ext.clearcoat && exp15.ext.anisotropy, "GpuPaintSession readExportChannels must extract requested extended PBR maps");
+  gpu15.dispose();
+
+  // 15e. Live UI Integration: Move Tool (V), 19-Channel Inspector, Layer Stamps & Layer Mask Sections
+  globalThis.window.__frontierTextureStudio.switchWorkspace("paint");
+  globalThis.window.dispatchEvent({ type: "keydown", key: "v" });
+  const activeMoveBtn = [...globalThis.document.querySelectorAll(".toolbar-group .pill-btn")].find((b) => b.classList.contains("active"));
+  assert(activeMoveBtn && /Transform Stamp/i.test(activeMoveBtn.title || ""), "Pressing V must activate Transform Stamp (Move) tool");
+
+  const cols15 = [...globalThis.document.querySelectorAll(".studio-column")];
+  const rightAside15 = cols15[cols15.length - 1];
+  const chanTrigger = rightAside15.querySelector(".pbr-add-trigger");
+  assert(chanTrigger, "Layer Inspector must expose + Channel dropdown for 19 PBR channels");
+  chanTrigger.click();
+  const clearcoatItem = rightAside15
+    .querySelectorAll(".pbr-chan-menu .menu-item")
+    .find((m) => m.dataset.channel === "clearcoat");
+  assert(clearcoatItem, "Layer Inspector + Channel dropdown must offer Clearcoat");
+  clearcoatItem.click();
+  assert(
+    rightAside15
+      .querySelectorAll(".pbr-chan-pill")
+      .some((p) => p.dataset.channel === "clearcoat"),
+    "Adding Clearcoat must add Clearcoat pill to Active PBR Channels",
+  );
+  const sectionTitles15 = [...rightAside15.querySelectorAll(".section-title")].map((s) => s.textContent);
+  assert(sectionTitles15.some((t) => /Layer Mask/i.test(t)), "Layer Inspector must expose unconditional Layer Mask section");
+
+  // Add a Stamp layer via + Stamp and confirm Layer Stamps section + Rough tab
+  const addStampLayerBtn = [...globalThis.document.querySelectorAll(".studio-column .chip-btn")].find((b) => /\+ Stamp/i.test(b.textContent || ""));
+  assert(addStampLayerBtn, "Left layer panel must expose + Stamp button");
+  addStampLayerBtn.click();
+  const titlesAfterStamp = [...rightAside15.querySelectorAll(".section-title")].map((s) => s.textContent);
+  assert(titlesAfterStamp.some((t) => /Layer Stamps/i.test(t)), "Selecting a Stamp layer must expose Layer Stamps section in inspector");
+  const roughInspectBtn = [...rightAside15.querySelectorAll(".segmented-track button")].find((b) => /Rough/i.test(b.textContent || ""));
+  assert(roughInspectBtn, "Inspect Channel SegmentedRow must retain Rough tab");
+
+  // Confirm Right-click popup also exposes Move tab at [5] and Stamp tab at [3]
+  globalThis.window.dispatchEvent({ type: "keydown", key: "q" });
+  const popTabs15 = globalThis.document.body.querySelectorAll(".tool-popup-menu .tool-popup-tab");
+  assert.equal(popTabs15.length, 6, "Right-click/Q popup must offer all 6 tools including Move");
+  assert(/Stamp/i.test(popTabs15[3].textContent || ""), "Right-click popup tab[3] must remain Stamp");
+  assert(/Move/i.test(popTabs15[5].textContent || ""), "Right-click popup tab[5] must be Move");
+  globalThis.window.dispatchEvent({ type: "keydown", key: "Escape" });
+
+  geo.dispose();
 });
 
 console.log(`\nALL ${results.length} VALIDATION SUITES PASSED CLEANLY`);

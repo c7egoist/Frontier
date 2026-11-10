@@ -14,6 +14,19 @@ import { STLLoader } from "../Vendor/addons/STLLoader.js";
 import { materials as MATERIAL_CATALOG } from "../Engine/Materials/materials.js";
 import {
   PAINT_MESH_PRESETS as PAINT_MESH_LIST,
+  PAINT_PBR_CHANNELS,
+  PAINT_PBR_CHANNEL_ROWS,
+  PAINT_PBR_CHANNEL_MAP,
+  EXTENDED_PBR_KEYS,
+  createDefaultChannelMap,
+  createDefaultChannelOpacities,
+  createDefaultChannelBlends,
+  createDefaultExtendedValues,
+  defaultByteForExtChannel,
+  createStampInstance,
+  generateProceduralMask,
+  featherMaskPixels,
+  lookupSurfaceAtUv,
   buildPaintTargetGeometry,
   buildMeshPaintIndex,
   createPaintDocument,
@@ -66,13 +79,25 @@ import {
 } from "../StudioControls.js";
 
 function clonePixels(buf) {
-  return {
+  const out = {
     res: buf.res,
     albedo: new Uint8ClampedArray(buf.albedo),
     roughness: new Uint8ClampedArray(buf.roughness),
     metalness: new Uint8ClampedArray(buf.metalness),
     height: new Uint8ClampedArray(buf.height),
   };
+  if (buf.roughAlpha) out.roughAlpha = new Uint8ClampedArray(buf.roughAlpha);
+  if (buf.metalAlpha) out.metalAlpha = new Uint8ClampedArray(buf.metalAlpha);
+  if (buf.heightAlpha) out.heightAlpha = new Uint8ClampedArray(buf.heightAlpha);
+  if (buf.extValues) {
+    out.extValues = {};
+    for (const [k, v] of Object.entries(buf.extValues)) out.extValues[k] = new Uint8ClampedArray(v);
+  }
+  if (buf.extAlphas) {
+    out.extAlphas = {};
+    for (const [k, v] of Object.entries(buf.extAlphas)) out.extAlphas[k] = new Uint8ClampedArray(v);
+  }
+  return out;
 }
 
 function createPaintEnv(renderer) {
@@ -142,6 +167,7 @@ const TOOL_LABELS = {
   fill: "Fill",
   stamp: "Stamp",
   eyedropper: "Sample",
+  move: "Transform Stamp",
 };
 
 const QUICK_SWATCHES = ["#eff4cf", "#e8c27a", "#d96b4e", "#6ea8ff", "#7ac98f", "#d6dce6", "#42464f", "#141518"];
@@ -157,20 +183,21 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   });
   const defaultStamp = stampPreviews[0];
 
-  const defaultChannels = () => ({ albedo: true, roughness: true, metalness: true, height: true });
+  const defaultChannels = () => createDefaultChannelMap(false);
 
   let state = {
     doc: createPaintDocument(res),
     meshId: "teapot",
     customGeo: null,
     viewportMode: "3d", // "3d" | "split" | "2d"
-    viewChannel: "lit", // "lit" | "baseColor" | "roughness" | "metalness" | "height" | "mask"
+    viewChannel: "lit", // "lit" | "mask" | any key of PAINT_PBR_CHANNELS
     fillScope: "part", // "part" | "island" | "all"
-    inspectedLayerChannel: "all", // "all" | "albedo" | "roughness" | "metalness" | "height"
+    inspectedLayerChannel: "all", // "all" | any key of PAINT_PBR_CHANNELS
     popupSubTab: "main", // "main" | "dynamics" | "curves"
     activeCurveKey: "falloff", // "falloff" | "sizeOverStroke" | "opacityOverStroke" | "hueOverStroke"
+    stampPlaceMode: "subcomponent", // "subcomponent" | "layer"
     brush: {
-      tool: "paint", // "paint" | "erase" | "fill" | "stamp" | "eyedropper"
+      tool: "paint", // "paint" | "erase" | "fill" | "stamp" | "eyedropper" | "move"
       tip: "round", // "round" | "chisel" | "chalk" | "splatter" | "sponge" | "custom"
       color: "#e8c27a",
       roughness: 0.34,
@@ -189,6 +216,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       paintChannels: defaultChannels(),
       eraseChannels: defaultChannels(),
       fillChannels: defaultChannels(),
+      extValues: createDefaultExtendedValues(),
       jitter: {
         size: 0.0,
         angle: 0.0,
@@ -220,6 +248,11 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       },
       stampName: defaultStamp.name,
       stampData: defaultStamp.evaluated,
+      stampScale: 0.28,
+      stampRotation: 0,
+      stampOpacity: 1.0,
+      stampHeightStrength: 0.5,
+      stampTint: "#ffffff",
       customTipName: "",
       customTipData: null,
     },
@@ -406,12 +439,14 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     ["fill", "Fill", "Fill"],
     ["stamp", "Stamp", "Stamp"],
     ["eyedropper", "Sample", "Pipette"],
+    ["move", "Move", "Move"],
   ]) {
     const b = Construct("button", "pill-btn" + (state.brush.tool === id ? " active" : ""), [
       ConstructGlyph(glyph),
       Construct("span", null, label),
     ]);
     b.type = "button";
+    b.title = TOOL_LABELS[id] || label;
     b.addEventListener("click", () => selectTool(id));
     toolButtons.set(id, b);
     toolGroup.append(b);
@@ -446,6 +481,21 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     ["Roughness", "roughness"],
     ["Metalness", "metalness"],
     ["Height", "height"],
+    ["Normal Map", "normal"],
+    ["Ambient Occlusion", "ao"],
+    ["Opacity / Alpha", "opacity"],
+    ["Emissive Color", "emissive"],
+    ["Emissive Glow", "emissiveIntensity"],
+    ["Clearcoat", "clearcoat"],
+    ["Coat Roughness", "coatRoughness"],
+    ["Sheen", "sheen"],
+    ["Sheen Roughness", "sheenRoughness"],
+    ["Specular", "specular"],
+    ["Anisotropy", "anisotropy"],
+    ["Iridescence", "iridescence"],
+    ["Iridescence Thick.", "iridescenceThickness"],
+    ["Transmission", "transmission"],
+    ["Thickness", "thickness"],
     ["Active Mask", "mask"],
   ]) {
     const o = Construct("option", null, label);
@@ -502,8 +552,11 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   pane2D.style.cssText = "background:transparent;cursor:crosshair;";
   pane2D.append(Construct("span", "pane-badge", "2D UV Texture Canvas"));
 
+  const uvStampOverlay = Construct("div", "uv-stamp-overlay");
+  pane2D.append(uvStampOverlay);
+
   splitBox.append(pane3D, pane2D);
-  const hudHelp = Construct("div", "viewport-hud-bottom", "Left-drag mesh to paint · Right-click or Q / Tab for Brush & Tool Inspector · B/E/G/S/I switch tools");
+  const hudHelp = Construct("div", "viewport-hud-bottom", "Drag mesh to paint · V = Move/Scale/Rotate Stamps · Right-click or Q/Tab = Tool Inspector · B/E/G/S/I/V tools");
   stage.append(splitBox, hudHelp);
   centerCol.append(toolbar, stage);
 
@@ -512,7 +565,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   rightCol.append(
     Construct("div", "panel-heading", [
       Construct("h2", null, "Layer Inspector"),
-      Construct("span", "panel-heading-meta", "GPU 3D/UV PAINT"),
+      Construct("span", "panel-heading-meta", "19-CH GPU PBR"),
     ]),
   );
   const rightScroll = Construct("div", "panel-scroll");
@@ -583,7 +636,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   const fallbackNormalTex = new THREE.DataTexture(new Uint8Array(res * res * 4), res, res, THREE.RGBAFormat);
   fallbackNormalTex.flipY = true; fallbackNormalTex.needsUpdate = true;
 
-  const paintMat = new THREE.MeshStandardMaterial({
+  const paintMat = new THREE.MeshPhysicalMaterial({
     map: gpuPaint.isActive ? gpuPaint.displayAlbedoRT.texture : fallbackAlbTex,
     roughnessMap: gpuPaint.isActive ? gpuPaint.finalOrmhRT.texture : fallbackRoughTex,
     metalnessMap: gpuPaint.isActive ? gpuPaint.finalOrmhRT.texture : fallbackMetalTex,
@@ -591,13 +644,29 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     roughness: 1.0,
     metalness: 1.0,
     normalScale: new THREE.Vector2(0.85, 0.85),
+    emissive: new THREE.Color("#000000"),
+    emissiveIntensity: 0,
+    clearcoat: 0,
+    clearcoatRoughness: 0.2,
+    sheen: 0,
+    sheenRoughness: 0.5,
+    sheenColor: new THREE.Color("#ffffff"),
+    iridescence: 0,
+    iridescenceThicknessMinimum: 100,
+    iridescenceThicknessMaximum: 550,
+    specularIntensity: 1,
+    transmission: 0,
+    thickness: 0,
+    anisotropy: 0,
+    transparent: false,
   });
 
   let paintMesh = null;
   let wireOverlay = null;
   let lastCpuComp = null;
+  let prevExtBitmask = "";
 
-  // 3D Brush Ring Reticle
+  // 3D Brush Ring Reticle + 3D Stamp Transform Gizmo Frame
   const ringPts = [];
   for (let i = 0; i <= 48; i++) {
     const a = (i / 48) * Math.PI * 2;
@@ -610,6 +679,20 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   brushRing.renderOrder = 999;
   brushRing.visible = false;
   scene.add(brushRing);
+
+  const stampGizmoPts = [
+    new THREE.Vector3(-1, -1, 0.012), new THREE.Vector3(1, -1, 0.012),
+    new THREE.Vector3(1, 1, 0.012), new THREE.Vector3(-1, 1, 0.012),
+    new THREE.Vector3(-1, -1, 0.012), new THREE.Vector3(0, 1, 0.012),
+    new THREE.Vector3(0, 1.32, 0.012),
+  ];
+  const stampGizmo3D = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints(stampGizmoPts),
+    new THREE.LineBasicMaterial({ color: "#6ea8ff", transparent: true, opacity: 0.95, depthTest: false }),
+  );
+  stampGizmo3D.renderOrder = 998;
+  stampGizmo3D.visible = false;
+  scene.add(stampGizmo3D);
 
   const raycaster = new THREE.Raycaster();
   const pointerNdc = new THREE.Vector2();
@@ -675,8 +758,211 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     rebuildInspector();
   }
 
+  function getActiveLayer() {
+    return state.doc.layers.find((l) => l.id === state.doc.selectedLayerId) || state.doc.layers[0];
+  }
+
+  function getSelectedStamp(layer = getActiveLayer(), fallbackDocSearch = false) {
+    if (layer?.stamps?.length) {
+      const s = layer.stamps.find((x) => x.id === layer.selectedStampId) || layer.stamps[0];
+      if (s) return { layer, stamp: s };
+    }
+    if (fallbackDocSearch) {
+      for (let i = state.doc.layers.length - 1; i >= 0; i--) {
+        const l = state.doc.layers[i];
+        if (l.visible && l.stamps?.length) {
+          const s = l.stamps.find((x) => x.id === l.selectedStampId) || l.stamps[0];
+          if (s) return { layer: l, stamp: s };
+        }
+      }
+    }
+    return null;
+  }
+
+  function getAnyExtendedChannelsMask() {
+    const out = {};
+    for (const k of EXTENDED_PBR_KEYS) out[k] = false;
+    for (const l of state.doc.layers) {
+      if (!l.visible) continue;
+      if (l.channels) {
+        for (const k of EXTENDED_PBR_KEYS) if (l.channels[k]) out[k] = true;
+      }
+      if (l.stamps?.some((s) => s.visible && s.channels)) {
+        for (const s of l.stamps) {
+          if (s.visible && s.channels) {
+            for (const k of EXTENDED_PBR_KEYS) if (s.channels[k]) out[k] = true;
+          }
+        }
+      }
+      if (l.pixels?.extValues) {
+        for (const k of Object.keys(l.pixels.extValues)) out[k] = true;
+      }
+    }
+    return out;
+  }
+
+  function update3DStampGizmo() {
+    const found = getSelectedStamp(getActiveLayer(), state.brush.tool === "move");
+    if (!found || !found.stamp.visible || state.viewportMode === "2d") {
+      stampGizmo3D.visible = false;
+      return;
+    }
+    const st = found.stamp;
+    let posArr = st.anchorPos;
+    let normArr = st.anchorNormal;
+    if (st.projection !== "3d" && meshCues) {
+      const surf = lookupSurfaceAtUv(meshCues, st.u ?? 0.5, st.v ?? 0.5);
+      if (surf) { posArr = surf.pos; normArr = surf.normal; }
+    }
+    if (!posArr || !normArr) {
+      stampGizmo3D.visible = false;
+      return;
+    }
+    const p = new THREE.Vector3(posArr[0], posArr[1], posArr[2]);
+    const n = new THREE.Vector3(normArr[0], normArr[1], normArr[2]).normalize();
+    const upRef = Math.abs(n.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
+    const rgt = new THREE.Vector3().crossVectors(upRef, n).normalize();
+    const btg = new THREE.Vector3().crossVectors(n, rgt).normalize();
+    const rotRad = ((st.rotation || 0) * Math.PI) / 180;
+    const basis = new THREE.Matrix4().makeBasis(rgt, btg, n);
+    const qRot = new THREE.Quaternion().setFromAxisAngle(n, -rotRad);
+    stampGizmo3D.position.copy(p).addScaledVector(n, 0.01);
+    stampGizmo3D.quaternion.setFromRotationMatrix(basis).premultiply(qRot);
+    const sx = Math.max(0.02, (st.scale ?? 0.28) * (st.scaleX ?? 1));
+    const sy = Math.max(0.02, (st.scale ?? 0.28) * (st.scaleY ?? 1));
+    stampGizmo3D.scale.set(sx, sy, 1);
+    stampGizmo3D.visible = state.brush.tool === "move" || found.layer.kind === "decal";
+  }
+
+  let activeGizmoDrag = null;
+
+  function renderUvStampGizmo() {
+    uvStampOverlay.innerHTML = "";
+    if (state.viewportMode === "3d" || typeof pane2D.getBoundingClientRect !== "function") return;
+    const found = getSelectedStamp(getActiveLayer(), state.brush.tool === "move");
+    if (!found || !found.stamp.visible) return;
+    const rect = pane2D.getBoundingClientRect();
+    if (!rect || rect.width <= 4 || rect.height <= 4) return;
+    const st = found.stamp;
+    const halfSide = Math.min(rect.width, rect.height) * 0.44;
+    const cxPane = rect.width * 0.5;
+    const cyPane = rect.height * 0.5;
+    const u = st.u ?? 0.5;
+    const v = st.v ?? 0.5;
+    const xPx = cxPane + (u - 0.5) * 2 * halfSide;
+    const yPx = cyPane + (0.5 - v) * 2 * halfSide;
+    const wPx = Math.max(18, (st.scale ?? 0.28) * (st.scaleX ?? 1) * 2 * halfSide * 2);
+    const hPx = Math.max(18, (st.scale ?? 0.28) * (st.scaleY ?? 1) * 2 * halfSide * 2);
+
+    const box = Construct("div", "uv-stamp-box");
+    box.style.width = `${wPx}px`;
+    box.style.height = `${hPx}px`;
+    box.style.left = `${xPx - wPx * 0.5}px`;
+    box.style.top = `${yPx - hPx * 0.5}px`;
+    box.style.transform = `rotate(${-(st.rotation || 0)}deg)`;
+
+    const centerDot = Construct("div", "uv-stamp-center");
+    const rotKnob = Construct("div", "uv-stamp-rot");
+    rotKnob.title = "Drag to Rotate Stamp";
+    box.append(centerDot, rotKnob);
+
+    for (const corner of ["nw", "ne", "sw", "se"]) {
+      const h = Construct("div", `uv-stamp-handle ${corner}`);
+      h.title = "Drag corner to Scale Stamp (Shift = Free Aspect)";
+      h.addEventListener("pointerdown", (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        if (found.layer.locked) return;
+        st.projection = "uv";
+        activeGizmoDrag = {
+          mode: "scale",
+          layer: found.layer,
+          stamp: st,
+          centerX: rect.left + xPx,
+          centerY: rect.top + yPx,
+          halfSide,
+          startDist: Math.max(8, Math.hypot(e.clientX - (rect.left + xPx), e.clientY - (rect.top + yPx))),
+          startScale: st.scale ?? 0.28,
+          startSX: st.scaleX ?? 1,
+          startSY: st.scaleY ?? 1,
+          startDx: Math.abs(e.clientX - (rect.left + xPx)) || 1,
+          startDy: Math.abs(e.clientY - (rect.top + yPx)) || 1,
+        };
+      });
+      box.append(h);
+    }
+
+    rotKnob.addEventListener("pointerdown", (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      if (found.layer.locked) return;
+      activeGizmoDrag = {
+        mode: "rotate",
+        layer: found.layer,
+        stamp: st,
+        centerX: rect.left + xPx,
+        centerY: rect.top + yPx,
+      };
+    });
+
+    box.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0 || e.target !== box) return;
+      e.stopPropagation();
+      e.preventDefault();
+      if (found.layer.locked) return;
+      st.projection = "uv";
+      activeGizmoDrag = {
+        mode: "move",
+        layer: found.layer,
+        stamp: st,
+        halfSide,
+        startX: e.clientX,
+        startY: e.clientY,
+        startU: st.u ?? 0.5,
+        startV: st.v ?? 0.5,
+      };
+    });
+
+    uvStampOverlay.append(box);
+  }
+
+  window.addEventListener("pointermove", (e) => {
+    if (!activeGizmoDrag) return;
+    const d = activeGizmoDrag;
+    const st = d.stamp;
+    if (d.mode === "move") {
+      st.u = d.startU + (e.clientX - d.startX) / (2 * Math.max(1, d.halfSide));
+      st.v = d.startV - (e.clientY - d.startY) / (2 * Math.max(1, d.halfSide));
+      const surf = meshCues ? lookupSurfaceAtUv(meshCues, st.u, st.v) : null;
+      if (surf) { st.anchorPos = surf.pos; st.anchorNormal = surf.normal; }
+    } else if (d.mode === "scale") {
+      if (e.shiftKey) {
+        const rx = Math.max(0.2, Math.min(3.5, (Math.abs(e.clientX - d.centerX) / d.startDx) * d.startSX));
+        const ry = Math.max(0.2, Math.min(3.5, (Math.abs(e.clientY - d.centerY) / d.startDy) * d.startSY));
+        st.scaleX = rx;
+        st.scaleY = ry;
+      } else {
+        const curDist = Math.max(6, Math.hypot(e.clientX - d.centerX, e.clientY - d.centerY));
+        st.scale = Math.max(0.025, Math.min(1.6, d.startScale * (curDist / d.startDist)));
+      }
+    } else if (d.mode === "rotate") {
+      const ang = (Math.atan2(-(e.clientY - d.centerY), e.clientX - d.centerX) * 180) / Math.PI - 90;
+      st.rotation = ((ang + 540) % 360) - 180;
+    }
+    refreshComposite();
+  });
+
+  window.addEventListener("pointerup", () => {
+    if (!activeGizmoDrag) return;
+    activeGizmoDrag = null;
+    Broadcast();
+  });
+
   function refreshComposite() {
     if (!meshCues || disposed) return;
+
+    const extMask = getAnyExtendedChannelsMask();
+    const isLit = state.viewChannel === "lit";
 
     if (gpuPaint.isActive) {
       const out = gpuPaint.composite(state.doc, {
@@ -686,22 +972,96 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       });
       if (out) {
         paintMat.map = out.albedoTex;
-        if (state.viewChannel === "lit") {
+        if (isLit) {
           paintMat.roughnessMap = out.ormhTex;
           paintMat.metalnessMap = out.ormhTex;
           paintMat.normalMap = out.normalTex;
           paintMat.roughness = 1.0;
           paintMat.metalness = 1.0;
+
+          const ext = out.ext;
+          const hasEm = !!(ext && (extMask.emissive || extMask.emissiveIntensity));
+          const hasCoat = !!(ext && (extMask.clearcoat || extMask.coatRoughness));
+          const hasSheen = !!(ext && (extMask.sheen || extMask.sheenRoughness));
+          const hasIrid = !!(ext && (extMask.iridescence || extMask.iridescenceThickness));
+          const hasTrans = !!(ext && (extMask.transmission || extMask.thickness));
+          const hasAo = !!(ext && extMask.ao);
+          const hasOp = !!(ext && extMask.opacity);
+          const hasSpec = !!(ext && extMask.specular);
+          const hasAniso = !!(ext && extMask.anisotropy);
+
+          paintMat.emissive.set(hasEm ? "#ffffff" : "#000000");
+          paintMat.emissiveIntensity = hasEm ? 1.0 : 0.0;
+          paintMat.emissiveMap = hasEm ? ext.emissiveSpecTex : null;
+
+          paintMat.clearcoat = hasCoat ? 1.0 : 0.0;
+          paintMat.clearcoatRoughness = hasCoat ? 1.0 : 0.2;
+          paintMat.clearcoatMap = hasCoat ? ext.coatSheenTex : null;
+          paintMat.clearcoatRoughnessMap = hasCoat ? ext.coatSheenTex : null;
+
+          paintMat.sheen = hasSheen ? 1.0 : 0.0;
+          paintMat.sheenRoughness = hasSheen ? 1.0 : 0.5;
+          paintMat.sheenRoughnessMap = hasSheen ? ext.coatSheenTex : null;
+
+          paintMat.iridescence = hasIrid ? 1.0 : 0.0;
+          paintMat.iridescenceMap = hasIrid ? ext.iridTex : null;
+          paintMat.iridescenceThicknessMap = hasIrid ? ext.iridTex : null;
+
+          paintMat.transmission = hasTrans ? 1.0 : 0.0;
+          paintMat.thickness = hasTrans ? 2.0 : 0.0;
+          paintMat.transmissionMap = hasTrans ? ext.transThickTex : null;
+          paintMat.thicknessMap = hasTrans ? ext.transThickTex : null;
+
+          paintMat.aoMap = hasAo ? ext.aoAlphaTex : null;
+          paintMat.aoMapIntensity = hasAo ? 1.0 : 0.0;
+
+          paintMat.alphaMap = hasOp ? ext.aoAlphaTex : null;
+          paintMat.transparent = hasOp;
+
+          paintMat.specularIntensityMap = hasSpec ? ext.emissiveSpecTex : null;
+          paintMat.anisotropy = hasAniso ? 1.0 : 0.0;
+          paintMat.anisotropyMap = hasAniso ? ext.anisoTex : null;
+
+          const sig = `${hasEm}|${hasCoat}|${hasSheen}|${hasIrid}|${hasTrans}|${hasAo}|${hasOp}|${hasSpec}|${hasAniso}`;
+          if (sig !== prevExtBitmask) {
+            prevExtBitmask = sig;
+            paintMat.needsUpdate = true;
+          }
         } else {
           paintMat.roughnessMap = null;
           paintMat.metalnessMap = null;
           paintMat.normalMap = null;
+          paintMat.emissiveMap = null;
+          paintMat.emissiveIntensity = 0;
+          paintMat.clearcoatMap = null;
+          paintMat.clearcoatRoughnessMap = null;
+          paintMat.clearcoat = 0;
+          paintMat.sheenRoughnessMap = null;
+          paintMat.sheen = 0;
+          paintMat.iridescenceMap = null;
+          paintMat.iridescenceThicknessMap = null;
+          paintMat.iridescence = 0;
+          paintMat.transmissionMap = null;
+          paintMat.thicknessMap = null;
+          paintMat.transmission = 0;
+          paintMat.aoMap = null;
+          paintMat.alphaMap = null;
+          paintMat.transparent = false;
+          paintMat.specularIntensityMap = null;
+          paintMat.anisotropyMap = null;
+          paintMat.anisotropy = 0;
           paintMat.roughness = 0.85;
           paintMat.metalness = 0.0;
+          if (prevExtBitmask !== "solo") {
+            prevExtBitmask = "solo";
+            paintMat.needsUpdate = true;
+          }
         }
         uvQuadMat.map = out.albedoTex;
         uvQuadMat.needsUpdate = true;
       }
+      renderUvStampGizmo();
+      update3DStampGizmo();
       return;
     }
 
@@ -721,6 +1081,8 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       mData[i4] = mData[i4 + 1] = mData[i4 + 2] = comp.metalness[i]; mData[i4 + 3] = 255;
     }
     fallbackRoughTex.needsUpdate = true; fallbackMetalTex.needsUpdate = true;
+    renderUvStampGizmo();
+    update3DStampGizmo();
   }
 
   // ----------------------------------------------------------------- GPU / CPU UNDO & REDO
@@ -784,7 +1146,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     Toast("Redid paint operation");
   });
 
-  // ----------------------------------------------------------------- 3D RAYCAST + GPU PAINT HANDLERS
+  // ----------------------------------------------------------------- 3D RAYCAST + GPU PAINT + STAMP TRANSFORM HANDLERS
   function raycastMeshFromEvent(e) {
     if (!paintMesh) return null;
     const rect = pane3D.getBoundingClientRect();
@@ -797,7 +1159,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   }
 
   function updateHoverCursor(hit) {
-    if (!hit || state.brush.tool === "eyedropper") {
+    if (!hit || state.brush.tool === "eyedropper" || state.brush.tool === "move") {
       brushRing.visible = false;
       return;
     }
@@ -805,7 +1167,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     brushRing.visible = true;
     brushRing.position.copy(hit.point).addScaledVector(n, 0.008);
     brushRing.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), n);
-    brushRing.scale.setScalar(state.brush.size);
+    brushRing.scale.setScalar(state.brush.tool === "stamp" ? state.brush.stampScale : state.brush.size);
   }
 
   function getTargetPaintableLayer(autoCreatePaint = true) {
@@ -822,6 +1184,50 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       return newPaint;
     }
     return layer;
+  }
+
+  function placeMovableStamp({ projection = "3d", hit = null, uv = null, stampData = state.brush.stampData, stampName = state.brush.stampName } = {}) {
+    if (!stampData) return null;
+    let targetLayer = getActiveLayer();
+    if (!targetLayer || targetLayer.kind === "folder" || state.stampPlaceMode === "layer") {
+      targetLayer = createPaintLayer("decal", { res, name: `${stampName || "Stamp"} Layer` });
+      state.doc.layers.push(targetLayer);
+      state.doc.selectedLayerId = targetLayer.id;
+    }
+    if (targetLayer.locked) { Toast("Target layer is locked"); return null; }
+    if (!targetLayer.stamps) targetLayer.stamps = [];
+
+    const surf = projection === "3d" && hit
+      ? {
+          pos: [hit.point.x, hit.point.y, hit.point.z],
+          normal: hit.face
+            ? (() => { const n = hit.face.normal.clone().transformDirection(paintMesh.matrixWorld).normalize(); return [n.x, n.y, n.z]; })()
+            : [0, 0, 1],
+        }
+      : (meshCues && uv ? lookupSurfaceAtUv(meshCues, uv.u, uv.v) : null);
+
+    const inst = createStampInstance({
+      name: stampName || "Stamp",
+      projection,
+      u: uv?.u ?? hit?.uv?.x ?? 0.5,
+      v: uv?.v ?? hit?.uv?.y ?? 0.5,
+      anchorPos: surf?.pos || [0, 0.2, 1.0],
+      anchorNormal: surf?.normal || [0, 0, 1],
+      scale: state.brush.stampScale ?? 0.28,
+      rotation: state.brush.stampRotation ?? 0,
+      opacity: state.brush.stampOpacity ?? 1.0,
+      heightStrength: state.brush.stampHeightStrength ?? 0.5,
+      tint: state.brush.stampTint || "#ffffff",
+      stampData,
+      channels: { ...getToolChannels(state.brush) },
+      extValues: { ...state.brush.extValues },
+    });
+    targetLayer.stamps.push(inst);
+    targetLayer.selectedStampId = inst.id;
+    renderLeftColumn();
+    rebuildInspector();
+    refreshComposite();
+    return { layer: targetLayer, stamp: inst };
   }
 
   function dabAlongSegment3D(pStart, pEnd, normal) {
@@ -975,13 +1381,15 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   let pendingUndoSnap = null;
   let rightDownPos3D = null;
   let rightDownPos2D = null;
+  let activeStamp3DDrag = null;
+  let activeStamp2DDrag = null;
 
   pane3D.addEventListener("pointerdown", (e) => {
     if (e.button === 2) {
       rightDownPos3D = { x: e.clientX, y: e.clientY };
       return;
     }
-    if (e.button !== 0 || e.altKey) return;
+    if (e.button !== 0) return;
     if (activeToolPopup && !activeToolPopup.contains(e.target)) closeToolPopup();
     const hit = raycastMeshFromEvent(e);
     if (!hit) {
@@ -989,10 +1397,53 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       return;
     }
 
+    // Move / Scale / Rotate Stamps smoothly across the 3D surface!
+    if (state.brush.tool === "move") {
+      const found = getSelectedStamp(getActiveLayer(), true);
+      if (!found || found.layer.locked) return;
+      orbit.enabled = false;
+      state.doc.selectedLayerId = found.layer.id;
+      found.layer.selectedStampId = found.stamp.id;
+      activeStamp3DDrag = {
+        layer: found.layer,
+        stamp: found.stamp,
+        mode: e.shiftKey ? "scale" : e.altKey ? "rotate" : "move",
+        startX: e.clientX,
+        startY: e.clientY,
+        startScale: found.stamp.scale ?? 0.28,
+        startRot: found.stamp.rotation ?? 0,
+      };
+      if (activeStamp3DDrag.mode === "move") {
+        const n = hit.face ? hit.face.normal.clone().transformDirection(paintMesh.matrixWorld).normalize() : new THREE.Vector3(0, 0, 1);
+        found.stamp.projection = "3d";
+        found.stamp.anchorPos = [hit.point.x, hit.point.y, hit.point.z];
+        found.stamp.anchorNormal = [n.x, n.y, n.z];
+        if (hit.uv) { found.stamp.u = hit.uv.x; found.stamp.v = hit.uv.y; }
+        refreshComposite();
+      }
+      pane3D.setPointerCapture(e.pointerId);
+      return;
+    }
+
+    if (e.altKey) return;
+
     if (state.brush.tool === "eyedropper") {
       if (hit.uv) performEyedropperAtUv(hit.uv.x, hit.uv.y);
       return;
     }
+
+    // Stamp tool places a movable, scalable, rotatable stamp on click & lets user drag to position it!
+    if (state.brush.tool === "stamp") {
+      orbit.enabled = false;
+      const placed = placeMovableStamp({ projection: "3d", hit });
+      if (placed) {
+        activeStamp3DDrag = { layer: placed.layer, stamp: placed.stamp, mode: "move", startX: e.clientX, startY: e.clientY };
+        pane3D.setPointerCapture(e.pointerId);
+        Toast(`Placed "${placed.stamp.name}" · drag to position or press V to Transform`);
+      }
+      return;
+    }
+
     const layer = getTargetPaintableLayer(true);
     if (!layer || layer.locked) return;
 
@@ -1024,6 +1475,22 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       const partName = partIdx >= 0 ? (meshIndex.partNames[partIdx] || `Part ${partIdx}`) : "Surface";
       state.hoverInfo = `${partName} · UV (${hit.uv.x.toFixed(2)}, ${hit.uv.y.toFixed(2)})`;
     }
+    if (activeStamp3DDrag) {
+      const d = activeStamp3DDrag;
+      if (d.mode === "move" && hit) {
+        const n = hit.face ? hit.face.normal.clone().transformDirection(paintMesh.matrixWorld).normalize() : new THREE.Vector3(0, 0, 1);
+        d.stamp.projection = "3d";
+        d.stamp.anchorPos = [hit.point.x, hit.point.y, hit.point.z];
+        d.stamp.anchorNormal = [n.x, n.y, n.z];
+        if (hit.uv) { d.stamp.u = hit.uv.x; d.stamp.v = hit.uv.y; }
+      } else if (d.mode === "scale") {
+        d.stamp.scale = Math.max(0.025, Math.min(1.6, d.startScale * Math.exp((e.clientX - d.startX) * 0.008)));
+      } else if (d.mode === "rotate") {
+        d.stamp.rotation = ((d.startRot + (e.clientX - d.startX) * 0.8 + 540) % 360) - 180;
+      }
+      refreshComposite();
+      return;
+    }
     if (!isPainting3D || !hit) return;
     const stab = Math.max(0, Math.min(0.85, state.brush.stabilizer ?? 0));
     smoothedHit3D = smoothedHit3D ? smoothedHit3D.lerp(hit.point, 1 - stab) : hit.point.clone();
@@ -1032,7 +1499,25 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     lastHitPos = smoothedHit3D.clone();
   });
 
+  pane3D.addEventListener("wheel", (e) => {
+    if (state.brush.tool !== "move") return;
+    const found = getSelectedStamp(getActiveLayer(), true);
+    if (!found || found.layer.locked) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const factor = e.deltaY < 0 ? 1.08 : 0.92;
+    found.stamp.scale = Math.max(0.025, Math.min(1.6, (found.stamp.scale ?? 0.28) * factor));
+    refreshComposite();
+    Broadcast();
+  }, { passive: false, capture: true });
+
   const endStroke3D = () => {
+    if (activeStamp3DDrag) {
+      activeStamp3DDrag = null;
+      orbit.enabled = true;
+      Broadcast();
+      return;
+    }
     if (!isPainting3D) return;
     isPainting3D = false;
     orbit.enabled = true;
@@ -1054,14 +1539,14 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   pane3D.addEventListener("pointerup", endStroke3D);
   pane3D.addEventListener("pointercancel", endStroke3D);
 
-  // Synchronized 2D UV Canvas Painting!
+  // Synchronized 2D UV Canvas Painting + Stamp Transform!
   function uvFromPaneEvent(e) {
     const rect = pane2D.getBoundingClientRect();
     const halfSide = Math.min(rect.width, rect.height) * 0.44;
     const cx = rect.left + rect.width * 0.5;
     const cy = rect.top + rect.height * 0.5;
-    const u = Math.max(0, Math.min(1, ((e.clientX - cx) / Math.max(1, halfSide)) * 0.5 + 0.5));
-    const v = Math.max(0, Math.min(1, 0.5 - ((e.clientY - cy) / Math.max(1, halfSide)) * 0.5));
+    const u = Math.max(-0.25, Math.min(1.25, ((e.clientX - cx) / Math.max(1, halfSide)) * 0.5 + 0.5));
+    const v = Math.max(-0.25, Math.min(1.25, 0.5 - ((e.clientY - cy) / Math.max(1, halfSide)) * 0.5));
     return { u, v };
   }
 
@@ -1073,26 +1558,66 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     if (e.button !== 0) return;
     if (activeToolPopup && !activeToolPopup.contains(e.target)) closeToolPopup();
     const { u, v } = uvFromPaneEvent(e);
-    if (state.brush.tool === "eyedropper") { performEyedropperAtUv(u, v); return; }
+    const uClamped = Math.max(0, Math.min(1, u));
+    const vClamped = Math.max(0, Math.min(1, v));
+
+    if (state.brush.tool === "move") {
+      const found = getSelectedStamp(getActiveLayer(), true);
+      if (!found || found.layer.locked) return;
+      state.doc.selectedLayerId = found.layer.id;
+      found.layer.selectedStampId = found.stamp.id;
+      found.stamp.projection = "uv";
+      found.stamp.u = u;
+      found.stamp.v = v;
+      activeStamp2DDrag = { layer: found.layer, stamp: found.stamp };
+      refreshComposite();
+      pane2D.setPointerCapture(e.pointerId);
+      return;
+    }
+
+    if (state.brush.tool === "eyedropper") { performEyedropperAtUv(uClamped, vClamped); return; }
+
+    if (state.brush.tool === "stamp") {
+      const placed = placeMovableStamp({ projection: "uv", uv: { u, v } });
+      if (placed) {
+        activeStamp2DDrag = { layer: placed.layer, stamp: placed.stamp };
+        pane2D.setPointerCapture(e.pointerId);
+        Toast(`Placed "${placed.stamp.name}" in UV · drag gizmo handles to resize/rotate`);
+      }
+      return;
+    }
+
     const layer = getTargetPaintableLayer(true);
     if (!layer || layer.locked) return;
-    if (state.brush.tool === "fill") { performFillAtUv(layer, u, v); return; }
+    if (state.brush.tool === "fill") { performFillAtUv(layer, uClamped, vClamped); return; }
 
     isPainting2D = true;
     hasLiveStroke = true;
     strokeDabIndex = 0;
     pendingUndoSnap = snapshotSelectedLayer();
-    smoothedUv2D = { u, v };
-    lastUv2D = { u, v };
+    smoothedUv2D = { u: uClamped, v: vClamped };
+    lastUv2D = { u: uClamped, v: vClamped };
     if (gpuPaint.isActive) gpuPaint.beginStroke();
     else activeCpuStroke = createStrokeAccumulator(res);
-    dabAlongSegment2D({ u, v }, { u, v });
+    dabAlongSegment2D({ u: uClamped, v: vClamped }, { u: uClamped, v: vClamped });
     pane2D.setPointerCapture(e.pointerId);
   });
 
   pane2D.addEventListener("pointermove", (e) => {
+    if (activeStamp2DDrag) {
+      const pt = uvFromPaneEvent(e);
+      const st = activeStamp2DDrag.stamp;
+      st.projection = "uv";
+      st.u = pt.u;
+      st.v = pt.v;
+      const surf = meshCues ? lookupSurfaceAtUv(meshCues, st.u, st.v) : null;
+      if (surf) { st.anchorPos = surf.pos; st.anchorNormal = surf.normal; }
+      refreshComposite();
+      return;
+    }
     if (!isPainting2D) return;
-    const pt = uvFromPaneEvent(e);
+    const rawPt = uvFromPaneEvent(e);
+    const pt = { u: Math.max(0, Math.min(1, rawPt.u)), v: Math.max(0, Math.min(1, rawPt.v)) };
     const stab = Math.max(0, Math.min(0.85, state.brush.stabilizer ?? 0));
     smoothedUv2D = smoothedUv2D
       ? { u: smoothedUv2D.u + (pt.u - smoothedUv2D.u) * (1 - stab), v: smoothedUv2D.v + (pt.v - smoothedUv2D.v) * (1 - stab) }
@@ -1102,6 +1627,11 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   });
 
   const endStroke2D = () => {
+    if (activeStamp2DDrag) {
+      activeStamp2DDrag = null;
+      Broadcast();
+      return;
+    }
     if (!isPainting2D) return;
     isPainting2D = false;
     const layer = getTargetPaintableLayer(false);
@@ -1182,14 +1712,21 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     closeBtn.addEventListener("click", closeToolPopup);
     pop.append(
       Construct("div", "tool-popup-head", [
-        ConstructGlyph(state.brush.tool === "erase" ? "Eraser" : state.brush.tool === "fill" ? "Fill" : state.brush.tool === "stamp" ? "Stamp" : state.brush.tool === "eyedropper" ? "Pipette" : "Brush"),
+        ConstructGlyph(
+          state.brush.tool === "erase" ? "Eraser"
+            : state.brush.tool === "fill" ? "Fill"
+              : state.brush.tool === "stamp" ? "Stamp"
+                : state.brush.tool === "move" ? "Move"
+                  : state.brush.tool === "eyedropper" ? "Pipette"
+                    : "Brush",
+        ),
         Construct("strong", null, `${TOOL_LABELS[state.brush.tool] || "Active"} Inspector`),
         Construct("small", null, "Right-Click / Q / Esc"),
         closeBtn,
       ]),
     );
 
-    // Quick tool switcher tabs
+    // Quick tool switcher tabs (indices [0..4] preserved; Move appended at [5])
     const tabs = Construct("div", "tool-popup-tabs");
     for (const [id, label, glyph] of [
       ["paint", "Brush", "Brush"],
@@ -1197,6 +1734,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       ["fill", "Fill", "Fill"],
       ["stamp", "Stamp", "Stamp"],
       ["eyedropper", "Pick", "Pipette"],
+      ["move", "Move", "Move"],
     ]) {
       const tb = Construct("button", "tool-popup-tab" + (state.brush.tool === id ? " active" : ""), [
         ConstructGlyph(glyph),
@@ -1223,6 +1761,32 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       parent.append(Row);
     };
 
+    const appendExtendedBrushChannelSliders = (parent, channelMask, valuesObj) => {
+      if (!channelMask || !valuesObj) return;
+      for (const chDef of PAINT_PBR_CHANNELS) {
+        if (!chDef.extended || chDef.key === "normal" || !channelMask[chDef.key]) continue;
+        if (chDef.isColor) {
+          ColorRow(parent, {
+            Label: `${chDef.label} Tint`,
+            Transient: true,
+            Read: () => valuesObj[chDef.key] || chDef.defaultVal,
+            Write: (v) => { valuesObj[chDef.key] = v; Broadcast(); },
+          });
+        } else {
+          makePopupSlider(
+            parent,
+            chDef.label,
+            chDef.min ?? 0,
+            chDef.max ?? 1,
+            chDef.step ?? 0.01,
+            "",
+            () => valuesObj[chDef.key] ?? chDef.defaultVal,
+            (v) => { valuesObj[chDef.key] = v; },
+          );
+        }
+      }
+    };
+
     const tool = state.brush.tool;
 
     if (tool === "paint") {
@@ -1242,11 +1806,14 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       if (state.popupSubTab === "main") {
         ChannelMaskRow(pop, {
           Label: "Paint PBR Channels",
+          Channels: PAINT_PBR_CHANNEL_ROWS,
+          StrictPresence: true,
           Transient: true,
           Read: () => state.brush.paintChannels,
           Write: (next) => {
             state.brush.paintChannels = next;
             Broadcast();
+            openToolPopup(null, null, true);
           },
         });
 
@@ -1299,6 +1866,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
         makePopupSlider(pop, "Roughness", 0.02, 1, 0.01, "", () => state.brush.roughness, (v) => { state.brush.roughness = v; });
         makePopupSlider(pop, "Metalness", 0, 1, 0.01, "", () => state.brush.metalness, (v) => { state.brush.metalness = v; });
         makePopupSlider(pop, "Height Relief", -1, 1, 0.02, "", () => state.brush.height, (v) => { state.brush.height = v; });
+        appendExtendedBrushChannelSliders(pop, state.brush.paintChannels, state.brush.extValues);
       } else if (state.popupSubTab === "dynamics") {
         pop.append(Construct("div", "property-label", "Stroke & Lazy Mouse"));
         makePopupSlider(pop, "Spacing", 0.06, 1.0, 0.01, "", () => state.brush.spacing, (v) => { state.brush.spacing = v; });
@@ -1416,9 +1984,10 @@ export function mountTexturePaintWorkspace(root, appBridge) {
         });
       }
     } else if (tool === "erase") {
-      // Strictly Eraser-relevant controls only — ZERO ink color / rough / metal / stamp clutter!
       ChannelMaskRow(pop, {
         Label: "Erase PBR Channels",
+        Channels: PAINT_PBR_CHANNEL_ROWS,
+        StrictPresence: true,
         Transient: true,
         Read: () => state.brush.eraseChannels,
         Write: (next) => {
@@ -1459,9 +2028,11 @@ export function mountTexturePaintWorkspace(root, appBridge) {
 
       ChannelMaskRow(pop, {
         Label: "Fill PBR Channels",
+        Channels: PAINT_PBR_CHANNEL_ROWS,
+        StrictPresence: true,
         Transient: true,
         Read: () => state.brush.fillChannels,
-        Write: (next) => { state.brush.fillChannels = next; Broadcast(); },
+        Write: (next) => { state.brush.fillChannels = next; Broadcast(); openToolPopup(null, null, true); },
       });
 
       const swRow = Construct("div", "tool-popup-swatches");
@@ -1476,17 +2047,29 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       makePopupSlider(pop, "Roughness", 0.02, 1, 0.01, "", () => state.brush.roughness, (v) => { state.brush.roughness = v; });
       makePopupSlider(pop, "Metalness", 0, 1, 0.01, "", () => state.brush.metalness, (v) => { state.brush.metalness = v; });
       makePopupSlider(pop, "Height Relief", -1, 1, 0.02, "", () => state.brush.height, (v) => { state.brush.height = v; });
+      appendExtendedBrushChannelSliders(pop, state.brush.fillChannels, state.brush.extValues);
       const addFillImg = Construct("button", "action-button warm", [ConstructGlyph("Image"), Construct("span", null, "+ Add Fill Image Texture")]);
       addFillImg.type = "button";
       addFillImg.style.width = "100%";
       addFillImg.addEventListener("click", () => triggerAddImage("fill"));
       pop.append(addFillImg);
     } else if (tool === "stamp") {
+      const modeRow = Construct("div", "chip-strip");
+      for (const [mLbl, mKey] of [["On Active Layer", "subcomponent"], ["New Stamp Layer", "layer"]]) {
+        const mb = Construct("button", "chip-btn" + (state.stampPlaceMode === mKey ? " active" : ""), mLbl);
+        mb.type = "button";
+        mb.addEventListener("click", () => { state.stampPlaceMode = mKey; openToolPopup(null, null, true); });
+        modeRow.append(mb);
+      }
+      pop.append(Construct("div", "property-label", "Placement Target"), modeRow);
+
       ChannelMaskRow(pop, {
         Label: "Stamp PBR Channels",
+        Channels: PAINT_PBR_CHANNEL_ROWS,
+        StrictPresence: true,
         Transient: true,
         Read: () => state.brush.paintChannels,
-        Write: (next) => { state.brush.paintChannels = next; Broadcast(); },
+        Write: (next) => { state.brush.paintChannels = next; Broadcast(); openToolPopup(null, null, true); },
       });
       const stampHead = Construct("div", null);
       stampHead.style.cssText = "display:flex;align-items:center;justify-content:space-between;margin:6px 0 4px;";
@@ -1510,11 +2093,59 @@ export function mountTexturePaintWorkspace(root, appBridge) {
         );
       }
       pop.append(gridBox);
-      makePopupSlider(pop, "Decal Scale", 0.04, 0.9, 0.01, "m", () => state.brush.size, (v) => { state.brush.size = v; state.brush.pixelRadius = Math.round(v * 110); });
-      makePopupSlider(pop, "Rotation", -180, 180, 1, "°", () => state.brush.angle, (v) => { state.brush.angle = v; });
-      makePopupSlider(pop, "Opacity", 0.05, 1, 0.01, "", () => state.brush.opacity, (v) => { state.brush.opacity = v; });
-      makePopupSlider(pop, "Relief Height", -1, 1, 0.02, "", () => state.brush.height, (v) => { state.brush.height = v; });
-      makePopupSlider(pop, "Scatter Jitter", 0, 1.5, 0.02, "r", () => state.brush.jitter.scatter, (v) => { state.brush.jitter.scatter = v; });
+      makePopupSlider(pop, "Stamp Scale", 0.04, 1.2, 0.01, "", () => state.brush.stampScale, (v) => { state.brush.stampScale = v; state.brush.size = v; });
+      makePopupSlider(pop, "Rotation", -180, 180, 1, "°", () => state.brush.stampRotation, (v) => { state.brush.stampRotation = v; state.brush.angle = v; });
+      makePopupSlider(pop, "Opacity", 0.05, 1, 0.01, "", () => state.brush.stampOpacity, (v) => { state.brush.stampOpacity = v; });
+      makePopupSlider(pop, "Relief Height", -1, 1, 0.02, "", () => state.brush.stampHeightStrength, (v) => { state.brush.stampHeightStrength = v; });
+      ColorRow(pop, { Label: "Stamp Tint", Transient: true, Read: () => state.brush.stampTint, Write: (v) => { state.brush.stampTint = v; Broadcast(); } });
+    } else if (tool === "move") {
+      const found = getSelectedStamp(getActiveLayer(), true);
+      if (!found) {
+        pop.append(Construct("p", "property-hint", "No stamps on active layer yet. Place a stamp with the Stamp tool (S) or click below to place one at center UV."));
+        const addCenterBtn = Construct("button", "action-button accent", [ConstructGlyph("Stamp"), Construct("span", null, "+ Place Stamp at UV Center")]);
+        addCenterBtn.type = "button";
+        addCenterBtn.style.width = "100%";
+        addCenterBtn.addEventListener("click", () => {
+          placeMovableStamp({ projection: "uv", uv: { u: 0.5, v: 0.5 } });
+          openToolPopup(null, null, true);
+        });
+        pop.append(addCenterBtn);
+      } else {
+        const st = found.stamp;
+        const projRow = Construct("div", "chip-strip");
+        for (const [pLbl, pKey] of [["UV Space", "uv"], ["3D Surface", "3d"]]) {
+          const pb = Construct("button", "chip-btn" + (st.projection === pKey ? " active" : ""), pLbl);
+          pb.type = "button";
+          pb.addEventListener("click", () => { st.projection = pKey; refreshComposite(); openToolPopup(null, null, true); });
+          projRow.append(pb);
+        }
+        pop.append(Construct("div", "property-label", `Transform: ${st.name}`), projRow);
+        makePopupSlider(pop, "Position U", 0, 1, 0.005, "", () => st.u ?? 0.5, (v) => { st.u = v; const surf = meshCues ? lookupSurfaceAtUv(meshCues, st.u, st.v) : null; if (surf) { st.anchorPos = surf.pos; st.anchorNormal = surf.normal; } refreshComposite(); });
+        makePopupSlider(pop, "Position V", 0, 1, 0.005, "", () => st.v ?? 0.5, (v) => { st.v = v; const surf = meshCues ? lookupSurfaceAtUv(meshCues, st.u, st.v) : null; if (surf) { st.anchorPos = surf.pos; st.anchorNormal = surf.normal; } refreshComposite(); });
+        makePopupSlider(pop, "Uniform Scale", 0.025, 1.5, 0.01, "", () => st.scale ?? 0.28, (v) => { st.scale = v; refreshComposite(); });
+        makePopupSlider(pop, "Scale X", 0.2, 2.5, 0.01, "x", () => st.scaleX ?? 1, (v) => { st.scaleX = v; refreshComposite(); });
+        makePopupSlider(pop, "Scale Y", 0.2, 2.5, 0.01, "x", () => st.scaleY ?? 1, (v) => { st.scaleY = v; refreshComposite(); });
+        makePopupSlider(pop, "Rotation", -180, 180, 1, "°", () => st.rotation ?? 0, (v) => { st.rotation = v; refreshComposite(); });
+        makePopupSlider(pop, "Opacity", 0.02, 1, 0.01, "", () => st.opacity ?? 1, (v) => { st.opacity = v; refreshComposite(); });
+        makePopupSlider(pop, "Height Gain", -1, 1.5, 0.02, "", () => st.heightStrength ?? 0.5, (v) => { st.heightStrength = v; refreshComposite(); });
+        ColorRow(pop, { Label: "Tint Color", Transient: true, Read: () => st.tint || "#ffffff", Write: (v) => { st.tint = v; refreshComposite(); } });
+        const actStrip = Construct("div", "chip-strip");
+        const rstBtn = Construct("button", "chip-btn", "Reset Aspect");
+        rstBtn.type = "button";
+        rstBtn.addEventListener("click", () => { st.scaleX = 1; st.scaleY = 1; st.rotation = 0; refreshComposite(); openToolPopup(null, null, true); });
+        const delBtn = Construct("button", "chip-btn", "Delete Stamp");
+        delBtn.type = "button";
+        delBtn.addEventListener("click", () => {
+          found.layer.stamps = found.layer.stamps.filter((x) => x.id !== st.id);
+          found.layer.selectedStampId = found.layer.stamps[0]?.id || null;
+          renderLeftColumn();
+          rebuildInspector();
+          refreshComposite();
+          openToolPopup(null, null, true);
+        });
+        actStrip.append(rstBtn, delBtn);
+        pop.append(actStrip);
+      }
     } else if (tool === "eyedropper") {
       const sampleCard = Construct("div", "object-heading");
       const dot = Construct("div", "object-symbol");
@@ -1595,6 +2226,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     state.brush.tool = id;
     for (const [k, b] of toolButtons.entries()) b.classList.toggle("active", k === id);
     rebuildInspector();
+    refreshComposite();
     if (activeToolPopup) openToolPopup(null, null, true);
     Broadcast();
   }
@@ -1607,6 +2239,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       ["+ Paint", "paint"],
       ["+ Fill", "fill"],
       ["+ Material", "material"],
+      ["+ Stamp", "decal"],
       ["+ Wear Gen", "generator"],
       ["+ Folder", "folder"],
     ]) {
@@ -1618,6 +2251,22 @@ export function mountTexturePaintWorkspace(root, appBridge) {
           color: state.brush.color,
           fill: { color: state.brush.color, roughness: state.brush.roughness, metalness: state.brush.metalness, height: 0 },
         });
+        if (kind === "decal" && state.brush.stampData) {
+          const st = createStampInstance({
+            name: state.brush.stampName || "Stamp",
+            projection: "uv",
+            u: 0.5,
+            v: 0.5,
+            scale: state.brush.stampScale ?? 0.28,
+            rotation: state.brush.stampRotation ?? 0,
+            opacity: state.brush.stampOpacity ?? 1.0,
+            heightStrength: state.brush.stampHeightStrength ?? 0.5,
+            tint: state.brush.stampTint || "#ffffff",
+            stampData: state.brush.stampData,
+          });
+          l.stamps.push(st);
+          l.selectedStampId = st.id;
+        }
         state.doc.layers.push(l);
         state.doc.selectedLayerId = l.id;
         state.doc.editingMask = false;
@@ -1650,8 +2299,9 @@ export function mountTexturePaintWorkspace(root, appBridge) {
 
       const partTag = layer.partFilter >= 0 && meshIndex?.partNames[layer.partFilter] ? meshIndex.partNames[layer.partFilter] : "All";
       const enabledCount = layer.channels ? Object.values(layer.channels).filter(Boolean).length : 4;
-      const chTag = layer.kind !== "folder" && enabledCount < 4 ? ` · ${enabledCount}/4 ch` : "";
-      const sub = `${layer.kind.toUpperCase()} · ${layer.blend} · ${partTag}${chTag}`;
+      const chTag = layer.kind !== "folder" && enabledCount !== 4 ? ` · ${enabledCount}/19 ch` : "";
+      const stpTag = layer.stamps?.length ? ` · ${layer.stamps.length} stp` : "";
+      const sub = `${layer.kind.toUpperCase()} · ${layer.blend} · ${partTag}${chTag}${stpTag}`;
       if (layer.parentId) row.style.marginLeft = "14px";
       const info = Construct("div", "stack-row-info", [
         Construct("span", "stack-row-title", layer.name),
@@ -1682,7 +2332,18 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       maskPill.addEventListener("click", (e) => {
         e.stopPropagation();
         if (!layer.mask) {
-          layer.mask = { enabled: true, invert: false, pixels: new Uint8ClampedArray(res * res).fill(255) };
+          layer.mask = {
+            enabled: true,
+            invert: false,
+            opacity: 1.0,
+            generatorPreset: "none",
+            generatorThreshold: 0.48,
+            generatorSoftness: 0.16,
+            generatorNoiseScale: 6.0,
+            generatorNoiseMix: 0.25,
+            featherRadius: 0,
+            pixels: new Uint8ClampedArray(res * res).fill(255),
+          };
           if (gpuPaint.isActive) gpuPaint.fillMaskGpu(layer, 1);
         } else {
           layer.mask.enabled = true;
@@ -1766,7 +2427,6 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     rightInner.innerHTML = "";
 
     const layer = state.doc.layers.find((l) => l.id === state.doc.selectedLayerId) || state.doc.layers[0];
-    const activeChCount = layer?.channels ? Object.values(layer.channels).filter(Boolean).length : 4;
     const ensureLayerChannelState = (l) => {
       if (!l) return;
       if (!l.channels) l.channels = { albedo: true, roughness: true, metalness: true, height: true };
@@ -1774,6 +2434,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       if (!l.channelBlends) l.channelBlends = { albedo: "Inherit", roughness: "Inherit", metalness: "Inherit", height: "Inherit" };
     };
     ensureLayerChannelState(layer);
+    const activeChCount = layer?.channels ? PAINT_PBR_CHANNELS.filter((c) => !!layer.channels[c.key]).length : 4;
 
     if (
       state.inspectedLayerChannel !== "all" &&
@@ -1796,19 +2457,21 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     MetricTrio(rightInner, [
       { Label: "GPU Canvas", Highlight: true, Read: () => ({ value: `${res}px`, sub: gpuPaint.isActive ? "WebGL2 RT" : "CPU Mock" }) },
       { Label: "Parts", Read: () => ({ value: String(meshIndex?.partNames?.length || 1), sub: `${meshIndex?.islandCount || 1} Islands` }) },
-      { Label: "PBR Channels", Read: () => ({ value: `${activeChCount}/4`, sub: state.doc.bakedMaps ? "Baked AO" : "Live Layer" }) },
+      { Label: "PBR Channels", Read: () => ({ value: `${activeChCount}/19`, sub: state.doc.bakedMaps ? "Baked AO" : "Live Layer" }) },
     ]);
 
     // Compact 1-row Active Tool launcher — keeps ALL brush/tool clutter in the Right-Click / Q inspector!
     const toolBarCard = Construct("div", "chip-strip");
     toolBarCard.style.cssText = "align-items:center;justify-content:space-between;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--card);";
     const activeToolLabel = TOOL_LABELS[state.brush.tool] || "Brush";
+    const activeStampInfo = getSelectedStamp(layer, false);
     const activeSubMeta =
       state.brush.tool === "paint" ? `${state.brush.tip} · ${state.brush.color}`
         : state.brush.tool === "erase" ? `${state.brush.tip} eraser`
           : state.brush.tool === "fill" ? `${state.fillScope} fill`
             : state.brush.tool === "stamp" ? (state.brush.stampName || "Stamp")
-              : "Sample surface";
+              : state.brush.tool === "move" ? (activeStampInfo ? `${activeStampInfo.stamp.name}` : "Drag Stamp")
+                : "Sample surface";
     const toolMetaCopy = Construct("div", null, [
       Construct("strong", null, `${activeToolLabel} Active`),
       Construct("div", null, `Right-click or Q for Brush Inspector · ${activeSubMeta}`),
@@ -1839,6 +2502,16 @@ export function mountTexturePaintWorkspace(root, appBridge) {
         Write: (v) => { layer.locked = !!v; renderLeftColumn(); },
       });
 
+      const folders = state.doc.layers.filter((f) => f.kind === "folder" && f.id !== layer.id);
+      if (layer.kind !== "folder" && folders.length) {
+        SelectRow(lSec.Inner, {
+          Label: "Parent Folder",
+          Options: [["Top Level (None)", ""], ...folders.map((f) => [f.name, f.id])],
+          Read: () => layer.parentId || "",
+          Write: (v) => { layer.parentId = v || null; renderLeftColumn(); refreshComposite(); },
+        });
+      }
+
       if (layer.kind !== "folder") {
         FilterDropdownPill(lSec.Inner, {
           Label: "Master Blend Mode",
@@ -1857,6 +2530,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
         ChannelMaskRow(lSec.Inner, {
           Label: "Active PBR Channels",
           AddLabel: "Channel",
+          Channels: PAINT_PBR_CHANNEL_ROWS,
           StrictPresence: true,
           Read: () => layer.channels,
           Write: (next) => {
@@ -1871,8 +2545,8 @@ export function mountTexturePaintWorkspace(root, appBridge) {
         });
 
         const chTabDefs = [["All", "all"]];
-        for (const [ck, cLabel] of [["Albedo", "albedo"], ["Rough", "roughness"], ["Metal", "metalness"], ["Height", "height"]]) {
-          if (layer.channels?.[cLabel]) chTabDefs.push([ck, cLabel]);
+        for (const cDef of PAINT_PBR_CHANNELS) {
+          if (layer.channels?.[cDef.key]) chTabDefs.push([cDef.short, cDef.key]);
         }
         SegmentedRow(lSec.Inner, {
           Label: "Inspect Channel",
@@ -1892,12 +2566,20 @@ export function mountTexturePaintWorkspace(root, appBridge) {
           gpuPaint._clearRT(layer._gpu.albedoRT, 0, 0, 0, 0);
           gpuPaint._clearRT(layer._gpu.ormhRT, 0.5, 0, 0.5, 0);
           gpuPaint._clearRT(layer._gpu.chanAlphaRT, 0, 0, 0, 0);
+          if (layer._gpu.extValRT) {
+            for (const rt of layer._gpu.extValRT) if (rt) gpuPaint._clearRT(rt, 0, 0, 0, 0);
+          }
+          if (layer._gpu.extAlphaRT) {
+            for (const rt of layer._gpu.extAlphaRT) if (rt) gpuPaint._clearRT(rt, 0, 0, 0, 0);
+          }
         }
         if (layer.pixels) {
           layer.pixels.albedo?.fill(0);
           layer.pixels.roughAlpha?.fill(0);
           layer.pixels.metalAlpha?.fill(0);
           layer.pixels.heightAlpha?.fill(0);
+          if (layer.pixels.extValues) for (const k of Object.keys(layer.pixels.extValues)) layer.pixels.extValues[k]?.fill(0);
+          if (layer.pixels.extAlphas) for (const k of Object.keys(layer.pixels.extAlphas)) layer.pixels.extAlphas[k]?.fill(0);
         }
         if (snap) pushUndoSnapshot(snap);
         refreshComposite();
@@ -1912,7 +2594,8 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       }));
 
       if (layer.kind !== "folder" && ch !== "all") {
-        const chTitle = ch[0].toUpperCase() + ch.slice(1);
+        const chDef = PAINT_PBR_CHANNEL_MAP[ch];
+        const chTitle = chDef?.label || (ch[0].toUpperCase() + ch.slice(1));
         SliderRow(lSec.Inner, {
           Label: `${chTitle} Channel Weight`,
           Minimum: 0,
@@ -1930,8 +2613,60 @@ export function mountTexturePaintWorkspace(root, appBridge) {
           Write: (v) => { layer.channelBlends[ch] = v; refreshComposite(); },
         });
 
-        // Direct per-channel value controls for each layer kind
-        if (layer.kind === "fill") {
+        const getExtObj = () => {
+          const target = layer.kind === "fill" ? layer.fill : layer.kind === "material" ? layer.material : layer.generator;
+          if (!target.extValues) target.extValues = {};
+          return target.extValues;
+        };
+
+        if (chDef?.extended) {
+          if (ch === "normal") {
+            SliderRow(lSec.Inner, {
+              Label: "Height-to-Normal Gain",
+              Minimum: 0,
+              Maximum: 2.5,
+              Step: 0.05,
+              Read: () => (getExtObj().normal ?? 1.0),
+              Write: (v) => { getExtObj().normal = v; refreshComposite(); },
+            });
+          } else if (layer.kind === "fill" || layer.kind === "material" || layer.kind === "generator") {
+            if (chDef.isColor) {
+              ColorRow(lSec.Inner, {
+                Label: `${chTitle} Color`,
+                Read: () => getExtObj()[ch] ?? chDef.defaultVal,
+                Write: (v) => { getExtObj()[ch] = v; refreshComposite(); },
+              });
+            } else {
+              SliderRow(lSec.Inner, {
+                Label: `${chTitle} Value`,
+                Minimum: chDef.min ?? 0,
+                Maximum: chDef.max ?? 1,
+                Step: chDef.step ?? 0.01,
+                Read: () => getExtObj()[ch] ?? chDef.defaultVal,
+                Write: (v) => { getExtObj()[ch] = v; refreshComposite(); },
+              });
+            }
+          } else {
+            ActionRow(lSec.Inner, [
+              {
+                Label: `Flood ${chTitle}`,
+                Glyph: "Fill",
+                Tone: "accent",
+                Act: () => {
+                  if (layer.locked) { Toast("Layer is locked"); return; }
+                  const prevScope = state.fillScope;
+                  const prevFillCh = state.brush.fillChannels;
+                  state.fillScope = "all";
+                  state.brush.fillChannels = { [ch]: true };
+                  performFillAtUv(layer, 0.5, 0.5);
+                  state.brush.fillChannels = prevFillCh;
+                  state.fillScope = prevScope;
+                },
+              },
+              { Label: "Clear Layer", Glyph: "Trash", Act: clearPaintLayerBuffers },
+            ]);
+          }
+        } else if (layer.kind === "fill") {
           if (ch === "albedo") {
             ColorRow(lSec.Inner, { Label: "Fill Base Color", Read: () => layer.fill.color, Write: (v) => { layer.fill.color = v; refreshComposite(); renderLeftColumn(); } });
             if (layer.fill.patternData) {
@@ -1979,7 +2714,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
                 const prevScope = state.fillScope;
                 const prevFillCh = state.brush.fillChannels;
                 state.fillScope = "all";
-                state.brush.fillChannels = { albedo: ch === "albedo", roughness: ch === "roughness", metalness: ch === "metalness", height: ch === "height" };
+                state.brush.fillChannels = { [ch]: true };
                 performFillAtUv(layer, 0.5, 0.5);
                 state.brush.fillChannels = prevFillCh;
                 state.fillScope = prevScope;
@@ -1990,7 +2725,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
         }
       } else if (layer.kind === "folder") {
         const childLayers = state.doc.layers.filter((c) => c.parentId === layer.id);
-        lSec.Inner.append(Construct("p", "property-hint", `Folder contains ${childLayers.length} nested child layer${childLayers.length === 1 ? "" : "s"}. Group opacity & visibility cascade during compositing.`));
+        lSec.Inner.append(Construct("p", "property-hint", `Folder contains ${childLayers.length} nested child layer${childLayers.length === 1 ? "" : "s"}. Group opacity, visibility & folder mask cascade during compositing.`));
         ActionRow(lSec.Inner, [
           {
             Label: "+ Paint Child",
@@ -2039,18 +2774,16 @@ export function mountTexturePaintWorkspace(root, appBridge) {
           { Label: "Clear Layer", Glyph: "Trash", Act: clearPaintLayerBuffers },
         ]);
       } else if (layer.kind === "decal") {
-        const kSec = SectionCard(rightInner, { Title: "Decal Stamp Layer", Glyph: "Stamp", Open: true });
-        kSec.Inner.append(Construct("p", "property-hint", `Active stamp: ${state.brush.stampName || "Default"}. Adjust placement or click Change Stamp to browse stamps.`));
-        SliderRow(kSec.Inner, { Label: "Decal Scale", Minimum: 0.04, Maximum: 0.85, Step: 0.01, Read: () => state.brush.stampScale, Write: (v) => { state.brush.stampScale = v; } });
-        SliderRow(kSec.Inner, { Label: "Decal Rotation", Minimum: -180, Maximum: 180, Step: 1, Unit: "°", Read: () => state.brush.stampRotation, Write: (v) => { state.brush.stampRotation = v; } });
+        const kSec = SectionCard(rightInner, { Title: "Stamp Decal Layer", Glyph: "Stamp", Open: true });
+        kSec.Inner.append(Construct("p", "property-hint", "Non-destructive Stamp layer. Place stamps anywhere with Stamp (S) and transform with Move (V) or 2D UV gizmo handles."));
         ActionRow(kSec.Inner, [
           {
-            Label: "Change Stamp (Tool)",
+            Label: "+ Place Stamp",
             Glyph: "Stamp",
             Tone: "accent",
-            Act: () => { selectTool("stamp"); openToolPopup(); },
+            Act: () => { placeMovableStamp({ projection: "uv", uv: { u: 0.5, v: 0.5 } }); selectTool("move"); },
           },
-          { Label: "Clear Decal Layer", Glyph: "Trash", Act: clearPaintLayerBuffers },
+          { Label: "Clear Layer", Glyph: "Trash", Act: clearPaintLayerBuffers },
         ]);
       } else if (layer.kind === "fill") {
         const kSec = SectionCard(rightInner, { Title: "Fill & Pattern Properties", Glyph: "Fill", Open: true });
@@ -2123,14 +2856,153 @@ export function mountTexturePaintWorkspace(root, appBridge) {
         SwitchRow(kSec.Inner, { Label: "Invert Generator Mask", Read: () => !!layer.generator.invert, Write: (v) => { layer.generator.invert = !!v; refreshComposite(); } });
       }
 
-      if (layer.mask) {
-        const maskSec = SectionCard(rightInner, { Title: "Layer Mask Controls", Glyph: "Sparkles", Open: state.doc.editingMask });
+      // Layer Stamps Subcomponents Inspector (when layer has stamps or is decal layer)
+      if (layer.kind !== "folder" && ((layer.stamps && layer.stamps.length > 0) || layer.kind === "decal")) {
+        const stSec = SectionCard(rightInner, {
+          Title: "Layer Stamps",
+          Glyph: "Stamp",
+          Badge: String(layer.stamps?.length || 0),
+          Open: true,
+        });
+        const list = Construct("div", "stamp-sublist");
+        for (const st of (layer.stamps || [])) {
+          const isStSel = st.id === layer.selectedStampId || (!layer.selectedStampId && st === layer.stamps[0]);
+          const item = Construct("div", "stamp-sub-item" + (isStSel ? " active" : ""));
+          const vis = Construct("button", "stack-mini-btn" + (st.visible ? " on" : ""), ConstructGlyph(st.visible ? "Eye" : "EyeOff"));
+          vis.type = "button";
+          vis.addEventListener("click", (e) => { e.stopPropagation(); st.visible = !st.visible; rebuildInspector(); refreshComposite(); });
+          const del = Construct("button", "stack-mini-btn", ConstructGlyph("Trash"));
+          del.type = "button";
+          del.addEventListener("click", (e) => {
+            e.stopPropagation();
+            layer.stamps = layer.stamps.filter((x) => x.id !== st.id);
+            layer.selectedStampId = layer.stamps[0]?.id || null;
+            renderLeftColumn();
+            rebuildInspector();
+            refreshComposite();
+          });
+          const lbl = Construct("span", null, `${st.name} (${st.projection.toUpperCase()})`);
+          lbl.style.cssText = "flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
+          item.append(ConstructGlyph("Stamp"), lbl, vis, del);
+          item.addEventListener("click", () => {
+            layer.selectedStampId = st.id;
+            rebuildInspector();
+            refreshComposite();
+          });
+          list.append(item);
+        }
+        stSec.Inner.append(list);
+
+        const activeSt = getSelectedStamp(layer, false)?.stamp;
+        if (activeSt) {
+          TextRow(stSec.Inner, { Label: "Stamp Name", Read: () => activeSt.name, Write: (v) => { activeSt.name = v; rebuildInspector(); } });
+          SegmentedRow(stSec.Inner, {
+            Label: "Projection",
+            Options: [["UV", "uv"], ["3D", "3d"]],
+            Read: () => activeSt.projection || "uv",
+            Write: (v) => { activeSt.projection = v; refreshComposite(); rebuildInspector(); },
+          });
+          SliderRow(stSec.Inner, { Label: "Uniform Scale", Minimum: 0.025, Maximum: 1.5, Step: 0.01, Read: () => activeSt.scale ?? 0.28, Write: (v) => { activeSt.scale = v; refreshComposite(); } });
+          SliderRow(stSec.Inner, { Label: "Rotation", Minimum: -180, Maximum: 180, Step: 1, Unit: "°", Read: () => activeSt.rotation ?? 0, Write: (v) => { activeSt.rotation = v; refreshComposite(); } });
+          SliderRow(stSec.Inner, { Label: "Opacity", Minimum: 0.02, Maximum: 1, Step: 0.01, Read: () => activeSt.opacity ?? 1, Write: (v) => { activeSt.opacity = v; refreshComposite(); } });
+          SliderRow(stSec.Inner, { Label: "Height Gain", Minimum: -1, Maximum: 1.5, Step: 0.02, Read: () => activeSt.heightStrength ?? 0.5, Write: (v) => { activeSt.heightStrength = v; refreshComposite(); } });
+          ColorRow(stSec.Inner, { Label: "Stamp Tint", Read: () => activeSt.tint || "#ffffff", Write: (v) => { activeSt.tint = v; refreshComposite(); } });
+        }
+        ActionRow(stSec.Inner, [
+          {
+            Label: "Move / Resize (V)",
+            Glyph: "Move",
+            Tone: "accent",
+            Act: () => selectTool("move"),
+          },
+          {
+            Label: "+ Add Stamp Here",
+            Glyph: "Plus",
+            Act: () => { placeMovableStamp({ projection: "uv", uv: { u: 0.5, v: 0.5 } }); selectTool("move"); },
+          },
+        ]);
+      }
+
+      // Unconditional Layer Mask Inspector (works on any layer & folder!)
+      const maskSec = SectionCard(rightInner, { Title: "Layer Mask", Glyph: "Sparkles", Badge: layer.mask ? (layer.mask.enabled ? "ON" : "OFF") : "NONE", Open: !!(state.doc.editingMask || layer.mask) });
+      if (!layer.mask) {
+        ActionRow(maskSec.Inner, [
+          {
+            Label: "Add White Mask",
+            Tone: "accent",
+            Act: () => {
+              layer.mask = { enabled: true, invert: false, opacity: 1, generatorPreset: "none", generatorThreshold: 0.48, generatorSoftness: 0.16, generatorNoiseScale: 6, generatorNoiseMix: 0.25, featherRadius: 0, pixels: new Uint8ClampedArray(res * res).fill(255) };
+              if (gpuPaint.isActive) gpuPaint.fillMaskGpu(layer, 1);
+              state.doc.editingMask = true;
+              renderLeftColumn();
+              rebuildInspector();
+              refreshComposite();
+            },
+          },
+          {
+            Label: "Add Black Mask",
+            Act: () => {
+              layer.mask = { enabled: true, invert: false, opacity: 1, generatorPreset: "none", generatorThreshold: 0.48, generatorSoftness: 0.16, generatorNoiseScale: 6, generatorNoiseMix: 0.25, featherRadius: 0, pixels: new Uint8ClampedArray(res * res).fill(0) };
+              if (gpuPaint.isActive) gpuPaint.fillMaskGpu(layer, 0);
+              state.doc.editingMask = true;
+              renderLeftColumn();
+              rebuildInspector();
+              refreshComposite();
+            },
+          },
+        ]);
+      } else {
         SwitchRow(maskSec.Inner, { Label: "Paint on Mask", Read: () => !!state.doc.editingMask, Write: (v) => { state.doc.editingMask = v; renderLeftColumn(); refreshComposite(); } });
         SwitchRow(maskSec.Inner, { Label: "Mask Enabled", Read: () => !!layer.mask.enabled, Write: (v) => { layer.mask.enabled = v; renderLeftColumn(); refreshComposite(); } });
         SwitchRow(maskSec.Inner, { Label: "Invert Mask", Read: () => !!layer.mask.invert, Write: (v) => { layer.mask.invert = v; refreshComposite(); } });
+        SliderRow(maskSec.Inner, { Label: "Mask Opacity", Minimum: 0, Maximum: 1, Step: 0.01, Read: () => layer.mask.opacity ?? 1, Write: (v) => { layer.mask.opacity = v; refreshComposite(); } });
+        SelectRow(maskSec.Inner, {
+          Label: "Procedural Generator",
+          Options: [["None (Manual Paint)", "none"], ["Edge Wear", "edge-wear"], ["Crevice Dirt", "crevice-dirt"], ["Top Dust", "top-dust"], ["Triplanar Grunge", "triplanar-grunge"]],
+          Read: () => layer.mask.generatorPreset || "none",
+          Write: (v) => { layer.mask.generatorPreset = v; rebuildInspector(); },
+        });
+        if (layer.mask.generatorPreset && layer.mask.generatorPreset !== "none") {
+          SliderRow(maskSec.Inner, { Label: "Gen Threshold", Minimum: 0.05, Maximum: 0.95, Step: 0.01, Read: () => layer.mask.generatorThreshold ?? 0.48, Write: (v) => { layer.mask.generatorThreshold = v; } });
+          SliderRow(maskSec.Inner, { Label: "Gen Softness", Minimum: 0.02, Maximum: 0.8, Step: 0.01, Read: () => layer.mask.generatorSoftness ?? 0.16, Write: (v) => { layer.mask.generatorSoftness = v; } });
+          ActionRow(maskSec.Inner, [{
+            Label: "Bake Generator to Mask",
+            Glyph: "Sparkles",
+            Tone: "accent",
+            Act: () => {
+              if (!meshCues) return;
+              const snap = snapshotSelectedLayer();
+              generateProceduralMask(layer.mask, meshCues, {
+                preset: layer.mask.generatorPreset,
+                threshold: layer.mask.generatorThreshold ?? 0.48,
+                softness: layer.mask.generatorSoftness ?? 0.16,
+                noiseScale: layer.mask.generatorNoiseScale ?? 6,
+                noiseMix: layer.mask.generatorNoiseMix ?? 0.25,
+                bakedMaps: state.doc.bakedMaps,
+              });
+              if (gpuPaint.isActive) gpuPaint.syncMaskCpuToGpu(layer);
+              if (snap) pushUndoSnapshot(snap);
+              refreshComposite();
+              Toast(`Baked ${layer.mask.generatorPreset} into Layer Mask`);
+            },
+          }]);
+        }
+        SliderRow(maskSec.Inner, { Label: "Feather Radius (px)", Minimum: 0, Maximum: 16, Step: 1, Read: () => layer.mask.featherRadius ?? 0, Write: (v) => { layer.mask.featherRadius = v; } });
         ActionRow(maskSec.Inner, [
-          { Label: "Fill White", Act: () => { layer.mask.pixels?.fill(255); if (gpuPaint.isActive) gpuPaint.fillMaskGpu(layer, 1); refreshComposite(); } },
-          { Label: "Fill Black", Act: () => { layer.mask.pixels?.fill(0); if (gpuPaint.isActive) gpuPaint.fillMaskGpu(layer, 0); refreshComposite(); } },
+          { Label: "Fill White", Act: () => { const snap = snapshotSelectedLayer(); layer.mask.pixels?.fill(255); if (gpuPaint.isActive) gpuPaint.fillMaskGpu(layer, 1); if (snap) pushUndoSnapshot(snap); refreshComposite(); } },
+          { Label: "Fill Black", Act: () => { const snap = snapshotSelectedLayer(); layer.mask.pixels?.fill(0); if (gpuPaint.isActive) gpuPaint.fillMaskGpu(layer, 0); if (snap) pushUndoSnapshot(snap); refreshComposite(); } },
+          {
+            Label: "Feather Mask",
+            Act: () => {
+              const r = Math.max(1, Math.round(layer.mask.featherRadius || 2));
+              const snap = snapshotSelectedLayer();
+              featherMaskPixels(layer.mask.pixels, res, r);
+              if (gpuPaint.isActive) gpuPaint.syncMaskCpuToGpu(layer);
+              if (snap) pushUndoSnapshot(snap);
+              refreshComposite();
+              Toast(`Feathered mask (${r}px)`);
+            },
+          },
           {
             Label: "Remove Mask",
             Glyph: "Trash",
@@ -2187,6 +3059,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       else { uvCam.left = -1; uvCam.right = 1; uvCam.top = 1 / pa; uvCam.bottom = -1 / pa; }
       uvCam.updateProjectionMatrix();
     }
+    renderUvStampGizmo();
   }
 
   meshSelect.addEventListener("change", () => {
@@ -2225,13 +3098,36 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   });
 
   btnExportAll.addEventListener("click", () => {
-    const exp = gpuPaint.isActive ? gpuPaint.readExportChannels() : lastCpuComp;
+    const extMask = getAnyExtendedChannelsMask();
+    const exp = gpuPaint.isActive ? gpuPaint.readExportChannels(extMask) : lastCpuComp;
     if (!exp) return;
     downloadRgbaPng(exp.albedo, res, `${state.meshId}-albedo.png`, false);
     downloadRgbaPng(exp.roughness, res, `${state.meshId}-roughness.png`, true);
     downloadRgbaPng(exp.metalness, res, `${state.meshId}-metalness.png`, true);
     downloadRgbaPng(exp.normal, res, `${state.meshId}-normal.png`, false);
-    Toast("Exported Albedo, Roughness, Metalness & Normal PNGs");
+    let extraCount = 0;
+    if (exp.ext) {
+      for (const [key, buf] of Object.entries(exp.ext)) {
+        if (!buf || !extMask[key]) continue;
+        if (key === "emissive") {
+          let rgbaBuf = buf;
+          if (buf.length === res * res * 3) {
+            rgbaBuf = new Uint8ClampedArray(res * res * 4);
+            for (let i = 0; i < res * res; i++) {
+              rgbaBuf[i * 4] = buf[i * 3];
+              rgbaBuf[i * 4 + 1] = buf[i * 3 + 1];
+              rgbaBuf[i * 4 + 2] = buf[i * 3 + 2];
+              rgbaBuf[i * 4 + 3] = 255;
+            }
+          }
+          downloadRgbaPng(rgbaBuf, res, `${state.meshId}-emissive.png`, false);
+        } else {
+          downloadRgbaPng(buf, res, `${state.meshId}-${key}.png`, true);
+        }
+        extraCount++;
+      }
+    }
+    Toast(`Exported 4 core maps${extraCount ? ` + ${extraCount} extended PBR PNGs` : ""}`);
   });
 
   const onKeyDown = (e) => {
@@ -2247,6 +3143,18 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     else if (e.key.toLowerCase() === "g") selectTool("fill");
     else if (e.key.toLowerCase() === "s") selectTool("stamp");
     else if (e.key.toLowerCase() === "i") selectTool("eyedropper");
+    else if (e.key.toLowerCase() === "v") selectTool("move");
+    else if (e.key === "[" || e.key === "]") {
+      const mul = e.key === "]" ? 1.12 : 0.88;
+      if (state.brush.tool === "move") {
+        const found = getSelectedStamp(getActiveLayer(), true);
+        if (found) { found.stamp.scale = Math.max(0.025, Math.min(1.6, (found.stamp.scale ?? 0.28) * mul)); refreshComposite(); }
+      } else {
+        state.brush.size = Math.max(0.03, Math.min(0.9, state.brush.size * mul));
+        state.brush.pixelRadius = Math.round(state.brush.size * 110);
+      }
+      Broadcast();
+    }
   };
   window.addEventListener("keydown", onKeyDown);
 
@@ -2343,34 +3251,26 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       if (gpuPaint.isActive) gpuPaint.ensureStampTexture(ev);
       selectTool("stamp");
 
-      // If dropped directly over 3D/2D canvas, place the stamp immediately at drop target!
+      // If dropped directly over 3D/2D canvas, place as movable/scalable/rotatable Stamp!
       if (dropInfo.event) {
         const evDrop = dropInfo.event;
-        let hitUv = null;
-        if (dropInfo.pane === "2d") hitUv = uvFromPaneEvent(evDrop);
-        else {
-          const hit = raycastMeshFromEvent(evDrop);
-          if (hit?.uv) hitUv = { u: hit.uv.x, v: hit.uv.y };
-        }
-        if (hitUv) {
-          const layer = getTargetPaintableLayer(true);
-          if (layer && !layer.locked) {
-            const snap = snapshotSelectedLayer();
-            let committed = false;
-            if (gpuPaint.isActive) {
-              gpuPaint.beginStroke();
-              gpuPaint.dabStroke({ mode: "2d", uv: hitUv, uvRadius: Math.max(0.05, state.brush.pixelRadius / res), brush: state.brush, partFilter: layer.partFilter ?? -1, seed: strokeSeedCounter++ });
-              committed = gpuPaint.commitStrokeToLayer(layer, state.brush, state.doc.editingMask);
-            } else {
-              const acc = createStrokeAccumulator(res);
-              applyBrushDabUV({ strokeAccum: acc, cues: meshCues, u: hitUv.u, v: hitUv.v, pixelRadius: Math.max(20, state.brush.pixelRadius), brush: state.brush, activePartFilter: layer.partFilter ?? -1 });
-              committed = commitStrokeAccumulator(layer, acc, state.brush, state.doc.editingMask);
-            }
-            if (committed && snap) pushUndoSnapshot(snap);
-            else gpuPaint.disposeSnapshot(snap);
-            refreshComposite();
-            Toast(`Stamped "${state.brush.stampName}" at UV (${hitUv.u.toFixed(2)}, ${hitUv.v.toFixed(2)})`);
+        if (dropInfo.pane === "2d") {
+          const hitUv = uvFromPaneEvent(evDrop);
+          const placed = placeMovableStamp({ projection: "uv", uv: hitUv });
+          if (placed) {
+            selectTool("move");
+            Toast(`Placed movable stamp "${state.brush.stampName}" at UV (${hitUv.u.toFixed(2)}, ${hitUv.v.toFixed(2)})`);
             return true;
+          }
+        } else {
+          const hit = raycastMeshFromEvent(evDrop);
+          if (hit) {
+            const placed = placeMovableStamp({ projection: "3d", hit });
+            if (placed) {
+              selectTool("move");
+              Toast(`Placed movable stamp "${state.brush.stampName}" on 3D mesh`);
+              return true;
+            }
           }
         }
       }
@@ -2500,6 +3400,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       fallbackAlbTex.dispose(); fallbackRoughTex.dispose();
       fallbackMetalTex.dispose(); fallbackNormalTex.dispose();
       uvQuadMat.dispose(); uvQuadMesh.geometry.dispose();
+      stampGizmo3D.geometry.dispose(); stampGizmo3D.material.dispose();
       paintMat.dispose();
       for (const s of state.undoStack) gpuPaint.disposeSnapshot(s);
       for (const s of state.redoStack) gpuPaint.disposeSnapshot(s);

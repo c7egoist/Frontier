@@ -8,7 +8,7 @@
    - GPU-resident Undo/Redo target snapshots (readPixels runs ONLY on PNG Export or Eyedropper sample). */
 
 import * as THREE from "three";
-import { sampleCurveLut, getToolChannels } from "./TexturePaintEngine.js";
+import { sampleCurveLut, getToolChannels, EXTENDED_PBR_KEYS, defaultByteForExtChannel, encodeScalarChannelByte } from "./TexturePaintEngine.js";
 
 function hexToRgb(hex) {
   const s = String(hex || "#ffffff").replace(/^#/, "");
@@ -23,6 +23,21 @@ function hexToRgb(hex) {
   if (Number.isNaN(n)) return [255, 255, 255];
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
+
+const EXT_GROUP_CHANNELS = [
+  ["emissive", "emissive", "emissive", "emissiveIntensity"],
+  ["clearcoat", "coatRoughness", "sheen", "sheenRoughness"],
+  ["iridescence", "iridescenceThickness", "transmission", "thickness"],
+  ["ao", "opacity", "normal", "specular"],
+  ["anisotropy", null, null, null],
+];
+const EXT_GROUP_DEFAULTS = [
+  [0, 0, 0, 0],
+  [0, 0.25, 0, 0.5],
+  [0, 0.5, 0, 0],
+  [1, 1, 0.5, 0.5],
+  [0, 0, 0, 1],
+];
 
 const FULLSCREEN_VERT = /* glsl */ `
 out vec2 vUv;
@@ -208,10 +223,13 @@ uniform sampler2D uBaseTex;
 uniform sampler2D uStrokeTex;
 uniform sampler2D uPrevChanAlphaTex;
 uniform float uOpacity;
-uniform vec4 uChanMask; // (albedo, rough, metal, height)
+uniform float uMaskInk; // < 0.0 -> stroke luminance, >= 0.0 -> explicit ink
+uniform vec4 uChanMask; // (albedo, rough, metal, height) OR group channel bits
+uniform vec4 uBrushVal; // extended group brush values
 uniform int uIsErase;
 uniform int uIsMask;
-uniform int uPassKind; // 0=albedo, 1=ormh, 2=chanAlpha
+uniform int uIsRgbGroup; // 1 for emissive RGB + scalar .a group
+uniform int uPassKind; // 0=albedo, 1=ormh, 2=chanAlpha, 3=extVal, 4=extAlpha
 in vec2 vUv;
 out vec4 fragColor;
 
@@ -225,7 +243,8 @@ void main() {
     return;
   }
   if (uIsMask != 0) {
-    float ink = uIsErase != 0 ? 1.0 : 0.0;
+    float lum = uMaskInk >= -0.01 ? uMaskInk : dot(src.rgb, vec3(0.299, 0.587, 0.114));
+    float ink = uIsErase != 0 ? 0.0 : clamp(lum, 0.0, 1.0);
     float m = mix(dst.r, ink, sa);
     fragColor = vec4(m, m, m, 1.0);
     return;
@@ -246,6 +265,51 @@ void main() {
         uChanMask.w > 0.5 ? sa + dst.a * (1.0 - sa) : dst.a
       );
     }
+    return;
+  }
+  if (uPassKind == 3 || uPassKind == 4) {
+    vec4 mask4 = uIsRgbGroup != 0 ? vec4(uChanMask.x, uChanMask.x, uChanMask.x, uChanMask.w) : uChanMask;
+    if (uPassKind == 4) {
+      if (uIsErase != 0) {
+        fragColor = vec4(
+          mask4.x > 0.5 ? dst.r * (1.0 - sa) : dst.r,
+          mask4.y > 0.5 ? dst.g * (1.0 - sa) : dst.g,
+          mask4.z > 0.5 ? dst.b * (1.0 - sa) : dst.b,
+          mask4.w > 0.5 ? dst.a * (1.0 - sa) : dst.a
+        );
+      } else {
+        fragColor = vec4(
+          mask4.x > 0.5 ? sa + dst.r * (1.0 - sa) : dst.r,
+          mask4.y > 0.5 ? sa + dst.g * (1.0 - sa) : dst.g,
+          mask4.z > 0.5 ? sa + dst.b * (1.0 - sa) : dst.b,
+          mask4.w > 0.5 ? sa + dst.a * (1.0 - sa) : dst.a
+        );
+      }
+      return;
+    }
+    if (uIsErase != 0) {
+      fragColor = dst;
+      return;
+    }
+    vec4 prevA = texelFetch(uPrevChanAlphaTex, px, 0);
+    vec4 outV = dst;
+    if (mask4.x > 0.5) {
+      float oa = sa + prevA.r * (1.0 - sa);
+      if (oa > 1e-4) outV.r = (uBrushVal.r * sa + dst.r * prevA.r * (1.0 - sa)) / oa;
+    }
+    if (mask4.y > 0.5) {
+      float oa = sa + prevA.g * (1.0 - sa);
+      if (oa > 1e-4) outV.g = (uBrushVal.g * sa + dst.g * prevA.g * (1.0 - sa)) / oa;
+    }
+    if (mask4.z > 0.5) {
+      float oa = sa + prevA.b * (1.0 - sa);
+      if (oa > 1e-4) outV.b = (uBrushVal.b * sa + dst.b * prevA.b * (1.0 - sa)) / oa;
+    }
+    if (mask4.w > 0.5) {
+      float oa = sa + prevA.a * (1.0 - sa);
+      if (oa > 1e-4) outV.a = (uBrushVal.a * sa + dst.a * prevA.a * (1.0 - sa)) / oa;
+    }
+    fragColor = outV;
     return;
   }
   if (uIsErase != 0) {
@@ -298,6 +362,7 @@ uniform sampler2D uLayerAlbedo;
 uniform sampler2D uLayerOrmh;
 uniform sampler2D uLayerChanAlpha;
 uniform sampler2D uLayerMask;
+uniform sampler2D uParentMask;
 uniform sampler2D uStrokeAlbedo;
 uniform sampler2D uStrokeOrmh;
 uniform sampler2D uPatternTex;
@@ -310,9 +375,14 @@ uniform float uOpacity;
 uniform int uPartFilter;
 uniform int uHasMask;
 uniform int uInvertMask;
+uniform float uMaskOpacity;
+uniform int uHasParentMask;
+uniform int uInvertParentMask;
+uniform float uParentMaskOp;
 uniform int uHasLiveStroke;
 uniform int uLiveErase;
 uniform int uLiveMaskStroke;
+uniform float uLiveMaskInk;
 uniform float uLiveOpacity;
 uniform vec4 uLiveChanMask;
 uniform vec4 uLayerChanMask;
@@ -466,11 +536,21 @@ void main() {
   if (uHasMask != 0) {
     float m = texelFetch(uLayerMask, px, 0).r;
     if (uHasLiveStroke != 0 && uLiveMaskStroke != 0) {
-      float sa = clamp(texelFetch(uStrokeAlbedo, px, 0).a * uLiveOpacity, 0.0, 1.0);
-      float ink = uLiveErase != 0 ? 0.0 : 1.0;
+      vec4 stA = texelFetch(uStrokeAlbedo, px, 0);
+      float sa = clamp(stA.a * uLiveOpacity, 0.0, 1.0);
+      float lum = uLiveMaskInk >= -0.01 ? uLiveMaskInk : dot(stA.rgb, vec3(0.299, 0.587, 0.114));
+      float ink = uLiveErase != 0 ? 0.0 : clamp(lum, 0.0, 1.0);
       m = mix(m, ink, sa);
     }
-    maskMul = uInvertMask != 0 ? (1.0 - m) : m;
+    float mv = uInvertMask != 0 ? (1.0 - m) : m;
+    float mop = clamp(uMaskOpacity, 0.0, 1.0);
+    maskMul *= (1.0 - mop) + mv * mop;
+  }
+  if (uHasParentMask != 0) {
+    float pm = texelFetch(uParentMask, px, 0).r;
+    float pmv = uInvertParentMask != 0 ? (1.0 - pm) : pm;
+    float pop = clamp(uParentMaskOp, 0.0, 1.0);
+    maskMul *= (1.0 - pop) + pmv * pop;
   }
 
   vec4 w4 = clamp(srcChAlpha * uLayerChanMask * uLayerChanOpacity * uOpacity * maskMul, 0.0, 1.0);
@@ -491,6 +571,349 @@ void main() {
     float m = mix(dstO.b, blendScalar(dstO.b, srcMetal, bM), w4.b);
     float h = clamp(mix(dstO.a, blendScalar(dstO.a, srcHeight, bH), w4.a), 0.0, 1.0);
     fragColor = vec4(dstO.r, r, m, h);
+  }
+}
+`;
+
+const DECAL_STAMP_FRAG = /* glsl */ `
+precision highp float;
+precision highp int;
+uniform sampler2D uAccAlbedo;
+uniform sampler2D uAccOrmh;
+uniform sampler2D uPosPartTex;
+uniform sampler2D uNormIslandTex;
+uniform sampler2D uStampAlbedo;
+uniform sampler2D uStampOrmh;
+uniform sampler2D uLayerMask;
+uniform sampler2D uParentMask;
+uniform int uStampProj; // 0 = 2D UV, 1 = 3D Surface
+uniform vec2 uStampUv;
+uniform vec2 uStampScale;
+uniform float uStampRot;
+uniform vec3 uStampAnchorPos;
+uniform vec3 uStampAnchorNorm;
+uniform vec3 uStampRight;
+uniform vec3 uStampUp;
+uniform vec3 uStampTint;
+uniform float uStampHeightStr;
+uniform float uStampOpacity;
+uniform float uLayerOpacity;
+uniform int uBlendMode;
+uniform vec4 uLayerChanBlends;
+uniform vec4 uLayerChanOpacity;
+uniform vec4 uLayerChanMask;
+uniform int uPartFilter;
+uniform int uHasMask;
+uniform int uInvertMask;
+uniform float uMaskOpacity;
+uniform int uHasParentMask;
+uniform int uInvertParentMask;
+uniform float uParentMaskOp;
+uniform int uHasStampOrmh;
+uniform int uOutTarget; // 0 = albedo, 1 = ormh, 2 = ext group
+uniform vec4 uExtVal;
+uniform vec4 uExtChanMask;
+uniform vec4 uExtChanOpacity;
+uniform vec4 uExtChanBlends;
+uniform int uIsRgbGroup;
+in vec2 vUv;
+out vec4 fragColor;
+
+vec3 blendRgb(vec3 b, vec3 s, int mode) {
+  if (mode == 1) return b * s;
+  if (mode == 2) return 1.0 - (1.0 - b) * (1.0 - s);
+  if (mode == 3) return mix(2.0 * b * s, 1.0 - 2.0 * (1.0 - b) * (1.0 - s), step(0.5, b));
+  if (mode == 4) return min(vec3(1.0), b + s);
+  if (mode == 5) return min(b, s);
+  return s;
+}
+
+float blendScalar(float b, float s, int mode) {
+  if (mode == 1) return b * s;
+  if (mode == 2) return 1.0 - (1.0 - b) * (1.0 - s);
+  if (mode == 3) return b < 0.5 ? 2.0 * b * s : 1.0 - 2.0 * (1.0 - b) * (1.0 - s);
+  if (mode == 4) return min(1.0, b + s);
+  if (mode == 5) return min(b, s);
+  return s;
+}
+
+void main() {
+  ivec2 px = ivec2(gl_FragCoord.xy);
+  vec4 dstA = texelFetch(uAccAlbedo, px, 0);
+  vec4 dstO = texelFetch(uAccOrmh, px, 0);
+  vec4 keepVal = uOutTarget == 1 ? dstO : dstA;
+
+  vec4 posPart = texelFetch(uPosPartTex, px, 0);
+  if (uPartFilter >= 0 && int(floor(posPart.w + 0.5)) != uPartFilter) {
+    fragColor = keepVal;
+    return;
+  }
+
+  vec2 sx = max(vec2(0.015), uStampScale);
+  float c = cos(uStampRot), s = sin(uStampRot);
+  vec2 suv = vec2(-1.0);
+  float ndotFade = 1.0;
+
+  if (uStampProj == 1) {
+    vec4 normIsl = texelFetch(uNormIslandTex, px, 0);
+    if (normIsl.w < -0.5) { fragColor = keepVal; return; }
+    float nd = dot(normIsl.xyz, uStampAnchorNorm);
+    if (nd < 0.15) { fragColor = keepVal; return; }
+    ndotFade = clamp((nd - 0.15) * 3.0, 0.0, 1.0);
+    vec3 delta = posPart.xyz - uStampAnchorPos;
+    vec2 proj = vec2(dot(delta, uStampRight), dot(delta, uStampUp));
+    vec2 rot = vec2(proj.x * c - proj.y * s, proj.x * s + proj.y * c) / sx;
+    suv = rot * 0.5 + 0.5;
+  } else {
+    vec2 d = vUv - uStampUv;
+    vec2 rot = vec2(d.x * c - d.y * s, d.x * s + d.y * c) / sx;
+    suv = rot * 0.5 + 0.5;
+  }
+
+  if (suv.x < 0.0 || suv.x > 1.0 || suv.y < 0.0 || suv.y > 1.0) {
+    fragColor = keepVal;
+    return;
+  }
+
+  vec4 stA = texture(uStampAlbedo, suv);
+  float eff = stA.a * uStampOpacity * uLayerOpacity * ndotFade;
+  if (uHasMask != 0) {
+    float m = texelFetch(uLayerMask, px, 0).r;
+    float mv = uInvertMask != 0 ? (1.0 - m) : m;
+    float mop = clamp(uMaskOpacity, 0.0, 1.0);
+    eff *= (1.0 - mop) + mv * mop;
+  }
+  if (uHasParentMask != 0) {
+    float pm = texelFetch(uParentMask, px, 0).r;
+    float pmv = uInvertParentMask != 0 ? (1.0 - pm) : pm;
+    float pop = clamp(uParentMaskOp, 0.0, 1.0);
+    eff *= (1.0 - pop) + pmv * pop;
+  }
+  if (eff <= 0.001) {
+    fragColor = keepVal;
+    return;
+  }
+
+  if (uOutTarget == 0) {
+    float w = clamp(eff * uLayerChanMask.x * uLayerChanOpacity.x, 0.0, 1.0);
+    if (w <= 0.001) { fragColor = dstA; return; }
+    int bA = uLayerChanBlends.x >= -0.5 ? int(floor(uLayerChanBlends.x + 0.5)) : uBlendMode;
+    vec3 srcRgb = stA.rgb * uStampTint;
+    fragColor = vec4(mix(dstA.rgb, blendRgb(dstA.rgb, srcRgb, bA), w), max(dstA.a, w));
+  } else if (uOutTarget == 1) {
+    vec4 stO = uHasStampOrmh != 0 ? texture(uStampOrmh, suv) : vec4(0.5, 0.0, 0.5, 1.0);
+    float wR = clamp(eff * uLayerChanMask.y * uLayerChanOpacity.y, 0.0, 1.0);
+    float wM = clamp(eff * uLayerChanMask.z * uLayerChanOpacity.z, 0.0, 1.0);
+    float wH = clamp(eff * uLayerChanMask.w * uLayerChanOpacity.w, 0.0, 1.0);
+    int bR = uLayerChanBlends.y >= -0.5 ? int(floor(uLayerChanBlends.y + 0.5)) : uBlendMode;
+    int bM = uLayerChanBlends.z >= -0.5 ? int(floor(uLayerChanBlends.z + 0.5)) : uBlendMode;
+    int bH = uLayerChanBlends.w >= -0.5 ? int(floor(uLayerChanBlends.w + 0.5)) : uBlendMode;
+    float sH = clamp(0.5 + (stO.b - 0.5) * uStampHeightStr, 0.0, 1.0);
+    float r = mix(dstO.g, blendScalar(dstO.g, stO.r, bR), wR);
+    float m = mix(dstO.b, blendScalar(dstO.b, stO.g, bM), wM);
+    float h = clamp(mix(dstO.a, blendScalar(dstO.a, sH, bH), wH), 0.0, 1.0);
+    fragColor = vec4(dstO.r, r, m, h);
+  } else {
+    vec4 m4 = uIsRgbGroup != 0 ? vec4(uExtChanMask.x, uExtChanMask.x, uExtChanMask.x, uExtChanMask.w) : uExtChanMask;
+    vec4 op4 = uIsRgbGroup != 0 ? vec4(uExtChanOpacity.x, uExtChanOpacity.x, uExtChanOpacity.x, uExtChanOpacity.w) : uExtChanOpacity;
+    vec4 w4 = clamp(eff * m4 * op4, 0.0, 1.0);
+    int b0 = uExtChanBlends.x >= -0.5 ? int(floor(uExtChanBlends.x + 0.5)) : uBlendMode;
+    int b1 = uIsRgbGroup != 0 ? b0 : (uExtChanBlends.y >= -0.5 ? int(floor(uExtChanBlends.y + 0.5)) : uBlendMode);
+    int b2 = uIsRgbGroup != 0 ? b0 : (uExtChanBlends.z >= -0.5 ? int(floor(uExtChanBlends.z + 0.5)) : uBlendMode);
+    int b3 = uExtChanBlends.w >= -0.5 ? int(floor(uExtChanBlends.w + 0.5)) : uBlendMode;
+    fragColor = vec4(
+      mix(dstA.r, blendScalar(dstA.r, uExtVal.r, b0), w4.r),
+      mix(dstA.g, blendScalar(dstA.g, uExtVal.g, b1), w4.g),
+      mix(dstA.b, blendScalar(dstA.b, uExtVal.b, b2), w4.b),
+      mix(dstA.a, blendScalar(dstA.a, uExtVal.a, b3), w4.a)
+    );
+  }
+}
+`;
+
+const EXT_COMP_FRAG = /* glsl */ `
+precision highp float;
+precision highp int;
+uniform sampler2D uAccVal;
+uniform sampler2D uPosPartTex;
+uniform sampler2D uAuxCueTex;
+uniform sampler2D uLayerVal;
+uniform sampler2D uLayerAlpha;
+uniform sampler2D uStrokeAlbedo;
+uniform sampler2D uLayerMask;
+uniform sampler2D uParentMask;
+uniform int uLayerKind; // 0=paint/decal, 1=fill, 2=material, 3=generator
+uniform int uBlendMode;
+uniform vec4 uChanBlends;
+uniform vec4 uChanOpacity;
+uniform vec4 uChanMask;
+uniform vec4 uSrcVal;
+uniform vec4 uBrushVal;
+uniform float uOpacity;
+uniform int uPartFilter;
+uniform int uHasMask;
+uniform int uInvertMask;
+uniform float uMaskOpacity;
+uniform int uHasParentMask;
+uniform int uInvertParentMask;
+uniform float uParentMaskOp;
+uniform int uHasLiveStroke;
+uniform int uLiveErase;
+uniform int uLiveMaskStroke;
+uniform float uLiveMaskInk;
+uniform float uLiveOpacity;
+uniform vec4 uLiveChanMask;
+uniform int uIsRgbGroup;
+uniform float uParamA;
+uniform float uParamB;
+uniform float uParamC;
+uniform float uGenScale;
+uniform int uGenInvert;
+uniform int uGenPreset;
+in vec2 vUv;
+out vec4 fragColor;
+
+float hash21(vec2 p) {
+  p = fract(p * vec2(127.1, 311.7));
+  p += dot(p, p + 41.23);
+  return fract(p.x * p.y);
+}
+float vnoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(
+    mix(hash21(i), hash21(i + vec2(1.0, 0.0)), u.x),
+    mix(hash21(i + vec2(0.0, 1.0)), hash21(i + vec2(1.0, 1.0)), u.x),
+    u.y
+  );
+}
+float blendScalar(float b, float s, int mode) {
+  if (mode == 1) return b * s;
+  if (mode == 2) return 1.0 - (1.0 - b) * (1.0 - s);
+  if (mode == 3) return b < 0.5 ? 2.0 * b * s : 1.0 - 2.0 * (1.0 - b) * (1.0 - s);
+  if (mode == 4) return min(1.0, b + s);
+  if (mode == 5) return min(b, s);
+  return s;
+}
+
+void main() {
+  ivec2 px = ivec2(gl_FragCoord.xy);
+  vec4 dst = texelFetch(uAccVal, px, 0);
+  vec4 posPart = texelFetch(uPosPartTex, px, 0);
+  if (uPartFilter >= 0 && int(floor(posPart.w + 0.5)) != uPartFilter) {
+    fragColor = dst;
+    return;
+  }
+
+  vec4 mask4 = uIsRgbGroup != 0 ? vec4(uChanMask.x, uChanMask.x, uChanMask.x, uChanMask.w) : uChanMask;
+  if (mask4.r < 0.5 && mask4.g < 0.5 && mask4.b < 0.5 && mask4.a < 0.5) {
+    fragColor = dst;
+    return;
+  }
+
+  vec4 srcV = uSrcVal;
+  vec4 srcA = vec4(1.0);
+  if (uLayerKind == 0) {
+    srcV = texelFetch(uLayerVal, px, 0);
+    srcA = texelFetch(uLayerAlpha, px, 0);
+    if (uHasLiveStroke != 0 && uLiveMaskStroke == 0) {
+      float sa = clamp(texelFetch(uStrokeAlbedo, px, 0).a * uLiveOpacity, 0.0, 1.0);
+      if (sa > 0.001) {
+        vec4 lm = uIsRgbGroup != 0 ? vec4(uLiveChanMask.x, uLiveChanMask.x, uLiveChanMask.x, uLiveChanMask.w) : uLiveChanMask;
+        if (uLiveErase != 0) {
+          srcA *= (1.0 - sa * lm);
+        } else {
+          if (lm.r > 0.5) { float na = sa + srcA.r * (1.0 - sa); if (na > 1e-4) srcV.r = (uBrushVal.r * sa + srcV.r * srcA.r * (1.0 - sa)) / na; srcA.r = na; }
+          if (lm.g > 0.5) { float ng = sa + srcA.g * (1.0 - sa); if (ng > 1e-4) srcV.g = (uBrushVal.g * sa + srcV.g * srcA.g * (1.0 - sa)) / ng; srcA.g = ng; }
+          if (lm.b > 0.5) { float nb = sa + srcA.b * (1.0 - sa); if (nb > 1e-4) srcV.b = (uBrushVal.b * sa + srcV.b * srcA.b * (1.0 - sa)) / nb; srcA.b = nb; }
+          if (lm.a > 0.5) { float nc = sa + srcA.a * (1.0 - sa); if (nc > 1e-4) srcV.a = (uBrushVal.a * sa + srcV.a * srcA.a * (1.0 - sa)) / nc; srcA.a = nc; }
+        }
+      }
+    }
+  } else if (uLayerKind == 3) {
+    vec4 cue = texelFetch(uAuxCueTex, px, 0);
+    float gs = max(1.0, uGenScale);
+    float signal = 0.0;
+    if (uGenPreset == 0) signal = clamp((cue.g - 0.5) * 2.0, 0.0, 1.0);
+    else if (uGenPreset == 1) signal = clamp(1.0 - cue.r, 0.0, 1.0);
+    else if (uGenPreset == 2) signal = clamp(cue.b, 0.0, 1.0);
+    else signal = clamp(vnoise(vUv * gs * 0.7) * 0.65 + vnoise(vUv * gs * 1.9 + 7.1) * 0.35, 0.0, 1.0);
+    float n = vnoise(vUv * gs) * 0.65 + vnoise(vUv * gs * 2.4) * 0.35;
+    signal = clamp(mix(signal, n, uParamC), 0.0, 1.0);
+    float gAlpha = smoothstep(uParamA - uParamB * 0.5, uParamA + uParamB * 0.5, signal);
+    if (uGenInvert != 0) gAlpha = 1.0 - gAlpha;
+    srcA = vec4(gAlpha);
+  }
+
+  float maskMul = 1.0;
+  if (uHasMask != 0) {
+    float m = texelFetch(uLayerMask, px, 0).r;
+    if (uHasLiveStroke != 0 && uLiveMaskStroke != 0) {
+      vec4 stA = texelFetch(uStrokeAlbedo, px, 0);
+      float sa = clamp(stA.a * uLiveOpacity, 0.0, 1.0);
+      float lum = uLiveMaskInk >= -0.01 ? uLiveMaskInk : dot(stA.rgb, vec3(0.299, 0.587, 0.114));
+      float ink = uLiveErase != 0 ? 0.0 : clamp(lum, 0.0, 1.0);
+      m = mix(m, ink, sa);
+    }
+    float mv = uInvertMask != 0 ? (1.0 - m) : m;
+    float mop = clamp(uMaskOpacity, 0.0, 1.0);
+    maskMul *= (1.0 - mop) + mv * mop;
+  }
+  if (uHasParentMask != 0) {
+    float pm = texelFetch(uParentMask, px, 0).r;
+    float pmv = uInvertParentMask != 0 ? (1.0 - pm) : pm;
+    float pop = clamp(uParentMaskOp, 0.0, 1.0);
+    maskMul *= (1.0 - pop) + pmv * pop;
+  }
+
+  vec4 op4 = uIsRgbGroup != 0 ? vec4(uChanOpacity.x, uChanOpacity.x, uChanOpacity.x, uChanOpacity.w) : uChanOpacity;
+  vec4 w4 = clamp(srcA * mask4 * op4 * uOpacity * maskMul, 0.0, 1.0);
+  int b0 = uChanBlends.x >= -0.5 ? int(floor(uChanBlends.x + 0.5)) : uBlendMode;
+  int b1 = uIsRgbGroup != 0 ? b0 : (uChanBlends.y >= -0.5 ? int(floor(uChanBlends.y + 0.5)) : uBlendMode);
+  int b2 = uIsRgbGroup != 0 ? b0 : (uChanBlends.z >= -0.5 ? int(floor(uChanBlends.z + 0.5)) : uBlendMode);
+  int b3 = uChanBlends.w >= -0.5 ? int(floor(uChanBlends.w + 0.5)) : uBlendMode;
+  fragColor = vec4(
+    mix(dst.r, blendScalar(dst.r, srcV.r, b0), w4.r),
+    mix(dst.g, blendScalar(dst.g, srcV.g, b1), w4.g),
+    mix(dst.b, blendScalar(dst.b, srcV.b, b2), w4.b),
+    mix(dst.a, blendScalar(dst.a, srcV.a, b3), w4.a)
+  );
+}
+`;
+
+const EXT_UNPACK_FRAG = /* glsl */ `
+precision highp float;
+precision highp int;
+uniform sampler2D uGroup0; // emissiveRGB + glow/4
+uniform sampler2D uGroup1; // clearcoat + coatRough + sheen + sheenRough
+uniform sampler2D uGroup2; // irid + iridThick + trans + thickness
+uniform sampler2D uGroup3; // ao + opacity + normal/2 + specular
+uniform sampler2D uGroup4; // anisotropy
+uniform int uOutMode; // 0=emissive+spec, 1=coatSheen, 2=irid, 3=transThick, 4=aoAlpha, 5=aniso
+in vec2 vUv;
+out vec4 fragColor;
+void main() {
+  ivec2 px = ivec2(gl_FragCoord.xy);
+  if (uOutMode == 0) {
+    vec4 g0 = texelFetch(uGroup0, px, 0);
+    vec4 g3 = texelFetch(uGroup3, px, 0);
+    float glow = g0.a * 4.0;
+    fragColor = vec4(clamp(g0.rgb * glow, 0.0, 1.0), g3.a);
+  } else if (uOutMode == 1) {
+    fragColor = texelFetch(uGroup1, px, 0);
+  } else if (uOutMode == 2) {
+    vec4 g2 = texelFetch(uGroup2, px, 0);
+    fragColor = vec4(g2.r, g2.g, 1.0, 1.0);
+  } else if (uOutMode == 3) {
+    vec4 g2 = texelFetch(uGroup2, px, 0);
+    fragColor = vec4(g2.b, g2.a, 0.0, 1.0);
+  } else if (uOutMode == 4) {
+    vec4 g3 = texelFetch(uGroup3, px, 0);
+    fragColor = vec4(g3.r, g3.g, 1.0, 1.0);
+  } else {
+    vec4 g4 = texelFetch(uGroup4, px, 0);
+    fragColor = vec4(1.0, 0.5, g4.r, 1.0);
   }
 }
 `;
@@ -526,16 +949,19 @@ const HEIGHT_TO_NORMAL_FRAG = /* glsl */ `
 precision highp float;
 uniform sampler2D uOrmhTex;
 uniform sampler2D uBakedNormalTex;
+uniform sampler2D uNormalGainTex;
 uniform int uHasBakedNormal;
+uniform int uHasNormalGain;
 in vec2 vUv;
 out vec4 fragColor;
 void main() {
   ivec2 px = ivec2(gl_FragCoord.xy);
+  float gain = uHasNormalGain != 0 ? texelFetch(uNormalGainTex, px, 0).b * 2.0 * 3.4 : 3.4;
   float hL = texelFetch(uOrmhTex, px + ivec2(-1, 0), 0).a;
   float hR = texelFetch(uOrmhTex, px + ivec2(1, 0), 0).a;
   float hD = texelFetch(uOrmhTex, px + ivec2(0, -1), 0).a;
   float hU = texelFetch(uOrmhTex, px + ivec2(0, 1), 0).a;
-  vec3 bump = normalize(vec3((hL - hR) * 3.4, (hD - hU) * 3.4, 1.0));
+  vec3 bump = normalize(vec3((hL - hR) * gain, (hD - hU) * gain, 1.0));
   if (uHasBakedNormal != 0) {
     vec3 bn = texelFetch(uBakedNormalTex, px, 0).xyz * 2.0 - 1.0;
     bump = normalize(vec3(bn.xy + bump.xy * 0.75, max(0.05, bn.z)));
@@ -549,8 +975,11 @@ precision highp float;
 precision highp int;
 uniform sampler2D uAlbedoTex;
 uniform sampler2D uOrmhTex;
+uniform sampler2D uNormalTex;
+uniform sampler2D uExtSoloTex;
 uniform sampler2D uMaskTex;
-uniform int uMode; // 0=lit/baseColor, 1=roughness, 2=metalness, 3=height, 4=mask
+uniform int uMode; // 0=lit/baseColor, 1=roughness, 2=metalness, 3=height, 4=mask, 5=normal, 6=extComp, 7=extRgb
+uniform int uExtComp;
 uniform int uHasMask;
 uniform int uInvertMask;
 in vec2 vUv;
@@ -568,10 +997,18 @@ void main() {
   } else if (uMode == 3) {
     float v = texelFetch(uOrmhTex, px, 0).a;
     fragColor = vec4(vec3(v), 1.0);
-  } else {
+  } else if (uMode == 4) {
     float m = uHasMask != 0 ? texelFetch(uMaskTex, px, 0).r : 1.0;
     if (uInvertMask != 0) m = 1.0 - m;
     fragColor = vec4(vec3(m), 1.0);
+  } else if (uMode == 5) {
+    fragColor = vec4(texelFetch(uNormalTex, px, 0).rgb, 1.0);
+  } else if (uMode == 7) {
+    fragColor = vec4(texelFetch(uExtSoloTex, px, 0).rgb, 1.0);
+  } else {
+    vec4 s = texelFetch(uExtSoloTex, px, 0);
+    float v = uExtComp == 0 ? s.r : (uExtComp == 1 ? s.g : (uExtComp == 2 ? s.b : s.a));
+    fragColor = vec4(vec3(v), 1.0);
   }
 }
 `;
@@ -579,7 +1016,23 @@ void main() {
 const BLEND_INDEX = { Normal: 0, Multiply: 1, Screen: 2, Overlay: 3, Add: 4, Darken: 5 };
 const TIP_INDEX = { round: 0, chisel: 1, chalk: 2, splatter: 3, sponge: 4, stamp: 5, custom: 6 };
 const GEN_INDEX = { "edge-wear": 0, "crevice-dirt": 1, "top-dust": 2, "triplanar-grunge": 3 };
-const CHAN_VIEW_INDEX = { lit: 0, baseColor: 0, roughness: 1, metalness: 2, height: 3, mask: 4 };
+const CHAN_VIEW_INDEX = { lit: 0, baseColor: 0, roughness: 1, metalness: 2, height: 3, mask: 4, normal: 5 };
+const EXT_VIEW_LOC = {
+  emissive: { group: 0, comp: 4 },
+  emissiveIntensity: { group: 0, comp: 3 },
+  clearcoat: { group: 1, comp: 0 },
+  coatRoughness: { group: 1, comp: 1 },
+  sheen: { group: 1, comp: 2 },
+  sheenRoughness: { group: 1, comp: 3 },
+  iridescence: { group: 2, comp: 0 },
+  iridescenceThickness: { group: 2, comp: 1 },
+  transmission: { group: 2, comp: 2 },
+  thickness: { group: 2, comp: 3 },
+  ao: { group: 3, comp: 0 },
+  opacity: { group: 3, comp: 1 },
+  specular: { group: 3, comp: 3 },
+  anisotropy: { group: 4, comp: 0 },
+};
 
 export class GpuPaintSession {
   constructor(renderer, res = 512) {
@@ -620,6 +1073,13 @@ export class GpuPaintSession {
     this.finalNormalRT = new THREE.WebGLRenderTarget(res, res, rtOpts);
     this.displayAlbedoRT = new THREE.WebGLRenderTarget(res, res, rtOpts);
     this.displayAlbedoRT.texture.colorSpace = THREE.SRGBColorSpace;
+
+    // Lazy extended PBR targets (allocated on first extended-channel usage)
+    this.extAccA = null;
+    this.extAccB = null;
+    this.extFinalGroupRT = null;
+    this.extOutRT = null; // [emissiveSpec, coatSheen, irid, transThick, aoAlpha, aniso]
+    this.stampCache = new Map();
 
     this.dummyTex = new THREE.DataTexture(new Uint8Array([0, 0, 0, 0]), 1, 1, THREE.RGBAFormat);
     this.dummyTex.needsUpdate = true;
@@ -686,9 +1146,12 @@ export class GpuPaintSession {
         uStrokeTex: { value: null },
         uPrevChanAlphaTex: { value: this.dummyTex },
         uOpacity: { value: 1 },
+        uMaskInk: { value: -1 },
         uChanMask: { value: new THREE.Vector4(1, 1, 1, 1) },
+        uBrushVal: { value: new THREE.Vector4(0, 0, 0, 0) },
         uIsErase: { value: 0 },
         uIsMask: { value: 0 },
+        uIsRgbGroup: { value: 0 },
         uPassKind: { value: 0 },
       },
       depthTest: false, depthWrite: false,
@@ -707,6 +1170,7 @@ export class GpuPaintSession {
         uLayerOrmh: { value: this.dummyTex },
         uLayerChanAlpha: { value: this.dummyTex },
         uLayerMask: { value: this.dummyTex },
+        uParentMask: { value: this.dummyTex },
         uStrokeAlbedo: { value: this.dummyTex },
         uStrokeOrmh: { value: this.dummyTex },
         uPatternTex: { value: this.dummyTex },
@@ -719,9 +1183,14 @@ export class GpuPaintSession {
         uPartFilter: { value: -1 },
         uHasMask: { value: 0 },
         uInvertMask: { value: 0 },
+        uMaskOpacity: { value: 1 },
+        uHasParentMask: { value: 0 },
+        uInvertParentMask: { value: 0 },
+        uParentMaskOp: { value: 1 },
         uHasLiveStroke: { value: 0 },
         uLiveErase: { value: 0 },
         uLiveMaskStroke: { value: 0 },
+        uLiveMaskInk: { value: -1 },
         uLiveOpacity: { value: 1 },
         uLiveChanMask: { value: new THREE.Vector4(1, 1, 1, 1) },
         uLayerChanMask: { value: new THREE.Vector4(1, 1, 1, 1) },
@@ -745,6 +1214,113 @@ export class GpuPaintSession {
       depthTest: false, depthWrite: false,
     });
 
+    this.decalMat = new THREE.ShaderMaterial({
+      glslVersion: THREE.GLSL3,
+      vertexShader: FULLSCREEN_VERT,
+      fragmentShader: DECAL_STAMP_FRAG,
+      uniforms: {
+        uAccAlbedo: { value: this.dummyTex },
+        uAccOrmh: { value: this.dummyTex },
+        uPosPartTex: { value: this.dummyTex },
+        uNormIslandTex: { value: this.dummyTex },
+        uStampAlbedo: { value: this.dummyTex },
+        uStampOrmh: { value: this.dummyTex },
+        uLayerMask: { value: this.dummyTex },
+        uParentMask: { value: this.dummyTex },
+        uStampProj: { value: 0 },
+        uStampUv: { value: new THREE.Vector2(0.5, 0.5) },
+        uStampScale: { value: new THREE.Vector2(0.28, 0.28) },
+        uStampRot: { value: 0 },
+        uStampAnchorPos: { value: new THREE.Vector3(0, 0, 1) },
+        uStampAnchorNorm: { value: new THREE.Vector3(0, 0, 1) },
+        uStampRight: { value: new THREE.Vector3(1, 0, 0) },
+        uStampUp: { value: new THREE.Vector3(0, 1, 0) },
+        uStampTint: { value: new THREE.Vector3(1, 1, 1) },
+        uStampHeightStr: { value: 0.5 },
+        uStampOpacity: { value: 1 },
+        uLayerOpacity: { value: 1 },
+        uBlendMode: { value: 0 },
+        uLayerChanBlends: { value: new THREE.Vector4(-1, -1, -1, -1) },
+        uLayerChanOpacity: { value: new THREE.Vector4(1, 1, 1, 1) },
+        uLayerChanMask: { value: new THREE.Vector4(1, 1, 1, 1) },
+        uPartFilter: { value: -1 },
+        uHasMask: { value: 0 },
+        uInvertMask: { value: 0 },
+        uMaskOpacity: { value: 1 },
+        uHasParentMask: { value: 0 },
+        uInvertParentMask: { value: 0 },
+        uParentMaskOp: { value: 1 },
+        uHasStampOrmh: { value: 0 },
+        uOutTarget: { value: 0 },
+        uExtVal: { value: new THREE.Vector4(0, 0, 0, 0) },
+        uExtChanMask: { value: new THREE.Vector4(0, 0, 0, 0) },
+        uExtChanOpacity: { value: new THREE.Vector4(1, 1, 1, 1) },
+        uExtChanBlends: { value: new THREE.Vector4(-1, -1, -1, -1) },
+        uIsRgbGroup: { value: 0 },
+      },
+      depthTest: false, depthWrite: false,
+    });
+
+    this.extCompMat = new THREE.ShaderMaterial({
+      glslVersion: THREE.GLSL3,
+      vertexShader: FULLSCREEN_VERT,
+      fragmentShader: EXT_COMP_FRAG,
+      uniforms: {
+        uAccVal: { value: this.dummyTex },
+        uPosPartTex: { value: this.dummyTex },
+        uAuxCueTex: { value: this.dummyTex },
+        uLayerVal: { value: this.dummyTex },
+        uLayerAlpha: { value: this.dummyTex },
+        uStrokeAlbedo: { value: this.dummyTex },
+        uLayerMask: { value: this.dummyTex },
+        uParentMask: { value: this.dummyTex },
+        uLayerKind: { value: 0 },
+        uBlendMode: { value: 0 },
+        uChanBlends: { value: new THREE.Vector4(-1, -1, -1, -1) },
+        uChanOpacity: { value: new THREE.Vector4(1, 1, 1, 1) },
+        uChanMask: { value: new THREE.Vector4(0, 0, 0, 0) },
+        uSrcVal: { value: new THREE.Vector4(0, 0, 0, 0) },
+        uBrushVal: { value: new THREE.Vector4(0, 0, 0, 0) },
+        uOpacity: { value: 1 },
+        uPartFilter: { value: -1 },
+        uHasMask: { value: 0 },
+        uInvertMask: { value: 0 },
+        uMaskOpacity: { value: 1 },
+        uHasParentMask: { value: 0 },
+        uInvertParentMask: { value: 0 },
+        uParentMaskOp: { value: 1 },
+        uHasLiveStroke: { value: 0 },
+        uLiveErase: { value: 0 },
+        uLiveMaskStroke: { value: 0 },
+        uLiveMaskInk: { value: -1 },
+        uLiveOpacity: { value: 1 },
+        uLiveChanMask: { value: new THREE.Vector4(0, 0, 0, 0) },
+        uIsRgbGroup: { value: 0 },
+        uParamA: { value: 10 },
+        uParamB: { value: 0.2 },
+        uParamC: { value: 0.4 },
+        uGenScale: { value: 6 },
+        uGenInvert: { value: 0 },
+        uGenPreset: { value: 0 },
+      },
+      depthTest: false, depthWrite: false,
+    });
+
+    this.extUnpackMat = new THREE.ShaderMaterial({
+      glslVersion: THREE.GLSL3,
+      vertexShader: FULLSCREEN_VERT,
+      fragmentShader: EXT_UNPACK_FRAG,
+      uniforms: {
+        uGroup0: { value: this.dummyTex },
+        uGroup1: { value: this.dummyTex },
+        uGroup2: { value: this.dummyTex },
+        uGroup3: { value: this.dummyTex },
+        uGroup4: { value: this.dummyTex },
+        uOutMode: { value: 0 },
+      },
+      depthTest: false, depthWrite: false,
+    });
+
     this.dilateMat = new THREE.ShaderMaterial({
       glslVersion: THREE.GLSL3,
       vertexShader: FULLSCREEN_VERT,
@@ -757,7 +1333,13 @@ export class GpuPaintSession {
       glslVersion: THREE.GLSL3,
       vertexShader: FULLSCREEN_VERT,
       fragmentShader: HEIGHT_TO_NORMAL_FRAG,
-      uniforms: { uOrmhTex: { value: this.dummyTex }, uBakedNormalTex: { value: this.dummyTex }, uHasBakedNormal: { value: 0 } },
+      uniforms: {
+        uOrmhTex: { value: this.dummyTex },
+        uBakedNormalTex: { value: this.dummyTex },
+        uNormalGainTex: { value: this.dummyTex },
+        uHasBakedNormal: { value: 0 },
+        uHasNormalGain: { value: 0 },
+      },
       depthTest: false, depthWrite: false,
     });
 
@@ -768,8 +1350,11 @@ export class GpuPaintSession {
       uniforms: {
         uAlbedoTex: { value: this.dummyTex },
         uOrmhTex: { value: this.dummyTex },
+        uNormalTex: { value: this.dummyTex },
+        uExtSoloTex: { value: this.dummyTex },
         uMaskTex: { value: this.dummyTex },
         uMode: { value: 0 },
+        uExtComp: { value: 0 },
         uHasMask: { value: 0 },
         uInvertMask: { value: 0 },
       },
@@ -917,9 +1502,182 @@ export class GpuPaintSession {
     this.dabMat.uniforms.uNormIslandTex.value = this.normIslandTex;
     this.compMat.uniforms.uPosPartTex.value = this.posPartTex;
     this.compMat.uniforms.uAuxCueTex.value = this.auxCueTex;
+    this.decalMat.uniforms.uPosPartTex.value = this.posPartTex;
+    this.decalMat.uniforms.uNormIslandTex.value = this.normIslandTex;
+    this.extCompMat.uniforms.uPosPartTex.value = this.posPartTex;
+    this.extCompMat.uniforms.uAuxCueTex.value = this.auxCueTex;
     this.dilateMat.uniforms.uAuxCueTex.value = this.auxCueTex;
     this.normalMat.uniforms.uBakedNormalTex.value = this.bakedNormalTex || this.dummyTex;
     this.normalMat.uniforms.uHasBakedNormal.value = this.hasBakedNormal ? 1 : 0;
+  }
+
+  _extValuesToGroupVec(srcObj, fallbackObj, groupIdx) {
+    const defs = EXT_GROUP_DEFAULTS[groupIdx];
+    const keys = EXT_GROUP_CHANNELS[groupIdx];
+    const readScalar = (k, def) => {
+      const raw = srcObj?.extValues?.[k] ?? srcObj?.[k] ?? fallbackObj?.[k];
+      return raw === undefined ? def : encodeScalarChannelByte(k, Number(raw)) / 255;
+    };
+    if (groupIdx === 0) {
+      const hex = srcObj?.extValues?.emissive ?? srcObj?.emissive ?? fallbackObj?.emissive ?? "#000000";
+      const [r, g, b] = hexToRgb(hex);
+      const gi = readScalar("emissiveIntensity", defs[3]);
+      return new THREE.Vector4(r / 255, g / 255, b / 255, gi);
+    }
+    return new THREE.Vector4(
+      keys[0] ? readScalar(keys[0], defs[0]) : defs[0],
+      keys[1] ? readScalar(keys[1], defs[1]) : defs[1],
+      keys[2] ? readScalar(keys[2], defs[2]) : defs[2],
+      keys[3] ? readScalar(keys[3], defs[3]) : defs[3],
+    );
+  }
+
+  _groupChannelMask(chObj, groupIdx) {
+    const keys = EXT_GROUP_CHANNELS[groupIdx];
+    if (groupIdx === 0) {
+      return new THREE.Vector4(chObj?.emissive ? 1 : 0, 0, 0, chObj?.emissiveIntensity ? 1 : 0);
+    }
+    return new THREE.Vector4(
+      keys[0] && chObj?.[keys[0]] ? 1 : 0,
+      keys[1] && chObj?.[keys[1]] ? 1 : 0,
+      keys[2] && chObj?.[keys[2]] ? 1 : 0,
+      keys[3] && chObj?.[keys[3]] ? 1 : 0,
+    );
+  }
+
+  _ensureExtGlobalTargets() {
+    if (this.extAccA) return;
+    const opts = this._rtOpts();
+    this.extAccA = []; this.extAccB = []; this.extFinalGroupRT = [];
+    for (let g = 0; g < 5; g++) {
+      this.extAccA.push(new THREE.WebGLRenderTarget(this.res, this.res, opts));
+      this.extAccB.push(new THREE.WebGLRenderTarget(this.res, this.res, opts));
+      this.extFinalGroupRT.push(new THREE.WebGLRenderTarget(this.res, this.res, opts));
+    }
+    this.extOutRT = Array.from({ length: 6 }, () => new THREE.WebGLRenderTarget(this.res, this.res, opts));
+    this.extOutRT[0].texture.colorSpace = THREE.SRGBColorSpace;
+  }
+
+  _ensureLayerExtGroup(layer, g) {
+    const gpu = this.ensureLayerTargets(layer);
+    if (!gpu.extValRT) { gpu.extValRT = new Array(5).fill(null); gpu.extAlphaRT = new Array(5).fill(null); }
+    if (!gpu.extValRT[g]) {
+      const opts = this._rtOpts();
+      const defs = EXT_GROUP_DEFAULTS[g];
+      const vRT = new THREE.WebGLRenderTarget(this.res, this.res, opts);
+      const aRT = new THREE.WebGLRenderTarget(this.res, this.res, opts);
+      this._clearRT(vRT, defs[0], defs[1], defs[2], defs[3]);
+      this._clearRT(aRT, 0, 0, 0, 0);
+      this.layerTargetRegistry.add(vRT);
+      this.layerTargetRegistry.add(aRT);
+      gpu.extValRT[g] = vRT;
+      gpu.extAlphaRT[g] = aRT;
+      if (layer.pixels?.extValues) this._syncCpuExtGroupToGpu(layer, g);
+    }
+    return { valRT: gpu.extValRT[g], alphaRT: gpu.extAlphaRT[g] };
+  }
+
+  _syncCpuExtGroupToGpu(layer, g) {
+    if (!this.isActive || !layer?.pixels?.extValues || !layer._gpu?.extValRT?.[g]) return;
+    const keys = EXT_GROUP_CHANNELS[g];
+    const px = layer.pixels;
+    const hasAny = keys.some((k) => k && px.extValues[k]);
+    if (!hasAny) return;
+    const res = this.res;
+    const n = res * res;
+    const vData = new Uint8Array(n * 4);
+    const aData = new Uint8Array(n * 4);
+    const dBytes = EXT_GROUP_DEFAULTS[g].map((v) => Math.round(v * 255));
+    for (let py = 0; py < res; py++) {
+      const sRow = (res - 1 - py) * res;
+      const dRow = py * res;
+      for (let x = 0; x < res; x++) {
+        const sp = sRow + x;
+        const dp = (dRow + x) * 4;
+        if (g === 0) {
+          const ev = px.extValues.emissive;
+          const ea = px.extAlphas.emissive;
+          const iv = px.extValues.emissiveIntensity;
+          const ia = px.extAlphas.emissiveIntensity;
+          vData[dp] = ev ? ev[sp * 3] : 0;
+          vData[dp + 1] = ev ? ev[sp * 3 + 1] : 0;
+          vData[dp + 2] = ev ? ev[sp * 3 + 2] : 0;
+          vData[dp + 3] = iv ? iv[sp] : 0;
+          const a0 = ea ? ea[sp] : 0;
+          aData[dp] = a0; aData[dp + 1] = a0; aData[dp + 2] = a0;
+          aData[dp + 3] = ia ? ia[sp] : 0;
+        } else {
+          for (let c = 0; c < 4; c++) {
+            const k = keys[c];
+            vData[dp + c] = k && px.extValues[k] ? px.extValues[k][sp] : dBytes[c];
+            aData[dp + c] = k && px.extAlphas[k] ? px.extAlphas[k][sp] : 0;
+          }
+        }
+      }
+    }
+    const tV = new THREE.DataTexture(vData, res, res, THREE.RGBAFormat); tV.flipY = false; tV.needsUpdate = true;
+    const tA = new THREE.DataTexture(aData, res, res, THREE.RGBAFormat); tA.flipY = false; tA.needsUpdate = true;
+    this._blit(tV, layer._gpu.extValRT[g]);
+    this._blit(tA, layer._gpu.extAlphaRT[g]);
+    tV.dispose(); tA.dispose();
+  }
+
+  _hasAnyExtendedActive(doc, liveBrush = null, viewChannel = "lit") {
+    if (viewChannel && viewChannel in EXT_VIEW_LOC) return true;
+    if (viewChannel === "normal") return true;
+    if (liveBrush) {
+      const bch = getToolChannels(liveBrush);
+      if (EXTENDED_PBR_KEYS.some((k) => bch[k])) return true;
+    }
+    for (const l of doc?.layers || []) {
+      if (!l.visible) continue;
+      if (l.channels && EXTENDED_PBR_KEYS.some((k) => l.channels[k])) return true;
+      if (l.stamps?.some((s) => s.visible && s.channels && EXTENDED_PBR_KEYS.some((k) => s.channels[k]))) return true;
+      if (l.pixels?.extValues && Object.keys(l.pixels.extValues).length > 0) return true;
+    }
+    return false;
+  }
+
+  _getCachedStampPair(stampData) {
+    const albPix = stampData?.albedo || stampData?.rgba;
+    if (!albPix || !stampData?.width) return null;
+    const cached = this.stampCache.get(stampData);
+    if (cached && cached.ref === albPix) return cached;
+    if (cached) {
+      cached.albedoTex?.dispose();
+      cached.ormhTex?.dispose();
+    }
+    const w = stampData.width;
+    const h = stampData.heightPx || w;
+    const flipA = new Uint8Array(w * h * 4);
+    const stride = w * 4;
+    for (let y = 0; y < h; y++) flipA.set(albPix.subarray((h - 1 - y) * stride, (h - y) * stride), y * stride);
+    const albedoTex = new THREE.DataTexture(flipA, w, h, THREE.RGBAFormat);
+    albedoTex.minFilter = THREE.LinearFilter; albedoTex.magFilter = THREE.LinearFilter;
+    albedoTex.flipY = false; albedoTex.needsUpdate = true;
+
+    let ormhTex = null;
+    if (stampData.roughness && stampData.metalness && stampData.height) {
+      const ormhData = new Uint8Array(w * h * 4);
+      for (let y = 0; y < h; y++) {
+        const sRow = (h - 1 - y) * w;
+        const dRow = y * w;
+        for (let x = 0; x < w; x++) {
+          const si = (sRow + x) * 4;
+          const di = (dRow + x) * 4;
+          ormhData[di] = stampData.roughness[si];
+          ormhData[di + 1] = stampData.metalness[si];
+          ormhData[di + 2] = stampData.height[si];
+          ormhData[di + 3] = 255;
+        }
+      }
+      ormhTex = new THREE.DataTexture(ormhData, w, h, THREE.RGBAFormat);
+      ormhTex.minFilter = THREE.LinearFilter; ormhTex.magFilter = THREE.LinearFilter;
+      ormhTex.flipY = false; ormhTex.needsUpdate = true;
+    }
+    const pair = { ref: albPix, albedoTex, ormhTex };
+    this.stampCache.set(stampData, pair);
+    return pair;
   }
 
   ensureStampTexture(stampData, preferTipAlpha = false) {
@@ -1074,6 +1832,13 @@ export class GpuPaintSession {
     this._blit(tO, gpu.ormhRT);
     if (gpu.chanAlphaRT) this._blit(tC, gpu.chanAlphaRT);
     tA.dispose(); tO.dispose(); tC.dispose();
+    if (layer.pixels.extValues) {
+      for (let g = 0; g < 5; g++) {
+        if (EXT_GROUP_CHANNELS[g].some((k) => k && layer.pixels.extValues[k])) {
+          this._ensureLayerExtGroup(layer, g);
+        }
+      }
+    }
   }
 
   syncMaskCpuToGpu(layer) {
@@ -1180,9 +1945,11 @@ export class GpuPaintSession {
       u.uStrokeTex.value = st.albedoRT.texture;
       u.uPrevChanAlphaTex.value = this.dummyTex;
       u.uOpacity.value = brush.opacity ?? 0.9;
+      u.uMaskInk.value = brush.maskInk !== undefined ? brush.maskInk : -1;
       u.uChanMask.value.set(1, 1, 1, 1);
       u.uIsErase.value = isErase ? 1 : 0;
       u.uIsMask.value = 1;
+      u.uIsRgbGroup.value = 0;
       u.uPassKind.value = 0;
       this._renderPass(this.commitMat, gpu.maskRT);
       this.beginStroke();
@@ -1196,10 +1963,12 @@ export class GpuPaintSession {
 
     const u = this.commitMat.uniforms;
     u.uOpacity.value = brush.opacity ?? 0.9;
+    u.uMaskInk.value = -1;
     u.uChanMask.value.set(ch.albedo ? 1 : 0, ch.roughness ? 1 : 0, ch.metalness ? 1 : 0, ch.height ? 1 : 0);
     u.uPrevChanAlphaTex.value = this.scratchChanAlphaRT.texture;
     u.uIsErase.value = isErase ? 1 : 0;
     u.uIsMask.value = 0;
+    u.uIsRgbGroup.value = 0;
 
     u.uBaseTex.value = this.compAlbedoA.texture;
     u.uStrokeTex.value = st.albedoRT.texture;
@@ -1216,6 +1985,31 @@ export class GpuPaintSession {
     u.uPassKind.value = 2;
     this._renderPass(this.commitMat, gpu.chanAlphaRT);
 
+    // Commit any active extended PBR groups onto lazy layer RTs
+    if (EXTENDED_PBR_KEYS.some((k) => ch[k])) {
+      this._ensureExtGlobalTargets();
+      for (let g = 0; g < 5; g++) {
+        const gm = this._groupChannelMask(ch, g);
+        if (gm.x + gm.y + gm.z + gm.w < 0.5) continue;
+        const { valRT, alphaRT } = this._ensureLayerExtGroup(layer, g);
+        this._blit(valRT.texture, this.extAccA[g]);
+        this._blit(alphaRT.texture, this.extAccB[g]);
+        u.uChanMask.value.copy(gm);
+        u.uBrushVal.value.copy(this._extValuesToGroupVec(brush.extValues, null, g));
+        u.uIsRgbGroup.value = g === 0 ? 1 : 0;
+        u.uPrevChanAlphaTex.value = this.extAccB[g].texture;
+        u.uStrokeTex.value = st.albedoRT.texture;
+
+        u.uBaseTex.value = this.extAccA[g].texture;
+        u.uPassKind.value = 3;
+        this._renderPass(this.commitMat, valRT);
+
+        u.uBaseTex.value = this.extAccB[g].texture;
+        u.uPassKind.value = 4;
+        this._renderPass(this.commitMat, alphaRT);
+      }
+    }
+
     this.beginStroke();
     return true;
   }
@@ -1224,7 +2018,7 @@ export class GpuPaintSession {
     if (!this.isActive || !layer) return null;
     const gpu = this.ensureLayerTargets(layer);
     const opts = this._rtOpts();
-    const snap = { layerId: layer.id, editingMask, albedoRT: null, ormhRT: null, chanAlphaRT: null, maskRT: null };
+    const snap = { layerId: layer.id, editingMask, albedoRT: null, ormhRT: null, chanAlphaRT: null, maskRT: null, extValRT: null, extAlphaRT: null };
     if (gpu.albedoRT) {
       snap.albedoRT = new THREE.WebGLRenderTarget(this.res, this.res, opts);
       this._blit(gpu.albedoRT.texture, snap.albedoRT);
@@ -1241,6 +2035,20 @@ export class GpuPaintSession {
       snap.maskRT = new THREE.WebGLRenderTarget(this.res, this.res, opts);
       this._blit(gpu.maskRT.texture, snap.maskRT);
     }
+    if (gpu.extValRT) {
+      snap.extValRT = gpu.extValRT.map((rt) => {
+        if (!rt) return null;
+        const c = new THREE.WebGLRenderTarget(this.res, this.res, opts);
+        this._blit(rt.texture, c);
+        return c;
+      });
+      snap.extAlphaRT = gpu.extAlphaRT.map((rt) => {
+        if (!rt) return null;
+        const c = new THREE.WebGLRenderTarget(this.res, this.res, opts);
+        this._blit(rt.texture, c);
+        return c;
+      });
+    }
     return snap;
   }
 
@@ -1251,6 +2059,15 @@ export class GpuPaintSession {
     if (snap.ormhRT && gpu.ormhRT) this._blit(snap.ormhRT.texture, gpu.ormhRT);
     if (snap.chanAlphaRT && gpu.chanAlphaRT) this._blit(snap.chanAlphaRT.texture, gpu.chanAlphaRT);
     if (snap.maskRT && gpu.maskRT) this._blit(snap.maskRT.texture, gpu.maskRT);
+    if (snap.extValRT) {
+      for (let g = 0; g < 5; g++) {
+        if (snap.extValRT[g]) {
+          const { valRT, alphaRT } = this._ensureLayerExtGroup(layer, g);
+          this._blit(snap.extValRT[g].texture, valRT);
+          if (snap.extAlphaRT?.[g]) this._blit(snap.extAlphaRT[g].texture, alphaRT);
+        }
+      }
+    }
   }
 
   disposeSnapshot(snap) {
@@ -1258,6 +2075,8 @@ export class GpuPaintSession {
     snap?.ormhRT?.dispose();
     snap?.chanAlphaRT?.dispose();
     snap?.maskRT?.dispose();
+    snap?.extValRT?.forEach((rt) => rt?.dispose());
+    snap?.extAlphaRT?.forEach((rt) => rt?.dispose());
   }
 
   composite(doc, { hasLiveStroke = false, liveBrush = null, viewChannel = "lit" } = {}) {
@@ -1270,27 +2089,73 @@ export class GpuPaintSession {
     let accAlb = this.compAlbedoA, nxtAlb = this.compAlbedoB;
     let accOrm = this.compOrmhA, nxtOrm = this.compOrmhB;
 
+    const extActive = this._hasAnyExtendedActive(doc, liveBrush, viewChannel);
+    this._hasExtExport = extActive;
+    let extAcc = null, extNxt = null;
+    if (extActive) {
+      this._ensureExtGlobalTargets();
+      extAcc = []; extNxt = [];
+      for (let g = 0; g < 5; g++) {
+        const d = EXT_GROUP_DEFAULTS[g];
+        this._clearRT(this.extAccA[g], d[0], d[1], d[2], d[3]);
+        extAcc.push(this.extAccA[g]);
+        extNxt.push(this.extAccB[g]);
+      }
+    }
+
     const st = this.currentStrokeTargets();
     const u = this.compMat.uniforms;
     u.uStrokeAlbedo.value = st.albedoRT.texture;
     u.uStrokeOrmh.value = st.ormhRT.texture;
     u.uLiveErase.value = liveBrush?.tool === "erase" ? 1 : 0;
     u.uLiveMaskStroke.value = doc.editingMask ? 1 : 0;
+    u.uLiveMaskInk.value = liveBrush?.maskInk !== undefined ? liveBrush.maskInk : -1;
     u.uLiveOpacity.value = liveBrush?.opacity ?? 0.9;
     const liveCh = liveBrush ? getToolChannels(liveBrush) : { albedo: true, roughness: true, metalness: true, height: true };
     u.uLiveChanMask.value.set(liveCh.albedo ? 1 : 0, liveCh.roughness ? 1 : 0, liveCh.metalness ? 1 : 0, liveCh.height ? 1 : 0);
 
-    const folderHidden = new Set();
-    for (const l of doc.layers) if (l.kind === "folder" && !l.visible) folderHidden.add(l.id);
+    const folderMap = new Map();
+    for (const l of doc.layers) if (l.kind === "folder") folderMap.set(l.id, l);
+    const isFolderVisible = (l) => {
+      let cur = l;
+      while (cur) {
+        if (!cur.visible) return false;
+        cur = cur.parentId ? folderMap.get(cur.parentId) : null;
+      }
+      return true;
+    };
+    const effectiveLayerOpacity = (l) => {
+      let op = l.opacity ?? 1;
+      let pid = l.parentId;
+      while (pid && folderMap.has(pid)) {
+        const f = folderMap.get(pid);
+        op *= f.opacity ?? 1;
+        pid = f.parentId;
+      }
+      return op;
+    };
+    const resolveParentMask = (l) => {
+      let pid = l.parentId;
+      while (pid && folderMap.has(pid)) {
+        const f = folderMap.get(pid);
+        if (f.mask?.enabled) {
+          const fg = this.ensureLayerTargets(f);
+          if (fg.maskRT) return { rt: fg.maskRT, invert: !!f.mask.invert, opacity: f.mask.opacity ?? 1 };
+        }
+        pid = f.parentId;
+      }
+      return null;
+    };
 
     for (const layer of doc.layers) {
-      if (!layer.visible || layer.kind === "folder") continue;
-      if (layer.parentId && folderHidden.has(layer.parentId)) continue;
+      if (layer.kind === "folder" || !isFolderVisible(layer)) continue;
 
       const gpu = this.ensureLayerTargets(layer);
       const isLive = hasLiveStroke && layer.id === doc.selectedLayerId;
+      const layerOp = effectiveLayerOpacity(layer);
+      const pMask = resolveParentMask(layer);
       const lCh = layer.channels || { albedo: true, roughness: true, metalness: true, height: true };
-      const lOp = layer.channelOpacity || { albedo: 1, roughness: 1, metalness: 1, height: 1 };
+      const lOp = layer.channelOpacity || {};
       const lBl = layer.channelBlends || {};
       const chB = (k) => (lBl[k] && lBl[k] !== "Inherit" && lBl[k] in BLEND_INDEX ? BLEND_INDEX[lBl[k]] : -1);
 
@@ -1300,11 +2165,16 @@ export class GpuPaintSession {
       u.uBlendMode.value = BLEND_INDEX[layer.blend] ?? 0;
       u.uLayerChanBlends.value.set(chB("albedo"), chB("roughness"), chB("metalness"), chB("height"));
       u.uLayerChanOpacity.value.set(lOp.albedo ?? 1, lOp.roughness ?? 1, lOp.metalness ?? 1, lOp.height ?? 1);
-      u.uOpacity.value = layer.opacity ?? 1;
+      u.uOpacity.value = layerOp;
       u.uPartFilter.value = layer.partFilter ?? -1;
       u.uHasMask.value = layer.mask?.enabled && gpu.maskRT ? 1 : 0;
       u.uInvertMask.value = layer.mask?.invert ? 1 : 0;
+      u.uMaskOpacity.value = layer.mask?.opacity ?? 1;
       u.uLayerMask.value = gpu.maskRT?.texture || this.dummyTex;
+      u.uHasParentMask.value = pMask ? 1 : 0;
+      u.uInvertParentMask.value = pMask?.invert ? 1 : 0;
+      u.uParentMaskOp.value = pMask?.opacity ?? 1;
+      u.uParentMask.value = pMask?.rt?.texture || this.dummyTex;
       u.uLayerChanMask.value.set(lCh.albedo ? 1 : 0, lCh.roughness ? 1 : 0, lCh.metalness ? 1 : 0, lCh.height ? 1 : 0);
 
       if (layer.kind === "paint" || layer.kind === "decal") {
@@ -1358,6 +2228,168 @@ export class GpuPaintSession {
 
       const tA = accAlb; accAlb = nxtAlb; nxtAlb = tA;
       const tO = accOrm; accOrm = nxtOrm; nxtOrm = tO;
+
+      // Composite Extended PBR channels for this layer
+      if (extActive) {
+        const srcObj = layer[layer.kind] || null;
+        const eu = this.extCompMat.uniforms;
+        eu.uStrokeAlbedo.value = st.albedoRT.texture;
+        eu.uLayerKind.value = u.uLayerKind.value;
+        eu.uBlendMode.value = u.uBlendMode.value;
+        eu.uOpacity.value = layerOp;
+        eu.uPartFilter.value = u.uPartFilter.value;
+        eu.uHasMask.value = u.uHasMask.value;
+        eu.uInvertMask.value = u.uInvertMask.value;
+        eu.uMaskOpacity.value = u.uMaskOpacity.value;
+        eu.uLayerMask.value = u.uLayerMask.value;
+        eu.uHasParentMask.value = u.uHasParentMask.value;
+        eu.uInvertParentMask.value = u.uInvertParentMask.value;
+        eu.uParentMaskOp.value = u.uParentMaskOp.value;
+        eu.uParentMask.value = u.uParentMask.value;
+        eu.uHasLiveStroke.value = isLive ? 1 : 0;
+        eu.uLiveErase.value = u.uLiveErase.value;
+        eu.uLiveMaskStroke.value = u.uLiveMaskStroke.value;
+        eu.uLiveMaskInk.value = u.uLiveMaskInk.value;
+        eu.uLiveOpacity.value = u.uLiveOpacity.value;
+        eu.uParamA.value = u.uParamA.value;
+        eu.uParamB.value = u.uParamB.value;
+        eu.uParamC.value = u.uParamC.value;
+        eu.uGenScale.value = u.uGenScale.value;
+        eu.uGenInvert.value = u.uGenInvert.value;
+        eu.uGenPreset.value = u.uGenPreset.value;
+
+        for (let g = 0; g < 5; g++) {
+          const gm = this._groupChannelMask(lCh, g);
+          if (gm.x + gm.y + gm.z + gm.w < 0.5) continue;
+          const keys = EXT_GROUP_CHANNELS[g];
+          eu.uAccVal.value = extAcc[g].texture;
+          eu.uChanMask.value.copy(gm);
+          eu.uIsRgbGroup.value = g === 0 ? 1 : 0;
+          eu.uChanOpacity.value.set(
+            keys[0] ? (lOp[keys[0]] ?? 1) : 1,
+            keys[1] ? (lOp[keys[1]] ?? 1) : 1,
+            keys[2] ? (lOp[keys[2]] ?? 1) : 1,
+            keys[3] ? (lOp[keys[3]] ?? 1) : 1,
+          );
+          eu.uChanBlends.value.set(
+            keys[0] ? chB(keys[0]) : -1,
+            keys[1] ? chB(keys[1]) : -1,
+            keys[2] ? chB(keys[2]) : -1,
+            keys[3] ? chB(keys[3]) : -1,
+          );
+          eu.uLiveChanMask.value.copy(this._groupChannelMask(liveCh, g));
+          eu.uSrcVal.value.copy(this._extValuesToGroupVec(srcObj, layer.extValues, g));
+          eu.uBrushVal.value.copy(this._extValuesToGroupVec(liveBrush?.extValues, null, g));
+          if (u.uLayerKind.value === 0) {
+            const grpRT = gpu.extValRT?.[g] ? { valRT: gpu.extValRT[g], alphaRT: gpu.extAlphaRT[g] } : null;
+            eu.uLayerVal.value = grpRT?.valRT?.texture || this.dummyTex;
+            eu.uLayerAlpha.value = grpRT?.alphaRT?.texture || this.dummyTex;
+          }
+          this._renderPass(this.extCompMat, extNxt[g]);
+          const tmp = extAcc[g]; extAcc[g] = extNxt[g]; extNxt[g] = tmp;
+        }
+      }
+
+      // Render all visible Stamp Subcomponents (+ legacy decal) on this layer
+      const stampList = layer.stamps?.length
+        ? layer.stamps
+        : (layer.kind === "decal" && layer.decal?.stampMaps
+          ? [{
+              visible: true,
+              projection: "3d",
+              anchorPos: layer.decal.anchorPos,
+              anchorNormal: layer.decal.anchorNormal,
+              scale: layer.decal.radius || 0.45,
+              scaleX: 1,
+              scaleY: 1,
+              rotation: layer.decal.rotation || 0,
+              opacity: 1,
+              blend: layer.blend,
+              heightStrength: 0.5,
+              tint: "#ffffff",
+              stampData: layer.decal.stampMaps,
+            }]
+          : []);
+
+      for (const stmp of stampList) {
+        if (!stmp?.visible) continue;
+        const stData = stmp.stampData || stmp.stampMaps;
+        const stPair = this._getCachedStampPair(stData);
+        if (!stPair) continue;
+        const du = this.decalMat.uniforms;
+        du.uStampAlbedo.value = stPair.albedoTex;
+        du.uStampOrmh.value = stPair.ormhTex || this.dummyTex;
+        du.uHasStampOrmh.value = stPair.ormhTex ? 1 : 0;
+        du.uStampProj.value = stmp.projection === "3d" ? 1 : 0;
+        du.uStampUv.value.set(stmp.u ?? 0.5, stmp.v ?? 0.5);
+        const sx = Math.max(0.015, (stmp.scale ?? 0.28) * (stmp.scaleX ?? 1.0));
+        const sy = Math.max(0.015, (stmp.scale ?? 0.28) * (stmp.scaleY ?? 1.0));
+        du.uStampScale.value.set(sx, sy);
+        du.uStampRot.value = ((stmp.rotation || 0) * Math.PI) / 180;
+        const ap = stmp.anchorPos || [0, 0, 1];
+        const an = stmp.anchorNormal || [0, 0, 1];
+        du.uStampAnchorPos.value.set(ap[0], ap[1], ap[2]);
+        du.uStampAnchorNorm.value.set(an[0], an[1], an[2]).normalize();
+        const upRef = Math.abs(du.uStampAnchorNorm.value.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
+        du.uStampRight.value.crossVectors(upRef, du.uStampAnchorNorm.value).normalize();
+        du.uStampUp.value.crossVectors(du.uStampAnchorNorm.value, du.uStampRight.value).normalize();
+        const [tr, tg, tb] = hexToRgb(stmp.tint || "#ffffff");
+        du.uStampTint.value.set(tr / 255, tg / 255, tb / 255);
+        du.uStampHeightStr.value = stmp.heightStrength ?? 0.5;
+        du.uStampOpacity.value = stmp.opacity ?? 1;
+        du.uLayerOpacity.value = layerOp;
+        const stCh = stmp.channels || lCh;
+        const stBlKey = stmp.blend && stmp.blend !== "Inherit" ? stmp.blend : layer.blend;
+        du.uBlendMode.value = BLEND_INDEX[stBlKey] ?? 0;
+        du.uLayerChanBlends.value.set(chB("albedo"), chB("roughness"), chB("metalness"), chB("height"));
+        du.uLayerChanOpacity.value.set(lOp.albedo ?? 1, lOp.roughness ?? 1, lOp.metalness ?? 1, lOp.height ?? 1);
+        du.uLayerChanMask.value.set(stCh.albedo ? 1 : 0, stCh.roughness ? 1 : 0, stCh.metalness ? 1 : 0, stCh.height ? 1 : 0);
+        du.uPartFilter.value = layer.partFilter ?? -1;
+        du.uHasMask.value = u.uHasMask.value;
+        du.uInvertMask.value = u.uInvertMask.value;
+        du.uMaskOpacity.value = u.uMaskOpacity.value;
+        du.uLayerMask.value = u.uLayerMask.value;
+        du.uHasParentMask.value = u.uHasParentMask.value;
+        du.uInvertParentMask.value = u.uInvertParentMask.value;
+        du.uParentMaskOp.value = u.uParentMaskOp.value;
+        du.uParentMask.value = u.uParentMask.value;
+
+        du.uAccAlbedo.value = accAlb.texture;
+        du.uAccOrmh.value = accOrm.texture;
+        du.uOutTarget.value = 0;
+        this._renderPass(this.decalMat, nxtAlb);
+        du.uOutTarget.value = 1;
+        this._renderPass(this.decalMat, nxtOrm);
+        const dA = accAlb; accAlb = nxtAlb; nxtAlb = dA;
+        const dO = accOrm; accOrm = nxtOrm; nxtOrm = dO;
+
+        if (extActive) {
+          du.uOutTarget.value = 2;
+          for (let g = 0; g < 5; g++) {
+            const gm = this._groupChannelMask(stCh, g);
+            if (gm.x + gm.y + gm.z + gm.w < 0.5) continue;
+            const keys = EXT_GROUP_CHANNELS[g];
+            du.uAccAlbedo.value = extAcc[g].texture;
+            du.uIsRgbGroup.value = g === 0 ? 1 : 0;
+            du.uExtChanMask.value.copy(gm);
+            du.uExtChanOpacity.value.set(
+              keys[0] ? (lOp[keys[0]] ?? 1) : 1,
+              keys[1] ? (lOp[keys[1]] ?? 1) : 1,
+              keys[2] ? (lOp[keys[2]] ?? 1) : 1,
+              keys[3] ? (lOp[keys[3]] ?? 1) : 1,
+            );
+            du.uExtChanBlends.value.set(
+              keys[0] ? chB(keys[0]) : -1,
+              keys[1] ? chB(keys[1]) : -1,
+              keys[2] ? chB(keys[2]) : -1,
+              keys[3] ? chB(keys[3]) : -1,
+            );
+            du.uExtVal.value.copy(this._extValuesToGroupVec(stmp.extValues, layer.extValues, g));
+            this._renderPass(this.decalMat, extNxt[g]);
+            const tmp = extAcc[g]; extAcc[g] = extNxt[g]; extNxt[g] = tmp;
+          }
+        }
+      }
     }
 
     // +2px UV gutter dilation pass
@@ -1367,25 +2399,65 @@ export class GpuPaintSession {
     this.dilateMat.uniforms.uSource.value = accOrm.texture;
     this._renderPass(this.dilateMat, this.finalOrmhRT);
 
-    // GPU Height->Tangent Normal Sobel pass
+    let extOut = null;
+    if (extActive) {
+      for (let g = 0; g < 5; g++) {
+        this.dilateMat.uniforms.uSource.value = extAcc[g].texture;
+        this._renderPass(this.dilateMat, this.extFinalGroupRT[g]);
+      }
+      const uu = this.extUnpackMat.uniforms;
+      uu.uGroup0.value = this.extFinalGroupRT[0].texture;
+      uu.uGroup1.value = this.extFinalGroupRT[1].texture;
+      uu.uGroup2.value = this.extFinalGroupRT[2].texture;
+      uu.uGroup3.value = this.extFinalGroupRT[3].texture;
+      uu.uGroup4.value = this.extFinalGroupRT[4].texture;
+      for (let m = 0; m < 6; m++) {
+        uu.uOutMode.value = m;
+        this._renderPass(this.extUnpackMat, this.extOutRT[m]);
+      }
+      extOut = {
+        emissiveSpecTex: this.extOutRT[0].texture,
+        coatSheenTex: this.extOutRT[1].texture,
+        iridTex: this.extOutRT[2].texture,
+        transThickTex: this.extOutRT[3].texture,
+        aoAlphaTex: this.extOutRT[4].texture,
+        anisoTex: this.extOutRT[5].texture,
+      };
+    }
+
+    // GPU Height->Tangent Normal Sobel pass (with optional Normal Strength gain)
     this.normalMat.uniforms.uOrmhTex.value = this.finalOrmhRT.texture;
+    this.normalMat.uniforms.uNormalGainTex.value = extActive ? this.extFinalGroupRT[3].texture : this.dummyTex;
+    this.normalMat.uniforms.uHasNormalGain.value = extActive ? 1 : 0;
     this._renderPass(this.normalMat, this.finalNormalRT);
 
-    // Channel solo display pass
+    // Channel solo display pass across ALL 19 PBR channels + Normal + Mask
     const activeLayer = doc.layers.find((l) => l.id === doc.selectedLayerId);
     const activeMaskRT = activeLayer?._gpu?.maskRT || null;
     this.viewMat.uniforms.uAlbedoTex.value = this.finalAlbedoRT.texture;
     this.viewMat.uniforms.uOrmhTex.value = this.finalOrmhRT.texture;
+    this.viewMat.uniforms.uNormalTex.value = this.finalNormalRT.texture;
     this.viewMat.uniforms.uMaskTex.value = activeMaskRT?.texture || this.dummyTex;
     this.viewMat.uniforms.uHasMask.value = activeLayer?.mask?.enabled && activeMaskRT ? 1 : 0;
     this.viewMat.uniforms.uInvertMask.value = activeLayer?.mask?.invert ? 1 : 0;
-    this.viewMat.uniforms.uMode.value = CHAN_VIEW_INDEX[viewChannel] ?? 0;
+
+    if (viewChannel in EXT_VIEW_LOC) {
+      const loc = EXT_VIEW_LOC[viewChannel];
+      this.viewMat.uniforms.uExtSoloTex.value = this.extFinalGroupRT[loc.group].texture;
+      this.viewMat.uniforms.uExtComp.value = loc.comp;
+      this.viewMat.uniforms.uMode.value = loc.comp === 4 ? 7 : 6;
+    } else {
+      this.viewMat.uniforms.uExtSoloTex.value = this.dummyTex;
+      this.viewMat.uniforms.uExtComp.value = 0;
+      this.viewMat.uniforms.uMode.value = CHAN_VIEW_INDEX[viewChannel] ?? 0;
+    }
     this._renderPass(this.viewMat, this.displayAlbedoRT);
 
     return {
       albedoTex: this.displayAlbedoRT.texture,
       ormhTex: this.finalOrmhRT.texture,
       normalTex: this.finalNormalRT.texture,
+      ext: extOut,
     };
   }
 
@@ -1406,7 +2478,7 @@ export class GpuPaintSession {
     };
   }
 
-  readExportChannels() {
+  readExportChannels(extMask = null) {
     if (!this.isActive) return null;
     const res = this.res;
     const n = res * res;
@@ -1421,6 +2493,7 @@ export class GpuPaintSession {
     const normal = new Uint8ClampedArray(n * 4);
     const roughness = new Uint8ClampedArray(n);
     const metalness = new Uint8ClampedArray(n);
+    const height = new Uint8ClampedArray(n);
     for (let y = 0; y < res; y++) {
       const sRow = (res - 1 - y) * res;
       const dRow = y * res;
@@ -1433,9 +2506,53 @@ export class GpuPaintSession {
         normal[di4] = rawNorm[si4]; normal[di4 + 1] = rawNorm[si4 + 1]; normal[di4 + 2] = rawNorm[si4 + 2]; normal[di4 + 3] = 255;
         roughness[dp] = rawOrm[si4 + 1];
         metalness[dp] = rawOrm[si4 + 2];
+        height[dp] = rawOrm[si4 + 3];
       }
     }
-    return { albedo, roughness, metalness, normal };
+    const ext = {};
+    const result = { albedo, roughness, metalness, height, normal, ext };
+    const wantExt = this._hasExtExport || (extMask && Object.values(extMask).some(Boolean));
+    if (wantExt && this.extFinalGroupRT) {
+      const gBufs = this.extFinalGroupRT.map((rt) => {
+        const raw = new Uint8Array(n * 4);
+        this.renderer.readRenderTargetPixels(rt, 0, 0, res, res, raw);
+        return raw;
+      });
+      ext.emissive = new Uint8ClampedArray(n * 3);
+      for (const k of EXTENDED_PBR_KEYS) {
+        if (k !== "emissive" && k !== "normal") ext[k] = new Uint8ClampedArray(n);
+      }
+      ext.normalStrength = new Uint8ClampedArray(n);
+      for (let y = 0; y < res; y++) {
+        const sRow = (res - 1 - y) * res;
+        const dRow = y * res;
+        for (let x = 0; x < res; x++) {
+          const sp = sRow + x;
+          const dp = dRow + x;
+          const si4 = sp * 4;
+          const d3 = dp * 3;
+          ext.emissive[d3] = gBufs[0][si4];
+          ext.emissive[d3 + 1] = gBufs[0][si4 + 1];
+          ext.emissive[d3 + 2] = gBufs[0][si4 + 2];
+          ext.emissiveIntensity[dp] = gBufs[0][si4 + 3];
+          ext.clearcoat[dp] = gBufs[1][si4];
+          ext.coatRoughness[dp] = gBufs[1][si4 + 1];
+          ext.sheen[dp] = gBufs[1][si4 + 2];
+          ext.sheenRoughness[dp] = gBufs[1][si4 + 3];
+          ext.iridescence[dp] = gBufs[2][si4];
+          ext.iridescenceThickness[dp] = gBufs[2][si4 + 1];
+          ext.transmission[dp] = gBufs[2][si4 + 2];
+          ext.thickness[dp] = gBufs[2][si4 + 3];
+          ext.ao[dp] = gBufs[3][si4];
+          ext.opacity[dp] = gBufs[3][si4 + 1];
+          ext.normalStrength[dp] = gBufs[3][si4 + 2];
+          ext.specular[dp] = gBufs[3][si4 + 3];
+          ext.anisotropy[dp] = gBufs[4][si4];
+        }
+      }
+      Object.assign(result, ext);
+    }
+    return result;
   }
 
   dispose() {
@@ -1447,6 +2564,15 @@ export class GpuPaintSession {
     this.finalNormalRT.dispose(); this.displayAlbedoRT.dispose();
     this.scratchMaskRT.dispose();
     this.scratchChanAlphaRT.dispose();
+    this.extAccA?.forEach((rt) => rt?.dispose());
+    this.extAccB?.forEach((rt) => rt?.dispose());
+    this.extFinalGroupRT?.forEach((rt) => rt?.dispose());
+    this.extOutRT?.forEach((rt) => rt?.dispose());
+    for (const pair of this.stampCache.values()) {
+      pair.albedoTex?.dispose();
+      pair.ormhTex?.dispose();
+    }
+    this.stampCache.clear();
     this.posPartTex?.dispose(); this.normIslandTex?.dispose();
     this.auxCueTex?.dispose(); this.bakedNormalTex?.dispose();
     this.stampTex?.dispose(); this.dummyTex?.dispose();
@@ -1454,7 +2580,8 @@ export class GpuPaintSession {
     this.layerTargetRegistry.clear();
     this.quadGeo.dispose(); this.quadMesh.material.dispose();
     this.blitMat.dispose(); this.dabMat.dispose(); this.commitMat.dispose();
-    this.compMat.dispose(); this.dilateMat.dispose(); this.normalMat.dispose();
+    this.compMat.dispose(); this.decalMat.dispose(); this.extCompMat.dispose();
+    this.extUnpackMat.dispose(); this.dilateMat.dispose(); this.normalMat.dispose();
     this.viewMat.dispose();
   }
 }
@@ -1464,6 +2591,9 @@ export const PAINT_GLSL3_SHADERS = {
   DAB_COMMON,
   COMMIT_STROKE_FRAG,
   COMPOSITE_LAYER_FRAG,
+  DECAL_STAMP_FRAG,
+  EXT_COMP_FRAG,
+  EXT_UNPACK_FRAG,
   DILATE_2PX_FRAG,
   HEIGHT_TO_NORMAL_FRAG,
   CHANNEL_PREVIEW_FRAG,
