@@ -63,21 +63,17 @@ function GeneratorDeclarations(Parameters)
         Inputs: ["scratchAngle", "scratchDensity", "scratchLength", "scratchWidth", "scratchDepth", "scratchSpread", "scratchBend", "scratchScale"], Outputs: ["normal", "roughness", "colour"] });
     return Entries;
 }
+const FULL_SURFACE_PBR_CHANNELS = Object.freeze(
+    Object.keys(PbrChannels).filter(Channel => Channel !== "coverage")
+);
 export function DeclareMaterialAuthoring(Parameters)
 {
     const Generators = GeneratorDeclarations(Parameters);
     const Surface = { Identity: AuthoringIdentity(), Name: Parameters.type === 0 ? "Paint body" : "Surface body", Model: "surface", Enabled: true,
-        Channels: [
-            "colour", "roughness", "metallic", "normal", "ior", "specular", "thickness",
-            ...(Parameters.type === 5 || Parameters.translucency > 0 ? ["transmission", ...(Parameters.attenuationColor ? ["attenuationColour"] : [])] : []),
-            ...(Parameters.sheen > 0 ? ["sheen", "sheenRoughness", "sheenColour"] : []),
-            ...(Parameters.anisotropy > 0 ? ["anisotropy"] : []),
-            ...(Parameters.iridescence > 0 ? ["iridescence", "iridescenceIor", "iridescenceThickness"] : []),
-            ...(Parameters.emissionStrength > 0 ? ["emissive", "emissiveIntensity"] : []),
-        ] };
+        Channels: [...FULL_SURFACE_PBR_CHANNELS] };
     const Layers = [Surface];
     if (Parameters.type === 0) Layers.unshift({ Identity: AuthoringIdentity(), Name: "Metallic flakes", Model: "flakes", Generator: Generators.find(Generator => Generator.Procedure === "flakes").Identity, Enabled: true, Channels: ["colour", "roughness", "metallic", "normal", "coverage"] });
-    if (Parameters.type === 0 || Parameters.coat > 0) Layers.unshift({ Identity: AuthoringIdentity(), Name: "Clearcoat", Model: "coat", Enabled: true, Channels: ["coverage", "roughness", "ior"] });
+    if (Parameters.type === 0 || Parameters.coat > 0) Layers.unshift({ Identity: AuthoringIdentity(), Name: "Clearcoat", Model: "coat", Enabled: true, Channels: ["coverage", "roughness", "ior", "normal"] });
     return { Version: 2, Layers, Generators, Variables: [], Links: {}, Inputs: {}, Sources: {}, Designer: {} };
 }
 export function NormalizeMaterialAuthoring(Input)

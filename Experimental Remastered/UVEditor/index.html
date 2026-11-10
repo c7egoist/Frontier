@@ -124,6 +124,7 @@
           <button type="button" data-mode="face" title="Face Mode (3)">3 Face</button>
           <button type="button" class="active" data-mode="island" title="Island Mode (4)">4 Island</button>
         </div>
+        <button class="pill-btn" id="select-menu-btn" type="button" title="Blender Select Menu — Loops, Select Similar (Shift+G), Select Random, Checker">Select ▾</button>
         <span class="bar-divider"></span>
         <button class="pill-btn active" id="sync-sel-btn" type="button" title="UV Sync Selection (2D ↔ 3D)">Sync 2D↔3D</button>
         <div class="select-pill-wrap vp-compact-select">
@@ -213,12 +214,12 @@
 
           <!-- Subtle Hotkey Bar bottom-center -->
           <div class="viewport-help">
-            <span>2 Edge: Alt Loop · ^Alt Ring · ^ Path</span><i>·</i>
+            <span>Alt Loop · ^Alt Ring</span><i>·</i>
+            <span>⇧G Similar</span><i>·</i>
+            <span>L Island</span><i>·</i>
             <span>K Seam Brush</span><i>·</i>
-            <span>^E Edge Menu</span><i>·</i>
             <span>G / R / S</span><i>·</i>
-            <span>U Unwrap</span><i>·</i>
-            <span>⇧P Pack</span>
+            <span>U Unwrap</span>
           </div>
         </div>
 
@@ -342,6 +343,68 @@
   </button>
 </div>
 
+<!-- POPOVER: BLENDER SELECT MENU (ALL / LOOPS / SIMILAR / RANDOM) -->
+<div class="popover select-menu" id="select-menu" hidden>
+  <div class="popover-label">STANDARD SELECTION</div>
+  <button data-sel-op="all" type="button"><span>Select All</span><kbd>A</kbd></button>
+  <button data-sel-op="none" type="button"><span>Deselect All</span><kbd>Alt+A</kbd></button>
+  <button data-sel-op="invert" type="button"><span>Invert Selection</span><kbd>Ctrl+I</kbd></button>
+  <button data-sel-op="grow" type="button"><span>Select More / Grow</span><kbd>Ctrl++</kbd></button>
+  <button data-sel-op="shrink" type="button"><span>Select Less / Shrink</span><kbd>Ctrl+-</kbd></button>
+  <div class="menu-divider"></div>
+  <div class="popover-label">LOOPS, REGIONS &amp; LINKED</div>
+  <button data-sel-op="loop" type="button"><span>Select Edge / Face Loop</span><kbd>Alt+Click</kbd></button>
+  <button data-sel-op="ring" type="button"><span>Select Edge Ring</span><kbd>^Alt+Click</kbd></button>
+  <button data-sel-op="boundary-loop" type="button"><span>Select Boundary Loop</span><kbd>Region Rim</kbd></button>
+  <button data-sel-op="loop-inner-region" type="button"><span>Select Loop Inner-Region</span><kbd>Inside Loop</kbd></button>
+  <button data-sel-op="same-island" type="button"><span>Select Linked / Same UV Island</span><kbd>L / DblClick</kbd></button>
+  <button data-sel-op="linked-flat" type="button"><span>Select Linked Flat Faces</span><kbd>^⇧F</kbd></button>
+  <div class="menu-divider"></div>
+  <div class="popover-label">SELECT SIMILAR (SHIFT+G)</div>
+  <button data-sel-op="sim:same_island" type="button"><span>Same UV Island</span><kbd>Island</kbd></button>
+  <button data-sel-op="sim:perimeter_uv" type="button"><span>Similar UV Perimeter</span><kbd>⇧G</kbd></button>
+  <button data-sel-op="sim:perimeter_3d" type="button"><span>Similar 3D Perimeter</span><kbd>⇧G</kbd></button>
+  <button data-sel-op="sim:area_3d" type="button"><span>Similar 3D Area</span><kbd>⇧G</kbd></button>
+  <button data-sel-op="sim:area_uv" type="button"><span>Similar UV Area</span><kbd>⇧G</kbd></button>
+  <button data-sel-op="sim:normal" type="button"><span>Similar Normal</span><kbd>⇧G</kbd></button>
+  <button data-sel-op="sim:coplanar" type="button"><span>Coplanar Faces</span><kbd>⇧G</kbd></button>
+  <button data-sel-op="sim:same_part" type="button"><span>Same Surface Part</span><kbd>Material</kbd></button>
+  <button data-sel-op="open-similar" type="button"><span>All Select Similar Modes…</span><kbd>Shift+G</kbd></button>
+  <div class="menu-divider"></div>
+  <div class="popover-label">RANDOM, CHECKER &amp; TRAITS</div>
+  <div class="sel-inline-controls">
+    <div class="sel-inline-row">
+      <span>Random Ratio</span>
+      <input id="sel-random-ratio-input" type="number" min="1" max="99" step="5" value="50">
+      <button id="sel-random-apply-btn" type="button" class="sel-apply-chip">Run</button>
+    </div>
+    <div class="sel-rand-btns">
+      <button data-sel-op="random-10" type="button">10%</button>
+      <button data-sel-op="random-25" type="button">25%</button>
+      <button data-sel-op="random-50" type="button">50%</button>
+      <button data-sel-op="random-75" type="button">75%</button>
+      <button data-sel-op="random-desel" type="button">Deselect 50%</button>
+    </div>
+  </div>
+  <button data-sel-op="checker" type="button"><span>Checker Deselect (1 of 2)</span><kbd>Pattern</kbd></button>
+  <button data-sel-op="pinned" type="button"><span>Select Pinned UVs</span><kbd>Pins</kbd></button>
+</div>
+
+<!-- POPOVER: BLENDER SELECT SIMILAR (Shift+G) -->
+<div class="popover select-similar-menu" id="select-similar-menu" hidden>
+  <div class="popover-label" id="select-similar-heading">SELECT SIMILAR (SHIFT+G)</div>
+  <div id="select-similar-items"></div>
+  <div class="menu-divider"></div>
+  <div class="sel-inline-controls">
+    <div class="sel-inline-row">
+      <span>Tolerance %</span>
+      <input id="sim-tol-input" type="number" min="1" max="100" step="1" value="14">
+      <span>Angle °</span>
+      <input id="sim-angle-input" type="number" min="1" max="90" step="1" value="15">
+    </div>
+  </div>
+</div>
+
 <!-- POPOVER: BLENDER EDGES, BOUNDARIES & SEAMS MENU (Ctrl+E) -->
 <div class="popover edge-seam-menu" id="edge-seam-menu" hidden>
   <div class="popover-label">SELECT EDGES &amp; BOUNDARIES</div>
@@ -374,12 +437,14 @@
   <p class="dialog-sub">Hover over the 2D UV Canvas or 3D Mesh Viewport and use standard Blender shortcuts seamlessly.</p>
   <div class="shortcut-list">
     <span>Selection Mode (Vert / Edge / Face / Island) <kbd>1 / 2 / 3 / 4</kbd></span>
-    <span>Edge Loop / Edge Ring / Shortest Path <kbd>Alt / Ctrl+Alt / Ctrl+Click</kbd></span>
+    <span>Edge / Face Loop · Ring · Shortest Path <kbd>Alt / ^Alt / ^Click</kbd></span>
+    <span>Select Similar Menu (Island, Perim, Area…) <kbd>Shift+G</kbd></span>
+    <span>Select Linked Island / Flat Faces <kbd>L / Ctrl+Shift+F</kbd></span>
     <span>Seam Brush Tool (Single / Alt+Click Loop) <kbd>K</kbd></span>
     <span>Cycle 3D Shading (Checker / Flat / Matcap) <kbd>Z</kbd></span>
     <span>Edges, Boundaries &amp; Seams Menu <kbd>Ctrl+E / RMB</kbd></span>
     <span>Select All / Deselect / Invert <kbd>A / Alt+A / Ctrl+I</kbd></span>
-    <span>Linked Island / Grow / Shrink <kbd>L / Ctrl++ / Ctrl+-</kbd></span>
+    <span>Grow / Shrink / Checker / Random <kbd>^++ / ^+- / Select▾</kbd></span>
     <span>Box Select / Circle Select <kbd>B / C</kbd></span>
     <span>Move / Rotate / Scale (Modal) <kbd>G / R / S</kbd></span>
     <span>Axis Lock during G/R/S <kbd>X or U / Y or V</kbd></span>

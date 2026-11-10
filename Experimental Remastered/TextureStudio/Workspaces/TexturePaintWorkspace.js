@@ -13,6 +13,7 @@ import { OBJLoader } from "../Vendor/addons/OBJLoader.js";
 import { STLLoader } from "../Vendor/addons/STLLoader.js";
 import { BuildThreeGeometryFromBridgeTransfer } from "../../Shared/UvTextureBridge.js";
 import { materials as MATERIAL_CATALOG } from "../Engine/Materials/materials.js";
+import { getBakedMaterialIcon } from "../MaterialIconBaker.js";
 import {
   PAINT_MESH_PRESETS as PAINT_MESH_LIST,
   PAINT_PBR_CHANNELS,
@@ -27,6 +28,7 @@ import {
   createDefaultChannelBlends,
   createDefaultExtendedValues,
   defaultByteForExtChannel,
+  createMaterialLayerOverridesFromPreset,
   createStampInstance,
   generateProceduralMask,
   featherMaskPixels,
@@ -1387,9 +1389,40 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     for (const k of EXTRA_COLOR_KEYS) out[k] = false;
     for (const l of state.doc.layers) {
       if (!l.visible) continue;
+      const isProcedural = l.kind === "fill" || l.kind === "material" || l.kind === "generator";
+      const srcObj = l[l.kind] || null;
+      const srcExt = srcObj?.extValues || l.extValues || null;
       if (l.channels) {
-        for (const k of EXTENDED_PBR_KEYS) if (l.channels[k]) out[k] = true;
-        for (const k of EXTRA_COLOR_KEYS) if (l.channels[k]) out[k] = true;
+        for (const k of [...EXTENDED_PBR_KEYS, ...EXTRA_COLOR_KEYS]) {
+          if (!l.channels[k]) continue;
+          if (!isProcedural) {
+            out[k] = true;
+            continue;
+          }
+          // For procedural layers, only mark Three.js costly passes (opacity transparency / transmission RTT) active when non-default
+          const v = srcExt?.[k] ?? srcObj?.[k];
+          if (k === "opacity") {
+            if ((v ?? 1) < 0.995) out[k] = true;
+          } else if (k === "transmission") {
+            if ((v ?? 0) > 0.005) out[k] = true;
+          } else if (k === "emissiveIntensity") {
+            if ((v ?? 0) > 0.005) out[k] = true;
+          } else if (k === "emissive") {
+            if ((srcExt?.emissiveIntensity ?? 0) > 0.005) out[k] = true;
+          } else if (k === "clearcoat" || k === "sheen" || k === "iridescence" || k === "anisotropy" || k === "thickness") {
+            if ((v ?? 0) > 0.005) out[k] = true;
+          } else if (k === "coatRoughness") {
+            if ((srcExt?.clearcoat ?? 0) > 0.005) out[k] = true;
+          } else if (k === "sheenRoughness" || k === "sheenColor") {
+            if ((srcExt?.sheen ?? 0) > 0.005) out[k] = true;
+          } else if (k === "iridescenceThickness") {
+            if ((srcExt?.iridescence ?? 0) > 0.005) out[k] = true;
+          } else if (k === "attenuationColor") {
+            if ((srcExt?.transmission ?? 0) > 0.005) out[k] = true;
+          } else {
+            out[k] = true;
+          }
+        }
       }
       if (l.stamps?.some((s) => s.visible && s.channels)) {
         for (const s of l.stamps) {
@@ -3411,11 +3444,17 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   }
 
   function addPaintLayerByKind(kind) {
-    const l = createPaintLayer(kind, {
-      res,
-      color: state.brush.color,
-      fill: { color: state.brush.color, roughness: state.brush.roughness, metalness: state.brush.metalness, height: 0 },
-    });
+    let l;
+    if (kind === "material") {
+      const defMat = MATERIAL_CATALOG.find((m) => m.id === "racing-green") || MATERIAL_CATALOG[0];
+      l = createPaintLayer("material", createMaterialLayerOverridesFromPreset(defMat, res));
+    } else {
+      l = createPaintLayer(kind, {
+        res,
+        color: state.brush.color,
+        fill: { color: state.brush.color, roughness: state.brush.roughness, metalness: state.brush.metalness, height: 0 },
+      });
+    }
     if (kind === "decal" && state.brush.stampData) {
       const st = createStampInstance({
         name: state.brush.stampName || "Stamp",
@@ -3435,6 +3474,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     state.doc.layers.push(l);
     state.doc.selectedLayerId = l.id;
     state.doc.editingMask = false;
+    if (kind === "material") layerStackUI.expandLayerDetails?.(l.id);
     invalidateLayerThumb(l.id);
     renderLeftColumn();
     rebuildInspector();
@@ -3506,6 +3546,40 @@ export function mountTexturePaintWorkspace(root, appBridge) {
           thumbEl.append(ConstructGlyph("Folder"));
           return;
         }
+        if (layer.kind === "material") {
+          const preset = MATERIAL_CATALOG.find((m) => m.id === layer.material?.presetId) || null;
+          const ev = layer.material?.extValues || {};
+          const sameAsPreset =
+            preset &&
+            layer.material?.color === preset.color &&
+            Math.abs((layer.material?.roughness ?? preset.roughness ?? 0.4) - (preset.roughness ?? 0.4)) < 1e-3 &&
+            Math.abs((layer.material?.metalness ?? preset.metalness ?? 0) - (preset.metalness ?? 0)) < 1e-3;
+          const matSpec = {
+            ...(preset || {}),
+            id: sameAsPreset
+              ? preset.id
+              : `tp-mat:${layer.id}:${layer.material?.color}:${layer.material?.roughness}:${layer.material?.metalness}:${ev.clearcoat ?? 0}`,
+            name: layer.material?.presetName || layer.name || "Material",
+            color: layer.material?.color || preset?.color || "#345f42",
+            roughness: layer.material?.roughness ?? preset?.roughness ?? 0.24,
+            metalness: layer.material?.metalness ?? preset?.metalness ?? 0.87,
+            coat: ev.clearcoat ?? preset?.coat ?? 0,
+            coatRoughness: ev.coatRoughness ?? preset?.coatRoughness ?? 0.08,
+            iridescence: ev.iridescence ?? preset?.iridescence ?? 0,
+            emissionColor: ev.emissive ?? preset?.emissionColor ?? "#000000",
+            emissionStrength: ev.emissiveIntensity ?? preset?.emissionStrength ?? 0,
+            translucency: ev.transmission ?? preset?.translucency ?? 0,
+          };
+          thumbEl.classList.add("is-baked-mat");
+          const img = document.createElement("img");
+          img.className = "tp-mat-baked-thumb";
+          img.alt = matSpec.name;
+          img.src = getBakedMaterialIcon(matSpec, (upgradedUrl) => {
+            if (img.isConnected) img.src = upgradedUrl;
+          });
+          thumbEl.append(img);
+          return;
+        }
         const cached = getCachedLayerThumbCanvas(layer);
         if (cached) {
           const out = document.createElement("canvas");
@@ -3519,7 +3593,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       getSubtitle(layer) {
         const partTag = layer.partFilter >= 0 && meshIndex?.partNames[layer.partFilter] ? meshIndex.partNames[layer.partFilter] : "All";
         const enabledCount = layer.channels ? Object.values(layer.channels).filter(Boolean).length : 4;
-        const chTag = layer.kind !== "folder" && enabledCount !== 4 ? ` · ${enabledCount}/19 ch` : "";
+        const chTag = layer.kind !== "folder" && enabledCount !== 4 ? ` · ${enabledCount}/${ALL_PAINT_CHANNEL_ROWS.length} ch` : "";
         const stpTag = layer.stamps?.length ? ` · ${layer.stamps.length} stp` : "";
         return `${layer.kind.toUpperCase()} · ${layer.blend} · ${partTag}${chTag}${stpTag}`;
       },
@@ -3587,11 +3661,23 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       },
       renderExpanded(layer, expEl) {
         const pills = Construct("div", "tp-exp-pills");
-        for (const ch of PAINT_PBR_CHANNELS) {
+        for (const ch of [...PAINT_PBR_CHANNELS, ...EXTRA_COLOR_CHANNELS]) {
           if (!layer.channels?.[ch.key]) continue;
           const dot = document.createElement("i");
           dot.style.setProperty("--pill-color", "#9ea2aa");
-          pills.append(Construct("span", "tp-exp-pill", [dot, Construct("span", null, ch.short)]));
+          const isCur = state.doc.selectedLayerId === layer.id && state.inspectedLayerChannel === ch.key;
+          const pill = Construct("button", "tp-exp-pill tp-exp-pill-btn" + (isCur ? " active" : ""), [dot, Construct("span", null, ch.short)]);
+          pill.type = "button";
+          pill.title = `Inspect ${ch.label} channel on ${layer.name}`;
+          pill.addEventListener("click", (e) => {
+            e.stopPropagation();
+            state.doc.selectedLayerId = layer.id;
+            state.doc.editingMask = false;
+            state.inspectedLayerChannel = ch.key;
+            renderLeftColumn();
+            rebuildInspector();
+          });
+          pills.append(pill);
         }
         expEl.append(
           pills,
@@ -4931,17 +5017,14 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     if (!payload) return false;
     if (payload.assetKind === "material") {
       const m = payload.raw;
-      const l = createPaintLayer("material", {
-        res,
-        name: m.name || "Material Layer",
-        material: { presetId: m.id, presetName: m.name, color: m.color, roughness: m.roughness, metalness: m.metalness, height: 0, grainScale: 10, grainStrength: 0.08 },
-      });
+      const l = createPaintLayer("material", createMaterialLayerOverridesFromPreset(m, res));
       state.doc.layers.push(l);
       state.doc.selectedLayerId = l.id;
+      layerStackUI.expandLayerDetails?.(l.id);
       renderLeftColumn();
       rebuildInspector();
       refreshComposite();
-      Toast(`Applied Material "${m.name}" to Paint Stack`);
+      Toast(`Applied Material "${m.name}" (${Object.values(l.channels).filter(Boolean).length} PBR channels) to Paint Stack`);
       return true;
     }
     if (payload.assetKind === "pattern") {
@@ -5045,26 +5128,14 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     applyAsset,
     applyImportedMesh,
     applyBridgedMaterial(matParams) {
-      const l = createPaintLayer("material", {
-        res,
-        name: matParams.name || "Material Layer",
-        material: {
-          presetId: matParams.id,
-          presetName: matParams.name,
-          color: matParams.color,
-          roughness: matParams.roughness,
-          metalness: matParams.metalness,
-          height: 0,
-          grainScale: 10,
-          grainStrength: 0.08,
-        },
-      });
+      const l = createPaintLayer("material", createMaterialLayerOverridesFromPreset(matParams, res));
       state.doc.layers.push(l);
       state.doc.selectedLayerId = l.id;
+      layerStackUI.expandLayerDetails?.(l.id);
       renderLeftColumn();
       rebuildInspector();
       refreshComposite();
-      Toast(`Added "${matParams.name}" Material layer`);
+      Toast(`Added "${matParams.name}" Material (${Object.values(l.channels).filter(Boolean).length} PBR channels)`);
     },
     applyBridgedPattern(patternEval) {
       const l = createPaintLayer("fill", {

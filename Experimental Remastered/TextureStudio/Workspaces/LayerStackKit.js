@@ -636,6 +636,7 @@ export function createLayerStackPanel(leftCol, config) {
 
   return {
     render,
+    expandLayerDetails: (id) => { if (id) uiState.expandedIds.add(id); },
     closeAddMenu: () => setAddMenuOpen(false),
     dispose: () => document.removeEventListener?.("pointerdown", onDocPointerDown),
     uiState,

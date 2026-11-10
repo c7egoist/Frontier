@@ -8,6 +8,7 @@ import * as THREE from "three";
 import { OrbitControls } from "../Vendor/orbit-controls.esm.min.js";
 import { RoundedBoxGeometry } from "../Vendor/addons/RoundedBoxGeometry.js";
 import { BuildThreeGeometryFromBridgeTransfer } from "../../Shared/UvTextureBridge.js";
+import { getBakedMaterialIcon } from "../MaterialIconBaker.js";
 import {
   materials as MATERIAL_CATALOG,
   createMaterial,
@@ -1006,7 +1007,14 @@ export function mountMaterialWorkspace(root, appBridge) {
 
       const thumb = Construct("div", "stack-row-thumb");
       if (layer.Model === "surface") {
-        thumb.style.background = p.color || "#888";
+        thumb.classList.add("is-baked-mat");
+        const img = document.createElement("img");
+        img.className = "mw-mat-baked-thumb";
+        img.alt = p.name || "Material";
+        img.src = getBakedMaterialIcon(p, (upgradedUrl) => {
+          if (img.isConnected) img.src = upgradedUrl;
+        });
+        thumb.append(img);
       } else if (layer.Model === "coat") {
         thumb.append(ConstructGlyph("Sparkles"));
       } else if (layer.Model === "flakes") {
@@ -1131,6 +1139,26 @@ export function mountMaterialWorkspace(root, appBridge) {
         rebuildInspector();
       });
       stackBox.append(row);
+
+      if (layer.Channels?.length) {
+        const chStrip = Construct("div", "mw-outliner-ch-strip");
+        for (const ch of layer.Channels) {
+          const isCur = isSelected && state.inspectedChannel === ch;
+          const label = PbrChannels[ch]?.Caption || ch;
+          const chBtn = Construct("button", "mw-outliner-ch-pill" + (isCur ? " active" : ""), label);
+          chBtn.type = "button";
+          chBtn.title = `Inspect ${label} channel on ${layer.Name}`;
+          chBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            state.selectedLayerId = layer.Identity;
+            state.inspectedChannel = ch;
+            renderLeftOutliner();
+            rebuildInspector();
+          });
+          chStrip.append(chBtn);
+        }
+        stackBox.append(chStrip);
+      }
     });
 
     sceneSummaryWrap.append(stackBox);

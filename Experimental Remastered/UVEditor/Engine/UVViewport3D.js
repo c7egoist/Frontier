@@ -443,12 +443,22 @@ export class UVViewport3D
         });
         this.canvas.addEventListener('dblclick', E =>
         {
-            if (this.selectionMode === 'edge' && this.activeTool !== 'seam')
+            if (this.activeTool === 'seam') return;
+            if (this.selectionMode === 'edge')
             {
                 const HitEdge = this.FindHitEdge(E);
                 if (HitEdge && this.onPickEdge)
                 {
                     this.onPickEdge(HitEdge.va, HitEdge.vb, { additive: E.shiftKey, loop: true, ring: false, path: false, faceIndex: HitEdge.faceIndex });
+                }
+                return;
+            }
+            if (this.selectionMode === 'face' || this.selectionMode === 'island')
+            {
+                const Pick = this.RaycastMesh(E);
+                if (Pick && this.onPickFace)
+                {
+                    this.onPickFace(Pick.faceIndex, E.shiftKey, { island: true });
                 }
             }
         });
@@ -620,18 +630,59 @@ export class UVViewport3D
             return;
         }
 
-        // 3. Vertex Selection Mode
-        if (this.selectionMode === 'vertex' && !Event.altKey && !Event.ctrlKey)
+        // 3. Vertex Selection Mode (Click, Shift+Click, Alt+Click Edge Loop, Ctrl+Click Shortest Path)
+        if (this.selectionMode === 'vertex')
         {
+            if (Event.altKey && !Event.ctrlKey)
+            {
+                const Edge = this.FindHitEdge(Event);
+                if (Edge && this.onPickVertex)
+                {
+                    this.onPickVertex(Edge.va, { additive: Event.shiftKey, loop: true, edgeVa: Edge.va, edgeVb: Edge.vb, faceIndex: Edge.faceIndex });
+                    return;
+                }
+            }
             const VHit = this.FindHitVertex(Event);
             if (VHit && this.onPickVertex)
             {
-                this.onPickVertex(VHit.v, { additive: Event.shiftKey, faceIndex: VHit.faceIndex });
+                this.onPickVertex(VHit.v, { additive: Event.shiftKey, path: Event.ctrlKey && !Event.altKey, faceIndex: VHit.faceIndex });
                 return;
             }
         }
 
-        // 4. Quick Seam shortcut in Face/Island mode via Alt+Click or Ctrl+Click
+        // 4. Face Mode Blender Modifiers: Alt+Click = Face Loop, Ctrl+Click = Shortest Face Path, Shift+Alt+Click = Quick Seam
+        if (this.selectionMode === 'face' && (Event.altKey || Event.ctrlKey))
+        {
+            if (Event.shiftKey && Event.altKey)
+            {
+                const Edge = this.FindHitEdge(Event);
+                if (Edge && this.onToggleEdgeSeam)
+                {
+                    this.onToggleEdgeSeam(Edge.va, Edge.vb, { loop: true, faceIndex: Edge.faceIndex });
+                }
+                return;
+            }
+            if (Event.altKey && !Event.ctrlKey)
+            {
+                const Edge = this.FindHitEdge(Event);
+                if (Edge && this.onPickFace)
+                {
+                    this.onPickFace(Edge.faceIndex, Event.shiftKey, { loop: true, edgeVa: Edge.va, edgeVb: Edge.vb });
+                }
+                return;
+            }
+            if (Event.ctrlKey && !Event.altKey)
+            {
+                const Pick = this.RaycastMesh(Event);
+                if (Pick && this.onPickFace)
+                {
+                    this.onPickFace(Pick.faceIndex, Event.shiftKey, { path: true });
+                }
+                return;
+            }
+        }
+
+        // 5. Quick Seam shortcut in Island mode via Alt+Click / Ctrl+Click
         if (Event.altKey || Event.ctrlKey)
         {
             const Edge = this.FindHitEdge(Event);
@@ -642,9 +693,9 @@ export class UVViewport3D
             return;
         }
 
-        // 5. Face / Island picking
+        // 6. Face / Island picking
         const Pick = this.RaycastMesh(Event);
-        if (Pick && this.onPickFace) this.onPickFace(Pick.faceIndex, Event.shiftKey);
+        if (Pick && this.onPickFace) this.onPickFace(Pick.faceIndex, Event.shiftKey, {});
     }
 
     CameraPreset(Preset)

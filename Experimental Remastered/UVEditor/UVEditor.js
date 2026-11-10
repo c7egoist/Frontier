@@ -73,6 +73,10 @@ const StudioState = {
     smartMargin: 0.015,
     relaxIterations: 18,
     targetTexelDensity: 8.5,
+    selectSimilarTol: 0.14,
+    selectSimilarAngle: 15,
+    selectRandomRatio: 0.5,
+    selectRandomSeed: 1337,
     packOptions: {
         budgetMode: 'strict-ratio', // 'strict-ratio' | 'fill-remainder'
         scope: 'active-udim', // 'active-udim' | 'per-udim' | 'auto-udim-spill' | 'selected-only'
@@ -260,11 +264,13 @@ function UpdateHeaderAndHud(Doc)
         if (StudioState.activeTool === 'seam')
             MeshHint.textContent = 'Seam Brush (K): Click edge to toggle seam · Alt+Click seam loop';
         else if (StudioState.selectionMode === 'edge')
-            MeshHint.textContent = 'Edge Mode: Click · Dbl/Alt Loop · ^Alt Ring · ^Path · RMB Menu';
+            MeshHint.textContent = 'Edge: Alt Loop · ^Alt Ring · ^Path · ⇧G Similar · RMB Menu';
         else if (StudioState.selectionMode === 'vertex')
-            MeshHint.textContent = 'Vertex Mode: Click vertex · Shift Multi · Alt+Click Edge Seam';
+            MeshHint.textContent = 'Vertex: Click · Alt Loop · ^Path · ⇧G Similar';
+        else if (StudioState.selectionMode === 'face')
+            MeshHint.textContent = 'Face: Alt Loop · ^Path · Dbl Island · ⇧G Similar · K Seam';
         else
-            MeshHint.textContent = 'Click Face/Island · Switch to 2 Edge for Loops/Rings · Alt+Click Seam';
+            MeshHint.textContent = 'Island: Click / DblClick · ⇧G Select Similar · L Linked';
     }
 
     document.getElementById('undo-btn').disabled = !Doc.surface.CanUndo();
@@ -740,12 +746,296 @@ function OpenEdgeSeamMenu(ClientX, ClientY)
     const Menu = document.getElementById('edge-seam-menu');
     if (!Menu) return;
     Menu.hidden = false;
-    const W = 292;
-    const H = Math.min(520, window.innerHeight - 24);
+    const W = 294;
+    const H = Math.min(540, window.innerHeight - 24);
     const X = Math.max(8, Math.min(window.innerWidth - W - 8, ClientX));
     const Y = Math.max(8, Math.min(window.innerHeight - H - 8, ClientY));
     Menu.style.left = `${X}px`;
     Menu.style.top = `${Y}px`;
+}
+
+function CloseAllSelectMenus()
+{
+    const M1 = document.getElementById('select-menu');
+    const M2 = document.getElementById('select-similar-menu');
+    if (M1) M1.hidden = true;
+    if (M2) M2.hidden = true;
+}
+
+function OpenSelectMenu(ClientX, ClientY)
+{
+    const Menu = document.getElementById('select-menu');
+    if (!Menu) return;
+    document.getElementById('select-similar-menu')?.setAttribute('hidden', '');
+    Menu.hidden = false;
+    const RatioIn = document.getElementById('sel-random-ratio-input');
+    if (RatioIn) RatioIn.value = String(Math.round(StudioState.selectRandomRatio * 100));
+    const W = 294;
+    const H = Math.min(560, window.innerHeight - 24);
+    const X = Math.max(8, Math.min(window.innerWidth - W - 8, ClientX));
+    const Y = Math.max(8, Math.min(window.innerHeight - H - 8, ClientY));
+    Menu.style.left = `${X}px`;
+    Menu.style.top = `${Y}px`;
+}
+
+const SELECT_SIMILAR_DEFINITIONS = {
+    vertex: [
+        ['same_island', 'Same UV Island', 'Island'],
+        ['vert_valence', 'Amount of Connected Edges', 'Valence'],
+        ['vert_pinned', 'Pinned UV State', 'Pins'],
+        ['vert_boundary', 'UV Island Boundary', 'Rim'],
+        ['same_udim', 'Same UDIM Tile', 'UDIM'],
+        ['same_part', 'Same Surface Part', 'Material']
+    ],
+    edge: [
+        ['same_island', 'Same UV Island', 'Island'],
+        ['edge_length_3d', 'Similar 3D Length', 'Length'],
+        ['edge_length_uv', 'Similar UV Length', 'UV Len'],
+        ['edge_direction', 'Similar 3D Direction', 'Parallel'],
+        ['edge_face_angle', 'Similar Face Angle', 'Dihedral'],
+        ['edge_seam', 'Seam State', 'Seam'],
+        ['edge_boundary', 'Boundary / Rim State', 'Bound'],
+        ['same_part', 'Same Surface Part', 'Material']
+    ],
+    face: [
+        ['same_island', 'Same UV Island', 'Island'],
+        ['perimeter_uv', 'Similar UV Perimeter', 'UV Perim'],
+        ['perimeter_3d', 'Similar 3D Perimeter', '3D Perim'],
+        ['area_3d', 'Similar 3D Area', '3D Area'],
+        ['area_uv', 'Similar UV Area', 'UV Area'],
+        ['normal', 'Similar Normal', 'Angle'],
+        ['coplanar', 'Coplanar Faces', 'Plane'],
+        ['sides', 'Polygon Sides (Tri/Quad)', 'Sides'],
+        ['texel_density', 'Similar Texel Density', 'px/cm'],
+        ['island_faces', 'Island Face Count', 'Isl Poly'],
+        ['same_part', 'Same Surface Part', 'Material'],
+        ['same_udim', 'Same UDIM Tile', 'UDIM']
+    ],
+    island: [
+        ['same_island', 'Same UV Island', 'Island'],
+        ['island_faces', 'Similar Island Poly Count', 'Polys'],
+        ['perimeter_uv', 'Similar UV Perimeter', 'UV Perim'],
+        ['perimeter_3d', 'Similar 3D Perimeter', '3D Perim'],
+        ['area_3d', 'Similar 3D Area', '3D Area'],
+        ['area_uv', 'Similar UV Area', 'UV Area'],
+        ['texel_density', 'Similar Texel Density', 'px/cm'],
+        ['same_part', 'Same Surface Part', 'Material'],
+        ['same_udim', 'Same UDIM Tile', 'UDIM']
+    ]
+};
+
+function OpenSelectSimilarMenu(ClientX, ClientY)
+{
+    const Menu = document.getElementById('select-similar-menu');
+    const Box = document.getElementById('select-similar-items');
+    const Heading = document.getElementById('select-similar-heading');
+    if (!Menu || !Box) return;
+
+    document.getElementById('select-menu')?.setAttribute('hidden', '');
+    const Mode = StudioState.selectionMode || 'face';
+    const ModeLabels = { vertex: 'VERTEX', edge: 'EDGE', face: 'FACE', island: 'ISLAND' };
+    if (Heading) Heading.textContent = `SELECT SIMILAR · ${ModeLabels[Mode] || 'FACE'} (SHIFT+G)`;
+
+    const TolIn = document.getElementById('sim-tol-input');
+    const AngIn = document.getElementById('sim-angle-input');
+    if (TolIn) TolIn.value = String(Math.round(StudioState.selectSimilarTol * 100));
+    if (AngIn) AngIn.value = String(Math.round(StudioState.selectSimilarAngle));
+
+    Box.textContent = '';
+    const List = SELECT_SIMILAR_DEFINITIONS[Mode] || SELECT_SIMILAR_DEFINITIONS.face;
+    for (const [Key, Label, Tag] of List)
+    {
+        const Btn = document.createElement('button');
+        Btn.type = 'button';
+        Btn.innerHTML = `<span>${Label}</span><kbd>${Tag}</kbd>`;
+        Btn.addEventListener('click', () =>
+        {
+            Menu.hidden = true;
+            RunSelectOp(`sim:${Key}`);
+        });
+        Box.append(Btn);
+    }
+
+    Menu.hidden = false;
+    const W = 294;
+    const H = Math.min(540, window.innerHeight - 24);
+    const X = Math.max(8, Math.min(window.innerWidth - W - 8, ClientX));
+    const Y = Math.max(8, Math.min(window.innerHeight - H - 8, ClientY));
+    Menu.style.left = `${X}px`;
+    Menu.style.top = `${Y}px`;
+}
+
+function RunSelectOp(OpId, Extra = {})
+{
+    const Doc = ActiveDoc();
+    if (!Doc) return 0;
+
+    if (OpId === 'all')
+    {
+        Doc.surface.SelectAll(Doc.islands);
+        SyncAllViews(true);
+        Toast(`Selected All (${Doc.surface.selectedFaces.size} faces)`);
+        return Doc.surface.selectedFaces.size;
+    }
+    if (OpId === 'none')
+    {
+        Doc.surface.ClearSelection();
+        SyncAllViews(true);
+        Toast('Cleared Selection');
+        return 0;
+    }
+    if (OpId === 'invert')
+    {
+        Doc.surface.InvertSelection(StudioState.selectionMode, Doc.islands);
+        SyncAllViews(true);
+        Toast('Inverted Selection');
+        return Doc.surface.selectedUVs.size;
+    }
+    if (OpId === 'grow') return RunEdgeOrSeamOp('grow-sel');
+    if (OpId === 'shrink') return RunEdgeOrSeamOp('shrink-sel');
+    if (OpId === 'ring') return RunEdgeOrSeamOp('select-ring');
+    if (OpId === 'boundary-loop') return RunEdgeOrSeamOp('select-boundary-auto');
+    if (OpId === 'open-similar')
+    {
+        OpenSelectSimilarMenu(LastPointerClient[0], LastPointerClient[1]);
+        return 0;
+    }
+
+    if (OpId === 'loop')
+    {
+        if (StudioState.selectionMode === 'face' || (!Doc.surface.selectedEdges3D.size && Doc.surface.selectedFaces.size))
+        {
+            const SeedFace = Doc.surface.activeFace ?? [...Doc.surface.selectedFaces][0];
+            if (SeedFace == null)
+            {
+                Toast('Click a face first (or Alt+Click an edge in 3D/2D Face mode)');
+                return 0;
+            }
+            const Cnt = Doc.surface.SelectFaceLoop3D(SeedFace, null, null, Extra.additive || false, Doc.islands);
+            SyncAllViews(true);
+            LogEvent('SEL', `Selected face loop (${Cnt} faces)`);
+            Toast(`Face Loop: ${Cnt} faces`);
+            return Cnt;
+        }
+        return RunEdgeOrSeamOp('select-loop');
+    }
+
+    if (OpId === 'loop-inner-region')
+    {
+        const Cnt = Doc.surface.SelectLoopInnerRegion(Doc.islands);
+        if (!Cnt)
+        {
+            Toast('Select a closed edge boundary loop first');
+            return 0;
+        }
+        SetSelectionMode('face');
+        SyncAllViews(true);
+        LogEvent('SEL', `Selected loop inner region (${Cnt} faces)`);
+        Toast(`Loop Inner Region: ${Cnt} faces`);
+        return Cnt;
+    }
+
+    if (OpId === 'same-island')
+    {
+        const Cnt = Doc.surface.SelectSameUvIsland(Extra.additive || false, Doc.islands);
+        if (!Cnt)
+        {
+            Toast('Select any vertex, edge, face, or island first');
+            return 0;
+        }
+        SyncAllViews(true);
+        LogEvent('SEL', `Selected ${Doc.surface.selectedIslands.size} linked UV island(s) (${Cnt} faces)`);
+        Toast(`Same UV Island: ${Doc.surface.selectedIslands.size} isl · ${Cnt} faces`);
+        return Cnt;
+    }
+
+    if (OpId === 'linked-flat')
+    {
+        const Seed = Doc.surface.activeFace ?? [...Doc.surface.selectedFaces][0] ?? 0;
+        const Cnt = Doc.surface.SelectLinkedFlatFaces(Seed, {
+            angleDeg: StudioState.selectSimilarAngle,
+            respectSeams: true,
+            additive: Extra.additive || false,
+            islands: Doc.islands
+        });
+        SetSelectionMode('face');
+        SyncAllViews(true);
+        LogEvent('SEL', `Selected ${Cnt} linked flat faces (<= ${StudioState.selectSimilarAngle}°)`);
+        Toast(`Linked Flat Faces: ${Cnt} faces`);
+        return Cnt;
+    }
+
+    if (OpId.startsWith('sim:'))
+    {
+        const Criterion = OpId.slice(4);
+        const Cnt = Doc.surface.SelectSimilar(Criterion, {
+            threshold: StudioState.selectSimilarTol,
+            angleDeg: StudioState.selectSimilarAngle,
+            additive: Extra.additive || false,
+            islands: Doc.islands
+        });
+        if (!Cnt)
+        {
+            Toast('Select a seed element first to match similar properties');
+            return 0;
+        }
+        SyncAllViews(true);
+        LogEvent('SEL', `Select Similar (${Criterion}): ${Cnt} matched`);
+        Toast(`Select Similar (${Criterion.replace(/_/g, ' ')}): ${Cnt}`);
+        return Cnt;
+    }
+
+    if (OpId.startsWith('random'))
+    {
+        let Ratio = StudioState.selectRandomRatio;
+        let Action = 'select';
+        if (OpId === 'random-10') Ratio = 0.1;
+        else if (OpId === 'random-25') Ratio = 0.25;
+        else if (OpId === 'random-50') Ratio = 0.5;
+        else if (OpId === 'random-75') Ratio = 0.75;
+        else if (OpId === 'random-desel') { Ratio = 0.5; Action = 'deselect'; }
+        else if (typeof Extra.ratio === 'number') Ratio = Extra.ratio;
+
+        StudioState.selectRandomRatio = Ratio;
+        StudioState.selectRandomSeed = (StudioState.selectRandomSeed + 101) & 0x7fffffff;
+        const Mode = StudioState.selectionMode || 'face';
+        const Cnt = Doc.surface.SelectRandom({
+            ratio: Ratio,
+            seed: StudioState.selectRandomSeed,
+            action: Action,
+            mode: Mode,
+            additive: false,
+            withinSelection: Action === 'deselect',
+            islands: Doc.islands
+        });
+        SyncAllViews(true);
+        LogEvent('SEL', `Random ${Action} (${Math.round(Ratio * 100)}% ${Mode}): ${Cnt} items`);
+        Toast(`Random ${Action === 'deselect' ? 'Deselect' : 'Select'} (${Math.round(Ratio * 100)}%): ${Cnt}`);
+        return Cnt;
+    }
+
+    if (OpId === 'checker')
+    {
+        const Mode = StudioState.selectionMode || 'face';
+        const Cnt = Doc.surface.CheckerDeselect({ nth: 2, skip: 1, offset: 0, mode: Mode, islands: Doc.islands });
+        SyncAllViews(true);
+        LogEvent('SEL', `Checker deselect (${Mode}): ${Cnt} kept`);
+        Toast(`Checker Deselect: ${Cnt} remaining`);
+        return Cnt;
+    }
+
+    if (OpId === 'pinned')
+    {
+        Doc.surface.ClearSelection();
+        for (const U of Doc.surface.pinned) Doc.surface.selectedUVs.add(U);
+        Doc.surface.SyncSelectionsFromMode('vertex', Doc.islands);
+        SetSelectionMode('vertex');
+        SyncAllViews(true);
+        Toast(`Selected ${Doc.surface.selectedUVs.size} pinned UV(s)`);
+        return Doc.surface.selectedUVs.size;
+    }
+
+    return 0;
 }
 
 function RunUnwrap(Kind)
@@ -1306,6 +1596,60 @@ function RenderUnwrapTab(Body, Doc)
         AlignGrid.append(Btn);
     }
     AlignSec.Inner.append(AlignGrid);
+
+    const BlenderSelSec = SectionCard(Body, {
+        Id: 'blender-selection-tools',
+        Title: 'Blender Selection, Loops & Random',
+        Glyph: 'Select',
+        Badge: 'SHIFT+G / RANDOM'
+    });
+    SliderPill(BlenderSelSec.Inner, {
+        Label: 'Similar Tolerance',
+        Min: 1,
+        Max: 80,
+        Step: 1,
+        Digits: 0,
+        Unit: '%',
+        Read: () => Math.round(StudioState.selectSimilarTol * 100),
+        Write: V => { StudioState.selectSimilarTol = V / 100; }
+    });
+    SliderPill(BlenderSelSec.Inner, {
+        Label: 'Normal / Flat Angle',
+        Min: 1,
+        Max: 90,
+        Step: 1,
+        Digits: 0,
+        Unit: '°',
+        Read: () => StudioState.selectSimilarAngle,
+        Write: V => { StudioState.selectSimilarAngle = V; }
+    });
+    SliderPill(BlenderSelSec.Inner, {
+        Label: 'Select Random Ratio',
+        Min: 5,
+        Max: 95,
+        Step: 5,
+        Digits: 0,
+        Unit: '%',
+        Read: () => Math.round(StudioState.selectRandomRatio * 100),
+        Write: V => { StudioState.selectRandomRatio = V / 100; }
+    });
+    ActionRow(BlenderSelSec.Inner, [
+        { Label: 'Face / Edge Loop', Act: () => RunSelectOp('loop') },
+        { Label: 'Inner Region', Act: () => RunSelectOp('loop-inner-region') },
+        { Label: 'Flat Faces', Act: () => RunSelectOp('linked-flat') },
+        { Label: 'Same UV Island', Tone: 'accent', Act: () => RunSelectOp('same-island') }
+    ]);
+    ActionRow(BlenderSelSec.Inner, [
+        { Label: 'Sim: UV Perim', Act: () => RunSelectOp('sim:perimeter_uv') },
+        { Label: 'Sim: 3D Perim', Act: () => RunSelectOp('sim:perimeter_3d') },
+        { Label: 'Sim: 3D Area', Act: () => RunSelectOp('sim:area_3d') },
+        { Label: 'Sim: Normal', Act: () => RunSelectOp('sim:normal') }
+    ]);
+    ActionRow(BlenderSelSec.Inner, [
+        { Label: 'Select Random', Tone: 'warm', Act: () => RunSelectOp('random') },
+        { Label: 'Checker Desel', Act: () => RunSelectOp('checker') },
+        { Label: 'Shift+G Menu', Act: () => OpenSelectSimilarMenu(LastPointerClient[0], LastPointerClient[1]) }
+    ]);
 }
 
 function RenderUdimTab(Body, Doc)
@@ -1700,17 +2044,33 @@ function SetupCanvas2DInteraction()
     CanvasEl.addEventListener('dblclick', E =>
     {
         const Doc = ActiveDoc();
-        if (!Doc || StudioState.selectionMode !== 'edge' || StudioState.activeTool === 'seam') return;
+        if (!Doc || StudioState.activeTool === 'seam') return;
         const Rect = CanvasEl.getBoundingClientRect();
         const Sx = E.clientX - Rect.left, Sy = E.clientY - Rect.top;
-        const Hit = Canvas2D.HitTest(Sx, Sy, {
-            surface: Doc.surface, islands: Doc.islands, mode: 'edge', activeTool: StudioState.activeTool, udimTiles: Doc.udimTiles
-        });
-        if (Hit?.kind === 'edge')
+        if (StudioState.selectionMode === 'edge')
         {
-            const Cnt = Doc.surface.SelectUvEdgeLoop(Hit.uvA, Hit.uvB, Doc.islands, E.shiftKey);
-            Toast(`UV Edge Loop: ${Cnt} edges`);
-            SyncAllViews(true);
+            const Hit = Canvas2D.HitTest(Sx, Sy, {
+                surface: Doc.surface, islands: Doc.islands, mode: 'edge', activeTool: StudioState.activeTool, udimTiles: Doc.udimTiles
+            });
+            if (Hit?.kind === 'edge')
+            {
+                const Cnt = Doc.surface.SelectUvEdgeLoop(Hit.uvA, Hit.uvB, Doc.islands, E.shiftKey);
+                Toast(`UV Edge Loop: ${Cnt} edges`);
+                SyncAllViews(true);
+            }
+            return;
+        }
+        if (StudioState.selectionMode === 'face' || StudioState.selectionMode === 'island')
+        {
+            const Hit = Canvas2D.HitTest(Sx, Sy, {
+                surface: Doc.surface, islands: Doc.islands, mode: 'island', activeTool: StudioState.activeTool, udimTiles: Doc.udimTiles
+            });
+            if (Hit?.islandId !== undefined)
+            {
+                Doc.surface.SelectIsland(Hit.islandId, E.shiftKey, Doc.islands);
+                Toast(`Linked UV Island selected`);
+                SyncAllViews(true);
+            }
         }
     });
 
@@ -1754,17 +2114,19 @@ function SetupCanvas2DInteraction()
             }
         }
 
-        // Panning: Middle Mouse, Right Mouse drag (short RMB click in edge mode opens Edge Menu!), or Alt+Left Mouse drag (short Alt+Click picks Edge Loop!)
+        // Panning: Middle Mouse, Right Mouse drag (short RMB click in edge mode opens Edge Menu!), or Alt+Left Mouse drag (short Alt+Click picks Edge/Face/Vertex Loop!)
         if (E.button === 1 || E.button === 2 || (E.button === 0 && E.altKey))
         {
             DragAction = {
                 kind: 'pan',
                 lastX: Sx,
-                lastY: Sy,
                 startX: Sx,
+                lastY: Sy,
                 startY: Sy,
                 button: E.button,
                 altClickEdge: E.button === 0 && E.altKey && (StudioState.selectionMode === 'edge' || StudioState.activeTool === 'seam'),
+                altClickFace: E.button === 0 && E.altKey && StudioState.selectionMode === 'face' && StudioState.activeTool !== 'seam',
+                altClickVertex: E.button === 0 && E.altKey && StudioState.selectionMode === 'vertex' && StudioState.activeTool !== 'seam',
                 shiftKey: E.shiftKey,
                 clientX: E.clientX,
                 clientY: E.clientY
@@ -1960,9 +2322,40 @@ function SetupCanvas2DInteraction()
                     }
                 }
             }
+            else if (Dist < 5 && DragAction.altClickFace)
+            {
+                const Doc = ActiveDoc();
+                const Hit = Canvas2D.HitTest(DragAction.startX, DragAction.startY, {
+                    surface: Doc.surface, islands: Doc.islands, mode: 'face', activeTool: StudioState.activeTool, udimTiles: Doc.udimTiles
+                });
+                if (Hit?.kind === 'face')
+                {
+                    const Cnt = Doc.surface.SelectFaceLoop3D(Hit.faceIndex, Hit.edgeVa, Hit.edgeVb, DragAction.shiftKey, Doc.islands);
+                    Toast(`Face Loop: ${Cnt} faces`);
+                    SyncAllViews(true);
+                }
+            }
+            else if (Dist < 5 && DragAction.altClickVertex)
+            {
+                const Doc = ActiveDoc();
+                const Hit = Canvas2D.HitTest(DragAction.startX, DragAction.startY, {
+                    surface: Doc.surface, islands: Doc.islands, mode: 'edge', activeTool: StudioState.activeTool, udimTiles: Doc.udimTiles
+                });
+                if (Hit?.kind === 'edge')
+                {
+                    const Cnt = Doc.surface.SelectUvEdgeLoop(Hit.uvA, Hit.uvB, Doc.islands, DragAction.shiftKey);
+                    Doc.surface.SyncSelectionsFromMode('edge', Doc.islands);
+                    Toast(`Vertex Loop (${Cnt} edges)`);
+                    SyncAllViews(true);
+                }
+            }
             else if (Dist < 5 && DragAction.button === 2 && (StudioState.selectionMode === 'edge' || StudioState.activeTool === 'seam'))
             {
                 OpenEdgeSeamMenu(DragAction.clientX, DragAction.clientY);
+            }
+            else if (Dist < 5 && DragAction.button === 2)
+            {
+                OpenSelectMenu(DragAction.clientX, DragAction.clientY);
             }
             DragAction = null;
             return;
@@ -2025,8 +2418,17 @@ function SetupCanvas2DInteraction()
 
 function ApplyHitSelection(Doc, Hit, Additive, Event = null)
 {
-    if (Hit.kind === 'island') Doc.surface.SelectIsland(Hit.islandId, Additive);
-    else if (Hit.kind === 'face') Doc.surface.SelectFace(Hit.faceIndex, Additive);
+    if (Hit.kind === 'island') Doc.surface.SelectIsland(Hit.islandId, Additive, Doc.islands);
+    else if (Hit.kind === 'face')
+    {
+        if (Event?.ctrlKey && !Event?.altKey && Doc.surface.activeFace != null)
+        {
+            const Cnt = Doc.surface.SelectShortestFacePath3D(Doc.surface.activeFace, Hit.faceIndex, Additive, Doc.islands);
+            Toast(`Shortest Face Path: ${Cnt} faces`);
+            return;
+        }
+        Doc.surface.SelectFace(Hit.faceIndex, Additive, Doc.islands);
+    }
     else if (Hit.kind === 'edge')
     {
         if (Event?.ctrlKey && !Event?.altKey && Doc.surface.activeEdgeUV)
@@ -2047,9 +2449,25 @@ function ApplyHitSelection(Doc, Hit, Additive, Event = null)
     }
     else if (Hit.kind === 'vertex')
     {
+        let V3 = null;
+        for (const F of Doc.surface.faces)
+        {
+            for (const C of F.corners) { if (C.uv === Hit.uvIndex) { V3 = C.v; break; } }
+            if (V3 !== null) break;
+        }
+        if (Event?.ctrlKey && !Event?.altKey && Doc.surface.activeVertex3D != null && V3 !== null)
+        {
+            const Cnt = Doc.surface.SelectShortestVertexPath3D(Doc.surface.activeVertex3D, V3, Additive, Doc.islands);
+            Toast(`Shortest Vertex Path: ${Cnt} verts`);
+            return;
+        }
         if (!Additive) Doc.surface.ClearSelection();
         if (Additive && Doc.surface.selectedUVs.has(Hit.uvIndex)) Doc.surface.selectedUVs.delete(Hit.uvIndex);
-        else Doc.surface.selectedUVs.add(Hit.uvIndex);
+        else
+        {
+            Doc.surface.selectedUVs.add(Hit.uvIndex);
+            if (V3 !== null) Doc.surface.activeVertex3D = V3;
+        }
         Doc.surface.SyncSelectionsFromMode('vertex', Doc.islands);
     }
 }
@@ -2138,10 +2556,13 @@ function SetupKeyboardShortcuts()
             return;
         }
         const EdgeMenu = document.getElementById('edge-seam-menu');
-        if (EdgeMenu && !EdgeMenu.hidden && E.key === 'Escape')
+        const SelMenu = document.getElementById('select-menu');
+        const SimMenu = document.getElementById('select-similar-menu');
+        if (E.key === 'Escape' && ((EdgeMenu && !EdgeMenu.hidden) || (SelMenu && !SelMenu.hidden) || (SimMenu && !SimMenu.hidden)))
         {
             E.preventDefault();
-            EdgeMenu.hidden = true;
+            if (EdgeMenu) EdgeMenu.hidden = true;
+            CloseAllSelectMenus();
             return;
         }
         const Doc = ActiveDoc();
@@ -2209,6 +2630,7 @@ function SetupKeyboardShortcuts()
         // Undo / Redo
         if (Mod && K === 'z' && !E.shiftKey) { E.preventDefault(); if (Doc.surface.Undo()) SyncAllViews(true); return; }
         if ((Mod && E.shiftKey && K === 'z') || (Mod && K === 'y')) { E.preventDefault(); if (Doc.surface.Redo()) SyncAllViews(true); return; }
+        if (Mod && E.shiftKey && K === 'f') { E.preventDefault(); RunSelectOp('linked-flat'); return; }
         if (Mod && K === 'f') { E.preventDefault(); document.getElementById('outliner-search').focus(); return; }
 
         // Selection Modes 1-4
@@ -2229,6 +2651,12 @@ function SetupKeyboardShortcuts()
             return;
         }
         if (Mod && K === 'i') { E.preventDefault(); Doc.surface.InvertSelection(StudioState.selectionMode, Doc.islands); SyncAllViews(true); return; }
+        if (E.shiftKey && !Mod && K === 'g')
+        {
+            E.preventDefault();
+            OpenSelectSimilarMenu(LastPointerClient[0], LastPointerClient[1]);
+            return;
+        }
         if (K === 'l')
         {
             E.preventDefault();
@@ -2236,6 +2664,7 @@ function SetupKeyboardShortcuts()
                 surface: Doc.surface, islands: Doc.islands, mode: 'island', udimTiles: Doc.udimTiles
             });
             if (Hit?.islandId !== undefined) Doc.surface.SelectIsland(Hit.islandId, true, Doc.islands);
+            else if (Doc.surface.selectedFaces.size || Doc.surface.selectedUVs.size || Doc.surface.selectedEdges3D.size) Doc.surface.SelectSameUvIsland(E.shiftKey, Doc.islands);
             else Doc.surface.SelectLinked(Doc.islands);
             SyncAllViews(true);
             return;
@@ -2648,11 +3077,55 @@ function InitStudioIconsAndBindings()
         SpawnMenu.style.top = `${R.bottom + 6}px`;
         SpawnMenu.hidden = !SpawnMenu.hidden;
     });
+    document.getElementById('select-menu-btn')?.addEventListener('click', E =>
+    {
+        const Menu = document.getElementById('select-menu');
+        if (!Menu) return;
+        if (!Menu.hidden) { Menu.hidden = true; return; }
+        const R = E.currentTarget.getBoundingClientRect();
+        OpenSelectMenu(R.left, R.bottom + 6);
+    });
+    document.querySelectorAll('#select-menu [data-sel-op]').forEach(Btn =>
+    {
+        Btn.addEventListener('click', () =>
+        {
+            const Op = Btn.dataset.selOp;
+            if (Op === 'open-similar')
+            {
+                const R = document.getElementById('select-menu-btn')?.getBoundingClientRect();
+                CloseAllSelectMenus();
+                OpenSelectSimilarMenu(R ? R.left : LastPointerClient[0], R ? R.bottom + 6 : LastPointerClient[1]);
+                return;
+            }
+            CloseAllSelectMenus();
+            RunSelectOp(Op);
+        });
+    });
+    document.getElementById('sel-random-apply-btn')?.addEventListener('click', () =>
+    {
+        const Pct = Math.max(1, Math.min(99, Number(document.getElementById('sel-random-ratio-input')?.value) || 50));
+        CloseAllSelectMenus();
+        RunSelectOp('random', { ratio: Pct / 100 });
+    });
+    document.getElementById('sim-tol-input')?.addEventListener('change', E =>
+    {
+        const Pct = Math.max(1, Math.min(100, Number(E.target.value) || 14));
+        StudioState.selectSimilarTol = Pct / 100;
+    });
+    document.getElementById('sim-angle-input')?.addEventListener('change', E =>
+    {
+        StudioState.selectSimilarAngle = Math.max(1, Math.min(90, Number(E.target.value) || 15));
+    });
+
     document.addEventListener('pointerdown', E =>
     {
         if (!SpawnMenu.hidden && !SpawnMenu.contains(E.target) && E.target.id !== 'spawn-tab-btn') SpawnMenu.hidden = true;
         const EdgeMenu = document.getElementById('edge-seam-menu');
         if (EdgeMenu && !EdgeMenu.hidden && !EdgeMenu.contains(E.target) && E.target.id !== 'op-edge-menu') EdgeMenu.hidden = true;
+        const SelMenu = document.getElementById('select-menu');
+        if (SelMenu && !SelMenu.hidden && !SelMenu.contains(E.target) && E.target.id !== 'select-menu-btn') SelMenu.hidden = true;
+        const SimMenu = document.getElementById('select-similar-menu');
+        if (SimMenu && !SimMenu.hidden && !SimMenu.contains(E.target) && E.target.id !== 'select-menu-btn') SimMenu.hidden = true;
     });
 
     // Import OBJ & Custom UDIM Texture
@@ -2761,16 +3234,29 @@ function Bootstrap()
 {
     Canvas2D = new UVCanvas2D(document.getElementById('uv-canvas-2d'));
     Viewport3D = new UVViewport3D(document.getElementById('mesh-viewport-mount'), {
-        onPickFace: (FaceIndex, Additive) =>
+        onPickFace: (FaceIndex, Additive, { loop = false, path = false, island = false, edgeVa = null, edgeVb = null } = {}) =>
         {
             const Doc = ActiveDoc();
             if (!StudioState.syncSelection) return;
-            if (StudioState.selectionMode === 'island')
+            if (island || StudioState.selectionMode === 'island')
             {
                 const Isl = Doc.islands.find(I => I.faceIndices.includes(FaceIndex));
-                if (Isl) Doc.surface.SelectIsland(Isl.id, Additive);
+                if (Isl) Doc.surface.SelectIsland(Isl.id, Additive, Doc.islands);
+                Toast(`Linked UV Island selected`);
             }
-            else Doc.surface.SelectFace(FaceIndex, Additive);
+            else if (loop)
+            {
+                const Cnt = Doc.surface.SelectFaceLoop3D(FaceIndex, edgeVa, edgeVb, Additive, Doc.islands);
+                LogEvent('SEL', `Selected 3D face loop (${Cnt} faces)`);
+                Toast(`3D Face Loop: ${Cnt} faces`);
+            }
+            else if (path && Doc.surface.activeFace != null)
+            {
+                const Cnt = Doc.surface.SelectShortestFacePath3D(Doc.surface.activeFace, FaceIndex, Additive, Doc.islands);
+                LogEvent('SEL', `Selected shortest face path (${Cnt} faces)`);
+                Toast(`Shortest Face Path: ${Cnt} faces`);
+            }
+            else Doc.surface.SelectFace(FaceIndex, Additive, Doc.islands);
             SyncAllViews(true);
         },
         onPickEdge: (Va, Vb, { additive = false, loop = false, ring = false, path = false } = {}) =>
@@ -2802,19 +3288,34 @@ function Bootstrap()
             }
             SyncAllViews(true);
         },
-        onPickVertex: (Vert3D, { additive = false } = {}) =>
+        onPickVertex: (Vert3D, { additive = false, loop = false, path = false, edgeVa = null, edgeVb = null } = {}) =>
         {
             const Doc = ActiveDoc();
             if (!Doc) return;
-            if (!additive) Doc.surface.ClearSelection();
-            for (const F of Doc.surface.faces)
+            if (loop && edgeVa != null && edgeVb != null)
             {
-                for (const C of F.corners)
-                {
-                    if (C.v === Vert3D) Doc.surface.selectedUVs.add(C.uv);
-                }
+                const Cnt = Doc.surface.SelectEdgeLoop3D(edgeVa, edgeVb, additive, Doc.islands);
+                Doc.surface.SyncSelectionsFromMode('vertex', Doc.islands);
+                Toast(`3D Vertex Loop (${Cnt} edges)`);
             }
-            Doc.surface.SyncSelectionsFromMode('vertex', Doc.islands);
+            else if (path && Doc.surface.activeVertex3D != null)
+            {
+                const Cnt = Doc.surface.SelectShortestVertexPath3D(Doc.surface.activeVertex3D, Vert3D, additive, Doc.islands);
+                Toast(`Shortest Vertex Path: ${Cnt} verts`);
+            }
+            else
+            {
+                if (!additive) Doc.surface.ClearSelection();
+                for (const F of Doc.surface.faces)
+                {
+                    for (const C of F.corners)
+                    {
+                        if (C.v === Vert3D) Doc.surface.selectedUVs.add(C.uv);
+                    }
+                }
+                Doc.surface.activeVertex3D = Vert3D;
+                Doc.surface.SyncSelectionsFromMode('vertex', Doc.islands);
+            }
             SyncAllViews(true);
         },
         onToggleEdgeSeam: (Va, Vb, { loop = false } = {}) =>

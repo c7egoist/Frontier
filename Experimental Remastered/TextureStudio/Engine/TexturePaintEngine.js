@@ -884,6 +884,52 @@ export function featherMaskPixels(pixels, res, passes = 2) {
   return pixels;
 }
 
+export function createMaterialLayerOverridesFromPreset(m, res = PAINT_DEFAULT_RES) {
+  const src = m || {};
+  const filmNm = src.filmThickness ?? 380;
+  const iridThickNorm = Number.isFinite(filmNm) ? Math.max(0, Math.min(1, filmNm > 2 ? filmNm / 1000 : filmNm)) : 0.45;
+  const extVals = createDefaultExtendedValues({
+    normal: src.normalStrength ?? 0.85,
+    ao: src.aoIntensity ?? 1.0,
+    opacity: src.opacity ?? 1.0,
+    emissive: src.emissionColor || "#000000",
+    emissiveIntensity: src.emissionStrength ?? 0.0,
+    clearcoat: src.coat ?? 0.0,
+    coatRoughness: src.coatRoughness ?? 0.08,
+    sheen: src.sheen ?? 0.0,
+    sheenRoughness: src.sheenRoughness ?? 0.45,
+    sheenColor: src.sheenColor || "#ffffff",
+    specular: src.specular ?? 1.0,
+    specularColor: src.specularColor || "#ffffff",
+    anisotropy: src.anisotropy ?? 0.0,
+    iridescence: src.iridescence ?? 0.0,
+    iridescenceThickness: iridThickNorm,
+    transmission: src.translucency ?? src.transmission ?? 0.0,
+    thickness: Math.max(0, Math.min(1, src.depth ?? 0.0)),
+    attenuationColor: src.attenuationColor || "#ffffff",
+  });
+  return {
+    res,
+    name: src.name || "Material Layer",
+    channels: createDefaultChannelMap(true),
+    extValues: { ...extVals },
+    material: {
+      presetId: src.id || "racing-green",
+      presetName: src.name || "Racing Green",
+      presetCategory: src.category || "Material",
+      presetLabel: src.label || "PBR",
+      color: src.color || "#345f42",
+      roughness: src.roughness ?? 0.24,
+      metalness: src.metalness ?? 0.87,
+      height: src.reliefHeight ?? 0.0,
+      extValues: extVals,
+      ...extVals,
+      grainScale: src.flakeScale ? Math.max(4, Math.min(32, src.flakeScale * 22)) : (src.grainScale ?? 10),
+      grainStrength: src.flakes ? Math.max(0.08, Math.min(0.35, src.flakes * 0.22)) : (src.grainStrength ?? 0.08),
+    },
+  };
+}
+
 export function createPaintLayer(kind = "paint", overrides = {}) {
   const res = overrides.res || PAINT_DEFAULT_RES;
   const id = overrides.id || nextArtworkId("tp");
@@ -912,6 +958,7 @@ export function createPaintLayer(kind = "paint", overrides = {}) {
       }),
     ];
   }
+  const defaultCh = createDefaultChannelMap(kind === "material", overrides.channels || {});
   return {
     id,
     kind, // "paint" | "fill" | "material" | "decal" | "generator" | "folder"
@@ -928,7 +975,7 @@ export function createPaintLayer(kind = "paint", overrides = {}) {
     blend: overrides.blend || "Normal",
     opacity: clamp(overrides.opacity ?? 1, 0, 1),
     partFilter: overrides.partFilter ?? -1, // -1 = all parts, 0..N = specific part
-    channels: createDefaultChannelMap(false, overrides.channels || {}),
+    channels: defaultCh,
     channelOpacity: createDefaultChannelOpacities(overrides.channelOpacity || {}),
     channelBlends: createDefaultChannelBlends(overrides.channelBlends || {}),
     extValues: createDefaultExtendedValues(overrides.extValues || {}),

@@ -2656,4 +2656,60 @@ await suite("23. UV Studio <-> Texture Studio Bridge (Controlled Integrator Roun
   assert.equal(studio.getSnapshot().shape, "custom", "Material workspace must switch to custom bridged shape");
 });
 
+await suite("24. Material Library Full PBR Channels in Outliner & 3D + Baked Material Layer Icons (Materials Only)", async () => {
+  const { ALL_PAINT_CHANNEL_ROWS } = await import("./Engine/TexturePaintEngine.js");
+  const studio = globalThis.window.__frontierTextureStudio;
+  const racingGreen = materials.find((m) => m.id === "racing-green");
+  assert(racingGreen, "Racing Green preset must exist in Material Library");
+
+  // 24a. Material Workspace: Racing Green Paint body surface layer exposes ALL 28 PBR surface channels in Authoring + Outliner + Baked Icon
+  const { DeclareMaterialAuthoring } = await import("./Engine/Materials/MaterialSpecification.js");
+  studio.switchWorkspace("material");
+  studio.applyAsset("material", "racing-green");
+  const rgAuth = DeclareMaterialAuthoring(racingGreen);
+  const rgLayer = rgAuth.Layers?.find((l) => l.Model === "surface");
+  assert(rgLayer && rgLayer.Channels.length === 28, `Racing Green surface layer must expose all 28 PBR channels (got ${rgLayer?.Channels?.length})`);
+  assert(rgLayer.Channels.includes("colour") && rgLayer.Channels.includes("iridescence") && rgLayer.Channels.includes("sheenColour"), "Surface channels must include extended PBR channels");
+
+  const mwChPills = [...globalThis.document.querySelectorAll(".mw-outliner-ch-pill")];
+  assert(mwChPills.length >= 28, `Material outliner must render clickable channel pills for all surface channels (found ${mwChPills.length})`);
+  const mwBakedThumbs = [...globalThis.document.querySelectorAll(".mw-mat-baked-thumb")];
+  assert(mwBakedThumbs.length === 1, "Material outliner must render baked shader-ball icon strictly on surface material row (not coat/flakes)");
+  assert(mwBakedThumbs[0].src.startsWith("data:image/png;base64,"), "Material outliner icon must be baked PNG matching Asset Browser");
+  assert(mwBakedThumbs[0].parentNode?.classList?.contains("is-baked-mat"), "Material outliner thumb container must have .is-baked-mat class");
+
+  // 24b. Texture Paint Workspace: Applying Racing Green via Material Library / Bridge enables all 22 PBR channels & baked icon strictly on material layers
+  const { createMaterialLayerOverridesFromPreset } = await import("./Engine/TexturePaintEngine.js");
+  studio.switchWorkspace("paint");
+  const beforeLayers = studio.getSnapshot().layers;
+  const applied = studio.applyAsset("material", "racing-green");
+  assert.equal(applied, true, "studio.applyAsset('material', 'racing-green') must succeed on Texture Paint");
+  const afterLayers = studio.getSnapshot().layers;
+  assert.equal(afterLayers, beforeLayers + 1, "Applying Racing Green must append the new material layer");
+
+  const rgPaintOverrides = createMaterialLayerOverridesFromPreset(racingGreen, 256);
+  const rgPaintLayer = createPaintLayer("material", rgPaintOverrides);
+  const enabledChCount = Object.values(rgPaintLayer.channels || {}).filter(Boolean).length;
+  assert.equal(enabledChCount, ALL_PAINT_CHANNEL_ROWS.length, `Material layer must enable all ${ALL_PAINT_CHANNEL_ROWS.length} PBR channels (got ${enabledChCount})`);
+  assert(Math.abs((rgPaintLayer.material?.extValues?.clearcoat ?? 0) - 0.94) < 0.01, "Racing Green clearcoat 0.94 must transfer to Paint layer material.extValues");
+  assert(Math.abs((rgPaintLayer.material?.extValues?.opacity ?? 1) - 1) < 1e-4, "Opaque Racing Green must keep opacity=1.0 so 3D object renders opaque");
+
+  // Outliner subtitle confirms all 22/22 channels enabled
+  const subs = [...globalThis.document.querySelectorAll(".stack-row-sub")].map((el) => el.textContent);
+  assert(subs.some((s) => s.includes(`MATERIAL`) && s.includes(`${ALL_PAINT_CHANNEL_ROWS.length}/${ALL_PAINT_CHANNEL_ROWS.length} ch`)),
+    `Material layer subtitle must show ${ALL_PAINT_CHANNEL_ROWS.length}/${ALL_PAINT_CHANNEL_ROWS.length} ch (got ${subs.join(" | ")})`);
+
+  // Layer stack thumbnails: baked icon strictly on kind === "material", never on paint/fill/generator/folder!
+  const tpMatThumbs = [...globalThis.document.querySelectorAll(".tp-mat-baked-thumb")];
+  assert(tpMatThumbs.length >= 1, "Material layer row in Texture Paint stack must use baked shader-ball icon (.tp-mat-baked-thumb)");
+  assert(tpMatThumbs[0].src.startsWith("data:image/png;base64,"), "Texture Paint material layer icon must be baked PNG matching Asset Browser");
+  assert(tpMatThumbs[0].parentNode?.classList?.contains("is-baked-mat"), "Material layer thumb container must have .is-baked-mat class");
+  const allTpThumbContainers = [...globalThis.document.querySelectorAll(".tp-layer-thumbnail")];
+  assert(allTpThumbContainers.some((el) => !el.classList.contains("is-baked-mat") && !el.querySelector(".tp-mat-baked-thumb")), "Non-material layers must NOT use baked material icons");
+
+  // Material layer expanded channel pills visible in outliner
+  const expPills = [...globalThis.document.querySelectorAll(".tp-exp-pill-btn")];
+  assert(expPills.length >= ALL_PAINT_CHANNEL_ROWS.length, `Expanded material layer outliner must expose all ${ALL_PAINT_CHANNEL_ROWS.length} channel pills (got ${expPills.length})`);
+});
+
 console.log(`\nALL ${results.length} VALIDATION SUITES PASSED CLEANLY`);

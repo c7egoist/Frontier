@@ -1554,6 +1554,823 @@ export class TopologySurface
         return this.selectedEdges3D.size;
     }
 
+    _FaceGeom(Fi)
+    {
+        const F = this.faces[Fi];
+        const C = F?.corners || [];
+        if (!C.length) return { centroid: [0, 0, 0], area3D: 0, perim3D: 0, areaUV: 0, perimUV: 0 };
+        let Cx = 0, Cy = 0, Cz = 0, Perim3D = 0, PerimUV = 0, AreaUV = 0, Area3D = 0;
+        for (let k = 0; k < C.length; k++)
+        {
+            const P = this.positions[C[k].v];
+            const Pn = this.positions[C[(k + 1) % C.length].v];
+            const U0 = this.uvCoords[C[k].uv];
+            const U1 = this.uvCoords[C[(k + 1) % C.length].uv];
+            Cx += P[0]; Cy += P[1]; Cz += P[2];
+            Perim3D += Math.hypot(Pn[0] - P[0], Pn[1] - P[1], Pn[2] - P[2]);
+            PerimUV += Math.hypot(U1[0] - U0[0], U1[1] - U0[1]);
+            AreaUV += (U0[0] * U1[1] - U1[0] * U0[1]) * 0.5;
+        }
+        const InvN = 1 / C.length;
+        const P0 = this.positions[C[0].v];
+        for (let k = 1; k < C.length - 1; k++)
+        {
+            const Pa = this.positions[C[k].v], Pb = this.positions[C[k + 1].v];
+            const Ax = Pa[0] - P0[0], Ay = Pa[1] - P0[1], Az = Pa[2] - P0[2];
+            const Bx = Pb[0] - P0[0], By = Pb[1] - P0[1], Bz = Pb[2] - P0[2];
+            const Ex = Ay * Bz - Az * By, Ey = Az * Bx - Ax * Bz, Ez = Ax * By - Ay * Bx;
+            Area3D += 0.5 * Math.hypot(Ex, Ey, Ez);
+        }
+        return {
+            centroid: [Cx * InvN, Cy * InvN, Cz * InvN],
+            area3D: Area3D,
+            perim3D: Perim3D,
+            areaUV: Math.abs(AreaUV),
+            perimUV: PerimUV
+        };
+    }
+
+    SelectFaceLoop3D(SeedFaceIndex, EdgeVa = null, EdgeVb = null, Additive = false, Islands = null)
+    {
+        if (SeedFaceIndex == null || !this.faces[SeedFaceIndex]) return 0;
+        const List = Islands || this.ExtractIslands();
+        const Topo = this.BuildEdgeTopology();
+        const Centroids = new Array(this.faces.length);
+        for (let fi = 0; fi < this.faces.length; fi++) Centroids[fi] = this._FaceGeom(fi).centroid;
+
+        const FindNeighborAcrossEdge = (Fi, EKey) =>
+        {
+            const Info = Topo.edges.get(EKey);
+            if (!Info || Info.faces.length !== 2) return -1;
+            return Info.faces[0] === Fi ? Info.faces[1] : Info.faces[0];
+        };
+
+        const FindCornerEdgeIndex = (Fi, Va, Vb) =>
+        {
+            const C = this.faces[Fi].corners;
+            for (let k = 0; k < C.length; k++)
+            {
+                const A = C[k].v, B = C[(k + 1) % C.length].v;
+                if ((A === Va && B === Vb) || (A === Vb && B === Va)) return k;
+            }
+            return -1;
+        };
+
+        const SeedFace = this.faces[SeedFaceIndex];
+        let SeedEdgeIdx = (EdgeVa != null && EdgeVb != null) ? FindCornerEdgeIndex(SeedFaceIndex, EdgeVa, EdgeVb) : -1;
+        if (SeedEdgeIdx < 0)
+        {
+            // Choose first edge with an internal manifold neighbor
+            for (let k = 0; k < SeedFace.corners.length; k++)
+            {
+                const K3 = EdgeKey(SeedFace.corners[k].v, SeedFace.corners[(k + 1) % SeedFace.corners.length].v);
+                if (FindNeighborAcrossEdge(SeedFaceIndex, K3) >= 0) { SeedEdgeIdx = k; break; }
+            }
+            if (SeedEdgeIdx < 0) SeedEdgeIdx = 0;
+        }
+
+        const LoopFaces = new Set([SeedFaceIndex]);
+
+        const WalkStrip = (StartFi, FirstEdgeIdx) =>
+        {
+            const C0 = this.faces[StartFi].corners;
+            const FirstKey = EdgeKey(C0[FirstEdgeIdx].v, C0[(FirstEdgeIdx + 1) % C0.length].v);
+            let PrevFi = StartFi;
+            let CurFi = FindNeighborAcrossEdge(StartFi, FirstKey);
+            let EnteredKey = FirstKey;
+
+            for (let step = 0; step < 2048 && CurFi >= 0 && !LoopFaces.has(CurFi); step++)
+            {
+                const CurFace = this.faces[CurFi];
+                const N0 = this.faceNormals[PrevFi], N1 = this.faceNormals[CurFi];
+                const DihedralDot = N0[0] * N1[0] + N0[1] * N1[1] + N0[2] * N1[2];
+                if (DihedralDot < 0.6) break; // stop at sharp > ~53° bends
+
+                LoopFaces.add(CurFi);
+                const C = CurFace.corners;
+                if (C.length === 4)
+                {
+                    let EnterK = -1;
+                    for (let k = 0; k < 4; k++)
+                    {
+                        if (EdgeKey(C[k].v, C[(k + 1) % 4].v) === EnteredKey) { EnterK = k; break; }
+                    }
+                    if (EnterK < 0) break;
+                    const OutK = (EnterK + 2) % 4;
+                    const OutKey = EdgeKey(C[OutK].v, C[(OutK + 1) % 4].v);
+                    if (this.seams.has(OutKey)) break;
+                    const NextFi = FindNeighborAcrossEdge(CurFi, OutKey);
+                    PrevFi = CurFi;
+                    CurFi = NextFi;
+                    EnteredKey = OutKey;
+                    continue;
+                }
+
+                // Triangle / n-gon directional strip follower
+                const Pc = Centroids[PrevFi], Cc = Centroids[CurFi];
+                const Dx = Cc[0] - Pc[0], Dy = Cc[1] - Pc[1], Dz = Cc[2] - Pc[2];
+                const DLen = Math.hypot(Dx, Dy, Dz) || 1;
+                let BestFi = -1, BestKey = null, BestScore = 0.35;
+                for (let k = 0; k < C.length; k++)
+                {
+                    const OutKey = EdgeKey(C[k].v, C[(k + 1) % C.length].v);
+                    if (OutKey === EnteredKey || this.seams.has(OutKey)) continue;
+                    const CandFi = FindNeighborAcrossEdge(CurFi, OutKey);
+                    if (CandFi < 0 || LoopFaces.has(CandFi)) continue;
+                    const Nc = Centroids[CandFi];
+                    const Sx = Nc[0] - Cc[0], Sy = Nc[1] - Cc[1], Sz = Nc[2] - Cc[2];
+                    const SLen = Math.hypot(Sx, Sy, Sz) || 1;
+                    const Align = (Dx * Sx + Dy * Sy + Dz * Sz) / (DLen * SLen);
+                    if (Align > BestScore)
+                    {
+                        BestScore = Align;
+                        BestFi = CandFi;
+                        BestKey = OutKey;
+                    }
+                }
+                if (BestFi < 0) break;
+                PrevFi = CurFi;
+                CurFi = BestFi;
+                EnteredKey = BestKey;
+            }
+        };
+
+        // Forward across chosen edge, and backward across opposite edge (quad) or best opposing edge (tri)
+        WalkStrip(SeedFaceIndex, SeedEdgeIdx);
+        if (SeedFace.corners.length === 4)
+        {
+            WalkStrip(SeedFaceIndex, (SeedEdgeIdx + 2) % 4);
+        }
+        else
+        {
+            const SeedK3 = EdgeKey(SeedFace.corners[SeedEdgeIdx].v, SeedFace.corners[(SeedEdgeIdx + 1) % SeedFace.corners.length].v);
+            const FwdFi = FindNeighborAcrossEdge(SeedFaceIndex, SeedK3);
+            if (FwdFi >= 0)
+            {
+                const Sc = Centroids[SeedFaceIndex], Fc = Centroids[FwdFi];
+                const Bx = Sc[0] - Fc[0], By = Sc[1] - Fc[1], Bz = Sc[2] - Fc[2];
+                const BLen = Math.hypot(Bx, By, Bz) || 1;
+                let BackIdx = -1, BestDot = 0.15;
+                for (let k = 0; k < SeedFace.corners.length; k++)
+                {
+                    if (k === SeedEdgeIdx) continue;
+                    const K3 = EdgeKey(SeedFace.corners[k].v, SeedFace.corners[(k + 1) % SeedFace.corners.length].v);
+                    if (this.seams.has(K3)) continue;
+                    const Cand = FindNeighborAcrossEdge(SeedFaceIndex, K3);
+                    if (Cand < 0 || LoopFaces.has(Cand)) continue;
+                    const Nc = Centroids[Cand];
+                    const Sx = Nc[0] - Sc[0], Sy = Nc[1] - Sc[1], Sz = Nc[2] - Sc[2];
+                    const SLen = Math.hypot(Sx, Sy, Sz) || 1;
+                    const Align = (Bx * Sx + By * Sy + Bz * Sz) / (BLen * SLen);
+                    if (Align > BestDot) { BestDot = Align; BackIdx = k; }
+                }
+                if (BackIdx >= 0) WalkStrip(SeedFaceIndex, BackIdx);
+            }
+        }
+
+        if (!Additive) this.ClearSelection();
+        for (const Fi of LoopFaces) this.selectedFaces.add(Fi);
+        this.activeFace = SeedFaceIndex;
+        this.SyncSelectionsFromMode('face', List);
+        return LoopFaces.size;
+    }
+
+    SelectShortestFacePath3D(SrcFaceIndex, DstFaceIndex, Additive = false, Islands = null)
+    {
+        if (SrcFaceIndex == null || DstFaceIndex == null || !this.faces[SrcFaceIndex] || !this.faces[DstFaceIndex]) return 0;
+        const List = Islands || this.ExtractIslands();
+        const Topo = this.BuildEdgeTopology();
+        const Centroids = new Array(this.faces.length);
+        for (let fi = 0; fi < this.faces.length; fi++) Centroids[fi] = this._FaceGeom(fi).centroid;
+
+        const Dist = new Map([[SrcFaceIndex, 0]]);
+        const Prev = new Map();
+        const Queue = [{ fi: SrcFaceIndex, d: 0 }];
+        const Visited = new Set();
+
+        while (Queue.length)
+        {
+            Queue.sort((A, B) => A.d - B.d);
+            const Cur = Queue.shift();
+            if (Visited.has(Cur.fi)) continue;
+            Visited.add(Cur.fi);
+            if (Cur.fi === DstFaceIndex) break;
+
+            const C = this.faces[Cur.fi].corners;
+            const Pc = Centroids[Cur.fi];
+            const N0 = this.faceNormals[Cur.fi];
+            for (let k = 0; k < C.length; k++)
+            {
+                const EInfo = Topo.edges.get(EdgeKey(C[k].v, C[(k + 1) % C.length].v));
+                if (!EInfo) continue;
+                for (const Nxt of EInfo.faces)
+                {
+                    if (Nxt === Cur.fi || Visited.has(Nxt)) continue;
+                    const Nc = Centroids[Nxt];
+                    const N1 = this.faceNormals[Nxt];
+                    const StepLen = Math.hypot(Nc[0] - Pc[0], Nc[1] - Pc[1], Nc[2] - Pc[2]) + 1e-4;
+                    const Bend = 1 + 1.5 * (1 - Math.max(0, N0[0] * N1[0] + N0[1] * N1[1] + N0[2] * N1[2]));
+                    const CandD = Cur.d + StepLen * Bend;
+                    if (!Dist.has(Nxt) || CandD < Dist.get(Nxt))
+                    {
+                        Dist.set(Nxt, CandD);
+                        Prev.set(Nxt, Cur.fi);
+                        Queue.push({ fi: Nxt, d: CandD });
+                    }
+                }
+            }
+        }
+
+        if (!Additive) this.ClearSelection();
+        const Path = new Set([SrcFaceIndex, DstFaceIndex]);
+        let Trace = DstFaceIndex;
+        while (Prev.has(Trace))
+        {
+            Trace = Prev.get(Trace);
+            Path.add(Trace);
+        }
+        for (const Fi of Path) this.selectedFaces.add(Fi);
+        this.activeFace = DstFaceIndex;
+        this.SyncSelectionsFromMode('face', List);
+        return Path.size;
+    }
+
+    SelectShortestVertexPath3D(SrcVert3D, DstVert3D, Additive = false, Islands = null)
+    {
+        if (SrcVert3D == null || DstVert3D == null) return 0;
+        const List = Islands || this.ExtractIslands();
+        const Topo = this.BuildEdgeTopology();
+
+        const Dist = new Map([[SrcVert3D, 0]]);
+        const Prev = new Map();
+        const Queue = [{ v: SrcVert3D, d: 0 }];
+        const Visited = new Set();
+
+        while (Queue.length)
+        {
+            Queue.sort((A, B) => A.d - B.d);
+            const Cur = Queue.shift();
+            if (Visited.has(Cur.v)) continue;
+            Visited.add(Cur.v);
+            if (Cur.v === DstVert3D) break;
+
+            const Pa = this.positions[Cur.v];
+            for (const EKey of Topo.vertEdges.get(Cur.v) || [])
+            {
+                const E = Topo.edges.get(EKey);
+                if (!E) continue;
+                const Nb = E.va === Cur.v ? E.vb : E.va;
+                if (Visited.has(Nb)) continue;
+                const Pb = this.positions[Nb];
+                const W = Math.hypot(Pb[0] - Pa[0], Pb[1] - Pa[1], Pb[2] - Pa[2]) + 1e-5;
+                const Cand = Cur.d + W;
+                if (!Dist.has(Nb) || Cand < Dist.get(Nb))
+                {
+                    Dist.set(Nb, Cand);
+                    Prev.set(Nb, Cur.v);
+                    Queue.push({ v: Nb, d: Cand });
+                }
+            }
+        }
+
+        const PathV = new Set([SrcVert3D, DstVert3D]);
+        let Trace = DstVert3D;
+        while (Prev.has(Trace))
+        {
+            Trace = Prev.get(Trace);
+            PathV.add(Trace);
+        }
+        if (!Additive) this.ClearSelection();
+        for (const F of this.faces)
+        {
+            for (const C of F.corners)
+            {
+                if (PathV.has(C.v)) this.selectedUVs.add(C.uv);
+            }
+        }
+        this.activeVertex3D = DstVert3D;
+        this.SyncSelectionsFromMode('vertex', List);
+        return PathV.size;
+    }
+
+    SelectLinkedFlatFaces(SeedFaceIndex = null, { angleDeg = 18, respectSeams = true, additive = false, islands = null } = {})
+    {
+        const List = islands || this.ExtractIslands();
+        const Topo = this.BuildEdgeTopology();
+        const Seeds = [];
+        if (SeedFaceIndex != null && this.faces[SeedFaceIndex]) Seeds.push(SeedFaceIndex);
+        else if (this.selectedFaces.size) Seeds.push(...this.selectedFaces);
+        else if (this.activeFace != null && this.faces[this.activeFace]) Seeds.push(this.activeFace);
+        if (!Seeds.length) return 0;
+
+        const CosThresh = Math.cos((Math.max(0.1, angleDeg) * Math.PI) / 180);
+        const Visited = new Set(Seeds);
+        const Queue = [...Seeds];
+
+        while (Queue.length)
+        {
+            const Fi = Queue.shift();
+            const N0 = this.faceNormals[Fi];
+            const C = this.faces[Fi].corners;
+            for (let k = 0; k < C.length; k++)
+            {
+                const K3 = EdgeKey(C[k].v, C[(k + 1) % C.length].v);
+                if (respectSeams && this.seams.has(K3)) continue;
+                const EInfo = Topo.edges.get(K3);
+                if (!EInfo) continue;
+                for (const Adj of EInfo.faces)
+                {
+                    if (Visited.has(Adj)) continue;
+                    const N1 = this.faceNormals[Adj];
+                    if (N0[0] * N1[0] + N0[1] * N1[1] + N0[2] * N1[2] >= CosThresh)
+                    {
+                        Visited.add(Adj);
+                        Queue.push(Adj);
+                    }
+                }
+            }
+        }
+
+        if (!additive) this.ClearSelection();
+        for (const Fi of Visited) this.selectedFaces.add(Fi);
+        this.SyncSelectionsFromMode('face', List);
+        return Visited.size;
+    }
+
+    SelectSameUvIsland(Additive = false, Islands = null)
+    {
+        const List = Islands || this.ExtractIslands();
+        const Touched = new Set();
+        for (const Isl of List)
+        {
+            if (
+                this.selectedIslands.has(Isl.id) ||
+                Isl.faceIndices.some(Fi => this.selectedFaces.has(Fi)) ||
+                Isl.uvIndices.some(U => this.selectedUVs.has(U)) ||
+                Isl.uvEdgeKeys.some(E => this.selectedUVEdges.has(E))
+            )
+            {
+                Touched.add(Isl.id);
+            }
+        }
+        if (!Touched.size && this.activeFace != null)
+        {
+            const ActiveIsl = List.find(I => I.faceIndices.includes(this.activeFace));
+            if (ActiveIsl) Touched.add(ActiveIsl.id);
+        }
+        if (!Touched.size) return 0;
+        if (!Additive) this.ClearSelection();
+        for (const Id of Touched) this.selectedIslands.add(Id);
+        this.SyncSelectionsFromMode('island', List);
+        return this.selectedFaces.size;
+    }
+
+    SelectLoopInnerRegion(Islands = null)
+    {
+        const List = Islands || this.ExtractIslands();
+        const Boundary3D = new Set(this.selectedEdges3D);
+        if (!Boundary3D.size && this.selectedUVEdges.size)
+        {
+            this.SyncEdges3DFromUV();
+            for (const K of this.selectedEdges3D) Boundary3D.add(K);
+        }
+        if (!Boundary3D.size) return 0;
+
+        const Topo = this.BuildEdgeTopology();
+        // Partition mesh faces by stopping at Boundary3D edges
+        const Visited = new Set();
+        const Regions = [];
+        for (let start = 0; start < this.faces.length; start++)
+        {
+            if (Visited.has(start)) continue;
+            const Comp = [];
+            let TouchesBoundary = false;
+            const Queue = [start];
+            Visited.add(start);
+            while (Queue.length)
+            {
+                const Fi = Queue.shift();
+                Comp.push(Fi);
+                const C = this.faces[Fi].corners;
+                for (let k = 0; k < C.length; k++)
+                {
+                    const K3 = EdgeKey(C[k].v, C[(k + 1) % C.length].v);
+                    if (Boundary3D.has(K3)) { TouchesBoundary = true; continue; }
+                    const EInfo = Topo.edges.get(K3);
+                    if (!EInfo) continue;
+                    for (const Adj of EInfo.faces)
+                    {
+                        if (!Visited.has(Adj)) { Visited.add(Adj); Queue.push(Adj); }
+                    }
+                }
+            }
+            if (TouchesBoundary) Regions.push(Comp);
+        }
+
+        if (Regions.length < 2) return 0;
+        Regions.sort((A, B) => A.length - B.length);
+        const Inner = Regions[0];
+        this.ClearSelection();
+        for (const Fi of Inner) this.selectedFaces.add(Fi);
+        this.SyncSelectionsFromMode('face', List);
+        return Inner.length;
+    }
+
+    SelectSimilar(Criterion = 'same_island', { threshold = 0.14, angleDeg = 15, additive = false, islands = null } = {})
+    {
+        const List = islands || this.ExtractIslands();
+        if (Criterion === 'same_island') return this.SelectSameUvIsland(additive, List);
+
+        const FaceToIsland = new Map();
+        const UvToIsland = new Map();
+        for (const Isl of List)
+        {
+            for (const Fi of Isl.faceIndices) FaceToIsland.set(Fi, Isl);
+            for (const U of Isl.uvIndices) UvToIsland.set(U, Isl);
+        }
+        const UdimOfFace = (Fi) =>
+        {
+            const C = this.faces[Fi].corners;
+            let Su = 0, Sv = 0;
+            for (const Cr of C) { Su += this.uvCoords[Cr.uv][0]; Sv += this.uvCoords[Cr.uv][1]; }
+            const Cu = Math.max(0, Math.floor(Su / Math.max(1, C.length)));
+            const Cv = Math.max(0, Math.floor(Sv / Math.max(1, C.length)));
+            return 1001 + Cu + Cv * 10;
+        };
+
+        const FacePartKey = (Fi) =>
+        {
+            const F = this.faces[Fi];
+            if (!F) return 'Default';
+            return (F.materialName && F.materialName !== 'Default') ? F.materialName : (F.partId || 'Default');
+        };
+
+        const Tol = Math.max(1e-4, threshold);
+        const RelMatch = (V, Ref) => Math.abs(V - Ref) / Math.max(1e-6, Math.abs(Ref)) <= Tol;
+        const CosAng = Math.cos((Math.max(0.5, angleDeg) * Math.PI) / 180);
+
+        // Edge criteria
+        if (Criterion.startsWith('edge_'))
+        {
+            const Topo = this.BuildEdgeTopology();
+            const RefKeys = this.selectedEdges3D.size
+                ? [...this.selectedEdges3D]
+                : (this.activeEdge3D ? [this.activeEdge3D] : []);
+            if (!RefKeys.length) return 0;
+
+            const EdgeVec3D = (E) =>
+            {
+                const A = this.positions[E.va], B = this.positions[E.vb];
+                const Dx = B[0] - A[0], Dy = B[1] - A[1], Dz = B[2] - A[2];
+                const L = Math.hypot(Dx, Dy, Dz);
+                return { len: L, dir: L > 1e-8 ? [Dx / L, Dy / L, Dz / L] : [1, 0, 0] };
+            };
+            const EdgeUvLen = (E) =>
+            {
+                let Sum = 0, Cnt = 0;
+                for (const KUv of E.uvEdges)
+                {
+                    const [Ua, Ub] = KUv.split(':').map(Number);
+                    const A = this.uvCoords[Ua], B = this.uvCoords[Ub];
+                    if (A && B) { Sum += Math.hypot(B[0] - A[0], B[1] - A[1]); Cnt++; }
+                }
+                return Cnt ? Sum / Cnt : 0;
+            };
+
+            const Refs = RefKeys.map(K => Topo.edges.get(K)).filter(Boolean);
+            if (!Refs.length) return 0;
+            const Matches = new Set();
+
+            for (const [K3, Info] of Topo.edges)
+            {
+                let Hit = false;
+                if (Criterion === 'edge_seam')
+                {
+                    const Want = Refs.some(R => this.seams.has(R.key));
+                    Hit = this.seams.has(K3) === Want;
+                }
+                else if (Criterion === 'edge_boundary')
+                {
+                    const WantMeshB = Refs.some(R => R.isMeshBoundary);
+                    const WantIslB = Refs.some(R => R.uvEdges.size > 1 || R.isMeshBoundary);
+                    Hit = WantMeshB ? Info.isMeshBoundary : (WantIslB && (Info.uvEdges.size > 1 || Info.isMeshBoundary));
+                }
+                else if (Criterion === 'edge_length_3d')
+                {
+                    const L = EdgeVec3D(Info).len;
+                    Hit = Refs.some(R => RelMatch(L, EdgeVec3D(R).len));
+                }
+                else if (Criterion === 'edge_length_uv')
+                {
+                    const L = EdgeUvLen(Info);
+                    Hit = Refs.some(R => RelMatch(L, EdgeUvLen(R)));
+                }
+                else if (Criterion === 'edge_direction')
+                {
+                    const D = EdgeVec3D(Info).dir;
+                    Hit = Refs.some(R =>
+                    {
+                        const Rd = EdgeVec3D(R).dir;
+                        return Math.abs(D[0] * Rd[0] + D[1] * Rd[1] + D[2] * Rd[2]) >= CosAng;
+                    });
+                }
+                else if (Criterion === 'edge_face_angle')
+                {
+                    Hit = Refs.some(R => Math.abs(Info.dihedralDeg - R.dihedralDeg) <= angleDeg);
+                }
+                if (Hit) Matches.add(K3);
+            }
+
+            if (!additive) this.ClearSelection();
+            for (const K3 of Matches) this.selectedEdges3D.add(K3);
+            this.SyncSelectionsFromMode('edge3d', List);
+            return this.selectedEdges3D.size;
+        }
+
+        // Vertex criteria
+        if (Criterion.startsWith('vert_'))
+        {
+            const Topo = this.BuildEdgeTopology();
+            const RefUVs = [...this.selectedUVs];
+            if (!RefUVs.length) return 0;
+
+            const BoundaryUVs = new Set();
+            for (const [KUv, Fl] of Topo.uvEdgeFaces)
+            {
+                if (Fl.length === 1)
+                {
+                    const [Ua, Ub] = KUv.split(':').map(Number);
+                    BoundaryUVs.add(Ua); BoundaryUVs.add(Ub);
+                }
+            }
+            const UvToV3 = new Map();
+            for (const F of this.faces) for (const C of F.corners) UvToV3.set(C.uv, C.v);
+
+            const RefValences = new Set(RefUVs.map(U => (Topo.vertEdges.get(UvToV3.get(U))?.size || 0)));
+            const WantPin = RefUVs.some(U => this.pinned.has(U));
+            const WantBound = RefUVs.some(U => BoundaryUVs.has(U));
+
+            const Matches = new Set();
+            for (let u = 0; u < this.uvCoords.length; u++)
+            {
+                let Hit = false;
+                if (Criterion === 'vert_valence')
+                {
+                    const V3 = UvToV3.get(u);
+                    if (V3 !== undefined) Hit = RefValences.has(Topo.vertEdges.get(V3)?.size || 0);
+                }
+                else if (Criterion === 'vert_pinned')
+                {
+                    Hit = this.pinned.has(u) === WantPin;
+                }
+                else if (Criterion === 'vert_boundary')
+                {
+                    Hit = BoundaryUVs.has(u) === WantBound;
+                }
+                if (Hit) Matches.add(u);
+            }
+            if (!additive) this.ClearSelection();
+            for (const U of Matches) this.selectedUVs.add(U);
+            this.SyncSelectionsFromMode('vertex', List);
+            return this.selectedUVs.size;
+        }
+
+        // Face / Island criteria
+        this.RecomputeNormals();
+        const RefFaces = this.selectedFaces.size
+            ? [...this.selectedFaces]
+            : (this.activeFace != null && this.faces[this.activeFace] ? [this.activeFace] : []);
+        if (!RefFaces.length) return 0;
+
+        const Geoms = new Array(this.faces.length);
+        for (let fi = 0; fi < this.faces.length; fi++) Geoms[fi] = this._FaceGeom(fi);
+
+        // Compute mesh scale for coplanar distance tolerance
+        let MinX = Infinity, MaxX = -Infinity, MinY = Infinity, MaxY = -Infinity, MinZ = Infinity, MaxZ = -Infinity;
+        for (const P of this.positions)
+        {
+            if (P[0] < MinX) MinX = P[0]; if (P[0] > MaxX) MaxX = P[0];
+            if (P[1] < MinY) MinY = P[1]; if (P[1] > MaxY) MaxY = P[1];
+            if (P[2] < MinZ) MinZ = P[2]; if (P[2] > MaxZ) MaxZ = P[2];
+        }
+        const Diag = Math.max(1e-4, Math.hypot(MaxX - MinX, MaxY - MinY, MaxZ - MinZ));
+        const PlaneEps = Diag * 0.008;
+
+        const RefSides = new Set(RefFaces.map(Fi => this.faces[Fi].corners.length));
+        const RefParts = new Set(RefFaces.map(Fi => FacePartKey(Fi)));
+        const RefUdims = new Set(RefFaces.map(Fi => UdimOfFace(Fi)));
+        const RefIslandCounts = new Set(RefFaces.map(Fi => FaceToIsland.get(Fi)?.faceIndices.length || 1));
+
+        const MatchFaces = new Set();
+        for (let fi = 0; fi < this.faces.length; fi++)
+        {
+            const G = Geoms[fi];
+            const N = this.faceNormals[fi];
+            let Hit = false;
+
+            if (Criterion === 'sides') Hit = RefSides.has(this.faces[fi].corners.length);
+            else if (Criterion === 'same_part') Hit = RefParts.has(FacePartKey(fi));
+            else if (Criterion === 'same_udim') Hit = RefUdims.has(UdimOfFace(fi));
+            else if (Criterion === 'island_faces')
+            {
+                const Cnt = FaceToIsland.get(fi)?.faceIndices.length || 1;
+                Hit = [...RefIslandCounts].some(Rc => RelMatch(Cnt, Rc));
+            }
+            else if (Criterion === 'area_3d') Hit = RefFaces.some(Rf => RelMatch(G.area3D, Geoms[Rf].area3D));
+            else if (Criterion === 'area_uv') Hit = RefFaces.some(Rf => RelMatch(G.areaUV, Geoms[Rf].areaUV));
+            else if (Criterion === 'perimeter_3d') Hit = RefFaces.some(Rf => RelMatch(G.perim3D, Geoms[Rf].perim3D));
+            else if (Criterion === 'perimeter_uv') Hit = RefFaces.some(Rf => RelMatch(G.perimUV, Geoms[Rf].perimUV));
+            else if (Criterion === 'texel_density')
+            {
+                const Td = Math.sqrt(G.areaUV / Math.max(1e-12, G.area3D));
+                Hit = RefFaces.some(Rf => RelMatch(Td, Math.sqrt(Geoms[Rf].areaUV / Math.max(1e-12, Geoms[Rf].area3D))));
+            }
+            else if (Criterion === 'normal')
+            {
+                Hit = RefFaces.some(Rf =>
+                {
+                    const Rn = this.faceNormals[Rf];
+                    return (N[0] * Rn[0] + N[1] * Rn[1] + N[2] * Rn[2]) >= CosAng;
+                });
+            }
+            else if (Criterion === 'coplanar')
+            {
+                Hit = RefFaces.some(Rf =>
+                {
+                    const Rn = this.faceNormals[Rf];
+                    if ((N[0] * Rn[0] + N[1] * Rn[1] + N[2] * Rn[2]) < CosAng) return false;
+                    const Rc = Geoms[Rf].centroid;
+                    const DistPlane = Math.abs((G.centroid[0] - Rc[0]) * Rn[0] + (G.centroid[1] - Rc[1]) * Rn[1] + (G.centroid[2] - Rc[2]) * Rn[2]);
+                    return DistPlane <= PlaneEps;
+                });
+            }
+
+            if (Hit) MatchFaces.add(fi);
+        }
+
+        if (!additive) this.ClearSelection();
+        for (const Fi of MatchFaces) this.selectedFaces.add(Fi);
+        this.SyncSelectionsFromMode('face', List);
+        return this.selectedFaces.size;
+    }
+
+    SelectRandom({ ratio = 0.5, seed = 1337, action = 'select', mode = 'face', additive = false, withinSelection = false, islands = null } = {})
+    {
+        const List = islands || this.ExtractIslands();
+        const ClampRatio = Math.max(0, Math.min(1, ratio));
+        // Deterministic Mulberry32 PRNG
+        let S = (Number(seed) || 1337) >>> 0;
+        const Rand = () =>
+        {
+            S = (S + 0x6D2B79F5) >>> 0;
+            let T = Math.imul(S ^ (S >>> 15), 1 | S);
+            T = (T + Math.imul(T ^ (T >>> 7), 61 | T)) ^ T;
+            return ((T ^ (T >>> 14)) >>> 0) / 4294967296;
+        };
+
+        let Pool = [];
+        if (mode === 'island')
+        {
+            Pool = (withinSelection && this.selectedIslands.size) ? [...this.selectedIslands] : List.map(I => I.id);
+        }
+        else if (mode === 'face')
+        {
+            Pool = (withinSelection && this.selectedFaces.size) ? [...this.selectedFaces] : Array.from({ length: this.faces.length }, (_, i) => i);
+        }
+        else if (mode === 'edge')
+        {
+            if (withinSelection && this.selectedEdges3D.size) Pool = [...this.selectedEdges3D];
+            else
+            {
+                const Topo = this.BuildEdgeTopology();
+                Pool = [...Topo.edges.keys()];
+            }
+        }
+        else
+        {
+            Pool = (withinSelection && this.selectedUVs.size) ? [...this.selectedUVs] : Array.from({ length: this.uvCoords.length }, (_, i) => i);
+        }
+
+        for (let i = Pool.length - 1; i > 0; i--)
+        {
+            const j = Math.floor(Rand() * (i + 1));
+            const Tmp = Pool[i]; Pool[i] = Pool[j]; Pool[j] = Tmp;
+        }
+        const Count = Math.max(0, Math.min(Pool.length, Math.round(Pool.length * ClampRatio)));
+        const Chosen = Pool.slice(0, Count);
+
+        if (action === 'deselect')
+        {
+            for (const Item of Chosen)
+            {
+                if (mode === 'island') this.selectedIslands.delete(Item);
+                else if (mode === 'face') this.selectedFaces.delete(Item);
+                else if (mode === 'edge') this.selectedEdges3D.delete(Item);
+                else this.selectedUVs.delete(Item);
+            }
+        }
+        else
+        {
+            if (!additive) this.ClearSelection();
+            for (const Item of Chosen)
+            {
+                if (mode === 'island') this.selectedIslands.add(Item);
+                else if (mode === 'face') this.selectedFaces.add(Item);
+                else if (mode === 'edge') this.selectedEdges3D.add(Item);
+                else this.selectedUVs.add(Item);
+            }
+        }
+
+        const SyncKey = mode === 'edge' ? 'edge3d' : mode;
+        this.SyncSelectionsFromMode(SyncKey, List);
+        return Chosen.length;
+    }
+
+    CheckerDeselect({ nth = 2, skip = 1, offset = 0, mode = 'face', islands = null } = {})
+    {
+        const List = islands || this.ExtractIslands();
+        const Period = Math.max(2, Math.round(nth));
+        const KeepStep = Math.max(1, Period - Math.max(1, Math.round(skip)));
+        const Off = Math.max(0, Math.round(offset));
+
+        if (mode === 'face' || mode === 'island')
+        {
+            const Sel = this.selectedFaces.size ? [...this.selectedFaces] : Array.from({ length: this.faces.length }, (_, i) => i);
+            if (!Sel.length) return 0;
+            const SelSet = new Set(Sel);
+            const Topo = this.BuildEdgeTopology();
+            const DistMap = new Map();
+            const Seed = (this.activeFace != null && SelSet.has(this.activeFace)) ? this.activeFace : Sel[0];
+            const Queue = [Seed];
+            DistMap.set(Seed, 0);
+            while (Queue.length)
+            {
+                const Cur = Queue.shift();
+                const D = DistMap.get(Cur);
+                const C = this.faces[Cur].corners;
+                for (let k = 0; k < C.length; k++)
+                {
+                    const E = Topo.edges.get(EdgeKey(C[k].v, C[(k + 1) % C.length].v));
+                    if (!E) continue;
+                    for (const Nb of E.faces)
+                    {
+                        if (SelSet.has(Nb) && !DistMap.has(Nb)) { DistMap.set(Nb, D + 1); Queue.push(Nb); }
+                    }
+                }
+            }
+            for (let idx = 0; idx < Sel.length; idx++)
+            {
+                const Fi = Sel[idx];
+                const Step = DistMap.has(Fi) ? DistMap.get(Fi) : idx;
+                if (((Step + Off) % Period) >= KeepStep) this.selectedFaces.delete(Fi);
+                else this.selectedFaces.add(Fi);
+            }
+            this.SyncSelectionsFromMode('face', List);
+            return this.selectedFaces.size;
+        }
+
+        if (mode === 'edge')
+        {
+            const Sel = this.selectedEdges3D.size ? [...this.selectedEdges3D] : [];
+            if (!Sel.length) return 0;
+            const SelSet = new Set(Sel);
+            const Topo = this.BuildEdgeTopology();
+            const DistMap = new Map();
+            const Seed = (this.activeEdge3D && SelSet.has(this.activeEdge3D)) ? this.activeEdge3D : Sel[0];
+            const Queue = [Seed];
+            DistMap.set(Seed, 0);
+            while (Queue.length)
+            {
+                const Cur = Queue.shift();
+                const D = DistMap.get(Cur);
+                const [Va, Vb] = Cur.split(':').map(Number);
+                for (const V of [Va, Vb])
+                {
+                    for (const Nb of Topo.vertEdges.get(V) || [])
+                    {
+                        if (SelSet.has(Nb) && !DistMap.has(Nb)) { DistMap.set(Nb, D + 1); Queue.push(Nb); }
+                    }
+                }
+            }
+            for (let idx = 0; idx < Sel.length; idx++)
+            {
+                const E = Sel[idx];
+                const Step = DistMap.has(E) ? DistMap.get(E) : idx;
+                if (((Step + Off) % Period) >= KeepStep) this.selectedEdges3D.delete(E);
+            }
+            this.SyncSelectionsFromMode('edge3d', List);
+            return this.selectedEdges3D.size;
+        }
+
+        const Sel = this.selectedUVs.size ? [...this.selectedUVs] : Array.from({ length: this.uvCoords.length }, (_, i) => i);
+        for (let idx = 0; idx < Sel.length; idx++)
+        {
+            if (((idx + Off) % Period) >= KeepStep) this.selectedUVs.delete(Sel[idx]);
+        }
+        this.SyncSelectionsFromMode('vertex', List);
+        return this.selectedUVs.size;
+    }
+
     SplitSelectedFaces(Islands)
     {
         // Blender Y: split selected faces into disconnected UV islands

@@ -303,5 +303,98 @@ console.log('6. Verifying Blender Unwrap, Relax, Pin, Seam, Stitch, Weld, Split 
     console.log('   OK: Edge loops, rings, paths, sharp/boundary selection & seam marking/healing passed.');
 }
 
+// 8. Blender-Style Selection Suite: Face Loops, Flat Faces, Loop Inner-Region, Select Similar, Random & Checker Deselect
+{
+    console.log('8. Testing Blender Selection (Face Loops, Similar [Island/Perim/Area/Normal/Coplanar], Random & Checker)...');
+    const BustSpec = SampleAssetCatalog.find(S => S.id === 'bust');
+    const CrateSpec = SampleAssetCatalog.find(S => S.id === 'crate');
+    const VehicleSpec = SampleAssetCatalog.find(S => S.id === 'controlled_integrator');
+
+    const { surface: Bust } = BustSpec.create();
+    const { surface: Crate } = CrateSpec.create();
+    const { surface: Vehicle } = VehicleSpec.create();
+
+    // 8a. 3D Face Loop on quad Bust AND triangulated Controlled Integrator
+    const F0 = Bust.faces[0];
+    const FaceLoopQuad = Bust.SelectFaceLoop3D(0, F0.corners[0].v, F0.corners[1].v, false);
+    assert.ok(FaceLoopQuad >= 3, `Expected quad face loop >= 3 faces on Bust, got ${FaceLoopQuad}`);
+
+    const Vf0 = Vehicle.faces[0];
+    const FaceLoopTri = Vehicle.SelectFaceLoop3D(0, Vf0.corners[0].v, Vf0.corners[1].v, false);
+    assert.ok(FaceLoopTri >= 1, `Expected face loop on triangulated Vehicle, got ${FaceLoopTri}`);
+
+    // 8b. Shortest Face Path & Shortest Vertex Path
+    const FacePath = Bust.SelectShortestFacePath3D(0, Math.min(18, Bust.faces.length - 1), false);
+    assert.ok(FacePath >= 2, `Shortest face path should span >= 2 faces (got ${FacePath})`);
+    const VertPath = Bust.SelectShortestVertexPath3D(Bust.faces[0].corners[0].v, Bust.faces[Math.min(18, Bust.faces.length - 1)].corners[0].v, false);
+    assert.ok(VertPath >= 2, `Shortest vertex path should span >= 2 vertices (got ${VertPath})`);
+
+    // 8c. Linked Flat Faces & Same UV Island
+    const FlatCount = Crate.SelectLinkedFlatFaces(0, { angleDeg: 18, respectSeams: true, additive: false });
+    assert.ok(FlatCount >= 1 && FlatCount <= Crate.faces.length, `Linked flat faces should match coplanar panel (${FlatCount})`);
+    Crate.SelectFace(0, false);
+    const SameIslCount = Crate.SelectSameUvIsland(false);
+    assert.ok(SameIslCount >= 1, `SelectSameUvIsland should select entire island containing seed face (${SameIslCount})`);
+
+    // 8d. Select Similar: UV Perimeter, 3D Perimeter, 3D Area, UV Area, Normal, Coplanar, Sides, Same Part, Edge/Vert criteria
+    const PerimUV = Crate.SelectSimilar('perimeter_uv', { threshold: 0.15 });
+    assert.ok(PerimUV >= 1, 'SelectSimilar perimeter_uv must match similar UV face perimeters');
+    Crate.SelectFace(0, false);
+    const Perim3D = Crate.SelectSimilar('perimeter_3d', { threshold: 0.15 });
+    assert.ok(Perim3D >= 1, 'SelectSimilar perimeter_3d must match similar 3D face perimeters');
+    Crate.SelectFace(0, false);
+    const Area3D = Crate.SelectSimilar('area_3d', { threshold: 0.15 });
+    assert.ok(Area3D >= 1, 'SelectSimilar area_3d must match similar 3D face areas');
+    Crate.SelectFace(0, false);
+    const AreaUV = Crate.SelectSimilar('area_uv', { threshold: 0.15 });
+    assert.ok(AreaUV >= 1, 'SelectSimilar area_uv must match similar UV face areas');
+    Crate.SelectFace(0, false);
+    const Coplanar = Crate.SelectSimilar('coplanar', { angleDeg: 10 });
+    assert.ok(Coplanar >= 1 && Coplanar <= Crate.faces.length, 'SelectSimilar coplanar must match coplanar faces');
+    Crate.SelectFace(0, false);
+    const Normals = Crate.SelectSimilar('normal', { angleDeg: 15 });
+    assert.ok(Normals >= Coplanar, 'SelectSimilar normal should be >= coplanar count');
+    Crate.SelectFace(0, false);
+    assert.ok(Crate.SelectSimilar('sides') >= 1, 'SelectSimilar sides must match polygon sides');
+
+    Vehicle.SelectFace(0, false);
+    const SamePart = Vehicle.SelectSimilar('same_part');
+    assert.ok(SamePart >= 1 && SamePart < Vehicle.faces.length, `SelectSimilar same_part should match vehicle sub-part (${SamePart}/${Vehicle.faces.length})`);
+    Vehicle.SelectFace(0, false);
+    assert.ok(Vehicle.SelectSimilar('same_udim') >= 1, 'SelectSimilar same_udim must select faces in active UDIM');
+
+    // Edge & Vertex Select Similar
+    const E0 = Crate.faces[0].corners;
+    Crate.SelectEdge3D(E0[0].v, E0[1].v, false);
+    assert.ok(Crate.SelectSimilar('edge_length_3d', { threshold: 0.15 }) >= 1, 'SelectSimilar edge_length_3d must match similar edges');
+    Crate.SelectEdge3D(E0[0].v, E0[1].v, false);
+    assert.ok(Crate.SelectSimilar('edge_direction', { angleDeg: 12 }) >= 1, 'SelectSimilar edge_direction must match parallel edges');
+    Crate.ClearSelection();
+    Crate.selectedUVs.add(E0[0].uv);
+    Crate.SyncSelectionsFromMode('vertex');
+    assert.ok(Crate.SelectSimilar('vert_valence') >= 1, 'SelectSimilar vert_valence must match vertices with same valence');
+
+    // 8e. Select Loop Inner-Region (from selected face boundary loop -> selects bounded face(s))
+    Crate.SelectFace(0, false);
+    Crate.SelectBoundaryEdges('selection', false);
+    const InnerCnt = Crate.SelectLoopInnerRegion();
+    assert.ok(InnerCnt >= 1 && InnerCnt < Crate.faces.length, `SelectLoopInnerRegion should enclose inner patch (${InnerCnt})`);
+
+    // 8f. Deterministic Select Random + Checker Deselect
+    const Rand50 = Crate.SelectRandom({ ratio: 0.5, seed: 42, mode: 'face' });
+    assert.equal(Rand50, Math.round(Crate.faces.length * 0.5), 'SelectRandom 50% must select exact half of faces');
+    const Rand50Again = Crate.SelectRandom({ ratio: 0.5, seed: 42, mode: 'face' });
+    assert.equal(Rand50Again, Rand50);
+    const Desel = Crate.SelectRandom({ ratio: 0.5, seed: 7, action: 'deselect', mode: 'face', withinSelection: true });
+    assert.ok(Desel > 0 && Crate.selectedFaces.size < Rand50, 'SelectRandom deselect should remove subset of active faces');
+
+    Crate.SelectAll(Crate.ExtractIslands());
+    const BeforeCheck = Crate.selectedFaces.size;
+    const AfterCheck = Crate.CheckerDeselect({ nth: 2, skip: 1, mode: 'face' });
+    assert.ok(AfterCheck > 0 && AfterCheck < BeforeCheck, `CheckerDeselect should deselect ~half (${AfterCheck}/${BeforeCheck})`);
+
+    console.log('   OK: All Blender selection tools (face loops, flat, inner-region, similar, random & checker) passed.');
+}
+
 console.log('\nALL UV STUDIO VALIDATIONS PASSED SUCCESSFULLY.');
 

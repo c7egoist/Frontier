@@ -884,10 +884,35 @@ export class UVCanvas2D
                 V < Isl.bounds.minV - 0.01 || V > Isl.bounds.maxV + 0.01) continue;
             for (const Fi of Isl.faceIndices)
             {
-                const Poly = surface.faces[Fi].corners.map(C => surface.uvCoords[C.uv]);
+                const Corners = surface.faces[Fi].corners;
+                const Poly = Corners.map(C => surface.uvCoords[C.uv]);
                 if (PointInPoly(U, V, Poly))
                 {
-                    return { kind: mode === 'face' ? 'face' : 'island', faceIndex: Fi, islandId: Isl.id };
+                    let BestEdgeDist = Infinity;
+                    let NearVa = Corners[0].v, NearVb = Corners[1].v;
+                    let NearUa = Corners[0].uv, NearUb = Corners[1].uv;
+                    for (let k = 0; k < Corners.length; k++)
+                    {
+                        const C0 = Corners[k], C1 = Corners[(k + 1) % Corners.length];
+                        const A = surface.uvCoords[C0.uv], B = surface.uvCoords[C1.uv];
+                        const D = PointSegmentDist(U, V, A[0], A[1], B[0], B[1]);
+                        if (D < BestEdgeDist)
+                        {
+                            BestEdgeDist = D;
+                            NearVa = C0.v; NearVb = C1.v;
+                            NearUa = C0.uv; NearUb = C1.uv;
+                        }
+                    }
+                    return {
+                        kind: mode === 'face' ? 'face' : 'island',
+                        faceIndex: Fi,
+                        islandId: Isl.id,
+                        edgeVa: NearVa,
+                        edgeVb: NearVb,
+                        edgeKey3d: EdgeKey(NearVa, NearVb),
+                        uvA: NearUa,
+                        uvB: NearUb
+                    };
                 }
             }
         }
