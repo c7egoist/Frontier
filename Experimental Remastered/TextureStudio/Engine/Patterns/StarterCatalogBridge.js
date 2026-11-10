@@ -574,9 +574,247 @@ export const NOISE_SCALED_STARTERS = [
 
 export const STAMP_STARTERS = [
   {
+    id: "stamp-basic-circle",
+    name: "Solid Circle Disc",
+    group: "Basic Shapes",
+    description: "Clean centered circular decal stamp with subtle enamel gloss relief.",
+    build: () => {
+      const doc = createArtworkDocument("stamp");
+      doc.name = "Solid Circle Disc";
+      doc.layers = [
+        createArtworkLayer("motif", {
+          name: "Solid Disc",
+          transform: { x: 256, y: 256, width: 300, height: 300, rotation: 0 },
+          shape: { motifType: "circle", color: "#eaecef" },
+          surface: { finish: "ink", roughness: 0.38, metalness: 0, height: 0.25, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+        }),
+      ];
+      return doc;
+    },
+  },
+  {
+    id: "stamp-basic-ring",
+    name: "Clean Halo Ring",
+    group: "Basic Shapes",
+    description: "Precision uniform annular ring stamp for port bezels, gauges, and badges.",
+    build: () => {
+      const doc = createArtworkDocument("stamp");
+      doc.name = "Clean Halo Ring";
+      doc.layers = [
+        createArtworkLayer("motif", {
+          name: "Halo Ring",
+          transform: { x: 256, y: 256, width: 320, height: 320, rotation: 0 },
+          shape: { motifType: "ring", innerRatio: 0.68, color: "#dce2eb" },
+          surface: { finish: "foil", roughness: 0.26, metalness: 0.85, height: 0.35, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+        }),
+      ];
+      return doc;
+    },
+  },
+  {
+    id: "stamp-basic-square",
+    name: "Rounded Plate Square",
+    group: "Basic Shapes",
+    description: "Crisp chamfered square placard stamp ready for stenciling labels and panels.",
+    build: () => {
+      const doc = createArtworkDocument("stamp");
+      doc.name = "Rounded Plate Square";
+      doc.layers = [
+        createArtworkLayer("motif", {
+          name: "Rounded Plate",
+          transform: { x: 256, y: 256, width: 290, height: 290, rotation: 0 },
+          shape: { motifType: "roundedRect", cornerRadius: 0.16, color: "#cfd6df", strokeWidth: 8, strokeColor: "#252930" },
+          surface: { finish: "ink", roughness: 0.44, metalness: 0.1, height: 0.3, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+        }),
+      ];
+      return doc;
+    },
+  },
+  {
+    id: "stamp-basic-triangle",
+    name: "Delta Warning Triangle",
+    group: "Basic Shapes",
+    description: "Bold equilateral delta triangle decal for cautionary markers and directionals.",
+    build: () => {
+      const doc = createArtworkDocument("stamp");
+      doc.name = "Delta Warning Triangle";
+      doc.layers = [
+        createArtworkLayer("motif", {
+          name: "Delta Triangle",
+          transform: { x: 256, y: 270, width: 300, height: 275, rotation: 0 },
+          shape: { motifType: "triangle", color: "#f2b838", strokeWidth: 10, strokeColor: "#1d1f24" },
+          surface: { finish: "ink", roughness: 0.42, metalness: 0, height: 0.22, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+        }),
+      ];
+      return doc;
+    },
+  },
+  {
+    id: "stamp-basic-star",
+    name: "Five-Point Badge Star",
+    group: "Basic Shapes",
+    description: "Classic crisp 5-point star emblem with metallic satin finish.",
+    build: () => {
+      const doc = createArtworkDocument("stamp");
+      doc.name = "Five-Point Badge Star";
+      doc.layers = [
+        createArtworkLayer("motif", {
+          name: "Star Emblem",
+          transform: { x: 256, y: 256, width: 310, height: 310, rotation: 0 },
+          shape: { motifType: "star", points: 5, innerRatio: 0.42, color: "#e8c468" },
+          surface: { finish: "foil", roughness: 0.24, metalness: 0.92, height: 0.45, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+        }),
+      ];
+      return doc;
+    },
+  },
+  {
+    id: "stamp-basic-hexagon",
+    name: "Hexagon Fastener Plate",
+    group: "Basic Shapes",
+    description: "Clean 6-sided machined hex shape for industrial hardware and sci-fi panels.",
+    build: () => {
+      const doc = createArtworkDocument("stamp");
+      doc.name = "Hexagon Fastener Plate";
+      doc.layers = [
+        createArtworkLayer("motif", {
+          name: "Hexagon Plate",
+          transform: { x: 256, y: 256, width: 300, height: 300, rotation: 0 },
+          shape: { motifType: "hexagon", color: "#8d99a8", strokeWidth: 8, strokeColor: "#1f242c" },
+          surface: { finish: "foil", roughness: 0.3, metalness: 0.88, height: 0.48, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+        }),
+      ];
+      return doc;
+    },
+  },
+  {
+    id: "stamp-basic-diamond",
+    name: "Precision Diamond Pip",
+    group: "Basic Shapes",
+    description: "Sharp 45-degree geometric diamond alignment marker.",
+    build: () => {
+      const doc = createArtworkDocument("stamp");
+      doc.name = "Precision Diamond Pip";
+      doc.layers = [
+        createArtworkLayer("motif", {
+          name: "Diamond Pip",
+          transform: { x: 256, y: 256, width: 250, height: 250, rotation: 0 },
+          shape: { motifType: "diamond", color: "#58b4ff" },
+          surface: { finish: "ink", roughness: 0.34, metalness: 0.05, height: 0.25, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+        }),
+      ];
+      return doc;
+    },
+  },
+  {
+    id: "stamp-basic-cross",
+    name: "Calibration Plus Cross",
+    group: "Basic Stencils",
+    description: "Clean registration plus-cross stamp for medical, technical, and fiducial placement.",
+    build: () => {
+      const doc = createArtworkDocument("stamp");
+      doc.name = "Calibration Plus Cross";
+      doc.layers = [
+        createArtworkLayer("motif", {
+          name: "Plus Cross",
+          transform: { x: 256, y: 256, width: 300, height: 300, rotation: 0 },
+          shape: { motifType: "cross", innerRatio: 0.26, color: "#eff4cf" },
+          surface: { finish: "ink", roughness: 0.4, metalness: 0, height: 0.22, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+        }),
+      ];
+      return doc;
+    },
+  },
+  {
+    id: "stamp-basic-arrow-chevron",
+    name: "Directional Chevron Stencil",
+    group: "Basic Stencils",
+    description: "Bold single stencil chevron pointer for flow arrows and latch indicators.",
+    build: () => {
+      const doc = createArtworkDocument("stamp");
+      doc.name = "Directional Chevron Stencil";
+      doc.layers = [
+        createArtworkLayer("motif", {
+          name: "Chevron Arrow",
+          transform: { x: 256, y: 256, width: 220, height: 240, rotation: 0 },
+          shape: { motifType: "chevron", color: "#ff7847" },
+          surface: { finish: "ink", roughness: 0.46, metalness: 0, height: 0.2, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+        }),
+      ];
+      return doc;
+    },
+  },
+  {
+    id: "stamp-basic-stripes",
+    name: "Parallel Caution Bars",
+    group: "Basic Stencils",
+    description: "Three parallel angled paint bars for technical hull decals and grip strips.",
+    build: () => {
+      const doc = createArtworkDocument("stamp");
+      doc.name = "Parallel Caution Bars";
+      doc.layers = [
+        createArtworkLayer("motif", {
+          name: "Caution Bars",
+          transform: { x: 256, y: 256, width: 260, height: 36, rotation: -35 },
+          shape: { motifType: "stripe", color: "#e8ecef" },
+          surface: { finish: "ink", roughness: 0.45, metalness: 0, height: 0.18, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+          modifiers: [
+            { ...createDefaultModifier("array-grid"), layout: "grid", columns: 1, rows: 3, spanX: 260, spanY: 165 },
+          ],
+        }),
+      ];
+      return doc;
+    },
+  },
+  {
+    id: "stamp-basic-corners",
+    name: "Corner Frame Bracket",
+    group: "Basic Stencils",
+    description: "Symmetric 4-corner radial framing bracket stencil for UI bays and plates.",
+    build: () => {
+      const doc = createArtworkDocument("stamp");
+      doc.name = "Corner Frame Bracket";
+      doc.layers = [
+        createArtworkLayer("motif", {
+          name: "Corner Lugs",
+          transform: { x: 256, y: 256, width: 76, height: 18, rotation: 0 },
+          shape: { motifType: "chevron", color: "#cbd4e1" },
+          surface: { finish: "ink", roughness: 0.42, metalness: 0.2, height: 0.22, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+          modifiers: [
+            { ...createDefaultModifier("array-radial"), count: 4, radius: 148, rings: 1, startAngle: 45, alignTangent: true },
+          ],
+        }),
+      ];
+      return doc;
+    },
+  },
+  {
+    id: "stamp-basic-rivet-grid",
+    name: "4x4 Fastener Rivet Grid",
+    group: "Basic Stencils",
+    description: "Clean metallic button rivet array with raised dome height and metallic specular.",
+    build: () => {
+      const doc = createArtworkDocument("stamp");
+      doc.name = "4x4 Fastener Rivet Grid";
+      doc.layers = [
+        createArtworkLayer("motif", {
+          name: "Rivet Array",
+          transform: { x: 256, y: 256, width: 40, height: 40, rotation: 0 },
+          shape: { motifType: "circle", color: "#aab4c2", strokeWidth: 4, strokeColor: "#262b33" },
+          surface: { finish: "foil", roughness: 0.28, metalness: 0.92, height: 0.72, enableAlbedo: true, enableRoughness: true, enableMetalness: true, enableHeight: true },
+          modifiers: [
+            { ...createDefaultModifier("array-grid"), layout: "grid", columns: 4, rows: 4, spanX: 280, spanY: 280 },
+          ],
+        }),
+      ];
+      return doc;
+    },
+  },
+  {
     id: "stamp-warning-seal",
     name: "Industrial Warning Seal",
     group: "Stencils & Badges",
+    description: "Industrial cautionary stamp emblem with recessed ring borders.",
     build: () => createArtworkDocument("stamp"),
   },
   {
@@ -795,6 +1033,7 @@ export function listStampStarterCatalog() {
     id: s.id,
     name: s.name,
     group: s.group,
+    description: s.description || "",
     starter: s,
   }));
 }

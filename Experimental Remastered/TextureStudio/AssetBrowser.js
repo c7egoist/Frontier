@@ -15,7 +15,7 @@ import {
 } from "./Engine/Patterns/StarterCatalogBridge.js";
 import { PAINT_MESH_LIST } from "./Engine/TexturePaintEngine.js";
 import { BAKE_STUDY_SHAPES } from "./Engine/BakingEngine.js";
-import { Construct, ConstructGlyph } from "./StudioControls.js";
+import { Construct, ConstructGlyph, Toast } from "./StudioControls.js";
 
 export const WORKSPACE_ASSET_CATEGORY = {
   material: "materials",
@@ -59,6 +59,10 @@ function buildBrushTipSvg(item) {
 }
 
 function buildMeshSvg(id) {
+  if (id === "plane") {
+    const accent = "#8fd4ff";
+    return `<svg viewBox="0 0 64 64"><path d="M12 42L26 18h26L38 42z" fill="${accent}" fill-opacity="0.22" stroke="${accent}" stroke-width="2.2" stroke-linejoin="round"/><path d="M19 30h26M27 18L19 42M41 18L33 42" stroke="${accent}" stroke-opacity="0.55" stroke-width="1.3"/></svg>`;
+  }
   const accent = id === "teapot" ? "#eff4cf" : id === "shaderball" ? "#e8c27a" : id === "torusknot" ? "#9ecfff" : "#a8d8a2";
   return `<svg viewBox="0 0 64 64"><path d="M32 10l18 10v24L32 54 14 44V20z" fill="${accent}" fill-opacity="0.16" stroke="${accent}" stroke-width="2.2" stroke-linejoin="round"/><path d="M32 32l18-12M32 32v22M32 32L14 20" stroke="${accent}" stroke-width="1.8"/></svg>`;
 }
@@ -75,8 +79,12 @@ export function createAssetBrowser(mountEl, appBridge) {
   }
   for (const p of PAINT_MESH_LIST) {
     if (!seenMeshes.has(p.id)) {
+      seenMeshes.add(p.id);
       meshAssets.push({ id: p.id, name: p.label, group: "Paint Meshes", paintId: p.id, bakeId: "teapot" });
     }
+  }
+  if (!seenMeshes.has("plane")) {
+    meshAssets.push({ id: "plane", name: "Flat Plane", group: "Look-Dev Meshes", paintId: "shaderball", bakeId: "teapot", description: "96x96 UV planar look-dev swatch card tilted toward key light." });
   }
 
   const CATEGORIES = [
@@ -94,7 +102,7 @@ export function createAssetBrowser(mountEl, appBridge) {
     family: "All",
     search: "",
     collapsed: false,
-    heightPx: 224,
+    heightPx: 248,
     activeAssetKey: null,
   };
 
@@ -133,20 +141,22 @@ export function createAssetBrowser(mountEl, appBridge) {
   const headRight = Construct("div", "cb-head-right", [searchInp, autoBtn, toggleBtn]);
   head.append(titleEl, catTabsWrap, headRight);
 
-  // Body (Families sidebar + Card Grid)
+  // Body (Families sidebar + Card Grid + Right-Side Asset Inspector)
   const body = Construct("div", "cb-body");
   const familyCol = Construct("div", "cb-families");
   const gridScroll = Construct("div", "cb-grid-scroll");
   const gridEl = Construct("div", "cb-grid");
   gridScroll.append(gridEl);
-  body.append(familyCol, gridScroll);
+  const inspectorCol = Construct("aside", "cb-inspector");
+  inspectorCol.setAttribute("aria-label", "Asset Inspector");
+  body.append(familyCol, gridScroll, inspectorCol);
 
   drawer.append(resizeNotch, head, body);
   mountEl.append(drawer);
 
   // ----------------------------------------------------------------- HEIGHT / COLLAPSE / DRAG NOTCH
   const MIN_H = 38;
-  const DEFAULT_H = 224;
+  const DEFAULT_H = 248;
   function getMaxHeight() {
     return Math.max(260, Math.min(540, Math.round(window.innerHeight * 0.62)));
   }
@@ -320,6 +330,222 @@ export function createAssetBrowser(mountEl, appBridge) {
     };
   }
 
+  const allItemsByKey = new Map();
+  for (const cat of CATEGORIES) {
+    const { items } = getCategoryFamiliesAndItems(cat.id);
+    for (const it of items) allItemsByKey.set(it.key, it);
+  }
+
+  function findItem(kind, id) {
+    for (const it of allItemsByKey.values()) {
+      if (it.assetKind === kind && (it.id === id || it.name === id)) return it;
+    }
+    return null;
+  }
+
+  function createPreviewVisual(item, sizePx = 64) {
+    if (item.assetKind === "material") {
+      const m = item.raw;
+      const sphere = Construct("div", "cb-mat-sphere");
+      const shine = Math.round((1 - Math.min(0.95, m.roughness ?? 0.5)) * 45 + (m.metalness ?? 0) * 28);
+      sphere.style.background = `radial-gradient(circle at 34% 30%, rgba(255,255,255,${0.14 + shine / 135}) 0%, ${m.color || "#888"} 48%, #101216 100%)`;
+      if ((m.emissionStrength || 0) > 0 && m.emissionColor) {
+        sphere.style.boxShadow = `0 0 14px ${m.emissionColor}66, inset -6px -7px 14px rgba(0,0,0,0.55)`;
+      }
+      return sphere;
+    }
+    const wrap = document.createElement("div");
+    wrap.style.cssText = "display:flex;align-items:center;justify-content:center;width:100%;height:100%;";
+    if (item.assetKind === "pattern") wrap.innerHTML = getArtworkPreviewSvg(item.raw, "pattern", sizePx);
+    else if (item.assetKind === "stamp") wrap.innerHTML = getArtworkPreviewSvg(item.raw, "stamp", sizePx);
+    else if (item.assetKind === "brush") wrap.innerHTML = buildBrushTipSvg(item.raw);
+    else wrap.innerHTML = buildMeshSvg(item.id);
+    return wrap;
+  }
+
+  function collectSwatches(item) {
+    const out = [];
+    const seen = new Set();
+    const push = (hex) => {
+      if (typeof hex !== "string" || !hex.startsWith("#")) return;
+      const norm = hex.toLowerCase();
+      if (seen.has(norm)) return;
+      seen.add(norm);
+      out.push(hex);
+    };
+    if (item.assetKind === "material") {
+      const m = item.raw || {};
+      push(m.color);
+      push(m.secondaryColor);
+      push(m.tertiaryColor);
+      if (Array.isArray(m.colors)) m.colors.slice(0, 4).forEach(push);
+      if ((m.emissionStrength || 0) > 0) push(m.emissionColor);
+    } else if (item.assetKind === "brush") {
+      push(item.raw?.color);
+    }
+    return out.slice(0, 6);
+  }
+
+  function buildInspectorProps(item) {
+    if (item.assetKind === "material") {
+      const m = item.raw || {};
+      const props = [
+        ["Roughness", `${Math.round((m.roughness ?? 0.5) * 100)}%`],
+        ["Metalness", `${Math.round((m.metalness ?? 0) * 100)}%`],
+        ["Clearcoat", `${Math.round((m.coat ?? 0) * 100)}%`],
+        ["IOR", Number(m.ior ?? 1.5).toFixed(2)],
+      ];
+      if ((m.translucency || 0) > 0) props.push(["Translucency", `${Math.round(m.translucency * 100)}%`]);
+      else if ((m.iridescence || 0) > 0) props.push(["Iridescence", `${Math.round(m.iridescence * 100)}%`]);
+      else if ((m.emissionStrength || 0) > 0) props.push(["Emission", `${Number(m.emissionStrength).toFixed(1)} EV`]);
+      else props.push(["Detail Scale", Number(m.detailScale ?? 1).toFixed(1)]);
+      props.push(["Shader Type", `#${m.type ?? 0}`]);
+      return props;
+    }
+    if (item.assetKind === "pattern") {
+      return [
+        ["Family", item.family],
+        ["Style", item.raw?.subGroup || item.family],
+        ["Format", "Seamless SVG"],
+        ["Channels", "Albedo + PBR"],
+      ];
+    }
+    if (item.assetKind === "stamp") {
+      return [
+        ["Group", item.family],
+        ["Format", "Alpha Decal"],
+        ["Channel Masks", "4 PBR Maps"],
+        ["Use", "Stamp / Paint"],
+      ];
+    }
+    if (item.assetKind === "brush") {
+      const b = item.raw || {};
+      return [
+        ["Group", item.family],
+        ["Mode", b.tool ? `Tool (${b.tool})` : `Tip (${b.tip})`],
+        ["Hardness", b.hardness !== undefined ? `${Math.round(b.hardness * 100)}%` : "Auto"],
+      ];
+    }
+    const mesh = item.raw || {};
+    return [
+      ["Group", item.family],
+      ["Paint Target", mesh.paintId || "shaderball"],
+      ["Bake Study", mesh.bakeId || "teapot"],
+    ];
+  }
+
+  function renderInspector(selectedItem) {
+    inspectorCol.innerHTML = "";
+    inspectorCol.append(
+      Construct("div", "cb-insp-head", [
+        Construct("span", "cb-insp-kicker", "Asset Inspector"),
+        Construct("span", "cb-insp-badge", selectedItem ? selectedItem.family : "None"),
+      ]),
+    );
+    if (!selectedItem) {
+      inspectorCol.append(Construct("div", "cb-insp-empty", "Select any asset card to inspect properties and actions."));
+      return;
+    }
+
+    const previewBox = Construct("div", "cb-insp-preview");
+    previewBox.append(createPreviewVisual(selectedItem, 64));
+
+    const kindLabel =
+      selectedItem.assetKind === "material"
+        ? selectedItem.raw?.label || `MATERIAL · ${(selectedItem.family || "").toUpperCase()}`
+        : `${selectedItem.assetKind.toUpperCase()} · ${(selectedItem.sub || "").toUpperCase()}`;
+
+    const metaCol = Construct("div", "cb-insp-meta", [
+      Construct("div", "cb-insp-title", selectedItem.name),
+      Construct("div", "cb-insp-sub", kindLabel),
+    ]);
+
+    const swatches = collectSwatches(selectedItem);
+    if (swatches.length) {
+      const swRow = Construct("div", "cb-insp-swatches");
+      for (const hex of swatches) {
+        const sw = Construct("button", "cb-insp-swatch");
+        sw.type = "button";
+        sw.style.background = hex;
+        sw.title = `${hex.toUpperCase()} — Click to copy`;
+        sw.addEventListener("click", () => {
+          try { navigator.clipboard?.writeText(hex.toUpperCase()); } catch {}
+          Toast(`Copied swatch ${hex.toUpperCase()}`);
+        });
+        swRow.append(sw);
+      }
+      metaCol.append(swRow);
+    }
+
+    const hero = Construct("div", "cb-insp-hero", [previewBox, metaCol]);
+    inspectorCol.append(hero);
+
+    const descText =
+      selectedItem.raw?.description ||
+      (selectedItem.assetKind === "material"
+        ? `${selectedItem.name} procedural PBR shader ready for Look-Dev inspection and baking.`
+        : selectedItem.assetKind === "pattern"
+          ? `Tileable procedural vector pattern from ${selectedItem.family}.`
+          : selectedItem.assetKind === "stamp"
+            ? `Vector decal stamp from ${selectedItem.family} with roughness, metalness & height relief.`
+            : selectedItem.assetKind === "brush"
+              ? `Paint brush tip configured for Frontier Texture Paint.`
+              : `3D preview & bake study geometry (${selectedItem.name}).`);
+    inspectorCol.append(Construct("p", "cb-insp-desc", descText));
+
+    const propsGrid = Construct("div", "cb-insp-props");
+    for (const [k, v] of buildInspectorProps(selectedItem)) {
+      propsGrid.append(
+        Construct("div", "cb-insp-prop", [
+          Construct("span", null, k),
+          Construct("strong", null, String(v)),
+        ]),
+      );
+    }
+    inspectorCol.append(propsGrid);
+
+    const actionsRow = Construct("div", "cb-insp-actions");
+    const applyBtn = Construct("button", "cb-insp-btn primary", "Apply to Stage");
+    applyBtn.type = "button";
+    applyBtn.addEventListener("click", () => {
+      appBridge.applyAssetToActiveWorkspace?.(buildPayloadForItem(selectedItem), { source: "inspector" });
+    });
+    actionsRow.append(applyBtn);
+
+    if (selectedItem.assetKind === "material") {
+      const paintBtn = Construct("button", "cb-insp-btn", "Send to Paint");
+      paintBtn.type = "button";
+      paintBtn.addEventListener("click", () => {
+        appBridge.sendMaterialToPaint?.(selectedItem.raw);
+      });
+      actionsRow.append(paintBtn);
+    } else if (selectedItem.assetKind === "pattern") {
+      const matBtn = Construct("button", "cb-insp-btn", "Tile on Material");
+      matBtn.type = "button";
+      matBtn.addEventListener("click", () => {
+        appBridge.openPatternAssetInMaterial?.(selectedItem.raw);
+      });
+      actionsRow.append(matBtn);
+    } else if (selectedItem.assetKind === "stamp") {
+      const paintBtn = Construct("button", "cb-insp-btn", "Use in Paint");
+      paintBtn.type = "button";
+      paintBtn.addEventListener("click", () => {
+        appBridge.openStampAssetInPaint?.(selectedItem.raw);
+      });
+      actionsRow.append(paintBtn);
+    } else if (selectedItem.assetKind === "mesh") {
+      const bakeBtn = Construct("button", "cb-insp-btn", "Open Bake");
+      bakeBtn.type = "button";
+      bakeBtn.addEventListener("click", () => {
+        appBridge.switchWorkspace?.("bake");
+        requestAnimationFrame(() => appBridge.applyAssetToActiveWorkspace?.(buildPayloadForItem(selectedItem)));
+      });
+      actionsRow.append(bakeBtn);
+    }
+
+    inspectorCol.append(actionsRow);
+  }
+
   function render() {
     // 1. Category tabs
     catTabsWrap.innerHTML = "";
@@ -384,6 +610,10 @@ export function createAssetBrowser(mountEl, appBridge) {
       );
     }).slice(0, 120);
 
+    if (!state.activeAssetKey && (filtered[0] || items[0])) {
+      state.activeAssetKey = (filtered[0] || items[0]).key;
+    }
+
     gridEl.innerHTML = "";
     for (const item of filtered) {
       const card = Construct("button", "cb-card" + (state.activeAssetKey === item.key ? " active" : ""));
@@ -394,21 +624,7 @@ export function createAssetBrowser(mountEl, appBridge) {
       card.title = `${item.name} (${item.family}) — Click to apply or drag onto canvas`;
 
       const thumb = Construct("div", "cb-thumb");
-      if (item.assetKind === "material") {
-        const m = item.raw;
-        const sphere = Construct("div", "cb-mat-sphere");
-        const shine = Math.round((1 - Math.min(0.95, m.roughness ?? 0.5)) * 45 + (m.metalness ?? 0) * 28);
-        sphere.style.background = `radial-gradient(circle at 34% 30%, rgba(255,255,255,${0.12 + shine / 140}) 0%, ${m.color || "#888"} 48%, #101216 100%)`;
-        thumb.append(sphere);
-      } else if (item.assetKind === "pattern") {
-        thumb.innerHTML = getArtworkPreviewSvg(item.raw, "pattern", 60);
-      } else if (item.assetKind === "stamp") {
-        thumb.innerHTML = getArtworkPreviewSvg(item.raw, "stamp", 60);
-      } else if (item.assetKind === "brush") {
-        thumb.innerHTML = buildBrushTipSvg(item.raw);
-      } else {
-        thumb.innerHTML = buildMeshSvg(item.id);
-      }
+      thumb.append(createPreviewVisual(item, 60));
 
       card.append(
         thumb,
@@ -440,6 +656,14 @@ export function createAssetBrowser(mountEl, appBridge) {
 
       gridEl.append(card);
     }
+
+    // 4. Right-side Asset Inspector for whichever asset is selected
+    const selectedItem =
+      (state.activeAssetKey && allItemsByKey.get(state.activeAssetKey)) ||
+      filtered[0] ||
+      items[0] ||
+      null;
+    renderInspector(selectedItem);
   }
 
   searchInp.addEventListener("input", () => {
@@ -485,10 +709,20 @@ export function createAssetBrowser(mountEl, appBridge) {
       state.family = familyName;
       render();
     },
+    selectAsset(kind, id) {
+      const found = findItem(kind, id);
+      if (found) {
+        state.activeAssetKey = found.key;
+        render();
+        return true;
+      }
+      return false;
+    },
     setHeight(h) {
       setDrawerHeight(h);
     },
     getState() {
+      const selectedItem = state.activeAssetKey ? allItemsByKey.get(state.activeAssetKey) : null;
       return {
         activeWorkspaceId: state.activeWorkspaceId,
         activeCategory: state.activeCategory,
@@ -498,12 +732,14 @@ export function createAssetBrowser(mountEl, appBridge) {
         heightPx: state.collapsed ? MIN_H : state.heightPx,
         renderedCount: gridEl.children.length,
         africanCount: patternCatalog.filter((p) => p.group === "African Patterns").length,
+        activeAssetKey: state.activeAssetKey,
+        inspectorItemId: selectedItem?.id || null,
+        inspectorItemName: selectedItem?.name || null,
+        inspectorItemKind: selectedItem?.assetKind || null,
       };
     },
     getAssetPayload(kind, id) {
-      const cat = kind === "material" ? "materials" : kind === "pattern" ? "patterns" : kind === "stamp" ? "stamps" : kind === "brush" ? "brushes" : "meshes";
-      const { items } = getCategoryFamiliesAndItems(cat);
-      const found = items.find((it) => it.id === id || it.name === id);
+      const found = findItem(kind, id);
       return found ? buildPayloadForItem(found) : null;
     },
     dispose() {

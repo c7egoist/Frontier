@@ -1353,6 +1353,71 @@ Object.assign(recipes, {
       scale("detailScale", "Sprinkle size"),
     ],
   },
+  pcb: {
+    title: "Printed circuit board (FR-4 & ENIG)",
+    caption: "Solder mask substrate with etched copper trace buses, drill vias, and gold bond pads.",
+    colors: [
+      { key: "color", label: "Solder mask color" },
+      { key: "secondaryColor", label: "Copper / solder traces" },
+      { key: "tertiaryColor", label: "ENIG gold via rings" },
+    ],
+    controls: [
+      rough("Solder mask roughness", 0.12, 0.85),
+      scale("detailScale", "Board trace density"),
+      direct("busbarWidth", "Trace width", 0.014, 0.08, "detail"),
+      direct("coat", "LPI solder overcoat", 0, 1, "finish"),
+      direct("coatRoughness", "Overcoat polish", 0.04, 0.45, "finish"),
+    ],
+  },
+  wafer: {
+    title: "Semiconductor lithography wafer",
+    caption: "Stepped monocrystalline die reticle grid with SRAM/ALU arrays and thin-film interference.",
+    colors: [
+      { key: "color", label: "Silicon wafer body" },
+      { key: "secondaryColor", label: "Dicing scribe street" },
+      { key: "tertiaryColor", label: "I/O aluminum bond pads" },
+    ],
+    controls: [
+      rough("Polished wafer roughness", 0.02, 0.35),
+      scale("detailScale", "Reticle die pitch"),
+      direct("iridescence", "Thin-film diffraction", 0, 1, "iridescence"),
+      direct("filmThickness", "Passivation film", 140, 820, "iridescence", "nm"),
+      direct("coat", "Optical passivation coat", 0, 1, "finish"),
+    ],
+  },
+  oled: {
+    title: "OLED display / Heat sink / Optical waveguide",
+    caption: "Technical microstructure array: RGB OLED diodes, extruded CNC fins, or fiber waveguides.",
+    colors: [
+      { key: "color", label: "Housing / Fin alloy" },
+      { key: "secondaryColor", label: "Secondary / Fiber emit" },
+      { key: "tertiaryColor", label: "Channel / Cladding" },
+    ],
+    controls: [
+      rough("Surface finish roughness", 0.04, 0.72),
+      scale("detailScale", "Cell / Fin density"),
+      direct("pixelFill", "Active fill factor", 0.25, 0.96, "detail"),
+      direct("emissionStrength", "Emitter intensity", 0, 6.0, "finish"),
+      direct("grain", "Anodized relief", 0, 1, "detail"),
+      direct("coat", "Optical resin coat", 0, 1, "finish"),
+    ],
+  },
+  rfMesh: {
+    title: "RF shielding mesh & Diffraction grating",
+    caption: "Hex laser-perforated EMI shielding foil or ruled holographic spectral diffraction optics.",
+    colors: [
+      { key: "color", label: "Primary metal alloy" },
+      { key: "secondaryColor", label: "Aperture cavity / Highlight" },
+      { key: "tertiaryColor", label: "Edge chamfer tint" },
+    ],
+    controls: [
+      rough("Metallic foil roughness", 0.04, 0.65),
+      scale("detailScale", "Mesh / Grating pitch"),
+      direct("pixelFill", "Aperture open ratio", 0.25, 0.9, "detail"),
+      direct("iridescence", "Grating iridescence", 0, 1, "iridescence"),
+      direct("filmThickness", "Optical pitch phase", 160, 860, "iridescence", "nm"),
+    ],
+  },
 });
 
 export function materialFamily(p) {
@@ -1415,6 +1480,10 @@ export function materialFamily(p) {
       40: "candySwirl",
       41: "candyGummy",
       42: "candyPearl",
+      43: "pcb",
+      44: "wafer",
+      45: "oled",
+      46: "rfMesh",
     }[p.type] || "paint"
   );
 }

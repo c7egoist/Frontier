@@ -19,6 +19,7 @@ import { extendedSurfaceGLSL, extendedSurfaceColor } from "./surfaceKernels.js";
 import { sandGLSL, sandColor } from "./sandKernels.js";
 import { granularCatalog } from "./granularCatalog.js";
 import { candyCatalog } from "./candyCatalog.js";
+import { engineeringCatalog } from "./engineeringCatalog.js";
 import { normalizeSandLayers, sandLayerSeed } from "./materialProfiles.js";
 
 export const materials = [
@@ -449,54 +450,6 @@ export const materials = [
     description: "Soft folds. A quiet, directional lustre.",
   },
   {
-    id: "cognac-leather",
-    name: "Cognac Leather",
-    category: "Leather",
-    label: "FULL-GRAIN AUTOMOTIVE HIDE",
-    color: "#713b23",
-    roughness: 0.48,
-    metalness: 0,
-    depth: 0.5,
-    flakes: 0,
-    size: 0.4,
-    coat: 0.2,
-    coatRoughness: 0.32,
-    type: 11,
-    colors: ["#9b643d"],
-    detailScale: 43,
-    grain: 0.75,
-    wear: 0.12,
-    sheen: 0.18,
-    sheenColor: "#b68866",
-    sheenRoughness: 0.7,
-    ior: 1.48,
-    description: "Irregular grain. Warm, enduring character.",
-  },
-  {
-    id: "nappa-leather",
-    name: "Nappa Leather",
-    category: "Leather",
-    label: "SOFT FINE-GRAIN NAPPA",
-    color: "#252429",
-    roughness: 0.54,
-    metalness: 0,
-    depth: 0.35,
-    flakes: 0,
-    size: 0.4,
-    coat: 0.12,
-    coatRoughness: 0.4,
-    type: 11,
-    colors: ["#55535c"],
-    detailScale: 72,
-    grain: 0.4,
-    wear: 0.05,
-    sheen: 0.25,
-    sheenColor: "#777780",
-    sheenRoughness: 0.8,
-    ior: 1.48,
-    description: "Supple, refined, beautifully understated.",
-  },
-  {
     category: "Fabric",
     type: 4,
     fabricMode: 0,
@@ -771,6 +724,7 @@ export const materials = [
   ...botanicalCatalog(),
   ...granularCatalog(),
   ...candyCatalog(),
+  ...engineeringCatalog(),
 ].map(normalizeMaterial).flatMap(Parameters => Parameters.camouflage ? [Parameters, { ...Parameters, id: `${Parameters.id}-smooth`, name: `${Parameters.name} · Smooth`, camouflageStyle: "camouflage-smooth" }] : [Parameters]).map(Parameters =>
 {
   if (!Parameters.camouflage) return Parameters;
@@ -968,7 +922,7 @@ export function createMaterial(input) {
     transmission: p.Authoring ? p.translucency : p.type === 5 ? 0.97 : p.translucency,
     opacity: p.opacity ?? 1,
     transparent: (p.opacity ?? 1) < 1,
-    emissive: p.type === 20 || (p.emissionStrength || 0) > 0 ? (p.emissionColor || "#000000") : "#000000",
+    emissive: p.type === 20 || p.type === 45 || (p.emissionStrength || 0) > 0 ? (p.emissionColor || "#000000") : "#000000",
     emissiveIntensity: p.emissionStrength,
     toneMapped: !p.bakeMode,
     alphaToCoverage: !p.bakeMode && (p.type === 27 || p.type === 28),
@@ -1417,6 +1371,10 @@ ${patternColorGLSL()}
       if(uType==39)roughnessFactor=mix(roughnessFactor,.05,candyCrystalMask);
       if(uType==41)roughnessFactor=mix(roughnessFactor,.46,candyCrystalMask);
       if(uType==42)roughnessFactor=mix(roughnessFactor,.09,candySpeckleMask);
+      if(uType==43){roughnessFactor=mix(roughnessFactor,.16,engPadMask);roughnessFactor=mix(roughnessFactor,.88,engHoleMask);}
+      if(uType==44)roughnessFactor=mix(roughnessFactor,.22,engPadMask);
+      if(uType==45 && uPanelMode>=0.5 && uPanelMode<1.5)roughnessFactor=mix(roughnessFactor,.62,engHoleMask);
+      if(uType==46 && uPanelMode<0.5)roughnessFactor=mix(roughnessFactor,.85,engHoleMask);
       if(uType==29 || uMetalScratches==1)roughnessFactor=mix(roughnessFactor,min(1.,roughnessFactor+.3),scratchMask);
     `,
     );
@@ -1429,6 +1387,7 @@ ${patternColorGLSL()}
       if(uType==21 && uSheetFinish>0)metalnessFactor*=1.-sheetOxide;
       if(uType==17)metalnessFactor=mix(.25,.96,contactMask);
       if(uType==20)metalnessFactor=ledContact*.92;
+      if(uType>=43 && uType<=46)metalnessFactor=clamp(max(metalnessFactor*(1.-engHoleMask),engMetalMask),0.,1.);
       #ifdef ALLOY_PATTERN
         metalnessFactor=mix(metalnessFactor,patternParamsSample.g,patternChannelMaskSample.g);
       #endif
@@ -1481,7 +1440,7 @@ ${patternColorGLSL()}
         #ifdef ALLOY_PATTERN
           clearcoatNormal=reliefNormal(surfaceHeight+peelHeight,clearcoatNormal,-vViewPosition);
         #else
-          clearcoatNormal=reliefNormal(peelHeight+((uType==11 || uType==20 || uType==22 || uType==30 || uType>=31 || uMetalScratches==1)?surfaceHeight:0.),clearcoatNormal,-vViewPosition);
+          clearcoatNormal=reliefNormal(peelHeight+((uType==11 || uType==20 || uType==22 || uType==30 || uType>=31 || (uType>=43 && uType<=46) || uMetalScratches==1)?surfaceHeight:0.),clearcoatNormal,-vViewPosition);
         #endif
       #endif
     `,
@@ -1536,7 +1495,8 @@ ${patternColorGLSL()}
     shader.fragmentShader = shader.fragmentShader.replace(
       "#include <emissivemap_fragment>",
       `#include <emissivemap_fragment>
-      if(uType==20)totalEmissiveRadiance*=emitterMask;`,
+      if(uType==20)totalEmissiveRadiance*=emitterMask;
+      if(uType==45)totalEmissiveRadiance=engEmitColor*engEmitMask*uEmissionScale;`,
     );
     shader.fragmentShader = shader.fragmentShader.replace(
       "#include <lights_fragment_end>",

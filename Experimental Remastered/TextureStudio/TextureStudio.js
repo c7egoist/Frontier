@@ -49,6 +49,34 @@ const appBridge = {
   focusAssetCategory(catId, family = null) {
     assetBrowser?.setCategory(catId, { userSpecified: false, family });
   },
+  inspectAsset(kind, id) {
+    assetBrowser?.selectAsset?.(kind, id);
+  },
+  openPatternAssetInMaterial(patternEntry) {
+    appBridge.shared.patternData = patternEntry;
+    activateWorkspace("material");
+    requestAnimationFrame(() => {
+      activeWorkspace?.applyAsset?.({
+        assetKind: "pattern",
+        id: patternEntry.id,
+        name: patternEntry.name,
+        family: patternEntry.group || patternEntry.family,
+        raw: patternEntry,
+      });
+    });
+  },
+  openStampAssetInPaint(stampEntry) {
+    activateWorkspace("paint");
+    requestAnimationFrame(() => {
+      activeWorkspace?.applyAsset?.({
+        assetKind: "stamp",
+        id: stampEntry.id,
+        name: stampEntry.name,
+        family: stampEntry.group || stampEntry.family,
+        raw: stampEntry,
+      });
+    });
+  },
   applyAssetToActiveWorkspace(payload, dropInfo = {}) {
     if (!payload) return false;
     const handled = activeWorkspace?.applyAsset?.(payload, dropInfo);

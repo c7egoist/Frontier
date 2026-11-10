@@ -1168,4 +1168,123 @@ await suite("12. Candy Materials, Expanded Patterns, Full 29 PBR Channels & Mesh
   assert(totalLayerPbrChannels >= 24, `Expected >=24 PBR channels rendered in Material Layer Inspector, got ${totalLayerPbrChannels}`);
 });
 
+await suite("13. Engineering Materials, Removal Check, Preview Plane, Basic Stamps & Asset Inspector", async () => {
+  const api = globalThis.window.__frontierTextureStudio;
+
+  // 13a. Verify Leather, Rose Petal, and Leaves are cleanly removed from browsable materials
+  assert.equal(materials.filter((m) => m.category === "Leather").length, 0, "All Leather category materials must be removed");
+  for (const removedId of [
+    "cognac-leather",
+    "nappa-leather",
+    "bull-grain-saddle-leather",
+    "bull-grain-black-leather",
+    "crocodile-belly-leather",
+    "rose-petal",
+    "broadleaf-green",
+    "autumn-leaf",
+  ]) {
+    assert(!materials.some((m) => m.id === removedId), `Removed material ${removedId} must not remain in catalog`);
+  }
+
+  // 13b. Verify new Engineering / Technical materials compile cleanly across PCB, Wafer, OLED, Heat Sink, RF Mesh, Solar & LED
+  const expectedEngIds = [
+    "emerald-pcb-copper-circuit",
+    "stealth-matte-black-pcb",
+    "euv-silicon-lithography-wafer",
+    "tandem-oled-subpixel-matrix",
+    "cnc-anodized-fin-heat-sink",
+    "optical-fiber-waveguide",
+    "perforated-rf-shielding-mesh",
+    "optical-diffraction-grating",
+    "perovskite-tandem-solar",
+    "amber-avionics-led-matrix",
+  ];
+  for (const id of expectedEngIds) {
+    const m = materials.find((x) => x.id === id);
+    assert(m, `Missing engineering material ${id}`);
+    assert.equal(m.category, "Technical", `Expected ${id} to be categorized as Technical`);
+    assert(getRecipe(m).controls.length >= 3, `Missing recipe controls for ${id}`);
+    const threeMat = createMaterial(m);
+    const shaderMock = {
+      uniforms: THREE.UniformsUtils.clone(THREE.ShaderLib.physical.uniforms),
+      vertexShader: THREE.ShaderLib.physical.vertexShader,
+      fragmentShader: THREE.ShaderLib.physical.fragmentShader,
+    };
+    threeMat.onBeforeCompile(shaderMock);
+    assert(shaderMock.fragmentShader.includes("engMetalMask"), `Missing engineering kernel hook in ${id}`);
+    threeMat.dispose();
+  }
+
+  // 13c. Verify Flat Plane option in Material Previewer (toolbar + FilterDropdownPill)
+  api.switchWorkspace("material");
+  const allOptionTexts = [...globalThis.document.querySelectorAll("option")].map((o) => o.textContent);
+  assert(allOptionTexts.includes("Plane"), "Material toolbar select must include Plane geometry");
+  const meshTrigger = [...globalThis.document.querySelectorAll(".pill-trigger")].find((el) => el.textContent.includes("Mesh:"));
+  assert(meshTrigger, "Missing Preview Mesh Geometry dropdown trigger");
+  meshTrigger.click();
+  const planeMenuItem = [...globalThis.document.querySelectorAll(".pill-menu .menu-item")].find((el) => el.textContent.includes("Plane"));
+  assert(planeMenuItem, "Preview Mesh Geometry menu must offer Plane");
+  planeMenuItem.click();
+  const updatedTrigger = [...globalThis.document.querySelectorAll(".pill-trigger")].find((el) => el.textContent.includes("Mesh:"));
+  assert(updatedTrigger?.textContent.includes("Plane"), "Clicking Plane in dropdown must activate Plane preview");
+
+  // 13d. Verify Basic Stamp Presets in StarterCatalogBridge
+  const stamps = listStampStarterCatalog();
+  assert(stamps.length >= 17, `Expected >=17 stamps including basic presets, got ${stamps.length}`);
+  for (const basicId of [
+    "stamp-basic-circle",
+    "stamp-basic-ring",
+    "stamp-basic-square",
+    "stamp-basic-triangle",
+    "stamp-basic-star",
+    "stamp-basic-hexagon",
+    "stamp-basic-cross",
+    "stamp-basic-arrow-chevron",
+    "stamp-basic-rivet-grid",
+  ]) {
+    const st = stamps.find((s) => s.id === basicId);
+    assert(st, `Missing basic stamp preset ${basicId}`);
+    assert(st.group === "Basic Shapes" || st.group === "Basic Stencils", `Unexpected group for ${basicId}: ${st.group}`);
+    const svg = getArtworkPreviewSvg(st, "stamp", 64);
+    assert(svg.includes("<svg"), `Basic stamp SVG render failed for ${basicId}`);
+    const doc = loadStarterAsArtworkDocument(st);
+    const evalOut = evaluateArtworkDocument(doc, 128);
+    assert.equal(evalOut.width, 128);
+  }
+
+  // 13e. Verify Right-Side Asset Inspector inside Bottom Asset Browser Drawer
+  const insp = globalThis.document.querySelector(".cb-inspector");
+  assert(insp, "Missing right-side .cb-inspector pane in AssetBrowser");
+  assert(insp.textContent.includes("Asset Inspector"), "Right-side Asset Inspector heading missing");
+
+  // Select a specific Engineering Material card and verify inspector updates
+  const pcbCard = [...globalThis.document.querySelectorAll(".cb-card")].find((c) => c.dataset.assetId === "emerald-pcb-copper-circuit");
+  if (!pcbCard) {
+    // Switch family or search if grid capped at 120 items
+    const techBtn = [...globalThis.document.querySelectorAll(".cb-family-btn")].find((b) => b.dataset.family === "Technical");
+    assert(techBtn, "Missing Technical family button in AssetBrowser");
+    techBtn.click();
+  }
+  const targetPcbCard = [...globalThis.document.querySelectorAll(".cb-card")].find((c) => c.dataset.assetId === "emerald-pcb-copper-circuit");
+  assert(targetPcbCard, "Missing Emerald PCB Copper Circuit card in AssetBrowser");
+  targetPcbCard.click();
+  assert.equal(api.getAssetBrowser().inspectorItemId, "emerald-pcb-copper-circuit");
+  assert(globalThis.document.querySelector(".cb-insp-title")?.textContent.includes("Emerald PCB Copper Circuit"), "Inspector must display clicked Material title");
+  assert(globalThis.document.querySelectorAll(".cb-insp-prop").length >= 4, "Inspector must render material PBR property cards");
+
+  // Switch to Stamps tab in AssetBrowser, click a Basic Stamp, and confirm Inspector updates!
+  const stampTab = [...globalThis.document.querySelectorAll(".cb-cat-tab")].find((t) => t.dataset.category === "stamps");
+  assert(stampTab, "Missing Stamps tab in AssetBrowser");
+  stampTab.click();
+  const starStampCard = [...globalThis.document.querySelectorAll(".cb-card")].find((c) => c.dataset.assetId === "stamp-basic-star");
+  assert(starStampCard, "Missing stamp-basic-star card in AssetBrowser");
+  starStampCard.click();
+  assert.equal(api.getAssetBrowser().inspectorItemId, "stamp-basic-star");
+  assert(globalThis.document.querySelector(".cb-insp-title")?.textContent.includes("Five-Point Badge Star"), "Inspector must update to clicked Basic Stamp");
+  const applyAction = [...globalThis.document.querySelectorAll(".cb-insp-btn")].find((b) => b.textContent === "Apply to Stage");
+  assert(applyAction, "Inspector must show Apply to Stage action button");
+  applyAction.click();
+  assert.equal(api.getActiveId(), "stamp", "Clicking Apply to Stage on stamp in inspector should route to Stamp Studio cleanly");
+});
+
 console.log(`\nALL ${results.length} VALIDATION SUITES PASSED CLEANLY`);

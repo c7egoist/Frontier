@@ -196,23 +196,6 @@ export function expandedCatalog() {
     dimpleDepth: 0.016,
     description: "A durable ionomer-like finish with procedural dimples.",
   });
-  add("Bull Grain Saddle Leather", "Leather", 11, "leather", "#744326", {
-    roughness: 0.53,
-    grain: 1,
-    detailScale: 19,
-    coat: 0.18,
-    sheen: 0.15,
-    description:
-      "Large irregular pebble grain, fine pores and a restrained hide finish.",
-  });
-  add("Bull Grain Black Leather", "Leather", 11, "leather", "#242221", {
-    roughness: 0.47,
-    grain: 0.85,
-    detailScale: 23,
-    coat: 0.24,
-    sheen: 0.18,
-    description: "Deep pebbled upholstery leather with height-aware patina.",
-  });
   [
     ["Raw Selvedge Denim", "#163353", "#bdb8a0", 0.08, 0.35],
     ["Washed Indigo Denim", "#526c81", "#d1c9b1", 0.6, 0.55],

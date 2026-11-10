@@ -18,30 +18,6 @@ export function botanicalCatalog() {
     ...extra,
   });
   return [
-    make("Crocodile Belly Leather", 30, "crocodile", "#70432b", {
-      secondaryColor: "#865335",
-      tertiaryColor: "#59321f",
-      detailScale: 5.2,
-      roughness: 0.28,
-      coat: 0.32,
-      coatRoughness: 0.17,
-      groutWidth: 0.024,
-      poreDensity: 0.8,
-      grain: 0.8,
-      description:
-        "Continuous tanned hide with soft shared creases, irregular scale sizing and fine grain. No separated tile masks or image maps.",
-    }),
-    make("Rose Petal", 33, "petalSurface", "#b83d65", {
-      secondaryColor: "#edb6bc",
-      tertiaryColor: "#802342",
-      colorGradient: 0.88,
-      spotDensity: 0.06,
-      veinRelief: 0.5,
-      cellRelief: 0.45,
-      cellScale: 160,
-      description:
-        "A whole petal UV surface: basal blush, tip gradient, branching striations and microscopic epidermal relief. No cutout.",
-    }),
     make("Lily Petal", 33, "petalSurface", "#ead7b8", {
       secondaryColor: "#b97c34",
       tertiaryColor: "#742a32",

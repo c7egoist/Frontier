@@ -245,6 +245,7 @@ export function mountMaterialWorkspace(root, appBridge) {
     ["Sphere", "sphere"],
     ["Draped Cloth", "cloth"],
     ["Chamfer Box", "box"],
+    ["Plane", "plane"],
   ];
   const shapeGroup = Construct("div", "toolbar-group");
   const shapeSelect = Construct("select");
@@ -367,6 +368,12 @@ export function mountMaterialWorkspace(root, appBridge) {
       return g;
     }
     if (shape === "box") return new RoundedBoxGeometry(2.15, 2.15, 2.15, 8, 0.28);
+    if (shape === "plane") {
+      const g = new THREE.PlaneGeometry(2.65, 2.65, 96, 96);
+      g.rotateX(-Math.PI * 0.22);
+      g.translate(0, 0.12, 0);
+      return g;
+    }
     return new THREE.SphereGeometry(1.42, 96, 64);
   }
 

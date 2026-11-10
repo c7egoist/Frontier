@@ -7,8 +7,8 @@ export function extendedSurfaceGLSL() {
     uniform float uMoisture,uScattering,uFreckles,uPaperRibs,uFiberContrast;
     uniform float uOxidation,uPanelMode,uBusbarWidth,uDimpleDepth,uDenimFade,uSlub,uPixelFill;
     uniform float uBakeHeightRange,uEmissionScale,uAoIntensity;
-    float oxideMask=0.,contactMask=0.,emitterMask=0.,candyCrystalMask=0.,candySpeckleMask=0.,candySugarRough=0.;
-    vec3 candyFacetDir=vec3(0.,0.,1.);
+    float oxideMask=0.,contactMask=0.,emitterMask=0.,candyCrystalMask=0.,candySpeckleMask=0.,candySugarRough=0.,engMetalMask=0.,engPadMask=0.,engHoleMask=0.,engEmitMask=0.;
+    vec3 candyFacetDir=vec3(0.,0.,1.),engEmitColor=vec3(0.);
     vec3 bakeSRGB(vec3 c){c=max(c,vec3(0.));return mix(c*12.92,1.055*pow(c,vec3(1./2.4))-.055,step(vec3(.0031308),c));}
     vec2 surfaceUV(vec3 p,vec3 w){if(w.x>w.y && w.x>w.z)return p.zy;if(w.y>w.z)return p.xz;return p.xy;}
     float segmentDistance(vec2 p,vec2 a,vec2 b){vec2 d=b-a;return length(p-a-d*clamp(dot(p-a,d)/dot(d,d),0.,1.));}
@@ -185,6 +185,139 @@ export function extendedSurfaceColor() {
       vec3 confetti=mix(pickColor(nonpareil.z),mix(uSecondary,uTertiary,step(.5,nonpareil.w)),.28);
       diffuseColor.rgb=mix(diffuseColor.rgb,confetti,candySpeckleMask);
       surfaceHeight=candySpeckleMask*max(0.,.24-nonpareil.x)*.012;
+    }
+    if(uType==43){
+      vec2 uv=surfaceUV(pp,weights)*uScale;
+      vec2 q=fract(uv)-.5;
+      float aa=max(max(fwidth(uv.x),fwidth(uv.y)),.0012);
+      vec2 cid=floor(uv);
+      float h=hash31(vec3(cid,7.3));
+      float h2=hash31(vec3(cid,19.1));
+      float bw=max(uBusbarWidth,.018);
+      float busX=1.-smoothstep(bw-aa,bw+aa,abs(q.x));
+      float busY=1.-smoothstep(bw-aa,bw+aa,abs(q.y));
+      float diag=1.-smoothstep(bw*.8-aa,bw*.8+aa,abs(q.x+q.y-0.0)*.707);
+      float traceA=h>.45?busX:busY;
+      float traceB=h2>.5?diag:busY*step(.35,h2);
+      float parallel=1.-smoothstep(bw*.62-aa,bw*.62+aa,abs(abs(q.x)-.19));
+      float traces=max(max(traceA,traceB),parallel*step(.42,h));
+      vec2 vp=fract(uv*2.)-.5;
+      float vr=length(vp);
+      float pad=1.-smoothstep(.24-aa*1.5,.24+aa*1.5,vr);
+      float drill=1.-smoothstep(.105-aa*1.5,.105+aa*1.5,vr);
+      float viaOcc=step(.52,hash31(vec3(floor(uv*2.),31.7)));
+      float ring=max(0.,pad-drill)*viaOcc;
+      float hole=drill*viaOcc;
+      float weave=sin(uv.x*64.)*sin(uv.y*64.)*.5+.5;
+      float silk=boxMask(q-vec2(.32,-.32),vec2(.045,.045),aa)*step(.7,h2);
+      vec3 solder=diffuseColor.rgb*(.88+.16*weave);
+      vec3 copperTrace=mix(solder,uSecondary,.52+traces*.42);
+      diffuseColor.rgb=mix(solder,copperTrace,traces*(1.-hole));
+      diffuseColor.rgb=mix(diffuseColor.rgb,uTertiary,ring);
+      diffuseColor.rgb=mix(diffuseColor.rgb,vec3(.02,.025,.022),hole);
+      diffuseColor.rgb=mix(diffuseColor.rgb,vec3(.92,.93,.9),silk);
+      engMetalMask=clamp(max(ring*.96,traces*.35),0.,1.);
+      engPadMask=ring;
+      engHoleMask=hole;
+      surfaceHeight=(traces*.00045+ring*.0008-hole*.0024);
+    }
+    if(uType==44){
+      vec2 uv=surfaceUV(pp,weights)*uScale;
+      vec2 q=fract(uv)-.5;
+      vec2 cid=floor(uv);
+      float aa=max(max(fwidth(uv.x),fwidth(uv.y)),.0012);
+      float border=1.-boxMask(q,vec2(.465,.465),aa);
+      vec2 sub=fract(uv*4.)-.5;
+      float subGap=1.-boxMask(sub,vec2(.42,.42),aa*4.);
+      float sectorHash=hash31(vec3(floor(uv*4.),cid.x*3.+cid.y));
+      float logicGrid=sin(uv.x*78.)*sin(uv.y*78.)*.5+.5;
+      logicGrid=mix(.5,logicGrid,1.-smoothstep(.08,.45,aa*26.));
+      float pads=boxMask(vec2(abs(q.x)-.43,fract(uv.y*12.)-.5),vec2(.022,.22),aa*2.);
+      pads=max(pads,boxMask(vec2(fract(uv.x*12.)-.5,abs(q.y)-.43),vec2(.22,.022),aa*2.));
+      float dieZone=mix(.68,1.18,sectorHash)*(.82+.24*logicGrid);
+      vec3 waferCol=mix(diffuseColor.rgb*dieZone,uSecondary,subGap*.65);
+      waferCol=mix(waferCol,uSecondary*.5,border*.8);
+      waferCol=mix(waferCol,uTertiary,pads*.92);
+      diffuseColor.rgb=waferCol;
+      engMetalMask=clamp(.68+pads*.3+subGap*.18,0.,1.);
+      engPadMask=clamp(pads+border*.5,0.,1.);
+      surfaceHeight=(pads*.0006-border*.0012-subGap*.0004);
+    }
+    if(uType==45){
+      vec2 uv=surfaceUV(pp,weights)*uScale;
+      float aa=max(max(fwidth(uv.x),fwidth(uv.y)),.0015);
+      if(uPanelMode<.5){
+        vec2 cell=fract(uv)-.5;
+        vec2 sub=vec2(fract(uv.x*3.)-.5,cell.y);
+        float pxMask=boxMask(cell,vec2(.44,.44),aa);
+        float sMask=boxMask(sub,vec2(.35,.38),aa*2.2)*pxMask;
+        float chan=floor(mod(uv.x*3.,3.));
+        vec3 subCol=chan<.5?vec3(1.,.1,.08):chan<1.5?vec3(.08,1.,.18):vec3(.12,.34,1.);
+        float lum=.82+.18*hash31(vec3(floor(uv),floor(uv.x*3.)));
+        engEmitColor=subCol*lum;
+        engEmitMask=sMask;
+        diffuseColor.rgb=mix(vec3(.012,.014,.018),subCol*.16,sMask);
+        engMetalMask=0.;
+        surfaceHeight=-.0005*(1.-sMask);
+      }else if(uPanelMode<1.5){
+        float fin=sin(uv.x*6.2831853*3.)*.5+.5;
+        float slot=smoothstep(.25,.72,fin);
+        float crossChannel=1.-smoothstep(.04,.09,abs(fract(uv.y*.5)-.5));
+        float brushed=noise3(pp*vec3(uScale*1.5,uScale*24.,uScale*1.5));
+        diffuseColor.rgb=mix(uTertiary,mix(diffuseColor.rgb,uSecondary,.35+.5*brushed),slot*(1.-crossChannel*.6));
+        engMetalMask=.94;
+        engHoleMask=clamp(1.-slot+crossChannel*.6,0.,1.);
+        surfaceHeight=(slot*(1.-crossChannel*.75)-.5)*.008*uGrain;
+      }else{
+        vec2 row=vec2(uv.x,uv.y/.8660254);
+        vec2 c0=floor(row);
+        float best=9.;vec2 bestId=c0;
+        for(int y=-1;y<=1;y++)for(int x=-1;x<=1;x++){
+          vec2 id=c0+vec2(float(x),float(y));
+          vec2 ctr=vec2(id.x+.5*mod(id.y,2.),id.y*.8660254);
+          float d=length(uv-ctr);
+          if(d<best){best=d;bestId=id;}
+        }
+        float coreR=uPixelFill*.34;
+        float core=1.-smoothstep(coreR*.58-aa,coreR*.58+aa,best);
+        float clad=1.-smoothstep(coreR*1.12-aa,coreR*1.12+aa,best);
+        float rnd=.65+.35*hash31(vec3(bestId,11.3));
+        engEmitColor=uSecondary*rnd;
+        engEmitMask=core;
+        diffuseColor.rgb=mix(diffuseColor.rgb,uTertiary,clad*(1.-core));
+        diffuseColor.rgb=mix(diffuseColor.rgb,uSecondary*.25,core);
+        surfaceHeight=(clad*.0012+core*.0008);
+      }
+    }
+    if(uType==46){
+      vec2 uv=surfaceUV(pp,weights)*uScale;
+      float aa=max(max(fwidth(uv.x),fwidth(uv.y)),.0015);
+      if(uPanelMode<.5){
+        vec2 row=vec2(uv.x,uv.y/.8660254);
+        vec2 c0=floor(row);
+        float best=9.;
+        for(int y=-1;y<=1;y++)for(int x=-1;x<=1;x++){
+          vec2 id=c0+vec2(float(x),float(y));
+          vec2 ctr=vec2(id.x+.5*mod(id.y,2.),id.y*.8660254);
+          best=min(best,length(uv-ctr));
+        }
+        float holeR=uPixelFill*.37;
+        float hole=1.-smoothstep(holeR-aa,holeR+aa,best);
+        float rim=1.-smoothstep(holeR+.06-aa,holeR+.06+aa,best);
+        diffuseColor.rgb=mix(diffuseColor.rgb,uTertiary,rim*(1.-hole)*.55);
+        diffuseColor.rgb=mix(diffuseColor.rgb,uSecondary,hole);
+        engMetalMask=(1.-hole)*.94;
+        engHoleMask=hole;
+        surfaceHeight=(1.-hole)*.0024-hole*.003;
+      }else{
+        float phase=uv.x*6.2831853*2.4;
+        float groove=sin(phase)*.5+.5;
+        float aaG=1.-smoothstep(.45,2.2,fwidth(phase));
+        float ruled=mix(.5,groove,aaG);
+        diffuseColor.rgb=mix(uTertiary,mix(diffuseColor.rgb,uSecondary,ruled),(.55+.45*ruled));
+        engMetalMask=.95;
+        surfaceHeight=(ruled-.5)*.0016;
+      }
     }
   `;
 }

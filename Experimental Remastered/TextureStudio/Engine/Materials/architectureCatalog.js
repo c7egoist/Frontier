@@ -115,28 +115,6 @@ export function architectureCatalog() {
     description:
       "A coarse, layered plaster grain with raised peaks and dry diffuse reflections.",
   });
-  add("Broadleaf Green", "Nature", 31, "leafSurface", "#355d28", {
-    secondaryColor: "#829548",
-    tertiaryColor: "#8c8a38",
-    colorGradient: 0.18,
-    roughness: 0.48,
-    detailScale: 10,
-    leafAspect: 0.4,
-    grain: 0.65,
-    description:
-      "Full UV leaf surface: branching veins, epidermal cells and mottled pigment. For real leaf meshes, not an atlas.",
-  });
-  add("Autumn Leaf", "Nature", 31, "leafSurface", "#985527", {
-    secondaryColor: "#c3a24a",
-    tertiaryColor: "#c78b37",
-    colorGradient: 0.75,
-    roughness: 0.6,
-    detailScale: 12,
-    leafAspect: 0.32,
-    grain: 0.5,
-    description:
-      "Whole-leaf autumn pigment, branching veins and fine epidermis. No cutout; use your mesh silhouette.",
-  });
   add("Meadow Grass Blades", "Nature", 32, "grassSurface", "#335b27", {
     secondaryColor: "#849348",
     roughness: 0.78,
