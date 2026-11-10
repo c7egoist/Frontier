@@ -1980,4 +1980,78 @@ await suite("17. Hard-Surface Decal Stamps, Baked Transparent Material Icons & F
   assert(cssText.includes(".cb-asset-icon") && cssText.includes("background: transparent;"), "CSS must keep .cb-asset-icon transparent with no box behind icon");
 });
 
+await suite("18. Reference UI Alignment: Material Look-Dev Stage, Shader Ball Pedestal Icons & Circular Olive Studio", async () => {
+  const api = globalThis.window.__frontierTextureStudio;
+  const { createShaderBallPedestalGeometry, renderAnalyticalSpherePixels } = await import("./MaterialIconBaker.js");
+  const fs = await import("node:fs");
+
+  // 18a. Material Workspace Stage (Image 3 / image-5.png)
+  api.switchWorkspace("material");
+  const mwStage = globalThis.document.querySelector(".mw-stage");
+  assert(mwStage, "Material workspace must render .mw-stage look-dev viewport");
+  assert(!globalThis.document.querySelector(".mw-stage .viewport-toolbar"), "Material stage must NOT render cluttered top .viewport-toolbar");
+  const mwHero = mwStage.querySelector(".mw-stage-hero");
+  const mwKicker = mwHero?.querySelector(".mw-hero-kicker");
+  const mwTitle = mwHero?.querySelector(".mw-hero-title");
+  const mwDesc = mwHero?.querySelector(".mw-hero-desc");
+  assert(mwHero && mwKicker && mwTitle && mwDesc, "Material stage must display floating top-left kicker, title & description");
+  assert(/^\d{2}\s+\/\s+.+COLLECTION/i.test(mwKicker.textContent), `Expected 'NN / <CAT> COLLECTION' kicker, got '${mwKicker.textContent}'`);
+
+  const zoomPct = mwStage.querySelector(".mw-zoom-pct");
+  const zoomBtns = mwStage.querySelectorAll(".mw-zoom-btn");
+  const resetBtn = mwStage.querySelector(".mw-reset-link");
+  assert(zoomPct && zoomBtns.length === 2 && resetBtn, "Material bottom dock must render [- pct +] zoom pill and Reset view");
+  const initialPct = parseInt(zoomPct.textContent, 10);
+  zoomBtns[1].click();
+  assert(parseInt(zoomPct.textContent, 10) > initialPct, "Zoom + button must increase viewport zoom readout");
+  resetBtn.click();
+  assert.equal(zoomPct.textContent, "62%", "Reset view must restore default 62% hero camera framing");
+
+  const selectPills = mwStage.querySelectorAll(".mw-select-pill");
+  assert.equal(selectPills.length, 2, "Material bottom dock must provide geometry & studio environment selector pills");
+  assert(selectPills[1].querySelectorAll("option").some((o) => o.textContent === "Studio softbox"), "Default backdrop list must include 'Studio softbox'");
+
+  const pedGeo = createShaderBallPedestalGeometry(1.52);
+  assert(pedGeo?.attributes?.position?.count > 100, "createShaderBallPedestalGeometry must generate beveled pedestal lathe geometry");
+  const px = renderAnalyticalSpherePixels(materials[0], 88);
+  const pedRow = Math.round(88 * 0.445 + 88 * 0.375 * 0.94);
+  const pedCenterAlpha = px.data[(pedRow * 88 + 44) * 4 + 3];
+  assert(pedCenterAlpha > 200, "Analytical Shader Ball baker must render beveled pedestal silhouette beneath sphere");
+
+  // 18b. Asset Browser Filter Chips, Collection Bar & Shader Ball Check Cards (Image 2 / image-4.png)
+  const drawer = globalThis.document.querySelector(".asset-browser");
+  if (api.getAssetBrowser().userSpecifiedCategory) drawer.querySelector(".cb-auto-pill")?.click();
+  const famStrip = drawer.querySelector(".cb-family-pills");
+  assert(famStrip && famStrip.querySelectorAll(".cb-family-chip").length >= 4, "Asset Browser must render rounded family filter pills strip");
+  const colBar = drawer.querySelector(".cb-collection-bar");
+  assert(colBar?.querySelector(".cb-collection-title")?.textContent === "THE ESSENTIAL COLLECTION", "Asset Browser must show THE ESSENTIAL COLLECTION header");
+  const matCard = drawer.querySelector(".cb-grid .cb-card");
+  assert(matCard?.querySelector(".cb-card-check") && matCard?.querySelector(".cb-card-sub"), "Material card must render selection check badge and category subtitle");
+
+  // 18c. Pattern, Stamp & Texture Paint Circular Tool Dock & Olive Stage (Image 1 / image-3.png)
+  for (const [ws, expectedKicker] of [["pattern", "REPEAT TILE"], ["stamp", "DECAL STAMP"], ["paint", "3D + 2D PAINT"]]) {
+    api.switchWorkspace(ws);
+    const eyebrow = globalThis.document.querySelector(".vp-hero-eyebrow");
+    const statusTxt = globalThis.document.querySelector(".vp-draft-status");
+    const toolsBar = globalThis.document.querySelector(".vp-tools-bar");
+    const moreBtn = toolsBar?.querySelector(".vp-more-tools-btn");
+    const moreMenu = toolsBar?.querySelector(".vp-more-tools-menu");
+    const stageShell = globalThis.document.querySelector(".se-stage-shell");
+    assert(eyebrow?.textContent.includes(expectedKicker), `${ws} header must display '${expectedKicker}' eyebrow`);
+    assert(statusTxt?.textContent.includes("Unsaved changes"), `${ws} header must show draft status indicator`);
+    assert(toolsBar.querySelectorAll(".vp-tool-circle").length >= 6, `${ws} Band 2 must render circular icon tool buttons`);
+    assert(moreBtn && moreMenu && moreMenu.hidden === true, `${ws} Band 2 must include collapsed 'More tools' popover`);
+    moreBtn.click();
+    assert.equal(moreMenu.hidden, false, `Clicking 'More tools' in ${ws} must expand secondary tool menu`);
+    moreBtn.click();
+    assert(stageShell?.querySelector(".se-stage-topbar") && stageShell?.querySelector(".se-stage-footer"), `${ws} stage must render topbar and bottom shortcut/selection footer`);
+  }
+
+  // Verify olive viewport + circular tool + look-dev stage CSS selectors exist
+  const cssText = fs.readFileSync(new URL("./TextureStudio.css", import.meta.url), "utf8");
+  for (const token of [".mw-stage", ".mw-bottom-dock", ".vp-tool-circle", ".vp-more-tools-btn", ".se-stage-topbar", ".se-stage-footer", ".cb-family-pills", ".cb-collection-bar"]) {
+    assert(cssText.includes(token), `TextureStudio.css missing required selector ${token}`);
+  }
+});
+
 console.log(`\nALL ${results.length} VALIDATION SUITES PASSED CLEANLY`);

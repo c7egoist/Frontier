@@ -1,18 +1,18 @@
 /*==========================================================================================================================================
                                                        MATERIALICONBAKER.JS
 ==========================================================================================================================================*/
-/* Pre-bakes transparent circular 3D PBR Material Sphere PNG icons for AssetBrowser:
-   - Stage 1: Instant analytical Cook-Torrance GGX + Clearcoat + Iridescence + Flake transparent PNG sphere (zero wait)
-   - Stage 2: Batched offscreen Three.js WebGL shader bake using genuine Frontier createMaterial(m) shaders + PMREM studio lighting,
-              auto-disposing the temporary baker WebGL context as soon as the queue completes. */
+/* Pre-bakes transparent 3D PBR Shader Ball + Beveled Pedestal PNG icons for AssetBrowser (matching Image 2):
+   - Stage 1: Instant analytical Cook-Torrance GGX Shader Ball (with signature tilted lathe grooves + dark metallic pedestal)
+   - Stage 2: Batched offscreen Three.js WebGL shader bake using Frontier's createBallGeometry() + createMaterial(m) + PMREM studio lighting,
+              preserving pure anti-aliased alpha transparency outside the ball & pedestal silhouette. */
 
 import * as THREE from "three";
-import { createMaterial, normalizeMaterial } from "./Engine/Materials/materials.js";
+import { createBallGeometry, createMaterial, normalizeMaterial } from "./Engine/Materials/materials.js";
 
 const ANALYTICAL_CACHE = new Map();
 const WEBGL_CACHE = new Map();
 const PENDING_IDS = new Set();
-const WAITERS = new Map(); // id -> Set<(url) => void>
+const WAITERS = new Map();
 
 let bakeQueue = [];
 let queueRunning = false;
@@ -40,8 +40,25 @@ function hash2(x, y, seed = 17) {
 }
 
 /**
- * Renders raw RGBA pixels of an 88x88 transparent Cook-Torrance PBR sphere
- * (alpha === 0 outside orb silhouette, alpha === 255 inside, smooth AA edge).
+ * Shared beveled gunmetal Shader Ball pedestal geometry matching Image 2 & Image 3.
+ */
+export function createShaderBallPedestalGeometry(outerRadius = 1.48) {
+  const pts = [
+    new THREE.Vector2(0.001, -0.14),
+    new THREE.Vector2(outerRadius * 0.99, -0.14),
+    new THREE.Vector2(outerRadius, -0.10),
+    new THREE.Vector2(outerRadius * 0.955, -0.02),
+    new THREE.Vector2(outerRadius * 0.88, 0.015),
+    new THREE.Vector2(outerRadius * 0.72, 0.015),
+    new THREE.Vector2(outerRadius * 0.65, -0.005),
+    new THREE.Vector2(0.001, -0.005),
+  ];
+  return new THREE.LatheGeometry(pts, 72);
+}
+
+/**
+ * Renders raw RGBA pixels of an 88x88 transparent Shader Ball + Beveled Pedestal PNG
+ * (alpha === 0 outside silhouette, alpha === 255 inside, smooth AA edge).
  */
 export function renderAnalyticalSpherePixels(mat, size = 88) {
   const data = new Uint8ClampedArray(size * size * 4);
@@ -58,7 +75,6 @@ export function renderAnalyticalSpherePixels(mat, size = 88) {
   const emit = Math.max(0, mat.emissionStrength ?? 0);
   const trans = clamp01(mat.translucency ?? mat.transmission ?? 0);
 
-  // Normalized key, fill & rim directions
   const kl = Math.hypot(-0.46, -0.58, 0.67);
   const kx = -0.46 / kl, ky = -0.58 / kl, kz = 0.67 / kl;
   const fl = Math.hypot(0.68, 0.25, 0.69);
@@ -74,108 +90,170 @@ export function renderAnalyticalSpherePixels(mat, size = 88) {
   const hfl = Math.hypot(hfx, hfy, hfz);
   const fhx = hfx / hfl, fhy = hfy / hfl, fhz = hfz / hfl;
 
-  const half = size * 0.5;
-  const radius = size * 0.445;
+  // Center sphere slightly above vertical center to leave room for the beveled pedestal disc below
+  const cx = size * 0.5;
+  const cy = size * 0.445;
+  const radius = size * 0.375;
   const alphaPow = rough * rough;
   const coatPow = coatRough * coatRough;
 
+  // Tilted Shader Ball seam basis (matches ~-20 deg diagonal sweep in Image 2 & Image 3)
+  const cosT = Math.cos(-0.34);
+  const sinT = Math.sin(-0.34);
+  const cosX = Math.cos(0.28);
+  const sinX = Math.sin(0.28);
+
+  // Pedestal ellipse geometry in pixel normalized units
+  const pedCenterY = cy + radius * 0.94;
+  const pedRx = radius * 0.86;
+  const pedRy = radius * 0.205;
+
+  const tone = (v) => {
+    const x = Math.max(0, v);
+    const mapped = (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);
+    return Math.round(Math.pow(clamp01(mapped), 1 / 2.15) * 255);
+  };
+
   for (let py = 0; py < size; py++) {
-    const dy = (py + 0.5 - half) / radius;
     for (let px = 0; px < size; px++) {
-      const dx = (px + 0.5 - half) / radius;
+      const dx = (px + 0.5 - cx) / radius;
+      const dy = (py + 0.5 - cy) / radius;
       const r2 = dx * dx + dy * dy;
-      if (r2 > 1.045) continue;
 
-      const rDist = Math.sqrt(r2);
-      const aa = clamp01((1.0 - rDist) * radius * 0.85 + 0.5);
-      if (aa <= 0.005) continue;
+      // Pedestal disc check (drawn behind bottom pole of sphere)
+      const pdx = (px + 0.5 - cx) / pedRx;
+      const pdy = (py + 0.5 - pedCenterY) / pedRy;
+      const pDist = Math.hypot(pdx, pdy);
+      const pedVisible = pDist <= 1.06 && py >= cy + radius * 0.56;
 
-      const nx = dx / Math.max(1, rDist);
-      const ny = dy / Math.max(1, rDist);
-      const nz = Math.sqrt(Math.max(0, 1 - Math.min(1, r2)));
+      let outR = 0, outG = 0, outB = 0, outA = 0;
 
-      const u = Math.atan2(nx, nz) / Math.PI;
-      const v = Math.asin(Math.max(-1, Math.min(1, ny))) / Math.PI;
-      const micro = (hash2(Math.floor(u * 46), Math.floor(v * 46), 31) - 0.5) * (0.04 + flakes * 0.14);
-
-      const nDotKey = Math.max(0, nx * kx + ny * ky + nz * kz);
-      const nDotFill = Math.max(0, nx * fx + ny * fy + nz * fz);
-      const nDotRim = Math.max(0, nx * rx + ny * ry + nz * rz);
-      const nDotV = Math.max(0.02, nz);
-      const fresnel = Math.pow(1 - nDotV, 5);
-
-      const nDotH = Math.max(0, nx * nhx + ny * nhy + nz * nhz);
-      const denom = nDotH * nDotH * (alphaPow * alphaPow - 1) + 1;
-      const ggx = (alphaPow * alphaPow) / Math.max(0.001, Math.PI * denom * denom);
-      const specKey = Math.min(2.4, ggx * 0.24 * (0.35 + 0.65 * nDotKey));
-
-      const nDotHf = Math.max(0, nx * fhx + ny * fhy + nz * fhz);
-      const specFill = Math.pow(nDotHf, Math.max(4, 18 / (rough + 0.08))) * 0.18;
-
-      const coatDenom = nDotH * nDotH * (coatPow * coatPow - 1) + 1;
-      const coatGgx = (coatPow * coatPow) / Math.max(0.0005, Math.PI * coatDenom * coatDenom);
-      const coatSpec = coat * Math.min(2.6, coatGgx * 0.18);
-
-      const amb = 0.14 + 0.14 * (-ny * 0.5 + 0.5) + fresnel * 0.22;
-      const diffWeight = (1 - metal * 0.88) * (0.12 + 0.78 * nDotKey + 0.28 * nDotFill);
-
-      const albR = clamp01(br * (1 - flakes * 0.12) + sr * (flakes * 0.12 + micro * 0.6));
-      const albG = clamp01(bg * (1 - flakes * 0.12) + sg * (flakes * 0.12 + micro * 0.6));
-      const albB = clamp01(bb * (1 - flakes * 0.12) + sb * (flakes * 0.12 + micro * 0.6));
-
-      const specR = (1 - metal) * 0.96 + metal * albR;
-      const specG = (1 - metal) * 0.96 + metal * albG;
-      const specB = (1 - metal) * 0.98 + metal * albB;
-
-      let outR = albR * (diffWeight + amb * (0.45 + 0.55 * (1 - metal))) + specR * (specKey + specFill) + coatSpec;
-      let outG = albG * (diffWeight + amb * (0.45 + 0.55 * (1 - metal))) + specG * (specKey + specFill) + coatSpec;
-      let outB = albB * (diffWeight + amb * (0.45 + 0.55 * (1 - metal))) + specB * (specKey + specFill) + coatSpec;
-
-      const rim = Math.pow(1 - nDotV, 2.4) * (0.28 + 0.45 * (1 - rough)) + nDotRim * 0.14;
-      outR += (0.55 * (1 - metal) + albR * metal) * rim * 0.42;
-      outG += (0.64 * (1 - metal) + albG * metal) * rim * 0.42;
-      outB += (0.82 * (1 - metal) + albB * metal) * rim * 0.45;
-
-      if (trans > 0.05) {
-        const sss = Math.pow(Math.max(0, 1 - nDotKey), 1.4) * trans * 0.38;
-        outR += albR * sss + sr * sss * 0.3;
-        outG += albG * sss + sg * sss * 0.3;
-        outB += albB * sss + sb * sss * 0.3;
+      if (pedVisible) {
+        const pedAA = clamp01((1.0 - pDist) * pedRx * 0.55 + 0.5);
+        // Dark brushed metallic bevel plinth shading
+        const edgeRim = Math.exp(-Math.pow((pDist - 0.92) / 0.08, 2));
+        const specSweep = Math.pow(Math.max(0, 1 - Math.abs(pdx + 0.25) * 1.4), 3) * (pdy > 0 ? 0.22 : 0.14);
+        const topHighlight = pdy < 0 ? 0.16 : 0.06;
+        const baseLuma = 0.07 + topHighlight + edgeRim * 0.26 + specSweep * (0.4 + 0.6 * (1 - Math.abs(pdy)));
+        outR = baseLuma * 0.92;
+        outG = baseLuma * 0.95;
+        outB = baseLuma * 1.02;
+        outA = pedAA;
       }
 
-      if (irid > 0.04) {
-        const phase = (1 - nDotV) * 5.2;
-        outR += irid * 0.28 * (0.5 + 0.5 * Math.cos(phase));
-        outG += irid * 0.26 * (0.5 + 0.5 * Math.cos(phase + 2.09));
-        outB += irid * 0.34 * (0.5 + 0.5 * Math.cos(phase + 4.18));
+      if (r2 <= 1.045) {
+        const rDist = Math.sqrt(r2);
+        const sphAA = clamp01((1.0 - rDist) * radius * 0.9 + 0.5);
+        if (sphAA > 0.005) {
+          const nx = dx / Math.max(1, rDist);
+          const ny = dy / Math.max(1, rDist);
+          const nz = Math.sqrt(Math.max(0, 1 - Math.min(1, r2)));
+
+          // Rotate normal into Shader Ball object frame for signature tilted lathe grooves
+          const rx1 = nx * cosT - ny * sinT;
+          const ry1 = nx * sinT + ny * cosT;
+          const objY = -(ry1 * cosX - nz * sinX);
+
+          // Upper double grooves + lower triple grooves matching createBallGeometry()
+          const gBand = (c, w) => Math.exp(-Math.pow((objY - c) / w, 4));
+          const groove =
+            gBand(0.46, 0.022) + gBand(0.39, 0.017) * 0.85 +
+            gBand(-0.55, 0.02) + gBand(-0.615, 0.02) + gBand(-0.68, 0.02);
+
+          // Perturb normal slightly across groove lip for specular catch
+          const gSlope =
+            (objY - 0.46) * gBand(0.46, 0.025) +
+            (objY - 0.39) * gBand(0.39, 0.02) +
+            (objY + 0.55) * gBand(-0.55, 0.022);
+          const gny = ny - gSlope * 3.8;
+          const gLen = Math.hypot(nx, gny, nz);
+          const snx = nx / gLen, sny = gny / gLen, snz = nz / gLen;
+
+          const u = Math.atan2(snx, snz) / Math.PI;
+          const v = Math.asin(Math.max(-1, Math.min(1, sny))) / Math.PI;
+          const micro = (hash2(Math.floor(u * 46), Math.floor(v * 46), 31) - 0.5) * (0.04 + flakes * 0.14);
+
+          const nDotKey = Math.max(0, snx * kx + sny * ky + snz * kz);
+          const nDotFill = Math.max(0, snx * fx + sny * fy + snz * fz);
+          const nDotRim = Math.max(0, snx * rx + sny * ry + snz * rz);
+          const nDotV = Math.max(0.02, snz);
+          const fresnel = Math.pow(1 - nDotV, 5);
+
+          const nDotH = Math.max(0, snx * nhx + sny * nhy + snz * nhz);
+          const denom = nDotH * nDotH * (alphaPow * alphaPow - 1) + 1;
+          const ggx = (alphaPow * alphaPow) / Math.max(0.001, Math.PI * denom * denom);
+          const specKey = Math.min(2.4, ggx * 0.24 * (0.35 + 0.65 * nDotKey));
+
+          const nDotHf = Math.max(0, snx * fhx + sny * fhy + snz * fhz);
+          const specFill = Math.pow(nDotHf, Math.max(4, 18 / (rough + 0.08))) * 0.18;
+
+          const coatDenom = nDotH * nDotH * (coatPow * coatPow - 1) + 1;
+          const coatGgx = (coatPow * coatPow) / Math.max(0.0005, Math.PI * coatDenom * coatDenom);
+          const coatSpec = coat * Math.min(2.6, coatGgx * 0.18);
+
+          const amb = 0.14 + 0.14 * (-sny * 0.5 + 0.5) + fresnel * 0.22;
+          const diffWeight = (1 - metal * 0.88) * (0.12 + 0.78 * nDotKey + 0.28 * nDotFill);
+
+          const albR = clamp01(br * (1 - flakes * 0.12) + sr * (flakes * 0.12 + micro * 0.6));
+          const albG = clamp01(bg * (1 - flakes * 0.12) + sg * (flakes * 0.12 + micro * 0.6));
+          const albB = clamp01(bb * (1 - flakes * 0.12) + sb * (flakes * 0.12 + micro * 0.6));
+
+          const specR = (1 - metal) * 0.96 + metal * albR;
+          const specG = (1 - metal) * 0.96 + metal * albG;
+          const specB = (1 - metal) * 0.98 + metal * albB;
+
+          const cavityShade = 1.0 - Math.min(0.68, groove * 0.68);
+          let sR = (albR * (diffWeight + amb * (0.45 + 0.55 * (1 - metal))) + specR * (specKey + specFill) + coatSpec) * cavityShade;
+          let sG = (albG * (diffWeight + amb * (0.45 + 0.55 * (1 - metal))) + specG * (specKey + specFill) + coatSpec) * cavityShade;
+          let sB = (albB * (diffWeight + amb * (0.45 + 0.55 * (1 - metal))) + specB * (specKey + specFill) + coatSpec) * cavityShade;
+
+          const rim = Math.pow(1 - nDotV, 2.4) * (0.28 + 0.45 * (1 - rough)) + nDotRim * 0.14;
+          sR += (0.55 * (1 - metal) + albR * metal) * rim * 0.42;
+          sG += (0.64 * (1 - metal) + albG * metal) * rim * 0.42;
+          sB += (0.82 * (1 - metal) + albB * metal) * rim * 0.45;
+
+          if (trans > 0.05) {
+            const sss = Math.pow(Math.max(0, 1 - nDotKey), 1.4) * trans * 0.38;
+            sR += albR * sss + sr * sss * 0.3;
+            sG += albG * sss + sg * sss * 0.3;
+            sB += albB * sss + sb * sss * 0.3;
+          }
+
+          if (irid > 0.04) {
+            const phase = (1 - nDotV) * 5.2;
+            sR += irid * 0.28 * (0.5 + 0.5 * Math.cos(phase));
+            sG += irid * 0.26 * (0.5 + 0.5 * Math.cos(phase + 2.09));
+            sB += irid * 0.34 * (0.5 + 0.5 * Math.cos(phase + 4.18));
+          }
+
+          if (emit > 0.02) {
+            const eStr = Math.min(1.4, emit * 0.55) * (0.55 + 0.45 * nDotV);
+            sR += er * eStr;
+            sG += eg * eStr;
+            sB += eb * eStr;
+          }
+
+          // Composite sphere AA edge cleanly over pedestal AA where overlapping
+          outR = sR * sphAA + outR * (1 - sphAA);
+          outG = sG * sphAA + outG * (1 - sphAA);
+          outB = sB * sphAA + outB * (1 - sphAA);
+          outA = Math.max(outA, sphAA);
+        }
       }
 
-      if (emit > 0.02) {
-        const eStr = Math.min(1.4, emit * 0.55) * (0.55 + 0.45 * nDotV);
-        outR += er * eStr;
-        outG += eg * eStr;
-        outB += eb * eStr;
-      }
-
-      const tone = (v) => {
-        const x = Math.max(0, v);
-        const mapped = (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);
-        return Math.round(Math.pow(clamp01(mapped), 1 / 2.15) * 255);
-      };
-
+      if (outA <= 0.005) continue;
       const i4 = (py * size + px) * 4;
       data[i4] = tone(outR);
       data[i4 + 1] = tone(outG);
       data[i4 + 2] = tone(outB);
-      data[i4 + 3] = Math.round(aa * 255);
+      data[i4 + 3] = Math.round(clamp01(outA) * 255);
     }
   }
   return { data, width: size, height: size };
 }
 
 /**
- * Instant transparent 88x88 Cook-Torrance PBR sphere bake on 2D Canvas.
- * Returns a circular PNG dataURL (transparent outside the orb) or null in headless Node mocks.
+ * Instant transparent 88x88 Cook-Torrance PBR Shader Ball + Pedestal bake on 2D Canvas.
  */
 export function bakeAnalyticalMaterialSphere(mat, size = 88) {
   if (!mat?.id) return null;
@@ -203,7 +281,7 @@ export function bakeAnalyticalMaterialSphere(mat, size = 88) {
   return url;
 }
 
-function ensureBakerSession(size = 96) {
+function ensureBakerSession(size = 112) {
   if (bakerSession) return bakerSession;
   if (typeof WebGL2RenderingContext === "undefined" && typeof WebGLRenderingContext === "undefined") {
     return null;
@@ -219,14 +297,14 @@ function ensureBakerSession(size = 96) {
     renderer.setSize(size, size, false);
     renderer.setClearColor(0x000000, 0);
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.1;
+    renderer.toneMappingExposure = 1.12;
 
     const pmrem = new THREE.PMREMGenerator(renderer);
     const envScene = new THREE.Scene();
-    envScene.background = new THREE.Color("#13161c");
+    envScene.background = new THREE.Color("#14171d");
     const cGeo = new THREE.PlaneGeometry(6, 4);
-    const cm1 = new THREE.MeshBasicMaterial({ color: new THREE.Color(3.8, 3.65, 3.4) });
-    const cm2 = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.4, 1.9, 2.6) });
+    const cm1 = new THREE.MeshBasicMaterial({ color: new THREE.Color(4.0, 3.85, 3.6) });
+    const cm2 = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.4, 1.9, 2.7) });
     const cm3 = new THREE.MeshBasicMaterial({ color: new THREE.Color(2.2, 1.85, 1.45) });
     const c1 = new THREE.Mesh(cGeo, cm1); c1.position.set(4.5, 5.2, 4.2); c1.lookAt(0, 0, 0);
     const c2 = new THREE.Mesh(cGeo, cm2); c2.position.set(-5.8, 2.2, -2.2); c2.lookAt(0, 0, 0);
@@ -237,25 +315,32 @@ function ensureBakerSession(size = 96) {
 
     const scene = new THREE.Scene();
     scene.environment = envRT.texture;
-    const cam = new THREE.PerspectiveCamera(34, 1, 0.1, 20);
-    cam.position.set(0, 0, 3.5);
-    cam.lookAt(0, 0, 0);
+    const cam = new THREE.PerspectiveCamera(34, 1, 0.1, 25);
+    cam.position.set(0, 0.35, 5.75);
+    cam.lookAt(0, -0.05, 0);
 
     const key = new THREE.DirectionalLight("#fff8eb", 2.4);
     key.position.set(3.2, 4.4, 4.0);
     const rim = new THREE.DirectionalLight("#9ac5ff", 1.15);
     rim.position.set(-3.8, 1.8, -3.2);
-    const hemi = new THREE.HemisphereLight("#eef3ff", "#17181d", 0.5);
+    const hemi = new THREE.HemisphereLight("#eef3ff", "#17181d", 0.55);
     scene.add(key, rim, hemi);
 
-    const sphereGeo = new THREE.SphereGeometry(0.95, 48, 36);
+    // Signature tilted Shader Ball + beveled brushed metallic pedestal matching Image 2 & Image 3
+    const sphereGeo = createBallGeometry();
     const mesh = new THREE.Mesh(sphereGeo, new THREE.MeshStandardMaterial());
-    scene.add(mesh);
+    mesh.position.set(0, 0.16, 0);
+    mesh.rotation.set(0.28, 0.44, -0.34);
 
-    const clipCanvas = document.createElement("canvas");
-    clipCanvas.width = size;
-    clipCanvas.height = size;
-    const clipCtx = clipCanvas.getContext("2d");
+    const pedGeo = createShaderBallPedestalGeometry(1.36);
+    const pedMat = new THREE.MeshStandardMaterial({
+      color: "#33363e",
+      roughness: 0.34,
+      metalness: 0.84,
+    });
+    const pedMesh = new THREE.Mesh(pedGeo, pedMat);
+    pedMesh.position.set(0, -1.24, 0);
+    scene.add(pedMesh, mesh);
 
     bakerSession = {
       size,
@@ -264,9 +349,9 @@ function ensureBakerSession(size = 96) {
       scene,
       cam,
       sphereGeo,
+      pedGeo,
+      pedMat,
       mesh,
-      clipCanvas,
-      clipCtx,
     };
     return bakerSession;
   } catch {
@@ -284,6 +369,8 @@ export function disposeMaterialIconBaker() {
   try {
     bakerSession.mesh.material?.dispose?.();
     bakerSession.sphereGeo.dispose();
+    bakerSession.pedGeo.dispose();
+    bakerSession.pedMat.dispose();
     bakerSession.envRT.dispose();
     bakerSession.renderer.dispose();
   } catch {}
@@ -291,12 +378,11 @@ export function disposeMaterialIconBaker() {
 }
 
 function renderOneWebglMaterial(mat) {
-  const s = ensureBakerSession(96);
+  const s = ensureBakerSession(112);
   if (!s) return null;
   let threeMat = null;
   try {
     const norm = normalizeMaterial(mat);
-    // Avoid Three.js transmission background pass turning circular alpha cutouts black
     norm.transmission = 0;
     threeMat = createMaterial(norm);
     s.mesh.material?.dispose?.();
@@ -304,17 +390,7 @@ function renderOneWebglMaterial(mat) {
     s.renderer.setClearColor(0x000000, 0);
     s.renderer.clear(true, true, true);
     s.renderer.render(s.scene, s.cam);
-
-    const cx = s.clipCtx;
-    const sz = s.size;
-    cx.clearRect(0, 0, sz, sz);
-    cx.save();
-    cx.beginPath();
-    cx.arc(sz * 0.5, sz * 0.5, sz * 0.465, 0, Math.PI * 2);
-    cx.clip();
-    cx.drawImage(s.renderer.domElement, 0, 0, sz, sz);
-    cx.restore();
-    return s.clipCanvas.toDataURL("image/png");
+    return s.renderer.domElement.toDataURL("image/png");
   } catch {
     threeMat?.dispose?.();
     return null;
@@ -360,8 +436,8 @@ function pumpBakeQueue() {
 }
 
 /**
- * Returns immediately available baked sphere PNG dataURL (WebGL cache -> analytical Cook-Torrance PBR bake)
- * and schedules an async WebGL shader upgrade when running in a browser WebGL environment.
+ * Returns immediately available baked Shader Ball PNG dataURL (WebGL cache -> analytical Shader Ball bake)
+ * and schedules an async Three.js WebGL shader upgrade when running in a browser WebGL environment.
  */
 export function getBakedMaterialIcon(mat, onUpgrade = null) {
   if (!mat?.id) return null;

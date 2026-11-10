@@ -41,6 +41,7 @@ import {
   listPatternStarterCatalog,
   buildMaterialPatternDocument,
 } from "../Engine/Patterns/StarterCatalogBridge.js";
+import { createShaderBallPedestalGeometry } from "../MaterialIconBaker.js";
 import {
   Construct,
   ConstructGlyph,
@@ -174,11 +175,15 @@ export function mountMaterialWorkspace(root, appBridge) {
     category: "All",
     search: "",
     shape: "shaderball",
-    backdrop: "obsidian",
+    backdrop: "softbox",
     autoRotate: false,
     lightAzimuth: 38,
     exposure: 1.08,
   };
+
+  const DEFAULT_CAM_POS = new THREE.Vector3(0.0, 0.36, 5.95);
+  const DEFAULT_CAM_TARGET = new THREE.Vector3(0, -0.14, 0);
+  const DEFAULT_CAM_DIST = DEFAULT_CAM_POS.distanceTo(DEFAULT_CAM_TARGET);
 
   let dragLayerId = null;
 
@@ -236,9 +241,8 @@ export function mountMaterialWorkspace(root, appBridge) {
     ]),
   );
 
-  // ----------------------------------------------------------------- CENTER: 3D STAGE
+  // ----------------------------------------------------------------- CENTER: CLEAN LOOK-DEV STAGE (MATCHING IMAGE 3)
   const centerCol = Construct("main", "studio-column viewport-column");
-  const toolbar = Construct("div", "viewport-toolbar");
 
   const shapeOptions = [
     ["Shader Ball", "shaderball"],
@@ -247,46 +251,87 @@ export function mountMaterialWorkspace(root, appBridge) {
     ["Chamfer Box", "box"],
     ["Plane", "plane"],
   ];
-  const shapeGroup = Construct("div", "toolbar-group");
-  const shapeSelect = Construct("select");
-  shapeSelect.style.cssText = "height:30px;padding:0 10px;background:#191a1d;border:1px solid var(--line);border-radius:999px;font-size:11.5px;";
+  const shapeSelect = Construct("select", "mw-select-pill");
+  shapeSelect.setAttribute("aria-label", "Preview Mesh Geometry");
   for (const [label, val] of shapeOptions) {
     const opt = Construct("option", null, label);
     opt.value = val;
     shapeSelect.append(opt);
   }
   shapeSelect.value = state.shape;
-  shapeGroup.append(shapeSelect);
 
   const backdropOptions = [
+    ["Studio softbox", "softbox", "#1f2022"],
     ["Obsidian", "obsidian", "#0d0e11"],
     ["Neutral", "neutral", "#1f2126"],
     ["Warm", "warm", "#221d18"],
     ["Daylight", "daylight", "#2a313a"],
   ];
-  const bgGroup = Construct("div", "toolbar-group");
-  const bgSelect = Construct("select");
-  bgSelect.style.cssText = shapeSelect.style.cssText;
+  const bgSelect = Construct("select", "mw-select-pill");
+  bgSelect.setAttribute("aria-label", "Studio Environment");
   for (const [label, val] of backdropOptions) {
     const opt = Construct("option", null, label);
     opt.value = val;
     bgSelect.append(opt);
   }
-  bgGroup.append(bgSelect);
+  bgSelect.value = state.backdrop;
 
-  const btnRotate = Construct("button", "pill-btn", [ConstructGlyph("Rotate"), Construct("span", null, "Spin")]);
+  const btnRotate = Construct("button", "pill-btn mw-mini-pill", [ConstructGlyph("Rotate"), Construct("span", null, "Spin")]);
   btnRotate.type = "button";
-  const btnResetCam = Construct("button", "pill-btn", [ConstructGlyph("Focus"), Construct("span", null, "Reset View")]);
-  btnResetCam.type = "button";
-  const btnSendToPaint = Construct("button", "pill-btn accent", [ConstructGlyph("Brush"), Construct("span", null, "Send to Paint")]);
+  const btnSendToPaint = Construct("button", "pill-btn accent mw-mini-pill", [ConstructGlyph("Brush"), Construct("span", null, "Use in Paint")]);
   btnSendToPaint.type = "button";
 
-  toolbar.append(shapeGroup, bgGroup, btnRotate, btnResetCam, Construct("div", "toolbar-spacer"), btnSendToPaint);
+  const stage = Construct("div", "viewport-stage mw-stage");
 
-  const stage = Construct("div", "viewport-stage");
-  const stageHint = Construct("div", "viewport-hud-bottom", "Drag to orbit · Scroll to zoom · Right-drag to pan");
-  stage.append(stageHint);
-  centerCol.append(toolbar, stage);
+  // Top-left floating editorial collection + large title + description (matching Image 3)
+  const mwHeroKicker = Construct("div", "mw-hero-kicker", "01 / MATERIAL COLLECTION");
+  const mwHeroTitle = Construct("h1", "mw-hero-title", state.params.name || "Material");
+  const mwHeroDesc = Construct("p", "mw-hero-desc", state.params.description || "Physically based procedural surface shader.");
+  const mwStageHero = Construct("div", "mw-stage-hero", [mwHeroKicker, mwHeroTitle, mwHeroDesc]);
+
+  const mwTopActions = Construct("div", "mw-stage-top-actions", [btnRotate, btnSendToPaint]);
+
+  // Bottom-center floating zoom capsule + Reset view + selector pills (matching Image 3)
+  const btnZoomOut = Construct("button", "mw-zoom-btn", "−");
+  btnZoomOut.type = "button";
+  btnZoomOut.title = "Zoom out";
+  const zoomReadout = Construct("span", "mw-zoom-pct", "62%");
+  const btnZoomIn = Construct("button", "mw-zoom-btn", "+");
+  btnZoomIn.type = "button";
+  btnZoomIn.title = "Zoom in";
+  const zoomPill = Construct("div", "mw-zoom-pill", [btnZoomOut, zoomReadout, btnZoomIn]);
+  const btnResetCam = Construct("button", "mw-reset-link", "Reset view");
+  btnResetCam.type = "button";
+  const zoomRow = Construct("div", "mw-zoom-row", [zoomPill, btnResetCam]);
+
+  const wrapSelectPill = (sel) =>
+    Construct("div", "mw-select-wrap", [
+      sel,
+      ConstructGlyph("ChevronDown", "glyph mw-select-caret"),
+    ]);
+  const selectorRow = Construct("div", "mw-selector-row", [
+    wrapSelectPill(shapeSelect),
+    wrapSelectPill(bgSelect),
+  ]);
+  const bottomDock = Construct("div", "mw-bottom-dock", [zoomRow, selectorRow]);
+
+  stage.append(mwStageHero, mwTopActions, bottomDock);
+  centerCol.append(stage);
+
+  function syncStageHeroCopy() {
+    const p = state.params;
+    const cat = p.category || "Material";
+    const catList = MATERIAL_CATALOG.filter((m) => (m.category || "Material") === cat);
+    const idx = Math.max(1, catList.findIndex((m) => m.id === p.id) + 1);
+    const idxStr = String(idx).padStart(2, "0");
+    mwHeroKicker.textContent = `${idxStr} / ${cat} COLLECTION`;
+    mwHeroTitle.textContent = p.name || "Procedural Material";
+    const rec = getRecipe(p);
+    mwHeroDesc.textContent =
+      p.description ||
+      rec?.description ||
+      `${p.label || rec?.title || "PBR"} · Roughness ${(p.roughness ?? 0.4).toFixed(2)}, Metalness ${Math.round((p.metalness ?? 0) * 100)}%.`;
+  }
 
   // ----------------------------------------------------------------- RIGHT: INSPECTOR
   const rightCol = Construct("aside", "studio-column");
@@ -322,16 +367,16 @@ export function mountMaterialWorkspace(root, appBridge) {
   stage.prepend(renderer.domElement);
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color("#0d0e11");
+  scene.background = new THREE.Color("#1f2022");
   const envTex = createStudioEnvTexture(renderer);
   scene.environment = envTex;
 
-  const camera = new THREE.PerspectiveCamera(36, 1, 0.1, 80);
-  camera.position.set(2.9, 1.9, 3.6);
+  const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 80);
+  camera.position.copy(DEFAULT_CAM_POS);
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
   controls.dampingFactor = 0.08;
-  controls.target.set(0, 0.1, 0);
+  controls.target.copy(DEFAULT_CAM_TARGET);
 
   const keyLight = new THREE.DirectionalLight("#fff8eb", 2.5);
   keyLight.castShadow = true;
@@ -344,15 +389,30 @@ export function mountMaterialWorkspace(root, appBridge) {
   scene.add(keyLight, fillLight, rimLight, hemiLight);
 
   const pedestal = new THREE.Mesh(
-    new THREE.CylinderGeometry(2.1, 2.2, 0.12, 48),
-    new THREE.MeshStandardMaterial({ color: "#15161a", roughness: 0.85, metalness: 0.08 }),
+    createShaderBallPedestalGeometry(1.52),
+    new THREE.MeshStandardMaterial({ color: "#34373e", roughness: 0.34, metalness: 0.86 }),
   );
-  pedestal.position.y = -1.52;
+  pedestal.position.y = -1.42;
   pedestal.receiveShadow = true;
   scene.add(pedestal);
 
   let sampleMesh = null;
   let activeMaterial = null;
+
+  function syncZoomReadout() {
+    const dist = Math.max(1.5, camera.position.distanceTo(controls.target));
+    const pct = Math.max(15, Math.min(250, Math.round((DEFAULT_CAM_DIST / dist) * 62)));
+    zoomReadout.textContent = `${pct}%`;
+  }
+
+  function applyZoomFactor(scale) {
+    const dir = camera.position.clone().sub(controls.target);
+    const nextDist = Math.max(2.1, Math.min(16, dir.length() * scale));
+    dir.setLength(nextDist);
+    camera.position.copy(controls.target).add(dir);
+    controls.update();
+    syncZoomReadout();
+  }
 
   function updateLights() {
     const rad = (state.lightAzimuth * Math.PI) / 180;
@@ -387,9 +447,13 @@ export function mountMaterialWorkspace(root, appBridge) {
     if (activeMaterial) activeMaterial.dispose();
     activeMaterial = mat;
     sampleMesh = new THREE.Mesh(geo, mat);
+    if (state.shape === "shaderball") {
+      sampleMesh.rotation.set(0.28, 0.44, -0.34);
+    }
     sampleMesh.castShadow = true;
     sampleMesh.receiveShadow = true;
     scene.add(sampleMesh);
+    syncStageHeroCopy();
   }
 
   function syncMaterialLive() {
@@ -402,6 +466,7 @@ export function mountMaterialWorkspace(root, appBridge) {
       activeMaterial = nextMat;
       if (old && old !== nextMat) old.dispose();
     }
+    syncStageHeroCopy();
   }
 
   function syncPatternUniformsFast() {
@@ -1717,18 +1782,22 @@ export function mountMaterialWorkspace(root, appBridge) {
   bgSelect.addEventListener("change", () => {
     state.backdrop = bgSelect.value;
     const found = backdropOptions.find(([, val]) => val === state.backdrop);
-    scene.background = new THREE.Color(found ? found[2] : "#0d0e11");
+    scene.background = new THREE.Color(found ? found[2] : "#1f2022");
     renderLeftOutliner();
   });
   btnRotate.addEventListener("click", () => {
     state.autoRotate = !state.autoRotate;
     btnRotate.classList.toggle("active", state.autoRotate);
   });
+  btnZoomOut.addEventListener("click", () => applyZoomFactor(1.16));
+  btnZoomIn.addEventListener("click", () => applyZoomFactor(0.86));
   btnResetCam.addEventListener("click", () => {
-    camera.position.set(2.9, 1.9, 3.6);
-    controls.target.set(0, 0.1, 0);
+    camera.position.copy(DEFAULT_CAM_POS);
+    controls.target.copy(DEFAULT_CAM_TARGET);
     controls.update();
+    syncZoomReadout();
   });
+  controls.addEventListener?.("change", syncZoomReadout);
   btnSendToPaint.addEventListener("click", () => appBridge.sendMaterialToPaint(state.params));
 
   const resizeObserver = new ResizeObserver(() => {
@@ -1742,6 +1811,7 @@ export function mountMaterialWorkspace(root, appBridge) {
 
   updateLights();
   rebuildMeshAndMaterial();
+  syncZoomReadout();
   renderLeftOutliner();
   rebuildInspector();
 
@@ -1775,6 +1845,8 @@ export function mountMaterialWorkspace(root, appBridge) {
       envTex.dispose();
       if (sampleMesh) sampleMesh.geometry.dispose();
       if (activeMaterial) activeMaterial.dispose();
+      pedestal.geometry.dispose();
+      pedestal.material.dispose();
       renderer.dispose();
       root.innerHTML = "";
     },

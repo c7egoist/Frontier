@@ -1,9 +1,9 @@
 /*==========================================================================================================================================
                                                          VIEWPORTHEADERKIT.JS
 ==========================================================================================================================================*/
-/* Shared two-tier AlloyStudio / Experimental viewport header builder unified across Pattern, Stamp & Texture Paint:
-   Band 1 (.vp-doc-bar.se-header-bar):  [ Icon ] [ Editable Canvas Name + MODE ] | [ Size ] [ View ] ... [ Undo/Redo ] [ Save ▾ ] [ Primary CTAs ]
-   Band 2 (.vp-tools-bar.tp-authoring-bar): [ .tp-tool-group: workspace tools ] ... [ contextual utilities / status ] */
+/* Shared two-tier AlloyStudio / Experimental viewport header builder unified across Pattern, Stamp & Texture Paint (matching Image 1):
+   Band 1 (.vp-doc-bar.se-header-bar):  [ Eyebrow + Large Borderless Canvas Name ] ... [ Status ] [ Size ] [ View ] [ Undo/Redo ] [ Save ▾ ] [ CTAs ]
+   Band 2 (.vp-tools-bar.tp-authoring-bar): [ .tp-tool-group: Circular Tool Buttons ] [ More tools ▾ ] ... [ contextual trailing ] */
 
 import { Construct, ConstructGlyph } from "../StudioControls.js";
 
@@ -13,6 +13,8 @@ export function createViewportHeader(parentCol, opts = {}) {
   const {
     workspace = "pattern",
     badgeText = "PATTERN",
+    eyebrowText = "",
+    draftText = "Unsaved changes",
     iconGlyph = "Pattern",
     canvasName = "Untitled",
     onRename = null,
@@ -28,6 +30,8 @@ export function createViewportHeader(parentCol, opts = {}) {
     saveItems = [],
     primaryActions = [],
     tools = [],
+    moreTools = [],
+    moreControls = [],
     toolGroupClass = "tp-tool-group",
     onToolSelect = null,
     toolTrailing = [],
@@ -36,7 +40,11 @@ export function createViewportHeader(parentCol, opts = {}) {
   const docBar = Construct("div", "viewport-toolbar vp-doc-bar se-header-bar");
   docBar.dataset.workspaceHeader = workspace;
 
-  const sceneIcon = Construct("div", "tp-scene-icon", ConstructGlyph(iconGlyph));
+  const eyebrowEl = Construct(
+    "span",
+    "vp-hero-eyebrow",
+    eyebrowText || `${badgeText} / ${resolution} UNITS`,
+  );
 
   const nameInput = document.createElement("input");
   nameInput.type = "text";
@@ -46,7 +54,13 @@ export function createViewportHeader(parentCol, opts = {}) {
   nameInput.title = "Click to rename canvas";
 
   const modeBadge = Construct("span", "vp-mode-badge", badgeText);
+  const sceneIcon = Construct("div", "tp-scene-icon", ConstructGlyph(iconGlyph));
   const docPill = Construct("div", "se-doc-pill", [nameInput, modeBadge]);
+
+  const heroBlock = Construct("div", "vp-hero-block", [
+    eyebrowEl,
+    Construct("div", "vp-hero-title-row", [sceneIcon, docPill]),
+  ]);
 
   nameInput.addEventListener("change", () => {
     const next = String(nameInput.value || "").trim() || "Untitled";
@@ -54,7 +68,9 @@ export function createViewportHeader(parentCol, opts = {}) {
     onRename?.(next);
   });
 
-  // Size / Resolution field (AlloyStudio .tp-header-field pill)
+  const statusText = Construct("span", "vp-draft-status", draftText);
+
+  // Size / Resolution field
   const resSelect = Construct("select", "se-header-select se-res-select");
   resSelect.setAttribute("aria-label", "Canvas Size");
   resSelect.title = "Canvas & Export Resolution";
@@ -110,7 +126,6 @@ export function createViewportHeader(parentCol, opts = {}) {
     if (onRedo) redoBtn.addEventListener("click", onRedo);
   }
 
-  // Save button + dropdown menu
   const saveWrap = Construct("div", "se-save-wrap");
   const saveBtn = Construct("button", "pill-btn se-save-btn", [
     ConstructGlyph("Save"),
@@ -156,48 +171,96 @@ export function createViewportHeader(parentCol, opts = {}) {
     saveBtn.classList.toggle("active", nextOpen);
   });
 
-  const onDocDown = (e) => {
-    if (!saveMenu.hidden && !saveWrap.contains?.(e.target)) closeSaveMenu();
-  };
-  document.addEventListener("pointerdown", onDocDown);
-
-  docBar.append(
-    sceneIcon,
-    docPill,
+  const rightControls = Construct("div", "vp-doc-actions", [
+    statusText,
     sizeField,
     viewField,
-    Construct("div", "toolbar-spacer"),
     undoBtn,
     redoBtn,
     saveWrap,
     ...primaryActions,
-  );
+  ]);
+  docBar.append(heroBlock, Construct("div", "toolbar-spacer"), rightControls);
 
-  // Band 2: Unified AlloyStudio Tools Ribbon ([ tools ])
+  // Band 2: Image 1 Floating Circular Tool Dock ([ circles ] [ More tools ])
   const toolsBar = Construct("div", "vp-tools-bar tp-authoring-bar");
   const toolGroup = Construct("div", toolGroupClass);
   toolGroup.setAttribute("role", "group");
   toolGroup.setAttribute("aria-label", "Workspace tools");
 
   const toolButtons = new Map();
-  for (const t of tools) {
-    const cls = t.className || t.buttonClass || "se-tool-btn";
+  const makeToolButton = (t, inMenu = false) => {
+    const baseCls = inMenu ? "vp-more-tool-item" : t.className || t.buttonClass || "se-tool-btn";
+    const circleCls = inMenu ? "" : " vp-tool-circle";
+    const extraCls = !inMenu && t.extra ? " vp-tool-extra" : "";
     const children = [
       ConstructGlyph(t.glyph),
-      Construct("span", null, t.label),
+      Construct("span", inMenu ? "vp-tool-label-vis" : "vp-tool-label-sr", t.label),
     ];
-    if (t.kbd) children.push(Construct("kbd", "vp-tool-kbd", t.kbd));
-    const btn = Construct("button", cls + (t.active ? " active" : ""), children);
+    if (t.kbd && inMenu) children.push(Construct("kbd", "vp-tool-kbd", t.kbd));
+    const btn = Construct("button", baseCls + circleCls + extraCls + (t.active ? " active" : ""), children);
     btn.type = "button";
     btn.title = t.title || (t.kbd ? `${t.label} (${t.kbd})` : t.label);
-    if (t.datasetKey) btn.dataset[t.datasetKey] = t.id;
+    if (!inMenu && t.datasetKey) btn.dataset[t.datasetKey] = t.id;
+    btn.setAttribute("aria-label", t.label);
     btn.setAttribute("aria-pressed", t.active ? "true" : "false");
-    btn.addEventListener("click", () => onToolSelect?.(t.id));
-    toolButtons.set(t.id, btn);
-    toolGroup.append(btn);
+    btn.addEventListener("click", () => {
+      onToolSelect?.(t.id);
+      if (inMenu) closeMoreMenu();
+    });
+    if (!inMenu) {
+      toolButtons.set(t.id, btn);
+    } else {
+      if (!menuToolButtons.has(t.id)) menuToolButtons.set(t.id, []);
+      menuToolButtons.get(t.id).push(btn);
+    }
+    return btn;
+  };
+
+  const menuToolButtons = new Map();
+  for (const t of tools) {
+    toolGroup.append(makeToolButton(t, false));
+  }
+  toolsBar.append(toolGroup);
+
+  let moreWrap = null;
+  let moreBtn = null;
+  let moreMenu = null;
+  const closeMoreMenu = () => {
+    if (!moreMenu || !moreBtn) return;
+    moreMenu.hidden = true;
+    moreBtn.classList.remove("active");
+  };
+
+  if (moreTools.length || moreControls.length) {
+    moreWrap = Construct("div", "vp-more-tools-wrap");
+    moreBtn = Construct("button", "vp-more-tools-btn", "More tools");
+    moreBtn.type = "button";
+    moreBtn.title = "Additional shapes, grid, snapping & stage tools";
+    moreMenu = Construct("div", "vp-more-tools-menu");
+    moreMenu.hidden = true;
+
+    if (moreTools.length) {
+      const mGrid = Construct("div", "vp-more-tools-grid");
+      for (const mt of moreTools) mGrid.append(makeToolButton(mt, true));
+      moreMenu.append(mGrid);
+    }
+    if (moreControls.length) {
+      const mCtrls = Construct("div", "vp-more-tools-controls");
+      for (const mc of moreControls) mCtrls.append(mc);
+      moreMenu.append(mCtrls);
+    }
+
+    moreBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const next = moreMenu.hidden;
+      moreMenu.hidden = !next;
+      moreBtn.classList.toggle("active", next);
+    });
+    moreWrap.append(moreBtn, moreMenu);
+    toolsBar.append(moreWrap);
   }
 
-  toolsBar.append(toolGroup);
   if (toolTrailing.length) {
     const tail = Construct("div", "vp-tools-tail", [
       Construct("span", "vp-bar-divider"),
@@ -205,6 +268,12 @@ export function createViewportHeader(parentCol, opts = {}) {
     ]);
     toolsBar.append(tail);
   }
+
+  const onDocDown = (e) => {
+    if (!saveMenu.hidden && !saveWrap.contains?.(e.target)) closeSaveMenu();
+    if (moreMenu && !moreMenu.hidden && !moreWrap?.contains?.(e.target)) closeMoreMenu();
+  };
+  document.addEventListener("pointerdown", onDocDown);
 
   parentCol.append(docBar, toolsBar);
 
@@ -214,17 +283,27 @@ export function createViewportHeader(parentCol, opts = {}) {
     toolGroup,
     nameInput,
     docPill,
+    eyebrowEl,
+    statusText,
     resSelect,
     viewSelect,
     saveBtn,
     saveMenu,
     undoBtn,
     redoBtn,
+    moreBtn,
+    moreMenu,
     toolButtons,
     setName(next) {
       if (document.activeElement !== nameInput) {
         nameInput.value = next || "Untitled";
       }
+    },
+    setEyebrow(txt) {
+      eyebrowEl.textContent = txt;
+    },
+    setDraftStatus(txt) {
+      statusText.textContent = txt;
     },
     setResolution(next) {
       resSelect.value = String(next);
@@ -242,6 +321,13 @@ export function createViewportHeader(parentCol, opts = {}) {
         btn.classList.toggle("active", isActive);
         btn.setAttribute("aria-pressed", isActive ? "true" : "false");
       }
+      for (const [tid, list] of menuToolButtons) {
+        const isActive = tid === id;
+        for (const btn of list) {
+          btn.classList.toggle("active", isActive);
+          btn.setAttribute("aria-pressed", isActive ? "true" : "false");
+        }
+      }
     },
     setSaveItemMeta(id, txt) {
       const btn = saveItemNodes.get(id);
@@ -251,6 +337,7 @@ export function createViewportHeader(parentCol, opts = {}) {
     closeSaveMenu,
     dispose() {
       closeSaveMenu();
+      closeMoreMenu();
       document.removeEventListener("pointerdown", onDocDown);
     },
   };

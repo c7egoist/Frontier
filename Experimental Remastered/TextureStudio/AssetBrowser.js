@@ -309,7 +309,7 @@ export function createAssetBrowser(hostOrOpts, maybeBridge) {
   searchWrap.append(ConstructGlyph("Search", "glyph cb-search-icon"));
   const searchInp = Construct("input", "cb-search");
   searchInp.type = "search";
-  searchInp.placeholder = "Filter assets...";
+  searchInp.placeholder = "Search materials...";
   searchInp.addEventListener("input", () => {
     state.search = searchInp.value;
     renderCenterAndInspector();
@@ -370,10 +370,15 @@ export function createAssetBrowser(hostOrOpts, maybeBridge) {
   const body = Construct("div", "cb-body");
   const treePane = Construct("aside", "cb-tree-pane");
   const centerPane = Construct("div", "cb-center-pane");
+  const familyPillsStrip = Construct("div", "cb-family-pills");
+  const collectionBar = Construct("div", "cb-collection-bar");
+  const collectionTitle = Construct("span", "cb-collection-title", "THE ESSENTIAL COLLECTION");
+  const collectionCount = Construct("span", "cb-collection-count", "0");
+  collectionBar.append(collectionTitle, collectionCount);
   const gridScroll = Construct("div", "cb-grid-scroll");
   const grid = Construct("div", "cb-grid");
   gridScroll.append(grid);
-  centerPane.append(gridScroll);
+  centerPane.append(familyPillsStrip, collectionBar, gridScroll);
   const inspectorPane = Construct("aside", "cb-inspector");
   body.append(treePane, centerPane, inspectorPane);
   root.append(resizeNotch, header, body);
@@ -721,11 +726,52 @@ export function createAssetBrowser(hostOrOpts, maybeBridge) {
 
   function renderGrid() {
     clearNode(grid);
+    clearNode(familyPillsStrip);
     grid.className = state.viewMode === "list" ? "cb-list" : "cb-grid";
+
+    const searchPlaceholders = {
+      materials: "Search materials...",
+      patterns: "Search patterns...",
+      stamps: "Search stamps...",
+      meshes: "Search meshes...",
+    };
+    searchInp.placeholder = searchPlaceholders[state.activeCategory] || "Search assets...";
+
+    const allPillsLabel = {
+      materials: "All materials",
+      patterns: "All patterns",
+      stamps: "All stamps",
+      meshes: "All meshes",
+    };
+    const fams = ["All", ...getFamiliesFor(state.activeCategory).map((f) => f.name)];
+    for (const fam of fams) {
+      const chip = Construct(
+        "button",
+        `cb-family-chip${state.activeFamily === fam ? " active" : ""}`,
+        fam === "All" ? (allPillsLabel[state.activeCategory] || "All") : fam,
+      );
+      chip.type = "button";
+      chip.dataset.family = fam;
+      chip.addEventListener("click", () => {
+        state.activeFamily = fam;
+        renderTreePane();
+        renderCenterAndInspector();
+      });
+      familyPillsStrip.append(chip);
+    }
 
     const filtered = getFilteredItems();
     const total = getItems().length;
     countBadge.textContent = filtered.length === total ? `${total}` : `${filtered.length}/${total}`;
+
+    const collectionLabels = {
+      materials: state.activeFamily === "All" ? "THE ESSENTIAL COLLECTION" : `${state.activeFamily.toUpperCase()} COLLECTION`,
+      patterns: state.activeFamily === "All" ? "PATTERN LIBRARY" : `${state.activeFamily.toUpperCase()} PATTERNS`,
+      stamps: state.activeFamily === "All" ? "DECAL STAMPS COLLECTION" : `${state.activeFamily.toUpperCase()} STAMPS`,
+      meshes: state.activeFamily === "All" ? "LOOK-DEV STUDY MESHES" : `${state.activeFamily.toUpperCase()} MESHES`,
+    };
+    collectionTitle.textContent = collectionLabels[state.activeCategory] || "ASSET COLLECTION";
+    collectionCount.textContent = String(filtered.length);
 
     const visible = filtered.slice(0, 140);
     if (!visible.length) {
@@ -744,7 +790,7 @@ export function createAssetBrowser(hostOrOpts, maybeBridge) {
       card.setAttribute("data-asset-id", item.id);
       card.title = `${item.name} (${item.family}) — Click to inspect · Double-click or drag to Stage`;
 
-      const iconEl = createAssetIconElement(item, isList ? 32 : 66);
+      const iconEl = createAssetIconElement(item, isList ? 34 : 76);
       const labelEl = Construct("div", "cb-card-name", item.name);
 
       if (isList) {
@@ -758,7 +804,12 @@ export function createAssetBrowser(hostOrOpts, maybeBridge) {
         const metricEl = Construct("span", "cb-list-metric", metricText);
         card.append(iconEl, textCol, metricEl);
       } else {
-        card.append(iconEl, labelEl);
+        const checkBadge = Construct("span", "cb-card-check", ConstructGlyph("Check", "glyph"));
+        const cardFooter = Construct("div", "cb-card-footer", [
+          labelEl,
+          Construct("div", "cb-card-sub", item.family),
+        ]);
+        card.append(checkBadge, iconEl, cardFooter);
       }
 
       card.addEventListener("dragstart", (e) => {

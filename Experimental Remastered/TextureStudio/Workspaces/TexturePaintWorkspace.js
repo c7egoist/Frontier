@@ -858,8 +858,10 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   const headerUI = createViewportHeader(centerCol, {
     workspace: "paint",
     badgeText: "3D PBR",
+    eyebrowText: `3D + 2D PAINT / ${state.exportResolution} UNITS`,
+    draftText: "Unsaved changes",
     iconGlyph: "Brush",
-    canvasName: state.doc.name || "Teapot Paint",
+    canvasName: state.doc.name || "Untitled paint",
     onRename(next) {
       state.doc.name = next;
       rebuildInspector();
@@ -903,8 +905,15 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     ],
     toolGroupClass: "tp-tool-group toolbar-group",
     onToolSelect: (id) => selectTool(id),
-    toolTrailing: [btnToolMenu, meshSelect, chanSelect, btnImportMesh, importInp, gpuPill],
+    moreControls: [btnToolMenu, meshSelect, chanSelect, btnImportMesh, importInp],
+    toolTrailing: [gpuPill],
   });
+
+  const stageShell = Construct("div", "se-stage-shell tp-stage-shell");
+  const paintStageTopBar = Construct("div", "se-stage-topbar");
+  const paintStageTitle = Construct("span", "se-stage-title", `PAINT CANVAS   ${state.exportResolution} × ${state.exportResolution}`);
+  const paintStageMeta = Construct("span", "se-stage-meta", `${meshSelect.options?.[meshSelect.selectedIndex]?.text || state.meshId} · Lit PBR`);
+  paintStageTopBar.append(paintStageTitle, paintStageMeta);
 
   const stage = Construct("div", "viewport-stage");
   const splitBox = Construct("div", "viewport-split-2d");
@@ -912,7 +921,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   const pane3D = Construct("div", "viewport-split-pane");
   pane3D.style.cssText = "background:transparent;";
   pane3D.append(Construct("span", "pane-badge", "3D Surface Viewport"));
-  const pane2D = Construct("div", "viewport-split-pane");
+  const pane2D = Construct("div", "viewport-split-pane tp-uv-pane");
   pane2D.style.cssText = "background:transparent;cursor:crosshair;";
   pane2D.append(Construct("span", "pane-badge", "2D UV Texture Canvas"));
 
@@ -920,9 +929,23 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   pane2D.append(uvStampOverlay);
 
   splitBox.append(pane3D, pane2D);
-  const hudHelp = Construct("div", "viewport-hud-bottom", "Drag mesh to paint · V = Move/Scale/Rotate Stamps · Right-click or Q/Tab = Tool Inspector · B/E/G/S/I/V tools");
-  stage.append(splitBox, hudHelp);
-  centerCol.append(stage);
+  stage.append(splitBox);
+
+  const paintStageFooter = Construct("div", "se-stage-footer");
+  const paintStageHints = Construct(
+    "span",
+    "se-stage-hints",
+    "Drag mesh to paint · V move/scale/rotate stamps · Right-click or Q Tool Inspector · B/E/G/S/I/V",
+  );
+  const paintToolReadout = Construct(
+    "span",
+    "se-sel-count",
+    `${TOOL_LABELS[state.brush.tool] || "Brush"} · ${Math.round(state.brush.size || 24)}px`,
+  );
+  paintStageFooter.append(paintStageHints, paintToolReadout);
+
+  stageShell.append(paintStageTopBar, stage, paintStageFooter);
+  centerCol.append(stageShell);
 
   // RIGHT: LAYER INSPECTOR (Right-click or Q opens Brush & Tool Inspector cleanly without clutter)
   const rightCol = Construct("aside", "studio-column");
@@ -2621,6 +2644,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   function selectTool(id) {
     state.brush.tool = id;
     headerUI.setActiveTool(id);
+    paintToolReadout.textContent = `${TOOL_LABELS[id] || "Brush"} · ${Math.round((state.brush.size || 0.14) * 100)}px`;
     rebuildInspector();
     refreshComposite();
     if (activeToolPopup) openToolPopup(null, null, true);
@@ -3642,6 +3666,8 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     if (!STUDIO_RESOLUTIONS.includes(nextExportRes)) return;
     state.exportResolution = nextExportRes;
     headerUI.setResolution(nextExportRes);
+    headerUI.setEyebrow(`3D + 2D PAINT / ${nextExportRes} UNITS`);
+    paintStageTitle.textContent = `PAINT CANVAS   ${nextExportRes} × ${nextExportRes}`;
     headerUI.setSaveItemMeta("base", `${nextExportRes}px`);
     headerUI.setSaveItemMeta("normal", `${nextExportRes}px`);
     headerUI.setSaveItemMeta("pbr", `${nextExportRes}px`);

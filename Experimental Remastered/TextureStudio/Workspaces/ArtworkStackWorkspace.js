@@ -324,11 +324,19 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     Toast("Redone");
   }
 
+  const primaryToolIds = new Set(["select", "square", "circle", "diamond", "triangle", "text", "pan"]);
+  const primaryToolList = VECTOR_TOOLS.filter((t) => primaryToolIds.has(t.id));
+  const extraToolList = VECTOR_TOOLS.filter((t) => !primaryToolIds.has(t.id));
+
   const headerUI = createViewportHeader(centerCol, {
     workspace: mode,
     badgeText: isPattern ? "PATTERN" : "STAMP",
+    eyebrowText: isPattern
+      ? `REPEAT TILE / ${state.doc.size || ARTWORK_SIZE} UNITS`
+      : `DECAL STAMP / ${state.doc.size || ARTWORK_SIZE} UNITS`,
+    draftText: "Unsaved changes",
     iconGlyph: isPattern ? "Pattern" : "Stamp",
-    canvasName: state.doc.name || (isPattern ? "Pattern" : "Stamp"),
+    canvasName: state.doc.name || (isPattern ? "Untitled pattern" : "Untitled stamp"),
     onRename(next) {
       if (state.doc.name === next) return;
       pushUndo();
@@ -343,6 +351,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
       state.resolution = val;
       headerUI.setSaveItemMeta("png", `${val}px`);
       headerUI.setSaveItemMeta("pbr", `${Math.min(2048, val)}px`);
+      viewTitle.textContent = `${isPattern ? "VECTOR CANVAS" : "STAMP CANVAS"}   ${val} × ${val}`;
       evaluateAndRender(true);
       Toast(`Resolution set to ${val} × ${val}px`);
     },
@@ -409,29 +418,31 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
       glyph: t.glyph,
       kbd: t.key,
       datasetKey: "vectorTool",
+      extra: !primaryToolIds.has(t.id),
       active: state.vectorTool === t.id,
     })),
+    moreTools: extraToolList.map((t) => ({
+      id: t.id,
+      label: t.label,
+      glyph: t.glyph,
+      kbd: t.key,
+      active: state.vectorTool === t.id,
+    })),
+    moreControls: [btnGrid, btnAxes, snapSelect],
     onToolSelect: (id) => selectVectorTool(id),
-    toolTrailing: [btnGrid, btnAxes, snapSelect],
   });
   syncUndoState();
 
-  // Interactive SVG Stage Shell
+  // Interactive SVG Stage Shell (Olive-tinted frame matching Image 1)
   const stage = Construct("div", "se-stage-shell");
-  const seViewport = Construct("div", "se-viewport");
 
-  const rulerCorner = Construct("div", "se-ruler-corner", "PX");
-  const rulerXWrap = Construct("div", "se-ruler-x");
-  const rulerXCanvas = document.createElement("canvas");
-  rulerXWrap.append(rulerXCanvas);
-
-  const rulerYWrap = Construct("div", "se-ruler-y");
-  const rulerYCanvas = document.createElement("canvas");
-  rulerYWrap.append(rulerYCanvas);
-
-  // Floating zoom HUD (.se-view-controls matching reference ShapeEditorCanvas.jsx)
+  const stageTopBar = Construct("div", "se-stage-topbar");
+  const viewTitle = Construct(
+    "span",
+    "se-stage-title",
+    `${isPattern ? "VECTOR CANVAS" : "STAMP CANVAS"}   ${state.doc.size || ARTWORK_SIZE} × ${state.doc.size || ARTWORK_SIZE}`,
+  );
   const viewControls = Construct("div", "se-view-controls");
-  const viewTitle = Construct("strong", null, `${isPattern ? "VECTOR CANVAS" : "STAMP VECTOR"} ${state.resolution}×${state.resolution}`);
   const btnZoomOut = Construct("button", null, "−");
   btnZoomOut.type = "button";
   const zoomReadout = Construct("span", "tabular", "100%");
@@ -439,7 +450,19 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
   btnZoomIn.type = "button";
   const btnZoomFit = Construct("button", "se-fit-btn", "Fit");
   btnZoomFit.type = "button";
-  viewControls.append(viewTitle, btnZoomOut, zoomReadout, btnZoomIn, btnZoomFit);
+  viewControls.append(btnZoomOut, zoomReadout, btnZoomIn, btnZoomFit);
+  stageTopBar.append(viewTitle, viewControls);
+
+  const seViewport = Construct("div", "se-viewport");
+
+  const rulerCorner = Construct("div", "se-ruler-corner", "");
+  const rulerXWrap = Construct("div", "se-ruler-x");
+  const rulerXCanvas = document.createElement("canvas");
+  rulerXWrap.append(rulerXCanvas);
+
+  const rulerYWrap = Construct("div", "se-ruler-y");
+  const rulerYCanvas = document.createElement("canvas");
+  rulerYWrap.append(rulerYCanvas);
 
   // Primary Interactive SVG Canvas
   const svgEl = document.createElementNS(SVG_NS, "svg");
@@ -453,7 +476,12 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
   const mainCanvas = document.createElement("canvas");
   pbrWrap.append(mainCanvas);
 
-  seViewport.append(rulerCorner, rulerXWrap, rulerYWrap, svgEl, viewControls, pbrWrap);
+  seViewport.append(rulerCorner, rulerXWrap, rulerYWrap, svgEl, pbrWrap);
+
+  const stageFooter = Construct("div", "se-stage-footer");
+  const hintText = Construct("span", "se-stage-hints", "Marquee to select · Shift constrain · Alt centred resize · Space pan");
+  const selCountEl = Construct("span", "se-sel-count", state.doc.selectedLayerId ? "1 selected" : "0 selected");
+  stageFooter.append(hintText, selCountEl);
 
   // Bottom quick channel strip + modifier tools
   const bottomBar = Construct("div", "se-bottom-bar");
@@ -493,8 +521,8 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
   const bottomTools = Construct("div", "se-bottom-tools", [btnAddNoiseScale, btnBackVector]);
   bottomBar.append(miniStrip, bottomTools);
 
-  stage.append(seViewport, bottomBar);
-  centerCol.append(stage);
+  stage.append(stageTopBar, seViewport, stageFooter);
+  centerCol.append(stage, bottomBar);
 
   // ----------------------------------------------------------------- RIGHT: LAYER, MASK & MODIFIER STACK
   const rightCol = Construct("aside", "studio-column");
@@ -564,61 +592,57 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
   }
 
   function drawRulers(m) {
-    // Top X ruler
+    // Top X ruler (Image 1 muted olive ruler styling)
     const rw = Math.max(1, Math.round(rulerXWrap.clientWidth || m.w));
-    const rh = Math.max(1, Math.round(rulerXWrap.clientHeight || 22));
+    const rh = Math.max(1, Math.round(rulerXWrap.clientHeight || 24));
     if (rulerXCanvas.width !== rw || rulerXCanvas.height !== rh) {
       rulerXCanvas.width = rw;
       rulerXCanvas.height = rh;
     }
     const rcx = rulerXCanvas.getContext("2d");
-    rcx.fillStyle = "#151918";
+    rcx.fillStyle = "#161b12";
     rcx.fillRect(0, 0, rw, rh);
-    rcx.strokeStyle = "#485950";
-    rcx.fillStyle = "#8aa095";
+    rcx.strokeStyle = "#36402d";
+    rcx.fillStyle = "#7a866b";
     rcx.font = "9px monospace";
 
-    const step = m.vw > 900 ? 128 : m.vw > 450 ? 64 : 32;
+    const step = m.vw > 1100 ? 128 : m.vw > 380 ? 64 : 32;
     const firstX = Math.floor(m.vx / step) * step;
     for (let v = firstX; v <= m.vx + m.vw; v += step) {
       const px = ((v - m.vx) / m.vw) * rw;
-      const major = v % 128 === 0;
+      const major = v % 64 === 0;
       rcx.beginPath();
-      rcx.moveTo(px, major ? 4 : 13);
+      rcx.moveTo(px, major ? 2 : 13);
       rcx.lineTo(px, rh);
       rcx.stroke();
-      if (major || step <= 64) {
-        rcx.fillText(String(Math.round(v)), px + 3, 11);
+      if (major) {
+        rcx.fillText(String(Math.round(v)), px + 4, 12);
       }
     }
 
-    // Left Y ruler
-    const yw = Math.max(1, Math.round(rulerYWrap.clientWidth || 24));
+    // Left Y ruler (upright horizontal labels like Image 1)
+    const yw = Math.max(1, Math.round(rulerYWrap.clientWidth || 30));
     const yh = Math.max(1, Math.round(rulerYWrap.clientHeight || m.h));
     if (rulerYCanvas.width !== yw || rulerYCanvas.height !== yh) {
       rulerYCanvas.width = yw;
       rulerYCanvas.height = yh;
     }
     const rcy = rulerYCanvas.getContext("2d");
-    rcy.fillStyle = "#151918";
+    rcy.fillStyle = "#161b12";
     rcy.fillRect(0, 0, yw, yh);
-    rcy.strokeStyle = "#485950";
-    rcy.fillStyle = "#8aa095";
+    rcy.strokeStyle = "#36402d";
+    rcy.fillStyle = "#7a866b";
     rcy.font = "9px monospace";
     const firstY = Math.floor(m.vy / step) * step;
     for (let v = firstY; v <= m.vy + m.vh; v += step) {
       const py = ((v - m.vy) / m.vh) * yh;
-      const major = v % 128 === 0;
+      const major = v % 64 === 0;
       rcy.beginPath();
-      rcy.moveTo(major ? 4 : 14, py);
+      rcy.moveTo(major ? 2 : 18, py);
       rcy.lineTo(yw, py);
       rcy.stroke();
-      if (major) {
-        rcy.save();
-        rcy.translate(10, py + 12);
-        rcy.rotate(-Math.PI / 2);
-        rcy.fillText(String(Math.round(v)), 0, 0);
-        rcy.restore();
+      if (major && v >= 0 && v <= (m.docSize || 512) + step) {
+        rcy.fillText(String(Math.round(v)), 4, py + 11);
       }
     }
   }
@@ -629,6 +653,8 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     const docSize = m.docSize;
     svgEl.setAttribute("viewBox", `${m.vx.toFixed(2)} ${m.vy.toFixed(2)} ${m.vw.toFixed(2)} ${m.vh.toFixed(2)}`);
     zoomReadout.textContent = `${Math.round(state.zoom * 100)}%`;
+    const activeSel = getSelectedLayer();
+    selCountEl.textContent = activeSel && activeSel.kind !== "folder" ? "1 selected" : "0 selected";
 
     const { defs: artDefs, body: artBody } = artworkDocumentLayersSvg(state.doc, { idPrefix: "se-live" });
     const bg = state.doc.background || {};
