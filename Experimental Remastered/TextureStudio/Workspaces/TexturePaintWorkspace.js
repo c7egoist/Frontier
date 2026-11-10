@@ -48,6 +48,7 @@ import {
   rgbaPixelsToSurfaceMaps,
 } from "../Engine/TexturePaintEngine.js";
 import { GpuPaintSession } from "../Engine/GpuPaintEngine.js";
+import { createLayerStackPanel } from "./LayerStackKit.js";
 import { evaluateArtworkDocument } from "../Engine/Patterns/ArtworkStackEngine.js";
 import {
   listStampStarterCatalog,
@@ -159,6 +160,236 @@ function rgbaToPreviewDataUrl(albedo, width, heightPx) {
   } catch {
     return null;
   }
+}
+
+function downsampleRgbaToCanvas(rgba, srcW, srcH, targetSize = 64) {
+  const cv = document.createElement("canvas");
+  cv.width = targetSize;
+  cv.height = targetSize;
+  if (!rgba || !srcW || !srcH) return cv;
+  const ctx = cv.getContext("2d");
+  if (!ctx?.createImageData || !ctx?.putImageData) return cv;
+  const img = ctx.createImageData(targetSize, targetSize);
+  const dst = img.data;
+  for (let y = 0; y < targetSize; y++) {
+    const sy = Math.min(srcH - 1, Math.floor((y / targetSize) * srcH));
+    for (let x = 0; x < targetSize; x++) {
+      const sx = Math.min(srcW - 1, Math.floor((x / targetSize) * srcW));
+      const si = (sy * srcW + sx) * 4;
+      const di = (y * targetSize + x) * 4;
+      dst[di] = rgba[si];
+      dst[di + 1] = rgba[si + 1];
+      dst[di + 2] = rgba[si + 2];
+      dst[di + 3] = rgba[si + 3];
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return cv;
+}
+
+function hexToRgbTuple(hex) {
+  const clean = String(hex || "#ffffff").replace("#", "");
+  const full = clean.length === 3 ? clean.replace(/(.)/g, "$1$1") : clean.padEnd(6, "0");
+  const n = parseInt(full.slice(0, 6), 16);
+  if (Number.isNaN(n)) return [232, 194, 122];
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+function drawStampOntoThumbCtx(ctx, st, sz) {
+  const sd = st?.stampData;
+  const srcAlb = sd?.albedo || sd?.rgba;
+  const sw = sd?.width || 0;
+  const sh = sd?.heightPx || sw;
+  if (!srcAlb || !sw || !sh) return;
+  const stampCv = downsampleRgbaToCanvas(srcAlb, sw, sh, Math.min(48, sw));
+  ctx.save();
+  ctx.globalAlpha = Math.max(0.15, Math.min(1, st.opacity ?? 1));
+  const cx = (st.u ?? 0.5) * sz;
+  const cy = (1 - (st.v ?? 0.5)) * sz;
+  ctx.translate(cx, cy);
+  ctx.rotate((-(st.rotation || 0) * Math.PI) / 180);
+  const drawW = Math.max(16, (st.scale ?? 0.28) * (st.scaleX ?? 1) * sz * 1.45);
+  const drawH = Math.max(16, (st.scale ?? 0.28) * (st.scaleY ?? 1) * sz * 1.45);
+  ctx.drawImage(stampCv, -drawW * 0.5, -drawH * 0.5, drawW, drawH);
+  ctx.restore();
+}
+
+function buildPaintLayerThumbCanvas(layer, { res, gpuPaint }) {
+  const sz = 64;
+  const cv = document.createElement("canvas");
+  cv.width = sz;
+  cv.height = sz;
+  const ctx = cv.getContext("2d");
+  if (!ctx) return cv;
+
+  if (layer.kind === "fill") {
+    const pat = layer.fill?.patternData;
+    const patAlb = pat?.albedo || pat?.rgba;
+    if (patAlb && pat?.width) {
+      const tileCv = downsampleRgbaToCanvas(patAlb, pat.width, pat.heightPx || pat.width, 32);
+      const rep = Math.max(1, Math.min(4, Math.round(layer.fill.patternRepeats || 2)));
+      const cell = sz / rep;
+      ctx.save();
+      ctx.translate(sz * 0.5, sz * 0.5);
+      ctx.rotate(((layer.fill.patternRotation || 0) * Math.PI) / 180);
+      for (let ty = -rep; ty <= rep; ty++) {
+        for (let tx = -rep; tx <= rep; tx++) {
+          ctx.drawImage(tileCv, tx * cell - sz * 0.5, ty * cell - sz * 0.5, cell, cell);
+        }
+      }
+      ctx.restore();
+    } else {
+      ctx.fillStyle = layer.fill?.color || "#808080";
+      ctx.fillRect(0, 0, sz, sz);
+    }
+    if (layer.stamps?.length) {
+      for (const st of layer.stamps) if (st.visible !== false) drawStampOntoThumbCtx(ctx, st, sz);
+    }
+    return cv;
+  }
+
+  if (layer.kind === "material") {
+    const [r, g, b] = hexToRgbTuple(layer.material?.color || "#7c8590");
+    const rough = Math.max(0.05, Math.min(1, layer.material?.roughness ?? 0.45));
+    const metal = Math.max(0, Math.min(1, layer.material?.metalness ?? 0.2));
+    const grain = Math.max(0, Math.min(0.4, layer.material?.grainStrength ?? 0.1));
+    ctx.fillStyle = `rgb(${Math.round(r * (0.48 + 0.15 * (1 - metal)))},${Math.round(g * (0.48 + 0.15 * (1 - metal)))},${Math.round(b * (0.48 + 0.15 * (1 - metal)))})`;
+    ctx.fillRect(0, 0, sz, sz);
+    // Shaded PBR sphere badge inside thumbnail
+    const grad = ctx.createRadialGradient?.(sz * 0.36, sz * 0.32, sz * 0.04, sz * 0.5, sz * 0.5, sz * 0.46);
+    if (grad) {
+      const hi = Math.round(255 * (1 - rough * 0.55));
+      const sr = Math.min(255, Math.round(r + (hi - r) * (0.45 + 0.45 * metal)));
+      const sg = Math.min(255, Math.round(g + (hi - g) * (0.45 + 0.45 * metal)));
+      const sb = Math.min(255, Math.round(b + (hi - b) * (0.45 + 0.45 * metal)));
+      grad.addColorStop(0, `rgb(${sr},${sg},${sb})`);
+      grad.addColorStop(0.65, `rgb(${r},${g},${b})`);
+      grad.addColorStop(1, `rgb(${Math.round(r * 0.25)},${Math.round(g * 0.25)},${Math.round(b * 0.25)})`);
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(sz * 0.5, sz * 0.5, sz * 0.42, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    if (grain > 0.02) {
+      ctx.fillStyle = "rgba(255,255,255,0.12)";
+      for (let i = 0; i < 14; i++) {
+        ctx.fillRect((i * 19 + 5) % sz, (i * 23 + 9) % sz, 2, 2);
+      }
+    }
+    return cv;
+  }
+
+  if (layer.kind === "generator") {
+    const [r, g, b] = hexToRgbTuple(layer.generator?.color || "#d8b47c");
+    const preset = layer.generator?.preset || "edge-wear";
+    ctx.fillStyle = "#16181c";
+    ctx.fillRect(0, 0, sz, sz);
+    ctx.strokeStyle = `rgba(${r},${g},${b},0.88)`;
+    ctx.lineWidth = preset === "edge-wear" ? 5 : 3;
+    if (preset === "edge-wear") {
+      ctx.beginPath();
+      ctx.rect(8, 8, sz - 16, sz - 16);
+      ctx.stroke();
+      ctx.fillStyle = `rgba(${r},${g},${b},0.35)`;
+      for (let i = 0; i < 10; i++) ctx.fillRect((i * 13 + 6) % (sz - 12), 6, 4, 4);
+    } else if (preset === "top-dust") {
+      const gr = ctx.createLinearGradient?.(0, 0, 0, sz);
+      if (gr) {
+        gr.addColorStop(0, `rgba(${r},${g},${b},0.92)`);
+        gr.addColorStop(0.65, `rgba(${r},${g},${b},0.25)`);
+        gr.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.fillStyle = gr;
+        ctx.fillRect(0, 0, sz, sz);
+      }
+    } else {
+      ctx.fillStyle = `rgba(${r},${g},${b},0.72)`;
+      for (let i = 0; i < 16; i++) {
+        ctx.beginPath();
+        ctx.arc((i * 17 + 9) % sz, (i * 29 + 11) % sz, 3 + (i % 4) * 1.4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    return cv;
+  }
+
+  // Paint & Decal layers: live GPU readback (only on commit) or CPU pixel buffer + nested UV stamps!
+  let srcRgba = null;
+  let srcSize = res;
+  if (gpuPaint?.isActive && layer._gpu) {
+    srcRgba = gpuPaint.readLayerPreviewRgba(layer, sz);
+    srcSize = sz;
+  }
+  if (!srcRgba && layer.pixels?.albedo) {
+    srcRgba = layer.pixels.albedo;
+    srcSize = layer.pixels.res || res;
+  }
+
+  let hasPixels = false;
+  if (srcRgba) {
+    for (let i = 3; i < srcRgba.length; i += 4) {
+      if (srcRgba[i] > 4) { hasPixels = true; break; }
+    }
+  }
+  if (hasPixels) {
+    const pxCv = downsampleRgbaToCanvas(srcRgba, srcSize, srcSize, sz);
+    ctx.drawImage(pxCv, 0, 0, sz, sz);
+  }
+  if (layer.stamps?.length) {
+    for (const st of layer.stamps) {
+      if (st.visible !== false) drawStampOntoThumbCtx(ctx, st, sz);
+    }
+  }
+  return cv;
+}
+
+function buildStampThumbCanvas(st) {
+  const sz = 28;
+  const sd = st?.stampData;
+  const src = sd?.albedo || sd?.rgba;
+  if (src && sd?.width) {
+    return downsampleRgbaToCanvas(src, sd.width, sd.heightPx || sd.width, sz);
+  }
+  const cv = document.createElement("canvas");
+  cv.width = sz;
+  cv.height = sz;
+  return cv;
+}
+
+function buildMaskThumbCanvas(layer, res, gpuPaint) {
+  const sz = 40;
+  let rgba = null;
+  const inv = !!layer.mask?.invert;
+  if (gpuPaint?.isActive && layer._gpu?.maskRT) {
+    rgba = gpuPaint.readMaskPreviewRgba(layer, sz);
+    if (rgba) {
+      for (let i = 0; i < rgba.length; i += 4) {
+        const v = inv ? 255 - rgba[i] : rgba[i];
+        rgba[i] = v;
+        rgba[i + 1] = v;
+        rgba[i + 2] = v;
+        rgba[i + 3] = 255;
+      }
+    }
+  }
+  if (!rgba && layer.mask?.pixels) {
+    const src = layer.mask.pixels;
+    const srcSize = Math.max(1, Math.round(Math.sqrt(src.length))) || res;
+    rgba = new Uint8ClampedArray(sz * sz * 4);
+    for (let y = 0; y < sz; y++) {
+      const sy = Math.min(srcSize - 1, Math.floor((y / sz) * srcSize));
+      for (let x = 0; x < sz; x++) {
+        const sx = Math.min(srcSize - 1, Math.floor((x / sz) * srcSize));
+        let v = src[sy * srcSize + sx];
+        if (inv) v = 255 - v;
+        const o = (y * sz + x) * 4;
+        rgba[o] = v;
+        rgba[o + 1] = v;
+        rgba[o + 2] = v;
+        rgba[o + 3] = 255;
+      }
+    }
+  }
+  return downsampleRgbaToCanvas(rgba, sz, sz, sz);
 }
 
 const TOOL_LABELS = {
@@ -346,6 +577,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
           targetFill.fill.patternData = evaluated;
           targetFill.fill.color = "#ffffff";
         }
+        invalidateLayerThumb(targetFill.id);
         renderLeftColumn();
         rebuildInspector();
         refreshComposite();
@@ -409,23 +641,12 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   // ----------------------------------------------------------------- DOM LAYOUT
   const grid = Construct("div", "studio-grid");
 
-  // LEFT: LAYER STACK
-  const leftCol = Construct("aside", "studio-column");
-  const leftMeta = Construct("span", "panel-heading-meta", `${res}×${res} GPU`);
-  leftCol.append(
-    Construct("div", "panel-heading", [
-      Construct("h2", null, "Paint Layer Stack"),
-      leftMeta,
-    ]),
-  );
-  const leftScroll = Construct("div", "panel-scroll");
-  const leftInner = Construct("div", "panel-scroll-inner");
-  leftScroll.append(leftInner);
-  const leftFooter = Construct("div", "panel-footer", [
-    Construct("span", null, "Drag / ↑↓ Reorder"),
-    Construct("span", null, "Seams Dilated +2px"),
-  ]);
-  leftCol.append(leftScroll, leftFooter);
+  // LEFT: FULL LAYER STACK + LIVE PAINT / STAMP / MATERIAL / MASK PREVIEWS
+  const leftCol = Construct("aside", "studio-column tp-layer-dock");
+  const layerStackUI = createLayerStackPanel(leftCol, {
+    title: "Layers",
+    extraMetricLabel: "ENGINE",
+  });
 
   // CENTER: TOOLBAR + UNIFIED GPU 3D/UV VIEWPORT
   const centerCol = Construct("main", "studio-column viewport-column");
@@ -581,7 +802,6 @@ export function mountTexturePaintWorkspace(root, appBridge) {
 
   grid.append(leftCol, centerCol, rightCol);
   root.append(grid);
-  SmoothScroll(leftScroll, leftInner);
   SmoothScroll(rightScroll, rightInner);
 
   // ----------------------------------------------------------------- THREE.JS UNIFIED GPU STAGE
@@ -954,7 +1174,12 @@ export function mountTexturePaintWorkspace(root, appBridge) {
 
   window.addEventListener("pointerup", () => {
     if (!activeGizmoDrag) return;
+    const draggedLayerId = activeGizmoDrag.layer?.id;
     activeGizmoDrag = null;
+    if (draggedLayerId) {
+      invalidateLayerThumb(draggedLayerId);
+      renderLeftColumn();
+    }
     Broadcast();
   });
 
@@ -1119,6 +1344,8 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       if (snap.pixels && layer.pixels) layer.pixels = clonePixels(snap.pixels);
       if (snap.maskPixels && layer.mask) layer.mask.pixels = new Uint8ClampedArray(snap.maskPixels);
     }
+    invalidateLayerThumb(layer.id);
+    renderLeftColumn();
     refreshComposite();
   }
 
@@ -1224,6 +1451,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     });
     targetLayer.stamps.push(inst);
     targetLayer.selectedStampId = inst.id;
+    invalidateLayerThumb(targetLayer.id);
     renderLeftColumn();
     rebuildInspector();
     refreshComposite();
@@ -1371,6 +1599,8 @@ export function mountTexturePaintWorkspace(root, appBridge) {
         else gpuPaint.syncCpuPixelsToLayerGpu(layer);
       }
       pushUndoSnapshot(snap);
+      invalidateLayerThumb(layer.id);
+      renderLeftColumn();
       refreshComposite();
       Toast(`Filled ${state.fillScope} scope`);
     } else {
@@ -1513,8 +1743,10 @@ export function mountTexturePaintWorkspace(root, appBridge) {
 
   const endStroke3D = () => {
     if (activeStamp3DDrag) {
+      const draggedId = activeStamp3DDrag.layer?.id;
       activeStamp3DDrag = null;
       orbit.enabled = true;
+      if (draggedId) { invalidateLayerThumb(draggedId); renderLeftColumn(); }
       Broadcast();
       return;
     }
@@ -1535,6 +1767,10 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     smoothedHit3D = null;
     pendingUndoSnap = null;
     refreshComposite();
+    if (committed && layer) {
+      invalidateLayerThumb(layer.id);
+      renderLeftColumn();
+    }
   };
   pane3D.addEventListener("pointerup", endStroke3D);
   pane3D.addEventListener("pointercancel", endStroke3D);
@@ -1628,7 +1864,9 @@ export function mountTexturePaintWorkspace(root, appBridge) {
 
   const endStroke2D = () => {
     if (activeStamp2DDrag) {
+      const draggedId = activeStamp2DDrag.layer?.id;
       activeStamp2DDrag = null;
+      if (draggedId) { invalidateLayerThumb(draggedId); renderLeftColumn(); }
       Broadcast();
       return;
     }
@@ -1648,6 +1886,10 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     smoothedUv2D = null;
     pendingUndoSnap = null;
     refreshComposite();
+    if (committed && layer) {
+      invalidateLayerThumb(layer.id);
+      renderLeftColumn();
+    }
   };
   pane2D.addEventListener("pointerup", endStroke2D);
   pane2D.addEventListener("pointercancel", endStroke2D);
@@ -2231,106 +2473,284 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     Broadcast();
   }
 
-  function renderLeftColumn() {
-    leftInner.innerHTML = "";
+  const PAINT_ADD_OPTIONS = [
+    { kind: "paint", label: "+ Paint", glyph: "Brush", hint: "Freehand 3D & 2D UV raster layer" },
+    { kind: "fill", label: "+ Fill", glyph: "Fill", hint: "Solid color or tileable PBR pattern" },
+    { kind: "material", label: "+ Material", glyph: "Cube", hint: "Full procedural Frontier material" },
+    { kind: "decal", label: "+ Stamp", glyph: "Stamp", hint: "Movable, scalable & rotatable decals" },
+    { kind: "generator", label: "+ Wear Gen", glyph: "Sparkles", hint: "Edge wear, crevice dirt, dust & grunge" },
+    { kind: "folder", label: "+ Folder", glyph: "Folder", hint: "Group & mask nested layers" },
+  ];
 
-    const addBar = Construct("div", "chip-strip");
-    for (const [label, kind] of [
-      ["+ Paint", "paint"],
-      ["+ Fill", "fill"],
-      ["+ Material", "material"],
-      ["+ Stamp", "decal"],
-      ["+ Wear Gen", "generator"],
-      ["+ Folder", "folder"],
-    ]) {
-      const b = Construct("button", "chip-btn", label);
-      b.type = "button";
-      b.addEventListener("click", () => {
-        const l = createPaintLayer(kind, {
-          res,
-          color: state.brush.color,
-          fill: { color: state.brush.color, roughness: state.brush.roughness, metalness: state.brush.metalness, height: 0 },
-        });
-        if (kind === "decal" && state.brush.stampData) {
-          const st = createStampInstance({
-            name: state.brush.stampName || "Stamp",
-            projection: "uv",
-            u: 0.5,
-            v: 0.5,
-            scale: state.brush.stampScale ?? 0.28,
-            rotation: state.brush.stampRotation ?? 0,
-            opacity: state.brush.stampOpacity ?? 1.0,
-            heightStrength: state.brush.stampHeightStrength ?? 0.5,
-            tint: state.brush.stampTint || "#ffffff",
-            stampData: state.brush.stampData,
-          });
-          l.stamps.push(st);
-          l.selectedStampId = st.id;
+  const layerThumbCache = new Map();
+  const maskThumbCache = new Map();
+
+  function invalidateLayerThumb(layerId) {
+    if (!layerId) return;
+    layerThumbCache.delete(layerId);
+    maskThumbCache.delete(layerId);
+  }
+
+  function invalidateAllLayerThumbs() {
+    layerThumbCache.clear();
+    maskThumbCache.clear();
+  }
+
+  function getCachedLayerThumbCanvas(layer) {
+    if (!layer || layer.kind === "folder") return null;
+    if (!layerThumbCache.has(layer.id)) {
+      layerThumbCache.set(layer.id, buildPaintLayerThumbCanvas(layer, { res, gpuPaint }));
+    }
+    return layerThumbCache.get(layer.id);
+  }
+
+  function getCachedMaskThumbCanvas(layer) {
+    if (!layer?.mask) return null;
+    if (!maskThumbCache.has(layer.id)) {
+      maskThumbCache.set(layer.id, buildMaskThumbCanvas(layer, res, gpuPaint));
+    }
+    return maskThumbCache.get(layer.id);
+  }
+
+  function addPaintLayerByKind(kind) {
+    const l = createPaintLayer(kind, {
+      res,
+      color: state.brush.color,
+      fill: { color: state.brush.color, roughness: state.brush.roughness, metalness: state.brush.metalness, height: 0 },
+    });
+    if (kind === "decal" && state.brush.stampData) {
+      const st = createStampInstance({
+        name: state.brush.stampName || "Stamp",
+        projection: "uv",
+        u: 0.5,
+        v: 0.5,
+        scale: state.brush.stampScale ?? 0.28,
+        rotation: state.brush.stampRotation ?? 0,
+        opacity: state.brush.stampOpacity ?? 1.0,
+        heightStrength: state.brush.stampHeightStrength ?? 0.5,
+        tint: state.brush.stampTint || "#ffffff",
+        stampData: state.brush.stampData,
+      });
+      l.stamps.push(st);
+      l.selectedStampId = st.id;
+    }
+    state.doc.layers.push(l);
+    state.doc.selectedLayerId = l.id;
+    state.doc.editingMask = false;
+    invalidateLayerThumb(l.id);
+    renderLeftColumn();
+    rebuildInspector();
+    refreshComposite();
+  }
+
+  function clonePaintLayerData(src) {
+    const copy = createPaintLayer(src.kind, {
+      res,
+      name: `${src.name} Copy`,
+      parentId: src.parentId || null,
+      visible: src.visible !== false,
+      locked: !!src.locked,
+      opacity: src.opacity ?? 1,
+      blend: src.blend || "Normal",
+      partFilter: src.partFilter ?? -1,
+      channels: src.channels ? { ...src.channels } : undefined,
+      channelOpacity: src.channelOpacity ? { ...src.channelOpacity } : undefined,
+      channelBlends: src.channelBlends ? { ...src.channelBlends } : undefined,
+      fill: src.fill ? { ...src.fill } : undefined,
+      material: src.material ? { ...src.material } : undefined,
+      generator: src.generator ? { ...src.generator } : undefined,
+    });
+    if (src.pixels) copy.pixels = clonePixels(src.pixels);
+    if (src.stamps?.length) {
+      copy.stamps = src.stamps.map((s) => ({
+        ...s,
+        id: `stp_${Math.random().toString(36).slice(2, 9)}`,
+        u: Math.min(0.95, (s.u ?? 0.5) + 0.04),
+        v: Math.max(0.05, (s.v ?? 0.5) - 0.04),
+      }));
+      copy.selectedStampId = copy.stamps[0]?.id || null;
+    }
+    if (src.mask) {
+      copy.mask = {
+        ...src.mask,
+        pixels: src.mask.pixels ? new Uint8ClampedArray(src.mask.pixels) : new Uint8ClampedArray(res * res).fill(255),
+      };
+    }
+    if (gpuPaint.isActive) {
+      if (src._gpu) gpuPaint.syncLayerGpuToCpuPixels(src);
+      if (copy.pixels && src.pixels) {
+        copy.pixels = clonePixels(src.pixels);
+        gpuPaint.syncCpuPixelsToLayerGpu(copy);
+      }
+      if (copy.mask) gpuPaint.syncMaskCpuToGpu(copy);
+    }
+    return copy;
+  }
+
+  function renderLeftColumn() {
+    const meshLabel = PAINT_MESH_LIST.find((m) => m.id === state.meshId)?.label || state.meshId;
+
+    layerStackUI.render({
+      layers: state.doc.layers,
+      limit: 32,
+      selectedId: state.doc.selectedLayerId,
+      addOptions: PAINT_ADD_OPTIONS,
+      extraMetricValue: gpuPaint.isActive ? "WebGL2" : "CPU",
+      orderRightText: `${res}×${res} PBR`,
+      systemBase: {
+        title: `Base Mesh · ${meshLabel}`,
+        meta: `${meshIndex?.islandCount || 1} UV islands · ${meshIndex?.partNames?.length || 1} parts`,
+        badge: state.doc.bakedMaps ? "Baked" : "Default",
+      },
+      renderThumb(layer, thumbEl, { isFolder }) {
+        if (isFolder) {
+          thumbEl.classList.add("tp-kind-folder");
+          thumbEl.append(ConstructGlyph("Folder"));
+          return;
         }
-        state.doc.layers.push(l);
-        state.doc.selectedLayerId = l.id;
+        const cached = getCachedLayerThumbCanvas(layer);
+        if (cached) {
+          const out = document.createElement("canvas");
+          out.width = 48;
+          out.height = 48;
+          const cx = out.getContext("2d");
+          cx?.drawImage?.(cached, 0, 0, 48, 48);
+          thumbEl.append(out);
+        }
+      },
+      getSubtitle(layer) {
+        const partTag = layer.partFilter >= 0 && meshIndex?.partNames[layer.partFilter] ? meshIndex.partNames[layer.partFilter] : "All";
+        const enabledCount = layer.channels ? Object.values(layer.channels).filter(Boolean).length : 4;
+        const chTag = layer.kind !== "folder" && enabledCount !== 4 ? ` · ${enabledCount}/19 ch` : "";
+        const stpTag = layer.stamps?.length ? ` · ${layer.stamps.length} stp` : "";
+        return `${layer.kind.toUpperCase()} · ${layer.blend} · ${partTag}${chTag}${stpTag}`;
+      },
+      getMaskSubrow(layer) {
+        if (!layer.mask) return null;
+        const mCv = getCachedMaskThumbCanvas(layer);
+        let preview = null;
+        if (mCv) {
+          preview = document.createElement("canvas");
+          preview.width = 24;
+          preview.height = 24;
+          preview.getContext("2d")?.drawImage?.(mCv, 0, 0, 24, 24);
+        }
+        const isEditing = !!(state.doc.editingMask && layer.id === state.doc.selectedLayerId);
+        return {
+          enabled: !!layer.mask.enabled,
+          active: isEditing,
+          label: isEditing ? "Editing mask" : "Layer mask",
+          meta: layer.mask.invert ? "Inverted" : layer.mask.generatorPreset && layer.mask.generatorPreset !== "none" ? layer.mask.generatorPreset : "Painted alpha",
+          thumbEl: preview,
+          onSelect: () => {
+            layer.mask.enabled = true;
+            state.doc.selectedLayerId = layer.id;
+            state.doc.editingMask = !isEditing;
+            renderLeftColumn();
+            rebuildInspector();
+            refreshComposite();
+          },
+          onToggle: () => {
+            layer.mask.enabled = !layer.mask.enabled;
+            renderLeftColumn();
+            rebuildInspector();
+            refreshComposite();
+          },
+        };
+      },
+      getChildSubrows(layer) {
+        if (!layer.stamps?.length) return [];
+        return layer.stamps.map((st) => {
+          const stCv = buildStampThumbCanvas(st);
+          return {
+            id: st.id,
+            active: layer.id === state.doc.selectedLayerId && (st.id === layer.selectedStampId || (!layer.selectedStampId && st === layer.stamps[0])),
+            visible: st.visible !== false,
+            label: st.name || "Stamp",
+            meta: `${String(st.projection || "uv").toUpperCase()} · ${Math.round((st.scale ?? 0.28) * 100)}%`,
+            thumbEl: stCv,
+            onSelect: () => {
+              state.doc.selectedLayerId = layer.id;
+              layer.selectedStampId = st.id;
+              state.doc.editingMask = false;
+              renderLeftColumn();
+              rebuildInspector();
+              refreshComposite();
+            },
+            onToggle: () => {
+              st.visible = st.visible === false;
+              invalidateLayerThumb(layer.id);
+              renderLeftColumn();
+              rebuildInspector();
+              refreshComposite();
+            },
+          };
+        });
+      },
+      renderExpanded(layer, expEl) {
+        const pills = Construct("div", "tp-exp-pills");
+        for (const ch of PAINT_PBR_CHANNELS) {
+          if (!layer.channels?.[ch.key]) continue;
+          const dot = document.createElement("i");
+          dot.style.setProperty("--pill-color", ch.color || "#eff4cf");
+          pills.append(Construct("span", "tp-exp-pill", [dot, Construct("span", null, ch.short)]));
+        }
+        expEl.append(
+          pills,
+          Construct("div", "tp-exp-meta", `Blend: ${layer.blend || "Normal"} · ${layer.stamps?.length || 0} stamp${(layer.stamps?.length || 0) === 1 ? "" : "s"}`),
+        );
+      },
+      onSelectLayer: (id) => {
+        state.doc.selectedLayerId = id;
         state.doc.editingMask = false;
         renderLeftColumn();
         rebuildInspector();
         refreshComposite();
-      });
-      addBar.append(b);
-    }
-    leftInner.append(addBar);
-
-    const layersTopDown = [...state.doc.layers].reverse();
-    for (let vIdx = 0; vIdx < layersTopDown.length; vIdx++) {
-      const layer = layersTopDown[vIdx];
-      const isSelected = layer.id === state.doc.selectedLayerId;
-      const row = Construct("div", "stack-row" + (isSelected ? " active" : ""));
-      row.draggable = true;
-      row.dataset.layerId = layer.id;
-
-      const handle = Construct("span", "stack-drag-handle", ConstructGlyph("Grip"));
-      handle.title = "Drag to reorder layer";
-
-      const thumb = Construct("div", "stack-row-thumb");
-      if (layer.kind === "folder") thumb.append(ConstructGlyph("Folder"));
-      else if (layer.kind === "generator") thumb.append(ConstructGlyph("Sparkles"));
-      else if (layer.kind === "decal") thumb.append(ConstructGlyph("Stamp"));
-      else if (layer.kind === "material") thumb.style.background = layer.material.color;
-      else if (layer.kind === "fill") thumb.style.background = layer.fill.color;
-      else thumb.append(ConstructGlyph("Brush"));
-
-      const partTag = layer.partFilter >= 0 && meshIndex?.partNames[layer.partFilter] ? meshIndex.partNames[layer.partFilter] : "All";
-      const enabledCount = layer.channels ? Object.values(layer.channels).filter(Boolean).length : 4;
-      const chTag = layer.kind !== "folder" && enabledCount !== 4 ? ` · ${enabledCount}/19 ch` : "";
-      const stpTag = layer.stamps?.length ? ` · ${layer.stamps.length} stp` : "";
-      const sub = `${layer.kind.toUpperCase()} · ${layer.blend} · ${partTag}${chTag}${stpTag}`;
-      if (layer.parentId) row.style.marginLeft = "14px";
-      const info = Construct("div", "stack-row-info", [
-        Construct("span", "stack-row-title", layer.name),
-        Construct("span", "stack-row-sub", sub),
-      ]);
-
-      const orderBox = Construct("div", "stack-order-btns");
-      const upBtn = Construct("button", "stack-order-btn", ConstructGlyph("ArrowUp"));
-      upBtn.type = "button";
-      upBtn.title = "Move layer up (Alt+↑)";
-      upBtn.disabled = vIdx === 0;
-      upBtn.addEventListener("click", (e) => { e.stopPropagation(); moveLayerByOffset(layer.id, +1); });
-
-      const dnBtn = Construct("button", "stack-order-btn", ConstructGlyph("ArrowDown"));
-      dnBtn.type = "button";
-      dnBtn.title = "Move layer down (Alt+↓)";
-      dnBtn.disabled = vIdx === layersTopDown.length - 1;
-      dnBtn.addEventListener("click", (e) => { e.stopPropagation(); moveLayerByOffset(layer.id, -1); });
-      orderBox.append(upBtn, dnBtn);
-
-      const maskPill = Construct(
-        "button",
-        "mask-pill" + (layer.mask?.enabled ? (state.doc.editingMask && isSelected ? " active" : "") : ""),
-        layer.mask?.enabled ? (state.doc.editingMask && isSelected ? "EDIT MSK" : "MSK") : "+MSK",
-      );
-      maskPill.type = "button";
-      maskPill.title = "Add or Edit Layer Mask";
-      maskPill.addEventListener("click", (e) => {
-        e.stopPropagation();
+      },
+      onAddLayer: addPaintLayerByKind,
+      onMoveLayer: moveLayerByOffset,
+      onDropReorder: moveLayerRelativeTo,
+      onToggleVisible: (id) => {
+        const l = state.doc.layers.find((x) => x.id === id);
+        if (!l) return;
+        l.visible = l.visible === false;
+        renderLeftColumn();
+        refreshComposite();
+      },
+      onToggleLock: (id) => {
+        const l = state.doc.layers.find((x) => x.id === id);
+        if (!l) return;
+        l.locked = !l.locked;
+        renderLeftColumn();
+        rebuildInspector();
+      },
+      onRenameLayer: (id, nextName) => {
+        const l = state.doc.layers.find((x) => x.id === id);
+        if (l) { l.name = nextName; rebuildInspector(); }
+      },
+      onOpacityChange: (id, val, final) => {
+        const l = state.doc.layers.find((x) => x.id === id);
+        if (!l) return;
+        l.opacity = val;
+        refreshComposite();
+        if (final) renderLeftColumn();
+      },
+      onDuplicateLayer: (id) => {
+        const src = state.doc.layers.find((x) => x.id === id);
+        if (!src) return;
+        const copy = clonePaintLayerData(src);
+        const idx = state.doc.layers.findIndex((x) => x.id === id);
+        state.doc.layers.splice(idx + 1, 0, copy);
+        state.doc.selectedLayerId = copy.id;
+        invalidateLayerThumb(copy.id);
+        renderLeftColumn();
+        rebuildInspector();
+        refreshComposite();
+        Toast(`Duplicated "${src.name}"`);
+      },
+      onToggleLayerMask: (id) => {
+        const layer = state.doc.layers.find((x) => x.id === id);
+        if (!layer) return;
         if (!layer.mask) {
           layer.mask = {
             enabled: true,
@@ -2345,80 +2765,27 @@ export function mountTexturePaintWorkspace(root, appBridge) {
             pixels: new Uint8ClampedArray(res * res).fill(255),
           };
           if (gpuPaint.isActive) gpuPaint.fillMaskGpu(layer, 1);
+          state.doc.editingMask = true;
         } else {
           layer.mask.enabled = true;
+          state.doc.editingMask = !state.doc.editingMask;
         }
         state.doc.selectedLayerId = layer.id;
-        state.doc.editingMask = !state.doc.editingMask;
+        invalidateLayerThumb(layer.id);
         renderLeftColumn();
         rebuildInspector();
         refreshComposite();
-      });
-
-      const visBtn = Construct("button", "stack-mini-btn" + (layer.visible ? " on" : ""), ConstructGlyph(layer.visible ? "Eye" : "EyeOff"));
-      visBtn.type = "button";
-      visBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        layer.visible = !layer.visible;
-        renderLeftColumn();
-        refreshComposite();
-      });
-
-      const delBtn = Construct("button", "stack-mini-btn", ConstructGlyph("Trash"));
-      delBtn.type = "button";
-      delBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
+      },
+      onDeleteLayer: (id) => {
         if (state.doc.layers.length <= 1) { Toast("Keep at least one layer"); return; }
-        state.doc.layers = state.doc.layers.filter((l) => l.id !== layer.id);
-        if (state.doc.selectedLayerId === layer.id) state.doc.selectedLayerId = state.doc.layers[state.doc.layers.length - 1].id;
+        invalidateLayerThumb(id);
+        state.doc.layers = state.doc.layers.filter((l) => l.id !== id);
+        if (state.doc.selectedLayerId === id) state.doc.selectedLayerId = state.doc.layers[state.doc.layers.length - 1].id;
         renderLeftColumn();
         rebuildInspector();
         refreshComposite();
-      });
-
-      // Drag-and-drop events
-      row.addEventListener("dragstart", (e) => {
-        dragLayerId = layer.id;
-        row.classList.add("dragging");
-        if (e.dataTransfer) {
-          e.dataTransfer.effectAllowed = "move";
-          e.dataTransfer.setData("text/plain", layer.id);
-        }
-      });
-      row.addEventListener("dragend", () => {
-        dragLayerId = null;
-        row.classList.remove("dragging", "drop-above", "drop-below");
-      });
-      row.addEventListener("dragover", (e) => {
-        if (!dragLayerId || dragLayerId === layer.id) return;
-        e.preventDefault();
-        const r = row.getBoundingClientRect();
-        const above = e.clientY < r.top + r.height * 0.5;
-        row.classList.toggle("drop-above", above);
-        row.classList.toggle("drop-below", !above);
-      });
-      row.addEventListener("dragleave", () => {
-        row.classList.remove("drop-above", "drop-below");
-      });
-      row.addEventListener("drop", (e) => {
-        e.preventDefault();
-        const src = dragLayerId || e.dataTransfer?.getData("text/plain");
-        const r = row.getBoundingClientRect();
-        const above = e.clientY < r.top + r.height * 0.5;
-        row.classList.remove("drop-above", "drop-below");
-        if (src && src !== layer.id) moveLayerRelativeTo(src, layer.id, above);
-      });
-
-      row.append(handle, thumb, info, orderBox, maskPill, visBtn, delBtn);
-      row.addEventListener("click", () => {
-        state.doc.selectedLayerId = layer.id;
-        state.doc.editingMask = false;
-        renderLeftColumn();
-        rebuildInspector();
-        refreshComposite();
-      });
-      leftInner.append(row);
-    }
+      },
+    });
   }
 
   function rebuildInspector() {
@@ -2582,6 +2949,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
           if (layer.pixels.extAlphas) for (const k of Object.keys(layer.pixels.extAlphas)) layer.pixels.extAlphas[k]?.fill(0);
         }
         if (snap) pushUndoSnapshot(snap);
+        invalidateLayerThumb(layer.id);
         refreshComposite();
         renderLeftColumn();
         Toast(`Cleared "${layer.name}"`);
@@ -2787,7 +3155,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
         ]);
       } else if (layer.kind === "fill") {
         const kSec = SectionCard(rightInner, { Title: "Fill & Pattern Properties", Glyph: "Fill", Open: true });
-        ColorRow(kSec.Inner, { Label: "Fill Color", Read: () => layer.fill.color, Write: (v) => { layer.fill.color = v; refreshComposite(); renderLeftColumn(); } });
+        ColorRow(kSec.Inner, { Label: "Fill Color", Read: () => layer.fill.color, Write: (v) => { layer.fill.color = v; invalidateLayerThumb(layer.id); refreshComposite(); renderLeftColumn(); } });
         SliderRow(kSec.Inner, { Label: "Roughness", Minimum: 0.02, Maximum: 1, Step: 0.01, Read: () => layer.fill.roughness, Write: (v) => { layer.fill.roughness = v; refreshComposite(); } });
         SliderRow(kSec.Inner, { Label: "Metalness", Minimum: 0, Maximum: 1, Step: 0.01, Read: () => layer.fill.metalness, Write: (v) => { layer.fill.metalness = v; refreshComposite(); } });
         SliderRow(kSec.Inner, { Label: "Height Relief", Minimum: -1, Maximum: 1, Step: 0.02, Read: () => layer.fill.height ?? 0, Write: (v) => { layer.fill.height = v; refreshComposite(); } });
@@ -2796,17 +3164,17 @@ export function mountTexturePaintWorkspace(root, appBridge) {
           ...(appBridge?.shared?.patternData ? [{
             Label: "Apply Pattern Tile",
             Glyph: "Pattern",
-            Act: () => { layer.fill.patternData = appBridge.shared.patternData; rebuildInspector(); refreshComposite(); Toast("Applied Pattern Studio tile to Fill layer"); },
+            Act: () => { layer.fill.patternData = appBridge.shared.patternData; invalidateLayerThumb(layer.id); rebuildInspector(); refreshComposite(); renderLeftColumn(); Toast("Applied Pattern Studio tile to Fill layer"); },
           }] : []),
         ]);
         if (layer.fill.patternData) {
-          SliderRow(kSec.Inner, { Label: "Pattern Repeats", Minimum: 1, Maximum: 16, Step: 1, Read: () => layer.fill.patternRepeats || 3, Write: (v) => { layer.fill.patternRepeats = v; refreshComposite(); } });
-          SliderRow(kSec.Inner, { Label: "Pattern Rotation", Minimum: -180, Maximum: 180, Step: 1, Unit: "°", Read: () => layer.fill.patternRotation || 0, Write: (v) => { layer.fill.patternRotation = v; refreshComposite(); } });
+          SliderRow(kSec.Inner, { Label: "Pattern Repeats", Minimum: 1, Maximum: 16, Step: 1, Read: () => layer.fill.patternRepeats || 3, Write: (v) => { layer.fill.patternRepeats = v; invalidateLayerThumb(layer.id); refreshComposite(); renderLeftColumn(); } });
+          SliderRow(kSec.Inner, { Label: "Pattern Rotation", Minimum: -180, Maximum: 180, Step: 1, Unit: "°", Read: () => layer.fill.patternRotation || 0, Write: (v) => { layer.fill.patternRotation = v; invalidateLayerThumb(layer.id); refreshComposite(); renderLeftColumn(); } });
           SliderRow(kSec.Inner, { Label: "Pattern Height Gain", Minimum: 0, Maximum: 2.5, Step: 0.05, Read: () => layer.fill.patternHeightStrength ?? 1.0, Write: (v) => { layer.fill.patternHeightStrength = v; refreshComposite(); } });
           ActionRow(kSec.Inner, [{
             Label: "Clear Pattern Tile",
             Glyph: "Trash",
-            Act: () => { layer.fill.patternData = null; rebuildInspector(); refreshComposite(); },
+            Act: () => { layer.fill.patternData = null; invalidateLayerThumb(layer.id); rebuildInspector(); refreshComposite(); renderLeftColumn(); },
           }]);
         }
       } else if (layer.kind === "material") {
@@ -2825,15 +3193,16 @@ export function mountTexturePaintWorkspace(root, appBridge) {
               layer.material.color = found.color;
               layer.material.roughness = found.roughness;
               layer.material.metalness = found.metalness;
+              invalidateLayerThumb(layer.id);
               rebuildInspector();
               refreshComposite();
               renderLeftColumn();
             }
           },
         });
-        ColorRow(kSec.Inner, { Label: "Base Tint", Read: () => layer.material.color, Write: (v) => { layer.material.color = v; refreshComposite(); renderLeftColumn(); } });
-        SliderRow(kSec.Inner, { Label: "Roughness", Minimum: 0.02, Maximum: 1, Step: 0.01, Read: () => layer.material.roughness, Write: (v) => { layer.material.roughness = v; refreshComposite(); } });
-        SliderRow(kSec.Inner, { Label: "Metalness", Minimum: 0, Maximum: 1, Step: 0.01, Read: () => layer.material.metalness, Write: (v) => { layer.material.metalness = v; refreshComposite(); } });
+        ColorRow(kSec.Inner, { Label: "Base Tint", Read: () => layer.material.color, Write: (v) => { layer.material.color = v; invalidateLayerThumb(layer.id); refreshComposite(); renderLeftColumn(); } });
+        SliderRow(kSec.Inner, { Label: "Roughness", Minimum: 0.02, Maximum: 1, Step: 0.01, Read: () => layer.material.roughness, Write: (v) => { layer.material.roughness = v; invalidateLayerThumb(layer.id); refreshComposite(); renderLeftColumn(); } });
+        SliderRow(kSec.Inner, { Label: "Metalness", Minimum: 0, Maximum: 1, Step: 0.01, Read: () => layer.material.metalness, Write: (v) => { layer.material.metalness = v; invalidateLayerThumb(layer.id); refreshComposite(); renderLeftColumn(); } });
         SliderRow(kSec.Inner, { Label: "Height Relief", Minimum: -1, Maximum: 1, Step: 0.02, Read: () => layer.material.height ?? 0, Write: (v) => { layer.material.height = v; refreshComposite(); } });
         SliderRow(kSec.Inner, { Label: "Micro Grain Scale", Minimum: 1, Maximum: 32, Step: 0.5, Read: () => layer.material.grainScale, Write: (v) => { layer.material.grainScale = v; refreshComposite(); } });
         SliderRow(kSec.Inner, { Label: "Grain Contrast", Minimum: 0, Maximum: 0.35, Step: 0.01, Read: () => layer.material.grainStrength, Write: (v) => { layer.material.grainStrength = v; refreshComposite(); } });
@@ -2843,9 +3212,9 @@ export function mountTexturePaintWorkspace(root, appBridge) {
           Label: "Generator Mode",
           Options: [["Edge Wear", "edge-wear"], ["Crevice Dirt", "crevice-dirt"], ["Top Dust", "top-dust"], ["Grunge", "triplanar-grunge"]],
           Read: () => layer.generator.preset,
-          Write: (v) => { layer.generator.preset = v; refreshComposite(); },
+          Write: (v) => { layer.generator.preset = v; invalidateLayerThumb(layer.id); refreshComposite(); renderLeftColumn(); },
         });
-        ColorRow(kSec.Inner, { Label: "Effect Color", Read: () => layer.generator.color, Write: (v) => { layer.generator.color = v; refreshComposite(); } });
+        ColorRow(kSec.Inner, { Label: "Effect Color", Read: () => layer.generator.color, Write: (v) => { layer.generator.color = v; invalidateLayerThumb(layer.id); refreshComposite(); renderLeftColumn(); } });
         SliderRow(kSec.Inner, { Label: "Roughness", Minimum: 0.02, Maximum: 1, Step: 0.01, Read: () => layer.generator.roughness, Write: (v) => { layer.generator.roughness = v; refreshComposite(); } });
         SliderRow(kSec.Inner, { Label: "Metalness", Minimum: 0, Maximum: 1, Step: 0.01, Read: () => layer.generator.metalness, Write: (v) => { layer.generator.metalness = v; refreshComposite(); } });
         SliderRow(kSec.Inner, { Label: "Height Relief", Minimum: -1, Maximum: 1, Step: 0.02, Read: () => layer.generator.height ?? 0.1, Write: (v) => { layer.generator.height = v; refreshComposite(); } });
@@ -2870,13 +3239,14 @@ export function mountTexturePaintWorkspace(root, appBridge) {
           const item = Construct("div", "stamp-sub-item" + (isStSel ? " active" : ""));
           const vis = Construct("button", "stack-mini-btn" + (st.visible ? " on" : ""), ConstructGlyph(st.visible ? "Eye" : "EyeOff"));
           vis.type = "button";
-          vis.addEventListener("click", (e) => { e.stopPropagation(); st.visible = !st.visible; rebuildInspector(); refreshComposite(); });
+          vis.addEventListener("click", (e) => { e.stopPropagation(); st.visible = !st.visible; invalidateLayerThumb(layer.id); renderLeftColumn(); rebuildInspector(); refreshComposite(); });
           const del = Construct("button", "stack-mini-btn", ConstructGlyph("Trash"));
           del.type = "button";
           del.addEventListener("click", (e) => {
             e.stopPropagation();
             layer.stamps = layer.stamps.filter((x) => x.id !== st.id);
             layer.selectedStampId = layer.stamps[0]?.id || null;
+            invalidateLayerThumb(layer.id);
             renderLeftColumn();
             rebuildInspector();
             refreshComposite();
@@ -2886,6 +3256,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
           item.append(ConstructGlyph("Stamp"), lbl, vis, del);
           item.addEventListener("click", () => {
             layer.selectedStampId = st.id;
+            renderLeftColumn();
             rebuildInspector();
             refreshComposite();
           });
@@ -2895,18 +3266,18 @@ export function mountTexturePaintWorkspace(root, appBridge) {
 
         const activeSt = getSelectedStamp(layer, false)?.stamp;
         if (activeSt) {
-          TextRow(stSec.Inner, { Label: "Stamp Name", Read: () => activeSt.name, Write: (v) => { activeSt.name = v; rebuildInspector(); } });
+          TextRow(stSec.Inner, { Label: "Stamp Name", Read: () => activeSt.name, Write: (v) => { activeSt.name = v; renderLeftColumn(); rebuildInspector(); } });
           SegmentedRow(stSec.Inner, {
             Label: "Projection",
             Options: [["UV", "uv"], ["3D", "3d"]],
             Read: () => activeSt.projection || "uv",
-            Write: (v) => { activeSt.projection = v; refreshComposite(); rebuildInspector(); },
+            Write: (v) => { activeSt.projection = v; invalidateLayerThumb(layer.id); renderLeftColumn(); refreshComposite(); rebuildInspector(); },
           });
-          SliderRow(stSec.Inner, { Label: "Uniform Scale", Minimum: 0.025, Maximum: 1.5, Step: 0.01, Read: () => activeSt.scale ?? 0.28, Write: (v) => { activeSt.scale = v; refreshComposite(); } });
-          SliderRow(stSec.Inner, { Label: "Rotation", Minimum: -180, Maximum: 180, Step: 1, Unit: "°", Read: () => activeSt.rotation ?? 0, Write: (v) => { activeSt.rotation = v; refreshComposite(); } });
-          SliderRow(stSec.Inner, { Label: "Opacity", Minimum: 0.02, Maximum: 1, Step: 0.01, Read: () => activeSt.opacity ?? 1, Write: (v) => { activeSt.opacity = v; refreshComposite(); } });
+          SliderRow(stSec.Inner, { Label: "Uniform Scale", Minimum: 0.025, Maximum: 1.5, Step: 0.01, Read: () => activeSt.scale ?? 0.28, Write: (v) => { activeSt.scale = v; invalidateLayerThumb(layer.id); renderLeftColumn(); refreshComposite(); } });
+          SliderRow(stSec.Inner, { Label: "Rotation", Minimum: -180, Maximum: 180, Step: 1, Unit: "°", Read: () => activeSt.rotation ?? 0, Write: (v) => { activeSt.rotation = v; invalidateLayerThumb(layer.id); renderLeftColumn(); refreshComposite(); } });
+          SliderRow(stSec.Inner, { Label: "Opacity", Minimum: 0.02, Maximum: 1, Step: 0.01, Read: () => activeSt.opacity ?? 1, Write: (v) => { activeSt.opacity = v; invalidateLayerThumb(layer.id); renderLeftColumn(); refreshComposite(); } });
           SliderRow(stSec.Inner, { Label: "Height Gain", Minimum: -1, Maximum: 1.5, Step: 0.02, Read: () => activeSt.heightStrength ?? 0.5, Write: (v) => { activeSt.heightStrength = v; refreshComposite(); } });
-          ColorRow(stSec.Inner, { Label: "Stamp Tint", Read: () => activeSt.tint || "#ffffff", Write: (v) => { activeSt.tint = v; refreshComposite(); } });
+          ColorRow(stSec.Inner, { Label: "Stamp Tint", Read: () => activeSt.tint || "#ffffff", Write: (v) => { activeSt.tint = v; invalidateLayerThumb(layer.id); renderLeftColumn(); refreshComposite(); } });
         }
         ActionRow(stSec.Inner, [
           {
@@ -2954,7 +3325,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       } else {
         SwitchRow(maskSec.Inner, { Label: "Paint on Mask", Read: () => !!state.doc.editingMask, Write: (v) => { state.doc.editingMask = v; renderLeftColumn(); refreshComposite(); } });
         SwitchRow(maskSec.Inner, { Label: "Mask Enabled", Read: () => !!layer.mask.enabled, Write: (v) => { layer.mask.enabled = v; renderLeftColumn(); refreshComposite(); } });
-        SwitchRow(maskSec.Inner, { Label: "Invert Mask", Read: () => !!layer.mask.invert, Write: (v) => { layer.mask.invert = v; refreshComposite(); } });
+        SwitchRow(maskSec.Inner, { Label: "Invert Mask", Read: () => !!layer.mask.invert, Write: (v) => { layer.mask.invert = v; invalidateLayerThumb(layer.id); renderLeftColumn(); refreshComposite(); } });
         SliderRow(maskSec.Inner, { Label: "Mask Opacity", Minimum: 0, Maximum: 1, Step: 0.01, Read: () => layer.mask.opacity ?? 1, Write: (v) => { layer.mask.opacity = v; refreshComposite(); } });
         SelectRow(maskSec.Inner, {
           Label: "Procedural Generator",
@@ -2982,6 +3353,8 @@ export function mountTexturePaintWorkspace(root, appBridge) {
               });
               if (gpuPaint.isActive) gpuPaint.syncMaskCpuToGpu(layer);
               if (snap) pushUndoSnapshot(snap);
+              invalidateLayerThumb(layer.id);
+              renderLeftColumn();
               refreshComposite();
               Toast(`Baked ${layer.mask.generatorPreset} into Layer Mask`);
             },
@@ -2989,8 +3362,8 @@ export function mountTexturePaintWorkspace(root, appBridge) {
         }
         SliderRow(maskSec.Inner, { Label: "Feather Radius (px)", Minimum: 0, Maximum: 16, Step: 1, Read: () => layer.mask.featherRadius ?? 0, Write: (v) => { layer.mask.featherRadius = v; } });
         ActionRow(maskSec.Inner, [
-          { Label: "Fill White", Act: () => { const snap = snapshotSelectedLayer(); layer.mask.pixels?.fill(255); if (gpuPaint.isActive) gpuPaint.fillMaskGpu(layer, 1); if (snap) pushUndoSnapshot(snap); refreshComposite(); } },
-          { Label: "Fill Black", Act: () => { const snap = snapshotSelectedLayer(); layer.mask.pixels?.fill(0); if (gpuPaint.isActive) gpuPaint.fillMaskGpu(layer, 0); if (snap) pushUndoSnapshot(snap); refreshComposite(); } },
+          { Label: "Fill White", Act: () => { const snap = snapshotSelectedLayer(); layer.mask.pixels?.fill(255); if (gpuPaint.isActive) gpuPaint.fillMaskGpu(layer, 1); if (snap) pushUndoSnapshot(snap); invalidateLayerThumb(layer.id); renderLeftColumn(); refreshComposite(); } },
+          { Label: "Fill Black", Act: () => { const snap = snapshotSelectedLayer(); layer.mask.pixels?.fill(0); if (gpuPaint.isActive) gpuPaint.fillMaskGpu(layer, 0); if (snap) pushUndoSnapshot(snap); invalidateLayerThumb(layer.id); renderLeftColumn(); refreshComposite(); } },
           {
             Label: "Feather Mask",
             Act: () => {
@@ -2999,6 +3372,8 @@ export function mountTexturePaintWorkspace(root, appBridge) {
               featherMaskPixels(layer.mask.pixels, res, r);
               if (gpuPaint.isActive) gpuPaint.syncMaskCpuToGpu(layer);
               if (snap) pushUndoSnapshot(snap);
+              invalidateLayerThumb(layer.id);
+              renderLeftColumn();
               refreshComposite();
               Toast(`Feathered mask (${r}px)`);
             },
@@ -3391,6 +3766,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     dispose() {
       disposed = true;
       cancelAnimationFrame(rafId);
+      layerStackUI.dispose?.();
       closeToolPopup();
       ro.disconnect();
       window.removeEventListener("keydown", onKeyDown);

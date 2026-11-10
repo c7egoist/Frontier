@@ -356,6 +356,7 @@ if (baseUrl) {
       "/Experimental%20Remastered/TextureStudio/AssetBrowser.js",
       "/Experimental%20Remastered/TextureStudio/StudioControls.js",
       "/Experimental%20Remastered/TextureStudio/Workspaces/MaterialWorkspace.js",
+      "/Experimental%20Remastered/TextureStudio/Workspaces/LayerStackKit.js",
       "/Experimental%20Remastered/TextureStudio/Workspaces/ArtworkStackWorkspace.js",
       "/Experimental%20Remastered/TextureStudio/Workspaces/PatternWorkspace.js",
       "/Experimental%20Remastered/TextureStudio/Workspaces/StampWorkspace.js",
@@ -1676,6 +1677,130 @@ await suite("15. Full 19-Channel PBR, Folder & Procedural Masks, Movable/Scalabl
   globalThis.window.dispatchEvent({ type: "keydown", key: "Escape" });
 
   geo.dispose();
+});
+
+// ----------------------------------------------------------------- 16. FULL LAYER STACK + LIVE THUMBNAIL PREVIEWS + SIMPLIFIED PATTERN/STAMP HEADERS
+await suite("16. Full Layer Stack Design, Live Previews & Simplified Pattern/Stamp Header (Resolution + Save)", async () => {
+  const api = globalThis.window.__frontierTextureStudio;
+
+  // 16a. Pattern & Stamp Simplified Headers + Resolution [512..4096] + Save Dropdown + Canvas Vector Dock
+  for (const ws of ["pattern", "stamp"]) {
+    api.switchWorkspace(ws);
+    const header = globalThis.document.querySelector(".se-header-bar");
+    assert(header, `Missing simplified .se-header-bar in ${ws}`);
+    assert.equal(header.querySelectorAll(".se-tool-btn").length, 0, `${ws} header must NOT contain vector shape tool clutter`);
+    assert(header.querySelector(".se-doc-pill"), `${ws} header must display document pill`);
+
+    const dock = globalThis.document.querySelector(".se-viewport .se-canvas-dock");
+    assert(dock && dock.querySelectorAll(".se-tool-btn").length >= 10, `${ws} floating canvas dock must house vector drawing tools`);
+
+    const resSelect = header.querySelector(".se-res-select");
+    assert(resSelect, `${ws} header must include Resolution selector`);
+    const resOpts = resSelect.children.map((o) => o.value);
+    assert.deepEqual(resOpts, ["512", "1024", "2048", "4096"], `${ws} header Resolution selector must offer 512/1024/2048/4096`);
+    resSelect.value = "2048";
+    resSelect.dispatchEvent({ type: "change" });
+    assert.equal(api.getSnapshot().resolution, 2048, `${ws} switching Resolution selector to 2048 must update state.resolution`);
+
+    const saveBtn = header.querySelector(".se-save-btn");
+    const saveMenu = header.querySelector(".se-save-menu");
+    assert(saveBtn && saveMenu, `${ws} header must include Save button + dropdown menu`);
+    assert.equal(saveMenu.hidden, true, `${ws} Save menu starts closed`);
+    saveBtn.click();
+    assert.equal(saveMenu.hidden, false, `Clicking Save button in ${ws} must open Save menu`);
+    const saveItems = saveMenu.querySelectorAll(".se-save-item");
+    assert(saveItems.length >= 5, `${ws} Save menu must expose Project JSON, PNG, SVG, PBR Maps & Open Project actions`);
+    assert(saveItems.some((it) => /2048px/.test(it.textContent || "")), `${ws} Save menu Export PNG label must reflect selected 2048px resolution`);
+    saveBtn.click();
+    assert.equal(saveMenu.hidden, true, `Clicking Save button again in ${ws} must close Save menu`);
+
+    // 16b. Full Layer Stack + Live Per-Layer SVG Thumbnails
+    const dockCol = globalThis.document.querySelector(".tp-layer-dock");
+    assert(dockCol, `${ws} must render full .tp-layer-dock panel`);
+    assert(dockCol.querySelector(".tp-pane-heading"), `${ws} missing .tp-pane-heading`);
+    assert(dockCol.querySelector(".tp-new-folder") && dockCol.querySelector(".tp-add-toggle"), `${ws} missing Folder+ / Add+ header buttons`);
+    assert.equal(dockCol.querySelectorAll(".tp-stat-card").length, 2, `${ws} must show Visible / Hidden filter stat cards`);
+    assert(dockCol.querySelector(".tp-search-input"), `${ws} must expose layer search bar`);
+    assert(dockCol.querySelector(".tp-system-base") && dockCol.querySelector(".tp-pane-footer"), `${ws} missing system base tile & footer metrics`);
+
+    const thumbs = dockCol.querySelectorAll(".tp-layer-row .tp-layer-thumbnail");
+    assert(thumbs.length >= 1, `${ws} layer rows must include .tp-layer-thumbnail containers`);
+    assert(thumbs.some((th) => String(th.innerHTML || "").includes("<svg")), `${ws} layer thumbnails must contain live isolated <svg> layer previews`);
+
+    // Test lock toggle + visibility filter + search filter + mask subrow
+    const lockBtn = dockCol.querySelector(".tp-lock-btn");
+    assert(lockBtn, `${ws} missing per-layer lock button`);
+    lockBtn.click();
+    assert(dockCol.querySelectorAll(".tp-layer-row").some((r) => r.classList.contains("is-locked")), `${ws} clicking lock button must mark layer .is-locked`);
+    lockBtn.click();
+
+    const actMask = [...dockCol.querySelectorAll(".tp-action-btn")][3];
+    assert(actMask, `${ws} missing bottom layer toolbar mask button`);
+    actMask.click();
+    assert(dockCol.querySelector(".tp-mask-row .tp-mask-thumb"), `${ws} toggling mask must display .tp-mask-row with live mask thumbnail`);
+  }
+
+  // 16c. Texture Paint Full Layer Stack + Live Raster / Material / Stamp / Mask Thumbnails
+  api.switchWorkspace("paint");
+  const paintDock = globalThis.document.querySelector(".tp-layer-dock");
+  assert(paintDock, "Texture Paint must render .tp-layer-dock");
+  const paintThumbs = paintDock.querySelectorAll(".tp-layer-row .tp-layer-thumbnail");
+  assert(paintThumbs.length >= 2, "Texture Paint must render thumbnails for each stack layer");
+  assert(paintThumbs.every((th) => th.querySelector("canvas")), "Texture Paint non-folder layer thumbnails must render live <canvas> previews");
+
+  // Add a Stamp layer -> verify nested .tp-decal-tree-row & .tp-decal-tree-thumb render in layer stack
+  const addStampChip = [...paintDock.querySelectorAll(".chip-btn")].find((b) => /\+ Stamp/i.test(b.textContent || ""));
+  addStampChip.click();
+  assert(paintDock.querySelector(".tp-decal-tree-row .tp-decal-tree-thumb canvas"), "Placed stamp on layer must render nested .tp-decal-tree-row with live stamp canvas preview");
+
+  // Verify Search filtering and Visible/Hidden stat card filtering
+  const searchInp = paintDock.querySelector(".tp-search-input");
+  const countBeforeFilter = paintDock.querySelectorAll(".tp-layer-row").length;
+  searchInp.value = "Stamp";
+  searchInp.dispatchEvent({ type: "input" });
+  const countAfterSearch = paintDock.querySelectorAll(".tp-layer-row").length;
+  assert(countAfterSearch >= 1 && countAfterSearch < countBeforeFilter, `Search filter should narrow layers (${countAfterSearch} < ${countBeforeFilter})`);
+  paintDock.querySelector(".tp-clear-filter").click();
+  assert.equal(paintDock.querySelectorAll(".tp-layer-row").length, countBeforeFilter, "Show all should restore full layer count");
+
+  // Verify GpuPaintSession.readLayerPreviewRgba & readMaskPreviewRgba with mock WebGL2 renderer
+  const { GpuPaintSession } = await import("./Engine/GpuPaintEngine.js");
+  const mockGpu16 = {
+    capabilities: { isWebGL2: true },
+    extensions: { get: () => ({}) },
+    getContext: () => ({ getParameter: () => "ValidatedWebGL2" }),
+    autoClear: true,
+    getRenderTarget: () => null,
+    getScissorTest: () => false,
+    setScissorTest() {},
+    setRenderTarget() {},
+    render() {},
+    readRenderTargetPixels(rt, x, y, w, h, out) {
+      for (let py = 0; py < h; py++) {
+        for (let px = 0; px < w; px++) {
+          const i = (py * w + px) * 4;
+          out[i] = py === 0 ? 220 : 40;
+          out[i + 1] = 160;
+          out[i + 2] = 90;
+          out[i + 3] = 255;
+        }
+      }
+    },
+    getClearColor: (c) => c.set(0, 0, 0),
+    getClearAlpha: () => 1,
+    setClearColor() {},
+    clear() {},
+  };
+  const gpu16 = new GpuPaintSession(mockGpu16, 32);
+  const pLyr = createPaintLayer("paint", { res: 32 });
+  pLyr.mask = { enabled: true, invert: false, pixels: new Uint8ClampedArray(32 * 32).fill(200) };
+  gpu16.ensureLayerTargets(pLyr);
+  const layerThumbRgba = gpu16.readLayerPreviewRgba(pLyr, 16);
+  const maskThumbRgba = gpu16.readMaskPreviewRgba(pLyr, 16);
+  assert.equal(layerThumbRgba.length, 16 * 16 * 4, "readLayerPreviewRgba must return 16x16 RGBA preview");
+  assert.equal(layerThumbRgba[(15 * 16) * 4], 220, "readLayerPreviewRgba must Y-flip WebGL bottom-up rows to top-down canvas order");
+  assert.equal(maskThumbRgba.length, 16 * 16 * 4, "readMaskPreviewRgba must return 16x16 RGBA preview");
+  gpu16.dispose();
 });
 
 console.log(`\nALL ${results.length} VALIDATION SUITES PASSED CLEANLY`);

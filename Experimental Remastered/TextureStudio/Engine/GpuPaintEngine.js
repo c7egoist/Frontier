@@ -2555,6 +2555,76 @@ export class GpuPaintSession {
     return result;
   }
 
+  readPreviewRgba(rt, thumbSize = 64) {
+    if (!this.isActive || !rt?.texture || typeof this.renderer.readRenderTargetPixels !== "function") return null;
+    if (!this.previewRT || this.previewRT.width !== thumbSize || this.previewRT.height !== thumbSize) {
+      this.previewRT?.dispose();
+      this.previewRT = new THREE.WebGLRenderTarget(thumbSize, thumbSize, this._rtOpts());
+    }
+    this._blit(rt.texture, this.previewRT);
+    const raw = new Uint8Array(thumbSize * thumbSize * 4);
+    this.renderer.readRenderTargetPixels(this.previewRT, 0, 0, thumbSize, thumbSize, raw);
+    const out = new Uint8ClampedArray(thumbSize * thumbSize * 4);
+    const stride = thumbSize * 4;
+    for (let y = 0; y < thumbSize; y++) {
+      out.set(raw.subarray((thumbSize - 1 - y) * stride, (thumbSize - y) * stride), y * stride);
+    }
+    return out;
+  }
+
+  readLayerPreviewRgba(layer, thumbSize = 64) {
+    return this.readPreviewRgba(layer?._gpu?.albedoRT, thumbSize);
+  }
+
+  readMaskPreviewRgba(layer, thumbSize = 48) {
+    return this.readPreviewRgba(layer?._gpu?.maskRT, thumbSize);
+  }
+
+  syncLayerGpuToCpuPixels(layer) {
+    if (!this.isActive || !layer?._gpu || typeof this.renderer.readRenderTargetPixels !== "function") return;
+    const res = this.res;
+    const n = res * res;
+    if (layer.pixels && layer._gpu.albedoRT && layer._gpu.ormhRT && layer._gpu.chanAlphaRT) {
+      const rawA = new Uint8Array(n * 4);
+      const rawO = new Uint8Array(n * 4);
+      const rawC = new Uint8Array(n * 4);
+      this.renderer.readRenderTargetPixels(layer._gpu.albedoRT, 0, 0, res, res, rawA);
+      this.renderer.readRenderTargetPixels(layer._gpu.ormhRT, 0, 0, res, res, rawO);
+      this.renderer.readRenderTargetPixels(layer._gpu.chanAlphaRT, 0, 0, res, res, rawC);
+      for (let y = 0; y < res; y++) {
+        const sRow = (res - 1 - y) * res;
+        const dRow = y * res;
+        for (let x = 0; x < res; x++) {
+          const sp = sRow + x;
+          const dp = dRow + x;
+          const si = sp * 4;
+          const di = dp * 4;
+          layer.pixels.albedo[di] = rawA[si];
+          layer.pixels.albedo[di + 1] = rawA[si + 1];
+          layer.pixels.albedo[di + 2] = rawA[si + 2];
+          layer.pixels.albedo[di + 3] = rawA[si + 3];
+          layer.pixels.roughness[dp] = rawO[si];
+          layer.pixels.metalness[dp] = rawO[si + 1];
+          layer.pixels.height[dp] = rawO[si + 2];
+          if (layer.pixels.roughAlpha) layer.pixels.roughAlpha[dp] = rawC[si + 1];
+          if (layer.pixels.metalAlpha) layer.pixels.metalAlpha[dp] = rawC[si + 2];
+          if (layer.pixels.heightAlpha) layer.pixels.heightAlpha[dp] = rawC[si + 3];
+        }
+      }
+    }
+    if (layer.mask?.pixels && layer._gpu.maskRT) {
+      const rawM = new Uint8Array(n * 4);
+      this.renderer.readRenderTargetPixels(layer._gpu.maskRT, 0, 0, res, res, rawM);
+      for (let y = 0; y < res; y++) {
+        const sRow = (res - 1 - y) * res;
+        const dRow = y * res;
+        for (let x = 0; x < res; x++) {
+          layer.mask.pixels[dRow + x] = rawM[(sRow + x) * 4];
+        }
+      }
+    }
+  }
+
   dispose() {
     this.strokeAlbedoA.dispose(); this.strokeAlbedoB.dispose();
     this.strokeOrmhA.dispose(); this.strokeOrmhB.dispose();
@@ -2562,6 +2632,7 @@ export class GpuPaintSession {
     this.compOrmhA.dispose(); this.compOrmhB.dispose();
     this.finalAlbedoRT.dispose(); this.finalOrmhRT.dispose();
     this.finalNormalRT.dispose(); this.displayAlbedoRT.dispose();
+    this.previewRT?.dispose();
     this.scratchMaskRT.dispose();
     this.scratchChanAlphaRT.dispose();
     this.extAccA?.forEach((rt) => rt?.dispose());

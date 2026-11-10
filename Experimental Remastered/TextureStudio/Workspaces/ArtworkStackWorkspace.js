@@ -23,6 +23,7 @@ import {
   listStampStarterCatalog,
   loadStarterAsArtworkDocument,
 } from "../Engine/Patterns/StarterCatalogBridge.js";
+import { createLayerStackPanel } from "./LayerStackKit.js";
 import {
   Construct,
   ConstructGlyph,
@@ -111,6 +112,57 @@ function snapCoord(val, step) {
   return step > 0 ? Math.round(val / step) * step : val;
 }
 
+const RESOLUTIONS = [512, 1024, 2048, 4096];
+
+function buildSingleLayerThumbSvg(doc, layer) {
+  if (!layer) return "";
+  const docSize = doc.size || ARTWORK_SIZE;
+  const thumbLayer = { ...layer, visible: true, parentId: null };
+  const singleDoc = {
+    ...doc,
+    mode: "stamp", // preview individual layer clearly without full-tile ghost crowding unless array-grid/wrap
+    layers: [thumbLayer],
+    background: { enabled: false },
+  };
+  const { defs, body } = artworkDocumentLayersSvg(singleDoc, {
+    idPrefix: `lt-${String(layer.id || "x").replace(/[^a-z0-9]/gi, "")}`,
+  });
+
+  // Auto-frame compact single shapes so tiny motifs fill the 36x36 thumbnail cleanly
+  const hasSpreadMod = (layer.modifiers || []).some(
+    (m) => m.enabled !== false && (m.type === "array-grid" || m.type === "array-radial"),
+  );
+  let vb = `0 0 ${docSize} ${docSize}`;
+  if (layer.kind !== "gradient" && !hasSpreadMod && layer.transform) {
+    const bw = Math.max(24, Number(layer.transform.width || 64));
+    const bh = Math.max(24, Number(layer.transform.height || 64));
+    const span = Math.max(bw, bh);
+    if (span < docSize * 0.56) {
+      const box = Math.min(docSize, Math.max(120, span * 1.48));
+      const cx = Number(layer.transform.x ?? docSize * 0.5);
+      const cy = Number(layer.transform.y ?? docSize * 0.5);
+      const vx = Math.max(0, Math.min(docSize - box, cx - box * 0.5));
+      const vy = Math.max(0, Math.min(docSize - box, cy - box * 0.5));
+      vb = `${vx.toFixed(1)} ${vy.toFixed(1)} ${box.toFixed(1)} ${box.toFixed(1)}`;
+    }
+  }
+  return `<svg xmlns="${SVG_NS}" viewBox="${vb}"><defs>${defs}</defs>${body}</svg>`;
+}
+
+function buildMaskMiniSvg(mask) {
+  if (!mask) return "";
+  const inv = !!mask.invert;
+  const fg = inv ? "#14161a" : "#eff4cf";
+  const bg = inv ? "#eff4cf" : "#14161a";
+  if (mask.mode === "radial") {
+    return `<svg viewBox="0 0 24 24"><rect width="24" height="24" fill="${bg}"/><circle cx="12" cy="12" r="7.5" fill="${fg}" fill-opacity="0.9"/></svg>`;
+  }
+  if (mask.mode === "stripe") {
+    return `<svg viewBox="0 0 24 24"><rect width="24" height="24" fill="${bg}"/><rect x="3" y="0" width="5" height="24" fill="${fg}"/><rect x="13" y="0" width="5" height="24" fill="${fg}"/></svg>`;
+  }
+  return `<svg viewBox="0 0 24 24"><rect width="24" height="24" fill="${bg}"/><circle cx="8" cy="9" r="5" fill="${fg}" fill-opacity="0.85"/><circle cx="16" cy="15" r="4.5" fill="${fg}" fill-opacity="0.7"/><circle cx="16" cy="7" r="2.8" fill="${fg}" fill-opacity="0.65"/></svg>`;
+}
+
 export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" } = {}) {
   const isPattern = mode === "pattern";
   const catalog = isPattern ? listPatternStarterCatalog() : listStampStarterCatalog();
@@ -123,6 +175,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     mode,
     doc: initialDoc,
     activeStarterId: catalog[0]?.id || "",
+    resolution: 1024,
     viewChannel: "vector", // "vector" | "tile2x2" | "composite" | "albedo" | "roughness" | "metalness" | "height" | "normal"
     vectorTool: "select",
     showGrid: true,
@@ -143,45 +196,20 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
 
   const grid = Construct("div", "studio-grid");
 
-  // ----------------------------------------------------------------- LEFT: DECLUTTERED LAYER STACK ONLY
-  const leftCol = Construct("aside", "studio-column");
-  const leftMeta = Construct("span", "panel-heading-meta", `${state.doc.layers.length} LAYERS`);
-  leftCol.append(
-    Construct("div", "panel-heading", [
-      Construct("h2", null, isPattern ? "Pattern Layer Stack" : "Stamp Layer Stack"),
-      leftMeta,
-    ]),
-  );
+  // ----------------------------------------------------------------- LEFT: FULL DESIGN LAYER STACK + LIVE THUMBNAILS
+  const leftCol = Construct("aside", "studio-column tp-layer-dock");
+  const layerStackUI = createLayerStackPanel(leftCol, {
+    title: isPattern ? "Layers" : "Layers",
+    extraMetricLabel: "MODS",
+  });
 
-  const leftScroll = Construct("div", "panel-scroll");
-  const leftInner = Construct("div", "panel-scroll-inner");
-  leftScroll.append(leftInner);
-  leftCol.append(
-    leftScroll,
-    Construct("div", "panel-footer", [
-      Construct("span", null, "Drag / ↑↓ Reorder"),
-      Construct("span", null, "Assets in Bottom Browser"),
-    ]),
-  );
-
-  // ----------------------------------------------------------------- CENTER: VECTOR TOOLBAR + INTERACTIVE SVG STAGE
+  // ----------------------------------------------------------------- CENTER: SIMPLIFIED HEADER + VECTOR/PBR STAGE
   const centerCol = Construct("main", "studio-column viewport-column");
-  const toolbar = Construct("div", "viewport-toolbar");
+  const toolbar = Construct("div", "viewport-toolbar se-header-bar");
 
-  const toolBarEl = Construct("div", "se-tool-bar");
-  const toolButtons = new Map();
-  for (const t of VECTOR_TOOLS) {
-    const btn = Construct("button", "se-tool-btn" + (state.vectorTool === t.id ? " active" : ""), [
-      ConstructGlyph(t.glyph),
-      Construct("span", null, t.label),
-    ]);
-    btn.type = "button";
-    btn.dataset.vectorTool = t.id;
-    btn.title = `${t.label} (${t.key})`;
-    btn.addEventListener("click", () => selectVectorTool(t.id));
-    toolButtons.set(t.id, btn);
-    toolBarEl.append(btn);
-  }
+  const docTitleEl = Construct("strong", null, state.doc.name || (isPattern ? "Pattern" : "Stamp"));
+  const docModeEl = Construct("span", null, isPattern ? "PATTERN" : "STAMP");
+  const docPill = Construct("div", "se-doc-pill", [docTitleEl, docModeEl]);
 
   const viewOpts = [
     ["Vector SVG", "vector"],
@@ -193,8 +221,8 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     ["Height", "height"],
     ["Normal", "normal"],
   ];
-  const viewSelect = Construct("select");
-  viewSelect.style.cssText = "height:28px;padding:0 9px;background:#191a1d;border:1px solid var(--line);border-radius:999px;font-size:11px;";
+  const viewSelect = Construct("select", "se-header-select");
+  viewSelect.setAttribute("aria-label", "Canvas View");
   for (const [label, val] of viewOpts) {
     const o = Construct("option", null, label);
     o.value = val;
@@ -202,39 +230,67 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
   }
   viewSelect.value = state.viewChannel;
 
-  const btnGrid = Construct("button", "pill-btn" + (state.showGrid ? " active" : ""), [
-    ConstructGlyph("Grid"),
-    Construct("span", null, "Grid"),
-  ]);
-  btnGrid.type = "button";
-  btnGrid.title = "Toggle Snap Grid & Axes";
-
-  const snapSelect = Construct("select");
-  snapSelect.style.cssText = "height:28px;padding:0 8px;background:#191a1d;border:1px solid var(--line);border-radius:999px;font-size:10.5px;";
-  for (const [label, val] of [["Snap: Off", 0], ["Snap: 8px", 8], ["Snap: 16px", 16], ["Snap: 32px", 32], ["Snap: 64px", 64]]) {
-    const o = Construct("option", null, label);
-    o.value = String(val);
-    snapSelect.append(o);
+  // Resolution dropdown (512, 1024, 2048, 4096)
+  const resSelect = Construct("select", "se-header-select se-res-select");
+  resSelect.setAttribute("aria-label", "Resolution");
+  resSelect.title = "Output & Export Resolution";
+  for (const r of RESOLUTIONS) {
+    const o = Construct("option", null, `${r} × ${r}`);
+    o.value = String(r);
+    resSelect.append(o);
   }
-  snapSelect.value = String(state.snapStep);
+  resSelect.value = String(state.resolution);
 
-  const btnAddNoiseScale = Construct("button", "pill-btn warm", [
-    ConstructGlyph("Noise"),
-    Construct("span", null, "+ Noise Scale"),
+  // Clean Save button + dropdown menu in header
+  const saveWrap = Construct("div", "se-save-wrap");
+  const btnSaveMenu = Construct("button", "pill-btn se-save-btn", [
+    ConstructGlyph("Save"),
+    Construct("span", null, "Save"),
+    ConstructGlyph("ChevronDown"),
   ]);
-  btnAddNoiseScale.type = "button";
+  btnSaveMenu.type = "button";
+  btnSaveMenu.title = "Save Project, Export PNG / SVG / PBR Maps";
 
-  const btnExportSvg = Construct("button", "pill-btn", [
-    ConstructGlyph("Download"),
-    Construct("span", null, "SVG"),
-  ]);
-  btnExportSvg.type = "button";
+  const saveMenu = Construct("div", "se-save-menu");
+  saveMenu.hidden = true;
 
-  const btnExportPng = Construct("button", "pill-btn", [
-    ConstructGlyph("Download"),
-    Construct("span", null, "PNG"),
+  const loadJsonInp = document.createElement("input");
+  loadJsonInp.type = "file";
+  loadJsonInp.accept = ".json,.pattern.json,.stamp.json";
+  loadJsonInp.hidden = true;
+
+  const savePngItem = Construct("button", "se-save-item", [
+    Construct("span", null, "Export PNG"),
+    Construct("small", null, `${state.resolution}px`),
   ]);
-  btnExportPng.type = "button";
+  savePngItem.type = "button";
+
+  const saveSvgItem = Construct("button", "se-save-item", [
+    Construct("span", null, "Export Vector SVG"),
+    Construct("small", null, ".svg"),
+  ]);
+  saveSvgItem.type = "button";
+
+  const saveDocItem = Construct("button", "se-save-item", [
+    Construct("span", null, "Save Project File"),
+    Construct("small", null, `.${mode}.json`),
+  ]);
+  saveDocItem.type = "button";
+
+  const savePbrItem = Construct("button", "se-save-item", [
+    Construct("span", null, "Export PBR Maps (4×)"),
+    Construct("small", null, `${Math.min(2048, state.resolution)}px`),
+  ]);
+  savePbrItem.type = "button";
+
+  const loadDocItem = Construct("button", "se-save-item", [
+    Construct("span", null, "Open Project File…"),
+    Construct("small", null, ".json"),
+  ]);
+  loadDocItem.type = "button";
+
+  saveMenu.append(saveDocItem, savePngItem, saveSvgItem, savePbrItem, loadDocItem, loadJsonInp);
+  saveWrap.append(btnSaveMenu, saveMenu);
 
   const btnSendToPaint = Construct("button", "pill-btn accent", [
     ConstructGlyph("Brush"),
@@ -254,14 +310,11 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
   }
 
   toolbar.append(
-    toolBarEl,
+    docPill,
     viewSelect,
-    btnGrid,
-    snapSelect,
-    btnAddNoiseScale,
+    resSelect,
+    saveWrap,
     Construct("div", "toolbar-spacer"),
-    btnExportSvg,
-    btnExportPng,
     btnSendToMaterial,
     btnSendToPaint,
   );
@@ -279,9 +332,32 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
   const rulerYCanvas = document.createElement("canvas");
   rulerYWrap.append(rulerYCanvas);
 
+  // Clean Floating Vector Tool Dock INSIDE the canvas viewport (declutters top header!)
+  const canvasDock = Construct("div", "se-canvas-dock");
+  const toolButtons = new Map();
+  for (const t of VECTOR_TOOLS) {
+    const btn = Construct("button", "se-tool-btn" + (state.vectorTool === t.id ? " active" : ""), [
+      ConstructGlyph(t.glyph),
+      Construct("span", null, t.label),
+    ]);
+    btn.type = "button";
+    btn.dataset.vectorTool = t.id;
+    btn.title = `${t.label} (${t.key})`;
+    btn.addEventListener("click", () => selectVectorTool(t.id));
+    toolButtons.set(t.id, btn);
+    canvasDock.append(btn);
+  }
+  const btnGrid = Construct("button", "se-tool-btn" + (state.showGrid ? " active" : ""), [
+    ConstructGlyph("Grid"),
+    Construct("span", null, "Grid"),
+  ]);
+  btnGrid.type = "button";
+  btnGrid.title = "Toggle Snap Grid & Axes";
+  canvasDock.append(Construct("div", "se-dock-divider"), btnGrid);
+
   // Floating zoom HUD (.se-view-controls matching reference ShapeEditorCanvas.jsx)
   const viewControls = Construct("div", "se-view-controls");
-  const viewTitle = Construct("strong", null, isPattern ? "VECTOR CANVAS 512×512" : "STAMP VECTOR 512×512");
+  const viewTitle = Construct("strong", null, `${isPattern ? "VECTOR CANVAS" : "STAMP VECTOR"} ${state.resolution}×${state.resolution}`);
   const btnZoomOut = Construct("button", null, "−");
   btnZoomOut.type = "button";
   const zoomReadout = Construct("span", "tabular", "100%");
@@ -303,9 +379,9 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
   const mainCanvas = document.createElement("canvas");
   pbrWrap.append(mainCanvas);
 
-  seViewport.append(rulerCorner, rulerXWrap, rulerYWrap, svgEl, viewControls, pbrWrap);
+  seViewport.append(rulerCorner, rulerXWrap, rulerYWrap, canvasDock, svgEl, viewControls, pbrWrap);
 
-  // Bottom quick channel strip + live interaction HUD
+  // Bottom quick channel strip + snap / modifier tools
   const bottomBar = Construct("div", "se-bottom-bar");
   const miniStrip = Construct("div", "channel-thumbs");
   const miniCanvases = {};
@@ -326,7 +402,22 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     });
     miniStrip.append(tile);
   }
-  const hudPill = Construct("span", "panel-heading-meta", "Drag shapes to move · Handles resize/rotate · Drop assets onto canvas");
+
+  const snapSelect = Construct("select", "se-header-select");
+  snapSelect.setAttribute("aria-label", "Snap Grid Step");
+  for (const [label, val] of [["Snap: Off", 0], ["Snap: 8px", 8], ["Snap: 16px", 16], ["Snap: 32px", 32], ["Snap: 64px", 64]]) {
+    const o = Construct("option", null, label);
+    o.value = String(val);
+    snapSelect.append(o);
+  }
+  snapSelect.value = String(state.snapStep);
+
+  const btnAddNoiseScale = Construct("button", "pill-btn warm", [
+    ConstructGlyph("Noise"),
+    Construct("span", null, "+ Noise Scale"),
+  ]);
+  btnAddNoiseScale.type = "button";
+
   const btnBackVector = Construct("button", "pill-btn", [ConstructGlyph("Pointer"), Construct("span", null, "Vector SVG")]);
   btnBackVector.type = "button";
   btnBackVector.addEventListener("click", () => {
@@ -334,7 +425,8 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     viewSelect.value = "vector";
     syncViewDisplay();
   });
-  bottomBar.append(miniStrip, hudPill, btnBackVector);
+  const bottomTools = Construct("div", "se-bottom-tools", [snapSelect, btnAddNoiseScale, btnBackVector]);
+  bottomBar.append(miniStrip, bottomTools);
 
   stage.append(seViewport, bottomBar);
   centerCol.append(toolbar, stage);
@@ -360,7 +452,6 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
 
   grid.append(leftCol, centerCol, rightCol);
   root.append(grid);
-  SmoothScroll(leftScroll, leftInner);
   SmoothScroll(rightScroll, rightInner);
 
   // ----------------------------------------------------------------- HELPERS
@@ -607,6 +698,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     const isVector = state.viewChannel === "vector";
     pbrWrap.hidden = isVector;
     svgEl.hidden = !isVector;
+    canvasDock.hidden = !isVector;
     viewControls.hidden = !isVector;
     rulerCorner.hidden = !isVector;
     rulerXWrap.hidden = !isVector;
@@ -624,183 +716,206 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
       state.lastStats = ev.stats;
       updatePbrPreviews();
     }
+    docTitleEl.textContent = state.doc.name || (isPattern ? "Pattern" : "Stamp");
+    viewTitle.textContent = `${isPattern ? "VECTOR CANVAS" : "STAMP VECTOR"} ${state.resolution}×${state.resolution}`;
     if (reRenderLeft) renderLeftColumn();
-    leftMeta.textContent = `${state.doc.layers.length} LAYERS`;
     Broadcast();
   }
 
-  // ----------------------------------------------------------------- LEFT LAYER STACK
+  // ----------------------------------------------------------------- LEFT LAYER STACK (FULL DESIGN + LIVE PREVIEWS)
+  const ARTWORK_ADD_OPTIONS = [
+    { kind: "motif", label: "+ Motif", glyph: "Star", hint: "Vector shape / procedural motif" },
+    { kind: "text", label: "+ Text", glyph: "Type", hint: "Typography & engraved label" },
+    { kind: "gradient", label: "+ Grad", glyph: "Sliders", hint: "Linear / radial surface gradient" },
+    { kind: "folder", label: "+ Folder", glyph: "Folder", hint: "Group & nest child layers" },
+  ];
+
+  function moveLayerByOffset(layerId, deltaUp) {
+    const idx = state.doc.layers.findIndex((l) => l.id === layerId);
+    if (idx < 0) return false;
+    const nextIdx = idx + (deltaUp > 0 ? 1 : -1);
+    if (nextIdx < 0 || nextIdx >= state.doc.layers.length) return false;
+    const [item] = state.doc.layers.splice(idx, 1);
+    state.doc.layers.splice(nextIdx, 0, item);
+    evaluateAndRender(true);
+    rebuildInspector();
+    return true;
+  }
+
+  function moveLayerRelativeTo(sourceId, targetId, dropAboveInVisual) {
+    if (!sourceId || sourceId === targetId) return false;
+    const srcIdx = state.doc.layers.findIndex((l) => l.id === sourceId);
+    const tgtIdx = state.doc.layers.findIndex((l) => l.id === targetId);
+    if (srcIdx < 0 || tgtIdx < 0) return false;
+    const [item] = state.doc.layers.splice(srcIdx, 1);
+    const newTgtIdx = state.doc.layers.findIndex((l) => l.id === targetId);
+    const insertAt = dropAboveInVisual ? newTgtIdx + 1 : newTgtIdx;
+    state.doc.layers.splice(insertAt, 0, item);
+    evaluateAndRender(true);
+    rebuildInspector();
+    return true;
+  }
+
+  function addArtworkLayer(kind) {
+    const layer = createArtworkLayer(kind, {
+      name: kind === "text" ? "Decal Typography" : kind === "gradient" ? "Gradient Wash" : kind === "folder" ? "Group Folder" : "Motif Shape",
+      shape: { color: isPattern ? "#eff4cf" : "#e8c27a" },
+    });
+    state.doc.layers.push(layer);
+    state.doc.selectedLayerId = layer.id;
+    evaluateAndRender(true);
+    rebuildInspector();
+  }
+
   function renderLeftColumn() {
-    leftInner.innerHTML = "";
-
-    const addBtns = Construct("div", "chip-strip");
-    for (const [label, kind] of [
-      ["+ Motif", "motif"],
-      ["+ Text", "text"],
-      ["+ Grad", "gradient"],
-      ["+ Folder", "folder"],
-    ]) {
-      const b = Construct("button", "chip-btn", label);
-      b.type = "button";
-      b.addEventListener("click", () => {
-        const layer = createArtworkLayer(kind, {
-          name: kind === "text" ? "Decal Typography" : kind === "gradient" ? "Gradient Wash" : kind === "folder" ? "Group Folder" : "Motif Shape",
-          shape: { color: isPattern ? "#eff4cf" : "#e8c27a" },
-        });
-        state.doc.layers.push(layer);
-        state.doc.selectedLayerId = layer.id;
-        evaluateAndRender(true);
-        rebuildInspector();
-      });
-      addBtns.append(b);
-    }
-    leftInner.append(addBtns);
-
-    const stackBox = Construct("div");
     const sel = getSelectedLayer();
-    let dragLayerId = null;
+    const totalMods = state.doc.layers.reduce((acc, l) => acc + ((l.modifiers || []).filter((m) => m.enabled !== false).length), 0);
+    const bg = state.doc.background || {};
 
-    const moveLayerByOffset = (layerId, deltaUp) => {
-      const idx = state.doc.layers.findIndex((l) => l.id === layerId);
-      if (idx < 0) return false;
-      const nextIdx = idx + (deltaUp > 0 ? 1 : -1);
-      if (nextIdx < 0 || nextIdx >= state.doc.layers.length) return false;
-      const [item] = state.doc.layers.splice(idx, 1);
-      state.doc.layers.splice(nextIdx, 0, item);
-      evaluateAndRender(true);
-      rebuildInspector();
-      return true;
-    };
-
-    const moveLayerRelativeTo = (sourceId, targetId, dropAboveInVisual) => {
-      if (!sourceId || sourceId === targetId) return false;
-      const srcIdx = state.doc.layers.findIndex((l) => l.id === sourceId);
-      const tgtIdx = state.doc.layers.findIndex((l) => l.id === targetId);
-      if (srcIdx < 0 || tgtIdx < 0) return false;
-      const [item] = state.doc.layers.splice(srcIdx, 1);
-      const newTgtIdx = state.doc.layers.findIndex((l) => l.id === targetId);
-      const insertAt = dropAboveInVisual ? newTgtIdx + 1 : newTgtIdx;
-      state.doc.layers.splice(insertAt, 0, item);
-      evaluateAndRender(true);
-      rebuildInspector();
-      return true;
-    };
-
-    const layersTopDown = [...state.doc.layers].reverse();
-    for (let vIdx = 0; vIdx < layersTopDown.length; vIdx++) {
-      const layer = layersTopDown[vIdx];
-      const isActive = sel && layer.id === sel.id;
-      const row = Construct("div", "stack-row" + (isActive ? " active" : "") + (layer.parentId ? " nested" : ""));
-      row.draggable = true;
-      row.dataset.layerId = layer.id;
-
-      const handle = Construct("span", "stack-drag-handle", ConstructGlyph("Grip"));
-      handle.title = "Drag to reorder layer";
-
-      const thumb = Construct("div", "stack-row-thumb");
-      if (layer.kind === "folder") thumb.append(ConstructGlyph("Folder"));
-      else thumb.style.background = layer.shape?.color || "#e8c27a";
-
-      const modCount = (layer.modifiers || []).filter((m) => m.enabled !== false).length;
-      const subParts = [layer.shape?.motifType || layer.kind, `${Math.round(layer.transform.x)},${Math.round(layer.transform.y)}`];
-      if (modCount > 0) subParts.push(`${modCount} mod${modCount > 1 ? "s" : ""}`);
-
-      const info = Construct("div", "stack-row-info", [
-        Construct("span", "stack-row-title", layer.name),
-        Construct("span", "stack-row-sub", subParts.join(" · ")),
-      ]);
-
-      const orderBox = Construct("div", "stack-order-btns");
-      const upBtn = Construct("button", "stack-order-btn", ConstructGlyph("ArrowUp"));
-      upBtn.type = "button";
-      upBtn.title = "Move layer up";
-      upBtn.disabled = vIdx === 0;
-      upBtn.addEventListener("click", (e) => { e.stopPropagation(); moveLayerByOffset(layer.id, +1); });
-
-      const dnBtn = Construct("button", "stack-order-btn", ConstructGlyph("ArrowDown"));
-      dnBtn.type = "button";
-      dnBtn.title = "Move layer down";
-      dnBtn.disabled = vIdx === layersTopDown.length - 1;
-      dnBtn.addEventListener("click", (e) => { e.stopPropagation(); moveLayerByOffset(layer.id, -1); });
-      orderBox.append(upBtn, dnBtn);
-
-      const maskBtn = Construct("button", "mask-pill" + (layer.mask?.enabled ? " active" : ""), "MSK");
-      maskBtn.type = "button";
-      maskBtn.title = "Toggle Per-Layer Mask";
-      maskBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        if (!layer.mask) {
-          layer.mask = { enabled: true, invert: false, mode: "noise", frequency: 4, threshold: 0.45, softness: 0.25, seed: 211 };
-        } else {
-          layer.mask.enabled = !layer.mask.enabled;
+    layerStackUI.render({
+      layers: state.doc.layers,
+      limit: 32,
+      selectedId: sel?.id || null,
+      addOptions: ARTWORK_ADD_OPTIONS,
+      extraMetricValue: totalMods,
+      systemBase: {
+        title: `Canvas Tile · ${state.resolution}×${state.resolution}`,
+        meta: bg.enabled ? `Background ${bg.color || "#171a1f"}` : "Transparent alpha cutout",
+        badge: isPattern ? "Seamless" : "Cutout",
+      },
+      renderThumb(layer, thumbEl, { isFolder }) {
+        if (isFolder) {
+          thumbEl.classList.add("tp-kind-folder");
+          thumbEl.append(ConstructGlyph("Folder"));
+          return;
         }
-        state.doc.selectedLayerId = layer.id;
+        thumbEl.innerHTML = buildSingleLayerThumbSvg(state.doc, layer);
+      },
+      getSubtitle(layer) {
+        const modCount = (layer.modifiers || []).filter((m) => m.enabled !== false).length;
+        const kindTag = layer.kind === "motif" ? (layer.shape?.motifType || "motif") : layer.kind;
+        const blendTag = layer.blend && layer.blend !== "Normal" ? ` · ${layer.blend}` : "";
+        const modTag = modCount > 0 ? ` · ${modCount} mod${modCount > 1 ? "s" : ""}` : "";
+        return `${kindTag}${blendTag}${modTag}`;
+      },
+      getMaskSubrow(layer) {
+        if (!layer.mask) return null;
+        const thumbWrap = Construct("div", "");
+        thumbWrap.innerHTML = buildMaskMiniSvg(layer.mask);
+        return {
+          enabled: !!layer.mask.enabled,
+          active: false,
+          label: "Layer mask",
+          meta: `${layer.mask.mode || "noise"} · T:${Number(layer.mask.threshold ?? 0.45).toFixed(2)}`,
+          thumbEl: thumbWrap.firstElementChild || null,
+          onSelect: () => {
+            state.doc.selectedLayerId = layer.id;
+            renderLeftColumn();
+            rebuildInspector();
+          },
+          onToggle: () => {
+            layer.mask.enabled = !layer.mask.enabled;
+            evaluateAndRender(true);
+            rebuildInspector();
+          },
+        };
+      },
+      renderExpanded(layer, expEl) {
+        const pills = Construct("div", "tp-exp-pills");
+        const chDefs = [
+          ["COL", layer.surface?.enableAlbedo !== false, "#eff4cf"],
+          ["RGH", layer.surface?.enableRoughness !== false, "#9ecfff"],
+          ["MET", layer.surface?.enableMetalness !== false, "#e8c27a"],
+          ["HGT", layer.surface?.enableHeight !== false, "#9ad48b"],
+        ];
+        for (const [short, on, col] of chDefs) {
+          if (!on) continue;
+          const dot = document.createElement("i");
+          dot.style.setProperty("--pill-color", col);
+          pills.append(Construct("span", "tp-exp-pill", [dot, Construct("span", null, short)]));
+        }
+        for (const mod of (layer.modifiers || []).filter((m) => m.enabled !== false)) {
+          const dot = document.createElement("i");
+          dot.style.setProperty("--pill-color", "#d49fff");
+          pills.append(Construct("span", "tp-exp-pill", [dot, Construct("span", null, mod.type)]));
+        }
+        expEl.append(
+          pills,
+          Construct("div", "tp-exp-meta", `Pos (${Math.round(layer.transform?.x ?? 256)}, ${Math.round(layer.transform?.y ?? 256)}) · ${Math.round(layer.transform?.width ?? 64)}×${Math.round(layer.transform?.height ?? 64)}`),
+        );
+      },
+      onSelectLayer: (id) => {
+        state.doc.selectedLayerId = id;
+        renderLeftColumn();
+        if (state.viewChannel === "vector") renderVectorSvgCanvas();
+        rebuildInspector();
+      },
+      onAddLayer: addArtworkLayer,
+      onMoveLayer: moveLayerByOffset,
+      onDropReorder: moveLayerRelativeTo,
+      onToggleVisible: (id) => {
+        const l = state.doc.layers.find((x) => x.id === id);
+        if (!l) return;
+        l.visible = l.visible === false;
+        evaluateAndRender(true);
+      },
+      onToggleLock: (id) => {
+        const l = state.doc.layers.find((x) => x.id === id);
+        if (!l) return;
+        l.locked = !l.locked;
+        renderLeftColumn();
+        rebuildInspector();
+      },
+      onRenameLayer: (id, nextName) => {
+        const l = state.doc.layers.find((x) => x.id === id);
+        if (l) { l.name = nextName; rebuildInspector(); }
+      },
+      onOpacityChange: (id, val, final) => {
+        const l = state.doc.layers.find((x) => x.id === id);
+        if (!l) return;
+        l.opacity = val;
+        evaluateAndRender(final, { skipPbr: !final });
+      },
+      onDuplicateLayer: (id) => {
+        const src = state.doc.layers.find((x) => x.id === id);
+        if (!src) return;
+        const copy = structuredClone(src);
+        copy.id = `lyr_${Math.random().toString(36).slice(2, 9)}`;
+        copy.name = `${src.name} Copy`;
+        if (copy.transform && copy.kind !== "folder") {
+          copy.transform.x = Math.min(512, (copy.transform.x ?? 256) + 18);
+          copy.transform.y = Math.min(512, (copy.transform.y ?? 256) + 18);
+        }
+        const idx = state.doc.layers.findIndex((x) => x.id === id);
+        state.doc.layers.splice(idx + 1, 0, copy);
+        state.doc.selectedLayerId = copy.id;
         evaluateAndRender(true);
         rebuildInspector();
-      });
-
-      const visBtn = Construct("button", "stack-mini-btn" + (layer.visible ? " on" : ""), ConstructGlyph(layer.visible ? "Eye" : "EyeOff"));
-      visBtn.type = "button";
-      visBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        layer.visible = !layer.visible;
+        Toast(`Duplicated "${src.name}"`);
+      },
+      onToggleLayerMask: (id) => {
+        const l = state.doc.layers.find((x) => x.id === id);
+        if (!l || l.kind === "folder") return;
+        if (!l.mask) {
+          l.mask = { enabled: true, invert: false, mode: "noise", frequency: 4, threshold: 0.45, softness: 0.25, seed: 211 };
+        } else {
+          l.mask.enabled = !l.mask.enabled;
+        }
+        state.doc.selectedLayerId = l.id;
         evaluateAndRender(true);
-      });
-
-      const delBtn = Construct("button", "stack-mini-btn", ConstructGlyph("Trash"));
-      delBtn.type = "button";
-      delBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
+        rebuildInspector();
+      },
+      onDeleteLayer: (id) => {
         if (state.doc.layers.length <= 1) {
           Toast("Keep at least one layer in stack");
           return;
         }
-        state.doc.layers = state.doc.layers.filter((l) => l.id !== layer.id);
-        if (state.doc.selectedLayerId === layer.id) state.doc.selectedLayerId = state.doc.layers[state.doc.layers.length - 1].id;
+        state.doc.layers = state.doc.layers.filter((l) => l.id !== id);
+        if (state.doc.selectedLayerId === id) state.doc.selectedLayerId = state.doc.layers[state.doc.layers.length - 1].id;
         evaluateAndRender(true);
         rebuildInspector();
-      });
-
-      row.addEventListener("dragstart", (e) => {
-        dragLayerId = layer.id;
-        row.classList.add("dragging");
-        if (e.dataTransfer) {
-          e.dataTransfer.effectAllowed = "move";
-          e.dataTransfer.setData("text/plain", layer.id);
-        }
-      });
-      row.addEventListener("dragend", () => {
-        dragLayerId = null;
-        row.classList.remove("dragging", "drop-above", "drop-below");
-      });
-      row.addEventListener("dragover", (e) => {
-        if (!dragLayerId || dragLayerId === layer.id) return;
-        e.preventDefault();
-        const r = row.getBoundingClientRect();
-        const above = e.clientY < r.top + r.height * 0.5;
-        row.classList.toggle("drop-above", above);
-        row.classList.toggle("drop-below", !above);
-      });
-      row.addEventListener("dragleave", () => row.classList.remove("drop-above", "drop-below"));
-      row.addEventListener("drop", (e) => {
-        e.preventDefault();
-        const src = dragLayerId || e.dataTransfer?.getData("text/plain");
-        const r = row.getBoundingClientRect();
-        const above = e.clientY < r.top + r.height * 0.5;
-        row.classList.remove("drop-above", "drop-below");
-        if (src && src !== layer.id) moveLayerRelativeTo(src, layer.id, above);
-      });
-
-      row.append(handle, thumb, info, orderBox, maskBtn, visBtn, delBtn);
-      row.addEventListener("click", () => {
-        state.doc.selectedLayerId = layer.id;
-        renderLeftColumn();
-        if (state.viewChannel === "vector") renderVectorSvgCanvas();
-        rebuildInspector();
-      });
-      stackBox.append(row);
-    }
-    leftInner.append(stackBox);
+      },
+    });
   }
 
   // ----------------------------------------------------------------- RIGHT INSPECTOR
@@ -840,31 +955,31 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
         Label: "Motif Shape",
         Options: MOTIF_TYPES.map((m) => [m.label, m.id]),
         Read: () => layer.shape.motifType,
-        Write: (v) => { layer.shape.motifType = v; evaluateAndRender(); },
+        Write: (v) => { layer.shape.motifType = v; evaluateAndRender(true); },
       });
     } else if (layer.kind === "text") {
       TextRow(lSec.Inner, {
         Label: "Text Content",
         Read: () => layer.text?.value || "FRONTIER",
-        Write: (v) => { if (!layer.text) layer.text = {}; layer.text.value = v; evaluateAndRender(); },
+        Write: (v) => { if (!layer.text) layer.text = {}; layer.text.value = v; evaluateAndRender(true); },
       });
       SliderRow(lSec.Inner, {
         Label: "Font Size",
         Minimum: 14, Maximum: 160, Step: 2, Unit: "px",
         Read: () => layer.text?.fontSize ?? 54,
-        Write: (v) => { if (!layer.text) layer.text = {}; layer.text.fontSize = v; evaluateAndRender(); },
+        Write: (v) => { if (!layer.text) layer.text = {}; layer.text.fontSize = v; evaluateAndRender(true); },
       });
     } else if (layer.kind === "gradient") {
       SegmentedRow(lSec.Inner, {
         Label: "Fill Type",
         Options: [["Linear", "linear"], ["Radial", "radial"]],
         Read: () => layer.shape.fillMode || "linear",
-        Write: (v) => { layer.shape.fillMode = v; evaluateAndRender(); },
+        Write: (v) => { layer.shape.fillMode = v; evaluateAndRender(true); },
       });
       ColorRow(lSec.Inner, {
         Label: "Secondary Color",
         Read: () => layer.shape.colorB || "#1a1e24",
-        Write: (v) => { layer.shape.colorB = v; evaluateAndRender(); },
+        Write: (v) => { layer.shape.colorB = v; evaluateAndRender(true); },
       });
     }
 
@@ -878,7 +993,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
         Label: "Stroke Outline",
         Minimum: 0, Maximum: 18, Step: 0.5, Unit: "px",
         Read: () => layer.shape.strokeWidth ?? 0,
-        Write: (v) => { layer.shape.strokeWidth = v; evaluateAndRender(); },
+        Write: (v) => { layer.shape.strokeWidth = v; evaluateAndRender(true); },
       });
       SelectRow(lSec.Inner, {
         Label: "Blend Mode",
@@ -890,37 +1005,37 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
         Label: "Layer Opacity",
         Minimum: 0, Maximum: 1, Step: 0.02,
         Read: () => layer.opacity ?? 1,
-        Write: (v) => { layer.opacity = v; evaluateAndRender(); },
+        Write: (v) => { layer.opacity = v; evaluateAndRender(true); },
       });
       SliderRow(lSec.Inner, {
         Label: "Center X",
         Minimum: 0, Maximum: 512, Step: 1, Unit: "px",
         Read: () => layer.transform.x,
-        Write: (v) => { layer.transform.x = v; evaluateAndRender(); },
+        Write: (v) => { layer.transform.x = v; evaluateAndRender(true); },
       });
       SliderRow(lSec.Inner, {
         Label: "Center Y",
         Minimum: 0, Maximum: 512, Step: 1, Unit: "px",
         Read: () => layer.transform.y,
-        Write: (v) => { layer.transform.y = v; evaluateAndRender(); },
+        Write: (v) => { layer.transform.y = v; evaluateAndRender(true); },
       });
       SliderRow(lSec.Inner, {
         Label: "Width",
         Minimum: 6, Maximum: 512, Step: 2, Unit: "px",
         Read: () => layer.transform.width,
-        Write: (v) => { layer.transform.width = v; evaluateAndRender(); },
+        Write: (v) => { layer.transform.width = v; evaluateAndRender(true); },
       });
       SliderRow(lSec.Inner, {
         Label: "Height",
         Minimum: 6, Maximum: 512, Step: 2, Unit: "px",
         Read: () => layer.transform.height,
-        Write: (v) => { layer.transform.height = v; evaluateAndRender(); },
+        Write: (v) => { layer.transform.height = v; evaluateAndRender(true); },
       });
       SliderRow(lSec.Inner, {
         Label: "Rotation",
         Minimum: -180, Maximum: 180, Step: 1, Unit: "°",
         Read: () => layer.transform.rotation,
-        Write: (v) => { layer.transform.rotation = v; evaluateAndRender(); },
+        Write: (v) => { layer.transform.rotation = v; evaluateAndRender(true); },
       });
     }
 
@@ -1193,7 +1308,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
       const dy = pt.y - pointerInteraction.startY;
       l.transform.x = snapCoord(pointerInteraction.origX + dx, e.shiftKey ? 0 : state.snapStep);
       l.transform.y = snapCoord(pointerInteraction.origY + dy, e.shiftKey ? 0 : state.snapStep);
-      hudPill.textContent = `Moving "${l.name}" -> (${Math.round(l.transform.x)}, ${Math.round(l.transform.y)})`;
+      viewTitle.textContent = `${l.name} (${Math.round(l.transform.x)}, ${Math.round(l.transform.y)})`;
       evaluateAndRender(false, { skipPbr: true });
       Broadcast();
     } else if (pointerInteraction.kind === "resize" && l) {
@@ -1231,7 +1346,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
       l.transform.height = nextH;
       l.transform.x = pointerInteraction.orig.x + shiftX * Math.cos(rotBack) - shiftY * Math.sin(rotBack);
       l.transform.y = pointerInteraction.orig.y + shiftX * Math.sin(rotBack) + shiftY * Math.cos(rotBack);
-      hudPill.textContent = `Resize "${l.name}" -> ${Math.round(nextW)}×${Math.round(nextH)}px`;
+      viewTitle.textContent = `${l.name} ${Math.round(nextW)}×${Math.round(nextH)}`;
       evaluateAndRender(false, { skipPbr: true });
       Broadcast();
     } else if (pointerInteraction.kind === "rotate" && l) {
@@ -1241,7 +1356,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
       while (nextRot > 180) nextRot -= 360;
       while (nextRot < -180) nextRot += 360;
       l.transform.rotation = Math.round(nextRot);
-      hudPill.textContent = `Rotate "${l.name}" -> ${l.transform.rotation}°`;
+      viewTitle.textContent = `${l.name} ${l.transform.rotation}°`;
       evaluateAndRender(false, { skipPbr: true });
       Broadcast();
     } else if (pointerInteraction.kind === "draw") {
@@ -1284,7 +1399,6 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     }
 
     if (act.kind === "move" || act.kind === "resize" || act.kind === "rotate") {
-      hudPill.textContent = "Drag shapes to move · Handles resize/rotate · Drop assets onto canvas";
       evaluateAndRender(true);
     }
   };
@@ -1386,6 +1500,127 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     state.viewChannel = viewSelect.value;
     syncViewDisplay();
   });
+
+  const syncSaveLabels = () => {
+    const pngTag = savePngItem.querySelector("small");
+    const pbrTag = savePbrItem.querySelector("small");
+    if (pngTag) pngTag.textContent = `${state.resolution}px`;
+    if (pbrTag) pbrTag.textContent = `${Math.min(2048, state.resolution)}px`;
+  };
+
+  resSelect.addEventListener("change", () => {
+    const val = Number(resSelect.value);
+    if (RESOLUTIONS.includes(val)) {
+      state.resolution = val;
+      syncSaveLabels();
+      evaluateAndRender(true);
+      Toast(`Resolution set to ${val} × ${val}px`);
+    }
+  });
+
+  const closeSaveMenu = () => {
+    saveMenu.hidden = true;
+    btnSaveMenu.classList.remove("active");
+  };
+  btnSaveMenu.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const nextOpen = saveMenu.hidden;
+    saveMenu.hidden = !nextOpen;
+    btnSaveMenu.classList.toggle("active", nextOpen);
+  });
+
+  const exportRgbaBufferPng = (rgba, w, h, filename) => {
+    const off = document.createElement("canvas");
+    off.width = w;
+    off.height = h;
+    off.getContext("2d").putImageData(new ImageData(new Uint8ClampedArray(rgba), w, h), 0, 0);
+    downloadBlobUrl(off.toDataURL("image/png"), filename);
+  };
+
+  const performSaveProject = () => {
+    const payload = {
+      schema: `frontier.${mode}.v1`,
+      resolution: state.resolution,
+      savedAt: new Date().toISOString(),
+      document: state.doc,
+    };
+    const json = JSON.stringify(payload, null, 2);
+    try {
+      localStorage?.setItem(`frontier-last-${mode}-doc`, json);
+    } catch {}
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const slug = (state.doc.name || mode).toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    downloadBlobUrl(url, `${slug}.${mode}.json`);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    closeSaveMenu();
+    Toast(`Saved ${state.doc.name || mode} (${state.resolution}px) project`);
+  };
+
+  saveDocItem.addEventListener("click", performSaveProject);
+
+  saveSvgItem.addEventListener("click", () => {
+    const sz = state.resolution;
+    const svgStr = artworkDocumentToSvgString(state.doc, { width: sz, height: sz, showBg: true });
+    const blob = new Blob([svgStr], { type: "image/svg+xml" });
+    const url = URL.createObjectURL(blob);
+    const slug = (state.doc.name || mode).toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    downloadBlobUrl(url, `${slug}-${mode}-${sz}.svg`);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    closeSaveMenu();
+    Toast(`Exported ${sz}×${sz} Vector SVG`);
+  });
+
+  savePngItem.addEventListener("click", () => {
+    const sz = state.resolution;
+    const ev = evaluateArtworkDocument(state.doc, sz);
+    const slug = (state.doc.name || mode).toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    exportRgbaBufferPng(ev.albedo, ev.width, ev.heightPx || ev.width, `${slug}-${mode}-${sz}.png`);
+    closeSaveMenu();
+    Toast(`Exported ${sz}×${sz} ${mode.toUpperCase()} PNG`);
+  });
+
+  savePbrItem.addEventListener("click", () => {
+    const sz = Math.min(2048, state.resolution);
+    const ev = evaluateArtworkDocument(state.doc, sz);
+    const slug = (state.doc.name || mode).toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    exportRgbaBufferPng(ev.albedo, ev.width, ev.heightPx || ev.width, `${slug}-albedo-${sz}.png`);
+    exportRgbaBufferPng(ev.roughness, ev.width, ev.heightPx || ev.width, `${slug}-roughness-${sz}.png`);
+    exportRgbaBufferPng(ev.metalness, ev.width, ev.heightPx || ev.width, `${slug}-metalness-${sz}.png`);
+    exportRgbaBufferPng(ev.normal, ev.width, ev.heightPx || ev.width, `${slug}-normal-${sz}.png`);
+    closeSaveMenu();
+    Toast(`Exported 4 PBR maps @ ${sz}×${sz}px`);
+  });
+
+  loadDocItem.addEventListener("click", () => {
+    loadJsonInp.click();
+  });
+  loadJsonInp.addEventListener("change", async () => {
+    const file = loadJsonInp.files?.[0];
+    if (!file) return;
+    try {
+      const parsed = JSON.parse(await file.text());
+      const docData = parsed?.document || parsed;
+      if (Array.isArray(docData?.layers) && docData.layers.length) {
+        state.doc = docData;
+        if (parsed.resolution && RESOLUTIONS.includes(Number(parsed.resolution))) {
+          state.resolution = Number(parsed.resolution);
+          resSelect.value = String(state.resolution);
+          syncSaveLabels();
+        }
+        evaluateAndRender(true);
+        rebuildInspector();
+        closeSaveMenu();
+        Toast(`Opened "${state.doc.name || file.name}"`);
+      } else {
+        Toast("Invalid project JSON");
+      }
+    } catch (err) {
+      Toast(`Open error: ${err.message}`);
+    }
+    loadJsonInp.value = "";
+  });
+
   btnGrid.addEventListener("click", () => {
     state.showGrid = !state.showGrid;
     btnGrid.classList.toggle("active", state.showGrid);
@@ -1417,36 +1652,17 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     rebuildInspector();
   });
 
-  btnExportSvg.addEventListener("click", () => {
-    const svgStr = artworkDocumentToSvgString(state.doc, { width: 512, height: 512, showBg: true });
-    const blob = new Blob([svgStr], { type: "image/svg+xml" });
-    const url = URL.createObjectURL(blob);
-    const slug = (state.doc.name || mode).toLowerCase().replace(/[^a-z0-9]+/g, "-");
-    downloadBlobUrl(url, `${slug}-${mode}.svg`);
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-    Toast(`Exported clean Vector ${mode.toUpperCase()} SVG`);
-  });
-
-  btnExportPng.addEventListener("click", () => {
-    const ev = evaluateArtworkDocument(state.doc, 1024);
-    const off = document.createElement("canvas");
-    off.width = ev.width;
-    off.height = ev.heightPx || ev.width;
-    off.getContext("2d").putImageData(new ImageData(new Uint8ClampedArray(ev.albedo), ev.width, off.height), 0, 0);
-    const slug = (state.doc.name || mode).toLowerCase().replace(/[^a-z0-9]+/g, "-");
-    downloadBlobUrl(off.toDataURL("image/png"), `${slug}-${mode}.png`);
-    Toast(`Exported 1024×1024 ${mode.toUpperCase()} PNG`);
-  });
-
   btnSendToPaint.addEventListener("click", () => {
-    const ev = evaluateArtworkDocument(state.doc, 512);
+    const sz = Math.min(1024, state.resolution);
+    const ev = evaluateArtworkDocument(state.doc, sz);
     const payload = { ...ev, name: state.doc.name };
     if (isPattern) appBridge.sendPatternToPaint(payload);
     else appBridge.sendStampToPaint(payload);
   });
   if (btnSendToMaterial) {
     btnSendToMaterial.addEventListener("click", () => {
-      const ev = evaluateArtworkDocument(state.doc, 512);
+      const sz = Math.min(1024, state.resolution);
+      const ev = evaluateArtworkDocument(state.doc, sz);
       appBridge.sendPatternToMaterial?.({
         ...ev,
         name: state.doc.name,
@@ -1543,10 +1759,20 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     artRDown = null;
   });
 
+  const onArtDocDown = (e) => {
+    if (!saveMenu.hidden && !saveWrap.contains?.(e.target)) closeSaveMenu();
+  };
+  document.addEventListener("pointerdown", onArtDocDown);
+
   const onArtKeyDown = (e) => {
     if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)) return;
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+      e.preventDefault();
+      performSaveProject();
+      return;
+    }
     if (e.code === "Space") { spacePanning = true; return; }
-    if (e.key === "Escape") { closeArtPopup(); return; }
+    if (e.key === "Escape") { closeArtPopup(); closeSaveMenu(); return; }
     if (e.key.toLowerCase() === "q" || e.key === "Tab") { e.preventDefault(); openArtPopup(); return; }
     if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
       e.preventDefault();
@@ -1588,6 +1814,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
       return {
         mode,
         name: state.doc.name,
+        resolution: state.resolution,
         layers: state.doc.layers.length,
         viewChannel: state.viewChannel,
         vectorTool: state.vectorTool,
@@ -1600,7 +1827,10 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     dispose() {
       disposed = true;
       ro.disconnect();
+      layerStackUI.dispose?.();
       closeArtPopup();
+      closeSaveMenu();
+      document.removeEventListener("pointerdown", onArtDocDown);
       window.removeEventListener("keydown", onArtKeyDown);
       window.removeEventListener("keyup", onArtKeyUp);
       if (inspectorScope) ReleaseScope(inspectorScope);
