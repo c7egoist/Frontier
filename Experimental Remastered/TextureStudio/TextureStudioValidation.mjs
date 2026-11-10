@@ -2543,20 +2543,21 @@ await suite("22. UI & Theme Polish: Material Fullscreen, Bigger Hero, Neutral PB
 
   studio.switchWorkspace("bake");
   assert(globalThis.document.querySelector(".viewport-toolbar .select-pill-wrap .pill-caret-divider"), "Baking study selector must use .select-pill-wrap with .pill-caret-divider");
-  assert.equal(studio.getSnapshot().viewMode, "2d", "Baking workspace must default to 2D-only view (not split)");
+  assert.equal(studio.getSnapshot().viewMode, "3d", "Baking workspace must default to 3D viewport (not split)");
   const bakePanes = globalThis.document.querySelectorAll(".viewport-split-pane");
   assert.equal(bakePanes.length, 2, "Baking workspace holds 3D and 2D panes");
-  assert.equal(bakePanes[0].hidden, true, "Baking workspace 3D pane must be hidden by default");
-  assert.equal(bakePanes[1].hidden, false, "Baking workspace 2D map pane must be visible by default");
+  assert.equal(bakePanes[0].hidden, false, "Baking workspace 3D viewport must be visible by default");
+  assert.equal(bakePanes[1].hidden, true, "Baking workspace 2D map pane must be hidden by default");
   const bakeViewSel = globalThis.document.querySelector(".vp-bake-view-select");
   assert(bakeViewSel, "Baking toolbar must offer view mode selector");
   bakeViewSel.value = "split";
   bakeViewSel.dispatchEvent({ type: "change" });
   assert.equal(bakePanes[0].hidden, false, "Switching Baking view mode to split must show 3D pane");
-  assert.equal(bakePanes[1].hidden, false, "Switching Baking view mode to split must keep 2D pane visible");
-  bakeViewSel.value = "2d";
+  assert.equal(bakePanes[1].hidden, false, "Switching Baking view mode to split must show 2D pane");
+  bakeViewSel.value = "3d";
   bakeViewSel.dispatchEvent({ type: "change" });
-  assert.equal(bakePanes[0].hidden, true, "Switching back to 2d must hide 3D pane again");
+  assert.equal(bakePanes[0].hidden, false, "Switching back to 3d must keep 3D viewport visible");
+  assert.equal(bakePanes[1].hidden, true, "Switching back to 3d must hide 2D pane");
 
   // 22c. Neutral PBR Channel Colors (no messy rainbow per-channel colors) & Theme Black Color B / Backgrounds
   assert(PAINT_PBR_CHANNELS.every((ch) => ch.dot === "#9ea2aa"), "All PBR channel specs must use unified neutral theme dot color (#9ea2aa)");
@@ -2572,6 +2573,10 @@ await suite("22. UI & Theme Polish: Material Fullscreen, Bigger Hero, Neutral PB
   assert(cssText.includes(".studio-grid.mw-fullscreen"), "TextureStudio.css must style .studio-grid.mw-fullscreen");
   assert(cssText.includes("border-radius: 50%;") && cssText.includes("::-webkit-color-swatch"), "TextureStudio.css must render circular color swatches");
   assert(!cssText.includes("#2fe6a7"), "TextureStudio.css must not use bright neon #2fe6a7 accents on PBR channels/dropdowns");
+  // Header, toolbar, and viewport stage must be separated by hairline dividers with no extra nested card boxes
+  assert(!cssText.includes("margin: 0 12px 10px;"), "TextureStudio.css must not wrap .vp-tools-bar or .se-stage-shell in extra boxed margins");
+  assert(!cssText.includes("border-radius: 13px;\n    background: #141517;"), "TextureStudio.css must not put an extra rounded card box around .vp-tools-bar");
+  assert(!cssText.includes("border-radius: 14px;\n    border: 1px solid rgba(255, 255, 255, 0.09);"), "TextureStudio.css must not put an extra rounded card box around .se-stage-shell");
 });
 
 console.log(`\nALL ${results.length} VALIDATION SUITES PASSED CLEANLY`);

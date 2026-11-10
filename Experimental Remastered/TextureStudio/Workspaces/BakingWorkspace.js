@@ -96,7 +96,7 @@ function renderVolumeSdfSliceToCanvas(canvas, sdf, axis = "z", sliceNorm = 0.5) 
 export function mountBakingWorkspace(root, appBridge) {
   let state = {
     studyId: "teapot",
-    viewMode: "2d", // "2d" (default) | "split" | "3d"
+    viewMode: "3d", // "3d" (default) | "2d" | "split"
     selectedChannels: new Set(["normalTangent", "ao", "curvature", "height", "volumeSdf"]),
     inspectChannel: "normalTangent",
     resolution: 512,
@@ -170,9 +170,9 @@ export function mountBakingWorkspace(root, appBridge) {
   viewSelect.setAttribute("aria-label", "Bake Viewport View");
   viewSelect.title = "Switch Baking Viewport View";
   for (const [label, val] of [
+    ["3D Mesh Only", "3d"],
     ["2D Map Only", "2d"],
     ["3D + 2D Split", "split"],
-    ["3D Mesh Only", "3d"],
   ]) {
     const o = Construct("option", null, label);
     o.value = val;
@@ -764,29 +764,29 @@ export function mountBakingWorkspace(root, appBridge) {
   };
 
   const syncBakeViewportLayout = () => {
-    const mode = state.viewMode || "2d";
+    const mode = state.viewMode || "3d";
     if (mode === "2d") {
       pane3D.hidden = true;
       pane2D.hidden = false;
       split.style.gridTemplateColumns = "1fr";
-      split.classList.add("bake-2d-only");
+      split.classList.add("bake-single-pane");
     } else if (mode === "3d") {
       pane3D.hidden = false;
       pane2D.hidden = true;
       split.style.gridTemplateColumns = "1fr";
-      split.classList.remove("bake-2d-only");
+      split.classList.add("bake-single-pane");
     } else {
       pane3D.hidden = false;
       pane2D.hidden = false;
       split.style.gridTemplateColumns = "1fr 1fr";
-      split.classList.remove("bake-2d-only");
+      split.classList.remove("bake-single-pane");
     }
     viewSelect.value = mode;
     resizeRenderer3D();
   };
 
   viewSelect.addEventListener("change", () => {
-    state.viewMode = viewSelect.value || "2d";
+    state.viewMode = viewSelect.value || "3d";
     syncBakeViewportLayout();
   });
   syncBakeViewportLayout();
