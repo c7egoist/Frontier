@@ -12,7 +12,7 @@ import { OrbitControls } from "../Vendor/orbit-controls.esm.min.js";
 import { OBJLoader } from "../Vendor/addons/OBJLoader.js";
 import { STLLoader } from "../Vendor/addons/STLLoader.js";
 import { BuildThreeGeometryFromBridgeTransfer } from "../../Shared/UvTextureBridge.js";
-import { materials as MATERIAL_CATALOG } from "../Engine/Materials/materials.js";
+import { materials as MATERIAL_CATALOG, attachProceduralMaterialEvaluation, updateProceduralMaterialUniforms } from "../Engine/Materials/materials.js";
 import { getBakedMaterialIcon } from "../MaterialIconBaker.js";
 import {
   PAINT_MESH_PRESETS as PAINT_MESH_LIST,
@@ -29,6 +29,7 @@ import {
   createDefaultExtendedValues,
   defaultByteForExtChannel,
   createMaterialLayerOverridesFromPreset,
+  resolveMaterialLayerSpec,
   createStampInstance,
   generateProceduralMask,
   featherMaskPixels,
@@ -220,21 +221,26 @@ function parsePaintProjectJson(rawText) {
 function createPaintEnv(renderer) {
   const pmrem = new THREE.PMREMGenerator(renderer);
   const envScene = new THREE.Scene();
-  envScene.background = new THREE.Color("#13151b");
-  const g = new THREE.PlaneGeometry(7, 5);
-  const m1 = new THREE.MeshBasicMaterial({ color: new THREE.Color(3.2, 3.1, 2.95) });
-  const m2 = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.2, 1.65, 2.3) });
+  envScene.background = new THREE.Color("#111318");
+  const g = new THREE.PlaneGeometry(6, 4);
+  const m1 = new THREE.MeshBasicMaterial({ color: new THREE.Color(3.6, 3.45, 3.2) });
+  const m2 = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.4, 1.85, 2.5) });
+  const m3 = new THREE.MeshBasicMaterial({ color: new THREE.Color(2.2, 1.85, 1.4) });
   const p1 = new THREE.Mesh(g, m1);
-  p1.position.set(4.5, 5.5, 4);
+  p1.position.set(4.5, 5.2, 4.2);
   p1.lookAt(0, 0, 0);
   const p2 = new THREE.Mesh(g, m2);
-  p2.position.set(-5.2, 2.5, -3.5);
+  p2.position.set(-5.8, 2.2, -2.2);
   p2.lookAt(0, 0, 0);
-  envScene.add(p1, p2);
-  const rt = pmrem.fromScene(envScene, 0.04);
+  const p3 = new THREE.Mesh(g, m3);
+  p3.position.set(0.5, -4.5, 3.8);
+  p3.lookAt(0, 0, 0);
+  envScene.add(p1, p2, p3);
+  const rt = pmrem.fromScene(envScene, 0.035);
   g.dispose();
   m1.dispose();
   m2.dispose();
+  m3.dispose();
   pmrem.dispose();
   return rt.texture;
 }
@@ -1004,7 +1010,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.06;
+  renderer.toneMappingExposure = 1.18;
   renderer.domElement.style.cssText = "position:absolute;inset:0;width:100%;height:100%;z-index:1;pointer-events:none;";
   stage.prepend(renderer.domElement);
 
@@ -1024,12 +1030,15 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   orbit.dampingFactor = 0.08;
   orbit.target.set(0, 0.08, 0);
 
-  const keyL = new THREE.DirectionalLight("#fff8eb", 2.3);
-  keyL.position.set(3.5, 4.8, 3.8);
-  const fillL = new THREE.DirectionalLight("#a8c6ff", 0.95);
-  fillL.position.set(-4, 2, -3);
-  const hemiL = new THREE.HemisphereLight("#eef3ff", "#1a1a1f", 0.65);
-  scene.add(keyL, fillL, hemiL);
+  const ambientL = new THREE.AmbientLight("#ffffff", 0.24);
+  const keyL = new THREE.SpotLight("#f1f6f2", 28, 25, 0.7, 0.8, 1.5);
+  keyL.position.set(-3, 6.5, 4);
+  keyL.target.position.set(0, 0, 0);
+  const rimL = new THREE.DirectionalLight("#dbe3f3", 1.25);
+  rimL.position.set(3, 4, -3);
+  const fillL = new THREE.DirectionalLight("#e4edf2", 0.42);
+  fillL.position.set(-4, 2, 1);
+  scene.add(ambientL, keyL, keyL.target, rimL, fillL);
 
   // 2D GPU UV View Scene (renders directly from GPU VRAM textures, zero readPixels!)
   const uvScene = new THREE.Scene();
@@ -1097,7 +1106,13 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     transmission: 0,
     thickness: 0,
     anisotropy: 0,
+    envMapIntensity: 1.35,
     transparent: false,
+  });
+  attachProceduralMaterialEvaluation(paintMat, MATERIAL_CATALOG[0], {
+    enabled: true,
+    hasMat: 0,
+    covTex: gpuPaint.finalMatCovRT?.texture || null,
   });
 
   let paintMesh = null;
@@ -1750,6 +1765,32 @@ export function mountTexturePaintWorkspace(root, appBridge) {
             prevExtBitmask = sig;
             paintMat.needsUpdate = true;
           }
+          const matLayer = out.activeShaderMatLayer;
+          if (matLayer) {
+            const matSpec = resolveMaterialLayerSpec(matLayer);
+            paintMat.envMapIntensity = matSpec.type === 4 && matSpec.fabricMode === 4 ? 1.8 : 1.35;
+            paintMat.ior = matSpec.ior ?? 1.5;
+            paintMat.iridescenceIOR = matSpec.iridescenceIOR ?? 1.35;
+            paintMat.iridescenceThicknessMinimum = Math.max(0, (matSpec.filmThickness ?? 380) - (matSpec.filmVariation ?? 0) * 0.5);
+            paintMat.iridescenceThicknessMaximum = (matSpec.filmThickness ?? 380) + (matSpec.filmVariation ?? 0) * 0.5;
+            paintMat.specularColor?.set?.(matSpec.specularColor || "#ffffff");
+            paintMat.sheenColor?.set?.(matSpec.sheenColor || "#ffffff");
+            paintMat.attenuationColor?.set?.(matSpec.attenuationColor || matSpec.color || "#ffffff");
+            paintMat.anisotropyRotation = ((matSpec.anisotropyRotation ?? 0) * Math.PI * 2) + (((matSpec.weaveAngle ?? 0) * Math.PI) / 180);
+            updateProceduralMaterialUniforms(paintMat, matSpec, {
+              hasMat: 1,
+              covTex: out.matCoverageTex,
+              color: matSpec.color,
+              roughness: matSpec.roughness,
+              metalness: matSpec.metalness,
+            });
+          } else {
+            paintMat.envMapIntensity = 1.0;
+            updateProceduralMaterialUniforms(paintMat, paintMat.userData.params, {
+              hasMat: 0,
+              covTex: out.matCoverageTex,
+            });
+          }
         } else {
           paintMat.roughnessMap = null;
           paintMat.metalnessMap = null;
@@ -1775,6 +1816,11 @@ export function mountTexturePaintWorkspace(root, appBridge) {
           paintMat.anisotropy = 0;
           paintMat.roughness = 0.85;
           paintMat.metalness = 0.0;
+          paintMat.envMapIntensity = 1.0;
+          updateProceduralMaterialUniforms(paintMat, paintMat.userData.params, {
+            hasMat: 0,
+            covTex: out.matCoverageTex,
+          });
           if (prevExtBitmask !== "solo") {
             prevExtBitmask = "solo";
             paintMat.needsUpdate = true;
@@ -3548,27 +3594,17 @@ export function mountTexturePaintWorkspace(root, appBridge) {
         }
         if (layer.kind === "material") {
           const preset = MATERIAL_CATALOG.find((m) => m.id === layer.material?.presetId) || null;
-          const ev = layer.material?.extValues || {};
+          const resolvedSpec = resolveMaterialLayerSpec(layer);
           const sameAsPreset =
             preset &&
             layer.material?.color === preset.color &&
             Math.abs((layer.material?.roughness ?? preset.roughness ?? 0.4) - (preset.roughness ?? 0.4)) < 1e-3 &&
             Math.abs((layer.material?.metalness ?? preset.metalness ?? 0) - (preset.metalness ?? 0)) < 1e-3;
           const matSpec = {
-            ...(preset || {}),
+            ...resolvedSpec,
             id: sameAsPreset
               ? preset.id
-              : `tp-mat:${layer.id}:${layer.material?.color}:${layer.material?.roughness}:${layer.material?.metalness}:${ev.clearcoat ?? 0}`,
-            name: layer.material?.presetName || layer.name || "Material",
-            color: layer.material?.color || preset?.color || "#345f42",
-            roughness: layer.material?.roughness ?? preset?.roughness ?? 0.24,
-            metalness: layer.material?.metalness ?? preset?.metalness ?? 0.87,
-            coat: ev.clearcoat ?? preset?.coat ?? 0,
-            coatRoughness: ev.coatRoughness ?? preset?.coatRoughness ?? 0.08,
-            iridescence: ev.iridescence ?? preset?.iridescence ?? 0,
-            emissionColor: ev.emissive ?? preset?.emissionColor ?? "#000000",
-            emissionStrength: ev.emissiveIntensity ?? preset?.emissionStrength ?? 0,
-            translucency: ev.transmission ?? preset?.translucency ?? 0,
+              : `tp-mat:${layer.id}:${resolvedSpec.color}:${resolvedSpec.roughness}:${resolvedSpec.metalness}:${resolvedSpec.coat ?? 0}`,
           };
           thumbEl.classList.add("is-baked-mat");
           const img = document.createElement("img");
@@ -4335,11 +4371,13 @@ export function mountTexturePaintWorkspace(root, appBridge) {
           Write: (id) => {
             const found = MATERIAL_CATALOG.find((m) => m.id === id);
             if (found) {
-              layer.material.presetId = found.id;
-              layer.material.presetName = found.name;
-              layer.material.color = found.color;
-              layer.material.roughness = found.roughness;
-              layer.material.metalness = found.metalness;
+              const prevPresetName = layer.material.presetName;
+              const nextOv = createMaterialLayerOverridesFromPreset(found, res);
+              Object.assign(layer.material, nextOv.material);
+              layer.extValues = { ...nextOv.extValues };
+              if (!layer.name || layer.name === prevPresetName || layer.name === "Material Layer") {
+                layer.name = found.name;
+              }
               invalidateLayerThumb(layer.id);
               rebuildInspector();
               refreshComposite();

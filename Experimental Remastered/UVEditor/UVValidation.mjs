@@ -396,5 +396,35 @@ console.log('6. Verifying Blender Unwrap, Relax, Pin, Seam, Stitch, Weld, Split 
     console.log('   OK: All Blender selection tools (face loops, flat, inner-region, similar, random & checker) passed.');
 }
 
+// 9. Right-Click Unified Context Menu + 3D Box/Face/Paint Select Parity
+console.log('9. Verifying Right-Click Context Menu & 3D Box/Face/Paint Selection...');
+{
+    const Html = ReadText('index.html');
+    const Css = ReadText('UVEditor.css');
+    const EditorJs = ReadText('UVEditor.js');
+    const Vp3dJs = ReadText('Engine/UVViewport3D.js');
+
+    assert.ok(Html.includes('id="uv-context-menu"'), 'index.html must include unified #uv-context-menu popover');
+    assert.ok(Html.includes('data-ctx-tool="box"'), 'Context menu must expose Box Select');
+    assert.ok(Html.includes('data-ctx-face-select="true"'), 'Context menu must expose Face Select');
+    assert.ok(Html.includes('data-ctx-tool="circle"'), 'Context menu must expose Paint Select');
+    for (const op of ['all', 'none', 'invert', 'grow', 'shrink', 'same-island', 'loop', 'ring', 'linked-flat', 'loop-inner-region', 'boundary-loop', 'random-50', 'checker'])
+    {
+        assert.ok(Html.includes(`data-ctx-sel="${op}"`), `Context menu missing selection option: ${op}`);
+    }
+    for (const op of ['unwrap', 'pack', 'smart', 'relax', 'split', 'stitch', 'weld', 'avg-scale', 'pin', 'unpin', 'mirror-u', 'rotate-90'])
+    {
+        assert.ok(Html.includes(`data-ctx-op="${op}"`), `Context menu missing UV operation: ${op}`);
+    }
+    assert.ok(Css.includes('.uv-marquee-3d') && Css.includes('.uv-brush-3d'), 'UVEditor.css must style 3D marquee & brush overlays');
+    assert.ok(Vp3dJs.includes('SetActiveTool(') && Vp3dJs.includes('DispatchBoxSelect3D(') && Vp3dJs.includes('DispatchPaintSelect3D('),
+        'UVViewport3D.js must support 3D Box Select and 3D Paint Select');
+    assert.ok(EditorJs.includes('onBoxSelect3D') && EditorJs.includes('onPaintSelect3D') && EditorJs.includes('OpenUvContextMenu'),
+        'UVEditor.js must wire 3D Box/Paint callbacks and unified right-click menu');
+    assert.ok(EditorJs.includes("if (Mode === 'face')"), '2D ApplyCircleSelectAt must handle face mode');
+
+    console.log('   OK: Context menu, 3D Box/Paint Select & 2D face-mode Paint Select verified.');
+}
+
 console.log('\nALL UV STUDIO VALIDATIONS PASSED SUCCESSFULLY.');
 

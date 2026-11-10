@@ -9,6 +9,7 @@ import { RoundedBoxGeometry } from "../Vendor/addons/RoundedBoxGeometry.js";
 import { createDrapedClothGeometry } from "./Materials/clothGeometry.js";
 import { fbm3D } from "./NoiseField.js";
 import { nextArtworkId } from "./Patterns/ArtworkStackEngine.js";
+import { materials as MATERIAL_CATALOG, normalizeMaterial } from "./Materials/materials.js";
 
 export const PAINT_DEFAULT_RES = 512;
 
@@ -885,7 +886,8 @@ export function featherMaskPixels(pixels, res, passes = 2) {
 }
 
 export function createMaterialLayerOverridesFromPreset(m, res = PAINT_DEFAULT_RES) {
-  const src = m || {};
+  const norm = normalizeMaterial(m || {});
+  const src = norm;
   const filmNm = src.filmThickness ?? 380;
   const iridThickNorm = Number.isFinite(filmNm) ? Math.max(0, Math.min(1, filmNm > 2 ? filmNm / 1000 : filmNm)) : 0.45;
   const extVals = createDefaultExtendedValues({
@@ -908,6 +910,8 @@ export function createMaterialLayerOverridesFromPreset(m, res = PAINT_DEFAULT_RE
     thickness: Math.max(0, Math.min(1, src.depth ?? 0.0)),
     attenuationColor: src.attenuationColor || "#ffffff",
   });
+  const defGrainScale = src.flakeScale ? Math.max(4, Math.min(32, src.flakeScale * 22)) : (src.grainScale ?? 10);
+  const defGrainStrength = src.flakes ? Math.max(0.08, Math.min(0.35, src.flakes * 0.22)) : (src.grainStrength ?? 0.08);
   return {
     res,
     name: src.name || "Material Layer",
@@ -918,16 +922,63 @@ export function createMaterialLayerOverridesFromPreset(m, res = PAINT_DEFAULT_RE
       presetName: src.name || "Racing Green",
       presetCategory: src.category || "Material",
       presetLabel: src.label || "PBR",
+      presetParams: norm,
       color: src.color || "#345f42",
       roughness: src.roughness ?? 0.24,
       metalness: src.metalness ?? 0.87,
       height: src.reliefHeight ?? 0.0,
       extValues: extVals,
       ...extVals,
-      grainScale: src.flakeScale ? Math.max(4, Math.min(32, src.flakeScale * 22)) : (src.grainScale ?? 10),
-      grainStrength: src.flakes ? Math.max(0.08, Math.min(0.35, src.flakes * 0.22)) : (src.grainStrength ?? 0.08),
+      grainScale: defGrainScale,
+      grainStrength: defGrainStrength,
+      baseGrainScale: defGrainScale,
+      baseGrainStrength: defGrainStrength,
     },
   };
+}
+
+export function resolveMaterialLayerSpec(layer) {
+  const mat = layer?.material || {};
+  const catalogPreset = MATERIAL_CATALOG.find((m) => m.id === mat.presetId) || null;
+  const ev = mat.extValues || layer?.extValues || {};
+  const merged = {
+    ...(catalogPreset || {}),
+    ...(mat.presetParams || {}),
+    id: mat.presetId || catalogPreset?.id || "custom",
+    name: mat.presetName || catalogPreset?.name || layer?.name || "Material",
+    color: mat.color || catalogPreset?.color || "#345f42",
+    roughness: mat.roughness ?? catalogPreset?.roughness ?? 0.24,
+    metalness: mat.metalness ?? catalogPreset?.metalness ?? 0.87,
+  };
+  if (ev.clearcoat !== undefined) merged.coat = ev.clearcoat;
+  if (ev.coatRoughness !== undefined) merged.coatRoughness = ev.coatRoughness;
+  if (ev.sheen !== undefined) merged.sheen = ev.sheen;
+  if (ev.sheenRoughness !== undefined) merged.sheenRoughness = ev.sheenRoughness;
+  if (ev.sheenColor !== undefined) merged.sheenColor = ev.sheenColor;
+  if (ev.specular !== undefined) merged.specular = ev.specular;
+  if (ev.specularColor !== undefined) merged.specularColor = ev.specularColor;
+  if (ev.anisotropy !== undefined) merged.anisotropy = ev.anisotropy;
+  if (ev.iridescence !== undefined) merged.iridescence = ev.iridescence;
+  if (ev.iridescenceThickness !== undefined) merged.filmThickness = Math.max(0, ev.iridescenceThickness * 1000);
+  if (ev.transmission !== undefined) merged.translucency = ev.transmission;
+  if (ev.emissive !== undefined) merged.emissionColor = ev.emissive;
+  if (ev.emissiveIntensity !== undefined) merged.emissionStrength = ev.emissiveIntensity;
+  if (ev.ao !== undefined) merged.aoIntensity = ev.ao;
+  if (ev.opacity !== undefined) merged.opacity = ev.opacity;
+
+  const baseScale = mat.baseGrainScale ?? (merged.flakeScale ? Math.max(4, Math.min(32, merged.flakeScale * 22)) : 10);
+  if (mat.grainScale && baseScale > 0 && Math.abs(mat.grainScale - baseScale) > 0.05) {
+    const ratio = mat.grainScale / baseScale;
+    merged.flakeScale = (merged.flakeScale ?? 1) * ratio;
+    merged.detailScale = (merged.detailScale ?? 10) * ratio;
+  }
+  const baseStr = mat.baseGrainStrength ?? (merged.flakes ? Math.max(0.08, Math.min(0.35, merged.flakes * 0.22)) : 0.08);
+  if (mat.grainStrength !== undefined && baseStr > 0 && Math.abs(mat.grainStrength - baseStr) > 0.005) {
+    const sRatio = mat.grainStrength / baseStr;
+    if ((merged.type ?? 0) === 0) merged.flakes = Math.max(0, Math.min(1, (merged.flakes ?? 0.5) * sRatio));
+    merged.grain = Math.max(0, Math.min(1, (merged.grain ?? 0.25) * sRatio));
+  }
+  return normalizeMaterial(merged);
 }
 
 export function createPaintLayer(kind = "paint", overrides = {}) {
@@ -1888,12 +1939,20 @@ export function compositePaintDocument(doc, cues, { liveStroke = null, liveBrush
       }
     } else if (layer.kind === "material") {
       const m = layer.material;
-      const [mr, mg, mb] = hexToRgb01(m.color).map((v) => v * 255);
-      const mRough = clamp(m.roughness ?? 0.4, 0, 1) * 255;
-      const mMetal = clamp(m.metalness ?? 0, 0, 1) * 255;
+      const spec = resolveMaterialLayerSpec(layer);
+      const isFlakePaint = (spec.type ?? 0) === 0 && (spec.flakes ?? 0) > 0.001;
+      const depthAbs = (spec.type ?? 0) === 0 ? Math.exp(-(spec.depth ?? 0) * 0.28) : 1.0;
+      const [mrBase, mgBase, mbBase] = hexToRgb01(spec.color || m.color).map((v) => v * 255);
+      const mr = mrBase * depthAbs, mg = mgBase * depthAbs, mb = mbBase * depthAbs;
+      const flakeStops = (spec.colors?.length ? spec.colors : [spec.color]).map((hex) =>
+        hexToRgb01(hex).map((v) => v * 255),
+      );
+      const flakeFreq = Math.min(260, ((52000 / Math.max(1, spec.flakeSize || 450)) * (spec.flakeScale || 1)));
+      const mRough = clamp(spec.roughness ?? m.roughness ?? 0.4, 0, 1) * 255;
+      const mMetal = clamp(spec.metalness ?? m.metalness ?? 0, 0, 1) * 255;
       const mHeight = clamp((m.height ?? 0) * 0.5 + 0.5, 0, 1) * 255;
-      const gScale = m.grainScale || 10;
-      const gStr = m.grainStrength || 0.08;
+      const gScale = m.grainScale || spec.detailScale || 10;
+      const gStr = m.grainStrength ?? 0.08;
       const extList = resolveScalarExtSource(m);
       const wOpA = chOp("albedo"), wOpR = chOp("roughness"), wOpM = chOp("metalness"), wOpH = chOp("height");
 
@@ -1902,24 +1961,44 @@ export function compositePaintDocument(doc, cues, { liveStroke = null, liveBrush
         const eff = op * evalMaskChain(maskChain, i);
         if (eff <= 0.001) continue;
 
-        const wx = cues.worldPos[i * 3] * gScale;
-        const wy = cues.worldPos[i * 3 + 1] * gScale;
-        const wz = cues.worldPos[i * 3 + 2] * gScale;
-        const micro = cues.covered[i] ? (fbm3D(wx, wy, wz, 2, 71) - 0.5) * 2 * gStr : 0;
+        const wx0 = cues.worldPos[i * 3];
+        const wy0 = cues.worldPos[i * 3 + 1];
+        const wz0 = cues.worldPos[i * 3 + 2];
+        const micro = cues.covered[i] ? (fbm3D(wx0 * gScale, wy0 * gScale, wz0 * gScale, 2, 71) - 0.5) * 2 * gStr : 0;
+
+        let sr = clamp(mr * (1 + micro), 0, 255);
+        let sg = clamp(mg * (1 + micro), 0, 255);
+        let sb = clamp(mb * (1 + micro), 0, 255);
+        let sRough = clamp(mRough + micro * 90, 0, 255);
+        let sMetal = mMetal;
+
+        if (isFlakePaint && cues.covered[i]) {
+          const hA = Math.abs(Math.sin(wx0 * flakeFreq * 12.9898 + wy0 * flakeFreq * 78.233 + wz0 * flakeFreq * 37.719) * 43758.5453) % 1;
+          const hB = Math.abs(Math.sin(wx0 * flakeFreq * 41.13 + wy0 * flakeFreq * 19.7 + wz0 * flakeFreq * 93.17) * 24634.6345) % 1;
+          const occ = hA < (spec.flakes || 0) * 0.48 ? 1.0 : 0.0;
+          if (occ > 0) {
+            const stop = flakeStops[Math.min(flakeStops.length - 1, Math.floor(hB * flakeStops.length))];
+            const fw = clamp((spec.FlakeWeight ?? 1) * 0.85, 0, 1);
+            sr = sr * (1 - fw) + stop[0] * fw;
+            sg = sg * (1 - fw) + stop[1] * fw;
+            sb = sb * (1 - fw) + stop[2] * fw;
+            const frR = ((spec.flakeRoughnessMin ?? 0.09) + hB * ((spec.flakeRoughnessMax ?? 0.28) - (spec.flakeRoughnessMin ?? 0.09))) * 255;
+            const frM = ((spec.flakeMetalnessMin ?? 0.86) + hB * ((spec.flakeMetalnessMax ?? 0.99) - (spec.flakeMetalnessMin ?? 0.86))) * 255;
+            sRough = sRough * (1 - fw) + frR * fw;
+            sMetal = sMetal * (1 - fw) + frM * fw;
+          }
+        }
 
         const i4 = i * 4;
         const wA = eff * wOpA, wR = eff * wOpR, wM = eff * wOpM, wH = eff * wOpH;
         if (ch.albedo && wA > 0.001) {
           const bA = chBlend("albedo");
-          const sr = clamp(mr * (1 + micro), 0, 255);
-          const sg = clamp(mg * (1 + micro), 0, 255);
-          const sb = clamp(mb * (1 + micro), 0, 255);
           outA[i4] = Math.round(outA[i4] * (1 - wA) + blendChannelByte(outA[i4], sr, bA) * wA);
           outA[i4 + 1] = Math.round(outA[i4 + 1] * (1 - wA) + blendChannelByte(outA[i4 + 1], sg, bA) * wA);
           outA[i4 + 2] = Math.round(outA[i4 + 2] * (1 - wA) + blendChannelByte(outA[i4 + 2], sb, bA) * wA);
         }
-        if (ch.roughness && wR > 0.001) outR[i] = Math.round(outR[i] * (1 - wR) + blendChannelByte(outR[i], clamp(mRough + micro * 90, 0, 255), chBlend("roughness")) * wR);
-        if (ch.metalness && wM > 0.001) outM[i] = Math.round(outM[i] * (1 - wM) + blendChannelByte(outM[i], mMetal, chBlend("metalness")) * wM);
+        if (ch.roughness && wR > 0.001) outR[i] = Math.round(outR[i] * (1 - wR) + blendChannelByte(outR[i], sRough, chBlend("roughness")) * wR);
+        if (ch.metalness && wM > 0.001) outM[i] = Math.round(outM[i] * (1 - wM) + blendChannelByte(outM[i], sMetal, chBlend("metalness")) * wM);
         if (ch.height && wH > 0.001) outH[i] = Math.round(outH[i] * (1 - wH) + blendChannelByte(outH[i], clamp(mHeight + micro * 70, 0, 255), chBlend("height")) * wH);
         for (const es of extList) {
           const we = eff * es.w;

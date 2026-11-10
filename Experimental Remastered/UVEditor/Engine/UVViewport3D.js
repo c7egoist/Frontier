@@ -248,7 +248,7 @@ function HexToRgb01(Hex)
 
 export class UVViewport3D
 {
-    constructor(Container, { onPickFace = null, onPickEdge = null, onPickVertex = null, onToggleEdgeSeam = null, onContextMenu = null } = {})
+    constructor(Container, { onPickFace = null, onPickEdge = null, onPickVertex = null, onToggleEdgeSeam = null, onContextMenu = null, onBoxSelect3D = null, onPaintSelect3D = null } = {})
     {
         this.container = Container;
         this.onPickFace = onPickFace;
@@ -256,9 +256,12 @@ export class UVViewport3D
         this.onPickVertex = onPickVertex;
         this.onToggleEdgeSeam = onToggleEdgeSeam;
         this.onContextMenu = onContextMenu;
+        this.onBoxSelect3D = onBoxSelect3D;
+        this.onPaintSelect3D = onPaintSelect3D;
         this.shadingMode = 'checker'; // 'checker' | 'flat' | 'matcap' | 'matcap-satin' | 'importance' | 'texel' | 'stretch'
         this.selectionMode = 'island';
         this.activeTool = 'select';
+        this.paintRadiusPx = 36;
         this.showWireframe = true;
         this.showSeams = true;
         this.showBoundaries = true;
@@ -418,29 +421,168 @@ export class UVViewport3D
         this.selectedVertPoints.renderOrder = 7;
         this.scene.add(this.selectedVertPoints);
 
-        // Pointer picking & hover edge preview
+        // 3D Box Select Marquee & 3D Paint Select Brush Ring DOM Overlays
+        this.marqueeEl = document.createElement('div');
+        this.marqueeEl.className = 'uv-marquee-3d';
+        this.marqueeEl.hidden = true;
+        this.brushEl = document.createElement('div');
+        this.brushEl.className = 'uv-brush-3d';
+        this.brushEl.hidden = true;
+        this.container.append(this.marqueeEl, this.brushEl);
+
+        // Pointer picking, hover edge preview, 3D Box Select & 3D Paint Select
         let DownPt = null;
         let RightDownPt = null;
+        let BoxDrag = null;
+        let PaintDrag = null;
+
+        const UpdateBrushRing = (E) =>
+        {
+            if (this.activeTool !== 'circle') { this.brushEl.hidden = true; return; }
+            const R = this.container.getBoundingClientRect();
+            const X = E.clientX - R.left, Y = E.clientY - R.top;
+            const Diam = Math.max(16, this.paintRadiusPx * 2);
+            this.brushEl.hidden = false;
+            this.brushEl.style.left = `${X}px`;
+            this.brushEl.style.top = `${Y}px`;
+            this.brushEl.style.width = `${Diam}px`;
+            this.brushEl.style.height = `${Diam}px`;
+            this.brushEl.classList.toggle('subtract', !!E.ctrlKey);
+        };
+
         this.canvas.addEventListener('pointerdown', E =>
         {
-            if (E.button === 0) DownPt = [E.clientX, E.clientY];
             if (E.button === 2) RightDownPt = [E.clientX, E.clientY];
+            if (E.button !== 0) return;
+            DownPt = [E.clientX, E.clientY];
+
+            // Alt+LMB always falls through to orbit even when Box or Paint Select is active
+            if (E.altKey)
+            {
+                if (this.activeTool === 'box' || this.activeTool === 'circle')
+                {
+                    this.controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
+                }
+                return;
+            }
+
+            const R = this.container.getBoundingClientRect();
+            const X = E.clientX - R.left, Y = E.clientY - R.top;
+
+            if (this.activeTool === 'box')
+            {
+                this.controls.enabled = false;
+                BoxDrag = { x0: X, y0: Y, x1: X, y1: Y, additive: E.shiftKey, subtract: E.ctrlKey };
+                this.marqueeEl.hidden = false;
+                this.marqueeEl.style.left = `${X}px`;
+                this.marqueeEl.style.top = `${Y}px`;
+                this.marqueeEl.style.width = '0px';
+                this.marqueeEl.style.height = '0px';
+                this.canvas.setPointerCapture(E.pointerId);
+                return;
+            }
+            if (this.activeTool === 'circle')
+            {
+                this.controls.enabled = false;
+                PaintDrag = { subtract: E.ctrlKey };
+                UpdateBrushRing(E);
+                this.DispatchPaintSelect3D(X, Y, R, { subtract: E.ctrlKey, commit: false });
+                this.canvas.setPointerCapture(E.pointerId);
+            }
         });
+
         this.canvas.addEventListener('pointermove', E =>
         {
+            if (BoxDrag)
+            {
+                const R = this.container.getBoundingClientRect();
+                BoxDrag.x1 = E.clientX - R.left;
+                BoxDrag.y1 = E.clientY - R.top;
+                const MinX = Math.min(BoxDrag.x0, BoxDrag.x1);
+                const MinY = Math.min(BoxDrag.y0, BoxDrag.y1);
+                this.marqueeEl.style.left = `${MinX}px`;
+                this.marqueeEl.style.top = `${MinY}px`;
+                this.marqueeEl.style.width = `${Math.abs(BoxDrag.x1 - BoxDrag.x0)}px`;
+                this.marqueeEl.style.height = `${Math.abs(BoxDrag.y1 - BoxDrag.y0)}px`;
+                return;
+            }
+            if (PaintDrag)
+            {
+                const R = this.container.getBoundingClientRect();
+                const X = E.clientX - R.left, Y = E.clientY - R.top;
+                UpdateBrushRing(E);
+                this.DispatchPaintSelect3D(X, Y, R, { subtract: PaintDrag.subtract || E.ctrlKey, commit: false });
+                return;
+            }
+            if (this.activeTool === 'circle') UpdateBrushRing(E);
+            else if (!this.brushEl.hidden) this.brushEl.hidden = true;
+
             if (E.buttons !== 0) return;
             this.UpdateHover(E);
         });
-        this.canvas.addEventListener('pointerleave', () => this.ClearHover());
+
+        this.canvas.addEventListener('pointerleave', () =>
+        {
+            this.ClearHover();
+            if (this.brushEl) this.brushEl.hidden = true;
+        });
+
         this.canvas.addEventListener('pointerup', E =>
         {
+            if (BoxDrag && E.button === 0)
+            {
+                const B = BoxDrag;
+                BoxDrag = null;
+                this.marqueeEl.hidden = true;
+                this.controls.enabled = true;
+                try { this.canvas.releasePointerCapture(E.pointerId); } catch {}
+                const MinX = Math.min(B.x0, B.x1), MaxX = Math.max(B.x0, B.x1);
+                const MinY = Math.min(B.y0, B.y1), MaxY = Math.max(B.y0, B.y1);
+                if (MaxX - MinX < 5 && MaxY - MinY < 5)
+                {
+                    this.HandleClick(E);
+                }
+                else
+                {
+                    const R = this.container.getBoundingClientRect();
+                    this.DispatchBoxSelect3D(MinX, MinY, MaxX, MaxY, R, { additive: B.additive, subtract: B.subtract, xray: E.altKey });
+                }
+                DownPt = null;
+                return;
+            }
+            if (PaintDrag && E.button === 0)
+            {
+                const Sub = PaintDrag.subtract || E.ctrlKey;
+                PaintDrag = null;
+                this.controls.enabled = true;
+                try { this.canvas.releasePointerCapture(E.pointerId); } catch {}
+                const R = this.container.getBoundingClientRect();
+                this.DispatchPaintSelect3D(E.clientX - R.left, E.clientY - R.top, R, { subtract: Sub, commit: true });
+                DownPt = null;
+                return;
+            }
             if (E.button === 0)
             {
+                if (this.activeTool === 'box' || this.activeTool === 'circle')
+                {
+                    this.controls.mouseButtons.LEFT = null;
+                }
                 const Moved = !DownPt || Math.hypot(E.clientX - DownPt[0], E.clientY - DownPt[1]) > 5;
                 DownPt = null;
                 if (!Moved) this.HandleClick(E);
             }
         });
+
+        this.canvas.addEventListener('wheel', E =>
+        {
+            if (this.activeTool === 'circle' && E.shiftKey)
+            {
+                E.preventDefault();
+                E.stopPropagation();
+                this.paintRadiusPx = Math.max(12, Math.min(160, this.paintRadiusPx + (E.deltaY < 0 ? 6 : -6)));
+                UpdateBrushRing(E);
+            }
+        }, { passive: false, capture: true });
         this.canvas.addEventListener('dblclick', E =>
         {
             if (this.activeTool === 'seam') return;
@@ -493,6 +635,138 @@ export class UVViewport3D
             this.renderer.render(this.scene, this.camera);
         };
         requestAnimationFrame(Loop);
+    }
+
+    SetActiveTool(Tool)
+    {
+        this.activeTool = Tool;
+        if (this.controls)
+        {
+            const IsMarqueeOrBrush = Tool === 'box' || Tool === 'circle';
+            this.controls.mouseButtons.LEFT = IsMarqueeOrBrush ? null : THREE.MOUSE.ROTATE;
+            this.controls.mouseButtons.MIDDLE = IsMarqueeOrBrush ? THREE.MOUSE.ROTATE : THREE.MOUSE.DOLLY;
+        }
+        if (this.canvas)
+        {
+            this.canvas.style.cursor = Tool === 'box' ? 'crosshair' : Tool === 'circle' ? 'none' : Tool === 'seam' ? 'crosshair' : 'default';
+        }
+        if (this.brushEl && Tool !== 'circle') this.brushEl.hidden = true;
+    }
+
+    _ProjectScreen(PosArr, Rect)
+    {
+        const V = new THREE.Vector3(PosArr[0], PosArr[1], PosArr[2]).project(this.camera);
+        if (V.z < -1 || V.z > 1) return null;
+        return [(V.x * 0.5 + 0.5) * Rect.width, (-V.y * 0.5 + 0.5) * Rect.height, V.z];
+    }
+
+    _IsFaceFrontFacing(FaceIdx)
+    {
+        const F = this.surface?.faces?.[FaceIdx];
+        const N = this.surface?.faceNormals?.[FaceIdx];
+        if (!F || !N) return true;
+        let Cx = 0, Cy = 0, Cz = 0;
+        for (const C of F.corners)
+        {
+            const P = this.surface.positions[C.v];
+            Cx += P[0]; Cy += P[1]; Cz += P[2];
+        }
+        const Inv = 1 / Math.max(1, F.corners.length);
+        const Vx = this.camera.position.x - Cx * Inv;
+        const Vy = this.camera.position.y - Cy * Inv;
+        const Vz = this.camera.position.z - Cz * Inv;
+        return (N[0] * Vx + N[1] * Vy + N[2] * Vz) > -0.04;
+    }
+
+    DispatchBoxSelect3D(MinX, MinY, MaxX, MaxY, Rect, { additive = false, subtract = false, xray = false } = {})
+    {
+        if (!this.surface || !this.onBoxSelect3D || !Rect.width || !Rect.height) return;
+        this.camera.updateMatrixWorld();
+        const InBox = (Pt) => Pt && Pt[0] >= MinX && Pt[0] <= MaxX && Pt[1] >= MinY && Pt[1] <= MaxY;
+        const FaceHits = [];
+        const VertHits = new Set();
+        const EdgeHits = new Set();
+
+        for (let fi = 0; fi < this.surface.faces.length; fi++)
+        {
+            if (!xray && !this._IsFaceFrontFacing(fi)) continue;
+            const F = this.surface.faces[fi];
+            let Cx = 0, Cy = 0, Cz = 0;
+            let AnyCornerIn = false;
+            for (const C of F.corners)
+            {
+                const P = this.surface.positions[C.v];
+                Cx += P[0]; Cy += P[1]; Cz += P[2];
+                const Sp = this._ProjectScreen(P, Rect);
+                if (InBox(Sp))
+                {
+                    AnyCornerIn = true;
+                    VertHits.add(C.v);
+                }
+            }
+            const Inv = 1 / Math.max(1, F.corners.length);
+            const CenterSp = this._ProjectScreen([Cx * Inv, Cy * Inv, Cz * Inv], Rect);
+            if (InBox(CenterSp) || AnyCornerIn)
+            {
+                FaceHits.push(fi);
+                for (let k = 0; k < F.corners.length; k++)
+                {
+                    const Va = F.corners[k].v, Vb = F.corners[(k + 1) % F.corners.length].v;
+                    const Pa = this.surface.positions[Va], Pb = this.surface.positions[Vb];
+                    const MidSp = this._ProjectScreen([0.5 * (Pa[0] + Pb[0]), 0.5 * (Pa[1] + Pb[1]), 0.5 * (Pa[2] + Pb[2])], Rect);
+                    if (InBox(MidSp) || (VertHits.has(Va) && VertHits.has(Vb))) EdgeHits.add(EdgeKey(Va, Vb));
+                }
+            }
+        }
+        this.onBoxSelect3D({ faces: FaceHits, verts3d: [...VertHits], edges3d: [...EdgeHits] }, { additive, subtract });
+    }
+
+    DispatchPaintSelect3D(Sx, Sy, Rect, { subtract = false, commit = false } = {})
+    {
+        if (!this.surface || !this.onPaintSelect3D || !Rect.width || !Rect.height) return;
+        this.camera.updateMatrixWorld();
+        const Rad = Math.max(8, this.paintRadiusPx);
+        const InBrush = (Pt) => Pt && Math.hypot(Pt[0] - Sx, Pt[1] - Sy) <= Rad;
+        const FaceHits = [];
+        const VertHits = new Set();
+        const EdgeHits = new Set();
+
+        // Raycast center point directly under cursor so huge single faces hit immediately even if center/corners are outside ring
+        const Ptr = new THREE.Vector2((Sx / Rect.width) * 2 - 1, -(Sy / Rect.height) * 2 + 1);
+        const Ray = new THREE.Raycaster();
+        Ray.setFromCamera(Ptr, this.camera);
+        const RayHits = Ray.intersectObject(this.mesh, false);
+        const CenterHitFi = RayHits.length ? this.triToFace[RayHits[0].faceIndex] : undefined;
+        if (CenterHitFi !== undefined) FaceHits.push(CenterHitFi);
+
+        for (let fi = 0; fi < this.surface.faces.length; fi++)
+        {
+            if (!this._IsFaceFrontFacing(fi)) continue;
+            const F = this.surface.faces[fi];
+            let Cx = 0, Cy = 0, Cz = 0;
+            let CornerHit = false;
+            for (const C of F.corners)
+            {
+                const P = this.surface.positions[C.v];
+                Cx += P[0]; Cy += P[1]; Cz += P[2];
+                const Sp = this._ProjectScreen(P, Rect);
+                if (InBrush(Sp)) { CornerHit = true; VertHits.add(C.v); }
+            }
+            const Inv = 1 / Math.max(1, F.corners.length);
+            const CenterSp = this._ProjectScreen([Cx * Inv, Cy * Inv, Cz * Inv], Rect);
+            if (InBrush(CenterSp) || CornerHit || fi === CenterHitFi)
+            {
+                if (fi !== CenterHitFi) FaceHits.push(fi);
+                for (let k = 0; k < F.corners.length; k++)
+                {
+                    const Va = F.corners[k].v, Vb = F.corners[(k + 1) % F.corners.length].v;
+                    const Pa = this.surface.positions[Va], Pb = this.surface.positions[Vb];
+                    const MidSp = this._ProjectScreen([0.5 * (Pa[0] + Pb[0]), 0.5 * (Pa[1] + Pb[1]), 0.5 * (Pa[2] + Pb[2])], Rect);
+                    if (InBrush(MidSp)) EdgeHits.add(EdgeKey(Va, Vb));
+                }
+            }
+        }
+        this.onPaintSelect3D({ faces: FaceHits, verts3d: [...VertHits], edges3d: [...EdgeHits] }, { subtract, commit });
     }
 
     RaycastMesh(Event)
@@ -557,11 +831,11 @@ export class UVViewport3D
 
     UpdateHover(Event)
     {
-        const WantEdgeHover = this.activeTool === 'seam' || this.selectionMode === 'edge' || Event.altKey;
+        const WantEdgeHover = this.activeTool === 'seam' || (this.selectionMode === 'edge' && this.activeTool !== 'box' && this.activeTool !== 'circle') || (Event.altKey && this.activeTool === 'select');
         if (!WantEdgeHover)
         {
             this.ClearHover();
-            this.canvas.style.cursor = 'default';
+            this.canvas.style.cursor = this.activeTool === 'box' ? 'crosshair' : this.activeTool === 'circle' ? 'none' : this.activeTool === 'seam' ? 'crosshair' : 'default';
             return;
         }
         const Edge = this.FindHitEdge(Event);

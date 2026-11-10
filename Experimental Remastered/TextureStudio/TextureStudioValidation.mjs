@@ -2712,4 +2712,84 @@ await suite("24. Material Library Full PBR Channels in Outliner & 3D + Baked Mat
   assert(expPills.length >= ALL_PAINT_CHANNEL_ROWS.length, `Expanded material layer outliner must expose all ${ALL_PAINT_CHANNEL_ROWS.length} channel pills (got ${expPills.length})`);
 });
 
+await suite("25. Texture Paint Procedural Material Shader Parity (Flakes, Depth Absorption, Clearcoat Peel & Presets)", async () => {
+  const THREE = await import("three");
+  const { attachProceduralMaterialEvaluation, updateProceduralMaterialUniforms } = await import("./Engine/Materials/materials.js");
+  const { createMaterialLayerOverridesFromPreset, resolveMaterialLayerSpec, compositePaintDocument } = await import("./Engine/TexturePaintEngine.js");
+  const { PAINT_GLSL3_SHADERS } = await import("./Engine/GpuPaintEngine.js");
+
+  const racingGreen = materials.find((m) => m.id === "racing-green");
+  assert(racingGreen, "Racing Green preset must exist");
+
+  // 25a. Shared procedural material evaluator attaches TP_PAINT_OVERLAY shader injection cleanly
+  const testMat = new THREE.MeshPhysicalMaterial({ color: "#ffffff", clearcoat: 1.0 });
+  attachProceduralMaterialEvaluation(testMat, racingGreen, { enabled: true, hasMat: 1, covTex: new THREE.Texture() });
+  assert.equal(testMat.userData.paintOverlay, true, "paintOverlay flag must be enabled on paintMat");
+  assert.equal(testMat.userData.paintOverlayState.hasMat, 1, "paintOverlayState.hasMat must initialize to 1");
+  const mockShader = {
+    uniforms: {},
+    vertexShader: "#include <begin_vertex>",
+    fragmentShader: [
+      "#include <color_fragment>",
+      "#include <roughnessmap_fragment>",
+      "#include <metalnessmap_fragment>",
+      "#include <normal_fragment_maps>",
+      "#include <clearcoat_normal_fragment_maps>",
+      "#include <lights_physical_fragment>",
+      "#include <emissivemap_fragment>",
+      "#include <lights_fragment_end>",
+      "#include <opaque_fragment>",
+    ].join("\n"),
+  };
+  testMat.onBeforeCompile(mockShader);
+  assert(mockShader.fragmentShader.includes("TP_PAINT_OVERLAY"), "Shader must define TP_PAINT_OVERLAY");
+  assert(mockShader.fragmentShader.includes("uPaintMatCovMap"), "Shader must sample uPaintMatCovMap");
+  assert(mockShader.fragmentShader.includes("cellular3("), "Shader must evaluate 3D cellular3 metallic flakes");
+  assert(mockShader.fragmentShader.includes("exp(-uDepth*.28)"), "Shader must evaluate multilayer depth absorption");
+  assert(mockShader.fragmentShader.includes("uCoatIor"), "Shader must apply independent uCoatIor Fresnel");
+  assert(mockShader.uniforms.uFlakes.value > 0.5, "Racing Green uFlakes uniform must match preset");
+
+  // Switching material preset type dynamically updates uniforms and triggers recompile on type change
+  const wood = materials.find((m) => m.type === 2) || materials[1];
+  updateProceduralMaterialUniforms(testMat, wood, { hasMat: 1, color: wood.color, roughness: wood.roughness, metalness: wood.metalness });
+  assert.equal(Math.floor(Number(testMat.userData.params.type)), wood.type, "updateProceduralMaterialUniforms must update material preset type");
+
+  // 25b. GPU Paint shader includes matCoverageRT + 3D cellular3 flakes + decal cutout
+  assert(PAINT_GLSL3_SHADERS.COMPOSITE_LAYER_FRAG.includes("uAccMatCov"), "COMPOSITE_LAYER_FRAG must propagate matCoverageRT");
+  assert(PAINT_GLSL3_SHADERS.COMPOSITE_LAYER_FRAG.includes("cellular3("), "GpuPaintEngine material fallback must evaluate 3D cellular3 flakes");
+  assert(PAINT_GLSL3_SHADERS.DECAL_STAMP_FRAG.includes("uAccMatCov"), "DECAL_STAMP_FRAG must cut out decals from material coverage");
+
+  // 25c. Layer preset overrides + resolveMaterialLayerSpec + CPU flake depth evaluation
+  const ov = createMaterialLayerOverridesFromPreset(racingGreen, 32);
+  const layer = createPaintLayer("material", ov);
+  const spec = resolveMaterialLayerSpec(layer);
+  assert.equal(spec.type, 0, "Racing Green resolves to multilayer metallic flake shader (type 0)");
+  assert(spec.depth > 0.3 && spec.flakes > 0.5 && spec.coat > 0.8, "Resolved Racing Green spec must preserve depth, flakes, and coat");
+
+  layer.material.color = "#1f6e4a";
+  const tintedSpec = resolveMaterialLayerSpec(layer);
+  assert.equal(tintedSpec.color.toLowerCase(), "#1f6e4a", "resolveMaterialLayerSpec must apply live base tint override");
+  layer.material.color = racingGreen.color;
+
+  const doc = createPaintDocument(32);
+  doc.layers = [layer];
+  const cues = {
+    res: 32,
+    covered: new Uint8Array(32 * 32).fill(1),
+    partAt: new Int16Array(32 * 32).fill(0),
+    worldPos: Float32Array.from({ length: 32 * 32 * 3 }, (_, idx) => ((idx % 97) / 97) * 2 - 1),
+    worldNormal: Float32Array.from({ length: 32 * 32 * 3 }, (_, idx) => (idx % 3 === 1 ? 1 : 0)),
+    curvature: new Float32Array(32 * 32).fill(0.5),
+    ao: new Float32Array(32 * 32).fill(1.0),
+  };
+  const comp = compositePaintDocument(doc, cues);
+  let minR = 255, maxR = 0;
+  for (let i = 0; i < 32 * 32; i++) {
+    const g = comp.albedo[i * 4 + 1];
+    if (g < minR) minR = g;
+    if (g > maxR) maxR = g;
+  }
+  assert(maxR > minR && minR < 100, `CPU Racing Green composite must show deep absorption + flake contrast (min=${minR}, max=${maxR})`);
+});
+
 console.log(`\nALL ${results.length} VALIDATION SUITES PASSED CLEANLY`);

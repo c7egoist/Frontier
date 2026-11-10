@@ -199,7 +199,8 @@ function SyncAllViews(UpdateInspector = false)
     if (Viewport3D)
     {
         Viewport3D.selectionMode = StudioState.selectionMode;
-        Viewport3D.activeTool = StudioState.activeTool;
+        Viewport3D.paintRadiusPx = CircleSelect.radiusPx;
+        Viewport3D.SetActiveTool(StudioState.activeTool);
         Viewport3D.showBoundaries = StudioState.showBoundaries;
         Viewport3D.SyncFromSurface(Doc.surface, Doc.islands, Doc.importanceGroups, StudioState.targetTexelDensity);
     }
@@ -758,8 +759,83 @@ function CloseAllSelectMenus()
 {
     const M1 = document.getElementById('select-menu');
     const M2 = document.getElementById('select-similar-menu');
+    const M3 = document.getElementById('uv-context-menu');
     if (M1) M1.hidden = true;
     if (M2) M2.hidden = true;
+    if (M3) M3.hidden = true;
+}
+
+function CloseUvContextMenu()
+{
+    const Menu = document.getElementById('uv-context-menu');
+    if (Menu) Menu.hidden = true;
+}
+
+function OpenUvContextMenu(ClientX, ClientY, { source = '3d', hitEdge = null } = {})
+{
+    const Menu = document.getElementById('uv-context-menu');
+    if (!Menu)
+    {
+        if (source === '3d' || StudioState.selectionMode === 'edge' || StudioState.activeTool === 'seam') OpenEdgeSeamMenu(ClientX, ClientY);
+        else OpenSelectMenu(ClientX, ClientY);
+        return;
+    }
+    document.getElementById('edge-seam-menu')?.setAttribute('hidden', '');
+    document.getElementById('select-menu')?.setAttribute('hidden', '');
+    document.getElementById('select-similar-menu')?.setAttribute('hidden', '');
+
+    const Doc = ActiveDoc();
+    if (hitEdge && Doc && StudioState.selectionMode === 'edge' && !Doc.surface.selectedEdges3D.has(hitEdge.key))
+    {
+        Doc.surface.SelectEdge3D(hitEdge.va, hitEdge.vb, false, Doc.islands);
+        SyncAllViews(true);
+    }
+
+    const Badge = document.getElementById('ctx-sel-badge');
+    if (Badge && Doc)
+    {
+        const Mode = StudioState.selectionMode;
+        if (Mode === 'face') Badge.textContent = `${Doc.surface.selectedFaces.size} faces`;
+        else if (Mode === 'edge') Badge.textContent = `${Doc.surface.selectedEdges3D.size} edges`;
+        else if (Mode === 'vertex') Badge.textContent = `${Doc.surface.selectedUVs.size} verts`;
+        else Badge.textContent = `${Doc.surface.selectedIslands.size} islands`;
+    }
+
+    Menu.querySelectorAll('[data-ctx-tool]').forEach(B => B.classList.toggle('active', B.dataset.ctxTool === StudioState.activeTool));
+    Menu.querySelectorAll('[data-ctx-face-select]').forEach(B => B.classList.toggle('active', StudioState.selectionMode === 'face' && StudioState.activeTool === 'select'));
+    Menu.querySelectorAll('[data-ctx-mode]').forEach(B => B.classList.toggle('active', B.dataset.ctxMode === StudioState.selectionMode));
+
+    const RadSlider = document.getElementById('ctx-paint-radius-slider');
+    const RadVal = document.getElementById('ctx-paint-radius-val');
+    if (RadSlider) RadSlider.value = String(Math.round(CircleSelect.radiusPx));
+    if (RadVal) RadVal.textContent = `${Math.round(CircleSelect.radiusPx)}px`;
+
+    Menu.hidden = false;
+    const W = 332;
+    const H = Math.min(620, window.innerHeight - 20);
+    const X = Math.max(8, Math.min(window.innerWidth - W - 8, ClientX));
+    const Y = Math.max(8, Math.min(window.innerHeight - H - 8, ClientY));
+    Menu.style.left = `${X}px`;
+    Menu.style.top = `${Y}px`;
+}
+
+function RunUvContextOperation(OpId)
+{
+    const Doc = ActiveDoc();
+    if (!Doc) return;
+    if (OpId === 'unwrap') RunUnwrap('lscm');
+    else if (OpId === 'smart') RunUnwrap('smart');
+    else if (OpId === 'pack') ExecuteImportancePack();
+    else if (OpId === 'relax') RunWithUndo('Minimize Stretch', () => { MinimizeStretch(Doc.surface, { iterations: StudioState.relaxIterations, onlySelected: Doc.surface.selectedUVs.size > 0, islands: Doc.islands }); });
+    else if (OpId === 'avg-scale') RunWithUndo('Average Scale', () => { AverageIslandScale(Doc.surface, Doc.islands, Doc.surface.selectedIslands.size > 0); });
+    else if (OpId === 'split') RunWithUndo('Split Island', () => { Doc.surface.SplitSelection(); });
+    else if (OpId === 'stitch') RunWithUndo('Stitch', () => { const N = Doc.surface.StitchSelected(Doc.islands); Toast(`Stitched ${N} UV pairs`); });
+    else if (OpId === 'weld') RunWithUndo('Weld', () => { const N = Doc.surface.WeldSelected(); Toast(`Welded ${N} UVs`); });
+    else if (OpId === 'pin') RunWithUndo('Pin', () => { Doc.surface.PinSelected(true); });
+    else if (OpId === 'unpin') RunWithUndo('Unpin', () => { Doc.surface.PinSelected(false); });
+    else if (OpId === 'mirror-u') RunWithUndo('Mirror U', () => { const P = ComputeSelectionPivot(Doc) || StudioState.cursorUV; Doc.surface.TransformSelectedUVs({ pivot: P, scaleU: -1, scaleV: 1 }); });
+    else if (OpId === 'rotate-90') RunWithUndo('Rotate 90°', () => { const P = ComputeSelectionPivot(Doc) || StudioState.cursorUV; Doc.surface.TransformSelectedUVs({ pivot: P, rotateRad: Math.PI / 2 }); });
+    else if (OpId === 'open-edge-menu') OpenEdgeSeamMenu(LastPointerClient[0], LastPointerClient[1]);
 }
 
 function OpenSelectMenu(ClientX, ClientY)
@@ -2349,13 +2425,9 @@ function SetupCanvas2DInteraction()
                     SyncAllViews(true);
                 }
             }
-            else if (Dist < 5 && DragAction.button === 2 && (StudioState.selectionMode === 'edge' || StudioState.activeTool === 'seam'))
-            {
-                OpenEdgeSeamMenu(DragAction.clientX, DragAction.clientY);
-            }
             else if (Dist < 5 && DragAction.button === 2)
             {
-                OpenSelectMenu(DragAction.clientX, DragAction.clientY);
+                OpenUvContextMenu(DragAction.clientX, DragAction.clientY, { source: '2d' });
             }
             DragAction = null;
             return;
@@ -2524,22 +2596,65 @@ function ApplyCircleSelectAt(Doc, Sx, Sy, Subtract = false)
 {
     const [Cu, Cv] = Canvas2D.ScreenToUv(Sx, Sy);
     const Ruv = CircleSelect.radiusPx / Canvas2D.scalePx;
-    for (const Isl of Doc.islands)
+    const Mode = StudioState.selectionMode;
+
+    if (Mode === 'face')
     {
-        if (Isl.hidden) continue;
-        for (const UvIdx of Isl.uvIndices)
+        for (let fi = 0; fi < Doc.surface.faces.length; fi++)
         {
-            const P = Doc.surface.uvCoords[UvIdx];
-            if (Math.hypot(P[0] - Cu, P[1] - Cv) <= Ruv)
+            const C = Doc.surface.faces[fi].corners;
+            let Cx = 0, Cy = 0;
+            let Hit = false;
+            for (const cr of C)
             {
-                if (Subtract) Doc.surface.selectedUVs.delete(UvIdx);
-                else
+                const P = Doc.surface.uvCoords[cr.uv];
+                Cx += P[0]; Cy += P[1];
+                if (Math.hypot(P[0] - Cu, P[1] - Cv) <= Ruv) Hit = true;
+            }
+            if (Hit || Math.hypot(Cx / C.length - Cu, Cy / C.length - Cv) <= Ruv)
+            {
+                if (Subtract) Doc.surface.selectedFaces.delete(fi);
+                else Doc.surface.selectedFaces.add(fi);
+            }
+        }
+        Doc.surface.SyncSelectionsFromMode('face', Doc.islands);
+    }
+    else if (Mode === 'edge')
+    {
+        for (const F of Doc.surface.faces)
+        {
+            for (let k = 0; k < F.corners.length; k++)
+            {
+                const Ua = F.corners[k].uv, Ub = F.corners[(k + 1) % F.corners.length].uv;
+                const Pa = Doc.surface.uvCoords[Ua], Pb = Doc.surface.uvCoords[Ub];
+                const Mx = 0.5 * (Pa[0] + Pb[0]), My = 0.5 * (Pa[1] + Pb[1]);
+                if (Math.hypot(Mx - Cu, My - Cv) <= Ruv)
                 {
-                    if (StudioState.selectionMode === 'island') Doc.surface.SelectIsland(Isl.id, true);
+                    const Ek = EdgeKey(Ua, Ub);
+                    if (Subtract) Doc.surface.selectedUVEdges.delete(Ek);
+                    else Doc.surface.selectedUVEdges.add(Ek);
+                }
+            }
+        }
+        Doc.surface.SyncSelectionsFromMode('edge', Doc.islands);
+    }
+    else
+    {
+        for (const Isl of Doc.islands)
+        {
+            if (Isl.hidden) continue;
+            for (const UvIdx of Isl.uvIndices)
+            {
+                const P = Doc.surface.uvCoords[UvIdx];
+                if (Math.hypot(P[0] - Cu, P[1] - Cv) <= Ruv)
+                {
+                    if (Subtract) Doc.surface.selectedUVs.delete(UvIdx);
+                    else if (Mode === 'island') Doc.surface.SelectIsland(Isl.id, true, Doc.islands);
                     else Doc.surface.selectedUVs.add(UvIdx);
                 }
             }
         }
+        if (Mode !== 'island') Doc.surface.SyncSelectionsFromMode('vertex', Doc.islands);
     }
     SyncAllViews();
 }
@@ -2558,7 +2673,8 @@ function SetupKeyboardShortcuts()
         const EdgeMenu = document.getElementById('edge-seam-menu');
         const SelMenu = document.getElementById('select-menu');
         const SimMenu = document.getElementById('select-similar-menu');
-        if (E.key === 'Escape' && ((EdgeMenu && !EdgeMenu.hidden) || (SelMenu && !SelMenu.hidden) || (SimMenu && !SimMenu.hidden)))
+        const CtxMenu = document.getElementById('uv-context-menu');
+        if (E.key === 'Escape' && ((EdgeMenu && !EdgeMenu.hidden) || (SelMenu && !SelMenu.hidden) || (SimMenu && !SimMenu.hidden) || (CtxMenu && !CtxMenu.hidden)))
         {
             E.preventDefault();
             if (EdgeMenu) EdgeMenu.hidden = true;
@@ -2669,8 +2785,17 @@ function SetupKeyboardShortcuts()
             SyncAllViews(true);
             return;
         }
-        if (!Mod && K === 'b') { E.preventDefault(); SetActiveTool('box'); Toast('Box Select: drag rectangle'); return; }
-        if (!Mod && K === 'c') { E.preventDefault(); CircleSelect.active = true; SetActiveTool('circle'); Toast('Circle Select: LMB paint · Wheel radius · Esc exit'); return; }
+        if (!Mod && K === 'b') { E.preventDefault(); SetActiveTool('box'); Toast('Box Select (2D & 3D): Drag rectangle · Shift Add · Ctrl Subtract'); return; }
+        if (!Mod && K === 'c') { E.preventDefault(); CircleSelect.active = true; SetActiveTool('circle'); Toast('Paint Select (2D & 3D): LMB brush · Ctrl Erase · [ / ] Radius · Esc exit'); return; }
+        if (!Mod && (E.key === '[' || E.key === ']'))
+        {
+            E.preventDefault();
+            CircleSelect.radiusPx = Math.max(12, Math.min(160, CircleSelect.radiusPx + (E.key === ']' ? 6 : -6)));
+            if (Viewport3D) Viewport3D.paintRadiusPx = CircleSelect.radiusPx;
+            Toast(`Paint Select Radius: ${Math.round(CircleSelect.radiusPx)}px`);
+            SyncAllViews();
+            return;
+        }
 
         // Blender Modal Transform
         if (!Mod && K === 'g') { E.preventDefault(); BeginModalTransform('move'); return; }
@@ -2771,15 +2896,40 @@ function SetSelectionMode(Mode)
 {
     StudioState.selectionMode = Mode;
     document.querySelectorAll('#sel-mode-pills button').forEach(B => B.classList.toggle('active', B.dataset.mode === Mode));
+    SyncMeshHintPill();
     SyncAllViews();
 }
 
 function SetActiveTool(Tool)
 {
     StudioState.activeTool = Tool;
-    if (Tool !== 'circle') CircleSelect.active = false;
+    CircleSelect.active = Tool === 'circle';
     UpdateToolRailActive();
+    SyncMeshHintPill();
     SyncAllViews();
+}
+
+function SyncMeshHintPill()
+{
+    const El = document.getElementById('mesh-hint-pill');
+    if (!El) return;
+    if (StudioState.activeTool === 'box')
+    {
+        El.textContent = 'Box Select (2D & 3D): LMB Drag Box · Shift Add · Ctrl Subtract · MMB/Alt Orbit · RMB Menu';
+    }
+    else if (StudioState.activeTool === 'circle')
+    {
+        El.textContent = 'Paint Select (2D & 3D): LMB Brush · Ctrl Subtract · [ / ] or Shift+Wheel Size · MMB/Alt Orbit · RMB Menu';
+    }
+    else if (StudioState.activeTool === 'seam')
+    {
+        El.textContent = 'Seam Brush: Click Edge to Toggle · Alt+Click Loop · RMB Context Menu';
+    }
+    else
+    {
+        const ModeTitle = { vertex: 'Vert', edge: 'Edge', face: 'Face', island: 'Island' }[StudioState.selectionMode] || 'Face';
+        El.textContent = `${ModeTitle} Mode: Click Select · Shift Multi · Alt Loop · Ctrl Path · RMB Tools & Ops`;
+    }
 }
 
 function UpdateToolRailActive()
@@ -3117,6 +3267,80 @@ function InitStudioIconsAndBindings()
         StudioState.selectSimilarAngle = Math.max(1, Math.min(90, Number(E.target.value) || 15));
     });
 
+    document.querySelectorAll('#uv-context-menu [data-ctx-tool]').forEach(Btn =>
+    {
+        Btn.addEventListener('click', () =>
+        {
+            const Tool = Btn.dataset.ctxTool;
+            CloseUvContextMenu();
+            SetActiveTool(Tool);
+            if (Tool === 'box') Toast('Box Select Active — drag marquee in 2D or 3D viewport');
+            else if (Tool === 'circle') Toast('Paint Select Active — brush over faces in 2D or 3D viewport');
+            else Toast('Click / Tweak Select Active');
+        });
+    });
+    document.querySelectorAll('#uv-context-menu [data-ctx-face-select]').forEach(Btn =>
+    {
+        Btn.addEventListener('click', () =>
+        {
+            CloseUvContextMenu();
+            SetSelectionMode('face');
+            SetActiveTool('select');
+            Toast('Face Select Mode Active (Click or Shift+Click multiple faces)');
+        });
+    });
+    document.querySelectorAll('#uv-context-menu [data-ctx-mode]').forEach(Btn =>
+    {
+        Btn.addEventListener('click', () =>
+        {
+            const Mode = Btn.dataset.ctxMode;
+            CloseUvContextMenu();
+            SetSelectionMode(Mode);
+            Toast(`Selection Mode: ${Mode.toUpperCase()}`);
+        });
+    });
+    document.getElementById('ctx-paint-radius-slider')?.addEventListener('input', E =>
+    {
+        const R = Math.max(12, Math.min(160, Number(E.target.value) || 36));
+        CircleSelect.radiusPx = R;
+        const ValEl = document.getElementById('ctx-paint-radius-val');
+        if (ValEl) ValEl.textContent = `${Math.round(R)}px`;
+        if (Viewport3D) Viewport3D.paintRadiusPx = R;
+        SyncAllViews();
+    });
+    document.querySelectorAll('#uv-context-menu [data-ctx-sel]').forEach(Btn =>
+    {
+        Btn.addEventListener('click', () =>
+        {
+            const Op = Btn.dataset.ctxSel;
+            CloseUvContextMenu();
+            if (Op === 'open-similar')
+            {
+                OpenSelectSimilarMenu(LastPointerClient[0], LastPointerClient[1]);
+                return;
+            }
+            RunSelectOp(Op);
+        });
+    });
+    document.querySelectorAll('#uv-context-menu [data-ctx-op]').forEach(Btn =>
+    {
+        Btn.addEventListener('click', () =>
+        {
+            const Op = Btn.dataset.ctxOp;
+            CloseUvContextMenu();
+            RunUvContextOperation(Op);
+        });
+    });
+    document.querySelectorAll('#uv-context-menu [data-ctx-edge]').forEach(Btn =>
+    {
+        Btn.addEventListener('click', () =>
+        {
+            const Op = Btn.dataset.ctxEdge;
+            CloseUvContextMenu();
+            RunEdgeOrSeamOp(Op);
+        });
+    });
+
     document.addEventListener('pointerdown', E =>
     {
         if (!SpawnMenu.hidden && !SpawnMenu.contains(E.target) && E.target.id !== 'spawn-tab-btn') SpawnMenu.hidden = true;
@@ -3126,6 +3350,8 @@ function InitStudioIconsAndBindings()
         if (SelMenu && !SelMenu.hidden && !SelMenu.contains(E.target) && E.target.id !== 'select-menu-btn') SelMenu.hidden = true;
         const SimMenu = document.getElementById('select-similar-menu');
         if (SimMenu && !SimMenu.hidden && !SimMenu.contains(E.target) && E.target.id !== 'select-menu-btn') SimMenu.hidden = true;
+        const CtxMenu = document.getElementById('uv-context-menu');
+        if (CtxMenu && !CtxMenu.hidden && !CtxMenu.contains(E.target)) CtxMenu.hidden = true;
     });
 
     // Import OBJ & Custom UDIM Texture
@@ -3338,15 +3564,125 @@ function Bootstrap()
                 }
             });
         },
-        onContextMenu: (ClientX, ClientY, HitEdge) =>
+        onBoxSelect3D: ({ faces, verts3d, edges3d }, { additive = false, subtract = false } = {}) =>
         {
             const Doc = ActiveDoc();
-            if (HitEdge && Doc && StudioState.selectionMode === 'edge' && !Doc.surface.selectedEdges3D.has(HitEdge.key))
+            if (!Doc || !StudioState.syncSelection) return;
+            const Mode = StudioState.selectionMode;
+            if (!additive && !subtract) Doc.surface.ClearSelection();
+
+            if (Mode === 'island')
             {
-                Doc.surface.SelectEdge3D(HitEdge.va, HitEdge.vb, false, Doc.islands);
-                SyncAllViews(true);
+                const FaceSet = new Set(faces);
+                for (const Isl of Doc.islands)
+                {
+                    if (Isl.hidden) continue;
+                    if (Isl.faceIndices.some(Fi => FaceSet.has(Fi)))
+                    {
+                        if (subtract) { for (const Fi of Isl.faceIndices) Doc.surface.selectedFaces.delete(Fi); }
+                        else Doc.surface.SelectIsland(Isl.id, true, Doc.islands);
+                    }
+                }
+                if (subtract) Doc.surface.SyncSelectionsFromMode('face', Doc.islands);
             }
-            OpenEdgeSeamMenu(ClientX, ClientY);
+            else if (Mode === 'face')
+            {
+                for (const Fi of faces)
+                {
+                    if (subtract) Doc.surface.selectedFaces.delete(Fi);
+                    else Doc.surface.selectedFaces.add(Fi);
+                }
+                Doc.surface.SyncSelectionsFromMode('face', Doc.islands);
+                if (faces.length) Doc.surface.activeFace = faces[faces.length - 1];
+            }
+            else if (Mode === 'edge')
+            {
+                for (const Ek3 of edges3d)
+                {
+                    if (subtract) Doc.surface.selectedEdges3D.delete(Ek3);
+                    else Doc.surface.selectedEdges3D.add(Ek3);
+                }
+                Doc.surface.SyncSelectionsFromMode('edge', Doc.islands);
+            }
+            else
+            {
+                const VSet = new Set(verts3d);
+                for (const F of Doc.surface.faces)
+                {
+                    for (const C of F.corners)
+                    {
+                        if (VSet.has(C.v))
+                        {
+                            if (subtract) Doc.surface.selectedUVs.delete(C.uv);
+                            else Doc.surface.selectedUVs.add(C.uv);
+                        }
+                    }
+                }
+                Doc.surface.SyncSelectionsFromMode('vertex', Doc.islands);
+            }
+            SyncAllViews(true);
+            Toast(`3D Box Select: ${Doc.surface.selectedFaces.size} faces`);
+        },
+        onPaintSelect3D: ({ faces, verts3d, edges3d }, { subtract = false, commit = false } = {}) =>
+        {
+            const Doc = ActiveDoc();
+            if (!Doc || !StudioState.syncSelection) return;
+            const Mode = StudioState.selectionMode;
+
+            if (Mode === 'island')
+            {
+                const FaceSet = new Set(faces);
+                for (const Isl of Doc.islands)
+                {
+                    if (Isl.hidden) continue;
+                    if (Isl.faceIndices.some(Fi => FaceSet.has(Fi)))
+                    {
+                        if (subtract) { for (const Fi of Isl.faceIndices) Doc.surface.selectedFaces.delete(Fi); }
+                        else Doc.surface.SelectIsland(Isl.id, true, Doc.islands);
+                    }
+                }
+                if (subtract) Doc.surface.SyncSelectionsFromMode('face', Doc.islands);
+            }
+            else if (Mode === 'face')
+            {
+                for (const Fi of faces)
+                {
+                    if (subtract) Doc.surface.selectedFaces.delete(Fi);
+                    else Doc.surface.selectedFaces.add(Fi);
+                }
+                Doc.surface.SyncSelectionsFromMode('face', Doc.islands);
+                if (!subtract && faces.length) Doc.surface.activeFace = faces[faces.length - 1];
+            }
+            else if (Mode === 'edge')
+            {
+                for (const Ek3 of edges3d)
+                {
+                    if (subtract) Doc.surface.selectedEdges3D.delete(Ek3);
+                    else Doc.surface.selectedEdges3D.add(Ek3);
+                }
+                Doc.surface.SyncSelectionsFromMode('edge', Doc.islands);
+            }
+            else
+            {
+                const VSet = new Set(verts3d);
+                for (const F of Doc.surface.faces)
+                {
+                    for (const C of F.corners)
+                    {
+                        if (VSet.has(C.v))
+                        {
+                            if (subtract) Doc.surface.selectedUVs.delete(C.uv);
+                            else Doc.surface.selectedUVs.add(C.uv);
+                        }
+                    }
+                }
+                Doc.surface.SyncSelectionsFromMode('vertex', Doc.islands);
+            }
+            SyncAllViews(commit);
+        },
+        onContextMenu: (ClientX, ClientY, HitEdge) =>
+        {
+            OpenUvContextMenu(ClientX, ClientY, { source: '3d', hitEdge: HitEdge });
         }
     });
 

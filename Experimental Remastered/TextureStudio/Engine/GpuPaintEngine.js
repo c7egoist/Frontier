@@ -8,7 +8,7 @@
    - GPU-resident Undo/Redo target snapshots (readPixels runs ONLY on PNG Export or Eyedropper sample). */
 
 import * as THREE from "three";
-import { sampleCurveLut, getToolChannels, EXTENDED_PBR_KEYS, defaultByteForExtChannel, encodeScalarChannelByte } from "./TexturePaintEngine.js";
+import { sampleCurveLut, getToolChannels, EXTENDED_PBR_KEYS, defaultByteForExtChannel, encodeScalarChannelByte, resolveMaterialLayerSpec } from "./TexturePaintEngine.js";
 
 function hexToRgb(hex) {
   const s = String(hex || "#ffffff").replace(/^#/, "");
@@ -401,7 +401,17 @@ uniform float uParamC; // noiseMix
 uniform float uGenScale;
 uniform int uGenInvert;
 uniform int uGenPreset; // 0=edge-wear, 1=crevice-dirt, 2=top-dust, 3=triplanar-grunge
-uniform int uOutTarget; // 0 = albedo, 1 = ormh
+uniform int uOutTarget; // 0 = albedo, 1 = ormh, 2 = matCoverage
+uniform sampler2D uAccMatCov;
+uniform int uIsShaderMatLayer;
+uniform vec4 uMatChFlags;
+uniform int uMatType;
+uniform float uMatDepth;
+uniform float uMatFlakes;
+uniform float uMatFlakeFreq;
+uniform vec2 uMatFlakeRough;
+uniform vec2 uMatFlakeMetal;
+uniform vec3 uMatFlakeColorB;
 in vec2 vUv;
 out vec4 fragColor;
 
@@ -420,6 +430,37 @@ float vnoise(vec2 p) {
     mix(hash21(i + vec2(0.0, 1.0)), hash21(i + vec2(1.0, 1.0)), u.x),
     u.y
   );
+}
+
+float hash31(vec3 p) {
+  p = fract(p * 0.1031);
+  p += dot(p, p.yzx + 33.33);
+  return fract((p.x + p.y) * p.z);
+}
+
+float noise3(vec3 p) {
+  vec3 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(
+    mix(mix(hash31(i), hash31(i + vec3(1.0, 0.0, 0.0)), f.x),
+        mix(hash31(i + vec3(0.0, 1.0, 0.0)), hash31(i + vec3(1.0, 1.0, 0.0)), f.x), f.y),
+    mix(mix(hash31(i + vec3(0.0, 0.0, 1.0)), hash31(i + vec3(1.0, 0.0, 1.0)), f.x),
+        mix(hash31(i + vec3(0.0, 1.0, 1.0)), hash31(i + vec3(1.0, 1.0, 1.0)), f.x), f.y),
+    f.z
+  );
+}
+
+vec4 cellular3(vec3 p, float seed) {
+  vec3 cell = floor(p), local = fract(p), nearest = vec3(0.0);
+  float f1 = 1e8, f2 = 1e8;
+  for (int z = -1; z <= 1; z++) for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
+    vec3 offset = vec3(float(x), float(y), float(z)), id = cell + offset;
+    vec3 site = 0.08 + 0.84 * vec3(hash31(id + seed), hash31(id + seed + 17.31), hash31(id + seed + 43.97));
+    vec3 delta = offset + site - local;
+    float d = dot(delta, delta);
+    if (d < f1) { f2 = f1; f1 = d; nearest = id; } else if (d < f2) f2 = d;
+  }
+  return vec4(max(0.0, sqrt(f2) - sqrt(f1)), hash31(nearest + seed + 61.7), hash31(nearest + seed + 127.3), hash31(nearest + seed + 223.1));
 }
 
 vec3 blendRgb(vec3 b, vec3 s, int mode) {
@@ -444,10 +485,11 @@ void main() {
   ivec2 px = ivec2(gl_FragCoord.xy);
   vec4 dstA = texelFetch(uAccAlbedo, px, 0);
   vec4 dstO = texelFetch(uAccOrmh, px, 0);
+  vec4 dstC = texelFetch(uAccMatCov, px, 0);
 
   vec4 posPart = texelFetch(uPosPartTex, px, 0);
   if (uPartFilter >= 0 && int(floor(posPart.w + 0.5)) != uPartFilter) {
-    fragColor = uOutTarget == 0 ? dstA : dstO;
+    fragColor = uOutTarget == 2 ? dstC : (uOutTarget == 0 ? dstA : dstO);
     return;
   }
 
@@ -512,11 +554,31 @@ void main() {
       }
     }
   } else if (uLayerKind == 2) {
-    float n = vnoise(vUv * max(1.0, uParamA)) * 0.65 + vnoise(vUv * max(1.0, uParamA) * 2.7) * 0.35;
-    float d = (n - 0.5) * uParamB * 2.0;
-    srcRgb = clamp(uColorA + d, 0.0, 1.0);
-    srcRough = clamp(uRoughA - d * 0.45, 0.02, 1.0);
-    srcHeight = clamp(uHeightA + d * 0.35, 0.0, 1.0);
+    vec3 pp = posPart.xyz;
+    float g3 = noise3(pp * max(1.0, uParamA)) * 0.65 + noise3(pp * max(1.0, uParamA) * 2.7) * 0.35;
+    float d = (g3 - 0.5) * uParamB * 2.0;
+    if (uMatType == 0) {
+      vec3 linBase = pow(max(uColorA, vec3(0.0001)), vec3(2.2)) * exp(-uMatDepth * 0.28);
+      vec3 linFlake = pow(max(uMatFlakeColorB, vec3(0.0001)), vec3(2.2));
+      float maskTot = 0.0, randTot = 0.5;
+      if (uMatFlakes > 0.001) {
+        vec3 dom = pp * max(4.0, uMatFlakeFreq);
+        vec3 warp = vec3(noise3(dom * 0.31), noise3(dom * 0.31 + 11.7), noise3(dom * 0.31 + 37.4)) - 0.5;
+        vec4 c0 = cellular3(dom * 0.71 + warp * 0.7, 4.1);
+        float occ0 = smoothstep(0.02, 0.09, c0.x) * step(1.0 - uMatFlakes * 0.55, c0.y);
+        maskTot = occ0;
+        randTot = c0.w;
+      }
+      vec3 blended = mix(linBase, linFlake, maskTot);
+      srcRgb = clamp(pow(max(blended, vec3(0.0)), vec3(1.0 / 2.2)), 0.0, 1.0);
+      srcRough = clamp(mix(uRoughA, mix(uMatFlakeRough.x, uMatFlakeRough.y, randTot), maskTot), 0.02, 1.0);
+      srcMetal = clamp(mix(uMetalA, mix(uMatFlakeMetal.x, uMatFlakeMetal.y, randTot), maskTot), 0.0, 1.0);
+      srcHeight = clamp(uHeightA + (maskTot - 0.5) * 0.08 + d * 0.12, 0.0, 1.0);
+    } else {
+      srcRgb = clamp(uColorA + d, 0.0, 1.0);
+      srcRough = clamp(uRoughA - d * 0.45, 0.02, 1.0);
+      srcHeight = clamp(uHeightA + d * 0.35, 0.0, 1.0);
+    }
   } else if (uLayerKind == 3) {
     vec4 cue = texelFetch(uAuxCueTex, px, 0);
     float gs = max(1.0, uGenScale);
@@ -554,6 +616,26 @@ void main() {
   }
 
   vec4 w4 = clamp(srcChAlpha * uLayerChanMask * uLayerChanOpacity * uOpacity * maskMul, 0.0, 1.0);
+  if (uOutTarget == 2) {
+    if (uIsShaderMatLayer != 0) {
+      float coatW = clamp(maskMul * uOpacity * uMatChFlags.a, 0.0, 1.0);
+      fragColor = vec4(
+        mix(dstC.r, uMatChFlags.r, w4.r),
+        mix(dstC.g, uMatChFlags.g, w4.g),
+        mix(dstC.b, uMatChFlags.b, w4.b),
+        mix(dstC.a, uMatChFlags.a, max(w4.a, coatW))
+      );
+    } else {
+      float cutN = clamp(max(w4.r * 0.9, max(w4.g, w4.a)), 0.0, 1.0);
+      fragColor = vec4(
+        mix(dstC.r, 0.0, w4.r),
+        mix(dstC.g, 0.0, w4.g),
+        mix(dstC.b, 0.0, w4.b),
+        mix(dstC.a, 0.0, cutN)
+      );
+    }
+    return;
+  }
   if (w4.r <= 0.001 && w4.g <= 0.001 && w4.b <= 0.001 && w4.a <= 0.001) {
     fragColor = uOutTarget == 0 ? dstA : dstO;
     return;
@@ -610,7 +692,8 @@ uniform int uHasParentMask;
 uniform int uInvertParentMask;
 uniform float uParentMaskOp;
 uniform int uHasStampOrmh;
-uniform int uOutTarget; // 0 = albedo, 1 = ormh, 2 = ext group
+uniform int uOutTarget; // 0 = albedo, 1 = ormh, 2 = ext group, 3 = matCoverage
+uniform sampler2D uAccMatCov;
 uniform vec4 uExtVal;
 uniform vec4 uExtChanMask;
 uniform vec4 uExtChanOpacity;
@@ -641,7 +724,8 @@ void main() {
   ivec2 px = ivec2(gl_FragCoord.xy);
   vec4 dstA = texelFetch(uAccAlbedo, px, 0);
   vec4 dstO = texelFetch(uAccOrmh, px, 0);
-  vec4 keepVal = uOutTarget == 1 ? dstO : dstA;
+  vec4 dstC = texelFetch(uAccMatCov, px, 0);
+  vec4 keepVal = uOutTarget == 3 ? dstC : (uOutTarget == 1 ? dstO : dstA);
 
   vec4 posPart = texelFetch(uPosPartTex, px, 0);
   if (uPartFilter >= 0 && int(floor(posPart.w + 0.5)) != uPartFilter) {
@@ -713,6 +797,18 @@ void main() {
     float m = mix(dstO.b, blendScalar(dstO.b, stO.g, bM), wM);
     float h = clamp(mix(dstO.a, blendScalar(dstO.a, sH, bH), wH), 0.0, 1.0);
     fragColor = vec4(dstO.r, r, m, h);
+  } else if (uOutTarget == 3) {
+    float wA = clamp(eff * uLayerChanMask.x * uLayerChanOpacity.x, 0.0, 1.0);
+    float wR = clamp(eff * uLayerChanMask.y * uLayerChanOpacity.y, 0.0, 1.0);
+    float wM = clamp(eff * uLayerChanMask.z * uLayerChanOpacity.z, 0.0, 1.0);
+    float wH = clamp(eff * uLayerChanMask.w * uLayerChanOpacity.w, 0.0, 1.0);
+    float cutN = clamp(max(wA * 0.9, max(wR, wH)), 0.0, 1.0);
+    fragColor = vec4(
+      mix(dstC.r, 0.0, wA),
+      mix(dstC.g, 0.0, wR),
+      mix(dstC.b, 0.0, wM),
+      mix(dstC.a, 0.0, cutN)
+    );
   } else {
     vec4 m4 = uIsRgbGroup != 0 ? vec4(uExtChanMask.x, uExtChanMask.x, uExtChanMask.x, uExtChanMask.w) : uExtChanMask;
     vec4 op4 = uIsRgbGroup != 0 ? vec4(uExtChanOpacity.x, uExtChanOpacity.x, uExtChanOpacity.x, uExtChanOpacity.w) : uExtChanOpacity;
@@ -1066,11 +1162,14 @@ export class GpuPaintSession {
     this.compAlbedoB = new THREE.WebGLRenderTarget(res, res, rtOpts);
     this.compOrmhA = new THREE.WebGLRenderTarget(res, res, rtOpts);
     this.compOrmhB = new THREE.WebGLRenderTarget(res, res, rtOpts);
+    this.matCovA = new THREE.WebGLRenderTarget(res, res, rtOpts);
+    this.matCovB = new THREE.WebGLRenderTarget(res, res, rtOpts);
 
     this.finalAlbedoRT = new THREE.WebGLRenderTarget(res, res, rtOpts);
     this.finalAlbedoRT.texture.colorSpace = THREE.SRGBColorSpace;
     this.finalOrmhRT = new THREE.WebGLRenderTarget(res, res, rtOpts);
     this.finalNormalRT = new THREE.WebGLRenderTarget(res, res, rtOpts);
+    this.finalMatCovRT = new THREE.WebGLRenderTarget(res, res, rtOpts);
     this.displayAlbedoRT = new THREE.WebGLRenderTarget(res, res, rtOpts);
     this.displayAlbedoRT.texture.colorSpace = THREE.SRGBColorSpace;
 
@@ -1210,6 +1309,16 @@ export class GpuPaintSession {
         uGenInvert: { value: 0 },
         uGenPreset: { value: 0 },
         uOutTarget: { value: 0 },
+        uAccMatCov: { value: this.dummyTex },
+        uIsShaderMatLayer: { value: 0 },
+        uMatChFlags: { value: new THREE.Vector4(1, 1, 1, 1) },
+        uMatType: { value: 0 },
+        uMatDepth: { value: 0 },
+        uMatFlakes: { value: 0 },
+        uMatFlakeFreq: { value: 115 },
+        uMatFlakeRough: { value: new THREE.Vector2(0.09, 0.28) },
+        uMatFlakeMetal: { value: new THREE.Vector2(0.86, 0.99) },
+        uMatFlakeColorB: { value: new THREE.Vector3(0.4, 0.7, 0.5) },
       },
       depthTest: false, depthWrite: false,
     });
@@ -1252,6 +1361,7 @@ export class GpuPaintSession {
         uParentMaskOp: { value: 1 },
         uHasStampOrmh: { value: 0 },
         uOutTarget: { value: 0 },
+        uAccMatCov: { value: this.dummyTex },
         uExtVal: { value: new THREE.Vector4(0, 0, 0, 0) },
         uExtChanMask: { value: new THREE.Vector4(0, 0, 0, 0) },
         uExtChanOpacity: { value: new THREE.Vector4(1, 1, 1, 1) },
@@ -2086,9 +2196,11 @@ export class GpuPaintSession {
     // Neutral clay base: Albedo=#e6e6de, ORM+Height=(AO=1.0, Rough=0.72, Metal=0.04, Height=0.5)
     this._clearRT(this.compAlbedoA, 230 / 255, 230 / 255, 222 / 255, 1.0);
     this._clearRT(this.compOrmhA, 1.0, 0.72, 0.04, 0.5);
+    this._clearRT(this.matCovA, 0.0, 0.0, 0.0, 0.0);
 
     let accAlb = this.compAlbedoA, nxtAlb = this.compAlbedoB;
     let accOrm = this.compOrmhA, nxtOrm = this.compOrmhB;
+    let accCov = this.matCovA, nxtCov = this.matCovB;
 
     const extActive = this._hasAnyExtendedActive(doc, liveBrush, viewChannel);
     this._hasExtExport = extActive;
@@ -2148,6 +2260,10 @@ export class GpuPaintSession {
       return null;
     };
 
+    const visibleMatLayers = doc.layers.filter((l) => l.kind === "material" && isFolderVisible(l));
+    const selectedMat = visibleMatLayers.find((l) => l.id === doc.selectedLayerId);
+    const activeShaderMatLayer = selectedMat || visibleMatLayers[visibleMatLayers.length - 1] || null;
+
     for (const layer of doc.layers) {
       if (layer.kind === "folder" || !isFolderVisible(layer)) continue;
 
@@ -2162,6 +2278,11 @@ export class GpuPaintSession {
 
       u.uAccAlbedo.value = accAlb.texture;
       u.uAccOrmh.value = accOrm.texture;
+      u.uAccMatCov.value = accCov.texture;
+      const isTargetMat = activeShaderMatLayer && layer.id === activeShaderMatLayer.id;
+      u.uIsShaderMatLayer.value = isTargetMat ? 1 : 0;
+      const hasCoatOrNorm = !!(lCh.height || lCh.clearcoat || lCh.normal);
+      u.uMatChFlags.value.set(lCh.albedo ? 1 : 0, lCh.roughness ? 1 : 0, lCh.metalness ? 1 : 0, hasCoatOrNorm ? 1 : 0);
       u.uHasLiveStroke.value = isLive ? 1 : 0;
       u.uBlendMode.value = BLEND_INDEX[layer.blend] ?? 0;
       u.uLayerChanBlends.value.set(chB("albedo"), chB("roughness"), chB("metalness"), chB("height"));
@@ -2199,13 +2320,23 @@ export class GpuPaintSession {
         u.uPatternHeightGain.value = layer.fill?.patternHeightStrength ?? 1.0;
       } else if (layer.kind === "material") {
         u.uLayerKind.value = 2;
-        const [r, g, b] = hexToRgb(layer.material?.color || "#888888");
+        const spec = resolveMaterialLayerSpec(layer);
+        const [r, g, b] = hexToRgb(spec.color || layer.material?.color || "#888888");
         u.uColorA.value.set(r / 255, g / 255, b / 255);
-        u.uRoughA.value = layer.material?.roughness ?? 0.4;
-        u.uMetalA.value = layer.material?.metalness ?? 0.1;
+        u.uRoughA.value = spec.roughness ?? layer.material?.roughness ?? 0.4;
+        u.uMetalA.value = spec.metalness ?? layer.material?.metalness ?? 0.1;
         u.uHeightA.value = Math.max(0, Math.min(1, (layer.material?.height ?? 0) * 0.5 + 0.5));
-        u.uParamA.value = layer.material?.grainScale ?? 10;
+        u.uParamA.value = layer.material?.grainScale ?? spec.detailScale ?? 10;
         u.uParamB.value = layer.material?.grainStrength ?? 0.08;
+        u.uMatType.value = Math.floor(Number(spec.type) || 0);
+        u.uMatDepth.value = spec.depth ?? 0;
+        u.uMatFlakes.value = spec.flakes ?? 0;
+        u.uMatFlakeFreq.value = Math.min(260, (52000 / Math.max(1, spec.flakeSize || 450)) * (spec.flakeScale || 1));
+        u.uMatFlakeRough.value.set(spec.flakeRoughnessMin ?? 0.09, spec.flakeRoughnessMax ?? 0.28);
+        u.uMatFlakeMetal.value.set(spec.flakeMetalnessMin ?? 0.86, spec.flakeMetalnessMax ?? 0.99);
+        const fc = spec.colors?.[Math.min(1, (spec.colors?.length || 1) - 1)] || spec.color;
+        const [fr, fg, fb] = hexToRgb(fc);
+        u.uMatFlakeColorB.value.set(fr / 255, fg / 255, fb / 255);
       } else if (layer.kind === "generator") {
         u.uLayerKind.value = 3;
         const [r, g, b] = hexToRgb(layer.generator?.color || "#d4d0c5");
@@ -2227,8 +2358,12 @@ export class GpuPaintSession {
       u.uOutTarget.value = 1;
       this._renderPass(this.compMat, nxtOrm);
 
+      u.uOutTarget.value = 2;
+      this._renderPass(this.compMat, nxtCov);
+
       const tA = accAlb; accAlb = nxtAlb; nxtAlb = tA;
       const tO = accOrm; accOrm = nxtOrm; nxtOrm = tO;
+      const tC = accCov; accCov = nxtCov; nxtCov = tC;
 
       // Composite Extended PBR channels for this layer
       if (extActive) {
@@ -2357,12 +2492,16 @@ export class GpuPaintSession {
 
         du.uAccAlbedo.value = accAlb.texture;
         du.uAccOrmh.value = accOrm.texture;
+        du.uAccMatCov.value = accCov.texture;
         du.uOutTarget.value = 0;
         this._renderPass(this.decalMat, nxtAlb);
         du.uOutTarget.value = 1;
         this._renderPass(this.decalMat, nxtOrm);
+        du.uOutTarget.value = 3;
+        this._renderPass(this.decalMat, nxtCov);
         const dA = accAlb; accAlb = nxtAlb; nxtAlb = dA;
         const dO = accOrm; accOrm = nxtOrm; nxtOrm = dO;
+        const dC = accCov; accCov = nxtCov; nxtCov = dC;
 
         if (extActive) {
           du.uOutTarget.value = 2;
@@ -2399,6 +2538,9 @@ export class GpuPaintSession {
 
     this.dilateMat.uniforms.uSource.value = accOrm.texture;
     this._renderPass(this.dilateMat, this.finalOrmhRT);
+
+    this.dilateMat.uniforms.uSource.value = accCov.texture;
+    this._renderPass(this.dilateMat, this.finalMatCovRT);
 
     let extOut = null;
     if (extActive) {
@@ -2458,6 +2600,8 @@ export class GpuPaintSession {
       albedoTex: this.displayAlbedoRT.texture,
       ormhTex: this.finalOrmhRT.texture,
       normalTex: this.finalNormalRT.texture,
+      matCoverageTex: this.finalMatCovRT.texture,
+      activeShaderMatLayer,
       ext: extOut,
     };
   }
@@ -2631,8 +2775,9 @@ export class GpuPaintSession {
     this.strokeOrmhA.dispose(); this.strokeOrmhB.dispose();
     this.compAlbedoA.dispose(); this.compAlbedoB.dispose();
     this.compOrmhA.dispose(); this.compOrmhB.dispose();
+    this.matCovA.dispose(); this.matCovB.dispose();
     this.finalAlbedoRT.dispose(); this.finalOrmhRT.dispose();
-    this.finalNormalRT.dispose(); this.displayAlbedoRT.dispose();
+    this.finalNormalRT.dispose(); this.finalMatCovRT.dispose(); this.displayAlbedoRT.dispose();
     this.previewRT?.dispose();
     this.scratchMaskRT.dispose();
     this.scratchChanAlphaRT.dispose();

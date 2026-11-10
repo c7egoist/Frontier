@@ -195,7 +195,7 @@
             <button class="icon-button" data-tool="rotate" type="button" title="Rotate (R)"></button>
             <button class="icon-button" data-tool="scale" type="button" title="Scale (S)"></button>
             <button class="icon-button" data-tool="box" type="button" title="Box Select (B)"></button>
-            <button class="icon-button" data-tool="circle" type="button" title="Circle Select (C)"></button>
+            <button class="icon-button" data-tool="circle" type="button" title="Paint Select / Circle Brush (C)"></button>
             <button class="icon-button" data-tool="seam" type="button" title="Seam Brush — Click edge to toggle seam · Alt+Click loop (K)"></button>
             <button class="icon-button" data-tool="cursor" type="button" title="Place 2D Cursor (Shift+RMB)"></button>
           </div>
@@ -403,6 +403,76 @@
       <input id="sim-angle-input" type="number" min="1" max="90" step="1" value="15">
     </div>
   </div>
+</div>
+
+<!-- POPOVER: UNIFIED RIGHT-CLICK CONTEXT MENU (TOOLS + SELECTION + OPERATIONS) -->
+<div class="popover uv-context-menu" id="uv-context-menu" hidden>
+  <div class="ctx-header-row">
+    <span class="popover-label">SELECTION TOOLS</span>
+    <span class="ctx-sel-badge" id="ctx-sel-badge">0 selected</span>
+  </div>
+  <div class="ctx-grid-2">
+    <button class="ctx-chip" data-ctx-tool="box" type="button"><span>Box Select</span><kbd>B</kbd></button>
+    <button class="ctx-chip" data-ctx-face-select="true" type="button"><span>Face Select</span><kbd>3</kbd></button>
+    <button class="ctx-chip" data-ctx-tool="circle" type="button"><span>Paint Select</span><kbd>C</kbd></button>
+    <button class="ctx-chip" data-ctx-tool="select" type="button"><span>Click / Tweak</span><kbd>W</kbd></button>
+  </div>
+  <div class="ctx-mode-row">
+    <button class="ctx-mode-btn" data-ctx-mode="vertex" type="button">1 Vert</button>
+    <button class="ctx-mode-btn" data-ctx-mode="edge" type="button">2 Edge</button>
+    <button class="ctx-mode-btn" data-ctx-mode="face" type="button">3 Face</button>
+    <button class="ctx-mode-btn" data-ctx-mode="island" type="button">4 Island</button>
+  </div>
+  <div class="ctx-brush-row" id="ctx-brush-row">
+    <span>Paint Radius</span>
+    <input id="ctx-paint-radius-slider" type="range" min="14" max="140" step="2" value="36">
+    <strong id="ctx-paint-radius-val">36px</strong>
+  </div>
+  <div class="menu-divider"></div>
+  <div class="popover-label">SELECTION OPTIONS</div>
+  <div class="ctx-grid-3">
+    <button class="ctx-chip" data-ctx-sel="all" type="button">All <kbd>A</kbd></button>
+    <button class="ctx-chip" data-ctx-sel="none" type="button">None <kbd>⌥A</kbd></button>
+    <button class="ctx-chip" data-ctx-sel="invert" type="button">Invert <kbd>^I</kbd></button>
+    <button class="ctx-chip" data-ctx-sel="grow" type="button">Grow <kbd>^+</kbd></button>
+    <button class="ctx-chip" data-ctx-sel="shrink" type="button">Shrink <kbd>^-</kbd></button>
+    <button class="ctx-chip" data-ctx-sel="same-island" type="button">Island <kbd>L</kbd></button>
+  </div>
+  <div class="ctx-grid-2">
+    <button class="ctx-chip" data-ctx-sel="loop" type="button"><span>Face / Edge Loop</span><kbd>⌥Click</kbd></button>
+    <button class="ctx-chip" data-ctx-sel="ring" type="button"><span>Edge Ring</span><kbd>^⌥</kbd></button>
+    <button class="ctx-chip" data-ctx-sel="linked-flat" type="button"><span>Linked Flat Faces</span><kbd>^⇧F</kbd></button>
+    <button class="ctx-chip" data-ctx-sel="loop-inner-region" type="button"><span>Inner Region</span><kbd>Loop</kbd></button>
+    <button class="ctx-chip" data-ctx-sel="boundary-loop" type="button"><span>Boundary Loop</span><kbd>Rim</kbd></button>
+    <button class="ctx-chip" data-ctx-sel="open-similar" type="button"><span>Select Similar…</span><kbd>⇧G</kbd></button>
+    <button class="ctx-chip" data-ctx-sel="random-50" type="button"><span>Random 50%</span><kbd>Rand</kbd></button>
+    <button class="ctx-chip" data-ctx-sel="checker" type="button"><span>Checker Desel</span><kbd>1/2</kbd></button>
+  </div>
+  <div class="menu-divider"></div>
+  <div class="popover-label">OPERATIONS ON SELECTION</div>
+  <div class="ctx-grid-2">
+    <button class="ctx-chip accent" data-ctx-op="unwrap" type="button"><span>Unwrap (LSCM)</span><kbd>U</kbd></button>
+    <button class="ctx-chip accent" data-ctx-op="pack" type="button"><span>Pack Budgets</span><kbd>⇧P</kbd></button>
+    <button class="ctx-chip" data-ctx-op="smart" type="button"><span>Smart UV</span><kbd>Auto</kbd></button>
+    <button class="ctx-chip" data-ctx-op="relax" type="button"><span>Relax Stretch</span><kbd>^V</kbd></button>
+    <button class="ctx-chip" data-ctx-op="split" type="button"><span>Split Island</span><kbd>Y</kbd></button>
+    <button class="ctx-chip" data-ctx-op="stitch" type="button"><span>Stitch</span><kbd>V</kbd></button>
+    <button class="ctx-chip" data-ctx-op="weld" type="button"><span>Weld / Merge</span><kbd>M</kbd></button>
+    <button class="ctx-chip" data-ctx-op="avg-scale" type="button"><span>Average Scale</span><kbd>^A</kbd></button>
+    <button class="ctx-chip" data-ctx-op="pin" type="button"><span>Pin UVs</span><kbd>P</kbd></button>
+    <button class="ctx-chip" data-ctx-op="unpin" type="button"><span>Unpin UVs</span><kbd>⌥P</kbd></button>
+    <button class="ctx-chip" data-ctx-op="mirror-u" type="button"><span>Mirror X (U)</span><kbd>Flip</kbd></button>
+    <button class="ctx-chip" data-ctx-op="rotate-90" type="button"><span>Rotate 90°</span><kbd>90°</kbd></button>
+  </div>
+  <div class="menu-divider"></div>
+  <div class="popover-label">EDGES &amp; SEAMS</div>
+  <div class="ctx-grid-2">
+    <button class="ctx-chip warm" data-ctx-edge="mark-seam" type="button"><span>Mark Seam</span><kbd>Cut</kbd></button>
+    <button class="ctx-chip" data-ctx-edge="clear-seam" type="button"><span>Clear Seam</span><kbd>Clr</kbd></button>
+    <button class="ctx-chip" data-ctx-edge="clear-seam-weld" type="button"><span>Clear &amp; Weld</span><kbd>Heal</kbd></button>
+    <button class="ctx-chip" data-ctx-edge="seams-from-islands" type="button"><span>Seams ← Islands</span><kbd>Rim</kbd></button>
+  </div>
+  <button class="ctx-full-btn" data-ctx-op="open-edge-menu" type="button"><span>Full Edges, Boundaries &amp; Seams Menu…</span><kbd>Ctrl+E</kbd></button>
 </div>
 
 <!-- POPOVER: BLENDER EDGES, BOUNDARIES & SEAMS MENU (Ctrl+E) -->

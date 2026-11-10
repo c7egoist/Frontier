@@ -896,54 +896,13 @@ export function normalizeMaterial(input) {
   return p.Authoring ? ResolveAuthoringParameters(Normalized, p, false) : Normalized;
 }
 
-export function createMaterial(input) {
-  const p = ResolveAuthoringParameters(normalizeMaterial(input), input);
-  const m = new THREE.MeshPhysicalMaterial({
-    color:
-      p.type === 5 || (p.type === 4 && ![1, 2].includes(p.fabricMode))
-        ? "#ffffff"
-        : p.color,
-    iridescence: p.iridescence,
-    iridescenceIOR: p.iridescenceIOR,
-    iridescenceThicknessMinimum: Math.max(0, p.filmThickness - p.filmVariation * 0.5),
-    iridescenceThicknessMaximum: p.filmThickness + p.filmVariation * 0.5,
-    metalness: p.metalness,
-    roughness: p.roughness,
-    clearcoat: p.coat,
-    clearcoatRoughness: p.coatRoughness,
-    ior: p.ior,
-    specularIntensity: p.specular,
-    specularColor: p.specularColor,
-    sheen: p.sheen,
-    sheenColor: p.sheenColor,
-    sheenRoughness: p.sheenRoughness,
-    anisotropy: p.anisotropy,
-    anisotropyRotation: ((p.anisotropyRotation ?? 0) * Math.PI * 2) + ((p.weaveAngle * Math.PI) / 180),
-    transmission: p.Authoring ? p.translucency : p.type === 5 ? 0.97 : p.translucency,
-    opacity: p.opacity ?? 1,
-    transparent: (p.opacity ?? 1) < 1,
-    emissive: p.type === 20 || p.type === 45 || (p.emissionStrength || 0) > 0 ? (p.emissionColor || "#000000") : "#000000",
-    emissiveIntensity: p.emissionStrength,
-    toneMapped: !p.bakeMode,
-    alphaToCoverage: !p.bakeMode && (p.type === 27 || p.type === 28),
-    thickness: p.depth * 2,
-    attenuationColor: new THREE.Color(p.attenuationColor || p.color),
-    attenuationDistance: 2.8,
-    envMapIntensity: p.type === 4 && p.fabricMode === 4 ? 1.8 : 1.35,
-    side: THREE.DoubleSide,
-  });
-  const surfaceSources = attachSurfaceSources(m, p);
-  if (surfaceSources.doc) {
-    m.clearcoat = Math.max(m.clearcoat, 0.01);
-    m.sheen = Math.max(m.sheen, 0.01);
-  }
+function buildMaterialShaderUniformValues(p, surfaceSources) {
   const stops = p.colors.map((color, i) => ({
     color,
     position: p.colorStops[i],
   }));
   if (p.colorMode === "ramp") stops.sort((a, b) => a.position - b.position);
   const count = stops.length;
-  // Average unresolved flakes in linear color space, rather than collapsing to a single ramp stop.
   const averageColor = new THREE.Color(0, 0, 0);
   for (let sample = 0; sample < 48; sample++) {
     const t = (sample + 0.5) / 48;
@@ -964,172 +923,252 @@ export function createMaterial(input) {
     averageColor.add(color.multiplyScalar(1 / 48));
   }
   while (stops.length < 12) stops.push(stops[stops.length - 1]);
-  m.userData.params = p;
+  const beds =
+    p.type === 38
+      ? p.sandLayers
+      : normalizeSandLayers([
+          {
+            color: p.color,
+            secondaryColor: p.secondaryColor,
+            size: p.grainSize,
+            sizeVariation: p.grainSizeVariation,
+            roughness: p.grainRoughness,
+            roughnessVariation: p.grainRoughnessVariation,
+            specular: p.grainSpecular,
+            specularVariation: p.grainSpecularVariation,
+            ior: p.grainIOR,
+            roundness: p.grainRoundness,
+            tilt: p.grainTilt,
+            relief: p.grainRelief,
+            coverage: p.sandCoverage,
+          },
+        ]);
+  const sandCount = beds.length;
+  const sandBeds = Array.from(
+    { length: 4 },
+    (_, i) => beds[i] || beds[beds.length - 1],
+  );
+  const values = {
+    uSandCount: sandCount,
+    uSandLayerSeeds: sandBeds.map((b) => sandLayerSeed(b.id)),
+    uSandBandsMode: p.sandArrangement === "bands" ? 1 : 0,
+    uSandScale: p.sandScale,
+    uSandSeed: p.surfaceSeed,
+    uSandBandFrequency: p.sandBandFrequency,
+    uSandBandWarp: p.sandBandWarp,
+    uSandBandAngle: (p.sandBandAngle * Math.PI) / 180,
+    uSandColors: sandBeds.map((b) => new THREE.Color(b.color)),
+    uSandPale: sandBeds.map((b) => new THREE.Color(b.secondaryColor)),
+    uSandSize: sandBeds.map(
+      (b) =>
+        new THREE.Vector4(
+          b.size,
+          b.sizeVariation,
+          b.enabled ? b.coverage : 0,
+          b.enabled ? b.thickness : 0,
+        ),
+    ),
+    uSandFinish: sandBeds.map(
+      (b) =>
+        new THREE.Vector4(
+          b.roughness,
+          b.roughnessVariation,
+          b.specular,
+          b.specularVariation,
+        ),
+    ),
+    uSandShape: sandBeds.map(
+      (b) => new THREE.Vector4(b.ior, b.roundness, b.tilt, b.relief),
+    ),
+    uRibProfile: p.ribProfile,
+    uSheetFinish: p.sheetFinish,
+    uSheetOxidation: p.sheetOxidation,
+    uSheetSpangle: p.sheetSpangle,
+    uCellLobing: p.cellLobing,
+    uStomataDensity: p.stomataDensity,
+    uScratchAngle:
+      ((p.type === 29 ? p.weaveAngle : p.scratchAngle) * Math.PI) / 180,
+    uVeinRelief: p.veinRelief,
+    uCellScale: p.cellScale,
+    uCellRelief: p.cellRelief,
+    uColorGradient: p.colorGradient,
+    uSpotDensity: p.spotDensity,
+    uSkinMode: p.skinMode,
+    uPlantRibs: p.plantRibs,
+    uTertiary: new THREE.Color(p.tertiaryColor),
+    uRibDepth: p.ribDepth,
+    uGroutWidth: p.groutWidth,
+    uTileVariation: p.tileVariation,
+    uTileStagger: p.tileStagger,
+    uVeinWidth: p.veinWidth,
+    uPoreDensity: p.poreDensity,
+    uWallMode: p.wallMode,
+    uLeafAspect: p.leafAspect,
+    uBladeWidth: p.bladeWidth,
+    uBladeLean: p.bladeLean,
+    uSurfaceSeed: p.surfaceSeed,
+    uScratchDensity: p.scratchDensity,
+    uScratchLength: p.scratchLength,
+    uScratchWidth: p.scratchWidth,
+    uScratchDepth: p.scratchDepth,
+    uScratchSpread: p.scratchSpread,
+    uScratchBend: p.scratchBend,
+    uLensDome: p.lensDome,
+    uPackageDepth: p.packageDepth,
+    uBakeMode: p.bakeMode,
+    uBakeHeightRange: p.bakeHeightRange,
+    uSecondary: new THREE.Color(p.secondaryColor),
+    uMoisture: p.moisture,
+    uScattering: p.scattering,
+    uFreckles: p.freckles,
+    uPaperRibs: p.paperRibs,
+    uFiberContrast: p.fiberContrast,
+    uOxidation: p.oxidation,
+    uPanelMode: p.panelMode,
+    uBusbarWidth: p.busbarWidth,
+    uDimpleDepth: p.dimpleDepth,
+    uDenimFade: p.denimFade,
+    uSlub: p.slub,
+    uPixelFill: p.pixelFill,
+    uAoIntensity: p.aoIntensity ?? 1,
+    uEmissionScale: Math.max(1, p.emissionStrength),
+    uAverageFlakeColor: averageColor,
+    uType: p.type,
+    uFlakes: p.flakes,
+    uFlakeFrequency: Math.min(
+      1e7,
+      (52000 / Math.max(0.001, p.flakeSize)) * p.flakeScale,
+    ),
+    uFlakeRoughMin: p.flakeRoughnessMin,
+    uFlakeRoughMax: p.flakeRoughnessMax,
+    uFlakeMetalMin: p.flakeMetalnessMin,
+    uFlakeMetalMax: p.flakeMetalnessMax,
+    uFlakeTilt: p.flakeTilt,
+    uFlakeWeight: p.FlakeWeight ?? 1,
+    uFlakeLayers: p.flakeLayers,
+    uFlakeLayerDepth: p.flakeLayerDepth,
+    uCloth: p.clothMapping ? 1 : 0,
+    uScale: p.detailScale,
+    uDepth: p.depth,
+    uCoatIor: p.coatIor,
+    uPeel: p.orangePeel,
+    uPeelScale: p.orangePeelScale,
+    uWeaveAngle: (p.weaveAngle * Math.PI) / 180,
+    uRelief: p.weaveRelief,
+    uFiberDetail: p.fiberDetail,
+    uFabricMode: p.fabricMode,
+    uWeave: [
+      "plain",
+      "twill",
+      "satin",
+      "basket",
+      "rib",
+      "herringbone",
+      "oxford",
+      "houndstooth",
+      "denim",
+    ].indexOf(p.weavePattern),
+    uWarpColor: new THREE.Color(p.warpColor),
+    uWeftColor: new THREE.Color(p.weftColor),
+    uFilmThickness: p.filmThickness,
+    uFilmVariation: p.filmVariation,
+    uFuzz: p.fuzz,
+    uGrain: p.grain,
+    uWear: p.wear,
+    uWearSoftness: p.wearSoftness,
+    uWornRoughness: p.wornRoughness,
+    uScratchScale: p.scratchScale,
+    uColorCount: count,
+    uColorMode: p.colorMode === "ramp" ? 1 : p.colorMode === "single" ? 2 : 0,
+    uColors: stops.map((s) => new THREE.Color(s.color)),
+    uStops: stops.map((s) => s.position),
+  };
+  return values;
+}
+
+export function updateProceduralMaterialUniforms(m, input, paintOverlayState = null) {
+  if (!m) return;
+  const prevP = m.userData.params || {};
+  const nextP = normalizeMaterial(input || prevP);
+  const macroChanged =
+    (Math.floor(Number(prevP.type) || 0) !== Math.floor(Number(nextP.type) || 0)) ||
+    (!!prevP.metalScratches !== !!nextP.metalScratches) ||
+    (!!prevP.potterySurface !== !!nextP.potterySurface) ||
+    ((prevP.bakeMode > 0) !== (nextP.bakeMode > 0)) ||
+    (JSON.stringify(prevP.FlakeOutputs || {}) !== JSON.stringify(nextP.FlakeOutputs || {}));
+
+  m.userData.params = nextP;
+  if (m.userData.paintOverlay && paintOverlayState) {
+    const pos = m.userData.paintOverlayState || (m.userData.paintOverlayState = {});
+    if (paintOverlayState.hasMat !== undefined) pos.hasMat = paintOverlayState.hasMat ? 1 : 0;
+    if (paintOverlayState.covTex !== undefined) pos.covTex = paintOverlayState.covTex;
+    if (paintOverlayState.color !== undefined) pos.color = paintOverlayState.color;
+    if (paintOverlayState.roughness !== undefined) pos.roughness = paintOverlayState.roughness;
+    if (paintOverlayState.metalness !== undefined) pos.metalness = paintOverlayState.metalness;
+  }
+
+  const shader = m.userData.shader;
+  if (shader?.uniforms) {
+    const values = buildMaterialShaderUniformValues(nextP, m.userData.surfaceSources || { uniforms: {} });
+    for (const [key, val] of Object.entries(values)) {
+      if (!shader.uniforms[key]) {
+        shader.uniforms[key] = { value: val };
+      } else if (val instanceof THREE.Color && shader.uniforms[key].value instanceof THREE.Color) {
+        shader.uniforms[key].value.copy(val);
+      } else {
+        shader.uniforms[key].value = val;
+      }
+    }
+    if (m.userData.paintOverlay && m.userData.paintOverlayState) {
+      const pos = m.userData.paintOverlayState;
+      if (shader.uniforms.uPaintHasMat) shader.uniforms.uPaintHasMat.value = pos.hasMat ? 1 : 0;
+      if (shader.uniforms.uPaintMatCovMap && pos.covTex) shader.uniforms.uPaintMatCovMap.value = pos.covTex;
+      if (shader.uniforms.uPaintMatColor) shader.uniforms.uPaintMatColor.value.set(pos.color || nextP.color || "#ffffff");
+      if (shader.uniforms.uPaintMatRough) shader.uniforms.uPaintMatRough.value = pos.roughness ?? nextP.roughness ?? 0.24;
+      if (shader.uniforms.uPaintMatMetal) shader.uniforms.uPaintMatMetal.value = pos.metalness ?? nextP.metalness ?? 0.87;
+    }
+  }
+  if (macroChanged) m.needsUpdate = true;
+}
+
+export function attachProceduralMaterialEvaluation(m, input, paintOverlayOpts = null) {
+  const initialP = normalizeMaterial(input || {});
+  const isPaintOverlay = !!paintOverlayOpts?.enabled;
+  const surfaceSources = isPaintOverlay ? { uniforms: {}, leather: false, doc: false } : attachSurfaceSources(m, initialP);
+  if (!isPaintOverlay && surfaceSources.doc) {
+    m.clearcoat = Math.max(m.clearcoat, 0.01);
+    m.sheen = Math.max(m.sheen, 0.01);
+  }
+  m.userData.params = initialP;
+  m.userData.surfaceSources = surfaceSources;
   m.userData.patternUniforms = surfaceSources.uniforms;
-  m.onBeforeCompile = (shader) => {
-    Object.assign(shader.uniforms, surfaceSources.uniforms);
-    const beds =
-      p.type === 38
-        ? p.sandLayers
-        : normalizeSandLayers([
-            {
-              color: p.color,
-              secondaryColor: p.secondaryColor,
-              size: p.grainSize,
-              sizeVariation: p.grainSizeVariation,
-              roughness: p.grainRoughness,
-              roughnessVariation: p.grainRoughnessVariation,
-              specular: p.grainSpecular,
-              specularVariation: p.grainSpecularVariation,
-              ior: p.grainIOR,
-              roundness: p.grainRoundness,
-              tilt: p.grainTilt,
-              relief: p.grainRelief,
-              coverage: p.sandCoverage,
-            },
-          ]);
-    const sandCount = beds.length;
-    const sandBeds = Array.from(
-      { length: 4 },
-      (_, i) => beds[i] || beds[beds.length - 1],
-    );
-    const values = {
-      uSandCount: sandCount,
-      uSandLayerSeeds: sandBeds.map((b) => sandLayerSeed(b.id)),
-      uSandBandsMode: p.sandArrangement === "bands" ? 1 : 0,
-      uSandScale: p.sandScale,
-      uSandSeed: p.surfaceSeed,
-      uSandBandFrequency: p.sandBandFrequency,
-      uSandBandWarp: p.sandBandWarp,
-      uSandBandAngle: (p.sandBandAngle * Math.PI) / 180,
-      uSandColors: sandBeds.map((b) => new THREE.Color(b.color)),
-      uSandPale: sandBeds.map((b) => new THREE.Color(b.secondaryColor)),
-      uSandSize: sandBeds.map(
-        (b) =>
-          new THREE.Vector4(
-            b.size,
-            b.sizeVariation,
-            b.enabled ? b.coverage : 0,
-            b.enabled ? b.thickness : 0,
-          ),
-      ),
-      uSandFinish: sandBeds.map(
-        (b) =>
-          new THREE.Vector4(
-            b.roughness,
-            b.roughnessVariation,
-            b.specular,
-            b.specularVariation,
-          ),
-      ),
-      uSandShape: sandBeds.map(
-        (b) => new THREE.Vector4(b.ior, b.roundness, b.tilt, b.relief),
-      ),
-      uRibProfile: p.ribProfile,
-      uSheetFinish: p.sheetFinish,
-      uSheetOxidation: p.sheetOxidation,
-      uSheetSpangle: p.sheetSpangle,
-      uCellLobing: p.cellLobing,
-      uStomataDensity: p.stomataDensity,
-      uScratchAngle:
-        ((p.type === 29 ? p.weaveAngle : p.scratchAngle) * Math.PI) / 180,
-      uVeinRelief: p.veinRelief,
-      uCellScale: p.cellScale,
-      uCellRelief: p.cellRelief,
-      uColorGradient: p.colorGradient,
-      uSpotDensity: p.spotDensity,
-      uSkinMode: p.skinMode,
-      uPlantRibs: p.plantRibs,
-      uTertiary: new THREE.Color(p.tertiaryColor),
-      uRibDepth: p.ribDepth,
-      uGroutWidth: p.groutWidth,
-      uTileVariation: p.tileVariation,
-      uTileStagger: p.tileStagger,
-      uVeinWidth: p.veinWidth,
-      uPoreDensity: p.poreDensity,
-      uWallMode: p.wallMode,
-      uLeafAspect: p.leafAspect,
-      uBladeWidth: p.bladeWidth,
-      uBladeLean: p.bladeLean,
-      uSurfaceSeed: p.surfaceSeed,
-      uScratchDensity: p.scratchDensity,
-      uScratchLength: p.scratchLength,
-      uScratchWidth: p.scratchWidth,
-      uScratchDepth: p.scratchDepth,
-      uScratchSpread: p.scratchSpread,
-      uScratchBend: p.scratchBend,
-      uLensDome: p.lensDome,
-      uPackageDepth: p.packageDepth,
-      uBakeMode: p.bakeMode,
-      uBakeHeightRange: p.bakeHeightRange,
-      uSecondary: new THREE.Color(p.secondaryColor),
-      uMoisture: p.moisture,
-      uScattering: p.scattering,
-      uFreckles: p.freckles,
-      uPaperRibs: p.paperRibs,
-      uFiberContrast: p.fiberContrast,
-      uOxidation: p.oxidation,
-      uPanelMode: p.panelMode,
-      uBusbarWidth: p.busbarWidth,
-      uDimpleDepth: p.dimpleDepth,
-      uDenimFade: p.denimFade,
-      uSlub: p.slub,
-      uPixelFill: p.pixelFill,
-      uAoIntensity: p.aoIntensity ?? 1,
-      uEmissionScale: Math.max(1, p.emissionStrength),
-      uAverageFlakeColor: averageColor,
-      uType: p.type,
-      uFlakes: p.flakes,
-      uFlakeFrequency: Math.min(
-        1e7,
-        (52000 / Math.max(0.001, p.flakeSize)) * p.flakeScale,
-      ),
-      uFlakeRoughMin: p.flakeRoughnessMin,
-      uFlakeRoughMax: p.flakeRoughnessMax,
-      uFlakeMetalMin: p.flakeMetalnessMin,
-      uFlakeMetalMax: p.flakeMetalnessMax,
-      uFlakeTilt: p.flakeTilt,
-      uFlakeWeight: p.FlakeWeight ?? 1,
-      uFlakeLayers: p.flakeLayers,
-      uFlakeLayerDepth: p.flakeLayerDepth,
-      uCloth: p.clothMapping ? 1 : 0,
-      uScale: p.detailScale,
-      uDepth: p.depth,
-      uCoatIor: p.coatIor,
-      uPeel: p.orangePeel,
-      uPeelScale: p.orangePeelScale,
-      uWeaveAngle: (p.weaveAngle * Math.PI) / 180,
-      uRelief: p.weaveRelief,
-      uFiberDetail: p.fiberDetail,
-      uFabricMode: p.fabricMode,
-      uWeave: [
-        "plain",
-        "twill",
-        "satin",
-        "basket",
-        "rib",
-        "herringbone",
-        "oxford",
-        "houndstooth",
-        "denim",
-      ].indexOf(p.weavePattern),
-      uWarpColor: new THREE.Color(p.warpColor),
-      uWeftColor: new THREE.Color(p.weftColor),
-      uFilmThickness: p.filmThickness,
-      uFilmVariation: p.filmVariation,
-      uFuzz: p.fuzz,
-      uGrain: p.grain,
-      uWear: p.wear,
-      uWearSoftness: p.wearSoftness,
-      uWornRoughness: p.wornRoughness,
-      uScratchScale: p.scratchScale,
-      uColorCount: count,
-      uColorMode: p.colorMode === "ramp" ? 1 : p.colorMode === "single" ? 2 : 0,
-      uColors: stops.map((s) => new THREE.Color(s.color)),
-      uStops: stops.map((s) => s.position),
+  m.userData.paintOverlay = isPaintOverlay;
+  if (isPaintOverlay) {
+    m.userData.paintOverlayState = {
+      hasMat: paintOverlayOpts?.hasMat ? 1 : 0,
+      covTex: paintOverlayOpts?.covTex || null,
+      color: paintOverlayOpts?.color || initialP.color || "#345f42",
+      roughness: paintOverlayOpts?.roughness ?? initialP.roughness ?? 0.24,
+      metalness: paintOverlayOpts?.metalness ?? initialP.metalness ?? 0.87,
     };
+  }
+
+  m.onBeforeCompile = (shader) => {
+    const p = m.userData.params || initialP;
+    Object.assign(shader.uniforms, surfaceSources.uniforms);
+    const values = buildMaterialShaderUniformValues(p, surfaceSources);
     for (const [key, value] of Object.entries(values))
       shader.uniforms[key] = { value };
+
+    if (m.userData.paintOverlay) {
+      const pos = m.userData.paintOverlayState || {};
+      shader.uniforms.uPaintHasMat = { value: pos.hasMat ? 1 : 0 };
+      shader.uniforms.uPaintMatCovMap = { value: pos.covTex || null };
+      shader.uniforms.uPaintMatColor = { value: new THREE.Color(pos.color || p.color || "#ffffff") };
+      shader.uniforms.uPaintMatRough = { value: pos.roughness ?? p.roughness ?? 0.24 };
+      shader.uniforms.uPaintMatMetal = { value: pos.metalness ?? p.metalness ?? 0.87 };
+    }
+
     shader.vertexShader =
       "varying vec3 vProcPosition;\nvarying vec3 vProcNormal;\nvarying vec2 vProcUv;\n" +
       shader.vertexShader;
@@ -1141,12 +1180,20 @@ export function createMaterial(input) {
       `
       ${surfaceSources.leather ? "#define ALLOY_HIDE_SOURCE" : ""}
       ${surfaceSources.doc ? "#define ALLOY_PATTERN" : ""}
+      ${m.userData.paintOverlay ? "#define TP_PAINT_OVERLAY" : ""}
       varying vec3 vProcPosition;
       varying vec3 vProcNormal;
       varying vec2 vProcUv;
-      #define uType ${Math.max(0, Math.min(38, Math.floor(Number(p.type) || 0)))}
+      #define uType ${Math.max(0, Math.min(46, Math.floor(Number(p.type) || 0)))}
       #define uPotterySurface ${p.potterySurface ? 1 : 0}
       #define uMetalScratches ${p.metalScratches ? 1 : 0}
+      #ifdef TP_PAINT_OVERLAY
+      uniform int uPaintHasMat;
+      uniform sampler2D uPaintMatCovMap;
+      uniform vec3 uPaintMatColor;
+      uniform float uPaintMatRough, uPaintMatMetal;
+      vec4 _tpMatCov = vec4(0.0);
+      #endif
       uniform int uColorCount, uColorMode, uFabricMode, uFlakeLayers, uCloth, uWeave;
       uniform float uFlakeWeight,uFlakeLayerDepth,uWearSoftness,uWornRoughness;
       uniform float uFlakes,uFlakeFrequency,uFlakeRoughMin,uFlakeRoughMax,uFlakeMetalMin,uFlakeMetalMax,uFlakeTilt;
@@ -1241,6 +1288,14 @@ ${botanicalGLSL()}
       vec3 weights=projectionWeights(vProcNormal);
       float grain=noise3(pp*uScale);
       peelHeight=(noise3(pp*uPeelScale)+.35*noise3(pp*uPeelScale*2.1))*uPeel*.003;
+      #ifdef TP_PAINT_OVERLAY
+      vec3 _tpBaseAlb = diffuseColor.rgb;
+      _tpMatCov = (uPaintHasMat != 0) ? texture2D(uPaintMatCovMap, vProcUv) : vec4(0.0);
+      if (uPaintHasMat != 0) {
+        diffuseColor.rgb = (uType == 5 || (uType == 4 && uFabricMode != 1 && uFabricMode != 2)) ? vec3(1.0) : uPaintMatColor;
+      }
+      if (uPaintHasMat != 0) {
+      #endif
       if(uType==0){
         vec3 base=diffuseColor.rgb*exp(-uDepth*.28);
         vec3 blended=base;
@@ -1345,12 +1400,23 @@ ${patternColorGLSL()}
       scratchMask=metalCuts.x;surfaceHeight+=metalCuts.y;
       diffuseColor.rgb*=1.-scratchMask*.11;
       #endif
+      #ifdef TP_PAINT_OVERLAY
+      }
+      diffuseColor.rgb = mix(_tpBaseAlb, diffuseColor.rgb, _tpMatCov.r);
+      surfaceHeight *= _tpMatCov.a;
+      peelHeight *= _tpMatCov.a;
+      #endif
     `,
     );
     shader.fragmentShader = shader.fragmentShader.replace(
       "#include <roughnessmap_fragment>",
       `
       #include <roughnessmap_fragment>
+      #ifdef TP_PAINT_OVERLAY
+      float _tpBaseRough = roughnessFactor;
+      if (uPaintHasMat != 0) {
+      roughnessFactor = uPaintMatRough;
+      #endif
       ${p.FlakeOutputs?.roughness === false ? "" : "if(uType==0)roughnessFactor=mix(roughnessFactor,mix(uFlakeRoughMin,uFlakeRoughMax,flakeRandom),flakeMask);"}
       if(uType>=8 && uType<=11)roughnessFactor=mix(clamp(roughnessFactor+uGrain*(grain-.5)*.16,.025,1.),uWornRoughness,wearMask);
       if(uType==12)roughnessFactor=mix(roughnessFactor,.24,uMoisture*.7);
@@ -1376,12 +1442,21 @@ ${patternColorGLSL()}
       if(uType==45 && uPanelMode>=0.5 && uPanelMode<1.5)roughnessFactor=mix(roughnessFactor,.62,engHoleMask);
       if(uType==46 && uPanelMode<0.5)roughnessFactor=mix(roughnessFactor,.85,engHoleMask);
       if(uType==29 || uMetalScratches==1)roughnessFactor=mix(roughnessFactor,min(1.,roughnessFactor+.3),scratchMask);
+      #ifdef TP_PAINT_OVERLAY
+      }
+      roughnessFactor = mix(_tpBaseRough, roughnessFactor, _tpMatCov.g);
+      #endif
     `,
     );
     shader.fragmentShader = shader.fragmentShader.replace(
       "#include <metalnessmap_fragment>",
       `
       #include <metalnessmap_fragment>
+      #ifdef TP_PAINT_OVERLAY
+      float _tpBaseMetal = metalnessFactor;
+      if (uPaintHasMat != 0) {
+      metalnessFactor = uPaintMatMetal;
+      #endif
       ${p.FlakeOutputs?.metallic === false ? "" : "if(uType==0)metalnessFactor=mix(metalnessFactor,mix(uFlakeMetalMin,uFlakeMetalMax,flakeRandom),flakeMask);"}
       if(uType==16)metalnessFactor*=1.-oxideMask;
       if(uType==21 && uSheetFinish>0)metalnessFactor*=1.-sheetOxide;
@@ -1391,12 +1466,20 @@ ${patternColorGLSL()}
       #ifdef ALLOY_PATTERN
         metalnessFactor=mix(metalnessFactor,patternParamsSample.g,patternChannelMaskSample.g);
       #endif
+      #ifdef TP_PAINT_OVERLAY
+      }
+      metalnessFactor = mix(_tpBaseMetal, metalnessFactor, _tpMatCov.b);
+      #endif
     `,
     );
     shader.fragmentShader = shader.fragmentShader.replace(
       "#include <normal_fragment_maps>",
       `
       #include <normal_fragment_maps>
+      #ifdef TP_PAINT_OVERLAY
+      vec3 _tpBaseNorm = normal;
+      if (uPaintHasMat != 0 && _tpMatCov.a > 0.001) {
+      #endif
       normal=reliefNormal(surfaceHeight+peelHeight*.2,normal,-vViewPosition);
       #ifdef ALLOY_PATTERN
         if(patternNormalSample.a>.0001){
@@ -1430,6 +1513,10 @@ ${patternColorGLSL()}
         vec3 cb=cross(normal,ct);
         normal=normalize(mix(normal,normalize(ct*candyFacetDir.x+cb*candyFacetDir.y+normal*candyFacetDir.z),candyCrystalMask*.42));
       }
+      #ifdef TP_PAINT_OVERLAY
+      }
+      normal = normalize(mix(_tpBaseNorm, normal, _tpMatCov.a));
+      #endif
     `,
     );
     shader.fragmentShader = shader.fragmentShader.replace(
@@ -1448,10 +1535,13 @@ ${patternColorGLSL()}
     // Three.js hardcodes the coat F0 to .04. Replace it with the independent coat IOR Fresnel term.
     let physical = THREE.ShaderChunk.lights_physical_fragment.replace(
       "material.clearcoatF0 = vec3( 0.04 );",
-      "material.clearcoatF0 = vec3( pow2( (uCoatIor - 1.0) / (uCoatIor + 1.0) ) );",
+      m.userData.paintOverlay
+        ? "material.clearcoatF0 = mix( vec3( 0.04 ), vec3( pow2( (uCoatIor - 1.0) / (uCoatIor + 1.0) ) ), _tpMatCov.a );"
+        : "material.clearcoatF0 = vec3( pow2( (uCoatIor - 1.0) / (uCoatIor + 1.0) ) );",
     );
     physical += `
       #ifdef USE_CLEARCOAT
+        ${m.userData.paintOverlay ? "if (_tpMatCov.a > 0.001) {" : ""}
         if(uType==11 || uType==30){
           material.clearcoatRoughness=clamp(material.clearcoatRoughness+leatherFold*.055+(leatherGrain-.5)*.035,.06,1.);
         }
@@ -1462,6 +1552,7 @@ ${patternColorGLSL()}
         #endif
         if(uType==20)material.clearcoat*=ledLens;
         if(uType==22)material.clearcoat*=1.-groutMask;
+        ${m.userData.paintOverlay ? "}" : ""}
       #endif
       #if defined(ALLOY_PATTERN) && defined(USE_SHEEN)
         float wool=patternFinishSample.g*uPatternApplyExtra.w;
@@ -1469,15 +1560,19 @@ ${patternColorGLSL()}
         material.sheenRoughness=mix(material.sheenRoughness,.85,patternMaterialCoverage*wool);
       #endif
       #if uType == 37 || uType == 38
+        ${m.userData.paintOverlay ? "if (_tpMatCov.a > 0.001) {" : ""}
         float grainF0=pow2((sandIOR-1.)/(sandIOR+1.));
         material.specularColor=mix(vec3(grainF0*sandSpecular),diffuseColor.rgb,metalnessFactor);
         material.specularF90=mix(sandSpecular,1.,metalnessFactor);
+        ${m.userData.paintOverlay ? "}" : ""}
       #endif
       #ifdef USE_IRIDESCENCE
+        ${m.userData.paintOverlay ? "if (_tpMatCov.a > 0.001) {" : ""}
         material.iridescenceThickness=uFilmThickness+(noise3(pp*3.7)-.5)*uFilmVariation;
+        ${m.userData.paintOverlay ? "}" : ""}
       #endif
       #ifdef USE_ANISOTROPY
-      if(uType==7 || uType==4){
+      if(${m.userData.paintOverlay ? "_tpMatCov.a > 0.001 && " : ""}(uType==7 || uType==4)){
         vec3 dpdx=dFdx(-vViewPosition),dpdy=dFdy(-vViewPosition);
         vec2 duvdx=dFdx(yarnUV),duvdy=dFdy(yarnUV);
         vec3 t=dpdx*duvdy.y-dpdy*duvdx.y;
@@ -1495,8 +1590,8 @@ ${patternColorGLSL()}
     shader.fragmentShader = shader.fragmentShader.replace(
       "#include <emissivemap_fragment>",
       `#include <emissivemap_fragment>
-      if(uType==20)totalEmissiveRadiance*=emitterMask;
-      if(uType==45)totalEmissiveRadiance=engEmitColor*engEmitMask*uEmissionScale;`,
+      if(${m.userData.paintOverlay ? "_tpMatCov.r > 0.001 && " : ""}uType==20)totalEmissiveRadiance*=emitterMask;
+      if(${m.userData.paintOverlay ? "_tpMatCov.r > 0.001 && " : ""}uType==45)totalEmissiveRadiance=engEmitColor*engEmitMask*uEmissionScale;`,
     );
     shader.fragmentShader = shader.fragmentShader.replace(
       "#include <lights_fragment_end>",
@@ -1504,16 +1599,18 @@ ${patternColorGLSL()}
       #ifdef ALLOY_PATTERN
         reflectedLight.indirectDiffuse*=mix(1.,patternParamsSample.a,patternChannelMaskSample.a);
       #endif
-      if(uType==13 || uType==14)reflectedLight.indirectDiffuse+=diffuseColor.rgb*ambientLightColor*uScattering*.22*pow(1.-abs(dot(normal,geometryViewDir)),2.)*vec3(1.,.55,.32);
-      if(uType>=39 && uType<=42)reflectedLight.indirectDiffuse+=diffuseColor.rgb*(ambientLightColor+vec3(.25))*uScattering*.28*pow(1.-abs(dot(normal,geometryViewDir)),1.85);
-      reflectedLight.indirectDiffuse*=uAoIntensity;`,
+      if(${m.userData.paintOverlay ? "_tpMatCov.a > 0.001 && " : ""}(uType==13 || uType==14))reflectedLight.indirectDiffuse+=diffuseColor.rgb*ambientLightColor*uScattering*.22*pow(1.-abs(dot(normal,geometryViewDir)),2.)*vec3(1.,.55,.32);
+      if(${m.userData.paintOverlay ? "_tpMatCov.a > 0.001 && " : ""}(uType>=39 && uType<=42))reflectedLight.indirectDiffuse+=diffuseColor.rgb*(ambientLightColor+vec3(.25))*uScattering*.28*pow(1.-abs(dot(normal,geometryViewDir)),1.85);
+      reflectedLight.indirectDiffuse*= ${m.userData.paintOverlay ? "mix(1.0, uAoIntensity, _tpMatCov.a)" : "uAoIntensity"};`,
     );
     // Same procedural field, unlit channel output. Bake colors are encoded sRGB;
     // scalar and normal channels are linear. A flat XY patch gives tangent normals.
     if (!p.bakeMode)
       shader.fragmentShader = shader.fragmentShader.replace(
         "#include <opaque_fragment>",
-        "#include <opaque_fragment>\nif(uType==27 || uType==28){if(surfaceCoverage<.001)discard;gl_FragColor.a=surfaceCoverage;}",
+        m.userData.paintOverlay
+          ? "#include <opaque_fragment>\nif(_tpMatCov.r>0.001 && (uType==27 || uType==28)){if(surfaceCoverage<.001)discard;gl_FragColor.a=surfaceCoverage;}"
+          : "#include <opaque_fragment>\nif(uType==27 || uType==28){if(surfaceCoverage<.001)discard;gl_FragColor.a=surfaceCoverage;}",
       );
     if (p.bakeMode)
       shader.fragmentShader = shader.fragmentShader.replace(
@@ -1529,8 +1626,49 @@ ${patternColorGLSL()}
       );
     m.userData.shader = shader;
   };
-  m.customProgramCacheKey = () =>
-    `alloy-procedural-v7-${p.type}-${p.metalScratches}-${p.bakeMode > 0}-${!!p.pattern}-${!!p.potterySurface}-${JSON.stringify(p.FlakeOutputs || {})}`;
+  m.customProgramCacheKey = () => {
+    const cp = m.userData.params || initialP;
+    return `alloy-procedural-v8-${m.userData.paintOverlay ? "po-" : ""}${cp.type}-${cp.metalScratches}-${cp.bakeMode > 0}-${!!cp.pattern}-${!!cp.potterySurface}-${JSON.stringify(cp.FlakeOutputs || {})}`;
+  };
+}
+
+export function createMaterial(input) {
+  const p = ResolveAuthoringParameters(normalizeMaterial(input), input);
+  const m = new THREE.MeshPhysicalMaterial({
+    color:
+      p.type === 5 || (p.type === 4 && ![1, 2].includes(p.fabricMode))
+        ? "#ffffff"
+        : p.color,
+    iridescence: p.iridescence,
+    iridescenceIOR: p.iridescenceIOR,
+    iridescenceThicknessMinimum: Math.max(0, p.filmThickness - p.filmVariation * 0.5),
+    iridescenceThicknessMaximum: p.filmThickness + p.filmVariation * 0.5,
+    metalness: p.metalness,
+    roughness: p.roughness,
+    clearcoat: p.coat,
+    clearcoatRoughness: p.coatRoughness,
+    ior: p.ior,
+    specularIntensity: p.specular,
+    specularColor: p.specularColor,
+    sheen: p.sheen,
+    sheenColor: p.sheenColor,
+    sheenRoughness: p.sheenRoughness,
+    anisotropy: p.anisotropy,
+    anisotropyRotation: ((p.anisotropyRotation ?? 0) * Math.PI * 2) + ((p.weaveAngle * Math.PI) / 180),
+    transmission: p.Authoring ? p.translucency : p.type === 5 ? 0.97 : p.translucency,
+    opacity: p.opacity ?? 1,
+    transparent: (p.opacity ?? 1) < 1,
+    emissive: p.type === 20 || p.type === 45 || (p.emissionStrength || 0) > 0 ? (p.emissionColor || "#000000") : "#000000",
+    emissiveIntensity: p.emissionStrength,
+    toneMapped: !p.bakeMode,
+    alphaToCoverage: !p.bakeMode && (p.type === 27 || p.type === 28),
+    thickness: p.depth * 2,
+    attenuationColor: new THREE.Color(p.attenuationColor || p.color),
+    attenuationDistance: 2.8,
+    envMapIntensity: p.type === 4 && p.fabricMode === 4 ? 1.8 : 1.35,
+    side: THREE.DoubleSide,
+  });
+  attachProceduralMaterialEvaluation(m, p, null);
   AttachPbrFields(m, p);
   return m;
 }
