@@ -52,11 +52,25 @@ export const PAINT_PBR_CHANNEL_ROWS = PAINT_PBR_CHANNELS.map((c) => [c.key, c.la
 export const PAINT_PBR_CHANNEL_MAP = Object.fromEntries(PAINT_PBR_CHANNELS.map((c) => [c.key, c]));
 export const EXTENDED_PBR_KEYS = PAINT_PBR_CHANNELS.slice(4).map((c) => c.key);
 
+export const EXTRA_COLOR_CHANNELS = [
+  { key: "specularColor", label: "Spec Colour", short: "SpecCol", sub: "Specular Tint", kind: "spec", dot: "#ffe4b5", type: "color", default: "#ffffff", extended: true, isColor: true },
+  { key: "sheenColor", label: "Sheen Colour", short: "SheenCol", sub: "Fabric Velour Tint", kind: "sheen", dot: "#f7c2ff", type: "color", default: "#ffffff", extended: true, isColor: true },
+  { key: "attenuationColor", label: "Subsurf Tint", short: "SubCol", sub: "Volume Attenuation", kind: "trans", dot: "#ffb8b8", type: "color", default: "#ffffff", extended: true, isColor: true },
+];
+export const EXTRA_COLOR_KEYS = EXTRA_COLOR_CHANNELS.map((c) => c.key);
+export const EXTRA_COLOR_CHANNEL_ROWS = EXTRA_COLOR_CHANNELS.map((c) => [c.key, c.label, c.sub, c.kind, c.dot]);
+export const ALL_PAINT_CHANNEL_ROWS = [...PAINT_PBR_CHANNEL_ROWS, ...EXTRA_COLOR_CHANNEL_ROWS];
+
+export function isRgbChannelKey(key) {
+  return key === "emissive" || key === "specularColor" || key === "sheenColor" || key === "attenuationColor";
+}
+
 export function createDefaultChannelMap(includeAll = false, overrides = {}) {
   const out = {};
   for (const c of PAINT_PBR_CHANNELS) {
     out[c.key] = includeAll ? true : (c.key === "albedo" || c.key === "roughness" || c.key === "metalness" || c.key === "height");
   }
+  for (const c of EXTRA_COLOR_CHANNELS) out[c.key] = !!includeAll;
   return { ...out, ...overrides };
 }
 
@@ -179,6 +193,7 @@ export function sampleCurveLut(points, count = 17) {
 export function getToolChannels(brush, toolOverride = null) {
   const t = toolOverride || brush?.tool || "paint";
   if (t === "erase") return brush?.eraseChannels || brush?.channels || { albedo: true, roughness: true, metalness: true, height: true };
+  if (t === "gradient") return brush?.gradientChannels || brush?.fillChannels || brush?.channels || { albedo: true, roughness: true, metalness: true, height: true };
   if (t === "fill") return brush?.fillChannels || brush?.channels || { albedo: true, roughness: true, metalness: true, height: true };
   return brush?.paintChannels || brush?.channels || { albedo: true, roughness: true, metalness: true, height: true };
 }
@@ -723,7 +738,7 @@ export function ensureExtPixelChannel(px, key, resOverride = null) {
   if (!px.extValues) px.extValues = {};
   if (!px.extAlphas) px.extAlphas = {};
   if (!px.extValues[key]) {
-    if (key === "emissive") {
+    if (isRgbChannelKey(key)) {
       px.extValues[key] = new Uint8ClampedArray(n * 3);
     } else {
       px.extValues[key] = new Uint8ClampedArray(n).fill(defaultByteForExtChannel(key));
@@ -1393,12 +1408,13 @@ export function commitStrokeAccumulator(layer, strokeAccum, brush, editingMask =
   if (!px.metalAlpha) px.metalAlpha = new Uint8ClampedArray(res * res);
   if (!px.heightAlpha) px.heightAlpha = new Uint8ClampedArray(res * res);
   const ch = getToolChannels(brush);
-  const activeExtKeys = EXTENDED_PBR_KEYS.filter((k) => ch[k]);
+  const activeExtKeys = [...EXTENDED_PBR_KEYS, ...EXTRA_COLOR_KEYS].filter((k) => ch[k]);
   const brushExtSrc = brush.extValues || {};
   const extData = activeExtKeys.map((k) => {
     const buf = ensureExtPixelChannel(px, k, res);
-    if (k === "emissive") {
-      const [er, eg, eb] = hexToRgb01(brushExtSrc.emissive || "#ff7a3b").map((v) => Math.round(v * 255));
+    if (isRgbChannelKey(k)) {
+      const defCol = k === "emissive" ? "#ff7a3b" : "#ffffff";
+      const [er, eg, eb] = hexToRgb01(brushExtSrc[k] || brush?.color || defCol).map((v) => Math.round(v * 255));
       return { key: k, isRgb: true, er, eg, eb, buf };
     }
     const val = brushExtSrc[k] ?? PAINT_PBR_CHANNELS.find((c) => c.key === k)?.default ?? 0;
@@ -1525,6 +1541,11 @@ export function compositePaintDocument(doc, cues, { liveStroke = null, liveBrush
       ? new Uint8ClampedArray(n * 3)
       : new Uint8ClampedArray(n).fill(defaultByteForExtChannel(k));
   }
+  for (const k of EXTRA_COLOR_KEYS) {
+    if (doc.layers.some((l) => l.visible && (l.channels?.[k] || l.pixels?.extValues?.[k]))) {
+      outExt[k] = new Uint8ClampedArray(n * 3).fill(255);
+    }
+  }
 
   // Initialize opaque neutral slate base
   for (let i = 0; i < n; i++) {
@@ -1597,13 +1618,13 @@ export function compositePaintDocument(doc, cues, { liveStroke = null, liveBrush
     };
     const maskChain = collectMaskChain(layer);
     const partFilter = layer.partFilter ?? -1;
-    const activeExtLayerKeys = EXTENDED_PBR_KEYS.filter((k) => ch[k] && chOp(k) > 0.001);
+    const activeExtLayerKeys = [...EXTENDED_PBR_KEYS, ...EXTRA_COLOR_KEYS].filter((k) => ch[k] && chOp(k) > 0.001 && outExt[k]);
 
     const resolveScalarExtSource = (srcObj) => {
       const out = [];
       for (const k of activeExtLayerKeys) {
-        if (k === "emissive") {
-          const [er, eg, eb] = hexToRgb01(srcObj?.extValues?.emissive ?? srcObj?.emissive ?? layer.extValues?.emissive ?? "#ff7a3b").map((v) => Math.round(v * 255));
+        if (isRgbChannelKey(k)) {
+          const [er, eg, eb] = hexToRgb01(srcObj?.extValues?.[k] ?? srcObj?.[k] ?? layer.extValues?.[k] ?? (k === "emissive" ? "#ff7a3b" : "#ffffff")).map((v) => Math.round(v * 255));
           out.push({ key: k, isRgb: true, er, eg, eb, w: chOp(k), b: chBlend(k) });
         } else {
           const v = srcObj?.extValues?.[k] ?? srcObj?.[k] ?? layer.extValues?.[k] ?? defaultByteForExtChannel(k) / 255;
@@ -1625,8 +1646,9 @@ export function compositePaintDocument(doc, cues, { liveStroke = null, liveBrush
       const wOpA = chOp("albedo"), wOpR = chOp("roughness"), wOpM = chOp("metalness"), wOpH = chOp("height");
       const paintExtList = activeExtLayerKeys.filter((k) => px.extValues?.[k] || (isLive && bch[k])).map((k) => {
         const hasBuf = !!px.extValues?.[k];
-        const bVal = isLive ? (k === "emissive" ? hexToRgb01(liveBrush.extValues?.emissive || "#ff7a3b").map((v) => Math.round(v * 255)) : encodeScalarChannelByte(k, Number(liveBrush.extValues?.[k] ?? defaultByteForExtChannel(k) / 255))) : null;
-        return { key: k, isRgb: k === "emissive", hasBuf, bufV: px.extValues?.[k], bufA: px.extAlphas?.[k], liveActive: !!(isLive && bch[k]), bVal, w: chOp(k), b: chBlend(k) };
+        const rgbCh = isRgbChannelKey(k);
+        const bVal = isLive ? (rgbCh ? hexToRgb01(liveBrush.extValues?.[k] || (k === "emissive" ? "#ff7a3b" : "#ffffff")).map((v) => Math.round(v * 255)) : encodeScalarChannelByte(k, Number(liveBrush.extValues?.[k] ?? defaultByteForExtChannel(k) / 255))) : null;
+        return { key: k, isRgb: rgbCh, hasBuf, bufV: px.extValues?.[k], bufA: px.extAlphas?.[k], liveActive: !!(isLive && bch[k]), bVal, w: chOp(k), b: chBlend(k) };
       });
 
       for (let i = 0; i < n; i++) {
@@ -2320,7 +2342,7 @@ export function applyPointGradient3DToLayer({ layer, cues, grad, brush, editingM
   const invRad = 1 / Math.max(0.25, cues.sphereRadius || 1.45);
   const partFilter = layer.partFilter ?? -1;
   const op = clamp(brush?.opacity ?? 1.0, 0.05, 1.0);
-  const fillCh = brush?.fillChannels || createDefaultChannelMap(false);
+  const fillCh = brush?.gradientChannels || (brush?.tool === "gradient" ? getToolChannels(brush) : brush?.fillChannels) || createDefaultChannelMap(false);
   const roughByte = Math.round(clamp(brush?.roughness ?? 0.34, 0.02, 1) * 255);
   const metalByte = Math.round(clamp(brush?.metalness ?? 0.12, 0, 1) * 255);
   const heightByte = Math.round(clamp(((brush?.height ?? 0.25) * 0.5 + 0.5), 0, 1) * 255);
@@ -2363,6 +2385,45 @@ export function applyPointGradient3DToLayer({ layer, cues, grad, brush, editingM
 
   const px = layer.pixels;
   if (!px) return false;
+  if (!layer.channels) layer.channels = createDefaultChannelMap(false);
+  for (const k of Object.keys(fillCh)) {
+    if (fillCh[k]) layer.channels[k] = true;
+  }
+  const colorExtKeys = ["emissive", ...EXTRA_COLOR_KEYS].filter((k) => !!fillCh[k]);
+  if (fillCh.emissive) layer.channels.emissiveIntensity = true;
+  if (fillCh.sheenColor) layer.channels.sheen = true;
+  if (fillCh.attenuationColor) layer.channels.transmission = true;
+
+  const colorExtBufs = colorExtKeys.map((k) => ensureExtPixelChannel(px, k, res));
+  const glowScalarBuf = fillCh.emissive || fillCh.emissiveIntensity ? ensureExtPixelChannel(px, "emissiveIntensity", res) : null;
+  const glowByte = encodeScalarChannelByte("emissiveIntensity", Number(brush?.extValues?.emissiveIntensity ?? 1.0));
+  const scalarExtList = EXTENDED_PBR_KEYS
+    .filter((k) => k !== "emissive" && k !== "emissiveIntensity" && !!fillCh[k])
+    .map((k) => {
+      const defVal = PAINT_PBR_CHANNELS.find((c) => c.key === k)?.default ?? 0.5;
+      const val = brush?.extValues?.[k] ?? defVal;
+      return {
+        key: k,
+        buf: ensureExtPixelChannel(px, k, res),
+        byteVal: encodeScalarChannelByte(k, Number(val)),
+      };
+    });
+  // If sheenColor or attenuationColor was enabled without manually enabling sheen/transmission scalar, populate visible default scalar coverage
+  if (fillCh.sheenColor && !fillCh.sheen) {
+    scalarExtList.push({
+      key: "sheen",
+      buf: ensureExtPixelChannel(px, "sheen", res),
+      byteVal: encodeScalarChannelByte("sheen", Number(brush?.extValues?.sheen || 0.85)),
+    });
+  }
+  if (fillCh.attenuationColor && !fillCh.transmission) {
+    scalarExtList.push({
+      key: "transmission",
+      buf: ensureExtPixelChannel(px, "transmission", res),
+      byteVal: encodeScalarChannelByte("transmission", Number(brush?.extValues?.transmission || 0.85)),
+    });
+  }
+
   for (let i = 0; i < n; i++) {
     if (partFilter >= 0 && cues.partAt[i] >= 0 && cues.partAt[i] !== partFilter) continue;
     const i3 = i * 3;
@@ -2401,6 +2462,23 @@ export function applyPointGradient3DToLayer({ layer, cues, grad, brush, editingM
       px.albedo[i4 + 2] = Math.round(px.albedo[i4 + 2] * (1 - op) + cb * op);
       px.albedo[i4 + 3] = Math.min(255, Math.round(px.albedo[i4 + 3] + (255 - px.albedo[i4 + 3]) * op));
     }
+    for (let c = 0; c < colorExtBufs.length; c++) {
+      const cbBuf = colorExtBufs[c];
+      const oldA = cbBuf.alpha[i] / 255;
+      const outA = op + oldA * (1 - op);
+      if (outA > 1e-4) {
+        cbBuf.values[i3] = Math.round((cr * op + cbBuf.values[i3] * oldA * (1 - op)) / outA);
+        cbBuf.values[i3 + 1] = Math.round((cg * op + cbBuf.values[i3 + 1] * oldA * (1 - op)) / outA);
+        cbBuf.values[i3 + 2] = Math.round((cb * op + cbBuf.values[i3 + 2] * oldA * (1 - op)) / outA);
+      }
+      cbBuf.alpha[i] = Math.min(255, Math.round(outA * 255));
+    }
+    if (glowScalarBuf) {
+      const oldG = glowScalarBuf.alpha[i] / 255;
+      const outG = op + oldG * (1 - op);
+      if (outG > 1e-4) glowScalarBuf.values[i] = Math.round((glowByte * op + glowScalarBuf.values[i] * oldG * (1 - op)) / outG);
+      glowScalarBuf.alpha[i] = Math.min(255, Math.round(outG * 255));
+    }
     if (fillCh.roughness) {
       px.roughness[i] = Math.round(px.roughness[i] * (1 - op) + roughByte * op);
       if (px.roughAlpha) px.roughAlpha[i] = Math.min(255, Math.round(px.roughAlpha[i] + (255 - px.roughAlpha[i]) * op));
@@ -2412,6 +2490,13 @@ export function applyPointGradient3DToLayer({ layer, cues, grad, brush, editingM
     if (fillCh.height) {
       px.height[i] = Math.round(px.height[i] * (1 - op) + heightByte * op);
       if (px.heightAlpha) px.heightAlpha[i] = Math.min(255, Math.round(px.heightAlpha[i] + (255 - px.heightAlpha[i]) * op));
+    }
+    for (let s = 0; s < scalarExtList.length; s++) {
+      const se = scalarExtList[s];
+      const oldS = se.buf.alpha[i] / 255;
+      const outS = op + oldS * (1 - op);
+      if (outS > 1e-4) se.buf.values[i] = Math.round((se.byteVal * op + se.buf.values[i] * oldS * (1 - op)) / outS);
+      se.buf.alpha[i] = Math.min(255, Math.round(outS * 255));
     }
   }
   return true;

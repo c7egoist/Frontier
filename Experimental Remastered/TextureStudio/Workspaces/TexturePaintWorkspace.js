@@ -18,6 +18,9 @@ import {
   PAINT_PBR_CHANNEL_ROWS,
   PAINT_PBR_CHANNEL_MAP,
   EXTENDED_PBR_KEYS,
+  EXTRA_COLOR_CHANNELS,
+  EXTRA_COLOR_KEYS,
+  ALL_PAINT_CHANNEL_ROWS,
   createDefaultChannelMap,
   createDefaultChannelOpacities,
   createDefaultChannelBlends,
@@ -601,6 +604,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       paintChannels: defaultChannels(),
       eraseChannels: defaultChannels(),
       fillChannels: defaultChannels(),
+      gradientChannels: defaultChannels(),
       extValues: createDefaultExtendedValues(),
       jitter: {
         size: 0.0,
@@ -1033,16 +1037,22 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   uvScene.add(uvQuadMesh);
   let uvWireLines = null;
 
-  // CPU fallback textures (used ONLY in headless Node mock without real WebGL2!)
+  // CPU fallback & auxiliary RGB channel textures (specularColor / sheenColor / emissive)
   let fallbackAlbTex;
   let fallbackRoughTex;
   let fallbackMetalTex;
   let fallbackNormalTex;
+  let fallbackEmissiveTex;
+  let fallbackSpecColorTex;
+  let fallbackSheenColorTex;
   function createFallbackTextures(texRes) {
     fallbackAlbTex?.dispose();
     fallbackRoughTex?.dispose();
     fallbackMetalTex?.dispose();
     fallbackNormalTex?.dispose();
+    fallbackEmissiveTex?.dispose();
+    fallbackSpecColorTex?.dispose();
+    fallbackSheenColorTex?.dispose();
     fallbackAlbTex = new THREE.DataTexture(new Uint8Array(texRes * texRes * 4), texRes, texRes, THREE.RGBAFormat);
     fallbackAlbTex.colorSpace = THREE.SRGBColorSpace; fallbackAlbTex.flipY = true; fallbackAlbTex.needsUpdate = true;
     fallbackRoughTex = new THREE.DataTexture(new Uint8Array(texRes * texRes * 4), texRes, texRes, THREE.RGBAFormat);
@@ -1051,6 +1061,12 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     fallbackMetalTex.flipY = true; fallbackMetalTex.needsUpdate = true;
     fallbackNormalTex = new THREE.DataTexture(new Uint8Array(texRes * texRes * 4), texRes, texRes, THREE.RGBAFormat);
     fallbackNormalTex.flipY = true; fallbackNormalTex.needsUpdate = true;
+    fallbackEmissiveTex = new THREE.DataTexture(new Uint8Array(texRes * texRes * 4), texRes, texRes, THREE.RGBAFormat);
+    fallbackEmissiveTex.colorSpace = THREE.SRGBColorSpace; fallbackEmissiveTex.flipY = true; fallbackEmissiveTex.needsUpdate = true;
+    fallbackSpecColorTex = new THREE.DataTexture(new Uint8Array(texRes * texRes * 4).fill(255), texRes, texRes, THREE.RGBAFormat);
+    fallbackSpecColorTex.colorSpace = THREE.SRGBColorSpace; fallbackSpecColorTex.flipY = true; fallbackSpecColorTex.needsUpdate = true;
+    fallbackSheenColorTex = new THREE.DataTexture(new Uint8Array(texRes * texRes * 4).fill(255), texRes, texRes, THREE.RGBAFormat);
+    fallbackSheenColorTex.colorSpace = THREE.SRGBColorSpace; fallbackSheenColorTex.flipY = true; fallbackSheenColorTex.needsUpdate = true;
   }
   createFallbackTextures(res);
 
@@ -1353,15 +1369,18 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   function getAnyExtendedChannelsMask() {
     const out = {};
     for (const k of EXTENDED_PBR_KEYS) out[k] = false;
+    for (const k of EXTRA_COLOR_KEYS) out[k] = false;
     for (const l of state.doc.layers) {
       if (!l.visible) continue;
       if (l.channels) {
         for (const k of EXTENDED_PBR_KEYS) if (l.channels[k]) out[k] = true;
+        for (const k of EXTRA_COLOR_KEYS) if (l.channels[k]) out[k] = true;
       }
       if (l.stamps?.some((s) => s.visible && s.channels)) {
         for (const s of l.stamps) {
           if (s.visible && s.channels) {
             for (const k of EXTENDED_PBR_KEYS) if (s.channels[k]) out[k] = true;
+            for (const k of EXTRA_COLOR_KEYS) if (s.channels[k]) out[k] = true;
           }
         }
       }
@@ -1534,6 +1553,86 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     Broadcast();
   });
 
+  function syncExtraColorMapsOnMaterial(isLit) {
+    if (!isLit) {
+      paintMat.specularColorMap = null;
+      paintMat.sheenColorMap = null;
+      paintMat.specularColor?.set?.("#ffffff");
+      paintMat.sheenColor?.set?.("#ffffff");
+      return;
+    }
+    const n = res * res;
+    const specLayers = state.doc.layers.filter((l) => l.visible && l.channels?.specularColor && l.pixels?.extValues?.specularColor);
+    const sheenLayers = state.doc.layers.filter((l) => l.visible && l.channels?.sheenColor && l.pixels?.extValues?.sheenColor);
+    const attLayers = state.doc.layers.filter((l) => l.visible && l.channels?.attenuationColor && l.pixels?.extValues?.attenuationColor);
+
+    if (specLayers.length) {
+      const dst = fallbackSpecColorTex.image.data;
+      dst.fill(255);
+      for (const l of specLayers) {
+        const src = l.pixels.extValues.specularColor;
+        const alp = l.pixels.extAlphas?.specularColor;
+        const op = l.opacity ?? 1;
+        for (let i = 0; i < n; i++) {
+          const a = ((alp ? alp[i] : 255) / 255) * op;
+          if (a <= 0.001) continue;
+          const i3 = i * 3, i4 = i * 4;
+          dst[i4] = Math.round(dst[i4] * (1 - a) + src[i3] * a);
+          dst[i4 + 1] = Math.round(dst[i4 + 1] * (1 - a) + src[i3 + 1] * a);
+          dst[i4 + 2] = Math.round(dst[i4 + 2] * (1 - a) + src[i3 + 2] * a);
+        }
+      }
+      fallbackSpecColorTex.needsUpdate = true;
+      if (paintMat.specularColorMap !== fallbackSpecColorTex) {
+        paintMat.specularColorMap = fallbackSpecColorTex;
+        paintMat.needsUpdate = true;
+      }
+      paintMat.specularColor?.set?.("#ffffff");
+    } else if (paintMat.specularColorMap) {
+      paintMat.specularColorMap = null;
+      paintMat.needsUpdate = true;
+    }
+
+    if (sheenLayers.length) {
+      const dst = fallbackSheenColorTex.image.data;
+      dst.fill(255);
+      for (const l of sheenLayers) {
+        const src = l.pixels.extValues.sheenColor;
+        const alp = l.pixels.extAlphas?.sheenColor;
+        const op = l.opacity ?? 1;
+        for (let i = 0; i < n; i++) {
+          const a = ((alp ? alp[i] : 255) / 255) * op;
+          if (a <= 0.001) continue;
+          const i3 = i * 3, i4 = i * 4;
+          dst[i4] = Math.round(dst[i4] * (1 - a) + src[i3] * a);
+          dst[i4 + 1] = Math.round(dst[i4 + 1] * (1 - a) + src[i3 + 1] * a);
+          dst[i4 + 2] = Math.round(dst[i4 + 2] * (1 - a) + src[i3 + 2] * a);
+        }
+      }
+      fallbackSheenColorTex.needsUpdate = true;
+      if (paintMat.sheenColorMap !== fallbackSheenColorTex) {
+        paintMat.sheenColorMap = fallbackSheenColorTex;
+        paintMat.needsUpdate = true;
+      }
+      paintMat.sheenColor?.set?.("#ffffff");
+      paintMat.sheen = Math.max(paintMat.sheen || 0, 0.85);
+    } else if (paintMat.sheenColorMap) {
+      paintMat.sheenColorMap = null;
+      paintMat.needsUpdate = true;
+    }
+
+    if (attLayers.length && paintMat.attenuationColor) {
+      const top = attLayers[attLayers.length - 1];
+      const src = top.pixels.extValues.attenuationColor;
+      let sr = 0, sg = 0, sb = 0, cnt = 0;
+      const step = Math.max(1, Math.floor(n / 512));
+      for (let i = 0; i < n; i += step) {
+        sr += src[i * 3]; sg += src[i * 3 + 1]; sb += src[i * 3 + 2]; cnt++;
+      }
+      if (cnt > 0) paintMat.attenuationColor.setRGB(sr / (cnt * 255), sg / (cnt * 255), sb / (cnt * 255));
+    }
+  }
+
   function refreshComposite() {
     if (!meshCues || disposed) return;
 
@@ -1558,12 +1657,12 @@ export function mountTexturePaintWorkspace(root, appBridge) {
           const ext = out.ext;
           const hasEm = !!(ext && (extMask.emissive || extMask.emissiveIntensity));
           const hasCoat = !!(ext && (extMask.clearcoat || extMask.coatRoughness));
-          const hasSheen = !!(ext && (extMask.sheen || extMask.sheenRoughness));
+          const hasSheen = !!(ext && (extMask.sheen || extMask.sheenRoughness || extMask.sheenColor));
           const hasIrid = !!(ext && (extMask.iridescence || extMask.iridescenceThickness));
-          const hasTrans = !!(ext && (extMask.transmission || extMask.thickness));
+          const hasTrans = !!(ext && (extMask.transmission || extMask.thickness || extMask.attenuationColor));
           const hasAo = !!(ext && extMask.ao);
           const hasOp = !!(ext && extMask.opacity);
-          const hasSpec = !!(ext && extMask.specular);
+          const hasSpec = !!(ext && (extMask.specular || extMask.specularColor));
           const hasAniso = !!(ext && extMask.anisotropy);
 
           paintMat.emissive.set(hasEm ? "#ffffff" : "#000000");
@@ -1633,6 +1732,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
             paintMat.needsUpdate = true;
           }
         }
+        syncExtraColorMapsOnMaterial(isLit);
         uvQuadMat.map = out.albedoTex;
         uvQuadMat.needsUpdate = true;
       }
@@ -1650,13 +1750,32 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     lastCpuComp = comp;
     fallbackAlbTex.image.data.set(comp.albedo); fallbackAlbTex.needsUpdate = true;
     fallbackNormalTex.image.data.set(comp.normal); fallbackNormalTex.needsUpdate = true;
-    const rData = fallbackRoughTex.image.data, mData = fallbackMetalTex.image.data;
+    const rData = fallbackRoughTex.image.data, mData = fallbackMetalTex.image.data, eData = fallbackEmissiveTex.image.data;
+    const emArr = comp.emissive || comp.ext?.emissive;
+    const emIntArr = comp.emissiveIntensity || comp.ext?.emissiveIntensity;
     for (let i = 0; i < res * res; i++) {
-      const i4 = i * 4;
+      const i4 = i * 4, i3 = i * 3;
       rData[i4] = rData[i4 + 1] = rData[i4 + 2] = comp.roughness[i]; rData[i4 + 3] = 255;
       mData[i4] = mData[i4 + 1] = mData[i4 + 2] = comp.metalness[i]; mData[i4 + 3] = 255;
+      if (emArr) {
+        const gain = emIntArr ? (emIntArr[i] / 255) * 4.0 : 1.0;
+        eData[i4] = Math.min(255, Math.round(emArr[i3] * gain));
+        eData[i4 + 1] = Math.min(255, Math.round(emArr[i3 + 1] * gain));
+        eData[i4 + 2] = Math.min(255, Math.round(emArr[i3 + 2] * gain));
+        eData[i4 + 3] = 255;
+      }
     }
     fallbackRoughTex.needsUpdate = true; fallbackMetalTex.needsUpdate = true;
+    if (emArr && extMask.emissive && isLit) {
+      fallbackEmissiveTex.needsUpdate = true;
+      paintMat.emissive.set("#ffffff");
+      paintMat.emissiveIntensity = 1.0;
+      paintMat.emissiveMap = fallbackEmissiveTex;
+    } else if (!isLit || !extMask.emissive) {
+      paintMat.emissiveMap = null;
+      paintMat.emissiveIntensity = 0;
+    }
+    syncExtraColorMapsOnMaterial(isLit);
     renderUvStampGizmo();
     update3DStampGizmo();
   }
@@ -2733,7 +2852,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       if (state.popupSubTab === "main") {
         ChannelMaskRow(pop, {
           Label: "Paint PBR Channels",
-          Channels: PAINT_PBR_CHANNEL_ROWS,
+          Channels: ALL_PAINT_CHANNEL_ROWS,
           StrictPresence: true,
           Transient: true,
           Read: () => state.brush.paintChannels,
@@ -2913,7 +3032,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     } else if (tool === "erase") {
       ChannelMaskRow(pop, {
         Label: "Erase PBR Channels",
-        Channels: PAINT_PBR_CHANNEL_ROWS,
+        Channels: ALL_PAINT_CHANNEL_ROWS,
         StrictPresence: true,
         Transient: true,
         Read: () => state.brush.eraseChannels,
@@ -2955,7 +3074,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
 
       ChannelMaskRow(pop, {
         Label: "Fill PBR Channels",
-        Channels: PAINT_PBR_CHANNEL_ROWS,
+        Channels: ALL_PAINT_CHANNEL_ROWS,
         StrictPresence: true,
         Transient: true,
         Read: () => state.brush.fillChannels,
@@ -2992,7 +3111,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
 
       ChannelMaskRow(pop, {
         Label: "Stamp PBR Channels",
-        Channels: PAINT_PBR_CHANNEL_ROWS,
+        Channels: ALL_PAINT_CHANNEL_ROWS,
         StrictPresence: true,
         Transient: true,
         Read: () => state.brush.paintChannels,
@@ -3095,6 +3214,27 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     } else if (tool === "gradient") {
       const g = state.pointGradient3D;
       pop.append(Construct("p", "property-hint", `Click 3D mesh to add colour points (${g.points.length}/12) or drag coloured 3D spheres in space.`));
+      ChannelMaskRow(pop, {
+        Label: "Gradient PBR Channels",
+        AddLabel: "Channel",
+        Channels: ALL_PAINT_CHANNEL_ROWS,
+        StrictPresence: true,
+        Transient: true,
+        Read: () => state.brush.gradientChannels,
+        Write: (next) => {
+          state.brush.gradientChannels = next;
+          if (state.gradientLiveUpdate) applyPointGradient3D({ pushUndo: false });
+          Broadcast();
+          rebuildInspector();
+          openToolPopup(null, null, true);
+        },
+      });
+      if (state.brush.gradientChannels?.emissive) {
+        makePopupSlider(pop, "Emissive Glow Power", 0.1, 4.0, 0.05, "x", () => state.brush.extValues.emissiveIntensity ?? 1.0, (v) => {
+          state.brush.extValues.emissiveIntensity = v;
+          if (state.gradientLiveUpdate) applyPointGradient3D({ pushUndo: false });
+        });
+      }
       makePopupToggle(pop, "Live Preview on Edit", () => state.gradientLiveUpdate, (v) => { state.gradientLiveUpdate = !!v; });
       makePopupSlider(pop, "Global Spread", 0.3, 2.5, 0.05, "x", () => g.falloff, (v) => {
         g.falloff = v;
@@ -3623,7 +3763,44 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     } else if (state.brush.tool === "gradient") {
       const g = state.pointGradient3D;
       const gSec = SectionCard(rightInner, { Title: "3D Space Gradient (D)", Glyph: "Gradient", Badge: `${g.points.length}/12 PTS`, Open: true });
-      gSec.Inner.append(Construct("p", "property-hint", "Click mesh to place 3D colour nodes or drag spheres in 3D space. Colours smoothly interpolate across 3D coordinates."));
+      gSec.Inner.append(Construct("p", "property-hint", "Click mesh to place 3D colour nodes or drag spheres in 3D space. Colours smoothly interpolate across enabled PBR colour channels."));
+      ChannelMaskRow(gSec.Inner, {
+        Label: "Target Colour & PBR Channels",
+        AddLabel: "Channel",
+        Channels: ALL_PAINT_CHANNEL_ROWS,
+        StrictPresence: true,
+        Read: () => state.brush.gradientChannels,
+        Write: (next) => {
+          state.brush.gradientChannels = next;
+          if (state.gradientLiveUpdate) applyPointGradient3D({ pushUndo: false });
+          Broadcast();
+          rebuildInspector();
+        },
+      });
+      const colChStrip = Construct("div", "chip-strip");
+      for (const [cLbl, cKey] of [["Albedo", "albedo"], ["Emissive", "emissive"], ["Spec Tint", "specularColor"], ["Sheen Tint", "sheenColor"], ["Subsurf Tint", "attenuationColor"]]) {
+        const cb = Construct("button", "chip-btn" + (state.brush.gradientChannels?.[cKey] ? " active" : ""), cLbl);
+        cb.type = "button";
+        cb.addEventListener("click", () => {
+          state.brush.gradientChannels = { ...(state.brush.gradientChannels || {}), [cKey]: !state.brush.gradientChannels?.[cKey] };
+          if (state.gradientLiveUpdate) applyPointGradient3D({ pushUndo: false });
+          Broadcast();
+          rebuildInspector();
+        });
+        colChStrip.append(cb);
+      }
+      gSec.Inner.append(colChStrip);
+      if (state.brush.gradientChannels?.emissive) {
+        SliderRow(gSec.Inner, {
+          Label: "Emissive Glow Power",
+          Minimum: 0.1, Maximum: 4.0, Step: 0.05,
+          Read: () => state.brush.extValues?.emissiveIntensity ?? 1.0,
+          Write: (v) => {
+            state.brush.extValues.emissiveIntensity = v;
+            if (state.gradientLiveUpdate) applyPointGradient3D({ pushUndo: false });
+          },
+        });
+      }
       SwitchRow(gSec.Inner, {
         Label: "Live Preview on Edit",
         Read: () => !!state.gradientLiveUpdate,
@@ -3766,7 +3943,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
         ChannelMaskRow(lSec.Inner, {
           Label: "Active PBR Channels",
           AddLabel: "Channel",
-          Channels: PAINT_PBR_CHANNEL_ROWS,
+          Channels: ALL_PAINT_CHANNEL_ROWS,
           StrictPresence: true,
           Read: () => layer.channels,
           Write: (next) => {
@@ -3781,7 +3958,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
         });
 
         const chTabDefs = [["All", "all"]];
-        for (const cDef of PAINT_PBR_CHANNELS) {
+        for (const cDef of [...PAINT_PBR_CHANNELS, ...EXTRA_COLOR_CHANNELS]) {
           if (layer.channels?.[cDef.key]) chTabDefs.push([cDef.short, cDef.key]);
         }
         SegmentedRow(lSec.Inner, {
@@ -4335,6 +4512,18 @@ export function mountTexturePaintWorkspace(root, appBridge) {
             const buf = l.pixels.extValues[k];
             if (!buf) continue;
             if (buf.length === oldR * oldR) l.pixels.extValues[k] = resampleGrayBuffer(buf, oldR, nextRes);
+            else if (buf.length === oldR * oldR * 3) {
+              const out3 = new Uint8ClampedArray(nextRes * nextRes * 3);
+              for (let y = 0; y < nextRes; y++) {
+                const sy = Math.min(oldR - 1, Math.floor((y / nextRes) * oldR));
+                for (let x = 0; x < nextRes; x++) {
+                  const sx = Math.min(oldR - 1, Math.floor((x / nextRes) * oldR));
+                  const si = (sy * oldR + sx) * 3, di = (y * nextRes + x) * 3;
+                  out3[di] = buf[si]; out3[di + 1] = buf[si + 1]; out3[di + 2] = buf[si + 2];
+                }
+              }
+              l.pixels.extValues[k] = out3;
+            }
           }
         }
         if (l.pixels.extAlphas) {
@@ -4893,6 +5082,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       envTex.dispose();
       fallbackAlbTex.dispose(); fallbackRoughTex.dispose();
       fallbackMetalTex.dispose(); fallbackNormalTex.dispose();
+      fallbackEmissiveTex.dispose(); fallbackSpecColorTex.dispose(); fallbackSheenColorTex.dispose();
       uvQuadMat.dispose(); uvQuadMesh.geometry.dispose();
       stampGizmo3D.geometry.dispose(); stampGizmo3D.material.dispose();
       shiftLine3D.geometry.dispose(); shiftLine3D.material.dispose();

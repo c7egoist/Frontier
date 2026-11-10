@@ -83,6 +83,170 @@ function detHash(a, b, seed) {
   return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 }
 
+const srgbChToLin = (v) => (v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
+const linChToSrgb = (v) => {
+  const c = clamp(v, 0, 1);
+  return c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
+};
+
+export function createDefaultPointGradient2D(colorA = "#eff4cf", colorB = "#5a7692", size = ARTWORK_SIZE) {
+  return {
+    schema: "alloy.point-gradient.v1",
+    space: "scene-2d",
+    falloff: 1.0,
+    background: colorB || "#1d222b",
+    points: [
+      { id: "pg_1", x: size * 0.34, y: size * 0.34, color: colorA || "#eff4cf", radius: size * 0.42, weight: 1.0 },
+      { id: "pg_2", x: size * 0.68, y: size * 0.68, color: colorB || "#5a7692", radius: size * 0.44, weight: 1.0 },
+    ],
+  };
+}
+
+export function normalizePointGradient2D(raw, fallbackA = "#eff4cf", fallbackB = "#5a7692", size = ARTWORK_SIZE) {
+  const src = raw && typeof raw === "object" ? raw : null;
+  const rawPts = Array.isArray(src?.points) ? src.points : [];
+  const points = (rawPts.length ? rawPts : createDefaultPointGradient2D(fallbackA, fallbackB, size).points)
+    .slice(0, 12)
+    .map((p, idx) => ({
+      id: typeof p?.id === "string" && p.id ? p.id : `pg_${idx + 1}`,
+      x: clamp(Number(p?.x ?? size * 0.5), -size * 0.5, size * 1.5),
+      y: clamp(Number(p?.y ?? size * 0.5), -size * 0.5, size * 1.5),
+      color: typeof p?.color === "string" && /^#[0-9a-f]{6}$/i.test(p.color) ? p.color.toLowerCase() : (fallbackA || "#eff4cf"),
+      radius: clamp(Number(p?.radius ?? size * 0.42), 16, size * 2.0),
+      weight: clamp(Number(p?.weight ?? 1.0), 0.02, 1.0),
+    }));
+  return {
+    schema: "alloy.point-gradient.v1",
+    space: "scene-2d",
+    falloff: clamp(Number(src?.falloff ?? 1.0), 0.2, 3.0),
+    background: typeof src?.background === "string" && /^#[0-9a-f]{6}$/i.test(src.background) ? src.background.toLowerCase() : (fallbackB || "#1d222b"),
+    points,
+  };
+}
+
+export function evaluatePointGradient2DAt(x, y, rawGrad, { size = ARTWORK_SIZE, seamless = false } = {}) {
+  const g = rawGrad?.schema === "alloy.point-gradient.v1" ? rawGrad : normalizePointGradient2D(rawGrad, "#eff4cf", "#5a7692", size);
+  const bg = hexToRgb(g.background).map((v) => srgbChToLin(v / 255));
+  const falloff = clamp(g.falloff ?? 1.0, 0.2, 3.0);
+  const half = size * 0.5;
+
+  let sr = 0, sg = 0, sb = 0, tw = 0, pw = 0;
+  for (let i = 0; i < g.points.length; i++) {
+    const pt = g.points[i];
+    if (pt.weight <= 0 || pt.radius <= 0) continue;
+    let dx = x - pt.x;
+    let dy = y - pt.y;
+    if (seamless) {
+      dx = ((((dx + half) % size) + size) % size) - half;
+      dy = ((((dy + half) % size) + size) % size) - half;
+    }
+    const r = Math.max(8, pt.radius * falloff);
+    const w = pt.weight * Math.exp(-(dx * dx + dy * dy) / (r * r));
+    if (w <= 1e-4) continue;
+    const [pr, pg, pb] = hexToRgb(pt.color).map((v) => srgbChToLin(v / 255));
+    sr += pr * w;
+    sg += pg * w;
+    sb += pb * w;
+    tw += w;
+    if (w > pw) pw = w;
+  }
+
+  let lr = bg[0], lg = bg[1], lb = bg[2];
+  if (tw > 1e-5) {
+    const blend = clamp(pw, 0, 1);
+    lr = bg[0] * (1 - blend) + (sr / tw) * blend;
+    lg = bg[1] * (1 - blend) + (sg / tw) * blend;
+    lb = bg[2] * (1 - blend) + (sb / tw) * blend;
+  }
+  return [
+    Math.round(linChToSrgb(lr) * 255),
+    Math.round(linChToSrgb(lg) * 255),
+    Math.round(linChToSrgb(lb) * 255),
+  ];
+}
+
+export function rasterizePointGradient2D(rawGrad, { res = 128, size = ARTWORK_SIZE, seamless = false } = {}) {
+  const g = normalizePointGradient2D(rawGrad, rawGrad?.background || "#eff4cf", "#5a7692", size);
+  const out = new Uint8ClampedArray(res * res * 4);
+  const bg = hexToRgb(g.background).map((v) => srgbChToLin(v / 255));
+  const falloff = clamp(g.falloff ?? 1.0, 0.2, 3.0);
+  const half = size * 0.5;
+  const pre = g.points.map((pt) => {
+    const rgb = hexToRgb(pt.color).map((v) => srgbChToLin(v / 255));
+    const r = Math.max(8, pt.radius * falloff);
+    return { x: pt.x, y: pt.y, r: rgb[0], g: rgb[1], b: rgb[2], invR2: 1 / (r * r), weight: pt.weight };
+  });
+
+  for (let py = 0; py < res; py++) {
+    const sy = ((py + 0.5) / res) * size;
+    for (let px = 0; px < res; px++) {
+      const sx = ((px + 0.5) / res) * size;
+      let sr = 0, sg = 0, sb = 0, tw = 0, pw = 0;
+      for (let k = 0; k < pre.length; k++) {
+        const pt = pre[k];
+        let dx = sx - pt.x;
+        let dy = sy - pt.y;
+        if (seamless) {
+          dx = ((((dx + half) % size) + size) % size) - half;
+          dy = ((((dy + half) % size) + size) % size) - half;
+        }
+        const w = pt.weight * Math.exp(-(dx * dx + dy * dy) * pt.invR2);
+        if (w <= 1e-4) continue;
+        sr += pt.r * w; sg += pt.g * w; sb += pt.b * w;
+        tw += w;
+        if (w > pw) pw = w;
+      }
+      let lr = bg[0], lg = bg[1], lb = bg[2];
+      if (tw > 1e-5) {
+        const blend = clamp(pw, 0, 1);
+        lr = bg[0] * (1 - blend) + (sr / tw) * blend;
+        lg = bg[1] * (1 - blend) + (sg / tw) * blend;
+        lb = bg[2] * (1 - blend) + (sb / tw) * blend;
+      }
+      const o = (py * res + px) * 4;
+      out[o] = Math.round(linChToSrgb(lr) * 255);
+      out[o + 1] = Math.round(linChToSrgb(lg) * 255);
+      out[o + 2] = Math.round(linChToSrgb(lb) * 255);
+      out[o + 3] = 255;
+    }
+  }
+  return out;
+}
+
+const ptGradCache = new Map();
+function getPointGradientCanvasAndUrl(rawGrad, { res = 128, size = ARTWORK_SIZE, seamless = false } = {}) {
+  const g = normalizePointGradient2D(rawGrad, "#eff4cf", "#5a7692", size);
+  const sig = `${res}|${size}|${seamless ? 1 : 0}|${JSON.stringify(g)}`;
+  if (ptGradCache.has(sig)) return ptGradCache.get(sig);
+  const rgba = rasterizePointGradient2D(g, { res, size, seamless });
+  let canvas = null;
+  let dataUrl = null;
+  try {
+    if (typeof document !== "undefined") {
+      canvas = document.createElement("canvas");
+      canvas.width = res;
+      canvas.height = res;
+      const ctx = canvas.getContext?.("2d");
+      if (ctx && typeof ctx.createImageData === "function" && typeof ctx.putImageData === "function") {
+        const img = ctx.createImageData(res, res);
+        img.data.set(rgba);
+        ctx.putImageData(img, 0, 0);
+        if (typeof canvas.toDataURL === "function") {
+          const url = canvas.toDataURL("image/png");
+          if (typeof url === "string" && url.startsWith("data:image/")) dataUrl = url;
+        }
+      }
+    }
+  } catch {
+    canvas = null;
+    dataUrl = null;
+  }
+  const entry = { canvas, dataUrl, grad: g };
+  if (ptGradCache.size > 48) ptGradCache.delete(ptGradCache.keys().next().value);
+  ptGradCache.set(sig, entry);
+  return entry;
+}
+
 export function createDefaultModifier(type = "noise-scale") {
   const id = nextArtworkId("mod");
   switch (type) {
@@ -229,7 +393,7 @@ export function createArtworkLayer(kind = "motif", overrides = {}) {
       fillRule: "evenodd",
       flipX: false,
       flipY: false,
-      fillMode: "solid", // "solid" | "linear" | "radial"
+      fillMode: "solid", // "solid" | "linear" | "radial" | "point"
       color: "#e8c27a",
       colorB: "#5a7692",
       fillStops: Array.isArray(overrides.shape?.fillStops)
@@ -238,9 +402,12 @@ export function createArtworkLayer(kind = "motif", overrides = {}) {
             { color: overrides.shape?.color || "#e8c27a", offset: 0 },
             { color: overrides.shape?.colorB || "#5a7692", offset: 1 },
           ],
+      fillPointGradient: overrides.shape?.fillPointGradient
+        ? normalizePointGradient2D(overrides.shape.fillPointGradient, overrides.shape?.color || "#e8c27a", overrides.shape?.colorB || "#5a7692")
+        : null,
       gradientAngle: 45,
       strokeColor: "#16181c",
-      strokeMode: "solid", // "solid" | "linear" | "radial"
+      strokeMode: "solid", // "solid" | "linear" | "radial" | "point"
       strokeColorB: "#eff4cf",
       strokeStops: Array.isArray(overrides.shape?.strokeStops)
         ? structuredClone(overrides.shape.strokeStops)
@@ -248,6 +415,9 @@ export function createArtworkLayer(kind = "motif", overrides = {}) {
             { color: overrides.shape?.strokeColor || "#16181c", offset: 0 },
             { color: overrides.shape?.strokeColorB || "#eff4cf", offset: 1 },
           ],
+      strokePointGradient: overrides.shape?.strokePointGradient
+        ? normalizePointGradient2D(overrides.shape.strokePointGradient, overrides.shape?.strokeColor || "#16181c", overrides.shape?.strokeColorB || "#eff4cf")
+        : null,
       strokeGradientAngle: 45,
       svgPath: "",
       pathNodes: Array.isArray(overrides.shape?.pathNodes) ? structuredClone(overrides.shape.pathNodes) : null,
@@ -548,6 +718,7 @@ export function evaluateLayerInstances(layer, docSize = ARTWORK_SIZE, mode = "pa
     colorB: layer.shape.fillMode && layer.shape.fillMode !== "solid" ? fillStops[fillStops.length - 1].color : (layer.shape.colorB || "#5a7692"),
     fillMode: layer.shape.fillMode || "solid",
     fillStops,
+    fillPointGradient: layer.shape.fillPointGradient || null,
     gradientAngle: layer.shape.gradientAngle ?? 45,
     opacity: 1,
     heightValue: layer.surface.height ?? 0.2,
@@ -557,6 +728,7 @@ export function evaluateLayerInstances(layer, docSize = ARTWORK_SIZE, mode = "pa
     outlineColor: layer.shape.strokeMode && layer.shape.strokeMode !== "solid" ? strokeStops[0].color : (layer.shape.strokeColor || "#16181c"),
     strokeMode: layer.shape.strokeMode || "solid",
     strokeStops,
+    strokePointGradient: layer.shape.strokePointGradient || null,
     strokeGradientAngle: layer.shape.strokeGradientAngle ?? 45,
     fillEnabled: layer.shape.fillEnabled !== false,
     fillRule: layer.shape.fillRule || "evenodd",
@@ -1036,7 +1208,19 @@ export function renderArtworkDocument(doc, targetSize = 512, { tileMode = "singl
   if (bg.enabled) {
     aCtx.save();
     aCtx.globalAlpha = clamp(bg.opacity ?? 1, 0, 1);
-    if (bg.fillMode === "linear" || bg.fillMode === "radial") {
+    if (bg.fillMode === "point") {
+      const ptRes = Math.min(256, Math.max(64, Math.round(targetSize * 0.5)));
+      const { canvas: pgCanvas } = getPointGradientCanvasAndUrl(
+        bg.fillPointGradient,
+        { res: ptRes, size, seamless: doc.mode === "pattern" },
+      );
+      if (pgCanvas) {
+        aCtx.drawImage(pgCanvas, 0, 0, targetSize, targetSize);
+      } else {
+        aCtx.fillStyle = bg.fillPointGradient?.background || bg.color || "#171a1f";
+        aCtx.fillRect(0, 0, targetSize, targetSize);
+      }
+    } else if (bg.fillMode === "linear" || bg.fillMode === "radial") {
       aCtx.translate(targetSize * 0.5, targetSize * 0.5);
       aCtx.fillStyle = resolveCanvasGradient(
         aCtx,
@@ -1111,6 +1295,7 @@ export function renderArtworkDocument(doc, targetSize = 512, { tileMode = "singl
           motifType: "square",
           fillMode: layer.shape.fillMode || "linear",
           fillStops: normalizeGradientStops(layer.shape.fillStops, layer.shape.color, layer.shape.colorB),
+          fillPointGradient: layer.shape.fillPointGradient || null,
           color: layer.shape.color,
           colorB: layer.shape.colorB,
           gradientAngle: layer.shape.gradientAngle ?? 45,
@@ -1122,6 +1307,24 @@ export function renderArtworkDocument(doc, targetSize = 512, { tileMode = "singl
           chipAmount: 0,
         }]
       : evaluateLayerInstances(layer, size, doc.mode);
+
+    const resolveScenePointPattern = (ctx, pointGrad, fallbackHex) => {
+      const ptRes = Math.min(256, Math.max(64, Math.round(targetSize * 0.5)));
+      const { canvas: pgCanvas } = getPointGradientCanvasAndUrl(pointGrad, {
+        res: ptRes,
+        size,
+        seamless: doc.mode === "pattern",
+      });
+      if (!pgCanvas || typeof ctx.createPattern !== "function") return fallbackHex;
+      const pat = ctx.createPattern(pgCanvas, "repeat");
+      if (!pat) return fallbackHex;
+      if (typeof DOMMatrix !== "undefined" && typeof pat.setTransform === "function" && typeof ctx.getTransform === "function") {
+        try {
+          pat.setTransform(ctx.getTransform().inverse().scale((scale * size) / ptRes));
+        } catch {}
+      }
+      return pat;
+    };
 
     // Draw each instance; wrap across tile edges if pattern mode
     const wraps = doc.mode === "pattern"
@@ -1155,11 +1358,15 @@ export function renderArtworkDocument(doc, targetSize = 512, { tileMode = "singl
             ctx.font = `${t.fontWeight || 600} ${t.fontSize || 48}px "${t.fontFamily || "DM Sans"}", sans-serif`;
             ctx.textAlign = t.align || "center";
             ctx.textBaseline = "middle";
-            ctx.fillStyle = fillStyle;
+            ctx.fillStyle = isAlbedo && inst.fillMode === "point"
+              ? resolveScenePointPattern(ctx, inst.fillPointGradient, inst.color)
+              : fillStyle;
             ctx.fillText(t.value || "", 0, 0);
             if (isAlbedo && inst.outlineWidth > 0) {
               ctx.lineWidth = inst.outlineWidth;
-              ctx.strokeStyle = resolveStrokeStyle(ctx, inst, true);
+              ctx.strokeStyle = inst.strokeMode === "point"
+                ? resolveScenePointPattern(ctx, inst.strokePointGradient, inst.outlineColor)
+                : resolveStrokeStyle(ctx, inst, true);
               ctx.strokeText(t.value || "", 0, 0);
             }
           } else if (inst.motifType === "svg-path" && inst.svgPath && typeof Path2D !== "undefined") {
@@ -1170,9 +1377,11 @@ export function renderArtworkDocument(doc, targetSize = 512, { tileMode = "singl
             ctx.translate(-50, -50);
             const p2d = new Path2D(inst.svgPath);
             if (inst.fillEnabled !== false) {
-              ctx.fillStyle = isAlbedo && (inst.fillMode === "linear" || inst.fillMode === "radial")
-                ? resolveCanvasGradient(ctx, inst.fillMode, inst.fillStops, inst.gradientAngle, 100, 100, inst.color, inst.colorB, 50, 50)
-                : fillStyle;
+              ctx.fillStyle = isAlbedo && inst.fillMode === "point"
+                ? resolveScenePointPattern(ctx, inst.fillPointGradient, inst.color)
+                : isAlbedo && (inst.fillMode === "linear" || inst.fillMode === "radial")
+                  ? resolveCanvasGradient(ctx, inst.fillMode, inst.fillStops, inst.gradientAngle, 100, 100, inst.color, inst.colorB, 50, 50)
+                  : fillStyle;
               ctx.fill(p2d, inst.fillRule === "nonzero" ? "nonzero" : "evenodd");
             }
             if (inst.outlineWidth > 0) {
@@ -1180,9 +1389,11 @@ export function renderArtworkDocument(doc, targetSize = 512, { tileMode = "singl
               ctx.lineJoin = "round";
               ctx.lineWidth = inst.outlineWidth / Math.max(0.15, (sx + sy) * 0.5);
               ctx.strokeStyle = isAlbedo
-                ? (inst.strokeMode === "linear" || inst.strokeMode === "radial"
-                    ? resolveCanvasGradient(ctx, inst.strokeMode, inst.strokeStops, inst.strokeGradientAngle, 100, 100, inst.outlineColor, inst.colorB, 50, 50)
-                    : (inst.outlineColor || inst.color || "#141619"))
+                ? (inst.strokeMode === "point"
+                    ? resolveScenePointPattern(ctx, inst.strokePointGradient, inst.outlineColor)
+                    : inst.strokeMode === "linear" || inst.strokeMode === "radial"
+                      ? resolveCanvasGradient(ctx, inst.strokeMode, inst.strokeStops, inst.strokeGradientAngle, 100, 100, inst.outlineColor, inst.colorB, 50, 50)
+                      : (inst.outlineColor || inst.color || "#141619"))
                 : fillStyle;
               ctx.stroke(p2d);
             }
@@ -1190,14 +1401,18 @@ export function renderArtworkDocument(doc, targetSize = 512, { tileMode = "singl
           } else {
             drawMotifPath(ctx, inst);
             if (inst.fillEnabled !== false && inst.motifType !== "line") {
-              ctx.fillStyle = fillStyle;
+              ctx.fillStyle = isAlbedo && inst.fillMode === "point"
+                ? resolveScenePointPattern(ctx, inst.fillPointGradient, inst.color)
+                : fillStyle;
               ctx.fill("evenodd");
             }
             if (inst.outlineWidth > 0 || inst.motifType === "line") {
               ctx.lineCap = "round";
               ctx.lineJoin = "round";
               ctx.lineWidth = Math.max(1, inst.outlineWidth || 4);
-              ctx.strokeStyle = resolveStrokeStyle(ctx, inst, isAlbedo);
+              ctx.strokeStyle = isAlbedo && inst.strokeMode === "point"
+                ? resolveScenePointPattern(ctx, inst.strokePointGradient, inst.outlineColor)
+                : resolveStrokeStyle(ctx, inst, isAlbedo);
               ctx.stroke();
             }
           }
@@ -1535,21 +1750,91 @@ function pushSvgGradientDef(gradDefs, id, mode, stops, angle = 45, fallbackA = "
   }
 }
 
-function buildSvgMotifMarkup(inst, fillAttr, strokeAttr, strokeW, gradDefs, gid) {
+function pushSvgPointGradientPatternDef(gradDefs, id, rawGrad, {
+  size = ARTWORK_SIZE,
+  seamless = false,
+  patternTransform = "",
+  res = 128,
+} = {}) {
+  const { dataUrl, grad } = getPointGradientCanvasAndUrl(rawGrad, { res, size, seamless });
+  const xfAttr = patternTransform ? ` patternTransform="${patternTransform}"` : "";
+  if (dataUrl) {
+    gradDefs.push(`<pattern id="${id}" patternUnits="userSpaceOnUse" x="0" y="0" width="${size}" height="${size}"${xfAttr}><image x="0" y="0" width="${size}" height="${size}" preserveAspectRatio="none" href="${dataUrl}"/></pattern>`);
+    return;
+  }
+  // Headless Node SVG fallback when Canvas2D image encoder isn't present
+  const bg = escapeXml(grad.background || "#1d222b");
+  const wraps = seamless
+    ? [[0, 0], [-size, 0], [size, 0], [0, -size], [0, size], [-size, -size], [size, -size], [-size, size], [size, size]]
+    : [[0, 0]];
+  const radDefs = [];
+  const blobs = [];
+  grad.points.forEach((pt, idx) => {
+    const rid = `${id}-r${idx}`;
+    const r = Math.max(8, pt.radius * (grad.falloff || 1));
+    const col = escapeXml(pt.color);
+    const op = clamp(pt.weight ?? 1, 0, 1).toFixed(3);
+    radDefs.push(`<radialGradient id="${rid}"><stop offset="0%" stop-color="${col}" stop-opacity="${op}"/><stop offset="100%" stop-color="${col}" stop-opacity="0"/></radialGradient>`);
+    for (const [wx, wy] of wraps) {
+      blobs.push(`<circle cx="${(pt.x + wx).toFixed(1)}" cy="${(pt.y + wy).toFixed(1)}" r="${r.toFixed(1)}" fill="url(#${rid})"/>`);
+    }
+  });
+  gradDefs.push(...radDefs, `<pattern id="${id}" patternUnits="userSpaceOnUse" x="0" y="0" width="${size}" height="${size}"${xfAttr}><rect width="${size}" height="${size}" fill="${bg}"/>${blobs.join("")}</pattern>`);
+}
+
+function buildSvgMotifMarkup(inst, fillAttr, strokeAttr, strokeW, gradDefs, gid, sceneCtx = null) {
   const w = Math.max(1, inst.width), h = Math.max(1, inst.height);
   const hw = w * 0.5, hh = h * 0.5;
   const t = inst.motifType || "circle";
+  const sceneSize = sceneCtx?.size || ARTWORK_SIZE;
+  const isSeamless = !!sceneCtx?.seamless;
+  const buildInverseSceneTransform = (forSvgPath = false) => {
+    if (!sceneCtx) return "";
+    const px = Number(sceneCtx.px ?? inst.x ?? 256);
+    const py = Number(sceneCtx.py ?? inst.y ?? 256);
+    const rot = Number(inst.rotation || 0);
+    const fx = inst.flipX ? -1 : 1;
+    const fy = inst.flipY ? -1 : 1;
+    const base = `scale(${fx} ${fy}) rotate(${(-rot).toFixed(3)}) translate(${(-px).toFixed(3)} ${(-py).toFixed(3)})`;
+    if (forSvgPath) {
+      return `translate(50 50) scale(${(100 / Math.max(1, w)).toFixed(5)} ${(100 / Math.max(1, h)).toFixed(5)}) ${base}`;
+    }
+    return base;
+  };
+
   let effectiveFill = inst.fillEnabled === false || t === "line" ? "none" : fillAttr;
-  if (effectiveFill !== "none" && (inst.fillMode === "linear" || inst.fillMode === "radial")) {
-    const id = `${gid}-g`;
-    pushSvgGradientDef(gradDefs, id, inst.fillMode, inst.fillStops, inst.gradientAngle, inst.color, inst.colorB || "#1a1e24");
-    effectiveFill = `url(#${id})`;
+  if (effectiveFill !== "none") {
+    if (inst.fillMode === "point") {
+      const id = `${gid}-pg`;
+      pushSvgPointGradientPatternDef(gradDefs, id, inst.fillPointGradient, {
+        size: sceneSize,
+        seamless: isSeamless,
+        patternTransform: buildInverseSceneTransform(t === "svg-path" && !!inst.svgPath),
+        res: sceneCtx?.pointRes || 128,
+      });
+      effectiveFill = `url(#${id})`;
+    } else if (inst.fillMode === "linear" || inst.fillMode === "radial") {
+      const id = `${gid}-g`;
+      pushSvgGradientDef(gradDefs, id, inst.fillMode, inst.fillStops, inst.gradientAngle, inst.color, inst.colorB || "#1a1e24");
+      effectiveFill = `url(#${id})`;
+    }
   }
   let effectiveStroke = strokeAttr;
-  if ((strokeW > 0 || t === "line") && (inst.strokeMode === "linear" || inst.strokeMode === "radial")) {
-    const sid = `${gid}-sg`;
-    pushSvgGradientDef(gradDefs, sid, inst.strokeMode, inst.strokeStops, inst.strokeGradientAngle, strokeAttr, inst.strokeStops?.[inst.strokeStops.length - 1]?.color || "#eff4cf");
-    effectiveStroke = `url(#${sid})`;
+  if (strokeW > 0 || t === "line") {
+    if (inst.strokeMode === "point") {
+      const sid = `${gid}-spg`;
+      pushSvgPointGradientPatternDef(gradDefs, sid, inst.strokePointGradient, {
+        size: sceneSize,
+        seamless: isSeamless,
+        patternTransform: buildInverseSceneTransform(t === "svg-path" && !!inst.svgPath),
+        res: sceneCtx?.pointRes || 128,
+      });
+      effectiveStroke = `url(#${sid})`;
+    } else if (inst.strokeMode === "linear" || inst.strokeMode === "radial") {
+      const sid = `${gid}-sg`;
+      pushSvgGradientDef(gradDefs, sid, inst.strokeMode, inst.strokeStops, inst.strokeGradientAngle, strokeAttr, inst.strokeStops?.[inst.strokeStops.length - 1]?.color || "#eff4cf");
+      effectiveStroke = `url(#${sid})`;
+    }
   }
   const common = `fill="${effectiveFill}" fill-rule="${inst.fillRule === "nonzero" ? "nonzero" : "evenodd"}" stroke="${strokeW > 0 || t === "line" ? effectiveStroke : "none"}" stroke-width="${t === "line" ? Math.max(1, strokeW || 4) : strokeW}" stroke-linecap="round" stroke-linejoin="round"`;
 
@@ -1634,7 +1919,7 @@ function buildSvgMotifMarkup(inst, fillAttr, strokeAttr, strokeW, gradDefs, gid)
   return `<ellipse cx="0" cy="0" rx="${hw}" ry="${hh}" ${common}/>`;
 }
 
-export function artworkDocumentLayersSvg(doc, { idPrefix = "art" } = {}) {
+export function artworkDocumentLayersSvg(doc, { idPrefix = "art", pointRes = 128 } = {}) {
   const size = doc.size || ARTWORK_SIZE;
   const gradDefs = [];
   const groups = [];
@@ -1656,6 +1941,7 @@ export function artworkDocumentLayersSvg(doc, { idPrefix = "art" } = {}) {
           x: size * 0.5, y: size * 0.5, width: size, height: size, rotation: 0,
           motifType: "square", fillMode: layer.shape.fillMode || "linear",
           fillStops: normalizeGradientStops(layer.shape.fillStops, layer.shape.color, layer.shape.colorB),
+          fillPointGradient: layer.shape.fillPointGradient || null,
           color: layer.shape.color, colorB: layer.shape.colorB, gradientAngle: layer.shape.gradientAngle ?? 45,
           opacity: 1, fillEnabled: true, outlineWidth: 0,
         }]
@@ -1672,14 +1958,32 @@ export function artworkDocumentLayersSvg(doc, { idPrefix = "art" } = {}) {
           const t = inst.text;
           const anchor = t.align === "left" ? "start" : t.align === "right" ? "end" : "middle";
           let textFill = inst.color || "#e8c27a";
-          if (inst.fillMode === "linear" || inst.fillMode === "radial") {
+          if (inst.fillMode === "point") {
+            const tid = `${idPrefix}-${instSeq++}-tpg`;
+            const inv = `scale(${inst.flipX ? -1 : 1} ${inst.flipY ? -1 : 1}) rotate(${(-(inst.rotation || 0)).toFixed(3)}) translate(${(-px).toFixed(3)} ${(-py).toFixed(3)})`;
+            pushSvgPointGradientPatternDef(gradDefs, tid, inst.fillPointGradient, {
+              size,
+              seamless: doc.mode === "pattern",
+              patternTransform: inv,
+              res: pointRes,
+            });
+            textFill = `url(#${tid})`;
+          } else if (inst.fillMode === "linear" || inst.fillMode === "radial") {
             const tid = `${idPrefix}-${instSeq++}-tg`;
             pushSvgGradientDef(gradDefs, tid, inst.fillMode, inst.fillStops, inst.gradientAngle, inst.color, inst.colorB);
             textFill = `url(#${tid})`;
           }
           parts.push(`<text transform="${xf}" opacity="${clamp(inst.opacity, 0, 1)}" text-anchor="${anchor}" dominant-baseline="central" font-family="${escapeXml(t.fontFamily || "DM Sans")}, sans-serif" font-weight="${t.fontWeight || 600}" font-size="${t.fontSize || 48}" letter-spacing="${t.letterSpacing || 0}" fill="${textFill}" ${inst.outlineWidth > 0 ? `stroke="${inst.outlineColor || "#141619"}" stroke-width="${inst.outlineWidth}"` : ""}>${escapeXml(t.value || "")}</text>`);
         } else {
-          const markup = buildSvgMotifMarkup(inst, inst.color || "#e8c27a", inst.outlineColor || inst.color || "#141619", inst.outlineWidth || 0, gradDefs, `${idPrefix}-${instSeq++}`);
+          const markup = buildSvgMotifMarkup(
+            inst,
+            inst.color || "#e8c27a",
+            inst.outlineColor || inst.color || "#141619",
+            inst.outlineWidth || 0,
+            gradDefs,
+            `${idPrefix}-${instSeq++}`,
+            { px, py, size, seamless: doc.mode === "pattern", pointRes },
+          );
           parts.push(`<g transform="${xf}" opacity="${clamp(inst.opacity, 0, 1)}">${markup}</g>`);
         }
       }
@@ -1689,19 +1993,31 @@ export function artworkDocumentLayersSvg(doc, { idPrefix = "art" } = {}) {
   return { defs: gradDefs.join(""), body: groups.join("") };
 }
 
+export function artworkDocumentBackgroundSvg(doc, { id = "doc-bg-grad", pointRes = 128 } = {}) {
+  const size = doc.size || ARTWORK_SIZE;
+  const bg = doc.background || {};
+  if (!bg.enabled) return { defs: "", rect: "" };
+  const extraDefs = [];
+  let bgFill = bg.color || "#171a1f";
+  if (bg.fillMode === "point") {
+    pushSvgPointGradientPatternDef(extraDefs, id, bg.fillPointGradient, {
+      size,
+      seamless: doc.mode === "pattern",
+      res: pointRes,
+    });
+    bgFill = `url(#${id})`;
+  } else if (bg.fillMode === "linear" || bg.fillMode === "radial") {
+    pushSvgGradientDef(extraDefs, id, bg.fillMode, bg.fillStops, bg.gradientAngle ?? 45, bg.color || "#171a1f", bg.colorB || "#2b3340");
+    bgFill = `url(#${id})`;
+  }
+  const rect = `<rect x="0" y="0" width="${size}" height="${size}" fill="${bgFill}" opacity="${clamp(bg.opacity ?? 1, 0, 1)}"/>`;
+  return { defs: extraDefs.join(""), rect };
+}
+
 export function artworkDocumentToSvgString(doc, { width = 512, height = 512, showBg = true } = {}) {
   const size = doc.size || ARTWORK_SIZE;
   const { defs, body } = artworkDocumentLayersSvg(doc);
-  const bg = doc.background || {};
-  const extraDefs = [];
-  let bgFill = bg.color || "#171a1f";
-  if (showBg && bg.enabled && (bg.fillMode === "linear" || bg.fillMode === "radial")) {
-    pushSvgGradientDef(extraDefs, "doc-bg-grad", bg.fillMode, bg.fillStops, bg.gradientAngle ?? 45, bg.color || "#171a1f", bg.colorB || "#2b3340");
-    bgFill = "url(#doc-bg-grad)";
-  }
-  const bgRect = showBg && bg.enabled
-    ? `<rect width="${size}" height="${size}" fill="${bgFill}" opacity="${clamp(bg.opacity ?? 1, 0, 1)}"/>`
-    : "";
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${size} ${size}"><defs>${extraDefs.join("")}${defs}</defs>${bgRect}${body}</svg>`;
+  const bg = showBg ? artworkDocumentBackgroundSvg(doc, { id: "doc-bg-grad" }) : { defs: "", rect: "" };
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${size} ${size}"><defs>${bg.defs}${defs}</defs>${bg.rect}${body}</svg>`;
 }
 

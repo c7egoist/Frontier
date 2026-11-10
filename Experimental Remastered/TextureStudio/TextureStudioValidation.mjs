@@ -2325,4 +2325,164 @@ await suite("20. Pattern & Stamp Curve/Pen/Multi-Stop Gradients, Texture Paint S
   sphereGeo.dispose();
 });
 
+await suite("21. Multi-Channel Colour/Emissive 3D Space Gradient, Scene-Space Point Gradient (Pattern/Stamp) & Removal of Redundant Bottom Previews", async () => {
+  const {
+    createDefaultPointGradient2D,
+    evaluatePointGradient2DAt,
+    rasterizePointGradient2D,
+    createArtworkDocument,
+    createArtworkLayer,
+    artworkDocumentToSvgString,
+    evaluateArtworkDocument,
+  } = await import("./Engine/Patterns/ArtworkStackEngine.js");
+  const {
+    EXTRA_COLOR_KEYS,
+    ALL_PAINT_CHANNEL_ROWS,
+    createPaintDocument,
+    createPaintLayer,
+    buildMeshPaintIndex,
+    buildDefaultMeshCues,
+    applyPointGradient3DToLayer,
+    compositePaintDocument,
+  } = await import("./Engine/TexturePaintEngine.js");
+  const studio = globalThis.window.__frontierTextureStudio;
+
+  // 21a. Texture Paint 3D Space Gradient multi-channel colour + emissive engine verification
+  assert.equal(EXTRA_COLOR_KEYS.length, 3, "EXTRA_COLOR_KEYS must expose specularColor, sheenColor, attenuationColor");
+  assert.equal(ALL_PAINT_CHANNEL_ROWS.length, 22, "ALL_PAINT_CHANNEL_ROWS must include all 19 core PBR + 3 extra colour channels");
+
+  const sphere = new THREE.SphereGeometry(1, 20, 14);
+  const idx = buildMeshPaintIndex(sphere);
+  const cues = buildDefaultMeshCues(sphere, idx, 128);
+  const pDoc = createPaintDocument(128);
+  const pLayer = createPaintLayer("paint", { res: 128, name: "MultiColGrad" });
+  pDoc.layers.push(pLayer);
+  pDoc.selectedLayerId = pLayer.id;
+
+  const gradDef = {
+    falloff: 1.0,
+    background: "#101820",
+    points: [
+      { id: "c1", position: [1, 0, 0], color: "#ff3300", radius: 2.0, weight: 1.0 },
+      { id: "c2", position: [-1, 0, 0], color: "#0099ff", radius: 2.0, weight: 1.0 },
+    ],
+  };
+  const multiBrush = {
+    tool: "gradient",
+    opacity: 1,
+    gradientChannels: {
+      albedo: true,
+      roughness: false,
+      metalness: false,
+      height: false,
+      emissive: true,
+      specularColor: true,
+      sheenColor: true,
+      attenuationColor: true,
+    },
+    extValues: { emissiveIntensity: 2.0, sheen: 0.9, transmission: 0.8 },
+  };
+  assert.equal(applyPointGradient3DToLayer({ layer: pLayer, cues, grad: gradDef, brush: multiBrush }), true);
+  assert.equal(pLayer.channels.emissive, true, "Applying 3D gradient with emissive enabled must auto-enable emissive channel on layer");
+  assert.equal(pLayer.channels.emissiveIntensity, true, "Applying 3D gradient with emissive enabled must auto-enable emissiveIntensity on layer");
+  assert.equal(pLayer.channels.specularColor, true, "Applying 3D gradient with specularColor must activate specularColor channel");
+  assert.equal(pLayer.channels.sheenColor, true, "Applying 3D gradient with sheenColor must activate sheenColor channel");
+  assert.equal(pLayer.channels.sheen, true, "Applying 3D gradient with sheenColor must auto-enable sheen scalar");
+  assert.equal(pLayer.channels.attenuationColor, true, "Applying 3D gradient with attenuationColor must activate attenuationColor channel");
+  assert.equal(pLayer.channels.transmission, true, "Applying 3D gradient with attenuationColor must auto-enable transmission scalar");
+
+  let nonZeroEmissive = 0;
+  let nonZeroSpecCol = 0;
+  for (let i = 0; i < 128 * 128; i++) {
+    const i3 = i * 3;
+    if (pLayer.pixels.extValues.emissive[i3] + pLayer.pixels.extValues.emissive[i3 + 2] > 20) nonZeroEmissive++;
+    if (pLayer.pixels.extValues.specularColor[i3] + pLayer.pixels.extValues.specularColor[i3 + 2] > 20) nonZeroSpecCol++;
+  }
+  assert(nonZeroEmissive > 128 * 48, `3D Space Gradient must populate emissive RGB texels (got ${nonZeroEmissive})`);
+  assert(nonZeroSpecCol > 128 * 48, `3D Space Gradient must populate specularColor RGB texels (got ${nonZeroSpecCol})`);
+
+  const comp = compositePaintDocument(pDoc, cues);
+  let compEmissiveSum = 0;
+  for (let i = 0; i < comp.emissive.length; i++) compEmissiveSum += comp.emissive[i];
+  assert(compEmissiveSum > 10000, "compositePaintDocument must composite emissive RGB buffer from 3D Space Gradient");
+
+  // 21b. Texture Paint UI channel toggle controls for 3D Space Gradient
+  studio.switchWorkspace("paint");
+  globalThis.window.dispatchEvent({ type: "keydown", key: "d", preventDefault() {} });
+  assert.equal(studio.getSnapshot().tool, "gradient");
+  const emChip = [...globalThis.document.querySelectorAll(".chip-btn")].find((b) => (b.textContent || "").trim() === "Emissive");
+  assert(emChip, "Texture Paint 3D Gradient inspector must expose 'Emissive' quick channel toggle chip");
+  emChip.click();
+  assert(emChip.className.includes("active") || [...globalThis.document.querySelectorAll(".chip-btn")].find((b) => (b.textContent || "").trim() === "Emissive").className.includes("active"),
+    "Clicking Emissive channel toggle on 3D Space Gradient must activate Emissive");
+
+  // Verify Emissive Glow Power appears cleanly once Emissive is enabled in 3D Gradient Inspector
+  const propLabels = [...globalThis.document.querySelectorAll(".property-label")].map((el) => el.textContent || "");
+  assert(propLabels.some((t) => t.includes("Emissive Glow Power")), "Enabling Emissive on 3D Space Gradient must surface Emissive Glow Power slider");
+  assert(propLabels.some((t) => t.includes("Target Colour & PBR Channels")), "3D Space Gradient inspector must expose full Target Colour & PBR Channels selector");
+
+  // 21c. Pattern & Stamp Engine Scene-Space Point Gradient (follows scene coordinates across transforms)
+  const ptGrad = createDefaultPointGradient2D("#ff2244", "#1188ff", 512);
+  ptGrad.points[0] = { id: "p0", x: 160, y: 200, color: "#ff2244", radius: 220, weight: 1.0 };
+  ptGrad.points[1] = { id: "p1", x: 360, y: 320, color: "#1188ff", radius: 220, weight: 1.0 };
+  const cLeft = evaluatePointGradient2DAt(160, 200, ptGrad, { size: 512, seamless: true });
+  const cRight = evaluatePointGradient2DAt(360, 320, ptGrad, { size: 512, seamless: true });
+  assert(cLeft[0] > cLeft[2] + 60, `Point Gradient at point 0 must skew warm/red (got ${cLeft})`);
+  assert(cRight[2] > cRight[0] + 60, `Point Gradient at point 1 must skew cool/blue (got ${cRight})`);
+
+  const patDoc = createArtworkDocument("pattern");
+  patDoc.layers = [
+    createArtworkLayer("motif", {
+      name: "Rotated Scene-Grad Motif",
+      transform: { x: 256, y: 256, width: 320, height: 320, rotation: 33 },
+      shape: { motifType: "square", fillMode: "point", fillPointGradient: structuredClone(ptGrad) },
+    }),
+  ];
+  const svgSceneA = artworkDocumentToSvgString(patDoc, { width: 512, height: 512 });
+  assert(svgSceneA.includes("patternUnits=\"userSpaceOnUse\""), "Scene Point Gradient SVG must emit userSpaceOnUse <pattern>");
+  assert(svgSceneA.includes("patternTransform="), "Scene Point Gradient SVG must apply inverse patternTransform so gradient stays anchored to scene coordinates");
+
+  const evalSceneA = evaluateArtworkDocument(patDoc, 128);
+  const rgbaBefore = rasterizePointGradient2D(patDoc.layers[0].shape.fillPointGradient, { res: 64, size: 512, seamless: true });
+  const cBeforeAt420 = evaluatePointGradient2DAt(420, 420, patDoc.layers[0].shape.fillPointGradient, { size: 512, seamless: true });
+  // Move point 0 to (420, 420) and verify field colors & rasterized gradient follow the moved scene point
+  patDoc.layers[0].shape.fillPointGradient.points[0] = { id: "p0", x: 420, y: 420, color: "#22ff55", radius: 220, weight: 1.0 };
+  const cMoved = evaluatePointGradient2DAt(420, 420, patDoc.layers[0].shape.fillPointGradient, { size: 512, seamless: true });
+  assert(cMoved[1] > cMoved[0] + 100 && cMoved[1] > cMoved[2] && cMoved[1] > cBeforeAt420[1] + 40, `Moving point 0 to (420, 420) must follow scene point with green peak (before=${cBeforeAt420}, after=${cMoved})`);
+  const rgbaAfter = rasterizePointGradient2D(patDoc.layers[0].shape.fillPointGradient, { res: 64, size: 512, seamless: true });
+  assert.notDeepEqual(rgbaBefore, rgbaAfter, "Moving Point Gradient node in scene must immediately update rasterized gradient field");
+  const evalSceneB = evaluateArtworkDocument(patDoc, 128);
+  assert.equal(evalSceneA.albedo.length, 128 * 128 * 4);
+  assert.equal(evalSceneB.albedo.length, 128 * 128 * 4);
+
+  // 21d. Pattern & Stamp Workspace: Point Grad (F) scene clicking + dragging + NO extra bottom previews
+  for (const ws of ["pattern", "stamp"]) {
+    studio.switchWorkspace(ws);
+    assert.equal(globalThis.document.querySelectorAll(".se-bottom-bar").length, 0, `${ws} Studio must remove redundant .se-bottom-bar preview strip`);
+    assert.equal(globalThis.document.querySelectorAll(".channel-thumbs").length, 0, `${ws} Studio must not display extra bottom .channel-thumbs previews`);
+    assert.equal(globalThis.document.querySelectorAll(".channel-tile").length, 0, `${ws} Studio must not display extra bottom .channel-tile previews`);
+
+    const btnText = (b) => `${b.title || ""} ${b.textContent || ""}`;
+    const ptGradBtn = [...globalThis.document.querySelectorAll(".vp-tool-circle"), ...globalThis.document.querySelectorAll(".se-tool-btn")].find((b) => /Point Grad/i.test(btnText(b)));
+    assert(ptGradBtn, `${ws} Studio toolbar must provide 'Point Grad (F)' tool`);
+    ptGradBtn.click();
+    assert.equal(studio.getSnapshot().vectorTool, "gradient", `${ws} Studio must switch to 'gradient' tool on Point Grad click`);
+
+    const seCanvas = globalThis.document.querySelector(".se-canvas");
+    seCanvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 512, height: 512 });
+    const svgBeforeClick = seCanvas.innerHTML;
+    seCanvas.dispatchEvent({ type: "pointerdown", button: 0, clientX: 140, clientY: 160, shiftKey: false, preventDefault() {} });
+    globalThis.window.dispatchEvent({ type: "pointerup", clientX: 140, clientY: 160 });
+    seCanvas.dispatchEvent({ type: "pointerdown", button: 0, clientX: 360, clientY: 340, shiftKey: false, preventDefault() {} });
+    seCanvas.dispatchEvent({ type: "pointermove", clientX: 390, clientY: 360 });
+    globalThis.window.dispatchEvent({ type: "pointerup", clientX: 390, clientY: 360 });
+
+    const svgAfterDrag = seCanvas.innerHTML;
+    assert(svgAfterDrag.includes("se-ptgrad-overlay") && svgAfterDrag.includes("data-ptgrad-id"), `${ws} Studio must render interactive scene-space Point Gradient handles in .se-canvas`);
+    assert.notEqual(svgBeforeClick, svgAfterDrag, `${ws} Studio Point Gradient placement & dragging must update live scene SVG`);
+  }
+
+  sphere.dispose();
+});
+
 console.log(`\nALL ${results.length} VALIDATION SUITES PASSED CLEANLY`);

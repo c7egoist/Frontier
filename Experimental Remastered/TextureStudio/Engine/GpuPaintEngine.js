@@ -1836,6 +1836,7 @@ export class GpuPaintSession {
       for (let g = 0; g < 5; g++) {
         if (EXT_GROUP_CHANNELS[g].some((k) => k && layer.pixels.extValues[k])) {
           this._ensureLayerExtGroup(layer, g);
+          this._syncCpuExtGroupToGpu(layer, g);
         }
       }
     }

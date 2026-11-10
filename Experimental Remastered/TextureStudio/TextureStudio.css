@@ -2874,6 +2874,9 @@ svg.glyph { width: 15px; height: 15px; flex: none; stroke: currentColor; fill: n
 .se-bottom-bar .channel-tile canvas {
     height: 30px;
 }
+.se-stage-shell:last-child {
+    margin-bottom: 10px;
+}
 
 /*------------------------------------------------------------------------------------------------------------------------
         PBR DROPDOWN -> PILL CHIPS, FRONTIER FILTER DROPDOWNS, COLOUR DYNAMICS SWATCHES, STAMP PREVIEWS & CURVE EDITOR

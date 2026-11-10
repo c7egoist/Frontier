@@ -11,13 +11,16 @@ import {
   ARTWORK_FINISHES,
   MOTIF_TYPES,
   MODIFIER_DEFINITIONS,
+  artworkDocumentBackgroundSvg,
   artworkDocumentLayersSvg,
   artworkDocumentToSvgString,
   createArtworkDocument,
   createArtworkLayer,
   createDefaultModifier,
+  createDefaultPointGradient2D,
   evaluateArtworkDocument,
   normalizeGradientStops,
+  normalizePointGradient2D,
   nodesToNormalizedCurveData,
   normalizedCurveToCanvasNodes,
   pathNodesToSvgD,
@@ -56,6 +59,7 @@ const VECTOR_TOOLS = [
   { id: "curve", label: "Curve", glyph: "Curve", key: "U" },
   { id: "pen", label: "Pen", glyph: "Pen", key: "P" },
   { id: "node", label: "Edit Points", glyph: "Focus", key: "A" },
+  { id: "gradient", label: "Point Grad", glyph: "Gradient", key: "F" },
   { id: "square", label: "Rect", glyph: "Square", key: "R" },
   { id: "circle", label: "Circle", glyph: "Circle", key: "O" },
   { id: "diamond", label: "Diamond", glyph: "Diamond", key: "D" },
@@ -194,6 +198,8 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     zoom: 1,
     panX: 0,
     panY: 0,
+    activePointGradSlot: "fill",
+    selectedPointGradIdx: 0,
     lastStats: { instances: 1, coveragePct: 0, minScale: 1, maxScale: 1 },
     lastEval: null,
   };
@@ -333,7 +339,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     Toast("Redone");
   }
 
-  const primaryToolIds = new Set(["select", "curve", "square", "circle", "diamond", "triangle", "text", "pan"]);
+  const primaryToolIds = new Set(["select", "curve", "gradient", "square", "circle", "diamond", "triangle", "text", "pan"]);
   const primaryToolList = VECTOR_TOOLS.filter((t) => primaryToolIds.has(t.id));
   const extraToolList = VECTOR_TOOLS.filter((t) => !primaryToolIds.has(t.id));
 
@@ -492,46 +498,8 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
   const selCountEl = Construct("span", "se-sel-count", state.doc.selectedLayerId ? "1 selected" : "0 selected");
   stageFooter.append(hintText, selCountEl);
 
-  // Bottom quick channel strip + modifier tools
-  const bottomBar = Construct("div", "se-bottom-bar");
-  const miniStrip = Construct("div", "channel-thumbs");
-  const miniCanvases = {};
-  for (const [label, key] of [
-    ["Albedo", "albedo"],
-    ["Rough", "roughness"],
-    ["Metal", "metalness"],
-    ["Normal", "normal"],
-  ]) {
-    const c = document.createElement("canvas");
-    miniCanvases[key] = c;
-    const tile = Construct("div", "channel-tile", [c, Construct("span", null, label)]);
-    tile.style.cursor = "pointer";
-    tile.addEventListener("click", () => {
-      state.viewChannel = state.viewChannel === key ? "vector" : key;
-      headerUI.setView(state.viewChannel);
-      syncViewDisplay();
-    });
-    miniStrip.append(tile);
-  }
-
-  const btnAddNoiseScale = Construct("button", "pill-btn warm", [
-    ConstructGlyph("Noise"),
-    Construct("span", null, "+ Noise Scale"),
-  ]);
-  btnAddNoiseScale.type = "button";
-
-  const btnBackVector = Construct("button", "pill-btn", [ConstructGlyph("Pointer"), Construct("span", null, "Vector SVG")]);
-  btnBackVector.type = "button";
-  btnBackVector.addEventListener("click", () => {
-    state.viewChannel = "vector";
-    headerUI.setView("vector");
-    syncViewDisplay();
-  });
-  const bottomTools = Construct("div", "se-bottom-tools", [btnAddNoiseScale, btnBackVector]);
-  bottomBar.append(miniStrip, bottomTools);
-
   stage.append(stageTopBar, seViewport, stageFooter);
-  centerCol.append(stage, bottomBar);
+  centerCol.append(stage);
 
   // ----------------------------------------------------------------- RIGHT: LAYER, MASK & MODIFIER STACK
   const rightCol = Construct("aside", "studio-column");
@@ -561,18 +529,122 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     return state.doc.layers.find((l) => l.id === state.doc.selectedLayerId) || state.doc.layers[state.doc.layers.length - 1] || state.doc.layers[0];
   }
 
+  function getPointGradientTarget(autoCreate = false) {
+    const slot = state.activePointGradSlot || "fill";
+    const bg = state.doc.background;
+    const size = state.doc.size || ARTWORK_SIZE;
+    if (slot === "ground" && bg?.enabled) {
+      if (autoCreate && bg.fillMode !== "point") {
+        bg.fillMode = "point";
+        bg.fillPointGradient = normalizePointGradient2D(bg.fillPointGradient, bg.color || "#171a1f", bg.colorB || "#2b3340", size);
+      }
+      if (bg.fillMode === "point") {
+        return {
+          slot: "ground",
+          label: "Document Ground",
+          getGrad: () => {
+            bg.fillPointGradient = normalizePointGradient2D(bg.fillPointGradient, bg.color || "#171a1f", bg.colorB || "#2b3340", size);
+            return bg.fillPointGradient;
+          },
+          setGrad: (g) => { bg.fillPointGradient = g; },
+        };
+      }
+    }
+
+    const sel = getSelectedLayer();
+    if (sel && sel.kind !== "folder" && !sel.locked) {
+      if (slot === "stroke" && sel.shape?.strokeMode === "point") {
+        return {
+          slot: "stroke",
+          layer: sel,
+          label: `${sel.name} Stroke`,
+          getGrad: () => {
+            sel.shape.strokePointGradient = normalizePointGradient2D(sel.shape.strokePointGradient, sel.shape.strokeColor || "#16181c", sel.shape.strokeColorB || "#eff4cf", size);
+            return sel.shape.strokePointGradient;
+          },
+          setGrad: (g) => { sel.shape.strokePointGradient = g; },
+        };
+      }
+      if (sel.shape?.fillMode === "point" || autoCreate) {
+        if (autoCreate && sel.shape.fillMode !== "point") {
+          sel.shape.fillMode = "point";
+          sel.shape.fillEnabled = true;
+          sel.shape.fillPointGradient = normalizePointGradient2D(sel.shape.fillPointGradient, sel.shape.color || "#eff4cf", sel.shape.colorB || "#5a7692", size);
+        }
+        if (sel.shape?.fillMode === "point") {
+          return {
+            slot: "fill",
+            layer: sel,
+            label: sel.name,
+            getGrad: () => {
+              sel.shape.fillPointGradient = normalizePointGradient2D(sel.shape.fillPointGradient, sel.shape.color || "#eff4cf", sel.shape.colorB || "#5a7692", size);
+              return sel.shape.fillPointGradient;
+            },
+            setGrad: (g) => { sel.shape.fillPointGradient = g; },
+          };
+        }
+      }
+    }
+
+    if (bg?.enabled && bg.fillMode === "point") {
+      return {
+        slot: "ground",
+        label: "Document Ground",
+        getGrad: () => {
+          bg.fillPointGradient = normalizePointGradient2D(bg.fillPointGradient, bg.color || "#171a1f", bg.colorB || "#2b3340", size);
+          return bg.fillPointGradient;
+        },
+        setGrad: (g) => { bg.fillPointGradient = g; },
+      };
+    }
+
+    if (autoCreate) {
+      let existingGrad = state.doc.layers.find((l) => l.kind === "gradient" && l.visible && !l.locked);
+      if (!existingGrad) {
+        existingGrad = createArtworkLayer("gradient", {
+          name: "Point Gradient Field",
+          shape: {
+            fillMode: "point",
+            color: isPattern ? "#eff4cf" : "#e8c27a",
+            colorB: "#5a7692",
+            fillPointGradient: createDefaultPointGradient2D(isPattern ? "#eff4cf" : "#e8c27a", "#5a7692", size),
+          },
+        });
+        state.doc.layers.unshift(existingGrad);
+      } else {
+        existingGrad.shape.fillMode = "point";
+        existingGrad.shape.fillPointGradient = normalizePointGradient2D(existingGrad.shape.fillPointGradient, existingGrad.shape.color || "#eff4cf", existingGrad.shape.colorB || "#5a7692", size);
+      }
+      state.doc.selectedLayerId = existingGrad.id;
+      state.activePointGradSlot = "fill";
+      renderLeftColumn();
+      return {
+        slot: "fill",
+        layer: existingGrad,
+        label: existingGrad.name,
+        getGrad: () => existingGrad.shape.fillPointGradient,
+        setGrad: (g) => { existingGrad.shape.fillPointGradient = g; },
+      };
+    }
+    return null;
+  }
+
   function syncPathSessionHints() {
     if (activePathSession) {
       const n = activePathSession.nodes.length;
       hintText.textContent = activePathSession.editingLayerId
         ? "Editing curve nodes · Drag points or handles · Dbl-click node to toggle smooth/corner · Enter finish"
         : `Curve path (${n} pt${n === 1 ? "" : "s"}) · Click add point · Click start or Dbl-click / Enter finish · Backspace undo pt`;
+    } else if (state.vectorTool === "gradient") {
+      const tgt = getPointGradientTarget(false);
+      const count = tgt ? tgt.getGrad().points.length : 0;
+      hintText.textContent = `Point Gradient (${count}/12 pts${tgt ? ` · ${tgt.label}` : ""}) · Click canvas to add colour points · Drag handles to move gradient in scene · Del removes`;
     } else if (state.vectorTool === "curve" || state.vectorTool === "pen") {
       hintText.textContent = `${state.vectorTool === "curve" ? "Curve Tool (U)" : "Pen Tool (P)"} · Click canvas to trace smooth Bézier curve · Enter or Dbl-click to commit`;
     } else if (state.vectorTool === "node") {
       hintText.textContent = "Point Editor (A) · Select a Curve layer to adjust nodes & Bézier handles";
     } else {
-      hintText.textContent = "Marquee to select · Shift constrain · Alt centred resize · Space pan · U Curve tool";
+      hintText.textContent = "Marquee to select · Shift constrain · Alt centred resize · Space pan · U Curve · F Point Grad";
     }
   }
 
@@ -775,28 +847,13 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     const activeSel = getSelectedLayer();
     selCountEl.textContent = activeSel && activeSel.kind !== "folder" ? "1 selected" : "0 selected";
 
-    const { defs: artDefs, body: artBody } = artworkDocumentLayersSvg(state.doc, { idPrefix: "se-live" });
-    const bg = state.doc.background || {};
+    const { defs: artDefs, body: artBody } = artworkDocumentLayersSvg(state.doc, { idPrefix: "se-live", pointRes: pointerInteraction?.kind === "ptgrad-move" ? 64 : 128 });
+    const bgSvg = artworkDocumentBackgroundSvg(state.doc, { id: "se-bg-grad", pointRes: pointerInteraction?.kind === "ptgrad-move" ? 64 : 128 });
     const units = m.vw / Math.max(1, m.w);
     const gridStep = Math.max(8, state.snapStep || 32);
 
-    let tileBg = "";
-    let extraDefs = "";
-    if (bg.enabled) {
-      let bgFill = bg.color || "#171a1f";
-      if (bg.fillMode === "linear" || bg.fillMode === "radial") {
-        const bgStops = normalizeGradientStops(bg.fillStops, bg.color || "#171a1f", bg.colorB || "#2b3340");
-        const stopXml = bgStops.map((s) => `<stop offset="${(s.offset * 100).toFixed(1)}%" stop-color="${s.color}"/>`).join("");
-        if (bg.fillMode === "radial") {
-          extraDefs += `<radialGradient id="se-bg-grad">${stopXml}</radialGradient>`;
-        } else {
-          const a = ((bg.gradientAngle ?? 45) * Math.PI) / 180;
-          extraDefs += `<linearGradient id="se-bg-grad" x1="${(50 - Math.cos(a) * 50).toFixed(1)}%" y1="${(50 - Math.sin(a) * 50).toFixed(1)}%" x2="${(50 + Math.cos(a) * 50).toFixed(1)}%" y2="${(50 + Math.sin(a) * 50).toFixed(1)}%">${stopXml}</linearGradient>`;
-        }
-        bgFill = "url(#se-bg-grad)";
-      }
-      tileBg = `<rect x="0" y="0" width="${docSize}" height="${docSize}" fill="${bgFill}" opacity="${bg.opacity ?? 1}"/>`;
-    }
+    const tileBg = bgSvg.rect;
+    const extraDefs = bgSvg.defs;
 
     // Adjacent subtle 2x2 ghost repeat preview in Pattern mode
     let ghostTiles = "";
@@ -892,6 +949,31 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
         </g>`;
     }
 
+    // Scene-space interactive Point Gradient nodes overlay
+    let pointGradMarkup = "";
+    const ptGradTarget = getPointGradientTarget(false);
+    if (ptGradTarget && (state.vectorTool === "gradient" || state.vectorTool === "select") && state.viewChannel === "vector" && !activePathSession) {
+      const grad = ptGradTarget.getGrad();
+      const selPtIdx = Math.min(Math.max(0, state.selectedPointGradIdx || 0), Math.max(0, grad.points.length - 1));
+      const nr = units * 8.5;
+      const selPt = grad.points[selPtIdx];
+      let rings = "";
+      if (selPt) {
+        rings += `<circle cx="${selPt.x}" cy="${selPt.y}" r="${Math.max(12, selPt.radius * (grad.falloff || 1))}" fill="none" stroke="rgba(239,244,207,0.34)" stroke-width="${units * 1.1}" stroke-dasharray="${units * 4} ${units * 4}" pointer-events="none"/>`;
+      }
+      const handles = grad.points.map((p, idx) => {
+        const isSel = idx === selPtIdx;
+        const r = isSel ? nr * 1.2 : nr;
+        return `
+          <g data-ptgrad-id="${p.id}" data-ptgrad-idx="${idx}" style="cursor:move;">
+            <circle cx="${p.x}" cy="${p.y}" r="${r + units * 2.2}" fill="none" stroke="${isSel ? "#eff4cf" : "rgba(0,0,0,0.45)"}" stroke-width="${units * (isSel ? 2.1 : 1.2)}"/>
+            <circle cx="${p.x}" cy="${p.y}" r="${r}" fill="${p.color}" stroke="#141619" stroke-width="${units * 1.6}"/>
+            <text x="${p.x}" y="${p.y}" text-anchor="middle" dominant-baseline="central" font-family="monospace" font-size="${units * 9}" font-weight="700" fill="#141619" stroke="rgba(255,255,255,0.65)" stroke-width="${units * 0.45}" paint-order="stroke" pointer-events="none">${idx + 1}</text>
+          </g>`;
+      }).join("");
+      pointGradMarkup = `<g class="se-ptgrad-overlay">${rings}${handles}</g>`;
+    }
+
     svgEl.innerHTML = `
       <defs>
         <pattern id="se-checker" width="24" height="24" patternUnits="userSpaceOnUse">
@@ -917,6 +999,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
       ${gridMarkup}
       <rect x="0" y="0" width="${docSize}" height="${docSize}" fill="none" stroke="#c1dcab" stroke-opacity="0.52" stroke-width="${units * 1.4}" pointer-events="none"/>
       ${selectionMarkup}
+      ${pointGradMarkup}
       ${drawDraftMarkup}
     `;
     drawRulers(m);
@@ -927,10 +1010,6 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     const ev = state.lastEval;
     const w = ev.width;
     const h = ev.heightPx || w;
-
-    for (const key of ["albedo", "roughness", "metalness", "normal"]) {
-      drawImageDataToCanvas(miniCanvases[key], ev[key], w, h, key === "albedo", 1);
-    }
 
     if (state.viewChannel !== "vector") {
       const chanData =
@@ -1213,6 +1292,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
 
     const appendColourSourceControls = (parentEl, {
       label = "Fill",
+      slot = "fill",
       allowSolid = true,
       getMode,
       setMode,
@@ -1220,19 +1300,24 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
       setStops,
       getAngle,
       setAngle,
+      getPointGrad,
+      setPointGrad,
       fallbackA = "#e8c27a",
       fallbackB = "#5a7692",
     }) => {
       const modeOpts = allowSolid
-        ? [["Solid", "solid"], ["Linear Grad", "linear"], ["Radial Grad", "radial"]]
-        : [["Linear Grad", "linear"], ["Radial Grad", "radial"]];
+        ? [["Solid", "solid"], ["Linear Grad", "linear"], ["Radial Grad", "radial"], ["Point Field", "point"]]
+        : [["Linear Grad", "linear"], ["Radial Grad", "radial"], ["Point Field", "point"]];
       SegmentedRow(parentEl, {
         Label: `${label} Source`,
         Options: modeOpts,
         Read: () => getMode() || (allowSolid ? "solid" : "linear"),
         Write: (v) => {
           setMode(v);
-          if (v !== "solid" && (!getStops() || getStops().length < 2)) {
+          if (v === "point" && getPointGrad && setPointGrad) {
+            state.activePointGradSlot = slot;
+            setPointGrad(normalizePointGradient2D(getPointGrad(), fallbackA, fallbackB, state.doc.size || ARTWORK_SIZE));
+          } else if (v !== "solid" && (!getStops() || getStops().length < 2)) {
             setStops(normalizeGradientStops(getStops(), fallbackA, fallbackB));
           }
           evaluateAndRender(true);
@@ -1251,6 +1336,131 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
             evaluateAndRender(true);
           },
         });
+        return;
+      }
+      if (curMode === "point" && getPointGrad && setPointGrad) {
+        const docSize = state.doc.size || ARTWORK_SIZE;
+        const grad = normalizePointGradient2D(getPointGrad(), fallbackA, fallbackB, docSize);
+        setPointGrad(grad);
+        state.selectedPointGradIdx = Math.min(Math.max(0, state.selectedPointGradIdx || 0), Math.max(0, grad.points.length - 1));
+        const wrap = Construct("div", "se-gradient-editor");
+        wrap.style.cssText = "display:flex;flex-direction:column;gap:6px;padding:6px 0;";
+
+        const isEditingScene = state.vectorTool === "gradient" && state.activePointGradSlot === slot;
+        const sceneBtn = Construct("button", "chip-btn" + (isEditingScene ? " active" : ""), isEditingScene ? "Done Placing Points" : "Edit Points in Scene (F)");
+        sceneBtn.type = "button";
+        sceneBtn.addEventListener("click", () => {
+          state.activePointGradSlot = slot;
+          selectVectorTool(isEditingScene ? "select" : "gradient");
+          rebuildInspector();
+        });
+        wrap.append(sceneBtn);
+
+        const ptStrip = Construct("div", "chip-strip");
+        grad.points.forEach((pt, idx) => {
+          const b = Construct("button", "chip-btn" + (idx === state.selectedPointGradIdx ? " active" : ""), `${idx + 1}`);
+          b.type = "button";
+          b.style.borderLeft = `6px solid ${pt.color}`;
+          b.addEventListener("click", () => {
+            state.activePointGradSlot = slot;
+            state.selectedPointGradIdx = idx;
+            renderVectorSvgCanvas();
+            rebuildInspector();
+          });
+          ptStrip.append(b);
+        });
+        const addPtBtn = Construct("button", "chip-btn", "+ Point");
+        addPtBtn.type = "button";
+        addPtBtn.disabled = grad.points.length >= 12;
+        addPtBtn.addEventListener("click", () => {
+          if (grad.points.length >= 12) return;
+          pushUndo();
+          const idx = grad.points.length;
+          const palette = ["#eff4cf", "#e8c27a", "#5a7692", "#c87849", "#699c8c", "#d890a8", "#8fb8de"];
+          grad.points.push({
+            id: `pg_${Date.now().toString(36)}_${idx}`,
+            x: Math.round(docSize * (0.25 + ((idx * 0.23) % 0.55))),
+            y: Math.round(docSize * (0.28 + ((idx * 0.31) % 0.52))),
+            color: palette[idx % palette.length],
+            radius: Math.round(docSize * 0.42),
+            weight: 1.0,
+          });
+          state.activePointGradSlot = slot;
+          state.selectedPointGradIdx = grad.points.length - 1;
+          setPointGrad(grad);
+          evaluateAndRender(true);
+          rebuildInspector();
+        });
+        ptStrip.append(addPtBtn);
+        wrap.append(ptStrip);
+
+        const selPt = grad.points[state.selectedPointGradIdx];
+        if (selPt) {
+          ColorRow(wrap, {
+            Label: `Point ${state.selectedPointGradIdx + 1} Colour`,
+            Read: () => selPt.color,
+            Write: (v) => {
+              selPt.color = v;
+              setPointGrad(grad);
+              evaluateAndRender(true);
+              rebuildInspector();
+            },
+          });
+          SliderRow(wrap, {
+            Label: `Point ${state.selectedPointGradIdx + 1} Radius`,
+            Minimum: 24, Maximum: Math.round(docSize * 1.5), Step: 4, Unit: "px",
+            Read: () => selPt.radius,
+            Write: (v) => {
+              selPt.radius = v;
+              setPointGrad(grad);
+              evaluateAndRender(true);
+            },
+          });
+          SliderRow(wrap, {
+            Label: `Point ${state.selectedPointGradIdx + 1} Weight`,
+            Minimum: 0.05, Maximum: 1.0, Step: 0.05,
+            Read: () => selPt.weight,
+            Write: (v) => {
+              selPt.weight = v;
+              setPointGrad(grad);
+              evaluateAndRender(true);
+            },
+          });
+        }
+        SliderRow(wrap, {
+          Label: "Global Spread",
+          Minimum: 0.3, Maximum: 2.5, Step: 0.05,
+          Read: () => grad.falloff ?? 1.0,
+          Write: (v) => {
+            grad.falloff = v;
+            setPointGrad(grad);
+            evaluateAndRender(true);
+          },
+        });
+        ColorRow(wrap, {
+          Label: "Field Base Colour",
+          Read: () => grad.background || fallbackB,
+          Write: (v) => {
+            grad.background = v;
+            setPointGrad(grad);
+            evaluateAndRender(true);
+          },
+        });
+        if (grad.points.length > 1) {
+          const rmBtn = Construct("button", "chip-btn", `Remove Point ${state.selectedPointGradIdx + 1}`);
+          rmBtn.type = "button";
+          rmBtn.addEventListener("click", () => {
+            if (grad.points.length <= 1) return;
+            pushUndo();
+            grad.points.splice(state.selectedPointGradIdx, 1);
+            state.selectedPointGradIdx = Math.max(0, state.selectedPointGradIdx - 1);
+            setPointGrad(grad);
+            evaluateAndRender(true);
+            rebuildInspector();
+          });
+          wrap.append(rmBtn);
+        }
+        parentEl.append(wrap);
         return;
       }
 
@@ -1418,6 +1628,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
       if (layer.shape.fillEnabled !== false || layer.kind === "gradient") {
         appendColourSourceControls(lSec.Inner, {
           label: "Fill",
+          slot: "fill",
           allowSolid: layer.kind !== "gradient",
           getMode: () => layer.shape.fillMode || (layer.kind === "gradient" ? "linear" : "solid"),
           setMode: (m) => { layer.shape.fillMode = m; },
@@ -1430,6 +1641,8 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
           },
           getAngle: () => layer.shape.gradientAngle ?? 45,
           setAngle: (a) => { layer.shape.gradientAngle = a; },
+          getPointGrad: () => layer.shape.fillPointGradient,
+          setPointGrad: (g) => { layer.shape.fillPointGradient = g; },
           fallbackA: layer.shape.color || "#e8c27a",
           fallbackB: layer.shape.colorB || "#5a7692",
         });
@@ -1448,6 +1661,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
       if ((layer.shape.strokeWidth || 0) > 0 || layer.shape.motifType === "line" || layer.shape.fillEnabled === false) {
         appendColourSourceControls(lSec.Inner, {
           label: "Stroke",
+          slot: "stroke",
           allowSolid: true,
           getMode: () => layer.shape.strokeMode || "solid",
           setMode: (m) => { layer.shape.strokeMode = m; },
@@ -1460,6 +1674,8 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
           },
           getAngle: () => layer.shape.strokeGradientAngle ?? 45,
           setAngle: (a) => { layer.shape.strokeGradientAngle = a; },
+          getPointGrad: () => layer.shape.strokePointGradient,
+          setPointGrad: (g) => { layer.shape.strokePointGradient = g; },
           fallbackA: layer.shape.strokeColor || "#16181c",
           fallbackB: layer.shape.strokeColorB || "#eff4cf",
         });
@@ -1658,6 +1874,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     if (state.doc.background?.enabled) {
       appendColourSourceControls(bgSec.Inner, {
         label: "Ground",
+        slot: "ground",
         allowSolid: true,
         getMode: () => state.doc.background.fillMode || "solid",
         setMode: (m) => { state.doc.background.fillMode = m; },
@@ -1670,6 +1887,8 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
         },
         getAngle: () => state.doc.background.gradientAngle ?? 45,
         setAngle: (a) => { state.doc.background.gradientAngle = a; },
+        getPointGrad: () => state.doc.background.fillPointGradient,
+        setPointGrad: (g) => { state.doc.background.fillPointGradient = g; },
         fallbackA: state.doc.background.color || "#171a1f",
         fallbackB: state.doc.background.colorB || "#2b3340",
       });
@@ -1706,6 +1925,67 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     if (e.button !== 0 || state.viewChannel !== "vector") return;
 
     const pt = clientToSvg(e.clientX, e.clientY);
+
+    // Interactive scene-space Point Gradient handle hit-test (drag or select)
+    const ptGradHandleEl = e.target.closest?.("[data-ptgrad-id]");
+    if (ptGradHandleEl && (state.vectorTool === "gradient" || state.vectorTool === "select")) {
+      const tgt = getPointGradientTarget(false);
+      if (tgt) {
+        const grad = tgt.getGrad();
+        const idx = Number(ptGradHandleEl.dataset.ptgradIdx);
+        if (Number.isInteger(idx) && grad.points[idx]) {
+          state.selectedPointGradIdx = idx;
+          pointerInteraction = {
+            kind: "ptgrad-move",
+            tgt,
+            idx,
+            undoSnap: structuredClone(state.doc),
+          };
+          svgEl.setPointerCapture?.(e.pointerId);
+          renderVectorSvgCanvas();
+          rebuildInspector();
+          return;
+        }
+      }
+    }
+
+    // Scene-space Point Gradient click-to-place point directly in scene
+    if (state.vectorTool === "gradient") {
+      const snap = structuredClone(state.doc);
+      const sx = snapCoord(pt.x, e.shiftKey ? 0 : state.snapStep);
+      const sy = snapCoord(pt.y, e.shiftKey ? 0 : state.snapStep);
+      const tgt = getPointGradientTarget(true);
+      if (tgt) {
+        const grad = tgt.getGrad();
+        const docSize = state.doc.size || ARTWORK_SIZE;
+        // Hit-check near existing handle in case user clicked close without SVG hit-test
+        const hitIdx = grad.points.findIndex((p) => Math.hypot(p.x - pt.x, p.y - pt.y) <= pt.unitsPerPx * 14);
+        if (hitIdx >= 0) {
+          state.selectedPointGradIdx = hitIdx;
+          pointerInteraction = { kind: "ptgrad-move", tgt, idx: hitIdx, undoSnap: snap };
+        } else if (grad.points.length < 12) {
+          const palette = ["#eff4cf", "#e8c27a", "#5a7692", "#c87849", "#699c8c", "#d890a8", "#8fb8de"];
+          const nextIdx = grad.points.length;
+          grad.points.push({
+            id: `pg_${Date.now().toString(36)}_${nextIdx}`,
+            x: Math.max(-docSize * 0.25, Math.min(docSize * 1.25, sx)),
+            y: Math.max(-docSize * 0.25, Math.min(docSize * 1.25, sy)),
+            color: palette[nextIdx % palette.length],
+            radius: Math.round(docSize * 0.42),
+            weight: 1.0,
+          });
+          state.selectedPointGradIdx = grad.points.length - 1;
+          tgt.setGrad(grad);
+          pointerInteraction = { kind: "ptgrad-move", tgt, idx: state.selectedPointGradIdx, undoSnap: snap };
+          evaluateAndRender(false, { skipPbr: true });
+        }
+        syncPathSessionHints();
+        renderVectorSvgCanvas();
+        rebuildInspector();
+        svgEl.setPointerCapture?.(e.pointerId);
+        return;
+      }
+    }
 
     // Interactive Curve / Pen / Point-Edit node & Bézier handle dragging
     const pathHandleEl = e.target.closest?.("[data-path-handle]");
@@ -1899,6 +2179,19 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     }
 
     const pt = clientToSvg(e.clientX, e.clientY);
+    if (pointerInteraction.kind === "ptgrad-move" && pointerInteraction.tgt) {
+      const grad = pointerInteraction.tgt.getGrad();
+      const gp = grad.points[pointerInteraction.idx];
+      if (gp) {
+        const docSize = state.doc.size || ARTWORK_SIZE;
+        gp.x = Math.max(-docSize * 0.25, Math.min(docSize * 1.25, snapCoord(pt.x, e.shiftKey ? 0 : state.snapStep)));
+        gp.y = Math.max(-docSize * 0.25, Math.min(docSize * 1.25, snapCoord(pt.y, e.shiftKey ? 0 : state.snapStep)));
+        pointerInteraction.tgt.setGrad(grad);
+        viewTitle.textContent = `POINT ${pointerInteraction.idx + 1} (${Math.round(gp.x)}, ${Math.round(gp.y)})`;
+        evaluateAndRender(false, { skipPbr: true });
+      }
+      return;
+    }
     if (pointerInteraction.kind === "pen-pull" && activePathSession) {
       const node = activePathSession.nodes[pointerInteraction.idx];
       if (node) {
@@ -2013,6 +2306,14 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     pointerInteraction = null;
     svgEl.style.cursor = state.vectorTool === "pan" ? "grab" : state.vectorTool === "select" ? "default" : "crosshair";
 
+    if (act.kind === "ptgrad-move") {
+      if (act.undoSnap) pushUndo(act.undoSnap);
+      syncPathSessionHints();
+      evaluateAndRender(true);
+      rebuildInspector();
+      return;
+    }
+
     if (act.kind === "pen-pull" || act.kind === "path-node" || act.kind === "path-handle") {
       if (activePathSession?.editingLayerId && (act.kind === "path-node" || act.kind === "path-handle")) {
         const l = state.doc.layers.find((x) => x.id === activePathSession.editingLayerId);
@@ -2057,6 +2358,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
   };
   svgEl.addEventListener("pointerup", endSvgPointer);
   svgEl.addEventListener("pointercancel", endSvgPointer);
+  window.addEventListener("pointerup", endSvgPointer);
   svgEl.addEventListener("dblclick", (e) => {
     if (activePathSession) {
       e.preventDefault();
@@ -2201,28 +2503,6 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     if (state.viewChannel === "vector") renderVectorSvgCanvas();
   });
 
-  btnAddNoiseScale.addEventListener("click", () => {
-    const layer = getSelectedLayer();
-    if (!layer || layer.kind === "folder") {
-      Toast("Select a Motif layer to add Noise Scale");
-      return;
-    }
-    pushUndo();
-    layer.modifiers = layer.modifiers || [];
-    const hasGrid = layer.modifiers.some((m) => m.type === "array-grid" || m.type === "array-radial");
-    if (!hasGrid && isPattern) layer.modifiers.unshift(createDefaultModifier("array-grid"));
-    const existing = layer.modifiers.find((m) => m.type === "noise-scale");
-    if (existing) {
-      existing.enabled = true;
-      Toast("Noise Scale modifier active on layer");
-    } else {
-      layer.modifiers.push(createDefaultModifier("noise-scale"));
-      Toast("Added Noise Scale modifier to layer");
-    }
-    evaluateAndRender(true);
-    rebuildInspector();
-  });
-
   btnSendToPaint.addEventListener("click", () => {
     const sz = Math.min(1024, state.resolution);
     const ev = evaluateArtworkDocument(state.doc, sz);
@@ -2355,6 +2635,23 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
       commitActivePathSession();
       return;
     }
+    if ((e.key === "Backspace" || e.key === "Delete") && state.vectorTool === "gradient" && !activePathSession) {
+      const tgt = getPointGradientTarget(false);
+      if (tgt) {
+        const grad = tgt.getGrad();
+        if (grad.points.length > 1) {
+          e.preventDefault();
+          pushUndo();
+          grad.points.splice(state.selectedPointGradIdx, 1);
+          state.selectedPointGradIdx = Math.max(0, state.selectedPointGradIdx - 1);
+          tgt.setGrad(grad);
+          syncPathSessionHints();
+          evaluateAndRender(true);
+          rebuildInspector();
+          return;
+        }
+      }
+    }
     if ((e.key === "Backspace" || e.key === "Delete") && activePathSession && !activePathSession.editingLayerId) {
       e.preventDefault();
       if (activePathSession.nodes.length > 1) {
@@ -2430,6 +2727,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
       closeArtPopup();
       window.removeEventListener("keydown", onArtKeyDown);
       window.removeEventListener("keyup", onArtKeyUp);
+      window.removeEventListener("pointerup", endSvgPointer);
       if (inspectorScope) ReleaseScope(inspectorScope);
       root.innerHTML = "";
     },
