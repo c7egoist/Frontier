@@ -89,20 +89,20 @@ const linChToSrgb = (v) => {
   return c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
 };
 
-export function createDefaultPointGradient2D(colorA = "#eff4cf", colorB = "#5a7692", size = ARTWORK_SIZE) {
+export function createDefaultPointGradient2D(colorA = "#eff4cf", colorB = "#0b0b0b", size = ARTWORK_SIZE) {
   return {
     schema: "alloy.point-gradient.v1",
     space: "scene-2d",
     falloff: 1.0,
-    background: colorB || "#1d222b",
+    background: colorB || "#0b0b0b",
     points: [
       { id: "pg_1", x: size * 0.34, y: size * 0.34, color: colorA || "#eff4cf", radius: size * 0.42, weight: 1.0 },
-      { id: "pg_2", x: size * 0.68, y: size * 0.68, color: colorB || "#5a7692", radius: size * 0.44, weight: 1.0 },
+      { id: "pg_2", x: size * 0.68, y: size * 0.68, color: colorB || "#0b0b0b", radius: size * 0.44, weight: 1.0 },
     ],
   };
 }
 
-export function normalizePointGradient2D(raw, fallbackA = "#eff4cf", fallbackB = "#5a7692", size = ARTWORK_SIZE) {
+export function normalizePointGradient2D(raw, fallbackA = "#eff4cf", fallbackB = "#0b0b0b", size = ARTWORK_SIZE) {
   const src = raw && typeof raw === "object" ? raw : null;
   const rawPts = Array.isArray(src?.points) ? src.points : [];
   const points = (rawPts.length ? rawPts : createDefaultPointGradient2D(fallbackA, fallbackB, size).points)
@@ -119,13 +119,13 @@ export function normalizePointGradient2D(raw, fallbackA = "#eff4cf", fallbackB =
     schema: "alloy.point-gradient.v1",
     space: "scene-2d",
     falloff: clamp(Number(src?.falloff ?? 1.0), 0.2, 3.0),
-    background: typeof src?.background === "string" && /^#[0-9a-f]{6}$/i.test(src.background) ? src.background.toLowerCase() : (fallbackB || "#1d222b"),
+    background: typeof src?.background === "string" && /^#[0-9a-f]{6}$/i.test(src.background) ? src.background.toLowerCase() : (fallbackB || "#0b0b0b"),
     points,
   };
 }
 
 export function evaluatePointGradient2DAt(x, y, rawGrad, { size = ARTWORK_SIZE, seamless = false } = {}) {
-  const g = rawGrad?.schema === "alloy.point-gradient.v1" ? rawGrad : normalizePointGradient2D(rawGrad, "#eff4cf", "#5a7692", size);
+  const g = rawGrad?.schema === "alloy.point-gradient.v1" ? rawGrad : normalizePointGradient2D(rawGrad, "#eff4cf", "#0b0b0b", size);
   const bg = hexToRgb(g.background).map((v) => srgbChToLin(v / 255));
   const falloff = clamp(g.falloff ?? 1.0, 0.2, 3.0);
   const half = size * 0.5;
@@ -514,7 +514,7 @@ export function createArtworkDocument(mode = "pattern") {
     mode: "pattern",
     name: "Noise-Scaled Hex Matrix",
     size: ARTWORK_SIZE,
-    background: { enabled: true, color: "#171a1f", opacity: 1, finish: "cotton", roughness: 0.85, metalness: 0.0, height: 0.0 },
+    background: { enabled: true, color: "#171a1f", colorB: "#0b0b0b", opacity: 1, finish: "cotton", roughness: 0.85, metalness: 0.0, height: 0.0 },
     tiling: { mode: "straight", repeats: 2, showGrid: false },
     layers: [
       createArtworkLayer("motif", {

@@ -2485,4 +2485,68 @@ await suite("21. Multi-Channel Colour/Emissive 3D Space Gradient, Scene-Space Po
   sphere.dispose();
 });
 
+// ----------------------------------------------------------------- 22. UI & THEME POLISH: HERO SCALE, FULLSCREEN TOP-RIGHT, NEUTRAL PBR, PILL COLOUR & DROPDOWN TABS, BLACK BACKGROUNDS
+await suite("22. UI & Theme Polish: Material Fullscreen, Bigger Hero, Neutral PBR Channels, Pill Colour Rows, Pill Dropdown Tabs & Black BG", async () => {
+  const studio = globalThis.window.__frontierTextureStudio;
+  const fs = await import("node:fs");
+  const { PAINT_PBR_CHANNELS, normalizePointGradient3D } = await import("./Engine/TexturePaintEngine.js");
+  const { createDefaultPointGradient2D, createArtworkDocument } = await import("./Engine/Patterns/ArtworkStackEngine.js");
+
+  // 22a. Material Stage Top-Left Hero enlarged + Top-Right has strictly 1 Fullscreen button (Spin + route buttons removed)
+  studio.switchWorkspace("material");
+  const mwStage = globalThis.document.querySelector(".mw-stage");
+  const topActions = mwStage.querySelector(".mw-stage-top-actions");
+  assert(topActions, "Material stage must render .mw-stage-top-actions");
+  const actionBtns = [...topActions.children].filter((c) => c.tagName === "BUTTON");
+  assert.equal(actionBtns.length, 1, `Material top-right must have strictly 1 Fullscreen button (found ${actionBtns.length})`);
+  const fsBtn = actionBtns[0];
+  assert(fsBtn.classList.contains("mw-fullscreen-btn") && /Fullscreen/i.test(fsBtn.textContent || ""), "Material top-right single button must be Fullscreen");
+  assert(!/Spin/i.test(topActions.textContent || "") && !/Use in Paint/i.test(topActions.textContent || "") && !/Baking/i.test(topActions.textContent || ""), "Spin and workspace-jump buttons must be removed from Material top-right");
+
+  const mwGrid = globalThis.document.querySelector(".studio-grid");
+  assert(!mwGrid.classList.contains("mw-fullscreen"), "Material stage starts in normal inspector view");
+  fsBtn.click();
+  assert(mwGrid.classList.contains("mw-fullscreen"), "Clicking Fullscreen button must toggle .mw-fullscreen on studio grid");
+  assert(/Exit Fullscreen/i.test(fsBtn.textContent || ""), "Active Fullscreen button label must switch to Exit Fullscreen");
+  assert.equal(studio.getSnapshot().fullscreen, true, "Snapshot must reflect fullscreen=true");
+  fsBtn.click();
+  assert(!mwGrid.classList.contains("mw-fullscreen"), "Clicking Fullscreen again must exit fullscreen mode");
+  assert.equal(studio.getSnapshot().fullscreen, false, "Snapshot must reflect fullscreen=false");
+
+  // 22b. Colour Rows as full Pill (Circle + Label + Hex) & Dropdowns as Pill Tabs (dropdown | V)
+  const colorRow = globalThis.document.querySelector(".color-row");
+  assert(colorRow, "Inspector must render .color-row");
+  const colorPill = colorRow.querySelector(".color-pill-wrap");
+  assert(colorPill && colorPill.querySelector(".color-circle-shell") && colorPill.querySelector(".color-native") && colorPill.querySelector(".color-pill-label") && colorPill.querySelector(".color-hex"),
+    "ColorRow must render full pill containing circular swatch, label text, and hex input");
+
+  const pillTriggers = globalThis.document.querySelectorAll(".pill-trigger");
+  assert(pillTriggers.length > 0 && pillTriggers.every((t) => t.querySelector(".pill-caret-divider")), "FilterDropdownPill / PBR channel dropdown triggers must render .pill-caret-divider (| V)");
+  assert(mwStage.querySelectorAll(".mw-select-wrap .mw-select-caret").length === 2, "Material stage dropdowns must include .mw-select-caret (| V) divider");
+
+  // Check SelectRow & header pill dropdown dividers in Texture Paint & Baking
+  studio.switchWorkspace("paint");
+  assert(globalThis.document.querySelectorAll(".select-row .select-pill-wrap .pill-caret-divider").length >= 1, "SelectRow must wrap <select> in .select-pill-wrap with .pill-caret-divider");
+  assert(globalThis.document.querySelector(".se-save-btn .pill-caret-divider"), "Save button must include .pill-caret-divider (| V)");
+  assert(globalThis.document.querySelectorAll(".pbr-chan-pill").length >= 1, "Texture Paint must render .pbr-chan-pill buttons");
+
+  studio.switchWorkspace("bake");
+  assert(globalThis.document.querySelector(".viewport-toolbar .select-pill-wrap .pill-caret-divider"), "Baking study selector must use .select-pill-wrap with .pill-caret-divider");
+
+  // 22c. Neutral PBR Channel Colors (no messy rainbow per-channel colors) & Theme Black Color B / Backgrounds
+  assert(PAINT_PBR_CHANNELS.every((ch) => ch.dot === "#9ea2aa"), "All PBR channel specs must use unified neutral theme dot color (#9ea2aa)");
+  const pg2d = createDefaultPointGradient2D("#eff4cf", "#0b0b0b", 512);
+  assert.equal(pg2d.background, "#0b0b0b", "Default 2D Point Gradient background/colorB must use theme black (#0b0b0b)");
+  const pg3d = normalizePointGradient3D({});
+  assert.equal(pg3d.background, "#0b0b0b", "Default 3D Point Gradient background must use theme black (#0b0b0b)");
+  const patDefaults = createArtworkDocument("pattern");
+  assert.equal(patDefaults.background.colorB, "#0b0b0b", "Pattern document background colorB must default to theme black (#0b0b0b)");
+
+  const cssText = fs.readFileSync(new URL("./TextureStudio.css", import.meta.url), "utf8");
+  assert(cssText.includes("font-size: 38px;") && cssText.includes(".mw-hero-title"), "TextureStudio.css must enlarge .mw-hero-title to 38px");
+  assert(cssText.includes(".studio-grid.mw-fullscreen"), "TextureStudio.css must style .studio-grid.mw-fullscreen");
+  assert(cssText.includes("border-radius: 50%;") && cssText.includes("::-webkit-color-swatch"), "TextureStudio.css must render circular color swatches");
+  assert(!cssText.includes("#2fe6a7"), "TextureStudio.css must not use bright neon #2fe6a7 accents on PBR channels/dropdowns");
+});
+
 console.log(`\nALL ${results.length} VALIDATION SUITES PASSED CLEANLY`);

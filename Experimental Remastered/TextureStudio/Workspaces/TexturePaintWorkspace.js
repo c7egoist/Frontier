@@ -824,6 +824,10 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     meshSelect.append(o);
   }
   meshSelect.value = state.meshId;
+  const meshSelectWrap = Construct("div", "select-pill-wrap vp-compact-select", [
+    meshSelect,
+    Construct("span", "pill-caret-divider", ConstructGlyph("ChevronDown", "glyph chev")),
+  ]);
 
   const chanSelect = Construct("select", "se-header-select");
   chanSelect.setAttribute("aria-label", "Display Channel");
@@ -854,6 +858,10 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     o.value = val;
     chanSelect.append(o);
   }
+  const chanSelectWrap = Construct("div", "select-pill-wrap vp-compact-select", [
+    chanSelect,
+    Construct("span", "pill-caret-divider", ConstructGlyph("ChevronDown", "glyph chev")),
+  ]);
 
   const btnToolMenu = Construct("button", "pill-btn", [ConstructGlyph("Sliders"), Construct("span", null, "Brush / Tool (Q)")]);
   btnToolMenu.type = "button";
@@ -930,7 +938,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     ],
     toolGroupClass: "tp-tool-group toolbar-group",
     onToolSelect: (id) => selectTool(id),
-    moreControls: [btnToolMenu, meshSelect, chanSelect, btnImportMesh, importInp],
+    moreControls: [btnToolMenu, meshSelectWrap, chanSelectWrap, btnImportMesh, importInp],
     toolTrailing: [gpuPill],
   });
 
@@ -1008,7 +1016,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   if (gpuLabel) gpuLabel.textContent = gpuPaint.isActive ? "WebGL2 GPU" : "CPU Mock";
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color("#0e0f12");
+  scene.background = new THREE.Color("#0b0b0b");
   const envTex = createPaintEnv(renderer);
   scene.environment = envTex;
 
@@ -1028,7 +1036,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
 
   // 2D GPU UV View Scene (renders directly from GPU VRAM textures, zero readPixels!)
   const uvScene = new THREE.Scene();
-  uvScene.background = new THREE.Color("#0b0c0f");
+  uvScene.background = new THREE.Color("#0b0b0b");
   const uvCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 10);
   uvCam.position.z = 5;
   const UV_QUAD_EXTENT = 1.76; // [-0.88 .. +0.88] square
@@ -3575,7 +3583,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
         for (const ch of PAINT_PBR_CHANNELS) {
           if (!layer.channels?.[ch.key]) continue;
           const dot = document.createElement("i");
-          dot.style.setProperty("--pill-color", ch.color || "#eff4cf");
+          dot.style.setProperty("--pill-color", "#9ea2aa");
           pills.append(Construct("span", "tp-exp-pill", [dot, Construct("span", null, ch.short)]));
         }
         expEl.append(

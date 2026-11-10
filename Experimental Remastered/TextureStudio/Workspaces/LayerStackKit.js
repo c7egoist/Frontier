@@ -17,16 +17,8 @@ function pad2(n) {
 
 function getKindColor(kind) {
   switch (kind) {
-    case "folder": return "#beab83";
-    case "paint": return "#eff4cf";
-    case "decal": return "#e8c27a";
-    case "fill": return "#88b8d6";
-    case "material": return "#c8a3d8";
-    case "generator": return "#f09e6b";
-    case "motif": return "#eff4cf";
-    case "text": return "#90c8ff";
-    case "gradient": return "#d49fff";
-    default: return "#b8b8aa";
+    case "folder": return "#c8c2b4";
+    default: return "#c2c5cd";
   }
 }
 

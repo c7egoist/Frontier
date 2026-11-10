@@ -27,25 +27,25 @@ export const PAINT_BLENDS = ["Normal", "Multiply", "Screen", "Overlay", "Add", "
  * Full 19-channel PBR channel registry aligned with Frontier MaterialSpecification.js.
  */
 export const PAINT_PBR_CHANNELS = [
-  { key: "albedo", label: "Albedo", short: "Albedo", sub: "Base Colour", kind: "albedo", dot: "#e8c27a", type: "color", default: "#e8c27a", defaultVal: "#e8c27a", extended: false, isColor: true, min: 0, max: 1, step: 0.01 },
-  { key: "roughness", label: "Roughness", short: "Rough", sub: "Surface Gloss", kind: "rough", dot: "#2fe6a7", type: "scalar", default: 0.34, defaultVal: 0.34, extended: false, isColor: false, min: 0.02, max: 1, step: 0.01 },
-  { key: "metalness", label: "Metalness", short: "Metal", sub: "Conductor Mask", kind: "metal", dot: "#63a8ff", type: "scalar", default: 0.12, defaultVal: 0.12, extended: false, isColor: false, min: 0, max: 1, step: 0.01 },
-  { key: "height", label: "Height", short: "Height", sub: "Relief / Bump", kind: "height", dot: "#e686b8", type: "scalar", default: 0.25, defaultVal: 0.25, extended: false, isColor: false, min: -1, max: 1, step: 0.02 },
-  { key: "normal", label: "Normal Str", short: "Normal", sub: "Bump Intensity", kind: "normal", dot: "#8b9cff", type: "scalar", default: 0.85, defaultVal: 0.85, extended: true, isColor: false, min: 0, max: 2, step: 0.05 },
-  { key: "ao", label: "Occlusion", short: "AO", sub: "Ambient Cavity", kind: "ao", dot: "#9aa3b2", type: "scalar", default: 1.0, defaultVal: 1.0, extended: true, isColor: false, min: 0, max: 1, step: 0.01 },
-  { key: "opacity", label: "Opacity", short: "Opacity", sub: "Cutout / Alpha", kind: "opacity", dot: "#d6dce6", type: "scalar", default: 1.0, defaultVal: 1.0, extended: true, isColor: false, min: 0, max: 1, step: 0.01 },
-  { key: "emissive", label: "Emissive", short: "Emissive", sub: "Glow Colour", kind: "emissive", dot: "#ff6e4a", type: "color", default: "#ff7a3b", defaultVal: "#ff7a3b", extended: true, isColor: true, min: 0, max: 1, step: 0.01 },
-  { key: "emissiveIntensity", label: "Glow Power", short: "Glow", sub: "Emission Gain", kind: "emissive", dot: "#ffb347", type: "scalar", default: 1.0, defaultVal: 1.0, extended: true, isColor: false, min: 0, max: 4, step: 0.05 },
-  { key: "clearcoat", label: "Clearcoat", short: "Coat", sub: "Varnish Coat", kind: "coat", dot: "#63e6ff", type: "scalar", default: 0.8, defaultVal: 0.8, extended: true, isColor: false, min: 0, max: 1, step: 0.01 },
-  { key: "coatRoughness", label: "Coat Rough", short: "CoatRgh", sub: "Varnish Gloss", kind: "coat", dot: "#8ce99a", type: "scalar", default: 0.08, defaultVal: 0.08, extended: true, isColor: false, min: 0.01, max: 1, step: 0.01 },
-  { key: "sheen", label: "Sheen", short: "Sheen", sub: "Fabric Velour", kind: "sheen", dot: "#f3a6ff", type: "scalar", default: 0.65, defaultVal: 0.65, extended: true, isColor: false, min: 0, max: 1, step: 0.01 },
-  { key: "sheenRoughness", label: "Sheen Rough", short: "SheenRgh", sub: "Microfiber Soft", kind: "sheen", dot: "#e599f7", type: "scalar", default: 0.45, defaultVal: 0.45, extended: true, isColor: false, min: 0.01, max: 1, step: 0.01 },
-  { key: "specular", label: "Specular", short: "Spec", sub: "Dielectric F0", kind: "spec", dot: "#fff3bf", type: "scalar", default: 1.0, defaultVal: 1.0, extended: true, isColor: false, min: 0, max: 1, step: 0.01 },
-  { key: "anisotropy", label: "Anisotropy", short: "Aniso", sub: "Brushed Grain", kind: "aniso", dot: "#a5d8ff", type: "scalar", default: 0.5, defaultVal: 0.5, extended: true, isColor: false, min: 0, max: 1, step: 0.01 },
-  { key: "iridescence", label: "Iridescence", short: "Irid", sub: "Thin-Film Pearl", kind: "irid", dot: "#ff87c2", type: "scalar", default: 0.7, defaultVal: 0.7, extended: true, isColor: false, min: 0, max: 1, step: 0.01 },
-  { key: "iridescenceThickness", label: "Irid Film", short: "IridFilm", sub: "Spectrum Shift", kind: "irid", dot: "#faa2c1", type: "scalar", default: 0.45, defaultVal: 0.45, extended: true, isColor: false, min: 0, max: 1, step: 0.01 },
-  { key: "transmission", label: "Transmission", short: "Trans", sub: "Glass / Jelly", kind: "trans", dot: "#74c0fc", type: "scalar", default: 0.65, defaultVal: 0.65, extended: true, isColor: false, min: 0, max: 1, step: 0.01 },
-  { key: "thickness", label: "Subsurface", short: "Depth", sub: "Depth / Scatter", kind: "trans", dot: "#ffa8a8", type: "scalar", default: 0.4, defaultVal: 0.4, extended: true, isColor: false, min: 0, max: 1, step: 0.01 },
+  { key: "albedo", label: "Albedo", short: "Albedo", sub: "Base Colour", kind: "albedo", dot: "#9ea2aa", type: "color", default: "#e8c27a", defaultVal: "#e8c27a", extended: false, isColor: true, min: 0, max: 1, step: 0.01 },
+  { key: "roughness", label: "Roughness", short: "Rough", sub: "Surface Gloss", kind: "rough", dot: "#9ea2aa", type: "scalar", default: 0.34, defaultVal: 0.34, extended: false, isColor: false, min: 0.02, max: 1, step: 0.01 },
+  { key: "metalness", label: "Metalness", short: "Metal", sub: "Conductor Mask", kind: "metal", dot: "#9ea2aa", type: "scalar", default: 0.12, defaultVal: 0.12, extended: false, isColor: false, min: 0, max: 1, step: 0.01 },
+  { key: "height", label: "Height", short: "Height", sub: "Relief / Bump", kind: "height", dot: "#9ea2aa", type: "scalar", default: 0.25, defaultVal: 0.25, extended: false, isColor: false, min: -1, max: 1, step: 0.02 },
+  { key: "normal", label: "Normal Str", short: "Normal", sub: "Bump Intensity", kind: "normal", dot: "#9ea2aa", type: "scalar", default: 0.85, defaultVal: 0.85, extended: true, isColor: false, min: 0, max: 2, step: 0.05 },
+  { key: "ao", label: "Occlusion", short: "AO", sub: "Ambient Cavity", kind: "ao", dot: "#9ea2aa", type: "scalar", default: 1.0, defaultVal: 1.0, extended: true, isColor: false, min: 0, max: 1, step: 0.01 },
+  { key: "opacity", label: "Opacity", short: "Opacity", sub: "Cutout / Alpha", kind: "opacity", dot: "#9ea2aa", type: "scalar", default: 1.0, defaultVal: 1.0, extended: true, isColor: false, min: 0, max: 1, step: 0.01 },
+  { key: "emissive", label: "Emissive", short: "Emissive", sub: "Glow Colour", kind: "emissive", dot: "#9ea2aa", type: "color", default: "#ff7a3b", defaultVal: "#ff7a3b", extended: true, isColor: true, min: 0, max: 1, step: 0.01 },
+  { key: "emissiveIntensity", label: "Glow Power", short: "Glow", sub: "Emission Gain", kind: "emissive", dot: "#9ea2aa", type: "scalar", default: 1.0, defaultVal: 1.0, extended: true, isColor: false, min: 0, max: 4, step: 0.05 },
+  { key: "clearcoat", label: "Clearcoat", short: "Coat", sub: "Varnish Coat", kind: "coat", dot: "#9ea2aa", type: "scalar", default: 0.8, defaultVal: 0.8, extended: true, isColor: false, min: 0, max: 1, step: 0.01 },
+  { key: "coatRoughness", label: "Coat Rough", short: "CoatRgh", sub: "Varnish Gloss", kind: "coat", dot: "#9ea2aa", type: "scalar", default: 0.08, defaultVal: 0.08, extended: true, isColor: false, min: 0.01, max: 1, step: 0.01 },
+  { key: "sheen", label: "Sheen", short: "Sheen", sub: "Fabric Velour", kind: "sheen", dot: "#9ea2aa", type: "scalar", default: 0.65, defaultVal: 0.65, extended: true, isColor: false, min: 0, max: 1, step: 0.01 },
+  { key: "sheenRoughness", label: "Sheen Rough", short: "SheenRgh", sub: "Microfiber Soft", kind: "sheen", dot: "#9ea2aa", type: "scalar", default: 0.45, defaultVal: 0.45, extended: true, isColor: false, min: 0.01, max: 1, step: 0.01 },
+  { key: "specular", label: "Specular", short: "Spec", sub: "Dielectric F0", kind: "spec", dot: "#9ea2aa", type: "scalar", default: 1.0, defaultVal: 1.0, extended: true, isColor: false, min: 0, max: 1, step: 0.01 },
+  { key: "anisotropy", label: "Anisotropy", short: "Aniso", sub: "Brushed Grain", kind: "aniso", dot: "#9ea2aa", type: "scalar", default: 0.5, defaultVal: 0.5, extended: true, isColor: false, min: 0, max: 1, step: 0.01 },
+  { key: "iridescence", label: "Iridescence", short: "Irid", sub: "Thin-Film Pearl", kind: "irid", dot: "#9ea2aa", type: "scalar", default: 0.7, defaultVal: 0.7, extended: true, isColor: false, min: 0, max: 1, step: 0.01 },
+  { key: "iridescenceThickness", label: "Irid Film", short: "IridFilm", sub: "Spectrum Shift", kind: "irid", dot: "#9ea2aa", type: "scalar", default: 0.45, defaultVal: 0.45, extended: true, isColor: false, min: 0, max: 1, step: 0.01 },
+  { key: "transmission", label: "Transmission", short: "Trans", sub: "Glass / Jelly", kind: "trans", dot: "#9ea2aa", type: "scalar", default: 0.65, defaultVal: 0.65, extended: true, isColor: false, min: 0, max: 1, step: 0.01 },
+  { key: "thickness", label: "Subsurface", short: "Depth", sub: "Depth / Scatter", kind: "trans", dot: "#9ea2aa", type: "scalar", default: 0.4, defaultVal: 0.4, extended: true, isColor: false, min: 0, max: 1, step: 0.01 },
 ];
 
 export const PAINT_PBR_CHANNEL_ROWS = PAINT_PBR_CHANNELS.map((c) => [c.key, c.label, c.sub, c.kind, c.dot]);
@@ -53,9 +53,9 @@ export const PAINT_PBR_CHANNEL_MAP = Object.fromEntries(PAINT_PBR_CHANNELS.map((
 export const EXTENDED_PBR_KEYS = PAINT_PBR_CHANNELS.slice(4).map((c) => c.key);
 
 export const EXTRA_COLOR_CHANNELS = [
-  { key: "specularColor", label: "Spec Colour", short: "SpecCol", sub: "Specular Tint", kind: "spec", dot: "#ffe4b5", type: "color", default: "#ffffff", extended: true, isColor: true },
-  { key: "sheenColor", label: "Sheen Colour", short: "SheenCol", sub: "Fabric Velour Tint", kind: "sheen", dot: "#f7c2ff", type: "color", default: "#ffffff", extended: true, isColor: true },
-  { key: "attenuationColor", label: "Subsurf Tint", short: "SubCol", sub: "Volume Attenuation", kind: "trans", dot: "#ffb8b8", type: "color", default: "#ffffff", extended: true, isColor: true },
+  { key: "specularColor", label: "Spec Colour", short: "SpecCol", sub: "Specular Tint", kind: "spec", dot: "#9ea2aa", type: "color", default: "#ffffff", extended: true, isColor: true },
+  { key: "sheenColor", label: "Sheen Colour", short: "SheenCol", sub: "Fabric Velour Tint", kind: "sheen", dot: "#9ea2aa", type: "color", default: "#ffffff", extended: true, isColor: true },
+  { key: "attenuationColor", label: "Subsurf Tint", short: "SubCol", sub: "Volume Attenuation", kind: "trans", dot: "#9ea2aa", type: "color", default: "#ffffff", extended: true, isColor: true },
 ];
 export const EXTRA_COLOR_KEYS = EXTRA_COLOR_CHANNELS.map((c) => c.key);
 export const EXTRA_COLOR_CHANNEL_ROWS = EXTRA_COLOR_CHANNELS.map((c) => [c.key, c.label, c.sub, c.kind, c.dot]);
@@ -241,23 +241,23 @@ function prngHash(seed, salt = 0) {
 }
 
 export const COLOUR_DYNAMIC_MODES = [
-  { id: "solid", label: "Solid + H/S/V Jitter", sub: "Base ink with HSL jitter & hue curve", dot: "#e8c27a" },
-  { id: "stroke-gradient", label: "Stroke Gradient", sub: "Smooth multi-stop colour ramp along stroke", dot: "#ff7a59" },
-  { id: "multicolour", label: "Multicolour Scatter", sub: "Random swatch selection per dab", dot: "#2fe6a7" },
-  { id: "multicolour-cycle", label: "Multicolour Cycle", sub: "Sequential palette stepping along stroke", dot: "#63a8ff" },
-  { id: "temperature", label: "Warm ↔ Cool Split", sub: "Alternating painterly temperature contrast", dot: "#ffb454" },
-  { id: "rainbow", label: "Spectrum Sweep", sub: "Full 360° chromatic rotation per stroke", dot: "#d97aff" },
-  { id: "velocity", label: "Speed & Velocity Shift", sub: "Hue & saturation react to stroke speed", dot: "#5eead4" },
+  { id: "solid", label: "Solid + H/S/V Jitter", sub: "Base ink with HSL jitter & hue curve", dot: "#9ea2aa" },
+  { id: "stroke-gradient", label: "Stroke Gradient", sub: "Smooth multi-stop colour ramp along stroke", dot: "#9ea2aa" },
+  { id: "multicolour", label: "Multicolour Scatter", sub: "Random swatch selection per dab", dot: "#9ea2aa" },
+  { id: "multicolour-cycle", label: "Multicolour Cycle", sub: "Sequential palette stepping along stroke", dot: "#9ea2aa" },
+  { id: "temperature", label: "Warm ↔ Cool Split", sub: "Alternating painterly temperature contrast", dot: "#9ea2aa" },
+  { id: "rainbow", label: "Spectrum Sweep", sub: "Full 360° chromatic rotation per stroke", dot: "#9ea2aa" },
+  { id: "velocity", label: "Speed & Velocity Shift", sub: "Hue & saturation react to stroke speed", dot: "#9ea2aa" },
 ];
 
 export const OPACITY_DYNAMIC_MODES = [
-  { id: "constant", label: "Constant + Jitter", sub: "Steady stroke with per-dab opacity jitter", dot: "#cbd5e1" },
-  { id: "fade-out", label: "Fade Out Tail", sub: "Tapers smoothly toward stroke end", dot: "#94a3b8" },
-  { id: "fade-in", label: "Fade In Entry", sub: "Soft entry ramping up along stroke", dot: "#7dd3fc" },
-  { id: "bell", label: "Soft Entry & Exit", sub: "Tapered both ends of stroke", dot: "#2fe6a7" },
-  { id: "pulse", label: "Opacity Pulse Wave", sub: "Rhythmic opacity wave along path", dot: "#c084fc" },
-  { id: "velocity", label: "Speed Reactive Opacity", sub: "Stroke velocity modulates dab opacity", dot: "#ffb454" },
-  { id: "curve", label: "Opacity Curve Driven", sub: "Uses Opacity Over Stroke spline", dot: "#63a8ff" },
+  { id: "constant", label: "Constant + Jitter", sub: "Steady stroke with per-dab opacity jitter", dot: "#9ea2aa" },
+  { id: "fade-out", label: "Fade Out Tail", sub: "Tapers smoothly toward stroke end", dot: "#9ea2aa" },
+  { id: "fade-in", label: "Fade In Entry", sub: "Soft entry ramping up along stroke", dot: "#9ea2aa" },
+  { id: "bell", label: "Soft Entry & Exit", sub: "Tapered both ends of stroke", dot: "#9ea2aa" },
+  { id: "pulse", label: "Opacity Pulse Wave", sub: "Rhythmic opacity wave along path", dot: "#9ea2aa" },
+  { id: "velocity", label: "Speed Reactive Opacity", sub: "Stroke velocity modulates dab opacity", dot: "#9ea2aa" },
+  { id: "curve", label: "Opacity Curve Driven", sub: "Uses Opacity Over Stroke spline", dot: "#9ea2aa" },
 ];
 
 export const COLOUR_GRADIENT_PRESETS = [
@@ -2281,14 +2281,14 @@ export function normalizePointGradient3D(input) {
     schema: "alloy.point-gradient.v1",
     space: input?.space || "object-sphere",
     falloff: clamp(Number(input?.falloff ?? 1.0), 0.2, 3.0),
-    background: input?.background || "#1d222b",
+    background: input?.background || "#0b0b0b",
     points,
   };
 }
 
 export function evaluatePointGradient3DAt(grad, localPos) {
   const falloffScale = clamp(grad.falloff ?? 1.0, 0.2, 3.0);
-  const bgRgb = hexToRgb01(grad.background || "#1d222b").map(srgbToLinear);
+  const bgRgb = hexToRgb01(grad.background || "#0b0b0b").map(srgbToLinear);
   let sumR = 0, sumG = 0, sumB = 0, totalW = 0, peakW = 0;
 
   for (let i = 0; i < grad.points.length; i++) {
@@ -2348,7 +2348,7 @@ export function applyPointGradient3DToLayer({ layer, cues, grad, brush, editingM
   const heightByte = Math.round(clamp(((brush?.height ?? 0.25) * 0.5 + 0.5), 0, 1) * 255);
 
   const falloffScale = clamp(g.falloff ?? 1.0, 0.2, 3.0);
-  const bgLin = hexToRgb01(g.background || "#1d222b").map(srgbToLinear);
+  const bgLin = hexToRgb01(g.background || "#0b0b0b").map(srgbToLinear);
   const prePts = g.points.map((pt) => {
     const rgb = hexToRgb01(pt.color).map(srgbToLinear);
     const rad = Math.max(0.08, pt.radius * falloffScale);

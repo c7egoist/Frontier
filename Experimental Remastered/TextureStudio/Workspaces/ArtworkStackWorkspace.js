@@ -280,6 +280,10 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     snapSelect.append(o);
   }
   snapSelect.value = String(state.snapStep);
+  const snapWrap = Construct("div", "select-pill-wrap vp-compact-select", [
+    snapSelect,
+    Construct("span", "pill-caret-divider", ConstructGlyph("ChevronDown", "glyph chev")),
+  ]);
 
   const exportRgbaBufferPng = (rgba, w, h, filename) => {
     const off = document.createElement("canvas");
@@ -443,12 +447,12 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
       kbd: t.key,
       active: state.vectorTool === t.id,
     })),
-    moreControls: [btnGrid, btnAxes, snapSelect],
+    moreControls: [btnGrid, btnAxes, snapWrap],
     onToolSelect: (id) => selectVectorTool(id),
   });
   syncUndoState();
 
-  // Interactive SVG Stage Shell (Olive-tinted frame matching Image 1)
+  // Interactive SVG Stage Shell
   const stage = Construct("div", "se-stage-shell");
 
   const stageTopBar = Construct("div", "se-stage-topbar");
@@ -1160,10 +1164,10 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
       renderExpanded(layer, expEl) {
         const pills = Construct("div", "tp-exp-pills");
         const chDefs = [
-          ["COL", layer.surface?.enableAlbedo !== false, "#eff4cf"],
-          ["RGH", layer.surface?.enableRoughness !== false, "#9ecfff"],
-          ["MET", layer.surface?.enableMetalness !== false, "#e8c27a"],
-          ["HGT", layer.surface?.enableHeight !== false, "#9ad48b"],
+          ["COL", layer.surface?.enableAlbedo !== false, "#9ea2aa"],
+          ["RGH", layer.surface?.enableRoughness !== false, "#9ea2aa"],
+          ["MET", layer.surface?.enableMetalness !== false, "#9ea2aa"],
+          ["HGT", layer.surface?.enableHeight !== false, "#9ea2aa"],
         ];
         for (const [short, on, col] of chDefs) {
           if (!on) continue;
@@ -1173,7 +1177,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
         }
         for (const mod of (layer.modifiers || []).filter((m) => m.enabled !== false)) {
           const dot = document.createElement("i");
-          dot.style.setProperty("--pill-color", "#d49fff");
+          dot.style.setProperty("--pill-color", "#9ea2aa");
           pills.append(Construct("span", "tp-exp-pill", [dot, Construct("span", null, mod.type)]));
         }
         expEl.append(
@@ -1494,11 +1498,11 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
 
       stops.forEach((stop, sIdx) => {
         const sRow = Construct("div", "se-gradient-stop-row");
-        sRow.style.cssText = "display:grid;grid-template-columns:28px 1fr 44px 22px;align-items:center;gap:6px;";
+        sRow.style.cssText = "display:grid;grid-template-columns:22px 1fr 44px 22px;align-items:center;gap:6px;";
         const colInp = document.createElement("input");
         colInp.type = "color";
+        colInp.className = "colour-stop-native";
         colInp.value = stop.color;
-        colInp.style.cssText = "width:26px;height:22px;padding:0;border:1px solid rgba(255,255,255,0.2);background:transparent;cursor:pointer;";
         colInp.addEventListener("input", () => {
           const next = stops.map((st, idx) => (idx === sIdx ? { ...st, color: colInp.value } : st));
           setStops(next);
@@ -1890,7 +1894,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
         getPointGrad: () => state.doc.background.fillPointGradient,
         setPointGrad: (g) => { state.doc.background.fillPointGradient = g; },
         fallbackA: state.doc.background.color || "#171a1f",
-        fallbackB: state.doc.background.colorB || "#2b3340",
+        fallbackB: state.doc.background.colorB || "#0b0b0b",
       });
     }
     if (isPattern) {

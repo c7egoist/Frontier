@@ -43,6 +43,8 @@ export const GlyphPaths = {
     Upload:     '<path d="M12 15V3m0 0-4 4m4-4 4 4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>',
     Help:       '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 0 1 5 .5c0 2-2.5 2-2.5 4M12 17.5h.01"/>',
     Focus:      '<path d="M4 9V5h4M16 5h4v4M20 15v4h-4M8 19H4v-4"/><circle cx="12" cy="12" r="2.2"/>',
+    Maximize:   '<path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>',
+    Minimize:   '<path d="M4 14h6v6M20 10h-6V4M14 10l7-7M10 14l-7 7"/>',
     Check:      '<path d="M5 12.5l4.2 4.2L19 7"/>',
     Sparkles:   '<path d="M11 3.5l1.7 4.6 4.6 1.7-4.6 1.7L11 16.1l-1.7-4.6-4.6-1.7 4.6-1.7z"/><path d="M18.5 14.5v5M16 17h5"/>',
     Sliders:    '<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',
@@ -259,7 +261,9 @@ export function SelectRow(Parent, Binding)
         Option.value = String(Value);
         Select.append(Option);
     }
-    const Row = Construct('div', 'property-row select-row', [Construct('label', 'property-label', Binding.Label), Select]);
+    const Caret = Construct('span', 'pill-caret-divider', ConstructGlyph('ChevronDown', 'glyph chev'));
+    const Wrap = Construct('div', 'select-pill-wrap', [Select, Caret]);
+    const Row = Construct('div', 'property-row select-row', [Construct('label', 'property-label', Binding.Label), Wrap]);
     Parent.append(Row);
     Select.addEventListener('change', () =>
     {
@@ -302,14 +306,14 @@ export function ColorRow(Parent, Binding)
     const Picker = Construct('input', 'color-native');
     Picker.type = 'color';
     Picker.setAttribute('aria-label', Binding.Label);
+    const SwatchShell = Construct('label', 'color-circle-shell', Picker);
+    const LabelSpan = Construct('span', 'property-label color-pill-label', Binding.Label);
     const Hex = Construct('input', 'color-hex');
     Hex.type = 'text';
     Hex.maxLength = 7;
-    const Control = Construct('div', 'color-pill-wrap', [Picker, Hex]);
-    const Row = Construct('div', 'property-row color-row', [
-        Construct('span', 'property-label', Binding.Label),
-        Control
-    ]);
+    Hex.setAttribute('aria-label', `${Binding.Label} Hex`);
+    const Control = Construct('div', 'color-pill-wrap', [SwatchShell, LabelSpan, Hex]);
+    const Row = Construct('div', 'property-row color-row', Control);
     Parent.append(Row);
 
     const CommitHex = Raw =>
@@ -320,13 +324,21 @@ export function ColorRow(Parent, Binding)
             Broadcast();
         }
     };
-    Picker.addEventListener('input', () => { Binding.Write(Picker.value.toLowerCase()); Broadcast(); });
+    Picker.addEventListener('input', () => {
+        const val = Picker.value.toLowerCase();
+        SwatchShell.style.background = val;
+        Binding.Write(val);
+        Broadcast();
+    });
     Hex.addEventListener('change', () => CommitHex(Hex.value));
 
     Register(() =>
     {
         const Val = String(Binding.Read() || '#ffffff').toLowerCase();
-        if (/^#[0-9a-f]{6}$/.test(Val)) Picker.value = Val;
+        if (/^#[0-9a-f]{6}$/.test(Val)) {
+            Picker.value = Val;
+            SwatchShell.style.background = Val;
+        }
         if (document.activeElement !== Hex) Hex.value = Val;
         ApplyAvailability(Row, Binding);
     });
@@ -361,8 +373,9 @@ export function FilterDropdownPill(Parent, Binding)
     const DimSpan = Construct('span', 'trigger-dim');
     const LabelSpan = Construct('span', 'trigger-label');
     const Chev = ConstructGlyph('ChevronDown', 'glyph chev');
+    const CaretBox = Construct('span', 'pill-caret-divider', Chev);
 
-    const Trigger = Construct('button', 'pill-trigger', [Dot, GradSw, DimSpan, LabelSpan, Chev]);
+    const Trigger = Construct('button', 'pill-trigger', [Dot, GradSw, DimSpan, LabelSpan, CaretBox]);
     Trigger.type = 'button';
     Trigger.setAttribute('aria-haspopup', 'menu');
     Trigger.setAttribute('aria-expanded', 'false');
@@ -454,7 +467,7 @@ export function FilterDropdownPill(Parent, Binding)
             else if (opt.dot)
             {
                 const d = Construct('span', 'row-dot');
-                d.style.background = opt.dot;
+                d.style.background = '#9ea2aa';
                 item.append(d);
             }
             const copy = Construct('span', 'menu-item-copy', [
@@ -502,7 +515,7 @@ export function FilterDropdownPill(Parent, Binding)
         {
             GradSw.style.display = 'none';
             Dot.style.display = '';
-            Dot.style.background = found.dot;
+            Dot.style.background = '#9ea2aa';
         }
         else
         {
@@ -552,10 +565,10 @@ export function FilterDropdownPill(Parent, Binding)
 export function ChannelMaskRow(Parent, Binding)
 {
     const Channels = Binding.Channels || [
-        ['albedo', 'Albedo', 'Base Colour', 'albedo', '#e8c27a'],
-        ['roughness', 'Roughness', 'Surface Gloss', 'rough', '#2fe6a7'],
-        ['metalness', 'Metalness', 'Conductor Mask', 'metal', '#63a8ff'],
-        ['height', 'Height', 'Relief / Bump', 'height', '#e686b8'],
+        ['albedo', 'Albedo', 'Base Colour', 'albedo', '#9ea2aa'],
+        ['roughness', 'Roughness', 'Surface Gloss', 'rough', '#9ea2aa'],
+        ['metalness', 'Metalness', 'Conductor Mask', 'metal', '#9ea2aa'],
+        ['height', 'Height', 'Relief / Bump', 'height', '#9ea2aa'],
     ];
     const Strict = !!Binding.StrictPresence;
     const MakeMap = (Val) => Object.fromEntries(Channels.map(([Key]) => [Key, Val]));
@@ -568,7 +581,7 @@ export function ChannelMaskRow(Parent, Binding)
         ConstructGlyph('Plus', 'glyph'),
         Construct('span', null, Binding.AddLabel || 'Channel'),
         TriggerCount,
-        ConstructGlyph('ChevronDown', 'glyph chev'),
+        Construct('span', 'pill-caret-divider', ConstructGlyph('ChevronDown', 'glyph chev')),
     ]);
     Trigger.type = 'button';
     Trigger.setAttribute('aria-haspopup', 'menu');
@@ -617,13 +630,13 @@ export function ChannelMaskRow(Parent, Binding)
             return !q || `${Title} ${Sub} ${Key}`.toLowerCase().includes(q);
         });
 
-        for (const [Key, Title, Sub, Kind, DotColor] of available)
+        for (const [Key, Title, Sub, Kind] of available)
         {
             const item = Construct('button', `menu-item chan-${Kind}`);
             item.type = 'button';
             item.dataset.channel = Key;
             const dot = Construct('span', 'row-dot');
-            dot.style.background = DotColor;
+            dot.style.background = '#9ea2aa';
             item.append(
                 dot,
                 Construct('span', 'menu-item-copy', [
@@ -660,12 +673,12 @@ export function ChannelMaskRow(Parent, Binding)
         PillsWrap.innerHTML = '';
         let inactiveCount = 0;
 
-        for (const [Key, Title, , Kind, DotColor] of Channels)
+        for (const [Key, Title, , Kind] of Channels)
         {
             if (!IsActive(MapObj, Key)) { inactiveCount++; continue; }
 
             const Dot = Construct('i', 'pbr-chan-dot');
-            Dot.style.background = DotColor;
+            Dot.style.background = '#9ea2aa';
             const RemoveX = Construct('span', 'pbr-chan-remove', ConstructGlyph('Close'));
             const Pill = Construct('button', `pbr-chan-pill active chan-${Kind}`, [
                 Dot,

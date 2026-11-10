@@ -104,35 +104,35 @@ function downloadBlob(text, filename, mime = "text/plain") {
 }
 
 const MATERIAL_PBR_CHANNEL_SPEC = Object.freeze([
-  ["colour", "Colour", "Diffuse / Base Albedo", "albedo", "#e8c27a"],
-  ["roughness", "Roughness", "Microfacet Gloss", "rough", "#2fe6a7"],
-  ["metallic", "Metallic", "Conductor Mask", "metal", "#63a8ff"],
-  ["normal", "Normal", "Surface Tangent", "height", "#c886f2"],
-  ["microNormal", "Micro normal", "Fine Pore / Grain", "height", "#e686b8"],
-  ["height", "Height / Relief", "Displacement Relief", "height", "#f5a3c7"],
-  ["occlusion", "Ambient Occlusion", "Cavity Indirect AO", "rough", "#9aa5b4"],
-  ["opacity", "Opacity", "Cutout / Alpha Weight", "albedo", "#e2e8f0"],
-  ["coverage", "Coverage", "Layer Mask / Blend", "albedo", "#eff4cf"],
-  ["ior", "IOR", "Fresnel Index", "metal", "#7ad7f0"],
-  ["specular", "Specular", "Dielectric Reflection", "metal", "#a3c6ff"],
-  ["specularColour", "Specular Colour", "Edge Specular Tint", "albedo", "#b8d4ff"],
-  ["coat", "Clearcoat", "Candy / Lacquer Topcoat", "rough", "#74e2b8"],
-  ["coatRoughness", "Coat Roughness", "Clearcoat Polish", "rough", "#54d8a6"],
-  ["coatIor", "Coat IOR", "Topcoat Fresnel IOR", "metal", "#6dcff6"],
-  ["coatNormal", "Coat Normal", "Orange-Peel / Coat Normal", "height", "#d79bf8"],
-  ["sheen", "Sheen", "Velvet / Frost Grazing", "albedo", "#e29fd3"],
-  ["sheenRoughness", "Sheen Roughness", "Grazing Falloff", "rough", "#c8a0e6"],
-  ["sheenColour", "Sheen Colour", "Grazing Tint", "albedo", "#f2b8e6"],
-  ["anisotropy", "Anisotropy", "Directional Brushing", "metal", "#80d1ff"],
-  ["anisotropyRotation", "Anisotropy Angle", "Grain Direction Angle", "metal", "#59b5eb"],
-  ["iridescence", "Iridescence", "Thin-Film Interference", "albedo", "#ff77c8"],
-  ["iridescenceIor", "Iridescence IOR", "Thin-Film Index", "metal", "#c985ff"],
-  ["iridescenceThickness", "Iridescence NM", "Film Thickness (nm)", "rough", "#ffad66"],
-  ["transmission", "Transmission", "Subsurface / Gel Glass", "rough", "#4ce0c4"],
-  ["thickness", "Thickness / SSS", "Volume Depth", "rough", "#f0b46b"],
-  ["attenuationColour", "Attenuation Colour", "Syrup / Interior Tint", "albedo", "#ff8266"],
-  ["emissive", "Emissive", "Self-Glow Colour", "albedo", "#ffe36e"],
-  ["emissiveIntensity", "Emissive Strength", "HDR Glow Intensity", "rough", "#ffb84d"],
+  ["colour", "Colour", "Diffuse / Base Albedo", "albedo", "#9ea2aa"],
+  ["roughness", "Roughness", "Microfacet Gloss", "rough", "#9ea2aa"],
+  ["metallic", "Metallic", "Conductor Mask", "metal", "#9ea2aa"],
+  ["normal", "Normal", "Surface Tangent", "height", "#9ea2aa"],
+  ["microNormal", "Micro normal", "Fine Pore / Grain", "height", "#9ea2aa"],
+  ["height", "Height / Relief", "Displacement Relief", "height", "#9ea2aa"],
+  ["occlusion", "Ambient Occlusion", "Cavity Indirect AO", "rough", "#9ea2aa"],
+  ["opacity", "Opacity", "Cutout / Alpha Weight", "albedo", "#9ea2aa"],
+  ["coverage", "Coverage", "Layer Mask / Blend", "albedo", "#9ea2aa"],
+  ["ior", "IOR", "Fresnel Index", "metal", "#9ea2aa"],
+  ["specular", "Specular", "Dielectric Reflection", "metal", "#9ea2aa"],
+  ["specularColour", "Specular Colour", "Edge Specular Tint", "albedo", "#9ea2aa"],
+  ["coat", "Clearcoat", "Candy / Lacquer Topcoat", "rough", "#9ea2aa"],
+  ["coatRoughness", "Coat Roughness", "Clearcoat Polish", "rough", "#9ea2aa"],
+  ["coatIor", "Coat IOR", "Topcoat Fresnel IOR", "metal", "#9ea2aa"],
+  ["coatNormal", "Coat Normal", "Orange-Peel / Coat Normal", "height", "#9ea2aa"],
+  ["sheen", "Sheen", "Velvet / Frost Grazing", "albedo", "#9ea2aa"],
+  ["sheenRoughness", "Sheen Roughness", "Grazing Falloff", "rough", "#9ea2aa"],
+  ["sheenColour", "Sheen Colour", "Grazing Tint", "albedo", "#9ea2aa"],
+  ["anisotropy", "Anisotropy", "Directional Brushing", "metal", "#9ea2aa"],
+  ["anisotropyRotation", "Anisotropy Angle", "Grain Direction Angle", "metal", "#9ea2aa"],
+  ["iridescence", "Iridescence", "Thin-Film Interference", "albedo", "#9ea2aa"],
+  ["iridescenceIor", "Iridescence IOR", "Thin-Film Index", "metal", "#9ea2aa"],
+  ["iridescenceThickness", "Iridescence NM", "Film Thickness (nm)", "rough", "#9ea2aa"],
+  ["transmission", "Transmission", "Subsurface / Gel Glass", "rough", "#9ea2aa"],
+  ["thickness", "Thickness / SSS", "Volume Depth", "rough", "#9ea2aa"],
+  ["attenuationColour", "Attenuation Colour", "Syrup / Interior Tint", "albedo", "#9ea2aa"],
+  ["emissive", "Emissive", "Self-Glow Colour", "albedo", "#9ea2aa"],
+  ["emissiveIntensity", "Emissive Strength", "HDR Glow Intensity", "rough", "#9ea2aa"],
 ]);
 
 const SOURCE_MODES = Object.freeze([
@@ -176,6 +176,7 @@ export function mountMaterialWorkspace(root, appBridge) {
     shape: "shaderball",
     backdrop: "softbox",
     inspectorTab: "properties",
+    fullscreen: false,
     autoRotate: false,
     lightAzimuth: -37,
     exposure: 1.22,
@@ -247,11 +248,11 @@ export function mountMaterialWorkspace(root, appBridge) {
   shapeSelect.value = state.shape;
 
   const backdropOptions = [
-    ["Studio softbox", "softbox", "#1f2022"],
-    ["Obsidian", "obsidian", "#0d0e11"],
-    ["Neutral", "neutral", "#1f2126"],
-    ["Warm", "warm", "#221d18"],
-    ["Daylight", "daylight", "#2a313a"],
+    ["Studio softbox", "softbox", "#1c1e22"],
+    ["Obsidian", "obsidian", "#111215"],
+    ["Neutral", "neutral", "#222429"],
+    ["Warm", "warm", "#221c16"],
+    ["Daylight", "daylight", "#262d36"],
   ];
   const bgSelect = Construct("select", "mw-select-pill");
   bgSelect.setAttribute("aria-label", "Studio Environment");
@@ -262,20 +263,22 @@ export function mountMaterialWorkspace(root, appBridge) {
   }
   bgSelect.value = state.backdrop;
 
-  const btnRotate = Construct("button", "pill-btn mw-mini-pill", [ConstructGlyph("Rotate"), Construct("span", null, "Spin")]);
-  btnRotate.type = "button";
-  const btnSendToPaint = Construct("button", "pill-btn accent mw-mini-pill", [ConstructGlyph("Brush"), Construct("span", null, "Use in Paint")]);
-  btnSendToPaint.type = "button";
+  const fsIconSlot = Construct("span", "mw-fs-icon", ConstructGlyph("Maximize"));
+  const fsLabel = Construct("span", "mw-fs-label", "Fullscreen");
+  const btnFullscreen = Construct("button", "pill-btn mw-mini-pill mw-fullscreen-btn", [fsIconSlot, fsLabel]);
+  btnFullscreen.type = "button";
+  btnFullscreen.setAttribute("aria-pressed", "false");
+  btnFullscreen.title = "Toggle fullscreen look-dev stage";
 
   const stage = Construct("div", "viewport-stage mw-stage");
 
-  // Top-left floating editorial collection + large title + description (matching Image 3)
+  // Top-left floating editorial collection + large title + description
   const mwHeroKicker = Construct("div", "mw-hero-kicker", "01 / MATERIAL COLLECTION");
   const mwHeroTitle = Construct("h1", "mw-hero-title", state.params.name || "Material");
   const mwHeroDesc = Construct("p", "mw-hero-desc", state.params.description || "Physically based procedural surface shader.");
   const mwStageHero = Construct("div", "mw-stage-hero", [mwHeroKicker, mwHeroTitle, mwHeroDesc]);
 
-  const mwTopActions = Construct("div", "mw-stage-top-actions", [btnRotate, btnSendToPaint]);
+  const mwTopActions = Construct("div", "mw-stage-top-actions", [btnFullscreen]);
 
   // Bottom-center floating zoom capsule + Reset view + selector pills (matching Image 3)
   const btnZoomOut = Construct("button", "mw-zoom-btn", "−");
@@ -379,11 +382,41 @@ export function mountMaterialWorkspace(root, appBridge) {
   renderer.shadowMap.type = THREE.PCFShadowMap;
   stage.prepend(renderer.domElement);
 
+  const THEME_BG_BLACK = "#0b0b0b";
+  let backdropTex = null;
+  function createRadialBackdropTexture(colorA, colorB = THEME_BG_BLACK) {
+    const c = document.createElement("canvas");
+    c.width = 512;
+    c.height = 512;
+    const ctx = c.getContext?.("2d");
+    if (!ctx || typeof ctx.createRadialGradient !== "function") return null;
+    const grad = ctx.createRadialGradient(256, 224, 24, 256, 224, 320);
+    grad.addColorStop(0, colorA || "#1c1e22");
+    grad.addColorStop(1, colorB || THEME_BG_BLACK);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 512, 512);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.needsUpdate = true;
+    return tex;
+  }
+
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color("#1f2022");
-  scene.fog = new THREE.FogExp2("#191a1c", 0.075);
+  scene.background = new THREE.Color(THEME_BG_BLACK);
+  scene.fog = new THREE.FogExp2(THEME_BG_BLACK, 0.068);
   const envTex = createStudioEnvTexture(renderer);
   scene.environment = envTex;
+
+  function applyStageBackdrop(hexA) {
+    const colorA = hexA || "#1c1e22";
+    stage.style.background = `radial-gradient(ellipse at 50% 44%, ${colorA} 0%, ${THEME_BG_BLACK} 78%)`;
+    const nextTex = createRadialBackdropTexture(colorA, THEME_BG_BLACK);
+    backdropTex?.dispose?.();
+    backdropTex = nextTex;
+    scene.background = nextTex || new THREE.Color(THEME_BG_BLACK);
+    if (scene.fog) scene.fog.color.set(THEME_BG_BLACK);
+  }
+  applyStageBackdrop(backdropOptions[0][2]);
 
   const camera = new THREE.PerspectiveCamera(37, 1, 0.001, 200);
   camera.position.copy(DEFAULT_CAM_POS);
@@ -406,9 +439,9 @@ export function mountMaterialWorkspace(root, appBridge) {
   fillLight.position.set(-4, 2, 1);
   scene.add(ambientLight, keyLight, keyLight.target, rimLight, fillLight);
 
-  // Exact unmodified AlloyStudio grey studio floor, faint ground grid, 3-part pedestal stand & cloth supportBall
+  // Exact unmodified AlloyStudio grey studio floor fading smoothly into theme black, faint ground grid, 3-part pedestal stand & cloth supportBall
   const floorMaterial = new THREE.MeshStandardMaterial({
-    color: "#242528",
+    color: "#1b1c1f",
     roughness: 0.85,
     metalness: 0.05,
     envMapIntensity: 0.2,
@@ -1088,8 +1121,7 @@ export function mountMaterialWorkspace(root, appBridge) {
       cb.addEventListener("click", () => {
         state.backdrop = val;
         bgSelect.value = val;
-        scene.background = new THREE.Color(hex);
-        if (scene.fog) scene.fog.color.set(hex);
+        applyStageBackdrop(hex);
         renderLeftOutliner();
       });
       envStrip.append(cb);
@@ -1259,14 +1291,14 @@ export function mountMaterialWorkspace(root, appBridge) {
     ChannelMaskRow(patSec.Inner, {
       Label: "Pattern PBR Channels",
       Channels: [
-        ["albedo", "Albedo", "Pattern Base Colour", "albedo", "#e8c27a"],
-        ["roughness", "Roughness", "Pattern Surface Gloss", "rough", "#2fe6a7"],
-        ["metalness", "Metalness", "Pattern Conductor", "metal", "#63a8ff"],
-        ["height", "Height", "Pattern Relief / Displacement", "height", "#e686b8"],
-        ["normal", "Normal", "Tangent Normal Map", "height", "#c886f2"],
-        ["occlusion", "Occlusion", "Cavity Indirect AO", "rough", "#9aa5b4"],
-        ["coat", "Clearcoat", "Ceramic / Candy Glaze", "rough", "#74e2b8"],
-        ["sheen", "Sheen", "Wool / Velvet Grazing", "albedo", "#e29fd3"],
+        ["albedo", "Albedo", "Pattern Base Colour", "albedo", "#9ea2aa"],
+        ["roughness", "Roughness", "Pattern Surface Gloss", "rough", "#9ea2aa"],
+        ["metalness", "Metalness", "Pattern Conductor", "metal", "#9ea2aa"],
+        ["height", "Height", "Pattern Relief / Displacement", "height", "#9ea2aa"],
+        ["normal", "Normal", "Tangent Normal Map", "height", "#9ea2aa"],
+        ["occlusion", "Occlusion", "Cavity Indirect AO", "rough", "#9ea2aa"],
+        ["coat", "Clearcoat", "Ceramic / Candy Glaze", "rough", "#9ea2aa"],
+        ["sheen", "Sheen", "Wool / Velvet Grazing", "albedo", "#9ea2aa"],
       ],
       Read: () => state.params.patternChannelMask || { albedo: true, roughness: true, metalness: true, height: true, normal: true, occlusion: true, coat: true, sheen: true },
       Write: (next) => {
@@ -1488,13 +1520,13 @@ export function mountMaterialWorkspace(root, appBridge) {
               next.Authoring.Sources[chAddr] = {
                 Mode: "field",
                 Generator: gen.Identity,
-                Stops: curSrc.Stops || ["#1a1d24", "#e8c27a"],
+                Stops: curSrc.Stops || ["#0b0b0b", "#e8c27a"],
                 Direct: curSrc.Direct ?? false,
               };
             } else {
               next.Authoring.Sources[chAddr] = {
                 Mode: mode,
-                Stops: curSrc.Stops || ["#1a1d24", "#e8c27a"],
+                Stops: curSrc.Stops || ["#0b0b0b", "#e8c27a"],
                 Direct: curSrc.Direct ?? false,
                 ...(mode === "texture" && curSrc.Texture ? { Texture: curSrc.Texture } : {}),
               };
@@ -1595,7 +1627,7 @@ export function mountMaterialWorkspace(root, appBridge) {
             } else {
               MultiColourRow(layerSec.Inner, {
                 Label: "Field Gradient Stops",
-                Read: () => p.Authoring.Sources[chAddr]?.Stops || ["#1a1d24", "#e8c27a"],
+                Read: () => p.Authoring.Sources[chAddr]?.Stops || ["#0b0b0b", "#e8c27a"],
                 Write: (cols) => {
                   mutateParamsPreservingPattern((cur) => {
                     const next = structuredClone(cur);
@@ -1813,6 +1845,11 @@ export function mountMaterialWorkspace(root, appBridge) {
 
     // Look-dev Lighting & Export
     const lightSec = SectionCard(rightInner, { Title: "Stage Lighting", Glyph: "Sun", Open: false });
+    SwitchRow(lightSec.Inner, {
+      Label: "Auto-Rotate Turntable",
+      Read: () => !!state.autoRotate,
+      Write: (v) => { state.autoRotate = !!v; },
+    });
     SliderRow(lightSec.Inner, {
       Label: "Key Light Azimuth",
       Minimum: -180, Maximum: 180, Step: 1, Unit: "°",
@@ -1892,15 +1929,56 @@ export function mountMaterialWorkspace(root, appBridge) {
   bgSelect.addEventListener("change", () => {
     state.backdrop = bgSelect.value;
     const found = backdropOptions.find(([, val]) => val === state.backdrop);
-    const hex = found ? found[2] : "#1f2022";
-    scene.background = new THREE.Color(hex);
-    if (scene.fog) scene.fog.color.set(hex);
+    const hex = found ? found[2] : "#1c1e22";
+    applyStageBackdrop(hex);
     renderLeftOutliner();
   });
-  btnRotate.addEventListener("click", () => {
-    state.autoRotate = !state.autoRotate;
-    btnRotate.classList.toggle("active", state.autoRotate);
+
+  const resizeStage = () => {
+    const w = stage.clientWidth || 600;
+    const h = stage.clientHeight || 480;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+  };
+
+  function syncFullscreenButton() {
+    const active = !!state.fullscreen;
+    grid.classList.toggle("mw-fullscreen", active);
+    btnFullscreen.classList.toggle("active", active);
+    btnFullscreen.setAttribute("aria-pressed", active ? "true" : "false");
+    fsIconSlot.innerHTML = "";
+    fsIconSlot.append(ConstructGlyph(active ? "Minimize" : "Maximize"));
+    fsLabel.textContent = active ? "Exit Fullscreen" : "Fullscreen";
+    resizeStage();
+  }
+
+  btnFullscreen.addEventListener("click", () => {
+    const next = !state.fullscreen;
+    state.fullscreen = next;
+    syncFullscreenButton();
+    try {
+      if (next && !document.fullscreenElement && typeof stage.requestFullscreen === "function") {
+        Promise.resolve(stage.requestFullscreen()).catch(() => {});
+      } else if (!next && document.fullscreenElement === stage && typeof document.exitFullscreen === "function") {
+        Promise.resolve(document.exitFullscreen()).catch(() => {});
+      }
+    } catch {}
   });
+
+  const onFsChange = () => {
+    if (!document.fullscreenElement && state.fullscreen) {
+      // Keep CSS fullscreen only if user didn't initiate exit via Escape from native fullscreen
+      if (onFsChange._wasNative) {
+        state.fullscreen = false;
+        syncFullscreenButton();
+      }
+    }
+    onFsChange._wasNative = document.fullscreenElement === stage;
+    resizeStage();
+  };
+  document.addEventListener("fullscreenchange", onFsChange);
+
   btnZoomOut.addEventListener("click", () => applyZoomFactor(1.16));
   btnZoomIn.addEventListener("click", () => applyZoomFactor(0.86));
   btnResetCam.addEventListener("click", () => {
@@ -1910,15 +1988,8 @@ export function mountMaterialWorkspace(root, appBridge) {
     syncZoomReadout();
   });
   controls.addEventListener?.("change", syncZoomReadout);
-  btnSendToPaint.addEventListener("click", () => appBridge.sendMaterialToPaint(state.params));
 
-  const resizeObserver = new ResizeObserver(() => {
-    const w = stage.clientWidth || 600;
-    const h = stage.clientHeight || 480;
-    renderer.setSize(w, h, false);
-    camera.aspect = w / h;
-    camera.updateProjectionMatrix();
-  });
+  const resizeObserver = new ResizeObserver(resizeStage);
   resizeObserver.observe(stage);
 
   updateLights();
@@ -1937,12 +2008,13 @@ export function mountMaterialWorkspace(root, appBridge) {
   rafId = requestAnimationFrame(tick);
 
   return {
-    name: "Material",
+      name: "Material",
     applyAsset,
     getSnapshot: () => ({
       id: state.params.id,
       name: state.params.name,
       shape: state.shape,
+      fullscreen: !!state.fullscreen,
       selectedLayerId: state.selectedLayerId,
       layerCount: state.params.Authoring?.Layers?.length || 0,
       hasPattern: !!state.params.pattern,
@@ -1951,9 +2023,11 @@ export function mountMaterialWorkspace(root, appBridge) {
     dispose() {
       disposed = true;
       cancelAnimationFrame(rafId);
+      document.removeEventListener("fullscreenchange", onFsChange);
       resizeObserver.disconnect();
       if (inspectorScope) ReleaseScope(inspectorScope);
       controls.dispose();
+      backdropTex?.dispose?.();
       envTex.dispose();
       if (sampleMesh) sampleMesh.geometry.dispose();
       if (activeMaterial) activeMaterial.dispose();

@@ -85,9 +85,13 @@ export function createViewportHeader(parentCol, opts = {}) {
     if (Number.isFinite(v) && v > 0) onResolutionChange?.(v);
   });
 
+  const sizeWrap = Construct("div", "select-pill-wrap vp-inline-select", [
+    resSelect,
+    Construct("span", "pill-caret-divider", ConstructGlyph("ChevronDown", "glyph chev")),
+  ]);
   const sizeField = Construct("label", "vp-field-chip", [
     Construct("span", null, "Size"),
-    resSelect,
+    sizeWrap,
   ]);
 
   let viewSelect = null;
@@ -102,9 +106,13 @@ export function createViewportHeader(parentCol, opts = {}) {
     }
     if (viewValue) viewSelect.value = viewValue;
     viewSelect.addEventListener("change", () => onViewChange?.(viewSelect.value));
+    const viewWrap = Construct("div", "select-pill-wrap vp-inline-select", [
+      viewSelect,
+      Construct("span", "pill-caret-divider", ConstructGlyph("ChevronDown", "glyph chev")),
+    ]);
     viewField = Construct("label", "vp-field-chip vp-view-chip", [
       Construct("span", null, "View"),
-      viewSelect,
+      viewWrap,
     ]);
   }
 
@@ -130,7 +138,7 @@ export function createViewportHeader(parentCol, opts = {}) {
   const saveBtn = Construct("button", "pill-btn se-save-btn", [
     ConstructGlyph("Save"),
     Construct("span", null, "Save"),
-    ConstructGlyph("ChevronDown"),
+    Construct("span", "pill-caret-divider", ConstructGlyph("ChevronDown", "glyph chev")),
   ]);
   saveBtn.type = "button";
   saveBtn.title = "Save Project & Export Maps";

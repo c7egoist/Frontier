@@ -154,13 +154,16 @@ export function mountBakingWorkspace(root, appBridge) {
   const centerCol = Construct("main", "studio-column viewport-column");
   const toolbar = Construct("div", "viewport-toolbar");
 
-  const studySelect = Construct("select");
-  studySelect.style.cssText = "height:30px;padding:0 10px;background:#191a1d;border:1px solid var(--line);border-radius:999px;font-size:11.5px;";
+  const studySelect = Construct("select", "se-header-select");
   for (const s of BAKE_STUDY_SHAPES) {
     const o = Construct("option", null, s.label);
     o.value = s.id;
     studySelect.append(o);
   }
+  const studyWrap = Construct("div", "select-pill-wrap vp-compact-select", [
+    studySelect,
+    Construct("span", "pill-caret-divider", ConstructGlyph("ChevronDown", "glyph chev")),
+  ]);
 
   const lowInp = document.createElement("input");
   lowInp.type = "file"; lowInp.accept = ".obj,.stl"; lowInp.hidden = true;
@@ -184,7 +187,7 @@ export function mountBakingWorkspace(root, appBridge) {
   const gpuPill = Construct("span", "gpu-badge", [document.createElement("i"), Construct("span", null, "GPU Baker Ready")]);
 
   toolbar.append(
-    studySelect,
+    studyWrap,
     btnLoadLow, lowInp,
     btnLoadHigh, highInp,
     gpuPill,
@@ -256,7 +259,7 @@ export function mountBakingWorkspace(root, appBridge) {
   });
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color("#0d0e11");
+  scene.background = new THREE.Color("#0b0b0b");
   const camera = new THREE.PerspectiveCamera(36, 1, 0.05, 80);
   camera.position.set(2.9, 1.9, 3.6);
   const orbit = new OrbitControls(camera, renderer.domElement);
