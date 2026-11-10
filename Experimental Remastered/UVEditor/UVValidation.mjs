@@ -419,11 +419,13 @@ console.log('9. Verifying Right-Click Context Menu & 3D Box/Face/Paint Selection
     assert.ok(Css.includes('.uv-marquee-3d') && Css.includes('.uv-brush-3d'), 'UVEditor.css must style 3D marquee & brush overlays');
     assert.ok(Vp3dJs.includes('SetActiveTool(') && Vp3dJs.includes('DispatchBoxSelect3D(') && Vp3dJs.includes('DispatchPaintSelect3D('),
         'UVViewport3D.js must support 3D Box Select and 3D Paint Select');
-    assert.ok(EditorJs.includes('onBoxSelect3D') && EditorJs.includes('onPaintSelect3D') && EditorJs.includes('OpenUvContextMenu'),
-        'UVEditor.js must wire 3D Box/Paint callbacks and unified right-click menu');
+    assert.ok(Vp3dJs.includes('EnsureGpuPickBuffer(') && Vp3dJs.includes('FastUpdateGpuFaceMask(') && Vp3dJs.includes('gpuSelectionTex') && Vp3dJs.includes('gpuPickRT'),
+        'UVViewport3D.js must perform GPU ID picking and GPU face selection mask updates');
+    assert.ok(EditorJs.includes('onBoxSelect3D') && EditorJs.includes('onPaintSelect3D') && EditorJs.includes('OpenUvContextMenu') && EditorJs.includes('FastPaintVisualSync('),
+        'UVEditor.js must wire GPU-fast 3D Box/Paint callbacks and unified right-click menu');
     assert.ok(EditorJs.includes("if (Mode === 'face')"), '2D ApplyCircleSelectAt must handle face mode');
 
-    console.log('   OK: Context menu, 3D Box/Paint Select & 2D face-mode Paint Select verified.');
+    console.log('   OK: Context menu, GPU 3D Box/Paint Select & 2D face-mode Paint Select verified.');
 }
 
 console.log('\nALL UV STUDIO VALIDATIONS PASSED SUCCESSFULLY.');

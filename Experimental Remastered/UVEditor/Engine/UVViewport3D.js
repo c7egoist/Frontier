@@ -344,20 +344,104 @@ export class UVViewport3D
         this.mesh = new THREE.Mesh(this.geometry, this.meshMat);
         this.scene.add(this.mesh);
 
-        // Unmistakable golden highlight overlay over selected faces / islands in ANY shading mode
-        this.selectedFaceGeo = new THREE.BufferGeometry();
-        this.selectedFaceOverlayMesh = new THREE.Mesh(this.selectedFaceGeo, new THREE.MeshBasicMaterial({
-            color: '#f5b84c',
+        // GPU Face-Selection Mask Texture (256 x H, 1 texel per mesh face -> 0.02ms instant live updates!)
+        this.gpuSelTexW = 256;
+        this.gpuSelTexH = 16;
+        this.gpuSelectionTex = new THREE.DataTexture(
+            new Uint8Array(this.gpuSelTexW * this.gpuSelTexH * 4),
+            this.gpuSelTexW,
+            this.gpuSelTexH,
+            THREE.RGBAFormat
+        );
+        this.gpuSelectionTex.minFilter = THREE.NearestFilter;
+        this.gpuSelectionTex.magFilter = THREE.NearestFilter;
+        this.gpuSelectionTex.generateMipmaps = false;
+        this.gpuSelectionTex.needsUpdate = true;
+
+        this.gpuSelOverlayMat = new THREE.ShaderMaterial({
+            uniforms: {
+                uSelTex: { value: this.gpuSelectionTex },
+                uTexSize: { value: new THREE.Vector2(this.gpuSelTexW, this.gpuSelTexH) }
+            },
+            vertexShader: `
+                attribute float aFaceId;
+                varying float vFaceId;
+                void main() {
+                    vFaceId = aFaceId;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: `
+                varying float vFaceId;
+                uniform sampler2D uSelTex;
+                uniform vec2 uTexSize;
+                void main() {
+                    float fid = floor(vFaceId + 0.5);
+                    float tx = mod(fid, uTexSize.x);
+                    float ty = floor(fid / uTexSize.x);
+                    float sel = texture2D(uSelTex, (vec2(tx, ty) + 0.5) / uTexSize).r;
+                    if (sel < 0.5) discard;
+                    gl_FragColor = vec4(0.96, 0.72, 0.24, 0.38);
+                }
+            `,
             transparent: true,
-            opacity: 0.34,
-            side: THREE.DoubleSide,
+            depthWrite: false,
             polygonOffset: true,
             polygonOffsetFactor: -3,
             polygonOffsetUnits: -3,
-            depthWrite: false
-        }));
+            toneMapped: false,
+            side: THREE.DoubleSide
+        });
+        this.selectedFaceOverlayMesh = new THREE.Mesh(this.geometry, this.gpuSelOverlayMat);
         this.selectedFaceOverlayMesh.renderOrder = 2;
         this.scene.add(this.selectedFaceOverlayMesh);
+
+        // GPU Offscreen Face-ID Picker Scene (hardware Z-buffer occlusion, 24-bit face index)
+        this.pickScene = new THREE.Scene();
+        this.pickScene.background = null;
+        this.pickMat = new THREE.ShaderMaterial({
+            vertexShader: `
+                attribute float aFaceId;
+                varying float vFaceId;
+                void main() {
+                    vFaceId = aFaceId;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: `
+                varying float vFaceId;
+                void main() {
+                    float id = floor(vFaceId + 0.5) + 1.0;
+                    float b = floor((id + 0.001) / 65536.0);
+                    float rem = id - b * 65536.0;
+                    float g = floor((rem + 0.001) / 256.0);
+                    float r = rem - g * 256.0;
+                    gl_FragColor = vec4(r / 255.0, g / 255.0, b / 255.0, 1.0);
+                }
+            `,
+            side: THREE.DoubleSide,
+            depthTest: true,
+            depthWrite: true,
+            dithering: false,
+            toneMapped: false
+        });
+        this.pickMesh = new THREE.Mesh(this.geometry, this.pickMat);
+        this.pickScene.add(this.pickMesh);
+        this.gpuPickRT = new THREE.WebGLRenderTarget(1, 1, {
+            minFilter: THREE.NearestFilter,
+            magFilter: THREE.NearestFilter,
+            format: THREE.RGBAFormat,
+            type: THREE.UnsignedByteType,
+            depthBuffer: true,
+            generateMipmaps: false
+        });
+        this.pickW = 0;
+        this.pickH = 0;
+        this.cachedPickPixels = null;
+        this.pickBufferDirty = true;
+        this._strokeSeenFaces = new Set();
+        this._islandByFaceCache = new Map();
+        this.controls.addEventListener('change', () => { this.pickBufferDirty = true; });
 
         this.wireGeo = new THREE.BufferGeometry();
         this.wireLines = new THREE.LineSegments(this.wireGeo, new THREE.LineBasicMaterial({
@@ -484,6 +568,8 @@ export class UVViewport3D
             if (this.activeTool === 'circle')
             {
                 this.controls.enabled = false;
+                this._strokeSeenFaces.clear();
+                this.EnsureGpuPickBuffer(R);
                 PaintDrag = { subtract: E.ctrlKey };
                 UpdateBrushRing(E);
                 this.DispatchPaintSelect3D(X, Y, R, { subtract: E.ctrlKey, commit: false });
@@ -554,6 +640,7 @@ export class UVViewport3D
             {
                 const Sub = PaintDrag.subtract || E.ctrlKey;
                 PaintDrag = null;
+                this._strokeSeenFaces.clear();
                 this.controls.enabled = true;
                 try { this.canvas.releasePointerCapture(E.pointerId); } catch {}
                 const R = this.container.getBoundingClientRect();
@@ -623,6 +710,7 @@ export class UVViewport3D
             this.renderer.setSize(R.width, R.height, false);
             this.camera.aspect = R.width / R.height;
             this.camera.updateProjectionMatrix();
+            this.pickBufferDirty = true;
         };
         new ResizeObserver(Resize).observe(this.container);
         Resize();
@@ -678,15 +766,159 @@ export class UVViewport3D
         return (N[0] * Vx + N[1] * Vy + N[2] * Vz) > -0.04;
     }
 
+    EnsureGpuPickBuffer(Rect)
+    {
+        if (!this.webglReady || !this.surface || !Rect?.width || !Rect?.height) return false;
+        const Scale = Math.min(1, 640 / Math.max(Rect.width, Rect.height));
+        const W = Math.max(64, Math.round(Rect.width * Scale));
+        const H = Math.max(64, Math.round(Rect.height * Scale));
+        if (!this.pickBufferDirty && this.cachedPickPixels && this.pickW === W && this.pickH === H)
+        {
+            return true;
+        }
+        if (this.pickW !== W || this.pickH !== H)
+        {
+            this.gpuPickRT.setSize(W, H);
+            this.pickW = W;
+            this.pickH = H;
+            this.cachedPickPixels = new Uint8Array(W * H * 4);
+        }
+        this.camera.updateMatrixWorld();
+        const PrevRT = this.renderer.getRenderTarget();
+        const PrevClear = this.renderer.getClearColor(new THREE.Color());
+        const PrevAlpha = this.renderer.getClearAlpha();
+        this.renderer.setRenderTarget(this.gpuPickRT);
+        this.renderer.setClearColor(0x000000, 0);
+        this.renderer.clear(true, true, false);
+        this.renderer.render(this.pickScene, this.camera);
+        this.renderer.readRenderTargetPixels(this.gpuPickRT, 0, 0, W, H, this.cachedPickPixels);
+        this.renderer.setRenderTarget(PrevRT);
+        this.renderer.setClearColor(PrevClear, PrevAlpha);
+        this.pickBufferDirty = false;
+        return true;
+    }
+
+    FastUpdateGpuFaceMask(Surface, Islands = null)
+    {
+        if (!this.webglReady || !Surface || !this.gpuSelectionTex) return;
+        const FaceCount = Surface.faces.length;
+        const W = this.gpuSelTexW;
+        const NeedH = Math.max(1, Math.ceil(FaceCount / W));
+        if (NeedH !== this.gpuSelTexH || this.gpuSelectionTex.image.data.length !== W * NeedH * 4)
+        {
+            this.gpuSelTexH = NeedH;
+            this.gpuSelectionTex.dispose();
+            this.gpuSelectionTex = new THREE.DataTexture(new Uint8Array(W * NeedH * 4), W, NeedH, THREE.RGBAFormat);
+            this.gpuSelectionTex.minFilter = THREE.NearestFilter;
+            this.gpuSelectionTex.magFilter = THREE.NearestFilter;
+            this.gpuSelectionTex.generateMipmaps = false;
+            this.gpuSelOverlayMat.uniforms.uSelTex.value = this.gpuSelectionTex;
+            this.gpuSelOverlayMat.uniforms.uTexSize.value.set(W, NeedH);
+        }
+        const Data = this.gpuSelectionTex.image.data;
+        Data.fill(0);
+        if (this.selectionMode === 'island' && Islands)
+        {
+            for (const Isl of Islands)
+            {
+                if (!Isl.hidden && Surface.selectedIslands.has(Isl.id))
+                {
+                    for (const fi of Isl.faceIndices) Data[fi * 4] = 255;
+                }
+            }
+        }
+        for (const fi of Surface.selectedFaces)
+        {
+            if (fi >= 0 && fi < FaceCount) Data[fi * 4] = 255;
+        }
+        if (this.selectionMode === 'vertex' && Surface.selectedUVs.size)
+        {
+            for (let fi = 0; fi < FaceCount; fi++)
+            {
+                for (const C of Surface.faces[fi].corners)
+                {
+                    if (Surface.selectedUVs.has(C.uv)) { Data[fi * 4] = 255; break; }
+                }
+            }
+        }
+        else if (this.selectionMode === 'edge' && Surface.selectedEdges3D.size)
+        {
+            for (let fi = 0; fi < FaceCount; fi++)
+            {
+                const Cr = Surface.faces[fi].corners;
+                for (let k = 0; k < Cr.length; k++)
+                {
+                    if (Surface.selectedEdges3D.has(EdgeKey(Cr[k].v, Cr[(k + 1) % Cr.length].v)))
+                    {
+                        Data[fi * 4] = 255; break;
+                    }
+                }
+            }
+        }
+        this.gpuSelectionTex.needsUpdate = true;
+        this.selectedFaceOverlayMesh.visible = true;
+    }
+
     DispatchBoxSelect3D(MinX, MinY, MaxX, MaxY, Rect, { additive = false, subtract = false, xray = false } = {})
     {
         if (!this.surface || !this.onBoxSelect3D || !Rect.width || !Rect.height) return;
-        this.camera.updateMatrixWorld();
         const InBox = (Pt) => Pt && Pt[0] >= MinX && Pt[0] <= MaxX && Pt[1] >= MinY && Pt[1] <= MaxY;
-        const FaceHits = [];
         const VertHits = new Set();
         const EdgeHits = new Set();
 
+        if (!xray && this.EnsureGpuPickBuffer(Rect))
+        {
+            const Sx = this.pickW / Rect.width;
+            const Sy = this.pickH / Rect.height;
+            const X0 = Math.max(0, Math.floor(MinX * Sx));
+            const X1 = Math.min(this.pickW - 1, Math.ceil(MaxX * Sx));
+            const Y0 = Math.max(0, Math.floor((Rect.height - MaxY) * Sy));
+            const Y1 = Math.min(this.pickH - 1, Math.ceil((Rect.height - MinY) * Sy));
+            const FaceSet = new Set();
+            const Px = this.cachedPickPixels;
+            const W = this.pickW;
+            const MaxFace = this.surface.faces.length;
+
+            for (let y = Y0; y <= Y1; y++)
+            {
+                let idx = (y * W + X0) * 4;
+                for (let x = X0; x <= X1; x++, idx += 4)
+                {
+                    if (Px[idx + 3] === 0) continue;
+                    const Id = Px[idx] + (Px[idx + 1] << 8) + (Px[idx + 2] << 16);
+                    if (Id > 0 && Id <= MaxFace) FaceSet.add(Id - 1);
+                }
+            }
+            const FaceHits = [...FaceSet];
+            if (this.selectionMode === 'vertex' || this.selectionMode === 'edge')
+            {
+                this.camera.updateMatrixWorld();
+                for (const fi of FaceHits)
+                {
+                    const Cr = this.surface.faces[fi].corners;
+                    for (const C of Cr)
+                    {
+                        const Sp = this._ProjectScreen(this.surface.positions[C.v], Rect);
+                        if (InBox(Sp)) VertHits.add(C.v);
+                    }
+                    if (this.selectionMode === 'edge')
+                    {
+                        for (let k = 0; k < Cr.length; k++)
+                        {
+                            const Va = Cr[k].v, Vb = Cr[(k + 1) % Cr.length].v;
+                            const Pa = this.surface.positions[Va], Pb = this.surface.positions[Vb];
+                            const MidSp = this._ProjectScreen([0.5 * (Pa[0] + Pb[0]), 0.5 * (Pa[1] + Pb[1]), 0.5 * (Pa[2] + Pb[2])], Rect);
+                            if (InBox(MidSp) || (VertHits.has(Va) && VertHits.has(Vb))) EdgeHits.add(EdgeKey(Va, Vb));
+                        }
+                    }
+                }
+            }
+            this.onBoxSelect3D({ faces: FaceHits, verts3d: [...VertHits], edges3d: [...EdgeHits] }, { additive, subtract });
+            return;
+        }
+
+        this.camera.updateMatrixWorld();
+        const FaceHits = [];
         for (let fi = 0; fi < this.surface.faces.length; fi++)
         {
             if (!xray && !this._IsFaceFrontFacing(fi)) continue;
@@ -698,11 +930,7 @@ export class UVViewport3D
                 const P = this.surface.positions[C.v];
                 Cx += P[0]; Cy += P[1]; Cz += P[2];
                 const Sp = this._ProjectScreen(P, Rect);
-                if (InBox(Sp))
-                {
-                    AnyCornerIn = true;
-                    VertHits.add(C.v);
-                }
+                if (InBox(Sp)) { AnyCornerIn = true; VertHits.add(C.v); }
             }
             const Inv = 1 / Math.max(1, F.corners.length);
             const CenterSp = this._ProjectScreen([Cx * Inv, Cy * Inv, Cz * Inv], Rect);
@@ -724,45 +952,78 @@ export class UVViewport3D
     DispatchPaintSelect3D(Sx, Sy, Rect, { subtract = false, commit = false } = {})
     {
         if (!this.surface || !this.onPaintSelect3D || !Rect.width || !Rect.height) return;
-        this.camera.updateMatrixWorld();
+        if (commit && this.EnsureGpuPickBuffer(Rect) === false) return;
+
         const Rad = Math.max(8, this.paintRadiusPx);
-        const InBrush = (Pt) => Pt && Math.hypot(Pt[0] - Sx, Pt[1] - Sy) <= Rad;
-        const FaceHits = [];
+        const FaceSet = new Set();
+
+        if (this.EnsureGpuPickBuffer(Rect))
+        {
+            const ScaleX = this.pickW / Rect.width;
+            const ScaleY = this.pickH / Rect.height;
+            const Cx = Sx * ScaleX;
+            const Cy = (Rect.height - Sy) * ScaleY;
+            const Rx = Math.max(2, Rad * ScaleX);
+            const Ry = Math.max(2, Rad * ScaleY);
+            const X0 = Math.max(0, Math.floor(Cx - Rx));
+            const X1 = Math.min(this.pickW - 1, Math.ceil(Cx + Rx));
+            const Y0 = Math.max(0, Math.floor(Cy - Ry));
+            const Y1 = Math.min(this.pickH - 1, Math.ceil(Cy + Ry));
+            const InvRx2 = 1 / (Rx * Rx);
+            const InvRy2 = 1 / (Ry * Ry);
+            const Px = this.cachedPickPixels;
+            const W = this.pickW;
+            const MaxFace = this.surface.faces.length;
+
+            for (let y = Y0; y <= Y1; y++)
+            {
+                const Dy = y - Cy;
+                const DyTerm = Dy * Dy * InvRy2;
+                if (DyTerm > 1) continue;
+                let idx = (y * W + X0) * 4;
+                for (let x = X0; x <= X1; x++, idx += 4)
+                {
+                    const Dx = x - Cx;
+                    if (Dx * Dx * InvRx2 + DyTerm > 1) continue;
+                    if (Px[idx + 3] === 0) continue;
+                    const Id = Px[idx] + (Px[idx + 1] << 8) + (Px[idx + 2] << 16);
+                    if (Id > 0 && Id <= MaxFace)
+                    {
+                        const Fi = Id - 1;
+                        if (!commit && this._strokeSeenFaces.has(Fi)) continue;
+                        FaceSet.add(Fi);
+                        if (!commit) this._strokeSeenFaces.add(Fi);
+                    }
+                }
+            }
+        }
+
+        const FaceHits = [...FaceSet];
+        if (!commit && FaceHits.length === 0) return;
+
         const VertHits = new Set();
         const EdgeHits = new Set();
-
-        // Raycast center point directly under cursor so huge single faces hit immediately even if center/corners are outside ring
-        const Ptr = new THREE.Vector2((Sx / Rect.width) * 2 - 1, -(Sy / Rect.height) * 2 + 1);
-        const Ray = new THREE.Raycaster();
-        Ray.setFromCamera(Ptr, this.camera);
-        const RayHits = Ray.intersectObject(this.mesh, false);
-        const CenterHitFi = RayHits.length ? this.triToFace[RayHits[0].faceIndex] : undefined;
-        if (CenterHitFi !== undefined) FaceHits.push(CenterHitFi);
-
-        for (let fi = 0; fi < this.surface.faces.length; fi++)
+        if (FaceHits.length && (this.selectionMode === 'vertex' || this.selectionMode === 'edge'))
         {
-            if (!this._IsFaceFrontFacing(fi)) continue;
-            const F = this.surface.faces[fi];
-            let Cx = 0, Cy = 0, Cz = 0;
-            let CornerHit = false;
-            for (const C of F.corners)
+            this.camera.updateMatrixWorld();
+            const InBrush = (Pt) => Pt && Math.hypot(Pt[0] - Sx, Pt[1] - Sy) <= Rad;
+            for (const fi of FaceHits)
             {
-                const P = this.surface.positions[C.v];
-                Cx += P[0]; Cy += P[1]; Cz += P[2];
-                const Sp = this._ProjectScreen(P, Rect);
-                if (InBrush(Sp)) { CornerHit = true; VertHits.add(C.v); }
-            }
-            const Inv = 1 / Math.max(1, F.corners.length);
-            const CenterSp = this._ProjectScreen([Cx * Inv, Cy * Inv, Cz * Inv], Rect);
-            if (InBrush(CenterSp) || CornerHit || fi === CenterHitFi)
-            {
-                if (fi !== CenterHitFi) FaceHits.push(fi);
-                for (let k = 0; k < F.corners.length; k++)
+                const Cr = this.surface.faces[fi].corners;
+                for (const C of Cr)
                 {
-                    const Va = F.corners[k].v, Vb = F.corners[(k + 1) % F.corners.length].v;
-                    const Pa = this.surface.positions[Va], Pb = this.surface.positions[Vb];
-                    const MidSp = this._ProjectScreen([0.5 * (Pa[0] + Pb[0]), 0.5 * (Pa[1] + Pb[1]), 0.5 * (Pa[2] + Pb[2])], Rect);
-                    if (InBrush(MidSp)) EdgeHits.add(EdgeKey(Va, Vb));
+                    const Sp = this._ProjectScreen(this.surface.positions[C.v], Rect);
+                    if (InBrush(Sp)) VertHits.add(C.v);
+                }
+                if (this.selectionMode === 'edge')
+                {
+                    for (let k = 0; k < Cr.length; k++)
+                    {
+                        const Va = Cr[k].v, Vb = Cr[(k + 1) % Cr.length].v;
+                        const Pa = this.surface.positions[Va], Pb = this.surface.positions[Vb];
+                        const MidSp = this._ProjectScreen([0.5 * (Pa[0] + Pb[0]), 0.5 * (Pa[1] + Pb[1]), 0.5 * (Pa[2] + Pb[2])], Rect);
+                        if (InBrush(MidSp)) EdgeHits.add(EdgeKey(Va, Vb));
+                    }
                 }
             }
         }
@@ -1009,7 +1270,7 @@ export class UVViewport3D
         const NormArr = [];
         const UvArr = [];
         const ColArr = [];
-        const SelFacePosArr = [];
+        const FaceIdArr = [];
         const WireArr = [];
         const BoundaryArr = [];
         const SeamTubeArr = [];
@@ -1019,6 +1280,7 @@ export class UVViewport3D
         const SelVertArr = [];
         this.triToFace = [];
         this.edgeNormalMap.clear();
+        this.pickBufferDirty = true;
 
         const IslandByFace = new Map();
         for (const Isl of Islands)
@@ -1113,7 +1375,7 @@ export class UVViewport3D
                     NormArr.push(Nrm[0], Nrm[1], Nrm[2]);
                     UvArr.push(Uv[0], Uv[1]);
                     ColArr.push(R, G, B);
-                    if (IsSel) SelFacePosArr.push(Pt[0], Pt[1], Pt[2]);
+                    FaceIdArr.push(fi);
                 }
                 this.triToFace.push(fi);
             }
@@ -1147,6 +1409,7 @@ export class UVViewport3D
         this.geometry.setAttribute('normal', new THREE.Float32BufferAttribute(NormArr, 3));
         this.geometry.setAttribute('uv', new THREE.Float32BufferAttribute(UvArr, 2));
         this.geometry.setAttribute('color', new THREE.Float32BufferAttribute(ColArr, 3));
+        this.geometry.setAttribute('aFaceId', new THREE.Float32BufferAttribute(FaceIdArr, 1));
         this.geometry.computeBoundingSphere();
 
         const ModelRadius = this.geometry.boundingSphere?.radius || 2.0;
@@ -1214,8 +1477,7 @@ export class UVViewport3D
             }
         }
 
-        this.selectedFaceGeo.setAttribute('position', new THREE.Float32BufferAttribute(SelFacePosArr, 3));
-        this.selectedFaceOverlayMesh.visible = SelFacePosArr.length > 0;
+        this.FastUpdateGpuFaceMask(Surface, Islands);
 
         this.wireGeo.setAttribute('position', new THREE.Float32BufferAttribute(WireArr, 3));
         this.wireLines.visible = this.showWireframe;

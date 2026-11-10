@@ -152,6 +152,55 @@ function CreateDocumentFromFactory(FactorySpec, IdOverride = null)
     return Doc;
 }
 
+let Fast2DRafId = 0;
+function ScheduleFast2DRender(Doc)
+{
+    if (!Canvas2D || !Doc || Fast2DRafId) return;
+    Fast2DRafId = requestAnimationFrame(() =>
+    {
+        Fast2DRafId = 0;
+        const CurDoc = ActiveDoc();
+        if (!CurDoc) return;
+        Canvas2D.Render({
+            surface: CurDoc.surface,
+            islands: CurDoc.islands,
+            udimTiles: CurDoc.udimTiles,
+            activeUdim: CurDoc.activeUdim,
+            importanceGroups: CurDoc.importanceGroups,
+            selectionMode: StudioState.selectionMode,
+            activeTool: StudioState.activeTool,
+            overlayLens: StudioState.overlayLens,
+            showChecker: StudioState.showChecker,
+            showSubGrid: true,
+            showSeams: StudioState.showSeams,
+            showBoundaries: StudioState.showBoundaries,
+            showPins: StudioState.showPins,
+            showIslandBadges: StudioState.showIslandBadges,
+            targetTexelDensity: StudioState.targetTexelDensity,
+            diagnostics: CurDoc.diagnostics,
+            hoverHit: HoverHit2D,
+            cursorUV: StudioState.cursorUV,
+            pivotPoint: null,
+            proportional: StudioState.proportional,
+            modalTransform: ModalTransform,
+            marqueeBox: MarqueeBox,
+            circleSelect: CircleSelect,
+            lassoPoints: LassoPoints
+        });
+    });
+}
+
+function FastPaintVisualSync(Doc)
+{
+    if (!Doc) return;
+    if (Viewport3D)
+    {
+        Viewport3D.selectionMode = StudioState.selectionMode;
+        Viewport3D.FastUpdateGpuFaceMask(Doc.surface, Doc.islands);
+    }
+    ScheduleFast2DRender(Doc);
+}
+
 function RefreshDocAnalysis(Doc = ActiveDoc())
 {
     if (!Doc) return;
@@ -2306,8 +2355,8 @@ function SetupCanvas2DInteraction()
         if (CircleSelect.active)
         {
             CircleSelect.x = Sx; CircleSelect.y = Sy;
-            if (DragAction?.kind === 'circle') ApplyCircleSelectAt(Doc, Sx, Sy, DragAction.subtract);
-            else SyncAllViews();
+            if (DragAction?.kind === 'circle') ApplyCircleSelectAt(Doc, Sx, Sy, DragAction.subtract, { commit: false });
+            else ScheduleFast2DRender(Doc);
             return;
         }
         if (!DragAction)
@@ -2430,6 +2479,18 @@ function SetupCanvas2DInteraction()
                 OpenUvContextMenu(DragAction.clientX, DragAction.clientY, { source: '2d' });
             }
             DragAction = null;
+            return;
+        }
+        if (DragAction?.kind === 'circle')
+        {
+            const Doc = ActiveDoc();
+            try { CanvasEl.releasePointerCapture(E.pointerId); } catch {}
+            DragAction = null;
+            if (Doc)
+            {
+                Doc.surface.SyncSelectionsFromMode(StudioState.selectionMode, Doc.islands);
+                SyncAllViews(true);
+            }
             return;
         }
         if (DragAction?.kind === 'box' && MarqueeBox)
@@ -2592,7 +2653,7 @@ function SelectInUVBox(Doc, MinU, MinV, MaxU, MaxV)
     }
 }
 
-function ApplyCircleSelectAt(Doc, Sx, Sy, Subtract = false)
+function ApplyCircleSelectAt(Doc, Sx, Sy, Subtract = false, { commit = false } = {})
 {
     const [Cu, Cv] = Canvas2D.ScreenToUv(Sx, Sy);
     const Ruv = CircleSelect.radiusPx / Canvas2D.scalePx;
@@ -2617,7 +2678,7 @@ function ApplyCircleSelectAt(Doc, Sx, Sy, Subtract = false)
                 else Doc.surface.selectedFaces.add(fi);
             }
         }
-        Doc.surface.SyncSelectionsFromMode('face', Doc.islands);
+        if (commit) Doc.surface.SyncSelectionsFromMode('face', Doc.islands);
     }
     else if (Mode === 'edge')
     {
@@ -2636,7 +2697,7 @@ function ApplyCircleSelectAt(Doc, Sx, Sy, Subtract = false)
                 }
             }
         }
-        Doc.surface.SyncSelectionsFromMode('edge', Doc.islands);
+        if (commit) Doc.surface.SyncSelectionsFromMode('edge', Doc.islands);
     }
     else
     {
@@ -2648,15 +2709,24 @@ function ApplyCircleSelectAt(Doc, Sx, Sy, Subtract = false)
                 const P = Doc.surface.uvCoords[UvIdx];
                 if (Math.hypot(P[0] - Cu, P[1] - Cv) <= Ruv)
                 {
-                    if (Subtract) Doc.surface.selectedUVs.delete(UvIdx);
+                    if (Subtract)
+                    {
+                        Doc.surface.selectedUVs.delete(UvIdx);
+                        if (Mode === 'island')
+                        {
+                            Doc.surface.selectedIslands.delete(Isl.id);
+                            for (const Fi of Isl.faceIndices) Doc.surface.selectedFaces.delete(Fi);
+                        }
+                    }
                     else if (Mode === 'island') Doc.surface.SelectIsland(Isl.id, true, Doc.islands);
                     else Doc.surface.selectedUVs.add(UvIdx);
                 }
             }
         }
-        if (Mode !== 'island') Doc.surface.SyncSelectionsFromMode('vertex', Doc.islands);
+        if (commit && Mode !== 'island') Doc.surface.SyncSelectionsFromMode('vertex', Doc.islands);
     }
-    SyncAllViews();
+    if (commit) SyncAllViews(true);
+    else FastPaintVisualSync(Doc);
 }
 
 function SetupKeyboardShortcuts()
@@ -3629,56 +3699,74 @@ function Bootstrap()
             if (!Doc || !StudioState.syncSelection) return;
             const Mode = StudioState.selectionMode;
 
-            if (Mode === 'island')
+            if (faces.length || verts3d.length || edges3d.length)
             {
-                const FaceSet = new Set(faces);
-                for (const Isl of Doc.islands)
+                if (Mode === 'island')
                 {
-                    if (Isl.hidden) continue;
-                    if (Isl.faceIndices.some(Fi => FaceSet.has(Fi)))
+                    const FaceSet = new Set(faces);
+                    for (const Isl of Doc.islands)
                     {
-                        if (subtract) { for (const Fi of Isl.faceIndices) Doc.surface.selectedFaces.delete(Fi); }
-                        else Doc.surface.SelectIsland(Isl.id, true, Doc.islands);
-                    }
-                }
-                if (subtract) Doc.surface.SyncSelectionsFromMode('face', Doc.islands);
-            }
-            else if (Mode === 'face')
-            {
-                for (const Fi of faces)
-                {
-                    if (subtract) Doc.surface.selectedFaces.delete(Fi);
-                    else Doc.surface.selectedFaces.add(Fi);
-                }
-                Doc.surface.SyncSelectionsFromMode('face', Doc.islands);
-                if (!subtract && faces.length) Doc.surface.activeFace = faces[faces.length - 1];
-            }
-            else if (Mode === 'edge')
-            {
-                for (const Ek3 of edges3d)
-                {
-                    if (subtract) Doc.surface.selectedEdges3D.delete(Ek3);
-                    else Doc.surface.selectedEdges3D.add(Ek3);
-                }
-                Doc.surface.SyncSelectionsFromMode('edge', Doc.islands);
-            }
-            else
-            {
-                const VSet = new Set(verts3d);
-                for (const F of Doc.surface.faces)
-                {
-                    for (const C of F.corners)
-                    {
-                        if (VSet.has(C.v))
+                        if (Isl.hidden) continue;
+                        if (Isl.faceIndices.some(Fi => FaceSet.has(Fi)))
                         {
-                            if (subtract) Doc.surface.selectedUVs.delete(C.uv);
-                            else Doc.surface.selectedUVs.add(C.uv);
+                            if (subtract)
+                            {
+                                Doc.surface.selectedIslands.delete(Isl.id);
+                                for (const Fi of Isl.faceIndices) Doc.surface.selectedFaces.delete(Fi);
+                            }
+                            else
+                            {
+                                Doc.surface.selectedIslands.add(Isl.id);
+                                for (const Fi of Isl.faceIndices) Doc.surface.selectedFaces.add(Fi);
+                            }
                         }
                     }
                 }
-                Doc.surface.SyncSelectionsFromMode('vertex', Doc.islands);
+                else if (Mode === 'face')
+                {
+                    for (const Fi of faces)
+                    {
+                        if (subtract) Doc.surface.selectedFaces.delete(Fi);
+                        else Doc.surface.selectedFaces.add(Fi);
+                    }
+                    if (!subtract && faces.length) Doc.surface.activeFace = faces[faces.length - 1];
+                }
+                else if (Mode === 'edge')
+                {
+                    for (const Ek3 of edges3d)
+                    {
+                        if (subtract) Doc.surface.selectedEdges3D.delete(Ek3);
+                        else Doc.surface.selectedEdges3D.add(Ek3);
+                    }
+                }
+                else
+                {
+                    const VSet = new Set(verts3d);
+                    for (const Fi of faces)
+                    {
+                        const F = Doc.surface.faces[Fi];
+                        if (!F) continue;
+                        for (const C of F.corners)
+                        {
+                            if (VSet.has(C.v))
+                            {
+                                if (subtract) Doc.surface.selectedUVs.delete(C.uv);
+                                else Doc.surface.selectedUVs.add(C.uv);
+                            }
+                        }
+                    }
+                }
             }
-            SyncAllViews(commit);
+
+            if (commit)
+            {
+                Doc.surface.SyncSelectionsFromMode(Mode, Doc.islands);
+                SyncAllViews(true);
+            }
+            else
+            {
+                FastPaintVisualSync(Doc);
+            }
         },
         onContextMenu: (ClientX, ClientY, HitEdge) =>
         {
