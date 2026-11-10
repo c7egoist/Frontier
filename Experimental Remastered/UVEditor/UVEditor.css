@@ -480,11 +480,59 @@ svg.glyph { width: 15px; height: 15px; flex: none; stroke: currentColor; fill: n
 .sel-mode-group button.active { background: var(--highlight-bg); color: var(--highlight-ink); font-weight: 500; }
 
 .bar-divider { width: 1px; height: 16px; background: var(--line); margin: 0 2px; flex: none; }
-.viewport-bar select {
-    height: 27px; padding: 0 9px;
-    background: #101010; border: 1px solid var(--line); border-radius: 999px;
-    font-size: 10.5px; color: #bcbcbc; flex: none;
+.select-pill-wrap {
+    width: 100%;
+    height: 32px;
+    display: flex;
+    align-items: stretch;
+    background: #0b0b0b;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    overflow: hidden;
+    flex: none;
+    transition: border-color 140ms, background 140ms;
 }
+.select-pill-wrap:hover,
+.select-pill-wrap:focus-within {
+    border-color: var(--line-strong);
+    background: #121316;
+}
+.select-pill-wrap select {
+    appearance: none;
+    -webkit-appearance: none;
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 100%;
+    padding: 0 10px 0 12px;
+    background: transparent;
+    border: 0;
+    font-size: 11.5px;
+    color: #e2e4e9;
+    outline: none;
+    cursor: pointer;
+}
+.pill-caret-divider {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    align-self: stretch;
+    flex: none;
+    margin-left: auto;
+    border-left: 1px solid rgba(255, 255, 255, 0.1);
+    color: #9ea2aa;
+    pointer-events: none;
+}
+.pill-caret-divider svg.glyph { width: 12px; height: 12px; }
+.select-pill-wrap.vp-compact-select { width: auto; height: 27px; background: #101010; }
+.select-pill-wrap.vp-compact-select select { padding: 0 8px 0 10px; font-size: 10.5px; color: #bcbcbc; }
+.select-pill-wrap.vp-compact-select .pill-caret-divider { width: 24px; }
+.warm-bridge-btn {
+    background: rgba(232, 194, 122, 0.14);
+    border: 1px solid rgba(232, 194, 122, 0.34);
+    color: #f6dcb0;
+}
+.warm-bridge-btn:hover { background: rgba(232, 194, 122, 0.24); border-color: rgba(232, 194, 122, 0.55); }
 .viewport-bar-end { margin-left: auto; display: flex; align-items: center; gap: 4px; flex: none; }
 .pill-btn { height: 26px; padding: 0 10px; font-size: 10.5px; background: #1e1e1e; border: 1px solid var(--line); color: #dcdcdc; white-space: nowrap; }
 .pill-btn:hover { background: #292929; }
@@ -773,9 +821,13 @@ svg.glyph { width: 15px; height: 15px; flex: none; stroke: currentColor; fill: n
 .budget-controls-row {
     display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
 }
-.budget-udim-select {
-    height: 26px; padding: 0 8px; background: #0b0b0c;
-    border: 1px solid var(--line); border-radius: 999px; font-size: 10.5px; color: #cfcfcf;
+.budget-udim-wrap {
+    height: 26px;
+}
+.budget-udim-wrap select {
+    font-size: 10.5px;
+    color: #cfcfcf;
+    padding: 0 6px 0 9px;
 }
 .budget-actual-row {
     display: flex; align-items: center; justify-content: space-between;
@@ -861,7 +913,7 @@ svg.glyph { width: 15px; height: 15px; flex: none; stroke: currentColor; fill: n
 .switch input:checked + span { background: #ffffff; border-color: #ffffff; }
 .switch input:checked + span::after { transform: translateX(19px); background: #111111; }
 
-.select-row select { width: 100%; height: 32px; padding: 0 12px; background: #0b0b0b; border: 1px solid var(--line); border-radius: 999px; font-size: 11.5px; color: #d6d6d6; outline: none; }
+.select-row .select-pill-wrap { width: 100%; }
 .segmented-track { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px; background: #0b0b0b; border: 1px solid var(--line); border-radius: 16px; }
 .segmented-track button { flex: 1 0 auto; padding: 5px 8px; font-size: 10.5px; color: #828282; }
 .segmented-track button.active { background: #292929; color: #f2f2f2; }

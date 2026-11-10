@@ -21,6 +21,7 @@ import { SolveImportancePack } from './Engine/ImportancePackingSolver.js';
 import { SampleAssetCatalog } from './Engine/SampleAssets.js';
 import { UVCanvas2D } from './Engine/UVCanvas2D.js';
 import { UVViewport3D } from './Engine/UVViewport3D.js';
+import { SerializeTopologySurfaceForBridge, SaveUvBridgeTransfer } from '../Shared/UvTextureBridge.js';
 import {
     Construct,
     ConstructGlyph,
@@ -45,7 +46,7 @@ const GroupColorPalette = ['#eff4cf', '#9ecfff', '#e8c27a', '#9bdac5', '#f4979b'
 const StudioState = {
     documents: [],
     activeDocId: null,
-    stageMode: 'split', // 'split' | 'uv' | 'mesh'
+    stageMode: 'mesh', // 'split' | 'uv' | 'mesh'
     inspectorTab: 'packing', // 'packing' | 'unwrap' | 'udim' | 'check'
     outlinerFilter: 'all',
     searchQuery: '',
@@ -298,9 +299,9 @@ function RenderDocumentTabs()
         Btn.addEventListener('click', () =>
         {
             StudioState.activeDocId = Doc.id;
+            SyncAllViews(true);
             Canvas2D.FrameUdimTiles(Doc.udimTiles);
             Viewport3D.CameraPreset('Persp');
-            SyncAllViews(true);
             LogEvent('DOC', `Switched to "${Doc.name}"`);
         });
         Box.append(Btn);
@@ -1000,6 +1001,10 @@ function RenderPackingTab(Body, Doc)
         }
         UdimSel.value = String(Grp.udimTarget || 'auto');
         UdimSel.addEventListener('change', () => { Grp.udimTarget = UdimSel.value; Broadcast(); });
+        const UdimWrap = Construct('div', 'select-pill-wrap vp-compact-select budget-udim-wrap', [
+            UdimSel,
+            Construct('span', 'pill-caret-divider', ConstructGlyph('ChevronDown', 'glyph chev'))
+        ]);
 
         const AddSelBtn = Construct('button', 'row-action-btn', ConstructGlyph('Plus'));
         AddSelBtn.type = 'button';
@@ -1017,7 +1022,7 @@ function RenderPackingTab(Body, Doc)
             SyncAllViews(true);
         });
 
-        Card.append(Construct('div', 'budget-group-head', [Dot, NameIn, CountPill, UdimSel, AddSelBtn, DelBtn]));
+        Card.append(Construct('div', 'budget-group-head', [Dot, NameIn, CountPill, UdimWrap, AddSelBtn, DelBtn]));
 
         SliderRow(Card, {
             Label: 'Target Space Share',
@@ -2451,17 +2456,23 @@ function InitStudioIconsAndBindings()
     });
 
     // Top Stage Mode Nav
+    const ApplyStageMode = (Mode) =>
+    {
+        StudioState.stageMode = Mode;
+        document.querySelectorAll('#stage-layout-nav button').forEach(B => B.classList.toggle('active', B.dataset.stageMode === Mode));
+        const Split = document.getElementById('stage-split');
+        Split.classList.toggle('mode-uv', Mode === 'uv');
+        Split.classList.toggle('mode-mesh', Mode === 'mesh');
+        requestAnimationFrame(() =>
+        {
+            SyncAllViews();
+            if (Mode !== 'mesh' && ActiveDoc()) Canvas2D.FrameUdimTiles(ActiveDoc().udimTiles);
+        });
+    };
+    ApplyStageMode(StudioState.stageMode);
     document.querySelectorAll('#stage-layout-nav button').forEach(Btn =>
     {
-        Btn.addEventListener('click', () =>
-        {
-            StudioState.stageMode = Btn.dataset.stageMode;
-            document.querySelectorAll('#stage-layout-nav button').forEach(B => B.classList.toggle('active', B === Btn));
-            const Split = document.getElementById('stage-split');
-            Split.classList.toggle('mode-uv', StudioState.stageMode === 'uv');
-            Split.classList.toggle('mode-mesh', StudioState.stageMode === 'mesh');
-            requestAnimationFrame(() => SyncAllViews());
-        });
+        Btn.addEventListener('click', () => ApplyStageMode(Btn.dataset.stageMode));
     });
 
     // Selection Mode Pills
@@ -2696,6 +2707,30 @@ function InitStudioIconsAndBindings()
     document.getElementById('help-close-btn').addEventListener('click', () => document.getElementById('help-dialog').close());
     document.getElementById('help-ok-btn').addEventListener('click', () => document.getElementById('help-dialog').close());
     document.getElementById('export-obj-btn').addEventListener('click', OpenExportModal);
+    document.getElementById('send-to-texture-studio-btn').addEventListener('click', async () =>
+    {
+        const Doc = ActiveDoc();
+        if (!Doc) return;
+        const Btn = document.getElementById('send-to-texture-studio-btn');
+        Btn.disabled = true;
+        try
+        {
+            const Payload = SerializeTopologySurfaceForBridge(Doc.surface, {
+                udimTiles: Doc.udimTiles,
+                importanceGroups: Doc.importanceGroups
+            });
+            await SaveUvBridgeTransfer(Payload, 'latest');
+            LogEvent('BRIDGE', `Sent "${Doc.name}" (${Payload.triCount} tris, ${Payload.partNames.length} parts) to Texture Studio`, 'live');
+            Toast(`Transferred "${Doc.name}" to Texture Studio`);
+            window.location.href = '../TextureStudio/?uvImport=latest#paint';
+        }
+        catch (Err)
+        {
+            LogEvent('ERR', `Bridge transfer failed: ${Err.message}`);
+            Toast(`Bridge failed: ${Err.message}`);
+            Btn.disabled = false;
+        }
+    });
     document.getElementById('export-close-btn').addEventListener('click', () => document.getElementById('export-dialog').close());
     document.getElementById('download-obj-btn').addEventListener('click', () =>
     {
@@ -2832,10 +2867,10 @@ function Bootstrap()
     window.addEventListener('resize', () => SyncAllViews());
     requestAnimationFrame(() =>
     {
+        SyncAllViews(true);
         Canvas2D.FrameUdimTiles(ActiveDoc().udimTiles);
         Viewport3D.CameraPreset('Persp');
-        LogEvent('INIT', 'Frontier UV Studio initialized (4 multi-UDIM sample assets ready)', 'live');
-        SyncAllViews(true);
+        LogEvent('INIT', `Frontier UV Studio initialized (${SampleAssetCatalog.length} assets, Controlled Integrator active)`, 'live');
     });
 }
 

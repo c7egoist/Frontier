@@ -13,6 +13,7 @@ import { mountStampWorkspace } from "./Workspaces/StampWorkspace.js";
 import { mountTexturePaintWorkspace } from "./Workspaces/TexturePaintWorkspace.js";
 import { mountBakingWorkspace } from "./Workspaces/BakingWorkspace.js";
 import { Toast } from "./StudioControls.js";
+import { LoadUvBridgeTransfer } from "../Shared/UvTextureBridge.js";
 
 const WORKSPACES = [
   { id: "material", label: "Material", mount: mountMaterialWorkspace },
@@ -39,6 +40,17 @@ const appBridge = {
     patternData: null,
     stampData: null,
     bakedMaps: null,
+    importedMesh: null,
+  },
+  applyImportedMesh(transfer, targetWorkspace = "paint") {
+    if (!transfer) return false;
+    appBridge.shared.importedMesh = transfer;
+    if (targetWorkspace && activeId !== targetWorkspace) {
+      activateWorkspace(targetWorkspace);
+      requestAnimationFrame(() => activeWorkspace?.applyImportedMesh?.(transfer));
+      return true;
+    }
+    return !!activeWorkspace?.applyImportedMesh?.(transfer);
   },
   switchWorkspace(id) {
     activateWorkspace(id);
@@ -209,9 +221,28 @@ window.__frontierTextureStudio = {
   getSnapshot: () => activeWorkspace?.getSnapshot?.() || null,
   getAssetBrowser: () => assetBrowser?.getState?.() || null,
   applyAsset: (kind, id) => appBridge.applyAssetToActiveWorkspace(assetBrowser?.getAssetPayload(kind, id)),
+  applyImportedMesh: (transfer, targetWs) => appBridge.applyImportedMesh(transfer, targetWs),
   sendPatternToMaterial: (pat) => appBridge.sendPatternToMaterial(pat),
   notify: (msg) => Toast(msg),
 };
 
 const initialHash = window.location.hash.replace(/^#/, "").toLowerCase();
-activateWorkspace(WORKSPACES.some((w) => w.id === initialHash) ? initialHash : "material");
+const urlParams = new URLSearchParams(window.location.search || "");
+const uvImportKey = urlParams.get("uvImport");
+const startupWorkspace = WORKSPACES.some((w) => w.id === initialHash)
+  ? initialHash
+  : (uvImportKey ? "paint" : "material");
+activateWorkspace(startupWorkspace);
+
+if (uvImportKey) {
+  LoadUvBridgeTransfer(uvImportKey).then((transfer) => {
+    if (!transfer) {
+      Toast("No recent UV Studio transfer found — load or send a mesh from UV Studio.");
+      return;
+    }
+    appBridge.shared.importedMesh = transfer;
+    activeWorkspace?.applyImportedMesh?.(transfer);
+  }).catch((err) => {
+    console.warn("UV Bridge load failed:", err);
+  });
+}

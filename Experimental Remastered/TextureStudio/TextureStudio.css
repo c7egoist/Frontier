@@ -1003,7 +1003,8 @@ svg.glyph { width: 15px; height: 15px; flex: none; stroke: currentColor; fill: n
 }
 .bk-map-swatch {
     position: relative;
-    height: 50px;
+    width: 100%;
+    aspect-ratio: 1 / 1;
     border-radius: 8px;
     border: 1px solid rgba(255, 255, 255, 0.1);
     overflow: hidden;
@@ -4087,46 +4088,27 @@ svg.glyph { width: 15px; height: 15px; flex: none; stroke: currentColor; fill: n
     background: rgba(255, 255, 255, 0.06);
     border-color: rgba(255, 255, 255, 0.1);
 }
-.mw-select-wrap {
-    position: relative;
-    display: inline-flex;
-    align-items: center;
-    border-radius: 999px;
-    overflow: hidden;
-}
-.mw-select-pill {
-    appearance: none;
-    -webkit-appearance: none;
+.select-pill-wrap.mw-stage-select {
+    width: auto;
     height: 28px;
-    padding: 0 36px 0 12px;
-    border-radius: 999px;
     background: rgba(11, 11, 11, 0.78);
     border: 1px solid rgba(255, 255, 255, 0.12);
     backdrop-filter: blur(8px);
+}
+.select-pill-wrap.mw-stage-select:hover,
+.select-pill-wrap.mw-stage-select:focus-within {
+    border-color: rgba(255, 255, 255, 0.25);
+    background: rgba(18, 20, 24, 0.9);
+}
+.select-pill-wrap.mw-stage-select select {
+    padding: 0 10px 0 12px;
     font-size: 10.5px;
     color: rgba(236, 239, 245, 0.9);
-    outline: none;
-    cursor: pointer;
 }
-.mw-select-pill:hover,
-.mw-select-pill:focus {
-    border-color: rgba(255, 255, 255, 0.25);
-    color: #ffffff;
+.select-pill-wrap.mw-stage-select .pill-caret-divider {
+    width: 26px;
+    border-left-color: rgba(255, 255, 255, 0.12);
 }
-.mw-select-caret {
-    position: absolute;
-    right: 0;
-    top: 0;
-    bottom: 0;
-    width: 28px;
-    border-left: 1px solid rgba(255, 255, 255, 0.12);
-    pointer-events: none;
-    color: rgba(220, 224, 232, 0.72);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-}
-.mw-select-caret svg.glyph { width: 11px; height: 11px; }
 
 /* AlloyStudio Material Inspector [Properties | Layer Stack] Tabs & Strata Pane */
 .mw-inspector-summary {

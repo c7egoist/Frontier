@@ -7,6 +7,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "../Vendor/orbit-controls.esm.min.js";
 import { RoundedBoxGeometry } from "../Vendor/addons/RoundedBoxGeometry.js";
+import { BuildThreeGeometryFromBridgeTransfer } from "../../Shared/UvTextureBridge.js";
 import {
   materials as MATERIAL_CATALOG,
   createMaterial,
@@ -294,9 +295,9 @@ export function mountMaterialWorkspace(root, appBridge) {
   const zoomRow = Construct("div", "mw-zoom-row", [zoomPill, btnResetCam]);
 
   const wrapSelectPill = (sel) =>
-    Construct("div", "mw-select-wrap", [
+    Construct("div", "select-pill-wrap vp-compact-select mw-stage-select", [
       sel,
-      ConstructGlyph("ChevronDown", "glyph mw-select-caret"),
+      Construct("span", "pill-caret-divider", ConstructGlyph("ChevronDown", "glyph chev")),
     ]);
   const selectorRow = Construct("div", "mw-selector-row", [
     wrapSelectPill(shapeSelect),
@@ -531,6 +532,19 @@ export function mountMaterialWorkspace(root, appBridge) {
 
   let sampleMesh = null;
   let activeMaterial = null;
+  let customBridgeGeo = null;
+
+  function ensureCustomShapeOption(label = "UV Bridge Mesh") {
+    let opt = Array.from(shapeSelect.options).find((o) => o.value === "custom");
+    if (!opt) {
+      opt = Construct("option", null, label);
+      opt.value = "custom";
+      shapeSelect.append(opt);
+    } else {
+      opt.textContent = label;
+    }
+    shapeSelect.value = "custom";
+  }
 
   function syncZoomReadout() {
     const dist = Math.max(1.5, camera.position.distanceTo(controls.target));
@@ -554,11 +568,35 @@ export function mountMaterialWorkspace(root, appBridge) {
   }
 
   function buildGeometryForShape(shape) {
+    if (shape === "custom" && customBridgeGeo) return customBridgeGeo.clone();
     if (shape === "shaderball") return createBallGeometry();
     if (shape === "cloth") return createDrapedClothGeometry();
     if (shape === "box") return new RoundedBoxGeometry(2.35, 2.35, 2.35, 8, 0.28);
     if (shape === "plane") return new THREE.PlaneGeometry(2.5, 2.5, 64, 64);
     return new THREE.SphereGeometry(1.4, 128, 96);
+  }
+
+  function applyImportedMesh(transfer) {
+    if (!transfer) return false;
+    const rawGeo = BuildThreeGeometryFromBridgeTransfer(transfer, THREE);
+    if (!rawGeo) return false;
+    rawGeo.computeBoundingBox();
+    const bb = rawGeo.boundingBox;
+    const sz = bb.getSize(new THREE.Vector3());
+    const ctr = bb.getCenter(new THREE.Vector3());
+    const scale = 2.45 / Math.max(1e-4, Math.max(sz.x, sz.y, sz.z));
+    rawGeo.translate(-ctr.x, -bb.min.y, -ctr.z);
+    rawGeo.scale(scale, scale, scale);
+    rawGeo.translate(0, 0.21, 0);
+    rawGeo.computeBoundingBox();
+    rawGeo.computeBoundingSphere();
+    customBridgeGeo = rawGeo;
+    state.shape = "custom";
+    ensureCustomShapeOption(`UV Bridge: ${transfer.name || "Imported Mesh"}`);
+    rebuildMeshAndMaterial();
+    renderLeftOutliner();
+    Toast(`Loaded "${transfer.name}" onto look-dev stage`);
+    return true;
   }
 
   function rebuildMeshAndMaterial() {
@@ -574,7 +612,10 @@ export function mountMaterialWorkspace(root, appBridge) {
     sampleMesh.rotation.set(0, 0, 0);
     sampleMesh.position.set(0, 1.65, 0);
     supportBall.visible = state.shape === "cloth";
-    if (state.shape === "shaderball") {
+    if (state.shape === "custom") {
+      sampleMesh.position.set(0, 0, 0);
+      sampleMesh.rotation.set(0, -0.35, 0);
+    } else if (state.shape === "shaderball") {
       sampleMesh.rotation.set(0, -0.4, -0.27);
     } else if (state.shape === "cloth") {
       sampleMesh.position.set(0, 0, 0);
@@ -1994,7 +2035,11 @@ export function mountMaterialWorkspace(root, appBridge) {
   resizeObserver.observe(stage);
 
   updateLights();
-  rebuildMeshAndMaterial();
+  if (appBridge?.shared?.importedMesh) {
+    applyImportedMesh(appBridge.shared.importedMesh);
+  } else {
+    rebuildMeshAndMaterial();
+  }
   syncZoomReadout();
   renderLeftOutliner();
   rebuildInspector();
@@ -2011,6 +2056,7 @@ export function mountMaterialWorkspace(root, appBridge) {
   return {
       name: "Material",
     applyAsset,
+    applyImportedMesh,
     getSnapshot: () => ({
       id: state.params.id,
       name: state.params.name,
@@ -2030,6 +2076,7 @@ export function mountMaterialWorkspace(root, appBridge) {
       controls.dispose();
       backdropTex?.dispose?.();
       envTex.dispose();
+      if (customBridgeGeo) customBridgeGeo.dispose();
       if (sampleMesh) sampleMesh.geometry.dispose();
       if (activeMaterial) activeMaterial.dispose();
       studioFloor.geometry.dispose();

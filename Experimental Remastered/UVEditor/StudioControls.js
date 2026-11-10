@@ -56,6 +56,7 @@ export const GlyphPaths = {
     Sliders:    '<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',
     Reset:      '<path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"/><path d="M3.5 4.5v4.6h4.6"/>',
     Terminal:   '<rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M7.5 9.5 11 12l-3.5 2.5M13 14.5h3.5"/>',
+    ChevronDown:'<path d="M6 9l6 6 6-6"/>',
     Dot:        '<circle cx="12" cy="12" r="3"/>'
 };
 
@@ -238,7 +239,9 @@ export function SelectRow(Parent, Binding)
         Option.value = String(Value);
         Select.append(Option);
     }
-    const Row = Construct('div', 'property-row select-row', [Construct('label', 'property-label', Binding.Label), Select]);
+    const Caret = Construct('span', 'pill-caret-divider', ConstructGlyph('ChevronDown', 'glyph chev'));
+    const Wrap = Construct('div', 'select-pill-wrap', [Select, Caret]);
+    const Row = Construct('div', 'property-row select-row', [Construct('label', 'property-label', Binding.Label), Wrap]);
     Parent.append(Row);
     Select.addEventListener('change', () =>
     {

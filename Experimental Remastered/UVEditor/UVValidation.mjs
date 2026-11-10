@@ -24,6 +24,7 @@ import {
 } from './Engine/UnwrapSolver.js';
 import { SolveImportancePack } from './Engine/ImportancePackingSolver.js';
 import { SampleAssetCatalog } from './Engine/SampleAssets.js';
+import { SerializeTopologySurfaceForBridge } from '../Shared/UvTextureBridge.js';
 
 const Dir = path.dirname(fileURLToPath(import.meta.url));
 const ReadText = Rel => fs.readFileSync(path.join(Dir, Rel), 'utf8');
@@ -34,7 +35,9 @@ const RequiredAssets = [
     'Fonts/dm-sans-latin-300-normal.woff2', 'Fonts/dm-sans-latin-400-normal.woff2', 'Fonts/dm-sans-latin-500-normal.woff2',
     'Vendor/three.esm.min.js', 'Vendor/orbit-controls.esm.min.js',
     'Engine/TopologySurface.js', 'Engine/UnwrapSolver.js', 'Engine/ImportancePackingSolver.js',
-    'Engine/SampleAssets.js', 'Engine/UVCanvas2D.js', 'Engine/UVViewport3D.js'
+    'Engine/ControlledIntegratorLoader.js', 'Engine/SampleAssets.js', 'Engine/UVCanvas2D.js', 'Engine/UVViewport3D.js',
+    'Assets/ControlVehicleBody.facet', 'Assets/ControlVehicleRim.facet', 'Assets/ControlVehicleTyre.facet',
+    '../Shared/UvTextureBridge.js'
 ];
 for (const File of RequiredAssets)
 {
@@ -52,6 +55,9 @@ for (const M of MainJs.matchAll(/document\.getElementById\('([^']+)'\)/g))
 {
     assert.ok(HtmlIds.has(M[1]), `Missing DOM id="${M[1]}" in index.html referenced by UVEditor.js`);
 }
+assert.ok(HtmlIds.has('send-to-texture-studio-btn'), 'index.html must include Export to Texture Studio bridge button');
+assert.ok(/data-stage-mode="mesh"[^>]*class="nav-button active"|class="nav-button active"[^>]*data-stage-mode="mesh"/.test(Html), 'Default active stage mode tab must be 3D Mesh');
+assert.ok((Html.match(/class="select-pill-wrap vp-compact-select"/g) || []).length >= 4, 'Top toolbar dropdowns must use unified .select-pill-wrap with .pill-caret-divider');
 console.log('   OK: All assets bundled & DOM IDs wired cleanly.');
 
 console.log('2. Checking UDIM coordinate conversions...');
@@ -64,7 +70,7 @@ assert.deepEqual(UdimOrigin(1001), { u: 0, v: 0 });
 assert.deepEqual(UdimOrigin(1023), { u: 2, v: 2 });
 console.log('   OK: Mari/Blender UDIM indexing verified.');
 
-console.log('3. Auditing all 4 sample assets for clean initial UVs, 0 overlaps & 0 flips...');
+console.log(`3. Auditing all ${SampleAssetCatalog.length} sample assets for clean initial UVs, 0 overlaps & 0 flips...`);
 for (const Spec of SampleAssetCatalog)
 {
     const { surface, importanceGroups, udimTiles } = Spec.create();
@@ -74,6 +80,14 @@ for (const Spec of SampleAssetCatalog)
     assert.ok(Islands.length >= 10, `${Spec.label} should have rich island count (got ${Islands.length})`);
     assert.equal(Diag.overlapCount, 0, `${Spec.label} has unexpected overlaps: ${Diag.overlapCount}`);
     assert.equal(Diag.flippedCount, 0, `${Spec.label} has unexpected flipped faces: ${Diag.flippedCount}`);
+    if (Spec.id === 'controlled_integrator')
+    {
+        assert.ok(surface.faces.length >= 25000, `Controlled Integrator should have >= 25k triangles (got ${surface.faces.length})`);
+        assert.ok(Islands.length >= 120, `Controlled Integrator should have >= 120 UV islands (got ${Islands.length})`);
+        const BridgePayload = SerializeTopologySurfaceForBridge(surface, { udimTiles, importanceGroups });
+        assert.equal(BridgePayload.triCount, surface.faces.length);
+        assert.ok(BridgePayload.partNames.length >= 6, 'Controlled Integrator bridge must retain vehicle part segmentation');
+    }
     console.log(`   OK: ${Spec.label} -> ${Islands.length} islands, ${udimTiles.length} UDIM(s), 0 overlaps, stretch ${(Diag.meanAngleStretch * 100).toFixed(1)}%`);
 }
 
@@ -133,7 +147,8 @@ console.log('4. Verifying Importance-Based Space Allocation (5 islands=70%, 10 i
 
 console.log('5. Verifying Auto-UDIM Spillover & Multi-UDIM Texel Density Equalization...');
 {
-    const { surface } = SampleAssetCatalog[3].create(); // Multi-UDIM Arch Kit
+    const ArchSpec = SampleAssetCatalog.find(S => S.id === 'udim_kit');
+    const { surface } = ArchSpec.create(); // Multi-UDIM Arch Kit
     const Islands = surface.ExtractIslands(() => 2048, 100);
     for (const Fi of surface.faces.keys()) surface.importanceByFace.delete(Fi);
     surface.AssignImportanceGroup(Islands.slice(0, 4).map(I => I.id), 'big1', Islands);
@@ -154,7 +169,9 @@ console.log('5. Verifying Auto-UDIM Spillover & Multi-UDIM Texel Density Equaliz
 
 console.log('6. Verifying Blender Unwrap, Relax, Pin, Seam, Stitch, Weld, Split & Undo/Redo...');
 {
-    const { surface } = SampleAssetCatalog[2].create(); // Armored Bust
+    const BustSpec = SampleAssetCatalog.find(S => S.id === 'bust');
+    const CrateSpec = SampleAssetCatalog.find(S => S.id === 'crate');
+    const { surface } = BustSpec.create(); // Armored Bust
     surface.PushUndo('Before Unwrap');
     const Solved = UnwrapLscm(surface, { onlySelected: false });
     assert.ok(Solved >= 1, 'LSCM should unwrap >= 1 island');
@@ -182,7 +199,7 @@ console.log('6. Verifying Blender Unwrap, Relax, Pin, Seam, Stitch, Weld, Split 
     assert.ok(AnalyticProject(surface, 'view') >= 1);
 
     // Quad strip FollowActiveQuads test
-    const { surface: CrateSurf } = SampleAssetCatalog[1].create();
+    const { surface: CrateSurf } = CrateSpec.create();
     CrateSurf.activeFace = 0;
     CrateSurf.selectedFaces = new Set([0, 1, 2]);
     assert.ok(FollowActiveQuads(CrateSurf) >= 1);
@@ -210,8 +227,10 @@ console.log('6. Verifying Blender Unwrap, Relax, Pin, Seam, Stitch, Weld, Split 
 // 7. Edge Selection, Loops, Rings, Shortest Paths, Boundaries, Sharp Edges & Seam Healing
 {
     console.log('7. Testing Blender Edge Selection, Loops/Rings/Paths, Sharp/Boundary & Seam Tools...');
-    const { surface: Bust } = SampleAssetCatalog[2].create(); // Armored Bust (quad grid + armor)
-    const { surface: Crate } = SampleAssetCatalog[1].create();
+    const BustSpec = SampleAssetCatalog.find(S => S.id === 'bust');
+    const CrateSpec = SampleAssetCatalog.find(S => S.id === 'crate');
+    const { surface: Bust } = BustSpec.create(); // Armored Bust (quad grid + armor)
+    const { surface: Crate } = CrateSpec.create();
 
     // 3D Edge Picking + 2D UV Edge Sync
     const F0 = Bust.faces[0];
@@ -270,7 +289,7 @@ console.log('6. Verifying Blender Unwrap, Relax, Pin, Seam, Stitch, Weld, Split 
     Bust.SeamsFromIslands();
 
     // Test Clear Seam + Weld healing on Crate: take 2 adjacent faces sharing a seam, clear their seam and weld
-    const Crate2 = SampleAssetCatalog[1].create().surface;
+    const Crate2 = CrateSpec.create().surface;
     const PreIsl2 = Crate2.ExtractIslands().length;
     const SeamArr = [...Crate2.seams];
     assert.ok(SeamArr.length > 0);

@@ -7,6 +7,7 @@
 import { TopologySurface, EdgeKey } from './TopologySurface.js';
 import { SmartUvProject } from './UnwrapSolver.js';
 import { SolveImportancePack } from './ImportancePackingSolver.js';
+import { CreateControlledIntegratorAsset } from './ControlledIntegratorLoader.js';
 
 class SurfaceAssembler
 {
@@ -541,6 +542,7 @@ export function CreateMultiUdimArchAsset()
 }
 
 export const SampleAssetCatalog = [
+    { id: 'controlled_integrator', label: 'Controlled Integrator', subtitle: '25,068 tris · 152 islands · 55/15/30', create: CreateControlledIntegratorAsset },
     { id: 'coupe', label: 'Aero Coupe GT', subtitle: '30 islands · 70/10/Rest demo', create: CreateAeroCoupeAsset },
     { id: 'crate', label: 'Tactical Crate', subtitle: '22 islands · Hard-surface quads', create: CreateTacticalCrateAsset },
     { id: 'bust', label: 'Armored Bust', subtitle: '16 islands · Organic LSCM + trim', create: CreateCharacterBustAsset },

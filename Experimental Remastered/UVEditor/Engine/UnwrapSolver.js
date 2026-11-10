@@ -532,7 +532,9 @@ export function SmartUvProject(Surface, { angleLimitDeg = 66, onlySelectedFaces 
         Visited.add(Seed);
         const Queue = [Seed];
         const Group = [];
-        let SumN = [...Surface.faceNormals[Seed]];
+        const SeedN = Surface.faceNormals[Seed];
+        let SumN = [...SeedN];
+        const SeedCosFloor = Math.max(0.28, CosLimit * 0.72);
 
         while (Queue.length)
         {
@@ -548,7 +550,7 @@ export function SmartUvProject(Surface, { angleLimitDeg = 66, onlySelectedFaces 
                 {
                     if (Visited.has(Adj)) continue;
                     const N2 = Surface.faceNormals[Adj];
-                    if (VecDot(AvgN, N2) >= CosLimit)
+                    if (VecDot(AvgN, N2) >= CosLimit && VecDot(SeedN, N2) >= SeedCosFloor)
                     {
                         Visited.add(Adj);
                         Queue.push(Adj);

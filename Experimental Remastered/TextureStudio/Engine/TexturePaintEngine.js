@@ -460,9 +460,13 @@ export function buildPaintTargetGeometry(meshId = "teapot", customGeometry = nul
     if (!geo.attributes.normal) geo.computeVertexNormals();
     if (!geo.attributes.uv) generateAutoBoxUVs(geo);
     clampAndSanitizeUVs(geo);
-    partNames = ["Imported Mesh"];
-    const count = geo.attributes.position.count;
-    geo.setAttribute("surfacePart", new THREE.Float32BufferAttribute(new Float32Array(count), 1));
+    if (geo.attributes.surfacePart && Array.isArray(customGeometry.userData?.partNames) && customGeometry.userData.partNames.length) {
+      partNames = [...customGeometry.userData.partNames];
+    } else {
+      partNames = ["Imported Mesh"];
+      const count = geo.attributes.position.count;
+      geo.setAttribute("surfacePart", new THREE.Float32BufferAttribute(new Float32Array(count), 1));
+    }
   } else if (meshId === "teapot") {
     const seg = 16;
     geo = new TeapotGeometry(1.0, seg);
@@ -567,8 +571,16 @@ function clampAndSanitizeUVs(geo) {
   const uv = geo.attributes.uv;
   if (!uv) return;
   for (let i = 0; i < uv.count; i++) {
-    const u = Math.max(0.002, Math.min(0.998, uv.getX(i)));
-    const v = Math.max(0.002, Math.min(0.998, uv.getY(i)));
+    let u = uv.getX(i);
+    let v = uv.getY(i);
+    if (!Number.isFinite(u)) u = 0.5;
+    if (!Number.isFinite(v)) v = 0.5;
+    if (u > 1.0001) u = u - Math.floor(u - 1e-5);
+    else if (u < -0.0001) u = u - Math.floor(u);
+    if (v > 1.0001) v = v - Math.floor(v - 1e-5);
+    else if (v < -0.0001) v = v - Math.floor(v);
+    u = Math.max(0.002, Math.min(0.998, u));
+    v = Math.max(0.002, Math.min(0.998, v));
     uv.setXY(i, u, v);
   }
   uv.needsUpdate = true;

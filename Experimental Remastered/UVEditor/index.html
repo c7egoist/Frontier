@@ -31,9 +31,9 @@
     </div>
 
     <nav class="top-nav" id="stage-layout-nav" aria-label="Viewport Layout">
-      <button class="nav-button active" data-stage-mode="split" type="button">Split 2D + 3D</button>
+      <button class="nav-button" data-stage-mode="split" type="button">Split 2D + 3D</button>
       <button class="nav-button" data-stage-mode="uv" type="button">2D UV Atlas</button>
-      <button class="nav-button" data-stage-mode="mesh" type="button">3D Mesh</button>
+      <button class="nav-button active" data-stage-mode="mesh" type="button">3D Mesh</button>
     </nav>
 
     <div class="header-end">
@@ -42,6 +42,7 @@
       <button class="icon-button" id="redo-btn" type="button" title="Redo (Ctrl+Shift+Z)"></button>
       <button class="button" id="import-obj-btn" type="button">Import OBJ</button>
       <button class="icon-button" id="help-btn" type="button" title="Blender UV Hotkeys (?)"></button>
+      <button class="button warm-bridge-btn" id="send-to-texture-studio-btn" type="button" title="Send active mesh &amp; UVs to Frontier Texture Studio">Export to Texture Studio</button>
       <button class="button export-button" id="export-obj-btn" type="button">Export OBJ</button>
     </div>
   </header>
@@ -125,37 +126,49 @@
         </div>
         <span class="bar-divider"></span>
         <button class="pill-btn active" id="sync-sel-btn" type="button" title="UV Sync Selection (2D ↔ 3D)">Sync 2D↔3D</button>
-        <select id="pivot-select" title="Pivot Point (.)">
-          <option value="median">Pivot: Median</option>
-          <option value="bounds">Pivot: Bounding Box</option>
-          <option value="cursor">Pivot: 2D Cursor</option>
-          <option value="individual">Pivot: Individual</option>
-        </select>
-        <select id="snap-select" title="Snap Mode (Shift+Tab)">
-          <option value="off">Snap: Off</option>
-          <option value="grid">Snap: Grid</option>
-          <option value="pixel">Snap: Pixel</option>
-          <option value="vertex">Snap: Vertex</option>
-        </select>
+        <div class="select-pill-wrap vp-compact-select">
+          <select id="pivot-select" title="Pivot Point (.)">
+            <option value="median">Pivot: Median</option>
+            <option value="bounds">Pivot: Bounding Box</option>
+            <option value="cursor">Pivot: 2D Cursor</option>
+            <option value="individual">Pivot: Individual</option>
+          </select>
+          <span class="pill-caret-divider"><svg class="glyph chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></span>
+        </div>
+        <div class="select-pill-wrap vp-compact-select">
+          <select id="snap-select" title="Snap Mode (Shift+Tab)">
+            <option value="off">Snap: Off</option>
+            <option value="grid">Snap: Grid</option>
+            <option value="pixel">Snap: Pixel</option>
+            <option value="vertex">Snap: Vertex</option>
+          </select>
+          <span class="pill-caret-divider"><svg class="glyph chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></span>
+        </div>
         <button class="pill-btn" id="prop-edit-btn" type="button" title="Proportional Editing (O)">Prop (O)</button>
         <span class="bar-divider"></span>
-        <select id="uv-lens-select" title="2D UV Overlay Lens">
-          <option value="importance">Lens: Importance Zones</option>
-          <option value="clean">Lens: Clean Wireframe</option>
-          <option value="texel">Lens: Texel Density</option>
-          <option value="stretch-angle">Lens: Angle Stretch</option>
-          <option value="stretch-area">Lens: Area Stretch</option>
-          <option value="overlap">Lens: Overlaps &amp; Flipped</option>
-        </select>
-        <select id="mesh-shade-select" title="3D Mesh Shading">
-          <option value="checker">3D: UV Checker</option>
-          <option value="flat">3D: Flat Shaded</option>
-          <option value="matcap">3D: Matcap Clay</option>
-          <option value="matcap-satin">3D: Matcap Satin</option>
-          <option value="importance">3D: Importance</option>
-          <option value="texel">3D: Texel Density</option>
-          <option value="stretch">3D: UV Stretch</option>
-        </select>
+        <div class="select-pill-wrap vp-compact-select">
+          <select id="uv-lens-select" title="2D UV Overlay Lens">
+            <option value="importance">Lens: Importance Zones</option>
+            <option value="clean">Lens: Clean Wireframe</option>
+            <option value="texel">Lens: Texel Density</option>
+            <option value="stretch-angle">Lens: Angle Stretch</option>
+            <option value="stretch-area">Lens: Area Stretch</option>
+            <option value="overlap">Lens: Overlaps &amp; Flipped</option>
+          </select>
+          <span class="pill-caret-divider"><svg class="glyph chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></span>
+        </div>
+        <div class="select-pill-wrap vp-compact-select">
+          <select id="mesh-shade-select" title="3D Mesh Shading">
+            <option value="checker">3D: UV Checker</option>
+            <option value="flat">3D: Flat Shaded</option>
+            <option value="matcap">3D: Matcap Clay</option>
+            <option value="matcap-satin">3D: Matcap Satin</option>
+            <option value="importance">3D: Importance</option>
+            <option value="texel">3D: Texel Density</option>
+            <option value="stretch">3D: UV Stretch</option>
+          </select>
+          <span class="pill-caret-divider"><svg class="glyph chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></span>
+        </div>
         <div class="viewport-bar-end">
           <button class="pill-btn active" id="toggle-checker-btn" type="button">Checker</button>
           <button class="pill-btn active" id="toggle-seams-btn" type="button">Seams</button>
@@ -164,7 +177,7 @@
         </div>
       </div>
 
-      <div class="stage-split" id="stage-split">
+      <div class="stage-split mode-mesh" id="stage-split">
         <!-- 2D UV & UDIM STAGE -->
         <div class="uv-stage" id="uv-stage">
           <canvas id="uv-canvas-2d"></canvas>

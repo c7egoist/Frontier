@@ -11,6 +11,7 @@ import * as THREE from "three";
 import { OrbitControls } from "../Vendor/orbit-controls.esm.min.js";
 import { OBJLoader } from "../Vendor/addons/OBJLoader.js";
 import { STLLoader } from "../Vendor/addons/STLLoader.js";
+import { BuildThreeGeometryFromBridgeTransfer } from "../../Shared/UvTextureBridge.js";
 import { materials as MATERIAL_CATALOG } from "../Engine/Materials/materials.js";
 import {
   PAINT_MESH_PRESETS as PAINT_MESH_LIST,
@@ -1314,8 +1315,20 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     return lg;
   }
 
+  function ensureCustomMeshOption(label = "Imported Mesh") {
+    let opt = Array.from(meshSelect.options).find((o) => o.value === "custom");
+    if (!opt) {
+      opt = Construct("option", null, label);
+      opt.value = "custom";
+      meshSelect.append(opt);
+    } else {
+      opt.textContent = label;
+    }
+    meshSelect.value = "custom";
+  }
+
   function rebuildPaintMesh(customGeometry = null) {
-    meshGeo = customGeometry || buildPaintTargetGeometry(state.meshId);
+    meshGeo = customGeometry || buildPaintTargetGeometry(state.meshId, state.meshId === "custom" ? state.customGeo : null);
     meshIndex = buildMeshPaintIndex(meshGeo);
     meshCues = buildDefaultMeshCues(meshGeo, meshIndex, res);
     if (paintMesh) { scene.remove(paintMesh); paintMesh.geometry.dispose(); }
@@ -4738,6 +4751,28 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     }
   });
 
+  function applyImportedMesh(transfer) {
+    if (!transfer) return false;
+    const rawGeo = BuildThreeGeometryFromBridgeTransfer(transfer, THREE);
+    if (!rawGeo) return false;
+    const builtGeo = buildPaintTargetGeometry("custom", rawGeo);
+    state.customGeo = builtGeo.clone();
+    state.meshId = "custom";
+    state.doc.meshId = "custom";
+    if (!state.doc.name || state.doc.name === "Untitled paint") {
+      state.doc.name = transfer.name || "UV Bridge Asset";
+      headerUI?.setName?.(state.doc.name);
+    }
+    ensureCustomMeshOption(`UV Bridge: ${transfer.name || "Imported Mesh"}`);
+    rebuildPaintMesh(builtGeo);
+    camera.position.set(2.9, 1.85, 3.6);
+    orbit.target.set(0, 0, 0);
+    orbit.update();
+    renderLeftColumn();
+    Toast(`Loaded "${transfer.name}" (${transfer.triCount.toLocaleString()} tris) from UV Studio`);
+    return true;
+  }
+
   importInp.addEventListener("change", async () => {
     const file = importInp.files?.[0];
     if (!file) return;
@@ -4754,7 +4789,13 @@ export function mountTexturePaintWorkspace(root, appBridge) {
         geo.center(); geo.computeBoundingSphere();
         const s = 1.45 / Math.max(0.01, geo.boundingSphere.radius || 1);
         geo.scale(s, s, s);
-        rebuildPaintMesh(buildPaintTargetGeometry("custom", geo));
+        const builtGeo = buildPaintTargetGeometry("custom", geo);
+        state.customGeo = builtGeo.clone();
+        state.meshId = "custom";
+        state.doc.meshId = "custom";
+        ensureCustomMeshOption(`Imported: ${file.name}`);
+        rebuildPaintMesh(builtGeo);
+        renderLeftColumn();
         Toast(`Imported ${file.name}`);
       }
     } catch (err) {
@@ -4828,7 +4869,11 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   const ro = new ResizeObserver(syncViewportLayout);
   ro.observe(stage);
 
-  rebuildPaintMesh();
+  if (appBridge?.shared?.importedMesh) {
+    applyImportedMesh(appBridge.shared.importedMesh);
+  } else {
+    rebuildPaintMesh();
+  }
   renderLeftColumn();
   syncUndoButtons();
   syncViewportLayout();
@@ -4998,6 +5043,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   return {
     name: "Texture Paint",
     applyAsset,
+    applyImportedMesh,
     applyBridgedMaterial(matParams) {
       const l = createPaintLayer("material", {
         res,

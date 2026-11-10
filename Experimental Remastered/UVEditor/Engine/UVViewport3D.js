@@ -280,8 +280,8 @@ export class UVViewport3D
 
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color('#101214');
-        this.camera = new THREE.PerspectiveCamera(40, 1, 0.05, 100);
-        this.camera.position.set(3.8, 2.5, 4.4);
+        this.camera = new THREE.PerspectiveCamera(40, 1, 0.05, 220);
+        this.camera.position.set(5.4, 2.6, 6.2);
 
         try
         {
@@ -314,7 +314,7 @@ export class UVViewport3D
         Rim.position.set(0, 3, -6);
         this.scene.add(Rim);
 
-        const Grid = new THREE.GridHelper(12, 24, '#3d4346', '#212527');
+        const Grid = new THREE.GridHelper(16, 32, '#3d4346', '#212527');
         Grid.position.y = -0.002;
         this.scene.add(Grid);
 
@@ -651,21 +651,27 @@ export class UVViewport3D
     {
         if (!this.webglReady) return;
         let Target = new THREE.Vector3(0, 0.85, 0);
+        let Radius = 1.9;
         if (this.surface && this.surface.positions.length)
         {
+            let MinX = Infinity, MaxX = -Infinity;
             let MinY = Infinity, MaxY = -Infinity;
+            let MinZ = Infinity, MaxZ = -Infinity;
             for (const P of this.surface.positions)
             {
-                if (P[1] < MinY) MinY = P[1];
-                if (P[1] > MaxY) MaxY = P[1];
+                if (P[0] < MinX) MinX = P[0]; if (P[0] > MaxX) MaxX = P[0];
+                if (P[1] < MinY) MinY = P[1]; if (P[1] > MaxY) MaxY = P[1];
+                if (P[2] < MinZ) MinZ = P[2]; if (P[2] > MaxZ) MaxZ = P[2];
             }
-            Target.set(0, 0.5 * (MinY + MaxY), 0);
+            Target.set(0.5 * (MinX + MaxX), 0.5 * (MinY + MaxY), 0.5 * (MinZ + MaxZ));
+            Radius = Math.max(1.1, 0.5 * Math.hypot(MaxX - MinX, MaxY - MinY, MaxZ - MinZ));
         }
+        const Scale = Radius / 1.85;
         this.controls.target.copy(Target);
-        if (Preset === 'Front') this.camera.position.set(0, Target.y + 0.4, 5.2);
-        else if (Preset === 'Side') this.camera.position.set(5.2, Target.y + 0.4, 0.01);
-        else if (Preset === 'Top') this.camera.position.set(0, Target.y + 5.4, 0.01);
-        else this.camera.position.set(3.8, Target.y + 1.8, 4.4);
+        if (Preset === 'Front') this.camera.position.set(Target.x + 5.2 * Scale, Target.y + 0.4 * Scale, Target.z + 0.01);
+        else if (Preset === 'Side') this.camera.position.set(Target.x, Target.y + 0.4 * Scale, Target.z + 5.2 * Scale);
+        else if (Preset === 'Top') this.camera.position.set(Target.x, Target.y + 5.4 * Scale, Target.z + 0.01);
+        else this.camera.position.set(Target.x + 3.8 * Scale, Target.y + 1.8 * Scale, Target.z + 4.4 * Scale);
         this.controls.update();
     }
 

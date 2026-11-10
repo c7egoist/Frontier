@@ -2543,7 +2543,7 @@ await suite("22. UI & Theme Polish: Material Fullscreen, Bigger Hero, Neutral PB
 
   const pillTriggers = globalThis.document.querySelectorAll(".pill-trigger");
   assert(pillTriggers.length > 0 && pillTriggers.every((t) => t.querySelector(".pill-caret-divider")), "FilterDropdownPill / PBR channel dropdown triggers must render .pill-caret-divider (| V)");
-  assert(mwStage.querySelectorAll(".mw-select-wrap .mw-select-caret").length === 2, "Material stage dropdowns must include .mw-select-caret (| V) divider");
+  assert(mwStage.querySelectorAll(".mw-stage-select .pill-caret-divider").length === 2, "Material stage dropdowns must include unified .select-pill-wrap .pill-caret-divider (| V)");
 
   // Check SelectRow & header pill dropdown dividers in Texture Paint & Baking
   studio.switchWorkspace("paint");
@@ -2618,6 +2618,42 @@ await suite("22. UI & Theme Polish: Material Fullscreen, Bigger Hero, Neutral PB
   const famRuleStart = cssText.indexOf(".cb-family-pills {");
   const famRuleBlock = cssText.slice(famRuleStart, cssText.indexOf("}", famRuleStart) + 1);
   assert(famRuleBlock.includes("flex-wrap: nowrap;"), "Asset Browser .cb-family-pills must stay on a clean single non-wrapping row");
+});
+
+await suite("23. UV Studio <-> Texture Studio Bridge (Controlled Integrator Roundtrip across Paint, Bake & Material)", async () => {
+  const { CreateControlledIntegratorAsset } = await import("../UVEditor/Engine/ControlledIntegratorLoader.js");
+  const {
+    SerializeTopologySurfaceForBridge,
+    BuildThreeGeometryFromBridgeTransfer,
+    SaveUvBridgeTransfer,
+    LoadUvBridgeTransfer,
+  } = await import("../Shared/UvTextureBridge.js");
+
+  const asset = CreateControlledIntegratorAsset();
+  const payload = SerializeTopologySurfaceForBridge(asset.surface, {
+    udimTiles: asset.udimTiles,
+    importanceGroups: asset.importanceGroups,
+  });
+  await SaveUvBridgeTransfer(payload, "latest");
+  const loaded = await LoadUvBridgeTransfer("latest");
+  assert(loaded && loaded.triCount === asset.surface.faces.length, "UV Bridge transfer must preserve exact triangle count");
+  assert(loaded.partNames.length === 13 && loaded.partNames.includes("Body Coat"), "UV Bridge transfer must retain vehicle part groups");
+
+  const rawGeo = BuildThreeGeometryFromBridgeTransfer(loaded, THREE);
+  const paintGeo = buildPaintTargetGeometry("custom", rawGeo);
+  assert(paintGeo.userData.partNames.length === 13, "buildPaintTargetGeometry('custom') must preserve all 13 partNames");
+  const paintIdx = buildMeshPaintIndex(paintGeo);
+  assert.equal(paintIdx.tris.length, loaded.triCount, "MeshPaintIndex must index all bridged triangles");
+  rawGeo.dispose();
+  paintGeo.dispose();
+
+  const studio = globalThis.window.__frontierTextureStudio;
+  assert.equal(studio.applyImportedMesh(loaded, "paint"), true, "Paint workspace must accept bridged mesh");
+  assert.equal(studio.getSnapshot().meshId, "custom", "Paint workspace must switch to custom bridged mesh");
+  assert.equal(studio.applyImportedMesh(loaded, "bake"), true, "Baking workspace must accept bridged mesh");
+  assert.equal(studio.getSnapshot().studyId, "custom", "Baking workspace must switch to custom bridged study");
+  assert.equal(studio.applyImportedMesh(loaded, "material"), true, "Material workspace must accept bridged mesh");
+  assert.equal(studio.getSnapshot().shape, "custom", "Material workspace must switch to custom bridged shape");
 });
 
 console.log(`\nALL ${results.length} VALIDATION SUITES PASSED CLEANLY`);

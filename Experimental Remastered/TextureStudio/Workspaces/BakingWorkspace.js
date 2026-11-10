@@ -20,6 +20,7 @@ import {
 } from "../Engine/BakingEngine.js";
 import { GpuBakeSession } from "../Engine/GpuBakeEngine.js";
 import { buildPaintTargetGeometry } from "../Engine/TexturePaintEngine.js";
+import { BuildThreeGeometryFromBridgeTransfer } from "../../Shared/UvTextureBridge.js";
 import {
   Construct,
   ConstructGlyph,
@@ -918,9 +919,49 @@ export function mountBakingWorkspace(root, appBridge) {
   };
   window.addEventListener("keydown", onBakeKeyDown);
 
-  renderLeftColumn();
-  rebuildInspector();
-  updateInspectedMapView();
+  function ensureCustomStudyOption(label = "Imported Study") {
+    let opt = Array.from(studySelect.options).find((o) => o.value === "custom");
+    if (!opt) {
+      opt = Construct("option", null, label);
+      opt.value = "custom";
+      studySelect.append(opt);
+    } else {
+      opt.textContent = label;
+    }
+    studySelect.value = "custom";
+  }
+
+  function applyImportedMesh(transfer) {
+    if (!transfer) return false;
+    const rawGeo = BuildThreeGeometryFromBridgeTransfer(transfer, THREE);
+    if (!rawGeo) return false;
+    const lowGeo = buildPaintTargetGeometry("custom", rawGeo);
+    const highGeo = lowGeo.clone();
+    state.studyId = "custom";
+    ensureCustomStudyOption(`UV Bridge: ${transfer.name || "Imported Mesh"}`);
+    studyPair = {
+      studyId: "custom",
+      low: [{ name: transfer.name || "Low", geometry: lowGeo }],
+      high: [{ name: transfer.name || "High", geometry: highGeo }],
+    };
+    state.bakedSurface = null;
+    state.bakedSdf = null;
+    if (bakedTex) { bakedTex.dispose(); bakedTex = null; }
+    rebuildPreviewMeshes();
+    updateInspectedMapView();
+    renderLeftColumn();
+    rebuildInspector();
+    Toast(`Loaded "${transfer.name}" (${transfer.triCount.toLocaleString()} tris) for baking`);
+    return true;
+  }
+
+  if (appBridge?.shared?.importedMesh) {
+    applyImportedMesh(appBridge.shared.importedMesh);
+  } else {
+    renderLeftColumn();
+    rebuildInspector();
+    updateInspectedMapView();
+  }
 
   const tick = () => {
     if (disposed) return;
@@ -978,6 +1019,7 @@ export function mountBakingWorkspace(root, appBridge) {
   return {
     name: "Baking",
     applyAsset,
+    applyImportedMesh,
     getSnapshot: () => ({
       studyId: state.studyId,
       viewMode: state.viewMode,
