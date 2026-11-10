@@ -1,0 +1,257 @@
+/*==========================================================================================================================================
+                                                         VIEWPORTHEADERKIT.JS
+==========================================================================================================================================*/
+/* Shared two-tier AlloyStudio / Experimental viewport header builder unified across Pattern, Stamp & Texture Paint:
+   Band 1 (.vp-doc-bar.se-header-bar):  [ Icon ] [ Editable Canvas Name + MODE ] | [ Size ] [ View ] ... [ Undo/Redo ] [ Save ▾ ] [ Primary CTAs ]
+   Band 2 (.vp-tools-bar.tp-authoring-bar): [ .tp-tool-group: workspace tools ] ... [ contextual utilities / status ] */
+
+import { Construct, ConstructGlyph } from "../StudioControls.js";
+
+export const STUDIO_RESOLUTIONS = [512, 1024, 2048, 4096];
+
+export function createViewportHeader(parentCol, opts = {}) {
+  const {
+    workspace = "pattern",
+    badgeText = "PATTERN",
+    iconGlyph = "Pattern",
+    canvasName = "Untitled",
+    onRename = null,
+    resolutions = STUDIO_RESOLUTIONS,
+    resolution = 1024,
+    onResolutionChange = null,
+    viewOptions = [],
+    viewValue = "",
+    viewAriaLabel = "Canvas View",
+    onViewChange = null,
+    onUndo = null,
+    onRedo = null,
+    saveItems = [],
+    primaryActions = [],
+    tools = [],
+    toolGroupClass = "tp-tool-group",
+    onToolSelect = null,
+    toolTrailing = [],
+  } = opts;
+
+  const docBar = Construct("div", "viewport-toolbar vp-doc-bar se-header-bar");
+  docBar.dataset.workspaceHeader = workspace;
+
+  const sceneIcon = Construct("div", "tp-scene-icon", ConstructGlyph(iconGlyph));
+
+  const nameInput = document.createElement("input");
+  nameInput.type = "text";
+  nameInput.className = "vp-name-input";
+  nameInput.value = canvasName || "Untitled";
+  nameInput.setAttribute("aria-label", "Canvas name");
+  nameInput.title = "Click to rename canvas";
+
+  const modeBadge = Construct("span", "vp-mode-badge", badgeText);
+  const docPill = Construct("div", "se-doc-pill", [nameInput, modeBadge]);
+
+  nameInput.addEventListener("change", () => {
+    const next = String(nameInput.value || "").trim() || "Untitled";
+    nameInput.value = next;
+    onRename?.(next);
+  });
+
+  // Size / Resolution field (AlloyStudio .tp-header-field pill)
+  const resSelect = Construct("select", "se-header-select se-res-select");
+  resSelect.setAttribute("aria-label", "Canvas Size");
+  resSelect.title = "Canvas & Export Resolution";
+  for (const r of resolutions) {
+    const opt = Construct("option", null, `${r} × ${r}`);
+    opt.value = String(r);
+    resSelect.append(opt);
+  }
+  resSelect.value = String(resolution);
+  resSelect.addEventListener("change", () => {
+    const v = Number(resSelect.value);
+    if (Number.isFinite(v) && v > 0) onResolutionChange?.(v);
+  });
+
+  const sizeField = Construct("label", "vp-field-chip", [
+    Construct("span", null, "Size"),
+    resSelect,
+  ]);
+
+  let viewSelect = null;
+  let viewField = null;
+  if (viewOptions.length) {
+    viewSelect = Construct("select", "se-header-select vp-view-select");
+    viewSelect.setAttribute("aria-label", viewAriaLabel);
+    for (const [label, val] of viewOptions) {
+      const opt = Construct("option", null, label);
+      opt.value = val;
+      viewSelect.append(opt);
+    }
+    if (viewValue) viewSelect.value = viewValue;
+    viewSelect.addEventListener("change", () => onViewChange?.(viewSelect.value));
+    viewField = Construct("label", "vp-field-chip vp-view-chip", [
+      Construct("span", null, "View"),
+      viewSelect,
+    ]);
+  }
+
+  let undoBtn = null;
+  let redoBtn = null;
+  if (onUndo || onRedo) {
+    undoBtn = Construct("button", "icon-btn vp-mini-icon vp-undo-btn", ConstructGlyph("Undo"));
+    undoBtn.type = "button";
+    undoBtn.setAttribute("data-header-action", "undo");
+    undoBtn.title = "Undo (Ctrl+Z)";
+    undoBtn.setAttribute("aria-label", "Undo");
+    if (onUndo) undoBtn.addEventListener("click", onUndo);
+
+    redoBtn = Construct("button", "icon-btn vp-mini-icon vp-redo-btn", ConstructGlyph("Redo"));
+    redoBtn.type = "button";
+    redoBtn.setAttribute("data-header-action", "redo");
+    redoBtn.title = "Redo (Ctrl+Y)";
+    redoBtn.setAttribute("aria-label", "Redo");
+    if (onRedo) redoBtn.addEventListener("click", onRedo);
+  }
+
+  // Save button + dropdown menu
+  const saveWrap = Construct("div", "se-save-wrap");
+  const saveBtn = Construct("button", "pill-btn se-save-btn", [
+    ConstructGlyph("Save"),
+    Construct("span", null, "Save"),
+    ConstructGlyph("ChevronDown"),
+  ]);
+  saveBtn.type = "button";
+  saveBtn.title = "Save Project & Export Maps";
+
+  const saveMenu = Construct("div", "se-save-menu");
+  saveMenu.hidden = true;
+  const saveItemNodes = new Map();
+
+  for (const item of saveItems) {
+    if (item.node) {
+      saveMenu.append(item.node);
+      continue;
+    }
+    const btn = Construct("button", "se-save-item", [
+      Construct("span", null, item.label),
+      item.meta ? Construct("small", null, item.meta) : null,
+    ]);
+    btn.type = "button";
+    if (item.id) btn.dataset.saveId = item.id;
+    btn.addEventListener("click", () => {
+      closeSaveMenu();
+      item.onClick?.();
+    });
+    if (item.id) saveItemNodes.set(item.id, btn);
+    saveMenu.append(btn);
+  }
+  saveWrap.append(saveBtn, saveMenu);
+
+  const closeSaveMenu = () => {
+    saveMenu.hidden = true;
+    saveBtn.classList.remove("active");
+  };
+
+  saveBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const nextOpen = saveMenu.hidden;
+    saveMenu.hidden = !nextOpen;
+    saveBtn.classList.toggle("active", nextOpen);
+  });
+
+  const onDocDown = (e) => {
+    if (!saveMenu.hidden && !saveWrap.contains?.(e.target)) closeSaveMenu();
+  };
+  document.addEventListener("pointerdown", onDocDown);
+
+  docBar.append(
+    sceneIcon,
+    docPill,
+    sizeField,
+    viewField,
+    Construct("div", "toolbar-spacer"),
+    undoBtn,
+    redoBtn,
+    saveWrap,
+    ...primaryActions,
+  );
+
+  // Band 2: Unified AlloyStudio Tools Ribbon ([ tools ])
+  const toolsBar = Construct("div", "vp-tools-bar tp-authoring-bar");
+  const toolGroup = Construct("div", toolGroupClass);
+  toolGroup.setAttribute("role", "group");
+  toolGroup.setAttribute("aria-label", "Workspace tools");
+
+  const toolButtons = new Map();
+  for (const t of tools) {
+    const cls = t.className || t.buttonClass || "se-tool-btn";
+    const children = [
+      ConstructGlyph(t.glyph),
+      Construct("span", null, t.label),
+    ];
+    if (t.kbd) children.push(Construct("kbd", "vp-tool-kbd", t.kbd));
+    const btn = Construct("button", cls + (t.active ? " active" : ""), children);
+    btn.type = "button";
+    btn.title = t.title || (t.kbd ? `${t.label} (${t.kbd})` : t.label);
+    if (t.datasetKey) btn.dataset[t.datasetKey] = t.id;
+    btn.setAttribute("aria-pressed", t.active ? "true" : "false");
+    btn.addEventListener("click", () => onToolSelect?.(t.id));
+    toolButtons.set(t.id, btn);
+    toolGroup.append(btn);
+  }
+
+  toolsBar.append(toolGroup);
+  if (toolTrailing.length) {
+    const tail = Construct("div", "vp-tools-tail", [
+      Construct("span", "vp-bar-divider"),
+      ...toolTrailing,
+    ]);
+    toolsBar.append(tail);
+  }
+
+  parentCol.append(docBar, toolsBar);
+
+  return {
+    docBar,
+    toolsBar,
+    toolGroup,
+    nameInput,
+    docPill,
+    resSelect,
+    viewSelect,
+    saveBtn,
+    saveMenu,
+    undoBtn,
+    redoBtn,
+    toolButtons,
+    setName(next) {
+      if (document.activeElement !== nameInput) {
+        nameInput.value = next || "Untitled";
+      }
+    },
+    setResolution(next) {
+      resSelect.value = String(next);
+    },
+    setView(val) {
+      if (viewSelect) viewSelect.value = val;
+    },
+    setUndoRedoState(canUndo, canRedo) {
+      if (undoBtn) undoBtn.disabled = !canUndo;
+      if (redoBtn) redoBtn.disabled = !canRedo;
+    },
+    setActiveTool(id) {
+      for (const [tid, btn] of toolButtons) {
+        const isActive = tid === id;
+        btn.classList.toggle("active", isActive);
+        btn.setAttribute("aria-pressed", isActive ? "true" : "false");
+      }
+    },
+    setSaveItemMeta(id, txt) {
+      const btn = saveItemNodes.get(id);
+      const sm = btn?.querySelector?.("small");
+      if (sm) sm.textContent = txt;
+    },
+    closeSaveMenu,
+    dispose() {
+      closeSaveMenu();
+      document.removeEventListener("pointerdown", onDocDown);
+    },
+  };
+}

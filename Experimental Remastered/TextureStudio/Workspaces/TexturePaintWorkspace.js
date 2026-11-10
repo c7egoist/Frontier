@@ -49,6 +49,7 @@ import {
 } from "../Engine/TexturePaintEngine.js";
 import { GpuPaintSession } from "../Engine/GpuPaintEngine.js";
 import { createLayerStackPanel } from "./LayerStackKit.js";
+import { createViewportHeader, STUDIO_RESOLUTIONS } from "./ViewportHeaderKit.js";
 import { evaluateArtworkDocument } from "../Engine/Patterns/ArtworkStackEngine.js";
 import {
   listStampStarterCatalog,
@@ -101,6 +102,111 @@ function clonePixels(buf) {
   return out;
 }
 
+function uint8ToBase64(bytes) {
+  let bin = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(bin);
+}
+
+function base64ToUint8(b64) {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+function resampleRgbaBuffer(src, srcSize, dstSize) {
+  if (!src || srcSize === dstSize) return src ? new Uint8ClampedArray(src) : null;
+  const dst = new Uint8ClampedArray(dstSize * dstSize * 4);
+  const scale = srcSize / dstSize;
+  for (let y = 0; y < dstSize; y++) {
+    const sy = Math.min(srcSize - 1, (y + 0.5) * scale - 0.5);
+    const y0 = Math.max(0, Math.floor(sy));
+    const y1 = Math.min(srcSize - 1, y0 + 1);
+    const fy = Math.max(0, sy - y0);
+    for (let x = 0; x < dstSize; x++) {
+      const sx = Math.min(srcSize - 1, (x + 0.5) * scale - 0.5);
+      const x0 = Math.max(0, Math.floor(sx));
+      const x1 = Math.min(srcSize - 1, x0 + 1);
+      const fx = Math.max(0, sx - x0);
+      const i00 = (y0 * srcSize + x0) * 4;
+      const i10 = (y0 * srcSize + x1) * 4;
+      const i01 = (y1 * srcSize + x0) * 4;
+      const i11 = (y1 * srcSize + x1) * 4;
+      const di = (y * dstSize + x) * 4;
+      const w00 = (1 - fx) * (1 - fy);
+      const w10 = fx * (1 - fy);
+      const w01 = (1 - fx) * fy;
+      const w11 = fx * fy;
+      dst[di] = Math.round(src[i00] * w00 + src[i10] * w10 + src[i01] * w01 + src[i11] * w11);
+      dst[di + 1] = Math.round(src[i00 + 1] * w00 + src[i10 + 1] * w10 + src[i01 + 1] * w01 + src[i11 + 1] * w11);
+      dst[di + 2] = Math.round(src[i00 + 2] * w00 + src[i10 + 2] * w10 + src[i01 + 2] * w01 + src[i11 + 2] * w11);
+      dst[di + 3] = Math.round(src[i00 + 3] * w00 + src[i10 + 3] * w10 + src[i01 + 3] * w01 + src[i11 + 3] * w11);
+    }
+  }
+  return dst;
+}
+
+function resampleGrayBuffer(src, srcSize, dstSize) {
+  if (!src || srcSize === dstSize) return src ? new Uint8ClampedArray(src) : null;
+  const dst = new Uint8ClampedArray(dstSize * dstSize);
+  const scale = srcSize / dstSize;
+  for (let y = 0; y < dstSize; y++) {
+    const sy = Math.min(srcSize - 1, (y + 0.5) * scale - 0.5);
+    const y0 = Math.max(0, Math.floor(sy));
+    const y1 = Math.min(srcSize - 1, y0 + 1);
+    const fy = Math.max(0, sy - y0);
+    for (let x = 0; x < dstSize; x++) {
+      const sx = Math.min(srcSize - 1, (x + 0.5) * scale - 0.5);
+      const x0 = Math.max(0, Math.floor(sx));
+      const x1 = Math.min(srcSize - 1, x0 + 1);
+      const fx = Math.max(0, sx - x0);
+      const v00 = src[y0 * srcSize + x0];
+      const v10 = src[y0 * srcSize + x1];
+      const v01 = src[y1 * srcSize + x0];
+      const v11 = src[y1 * srcSize + x1];
+      dst[y * dstSize + x] = Math.round(
+        v00 * (1 - fx) * (1 - fy) +
+        v10 * fx * (1 - fy) +
+        v01 * (1 - fx) * fy +
+        v11 * fx * fy,
+      );
+    }
+  }
+  return dst;
+}
+
+function serializePaintProjectJson(doc, meta = {}) {
+  const cleanDoc = JSON.stringify(
+    {
+      schema: "frontier.paint.v1",
+      savedAt: new Date().toISOString(),
+      ...meta,
+      document: doc,
+    },
+    (key, val) => {
+      if (key === "_gpu") return undefined;
+      if (val instanceof Uint8ClampedArray) return { __u8c: uint8ToBase64(val) };
+      if (val instanceof Uint8Array) return { __u8: uint8ToBase64(val) };
+      return val;
+    },
+  );
+  return cleanDoc;
+}
+
+function parsePaintProjectJson(rawText) {
+  return JSON.parse(rawText, (_key, val) => {
+    if (val && typeof val === "object") {
+      if (typeof val.__u8c === "string") return new Uint8ClampedArray(base64ToUint8(val.__u8c));
+      if (typeof val.__u8 === "string") return base64ToUint8(val.__u8);
+    }
+    return val;
+  });
+}
+
 function createPaintEnv(renderer) {
   const pmrem = new THREE.PMREMGenerator(renderer);
   const envScene = new THREE.Scene();
@@ -143,6 +249,41 @@ function downloadRgbaPng(rgba, res, filename, isGray = false) {
   ctx.putImageData(new ImageData(new Uint8ClampedArray(out), res, res), 0, 0);
   const a = document.createElement("a");
   a.href = c.toDataURL("image/png");
+  a.download = filename;
+  a.click();
+}
+
+function downloadBufferScaledPng(rgba, srcRes, targetRes, filename, isGray = false) {
+  if (!targetRes || targetRes === srcRes) {
+    downloadRgbaPng(rgba, srcRes, filename, isGray);
+    return;
+  }
+  const srcC = document.createElement("canvas");
+  srcC.width = srcRes;
+  srcC.height = srcRes;
+  const sCtx = srcC.getContext("2d");
+  let out;
+  if (isGray) {
+    out = new Uint8ClampedArray(srcRes * srcRes * 4);
+    for (let i = 0; i < srcRes * srcRes; i++) {
+      out[i * 4] = rgba[i];
+      out[i * 4 + 1] = rgba[i];
+      out[i * 4 + 2] = rgba[i];
+      out[i * 4 + 3] = 255;
+    }
+  } else {
+    out = rgba;
+  }
+  sCtx.putImageData(new ImageData(new Uint8ClampedArray(out), srcRes, srcRes), 0, 0);
+  const dstC = document.createElement("canvas");
+  dstC.width = targetRes;
+  dstC.height = targetRes;
+  const dCtx = dstC.getContext("2d");
+  dCtx.imageSmoothingEnabled = true;
+  dCtx.imageSmoothingQuality = "high";
+  dCtx.drawImage(srcC, 0, 0, targetRes, targetRes);
+  const a = document.createElement("a");
+  a.href = dstC.toDataURL("image/png");
   a.download = filename;
   a.click();
 }
@@ -418,6 +559,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
 
   let state = {
     doc: createPaintDocument(res),
+    exportResolution: res,
     meshId: "teapot",
     customGeo: null,
     viewportMode: "3d", // "3d" | "split" | "2d"
@@ -648,33 +790,11 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     extraMetricLabel: "ENGINE",
   });
 
-  // CENTER: TOOLBAR + UNIFIED GPU 3D/UV VIEWPORT
+  // CENTER: UNIFIED 2-TIER ALLOYSTUDIO HEADER + UNIFIED GPU 3D/UV VIEWPORT
   const centerCol = Construct("main", "studio-column viewport-column");
-  const toolbar = Construct("div", "viewport-toolbar");
 
-  const toolButtons = new Map();
-  const toolGroup = Construct("div", "toolbar-group");
-  for (const [id, label, glyph] of [
-    ["paint", "Brush", "Brush"],
-    ["erase", "Eraser", "Eraser"],
-    ["fill", "Fill", "Fill"],
-    ["stamp", "Stamp", "Stamp"],
-    ["eyedropper", "Sample", "Pipette"],
-    ["move", "Move", "Move"],
-  ]) {
-    const b = Construct("button", "pill-btn" + (state.brush.tool === id ? " active" : ""), [
-      ConstructGlyph(glyph),
-      Construct("span", null, label),
-    ]);
-    b.type = "button";
-    b.title = TOOL_LABELS[id] || label;
-    b.addEventListener("click", () => selectTool(id));
-    toolButtons.set(id, b);
-    toolGroup.append(b);
-  }
-
-  const meshSelect = Construct("select");
-  meshSelect.style.cssText = "height:30px;padding:0 10px;background:#191a1d;border:1px solid var(--line);border-radius:999px;font-size:11px;";
+  const meshSelect = Construct("select", "se-header-select");
+  meshSelect.setAttribute("aria-label", "Paint Mesh");
   for (const m of PAINT_MESH_LIST) {
     const o = Construct("option", null, m.label);
     o.value = m.id;
@@ -682,20 +802,8 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   }
   meshSelect.value = state.meshId;
 
-  const vpSelect = Construct("select");
-  vpSelect.style.cssText = meshSelect.style.cssText;
-  for (const [label, val] of [
-    ["3D Mesh", "3d"],
-    ["3D + 2D UV", "split"],
-    ["2D UV Only", "2d"],
-  ]) {
-    const o = Construct("option", null, label);
-    o.value = val;
-    vpSelect.append(o);
-  }
-
-  const chanSelect = Construct("select");
-  chanSelect.style.cssText = meshSelect.style.cssText;
+  const chanSelect = Construct("select", "se-header-select");
+  chanSelect.setAttribute("aria-label", "Display Channel");
   for (const [label, val] of [
     ["Lit PBR", "lit"],
     ["Base Color", "baseColor"],
@@ -728,40 +836,75 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   btnToolMenu.type = "button";
   btnToolMenu.title = "Open Brush & Tool Inspector (Right-Click / Q / Tab)";
 
-  const btnUndo = Construct("button", "icon-btn", ConstructGlyph("Undo"));
-  btnUndo.type = "button";
-  btnUndo.title = "Undo (Ctrl+Z)";
-  const btnRedo = Construct("button", "icon-btn", ConstructGlyph("Redo"));
-  btnRedo.type = "button";
-  btnRedo.title = "Redo (Ctrl+Y)";
-
   const importInp = document.createElement("input");
   importInp.type = "file";
   importInp.accept = ".obj,.stl";
   importInp.hidden = true;
   const btnImportMesh = Construct("button", "pill-btn", [ConstructGlyph("Upload"), Construct("span", null, "Mesh")]);
   btnImportMesh.type = "button";
+  btnImportMesh.title = "Import custom .obj or .stl mesh";
   btnImportMesh.addEventListener("click", () => importInp.click());
+
+  const loadPaintInp = document.createElement("input");
+  loadPaintInp.type = "file";
+  loadPaintInp.accept = ".json,.paint.json";
+  loadPaintInp.hidden = true;
 
   const btnExportAll = Construct("button", "pill-btn accent", [ConstructGlyph("Download"), Construct("span", null, "Export PBR")]);
   btnExportAll.type = "button";
 
   const gpuPill = Construct("span", "gpu-badge", [document.createElement("i"), Construct("span", null, "GPU Paint")]);
 
-  toolbar.append(
-    toolGroup,
-    btnToolMenu,
-    meshSelect,
-    vpSelect,
-    chanSelect,
-    gpuPill,
-    Construct("div", "toolbar-spacer"),
-    btnUndo,
-    btnRedo,
-    btnImportMesh,
-    importInp,
-    btnExportAll,
-  );
+  const headerUI = createViewportHeader(centerCol, {
+    workspace: "paint",
+    badgeText: "3D PBR",
+    iconGlyph: "Brush",
+    canvasName: state.doc.name || "Teapot Paint",
+    onRename(next) {
+      state.doc.name = next;
+      rebuildInspector();
+      Broadcast();
+    },
+    resolutions: STUDIO_RESOLUTIONS,
+    resolution: state.exportResolution,
+    onResolutionChange(val) {
+      changePaintResolution(val);
+    },
+    viewOptions: [
+      ["3D Mesh", "3d"],
+      ["3D + 2D UV", "split"],
+      ["2D UV Only", "2d"],
+    ],
+    viewValue: state.viewportMode,
+    viewAriaLabel: "Viewport Layout",
+    onViewChange(val) {
+      state.viewportMode = val;
+      syncViewportLayout();
+      refreshComposite();
+    },
+    onUndo: () => performUndo(),
+    onRedo: () => performRedo(),
+    saveItems: [
+      { id: "project", label: "Save Project File", meta: ".paint.json", onClick: () => performSavePaintProject() },
+      { id: "base", label: "Export Base Color PNG", meta: `${state.exportResolution}px`, onClick: () => exportSinglePaintMap("albedo") },
+      { id: "normal", label: "Export Normal Map PNG", meta: `${state.exportResolution}px`, onClick: () => exportSinglePaintMap("normal") },
+      { id: "pbr", label: "Export All PBR Maps", meta: `${state.exportResolution}px`, onClick: () => exportAllPbrMaps() },
+      { id: "open", label: "Open Project File…", meta: ".paint.json", onClick: () => loadPaintInp.click() },
+      { node: loadPaintInp },
+    ],
+    primaryActions: [btnExportAll],
+    tools: [
+      { id: "paint", label: "Brush", glyph: "Brush", kbd: "B", title: TOOL_LABELS.paint, active: state.brush.tool === "paint", buttonClass: "pill-btn" },
+      { id: "erase", label: "Eraser", glyph: "Eraser", kbd: "E", title: TOOL_LABELS.erase, active: state.brush.tool === "erase", buttonClass: "pill-btn" },
+      { id: "fill", label: "Fill", glyph: "Fill", kbd: "G", title: TOOL_LABELS.fill, active: state.brush.tool === "fill", buttonClass: "pill-btn" },
+      { id: "stamp", label: "Stamp", glyph: "Stamp", kbd: "S", title: TOOL_LABELS.stamp, active: state.brush.tool === "stamp", buttonClass: "pill-btn" },
+      { id: "eyedropper", label: "Sample", glyph: "Pipette", kbd: "I", title: TOOL_LABELS.eyedropper, active: state.brush.tool === "eyedropper", buttonClass: "pill-btn" },
+      { id: "move", label: "Move", glyph: "Move", kbd: "V", title: TOOL_LABELS.move, active: state.brush.tool === "move", buttonClass: "pill-btn" },
+    ],
+    toolGroupClass: "tp-tool-group toolbar-group",
+    onToolSelect: (id) => selectTool(id),
+    toolTrailing: [btnToolMenu, meshSelect, chanSelect, btnImportMesh, importInp, gpuPill],
+  });
 
   const stage = Construct("div", "viewport-stage");
   const splitBox = Construct("div", "viewport-split-2d");
@@ -779,7 +922,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   splitBox.append(pane3D, pane2D);
   const hudHelp = Construct("div", "viewport-hud-bottom", "Drag mesh to paint · V = Move/Scale/Rotate Stamps · Right-click or Q/Tab = Tool Inspector · B/E/G/S/I/V tools");
   stage.append(splitBox, hudHelp);
-  centerCol.append(toolbar, stage);
+  centerCol.append(stage);
 
   // RIGHT: LAYER INSPECTOR (Right-click or Q opens Brush & Tool Inspector cleanly without clutter)
   const rightCol = Construct("aside", "studio-column");
@@ -812,7 +955,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   renderer.domElement.style.cssText = "position:absolute;inset:0;width:100%;height:100%;z-index:1;pointer-events:none;";
   stage.prepend(renderer.domElement);
 
-  const gpuPaint = new GpuPaintSession(renderer, res);
+  let gpuPaint = new GpuPaintSession(renderer, res);
   const gpuLabel = gpuPill.querySelector("span");
   if (gpuLabel) gpuLabel.textContent = gpuPaint.isActive ? "WebGL2 GPU" : "CPU Mock";
 
@@ -847,14 +990,25 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   let uvWireLines = null;
 
   // CPU fallback textures (used ONLY in headless Node mock without real WebGL2!)
-  const fallbackAlbTex = new THREE.DataTexture(new Uint8Array(res * res * 4), res, res, THREE.RGBAFormat);
-  fallbackAlbTex.colorSpace = THREE.SRGBColorSpace; fallbackAlbTex.flipY = true; fallbackAlbTex.needsUpdate = true;
-  const fallbackRoughTex = new THREE.DataTexture(new Uint8Array(res * res * 4), res, res, THREE.RGBAFormat);
-  fallbackRoughTex.flipY = true; fallbackRoughTex.needsUpdate = true;
-  const fallbackMetalTex = new THREE.DataTexture(new Uint8Array(res * res * 4), res, res, THREE.RGBAFormat);
-  fallbackMetalTex.flipY = true; fallbackMetalTex.needsUpdate = true;
-  const fallbackNormalTex = new THREE.DataTexture(new Uint8Array(res * res * 4), res, res, THREE.RGBAFormat);
-  fallbackNormalTex.flipY = true; fallbackNormalTex.needsUpdate = true;
+  let fallbackAlbTex;
+  let fallbackRoughTex;
+  let fallbackMetalTex;
+  let fallbackNormalTex;
+  function createFallbackTextures(texRes) {
+    fallbackAlbTex?.dispose();
+    fallbackRoughTex?.dispose();
+    fallbackMetalTex?.dispose();
+    fallbackNormalTex?.dispose();
+    fallbackAlbTex = new THREE.DataTexture(new Uint8Array(texRes * texRes * 4), texRes, texRes, THREE.RGBAFormat);
+    fallbackAlbTex.colorSpace = THREE.SRGBColorSpace; fallbackAlbTex.flipY = true; fallbackAlbTex.needsUpdate = true;
+    fallbackRoughTex = new THREE.DataTexture(new Uint8Array(texRes * texRes * 4), texRes, texRes, THREE.RGBAFormat);
+    fallbackRoughTex.flipY = true; fallbackRoughTex.needsUpdate = true;
+    fallbackMetalTex = new THREE.DataTexture(new Uint8Array(texRes * texRes * 4), texRes, texRes, THREE.RGBAFormat);
+    fallbackMetalTex.flipY = true; fallbackMetalTex.needsUpdate = true;
+    fallbackNormalTex = new THREE.DataTexture(new Uint8Array(texRes * texRes * 4), texRes, texRes, THREE.RGBAFormat);
+    fallbackNormalTex.flipY = true; fallbackNormalTex.needsUpdate = true;
+  }
+  createFallbackTextures(res);
 
   const paintMat = new THREE.MeshPhysicalMaterial({
     map: gpuPaint.isActive ? gpuPaint.displayAlbedoRT.texture : fallbackAlbTex,
@@ -1350,11 +1504,10 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   }
 
   function syncUndoButtons() {
-    btnUndo.disabled = state.undoStack.length === 0;
-    btnRedo.disabled = state.redoStack.length === 0;
+    headerUI.setUndoRedoState(state.undoStack.length > 0, state.redoStack.length > 0);
   }
 
-  btnUndo.addEventListener("click", () => {
+  function performUndo() {
     if (!state.undoStack.length) return;
     const prev = state.undoStack.pop();
     const cur = snapshotSelectedLayer();
@@ -1362,8 +1515,9 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     applySnapshot(prev);
     syncUndoButtons();
     Toast("Undid paint operation");
-  });
-  btnRedo.addEventListener("click", () => {
+  }
+
+  function performRedo() {
     if (!state.redoStack.length) return;
     const next = state.redoStack.pop();
     const cur = snapshotSelectedLayer();
@@ -1371,7 +1525,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     applySnapshot(next);
     syncUndoButtons();
     Toast("Redid paint operation");
-  });
+  }
 
   // ----------------------------------------------------------------- 3D RAYCAST + GPU PAINT + STAMP TRANSFORM HANDLERS
   function raycastMeshFromEvent(e) {
@@ -2466,7 +2620,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
 
   function selectTool(id) {
     state.brush.tool = id;
-    for (const [k, b] of toolButtons.entries()) b.classList.toggle("active", k === id);
+    headerUI.setActiveTool(id);
     rebuildInspector();
     refreshComposite();
     if (activeToolPopup) openToolPopup(null, null, true);
@@ -3437,6 +3591,172 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     renderUvStampGizmo();
   }
 
+  function syncAllLayersToCpuForSaveOrResize() {
+    if (!gpuPaint.isActive) return;
+    for (const l of state.doc.layers) {
+      if (l._gpu) gpuPaint.syncLayerGpuToCpuPixels(l);
+    }
+  }
+
+  function clearAllLayerGpuHandles() {
+    for (const l of state.doc.layers) {
+      if (l._gpu) delete l._gpu;
+    }
+  }
+
+  function resamplePaintDocumentBuffers(nextRes) {
+    for (const l of state.doc.layers) {
+      if (l.pixels && l.pixels.res !== nextRes) {
+        const oldR = l.pixels.res || res;
+        l.pixels.albedo = resampleRgbaBuffer(l.pixels.albedo, oldR, nextRes);
+        l.pixels.roughness = resampleGrayBuffer(l.pixels.roughness, oldR, nextRes);
+        l.pixels.metalness = resampleGrayBuffer(l.pixels.metalness, oldR, nextRes);
+        l.pixels.height = resampleGrayBuffer(l.pixels.height, oldR, nextRes);
+        if (l.pixels.roughAlpha) l.pixels.roughAlpha = resampleGrayBuffer(l.pixels.roughAlpha, oldR, nextRes);
+        if (l.pixels.metalAlpha) l.pixels.metalAlpha = resampleGrayBuffer(l.pixels.metalAlpha, oldR, nextRes);
+        if (l.pixels.heightAlpha) l.pixels.heightAlpha = resampleGrayBuffer(l.pixels.heightAlpha, oldR, nextRes);
+        if (l.pixels.extValues) {
+          for (const k of Object.keys(l.pixels.extValues)) {
+            const buf = l.pixels.extValues[k];
+            if (!buf) continue;
+            if (buf.length === oldR * oldR) l.pixels.extValues[k] = resampleGrayBuffer(buf, oldR, nextRes);
+          }
+        }
+        if (l.pixels.extAlphas) {
+          for (const k of Object.keys(l.pixels.extAlphas)) {
+            const buf = l.pixels.extAlphas[k];
+            if (!buf) continue;
+            if (buf.length === oldR * oldR) l.pixels.extAlphas[k] = resampleGrayBuffer(buf, oldR, nextRes);
+          }
+        }
+        l.pixels.res = nextRes;
+      }
+      if (l.mask?.pixels && l.mask.pixels.length !== nextRes * nextRes) {
+        const oldMr = Math.max(1, Math.round(Math.sqrt(l.mask.pixels.length)));
+        l.mask.pixels = resampleGrayBuffer(l.mask.pixels, oldMr, nextRes);
+      }
+    }
+  }
+
+  function changePaintResolution(nextExportRes) {
+    if (!STUDIO_RESOLUTIONS.includes(nextExportRes)) return;
+    state.exportResolution = nextExportRes;
+    headerUI.setResolution(nextExportRes);
+    headerUI.setSaveItemMeta("base", `${nextExportRes}px`);
+    headerUI.setSaveItemMeta("normal", `${nextExportRes}px`);
+    headerUI.setSaveItemMeta("pbr", `${nextExportRes}px`);
+
+    const nextLiveRes = Math.min(2048, nextExportRes);
+    if (nextLiveRes !== res) {
+      syncAllLayersToCpuForSaveOrResize();
+      clearAllLayerGpuHandles();
+      for (const s of state.undoStack) gpuPaint.disposeSnapshot(s);
+      for (const s of state.redoStack) gpuPaint.disposeSnapshot(s);
+      state.undoStack.length = 0;
+      state.redoStack.length = 0;
+      syncUndoButtons();
+
+      resamplePaintDocumentBuffers(nextLiveRes);
+      res = nextLiveRes;
+      state.doc.resolution = nextLiveRes;
+
+      gpuPaint.dispose();
+      gpuPaint = new GpuPaintSession(renderer, res);
+      if (!gpuPaint.isActive) {
+        createFallbackTextures(res);
+        paintMat.map = fallbackAlbTex;
+        paintMat.roughnessMap = fallbackRoughTex;
+        paintMat.metalnessMap = fallbackMetalTex;
+        paintMat.normalMap = fallbackNormalTex;
+        paintMat.needsUpdate = true;
+        uvQuadMat.map = fallbackAlbTex;
+        uvQuadMat.needsUpdate = true;
+      }
+      if (state.brush.stampData && gpuPaint.isActive) gpuPaint.ensureStampTexture(state.brush.stampData, false);
+      if (state.brush.customTipData && gpuPaint.isActive) gpuPaint.ensureStampTexture(state.brush.customTipData, true);
+      prevExtBitmask = "";
+      rebuildPaintMesh(state.customGeo && meshGeo ? meshGeo.clone() : null);
+      invalidateAllLayerThumbs();
+      renderLeftColumn();
+      rebuildInspector();
+      refreshComposite();
+    } else {
+      renderLeftColumn();
+      rebuildInspector();
+    }
+
+    const note = nextExportRes > 2048 ? ` (2048px GPU live · ${nextExportRes}px PNG export)` : "";
+    Toast(`Paint canvas set to ${nextExportRes}×${nextExportRes}${note}`);
+  }
+
+  function performSavePaintProject() {
+    syncAllLayersToCpuForSaveOrResize();
+    const json = serializePaintProjectJson(state.doc, {
+      resolution: res,
+      exportResolution: state.exportResolution,
+      meshId: state.meshId,
+    });
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const slug = (state.doc.name || state.meshId || "paint").toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${slug}.paint.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    Toast(`Saved "${state.doc.name || "Paint Project"}" (${state.exportResolution}px)`);
+  }
+
+  function exportSinglePaintMap(which) {
+    const extMask = getAnyExtendedChannelsMask();
+    const exp = gpuPaint.isActive ? gpuPaint.readExportChannels(extMask) : lastCpuComp;
+    if (!exp) return;
+    const outRes = state.exportResolution || res;
+    const slug = (state.doc.name || state.meshId || "paint").toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    if (which === "normal") {
+      downloadBufferScaledPng(exp.normal, res, outRes, `${slug}-normal-${outRes}.png`, false);
+      Toast(`Exported ${outRes}×${outRes} Normal Map PNG`);
+    } else {
+      downloadBufferScaledPng(exp.albedo, res, outRes, `${slug}-albedo-${outRes}.png`, false);
+      Toast(`Exported ${outRes}×${outRes} Base Color PNG`);
+    }
+  }
+
+  function exportAllPbrMaps() {
+    const extMask = getAnyExtendedChannelsMask();
+    const exp = gpuPaint.isActive ? gpuPaint.readExportChannels(extMask) : lastCpuComp;
+    if (!exp) return;
+    const outRes = state.exportResolution || res;
+    const slug = (state.doc.name || state.meshId || "paint").toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    downloadBufferScaledPng(exp.albedo, res, outRes, `${slug}-albedo.png`, false);
+    downloadBufferScaledPng(exp.roughness, res, outRes, `${slug}-roughness.png`, true);
+    downloadBufferScaledPng(exp.metalness, res, outRes, `${slug}-metalness.png`, true);
+    downloadBufferScaledPng(exp.normal, res, outRes, `${slug}-normal.png`, false);
+    let extraCount = 0;
+    if (exp.ext) {
+      for (const [key, buf] of Object.entries(exp.ext)) {
+        if (!buf || !extMask[key]) continue;
+        if (key === "emissive") {
+          let rgbaBuf = buf;
+          if (buf.length === res * res * 3) {
+            rgbaBuf = new Uint8ClampedArray(res * res * 4);
+            for (let i = 0; i < res * res; i++) {
+              rgbaBuf[i * 4] = buf[i * 3];
+              rgbaBuf[i * 4 + 1] = buf[i * 3 + 1];
+              rgbaBuf[i * 4 + 2] = buf[i * 3 + 2];
+              rgbaBuf[i * 4 + 3] = 255;
+            }
+          }
+          downloadBufferScaledPng(rgbaBuf, res, outRes, `${slug}-emissive.png`, false);
+        } else {
+          downloadBufferScaledPng(buf, res, outRes, `${slug}-${key}.png`, true);
+        }
+        extraCount++;
+      }
+    }
+    Toast(`Exported 4 core maps${extraCount ? ` + ${extraCount} extended` : ""} @ ${outRes}×${outRes}px`);
+  }
+
   meshSelect.addEventListener("change", () => {
     state.meshId = meshSelect.value;
     state.doc.meshId = state.meshId;
@@ -3444,8 +3764,70 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     renderLeftColumn();
     Toast(`Loaded ${meshSelect.options[meshSelect.selectedIndex].text}`);
   });
-  vpSelect.addEventListener("change", () => { state.viewportMode = vpSelect.value; syncViewportLayout(); refreshComposite(); });
   chanSelect.addEventListener("change", () => { state.viewChannel = chanSelect.value; refreshComposite(); });
+
+  loadPaintInp.addEventListener("change", async () => {
+    const file = loadPaintInp.files?.[0];
+    loadPaintInp.value = "";
+    if (!file) return;
+    try {
+      const parsed = parsePaintProjectJson(await file.text());
+      const docData = parsed?.document || parsed;
+      if (!Array.isArray(docData?.layers) || !docData.layers.length) {
+        Toast("Invalid paint project JSON");
+        return;
+      }
+      clearAllLayerGpuHandles();
+      for (const s of state.undoStack) gpuPaint.disposeSnapshot(s);
+      for (const s of state.redoStack) gpuPaint.disposeSnapshot(s);
+      state.undoStack.length = 0;
+      state.redoStack.length = 0;
+      syncUndoButtons();
+
+      const targetExport = STUDIO_RESOLUTIONS.includes(Number(parsed.exportResolution))
+        ? Number(parsed.exportResolution)
+        : (STUDIO_RESOLUTIONS.includes(Number(parsed.resolution)) ? Number(parsed.resolution) : res);
+      const nextLiveRes = Math.min(2048, targetExport);
+
+      state.doc = docData;
+      if (!state.doc.name) state.doc.name = file.name.replace(/\.(paint\.)?json$/i, "") || "Paint Project";
+      if (parsed.meshId && PAINT_MESH_LIST.some((m) => m.id === parsed.meshId)) {
+        state.meshId = parsed.meshId;
+        meshSelect.value = state.meshId;
+      }
+      resamplePaintDocumentBuffers(nextLiveRes);
+      state.exportResolution = targetExport;
+      if (nextLiveRes !== res) {
+        res = nextLiveRes;
+        gpuPaint.dispose();
+        gpuPaint = new GpuPaintSession(renderer, res);
+        if (!gpuPaint.isActive) {
+          createFallbackTextures(res);
+          paintMat.map = fallbackAlbTex;
+          paintMat.roughnessMap = fallbackRoughTex;
+          paintMat.metalnessMap = fallbackMetalTex;
+          paintMat.normalMap = fallbackNormalTex;
+          paintMat.needsUpdate = true;
+          uvQuadMat.map = fallbackAlbTex;
+          uvQuadMat.needsUpdate = true;
+        }
+      }
+      headerUI.setName(state.doc.name);
+      headerUI.setResolution(state.exportResolution);
+      headerUI.setSaveItemMeta("base", `${state.exportResolution}px`);
+      headerUI.setSaveItemMeta("normal", `${state.exportResolution}px`);
+      headerUI.setSaveItemMeta("pbr", `${state.exportResolution}px`);
+      prevExtBitmask = "";
+      rebuildPaintMesh(state.customGeo && meshGeo ? meshGeo.clone() : null);
+      invalidateAllLayerThumbs();
+      renderLeftColumn();
+      rebuildInspector();
+      refreshComposite();
+      Toast(`Opened "${state.doc.name}" (${state.exportResolution}px)`);
+    } catch (err) {
+      Toast(`Open error: ${err.message}`);
+    }
+  });
 
   importInp.addEventListener("change", async () => {
     const file = importInp.files?.[0];
@@ -3472,46 +3854,16 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     importInp.value = "";
   });
 
-  btnExportAll.addEventListener("click", () => {
-    const extMask = getAnyExtendedChannelsMask();
-    const exp = gpuPaint.isActive ? gpuPaint.readExportChannels(extMask) : lastCpuComp;
-    if (!exp) return;
-    downloadRgbaPng(exp.albedo, res, `${state.meshId}-albedo.png`, false);
-    downloadRgbaPng(exp.roughness, res, `${state.meshId}-roughness.png`, true);
-    downloadRgbaPng(exp.metalness, res, `${state.meshId}-metalness.png`, true);
-    downloadRgbaPng(exp.normal, res, `${state.meshId}-normal.png`, false);
-    let extraCount = 0;
-    if (exp.ext) {
-      for (const [key, buf] of Object.entries(exp.ext)) {
-        if (!buf || !extMask[key]) continue;
-        if (key === "emissive") {
-          let rgbaBuf = buf;
-          if (buf.length === res * res * 3) {
-            rgbaBuf = new Uint8ClampedArray(res * res * 4);
-            for (let i = 0; i < res * res; i++) {
-              rgbaBuf[i * 4] = buf[i * 3];
-              rgbaBuf[i * 4 + 1] = buf[i * 3 + 1];
-              rgbaBuf[i * 4 + 2] = buf[i * 3 + 2];
-              rgbaBuf[i * 4 + 3] = 255;
-            }
-          }
-          downloadRgbaPng(rgbaBuf, res, `${state.meshId}-emissive.png`, false);
-        } else {
-          downloadRgbaPng(buf, res, `${state.meshId}-${key}.png`, true);
-        }
-        extraCount++;
-      }
-    }
-    Toast(`Exported 4 core maps${extraCount ? ` + ${extraCount} extended PBR PNGs` : ""}`);
-  });
+  btnExportAll.addEventListener("click", exportAllPbrMaps);
 
   const onKeyDown = (e) => {
     if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)) return;
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") { e.preventDefault(); btnUndo.click(); }
-    else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") { e.preventDefault(); btnRedo.click(); }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") { e.preventDefault(); performSavePaintProject(); }
+    else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") { e.preventDefault(); if (e.shiftKey) performRedo(); else performUndo(); }
+    else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") { e.preventDefault(); performRedo(); }
     else if (e.altKey && e.key === "ArrowUp") { e.preventDefault(); moveLayerByOffset(state.doc.selectedLayerId, +1); }
     else if (e.altKey && e.key === "ArrowDown") { e.preventDefault(); moveLayerByOffset(state.doc.selectedLayerId, -1); }
-    else if (e.key === "Escape") { closeToolPopup(); }
+    else if (e.key === "Escape") { closeToolPopup(); headerUI.closeSaveMenu(); }
     else if (e.key.toLowerCase() === "q" || e.key === "Tab") { e.preventDefault(); openToolPopup(); }
     else if (e.key.toLowerCase() === "b") selectTool("paint");
     else if (e.key.toLowerCase() === "e") selectTool("erase");
@@ -3762,10 +4114,20 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       Toast("Attached High/Low Baked AO + Curvature maps to Texture Paint");
     },
     moveLayer: moveLayerByOffset,
-    getSnapshot: () => ({ meshId: state.meshId, layers: state.doc.layers.length, tool: state.brush.tool, gpu: gpuPaint.isActive }),
+    getSnapshot: () => ({
+      meshId: state.meshId,
+      name: state.doc.name,
+      resolution: state.exportResolution,
+      liveResolution: res,
+      viewportMode: state.viewportMode,
+      layers: state.doc.layers.length,
+      tool: state.brush.tool,
+      gpu: gpuPaint.isActive,
+    }),
     dispose() {
       disposed = true;
       cancelAnimationFrame(rafId);
+      headerUI.dispose();
       layerStackUI.dispose?.();
       closeToolPopup();
       ro.disconnect();

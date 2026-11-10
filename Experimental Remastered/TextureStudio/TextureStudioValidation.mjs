@@ -357,6 +357,7 @@ if (baseUrl) {
       "/Experimental%20Remastered/TextureStudio/StudioControls.js",
       "/Experimental%20Remastered/TextureStudio/Workspaces/MaterialWorkspace.js",
       "/Experimental%20Remastered/TextureStudio/Workspaces/LayerStackKit.js",
+      "/Experimental%20Remastered/TextureStudio/Workspaces/ViewportHeaderKit.js",
       "/Experimental%20Remastered/TextureStudio/Workspaces/ArtworkStackWorkspace.js",
       "/Experimental%20Remastered/TextureStudio/Workspaces/PatternWorkspace.js",
       "/Experimental%20Remastered/TextureStudio/Workspaces/StampWorkspace.js",
@@ -1679,32 +1680,58 @@ await suite("15. Full 19-Channel PBR, Folder & Procedural Masks, Movable/Scalabl
   geo.dispose();
 });
 
-// ----------------------------------------------------------------- 16. FULL LAYER STACK + LIVE THUMBNAIL PREVIEWS + SIMPLIFIED PATTERN/STAMP HEADERS
-await suite("16. Full Layer Stack Design, Live Previews & Simplified Pattern/Stamp Header (Resolution + Save)", async () => {
+// ----------------------------------------------------------------- 16. UNIFIED 2-TIER ALLOYSTUDIO HEADER + LAYER STACK + LIVE THUMBNAIL PREVIEWS
+await suite("16. Unified AlloyStudio Viewport Header ([Canvas; Size; View; Undo/Redo; Save][Tools]), Full Layer Stack & Live Previews", async () => {
   const api = globalThis.window.__frontierTextureStudio;
 
-  // 16a. Pattern & Stamp Simplified Headers + Resolution [512..4096] + Save Dropdown + Canvas Vector Dock
+  // 16a. Pattern & Stamp Unified 2-Band Header + Band 2 Tools Capsule + Undo/Redo + Editable Name + Save Menu
   for (const ws of ["pattern", "stamp"]) {
     api.switchWorkspace(ws);
-    const header = globalThis.document.querySelector(".se-header-bar");
-    assert(header, `Missing simplified .se-header-bar in ${ws}`);
-    assert.equal(header.querySelectorAll(".se-tool-btn").length, 0, `${ws} header must NOT contain vector shape tool clutter`);
-    assert(header.querySelector(".se-doc-pill"), `${ws} header must display document pill`);
+    const header = globalThis.document.querySelector(".vp-doc-bar");
+    const toolsBar = globalThis.document.querySelector(".vp-tools-bar");
+    assert(header && header.classList.contains("se-header-bar"), `Missing Band 1 .vp-doc-bar (.se-header-bar) in ${ws}`);
+    assert(toolsBar && toolsBar.classList.contains("tp-authoring-bar"), `Missing Band 2 .vp-tools-bar (.tp-authoring-bar) in ${ws}`);
+    assert.equal(header.querySelectorAll(".se-tool-btn").length, 0, `${ws} Band 1 header must NOT contain tool button clutter`);
+    assert(!globalThis.document.querySelector(".se-canvas-dock"), `${ws} must not render redundant floating .se-canvas-dock over viewport`);
 
-    const dock = globalThis.document.querySelector(".se-viewport .se-canvas-dock");
-    assert(dock && dock.querySelectorAll(".se-tool-btn").length >= 10, `${ws} floating canvas dock must house vector drawing tools`);
+    assert(header.querySelector(".tp-scene-icon"), `${ws} Band 1 must render .tp-scene-icon`);
+    const docPill = header.querySelector(".se-doc-pill");
+    const nameInput = docPill?.querySelector(".vp-name-input");
+    assert(docPill && nameInput && docPill.querySelector(".vp-mode-badge"), `${ws} Band 1 must render editable .vp-name-input + .vp-mode-badge inside .se-doc-pill`);
+    nameInput.value = `${ws}-CustomTitle`;
+    nameInput.dispatchEvent({ type: "change" });
+    assert.equal(api.getSnapshot().name, `${ws}-CustomTitle`, `${ws} editing .vp-name-input must update document name`);
+
+    const toolGroup = toolsBar.querySelector(".tp-tool-group");
+    assert(toolGroup && toolGroup.querySelectorAll(".se-tool-btn").length >= 10, `${ws} Band 2 .tp-tool-group capsule must house >=10 vector tools`);
 
     const resSelect = header.querySelector(".se-res-select");
-    assert(resSelect, `${ws} header must include Resolution selector`);
+    assert(resSelect, `${ws} Band 1 must include Resolution selector`);
     const resOpts = resSelect.children.map((o) => o.value);
     assert.deepEqual(resOpts, ["512", "1024", "2048", "4096"], `${ws} header Resolution selector must offer 512/1024/2048/4096`);
     resSelect.value = "2048";
     resSelect.dispatchEvent({ type: "change" });
     assert.equal(api.getSnapshot().resolution, 2048, `${ws} switching Resolution selector to 2048 must update state.resolution`);
 
+    // Undo / Redo buttons in Band 1: add a layer -> Undo -> Redo
+    const undoBtn = header.querySelector(".vp-undo-btn");
+    const redoBtn = header.querySelector(".vp-redo-btn");
+    assert(undoBtn && redoBtn, `${ws} Band 1 must expose Undo & Redo buttons`);
+    const layersBefore = api.getSnapshot().layers;
+    const dockColPre = globalThis.document.querySelector(".tp-layer-dock");
+    dockColPre.querySelector(".tp-add-toggle").click();
+    dockColPre.querySelector(".tp-add-item").click();
+    assert.equal(api.getSnapshot().layers, layersBefore + 1, `${ws} adding layer must increment count`);
+    assert.equal(undoBtn.disabled, false, `${ws} Undo button must enable after adding layer`);
+    undoBtn.click();
+    assert.equal(api.getSnapshot().layers, layersBefore, `${ws} clicking Undo must revert added layer`);
+    assert.equal(redoBtn.disabled, false, `${ws} Redo button must enable after Undo`);
+    redoBtn.click();
+    assert.equal(api.getSnapshot().layers, layersBefore + 1, `${ws} clicking Redo must reapply added layer`);
+
     const saveBtn = header.querySelector(".se-save-btn");
     const saveMenu = header.querySelector(".se-save-menu");
-    assert(saveBtn && saveMenu, `${ws} header must include Save button + dropdown menu`);
+    assert(saveBtn && saveMenu, `${ws} Band 1 must include Save button + dropdown menu`);
     assert.equal(saveMenu.hidden, true, `${ws} Save menu starts closed`);
     saveBtn.click();
     assert.equal(saveMenu.hidden, false, `Clicking Save button in ${ws} must open Save menu`);
@@ -1727,7 +1754,7 @@ await suite("16. Full Layer Stack Design, Live Previews & Simplified Pattern/Sta
     assert(thumbs.length >= 1, `${ws} layer rows must include .tp-layer-thumbnail containers`);
     assert(thumbs.some((th) => String(th.innerHTML || "").includes("<svg")), `${ws} layer thumbnails must contain live isolated <svg> layer previews`);
 
-    // Test lock toggle + visibility filter + search filter + mask subrow
+    // Test lock toggle + mask subrow
     const lockBtn = dockCol.querySelector(".tp-lock-btn");
     assert(lockBtn, `${ws} missing per-layer lock button`);
     lockBtn.click();
@@ -1740,8 +1767,44 @@ await suite("16. Full Layer Stack Design, Live Previews & Simplified Pattern/Sta
     assert(dockCol.querySelector(".tp-mask-row .tp-mask-thumb"), `${ws} toggling mask must display .tp-mask-row with live mask thumbnail`);
   }
 
-  // 16c. Texture Paint Full Layer Stack + Live Raster / Material / Stamp / Mask Thumbnails
+  // 16c. Texture Paint Unified 2-Band Header (Same Pattern/Stamp Style) + Live Size Resize + Save Menu + Full Layer Stack
   api.switchWorkspace("paint");
+  const paintHeader = globalThis.document.querySelector(".vp-doc-bar");
+  const paintToolsBar = globalThis.document.querySelector(".vp-tools-bar");
+  assert(paintHeader && paintHeader.classList.contains("se-header-bar"), "Texture Paint must render Band 1 .vp-doc-bar (.se-header-bar)");
+  assert(paintToolsBar && paintToolsBar.classList.contains("tp-authoring-bar"), "Texture Paint must render Band 2 .vp-tools-bar (.tp-authoring-bar)");
+
+  const paintNameInput = paintHeader.querySelector(".vp-name-input");
+  assert(paintNameInput && paintHeader.querySelector(".vp-mode-badge"), "Texture Paint Band 1 must display editable canvas name + mode badge");
+  paintNameInput.value = "Painted Relic";
+  paintNameInput.dispatchEvent({ type: "change" });
+  assert.equal(api.getSnapshot().name, "Painted Relic", "Texture Paint renaming canvas must update document name");
+
+  const paintResSel = paintHeader.querySelector(".se-res-select");
+  assert(paintResSel, "Texture Paint Band 1 must include Size selector");
+  paintResSel.value = "1024";
+  paintResSel.dispatchEvent({ type: "change" });
+  assert.equal(api.getSnapshot().resolution, 1024, "Texture Paint changing Size to 1024 must resize canvas resolution");
+  assert.equal(api.getSnapshot().liveResolution, 1024, "Texture Paint 1024 must set live session resolution to 1024");
+  paintResSel.value = "4096";
+  paintResSel.dispatchEvent({ type: "change" });
+  assert.equal(api.getSnapshot().resolution, 4096, "Texture Paint changing Size to 4096 must set exportResolution=4096");
+  assert.equal(api.getSnapshot().liveResolution, 2048, "Texture Paint 4096 must safely cap live buffer at 2048px while exporting 4096px");
+  paintResSel.value = "512";
+  paintResSel.dispatchEvent({ type: "change" });
+
+  const paintSaveBtn = paintHeader.querySelector(".se-save-btn");
+  const paintSaveMenu = paintHeader.querySelector(".se-save-menu");
+  assert(paintSaveBtn && paintSaveMenu, "Texture Paint Band 1 must include Save dropdown menu");
+  paintSaveBtn.click();
+  assert.equal(paintSaveMenu.hidden, false, "Texture Paint Save button must open Save menu");
+  assert(paintSaveMenu.querySelectorAll(".se-save-item").length >= 5, "Texture Paint Save menu must expose .paint.json Save/Open + Base/Normal/All PBR exports");
+  paintSaveBtn.click();
+
+  const paintToolCaps = paintToolsBar.querySelector(".tp-tool-group");
+  assert(paintToolCaps && paintToolCaps.querySelectorAll(".pill-btn").length === 6, "Texture Paint Band 2 .tp-tool-group must house the 6 paint tool pills");
+  assert(paintToolsBar.querySelector(".gpu-badge"), "Texture Paint Band 2 trailing strip must keep GPU status badge");
+
   const paintDock = globalThis.document.querySelector(".tp-layer-dock");
   assert(paintDock, "Texture Paint must render .tp-layer-dock");
   const paintThumbs = paintDock.querySelectorAll(".tp-layer-row .tp-layer-thumbnail");

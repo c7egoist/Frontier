@@ -963,6 +963,7 @@ export function createPaintDocument(res = PAINT_DEFAULT_RES) {
   });
   return {
     schema: "frontier.texture-paint.v2",
+    name: "Teapot Paint",
     resolution: res,
     meshId: "teapot",
     layers: [baseFill, paintTop], // Bottom-to-top compositing order

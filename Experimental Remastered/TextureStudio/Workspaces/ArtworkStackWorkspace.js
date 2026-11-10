@@ -24,6 +24,7 @@ import {
   loadStarterAsArtworkDocument,
 } from "../Engine/Patterns/StarterCatalogBridge.js";
 import { createLayerStackPanel } from "./LayerStackKit.js";
+import { createViewportHeader, STUDIO_RESOLUTIONS } from "./ViewportHeaderKit.js";
 import {
   Construct,
   ConstructGlyph,
@@ -112,7 +113,7 @@ function snapCoord(val, step) {
   return step > 0 ? Math.round(val / step) * step : val;
 }
 
-const RESOLUTIONS = [512, 1024, 2048, 4096];
+const RESOLUTIONS = STUDIO_RESOLUTIONS;
 
 function buildSingleLayerThumbSvg(doc, layer) {
   if (!layer) return "";
@@ -193,23 +194,20 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
   let disposed = false;
   let spacePanning = false;
   let pointerInteraction = null; // { kind: "move" | "resize" | "rotate" | "draw" | "pan", ... }
+  const undoStack = [];
+  const redoStack = [];
 
   const grid = Construct("div", "studio-grid");
 
   // ----------------------------------------------------------------- LEFT: FULL DESIGN LAYER STACK + LIVE THUMBNAILS
   const leftCol = Construct("aside", "studio-column tp-layer-dock");
   const layerStackUI = createLayerStackPanel(leftCol, {
-    title: isPattern ? "Layers" : "Layers",
+    title: "Layers",
     extraMetricLabel: "MODS",
   });
 
-  // ----------------------------------------------------------------- CENTER: SIMPLIFIED HEADER + VECTOR/PBR STAGE
+  // ----------------------------------------------------------------- CENTER: UNIFIED 2-TIER ALLOYSTUDIO HEADER + STAGE
   const centerCol = Construct("main", "studio-column viewport-column");
-  const toolbar = Construct("div", "viewport-toolbar se-header-bar");
-
-  const docTitleEl = Construct("strong", null, state.doc.name || (isPattern ? "Pattern" : "Stamp"));
-  const docModeEl = Construct("span", null, isPattern ? "PATTERN" : "STAMP");
-  const docPill = Construct("div", "se-doc-pill", [docTitleEl, docModeEl]);
 
   const viewOpts = [
     ["Vector SVG", "vector"],
@@ -221,82 +219,18 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     ["Height", "height"],
     ["Normal", "normal"],
   ];
-  const viewSelect = Construct("select", "se-header-select");
-  viewSelect.setAttribute("aria-label", "Canvas View");
-  for (const [label, val] of viewOpts) {
-    const o = Construct("option", null, label);
-    o.value = val;
-    viewSelect.append(o);
-  }
-  viewSelect.value = state.viewChannel;
-
-  // Resolution dropdown (512, 1024, 2048, 4096)
-  const resSelect = Construct("select", "se-header-select se-res-select");
-  resSelect.setAttribute("aria-label", "Resolution");
-  resSelect.title = "Output & Export Resolution";
-  for (const r of RESOLUTIONS) {
-    const o = Construct("option", null, `${r} × ${r}`);
-    o.value = String(r);
-    resSelect.append(o);
-  }
-  resSelect.value = String(state.resolution);
-
-  // Clean Save button + dropdown menu in header
-  const saveWrap = Construct("div", "se-save-wrap");
-  const btnSaveMenu = Construct("button", "pill-btn se-save-btn", [
-    ConstructGlyph("Save"),
-    Construct("span", null, "Save"),
-    ConstructGlyph("ChevronDown"),
-  ]);
-  btnSaveMenu.type = "button";
-  btnSaveMenu.title = "Save Project, Export PNG / SVG / PBR Maps";
-
-  const saveMenu = Construct("div", "se-save-menu");
-  saveMenu.hidden = true;
 
   const loadJsonInp = document.createElement("input");
   loadJsonInp.type = "file";
   loadJsonInp.accept = ".json,.pattern.json,.stamp.json";
   loadJsonInp.hidden = true;
 
-  const savePngItem = Construct("button", "se-save-item", [
-    Construct("span", null, "Export PNG"),
-    Construct("small", null, `${state.resolution}px`),
-  ]);
-  savePngItem.type = "button";
-
-  const saveSvgItem = Construct("button", "se-save-item", [
-    Construct("span", null, "Export Vector SVG"),
-    Construct("small", null, ".svg"),
-  ]);
-  saveSvgItem.type = "button";
-
-  const saveDocItem = Construct("button", "se-save-item", [
-    Construct("span", null, "Save Project File"),
-    Construct("small", null, `.${mode}.json`),
-  ]);
-  saveDocItem.type = "button";
-
-  const savePbrItem = Construct("button", "se-save-item", [
-    Construct("span", null, "Export PBR Maps (4×)"),
-    Construct("small", null, `${Math.min(2048, state.resolution)}px`),
-  ]);
-  savePbrItem.type = "button";
-
-  const loadDocItem = Construct("button", "se-save-item", [
-    Construct("span", null, "Open Project File…"),
-    Construct("small", null, ".json"),
-  ]);
-  loadDocItem.type = "button";
-
-  saveMenu.append(saveDocItem, savePngItem, saveSvgItem, savePbrItem, loadDocItem, loadJsonInp);
-  saveWrap.append(btnSaveMenu, saveMenu);
-
   const btnSendToPaint = Construct("button", "pill-btn accent", [
     ConstructGlyph("Brush"),
-    Construct("span", null, isPattern ? "Use Pattern in Paint" : "Use Stamp in Paint"),
+    Construct("span", null, isPattern ? "Use in Paint" : "Use Stamp"),
   ]);
   btnSendToPaint.type = "button";
+  btnSendToPaint.title = isPattern ? "Use Pattern in Texture Paint" : "Use Stamp in Texture Paint";
 
   const btnSendToMaterial = isPattern
     ? Construct("button", "pill-btn warm", [
@@ -309,15 +243,178 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     btnSendToMaterial.title = "Apply this pattern onto the active Material as a tileable PBR texture";
   }
 
-  toolbar.append(
-    docPill,
-    viewSelect,
-    resSelect,
-    saveWrap,
-    Construct("div", "toolbar-spacer"),
-    btnSendToMaterial,
-    btnSendToPaint,
-  );
+  const btnGrid = Construct("button", "se-tool-btn" + (state.showGrid ? " active" : ""), [
+    ConstructGlyph("Grid"),
+    Construct("span", null, "Grid"),
+  ]);
+  btnGrid.type = "button";
+  btnGrid.title = "Toggle Snap Grid";
+
+  const btnAxes = Construct("button", "se-tool-btn" + (state.showAxes ? " active" : ""), [
+    ConstructGlyph("Focus"),
+    Construct("span", null, "Axes"),
+  ]);
+  btnAxes.type = "button";
+  btnAxes.title = "Toggle Center Symmetry Axes";
+
+  const snapSelect = Construct("select", "se-header-select");
+  snapSelect.setAttribute("aria-label", "Snap Grid Step");
+  for (const [label, val] of [["Snap: Off", 0], ["Snap: 8px", 8], ["Snap: 16px", 16], ["Snap: 32px", 32], ["Snap: 64px", 64]]) {
+    const o = Construct("option", null, label);
+    o.value = String(val);
+    snapSelect.append(o);
+  }
+  snapSelect.value = String(state.snapStep);
+
+  const exportRgbaBufferPng = (rgba, w, h, filename) => {
+    const off = document.createElement("canvas");
+    off.width = w;
+    off.height = h;
+    off.getContext("2d").putImageData(new ImageData(new Uint8ClampedArray(rgba), w, h), 0, 0);
+    downloadBlobUrl(off.toDataURL("image/png"), filename);
+  };
+
+  const performSaveProject = () => {
+    const payload = {
+      schema: `frontier.${mode}.v1`,
+      resolution: state.resolution,
+      savedAt: new Date().toISOString(),
+      document: state.doc,
+    };
+    const json = JSON.stringify(payload, null, 2);
+    try {
+      localStorage?.setItem(`frontier-last-${mode}-doc`, json);
+    } catch {}
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const slug = (state.doc.name || mode).toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    downloadBlobUrl(url, `${slug}.${mode}.json`);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    Toast(`Saved ${state.doc.name || mode} (${state.resolution}px) project`);
+  };
+
+  function syncUndoState() {
+    headerUI?.setUndoRedoState(undoStack.length > 0, redoStack.length > 0);
+  }
+
+  function pushUndo(snap = null) {
+    undoStack.push(snap || structuredClone(state.doc));
+    if (undoStack.length > 40) undoStack.shift();
+    redoStack.length = 0;
+    syncUndoState();
+  }
+
+  function performUndo() {
+    if (!undoStack.length) return;
+    redoStack.push(structuredClone(state.doc));
+    state.doc = undoStack.pop();
+    syncUndoState();
+    evaluateAndRender(true);
+    rebuildInspector();
+    Toast("Undone");
+  }
+
+  function performRedo() {
+    if (!redoStack.length) return;
+    undoStack.push(structuredClone(state.doc));
+    state.doc = redoStack.pop();
+    syncUndoState();
+    evaluateAndRender(true);
+    rebuildInspector();
+    Toast("Redone");
+  }
+
+  const headerUI = createViewportHeader(centerCol, {
+    workspace: mode,
+    badgeText: isPattern ? "PATTERN" : "STAMP",
+    iconGlyph: isPattern ? "Pattern" : "Stamp",
+    canvasName: state.doc.name || (isPattern ? "Pattern" : "Stamp"),
+    onRename(next) {
+      if (state.doc.name === next) return;
+      pushUndo();
+      state.doc.name = next;
+      evaluateAndRender(false, { skipPbr: true });
+      rebuildInspector();
+    },
+    resolutions: RESOLUTIONS,
+    resolution: state.resolution,
+    onResolutionChange(val) {
+      if (!RESOLUTIONS.includes(val)) return;
+      state.resolution = val;
+      headerUI.setSaveItemMeta("png", `${val}px`);
+      headerUI.setSaveItemMeta("pbr", `${Math.min(2048, val)}px`);
+      evaluateAndRender(true);
+      Toast(`Resolution set to ${val} × ${val}px`);
+    },
+    viewOptions: viewOpts,
+    viewValue: state.viewChannel,
+    viewAriaLabel: "Canvas View",
+    onViewChange(val) {
+      state.viewChannel = val;
+      syncViewDisplay();
+    },
+    onUndo: performUndo,
+    onRedo: performRedo,
+    saveItems: [
+      { id: "project", label: "Save Project File", meta: `.${mode}.json`, onClick: performSaveProject },
+      {
+        id: "png",
+        label: "Export PNG",
+        meta: `${state.resolution}px`,
+        onClick() {
+          const sz = state.resolution;
+          const ev = evaluateArtworkDocument(state.doc, sz);
+          const slug = (state.doc.name || mode).toLowerCase().replace(/[^a-z0-9]+/g, "-");
+          exportRgbaBufferPng(ev.albedo, ev.width, ev.heightPx || ev.width, `${slug}-${mode}-${sz}.png`);
+          Toast(`Exported ${sz}×${sz} ${mode.toUpperCase()} PNG`);
+        },
+      },
+      {
+        id: "svg",
+        label: "Export Vector SVG",
+        meta: ".svg",
+        onClick() {
+          const sz = state.resolution;
+          const svgStr = artworkDocumentToSvgString(state.doc, { width: sz, height: sz, showBg: true });
+          const blob = new Blob([svgStr], { type: "image/svg+xml" });
+          const url = URL.createObjectURL(blob);
+          const slug = (state.doc.name || mode).toLowerCase().replace(/[^a-z0-9]+/g, "-");
+          downloadBlobUrl(url, `${slug}-${mode}-${sz}.svg`);
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+          Toast(`Exported ${sz}×${sz} Vector SVG`);
+        },
+      },
+      {
+        id: "pbr",
+        label: "Export PBR Maps (4×)",
+        meta: `${Math.min(2048, state.resolution)}px`,
+        onClick() {
+          const sz = Math.min(2048, state.resolution);
+          const ev = evaluateArtworkDocument(state.doc, sz);
+          const slug = (state.doc.name || mode).toLowerCase().replace(/[^a-z0-9]+/g, "-");
+          exportRgbaBufferPng(ev.albedo, ev.width, ev.heightPx || ev.width, `${slug}-albedo-${sz}.png`);
+          exportRgbaBufferPng(ev.roughness, ev.width, ev.heightPx || ev.width, `${slug}-roughness-${sz}.png`);
+          exportRgbaBufferPng(ev.metalness, ev.width, ev.heightPx || ev.width, `${slug}-metalness-${sz}.png`);
+          exportRgbaBufferPng(ev.normal, ev.width, ev.heightPx || ev.width, `${slug}-normal-${sz}.png`);
+          Toast(`Exported 4 PBR maps @ ${sz}×${sz}px`);
+        },
+      },
+      { id: "open", label: "Open Project File…", meta: ".json", onClick: () => loadJsonInp.click() },
+      { node: loadJsonInp },
+    ],
+    primaryActions: [btnSendToMaterial, btnSendToPaint].filter(Boolean),
+    tools: VECTOR_TOOLS.map((t) => ({
+      id: t.id,
+      label: t.label,
+      glyph: t.glyph,
+      kbd: t.key,
+      datasetKey: "vectorTool",
+      active: state.vectorTool === t.id,
+    })),
+    onToolSelect: (id) => selectVectorTool(id),
+    toolTrailing: [btnGrid, btnAxes, snapSelect],
+  });
+  syncUndoState();
 
   // Interactive SVG Stage Shell
   const stage = Construct("div", "se-stage-shell");
@@ -331,29 +428,6 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
   const rulerYWrap = Construct("div", "se-ruler-y");
   const rulerYCanvas = document.createElement("canvas");
   rulerYWrap.append(rulerYCanvas);
-
-  // Clean Floating Vector Tool Dock INSIDE the canvas viewport (declutters top header!)
-  const canvasDock = Construct("div", "se-canvas-dock");
-  const toolButtons = new Map();
-  for (const t of VECTOR_TOOLS) {
-    const btn = Construct("button", "se-tool-btn" + (state.vectorTool === t.id ? " active" : ""), [
-      ConstructGlyph(t.glyph),
-      Construct("span", null, t.label),
-    ]);
-    btn.type = "button";
-    btn.dataset.vectorTool = t.id;
-    btn.title = `${t.label} (${t.key})`;
-    btn.addEventListener("click", () => selectVectorTool(t.id));
-    toolButtons.set(t.id, btn);
-    canvasDock.append(btn);
-  }
-  const btnGrid = Construct("button", "se-tool-btn" + (state.showGrid ? " active" : ""), [
-    ConstructGlyph("Grid"),
-    Construct("span", null, "Grid"),
-  ]);
-  btnGrid.type = "button";
-  btnGrid.title = "Toggle Snap Grid & Axes";
-  canvasDock.append(Construct("div", "se-dock-divider"), btnGrid);
 
   // Floating zoom HUD (.se-view-controls matching reference ShapeEditorCanvas.jsx)
   const viewControls = Construct("div", "se-view-controls");
@@ -379,9 +453,9 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
   const mainCanvas = document.createElement("canvas");
   pbrWrap.append(mainCanvas);
 
-  seViewport.append(rulerCorner, rulerXWrap, rulerYWrap, canvasDock, svgEl, viewControls, pbrWrap);
+  seViewport.append(rulerCorner, rulerXWrap, rulerYWrap, svgEl, viewControls, pbrWrap);
 
-  // Bottom quick channel strip + snap / modifier tools
+  // Bottom quick channel strip + modifier tools
   const bottomBar = Construct("div", "se-bottom-bar");
   const miniStrip = Construct("div", "channel-thumbs");
   const miniCanvases = {};
@@ -397,20 +471,11 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     tile.style.cursor = "pointer";
     tile.addEventListener("click", () => {
       state.viewChannel = state.viewChannel === key ? "vector" : key;
-      viewSelect.value = state.viewChannel;
+      headerUI.setView(state.viewChannel);
       syncViewDisplay();
     });
     miniStrip.append(tile);
   }
-
-  const snapSelect = Construct("select", "se-header-select");
-  snapSelect.setAttribute("aria-label", "Snap Grid Step");
-  for (const [label, val] of [["Snap: Off", 0], ["Snap: 8px", 8], ["Snap: 16px", 16], ["Snap: 32px", 32], ["Snap: 64px", 64]]) {
-    const o = Construct("option", null, label);
-    o.value = String(val);
-    snapSelect.append(o);
-  }
-  snapSelect.value = String(state.snapStep);
 
   const btnAddNoiseScale = Construct("button", "pill-btn warm", [
     ConstructGlyph("Noise"),
@@ -422,14 +487,14 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
   btnBackVector.type = "button";
   btnBackVector.addEventListener("click", () => {
     state.viewChannel = "vector";
-    viewSelect.value = "vector";
+    headerUI.setView("vector");
     syncViewDisplay();
   });
-  const bottomTools = Construct("div", "se-bottom-tools", [snapSelect, btnAddNoiseScale, btnBackVector]);
+  const bottomTools = Construct("div", "se-bottom-tools", [btnAddNoiseScale, btnBackVector]);
   bottomBar.append(miniStrip, bottomTools);
 
   stage.append(seViewport, bottomBar);
-  centerCol.append(toolbar, stage);
+  centerCol.append(stage);
 
   // ----------------------------------------------------------------- RIGHT: LAYER, MASK & MODIFIER STACK
   const rightCol = Construct("aside", "studio-column");
@@ -461,9 +526,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
 
   function selectVectorTool(id) {
     state.vectorTool = id;
-    for (const [tid, btn] of toolButtons) {
-      btn.classList.toggle("active", tid === id);
-    }
+    headerUI.setActiveTool(id);
     svgEl.style.cursor = id === "pan" ? "grab" : id === "select" ? "default" : "crosshair";
   }
 
@@ -698,7 +761,6 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     const isVector = state.viewChannel === "vector";
     pbrWrap.hidden = isVector;
     svgEl.hidden = !isVector;
-    canvasDock.hidden = !isVector;
     viewControls.hidden = !isVector;
     rulerCorner.hidden = !isVector;
     rulerXWrap.hidden = !isVector;
@@ -716,7 +778,8 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
       state.lastStats = ev.stats;
       updatePbrPreviews();
     }
-    docTitleEl.textContent = state.doc.name || (isPattern ? "Pattern" : "Stamp");
+    headerUI.setName(state.doc.name || (isPattern ? "Pattern" : "Stamp"));
+    headerUI.setResolution(state.resolution);
     viewTitle.textContent = `${isPattern ? "VECTOR CANVAS" : "STAMP VECTOR"} ${state.resolution}×${state.resolution}`;
     if (reRenderLeft) renderLeftColumn();
     Broadcast();
@@ -735,6 +798,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     if (idx < 0) return false;
     const nextIdx = idx + (deltaUp > 0 ? 1 : -1);
     if (nextIdx < 0 || nextIdx >= state.doc.layers.length) return false;
+    pushUndo();
     const [item] = state.doc.layers.splice(idx, 1);
     state.doc.layers.splice(nextIdx, 0, item);
     evaluateAndRender(true);
@@ -747,6 +811,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     const srcIdx = state.doc.layers.findIndex((l) => l.id === sourceId);
     const tgtIdx = state.doc.layers.findIndex((l) => l.id === targetId);
     if (srcIdx < 0 || tgtIdx < 0) return false;
+    pushUndo();
     const [item] = state.doc.layers.splice(srcIdx, 1);
     const newTgtIdx = state.doc.layers.findIndex((l) => l.id === targetId);
     const insertAt = dropAboveInVisual ? newTgtIdx + 1 : newTgtIdx;
@@ -757,6 +822,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
   }
 
   function addArtworkLayer(kind) {
+    pushUndo();
     const layer = createArtworkLayer(kind, {
       name: kind === "text" ? "Decal Typography" : kind === "gradient" ? "Gradient Wash" : kind === "folder" ? "Group Folder" : "Motif Shape",
       shape: { color: isPattern ? "#eff4cf" : "#e8c27a" },
@@ -879,6 +945,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
       onDuplicateLayer: (id) => {
         const src = state.doc.layers.find((x) => x.id === id);
         if (!src) return;
+        pushUndo();
         const copy = structuredClone(src);
         copy.id = `lyr_${Math.random().toString(36).slice(2, 9)}`;
         copy.name = `${src.name} Copy`;
@@ -896,6 +963,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
       onToggleLayerMask: (id) => {
         const l = state.doc.layers.find((x) => x.id === id);
         if (!l || l.kind === "folder") return;
+        pushUndo();
         if (!l.mask) {
           l.mask = { enabled: true, invert: false, mode: "noise", frequency: 4, threshold: 0.45, softness: 0.25, seed: 211 };
         } else {
@@ -910,6 +978,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
           Toast("Keep at least one layer in stack");
           return;
         }
+        pushUndo();
         state.doc.layers = state.doc.layers.filter((l) => l.id !== id);
         if (state.doc.selectedLayerId === id) state.doc.selectedLayerId = state.doc.layers[state.doc.layers.length - 1].id;
         evaluateAndRender(true);
@@ -1228,10 +1297,12 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
       const sel = getSelectedLayer();
       if (!sel || sel.locked) return;
       const handleId = handleEl.dataset.handle;
+      const snap = structuredClone(state.doc);
       if (handleId === "rotate") {
         pointerInteraction = {
           kind: "rotate",
           layer: sel,
+          undoSnap: snap,
           startAngle: Math.atan2(pt.y - sel.transform.y, pt.x - sel.transform.x) * (180 / Math.PI),
           origRot: sel.transform.rotation || 0,
         };
@@ -1239,6 +1310,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
         pointerInteraction = {
           kind: "resize",
           layer: sel,
+          undoSnap: snap,
           handle: handleId,
           startX: pt.x,
           startY: pt.y,
@@ -1280,6 +1352,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
           pointerInteraction = {
             kind: "move",
             layer: targetLayer,
+            undoSnap: structuredClone(state.doc),
             startX: pt.x,
             startY: pt.y,
             origX: targetLayer.transform.x,
@@ -1378,6 +1451,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     svgEl.style.cursor = state.vectorTool === "pan" ? "grab" : state.vectorTool === "select" ? "default" : "crosshair";
 
     if (act.kind === "draw") {
+      pushUndo();
       const dr = act.draftRect;
       const w = Math.max(48, dr.w < 12 ? 96 : dr.w);
       const h = Math.max(48, dr.h < 12 ? (act.tool === "stripe" ? 36 : 96) : dr.h);
@@ -1399,6 +1473,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     }
 
     if (act.kind === "move" || act.kind === "resize" || act.kind === "rotate") {
+      if (act.undoSnap) pushUndo(act.undoSnap);
       evaluateAndRender(true);
     }
   };
@@ -1427,6 +1502,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     }
 
     if (payload.assetKind === "pattern" || (payload.assetKind === "stamp" && !isPattern && !dropInfo.merge)) {
+      pushUndo();
       const entry = payload.raw;
       state.activeStarterId = entry.id;
       state.doc = loadStarterAsArtworkDocument(entry);
@@ -1439,6 +1515,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
 
     if (payload.assetKind === "stamp") {
       // Drop stamp into Pattern (or Shift-drop into Stamp) as placed layer(s) at drop coordinates!
+      pushUndo();
       const stampDoc = loadStarterAsArtworkDocument(payload.raw);
       const targetX = svgPt ? svgPt.x : 256;
       const targetY = svgPt ? svgPt.y : 256;
@@ -1462,6 +1539,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
       const mat = payload.raw;
       const sel = getSelectedLayer();
       if (sel && sel.kind !== "folder") {
+        pushUndo();
         sel.shape.color = mat.color || sel.shape.color;
         sel.surface.roughness = mat.roughness ?? sel.surface.roughness;
         sel.surface.metalness = mat.metalness ?? sel.surface.metalness;
@@ -1496,105 +1574,6 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
   });
 
   // ----------------------------------------------------------------- TOOLBAR & POPUP ACTIONS
-  viewSelect.addEventListener("change", () => {
-    state.viewChannel = viewSelect.value;
-    syncViewDisplay();
-  });
-
-  const syncSaveLabels = () => {
-    const pngTag = savePngItem.querySelector("small");
-    const pbrTag = savePbrItem.querySelector("small");
-    if (pngTag) pngTag.textContent = `${state.resolution}px`;
-    if (pbrTag) pbrTag.textContent = `${Math.min(2048, state.resolution)}px`;
-  };
-
-  resSelect.addEventListener("change", () => {
-    const val = Number(resSelect.value);
-    if (RESOLUTIONS.includes(val)) {
-      state.resolution = val;
-      syncSaveLabels();
-      evaluateAndRender(true);
-      Toast(`Resolution set to ${val} × ${val}px`);
-    }
-  });
-
-  const closeSaveMenu = () => {
-    saveMenu.hidden = true;
-    btnSaveMenu.classList.remove("active");
-  };
-  btnSaveMenu.addEventListener("click", (e) => {
-    e.stopPropagation();
-    const nextOpen = saveMenu.hidden;
-    saveMenu.hidden = !nextOpen;
-    btnSaveMenu.classList.toggle("active", nextOpen);
-  });
-
-  const exportRgbaBufferPng = (rgba, w, h, filename) => {
-    const off = document.createElement("canvas");
-    off.width = w;
-    off.height = h;
-    off.getContext("2d").putImageData(new ImageData(new Uint8ClampedArray(rgba), w, h), 0, 0);
-    downloadBlobUrl(off.toDataURL("image/png"), filename);
-  };
-
-  const performSaveProject = () => {
-    const payload = {
-      schema: `frontier.${mode}.v1`,
-      resolution: state.resolution,
-      savedAt: new Date().toISOString(),
-      document: state.doc,
-    };
-    const json = JSON.stringify(payload, null, 2);
-    try {
-      localStorage?.setItem(`frontier-last-${mode}-doc`, json);
-    } catch {}
-    const blob = new Blob([json], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const slug = (state.doc.name || mode).toLowerCase().replace(/[^a-z0-9]+/g, "-");
-    downloadBlobUrl(url, `${slug}.${mode}.json`);
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-    closeSaveMenu();
-    Toast(`Saved ${state.doc.name || mode} (${state.resolution}px) project`);
-  };
-
-  saveDocItem.addEventListener("click", performSaveProject);
-
-  saveSvgItem.addEventListener("click", () => {
-    const sz = state.resolution;
-    const svgStr = artworkDocumentToSvgString(state.doc, { width: sz, height: sz, showBg: true });
-    const blob = new Blob([svgStr], { type: "image/svg+xml" });
-    const url = URL.createObjectURL(blob);
-    const slug = (state.doc.name || mode).toLowerCase().replace(/[^a-z0-9]+/g, "-");
-    downloadBlobUrl(url, `${slug}-${mode}-${sz}.svg`);
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-    closeSaveMenu();
-    Toast(`Exported ${sz}×${sz} Vector SVG`);
-  });
-
-  savePngItem.addEventListener("click", () => {
-    const sz = state.resolution;
-    const ev = evaluateArtworkDocument(state.doc, sz);
-    const slug = (state.doc.name || mode).toLowerCase().replace(/[^a-z0-9]+/g, "-");
-    exportRgbaBufferPng(ev.albedo, ev.width, ev.heightPx || ev.width, `${slug}-${mode}-${sz}.png`);
-    closeSaveMenu();
-    Toast(`Exported ${sz}×${sz} ${mode.toUpperCase()} PNG`);
-  });
-
-  savePbrItem.addEventListener("click", () => {
-    const sz = Math.min(2048, state.resolution);
-    const ev = evaluateArtworkDocument(state.doc, sz);
-    const slug = (state.doc.name || mode).toLowerCase().replace(/[^a-z0-9]+/g, "-");
-    exportRgbaBufferPng(ev.albedo, ev.width, ev.heightPx || ev.width, `${slug}-albedo-${sz}.png`);
-    exportRgbaBufferPng(ev.roughness, ev.width, ev.heightPx || ev.width, `${slug}-roughness-${sz}.png`);
-    exportRgbaBufferPng(ev.metalness, ev.width, ev.heightPx || ev.width, `${slug}-metalness-${sz}.png`);
-    exportRgbaBufferPng(ev.normal, ev.width, ev.heightPx || ev.width, `${slug}-normal-${sz}.png`);
-    closeSaveMenu();
-    Toast(`Exported 4 PBR maps @ ${sz}×${sz}px`);
-  });
-
-  loadDocItem.addEventListener("click", () => {
-    loadJsonInp.click();
-  });
   loadJsonInp.addEventListener("change", async () => {
     const file = loadJsonInp.files?.[0];
     if (!file) return;
@@ -1602,15 +1581,17 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
       const parsed = JSON.parse(await file.text());
       const docData = parsed?.document || parsed;
       if (Array.isArray(docData?.layers) && docData.layers.length) {
+        pushUndo();
         state.doc = docData;
         if (parsed.resolution && RESOLUTIONS.includes(Number(parsed.resolution))) {
           state.resolution = Number(parsed.resolution);
-          resSelect.value = String(state.resolution);
-          syncSaveLabels();
+          headerUI.setResolution(state.resolution);
+          headerUI.setSaveItemMeta("png", `${state.resolution}px`);
+          headerUI.setSaveItemMeta("pbr", `${Math.min(2048, state.resolution)}px`);
         }
         evaluateAndRender(true);
         rebuildInspector();
-        closeSaveMenu();
+        headerUI.closeSaveMenu();
         Toast(`Opened "${state.doc.name || file.name}"`);
       } else {
         Toast("Invalid project JSON");
@@ -1626,6 +1607,11 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     btnGrid.classList.toggle("active", state.showGrid);
     if (state.viewChannel === "vector") renderVectorSvgCanvas();
   });
+  btnAxes.addEventListener("click", () => {
+    state.showAxes = !state.showAxes;
+    btnAxes.classList.toggle("active", state.showAxes);
+    if (state.viewChannel === "vector") renderVectorSvgCanvas();
+  });
   snapSelect.addEventListener("change", () => {
     state.snapStep = Number(snapSelect.value) || 0;
     if (state.viewChannel === "vector") renderVectorSvgCanvas();
@@ -1637,6 +1623,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
       Toast("Select a Motif layer to add Noise Scale");
       return;
     }
+    pushUndo();
     layer.modifiers = layer.modifiers || [];
     const hasGrid = layer.modifiers.some((m) => m.type === "array-grid" || m.type === "array-radial");
     if (!hasGrid && isPattern) layer.modifiers.unshift(createDefaultModifier("array-grid"));
@@ -1707,7 +1694,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
       cb.type = "button";
       cb.addEventListener("click", () => {
         state.viewChannel = val;
-        viewSelect.value = val;
+        headerUI.setView(val);
         syncViewDisplay();
         closeArtPopup();
       });
@@ -1722,6 +1709,7 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
       mb.addEventListener("click", () => {
         const l = getSelectedLayer();
         if (l) {
+          pushUndo();
           l.modifiers = l.modifiers || [];
           l.modifiers.push(createDefaultModifier(kind));
           evaluateAndRender(true);
@@ -1759,11 +1747,6 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     artRDown = null;
   });
 
-  const onArtDocDown = (e) => {
-    if (!saveMenu.hidden && !saveWrap.contains?.(e.target)) closeSaveMenu();
-  };
-  document.addEventListener("pointerdown", onArtDocDown);
-
   const onArtKeyDown = (e) => {
     if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)) return;
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
@@ -1771,21 +1754,24 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
       performSaveProject();
       return;
     }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+      e.preventDefault();
+      if (e.shiftKey) performRedo();
+      else performUndo();
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
+      e.preventDefault();
+      performRedo();
+      return;
+    }
     if (e.code === "Space") { spacePanning = true; return; }
-    if (e.key === "Escape") { closeArtPopup(); closeSaveMenu(); return; }
+    if (e.key === "Escape") { closeArtPopup(); headerUI.closeSaveMenu(); return; }
     if (e.key.toLowerCase() === "q" || e.key === "Tab") { e.preventDefault(); openArtPopup(); return; }
     if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
       e.preventDefault();
       const sel = getSelectedLayer();
-      if (!sel) return;
-      const idx = state.doc.layers.findIndex((l) => l.id === sel.id);
-      const nextIdx = idx + (e.key === "ArrowUp" ? 1 : -1);
-      if (nextIdx >= 0 && nextIdx < state.doc.layers.length) {
-        const [item] = state.doc.layers.splice(idx, 1);
-        state.doc.layers.splice(nextIdx, 0, item);
-        evaluateAndRender(true);
-        rebuildInspector();
-      }
+      if (sel) moveLayerByOffset(sel.id, e.key === "ArrowUp" ? +1 : -1);
       return;
     }
     const toolMatch = VECTOR_TOOLS.find((t) => t.key.toLowerCase() === e.key.toLowerCase());
@@ -1820,6 +1806,8 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
         vectorTool: state.vectorTool,
         showGrid: state.showGrid,
         snapStep: state.snapStep,
+        undoDepth: undoStack.length,
+        redoDepth: redoStack.length,
         selectedLayer: sel ? { id: sel.id, name: sel.name, ...sel.transform } : null,
         stats: state.lastStats,
       };
@@ -1827,10 +1815,9 @@ export function mountArtworkStackWorkspace(root, appBridge, { mode = "pattern" }
     dispose() {
       disposed = true;
       ro.disconnect();
+      headerUI.dispose();
       layerStackUI.dispose?.();
       closeArtPopup();
-      closeSaveMenu();
-      document.removeEventListener("pointerdown", onArtDocDown);
       window.removeEventListener("keydown", onArtKeyDown);
       window.removeEventListener("keyup", onArtKeyUp);
       if (inspectorScope) ReleaseScope(inspectorScope);
