@@ -301,8 +301,11 @@ uniform sampler2D uLayerMask;
 uniform sampler2D uStrokeAlbedo;
 uniform sampler2D uStrokeOrmh;
 uniform sampler2D uPatternTex;
+uniform sampler2D uPatternOrmhTex;
 uniform int uLayerKind; // 0=paint/decal, 1=fill, 2=material, 3=generator
 uniform int uBlendMode; // 0=Normal,1=Multiply,2=Screen,3=Overlay,4=Add,5=Darken
+uniform vec4 uLayerChanBlends;
+uniform vec4 uLayerChanOpacity;
 uniform float uOpacity;
 uniform int uPartFilter;
 uniform int uHasMask;
@@ -314,7 +317,10 @@ uniform float uLiveOpacity;
 uniform vec4 uLiveChanMask;
 uniform vec4 uLayerChanMask;
 uniform int uHasPattern;
+uniform int uHasPatternPbr;
 uniform float uPatternRepeats;
+uniform float uPatternRot;
+uniform float uPatternHeightGain;
 uniform vec3 uColorA;
 uniform float uRoughA;
 uniform float uMetalA;
@@ -322,7 +328,9 @@ uniform float uHeightA;
 uniform float uParamA; // grainScale / threshold
 uniform float uParamB; // grainStrength / softness
 uniform float uParamC; // noiseMix
-uniform int uGenPreset; // 0=edge-wear, 1=crevice-dirt, 2=top-dust
+uniform float uGenScale;
+uniform int uGenInvert;
+uniform int uGenPreset; // 0=edge-wear, 1=crevice-dirt, 2=top-dust, 3=triplanar-grunge
 uniform int uOutTarget; // 0 = albedo, 1 = ormh
 in vec2 vUv;
 out vec4 fragColor;
@@ -349,6 +357,15 @@ vec3 blendRgb(vec3 b, vec3 s, int mode) {
   if (mode == 2) return 1.0 - (1.0 - b) * (1.0 - s);
   if (mode == 3) return mix(2.0 * b * s, 1.0 - 2.0 * (1.0 - b) * (1.0 - s), step(0.5, b));
   if (mode == 4) return min(vec3(1.0), b + s);
+  if (mode == 5) return min(b, s);
+  return s;
+}
+
+float blendScalar(float b, float s, int mode) {
+  if (mode == 1) return b * s;
+  if (mode == 2) return 1.0 - (1.0 - b) * (1.0 - s);
+  if (mode == 3) return b < 0.5 ? 2.0 * b * s : 1.0 - 2.0 * (1.0 - b) * (1.0 - s);
+  if (mode == 4) return min(1.0, b + s);
   if (mode == 5) return min(b, s);
   return s;
 }
@@ -412,25 +429,37 @@ void main() {
     }
   } else if (uLayerKind == 1) {
     if (uHasPattern != 0) {
-      vec2 puv = fract(vUv * max(1.0, uPatternRepeats));
+      vec2 uc = (vUv - 0.5) * max(0.25, uPatternRepeats);
+      float cr = cos(uPatternRot), sr = sin(uPatternRot);
+      vec2 puv = fract(vec2(uc.x * cr - uc.y * sr, uc.x * sr + uc.y * cr) + 0.5);
       vec4 pt = texture(uPatternTex, puv);
       srcRgb = mix(uColorA, pt.rgb, pt.a);
+      if (uHasPatternPbr != 0) {
+        vec4 po = texture(uPatternOrmhTex, puv);
+        srcRough = mix(uRoughA, po.r, pt.a);
+        srcMetal = mix(uMetalA, po.g, pt.a);
+        srcHeight = clamp(0.5 + ((po.b - 0.5) * pt.a) * uPatternHeightGain + (uHeightA - 0.5), 0.0, 1.0);
+      }
     }
   } else if (uLayerKind == 2) {
     float n = vnoise(vUv * max(1.0, uParamA)) * 0.65 + vnoise(vUv * max(1.0, uParamA) * 2.7) * 0.35;
     float d = (n - 0.5) * uParamB * 2.0;
     srcRgb = clamp(uColorA + d, 0.0, 1.0);
     srcRough = clamp(uRoughA - d * 0.45, 0.02, 1.0);
-    srcHeight = clamp(0.5 + d * 0.35, 0.0, 1.0);
+    srcHeight = clamp(uHeightA + d * 0.35, 0.0, 1.0);
   } else if (uLayerKind == 3) {
     vec4 cue = texelFetch(uAuxCueTex, px, 0);
+    float gs = max(1.0, uGenScale);
     float signal = 0.0;
     if (uGenPreset == 0) signal = clamp((cue.g - 0.5) * 2.0, 0.0, 1.0);
     else if (uGenPreset == 1) signal = clamp(1.0 - cue.r, 0.0, 1.0);
-    else signal = clamp(cue.b, 0.0, 1.0);
-    float n = vnoise(vUv * 12.0) * 0.65 + vnoise(vUv * 29.0) * 0.35;
-    signal = clamp(mix(signal, signal * (0.4 + n * 0.9), uParamC), 0.0, 1.0);
-    srcChAlpha = vec4(smoothstep(uParamA - uParamB * 0.5, uParamA + uParamB * 0.5, signal));
+    else if (uGenPreset == 2) signal = clamp(cue.b, 0.0, 1.0);
+    else signal = clamp(vnoise(vUv * gs * 0.7) * 0.65 + vnoise(vUv * gs * 1.9 + 7.1) * 0.35, 0.0, 1.0);
+    float n = vnoise(vUv * gs) * 0.65 + vnoise(vUv * gs * 2.4) * 0.35;
+    signal = clamp(mix(signal, n, uParamC), 0.0, 1.0);
+    float gAlpha = smoothstep(uParamA - uParamB * 0.5, uParamA + uParamB * 0.5, signal);
+    if (uGenInvert != 0) gAlpha = 1.0 - gAlpha;
+    srcChAlpha = vec4(gAlpha);
   }
 
   float maskMul = 1.0;
@@ -444,19 +473,23 @@ void main() {
     maskMul = uInvertMask != 0 ? (1.0 - m) : m;
   }
 
-  vec4 w4 = clamp(srcChAlpha * uLayerChanMask * uOpacity * maskMul, 0.0, 1.0);
+  vec4 w4 = clamp(srcChAlpha * uLayerChanMask * uLayerChanOpacity * uOpacity * maskMul, 0.0, 1.0);
   if (w4.r <= 0.001 && w4.g <= 0.001 && w4.b <= 0.001 && w4.a <= 0.001) {
     fragColor = uOutTarget == 0 ? dstA : dstO;
     return;
   }
 
   if (uOutTarget == 0) {
-    vec3 bRgb = blendRgb(dstA.rgb, srcRgb, uBlendMode);
+    int bA = uLayerChanBlends.x >= -0.5 ? int(floor(uLayerChanBlends.x + 0.5)) : uBlendMode;
+    vec3 bRgb = blendRgb(dstA.rgb, srcRgb, bA);
     fragColor = vec4(mix(dstA.rgb, bRgb, w4.r), max(dstA.a, w4.r));
   } else {
-    float r = mix(dstO.g, srcRough, w4.g);
-    float m = mix(dstO.b, srcMetal, w4.b);
-    float h = clamp(mix(dstO.a, srcHeight, w4.a), 0.0, 1.0);
+    int bR = uLayerChanBlends.y >= -0.5 ? int(floor(uLayerChanBlends.y + 0.5)) : 0;
+    int bM = uLayerChanBlends.z >= -0.5 ? int(floor(uLayerChanBlends.z + 0.5)) : 0;
+    int bH = uLayerChanBlends.w >= -0.5 ? int(floor(uLayerChanBlends.w + 0.5)) : 0;
+    float r = mix(dstO.g, blendScalar(dstO.g, srcRough, bR), w4.g);
+    float m = mix(dstO.b, blendScalar(dstO.b, srcMetal, bM), w4.b);
+    float h = clamp(mix(dstO.a, blendScalar(dstO.a, srcHeight, bH), w4.a), 0.0, 1.0);
     fragColor = vec4(dstO.r, r, m, h);
   }
 }
@@ -545,7 +578,7 @@ void main() {
 
 const BLEND_INDEX = { Normal: 0, Multiply: 1, Screen: 2, Overlay: 3, Add: 4, Darken: 5 };
 const TIP_INDEX = { round: 0, chisel: 1, chalk: 2, splatter: 3, sponge: 4, stamp: 5, custom: 6 };
-const GEN_INDEX = { "edge-wear": 0, "crevice-dirt": 1, "top-dust": 2 };
+const GEN_INDEX = { "edge-wear": 0, "crevice-dirt": 1, "top-dust": 2, "triplanar-grunge": 3 };
 const CHAN_VIEW_INDEX = { lit: 0, baseColor: 0, roughness: 1, metalness: 2, height: 3, mask: 4 };
 
 export class GpuPaintSession {
@@ -677,8 +710,11 @@ export class GpuPaintSession {
         uStrokeAlbedo: { value: this.dummyTex },
         uStrokeOrmh: { value: this.dummyTex },
         uPatternTex: { value: this.dummyTex },
+        uPatternOrmhTex: { value: this.dummyTex },
         uLayerKind: { value: 0 },
         uBlendMode: { value: 0 },
+        uLayerChanBlends: { value: new THREE.Vector4(-1, -1, -1, -1) },
+        uLayerChanOpacity: { value: new THREE.Vector4(1, 1, 1, 1) },
         uOpacity: { value: 1 },
         uPartFilter: { value: -1 },
         uHasMask: { value: 0 },
@@ -690,7 +726,10 @@ export class GpuPaintSession {
         uLiveChanMask: { value: new THREE.Vector4(1, 1, 1, 1) },
         uLayerChanMask: { value: new THREE.Vector4(1, 1, 1, 1) },
         uHasPattern: { value: 0 },
+        uHasPatternPbr: { value: 0 },
         uPatternRepeats: { value: 3 },
+        uPatternRot: { value: 0 },
+        uPatternHeightGain: { value: 1 },
         uColorA: { value: new THREE.Vector3(1, 1, 1) },
         uRoughA: { value: 0.5 },
         uMetalA: { value: 0 },
@@ -698,6 +737,8 @@ export class GpuPaintSession {
         uParamA: { value: 10 },
         uParamB: { value: 0.1 },
         uParamC: { value: 0.4 },
+        uGenScale: { value: 6 },
+        uGenInvert: { value: 0 },
         uGenPreset: { value: 0 },
         uOutTarget: { value: 0 },
       },
@@ -943,7 +984,8 @@ export class GpuPaintSession {
     const pd = layer.fill?.patternData;
     const patPix = pd?.albedo || pd?.rgba;
     if (layer.kind === "fill" && patPix && pd?.width && layer._gpu.patternRef !== patPix) {
-      if (layer._gpu.patternTex) layer._gpu.patternTex.dispose();
+      if (layer._gpu.patternTex) { this.layerTargetRegistry.delete(layer._gpu.patternTex); layer._gpu.patternTex.dispose(); }
+      if (layer._gpu.patternOrmhTex) { this.layerTargetRegistry.delete(layer._gpu.patternOrmhTex); layer._gpu.patternOrmhTex.dispose(); }
       const pw = pd.width, ph = pd.heightPx || pd.width;
       const flipped = new Uint8Array(pw * ph * 4);
       const stride = pw * 4;
@@ -953,7 +995,39 @@ export class GpuPaintSession {
       tex.minFilter = THREE.LinearFilter; tex.magFilter = THREE.LinearFilter;
       tex.flipY = false; tex.needsUpdate = true;
       layer._gpu.patternTex = tex;
+      this.layerTargetRegistry.add(tex);
       layer._gpu.patternRef = patPix;
+      if (pd.roughness && pd.metalness && pd.height) {
+        const ormhData = new Uint8Array(pw * ph * 4);
+        for (let y = 0; y < ph; y++) {
+          const sRow = (ph - 1 - y) * pw;
+          const dRow = y * pw;
+          for (let x = 0; x < pw; x++) {
+            const si = (sRow + x) * 4;
+            const di = (dRow + x) * 4;
+            ormhData[di] = pd.roughness[si];
+            ormhData[di + 1] = pd.metalness[si];
+            ormhData[di + 2] = pd.height[si];
+            ormhData[di + 3] = 255;
+          }
+        }
+        const oTex = new THREE.DataTexture(ormhData, pw, ph, THREE.RGBAFormat);
+        oTex.wrapS = THREE.RepeatWrapping; oTex.wrapT = THREE.RepeatWrapping;
+        oTex.minFilter = THREE.LinearFilter; oTex.magFilter = THREE.LinearFilter;
+        oTex.flipY = false; oTex.needsUpdate = true;
+        layer._gpu.patternOrmhTex = oTex;
+        this.layerTargetRegistry.add(oTex);
+      } else {
+        layer._gpu.patternOrmhTex = null;
+      }
+    } else if (layer.kind === "fill" && !patPix && layer._gpu.patternTex) {
+      this.layerTargetRegistry.delete(layer._gpu.patternTex);
+      layer._gpu.patternTex.dispose();
+      layer._gpu.patternTex = null;
+      if (layer._gpu.patternOrmhTex) this.layerTargetRegistry.delete(layer._gpu.patternOrmhTex);
+      layer._gpu.patternOrmhTex?.dispose();
+      layer._gpu.patternOrmhTex = null;
+      layer._gpu.patternRef = null;
     }
     return layer._gpu;
   }
@@ -1216,11 +1290,16 @@ export class GpuPaintSession {
       const gpu = this.ensureLayerTargets(layer);
       const isLive = hasLiveStroke && layer.id === doc.selectedLayerId;
       const lCh = layer.channels || { albedo: true, roughness: true, metalness: true, height: true };
+      const lOp = layer.channelOpacity || { albedo: 1, roughness: 1, metalness: 1, height: 1 };
+      const lBl = layer.channelBlends || {};
+      const chB = (k) => (lBl[k] && lBl[k] !== "Inherit" && lBl[k] in BLEND_INDEX ? BLEND_INDEX[lBl[k]] : -1);
 
       u.uAccAlbedo.value = accAlb.texture;
       u.uAccOrmh.value = accOrm.texture;
       u.uHasLiveStroke.value = isLive ? 1 : 0;
       u.uBlendMode.value = BLEND_INDEX[layer.blend] ?? 0;
+      u.uLayerChanBlends.value.set(chB("albedo"), chB("roughness"), chB("metalness"), chB("height"));
+      u.uLayerChanOpacity.value.set(lOp.albedo ?? 1, lOp.roughness ?? 1, lOp.metalness ?? 1, lOp.height ?? 1);
       u.uOpacity.value = layer.opacity ?? 1;
       u.uPartFilter.value = layer.partFilter ?? -1;
       u.uHasMask.value = layer.mask?.enabled && gpu.maskRT ? 1 : 0;
@@ -1241,8 +1320,12 @@ export class GpuPaintSession {
         u.uMetalA.value = layer.fill?.metalness ?? 0;
         u.uHeightA.value = Math.max(0, Math.min(1, (layer.fill?.height ?? 0) * 0.5 + 0.5));
         u.uHasPattern.value = gpu.patternTex ? 1 : 0;
+        u.uHasPatternPbr.value = gpu.patternOrmhTex ? 1 : 0;
         u.uPatternTex.value = gpu.patternTex || this.dummyTex;
+        u.uPatternOrmhTex.value = gpu.patternOrmhTex || this.dummyTex;
         u.uPatternRepeats.value = layer.fill?.patternRepeats || 3;
+        u.uPatternRot.value = ((layer.fill?.patternRotation || 0) * Math.PI) / 180;
+        u.uPatternHeightGain.value = layer.fill?.patternHeightStrength ?? 1.0;
       } else if (layer.kind === "material") {
         u.uLayerKind.value = 2;
         const [r, g, b] = hexToRgb(layer.material?.color || "#888888");
@@ -1263,6 +1346,8 @@ export class GpuPaintSession {
         u.uParamA.value = layer.generator?.threshold ?? 0.55;
         u.uParamB.value = layer.generator?.softness ?? 0.25;
         u.uParamC.value = layer.generator?.noiseMix ?? 0.4;
+        u.uGenScale.value = layer.generator?.noiseScale ?? 6;
+        u.uGenInvert.value = layer.generator?.invert ? 1 : 0;
       }
 
       u.uOutTarget.value = 0;

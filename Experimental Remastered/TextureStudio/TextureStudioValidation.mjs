@@ -688,8 +688,8 @@ await suite("8. GPU Bake/Paint Shaders, Q/Tab/Right-Click Tool Popups & Draggabl
 
   // Switch back to Texture Paint & exercise Q/Tab/Right-click popup + Stamp Previews + Curves + PBR Channels + layer stack drag/up/down
   globalThis.window.__frontierTextureStudio.switchWorkspace("paint");
-  assert(globalThis.document.querySelectorAll(".pbr-chan-pill").length >= 12, "Inspector must display Paint/Erase/Fill PBR channel toggles");
-  assert(globalThis.document.querySelectorAll(".curve-editor-svg").length >= 1, "Inspector must render interactive SVG Curve editor");
+  assert.equal(globalThis.document.querySelectorAll(".pbr-chan-pill").length, 4, "Layer Inspector must display strictly the selected layer's 4 active PBR channel pills");
+  assert.equal(globalThis.document.querySelectorAll(".curve-editor-svg").length, 0, "Right-side Layer Inspector must NOT be cluttered with brush curves");
   const paintRowsBefore = globalThis.document.querySelectorAll(".stack-row");
   assert(paintRowsBefore.length >= 2, "Expected paint workspace stack rows");
   assert(paintRowsBefore.every((r) => r.draggable === true), "All paint stack rows must be draggable");
@@ -1285,6 +1285,171 @@ await suite("13. Engineering Materials, Removal Check, Preview Plane, Basic Stam
   assert(applyAction, "Inspector must show Apply to Stage action button");
   applyAction.click();
   assert.equal(api.getActiveId(), "stamp", "Clicking Apply to Stage on stamp in inspector should route to Stamp Studio cleanly");
+});
+
+await suite("14. Texture Paint Clean Layer Inspector, Right-Click Tool-Specific Brush Inspector & Per-Channel Mixing", async () => {
+  const api = globalThis.window.__frontierTextureStudio;
+  api.switchWorkspace("paint");
+
+  // 14a. Right column is strictly Layer Inspector (no brush/dynamics/curves/stamps clutter)
+  const panelTitles = [...globalThis.document.querySelectorAll(".panel-heading h2")].map((el) => el.textContent);
+  assert(panelTitles.includes("Layer Inspector"), "Right-side heading must read 'Layer Inspector'");
+  assert(!panelTitles.includes("Brush & Layer Inspector"), "Legacy 'Brush & Layer Inspector' heading must be replaced");
+
+  const secTitles = [...globalThis.document.querySelectorAll(".section-title")].map((el) => el.textContent);
+  assert(!secTitles.some((t) => t.includes("Brush & Tool") || t.includes("Colour Dynamics") || t.includes("Brush & Stroke Curves") || t.includes("Stamps & Custom Images")),
+    "Right-side Layer Inspector must not be cluttered with brush/dynamics/curves/stamp sections");
+
+  // 14b. Per-layer PBR Channel pills & Inspect Channel per-channel weight/blend controls
+  const inspectLabels = [...globalThis.document.querySelectorAll(".segmented-track")];
+  const chanInspSeg = inspectLabels.find((seg) => [...seg.querySelectorAll("button")].some((b) => b.textContent === "Rough"));
+  assert(chanInspSeg, "Layer Inspector must provide 'Inspect Channel' segmented tabs (All | Albedo | Rough | Metal | Height)");
+  const roughBtn = [...chanInspSeg.querySelectorAll("button")].find((b) => b.textContent === "Rough");
+  roughBtn.click();
+  const sliderLabelsAfterRough = [...globalThis.document.querySelectorAll(".property-label")].map((el) => el.textContent);
+  assert(sliderLabelsAfterRough.some((t) => t.includes("Roughness Channel Weight")), "Inspecting Roughness channel must show Roughness Channel Weight");
+  assert(sliderLabelsAfterRough.some((t) => t.includes("Roughness Blend Override")), "Inspecting Roughness channel must show Roughness Blend Override");
+
+  // Verify removing Height channel from Layer removes its Inspect Channel tab cleanly
+  const layerPills = [...globalThis.document.querySelectorAll(".pbr-chan-pill")];
+  const heightPill = layerPills.find((p) => p.dataset.channel === "height");
+  assert(heightPill, "Layer Inspector must render Height PBR pill");
+  heightPill.click();
+  assert.equal(globalThis.document.querySelectorAll(".pbr-chan-pill").length, 3, "Removing Height pill must leave 3 active layer channels");
+  const allChBtn = [...globalThis.document.querySelectorAll(".segmented-track button")].find((b) => b.textContent === "All");
+  allChBtn?.click();
+
+  // Re-add Height via Layer's + Channel dropdown
+  const addChanTrig = globalThis.document.querySelector(".pbr-add-trigger");
+  addChanTrig?.click();
+  const hMenu = [...globalThis.document.querySelectorAll(".pbr-chan-menu .menu-item")].find((el) => el.dataset.channel === "height");
+  assert(hMenu, "Removed Height channel must appear in Layer Inspector + Channel dropdown");
+  hMenu.click();
+  assert.equal(globalThis.document.querySelectorAll(".pbr-chan-pill").length, 4, "Re-adding Height must restore 4 Layer PBR channel pills");
+
+  // 14c. Verify Right-Click on viewport opens Tool-Specific Brush Inspector and isolates irrelevant controls per tool
+  const pane = globalThis.document.querySelector(".viewport-split-pane");
+  pane.dispatchEvent({ type: "contextmenu", clientX: 250, clientY: 200 });
+  let pop = globalThis.document.body.querySelector(".tool-popup-menu");
+  assert(pop, "Right-click must open Active Tool / Brush Inspector popup");
+  assert(pop.querySelector(".tool-popup-head strong")?.textContent === "Brush Inspector", "Default popup title should read 'Brush Inspector'");
+
+  // Switch to Erase tab inside popup -> verify ONLY eraser controls (NO ink swatches, NO Roughness/Metalness/Height Relief sliders, NO Colour Dynamics subtabs)
+  const eraseTab = [...pop.querySelectorAll(".tool-popup-tab")].find((t) => t.textContent.includes("Erase"));
+  assert(eraseTab, "Missing Erase tab in right-click Tool Inspector");
+  eraseTab.click();
+  pop = globalThis.document.body.querySelector(".tool-popup-menu");
+  assert.equal(pop.querySelector(".tool-popup-head strong")?.textContent, "Eraser Inspector");
+  assert.equal(pop.querySelectorAll(".tool-popup-swatch").length, 0, "Eraser Inspector must NOT show paint ink swatches");
+  assert.equal(pop.querySelectorAll(".tool-popup-subtab").length, 0, "Eraser Inspector must NOT clutter UI with paint Colour Dynamics/Curves tabs");
+  const eraseLabels = [...pop.querySelectorAll(".property-label")].map((el) => el.textContent);
+  assert(!eraseLabels.some((l) => l.includes("Roughness") || l.includes("Metalness") || l.includes("Height Relief")), "Eraser Inspector must NOT show paint PBR value sliders");
+
+  // Switch to Fill tab -> verify Flood Scope & Fill controls without brush curves
+  const fillTab = [...pop.querySelectorAll(".tool-popup-tab")].find((t) => t.textContent.includes("Fill"));
+  fillTab.click();
+  pop = globalThis.document.body.querySelector(".tool-popup-menu");
+  assert.equal(pop.querySelector(".tool-popup-head strong")?.textContent, "Fill Inspector");
+  assert(pop.textContent.includes("Flood Fill Scope"), "Fill Inspector must expose Flood Fill Scope");
+  assert(pop.querySelectorAll(".tool-popup-swatch").length > 0, "Fill Inspector must expose Fill Color swatches");
+
+  // Switch to Eyedropper tab -> verify clean Sampler card
+  const pickTab = [...pop.querySelectorAll(".tool-popup-tab")].find((t) => t.textContent.includes("Pick"));
+  pickTab.click();
+  pop = globalThis.document.body.querySelector(".tool-popup-menu");
+  assert.equal(pop.querySelector(".tool-popup-head strong")?.textContent, "Sample Inspector");
+
+  // Switch back to Brush before closing and test right-click directly on Layer Inspector column background!
+  const brushTab = [...pop.querySelectorAll(".tool-popup-tab")].find((t) => t.textContent.includes("Brush"));
+  brushTab.click();
+  globalThis.window.dispatchEvent({ type: "keydown", key: "Escape" });
+  const cols = globalThis.document.querySelectorAll(".studio-column");
+  const rightAside = cols[cols.length - 1];
+  rightAside.dispatchEvent({ type: "contextmenu", clientX: 900, clientY: 320 });
+  assert(globalThis.document.body.querySelector(".tool-popup-menu"), "Right-clicking Layer Inspector panel must also open Brush/Tool Inspector");
+  globalThis.window.dispatchEvent({ type: "keydown", key: "Escape" });
+
+  // 14d. Verify Engine-level Per-Channel Opacity, Per-Channel Blend, Rotated Fill Pattern, and Triplanar Grunge + Invert Generator
+  const r2 = 32;
+  const cuesGeo = new THREE.SphereGeometry(1, 24, 16);
+  const cuesIdx = buildMeshPaintIndex(cuesGeo);
+  const testCues = buildDefaultMeshCues(cuesGeo, cuesIdx, r2);
+  const doc14 = createPaintDocument(r2);
+  const baseFill = doc14.layers[0];
+  baseFill.fill.color = "#808080";
+  baseFill.fill.roughness = 0.8;
+  baseFill.fill.metalness = 0.0;
+  baseFill.fill.height = 0.0;
+
+  const solidChLayer = createPaintLayer("fill", {
+    res: r2,
+    fill: { color: "#ffffff", roughness: 0.2, metalness: 1.0, height: 0.6 },
+    channels: { albedo: true, roughness: true, metalness: true, height: true },
+    channelOpacity: { albedo: 1.0, roughness: 0.0, metalness: 0.5, height: 1.0 },
+    channelBlends: { albedo: "Multiply", roughness: "Inherit", metalness: "Normal", height: "Screen" },
+  });
+  doc14.layers.push(solidChLayer);
+  const comp14 = compositePaintDocument(doc14, testCues);
+  const midOff = Math.floor(r2 * 0.5) * r2 + Math.floor(r2 * 0.5);
+  assert(Math.abs(comp14.roughness[midOff] - Math.round(0.8 * 255)) <= 3, "Zero roughness channelOpacity must keep underlying roughness untouched");
+  assert(comp14.metalness[midOff] > 90 && comp14.metalness[midOff] < 200, "0.5 metalness channelOpacity must half-blend metalness");
+
+  const patEval14 = evaluateArtworkDocument(createArtworkDocument("pattern"), 32);
+  const topFill = createPaintLayer("fill", {
+    res: r2,
+    fill: {
+      color: "#ffffff",
+      roughness: 0.2,
+      metalness: 0.9,
+      height: 0.3,
+      patternData: patEval14,
+      patternRepeats: 3,
+      patternRotation: 35,
+      patternHeightStrength: 1.5,
+    },
+  });
+
+  // Generator Triplanar Grunge + Invert test
+  const genGr = createPaintLayer("generator", {
+    res: r2,
+    generator: { preset: "triplanar-grunge", color: "#554433", roughness: 0.9, metalness: 0.0, height: -0.3, threshold: 0.4, softness: 0.35, noiseMix: 0.6, noiseScale: 8, invert: false },
+  });
+  const docGen = createPaintDocument(r2);
+  docGen.layers.push(genGr);
+  const compGenA = compositePaintDocument(docGen, testCues);
+  genGr.generator.invert = true;
+  const compGenB = compositePaintDocument(docGen, testCues);
+  let diffSum = 0;
+  for (let i = 0; i < r2 * r2; i++) diffSum += Math.abs(compGenA.albedo[i * 4] - compGenB.albedo[i * 4]);
+  assert(diffSum > 100, "Inverting triplanar-grunge generator must visibly invert mask coverage");
+
+  // Verify GpuPaintSession patternOrmhTex upload + composite uniforms cleanly execute end-to-end
+  const { GpuPaintSession } = await import("./Engine/GpuPaintEngine.js");
+  const mockGpuRenderer14 = {
+    capabilities: { isWebGL2: true },
+    extensions: { get: () => ({}) },
+    getContext: () => ({ getParameter: () => "ValidatedWebGL2" }),
+    autoClear: true,
+    getRenderTarget: () => null,
+    getScissorTest: () => false,
+    setScissorTest() {},
+    setRenderTarget() {},
+    render() {},
+    getClearColor: (c) => c.set(0, 0, 0),
+    getClearAlpha: () => 1,
+    setClearColor() {},
+    clear() {},
+  };
+  const gpu14 = new GpuPaintSession(mockGpuRenderer14, 32);
+  gpu14.uploadMeshCues(testCues, null);
+  gpu14.ensureLayerTargets(topFill);
+  assert(topFill._gpu.patternOrmhTex, "GpuPaintSession must generate packed ORM+H DataTexture when fill patternData includes roughness/metalness/height");
+  assert(gpu14.compMat.uniforms.uLayerChanOpacity && gpu14.compMat.uniforms.uLayerChanBlends && gpu14.compMat.uniforms.uGenScale && gpu14.compMat.uniforms.uGenInvert, "GpuPaintSession composite shader must expose channel opacity, channel blend, and generator uniforms");
+  doc14.layers.push(topFill, genGr);
+  gpu14.composite(doc14);
+  assert.equal(gpu14.compMat.uniforms.uGenInvert.value, 1, "Composite pass must forward generator invert flag to GPU");
+  gpu14.dispose();
+  cuesGeo.dispose();
 });
 
 console.log(`\nALL ${results.length} VALIDATION SUITES PASSED CLEANLY`);

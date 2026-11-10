@@ -166,6 +166,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     viewportMode: "3d", // "3d" | "split" | "2d"
     viewChannel: "lit", // "lit" | "baseColor" | "roughness" | "metalness" | "height" | "mask"
     fillScope: "part", // "part" | "island" | "all"
+    inspectedLayerChannel: "all", // "all" | "albedo" | "roughness" | "metalness" | "height"
     popupSubTab: "main", // "main" | "dynamics" | "curves"
     activeCurveKey: "falloff", // "falloff" | "sizeOverStroke" | "opacityOverStroke" | "hueOverStroke"
     brush: {
@@ -452,9 +453,9 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     chanSelect.append(o);
   }
 
-  const btnToolMenu = Construct("button", "pill-btn", [ConstructGlyph("Sliders"), Construct("span", null, "Tool Menu (Q)")]);
+  const btnToolMenu = Construct("button", "pill-btn", [ConstructGlyph("Sliders"), Construct("span", null, "Brush / Tool (Q)")]);
   btnToolMenu.type = "button";
-  btnToolMenu.title = "Open Active Tool Popup (Right-Click / Q / Tab)";
+  btnToolMenu.title = "Open Brush & Tool Inspector (Right-Click / Q / Tab)";
 
   const btnUndo = Construct("button", "icon-btn", ConstructGlyph("Undo"));
   btnUndo.type = "button";
@@ -502,15 +503,15 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   pane2D.append(Construct("span", "pane-badge", "2D UV Texture Canvas"));
 
   splitBox.append(pane3D, pane2D);
-  const hudHelp = Construct("div", "viewport-hud-bottom", "Left-drag mesh to paint · Right-click or Q / Tab for Active Tool Menu · B/E/G/S/I switch tools");
+  const hudHelp = Construct("div", "viewport-hud-bottom", "Left-drag mesh to paint · Right-click or Q / Tab for Brush & Tool Inspector · B/E/G/S/I switch tools");
   stage.append(splitBox, hudHelp);
   centerCol.append(toolbar, stage);
 
-  // RIGHT: BRUSH & LAYER INSPECTOR
+  // RIGHT: LAYER INSPECTOR (Right-click or Q opens Brush & Tool Inspector cleanly without clutter)
   const rightCol = Construct("aside", "studio-column");
   rightCol.append(
     Construct("div", "panel-heading", [
-      Construct("h2", null, "Brush & Layer Inspector"),
+      Construct("h2", null, "Layer Inspector"),
       Construct("span", "panel-heading-meta", "GPU 3D/UV PAINT"),
     ]),
   );
@@ -1182,8 +1183,8 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     pop.append(
       Construct("div", "tool-popup-head", [
         ConstructGlyph(state.brush.tool === "erase" ? "Eraser" : state.brush.tool === "fill" ? "Fill" : state.brush.tool === "stamp" ? "Stamp" : state.brush.tool === "eyedropper" ? "Pipette" : "Brush"),
-        Construct("strong", null, `${TOOL_LABELS[state.brush.tool] || "Active"} Tool Options`),
-        Construct("small", null, "Q / Tab / Esc"),
+        Construct("strong", null, `${TOOL_LABELS[state.brush.tool] || "Active"} Inspector`),
+        Construct("small", null, "Right-Click / Q / Esc"),
         closeBtn,
       ]),
     );
@@ -1224,8 +1225,8 @@ export function mountTexturePaintWorkspace(root, appBridge) {
 
     const tool = state.brush.tool;
 
-    if (tool === "paint" || tool === "erase") {
-      // Sub-tabs: Tip & PBR | Jitter & Colour | Curves
+    if (tool === "paint") {
+      // Sub-tabs: Tip & PBR | Colour Dynamics | Curves (only for Paint Brush!)
       const subTabs = Construct("div", "tool-popup-subtabs");
       for (const [sid, sLabel] of [["main", "Tip & PBR"], ["dynamics", "Colour Dynamics"], ["curves", "Curves"]]) {
         const sb = Construct("button", "tool-popup-subtab" + (state.popupSubTab === sid ? " active" : ""), sLabel);
@@ -1240,12 +1241,11 @@ export function mountTexturePaintWorkspace(root, appBridge) {
 
       if (state.popupSubTab === "main") {
         ChannelMaskRow(pop, {
-          Label: tool === "erase" ? "Erase PBR Channels" : "Paint PBR Channels",
+          Label: "Paint PBR Channels",
           Transient: true,
-          Read: () => getToolChannels(state.brush, tool),
+          Read: () => state.brush.paintChannels,
           Write: (next) => {
-            if (tool === "erase") state.brush.eraseChannels = next;
-            else state.brush.paintChannels = next;
+            state.brush.paintChannels = next;
             Broadcast();
           },
         });
@@ -1260,7 +1260,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
               return;
             }
             state.brush.tip = key;
-            Broadcast();
+            rebuildInspector();
             openToolPopup(null, null, true);
           });
           tipRow.append(cb);
@@ -1271,26 +1271,24 @@ export function mountTexturePaintWorkspace(root, appBridge) {
         tipRow.append(addTipBtn);
         pop.append(Construct("div", "property-label", state.brush.tip === "custom" && state.brush.customTipName ? `Brush Tip (${state.brush.customTipName})` : "Brush Tip Shape"), tipRow);
 
-        if (tool === "paint") {
-          const swRow = Construct("div", "tool-popup-swatches");
-          for (const hex of QUICK_SWATCHES) {
-            const sw = Construct("button", "tool-popup-swatch" + (state.brush.color.toLowerCase() === hex ? " active" : ""));
-            sw.type = "button";
-            sw.style.background = hex;
-            sw.title = hex;
-            sw.addEventListener("click", () => {
-              state.brush.color = hex;
-              Broadcast();
-              openToolPopup(null, null, true);
-            });
-            swRow.append(sw);
-          }
-          const cInp = document.createElement("input");
-          cInp.type = "color"; cInp.value = state.brush.color; cInp.className = "color-native";
-          cInp.addEventListener("input", () => { state.brush.color = cInp.value; Broadcast(); });
-          swRow.append(cInp);
-          pop.append(Construct("div", "property-label", "Ink Color"), swRow);
+        const swRow = Construct("div", "tool-popup-swatches");
+        for (const hex of QUICK_SWATCHES) {
+          const sw = Construct("button", "tool-popup-swatch" + (state.brush.color.toLowerCase() === hex ? " active" : ""));
+          sw.type = "button";
+          sw.style.background = hex;
+          sw.title = hex;
+          sw.addEventListener("click", () => {
+            state.brush.color = hex;
+            rebuildInspector();
+            openToolPopup(null, null, true);
+          });
+          swRow.append(sw);
         }
+        const cInp = document.createElement("input");
+        cInp.type = "color"; cInp.value = state.brush.color; cInp.className = "color-native";
+        cInp.addEventListener("input", () => { state.brush.color = cInp.value; Broadcast(); });
+        swRow.append(cInp);
+        pop.append(Construct("div", "property-label", "Ink Color"), swRow);
 
         makePopupSlider(pop, "Brush Size", 0.03, 0.9, 0.01, "m", () => state.brush.size, (v) => { state.brush.size = v; state.brush.pixelRadius = Math.round(v * 110); });
         makePopupSlider(pop, "Opacity", 0.05, 1, 0.01, "", () => state.brush.opacity, (v) => { state.brush.opacity = v; });
@@ -1298,11 +1296,9 @@ export function mountTexturePaintWorkspace(root, appBridge) {
         makePopupSlider(pop, "Hardness", 0.05, 0.98, 0.01, "", () => state.brush.hardness, (v) => { state.brush.hardness = v; });
         makePopupSlider(pop, "Tip Angle", -180, 180, 1, "°", () => state.brush.angle, (v) => { state.brush.angle = v; });
         makePopupSlider(pop, "Tip Roundness", 0.15, 1.0, 0.01, "", () => state.brush.roundness, (v) => { state.brush.roundness = v; });
-        if (tool === "paint") {
-          makePopupSlider(pop, "Roughness", 0.02, 1, 0.01, "", () => state.brush.roughness, (v) => { state.brush.roughness = v; });
-          makePopupSlider(pop, "Metalness", 0, 1, 0.01, "", () => state.brush.metalness, (v) => { state.brush.metalness = v; });
-          makePopupSlider(pop, "Height Relief", -1, 1, 0.02, "", () => state.brush.height, (v) => { state.brush.height = v; });
-        }
+        makePopupSlider(pop, "Roughness", 0.02, 1, 0.01, "", () => state.brush.roughness, (v) => { state.brush.roughness = v; });
+        makePopupSlider(pop, "Metalness", 0, 1, 0.01, "", () => state.brush.metalness, (v) => { state.brush.metalness = v; });
+        makePopupSlider(pop, "Height Relief", -1, 1, 0.02, "", () => state.brush.height, (v) => { state.brush.height = v; });
       } else if (state.popupSubTab === "dynamics") {
         pop.append(Construct("div", "property-label", "Stroke & Lazy Mouse"));
         makePopupSlider(pop, "Spacing", 0.06, 1.0, 0.01, "", () => state.brush.spacing, (v) => { state.brush.spacing = v; });
@@ -1315,92 +1311,90 @@ export function mountTexturePaintWorkspace(root, appBridge) {
         makePopupSlider(pop, "Position Scatter", 0, 1.5, 0.02, "r", () => state.brush.jitter.scatter, (v) => { state.brush.jitter.scatter = v; });
         makePopupSlider(pop, "Flow Jitter", 0, 0.8, 0.01, "", () => state.brush.jitter.flow, (v) => { state.brush.jitter.flow = v; });
 
-        if (tool === "paint") {
-          pop.append(Construct("div", "property-label", "Colour Dynamics"));
+        pop.append(Construct("div", "property-label", "Colour Dynamics"));
+        FilterDropdownPill(pop, {
+          Label: "Colour Mode",
+          Prefix: "Mode:",
+          Placeholder: "Filter colour modes...",
+          Transient: true,
+          Options: COLOUR_DYNAMIC_MODES,
+          Read: () => state.brush.colourDynamics.mode,
+          Write: (v) => {
+            state.brush.colourDynamics.mode = v;
+            Broadcast();
+            openToolPopup(null, null, true);
+          },
+        });
+
+        const cdMode = state.brush.colourDynamics.mode;
+        if (cdMode === "stroke-gradient" || cdMode === "multicolour" || cdMode === "multicolour-cycle") {
           FilterDropdownPill(pop, {
-            Label: "Colour Mode",
-            Prefix: "Mode:",
-            Placeholder: "Filter colour modes...",
+            Label: "Gradient / Palette Preset",
+            Prefix: "Palette:",
+            Placeholder: "Filter palettes...",
             Transient: true,
-            Options: COLOUR_DYNAMIC_MODES,
-            Read: () => state.brush.colourDynamics.mode,
-            Write: (v) => {
-              state.brush.colourDynamics.mode = v;
+            Options: COLOUR_GRADIENT_PRESETS,
+            Read: () => state.brush.colourDynamics.gradientPreset,
+            Write: (id, opt) => {
+              state.brush.colourDynamics.gradientPreset = id;
+              if (opt?.stops) {
+                state.brush.colourDynamics.gradientStops = [...opt.stops];
+                state.brush.colourDynamics.paletteColors = [...opt.stops];
+              }
               Broadcast();
               openToolPopup(null, null, true);
             },
           });
-
-          const cdMode = state.brush.colourDynamics.mode;
-          if (cdMode === "stroke-gradient" || cdMode === "multicolour" || cdMode === "multicolour-cycle") {
-            FilterDropdownPill(pop, {
-              Label: "Gradient / Palette Preset",
-              Prefix: "Palette:",
-              Placeholder: "Filter palettes...",
-              Transient: true,
-              Options: COLOUR_GRADIENT_PRESETS,
-              Read: () => state.brush.colourDynamics.gradientPreset,
-              Write: (id, opt) => {
-                state.brush.colourDynamics.gradientPreset = id;
-                if (opt?.stops) {
-                  state.brush.colourDynamics.gradientStops = [...opt.stops];
-                  state.brush.colourDynamics.paletteColors = [...opt.stops];
-                }
+          MultiColourRow(pop, {
+            Label: cdMode === "stroke-gradient" ? "Gradient Colour Stops" : "Multicolour Palette",
+            Transient: true,
+            Read: () => (cdMode === "stroke-gradient" ? state.brush.colourDynamics.gradientStops : state.brush.colourDynamics.paletteColors),
+            Write: (list) => {
+              if (cdMode === "stroke-gradient") state.brush.colourDynamics.gradientStops = list;
+              else state.brush.colourDynamics.paletteColors = list;
+              Broadcast();
+            },
+          });
+          if (cdMode === "stroke-gradient") {
+            makePopupSlider(pop, "Gradient Span (Dabs)", 6, 120, 1, "", () => state.brush.colourDynamics.gradientLength, (v) => { state.brush.colourDynamics.gradientLength = v; });
+            const wrapRow = Construct("div", "chip-strip");
+            for (const [wLabel, wKey] of [["Ping-Pong", "pingpong"], ["Loop", "loop"], ["Clamp", "clamp"]]) {
+              const wb = Construct("button", "chip-btn" + (state.brush.colourDynamics.gradientWrap === wKey ? " active" : ""), wLabel);
+              wb.type = "button";
+              wb.addEventListener("click", () => {
+                state.brush.colourDynamics.gradientWrap = wKey;
                 Broadcast();
                 openToolPopup(null, null, true);
-              },
-            });
-            MultiColourRow(pop, {
-              Label: cdMode === "stroke-gradient" ? "Gradient Colour Stops" : "Multicolour Palette",
-              Transient: true,
-              Read: () => (cdMode === "stroke-gradient" ? state.brush.colourDynamics.gradientStops : state.brush.colourDynamics.paletteColors),
-              Write: (list) => {
-                if (cdMode === "stroke-gradient") state.brush.colourDynamics.gradientStops = list;
-                else state.brush.colourDynamics.paletteColors = list;
-                Broadcast();
-              },
-            });
-            if (cdMode === "stroke-gradient") {
-              makePopupSlider(pop, "Gradient Span (Dabs)", 6, 120, 1, "", () => state.brush.colourDynamics.gradientLength, (v) => { state.brush.colourDynamics.gradientLength = v; });
-              const wrapRow = Construct("div", "chip-strip");
-              for (const [wLabel, wKey] of [["Ping-Pong", "pingpong"], ["Loop", "loop"], ["Clamp", "clamp"]]) {
-                const wb = Construct("button", "chip-btn" + (state.brush.colourDynamics.gradientWrap === wKey ? " active" : ""), wLabel);
-                wb.type = "button";
-                wb.addEventListener("click", () => {
-                  state.brush.colourDynamics.gradientWrap = wKey;
-                  Broadcast();
-                  openToolPopup(null, null, true);
-                });
-                wrapRow.append(wb);
-              }
-              pop.append(Construct("div", "property-label", "Gradient Wrap"), wrapRow);
+              });
+              wrapRow.append(wb);
             }
-          } else if (cdMode === "temperature") {
-            makePopupSlider(pop, "Warm ↔ Cool Shift", 0, 1, 0.02, "", () => state.brush.colourDynamics.temperatureShift, (v) => { state.brush.colourDynamics.temperatureShift = v; });
+            pop.append(Construct("div", "property-label", "Gradient Wrap"), wrapRow);
           }
-
-          FilterDropdownPill(pop, {
-            Label: "Opacity Dynamics",
-            Prefix: "Opacity:",
-            Placeholder: "Filter opacity modes...",
-            Transient: true,
-            Options: OPACITY_DYNAMIC_MODES,
-            Read: () => state.brush.colourDynamics.opacityMode,
-            Write: (v) => {
-              state.brush.colourDynamics.opacityMode = v;
-              Broadcast();
-              openToolPopup(null, null, true);
-            },
-          });
-          makePopupSlider(pop, "Opacity Jitter", 0, 0.95, 0.01, "", () => state.brush.colourDynamics.opacityJitter, (v) => { state.brush.colourDynamics.opacityJitter = v; });
-          if (state.brush.colourDynamics.opacityMode !== "constant") {
-            makePopupSlider(pop, "Min Opacity Floor", 0.02, 1, 0.01, "", () => state.brush.colourDynamics.opacityMin, (v) => { state.brush.colourDynamics.opacityMin = v; });
-          }
-          makePopupSlider(pop, "Hue Jitter", 0, 1, 0.01, "", () => state.brush.colourDynamics.hueJitter, (v) => { state.brush.colourDynamics.hueJitter = v; });
-          makePopupSlider(pop, "Saturation Jitter", 0, 0.8, 0.01, "", () => state.brush.colourDynamics.satJitter, (v) => { state.brush.colourDynamics.satJitter = v; });
-          makePopupSlider(pop, "Value Jitter", 0, 0.8, 0.01, "", () => state.brush.colourDynamics.valJitter, (v) => { state.brush.colourDynamics.valJitter = v; });
-          makePopupToggle(pop, "Hue Shift Over Stroke Curve", () => state.brush.colourDynamics.strokeGradient, (v) => { state.brush.colourDynamics.strokeGradient = v; });
+        } else if (cdMode === "temperature") {
+          makePopupSlider(pop, "Warm ↔ Cool Shift", 0, 1, 0.02, "", () => state.brush.colourDynamics.temperatureShift, (v) => { state.brush.colourDynamics.temperatureShift = v; });
         }
+
+        FilterDropdownPill(pop, {
+          Label: "Opacity Dynamics",
+          Prefix: "Opacity:",
+          Placeholder: "Filter opacity modes...",
+          Transient: true,
+          Options: OPACITY_DYNAMIC_MODES,
+          Read: () => state.brush.colourDynamics.opacityMode,
+          Write: (v) => {
+            state.brush.colourDynamics.opacityMode = v;
+            Broadcast();
+            openToolPopup(null, null, true);
+          },
+        });
+        makePopupSlider(pop, "Opacity Jitter", 0, 0.95, 0.01, "", () => state.brush.colourDynamics.opacityJitter, (v) => { state.brush.colourDynamics.opacityJitter = v; });
+        if (state.brush.colourDynamics.opacityMode !== "constant") {
+          makePopupSlider(pop, "Min Opacity Floor", 0.02, 1, 0.01, "", () => state.brush.colourDynamics.opacityMin, (v) => { state.brush.colourDynamics.opacityMin = v; });
+        }
+        makePopupSlider(pop, "Hue Jitter", 0, 1, 0.01, "", () => state.brush.colourDynamics.hueJitter, (v) => { state.brush.colourDynamics.hueJitter = v; });
+        makePopupSlider(pop, "Saturation Jitter", 0, 0.8, 0.01, "", () => state.brush.colourDynamics.satJitter, (v) => { state.brush.colourDynamics.satJitter = v; });
+        makePopupSlider(pop, "Value Jitter", 0, 0.8, 0.01, "", () => state.brush.colourDynamics.valJitter, (v) => { state.brush.colourDynamics.valJitter = v; });
+        makePopupToggle(pop, "Hue Shift Over Stroke Curve", () => state.brush.colourDynamics.strokeGradient, (v) => { state.brush.colourDynamics.strokeGradient = v; });
       } else {
         const cTabs = Construct("div", "chip-strip");
         for (const [ck, cLabel] of [["falloff", "Tip Falloff"], ["sizeOverStroke", "Size"], ["opacityOverStroke", "Opacity"], ["hueOverStroke", "Hue Shift"]]) {
@@ -1421,6 +1415,38 @@ export function mountTexturePaintWorkspace(root, appBridge) {
           Write: (pts) => { state.brush.curves[state.activeCurveKey] = pts; Broadcast(); },
         });
       }
+    } else if (tool === "erase") {
+      // Strictly Eraser-relevant controls only — ZERO ink color / rough / metal / stamp clutter!
+      ChannelMaskRow(pop, {
+        Label: "Erase PBR Channels",
+        Transient: true,
+        Read: () => state.brush.eraseChannels,
+        Write: (next) => {
+          state.brush.eraseChannels = next;
+          Broadcast();
+        },
+      });
+      const tipRow = Construct("div", "chip-strip");
+      for (const [label, key] of [["Round", "round"], ["Chisel", "chisel"], ["Chalk", "chalk"], ["Splatter", "splatter"], ["Sponge", "sponge"], ["Custom Img", "custom"]]) {
+        const cb = Construct("button", "chip-btn" + (state.brush.tip === key ? " active" : ""), label);
+        cb.type = "button";
+        cb.addEventListener("click", () => {
+          if (key === "custom" && !state.brush.customTipData) {
+            triggerAddImage("tip");
+            return;
+          }
+          state.brush.tip = key;
+          rebuildInspector();
+          openToolPopup(null, null, true);
+        });
+        tipRow.append(cb);
+      }
+      pop.append(Construct("div", "property-label", "Eraser Tip Shape"), tipRow);
+      makePopupSlider(pop, "Eraser Size", 0.03, 0.9, 0.01, "m", () => state.brush.size, (v) => { state.brush.size = v; state.brush.pixelRadius = Math.round(v * 110); });
+      makePopupSlider(pop, "Opacity", 0.05, 1, 0.01, "", () => state.brush.opacity, (v) => { state.brush.opacity = v; });
+      makePopupSlider(pop, "Flow", 0.05, 1, 0.01, "", () => state.brush.flow, (v) => { state.brush.flow = v; });
+      makePopupSlider(pop, "Hardness", 0.05, 0.98, 0.01, "", () => state.brush.hardness, (v) => { state.brush.hardness = v; });
+      makePopupSlider(pop, "Stabilizer", 0, 0.85, 0.02, "", () => state.brush.stabilizer, (v) => { state.brush.stabilizer = v; });
     } else if (tool === "fill") {
       const scRow = Construct("div", "chip-strip");
       for (const [label, sc] of [["Mesh Part", "part"], ["UV Island", "island"], ["Whole Mesh", "all"]]) {
@@ -1442,7 +1468,7 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       for (const hex of QUICK_SWATCHES) {
         const sw = Construct("button", "tool-popup-swatch" + (state.brush.color.toLowerCase() === hex ? " active" : ""));
         sw.type = "button"; sw.style.background = hex;
-        sw.addEventListener("click", () => { state.brush.color = hex; Broadcast(); openToolPopup(null, null, true); });
+        sw.addEventListener("click", () => { state.brush.color = hex; rebuildInspector(); openToolPopup(null, null, true); });
         swRow.append(sw);
       }
       pop.append(Construct("div", "property-label", "Fill Color"), swRow);
@@ -1528,6 +1554,12 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     if (moved < 5) openToolPopup(e.clientX, e.clientY);
   }, { capture: true });
 
+  rightCol.addEventListener("contextmenu", (e) => {
+    if (["INPUT", "TEXTAREA", "SELECT", "BUTTON"].includes(e.target?.tagName)) return;
+    e.preventDefault();
+    openToolPopup(e.clientX, e.clientY);
+  });
+
   // ----------------------------------------------------------------- LAYER ORDERING & LEFT COLUMN
   function moveLayerByOffset(layerId, deltaVisualUp) {
     // state.doc.layers is bottom-to-top compositing order (index 0 = bottom, index len-1 = top).
@@ -1562,6 +1594,8 @@ export function mountTexturePaintWorkspace(root, appBridge) {
   function selectTool(id) {
     state.brush.tool = id;
     for (const [k, b] of toolButtons.entries()) b.classList.toggle("active", k === id);
+    rebuildInspector();
+    if (activeToolPopup) openToolPopup(null, null, true);
     Broadcast();
   }
 
@@ -1615,7 +1649,10 @@ export function mountTexturePaintWorkspace(root, appBridge) {
       else thumb.append(ConstructGlyph("Brush"));
 
       const partTag = layer.partFilter >= 0 && meshIndex?.partNames[layer.partFilter] ? meshIndex.partNames[layer.partFilter] : "All";
-      const sub = `${layer.kind.toUpperCase()} · ${layer.blend} · ${partTag}`;
+      const enabledCount = layer.channels ? Object.values(layer.channels).filter(Boolean).length : 4;
+      const chTag = layer.kind !== "folder" && enabledCount < 4 ? ` · ${enabledCount}/4 ch` : "";
+      const sub = `${layer.kind.toUpperCase()} · ${layer.blend} · ${partTag}${chTag}`;
+      if (layer.parentId) row.style.marginLeft = "14px";
       const info = Construct("div", "stack-row-info", [
         Construct("span", "stack-row-title", layer.name),
         Construct("span", "stack-row-sub", sub),
@@ -1729,13 +1766,29 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     rightInner.innerHTML = "";
 
     const layer = state.doc.layers.find((l) => l.id === state.doc.selectedLayerId) || state.doc.layers[0];
+    const activeChCount = layer?.channels ? Object.values(layer.channels).filter(Boolean).length : 4;
+    const ensureLayerChannelState = (l) => {
+      if (!l) return;
+      if (!l.channels) l.channels = { albedo: true, roughness: true, metalness: true, height: true };
+      if (!l.channelOpacity) l.channelOpacity = { albedo: 1, roughness: 1, metalness: 1, height: 1 };
+      if (!l.channelBlends) l.channelBlends = { albedo: "Inherit", roughness: "Inherit", metalness: "Inherit", height: "Inherit" };
+    };
+    ensureLayerChannelState(layer);
+
+    if (
+      state.inspectedLayerChannel !== "all" &&
+      layer?.channels &&
+      layer.channels[state.inspectedLayerChannel] === false
+    ) {
+      state.inspectedLayerChannel = "all";
+    }
 
     rightInner.append(
       Construct("div", "object-heading", [
-        Construct("div", "object-symbol", ConstructGlyph("Brush")),
+        Construct("div", "object-symbol", ConstructGlyph("Layers")),
         Construct("div", "object-heading-copy", [
           Construct("strong", null, layer ? layer.name : "No Layer"),
-          Construct("span", null, state.doc.editingMask ? "EDITING LAYER MASK (WHITE=SHOW)" : `${layer?.kind?.toUpperCase() || "PAINT"} LAYER`),
+          Construct("span", null, state.doc.editingMask ? "EDITING LAYER MASK (WHITE=SHOW)" : `${layer?.kind?.toUpperCase() || "PAINT"} LAYER · LAYER INSPECTOR`),
         ]),
       ]),
     );
@@ -1743,177 +1796,37 @@ export function mountTexturePaintWorkspace(root, appBridge) {
     MetricTrio(rightInner, [
       { Label: "GPU Canvas", Highlight: true, Read: () => ({ value: `${res}px`, sub: gpuPaint.isActive ? "WebGL2 RT" : "CPU Mock" }) },
       { Label: "Parts", Read: () => ({ value: String(meshIndex?.partNames?.length || 1), sub: `${meshIndex?.islandCount || 1} Islands` }) },
-      { Label: "Baked Maps", Read: () => ({ value: state.doc.bakedMaps ? "Linked" : "Geom", sub: state.doc.bakedMaps ? "High/Low AO" : "Auto Cues" }) },
+      { Label: "PBR Channels", Read: () => ({ value: `${activeChCount}/4`, sub: state.doc.bakedMaps ? "Baked AO" : "Live Layer" }) },
     ]);
 
-    const bSec = SectionCard(rightInner, { Title: "Brush & Tool Parameters", Glyph: "Brush" });
-    SegmentedRow(bSec.Inner, {
-      Label: "Brush Tip Shape",
-      Options: [["Round", "round"], ["Chisel", "chisel"], ["Chalk", "chalk"], ["Splatter", "splatter"], ["Sponge", "sponge"], ["Custom", "custom"]],
-      Read: () => state.brush.tip,
-      Write: (v) => {
-        if (v === "custom" && !state.brush.customTipData) {
-          triggerAddImage("tip");
-          return;
-        }
-        state.brush.tip = v;
-      },
-    });
-    ActionRow(bSec.Inner, [
-      { Label: "+ Add Tip Image", Glyph: "Image", Act: () => triggerAddImage("tip") },
-      { Label: "+ Add Fill Image", Glyph: "Image", Tone: "warm", Act: () => triggerAddImage("fill") },
+    // Compact 1-row Active Tool launcher — keeps ALL brush/tool clutter in the Right-Click / Q inspector!
+    const toolBarCard = Construct("div", "chip-strip");
+    toolBarCard.style.cssText = "align-items:center;justify-content:space-between;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--card);";
+    const activeToolLabel = TOOL_LABELS[state.brush.tool] || "Brush";
+    const activeSubMeta =
+      state.brush.tool === "paint" ? `${state.brush.tip} · ${state.brush.color}`
+        : state.brush.tool === "erase" ? `${state.brush.tip} eraser`
+          : state.brush.tool === "fill" ? `${state.fillScope} fill`
+            : state.brush.tool === "stamp" ? (state.brush.stampName || "Stamp")
+              : "Sample surface";
+    const toolMetaCopy = Construct("div", null, [
+      Construct("strong", null, `${activeToolLabel} Active`),
+      Construct("div", null, `Right-click or Q for Brush Inspector · ${activeSubMeta}`),
     ]);
-    ChannelMaskRow(bSec.Inner, {
-      Label: "Paint & Stamp Channels",
-      Read: () => state.brush.paintChannels,
-      Write: (next) => { state.brush.paintChannels = next; },
+    toolMetaCopy.style.cssText = "font-size:11px;line-height:1.35;color:var(--muted);";
+    const openBrushBtn = Construct("button", "chip-btn active", [ConstructGlyph("Sliders"), Construct("span", null, "Brush / Tool")]);
+    openBrushBtn.type = "button";
+    openBrushBtn.title = "Open Brush & Active Tool Inspector (Right-Click / Q)";
+    openBrushBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const r = openBrushBtn.getBoundingClientRect();
+      openToolPopup(r.left - 340, r.top);
     });
-    ChannelMaskRow(bSec.Inner, {
-      Label: "Eraser PBR Channels",
-      Read: () => state.brush.eraseChannels,
-      Write: (next) => { state.brush.eraseChannels = next; },
-    });
-    ChannelMaskRow(bSec.Inner, {
-      Label: "Fill Tool PBR Channels",
-      Read: () => state.brush.fillChannels,
-      Write: (next) => { state.brush.fillChannels = next; },
-    });
-    ColorRow(bSec.Inner, { Label: "Paint Color", Read: () => state.brush.color, Write: (hex) => { state.brush.color = hex; } });
-    SliderRow(bSec.Inner, { Label: "3D Radius", Minimum: 0.03, Maximum: 0.9, Step: 0.01, Unit: "m", Read: () => state.brush.size, Write: (v) => { state.brush.size = v; state.brush.pixelRadius = Math.round(v * 110); } });
-    SliderRow(bSec.Inner, { Label: "Opacity", Minimum: 0.05, Maximum: 1, Step: 0.01, Read: () => state.brush.opacity, Write: (v) => { state.brush.opacity = v; } });
-    SliderRow(bSec.Inner, { Label: "Flow", Minimum: 0.05, Maximum: 1, Step: 0.01, Read: () => state.brush.flow, Write: (v) => { state.brush.flow = v; } });
-    SliderRow(bSec.Inner, { Label: "Hardness", Minimum: 0.05, Maximum: 0.98, Step: 0.01, Read: () => state.brush.hardness, Write: (v) => { state.brush.hardness = v; } });
-    SliderRow(bSec.Inner, { Label: "Tip Angle", Minimum: -180, Maximum: 180, Step: 1, Unit: "°", Read: () => state.brush.angle, Write: (v) => { state.brush.angle = v; } });
-    SliderRow(bSec.Inner, { Label: "Tip Roundness", Minimum: 0.15, Maximum: 1.0, Step: 0.01, Read: () => state.brush.roundness, Write: (v) => { state.brush.roundness = v; } });
-    SliderRow(bSec.Inner, { Label: "Brush Roughness", Minimum: 0.02, Maximum: 1, Step: 0.01, Read: () => state.brush.roughness, Write: (v) => { state.brush.roughness = v; } });
-    SliderRow(bSec.Inner, { Label: "Brush Metalness", Minimum: 0, Maximum: 1, Step: 0.01, Read: () => state.brush.metalness, Write: (v) => { state.brush.metalness = v; } });
-    SliderRow(bSec.Inner, { Label: "Brush Height Relief", Minimum: -1, Maximum: 1, Step: 0.02, Read: () => state.brush.height, Write: (v) => { state.brush.height = v; } });
-    SegmentedRow(bSec.Inner, {
-      Label: "Fill Tool Scope",
-      Options: [["Mesh Part", "part"], ["UV Island", "island"], ["Whole Mesh", "all"]],
-      Read: () => state.fillScope,
-      Write: (v) => { state.fillScope = v; },
-    });
-
-    const dynSec = SectionCard(rightInner, { Title: "Stroke, Jitter & Colour Dynamics", Glyph: "Sparkles", Open: true });
-    SliderRow(dynSec.Inner, { Label: "Stroke Spacing", Minimum: 0.06, Maximum: 1.0, Step: 0.01, Read: () => state.brush.spacing, Write: (v) => { state.brush.spacing = v; } });
-    SliderRow(dynSec.Inner, { Label: "Lazy Mouse Stabilizer", Minimum: 0, Maximum: 0.85, Step: 0.02, Read: () => state.brush.stabilizer, Write: (v) => { state.brush.stabilizer = v; } });
-    SwitchRow(dynSec.Inner, { Label: "Follow Stroke Direction", Read: () => state.brush.followDirection, Write: (v) => { state.brush.followDirection = v; } });
-    SliderRow(dynSec.Inner, { Label: "Size Jitter", Minimum: 0, Maximum: 0.9, Step: 0.01, Read: () => state.brush.jitter.size, Write: (v) => { state.brush.jitter.size = v; } });
-    SliderRow(dynSec.Inner, { Label: "Angle Jitter", Minimum: 0, Maximum: 180, Step: 1, Unit: "°", Read: () => state.brush.jitter.angle, Write: (v) => { state.brush.jitter.angle = v; } });
-    SliderRow(dynSec.Inner, { Label: "Position Scatter", Minimum: 0, Maximum: 1.5, Step: 0.02, Unit: "r", Read: () => state.brush.jitter.scatter, Write: (v) => { state.brush.jitter.scatter = v; } });
-    SliderRow(dynSec.Inner, { Label: "Flow Jitter", Minimum: 0, Maximum: 0.8, Step: 0.01, Read: () => state.brush.jitter.flow, Write: (v) => { state.brush.jitter.flow = v; } });
-
-    FilterDropdownPill(dynSec.Inner, {
-      Label: "Colour Dynamics Mode",
-      Prefix: "Mode:",
-      Placeholder: "Filter colour modes...",
-      Options: COLOUR_DYNAMIC_MODES,
-      Read: () => state.brush.colourDynamics.mode,
-      Write: (v) => { state.brush.colourDynamics.mode = v; rebuildInspector(); },
-    });
-    if (state.brush.colourDynamics.mode === "stroke-gradient" || state.brush.colourDynamics.mode === "multicolour" || state.brush.colourDynamics.mode === "multicolour-cycle") {
-      FilterDropdownPill(dynSec.Inner, {
-        Label: "Gradient / Palette Preset",
-        Prefix: "Preset:",
-        Placeholder: "Filter gradient palettes...",
-        Options: COLOUR_GRADIENT_PRESETS,
-        Read: () => state.brush.colourDynamics.gradientPreset,
-        Write: (id, opt) => {
-          state.brush.colourDynamics.gradientPreset = id;
-          if (opt?.stops) {
-            state.brush.colourDynamics.gradientStops = [...opt.stops];
-            state.brush.colourDynamics.paletteColors = [...opt.stops];
-          }
-          rebuildInspector();
-        },
-      });
-      MultiColourRow(dynSec.Inner, {
-        Label: state.brush.colourDynamics.mode === "stroke-gradient" ? "Gradient Stops" : "Multicolour Swatches",
-        Read: () => (state.brush.colourDynamics.mode === "stroke-gradient" ? state.brush.colourDynamics.gradientStops : state.brush.colourDynamics.paletteColors),
-        Write: (list) => {
-          if (state.brush.colourDynamics.mode === "stroke-gradient") state.brush.colourDynamics.gradientStops = list;
-          else state.brush.colourDynamics.paletteColors = list;
-        },
-      });
-      if (state.brush.colourDynamics.mode === "stroke-gradient") {
-        SliderRow(dynSec.Inner, { Label: "Gradient Span (Dabs)", Minimum: 6, Maximum: 120, Step: 1, Read: () => state.brush.colourDynamics.gradientLength, Write: (v) => { state.brush.colourDynamics.gradientLength = v; } });
-        SegmentedRow(dynSec.Inner, {
-          Label: "Gradient Wrap",
-          Options: [["Ping-Pong", "pingpong"], ["Loop", "loop"], ["Clamp", "clamp"]],
-          Read: () => state.brush.colourDynamics.gradientWrap,
-          Write: (v) => { state.brush.colourDynamics.gradientWrap = v; },
-        });
-      }
-    } else if (state.brush.colourDynamics.mode === "temperature") {
-      SliderRow(dynSec.Inner, { Label: "Warm ↔ Cool Shift", Minimum: 0, Maximum: 1, Step: 0.02, Read: () => state.brush.colourDynamics.temperatureShift, Write: (v) => { state.brush.colourDynamics.temperatureShift = v; } });
-    }
-
-    FilterDropdownPill(dynSec.Inner, {
-      Label: "Opacity Dynamics Mode",
-      Prefix: "Opacity:",
-      Placeholder: "Filter opacity modes...",
-      Options: OPACITY_DYNAMIC_MODES,
-      Read: () => state.brush.colourDynamics.opacityMode,
-      Write: (v) => { state.brush.colourDynamics.opacityMode = v; rebuildInspector(); },
-    });
-    SliderRow(dynSec.Inner, { Label: "Opacity Jitter", Minimum: 0, Maximum: 0.95, Step: 0.01, Read: () => state.brush.colourDynamics.opacityJitter, Write: (v) => { state.brush.colourDynamics.opacityJitter = v; } });
-    SliderRow(dynSec.Inner, {
-      Label: "Min Opacity Floor",
-      Minimum: 0.02,
-      Maximum: 1.0,
-      Step: 0.01,
-      When: () => state.brush.colourDynamics.opacityMode !== "constant",
-      Read: () => state.brush.colourDynamics.opacityMin,
-      Write: (v) => { state.brush.colourDynamics.opacityMin = v; },
-    });
-    SliderRow(dynSec.Inner, {
-      Label: "Pulse Frequency",
-      Minimum: 0.08,
-      Maximum: 2.0,
-      Step: 0.02,
-      When: () => state.brush.colourDynamics.opacityMode === "pulse",
-      Read: () => state.brush.colourDynamics.opacityPulseFreq,
-      Write: (v) => { state.brush.colourDynamics.opacityPulseFreq = v; },
-    });
-    SliderRow(dynSec.Inner, { Label: "Hue Jitter", Minimum: 0, Maximum: 1.0, Step: 0.01, Read: () => state.brush.colourDynamics.hueJitter, Write: (v) => { state.brush.colourDynamics.hueJitter = v; } });
-    SliderRow(dynSec.Inner, { Label: "Saturation Jitter", Minimum: 0, Maximum: 0.8, Step: 0.01, Read: () => state.brush.colourDynamics.satJitter, Write: (v) => { state.brush.colourDynamics.satJitter = v; } });
-    SliderRow(dynSec.Inner, { Label: "Value Jitter", Minimum: 0, Maximum: 0.8, Step: 0.01, Read: () => state.brush.colourDynamics.valJitter, Write: (v) => { state.brush.colourDynamics.valJitter = v; } });
-    SwitchRow(dynSec.Inner, { Label: "Hue Shift Over Stroke Curve", Read: () => state.brush.colourDynamics.strokeGradient, Write: (v) => { state.brush.colourDynamics.strokeGradient = v; } });
-
-    const curveSec = SectionCard(rightInner, { Title: "Brush & Stroke Curves", Glyph: "Curve", Open: true });
-    SegmentedRow(curveSec.Inner, {
-      Label: "Curve Target",
-      Options: [["Tip Falloff", "falloff"], ["Size", "sizeOverStroke"], ["Opacity", "opacityOverStroke"], ["Hue", "hueOverStroke"]],
-      Read: () => state.activeCurveKey,
-      Write: (v) => { state.activeCurveKey = v; },
-    });
-    CurveRow(curveSec.Inner, {
-      Label: "Response Spline",
-      Detail: "Click add · Drag · Right-click del",
-      Read: () => state.brush.curves[state.activeCurveKey],
-      Write: (pts) => { state.brush.curves[state.activeCurveKey] = pts; },
-    });
-
-    const stSec = SectionCard(rightInner, { Title: "Stamps & Custom Images", Glyph: "Stamp", Badge: String(stampPreviews.length), Open: false });
-    ActionRow(stSec.Inner, [{ Label: "+ Add Stamp Image", Glyph: "Image", Tone: "warm", Act: () => triggerAddImage("stamp") }]);
-    const stampGrid = Construct("div", "stamp-preview-grid");
-    for (const sp of stampPreviews) {
-      stampGrid.append(
-        createStampPreviewCard(sp, state.brush.stampName === sp.name && state.brush.tool === "stamp", () => {
-          state.brush.stampData = sp.evaluated;
-          state.brush.stampName = sp.name;
-          if (gpuPaint.isActive) gpuPaint.ensureStampTexture(sp.evaluated, false);
-          selectTool("stamp");
-          rebuildInspector();
-          Toast(`Equipped stamp "${sp.name}"`);
-        }),
-      );
-    }
-    stSec.Inner.append(stampGrid);
+    toolBarCard.append(toolMetaCopy, openBrushBtn);
+    rightInner.append(toolBarCard);
 
     if (layer) {
-      const lSec = SectionCard(rightInner, { Title: `Layer Inspector: ${layer.name}`, Glyph: "Layers", Badge: layer.kind.toUpperCase() });
+      const lSec = SectionCard(rightInner, { Title: `Layer Inspector: ${layer.name}`, Glyph: "Layers", Badge: layer.kind.toUpperCase(), Open: true });
       TextRow(lSec.Inner, { Label: "Layer Name", Read: () => layer.name, Write: (v) => { layer.name = v; renderLeftColumn(); } });
       SwitchRow(lSec.Inner, {
         Label: "Layer Visible",
@@ -1925,9 +1838,10 @@ export function mountTexturePaintWorkspace(root, appBridge) {
         Read: () => !!layer.locked,
         Write: (v) => { layer.locked = !!v; renderLeftColumn(); },
       });
+
       if (layer.kind !== "folder") {
         FilterDropdownPill(lSec.Inner, {
-          Label: "Blend Mode",
+          Label: "Master Blend Mode",
           Prefix: "Blend:",
           Placeholder: "Filter blend modes...",
           Options: ["Normal", "Multiply", "Screen", "Overlay", "Add", "Darken"].map((b) => ({ value: b, label: b })),
@@ -1935,19 +1849,146 @@ export function mountTexturePaintWorkspace(root, appBridge) {
           Write: (v) => { layer.blend = v; refreshComposite(); renderLeftColumn(); },
         });
       }
-      SliderRow(lSec.Inner, { Label: "Layer Opacity", Minimum: 0, Maximum: 1, Step: 0.01, Read: () => layer.opacity, Write: (v) => { layer.opacity = v; refreshComposite(); } });
+      SliderRow(lSec.Inner, { Label: "Master Opacity", Minimum: 0, Maximum: 1, Step: 0.01, Read: () => layer.opacity, Write: (v) => { layer.opacity = v; refreshComposite(); } });
       const partOpts = [["All Mesh Parts", -1], ...(meshIndex?.partNames || ["Surface"]).map((n, i) => [n, i])];
       SelectRow(lSec.Inner, { Label: "Target Part Filter", Options: partOpts, Read: () => layer.partFilter ?? -1, Write: (v) => { layer.partFilter = Number(v); refreshComposite(); renderLeftColumn(); } });
 
       if (layer.kind !== "folder") {
         ChannelMaskRow(lSec.Inner, {
-          Label: "Layer PBR Channels",
+          Label: "Active PBR Channels",
+          AddLabel: "Channel",
+          StrictPresence: true,
           Read: () => layer.channels,
-          Write: (next) => { layer.channels = next; refreshComposite(); renderLeftColumn(); },
+          Write: (next) => {
+            layer.channels = next;
+            if (state.inspectedLayerChannel !== "all" && !next[state.inspectedLayerChannel]) {
+              state.inspectedLayerChannel = "all";
+            }
+            refreshComposite();
+            renderLeftColumn();
+            rebuildInspector();
+          },
+        });
+
+        const chTabDefs = [["All", "all"]];
+        for (const [ck, cLabel] of [["Albedo", "albedo"], ["Rough", "roughness"], ["Metal", "metalness"], ["Height", "height"]]) {
+          if (layer.channels?.[cLabel]) chTabDefs.push([ck, cLabel]);
+        }
+        SegmentedRow(lSec.Inner, {
+          Label: "Inspect Channel",
+          Options: chTabDefs,
+          Read: () => state.inspectedLayerChannel,
+          Write: (v) => {
+            state.inspectedLayerChannel = v;
+            rebuildInspector();
+          },
         });
       }
 
-      if (layer.kind === "folder") {
+      const clearPaintLayerBuffers = () => {
+        if (layer.locked) { Toast("Layer is locked"); return; }
+        const snap = snapshotSelectedLayer();
+        if (gpuPaint.isActive && layer._gpu) {
+          gpuPaint._clearRT(layer._gpu.albedoRT, 0, 0, 0, 0);
+          gpuPaint._clearRT(layer._gpu.ormhRT, 0.5, 0, 0.5, 0);
+          gpuPaint._clearRT(layer._gpu.chanAlphaRT, 0, 0, 0, 0);
+        }
+        if (layer.pixels) {
+          layer.pixels.albedo?.fill(0);
+          layer.pixels.roughAlpha?.fill(0);
+          layer.pixels.metalAlpha?.fill(0);
+          layer.pixels.heightAlpha?.fill(0);
+        }
+        if (snap) pushUndoSnapshot(snap);
+        refreshComposite();
+        renderLeftColumn();
+        Toast(`Cleared "${layer.name}"`);
+      };
+
+      const ch = state.inspectedLayerChannel;
+      const CHAN_BLEND_OPTIONS = ["Inherit", "Normal", "Multiply", "Screen", "Overlay", "Add", "Darken"].map((b) => ({
+        value: b,
+        label: b === "Inherit" ? "Inherit (Master)" : b,
+      }));
+
+      if (layer.kind !== "folder" && ch !== "all") {
+        const chTitle = ch[0].toUpperCase() + ch.slice(1);
+        SliderRow(lSec.Inner, {
+          Label: `${chTitle} Channel Weight`,
+          Minimum: 0,
+          Maximum: 1,
+          Step: 0.01,
+          Read: () => layer.channelOpacity[ch] ?? 1,
+          Write: (v) => { layer.channelOpacity[ch] = v; refreshComposite(); },
+        });
+        FilterDropdownPill(lSec.Inner, {
+          Label: `${chTitle} Blend Override`,
+          Prefix: "Blend:",
+          Placeholder: "Filter channel blends...",
+          Options: CHAN_BLEND_OPTIONS,
+          Read: () => layer.channelBlends[ch] || "Inherit",
+          Write: (v) => { layer.channelBlends[ch] = v; refreshComposite(); },
+        });
+
+        // Direct per-channel value controls for each layer kind
+        if (layer.kind === "fill") {
+          if (ch === "albedo") {
+            ColorRow(lSec.Inner, { Label: "Fill Base Color", Read: () => layer.fill.color, Write: (v) => { layer.fill.color = v; refreshComposite(); renderLeftColumn(); } });
+            if (layer.fill.patternData) {
+              SliderRow(lSec.Inner, { Label: "Pattern Repeats", Minimum: 1, Maximum: 12, Step: 1, Read: () => layer.fill.patternRepeats || 3, Write: (v) => { layer.fill.patternRepeats = v; refreshComposite(); } });
+              SliderRow(lSec.Inner, { Label: "Pattern Rotation", Minimum: -180, Maximum: 180, Step: 1, Unit: "°", Read: () => layer.fill.patternRotation || 0, Write: (v) => { layer.fill.patternRotation = v; refreshComposite(); } });
+            }
+          } else if (ch === "roughness") {
+            SliderRow(lSec.Inner, { Label: "Fill Roughness", Minimum: 0.02, Maximum: 1, Step: 0.01, Read: () => layer.fill.roughness, Write: (v) => { layer.fill.roughness = v; refreshComposite(); } });
+          } else if (ch === "metalness") {
+            SliderRow(lSec.Inner, { Label: "Fill Metalness", Minimum: 0, Maximum: 1, Step: 0.01, Read: () => layer.fill.metalness, Write: (v) => { layer.fill.metalness = v; refreshComposite(); } });
+          } else if (ch === "height") {
+            SliderRow(lSec.Inner, { Label: "Fill Height Relief", Minimum: -1, Maximum: 1, Step: 0.02, Read: () => layer.fill.height ?? 0, Write: (v) => { layer.fill.height = v; refreshComposite(); } });
+            if (layer.fill.patternData) {
+              SliderRow(lSec.Inner, { Label: "Pattern Height Gain", Minimum: 0, Maximum: 2.5, Step: 0.05, Read: () => layer.fill.patternHeightStrength ?? 1.0, Write: (v) => { layer.fill.patternHeightStrength = v; refreshComposite(); } });
+            }
+          }
+        } else if (layer.kind === "material") {
+          if (ch === "albedo") {
+            ColorRow(lSec.Inner, { Label: "Material Tint", Read: () => layer.material.color, Write: (v) => { layer.material.color = v; refreshComposite(); renderLeftColumn(); } });
+          } else if (ch === "roughness") {
+            SliderRow(lSec.Inner, { Label: "Material Roughness", Minimum: 0.02, Maximum: 1, Step: 0.01, Read: () => layer.material.roughness, Write: (v) => { layer.material.roughness = v; refreshComposite(); } });
+          } else if (ch === "metalness") {
+            SliderRow(lSec.Inner, { Label: "Material Metalness", Minimum: 0, Maximum: 1, Step: 0.01, Read: () => layer.material.metalness, Write: (v) => { layer.material.metalness = v; refreshComposite(); } });
+          } else if (ch === "height") {
+            SliderRow(lSec.Inner, { Label: "Material Height Relief", Minimum: -1, Maximum: 1, Step: 0.02, Read: () => layer.material.height ?? 0, Write: (v) => { layer.material.height = v; refreshComposite(); } });
+          }
+        } else if (layer.kind === "generator") {
+          if (ch === "albedo") {
+            ColorRow(lSec.Inner, { Label: "Generator Color", Read: () => layer.generator.color, Write: (v) => { layer.generator.color = v; refreshComposite(); } });
+          } else if (ch === "roughness") {
+            SliderRow(lSec.Inner, { Label: "Generator Roughness", Minimum: 0.02, Maximum: 1, Step: 0.01, Read: () => layer.generator.roughness, Write: (v) => { layer.generator.roughness = v; refreshComposite(); } });
+          } else if (ch === "metalness") {
+            SliderRow(lSec.Inner, { Label: "Generator Metalness", Minimum: 0, Maximum: 1, Step: 0.01, Read: () => layer.generator.metalness, Write: (v) => { layer.generator.metalness = v; refreshComposite(); } });
+          } else if (ch === "height") {
+            SliderRow(lSec.Inner, { Label: "Generator Height Relief", Minimum: -1, Maximum: 1, Step: 0.02, Read: () => layer.generator.height ?? 0.1, Write: (v) => { layer.generator.height = v; refreshComposite(); } });
+          }
+        } else if (layer.kind === "paint" || layer.kind === "decal") {
+          ActionRow(lSec.Inner, [
+            {
+              Label: `Flood ${chTitle}`,
+              Glyph: "Fill",
+              Tone: "accent",
+              Act: () => {
+                if (layer.locked) { Toast("Layer is locked"); return; }
+                const prevScope = state.fillScope;
+                const prevFillCh = state.brush.fillChannels;
+                state.fillScope = "all";
+                state.brush.fillChannels = { albedo: ch === "albedo", roughness: ch === "roughness", metalness: ch === "metalness", height: ch === "height" };
+                performFillAtUv(layer, 0.5, 0.5);
+                state.brush.fillChannels = prevFillCh;
+                state.fillScope = prevScope;
+              },
+            },
+            { Label: "Clear Layer", Glyph: "Trash", Act: clearPaintLayerBuffers },
+          ]);
+        }
+      } else if (layer.kind === "folder") {
         const childLayers = state.doc.layers.filter((c) => c.parentId === layer.id);
         lSec.Inner.append(Construct("p", "property-hint", `Folder contains ${childLayers.length} nested child layer${childLayers.length === 1 ? "" : "s"}. Group opacity & visibility cascade during compositing.`));
         ActionRow(lSec.Inner, [
@@ -1979,10 +2020,12 @@ export function mountTexturePaintWorkspace(root, appBridge) {
             },
           },
         ]);
-      } else if (layer.kind === "paint" || layer.kind === "decal") {
-        ActionRow(lSec.Inner, [
+      } else if (layer.kind === "paint") {
+        const kSec = SectionCard(rightInner, { Title: "Paint Layer Actions", Glyph: "Brush", Open: true });
+        kSec.Inner.append(Construct("p", "property-hint", "Direct 3D/UV raster layer. Right-click canvas or press Q to switch brush tips, PBR values, or dynamics."));
+        ActionRow(kSec.Inner, [
           {
-            Label: "Flood Active Brush",
+            Label: "Flood Active Color",
             Glyph: "Fill",
             Tone: "accent",
             Act: () => {
@@ -1993,50 +2036,49 @@ export function mountTexturePaintWorkspace(root, appBridge) {
               state.fillScope = prevScope;
             },
           },
+          { Label: "Clear Layer", Glyph: "Trash", Act: clearPaintLayerBuffers },
+        ]);
+      } else if (layer.kind === "decal") {
+        const kSec = SectionCard(rightInner, { Title: "Decal Stamp Layer", Glyph: "Stamp", Open: true });
+        kSec.Inner.append(Construct("p", "property-hint", `Active stamp: ${state.brush.stampName || "Default"}. Adjust placement or click Change Stamp to browse stamps.`));
+        SliderRow(kSec.Inner, { Label: "Decal Scale", Minimum: 0.04, Maximum: 0.85, Step: 0.01, Read: () => state.brush.stampScale, Write: (v) => { state.brush.stampScale = v; } });
+        SliderRow(kSec.Inner, { Label: "Decal Rotation", Minimum: -180, Maximum: 180, Step: 1, Unit: "°", Read: () => state.brush.stampRotation, Write: (v) => { state.brush.stampRotation = v; } });
+        ActionRow(kSec.Inner, [
           {
-            Label: "Clear Layer",
-            Glyph: "Trash",
-            Act: () => {
-              if (layer.locked) { Toast("Layer is locked"); return; }
-              const snap = snapshotSelectedLayer();
-              if (gpuPaint.isActive && layer._gpu) {
-                gpuPaint._clearRT(layer._gpu.albedoRT, 0, 0, 0, 0);
-                gpuPaint._clearRT(layer._gpu.ormhRT, 0.5, 0, 0.5, 0);
-                gpuPaint._clearRT(layer._gpu.chanAlphaRT, 0, 0, 0, 0);
-              }
-              if (layer.albedo) {
-                layer.albedo.fill(0);
-                layer.roughness?.fill(0);
-                layer.metalness?.fill(0);
-                layer.height?.fill(0);
-                layer.roughWeight?.fill(0);
-                layer.metalWeight?.fill(0);
-                layer.heightWeight?.fill(0);
-              }
-              if (snap) pushUndoSnapshot(snap);
-              refreshComposite();
-              renderLeftColumn();
-              Toast(`Cleared "${layer.name}"`);
-            },
+            Label: "Change Stamp (Tool)",
+            Glyph: "Stamp",
+            Tone: "accent",
+            Act: () => { selectTool("stamp"); openToolPopup(); },
           },
+          { Label: "Clear Decal Layer", Glyph: "Trash", Act: clearPaintLayerBuffers },
         ]);
       } else if (layer.kind === "fill") {
-        ColorRow(lSec.Inner, { Label: "Fill Color", Read: () => layer.fill.color, Write: (v) => { layer.fill.color = v; refreshComposite(); renderLeftColumn(); } });
-        SliderRow(lSec.Inner, { Label: "Roughness", Minimum: 0.02, Maximum: 1, Step: 0.01, Read: () => layer.fill.roughness, Write: (v) => { layer.fill.roughness = v; refreshComposite(); } });
-        SliderRow(lSec.Inner, { Label: "Metalness", Minimum: 0, Maximum: 1, Step: 0.01, Read: () => layer.fill.metalness, Write: (v) => { layer.fill.metalness = v; refreshComposite(); } });
-        ActionRow(lSec.Inner, [
+        const kSec = SectionCard(rightInner, { Title: "Fill & Pattern Properties", Glyph: "Fill", Open: true });
+        ColorRow(kSec.Inner, { Label: "Fill Color", Read: () => layer.fill.color, Write: (v) => { layer.fill.color = v; refreshComposite(); renderLeftColumn(); } });
+        SliderRow(kSec.Inner, { Label: "Roughness", Minimum: 0.02, Maximum: 1, Step: 0.01, Read: () => layer.fill.roughness, Write: (v) => { layer.fill.roughness = v; refreshComposite(); } });
+        SliderRow(kSec.Inner, { Label: "Metalness", Minimum: 0, Maximum: 1, Step: 0.01, Read: () => layer.fill.metalness, Write: (v) => { layer.fill.metalness = v; refreshComposite(); } });
+        SliderRow(kSec.Inner, { Label: "Height Relief", Minimum: -1, Maximum: 1, Step: 0.02, Read: () => layer.fill.height ?? 0, Write: (v) => { layer.fill.height = v; refreshComposite(); } });
+        ActionRow(kSec.Inner, [
           { Label: "+ Add Image Tile", Glyph: "Image", Tone: "warm", Act: () => triggerAddImage("fill") },
           ...(appBridge?.shared?.patternData ? [{
             Label: "Apply Pattern Tile",
             Glyph: "Pattern",
-            Act: () => { layer.fill.patternData = appBridge.shared.patternData; refreshComposite(); Toast("Applied Pattern Studio tile to Fill layer"); },
+            Act: () => { layer.fill.patternData = appBridge.shared.patternData; rebuildInspector(); refreshComposite(); Toast("Applied Pattern Studio tile to Fill layer"); },
           }] : []),
         ]);
         if (layer.fill.patternData) {
-          SliderRow(lSec.Inner, { Label: "Pattern Repeats", Minimum: 1, Maximum: 12, Step: 1, Read: () => layer.fill.patternRepeats || 3, Write: (v) => { layer.fill.patternRepeats = v; refreshComposite(); } });
+          SliderRow(kSec.Inner, { Label: "Pattern Repeats", Minimum: 1, Maximum: 16, Step: 1, Read: () => layer.fill.patternRepeats || 3, Write: (v) => { layer.fill.patternRepeats = v; refreshComposite(); } });
+          SliderRow(kSec.Inner, { Label: "Pattern Rotation", Minimum: -180, Maximum: 180, Step: 1, Unit: "°", Read: () => layer.fill.patternRotation || 0, Write: (v) => { layer.fill.patternRotation = v; refreshComposite(); } });
+          SliderRow(kSec.Inner, { Label: "Pattern Height Gain", Minimum: 0, Maximum: 2.5, Step: 0.05, Read: () => layer.fill.patternHeightStrength ?? 1.0, Write: (v) => { layer.fill.patternHeightStrength = v; refreshComposite(); } });
+          ActionRow(kSec.Inner, [{
+            Label: "Clear Pattern Tile",
+            Glyph: "Trash",
+            Act: () => { layer.fill.patternData = null; rebuildInspector(); refreshComposite(); },
+          }]);
         }
       } else if (layer.kind === "material") {
-        FilterDropdownPill(lSec.Inner, {
+        const kSec = SectionCard(rightInner, { Title: "Material Surface Properties", Glyph: "Cube", Open: true });
+        FilterDropdownPill(kSec.Inner, {
           Label: "Frontier Material",
           Prefix: "Mat:",
           Placeholder: "Filter Frontier materials...",
@@ -2050,19 +2092,35 @@ export function mountTexturePaintWorkspace(root, appBridge) {
               layer.material.color = found.color;
               layer.material.roughness = found.roughness;
               layer.material.metalness = found.metalness;
+              rebuildInspector();
               refreshComposite();
               renderLeftColumn();
             }
           },
         });
-        SliderRow(lSec.Inner, { Label: "Micro Grain Scale", Minimum: 1, Maximum: 32, Step: 0.5, Read: () => layer.material.grainScale, Write: (v) => { layer.material.grainScale = v; refreshComposite(); } });
-        SliderRow(lSec.Inner, { Label: "Grain Contrast", Minimum: 0, Maximum: 0.35, Step: 0.01, Read: () => layer.material.grainStrength, Write: (v) => { layer.material.grainStrength = v; refreshComposite(); } });
+        ColorRow(kSec.Inner, { Label: "Base Tint", Read: () => layer.material.color, Write: (v) => { layer.material.color = v; refreshComposite(); renderLeftColumn(); } });
+        SliderRow(kSec.Inner, { Label: "Roughness", Minimum: 0.02, Maximum: 1, Step: 0.01, Read: () => layer.material.roughness, Write: (v) => { layer.material.roughness = v; refreshComposite(); } });
+        SliderRow(kSec.Inner, { Label: "Metalness", Minimum: 0, Maximum: 1, Step: 0.01, Read: () => layer.material.metalness, Write: (v) => { layer.material.metalness = v; refreshComposite(); } });
+        SliderRow(kSec.Inner, { Label: "Height Relief", Minimum: -1, Maximum: 1, Step: 0.02, Read: () => layer.material.height ?? 0, Write: (v) => { layer.material.height = v; refreshComposite(); } });
+        SliderRow(kSec.Inner, { Label: "Micro Grain Scale", Minimum: 1, Maximum: 32, Step: 0.5, Read: () => layer.material.grainScale, Write: (v) => { layer.material.grainScale = v; refreshComposite(); } });
+        SliderRow(kSec.Inner, { Label: "Grain Contrast", Minimum: 0, Maximum: 0.35, Step: 0.01, Read: () => layer.material.grainStrength, Write: (v) => { layer.material.grainStrength = v; refreshComposite(); } });
       } else if (layer.kind === "generator") {
-        SegmentedRow(lSec.Inner, { Label: "Generator Type", Options: [["Edge Wear", "edge-wear"], ["Crevice Dirt", "crevice-dirt"], ["Top Dust", "top-dust"]], Read: () => layer.generator.preset, Write: (v) => { layer.generator.preset = v; refreshComposite(); } });
-        ColorRow(lSec.Inner, { Label: "Effect Color", Read: () => layer.generator.color, Write: (v) => { layer.generator.color = v; refreshComposite(); } });
-        SliderRow(lSec.Inner, { Label: "Threshold", Minimum: 0.05, Maximum: 0.95, Step: 0.01, Read: () => layer.generator.threshold, Write: (v) => { layer.generator.threshold = v; refreshComposite(); } });
-        SliderRow(lSec.Inner, { Label: "Softness", Minimum: 0.02, Maximum: 0.8, Step: 0.01, Read: () => layer.generator.softness, Write: (v) => { layer.generator.softness = v; refreshComposite(); } });
-        SliderRow(lSec.Inner, { Label: "Noise Breakup", Minimum: 0, Maximum: 0.9, Step: 0.02, Read: () => layer.generator.noiseMix, Write: (v) => { layer.generator.noiseMix = v; refreshComposite(); } });
+        const kSec = SectionCard(rightInner, { Title: "Procedural Mask Generator", Glyph: "Sparkles", Open: true });
+        SegmentedRow(kSec.Inner, {
+          Label: "Generator Mode",
+          Options: [["Edge Wear", "edge-wear"], ["Crevice Dirt", "crevice-dirt"], ["Top Dust", "top-dust"], ["Grunge", "triplanar-grunge"]],
+          Read: () => layer.generator.preset,
+          Write: (v) => { layer.generator.preset = v; refreshComposite(); },
+        });
+        ColorRow(kSec.Inner, { Label: "Effect Color", Read: () => layer.generator.color, Write: (v) => { layer.generator.color = v; refreshComposite(); } });
+        SliderRow(kSec.Inner, { Label: "Roughness", Minimum: 0.02, Maximum: 1, Step: 0.01, Read: () => layer.generator.roughness, Write: (v) => { layer.generator.roughness = v; refreshComposite(); } });
+        SliderRow(kSec.Inner, { Label: "Metalness", Minimum: 0, Maximum: 1, Step: 0.01, Read: () => layer.generator.metalness, Write: (v) => { layer.generator.metalness = v; refreshComposite(); } });
+        SliderRow(kSec.Inner, { Label: "Height Relief", Minimum: -1, Maximum: 1, Step: 0.02, Read: () => layer.generator.height ?? 0.1, Write: (v) => { layer.generator.height = v; refreshComposite(); } });
+        SliderRow(kSec.Inner, { Label: "Threshold", Minimum: 0.05, Maximum: 0.95, Step: 0.01, Read: () => layer.generator.threshold, Write: (v) => { layer.generator.threshold = v; refreshComposite(); } });
+        SliderRow(kSec.Inner, { Label: "Softness", Minimum: 0.02, Maximum: 0.8, Step: 0.01, Read: () => layer.generator.softness, Write: (v) => { layer.generator.softness = v; refreshComposite(); } });
+        SliderRow(kSec.Inner, { Label: "Noise Scale", Minimum: 1, Maximum: 24, Step: 0.5, Read: () => layer.generator.noiseScale ?? 6, Write: (v) => { layer.generator.noiseScale = v; refreshComposite(); } });
+        SliderRow(kSec.Inner, { Label: "Noise Breakup", Minimum: 0, Maximum: 0.9, Step: 0.02, Read: () => layer.generator.noiseMix, Write: (v) => { layer.generator.noiseMix = v; refreshComposite(); } });
+        SwitchRow(kSec.Inner, { Label: "Invert Generator Mask", Read: () => !!layer.generator.invert, Write: (v) => { layer.generator.invert = !!v; refreshComposite(); } });
       }
 
       if (layer.mask) {
@@ -2073,6 +2131,17 @@ export function mountTexturePaintWorkspace(root, appBridge) {
         ActionRow(maskSec.Inner, [
           { Label: "Fill White", Act: () => { layer.mask.pixels?.fill(255); if (gpuPaint.isActive) gpuPaint.fillMaskGpu(layer, 1); refreshComposite(); } },
           { Label: "Fill Black", Act: () => { layer.mask.pixels?.fill(0); if (gpuPaint.isActive) gpuPaint.fillMaskGpu(layer, 0); refreshComposite(); } },
+          {
+            Label: "Remove Mask",
+            Glyph: "Trash",
+            Act: () => {
+              layer.mask = null;
+              state.doc.editingMask = false;
+              renderLeftColumn();
+              rebuildInspector();
+              refreshComposite();
+            },
+          },
         ]);
       }
     }
