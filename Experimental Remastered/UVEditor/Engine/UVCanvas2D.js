@@ -139,6 +139,58 @@ export class UVCanvas2D
         this.dpr = 1;
         this.patternCache = new Map();
         this.customTileImages = new Map();
+        this._baseLayerCanvas = typeof document !== 'undefined' ? document.createElement('canvas') : null;
+        this._baseLayerCtx = this._baseLayerCanvas ? this._baseLayerCanvas.getContext('2d') : null;
+        this._baseLayerSig = null;
+        this._uvEdgeTopologyCache = null;
+    }
+
+    _EnsureUvEdgeTopology(surface, islands)
+    {
+        const Sig = typeof surface.ComputeDataSignature === 'function'
+            ? surface.ComputeDataSignature('2dEdge')
+            : `${surface.faces.length}:${surface.uvCoords.length}:${surface.seams.size}:${surface.hiddenIslands.size}`;
+        if (this._uvEdgeTopologyCache && this._uvEdgeTopologyCache.sig === Sig) return this._uvEdgeTopologyCache;
+
+        const UvEdgeCount = new Map();
+        const UniqueEdges = []; // { uvA, uvB, uvKey, k3, faceIndices, islId, isSeam, isBoundary }
+        const EdgeByKey = new Map();
+        for (const Isl of islands)
+        {
+            if (Isl.hidden) continue;
+            for (const Fi of Isl.faceIndices)
+            {
+                const C = surface.faces[Fi].corners;
+                for (let k = 0; k < C.length; k++)
+                {
+                    const A = C[k], B = C[(k + 1) % C.length];
+                    const UvKey = EdgeKey(A.uv, B.uv);
+                    UvEdgeCount.set(UvKey, (UvEdgeCount.get(UvKey) || 0) + 1);
+                    let Entry = EdgeByKey.get(UvKey);
+                    if (!Entry)
+                    {
+                        const K3 = EdgeKey(A.v, B.v);
+                        Entry = {
+                            uvA: A.uv, uvB: B.uv, uvKey: UvKey, k3: K3,
+                            faces: [Fi], islId: Isl.id, isSeam: surface.seams.has(K3), isBoundary: false
+                        };
+                        EdgeByKey.set(UvKey, Entry);
+                        UniqueEdges.push(Entry);
+                    }
+                    else
+                    {
+                        Entry.faces.push(Fi);
+                    }
+                }
+            }
+        }
+        for (let i = 0; i < UniqueEdges.length; i++)
+        {
+            const E = UniqueEdges[i];
+            E.isBoundary = UvEdgeCount.get(E.uvKey) === 1;
+        }
+        this._uvEdgeTopologyCache = { sig: Sig, uniqueEdges: UniqueEdges, edgeByKey: EdgeByKey };
+        return this._uvEdgeTopologyCache;
     }
 
     Resize()
@@ -224,9 +276,6 @@ export class UVCanvas2D
         Ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
 
         const W = this.width, H = this.height;
-        Ctx.fillStyle = '#090a0c';
-        Ctx.fillRect(0, 0, W, H);
-
         const {
             surface,
             islands,
@@ -254,322 +303,190 @@ export class UVCanvas2D
             lassoPoints
         } = State;
 
-        // 1. Background UDIM coordinate workspace lines (ghosted cells 0..9 x 0..3)
-        const LeftUV = this.panU - (W * 0.5) / this.scalePx;
-        const RightUV = this.panU + (W * 0.5) / this.scalePx;
-        const BottomUV = this.panV - (H * 0.5) / this.scalePx;
-        const TopUV = this.panV + (H * 0.5) / this.scalePx;
+        const SurfSig = typeof surface.ComputeDataSignature === 'function'
+            ? surface.ComputeDataSignature()
+            : `${surface.faces.length}:${surface.uvCoords.length}:${surface.seams.size}`;
+        const UdimSig = udimTiles.map(T => `${T.id}:${T.checkerMode}:${T.resolution}:${T.label}`).join(',');
+        const BaseSig = [
+            W, H, this.dpr,
+            this.panU.toFixed(6), this.panV.toFixed(6), this.scalePx.toFixed(3),
+            SurfSig, UdimSig, activeUdim,
+            overlayLens, showChecker ? 1 : 0, showSubGrid ? 1 : 0,
+            showSeams ? 1 : 0, showBoundaries !== false ? 1 : 0,
+            targetTexelDensity, importanceGroups.length
+        ].join('|');
 
-        const MinTileU = Math.max(-2, Math.floor(LeftUV));
-        const MaxTileU = Math.min(10, Math.ceil(RightUV));
-        const MinTileV = Math.max(-1, Math.floor(BottomUV));
-        const MaxTileV = Math.min(5, Math.ceil(TopUV));
+        const GroupColors = new Map(importanceGroups.map(G => [G.id, G.color]));
+        const EdgeTopo = this._EnsureUvEdgeTopology(surface, islands);
 
-        Ctx.lineWidth = 1;
-        Ctx.strokeStyle = 'rgba(255,255,255,0.04)';
-        for (let tu = MinTileU; tu <= MaxTileU; tu++)
+        // 1..4a. Static Base Layer (UDIM grid, tiles, batched face fills, batched wireframe, seams) -> cached offscreen!
+        let BlitBaseOk = false;
+        if (this._baseLayerCanvas && this._baseLayerCtx)
         {
-            const [Sx] = this.UvToScreen(tu, 0);
-            Ctx.beginPath(); Ctx.moveTo(Sx, 0); Ctx.lineTo(Sx, H); Ctx.stroke();
-        }
-        for (let tv = MinTileV; tv <= MaxTileV; tv++)
-        {
-            const [, Sy] = this.UvToScreen(0, tv);
-            Ctx.beginPath(); Ctx.moveTo(0, Sy); Ctx.lineTo(W, Sy); Ctx.stroke();
-        }
-
-        // Faint coordinate labels on empty potential UDIM slots
-        if (this.scalePx > 90)
-        {
-            Ctx.font = '500 9.5px ui-monospace, monospace';
-            Ctx.fillStyle = 'rgba(255,255,255,0.14)';
-            for (let tv = 0; tv <= 2; tv++)
+            const PixW = Math.max(1, Math.round(W * this.dpr));
+            const PixH = Math.max(1, Math.round(H * this.dpr));
+            if (this._baseLayerCanvas.width !== PixW || this._baseLayerCanvas.height !== PixH)
             {
-                for (let tu = 0; tu <= 4; tu++)
-                {
-                    const TileId = 1001 + tu + tv * 10;
-                    if (udimTiles.some(T => T.id === TileId)) continue;
-                    const [Sx, Sy] = this.UvToScreen(tu + 0.04, tv + 0.94);
-                    Ctx.fillText(`${TileId}`, Sx, Sy);
-                }
+                this._baseLayerCanvas.width = PixW;
+                this._baseLayerCanvas.height = PixH;
+                this._baseLayerSig = null;
             }
-        }
-
-        // 2. Active Configured UDIM Tiles
-        const TileIslandCounts = new Map();
-        const TileAreaSums = new Map();
-        for (const Isl of islands)
-        {
-            if (Isl.hidden) continue;
-            TileIslandCounts.set(Isl.udimTile, (TileIslandCounts.get(Isl.udimTile) || 0) + 1);
-            TileAreaSums.set(Isl.udimTile, (TileAreaSums.get(Isl.udimTile) || 0) + Isl.areaUV);
-        }
-
-        for (const Tile of udimTiles)
-        {
-            const O = UdimOrigin(Tile.id);
-            const [X0, Y1] = this.UvToScreen(O.u, O.v);
-            const [X1, Y0] = this.UvToScreen(O.u + 1, O.v + 1);
-            const TileW = X1 - X0, TileH = Y1 - Y0;
-            if (X1 < 0 || X0 > W || Y1 < 0 || Y0 > H) continue;
-
-            const IsActive = Tile.id === activeUdim;
+            if (this._baseLayerSig !== BaseSig)
+            {
+                this._RenderBaseLayer(this._baseLayerCtx, W, H, State, GroupColors, EdgeTopo);
+                this._baseLayerSig = BaseSig;
+            }
             Ctx.save();
-            Ctx.beginPath();
-            Ctx.rect(X0, Y0, TileW, TileH);
-            Ctx.clip();
+            Ctx.setTransform(1, 0, 0, 1, 0, 0);
+            Ctx.drawImage(this._baseLayerCanvas, 0, 0);
+            Ctx.restore();
+            BlitBaseOk = true;
+        }
+        if (!BlitBaseOk)
+        {
+            this._RenderBaseLayer(Ctx, W, H, State, GroupColors, EdgeTopo);
+        }
 
-            // Tile Backdrop / Checker / Custom Texture
-            const CustomImg = this.customTileImages.get(Tile.id);
-            if (CustomImg && CustomImg.complete)
+        // 4b. Dynamic Batched Selection Overlay Layer (selected faces, island edges, active face, seams/selected edges)
+        const HalfW = W * 0.5, HalfH = H * 0.5;
+        const S = this.scalePx, Pu = this.panU, Pv = this.panV;
+
+        if (surface.selectedIslands.size || surface.selectedFaces.size)
+        {
+            let HasIslFill = false;
+            Ctx.beginPath();
+            for (const Isl of islands)
             {
-                Ctx.globalAlpha = 0.72;
-                Ctx.drawImage(CustomImg, X0, Y0, TileW, TileH);
-                Ctx.globalAlpha = 1;
-            }
-            else if (showChecker)
-            {
-                const PatCanvas = this.GetPattern(Tile.checkerMode || 'color');
-                if (PatCanvas)
+                if (Isl.hidden || !surface.selectedIslands.has(Isl.id)) continue;
+                for (const Fi of Isl.faceIndices)
                 {
-                    Ctx.globalAlpha = IsActive ? 0.92 : 0.64;
-                    Ctx.drawImage(PatCanvas, X0, Y0, TileW, TileH);
-                    Ctx.globalAlpha = 1;
+                    if (surface.selectedFaces.has(Fi)) continue;
+                    const Cr = surface.faces[Fi].corners;
+                    const U0 = surface.uvCoords[Cr[0].uv];
+                    Ctx.moveTo(HalfW + (U0[0] - Pu) * S, HalfH - (U0[1] - Pv) * S);
+                    for (let k = 1; k < Cr.length; k++)
+                    {
+                        const Uk = surface.uvCoords[Cr[k].uv];
+                        Ctx.lineTo(HalfW + (Uk[0] - Pu) * S, HalfH - (Uk[1] - Pv) * S);
+                    }
+                    Ctx.closePath();
+                    HasIslFill = true;
                 }
+            }
+            if (HasIslFill)
+            {
+                Ctx.fillStyle = 'rgba(239, 244, 207, 0.16)';
+                Ctx.fill();
+            }
+
+            if (surface.selectedFaces.size)
+            {
+                Ctx.beginPath();
+                let HasFaceFill = false;
+                for (const Fi of surface.selectedFaces)
+                {
+                    const F = surface.faces[Fi];
+                    if (!F) continue;
+                    const Cr = F.corners;
+                    const U0 = surface.uvCoords[Cr[0].uv];
+                    Ctx.moveTo(HalfW + (U0[0] - Pu) * S, HalfH - (U0[1] - Pv) * S);
+                    for (let k = 1; k < Cr.length; k++)
+                    {
+                        const Uk = surface.uvCoords[Cr[k].uv];
+                        Ctx.lineTo(HalfW + (Uk[0] - Pu) * S, HalfH - (Uk[1] - Pv) * S);
+                    }
+                    Ctx.closePath();
+                    HasFaceFill = true;
+                }
+                if (HasFaceFill)
+                {
+                    Ctx.fillStyle = 'rgba(245, 184, 76, 0.30)';
+                    Ctx.fill();
+                }
+            }
+        }
+
+        if (surface.activeFace !== null && surface.activeFace !== undefined && surface.faces[surface.activeFace])
+        {
+            const Cr = surface.faces[surface.activeFace].corners;
+            const U0 = surface.uvCoords[Cr[0].uv];
+            Ctx.beginPath();
+            Ctx.moveTo(HalfW + (U0[0] - Pu) * S, HalfH - (U0[1] - Pv) * S);
+            for (let k = 1; k < Cr.length; k++)
+            {
+                const Uk = surface.uvCoords[Cr[k].uv];
+                Ctx.lineTo(HalfW + (Uk[0] - Pu) * S, HalfH - (Uk[1] - Pv) * S);
+            }
+            Ctx.closePath();
+            Ctx.strokeStyle = '#ff9d3b';
+            Ctx.lineWidth = 2.0;
+            Ctx.stroke();
+        }
+
+        // Batched selected edges + active edge
+        const IsRegionSelMode = selectionMode === 'face' || selectionMode === 'island';
+        const SelEdgeList = [];
+        let ActiveEdgeItem = null;
+        for (let i = 0; i < EdgeTopo.uniqueEdges.length; i++)
+        {
+            const E = EdgeTopo.uniqueEdges[i];
+            let IsSelEdge = false;
+            if (IsRegionSelMode)
+            {
+                let SelCnt = 0;
+                for (let j = 0; j < E.faces.length; j++)
+                {
+                    const Fi = E.faces[j];
+                    if (surface.selectedFaces.has(Fi) || surface.selectedIslands.has(E.islId)) SelCnt++;
+                }
+                IsSelEdge = SelCnt === 1;
             }
             else
             {
-                Ctx.fillStyle = IsActive ? '#111417' : '#0c0e11';
-                Ctx.fillRect(X0, Y0, TileW, TileH);
+                IsSelEdge = surface.selectedUVEdges.has(E.uvKey);
             }
-
-            // Subdivision grid inside UDIM tile
-            if (showSubGrid && TileW > 64)
-            {
-                const Divs = TileW > 420 ? 16 : 8;
-                Ctx.strokeStyle = 'rgba(255,255,255,0.055)';
-                Ctx.lineWidth = 1;
-                for (let k = 1; k < Divs; k++)
-                {
-                    const Gx = X0 + (TileW * k) / Divs;
-                    const Gy = Y0 + (TileH * k) / Divs;
-                    Ctx.beginPath(); Ctx.moveTo(Gx, Y0); Ctx.lineTo(Gx, Y1); Ctx.stroke();
-                    Ctx.beginPath(); Ctx.moveTo(X0, Gy); Ctx.lineTo(X1, Gy); Ctx.stroke();
-                }
-            }
-
-            // Border highlight for tile
-            Ctx.restore();
-            Ctx.strokeStyle = IsActive ? 'rgba(239, 244, 207, 0.55)' : 'rgba(255, 255, 255, 0.16)';
-            Ctx.lineWidth = IsActive ? 1.5 : 1;
-            Ctx.strokeRect(X0 + 0.5, Y0 + 0.5, TileW - 1, TileH - 1);
-
-            // Tile header badge pill above top-left corner
-            const OccPct = Math.min(100, (TileAreaSums.get(Tile.id) || 0) * 100);
-            const ResLabel = Tile.resolution >= 1024 ? `${Tile.resolution / 1024}K` : `${Tile.resolution}`;
-            const BadgeText = `${Tile.id} · ${ResLabel} · ${OccPct.toFixed(1)}%${Tile.label ? ' · ' + Tile.label : ''}`;
-            Ctx.font = '500 10px ui-monospace, monospace';
-            const Tw = Math.min(Math.max(90, TileW - 8), Ctx.measureText(BadgeText).width + 16);
-            const PillY = Math.max(6, Y0 - 22);
-            Ctx.fillStyle = IsActive ? 'rgba(239, 244, 207, 0.94)' : 'rgba(22, 23, 26, 0.90)';
-            Ctx.strokeStyle = IsActive ? 'rgba(239, 244, 207, 1)' : 'rgba(255, 255, 255, 0.12)';
-            Ctx.beginPath();
-            Ctx.roundRect(X0 + 2, PillY, Tw, 18, 9);
-            Ctx.fill();
-            Ctx.stroke();
-            Ctx.fillStyle = IsActive ? '#0b0b0b' : '#d8dad6';
-            Ctx.fillText(BadgeText, X0 + 10, PillY + 12.5, Tw - 14);
+            if (!IsSelEdge) continue;
+            const Pa = surface.uvCoords[E.uvA], Pb = surface.uvCoords[E.uvB];
+            const X0 = HalfW + (Pa[0] - Pu) * S, Y0 = HalfH - (Pa[1] - Pv) * S;
+            const X1 = HalfW + (Pb[0] - Pu) * S, Y1 = HalfH - (Pb[1] - Pv) * S;
+            if (Math.max(X0, X1) < -8 || Math.min(X0, X1) > W + 8 || Math.max(Y0, Y1) < -8 || Math.min(Y0, Y1) > H + 8) continue;
+            if (!IsRegionSelMode && surface.activeEdgeUV === E.uvKey) ActiveEdgeItem = [X0, Y0, X1, Y1];
+            else SelEdgeList.push(X0, Y0, X1, Y1);
         }
 
-        // 3. Draw UV Faces
-        const GroupColors = new Map(importanceGroups.map(G => [G.id, G.color]));
-        const IslandByFace = new Map();
-        for (const Isl of islands)
+        if (SelEdgeList.length || ActiveEdgeItem)
         {
-            for (const Fi of Isl.faceIndices) IslandByFace.set(Fi, Isl);
-        }
-
-        for (const Isl of islands)
-        {
-            if (Isl.hidden) continue;
-            const IslSelected = surface.selectedIslands.has(Isl.id);
-            const GrpColor = Isl.importanceGroupId ? GroupColors.get(Isl.importanceGroupId) : null;
-
-            for (const Fi of Isl.faceIndices)
+            Ctx.save();
+            Ctx.lineCap = 'round';
+            if (SelEdgeList.length)
             {
-                const F = surface.faces[Fi];
-                const Pts = F.corners.map(C => this.UvToScreen(surface.uvCoords[C.uv][0], surface.uvCoords[C.uv][1]));
                 Ctx.beginPath();
-                Ctx.moveTo(Pts[0][0], Pts[0][1]);
-                for (let k = 1; k < Pts.length; k++) Ctx.lineTo(Pts[k][0], Pts[k][1]);
-                Ctx.closePath();
-
-                const IsFaceSel = surface.selectedFaces.has(Fi);
-                const IsOverlap = diagnostics?.OverlappingFaces?.has(Fi);
-                const IsFlipped = diagnostics?.FlippedFaces?.has(Fi);
-
-                let Fill = 'rgba(255,255,255,0.065)';
-                if (overlayLens === 'importance')
+                for (let i = 0; i < SelEdgeList.length; i += 4)
                 {
-                    Fill = GrpColor ? this.HexToRgba(GrpColor, IsFaceSel || IslSelected ? 0.42 : 0.25) : 'rgba(145, 152, 162, 0.16)';
+                    Ctx.moveTo(SelEdgeList[i], SelEdgeList[i + 1]);
+                    Ctx.lineTo(SelEdgeList[i + 2], SelEdgeList[i + 3]);
                 }
-                else if (overlayLens === 'texel')
-                {
-                    const Ratio = Isl.texelDensity / Math.max(0.1, targetTexelDensity || 10);
-                    // Ratio 1.0 -> mint (~0.35), low -> blue (0.0), high -> coral (1.0)
-                    const T = Math.max(0, Math.min(1, 0.35 + Math.log2(Math.max(0.125, Ratio)) * 0.28));
-                    Fill = HeatColor(T, IsFaceSel ? 0.52 : 0.36);
-                }
-                else if (overlayLens === 'stretch-angle')
-                {
-                    const D = surface.FaceTrianglesDistortion(Fi);
-                    Fill = HeatColor(Math.min(1, D.angleStretch * 2.2), IsFaceSel ? 0.56 : 0.42);
-                }
-                else if (overlayLens === 'stretch-area')
-                {
-                    const D = surface.FaceTrianglesDistortion(Fi);
-                    const T = Math.max(0, Math.min(1, 0.35 + Math.log2(Math.max(0.1, D.areaScale)) * 0.22));
-                    Fill = HeatColor(T, IsFaceSel ? 0.56 : 0.40);
-                }
-                else if (overlayLens === 'overlap')
-                {
-                    if (IsOverlap) Fill = 'rgba(255, 84, 84, 0.54)';
-                    else if (IsFlipped) Fill = 'rgba(243, 196, 108, 0.46)';
-                    else Fill = 'rgba(120, 199, 150, 0.12)';
-                }
-                else
-                {
-                    // Clean lens
-                    if (IsFaceSel) Fill = 'rgba(239, 244, 207, 0.20)';
-                    else if (IslSelected) Fill = 'rgba(239, 244, 207, 0.12)';
-                    else if (GrpColor) Fill = this.HexToRgba(GrpColor, 0.10);
-                }
-
-                Ctx.fillStyle = Fill;
-                Ctx.fill();
-
-                if (IsFaceSel || IslSelected)
-                {
-                    Ctx.fillStyle = IsFaceSel ? 'rgba(245, 184, 76, 0.26)' : 'rgba(239, 244, 207, 0.14)';
-                    Ctx.fill();
-                }
-
-                if (surface.activeFace === Fi)
-                {
-                    Ctx.strokeStyle = '#ff9d3b';
-                    Ctx.lineWidth = 2.0;
-                    Ctx.stroke();
-                }
+                Ctx.strokeStyle = 'rgba(8, 9, 11, 0.88)';
+                Ctx.lineWidth = 5.0;
+                Ctx.stroke();
+                Ctx.strokeStyle = '#eff4cf';
+                Ctx.lineWidth = 2.9;
+                Ctx.stroke();
             }
-        }
-
-        // 4. Draw UV Edges, Island Boundaries, Selected Edges & Seams
-        const UvEdgeCount = new Map();
-        const SelUvEdgeCount = new Map();
-        for (const Isl of islands)
-        {
-            if (Isl.hidden) continue;
-            const IslSel = surface.selectedIslands.has(Isl.id);
-            for (const Fi of Isl.faceIndices)
+            if (ActiveEdgeItem)
             {
-                const C = surface.faces[Fi].corners;
-                const FaceSel = surface.selectedFaces.has(Fi) || IslSel;
-                for (let k = 0; k < C.length; k++)
-                {
-                    const Key = EdgeKey(C[k].uv, C[(k + 1) % C.length].uv);
-                    UvEdgeCount.set(Key, (UvEdgeCount.get(Key) || 0) + 1);
-                    if (FaceSel) SelUvEdgeCount.set(Key, (SelUvEdgeCount.get(Key) || 0) + 1);
-                }
+                Ctx.beginPath();
+                Ctx.moveTo(ActiveEdgeItem[0], ActiveEdgeItem[1]);
+                Ctx.lineTo(ActiveEdgeItem[2], ActiveEdgeItem[3]);
+                Ctx.strokeStyle = 'rgba(8, 9, 11, 0.88)';
+                Ctx.lineWidth = 5.8;
+                Ctx.stroke();
+                Ctx.strokeStyle = '#ff9d3b';
+                Ctx.lineWidth = 3.4;
+                Ctx.stroke();
             }
+            Ctx.restore();
         }
-
-        const IsRegionSelMode = selectionMode === 'face' || selectionMode === 'island';
-        const DrawnEdges = new Set();
-        const ActiveEdges = [];
-        for (const Isl of islands)
-        {
-            if (Isl.hidden) continue;
-            const GrpColor = Isl.importanceGroupId ? GroupColors.get(Isl.importanceGroupId) : null;
-            const IslSelected = surface.selectedIslands.has(Isl.id);
-
-            for (const Fi of Isl.faceIndices)
-            {
-                const C = surface.faces[Fi].corners;
-                for (let k = 0; k < C.length; k++)
-                {
-                    const A = C[k], B = C[(k + 1) % C.length];
-                    const UvKey = EdgeKey(A.uv, B.uv);
-                    if (DrawnEdges.has(UvKey)) continue;
-                    DrawnEdges.add(UvKey);
-
-                    const [X0, Y0] = this.UvToScreen(surface.uvCoords[A.uv][0], surface.uvCoords[A.uv][1]);
-                    const [X1, Y1] = this.UvToScreen(surface.uvCoords[B.uv][0], surface.uvCoords[B.uv][1]);
-                    const IsSeam = showSeams && surface.seams.has(EdgeKey(A.v, B.v));
-                    const IsSelEdge = IsRegionSelMode
-                        ? SelUvEdgeCount.get(UvKey) === 1
-                        : surface.selectedUVEdges.has(UvKey);
-                    const IsBoundary = showBoundaries !== false && UvEdgeCount.get(UvKey) === 1;
-
-                    if (IsSelEdge || IsSeam)
-                    {
-                        ActiveEdges.push({ UvKey, X0, Y0, X1, Y1, IsSeam, IsSelEdge, IsActive: !IsRegionSelMode && surface.activeEdgeUV === UvKey });
-                        continue;
-                    }
-
-                    Ctx.beginPath();
-                    Ctx.moveTo(X0, Y0);
-                    Ctx.lineTo(X1, Y1);
-                    if (IslSelected)
-                    {
-                        Ctx.strokeStyle = 'rgba(245, 198, 108, 0.72)';
-                        Ctx.lineWidth = 1.25;
-                    }
-                    else if (IsBoundary)
-                    {
-                        Ctx.strokeStyle = GrpColor ? this.HexToRgba(GrpColor, 0.72) : 'rgba(123, 212, 184, 0.54)';
-                        Ctx.lineWidth = 1.25;
-                    }
-                    else
-                    {
-                        Ctx.strokeStyle = GrpColor ? this.HexToRgba(GrpColor, 0.40) : 'rgba(242, 242, 240, 0.30)';
-                        Ctx.lineWidth = 0.9;
-                    }
-                    Ctx.stroke();
-                }
-            }
-        }
-
-        // Pass seams first, then dark contrast halo + selected edges on top so selection always pops clearly
-        for (const E of ActiveEdges)
-        {
-            if (!E.IsSeam || E.IsSelEdge) continue;
-            Ctx.beginPath();
-            Ctx.moveTo(E.X0, E.Y0);
-            Ctx.lineTo(E.X1, E.Y1);
-            Ctx.strokeStyle = '#ff6d5a';
-            Ctx.lineWidth = 1.95;
-            Ctx.stroke();
-        }
-        Ctx.save();
-        Ctx.lineCap = 'round';
-        for (const E of ActiveEdges)
-        {
-            if (!E.IsSelEdge) continue;
-            Ctx.beginPath();
-            Ctx.moveTo(E.X0, E.Y0);
-            Ctx.lineTo(E.X1, E.Y1);
-            Ctx.strokeStyle = 'rgba(8, 9, 11, 0.88)';
-            Ctx.lineWidth = E.IsActive ? 5.8 : 5.0;
-            Ctx.stroke();
-
-            Ctx.beginPath();
-            Ctx.moveTo(E.X0, E.Y0);
-            Ctx.lineTo(E.X1, E.Y1);
-            Ctx.strokeStyle = E.IsActive ? '#ff9d3b' : '#eff4cf';
-            Ctx.lineWidth = E.IsActive ? 3.4 : 2.9;
-            Ctx.stroke();
-        }
-        Ctx.restore();
 
         // Hover edge / vertex preview in 2D
         if (hoverHit?.kind === 'edge')
@@ -588,9 +505,6 @@ export class UVCanvas2D
                 Ctx.strokeStyle = 'rgba(8, 9, 11, 0.85)';
                 Ctx.lineWidth = 6.0;
                 Ctx.stroke();
-                Ctx.beginPath();
-                Ctx.moveTo(X0, Y0);
-                Ctx.lineTo(X1, Y1);
                 Ctx.strokeStyle = activeTool === 'seam' ? '#ff8b78' : '#7dd3fc';
                 Ctx.lineWidth = 3.6;
                 Ctx.stroke();
@@ -622,6 +536,7 @@ export class UVCanvas2D
                 const BoxH = Isl.bounds.height * this.scalePx;
                 if (BoxW < 42 || BoxH < 20) continue;
                 const [Cx, Cy] = this.UvToScreen(Isl.bounds.centerU, Isl.bounds.centerV);
+                if (Cx < -80 || Cx > W + 80 || Cy < -40 || Cy > H + 40) continue;
                 const Label = Isl.displayName.length > 14 ? Isl.displayName.slice(0, 13) + '…' : Isl.displayName;
                 const Tw = Ctx.measureText(Label).width + 10;
                 Ctx.fillStyle = 'rgba(11, 12, 14, 0.76)';
@@ -635,47 +550,73 @@ export class UVCanvas2D
             }
         }
 
-        // 6. Draw Vertices & Pins
-        const DrawnUVs = new Set();
+        // 6. Batched Vertices & Pins (2 path strokes/fills instead of 4000 separate arcs!)
         const ShowAllVerts = selectionMode === 'vertex' || this.scalePx > 260;
+        const DrawnUVs = new Uint8Array(surface.uvCoords.length);
+        const PinPts = [], UnselPts = [], SelPts = [];
         for (const Isl of islands)
         {
             if (Isl.hidden) continue;
-            for (const UvIdx of Isl.uvIndices)
+            for (let i = 0; i < Isl.uvIndices.length; i++)
             {
-                if (DrawnUVs.has(UvIdx)) continue;
-                DrawnUVs.add(UvIdx);
+                const UvIdx = Isl.uvIndices[i];
+                if (DrawnUVs[UvIdx]) continue;
+                DrawnUVs[UvIdx] = 1;
 
                 const IsPin = showPins && surface.pinned.has(UvIdx);
                 const IsSel = surface.selectedUVs.has(UvIdx);
                 if (!ShowAllVerts && !IsPin && !IsSel) continue;
 
-                const [Sx, Sy] = this.UvToScreen(surface.uvCoords[UvIdx][0], surface.uvCoords[UvIdx][1]);
+                const P = surface.uvCoords[UvIdx];
+                const Sx = HalfW + (P[0] - Pu) * S;
+                const Sy = HalfH - (P[1] - Pv) * S;
                 if (Sx < -10 || Sx > W + 10 || Sy < -10 || Sy > H + 10) continue;
 
-                if (IsPin)
-                {
-                    Ctx.beginPath();
-                    Ctx.arc(Sx, Sy, 5.2, 0, Math.PI * 2);
-                    Ctx.strokeStyle = '#ff645a';
-                    Ctx.lineWidth = 1.6;
-                    Ctx.stroke();
-                }
-
-                if (IsSel || ShowAllVerts)
-                {
-                    Ctx.beginPath();
-                    Ctx.arc(Sx, Sy, IsSel ? 4.3 : 2.1, 0, Math.PI * 2);
-                    Ctx.fillStyle = IsSel ? '#eff4cf' : 'rgba(255, 255, 255, 0.45)';
-                    Ctx.fill();
-                    if (IsSel)
-                    {
-                        Ctx.lineWidth = 1.5;
-                        Ctx.strokeStyle = '#0b0b0b';
-                        Ctx.stroke();
-                    }
-                }
+                if (IsPin) PinPts.push(Sx, Sy);
+                if (IsSel) SelPts.push(Sx, Sy);
+                else if (ShowAllVerts) UnselPts.push(Sx, Sy);
             }
+        }
+
+        if (UnselPts.length)
+        {
+            Ctx.beginPath();
+            for (let i = 0; i < UnselPts.length; i += 2)
+            {
+                const x = UnselPts[i], y = UnselPts[i + 1];
+                Ctx.moveTo(x + 2.1, y);
+                Ctx.arc(x, y, 2.1, 0, Math.PI * 2);
+            }
+            Ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
+            Ctx.fill();
+        }
+        if (PinPts.length)
+        {
+            Ctx.beginPath();
+            for (let i = 0; i < PinPts.length; i += 2)
+            {
+                const x = PinPts[i], y = PinPts[i + 1];
+                Ctx.moveTo(x + 5.2, y);
+                Ctx.arc(x, y, 5.2, 0, Math.PI * 2);
+            }
+            Ctx.strokeStyle = '#ff645a';
+            Ctx.lineWidth = 1.6;
+            Ctx.stroke();
+        }
+        if (SelPts.length)
+        {
+            Ctx.beginPath();
+            for (let i = 0; i < SelPts.length; i += 2)
+            {
+                const x = SelPts[i], y = SelPts[i + 1];
+                Ctx.moveTo(x + 4.3, y);
+                Ctx.arc(x, y, 4.3, 0, Math.PI * 2);
+            }
+            Ctx.fillStyle = '#eff4cf';
+            Ctx.fill();
+            Ctx.lineWidth = 1.5;
+            Ctx.strokeStyle = '#0b0b0b';
+            Ctx.stroke();
         }
 
         // 7. 2D Cursor (Blender-style crosshair)
@@ -795,6 +736,281 @@ export class UVCanvas2D
         }
     }
 
+    _RenderBaseLayer(Ctx, W, H, State, GroupColors, EdgeTopo)
+    {
+        const {
+            surface,
+            islands,
+            udimTiles,
+            activeUdim,
+            overlayLens,
+            showChecker,
+            showSubGrid,
+            showSeams,
+            showBoundaries,
+            targetTexelDensity,
+            diagnostics
+        } = State;
+
+        Ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+        Ctx.fillStyle = '#090a0c';
+        Ctx.fillRect(0, 0, W, H);
+
+        const HalfW = W * 0.5, HalfH = H * 0.5;
+        const S = this.scalePx, Pu = this.panU, Pv = this.panV;
+
+        // 1. Batched Background UDIM coordinate workspace lines
+        const LeftUV = Pu - HalfW / S;
+        const RightUV = Pu + HalfW / S;
+        const BottomUV = Pv - HalfH / S;
+        const TopUV = Pv + HalfH / S;
+
+        const MinTileU = Math.max(-2, Math.floor(LeftUV));
+        const MaxTileU = Math.min(10, Math.ceil(RightUV));
+        const MinTileV = Math.max(-1, Math.floor(BottomUV));
+        const MaxTileV = Math.min(5, Math.ceil(TopUV));
+
+        Ctx.lineWidth = 1;
+        Ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+        Ctx.beginPath();
+        for (let tu = MinTileU; tu <= MaxTileU; tu++)
+        {
+            const Sx = HalfW + (tu - Pu) * S;
+            Ctx.moveTo(Sx, 0); Ctx.lineTo(Sx, H);
+        }
+        for (let tv = MinTileV; tv <= MaxTileV; tv++)
+        {
+            const Sy = HalfH - (tv - Pv) * S;
+            Ctx.moveTo(0, Sy); Ctx.lineTo(W, Sy);
+        }
+        Ctx.stroke();
+
+        if (S > 90)
+        {
+            Ctx.font = '500 9.5px ui-monospace, monospace';
+            Ctx.fillStyle = 'rgba(255,255,255,0.14)';
+            for (let tv = 0; tv <= 2; tv++)
+            {
+                for (let tu = 0; tu <= 4; tu++)
+                {
+                    const TileId = 1001 + tu + tv * 10;
+                    if (udimTiles.some(T => T.id === TileId)) continue;
+                    const Sx = HalfW + (tu + 0.04 - Pu) * S;
+                    const Sy = HalfH - (tv + 0.94 - Pv) * S;
+                    Ctx.fillText(`${TileId}`, Sx, Sy);
+                }
+            }
+        }
+
+        // 2. Active Configured UDIM Tiles
+        const TileAreaSums = new Map();
+        for (const Isl of islands)
+        {
+            if (Isl.hidden) continue;
+            TileAreaSums.set(Isl.udimTile, (TileAreaSums.get(Isl.udimTile) || 0) + Isl.areaUV);
+        }
+
+        for (const Tile of udimTiles)
+        {
+            const O = UdimOrigin(Tile.id);
+            const X0 = HalfW + (O.u - Pu) * S, Y1 = HalfH - (O.v - Pv) * S;
+            const X1 = HalfW + (O.u + 1 - Pu) * S, Y0 = HalfH - (O.v + 1 - Pv) * S;
+            const TileW = X1 - X0, TileH = Y1 - Y0;
+            if (X1 < 0 || X0 > W || Y1 < 0 || Y0 > H) continue;
+
+            const IsActive = Tile.id === activeUdim;
+            Ctx.save();
+            Ctx.beginPath();
+            Ctx.rect(X0, Y0, TileW, TileH);
+            Ctx.clip();
+
+            const CustomImg = this.customTileImages.get(Tile.id);
+            if (CustomImg && CustomImg.complete)
+            {
+                Ctx.globalAlpha = 0.72;
+                Ctx.drawImage(CustomImg, X0, Y0, TileW, TileH);
+                Ctx.globalAlpha = 1;
+            }
+            else if (showChecker)
+            {
+                const PatCanvas = this.GetPattern(Tile.checkerMode || 'color');
+                if (PatCanvas)
+                {
+                    Ctx.globalAlpha = IsActive ? 0.92 : 0.64;
+                    Ctx.drawImage(PatCanvas, X0, Y0, TileW, TileH);
+                    Ctx.globalAlpha = 1;
+                }
+            }
+            else
+            {
+                Ctx.fillStyle = IsActive ? '#111417' : '#0c0e11';
+                Ctx.fillRect(X0, Y0, TileW, TileH);
+            }
+
+            if (showSubGrid && TileW > 64)
+            {
+                const Divs = TileW > 420 ? 16 : 8;
+                Ctx.strokeStyle = 'rgba(255,255,255,0.055)';
+                Ctx.lineWidth = 1;
+                Ctx.beginPath();
+                for (let k = 1; k < Divs; k++)
+                {
+                    const Gx = X0 + (TileW * k) / Divs;
+                    const Gy = Y0 + (TileH * k) / Divs;
+                    Ctx.moveTo(Gx, Y0); Ctx.lineTo(Gx, Y1);
+                    Ctx.moveTo(X0, Gy); Ctx.lineTo(X1, Gy);
+                }
+                Ctx.stroke();
+            }
+
+            Ctx.restore();
+            Ctx.strokeStyle = IsActive ? 'rgba(239, 244, 207, 0.55)' : 'rgba(255, 255, 255, 0.16)';
+            Ctx.lineWidth = IsActive ? 1.5 : 1;
+            Ctx.strokeRect(X0 + 0.5, Y0 + 0.5, TileW - 1, TileH - 1);
+
+            const OccPct = Math.min(100, (TileAreaSums.get(Tile.id) || 0) * 100);
+            const ResLabel = Tile.resolution >= 1024 ? `${Tile.resolution / 1024}K` : `${Tile.resolution}`;
+            const BadgeText = `${Tile.id} · ${ResLabel} · ${OccPct.toFixed(1)}%${Tile.label ? ' · ' + Tile.label : ''}`;
+            Ctx.font = '500 10px ui-monospace, monospace';
+            const Tw = Math.min(Math.max(90, TileW - 8), Ctx.measureText(BadgeText).width + 16);
+            const PillY = Math.max(6, Y0 - 22);
+            Ctx.fillStyle = IsActive ? 'rgba(239, 244, 207, 0.94)' : 'rgba(22, 23, 26, 0.90)';
+            Ctx.strokeStyle = IsActive ? 'rgba(239, 244, 207, 1)' : 'rgba(255, 255, 255, 0.12)';
+            Ctx.beginPath();
+            Ctx.roundRect(X0 + 2, PillY, Tw, 18, 9);
+            Ctx.fill();
+            Ctx.stroke();
+            Ctx.fillStyle = IsActive ? '#0b0b0b' : '#d8dad6';
+            Ctx.fillText(BadgeText, X0 + 10, PillY + 12.5, Tw - 14);
+        }
+
+        // 3. Color-Batched UV Faces (1 fill() per distinct fill color instead of 6000 separate fill() calls!)
+        const FaceBuckets = new Map();
+        const AddFaceToBucket = (Color, Fi) =>
+        {
+            let List = FaceBuckets.get(Color);
+            if (!List) { List = []; FaceBuckets.set(Color, List); }
+            List.push(Fi);
+        };
+        const HasFastDist = typeof surface.GetFaceDistortionFast === 'function';
+
+        for (const Isl of islands)
+        {
+            if (Isl.hidden) continue;
+            if (Isl.bounds.maxU < LeftUV - 0.01 || Isl.bounds.minU > RightUV + 0.01 ||
+                Isl.bounds.maxV < BottomUV - 0.01 || Isl.bounds.minV > TopUV + 0.01) continue;
+
+            const GrpColor = Isl.importanceGroupId ? GroupColors.get(Isl.importanceGroupId) : null;
+            const BaseColor = overlayLens === 'importance'
+                ? (GrpColor ? this.HexToRgba(GrpColor, 0.25) : 'rgba(145, 152, 162, 0.16)')
+                : overlayLens === 'texel'
+                    ? HeatColor(Math.round(Math.max(0, Math.min(1, 0.35 + Math.log2(Math.max(0.125, Isl.texelDensity / Math.max(0.1, targetTexelDensity || 10))) * 0.28)) * 31) / 31, 0.36)
+                    : (GrpColor && overlayLens === 'clean' ? this.HexToRgba(GrpColor, 0.10) : 'rgba(255,255,255,0.065)');
+
+            for (let i = 0; i < Isl.faceIndices.length; i++)
+            {
+                const Fi = Isl.faceIndices[i];
+                if (overlayLens === 'stretch-angle')
+                {
+                    const D = HasFastDist ? surface.GetFaceDistortionFast(Fi) : surface.FaceTrianglesDistortion(Fi);
+                    const Q = Math.round(Math.min(1, D.angleStretch * 2.2) * 31) / 31;
+                    AddFaceToBucket(HeatColor(Q, 0.42), Fi);
+                }
+                else if (overlayLens === 'stretch-area')
+                {
+                    const D = HasFastDist ? surface.GetFaceDistortionFast(Fi) : surface.FaceTrianglesDistortion(Fi);
+                    const Q = Math.round(Math.max(0, Math.min(1, 0.35 + Math.log2(Math.max(0.1, D.areaScale)) * 0.22)) * 31) / 31;
+                    AddFaceToBucket(HeatColor(Q, 0.40), Fi);
+                }
+                else if (overlayLens === 'overlap')
+                {
+                    if (diagnostics?.OverlappingFaces?.has(Fi)) AddFaceToBucket('rgba(255, 84, 84, 0.54)', Fi);
+                    else if (diagnostics?.FlippedFaces?.has(Fi)) AddFaceToBucket('rgba(243, 196, 108, 0.46)', Fi);
+                    else AddFaceToBucket('rgba(120, 199, 150, 0.12)', Fi);
+                }
+                else
+                {
+                    AddFaceToBucket(BaseColor, Fi);
+                }
+            }
+        }
+
+        for (const [Color, FaceList] of FaceBuckets)
+        {
+            Ctx.beginPath();
+            for (let i = 0; i < FaceList.length; i++)
+            {
+                const Cr = surface.faces[FaceList[i]].corners;
+                const U0 = surface.uvCoords[Cr[0].uv];
+                Ctx.moveTo(HalfW + (U0[0] - Pu) * S, HalfH - (U0[1] - Pv) * S);
+                for (let k = 1; k < Cr.length; k++)
+                {
+                    const Uk = surface.uvCoords[Cr[k].uv];
+                    Ctx.lineTo(HalfW + (Uk[0] - Pu) * S, HalfH - (Uk[1] - Pv) * S);
+                }
+                Ctx.closePath();
+            }
+            Ctx.fillStyle = Color;
+            Ctx.fill();
+        }
+
+        // 4a. Style-Batched Wireframe Edges, Boundaries & Seams (1 stroke() per color bucket!)
+        const EdgeBuckets = new Map();
+        const SeamCoords = [];
+        const IslandMap = new Map(islands.map(Isl => [Isl.id, Isl]));
+
+        for (let i = 0; i < EdgeTopo.uniqueEdges.length; i++)
+        {
+            const E = EdgeTopo.uniqueEdges[i];
+            const Pa = surface.uvCoords[E.uvA], Pb = surface.uvCoords[E.uvB];
+            if (Math.max(Pa[0], Pb[0]) < LeftUV - 0.01 || Math.min(Pa[0], Pb[0]) > RightUV + 0.01 ||
+                Math.max(Pa[1], Pb[1]) < BottomUV - 0.01 || Math.min(Pa[1], Pb[1]) > TopUV + 0.01) continue;
+
+            const X0 = HalfW + (Pa[0] - Pu) * S, Y0 = HalfH - (Pa[1] - Pv) * S;
+            const X1 = HalfW + (Pb[0] - Pu) * S, Y1 = HalfH - (Pb[1] - Pv) * S;
+            if (showSeams && E.isSeam)
+            {
+                SeamCoords.push(X0, Y0, X1, Y1);
+                continue;
+            }
+            const Isl = IslandMap.get(E.islId);
+            const GrpColor = Isl?.importanceGroupId ? GroupColors.get(Isl.importanceGroupId) : null;
+            const IsBoundary = showBoundaries !== false && E.isBoundary;
+            const Key = IsBoundary
+                ? `1.25|${GrpColor ? this.HexToRgba(GrpColor, 0.72) : 'rgba(123, 212, 184, 0.54)'}`
+                : `0.9|${GrpColor ? this.HexToRgba(GrpColor, 0.40) : 'rgba(242, 242, 240, 0.30)'}`;
+            let Coords = EdgeBuckets.get(Key);
+            if (!Coords) { Coords = []; EdgeBuckets.set(Key, Coords); }
+            Coords.push(X0, Y0, X1, Y1);
+        }
+
+        for (const [Key, Coords] of EdgeBuckets)
+        {
+            const Sep = Key.indexOf('|');
+            Ctx.lineWidth = parseFloat(Key.slice(0, Sep));
+            Ctx.strokeStyle = Key.slice(Sep + 1);
+            Ctx.beginPath();
+            for (let i = 0; i < Coords.length; i += 4)
+            {
+                Ctx.moveTo(Coords[i], Coords[i + 1]);
+                Ctx.lineTo(Coords[i + 2], Coords[i + 3]);
+            }
+            Ctx.stroke();
+        }
+        if (SeamCoords.length)
+        {
+            Ctx.strokeStyle = '#ff6d5a';
+            Ctx.lineWidth = 1.95;
+            Ctx.beginPath();
+            for (let i = 0; i < SeamCoords.length; i += 4)
+            {
+                Ctx.moveTo(SeamCoords[i], SeamCoords[i + 1]);
+                Ctx.lineTo(SeamCoords[i + 2], SeamCoords[i + 3]);
+            }
+            Ctx.stroke();
+        }
+    }
+
     HexToRgba(Hex, Alpha)
     {
         const Clean = (Hex || '#eff4cf').replace('#', '');
@@ -821,17 +1037,53 @@ export class UVCanvas2D
             }
         }
 
+        // Spatial-grid O(1) lookup of candidate faces near (U, V)
+        const UseSpatial = typeof surface.QueryUvSpatialFaces === 'function';
+        const Candidates = UseSpatial
+            ? surface.QueryUvSpatialFaces(U - ThresholdUV, V - ThresholdUV, U + ThresholdUV, V + ThresholdUV)
+            : null;
+        const HiddenFaces = UseSpatial && surface.hiddenIslands.size ? new Set() : null;
+        const IslandByFace = new Map();
+        for (const Isl of islands)
+        {
+            if (Isl.hidden)
+            {
+                if (HiddenFaces) for (const Fi of Isl.faceIndices) HiddenFaces.add(Fi);
+                continue;
+            }
+            for (const Fi of Isl.faceIndices) IslandByFace.set(Fi, Isl);
+        }
+
         if (mode === 'vertex' && activeTool !== 'seam')
         {
             let BestUV = null, BestDist = ThresholdUV;
-            for (const Isl of islands)
+            if (Candidates)
             {
-                if (Isl.hidden) continue;
-                for (const UvIdx of Isl.uvIndices)
+                for (let i = 0; i < Candidates.length; i++)
                 {
-                    const P = surface.uvCoords[UvIdx];
-                    const D = Math.hypot(P[0] - U, P[1] - V);
-                    if (D < BestDist) { BestDist = D; BestUV = UvIdx; }
+                    const Fi = Candidates[i];
+                    if (HiddenFaces?.has(Fi)) continue;
+                    const Cr = surface.faces[Fi].corners;
+                    for (let k = 0; k < Cr.length; k++)
+                    {
+                        const UvIdx = Cr[k].uv;
+                        const P = surface.uvCoords[UvIdx];
+                        const D = Math.hypot(P[0] - U, P[1] - V);
+                        if (D < BestDist) { BestDist = D; BestUV = UvIdx; }
+                    }
+                }
+            }
+            else
+            {
+                for (const Isl of islands)
+                {
+                    if (Isl.hidden) continue;
+                    for (const UvIdx of Isl.uvIndices)
+                    {
+                        const P = surface.uvCoords[UvIdx];
+                        const D = Math.hypot(P[0] - U, P[1] - V);
+                        if (D < BestDist) { BestDist = D; BestUV = UvIdx; }
+                    }
                 }
             }
             if (BestUV !== null) return { kind: 'vertex', uvIndex: BestUV };
@@ -840,11 +1092,12 @@ export class UVCanvas2D
         if (mode === 'edge' || activeTool === 'seam')
         {
             let BestEdge = null, BestDist = ThresholdUV, BestA = -1, BestB = -1, BestVA = -1, BestVB = -1;
-            for (const Isl of islands)
+            if (Candidates)
             {
-                if (Isl.hidden) continue;
-                for (const Fi of Isl.faceIndices)
+                for (let i = 0; i < Candidates.length; i++)
                 {
+                    const Fi = Candidates[i];
+                    if (HiddenFaces?.has(Fi)) continue;
                     const C = surface.faces[Fi].corners;
                     for (let k = 0; k < C.length; k++)
                     {
@@ -858,6 +1111,31 @@ export class UVCanvas2D
                             BestEdge = EdgeKey(Ua, Ub);
                             BestA = Ua; BestB = Ub;
                             BestVA = C0.v; BestVB = C1.v;
+                        }
+                    }
+                }
+            }
+            else
+            {
+                for (const Isl of islands)
+                {
+                    if (Isl.hidden) continue;
+                    for (const Fi of Isl.faceIndices)
+                    {
+                        const C = surface.faces[Fi].corners;
+                        for (let k = 0; k < C.length; k++)
+                        {
+                            const C0 = C[k], C1 = C[(k + 1) % C.length];
+                            const Ua = C0.uv, Ub = C1.uv;
+                            const A = surface.uvCoords[Ua], B = surface.uvCoords[Ub];
+                            const D = PointSegmentDist(U, V, A[0], A[1], B[0], B[1]);
+                            if (D < BestDist)
+                            {
+                                BestDist = D;
+                                BestEdge = EdgeKey(Ua, Ub);
+                                BestA = Ua; BestB = Ub;
+                                BestVA = C0.v; BestVB = C1.v;
+                            }
                         }
                     }
                 }
@@ -876,7 +1154,53 @@ export class UVCanvas2D
             }
         }
 
-        // Face / Island hit test via point-in-polygon
+        // Face / Island hit test via spatial candidate list
+        const CheckFaceHit = (Fi, Isl) =>
+        {
+            const Corners = surface.faces[Fi].corners;
+            const Poly = Corners.map(C => surface.uvCoords[C.uv]);
+            if (!PointInPoly(U, V, Poly)) return null;
+            let BestEdgeDist = Infinity;
+            let NearVa = Corners[0].v, NearVb = Corners[1].v;
+            let NearUa = Corners[0].uv, NearUb = Corners[1].uv;
+            for (let k = 0; k < Corners.length; k++)
+            {
+                const C0 = Corners[k], C1 = Corners[(k + 1) % Corners.length];
+                const A = surface.uvCoords[C0.uv], B = surface.uvCoords[C1.uv];
+                const D = PointSegmentDist(U, V, A[0], A[1], B[0], B[1]);
+                if (D < BestEdgeDist)
+                {
+                    BestEdgeDist = D;
+                    NearVa = C0.v; NearVb = C1.v;
+                    NearUa = C0.uv; NearUb = C1.uv;
+                }
+            }
+            return {
+                kind: mode === 'face' ? 'face' : 'island',
+                faceIndex: Fi,
+                islandId: Isl?.id ?? null,
+                edgeVa: NearVa,
+                edgeVb: NearVb,
+                edgeKey3d: EdgeKey(NearVa, NearVb),
+                uvA: NearUa,
+                uvB: NearUb
+            };
+        };
+
+        if (Candidates)
+        {
+            for (let i = 0; i < Candidates.length; i++)
+            {
+                const Fi = Candidates[i];
+                if (HiddenFaces?.has(Fi)) continue;
+                const Isl = IslandByFace.get(Fi);
+                if (!Isl) continue;
+                const Res = CheckFaceHit(Fi, Isl);
+                if (Res) return Res;
+            }
+            return null;
+        }
+
         for (const Isl of islands)
         {
             if (Isl.hidden) continue;
@@ -884,36 +1208,8 @@ export class UVCanvas2D
                 V < Isl.bounds.minV - 0.01 || V > Isl.bounds.maxV + 0.01) continue;
             for (const Fi of Isl.faceIndices)
             {
-                const Corners = surface.faces[Fi].corners;
-                const Poly = Corners.map(C => surface.uvCoords[C.uv]);
-                if (PointInPoly(U, V, Poly))
-                {
-                    let BestEdgeDist = Infinity;
-                    let NearVa = Corners[0].v, NearVb = Corners[1].v;
-                    let NearUa = Corners[0].uv, NearUb = Corners[1].uv;
-                    for (let k = 0; k < Corners.length; k++)
-                    {
-                        const C0 = Corners[k], C1 = Corners[(k + 1) % Corners.length];
-                        const A = surface.uvCoords[C0.uv], B = surface.uvCoords[C1.uv];
-                        const D = PointSegmentDist(U, V, A[0], A[1], B[0], B[1]);
-                        if (D < BestEdgeDist)
-                        {
-                            BestEdgeDist = D;
-                            NearVa = C0.v; NearVb = C1.v;
-                            NearUa = C0.uv; NearUb = C1.uv;
-                        }
-                    }
-                    return {
-                        kind: mode === 'face' ? 'face' : 'island',
-                        faceIndex: Fi,
-                        islandId: Isl.id,
-                        edgeVa: NearVa,
-                        edgeVb: NearVb,
-                        edgeKey3d: EdgeKey(NearVa, NearVb),
-                        uvA: NearUa,
-                        uvB: NearUb
-                    };
-                }
+                const Res = CheckFaceHit(Fi, Isl);
+                if (Res) return Res;
             }
         }
         return null;

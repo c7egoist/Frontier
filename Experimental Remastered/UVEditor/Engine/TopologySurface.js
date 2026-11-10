@@ -125,7 +125,198 @@ export class TopologySurface
         this.undoStack = [];
         this.redoStack = [];
         this.faceNormals = [];
+        this._analysisCache = null;
+        this._distortionCache = null;
+        this._spatialGridCache = null;
+        this._adjCache = null;
         this.RecomputeNormals();
+    }
+
+    ComputeDataSignature(ExtraSalt = '')
+    {
+        const N = this.faces.length;
+        const ULen = this.uvCoords.length;
+        let UvHash = 0;
+        const Step = Math.max(1, (ULen / 32) | 0);
+        for (let i = 0; i < ULen; i += Step)
+        {
+            const P = this.uvCoords[i];
+            UvHash = ((UvHash * 1.00013) + P[0] * 13.7 + P[1] * 29.3) % 1e9;
+        }
+        let ImpHash = this.importanceByFace.size;
+        let ImpSum = 0;
+        if (ImpHash)
+        {
+            let Cnt = 0;
+            for (const [k, v] of this.importanceByFace)
+            {
+                ImpSum += (k + 1) * (v ? v.length : 0);
+                if (++Cnt >= 16) break;
+            }
+        }
+        return `${N}:${ULen}:${this.seams.size}:${this.pinned.size}:${this.hiddenIslands.size}:${this.lockedIslands.size}:${ImpHash}:${ImpSum}:${UvHash.toFixed(4)}:${ExtraSalt}`;
+    }
+
+    GetFaceDistortionFast(FaceIndex)
+    {
+        if (this._distortionCache && FaceIndex < this.faces.length)
+        {
+            const Base = FaceIndex * 3;
+            return {
+                area3D: this._distortionCache[Base],
+                angleStretch: this._distortionCache[Base + 1],
+                areaScale: this._distortionCache[Base + 2]
+            };
+        }
+        const A3 = this.FaceArea3D(FaceIndex);
+        const D = this.FaceTrianglesDistortion(FaceIndex);
+        return { area3D: A3, angleStretch: D.angleStretch, areaScale: D.areaScale };
+    }
+
+    GetCachedAnalysis(TileResolutionResolver = () => 2048, PixelsPerUnitMultiplier = 100, TileSig = '')
+    {
+        const Sig = this.ComputeDataSignature(TileSig);
+        if (this._analysisCache && this._analysisCache.sig === Sig)
+        {
+            return this._analysisCache;
+        }
+        const Islands = this.ExtractIslands(TileResolutionResolver, PixelsPerUnitMultiplier);
+        const Diagnostics = this.AnalyzeDiagnostics(Islands);
+        const FaceToIsland = new Int32Array(this.faces.length).fill(-1);
+        for (const Isl of Islands)
+        {
+            for (const Fi of Isl.faceIndices) FaceToIsland[Fi] = Isl.id;
+        }
+        this._analysisCache = { sig: Sig, islands: Islands, diagnostics: Diagnostics, faceToIsland: FaceToIsland };
+        return this._analysisCache;
+    }
+
+    EnsureAdjacencyIndices()
+    {
+        const N = this.faces.length;
+        const ULen = this.uvCoords.length;
+        const Sig = `${N}:${ULen}:${this.seams.size}`;
+        if (this._adjCache && this._adjCache.sig === Sig) return this._adjCache;
+
+        const Vert3dToUvs = new Array(this.positions.length);
+        const Vert3dUvSets = new Array(this.positions.length);
+        const UvToFaces = new Array(ULen);
+        const Edge3dFaces = new Map();
+        for (let fi = 0; fi < N; fi++)
+        {
+            const Cr = this.faces[fi].corners;
+            for (let k = 0; k < Cr.length; k++)
+            {
+                const C = Cr[k];
+                const CNext = Cr[(k + 1) % Cr.length];
+                if (!Vert3dUvSets[C.v]) Vert3dUvSets[C.v] = new Set();
+                Vert3dUvSets[C.v].add(C.uv);
+                if (!UvToFaces[C.uv]) UvToFaces[C.uv] = [];
+                UvToFaces[C.uv].push(fi);
+                const K3 = EdgeKey(C.v, CNext.v);
+                if (!Edge3dFaces.has(K3)) Edge3dFaces.set(K3, []);
+                Edge3dFaces.get(K3).push(fi);
+            }
+        }
+        for (let v = 0; v < this.positions.length; v++)
+        {
+            Vert3dToUvs[v] = Vert3dUvSets[v] ? [...Vert3dUvSets[v]] : [];
+        }
+        this._adjCache = { sig: Sig, vert3dToUvs: Vert3dToUvs, uvToFaces: UvToFaces, edge3dFaces: Edge3dFaces };
+        return this._adjCache;
+    }
+
+    EnsureUvSpatialGrid()
+    {
+        const Sig = this.ComputeDataSignature('grid');
+        if (this._spatialGridCache && this._spatialGridCache.sig === Sig) return this._spatialGridCache;
+
+        let MinU = Infinity, MinV = Infinity, MaxU = -Infinity, MaxV = -Infinity;
+        for (let i = 0; i < this.uvCoords.length; i++)
+        {
+            const P = this.uvCoords[i];
+            if (P[0] < MinU) MinU = P[0]; if (P[0] > MaxU) MaxU = P[0];
+            if (P[1] < MinV) MinV = P[1]; if (P[1] > MaxV) MaxV = P[1];
+        }
+        if (!Number.isFinite(MinU)) { MinU = 0; MaxU = 1; MinV = 0; MaxV = 1; }
+        const Pad = 0.02;
+        MinU -= Pad; MinV -= Pad; MaxU += Pad; MaxV += Pad;
+        const SpanU = Math.max(0.05, MaxU - MinU);
+        const SpanV = Math.max(0.05, MaxV - MinV);
+        const GridRes = 64;
+        const Buckets = new Array(GridRes * GridRes);
+        const N = this.faces.length;
+
+        for (let fi = 0; fi < N; fi++)
+        {
+            const Cr = this.faces[fi].corners;
+            let FMinU = Infinity, FMinV = Infinity, FMaxU = -Infinity, FMaxV = -Infinity;
+            for (const C of Cr)
+            {
+                const P = this.uvCoords[C.uv];
+                if (P[0] < FMinU) FMinU = P[0]; if (P[0] > FMaxU) FMaxU = P[0];
+                if (P[1] < FMinV) FMinV = P[1]; if (P[1] > FMaxV) FMaxV = P[1];
+            }
+            const X0 = Math.max(0, Math.min(GridRes - 1, Math.floor(((FMinU - MinU) / SpanU) * GridRes)));
+            const X1 = Math.max(0, Math.min(GridRes - 1, Math.floor(((FMaxU - MinU) / SpanU) * GridRes)));
+            const Y0 = Math.max(0, Math.min(GridRes - 1, Math.floor(((FMinV - MinV) / SpanV) * GridRes)));
+            const Y1 = Math.max(0, Math.min(GridRes - 1, Math.floor(((FMaxV - MinV) / SpanV) * GridRes)));
+            for (let gy = Y0; gy <= Y1; gy++)
+            {
+                const Row = gy * GridRes;
+                for (let gx = X0; gx <= X1; gx++)
+                {
+                    const Bi = Row + gx;
+                    if (!Buckets[Bi]) Buckets[Bi] = [fi];
+                    else Buckets[Bi].push(fi);
+                }
+            }
+        }
+        this._spatialGridCache = {
+            sig: Sig,
+            minU: MinU, minV: MinV, maxU: MaxU, maxV: MaxV,
+            invSpanU: GridRes / SpanU, invSpanV: GridRes / SpanV,
+            gridRes: GridRes,
+            buckets: Buckets,
+            seenMark: new Uint32Array(N),
+            seenStamp: 0
+        };
+        return this._spatialGridCache;
+    }
+
+    QueryUvSpatialFaces(MinU, MinV, MaxU, MaxV)
+    {
+        const G = this.EnsureUvSpatialGrid();
+        const R = G.gridRes;
+        if (MaxU < G.minU || MinU > G.maxU || MaxV < G.minV || MinV > G.maxV) return [];
+        const X0 = Math.max(0, Math.min(R - 1, Math.floor((MinU - G.minU) * G.invSpanU)));
+        const X1 = Math.max(0, Math.min(R - 1, Math.floor((MaxU - G.minU) * G.invSpanU)));
+        const Y0 = Math.max(0, Math.min(R - 1, Math.floor((MinV - G.minV) * G.invSpanV)));
+        const Y1 = Math.max(0, Math.min(R - 1, Math.floor((MaxV - G.minV) * G.invSpanV)));
+
+        G.seenStamp++;
+        if (G.seenStamp > 0xFFFFFFF0) { G.seenMark.fill(0); G.seenStamp = 1; }
+        const Stamp = G.seenStamp;
+        const Out = [];
+        for (let gy = Y0; gy <= Y1; gy++)
+        {
+            const Row = gy * R;
+            for (let gx = X0; gx <= X1; gx++)
+            {
+                const List = G.buckets[Row + gx];
+                if (!List) continue;
+                for (let i = 0; i < List.length; i++)
+                {
+                    const Fi = List[i];
+                    if (G.seenMark[Fi] !== Stamp)
+                    {
+                        G.seenMark[Fi] = Stamp;
+                        Out.push(Fi);
+                    }
+                }
+            }
+        }
+        return Out;
     }
 
     CreateSnapshot(Label = 'Edit')
@@ -315,6 +506,10 @@ export class TopologySurface
     {
         const N = this.faces.length;
         if (!N) return [];
+        if (!this._distortionCache || this._distortionCache.length !== N * 3)
+        {
+            this._distortionCache = new Float32Array(N * 3);
+        }
 
         // Map UV edges -> incident faces (strictly NOT crossing marked seams between distinct 3D edges)
         const UvEdgeFaces = new Map();
@@ -390,6 +585,10 @@ export class TopologySurface
                 const SA2 = this.FaceSignedAreaUV(Fi);
                 const A2 = Math.abs(SA2);
                 const Dist = this.FaceTrianglesDistortion(Fi);
+                const DC = Fi * 3;
+                this._distortionCache[DC] = A3;
+                this._distortionCache[DC + 1] = Dist.angleStretch;
+                this._distortionCache[DC + 2] = Dist.areaScale;
                 Area3D += A3;
                 AreaUV += A2;
                 SignedAreaUV += SA2;
@@ -3274,13 +3473,24 @@ export class TopologySurface
         const List = Islands || this.ExtractIslands();
         const Base = this.DetectOverlapsAndFlips(List);
         let SumAngle = 0, MaxAngle = 0, SumArea3D = 0;
+        const HasCache = this._distortionCache && this._distortionCache.length === this.faces.length * 3;
         for (let fi = 0; fi < this.faces.length; fi++)
         {
-            const A3 = Math.max(1e-7, this.FaceArea3D(fi));
-            const D = this.FaceTrianglesDistortion(fi);
-            SumAngle += D.angleStretch * A3;
+            let A3, AngleStretch;
+            if (HasCache)
+            {
+                const DC = fi * 3;
+                A3 = Math.max(1e-7, this._distortionCache[DC]);
+                AngleStretch = this._distortionCache[DC + 1];
+            }
+            else
+            {
+                A3 = Math.max(1e-7, this.FaceArea3D(fi));
+                AngleStretch = this.FaceTrianglesDistortion(fi).angleStretch;
+            }
+            SumAngle += AngleStretch * A3;
             SumArea3D += A3;
-            if (D.angleStretch > MaxAngle) MaxAngle = D.angleStretch;
+            if (AngleStretch > MaxAngle) MaxAngle = AngleStretch;
         }
         return {
             ...Base,

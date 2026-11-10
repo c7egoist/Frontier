@@ -271,6 +271,9 @@ export class UVViewport3D
         this.hoveredEdge = null;
         this.edgeNormalMap = new Map();
         this.edgeScaleRadius = 0.008;
+        this.edgeList = [];
+        this.edgeKeyToId = new Map();
+        this._lastMeshTopoSig = null;
 
         this.InitScene();
     }
@@ -396,6 +399,269 @@ export class UVViewport3D
         this.selectedFaceOverlayMesh.renderOrder = 2;
         this.scene.add(this.selectedFaceOverlayMesh);
 
+        // GPU Barycentric Quad/N-Gon Wireframe Shader (zero diagonal lines, zero LineSegments buffer!)
+        this.gpuWireMat = new THREE.ShaderMaterial({
+            vertexShader: `
+                attribute vec3 aBary;
+                attribute vec3 aEdgeMask;
+                varying vec3 vBary;
+                varying vec3 vEdgeMask;
+                void main() {
+                    vBary = aBary;
+                    vEdgeMask = aEdgeMask;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: `
+                varying vec3 vBary;
+                varying vec3 vEdgeMask;
+                void main() {
+                    vec3 d = fwidth(vBary);
+                    vec3 a3 = smoothstep(vec3(0.0), d * 1.15, vBary + (1.0 - vEdgeMask) * 10.0);
+                    float edgeFactor = 1.0 - min(min(a3.x, a3.y), a3.z);
+                    if (edgeFactor < 0.02) discard;
+                    gl_FragColor = vec4(1.0, 1.0, 1.0, edgeFactor * 0.20);
+                }
+            `,
+            transparent: true,
+            depthWrite: false,
+            polygonOffset: true,
+            polygonOffsetFactor: -2,
+            polygonOffsetUnits: -2,
+            toneMapped: false,
+            side: THREE.DoubleSide
+        });
+        this.gpuWireMesh = new THREE.Mesh(this.geometry, this.gpuWireMat);
+        this.gpuWireMesh.renderOrder = 2;
+        this.scene.add(this.gpuWireMesh);
+
+        // GPU Edge State Texture (256 x H RGBA: R=selected, G=seam, B=boundary, A=active)
+        this.gpuEdgeTexW = 256;
+        this.gpuEdgeTexH = 16;
+        this.gpuEdgeStateTex = new THREE.DataTexture(
+            new Uint8Array(this.gpuEdgeTexW * this.gpuEdgeTexH * 4),
+            this.gpuEdgeTexW,
+            this.gpuEdgeTexH,
+            THREE.RGBAFormat
+        );
+        this.gpuEdgeStateTex.minFilter = THREE.NearestFilter;
+        this.gpuEdgeStateTex.magFilter = THREE.NearestFilter;
+        this.gpuEdgeStateTex.generateMipmaps = false;
+        this.gpuEdgeStateTex.needsUpdate = true;
+
+        this.gpuEdgeGeo = new THREE.BufferGeometry();
+        const EdgeVertShader = `
+            attribute vec3 aPosB;
+            attribute vec2 aCorner;
+            attribute float aEdgeId;
+            uniform sampler2D uEdgeTex;
+            uniform vec2 uEdgeTexSize;
+            uniform vec2 uResolution;
+            uniform float uHoverEdgeId;
+            uniform float uShowSeams;
+            uniform float uShowBoundaries;
+            uniform float uGhostPass;
+            varying vec4 vState;
+            varying float vIsHover;
+            varying float vSide;
+            void main() {
+                float eid = floor(aEdgeId + 0.5);
+                float tx = mod(eid, uEdgeTexSize.x);
+                float ty = floor(eid / uEdgeTexSize.x);
+                vec4 state = texture2D(uEdgeTex, (vec2(tx, ty) + 0.5) / uEdgeTexSize);
+                bool isHover = abs(eid - uHoverEdgeId) < 0.5;
+
+                float halfW = 0.0;
+                if (uGhostPass > 0.5) {
+                    if (state.a > 0.5 || state.r > 0.5) halfW = 1.1;
+                } else {
+                    if (isHover) halfW = 2.85;
+                    else if (state.a > 0.5) halfW = 2.75;
+                    else if (state.r > 0.5) halfW = 2.25;
+                    else if (state.g > 0.5 && uShowSeams > 0.5) halfW = 1.85;
+                    else if (state.b > 0.5 && uShowBoundaries > 0.5) halfW = 1.15;
+                }
+
+                vState = state;
+                vIsHover = isHover ? 1.0 : 0.0;
+                vSide = aCorner.y;
+
+                if (halfW <= 0.01) {
+                    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+                    return;
+                }
+
+                vec4 clipA = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                vec4 clipB = projectionMatrix * modelViewMatrix * vec4(aPosB, 1.0);
+                if (clipA.w <= 0.05 || clipB.w <= 0.05) {
+                    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+                    return;
+                }
+                vec2 ndcA = clipA.xy / clipA.w;
+                vec2 ndcB = clipB.xy / clipB.w;
+                vec2 dirPx = (ndcB - ndcA) * uResolution * 0.5;
+                float segLen = length(dirPx);
+                vec2 tangent = segLen > 0.001 ? dirPx / segLen : vec2(1.0, 0.0);
+                vec2 perp = vec2(-tangent.y, tangent.x);
+
+                vec4 clipPos = mix(clipA, clipB, aCorner.x);
+                clipPos.z -= (isHover || state.a > 0.5 ? 0.00075 : 0.00045) * clipPos.w;
+                clipPos.xy += (perp * aCorner.y * halfW) * (2.0 / max(vec2(1.0), uResolution)) * clipPos.w;
+                gl_Position = clipPos;
+            }
+        `;
+        const EdgeFragShader = `
+            uniform float uShowSeams;
+            uniform float uShowBoundaries;
+            uniform float uGhostPass;
+            uniform vec3 uHoverColor;
+            varying vec4 vState;
+            varying float vIsHover;
+            varying float vSide;
+            void main() {
+                float aa = 1.0 - smoothstep(0.68, 1.0, abs(vSide));
+                if (aa < 0.02) discard;
+                if (uGhostPass > 0.5) {
+                    if (vState.a < 0.5 && vState.r < 0.5) discard;
+                    vec3 gc = vState.a > 0.5 ? vec3(1.0, 0.616, 0.231) : vec3(0.937, 0.957, 0.812);
+                    gl_FragColor = vec4(gc, aa * 0.24);
+                    return;
+                }
+                vec3 col;
+                float alpha = aa;
+                if (vIsHover > 0.5) {
+                    col = uHoverColor;
+                } else if (vState.a > 0.5) {
+                    col = vec3(1.0, 0.616, 0.231);
+                } else if (vState.r > 0.5) {
+                    col = vec3(0.937, 0.957, 0.812);
+                } else if (vState.g > 0.5 && uShowSeams > 0.5) {
+                    col = vec3(1.0, 0.365, 0.278);
+                } else if (vState.b > 0.5 && uShowBoundaries > 0.5) {
+                    col = vec3(0.482, 0.831, 0.722);
+                    alpha *= 0.82;
+                } else {
+                    discard;
+                }
+                gl_FragColor = vec4(col, alpha);
+            }
+        `;
+        this.gpuEdgeMat = new THREE.ShaderMaterial({
+            uniforms: {
+                uEdgeTex: { value: this.gpuEdgeStateTex },
+                uEdgeTexSize: { value: new THREE.Vector2(this.gpuEdgeTexW, this.gpuEdgeTexH) },
+                uResolution: { value: new THREE.Vector2(800, 600) },
+                uHoverEdgeId: { value: -10.0 },
+                uHoverColor: { value: new THREE.Color('#7dd3fc') },
+                uShowSeams: { value: 1.0 },
+                uShowBoundaries: { value: 1.0 },
+                uGhostPass: { value: 0.0 }
+            },
+            vertexShader: EdgeVertShader,
+            fragmentShader: EdgeFragShader,
+            transparent: true,
+            depthTest: true,
+            depthWrite: false,
+            toneMapped: false,
+            side: THREE.DoubleSide
+        });
+        this.gpuEdgeMesh = new THREE.Mesh(this.gpuEdgeGeo, this.gpuEdgeMat);
+        this.gpuEdgeMesh.renderOrder = 4;
+        this.gpuEdgeMesh.frustumCulled = false;
+        this.scene.add(this.gpuEdgeMesh);
+
+        this.gpuEdgeGhostMat = new THREE.ShaderMaterial({
+            uniforms: {
+                uEdgeTex: { value: this.gpuEdgeStateTex },
+                uEdgeTexSize: { value: new THREE.Vector2(this.gpuEdgeTexW, this.gpuEdgeTexH) },
+                uResolution: this.gpuEdgeMat.uniforms.uResolution,
+                uHoverEdgeId: { value: -10.0 },
+                uHoverColor: this.gpuEdgeMat.uniforms.uHoverColor,
+                uShowSeams: { value: 0.0 },
+                uShowBoundaries: { value: 0.0 },
+                uGhostPass: { value: 1.0 }
+            },
+            vertexShader: EdgeVertShader,
+            fragmentShader: EdgeFragShader,
+            transparent: true,
+            depthTest: false,
+            depthWrite: false,
+            toneMapped: false,
+            side: THREE.DoubleSide
+        });
+        this.gpuEdgeGhostMesh = new THREE.Mesh(this.gpuEdgeGeo, this.gpuEdgeGhostMat);
+        this.gpuEdgeGhostMesh.renderOrder = 3;
+        this.gpuEdgeGhostMesh.frustumCulled = false;
+        this.scene.add(this.gpuEdgeGhostMesh);
+
+        // GPU Selected/Active Vertex Point Cloud (256 x H RGBA: R=selected, G=active)
+        this.gpuVertTexW = 256;
+        this.gpuVertTexH = 16;
+        this.gpuVertSelTex = new THREE.DataTexture(
+            new Uint8Array(this.gpuVertTexW * this.gpuVertTexH * 4),
+            this.gpuVertTexW,
+            this.gpuVertTexH,
+            THREE.RGBAFormat
+        );
+        this.gpuVertSelTex.minFilter = THREE.NearestFilter;
+        this.gpuVertSelTex.magFilter = THREE.NearestFilter;
+        this.gpuVertSelTex.generateMipmaps = false;
+        this.gpuVertSelTex.needsUpdate = true;
+
+        this.gpuVertGeo = new THREE.BufferGeometry();
+        this.gpuVertMat = new THREE.ShaderMaterial({
+            uniforms: {
+                uVertTex: { value: this.gpuVertSelTex },
+                uVertTexSize: { value: new THREE.Vector2(this.gpuVertTexW, this.gpuVertTexH) },
+                uPixelRatio: { value: Math.min(2, window.devicePixelRatio || 1) }
+            },
+            vertexShader: `
+                attribute float aVertId;
+                uniform sampler2D uVertTex;
+                uniform vec2 uVertTexSize;
+                uniform float uPixelRatio;
+                varying float vActive;
+                void main() {
+                    float vid = floor(aVertId + 0.5);
+                    float tx = mod(vid, uVertTexSize.x);
+                    float ty = floor(vid / uVertTexSize.x);
+                    vec4 state = texture2D(uVertTex, (vec2(tx, ty) + 0.5) / uVertTexSize);
+                    if (state.r < 0.5) {
+                        gl_PointSize = 0.0;
+                        gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+                        return;
+                    }
+                    vActive = state.g;
+                    vec4 clipPos = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                    clipPos.z -= 0.0009 * clipPos.w;
+                    gl_Position = clipPos;
+                    gl_PointSize = (state.g > 0.5 ? 14.5 : 12.0) * uPixelRatio;
+                }
+            `,
+            fragmentShader: `
+                varying float vActive;
+                void main() {
+                    vec2 uv = gl_PointCoord * 2.0 - 1.0;
+                    float d = length(uv);
+                    if (d > 1.0) discard;
+                    if (d > 0.68) {
+                        gl_FragColor = vec4(0.04, 0.05, 0.06, 1.0);
+                    } else {
+                        vec3 col = vActive > 0.5 ? vec3(1.0, 0.68, 0.25) : vec3(0.937, 0.957, 0.812);
+                        gl_FragColor = vec4(col, 1.0);
+                    }
+                }
+            `,
+            transparent: false,
+            depthTest: true,
+            depthWrite: true,
+            toneMapped: false
+        });
+        this.gpuVertPoints = new THREE.Points(this.gpuVertGeo, this.gpuVertMat);
+        this.gpuVertPoints.renderOrder = 7;
+        this.gpuVertPoints.frustumCulled = false;
+        this.scene.add(this.gpuVertPoints);
+
         // GPU Offscreen Face-ID Picker Scene (hardware Z-buffer occlusion, 24-bit face index)
         this.pickScene = new THREE.Scene();
         this.pickScene.background = null;
@@ -442,68 +708,6 @@ export class UVViewport3D
         this._strokeSeenFaces = new Set();
         this._islandByFaceCache = new Map();
         this.controls.addEventListener('change', () => { this.pickBufferDirty = true; });
-
-        this.wireGeo = new THREE.BufferGeometry();
-        this.wireLines = new THREE.LineSegments(this.wireGeo, new THREE.LineBasicMaterial({
-            color: '#ffffff', transparent: true, opacity: 0.16
-        }));
-        this.scene.add(this.wireLines);
-
-        this.boundaryGeo = new THREE.BufferGeometry();
-        this.boundaryLines = new THREE.LineSegments(this.boundaryGeo, new THREE.LineBasicMaterial({
-            color: '#7bd4b8', transparent: true, opacity: 0.78
-        }));
-        this.scene.add(this.boundaryLines);
-
-        // Thick 3D tubes for crisp Seams, Selected Edges, Active Edge, and Hovered Edge
-        this.seamGeo = new THREE.BufferGeometry();
-        this.seamMesh = new THREE.Mesh(this.seamGeo, new THREE.MeshBasicMaterial({
-            color: '#ff5d47'
-        }));
-        this.seamMesh.renderOrder = 3;
-        this.scene.add(this.seamMesh);
-
-        this.selectedEdgeGeo = new THREE.BufferGeometry();
-        this.selectedEdgeMesh = new THREE.Mesh(this.selectedEdgeGeo, new THREE.MeshBasicMaterial({
-            color: '#eff4cf'
-        }));
-        this.selectedEdgeMesh.renderOrder = 4;
-        this.scene.add(this.selectedEdgeMesh);
-
-        this.selectedEdgeGhostGeo = new THREE.BufferGeometry();
-        this.selectedEdgeGhostLines = new THREE.LineSegments(this.selectedEdgeGhostGeo, new THREE.LineBasicMaterial({
-            color: '#eff4cf', transparent: true, opacity: 0.25, depthTest: false
-        }));
-        this.selectedEdgeGhostLines.renderOrder = 4;
-        this.scene.add(this.selectedEdgeGhostLines);
-
-        this.activeEdgeGeo = new THREE.BufferGeometry();
-        this.activeEdgeMesh = new THREE.Mesh(this.activeEdgeGeo, new THREE.MeshBasicMaterial({
-            color: '#ff9d3b'
-        }));
-        this.activeEdgeMesh.renderOrder = 5;
-        this.scene.add(this.activeEdgeMesh);
-
-        this.hoverEdgeGeo = new THREE.BufferGeometry();
-        this.hoverEdgeMat = new THREE.MeshBasicMaterial({
-            color: '#7dd3fc'
-        });
-        this.hoverEdgeMesh = new THREE.Mesh(this.hoverEdgeGeo, this.hoverEdgeMat);
-        this.hoverEdgeMesh.renderOrder = 6;
-        this.scene.add(this.hoverEdgeMesh);
-
-        this.selectedVertGeo = new THREE.BufferGeometry();
-        this.selectedVertPoints = new THREE.Points(this.selectedVertGeo, new THREE.PointsMaterial({
-            color: '#ffffff',
-            map: this.vertexDotTex,
-            size: 13,
-            sizeAttenuation: false,
-            transparent: true,
-            alphaTest: 0.2,
-            depthTest: true
-        }));
-        this.selectedVertPoints.renderOrder = 7;
-        this.scene.add(this.selectedVertPoints);
 
         // 3D Box Select Marquee & 3D Paint Select Brush Ring DOM Overlays
         this.marqueeEl = document.createElement('div');
@@ -710,6 +914,7 @@ export class UVViewport3D
             this.renderer.setSize(R.width, R.height, false);
             this.camera.aspect = R.width / R.height;
             this.camera.updateProjectionMatrix();
+            this.gpuEdgeMat.uniforms.uResolution.value.set(R.width, R.height);
             this.pickBufferDirty = true;
         };
         new ResizeObserver(Resize).observe(this.container);
@@ -801,6 +1006,8 @@ export class UVViewport3D
     FastUpdateGpuFaceMask(Surface, Islands = null)
     {
         if (!this.webglReady || !Surface || !this.gpuSelectionTex) return;
+        const UseIslands = Islands || this._lastIslands || null;
+        if (Islands) this._lastIslands = Islands;
         const FaceCount = Surface.faces.length;
         const W = this.gpuSelTexW;
         const NeedH = Math.max(1, Math.ceil(FaceCount / W));
@@ -817,9 +1024,9 @@ export class UVViewport3D
         }
         const Data = this.gpuSelectionTex.image.data;
         Data.fill(0);
-        if (this.selectionMode === 'island' && Islands)
+        if (this.selectionMode === 'island' && UseIslands)
         {
-            for (const Isl of Islands)
+            for (const Isl of UseIslands)
             {
                 if (!Isl.hidden && Surface.selectedIslands.has(Isl.id))
                 {
@@ -833,30 +1040,185 @@ export class UVViewport3D
         }
         if (this.selectionMode === 'vertex' && Surface.selectedUVs.size)
         {
-            for (let fi = 0; fi < FaceCount; fi++)
+            const Adj = Surface.EnsureAdjacencyIndices();
+            for (const UvId of Surface.selectedUVs)
             {
-                for (const C of Surface.faces[fi].corners)
+                const Faces = Adj.uvToFaces[UvId];
+                if (!Faces) continue;
+                for (let i = 0; i < Faces.length; i++)
                 {
-                    if (Surface.selectedUVs.has(C.uv)) { Data[fi * 4] = 255; break; }
+                    const fi = Faces[i];
+                    if (fi >= 0 && fi < FaceCount) Data[fi * 4] = 255;
                 }
             }
         }
         else if (this.selectionMode === 'edge' && Surface.selectedEdges3D.size)
         {
-            for (let fi = 0; fi < FaceCount; fi++)
+            const Adj = Surface.EnsureAdjacencyIndices();
+            for (const K3 of Surface.selectedEdges3D)
             {
-                const Cr = Surface.faces[fi].corners;
-                for (let k = 0; k < Cr.length; k++)
+                const Faces = Adj.edge3dFaces.get(K3);
+                if (!Faces) continue;
+                for (let i = 0; i < Faces.length; i++)
                 {
-                    if (Surface.selectedEdges3D.has(EdgeKey(Cr[k].v, Cr[(k + 1) % Cr.length].v)))
-                    {
-                        Data[fi * 4] = 255; break;
-                    }
+                    const fi = Faces[i];
+                    if (fi >= 0 && fi < FaceCount) Data[fi * 4] = 255;
                 }
             }
         }
         this.gpuSelectionTex.needsUpdate = true;
         this.selectedFaceOverlayMesh.visible = true;
+        this.FastUpdateGpuEdgeAndVertMasks(Surface, UseIslands);
+    }
+
+    FastUpdateUvsOnly(Surface)
+    {
+        if (!this.webglReady || !Surface || !this.geometry) return;
+        const UvAttr = this.geometry.getAttribute('uv');
+        if (!UvAttr) return;
+        const Arr = UvAttr.array;
+        const IslandMap = this._lastIslands ? new Int32Array(Surface.faces.length).fill(-1) : null;
+        const HiddenIslands = new Set();
+        if (this._lastIslands)
+        {
+            for (const Isl of this._lastIslands)
+            {
+                if (Isl.hidden) HiddenIslands.add(Isl.id);
+                for (const fi of Isl.faceIndices) IslandMap[fi] = Isl.id;
+            }
+        }
+        let W = 0;
+        for (let fi = 0; fi < Surface.faces.length; fi++)
+        {
+            if (IslandMap && HiddenIslands.has(IslandMap[fi])) continue;
+            const Cr = Surface.faces[fi].corners;
+            for (let k = 1; k < Cr.length - 1; k++)
+            {
+                const Idxs = [0, k, k + 1];
+                for (let b = 0; b < 3; b++)
+                {
+                    const Uv = Surface.uvCoords[Cr[Idxs[b]].uv];
+                    Arr[W++] = Uv[0];
+                    Arr[W++] = Uv[1];
+                }
+            }
+        }
+        UvAttr.needsUpdate = true;
+    }
+
+    FastUpdateGpuEdgeAndVertMasks(Surface, Islands = null)
+    {
+        if (!this.webglReady || !Surface) return;
+        const EdgeCount = this.edgeList.length;
+        if (EdgeCount && this.gpuEdgeStateTex)
+        {
+            const W = this.gpuEdgeTexW;
+            const NeedH = Math.max(1, Math.ceil(EdgeCount / W));
+            if (NeedH !== this.gpuEdgeTexH || this.gpuEdgeStateTex.image.data.length !== W * NeedH * 4)
+            {
+                this.gpuEdgeTexH = NeedH;
+                this.gpuEdgeStateTex.dispose();
+                this.gpuEdgeStateTex = new THREE.DataTexture(new Uint8Array(W * NeedH * 4), W, NeedH, THREE.RGBAFormat);
+                this.gpuEdgeStateTex.minFilter = THREE.NearestFilter;
+                this.gpuEdgeStateTex.magFilter = THREE.NearestFilter;
+                this.gpuEdgeStateTex.generateMipmaps = false;
+                this.gpuEdgeMat.uniforms.uEdgeTex.value = this.gpuEdgeStateTex;
+                this.gpuEdgeMat.uniforms.uEdgeTexSize.value.set(W, NeedH);
+                this.gpuEdgeGhostMat.uniforms.uEdgeTex.value = this.gpuEdgeStateTex;
+                this.gpuEdgeGhostMat.uniforms.uEdgeTexSize.value.set(W, NeedH);
+            }
+            const Data = this.gpuEdgeStateTex.image.data;
+            Data.fill(0);
+            const IsRegionMode = this.selectionMode === 'face' || this.selectionMode === 'island';
+            const Adj = Surface.EnsureAdjacencyIndices();
+
+            let IslandByFace = null;
+            if (IsRegionMode && Islands)
+            {
+                IslandByFace = new Int32Array(Surface.faces.length).fill(-1);
+                for (const Isl of Islands)
+                {
+                    if (!Isl.hidden && Surface.selectedIslands.has(Isl.id))
+                    {
+                        for (const fi of Isl.faceIndices) IslandByFace[fi] = Isl.id;
+                    }
+                }
+            }
+
+            for (let ei = 0; ei < EdgeCount; ei++)
+            {
+                const E = this.edgeList[ei];
+                const Base = ei * 4;
+                if (Surface.seams.has(E.key)) Data[Base + 1] = 255;
+                if (E.isBoundary) Data[Base + 2] = 255;
+                if (IsRegionMode)
+                {
+                    const Faces = Adj.edge3dFaces.get(E.key);
+                    let SelCnt = 0;
+                    if (Faces)
+                    {
+                        for (let i = 0; i < Faces.length; i++)
+                        {
+                            const Fi = Faces[i];
+                            if (Surface.selectedFaces.has(Fi) || (IslandByFace && IslandByFace[Fi] >= 0)) SelCnt++;
+                        }
+                    }
+                    if (SelCnt === 1) Data[Base] = 255;
+                }
+                else
+                {
+                    if (Surface.selectedEdges3D.has(E.key)) Data[Base] = 255;
+                    if (Surface.activeEdge3D === E.key) Data[Base + 3] = 255;
+                }
+            }
+            this.gpuEdgeStateTex.needsUpdate = true;
+            this.gpuEdgeMat.uniforms.uShowSeams.value = this.showSeams ? 1.0 : 0.0;
+            this.gpuEdgeMat.uniforms.uShowBoundaries.value = this.showBoundaries ? 1.0 : 0.0;
+            this.gpuEdgeGhostMesh.visible = !IsRegionMode;
+        }
+
+        const VertCount = Surface.positions.length;
+        if (VertCount && this.gpuVertSelTex)
+        {
+            const W = this.gpuVertTexW;
+            const NeedH = Math.max(1, Math.ceil(VertCount / W));
+            if (NeedH !== this.gpuVertTexH || this.gpuVertSelTex.image.data.length !== W * NeedH * 4)
+            {
+                this.gpuVertTexH = NeedH;
+                this.gpuVertSelTex.dispose();
+                this.gpuVertSelTex = new THREE.DataTexture(new Uint8Array(W * NeedH * 4), W, NeedH, THREE.RGBAFormat);
+                this.gpuVertSelTex.minFilter = THREE.NearestFilter;
+                this.gpuVertSelTex.magFilter = THREE.NearestFilter;
+                this.gpuVertSelTex.generateMipmaps = false;
+                this.gpuVertMat.uniforms.uVertTex.value = this.gpuVertSelTex;
+                this.gpuVertMat.uniforms.uVertTexSize.value.set(W, NeedH);
+            }
+            const VData = this.gpuVertSelTex.image.data;
+            VData.fill(0);
+            if (this.selectionMode === 'vertex' && Surface.selectedUVs.size)
+            {
+                for (const UvId of Surface.selectedUVs)
+                {
+                    const Adj = Surface.EnsureAdjacencyIndices();
+                    const Faces = Adj.uvToFaces[UvId];
+                    if (!Faces) continue;
+                    for (let i = 0; i < Faces.length; i++)
+                    {
+                        const Cr = Surface.faces[Faces[i]].corners;
+                        for (let k = 0; k < Cr.length; k++)
+                        {
+                            if (Cr[k].uv === UvId)
+                            {
+                                VData[Cr[k].v * 4] = 255;
+                                if (Surface.activeUV === UvId) VData[Cr[k].v * 4 + 1] = 255;
+                            }
+                        }
+                    }
+                }
+            }
+            this.gpuVertSelTex.needsUpdate = true;
+            this.gpuVertPoints.visible = this.selectionMode === 'vertex' && Surface.selectedUVs.size > 0;
+        }
     }
 
     DispatchBoxSelect3D(MinX, MinY, MaxX, MaxY, Rect, { additive = false, subtract = false, xray = false } = {})
@@ -1035,18 +1397,63 @@ export class UVViewport3D
         if (!this.webglReady || !this.surface || !this.triToFace.length) return null;
         const Rect = this.canvas.getBoundingClientRect();
         if (!Rect.width || !Rect.height) return null;
+        const Sx = Event.clientX - Rect.left;
+        const Sy = Event.clientY - Rect.top;
+        if (Sx < 0 || Sy < 0 || Sx >= Rect.width || Sy >= Rect.height) return null;
+
+        let FaceIndex = -1;
+        if (this.EnsureGpuPickBuffer(Rect))
+        {
+            const PxX = Math.max(0, Math.min(this.pickW - 1, Math.floor((Sx / Rect.width) * this.pickW)));
+            const PxY = Math.max(0, Math.min(this.pickH - 1, Math.floor(((Rect.height - Sy) / Rect.height) * this.pickH)));
+            const idx = (PxY * this.pickW + PxX) * 4;
+            const Px = this.cachedPickPixels;
+            if (Px && Px[idx + 3] > 0)
+            {
+                const Id = Px[idx] + (Px[idx + 1] << 8) + (Px[idx + 2] << 16);
+                if (Id > 0 && Id <= this.surface.faces.length) FaceIndex = Id - 1;
+            }
+            if (FaceIndex < 0) return null;
+        }
+        else
+        {
+            return null;
+        }
+
         const Ptr = new THREE.Vector2(
-            ((Event.clientX - Rect.left) / Rect.width) * 2 - 1,
-            -((Event.clientY - Rect.top) / Rect.height) * 2 + 1
+            (Sx / Rect.width) * 2 - 1,
+            -(Sy / Rect.height) * 2 + 1
         );
         const Ray = new THREE.Raycaster();
         Ray.setFromCamera(Ptr, this.camera);
-        const Hits = Ray.intersectObject(this.mesh, false);
-        if (!Hits.length) return null;
-        const Hit = Hits[0];
-        const FaceIndex = this.triToFace[Hit.faceIndex];
-        if (FaceIndex === undefined) return null;
-        return { hit: Hit, faceIndex: FaceIndex };
+        const F = this.surface.faces[FaceIndex];
+        const Pt = new THREE.Vector3();
+        let HitPt = null;
+        if (F && F.corners.length >= 3)
+        {
+            const P0 = this.surface.positions[F.corners[0].v];
+            const V0 = new THREE.Vector3(P0[0], P0[1], P0[2]);
+            for (let k = 1; k < F.corners.length - 1; k++)
+            {
+                const Pa = this.surface.positions[F.corners[k].v];
+                const Pb = this.surface.positions[F.corners[k + 1].v];
+                const V1 = new THREE.Vector3(Pa[0], Pa[1], Pa[2]);
+                const V2 = new THREE.Vector3(Pb[0], Pb[1], Pb[2]);
+                if (Ray.ray.intersectTriangle(V0, V1, V2, false, Pt))
+                {
+                    HitPt = Pt.clone();
+                    break;
+                }
+            }
+            if (!HitPt)
+            {
+                let Cx = 0, Cy = 0, Cz = 0;
+                for (const C of F.corners) { const P = this.surface.positions[C.v]; Cx += P[0]; Cy += P[1]; Cz += P[2]; }
+                const Inv = 1 / F.corners.length;
+                HitPt = new THREE.Vector3(Cx * Inv, Cy * Inv, Cz * Inv);
+            }
+        }
+        return HitPt ? { hit: { point: HitPt, faceIndex: FaceIndex }, faceIndex: FaceIndex } : null;
     }
 
     FindHitEdge(Event)
@@ -1103,33 +1510,21 @@ export class UVViewport3D
         this.hoveredEdge = Edge;
         if (!Edge)
         {
-            this.hoverEdgeGeo.setAttribute('position', new THREE.Float32BufferAttribute([], 3));
-            this.hoverEdgeMesh.visible = false;
+            this.gpuEdgeMat.uniforms.uHoverEdgeId.value = -10.0;
             this.canvas.style.cursor = this.activeTool === 'seam' ? 'crosshair' : 'default';
             return;
         }
-        this.hoverEdgeMat.color.set(this.activeTool === 'seam' ? '#ff8b78' : '#7dd3fc');
+        const EdgeId = this.edgeKeyToId.get(Edge.key);
+        this.gpuEdgeMat.uniforms.uHoverColor.value.set(this.activeTool === 'seam' ? '#ff8b78' : '#7dd3fc');
+        this.gpuEdgeMat.uniforms.uHoverEdgeId.value = EdgeId !== undefined ? EdgeId : -10.0;
         this.canvas.style.cursor = this.activeTool === 'seam' ? 'crosshair' : 'pointer';
-
-        const A = this.surface.positions[Edge.va];
-        const B = this.surface.positions[Edge.vb];
-        const N = this.edgeNormalMap.get(Edge.key) || this.surface.faceNormals[Edge.faceIndex] || [0, 1, 0];
-        const Lift = this.edgeScaleRadius * 0.45;
-        const P0 = [A[0] + N[0] * Lift, A[1] + N[1] * Lift, A[2] + N[2] * Lift];
-        const P1 = [B[0] + N[0] * Lift, B[1] + N[1] * Lift, B[2] + N[2] * Lift];
-        const Arr = [];
-        AppendEdgeTube(Arr, P0, P1, this.edgeScaleRadius * 1.32);
-        this.hoverEdgeGeo.setAttribute('position', new THREE.Float32BufferAttribute(Arr, 3));
-        this.hoverEdgeGeo.computeVertexNormals();
-        this.hoverEdgeMesh.visible = true;
     }
 
     ClearHover()
     {
-        if (!this.hoveredEdge) return;
+        if (!this.hoveredEdge && this.gpuEdgeMat.uniforms.uHoverEdgeId.value < 0) return;
         this.hoveredEdge = null;
-        this.hoverEdgeGeo.setAttribute('position', new THREE.Float32BufferAttribute([], 3));
-        this.hoverEdgeMesh.visible = false;
+        this.gpuEdgeMat.uniforms.uHoverEdgeId.value = -10.0;
     }
 
     HandleClick(Event)
@@ -1261,44 +1656,21 @@ export class UVViewport3D
         this.controls.update();
     }
 
+    SyncOverlayStates()
+    {
+        if (!this.webglReady) return;
+        this.gpuWireMesh.visible = this.showWireframe;
+        this.gpuEdgeMat.uniforms.uShowSeams.value = this.showSeams ? 1.0 : 0.0;
+        this.gpuEdgeMat.uniforms.uShowBoundaries.value = this.showBoundaries ? 1.0 : 0.0;
+    }
+
     SyncFromSurface(Surface, Islands, ImportanceGroups, TargetTexelDensity = 10)
     {
         this.surface = Surface;
         if (!this.webglReady || !Surface) return;
 
-        const PosArr = [];
-        const NormArr = [];
-        const UvArr = [];
-        const ColArr = [];
-        const FaceIdArr = [];
-        const WireArr = [];
-        const BoundaryArr = [];
-        const SeamTubeArr = [];
-        const SelEdgeTubeArr = [];
-        const SelEdgeGhostArr = [];
-        const ActiveEdgeTubeArr = [];
-        const SelVertArr = [];
-        this.triToFace = [];
-        this.edgeNormalMap.clear();
-        this.pickBufferDirty = true;
-
-        const IslandByFace = new Map();
-        for (const Isl of Islands)
-        {
-            for (const Fi of Isl.faceIndices) IslandByFace.set(Fi, Isl);
-        }
-        const GroupColors = new Map(ImportanceGroups.map(G => [G.id, HexToRgb01(G.color)]));
-        const UdimTints = [
-            [0.95, 0.96, 0.92],
-            [0.78, 0.90, 1.00],
-            [0.98, 0.88, 0.70],
-            [0.74, 0.94, 0.85]
-        ];
-
         const IsMatcap = this.shadingMode === 'matcap' || this.shadingMode === 'matcap-satin';
         const IsFlat = this.shadingMode === 'flat';
-        const CreaseNormals = IsMatcap ? ComputeCreaseCornerNormals(Surface, 52) : null;
-
         if (IsMatcap)
         {
             this.matcapMat.matcap = this.shadingMode === 'matcap-satin' ? this.matcapSatinTex : this.matcapClayTex;
@@ -1313,21 +1685,65 @@ export class UVViewport3D
             this.mesh.material = this.meshMat;
         }
 
-        // Track edge face counts, selection boundary counts, & averaged normal per unique 3D edge
+        let UvHash = 0;
+        const ULen = Surface.uvCoords.length;
+        const Step = Math.max(1, (ULen / 32) | 0);
+        for (let i = 0; i < ULen; i += Step)
+        {
+            const P = Surface.uvCoords[i];
+            UvHash = ((UvHash * 1.00013) + P[0] * 13.7 + P[1] * 29.3) % 1e9;
+        }
+        const DataSig = `${Surface.faces.length}:${ULen}:${Surface.hiddenIslands.size}:${Surface.importanceByFace.size}:${this.shadingMode}:${TargetTexelDensity}:${ImportanceGroups.length}:${UvHash.toFixed(4)}`;
+
+        // Fast path: topology, UVs, and shading didn't change -> ONLY upload compact GPU masks (0.02ms!)
+        if (this._lastMeshTopoSig === DataSig && this.triToFace.length > 0)
+        {
+            this.FastUpdateGpuFaceMask(Surface, Islands);
+            this.SyncOverlayStates();
+            return;
+        }
+        this._lastMeshTopoSig = DataSig;
+
+        const PosArr = [];
+        const NormArr = [];
+        const UvArr = [];
+        const ColArr = [];
+        const FaceIdArr = [];
+        const BaryArr = [];
+        const EdgeMaskArr = [];
+        this.triToFace = [];
+        this.edgeNormalMap.clear();
+        this.edgeList = [];
+        this.edgeKeyToId.clear();
+        this.pickBufferDirty = true;
+
+        const IslandByFace = new Array(Surface.faces.length);
+        for (const Isl of Islands)
+        {
+            for (const Fi of Isl.faceIndices) IslandByFace[Fi] = Isl;
+        }
+        const GroupColors = new Map(ImportanceGroups.map(G => [G.id, HexToRgb01(G.color)]));
+        const UdimTints = [
+            [0.95, 0.96, 0.92],
+            [0.78, 0.90, 1.00],
+            [0.98, 0.88, 0.70],
+            [0.74, 0.94, 0.85]
+        ];
+
+        const CreaseNormals = IsMatcap ? ComputeCreaseCornerNormals(Surface, 52) : null;
         const EdgeAccum = new Map();
 
         for (let fi = 0; fi < Surface.faces.length; fi++)
         {
             const F = Surface.faces[fi];
-            const Isl = IslandByFace.get(fi);
+            const Isl = IslandByFace[fi];
             if (Isl?.hidden) continue;
 
             const Corners = F.corners;
             const FaceN = Surface.faceNormals[fi] || [0, 1, 0];
             const SmoothN = CreaseNormals ? CreaseNormals[fi] : null;
-            const IsSel = Surface.selectedFaces.has(fi) || (Isl && Surface.selectedIslands.has(Isl.id));
 
-            // Determine face color based on 3D shading lens
+            // Pure surface color without selection tint (gpuSelectionTex renders selection overlay on GPU)
             let R = 0.85, G = 0.86, B = 0.85;
             if (this.shadingMode === 'checker')
             {
@@ -1351,56 +1767,50 @@ export class UVViewport3D
             }
             else if (this.shadingMode === 'stretch')
             {
-                const D = Surface.FaceTrianglesDistortion(fi);
+                const D = typeof Surface.GetFaceDistortionFast === 'function' ? Surface.GetFaceDistortionFast(fi) : Surface.FaceTrianglesDistortion(fi);
                 [R, G, B] = HeatRgb(Math.min(1, D.angleStretch * 2.2));
             }
 
-            if (IsSel && !IsMatcap)
-            {
-                R = Math.min(1, R * 0.62 + 0.96 * 0.42);
-                G = Math.min(1, G * 0.62 + 0.76 * 0.42);
-                B = Math.min(1, B * 0.62 + 0.28 * 0.42);
-            }
-
+            const LastTriIdx = Corners.length - 2;
             for (let k = 1; k < Corners.length - 1; k++)
             {
+                // Polygon-boundary edge mask so barycentric GPU wireframe hides internal quad/ngon diagonals
+                const M0 = 1.0; // edge (k, k+1) across from v0 is ALWAYS a real edge
+                const M1 = k === LastTriIdx ? 1.0 : 0.0; // edge (k+1, 0) across from v1
+                const M2 = k === 1 ? 1.0 : 0.0; // edge (0, k) across from v2
+
                 const Idxs = [0, k, k + 1];
-                for (const ci of Idxs)
+                const Barys = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+                for (let b = 0; b < 3; b++)
                 {
-                    const C = Corners[ci];
+                    const C = Corners[Idxs[b]];
                     const Pt = Surface.positions[C.v];
                     const Uv = Surface.uvCoords[C.uv];
-                    const Nrm = SmoothN ? SmoothN[ci] : FaceN;
+                    const Nrm = SmoothN ? SmoothN[Idxs[b]] : FaceN;
                     PosArr.push(Pt[0], Pt[1], Pt[2]);
                     NormArr.push(Nrm[0], Nrm[1], Nrm[2]);
                     UvArr.push(Uv[0], Uv[1]);
                     ColArr.push(R, G, B);
                     FaceIdArr.push(fi);
+                    BaryArr.push(Barys[b][0], Barys[b][1], Barys[b][2]);
+                    EdgeMaskArr.push(M0, M1, M2);
                 }
                 this.triToFace.push(fi);
             }
 
-            const Eps = 0.002;
             for (let k = 0; k < Corners.length; k++)
             {
                 const Va = Corners[k].v, Vb = Corners[(k + 1) % Corners.length].v;
-                const A = Surface.positions[Va], Bpt = Surface.positions[Vb];
-                WireArr.push(
-                    A[0] + FaceN[0] * Eps, A[1] + FaceN[1] * Eps, A[2] + FaceN[2] * Eps,
-                    Bpt[0] + FaceN[0] * Eps, Bpt[1] + FaceN[1] * Eps, Bpt[2] + FaceN[2] * Eps
-                );
-
                 const K3 = EdgeKey(Va, Vb);
-                if (!EdgeAccum.has(K3))
+                let Acc = EdgeAccum.get(K3);
+                if (!Acc)
                 {
-                    EdgeAccum.set(K3, { va: Va, vb: Vb, nx: FaceN[0], ny: FaceN[1], nz: FaceN[2], count: 1, selFaceCount: IsSel ? 1 : 0 });
+                    EdgeAccum.set(K3, { va: Va, vb: Vb, nx: FaceN[0], ny: FaceN[1], nz: FaceN[2], count: 1 });
                 }
                 else
                 {
-                    const Acc = EdgeAccum.get(K3);
                     Acc.nx += FaceN[0]; Acc.ny += FaceN[1]; Acc.nz += FaceN[2];
                     Acc.count++;
-                    if (IsSel) Acc.selFaceCount++;
                 }
             }
         }
@@ -1410,95 +1820,70 @@ export class UVViewport3D
         this.geometry.setAttribute('uv', new THREE.Float32BufferAttribute(UvArr, 2));
         this.geometry.setAttribute('color', new THREE.Float32BufferAttribute(ColArr, 3));
         this.geometry.setAttribute('aFaceId', new THREE.Float32BufferAttribute(FaceIdArr, 1));
+        this.geometry.setAttribute('aBary', new THREE.Float32BufferAttribute(BaryArr, 3));
+        this.geometry.setAttribute('aEdgeMask', new THREE.Float32BufferAttribute(EdgeMaskArr, 3));
         this.geometry.computeBoundingSphere();
 
         const ModelRadius = this.geometry.boundingSphere?.radius || 2.0;
         const BaseR = Math.max(0.0038, Math.min(0.022, ModelRadius * 0.0042));
         this.edgeScaleRadius = BaseR;
 
-        // Selected vertices in Vertex mode
-        const SelVert3DSet = new Set();
-        if (this.selectionMode === 'vertex')
-        {
-            for (const F of Surface.faces)
-            {
-                for (const C of F.corners)
-                {
-                    if (Surface.selectedUVs.has(C.uv)) SelVert3DSet.add(C.v);
-                }
-            }
-            for (const V of SelVert3DSet)
-            {
-                const P = Surface.positions[V];
-                if (P) SelVertArr.push(P[0], P[1], P[2]);
-            }
-        }
-
-        const IsRegionMode = this.selectionMode === 'face' || this.selectionMode === 'island';
+        // Build static GPU Edge Ribbon geometry ONCE per topology
+        const EdgeCount = EdgeAccum.size;
+        const EPos = new Float32Array(EdgeCount * 6 * 3);
+        const EPosB = new Float32Array(EdgeCount * 6 * 3);
+        const ECorner = new Float32Array(EdgeCount * 6 * 2);
+        const EId = new Float32Array(EdgeCount * 6);
+        let ei = 0;
+        const Lift = BaseR * 0.25;
+        const TriCorners = [[0, -1], [0, 1], [1, 1], [0, -1], [1, 1], [1, -1]];
 
         for (const [K3, Acc] of EdgeAccum)
         {
             const NLen = Math.hypot(Acc.nx, Acc.ny, Acc.nz) || 1;
             const Nx = Acc.nx / NLen, Ny = Acc.ny / NLen, Nz = Acc.nz / NLen;
             this.edgeNormalMap.set(K3, [Nx, Ny, Nz]);
+            this.edgeKeyToId.set(K3, ei);
+            this.edgeList.push({ key: K3, va: Acc.va, vb: Acc.vb, isBoundary: Acc.count === 1 });
 
             const A = Surface.positions[Acc.va], Bpt = Surface.positions[Acc.vb];
-            if (Acc.count === 1)
+            const Ax = A[0] + Nx * Lift, Ay = A[1] + Ny * Lift, Az = A[2] + Nz * Lift;
+            const Bx = Bpt[0] + Nx * Lift, By = Bpt[1] + Ny * Lift, Bz = Bpt[2] + Nz * Lift;
+            for (let v = 0; v < 6; v++)
             {
-                const BEps = BaseR * 0.4;
-                BoundaryArr.push(
-                    A[0] + Nx * BEps, A[1] + Ny * BEps, A[2] + Nz * BEps,
-                    Bpt[0] + Nx * BEps, Bpt[1] + Ny * BEps, Bpt[2] + Nz * BEps
-                );
+                const vi3 = (ei * 6 + v) * 3;
+                const vi2 = (ei * 6 + v) * 2;
+                EPos[vi3] = Ax; EPos[vi3 + 1] = Ay; EPos[vi3 + 2] = Az;
+                EPosB[vi3] = Bx; EPosB[vi3 + 1] = By; EPosB[vi3 + 2] = Bz;
+                ECorner[vi2] = TriCorners[v][0];
+                ECorner[vi2 + 1] = TriCorners[v][1];
+                EId[ei * 6 + v] = ei;
             }
-            if (Surface.seams.has(K3))
-            {
-                const SEps = BaseR * 0.35;
-                AppendEdgeTube(
-                    SeamTubeArr,
-                    [A[0] + Nx * SEps, A[1] + Ny * SEps, A[2] + Nz * SEps],
-                    [Bpt[0] + Nx * SEps, Bpt[1] + Ny * SEps, Bpt[2] + Nz * SEps],
-                    BaseR * 0.70
-                );
-            }
-
-            const ShowSelEdge = IsRegionMode
-                ? (Acc.selFaceCount === 1) // crisp selection perimeter around selected faces/islands
-                : Surface.selectedEdges3D.has(K3);
-
-            if (ShowSelEdge)
-            {
-                const EEps = BaseR * 0.45;
-                const P0 = [A[0] + Nx * EEps, A[1] + Ny * EEps, A[2] + Nz * EEps];
-                const P1 = [Bpt[0] + Nx * EEps, Bpt[1] + Ny * EEps, Bpt[2] + Nz * EEps];
-                const IsActiveEdge = !IsRegionMode && Surface.activeEdge3D === K3;
-                AppendEdgeTube(IsActiveEdge ? ActiveEdgeTubeArr : SelEdgeTubeArr, P0, P1, IsActiveEdge ? BaseR * 1.45 : BaseR * 1.15);
-                SelEdgeGhostArr.push(P0[0], P0[1], P0[2], P1[0], P1[1], P1[2]);
-            }
+            ei++;
         }
+        this.gpuEdgeGeo.setAttribute('position', new THREE.BufferAttribute(EPos, 3));
+        this.gpuEdgeGeo.setAttribute('aPosB', new THREE.BufferAttribute(EPosB, 3));
+        this.gpuEdgeGeo.setAttribute('aCorner', new THREE.BufferAttribute(ECorner, 2));
+        this.gpuEdgeGeo.setAttribute('aEdgeId', new THREE.BufferAttribute(EId, 1));
+
+        // Build static GPU Vertex Points geometry ONCE per topology
+        const VertCount = Surface.positions.length;
+        const VPos = new Float32Array(VertCount * 3);
+        const VId = new Float32Array(VertCount);
+        for (let v = 0; v < VertCount; v++)
+        {
+            const P = Surface.positions[v];
+            VPos[v * 3] = P[0]; VPos[v * 3 + 1] = P[1]; VPos[v * 3 + 2] = P[2];
+            VId[v] = v;
+        }
+        this.gpuVertGeo.setAttribute('position', new THREE.BufferAttribute(VPos, 3));
+        this.gpuVertGeo.setAttribute('aVertId', new THREE.BufferAttribute(VId, 1));
+
+        const Rect = this.container.getBoundingClientRect();
+        if (Rect.width && Rect.height) this.gpuEdgeMat.uniforms.uResolution.value.set(Rect.width, Rect.height);
 
         this.FastUpdateGpuFaceMask(Surface, Islands);
-
-        this.wireGeo.setAttribute('position', new THREE.Float32BufferAttribute(WireArr, 3));
-        this.wireLines.visible = this.showWireframe;
-
-        this.boundaryGeo.setAttribute('position', new THREE.Float32BufferAttribute(BoundaryArr, 3));
-        this.boundaryLines.visible = this.showBoundaries;
-
-        this.seamGeo.setAttribute('position', new THREE.Float32BufferAttribute(SeamTubeArr, 3));
-        this.seamMesh.visible = this.showSeams && SeamTubeArr.length > 0;
-
-        this.selectedEdgeGeo.setAttribute('position', new THREE.Float32BufferAttribute(SelEdgeTubeArr, 3));
-        this.selectedEdgeMesh.visible = SelEdgeTubeArr.length > 0;
-
-        this.selectedEdgeGhostGeo.setAttribute('position', new THREE.Float32BufferAttribute(SelEdgeGhostArr, 3));
-        this.selectedEdgeGhostLines.visible = SelEdgeGhostArr.length > 0 && !IsRegionMode;
-
-        this.activeEdgeGeo.setAttribute('position', new THREE.Float32BufferAttribute(ActiveEdgeTubeArr, 3));
-        this.activeEdgeMesh.visible = ActiveEdgeTubeArr.length > 0;
-
-        this.selectedVertGeo.setAttribute('position', new THREE.Float32BufferAttribute(SelVertArr, 3));
-        this.selectedVertPoints.visible = SelVertArr.length > 0;
+        this.SyncOverlayStates();
     }
 }
 

@@ -428,5 +428,55 @@ console.log('9. Verifying Right-Click Context Menu & 3D Box/Face/Paint Selection
     console.log('   OK: Context menu, GPU 3D Box/Paint Select & 2D face-mode Paint Select verified.');
 }
 
+// 10. GPU Wireframe/Edge/Vertex Shaders, Versioned Caches, Spatial Grid & Batched 2D Rendering
+console.log('10. Testing GPU Wireframe/Edge/Vertex Shaders, Spatial Grid, Adjacency & Versioned Caches...');
+{
+    const { surface: Vehicle } = SampleAssetCatalog[1].create();
+
+    // Cached analysis returns identical memoized objects when unchanged and invalidates on UV move
+    const A1 = Vehicle.GetCachedAnalysis(() => 2048, 100, '1001:2048');
+    const A2 = Vehicle.GetCachedAnalysis(() => 2048, 100, '1001:2048');
+    assert.strictEqual(A1, A2, 'GetCachedAnalysis must reuse cached islands/diagnostics when data unchanged');
+    assert.ok(A1.faceToIsland.length === Vehicle.faces.length, 'GetCachedAnalysis must populate faceToIsland');
+
+    Vehicle.uvCoords[0][0] += 0.05;
+    const A3 = Vehicle.GetCachedAnalysis(() => 2048, 100, '1001:2048');
+    assert.notStrictEqual(A3, A1, 'GetCachedAnalysis must invalidate cache after UV edit');
+
+    // Fast precomputed distortion matches computed distortion
+    const DFast = Vehicle.GetFaceDistortionFast(0);
+    assert.ok(Number.isFinite(DFast.angleStretch) && DFast.area3D > 0, 'GetFaceDistortionFast must return cached face distortion');
+
+    // Prebuilt Adjacency indices
+    const Adj = Vehicle.EnsureAdjacencyIndices();
+    assert.equal(Adj.uvToFaces.length, Vehicle.uvCoords.length, 'EnsureAdjacencyIndices must index UV -> faces');
+    assert.ok(Adj.edge3dFaces.size >= Vehicle.faces.length, 'EnsureAdjacencyIndices must index 3D edges -> faces');
+
+    // 2D UV Spatial Grid query returns face containing corner UV without scanning whole mesh
+    const TargetUv = Vehicle.uvCoords[Vehicle.faces[0].corners[0].uv];
+    const SpatialHits = Vehicle.QueryUvSpatialFaces(TargetUv[0] - 0.005, TargetUv[1] - 0.005, TargetUv[0] + 0.005, TargetUv[1] + 0.005);
+    assert.ok(SpatialHits.includes(0), 'QueryUvSpatialFaces must return face 0 at its own UV corner');
+    assert.ok(SpatialHits.length < Vehicle.faces.length, 'QueryUvSpatialFaces must narrow candidates using spatial grid buckets');
+
+    const Vp3dJs = ReadText('Engine/UVViewport3D.js');
+    const Cv2dJs = ReadText('Engine/UVCanvas2D.js');
+    const EditorJs = ReadText('UVEditor.js');
+
+    assert.ok(Vp3dJs.includes('gpuWireMat') && Vp3dJs.includes('aBary') && Vp3dJs.includes('aEdgeMask') && Vp3dJs.includes('fwidth(vBary)'),
+        'UVViewport3D.js must render quad/n-gon wireframe on GPU via barycentric derivatives');
+    assert.ok(Vp3dJs.includes('gpuEdgeStateTex') && Vp3dJs.includes('gpuEdgeMesh') && Vp3dJs.includes('uHoverEdgeId') && Vp3dJs.includes('FastUpdateGpuEdgeAndVertMasks('),
+        'UVViewport3D.js must render seams, boundaries, selected, active, and hovered edges via GPU state texture & shader');
+    assert.ok(Vp3dJs.includes('gpuVertPoints') && Vp3dJs.includes('gpuVertSelTex') && Vp3dJs.includes('FastUpdateUvsOnly('),
+        'UVViewport3D.js must render selected vertices via GPU point shader and support zero-rebuild UV attribute streaming');
+    assert.ok(!Vp3dJs.includes('intersectObject(this.mesh'),
+        'UVViewport3D.js must replace CPU THREE.Raycaster mesh intersection with 1-pixel GPU ID lookup');
+    assert.ok(Cv2dJs.includes('_baseLayerCanvas') && Cv2dJs.includes('_RenderBaseLayer(') && Cv2dJs.includes('QueryUvSpatialFaces('),
+        'UVCanvas2D.js must batch & cache static UV layer offscreen and use spatial grid HitTest');
+    assert.ok(EditorJs.includes('_lastOutlinerSig') && EditorJs.includes('GetCachedAnalysis(') && EditorJs.includes('QueryUvSpatialFaces(') && EditorJs.includes('SyncOverlayStates()'),
+        'UVEditor.js must memoize Outliner, use cached analysis, spatial 2D selection, and instant GPU overlay toggles');
+
+    console.log('   OK: GPU wireframe/edge/vertex shaders, spatial grid, adjacency & caching verified.');
+}
+
 console.log('\nALL UV STUDIO VALIDATIONS PASSED SUCCESSFULLY.');
 

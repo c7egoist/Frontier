@@ -205,8 +205,18 @@ function RefreshDocAnalysis(Doc = ActiveDoc())
 {
     if (!Doc) return;
     const TileResMap = new Map(Doc.udimTiles.map(T => [T.id, T.resolution || 2048]));
-    Doc.islands = Doc.surface.ExtractIslands(TileId => TileResMap.get(TileId) || 2048, 100);
-    Doc.diagnostics = Doc.surface.AnalyzeDiagnostics();
+    const TileSig = Doc.udimTiles.map(T => `${T.id}:${T.resolution || 2048}`).join(',');
+    if (typeof Doc.surface.GetCachedAnalysis === 'function')
+    {
+        const Cached = Doc.surface.GetCachedAnalysis(TileId => TileResMap.get(TileId) || 2048, 100, TileSig);
+        Doc.islands = Cached.islands;
+        Doc.diagnostics = Cached.diagnostics;
+    }
+    else
+    {
+        Doc.islands = Doc.surface.ExtractIslands(TileId => TileResMap.get(TileId) || 2048, 100);
+        Doc.diagnostics = Doc.surface.AnalyzeDiagnostics(Doc.islands);
+    }
 }
 
 function SyncAllViews(UpdateInspector = false)
@@ -396,8 +406,16 @@ function RenderUdimChipStrip(Doc)
     }
 }
 
+let _lastOutlinerSig = null;
 function RenderOutliner(Doc)
 {
+    const SelIslList = [...Doc.surface.selectedIslands].sort((a, b) => a - b).join(',');
+    const GrpSig = Doc.importanceGroups.map(G => `${G.id}:${G.name}:${G.targetPercent}:${G.color}`).join(';');
+    const SurfSig = typeof Doc.surface.ComputeDataSignature === 'function' ? Doc.surface.ComputeDataSignature() : `${Doc.islands.length}`;
+    const OutlinerSig = `${Doc.id}|${StudioState.outlinerFilter}|${StudioState.searchQuery.trim()}|${SurfSig}|${GrpSig}|${SelIslList}|${Doc.diagnostics?.overlapCount || 0}|${Doc.diagnostics?.flippedCount || 0}`;
+    if (_lastOutlinerSig === OutlinerSig) return;
+    _lastOutlinerSig = OutlinerSig;
+
     const Container = document.getElementById('outliner-list');
     Container.textContent = '';
     const Query = StudioState.searchQuery.trim().toLowerCase();
@@ -2131,7 +2149,8 @@ function UpdateModalTransform(Sx, Sy)
     else if (ModalTransform.mode === 'rotate') Banner.textContent = `ROTATE: ${(Angle * 180 / Math.PI).toFixed(1)}° · Type degrees · LMB/Enter confirm`;
     else Banner.textContent = `SCALE${AxisStr}: ${ScaleU.toFixed(2)}×, ${ScaleV.toFixed(2)}× · LMB/Enter confirm`;
 
-    SyncAllViews(false);
+    if (Viewport3D) Viewport3D.FastUpdateUvsOnly(Doc.surface);
+    ScheduleFast2DRender(Doc);
 }
 
 function ConfirmModalTransform()
@@ -2407,7 +2426,7 @@ function SetupCanvas2DInteraction()
 
     CanvasEl.addEventListener('pointerleave', () =>
     {
-        if (HoverHit2D) { HoverHit2D = null; SyncAllViews(false); }
+        if (HoverHit2D) { HoverHit2D = null; ScheduleFast2DRender(ActiveDoc()); }
     });
 
     const FinishPointer = E =>
@@ -2533,7 +2552,7 @@ function SetupCanvas2DInteraction()
         if (CircleSelect.active)
         {
             CircleSelect.radiusPx = Math.max(12, Math.min(160, CircleSelect.radiusPx + (E.deltaY < 0 ? 6 : -6)));
-            SyncAllViews();
+            ScheduleFast2DRender(ActiveDoc());
             return;
         }
 
@@ -2545,7 +2564,7 @@ function SetupCanvas2DInteraction()
         const [AfterU, AfterV] = Canvas2D.ScreenToUv(Sx, Sy);
         Canvas2D.panU += BeforeU - AfterU;
         Canvas2D.panV += BeforeV - AfterV;
-        SyncAllViews();
+        ScheduleFast2DRender(ActiveDoc());
     }, { passive: false });
 }
 
@@ -2608,6 +2627,9 @@ function ApplyHitSelection(Doc, Hit, Additive, Event = null)
 function SelectInUVBox(Doc, MinU, MinV, MaxU, MaxV)
 {
     const InBox = (U, V) => U >= MinU && U <= MaxU && V >= MinV && V <= MaxV;
+    const HasSpatial = typeof Doc.surface.QueryUvSpatialFaces === 'function';
+    const CandFaces = HasSpatial ? Doc.surface.QueryUvSpatialFaces(MinU, MinV, MaxU, MaxV) : null;
+
     if (StudioState.selectionMode === 'island')
     {
         for (const Isl of Doc.islands)
@@ -2616,18 +2638,50 @@ function SelectInUVBox(Doc, MinU, MinV, MaxU, MaxV)
             if (Isl.bounds.maxU >= MinU && Isl.bounds.minU <= MaxU && Isl.bounds.maxV >= MinV && Isl.bounds.minV <= MaxV)
             {
                 const HasVertInBox = Isl.uvIndices.some(Idx => InBox(Doc.surface.uvCoords[Idx][0], Doc.surface.uvCoords[Idx][1]));
-                if (HasVertInBox) Doc.surface.SelectIsland(Isl.id, true);
+                if (HasVertInBox) Doc.surface.SelectIsland(Isl.id, true, Doc.islands);
             }
         }
     }
     else if (StudioState.selectionMode === 'face')
     {
-        for (let fi = 0; fi < Doc.surface.faces.length; fi++)
+        const LoopFaces = CandFaces || Doc.surface.faces.map((_, i) => i);
+        for (let i = 0; i < LoopFaces.length; i++)
         {
+            const fi = LoopFaces[i];
             const C = Doc.surface.faces[fi].corners;
-            const Center = C.reduce((Acc, c) => [Acc[0] + Doc.surface.uvCoords[c.uv][0] / C.length, Acc[1] + Doc.surface.uvCoords[c.uv][1] / C.length], [0, 0]);
-            if (InBox(Center[0], Center[1])) Doc.surface.SelectFace(fi, true);
+            let Cx = 0, Cy = 0;
+            for (let k = 0; k < C.length; k++)
+            {
+                const P = Doc.surface.uvCoords[C[k].uv];
+                Cx += P[0]; Cy += P[1];
+            }
+            if (InBox(Cx / C.length, Cy / C.length)) Doc.surface.SelectFace(fi, true, Doc.islands);
         }
+    }
+    else if (CandFaces)
+    {
+        for (let i = 0; i < CandFaces.length; i++)
+        {
+            const Cr = Doc.surface.faces[CandFaces[i]].corners;
+            for (let k = 0; k < Cr.length; k++)
+            {
+                const UvIdx = Cr[k].uv;
+                const P = Doc.surface.uvCoords[UvIdx];
+                if (InBox(P[0], P[1])) Doc.surface.selectedUVs.add(UvIdx);
+            }
+            if (StudioState.selectionMode === 'edge')
+            {
+                for (let k = 0; k < Cr.length; k++)
+                {
+                    const Ua = Cr[k].uv, Ub = Cr[(k + 1) % Cr.length].uv;
+                    if (Doc.surface.selectedUVs.has(Ua) && Doc.surface.selectedUVs.has(Ub))
+                    {
+                        Doc.surface.selectedUVEdges.add(EdgeKey(Ua, Ub));
+                    }
+                }
+            }
+        }
+        Doc.surface.SyncSelectionsFromMode(StudioState.selectionMode, Doc.islands);
     }
     else
     {
@@ -2658,11 +2712,15 @@ function ApplyCircleSelectAt(Doc, Sx, Sy, Subtract = false, { commit = false } =
     const [Cu, Cv] = Canvas2D.ScreenToUv(Sx, Sy);
     const Ruv = CircleSelect.radiusPx / Canvas2D.scalePx;
     const Mode = StudioState.selectionMode;
+    const HasSpatial = typeof Doc.surface.QueryUvSpatialFaces === 'function';
+    const CandFaces = HasSpatial ? Doc.surface.QueryUvSpatialFaces(Cu - Ruv, Cv - Ruv, Cu + Ruv, Cv + Ruv) : null;
 
     if (Mode === 'face')
     {
-        for (let fi = 0; fi < Doc.surface.faces.length; fi++)
+        const Loop = CandFaces || Doc.surface.faces.map((_, i) => i);
+        for (let i = 0; i < Loop.length; i++)
         {
+            const fi = Loop[i];
             const C = Doc.surface.faces[fi].corners;
             let Cx = 0, Cy = 0;
             let Hit = false;
@@ -2682,8 +2740,10 @@ function ApplyCircleSelectAt(Doc, Sx, Sy, Subtract = false, { commit = false } =
     }
     else if (Mode === 'edge')
     {
-        for (const F of Doc.surface.faces)
+        const Loop = CandFaces || Doc.surface.faces.map((_, i) => i);
+        for (let i = 0; i < Loop.length; i++)
         {
+            const F = Doc.surface.faces[Loop[i]];
             for (let k = 0; k < F.corners.length; k++)
             {
                 const Ua = F.corners[k].uv, Ub = F.corners[(k + 1) % F.corners.length].uv;
@@ -2699,11 +2759,31 @@ function ApplyCircleSelectAt(Doc, Sx, Sy, Subtract = false, { commit = false } =
         }
         if (commit) Doc.surface.SyncSelectionsFromMode('edge', Doc.islands);
     }
+    else if (Mode === 'vertex' && CandFaces)
+    {
+        for (let i = 0; i < CandFaces.length; i++)
+        {
+            const Cr = Doc.surface.faces[CandFaces[i]].corners;
+            for (let k = 0; k < Cr.length; k++)
+            {
+                const UvIdx = Cr[k].uv;
+                const P = Doc.surface.uvCoords[UvIdx];
+                if (Math.hypot(P[0] - Cu, P[1] - Cv) <= Ruv)
+                {
+                    if (Subtract) Doc.surface.selectedUVs.delete(UvIdx);
+                    else Doc.surface.selectedUVs.add(UvIdx);
+                }
+            }
+        }
+        if (commit) Doc.surface.SyncSelectionsFromMode('vertex', Doc.islands);
+    }
     else
     {
         for (const Isl of Doc.islands)
         {
             if (Isl.hidden) continue;
+            if (Isl.bounds.maxU < Cu - Ruv || Isl.bounds.minU > Cu + Ruv ||
+                Isl.bounds.maxV < Cv - Ruv || Isl.bounds.minV > Cv + Ruv) continue;
             for (const UvIdx of Isl.uvIndices)
             {
                 const P = Doc.surface.uvCoords[UvIdx];
@@ -3184,10 +3264,10 @@ function InitStudioIconsAndBindings()
     document.getElementById('uv-lens-select').addEventListener('change', E => { StudioState.overlayLens = E.target.value; SyncAllViews(); });
     document.getElementById('mesh-shade-select').addEventListener('change', E => Set3DShadingMode(E.target.value));
     document.querySelectorAll('.mesh-camera-bar button[data-shade3d]').forEach(B => B.addEventListener('click', () => Set3DShadingMode(B.dataset.shade3d)));
-    document.getElementById('toggle-checker-btn').addEventListener('click', E => { StudioState.showChecker = !StudioState.showChecker; E.currentTarget.classList.toggle('active', StudioState.showChecker); SyncAllViews(); });
-    document.getElementById('toggle-seams-btn').addEventListener('click', E => { StudioState.showSeams = !StudioState.showSeams; Viewport3D.showSeams = StudioState.showSeams; E.currentTarget.classList.toggle('active', StudioState.showSeams); SyncAllViews(); });
-    document.getElementById('toggle-boundaries-btn').addEventListener('click', E => { StudioState.showBoundaries = !StudioState.showBoundaries; E.currentTarget.classList.toggle('active', StudioState.showBoundaries); SyncAllViews(); });
-    document.getElementById('toggle-wire3d-btn').addEventListener('click', E => { Viewport3D.showWireframe = !Viewport3D.showWireframe; E.currentTarget.classList.toggle('active', Viewport3D.showWireframe); SyncAllViews(); });
+    document.getElementById('toggle-checker-btn').addEventListener('click', E => { StudioState.showChecker = !StudioState.showChecker; E.currentTarget.classList.toggle('active', StudioState.showChecker); ScheduleFast2DRender(ActiveDoc()); });
+    document.getElementById('toggle-seams-btn').addEventListener('click', E => { StudioState.showSeams = !StudioState.showSeams; Viewport3D.showSeams = StudioState.showSeams; E.currentTarget.classList.toggle('active', StudioState.showSeams); Viewport3D.SyncOverlayStates(); ScheduleFast2DRender(ActiveDoc()); });
+    document.getElementById('toggle-boundaries-btn').addEventListener('click', E => { StudioState.showBoundaries = !StudioState.showBoundaries; Viewport3D.showBoundaries = StudioState.showBoundaries; E.currentTarget.classList.toggle('active', StudioState.showBoundaries); Viewport3D.SyncOverlayStates(); ScheduleFast2DRender(ActiveDoc()); });
+    document.getElementById('toggle-wire3d-btn').addEventListener('click', E => { Viewport3D.showWireframe = !Viewport3D.showWireframe; E.currentTarget.classList.toggle('active', Viewport3D.showWireframe); Viewport3D.SyncOverlayStates(); });
 
     document.querySelectorAll('.mesh-camera-bar button[data-cam]').forEach(B => B.addEventListener('click', () => Viewport3D.CameraPreset(B.dataset.cam)));
 
