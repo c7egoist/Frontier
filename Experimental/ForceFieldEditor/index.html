@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Force Field Editor</title>
+    <link rel="stylesheet" href="./ForceFieldEditor.css" />
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "./Vendor/three.esm.min.js"
+        }
+    }
+    </script>
+    <script src="../ForceFieldVisualization/ForceFieldVisualization.js"></script>
+</head>
+<body>
+    <div class="studio-shell">
+        <div class="studio-workspace">
+            <aside class="studio-panel outliner-panel" aria-label="Scene outliner">
+                <div class="panel-header">
+                    <div class="panel-heading">
+                        <span class="panel-title">Outliner</span>
+                        <span class="panel-subtitle">Scene graph</span>
+                    </div>
+                </div>
+                <div class="panel-scroll" id="OutlinerScroll">
+                    <div class="panel-content" id="OutlinerContent"></div>
+                </div>
+                <div class="panel-footer" id="OutlinerStatus"></div>
+            </aside>
+
+            <main class="center-column">
+                <section class="studio-panel viewport-panel" aria-label="Force field viewport">
+                    <div class="viewport-toolbar" id="ViewportBar">
+                        <label class="toolbar-select">
+                            <span>SCENE</span>
+                            <select id="SceneSelect" aria-label="Scene preset">
+                                <option value="lab">Wind + vortex lab</option>
+                                <option value="corridor">Dual wind corridor</option>
+                                <option value="storm">Storm · 100 km</option>
+                                <option value="blank">Blank field</option>
+                            </select>
+                        </label>
+                        <label class="toolbar-select" id="QuickPlaceGroup">
+                            <span>ADD FIELD</span>
+                            <select id="PlaceTypeSelect" aria-label="Choose a force field to place">
+                                <option value="">Choose type…</option>
+                            </select>
+                        </label>
+                        <label class="toolbar-select">
+                            <span>VIEW</span>
+                            <select id="ViewModeSelect" aria-label="Viewport mode">
+                                <option value="Map">2D · XZ plan</option>
+                                <option value="Stage3D">3D · field stage</option>
+                            </select>
+                        </label>
+                        <label class="toolbar-select toolbar-select-compact">
+                            <span>EXTENT</span>
+                            <select id="SpanSelect" aria-label="View extent">
+                                <option value="custom">Custom span</option>
+                                <option value="250">250 m</option>
+                                <option value="1400">1.4 km</option>
+                                <option value="6000">6 km</option>
+                                <option value="100000">100 km</option>
+                            </select>
+                        </label>
+                        <label class="toolbar-select toolbar-select-view">
+                            <span>FIELD DISPLAY</span>
+                            <select id="ViewPresetSelect" aria-label="Field display preset">
+                                <option value="composite">Composite engineering</option>
+                                <option value="vectors">Vectors</option>
+                                <option value="streamlines">Streamlines</option>
+                                <option value="magnitude">Magnitude map</option>
+                                <option value="minimal">Minimal</option>
+                                <option value="custom">Custom</option>
+                            </select>
+                        </label>
+                        <button class="toolbar-log" id="BtnToggleLog" type="button" aria-controls="LogDrawer" aria-expanded="false">Log</button>
+                    </div>
+
+                    <div class="viewport-surface" id="ViewportSurface">
+                        <canvas id="ViewportCanvas" aria-label="Two-dimensional force field vector map"></canvas>
+                        <div class="stage3d-mount" id="Stage3DMount" hidden></div>
+
+                        <div class="viewport-hud-top">
+                            <div class="place-banner" id="PlaceBanner" hidden>
+                                <span class="placement-dot" aria-hidden="true"></span>
+                                <span id="PlaceBannerText">Click in viewport to place</span>
+                                <button class="banner-cancel" id="BtnCancelPlace" type="button">Cancel · Esc</button>
+                            </div>
+                        </div>
+
+                        <div class="viewport-readout" id="ViewportReadout" aria-live="polite"></div>
+                        <div class="viewport-layer-key" id="ViewportLayerKey" aria-label="Field layer key">
+                            <span data-key-layer="vectors"><i class="key-vector"></i>VECTORS</span>
+                            <span data-key-layer="streamlines"><i class="key-streamline"></i>STREAMLINES</span>
+                            <span data-key-layer="influence"><i class="key-boundary"></i>INFLUENCE</span>
+                        </div>
+                        <div class="heatmap-legend" id="HeatmapLegend" hidden><span>FIELD MAGNITUDE</span><i></i><small>LOW</small><small>HIGH</small></div>
+
+                        <div class="viewport-inset minimap-inset shown" id="MinimapInset">
+                            <canvas id="MinimapCanvas" aria-label="Field extent overview"></canvas>
+                            <div class="inset-label" id="MinimapLabel">Extent</div>
+                        </div>
+                    </div>
+
+                    <div class="timeline-strip" id="TimelineStrip"></div>
+                    <div class="viewport-footer">
+                        <span class="footer-note" id="ViewportStatus">XZ slice · vector field · RK2 streamlines · finite influence</span>
+                        <span class="footer-hint">Drag to pan · wheel to scale · hover to probe</span>
+                    </div>
+                </section>
+
+                <section class="studio-panel log-drawer" id="LogDrawer" hidden>
+                    <div class="panel-header">
+                        <span class="panel-title">Event log <span class="live-dot">LIVE</span></span>
+                        <div class="panel-actions" id="LogHead"></div>
+                    </div>
+                    <div class="panel-scroll" id="LogScroll">
+                        <div class="panel-content" id="LogContent"></div>
+                    </div>
+                </section>
+            </main>
+
+            <aside class="studio-panel inspector-panel" aria-label="Selected object inspector">
+                <div class="panel-header">
+                    <div class="panel-heading">
+                        <span class="panel-title">Inspector</span>
+                        <span class="panel-subtitle">Properties &amp; diagnostics</span>
+                    </div>
+                    <span class="inspector-tag" id="InspectorRevision">LIVE</span>
+                </div>
+                <div class="panel-scroll" id="InspectorScroll">
+                    <div class="panel-content" id="InspectorContent"></div>
+                </div>
+                <div class="panel-footer" id="InspectorStatus"></div>
+            </aside>
+        </div>
+    </div>
+
+    <script type="module" src="./ForceFieldEditor.js"></script>
+</body>
+</html>
