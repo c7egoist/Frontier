@@ -250,11 +250,51 @@ frontier_compile_slang_shader(UVDistortionInspection.slang   ComputeEntry  compu
 frontier_compile_slang_shader(StretchRelaxCompute.slang      ComputeEntry  compute  StretchRelaxCompute.comp.spv)
 frontier_compile_slang_shader(ConcaveSkylineCompute.slang    ComputeEntry  compute  ConcaveSkylineCompute.comp.spv)
 
+set(FRONTIER_MODULAR_SHADER_DIR "${CMAKE_SOURCE_DIR}/Engine/Shaders")
+
+function(frontier_compile_modular_slang_shader DOMAIN_REL_PATH ENTRY_NAME SHADER_UNIT OUT_SPV_NAME)
+    set(OUT_SPV "${FRONTIER_COMPILED_SHADER_DIR}/${OUT_SPV_NAME}")
+    file(GLOB DOMAIN_SLANG_DEPS "${FRONTIER_MODULAR_SHADER_DIR}/MaterialSpace/*.slang")
+    add_custom_command(
+        OUTPUT "${OUT_SPV}"
+        COMMAND "${FRONTIER_SLANGC_BIN}"
+            "${FRONTIER_MODULAR_SHADER_DIR}/${DOMAIN_REL_PATH}"
+            -I "${FRONTIER_MODULAR_SHADER_DIR}/MaterialSpace"
+            -I "${FRONTIER_MODULAR_SHADER_DIR}"
+            -target spirv
+            -profile spirv_1_3+spvGroupNonUniformArithmetic
+            -emit-spirv-directly
+            -fvk-use-entrypoint-name
+            -matrix-layout-row-major
+            -O0
+            -entry "${ENTRY_NAME}"
+            -stage "${SHADER_UNIT}"
+            -o "${OUT_SPV}"
+        DEPENDS
+            "${FRONTIER_MODULAR_SHADER_DIR}/${DOMAIN_REL_PATH}"
+            ${DOMAIN_SLANG_DEPS}
+        COMMENT "[Slang] Compiling ${DOMAIN_REL_PATH} (${SHADER_UNIT}) -> ${OUT_SPV_NAME}"
+        VERBATIM
+    )
+    set(FRONTIER_SPV_OUTPUTS ${FRONTIER_SPV_OUTPUTS} "${OUT_SPV}" PARENT_SCOPE)
+endfunction()
+
+frontier_compile_modular_slang_shader(MaterialSpace/BounceLayerSummary.slang        BounceSummaryComputeEntry compute BounceLayerSummary.comp.spv)
+frontier_compile_modular_slang_shader(MaterialSpace/OpenPbrSurfaceScattering.slang  ComputeEntry              compute OpenPbrSurfaceScattering.comp.spv)
+
 add_custom_target(FrontierShaders DEPENDS ${FRONTIER_SPV_OUTPUTS})
 
 set(FRONTIER_ENGINE_SOURCES
     Engine/Configuration/EngineConfiguration.cpp
     Engine/Configuration/WorkspaceConfiguration.cpp
+    Engine/MaterialSpace/SurfaceMaterial.cpp
+    Engine/MaterialSpace/CompactMaterialRegister.cpp
+    Engine/MaterialSpace/MaterialSurfaceLayer/MaterialSurfaceLayer.cpp
+    Engine/MaterialSpace/MaterialSurfaceLayer/BounceLayerSummary.cpp
+    Engine/MaterialSpace/EnergyCompensation/DirectionalAlbedoIntegral.cpp
+    Engine/MaterialSpace/EnergyCompensation/SheenCosineIntegral.cpp
+    Engine/MaterialSpace/Baking/ProceduralChannelBaker.cpp
+    Engine/MaterialSpace/Baking/MaterialSpecimenRasterizer.cpp
     Engine/GeometrySpace/Network/PolygonNetwork.cpp
     Engine/GeometrySpace/Network/GeometryInstance.cpp
     Engine/GeometrySpace/Network/FacePartitionRegister.cpp
@@ -427,6 +467,7 @@ if(BUILD_TESTING)
     frontier_register_exhibit(ContentBrowserValidation       Exhibits/ContentBrowserValidation.cpp)
     frontier_register_exhibit(GeometryNetworkValidation      Exhibits/GeometryNetworkValidation.cpp)
     frontier_register_exhibit(GeometryCompletionValidation   Exhibits/GeometryCompletionValidation.cpp)
+    frontier_register_exhibit(MaterialScatteringValidation   Exhibits/MaterialScatteringValidation.cpp)
     frontier_register_exhibit(UVRasterPickingGizmoValidation    Exhibits/UVRasterPickingGizmoValidation.cpp)
     frontier_register_exhibit(UVWorkspaceUIValidation           Exhibits/UVWorkspaceUIValidation.cpp)
     frontier_register_exhibit(UVParameterizationValidation      Exhibits/UVParameterizationValidation.cpp)

@@ -61,7 +61,7 @@ struct SubFormatMappingEntry
     std::string_view LowercaseTag;
 };
 
-constexpr std::array<SubFormatMappingEntry, 26u> SubFormatRegistry = {{
+constexpr std::array<SubFormatMappingEntry, 28u> SubFormatRegistry = {{
     { ".DocumentHeader",   ".documentheader"   },
     { ".SectionDirectory", ".sectiondirectory" },
     { ".Revision",         ".revision"         },
@@ -88,6 +88,8 @@ constexpr std::array<SubFormatMappingEntry, 26u> SubFormatRegistry = {{
     { ".PolygonNetwork",   ".polygonnetwork"   },
     { ".ClusterHierarchy", ".clusterhierarchy" },
     { ".WideBoundingTree", ".wideboundingtree" },
+    { ".MaterialRegister", ".materialregister" },
+    { ".BounceSummary",    ".bouncesummary"    },
 }};
 
 [[nodiscard]] std::string ToAsciiLower(std::string_view Text)
