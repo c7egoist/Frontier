@@ -126,6 +126,11 @@ void InspectorPanel::ConfigureExtensionSectionCallback(InspectorExtensionRenderC
     ExtensionSectionCallback = std::move(Callback);
 }
 
+void InspectorPanel::ConfigureFullOverrideCallback(InspectorFullOverrideCallback Callback)
+{
+    FullOverrideCallback = std::move(Callback);
+}
+
 void InspectorPanel::ConfigureNotesBoxOpen(bool Open) noexcept
 {
     NotesBoxExpanded = Open;
@@ -1609,6 +1614,15 @@ void InspectorPanel::Render(
     const OutlinerSlotToken PrimaryToken = (Selected.size() == 1u) ? Selected.front() : OutlinerSlotToken{};
     OutlinerRecordEntry*    PrimaryEntry = (AttachedOutliner != nullptr) ? AttachedOutliner->AccessEntry(PrimaryToken) : nullptr;
     SyncNotesBufferWithSelection(PrimaryToken, PrimaryEntry);
+
+    if (FullOverrideCallback && Selected.size() <= 1u)
+    {
+        if (FullOverrideCallback(Surface, Bounds, AttachedOutliner, PrimaryEntry, Input, Δt))
+        {
+            Surface.PopClip();
+            return;
+        }
+    }
 
     Surface.PushClip(ScrollViewport);
 

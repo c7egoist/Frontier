@@ -12,6 +12,7 @@
 #include "Engine/Components/Panes/InspectorPanel.h"
 #include "Engine/Components/Panes/OutlinerPanel.h"
 #include "Engine/Components/Panes/ViewportPanel.h"
+#include "Engine/Editor/Workspaces/Simulation/ForceInspectorView.h"
 #include "Engine/Editor/Workspaces/Simulation/VectorFieldOverlaySequence.h"
 #include "Engine/SimulationSpace/ForceFields/FieldLatticeCascade.h"
 #include "Engine/SimulationSpace/ForceFields/FieldLatticeVulkanExecutor.h"
@@ -55,6 +56,7 @@ public:
     [[nodiscard]] SimulationSpace::ForceFields::FieldLatticeCascade&         AccessLatticeCascade() noexcept;
     [[nodiscard]] SimulationSpace::ForceFields::FieldLatticeVulkanExecutor&  AccessVulkanExecutor() noexcept;
     [[nodiscard]] VectorFieldOverlaySequence&                                AccessOverlaySequence() noexcept;
+    [[nodiscard]] ForceInspectorView&                                        AccessForceInspectorView() noexcept;
     [[nodiscard]] OverlayCameraState&                                        AccessCamera(uint32_t PaneIndex) noexcept;
 
     [[nodiscard]] int32_t QuerySelectedWaypointIndex() const noexcept;
@@ -64,14 +66,14 @@ public:
 
 private:
     void  SynchronizeOutlinerAndAccumulator();
-    float RenderForceInspectorExtension(
+    void  RecordAnemometerSample(double SampleTimeSec) noexcept;
+    bool  RenderFullForceInspector(
         PixelSpace&             Surface,
-        Rectangle2D             ScrollViewport,
-        float                   LeftX,
-        float                   TopY,
-        float                   InnerWidth,
-        OutlinerRecordEntry&    Entry,
-        const PaneInputReading& Input);
+        Rectangle2D             Bounds,
+        OutlinerPanel*          Outliner,
+        OutlinerRecordEntry*    PrimaryEntry,
+        const PaneInputReading& Input,
+        double                  Δt);
     ViewportRasterSurface HandleViewportRaster(const ViewportPaneSurfaceSpecification& Spec);
     void                  HandleViewportInteraction(uint32_t PaneIndex, Rectangle2D PaneBounds, const PaneInputReading& Input);
 
@@ -83,13 +85,13 @@ private:
     SimulationSpace::ForceFields::FieldLatticeCascade        LatticeCascade {};
     SimulationSpace::ForceFields::FieldLatticeVulkanExecutor VulkanExecutor {};
     VectorFieldOverlaySequence                               OverlaySequence{};
+    ForceInspectorView                                       InspectorView  {};
 
     std::vector<SimulationSpace::ForceFields::ForceSourceRecordEntry> AuthoredSources{};
     uint32_t                                                          NextForceToken = 1u;
 
     std::array<OverlayCameraState, 2> Cameras            {};
-    std::array<float, 32>             AnemometerHistoryMs{};
-    uint32_t                          AnemometerCursor    = 0u;
+    std::vector<float>                AnemometerHistoryMs{};
     int32_t                           SelectedWaypointIdx = -1;
     double                            SimulationTimeSec   = 0.0;
 

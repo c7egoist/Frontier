@@ -27,6 +27,14 @@ using InspectorExtensionRenderCallback = std::function<float(
     OutlinerRecordEntry&    Entry,
     const PaneInputReading& Input)>;
 
+using InspectorFullOverrideCallback = std::function<bool(
+    PixelSpace&             Surface,
+    Rectangle2D             Bounds,
+    OutlinerPanel*          Outliner,
+    OutlinerRecordEntry*    PrimaryEntry,
+    const PaneInputReading& Input,
+    double                  Δt)>;
+
 //------------------------------------------------------------------------------------------------------------------------
 //                                                      ENUMERATIONS
 //------------------------------------------------------------------------------------------------------------------------
@@ -54,6 +62,7 @@ public:
 
     void AttachOutliner(OutlinerPanel* SourceOutliner) noexcept;
     void ConfigureExtensionSectionCallback(InspectorExtensionRenderCallback Callback);
+    void ConfigureFullOverrideCallback(InspectorFullOverrideCallback Callback);
     void ConfigureNotesBoxOpen(bool Open) noexcept;
     void AssignActiveNotes(std::string_view NotesText);
     void ConfigureScrollOffset(float OffsetY) noexcept;
@@ -118,6 +127,7 @@ private:
     float                          ScrollOffsetY            = 0.0f;                                  // [px] - Vertical inspector scroll offset
     float                          LastContentHeight        = 0.0f;                                  // [px] - Measured scroll document height
     InspectorExtensionRenderCallback ExtensionSectionCallback {};                                  // [-]  - Optional domain extension cards
+    InspectorFullOverrideCallback    FullOverrideCallback     {};                                  // [-]  - Complete domain inspector replacement
 };
 
 //------------------------------------------------------------------------------------------------------------------------

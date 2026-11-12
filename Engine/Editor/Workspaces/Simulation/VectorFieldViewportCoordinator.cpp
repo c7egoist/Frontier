@@ -113,14 +113,14 @@ bool VectorFieldViewportCoordinator::InitializeAndAttach(
     }
 
     const std::vector<OutlinerConstructTemplate> ForceTemplates = {
-        { "Add Linear Wind",      "Linear Wind",       "Force Field", "Steady directional flow",  ConstructSlotCategory::ForceField },
-        { "Add Radial Burst",     "Radial Burst",      "Force Field", "Expanding impulse wave",   ConstructSlotCategory::ForceField },
-        { "Add Vortex Column",    "Rotational Column", "Force Field", "Helical swirl column",     ConstructSlotCategory::ForceField },
-        { "Add Point Attractor",  "Point Attractor",   "Force Field", "Inward pull sink",         ConstructSlotCategory::ForceField },
-        { "Add Curl Turbulence",  "Curl Noise",        "Force Field", "Divergence-free curl eddy",ConstructSlotCategory::ForceField },
-        { "Add Custom Formula",   "Custom Formula",    "Force Field", "VectorFieldLang override", ConstructSlotCategory::ForceField },
-        { "Add Cube Mesh",        "Cube",              "Static Mesh", "Position 0, 0, 0 m",       ConstructSlotCategory::CategoryOne },
-        { "Add Point Light",      "Point Light",       "Light",       "Position 0, 0, 0 m",       ConstructSlotCategory::CategoryThree },
+        { "Add Linear Wind",      "Linear Wind",       "Force Field", "Steady directional flow",  ConstructSlotCategory::ForceField, static_cast<uint32_t>(SimulationSpace::ForceFields::ForceModel::LinearWind)           },
+        { "Add Radial Burst",     "Radial Burst",      "Force Field", "Expanding impulse wave",   ConstructSlotCategory::ForceField, static_cast<uint32_t>(SimulationSpace::ForceFields::ForceModel::RadialBurst)          },
+        { "Add Vortex Column",    "Rotational Column", "Force Field", "Helical swirl column",     ConstructSlotCategory::ForceField, static_cast<uint32_t>(SimulationSpace::ForceFields::ForceModel::RotationalColumn)     },
+        { "Add Point Attractor",  "Point Attractor",   "Force Field", "Inward pull sink",         ConstructSlotCategory::ForceField, static_cast<uint32_t>(SimulationSpace::ForceFields::ForceModel::Attractor)            },
+        { "Add Curl Turbulence",  "Curl Noise",        "Force Field", "Divergence-free curl eddy",ConstructSlotCategory::ForceField, static_cast<uint32_t>(SimulationSpace::ForceFields::ForceModel::CurlNoise)            },
+        { "Add Custom Formula",   "Custom Formula",    "Force Field", "VectorFieldLang override", ConstructSlotCategory::ForceField, static_cast<uint32_t>(SimulationSpace::ForceFields::ForceModel::FlowStream)           },
+        { "Add Cube Mesh",        "Cube",              "Static Mesh", "Position 0, 0, 0 m",       ConstructSlotCategory::CategoryOne,  0xFFFFFFFFu },
+        { "Add Point Light",      "Point Light",       "Light",       "Position 0, 0, 0 m",       ConstructSlotCategory::CategoryThree,0xFFFFFFFFu },
     };
     Outliner.ConfigureConstructTemplates(ForceTemplates);
 
@@ -133,11 +133,29 @@ bool VectorFieldViewportCoordinator::InitializeAndAttach(
                                      { return HandleViewportRaster(Spec); });
     Viewport.ConfigureInteractionCallback([this](uint32_t PaneIdx, Rectangle2D Bounds, const PaneInputReading& Input)
                                           { HandleViewportInteraction(PaneIdx, Bounds, Input); });
-    Inspector.ConfigureExtensionSectionCallback(
-        [this](PixelSpace& Surface, Rectangle2D ScrollVp, float LeftX, float TopY, float InnerW, OutlinerRecordEntry& Entry, const PaneInputReading& Input)
-        { return RenderForceInspectorExtension(Surface, ScrollVp, LeftX, TopY, InnerW, Entry, Input); });
+    Inspector.ConfigureFullOverrideCallback(
+        [this](PixelSpace& Surface, Rectangle2D Bounds, OutlinerPanel* OutlinerPtr, OutlinerRecordEntry* PrimaryEntry, const PaneInputReading& Input, double Δt)
+        { return RenderFullForceInspector(Surface, Bounds, OutlinerPtr, PrimaryEntry, Input, Δt); });
 
+    AnemometerHistoryMs.clear();
     return true;
+}
+
+void VectorFieldViewportCoordinator::RecordAnemometerSample(double SampleTimeSec) noexcept
+{
+    const auto ProbePos = (BoundViewport != nullptr)
+                              ? BoundViewport->QueryForceOverlaySettings().AnemometerWorldMeters
+                              : SimulationSpace::ForceFields::SpatialVector3{ 0.0f, 0.0f, 8.0f };
+    const auto Diag     = Accumulator.QueryAnemometerDiagnostics(ProbePos, SampleTimeSec);
+    const float WindSpd = SimulationSpace::ForceFields::VectorLength(Diag.TotalForce.AdvectionVelocity);
+    const float AccSpd  = SimulationSpace::ForceFields::VectorLength(Diag.TotalForce.LinearAcceleration);
+    const float Speed   = (WindSpd > 0.01f) ? WindSpd : AccSpd;
+
+    AnemometerHistoryMs.push_back(Speed);
+    if (AnemometerHistoryMs.size() > 72u)
+    {
+        AnemometerHistoryMs.erase(AnemometerHistoryMs.begin());
+    }
 }
 
 void VectorFieldViewportCoordinator::StepSimulation(double ΔtSeconds) noexcept
@@ -145,6 +163,7 @@ void VectorFieldViewportCoordinator::StepSimulation(double ΔtSeconds) noexcept
     if (BoundViewport != nullptr && BoundViewport->ConsumeRewindRequested())
     {
         SimulationTimeSec = 0.0;
+        AnemometerHistoryMs.clear();
     }
 
     const bool Advance = (BoundViewport == nullptr) ||
@@ -157,6 +176,7 @@ void VectorFieldViewportCoordinator::StepSimulation(double ΔtSeconds) noexcept
 
     SynchronizeOutlinerAndAccumulator();
     Accumulator.StepAnimation(SimulationTimeSec, Advance);
+    RecordAnemometerSample(SimulationTimeSec);
 
     if (BoundViewport != nullptr)
     {
@@ -179,9 +199,11 @@ OutlinerSlotToken VectorFieldViewportCoordinator::AddForceSourceEntry(
     const OutlinerSlotToken Token = BoundOutliner->ConstructFromTemplate(0u, EnclosingFolder);
     if (OutlinerRecordEntry* Created = BoundOutliner->AccessEntry(Token))
     {
-        Created->Category      = ConstructSlotCategory::ForceField;
-        Created->Title         = Descriptor.Label;
-        Created->CategoryLabel = SimulationSpace::ForceFields::QueryForceModelDisplayName(Descriptor.Model);
+        Created->Category             = ConstructSlotCategory::ForceField;
+        Created->Title                = Descriptor.Label;
+        Created->CategoryLabel        = SimulationSpace::ForceFields::QueryForceModelDisplayName(Descriptor.Model);
+        Created->ForceLawOrdinal      = static_cast<uint32_t>(Descriptor.Model);
+        Created->ForceFormulaOverride = Descriptor.FormulaEnabled;
         char SubBuf[96]{};
         std::snprintf(SubBuf, sizeof(SubBuf), "r %.0f m  |  %.1f m/s", Descriptor.RadiusMeters, Descriptor.Strength);
         Created->Subtitle  = SubBuf;
@@ -252,9 +274,11 @@ void VectorFieldViewportCoordinator::SynchronizeOutlinerAndAccumulator()
             }
             else if (OutlinerRecordEntry* Mut = BoundOutliner->AccessEntry(Entry.Token))
             {
-                Mut->PositionX = It->EvaluatedCentreMeters.X;
-                Mut->PositionY = It->EvaluatedCentreMeters.Y;
-                Mut->PositionZ = It->EvaluatedCentreMeters.Z;
+                Mut->PositionX            = It->EvaluatedCentreMeters.X;
+                Mut->PositionY            = It->EvaluatedCentreMeters.Y;
+                Mut->PositionZ            = It->EvaluatedCentreMeters.Z;
+                Mut->ForceLawOrdinal      = static_cast<uint32_t>(It->Model);
+                Mut->ForceFormulaOverride = It->FormulaEnabled;
             }
         }
     }
@@ -328,8 +352,10 @@ ViewportRasterSurface VectorFieldViewportCoordinator::HandleViewportRaster(const
     const auto ProbePos = Spec.ForceOverlay.AnemometerWorldMeters;
     const auto Diag     = Accumulator.QueryAnemometerDiagnostics(ProbePos, Spec.TimeSeconds);
     const float Speed   = SimulationSpace::ForceFields::VectorLength(Diag.TotalForce.AdvectionVelocity);
-    AnemometerHistoryMs[AnemometerCursor % AnemometerHistoryMs.size()] = Speed;
-    ++AnemometerCursor;
+    if (AnemometerHistoryMs.empty())
+    {
+        AnemometerHistoryMs.push_back(Speed);
+    }
 
     if (BoundViewport != nullptr)
     {
@@ -443,210 +469,63 @@ void VectorFieldViewportCoordinator::HandleViewportInteraction(
 }
 
 //------------------------------------------------------------------------------------------------------------------------
-//                                           INSPECTOR FORCE EXTENSION UI
+//                                           1:1 FORCE INSPECTOR DELEGATION
 //------------------------------------------------------------------------------------------------------------------------
 
-float VectorFieldViewportCoordinator::RenderForceInspectorExtension(
+bool VectorFieldViewportCoordinator::RenderFullForceInspector(
     PixelSpace&             Surface,
-    Rectangle2D             ScrollViewport,
-    float                   LeftX,
-    float                   TopY,
-    float                   InnerWidth,
-    OutlinerRecordEntry&    Entry,
-    const PaneInputReading& Input)
+    Rectangle2D             Bounds,
+    OutlinerPanel*          Outliner,
+    OutlinerRecordEntry*    PrimaryEntry,
+    const PaneInputReading& Input,
+    double                  Δt)
 {
-    if (Entry.Category != ConstructSlotCategory::ForceField)
+    if (PrimaryEntry != nullptr && PrimaryEntry->Category != ConstructSlotCategory::ForceField)
     {
-        return 0.0f;
+        return false;
     }
 
     auto LiveSources = Accumulator.AccessSources();
     SimulationSpace::ForceFields::ForceSourceRecordEntry* ActiveSource = nullptr;
-    for (auto& Src : LiveSources)
+    if (PrimaryEntry != nullptr)
     {
-        if (Src.OutlinerTokenId == Entry.Token.Identifier)
+        for (auto& Src : LiveSources)
         {
-            ActiveSource = &Src;
-            break;
-        }
-    }
-    if (ActiveSource == nullptr)
-    {
-        return 0.0f;
-    }
-
-    const Point2D Cursor{ Input.PrimaryPointer.X, Input.PrimaryPointer.Y };
-    const bool    Interactive = ScrollViewport.Contains(Cursor);
-    float         CurY        = TopY + 6.0f;
-
-    auto DrawScalarScrubber = [&](float CardX, float CardW, float RowY, const char* Label, float& Val, float MinV, float MaxV, const char* Unit)
-    {
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { CardX + 12.0f, RowY + 3.0f }, 10.0f, WorkspaceSurfaceColors::SecondaryInk, Label);
-        char Buf[40]{};
-        std::snprintf(Buf, sizeof(Buf), "%.1f %s", Val, Unit);
-        const float W = WorkspaceAppearance::MeasureWeightedTextWidth(Surface, FontWeightClass::Regular, 10.0f, Buf);
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { CardX + CardW - 12.0f - W, RowY + 3.0f }, 10.0f, ColorRgba{ 146, 224, 250, 255 }, Buf);
-
-        const Rectangle2D Track{ CardX + 12.0f, RowY + 19.0f, CardW - 24.0f, 9.0f };
-        const float       T = std::clamp((Val - MinV) / std::max(0.001f, MaxV - MinV), 0.0f, 1.0f);
-        Surface.FillRectangle(Track, ColorRgba{ 36, 38, 42, 255 }, 4.5f);
-        Surface.FillRectangle({ Track.X, Track.Y, std::max(6.0f, Track.Width * T), Track.Height }, ColorRgba{ 62, 168, 212, 255 }, 4.5f);
-        if (Interactive && Track.Contains(Cursor) && Input.PrimaryPointer.Down)
-        {
-            const float NextT = std::clamp((Cursor.X - Track.X) / Track.Width, 0.0f, 1.0f);
-            Val               = MinV + NextT * (MaxV - MinV);
-        }
-    };
-
-    // Card 1: ForceModel & Envelope (208px)
-    {
-        const Rectangle2D Card{ LeftX, CurY, InnerWidth, 208.0f };
-        Surface.FillRectangle(Card, ColorRgba{ 30, 31, 34, 255 }, 10.0f);
-        Surface.StrokeRectangle(Card, ColorRgba{ 54, 58, 64, 255 }, 10.0f, 1.0f);
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::SemiBold, { Card.X + 12.0f, Card.Y + 11.0f }, 10.5f, ColorRgba{ 104, 220, 255, 255 }, "FORCE MODEL & ENVELOPE");
-
-        const Rectangle2D ModelBtn{ Card.X + 12.0f, Card.Y + 32.0f, InnerWidth - 24.0f, 26.0f };
-        Surface.FillRectangle(ModelBtn, ColorRgba{ 40, 42, 48, 255 }, 7.0f);
-        Surface.StrokeRectangle(ModelBtn, ColorRgba{ 72, 120, 146, 255 }, 7.0f, 1.0f);
-        const char* ModelName = SimulationSpace::ForceFields::QueryForceModelDisplayName(ActiveSource->Model);
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Medium, { ModelBtn.X + 10.0f, ModelBtn.Y + 6.5f }, 10.5f, WorkspaceSurfaceColors::PrimaryInk, ModelName);
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { ModelBtn.Right() - 48.0f, ModelBtn.Y + 7.5f }, 9.0f, WorkspaceSurfaceColors::FaintInk, "Next >");
-        if (Interactive && ModelBtn.Contains(Cursor) && Input.PrimaryPointer.Pressed)
-        {
-            const uint32_t NextM = (static_cast<uint32_t>(ActiveSource->Model) + 1u) %
-                                   static_cast<uint32_t>(SimulationSpace::ForceFields::ForceModel::Count);
-            ActiveSource->Model  = static_cast<SimulationSpace::ForceFields::ForceModel>(NextM);
-            ActiveSource->Domain = SimulationSpace::ForceFields::QueryDomainForModel(ActiveSource->Model);
-            Entry.CategoryLabel  = SimulationSpace::ForceFields::QueryForceModelDisplayName(ActiveSource->Model);
-        }
-
-        DrawScalarScrubber(Card.X, InnerWidth, Card.Y + 66.0f,  "Strength", ActiveSource->Strength,        -40.0f, 60.0f, "m/s");
-        DrawScalarScrubber(Card.X, InnerWidth, Card.Y + 100.0f, "Radius",   ActiveSource->RadiusMeters,     2.0f,  60.0f, "m");
-        DrawScalarScrubber(Card.X, InnerWidth, Card.Y + 134.0f, "Falloff",  ActiveSource->FalloffExponent,  0.1f,  4.0f,  "exp");
-        DrawScalarScrubber(Card.X, InnerWidth, Card.Y + 168.0f, "Swirl",    ActiveSource->SwirlRatio,      -2.0f,  2.0f,  "x");
-        CurY += Card.Height + 10.0f;
-    }
-
-    // Card 2: Curve & Motion Path (146px)
-    {
-        const Rectangle2D Card{ LeftX, CurY, InnerWidth, 146.0f };
-        Surface.FillRectangle(Card, ColorRgba{ 30, 31, 34, 255 }, 10.0f);
-        Surface.StrokeRectangle(Card, ColorRgba{ 54, 58, 64, 255 }, 10.0f, 1.0f);
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::SemiBold, { Card.X + 12.0f, Card.Y + 11.0f }, 10.5f, ColorRgba{ 246, 198, 108, 255 }, "CURVE & MOTION PATH");
-
-        constexpr std::array<std::pair<const char*, SimulationSpace::ForceFields::MotionPathTopology>, 4> Modes = {{
-            { "Still",  SimulationSpace::ForceFields::MotionPathTopology::Static        },
-            { "Line",   SimulationSpace::ForceFields::MotionPathTopology::LinearSpan    },
-            { "Spline", SimulationSpace::ForceFields::MotionPathTopology::CatmullSpline },
-            { "Orbit",  SimulationSpace::ForceFields::MotionPathTopology::HelicalOrbit  },
-        }};
-        const float PillW = (InnerWidth - 24.0f - 12.0f) * 0.25f;
-        float       Px    = Card.X + 12.0f;
-        for (const auto& M : Modes)
-        {
-            const bool        Sel = (ActiveSource->Motion.Topology == M.second);
-            const Rectangle2D Pill{ Px, Card.Y + 34.0f, PillW, 24.0f };
-            Surface.FillRectangle(Pill, Sel ? ColorRgba{ 76, 58, 30, 255 } : ColorRgba{ 40, 42, 46, 255 }, 6.0f);
-            Surface.StrokeRectangle(Pill, Sel ? WorkspaceSurfaceColors::SelectionAmber : ColorRgba{ 62, 64, 68, 255 }, 6.0f, 1.0f);
-            Surface.TextCentered(Pill, 9.5f, Sel ? ColorRgba{ 255, 224, 152, 255 } : WorkspaceSurfaceColors::SecondaryInk, M.first);
-            if (Interactive && Pill.Contains(Cursor) && Input.PrimaryPointer.Pressed)
+            if (Src.OutlinerTokenId == PrimaryEntry->Token.Identifier)
             {
-                SimulationSpace::ForceFields::AssignPresetMotionPath(*ActiveSource, M.second);
-            }
-            Px += PillW + 4.0f;
-        }
-
-        DrawScalarScrubber(Card.X, InnerWidth, Card.Y + 68.0f, "Travel Speed", ActiveSource->Motion.SpeedMetresPerSecond, 0.5f, 25.0f, "m/s");
-
-        char WpLine[96]{};
-        std::snprintf(
-            WpLine,
-            sizeof(WpLine),
-            "Waypoints: %u pts  |  Phase %.2f",
-            ActiveSource->Motion.WaypointCount,
-            ActiveSource->Motion.NormalizedProgress);
-        WorkspaceAppearance::ConstructTruncatedText(Surface, FontWeightClass::Regular, { Card.X + 12.0f, Card.Y + 114.0f }, InnerWidth - 24.0f, 9.5f, WorkspaceSurfaceColors::FaintInk, WpLine);
-        CurY += Card.Height + 10.0f;
-    }
-
-    // Card 3: Formula (VectorFieldLang) (116px)
-    {
-        const Rectangle2D Card{ LeftX, CurY, InnerWidth, 116.0f };
-        Surface.FillRectangle(Card, ColorRgba{ 30, 31, 34, 255 }, 10.0f);
-        Surface.StrokeRectangle(Card, ColorRgba{ 54, 58, 64, 255 }, 10.0f, 1.0f);
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::SemiBold, { Card.X + 12.0f, Card.Y + 11.0f }, 10.5f, ColorRgba{ 168, 198, 255, 255 }, "FORMULA (VECTORFIELDLANG)");
-
-        const Rectangle2D PresetBtn{ Card.X + 12.0f, Card.Y + 34.0f, InnerWidth - 24.0f, 24.0f };
-        Surface.FillRectangle(PresetBtn, ColorRgba{ 40, 42, 48, 255 }, 6.0f);
-        Surface.StrokeRectangle(PresetBtn, ColorRgba{ 76, 84, 108, 255 }, 6.0f, 1.0f);
-        WorkspaceAppearance::ConstructTruncatedText(
-            Surface,
-            FontWeightClass::Regular,
-            { PresetBtn.X + 8.0f, PresetBtn.Y + 6.0f },
-            PresetBtn.Width - 16.0f,
-            9.5f,
-            ColorRgba{ 212, 224, 248, 255 },
-            ActiveSource->FormulaSourceText.empty() ? "Click to cycle preset formula..." : ActiveSource->FormulaSourceText);
-
-        if (Interactive && PresetBtn.Contains(Cursor) && Input.PrimaryPointer.Pressed)
-        {
-            static uint32_t PresetIdx = 0u;
-            const auto Presets        = SimulationSpace::ForceFields::QueryBuiltInFormulaPresets();
-            if (!Presets.empty())
-            {
-                const auto& Choice             = Presets[PresetIdx++ % Presets.size()];
-                ActiveSource->FormulaSourceText = Choice.FormulaSource;
-                ActiveSource->FormulaEnabled    = true;
+                ActiveSource = &Src;
+                break;
             }
         }
-
-        const char* StatusMsg = ActiveSource->FormulaEnabled
-                                    ? "Bytecode compiled -> .slang SPIR-V"
-                                    : "Analytical GPU/CPU ForceModel law active";
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { Card.X + 12.0f, Card.Y + 72.0f }, 9.5f, ColorRgba{ 132, 212, 168, 255 }, StatusMsg);
-        CurY += Card.Height + 10.0f;
     }
 
-    // Card 4: Anemometer & Wind Probe (118px)
+    if (AnemometerHistoryMs.empty())
     {
-        const Rectangle2D Card{ LeftX, CurY, InnerWidth, 118.0f };
-        Surface.FillRectangle(Card, ColorRgba{ 28, 32, 36, 255 }, 10.0f);
-        Surface.StrokeRectangle(Card, ColorRgba{ 58, 76, 86, 255 }, 10.0f, 1.0f);
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::SemiBold, { Card.X + 12.0f, Card.Y + 11.0f }, 10.5f, ColorRgba{ 104, 220, 255, 255 }, "ANEMOMETER & WIND PROBE");
-
-        const auto ProbePos = (BoundViewport != nullptr)
-                                  ? BoundViewport->QueryForceOverlaySettings().AnemometerWorldMeters
-                                  : SimulationSpace::ForceFields::SpatialVector3{ 0.0f, 0.0f, 8.0f };
-        const auto Diag  = Accumulator.QueryAnemometerDiagnostics(ProbePos, SimulationTimeSec);
-        const float Spd  = SimulationSpace::ForceFields::VectorLength(Diag.TotalForce.AdvectionVelocity);
-        char Row1[96]{};
-        std::snprintf(Row1, sizeof(Row1), "Speed: %.2f m/s   Bft %u   q: %.1f Pa", Spd, Diag.BeaufortScale, Diag.DynamicPressurePa);
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { Card.X + 12.0f, Card.Y + 34.0f }, 10.0f, WorkspaceSurfaceColors::PrimaryInk, Row1);
-
-        const Rectangle2D Chart{ Card.X + 12.0f, Card.Y + 56.0f, InnerWidth - 24.0f, 48.0f };
-        Surface.FillRectangle(Chart, ColorRgba{ 20, 24, 28, 255 }, 6.0f);
-        float Peak = 1.0f;
-        for (float V : AnemometerHistoryMs)
-        {
-            Peak = std::max(Peak, V);
-        }
-        const float StepX = Chart.Width / static_cast<float>(AnemometerHistoryMs.size() - 1u);
-        for (std::size_t I = 0u; I + 1u < AnemometerHistoryMs.size(); ++I)
-        {
-            const std::size_t A = (AnemometerCursor + I) % AnemometerHistoryMs.size();
-            const std::size_t B = (AnemometerCursor + I + 1u) % AnemometerHistoryMs.size();
-            const float Y0 = Chart.Bottom() - 6.0f - (AnemometerHistoryMs[A] / Peak) * (Chart.Height - 12.0f);
-            const float Y1 = Chart.Bottom() - 6.0f - (AnemometerHistoryMs[B] / Peak) * (Chart.Height - 12.0f);
-            Surface.StrokeLine(
-                { Chart.X + static_cast<float>(I) * StepX, Y0 },
-                { Chart.X + static_cast<float>(I + 1u) * StepX, Y1 },
-                ColorRgba{ 104, 220, 255, 255 },
-                1.6f);
-        }
-        CurY += Card.Height + 12.0f;
+        RecordAnemometerSample(SimulationTimeSec);
     }
 
-    return CurY - TopY;
+    ForceInspectorViewTargets Targets{};
+    Targets.Outliner          = Outliner;
+    Targets.OutlinerEntry     = PrimaryEntry;
+    Targets.Accumulator       = &Accumulator;
+    Targets.LatticeCascade    = &LatticeCascade;
+    Targets.ActiveForce       = ActiveSource;
+    Targets.OverlaySettings   = (BoundViewport != nullptr) ? &BoundViewport->AccessForceOverlaySettings() : nullptr;
+    Targets.AnemometerSamples = AnemometerHistoryMs;
+    Targets.SimulationTimeSec = SimulationTimeSec;
+    Targets.SelectedWaypoint  = &SelectedWaypointIdx;
+
+    const bool Handled = InspectorView.Render(Surface, Bounds, Targets, Input, Δt);
+
+    if (ActiveSource != nullptr && PrimaryEntry != nullptr)
+    {
+        PrimaryEntry->ForceLawOrdinal      = static_cast<uint32_t>(ActiveSource->Model);
+        PrimaryEntry->ForceFormulaOverride = ActiveSource->FormulaEnabled;
+        char SubBuf[96]{};
+        std::snprintf(SubBuf, sizeof(SubBuf), "r %.0f m  |  %.1f m/s", ActiveSource->RadiusMeters, ActiveSource->Strength);
+        PrimaryEntry->Subtitle = SubBuf;
+    }
+    return Handled;
 }
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -658,6 +537,7 @@ const SimulationSpace::ForceFields::ForceFieldAccumulator& VectorFieldViewportCo
 SimulationSpace::ForceFields::FieldLatticeCascade& VectorFieldViewportCoordinator::AccessLatticeCascade() noexcept { return LatticeCascade; }
 SimulationSpace::ForceFields::FieldLatticeVulkanExecutor& VectorFieldViewportCoordinator::AccessVulkanExecutor() noexcept { return VulkanExecutor; }
 VectorFieldOverlaySequence& VectorFieldViewportCoordinator::AccessOverlaySequence() noexcept { return OverlaySequence; }
+ForceInspectorView& VectorFieldViewportCoordinator::AccessForceInspectorView() noexcept { return InspectorView; }
 OverlayCameraState& VectorFieldViewportCoordinator::AccessCamera(uint32_t PaneIndex) noexcept { return Cameras[PaneIndex < 2u ? PaneIndex : 0u]; }
 int32_t VectorFieldViewportCoordinator::QuerySelectedWaypointIndex() const noexcept { return SelectedWaypointIdx; }
 void VectorFieldViewportCoordinator::ConfigureSelectedWaypointIndex(int32_t WaypointIdx) noexcept { SelectedWaypointIdx = WaypointIdx; }

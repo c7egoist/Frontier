@@ -313,6 +313,11 @@ struct ForceOverlaySettings
     uint32_t              StreamLineCount          = 180u;                               // [count]- Simultaneous RK4 streamline ribbons
     bool                  CrossSectionAnemometerActive = false;                          // [-]   - PointSampleCursor enabled in viewport
     SpatialVector3        AnemometerWorldMeters    { 0.0f, 0.0f, 8.0f };                 // [m]   - World coordinate of PointSampleCursor
+    uint32_t              HeatmapColorSchemeOrdinal = 0u;                                // [0-3] - 0=Engineering, 1=Turbo, 2=Plasma, 3=Diverging
+    float                 HeatmapCeilingScale      = 34.0f;                              // [m/s] - Fixed color scale upper clamp
+    float                 ArrowSpacingMeters       = 46.0f;                              // [m]   - Volumetric arrow lattice spacing
+    float                 HeatmapOpacity           = 0.58f;                              // [0-1] - Cross-section heatmap alpha
+    uint32_t              ArrowLayerCount          = 1u;                                 // [1-3] - Volumetric arrow vertical slabs
 };
 
 //------------------------------------------------------------------------------------------------------------------------

@@ -308,6 +308,7 @@ endif()
 if(FRONTIER_PROFILE STREQUAL "Editor")
     list(APPEND FRONTIER_ENGINE_SOURCES
         Engine/Lifecycle/EditorLifecycle.cpp
+        Engine/Editor/Workspaces/Simulation/ForceInspectorView.cpp
         Engine/Editor/Workspaces/Simulation/VectorFieldOverlaySequence.cpp
         Engine/Editor/Workspaces/Simulation/VectorFieldViewportCoordinator.cpp
     )

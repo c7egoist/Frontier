@@ -803,12 +803,13 @@ bool ValidateEditorVulkanOverlayAndCaptureExhibits()
         }
     }
 
-    // Exhibit 2: Split Viewport (Perspective | Top) + Diagnostics + Scrolled Inspector (Formula & Anemometer cards)
+    // Exhibit 2: Split Viewport (Perspective | Top) + Diagnostics + Scrolled Field Inspector (Radial Envelope + Motion Path + Waypoints)
     Viewport.ConfigureSplitViewport(true);
     Viewport.ConfigurePrimaryProjection(ViewportProjectionPreset::Perspective);
     Viewport.ConfigureSecondaryProjection(ViewportProjectionPreset::Top);
     Viewport.ConfigureDiagnosticsVisible(true);
-    Inspector.ConfigureScrollOffset(270.0f);
+    Coordinator.AccessForceInspectorView().ConfigureActiveTab(ForceInspectorTab::Field);
+    Coordinator.AccessForceInspectorView().ConfigureScrollOffset(830.0f);
     Ov.StreamColorMode  = StreamlineColorMode::CyanSingle;
     Ov.CrossSectionAxis = CrossSectionPlaneAxis::AllThreeAxes;
 
@@ -818,6 +819,40 @@ bool ValidateEditorVulkanOverlayAndCaptureExhibits()
         ImGui::DestroyContext(GuiSession);
         return false;
     }
+
+    // Exhibits 4..6: Verify Formula, Layers, and Cache Inspector tabs 1:1
+    Viewport.ConfigureSplitViewport(false);
+    Viewport.ConfigureDiagnosticsVisible(false);
+    Coordinator.AccessForceInspectorView().ConfigureActiveTab(ForceInspectorTab::Formula);
+    Coordinator.AccessForceInspectorView().ConfigureScrollOffset(0.0f);
+    if (!CaptureFullWorkspacePng("04-ForceFieldInspectorFormulaTab.png"))
+    {
+        TypographyRepository::AssignCurrent(nullptr);
+        ImGui::DestroyContext(GuiSession);
+        return false;
+    }
+
+    Coordinator.AccessForceInspectorView().ConfigureActiveTab(ForceInspectorTab::Layers);
+    Coordinator.AccessForceInspectorView().ConfigureScrollOffset(0.0f);
+    if (!CaptureFullWorkspacePng("05-ForceFieldInspectorLayersTab.png"))
+    {
+        TypographyRepository::AssignCurrent(nullptr);
+        ImGui::DestroyContext(GuiSession);
+        return false;
+    }
+
+    Coordinator.AccessForceInspectorView().ConfigureActiveTab(ForceInspectorTab::Cache);
+    Coordinator.AccessForceInspectorView().ConfigureScrollOffset(0.0f);
+    if (!CaptureFullWorkspacePng("06-ForceFieldInspectorCacheTab.png"))
+    {
+        TypographyRepository::AssignCurrent(nullptr);
+        ImGui::DestroyContext(GuiSession);
+        return false;
+    }
+
+    // Restore default Field tab scroll offset 0
+    Coordinator.AccessForceInspectorView().ConfigureActiveTab(ForceInspectorTab::Field);
+    Coordinator.AccessForceInspectorView().ConfigureScrollOffset(0.0f);
 
     TypographyRepository::AssignCurrent(nullptr);
     ImGui::DestroyContext(GuiSession);

@@ -163,6 +163,7 @@ OutlinerSlotToken OutlinerPanel::ConstructFromTemplate(uint32_t TemplateIndex, O
     Created.Subtitle          = Preset.DefaultDetail;
     Created.VisibilityEnabled = true;
     Created.Expanded          = true;
+    Created.ForceLawOrdinal   = Preset.ForceLawOrdinal;
 
     if (OutlinerRecordEntry* EnclosureEntry = AccessEntry(Created.EnclosingToken))
     {
@@ -1161,22 +1162,22 @@ void OutlinerPanel::Render(
             { "Notes",   OutlinerCategoryFilter::WithNotes      },
         }};
 
-        bool HasForceSlots = false;
+        bool ForceSlotsPresent = false;
         for (const auto& Existing : Entries)
         {
             if (Existing.Category == ConstructSlotCategory::ForceField)
             {
-                HasForceSlots = true;
+                ForceSlotsPresent = true;
                 break;
             }
         }
-        if (!HasForceSlots)
+        if (!ForceSlotsPresent)
         {
             for (const auto& Preset : ConstructTemplates)
             {
                 if (Preset.Category == ConstructSlotCategory::ForceField)
                 {
-                    HasForceSlots = true;
+                    ForceSlotsPresent = true;
                     break;
                 }
             }
@@ -1186,7 +1187,7 @@ void OutlinerPanel::Render(
         Chips.reserve(AllChips.size());
         for (const auto& Candidate : AllChips)
         {
-            if (Candidate.Filter == OutlinerCategoryFilter::ForceFieldType && !HasForceSlots)
+            if (Candidate.Filter == OutlinerCategoryFilter::ForceFieldType && !ForceSlotsPresent)
             {
                 continue;
             }
@@ -1359,15 +1360,31 @@ void OutlinerPanel::Render(
                 }
             }
 
-            // 24px Showcase folder or category icon
+            // 24px Showcase folder or category icon (exact 19 bespoke ForceModel icons when ForceLawOrdinal < 19)
             const Point2D IconOrigin{ DisclosureRect.Right() + 4.0f, RowRect.Y + 7.5f };
-            WorkspaceAppearance::ConstructSlotCategoryIcon(
-                Surface,
-                Entry->Category,
-                IconOrigin,
-                24.0f,
-                Entry->FolderTint,
-                RowAlpha);
+            if (Entry->Category == ConstructSlotCategory::ForceField && Entry->ForceLawOrdinal < 19u)
+            {
+                const ColorRgba LawInk = Entry->ForceFormulaOverride
+                    ? WorkspaceSurfaceColors::SelectionAmber
+                    : WorkspaceAppearance::QueryForceLawTint(Entry->ForceLawOrdinal);
+                WorkspaceAppearance::ConstructForceLawIcon(
+                    Surface,
+                    Entry->ForceLawOrdinal,
+                    { IconOrigin.X + 2.0f, IconOrigin.Y + 2.0f },
+                    20.0f,
+                    LawInk,
+                    RowAlpha);
+            }
+            else
+            {
+                WorkspaceAppearance::ConstructSlotCategoryIcon(
+                    Surface,
+                    Entry->Category,
+                    IconOrigin,
+                    24.0f,
+                    Entry->FolderTint,
+                    RowAlpha);
+            }
 
             // Right-side visibility status indicator & eye toggle
             const Rectangle2D EyeHit{ RowRect.Right() - 24.0f, RowRect.Y + 9.5f, 18.0f, 20.0f };
