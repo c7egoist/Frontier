@@ -8,6 +8,7 @@
 //------------------------------------------------------------------------------------------------------------------------
 
 #include "Engine/Editor/Workspaces/Simulation/VectorFieldViewportCoordinator.h"
+#include "Engine/Codecs/ForceModelPresetCodec.h"
 #include "Engine/SimulationSpace/ForceFields/FieldFormulaCompiler.h"
 #include "Engine/SimulationSpace/ForceFields/ForceMotionPath.h"
 
@@ -22,58 +23,159 @@ namespace Frontier::Editor::Simulation
 namespace
 {
 
-[[nodiscard]] SimulationSpace::ForceFields::ForceSourceRecordEntry BuildPresetFromTemplateTitle(std::string_view Title)
+[[nodiscard]] SimulationSpace::ForceFields::ForceSourceRecordEntry BuildPresetForTemplateEntry(
+    uint32_t         ForceLawOrdinal,
+    std::string_view Title)
 {
     using namespace SimulationSpace::ForceFields;
     ForceSourceRecordEntry Desc{};
-    Desc.RadiusMeters      = 24.0f;
+    Desc.RadiusMeters      = 20.0f;
     Desc.Strength          = 18.0f;
     Desc.FalloffExponent   = 1.4f;
     Desc.CentreMeters      = { 0.0f, 0.0f, 6.0f };
+    Desc.EvaluatedCentreMeters = Desc.CentreMeters;
     Desc.Label             = std::string(Title);
 
-    if (Title.find("Radial") != std::string_view::npos || Title.find("Burst") != std::string_view::npos)
+    if (ForceLawOrdinal < static_cast<uint32_t>(ForceModel::Count))
     {
-        Desc.Model              = ForceModel::RadialBurst;
-        Desc.Strength           = 26.0f;
-        Desc.RadiusMeters       = 18.0f;
-        Desc.DurationMode       = ForceDurationMode::Impulse;
-        Desc.ImpulseTriggerTimeSec = 0.0f;
-        Desc.ImpulseDurationSec = 1.6f;
+        Desc.Model = static_cast<ForceModel>(ForceLawOrdinal);
+    }
+    else if (Title.find("Radial") != std::string_view::npos || Title.find("Burst") != std::string_view::npos)
+    {
+        Desc.Model = ForceModel::RadialBurst;
     }
     else if (Title.find("Rotational") != std::string_view::npos || Title.find("Vortex") != std::string_view::npos)
     {
-        Desc.Model        = ForceModel::RotationalColumn;
-        Desc.Strength     = 22.0f;
-        Desc.SwirlRatio   = 0.9f;
-        Desc.RadiusMeters = 20.0f;
+        Desc.Model = ForceModel::RotationalColumn;
     }
     else if (Title.find("Attractor") != std::string_view::npos)
     {
-        Desc.Model            = ForceModel::Attractor;
-        Desc.Strength         = 20.0f;
-        Desc.CoreRadiusMeters = 3.0f;
+        Desc.Model = ForceModel::Attractor;
     }
     else if (Title.find("Curl") != std::string_view::npos || Title.find("Turbulence") != std::string_view::npos)
     {
-        Desc.Model                 = ForceModel::CurlNoise;
-        Desc.Domain                = ForceDomainCategory::TurbulenceField;
-        Desc.Strength              = 16.0f;
-        Desc.TurbulenceScaleMeters = 12.0f;
-        Desc.OctaveCount           = 3u;
+        Desc.Model = ForceModel::CurlNoise;
     }
     else if (Title.find("Formula") != std::string_view::npos)
     {
-        Desc.Model             = ForceModel::FlowStream;
-        Desc.Strength          = 18.0f;
-        Desc.FormulaEnabled    = true;
-        Desc.FormulaSourceText = QueryBuiltInFormulaPresets()[0].FormulaSource;
+        Desc.Model = ForceModel::FlowStream;
     }
     else
     {
         Desc.Model = ForceModel::LinearWind;
     }
+
+    Desc.Domain = QueryDomainForModel(Desc.Model);
+    switch (Desc.Model)
+    {
+    case ForceModel::LinearWind:
+        Desc.Strength       = 14.5f;
+        Desc.RadiusMeters   = 26.0f;
+        Desc.EulerDegrees.Z = 228.0f;
+        break;
+    case ForceModel::Buoyancy:
+        Desc.Strength     = 15.0f;
+        Desc.RadiusMeters = 18.0f;
+        Desc.Envelope     = ReachEnvelopeCategory::Column;
+        break;
+    case ForceModel::RadialBurst:
+        Desc.Strength           = 28.0f;
+        Desc.RadiusMeters       = 18.0f;
+        Desc.DurationMode       = ForceDurationMode::Impulse;
+        Desc.ImpulseDurationSec = 1.6f;
+        break;
+    case ForceModel::Attractor:
+        Desc.Strength         = 22.0f;
+        Desc.CoreRadiusMeters = 3.0f;
+        Desc.Attenuation      = ForceAttenuationMode::InverseSquare;
+        break;
+    case ForceModel::Repulsor:
+        Desc.Strength         = 24.0f;
+        Desc.CoreRadiusMeters = 3.5f;
+        break;
+    case ForceModel::AxisAttractor:
+        Desc.Envelope   = ReachEnvelopeCategory::Column;
+        Desc.Strength   = 18.0f;
+        Desc.SwirlRatio = 0.55f;
+        break;
+    case ForceModel::Containment:
+        Desc.Strength         = 24.0f;
+        Desc.CoreRadiusMeters = 8.0f;
+        Desc.RadiusMeters     = 22.0f;
+        break;
+    case ForceModel::RotationalColumn:
+        Desc.Strength     = 24.0f;
+        Desc.SwirlRatio   = 1.1f;
+        Desc.RadiusMeters = 20.0f;
+        break;
+    case ForceModel::Torque:
+        Desc.Strength   = 16.0f;
+        Desc.SwirlRatio = 1.4f;
+        break;
+    case ForceModel::Drag:
+        Desc.Strength        = 12.0f;
+        Desc.DragCoefficient = 1.15f;
+        break;
+    case ForceModel::CurlNoise:
+        Desc.Strength              = 16.5f;
+        Desc.TurbulenceScaleMeters = 12.0f;
+        Desc.OctaveCount           = 3u;
+        break;
+    case ForceModel::AtmosphericGust:
+        Desc.Strength       = 21.0f;
+        Desc.DurationMode   = ForceDurationMode::Modulated;
+        Desc.FrequencyHertz = 0.25f;
+        break;
+    case ForceModel::VorticityConfinement:
+        Desc.Strength              = 18.0f;
+        Desc.TurbulenceScaleMeters = 10.0f;
+        break;
+    case ForceModel::BrownianNoise:
+        Desc.Strength              = 14.0f;
+        Desc.TurbulenceScaleMeters = 8.0f;
+        break;
+    case ForceModel::LorentzField:
+        Desc.Strength   = 20.0f;
+        Desc.SwirlRatio = 1.1f;
+        break;
+    case ForceModel::MagneticDipole:
+        Desc.Strength         = 19.0f;
+        Desc.CoreRadiusMeters = 3.5f;
+        break;
+    case ForceModel::FlowStream:
+        Desc.Strength      = 24.0f;
+        Desc.RadiusMeters  = 18.0f;
+        Desc.StreamProfile = FlowStreamProfile::SlipstreamJet;
+        if (Title.find("Formula") != std::string_view::npos)
+        {
+            Desc.FormulaEnabled    = true;
+            Desc.FormulaSourceText = QueryBuiltInFormulaPresets()[0].FormulaSource;
+        }
+        break;
+    case ForceModel::SplineForce:
+        Desc.Strength     = 20.0f;
+        Desc.RadiusMeters = 18.0f;
+        break;
+    case ForceModel::BoundaryAdhesion:
+        Desc.Strength         = 15.0f;
+        Desc.CoreRadiusMeters = 4.0f;
+        break;
+    default:
+        break;
+    }
     return Desc;
+}
+
+[[nodiscard]] const char* QueryForceDomainCaption(SimulationSpace::ForceFields::ForceDomainCategory Domain) noexcept
+{
+    using namespace SimulationSpace::ForceFields;
+    switch (Domain)
+    {
+    case ForceDomainCategory::VectorField:     return "VectorField";
+    case ForceDomainCategory::FlowField:       return "FlowField";
+    case ForceDomainCategory::TurbulenceField: return "Turbulence";
+    default:                                   return "ForceField";
+    }
 }
 
 } // namespace
@@ -112,17 +214,99 @@ bool VectorFieldViewportCoordinator::InitializeAndAttach(
         return false;
     }
 
-    const std::vector<OutlinerConstructTemplate> ForceTemplates = {
-        { "Add Linear Wind",      "Linear Wind",       "Force Field", "Steady directional flow",  ConstructSlotCategory::ForceField, static_cast<uint32_t>(SimulationSpace::ForceFields::ForceModel::LinearWind)           },
-        { "Add Radial Burst",     "Radial Burst",      "Force Field", "Expanding impulse wave",   ConstructSlotCategory::ForceField, static_cast<uint32_t>(SimulationSpace::ForceFields::ForceModel::RadialBurst)          },
-        { "Add Vortex Column",    "Rotational Column", "Force Field", "Helical swirl column",     ConstructSlotCategory::ForceField, static_cast<uint32_t>(SimulationSpace::ForceFields::ForceModel::RotationalColumn)     },
-        { "Add Point Attractor",  "Point Attractor",   "Force Field", "Inward pull sink",         ConstructSlotCategory::ForceField, static_cast<uint32_t>(SimulationSpace::ForceFields::ForceModel::Attractor)            },
-        { "Add Curl Turbulence",  "Curl Noise",        "Force Field", "Divergence-free curl eddy",ConstructSlotCategory::ForceField, static_cast<uint32_t>(SimulationSpace::ForceFields::ForceModel::CurlNoise)            },
-        { "Add Custom Formula",   "Custom Formula",    "Force Field", "VectorFieldLang override", ConstructSlotCategory::ForceField, static_cast<uint32_t>(SimulationSpace::ForceFields::ForceModel::FlowStream)           },
-        { "Add Cube Mesh",        "Cube",              "Static Mesh", "Position 0, 0, 0 m",       ConstructSlotCategory::CategoryOne,  0xFFFFFFFFu },
-        { "Add Point Light",      "Point Light",       "Light",       "Position 0, 0, 0 m",       ConstructSlotCategory::CategoryThree,0xFFFFFFFFu },
-    };
-    Outliner.ConfigureConstructTemplates(ForceTemplates);
+    std::vector<OutlinerConstructTemplate> ForceTemplates;
+    ForceTemplates.reserve(22u);
+    for (uint32_t Ord = 0u; Ord < static_cast<uint32_t>(SimulationSpace::ForceFields::ForceModel::Count); ++Ord)
+    {
+        const auto Model    = static_cast<SimulationSpace::ForceFields::ForceModel>(Ord);
+        const auto Domain   = SimulationSpace::ForceFields::QueryDomainForModel(Model);
+        const char* Name    = SimulationSpace::ForceFields::QueryForceModelDisplayName(Model);
+        const char* DomName = QueryForceDomainCaption(Domain);
+        ForceTemplates.push_back({
+            std::string("Add ") + Name,
+            Name,
+            DomName,
+            "Analytical ForceModel",
+            ConstructSlotCategory::ForceField,
+            Ord
+        });
+    }
+    ForceTemplates.push_back({ "Add Custom Formula", "Custom Formula", "VectorFieldLang", "Symbolic GPU formula", ConstructSlotCategory::ForceField, static_cast<uint32_t>(SimulationSpace::ForceFields::ForceModel::FlowStream) });
+    ForceTemplates.push_back({ "Add Cube Mesh",      "Cube",           "Static Mesh",     "Position 0, 0, 0 m",   ConstructSlotCategory::CategoryOne,  0xFFFFFFFFu });
+    ForceTemplates.push_back({ "Add Point Light",    "Point Light",    "Light",           "Position 0, 0, 0 m",   ConstructSlotCategory::CategoryThree,0xFFFFFFFFu });
+    Outliner.ConfigureConstructTemplates(std::move(ForceTemplates));
+
+    ContentBrowser.PopulateDefaultForcePresets();
+    ContentBrowser.ConfigureConstructPresetCallback(
+        [this](const Codecs::ForceModelPresetDocument& Doc)
+        {
+            OutlinerSlotToken TargetFolder = DefaultForceFolderToken;
+            if (TargetFolder.Valid() && BoundOutliner != nullptr && BoundOutliner->FindEntry(TargetFolder) == nullptr)
+            {
+                TargetFolder = {};
+            }
+            (void)AddForceSourceEntry(Doc.ForceSource, TargetFolder);
+        });
+    ContentBrowser.ConfigureSaveSelectedCallback(
+        [this](Codecs::ForceModelPresetDocument& OutDoc) -> bool
+        {
+            if (BoundOutliner == nullptr)
+            {
+                return false;
+            }
+            const OutlinerSlotToken Primary = BoundOutliner->QueryPrimarySelection();
+            const uint32_t          ForceTok = QueryMappedForceToken(Primary);
+            for (const auto& Src : Accumulator.QuerySources())
+            {
+                if (Src.UniqueToken == ForceTok)
+                {
+                    OutDoc.PresetTitle  = Src.Label + " Preset";
+                    OutDoc.AuthorNote   = "Captured from active Frontier scene.";
+                    OutDoc.ForceSource  = Src;
+                    return true;
+                }
+            }
+            return false;
+        });
+
+    std::vector<ViewportConstructPresetEntry> ViewportPresets;
+    std::vector<Codecs::ForceModelPresetDocument> CapturedPresetDocs;
+    for (const auto& Asset : ContentBrowser.QueryAllAssets())
+    {
+        if (Asset.Category == ContentAssetCategory::ForcePresets || Asset.Category == ContentAssetCategory::FormulaPresets)
+        {
+            ViewportPresets.push_back({
+                Asset.Title,
+                Asset.CategoryCaption,
+                static_cast<uint32_t>(Asset.PresetDocument.ForceSource.Model),
+                Asset.FormulaOverride,
+                static_cast<uint32_t>(Asset.PresetDocument.ForceSource.Domain)
+            });
+            CapturedPresetDocs.push_back(Asset.PresetDocument);
+        }
+    }
+    Viewport.ConfigureConstructPresets(std::move(ViewportPresets));
+    Viewport.ConfigureConstructPresetCallback(
+        [this, CapturedPresetDocs = std::move(CapturedPresetDocs)](uint32_t PresetIdx)
+        {
+            if (PresetIdx >= CapturedPresetDocs.size())
+            {
+                return;
+            }
+            OutlinerSlotToken TargetFolder = DefaultForceFolderToken;
+            if (TargetFolder.Valid() && BoundOutliner != nullptr && BoundOutliner->FindEntry(TargetFolder) == nullptr)
+            {
+                TargetFolder = {};
+            }
+            (void)AddForceSourceEntry(CapturedPresetDocs[PresetIdx].ForceSource, TargetFolder);
+        });
+    Viewport.ConfigureOpenContentBrowserCallback(
+        [this]()
+        {
+            ContentBrowser.ConfigureOriginFilter(ContentAssetOrigin::All);
+            ContentBrowser.ConfigureCategoryFilter(ContentAssetCategory::ForcePresets);
+            ContentBrowser.ConfigureOpen(true, false);
+        });
 
     Viewport.AttachOutliner(&Outliner);
     Inspector.AttachOutliner(&Outliner);
@@ -193,10 +377,15 @@ OutlinerSlotToken VectorFieldViewportCoordinator::AddForceSourceEntry(
         return {};
     }
 
+    if (EnclosingFolder.Valid() && !DefaultForceFolderToken.Valid())
+    {
+        DefaultForceFolderToken = EnclosingFolder;
+    }
+
     Descriptor.UniqueToken = NextForceToken++;
     Descriptor.Domain      = SimulationSpace::ForceFields::QueryDomainForModel(Descriptor.Model);
 
-    const OutlinerSlotToken Token = BoundOutliner->ConstructFromTemplate(0u, EnclosingFolder);
+    const OutlinerSlotToken Token = BoundOutliner->ConstructFromTemplate(static_cast<uint32_t>(Descriptor.Model), EnclosingFolder);
     if (OutlinerRecordEntry* Created = BoundOutliner->AccessEntry(Token))
     {
         Created->Category             = ConstructSlotCategory::ForceField;
@@ -253,13 +442,22 @@ void VectorFieldViewportCoordinator::SynchronizeOutlinerAndAccumulator()
 
         if (It == AuthoredSources.end())
         {
-            auto Desc            = BuildPresetFromTemplateTitle(Entry.Title);
+            auto Desc            = BuildPresetForTemplateEntry(Entry.ForceLawOrdinal, Entry.Title);
             Desc.UniqueToken     = NextForceToken++;
             Desc.OutlinerTokenId = Entry.Token.Identifier;
             Desc.CentreMeters    = { Entry.PositionX, Entry.PositionY, Entry.PositionZ };
             Desc.EvaluatedCentreMeters = Desc.CentreMeters;
             Desc.EulerDegrees    = { Entry.RotationX, Entry.RotationY, Entry.RotationZ };
             Desc.Enabled         = BoundOutliner->QueryEffectiveVisibility(Entry.Token);
+            if (OutlinerRecordEntry* Mut = BoundOutliner->AccessEntry(Entry.Token))
+            {
+                Mut->CategoryLabel        = SimulationSpace::ForceFields::QueryForceModelDisplayName(Desc.Model);
+                Mut->ForceLawOrdinal      = static_cast<uint32_t>(Desc.Model);
+                Mut->ForceFormulaOverride = Desc.FormulaEnabled;
+                char SubBuf[96]{};
+                std::snprintf(SubBuf, sizeof(SubBuf), "r %.0f m  |  %.1f m/s", Desc.RadiusMeters, Desc.Strength);
+                Mut->Subtitle = SubBuf;
+            }
             AuthoredSources.push_back(std::move(Desc));
             Dirty = true;
         }
@@ -538,6 +736,7 @@ SimulationSpace::ForceFields::FieldLatticeCascade& VectorFieldViewportCoordinato
 SimulationSpace::ForceFields::FieldLatticeVulkanExecutor& VectorFieldViewportCoordinator::AccessVulkanExecutor() noexcept { return VulkanExecutor; }
 VectorFieldOverlaySequence& VectorFieldViewportCoordinator::AccessOverlaySequence() noexcept { return OverlaySequence; }
 ForceInspectorView& VectorFieldViewportCoordinator::AccessForceInspectorView() noexcept { return InspectorView; }
+ContentBrowserPanel& VectorFieldViewportCoordinator::AccessContentBrowser() noexcept { return ContentBrowser; }
 OverlayCameraState& VectorFieldViewportCoordinator::AccessCamera(uint32_t PaneIndex) noexcept { return Cameras[PaneIndex < 2u ? PaneIndex : 0u]; }
 int32_t VectorFieldViewportCoordinator::QuerySelectedWaypointIndex() const noexcept { return SelectedWaypointIdx; }
 void VectorFieldViewportCoordinator::ConfigureSelectedWaypointIndex(int32_t WaypointIdx) noexcept { SelectedWaypointIdx = WaypointIdx; }

@@ -17,6 +17,7 @@
 #include <functional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace Frontier
 {
@@ -46,9 +47,28 @@ enum class ConstructCategoryRail : uint8_t
     Organization = 2, // [-] - Organizational folders
 };
 
+enum class ForceConstructCategory : uint8_t
+{
+    All             = 0, // [-] - All 19 ForceModel laws, presets, & scene entries
+    VectorLaws      = 1, // [-] - VectorField analytic spatial laws (Linear, Buoyancy, Radial, Attractor, Repulsor, Axis, Containment)
+    FlowLaws        = 2, // [-] - FlowField & transport laws (Rotation, Torque, Drag, Vorticity, Lorentz, Dipole, Stream, Spline, Adhesion)
+    TurbulenceLaws  = 3, // [-] - CurlNoise, AtmosphericGust, BrownianNoise
+    Presets         = 4, // [-] - Curated .ForceModel & Formula presets
+    SceneAndFolders = 5, // [-] - Static geometry, lights & folders
+};
+
 //------------------------------------------------------------------------------------------------------------------------
 //                                                       STRUCTURES
 //------------------------------------------------------------------------------------------------------------------------
+
+struct ViewportConstructPresetEntry
+{
+    std::string Title           {};          // [-] - Preset display title
+    std::string Subtitle        {};          // [-] - Short parameter caption
+    uint32_t    ForceLawOrdinal = 0u;          // [id]- ForceModel ordinal [0..18]
+    bool        FormulaOverride = false;       // [-] - Symbolic formula preset indicator
+    uint32_t    DomainOrdinal   = 0u;          // [id]- 0=VectorField, 1=FlowField, 2=TurbulenceField
+};
 
 struct ViewportDisplaySettings
 {
@@ -94,6 +114,9 @@ public:
     ViewportPanel() noexcept;
 
     void AttachOutliner(OutlinerPanel* SourceOutliner) noexcept;
+    void ConfigureConstructPresets(std::vector<ViewportConstructPresetEntry> Presets);
+    void ConfigureConstructPresetCallback(std::function<void(uint32_t PresetIndex)> Callback);
+    void ConfigureOpenContentBrowserCallback(std::function<void()> Callback);
     void ConfigureRasterCallback(ViewportPaneRasterCallback Callback);
     void ConfigureInteractionCallback(ViewportPaneInteractionCallback Callback);
     void ConfigureForceOverlayToolsVisible(bool Visible) noexcept;
@@ -161,6 +184,8 @@ private:
         uint32_t                ConstructedCount,
         uint32_t                VisibleCount,
         const PaneInputReading& Input);
+    [[nodiscard]] bool        QueryForceConstructAvailable() const noexcept;
+    [[nodiscard]] Rectangle2D QueryConstructDialogBounds(Rectangle2D Bounds) const noexcept;
     void RenderConstructDialog(
         PixelSpace&             Overlay,
         Rectangle2D             Bounds,
@@ -191,7 +216,12 @@ private:
     std::array<float, 120>     IntervalHistoryMs      {};                                        // [ms]  - Rolling 120-step timing samples
     uint32_t                   HistoryWriteCursor      = 0u;                                      // [idx] - Ring buffer write cursor
     ConstructCategoryRail      ConstructRail           = ConstructCategoryRail::All;              // [-]   - Active Construct category rail
+    ForceConstructCategory     ForceConstructTab       = ForceConstructCategory::All;             // [-]   - Active Force Construct rail tab
+    float                      ConstructGridScrollY    = 0.0f;                                    // [px]  - Construct tile grid scroll offset
     TextEditBuffer             ConstructSearchEditor   {};                                        // [-]   - Construct search filter buffer
+    std::vector<ViewportConstructPresetEntry> ConstructPresets {};                                // [-]   - Optional Force presets shown in Construct dialog
+    std::function<void(uint32_t)>             ConstructPresetCallback {};                         // [-]   - Callback invoked when preset tile chosen
+    std::function<void()>                     OpenContentBrowserCallback {};                      // [-]   - Callback invoked by Content Browser button
 
     ViewportPaneRasterCallback      RasterCallback          {};                                        // [-]   - Optional GPU / software surface feeder
     ViewportPaneInteractionCallback InteractionCallback     {};                                        // [-]   - Optional canvas pointer router

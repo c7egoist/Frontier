@@ -255,6 +255,7 @@ set(FRONTIER_UI_COMPONENT_SOURCES
     Engine/Components/Panes/OutlinerPanel.cpp
     Engine/Components/Panes/InspectorPanel.cpp
     Engine/Components/Panes/ViewportPanel.cpp
+    Engine/Components/Panes/ContentBrowserPanel.cpp
     Engine/Components/ControlCentre/ControlCentrePanel.cpp
     Engine/Configuration/InputSettings.cpp
     Engine/Configuration/ProjectSpaceRepository.cpp

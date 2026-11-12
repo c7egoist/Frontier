@@ -707,6 +707,7 @@ bool ValidateEditorVulkanOverlayAndCaptureExhibits()
             ImGui::NewFrame();
             Container.PresentWindowImGuiPanes(HostWindowToken{ 0u });
             ControlCentre.Render({ 0.0f, 0.0f, 1600.0f, 980.0f }, 1.0 / 60.0, 60.0f);
+            Coordinator.AccessContentBrowser().PresentInImGuiHost(1.0 / 60.0, 1.0f);
             ImGui::Render();
         }
 
@@ -853,6 +854,101 @@ bool ValidateEditorVulkanOverlayAndCaptureExhibits()
     // Restore default Field tab scroll offset 0
     Coordinator.AccessForceInspectorView().ConfigureActiveTab(ForceInspectorTab::Field);
     Coordinator.AccessForceInspectorView().ConfigureScrollOffset(0.0f);
+
+    // Exhibit 7: Bottom pull-up Content Browser drawer with Force presets, 19 ForceModel laws & VectorFieldLang formulas
+    auto& Browser = Coordinator.AccessContentBrowser();
+    if (!VerifyCondition(Browser.QueryAllAssets().size() >= 36u, "ContentBrowser populated with >= 36 presets/laws/formulas"))
+    {
+        TypographyRepository::AssignCurrent(nullptr);
+        ImGui::DestroyContext(GuiSession);
+        return false;
+    }
+    Browser.ConfigureOriginFilter(ContentAssetOrigin::All);
+    Browser.ConfigureCategoryFilter(ContentAssetCategory::ForcePresets);
+    Browser.ConfigureSelectedAssetId("preset-supercell-cyclone");
+    Browser.SnapOpen(true);
+    if (!CaptureFullWorkspacePng("07-ForceFieldContentBrowserDrawer.png"))
+    {
+        TypographyRepository::AssignCurrent(nullptr);
+        ImGui::DestroyContext(GuiSession);
+        return false;
+    }
+
+    // Functional check 1: Construct a Force preset directly from the Content Browser
+    const std::size_t BeforeBrowserAddCount = Coordinator.QueryAccumulator().QuerySources().size();
+    if (!VerifyCondition(Browser.ConstructSelectedPreset(), "ConstructSelectedPreset() returned true"))
+    {
+        TypographyRepository::AssignCurrent(nullptr);
+        ImGui::DestroyContext(GuiSession);
+        return false;
+    }
+    Coordinator.StepSimulation(1.0 / 60.0);
+    const auto AfterBrowserSrcs = Coordinator.QueryAccumulator().QuerySources();
+    if (!VerifyCondition(
+            AfterBrowserSrcs.size() == BeforeBrowserAddCount + 1u &&
+            AfterBrowserSrcs.back().Model == ForceModel::RotationalColumn,
+            "ContentBrowser ConstructSelectedPreset() spawned ForceModel::RotationalColumn into Accumulator"))
+    {
+        TypographyRepository::AssignCurrent(nullptr);
+        ImGui::DestroyContext(GuiSession);
+        return false;
+    }
+    Browser.SnapOpen(false);
+
+    // Functional check 2: Write .ForceModel preset on disk & import via LoadForcePresetsFromDirectory
+    {
+        const auto TempPresetDir = RepoRoot / "Build" / "_PresetValidationTmp";
+        std::filesystem::create_directories(TempPresetDir);
+        Codecs::ForceModelPresetDocument SaveDoc{};
+        SaveDoc.PresetTitle  = "Bespoke Cyclotron Saved";
+        SaveDoc.AuthorNote   = "Validation roundtrip preset.";
+        SaveDoc.ForceSource  = AfterBrowserSrcs.back();
+        SaveDoc.ForceSource.Model = ForceModel::LorentzField;
+        std::string EncodeDiag;
+        const bool Encoded = VerifyCondition(
+            Codecs::ForceModelPresetEncoder::EncodeToFile(TempPresetDir / "CyclotronSaved.ForceModel", SaveDoc, EncodeDiag),
+            "EncodeToFile .ForceModel preset");
+        const uint32_t LoadedCnt = Browser.LoadForcePresetsFromDirectory(TempPresetDir);
+        std::error_code CleanupEc;
+        std::filesystem::remove_all(TempPresetDir, CleanupEc);
+        if (!Encoded || !VerifyCondition(LoadedCnt == 1u, "ContentBrowser imported .ForceModel preset file"))
+        {
+            TypographyRepository::AssignCurrent(nullptr);
+            ImGui::DestroyContext(GuiSession);
+            return false;
+        }
+    }
+
+    // Exhibit 8: Viewport header Construct modal showing Force presets & all 19 ForceModel laws + Content Browser button
+    Outliner.SelectSingle(VortexToken);
+    Viewport.ConfigureConstructSheetOpen(true);
+    if (!CaptureFullWorkspacePng("08-ForceFieldConstructModal.png"))
+    {
+        TypographyRepository::AssignCurrent(nullptr);
+        ImGui::DestroyContext(GuiSession);
+        return false;
+    }
+
+    // Functional check 3: Construct via Viewport/Outliner template (ForceModel::VorticityConfinement)
+    const std::size_t BeforeConstructCount = Coordinator.QueryAccumulator().QuerySources().size();
+    const OutlinerSlotToken NewLawToken = Outliner.ConstructFromTemplate(
+        static_cast<uint32_t>(ForceModel::VorticityConfinement),
+        WindFolder);
+    Coordinator.StepSimulation(1.0 / 60.0);
+    const auto AfterConstructSrcs = Coordinator.QueryAccumulator().QuerySources();
+    if (!VerifyCondition(
+            NewLawToken.Valid() &&
+            AfterConstructSrcs.size() == BeforeConstructCount + 1u &&
+            AfterConstructSrcs.back().Model == ForceModel::VorticityConfinement,
+            "Viewport Construct / Outliner template spawned ForceModel::VorticityConfinement"))
+    {
+        TypographyRepository::AssignCurrent(nullptr);
+        ImGui::DestroyContext(GuiSession);
+        return false;
+    }
+
+    Viewport.ConfigureConstructSheetOpen(false);
+    Browser.SnapOpen(false);
 
     TypographyRepository::AssignCurrent(nullptr);
     ImGui::DestroyContext(GuiSession);
