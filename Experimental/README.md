@@ -1,0 +1,58 @@
+# 🧩 `Experimental/` — Reference Studios Pending Native C++20 Conversion
+
+> **TL;DR**: `Experimental/` stages **ten reference editor shells and interactive web/WebGPU/WebGL2 studios** extracted from prior Frontier prototype branches. None of these prototypes ship directly in production; each serves as the verified UX, component, mathematical, and shader specification for shared **ISO C++20 `Engine/Components/` + `Engine/Workspaces/` + `.slang` GPU** modules (`FRONTIER_PROFILE_EDITOR`).
+
+---
+
+## 🏷️ 1. Staged Reference Editor UIs & Studios
+
+| Studio Directory | Prototype Scope | Provenance | Target Native C++20 / `.slang` Destination |
+| :--- | :--- | :--- | :--- |
+| **`FrontierEditor/`** | Initial HTML/Vite React editor UI (`index.html`), Automotive CAD workbench (`cad.html`), and SVG icon catalog (`icons.html`) — 100% HTML/JS/CSS. | `c7egoist/Frontier` (`arena/f3437631-frontier` @ `186a7b8`) | `Engine/Components/` + `Engine/Workspaces/` + `Engine/Editor/` |
+| **`ProjectZeroEditor/`** | Primary Project-Zero HTML/JS UI specification (with `README.md` render) uniting trapezoidal dock tabs, Notch quick-tools, Outliner tree, Construct drawer, and Light/Fog/Wind/Material inspectors. | `c7egoist/Frontier` (`arena/f3437631-frontier` @ `186a7b8`) | `Engine/Components/Docking/` + `Engine/Editor/Explorer/` + `Engine/Workspaces/` |
+| **`FluidEditor/`** | Gaseous plume, combustion, detonation, wildfire, and vortex solver (`WebGPU` + `WebGL2`) with `.gasscene.toml` serialization and flipbook baking. | `Frontier-OLD` @ `438aeaf` | `Engine/SimulationSpace/FluidSimulation/` + `Shaders/Compute/` + `Engine/Editor/` |
+| **`FractureEditor/`** | Six fracture & debris solvers: baked Voronoi fracture, fast runtime shattering, convex partitioning, piece SDFs, rigid-body dynamics, and atmospheric drag. | `Frontier-OLD` @ `438aeaf` | `Engine/Geometry/` (Voronoi/convex partitioning) + `Engine/Physics/` (`JoltPhysics` rigid bodies) + `Engine/Editor/` |
+| **`ParticleEditor/`** | GPU compute particle emitters, fibres/ribbons, procedural lightning, and live spatial force-field sampling (**Particle Studio**). | `Frontier-OLD` @ `438aeaf` | `Engine/Render/` & `Shaders/` (`.slang` GPU compute simulation & indirect draw) + `Engine/Editor/` |
+| **`PhotometricEditor/`** | LM-63 `.ies` luminaire profiles, automotive headlamp optics, celestial sky scattering, ACES tone mapping, and isolux metering (**Photometric Studio**). | `Frontier-OLD` @ `438aeaf` | `Engine/Render/` (photometric light evaluation & sky LUTs in `.slang`) + `Engine/Editor/` |
+| **`ForceFieldEditor/`** | Global wind synthesis + 16 bounded spatial force fields with RK2 streamline tracing and GPU vector/bounds overlays (**Force Field Studio**). | `Frontier-OLD` @ `438aeaf` | `Engine/Physics/` & `Shaders/` (shared `.slang` spatial force-field evaluation & GPU debug overlays) |
+| **`VehicleLab/`** | `ControlVehicle` `FCT1` mesh inspection, VR38DETT torque & turbo spool curves, Pacejka MF6.1 tyre thermal/slip solver, and 10 telemetry channels. | `Frontier-OLD` @ `438aeaf` | `Engine/Physics/` (`JoltPhysics` wheeled vehicle + Pacejka/thermal solver) + `Engine/Assets/` + `Engine/Editor/` |
+| **`UVEditor/`** | Synchronized 2D UDIM layout & 3D mesh viewport, LSCM conformal unwrapping, seam authoring, GPU wireframe overlays, and importance-weighted packing. | `c7egoist/Frontier` @ `3350774` | `Engine/Geometry/` (LSCM unwrap & UDIM packer) + `Shaders/` (GPU UV/wireframe overlays) + `Engine/Editor/` |
+| **`TextureStudio/`** | Five-workspace texturing suite: `#material` look-dev, `#pattern` noise-scaled layer stack, `#stamp` decals, `#paint` 3D brush projection, and `#bake` mesh + volume SDF baking. | `c7egoist/Frontier` @ `3350774` | `Engine/Materials/`, `Engine/Assets/`, & `Shaders/` (`.slang` procedural noise, brush projection, AO/curvature/SDF bakers) + `Engine/Editor/` |
+| **`VectorFieldVisualizer/`** | Project Zero GPU vector-field studio (`WebGL2` + Software 2D/Iso fallback) uniting 19 `ForceModel` laws, symbolic `VectorFieldLang` compiler, bidirectional RK4 streamlines, and zoom-adaptive `128×128` field baking ([docs](VectorFieldVisualizer/README.md)). | `streamlinkinbox/Frontier` (`arena/d8bdb20c-frontier`) | `Engine/Physics/`, `Engine/SimulationSpace/`, & `Shaders/` (`.slang` spatial field evaluation, symbolic kernels, debug overlays) |
+| **`ParticleWorkspace/`** | Standalone Project Zero `.ParticleSpace` GPU studio (`WebGL2` + Software 3D fallback) with 36 emitter presets, 13 Flow/Acc/Damp force primitives, LJ 12-6 atoms, `A+B⇌C` reactions, VFX transitions, Light Fibres, fractal lightning, and live `.ParticleSpace` TOML + 215 MiB Revision ledger ([docs](ParticleWorkspace/README.md)). | `streamlinkinbox/Frontier` (`arena/d8bdb20c-frontier`) | `Engine/Workspaces/`, `Engine/SimulationSpace/ParticleSimulation/`, & `Shaders/` (`.slang` particle, fibre, lightning, and field slice evaluation) |
+
+---
+
+## 🧩 2. Shared Prototype Support Directories
+
+| Path | Role |
+| :--- | :--- |
+| **`ForceFieldVisualization/`** | Shared 3D force-field glyph and streamline builder consumed by `ParticleEditor/` and `ForceFieldEditor/`. |
+| **`Shared/UvTextureBridge.js`** | Cross-studio UV layout & mesh transfer bridge connecting `UVEditor/` and `TextureStudio/`. |
+| **`VehicleProvingGrounds/{Archive,Source}/`** | Binary `FCT1` `ControlVehicle` body/rim/tyre streams and authored powertrain/Pacejka/thermal sheets loaded by `VehicleLab/`. |
+| **`UI_COMPONENT_GUIDELINES.md`** | Visual layout, typography, and custom inspector widget specification shared across the reference studios. |
+
+---
+
+## 🔍 3. Local Preview & Automated Verification
+
+```bash
+# Serve all Experimental studios simultaneously on http://0.0.0.0:8080/Experimental/
+python3 Experimental/Serve.py 8080
+# Or run the standalone VectorFieldVisualizer GPU Studio on port 8094
+python3 Experimental/VectorFieldVisualizer/Serve.py 8094
+# Or run the standalone ParticleWorkspace (.ParticleSpace) GPU Studio on port 8096
+python3 Experimental/ParticleWorkspace/Serve.py 8096
+
+# Run standalone Node ESM validation suites across the staged studios
+node Experimental/FluidEditor/src/SceneMetrics.mjs
+node Experimental/FractureEditor/FractureValidation.mjs
+node Experimental/ParticleEditor/Engine/CheckForceFields.mjs
+node Experimental/PhotometricEditor/PhotometricValidation.mjs
+node Experimental/ForceFieldEditor/ForceFieldValidation.mjs
+node Experimental/VehicleLab/AssetInspectorValidation.mjs
+node Experimental/UVEditor/UVValidation.mjs
+node Experimental/TextureStudio/TextureStudioValidation.mjs
+node Experimental/VectorFieldVisualizer/VectorFieldValidation.mjs
+node Experimental/ParticleWorkspace/ParticleWorkspaceValidation.mjs
+```

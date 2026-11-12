@@ -1,0 +1,377 @@
+#============================================================================================================================================
+#                                                           CMAKELISTS.TXT
+#============================================================================================================================================
+# 🧩 Root ISO C++20 build configuration enforcing Editor, Development, and Shipping profiles across Windows, Linux, and Android.
+
+cmake_minimum_required(VERSION 3.21)
+project(Frontier LANGUAGES C CXX)
+
+include(CTest)
+
+#------------------------------------------------------------------------------------------------------------------------
+#                                                LANGUAGE & PROFILE POLICY
+#------------------------------------------------------------------------------------------------------------------------
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+set(FRONTIER_PROFILE "Development" CACHE STRING "Active Frontier build profile (Editor, Development, Shipping)")
+set_property(CACHE FRONTIER_PROFILE PROPERTY STRINGS Editor Development Shipping)
+
+if(FRONTIER_PROFILE STREQUAL "Editor")
+    set(FRONTIER_PROFILE_EDITOR_DEF      1)
+    set(FRONTIER_PROFILE_DEVELOPMENT_DEF 0)
+    set(FRONTIER_PROFILE_SHIPPING_DEF    0)
+elseif(FRONTIER_PROFILE STREQUAL "Development")
+    set(FRONTIER_PROFILE_EDITOR_DEF      0)
+    set(FRONTIER_PROFILE_DEVELOPMENT_DEF 1)
+    set(FRONTIER_PROFILE_SHIPPING_DEF    0)
+elseif(FRONTIER_PROFILE STREQUAL "Shipping")
+    set(FRONTIER_PROFILE_EDITOR_DEF      0)
+    set(FRONTIER_PROFILE_DEVELOPMENT_DEF 0)
+    set(FRONTIER_PROFILE_SHIPPING_DEF    1)
+else()
+    message(FATAL_ERROR "Invalid FRONTIER_PROFILE='${FRONTIER_PROFILE}'. Choose Editor, Development, or Shipping.")
+endif()
+
+message(STATUS "Frontier active profile: ${FRONTIER_PROFILE}")
+
+#------------------------------------------------------------------------------------------------------------------------
+#                                          PINNED DEPENDENCY & PATCH VERIFICATION
+#------------------------------------------------------------------------------------------------------------------------
+
+find_package(Threads REQUIRED)
+find_package(Python3 3.9 REQUIRED COMPONENTS Interpreter)
+execute_process(
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/Automation/PrepareDependencies.py" --verify
+    RESULT_VARIABLE FRONTIER_DEP_STATUS
+)
+if(NOT FRONTIER_DEP_STATUS EQUAL 0)
+    message(FATAL_ERROR "Dependencies or ImGui patches unverified. Run: python3 Automation/PrepareDependencies.py")
+endif()
+
+#------------------------------------------------------------------------------------------------------------------------
+#                                             COMPILER WARNING & PROFILE FLAGS
+#------------------------------------------------------------------------------------------------------------------------
+
+add_library(FrontierCompileSettings INTERFACE)
+target_compile_features(FrontierCompileSettings INTERFACE cxx_std_20)
+target_compile_definitions(FrontierCompileSettings INTERFACE
+    FRONTIER_PROFILE_EDITOR=${FRONTIER_PROFILE_EDITOR_DEF}
+    FRONTIER_PROFILE_DEVELOPMENT=${FRONTIER_PROFILE_DEVELOPMENT_DEF}
+    FRONTIER_PROFILE_SHIPPING=${FRONTIER_PROFILE_SHIPPING_DEF}
+)
+
+if(MSVC)
+    target_compile_options(FrontierCompileSettings INTERFACE /utf-8 /W4 /permissive-)
+    if(FRONTIER_PROFILE STREQUAL "Shipping")
+        target_compile_options(FrontierCompileSettings INTERFACE /O2 /DNDEBUG)
+    else()
+        target_compile_options(FrontierCompileSettings INTERFACE /Zi)
+    endif()
+else()
+    target_compile_options(FrontierCompileSettings INTERFACE -Wall -Wextra -Wpedantic)
+    if(FRONTIER_PROFILE STREQUAL "Shipping")
+        target_compile_options(FrontierCompileSettings INTERFACE -O3 -DNDEBUG)
+    else()
+        target_compile_options(FrontierCompileSettings INTERFACE -O1 -g)
+    endif()
+endif()
+
+#------------------------------------------------------------------------------------------------------------------------
+#                                     PATCHED IMGUI (EXCLUDED FROM SHIPPING RUNTIME)
+#------------------------------------------------------------------------------------------------------------------------
+
+if(NOT FRONTIER_PROFILE STREQUAL "Shipping" OR BUILD_TESTING)
+    set(IMGUI_ROOT "${CMAKE_SOURCE_DIR}/ExternalPackages/imgui")
+    if(FRONTIER_PROFILE STREQUAL "Shipping")
+        add_library(FrontierImGui STATIC EXCLUDE_FROM_ALL
+            "${IMGUI_ROOT}/imgui.cpp"
+            "${IMGUI_ROOT}/imgui_draw.cpp"
+            "${IMGUI_ROOT}/imgui_tables.cpp"
+            "${IMGUI_ROOT}/imgui_widgets.cpp"
+        )
+    else()
+        add_library(FrontierImGui STATIC
+            "${IMGUI_ROOT}/imgui.cpp"
+            "${IMGUI_ROOT}/imgui_draw.cpp"
+            "${IMGUI_ROOT}/imgui_tables.cpp"
+            "${IMGUI_ROOT}/imgui_widgets.cpp"
+        )
+    endif()
+    target_include_directories(FrontierImGui PUBLIC "${IMGUI_ROOT}")
+    target_compile_definitions(FrontierImGui PUBLIC "ImDrawIdx=unsigned int")
+    if(NOT MSVC)
+        target_compile_options(FrontierImGui PRIVATE -w)
+    endif()
+endif()
+
+#------------------------------------------------------------------------------------------------------------------------
+#                                         DESKTOP GLFW 3.4 BACKEND (NON-ANDROID)
+#------------------------------------------------------------------------------------------------------------------------
+
+if(NOT ANDROID)
+    set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+
+    if(UNIX AND NOT APPLE)
+        include(CheckIncludeFile)
+        check_include_file("X11/Xlib.h" FRONTIER_HAS_X11_HEADERS)
+        check_include_file("wayland-client.h" FRONTIER_HAS_WAYLAND_HEADERS)
+        find_program(FRONTIER_WAYLAND_SCANNER NAMES wayland-scanner)
+
+        if(FRONTIER_HAS_X11_HEADERS)
+            set(GLFW_BUILD_X11 ON CACHE BOOL "" FORCE)
+        else()
+            set(GLFW_BUILD_X11 OFF CACHE BOOL "" FORCE)
+        endif()
+
+        if(FRONTIER_HAS_WAYLAND_HEADERS AND FRONTIER_WAYLAND_SCANNER)
+            set(GLFW_BUILD_WAYLAND ON CACHE BOOL "" FORCE)
+        else()
+            set(GLFW_BUILD_WAYLAND OFF CACHE BOOL "" FORCE)
+        endif()
+    endif()
+
+    add_subdirectory(ExternalPackages/glfw EXCLUDE_FROM_ALL)
+endif()
+
+#------------------------------------------------------------------------------------------------------------------------
+#                                         VOLK LOADER, JOLT PHYSICS & SLANG SPIR-V
+#------------------------------------------------------------------------------------------------------------------------
+
+add_library(FrontierVolk STATIC "${CMAKE_SOURCE_DIR}/ExternalPackages/volk/volk.c")
+target_include_directories(FrontierVolk PUBLIC
+    "${CMAKE_SOURCE_DIR}/ExternalPackages/vulkan-headers/include"
+    "${CMAKE_SOURCE_DIR}/ExternalPackages/volk"
+)
+if(UNIX AND NOT APPLE)
+    target_link_libraries(FrontierVolk PRIVATE ${CMAKE_DL_LIBS})
+endif()
+if(NOT MSVC)
+    target_compile_options(FrontierVolk PRIVATE -w)
+endif()
+
+include("${CMAKE_SOURCE_DIR}/Automation/JoltPhysics.cmake")
+frontier_add_jolt()
+
+set(FRONTIER_SLANGC_CANDIDATE "${CMAKE_SOURCE_DIR}/ExternalPackages/VulkanCompute/Slang/slangtorch/bin/slangc${CMAKE_EXECUTABLE_SUFFIX}")
+if(EXISTS "${FRONTIER_SLANGC_CANDIDATE}")
+    set(FRONTIER_SLANGC "${FRONTIER_SLANGC_CANDIDATE}")
+else()
+    find_program(FRONTIER_SLANGC NAMES slangc REQUIRED)
+endif()
+
+set(FRONTIER_SHADER_BINARY_DIR "${CMAKE_BINARY_DIR}/EngineContent/Shaders")
+file(MAKE_DIRECTORY "${FRONTIER_SHADER_BINARY_DIR}")
+set(FRONTIER_COMPILED_SPV_OUTPUTS "")
+
+function(frontier_compile_slang_stage SLANG_REL_PATH ENTRY_NAME STAGE_KIND OUT_SPV_NAME)
+    set(IN_SLANG "${CMAKE_SOURCE_DIR}/${SLANG_REL_PATH}")
+    set(OUT_SPV "${FRONTIER_SHADER_BINARY_DIR}/${OUT_SPV_NAME}")
+    add_custom_command(
+        OUTPUT "${OUT_SPV}"
+        COMMAND "${FRONTIER_SLANGC}"
+            -profile spirv_1_5
+            -target spirv
+            -emit-spirv-directly
+            -O0
+            -I "${CMAKE_SOURCE_DIR}"
+            -entry "${ENTRY_NAME}"
+            -stage "${STAGE_KIND}"
+            "${IN_SLANG}"
+            -o "${OUT_SPV}"
+        DEPENDS
+            "${IN_SLANG}"
+            "${CMAKE_SOURCE_DIR}/Engine/Shaders/Compute/ForceFieldEvaluationShared.slang"
+            "${CMAKE_SOURCE_DIR}/Engine/Shaders/VectorField/VectorFieldRenderingShared.slang"
+        COMMENT "Compiling Slang (${STAGE_KIND}:${ENTRY_NAME}) -> ${OUT_SPV_NAME}"
+        VERBATIM
+    )
+    list(APPEND FRONTIER_COMPILED_SPV_OUTPUTS "${OUT_SPV}")
+    set(FRONTIER_COMPILED_SPV_OUTPUTS "${FRONTIER_COMPILED_SPV_OUTPUTS}" PARENT_SCOPE)
+endfunction()
+
+frontier_compile_slang_stage(
+    "Engine/Shaders/Compute/FieldLatticeCompute.slang"
+    "ComputeFieldLatticeVoxel"
+    "compute"
+    "FieldLatticeCompute.spv"
+)
+
+if(FRONTIER_PROFILE STREQUAL "Editor")
+    foreach(VF_SHADER_STEM
+        LitBackdropRasterization
+        CrossSectionHeatmapRasterization
+        InfluenceEnvelopeRasterization
+        VectorArrowRasterization
+        StreamlineRasterization
+        ForcePathAndBeaconRasterization)
+        frontier_compile_slang_stage(
+            "Engine/Shaders/VectorField/${VF_SHADER_STEM}.slang"
+            "VertexMain"
+            "vertex"
+            "${VF_SHADER_STEM}.vert.spv"
+        )
+        frontier_compile_slang_stage(
+            "Engine/Shaders/VectorField/${VF_SHADER_STEM}.slang"
+            "FragmentMain"
+            "fragment"
+            "${VF_SHADER_STEM}.frag.spv"
+        )
+    endforeach()
+endif()
+
+add_custom_target(FrontierShaders DEPENDS ${FRONTIER_COMPILED_SPV_OUTPUTS})
+
+#------------------------------------------------------------------------------------------------------------------------
+#                                               ENGINE RUNTIME LIBRARY
+#------------------------------------------------------------------------------------------------------------------------
+
+set(FRONTIER_UI_COMPONENT_SOURCES
+    Engine/Components/PixelSpace.cpp
+    Engine/Components/VectorIcons/VectorIconRepository.cpp
+    Engine/Components/Appearance/ThemeRepository.cpp
+    Engine/Components/Appearance/TypographyRepository.cpp
+    Engine/Components/Motion/SpringIntegrator.cpp
+    Engine/Components/Notch/PanelExpansionTab.cpp
+    Engine/Components/Controls/ControlAppearance.cpp
+    Engine/Components/Controls/ControlTooltip.cpp
+    Engine/Components/Controls/ScalarSlider.cpp
+    Engine/Components/Controls/ExclusiveSelector.cpp
+    Engine/Components/Controls/CapsuleButton.cpp
+    Engine/Components/Controls/ThemePreviewTile.cpp
+    Engine/Components/Controls/DropdownSelector.cpp
+    Engine/Components/Controls/TextInputField.cpp
+    Engine/Components/Controls/ConfirmationDialogue.cpp
+    Engine/Components/Controls/NotificationSequence.cpp
+    Engine/Components/Docking/WorkspaceTabStrip.cpp
+    Engine/Components/Docking/WorkspaceDockContainer.cpp
+    Engine/Components/Panes/WorkspaceAppearance.cpp
+    Engine/Components/Panes/OutlinerPanel.cpp
+    Engine/Components/Panes/InspectorPanel.cpp
+    Engine/Components/Panes/ViewportPanel.cpp
+    Engine/Components/ControlCentre/ControlCentrePanel.cpp
+    Engine/Configuration/InputSettings.cpp
+    Engine/Configuration/ProjectSpaceRepository.cpp
+    Engine/Lifecycle/WorkspaceLifecycle.cpp
+)
+
+set(FRONTIER_ENGINE_SOURCES
+    Engine/Input/InputExchange.cpp
+    Engine/Input/InputExtension.cpp
+    Engine/Lifecycle/RuntimeLifecycle.cpp
+    Engine/Windowing/PlatformWindowStub.cpp
+    Engine/Threading/Sync/HeartbeatMonitor.cpp
+    Engine/Threading/Tasks/TaskChannel.cpp
+    Engine/Threading/Tasks/ExecutionCluster.cpp
+    Engine/Threading/Tasks/TaskScheduler.cpp
+    Engine/Threading/Threads/Workspace/WorkspaceThread.cpp
+    Engine/Codecs/SpaceContainerCodec.cpp
+    Engine/Codecs/RevisionCodec.cpp
+    Engine/Codecs/ProjectCodec.cpp
+    Engine/Codecs/ColourCodec.cpp
+    Engine/Codecs/FontCodec.cpp
+    Engine/Codecs/UVCodec.cpp
+    Engine/Codecs/ImageCodec.cpp
+    Engine/Codecs/TextureCodec.cpp
+    Engine/Codecs/MaterialCodec.cpp
+    Engine/Codecs/VectorCodec.cpp
+    Engine/Codecs/VectorFieldCodec.cpp
+    Engine/Codecs/ForceModelPresetCodec.cpp
+    Engine/SimulationSpace/ForceFields/ForceMotionPath.cpp
+    Engine/SimulationSpace/ForceFields/VectorField.cpp
+    Engine/SimulationSpace/ForceFields/FlowField.cpp
+    Engine/SimulationSpace/ForceFields/TurbulenceField.cpp
+    Engine/SimulationSpace/ForceFields/FieldFormulaCompiler.cpp
+    Engine/SimulationSpace/ForceFields/ForceFieldAccumulator.cpp
+    Engine/SimulationSpace/ForceFields/FieldLatticeCascade.cpp
+    Engine/SimulationSpace/ForceFields/FieldLatticeVulkanExecutor.cpp
+    Engine/Workspaces/Revision/ContentRegion.cpp
+    Engine/Workspaces/Revision/NonLinearHistory.cpp
+    Engine/Workspaces/Revision/OperationRecorder.cpp
+    Engine/Workspaces/Revision/CursorResolution.cpp
+    Engine/Workspaces/Revision/RevisionTracker.cpp
+    Engine/Workspaces/Revision/RevisionExtension.cpp
+    Engine/Workspaces/WorkspaceDocument.cpp
+    Engine/Workspaces/WorkspaceRegistry.cpp
+    Engine/Workspaces/WorkspaceExchange.cpp
+    Engine/Workspaces/WorkspaceExtension.cpp
+)
+if(NOT ANDROID)
+    list(APPEND FRONTIER_ENGINE_SOURCES Engine/Windowing/PlatformWindowDesktop.cpp)
+endif()
+if(FRONTIER_PROFILE STREQUAL "Editor")
+    list(APPEND FRONTIER_ENGINE_SOURCES
+        Engine/Lifecycle/EditorLifecycle.cpp
+        Engine/Editor/Workspaces/Simulation/VectorFieldOverlaySequence.cpp
+        Engine/Editor/Workspaces/Simulation/VectorFieldViewportCoordinator.cpp
+    )
+endif()
+if(NOT FRONTIER_PROFILE STREQUAL "Shipping")
+    list(APPEND FRONTIER_ENGINE_SOURCES ${FRONTIER_UI_COMPONENT_SOURCES})
+endif()
+
+add_library(FrontierEngine STATIC ${FRONTIER_ENGINE_SOURCES})
+add_dependencies(FrontierEngine FrontierShaders)
+
+target_include_directories(FrontierEngine PUBLIC
+    "${CMAKE_SOURCE_DIR}"
+    "${CMAKE_SOURCE_DIR}/ExternalPackages/vulkan-headers/include"
+    "${CMAKE_SOURCE_DIR}/ExternalPackages/volk"
+    "${CMAKE_SOURCE_DIR}/ExternalPackages/tomlpp/include"
+    "${CMAKE_SOURCE_DIR}/ExternalPackages/JoltPhysics"
+)
+if(FRONTIER_PROFILE STREQUAL "Editor")
+    target_include_directories(FrontierEngine PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
+endif()
+target_link_libraries(FrontierEngine PUBLIC FrontierCompileSettings FrontierVolk Jolt Threads::Threads)
+target_compile_definitions(FrontierEngine PUBLIC FRONTIER_HAS_JOLT_PHYSICS=1)
+if(NOT FRONTIER_PROFILE STREQUAL "Shipping")
+    target_link_libraries(FrontierEngine PUBLIC FrontierImGui)
+endif()
+if(NOT ANDROID)
+    target_include_directories(FrontierEngine PUBLIC "${CMAKE_SOURCE_DIR}/ExternalPackages/glfw/include")
+    target_link_libraries(FrontierEngine PRIVATE glfw)
+endif()
+
+#------------------------------------------------------------------------------------------------------------------------
+#                                         VALIDATION EXHIBITS (CTEST TARGETS)
+#------------------------------------------------------------------------------------------------------------------------
+
+if(BUILD_TESTING)
+    if(FRONTIER_PROFILE STREQUAL "Shipping")
+        add_library(FrontierShippingExhibitUi STATIC EXCLUDE_FROM_ALL ${FRONTIER_UI_COMPONENT_SOURCES})
+        target_include_directories(FrontierShippingExhibitUi PUBLIC "${CMAKE_SOURCE_DIR}")
+        target_link_libraries(FrontierShippingExhibitUi PUBLIC FrontierEngine FrontierImGui)
+    endif()
+
+    function(frontier_register_exhibit EXHIBIT_NAME EXHIBIT_SOURCE)
+        add_executable(${EXHIBIT_NAME} ${EXHIBIT_SOURCE} ${ARGN})
+        target_include_directories(${EXHIBIT_NAME} PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
+        target_compile_definitions(${EXHIBIT_NAME} PRIVATE
+            "FRONTIER_REPO_ROOT_DIR=\"${CMAKE_SOURCE_DIR}\""
+            "FRONTIER_SHADER_BINARY_DIR=\"${FRONTIER_SHADER_BINARY_DIR}\""
+            "FRONTIER_SWIFTSHADER_ICD_DIR=\"${CMAKE_SOURCE_DIR}/ExternalPackages/VulkanCompute/SwiftShader\""
+        )
+        if(FRONTIER_PROFILE STREQUAL "Shipping")
+            target_link_libraries(${EXHIBIT_NAME} PRIVATE FrontierShippingExhibitUi FrontierEngine FrontierImGui)
+        else()
+            target_link_libraries(${EXHIBIT_NAME} PRIVATE FrontierEngine FrontierImGui)
+        endif()
+        add_test(NAME ${EXHIBIT_NAME} COMMAND ${EXHIBIT_NAME})
+    endfunction()
+
+    frontier_register_exhibit(InputValidation             Exhibits/InputValidation.cpp)
+    frontier_register_exhibit(WindowValidation            Exhibits/WindowValidation.cpp)
+    frontier_register_exhibit(DockingValidation           Exhibits/DockingValidation.cpp)
+    frontier_register_exhibit(ControlCentreValidation     Exhibits/ControlCentreValidation.cpp)
+    frontier_register_exhibit(WorkspacePanesValidation    Exhibits/WorkspacePanesValidation.cpp)
+    frontier_register_exhibit(LifecycleValidation         Exhibits/LifecycleValidation.cpp)
+    frontier_register_exhibit(WorkspaceRevisionValidation Exhibits/WorkspaceRevisionValidation.cpp)
+    frontier_register_exhibit(VectorFieldValidation       Exhibits/VectorFieldValidation.cpp)
+endif()
