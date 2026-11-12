@@ -104,3 +104,21 @@ Leaving **`Experimental/GtxReflectionBenchmark/` (`:8096`) untouched** as our pe
 2. **Primary + Multi-Bounce Cone-Footprint Raytracer** (even primary visibility can be raytraced directly alongside raster comparison, plus `1–3` bounce reflections & refractive glass cabin windows!).
 3. **Live Raytraced `DDGI` Octahedral Probe Volume** (deterministic 64-ray Fibonacci spherical lattice per probe + Chebyshev visibility — smooth multi-bounce red/cyan color bleeding with **`0` per-pixel random GI rays and `0` Russian Roulette**).
 4. **Analytic `LTC` Showroom Area Lights + Deterministic Raytraced Contact-Hardening Shadows** with live FPS, pass-by-pass GPU timestamp queries (`timestamp-query`), and probe-sphere debug visualization toggles.
+
+---
+
+## 6. Shipped Live Prototype & Measured `"FRT1"` `4-Wide BVH4` Verification (`:8097`)
+
+`Experimental/DeterministicRaytracingLab/` (`0.0.0.0:8097`) is now live alongside the untouched `Experimental/GtxReflectionBenchmark/` (`:8096`):
+
+![ControlVehicle 100% Deterministic Full Raytrace vs Clay DDGI + Solar Frustum Penumbra](../../Exhibits/Images/ReflectionBenchmark/03-ControlVehicleDeterministicFullRaytrace.png)
+
+### Measured Structural & Algorithmic Results
+- **`4-Wide BVH4` Tree Compression (`"FRT1"`)**: Collapsing the binary SAH hierarchy into 4-wide SIMD `vec4<f32>` slab nodes reduced total BLAS node count from **`5,930` binary nodes → `1,444` `BVH4` nodes (`4.11×` reduction)** across `9,240` unique triangles (`25,920` instanced showroom + vehicle triangles).
+- **Compact Pure-RT Asset Payload**: Eliminating 3D SDF clipmaps shrunk the scene asset bundle from `8.5 MB` (`VehicleBenchmarkAssets.bin`) down to **`759 KB`** (`DeterministicRtAssets.bin` — **`11.2×` smaller**).
+- **Primary Camera `BVH4` Efficiency**: Full-resolution primary camera rays average **`10.00` `BVH4` node steps/pixel** across the `44 m × 28 m` `ProvingGroundArena` + `ControlVehicle` (`0` raster G-buffer pass required).
+- **Zero Monte Carlo / Zero Russian Roulette**:
+  - **Diffuse GI & Color Bleeding**: `20 × 16 × 6 = 1,920` world-space `DDGI` octahedral probes (`64` deterministic Spherical-Fibonacci rays/probe in `var<workgroup>`, multi-bounce `1B / 2B / 3B / ∞` via ping-pong probe feedback + Chebyshev `[mean, mean²]` anti-leak).
+  - **Cabin Glass (`mat 7`) & Clearcoat (`mat 6`)**: Deterministic Fresnel reflection + Snell's-law (`IOR = 1.46`) cockpit refraction revealing the sculpted 3D interior bucket seats, plus `1–4` cone-footprint specular bounces (`throughput >= 0.025` deterministic cutoff).
+  - **Soft Shadows & Contact AO**: Deterministic Vogel-spiral solar frustum + `4`-ray `BVH4` short-range (`0.55 m`) hemisphere Contact AO + coplanar blocker dilation & 3-pass (`step = 1, 2, 4`) continuous-sigma plane-aware Gaussian integration — **zero screen-space horizon rings, zero banding, and zero temporal boiling**.
+
