@@ -257,6 +257,7 @@ function(frontier_compile_modular_slang_shader DOMAIN_REL_PATH ENTRY_NAME SHADER
     file(GLOB DOMAIN_SLANG_DEPS
         "${FRONTIER_MODULAR_SHADER_DIR}/MaterialSpace/*.slang"
         "${FRONTIER_MODULAR_SHADER_DIR}/Visibility/*.slang"
+        "${FRONTIER_MODULAR_SHADER_DIR}/DirectLighting/*.slang"
     )
     add_custom_command(
         OUTPUT "${OUT_SPV}"
@@ -264,6 +265,7 @@ function(frontier_compile_modular_slang_shader DOMAIN_REL_PATH ENTRY_NAME SHADER
             "${FRONTIER_MODULAR_SHADER_DIR}/${DOMAIN_REL_PATH}"
             -I "${FRONTIER_MODULAR_SHADER_DIR}/MaterialSpace"
             -I "${FRONTIER_MODULAR_SHADER_DIR}/Visibility"
+            -I "${FRONTIER_MODULAR_SHADER_DIR}/DirectLighting"
             -I "${FRONTIER_MODULAR_SHADER_DIR}"
             -target spirv
             -profile spirv_1_3+spvGroupNonUniformArithmetic+spvInt64Atomics
@@ -291,6 +293,9 @@ frontier_compile_modular_slang_shader(Visibility/HardwareVisibilityRasterization
 frontier_compile_modular_slang_shader(Visibility/HardwareVisibilityRasterization.slang    VisibilityFragmentEntry     fragment HardwareVisibilityRasterization.frag.spv)
 frontier_compile_modular_slang_shader(Visibility/MicroFaceSoftwareRasterization.slang     MicroFaceComputeEntry       compute  MicroFaceSoftwareRasterization.comp.spv)
 frontier_compile_modular_slang_shader(Visibility/AnalyticBarycentricResolve.slang         AnalyticResolveComputeEntry compute  AnalyticBarycentricResolve.comp.spv)
+frontier_compile_modular_slang_shader(DirectLighting/SolarFrustumShadow.slang             SolarShadowComputeEntry     compute  SolarFrustumShadow.comp.spv)
+frontier_compile_modular_slang_shader(DirectLighting/ContactClipShadow.slang              ContactClipComputeEntry     compute  ContactClipShadow.comp.spv)
+frontier_compile_modular_slang_shader(DirectLighting/PlaneAwareShadowFilter.slang         PlaneFilterComputeEntry     compute  PlaneAwareShadowFilter.comp.spv)
 
 add_custom_target(FrontierShaders DEPENDS ${FRONTIER_SPV_OUTPUTS})
 
@@ -309,6 +314,8 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/GeometricRaster/Visibility/ClusterCullEncoder.cpp
     Engine/GeometricRaster/Visibility/VisibilityClusterRasterization.cpp
     Engine/GeometricRaster/Visibility/VisibilityMaterialResolve.cpp
+    Engine/GeometricRaster/DirectLighting/SolarShadowSequence.cpp
+    Engine/GeometricRaster/DirectLighting/LinearCosineLightIntegration.cpp
     Engine/GeometrySpace/Network/PolygonNetwork.cpp
     Engine/GeometrySpace/Network/GeometryInstance.cpp
     Engine/GeometrySpace/Network/FacePartitionRegister.cpp
@@ -483,6 +490,7 @@ if(BUILD_TESTING)
     frontier_register_exhibit(GeometryCompletionValidation   Exhibits/GeometryCompletionValidation.cpp)
     frontier_register_exhibit(MaterialScatteringValidation   Exhibits/MaterialScatteringValidation.cpp)
     frontier_register_exhibit(VisibilityRasterValidation     Exhibits/VisibilityRasterValidation.cpp)
+    frontier_register_exhibit(SolarShadowValidation          Exhibits/SolarShadowValidation.cpp)
     frontier_register_exhibit(UVRasterPickingGizmoValidation    Exhibits/UVRasterPickingGizmoValidation.cpp)
     frontier_register_exhibit(UVWorkspaceUIValidation           Exhibits/UVWorkspaceUIValidation.cpp)
     frontier_register_exhibit(UVParameterizationValidation      Exhibits/UVParameterizationValidation.cpp)
