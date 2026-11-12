@@ -53,7 +53,7 @@ export const CanonicalEditorCamera = {
   SubjectDistanceM: 4.11,
 };
 
-function BuildMaterialRecord({
+export function BuildMaterialRecord({
   Type = "Standard",
   BaseLinear = [0.78, 0.77, 0.75],
   Metallic = 0.0,
@@ -431,6 +431,25 @@ export const ShowcaseInitialValues = {
     EmittedRadiance: [7.5, 6.6, 5.4],
     "Cast shadows": false,
     GI: true,
+    ReferenceInspector: {
+      Type: "LuminousSurface",
+      Properties: {
+        lumens: 2400,
+        dimmer: 1,
+        color: "#fff3e2",
+        temperature: 5400,
+        useTemp: false,
+        width: 1.7,
+        height: 1.3,
+        twoSided: false,
+        spread: 165,
+        pos: [0.55, 0.35, 1.82],
+        rot: [0, 0, 0],
+        castShadows: true,
+        shadowSoftness: 1,
+        affectSpecular: true,
+      },
+    },
     Notes:
       "Overhead clipped-horizon LTC polygonal area quad light (1.70 × 1.30 m, downward -Z normal).",
   },
@@ -537,24 +556,37 @@ export function CompileLiveGtxScene(Rows, Values, Hidden, Projection = "PERSP") 
     if (Row.Panel !== "light") continue;
     if (!RowEffectivelyVisible(Row, Rows, Hidden)) continue;
     const Rec = Values?.[Row.Id] || {};
-    const RefPos = Rec.ReferenceInspector?.Properties?.pos;
+    const RefProps = Rec.ReferenceInspector?.Properties || {};
     const Pos = Array.isArray(Rec.Position)
       ? Rec.Position
-      : Array.isArray(RefPos)
-        ? RefPos
+      : Array.isArray(RefProps.pos)
+        ? RefProps.pos
         : [0.55, 0.35, 1.82];
-    const Scale = Array.isArray(Rec.Scale) ? Rec.Scale : [1.7, 1.3, 1.0];
-    const Intensity = Number(Rec.Intensity ?? 7.5);
-    const Ratio = Intensity / 7.5;
-    const BaseEmit = Array.isArray(Rec.EmittedRadiance)
-      ? Rec.EmittedRadiance
-      : [7.5, 6.6, 5.4];
+    const Width = Array.isArray(Rec.Scale)
+      ? Number(Rec.Scale[0]) || Number(RefProps.width) || 1.7
+      : Number(RefProps.width) || 1.7;
+    const Height = Array.isArray(Rec.Scale)
+      ? Number(Rec.Scale[1]) || Number(RefProps.height) || 1.3
+      : Number(RefProps.height) || 1.3;
+    const LumensRatio =
+      typeof RefProps.lumens === "number"
+        ? (Math.max(0, RefProps.lumens) / 2400) * Math.max(0, Number(RefProps.dimmer ?? 1))
+        : Number(Rec.Intensity ?? 7.5) / 7.5;
+    const TintRgb =
+      typeof RefProps.color === "string" && /^#[0-9a-f]{6}$/i.test(RefProps.color)
+        ? HexToLinearRgb(RefProps.color, [1.0, 0.88, 0.72])
+        : null;
+    const BaseEmit = TintRgb
+      ? [TintRgb[0] * 7.5, TintRgb[1] * 7.5, TintRgb[2] * 7.5]
+      : Array.isArray(Rec.EmittedRadiance)
+        ? Rec.EmittedRadiance
+        : [7.5, 6.6, 5.4];
     AreaLights.push({
       Id: Row.Id,
       Center: [Number(Pos[0]) || 0, Number(Pos[1]) || 0, Number(Pos[2]) || 0],
-      HalfWidth: Math.max(0.08, Math.abs(Number(Scale[0]) || 1.7) * 0.5),
-      HalfHeight: Math.max(0.08, Math.abs(Number(Scale[1]) || 1.3) * 0.5),
-      Radiance: BaseEmit.map((C) => Math.max(0, C * Ratio)),
+      HalfWidth: Math.max(0.08, Math.abs(Width) * 0.5),
+      HalfHeight: Math.max(0.08, Math.abs(Height) * 0.5),
+      Radiance: BaseEmit.map((C) => Math.max(0, C * LumensRatio)),
     });
     if (AreaLights.length >= 4) break;
   }
@@ -577,6 +609,8 @@ export function CompileLiveGtxScene(Rows, Values, Hidden, Projection = "PERSP") 
     const Anisotropy = Math.max(-0.95, Math.min(0.95, Number(Ch.anisotropy?.Fill ?? 0)));
     const CoatWeight = Math.max(0, Math.min(1, Number(Ch.coat?.Fill ?? 0)));
     const CoatRoughness = Math.max(0.02, Math.min(1, Number(Ch.coatRoughness?.Fill ?? 0.08)));
+    const Opacity = Math.max(0, Math.min(1, Number(Ch.opacity?.Fill ?? 1)));
+    const Displacement = Math.max(-0.1, Math.min(0.1, Number(Ch.displacement?.Fill ?? 0)));
     const Transmission =
       Mat.Type === "Glass"
         ? Math.max(0.85, Number(Ch.transmission?.Fill ?? 1))
@@ -593,6 +627,11 @@ export function CompileLiveGtxScene(Rows, Values, Hidden, Projection = "PERSP") 
       ? Rec.AttenuationLinear
       : BaseColor;
 
+    const IsTransparentShell =
+      (Transmission > 0.45 && Ch.transmission?.Source === "Fill") ||
+      Mat.Type === "Glass" ||
+      (Opacity < 0.92 && Ch.opacity?.Source === "Fill");
+
     Primitives.push({
       Id: Row.Id,
       Name: Row.Name,
@@ -600,13 +639,15 @@ export function CompileLiveGtxScene(Rows, Values, Hidden, Projection = "PERSP") 
       Center: [Number(Pos[0]) || 0, Number(Pos[1]) || 0, Number(Pos[2]) || 0],
       RotationRad: Rot.map((Deg) => ((Number(Deg) || 0) * Math.PI) / 180),
       HalfExtents: [
-        Math.max(0.015, Math.abs(Number(Scale[0]) || 0.8) * 0.5),
-        Math.max(0.015, Math.abs(Number(Scale[1]) || 0.8) * 0.5),
-        Math.max(0.015, Math.abs(Number(Scale[2]) || 0.8) * 0.5),
+        Math.max(0.015, Math.abs(Number(Scale[0]) || 0.8) * 0.5 + Displacement),
+        Math.max(0.015, Math.abs(Number(Scale[1]) || 0.8) * 0.5 + Displacement),
+        Math.max(0.015, Math.abs(Number(Scale[2]) || 0.8) * 0.5 + Displacement),
       ],
-      CastShadows: (Rec["Cast shadows"] ?? Transmission < 0.5) ? 1 : 0,
-      GiContributor: (Rec.GI ?? Transmission < 0.5) ? 1 : 0,
-      GlassShell: Transmission > 0.5,
+      CastShadows: (Rec["Cast shadows"] ?? !IsTransparentShell) ? 1 : 0,
+      GiContributor: (Rec.GI ?? !IsTransparentShell) ? 1 : 0,
+      GlassShell: IsTransparentShell,
+      ResolvedMaterial: Mat,
+      MaterialType: Mat.Type,
       BaseColor,
       Metallic,
       Roughness,
@@ -614,6 +655,8 @@ export function CompileLiveGtxScene(Rows, Values, Hidden, Projection = "PERSP") 
       Anisotropy,
       CoatWeight,
       CoatRoughness,
+      Opacity,
+      Displacement,
       Transmission,
       Ior,
       Emission,
@@ -640,8 +683,16 @@ export function CompileLiveGtxScene(Rows, Values, Hidden, Projection = "PERSP") 
   };
 }
 
-// Analytical 3D ray picking in Z-up world space so clicking any 3D object in the GTX viewport selects it in Outliner & Inspector!
-export function PickSceneEntityAtUv(CompiledScene, U, V, Aspect) {
+function InvRotateEulerXYZ(V, R) {
+  const Cx = Math.cos(R[0] || 0), Sx = Math.sin(R[0] || 0);
+  const Cy = Math.cos(R[1] || 0), Sy = Math.sin(R[1] || 0);
+  const Cz = Math.cos(R[2] || 0), Sz = Math.sin(R[2] || 0);
+  const Z = [Cz * V[0] + Sz * V[1], -Sz * V[0] + Cz * V[1], V[2]];
+  const Y = [Cy * Z[0] - Sy * Z[2], Z[1], Sy * Z[0] + Cy * Z[2]];
+  return [Y[0], Cx * Y[1] + Sx * Y[2], -Sx * Y[1] + Cx * Y[2]];
+}
+
+export function ComputeCameraRayAtUv(CompiledScene, U, V, Aspect) {
   const { CameraOrigin, CameraTarget, WorldUp, VerticalFovRad, OrthoHalfHeight } =
     CompiledScene;
   const Fwd = NormalizeVec3([
@@ -677,23 +728,31 @@ export function PickSceneEntityAtUv(CompiledScene, U, V, Aspect) {
       Fwd[2] + Right[2] * NdcX * Aspect * TanHalf + Up[2] * NdcY * TanHalf,
     ]);
   }
+  return { RayOrigin, RayDir, Basis: { Right, Up, Forward: Fwd } };
+}
+
+// Analytical 3D ray picking in Z-up world space so clicking any 3D object in the GTX viewport selects it in Outliner & Inspector!
+export function PickSceneEntityAtUv(CompiledScene, U, V, Aspect) {
+  const { RayOrigin, RayDir } = ComputeCameraRayAtUv(CompiledScene, U, V, Aspect);
 
   let BestT = Infinity;
   let BestId = null;
 
   for (const Prim of CompiledScene.Primitives) {
-    const Rel = [
+    const WorldRel = [
       RayOrigin[0] - Prim.Center[0],
       RayOrigin[1] - Prim.Center[1],
       RayOrigin[2] - Prim.Center[2],
     ];
+    const Rel = InvRotateEulerXYZ(WorldRel, Prim.RotationRad || [0, 0, 0]);
+    const LocalDir = InvRotateEulerXYZ(RayDir, Prim.RotationRad || [0, 0, 0]);
     if (Prim.Shape === 1) {
       // Ellipsoid / sphere
       const Rx = Prim.HalfExtents[0];
       const Ry = Prim.HalfExtents[1];
       const Rz = Prim.HalfExtents[2];
       const O = [Rel[0] / Rx, Rel[1] / Ry, Rel[2] / Rz];
-      const D = [RayDir[0] / Rx, RayDir[1] / Ry, RayDir[2] / Rz];
+      const D = [LocalDir[0] / Rx, LocalDir[1] / Ry, LocalDir[2] / Rz];
       const A = D[0] * D[0] + D[1] * D[1] + D[2] * D[2];
       const B = O[0] * D[0] + O[1] * D[1] + O[2] * D[2];
       const C = O[0] * O[0] + O[1] * O[1] + O[2] * O[2] - 1;
@@ -709,12 +768,12 @@ export function PickSceneEntityAtUv(CompiledScene, U, V, Aspect) {
         }
       }
     } else {
-      // Axis-aligned / local box slab
+      // Local oriented box slab
       let TMin = 0.05;
       let TMax = BestT;
       let Hit = true;
       for (let Axis = 0; Axis < 3; ++Axis) {
-        const InvD = Math.abs(RayDir[Axis]) > 1e-7 ? 1 / RayDir[Axis] : 1e7;
+        const InvD = Math.abs(LocalDir[Axis]) > 1e-7 ? 1 / LocalDir[Axis] : 1e7;
         let T0 = (-Prim.HalfExtents[Axis] - Rel[Axis]) * InvD;
         let T1 = (Prim.HalfExtents[Axis] - Rel[Axis]) * InvD;
         if (T0 > T1) [T0, T1] = [T1, T0];

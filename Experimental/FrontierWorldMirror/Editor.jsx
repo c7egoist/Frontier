@@ -47,6 +47,12 @@ import Notch from "./Notch.jsx";
 import ActionIcon from "./ActionIcon.jsx";
 import ConstructPanel from "./ConstructPanel.jsx";
 import GtxWorldViewport, { PreviewVisible } from "./GtxWorldViewport.jsx";
+import LevelDialogModal from "./LevelDialogModal.jsx";
+import {
+  CreateNewLevelRecord,
+  LoadSavedLevelsState,
+  SaveLevelsState,
+} from "./LevelSystem.js";
 import {
   CanonicalEditorCamera,
   NormalizeVec3,
@@ -473,7 +479,10 @@ function App() {
       Right: "Inspector",
     }),
     [LeftWidth, ResizeLeft] = useState(316),
-    [RightWidth, ResizeRight] = useState(340);
+    [RightWidth, ResizeRight] = useState(340),
+    [ShowGizmo, SetShowGizmo] = useState(true),
+    [CreateLevelOpen, SetCreateLevelOpen] = useState(false),
+    [LevelsState, SetLevelsState] = useState(() => LoadSavedLevelsState());
   const PreviousFractureRows = useRef(Rows);
   useEffect(() => {
     const Receive = (Event) => {
@@ -799,10 +808,23 @@ function App() {
               );
           }
         }
+        const LightPosPatch =
+          Panel === "light" && Array.isArray(Record.Properties?.pos)
+            ? {
+                Position: [...Record.Properties.pos],
+                Scale: [
+                  Number(Record.Properties.width) || 1.7,
+                  Number(Record.Properties.height) || 1.3,
+                  1.0,
+                ],
+                LOCKED: !!Record.Locked,
+              }
+            : {};
         Next[Record.Id] = {
           ...Next[Record.Id],
           ...CloudChanges,
           ...HeightChanges,
+          ...LightPosPatch,
           ReferenceInspector: {
             Properties:
               Panel === "height-fog"
@@ -860,6 +882,113 @@ function App() {
   const Toast = (Text) => {
     Notify(Text);
     setTimeout(() => Notify(""), 3200);
+  };
+
+  // Sync active level snapshot into LevelsState + localStorage
+  useEffect(() => {
+    SetLevelsState((Prev) => {
+      const NextLevels = Prev.Levels.map((Lvl) =>
+        Lvl.Id === Prev.ActiveLevelId
+          ? {
+              ...Lvl,
+              Name: Name || Lvl.Name,
+              Rows,
+              Values,
+              Hidden,
+              Collapsed,
+              Selected,
+            }
+          : Lvl,
+      );
+      const NextState = { ActiveLevelId: Prev.ActiveLevelId, Levels: NextLevels };
+      SaveLevelsState(NextState);
+      return NextState;
+    });
+  }, [Rows, Values, Hidden, Collapsed, Selected, Name]);
+
+  const SwitchToLevel = (LevelId) => {
+    if (LevelId === "__create_new__") {
+      SetCreateLevelOpen(true);
+      return;
+    }
+    const Target = LevelsState.Levels.find((Item) => Item.Id === LevelId);
+    if (!Target) return;
+    const PreparedRows = EnsureEditorCamera(PrepareLightRows(Target.Rows, 1));
+    SetLevelsState((Prev) => {
+      const NextState = { ...Prev, ActiveLevelId: Target.Id };
+      SaveLevelsState(NextState);
+      return NextState;
+    });
+    StoreRows(PreparedRows);
+    AssignValues(Target.Values || {});
+    AssignHidden({ ...(Target.Hidden || {}), camera: false });
+    Collapse(Target.Collapsed || {});
+    RenameProject(Target.Name);
+    Select(Target.Selected || PreparedRows[0]?.Id || "camera");
+    Toast(`Loaded level "${Target.Name}"`);
+  };
+
+  const HandleCreateLevel = ({ Name: NewName, TemplateId, Notes }) => {
+    const CurrentLevel = LevelsState.Levels.find(
+      (Item) => Item.Id === LevelsState.ActiveLevelId,
+    ) || {
+      Id: LevelsState.ActiveLevelId,
+      Name,
+      Rows,
+      Values,
+      Hidden,
+      Collapsed,
+      Selected,
+    };
+    const Created = CreateNewLevelRecord({
+      Name: NewName,
+      TemplateId,
+      Notes,
+      CurrentLevel,
+    });
+    const PreparedRows = EnsureEditorCamera(PrepareLightRows(Created.Rows, 1));
+    Created.Rows = PreparedRows;
+    SetLevelsState((Prev) => {
+      const NextState = {
+        ActiveLevelId: Created.Id,
+        Levels: [...Prev.Levels, Created],
+      };
+      SaveLevelsState(NextState);
+      return NextState;
+    });
+    StoreRows(PreparedRows);
+    AssignValues(Created.Values || {});
+    AssignHidden({ ...(Created.Hidden || {}), camera: false });
+    Collapse(Created.Collapsed || {});
+    RenameProject(Created.Name);
+    Select(Created.Selected || PreparedRows[0]?.Id || "camera");
+    SetCreateLevelOpen(false);
+    Toast(`Created level "${Created.Name}"`);
+  };
+
+  const HandleGizmoTransformEntity = (TargetId, Solved, TargetKind) => {
+    AssignValues((Previous) => {
+      const Existing = Previous[TargetId] || {};
+      const NextEntry = {
+        ...Existing,
+        Position: Solved.Position,
+        Rotation: Solved.Rotation,
+        Scale: Solved.Scale,
+      };
+      if (TargetKind === "light" && Existing.ReferenceInspector?.Properties) {
+        NextEntry.ReferenceInspector = {
+          ...Existing.ReferenceInspector,
+          Properties: {
+            ...Existing.ReferenceInspector.Properties,
+            pos: [...Solved.Position],
+            rot: [...Solved.Rotation],
+            width: Solved.Scale[0],
+            height: Solved.Scale[1],
+          },
+        };
+      }
+      return { ...Previous, [TargetId]: NextEntry };
+    });
   };
   useEffect(() => {
     try {
@@ -1631,6 +1760,19 @@ function App() {
           </label>
           <div className="viewport-secondary-tools">
             <button
+              className="viewport-icon-button gizmo-pill"
+              aria-label="Toggle 3D transform gizmo"
+              aria-pressed={ShowGizmo}
+              title={
+                ShowGizmo
+                  ? "Hide 3D Slate GizmoPRO manipulator"
+                  : "Show 3D Slate GizmoPRO manipulator"
+              }
+              onClick={() => SetShowGizmo((Previous) => !Previous)}
+            >
+              GIZMO
+            </button>
+            <button
               className="viewport-icon-button"
               aria-label="Split viewport"
               aria-pressed={SplitView}
@@ -1747,7 +1889,9 @@ function App() {
           Projection={Projection}
           Debug={Debug}
           Settings={Settings}
+          ShowGizmo={ShowGizmo}
           UpdateEditorCamera={UpdateEditorCamera}
+          OnTransformEntity={HandleGizmoTransformEntity}
           OnFpsSample={SetLiveFps}
         />
         {SplitView && (
@@ -1760,7 +1904,9 @@ function App() {
             Projection={Projection}
             Debug={Debug}
             Settings={Settings}
+            ShowGizmo={ShowGizmo}
             UpdateEditorCamera={UpdateEditorCamera}
+            OnTransformEntity={HandleGizmoTransformEntity}
             View={2}
           />
         )}
@@ -1804,17 +1950,51 @@ function App() {
       </div>
       <footer
         className="viewport-footer"
-        title="Browser-local analytical symbols, not native geometry or renderer telemetry"
+        title="Live Tier 1 GTX WebGL2 World Viewport · Level Switcher & Authoring"
       >
-        HTML PREVIEW · CONSTRUCTED{" "}
-        <b>{Rows.filter((Subject) => Subject.Preview).length}</b> ·{" "}
-        {
-          Rows.filter(
-            (Subject) =>
-              Subject.Preview && PreviewVisible(Subject, Rows, Hidden),
-          ).length
-        }{" "}
-        visible · NO ENGINE CONNECTION
+        <div className="viewport-footer-levels">
+          <span className="viewport-footer-badge">GTX TIER 1</span>
+          <label className="viewport-level-switcher">
+            <span className="viewport-level-label">LEVEL</span>
+            <select
+              aria-label="Active level"
+              value={LevelsState.ActiveLevelId}
+              onChange={(Event) => SwitchToLevel(Event.target.value)}
+            >
+              {LevelsState.Levels.map((Lvl) => (
+                <option key={Lvl.Id} value={Lvl.Id}>
+                  {Lvl.Name}
+                </option>
+              ))}
+              <option value="__create_new__">+ Create Level…</option>
+            </select>
+          </label>
+          <button
+            type="button"
+            className="viewport-create-level-btn"
+            aria-label="Create new level"
+            title="Open Create Level dialogue"
+            onClick={() => SetCreateLevelOpen(true)}
+          >
+            + Create Level
+          </button>
+        </div>
+        <div className="viewport-footer-telemetry">
+          CONSTRUCTED{" "}
+          <b>{Rows.filter((Subject) => Subject.Preview).length}</b> ·{" "}
+          <b>
+            {
+              Rows.filter(
+                (Subject) =>
+                  Subject.Preview && PreviewVisible(Subject, Rows, Hidden),
+              ).length
+            }
+          </b>{" "}
+          visible ·{" "}
+          <span className="viewport-footer-gizmo">
+            {ShowGizmo ? "SLATE GIZMO ACTIVE" : "GIZMO HIDDEN"}
+          </span>
+        </div>
       </footer>
     </>
   );
@@ -2465,6 +2645,17 @@ function App() {
         ref={FileInput}
         onChange={RestoreFile}
       />
+      <LevelDialogModal
+        Open={CreateLevelOpen}
+        LevelCount={LevelsState.Levels.length}
+        ActiveLevelName={
+          LevelsState.Levels.find((L) => L.Id === LevelsState.ActiveLevelId)?.Name ||
+          Name ||
+          "Cornell-Studio Gallery"
+        }
+        OnCancel={() => SetCreateLevelOpen(false)}
+        OnCreate={HandleCreateLevel}
+      />
       {Message && (
         <div className="toast" role="status">
           {Message}
@@ -2477,5 +2668,5 @@ createRoot(document.getElementById("Editor")).render(<App />);
 window.ProjectZeroHtml = {
   Panels: Object.keys(Panels),
   NativeSource: "9864969",
-  EngineConnected: false,
+  EngineConnected: true,
 };

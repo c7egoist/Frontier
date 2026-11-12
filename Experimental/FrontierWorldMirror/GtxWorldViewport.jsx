@@ -1,35 +1,63 @@
+//==========================================================================================================================================
+//                                                    GTXWORLDVIEWPORT.JSX
+//==========================================================================================================================================
+// Live WebGL2 Tier 1 GTX World Viewport (Zero RT Hardware):
+//   Pass 1: Analytical GTX World Render (Smooth Ray-Primitive Contact-Hardening Solar Shadows, Analytical Cone GI/AO with zero SDF rings,
+//           Clipped-Horizon LTC Softbox, 20-Channel OpenPBR Material Atlas, 2-Layer Abbe Dispersive Glass) -> Offscreen RGBA8 + EntityID
+//   Pass 2: Screen-Space 2px Anti-Aliased Silhouette Selection Outline (#F5C469)
+//   Pass 3: 1:1 C++ Slate 13-Handle TransformGizmo (GizmoPRO) with Hover Highlight, Skew-Line/Plane/Arc Dragging, Ctrl-Snap & HUD Readout
+
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   CanonicalEditorCamera,
   CompileLiveGtxScene,
+  ComputeCameraRayAtUv,
   NormalizeVec3,
   PickSceneEntityAtUv,
   RowEffectivelyVisible,
 } from "./ShowcaseGalleryScene.js";
 
-export function PreviewVisible(Subject, Rows, Hidden) {
-  return RowEffectivelyVisible(Subject, Rows, Hidden);
-}
+export { RowEffectivelyVisible as PreviewVisible };
+import {
+  ATLAS_COLS,
+  ATLAS_HEIGHT,
+  ATLAS_ROWS,
+  ATLAS_TILE_SIZE,
+  ATLAS_WIDTH,
+  EnsureMaterialTexturesDecoded,
+  MaterialAtlasSynchronizer,
+  TILES_PER_PRIM,
+} from "./MaterialAtlasCompiler.js";
+import {
+  BeginGizmoDrag,
+  BuildColumnMajorViewProj,
+  BuildSlateGizmoGeometry,
+  ComputeGizmoWorldRadius,
+  GIZMO_FRAGMENT_SHADER,
+  GIZMO_HANDLE_LABELS,
+  GIZMO_VERTEX_SHADER,
+  GizmoHandle,
+  PickGizmoHandle,
+  SolveGizmoDrag,
+} from "./TransformGizmo3D.js";
 
 const MAX_PRIMS = 24;
-const MAX_AREA_LIGHTS = 4;
+const MAX_LIGHTS = 4;
 
-const VERTEX_SHADER_GLSL = `#version 300 es
+const FULLSCREEN_VERTEX_SHADER = `#version 300 es
 precision highp float;
-const vec2 POS[3] = vec2[3](
-  vec2(-1.0, -1.0),
-  vec2( 3.0, -1.0),
-  vec2(-1.0,  3.0)
-);
 out vec2 vUv;
 void main() {
-  vec2 p = POS[gl_VertexID];
-  vUv = 0.5 * (p + 1.0);
-  gl_Position = vec4(p, 0.0, 1.0);
+  vec2 pos = vec2((gl_VertexID == 1) ? 3.0 : -1.0, (gl_VertexID == 2) ? 3.0 : -1.0);
+  vUv = pos * 0.5 + 0.5;
+  gl_Position = vec4(pos, 0.0, 1.0);
 }
 `;
 
-const FRAGMENT_SHADER_GLSL = `#version 300 es
+//==========================================================================================================================================
+// PASS 1: TIER 1 GTX WORLD FRAGMENT SHADER (ZERO SDF RINGS + FULL 20-CHANNEL OPENPBR MATERIAL ATLAS)
+//==========================================================================================================================================
+export const GTX_FRAGMENT_SHADER = `#version 300 es
 precision highp float;
 
 in vec2 vUv;
@@ -37,90 +65,218 @@ out vec4 fragColor;
 
 uniform vec2  uResolution;
 uniform vec3  uCamOrigin;
-uniform vec3  uCamTarget;
+uniform vec3  uCamForward;
+uniform vec3  uCamRight;
 uniform vec3  uCamUp;
 uniform float uTanHalfFov;
 uniform float uOrthoHalfHeight;
 uniform float uExposureGain;
-uniform int   uDebugMode;
-uniform int   uEnableGi;
-uniform int   uEnableReflections;
-uniform int   uSelectedIndex;
+uniform int   uViewMode;       // 0 = Lit GTX, 1 = Clay, 2 = Normals, 3 = Wireframe
+uniform int   uShowGrid;
+uniform int   uSelectedEntityCode;
 
 uniform vec3  uSunDir;
 uniform vec3  uSunIrradiance;
 uniform float uSunAngularRadius;
 uniform vec3  uSkyRadiance;
 
-uniform int   uAreaLightCount;
-uniform vec4  uAreaLightCenterHalfW[4]; // xyz = center, w = halfWidth
-uniform vec4  uAreaLightRadHalfH[4];    // rgb = radiance, w = halfHeight
+uniform int   uLightCount;
+uniform vec4  uLightCenterHalfW[${MAX_LIGHTS}];
+uniform vec4  uLightHalfHRad[${MAX_LIGHTS}];
 
 uniform int   uPrimCount;
-uniform vec4  uPrimCenterShape[24];     // xyz = center, w = shape (0=box,1=sphere,2=cyl,3=cone,4=torus)
-uniform vec4  uPrimHalfExtShadow[24];   // xyz = halfExtents, w = packed flags (bit0=shadow, bit1=gi, bit2=glass)
-uniform vec4  uPrimRotRad[24];          // xyz = euler rad
-uniform vec4  uPrimAlbedoMetal[24];     // rgb = baseColor, w = metallic
-uniform vec4  uPrimSpecParams[24];      // x = roughness, y = diffRoughness, z = anisotropy, w = ior
-uniform vec4  uPrimCoatTrans[24];       // x = coatWeight, y = coatRoughness, z = transmission, w = abbe
-uniform vec4  uPrimF82Emit[24];         // rgb = edgeTintF82, w = emission
-uniform vec4  uPrimAtten[24];           // rgb = attenuationColor
+uniform vec4  uPrimPosShape[${MAX_PRIMS}];   // xyz = center, w = shape (0 box, 1 sphere, 2 cyl, 3 cone, 4 torus)
+uniform vec4  uPrimHalfFlags[${MAX_PRIMS}];  // xyz = halfExtents, w = bitmask (1=shadow, 2=gi, 4=glassShell)
+uniform vec4  uPrimRotAbbe[${MAX_PRIMS}];    // xyz = euler rad, w = abbeNumber
+uniform vec4  uPrimEdgeTint[${MAX_PRIMS}];   // rgb = F82 edge tint, w = base transmission
+uniform sampler2D uMaterialAtlas;
 
 const float PI = 3.14159265359;
+const float ATLAS_W = ${ATLAS_WIDTH}.0;
+const float ATLAS_H = ${ATLAS_HEIGHT}.0;
+const float TILE_PX = ${ATLAS_TILE_SIZE}.0;
 
-mat3 buildEulerColumns(vec3 r) {
-  float cx = cos(r.x), sx = sin(r.x);
-  float cy = cos(r.y), sy = sin(r.y);
-  float cz = cos(r.z), sz = sin(r.z);
-  mat3 rx = mat3(1.0, 0.0, 0.0,  0.0, cx, sx,  0.0, -sx, cx);
-  mat3 ry = mat3(cy, 0.0, -sy,  0.0, 1.0, 0.0,  sy, 0.0, cy);
-  mat3 rz = mat3(cz, sz, 0.0,  -sz, cz, 0.0,  0.0, 0.0, 1.0);
-  return rz * ry * rx;
-}
+bool PrimFlagShadow(int i) { int f = int(uPrimHalfFlags[i].w + 0.5); return (f & 1) != 0; }
+bool PrimFlagGi(int i)     { int f = int(uPrimHalfFlags[i].w + 0.5); return (f & 2) != 0; }
+bool PrimFlagGlass(int i)  { int f = int(uPrimHalfFlags[i].w + 0.5); return (f & 4) != 0; }
 
-bool PrimFlagShadow(int i) {
-  int f = int(uPrimHalfExtShadow[i].w + 0.5);
-  return (f & 1) != 0;
-}
-bool PrimFlagGi(int i) {
-  int f = int(uPrimHalfExtShadow[i].w + 0.5);
-  return (f & 2) != 0;
-}
-bool PrimFlagGlass(int i) {
-  int f = int(uPrimHalfExtShadow[i].w + 0.5);
-  return (f & 4) != 0;
+vec3 invRotateEuler(vec3 v, vec3 r) {
+  if (dot(r, r) < 1e-8) return v;
+  vec3 c = cos(r), s = sin(r);
+  vec3 z = vec3( c.z * v.x + s.z * v.y, -s.z * v.x + c.z * v.y, v.z);
+  vec3 y = vec3( c.y * z.x - s.y * z.z,  z.y, s.y * z.x + c.y * z.z);
+  return   vec3( y.x, c.x * y.y + s.x * y.z, -s.x * y.y + c.x * y.z);
 }
 
-float sdPrimLocal(vec3 p, int shape, vec3 h) {
+vec3 fwdRotateEuler(vec3 v, vec3 r) {
+  if (dot(r, r) < 1e-8) return v;
+  vec3 c = cos(r), s = sin(r);
+  vec3 x = vec3(v.x, c.x * v.y - s.x * v.z, s.x * v.y + c.x * v.z);
+  vec3 y = vec3(c.y * x.x + s.y * x.z, x.y, -s.y * x.x + c.y * x.z);
+  return   vec3(c.z * y.x - s.z * y.y, s.z * y.x + c.z * y.y, y.z);
+}
+
+struct HitInfo {
+  bool  hit;
+  float t;
+  vec3  pos;
+  vec3  normal;
+  vec3  tangent;
+  vec2  uv;
+  int   primIdx;
+};
+
+struct SampledMaterial {
+  vec3  baseColor;
+  float opacity;
+  float metallic;
+  float roughness;
+  float diffuseRoughness;
+  float ior;
+  float ao;
+  vec3  normalTs;
+  float anisotropy;
+  float anisoRotation;
+  float coat;
+  float coatRoughness;
+  vec3  coatNormalTs;
+  vec3  sheenColor;
+  float sheenRoughness;
+  vec3  subsurfaceColor;
+  float thickness;
+  float transmission;
+  float emission;
+  bool  unlit;
+};
+
+vec4 sampleAtlasSlot(int primIdx, int slot, vec2 uv) {
+  int tileIdx = primIdx * ${TILES_PER_PRIM} + slot;
+  int col = tileIdx % ${ATLAS_COLS};
+  int row = tileIdx / ${ATLAS_COLS};
+  vec2 clampedUv = clamp(uv, vec2(0.0), vec2(1.0));
+  vec2 px = vec2(float(col), float(row)) * TILE_PX + vec2(1.0) + clampedUv * (TILE_PX - 2.0);
+  return textureLod(uMaterialAtlas, px / vec2(ATLAS_W, ATLAS_H), 0.0);
+}
+
+SampledMaterial fetchMaterial(int primIdx, vec2 uv) {
+  vec4 s0 = sampleAtlasSlot(primIdx, 0, uv);
+  vec4 s1 = sampleAtlasSlot(primIdx, 1, uv);
+  vec4 s2 = sampleAtlasSlot(primIdx, 2, uv);
+  vec4 s3 = sampleAtlasSlot(primIdx, 3, uv);
+  vec4 s4 = sampleAtlasSlot(primIdx, 4, uv);
+  vec4 s5 = sampleAtlasSlot(primIdx, 5, uv);
+  vec4 s6 = sampleAtlasSlot(primIdx, 6, uv);
+  vec4 s7 = sampleAtlasSlot(primIdx, 7, uv);
+
+  SampledMaterial m;
+  m.baseColor        = s0.rgb;
+  m.opacity          = s0.a;
+  m.metallic         = s1.r;
+  m.roughness        = max(0.025, s1.g);
+  m.ior              = 1.0 + s1.b * 1.5;
+  m.ao               = s1.a;
+  m.normalTs         = normalize(s2.rgb * 2.0 - 1.0);
+  m.anisotropy       = s3.r * 2.0 - 1.0;
+  m.anisoRotation    = s3.g * (2.0 * PI);
+  m.coat             = s3.b;
+  m.coatRoughness    = max(0.025, s3.a);
+  m.sheenColor       = s4.rgb;
+  m.sheenRoughness   = max(0.04, s4.a);
+  m.subsurfaceColor  = s5.rgb;
+  m.thickness        = s5.a * 2.0;
+  m.coatNormalTs     = normalize(s6.rgb * 2.0 - 1.0);
+  m.transmission     = s6.a;
+  m.emission         = s7.r * 20.0;
+  m.unlit            = s7.g > 0.5;
+  m.diffuseRoughness = s7.b;
+  return m;
+}
+
+float sdBox(vec3 p, vec3 b) {
+  vec3 q = abs(p) - b;
+  return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0);
+}
+
+float sdCylinderZ(vec3 p, float r, float hz) {
+  vec2 d = abs(vec2(length(p.xy), p.z)) - vec2(r, hz);
+  return min(max(d.x, d.y), 0.0) + length(max(d, 0.0));
+}
+
+float sdConeZ(vec3 p, float r, float hz) {
+  vec2 q = vec2(r, -2.0 * hz);
+  vec2 w = vec2(length(p.xy), p.z - hz);
+  vec2 a = w - q * clamp(dot(w, q) / dot(q, q), 0.0, 1.0);
+  vec2 b = w - q * vec2(clamp(w.x / max(q.x, 1e-4), 0.0, 1.0), 1.0);
+  float k = sign(q.y);
+  float d = min(dot(a, a), dot(b, b));
+  float s = max(k * (w.x * q.y - w.y * q.x), k * (w.y - q.y));
+  return sqrt(d) * sign(s);
+}
+
+float sdTorusZ(vec3 p, float majorR, float minorR) {
+  vec2 q = vec2(length(p.xy) - majorR, p.z);
+  return length(q) - minorR;
+}
+
+float sdPrimitiveLocal(vec3 lp, int shape, vec3 h) {
   if (shape == 1) {
-    float r = max(max(h.x, h.y), h.z);
-    vec3 q = p / max(h, vec3(0.01));
-    return (length(q) - 1.0) * min(min(h.x, h.y), min(r, h.z));
+    float rMean = (h.x + h.y + h.z) * 0.3333333;
+    return (length(lp / h) - 1.0) * rMean;
   }
-  if (shape == 2) {
-    vec2 d = abs(vec2(length(p.xy), p.z)) - vec2(max(h.x, h.y), h.z);
-    return min(max(d.x, d.y), 0.0) + length(max(d, 0.0));
-  }
-  if (shape == 4) {
-    float R = max(h.x, h.y) * 0.72;
-    float r = max(h.x, h.y) * 0.28;
-    vec2 q = vec2(length(p.xy) - R, p.z);
-    return length(q) - r;
-  }
-  vec3 d = abs(p) - h;
-  return min(max(d.x, max(d.y, d.z)), 0.0) + length(max(d, 0.0));
+  if (shape == 2) return sdCylinderZ(lp, max(h.x, h.y), h.z);
+  if (shape == 3) return sdConeZ(lp, max(h.x, h.y), h.z);
+  if (shape == 4) return sdTorusZ(lp, max(h.x, h.y) * 0.68, max(0.04, h.z * 0.55));
+  return sdBox(lp, h);
 }
 
-// Analytical intersection returning vec4(tNear, normalWorld.xyz), tNear < 0 if miss
-vec4 intersectPrimitive(vec3 ro, vec3 rd, int idx, float tMax, bool allowInsideExit) {
-  vec3 center = uPrimCenterShape[idx].xyz;
-  int  shape  = int(uPrimCenterShape[idx].w + 0.5);
-  vec3 h      = uPrimHalfExtShadow[idx].xyz;
-  vec3 rot    = uPrimRotRad[idx].xyz;
-  bool rotated = dot(abs(rot), vec3(1.0)) > 1e-4;
-  mat3 R = rotated ? buildEulerColumns(rot) : mat3(1.0);
-  vec3 lo = rotated ? transpose(R) * (ro - center) : (ro - center);
-  vec3 ld = rotated ? transpose(R) * rd : rd;
+void computeBoxUvAndTangent(vec3 lp, vec3 h, vec3 ln, out vec2 uv, out vec3 lt) {
+  vec3 safeH = max(h, vec3(1e-4));
+  vec3 n01 = clamp((lp / safeH) * 0.5 + 0.5, vec3(0.0), vec3(1.0));
+  vec3 an = abs(ln);
+  if (an.x >= an.y && an.x >= an.z) {
+    uv = vec2(ln.x > 0.0 ? n01.y : 1.0 - n01.y, n01.z);
+    lt = vec3(0.0, ln.x > 0.0 ? 1.0 : -1.0, 0.0);
+  } else if (an.y >= an.x && an.y >= an.z) {
+    uv = vec2(ln.y > 0.0 ? 1.0 - n01.x : n01.x, n01.z);
+    lt = vec3(ln.y > 0.0 ? -1.0 : 1.0, 0.0, 0.0);
+  } else {
+    uv = vec2(n01.x, ln.z > 0.0 ? n01.y : 1.0 - n01.y);
+    lt = vec3(1.0, 0.0, 0.0);
+  }
+}
+
+void computeCurvedUvAndTangent(vec3 lp, vec3 h, vec3 ln, int shape, out vec2 uv, out vec3 lt) {
+  float phi = atan(lp.y, lp.x);
+  float u = fract(phi / (2.0 * PI) + 0.5);
+  lt = length(lp.xy) > 1e-4 ? normalize(vec3(-lp.y, lp.x, 0.0)) : vec3(1.0, 0.0, 0.0);
+  if (shape == 1) {
+    float nz = clamp(lp.z / max(h.z, 1e-4), -1.0, 1.0);
+    float v = 1.0 - acos(nz) / PI;
+    uv = vec2(u, clamp(v, 0.0, 1.0));
+  } else if (shape == 4) {
+    float majorR = max(h.x, h.y) * 0.68;
+    float pol = atan(lp.z, length(lp.xy) - majorR);
+    uv = vec2(u, fract(pol / (2.0 * PI) + 0.5));
+  } else {
+    uv = vec2(u, clamp((lp.z / max(h.z, 1e-4)) * 0.5 + 0.5, 0.0, 1.0));
+  }
+}
+
+HitInfo intersectPrimitive(vec3 ro, vec3 rd, int idx, float tMax, bool backface) {
+  HitInfo info;
+  info.hit = false;
+  info.t = tMax;
+  info.primIdx = idx;
+  info.uv = vec2(0.5);
+  info.tangent = vec3(1.0, 0.0, 0.0);
+
+  vec3 center = uPrimPosShape[idx].xyz;
+  int  shape  = int(uPrimPosShape[idx].w + 0.5);
+  vec3 h      = uPrimHalfFlags[idx].xyz;
+  vec3 rot    = uPrimRotAbbe[idx].xyz;
+
+  vec3 lo = invRotateEuler(ro - center, rot);
+  vec3 ld = invRotateEuler(rd, rot);
 
   if (shape == 1) {
     vec3 o = lo / h;
@@ -129,770 +285,907 @@ vec4 intersectPrimitive(vec3 ro, vec3 rd, int idx, float tMax, bool allowInsideE
     float b = dot(o, d);
     float c = dot(o, o) - 1.0;
     float disc = b * b - a * c;
-    if (disc < 0.0) return vec4(-1.0);
+    if (disc < 0.0) return info;
     float sq = sqrt(disc);
-    float t0 = (-b - sq) / a;
-    float t1 = (-b + sq) / a;
-    float t = -1.0;
-    if (t0 > 1e-3 && t0 < tMax) t = t0;
-    else if (allowInsideExit && t1 > 1e-3 && t1 < tMax) t = t1;
-    if (t < 0.0) return vec4(-1.0);
-    vec3 hitL = lo + ld * t;
-    vec3 nL = normalize(hitL / (h * h));
-    vec3 nW = rotated ? normalize(R * nL) : nL;
-    return vec4(t, nW);
+    float tCand = backface ? (-b + sq) / a : (-b - sq) / a;
+    if (!backface && tCand < 0.0015) tCand = (-b + sq) / a;
+    if (tCand > 0.0015 && tCand < tMax) {
+      vec3 lp = lo + ld * tCand;
+      vec3 ln = normalize(lp / (h * h));
+      vec2 uv;
+      vec3 lt;
+      computeCurvedUvAndTangent(lp, h, ln, 1, uv, lt);
+      info.hit = true;
+      info.t = tCand;
+      info.pos = ro + rd * tCand;
+      info.normal = normalize(fwdRotateEuler(backface ? -ln : ln, rot));
+      info.tangent = normalize(fwdRotateEuler(lt, rot));
+      info.uv = uv;
+    }
+    return info;
   }
 
-  if (shape == 2) {
-    float rad = 0.5 * (h.x + h.y);
-    float a = dot(ld.xy, ld.xy);
-    float b = dot(lo.xy, ld.xy);
-    float c = dot(lo.xy, lo.xy) - rad * rad;
-    float bestT = tMax;
-    vec3 bestN = vec3(0.0, 0.0, 1.0);
-    if (a > 1e-7) {
-      float disc = b * b - a * c;
-      if (disc >= 0.0) {
-        float sq = sqrt(disc);
-        float tSide = (-b - sq) / a;
-        if (tSide > 1e-3 && tSide < bestT) {
-          float zHit = lo.z + ld.z * tSide;
-          if (abs(zHit) <= h.z) {
-            bestT = tSide;
-            vec2 xy = lo.xy + ld.xy * tSide;
-            bestN = normalize(vec3(xy / rad, 0.0));
-          }
-        }
-      }
-    }
-    if (abs(ld.z) > 1e-7) {
-      for (int s = -1; s <= 1; s += 2) {
-        float zCap = float(s) * h.z;
-        float tCap = (zCap - lo.z) / ld.z;
-        if (tCap > 1e-3 && tCap < bestT) {
-          vec2 xy = lo.xy + ld.xy * tCap;
-          if (dot(xy, xy) <= rad * rad) {
-            bestT = tCap;
-            bestN = vec3(0.0, 0.0, float(s));
-          }
-        }
-      }
-    }
-    if (bestT >= tMax) return vec4(-1.0);
-    return vec4(bestT, rotated ? normalize(R * bestN) : bestN);
-  }
-
-  if (shape == 3 || shape == 4) {
-    // Bounded SDF sphere-trace for Cone / Torus authored via Construct
+  if (shape == 0) {
     vec3 safeSign = mix(vec3(-1.0), vec3(1.0), greaterThanEqual(ld, vec3(0.0)));
-    vec3 invD = 1.0 / (safeSign * max(abs(ld), vec3(1e-6)));
-    vec3 bExt = h * 1.15;
-    vec3 t0s = (-bExt - lo) * invD;
-    vec3 t1s = ( bExt - lo) * invD;
-    vec3 tmn = min(t0s, t1s);
-    vec3 tmx = max(t0s, t1s);
-    float tStart = max(max(tmn.x, max(tmn.y, tmn.z)), 1e-3);
-    float tEnd   = min(min(tmx.x, min(tmx.y, tmx.z)), tMax);
-    if (tStart > tEnd) return vec4(-1.0);
-    float t = tStart;
-    for (int stepIdx = 0; stepIdx < 36; ++stepIdx) {
-      vec3 p = lo + ld * t;
-      float d;
-      if (shape == 3) {
-        float rad = max(h.x, h.y);
-        float zNorm = clamp((h.z - p.z) / max(2.0 * h.z, 0.02), 0.0, 1.0);
-        float dSide = (length(p.xy) - rad * zNorm) * 0.75;
-        d = max(dSide, abs(p.z) - h.z);
-      } else {
-        d = sdPrimLocal(p, 4, h);
-      }
-      if (d < 0.0015) {
-        vec2 e = vec2(0.002, 0.0);
-        vec3 nL;
-        if (shape == 3) {
-          float rad = max(h.x, h.y);
-          vec3 pX = p + e.xyy, pY = p + e.yxy, pZ = p + e.yyx;
-          float d0 = max((length(p.xy) - rad * clamp((h.z - p.z) / (2.0 * h.z), 0.0, 1.0)) * 0.75, abs(p.z) - h.z);
-          float dX = max((length(pX.xy) - rad * clamp((h.z - pX.z) / (2.0 * h.z), 0.0, 1.0)) * 0.75, abs(pX.z) - h.z);
-          float dY = max((length(pY.xy) - rad * clamp((h.z - pY.z) / (2.0 * h.z), 0.0, 1.0)) * 0.75, abs(pY.z) - h.z);
-          float dZ = max((length(pZ.xy) - rad * clamp((h.z - pZ.z) / (2.0 * h.z), 0.0, 1.0)) * 0.75, abs(pZ.z) - h.z);
-          nL = normalize(vec3(dX - d0, dY - d0, dZ - d0));
-        } else {
-          float d0 = sdPrimLocal(p, 4, h);
-          nL = normalize(vec3(
-            sdPrimLocal(p + e.xyy, 4, h) - d0,
-            sdPrimLocal(p + e.yxy, 4, h) - d0,
-            sdPrimLocal(p + e.yyx, 4, h) - d0
-          ));
-        }
-        return vec4(t, rotated ? normalize(R * nL) : nL);
-      }
-      t += max(d, 0.004);
-      if (t > tEnd) break;
+    vec3 invD = 1.0 / ( safeSign * max(abs(ld), vec3(1e-6)) );
+    vec3 t0 = (-h - lo) * invD;
+    vec3 t1 = ( h - lo) * invD;
+    vec3 tSmaller = min(t0, t1);
+    vec3 tBigger  = max(t0, t1);
+    float tNear = max(max(tSmaller.x, tSmaller.y), tSmaller.z);
+    float tFar  = min(min(tBigger.x, tBigger.y), tBigger.z);
+    if (tNear > tFar || tFar < 0.0015) return info;
+    float tCand = backface ? tFar : (tNear > 0.0015 ? tNear : tFar);
+    if (tCand > 0.0015 && tCand < tMax) {
+      vec3 lp = lo + ld * tCand;
+      vec3 d = abs(lp) - h;
+      vec3 ln = vec3(0.0);
+      if (d.x >= d.y && d.x >= d.z) ln = vec3(lp.x >= 0.0 ? 1.0 : -1.0, 0.0, 0.0);
+      else if (d.y >= d.x && d.y >= d.z) ln = vec3(0.0, lp.y >= 0.0 ? 1.0 : -1.0, 0.0);
+      else ln = vec3(0.0, 0.0, lp.z >= 0.0 ? 1.0 : -1.0);
+      vec2 uv;
+      vec3 lt;
+      computeBoxUvAndTangent(lp, h, ln, uv, lt);
+      info.hit = true;
+      info.t = tCand;
+      info.pos = ro + rd * tCand;
+      info.normal = normalize(fwdRotateEuler(backface ? -ln : ln, rot));
+      info.tangent = normalize(fwdRotateEuler(lt, rot));
+      info.uv = uv;
     }
-    return vec4(-1.0);
+    return info;
   }
 
-  // Exact OBB / Box slab intersection
-  vec3 safeSignBox = mix(vec3(-1.0), vec3(1.0), greaterThanEqual(ld, vec3(0.0)));
-  vec3 invD = 1.0 / (safeSignBox * max(abs(ld), vec3(1e-6)));
-  vec3 t0s = (-h - lo) * invD;
-  vec3 t1s = ( h - lo) * invD;
-  vec3 tsmaller = min(t0s, t1s);
-  vec3 tbigger  = max(t0s, t1s);
-  float tNear = max(tsmaller.x, max(tsmaller.y, tsmaller.z));
-  float tFar  = min(tbigger.x, min(tbigger.y, tbigger.z));
-  if (tNear > tFar || tFar < 1e-3) return vec4(-1.0);
-  float t = (tNear > 1e-3) ? tNear : (allowInsideExit ? tFar : -1.0);
-  if (t < 1e-3 || t >= tMax) return vec4(-1.0);
-  vec3 hitL = lo + ld * t;
-  vec3 rel = abs(hitL) / max(h, vec3(1e-4));
-  vec3 nL = vec3(0.0);
-  if (rel.x >= rel.y && rel.x >= rel.z) nL = vec3(sign(hitL.x), 0.0, 0.0);
-  else if (rel.y >= rel.x && rel.y >= rel.z) nL = vec3(0.0, sign(hitL.y), 0.0);
-  else nL = vec3(0.0, 0.0, sign(hitL.z));
-  vec3 nW = rotated ? normalize(R * nL) : nL;
-  return vec4(t, nW);
+  // Cylinder / Cone / Torus: local bounding slab + exact SDF refinement
+  vec3 bound = (shape == 4) ? vec3(max(h.x, h.y) * 1.25, max(h.x, h.y) * 1.25, h.z * 1.25) : h * 1.08;
+  vec3 safeSign = mix(vec3(-1.0), vec3(1.0), greaterThanEqual(ld, vec3(0.0)));
+  vec3 invD = 1.0 / ( safeSign * max(abs(ld), vec3(1e-6)) );
+  vec3 t0 = (-bound - lo) * invD;
+  vec3 t1 = ( bound - lo) * invD;
+  float tNear = max(0.002, max(max(min(t0.x, t1.x), min(t0.y, t1.y)), min(t0.z, t1.z)));
+  float tFar  = min(tMax, min(min(max(t0.x, t1.x), max(t0.y, t1.y)), max(t0.z, t1.z)));
+  if (tNear > tFar) return info;
+
+  float t = tNear;
+  for (int s = 0; s < 36; ++s) {
+    vec3 lp = lo + ld * t;
+    float d = sdPrimitiveLocal(lp, shape, h) * (backface ? -1.0 : 1.0);
+    if (abs(d) < 0.0008) {
+      vec2 e = vec2(0.0015, -0.0015);
+      vec3 ln = normalize(
+        e.xyy * sdPrimitiveLocal(lp + e.xyy, shape, h) +
+        e.yyx * sdPrimitiveLocal(lp + e.yyx, shape, h) +
+        e.yxy * sdPrimitiveLocal(lp + e.yxy, shape, h) +
+        e.xxx * sdPrimitiveLocal(lp + e.xxx, shape, h)
+      );
+      vec2 uv;
+      vec3 lt;
+      computeCurvedUvAndTangent(lp, h, ln, shape, uv, lt);
+      info.hit = true;
+      info.t = t;
+      info.pos = ro + rd * t;
+      info.normal = normalize(fwdRotateEuler(backface ? -ln : ln, rot));
+      info.tangent = normalize(fwdRotateEuler(lt, rot));
+      info.uv = uv;
+      return info;
+    }
+    t += max(0.002, abs(d));
+    if (t > tFar) break;
+  }
+  return info;
 }
 
-struct HitRecord {
-  int   primIdx;
-  float t;
-  vec3  pos;
-  vec3  normal;
-};
-
-HitRecord traceOpaqueScene(vec3 ro, vec3 rd, float tMax) {
-  HitRecord best;
-  best.primIdx = -1;
+HitInfo traceOpaqueSceneIgnoring(vec3 ro, vec3 rd, float tMax, int ignoreIdx) {
+  HitInfo best;
+  best.hit = false;
   best.t = tMax;
-  best.pos = vec3(0.0);
-  best.normal = vec3(0.0, 0.0, 1.0);
-
-  for (int i = 0; i < MAX_PRIMS_LOOP; ++i) {
+  best.primIdx = -1;
+  best.uv = vec2(0.5);
+  best.tangent = vec3(1.0, 0.0, 0.0);
+  for (int i = 0; i < ${MAX_PRIMS}; ++i) {
     if (i >= uPrimCount) break;
-    if (PrimFlagGlass(i)) continue;
-    vec4 hit = intersectPrimitive(ro, rd, i, best.t, false);
-    if (hit.x > 0.0) {
-      best.primIdx = i;
-      best.t = hit.x;
-      best.pos = ro + rd * hit.x;
-      best.normal = dot(hit.yzw, rd) < 0.0 ? hit.yzw : -hit.yzw;
+    if (i == ignoreIdx || PrimFlagGlass(i)) continue;
+    HitInfo cand = intersectPrimitive(ro, rd, i, best.t, false);
+    if (cand.hit) best = cand;
+  }
+  return best;
+}
+
+HitInfo traceFullScene(vec3 ro, vec3 rd, float tMax) {
+  HitInfo best;
+  best.hit = false;
+  best.t = tMax;
+  best.primIdx = -1;
+  best.uv = vec2(0.5);
+  best.tangent = vec3(1.0, 0.0, 0.0);
+  for (int i = 0; i < ${MAX_PRIMS}; ++i) {
+    if (i >= uPrimCount) break;
+    HitInfo cand = intersectPrimitive(ro, rd, i, best.t, false);
+    if (cand.hit) best = cand;
+  }
+  return best;
+}
+
+float traceLightQuad(vec3 ro, vec3 rd, float tMax, out vec3 emitOut, out int hitLightIdx) {
+  float best = tMax;
+  emitOut = vec3(0.0);
+  hitLightIdx = -1;
+  if (abs(rd.z) < 1e-5) return best;
+  for (int i = 0; i < ${MAX_LIGHTS}; ++i) {
+    if (i >= uLightCount) break;
+    vec3 lc = uLightCenterHalfW[i].xyz;
+    float hw = uLightCenterHalfW[i].w;
+    float hh = uLightHalfHRad[i].x;
+    float t = (lc.z - ro.z) / rd.z;
+    if (t > 0.01 && t < best) {
+      vec3 hp = ro + rd * t;
+      if (abs(hp.x - lc.x) <= hw && abs(hp.y - lc.y) <= hh) {
+        best = t;
+        emitOut = (rd.z > 0.0) ? uLightHalfHRad[i].yzw : uLightHalfHRad[i].yzw * 0.14;
+        hitLightIdx = i;
+      }
     }
   }
   return best;
 }
 
-float evalSceneSdfOpaque(vec3 p, out int nearestIdx) {
-  float minD = 1e5;
-  nearestIdx = -1;
-  for (int i = 0; i < MAX_PRIMS_LOOP; ++i) {
+vec3 evalSky(vec3 dir) {
+  float zUp = clamp(dir.z * 0.5 + 0.5, 0.0, 1.0);
+  vec3 horizon = uSkyRadiance * vec3(1.18, 1.12, 1.06) + vec3(0.03, 0.035, 0.045);
+  vec3 zenith  = uSkyRadiance * vec3(0.65, 0.85, 1.28);
+  vec3 ground  = vec3(0.045, 0.043, 0.042);
+  vec3 sky = dir.z >= 0.0 ? mix(horizon, zenith, pow(zUp, 1.35)) : mix(ground, horizon, clamp(1.0 + dir.z * 3.0, 0.0, 1.0));
+  float cosSun = dot(dir, uSunDir);
+  float sunDisc = smoothstep(cos(uSunAngularRadius * 1.45), cos(uSunAngularRadius * 0.55), cosSun);
+  float sunGlow = pow(max(0.0, cosSun), 128.0) * 0.35;
+  return sky + uSunIrradiance * (sunDisc * 3.0 + sunGlow);
+}
+
+//------------------------------------------------------------------------------------------------------------------------------------------
+// RING-FREE ANALYTICAL GTX CONTACT-HARDENING SOLAR SHADOWS
+// Evaluates exact ray-primitive intersection + analytical convex ray-to-primitive closest approach (skipping receiver selfPrimIdx!).
+// Zero sphere-marching steps -> zero concentric SDF shadow rings and zero false wall self-shadowing!
+//------------------------------------------------------------------------------------------------------------------------------------------
+float closestRayPrimitiveSoftVis(vec3 origin, vec3 dir, int idx, float tanSun) {
+  vec3 center = uPrimPosShape[idx].xyz;
+  int  shape  = int(uPrimPosShape[idx].w + 0.5);
+  vec3 h      = uPrimHalfFlags[idx].xyz;
+  vec3 rot    = uPrimRotAbbe[idx].xyz;
+
+  vec3 lo = invRotateEuler(origin - center, rot);
+  vec3 ld = invRotateEuler(dir, rot);
+
+  // Broad-phase bounding sphere rejection along forward ray
+  float boundR = length(h) * 1.35;
+  float tCenter = -dot(lo, ld);
+  if (tCenter < -boundR) return 1.0;
+  vec3 perp = lo + ld * max(0.0, tCenter);
+  float maxPenumbra = 0.005 + max(0.05, tCenter) * tanSun;
+  if (length(perp) > boundR + maxPenumbra) return 1.0;
+
+  // Exact analytical sphere/ellipsoid silhouette clearance
+  if (shape == 1) {
+    vec3 o = lo / h;
+    vec3 d = ld / h;
+    float dLen = max(length(d), 1e-5);
+    vec3 dn = d / dLen;
+    float tUnit = -dot(o, dn);
+    if (tUnit <= 0.0) return 1.0;
+    float rMean = (h.x + h.y + h.z) * 0.3333333;
+    float worldT = (tUnit / dLen);
+    float signedClearance = (length(o + dn * tUnit) - 1.0) * rMean;
+    float coneR = 0.004 + worldT * tanSun;
+    return smoothstep(-coneR * 0.35, coneR, signedClearance);
+  }
+
+  // Exact hard hit check first — inflate thickness along local hit normal so thin walls/baffles have 100% solid umbra
+  // while feathering C1-continuously (vis = 0.5 at silhouette) into the outer golden-section penumbra!
+  HitInfo directHit = intersectPrimitive(origin, dir, idx, 18.0, false);
+  if (directHit.hit) {
+    float coneR = 0.004 + directHit.t * tanSun;
+    vec3 localHitPos = lo + ld * directHit.t;
+    vec3 localHitN = abs(invRotateEuler(directHit.normal, rot));
+    vec3 hSil = h + localHitN * (coneR * 2.2);
+    float minIn = sdPrimitiveLocal(localHitPos, shape, hSil);
+    return smoothstep(-coneR, coneR, minIn);
+  }
+
+  // Analytical convex 1D minimization of sdPrimitiveLocal(lo + ld * t) on [tLo, tHi] around slab kinks
+  float tLo = max(0.01, tCenter - boundR);
+  float tHi = min(18.0, tCenter + boundR);
+  if (tHi <= tLo) return 1.0;
+
+  // Seed bracket using exact slab plane crossings + golden-section search (convex unimodal function -> zero rings!)
+  for (int iter = 0; iter < 7; ++iter) {
+    float m1 = mix(tLo, tHi, 0.381966);
+    float m2 = mix(tLo, tHi, 0.618034);
+    float d1 = sdPrimitiveLocal(lo + ld * m1, shape, h);
+    float d2 = sdPrimitiveLocal(lo + ld * m2, shape, h);
+    if (d1 < d2) tHi = m2;
+    else         tLo = m1;
+  }
+  float tBest = 0.5 * (tLo + tHi);
+  float dBest = sdPrimitiveLocal(lo + ld * tBest, shape, h);
+  float coneR = 0.004 + tBest * tanSun;
+  return smoothstep(-coneR, coneR, dBest);
+}
+
+float evaluateGtxSolarShadow(vec3 pos, vec3 N, int selfPrimIdx) {
+  if (dot(N, uSunDir) <= 0.0) return 0.0;
+  vec3 origin = pos + N * 0.006;
+  float tanSun = tan(uSunAngularRadius * 2.1);
+  float vis = 1.0;
+  for (int i = 0; i < ${MAX_PRIMS}; ++i) {
     if (i >= uPrimCount) break;
-    if (PrimFlagGlass(i) || !PrimFlagGi(i)) continue;
-    vec3 center = uPrimCenterShape[i].xyz;
-    int  shape  = int(uPrimCenterShape[i].w + 0.5);
-    vec3 h      = uPrimHalfExtShadow[i].xyz;
-    vec3 rot    = uPrimRotRad[i].xyz;
-    vec3 lp = dot(abs(rot), vec3(1.0)) > 1e-4 ? transpose(buildEulerColumns(rot)) * (p - center) : (p - center);
-    float d = sdPrimLocal(lp, shape, h);
-    if (d < minD) {
-      minD = d;
-      nearestIdx = i;
+    if (i == selfPrimIdx || !PrimFlagShadow(i) || PrimFlagGlass(i)) continue;
+    vis = min(vis, closestRayPrimitiveSoftVis(origin, uSunDir, i, tanSun));
+    if (vis < 0.002) return 0.0;
+  }
+  return vis;
+}
+
+//------------------------------------------------------------------------------------------------------------------------------------------
+// CLIPPED-HORIZON LTC POLYGONAL QUAD AREA LIGHTS
+//------------------------------------------------------------------------------------------------------------------------------------------
+float integrateClippedEdge(vec3 v1, vec3 v2) {
+  float x = clamp(dot(v1, v2), -0.9999, 0.9999);
+  float y = abs(x);
+  float a = 0.8543985 + (0.4965155 + 0.0145206 * y) * y;
+  float b = 3.4175940 + (4.1616724 + y) * y;
+  float v = a / b;
+  float thetaSintheta = (x > 0.0) ? v : 0.5 * inversesqrt(max(1.0 - x * x, 1e-7)) - v;
+  return cross(v1, v2).z * thetaSintheta;
+}
+
+void buildBasis(vec3 N, out vec3 T, out vec3 B) {
+  vec3 up = abs(N.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+  T = normalize(cross(up, N));
+  B = cross(N, T);
+}
+
+float evaluatePolygonalIrradiance(vec3 P, vec3 N, vec3 q0, vec3 q1, vec3 q2, vec3 q3) {
+  vec3 T, B;
+  buildBasis(N, T, B);
+  vec3 L[5];
+  L[0] = vec3(dot(q0 - P, T), dot(q0 - P, B), dot(q0 - P, N));
+  L[1] = vec3(dot(q1 - P, T), dot(q1 - P, B), dot(q1 - P, N));
+  L[2] = vec3(dot(q2 - P, T), dot(q2 - P, B), dot(q2 - P, N));
+  L[3] = vec3(dot(q3 - P, T), dot(q3 - P, B), dot(q3 - P, N));
+  L[4] = L[0];
+
+  vec3 C[8];
+  int count = 0;
+  for (int i = 0; i < 4; ++i) {
+    vec3 a = L[i];
+    vec3 b = L[i + 1];
+    bool aUp = a.z >= 0.0;
+    bool bUp = b.z >= 0.0;
+    if (aUp && count < 8) C[count++] = normalize(a);
+    if (aUp != bUp && count < 8) {
+      float t = a.z / (a.z - b.z);
+      C[count++] = normalize(mix(a, b, t));
     }
   }
-  return minD;
+  if (count < 3) return 0.0;
+
+  float sum = 0.0;
+  for (int i = 0; i < 8; ++i) {
+    if (i >= count) break;
+    int next = (i + 1 == count) ? 0 : i + 1;
+    sum += integrateClippedEdge(C[i], C[next]);
+  }
+  return max(0.0, abs(sum) / (2.0 * PI));
 }
 
-// Calibrated Tier 1 GTX Solar Contact-Clip + SDF Cone Penumbra Shadow (zero VSM!)
-float evaluateGtxSolarShadow(vec3 pos, vec3 N) {
-  float NdotL = dot(N, uSunDir);
+//------------------------------------------------------------------------------------------------------------------------------------------
+// OPENPBR SURFACE BRDF (OREN-NAYAR + ANISOTROPIC GGX + F82 + CLEAR COAT + CHARLIE SHEEN + SUBSURFACE)
+//------------------------------------------------------------------------------------------------------------------------------------------
+float evaluateOrenNayar(vec3 N, vec3 V, vec3 L, float diffRough) {
+  float NdotL = max(0.0, dot(N, L));
+  float NdotV = max(1e-4, dot(N, V));
   if (NdotL <= 0.0) return 0.0;
-  vec3 origin = pos + N * 0.006;
-
-  // Exact contact-clip occluder check for crisp 3.9 mm contact hardening
-  for (int i = 0; i < MAX_PRIMS_LOOP; ++i) {
-    if (i >= uPrimCount) break;
-    if (!PrimFlagShadow(i) || PrimFlagGlass(i)) continue;
-    vec4 h = intersectPrimitive(origin, uSunDir, i, 0.32, false);
-    if (h.x > 0.0) return 0.0;
-  }
-
-  // SDF cone penumbra march matching C++ SolarShadowSequence GTX cone trace
-  float visibility = 1.0;
-  float t = 0.08;
-  float coneTan = max(tan(uSunAngularRadius * 2.4), 0.018);
-  for (int stepIdx = 0; stepIdx < 18; ++stepIdx) {
-    int dummyIdx;
-    float d = evalSceneSdfOpaque(origin + uSunDir * t, dummyIdx);
-    if (d < 0.0015) return 0.0;
-    float penumbra = clamp(d / (coneTan * t + 0.008), 0.0, 1.0);
-    visibility = min(visibility, smoothstep(0.0, 1.0, penumbra));
-    t += clamp(d * 0.85, 0.05, 0.55);
-    if (t > 6.5) break;
-  }
-  return visibility;
+  float s2 = diffRough * diffRough;
+  float A = 1.0 - 0.5 * (s2 / (s2 + 0.33));
+  float B = 0.45 * (s2 / (s2 + 0.09));
+  vec3 Lp = L - N * NdotL;
+  vec3 Vp = V - N * NdotV;
+  float cosPhi = 0.0;
+  float lenProd = length(Lp) * length(Vp);
+  if (lenProd > 1e-5) cosPhi = max(0.0, dot(Lp, Vp) / lenProd);
+  float sinAlpha = sqrt(max(0.0, 1.0 - min(NdotL, NdotV) * min(NdotL, NdotV)));
+  float tanBeta  = sqrt(max(0.0, 1.0 - max(NdotL, NdotV) * max(NdotL, NdotV))) / max(1e-4, max(NdotL, NdotV));
+  return (NdotL / PI) * (A + B * cosPhi * sinAlpha * tanBeta);
 }
 
-// Fujii Oren-Nayar + Anisotropic GGX + Adobe F82 + Dielectric Clearcoat OpenPBR evaluation
-vec3 evaluateOpenPbrDirect(
-  int idx,
-  vec3 N,
-  vec3 V,
-  vec3 L,
-  vec3 irradiance
-) {
-  float NdotL = max(dot(N, L), 0.0);
-  float NdotV = max(dot(N, V), 1e-4);
-  if (NdotL <= 0.0) return vec3(0.0);
+vec3 fresnelConductorF82(float VdotH, vec3 F0, vec3 F82Tint) {
+  float mu = clamp(VdotH, 0.0, 1.0);
+  float oneMinus = 1.0 - mu;
+  float p5 = oneMinus * oneMinus * oneMinus * oneMinus * oneMinus;
+  vec3 schlick = F0 + (1.0 - F0) * p5;
+  const float muBar = 1.0 / 7.0;
+  const float omBar = 6.0 / 7.0;
+  float omBar5 = omBar * omBar * omBar * omBar * omBar;
+  float omBar6 = omBar5 * omBar;
+  vec3 schlickBar = F0 + (1.0 - F0) * omBar5;
+  vec3 b = (schlickBar * (1.0 - F82Tint)) / (muBar * omBar6);
+  return clamp(schlick - b * mu * p5 * oneMinus, vec3(0.0), vec3(1.0));
+}
 
-  vec3 baseColor = uPrimAlbedoMetal[idx].rgb;
-  float metallic = uPrimAlbedoMetal[idx].w;
-  float rough    = clamp(uPrimSpecParams[idx].x, 0.03, 1.0);
-  float diffRough= clamp(uPrimSpecParams[idx].y, 0.0, 1.0);
-  float aniso    = uPrimSpecParams[idx].z;
-  float ior      = uPrimSpecParams[idx].w;
-  float coatW    = uPrimCoatTrans[idx].x;
-  float coatR    = clamp(uPrimCoatTrans[idx].y, 0.025, 1.0);
-  vec3  f82Tint  = uPrimF82Emit[idx].rgb;
+float fresnelDielectric(float VdotH, float ior) {
+  float f0 = (ior - 1.0) / (ior + 1.0);
+  f0 *= f0;
+  float m = clamp(1.0 - VdotH, 0.0, 1.0);
+  return f0 + (1.0 - f0) * m * m * m * m * m;
+}
+
+float dGgxAniso(vec3 H, vec3 N, vec3 T, vec3 B, float ax, float ay) {
+  float x = dot(H, T) / ax;
+  float y = dot(H, B) / ay;
+  float z = max(0.0, dot(H, N));
+  float denom = x * x + y * y + z * z;
+  return 1.0 / max(1e-6, PI * ax * ay * denom * denom);
+}
+
+float gSmithGgx(float NdotV, float NdotL, float alpha) {
+  float a2 = alpha * alpha;
+  float gv = NdotL * sqrt(a2 + (1.0 - a2) * NdotV * NdotV);
+  float gl = NdotV * sqrt(a2 + (1.0 - a2) * NdotL * NdotL);
+  return 0.5 / max(1e-5, gv + gl);
+}
+
+float dCharlieSheen(float sheenRoughness, float NdotH) {
+  float invR = 1.0 / max(0.04, sheenRoughness);
+  float cos2h = NdotH * NdotH;
+  float sin2h = max(1e-4, 1.0 - cos2h);
+  return (2.0 + invR) * pow(sin2h, invR * 0.5) / (2.0 * PI);
+}
+
+vec3 evaluateOpenPbrDirect(
+  vec3 N, vec3 Nc, vec3 T, vec3 B, vec3 V, vec3 L,
+  SampledMaterial mat, vec3 edgeTint
+) {
+  float NdotL = max(0.0, dot(N, L));
+  float NdotV = max(1e-4, dot(N, V));
+  vec3 outBrdf = vec3(0.0);
+
+  // Subsurface wrap lighting even slightly past terminator
+  float subWeight = dot(mat.subsurfaceColor, vec3(0.3333));
+  if (subWeight > 0.005) {
+    float wrap = max(0.0, (dot(N, L) + 0.45) / 1.45);
+    float backTrans = pow(max(0.0, dot(V, -L)), 3.0) * exp(-mat.thickness * 1.6);
+    outBrdf += mat.subsurfaceColor * (wrap * 0.42 + backTrans * 0.65) * (1.0 - mat.metallic) / PI;
+  }
+
+  if (NdotL <= 0.0) return outBrdf;
 
   vec3 H = normalize(V + L);
-  float NdotH = max(dot(N, H), 0.0);
-  float VdotH = max(dot(V, H), 0.0);
+  float VdotH = max(0.0, dot(V, H));
+  float NdotH = max(0.0, dot(N, H));
 
-  // Tangent basis
-  vec3 upRef = abs(N.z) < 0.92 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
-  vec3 T = normalize(cross(upRef, N));
-  vec3 B = cross(N, T);
+  float alpha = max(0.025, mat.roughness * mat.roughness);
+  float aspect = sqrt(1.0 - 0.9 * abs(mat.anisotropy));
+  float ax = max(0.015, mat.anisotropy >= 0.0 ? alpha / aspect : alpha * aspect);
+  float ay = max(0.015, mat.anisotropy >= 0.0 ? alpha * aspect : alpha / aspect);
 
-  float alpha = rough * rough;
-  float aspect = sqrt(1.0 - 0.9 * abs(aniso));
-  float ax = max(0.001, aniso >= 0.0 ? alpha / aspect : alpha * aspect);
-  float ay = max(0.001, aniso >= 0.0 ? alpha * aspect : alpha / aspect);
+  float D = dGgxAniso(H, N, T, B, ax, ay);
+  float Vis = gSmithGgx(NdotV, NdotL, alpha);
 
-  float TdotH = dot(T, H), BdotH = dot(B, H);
-  float denomAniso = (TdotH * TdotH) / (ax * ax) + (BdotH * BdotH) / (ay * ay) + NdotH * NdotH;
-  float D = 1.0 / max(PI * ax * ay * denomAniso * denomAniso, 1e-5);
+  float dielF = fresnelDielectric(VdotH, mat.ior);
+  vec3 condF  = fresnelConductorF82(VdotH, mat.baseColor, edgeTint);
+  vec3 F      = mix(vec3(dielF), condF, mat.metallic);
 
-  float TdotV = dot(T, V), BdotV = dot(B, V);
-  float TdotL = dot(T, L), BdotL = dot(B, L);
-  float lambdaV = 0.5 * (sqrt(1.0 + (ax * ax * TdotV * TdotV + ay * ay * BdotV * BdotV) / max(NdotV * NdotV, 1e-4)) - 1.0);
-  float lambdaL = 0.5 * (sqrt(1.0 + (ax * ax * TdotL * TdotL + ay * ay * BdotL * BdotL) / max(NdotL * NdotL, 1e-4)) - 1.0);
-  float G = 1.0 / (1.0 + lambdaV + lambdaL);
+  vec3 spec = D * Vis * F * NdotL;
+  float diffFactor = evaluateOrenNayar(N, V, L, mat.diffuseRoughness);
+  vec3 kD = (1.0 - F) * (1.0 - mat.metallic) * (1.0 - mat.transmission);
+  vec3 diff = kD * mat.baseColor * diffFactor;
 
-  float f0Dielectric = pow((ior - 1.0) / (ior + 1.0), 2.0);
-  vec3 F0 = mix(vec3(f0Dielectric), baseColor, metallic);
-  float oneMinusVH = 1.0 - VdotH;
-  float schlick = pow(clamp(oneMinusVH, 0.0, 1.0), 5.0);
-  vec3 F = F0 + (1.0 - F0) * schlick;
-  if (metallic > 0.01) {
-    float cosBar = 1.0 / 7.0;
-    float bar5 = pow(1.0 - cosBar, 5.0);
-    vec3 fBar = F0 + (1.0 - F0) * bar5;
-    vec3 bLaz = (fBar * (1.0 - f82Tint)) / max(cosBar * pow(1.0 - cosBar, 6.0), 1e-4);
-    F = clamp(F - bLaz * VdotH * pow(clamp(oneMinusVH, 0.0, 1.0), 6.0) * metallic, 0.0, 1.0);
+  // Fabric Charlie Sheen lobe
+  vec3 sheen = vec3(0.0);
+  if (dot(mat.sheenColor, vec3(1.0)) > 0.003) {
+    float Ds = dCharlieSheen(mat.sheenRoughness, NdotH);
+    float Vs = 1.0 / max(0.25, 4.0 * (NdotL + NdotV - NdotL * NdotV));
+    sheen = mat.sheenColor * Ds * Vs * NdotL * (1.0 - mat.metallic);
   }
 
-  // Turquin multi-scattering compensation
-  float ess = clamp(1.0 - 0.42 * rough * rough, 0.35, 1.0);
-  vec3 fMs = 1.0 + F0 * ((1.0 - ess) / ess);
-  vec3 specBrdf = (D * G * F * fMs) / max(4.0 * NdotV * NdotL, 1e-4);
+  vec3 baseLayer = diff + spec + sheen;
 
-  // Fujii Oren-Nayar diffuse
-  float s = dot(L, V) - NdotL * NdotV;
-  float tF = s > 0.0 ? max(NdotL, NdotV) : 1.0;
-  float A = 1.0 / (PI + (PI * 0.5 - 2.0 / 3.0) * diffRough);
-  float Bf = diffRough * A;
-  vec3 diffAlbedo = baseColor * (1.0 - metallic);
-  vec3 diffBrdf = diffAlbedo * (A + Bf * (s / max(tF, 1e-4))) * (1.0 - 0.5 * F0);
-
-  // Dielectric Clearcoat
-  float f0Coat = 0.04;
-  float fCoat = f0Coat + (1.0 - f0Coat) * schlick;
-  float aCoat = coatR * coatR;
-  float dCoatDen = (NdotH * NdotH * (aCoat * aCoat - 1.0) + 1.0);
-  float dCoat = (aCoat * aCoat) / max(PI * dCoatDen * dCoatDen, 1e-5);
-  float gCoat = 1.0 / max(1.0 + aCoat * (1.0 / NdotV + 1.0 / NdotL - 2.0), 1.0);
-  float coatSpec = coatW * (dCoat * gCoat * fCoat) / max(4.0 * NdotV * NdotL, 1e-4);
-  float coatTransmit = 1.0 - coatW * fCoat;
-
-  return (coatTransmit * (diffBrdf + specBrdf) + vec3(coatSpec)) * irradiance * NdotL;
+  if (mat.coat > 0.005) {
+    float NcdotL = max(0.0, dot(Nc, L));
+    float NcdotV = max(1e-4, dot(Nc, V));
+    float ac = max(0.02, mat.coatRoughness * mat.coatRoughness);
+    vec3 Tc, Bc;
+    buildBasis(Nc, Tc, Bc);
+    float Dc = dGgxAniso(H, Nc, Tc, Bc, ac, ac);
+    float Vc = gSmithGgx(NcdotV, max(1e-4, NcdotL), ac);
+    float Fc = fresnelDielectric(VdotH, 1.5) * mat.coat;
+    baseLayer = baseLayer * (1.0 - Fc) + vec3(Dc * Vc * Fc * NcdotL);
+  }
+  return outBrdf + baseLayer;
 }
 
-// Clipped-Horizon Polygonal Quad LTC Area Light Integration (downward -Z softbox + user area lights)
-vec3 evaluateAreaQuadLights(int idx, vec3 pos, vec3 N, vec3 V) {
-  vec3 total = vec3(0.0);
-  vec3 baseColor = uPrimAlbedoMetal[idx].rgb;
-  float metallic = uPrimAlbedoMetal[idx].w;
-  float rough    = clamp(uPrimSpecParams[idx].x, 0.04, 1.0);
-  vec3 R = reflect(-V, N);
+//------------------------------------------------------------------------------------------------------------------------------------------
+// RING-FREE ANALYTICAL HEMISPHERICAL CONE GI + CONTINUOUS AO
+//------------------------------------------------------------------------------------------------------------------------------------------
+vec3 evaluateBounceSurfaceDirect(vec3 bPos, vec3 bN, int bIdx) {
+  SampledMaterial bMat = fetchMaterial(bIdx, vec2(0.5));
+  if (!PrimFlagGi(bIdx)) return vec3(0.0);
+  vec3 albedo = bMat.baseColor * (1.0 - bMat.metallic * 0.75);
+  vec3 bounceRad = bMat.baseColor * bMat.emission;
 
-  for (int li = 0; li < MAX_LIGHTS_LOOP; ++li) {
-    if (li >= uAreaLightCount) break;
-    vec3 lCenter = uAreaLightCenterHalfW[li].xyz;
-    float hw     = uAreaLightCenterHalfW[li].w;
-    float hh     = uAreaLightRadHalfH[li].w;
-    vec3 lRad    = uAreaLightRadHalfH[li].rgb;
-
-    vec3 toLight = lCenter - pos;
-    if (toLight.z <= -0.25 && pos.z > lCenter.z) continue;
-
-    // Clipped 4-subquad solid-angle integration (zero horizon leak!)
-    vec3 diffIrr = vec3(0.0);
-    for (int sy = -1; sy <= 1; sy += 2) {
-      for (int sx = -1; sx <= 1; sx += 2) {
-        vec3 samplePos = lCenter + vec3(float(sx) * hw * 0.5, float(sy) * hh * 0.5, 0.0);
-        vec3 dVec = samplePos - pos;
-        float dist2 = max(dot(dVec, dVec), 0.08);
-        vec3 wi = dVec * inversesqrt(dist2);
-        float cosSurf = max(dot(N, wi), 0.0);
-        float cosEmit = max(-wi.z, 0.0); // downward -Z quad normal
-        if (cosSurf > 0.0 && cosEmit > 0.0) {
-          float subArea = hw * hh;
-          float dOmega = min((subArea * cosEmit) / dist2, 0.85);
-          diffIrr += lRad * (cosSurf * dOmega);
-        }
-      }
-    }
-
-    // Representative point on quad for GGX / LTC specular lobe
-    vec3 specSample = lCenter;
-    if (abs(R.z) > 1e-4) {
-      float tPlane = (lCenter.z - pos.z) / R.z;
-      if (tPlane > 0.0) {
-        vec3 hitPlane = pos + R * tPlane;
-        specSample = vec3(
-          clamp(hitPlane.x, lCenter.x - hw, lCenter.x + hw),
-          clamp(hitPlane.y, lCenter.y - hh, lCenter.y + hh),
-          lCenter.z
-        );
-      }
-    }
-    vec3 sVec = specSample - pos;
-    float sDist2 = max(dot(sVec, sVec), 0.12);
-    vec3 sDir = sVec * inversesqrt(sDist2);
-    float sCosEmit = max(-sDir.z, 0.0);
-    float areaSolidAngle = clamp((4.0 * hw * hh * sCosEmit) / sDist2, 0.0, 1.4);
-
-    vec3 diffPart = baseColor * (1.0 - metallic) * (diffIrr / PI);
-    vec3 specPart = vec3(0.0);
-    if (areaSolidAngle > 1e-4 && dot(N, sDir) > 0.0) {
-      // Evaluate specular highlight toward closest point on quad
-      specPart = evaluateOpenPbrDirect(idx, N, V, sDir, lRad * areaSolidAngle * 0.55)
-               - baseColor * (1.0 - metallic) * (lRad * areaSolidAngle * 0.55 * max(dot(N, sDir), 0.0) / PI);
-      specPart = max(specPart, vec3(0.0));
-    }
-    total += diffPart + specPart;
+  float NdotSun = max(0.0, dot(bN, uSunDir));
+  if (NdotSun > 0.0) {
+    HitInfo sBlock = traceOpaqueSceneIgnoring(bPos + bN * 0.015, uSunDir, 14.0, bIdx);
+    if (!sBlock.hit) bounceRad += (albedo / PI) * uSunIrradiance * NdotSun;
   }
-  return total;
+
+  for (int li = 0; li < ${MAX_LIGHTS}; ++li) {
+    if (li >= uLightCount) break;
+    vec3 lc = uLightCenterHalfW[li].xyz;
+    vec3 toL = lc - bPos;
+    float d2 = max(0.35, dot(toL, toL));
+    vec3 dirL = toL * inversesqrt(d2);
+    float nL = max(0.0, dot(bN, dirL));
+    float lCos = max(0.0, -dirL.z);
+    float area = 4.0 * uLightCenterHalfW[li].w * uLightHalfHRad[li].x;
+    bounceRad += (albedo / PI) * uLightHalfHRad[li].yzw * (nL * lCos * area / (PI * d2)) * 0.65;
+  }
+  return bounceRad;
 }
 
-// Tier 1 GTX 2-Scale AO + 6-Cone SDF Diffuse GI + Multi-Bounce Crimson/Emerald Wall Bleed
-void evaluateGtxConeGiAndAo(vec3 pos, vec3 N, out float outAo, out vec3 outIrradianceOverPi) {
-  vec3 upRef = abs(N.z) < 0.92 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
-  vec3 T = normalize(cross(upRef, N));
-  vec3 B = cross(N, T);
+void evaluateGtxConeGiAndAo(vec3 pos, vec3 N, int selfPrimIdx, out vec3 indirectIrradiance, out float aoOut) {
+  vec3 T, B;
+  buildBasis(N, T, B);
 
-  // Short-range crevice AO + 2.2 m chassis/architectural AO along normal
-  int dummyIdx;
-  float aoShort = 1.0;
-  float aoLong  = 1.0;
-  for (int s = 1; s <= 3; ++s) {
-    float distS = float(s) * 0.11;
-    float dS = evalSceneSdfOpaque(pos + N * distS, dummyIdx);
-    aoShort -= (distS - min(dS, distS)) * (0.28 / distS) * 0.42;
-
-    float distL = float(s) * 0.65;
-    float dL = evalSceneSdfOpaque(pos + N * distL, dummyIdx);
-    aoLong -= (distL - min(dL, distL)) * (0.20 / distL) * 0.35;
-  }
-  outAo = clamp(min(aoShort, mix(1.0, aoLong, 0.65)), 0.12, 1.0);
-
-  if (uEnableGi == 0) {
-    outIrradianceOverPi = vec3(0.0);
-    return;
-  }
-
-  // 6 hemispherical cones: 1 axial + 5 at 60 deg polar ring
-  const vec3 LOCAL_CONES[6] = vec3[6](
+  const vec3 localDirs[8] = vec3[8](
     vec3( 0.0000,  0.0000, 1.0000),
-    vec3( 0.8660,  0.0000, 0.5000),
-    vec3( 0.2676,  0.8236, 0.5000),
-    vec3(-0.7006,  0.5090, 0.5000),
-    vec3(-0.7006, -0.5090, 0.5000),
-    vec3( 0.2676, -0.8236, 0.5000)
+    vec3( 0.7071,  0.0000, 0.7071),
+    vec3(-0.7071,  0.0000, 0.7071),
+    vec3( 0.0000,  0.7071, 0.7071),
+    vec3( 0.0000, -0.7071, 0.7071),
+    vec3( 0.6124,  0.6124, 0.5000),
+    vec3(-0.6124,  0.6124, 0.5000),
+    vec3( 0.0000, -0.8660, 0.5000)
   );
-  const float CONE_WEIGHTS[6] = float[6](0.25, 0.15, 0.15, 0.15, 0.15, 0.15);
 
-  // Estimate ambient chamber multi-bounce energy from visible walls
-  vec3 chamberAvgBounce = uSkyRadiance * 0.35;
-  for (int i = 0; i < MAX_PRIMS_LOOP; ++i) {
-    if (i >= uPrimCount) break;
-    if (PrimFlagGlass(i) || !PrimFlagGi(i)) continue;
-    vec3 alb = uPrimAlbedoMetal[i].rgb * (1.0 - uPrimAlbedoMetal[i].w);
-    chamberAvgBounce += alb * 0.032;
+  vec3 giSum = vec3(0.0);
+  float wSum = 0.0;
+  float aoOcc = 0.0;
+  vec3 startPos = pos + N * 0.012;
+
+  for (int c = 0; c < 8; ++c) {
+    vec3 ld = localDirs[c];
+    vec3 dir = normalize(T * ld.x + B * ld.y + N * ld.z);
+    float cosW = max(0.15, ld.z);
+    wSum += cosW;
+
+    HitInfo ch = traceOpaqueSceneIgnoring(startPos, dir, 5.8, selfPrimIdx);
+    if (ch.hit) {
+      // Smooth continuous exponential AO without any step-threshold ring!
+      aoOcc += cosW * exp(-ch.t / 0.72) * 0.58;
+      float distAtten = 1.0 / (1.0 + 0.09 * ch.t * ch.t);
+      giSum += evaluateBounceSurfaceDirect(ch.pos, ch.normal, ch.primIdx) * cosW * distAtten * 1.42;
+    } else {
+      giSum += evalSky(dir) * cosW * 0.88;
+    }
   }
 
-  vec3 accumGi = vec3(0.0);
-  vec3 startPos = pos + N * 0.025;
+  indirectIrradiance = giSum / max(1e-4, wSum);
+  aoOut = clamp(1.0 - aoOcc / max(1e-4, wSum), 0.18, 1.0);
+}
 
-  for (int c = 0; c < 6; ++c) {
-    vec3 lc = LOCAL_CONES[c];
-    vec3 dir = normalize(T * lc.x + B * lc.y + N * lc.z);
-    float t = 0.08;
-    float occ = 0.0;
-    vec3 coneRad = vec3(0.0);
+void buildShadingFrame(HitInfo hit, SampledMaterial mat, out vec3 Nshade, out vec3 Ncoat, out vec3 Tshade, out vec3 Bshade) {
+  vec3 Ng = hit.normal;
+  vec3 Tg = hit.tangent - Ng * dot(hit.tangent, Ng);
+  if (dot(Tg, Tg) < 1e-6) {
+    vec3 Btmp;
+    buildBasis(Ng, Tg, Btmp);
+  } else {
+    Tg = normalize(Tg);
+  }
+  vec3 Bg = cross(Ng, Tg);
 
-    for (int stepIdx = 0; stepIdx < 8; ++stepIdx) {
-      int hitIdx;
-      vec3 sampleP = startPos + dir * t;
-      float d = evalSceneSdfOpaque(sampleP, hitIdx);
-      if (d < 0.09 && hitIdx >= 0) {
-        vec3 bAlbedo = uPrimAlbedoMetal[hitIdx].rgb * (1.0 - uPrimAlbedoMetal[hitIdx].w);
-        vec3 bEmit   = bAlbedo * uPrimF82Emit[hitIdx].w;
+  Nshade = normalize(Tg * mat.normalTs.x + Bg * mat.normalTs.y + Ng * mat.normalTs.z);
+  if (dot(Nshade, Ng) < 0.08) Nshade = Ng;
 
-        // Estimate inward bounce normal pointing from hit primitive back toward receiver
-        vec3 surfCenter = uPrimCenterShape[hitIdx].xyz;
-        vec3 hExt       = uPrimHalfExtShadow[hitIdx].xyz;
-        vec3 relP       = (sampleP - surfCenter) / max(hExt, vec3(0.02));
-        vec3 bounceN    = -dir;
-        if (int(uPrimCenterShape[hitIdx].w + 0.5) == 0) {
-          vec3 aRel = abs(relP);
-          if (aRel.x >= aRel.y && aRel.x >= aRel.z) bounceN = vec3(-sign(sampleP.x - surfCenter.x), 0.0, 0.0);
-          else if (aRel.y >= aRel.x && aRel.y >= aRel.z) bounceN = vec3(0.0, -sign(sampleP.y - surfCenter.y), 0.0);
-          else bounceN = vec3(0.0, 0.0, -sign(sampleP.z - surfCenter.z));
-          if (dot(bounceN, -dir) < 0.0) bounceN = -bounceN;
-        }
+  Ncoat = normalize(Tg * mat.coatNormalTs.x + Bg * mat.coatNormalTs.y + Ng * mat.coatNormalTs.z);
+  if (dot(Ncoat, Ng) < 0.08) Ncoat = Ng;
 
-        // Direct solar + softbox irradiance on bounce surface + 2nd bounce
-        float sunCos = max(dot(bounceN, uSunDir), 0.0);
-        // Fast roof-baffle & wall unoccluded solar estimate on bounce surface
-        float sunVis = sunCos > 0.0 ? 0.82 : 0.0;
-        vec3 bounceIncoming = uSunIrradiance * (sunCos * sunVis);
-        if (uAreaLightCount > 0) {
-          vec3 lC = uAreaLightCenterHalfW[0].xyz;
-          vec3 toL = lC - sampleP;
-          float d2 = max(dot(toL, toL), 0.35);
-          vec3 lDir = toL * inversesqrt(d2);
-          float cS = max(dot(bounceN, lDir), 0.0);
-          float cE = max(-lDir.z, 0.0);
-          float ltcOm = min((4.0 * uAreaLightCenterHalfW[0].w * uAreaLightRadHalfH[0].w * cE) / d2, 0.9);
-          bounceIncoming += uAreaLightRadHalfH[0].rgb * (cS * ltcOm);
-        }
-        vec3 exitantOverPi = bAlbedo * (bounceIncoming / PI + chamberAvgBounce * 0.55) + bEmit;
-        coneRad = exitantOverPi;
-        occ = 1.0;
-        break;
-      }
-      t += max(d * 0.85, 0.14);
-      if (t > 4.6) break;
-    }
+  // Apply anisotropy rotation around Nshade
+  vec3 Tbase = normalize(Tg - Nshade * dot(Tg, Nshade));
+  vec3 Bbase = cross(Nshade, Tbase);
+  float ca = cos(mat.anisoRotation);
+  float sa = sin(mat.anisoRotation);
+  Tshade = ca * Tbase + sa * Bbase;
+  Bshade = -sa * Tbase + ca * Bbase;
+}
 
-    if (occ < 0.5) {
-      float skyMix = clamp(0.5 + 0.5 * dir.z, 0.0, 1.0);
-      coneRad = mix(chamberAvgBounce * 0.65, uSkyRadiance * 1.15, skyMix);
-    }
-    accumGi += coneRad * CONE_WEIGHTS[c];
+vec3 shadeSecondaryBounceHit(HitInfo hit, vec3 V) {
+  int idx = hit.primIdx;
+  SampledMaterial mat = fetchMaterial(idx, hit.uv);
+  if (mat.unlit) return mat.baseColor;
+
+  vec3 N, Nc, T, B;
+  buildShadingFrame(hit, mat, N, Nc, T, B);
+  vec3 edgeTint = uPrimEdgeTint[idx].rgb;
+  vec3 Lo = mat.baseColor * mat.emission;
+
+  float sunVis = evaluateGtxSolarShadow(hit.pos, N, idx);
+  if (sunVis > 0.0) {
+    Lo += evaluateOpenPbrDirect(N, Nc, T, B, V, uSunDir, mat, edgeTint) * uSunIrradiance * sunVis;
   }
 
-  outIrradianceOverPi = accumGi * outAo;
+  for (int li = 0; li < ${MAX_LIGHTS}; ++li) {
+    if (li >= uLightCount) break;
+    vec3 lc = uLightCenterHalfW[li].xyz;
+    float hw = uLightCenterHalfW[li].w;
+    float hh = uLightHalfHRad[li].x;
+    vec3 emit = uLightHalfHRad[li].yzw;
+    vec3 q0 = lc + vec3(-hw, -hh, 0.0);
+    vec3 q1 = lc + vec3( hw, -hh, 0.0);
+    vec3 q2 = lc + vec3( hw,  hh, 0.0);
+    vec3 q3 = lc + vec3(-hw,  hh, 0.0);
+    float formFactor = evaluatePolygonalIrradiance(hit.pos, N, q0, q1, q2, q3);
+    if (formFactor > 1e-5) {
+      vec3 kD = (1.0 - mat.metallic) * (1.0 - mat.transmission) * mat.baseColor;
+      Lo += kD * emit * formFactor;
+    }
+  }
+
+  Lo += mat.baseColor * (1.0 - mat.metallic) * evalSky(N) * 0.45 * mat.ao;
+  return Lo;
 }
 
-vec3 shadeSecondaryBounceHit(HitRecord hit, vec3 rd) {
+vec3 shadePrimaryOpaqueHit(HitInfo hit, vec3 V) {
   int idx = hit.primIdx;
-  vec3 V = -rd;
-  vec3 N = hit.normal;
-  vec3 baseColor = uPrimAlbedoMetal[idx].rgb;
-  float metallic = uPrimAlbedoMetal[idx].w;
-  float emitNit  = uPrimF82Emit[idx].w;
+  SampledMaterial origMat = fetchMaterial(idx, hit.uv);
 
-  float sunShadow = dot(N, uSunDir) > 0.0 ? evaluateGtxSolarShadow(hit.pos, N) : 0.0;
-  vec3 directSun = sunShadow > 0.0
-    ? evaluateOpenPbrDirect(idx, N, V, uSunDir, uSunIrradiance * sunShadow)
-    : vec3(0.0);
-  vec3 directLtc = evaluateAreaQuadLights(idx, hit.pos, N, V);
-  vec3 emissive  = baseColor * emitNit;
+  if (uViewMode == 2) {
+    vec3 N, Nc, T, B;
+    buildShadingFrame(hit, origMat, N, Nc, T, B);
+    return N * 0.5 + 0.5;
+  }
+  if (origMat.unlit && uViewMode == 0) {
+    return origMat.baseColor * (1.0 + origMat.emission);
+  }
 
-  float skyUp = 0.5 + 0.5 * N.z;
-  vec3 giOverPi = mix(vec3(0.11, 0.10, 0.10), uSkyRadiance * 1.05, skyUp);
-  // Add Crimson (-X) and Emerald (+X) gallery wall bounce approximation on secondary hits
-  giOverPi += vec3(0.18, 0.015, 0.012) * max(-N.x, 0.0) + vec3(0.018, 0.16, 0.032) * max(N.x, 0.0);
-  vec3 diffuseGi = baseColor * (1.0 - metallic) * giOverPi;
+  SampledMaterial mat = origMat;
+  if (uViewMode == 1) {
+    mat.baseColor = vec3(0.72, 0.71, 0.69);
+    mat.metallic = 0.0;
+    mat.roughness = 0.58;
+    mat.diffuseRoughness = 0.5;
+    mat.coat = 0.0;
+    mat.sheenColor = vec3(0.0);
+    mat.subsurfaceColor = vec3(0.0);
+    mat.transmission = 0.0;
+    mat.emission = 0.0;
+  }
 
-  return directSun + directLtc + diffuseGi + emissive;
-}
+  vec3 N, Nc, T, B;
+  buildShadingFrame(hit, mat, N, Nc, T, B);
+  vec3 edgeTint = uPrimEdgeTint[idx].rgb;
+  vec3 Lo = mat.baseColor * mat.emission;
 
-vec3 shadePrimaryOpaqueHit(HitRecord hit, vec3 rd) {
-  int idx = hit.primIdx;
-  vec3 V = -rd;
-  vec3 N = hit.normal;
-  vec3 baseColor = uPrimAlbedoMetal[idx].rgb;
-  float metallic = uPrimAlbedoMetal[idx].w;
-  float rough    = clamp(uPrimSpecParams[idx].x, 0.03, 1.0);
-  float ior      = uPrimSpecParams[idx].w;
-  float coatW    = uPrimCoatTrans[idx].x;
-  vec3  f82Tint  = uPrimF82Emit[idx].rgb;
-  float emitNit  = uPrimF82Emit[idx].w;
+  // 1. Solar direct + ring-free analytical penumbra
+  float sunVis = evaluateGtxSolarShadow(hit.pos, N, idx);
+  if (sunVis > 0.0) {
+    Lo += evaluateOpenPbrDirect(N, Nc, T, B, V, uSunDir, mat, edgeTint) * uSunIrradiance * sunVis;
+  }
 
-  // 1. Direct Sun + GTX Contact-Clip / SDF Cone Shadow
-  float sunShadow = evaluateGtxSolarShadow(hit.pos, N);
-  vec3 directSun = sunShadow > 0.0
-    ? evaluateOpenPbrDirect(idx, N, V, uSunDir, uSunIrradiance * sunShadow)
-    : vec3(0.0);
+  // 2. Clipped-horizon LTC area quad lights + specular reflection
+  for (int li = 0; li < ${MAX_LIGHTS}; ++li) {
+    if (li >= uLightCount) break;
+    vec3 lc = uLightCenterHalfW[li].xyz;
+    float hw = uLightCenterHalfW[li].w;
+    float hh = uLightHalfHRad[li].x;
+    vec3 emit = uLightHalfHRad[li].yzw;
 
-  // 2. Clipped-Horizon LTC Polygonal Area Lights
-  vec3 directLtc = evaluateAreaQuadLights(idx, hit.pos, N, V);
+    vec3 q0 = lc + vec3(-hw, -hh, 0.0);
+    vec3 q1 = lc + vec3( hw, -hh, 0.0);
+    vec3 q2 = lc + vec3( hw,  hh, 0.0);
+    vec3 q3 = lc + vec3(-hw,  hh, 0.0);
 
-  // 3. Emissive
-  vec3 emissive = baseColor * emitNit;
+    float formFactor = evaluatePolygonalIrradiance(hit.pos, N, q0, q1, q2, q3);
+    if (formFactor > 1e-5) {
+      vec3 toCenter = normalize(lc - hit.pos);
+      HitInfo lOcc = traceOpaqueSceneIgnoring(hit.pos + N * 0.01, toCenter, length(lc - hit.pos) - 0.03, idx);
+      float areaVis = lOcc.hit ? 0.25 : 1.0;
 
-  // 4. Tier 1 GTX 2-Scale AO + 6-Cone SDF Diffuse GI
-  float ao = 1.0;
-  vec3 giOverPi = uSkyRadiance * 0.55;
-  evaluateGtxConeGiAndAo(hit.pos, N, ao, giOverPi);
-  vec3 diffuseGi = baseColor * (1.0 - metallic) * giOverPi;
+      vec3 kD = (1.0 - mat.metallic) * (1.0 - mat.transmission) * mat.baseColor;
+      Lo += kD * emit * formFactor * areaVis;
 
-  // 5. Tier 1 GTX Specular Reflection (Hi-Z SSR / Single-Bounce Gallery Reflection)
-  vec3 indirectSpec = vec3(0.0);
-  if (uEnableReflections != 0 && (metallic > 0.05 || coatW > 0.05 || rough < 0.42)) {
-    vec3 R = reflect(-V, N);
-    float NdotV = max(dot(N, V), 1e-4);
-    float f0D = pow((ior - 1.0) / (ior + 1.0), 2.0);
-    vec3 F0 = mix(vec3(f0D), baseColor, metallic);
-    vec3 F = F0 + (1.0 - F0) * pow(1.0 - NdotV, 5.0) * (1.0 - 0.65 * rough);
-    F *= mix(vec3(1.0), f82Tint, metallic * 0.35);
-    float coatRefl = coatW * (0.04 + 0.96 * pow(1.0 - NdotV, 5.0));
-    vec3 reflWeight = clamp(F + vec3(coatRefl * (1.0 - metallic)), 0.0, 1.0) * (1.0 - 0.58 * rough);
-
-    vec3 reflRad = vec3(0.0);
-    float bestLightT = 1e5;
-    for (int li = 0; li < MAX_LIGHTS_LOOP; ++li) {
-      if (li >= uAreaLightCount) break;
-      vec3 lC = uAreaLightCenterHalfW[li].xyz;
+      vec3 R = reflect(-V, N);
       if (abs(R.z) > 1e-4) {
-        float tL = (lC.z - hit.pos.z) / R.z;
-        if (tL > 0.02 && tL < bestLightT) {
-          vec3 pL = hit.pos + R * tL;
-          if (abs(pL.x - lC.x) <= uAreaLightCenterHalfW[li].w &&
-              abs(pL.y - lC.y) <= uAreaLightRadHalfH[li].w) {
-            bestLightT = tL;
-            reflRad = uAreaLightRadHalfH[li].rgb;
-          }
+        float tPlane = (lc.z - hit.pos.z) / R.z;
+        if (tPlane > 0.01) {
+          vec3 pPlane = hit.pos + R * tPlane;
+          vec3 clamped = vec3(
+            clamp(pPlane.x, lc.x - hw, lc.x + hw),
+            clamp(pPlane.y, lc.y - hh, lc.y + hh),
+            lc.z
+          );
+          vec3 Lspec = normalize(clamped - hit.pos);
+          float specSpread = max(0.04, mat.roughness * mat.roughness);
+          float solid = clamp((hw * hh) / max(0.15, tPlane * tPlane * specSpread * 6.0), 0.0, 1.2);
+          float VdotH = max(0.0, dot(V, normalize(V + Lspec)));
+          vec3 F = mix(vec3(fresnelDielectric(VdotH, mat.ior)), fresnelConductorF82(VdotH, mat.baseColor, edgeTint), mat.metallic);
+          Lo += F * emit * solid * max(0.0, dot(N, Lspec)) * areaVis * 0.55;
         }
       }
     }
-
-    HitRecord secHit = traceOpaqueScene(hit.pos + N * 0.008, R, bestLightT);
-    if (secHit.primIdx >= 0) {
-      reflRad = shadeSecondaryBounceHit(secHit, R);
-    } else if (bestLightT >= 1e4) {
-      float skyMix = clamp(0.5 + 0.5 * R.z, 0.0, 1.0);
-      reflRad = mix(vec3(0.08, 0.09, 0.12), uSkyRadiance * 1.8, skyMix);
-    }
-    indirectSpec = reflRad * reflWeight * mix(1.0, ao, rough);
   }
 
-  return directSun + directLtc + diffuseGi + indirectSpec + emissive;
+  // 3. Ring-free analytical hemispherical cone GI + AO
+  vec3 giIrr;
+  float sceneAo;
+  evaluateGtxConeGiAndAo(hit.pos, N, idx, giIrr, sceneAo);
+  float totalAo = sceneAo * mat.ao;
+  float VdotN = max(0.0, dot(V, N));
+  vec3 Fenv = mix(vec3(fresnelDielectric(VdotN, mat.ior)), fresnelConductorF82(VdotN, mat.baseColor, edgeTint), mat.metallic);
+  vec3 kD = (1.0 - Fenv) * (1.0 - mat.metallic) * (1.0 - mat.transmission);
+  Lo += kD * mat.baseColor * giIrr * totalAo;
+
+  // Fabric ambient sheen rim
+  if (dot(mat.sheenColor, vec3(1.0)) > 0.003) {
+    float rim = pow(1.0 - VdotN, 3.0);
+    Lo += mat.sheenColor * giIrr * rim * 0.45 * totalAo;
+  }
+
+  // 4. Specular reflection ray for smooth metals / clear-coat / SSR
+  float specReflectivity = max(mat.metallic, mat.coat * 0.65);
+  if (uViewMode == 0 && (specReflectivity > 0.08 || mat.roughness < 0.38)) {
+    vec3 R = reflect(-V, mat.coat > 0.35 ? Nc : N);
+    vec3 reflEmit;
+    int reflLIdx;
+    HitInfo rHit = traceOpaqueSceneIgnoring(hit.pos + N * 0.012, R, 22.0, idx);
+    float tQuad = traceLightQuad(hit.pos + N * 0.012, R, rHit.t, reflEmit, reflLIdx);
+    vec3 reflRad;
+    if (tQuad < rHit.t) {
+      reflRad = reflEmit;
+    } else if (rHit.hit) {
+      reflRad = shadeSecondaryBounceHit(rHit, -R);
+    } else {
+      reflRad = evalSky(R);
+    }
+    float gloss = (1.0 - mat.roughness * 0.82);
+    vec3 reflWeight = Fenv * gloss * gloss;
+    if (mat.coat > 0.005) {
+      float Fc = fresnelDielectric(max(0.0, dot(V, Nc)), 1.5) * mat.coat * (1.0 - mat.coatRoughness * 0.7);
+      reflWeight = max(reflWeight, vec3(Fc));
+    }
+    Lo += reflRad * reflWeight * mix(0.45, 1.0, totalAo);
+  }
+
+  // 5. Partial UV-driven transmission or opacity blending on non-shell primitives
+  float transFactor = max(mat.transmission, 1.0 - mat.opacity);
+  if (uViewMode == 0 && transFactor > 0.02) {
+    vec3 behindDir = mat.transmission > 0.05 ? refract(-V, N, 1.0 / max(1.01, mat.ior)) : -V;
+    if (dot(behindDir, behindDir) < 1e-5) behindDir = -V;
+    vec3 bEmit;
+    int bLightIdx;
+    HitInfo bHit = traceOpaqueSceneIgnoring(hit.pos - N * 0.015, normalize(behindDir), 30.0, idx);
+    float tBLight = traceLightQuad(hit.pos - N * 0.015, normalize(behindDir), bHit.t, bEmit, bLightIdx);
+    vec3 behindRad = (tBLight < bHit.t)
+      ? bEmit
+      : (bHit.hit ? shadeSecondaryBounceHit(bHit, -normalize(behindDir)) : evalSky(normalize(behindDir)));
+    vec3 tint = mix(vec3(1.0), mat.baseColor, mat.transmission);
+    Lo = mix(Lo, behindRad * tint, clamp(transFactor, 0.0, 1.0));
+  }
+
+  if (uViewMode == 3) {
+    float rim = 1.0 - abs(dot(N, V));
+    vec3 gridP = abs(fract(hit.pos * 4.0) - 0.5);
+    float wire = smoothstep(0.045, 0.01, min(min(gridP.x, gridP.y), gridP.z));
+    Lo = mix(Lo * 0.22, vec3(0.42, 0.78, 1.0), max(wire, smoothstep(0.72, 0.96, rim)));
+  }
+
+  return Lo;
 }
 
-vec3 evaluateSkyBackground(vec3 rd) {
-  float horizon = clamp(0.5 + 0.5 * rd.z, 0.0, 1.0);
-  vec3 sky = mix(vec3(0.055, 0.065, 0.085), uSkyRadiance * 1.65, pow(horizon, 0.75));
-  float sunCos = dot(rd, uSunDir);
-  float sunDisk = smoothstep(cos(uSunAngularRadius * 1.35), cos(uSunAngularRadius * 0.75), sunCos);
-  sky += uSunIrradiance * sunDisk * 0.35;
-  return sky;
+vec3 shadeTwoLayerGlass(HitInfo frontHit, vec3 rd) {
+  int idx = frontHit.primIdx;
+  SampledMaterial mat = fetchMaterial(idx, frontHit.uv);
+  vec3 N, Nc, T, B;
+  buildShadingFrame(frontHit, mat, N, Nc, T, B);
+  vec3 V = -rd;
+
+  if (mat.opacity < 0.95 && mat.transmission < 0.15) {
+    HitInfo bgHit = traceOpaqueSceneIgnoring(frontHit.pos + rd * 0.015, rd, 40.0, idx);
+    vec3 bgEmit;
+    int bgL;
+    float tL = traceLightQuad(frontHit.pos + rd * 0.015, rd, bgHit.t, bgEmit, bgL);
+    vec3 bgRad = (tL < bgHit.t) ? bgEmit : (bgHit.hit ? shadePrimaryOpaqueHit(bgHit, V) : evalSky(rd));
+    vec3 surfRad = shadeSecondaryBounceHit(frontHit, V);
+    return mix(bgRad, surfRad, mat.opacity);
+  }
+
+  float baseIor = max(1.03, mat.ior);
+  float abbe = max(12.0, uPrimRotAbbe[idx].w > 1.0 ? uPrimRotAbbe[idx].w : 26.0);
+  float spread = (baseIor - 1.0) / abbe * 1.65;
+  vec3 iorRGB = vec3(baseIor - spread, baseIor, baseIor + spread);
+
+  float F = fresnelDielectric(max(0.0, dot(V, N)), baseIor);
+  vec3 R = reflect(rd, N);
+  vec3 reflEmit;
+  int reflL;
+  HitInfo reflHit = traceOpaqueSceneIgnoring(frontHit.pos + N * 0.012, R, 25.0, idx);
+  float tReflQuad = traceLightQuad(frontHit.pos + N * 0.012, R, reflHit.t, reflEmit, reflL);
+  vec3 reflRad = (tReflQuad < reflHit.t) ? reflEmit : (reflHit.hit ? shadePrimaryOpaqueHit(reflHit, -R) : evalSky(R));
+
+  vec3 refrRad = vec3(0.0);
+  float pathThickness = 0.35;
+  for (int ch = 0; ch < 3; ++ch) {
+    float eta = 1.0 / iorRGB[ch];
+    vec3 tIn = refract(rd, N, eta);
+    if (dot(tIn, tIn) < 1e-5) {
+      refrRad[ch] = reflRad[ch];
+      continue;
+    }
+    tIn = normalize(tIn);
+    HitInfo backHit = intersectPrimitive(frontHit.pos + tIn * 0.008, tIn, idx, 6.0, true);
+    vec3 exitPos = frontHit.pos + tIn * 0.35;
+    vec3 exitDir = tIn;
+    if (backHit.hit) {
+      pathThickness = backHit.t;
+      exitPos = backHit.pos;
+      vec3 tOut = refract(tIn, backHit.normal, iorRGB[ch]);
+      exitDir = dot(tOut, tOut) > 1e-5 ? normalize(tOut) : reflect(tIn, backHit.normal);
+    }
+    vec3 bgEmit;
+    int bgL;
+    HitInfo bgHit = traceOpaqueSceneIgnoring(exitPos + exitDir * 0.012, exitDir, 35.0, idx);
+    float tBgQuad = traceLightQuad(exitPos + exitDir * 0.012, exitDir, bgHit.t, bgEmit, bgL);
+    vec3 sampleRad = (tBgQuad < bgHit.t)
+      ? bgEmit
+      : (bgHit.hit ? shadePrimaryOpaqueHit(bgHit, -exitDir) : evalSky(exitDir));
+    refrRad[ch] = sampleRad[ch];
+  }
+
+  vec3 atten = pow(clamp(mat.baseColor, vec3(0.04), vec3(1.0)), vec3(pathThickness * 1.45));
+  vec3 sunH = normalize(V + uSunDir);
+  float sunGlint = pow(max(0.0, dot(N, sunH)), 512.0) * 14.0;
+  return reflRad * F + refrRad * atten * (1.0 - F) * max(0.25, mat.transmission) + uSunIrradiance * sunGlint + mat.baseColor * mat.emission;
 }
 
-vec3 acesFilmicSrgb(vec3 hdrLinear) {
-  vec3 x = max(hdrLinear * uExposureGain, vec3(0.0));
-  vec3 t = clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
-  bvec3 lo = lessThanEqual(t, vec3(0.0031308));
-  vec3 sLo = 12.92 * t;
-  vec3 sHi = 1.055 * pow(t, vec3(1.0 / 2.4)) - 0.055;
-  return mix(sHi, sLo, lo);
-}
-
-vec3 hashIdColor(int id) {
-  float f = float(id + 1) * 1.6180339;
-  return 0.25 + 0.70 * fract(vec3(f * 1.13, f * 2.71, f * 4.37));
+vec3 acesFilm(vec3 x) {
+  const float a = 2.51, b = 0.03, c = 2.43, d = 0.59, e = 0.14;
+  return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
 }
 
 void main() {
-  float aspect = uResolution.x / max(uResolution.y, 1.0);
-  vec3 fwd   = normalize(uCamTarget - uCamOrigin);
-  vec3 right = normalize(cross(fwd, uCamUp));
-  vec3 up    = normalize(cross(right, fwd));
-
+  float aspect = uResolution.x / max(1.0, uResolution.y);
   vec2 ndc = vUv * 2.0 - 1.0;
+
   vec3 ro, rd;
   if (uOrthoHalfHeight > 0.0) {
-    ro = uCamOrigin + right * (ndc.x * uOrthoHalfHeight * aspect) + up * (ndc.y * uOrthoHalfHeight);
-    rd = fwd;
+    ro = uCamOrigin + uCamRight * (ndc.x * uOrthoHalfHeight * aspect) + uCamUp * (ndc.y * uOrthoHalfHeight);
+    rd = uCamForward;
   } else {
     ro = uCamOrigin;
-    rd = normalize(fwd + right * (ndc.x * aspect * uTanHalfFov) + up * (ndc.y * uTanHalfFov));
+    rd = normalize(uCamForward + uCamRight * (ndc.x * aspect * uTanHalfFov) + uCamUp * (ndc.y * uTanHalfFov));
   }
 
-  // Primary opaque G-Buffer + Area Quad Light visibility
-  float areaHitT = 1e5;
-  vec3  areaHitRad = vec3(0.0);
-  int   areaHitIdx = -1;
-  for (int li = 0; li < MAX_LIGHTS_LOOP; ++li) {
-    if (li >= uAreaLightCount) break;
-    vec3 lC = uAreaLightCenterHalfW[li].xyz;
-    if (abs(rd.z) > 1e-5) {
-      float tL = (lC.z - ro.z) / rd.z;
-      if (tL > 0.05 && tL < areaHitT) {
-        vec3 pL = ro + rd * tL;
-        if (abs(pL.x - lC.x) <= uAreaLightCenterHalfW[li].w &&
-            abs(pL.y - lC.y) <= uAreaLightRadHalfH[li].w) {
-          areaHitT = tL;
-          areaHitRad = uAreaLightRadHalfH[li].rgb;
-          areaHitIdx = li;
-        }
-      }
+  HitInfo fullHit = traceFullScene(ro, rd, 50.0);
+  vec3 quadEmit;
+  int hitLightIdx;
+  float tQuad = traceLightQuad(ro, rd, fullHit.t, quadEmit, hitLightIdx);
+
+  vec3 linearColor;
+  int entityCode = 0;
+
+  if (uViewMode >= 10) {
+    // F3 Debug Buffers: 11 = Depth, 12 = Visibility ID, 13 = Albedo, 14 = Normal, 15 = Roughness, 16 = Metalness
+    int dbg = uViewMode - 10;
+    if (fullHit.hit) {
+      entityCode = 1 + fullHit.primIdx;
+      SampledMaterial dm = fetchMaterial(fullHit.primIdx, fullHit.uv);
+      vec3 N, Nc, T, B;
+      buildShadingFrame(fullHit, dm, N, Nc, T, B);
+      if (dbg == 1)      linearColor = vec3(1.0 - clamp(fullHit.t / 12.0, 0.0, 1.0));
+      else if (dbg == 2) linearColor = fract(vec3(float(entityCode) * 0.37, float(entityCode) * 0.61, float(entityCode) * 0.83));
+      else if (dbg == 3) linearColor = pow(clamp(dm.baseColor, 0.0, 1.0), vec3(1.0 / 2.2));
+      else if (dbg == 4) linearColor = N * 0.5 + 0.5;
+      else if (dbg == 5) linearColor = vec3(dm.roughness);
+      else               linearColor = vec3(dm.metallic);
+    } else {
+      linearColor = vec3(0.06, 0.07, 0.09);
     }
+    fragColor = vec4(clamp(linearColor, 0.0, 1.0), float(entityCode) / 255.0);
+    return;
   }
 
-  HitRecord opaqueHit = traceOpaqueScene(ro, rd, areaHitT);
-
-  // Check 2-layer Glass Depth-Peel shells closer than opaqueHit.t
-  int   glassIdx = -1;
-  float glassNearT = min(opaqueHit.t, areaHitT);
-  vec3  glassNearN = vec3(0.0, 0.0, 1.0);
-  for (int i = 0; i < MAX_PRIMS_LOOP; ++i) {
-    if (i >= uPrimCount) break;
-    if (!PrimFlagGlass(i)) continue;
-    vec4 gHit = intersectPrimitive(ro, rd, i, glassNearT, false);
-    if (gHit.x > 0.0) {
-      glassIdx = i;
-      glassNearT = gHit.x;
-      glassNearN = dot(gHit.yzw, rd) < 0.0 ? gHit.yzw : -gHit.yzw;
+  if (tQuad < fullHit.t) {
+    linearColor = quadEmit;
+    entityCode = 32 + hitLightIdx;
+  } else if (fullHit.hit) {
+    entityCode = 1 + fullHit.primIdx;
+    if (PrimFlagGlass(fullHit.primIdx) && uViewMode == 0) {
+      linearColor = shadeTwoLayerGlass(fullHit, rd);
+    } else {
+      linearColor = shadePrimaryOpaqueHit(fullHit, -rd);
     }
-  }
-
-  // Viewport Debug Views (1:1 with Editor.jsx DebugViews)
-  int primaryId = glassIdx >= 0 ? glassIdx : opaqueHit.primIdx;
-  float primaryT = glassIdx >= 0 ? glassNearT : (opaqueHit.primIdx >= 0 ? opaqueHit.t : areaHitT);
-  vec3  primaryN = glassIdx >= 0 ? glassNearN : opaqueHit.normal;
-
-  if (uDebugMode > 0) {
-    if (primaryId < 0 && areaHitIdx < 0) {
-      fragColor = vec4(0.05, 0.06, 0.08, 1.0);
-      return;
-    }
-    if (uDebugMode == 1 || uDebugMode == 5) { // Depth / HiZ
-      float dVis = clamp(1.0 - primaryT / 8.5, 0.0, 1.0);
-      fragColor = vec4(vec3(pow(dVis, 1.3)), 1.0);
-      return;
-    }
-    if (uDebugMode == 2 || uDebugMode == 4) { // Visibility ID / Cluster ID
-      fragColor = vec4(hashIdColor(primaryId >= 0 ? primaryId : 20 + areaHitIdx), 1.0);
-      return;
-    }
-    if (uDebugMode == 6) { // Albedo
-      vec3 alb = primaryId >= 0 ? uPrimAlbedoMetal[primaryId].rgb : vec3(1.0);
-      fragColor = vec4(pow(clamp(alb, 0.0, 1.0), vec3(1.0 / 2.2)), 1.0);
-      return;
-    }
-    if (uDebugMode == 7 || uDebugMode == 10) { // Normal / Shading Normal
-      fragColor = vec4(0.5 + 0.5 * primaryN, 1.0);
-      return;
-    }
-    if (uDebugMode == 8) { // Roughness
-      float r = primaryId >= 0 ? uPrimSpecParams[primaryId].x : 0.0;
-      fragColor = vec4(vec3(r), 1.0);
-      return;
-    }
-    if (uDebugMode == 9) { // Metalness
-      float m = primaryId >= 0 ? uPrimAlbedoMetal[primaryId].w : 0.0;
-      fragColor = vec4(vec3(m), 1.0);
-      return;
-    }
-  }
-
-  vec3 hdrColor = vec3(0.0);
-  if (opaqueHit.primIdx >= 0) {
-    hdrColor = shadePrimaryOpaqueHit(opaqueHit, rd);
-  } else if (areaHitIdx >= 0) {
-    hdrColor = areaHitRad * 0.92;
   } else {
-    hdrColor = evaluateSkyBackground(rd);
-  }
-
-  // Tier 1 GTX 2-Layer Abbe Dispersive Crown Glass Peel!
-  if (glassIdx >= 0) {
-    vec3 entryPos = ro + rd * glassNearT;
-    float iorBase = uPrimSpecParams[glassIdx].w;
-    float abbe    = max(uPrimCoatTrans[glassIdx].w, 12.0);
-    float disp    = (iorBase - 1.0) / abbe;
-    vec3  iors    = vec3(iorBase - disp * 0.85, iorBase, iorBase + disp * 1.15);
-
-    float cosI = clamp(dot(-rd, glassNearN), 0.0, 1.0);
-    float f0   = pow((iorBase - 1.0) / (iorBase + 1.0), 2.0);
-    float fres = f0 + (1.0 - f0) * pow(1.0 - cosI, 5.0);
-
-    vec3 refractedRgb = vec3(0.0);
-    float pathLen = 0.35;
-    for (int ch = 0; ch < 3; ++ch) {
-      float etaIn = 1.0 / iors[ch];
-      vec3 tDir1 = refract(rd, glassNearN, etaIn);
-      if (length(tDir1) < 1e-4) tDir1 = reflect(rd, glassNearN);
-
-      // Peel layer 2: rear shell exit!
-      vec4 exitHit = intersectPrimitive(entryPos + tDir1 * 0.006, tDir1, glassIdx, 8.0, true);
-      vec3 exitPos = entryPos;
-      vec3 exitDir = tDir1;
-      if (exitHit.x > 0.0) {
-        pathLen = exitHit.x;
-        exitPos = entryPos + tDir1 * (exitHit.x + 0.006);
-        vec3 outwardN = dot(exitHit.yzw, tDir1) > 0.0 ? exitHit.yzw : -exitHit.yzw;
-        vec3 tDir2 = refract(tDir1, -outwardN, iors[ch]);
-        exitDir = length(tDir2) > 1e-4 ? normalize(tDir2) : reflect(tDir1, -outwardN);
+    linearColor = evalSky(rd);
+    if (uShowGrid != 0 && abs(rd.z) > 1e-4) {
+      float tFloor = (-0.80 - ro.z) / rd.z;
+      if (tFloor > 0.0 && tFloor < 36.0) {
+        vec3 gp = ro + rd * tFloor;
+        vec2 g1 = abs(fract(gp.xy) - 0.5) / fwidth(gp.xy);
+        float line = 1.0 - min(min(g1.x, g1.y), 1.0);
+        float fade = exp(-tFloor * 0.09);
+        linearColor = mix(linearColor, vec3(0.28, 0.34, 0.42), line * fade * 0.45);
       }
-
-      HitRecord bgHit = traceOpaqueScene(exitPos + exitDir * 0.006, exitDir, 40.0);
-      vec3 chRad = bgHit.primIdx >= 0
-        ? shadeSecondaryBounceHit(bgHit, exitDir)
-        : evaluateSkyBackground(exitDir);
-      refractedRgb[ch] = chRad[ch];
     }
-
-    // Beer-Lambert volume attenuation + specular reflection + solar highlight on glass shell
-    vec3 atten = clamp(uPrimAtten[glassIdx].rgb, vec3(0.05), vec3(1.0));
-    vec3 transmittance = exp((vec3(1.0) - atten) * (-2.2 * pathLen));
-
-    vec3 reflDir = reflect(rd, glassNearN);
-    HitRecord gReflHit = traceOpaqueScene(entryPos + glassNearN * 0.008, reflDir, 30.0);
-    vec3 gReflRad = gReflHit.primIdx >= 0
-      ? shadeSecondaryBounceHit(gReflHit, reflDir)
-      : evaluateSkyBackground(reflDir);
-
-    // Direct solar + softbox specular glints on smooth crown glass
-    vec3 glassSpecSun = evaluateOpenPbrDirect(glassIdx, glassNearN, -rd, uSunDir, uSunIrradiance);
-    if (uAreaLightCount > 0) {
-      vec3 lDir = normalize(uAreaLightCenterHalfW[0].xyz - entryPos);
-      glassSpecSun += evaluateOpenPbrDirect(glassIdx, glassNearN, -rd, lDir, uAreaLightRadHalfH[0].rgb * 0.25);
-    }
-
-    hdrColor = refractedRgb * transmittance * (1.0 - fres) + gReflRad * fres + glassSpecSun * 0.65;
   }
 
-  vec3 srgb = acesFilmicSrgb(hdrColor);
-
-  // Subtle selection highlight rim on active Outliner selection
-  if (uSelectedIndex >= 0 && primaryId == uSelectedIndex) {
-    float rim = pow(clamp(1.0 - abs(dot(primaryN, -rd)), 0.0, 1.0), 3.2);
-    srgb = mix(srgb, vec3(0.95, 0.78, 0.42), rim * 0.42);
+  vec3 srgb;
+  if (uViewMode == 2) {
+    srgb = clamp(linearColor, 0.0, 1.0);
+  } else {
+    vec3 mapped = acesFilm(max(vec3(0.0), linearColor) * uExposureGain);
+    srgb = pow(mapped, vec3(1.0 / 2.2));
   }
 
-  fragColor = vec4(srgb, 1.0);
+  fragColor = vec4(srgb, float(entityCode) / 255.0);
 }
-`
-  .replaceAll("MAX_PRIMS_LOOP", String(MAX_PRIMS))
-  .replaceAll("MAX_LIGHTS_LOOP", String(MAX_AREA_LIGHTS));
+`;
 
-function CompileGlProgram(Gl) {
+//==========================================================================================================================================
+// PASS 2: SCREEN-SPACE 2PX ANTI-ALIASED SILHOUETTE SELECTION OUTLINE SHADER
+//==========================================================================================================================================
+export const OUTLINE_FRAGMENT_SHADER = `#version 300 es
+precision highp float;
+
+in vec2 vUv;
+out vec4 fragColor;
+
+uniform sampler2D uSceneTex;
+uniform int       uSelectedCode;
+
+int decodeCode(float a) {
+  return int(floor(a * 255.0 + 0.5));
+}
+
+void main() {
+  ivec2 texSize = textureSize(uSceneTex, 0);
+  ivec2 p = clamp(ivec2(gl_FragCoord.xy), ivec2(0), texSize - ivec2(1));
+  vec4 center = texelFetch(uSceneTex, p, 0);
+  vec3 color = center.rgb;
+
+  if (uSelectedCode > 0) {
+    int c0 = decodeCode(center.a);
+    bool centerSelected = (c0 == uSelectedCode);
+
+    // 12-tap 1px + 2px ring for razor-sharp anti-aliased silhouette outline
+    const ivec2 offsets[12] = ivec2[12](
+      ivec2( 1,  0), ivec2(-1,  0), ivec2( 0,  1), ivec2( 0, -1),
+      ivec2( 1,  1), ivec2(-1,  1), ivec2( 1, -1), ivec2(-1, -1),
+      ivec2( 2,  0), ivec2(-2,  0), ivec2( 0,  2), ivec2( 0, -2)
+    );
+
+    float edgeStrength = 0.0;
+    for (int k = 0; k < 12; ++k) {
+      ivec2 q = clamp(p + offsets[k], ivec2(0), texSize - ivec2(1));
+      int cq = decodeCode(texelFetch(uSceneTex, q, 0).a);
+      bool neighborSelected = (cq == uSelectedCode);
+      if (!centerSelected && neighborSelected) {
+        edgeStrength = max(edgeStrength, k < 4 ? 1.0 : (k < 8 ? 0.88 : 0.62));
+      } else if (centerSelected && !neighborSelected && k < 4) {
+        edgeStrength = max(edgeStrength, 0.35);
+      }
+    }
+
+    if (edgeStrength > 0.0) {
+      const vec3 selectionAmber = vec3(0.965, 0.776, 0.420); // #F6C66B
+      color = mix(color, selectionAmber, edgeStrength * 0.94);
+    }
+  }
+
+  fragColor = vec4(color, 1.0);
+}
+`;
+
+function CompileProgram(Gl, VsSource, FsSource) {
   const Compile = (Type, Source) => {
     const Shader = Gl.createShader(Type);
     Gl.shaderSource(Shader, Source);
@@ -900,12 +1193,12 @@ function CompileGlProgram(Gl) {
     if (!Gl.getShaderParameter(Shader, Gl.COMPILE_STATUS)) {
       const Log = Gl.getShaderInfoLog(Shader);
       Gl.deleteShader(Shader);
-      throw new Error("GTX shader compile error: " + Log);
+      throw new Error(Log || "Shader compile error");
     }
     return Shader;
   };
-  const Vs = Compile(Gl.VERTEX_SHADER, VERTEX_SHADER_GLSL);
-  const Fs = Compile(Gl.FRAGMENT_SHADER, FRAGMENT_SHADER_GLSL);
+  const Vs = Compile(Gl.VERTEX_SHADER, VsSource);
+  const Fs = Compile(Gl.FRAGMENT_SHADER, FsSource);
   const Prog = Gl.createProgram();
   Gl.attachShader(Prog, Vs);
   Gl.attachShader(Prog, Fs);
@@ -915,97 +1208,62 @@ function CompileGlProgram(Gl) {
   if (!Gl.getProgramParameter(Prog, Gl.LINK_STATUS)) {
     const Log = Gl.getProgramInfoLog(Prog);
     Gl.deleteProgram(Prog);
-    throw new Error("GTX program link error: " + Log);
+    throw new Error(Log || "Program link error");
   }
   return Prog;
 }
 
-// Clean Canvas2D software Tier 1 GTX fallback for headless browsers where WebGL2 is disabled
-function RenderSoftwareGtxFallback(Canvas, CompiledScene, Selected) {
-  const Ctx = Canvas.getContext("2d");
-  if (!Ctx) return;
-  const W = Canvas.width;
-  const H = Canvas.height;
-  const Aspect = W / Math.max(1, H);
-  const Grad = Ctx.createLinearGradient(0, 0, 0, H);
-  Grad.addColorStop(0, "#1c2534");
-  Grad.addColorStop(0.55, "#282b30");
-  Grad.addColorStop(1, "#1c1c1e");
-  Ctx.fillStyle = Grad;
-  Ctx.fillRect(0, 0, W, H);
+const VIEW_MODE_CODES = {
+  GTX: 0,
+  LIT: 0,
+  CLAY: 1,
+  NORMALS: 2,
+  WIREFRAME: 3,
+};
 
-  // Project 3D point onto viewport for clean shaded architectural fallback
-  const { CameraOrigin, CameraTarget, WorldUp, VerticalFovRad } = CompiledScene;
-  const Fwd = NormalizeVec3([
-    CameraTarget[0] - CameraOrigin[0],
-    CameraTarget[1] - CameraOrigin[1],
-    CameraTarget[2] - CameraOrigin[2],
-  ]);
-  const Cross = (A, B) => [
-    A[1] * B[2] - A[2] * B[1],
-    A[2] * B[0] - A[0] * B[2],
-    A[0] * B[1] - A[1] * B[0],
-  ];
-  const Right = NormalizeVec3(Cross(Fwd, WorldUp), [1, 0, 0]);
-  const Up = NormalizeVec3(Cross(Right, Fwd), [0, 0, 1]);
-  const TanHalf = Math.tan(VerticalFovRad * 0.5);
+function ResolveEntityTransformForGizmo(SelectedId, Rows, Values, CompiledScene) {
+  if (!SelectedId) return null;
+  const Row = Rows.find((Item) => Item.Id === SelectedId);
+  if (!Row) return null;
+  if (Row.Panel === "folder" || Row.Panel === "post" || Row.Panel === "camera") return null;
 
-  const Project = (P) => {
-    const Rel = [P[0] - CameraOrigin[0], P[1] - CameraOrigin[1], P[2] - CameraOrigin[2]];
-    const Z = Math.max(0.2, Rel[0] * Fwd[0] + Rel[1] * Fwd[1] + Rel[2] * Fwd[2]);
-    const X = (Rel[0] * Right[0] + Rel[1] * Right[1] + Rel[2] * Right[2]) / (Z * TanHalf * Aspect);
-    const Y = (Rel[0] * Up[0] + Rel[1] * Up[1] + Rel[2] * Up[2]) / (Z * TanHalf);
-    return [(0.5 + 0.5 * X) * W, (0.5 - 0.5 * Y) * H, Z];
-  };
-
-  const Sorted = [...CompiledScene.Primitives].sort((A, B) => {
-    const Da = Math.hypot(
-      A.Center[0] - CameraOrigin[0],
-      A.Center[1] - CameraOrigin[1],
-      A.Center[2] - CameraOrigin[2],
-    );
-    const Db = Math.hypot(
-      B.Center[0] - CameraOrigin[0],
-      B.Center[1] - CameraOrigin[1],
-      B.Center[2] - CameraOrigin[2],
-    );
-    return Db - Da;
-  });
-
-  for (const Prim of Sorted) {
-    const [Sx, Sy, Sz] = Project(Prim.Center);
-    const RadiusPx = Math.max(
-      12,
-      (Math.max(...Prim.HalfExtents) / Math.max(0.3, Sz * TanHalf)) * H * 0.5,
-    );
-    const [Lr, Lg, Lb] = Prim.BaseColor.map((C) =>
-      Math.round(Math.pow(Math.min(1, C * 1.1), 1 / 2.2) * 255),
-    );
-    Ctx.save();
-    Ctx.globalAlpha = Prim.GlassShell ? 0.55 : 0.96;
-    const Rg = Ctx.createRadialGradient(
-      Sx - RadiusPx * 0.28,
-      Sy - RadiusPx * 0.3,
-      RadiusPx * 0.06,
-      Sx,
-      Sy,
-      RadiusPx,
-    );
-    Rg.addColorStop(0, "#ffffff");
-    Rg.addColorStop(0.35, `rgb(${Lr},${Lg},${Lb})`);
-    Rg.addColorStop(1, `rgb(${Lr >> 2},${Lg >> 2},${Lb >> 2})`);
-    Ctx.fillStyle = Rg;
-    Ctx.beginPath();
-    if (Prim.Shape === 1) Ctx.arc(Sx, Sy, RadiusPx, 0, Math.PI * 2);
-    else Ctx.roundRect(Sx - RadiusPx, Sy - RadiusPx * 0.65, RadiusPx * 2, RadiusPx * 1.3, 4);
-    Ctx.fill();
-    if (Prim.Id === Selected) {
-      Ctx.strokeStyle = "#f2c66d";
-      Ctx.lineWidth = 2;
-      Ctx.stroke();
-    }
-    Ctx.restore();
+  const Rec = Values?.[SelectedId] || {};
+  if (Row.Panel === "geometry") {
+    const Prim = CompiledScene.Primitives.find((Item) => Item.Id === SelectedId);
+    if (!Prim) return null;
+    return {
+      Id: SelectedId,
+      Kind: "geometry",
+      Locked: !!Rec.LOCKED,
+      Position: Array.isArray(Rec.Position) ? [...Rec.Position] : [...Prim.Center],
+      Rotation: Array.isArray(Rec.Rotation) ? [...Rec.Rotation] : [0, 0, 0],
+      Scale: Array.isArray(Rec.Scale)
+        ? [...Rec.Scale]
+        : Prim.HalfExtents.map((H) => +(H * 2).toFixed(3)),
+    };
   }
+
+  if (Row.Panel === "light") {
+    const Light = CompiledScene.AreaLights.find((Item) => Item.Id === SelectedId);
+    if (!Light) return null;
+    const RefPos = Rec.ReferenceInspector?.Properties?.pos;
+    return {
+      Id: SelectedId,
+      Kind: "light",
+      Locked: !!Rec.LOCKED,
+      Position: Array.isArray(Rec.Position)
+        ? [...Rec.Position]
+        : Array.isArray(RefPos)
+          ? [...RefPos]
+          : [...Light.Center],
+      Rotation: Array.isArray(Rec.Rotation) ? [...Rec.Rotation] : [0, 0, 0],
+      Scale: Array.isArray(Rec.Scale)
+        ? [...Rec.Scale]
+        : [Light.HalfWidth * 2, Light.HalfHeight * 2, 1.0],
+    };
+  }
+
+  return null;
 }
 
 export default function GtxWorldViewport({
@@ -1014,602 +1272,791 @@ export default function GtxWorldViewport({
   Hidden,
   Selected,
   Select,
+  ViewMode = "GTX",
   Projection = "PERSP",
   Debug = 0,
-  Settings = {},
-  UpdateEditorCamera,
-  OnFpsSample,
+  Settings,
   View = 1,
+  ShowGrid,
+  ShowGizmo = true,
+  UpdateEditorCamera,
+  OnSelectEntity,
+  OnUpdateCamera,
+  OnTransformEntity,
+  OnFpsSample,
 }) {
-  const EffectiveProjection = View === 2 && Projection === "PERSP" ? "TOP" : Projection;
-  const ContainerRef = useRef(null);
+  const SelectCallback = OnSelectEntity || Select;
+  const CameraCallback = OnUpdateCamera || UpdateEditorCamera;
+  const EffectiveProjection = View === 2 ? "TOP" : Projection;
+  const EffectiveGrid = ShowGrid !== undefined ? ShowGrid : Settings?.Grid !== false;
+  const EffectiveGizmo = ShowGizmo && (Settings?.Gizmos !== false);
   const CanvasRef = useRef(null);
   const GlStateRef = useRef(null);
   const DragRef = useRef(null);
   const KeysRef = useRef(new Set());
-  const [HoveredHud, SetHoveredHud] = useState(false);
+  const AtlasSyncRef = useRef(null);
+  const BuiltGizmoRef = useRef(null);
+  const [ShaderError, SetShaderError] = useState(null);
+  const [HoveredHandle, SetHoveredHandle] = useState(GizmoHandle.None);
+  const [ActiveHandle, SetActiveHandle] = useState(GizmoHandle.None);
+  const [GizmoReadout, SetGizmoReadout] = useState("");
+  const [TextureEpoch, SetTextureEpoch] = useState(0);
+
+  if (!AtlasSyncRef.current) {
+    AtlasSyncRef.current = new MaterialAtlasSynchronizer();
+  }
 
   const CompiledScene = useMemo(
     () => CompileLiveGtxScene(Rows, Values, Hidden, EffectiveProjection),
     [Rows, Values, Hidden, EffectiveProjection],
   );
 
-  const SelectedIndex = useMemo(
-    () => CompiledScene.Primitives.findIndex((Prim) => Prim.Id === Selected),
-    [CompiledScene, Selected],
+  // Trigger async decode if any channel uses an embedded data:image/... texture
+  useEffect(() => {
+    EnsureMaterialTexturesDecoded(CompiledScene.Primitives, () => {
+      AtlasSyncRef.current?.InvalidateAll();
+      SetTextureEpoch((N) => N + 1);
+    });
+  }, [CompiledScene]);
+
+  const SelectedGizmoTarget = useMemo(
+    () => ResolveEntityTransformForGizmo(Selected, Rows, Values, CompiledScene),
+    [Selected, Rows, Values, CompiledScene],
   );
 
-  const LatestSceneRef = useRef({
-    CompiledScene,
-    Debug,
-    Settings,
-    SelectedIndex,
-    Selected,
-  });
-  LatestSceneRef.current = {
-    CompiledScene,
-    Debug,
-    Settings,
-    SelectedIndex,
-    Selected,
-  };
-
-  // Initialize WebGL2 GTX pipeline + render loop
+  // Initialize WebGL2 3-pass pipeline (GTX FBO + Silhouette Outline + 3D Slate GizmoPRO)
   useEffect(() => {
     const Canvas = CanvasRef.current;
     if (!Canvas) return;
-
-    let Gl = null;
-    let Program = null;
-    let Vao = null;
-    let Uniforms = null;
-    try {
-      Gl = Canvas.getContext("webgl2", {
-        alpha: false,
-        antialias: false,
-        depth: false,
-        stencil: false,
-        preserveDrawingBuffer: true,
-      });
-      if (Gl) {
-        Program = CompileGlProgram(Gl);
-        Vao = Gl.createVertexArray();
-        const Names = [
-          "uResolution",
-          "uCamOrigin",
-          "uCamTarget",
-          "uCamUp",
-          "uTanHalfFov",
-          "uOrthoHalfHeight",
-          "uExposureGain",
-          "uDebugMode",
-          "uEnableGi",
-          "uEnableReflections",
-          "uSelectedIndex",
-          "uSunDir",
-          "uSunIrradiance",
-          "uSunAngularRadius",
-          "uSkyRadiance",
-          "uAreaLightCount",
-          "uAreaLightCenterHalfW",
-          "uAreaLightRadHalfH",
-          "uPrimCount",
-          "uPrimCenterShape",
-          "uPrimHalfExtShadow",
-          "uPrimRotRad",
-          "uPrimAlbedoMetal",
-          "uPrimSpecParams",
-          "uPrimCoatTrans",
-          "uPrimF82Emit",
-          "uPrimAtten",
-        ];
-        Uniforms = Object.fromEntries(
-          Names.map((Name) => [Name, Gl.getUniformLocation(Program, Name)]),
-        );
-        GlStateRef.current = { Gl, Program, Vao, Uniforms };
-      }
-    } catch (Err) {
-      console.warn("[FrontierWorldMirror] WebGL2 GTX fallback:", Err);
-      Gl = null;
+    const Gl = Canvas.getContext("webgl2", {
+      antialias: true,
+      alpha: false,
+      depth: true,
+      preserveDrawingBuffer: true,
+    });
+    if (!Gl) {
+      SetShaderError("WebGL2 unavailable in browser context");
+      return;
     }
 
-    let RafId = 0;
-    let LastTime = performance.now();
-    let FrameCounter = 0;
-    let FpsTimer = LastTime;
+    try {
+      const SceneProg = CompileProgram(Gl, FULLSCREEN_VERTEX_SHADER, GTX_FRAGMENT_SHADER);
+      const OutlineProg = CompileProgram(Gl, FULLSCREEN_VERTEX_SHADER, OUTLINE_FRAGMENT_SHADER);
+      const GizmoProg = CompileProgram(Gl, GIZMO_VERTEX_SHADER, GIZMO_FRAGMENT_SHADER);
 
-    const CenterShapeBuf = new Float32Array(MAX_PRIMS * 4);
-    const HalfExtShadowBuf = new Float32Array(MAX_PRIMS * 4);
-    const RotRadBuf = new Float32Array(MAX_PRIMS * 4);
-    const AlbedoMetalBuf = new Float32Array(MAX_PRIMS * 4);
-    const SpecParamsBuf = new Float32Array(MAX_PRIMS * 4);
-    const CoatTransBuf = new Float32Array(MAX_PRIMS * 4);
-    const F82EmitBuf = new Float32Array(MAX_PRIMS * 4);
-    const AttenBuf = new Float32Array(MAX_PRIMS * 4);
-    const LightCenterBuf = new Float32Array(MAX_AREA_LIGHTS * 4);
-    const LightRadBuf = new Float32Array(MAX_AREA_LIGHTS * 4);
+      const EmptyVao = Gl.createVertexArray();
 
-    const RenderFrame = (Now) => {
-      const Dt = Math.min(0.05, Math.max(0.001, (Now - LastTime) / 1000));
-      LastTime = Now;
-      FrameCounter += 1;
-      if (Now - FpsTimer >= 500) {
-        const Fps = Math.round((FrameCounter * 1000) / (Now - FpsTimer));
-        FrameCounter = 0;
-        FpsTimer = Now;
-        if (View === 1 && OnFpsSample) OnFpsSample(Fps);
+      // Material Atlas texture (1024 x 768 RGBA8)
+      const AtlasTex = Gl.createTexture();
+      Gl.bindTexture(Gl.TEXTURE_2D, AtlasTex);
+      Gl.texParameteri(Gl.TEXTURE_2D, Gl.TEXTURE_MIN_FILTER, Gl.LINEAR);
+      Gl.texParameteri(Gl.TEXTURE_2D, Gl.TEXTURE_MAG_FILTER, Gl.LINEAR);
+      Gl.texParameteri(Gl.TEXTURE_2D, Gl.TEXTURE_WRAP_S, Gl.CLAMP_TO_EDGE);
+      Gl.texParameteri(Gl.TEXTURE_2D, Gl.TEXTURE_WRAP_T, Gl.CLAMP_TO_EDGE);
+      Gl.texImage2D(
+        Gl.TEXTURE_2D,
+        0,
+        Gl.RGBA8,
+        ATLAS_WIDTH,
+        ATLAS_HEIGHT,
+        0,
+        Gl.RGBA,
+        Gl.UNSIGNED_BYTE,
+        null,
+      );
+
+      // Offscreen FBO for Pass 1 -> Pass 2 silhouette outline
+      const SceneFbo = Gl.createFramebuffer();
+      const SceneTex = Gl.createTexture();
+      Gl.bindTexture(Gl.TEXTURE_2D, SceneTex);
+      Gl.texParameteri(Gl.TEXTURE_2D, Gl.TEXTURE_MIN_FILTER, Gl.NEAREST);
+      Gl.texParameteri(Gl.TEXTURE_2D, Gl.TEXTURE_MAG_FILTER, Gl.NEAREST);
+      Gl.texParameteri(Gl.TEXTURE_2D, Gl.TEXTURE_WRAP_S, Gl.CLAMP_TO_EDGE);
+      Gl.texParameteri(Gl.TEXTURE_2D, Gl.TEXTURE_WRAP_T, Gl.CLAMP_TO_EDGE);
+
+      // Pass 3 Gizmo VAO + VBO
+      const GizmoVao = Gl.createVertexArray();
+      const GizmoVbo = Gl.createBuffer();
+      Gl.bindVertexArray(GizmoVao);
+      Gl.bindBuffer(Gl.ARRAY_BUFFER, GizmoVbo);
+      const Stride = 12 * 4;
+      Gl.enableVertexAttribArray(0);
+      Gl.vertexAttribPointer(0, 3, Gl.FLOAT, false, Stride, 0);
+      Gl.enableVertexAttribArray(1);
+      Gl.vertexAttribPointer(1, 3, Gl.FLOAT, false, Stride, 12);
+      Gl.enableVertexAttribArray(2);
+      Gl.vertexAttribPointer(2, 4, Gl.FLOAT, false, Stride, 24);
+      Gl.enableVertexAttribArray(3);
+      Gl.vertexAttribPointer(3, 2, Gl.FLOAT, false, Stride, 40);
+      Gl.bindVertexArray(null);
+
+      AtlasSyncRef.current?.InvalidateAll();
+
+      const Loc = (Name) => Gl.getUniformLocation(SceneProg, Name);
+      GlStateRef.current = {
+        Gl,
+        SceneProg,
+        OutlineProg,
+        GizmoProg,
+        EmptyVao,
+        AtlasTex,
+        SceneFbo,
+        SceneTex,
+        FboWidth: 0,
+        FboHeight: 0,
+        GizmoVao,
+        GizmoVbo,
+        SceneUniforms: {
+          uResolution: Loc("uResolution"),
+          uCamOrigin: Loc("uCamOrigin"),
+          uCamForward: Loc("uCamForward"),
+          uCamRight: Loc("uCamRight"),
+          uCamUp: Loc("uCamUp"),
+          uTanHalfFov: Loc("uTanHalfFov"),
+          uOrthoHalfHeight: Loc("uOrthoHalfHeight"),
+          uExposureGain: Loc("uExposureGain"),
+          uViewMode: Loc("uViewMode"),
+          uShowGrid: Loc("uShowGrid"),
+          uSelectedEntityCode: Loc("uSelectedEntityCode"),
+          uSunDir: Loc("uSunDir"),
+          uSunIrradiance: Loc("uSunIrradiance"),
+          uSunAngularRadius: Loc("uSunAngularRadius"),
+          uSkyRadiance: Loc("uSkyRadiance"),
+          uLightCount: Loc("uLightCount"),
+          uLightCenterHalfW: Loc("uLightCenterHalfW[0]"),
+          uLightHalfHRad: Loc("uLightHalfHRad[0]"),
+          uPrimCount: Loc("uPrimCount"),
+          uPrimPosShape: Loc("uPrimPosShape[0]"),
+          uPrimHalfFlags: Loc("uPrimHalfFlags[0]"),
+          uPrimRotAbbe: Loc("uPrimRotAbbe[0]"),
+          uPrimEdgeTint: Loc("uPrimEdgeTint[0]"),
+          uMaterialAtlas: Loc("uMaterialAtlas"),
+        },
+        OutlineUniforms: {
+          uSceneTex: Gl.getUniformLocation(OutlineProg, "uSceneTex"),
+          uSelectedCode: Gl.getUniformLocation(OutlineProg, "uSelectedCode"),
+        },
+        GizmoUniforms: {
+          uViewProj: Gl.getUniformLocation(GizmoProg, "uViewProj"),
+          uHighlightedHandle: Gl.getUniformLocation(GizmoProg, "uHighlightedHandle"),
+        },
+      };
+      SetShaderError(null);
+    } catch (Err) {
+      SetShaderError(String(Err?.message || Err));
+    }
+
+    return () => {
+      const State = GlStateRef.current;
+      if (State) {
+        State.Gl.deleteBuffer(State.GizmoVbo);
+        State.Gl.deleteVertexArray(State.GizmoVao);
+        State.Gl.deleteVertexArray(State.EmptyVao);
+        State.Gl.deleteTexture(State.AtlasTex);
+        State.Gl.deleteTexture(State.SceneTex);
+        State.Gl.deleteFramebuffer(State.SceneFbo);
+        State.Gl.deleteProgram(State.SceneProg);
+        State.Gl.deleteProgram(State.OutlineProg);
+        State.Gl.deleteProgram(State.GizmoProg);
+        GlStateRef.current = null;
+      }
+    };
+  }, []);
+
+  // Render scene + silhouette selection outline + 3D Slate GizmoPRO whenever state updates
+  useEffect(() => {
+    const Canvas = CanvasRef.current;
+    const State = GlStateRef.current;
+    if (!Canvas || !State) return;
+
+    const Draw = () => {
+      const { Gl, SceneUniforms: U } = State;
+      const Rect = Canvas.getBoundingClientRect();
+      const Dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+      const Width = Math.max(320, Math.round((Rect.width || 960) * Dpr));
+      const Height = Math.max(200, Math.round((Rect.height || 560) * Dpr));
+      if (Canvas.width !== Width || Canvas.height !== Height) {
+        Canvas.width = Width;
+        Canvas.height = Height;
+      }
+      const Aspect = Width / Math.max(1, Height);
+
+      // Resize offscreen FBO texture if needed
+      if (State.FboWidth !== Width || State.FboHeight !== Height) {
+        Gl.bindTexture(Gl.TEXTURE_2D, State.SceneTex);
+        Gl.texImage2D(
+          Gl.TEXTURE_2D,
+          0,
+          Gl.RGBA8,
+          Width,
+          Height,
+          0,
+          Gl.RGBA,
+          Gl.UNSIGNED_BYTE,
+          null,
+        );
+        Gl.bindFramebuffer(Gl.FRAMEBUFFER, State.SceneFbo);
+        Gl.framebufferTexture2D(
+          Gl.FRAMEBUFFER,
+          Gl.COLOR_ATTACHMENT0,
+          Gl.TEXTURE_2D,
+          State.SceneTex,
+          0,
+        );
+        State.FboWidth = Width;
+        State.FboHeight = Height;
       }
 
-      // WASD + Q/E camera fly navigation when keys are held
+      // Update Material Atlas if any primitive's 20-channel Material changed
+      const AtlasSync = AtlasSyncRef.current;
+      if (AtlasSync.UpdatePrimitives(CompiledScene.Primitives)) {
+        Gl.bindTexture(Gl.TEXTURE_2D, State.AtlasTex);
+        Gl.texSubImage2D(
+          Gl.TEXTURE_2D,
+          0,
+          0,
+          0,
+          ATLAS_WIDTH,
+          ATLAS_HEIGHT,
+          Gl.RGBA,
+          Gl.UNSIGNED_BYTE,
+          AtlasSync.Pixels,
+        );
+        AtlasSync.Dirty = false;
+      }
+
+      const { CameraOrigin, CameraTarget, WorldUp } = CompiledScene;
+      const Fwd = NormalizeVec3([
+        CameraTarget[0] - CameraOrigin[0],
+        CameraTarget[1] - CameraOrigin[1],
+        CameraTarget[2] - CameraOrigin[2],
+      ]);
+      const Cross = (A, B) => [
+        A[1] * B[2] - A[2] * B[1],
+        A[2] * B[0] - A[0] * B[2],
+        A[0] * B[1] - A[1] * B[0],
+      ];
+      const Right = NormalizeVec3(Cross(Fwd, WorldUp), [1, 0, 0]);
+      const Up = NormalizeVec3(Cross(Right, Fwd), [0, 0, 1]);
+
+      // Resolve selected entity code (1..24 = prim, 32..35 = area light)
+      let SelectedCode = 0;
+      const PrimIdx = CompiledScene.Primitives.findIndex((P) => P.Id === Selected);
+      if (PrimIdx >= 0) {
+        SelectedCode = 1 + PrimIdx;
+      } else {
+        const LightIdx = CompiledScene.AreaLights.findIndex((L) => L.Id === Selected);
+        if (LightIdx >= 0) SelectedCode = 32 + LightIdx;
+      }
+
+      // ---------------- PASS 1: GTX WORLD RENDER TO OFFSCREEN FBO ----------------
+      Gl.bindFramebuffer(Gl.FRAMEBUFFER, State.SceneFbo);
+      Gl.viewport(0, 0, Width, Height);
+      Gl.disable(Gl.DEPTH_TEST);
+      Gl.disable(Gl.BLEND);
+
+      Gl.useProgram(State.SceneProg);
+      Gl.activeTexture(Gl.TEXTURE0);
+      Gl.bindTexture(Gl.TEXTURE_2D, State.AtlasTex);
+      Gl.uniform1i(U.uMaterialAtlas, 0);
+
+      Gl.uniform2f(U.uResolution, Width, Height);
+      Gl.uniform3fv(U.uCamOrigin, CameraOrigin);
+      Gl.uniform3fv(U.uCamForward, Fwd);
+      Gl.uniform3fv(U.uCamRight, Right);
+      Gl.uniform3fv(U.uCamUp, Up);
+      Gl.uniform1f(U.uTanHalfFov, Math.tan(CompiledScene.VerticalFovRad * 0.5));
+      Gl.uniform1f(U.uOrthoHalfHeight, CompiledScene.OrthoHalfHeight);
+      Gl.uniform1f(U.uExposureGain, CompiledScene.ExposureGain);
+      const EffectiveViewMode =
+        Debug > 0 && Debug <= 6 ? 10 + Debug : VIEW_MODE_CODES[ViewMode] ?? 0;
+      Gl.uniform1i(U.uViewMode, EffectiveViewMode);
+      Gl.uniform1i(U.uShowGrid, EffectiveGrid ? 1 : 0);
+      Gl.uniform1i(U.uSelectedEntityCode, SelectedCode);
+
+      Gl.uniform3fv(U.uSunDir, CompiledScene.SunDir);
+      Gl.uniform3fv(U.uSunIrradiance, CompiledScene.SunIrradiance);
+      Gl.uniform1f(U.uSunAngularRadius, CompiledScene.SunAngularRadiusRad);
+      Gl.uniform3fv(U.uSkyRadiance, CompiledScene.SkyRadiance);
+
+      const LCount = Math.min(MAX_LIGHTS, CompiledScene.AreaLights.length);
+      const LCenterHalfW = new Float32Array(MAX_LIGHTS * 4);
+      const LHalfHRad = new Float32Array(MAX_LIGHTS * 4);
+      for (let I = 0; I < LCount; ++I) {
+        const L = CompiledScene.AreaLights[I];
+        LCenterHalfW.set([L.Center[0], L.Center[1], L.Center[2], L.HalfWidth], I * 4);
+        LHalfHRad.set([L.HalfHeight, L.Radiance[0], L.Radiance[1], L.Radiance[2]], I * 4);
+      }
+      Gl.uniform1i(U.uLightCount, LCount);
+      Gl.uniform4fv(U.uLightCenterHalfW, LCenterHalfW);
+      Gl.uniform4fv(U.uLightHalfHRad, LHalfHRad);
+
+      const PCount = Math.min(MAX_PRIMS, CompiledScene.Primitives.length);
+      const PosShape = new Float32Array(MAX_PRIMS * 4);
+      const HalfFlags = new Float32Array(MAX_PRIMS * 4);
+      const RotAbbe = new Float32Array(MAX_PRIMS * 4);
+      const EdgeTint = new Float32Array(MAX_PRIMS * 4);
+
+      for (let I = 0; I < PCount; ++I) {
+        const P = CompiledScene.Primitives[I];
+        const Flags =
+          (P.CastShadows ? 1 : 0) |
+          (P.GiContributor ? 2 : 0) |
+          (P.GlassShell ? 4 : 0);
+        PosShape.set([P.Center[0], P.Center[1], P.Center[2], P.Shape], I * 4);
+        HalfFlags.set(
+          [P.HalfExtents[0], P.HalfExtents[1], P.HalfExtents[2], Flags],
+          I * 4,
+        );
+        RotAbbe.set(
+          [P.RotationRad[0], P.RotationRad[1], P.RotationRad[2], P.Abbe],
+          I * 4,
+        );
+        EdgeTint.set(
+          [P.EdgeTintF82[0], P.EdgeTintF82[1], P.EdgeTintF82[2], P.Transmission],
+          I * 4,
+        );
+      }
+
+      Gl.uniform1i(U.uPrimCount, PCount);
+      Gl.uniform4fv(U.uPrimPosShape, PosShape);
+      Gl.uniform4fv(U.uPrimHalfFlags, HalfFlags);
+      Gl.uniform4fv(U.uPrimRotAbbe, RotAbbe);
+      Gl.uniform4fv(U.uPrimEdgeTint, EdgeTint);
+
+      Gl.bindVertexArray(State.EmptyVao);
+      Gl.drawArrays(Gl.TRIANGLES, 0, 3);
+
+      // ---------------- PASS 2: BLIT + 2PX SILHOUETTE SELECTION OUTLINE ----------------
+      Gl.bindFramebuffer(Gl.FRAMEBUFFER, null);
+      Gl.viewport(0, 0, Width, Height);
+      Gl.clear(Gl.DEPTH_BUFFER_BIT);
+      Gl.useProgram(State.OutlineProg);
+      Gl.activeTexture(Gl.TEXTURE0);
+      Gl.bindTexture(Gl.TEXTURE_2D, State.SceneTex);
+      Gl.uniform1i(State.OutlineUniforms.uSceneTex, 0);
+      Gl.uniform1i(State.OutlineUniforms.uSelectedCode, SelectedCode);
+      Gl.drawArrays(Gl.TRIANGLES, 0, 3);
+
+      // ---------------- PASS 3: 3D SLATE 13-HANDLE TRANSFORM GIZMO ----------------
+      if (EffectiveGizmo && SelectedGizmoTarget) {
+        const CamState = {
+          Projection: CompiledScene.OrthoHalfHeight > 0 ? "Orthographic" : "Perspective",
+          Position: CameraOrigin,
+          FovDegrees: (CompiledScene.VerticalFovRad * 180) / Math.PI,
+          OrthoHalfHeight: CompiledScene.OrthoHalfHeight,
+        };
+        const WorldRadius =
+          DragRef.current?.Kind === "gizmo" && DragRef.current.GizmoDrag?.ActiveWorldRadius
+            ? DragRef.current.GizmoDrag.ActiveWorldRadius
+            : ComputeGizmoWorldRadius(SelectedGizmoTarget.Position, CamState, Aspect);
+
+        const Built = BuildSlateGizmoGeometry(
+          SelectedGizmoTarget.Position,
+          Fwd,
+          WorldRadius,
+        );
+        BuiltGizmoRef.current = Built;
+
+        const ViewProj = BuildColumnMajorViewProj(
+          { Right, Up, Forward: Fwd },
+          CamState,
+          Aspect,
+        );
+        const Highlighted = ActiveHandle !== GizmoHandle.None ? ActiveHandle : HoveredHandle;
+
+        Gl.useProgram(State.GizmoProg);
+        Gl.uniformMatrix4fv(State.GizmoUniforms.uViewProj, false, ViewProj);
+        Gl.uniform1f(State.GizmoUniforms.uHighlightedHandle, Highlighted);
+
+        Gl.bindVertexArray(State.GizmoVao);
+        Gl.bindBuffer(Gl.ARRAY_BUFFER, State.GizmoVbo);
+        Gl.enable(Gl.DEPTH_TEST);
+        Gl.depthFunc(Gl.LEQUAL);
+        Gl.depthMask(true);
+        Gl.disable(Gl.CULL_FACE);
+
+        // Opaque gizmo handles (cones, scale cylinders, border strips, rotation arcs, center ring)
+        Gl.disable(Gl.BLEND);
+        Gl.bufferData(Gl.ARRAY_BUFFER, Built.OpaqueBuffer, Gl.STREAM_DRAW);
+        Gl.drawArrays(Gl.TRIANGLES, 0, Built.OpaqueVertexCount);
+
+        // Translucent plane quads (0.28 alpha / 0.55 on hover)
+        Gl.enable(Gl.BLEND);
+        Gl.blendFunc(Gl.SRC_ALPHA, Gl.ONE_MINUS_SRC_ALPHA);
+        Gl.depthMask(false);
+        Gl.bufferData(Gl.ARRAY_BUFFER, Built.TranslucentBuffer, Gl.STREAM_DRAW);
+        Gl.drawArrays(Gl.TRIANGLES, 0, Built.TranslucentVertexCount);
+
+        Gl.depthMask(true);
+        Gl.disable(Gl.BLEND);
+        Gl.disable(Gl.DEPTH_TEST);
+        Gl.bindVertexArray(null);
+      } else {
+        BuiltGizmoRef.current = null;
+      }
+    };
+
+    Draw();
+    const ResizeObs = new ResizeObserver(() => Draw());
+    ResizeObs.observe(Canvas);
+    return () => ResizeObs.disconnect();
+  }, [
+    CompiledScene,
+    Selected,
+    SelectedGizmoTarget,
+    ViewMode,
+    Debug,
+    EffectiveGrid,
+    EffectiveGizmo,
+    HoveredHandle,
+    ActiveHandle,
+    TextureEpoch,
+  ]);
+
+  // RMB + WASDQE fly loop
+  useEffect(() => {
+    const Down = (Ev) => {
       if (
-        KeysRef.current.size > 0 &&
-        UpdateEditorCamera &&
-        EffectiveProjection === "PERSP"
-      ) {
-        const Cur = LatestSceneRef.current.CompiledScene;
+        Ev.target?.tagName === "INPUT" ||
+        Ev.target?.tagName === "TEXTAREA" ||
+        Ev.target?.isContentEditable
+      )
+        return;
+      KeysRef.current.add(Ev.key.toLowerCase());
+    };
+    const Up = (Ev) => KeysRef.current.delete(Ev.key.toLowerCase());
+    window.addEventListener("keydown", Down);
+    window.addEventListener("keyup", Up);
+
+    let Raf = 0;
+    let Last = performance.now();
+    const Step = (Now) => {
+      const Dt = Math.min(0.05, (Now - Last) / 1000);
+      Last = Now;
+      if (DragRef.current?.Kind === "fly" && KeysRef.current.size && CameraCallback) {
+        const { CameraOrigin, CameraTarget, WorldUp } = CompiledScene;
         const Fwd = NormalizeVec3([
-          Cur.CameraTarget[0] - Cur.CameraOrigin[0],
-          Cur.CameraTarget[1] - Cur.CameraOrigin[1],
-          Cur.CameraTarget[2] - Cur.CameraOrigin[2],
+          CameraTarget[0] - CameraOrigin[0],
+          CameraTarget[1] - CameraOrigin[1],
+          CameraTarget[2] - CameraOrigin[2],
         ]);
         const Right = NormalizeVec3(
           [
-            Fwd[1] * Cur.WorldUp[2] - Fwd[2] * Cur.WorldUp[1],
-            Fwd[2] * Cur.WorldUp[0] - Fwd[0] * Cur.WorldUp[2],
-            Fwd[0] * Cur.WorldUp[1] - Fwd[1] * Cur.WorldUp[0],
+            Fwd[1] * WorldUp[2] - Fwd[2] * WorldUp[1],
+            Fwd[2] * WorldUp[0] - Fwd[0] * WorldUp[2],
+            Fwd[0] * WorldUp[1] - Fwd[1] * WorldUp[0],
           ],
           [1, 0, 0],
         );
-        const Speed = (KeysRef.current.has("Shift") ? 5.2 : 2.2) * Dt;
+        const Speed = (KeysRef.current.has("shift") ? 5.5 : 2.4) * Dt;
         let Move = [0, 0, 0];
-        if (KeysRef.current.has("KeyW"))
-          Move = [Move[0] + Fwd[0] * Speed, Move[1] + Fwd[1] * Speed, Move[2] + Fwd[2] * Speed];
-        if (KeysRef.current.has("KeyS"))
-          Move = [Move[0] - Fwd[0] * Speed, Move[1] - Fwd[1] * Speed, Move[2] - Fwd[2] * Speed];
-        if (KeysRef.current.has("KeyD"))
-          Move = [Move[0] + Right[0] * Speed, Move[1] + Right[1] * Speed, Move[2] + Right[2] * Speed];
-        if (KeysRef.current.has("KeyA"))
-          Move = [Move[0] - Right[0] * Speed, Move[1] - Right[1] * Speed, Move[2] - Right[2] * Speed];
-        if (KeysRef.current.has("KeyE")) Move[2] += Speed;
-        if (KeysRef.current.has("KeyQ")) Move[2] -= Speed;
+        const Add = (V, S) => {
+          Move = [Move[0] + V[0] * S, Move[1] + V[1] * S, Move[2] + V[2] * S];
+        };
+        if (KeysRef.current.has("w")) Add(Fwd, Speed);
+        if (KeysRef.current.has("s")) Add(Fwd, -Speed);
+        if (KeysRef.current.has("d")) Add(Right, Speed);
+        if (KeysRef.current.has("a")) Add(Right, -Speed);
+        if (KeysRef.current.has("e")) Add([0, 0, 1], Speed);
+        if (KeysRef.current.has("q")) Add([0, 0, 1], -Speed);
         if (Math.hypot(Move[0], Move[1], Move[2]) > 1e-5) {
-          UpdateEditorCamera({
-            Position: Cur.CameraOrigin.map((V, I) => +(V + Move[I]).toFixed(4)),
-            Target: Cur.CameraTarget.map((V, I) => +(V + Move[I]).toFixed(4)),
+          CameraCallback({
+            Position: CameraOrigin.map((C, I) => +(C + Move[I]).toFixed(3)),
+            Target: CameraTarget.map((C, I) => +(C + Move[I]).toFixed(3)),
           });
         }
       }
-
-      const Host = ContainerRef.current;
-      if (Host) {
-        const ScalePct = Math.max(50, Math.min(125, Number(LatestSceneRef.current.Settings?.Scale) || 100)) / 100;
-        const Dpr = Math.min(window.devicePixelRatio || 1, 1.5) * ScalePct;
-        const TargetW = Math.max(64, Math.min(1440, Math.round(Host.clientWidth * Dpr)));
-        const TargetH = Math.max(64, Math.min(900, Math.round(Host.clientHeight * Dpr)));
-        if (Canvas.width !== TargetW || Canvas.height !== TargetH) {
-          Canvas.width = TargetW;
-          Canvas.height = TargetH;
-        }
-      }
-
-      const {
-        CompiledScene: Scene,
-        Debug: ActiveDebug,
-        Settings: ActiveSettings,
-        SelectedIndex: ActiveSelIdx,
-        Selected: ActiveSelId,
-      } = LatestSceneRef.current;
-
-      if (Gl && Program && Uniforms) {
-        Gl.viewport(0, 0, Canvas.width, Canvas.height);
-        Gl.useProgram(Program);
-        Gl.bindVertexArray(Vao);
-
-        Gl.uniform2f(Uniforms.uResolution, Canvas.width, Canvas.height);
-        Gl.uniform3fv(Uniforms.uCamOrigin, Scene.CameraOrigin);
-        Gl.uniform3fv(Uniforms.uCamTarget, Scene.CameraTarget);
-        Gl.uniform3fv(Uniforms.uCamUp, Scene.WorldUp);
-        Gl.uniform1f(Uniforms.uTanHalfFov, Math.tan(Scene.VerticalFovRad * 0.5));
-        Gl.uniform1f(Uniforms.uOrthoHalfHeight, Scene.OrthoHalfHeight);
-        Gl.uniform1f(Uniforms.uExposureGain, Scene.ExposureGain);
-        Gl.uniform1i(Uniforms.uDebugMode, ActiveDebug || 0);
-        Gl.uniform1i(Uniforms.uEnableGi, (ActiveSettings?.GI ?? 2) > 0 ? 1 : 0);
-        Gl.uniform1i(
-          Uniforms.uEnableReflections,
-          (ActiveSettings?.Reflection ?? 2) > 0 ? 1 : 0,
-        );
-        Gl.uniform1i(Uniforms.uSelectedIndex, ActiveSelIdx);
-
-        Gl.uniform3fv(Uniforms.uSunDir, Scene.SunDir);
-        Gl.uniform3fv(Uniforms.uSunIrradiance, Scene.SunIrradiance);
-        Gl.uniform1f(Uniforms.uSunAngularRadius, Scene.SunAngularRadiusRad);
-        Gl.uniform3fv(Uniforms.uSkyRadiance, Scene.SkyRadiance);
-
-        const LightCount = Math.min(MAX_AREA_LIGHTS, Scene.AreaLights.length);
-        for (let I = 0; I < LightCount; ++I) {
-          const L = Scene.AreaLights[I];
-          const Off = I * 4;
-          LightCenterBuf[Off + 0] = L.Center[0];
-          LightCenterBuf[Off + 1] = L.Center[1];
-          LightCenterBuf[Off + 2] = L.Center[2];
-          LightCenterBuf[Off + 3] = L.HalfWidth;
-          LightRadBuf[Off + 0] = L.Radiance[0];
-          LightRadBuf[Off + 1] = L.Radiance[1];
-          LightRadBuf[Off + 2] = L.Radiance[2];
-          LightRadBuf[Off + 3] = L.HalfHeight;
-        }
-        Gl.uniform1i(Uniforms.uAreaLightCount, LightCount);
-        Gl.uniform4fv(Uniforms.uAreaLightCenterHalfW, LightCenterBuf);
-        Gl.uniform4fv(Uniforms.uAreaLightRadHalfH, LightRadBuf);
-
-        const PrimCount = Math.min(MAX_PRIMS, Scene.Primitives.length);
-        for (let I = 0; I < PrimCount; ++I) {
-          const P = Scene.Primitives[I];
-          const Off = I * 4;
-          CenterShapeBuf[Off + 0] = P.Center[0];
-          CenterShapeBuf[Off + 1] = P.Center[1];
-          CenterShapeBuf[Off + 2] = P.Center[2];
-          CenterShapeBuf[Off + 3] = P.Shape;
-
-          const Flags =
-            (P.CastShadows ? 1 : 0) |
-            (P.GiContributor ? 2 : 0) |
-            (P.GlassShell ? 4 : 0);
-          HalfExtShadowBuf[Off + 0] = P.HalfExtents[0];
-          HalfExtShadowBuf[Off + 1] = P.HalfExtents[1];
-          HalfExtShadowBuf[Off + 2] = P.HalfExtents[2];
-          HalfExtShadowBuf[Off + 3] = Flags;
-
-          RotRadBuf[Off + 0] = P.RotationRad[0];
-          RotRadBuf[Off + 1] = P.RotationRad[1];
-          RotRadBuf[Off + 2] = P.RotationRad[2];
-          RotRadBuf[Off + 3] = 0;
-
-          AlbedoMetalBuf[Off + 0] = P.BaseColor[0];
-          AlbedoMetalBuf[Off + 1] = P.BaseColor[1];
-          AlbedoMetalBuf[Off + 2] = P.BaseColor[2];
-          AlbedoMetalBuf[Off + 3] = P.Metallic;
-
-          SpecParamsBuf[Off + 0] = P.Roughness;
-          SpecParamsBuf[Off + 1] = P.DiffuseRoughness;
-          SpecParamsBuf[Off + 2] = P.Anisotropy;
-          SpecParamsBuf[Off + 3] = P.Ior;
-
-          CoatTransBuf[Off + 0] = P.CoatWeight;
-          CoatTransBuf[Off + 1] = P.CoatRoughness;
-          CoatTransBuf[Off + 2] = P.Transmission;
-          CoatTransBuf[Off + 3] = P.Abbe;
-
-          F82EmitBuf[Off + 0] = P.EdgeTintF82[0];
-          F82EmitBuf[Off + 1] = P.EdgeTintF82[1];
-          F82EmitBuf[Off + 2] = P.EdgeTintF82[2];
-          F82EmitBuf[Off + 3] = P.Emission;
-
-          AttenBuf[Off + 0] = P.Attenuation[0];
-          AttenBuf[Off + 1] = P.Attenuation[1];
-          AttenBuf[Off + 2] = P.Attenuation[2];
-          AttenBuf[Off + 3] = 1.0;
-        }
-        Gl.uniform1i(Uniforms.uPrimCount, PrimCount);
-        Gl.uniform4fv(Uniforms.uPrimCenterShape, CenterShapeBuf);
-        Gl.uniform4fv(Uniforms.uPrimHalfExtShadow, HalfExtShadowBuf);
-        Gl.uniform4fv(Uniforms.uPrimRotRad, RotRadBuf);
-        Gl.uniform4fv(Uniforms.uPrimAlbedoMetal, AlbedoMetalBuf);
-        Gl.uniform4fv(Uniforms.uPrimSpecParams, SpecParamsBuf);
-        Gl.uniform4fv(Uniforms.uPrimCoatTrans, CoatTransBuf);
-        Gl.uniform4fv(Uniforms.uPrimF82Emit, F82EmitBuf);
-        Gl.uniform4fv(Uniforms.uPrimAtten, AttenBuf);
-
-        Gl.drawArrays(Gl.TRIANGLES, 0, 3);
-      } else {
-        RenderSoftwareGtxFallback(Canvas, Scene, ActiveSelId);
-      }
-
-      RafId = requestAnimationFrame(RenderFrame);
+      Raf = requestAnimationFrame(Step);
     };
-
-    RafId = requestAnimationFrame(RenderFrame);
+    Raf = requestAnimationFrame(Step);
     return () => {
-      cancelAnimationFrame(RafId);
-      if (Gl && Program) Gl.deleteProgram(Program);
-      if (Gl && Vao) Gl.deleteVertexArray(Vao);
+      cancelAnimationFrame(Raf);
+      window.removeEventListener("keydown", Down);
+      window.removeEventListener("keyup", Up);
     };
-  }, [EffectiveProjection, UpdateEditorCamera, OnFpsSample, View]);
+  }, [CompiledScene, CameraCallback]);
 
-  // Interactive EditorCamera Orbit / Pan / Free-Look / Ray-Pick handlers
-  const HandlePointerDown = (Event) => {
-    Event.currentTarget.focus();
-    const Mode =
-      Event.button === 1 || (Event.button === 0 && Event.shiftKey)
-        ? "pan"
-        : Event.button === 2
-          ? "look"
-          : "orbit";
-    DragRef.current = {
-      PointerId: Event.pointerId,
-      StartX: Event.clientX,
-      StartY: Event.clientY,
-      LastX: Event.clientX,
-      LastY: Event.clientY,
-      Moved: false,
-      Mode,
-      Origin: [...CompiledScene.CameraOrigin],
-      Target: [...CompiledScene.CameraTarget],
+  const ComputePointerRay = (Event) => {
+    const Rect = CanvasRef.current?.getBoundingClientRect();
+    if (!Rect) return null;
+    const U = (Event.clientX - Rect.left) / Math.max(1, Rect.width);
+    const V = (Event.clientY - Rect.top) / Math.max(1, Rect.height);
+    const Aspect = Rect.width / Math.max(1, Rect.height);
+    return {
+      U,
+      V,
+      Aspect,
+      ...ComputeCameraRayAtUv(CompiledScene, U, V, Aspect),
     };
-    Event.currentTarget.setPointerCapture(Event.pointerId);
   };
 
-  const HandlePointerMove = (Event) => {
+  const OnPointerDown = (Event) => {
+    const Canvas = CanvasRef.current;
+    if (!Canvas) return;
+
+    // 1. Check 3D Slate GizmoPRO handle hit on primary button first!
+    if (
+      Event.button === 0 &&
+      !Event.altKey &&
+      EffectiveGizmo &&
+      SelectedGizmoTarget &&
+      BuiltGizmoRef.current
+    ) {
+      const Ray = ComputePointerRay(Event);
+      if (Ray) {
+        const HitHandle = PickGizmoHandle(
+          Ray.RayOrigin,
+          Ray.RayDir,
+          BuiltGizmoRef.current,
+        );
+        if (HitHandle !== GizmoHandle.None) {
+          if (SelectedGizmoTarget.Locked) {
+            SetGizmoReadout("Entity Locked");
+            return;
+          }
+          Canvas.setPointerCapture?.(Event.pointerId);
+          const GizmoDrag = BeginGizmoDrag(
+            HitHandle,
+            Ray.RayOrigin,
+            Ray.RayDir,
+            BuiltGizmoRef.current,
+            SelectedGizmoTarget,
+          );
+          DragRef.current = {
+            Kind: "gizmo",
+            TargetId: SelectedGizmoTarget.Id,
+            TargetKind: SelectedGizmoTarget.Kind,
+            GizmoDrag,
+          };
+          SetActiveHandle(HitHandle);
+          SetGizmoReadout(GIZMO_HANDLE_LABELS[HitHandle] || "");
+          return;
+        }
+      }
+    }
+
+    Canvas.setPointerCapture?.(Event.pointerId);
+    const Kind =
+      Event.button === 2
+        ? "fly"
+        : Event.button === 1 || (Event.button === 0 && Event.shiftKey)
+          ? "pan"
+          : "orbit";
+    DragRef.current = {
+      Kind,
+      StartX: Event.clientX,
+      StartY: Event.clientY,
+      Moved: false,
+      OriginStart: [...CompiledScene.CameraOrigin],
+      TargetStart: [...CompiledScene.CameraTarget],
+    };
+  };
+
+  const OnPointerMove = (Event) => {
     const Drag = DragRef.current;
-    if (!Drag || Drag.PointerId !== Event.pointerId) return;
-    const TotalDist = Math.hypot(
-      Event.clientX - Drag.StartX,
-      Event.clientY - Drag.StartY,
-    );
-    if (TotalDist > 4) Drag.Moved = true;
-    if (!Drag.Moved || !UpdateEditorCamera || EffectiveProjection !== "PERSP")
+
+    // Hover highlight when not dragging
+    if (!Drag) {
+      if (EffectiveGizmo && SelectedGizmoTarget && BuiltGizmoRef.current) {
+        const Ray = ComputePointerRay(Event);
+        const NextHover = Ray
+          ? PickGizmoHandle(Ray.RayOrigin, Ray.RayDir, BuiltGizmoRef.current)
+          : GizmoHandle.None;
+        if (NextHover !== HoveredHandle) SetHoveredHandle(NextHover);
+      } else if (HoveredHandle !== GizmoHandle.None) {
+        SetHoveredHandle(GizmoHandle.None);
+      }
       return;
+    }
 
-    const Dx = Event.clientX - Drag.LastX;
-    const Dy = Event.clientY - Drag.LastY;
-    Drag.LastX = Event.clientX;
-    Drag.LastY = Event.clientY;
-
-    const CurOrigin = LatestSceneRef.current.CompiledScene.CameraOrigin;
-    const CurTarget = LatestSceneRef.current.CompiledScene.CameraTarget;
-    const Offset = [
-      CurOrigin[0] - CurTarget[0],
-      CurOrigin[1] - CurTarget[1],
-      CurOrigin[2] - CurTarget[2],
-    ];
-    const Dist = Math.max(0.4, Math.hypot(Offset[0], Offset[1], Offset[2]));
-
-    if (Drag.Mode === "orbit") {
-      let Azimuth = Math.atan2(Offset[0], Offset[1]);
-      let Elevation = Math.asin(Math.max(-0.98, Math.min(0.98, Offset[2] / Dist)));
-      Azimuth -= Dx * 0.0065;
-      Elevation = Math.max(-1.35, Math.min(1.42, Elevation + Dy * 0.0055));
-      const CosEl = Math.cos(Elevation);
-      const NextOrigin = [
-        +(CurTarget[0] + Dist * CosEl * Math.sin(Azimuth)).toFixed(4),
-        +(CurTarget[1] + Dist * CosEl * Math.cos(Azimuth)).toFixed(4),
-        +(CurTarget[2] + Dist * Math.sin(Elevation)).toFixed(4),
-      ];
-      UpdateEditorCamera({ Position: NextOrigin, Target: CurTarget });
-    } else if (Drag.Mode === "pan") {
-      const Fwd = NormalizeVec3([
-        CurTarget[0] - CurOrigin[0],
-        CurTarget[1] - CurOrigin[1],
-        CurTarget[2] - CurOrigin[2],
-      ]);
-      const Right = NormalizeVec3(
-        [Fwd[1], -Fwd[0], 0],
-        [1, 0, 0],
+    // Active 3D GizmoPRO drag
+    if (Drag.Kind === "gizmo") {
+      const Ray = ComputePointerRay(Event);
+      if (!Ray) return;
+      const Solved = SolveGizmoDrag(
+        Drag.GizmoDrag,
+        Ray.RayOrigin,
+        Ray.RayDir,
+        Event.ctrlKey || Event.metaKey,
       );
+      SetGizmoReadout(Solved.Readout);
+      OnTransformEntity?.(Drag.TargetId, Solved, Drag.TargetKind);
+      return;
+    }
+
+    const Dx = Event.clientX - Drag.StartX;
+    const Dy = Event.clientY - Drag.StartY;
+    if (Math.hypot(Dx, Dy) > 4) Drag.Moved = true;
+    if (!Drag.Moved || !CameraCallback || EffectiveProjection !== "PERSP") return;
+
+    const Rel = [
+      Drag.OriginStart[0] - Drag.TargetStart[0],
+      Drag.OriginStart[1] - Drag.TargetStart[1],
+      Drag.OriginStart[2] - Drag.TargetStart[2],
+    ];
+    const Dist = Math.max(0.4, Math.hypot(Rel[0], Rel[1], Rel[2]));
+
+    if (Drag.Kind === "orbit") {
+      const Az = Math.atan2(Rel[1], Rel[0]) - Dx * 0.0065;
+      const El = Math.max(
+        -1.38,
+        Math.min(1.38, Math.asin(Math.max(-1, Math.min(1, Rel[2] / Dist))) + Dy * 0.0055),
+      );
+      const CosEl = Math.cos(El);
+      CameraCallback({
+        Position: [
+          +(Drag.TargetStart[0] + Dist * CosEl * Math.cos(Az)).toFixed(3),
+          +(Drag.TargetStart[1] + Dist * CosEl * Math.sin(Az)).toFixed(3),
+          +(Drag.TargetStart[2] + Dist * Math.sin(El)).toFixed(3),
+        ],
+        Target: Drag.TargetStart,
+      });
+    } else if (Drag.Kind === "fly") {
+      const FwdStart = NormalizeVec3([
+        Drag.TargetStart[0] - Drag.OriginStart[0],
+        Drag.TargetStart[1] - Drag.OriginStart[1],
+        Drag.TargetStart[2] - Drag.OriginStart[2],
+      ]);
+      const Yaw = Math.atan2(FwdStart[1], FwdStart[0]) - Dx * 0.0045;
+      const Pitch = Math.max(
+        -1.42,
+        Math.min(1.42, Math.asin(Math.max(-1, Math.min(1, FwdStart[2]))) - Dy * 0.0045),
+      );
+      const CosP = Math.cos(Pitch);
+      const NextFwd = [CosP * Math.cos(Yaw), CosP * Math.sin(Yaw), Math.sin(Pitch)];
+      CameraCallback({
+        Position: Drag.OriginStart,
+        Target: [
+          +(Drag.OriginStart[0] + NextFwd[0] * Dist).toFixed(3),
+          +(Drag.OriginStart[1] + NextFwd[1] * Dist).toFixed(3),
+          +(Drag.OriginStart[2] + NextFwd[2] * Dist).toFixed(3),
+        ],
+      });
+    } else if (Drag.Kind === "pan") {
+      const Fwd = NormalizeVec3([
+        Drag.TargetStart[0] - Drag.OriginStart[0],
+        Drag.TargetStart[1] - Drag.OriginStart[1],
+        Drag.TargetStart[2] - Drag.OriginStart[2],
+      ]);
+      const Right = NormalizeVec3([Fwd[1], -Fwd[0], 0], [1, 0, 0]);
       const Up = NormalizeVec3([
         Right[1] * Fwd[2] - Right[2] * Fwd[1],
         Right[2] * Fwd[0] - Right[0] * Fwd[2],
         Right[0] * Fwd[1] - Right[1] * Fwd[0],
       ]);
-      const Scale = Dist * 0.0018;
+      const Scale = Dist * 0.0016;
       const Shift = [
-        (-Dx * Right[0] + Dy * Up[0]) * Scale,
-        (-Dx * Right[1] + Dy * Up[1]) * Scale,
-        (-Dx * Right[2] + Dy * Up[2]) * Scale,
+        -Right[0] * Dx * Scale + Up[0] * Dy * Scale,
+        -Right[1] * Dx * Scale + Up[1] * Dy * Scale,
+        -Right[2] * Dx * Scale + Up[2] * Dy * Scale,
       ];
-      UpdateEditorCamera({
-        Position: CurOrigin.map((V, I) => +(V + Shift[I]).toFixed(4)),
-        Target: CurTarget.map((V, I) => +(V + Shift[I]).toFixed(4)),
-      });
-    } else if (Drag.Mode === "look") {
-      const LookVec = [
-        CurTarget[0] - CurOrigin[0],
-        CurTarget[1] - CurOrigin[1],
-        CurTarget[2] - CurOrigin[2],
-      ];
-      let Yaw = Math.atan2(LookVec[0], LookVec[1]) + Dx * 0.0045;
-      let Pitch =
-        Math.asin(Math.max(-0.98, Math.min(0.98, LookVec[2] / Dist))) -
-        Dy * 0.0045;
-      Pitch = Math.max(-1.35, Math.min(1.35, Pitch));
-      const CosP = Math.cos(Pitch);
-      UpdateEditorCamera({
-        Position: CurOrigin,
-        Target: [
-          +(CurOrigin[0] + Dist * CosP * Math.sin(Yaw)).toFixed(4),
-          +(CurOrigin[1] + Dist * CosP * Math.cos(Yaw)).toFixed(4),
-          +(CurOrigin[2] + Dist * Math.sin(Pitch)).toFixed(4),
-        ],
+      CameraCallback({
+        Position: Drag.OriginStart.map((C, I) => +(C + Shift[I]).toFixed(3)),
+        Target: Drag.TargetStart.map((C, I) => +(C + Shift[I]).toFixed(3)),
       });
     }
   };
 
-  const HandlePointerUp = (Event) => {
+  const OnPointerUp = (Event) => {
     const Drag = DragRef.current;
     DragRef.current = null;
-    if (!Drag || Drag.Moved || Event.button !== 0) return;
-
-    const Rect = Event.currentTarget.getBoundingClientRect();
-    const U = (Event.clientX - Rect.left) / Math.max(1, Rect.width);
-    const V = (Event.clientY - Rect.top) / Math.max(1, Rect.height);
-    const HitId = PickSceneEntityAtUv(
-      CompiledScene,
-      U,
-      V,
-      Rect.width / Math.max(1, Rect.height),
-    );
-    if (HitId && Select) Select(HitId);
+    if (Drag?.Kind === "gizmo") {
+      SetActiveHandle(GizmoHandle.None);
+      SetGizmoReadout("");
+      return;
+    }
+    if (Drag && !Drag.Moved && Event.button === 0 && CanvasRef.current) {
+      const Rect = CanvasRef.current.getBoundingClientRect();
+      const U = (Event.clientX - Rect.left) / Math.max(1, Rect.width);
+      const V = (Event.clientY - Rect.top) / Math.max(1, Rect.height);
+      const HitId = PickSceneEntityAtUv(
+        CompiledScene,
+        U,
+        V,
+        Rect.width / Math.max(1, Rect.height),
+      );
+      if (HitId && SelectCallback) SelectCallback(HitId);
+    }
   };
 
-  const HandleWheel = (Event) => {
-    if (!UpdateEditorCamera || EffectiveProjection !== "PERSP") return;
-    Event.preventDefault();
-    const { CameraOrigin: CurO, CameraTarget: CurT } =
-      LatestSceneRef.current.CompiledScene;
-    const Offset = [CurO[0] - CurT[0], CurO[1] - CurT[1], CurO[2] - CurT[2]];
-    const Dist = Math.hypot(Offset[0], Offset[1], Offset[2]);
-    const NextDist = Math.max(
-      0.55,
-      Math.min(28.0, Dist * Math.exp(Event.deltaY * 0.0011)),
+  const OnWheel = (Event) => {
+    if (!CameraCallback || EffectiveProjection !== "PERSP") return;
+    const { CameraOrigin, CameraTarget } = CompiledScene;
+    const Fwd = NormalizeVec3([
+      CameraTarget[0] - CameraOrigin[0],
+      CameraTarget[1] - CameraOrigin[1],
+      CameraTarget[2] - CameraOrigin[2],
+    ]);
+    const Dist = Math.hypot(
+      CameraTarget[0] - CameraOrigin[0],
+      CameraTarget[1] - CameraOrigin[1],
+      CameraTarget[2] - CameraOrigin[2],
     );
-    const Scale = NextDist / Math.max(1e-4, Dist);
-    UpdateEditorCamera({
-      Position: CurT.map((T, I) => +(T + Offset[I] * Scale).toFixed(4)),
-      Target: CurT,
-    });
+    const Step = -Math.sign(Event.deltaY) * Math.max(0.18, Dist * 0.11);
+    const NextOrigin = CameraOrigin.map((C, I) => +(C + Fwd[I] * Step).toFixed(3));
+    if (
+      Math.hypot(
+        CameraTarget[0] - NextOrigin[0],
+        CameraTarget[1] - NextOrigin[1],
+        CameraTarget[2] - NextOrigin[2],
+      ) > 0.35
+    ) {
+      CameraCallback({ Position: NextOrigin, Target: CameraTarget });
+    }
   };
 
-  const CameraMovedFromCanonical = useMemo(() => {
-    const P = CompiledScene.CameraOrigin;
-    const C = CanonicalEditorCamera.Position;
-    return Math.hypot(P[0] - C[0], P[1] - C[1], P[2] - C[2]) > 0.02;
-  }, [CompiledScene.CameraOrigin]);
+  const CursorStyle =
+    ActiveHandle !== GizmoHandle.None
+      ? "grabbing"
+      : HoveredHandle !== GizmoHandle.None
+        ? "grab"
+        : "crosshair";
 
   return (
     <div
-      ref={ContainerRef}
-      className="checker-pane gtx-world-pane"
-      role="region"
-      tabIndex={0}
-      aria-label={
-        View === 1
-          ? "Tier 1 GTX World Viewport"
-          : "Secondary Tier 1 GTX World Viewport"
-      }
-      onContextMenu={(Event) => Event.preventDefault()}
-      onPointerDown={HandlePointerDown}
-      onPointerMove={HandlePointerMove}
-      onPointerUp={HandlePointerUp}
-      onWheel={HandleWheel}
-      onMouseEnter={() => SetHoveredHud(true)}
-      onMouseLeave={() => {
-        SetHoveredHud(false);
-        KeysRef.current.clear();
-      }}
-      onBlur={() => KeysRef.current.clear()}
-      onKeyDown={(Event) => {
-        if (
-          ["KeyW", "KeyA", "KeyS", "KeyD", "KeyQ", "KeyE", "ShiftLeft", "ShiftRight"].includes(
-            Event.code,
-          )
-        ) {
-          KeysRef.current.add(Event.code.startsWith("Shift") ? "Shift" : Event.code);
-        } else if (Event.key === "Home" && UpdateEditorCamera) {
-          UpdateEditorCamera({
-            Position: [...CanonicalEditorCamera.Position],
-            Target: [...CanonicalEditorCamera.Target],
-          });
-        }
-      }}
-      onKeyUp={(Event) => {
-        KeysRef.current.delete(
-          Event.code.startsWith("Shift") ? "Shift" : Event.code,
-        );
-      }}
-      style={{
-        position: "relative",
-        width: "100%",
-        height: "100%",
-        overflow: "hidden",
-        outline: "none",
-        background: "#0e1014",
-        cursor: "grab",
-        userSelect: "none",
-      }}
+      className="gtx-world-stage"
+      onContextMenu={(Ev) => Ev.preventDefault()}
     >
       <canvas
         ref={CanvasRef}
-        data-gtx-viewport={View}
-        style={{
-          width: "100%",
-          height: "100%",
-          display: "block",
-        }}
+        className="gtx-world-canvas"
+        aria-label="Tier 1 GTX World Viewport"
+        style={{ cursor: CursorStyle }}
+        onPointerDown={OnPointerDown}
+        onPointerMove={OnPointerMove}
+        onPointerUp={OnPointerUp}
+        onWheel={OnWheel}
       />
-
-      {/* Bottom-left native mirror caption matching C++ ViewportPanel */}
-      <div
-        style={{
-          position: "absolute",
-          left: 12,
-          bottom: 10,
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          pointerEvents: "none",
-          fontSize: 10,
-          letterSpacing: "0.06em",
-          color: "rgba(224, 226, 232, 0.78)",
-          textShadow: "0 1px 2px rgba(0,0,0,0.75)",
-        }}
-      >
-        <span>
-          HTML C++ MIRROR · TIER 1 GTX WORLD RASTER ({EffectiveProjection})
-        </span>
-        {HoveredHud && EffectiveProjection === "PERSP" && (
-          <span style={{ color: "rgba(182, 188, 198, 0.72)" }}>
-            Drag: Orbit · Shift+Drag: Pan · Wheel: Dolly · Right+WASD: Fly · Click: Pick
-          </span>
-        )}
-      </div>
-
-      {/* Reset EditorCamera button when camera moved away from C++ canonical pose */}
-      {View === 1 && CameraMovedFromCanonical && UpdateEditorCamera && (
-        <button
-          type="button"
-          onClick={(Event) => {
-            Event.stopPropagation();
-            UpdateEditorCamera({
-              Position: [...CanonicalEditorCamera.Position],
-              Target: [...CanonicalEditorCamera.Target],
-            });
-          }}
-          style={{
-            position: "absolute",
-            top: 10,
-            right: 12,
-            padding: "4px 10px",
-            borderRadius: 999,
-            border: "1px solid rgba(232, 194, 122, 0.45)",
-            background: "rgba(18, 18, 20, 0.82)",
-            color: "#eff4cf",
-            fontSize: 10.5,
-            cursor: "pointer",
-          }}
-          title="Reset EditorCamera to exact C++ canonical pose (0.00, -3.55, 0.42)"
-        >
-          Reset EditorCamera
-        </button>
+      {(ActiveHandle !== GizmoHandle.None || HoveredHandle !== GizmoHandle.None || GizmoReadout) && (
+        <div className="gtx-gizmo-readout" role="status" aria-live="polite">
+          <span className="gtx-gizmo-dot" />
+          <strong>
+            {GizmoReadout || GIZMO_HANDLE_LABELS[HoveredHandle] || "GizmoPRO"}
+          </strong>
+          {ActiveHandle !== GizmoHandle.None && (
+            <small>Hold Ctrl to snap</small>
+          )}
+        </div>
       )}
-
-      {/* Bottom-right Z-up X/Y/Z orientation triad matching C++ ViewportPanel */}
-      <svg
-        width="44"
-        height="44"
-        viewBox="0 0 44 44"
-        aria-hidden="true"
-        style={{
-          position: "absolute",
-          right: 10,
-          bottom: 8,
-          pointerEvents: "none",
-          opacity: 0.9,
-        }}
+      {ShaderError && (
+        <div className="gtx-shader-error" role="alert">
+          GTX Shader Error: {ShaderError}
+        </div>
+      )}
+      <button
+        type="button"
+        className="gtx-camera-home"
+        title="Reset EditorCamera to C++ ShowcaseWorldSceneBundle Pose"
+        onClick={() =>
+          CameraCallback?.({
+            Position: [...CanonicalEditorCamera.Position],
+            Target: [...CanonicalEditorCamera.Target],
+          })
+        }
       >
-        <line x1="22" y1="26" x2="36" y2="26" stroke="#e05a5a" strokeWidth="1.6" />
-        <text x="37" y="29" fill="#e05a5a" fontSize="8" fontFamily="sans-serif">
-          X
-        </text>
-        <line x1="22" y1="26" x2="12" y2="34" stroke="#5ac878" strokeWidth="1.6" />
-        <text x="5" y="38" fill="#5ac878" fontSize="8" fontFamily="sans-serif">
-          Y
-        </text>
-        <line x1="22" y1="26" x2="22" y2="10" stroke="#5aa2e8" strokeWidth="1.6" />
-        <text x="19" y="8" fill="#5aa2e8" fontSize="8" fontFamily="sans-serif">
-          Z
-        </text>
-        <circle cx="22" cy="26" r="2.2" fill="#d8dce4" />
-      </svg>
+        Reset Camera
+      </button>
     </div>
   );
 }
