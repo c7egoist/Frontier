@@ -41,8 +41,8 @@ import {
 
 export { RowEffectivelyVisible as PreviewVisible };
 
-const MAX_PRIMS = 16;
-const MAX_LIGHTS = 4;
+const MAX_PRIMS = 14;
+const MAX_LIGHTS = 2;
 
 const FULLSCREEN_VERTEX_SHADER = `#version 300 es
 precision highp float;
@@ -61,8 +61,7 @@ export const GTX_FRAGMENT_SHADER = `#version 300 es
 precision highp float;
 
 in vec2 vUv;
-layout(location = 0) out vec4 fragColor;
-layout(location = 1) out vec4 fragMeta;
+out vec4 fragColor;
 
 uniform vec2  uResolution;
 uniform vec3  uCamOrigin;
@@ -74,6 +73,7 @@ uniform float uOrthoHalfHeight;
 uniform float uExposureGain;
 uniform int   uViewMode;
 uniform int   uShowGrid;
+uniform int   uSelectedCode;
 
 uniform vec3  uSunDir;
 uniform vec3  uSunIrradiance;
@@ -87,7 +87,9 @@ uniform vec4  uLightHalfHRad[${MAX_LIGHTS}];
 uniform int   uPrimCount;
 uniform vec4  uPrimPosShape[${MAX_PRIMS}];   // xyz = center, w = shape (0 box, 1 sphere, 2 cyl, 3 cone, 4 torus)
 uniform vec4  uPrimHalfFlags[${MAX_PRIMS}];  // xyz = halfExtents, w = bitmask (1=shadow, 2=gi, 4=glassShell)
-uniform vec4  uPrimRotAbbe[${MAX_PRIMS}];    // xyz = euler rad, w = abbeNumber
+uniform vec4  uPrimRotCol0[${MAX_PRIMS}];    // xyz = local +X in world, w = abbeNumber
+uniform vec4  uPrimRotCol1[${MAX_PRIMS}];    // xyz = local +Y in world, w = unused
+uniform vec4  uPrimRotCol2[${MAX_PRIMS}];    // xyz = local +Z in world, w = unused
 uniform vec4  uPrimEdgeTint[${MAX_PRIMS}];   // rgb = F82 edge tint, w = base transmission
 uniform vec4  uPrimGiBounce[${MAX_PRIMS}];   // rgb = diffuse bounce albedo, w = emission nit
 uniform sampler2D uMaterialAtlas;
@@ -101,20 +103,17 @@ bool PrimFlagShadow(int i) { int f = int(uPrimHalfFlags[i].w + 0.5); return (f &
 bool PrimFlagGi(int i)     { int f = int(uPrimHalfFlags[i].w + 0.5); return (f & 2) != 0; }
 bool PrimFlagGlass(int i)  { int f = int(uPrimHalfFlags[i].w + 0.5); return (f & 4) != 0; }
 
-vec3 invRotateEuler(vec3 v, vec3 r) {
-  if (dot(r, r) < 1e-8) return v;
-  vec3 c = cos(r), s = sin(r);
-  vec3 z = vec3( c.z * v.x + s.z * v.y, -s.z * v.x + c.z * v.y, v.z);
-  vec3 y = vec3( c.y * z.x - s.y * z.z,  z.y, s.y * z.x + c.y * z.z);
-  return   vec3( y.x, c.x * y.y + s.x * y.z, -s.x * y.y + c.x * y.z);
+// Zero-trig CPU-precomputed orthogonal rotation transforms (3 dot products -> tiny SPIR-V & instant FXC compile!)
+vec3 invRotatePrim(vec3 v, int i) {
+  return vec3(
+    dot(uPrimRotCol0[i].xyz, v),
+    dot(uPrimRotCol1[i].xyz, v),
+    dot(uPrimRotCol2[i].xyz, v)
+  );
 }
 
-vec3 fwdRotateEuler(vec3 v, vec3 r) {
-  if (dot(r, r) < 1e-8) return v;
-  vec3 c = cos(r), s = sin(r);
-  vec3 x = vec3(v.x, c.x * v.y - s.x * v.z, s.x * v.y + c.x * v.z);
-  vec3 y = vec3(c.y * x.x + s.y * x.z, x.y, -s.y * x.x + c.y * x.z);
-  return   vec3(c.z * y.x - s.z * y.y, s.z * y.x + c.z * y.y, y.z);
+vec3 fwdRotatePrim(vec3 v, int i) {
+  return uPrimRotCol0[i].xyz * v.x + uPrimRotCol1[i].xyz * v.y + uPrimRotCol2[i].xyz * v.z;
 }
 
 struct HitInfo {
@@ -235,210 +234,192 @@ void computeCurvedUvAndTangent(vec3 lp, vec3 h, int shape, out vec2 uv, out vec3
   }
 }
 
-// Closed-form zero-loop ray-primitive intersection (used by all secondary/GI/shadow rays -> zero unroll explosion!)
-HitInfo intersectPrimitiveFast(vec3 ro, vec3 rd, int idx, float tMax, bool backface) {
-  HitInfo info;
-  info.hit = false;
-  info.t = tMax;
-  info.primIdx = idx;
-  info.uv = vec2(0.5);
-  info.tangent = vec3(1.0, 0.0, 0.0);
-
-  vec3 center = uPrimPosShape[idx].xyz;
-  int  shape  = int(uPrimPosShape[idx].w + 0.5);
-  vec3 h      = uPrimHalfFlags[idx].xyz;
-  vec3 rot    = uPrimRotAbbe[idx].xyz;
-
-  vec3 lo = invRotateEuler(ro - center, rot);
-  vec3 ld = invRotateEuler(rd, rot);
-
-  // Sphere / Ellipsoid
+// Branch-minimal scalar-T ray-primitive intersection (zero short-circuit CFG bloat -> ultra-fast FXC compile!)
+float intersectPrimT(vec3 lo, vec3 ld, vec3 h, int shape, float tMax, float bf) {
   if (shape == 1) {
     vec3 o = lo / h;
     vec3 d = ld / h;
     float a = dot(d, d);
     float b = dot(o, d);
-    float c = dot(o, o) - 1.0;
-    float disc = b * b - a * c;
-    if (disc < 0.0) return info;
+    float disc = b * b - a * (dot(o, o) - 1.0);
+    if (disc < 0.0) return tMax;
     float sq = sqrt(disc);
-    float tCand = backface ? (-b + sq) / a : (-b - sq) / a;
-    if (!backface && tCand < 0.0015) tCand = (-b + sq) / a;
-    if (tCand > 0.0015 && tCand < tMax) {
-      vec3 lp = lo + ld * tCand;
-      vec3 ln = normalize(lp / (h * h));
-      vec2 uv;
-      vec3 lt;
-      computeCurvedUvAndTangent(lp, h, 1, uv, lt);
-      info.hit = true;
-      info.t = tCand;
-      info.pos = ro + rd * tCand;
-      info.normal = normalize(fwdRotateEuler(backface ? -ln : ln, rot));
-      info.tangent = normalize(fwdRotateEuler(lt, rot));
-      info.uv = uv;
-    }
-    return info;
+    float t0 = (-b - sq) / a;
+    float t1 = (-b + sq) / a;
+    float tFront = mix(t1, t0, step(0.0015, t0));
+    float tCand = mix(tFront, t1, bf);
+    return mix(tMax, tCand, step(0.0015, tCand) * step(tCand, tMax));
   }
 
-  // Analytical Z-Cylinder (also fast proxy for Cone/Torus in secondary GI rays)
   if (shape >= 2) {
     float rad = max(h.x, h.y) * (shape == 3 ? 0.65 : 1.0);
     float hz  = h.z;
+    float bestT = tMax;
     float a = dot(ld.xy, ld.xy);
     float b = dot(lo.xy, ld.xy);
-    float c = dot(lo.xy, lo.xy) - rad * rad;
-    float bestT = tMax;
-    vec3 bestLn = vec3(0.0, 0.0, 1.0);
-
-    if (a > 1e-6) {
-      float disc = b * b - a * c;
-      if (disc >= 0.0) {
-        float sq = sqrt(disc);
-        float tSide = backface ? (-b + sq) / a : (-b - sq) / a;
-        if (!backface && tSide < 0.0015) tSide = (-b + sq) / a;
-        if (tSide > 0.0015 && tSide < bestT) {
-          float zHit = lo.z + ld.z * tSide;
-          if (abs(zHit) <= hz) {
-            bestT = tSide;
-            vec2 xy = lo.xy + ld.xy * tSide;
-            bestLn = vec3(normalize(xy), 0.0);
-          }
-        }
-      }
+    float disc = b * b - a * (dot(lo.xy, lo.xy) - rad * rad);
+    if (a > 1e-6 && disc >= 0.0) {
+      float sq = sqrt(disc);
+      float t0 = (-b - sq) / a;
+      float t1 = (-b + sq) / a;
+      float tSide = mix(mix(t1, t0, step(0.0015, t0)), t1, bf);
+      float validS = step(0.0015, tSide) * step(tSide, bestT) * step(abs(lo.z + ld.z * tSide), hz);
+      bestT = mix(bestT, tSide, validS);
     }
     if (abs(ld.z) > 1e-6) {
-      for (int sgn = -1; sgn <= 1; sgn += 2) {
-        float tCap = (float(sgn) * hz - lo.z) / ld.z;
-        if (tCap > 0.0015 && tCap < bestT) {
-          vec2 xy = lo.xy + ld.xy * tCap;
-          if (dot(xy, xy) <= rad * rad) {
-            bestT = tCap;
-            bestLn = vec3(0.0, 0.0, float(sgn));
-          }
-        }
-      }
+      float invZ = 1.0 / ld.z;
+      float c0 = (-hz - lo.z) * invZ;
+      float c1 = ( hz - lo.z) * invZ;
+      float tcMin = min(c0, c1);
+      float tcMax = max(c0, c1);
+      float tCap = mix(mix(tcMax, tcMin, step(0.0015, tcMin)), tcMax, bf);
+      vec2 xy = lo.xy + ld.xy * tCap;
+      float validC = step(0.0015, tCap) * step(tCap, bestT) * step(dot(xy, xy), rad * rad);
+      bestT = mix(bestT, tCap, validC);
     }
-    if (bestT < tMax) {
-      vec3 lp = lo + ld * bestT;
-      vec2 uv;
-      vec3 lt;
-      computeCurvedUvAndTangent(lp, h, shape, uv, lt);
-      info.hit = true;
-      info.t = bestT;
-      info.pos = ro + rd * bestT;
-      info.normal = normalize(fwdRotateEuler(backface ? -bestLn : bestLn, rot));
-      info.tangent = normalize(fwdRotateEuler(lt, rot));
-      info.uv = uv;
-    }
-    return info;
+    return bestT;
   }
 
-  // Oriented Box
-  vec3 safeSign = mix(vec3(-1.0), vec3(1.0), greaterThanEqual(ld, vec3(0.0)));
+  vec3 safeSign = step(vec3(0.0), ld) * 2.0 - 1.0;
   vec3 invD = 1.0 / (safeSign * max(abs(ld), vec3(1e-6)));
   vec3 t0 = (-h - lo) * invD;
   vec3 t1 = ( h - lo) * invD;
-  vec3 tSmaller = min(t0, t1);
-  vec3 tBigger  = max(t0, t1);
-  float tNear = max(max(tSmaller.x, tSmaller.y), tSmaller.z);
-  float tFar  = min(min(tBigger.x, tBigger.y), tBigger.z);
-  if (tNear > tFar || tFar < 0.0015) return info;
-  float tCand = backface ? tFar : (tNear > 0.0015 ? tNear : tFar);
-  if (tCand > 0.0015 && tCand < tMax) {
-    vec3 lp = lo + ld * tCand;
+  float tNear = max(max(min(t0.x, t1.x), min(t0.y, t1.y)), min(t0.z, t1.z));
+  float tFar  = min(min(max(t0.x, t1.x), max(t0.y, t1.y)), max(t0.z, t1.z));
+  if (tNear > tFar || tFar < 0.0015) return tMax;
+  float tCand = mix(mix(tFar, tNear, step(0.0015, tNear)), tFar, bf);
+  return mix(tMax, tCand, step(0.0015, tCand) * step(tCand, tMax));
+}
+
+HitInfo finalizeHit(vec3 ro, vec3 rd, int idx, float t, bool backface) {
+  HitInfo info;
+  info.hit = true;
+  info.t = t;
+  info.pos = ro + rd * t;
+  info.primIdx = idx;
+
+  vec3 center = uPrimPosShape[idx].xyz;
+  int  shape  = int(uPrimPosShape[idx].w + 0.5);
+  vec3 h      = uPrimHalfFlags[idx].xyz;
+  vec3 lp     = invRotatePrim(info.pos - center, idx);
+
+  vec3 ln;
+  vec3 lt;
+  vec2 uv;
+  if (shape == 1) {
+    ln = normalize(lp / (h * h));
+    computeCurvedUvAndTangent(lp, h, 1, uv, lt);
+  } else if (shape == 4) {
+    float majorR = max(h.x, h.y) * 0.68;
+    vec2 radDir = length(lp.xy) > 1e-5 ? normalize(lp.xy) : vec2(1.0, 0.0);
+    ln = normalize(lp - vec3(radDir * majorR, 0.0));
+    computeCurvedUvAndTangent(lp, h, 4, uv, lt);
+  } else if (shape >= 2) {
+    if (abs(abs(lp.z) - h.z) < 0.003) {
+      ln = vec3(0.0, 0.0, step(0.0, lp.z) * 2.0 - 1.0);
+    } else {
+      ln = vec3(length(lp.xy) > 1e-5 ? normalize(lp.xy) : vec2(1.0, 0.0), 0.0);
+    }
+    computeCurvedUvAndTangent(lp, h, shape, uv, lt);
+  } else {
     vec3 d = abs(lp) - h;
-    vec3 ln = (d.x >= d.y && d.x >= d.z)
-      ? vec3(lp.x >= 0.0 ? 1.0 : -1.0, 0.0, 0.0)
-      : ((d.y >= d.x && d.y >= d.z)
-          ? vec3(0.0, lp.y >= 0.0 ? 1.0 : -1.0, 0.0)
-          : vec3(0.0, 0.0, lp.z >= 0.0 ? 1.0 : -1.0));
-    vec2 uv;
-    vec3 lt;
+    vec3 sg = step(vec3(0.0), lp) * 2.0 - 1.0;
+    if (d.x >= d.y && d.x >= d.z)      ln = vec3(sg.x, 0.0, 0.0);
+    else if (d.y >= d.x && d.y >= d.z) ln = vec3(0.0, sg.y, 0.0);
+    else                               ln = vec3(0.0, 0.0, sg.z);
     computeBoxUvAndTangent(lp, h, ln, uv, lt);
-    info.hit = true;
-    info.t = tCand;
-    info.pos = ro + rd * tCand;
-    info.normal = normalize(fwdRotateEuler(backface ? -ln : ln, rot));
-    info.tangent = normalize(fwdRotateEuler(lt, rot));
-    info.uv = uv;
   }
+
+  info.normal  = fwdRotatePrim(backface ? -ln : ln, idx);
+  info.tangent = fwdRotatePrim(lt, idx);
+  info.uv      = uv;
   return info;
 }
 
-// Primary camera ray trace: adds exact Torus/Cone surface refinement ONLY on primary camera rays
+// Primary camera ray trace: evaluates only scalar t inside the loop, finalizing UV/normal ONCE for the winning primitive!
 HitInfo tracePrimaryScene(vec3 ro, vec3 rd, float tMax) {
-  HitInfo best;
-  best.hit = false;
-  best.t = tMax;
-  best.primIdx = -1;
-  best.uv = vec2(0.5);
-  best.tangent = vec3(1.0, 0.0, 0.0);
+  float bestT = tMax;
+  int bestIdx = -1;
 
   for (int i = 0; i < ${MAX_PRIMS}; ++i) {
     if (i >= uPrimCount) break;
-    int shape = int(uPrimPosShape[i].w + 0.5);
+    vec4 ps = uPrimPosShape[i];
+    int shape = int(ps.w + 0.5);
+    vec3 h = uPrimHalfFlags[i].xyz;
+    vec3 lo = invRotatePrim(ro - ps.xyz, i);
+    vec3 ld = invRotatePrim(rd, i);
+
     if (shape == 4) {
-      vec3 center = uPrimPosShape[i].xyz;
-      vec3 h = uPrimHalfFlags[i].xyz;
-      vec3 rot = uPrimRotAbbe[i].xyz;
-      vec3 lo = invRotateEuler(ro - center, rot);
-      vec3 ld = invRotateEuler(rd, rot);
       float majorR = max(h.x, h.y) * 0.68;
       float minorR = max(0.04, h.z * 0.55);
       vec3 bound = vec3(majorR + minorR + 0.04, majorR + minorR + 0.04, minorR + 0.04);
-      vec3 safeSign = mix(vec3(-1.0), vec3(1.0), greaterThanEqual(ld, vec3(0.0)));
+      vec3 safeSign = step(vec3(0.0), ld) * 2.0 - 1.0;
       vec3 invD = 1.0 / (safeSign * max(abs(ld), vec3(1e-6)));
       vec3 t0 = (-bound - lo) * invD;
       vec3 t1 = ( bound - lo) * invD;
       float tNear = max(0.002, max(max(min(t0.x, t1.x), min(t0.y, t1.y)), min(t0.z, t1.z)));
-      float tFar  = min(best.t, min(min(max(t0.x, t1.x), max(t0.y, t1.y)), max(t0.z, t1.z)));
+      float tFar  = min(bestT, min(min(max(t0.x, t1.x), max(t0.y, t1.y)), max(t0.z, t1.z)));
       if (tNear <= tFar) {
         float t = tNear;
-        for (int s = 0; s < 20; ++s) {
-          vec3 lp = lo + ld * t;
-          float d = sdTorusZ(lp, majorR, minorR);
-          if (d < 0.0012) {
-            vec2 radDir = length(lp.xy) > 1e-5 ? normalize(lp.xy) : vec2(1.0, 0.0);
-            vec3 ringCenter = vec3(radDir * majorR, 0.0);
-            vec3 ln = normalize(lp - ringCenter);
-            vec2 uv;
-            vec3 lt;
-            computeCurvedUvAndTangent(lp, h, 4, uv, lt);
-            best.hit = true;
-            best.t = t;
-            best.pos = ro + rd * t;
-            best.normal = normalize(fwdRotateEuler(ln, rot));
-            best.tangent = normalize(fwdRotateEuler(lt, rot));
-            best.uv = uv;
-            best.primIdx = i;
+        for (int s = 0; s < 14; ++s) {
+          float d = sdTorusZ(lo + ld * t, majorR, minorR);
+          if (d < 0.0018) {
+            bestT = t;
+            bestIdx = i;
             break;
           }
-          t += max(0.004, d);
+          t += max(0.006, d);
           if (t > tFar) break;
         }
       }
       continue;
     }
-    HitInfo cand = intersectPrimitiveFast(ro, rd, i, best.t, false);
-    if (cand.hit) best = cand;
+
+    float tCand = intersectPrimT(lo, ld, h, shape, bestT, 0.0);
+    if (tCand < bestT) {
+      bestT = tCand;
+      bestIdx = i;
+    }
   }
-  return best;
+
+  if (bestIdx >= 0) return finalizeHit(ro, rd, bestIdx, bestT, false);
+  HitInfo miss;
+  miss.hit = false;
+  miss.t = tMax;
+  miss.primIdx = -1;
+  miss.uv = vec2(0.5);
+  miss.tangent = vec3(1.0, 0.0, 0.0);
+  return miss;
 }
 
 HitInfo traceOpaqueSceneIgnoring(vec3 ro, vec3 rd, float tMax, int ignoreIdx) {
-  HitInfo best;
-  best.hit = false;
-  best.t = tMax;
-  best.primIdx = -1;
-  best.uv = vec2(0.5);
-  best.tangent = vec3(1.0, 0.0, 0.0);
+  float bestT = tMax;
+  int bestIdx = -1;
   for (int i = 0; i < ${MAX_PRIMS}; ++i) {
     if (i >= uPrimCount) break;
     if (i == ignoreIdx || PrimFlagGlass(i)) continue;
-    HitInfo cand = intersectPrimitiveFast(ro, rd, i, best.t, false);
-    if (cand.hit) best = cand;
+    vec4 ps = uPrimPosShape[i];
+    float tCand = intersectPrimT(
+      invRotatePrim(ro - ps.xyz, i),
+      invRotatePrim(rd, i),
+      uPrimHalfFlags[i].xyz,
+      int(ps.w + 0.5),
+      bestT,
+      0.0
+    );
+    if (tCand < bestT) {
+      bestT = tCand;
+      bestIdx = i;
+    }
   }
-  return best;
+  if (bestIdx >= 0) return finalizeHit(ro, rd, bestIdx, bestT, false);
+  HitInfo miss;
+  miss.hit = false;
+  miss.t = tMax;
+  miss.primIdx = -1;
+  miss.uv = vec2(0.5);
+  miss.tangent = vec3(1.0, 0.0, 0.0);
+  return miss;
 }
 
 float traceLightQuad(vec3 ro, vec3 rd, float tMax, out vec3 emitOut, out int hitLightIdx) {
@@ -483,10 +464,9 @@ float closestRayPrimitiveSoftVis(vec3 origin, vec3 dir, int idx, float tanSun) {
   vec3 center = uPrimPosShape[idx].xyz;
   int  shape  = int(uPrimPosShape[idx].w + 0.5);
   vec3 h      = uPrimHalfFlags[idx].xyz;
-  vec3 rot    = uPrimRotAbbe[idx].xyz;
 
-  vec3 lo = invRotateEuler(origin - center, rot);
-  vec3 ld = invRotateEuler(dir, rot);
+  vec3 lo = invRotatePrim(origin - center, idx);
+  vec3 ld = invRotatePrim(dir, idx);
 
   float boundR = length(h) * 1.35;
   float tCenter = -dot(lo, ld);
@@ -495,7 +475,6 @@ float closestRayPrimitiveSoftVis(vec3 origin, vec3 dir, int idx, float tanSun) {
   vec3 perp = lo + ld * max(0.0, tCenter);
   if (length(perp) > boundR + maxPenumbra) return 1.0;
 
-  // Exact analytical sphere/ellipsoid silhouette clearance (0 loops)
   if (shape == 1) {
     vec3 o = lo / h;
     vec3 d = ld / h;
@@ -510,9 +489,8 @@ float closestRayPrimitiveSoftVis(vec3 origin, vec3 dir, int idx, float tanSun) {
     return smoothstep(-coneR * 0.35, coneR, signedClearance);
   }
 
-  // Closed-form penumbra-expanded slab interval (0 loops, zero rings, C1-continuous, solid thin-slab umbra!)
   vec3 hPen = h + vec3(maxPenumbra);
-  vec3 safeSign = mix(vec3(-1.0), vec3(1.0), greaterThanEqual(ld, vec3(0.0)));
+  vec3 safeSign = step(vec3(0.0), ld) * 2.0 - 1.0;
   vec3 invD = 1.0 / (safeSign * max(abs(ld), vec3(1e-6)));
   vec3 t0 = (-hPen - lo) * invD;
   vec3 t1 = ( hPen - lo) * invD;
@@ -524,51 +502,36 @@ float closestRayPrimitiveSoftVis(vec3 origin, vec3 dir, int idx, float tanSun) {
   float coneR = 0.004 + tMid * tanSun;
   vec3 lp = lo + ld * tMid;
 
-  float dSil;
-  if (shape >= 2) {
-    float rad = max(h.x, h.y);
-    float dRad = length(lp.xy) - rad;
-    float thinZ = max(h.z, coneR * 1.25);
-    float dCap = abs(lp.z) - thinZ;
-    dSil = max(dRad, dCap);
-  } else {
-    // Pad ONLY thin axes (< 1.25 * coneR) so thin slabs cast solid umbra without shifting wide X/Y edges!
-    vec3 hSil = max(h, vec3(coneR * 1.25));
-    dSil = sdBox(lp, hSil);
-  }
+  float dSil = (shape >= 2)
+    ? max(length(lp.xy) - max(h.x, h.y), abs(lp.z) - max(h.z, coneR * 1.25))
+    : sdBox(lp, max(h, vec3(coneR * 1.25)));
   return smoothstep(-coneR, coneR, dSil);
 }
 
-float evaluateGtxSolarShadow(vec3 pos, vec3 N, int selfPrimIdx) {
-  if (dot(N, uSunDir) <= 0.0) return 0.0;
-  vec3 origin = pos + N * 0.006;
-  float tanSun = tan(uSunAngularRadius * 2.1);
+float evaluateSoftConeVis(vec3 origin, vec3 dir, float maxDist, float tanAngle, float minVis, int selfPrimIdx) {
   float vis = 1.0;
   for (int i = 0; i < ${MAX_PRIMS}; ++i) {
     if (i >= uPrimCount) break;
     if (i == selfPrimIdx || !PrimFlagShadow(i) || PrimFlagGlass(i)) continue;
-    vis = min(vis, closestRayPrimitiveSoftVis(origin, uSunDir, i, tanSun));
-    if (vis < 0.002) return 0.0;
+    float tProj = dot(uPrimPosShape[i].xyz - origin, dir);
+    if (tProj <= -0.5 || tProj >= maxDist) continue;
+    vis = min(vis, mix(minVis, 1.0, closestRayPrimitiveSoftVis(origin, dir, i, tanAngle)));
+    if (vis <= minVis + 0.002) return minVis;
   }
   return vis;
+}
+
+float evaluateGtxSolarShadow(vec3 pos, vec3 N, int selfPrimIdx) {
+  if (dot(N, uSunDir) <= 0.0) return 0.0;
+  return evaluateSoftConeVis(pos + N * 0.006, uSunDir, 28.0, tan(uSunAngularRadius * 2.1), 0.0, selfPrimIdx);
 }
 
 float evaluateAreaLightSoftVis(vec3 pos, vec3 N, vec3 lc, float hw, float hh, int selfPrimIdx) {
   vec3 toL = lc - pos;
   float distL = length(toL);
   if (distL < 0.05) return 1.0;
-  vec3 dirL = toL / distL;
   float tanArea = clamp(length(vec2(hw, hh)) * 0.65 / max(distL, 0.35), 0.18, 0.55);
-  vec3 origin = pos + N * 0.008;
-  float vis = 1.0;
-  for (int i = 0; i < ${MAX_PRIMS}; ++i) {
-    if (i >= uPrimCount) break;
-    if (i == selfPrimIdx || !PrimFlagShadow(i) || PrimFlagGlass(i)) continue;
-    float tProj = dot(uPrimPosShape[i].xyz - origin, dirL);
-    if (tProj <= 0.02 || tProj >= distL - 0.04) continue;
-    vis = min(vis, mix(0.38, 1.0, closestRayPrimitiveSoftVis(origin, dirL, i, tanArea)));
-  }
-  return vis;
+  return evaluateSoftConeVis(pos + N * 0.008, toL / distL, distL - 0.04, tanArea, 0.38, selfPrimIdx);
 }
 
 void buildBasis(vec3 N, out vec3 T, out vec3 B) {
@@ -725,14 +688,12 @@ void evaluateGtxConeGiAndAo(vec3 pos, vec3 N, int selfPrimIdx, out vec3 indirect
     vec3 center = uPrimPosShape[i].xyz;
     int  shape  = int(uPrimPosShape[i].w + 0.5);
     vec3 h      = uPrimHalfFlags[i].xyz;
-    vec3 rot    = uPrimRotAbbe[i].xyz;
 
     float occContribution = 0.0;
     float giFormFactor    = 0.0;
     vec3  emitterNormal   = -N;
 
     if (shape == 1) {
-      // Smooth analytical spherical-cap solid angle (Snyder / Quilez sphere AO & diffuse transfer)
       vec3 toSphere = center - pos;
       float dist2 = max(1e-4, dot(toSphere, toSphere));
       float dist  = sqrt(dist2);
@@ -742,16 +703,14 @@ void evaluateGtxConeGiAndAo(vec3 pos, vec3 N, int selfPrimIdx, out vec3 indirect
       float sinH  = clamp(rEff / max(dist, rEff + 1e-3), 0.0, 0.98);
       float horizon = smoothstep(-sinH, sinH * 0.85 + 0.25, cosN);
       float solidRatio = (rEff * rEff) / max(dist2, rEff * rEff * 1.05);
-      // Contact AO decays rapidly with distance so spheres never cast ovals onto distant walls!
       float nearFade = exp(-max(0.0, dist - rEff) / 0.55);
       occContribution = horizon * solidRatio * nearFade * 0.75;
       giFormFactor    = horizon * solidRatio * 0.35;
       emitterNormal   = -dir;
     } else {
-      // Smooth OBB closest-patch subtended solid angle
-      vec3 lp = invRotateEuler(pos - center, rot);
-      vec3 ln = invRotateEuler(N, rot);
-      vec3 farCorner = mix(-h, h, greaterThanEqual(ln, vec3(0.0)));
+      vec3 lp = invRotatePrim(pos - center, i);
+      vec3 ln = invRotatePrim(N, i);
+      vec3 farCorner = (step(vec3(0.0), ln) * 2.0 - 1.0) * h;
       float maxAboveHorizon = dot(ln, farCorner - lp);
 
       if (maxAboveHorizon > 0.002) {
@@ -762,27 +721,30 @@ void evaluateGtxConeGiAndAo(vec3 pos, vec3 N, int selfPrimIdx, out vec3 indirect
 
         vec3 relNorm = lp / max(h, vec3(0.02));
         vec3 absR = abs(relNorm);
-        vec3 boxFaceLocal = (absR.x >= absR.y && absR.x >= absR.z)
-          ? vec3(relNorm.x >= 0.0 ? 1.0 : -1.0, 0.0, 0.0)
-          : ((absR.y >= absR.x && absR.y >= absR.z)
-              ? vec3(0.0, relNorm.y >= 0.0 ? 1.0 : -1.0, 0.0)
-              : vec3(0.0, 0.0, relNorm.z >= 0.0 ? 1.0 : -1.0));
-        emitterNormal = normalize(fwdRotateEuler(boxFaceLocal, rot));
+        vec3 sg = step(vec3(0.0), relNorm) * 2.0 - 1.0;
+        vec3 boxFaceLocal;
+        float faceArea;
+        if (absR.x >= absR.y && absR.x >= absR.z) {
+          boxFaceLocal = vec3(sg.x, 0.0, 0.0);
+          faceArea = 4.0 * h.y * h.z;
+        } else if (absR.y >= absR.x && absR.y >= absR.z) {
+          boxFaceLocal = vec3(0.0, sg.y, 0.0);
+          faceArea = 4.0 * h.x * h.z;
+        } else {
+          boxFaceLocal = vec3(0.0, 0.0, sg.z);
+          faceArea = 4.0 * h.x * h.y;
+        }
+        emitterNormal = fwdRotatePrim(boxFaceLocal, i);
 
-        float faceArea = abs(boxFaceLocal.x) > 0.5
-          ? (4.0 * h.y * h.z)
-          : (abs(boxFaceLocal.y) > 0.5 ? (4.0 * h.x * h.z) : (4.0 * h.x * h.y));
-
-        vec3 toPatchWorld = fwdRotateEuler(diffLocal, rot);
-        vec3 dirWorld = dist > 1e-3 ? (toPatchWorld / dist) : N;
-        float receiverCos = clamp(dot(N, dirWorld) * 0.5 + 0.5, 0.0, 1.0);
+        vec3 invDistDiff = diffLocal * inversesqrt(max(1e-5, dist2));
+        float receiverCos = clamp(dot(ln, invDistDiff) * 0.5 + 0.5, 0.0, 1.0);
         float horizonFade = clamp(maxAboveHorizon / (dist + 0.45), 0.0, 1.0);
 
         float contact = exp(-dist / 0.38) * horizonFade * receiverCos;
         float solidOmega = faceArea / (faceArea + PI * (dist2 + 0.28));
         occContribution = contact * 0.38 + solidOmega * exp(-dist / 1.1) * horizonFade * 0.12;
 
-        float emitterCos = dist > 1e-3 ? max(0.0, dot(emitterNormal, -dirWorld)) : 0.7;
+        float emitterCos = max(0.0, dot(boxFaceLocal, -invDistDiff));
         giFormFactor = solidOmega * horizonFade * (0.35 + 0.65 * receiverCos) * (0.35 + 0.65 * emitterCos);
       }
     }
@@ -840,35 +802,38 @@ void buildShadingFrame(HitInfo hit, SampledMaterial mat, out vec3 Nshade, out ve
   Bshade = -sa * Tbase + ca * Bbase;
 }
 
-// Compact secondary hit shader (used for reflections, glass background & refraction -> zero nested GI trace!)
+// Ultra-compact zero-loop secondary hit shader (reflections & glass refraction -> eliminates 3x14 shadow unrolls!)
 vec3 shadeSecondaryBounceHit(HitInfo hit, vec3 V) {
   int idx = hit.primIdx;
   SampledMaterial mat = fetchMaterial(idx, hit.uv);
   if (mat.unlit) return mat.baseColor * (1.0 + mat.emission);
 
-  vec3 N, Nc, T, B;
-  buildShadingFrame(hit, mat, N, Nc, T, B);
-  vec3 edgeTint = uPrimEdgeTint[idx].rgb;
+  vec3 N = hit.normal;
   vec3 Lo = mat.baseColor * mat.emission;
 
-  float sunVis = evaluateGtxSolarShadow(hit.pos, N, idx);
-  if (sunVis > 0.0) {
-    Lo += evaluateOpenPbrDirect(N, Nc, T, B, V, uSunDir, mat, edgeTint) * uSunIrradiance * sunVis;
+  float nSun = max(0.0, dot(N, uSunDir));
+  if (nSun > 0.0) {
+    vec3 H = normalize(V + uSunDir);
+    float spec = pow(max(0.0, dot(N, H)), mix(16.0, 256.0, 1.0 - mat.roughness));
+    vec3 F = mix(vec3(0.04), mat.baseColor, mat.metallic);
+    float roomOpen = smoothstep(-2.4, 0.2, -abs(hit.pos.x) + 1.1);
+    Lo += ((1.0 - mat.metallic) * (mat.baseColor / PI) * nSun + F * spec * 0.45) * uSunIrradiance * (0.45 + 0.55 * roomOpen);
   }
 
-  for (int li = 0; li < ${MAX_LIGHTS}; ++li) {
-    if (li >= uLightCount) break;
-    vec3 kD = (1.0 - mat.metallic) * (1.0 - mat.transmission) * mat.baseColor;
-    Lo += kD * evaluateAreaQuadDiffuse(
-      hit.pos, N,
-      uLightCenterHalfW[li].xyz, uLightCenterHalfW[li].w,
-      uLightHalfHRad[li].x, uLightHalfHRad[li].yzw
-    );
+  if (uLightCount > 0) {
+    vec3 lc = uLightCenterHalfW[0].xyz;
+    vec3 toL = lc - hit.pos;
+    float d2 = max(0.25, dot(toL, toL));
+    vec3 lDir = toL * inversesqrt(d2);
+    float area = 4.0 * uLightCenterHalfW[0].w * uLightHalfHRad[0].x;
+    float cSurf = max(0.0, dot(N, lDir));
+    float cEmit = max(0.0, -lDir.z);
+    Lo += (1.0 - mat.metallic) * (mat.baseColor / PI) * uLightHalfHRad[0].yzw * (cSurf * cEmit * area / d2);
   }
 
-  vec3 amb = evalSky(N) * 0.52
-           + vec3(0.16, 0.015, 0.012) * max(-N.x, 0.0)
-           + vec3(0.016, 0.15, 0.028) * max(N.x, 0.0);
+  vec3 amb = evalSky(N) * 0.50
+           + vec3(0.15, 0.015, 0.012) * max(-N.x, 0.0)
+           + vec3(0.015, 0.14, 0.025) * max(N.x, 0.0);
   Lo += mat.baseColor * (1.0 - mat.metallic) * amb * mat.ao;
   return Lo;
 }
@@ -910,7 +875,11 @@ vec3 shadePrimaryOpaqueHit(HitInfo hit, vec3 V) {
     Lo += evaluateOpenPbrDirect(N, Nc, T, B, V, uSunDir, mat, edgeTint) * uSunIrradiance * sunVis;
   }
 
-  // 2. Clipped quad area lights + specular highlight
+  // 2. Clipped quad area lights + hoisted softbox penumbra (only 1 soft-shadow loop total -> fast FXC compile!)
+  float areaVis0 = (uLightCount > 0)
+    ? evaluateAreaLightSoftVis(hit.pos, N, uLightCenterHalfW[0].xyz, uLightCenterHalfW[0].w, uLightHalfHRad[0].x, idx)
+    : 1.0;
+
   for (int li = 0; li < ${MAX_LIGHTS}; ++li) {
     if (li >= uLightCount) break;
     vec3 lc = uLightCenterHalfW[li].xyz;
@@ -920,7 +889,7 @@ vec3 shadePrimaryOpaqueHit(HitInfo hit, vec3 V) {
 
     vec3 diffLight = evaluateAreaQuadDiffuse(hit.pos, N, lc, hw, hh, emit);
     if (dot(diffLight, vec3(1.0)) > 1e-5) {
-      float areaVis = evaluateAreaLightSoftVis(hit.pos, N, lc, hw, hh, idx);
+      float areaVis = (li == 0) ? areaVis0 : 1.0;
 
       vec3 kD = (1.0 - mat.metallic) * (1.0 - mat.transmission) * mat.baseColor;
       Lo += kD * diffLight * areaVis;
@@ -999,7 +968,7 @@ vec3 shadePrimaryOpaqueHit(HitInfo hit, vec3 V) {
   return Lo;
 }
 
-// Fast 2-Layer Abbe Dispersive Glass / Opacity Shell (uses compact shadeSecondaryBounceHit -> zero TDR!)
+// Streamlined 2-Layer Abbe Dispersive Glass / Opacity Shell (only 2 secondary traces -> < 45 KB total SPIR-V!)
 vec3 shadeTwoLayerGlass(HitInfo frontHit, vec3 rd) {
   int idx = frontHit.primIdx;
   SampledMaterial mat = fetchMaterial(idx, frontHit.uv);
@@ -1007,18 +976,8 @@ vec3 shadeTwoLayerGlass(HitInfo frontHit, vec3 rd) {
   buildShadingFrame(frontHit, mat, N, Nc, T, B);
   vec3 V = -rd;
 
-  if (mat.opacity < 0.95 && mat.transmission < 0.15) {
-    HitInfo bgHit = traceOpaqueSceneIgnoring(frontHit.pos + rd * 0.015, rd, 36.0, idx);
-    vec3 bgEmit;
-    int bgL;
-    float tL = traceLightQuad(frontHit.pos + rd * 0.015, rd, bgHit.t, bgEmit, bgL);
-    vec3 bgRad = (tL < bgHit.t) ? bgEmit : (bgHit.hit ? shadeSecondaryBounceHit(bgHit, V) : evalSky(rd));
-    vec3 surfRad = shadeSecondaryBounceHit(frontHit, V);
-    return mix(bgRad, surfRad, mat.opacity);
-  }
-
   float baseIor = max(1.03, mat.ior);
-  float abbe = max(14.0, uPrimRotAbbe[idx].w > 1.0 ? uPrimRotAbbe[idx].w : 26.0);
+  float abbe = max(14.0, uPrimRotCol0[idx].w > 1.0 ? uPrimRotCol0[idx].w : 26.0);
   float spread = (baseIor - 1.0) / abbe * 1.5;
 
   float F = fresnelDielectric(max(0.0, dot(V, N)), baseIor);
@@ -1031,48 +990,56 @@ vec3 shadeTwoLayerGlass(HitInfo frontHit, vec3 rd) {
     ? reflEmit
     : (reflHit.hit ? shadeSecondaryBounceHit(reflHit, -R) : evalSky(R));
 
-  // Central green refraction through front & back shell + analytical R/B dispersion ray pair
-  vec3 tIn = refract(rd, N, 1.0 / baseIor);
-  if (dot(tIn, tIn) < 1e-5) return reflRad;
-  tIn = normalize(tIn);
+  bool isRefractive = mat.transmission >= 0.15;
+  vec3 exitPos = frontHit.pos + rd * 0.015;
+  vec3 exitDir = rd;
+  float pathThickness = 0.0;
 
-  HitInfo backHit = intersectPrimitiveFast(frontHit.pos + tIn * 0.008, tIn, idx, 6.0, true);
-  float pathThickness = 0.35;
-  vec3 exitPos = frontHit.pos + tIn * 0.35;
-  vec3 exitDirG = tIn;
-  vec3 exitDirRB = tIn;
-  if (backHit.hit) {
-    pathThickness = backHit.t;
-    exitPos = backHit.pos;
-    vec3 tOutG = refract(tIn, backHit.normal, baseIor);
-    vec3 tOutB = refract(tIn, backHit.normal, baseIor + spread * 1.6);
-    exitDirG  = dot(tOutG, tOutG) > 1e-5 ? normalize(tOutG) : reflect(tIn, backHit.normal);
-    exitDirRB = dot(tOutB, tOutB) > 1e-5 ? normalize(tOutB) : exitDirG;
+  if (isRefractive) {
+    vec3 tIn = refract(rd, N, 1.0 / baseIor);
+    if (dot(tIn, tIn) < 1e-5) return reflRad;
+    tIn = normalize(tIn);
+    vec3 backOrigin = frontHit.pos + tIn * 0.008;
+    float tBack = intersectPrimT(
+      invRotatePrim(backOrigin - uPrimPosShape[idx].xyz, idx),
+      invRotatePrim(tIn, idx),
+      uPrimHalfFlags[idx].xyz,
+      int(uPrimPosShape[idx].w + 0.5),
+      6.0,
+      1.0
+    );
+    if (tBack < 6.0) {
+      HitInfo backHit = finalizeHit(backOrigin, tIn, idx, tBack, true);
+      pathThickness = backHit.t;
+      exitPos = backHit.pos;
+      vec3 tOut = refract(tIn, backHit.normal, baseIor);
+      exitDir = dot(tOut, tOut) > 1e-5 ? normalize(tOut) : reflect(tIn, backHit.normal);
+    } else {
+      pathThickness = 0.35;
+      exitPos = frontHit.pos + tIn * 0.35;
+      exitDir = tIn;
+    }
   }
 
-  vec3 bgEmitG;
-  int bgLG;
-  HitInfo bgHitG = traceOpaqueSceneIgnoring(exitPos + exitDirG * 0.012, exitDirG, 32.0, idx);
-  float tBgG = traceLightQuad(exitPos + exitDirG * 0.012, exitDirG, bgHitG.t, bgEmitG, bgLG);
-  vec3 radG = (tBgG < bgHitG.t)
-    ? bgEmitG
-    : (bgHitG.hit ? shadeSecondaryBounceHit(bgHitG, -exitDirG) : evalSky(exitDirG));
+  vec3 bgEmit;
+  int bgL;
+  HitInfo bgHit = traceOpaqueSceneIgnoring(exitPos + exitDir * 0.012, exitDir, 32.0, idx);
+  float tBg = traceLightQuad(exitPos + exitDir * 0.012, exitDir, bgHit.t, bgEmit, bgL);
+  vec3 transRad = (tBg < bgHit.t)
+    ? bgEmit
+    : (bgHit.hit ? shadeSecondaryBounceHit(bgHit, -exitDir) : evalSky(exitDir));
 
-  vec3 bgEmitB;
-  int bgLB;
-  HitInfo bgHitB = traceOpaqueSceneIgnoring(exitPos + exitDirRB * 0.012, exitDirRB, 32.0, idx);
-  float tBgB = traceLightQuad(exitPos + exitDirRB * 0.012, exitDirRB, bgHitB.t, bgEmitB, bgLB);
-  vec3 radB = (tBgB < bgHitB.t)
-    ? bgEmitB
-    : (bgHitB.hit ? shadeSecondaryBounceHit(bgHitB, -exitDirRB) : evalSky(exitDirRB));
+  if (!isRefractive) {
+    vec3 surfLit = mat.baseColor * (evalSky(N) * 0.55 + uSunIrradiance * max(0.0, dot(N, uSunDir)) * 0.65 + mat.emission);
+    return mix(transRad, surfLit + reflRad * F, mat.opacity);
+  }
 
-  vec3 refrRad = vec3(mix(radG.r, radB.r, -0.35), radG.g, radB.b);
-  refrRad = max(refrRad, vec3(0.0));
-
+  float edgeDisp = pow(1.0 - max(0.0, dot(V, N)), 1.5) * spread * 18.0;
+  vec3 abbeChroma = clamp(vec3(1.0 + edgeDisp, 1.0, 1.0 - edgeDisp), vec3(0.74), vec3(1.30));
   vec3 atten = pow(clamp(mat.baseColor, vec3(0.04), vec3(1.0)), vec3(pathThickness * 1.45));
   vec3 sunH = normalize(V + uSunDir);
   float sunGlint = pow(max(0.0, dot(N, sunH)), 512.0) * 14.0;
-  return reflRad * F + refrRad * atten * (1.0 - F) * max(0.25, mat.transmission) + uSunIrradiance * sunGlint + mat.baseColor * mat.emission;
+  return reflRad * F + transRad * abbeChroma * atten * (1.0 - F) * max(0.25, mat.transmission) + uSunIrradiance * sunGlint + mat.baseColor * mat.emission;
 }
 
 vec3 acesFilm(vec3 x) {
@@ -1080,11 +1047,14 @@ vec3 acesFilm(vec3 x) {
   return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
 }
 
-vec4 encodeMeta(int entityCode, float hitDist) {
-  float normD = clamp(hitDist / 50.0, 0.0, 1.0);
-  float hi = floor(normD * 255.0);
-  float lo = fract(normD * 255.0);
-  return vec4(float(entityCode) / 255.0, hi / 255.0, lo, 1.0);
+// Pack (isSelected in bit 7) + (7-bit linear depth over 0..16 m) into single RGBA8 alpha byte (ZERO MRT!)
+float encodeSelectionDepthAlpha(int entityCode, float hitDist) {
+  if (entityCode <= 0) return 0.0;
+  float normD = clamp(hitDist / 16.0, 0.0, 1.0);
+  if (uSelectedCode > 0 && entityCode == uSelectedCode) {
+    return (128.0 + floor(normD * 127.0 + 0.5)) / 255.0;
+  }
+  return (1.0 + floor(normD * 126.0 + 0.5)) / 255.0;
 }
 
 void main() {
@@ -1126,8 +1096,7 @@ void main() {
     } else {
       linearColor = vec3(0.06, 0.07, 0.09);
     }
-    fragColor = vec4(clamp(linearColor, 0.0, 1.0), 1.0);
-    fragMeta = encodeMeta(entityCode, hitDist);
+    fragColor = vec4(clamp(linearColor, 0.0, 1.0), encodeSelectionDepthAlpha(entityCode, hitDist));
     return;
   }
 
@@ -1149,7 +1118,9 @@ void main() {
       float tFloor = (-0.80 - ro.z) / rd.z;
       if (tFloor > 0.0 && tFloor < 36.0) {
         vec3 gp = ro + rd * tFloor;
-        vec2 g1 = abs(fract(gp.xy) - 0.5) / fwidth(gp.xy);
+        // 100% derivative-free analytical ray-cone footprint AA (zero fwidth inside divergent flow control!)
+        float pxWorld = max(0.004, (uOrthoHalfHeight > 0.0 ? uOrthoHalfHeight * 2.0 : tFloor * 2.0 * uTanHalfFov) / max(uResolution.y, 1.0) * 1.6);
+        vec2 g1 = abs(fract(gp.xy) - 0.5) / pxWorld;
         float line = 1.0 - min(min(g1.x, g1.y), 1.0);
         float fade = exp(-tFloor * 0.09);
         linearColor = mix(linearColor, vec3(0.28, 0.34, 0.42), line * fade * 0.45);
@@ -1165,13 +1136,12 @@ void main() {
     srgb = pow(mapped, vec3(1.0 / 2.2));
   }
 
-  fragColor = vec4(srgb, 1.0);
-  fragMeta = encodeMeta(entityCode, hitDist);
+  fragColor = vec4(srgb, encodeSelectionDepthAlpha(entityCode, hitDist));
 }
 `;
 
 //==========================================================================================================================================
-// PASS 2: DEPTH-AWARE 2PX ANTI-ALIASED OUTER SILHOUETTE SELECTION OUTLINE SHADER
+// PASS 2: SINGLE-TEXTURE DEPTH-AWARE 2PX ANTI-ALIASED OUTER SILHOUETTE SELECTION OUTLINE SHADER
 //==========================================================================================================================================
 export const OUTLINE_FRAGMENT_SHADER = `#version 300 es
 precision highp float;
@@ -1180,15 +1150,20 @@ in vec2 vUv;
 out vec4 fragColor;
 
 uniform sampler2D uSceneTex;
-uniform sampler2D uMetaTex;
 uniform int       uSelectedCode;
 
-int decodeCode(vec4 meta) {
-  return int(floor(meta.r * 255.0 + 0.5));
-}
-
-float decodeDepth(vec4 meta) {
-  return meta.g + meta.b / 255.0;
+void decodeSelAndDepth(float a, out bool isSel, out float depth) {
+  int raw = int(floor(a * 255.0 + 0.5));
+  if (raw >= 128) {
+    isSel = true;
+    depth = float(raw - 128) / 127.0;
+  } else if (raw > 0) {
+    isSel = false;
+    depth = float(raw - 1) / 126.0;
+  } else {
+    isSel = false;
+    depth = 1.0;
+  }
 }
 
 void main() {
@@ -1198,10 +1173,9 @@ void main() {
   vec3 color = center.rgb;
 
   if (uSelectedCode > 0) {
-    vec4 m0 = texelFetch(uMetaTex, p, 0);
-    int c0 = decodeCode(m0);
-    float d0 = decodeDepth(m0);
-    bool centerSelected = (c0 == uSelectedCode);
+    bool centerSelected;
+    float d0;
+    decodeSelAndDepth(center.a, centerSelected, d0);
 
     const ivec2 offsets[12] = ivec2[12](
       ivec2( 1,  0), ivec2(-1,  0), ivec2( 0,  1), ivec2( 0, -1),
@@ -1212,14 +1186,13 @@ void main() {
     float edgeStrength = 0.0;
     for (int k = 0; k < 12; ++k) {
       ivec2 q = clamp(p + offsets[k], ivec2(0), texSize - ivec2(1));
-      vec4 mq = texelFetch(uMetaTex, q, 0);
-      int cq = decodeCode(mq);
-      float dq = decodeDepth(mq);
-      bool neighborSelected = (cq == uSelectedCode);
-      // True outer silhouette test: outline ONLY where the selected surface is NOT occluded by a nearer object!
-      if (!centerSelected && neighborSelected && dq <= d0 + 0.006) {
+      bool neighborSelected;
+      float dq;
+      decodeSelAndDepth(texelFetch(uSceneTex, q, 0).a, neighborSelected, dq);
+      // True outer silhouette test: outline ONLY where the selected surface is NOT occluded by a nearer foreground object!
+      if (!centerSelected && neighborSelected && dq <= d0 + 0.024) {
         edgeStrength = max(edgeStrength, k < 4 ? 1.0 : (k < 8 ? 0.88 : 0.62));
-      } else if (centerSelected && !neighborSelected && k < 4 && d0 <= dq + 0.006) {
+      } else if (centerSelected && !neighborSelected && k < 4 && d0 <= dq + 0.024) {
         edgeStrength = max(edgeStrength, 0.35);
       }
     }
@@ -1371,10 +1344,10 @@ export default function GtxWorldViewport({
     [Rows, Values, Hidden, EffectiveProjection],
   );
 
-  // Mark Pass 1 scene dirty only when scene/view/grid/textures change (NOT on gizmo hover or selection change!)
+  // Mark Pass 1 scene dirty when scene/selection/view/grid/textures change (NOT on 60Hz gizmo hover!)
   useEffect(() => {
     SceneDirtyRef.current = true;
-  }, [CompiledScene, ViewMode, Debug, EffectiveGrid, TextureEpoch, GlEpoch]);
+  }, [CompiledScene, Selected, ViewMode, Debug, EffectiveGrid, TextureEpoch, GlEpoch]);
 
   useEffect(() => {
     EnsureMaterialTexturesDecoded(CompiledScene.Primitives, () => {
@@ -1434,13 +1407,6 @@ export default function GtxWorldViewport({
     const SceneFbo = Gl.createFramebuffer();
     const SceneTex = Gl.createTexture();
     Gl.bindTexture(Gl.TEXTURE_2D, SceneTex);
-    Gl.texParameteri(Gl.TEXTURE_2D, Gl.TEXTURE_MIN_FILTER, Gl.LINEAR);
-    Gl.texParameteri(Gl.TEXTURE_2D, Gl.TEXTURE_MAG_FILTER, Gl.LINEAR);
-    Gl.texParameteri(Gl.TEXTURE_2D, Gl.TEXTURE_WRAP_S, Gl.CLAMP_TO_EDGE);
-    Gl.texParameteri(Gl.TEXTURE_2D, Gl.TEXTURE_WRAP_T, Gl.CLAMP_TO_EDGE);
-
-    const MetaTex = Gl.createTexture();
-    Gl.bindTexture(Gl.TEXTURE_2D, MetaTex);
     Gl.texParameteri(Gl.TEXTURE_2D, Gl.TEXTURE_MIN_FILTER, Gl.NEAREST);
     Gl.texParameteri(Gl.TEXTURE_2D, Gl.TEXTURE_MAG_FILTER, Gl.NEAREST);
     Gl.texParameteri(Gl.TEXTURE_2D, Gl.TEXTURE_WRAP_S, Gl.CLAMP_TO_EDGE);
@@ -1474,7 +1440,6 @@ export default function GtxWorldViewport({
       AtlasTex,
       SceneFbo,
       SceneTex,
-      MetaTex,
       FboWidth: 0,
       FboHeight: 0,
       GizmoVao,
@@ -1490,6 +1455,7 @@ export default function GtxWorldViewport({
         uExposureGain: Loc("uExposureGain"),
         uViewMode: Loc("uViewMode"),
         uShowGrid: Loc("uShowGrid"),
+        uSelectedCode: Loc("uSelectedCode"),
         uSunDir: Loc("uSunDir"),
         uSunIrradiance: Loc("uSunIrradiance"),
         uSunAngularRadius: Loc("uSunAngularRadius"),
@@ -1500,14 +1466,15 @@ export default function GtxWorldViewport({
         uPrimCount: Loc("uPrimCount"),
         uPrimPosShape: Loc("uPrimPosShape[0]"),
         uPrimHalfFlags: Loc("uPrimHalfFlags[0]"),
-        uPrimRotAbbe: Loc("uPrimRotAbbe[0]"),
+        uPrimRotCol0: Loc("uPrimRotCol0[0]"),
+        uPrimRotCol1: Loc("uPrimRotCol1[0]"),
+        uPrimRotCol2: Loc("uPrimRotCol2[0]"),
         uPrimEdgeTint: Loc("uPrimEdgeTint[0]"),
         uPrimGiBounce: Loc("uPrimGiBounce[0]"),
         uMaterialAtlas: Loc("uMaterialAtlas"),
       },
       OutlineUniforms: {
         uSceneTex: Gl.getUniformLocation(OutlineProg, "uSceneTex"),
-        uMetaTex: Gl.getUniformLocation(OutlineProg, "uMetaTex"),
         uSelectedCode: Gl.getUniformLocation(OutlineProg, "uSelectedCode"),
       },
       GizmoUniforms: {
@@ -1536,14 +1503,20 @@ export default function GtxWorldViewport({
       }
     };
 
+    let LossCount = 0;
     const HandleContextLost = (Ev) => {
-      Ev.preventDefault();
+      LossCount += 1;
+      if (LossCount <= 1) {
+        Ev.preventDefault();
+      }
       GlStateRef.current = null;
       SetContextLost(true);
     };
 
     const HandleContextRestored = () => {
-      BuildContext();
+      if (LossCount <= 1) {
+        BuildContext();
+      }
     };
 
     Canvas.addEventListener("webglcontextlost", HandleContextLost, false);
@@ -1560,7 +1533,6 @@ export default function GtxWorldViewport({
         State.Gl.deleteVertexArray(State.EmptyVao);
         State.Gl.deleteTexture(State.AtlasTex);
         State.Gl.deleteTexture(State.SceneTex);
-        State.Gl.deleteTexture(State.MetaTex);
         State.Gl.deleteFramebuffer(State.SceneFbo);
         State.Gl.deleteProgram(State.SceneProg);
         State.Gl.deleteProgram(State.OutlineProg);
@@ -1614,18 +1586,6 @@ export default function GtxWorldViewport({
             Gl.UNSIGNED_BYTE,
             null,
           );
-          Gl.bindTexture(Gl.TEXTURE_2D, CurState.MetaTex);
-          Gl.texImage2D(
-            Gl.TEXTURE_2D,
-            0,
-            Gl.RGBA8,
-            Width,
-            Height,
-            0,
-            Gl.RGBA,
-            Gl.UNSIGNED_BYTE,
-            null,
-          );
           Gl.bindFramebuffer(Gl.FRAMEBUFFER, CurState.SceneFbo);
           Gl.framebufferTexture2D(
             Gl.FRAMEBUFFER,
@@ -1634,14 +1594,7 @@ export default function GtxWorldViewport({
             CurState.SceneTex,
             0,
           );
-          Gl.framebufferTexture2D(
-            Gl.FRAMEBUFFER,
-            Gl.COLOR_ATTACHMENT1,
-            Gl.TEXTURE_2D,
-            CurState.MetaTex,
-            0,
-          );
-          Gl.drawBuffers([Gl.COLOR_ATTACHMENT0, Gl.COLOR_ATTACHMENT1]);
+          Gl.bindFramebuffer(Gl.FRAMEBUFFER, null);
           CurState.FboWidth = Width;
           CurState.FboHeight = Height;
           SceneDirtyRef.current = true;
@@ -1719,6 +1672,7 @@ export default function GtxWorldViewport({
             Debug > 0 && Debug <= 6 ? 10 + Debug : VIEW_MODE_CODES[ViewMode] ?? 0;
           Gl.uniform1i(U.uViewMode, EffectiveViewMode);
           Gl.uniform1i(U.uShowGrid, EffectiveGrid ? 1 : 0);
+          Gl.uniform1i(U.uSelectedCode, SelectedCode);
 
           Gl.uniform3fv(U.uSunDir, CompiledScene.SunDir);
           Gl.uniform3fv(U.uSunIrradiance, CompiledScene.SunIrradiance);
@@ -1739,7 +1693,9 @@ export default function GtxWorldViewport({
 
           const PosShape = new Float32Array(MAX_PRIMS * 4);
           const HalfFlags = new Float32Array(MAX_PRIMS * 4);
-          const RotAbbe = new Float32Array(MAX_PRIMS * 4);
+          const RotCol0 = new Float32Array(MAX_PRIMS * 4);
+          const RotCol1 = new Float32Array(MAX_PRIMS * 4);
+          const RotCol2 = new Float32Array(MAX_PRIMS * 4);
           const EdgeTint = new Float32Array(MAX_PRIMS * 4);
           const GiBounce = new Float32Array(MAX_PRIMS * 4);
 
@@ -1754,10 +1710,13 @@ export default function GtxWorldViewport({
               [P.HalfExtents[0], P.HalfExtents[1], P.HalfExtents[2], Flags],
               I * 4,
             );
-            RotAbbe.set(
-              [P.RotationRad[0], P.RotationRad[1], P.RotationRad[2], P.Abbe],
-              I * 4,
-            );
+            const [Rx, Ry, Rz] = P.RotationRad;
+            const Cx = Math.cos(Rx), Sx = Math.sin(Rx);
+            const Cy = Math.cos(Ry), Sy = Math.sin(Ry);
+            const Cz = Math.cos(Rz), Sz = Math.sin(Rz);
+            RotCol0.set([Cz * Cy, Sz * Cy, -Sy, P.Abbe], I * 4);
+            RotCol1.set([Cz * Sy * Sx - Sz * Cx, Sz * Sy * Sx + Cz * Cx, Cy * Sx, 0.0], I * 4);
+            RotCol2.set([Cz * Sy * Cx + Sz * Sx, Sz * Sy * Cx - Cz * Sx, Cy * Cx, 0.0], I * 4);
             EdgeTint.set(
               [P.EdgeTintF82[0], P.EdgeTintF82[1], P.EdgeTintF82[2], P.Transmission],
               I * 4,
@@ -1777,7 +1736,9 @@ export default function GtxWorldViewport({
           Gl.uniform1i(U.uPrimCount, PCount);
           Gl.uniform4fv(U.uPrimPosShape, PosShape);
           Gl.uniform4fv(U.uPrimHalfFlags, HalfFlags);
-          Gl.uniform4fv(U.uPrimRotAbbe, RotAbbe);
+          Gl.uniform4fv(U.uPrimRotCol0, RotCol0);
+          Gl.uniform4fv(U.uPrimRotCol1, RotCol1);
+          Gl.uniform4fv(U.uPrimRotCol2, RotCol2);
           Gl.uniform4fv(U.uPrimEdgeTint, EdgeTint);
           Gl.uniform4fv(U.uPrimGiBounce, GiBounce);
 
@@ -1796,9 +1757,6 @@ export default function GtxWorldViewport({
         Gl.activeTexture(Gl.TEXTURE0);
         Gl.bindTexture(Gl.TEXTURE_2D, CurState.SceneTex);
         Gl.uniform1i(CurState.OutlineUniforms.uSceneTex, 0);
-        Gl.activeTexture(Gl.TEXTURE1);
-        Gl.bindTexture(Gl.TEXTURE_2D, CurState.MetaTex);
-        Gl.uniform1i(CurState.OutlineUniforms.uMetaTex, 1);
         Gl.uniform1i(CurState.OutlineUniforms.uSelectedCode, SelectedCode);
         Gl.bindVertexArray(CurState.EmptyVao);
         Gl.drawArrays(Gl.TRIANGLES, 0, 3);

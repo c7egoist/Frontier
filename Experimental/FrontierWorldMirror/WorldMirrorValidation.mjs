@@ -225,15 +225,17 @@ assert.equal(Duplicated.Rows.length, 17, "Duplicate Current Level clones all 17 
 const ViewportSrc = fs.readFileSync(path.join(Folder, "GtxWorldViewport.jsx"), "utf8");
 assert.ok(
   !ViewportSrc.includes("evalSceneSdfOpaque") &&
-    !ViewportSrc.includes("localDirs[6]"),
-  "Legacy SDF step march AND discrete 6-ray ghost GI projections completely removed",
+    !ViewportSrc.includes("localDirs[6]") &&
+    !ViewportSrc.includes("fwidth(") &&
+    !ViewportSrc.includes("uMetaTex"),
+  "Zero SDF rings, zero discrete GI ghost rays, zero divergent fwidth derivatives, and zero MRT overhead",
 );
 assert.ok(
   ViewportSrc.includes("closestRayPrimitiveSoftVis") &&
     ViewportSrc.includes("evaluateAreaLightSoftVis") &&
-    ViewportSrc.includes("uMetaTex") &&
+    ViewportSrc.includes("encodeSelectionDepthAlpha") &&
     ViewportSrc.includes("OUTLINE_FRAGMENT_SHADER"),
-  "Smooth analytical GI/AO, softbox penumbra, and depth-aware 2px outer silhouette outline shaders present",
+  "Smooth analytical GI/AO, softbox penumbra, and single-texture depth-aware 2px outer silhouette outline shaders present",
 );
 
 const HtmlPath = path.join(Folder, "index.html");
