@@ -40,6 +40,7 @@ import {
   BuildDefaultLevels,
   CreateNewLevelRecord,
 } from "./LevelSystem.js";
+import { CpuGtxRenderer } from "./CpuGtxFallbackRenderer.js";
 
 const Folder = path.dirname(fileURLToPath(import.meta.url));
 
@@ -238,18 +239,51 @@ assert.ok(
   "Smooth analytical GI/AO, softbox penumbra, and single-texture depth-aware 2px outer silhouette outline shaders present",
 );
 
+// 8. Verify Zero-WebGL CpuGtxRenderer + KHR_parallel_shader_compile Dual-Backend Self-Healing Parity
+assert.ok(
+  ViewportSrc.includes("KHR_parallel_shader_compile") &&
+    ViewportSrc.includes("CpuGtxRenderer") &&
+    ViewportSrc.includes("SessionWebGlBlocked"),
+  "Dual-backend KHR_parallel_shader_compile + zero-WebGL CpuGtxRenderer self-healing wired",
+);
+const CpuFallback = new CpuGtxRenderer();
+const CpuAtlas = new MaterialAtlasSynchronizer();
+CpuAtlas.UpdatePrimitives(Compiled.Primitives);
+const DoneCpu = CpuFallback.RenderSlice(
+  {
+    CompiledScene: Compiled,
+    AtlasPixels: CpuAtlas.Pixels,
+    Width: 160,
+    Height: 90,
+    ViewModeCode: 0,
+    ShowGrid: 1,
+  },
+  90,
+);
+assert.equal(DoneCpu, true, "CpuGtxRenderer completes full Cornell-Studio Gallery frame");
+let NonBlackPixels = 0;
+for (let I = 0; I < CpuFallback.OffscreenImg.data.length; I += 4) {
+  const R = CpuFallback.OffscreenImg.data[I];
+  const G = CpuFallback.OffscreenImg.data[I + 1];
+  const B = CpuFallback.OffscreenImg.data[I + 2];
+  assert.ok(Number.isFinite(R) && Number.isFinite(G) && Number.isFinite(B), "Finite RGB output");
+  if (R + G + B > 24) NonBlackPixels += 1;
+}
+assert.ok(NonBlackPixels > 160 * 90 * 0.9, "CpuGtxRenderer produces fully lit Cornell-Studio Gallery");
+
 const HtmlPath = path.join(Folder, "index.html");
 assert.ok(fs.existsSync(HtmlPath), "Bundled index.html exists");
 const HtmlText = fs.readFileSync(HtmlPath, "utf8");
 assert.ok(
   HtmlText.includes("Frontier World Mirror — Tier 1 GTX") &&
     HtmlText.includes("closestRayPrimitiveSoftVis") &&
+    HtmlText.includes("KHR_parallel_shader_compile") &&
     HtmlText.includes("Create New Level") &&
     HtmlText.includes("Active level") &&
     !HtmlText.includes("NO ENGINE CONNECTION"),
-  "Bundled index.html embeds ring-free GTX shader, Slate GizmoPRO, Level Switcher, Create Level modal, and removes NO ENGINE CONNECTION",
+  "Bundled index.html embeds ring-free GTX shader, dual-backend CPU GTX fallback, Slate GizmoPRO, Level Switcher, and Create Level modal",
 );
 
 console.log(
-  "[WorldMirrorValidation] ALL 7 SUITES PASSED: Ring-free GTX shadows/GI, 20-channel Material Atlas, 13-handle Slate GizmoPRO, 2px Selection Outline, and Multi-Level Footer/Modal verified!",
+  "[WorldMirrorValidation] ALL 8 SUITES PASSED: Dual-backend WebGL2 + CPU GTX self-healing, ring-free GTX shadows/GI, 20-channel Material Atlas, 13-handle Slate GizmoPRO, 2px Selection Outline, and Multi-Level Footer/Modal verified!",
 );

@@ -38,8 +38,12 @@ import {
   PickGizmoHandle,
   SolveGizmoDrag,
 } from "./TransformGizmo3D.js";
+import { CpuGtxRenderer } from "./CpuGtxFallbackRenderer.js";
 
 export { RowEffectivelyVisible as PreviewVisible };
+
+// Remember within this tab session if Chromium has domain-blocked or disabled WebGL2 so remounts never spam loseContext
+let SessionWebGlBlocked = false;
 
 const MAX_PRIMS = 14;
 const MAX_LIGHTS = 2;
@@ -1190,9 +1194,9 @@ void main() {
       float dq;
       decodeSelAndDepth(texelFetch(uSceneTex, q, 0).a, neighborSelected, dq);
       // True outer silhouette test: outline ONLY where the selected surface is NOT occluded by a nearer foreground object!
-      if (!centerSelected && neighborSelected && dq <= d0 + 0.024) {
+      if (!centerSelected && neighborSelected && dq <= d0 + 0.008) {
         edgeStrength = max(edgeStrength, k < 4 ? 1.0 : (k < 8 ? 0.88 : 0.62));
-      } else if (centerSelected && !neighborSelected && k < 4 && d0 <= dq + 0.024) {
+      } else if (centerSelected && !neighborSelected && k < 4 && d0 <= dq + 0.008) {
         edgeStrength = max(edgeStrength, 0.35);
       }
     }
@@ -1207,31 +1211,34 @@ void main() {
 }
 `;
 
-function CompileProgram(Gl, VsSource, FsSource) {
-  const Compile = (Type, Source) => {
-    const Shader = Gl.createShader(Type);
-    Gl.shaderSource(Shader, Source);
-    Gl.compileShader(Shader);
-    if (!Gl.getShaderParameter(Shader, Gl.COMPILE_STATUS)) {
-      const Log = Gl.getShaderInfoLog(Shader);
-      Gl.deleteShader(Shader);
-      throw new Error(Log || "Shader compile error");
-    }
-    return Shader;
-  };
-  const Vs = Compile(Gl.VERTEX_SHADER, VsSource);
-  const Fs = Compile(Gl.FRAGMENT_SHADER, FsSource);
+function StartProgramLink(Gl, VsSource, FsSource) {
+  const Vs = Gl.createShader(Gl.VERTEX_SHADER);
+  Gl.shaderSource(Vs, VsSource);
+  Gl.compileShader(Vs);
+  const Fs = Gl.createShader(Gl.FRAGMENT_SHADER);
+  Gl.shaderSource(Fs, FsSource);
+  Gl.compileShader(Fs);
   const Prog = Gl.createProgram();
   Gl.attachShader(Prog, Vs);
   Gl.attachShader(Prog, Fs);
   Gl.linkProgram(Prog);
+  return { Prog, Vs, Fs };
+}
+
+function FinalizeLinkedProgram(Gl, Handle) {
+  const { Prog, Vs, Fs } = Handle;
+  const Linked = Gl.getProgramParameter(Prog, Gl.LINK_STATUS);
+  if (!Linked) {
+    const VsLog = Gl.getShaderInfoLog(Vs) || "";
+    const FsLog = Gl.getShaderInfoLog(Fs) || "";
+    const ProgLog = Gl.getProgramInfoLog(Prog) || "";
+    Gl.deleteShader(Vs);
+    Gl.deleteShader(Fs);
+    Gl.deleteProgram(Prog);
+    throw new Error(ProgLog || FsLog || VsLog || "Program link error");
+  }
   Gl.deleteShader(Vs);
   Gl.deleteShader(Fs);
-  if (!Gl.getProgramParameter(Prog, Gl.LINK_STATUS)) {
-    const Log = Gl.getProgramInfoLog(Prog);
-    Gl.deleteProgram(Prog);
-    throw new Error(Log || "Program link error");
-  }
   return Prog;
 }
 
@@ -1312,6 +1319,7 @@ export default function GtxWorldViewport({
   OnSelectEntity,
   OnUpdateCamera,
   OnTransformEntity,
+  OnFpsSample,
 }) {
   const SelectCallback = OnSelectEntity || Select;
   const CameraCallback = OnUpdateCamera || UpdateEditorCamera;
@@ -1321,14 +1329,20 @@ export default function GtxWorldViewport({
 
   const CanvasRef = useRef(null);
   const GlStateRef = useRef(null);
+  const CpuRendererRef = useRef(null);
   const DragRef = useRef(null);
   const KeysRef = useRef(new Set());
   const AtlasSyncRef = useRef(null);
   const BuiltGizmoRef = useRef(null);
   const SceneDirtyRef = useRef(true);
+  const EvictionCountRef = useRef(0);
 
+  const [RenderBackend, SetRenderBackend] = useState(() =>
+    SessionWebGlBlocked ? "cpu-gtx" : "webgl2",
+  );
+  const [CanvasInstance, SetCanvasInstance] = useState(0);
+  const [CpuSettleTick, SetCpuSettleTick] = useState(0);
   const [ShaderError, SetShaderError] = useState(null);
-  const [ContextLost, SetContextLost] = useState(false);
   const [GlEpoch, SetGlEpoch] = useState(0);
   const [HoveredHandle, SetHoveredHandle] = useState(GizmoHandle.None);
   const [ActiveHandle, SetActiveHandle] = useState(GizmoHandle.None);
@@ -1347,7 +1361,7 @@ export default function GtxWorldViewport({
   // Mark Pass 1 scene dirty when scene/selection/view/grid/textures change (NOT on 60Hz gizmo hover!)
   useEffect(() => {
     SceneDirtyRef.current = true;
-  }, [CompiledScene, Selected, ViewMode, Debug, EffectiveGrid, TextureEpoch, GlEpoch]);
+  }, [CompiledScene, Selected, ViewMode, Debug, EffectiveGrid, TextureEpoch, GlEpoch, RenderBackend, CpuSettleTick]);
 
   useEffect(() => {
     EnsureMaterialTexturesDecoded(CompiledScene.Primitives, () => {
@@ -1368,21 +1382,19 @@ export default function GtxWorldViewport({
       alpha: false,
       depth: true,
       stencil: false,
-      powerPreference: "high-performance",
+      powerPreference: "default",
       preserveDrawingBuffer: false,
     });
-    if (!Gl) {
-      SetShaderError("WebGL2 unavailable in browser context");
-      return null;
-    }
-    if (Gl.isContextLost()) {
-      SetContextLost(true);
+    if (!Gl || Gl.isContextLost()) {
+      SessionWebGlBlocked = true;
+      SetRenderBackend("cpu-gtx");
       return null;
     }
 
-    const SceneProg = CompileProgram(Gl, FULLSCREEN_VERTEX_SHADER, GTX_FRAGMENT_SHADER);
-    const OutlineProg = CompileProgram(Gl, FULLSCREEN_VERTEX_SHADER, OUTLINE_FRAGMENT_SHADER);
-    const GizmoProg = CompileProgram(Gl, GIZMO_VERTEX_SHADER, GIZMO_FRAGMENT_SHADER);
+    const ParallelExt = Gl.getExtension("KHR_parallel_shader_compile");
+    const SceneHandle = StartProgramLink(Gl, FULLSCREEN_VERTEX_SHADER, GTX_FRAGMENT_SHADER);
+    const OutlineHandle = StartProgramLink(Gl, FULLSCREEN_VERTEX_SHADER, OUTLINE_FRAGMENT_SHADER);
+    const GizmoHandleProg = StartProgramLink(Gl, GIZMO_VERTEX_SHADER, GIZMO_FRAGMENT_SHADER);
 
     const EmptyVao = Gl.createVertexArray();
 
@@ -1430,12 +1442,16 @@ export default function GtxWorldViewport({
     AtlasSyncRef.current?.InvalidateAll();
     SceneDirtyRef.current = true;
 
-    const Loc = (Name) => Gl.getUniformLocation(SceneProg, Name);
     return {
       Gl,
-      SceneProg,
-      OutlineProg,
-      GizmoProg,
+      ParallelExt,
+      Linked: false,
+      SceneHandle,
+      OutlineHandle,
+      GizmoHandleProg,
+      SceneProg: null,
+      OutlineProg: null,
+      GizmoProg: null,
       EmptyVao,
       AtlasTex,
       SceneFbo,
@@ -1444,88 +1460,59 @@ export default function GtxWorldViewport({
       FboHeight: 0,
       GizmoVao,
       GizmoVbo,
-      SceneUniforms: {
-        uResolution: Loc("uResolution"),
-        uCamOrigin: Loc("uCamOrigin"),
-        uCamForward: Loc("uCamForward"),
-        uCamRight: Loc("uCamRight"),
-        uCamUp: Loc("uCamUp"),
-        uTanHalfFov: Loc("uTanHalfFov"),
-        uOrthoHalfHeight: Loc("uOrthoHalfHeight"),
-        uExposureGain: Loc("uExposureGain"),
-        uViewMode: Loc("uViewMode"),
-        uShowGrid: Loc("uShowGrid"),
-        uSelectedCode: Loc("uSelectedCode"),
-        uSunDir: Loc("uSunDir"),
-        uSunIrradiance: Loc("uSunIrradiance"),
-        uSunAngularRadius: Loc("uSunAngularRadius"),
-        uSkyRadiance: Loc("uSkyRadiance"),
-        uLightCount: Loc("uLightCount"),
-        uLightCenterHalfW: Loc("uLightCenterHalfW[0]"),
-        uLightHalfHRad: Loc("uLightHalfHRad[0]"),
-        uPrimCount: Loc("uPrimCount"),
-        uPrimPosShape: Loc("uPrimPosShape[0]"),
-        uPrimHalfFlags: Loc("uPrimHalfFlags[0]"),
-        uPrimRotCol0: Loc("uPrimRotCol0[0]"),
-        uPrimRotCol1: Loc("uPrimRotCol1[0]"),
-        uPrimRotCol2: Loc("uPrimRotCol2[0]"),
-        uPrimEdgeTint: Loc("uPrimEdgeTint[0]"),
-        uPrimGiBounce: Loc("uPrimGiBounce[0]"),
-        uMaterialAtlas: Loc("uMaterialAtlas"),
-      },
-      OutlineUniforms: {
-        uSceneTex: Gl.getUniformLocation(OutlineProg, "uSceneTex"),
-        uSelectedCode: Gl.getUniformLocation(OutlineProg, "uSelectedCode"),
-      },
-      GizmoUniforms: {
-        uViewProj: Gl.getUniformLocation(GizmoProg, "uViewProj"),
-        uHighlightedHandle: Gl.getUniformLocation(GizmoProg, "uHighlightedHandle"),
-      },
+      SceneUniforms: null,
+      OutlineUniforms: null,
+      GizmoUniforms: null,
     };
   }, []);
 
-  // Initialize WebGL2 + automatic webglcontextlost / webglcontextrestored recovery!
+  // Initialize WebGL2 when RenderBackend === "webgl2"; fall back seamlessly to CPU GTX on domain-block or repeated eviction!
   useEffect(() => {
+    if (RenderBackend !== "webgl2") return;
     const Canvas = CanvasRef.current;
     if (!Canvas) return;
 
-    const BuildContext = () => {
-      try {
-        const Built = InitGlResources(Canvas);
-        if (Built) {
-          GlStateRef.current = Built;
-          SetContextLost(false);
-          SetShaderError(null);
-          SetGlEpoch((N) => N + 1);
-        }
-      } catch (Err) {
-        SetShaderError(String(Err?.message || Err));
-      }
-    };
+    const MountedAt = performance.now();
+    let RemountTimer = 0;
 
-    let LossCount = 0;
-    const HandleContextLost = (Ev) => {
-      LossCount += 1;
-      if (LossCount <= 1) {
-        Ev.preventDefault();
-      }
+    const SwitchToCpuGtx = (BlockSession) => {
+      if (BlockSession) SessionWebGlBlocked = true;
       GlStateRef.current = null;
-      SetContextLost(true);
+      SetShaderError(null);
+      SetRenderBackend("cpu-gtx");
     };
 
-    const HandleContextRestored = () => {
-      if (LossCount <= 1) {
-        BuildContext();
+    const HandleContextLost = (Ev) => {
+      Ev.preventDefault();
+      GlStateRef.current = null;
+      const AliveMs = performance.now() - MountedAt;
+      // Instant context loss (< 2.5s) means Chromium domain-blocked 3D APIs in this tab -> switch immediately to live CPU GTX!
+      if (AliveMs < 2500 || EvictionCountRef.current >= 1 || document.visibilityState !== "visible") {
+        SwitchToCpuGtx(AliveMs < 2500);
+        return;
       }
+      // Single LRU context eviction (e.g., Monaco Diff tabs opened): remount a fresh <canvas> once!
+      EvictionCountRef.current += 1;
+      RemountTimer = window.setTimeout(() => {
+        SetCanvasInstance((K) => K + 1);
+      }, 220);
     };
 
     Canvas.addEventListener("webglcontextlost", HandleContextLost, false);
-    Canvas.addEventListener("webglcontextrestored", HandleContextRestored, false);
-    BuildContext();
+    try {
+      const Built = InitGlResources(Canvas);
+      if (Built) {
+        GlStateRef.current = Built;
+        SetShaderError(null);
+        SetGlEpoch((N) => N + 1);
+      }
+    } catch {
+      SwitchToCpuGtx(true);
+    }
 
     return () => {
+      if (RemountTimer) window.clearTimeout(RemountTimer);
       Canvas.removeEventListener("webglcontextlost", HandleContextLost, false);
-      Canvas.removeEventListener("webglcontextrestored", HandleContextRestored, false);
       const State = GlStateRef.current;
       if (State && !State.Gl.isContextLost()) {
         State.Gl.deleteBuffer(State.GizmoVbo);
@@ -1534,16 +1521,20 @@ export default function GtxWorldViewport({
         State.Gl.deleteTexture(State.AtlasTex);
         State.Gl.deleteTexture(State.SceneTex);
         State.Gl.deleteFramebuffer(State.SceneFbo);
-        State.Gl.deleteProgram(State.SceneProg);
-        State.Gl.deleteProgram(State.OutlineProg);
-        State.Gl.deleteProgram(State.GizmoProg);
+        if (State.SceneProg) State.Gl.deleteProgram(State.SceneProg);
+        else if (State.SceneHandle) State.Gl.deleteProgram(State.SceneHandle.Prog);
+        if (State.OutlineProg) State.Gl.deleteProgram(State.OutlineProg);
+        else if (State.OutlineHandle) State.Gl.deleteProgram(State.OutlineHandle.Prog);
+        if (State.GizmoProg) State.Gl.deleteProgram(State.GizmoProg);
+        else if (State.GizmoHandleProg) State.Gl.deleteProgram(State.GizmoHandleProg.Prog);
       }
       GlStateRef.current = null;
     };
-  }, [InitGlResources]);
+  }, [RenderBackend, CanvasInstance, InitGlResources]);
 
-  // Render pipeline: Pass 1 cached in FBO; Pass 2 (Outline) + Pass 3 (Slate GizmoPRO) ultra-lightweight!
+  // WebGL2 Render pipeline: non-blocking KHR_parallel_shader_compile + Pass 1 FBO + Pass 2 Outline + Pass 3 Slate GizmoPRO
   useEffect(() => {
+    if (RenderBackend !== "webgl2") return;
     const Canvas = CanvasRef.current;
     const State = GlStateRef.current;
     if (!Canvas || !State || State.Gl.isContextLost()) return;
@@ -1555,9 +1546,85 @@ export default function GtxWorldViewport({
       RafId = requestAnimationFrame(() => {
         RafId = 0;
         const CurState = GlStateRef.current;
-        if (!CurState || CurState.Gl.isContextLost() || !CanvasRef.current) return;
-        const { Gl, SceneUniforms: U } = CurState;
+        if (!CurState || !CanvasRef.current) return;
+        const { Gl } = CurState;
+        if (Gl.isContextLost()) {
+          SessionWebGlBlocked = true;
+          GlStateRef.current = null;
+          SetRenderBackend("cpu-gtx");
+          return;
+        }
 
+        // Poll KHR_parallel_shader_compile without blocking Chromium's GPU Watchdog thread!
+        if (!CurState.Linked) {
+          if (CurState.ParallelExt) {
+            const Done1 = Gl.getProgramParameter(CurState.SceneHandle.Prog, CurState.ParallelExt.COMPLETION_STATUS_KHR);
+            const Done2 = Gl.getProgramParameter(CurState.OutlineHandle.Prog, CurState.ParallelExt.COMPLETION_STATUS_KHR);
+            const Done3 = Gl.getProgramParameter(CurState.GizmoHandleProg.Prog, CurState.ParallelExt.COMPLETION_STATUS_KHR);
+            if (!Done1 || !Done2 || !Done3) {
+              ScheduleDraw(false);
+              return;
+            }
+          }
+          try {
+            const SceneProg = FinalizeLinkedProgram(Gl, CurState.SceneHandle);
+            const OutlineProg = FinalizeLinkedProgram(Gl, CurState.OutlineHandle);
+            const GizmoProg = FinalizeLinkedProgram(Gl, CurState.GizmoHandleProg);
+            CurState.SceneHandle = null;
+            CurState.OutlineHandle = null;
+            CurState.GizmoHandleProg = null;
+            CurState.SceneProg = SceneProg;
+            CurState.OutlineProg = OutlineProg;
+            CurState.GizmoProg = GizmoProg;
+            const Loc = (Name) => Gl.getUniformLocation(SceneProg, Name);
+            CurState.SceneUniforms = {
+              uResolution: Loc("uResolution"),
+              uCamOrigin: Loc("uCamOrigin"),
+              uCamForward: Loc("uCamForward"),
+              uCamRight: Loc("uCamRight"),
+              uCamUp: Loc("uCamUp"),
+              uTanHalfFov: Loc("uTanHalfFov"),
+              uOrthoHalfHeight: Loc("uOrthoHalfHeight"),
+              uExposureGain: Loc("uExposureGain"),
+              uViewMode: Loc("uViewMode"),
+              uShowGrid: Loc("uShowGrid"),
+              uSelectedCode: Loc("uSelectedCode"),
+              uSunDir: Loc("uSunDir"),
+              uSunIrradiance: Loc("uSunIrradiance"),
+              uSunAngularRadius: Loc("uSunAngularRadius"),
+              uSkyRadiance: Loc("uSkyRadiance"),
+              uLightCount: Loc("uLightCount"),
+              uLightCenterHalfW: Loc("uLightCenterHalfW[0]"),
+              uLightHalfHRad: Loc("uLightHalfHRad[0]"),
+              uPrimCount: Loc("uPrimCount"),
+              uPrimPosShape: Loc("uPrimPosShape[0]"),
+              uPrimHalfFlags: Loc("uPrimHalfFlags[0]"),
+              uPrimRotCol0: Loc("uPrimRotCol0[0]"),
+              uPrimRotCol1: Loc("uPrimRotCol1[0]"),
+              uPrimRotCol2: Loc("uPrimRotCol2[0]"),
+              uPrimEdgeTint: Loc("uPrimEdgeTint[0]"),
+              uPrimGiBounce: Loc("uPrimGiBounce[0]"),
+              uMaterialAtlas: Loc("uMaterialAtlas"),
+            };
+            CurState.OutlineUniforms = {
+              uSceneTex: Gl.getUniformLocation(OutlineProg, "uSceneTex"),
+              uSelectedCode: Gl.getUniformLocation(OutlineProg, "uSelectedCode"),
+            };
+            CurState.GizmoUniforms = {
+              uViewProj: Gl.getUniformLocation(GizmoProg, "uViewProj"),
+              uHighlightedHandle: Gl.getUniformLocation(GizmoProg, "uHighlightedHandle"),
+            };
+            CurState.Linked = true;
+            SceneDirtyRef.current = true;
+          } catch {
+            SessionWebGlBlocked = true;
+            GlStateRef.current = null;
+            SetRenderBackend("cpu-gtx");
+            return;
+          }
+        }
+
+        const U = CurState.SceneUniforms;
         const Rect = Canvas.getBoundingClientRect();
         const Dpr = Math.min(window.devicePixelRatio || 1, 1.25);
         const RawW = Math.max(320, Math.round((Rect.width || 900) * Dpr));
@@ -1839,6 +1906,175 @@ export default function GtxWorldViewport({
     ActiveHandle,
     TextureEpoch,
     GlEpoch,
+    RenderBackend,
+  ]);
+
+  // Zero-WebGL Live Progressive Tier 1 GTX + 2px Silhouette Outline + 13-Handle Slate GizmoPRO Canvas2D Pipeline
+  useEffect(() => {
+    if (RenderBackend !== "cpu-gtx") return;
+    const Canvas = CanvasRef.current;
+    if (!Canvas) return;
+    const Ctx2d = Canvas.getContext("2d", { alpha: false });
+    if (!Ctx2d) return;
+
+    if (!CpuRendererRef.current) {
+      CpuRendererRef.current = new CpuGtxRenderer();
+    }
+    const Cpu = CpuRendererRef.current;
+
+    let RafId = 0;
+    const StepDraw = (ForceInvalidate = false) => {
+      if (ForceInvalidate) SceneDirtyRef.current = true;
+      if (RafId) return;
+      RafId = requestAnimationFrame(() => {
+        RafId = 0;
+        if (!CanvasRef.current || RenderBackend !== "cpu-gtx") return;
+
+        const T0 = performance.now();
+        const Rect = Canvas.getBoundingClientRect();
+        const Dpr = Math.min(window.devicePixelRatio || 1, 1.25);
+        const Width = Math.max(320, Math.min(1120, Math.round((Rect.width || 900) * Dpr)));
+        const Height = Math.max(200, Math.min(680, Math.round((Rect.height || 520) * Dpr)));
+        if (Canvas.width !== Width || Canvas.height !== Height) {
+          Canvas.width = Width;
+          Canvas.height = Height;
+          SceneDirtyRef.current = true;
+        }
+        const Aspect = Width / Math.max(1, Height);
+
+        const AtlasSync = AtlasSyncRef.current;
+        if (AtlasSync.UpdatePrimitives(CompiledScene.Primitives)) {
+          AtlasSync.Dirty = false;
+          SceneDirtyRef.current = true;
+        }
+
+        const PCount = Math.min(MAX_PRIMS, CompiledScene.Primitives.length);
+        let SelectedCode = 0;
+        const PrimIdx = CompiledScene.Primitives
+          .slice(0, PCount)
+          .findIndex((P) => P.Id === Selected);
+        if (PrimIdx >= 0) {
+          SelectedCode = 1 + PrimIdx;
+        } else {
+          const LightIdx = CompiledScene.AreaLights
+            .slice(0, MAX_LIGHTS)
+            .findIndex((L) => L.Id === Selected);
+          if (LightIdx >= 0) SelectedCode = 32 + LightIdx;
+        }
+
+        const EffectiveViewMode =
+          Debug > 0 && Debug <= 6 ? 10 + Debug : VIEW_MODE_CODES[ViewMode] ?? 0;
+
+        const IsDragging = DragRef.current !== null;
+        const TargetRayW = IsDragging ? 224 : Math.min(576, Math.max(320, Math.round((Rect.width || 800) * 0.68)));
+        const TargetRayH = Math.max(126, Math.round(TargetRayW / Math.max(0.5, Aspect)));
+
+        if (SceneDirtyRef.current || Cpu.BufW !== TargetRayW || Cpu.BufH !== TargetRayH) {
+          SceneDirtyRef.current = false;
+          Cpu.EnsureBuffers(TargetRayW, TargetRayH);
+          Cpu.Invalidate();
+        }
+
+        let Done = Cpu.Complete;
+        if (!Done) {
+          Done = Cpu.RenderSlice(
+            {
+              CompiledScene,
+              AtlasPixels: AtlasSync.Pixels,
+              Width: Cpu.BufW,
+              Height: Cpu.BufH,
+              ViewModeCode: EffectiveViewMode,
+              ShowGrid: EffectiveGrid ? 1 : 0,
+            },
+            IsDragging ? Cpu.BufH : 54,
+          );
+        }
+
+        // Build 3D Slate 13-Handle GizmoPRO geometry + ViewProj (exact parity with Pass 3!)
+        let BuiltGizmo = null;
+        let ViewProj = null;
+        const Highlighted =
+          ActiveHandle !== GizmoHandle.None ? ActiveHandle : HoveredHandle;
+
+        if (EffectiveGizmo && SelectedGizmoTarget) {
+          const { CameraOrigin, CameraTarget, WorldUp } = CompiledScene;
+          const Fwd = NormalizeVec3([
+            CameraTarget[0] - CameraOrigin[0],
+            CameraTarget[1] - CameraOrigin[1],
+            CameraTarget[2] - CameraOrigin[2],
+          ]);
+          const Cross = (A, B) => [
+            A[1] * B[2] - A[2] * B[1],
+            A[2] * B[0] - A[0] * B[2],
+            A[0] * B[1] - A[1] * B[0],
+          ];
+          const Right = NormalizeVec3(Cross(Fwd, WorldUp), [1, 0, 0]);
+          const Up = NormalizeVec3(Cross(Right, Fwd), [0, 0, 1]);
+          const CamState = {
+            Projection: CompiledScene.OrthoHalfHeight > 0 ? "Orthographic" : "Perspective",
+            Position: CameraOrigin,
+            FovDegrees: (CompiledScene.VerticalFovRad * 180) / Math.PI,
+            OrthoHalfHeight: CompiledScene.OrthoHalfHeight,
+          };
+          const WorldRadius =
+            DragRef.current?.Kind === "gizmo" && DragRef.current.GizmoDrag?.ActiveWorldRadius
+              ? DragRef.current.GizmoDrag.ActiveWorldRadius
+              : ComputeGizmoWorldRadius(SelectedGizmoTarget.Position, CamState, Aspect);
+          BuiltGizmo = BuildSlateGizmoGeometry(
+            SelectedGizmoTarget.Position,
+            Fwd,
+            WorldRadius,
+          );
+          BuiltGizmoRef.current = BuiltGizmo;
+          ViewProj = BuildColumnMajorViewProj(
+            { Right, Up, Forward: Fwd },
+            CamState,
+            Aspect,
+          );
+        } else {
+          BuiltGizmoRef.current = null;
+        }
+
+        Cpu.CompositeToCanvas(
+          Ctx2d,
+          Width,
+          Height,
+          SelectedCode,
+          BuiltGizmo,
+          ViewProj,
+          Highlighted,
+        );
+
+        const Elapsed = Math.max(1, performance.now() - T0);
+        OnFpsSample?.(Math.min(120, Math.round(1000 / Elapsed)));
+
+        if (!Done) {
+          StepDraw(false);
+        }
+      });
+    };
+
+    StepDraw(false);
+    const ResizeObs = new ResizeObserver(() => StepDraw(true));
+    ResizeObs.observe(Canvas);
+    return () => {
+      if (RafId) cancelAnimationFrame(RafId);
+      ResizeObs.disconnect();
+    };
+  }, [
+    RenderBackend,
+    CompiledScene,
+    Selected,
+    SelectedGizmoTarget,
+    ViewMode,
+    Debug,
+    EffectiveGrid,
+    EffectiveGizmo,
+    HoveredHandle,
+    ActiveHandle,
+    TextureEpoch,
+    CpuSettleTick,
+    OnFpsSample,
   ]);
 
   // RMB + WASDQE fly loop
@@ -2086,6 +2322,10 @@ export default function GtxWorldViewport({
   const OnPointerUp = (Event) => {
     const Drag = DragRef.current;
     DragRef.current = null;
+    if (RenderBackend === "cpu-gtx" && Drag && (Drag.Moved || Drag.Kind === "gizmo")) {
+      SceneDirtyRef.current = true;
+      SetCpuSettleTick((T) => T + 1);
+    }
     if (Drag?.Kind === "gizmo") {
       SetActiveHandle(GizmoHandle.None);
       SetGizmoReadout("");
@@ -2144,6 +2384,7 @@ export default function GtxWorldViewport({
       onContextMenu={(Ev) => Ev.preventDefault()}
     >
       <canvas
+        key={`${RenderBackend}-${CanvasInstance}`}
         ref={CanvasRef}
         className="gtx-world-canvas"
         aria-label="Tier 1 GTX World Viewport"
@@ -2162,11 +2403,6 @@ export default function GtxWorldViewport({
           {ActiveHandle !== GizmoHandle.None && (
             <small>Hold Ctrl to snap</small>
           )}
-        </div>
-      )}
-      {ContextLost && (
-        <div className="gtx-shader-error" role="status">
-          Restoring WebGL2 GPU context…
         </div>
       )}
       {ShaderError && (
