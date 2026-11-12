@@ -1,5 +1,6 @@
 // Frontier Engine — 100% Deterministic WebGPU Full Raytracing Shaders (WGSL)
-// Zero Monte Carlo RNG | Zero Russian Roulette | 4-Wide SIMD BVH4 + Fibonacci DDGI + Analytic LTC + Cone-Footprint Specular & Glass
+// Zero Monte Carlo RNG | Zero Russian Roulette | 4-Wide SIMD BVH4
+// Calibrated v2: 1/pi Energy-Normalized DDGI + 16x16 Chebyshev Radial Depth + Visibility-Gated LTC + 2.2m Chassis AO & SpecAO + SolarDisc
 
 export const COMMON_WGSL = /* wgsl */ `
 struct FrameUniforms {
@@ -10,8 +11,8 @@ struct FrameUniforms {
   sunDirRadius   : vec4<f32>, // xyz: sunDir, w: sunAreaRadius
   paintBounces   : vec4<f32>, // xyz: paintColor, w: maxSpecBounces
   resFilter      : vec4<f32>, // x: width, y: height, z: filterStep, w: frameIndex
-  ddgiOriginRays : vec4<f32>, // xyz: origin (-15.5,-11.5,0.42), w: probeRayCount (32 or 64)
-  ddgiSpaceHyst  : vec4<f32>, // xyz: spacing (1.63,1.53,0.96), w: hysteresis (0..0.92)
+  ddgiOriginRays : vec4<f32>, // xyz: origin (-15.5,-11.5,0.20), w: probeRayCount (16..64)
+  ddgiSpaceHyst  : vec4<f32>, // xyz: spacing (1.63,1.53,0.98), w: hysteresis (0..0.92)
   lightKnobs     : vec4<f32>, // x: portalGain, y: ddgiGain, z: shadowRays, w: aoRays
   flagsA         : vec4<f32>, // x: enableDdgi, y: enableLtc, z: enableSoftShadow, w: enableContactAo
   flagsB         : vec4<f32>, // x: enableGlassRefract, y: show3dProbes, z: ddgiReadBounce, w: probeSliceIdx (-1=all, 0..3=slice)
@@ -47,11 +48,13 @@ struct InstanceGpu {
 @group(0) @binding(3) var<storage, read> instances : array<InstanceGpu>;
 @group(0) @binding(4) var<storage, read> ddgiRead  : array<vec4<f32>>;
 
-const PI       : f32 = 3.14159265359;
-const INV_PI   : f32 = 0.31830988618;
-const DDGI_NX  : i32 = 20;
-const DDGI_NY  : i32 = 16;
-const DDGI_NZ  : i32 = 6;
+const PI               : f32 = 3.14159265359;
+const INV_PI           : f32 = 0.31830988618;
+const DDGI_NX          : i32 = 20;
+const DDGI_NY          : i32 = 16;
+const DDGI_NZ          : i32 = 6;
+// Per probe in ddgi buffer: 36 vec4f (6x6 irradiance) + 128 vec4f (16x16 radial depth moments = 256 vec2f) = 164 vec4f
+const DDGI_PROBE_STRIDE: i32 = 164;
 
 fn safeInvDir(d : vec3<f32>) -> vec3<f32> {
   let sx = select(-1e-8, 1e-8, d.x >= 0.0);
@@ -166,7 +169,6 @@ fn traceBvh4(worldRo : vec3<f32>, worldRd : vec3<f32>, tMin : f32, tMax : f32, s
       }
     }
 
-    // Sort descending so nearest child sits on top of LIFO stack
     for (var i : i32 = 0; i < hitCnt - 1; i = i + 1) {
       for (var j : i32 = i + 1; j < hitCnt; j = j + 1) {
         if (hitT[i] < hitT[j]) {
@@ -243,6 +245,40 @@ fn traceBvh4(worldRo : vec3<f32>, worldRd : vec3<f32>, tMin : f32, tMax : f32, s
   return best;
 }
 
+struct ShadowTransOut {
+  vis     : f32,
+  blocker : f32,
+  steps   : i32,
+};
+
+// Traces solar/luminaire visibility with partial tinted Cabin-Glass (matId == 7) transmission!
+fn traceShadowWithGlass(origin : vec3<f32>, dir : vec3<f32>, tMin : f32, tMax : f32) -> ShadowTransOut {
+  var o : ShadowTransOut;
+  let h0 = traceBvh4(origin, dir, tMin, tMax, false);
+  o.steps = h0.steps;
+  if (!h0.hit) {
+    o.vis = 1.0;
+    o.blocker = 0.0;
+    return o;
+  }
+  if (h0.matId != 7) {
+    o.vis = 0.0;
+    o.blocker = h0.t;
+    return o;
+  }
+  // Ray entered Cabin Glass: check if an opaque pillar/roof/seat behind the glass blocks it
+  let hOpq = traceBvh4(origin, dir, tMin, tMax, true);
+  o.steps = o.steps + hOpq.steps;
+  if (hOpq.hit) {
+    o.vis = 0.0;
+    o.blocker = hOpq.t;
+  } else {
+    o.vis = 0.36; // Tinted automotive cabin glazing transmits 36% solar flux
+    o.blocker = h0.t;
+  }
+  return o;
+}
+
 struct SurfaceMat {
   albedo    : vec3<f32>,
   roughness : f32,
@@ -264,11 +300,11 @@ fn evalMat(matId : i32, pos : vec3<f32>, paint : vec3<f32>) -> SurfaceMat {
   if (matId == 1) {
     let gx = abs(pos.x * 0.5 - floor(pos.x * 0.5 + 0.5));
     let gy = abs(pos.y * 0.5 - floor(pos.y * 0.5 + 0.5));
-    let line = (1.0 - smoothstep(0.0, 0.016, min(gx, gy))) * 0.08;
-    m.albedo = vec3<f32>(0.50, 0.52, 0.55) + vec3<f32>(line);
-    m.roughness = 0.30;
+    let line = (1.0 - smoothstep(0.0, 0.016, min(gx, gy))) * 0.06;
+    m.albedo = vec3<f32>(0.39, 0.41, 0.44) + vec3<f32>(line);
+    m.roughness = 0.28;
     m.metalness = 0.04;
-    m.coat = 0.38;
+    m.coat = 0.36;
     m.coatRough = 0.14;
   } else if (matId == 2) {
     m.albedo = vec3<f32>(0.93, 0.95, 0.98);
@@ -338,20 +374,24 @@ fn evalMat(matId : i32, pos : vec3<f32>, paint : vec3<f32>) -> SurfaceMat {
   return m;
 }
 
-fn evalSky(dir : vec3<f32>, sunDir : vec3<f32>) -> vec3<f32> {
+// SolarDisc option: includeSunDisc = false on glossy reflection rays so direct SolarDisc NEE is never double-counted
+fn evalSky(dir : vec3<f32>, sunDir : vec3<f32>, includeSunDisc : bool) -> vec3<f32> {
   let up = clamp(dir.z, -0.2, 1.0);
-  let hor = vec3<f32>(0.52, 0.66, 0.86);
-  let zen = vec3<f32>(0.09, 0.21, 0.48);
-  let gnd = vec3<f32>(0.06, 0.065, 0.075);
+  let hor = vec3<f32>(0.36, 0.48, 0.68);
+  let zen = vec3<f32>(0.06, 0.15, 0.36);
+  let gnd = vec3<f32>(0.035, 0.04, 0.05);
   var sky : vec3<f32>;
   if (up >= 0.0) {
-    sky = mix(hor, zen, pow(up, 0.58));
+    sky = mix(hor, zen, pow(up, 0.62));
   } else {
-    sky = mix(hor * 0.45, gnd, clamp(-up * 6.0, 0.0, 1.0));
+    sky = mix(hor * 0.34, gnd, clamp(-up * 6.0, 0.0, 1.0));
   }
   let sc = max(dot(dir, sunDir), 0.0);
-  return sky + vec3<f32>(1.0, 0.82, 0.56) * (pow(sc, 16.0) * 0.55)
-             + vec3<f32>(1.0, 0.93, 0.80) * (smoothstep(0.99935, 0.99985, sc) * 12.0);
+  var sunGlow = vec3<f32>(1.0, 0.82, 0.56) * (pow(sc, 28.0) * 0.30);
+  if (includeSunDisc) {
+    sunGlow = sunGlow + vec3<f32>(1.0, 0.93, 0.80) * (smoothstep(0.99950, 0.99992, sc) * 4.5);
+  }
+  return sky + sunGlow;
 }
 
 struct LtcOut {
@@ -359,11 +399,19 @@ struct LtcOut {
   spec : vec3<f32>,
 };
 
-fn evalAnalyticLtcPortals(pos : vec3<f32>, nrm : vec3<f32>, viewDir : vec3<f32>, rough : f32, portalGain : f32) -> LtcOut {
+// Improvement #2: Visibility-Gated Analytic LTC Overhead Portals (blocks ceiling strips through solid car body!)
+fn evalAnalyticLtcPortals(
+  pos : vec3<f32>,
+  nrm : vec3<f32>,
+  viewDir : vec3<f32>,
+  rough : f32,
+  portalGain : f32,
+  traceVisibility : bool
+) -> LtcOut {
   var o : LtcOut;
   o.diff = vec3<f32>(0.0);
   o.spec = vec3<f32>(0.0);
-  if (pos.z >= 6.20 || portalGain <= 0.001 || u.flagsA.y < 0.5) {
+  if (pos.z >= 6.18 || portalGain <= 0.001 || u.flagsA.y < 0.5) {
     return o;
   }
   let reflDir = reflect(-viewDir, nrm);
@@ -373,16 +421,28 @@ fn evalAnalyticLtcPortals(pos : vec3<f32>, nrm : vec3<f32>, viewDir : vec3<f32>,
     let nearPt = vec3<f32>(clamp(pos.x, px - 0.30, px + 0.30), clamp(pos.y, -13.8, 13.7), 6.22);
     let d = nearPt - pos;
     let dist2 = max(dot(d, d), 0.25);
-    let lDir = d * inverseSqrt(dist2);
-    let solidAngle = (0.60 * 4.8 * max(-lDir.z, 0.0)) / (dist2 + 3.2);
-    o.diff = o.diff + vec3<f32>(1.05, 1.15, 1.35) * (max(dot(nrm, lDir), 0.0) * solidAngle * portalGain);
-    if (reflDir.z > 0.02) {
+    let dist = sqrt(dist2);
+    let lDir = d / dist;
+    let nDotL = max(dot(nrm, lDir), 0.0);
+    if (nDotL <= 0.001) {
+      continue;
+    }
+
+    var pVis = 1.0;
+    if (traceVisibility && dist > 0.16) {
+      let shP = traceShadowWithGlass(pos + nrm * 0.008, lDir, 0.006, dist - 0.10);
+      pVis = shP.vis;
+    }
+
+    let solidAngle = (0.60 * 3.8 * max(-lDir.z, 0.0)) / (dist2 + 3.8);
+    o.diff = o.diff + vec3<f32>(0.98, 1.08, 1.28) * (nDotL * solidAngle * portalGain * pVis);
+    if (reflDir.z > 0.02 && pVis > 0.01) {
       let tP = (6.22 - pos.z) / reflDir.z;
       let hp = pos + reflDir * tP;
       let dx = max(0.0, abs(hp.x - px) - 0.30);
       let dy = max(0.0, abs(hp.y) - 13.75);
       let cf = max(0.06, tP * alpha * 0.85);
-      o.spec = o.spec + vec3<f32>(6.5, 7.2, 8.4) * (exp(-(dx * dx + dy * dy) / (2.0 * cf * cf)) / (1.0 + alpha * 6.0) * portalGain);
+      o.spec = o.spec + vec3<f32>(4.8, 5.4, 6.4) * (exp(-(dx * dx + dy * dy) / (2.0 * cf * cf)) / (1.0 + alpha * 6.0) * portalGain * pVis);
     }
   }
   return o;
@@ -426,41 +486,43 @@ fn sampleProbeOctIrr(pIdx : i32, dir : vec3<f32>) -> vec3<f32> {
   let y1 = min(y0 + 1, 5);
   let tx = fx - f32(x0);
   let ty = fy - f32(y0);
-  let base = pIdx * 36;
-  let c00 = ddgiRead[(base + y0 * 6 + x0) * 2].xyz;
-  let c10 = ddgiRead[(base + y0 * 6 + x1) * 2].xyz;
-  let c01 = ddgiRead[(base + y1 * 6 + x0) * 2].xyz;
-  let c11 = ddgiRead[(base + y1 * 6 + x1) * 2].xyz;
+  let base = pIdx * DDGI_PROBE_STRIDE;
+  let c00 = ddgiRead[base + y0 * 6 + x0].xyz;
+  let c10 = ddgiRead[base + y0 * 6 + x1].xyz;
+  let c01 = ddgiRead[base + y1 * 6 + x0].xyz;
+  let c11 = ddgiRead[base + y1 * 6 + x1].xyz;
   return mix(mix(c00, c10, tx), mix(c01, c11, tx), ty);
 }
 
-fn sampleProbeOctDist(pIdx : i32, dir : vec3<f32>) -> vec2<f32> {
+fn readProbeDepthTexel16(pIdx : i32, dx : i32, dy : i32) -> vec2<f32> {
+  let dTex = dy * 16 + dx;
+  let v = ddgiRead[pIdx * DDGI_PROBE_STRIDE + 36 + (dTex >> 1)];
+  return select(v.xy, v.zw, (dTex & 1) == 1);
+}
+
+// Improvement #3: High-Resolution 16x16 Octahedral Chebyshev Radial-Depth Visibility Lookup
+fn sampleProbeOctDist16(pIdx : i32, dir : vec3<f32>) -> vec2<f32> {
   let uv = octEncode01(dir);
-  let fx = clamp(uv.x * 6.0 - 0.5, 0.0, 4.999);
-  let fy = clamp(uv.y * 6.0 - 0.5, 0.0, 4.999);
+  let fx = clamp(uv.x * 16.0 - 0.5, 0.0, 14.999);
+  let fy = clamp(uv.y * 16.0 - 0.5, 0.0, 14.999);
   let x0 = i32(fx);
   let y0 = i32(fy);
-  let x1 = min(x0 + 1, 5);
-  let y1 = min(y0 + 1, 5);
+  let x1 = min(x0 + 1, 15);
+  let y1 = min(y0 + 1, 15);
   let tx = fx - f32(x0);
   let ty = fy - f32(y0);
-  let base = pIdx * 36;
-  let i00 = (base + y0 * 6 + x0) * 2;
-  let i10 = (base + y0 * 6 + x1) * 2;
-  let i01 = (base + y1 * 6 + x0) * 2;
-  let i11 = (base + y1 * 6 + x1) * 2;
-  let d00 = vec2<f32>(ddgiRead[i00].w, ddgiRead[i00 + 1].x);
-  let d10 = vec2<f32>(ddgiRead[i10].w, ddgiRead[i10 + 1].x);
-  let d01 = vec2<f32>(ddgiRead[i01].w, ddgiRead[i01 + 1].x);
-  let d11 = vec2<f32>(ddgiRead[i11].w, ddgiRead[i11 + 1].x);
+  let d00 = readProbeDepthTexel16(pIdx, x0, y0);
+  let d10 = readProbeDepthTexel16(pIdx, x1, y0);
+  let d01 = readProbeDepthTexel16(pIdx, x0, y1);
+  let d11 = readProbeDepthTexel16(pIdx, x1, y1);
   return mix(mix(d00, d10, tx), mix(d01, d11, tx), ty);
 }
 
 fn sampleWorldIrradiance(pos : vec3<f32>, nrm : vec3<f32>, vBias : vec3<f32>) -> vec3<f32> {
   if (u.flagsA.x < 0.5) {
-    return vec3<f32>(0.10, 0.13, 0.18);
+    return vec3<f32>(0.08, 0.10, 0.14);
   }
-  let biased = pos + nrm * 0.22 + vBias * 0.08;
+  let biased = pos + nrm * 0.08 + vBias * 0.03;
   let rel = (biased - u.ddgiOriginRays.xyz) / u.ddgiSpaceHyst.xyz;
   let gx = clamp(rel.x, 0.0, f32(DDGI_NX) - 1.001);
   let gy = clamp(rel.y, 0.0, f32(DDGI_NY) - 1.001);
@@ -471,6 +533,7 @@ fn sampleWorldIrradiance(pos : vec3<f32>, nrm : vec3<f32>, vBias : vec3<f32>) ->
   let fx = gx - f32(x0);
   let fy = gy - f32(y0);
   let fz = gz - f32(z0);
+  let maxCellDist = length(u.ddgiSpaceHyst.xyz) * 1.35;
 
   var sumIrr = vec3<f32>(0.0);
   var sumW   = 0.0;
@@ -481,20 +544,24 @@ fn sampleWorldIrradiance(pos : vec3<f32>, nrm : vec3<f32>, vBias : vec3<f32>) ->
         let iy = min(y0 + dy, DDGI_NY - 1);
         let iz = min(z0 + dz, DDGI_NZ - 1);
         let pIdx = (iz * DDGI_NY + iy) * DDGI_NX + ix;
+        if (ddgiRead[pIdx * DDGI_PROBE_STRIDE].w < 0.5) {
+          continue;
+        }
         let pPos = ddgiProbePos(ix, iy, iz);
-        let toP = pPos - pos;
+        let toP = pPos - biased;
         let dist = length(toP);
         let dir = select(nrm, toP / max(dist, 1e-4), dist > 1e-4);
 
-        let wrap = max(0.001, (dot(dir, nrm) + 0.25) / 1.25);
-        var w = wrap * wrap + 0.002;
+        let wrap = max(0.02, (dot(dir, nrm) + 0.22) / 1.22);
+        var w = wrap * wrap + 0.004;
 
-        let mom = sampleProbeOctDist(pIdx, -dir);
-        if (dist > mom.x) {
-          let variance = max(abs(mom.y - mom.x * mom.x), 0.02);
+        let mom = sampleProbeOctDist16(pIdx, -dir);
+        if (dist > mom.x + 0.08 && dist < maxCellDist) {
+          let variance = max(abs(mom.y - mom.x * mom.x), 0.025);
           let diff = dist - mom.x;
           let cheb = variance / (variance + diff * diff);
-          w = w * max(cheb * cheb * cheb, 0.005);
+          let fadeOut = 1.0 - smoothstep(maxCellDist * 0.65, maxCellDist, dist);
+          w = w * mix(1.0, max(cheb * cheb * cheb, 0.03), fadeOut);
         }
 
         let wx = select(1.0 - fx, fx, dx == 1);
@@ -507,9 +574,10 @@ fn sampleWorldIrradiance(pos : vec3<f32>, nrm : vec3<f32>, vBias : vec3<f32>) ->
       }
     }
   }
-  return select(vec3<f32>(0.10, 0.12, 0.16), sumIrr / sumW, sumW > 0.0);
+  return select(vec3<f32>(0.08, 0.10, 0.14), sumIrr / sumW, sumW > 0.0);
 }
 
+// Improvement #1 & #5: 1/pi Energy-Normalized DDGI + Calibrated Daylight Sun EV + SolarDisc Specular Normalization
 fn shadeSurfaceDirectAndGi(
   pos : vec3<f32>,
   nrm : vec3<f32>,
@@ -517,49 +585,59 @@ fn shadeSurfaceDirectAndGi(
   viewDir : vec3<f32>,
   sunVis : f32,
   contactAo : f32,
-  clayMode : bool
+  clayMode : bool,
+  traceLtcVis : bool
 ) -> vec3<f32> {
   var m = evalMat(matId, pos, u.paintBounces.xyz);
   if (clayMode && matId != 5 && matId != 18 && matId != 19) {
-    m.albedo = vec3<f32>(0.84, 0.85, 0.87);
+    m.albedo = vec3<f32>(0.82, 0.83, 0.86);
     m.metalness = 0.0;
     m.coat = 0.0;
     m.roughness = 0.88;
     m.emissive = vec3<f32>(0.0);
   }
 
+  let aoTerm = select(1.0, contactAo, u.flagsA.w > 0.5);
   let effRough = select(m.roughness, m.coatRough, m.coat > 0.0);
-  var ltc = evalAnalyticLtcPortals(pos, nrm, viewDir, effRough, u.lightKnobs.x);
+  var ltc = evalAnalyticLtcPortals(pos, nrm, viewDir, effRough, u.lightKnobs.x, traceLtcVis);
   if (clayMode) {
     ltc.spec = vec3<f32>(0.0);
   }
 
-  let aoTerm = select(1.0, contactAo, u.flagsA.w > 0.5);
+  // Both direct sunlight, LTC diffuse, AND DDGI irradiance share Lambertian 1/pi BRDF normalization!
   let ddgiIrr = sampleWorldIrradiance(pos, nrm, viewDir) * (u.lightKnobs.y * aoTerm);
 
   let sunDir = u.sunDirRadius.xyz;
   let ndl = max(dot(nrm, sunDir), 0.0);
-  let sunIrr = vec3<f32>(4.4, 3.95, 3.40) * (ndl * sunVis);
+  let sunIrr = vec3<f32>(5.45, 4.90, 4.30) * (ndl * sunVis);
 
+  // SolarDisc representative-point energy normalization (prevents clearcoat sun-glint explosion)
   let f0 = mix(vec3<f32>(0.04), m.albedo, m.metalness);
   let h = normalize(sunDir + viewDir);
   let ndh = max(dot(nrm, h), 0.0);
-  let rBlend = select(m.roughness, mix(m.roughness, m.coatRough, m.coat * 0.70), m.coat > 0.0);
-  let r = max(rBlend, 0.035);
-  let a2 = r * r * r * r;
-  let den = ndh * ndh * (a2 - 1.0) + 1.0;
-  let ggx = a2 / max(PI * den * den, 1e-4);
+  let rBlend = select(m.roughness, mix(m.roughness, m.coatRough, m.coat * 0.72), m.coat > 0.0);
+  let alpha = max(rBlend * rBlend, 0.0012);
+  let sunAngular = max(u.sunDirRadius.w * 0.024, 0.0045);
+  let alphaWidened = alpha + sunAngular * 0.5;
+  let a2 = alpha * alpha;
+  let aw2 = alphaWidened * alphaWidened;
+  let den = ndh * ndh * (aw2 - 1.0) + 1.0;
+  let ggxDisc = (a2 / max(PI * den * den, 1e-4)) * (a2 / max(aw2, 1e-5));
   let sunSpec = select(
-    f0 * vec3<f32>(3.5, 3.15, 2.75) * (min(ggx * 0.22, 16.0) * ndl * sunVis),
+    f0 * vec3<f32>(4.6, 4.15, 3.65) * (min(ggxDisc * 0.18, 14.0) * ndl * sunVis),
     vec3<f32>(0.0),
     clayMode
   );
 
+  // Lagarde-de Rousiers Specular Occlusion for LTC ribbon reflections
+  let noV = max(dot(nrm, viewDir), 0.02);
+  let specAo = clamp(pow(noV + aoTerm, exp2(-16.0 * effRough - 1.0)) - 1.0 + aoTerm, 0.03, 1.0);
+
   let diffAlbedo = m.albedo * (1.0 - m.metalness);
   return m.emissive
-       + diffAlbedo * ((sunIrr + ltc.diff * aoTerm) * INV_PI + ddgiIrr)
+       + diffAlbedo * ((sunIrr + ltc.diff * aoTerm + ddgiIrr) * INV_PI)
        + sunSpec
-       + ltc.spec * select(0.22, 0.0, clayMode);
+       + ltc.spec * select(0.22 * specAo, 0.0, clayMode);
 }
 
 fn makeCamRay(px : f32, py : f32) -> vec3<f32> {
@@ -574,13 +652,14 @@ fn makeCamRay(px : f32, py : f32) -> vec3<f32> {
 `;
 
 // ============================================================================
-// Pass 1: Deterministic Spherical-Fibonacci DDGI Probe Update (64 threads = 1 probe)
+// Pass 1: Deterministic Spherical-Fibonacci DDGI Probe Update (6x6 Irr + 16x16 Chebyshev Depth)
 // ============================================================================
 export const DDGI_PROBE_UPDATE_WGSL = COMMON_WGSL + /* wgsl */ `
 @group(1) @binding(0) var<storage, read_write> ddgiWrite : array<vec4<f32>>;
 
 var<workgroup> sharedRad  : array<vec3<f32>, 64>;
 var<workgroup> sharedDist : array<f32, 64>;
+var<workgroup> sharedBack : array<f32, 64>;
 
 @compute @workgroup_size(64, 1, 1)
 fn main(
@@ -609,35 +688,44 @@ fn main(
 
     let h = traceBvh4(pOrigin, dir, 0.02, 42.0, true);
     if (!h.hit) {
-      sharedRad[lid] = evalSky(dir, sunDir) * 0.52;
+      // Sky radiance integrated into probe hemisphere (scaled by pi so 1/pi Lambertian evaluation is exact)
+      sharedRad[lid] = evalSky(dir, sunDir, false) * 1.35;
       sharedDist[lid] = 24.0;
+      sharedBack[lid] = 0.0;
     } else if (dot(h.nrm, dir) > 0.0) {
       sharedRad[lid] = vec3<f32>(0.0);
-      sharedDist[lid] = h.t * 0.20;
+      sharedDist[lid] = h.t * 0.15;
+      sharedBack[lid] = 1.0;
     } else {
       sharedDist[lid] = h.t;
+      sharedBack[lid] = 0.0;
       let sm = evalMat(h.matId, h.pos, u.paintBounces.xyz);
       var sunVis = 0.0;
       if (dot(h.nrm, sunDir) > 0.02) {
-        let sh = traceBvh4(h.pos + h.nrm * 0.01, sunDir, 0.008, 36.0, true);
-        sunVis = select(1.0, 0.0, sh.hit);
+        let sh = traceShadowWithGlass(h.pos + h.nrm * 0.01, sunDir, 0.008, 36.0);
+        sunVis = sh.vis;
       }
-      let ltc = evalAnalyticLtcPortals(h.pos, h.nrm, -dir, sm.roughness, u.lightKnobs.x);
-      let sunIrr = vec3<f32>(4.4, 3.95, 3.40) * (max(dot(h.nrm, sunDir), 0.0) * sunVis);
-      var multiBounce = vec3<f32>(0.12, 0.16, 0.22);
+      let ltc = evalAnalyticLtcPortals(h.pos, h.nrm, -dir, sm.roughness, u.lightKnobs.x, false);
+      let sunIrr = vec3<f32>(5.45, 4.90, 4.30) * (max(dot(h.nrm, sunDir), 0.0) * sunVis);
+      var multiBounce = vec3<f32>(0.22, 0.28, 0.38);
       if (u.flagsB.z > 0.5) {
-        multiBounce = sampleWorldIrradiance(h.pos, h.nrm, -dir) * 0.85;
+        multiBounce = sampleWorldIrradiance(h.pos, h.nrm, -dir) * 0.92;
       }
       let diffTint = select(
         sm.albedo * (1.0 - sm.metalness),
         mix(sm.albedo * (1.0 - sm.metalness), sm.albedo * 0.68, 0.65),
         h.matId == 6
       );
-      sharedRad[lid] = clamp(sm.emissive + diffTint * ((sunIrr + ltc.diff) * INV_PI + multiBounce), vec3<f32>(0.0), vec3<f32>(18.0));
+      // Metallic mirror energy conservation in DDGI (prevents 96%-metallic mirrors from acting as black holes!)
+      let metalRefl = sm.albedo * sm.metalness * (evalSky(reflect(dir, h.nrm), sunDir, false) * 0.42 + multiBounce * INV_PI * 0.65);
+      // Store radiosity (pi * outgoing radiance) so sampleWorldIrradiance returns true hemisphere irradiance E!
+      let outRadiance = sm.emissive + diffTint * ((sunIrr + ltc.diff + multiBounce) * INV_PI) + metalRefl;
+      sharedRad[lid] = clamp(outRadiance * PI, vec3<f32>(0.0), vec3<f32>(24.0));
     }
   } else {
     sharedRad[lid] = vec3<f32>(0.0);
     sharedDist[lid] = 24.0;
+    sharedBack[lid] = 0.0;
   }
 
   workgroupBarrier();
@@ -645,15 +733,20 @@ fn main(
   if (!validProbe) {
     return;
   }
+  let probeBase = pIdx * DDGI_PROBE_STRIDE;
   if (!activeSlice) {
     if (lid < 36) {
-      let idx2 = (pIdx * 36 + lid) * 2;
-      ddgiWrite[idx2]     = ddgiRead[idx2];
-      ddgiWrite[idx2 + 1] = ddgiRead[idx2 + 1];
+      ddgiWrite[probeBase + lid] = ddgiRead[probeBase + lid];
     }
+    let v0 = probeBase + 36 + lid * 2;
+    ddgiWrite[v0]     = ddgiRead[v0];
+    ddgiWrite[v0 + 1] = ddgiRead[v0 + 1];
     return;
   }
 
+  let hyst = clamp(u.ddgiSpaceHyst.w, 0.0, 0.95);
+
+  // 1. Write 6x6 Octahedral Irradiance (threads 0..35)
   if (lid < 36) {
     let tx = lid % 6;
     let ty = lid / 6;
@@ -663,49 +756,81 @@ fn main(
 
     var irrSum = vec3<f32>(0.0);
     var wIrr = 0.0;
-    var dSum = 0.0;
-    var d2Sum = 0.0;
-    var wDist = 0.0;
-
+    var backHits = 0.0;
     for (var rIdx : i32 = 0; rIdx < rayCount; rIdx = rIdx + 1) {
+      backHits = backHits + sharedBack[rIdx];
       let zz = 1.0 - 2.0 * (f32(rIdx) + 0.5) / f32(rayCount);
       let rr = sqrt(max(0.0, 1.0 - zz * zz));
       let pp = f32(rIdx) * 2.39996323;
       let rDir = vec3<f32>(rr * cos(pp), rr * sin(pp), zz);
-
       let cw = max(0.0, dot(texDir, rDir));
-      if (cw > 0.0) {
+      if (cw > 0.0 && sharedBack[rIdx] < 0.5) {
         irrSum = irrSum + sharedRad[rIdx] * cw;
         wIrr = wIrr + cw;
-        let dw = pow(cw, 8.0);
-        let cd = min(sharedDist[rIdx], 18.0);
-        dSum = dSum + cd * dw;
-        d2Sum = d2Sum + cd * cd * dw;
-        wDist = wDist + dw;
       }
     }
-
+    let probeActive = select(0.0, 1.0, backHits < 3.0);
     let newIrr = select(vec3<f32>(0.0), irrSum / wIrr, wIrr > 0.0);
-    let newM1  = select(12.0, dSum / wDist, wDist > 0.0);
-    let newM2  = select(144.0, d2Sum / wDist, wDist > 0.0);
-
-    let outIdx = (pIdx * 36 + lid) * 2;
-    let hyst = clamp(u.ddgiSpaceHyst.w, 0.0, 0.95);
+    let irrIdx = probeBase + lid;
     if (hyst > 0.001) {
-      let prev0 = ddgiRead[outIdx];
-      let prev1 = ddgiRead[outIdx + 1];
-      ddgiWrite[outIdx]     = vec4<f32>(mix(newIrr, prev0.xyz, hyst), mix(newM1, prev0.w, hyst));
-      ddgiWrite[outIdx + 1] = vec4<f32>(mix(newM2, prev1.x, hyst), 0.0, 0.0, 0.0);
+      let prevIrr = ddgiRead[irrIdx].xyz;
+      ddgiWrite[irrIdx] = vec4<f32>(mix(newIrr, prevIrr, hyst), probeActive);
     } else {
-      ddgiWrite[outIdx]     = vec4<f32>(newIrr, newM1);
-      ddgiWrite[outIdx + 1] = vec4<f32>(newM2, 0.0, 0.0, 0.0);
+      ddgiWrite[irrIdx] = vec4<f32>(newIrr, probeActive);
+    }
+  }
+
+  // 2. Write 16x16 Octahedral Chebyshev Radial-Depth Moments (all 64 threads x 4 depth texels = 256 texels!)
+  for (var pair : i32 = 0; pair < 2; pair = pair + 1) {
+    let vecOffset = lid * 2 + pair; // 0..127
+    var mPair = vec4<f32>(12.0, 144.0, 12.0, 144.0);
+    for (var sub : i32 = 0; sub < 2; sub = sub + 1) {
+      let dTex = vecOffset * 2 + sub; // 0..255
+      let dx = dTex & 15;
+      let dy = dTex >> 4;
+      let du = ((f32(dx) + 0.5) / 16.0) * 2.0 - 1.0;
+      let dv = ((f32(dy) + 0.5) / 16.0) * 2.0 - 1.0;
+      let dDir = octDecode(du, dv);
+
+      var dSum = 0.0;
+      var d2Sum = 0.0;
+      var wDist = 0.0;
+      for (var rIdx : i32 = 0; rIdx < rayCount; rIdx = rIdx + 1) {
+        let zz = 1.0 - 2.0 * (f32(rIdx) + 0.5) / f32(rayCount);
+        let rr = sqrt(max(0.0, 1.0 - zz * zz));
+        let pp = f32(rIdx) * 2.39996323;
+        let rDir = vec3<f32>(rr * cos(pp), rr * sin(pp), zz);
+        let cw = max(0.0, dot(dDir, rDir));
+        if (cw > 0.0) {
+          let dw = pow(cw, 6.0);
+          let cd = min(sharedDist[rIdx], 18.0);
+          dSum = dSum + cd * dw;
+          d2Sum = d2Sum + cd * cd * dw;
+          wDist = wDist + dw;
+        }
+      }
+      let m1 = select(12.0, dSum / wDist, wDist > 1e-6);
+      let m2 = select(144.0, d2Sum / wDist, wDist > 1e-6);
+      if (sub == 0) {
+        mPair.x = m1;
+        mPair.y = m2;
+      } else {
+        mPair.z = m1;
+        mPair.w = m2;
+      }
+    }
+    let dOutIdx = probeBase + 36 + vecOffset;
+    if (hyst > 0.001) {
+      ddgiWrite[dOutIdx] = mix(mPair, ddgiRead[dOutIdx], hyst);
+    } else {
+      ddgiWrite[dOutIdx] = mPair;
     }
   }
 }
 `;
 
 // ============================================================================
-// Pass 2: Full-Res Primary Camera BVH4 Raytrace + Deterministic Solar Frustum & BVH4 Contact AO
+// Pass 2: Full-Res Primary Camera BVH4 + Tinted-Glass Solar Frustum + Two-Scale 2.3m Chassis AO
 // ============================================================================
 export const PRIMARY_AND_SHADOW_WGSL = COMMON_WGSL + /* wgsl */ `
 @group(1) @binding(0) var gPosTOut      : texture_storage_2d<rgba32float, write>;
@@ -754,19 +879,20 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
     let phase = bayer4Phase(x, y);
     let sunDir = u.sunDirRadius.xyz;
 
-    // 1. Deterministic Vogel-Spiral Solar Frustum Shadow (ZERO RNG!)
+    // 1. Deterministic Vogel-Spiral Solar Frustum Shadow with Tinted Cabin-Glass Transmission!
     if (dot(hit.nrm, sunDir) <= 0.0) {
       vis = 0.0;
     } else if (u.flagsA.z < 0.5) {
-      let sh = traceBvh4(hit.pos + hit.nrm * 0.006, sunDir, 0.004, 45.0, true);
+      let sh = traceShadowWithGlass(hit.pos + hit.nrm * 0.006, sunDir, 0.004, 45.0);
       totalSteps = totalSteps + sh.steps;
-      vis = select(1.0, 0.0, sh.hit);
+      vis = sh.vis;
+      blocker = sh.blocker;
     } else {
       let upS = select(vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(0.0, 0.0, 1.0), abs(sunDir.z) < 0.92);
       let sunT = normalize(cross(upS, sunDir));
       let sunB = cross(sunDir, sunT);
       let nSh = clamp(i32(round(u.lightKnobs.z)), 1, 12);
-      let sunRad = u.sunDirRadius.w * 0.046;
+      let sunRad = u.sunDirRadius.w * 0.024;
       var vSum = 0.0;
       var bSum = 0.0;
       var bCnt = 0;
@@ -774,12 +900,11 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
         let r = select(0.0, sqrt((f32(s) + 0.5) / f32(nSh)) * sunRad, nSh > 1);
         let a = phase + f32(s) * 2.39996323;
         let sDir = normalize(sunDir + (sunT * cos(a) + sunB * sin(a)) * r);
-        let sh = traceBvh4(hit.pos + hit.nrm * 0.006, sDir, 0.004, 45.0, true);
+        let sh = traceShadowWithGlass(hit.pos + hit.nrm * 0.006, sDir, 0.004, 45.0);
         totalSteps = totalSteps + sh.steps;
-        if (!sh.hit) {
-          vSum = vSum + 1.0;
-        } else {
-          bSum = bSum + sh.t;
+        vSum = vSum + sh.vis;
+        if (sh.vis < 0.99) {
+          bSum = bSum + sh.blocker;
           bCnt = bCnt + 1;
         }
       }
@@ -787,23 +912,29 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
       blocker = select(0.0, bSum / f32(bCnt), bCnt > 0);
     }
 
-    // 2. True Deterministic BVH4 Hemisphere Contact AO (ZERO screen-space rings!)
+    // 2. Improvement #4: Two-Scale Deterministic BVH4 AO (0.40m Tyre Contact + 2.35m Under-Chassis Ground Shadow, min=0.02!)
     if (u.flagsA.w > 0.5) {
       let nAo = clamp(i32(round(u.lightKnobs.w)), 1, 8);
       let upA = select(vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(0.0, 0.0, 1.0), abs(hit.nrm.z) < 0.92);
       let tA = normalize(cross(upA, hit.nrm));
       let bA = cross(hit.nrm, tA);
-      var aoSum = 0.0;
+      var tightSum = 0.0;
+      var chassisSum = 0.0;
       for (var k : i32 = 0; k < nAo; k = k + 1) {
-        let r = sqrt((f32(k) + 0.5) / f32(nAo)) * 0.85;
+        let r = sqrt((f32(k) + 0.5) / f32(nAo)) * 0.82;
         let a = phase + f32(k) * 2.39996323;
-        let z = sqrt(max(0.05, 1.0 - r * r));
+        let z = sqrt(max(0.08, 1.0 - r * r));
         let aoDir = normalize(tA * (r * cos(a)) + bA * (r * sin(a)) + hit.nrm * z);
-        let ah = traceBvh4(hit.pos + hit.nrm * 0.006, aoDir, 0.005, 0.55, true);
+        let ah = traceBvh4(hit.pos + hit.nrm * 0.006, aoDir, 0.005, 2.60, true);
         totalSteps = totalSteps + ah.steps;
-        aoSum = aoSum + select(1.0, smoothstep(0.02, 0.55, ah.t), ah.hit);
+        let tightVis   = select(1.0, smoothstep(0.015, 0.42, ah.t), ah.hit);
+        let chassisVis = select(1.0, smoothstep(0.04, 2.60, ah.t), ah.hit);
+        tightSum   = tightSum + tightVis;
+        chassisSum = chassisSum + chassisVis;
       }
-      contactAo = 0.25 + 0.75 * (aoSum / f32(nAo));
+      let aoTight   = tightSum / f32(nAo);
+      let aoChassis = chassisSum / f32(nAo);
+      contactAo = clamp(0.02 + 0.98 * (aoTight * (0.18 + 0.82 * aoChassis)), 0.02, 1.0);
     }
   }
 
@@ -848,7 +979,7 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
         let qNrm = textureLoad(gNrmMatTex, vec2<i32>(qx, qy), 0).xyz;
         if (dot(cNrm, qNrm) > 0.85 && abs(dot(cNrm, qPosT.xyz - cPosT.xyz)) < 0.08) {
           let qBlk = textureLoad(gShadowRawTex, vec2<i32>(qx, qy), 0).y;
-          maxBlk = max(maxBlk, qBlk * 0.94);
+          maxBlk = max(maxBlk, qBlk * 0.92);
         }
       }
     }
@@ -858,7 +989,7 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
 `;
 
 // ============================================================================
-// Pass 4: Continuous-Sigma Plane-Aware Shadow & Contact AO Integration
+// Pass 4: Continuous-Sigma Plane-Aware PenumbraFilter & Chassis AO Integration
 // ============================================================================
 export const SHADOW_AO_FILTER_WGSL = COMMON_WGSL + /* wgsl */ `
 @group(1) @binding(0) var gPosTTex   : texture_2d<f32>;
@@ -886,9 +1017,11 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
   let stepPx = max(1, i32(round(u.resFilter.z)));
   let cNrm = textureLoad(gNrmMatTex, vec2<i32>(x, y), 0).xyz;
   let dilBlk = cSh.y;
+  let sunScale = clamp(u.sunDirRadius.w, 0.15, 3.5);
+  // Contact-hardening sigma: razor-sharp (0.15 px) at tyre/panel contact (dilBlk ~ 0), widening with blocker distance * sunScale!
   let sigma = select(
-    clamp(0.22 + dilBlk * 1.55, 0.22, 3.0),
-    clamp(0.80 + dilBlk * 1.40, 0.80, 2.8),
+    clamp(0.14 + dilBlk * 0.52 * sunScale, 0.14, 2.8),
+    clamp(0.55 + dilBlk * 0.65 * sunScale, 0.55, 2.6),
     stepPx == 1 && u.flagsA.z > 0.5
   );
 
@@ -906,10 +1039,10 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
         let qNrm = textureLoad(gNrmMatTex, vec2<i32>(qx, qy), 0).xyz;
         let qSh  = textureLoad(gShadowIn, vec2<i32>(qx, qy), 0);
         let wn = pow(max(dot(cNrm, qNrm), 0.0), 32.0);
-        let wp = exp(-abs(dot(cNrm, qPosT.xyz - cPosT.xyz)) * 50.0);
+        let wp = exp(-abs(dot(cNrm, qPosT.xyz - cPosT.xyz)) * 55.0);
         let r2 = f32(dx * dx + dy * dy);
         let wgS = select(exp(-r2 / (2.0 * sigma * sigma)), 1.0, dx == 0 && dy == 0);
-        let wgA = select(exp(-r2 / (2.0 * 1.35 * 1.35)), 1.0, dx == 0 && dy == 0);
+        let wgA = select(exp(-r2 / (2.0 * 1.45 * 1.45)), 1.0, dx == 0 && dy == 0);
         let ws = wn * wp * select(0.0, wgS, u.flagsA.z > 0.5 || (dx == 0 && dy == 0));
         let wa = wn * wp * wgA;
         sSum = sSum + qSh.x * ws;
@@ -972,15 +1105,15 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
     let rDir = reflect(rd, nrm);
     let rh = traceBvh4(pos + nrm * 0.006, rDir, 0.005, 80.0, true);
     extraSteps = extraSteps + rh.steps;
-    var rCol = evalSky(rDir, sunDir);
+    var rCol = evalSky(rDir, sunDir, false);
     if (rh.hit) {
       var rSv = 0.0;
       if (dot(rh.nrm, sunDir) > 0.02) {
-        let sh = traceBvh4(rh.pos + rh.nrm * 0.008, sunDir, 0.006, 40.0, true);
+        let sh = traceShadowWithGlass(rh.pos + rh.nrm * 0.008, sunDir, 0.006, 40.0);
         extraSteps = extraSteps + sh.steps;
-        rSv = select(1.0, 0.0, sh.hit);
+        rSv = sh.vis;
       }
-      rCol = shadeSurfaceDirectAndGi(rh.pos, rh.nrm, rh.matId, -rDir, rSv, 1.0, false);
+      rCol = shadeSurfaceDirectAndGi(rh.pos, rh.nrm, rh.matId, -rDir, rSv, 0.92, false, true);
     }
 
     var tCol = rCol * 0.35;
@@ -994,18 +1127,22 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
       if (th.hit) {
         var tSv = 0.0;
         if (dot(th.nrm, sunDir) > 0.02) {
-          let sh = traceBvh4(th.pos + th.nrm * 0.008, sunDir, 0.006, 40.0, true);
+          let sh = traceShadowWithGlass(th.pos + th.nrm * 0.008, sunDir, 0.006, 40.0);
           extraSteps = extraSteps + sh.steps;
-          tSv = select(1.0, 0.0, sh.hit);
+          tSv = sh.vis;
         }
-        tCol = shadeSurfaceDirectAndGi(th.pos, th.nrm, th.matId, -tDir, tSv, 0.85, false);
+        tCol = shadeSurfaceDirectAndGi(th.pos, th.nrm, th.matId, -tDir, tSv, 0.72, false, true);
       } else {
-        tCol = evalSky(tDir, sunDir);
+        tCol = evalSky(tDir, sunDir, true);
       }
       tCol = tCol * vec3<f32>(0.58, 0.66, 0.74);
     }
 
-    let glassHdr = tCol * (1.0 - fres) + rCol * fres;
+    // Add crisp direct SolarDisc highlight on cabin glass exterior
+    let hSun = normalize(sunDir + viewDir);
+    let ndhG = max(dot(nrm, hSun), 0.0);
+    let gSpec = vec3<f32>(4.8, 4.35, 3.80) * (pow(ndhG, 900.0) * 3.5 * max(dot(nrm, sunDir), 0.0));
+    let glassHdr = tCol * (1.0 - fres) + rCol * fres + gSpec;
     textureStore(gSpecGlassOut, vec2<i32>(x, y), vec4<f32>(glassHdr, f32(extraSteps)));
     return;
   }
@@ -1032,23 +1169,25 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
     let bh = traceBvh4(cO + cN * 0.006, rDir, 0.004, 80.0, true);
     extraSteps = extraSteps + bh.steps;
     if (!bh.hit) {
-      reflRad = reflRad + tp * evalSky(rDir, sunDir);
+      reflRad = reflRad + tp * evalSky(rDir, sunDir, false);
       break;
     }
 
     coneRadius = coneRadius + bh.t * max(0.002, curRough * curRough * 0.35);
     var bSv = 0.0;
     if (dot(bh.nrm, sunDir) > 0.02) {
-      let sh = traceBvh4(bh.pos + bh.nrm * 0.008, sunDir, 0.006, 40.0, true);
+      let sh = traceShadowWithGlass(bh.pos + bh.nrm * 0.008, sunDir, 0.006, 40.0);
       extraSteps = extraSteps + sh.steps;
-      bSv = select(1.0, 0.0, sh.hit);
+      bSv = sh.vis;
     }
 
-    var hitCol = shadeSurfaceDirectAndGi(bh.pos, bh.nrm, bh.matId, -rDir, bSv, 0.92, false);
+    // Approximate under-chassis ambient darkening on reflected hits near z < 0.55m
+    let hitAo = select(0.92, clamp(0.18 + bh.pos.z * 1.4, 0.18, 0.92), bh.matId >= 6 && bh.matId <= 16);
+    var hitCol = shadeSurfaceDirectAndGi(bh.pos, bh.nrm, bh.matId, -rDir, bSv, hitAo, false, b == 1);
     let bm = evalMat(bh.matId, bh.pos, u.paintBounces.xyz);
     let coneBlur = clamp(coneRadius * 0.65, 0.0, 0.70);
     if (coneBlur > 0.01) {
-      let preInt = bm.emissive + bm.albedo * (sampleWorldIrradiance(bh.pos, bh.nrm, -rDir) * 1.40);
+      let preInt = bm.emissive + bm.albedo * (sampleWorldIrradiance(bh.pos, bh.nrm, -rDir) * INV_PI * u.lightKnobs.y);
       hitCol = mix(hitCol, preInt, coneBlur);
     }
 
@@ -1076,7 +1215,7 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
 `;
 
 // ============================================================================
-// Pass 6: Final Deterministic Composite + 3D DDGI Probe Spheres + BVH4 Heatmap + ACES
+// Pass 6: Final Deterministic Composite + Specular Occlusion + 3D DDGI Probes + ACES
 // ============================================================================
 export const COMPOSITE_WGSL = COMMON_WGSL + /* wgsl */ `
 @group(1) @binding(0) var gPosTTex     : texture_2d<f32>;
@@ -1119,9 +1258,9 @@ fn traceDdgiProbeSpheres(camPos : vec3<f32>, rd : vec3<f32>, maxT : f32, curHdr 
             bestT = tp;
             let spN = normalize(camPos + rd * tp - center);
             let pIdx = (iz * DDGI_NY + iy) * DDGI_NX + ix;
-            let pIrr = sampleProbeOctIrr(pIdx, spN);
+            let pIrr = sampleProbeOctIrr(pIdx, spN) * INV_PI;
             let rim = pow(1.0 - max(dot(spN, viewDir), 0.0), 3.0);
-            outHdr = pIrr * 1.35 + vec3<f32>(0.18, 0.26, 0.38) * rim;
+            outHdr = pIrr * 1.45 + vec3<f32>(0.18, 0.26, 0.38) * rim;
           }
         }
       }
@@ -1151,7 +1290,7 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
   let shData = textureLoad(gShadowTex, vec2<i32>(x, y), 0);
   let sgData = textureLoad(gSpecGlassTex, vec2<i32>(x, y), 0);
 
-  // Mode 5: 4-Wide BVH4 Traversal Steps Heatmap
+  // Mode 5: 4-Wide BVH4 Steps Heatmap
   if (viewMode == 5) {
     let totalSteps = shData.w + sgData.w;
     let heat = heatmapColor(totalSteps / 95.0);
@@ -1163,7 +1302,7 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
   let maxDepth = select(posT.w, 120.0, posT.w < 0.0);
 
   if (posT.w < 0.0) {
-    hdr = evalSky(rd, u.sunDirRadius.xyz) * 0.82;
+    hdr = evalSky(rd, u.sunDirRadius.xyz, true) * 0.85;
   } else {
     let pos = posT.xyz;
     let nrm = nrmMat.xyz;
@@ -1172,21 +1311,27 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
     let contactAo = shData.z;
 
     if (viewMode == 2 || isSplitClay) {
-      hdr = shadeSurfaceDirectAndGi(pos, nrm, matId, viewDir, sunVis, contactAo, true) * 0.78;
+      hdr = shadeSurfaceDirectAndGi(pos, nrm, matId, viewDir, sunVis, contactAo, true, true) * 0.82;
     } else if (viewMode == 4) {
       hdr = sgData.xyz * 0.85;
     } else if (matId == 7) {
-      hdr = sgData.xyz * 0.82;
+      hdr = sgData.xyz * 0.84;
     } else {
-      let baseLit = shadeSurfaceDirectAndGi(pos, nrm, matId, viewDir, sunVis, contactAo, false);
+      let baseLit = shadeSurfaceDirectAndGi(pos, nrm, matId, viewDir, sunVis, contactAo, false, true);
       let m = evalMat(matId, pos, u.paintBounces.xyz);
+      let noV = max(dot(nrm, viewDir), 0.02);
       let f0 = mix(vec3<f32>(0.04), m.albedo, m.metalness);
-      let s5 = pow(1.0 - max(dot(nrm, viewDir), 0.02), 5.0);
+      let s5 = pow(1.0 - noV, 5.0);
       let cF = m.coat * (0.04 + 0.96 * s5);
       let baseFres = (f0 + (vec3<f32>(1.0) - f0) * s5) * (1.0 - cF) + vec3<f32>(cF);
+      let effRough = select(m.roughness, m.coatRough, m.coat > 0.0);
       let fade = 1.0 - smoothstep(0.32, 0.78, m.roughness * (1.0 - m.coat * 0.70));
-      let rw = clamp(baseFres * fade, vec3<f32>(0.0), vec3<f32>(0.95));
-      hdr = (baseLit * (vec3<f32>(1.0) - rw * 0.45) + sgData.xyz * rw) * 0.78;
+
+      // Improvement #4: Lagarde-de Rousiers Specular Occlusion (prevents grazing Fresnel glare washing out umbra/chassis shadow!)
+      let aoTerm = select(1.0, contactAo, u.flagsA.w > 0.5);
+      let specAo = clamp(pow(noV + aoTerm, exp2(-16.0 * effRough - 1.0)) - 1.0 + aoTerm, 0.04, 1.0);
+      let rw = clamp(baseFres * fade * mix(specAo, 1.0, m.metalness * 0.75), vec3<f32>(0.0), vec3<f32>(0.95));
+      hdr = (baseLit * (vec3<f32>(1.0) - rw * 0.45) + sgData.xyz * rw) * 0.82;
     }
   }
 

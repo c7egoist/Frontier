@@ -9,11 +9,11 @@ import {
   SPECULAR_AND_GLASS_WGSL,
   COMPOSITE_WGSL,
   PRESENT_WGSL,
-} from "./DeterministicRtShaders.js";
+} from "./DeterministicRtShaders.js?v=2";
 
 const TLAS4_RESERVED = 16;
-const DDGI_PROBES = 20 * 16 * 6; // 1,920 world-space probes
-const DDGI_TEXELS_PER_PROBE = 36; // 6x6 octahedral texels/probe
+const DDGI_PROBES = 20 * 16 * 6; // 1,920 world-space octahedral sensors
+const DDGI_VEC4_PER_PROBE = 164; // 36 vec4f (6x6 irradiance) + 128 vec4f (16x16 Chebyshev radial-depth moments)
 const UNIFORM_STRIDE = 256; // WebGPU minUniformBufferOffsetAlignment
 const UNIFORM_SLOTS = 8;
 
@@ -147,22 +147,22 @@ class DeterministicWebGpuRaytracer {
       ddgiDirtySolve: true,
       probeSliceMode: -1, // -1 = full 1920 probes/frame, 1 = 4x rotational slice
       probeRays: 64,
-      ddgiGain: 1.65,
+      ddgiGain: 0.95,
       specBounces: 3,
       paint: [...PAINT_PRESETS.pearl],
       shadowRays: 8,
-      aoRays: 4,
-      sunRadius: 2.10,
-      sunAzimuthDeg: 50,
+      aoRays: 6,
+      sunRadius: 0.65,
+      sunAzimuthDeg: 72,
       sunElevationDeg: 41.5,
-      ltcGain: 1.00,
+      ltcGain: 0.78,
       resScale: 1.00,
       enableDdgi: true,
       enableLtc: true,
       enableSoftShadow: true,
       enableContactAo: true,
       enableGlassIor: true,
-      show3dProbes: true,
+      show3dProbes: false,
       carX: -0.55,
       carY: 0.65,
       carYaw: 0.42,
@@ -193,11 +193,19 @@ class DeterministicWebGpuRaytracer {
       return;
     }
 
-    const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
+    let adapter = null;
+    for (const opts of [{ powerPreference: "high-performance" }, {}, { forceFallbackAdapter: true }]) {
+      try {
+        adapter = await navigator.gpu.requestAdapter(opts);
+        if (adapter) break;
+      } catch (_e) {
+        // Continue to next WebGPU adapter option
+      }
+    }
     if (!adapter) {
       showFatalOverlay(
         "No WebGPU Hardware Adapter Found",
-        "navigator.gpu is present, but no GPU adapter was returned (on Linux Chrome, enable chrome://flags/#enable-unsafe-webgpu and Vulkan). Showing verified C++20 FRT1 deterministic render below:"
+        "navigator.gpu is present, but Chrome's GPU process could not open an adapter (click 'Relaunch to update' in Chrome or verify Hardware Acceleration in chrome://settings/system). Showing verified C++20 FRT1 deterministic render below:"
       );
       return;
     }
@@ -280,13 +288,20 @@ class DeterministicWebGpuRaytracer {
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     });
 
-    // 3. Ping-Pong DDGI Octahedral Irradiance + Chebyshev Moments Storage Buffers
-    // 1920 probes * 36 texels * 2 vec4f * 16 bytes = 2,211,840 bytes (~2.1 MB)
-    const ddgiFloatsCount = DDGI_PROBES * DDGI_TEXELS_PER_PROBE * 8;
+    // 3. Ping-Pong DDGI 6x6 Octahedral Irradiance + 16x16 Chebyshev Radial-Depth Moments Buffers
+    // 1,920 probes * 164 vec4f * 16 bytes = 5,038,080 bytes (~4.80 MB)
+    const ddgiFloatsCount = DDGI_PROBES * DDGI_VEC4_PER_PROBE * 4;
     const initDdgi = new Float32Array(ddgiFloatsCount);
-    for (let i = 0; i < DDGI_PROBES * DDGI_TEXELS_PER_PROBE; i++) {
-      initDdgi[i * 8 + 3] = 12.0;  // mean distance
-      initDdgi[i * 8 + 4] = 144.0; // mean squared distance
+    for (let p = 0; p < DDGI_PROBES; p++) {
+      const base = p * DDGI_VEC4_PER_PROBE * 4;
+      initDdgi[base + 3] = 1.0; // probeActive = 1.0 until classified
+      for (let d = 0; d < 128; d++) {
+        const off = base + (36 + d) * 4;
+        initDdgi[off + 0] = 12.0;
+        initDdgi[off + 1] = 144.0;
+        initDdgi[off + 2] = 12.0;
+        initDdgi[off + 3] = 144.0;
+      }
     }
     this.ddgiBufferA = d.createBuffer({
       label: "DdgiAtlasA",
@@ -707,10 +722,10 @@ class DeterministicWebGpuRaytracer {
     f[25] = this.renderH;
     f[26] = overrides.filterStep ?? 1;
     f[27] = this.frameIndex;
-    // 7: ddgiOriginRays
-    f[28] = -15.5; f[29] = -11.5; f[30] = 0.42; f[31] = s.probeRays;
+    // 7: ddgiOriginRays (strictly inside full interior air volume [-19.5..+19.45] x [-13.2..+13.20] x [0.25..5.85])
+    f[28] = -19.5; f[29] = -13.2; f[30] = 0.25; f[31] = s.probeRays;
     // 8: ddgiSpaceHyst
-    f[32] = 1.63; f[33] = 1.53; f[34] = 0.96; f[35] = overrides.hysteresis ?? 0.0;
+    f[32] = 2.05; f[33] = 1.76; f[34] = 1.12; f[35] = overrides.hysteresis ?? 0.0;
     // 9: lightKnobs
     f[36] = s.ltcGain; f[37] = s.ddgiGain; f[38] = s.shadowRays; f[39] = s.aoRays;
     // 10: flagsA
