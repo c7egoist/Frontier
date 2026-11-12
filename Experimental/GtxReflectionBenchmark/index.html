@@ -126,6 +126,37 @@
       </div>
     </div>
 
+    <div class="dock-row dock-row-accent">
+      <div class="control-cluster">
+        <span class="cluster-label">GI Bounces</span>
+        <div class="segmented-track" role="group" aria-label="Diffuse GI Bounces">
+          <button data-gi-bounces="1" aria-pressed="false" title="1-Bounce Direct->Diffuse GI">1B</button>
+          <button data-gi-bounces="2" aria-pressed="true" title="2-Bounce Inter-Reflection GI (Voxel Cache vs Path Trace)">2B</button>
+          <button data-gi-bounces="3" aria-pressed="false" title="3-Bounce Deep Cornell Radiosity">3B</button>
+        </div>
+      </div>
+
+      <div class="control-cluster">
+        <span class="cluster-label">Samples / Px (SPP)</span>
+        <div class="segmented-track" role="group" aria-label="Ray Samples Per Pixel">
+          <button data-spp="0" aria-pressed="false" title="4 GI Rays / 2 Disk Shadow Rays / 4 SDF Cones">Low 4/2</button>
+          <button data-spp="1" aria-pressed="true" title="6 GI Rays / 4 Disk Shadow Rays / 6 SDF Cones">Std 6/4</button>
+          <button data-spp="2" aria-pressed="false" title="12 GI Rays / 8 Disk Shadow Rays / 9 SDF Cones">High 12/8</button>
+          <button data-spp="3" aria-pressed="false" title="24 GI Rays / 12 Disk Shadow Rays / 12 SDF Cones">Ultra 24/12</button>
+        </div>
+      </div>
+
+      <div class="control-cluster">
+        <span class="cluster-label">Improvements (A/B)</span>
+        <button id="toggle-dir-sdf" class="toggle-chip fix-chip" aria-pressed="true" title="Directional Lambertian SDF Voxel Emission — fixes pink 'emissive' underglow on Left">Dir SDF GI</button>
+        <button id="toggle-contact-ao" class="toggle-chip fix-chip" aria-pressed="true" title="6-Tap Full-Res Horizon Contact AO — grounds tyres &amp; blocks under-chassis GI leak">Contact AO</button>
+        <button id="toggle-smooth-pcss" class="toggle-chip fix-chip" aria-pressed="true" title="3×3 Blocker Dilation + Continuous Gaussian PCSS — fixes sharp->soft halo cliff on Right">Smooth PCSS</button>
+        <button id="toggle-deblotch" class="toggle-chip fix-chip" aria-pressed="true" title="R2 Quasi-Random Stratification + Pass-1 Variance Clamp — fixes cloudy Ray GI blotches on Right">R2 De-Blotch</button>
+        <button id="toggle-fullres" class="toggle-chip" aria-pressed="false" title="Trace GI &amp; Reflections at 1.0× Native Resolution vs 0.5× Half-Res">Full-Res 1.0×</button>
+        <button id="btn-ab-fixes" class="ab-master-btn" data-all="on" title="Flip all 4 visual quality improvements OFF vs ON in one click">A/B: Fixes ON</button>
+      </div>
+    </div>
+
     <div class="dock-row">
       <div class="control-cluster">
         <span class="cluster-label">Reflections</span>

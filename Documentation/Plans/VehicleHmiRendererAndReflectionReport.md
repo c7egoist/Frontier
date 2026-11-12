@@ -168,4 +168,20 @@ Your eye caught a **classic, genuine voxel-cone-tracing physics trait** in the r
 | **Soft Area-Light Penumbra** | 🥇 **Hybrid: `0–0.4 m` Contact Ray/Hi-Z + Global SDF Cone Penumbra** | Global SDF Cone Penumbra gives a **true continuous distance-proportional penumbra** without 4-ray disk banding or `vRad = 0 -> 1` halo jumps; pairing it with a `0.4 m` screen-space/triangle contact ray nails millimeter-crisp tyre contact. |
 | **Sharp Mirror / Clearcoat Reflections** | 🥇 **Tiered: Global SDF + Hi-Z (`GTX`) / Hardware `VK_KHR_ray_query` BVH (`RX 9060 XT` / `RTX`)** | On GTX, Polished Global SDF + Hi-Z runs in **`~0.2 ms`**. On RDNA 4 (`RX 9060 XT`) & RTX hardware RT cores, coherent triangle raytracing resolves exact wheel-spoke & trim silhouettes on `Roughness <= 0.25` clearcoat without software `stack[48]` overhead. |
 
+---
+
+## 9. 🎛️ Live Quality Scaling (`GI Bounces 1B–3B`, `Samples / Pixel [SPP]`) & Toggleable A/B Fixes (`Port 8096`)
+
+All four root-cause fixes diagnosed in §8 — plus **Multi-Bounce Diffuse GI (`1B / 2B / 3B`)** and **Ray Samples Per Pixel (`SPP`)** scaling — are now wired into **`Experimental/GtxReflectionBenchmark/` (`port 8096`)** as live A/B toggles that automatically re-benchmark GPU pass `ms` and `FPS`:
+
+| New Control / A/B Toggle | What It Controls on `Global SDF` (Left) | What It Controls on `Compute BVH` (Right) | Quality vs. Performance Impact |
+| :--- | :--- | :--- | :--- |
+| **`GI Bounces` (`1B` \| `2B` \| `3B`)** | **Surface-Cache Voxel-to-Voxel Bounce Propagation (`SDF_RADIOSITY_BOUNCE_FRAG`)** across `Clip0` & `Clip1` + rolling `3` slices/tick dynamic refresh & car-voxel bounce gather | **True `1–3` Bounce Cosine-Hemisphere Path Tracing** with NEE sun shadow rays & energy-conserving residual sky termination | Shows Global SDF's core architectural superpower: **`2B`/`3B` adds `< 0.1 ms` on Global SDF** (cached in 3D surface voxels) vs. **`~1.7× – 2.5×` ray cost on Compute BVH**. |
+| **`Samples / Px (SPP)` (`Low 4/2` → `Ultra 24/12`)** | Scales SDF hemisphere cone count (`4` / `6` / `9` / `12` cones/px) | Scales **GI Paths / Pixel (`4, 6, 12, 24`)** and **Solar Disk Shadow Rays / Pixel (`2, 4, 8, 12`)** | Demonstrates brute-force Monte Carlo convergence (`Ultra 24/12` melts noise away at `~3.5×` GPU cost) vs. smart filtering at `Std 6/4`. |
+| **`Dir SDF GI` *(Toggle)*** | Evaluates 4-tap tetrahedral SDF surface normal `surfN` at cone hits (`smoothstep(-0.04, 0.58, dot(surfN, -cDir))`) + near-field underbody tightening | *(No-op on BVH)* | **Eliminates the pink isotropic 360° "emissive underglow"** under the rear bumper (`< 0.04 ms`). |
+| **`Contact AO` *(Toggle)*** | 6-direction full-resolution G-Buffer horizon/crevice contact AO (`r <= 0.58 m`) | Same 6-direction full-res contact AO | **Grounds tyre treads, wheel arches, and under-chassis crevices** (`~0.03 ms`). |
+| **`Smooth PCSS` *(Toggle)*** | Analytical SDF blocker meta output for sub-texel penumbra anti-aliasing | **`3×3` Plane-Aware Blocker Dilation + Continuous Fractional Gaussian `sigma`** (`0.16..2.85`) + `R2` disk stratification | **Eliminates the "sharp shadow cutout → faked soft halo" integer `vRad` cliff** on Right (`~0.02 ms`). |
+| **`R2 De-Blotch` *(Toggle)*** | `R2` low-discrepancy cone rotation | **Martin Roberts' 2D `R2` Cranley–Patterson Hemisphere Stratification + Pass-1 `3×3` Mean/StdDev Outlier Clamp** + sub-step rotated À-Trous | **Eliminates stationary cloudy 6-ray GI blotches & sill speckles** on Right (`~0.03 ms`). |
+| **`Full-Res 1.0×` / `A/B: Fixes ON`** | Switches trace FBOs between `0.5×` half-res and `1.0×` native resolution; `A/B: Fixes ON/OFF` flips all 4 fixes in one click | Same (`0.5×` vs `1.0×` native ray count = `4×` pixels) | Instant 1-click **Before (`Legacy OFF`) vs. After (`Fixes ON`)** visual & `FPS`/`ms` comparison. |
+
 

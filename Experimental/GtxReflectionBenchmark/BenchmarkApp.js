@@ -3,6 +3,7 @@ import {
   GBUFFER_VERT,
   GBUFFER_FRAG,
   SDF_STATIC_SHADE_FRAG,
+  SDF_RADIOSITY_BOUNCE_FRAG,
   SDF_UNION_FRAG,
   GI_SDF_FRAG,
   GI_BVH_FRAG,
@@ -406,6 +407,8 @@ async function startBenchmark() {
     return needDynamicCopy
       ? {
           rawTex, distTex,
+          directTex: makeEmpty3D(gl.RGBA16F, gl.RGBA),
+          tmpTex: makeEmpty3D(gl.RGBA16F, gl.RGBA),
           texA: makeEmpty3D(gl.RGBA16F, gl.RGBA),
           reflA: makeEmpty3D(gl.R16F, gl.RED),
           texB: makeEmpty3D(gl.RGBA16F, gl.RGBA),
@@ -413,6 +416,8 @@ async function startBenchmark() {
         }
       : {
           rawTex, distTex,
+          directTex: makeEmpty3D(gl.RGBA16F, gl.RGBA),
+          tmpTex: makeEmpty3D(gl.RGBA16F, gl.RGBA),
           texA: makeEmpty3D(gl.RGBA16F, gl.RGBA),
           reflA: makeEmpty3D(gl.R16F, gl.RED),
         };
@@ -454,6 +459,7 @@ async function startBenchmark() {
   // Compile GPU Programs
   const progGBuffer       = compileProgram(gl, GBUFFER_VERT, GBUFFER_FRAG, "GBuffer");
   const progStaticShade   = compileProgram(gl, FULLSCREEN_VERT, SDF_STATIC_SHADE_FRAG, "SdfStaticShade");
+  const progSdfBounce     = compileProgram(gl, FULLSCREEN_VERT, SDF_RADIOSITY_BOUNCE_FRAG, "SdfRadiosityBounce");
   const progSdfUnion      = compileProgram(gl, FULLSCREEN_VERT, SDF_UNION_FRAG, "SdfUnion");
   const progGiSdf         = compileProgram(gl, FULLSCREEN_VERT, GI_SDF_FRAG, "GiSdf");
   const progGiBvh         = compileProgram(gl, FULLSCREEN_VERT, GI_BVH_FRAG, "GiBvh");
@@ -466,7 +472,7 @@ async function startBenchmark() {
   const sdfSliceFbo = gl.createFramebuffer();
 
   // Render Targets
-  let screenW = 0, screenH = 0, traceW = 0, traceH = 0;
+  let screenW = 0, screenH = 0, traceW = 0, traceH = 0, traceResScale = 0.5;
   let gBufferFbo = null, gPosTex = null, gNormTex = null, gDirectTex = null, gDepthRb = null;
   let giSdfRawFbo = null, giSdfRawTex = null, giSdfMetaTex = null;
   let giBvhRawFbo = null, giBvhRawTex = null, giBvhMetaTex = null;
@@ -505,14 +511,15 @@ async function startBenchmark() {
     return fbo;
   }
 
-  function resizeTargets() {
+  function resizeTargets(force = false) {
     const dpr = Math.min(window.devicePixelRatio || 1, 1.35);
     const w = Math.max(640, Math.floor(window.innerWidth * dpr));
     const h = Math.max(360, Math.floor(window.innerHeight * dpr));
-    if (w === screenW && h === screenH) return;
+    const tw = Math.max(320, Math.floor(w * traceResScale));
+    const th = Math.max(180, Math.floor(h * traceResScale));
+    if (!force && w === screenW && h === screenH && tw === traceW && th === traceH) return;
     screenW = w; screenH = h;
-    traceW = Math.max(320, Math.floor(w * 0.5));
-    traceH = Math.max(180, Math.floor(h * 0.5));
+    traceW = tw; traceH = th;
     canvas.width = w;
     canvas.height = h;
 
@@ -568,7 +575,14 @@ async function startBenchmark() {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
   resizeTargets();
-  window.addEventListener("resize", resizeTargets);
+  window.addEventListener("resize", () => resizeTargets(false));
+
+  const SPP_PRESETS = [
+    { giRays: 4,  shadowRays: 2,  sdfCones: 4,  label: "Low 4/2" },
+    { giRays: 6,  shadowRays: 4,  sdfCones: 6,  label: "Std 6/4" },
+    { giRays: 12, shadowRays: 8,  sdfCones: 9,  label: "High 12/8" },
+    { giRays: 24, shadowRays: 12, sdfCones: 12, label: "Ultra 24/12" },
+  ];
 
   //======================================================================================================================
   // INTERACTIVE STATE & VEHICLE MOTION
@@ -577,11 +591,22 @@ async function startBenchmark() {
   const state = {
     displayMode: 2, // 0=SDF, 1=BVH, 2=Split, 3=Delta, 4=Clay GI+Penumbra Split
     maxBounces: 2,
+    giBounces: 2,
+    sppPreset: 1,
+
     enableGi: true,
     enableShadows: true,
     softPenumbra: true,
     useHiZAssist: true,
     traceNeeShadows: true,
+
+    // Toggleable Visual & Physical Quality Improvements (A/B Compare!)
+    fixDirSdfGi: true,
+    fixContactAo: true,
+    fixSmoothPcss: true,
+    fixDeblotchGi: true,
+    fullResTrace: false,
+
     penumbraScale: 2.10,
     giIntensity: 1.85,
     sunAzimuthDeg: 50,
@@ -855,11 +880,73 @@ async function startBenchmark() {
     }
   }
 
+  function propagateCascadeBounce(vol, vox, rawTex, directTex, prevClip0, prevClip1, outVoxTex, sliceStart = 0, sliceEnd = -1) {
+    const endZ = sliceEnd < 0 ? vol.nz : Math.min(vol.nz, sliceEnd);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, sdfSliceFbo);
+    gl.viewport(0, 0, vol.nx, vol.ny);
+    gl.disable(gl.DEPTH_TEST);
+    gl.useProgram(progSdfBounce);
+
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_3D, rawTex);
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_3D, directTex);
+    gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_3D, prevClip0); gl.bindSampler(2, linearSampler);
+    gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_3D, prevClip1); gl.bindSampler(3, linearSampler);
+
+    gl.uniform1i(gl.getUniformLocation(progSdfBounce, "uTargetRaw"), 0);
+    gl.uniform1i(gl.getUniformLocation(progSdfBounce, "uDirectVoxel"), 1);
+    gl.uniform1i(gl.getUniformLocation(progSdfBounce, "uPrevClip0Linear"), 2);
+    gl.uniform1i(gl.getUniformLocation(progSdfBounce, "uPrevClip1Linear"), 3);
+
+    gl.uniform3fv(gl.getUniformLocation(progSdfBounce, "uTargetMin"), vol.min);
+    gl.uniform3fv(gl.getUniformLocation(progSdfBounce, "uTargetMax"), vol.max);
+    gl.uniform1f(gl.getUniformLocation(progSdfBounce, "uTargetVoxel"), vox);
+    gl.uniform1i(gl.getUniformLocation(progSdfBounce, "uTargetDepth"), vol.nz);
+
+    gl.uniform3fv(gl.getUniformLocation(progSdfBounce, "uClip0Min"), clip0Vol.min);
+    gl.uniform3f(gl.getUniformLocation(progSdfBounce, "uClip0InvSpan"), 1/clip0Span[0], 1/clip0Span[1], 1/clip0Span[2]);
+    gl.uniform1f(gl.getUniformLocation(progSdfBounce, "uClip0Voxel"), clip0Voxel);
+    gl.uniform3fv(gl.getUniformLocation(progSdfBounce, "uClip1Min"), clip1Vol.min);
+    gl.uniform3f(gl.getUniformLocation(progSdfBounce, "uClip1InvSpan"), 1/clip1Span[0], 1/clip1Span[1], 1/clip1Span[2]);
+    gl.uniform1f(gl.getUniformLocation(progSdfBounce, "uClip1Voxel"), clip1Voxel);
+    gl.uniform3fv(gl.getUniformLocation(progSdfBounce, "uPaintColor"), PAINT_PALETTE[state.paintIdx]);
+
+    // Detach COLOR_ATTACHMENT1 so single-attachment bounce pass never collides with 2-attachment FBO state
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, null, 0);
+    gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+
+    const sliceLoc = gl.getUniformLocation(progSdfBounce, "uSliceIndex");
+    gl.bindVertexArray(emptyVao);
+    for (let iz = sliceStart; iz < endZ; iz++) {
+      gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, outVoxTex, 0, iz);
+      gl.uniform1i(sliceLoc, iz);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+    unbindSamplers(2, 2);
+  }
+
   function runStaticArenaSdfShadeIfNeeded() {
     if (!state.staticShadeDirty) return;
-    shadeStaticCascadeTarget(clip0Vol, clip0Voxel, clip0Pair.rawTex, clip0Pair.texA, clip0Pair.reflA);
-    shadeStaticCascadeTarget(clip0Vol, clip0Voxel, clip0Pair.rawTex, clip0Pair.texB, clip0Pair.reflB);
-    shadeStaticCascadeTarget(clip1Vol, clip1Voxel, clip1Pair.rawTex, clip1Pair.texA, clip1Pair.reflA);
+    if (state.giBounces <= 1) {
+      shadeStaticCascadeTarget(clip0Vol, clip0Voxel, clip0Pair.rawTex, clip0Pair.texA, clip0Pair.reflA);
+      shadeStaticCascadeTarget(clip0Vol, clip0Voxel, clip0Pair.rawTex, clip0Pair.texB, clip0Pair.reflB);
+      shadeStaticCascadeTarget(clip1Vol, clip1Voxel, clip1Pair.rawTex, clip1Pair.texA, clip1Pair.reflA);
+    } else {
+      shadeStaticCascadeTarget(clip0Vol, clip0Voxel, clip0Pair.rawTex, clip0Pair.directTex, clip0Pair.reflA);
+      shadeStaticCascadeTarget(clip0Vol, clip0Voxel, clip0Pair.rawTex, clip0Pair.texB, clip0Pair.reflB);
+      shadeStaticCascadeTarget(clip1Vol, clip1Voxel, clip1Pair.rawTex, clip1Pair.directTex, clip1Pair.reflA);
+
+      if (state.giBounces === 2) {
+        propagateCascadeBounce(clip0Vol, clip0Voxel, clip0Pair.rawTex, clip0Pair.directTex, clip0Pair.directTex, clip1Pair.directTex, clip0Pair.texA);
+        propagateCascadeBounce(clip0Vol, clip0Voxel, clip0Pair.rawTex, clip0Pair.directTex, clip0Pair.directTex, clip1Pair.directTex, clip0Pair.texB, 29, clip0Vol.nz);
+        propagateCascadeBounce(clip1Vol, clip1Voxel, clip1Pair.rawTex, clip1Pair.directTex, clip0Pair.directTex, clip1Pair.directTex, clip1Pair.texA);
+      } else {
+        propagateCascadeBounce(clip0Vol, clip0Voxel, clip0Pair.rawTex, clip0Pair.directTex, clip0Pair.directTex, clip1Pair.directTex, clip0Pair.tmpTex);
+        propagateCascadeBounce(clip1Vol, clip1Voxel, clip1Pair.rawTex, clip1Pair.directTex, clip0Pair.directTex, clip1Pair.directTex, clip1Pair.tmpTex);
+        propagateCascadeBounce(clip0Vol, clip0Voxel, clip0Pair.rawTex, clip0Pair.directTex, clip0Pair.tmpTex, clip1Pair.tmpTex, clip0Pair.texA);
+        propagateCascadeBounce(clip0Vol, clip0Voxel, clip0Pair.rawTex, clip0Pair.directTex, clip0Pair.tmpTex, clip1Pair.tmpTex, clip0Pair.texB, 29, clip0Vol.nz);
+        propagateCascadeBounce(clip1Vol, clip1Voxel, clip1Pair.rawTex, clip1Pair.directTex, clip0Pair.tmpTex, clip1Pair.tmpTex, clip1Pair.texA);
+      }
+    }
     state.staticShadeDirty = false;
   }
 
@@ -905,6 +992,7 @@ async function startBenchmark() {
     gl.uniform3f(gl.getUniformLocation(progSdfUnion, "uCarCenter"), state.carX, state.carY, TYRE_RADIUS);
     gl.uniform3fv(gl.getUniformLocation(progSdfUnion, "uSunDir"), state.sunDir);
     gl.uniform3fv(gl.getUniformLocation(progSdfUnion, "uPaintColor"), PAINT_PALETTE[state.paintIdx]);
+    gl.uniform1i(gl.getUniformLocation(progSdfUnion, "uGiBounces"), state.giBounces);
 
     const sliceNormLoc = gl.getUniformLocation(progSdfUnion, "uSliceZNorm");
     const sliceIdxLoc  = gl.getUniformLocation(progSdfUnion, "uSliceIndex");
@@ -982,6 +1070,9 @@ async function startBenchmark() {
     gl.uniform1i(gl.getUniformLocation(progGiBilateral, "uGNormMat"), 3);
     gl.uniform2f(gl.getUniformLocation(progGiBilateral, "uTexelSize"), 1.0 / traceW, 1.0 / traceH);
     gl.uniform1i(gl.getUniformLocation(progGiBilateral, "uContactHardenShadows"), contactHarden ? 1 : 0);
+    gl.uniform1f(gl.getUniformLocation(progGiBilateral, "uPenumbraScale"), state.penumbraScale);
+    gl.uniform1i(gl.getUniformLocation(progGiBilateral, "uSmoothPcss"), state.fixSmoothPcss ? 1 : 0);
+    gl.uniform1i(gl.getUniformLocation(progGiBilateral, "uDeblotchGi"), state.fixDeblotchGi ? 1 : 0);
 
     const stepLoc = gl.getUniformLocation(progGiBilateral, "uStepPx");
     gl.bindVertexArray(emptyVao);
@@ -1005,7 +1096,20 @@ async function startBenchmark() {
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
+  let rollingBounceSlice = 0;
   function runGiSdfPipeline() {
+    // Amortized real-time surface-cache multi-bounce refresh (3 slices/frame per extra bounce, just like Lumen!)
+    if (state.enableGi && state.giBounces >= 2) {
+      const slicesPerTick = (state.giBounces - 1) * 3;
+      const z0 = rollingBounceSlice % clip0Vol.nz;
+      const z1 = Math.min(clip0Vol.nz, z0 + slicesPerTick);
+      const prev0 = state.giBounces === 3 ? clip0Pair.tmpTex : clip0Pair.directTex;
+      const prev1 = state.giBounces === 3 ? clip1Pair.tmpTex : clip1Pair.directTex;
+      propagateCascadeBounce(clip0Vol, clip0Voxel, clip0Pair.rawTex, clip0Pair.directTex, prev0, prev1, clip0Pair.texA, z0, z1);
+      rollingBounceSlice = (z0 + slicesPerTick) % clip0Vol.nz;
+    }
+
+    const preset = SPP_PRESETS[state.sppPreset];
     gl.bindFramebuffer(gl.FRAMEBUFFER, giSdfRawFbo);
     gl.viewport(0, 0, traceW, traceH);
     gl.disable(gl.DEPTH_TEST);
@@ -1022,15 +1126,20 @@ async function startBenchmark() {
     gl.uniform1i(gl.getUniformLocation(progGiSdf, "uEnableGi"), state.enableGi ? 1 : 0);
     gl.uniform1i(gl.getUniformLocation(progGiSdf, "uEnableShadows"), state.enableShadows ? 1 : 0);
     gl.uniform1i(gl.getUniformLocation(progGiSdf, "uSoftPenumbra"), state.softPenumbra ? 1 : 0);
+    gl.uniform1i(gl.getUniformLocation(progGiSdf, "uSdfConeCount"), preset.sdfCones);
+    gl.uniform1i(gl.getUniformLocation(progGiSdf, "uDirectionalSdfGi"), state.fixDirSdfGi ? 1 : 0);
+    gl.uniform1i(gl.getUniformLocation(progGiSdf, "uUseR2Stratified"), state.fixDeblotchGi ? 1 : 0);
+    gl.uniform1i(gl.getUniformLocation(progGiSdf, "uSmoothPcss"), state.fixSmoothPcss ? 1 : 0);
 
     gl.bindVertexArray(emptyVao);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     unbindSamplers(2, 4);
 
-    runBilateralChain(giSdfRawTex, giSdfMetaTex, giSdfFinalFbo, false);
+    runBilateralChain(giSdfRawTex, giSdfMetaTex, giSdfFinalFbo, state.fixSmoothPcss && state.softPenumbra);
   }
 
   function runGiBvhPipeline() {
+    const preset = SPP_PRESETS[state.sppPreset];
     gl.bindFramebuffer(gl.FRAMEBUFFER, giBvhRawFbo);
     gl.viewport(0, 0, traceW, traceH);
     gl.disable(gl.DEPTH_TEST);
@@ -1055,6 +1164,11 @@ async function startBenchmark() {
     gl.uniform1i(gl.getUniformLocation(progGiBvh, "uEnableShadows"), state.enableShadows ? 1 : 0);
     gl.uniform1i(gl.getUniformLocation(progGiBvh, "uSoftPenumbra"), state.softPenumbra ? 1 : 0);
     gl.uniform1i(gl.getUniformLocation(progGiBvh, "uTraceNeeShadows"), state.traceNeeShadows ? 1 : 0);
+    gl.uniform1i(gl.getUniformLocation(progGiBvh, "uGiSamples"), preset.giRays);
+    gl.uniform1i(gl.getUniformLocation(progGiBvh, "uShadowSamples"), preset.shadowRays);
+    gl.uniform1i(gl.getUniformLocation(progGiBvh, "uGiBounces"), state.giBounces);
+    gl.uniform1i(gl.getUniformLocation(progGiBvh, "uUseR2Stratified"), state.fixDeblotchGi ? 1 : 0);
+    gl.uniform1i(gl.getUniformLocation(progGiBvh, "uSmoothPcss"), state.fixSmoothPcss ? 1 : 0);
 
     gl.bindVertexArray(emptyVao);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -1142,10 +1256,12 @@ async function startBenchmark() {
     gl.uniform3fv(gl.getUniformLocation(progComposite, "uSunDir"), state.sunDir);
     gl.uniform3fv(gl.getUniformLocation(progComposite, "uPaintColor"), PAINT_PALETTE[state.paintIdx]);
     gl.uniform2f(gl.getUniformLocation(progComposite, "uTraceTexelSize"), 1.0 / traceW, 1.0 / traceH);
+    gl.uniform2f(gl.getUniformLocation(progComposite, "uFullTexelSize"), 1.0 / screenW, 1.0 / screenH);
     gl.uniform1i(gl.getUniformLocation(progComposite, "uDisplayMode"), state.displayMode);
     gl.uniform1f(gl.getUniformLocation(progComposite, "uSplitX"), state.splitX);
     gl.uniform1f(gl.getUniformLocation(progComposite, "uGiIntensity"), state.enableGi ? state.giIntensity : 0.0);
     gl.uniform1i(gl.getUniformLocation(progComposite, "uMaxBounces"), state.maxBounces);
+    gl.uniform1i(gl.getUniformLocation(progComposite, "uContactAo"), state.fixContactAo ? 1 : 0);
 
     gl.bindVertexArray(emptyVao);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -1305,6 +1421,25 @@ async function startBenchmark() {
     });
   });
 
+  document.querySelectorAll("[data-gi-bounces]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.giBounces = parseInt(btn.dataset.giBounces, 10);
+      state.staticShadeDirty = true;
+      document.querySelectorAll("[data-gi-bounces]").forEach((b) =>
+        b.setAttribute("aria-pressed", b === btn ? "true" : "false"));
+      runSynchronizedBenchmark(6);
+    });
+  });
+
+  document.querySelectorAll("[data-spp]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.sppPreset = parseInt(btn.dataset.spp, 10);
+      document.querySelectorAll("[data-spp]").forEach((b) =>
+        b.setAttribute("aria-pressed", b === btn ? "true" : "false"));
+      runSynchronizedBenchmark(state.sppPreset >= 3 ? 4 : 6);
+    });
+  });
+
   function syncDriveButtons() {
     document.querySelectorAll("[data-drive]").forEach((b) =>
       b.setAttribute("aria-pressed", b.dataset.drive === state.driveMode ? "true" : "false"));
@@ -1330,6 +1465,51 @@ async function startBenchmark() {
   bindChip("toggle-hiz", "useHiZAssist", false);
   bindChip("toggle-nee", "traceNeeShadows", true);
   bindChip("toggle-chase", "chaseCam", false);
+
+  function syncMasterFixesBtn() {
+    const abBtn = document.getElementById("btn-ab-fixes");
+    const anyOn = state.fixDirSdfGi || state.fixContactAo || state.fixSmoothPcss || state.fixDeblotchGi;
+    abBtn.dataset.all = anyOn ? "on" : "off";
+    abBtn.textContent = anyOn ? "A/B: Fixes ON" : "A/B: Legacy OFF";
+  }
+
+  function bindFixChip(id, prop) {
+    const el = document.getElementById(id);
+    el.addEventListener("click", () => {
+      state[prop] = !state[prop];
+      el.setAttribute("aria-pressed", state[prop] ? "true" : "false");
+      syncMasterFixesBtn();
+      runSynchronizedBenchmark(5);
+    });
+  }
+  bindFixChip("toggle-dir-sdf", "fixDirSdfGi");
+  bindFixChip("toggle-contact-ao", "fixContactAo");
+  bindFixChip("toggle-smooth-pcss", "fixSmoothPcss");
+  bindFixChip("toggle-deblotch", "fixDeblotchGi");
+
+  document.getElementById("btn-ab-fixes").addEventListener("click", () => {
+    const turnOn = !(state.fixDirSdfGi && state.fixContactAo && state.fixSmoothPcss && state.fixDeblotchGi);
+    state.fixDirSdfGi = turnOn;
+    state.fixContactAo = turnOn;
+    state.fixSmoothPcss = turnOn;
+    state.fixDeblotchGi = turnOn;
+    document.getElementById("toggle-dir-sdf").setAttribute("aria-pressed", turnOn ? "true" : "false");
+    document.getElementById("toggle-contact-ao").setAttribute("aria-pressed", turnOn ? "true" : "false");
+    document.getElementById("toggle-smooth-pcss").setAttribute("aria-pressed", turnOn ? "true" : "false");
+    document.getElementById("toggle-deblotch").setAttribute("aria-pressed", turnOn ? "true" : "false");
+    syncMasterFixesBtn();
+    runSynchronizedBenchmark(5);
+  });
+
+  const fullResBtn = document.getElementById("toggle-fullres");
+  fullResBtn.addEventListener("click", () => {
+    state.fullResTrace = !state.fullResTrace;
+    traceResScale = state.fullResTrace ? 1.0 : 0.5;
+    fullResBtn.setAttribute("aria-pressed", state.fullResTrace ? "true" : "false");
+    fullResBtn.textContent = state.fullResTrace ? "Full-Res 1.0×" : "Half-Res 0.5×";
+    resizeTargets(true);
+    runSynchronizedBenchmark(4);
+  });
 
   const sliderPenumbra = document.getElementById("slider-penumbra");
   const valPenumbra    = document.getElementById("val-penumbra");
@@ -1359,6 +1539,7 @@ async function startBenchmark() {
   document.querySelectorAll(".paint-swatch").forEach((sw) => {
     sw.addEventListener("click", () => {
       state.paintIdx = parseInt(sw.dataset.paint, 10);
+      state.staticShadeDirty = true;
       document.querySelectorAll(".paint-swatch").forEach((s) =>
         s.setAttribute("aria-pressed", s === sw ? "true" : "false"));
     });

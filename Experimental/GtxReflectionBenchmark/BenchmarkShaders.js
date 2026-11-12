@@ -149,13 +149,13 @@ SurfaceMat evalMaterial(int matId, vec3 worldPos, vec3 paintColor) {
 
 vec3 evalPortalIrradiance(vec3 pos, vec3 nrm) {
   vec3 portalIrr = vec3(0.0);
-  if (pos.z < 4.39) {
-    for (int i = -1; i <= 1; i += 2) {
-      vec3 lp = vec3(float(i) * 4.6, clamp(pos.y, -5.0, 5.0), 4.39);
+  if (pos.z < 6.20) {
+    for (int i = -1; i <= 1; i++) {
+      vec3 lp = vec3(float(i) * 12.5, clamp(pos.y, -13.6, 13.6), 6.22);
       vec3 d = lp - pos;
       float d2 = dot(d, d);
       vec3 ldir = d * inversesqrt(max(d2, 1e-4));
-      portalIrr += vec3(0.62, 0.72, 0.90) * (max(dot(nrm, ldir), 0.0) / (1.0 + 0.28 * d2));
+      portalIrr += vec3(0.72, 0.82, 1.02) * (max(dot(nrm, ldir), 0.0) / (1.0 + 0.14 * d2));
     }
   }
   return portalIrr;
@@ -196,14 +196,22 @@ float interleavedGradientNoise(vec2 px) {
   return fract(52.9829189 * fract(0.06711056 * px.x + 0.00583715 * px.y));
 }
 
+// Martin Roberts' optimal 2D R2 low-discrepancy quasi-random sequence (eliminates IGN modulo clumping!)
+vec2 r2Sequence(vec2 px) {
+  return fract(px.x * vec2(0.7548776662, 0.5698402910) + px.y * vec2(0.5698402910, 0.3247179572));
+}
+
 // Secondary bounce radiosity (for voxel caches, GI hits, and multi-bounce reflection hits)
-vec3 evalSecondaryBounceRadiance(vec3 pos, vec3 nrm, int matId, SurfaceMat m, vec3 sunDir, float sunVis) {
+vec3 evalBounceDirectRadiance(vec3 pos, vec3 nrm, int matId, SurfaceMat m, vec3 sunDir, float sunVis, bool addResidualSky) {
   float ndl = max(dot(nrm, sunDir), 0.0) * sunVis;
   vec3 sunIrr = vec3(4.4, 3.95, 3.40) * ndl;
-  vec3 skyIrr = vec3(0.18, 0.24, 0.34);
-  // Clearcoat car paint (matId == 6) also bounces colored tint into surrounding GI!
+  vec3 skyIrr = addResidualSky ? vec3(0.18, 0.24, 0.34) : vec3(0.0);
   vec3 diffTint = (matId == 6) ? mix(m.albedo * (1.0 - m.metalness), m.albedo * 0.68, 0.65) : m.albedo * (1.0 - m.metalness);
   return m.emissive + diffTint * ((sunIrr + skyIrr + evalPortalIrradiance(pos, nrm)) * (1.0 / 3.14159265));
+}
+
+vec3 evalSecondaryBounceRadiance(vec3 pos, vec3 nrm, int matId, SurfaceMat m, vec3 sunDir, float sunVis) {
+  return evalBounceDirectRadiance(pos, nrm, matId, m, sunDir, sunVis, true);
 }
 `;
 
@@ -346,6 +354,114 @@ void main() {
 `;
 
 //========================================================================================================================
+// MULTI-BOUNCE GLOBAL SDF VOXEL-TO-VOXEL RADIOSITY PROPAGATION (2nd & 3rd GI Bounces inside Surface Voxel Cache!)
+// Propagates indirect bounce across Clip0 & Clip1 narrow-band surface voxels so multi-bounce GI adds ~0 ms per-pixel cost!
+//========================================================================================================================
+export const SDF_RADIOSITY_BOUNCE_FRAG = `#version 300 es
+precision highp float;
+precision highp sampler3D;
+
+in vec2 vUv;
+uniform sampler3D uTargetRaw;       // RG16F NEAREST: .r = dist, .g = matId
+uniform sampler3D uDirectVoxel;     // RGBA16F: 1st-bounce direct radiosity + dist
+uniform sampler3D uPrevClip0Linear; // RGBA16F LINEAR: previous bounce Clip0
+uniform sampler3D uPrevClip1Linear; // RGBA16F LINEAR: previous bounce Clip1
+
+uniform vec3 uTargetMin;
+uniform vec3 uTargetMax;
+uniform float uTargetVoxel;
+uniform int uSliceIndex;
+uniform int uTargetDepth;
+
+uniform vec3 uClip0Min;
+uniform vec3 uClip0InvSpan;
+uniform float uClip0Voxel;
+uniform vec3 uClip1Min;
+uniform vec3 uClip1InvSpan;
+uniform float uClip1Voxel;
+uniform vec3 uPaintColor;
+
+layout(location = 0) out vec4 outVoxel;
+
+${COMMON_MATERIAL_GLSL}
+
+vec4 samplePrevCascade(vec3 p, out float voxOut) {
+  vec3 u0 = (p - uClip0Min) * uClip0InvSpan;
+  if (all(greaterThan(u0, vec3(0.02))) && all(lessThan(u0, vec3(0.98)))) {
+    voxOut = uClip0Voxel;
+    return texture(uPrevClip0Linear, u0);
+  }
+  vec3 u1 = (p - uClip1Min) * uClip1InvSpan;
+  if (all(greaterThan(u1, vec3(0.015))) && all(lessThan(u1, vec3(0.985)))) {
+    voxOut = uClip1Voxel;
+    return texture(uPrevClip1Linear, u1);
+  }
+  voxOut = 1.0;
+  return vec4(0.0, 0.0, 0.0, 1e5);
+}
+
+void main() {
+  ivec3 tc = ivec3(ivec2(gl_FragCoord.xy), uSliceIndex);
+  vec4 raw = texelFetch(uTargetRaw, tc, 0);
+  vec4 dirVox = texelFetch(uDirectVoxel, tc, 0);
+  int matId = int(raw.g + 0.5);
+  if (matId <= 0 || matId == 5) {
+    outVoxel = dirVox;
+    return;
+  }
+
+  vec3 uvw = vec3(vUv, (float(uSliceIndex) + 0.5) / float(uTargetDepth));
+  vec3 wp = mix(uTargetMin, uTargetMax, uvw);
+  SurfaceMat sm = evalMaterial(matId, wp, uPaintColor);
+  vec3 diffTint = sm.albedo * (1.0 - sm.metalness);
+  if (max(diffTint.r, max(diffTint.g, diffTint.b)) < 0.02) {
+    outVoxel = dirVox;
+    return;
+  }
+
+  float h = uTargetVoxel * 0.95;
+  float dm;
+  vec3 nrm = (matId == 1)
+    ? vec3(0.0, 0.0, 1.0)
+    : normalize(vec3(
+        samplePrevCascade(wp + vec3(h, 0.0, 0.0), dm).a - samplePrevCascade(wp - vec3(h, 0.0, 0.0), dm).a,
+        samplePrevCascade(wp + vec3(0.0, h, 0.0), dm).a - samplePrevCascade(wp - vec3(0.0, h, 0.0), dm).a,
+        samplePrevCascade(wp + vec3(0.0, 0.0, h), dm).a - samplePrevCascade(wp - vec3(0.0, 0.0, h), dm).a
+      ) + vec3(0.0, 0.0, 1e-6));
+
+  vec3 tB, bB;
+  buildOrthonormalBasis(nrm, tB, bB);
+  vec3 bounceIrr = vec3(0.0);
+  for (int k = 0; k < 4; k++) {
+    float r = sqrt((float(k) + 0.5) / 4.0);
+    float a = float(k) * 2.3999632 + 0.45;
+    vec3 cDir = normalize(tB * (r * cos(a)) + bB * (r * sin(a)) + nrm * sqrt(max(0.0, 1.0 - r * r)));
+    float ct = uTargetVoxel * 1.8;
+    vec3 cRad = vec3(0.0);
+    float cAlpha = 0.0;
+    for (int s = 0; s < 7; s++) {
+      if (cAlpha > 0.95 || ct > 12.0) break;
+      float vox;
+      vec4 sv = samplePrevCascade(wp + nrm * uTargetVoxel + cDir * ct, vox);
+      if (sv.a > 1e4) break;
+      float coneR = max(vox * 0.85, ct * 0.18);
+      if (sv.a < coneR) {
+        float occ = smoothstep(coneR, -vox * 0.2, sv.a);
+        float w = (1.0 - cAlpha) * occ;
+        cRad += sv.rgb * w;
+        cAlpha += w;
+      }
+      ct += max(sv.a * 0.90, vox * 0.95);
+    }
+    bounceIrr += cRad * 0.25;
+  }
+
+  vec3 totalRad = min(dirVox.rgb + diffTint * bounceIrr * 0.85, vec3(28.0));
+  outVoxel = vec4(totalRad, dirVox.a);
+}
+`;
+
+//========================================================================================================================
 // DYNAMIC GPU SLICE UNION PASS: Unions moving ControlVehicle (.sdfspace Body + 4x Rim + 4x Tyre) into Global SDF Clip0
 // AND attenuates floor radiosity inside the car's dynamic sun shadow for accurate secondary GI & reflections!
 //========================================================================================================================
@@ -379,6 +495,7 @@ uniform mat4 uWheelWorldToLocal[4];
 uniform vec3 uCarCenter;
 uniform vec3 uSunDir;
 uniform vec3 uPaintColor;
+uniform int uGiBounces;
 
 layout(location = 0) out vec4 outSdfVoxel;
 layout(location = 1) out vec4 outSdfRefl;
@@ -446,7 +563,20 @@ void main() {
       worldN = normalize(mat3(uBodyLocalToWorld) * localN);
     }
     SurfaceMat m = evalMaterial(hitMat, worldPos, uPaintColor);
-    finalRad = min(evalSecondaryBounceRadiance(worldPos, worldN, hitMat, m, uSunDir, 1.0), vec3(24.0));
+    finalRad = evalSecondaryBounceRadiance(worldPos, worldN, hitMat, m, uSunDir, 1.0);
+    if (uGiBounces >= 2) {
+      // Gather secondary bounce from static arena Clip0 onto moving car voxels!
+      vec3 span0 = uClip0Max - uClip0Min;
+      vec3 bounceAcc = vec3(0.0);
+      for (int b = 0; b < 3; b++) {
+        vec3 bDir = (b == 0) ? worldN : normalize(worldN + ((b == 1) ? vec3(0.55, 0.35, 0.25) : vec3(-0.55, -0.35, 0.25)));
+        vec3 bUv = clamp((worldPos + bDir * 1.35 - uClip0Min) / span0, vec3(0.01), vec3(0.99));
+        bounceAcc += texture(uStaticClip0, bUv).rgb * (1.0 / 3.0);
+      }
+      vec3 carTint = (hitMat == 6) ? mix(m.albedo * (1.0 - m.metalness), m.albedo * 0.68, 0.65) : m.albedo * (1.0 - m.metalness);
+      finalRad += carTint * bounceAcc * 0.55;
+    }
+    finalRad = min(finalRad, vec3(26.0));
     finalRefl = clamp((m.metalness * 0.75 + m.coat * 0.45) * (1.0 - m.roughness), 0.0, 0.95);
   } else if (uSliceIndex <= 6 && stMat == 1) {
     // Dynamic car sun-shadow attenuation on floor voxels so moving car darkens secondary GI & mirror reflections!
@@ -512,11 +642,25 @@ void unpackSdfSurface(vec3 p, int cascade, out vec3 rad, out float refl) {
     refl = texture(uClip1Refl, u).r;
   }
 }
+
+vec3 evalGlobalSdfNormal(vec3 p, int cascade) {
+  float h = (cascade == 0) ? uClip0Voxel * 0.95 : uClip1Voxel * 0.95;
+  int c;
+  const vec3 k0 = vec3( 1.0, -1.0, -1.0);
+  const vec3 k1 = vec3(-1.0, -1.0,  1.0);
+  const vec3 k2 = vec3(-1.0,  1.0, -1.0);
+  const vec3 k3 = vec3( 1.0,  1.0,  1.0);
+  vec3 g = k0 * sampleGlobalSdfDistance(p + k0 * h, c)
+         + k1 * sampleGlobalSdfDistance(p + k1 * h, c)
+         + k2 * sampleGlobalSdfDistance(p + k2 * h, c)
+         + k3 * sampleGlobalSdfDistance(p + k3 * h, c);
+  return normalize(g + vec3(0.0, 0.0, 1e-6));
+}
 `;
 
 //========================================================================================================================
-// PATH A (GI + PENUMBRA): GLOBAL SDF 6-CONE VOXEL GI + COLOR BLEEDING + CONTACT-HARDENING CONE PENUMBRA
-// Deterministic single-frame evaluation: ZERO ghosting, ZERO smearing, ZERO jittering noise!
+// PATH A (GI + PENUMBRA): GLOBAL SDF CONE VOXEL GI + COLOR BLEEDING + CONTACT-HARDENING CONE PENUMBRA
+// Supports A/B toggles for Directional SDF GI (fixes isotropic "emissive" underglow), Smooth PCSS, R2, and Cone Count!
 //========================================================================================================================
 export const GI_SDF_FRAG = `#version 300 es
 precision highp float;
@@ -531,9 +675,13 @@ uniform float uPenumbraScale;
 uniform int uEnableGi;
 uniform int uEnableShadows;
 uniform int uSoftPenumbra;
+uniform int uSdfConeCount;
+uniform int uDirectionalSdfGi;
+uniform int uUseR2Stratified;
+uniform int uSmoothPcss;
 
 layout(location = 0) out vec4 outGiAndShadow;  // .rgb = demodulated GI irradiance, .a = sun shadow visibility
-layout(location = 1) out vec4 outShadowMeta;   // .r = blocker distance (0 = analytical SDF)
+layout(location = 1) out vec4 outShadowMeta;   // .r = analytical blocker distance
 
 ${COMMON_MATERIAL_GLSL}
 ${GLOBAL_SDF_HELPERS_GLSL}
@@ -553,12 +701,14 @@ void main() {
 
   // 1. Contact-Hardening Global SDF Analytical Cone Penumbra
   float sunVis = 1.0;
+  float sdfBlocker = 0.0;
   if (uEnableShadows == 1) {
     if (dot(nrm, uSunDir) <= 0.0) {
       sunVis = 0.0;
     } else {
       float effPenumbra = (uSoftPenumbra == 1) ? max(uPenumbraScale, 0.08) : 0.04;
       float t = 0.08;
+      float minRatio = 1e4;
       for (int s = 0; s < 34; s++) {
         vec3 sp = pos + nrm * (uClip0Voxel * 0.85) + uSunDir * t;
         int casc = 0;
@@ -567,51 +717,71 @@ void main() {
         float halfW = (uSoftPenumbra == 1)
           ? max(uClip0Voxel * 0.55, effPenumbra * 0.056 * t)
           : uClip0Voxel * 0.32;
-        sunVis = min(sunVis, smoothstep(-halfW * 0.35, halfW, d));
+        float visStep = smoothstep(-halfW * 0.35, halfW, d);
+        if (visStep < sunVis) {
+          sunVis = visStep;
+          sdfBlocker = t * 0.35;
+        }
+        if (d < minRatio) minRatio = d;
         if (sunVis < 0.002) { sunVis = 0.0; break; }
         t += clamp(d * 0.78, 0.055, 0.48);
-        if (t > 18.0) break;
+        if (t > 24.0) break;
       }
     }
   }
 
-  // 2. Self-Plane-Free Sphere-Marched 6-Cone Voxel GI + Vivid Color Bleeding
+  // 2. Self-Plane-Free Sphere-Marched Voxel Cone GI + Optional Directional Lambertian Voxel Rejection
   vec3 giIrr = vec3(0.0);
   if (uEnableGi == 1) {
     vec3 tB, bB;
     buildOrthonormalBasis(nrm, tB, bB);
-    float phi0 = interleavedGradientNoise(gl_FragCoord.xy) * 6.2831853;
+    vec2 r2 = r2Sequence(gl_FragCoord.xy);
+    float phi0 = ((uUseR2Stratified == 1) ? r2.x : interleavedGradientNoise(gl_FragCoord.xy)) * 6.2831853;
+    int coneCnt = clamp(uSdfConeCount, 4, 12);
+    float invCones = 1.0 / float(coneCnt);
 
-    for (int k = 0; k < 6; k++) {
-      float r = sqrt((float(k) + 0.5) / 6.0);
+    for (int k = 0; k < 12; k++) {
+      if (k >= coneCnt) break;
+      float uRad = (float(k) + ((uUseR2Stratified == 1) ? fract(r2.y + float(k) * 0.618034) * 0.65 + 0.175 : 0.5)) * invCones;
+      float r = sqrt(clamp(uRad, 0.02, 0.96));
       float a = phi0 + float(k) * 2.3999632;
       vec3 cDir = normalize(tB * (r * cos(a)) + bB * (r * sin(a)) + nrm * sqrt(max(0.0, 1.0 - r * r)));
 
-      float ct = 0.18;
+      float ct = (uDirectionalSdfGi == 1) ? 0.13 : 0.18;
       float cAlpha = 0.0;
       vec3 cCol = vec3(0.0);
-      for (int st = 0; st < 14; st++) {
-        if (cAlpha >= 0.98 || ct > 11.0) break;
-        vec3 sp = pos + nrm * (uClip0Voxel * 1.05) + cDir * ct;
+      for (int st = 0; st < 15; st++) {
+        if (cAlpha >= 0.98 || ct > 14.0) break;
+        vec3 sp = pos + nrm * (uClip0Voxel * 0.95) + cDir * ct;
         int cc = 0;
         float cd = sampleGlobalSdfDistance(sp, cc);
         if (cc == 2) break;
         float vox = (cc == 0) ? uClip0Voxel : uClip1Voxel;
-        float coneR = max(vox * 0.75, ct * 0.14);
+        float coneR = max(vox * ((uDirectionalSdfGi == 1) ? 0.62 : 0.75), ct * 0.14);
         if (cd < coneR) {
-          float occ = smoothstep(coneR, -vox * 0.25, cd);
+          float occ = smoothstep(coneR, -vox * ((uDirectionalSdfGi == 1) ? 0.16 : 0.25), cd);
           vec3 sRad; float sRefl;
           unpackSdfSurface(sp, cc, sRad, sRefl);
+          if (uDirectionalSdfGi == 1) {
+            // Reject isotropic 360-deg back/side "emissive" voxel shell glow: walls only bounce along +surfN!
+            vec3 surfN = evalGlobalSdfNormal(sp, cc);
+            float frontEmit = smoothstep(-0.04, 0.58, dot(surfN, -cDir)) * 1.24;
+            // Tighten near-field under-chassis tyre/bumper occlusion so grazing cones don't leak pink glow under car
+            if (ct < 0.85 && sRefl < 0.08 && max(sRad.r, max(sRad.g, sRad.b)) < 0.22) {
+              occ = min(1.0, occ * 1.45);
+            }
+            sRad *= frontEmit;
+          }
           float stepW = (1.0 - cAlpha) * occ;
           cCol += sRad * stepW;
           cAlpha += stepW;
         }
-        ct += max(cd * 0.88, vox * 0.85);
+        ct += max(cd * 0.86, vox * 0.82);
       }
       float su = cDir.z * 0.5 + 0.5;
       vec3 skyAmb = mix(vec3(0.08, 0.09, 0.12), vec3(0.22, 0.32, 0.48), su);
       cCol += skyAmb * (1.0 - cAlpha);
-      giIrr += cCol * (1.0 / 6.0);
+      giIrr += cCol * invCones;
     }
   } else {
     float su = nrm.z * 0.5 + 0.5;
@@ -619,7 +789,7 @@ void main() {
   }
 
   outGiAndShadow = vec4(min(giIrr, vec3(16.0)), sunVis);
-  outShadowMeta  = vec4(0.8, 0.0, 0.0, 1.0);
+  outShadowMeta  = vec4((uSmoothPcss == 1) ? clamp(sdfBlocker, 0.12, 1.1) : 0.8, 0.0, 0.0, 1.0);
 }
 `;
 
@@ -923,6 +1093,11 @@ uniform int uEnableGi;
 uniform int uEnableShadows;
 uniform int uSoftPenumbra;
 uniform int uTraceNeeShadows;
+uniform int uGiSamples;
+uniform int uShadowSamples;
+uniform int uGiBounces;
+uniform int uUseR2Stratified;
+uniform int uSmoothPcss;
 
 layout(location = 0) out vec4 outGiAndShadow;
 layout(location = 1) out vec4 outShadowMeta;
@@ -942,7 +1117,8 @@ void main() {
 
   vec3 pos = posRough.xyz;
   vec3 nrm = normalize(normMat.xyz);
-  float phi0 = interleavedGradientNoise(gl_FragCoord.xy) * 6.2831853;
+  vec2 r2 = r2Sequence(gl_FragCoord.xy);
+  float phi0 = ((uUseR2Stratified == 1 || uSmoothPcss == 1) ? r2.x : interleavedGradientNoise(gl_FragCoord.xy)) * 6.2831853;
 
   // 1. Golden-Disk Area-Light Raytraced Soft Shadow + Blocker Distance Contact-Hardening
   float sunVis = 1.0;
@@ -951,58 +1127,93 @@ void main() {
     if (dot(nrm, uSunDir) <= 0.0) {
       sunVis = 0.0;
     } else if (uSoftPenumbra == 0 || uPenumbraScale <= 0.02) {
-      float blk = traceSceneShadowBlockerBvh(pos + nrm * 0.005, uSunDir, 0.004, 35.0);
+      float blk = traceSceneShadowBlockerBvh(pos + nrm * 0.005, uSunDir, 0.004, 48.0);
       sunVis = (blk < 0.0) ? 1.0 : 0.0;
       avgBlocker = 0.0;
     } else {
       vec3 sunT, sunB;
       buildOrthonormalBasis(uSunDir, sunT, sunB);
       float diskRad = uPenumbraScale * 0.056;
+      int shRays = clamp(uShadowSamples, 2, 16);
+      float invSh = 1.0 / float(shRays);
       float visAcc = 0.0;
       float blkAcc = 0.0;
       int blkCnt = 0;
-      for (int s = 0; s < 4; s++) {
-        float r = sqrt((float(s) + 0.5) / 4.0) * diskRad;
+      for (int s = 0; s < 16; s++) {
+        if (s >= shRays) break;
+        float uDisk = (float(s) + ((uSmoothPcss == 1) ? fract(r2.y + float(s) * 0.618034) * 0.8 + 0.1 : 0.5)) * invSh;
+        float r = sqrt(clamp(uDisk, 0.005, 0.995)) * diskRad;
         float a = phi0 + float(s) * 2.3999632;
         vec3 sDir = normalize(uSunDir + sunT * (r * cos(a)) + sunB * (r * sin(a)));
-        float blk = traceSceneShadowBlockerBvh(pos + nrm * 0.005, sDir, 0.004, 35.0);
+        float blk = traceSceneShadowBlockerBvh(pos + nrm * 0.005, sDir, 0.004, 48.0);
         if (blk < 0.0) {
-          visAcc += 0.25;
+          visAcc += invSh;
         } else {
           blkAcc += blk;
           blkCnt++;
         }
       }
       sunVis = visAcc;
-      avgBlocker = (blkCnt > 0) ? (blkAcc / float(blkCnt)) * (uPenumbraScale * 0.5) : 0.0;
+      avgBlocker = (blkCnt > 0)
+        ? (blkAcc / float(blkCnt)) * ((uSmoothPcss == 1) ? 1.0 : (uPenumbraScale * 0.5))
+        : 0.0;
     }
   }
 
-  // 2. Cosine-Weighted Golden-Spiral Hemisphere BVH Global Illumination + Color Bleeding
+  // 2. Multi-Bounce Cosine-Weighted Hemisphere BVH Global Illumination + Adjustable SPP
   vec3 giIrr = vec3(0.0);
   if (uEnableGi == 1) {
-    vec3 tB, bB;
-    buildOrthonormalBasis(nrm, tB, bB);
-    const int GI_RAYS = 6;
-    for (int k = 0; k < GI_RAYS; k++) {
-      float r = sqrt((float(k) + 0.5) / float(GI_RAYS));
-      float a = phi0 + float(k) * 2.3999632;
-      vec3 hDir = normalize(tB * (r * cos(a)) + bB * (r * sin(a)) + nrm * sqrt(max(0.0, 1.0 - r * r)));
-      BvhHit gh = traceSceneBvh(pos + nrm * 0.006, hDir, 0.004, 11.0);
-      if (!gh.hit) {
-        float su = hDir.z * 0.5 + 0.5;
-        giIrr += mix(vec3(0.08, 0.09, 0.12), vec3(0.22, 0.32, 0.48), su) * (1.0 / float(GI_RAYS));
-      } else {
+    int giRays = clamp(uGiSamples, 2, 32);
+    int maxGiB = clamp(uGiBounces, 1, 3);
+    float invGi = 1.0 / float(giRays);
+    float phiGi = ((uUseR2Stratified == 1) ? r2.x : interleavedGradientNoise(gl_FragCoord.xy)) * 6.2831853;
+
+    for (int k = 0; k < 32; k++) {
+      if (k >= giRays) break;
+      vec3 currPos = pos;
+      vec3 currNrm = nrm;
+      vec3 throughput = vec3(1.0);
+      vec3 pathRad = vec3(0.0);
+
+      for (int b = 1; b <= 3; b++) {
+        if (b > maxGiB) break;
+        vec3 tB, bB;
+        buildOrthonormalBasis(currNrm, tB, bB);
+        float u1 = (uUseR2Stratified == 1)
+          ? (float(k) + fract(r2.y + float(b - 1) * 0.381966 + float(k) * 0.618034) * 0.85 + 0.075) * invGi
+          : (float(k) + 0.5) * invGi;
+        float r = sqrt(clamp(u1, 0.01, 0.99));
+        float a = phiGi + float(k) * 2.3999632 + float(b - 1) * 1.919862;
+        vec3 hDir = normalize(tB * (r * cos(a)) + bB * (r * sin(a)) + currNrm * sqrt(max(0.0, 1.0 - r * r)));
+
+        BvhHit gh = traceSceneBvh(currPos + currNrm * 0.006, hDir, 0.004, (b == 1) ? 26.0 : 18.0);
+        if (!gh.hit) {
+          float su = hDir.z * 0.5 + 0.5;
+          pathRad += throughput * mix(vec3(0.08, 0.09, 0.12), vec3(0.22, 0.32, 0.48), su);
+          break;
+        }
+
         SurfaceMat gm = evalMaterial(gh.matId, gh.pos, uPaintColor);
         float gsv = 0.0;
         if (dot(gh.nrm, uSunDir) > 0.02) {
           gsv = (uTraceNeeShadows == 1)
-            ? ((traceSceneShadowBlockerBvh(gh.pos + gh.nrm * 0.008, uSunDir, 0.006, 20.0) < 0.0) ? 1.0 : 0.0)
+            ? ((traceSceneShadowBlockerBvh(gh.pos + gh.nrm * 0.008, uSunDir, 0.006, 32.0) < 0.0) ? 1.0 : 0.0)
             : 1.0;
         }
-        vec3 gRad = evalSecondaryBounceRadiance(gh.pos, gh.nrm, gh.matId, gm, uSunDir, gsv);
-        giIrr += gRad * (1.0 / float(GI_RAYS));
+        bool isLastBounce = (b == maxGiB);
+        vec3 hitDirect = evalBounceDirectRadiance(gh.pos, gh.nrm, gh.matId, gm, uSunDir, gsv, isLastBounce);
+        pathRad += throughput * hitDirect;
+
+        if (isLastBounce || gh.matId == 5) break;
+        vec3 bounceTint = (gh.matId == 6)
+          ? mix(gm.albedo * (1.0 - gm.metalness), gm.albedo * 0.68, 0.65)
+          : gm.albedo * (1.0 - gm.metalness);
+        throughput *= bounceTint * 0.88;
+        if (max(throughput.r, max(throughput.g, throughput.b)) < 0.025) break;
+        currNrm = (dot(gh.nrm, -hDir) >= 0.0) ? gh.nrm : -gh.nrm;
+        currPos = gh.pos;
       }
+      giIrr += pathRad * invGi;
     }
   } else {
     float su = nrm.z * 0.5 + 0.5;
@@ -1016,7 +1227,9 @@ void main() {
 
 //========================================================================================================================
 // SINGLE-FRAME PLANE-AWARE DEMODULATED CROSS-BILATERAL FILTER (Step = 1, 2, 4)
-// Zero temporal feedback = Zero ghosting | Plane + Normal^32 + PCSS Blocker Kernel = Zero smearing & Zero noise!
+// Supports A/B Toggles:
+//  - uSmoothPcss: 3x3 Blocker Dilation + Continuous Fractional Gaussian Sigma (eliminates sharp->soft halo jump!)
+//  - uDeblotchGi: Pass-1 3x3 Variance Outlier Clamp + R2 Sub-Step Rotation (eliminates cloudy 6-ray blotches!)
 //========================================================================================================================
 export const GI_BILATERAL_FRAG = `#version 300 es
 precision highp float;
@@ -1030,6 +1243,9 @@ uniform sampler2D uGNormMat;
 uniform vec2 uTexelSize;
 uniform int uStepPx;
 uniform int uContactHardenShadows;
+uniform float uPenumbraScale;
+uniform int uSmoothPcss;
+uniform int uDeblotchGi;
 
 layout(location = 0) out vec4 outGiShadowFiltered;
 
@@ -1045,10 +1261,55 @@ void main() {
   vec4 centerVal = texture(uGiShadowIn, vUv);
   float blockerDist = texture(uShadowMetaIn, vUv).r;
 
-  // Contact-hardening shadow kernel: 0 px blur right at contact (blockerDist -> 0), wider smooth blur in far penumbra!
-  int vRad = (uContactHardenShadows == 1)
-    ? clamp(int( floor(blockerDist * 1.8 + 0.5) ), 0, 2)
-    : 1;
+  // Optional Pass-1 neighborhood mean/std-dev clamp + 3x3 blocker dilation across penumbra edges
+  vec3 clampMin = vec3(0.0);
+  vec3 clampMax = vec3(64.0);
+  float dilatedBlocker = blockerDist;
+
+  if (uSmoothPcss == 1 || (uDeblotchGi == 1 && uStepPx == 1)) {
+    vec3 m1 = vec3(0.0);
+    vec3 m2 = vec3(0.0);
+    float mW = 0.0;
+    for (int sy = -1; sy <= 1; sy++) {
+      for (int sx = -1; sx <= 1; sx++) {
+        vec2 sUv = clamp(vUv + vec2(float(sx * uStepPx), float(sy * uStepPx)) * uTexelSize, vec2(0.001), vec2(0.999));
+        vec4 nS = texture(uGNormMat, sUv);
+        if (nS.w < 0.5) continue;
+        vec3 pS = texture(uGPosRough, sUv).xyz;
+        float wS = pow(max(dot(nrmC, normalize(nS.xyz)), 0.0), 24.0) * exp(-abs(dot(nrmC, pS - posC)) * 40.0);
+        if (wS > 0.25) {
+          if (uSmoothPcss == 1) {
+            dilatedBlocker = max(dilatedBlocker, texture(uShadowMetaIn, sUv).r * 0.92);
+          }
+          if (uDeblotchGi == 1 && uStepPx == 1) {
+            vec3 gS = texture(uGiShadowIn, sUv).rgb;
+            m1 += gS * wS;
+            m2 += gS * gS * wS;
+            mW += wS;
+          }
+        }
+      }
+    }
+    if (uDeblotchGi == 1 && uStepPx == 1 && mW > 0.01) {
+      vec3 mean = m1 / mW;
+      vec3 stddev = sqrt(max(m2 / mW - mean * mean, vec3(1e-4)));
+      clampMin = max(vec3(0.0), mean - stddev * 1.45);
+      clampMax = mean + stddev * 1.45;
+    }
+  }
+
+  // Legacy integer kernel vs Smooth PCSS continuous Gaussian sigma
+  int legacyRad = (uContactHardenShadows == 1) ? clamp(int(floor(blockerDist * 1.8 + 0.5)), 0, 2) : 1;
+  float smoothSigma = (uContactHardenShadows == 1)
+    ? clamp(0.16 + dilatedBlocker * max(uPenumbraScale, 0.15) * 0.52, 0.16, 2.85)
+    : 1.75;
+
+  // R2 sub-step decorrelation offset on wider passes (breaks boxy A-Trous grid clumps!)
+  vec2 r2Jitter = vec2(0.0);
+  if (uDeblotchGi == 1 && uStepPx >= 2) {
+    vec2 r2 = fract(gl_FragCoord.x * vec2(0.75487766, 0.56984029) + gl_FragCoord.y * vec2(0.56984029, 0.32471796));
+    r2Jitter = (r2 - 0.5) * float(uStepPx) * 0.42;
+  }
 
   vec3 sumGi = vec3(0.0);
   float wGi = 0.0;
@@ -1057,7 +1318,9 @@ void main() {
 
   for (int dy = -2; dy <= 2; dy++) {
     for (int dx = -2; dx <= 2; dx++) {
-      vec2 qUv = clamp(vUv + vec2(float(dx * uStepPx), float(dy * uStepPx)) * uTexelSize, vec2(0.001), vec2(0.999));
+      vec2 baseOff = vec2(float(dx * uStepPx), float(dy * uStepPx));
+      vec2 offGi = (dx == 0 && dy == 0) ? vec2(0.0) : (baseOff + r2Jitter);
+      vec2 qUv = clamp(vUv + offGi * uTexelSize, vec2(0.001), vec2(0.999));
       vec4 normMatQ = texture(uGNormMat, qUv);
       if (normMatQ.w < 0.5) continue;
 
@@ -1067,18 +1330,32 @@ void main() {
       float nDot = max(dot(nrmC, nrmQ), 0.0);
       float wNorm = pow(nDot, 32.0);
       float planeDist = abs(dot(nrmC, posQ - posC));
-      float wPlane = exp(-planeDist * 45.0);
+      float wPlane = exp(-planeDist * 48.0);
       float wGeo = wNorm * wPlane;
       if (wGeo < 1e-4) continue;
 
-      float wSpatial = exp(-float(dx * dx + dy * dy) * 0.22);
-      float w = wGeo * wSpatial;
+      float r2Dist = float(dx * dx + dy * dy);
+      float wSpatialGi = exp(-r2Dist * ((uDeblotchGi == 1) ? 0.17 : 0.22));
+      float w = wGeo * wSpatialGi;
 
       vec4 sampleVal = texture(uGiShadowIn, qUv);
-      sumGi += sampleVal.rgb * w;
+      vec3 giTap = (uDeblotchGi == 1 && uStepPx == 1) ? clamp(sampleVal.rgb, clampMin, clampMax) : sampleVal.rgb;
+      sumGi += giTap * w;
       wGi += w;
 
-      if (abs(dx) <= vRad && abs(dy) <= vRad) {
+      if (uSmoothPcss == 1) {
+        // Sample shadow at exact unjittered texel with continuous fractional Gaussian falloff -> ZERO sharp->soft cliff!
+        vec2 sUv = clamp(vUv + baseOff * uTexelSize, vec2(0.001), vec2(0.999));
+        vec4 nS = texture(uGNormMat, sUv);
+        if (nS.w > 0.5) {
+          vec3 pS = texture(uGPosRough, sUv).xyz;
+          float wGeoS = pow(max(dot(nrmC, normalize(nS.xyz)), 0.0), 32.0) * exp(-abs(dot(nrmC, pS - posC)) * 50.0);
+          float wGauss = (dx == 0 && dy == 0) ? 1.0 : exp(-r2Dist / (2.0 * smoothSigma * smoothSigma));
+          float wS = wGeoS * wGauss;
+          sumVis += texture(uGiShadowIn, sUv).a * wS;
+          wVis += wS;
+        }
+      } else if (abs(dx) <= legacyRad && abs(dy) <= legacyRad) {
         sumVis += sampleVal.a * w;
         wVis += w;
       }
@@ -1086,9 +1363,14 @@ void main() {
   }
 
   vec3 outGi = (wGi > 0.0) ? (sumGi / wGi) : centerVal.rgb;
-  float outVis = (uContactHardenShadows == 1 && vRad == 0)
-    ? centerVal.a
-    : ((wVis > 0.0) ? (sumVis / wVis) : centerVal.a);
+  float outVis;
+  if (uSmoothPcss == 1) {
+    outVis = (wVis > 0.0) ? (sumVis / wVis) : centerVal.a;
+  } else {
+    outVis = (uContactHardenShadows == 1 && legacyRad == 0)
+      ? centerVal.a
+      : ((wVis > 0.0) ? (sumVis / wVis) : centerVal.a);
+  }
 
   outGiShadowFiltered = vec4(outGi, outVis);
 }
@@ -1117,20 +1399,6 @@ layout(location = 0) out vec4 outReflection;
 
 ${COMMON_MATERIAL_GLSL}
 ${GLOBAL_SDF_HELPERS_GLSL}
-
-vec3 evalGlobalSdfNormal(vec3 p, int cascade) {
-  float h = (cascade == 0) ? uClip0Voxel * 0.95 : uClip1Voxel * 0.95;
-  int c;
-  const vec3 k0 = vec3( 1.0, -1.0, -1.0);
-  const vec3 k1 = vec3(-1.0, -1.0,  1.0);
-  const vec3 k2 = vec3(-1.0,  1.0, -1.0);
-  const vec3 k3 = vec3( 1.0,  1.0,  1.0);
-  vec3 g = k0 * sampleGlobalSdfDistance(p + k0 * h, c)
-         + k1 * sampleGlobalSdfDistance(p + k1 * h, c)
-         + k2 * sampleGlobalSdfDistance(p + k2 * h, c)
-         + k3 * sampleGlobalSdfDistance(p + k3 * h, c);
-  return normalize(g + vec3(0.0, 0.0, 1e-6));
-}
 
 void main() {
   if (uMaxBounces <= 0) {
@@ -1374,6 +1642,8 @@ uniform int uDisplayMode; // 0 = SDF, 1 = BVH, 2 = Split, 3 = Pixel Delta, 4 = C
 uniform float uSplitX;
 uniform float uGiIntensity;
 uniform int uMaxBounces;
+uniform vec2 uFullTexelSize;
+uniform int uContactAo;
 
 out vec4 outColor;
 
@@ -1386,6 +1656,33 @@ vec3 acesFilm(vec3 x) {
   const float d = 0.59;
   const float e = 0.14;
   return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+}
+
+// Deterministic 6-Direction Full-Res Screen-Space Horizon / Contact AO (grounds tyres, wheel wells & underbody!)
+float evalScreenSpaceContactAo(vec2 uv, vec3 posC, vec3 nrmC) {
+  if (uContactAo == 0) return 1.0;
+  float occ = 0.0;
+  for (int i = 0; i < 6; i++) {
+    float ang = float(i) * 1.04719755 + 0.32;
+    vec2 dir2 = vec2(cos(ang), sin(ang));
+    float dirOcc = 0.0;
+    for (int s = 1; s <= 3; s++) {
+      float radPx = (s == 1) ? 3.5 : ((s == 2) ? 10.0 : 21.0);
+      vec2 sUv = clamp(uv + dir2 * radPx * uFullTexelSize, vec2(0.001), vec2(0.999));
+      if (texture(uGNormMat, sUv).w < 0.5) continue;
+      vec3 dv = texture(uGPosRough, sUv).xyz - posC;
+      float dist2 = dot(dv, dv);
+      if (dist2 > 2e-4 && dist2 < 0.36) {
+        float invD = inversesqrt(dist2);
+        float dist = dist2 * invD;
+        float horiz = max(0.0, dot(nrmC, dv * invD) - 0.14);
+        float falloff = 1.0 - smoothstep(0.08, 0.58, dist);
+        dirOcc = max(dirOcc, horiz * falloff);
+      }
+    }
+    occ += dirOcc * (1.0 / 6.0);
+  }
+  return clamp(1.0 - occ * 1.15, 0.24, 1.0);
 }
 
 // Joint-bilateral upsample of half-res demodulated (GI.rgb, sunVis) against full-res G-Buffer -> ZERO silhouette smearing!
@@ -1422,8 +1719,9 @@ vec3 shadeFullPipeline(vec3 pos, vec3 nrm, int matId, vec4 giVis, vec3 reflRad, 
     m.emissive = vec3(0.0);
   }
 
+  float contactAo = evalScreenSpaceContactAo(vUv, pos, nrm);
   float sunVis = giVis.a;
-  vec3 giIrr = giVis.rgb * uGiIntensity;
+  vec3 giIrr = giVis.rgb * uGiIntensity * contactAo;
 
   float ndl = max(dot(nrm, uSunDir), 0.0);
   vec3 sunIrr = vec3(4.4, 3.95, 3.40) * (ndl * sunVis);
@@ -1438,7 +1736,7 @@ vec3 shadeFullPipeline(vec3 pos, vec3 nrm, int matId, vec4 giVis, vec3 reflRad, 
   float ggx = a2 / max(3.14159265 * denom * denom, 1e-4);
   vec3 spec = f0 * (min(ggx * 0.22, 16.0) * ndl * sunVis) * vec3(3.5, 3.15, 2.75);
 
-  vec3 lit = m.emissive + diffAlbedo * ((sunIrr + evalPortalIrradiance(pos, nrm)) * (1.0 / 3.14159265) + giIrr) + spec;
+  vec3 lit = m.emissive + diffAlbedo * ((sunIrr + evalPortalIrradiance(pos, nrm) * contactAo) * (1.0 / 3.14159265) + giIrr) + spec;
   if (clayMode || uMaxBounces <= 0) {
     return lit * 0.78;
   }
