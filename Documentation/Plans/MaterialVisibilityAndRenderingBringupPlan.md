@@ -93,12 +93,12 @@ Every folder and file name below is verified against [../BannedWordsVocabulary.m
 Frontier/
 ├── Engine/
 │   ├── MaterialSpace/                                 // NEW: Universal 10-lobe OpenPBR 1.1 + Glinty physical materials
-│   │   ├── Strata/
-│   │   │   ├── LayeredStrataLayout.h                  // Aligned 8-stratum physical parameter layout & validation
+│   │   ├── SurfaceLayers/                             // Ordered physical layer stack, 128 B register & 32 B bounce summary
+│   │   │   ├── SurfaceLayerLayout.h                   // Aligned 8-layer physical parameter layout & validation
 │   │   │   ├── CompactMaterialRegister.{h,cpp}        // Bindless 128 B primary material register + ActiveLobeMask
-│   │   │   └── BounceSlabSummary.{h,cpp}              // Pre-integrated 32 B secondary-bounce summary compiler
-│   │   ├── Scattering/
-│   │   │   ├── OpenPbrSurfaceScattering.h             // Shared C++20/.slang 10-lobe evaluation & mixture PDF
+│   │   │   └── BounceLayerSummary.{h,cpp}             // Pre-integrated 32 B secondary-bounce summary compiler
+│   │   ├── Scattering/                                // Shared C++20/.slang 10-lobe physical optical equations
+│   │   │   ├── OpenPbrSurfaceScattering.h             // Master 10-lobe evaluation & mixture PDF
 │   │   │   ├── EnergyPreservingOrenNayar.h            // Portsmouth 2025 EON rough diffuse + CLTC sampling
 │   │   │   ├── MetallicFresnelTint.h                  // Anisotropic VNDF GGX, F0/F82 metal tint & exact dielectric Fresnel
 │   │   │   ├── ClearcoatAbsorption.h                  // Coat roughening, TIR darkening & Beer-Lambert absorption
@@ -109,12 +109,12 @@ Frontier/
 │   │   │   ├── LinearlyTransformedSheen.h             // Zeltner 2022 LTC multiple-scattering cloth/velvet sheen
 │   │   │   ├── FiberScattering.h                      // Chiang/Marschner R + TT + TRT hair and fiber BCSDF
 │   │   │   └── PorosityAndBlackbody.h                 // Relative-IOR wetness darkening & Planckian Kelvin luminous flux
-│   │   ├── LookUpSheets/
-│   │   │   ├── DirectionalAlbedoSheet.{h,cpp}         // 32x32 RG16F (4 KB) Turquin multi-scatter compensation sheet
-│   │   │   └── SheenLinearCosineSheet.{h,cpp}         // 32x32 RGBA16F (8 KB) Zeltner LTC sheen fit coefficients
-│   │   └── Baking/
-│   │       ├── ProceduralChannelBaker.{h,cpp}         // Deterministic procedural normal/roughness/albedo pyramid baker
-│   │       └── MaterialSpecimenRasterizer.{h,cpp}     // Shader-ball & draped-cloth preview thumbnail generator
+│   │   ├── EnergyCompensation/                        // Precomputed directional hemisphere integrals (replaces LookUpSheets)
+│   │   │   ├── DirectionalAlbedoIntegral.{h,cpp}      // 32x32 RG16F (4 KB) Turquin multi-scatter energy preservation
+│   │   │   └── SheenCosineIntegral.{h,cpp}            // 32x32 RGBA16F (8 KB) Zeltner LTC sheen fit coefficients
+│   │   └── TextureSynthesis/                          // Procedural channel pyramids & preview rendering (replaces Baking)
+│   │       ├── ProceduralChannelSynthesis.{h,cpp}     // Deterministic procedural normal/roughness/albedo pyramid generator
+│   │       └── MaterialSpecimenRasterization.{h,cpp}  // Shader-ball & draped-cloth preview thumbnail rasterizer
 │   │
 │   ├── SpatialAcceleration/                           // NEW: Unified cluster LOD pyramid & 4-wide ray acceleration
 │   │   ├── ClusterPyramid.{h,cpp}                     // 128-face PolygonNetwork LOD pyramid with locked seam/crease borders
@@ -130,12 +130,14 @@ Frontier/
 │       │   ├── VisibilityClusterRasterization.{h,cpp} // uint64 (Depth32 | VisibilityToken32) + 2-layer glass depth peel
 │       │   └── VisibilityMaterialResolve.{h,cpp}      // Analytic ray-differential barycentrics & LobeMask tile resolve
 │       │
-│       └── Illumination/                              // NEW: Dual-tier GTX & Deterministic RTX shadows, GI & reflections
-│           ├── SolarShadowSequence.{h,cpp}            // RTX deterministic solar frustum + GTX 2-cascade contact clip + SDF
+│       ├── DirectLighting/                            // NEW: First-hit solar shadows, analytic area lights & chassis AO
+│       │   ├── SolarShadowSequence.{h,cpp}            // RTX deterministic solar frustum + GTX 2-cascade contact clip + SDF
+│       │   └── LinearCosineLightIntegration.{h,cpp}   // Visibility-gated analytic polygonal lights + 2.2 m chassis AO
+│       │
+│       └── GlobalIllumination/                        // NEW: Multi-bounce GI, octahedral irradiance lattice & RT reflections
 │           ├── IrradianceLatticeSequence.{h,cpp}      // RTX 1/pi octahedral lattice (Chebyshev depth) + GTX SDF cone GI
-│           ├── LinearCosineLightIntegration.{h,cpp}   // Visibility-gated analytic polygonal lights + 2.2 m chassis AO
 │           ├── SpecularReflectionSequence.{h,cpp}     // Coherent WideBoundingTree multi-bounce specular & glass refraction
-│           └── TieredWorldRenderSequence.{h,cpp}      // Complete ordered GTX/RTX frame sequence bound to viewports
+│           └── TieredWorldRenderSequence.{h,cpp}      // Complete ordered GTX/RTX world sequence bound to viewports
 │
 └── Shaders/                                           // NEW: Modular Slang (.slang) GPU shader domains
     ├── MaterialSpace/
@@ -145,21 +147,22 @@ Frontier/
     │   ├── LinearlyTransformedSheen.slang             // LTC cloth/microfiber sheen
     │   ├── SubsurfaceAndTransmission.slang            // Thin/solid rough refraction, dispersion & SSS
     │   ├── FiberScattering.slang                      // Hair/fiber longitudinal & azimuthal BCSDF
-    │   └── BounceSlabSummary.slang                    // Fast 5-ALU secondary-bounce surface shading
+    │   └── BounceLayerSummary.slang                   // Fast 5-ALU secondary-bounce surface shading
     ├── Visibility/
     │   ├── ClusterVisibilityCull.slang                // Two-phase frustum, normal-cone & DepthPyramid occlusion cull
     │   ├── DepthPyramidDownsample.slang               // Conservative reversed-Z min reduction
     │   ├── HardwareVisibilityRasterization.slang      // >=4 px indirect cluster rasterization + 2-layer glass peel
     │   ├── MicroFaceSoftwareRasterization.slang       // <4 px compute atomicMax64 sub-pixel face rasterization
     │   └── AnalyticBarycentricResolve.slang           // Ray-plane barycentrics, UV Jacobians & wave-uniform material shade
-    └── Illumination/
-        ├── WideTreeRayQuery.slang                     // Shared 4-Wide BVH4 stackless/short-stack & VK_KHR_ray_query trace
-        ├── SolarFrustumShadow.slang                   // Deterministic Vogel solar disc trace + chassis 2-scale AO
-        ├── ContactClipShadow.slang                    // GTX 2-cascade tight contact shadow + SDF cone penumbra blend
+    ├── DirectLighting/
+    │   ├── WideTreeRayQuery.slang                     // Shared 4-Wide BVH4 & VK_KHR_ray_query intersection routines
+    │   ├── SolarFrustumShadow.slang                   // Deterministic Vogel solar disc trace + chassis 2-scale AO
+    │   ├── ContactClipShadow.slang                    // GTX 2-cascade tight contact shadow + SDF cone penumbra blend
+    │   └── PlaneAwareShadowFilter.slang               // Coplanar dilation + 3-step continuous-sigma edge-preserving filter
+    └── GlobalIllumination/
         ├── OctahedralIrradianceLattice.slang          // 64-ray Fibonacci update, 16x16 Chebyshev depth & 1/pi lookup
         ├── SignedDistanceConeIllumination.slang       // GTX 6-cone directional SDF diffuse irradiance
-        ├── SpecularAndGlassRaytrace.slang             // Coherent cone-footprint multi-bounce specular & dielectric glass
-        └── PlaneAwareShadowFilter.slang               // Coplanar dilation + 3-step continuous-sigma edge-preserving filter
+        └── SpecularAndGlassRaytrace.slang             // Coherent cone-footprint multi-bounce specular & dielectric glass
 ```
 
 ---
