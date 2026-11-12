@@ -18,12 +18,12 @@ namespace Frontier
 namespace
 {
 
-constexpr uint32_t CategoryBit(ContentCategoryKind Category) noexcept
+constexpr uint32_t CategoryBit(ContentCategory Category) noexcept
 {
     return 1u << static_cast<uint32_t>(Category);
 }
 
-constexpr uint32_t WorkspaceBit(WorkspaceDomainKind Workspace) noexcept
+constexpr uint32_t WorkspaceBit(WorkspaceCategory Workspace) noexcept
 {
     return 1u << static_cast<uint32_t>(Workspace);
 }
@@ -77,7 +77,7 @@ void WriteTilePixel(
 }
 
 void SynthesizePrebakedTileRgba(
-    ContentCategoryKind Category,
+    ContentCategory Category,
     ColorRgba           Tint,
     std::span<uint8_t>  OutTileRgba) noexcept
 {
@@ -105,7 +105,7 @@ void SynthesizePrebakedTileRgba(
 
             switch (Category)
             {
-                case ContentCategoryKind::Materials:
+                case ContentCategory::Materials:
                 {
                     if (R <= 0.72f)
                     {
@@ -127,7 +127,7 @@ void SynthesizePrebakedTileRgba(
                     break;
                 }
 
-                case ContentCategoryKind::Geometry:
+                case ContentCategory::Geometry:
                 {
                     // Isometric 3-facet analytic solid hexagon
                     const float Ax = std::fabs(Nx);
@@ -157,7 +157,7 @@ void SynthesizePrebakedTileRgba(
                     break;
                 }
 
-                case ContentCategoryKind::UVLayouts:
+                case ContentCategory::UVLayouts:
                 {
                     if (std::fabs(Nx) <= 0.70f && std::fabs(Ny) <= 0.70f)
                     {
@@ -182,7 +182,7 @@ void SynthesizePrebakedTileRgba(
                     break;
                 }
 
-                case ContentCategoryKind::Textures:
+                case ContentCategory::Textures:
                 {
                     if (std::fabs(Nx) <= 0.70f && std::fabs(Ny) <= 0.70f)
                     {
@@ -207,7 +207,7 @@ void SynthesizePrebakedTileRgba(
                     break;
                 }
 
-                case ContentCategoryKind::Images:
+                case ContentCategory::Images:
                 {
                     if (std::fabs(Nx) <= 0.74f && std::fabs(Ny) <= 0.58f)
                     {
@@ -234,7 +234,7 @@ void SynthesizePrebakedTileRgba(
                     break;
                 }
 
-                case ContentCategoryKind::Vectors:
+                case ContentCategory::Vectors:
                 {
                     const float CurveY = 0.36f * std::sin(Nx * 3.1f);
                     if (std::fabs(Nx) <= 0.72f && std::fabs(Ny - CurveY) < 0.065f)
@@ -249,7 +249,7 @@ void SynthesizePrebakedTileRgba(
                     break;
                 }
 
-                case ContentCategoryKind::Fonts:
+                case ContentCategory::Fonts:
                 {
                     // Bold geometric "A" stroke
                     const bool LeftLeg  = (Ny >= -0.50f && Ny <= 0.54f && std::fabs(Nx + (Ny + 0.50f) * 0.42f) < 0.075f);
@@ -262,7 +262,7 @@ void SynthesizePrebakedTileRgba(
                     break;
                 }
 
-                case ContentCategoryKind::Simulations:
+                case ContentCategory::Simulations:
                 {
                     // Concentric force-field / turbulent curl rings
                     if (R <= 0.74f && (std::fabs(R - 0.24f) < 0.045f || std::fabs(R - 0.46f) < 0.045f || std::fabs(R - 0.68f) < 0.045f))
@@ -272,7 +272,7 @@ void SynthesizePrebakedTileRgba(
                     break;
                 }
 
-                case ContentCategoryKind::Volumetrics:
+                case ContentCategory::Volumetrics:
                 {
                     const float D1 = std::hypot(Nx + 0.20f, Ny - 0.06f);
                     const float D2 = std::hypot(Nx - 0.18f, Ny - 0.08f);
@@ -291,7 +291,7 @@ void SynthesizePrebakedTileRgba(
                     break;
                 }
 
-                case ContentCategoryKind::Particles:
+                case ContentCategory::Particles:
                 {
                     const float Angle = std::atan2(Ny, Nx);
                     const float Spokes = std::fabs(std::sin(Angle * 6.0f));
@@ -302,7 +302,7 @@ void SynthesizePrebakedTileRgba(
                     break;
                 }
 
-                case ContentCategoryKind::Photometry:
+                case ContentCategory::Photometry:
                 {
                     // Polar candela lobe below luminaire origin
                     const float Dy = Ny + 0.42f;
@@ -314,7 +314,7 @@ void SynthesizePrebakedTileRgba(
                     break;
                 }
 
-                case ContentCategoryKind::Audio:
+                case ContentCategory::Audio:
                 {
                     const int BarIdx = static_cast<int>((Nx + 0.72f) / 0.18f);
                     const float RelX = std::fmod(Nx + 0.72f, 0.18f);
@@ -326,7 +326,7 @@ void SynthesizePrebakedTileRgba(
                     break;
                 }
 
-                case ContentCategoryKind::Shaders:
+                case ContentCategory::Shaders:
                 {
                     const bool LeftChevron  = (Nx >= -0.64f && Nx <= -0.22f && std::fabs(std::fabs(Ny) - (Nx + 0.62f)) < 0.07f);
                     const bool RightChevron = (Nx >= 0.22f && Nx <= 0.64f && std::fabs(std::fabs(Ny) - (0.62f - Nx)) < 0.07f);
@@ -338,8 +338,8 @@ void SynthesizePrebakedTileRgba(
                     break;
                 }
 
-                case ContentCategoryKind::Colours:
-                case ContentCategoryKind::All:
+                case ContentCategory::Colours:
+                case ContentCategory::All:
                 {
                     if (R <= 0.68f)
                     {
@@ -378,124 +378,124 @@ ThumbnailSheetRepository::ThumbnailSheetRepository()
 
 ThumbnailSheetRepository::~ThumbnailSheetRepository() noexcept = default;
 
-uint32_t ThumbnailSheetRepository::QueryAllowedCategoryMask(WorkspaceDomainKind Workspace) noexcept
+uint32_t ThumbnailSheetRepository::QueryAllowedCategoryMask(WorkspaceCategory Workspace) noexcept
 {
     switch (Workspace)
     {
-        case WorkspaceDomainKind::SceneWorld:
-            return CategoryBit(ContentCategoryKind::All) |
-                   CategoryBit(ContentCategoryKind::Colours) |
-                   CategoryBit(ContentCategoryKind::Geometry) |
-                   CategoryBit(ContentCategoryKind::UVLayouts) |
-                   CategoryBit(ContentCategoryKind::Materials) |
-                   CategoryBit(ContentCategoryKind::Textures) |
-                   CategoryBit(ContentCategoryKind::Images) |
-                   CategoryBit(ContentCategoryKind::Fonts) |
-                   CategoryBit(ContentCategoryKind::Simulations) |
-                   CategoryBit(ContentCategoryKind::Volumetrics) |
-                   CategoryBit(ContentCategoryKind::Particles) |
-                   CategoryBit(ContentCategoryKind::Photometry) |
-                   CategoryBit(ContentCategoryKind::Audio) |
-                   CategoryBit(ContentCategoryKind::Shaders);
+        case WorkspaceCategory::SceneWorld:
+            return CategoryBit(ContentCategory::All) |
+                   CategoryBit(ContentCategory::Colours) |
+                   CategoryBit(ContentCategory::Geometry) |
+                   CategoryBit(ContentCategory::UVLayouts) |
+                   CategoryBit(ContentCategory::Materials) |
+                   CategoryBit(ContentCategory::Textures) |
+                   CategoryBit(ContentCategory::Images) |
+                   CategoryBit(ContentCategory::Fonts) |
+                   CategoryBit(ContentCategory::Simulations) |
+                   CategoryBit(ContentCategory::Volumetrics) |
+                   CategoryBit(ContentCategory::Particles) |
+                   CategoryBit(ContentCategory::Photometry) |
+                   CategoryBit(ContentCategory::Audio) |
+                   CategoryBit(ContentCategory::Shaders);
 
-        case WorkspaceDomainKind::UV:
+        case WorkspaceCategory::UV:
             // 🔴 Strict UV workspace filter: only Geometry, UVLayouts, Colours, Materials, Textures, and Images exist
-            return CategoryBit(ContentCategoryKind::All) |
-                   CategoryBit(ContentCategoryKind::Colours) |
-                   CategoryBit(ContentCategoryKind::Geometry) |
-                   CategoryBit(ContentCategoryKind::UVLayouts) |
-                   CategoryBit(ContentCategoryKind::Materials) |
-                   CategoryBit(ContentCategoryKind::Textures) |
-                   CategoryBit(ContentCategoryKind::Images);
+            return CategoryBit(ContentCategory::All) |
+                   CategoryBit(ContentCategory::Colours) |
+                   CategoryBit(ContentCategory::Geometry) |
+                   CategoryBit(ContentCategory::UVLayouts) |
+                   CategoryBit(ContentCategory::Materials) |
+                   CategoryBit(ContentCategory::Textures) |
+                   CategoryBit(ContentCategory::Images);
 
-        case WorkspaceDomainKind::GeometryCad:
-            return CategoryBit(ContentCategoryKind::All) |
-                   CategoryBit(ContentCategoryKind::Colours) |
-                   CategoryBit(ContentCategoryKind::Geometry) |
-                   CategoryBit(ContentCategoryKind::UVLayouts) |
-                   CategoryBit(ContentCategoryKind::Materials) |
-                   CategoryBit(ContentCategoryKind::Images) |
-                   CategoryBit(ContentCategoryKind::Vectors) |
-                   CategoryBit(ContentCategoryKind::Fonts);
+        case WorkspaceCategory::GeometryCad:
+            return CategoryBit(ContentCategory::All) |
+                   CategoryBit(ContentCategory::Colours) |
+                   CategoryBit(ContentCategory::Geometry) |
+                   CategoryBit(ContentCategory::UVLayouts) |
+                   CategoryBit(ContentCategory::Materials) |
+                   CategoryBit(ContentCategory::Images) |
+                   CategoryBit(ContentCategory::Vectors) |
+                   CategoryBit(ContentCategory::Fonts);
 
-        case WorkspaceDomainKind::Material:
-            return CategoryBit(ContentCategoryKind::All) |
-                   CategoryBit(ContentCategoryKind::Colours) |
-                   CategoryBit(ContentCategoryKind::Geometry) |
-                   CategoryBit(ContentCategoryKind::Materials) |
-                   CategoryBit(ContentCategoryKind::Textures) |
-                   CategoryBit(ContentCategoryKind::Images) |
-                   CategoryBit(ContentCategoryKind::Volumetrics) |
-                   CategoryBit(ContentCategoryKind::Photometry) |
-                   CategoryBit(ContentCategoryKind::Shaders);
+        case WorkspaceCategory::Material:
+            return CategoryBit(ContentCategory::All) |
+                   CategoryBit(ContentCategory::Colours) |
+                   CategoryBit(ContentCategory::Geometry) |
+                   CategoryBit(ContentCategory::Materials) |
+                   CategoryBit(ContentCategory::Textures) |
+                   CategoryBit(ContentCategory::Images) |
+                   CategoryBit(ContentCategory::Volumetrics) |
+                   CategoryBit(ContentCategory::Photometry) |
+                   CategoryBit(ContentCategory::Shaders);
 
-        case WorkspaceDomainKind::TexturePaint:
-            return CategoryBit(ContentCategoryKind::All) |
-                   CategoryBit(ContentCategoryKind::Colours) |
-                   CategoryBit(ContentCategoryKind::Geometry) |
-                   CategoryBit(ContentCategoryKind::UVLayouts) |
-                   CategoryBit(ContentCategoryKind::Materials) |
-                   CategoryBit(ContentCategoryKind::Textures) |
-                   CategoryBit(ContentCategoryKind::Images) |
-                   CategoryBit(ContentCategoryKind::Vectors) |
-                   CategoryBit(ContentCategoryKind::Fonts);
+        case WorkspaceCategory::TexturePaint:
+            return CategoryBit(ContentCategory::All) |
+                   CategoryBit(ContentCategory::Colours) |
+                   CategoryBit(ContentCategory::Geometry) |
+                   CategoryBit(ContentCategory::UVLayouts) |
+                   CategoryBit(ContentCategory::Materials) |
+                   CategoryBit(ContentCategory::Textures) |
+                   CategoryBit(ContentCategory::Images) |
+                   CategoryBit(ContentCategory::Vectors) |
+                   CategoryBit(ContentCategory::Fonts);
 
-        case WorkspaceDomainKind::Image:
-            return CategoryBit(ContentCategoryKind::All) |
-                   CategoryBit(ContentCategoryKind::Colours) |
-                   CategoryBit(ContentCategoryKind::Textures) |
-                   CategoryBit(ContentCategoryKind::Images) |
-                   CategoryBit(ContentCategoryKind::Vectors) |
-                   CategoryBit(ContentCategoryKind::Fonts);
+        case WorkspaceCategory::Image:
+            return CategoryBit(ContentCategory::All) |
+                   CategoryBit(ContentCategory::Colours) |
+                   CategoryBit(ContentCategory::Textures) |
+                   CategoryBit(ContentCategory::Images) |
+                   CategoryBit(ContentCategory::Vectors) |
+                   CategoryBit(ContentCategory::Fonts);
 
-        case WorkspaceDomainKind::Vector:
-            return CategoryBit(ContentCategoryKind::All) |
-                   CategoryBit(ContentCategoryKind::Colours) |
-                   CategoryBit(ContentCategoryKind::Images) |
-                   CategoryBit(ContentCategoryKind::Vectors) |
-                   CategoryBit(ContentCategoryKind::Fonts);
+        case WorkspaceCategory::Vector:
+            return CategoryBit(ContentCategory::All) |
+                   CategoryBit(ContentCategory::Colours) |
+                   CategoryBit(ContentCategory::Images) |
+                   CategoryBit(ContentCategory::Vectors) |
+                   CategoryBit(ContentCategory::Fonts);
 
-        case WorkspaceDomainKind::Simulation:
-            return CategoryBit(ContentCategoryKind::All) |
-                   CategoryBit(ContentCategoryKind::Colours) |
-                   CategoryBit(ContentCategoryKind::Geometry) |
-                   CategoryBit(ContentCategoryKind::Simulations) |
-                   CategoryBit(ContentCategoryKind::Volumetrics) |
-                   CategoryBit(ContentCategoryKind::Particles) |
-                   CategoryBit(ContentCategoryKind::Shaders);
+        case WorkspaceCategory::Simulation:
+            return CategoryBit(ContentCategory::All) |
+                   CategoryBit(ContentCategory::Colours) |
+                   CategoryBit(ContentCategory::Geometry) |
+                   CategoryBit(ContentCategory::Simulations) |
+                   CategoryBit(ContentCategory::Volumetrics) |
+                   CategoryBit(ContentCategory::Particles) |
+                   CategoryBit(ContentCategory::Shaders);
 
-        case WorkspaceDomainKind::Particle:
-            return CategoryBit(ContentCategoryKind::All) |
-                   CategoryBit(ContentCategoryKind::Colours) |
-                   CategoryBit(ContentCategoryKind::Geometry) |
-                   CategoryBit(ContentCategoryKind::Materials) |
-                   CategoryBit(ContentCategoryKind::Textures) |
-                   CategoryBit(ContentCategoryKind::Images) |
-                   CategoryBit(ContentCategoryKind::Simulations) |
-                   CategoryBit(ContentCategoryKind::Volumetrics) |
-                   CategoryBit(ContentCategoryKind::Particles) |
-                   CategoryBit(ContentCategoryKind::Shaders);
+        case WorkspaceCategory::Particle:
+            return CategoryBit(ContentCategory::All) |
+                   CategoryBit(ContentCategory::Colours) |
+                   CategoryBit(ContentCategory::Geometry) |
+                   CategoryBit(ContentCategory::Materials) |
+                   CategoryBit(ContentCategory::Textures) |
+                   CategoryBit(ContentCategory::Images) |
+                   CategoryBit(ContentCategory::Simulations) |
+                   CategoryBit(ContentCategory::Volumetrics) |
+                   CategoryBit(ContentCategory::Particles) |
+                   CategoryBit(ContentCategory::Shaders);
 
-        case WorkspaceDomainKind::Audio:
-            return CategoryBit(ContentCategoryKind::All) |
-                   CategoryBit(ContentCategoryKind::Audio);
+        case WorkspaceCategory::Audio:
+            return CategoryBit(ContentCategory::All) |
+                   CategoryBit(ContentCategory::Audio);
     }
     return 0xFFFFFFFFu;
 }
 
 bool ThumbnailSheetRepository::QueryCategoryPermitted(
-    WorkspaceDomainKind Workspace,
-    ContentCategoryKind Category) noexcept
+    WorkspaceCategory Workspace,
+    ContentCategory Category) noexcept
 {
     return (QueryAllowedCategoryMask(Workspace) & CategoryBit(Category)) != 0u;
 }
 
-uint32_t ThumbnailSheetRepository::ComputeWorkspacesAllowingCategory(ContentCategoryKind Category) noexcept
+uint32_t ThumbnailSheetRepository::ComputeWorkspacesAllowingCategory(ContentCategory Category) noexcept
 {
     uint32_t Mask = 0u;
-    for (uint8_t Ord = 0u; Ord <= static_cast<uint8_t>(WorkspaceDomainKind::Audio); ++Ord)
+    for (uint8_t Ord = 0u; Ord <= static_cast<uint8_t>(WorkspaceCategory::Audio); ++Ord)
     {
-        const auto Domain = static_cast<WorkspaceDomainKind>(Ord);
+        const auto Domain = static_cast<WorkspaceCategory>(Ord);
         if (QueryCategoryPermitted(Domain, Category))
         {
             Mask |= WorkspaceBit(Domain);
@@ -504,130 +504,130 @@ uint32_t ThumbnailSheetRepository::ComputeWorkspacesAllowingCategory(ContentCate
     return Mask;
 }
 
-const char* ThumbnailSheetRepository::QueryCategoryTitle(ContentCategoryKind Category) noexcept
+const char* ThumbnailSheetRepository::QueryCategoryTitle(ContentCategory Category) noexcept
 {
     switch (Category)
     {
-        case ContentCategoryKind::All:         return "All";
-        case ContentCategoryKind::Colours:     return "Colours";
-        case ContentCategoryKind::Geometry:    return "Geometry";
-        case ContentCategoryKind::UVLayouts:   return "UV Layouts";
-        case ContentCategoryKind::Materials:   return "Materials";
-        case ContentCategoryKind::Textures:    return "Textures";
-        case ContentCategoryKind::Images:      return "Images";
-        case ContentCategoryKind::Vectors:     return "Vectors";
-        case ContentCategoryKind::Fonts:       return "Fonts";
-        case ContentCategoryKind::Simulations: return "Simulations";
-        case ContentCategoryKind::Volumetrics: return "Volumetrics";
-        case ContentCategoryKind::Particles:   return "Particles";
-        case ContentCategoryKind::Photometry:  return "Photometry";
-        case ContentCategoryKind::Audio:       return "Audio";
-        case ContentCategoryKind::Shaders:     return "Shaders";
+        case ContentCategory::All:         return "All";
+        case ContentCategory::Colours:     return "Colours";
+        case ContentCategory::Geometry:    return "Geometry";
+        case ContentCategory::UVLayouts:   return "UV Layouts";
+        case ContentCategory::Materials:   return "Materials";
+        case ContentCategory::Textures:    return "Textures";
+        case ContentCategory::Images:      return "Images";
+        case ContentCategory::Vectors:     return "Vectors";
+        case ContentCategory::Fonts:       return "Fonts";
+        case ContentCategory::Simulations: return "Simulations";
+        case ContentCategory::Volumetrics: return "Volumetrics";
+        case ContentCategory::Particles:   return "Particles";
+        case ContentCategory::Photometry:  return "Photometry";
+        case ContentCategory::Audio:       return "Audio";
+        case ContentCategory::Shaders:     return "Shaders";
     }
     return "All";
 }
 
-const char* ThumbnailSheetRepository::QueryCanonicalExtension(ContentCategoryKind Category) noexcept
+const char* ThumbnailSheetRepository::QueryCanonicalExtension(ContentCategory Category) noexcept
 {
     switch (Category)
     {
-        case ContentCategoryKind::All:         return ".Space";
-        case ContentCategoryKind::Colours:     return ".ColourSwatch";
-        case ContentCategoryKind::Geometry:    return ".GeometrySpace";
-        case ContentCategoryKind::UVLayouts:   return ".UVSpace";
-        case ContentCategoryKind::Materials:   return ".MaterialSpace";
-        case ContentCategoryKind::Textures:    return ".TextureSpace";
-        case ContentCategoryKind::Images:      return ".ImageSpace";
-        case ContentCategoryKind::Vectors:     return ".VectorSpace";
-        case ContentCategoryKind::Fonts:       return ".FontSpace";
-        case ContentCategoryKind::Simulations: return ".SimulationSpace";
-        case ContentCategoryKind::Volumetrics: return ".VolumetricSpace";
-        case ContentCategoryKind::Particles:   return ".ParticleSpace";
-        case ContentCategoryKind::Photometry:  return ".Photometry";
-        case ContentCategoryKind::Audio:       return ".Acoustic";
-        case ContentCategoryKind::Shaders:     return ".slang";
+        case ContentCategory::All:         return ".Space";
+        case ContentCategory::Colours:     return ".ColourSwatch";
+        case ContentCategory::Geometry:    return ".GeometrySpace";
+        case ContentCategory::UVLayouts:   return ".UVSpace";
+        case ContentCategory::Materials:   return ".MaterialSpace";
+        case ContentCategory::Textures:    return ".TextureSpace";
+        case ContentCategory::Images:      return ".ImageSpace";
+        case ContentCategory::Vectors:     return ".VectorSpace";
+        case ContentCategory::Fonts:       return ".FontSpace";
+        case ContentCategory::Simulations: return ".SimulationSpace";
+        case ContentCategory::Volumetrics: return ".VolumetricSpace";
+        case ContentCategory::Particles:   return ".ParticleSpace";
+        case ContentCategory::Photometry:  return ".Photometry";
+        case ContentCategory::Audio:       return ".Acoustic";
+        case ContentCategory::Shaders:     return ".slang";
     }
     return ".Space";
 }
 
-const char* ThumbnailSheetRepository::QueryWorkspaceTitle(WorkspaceDomainKind Workspace) noexcept
+const char* ThumbnailSheetRepository::QueryWorkspaceTitle(WorkspaceCategory Workspace) noexcept
 {
     switch (Workspace)
     {
-        case WorkspaceDomainKind::SceneWorld:   return "Scene";
-        case WorkspaceDomainKind::UV:           return "UV";
-        case WorkspaceDomainKind::GeometryCad:  return "Geometry";
-        case WorkspaceDomainKind::Material:     return "Material";
-        case WorkspaceDomainKind::TexturePaint: return "Texture";
-        case WorkspaceDomainKind::Image:        return "Image";
-        case WorkspaceDomainKind::Vector:       return "Vector";
-        case WorkspaceDomainKind::Simulation:   return "Simulation";
-        case WorkspaceDomainKind::Particle:     return "Particle";
-        case WorkspaceDomainKind::Audio:        return "Audio";
+        case WorkspaceCategory::SceneWorld:   return "Scene";
+        case WorkspaceCategory::UV:           return "UV";
+        case WorkspaceCategory::GeometryCad:  return "Geometry";
+        case WorkspaceCategory::Material:     return "Material";
+        case WorkspaceCategory::TexturePaint: return "Texture";
+        case WorkspaceCategory::Image:        return "Image";
+        case WorkspaceCategory::Vector:       return "Vector";
+        case WorkspaceCategory::Simulation:   return "Simulation";
+        case WorkspaceCategory::Particle:     return "Particle";
+        case WorkspaceCategory::Audio:        return "Audio";
     }
     return "Scene";
 }
 
-ContentCategoryKind ThumbnailSheetRepository::ClassifyExternalExtension(const std::filesystem::path& SourceFile) noexcept
+ContentCategory ThumbnailSheetRepository::ClassifyExternalExtension(const std::filesystem::path& SourceFile) noexcept
 {
     const std::string Ext = LowercaseAscii(SourceFile.extension().string());
     if (Ext == ".colourswatch" || Ext == ".colourspace" || Ext == ".toml")
     {
-        return ContentCategoryKind::Colours;
+        return ContentCategory::Colours;
     }
     if (Ext == ".gltf" || Ext == ".glb" || Ext == ".fbx" || Ext == ".obj" || Ext == ".step" || Ext == ".geometryspace" || Ext == ".assembly" || Ext == ".sketch")
     {
-        return ContentCategoryKind::Geometry;
+        return ContentCategory::Geometry;
     }
     if (Ext == ".uvspace")
     {
-        return ContentCategoryKind::UVLayouts;
+        return ContentCategory::UVLayouts;
     }
     if (Ext == ".mtlx" || Ext == ".materialspace")
     {
-        return ContentCategoryKind::Materials;
+        return ContentCategory::Materials;
     }
     if (Ext == ".ktx2" || Ext == ".dds" || Ext == ".texturespace" || Ext == ".pigment")
     {
-        return ContentCategoryKind::Textures;
+        return ContentCategory::Textures;
     }
     if (Ext == ".png" || Ext == ".jpg" || Ext == ".jpeg" || Ext == ".exr" || Ext == ".hdr" || Ext == ".imagespace")
     {
-        return ContentCategoryKind::Images;
+        return ContentCategory::Images;
     }
     if (Ext == ".svg" || Ext == ".vectorspace")
     {
-        return ContentCategoryKind::Vectors;
+        return ContentCategory::Vectors;
     }
     if (Ext == ".ttf" || Ext == ".otf" || Ext == ".fontspace")
     {
-        return ContentCategoryKind::Fonts;
+        return ContentCategory::Fonts;
     }
     if (Ext == ".simulationspace")
     {
-        return ContentCategoryKind::Simulations;
+        return ContentCategory::Simulations;
     }
     if (Ext == ".vdb" || Ext == ".volumetricspace")
     {
-        return ContentCategoryKind::Volumetrics;
+        return ContentCategory::Volumetrics;
     }
     if (Ext == ".particlespace")
     {
-        return ContentCategoryKind::Particles;
+        return ContentCategory::Particles;
     }
     if (Ext == ".ies" || Ext == ".photometry")
     {
-        return ContentCategoryKind::Photometry;
+        return ContentCategory::Photometry;
     }
     if (Ext == ".wav" || Ext == ".flac" || Ext == ".ogg" || Ext == ".acoustic")
     {
-        return ContentCategoryKind::Audio;
+        return ContentCategory::Audio;
     }
     if (Ext == ".slang" || Ext == ".render")
     {
-        return ContentCategoryKind::Shaders;
+        return ContentCategory::Shaders;
     }
-    return ContentCategoryKind::Geometry;
+    return ContentCategory::Geometry;
 }
 
 void ThumbnailSheetRepository::ConfigureImportPolicy(const ImportIntakeConfiguration& Policy)
@@ -653,7 +653,7 @@ std::filesystem::path ThumbnailSheetRepository::ResolveQuarantineDirectory() con
     return ImportPolicy.ScratchSessionRoot / "Saved/ImportIntake";
 }
 
-std::filesystem::path ThumbnailSheetRepository::ResolveFinalImportDirectory(ContentCategoryKind Category) const
+std::filesystem::path ThumbnailSheetRepository::ResolveFinalImportDirectory(ContentCategory Category) const
 {
     const char* CategoryFolder = QueryCategoryTitle(Category);
     if (ImportPolicy.Mode == ImportDestinationMode::UserCustomFolder && !ImportPolicy.CustomImportDirectory.empty())
@@ -713,7 +713,7 @@ void ThumbnailSheetRepository::BakeProceduralTileIntoPage(ContentRepositoryEntry
 {
     std::vector<uint8_t> TileRgba(static_cast<std::size_t>(TileDimensionPixels) * TileDimensionPixels * 4u, 0u);
     SynthesizePrebakedTileRgba(
-        static_cast<ContentCategoryKind>(Entry.IndexHeader.CategoryCode),
+        static_cast<ContentCategory>(Entry.IndexHeader.CategoryCode),
         ColorRgba{ Entry.IndexHeader.TintRed, Entry.IndexHeader.TintGreen, Entry.IndexHeader.TintBlue, 255u },
         TileRgba);
     CopyTileBytesIntoPage(Entry.IndexHeader, TileRgba);
@@ -722,7 +722,7 @@ void ThumbnailSheetRepository::BakeProceduralTileIntoPage(ContentRepositoryEntry
 
 std::size_t ThumbnailSheetRepository::RegisterPrebakedEntry(
     std::string_view             DisplayTitle,
-    ContentCategoryKind          Category,
+    ContentCategory          Category,
     ContentOriginFilter          Origin,
     ColorRgba                    PreviewTint,
     const std::filesystem::path& DiskPath,
@@ -774,43 +774,43 @@ void ThumbnailSheetRepository::PopulateDefaultEngineAndProjectEntries()
     struct SeedEntry
     {
         const char*         Title;
-        ContentCategoryKind Category;
+        ContentCategory Category;
         ContentOriginFilter Origin;
         ColorRgba           Tint;
     };
 
     constexpr std::array<SeedEntry, 24> StockEntries = {{
         // Materials (EngineContent/Materials/)
-        { "Standard Preset",      ContentCategoryKind::Materials,   ContentOriginFilter::Engine,  { 199u, 173u, 160u, 255u } },
-        { "Dielectric Glass",     ContentCategoryKind::Materials,   ContentOriginFilter::Engine,  { 176u, 222u, 242u, 255u } },
-        { "Brushed Titanium",     ContentCategoryKind::Materials,   ContentOriginFilter::Engine,  { 188u, 194u, 204u, 255u } },
-        { "Automotive Clearcoat", ContentCategoryKind::Materials,   ContentOriginFilter::Engine,  { 204u, 52u,  62u,  255u } },
-        { "Subsurface Wax",       ContentCategoryKind::Materials,   ContentOriginFilter::Project, { 228u, 188u, 146u, 255u } },
+        { "Standard Preset",      ContentCategory::Materials,   ContentOriginFilter::Engine,  { 199u, 173u, 160u, 255u } },
+        { "Dielectric Glass",     ContentCategory::Materials,   ContentOriginFilter::Engine,  { 176u, 222u, 242u, 255u } },
+        { "Brushed Titanium",     ContentCategory::Materials,   ContentOriginFilter::Engine,  { 188u, 194u, 204u, 255u } },
+        { "Automotive Clearcoat", ContentCategory::Materials,   ContentOriginFilter::Engine,  { 204u, 52u,  62u,  255u } },
+        { "Subsurface Wax",       ContentCategory::Materials,   ContentOriginFilter::Project, { 228u, 188u, 146u, 255u } },
         // Geometry (EngineContent/Worlds/ & Project)
-        { "Calibration BevelBox", ContentCategoryKind::Geometry,    ContentOriginFilter::Engine,  { 184u, 196u, 214u, 255u } },
-        { "Shader Ball Solid",    ContentCategoryKind::Geometry,    ContentOriginFilter::Engine,  { 212u, 192u, 166u, 255u } },
-        { "Modular Hull Assembly",ContentCategoryKind::Geometry,    ContentOriginFilter::Project, { 152u, 198u, 178u, 255u } },
+        { "Calibration BevelBox", ContentCategory::Geometry,    ContentOriginFilter::Engine,  { 184u, 196u, 214u, 255u } },
+        { "Shader Ball Solid",    ContentCategory::Geometry,    ContentOriginFilter::Engine,  { 212u, 192u, 166u, 255u } },
+        { "Modular Hull Assembly",ContentCategory::Geometry,    ContentOriginFilter::Project, { 152u, 198u, 178u, 255u } },
         // UV Layouts (.UVSpace)
-        { "UDIM 1001..1004 Grid", ContentCategoryKind::UVLayouts,   ContentOriginFilter::Engine,  { 118u, 196u, 216u, 255u } },
-        { "TrimSheet Atlas UV",   ContentCategoryKind::UVLayouts,   ContentOriginFilter::Project, { 216u, 178u, 112u, 255u } },
+        { "UDIM 1001..1004 Grid", ContentCategory::UVLayouts,   ContentOriginFilter::Engine,  { 118u, 196u, 216u, 255u } },
+        { "TrimSheet Atlas UV",   ContentCategory::UVLayouts,   ContentOriginFilter::Project, { 216u, 178u, 112u, 255u } },
         // Textures (.TextureSpace)
-        { "Brushed Aniso Pack",   ContentCategoryKind::Textures,    ContentOriginFilter::Engine,  { 174u, 184u, 198u, 255u } },
-        { "Weathered Concrete",   ContentCategoryKind::Textures,    ContentOriginFilter::Project, { 164u, 158u, 148u, 255u } },
+        { "Brushed Aniso Pack",   ContentCategory::Textures,    ContentOriginFilter::Engine,  { 174u, 184u, 198u, 255u } },
+        { "Weathered Concrete",   ContentCategory::Textures,    ContentOriginFilter::Project, { 164u, 158u, 148u, 255u } },
         // Images (.ImageSpace)
-        { "Studio Courtyard HDRI",ContentCategoryKind::Images,      ContentOriginFilter::Engine,  { 234u, 176u, 118u, 255u } },
-        { "ColorChecker Chart",   ContentCategoryKind::Images,      ContentOriginFilter::Engine,  { 126u, 186u, 232u, 255u } },
+        { "Studio Courtyard HDRI",ContentCategory::Images,      ContentOriginFilter::Engine,  { 234u, 176u, 118u, 255u } },
+        { "ColorChecker Chart",   ContentCategory::Images,      ContentOriginFilter::Engine,  { 126u, 186u, 232u, 255u } },
         // Vectors & Fonts
-        { "UI Contour Stencil",   ContentCategoryKind::Vectors,     ContentOriginFilter::Engine,  { 226u, 198u, 146u, 255u } },
-        { "Space Grotesk Face",   ContentCategoryKind::Fonts,       ContentOriginFilter::Engine,  { 232u, 224u, 210u, 255u } },
-        { "JetBrains Mono Face",  ContentCategoryKind::Fonts,       ContentOriginFilter::Engine,  { 168u, 206u, 238u, 255u } },
+        { "UI Contour Stencil",   ContentCategory::Vectors,     ContentOriginFilter::Engine,  { 226u, 198u, 146u, 255u } },
+        { "Space Grotesk Face",   ContentCategory::Fonts,       ContentOriginFilter::Engine,  { 232u, 224u, 210u, 255u } },
+        { "JetBrains Mono Face",  ContentCategory::Fonts,       ContentOriginFilter::Engine,  { 168u, 206u, 238u, 255u } },
         // Simulations, Volumetrics, Particles, Photometry, Audio, Shaders
-        { "Turbulent Wind Field", ContentCategoryKind::Simulations, ContentOriginFilter::Engine,  { 102u, 208u, 196u, 255u } },
-        { "Voronoi Fracture Rig", ContentCategoryKind::Simulations, ContentOriginFilter::Project, { 232u, 148u, 96u,  255u } },
-        { "Cumulus Density SDF",  ContentCategoryKind::Volumetrics, ContentOriginFilter::Engine,  { 198u, 214u, 232u, 255u } },
-        { "Ember Fountain GPU",   ContentCategoryKind::Particles,   ContentOriginFilter::Engine,  { 250u, 166u, 68u,  255u } },
-        { "Downlight Narrow IES", ContentCategoryKind::Photometry,  ContentOriginFilter::Engine,  { 248u, 224u, 134u, 255u } },
-        { "Turbine Loop Bus",     ContentCategoryKind::Audio,       ContentOriginFilter::Engine,  { 124u, 218u, 156u, 255u } },
-        { "MicrofacetGGX.slang",  ContentCategoryKind::Shaders,     ContentOriginFilter::Engine,  { 186u, 156u, 238u, 255u } },
+        { "Turbulent Wind Field", ContentCategory::Simulations, ContentOriginFilter::Engine,  { 102u, 208u, 196u, 255u } },
+        { "Voronoi Fracture Rig", ContentCategory::Simulations, ContentOriginFilter::Project, { 232u, 148u, 96u,  255u } },
+        { "Cumulus Density SDF",  ContentCategory::Volumetrics, ContentOriginFilter::Engine,  { 198u, 214u, 232u, 255u } },
+        { "Ember Fountain GPU",   ContentCategory::Particles,   ContentOriginFilter::Engine,  { 250u, 166u, 68u,  255u } },
+        { "Downlight Narrow IES", ContentCategory::Photometry,  ContentOriginFilter::Engine,  { 248u, 224u, 134u, 255u } },
+        { "Turbine Loop Bus",     ContentCategory::Audio,       ContentOriginFilter::Engine,  { 124u, 218u, 156u, 255u } },
+        { "MicrofacetGGX.slang",  ContentCategory::Shaders,     ContentOriginFilter::Engine,  { 186u, 156u, 238u, 255u } },
     }};
 
     for (const SeedEntry& Seed : StockEntries)
@@ -960,7 +960,7 @@ bool ThumbnailSheetRepository::LoadBinaryIndexHeaderOnly(
     {
         ContentRepositoryEntry Entry{};
         Entry.IndexHeader     = Header;
-        const auto Category   = static_cast<ContentCategoryKind>(Header.CategoryCode);
+        const auto Category   = static_cast<ContentCategory>(Header.CategoryCode);
         Entry.ContainerFormat = QueryCanonicalExtension(Category);
         if (Header.TitleStringOffset < StringBlob.size())
         {
@@ -1026,7 +1026,7 @@ void ThumbnailSheetRepository::RequestVisibleTileStreaming(
 
 ImportIntakeResult ThumbnailSheetRepository::IntakeExternalAssetDrop(
     const std::filesystem::path& DroppedSourceFile,
-    WorkspaceDomainKind          ActiveWorkspace)
+    WorkspaceCategory          ActiveWorkspace)
 {
     ImportIntakeResult Result{};
     if (DroppedSourceFile.empty())
@@ -1035,7 +1035,7 @@ ImportIntakeResult ThumbnailSheetRepository::IntakeExternalAssetDrop(
         return Result;
     }
 
-    const ContentCategoryKind Detected = ClassifyExternalExtension(DroppedSourceFile);
+    const ContentCategory Detected = ClassifyExternalExtension(DroppedSourceFile);
     Result.DetectedCategory            = Detected;
 
     // 🔴 Enforce hard workspace domain blocking before quarantine or import conversion
@@ -1131,7 +1131,7 @@ uint32_t ThumbnailSheetRepository::MigrateScratchImportsToProject(
             continue;
         }
 
-        const auto Category = static_cast<ContentCategoryKind>(Entry.IndexHeader.CategoryCode);
+        const auto Category = static_cast<ContentCategory>(Entry.IndexHeader.CategoryCode);
         const std::filesystem::path DestDir  = SavedProjectRoot / "Content/Imported" / QueryCategoryTitle(Category);
         const std::filesystem::path DestFile = DestDir / Entry.DiskPath.filename();
         std::filesystem::create_directories(DestDir, IoErr);
@@ -1154,8 +1154,8 @@ uint32_t ThumbnailSheetRepository::MigrateScratchImportsToProject(
 }
 
 std::vector<std::size_t> ThumbnailSheetRepository::QueryFilteredEntries(
-    WorkspaceDomainKind Workspace,
-    ContentCategoryKind Category,
+    WorkspaceCategory Workspace,
+    ContentCategory Category,
     ContentOriginFilter Origin,
     std::string_view    SearchQuery) const
 {
@@ -1169,7 +1169,7 @@ std::vector<std::size_t> ThumbnailSheetRepository::QueryFilteredEntries(
     for (std::size_t Idx = 0u; Idx < Entries.size(); ++Idx)
     {
         const ContentRepositoryEntry& Entry         = Entries[Idx];
-        const auto                    EntryCategory = static_cast<ContentCategoryKind>(Entry.IndexHeader.CategoryCode);
+        const auto                    EntryCategory = static_cast<ContentCategory>(Entry.IndexHeader.CategoryCode);
         const auto                    EntryOrigin   = static_cast<ContentOriginFilter>(Entry.IndexHeader.OriginCode);
 
         // Hard workspace compatibility gate
@@ -1178,7 +1178,7 @@ std::vector<std::size_t> ThumbnailSheetRepository::QueryFilteredEntries(
             continue;
         }
 
-        if (Category != ContentCategoryKind::All && EntryCategory != Category)
+        if (Category != ContentCategory::All && EntryCategory != Category)
         {
             continue;
         }

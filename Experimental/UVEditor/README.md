@@ -1,8 +1,13 @@
-# Frontier. UV Studio — Experimental Remastered
+# Frontier · UV Workspace (`Project-Zero` HTML UI)
 
-Full-featured 2D + 3D UV Editing, Unwrapping, Multi-UDIM Atlas, and Importance-Based Packing workspace matching the Frontier `Experimental Remastered` Sun + Fluid studio system.
+De-cluttered 2D + 3D UV Editing, Conformal Unwrapping, Multi-UDIM (`1001+`), Importance-Based Packing, and **Per-Face Multi-MatCap + Fast Lit (EON + Blinn-Phong + PCF Directional Shadows)** workspace styled in the exact **Project-Zero Editor UI** visual language.
 
 ## Key Capabilities
+
+0. **Project-Zero UI Architecture & Per-Face Multi-MatCap + Fast Lit 3D Shading (`Engine/UVViewport3D.js`)**
+   - **De-cluttered Project-Zero 3-Column Dock**: Full-height `Outliner | Viewport | Inspector` starting at `y = 0` with unrounded trapezoidal tabs, S-curve `"Frontier"` pull-down document notch, inverted `"Sample Assets"` bottom handle, draggable column splitters, `22px`-rounded property cards, `26px` capsule sliders, and radial-glow quick-action tiles.
+   - **Per-Face Multi-MatCap (`0..7` Simultaneous Studio MatCaps on One Surface)**: Assign any of 8 studio MatCaps (`Sculpt Clay`, `Satin Pearl`, `Red Sculpt Wax`, `Celadon Jade`, `Brushed Gold`, `Anodized Cobalt`, `Obsidian Rim`, `Solar Carpaint`) to any single face, multi-face selection, or UV chart via `0.02 ms` GPU `uFaceStateTex` B-channel updates (with Undo/Redo support and right-click quick strip).
+   - **Fast Lit Renderer**: Portsmouth, Kutz & Hill (2024) **Energy-Preserving Oren-Nayar (EON)** rough diffuse + energy-conserving normalized **Blinn-Phong** specular + `2048×2048` orthographic directional **9-tap PCF shadows** + ground contact shadow receiver.
 
 1. **Importance-Based Space Allocation Packer (`Engine/ImportancePackingSolver.js`)**
    - Select any subset of UV islands (e.g. 5 hero islands) and assign a target UV space share (e.g. `70%`).
@@ -32,8 +37,8 @@ Full-featured 2D + 3D UV Editing, Unwrapping, Multi-UDIM Atlas, and Importance-B
 
 ```bash
 # Run headless verification suite (Node v22+):
-node "Experimental/UVEditor/UVValidation.mjs"
+node Experimental/UVEditor/UVValidation.mjs
 
-# Launch live preview server:
-python3 "Experimental/UVEditor/Serve.py" 8086
+# Launch live preview server on 0.0.0.0:8085:
+python3 Experimental/UVEditor/Serve.py 8085
 ```

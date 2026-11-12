@@ -28,7 +28,7 @@ void ContentBrowser::AttachThemeRepository(const ThemeRepository* SourceTheme) n
     Panel.AttachThemeRepository(SourceTheme);
 }
 
-void ContentBrowser::ConfigureWorkspaceDomain(WorkspaceDomainKind ActiveDomain) noexcept
+void ContentBrowser::ConfigureWorkspaceDomain(WorkspaceCategory ActiveDomain) noexcept
 {
     Panel.ConfigureWorkspaceDomain(ActiveDomain);
 }

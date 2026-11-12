@@ -108,7 +108,7 @@ if(NOT FRONTIER_PROFILE STREQUAL "Shipping" OR BUILD_TESTING)
 endif()
 
 #------------------------------------------------------------------------------------------------------------------------
-#                                         DESKTOP GLFW 3.4 BACKEND (NON-ANDROID)
+#                                         DESKTOP GLFW 3.4 WINDOWING (NON-ANDROID)
 #------------------------------------------------------------------------------------------------------------------------
 
 if(NOT ANDROID)
@@ -167,16 +167,101 @@ set(FRONTIER_UI_COMPONENT_SOURCES
     Engine/Components/Panes/OutlinerPanel.cpp
     Engine/Components/Panes/InspectorPanel.cpp
     Engine/Components/Panes/ViewportPanel.cpp
+    Engine/Components/Panes/ViewportProjectionPane.cpp
     Engine/Components/ControlCentre/ControlCentrePanel.cpp
     Engine/Components/ContentBrowser/ColourCodex.cpp
     Engine/Components/ContentBrowser/ThumbnailSheetRepository.cpp
     Engine/Components/ContentBrowser/ContentBrowserPanel.cpp
+    Engine/Workspaces/UV/UVOutlinerPanel.cpp
+    Engine/Workspaces/UV/UVInspectorPanel.cpp
+    Engine/Workspaces/UV/UVViewportInteractor.cpp
+    Engine/Workspaces/UV/UVViewportHost.cpp
+    Engine/Workspaces/UV/UVWorkspaceHost.cpp
+    Engine/GeometricRaster/Rasterization/ImGuiOverlayRasterization.cpp
     Engine/Configuration/InputSettings.cpp
     Engine/Configuration/ProjectSpaceRepository.cpp
     Engine/Lifecycle/WorkspaceLifecycle.cpp
 )
+if(NOT ANDROID)
+    list(APPEND FRONTIER_UI_COMPONENT_SOURCES Engine/Lifecycle/DesktopWorkspaceLaunch.cpp)
+endif()
+
+#------------------------------------------------------------------------------------------------------------------------
+#                                      SLANG -> SPIR-V SHADER COMPILATION PIPELINE
+#------------------------------------------------------------------------------------------------------------------------
+
+set(FRONTIER_SLANGC_BIN "${CMAKE_SOURCE_DIR}/ExternalPackages/VulkanCompute/Slang/slangtorch/bin/slangc")
+if(NOT EXISTS "${FRONTIER_SLANGC_BIN}")
+    execute_process(
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/Automation/PrepareShaderToolchain.py"
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        RESULT_VARIABLE FRONTIER_SHADER_TOOLCHAIN_STATUS
+    )
+endif()
+
+set(FRONTIER_COMPILED_SHADER_DIR "${CMAKE_BINARY_DIR}/CompiledShaders")
+file(MAKE_DIRECTORY "${FRONTIER_COMPILED_SHADER_DIR}")
+set(FRONTIER_SHADER_SRC_DIR "${CMAKE_SOURCE_DIR}/Engine/GeometricRaster/Shaders")
+set(FRONTIER_SPV_OUTPUTS "")
+
+function(frontier_compile_slang_shader SLANG_FILE ENTRY_NAME SHADER_UNIT OUT_SPV_NAME)
+    set(OUT_SPV "${FRONTIER_COMPILED_SHADER_DIR}/${OUT_SPV_NAME}")
+    add_custom_command(
+        OUTPUT "${OUT_SPV}"
+        COMMAND "${FRONTIER_SLANGC_BIN}"
+            "${FRONTIER_SHADER_SRC_DIR}/${SLANG_FILE}"
+            -I "${FRONTIER_SHADER_SRC_DIR}"
+            -target spirv
+            -profile spirv_1_3
+            -emit-spirv-directly
+            -fvk-use-entrypoint-name
+            -matrix-layout-row-major
+            -O0
+            -entry "${ENTRY_NAME}"
+            -stage "${SHADER_UNIT}"
+            -o "${OUT_SPV}"
+        DEPENDS
+            "${FRONTIER_SHADER_SRC_DIR}/${SLANG_FILE}"
+            "${FRONTIER_SHADER_SRC_DIR}/MatCapEvaluation.slang"
+        COMMENT "[Slang] Compiling ${SLANG_FILE} (${SHADER_UNIT}) -> ${OUT_SPV_NAME}"
+        VERBATIM
+    )
+    set(FRONTIER_SPV_OUTPUTS ${FRONTIER_SPV_OUTPUTS} "${OUT_SPV}" PARENT_SCOPE)
+endfunction()
+
+frontier_compile_slang_shader(SurfaceShading.slang           VertexEntry   vertex   SurfaceShading.vert.spv)
+frontier_compile_slang_shader(SurfaceShading.slang           FragmentEntry fragment SurfaceShading.frag.spv)
+frontier_compile_slang_shader(UVTileRasterization.slang      VertexEntry   vertex   UVTileRasterization.vert.spv)
+frontier_compile_slang_shader(UVTileRasterization.slang      FragmentEntry fragment UVTileRasterization.frag.spv)
+frontier_compile_slang_shader(GizmoRasterization.slang        VertexEntry   vertex   GizmoRasterization.vert.spv)
+frontier_compile_slang_shader(GizmoRasterization.slang        FragmentEntry fragment GizmoRasterization.frag.spv)
+frontier_compile_slang_shader(ImGuiOverlayRasterization.slang VertexEntry   vertex   ImGuiOverlayRasterization.vert.spv)
+frontier_compile_slang_shader(ImGuiOverlayRasterization.slang FragmentEntry fragment ImGuiOverlayRasterization.frag.spv)
+frontier_compile_slang_shader(SelectionMaskCompute.slang     ComputeEntry  compute  SelectionMaskCompute.comp.spv)
+frontier_compile_slang_shader(ViewportPickReduction.slang    ComputeEntry  compute  ViewportPickReduction.comp.spv)
+frontier_compile_slang_shader(UVDistortionInspection.slang   ComputeEntry  compute  UVDistortionInspection.comp.spv)
+frontier_compile_slang_shader(StretchRelaxCompute.slang      ComputeEntry  compute  StretchRelaxCompute.comp.spv)
+frontier_compile_slang_shader(ConcaveSkylineCompute.slang    ComputeEntry  compute  ConcaveSkylineCompute.comp.spv)
+
+add_custom_target(FrontierShaders DEPENDS ${FRONTIER_SPV_OUTPUTS})
 
 set(FRONTIER_ENGINE_SOURCES
+    Engine/Configuration/EngineConfiguration.cpp
+    Engine/Configuration/WorkspaceConfiguration.cpp
+    Engine/GeometrySpace/Network/PolygonNetwork.cpp
+    Engine/GeometrySpace/Network/GeometryInstance.cpp
+    Engine/GeometrySpace/Network/FacePartitionRegister.cpp
+    Engine/GeometrySpace/Primitives/AnalyticPrimitives.cpp
+    Engine/GeometrySpace/Selection/ComponentSelectionMask.cpp
+    Engine/GeometrySpace/Selection/GeometrySelection.cpp
+    Engine/Interchange/GeometryInterchange.cpp
+    Engine/Editor/Viewports/TransformGizmo.cpp
+    Engine/Editor/Viewports/ViewportProjection.cpp
+    Engine/GeometricRaster/VulkanInterchange.cpp
+    Engine/GeometricRaster/Compute/TimelineTransferRegister.cpp
+    Engine/GeometricRaster/Compute/ComputeDispatchEncoder.cpp
+    Engine/GeometricRaster/Picking/ViewportPickQuery.cpp
+    Engine/GeometricRaster/UV/UVWorkspaceRasterizer.cpp
     Engine/Input/InputExchange.cpp
     Engine/Input/InputExtension.cpp
     Engine/Lifecycle/RuntimeLifecycle.cpp
@@ -207,6 +292,15 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/Workspaces/WorkspaceRegistry.cpp
     Engine/Workspaces/WorkspaceExchange.cpp
     Engine/Workspaces/WorkspaceExtension.cpp
+    Engine/Workspaces/UV/Operations/UVAuthoringOperations.cpp
+    Engine/Workspaces/UV/Solvers/SeamCutGenerator.cpp
+    Engine/Workspaces/UV/Solvers/ConformalUnwrapSolver.cpp
+    Engine/Workspaces/UV/Solvers/ProgressiveStretchRelaxer.cpp
+    Engine/Workspaces/UV/Solvers/ConcaveSkylinePacker.cpp
+    Engine/Workspaces/UV/Solvers/TexelDensityEqualizer.cpp
+    Engine/Workspaces/UV/Solvers/UVProjectionSolvers.cpp
+    Engine/Workspaces/UV/Solvers/UVIslandLayoutOperations.cpp
+    Engine/Workspaces/UV/UVWorkspaceSession.cpp
 )
 if(NOT ANDROID)
     list(APPEND FRONTIER_ENGINE_SOURCES Engine/Windowing/PlatformWindowDesktop.cpp)
@@ -222,6 +316,7 @@ if(NOT FRONTIER_PROFILE STREQUAL "Shipping")
 endif()
 
 add_library(FrontierEngine STATIC ${FRONTIER_ENGINE_SOURCES})
+add_dependencies(FrontierEngine FrontierShaders)
 
 target_include_directories(FrontierEngine PUBLIC
     "${CMAKE_SOURCE_DIR}"
@@ -229,13 +324,30 @@ target_include_directories(FrontierEngine PUBLIC
     "${CMAKE_SOURCE_DIR}/ExternalPackages/volk"
     "${CMAKE_SOURCE_DIR}/ExternalPackages/tomlpp/include"
 )
-target_link_libraries(FrontierEngine PUBLIC FrontierCompileSettings Threads::Threads)
+target_compile_definitions(FrontierEngine PUBLIC
+    "FRONTIER_COMPILED_SHADER_DIR=\"${FRONTIER_COMPILED_SHADER_DIR}\""
+)
+target_link_libraries(FrontierEngine PUBLIC FrontierCompileSettings Threads::Threads ${CMAKE_DL_LIBS})
 if(NOT FRONTIER_PROFILE STREQUAL "Shipping")
     target_link_libraries(FrontierEngine PUBLIC FrontierImGui)
 endif()
 if(NOT ANDROID)
     target_include_directories(FrontierEngine PUBLIC "${CMAKE_SOURCE_DIR}/ExternalPackages/glfw/include")
     target_link_libraries(FrontierEngine PRIVATE glfw)
+endif()
+
+#------------------------------------------------------------------------------------------------------------------------
+#                                    DESKTOP APPLICATION EXECUTABLES (FRONTIERUV & FRONTIEREDITOR)
+#------------------------------------------------------------------------------------------------------------------------
+
+if(NOT ANDROID AND NOT FRONTIER_PROFILE STREQUAL "Shipping")
+    add_executable(FrontierUV Engine/Lifecycle/FrontierUVLaunch.cpp)
+    target_compile_definitions(FrontierUV PRIVATE "FRONTIER_REPO_ROOT_DIR=\"${CMAKE_SOURCE_DIR}\"")
+    target_link_libraries(FrontierUV PRIVATE FrontierEngine FrontierImGui)
+
+    add_executable(FrontierEditor Engine/Lifecycle/FrontierEditorLaunch.cpp)
+    target_compile_definitions(FrontierEditor PRIVATE "FRONTIER_REPO_ROOT_DIR=\"${CMAKE_SOURCE_DIR}\"")
+    target_link_libraries(FrontierEditor PRIVATE FrontierEngine FrontierImGui)
 endif()
 
 #------------------------------------------------------------------------------------------------------------------------
@@ -247,6 +359,9 @@ if(BUILD_TESTING)
         add_library(FrontierShippingExhibitUi STATIC EXCLUDE_FROM_ALL ${FRONTIER_UI_COMPONENT_SOURCES})
         target_include_directories(FrontierShippingExhibitUi PUBLIC "${CMAKE_SOURCE_DIR}")
         target_link_libraries(FrontierShippingExhibitUi PUBLIC FrontierEngine FrontierImGui)
+        if(NOT ANDROID)
+            target_link_libraries(FrontierShippingExhibitUi PRIVATE glfw)
+        endif()
     endif()
 
     function(frontier_register_exhibit EXHIBIT_NAME EXHIBIT_SOURCE)
@@ -266,7 +381,23 @@ if(BUILD_TESTING)
     frontier_register_exhibit(DockingValidation           Exhibits/DockingValidation.cpp)
     frontier_register_exhibit(ControlCentreValidation     Exhibits/ControlCentreValidation.cpp)
     frontier_register_exhibit(WorkspacePanesValidation    Exhibits/WorkspacePanesValidation.cpp)
-    frontier_register_exhibit(LifecycleValidation         Exhibits/LifecycleValidation.cpp)
-    frontier_register_exhibit(WorkspaceRevisionValidation Exhibits/WorkspaceRevisionValidation.cpp)
-    frontier_register_exhibit(ContentBrowserValidation    Exhibits/ContentBrowserValidation.cpp)
+    frontier_register_exhibit(LifecycleValidation            Exhibits/LifecycleValidation.cpp)
+    frontier_register_exhibit(WorkspaceRevisionValidation    Exhibits/WorkspaceRevisionValidation.cpp)
+    frontier_register_exhibit(ContentBrowserValidation       Exhibits/ContentBrowserValidation.cpp)
+    frontier_register_exhibit(GeometryNetworkValidation      Exhibits/GeometryNetworkValidation.cpp)
+    frontier_register_exhibit(UVRasterPickingGizmoValidation    Exhibits/UVRasterPickingGizmoValidation.cpp)
+    frontier_register_exhibit(UVWorkspaceUIValidation           Exhibits/UVWorkspaceUIValidation.cpp)
+    frontier_register_exhibit(UVParameterizationValidation      Exhibits/UVParameterizationValidation.cpp)
+    frontier_register_exhibit(UVInteractiveAuthoringValidation  Exhibits/UVInteractiveAuthoringValidation.cpp)
+
+    if(NOT ANDROID AND NOT FRONTIER_PROFILE STREQUAL "Shipping")
+        add_test(
+            NAME FrontierUVExecutableSmoke
+            COMMAND FrontierUV --frames=3 "--capture-png=${CMAKE_SOURCE_DIR}/Exhibits/Images/UV/FrontierUV_DesktopExecutable.png"
+        )
+        add_test(
+            NAME FrontierEditorExecutableSmoke
+            COMMAND FrontierEditor --frames=3 --open-browser "--capture-png=${CMAKE_SOURCE_DIR}/Exhibits/Images/UV/FrontierEditor_DesktopExecutable.png"
+        )
+    endif()
 endif()

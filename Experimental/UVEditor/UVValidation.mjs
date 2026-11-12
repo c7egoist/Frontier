@@ -20,8 +20,11 @@ import {
     FollowActiveQuads,
     MinimizeStretch,
     AverageIslandScale,
-    ApplyAlignOrRectify
+    ApplyAlignOrRectify,
+    StackSimilarIslands,
+    UnstackOverlappingIslands
 } from './Engine/UnwrapSolver.js';
+import { MATCAP_STUDIO_CATALOG, SynthesizeMatcapPixels } from './Engine/EngineeringMatcaps.js';
 import { SolveImportancePack } from './Engine/ImportancePackingSolver.js';
 import { SampleAssetCatalog } from './Engine/SampleAssets.js';
 import { SerializeTopologySurfaceForBridge } from '../Shared/UvTextureBridge.js';
@@ -35,7 +38,8 @@ const RequiredAssets = [
     'Fonts/dm-sans-latin-300-normal.woff2', 'Fonts/dm-sans-latin-400-normal.woff2', 'Fonts/dm-sans-latin-500-normal.woff2',
     'Vendor/three.esm.min.js', 'Vendor/orbit-controls.esm.min.js',
     'Engine/TopologySurface.js', 'Engine/UnwrapSolver.js', 'Engine/ImportancePackingSolver.js',
-    'Engine/ControlledIntegratorLoader.js', 'Engine/SampleAssets.js', 'Engine/UVCanvas2D.js', 'Engine/UVViewport3D.js',
+    'Engine/ControlledIntegratorLoader.js', 'Engine/SampleAssets.js', 'Engine/EngineeringMatcaps.js',
+    'Engine/UVCanvas2D.js', 'Engine/UVViewport3D.js',
     'Assets/ControlVehicleBody.facet', 'Assets/ControlVehicleRim.facet', 'Assets/ControlVehicleTyre.facet',
     '../Shared/UvTextureBridge.js'
 ];
@@ -57,7 +61,66 @@ for (const M of MainJs.matchAll(/document\.getElementById\('([^']+)'\)/g))
 }
 assert.ok(HtmlIds.has('send-to-texture-studio-btn'), 'index.html must include Export to Texture Studio bridge button');
 assert.ok(/data-stage-mode="mesh"[^>]*class="nav-button active"|class="nav-button active"[^>]*data-stage-mode="mesh"/.test(Html), 'Default active stage mode tab must be 3D Mesh');
-assert.ok((Html.match(/class="select-pill-wrap vp-compact-select"/g) || []).length >= 4, 'Top toolbar dropdowns must use unified .select-pill-wrap with .pill-caret-divider');
+assert.ok((Html.match(/select-pill-wrap vp-compact-select/g) || []).length >= 4, 'Top toolbar dropdowns must use unified .select-pill-wrap with .pill-caret-divider');
+assert.ok(HtmlIds.has('pz-notch-toggle'), 'Project-Zero pull-down notch must be present');
+
+// Verify 16 Procedural Studio MatCaps (Metals, Rubber, Normal, Car Flakes, Carbon Fibre, Fabrics) + Undo/Redo round-trip
+{
+    const { MATCAP_STUDIO_CATALOG, SynthesizeMatcapPixels } = await import('./Engine/EngineeringMatcaps.js');
+    assert.equal(MATCAP_STUDIO_CATALOG.length, 16, 'MATCAP_STUDIO_CATALOG must expose 16 procedural Studio MatCaps');
+    const ExpectedIds = [
+        'cnc-alu', 'ti-grade5', 'cad-clay', 'studio-chrome',
+        'gunmetal-ano', 'layout-blue', 'cnc-brass', 'cad-zebra',
+        'vulcan-rubber', 'normal-rgb', 'car-flake-blue', 'car-flake-ruby',
+        'carbon-fiber', 'woven-fabric', 'velvet-suede', 'ripstop-fabric'
+    ];
+    assert.deepEqual(MATCAP_STUDIO_CATALOG.map(M => M.id), ExpectedIds, '16-slot MatCap catalog IDs must match');
+
+    for (const Spec of MATCAP_STUDIO_CATALOG)
+    {
+        const Buf = SynthesizeMatcapPixels(Spec, 64);
+        let MinLum = 255, MaxLum = 0;
+        for (let y = 8; y < 56; y++)
+        {
+            for (let x = 8; x < 56; x++)
+            {
+                const Nx = (2 * (x + 0.5)) / 64 - 1;
+                const Ny = 1 - (2 * (y + 0.5)) / 64;
+                if (Nx * Nx + Ny * Ny > 0.88) continue;
+                const i = (y * 64 + x) * 4;
+                const Lum = 0.2126 * Buf[i] + 0.7152 * Buf[i + 1] + 0.0722 * Buf[i + 2];
+                if (Lum < MinLum) MinLum = Lum;
+                if (Lum > MaxLum) MaxLum = Lum;
+            }
+        }
+        const MinExpectedSpan = (Spec.kind === 'rubber' || Spec.kind.startsWith('fabric')) ? 42 : 110;
+        assert.ok(MaxLum - MinLum >= MinExpectedSpan,
+            `MatCap "${Spec.label}" must have realistic shading range >= ${MinExpectedSpan} (got ${(MaxLum - MinLum).toFixed(1)})`);
+    }
+
+    // Verify Normal Map MatCap center pixel encodes +Z normal (~128, ~128, ~255)
+    const NormBuf = SynthesizeMatcapPixels(MATCAP_STUDIO_CATALOG[9], 64);
+    const CenterIdx = (32 * 64 + 32) * 4;
+    assert.ok(NormBuf[CenterIdx] > 115 && NormBuf[CenterIdx] < 142 &&
+              NormBuf[CenterIdx + 1] > 115 && NormBuf[CenterIdx + 1] < 142 &&
+              NormBuf[CenterIdx + 2] > 245,
+        `Normal RGB MatCap center must encode (0,0,+1) normal, got (${NormBuf[CenterIdx]}, ${NormBuf[CenterIdx + 1]}, ${NormBuf[CenterIdx + 2]})`);
+
+    const TestSurf = SampleAssetCatalog[0].create().surface;
+    TestSurf.PushUndo('Before Multi-MatCap');
+    TestSurf.AssignMatcapToFaces([0], 8);        // Face 0 -> Vulcan Rubber
+    TestSurf.AssignMatcapToFaces([1, 2, 3], 12); // Faces 1..3 -> Carbon Fibre
+    TestSurf.AssignMatcapToFaces([4, 5], 14);    // Faces 4..5 -> Velvet Suede
+    assert.equal(TestSurf.faces[0].matcapSlot, 8);
+    assert.equal(TestSurf.faces[2].matcapSlot, 12);
+    assert.equal(TestSurf.faces[5].matcapSlot, 14);
+    const Hist = TestSurf.GetMatcapUsageCounts();
+    assert.equal(Hist.length, 16, 'GetMatcapUsageCounts must track all 16 MatCap slots');
+    assert.ok(Hist[8] >= 1 && Hist[12] >= 3 && Hist[14] >= 2, 'High-slot MatCaps (Rubber, Carbon, Velvet) active simultaneously');
+    TestSurf.Undo();
+    TestSurf.Redo();
+    assert.equal(TestSurf.faces[2].matcapSlot, 12, '16-slot Per-face MatCap assignment survives Undo/Redo');
+}
 console.log('   OK: All assets bundled & DOM IDs wired cleanly.');
 
 console.log('2. Checking UDIM coordinate conversions...');
@@ -478,5 +541,230 @@ console.log('10. Testing GPU Wireframe/Edge/Vertex Shaders, Spatial Grid, Adjace
     console.log('   OK: GPU wireframe/edge/vertex shaders, spatial grid, adjacency & caching verified.');
 }
 
+// 11. Multi-Surface Engineering MatCaps, Stack Similar UVs, Follow Active Quads & Decluttered UI Checks
+console.log('11. Testing Multi-Surface Engineering MatCaps, Stack Similar UVs, Follow Active Quads & UI Polish...');
+{
+    assert.equal(MATCAP_STUDIO_CATALOG.length, 16, 'MATCAP_STUDIO_CATALOG must expose 16 procedural MatCap finishes');
+    const Pixels = SynthesizeMatcapPixels(MATCAP_STUDIO_CATALOG[12], 64); // Carbon Fibre
+    assert.equal(Pixels.length, 64 * 64 * 4, 'SynthesizeMatcapPixels must generate RGBA buffer');
+
+    // Multi-part surface must receive multiple distinct MatCap slots (never 1 single uniform colour)
+    const { surface: Vehicle } = SampleAssetCatalog[0].create(); // Controlled Integrator (multi-part vehicle)
+    const VehIslands = Vehicle.ExtractIslands();
+    Vehicle.AutoAssignMatcapsByPart(VehIslands);
+    const DistinctSlots = new Set(Vehicle.faces.map(F => F.matcapSlot));
+    assert.ok(DistinctSlots.size >= 5, `Expected >= 5 distinct Engineering MatCap slots across multi-part vehicle, got ${DistinctSlots.size}`);
+
+    // Assigning MatCap + Fast PBR to a selected island updates ONLY that island's faces (never entire geometry!)
+    const OtherIslFace = VehIslands[1].faceIndices[0];
+    const OrigOtherSlot = Vehicle.faces[OtherIslFace].matcapSlot;
+    const OrigOtherColor = Vehicle.faces[OtherIslFace].pbrColor;
+
+    // 1) With empty selection, AssignSurfaceMaterialToSelection MUST return 0 and leave ALL faces untouched
+    Vehicle.SelectFace(0, false);
+    Vehicle.ClearSelection();
+    const AssignedWhenEmpty = Vehicle.AssignSurfaceMaterialToSelection({
+        matcapSlot: 3,
+        pbrColor: '#112233',
+        pbrMetallic: 0.99
+    }, VehIslands);
+    assert.equal(AssignedWhenEmpty, 0, 'AssignSurfaceMaterialToSelection must affect 0 faces when nothing is selected');
+    assert.equal(Vehicle.faces[OtherIslFace].matcapSlot, OrigOtherSlot, 'Empty selection must NOT overwrite unselected faces');
+    assert.equal(Vehicle.faces[OtherIslFace].pbrColor, OrigOtherColor, 'Empty selection must NOT overwrite unselected PBR colour');
+
+    // 2) With Island 0 selected ("Apply Selected"), ONLY Island 0's faces receive the MatCap + Fast PBR patch
+    Vehicle.PushUndo('Test Per-Face PBR + MatCap Apply');
+    Vehicle.SelectIslands([VehIslands[0].id], false);
+    const AssignedIsl = Vehicle.AssignSurfaceMaterialToSelection({
+        matcapSlot: 7,
+        pbrColor: '#e05252',
+        pbrMetallic: 0.91,
+        pbrRoughness: 0.14,
+        pbrSpecular: 0.88,
+        matcapMix: 0.45
+    }, VehIslands);
+    assert.equal(AssignedIsl, VehIslands[0].faceIndices.length, 'AssignSurfaceMaterialToSelection must target ONLY selected island faces');
+    for (const Fi of VehIslands[0].faceIndices)
+    {
+        assert.equal(Vehicle.faces[Fi].matcapSlot, 7, 'Selected face must receive slot 7 (Zebra CAD)');
+        assert.equal(Vehicle.faces[Fi].pbrColor, '#e05252', 'Selected face must receive per-face PBR colour');
+        assert.ok(Math.abs(Vehicle.faces[Fi].pbrMetallic - 0.91) < 1e-6, 'Selected face must receive per-face metallic');
+        assert.ok(Math.abs(Vehicle.faces[Fi].pbrRoughness - 0.14) < 1e-6, 'Selected face must receive per-face roughness');
+        assert.ok(Math.abs(Vehicle.faces[Fi].pbrSpecular - 0.88) < 1e-6, 'Selected face must receive per-face specular');
+    }
+    assert.equal(Vehicle.faces[OtherIslFace].matcapSlot, OrigOtherSlot, 'Unselected island must keep its original MatCap');
+    assert.equal(Vehicle.faces[OtherIslFace].pbrColor, OrigOtherColor, 'Unselected island must keep its original PBR colour');
+
+    // Undo / Redo restores per-face PBR + MatCap cleanly and bumps _matVersion
+    const MatVerBeforeUndo = Vehicle._matVersion;
+    assert.equal(Vehicle.Undo(), true, 'Undo should restore pre-apply material state');
+    assert.ok(Vehicle._matVersion > MatVerBeforeUndo, 'Undo must increment _matVersion so GPU attributes refresh');
+    assert.equal(Vehicle.Redo(), true, 'Redo should re-apply per-face PBR + MatCap state');
+    assert.equal(Vehicle.faces[VehIslands[0].faceIndices[0]].pbrColor, '#e05252');
+
+    // 3) Explicit "Fill All" (FillSurfaceMaterial) fills the entire geometry
+    const FilledAll = Vehicle.FillSurfaceMaterial({
+        matcapSlot: 5,
+        pbrColor: '#4c7dc9',
+        pbrMetallic: 0.62,
+        pbrRoughness: 0.25,
+        pbrSpecular: 0.70,
+        matcapMix: 0.60
+    });
+    assert.equal(FilledAll, Vehicle.faces.length, 'FillSurfaceMaterial must update every face on the geometry');
+    assert.ok(Vehicle.faces.every(F => F.matcapSlot === 5 && F.pbrColor === '#4c7dc9'),
+        'FillSurfaceMaterial must assign MatCap + Fast PBR to all faces');
+
+    // StackSimilarIslands & UnstackOverlappingIslands on Tactical Crate (6 congruent quad faces / straps)
+    const CrateSpec = SampleAssetCatalog.find(S => S.id === 'crate');
+    const { surface: Crate } = CrateSpec.create();
+    const CrateIslandsBefore = Crate.ExtractIslands();
+    const StackRes = StackSimilarIslands(Crate, { islands: CrateIslandsBefore, tolerance: 0.12 });
+    assert.ok(StackRes.stackedIslands >= 2 && StackRes.masterGroups >= 1,
+        `StackSimilarIslands should stack >= 2 congruent crate islands (got ${StackRes.stackedIslands} in ${StackRes.masterGroups} groups)`);
+    assert.ok(Crate.AnalyzeDiagnostics().overlapCount > 0, 'Stacked congruent islands must overlap in UV space to share texels');
+
+    // UnstackOverlappingIslands separates stacked duplicates cleanly
+    const Unstacked = UnstackOverlappingIslands(Crate, { stepU: 0.22 });
+    assert.ok(Unstacked >= 1, 'UnstackOverlappingIslands should offset stacked duplicate islands');
+
+    // FollowActiveQuads works even when activeFace is null (auto-seeds from selected faces)
+    Crate.ClearSelection();
+    Crate.activeFace = null;
+    Crate.selectedFaces = new Set([0, 1, 2]);
+    assert.ok(FollowActiveQuads(Crate, 'length-avg') >= 1, 'FollowActiveQuads must auto-seed when activeFace is null');
+
+    // Verify UI / shader invariants
+    const Vp3dJs = ReadText('Engine/UVViewport3D.js');
+    const EditorJs = ReadText('UVEditor.js');
+    const IndexHtml = ReadText('index.html');
+    assert.ok(Vp3dJs.includes('attribute float aMatcapSlot;') && Vp3dJs.includes('attribute vec3 aPbrColor;') &&
+              Vp3dJs.includes('attribute vec4 aPbrParams;') && Vp3dJs.includes('FastUpdateGpuFaceMaterials(') &&
+              Vp3dJs.includes('precision highp float;'),
+        'UVViewport3D.js must pass lossless per-vertex aMatcapSlot, aPbrColor, and aPbrParams with FastUpdateGpuFaceMaterials');
+    assert.ok(Vp3dJs.includes('this.fastPbrMat') && !Vp3dJs.includes('dGgx'),
+        'UVViewport3D.js must provide simplified Fast PBR shader (Colour, Metallic, Roughness, Specular only) with zero GGX');
+    assert.ok(Vp3dJs.includes("this.shadingMode = 'fast-pbr';"),
+        'Default 3D shadingMode must be fast-pbr so MatCaps only appear when a MatCap mode is selected');
+
+    // Verify Inspector tab order: Pack -> Unwrap -> UDIM -> Shading -> Check (Shading after UDIM, before Check)
+    const TabsBlock = IndexHtml.slice(IndexHtml.indexOf('id="inspector-tabs"'), IndexHtml.indexOf('</div>', IndexHtml.indexOf('id="inspector-tabs"')));
+    const TabOrder = [...TabsBlock.matchAll(/data-tab="([^"]+)"/g)].map(M => M[1]);
+    assert.deepEqual(TabOrder, ['packing', 'unwrap', 'udim', 'shading', 'check'],
+        `Inspector tabs must be ordered Pack -> Unwrap -> UDIM -> Shading -> Check (got ${TabOrder.join(' -> ')})`);
+
+    // Verify unified single Shading card (MatCaps gated strictly on IsMatcapMode + Apply Selected & Fill All)
+    const ShadingSlice = EditorJs.slice(EditorJs.indexOf('function RenderShadingTab'), EditorJs.indexOf('function RenderPackingTab'));
+    assert.ok(ShadingSlice.includes('if (IsMatcapMode)') && EditorJs.includes('CtxMatcapSec.hidden = !'),
+        'MatCap orbs must be conditionally rendered ONLY when a MatCap mode is selected');
+    assert.ok(!ShadingSlice.includes('RenderUvSelectionTransformCard'), 'Shading menu must NOT include 2D UV Transform card');
+    assert.equal((ShadingSlice.match(/SectionCard\(/g) || []).length, 1,
+        'Shading menu must combine Fast PBR Lit + Multi-MatCap into a single unified SectionCard');
+    assert.ok(ShadingSlice.includes("Label: 'Apply Selected'") && ShadingSlice.includes("Label: 'Fill All'"),
+        'Combined Shading card must expose Apply Selected and Fill All actions');
+    assert.ok(ShadingSlice.includes("'Colour'") && ShadingSlice.includes("Label: 'Metallic'") &&
+              ShadingSlice.includes("Label: 'Roughness'") && ShadingSlice.includes("Label: 'Specular'") &&
+              ShadingSlice.includes('MATCAP_STUDIO_CATALOG'),
+        'Combined Shading card must expose Multi-MatCap orbs + Colour, Metallic, Roughness, and Specular');
+
+    const CheckSlice = EditorJs.slice(EditorJs.indexOf('function RenderDiagnosticsTab'), EditorJs.indexOf('function SnapUV'));
+    assert.ok(CheckSlice.includes("Label: 'Overlapping Faces'") && CheckSlice.includes("Label: 'Select Overlaps'") &&
+              !CheckSlice.includes('RenderStudioPreviewAndFlatDebugCard'),
+        'Check menu must match exact UV Integrity & Repair layout from a874c93');
+
+    const UdimSlice = EditorJs.slice(EditorJs.indexOf('function RenderUdimTab'), EditorJs.indexOf('function RenderDiagnosticsTab'));
+    assert.ok(UdimSlice.includes('MetricTrio') && UdimSlice.includes('pz-udim-table') &&
+              !UdimSlice.includes('pz-udim-atlas-shell') && !UdimSlice.includes('Spatial UDIM Matrix'),
+        'UDIM menu must use Check-style MetricTrio + clean UDIM Tile Table instead of Spatial UDIM Matrix');
+
+    assert.ok(!ShadingSlice.includes('Fast PBR') && ShadingSlice.includes('Surface Material') &&
+              ShadingSlice.includes('pz-cpp-color-picker') && ShadingSlice.includes('pz-cpp-color-circle') &&
+              !ShadingSlice.includes('pz-pbr-swatch-dots') && !ShadingSlice.includes('pz-finish-showcase'),
+        'Shading Colour row must use C++-style [(circle) Colour Name · #HEX] picker with no extra swatch clutter');
+
+    const BudgetCardSlice = EditorJs.slice(EditorJs.indexOf('function RenderUdimSpaceBudgetCard'), EditorJs.indexOf('function UpdateHeaderAndHud'));
+    const OutlinerSlice = EditorJs.slice(EditorJs.indexOf('function RenderOutliner'), EditorJs.indexOf('function RenderLegendStrip'));
+    const PackSlice = EditorJs.slice(EditorJs.indexOf('function RenderPackingTab'), EditorJs.indexOf('function RenderUnwrapTab'));
+    assert.ok(EditorJs.includes('function RenderUdimSpaceBudgetCard') &&
+              IndexHtml.includes('<footer class="pz-outliner-budget-footer" id="lp-udim-budget-card"></footer>') &&
+              !BudgetCardSlice.includes('alloc-chips-row') && !BudgetCardSlice.includes('alloc-chip') &&
+              !PackSlice.includes('hero-card') && !PackSlice.includes('allocation-spectrum'),
+        'UDIM Space Budget must live in the UV Space footer with zero per-layer % text chips');
+
+    assert.ok(EditorJs.indexOf('function DescribeHexColorName') > 0 &&
+              EditorJs.indexOf('function DescribeHexColorName') < EditorJs.indexOf('function RenderShadingTab'),
+        'DescribeHexColorName must be declared at module scope so RenderPackingTab never throws ReferenceError');
+
+    assert.ok(IndexHtml.includes('class="pz-outliner-plus-btn" id="pz-new-folder-btn"') &&
+              OutlinerSlice.includes('pz-frontier-layer-box') && OutlinerSlice.includes('SelectFaceGroupRef') &&
+              OutlinerSlice.includes('FastSyncSelectionViews') && !OutlinerSlice.includes('pz-prio-add-btn') &&
+              !OutlinerSlice.includes('Surface Parts') && !OutlinerSlice.includes('pz-part-square') &&
+              !OutlinerSlice.includes('pz-chart-row') &&
+              PackSlice.includes('MetricTrio(Body') && PackSlice.includes('Selected · UDIM') &&
+              PackSlice.includes('Importance Space Allocation') && PackSlice.includes('SliderRow(AllocSec.Inner') &&
+              PackSlice.includes("Unit: '%'") &&
+              PackSlice.includes('pz-inspector-text-input') && PackSlice.includes('pz-cpp-color-picker'),
+        'UV Space must use unrounded colour-coded Frontier Editor Outliner boxes (+ in header), with UDIM selection cards + Inspector % SliderRow in Pack');
+
+    // Benchmark & verify saved FaceGroupRef (zero ExtractIslands re-iteration + cross-object face references!)
+    {
+        const { surface: SurfA, importanceGroups: GrpsA } = SampleAssetCatalog[0].create();
+        SurfA.objectId = 'obj-integrator-a';
+        const { surface: SurfB, importanceGroups: GrpsB } = SampleAssetCatalog[1].create();
+        SurfB.objectId = 'obj-coupe-b';
+        SurfA.GetCachedAnalysis();
+        SurfB.GetCachedAnalysis();
+        SurfA.EnsureLayerFaceRefs();
+        SurfB.EnsureLayerFaceRefs();
+
+        let ReExtractCount = 0;
+        const OrigExtract = SurfA.ExtractIslands.bind(SurfA);
+        SurfA.ExtractIslands = (...Args) => { ReExtractCount++; return OrigExtract(...Args); };
+
+        const T0 = performance.now();
+        for (let iter = 0; iter < 100; iter++)
+        {
+            const HeroRefA = SurfA.GetLayerFaceRef(GrpsA[0].id);
+            const HeroRefB = SurfB.GetLayerFaceRef(GrpsB[0].id);
+            SurfA.SelectFaceGroupRef(HeroRefA, false);
+            SurfB.SelectFaceGroupRef(HeroRefB, false);
+        }
+        const ElapsedMs = performance.now() - T0;
+        SurfA.ExtractIslands = OrigExtract;
+
+        assert.strictEqual(ReExtractCount, 0, 'Selecting saved FaceGroupRef must NEVER re-run ExtractIslands()');
+        assert.ok(SurfA.selectedFaces.size > 0 && SurfB.selectedFaces.size > 0,
+            'Cross-object saved FaceGroupRef must select bound faces across independent objects');
+        assert.ok(ElapsedMs < 50, `100x cross-object FaceGroupRef selections must stay sub-millisecond per click (got ${ElapsedMs.toFixed(2)}ms)`);
+
+        // Verify direct face-level AssignFacesToLayer updates saved FaceGroupRef cleanly
+        SurfA.AssignFacesToLayer([0, 1, 2], 'custom-layer-x');
+        const CustomRef = SurfA.GetLayerFaceRef('custom-layer-x');
+        assert.strictEqual(CustomRef.faceCount, 3, 'AssignFacesToLayer must persist direct face references');
+    }
+
+    assert.ok(EditorJs.includes('function RenderUdimFilterBar') && IndexHtml.includes('data-udim="all"') &&
+              !IndexHtml.includes('data-filter="selected"') && !IndexHtml.includes('data-filter="issues"'),
+        'UV Space filters must strictly be Search + UDIM filters only');
+
+    assert.ok(IndexHtml.includes('<h1>UV Space</h1>') && !IndexHtml.includes('Clean Charts') &&
+              IndexHtml.includes('id="lp-kpi-util"') && IndexHtml.includes('id="lp-kpi-selected"') &&
+              IndexHtml.includes('id="lp-kpi-remaining"') && IndexHtml.includes('id="stat-issues-card"') &&
+              IndexHtml.includes('id="stat-overlap-card"') && IndexHtml.includes('>Stretch Caution<') && IndexHtml.includes('>Overlaps<'),
+        'UV Space left panel must be renamed from Outliner and show 5 infographic cards (3 Pack tiles + Stretch Caution + red Overlaps)');
+
+    const EditorCss = ReadText('UVEditor.css');
+    for (const BlueHex of ['#262930', '#191a1d', '#131418', '#0d0e11', 'rgba(56, 189, 248'])
+    {
+        assert.ok(!EditorCss.includes(BlueHex), `UVEditor.css must not contain blue-tinted card background ${BlueHex}`);
+    }
+
+    assert.ok(Vp3dJs.includes('this.showSeams = false;') && EditorJs.includes('showSeams: false'),
+        'Seam debug overlay must default to false');
+
+    console.log(`   OK: C++ Colour Picker, 5-card UV Space panel with Importance Space Allocation, neutral Check palette & ${DistinctSlots.size} MatCaps verified.`);
+}
+
 console.log('\nALL UV STUDIO VALIDATIONS PASSED SUCCESSFULLY.');
+
 

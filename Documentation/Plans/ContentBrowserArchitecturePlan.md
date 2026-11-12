@@ -13,7 +13,7 @@
 | **Streaming & Pre-Baked Icon/Thumbnail Pages** | **🏆 🥇 Option A — Pre-Baked `ThumbnailSheet` Pages + Exact `64 B` `ContentIndexEntry64` + Dual-Path SSD/HDD `AssetStreamThread`** | **🔴 `< 2 ms`** header load · **🔴 `3–7 GB/s`** SSD `4 KiB` scatter · **🔴 `180–220 MB/s`** HDD `2 MiB` C-SCAN sweep (**`0` backward seeks**) · **✔️ `~3.2 MiB` / `50k` entries** | ⭐⭐⭐⭐⭐ |
 | **OS Drop & `Imported` Directory Policy** | **🏆 🥇 Two-Step Quarantine → User-Selectable Destination**<br>① Quarantine raw drop in `Saved/ImportIntake/`<br>② Convert to canonical `.Space` / `.ColourSwatch` into `Projects/<Project>/Content/Imported/<Category>/` *(auto-falls back to `Projects/_Scratch/Saved/Imported/` when unsaved, or user-toggled **`Import: Temp`** / custom directory; `MigrateScratchImportsToProject` migrates on save)* | **🔴 Never breaks scene links** · **🔴 Corrupt drops purged in quarantine** · **✔️ User-selectable `Import: Project` vs `Import: Temp`** | ⭐⭐⭐⭐⭐ |
 | **Singular Colour Format** | **🏆 🥇 `.ColourSwatch`** *(case-insensitive `.colourswatch` load, canonical PascalCase `.ColourSwatch` write)* | Individual named swatch container (`[ColourSwatch]` `Name`, `Hex`, `RGB`, `CMYK`, `Series`, `FilterGroup`) alongside multi-swatch `.ColourSpace` and `.toml` | ⭐⭐⭐⭐⭐ |
-| **Workspace Category Filtering** | **🏆 🥇 Hard Per-Workspace Mask (`WorkspaceDomainKind`)** | Incompatible categories are **completely excluded** from the left rail, search results, and external file-drop intake (`🏴` hard-blocked, zero clutter) | ⭐⭐⭐⭐⭐ |
+| **Workspace Category Filtering** | **🏆 🥇 Hard Per-Workspace Mask (`WorkspaceCategory`)** | Incompatible categories are **completely excluded** from the left rail, search results, and external file-drop intake (`🏴` hard-blocked, zero clutter) | ⭐⭐⭐⭐⭐ |
 
 ---
 
@@ -46,7 +46,7 @@
 
 | Origin Tab | Searched Roots | Behavior |
 | :--- | :--- | :--- |
-| **`All`** | `EngineContent/` + `Projects/<Project>/Content/` + `Imported` | Unified view of all entries allowed by active `WorkspaceDomainKind`. |
+| **`All`** | `EngineContent/` + `Projects/<Project>/Content/` + `Imported` | Unified view of all entries allowed by active `WorkspaceCategory`. |
 | **`Project`** | `Projects/<Project>/Content/` **+ `EngineContent/`** | Searches project-authored `.Space` files **and** stock `EngineContent/` references together. |
 | **`Imported`** | `Projects/<Project>/Content/Imported/` *(or `Projects/_Scratch/Saved/Imported/` / custom folder)* | Receives OS drag-and-drop files after `Saved/ImportIntake/` quarantine conversion. |
 | **`Engine`** | `EngineContent/` only | Read-only stock engine entries. |

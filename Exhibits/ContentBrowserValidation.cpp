@@ -36,7 +36,7 @@ using Frontier::ColourSlotRegistration;
 using Frontier::ColourSortOrder;
 using Frontier::ContentBrowserPanel;
 using Frontier::ContentBrowserPointerInput;
-using Frontier::ContentCategoryKind;
+using Frontier::ContentCategory;
 using Frontier::ContentIndexEntry64;
 using Frontier::ContentOriginFilter;
 using Frontier::ContentShelfExtent;
@@ -49,7 +49,7 @@ using Frontier::Rectangle2D;
 using Frontier::ThemeRepository;
 using Frontier::ThumbnailSheetRepository;
 using Frontier::TypographyRepository;
-using Frontier::WorkspaceDomainKind;
+using Frontier::WorkspaceCategory;
 using Frontier::Components::ConfigureImGuiWorkspaceTheme;
 using Frontier::Components::DockPlacementDirection;
 using Frontier::Components::HeadlessWorkspaceDockContainer;
@@ -261,8 +261,8 @@ bool ValidateDualPathStreamingQuarantineAndWorkspaceBlocking()
         }
 
         // Strict UV workspace gate: Particles and ForceFields/Simulations MUST be blocked!
-        const ImportIntakeResult BlockedParticles = IntakeRepo.IntakeExternalAssetDrop(DroppedParticle, WorkspaceDomainKind::UV);
-        const ImportIntakeResult BlockedForce     = IntakeRepo.IntakeExternalAssetDrop(DroppedForce, WorkspaceDomainKind::UV);
+        const ImportIntakeResult BlockedParticles = IntakeRepo.IntakeExternalAssetDrop(DroppedParticle, WorkspaceCategory::UV);
+        const ImportIntakeResult BlockedForce     = IntakeRepo.IntakeExternalAssetDrop(DroppedForce, WorkspaceCategory::UV);
         if (!VerifyAssertion(!BlockedParticles.Accepted, "UV workspace strictly blocks Particle assets on drop") ||
             !VerifyAssertion(!BlockedForce.Accepted, "UV workspace strictly blocks ForceField/Simulation assets on drop"))
         {
@@ -270,7 +270,7 @@ bool ValidateDualPathStreamingQuarantineAndWorkspaceBlocking()
         }
 
         // Valid Geometry drop in UV workspace -> Quarantines in Saved/ImportIntake then lands in _Scratch/Saved/Imported/Geometry
-        const ImportIntakeResult AcceptedSolid = IntakeRepo.IntakeExternalAssetDrop(DroppedSolid, WorkspaceDomainKind::UV);
+        const ImportIntakeResult AcceptedSolid = IntakeRepo.IntakeExternalAssetDrop(DroppedSolid, WorkspaceCategory::UV);
         if (!VerifyAssertion(AcceptedSolid.Accepted, "UV workspace accepts Geometry (.gltf) drop") ||
             !VerifyAssertion(!std::filesystem::exists(AcceptedSolid.QuarantinePath, IoErr), "Transient quarantine file cleaned up after conversion") ||
             !VerifyAssertion(std::filesystem::exists(AcceptedSolid.FinalSpacePath, IoErr), "Converted .GeometrySpace exists in Scratch fallback") ||
@@ -292,8 +292,8 @@ bool ValidateDualPathStreamingQuarantineAndWorkspaceBlocking()
         }
 
         // Verify Origin == Project searches BOTH Project Content AND EngineContent
-        const auto EngineOnly  = IntakeRepo.QueryFilteredEntries(WorkspaceDomainKind::SceneWorld, ContentCategoryKind::All, ContentOriginFilter::Engine);
-        const auto ProjectPlus = IntakeRepo.QueryFilteredEntries(WorkspaceDomainKind::SceneWorld, ContentCategoryKind::All, ContentOriginFilter::Project);
+        const auto EngineOnly  = IntakeRepo.QueryFilteredEntries(WorkspaceCategory::SceneWorld, ContentCategory::All, ContentOriginFilter::Engine);
+        const auto ProjectPlus = IntakeRepo.QueryFilteredEntries(WorkspaceCategory::SceneWorld, ContentCategory::All, ContentOriginFilter::Project);
         if (!VerifyAssertion(ProjectPlus.size() > EngineOnly.size(), "Project origin searches both Project Content and EngineContent"))
         {
             return false;
@@ -425,7 +425,7 @@ bool ValidateAndRenderContentBrowserSnapshots()
 
     // Snapshot 01: Closed bottom-edge "ContentBrowser" trapezoidal notch
     Browser.ConfigureShelfExtent(ContentShelfExtent::Closed, true);
-    (void)Browser.ActivateCategory(ContentCategoryKind::Materials);
+    (void)Browser.ActivateCategory(ContentCategory::Materials);
     for (int Warmup = 0; Warmup < 3; ++Warmup)
     {
         StepPresentation(IdleInput);
@@ -439,7 +439,7 @@ bool ValidateAndRenderContentBrowserSnapshots()
 
     // Snapshot 02: FullHeight ContentBrowser -> Colours -> GridCircles -> Fig Purple (#3B1F3A, white ink)
     Browser.ConfigureShelfExtent(ContentShelfExtent::FullHeight, true);
-    (void)Browser.ActivateCategory(ContentCategoryKind::Colours);
+    (void)Browser.ActivateCategory(ContentCategory::Colours);
     Browser.ConfigureColourLayout(ColourRepositoryLayout::GridCircles);
     Browser.ConfigureColourFilter(ColourFilterGroup::All);
     (void)Browser.SelectColourByName("Fig Purple");
@@ -557,9 +557,9 @@ bool ValidateAndRenderContentBrowserSnapshots()
 
     // Snapshot 07: Scene Workspace -> All Pre-Baked 1024x1024 ThumbnailSheet Assets
     Browser.ConfigureShelfExtent(ContentShelfExtent::FullHeight, true);
-    Browser.ConfigureWorkspaceDomain(WorkspaceDomainKind::SceneWorld);
+    Browser.ConfigureWorkspaceDomain(WorkspaceCategory::SceneWorld);
     Browser.ConfigureOriginFilter(ContentOriginFilter::All);
-    (void)Browser.ActivateCategory(ContentCategoryKind::All);
+    (void)Browser.ActivateCategory(ContentCategory::All);
     StepPresentation(IdleInput);
     if (!VerifyAssertion(Browser.InspectReading().PermittedCategoryCount == 13u, "SceneWorld workspace permits 13 asset categories") ||
         !WriteCurrentSnapshot("07-SceneWorkspacePrebakedThumbnailSheet.png"))
@@ -579,10 +579,10 @@ bool ValidateAndRenderContentBrowserSnapshots()
     UvImportPolicy.ActiveProjectRoot  = TempDropDir / "Projects/SampleProject";
     UvImportPolicy.ScratchSessionRoot = TempDropDir / "Projects/_Scratch";
     Browser.ConfigureImportDestination(UvImportPolicy);
-    Browser.ConfigureWorkspaceDomain(WorkspaceDomainKind::UV);
+    Browser.ConfigureWorkspaceDomain(WorkspaceCategory::UV);
 
-    if (!VerifyAssertion(!Browser.ActivateCategory(ContentCategoryKind::Particles), "UV workspace rejects ActivateCategory(Particles)") ||
-        !VerifyAssertion(!Browser.ActivateCategory(ContentCategoryKind::Simulations), "UV workspace rejects ActivateCategory(Simulations)") ||
+    if (!VerifyAssertion(!Browser.ActivateCategory(ContentCategory::Particles), "UV workspace rejects ActivateCategory(Particles)") ||
+        !VerifyAssertion(!Browser.ActivateCategory(ContentCategory::Simulations), "UV workspace rejects ActivateCategory(Simulations)") ||
         !VerifyAssertion(Browser.InspectReading().PermittedCategoryCount == 6u, "UV workspace exposes strictly 6 permitted categories"))
     {
         std::filesystem::remove_all(TempDropDir, DropErr);
@@ -603,7 +603,7 @@ bool ValidateAndRenderContentBrowserSnapshots()
     }
 
     Browser.ConfigureOriginFilter(ContentOriginFilter::All);
-    (void)Browser.ActivateCategory(ContentCategoryKind::All);
+    (void)Browser.ActivateCategory(ContentCategory::All);
     StepPresentation(IdleInput);
     if (!VerifyAssertion(Browser.QuerySearchFieldBounds().Width >= 140.0f, "Search capsule bounds rendered in ContentBrowser toolbar") ||
         !WriteCurrentSnapshot("08-UVWorkspaceStrictCategoryMaskAndImported.png"))
@@ -616,8 +616,8 @@ bool ValidateAndRenderContentBrowserSnapshots()
     // Snapshot 09: Daylight Light Theme + Emerald Accent + Active Search Query + List View Icons
     Theme.ConfigureTheme(Frontier::ThemePreset::Light);
     Theme.ConfigureAccent(Frontier::AccentPreset::Emerald);
-    Browser.ConfigureWorkspaceDomain(WorkspaceDomainKind::SceneWorld);
-    (void)Browser.ActivateCategory(ContentCategoryKind::All);
+    Browser.ConfigureWorkspaceDomain(WorkspaceCategory::SceneWorld);
+    (void)Browser.ActivateCategory(ContentCategory::All);
     Browser.ConfigureStandardLayout(Frontier::StandardRepositoryLayout::List);
     Browser.ConfigureSearchQuery("Standard");
     StepPresentation(IdleInput);

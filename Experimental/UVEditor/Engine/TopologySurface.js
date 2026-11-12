@@ -96,18 +96,30 @@ function TrianglesOverlap2D(T1, T2)
 
 export class TopologySurface
 {
-    constructor({ name = 'Surface', positions = [], faces = [], uvCoords = [], seams = [], pinned = [] } = {})
+    constructor({ name = 'Surface', objectId = null, positions = [], faces = [], uvCoords = [], seams = [], pinned = [], importanceByFace = null } = {})
     {
         this.name = name;
+        this.objectId = objectId || name || 'surface-0';
         this.positions = positions.map(P => [Number(P[0]) || 0, Number(P[1]) || 0, Number(P[2]) || 0]);
         this.uvCoords = uvCoords.map(Uv => [Number(Uv[0]) || 0, Number(Uv[1]) || 0]);
-        this.faces = faces.map((F, Index) => ({
-            id: F.id ?? Index,
-            name: F.name || F.partId || `Face ${Index}`,
-            partId: F.partId || 'Surface',
-            materialName: F.materialName || 'Default',
-            corners: F.corners.map(C => ({ v: C.v | 0, uv: C.uv | 0 }))
-        }));
+        this.faces = faces.map((F, Index) =>
+        {
+            const PartTag = `${F.partId || ''} ${F.materialName || ''}`.trim();
+            const DefPbr = this._DefaultPbrForPart(PartTag, Index);
+            return {
+                id: F.id ?? Index,
+                name: F.name || F.partId || `Face ${Index}`,
+                partId: F.partId || 'Surface',
+                materialName: F.materialName || 'Default',
+                matcapSlot: typeof F.matcapSlot === 'number' ? (F.matcapSlot & 15) : this._DefaultMatcapForPart(PartTag, Index),
+                pbrColor: typeof F.pbrColor === 'string' ? F.pbrColor : DefPbr.pbrColor,
+                pbrMetallic: typeof F.pbrMetallic === 'number' ? F.pbrMetallic : DefPbr.pbrMetallic,
+                pbrRoughness: typeof F.pbrRoughness === 'number' ? F.pbrRoughness : DefPbr.pbrRoughness,
+                pbrSpecular: typeof F.pbrSpecular === 'number' ? F.pbrSpecular : DefPbr.pbrSpecular,
+                matcapMix: typeof F.matcapMix === 'number' ? F.matcapMix : DefPbr.matcapMix,
+                corners: F.corners.map(C => ({ v: C.v | 0, uv: C.uv | 0 }))
+            };
+        });
         this.seams = new Set(seams);
         this.pinned = new Set(pinned);
         this.selectedUVs = new Set();
@@ -119,7 +131,9 @@ export class TopologySurface
         this.activeIsland = null;
         this.activeEdge3D = null;
         this.activeEdgeUV = null;
-        this.importanceByFace = new Map(); // faceIndex -> groupId | null
+        this.importanceByFace = importanceByFace instanceof Map
+            ? new Map(importanceByFace)
+            : new Map(importanceByFace || []); // faceIndex -> groupId | null
         this.lockedIslands = new Set();    // key = canonical face signature or lowest face index
         this.hiddenIslands = new Set();
         this.undoStack = [];
@@ -129,7 +143,173 @@ export class TopologySurface
         this._distortionCache = null;
         this._spatialGridCache = null;
         this._adjCache = null;
+        this._layerFaceRefCache = null;
+        this._layerRefVersion = 1;
+        this._matVersion = 1;
         this.RecomputeNormals();
+    }
+
+    _DefaultMatcapForPart(PartLabel, FallbackIndex = 0)
+    {
+        const S = String(PartLabel || '').toLowerCase();
+        if (!S || S === 'surface' || S === 'default') return 0; // CNC Aluminum
+        if (/\b(tyre|tire|rubber|grip|seal|bumper)\b/.test(S)) return 8; // Vulcan Rubber
+        if (/\b(carbon|splitter|diffuser|wing|spoiler)\b/.test(S)) return 12; // Carbon Fibre
+        if (/\b(strap|cloth|fabric|seat|canvas|pouch|velvet|suede)\b/.test(S)) return 13; // Woven Fabric
+        if (/\b(rim|wheel|spoke|hub|pauldron|lid)\b/.test(S)) return 0; // CNC Aluminum
+        if (/\b(glass|visor|chrome|canopy|windshield|mirror)\b/.test(S)) return 3; // Class-A Chrome
+        if (S.includes('optic') || S.includes('light') || S.includes('latch') || S.includes('bolt') || S.includes('brass') || S.includes('gold') || S.includes('lock') || S.includes('ring') || S.includes('badge') || S.includes('crest')) return 6; // Turned Brass
+        if (S.includes('caliper') || S.includes('brake')) return 11; // Car Flake Ruby
+        if (S.includes('body') || S.includes('hood') || S.includes('roof') || S.includes('door') || S.includes('fender') || S.includes('chest') || S.includes('torso') || S.includes('helm') || S.includes('hull') || S.includes('accent')) return 10; // Car Flake Blue
+        if (S.includes('chassis') || S.includes('trim') || S.includes('exhaust') || S.includes('frame') || S.includes('grille') || S.includes('iron') || S.includes('panel')) return 1; // Grade-5 Titanium
+        if (S.includes('arch') || S.includes('stone') || S.includes('pillar') || S.includes('column') || S.includes('capital') || S.includes('plinth') || S.includes('wall') || S.includes('clay') || S.includes('sculpt') || S.includes('bust') || S.includes('head')) return 2; // CAD Clay
+        const EngMetals = [10, 0, 1, 6, 8, 12, 13, 2];
+        let Hash = 0;
+        for (let i = 0; i < S.length; i++) Hash = ((Hash * 31) + S.charCodeAt(i)) | 0;
+        return EngMetals[Math.abs(Hash || FallbackIndex) % EngMetals.length];
+    }
+
+    _DefaultPbrForPart(PartLabel, FallbackIndex = 0)
+    {
+        const S = String(PartLabel || '').toLowerCase();
+        if (!S || S === 'surface' || S === 'default')
+            return { pbrColor: '#9fb2c8', pbrMetallic: 0.65, pbrRoughness: 0.28, pbrSpecular: 0.60, matcapMix: 0.62 };
+        if (/\b(tyre|tire|rubber|grip|seal|bumper)\b/.test(S))
+            return { pbrColor: '#363b44', pbrMetallic: 0.06, pbrRoughness: 0.78, pbrSpecular: 0.26, matcapMix: 0.55 };
+        if (/\b(rim|wheel|spoke|hub|pauldron|lid)\b/.test(S))
+            return { pbrColor: '#c4ccd8', pbrMetallic: 0.90, pbrRoughness: 0.20, pbrSpecular: 0.75, matcapMix: 0.68 };
+        if (/\b(glass|visor|chrome|canopy|windshield|mirror)\b/.test(S))
+            return { pbrColor: '#a6c8e8', pbrMetallic: 0.18, pbrRoughness: 0.08, pbrSpecular: 0.95, matcapMix: 0.74 };
+        if (S.includes('optic') || S.includes('light') || S.includes('latch') || S.includes('strap') || S.includes('bolt') || S.includes('brass') || S.includes('gold') || S.includes('lock') || S.includes('ring') || S.includes('badge') || S.includes('crest'))
+            return { pbrColor: '#d9a448', pbrMetallic: 0.86, pbrRoughness: 0.22, pbrSpecular: 0.72, matcapMix: 0.66 };
+        if (S.includes('body') || S.includes('hood') || S.includes('roof') || S.includes('door') || S.includes('fender') || S.includes('chest') || S.includes('torso') || S.includes('helm') || S.includes('hull') || S.includes('caliper') || S.includes('brake') || S.includes('accent'))
+            return { pbrColor: '#4c7dc9', pbrMetallic: 0.60, pbrRoughness: 0.24, pbrSpecular: 0.68, matcapMix: 0.62 };
+        if (S.includes('chassis') || S.includes('trim') || S.includes('exhaust') || S.includes('frame') || S.includes('grille') || S.includes('spoiler') || S.includes('iron') || S.includes('panel'))
+            return { pbrColor: '#9ea3ac', pbrMetallic: 0.80, pbrRoughness: 0.34, pbrSpecular: 0.58, matcapMix: 0.64 };
+        if (S.includes('arch') || S.includes('stone') || S.includes('pillar') || S.includes('column') || S.includes('capital') || S.includes('plinth') || S.includes('wall') || S.includes('clay') || S.includes('sculpt') || S.includes('bust') || S.includes('head'))
+            return { pbrColor: '#b5aca0', pbrMetallic: 0.08, pbrRoughness: 0.62, pbrSpecular: 0.38, matcapMix: 0.64 };
+        const Palette = [
+            { pbrColor: '#4c7dc9', pbrMetallic: 0.60, pbrRoughness: 0.24, pbrSpecular: 0.68, matcapMix: 0.62 },
+            { pbrColor: '#c4ccd8', pbrMetallic: 0.88, pbrRoughness: 0.22, pbrSpecular: 0.72, matcapMix: 0.66 },
+            { pbrColor: '#a89f94', pbrMetallic: 0.74, pbrRoughness: 0.34, pbrSpecular: 0.58, matcapMix: 0.64 },
+            { pbrColor: '#d9a448', pbrMetallic: 0.86, pbrRoughness: 0.24, pbrSpecular: 0.70, matcapMix: 0.66 },
+            { pbrColor: '#566070', pbrMetallic: 0.45, pbrRoughness: 0.48, pbrSpecular: 0.48, matcapMix: 0.60 },
+            { pbrColor: '#8aa090', pbrMetallic: 0.22, pbrRoughness: 0.52, pbrSpecular: 0.45, matcapMix: 0.60 }
+        ];
+        let Hash = 0;
+        for (let i = 0; i < S.length; i++) Hash = ((Hash * 31) + S.charCodeAt(i)) | 0;
+        return Palette[Math.abs(Hash || FallbackIndex) % Palette.length];
+    }
+
+    GetSelectedTargetFaces(Islands = [])
+    {
+        const TargetFaces = new Set(this.selectedFaces);
+        if (Islands && Islands.length && this.selectedIslands.size)
+        {
+            for (const Isl of Islands)
+            {
+                if (this.selectedIslands.has(Isl.id))
+                {
+                    for (const Fi of Isl.faceIndices) TargetFaces.add(Fi);
+                }
+            }
+        }
+        if (TargetFaces.size === 0 && (this.selectedEdges3D.size > 0 || this.selectedUVs.size > 0))
+        {
+            const Adj = this.EnsureAdjacencyIndices();
+            for (const K3 of this.selectedEdges3D)
+            {
+                for (const Fi of Adj.edge3dFaces.get(K3) || []) TargetFaces.add(Fi);
+            }
+            for (const UvId of this.selectedUVs)
+            {
+                for (const Fi of Adj.uvToFaces[UvId] || []) TargetFaces.add(Fi);
+            }
+        }
+        return TargetFaces;
+    }
+
+    AssignSurfaceMaterialToFaces(FaceIndices, Patch = {})
+    {
+        let Assigned = 0;
+        for (const Fi of FaceIndices)
+        {
+            const F = this.faces[Fi];
+            if (!F) continue;
+            if (Patch.matcapSlot !== undefined) F.matcapSlot = (Patch.matcapSlot | 0) & 15;
+            if (Patch.pbrColor !== undefined) F.pbrColor = String(Patch.pbrColor);
+            if (Patch.pbrMetallic !== undefined) F.pbrMetallic = Math.max(0, Math.min(1, Number(Patch.pbrMetallic)));
+            if (Patch.pbrRoughness !== undefined) F.pbrRoughness = Math.max(0.04, Math.min(1, Number(Patch.pbrRoughness)));
+            if (Patch.pbrSpecular !== undefined) F.pbrSpecular = Math.max(0, Math.min(1, Number(Patch.pbrSpecular)));
+            if (Patch.matcapMix !== undefined) F.matcapMix = Math.max(0, Math.min(1, Number(Patch.matcapMix)));
+            Assigned++;
+        }
+        if (Assigned > 0) this._matVersion = (this._matVersion || 0) + 1;
+        return Assigned;
+    }
+
+    AssignSurfaceMaterialToSelection(Patch = {}, Islands = [])
+    {
+        const TargetFaces = this.GetSelectedTargetFaces(Islands);
+        if (TargetFaces.size === 0) return 0;
+        return this.AssignSurfaceMaterialToFaces(TargetFaces, Patch);
+    }
+
+    FillSurfaceMaterial(Patch = {})
+    {
+        const All = new Array(this.faces.length);
+        for (let Fi = 0; Fi < this.faces.length; Fi++) All[Fi] = Fi;
+        return this.AssignSurfaceMaterialToFaces(All, Patch);
+    }
+
+    AssignMatcapToFaces(FaceIndices, Slot)
+    {
+        return this.AssignSurfaceMaterialToFaces(FaceIndices, { matcapSlot: Slot });
+    }
+
+    AssignMatcapToSelection(Slot, Islands = [], { fallbackAll = false } = {})
+    {
+        const TargetFaces = this.GetSelectedTargetFaces(Islands);
+        if (TargetFaces.size === 0)
+        {
+            return fallbackAll ? this.FillSurfaceMaterial({ matcapSlot: Slot }) : 0;
+        }
+        return this.AssignSurfaceMaterialToFaces(TargetFaces, { matcapSlot: Slot });
+    }
+
+    AutoAssignMatcapsByPart(Islands = [])
+    {
+        const EngSet = [5, 0, 1, 6, 4, 2, 3];
+        if (Islands && Islands.length)
+        {
+            const DistinctLabels = new Set(Islands.map(I => `${I.partId || I.name || ''}:${I.materialName || ''}`));
+            for (let i = 0; i < Islands.length; i++)
+            {
+                const Isl = Islands[i];
+                const Tag = `${Isl.partId || Isl.name || ''} ${Isl.materialName || ''}`.trim();
+                const Slot = DistinctLabels.size >= 2
+                    ? this._DefaultMatcapForPart(Tag, i)
+                    : EngSet[i % EngSet.length];
+                const Pbr = this._DefaultPbrForPart(DistinctLabels.size >= 2 ? Tag : `part_${i}`, i);
+                this.AssignSurfaceMaterialToFaces(Isl.faceIndices, { matcapSlot: Slot, ...Pbr });
+            }
+            return this.faces.length;
+        }
+        for (let Fi = 0; Fi < this.faces.length; Fi++)
+        {
+            const Tag = `${this.faces[Fi].partId || ''} ${this.faces[Fi].materialName || ''}`.trim();
+            const Slot = this._DefaultMatcapForPart(Tag, Fi);
+            const Pbr = this._DefaultPbrForPart(Tag, Fi);
+            this.AssignSurfaceMaterialToFaces([Fi], { matcapSlot: Slot, ...Pbr });
+        }
+        return this.faces.length;
+    }
+
+    GetMatcapUsageCounts()
+    {
+        const Counts = new Uint32Array(16);
+        for (let Fi = 0; Fi < this.faces.length; Fi++) Counts[this.faces[Fi].matcapSlot & 15]++;
+        return Counts;
     }
 
     ComputeDataSignature(ExtraSalt = '')
@@ -154,7 +334,7 @@ export class TopologySurface
                 if (++Cnt >= 16) break;
             }
         }
-        return `${N}:${ULen}:${this.seams.size}:${this.pinned.size}:${this.hiddenIslands.size}:${this.lockedIslands.size}:${ImpHash}:${ImpSum}:${UvHash.toFixed(4)}:${ExtraSalt}`;
+        return `${N}:${ULen}:${this.seams.size}:${this.pinned.size}:${this.hiddenIslands.size}:${this.lockedIslands.size}:${ImpHash}:${ImpSum}:${this._layerRefVersion || 1}:${UvHash.toFixed(4)}:${ExtraSalt}`;
     }
 
     GetFaceDistortionFast(FaceIndex)
@@ -417,6 +597,10 @@ export class TopologySurface
         this.importanceByFace = new Map(Snap.importanceByFace);
         this.lockedIslands = new Set(Snap.lockedIslands || []);
         this.hiddenIslands = new Set(Snap.hiddenIslands || []);
+        this._analysisCache = null;
+        this._layerFaceRefCache = null;
+        this._layerRefVersion = (this._layerRefVersion || 0) + 1;
+        this._matVersion = (this._matVersion || 0) + 1;
     }
 
     FaceArea3D(FaceIndex)
@@ -576,6 +760,7 @@ export class TopologySurface
             let WeightedU = 0, WeightedV = 0, WeightTotal = 0;
             let AngleStretchSum = 0;
             const PartCounts = new Map();
+            const MatCounts = new Map();
             const GroupCounts = new Map();
 
             for (const Fi of FaceIndices)
@@ -596,6 +781,7 @@ export class TopologySurface
                 if (SA2 < -1e-9) FlippedFaces++;
 
                 PartCounts.set(F.partId, (PartCounts.get(F.partId) || 0) + 1);
+                if (F.materialName) MatCounts.set(F.materialName, (MatCounts.get(F.materialName) || 0) + 1);
                 const GroupId = this.importanceByFace.get(Fi) || null;
                 if (GroupId) GroupCounts.set(GroupId, (GroupCounts.get(GroupId) || 0) + 1);
 
@@ -633,6 +819,13 @@ export class TopologySurface
                 if (Count > BestCount) { BestCount = Count; DominantPart = Part; }
             }
 
+            let DominantMat = 'Default';
+            let BestMatCount = -1;
+            for (const [Mat, Count] of MatCounts)
+            {
+                if (Count > BestMatCount) { BestMatCount = Count; DominantMat = Mat; }
+            }
+
             let DominantGroup = null;
             let BestGroupCount = 0;
             for (const [Gid, Count] of GroupCounts)
@@ -655,6 +848,7 @@ export class TopologySurface
                 stableKey: Key,
                 name: DominantPart,
                 partId: DominantPart,
+                materialName: DominantMat,
                 faceIndices: FaceIndices,
                 uvIndices: [...UvSet],
                 uvEdgeKeys: [...EdgeSet],
@@ -3303,9 +3497,212 @@ export class TopologySurface
         return { surface: Surface, hadUVs: HadUVs };
     }
 
+    _ResolveIslandsFast(Islands = null)
+    {
+        return Islands || (this._analysisCache ? this._analysisCache.islands : null) || this.ExtractIslands();
+    }
+
+    EnsureLayerFaceRefs(Islands = null)
+    {
+        const Sig = this.ComputeDataSignature('layerFaceRefs');
+        if (this._layerFaceRefCache && this._layerFaceRefCache.sig === Sig)
+        {
+            return this._layerFaceRefCache;
+        }
+
+        const List = this._ResolveIslandsFast(Islands);
+        const RawByLayer = new Map();
+        const UdimTotals = new Map();
+        let TotalUvArea = 0;
+
+        const GetBucket = LayerKey =>
+        {
+            let B = RawByLayer.get(LayerKey);
+            if (!B)
+            {
+                B = {
+                    faces: [],
+                    uvSet: new Set(),
+                    islandSet: new Set(),
+                    udimSet: new Set(),
+                    uvArea: 0,
+                    byUdim: new Map()
+                };
+                RawByLayer.set(LayerKey, B);
+            }
+            return B;
+        };
+
+        const GetSubBucket = (B, TileId) =>
+        {
+            let Sub = B.byUdim.get(TileId);
+            if (!Sub)
+            {
+                Sub = { faces: [], uvSet: new Set(), islandSet: new Set(), uvArea: 0 };
+                B.byUdim.set(TileId, Sub);
+            }
+            return Sub;
+        };
+
+        for (let i = 0; i < List.length; i++)
+        {
+            const Isl = List[i];
+            const TileId = Isl.udimTile || 1001;
+            const AreaUv = Isl.areaUV || 0;
+            TotalUvArea += AreaUv;
+
+            let T = UdimTotals.get(TileId);
+            if (!T) { T = { islands: 0, uvArea: 0 }; UdimTotals.set(TileId, T); }
+            T.islands++;
+            T.uvArea += AreaUv;
+
+            const FIdx = Isl.faceIndices;
+            const FaceAreaShare = FIdx.length > 0 ? (AreaUv / FIdx.length) : 0;
+            for (let f = 0; f < FIdx.length; f++)
+            {
+                const Fi = FIdx[f];
+                const FaceLayerKey = this.importanceByFace.get(Fi) || '__unassigned__';
+                const FB = GetBucket(FaceLayerKey);
+                const FSub = GetSubBucket(FB, TileId);
+                FB.faces.push(Fi);
+                FB.islandSet.add(Isl.id);
+                FB.udimSet.add(TileId);
+                FB.uvArea += FaceAreaShare;
+                FSub.faces.push(Fi);
+                FSub.islandSet.add(Isl.id);
+                FSub.uvArea += FaceAreaShare;
+                const Cr = this.faces[Fi]?.corners || [];
+                for (let c = 0; c < Cr.length; c++)
+                {
+                    FB.uvSet.add(Cr[c].uv);
+                    FSub.uvSet.add(Cr[c].uv);
+                }
+            }
+        }
+
+        const FreezeSlice = (ObjId, LayerKey, Src, UdimsArr) =>
+        {
+            const FaceArr = new Uint32Array(Src.faces);
+            return {
+                objectId: ObjId,
+                layerId: LayerKey,
+                faceIndices: FaceArr,
+                uvIndices: new Uint32Array(Src.uvSet),
+                islandIds: new Int32Array(Src.islandSet),
+                faceSet: new Set(FaceArr),
+                faceCount: FaceArr.length,
+                islandCount: Src.islandSet.size,
+                uvArea: Src.uvArea,
+                udims: UdimsArr
+            };
+        };
+
+        const ByLayer = new Map();
+        for (const [LayerKey, B] of RawByLayer)
+        {
+            const UdimsArr = [...B.udimSet].sort((A, C) => A - C);
+            const Frozen = FreezeSlice(this.objectId, LayerKey, B, UdimsArr);
+            const FrozenByUdim = new Map();
+            for (const [TileId, Sub] of B.byUdim)
+            {
+                FrozenByUdim.set(TileId, FreezeSlice(this.objectId, LayerKey, Sub, [TileId]));
+            }
+            Frozen.byUdim = FrozenByUdim;
+            ByLayer.set(LayerKey, Frozen);
+        }
+
+        const EmptyRef = {
+            objectId: this.objectId,
+            layerId: '',
+            faceIndices: new Uint32Array(0),
+            uvIndices: new Uint32Array(0),
+            islandIds: new Int32Array(0),
+            faceSet: new Set(),
+            faceCount: 0,
+            islandCount: 0,
+            uvArea: 0,
+            udims: [],
+            byUdim: new Map()
+        };
+
+        this._layerFaceRefCache = {
+            sig: Sig,
+            byLayer: ByLayer,
+            emptyRef: EmptyRef,
+            totalIslands: List.length,
+            totalUvArea: Math.max(1e-6, TotalUvArea),
+            udimTotals: UdimTotals
+        };
+        return this._layerFaceRefCache;
+    }
+
+    GetLayerFaceRef(LayerId, Islands = null, FilterUdim = null)
+    {
+        const Cache = this.EnsureLayerFaceRefs(Islands);
+        const Key = LayerId || '__unassigned__';
+        const Base = Cache.byLayer.get(Key);
+        if (!Base) return Cache.emptyRef;
+        if (FilterUdim === null || FilterUdim === undefined) return Base;
+        return Base.byUdim.get(FilterUdim) || Cache.emptyRef;
+    }
+
+    SelectFaceGroupRef(FaceRef, Additive = false)
+    {
+        if (!Additive) this.ClearSelection();
+        if (!FaceRef || FaceRef.faceCount === 0) return 0;
+
+        const Faces = FaceRef.faceIndices;
+        const Uvs = FaceRef.uvIndices;
+        const Isls = FaceRef.islandIds;
+
+        // Toggle off when Shift/Ctrl-clicking an already-selected FaceGroupRef
+        if (Additive && Faces.length > 0 && this.selectedFaces.has(Faces[0]))
+        {
+            let AllPresent = true;
+            for (let i = 0; i < Faces.length; i++)
+            {
+                if (!this.selectedFaces.has(Faces[i])) { AllPresent = false; break; }
+            }
+            if (AllPresent)
+            {
+                for (let i = 0; i < Faces.length; i++) this.selectedFaces.delete(Faces[i]);
+                for (let i = 0; i < Uvs.length; i++) this.selectedUVs.delete(Uvs[i]);
+                for (let i = 0; i < Isls.length; i++) this.selectedIslands.delete(Isls[i]);
+                return this.selectedFaces.size;
+            }
+        }
+
+        for (let i = 0; i < Faces.length; i++) this.selectedFaces.add(Faces[i]);
+        for (let i = 0; i < Uvs.length; i++) this.selectedUVs.add(Uvs[i]);
+        for (let i = 0; i < Isls.length; i++) this.selectedIslands.add(Isls[i]);
+        if (Faces.length > 0) this.activeFace = Faces[0];
+        if (Isls.length > 0) this.activeIsland = Isls[0];
+        return Faces.length;
+    }
+
+    AssignFacesToLayer(FaceIndices, LayerId = null)
+    {
+        let Updated = 0;
+        const Limit = this.faces.length;
+        for (const Fi of FaceIndices)
+        {
+            if (Fi < 0 || Fi >= Limit) continue;
+            if (LayerId) this.importanceByFace.set(Fi, LayerId);
+            else this.importanceByFace.delete(Fi);
+            Updated++;
+        }
+        if (Updated > 0)
+        {
+            this._layerRefVersion = (this._layerRefVersion || 0) + 1;
+            this._layerFaceRefCache = null;
+            this._analysisCache = null;
+        }
+        return Updated;
+    }
+
     SelectIsland(IslandId, Additive = false, Islands = null)
     {
-        const List = Islands || this.ExtractIslands();
+        const List = this._ResolveIslandsFast(Islands);
         if (!Additive) this.ClearSelection();
         const Target = List.find(I => I.id === IslandId || I.stableKey === IslandId);
         if (!Target) return 0;
@@ -3318,12 +3715,17 @@ export class TopologySurface
 
     SelectIslands(IslandIds, Additive = false, Islands = null)
     {
-        const List = Islands || this.ExtractIslands();
+        const List = this._ResolveIslandsFast(Islands);
         if (!Additive) this.ClearSelection();
-        for (const Id of IslandIds)
+        const IdSet = IslandIds instanceof Set ? IslandIds : new Set(IslandIds);
+        for (let i = 0; i < List.length; i++)
         {
-            const Target = List.find(I => I.id === Id || I.stableKey === Id);
-            if (Target) this.selectedIslands.add(Target.id);
+            const Isl = List[i];
+            if (IdSet.has(Isl.id) || IdSet.has(Isl.stableKey))
+            {
+                this.selectedIslands.add(Isl.id);
+                this.activeIsland = Isl.id;
+            }
         }
         this.SyncSelectionsFromMode('island', List);
         return this.selectedIslands.size;
@@ -3331,7 +3733,7 @@ export class TopologySurface
 
     SelectFace(FaceIndex, Additive = false, Islands = null)
     {
-        const List = Islands || this.ExtractIslands();
+        const List = this._ResolveIslandsFast(Islands);
         if (!Additive) this.ClearSelection();
         if (Additive && this.selectedFaces.has(FaceIndex)) this.selectedFaces.delete(FaceIndex);
         else
@@ -3345,7 +3747,7 @@ export class TopologySurface
 
     SelectLinked(Islands = null)
     {
-        const List = Islands || this.ExtractIslands();
+        const List = this._ResolveIslandsFast(Islands);
         for (const Isl of List)
         {
             if (Isl.uvIndices.some(U => this.selectedUVs.has(U)) || Isl.faceIndices.some(F => this.selectedFaces.has(F)))
@@ -3359,7 +3761,7 @@ export class TopologySurface
 
     SyncDerivedSelectionFromFaces(Islands = null)
     {
-        this.SyncSelectionsFromMode('face', Islands || this.ExtractIslands());
+        this.SyncSelectionsFromMode('face', this._ResolveIslandsFast(Islands));
     }
 
     PinSelected(Pin = true)
@@ -3375,7 +3777,7 @@ export class TopologySurface
 
     PinIslandBoundaries(Islands = null)
     {
-        const List = Islands || this.ExtractIslands();
+        const List = this._ResolveIslandsFast(Islands);
         const TargetIslands = this.selectedIslands.size
             ? List.filter(I => this.selectedIslands.has(I.id))
             : List;
@@ -3405,7 +3807,7 @@ export class TopologySurface
 
     AssignImportanceGroup(IslandIds, GroupId, Islands = null)
     {
-        const List = Islands || this.ExtractIslands();
+        const List = this._ResolveIslandsFast(Islands);
         const IdSet = new Set(IslandIds);
         let Updated = 0;
         for (const Isl of List)
@@ -3418,12 +3820,18 @@ export class TopologySurface
             }
             Updated++;
         }
+        if (Updated > 0)
+        {
+            this._layerRefVersion = (this._layerRefVersion || 0) + 1;
+            this._layerFaceRefCache = null;
+            this._analysisCache = null;
+        }
         return Updated;
     }
 
     SetIslandLocked(IslandIdOrKey, Locked, Islands = null)
     {
-        const List = Islands || this.ExtractIslands();
+        const List = this._ResolveIslandsFast(Islands);
         const Target = List.find(I => I.id === IslandIdOrKey || I.stableKey === IslandIdOrKey);
         const Key = Target ? Target.stableKey : IslandIdOrKey;
         if (Locked) this.lockedIslands.add(Key);
@@ -3432,7 +3840,7 @@ export class TopologySurface
 
     SetIslandHidden(IslandIdOrKey, Hidden, Islands = null)
     {
-        const List = Islands || this.ExtractIslands();
+        const List = this._ResolveIslandsFast(Islands);
         const Target = List.find(I => I.id === IslandIdOrKey || I.stableKey === IslandIdOrKey);
         const Key = Target ? Target.stableKey : IslandIdOrKey;
         if (Hidden) this.hiddenIslands.add(Key);

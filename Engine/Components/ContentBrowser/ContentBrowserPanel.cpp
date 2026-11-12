@@ -245,22 +245,22 @@ bool ConstructSegmentedOption(
     return Hovered && Input.Pressed;
 }
 
-constexpr std::array<ContentCategoryKind, 15> OrderedRailCategories = {{
-    ContentCategoryKind::All,
-    ContentCategoryKind::Materials,
-    ContentCategoryKind::Colours,
-    ContentCategoryKind::Geometry,
-    ContentCategoryKind::UVLayouts,
-    ContentCategoryKind::Textures,
-    ContentCategoryKind::Images,
-    ContentCategoryKind::Vectors,
-    ContentCategoryKind::Fonts,
-    ContentCategoryKind::Simulations,
-    ContentCategoryKind::Volumetrics,
-    ContentCategoryKind::Particles,
-    ContentCategoryKind::Photometry,
-    ContentCategoryKind::Audio,
-    ContentCategoryKind::Shaders,
+constexpr std::array<ContentCategory, 15> OrderedRailCategories = {{
+    ContentCategory::All,
+    ContentCategory::Materials,
+    ContentCategory::Colours,
+    ContentCategory::Geometry,
+    ContentCategory::UVLayouts,
+    ContentCategory::Textures,
+    ContentCategory::Images,
+    ContentCategory::Vectors,
+    ContentCategory::Fonts,
+    ContentCategory::Simulations,
+    ContentCategory::Volumetrics,
+    ContentCategory::Particles,
+    ContentCategory::Photometry,
+    ContentCategory::Audio,
+    ContentCategory::Shaders,
 }};
 
 } // namespace
@@ -294,7 +294,7 @@ void ContentBrowserPanel::ConfigureShelfExtent(ContentShelfExtent RequestedExten
     }
 }
 
-void ContentBrowserPanel::ConfigureWorkspaceDomain(WorkspaceDomainKind Workspace) noexcept
+void ContentBrowserPanel::ConfigureWorkspaceDomain(WorkspaceCategory Workspace) noexcept
 {
     ActiveWorkspace   = Workspace;
     RepositoryScrollY = 0.0f;
@@ -302,17 +302,17 @@ void ContentBrowserPanel::ConfigureWorkspaceDomain(WorkspaceDomainKind Workspace
     // 🔴 Snap active category if newly entered workspace blocks previous selection
     if (!ThumbnailSheetRepository::QueryCategoryPermitted(ActiveWorkspace, Category))
     {
-        Category = ContentCategoryKind::All;
+        Category = ContentCategory::All;
     }
 
-    const auto ValidEntries = ThumbnailRepository.QueryFilteredEntries(ActiveWorkspace, ContentCategoryKind::All, OriginScope, SearchBuffer);
+    const auto ValidEntries = ThumbnailRepository.QueryFilteredEntries(ActiveWorkspace, ContentCategory::All, OriginScope, SearchBuffer);
     if (!ValidEntries.empty() && std::find(ValidEntries.begin(), ValidEntries.end(), SelectedContentIndex) == ValidEntries.end())
     {
         SelectedContentIndex = ValidEntries.front();
     }
 }
 
-bool ContentBrowserPanel::ActivateCategory(ContentCategoryKind NextCategory) noexcept
+bool ContentBrowserPanel::ActivateCategory(ContentCategory NextCategory) noexcept
 {
     if (!ThumbnailSheetRepository::QueryCategoryPermitted(ActiveWorkspace, NextCategory))
     {
@@ -402,7 +402,7 @@ ImportIntakeResult ContentBrowserPanel::IntakeExternalAssetDrop(const std::files
         return Result;
     }
 
-    if (Result.DetectedCategory == ContentCategoryKind::Colours)
+    if (Result.DetectedCategory == ContentCategory::Colours)
     {
         std::string Diagnostic{};
         std::size_t AddedColourIdx = 0u;
@@ -555,9 +555,9 @@ bool ContentBrowserPanel::ApplyColourIndexToSlot(std::size_t ColourIndex, std::s
 ContentBrowserReading ContentBrowserPanel::InspectReading() const noexcept
 {
     uint32_t PermittedCount = 0u;
-    for (const ContentCategoryKind Candidate : OrderedRailCategories)
+    for (const ContentCategory Candidate : OrderedRailCategories)
     {
-        if (Candidate != ContentCategoryKind::All &&
+        if (Candidate != ContentCategory::All &&
             ThumbnailSheetRepository::QueryCategoryPermitted(ActiveWorkspace, Candidate))
         {
             ++PermittedCount;
@@ -578,7 +578,7 @@ ContentBrowserReading ContentBrowserPanel::InspectReading() const noexcept
     Reading.ActiveImportMode       = ThumbnailRepository.QueryImportPolicy().Mode;
     Reading.PermittedCategoryCount = PermittedCount;
     Reading.VisibleEntryCount      = LastVisibleCount;
-    Reading.ColourFiltersVisible   = (Category == ContentCategoryKind::Colours);
+    Reading.ColourFiltersVisible   = (Category == ContentCategory::Colours);
     Reading.DraggingColourActive   = DraggingColour;
     if (const ColourCodexEntry* Selected = CodexLibrary.QueryEntryAt(SelectedColourIndex))
     {
@@ -1044,7 +1044,7 @@ void ContentBrowserPanel::RenderNonColoursRepository(
                 Canvas.FillTexturedRectangle(IconBox, TileUv.TexturePointer, TileUv.UvMin, TileUv.UvMax, 8.0f);
             }
 
-            const auto  EntryCat    = static_cast<ContentCategoryKind>(Entry->IndexHeader.CategoryCode);
+            const auto  EntryCat    = static_cast<ContentCategory>(Entry->IndexHeader.CategoryCode);
             const auto  EntryOrigin = static_cast<ContentOriginFilter>(Entry->IndexHeader.OriginCode);
             const char* OriginTag   = (EntryOrigin == ContentOriginFilter::Engine) ? "Engine" : ((EntryOrigin == ContentOriginFilter::Imported) ? "Imported" : "Project");
             const std::string MetaLine = Entry->ContainerFormat + "  ·  " + ThumbnailSheetRepository::QueryCategoryTitle(EntryCat) + "  ·  " + OriginTag;
@@ -1103,7 +1103,7 @@ void ContentBrowserPanel::RenderNonColoursRepository(
 
             Canvas.TextCentered({ CellRect.X + 5.0f, CellRect.Y + 82.0f, CellRect.Width - 10.0f, 16.0f }, 10.0f, TitleInk, Entry->DisplayTitle.c_str());
 
-            const auto EntryCat    = static_cast<ContentCategoryKind>(Entry->IndexHeader.CategoryCode);
+            const auto EntryCat    = static_cast<ContentCategory>(Entry->IndexHeader.CategoryCode);
             const auto EntryOrigin = static_cast<ContentOriginFilter>(Entry->IndexHeader.OriginCode);
             const char* OriginTag  = (EntryOrigin == ContentOriginFilter::Engine) ? "Engine" : ((EntryOrigin == ContentOriginFilter::Imported) ? "Imported" : "Project");
             const std::string Sub  = std::string(ThumbnailSheetRepository::QueryCategoryTitle(EntryCat)) + " · " + OriginTag;
@@ -1132,7 +1132,7 @@ void ContentBrowserPanel::RenderContentDetailsSidebar(
     const ColorRgba EyebrowInk = BlendRgba(AppearanceColors.Accent, AppearanceColors.TextDim, 0.48f);
     Canvas.Text({ Inner.X, Inner.Y }, 9.0f, EyebrowInk, "CONTENT DETAILS");
 
-    if (Category == ContentCategoryKind::Colours)
+    if (Category == ContentCategory::Colours)
     {
         if (const ColourCodexEntry* Entry = CodexLibrary.QueryEntryAt(SelectedColourIndex))
         {
@@ -1223,7 +1223,7 @@ void ContentBrowserPanel::RenderContentDetailsSidebar(
                 Canvas.FillTexturedRectangle(BigThumb, TileUv.TexturePointer, TileUv.UvMin, TileUv.UvMax, 16.0f);
             }
 
-            const auto  EntryCat    = static_cast<ContentCategoryKind>(Entry->IndexHeader.CategoryCode);
+            const auto  EntryCat    = static_cast<ContentCategory>(Entry->IndexHeader.CategoryCode);
             const auto  EntryOrigin = static_cast<ContentOriginFilter>(Entry->IndexHeader.OriginCode);
             const char* OriginName  = (EntryOrigin == ContentOriginFilter::Engine) ? "EngineContent (Read-Only)" : ((EntryOrigin == ContentOriginFilter::Imported) ? "Imported (.Space)" : "Project Content");
 
@@ -1356,12 +1356,12 @@ void ContentBrowserPanel::RenderWithInput(
     Canvas.Text({ DrawerRect.X + PadX, CurY }, 8.5f, EyebrowInk, Eyebrow.c_str());
     Canvas.Text({ DrawerRect.X + PadX, CurY + 12.0f }, 21.0f, AppearanceColors.Text.ToRgba8(), "ContentBrowser");
 
-    constexpr std::array<std::pair<WorkspaceDomainKind, const char*>, 5> QuickWorkspaces = {{
-        { WorkspaceDomainKind::SceneWorld, "Scene"      },
-        { WorkspaceDomainKind::UV,         "UV"         },
-        { WorkspaceDomainKind::Material,   "Material"   },
-        { WorkspaceDomainKind::Simulation, "Simulation" },
-        { WorkspaceDomainKind::Audio,      "Audio"      },
+    constexpr std::array<std::pair<WorkspaceCategory, const char*>, 5> QuickWorkspaces = {{
+        { WorkspaceCategory::SceneWorld, "Scene"      },
+        { WorkspaceCategory::UV,         "UV"         },
+        { WorkspaceCategory::Material,   "Material"   },
+        { WorkspaceCategory::Simulation, "Simulation" },
+        { WorkspaceCategory::Audio,      "Audio"      },
     }};
     float WsTotalW = 6.0f;
     for (std::size_t Idx = 0u; Idx < QuickWorkspaces.size(); ++Idx)
@@ -1429,10 +1429,10 @@ void ContentBrowserPanel::RenderWithInput(
             false,
             ControlIcon::PlusAdd))
     {
-        if (ThumbnailSheetRepository::QueryCategoryPermitted(ActiveWorkspace, ContentCategoryKind::Colours))
+        if (ThumbnailSheetRepository::QueryCategoryPermitted(ActiveWorkspace, ContentCategory::Colours))
         {
             const std::size_t Added = CodexLibrary.AddProjectColour("Project Swatch", "#2454FF", "Project");
-            (void)ActivateCategory(ContentCategoryKind::Colours);
+            (void)ActivateCategory(ContentCategory::Colours);
             ConfigureColourFilter(ColourFilterGroup::All);
             SelectedColourIndex = Added;
             StatusMessage       = "Created Project Swatch (.ColourSwatch #2454FF)";
@@ -1502,7 +1502,7 @@ void ContentBrowserPanel::RenderWithInput(
     }
     OriginX = OriginTrack.Right();
 
-    const float LayoutClusterWidth = (Category == ContentCategoryKind::Colours) ? 286.0f : 165.0f;
+    const float LayoutClusterWidth = (Category == ContentCategory::Colours) ? 286.0f : 165.0f;
     const float LayoutStartX       = DrawerRect.Right() - PadX - LayoutClusterWidth;
 
     // Interactive Search Capsule with leading SearchGlass icon and trailing CloseCross clear button
@@ -1614,7 +1614,7 @@ void ContentBrowserPanel::RenderWithInput(
     const Rectangle2D LayoutTrack{ LayoutStartX, CurY, LayoutClusterWidth, 30.0f };
     ConstructSegmentedTrack(Canvas, LayoutTrack, AppearanceColors);
 
-    if (Category == ContentCategoryKind::Colours)
+    if (Category == ContentCategory::Colours)
     {
         float LayoutX = LayoutTrack.X + 3.0f;
         if (ConstructSegmentedOption(
@@ -1689,7 +1689,7 @@ void ContentBrowserPanel::RenderWithInput(
     CurY += 37.0f;
 
     // 3. Dedicated Colour Filters Bar (ONLY visible when Colours category is active)
-    if (Category == ContentCategoryKind::Colours)
+    if (Category == ContentCategory::Colours)
     {
         Canvas.Text({ DrawerRect.X + PadX, CurY + 7.0f }, 9.0f, EyebrowInk, "COLOUR FILTERS");
         float ChipX = DrawerRect.X + PadX + 104.0f;
@@ -1759,7 +1759,7 @@ void ContentBrowserPanel::RenderWithInput(
 
     Canvas.PushClip(RailArea);
     float RailY = RailArea.Y + 2.0f;
-    for (const ContentCategoryKind CategoryOption : OrderedRailCategories)
+    for (const ContentCategory CategoryOption : OrderedRailCategories)
     {
         // 🔴 Completely exclude blocked categories in specialized workspaces (e.g. Particles/Simulations/Audio in UV)
         if (!ThumbnailSheetRepository::QueryCategoryPermitted(ActiveWorkspace, CategoryOption))
@@ -1797,7 +1797,7 @@ void ContentBrowserPanel::RenderWithInput(
     Canvas.PopClip();
     Canvas.StrokeLine({ RailArea.Right(), RailArea.Y }, { RailArea.Right(), RailArea.Bottom() }, AppearanceColors.Divider.ToRgba8(), 1.0f);
 
-    if (Category == ContentCategoryKind::Colours)
+    if (Category == ContentCategory::Colours)
     {
         RenderColoursRepository(Canvas, CentreArea, PointerInput, AppearanceColors, SectionRadius);
     }
@@ -1813,7 +1813,7 @@ void ContentBrowserPanel::RenderWithInput(
     Canvas.StrokeLine({ FooterRect.X, FooterRect.Y }, { FooterRect.Right(), FooterRect.Y }, AppearanceColors.Divider.ToRgba8(), 1.0f);
 
     const char* DefaultHint =
-        (Category == ContentCategoryKind::Colours)
+        (Category == ContentCategory::Colours)
             ? "Drag any .ColourSwatch circle/strip onto a colour slot or double-click to apply"
             : "Pre-baked 1024x1024 ThumbnailSheet + 64B ContentIndex · Drop external files to quarantine & import";
     Canvas.Text(

@@ -37,7 +37,7 @@ public:
         InspectorPanel* ActiveInspector) noexcept;
     void AttachThemeRepository(const ThemeRepository* SourceTheme) noexcept;
 
-    void ConfigureWorkspaceDomain(WorkspaceDomainKind ActiveDomain) noexcept;
+    void ConfigureWorkspaceDomain(WorkspaceCategory ActiveDomain) noexcept;
     void ConfigureImportPolicy(const ImportIntakeConfiguration& Policy);
 
     [[nodiscard]] ImportIntakeResult IntakeExternalAssetDrop(const std::filesystem::path& DroppedSourceFile);

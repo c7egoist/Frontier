@@ -1,18 +1,18 @@
-"""Frontier UV Studio preview server on 0.0.0.0."""
+"""Frontier UV Workspace preview server on 0.0.0.0 (serves Experimental/ only, never repo root)."""
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import os
 import sys
 
-ROOT = Path(__file__).resolve().parents[2]
-os.chdir(ROOT)
+EXPERIMENTAL_ROOT = Path(__file__).resolve().parents[1]
+os.chdir(EXPERIMENTAL_ROOT)
 
 
 class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         if self.path in ('/', '/index.html'):
             self.send_response(302)
-            self.send_header('Location', '/Experimental/UVEditor/')
+            self.send_header('Location', '/UVEditor/index.html')
             self.end_headers()
             return
         super().do_GET()
@@ -23,5 +23,6 @@ class Handler(SimpleHTTPRequestHandler):
 
 
 if __name__ == '__main__':
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else int(os.environ.get('PORT', '8086'))
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else int(os.environ.get('PORT', '8085'))
+    print(f'[UVWorkspace] Serving {EXPERIMENTAL_ROOT}/UVEditor on http://0.0.0.0:{port}/UVEditor/index.html', flush=True)
     ThreadingHTTPServer(('0.0.0.0', port), Handler).serve_forever()

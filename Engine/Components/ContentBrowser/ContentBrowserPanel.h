@@ -76,8 +76,8 @@ struct ContentBrowserReading
 {
     ContentShelfExtent             ShelfExtent            = ContentShelfExtent::Closed;                     // [-]     - Closed, SplitHalf, or FullHeight
     float                          ShelfProgress          = 0.0f;                                           // [0-1]   - Animated spring height ratio
-    WorkspaceDomainKind            ActiveWorkspace        = WorkspaceDomainKind::SceneWorld;                // [-]     - Active workspace domain filter
-    ContentCategoryKind            ActiveCategory         = ContentCategoryKind::Materials;                 // [-]     - Selected left-rail category
+    WorkspaceCategory            ActiveWorkspace        = WorkspaceCategory::SceneWorld;                // [-]     - Active workspace domain filter
+    ContentCategory            ActiveCategory         = ContentCategory::Materials;                 // [-]     - Selected left-rail category
     ContentOriginFilter            ActiveOrigin           = ContentOriginFilter::All;                       // [-]     - All, Project, Imported, or Engine
     ColourRepositoryLayout         ActiveColourLayout     = ColourRepositoryLayout::GridCircles;            // [-]     - Colours-only layout mode
     StandardRepositoryLayout       ActiveStandardLayout   = StandardRepositoryLayout::Grid;                 // [-]     - Non-Colours layout mode
@@ -107,8 +107,8 @@ public:
     ContentBrowserPanel& operator=(const ContentBrowserPanel&) = delete;
 
     void ConfigureShelfExtent(ContentShelfExtent RequestedExtent, bool Immediate = false) noexcept;
-    void ConfigureWorkspaceDomain(WorkspaceDomainKind Workspace) noexcept;
-    bool ActivateCategory(ContentCategoryKind NextCategory) noexcept;
+    void ConfigureWorkspaceDomain(WorkspaceCategory Workspace) noexcept;
+    bool ActivateCategory(ContentCategory NextCategory) noexcept;
     void ConfigureOriginFilter(ContentOriginFilter Origin) noexcept;
     void ConfigureStandardLayout(StandardRepositoryLayout Layout) noexcept;
     void ConfigureColourLayout(ColourRepositoryLayout Layout) noexcept;
@@ -188,8 +188,8 @@ private:
     SpringIntegrator                    ShelfSpring           {};                                       // [-]   - Smooth bottom-drawer spring
     uint32_t                            ShelfAxis             = 0u;                                     // [idx] - Vertical shelf spring axis
     ContentShelfExtent                  TargetExtent          = ContentShelfExtent::Closed;             // [-]   - Target stop (Closed/SplitHalf/Full)
-    WorkspaceDomainKind                 ActiveWorkspace       = WorkspaceDomainKind::SceneWorld;        // [-]   - Active workspace domain mask
-    ContentCategoryKind                 Category              = ContentCategoryKind::Materials;         // [-]   - Active left-rail category
+    WorkspaceCategory                 ActiveWorkspace       = WorkspaceCategory::SceneWorld;        // [-]   - Active workspace domain mask
+    ContentCategory                 Category              = ContentCategory::Materials;         // [-]   - Active left-rail category
     ContentOriginFilter                 OriginScope           = ContentOriginFilter::All;               // [-]   - Active origin scope
     StandardRepositoryLayout            StandardLayout        = StandardRepositoryLayout::Grid;         // [-]   - Non-Colours layout
     ColourRepositoryLayout              ColourLayout          = ColourRepositoryLayout::GridCircles;    // [-]   - Colours-only layout

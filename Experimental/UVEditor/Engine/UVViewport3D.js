@@ -9,6 +9,8 @@
 import * as THREE from '../Vendor/three.esm.min.js';
 import { OrbitControls } from '../Vendor/orbit-controls.esm.min.js';
 import { EdgeKey, UdimFromUV } from './TopologySurface.js';
+import { MATCAP_STUDIO_CATALOG, RenderMatcapSphereToImageData } from './EngineeringMatcaps.js';
+export { MATCAP_STUDIO_CATALOG };
 
 function BuildCheckerTexture()
 {
@@ -50,6 +52,40 @@ function BuildCheckerTexture()
     return Tex;
 }
 
+export function BuildMatcapPreviewDataUrl(Slot = 0, Size = 72)
+{
+    if (typeof document === 'undefined') return '';
+    const Spec = MATCAP_STUDIO_CATALOG[Slot & 15] || MATCAP_STUDIO_CATALOG[0];
+    const Canvas = document.createElement('canvas');
+    Canvas.width = Size;
+    Canvas.height = Size;
+    const Ctx = Canvas.getContext('2d');
+    RenderMatcapSphereToImageData(Ctx, Spec, Size, 0, 0);
+    return Canvas.toDataURL('image/png');
+}
+
+function BuildMultiMatcapSheetTexture()
+{
+    const Cell = 256;
+    const Cols = 4, Rows = 4;
+    const Canvas = document.createElement('canvas');
+    Canvas.width = Cell * Cols;
+    Canvas.height = Cell * Rows;
+    const Ctx = Canvas.getContext('2d');
+    for (let i = 0; i < MATCAP_STUDIO_CATALOG.length && i < Cols * Rows; i++)
+    {
+        const Col = i % Cols;
+        const Row = Math.floor(i / Cols);
+        RenderMatcapSphereToImageData(Ctx, MATCAP_STUDIO_CATALOG[i], Cell, Col * Cell, Row * Cell);
+    }
+    const Tex = new THREE.CanvasTexture(Canvas);
+    Tex.minFilter = THREE.LinearFilter;
+    Tex.magFilter = THREE.LinearFilter;
+    Tex.generateMipmaps = false;
+    Tex.flipY = true;
+    return Tex;
+}
+
 function BuildMatcapTexture(Variant = 'clay')
 {
     const Size = 512;
@@ -57,60 +93,8 @@ function BuildMatcapTexture(Variant = 'clay')
     Canvas.width = Size;
     Canvas.height = Size;
     const Ctx = Canvas.getContext('2d');
-    const Img = Ctx.createImageData(Size, Size);
-    const Data = Img.data;
-
-    const IsSatin = Variant === 'matcap-satin';
-    const BaseDark = IsSatin ? [24, 27, 32] : [74, 46, 36];
-    const BaseMid = IsSatin ? [92, 100, 110] : [178, 120, 96];
-    const SpecCol = IsSatin ? [239, 244, 207] : [255, 232, 214];
-    const RimCol = IsSatin ? [138, 186, 224] : [158, 207, 255];
-
-    const Lx = 0.40, Ly = 0.58, Lz = 0.707;
-    const Hx = Lx * 0.5, Hy = Ly * 0.5, Hz = (Lz + 1) * 0.5;
-    const HLen = Math.hypot(Hx, Hy, Hz);
-    const Hnx = Hx / HLen, Hny = Hy / HLen, Hnz = Hz / HLen;
-
-    const Fx = -0.58, Fy = -0.35, Fz = 0.73;
-
-    for (let y = 0; y < Size; y++)
-    {
-        const Ny = 1 - (2 * (y + 0.5)) / Size;
-        for (let x = 0; x < Size; x++)
-        {
-            const Nx = (2 * (x + 0.5)) / Size - 1;
-            const R2 = Nx * Nx + Ny * Ny;
-            const Nz = R2 <= 1 ? Math.sqrt(1 - R2) : 0;
-            const idx = (y * Size + x) * 4;
-
-            if (R2 > 1.0)
-            {
-                const Edge = Math.max(0, 1 - (R2 - 1) * 6);
-                Data[idx] = BaseDark[0];
-                Data[idx + 1] = BaseDark[1];
-                Data[idx + 2] = BaseDark[2];
-                Data[idx + 3] = Math.round(Edge * 255);
-                continue;
-            }
-
-            const NdL = Math.max(0, Nx * Lx + Ny * Ly + Nz * Lz);
-            const Wrap = Math.max(0, Math.min(1, (Nx * Lx + Ny * Ly + Nz * Lz + 0.45) / 1.45));
-            const NdH = Math.max(0, Nx * Hnx + Ny * Hny + Nz * Hnz);
-            const Spec = Math.pow(NdH, IsSatin ? 42 : 22) * (IsSatin ? 0.85 : 0.42);
-            const Fill = Math.max(0, Nx * Fx + Ny * Fy + Nz * Fz) * 0.20;
-            const Fresnel = Math.pow(1 - Nz, 2.8) * (IsSatin ? 0.42 : 0.24);
-
-            const R = Math.min(255, BaseDark[0] + (BaseMid[0] - BaseDark[0]) * Wrap + SpecCol[0] * Spec + RimCol[0] * (Fresnel + Fill) + NdL * 24);
-            const G = Math.min(255, BaseDark[1] + (BaseMid[1] - BaseDark[1]) * Wrap + SpecCol[1] * Spec + RimCol[1] * (Fresnel + Fill) + NdL * 22);
-            const B = Math.min(255, BaseDark[2] + (BaseMid[2] - BaseDark[2]) * Wrap + SpecCol[2] * Spec + RimCol[2] * (Fresnel + Fill) + NdL * 20);
-
-            Data[idx] = R;
-            Data[idx + 1] = G;
-            Data[idx + 2] = B;
-            Data[idx + 3] = 255;
-        }
-    }
-    Ctx.putImageData(Img, 0, 0);
+    const Spec = Variant === 'matcap-satin' ? MATCAP_STUDIO_CATALOG[1] : MATCAP_STUDIO_CATALOG[0];
+    RenderMatcapSphereToImageData(Ctx, Spec, Size, 0, 0);
     const Tex = new THREE.CanvasTexture(Canvas);
     Tex.colorSpace = THREE.SRGBColorSpace;
     return Tex;
@@ -258,13 +242,26 @@ export class UVViewport3D
         this.onContextMenu = onContextMenu;
         this.onBoxSelect3D = onBoxSelect3D;
         this.onPaintSelect3D = onPaintSelect3D;
-        this.shadingMode = 'checker'; // 'checker' | 'flat' | 'matcap' | 'matcap-satin' | 'importance' | 'texel' | 'stretch'
+        this.shadingMode = 'fast-pbr'; // 'fast-pbr' | 'multi-matcap' | 'lit-matcap' | 'checker' | 'flat' | 'flat-slots' | 'importance' | 'texel' | 'stretch' | 'overlap'
+        this.pbrColor = '#7d93b2';
+        this.pbrMetallic = 0.55;
+        this.pbrRoughness = 0.28;
+        this.pbrSpecular = 0.55;
+        this.eonRoughness = 0.36;
+        this.blinnShininess = 64.0;
+        this.specularStrength = 0.65;
+        this.matcapCoatBlend = 0.90;
+        this.shadowsEnabled = true;
+        this.eonEnergyComp = true;
+        this.lightAzimuthDeg = 42.0;
+        this.lightElevationDeg = 54.0;
+        this.shadowDirty = true;
         this.selectionMode = 'island';
         this.activeTool = 'select';
         this.paintRadiusPx = 36;
         this.showWireframe = true;
-        this.showSeams = true;
-        this.showBoundaries = true;
+        this.showSeams = false;
+        this.showBoundaries = false;
         this.webglReady = false;
         this.triToFace = [];
         this.surface = null;
@@ -285,7 +282,7 @@ export class UVViewport3D
         this.container.append(this.canvas);
 
         this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color('#101214');
+        this.scene.background = new THREE.Color('#0c0c0e');
         this.camera = new THREE.PerspectiveCamera(40, 1, 0.05, 220);
         this.camera.position.set(5.4, 2.6, 6.2);
 
@@ -295,7 +292,7 @@ export class UVViewport3D
             this.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
             this.renderer.outputColorSpace = THREE.SRGBColorSpace;
             this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-            this.renderer.toneMappingExposure = 1.08;
+            this.renderer.toneMappingExposure = 1.06;
             this.webglReady = true;
         }
         catch
@@ -309,24 +306,28 @@ export class UVViewport3D
         this.controls.dampingFactor = 0.08;
         this.controls.target.set(0, 0.85, 0);
 
-        this.scene.add(new THREE.HemisphereLight('#dce6ec', '#2e2b25', 1.45));
+        this.scene.add(new THREE.HemisphereLight('#dce6ec', '#1b1c20', 1.35));
         const Key = new THREE.DirectionalLight('#fff2dd', 2.4);
         Key.position.set(5, 8, 5);
+        this.keyLight = Key;
         this.scene.add(Key);
-        const Fill = new THREE.DirectionalLight('#9ecfff', 1.2);
+        const Fill = new THREE.DirectionalLight('#9ecfff', 1.1);
         Fill.position.set(-5, 4, -4);
         this.scene.add(Fill);
-        const Rim = new THREE.DirectionalLight('#9bdac5', 0.9);
+        const Rim = new THREE.DirectionalLight('#9bdac5', 0.85);
         Rim.position.set(0, 3, -6);
         this.scene.add(Rim);
 
-        const Grid = new THREE.GridHelper(16, 32, '#3d4346', '#212527');
+        const Grid = new THREE.GridHelper(16, 32, '#282a30', '#16171b');
         Grid.position.y = -0.002;
         this.scene.add(Grid);
 
         this.checkerTex = BuildCheckerTexture();
-        this.matcapClayTex = BuildMatcapTexture('clay');
-        this.matcapSatinTex = BuildMatcapTexture('matcap-satin');
+        this.matcapClayTex = null;
+        this.matcapSatinTex = null;
+        this.matcapSheetTex = new THREE.DataTexture(new Uint8Array([180, 188, 200, 255]), 1, 1, THREE.RGBAFormat);
+        this.matcapSheetTex.needsUpdate = true;
+        this._matcapSheetBuilt = false;
         this.vertexDotTex = BuildVertexDotTexture();
 
         this.meshMat = new THREE.MeshStandardMaterial({
@@ -347,7 +348,101 @@ export class UVViewport3D
         this.mesh = new THREE.Mesh(this.geometry, this.meshMat);
         this.scene.add(this.mesh);
 
-        // GPU Face-Selection Mask Texture (256 x H, 1 texel per mesh face -> 0.02ms instant live updates!)
+        // Directional Orthographic Shadow Depth Target (2048x2048 RGBA-packed linear depth for universal WebGL portability)
+        this.shadowMapSize = 2048;
+        this.shadowRT = new THREE.WebGLRenderTarget(this.shadowMapSize, this.shadowMapSize, {
+            minFilter: THREE.NearestFilter,
+            magFilter: THREE.NearestFilter,
+            format: THREE.RGBAFormat,
+            type: THREE.UnsignedByteType,
+            depthBuffer: true
+        });
+        this.shadowCam = new THREE.OrthographicCamera(-5, 5, 5, -5, 0.25, 32.0);
+        this.shadowMatrix = new THREE.Matrix4();
+        this.shadowDepthMat = new THREE.ShaderMaterial({
+            vertexShader: `
+                varying float vNormDepth;
+                void main() {
+                    vec4 clip = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                    vNormDepth = clip.z / clip.w * 0.5 + 0.5;
+                    gl_Position = clip;
+                }
+            `,
+            fragmentShader: `
+                varying float vNormDepth;
+                void main() {
+                    float d = clamp(vNormDepth, 0.0, 1.0);
+                    vec4 enc = vec4(1.0, 255.0, 65025.0, 16581375.0) * d;
+                    enc = fract(enc);
+                    enc -= enc.yzww * vec4(1.0 / 255.0, 1.0 / 255.0, 1.0 / 255.0, 0.0);
+                    gl_FragColor = enc;
+                }
+            `,
+            side: THREE.DoubleSide
+        });
+        this.shadowScene = new THREE.Scene();
+        this.shadowProxyMesh = new THREE.Mesh(this.geometry, this.shadowDepthMat);
+        this.shadowScene.add(this.shadowProxyMesh);
+
+        // Subtle studio ground contact-shadow receiver
+        this.groundShadowMat = new THREE.ShaderMaterial({
+            uniforms: {
+                uShadowMap: { value: this.shadowRT.texture },
+                uShadowMatrix: { value: this.shadowMatrix },
+                uShadowsEnabled: { value: 1.0 }
+            },
+            vertexShader: `
+                uniform mat4 uShadowMatrix;
+                varying vec4 vShadowCoord;
+                varying vec2 vLocalXZ;
+                void main() {
+                    vec4 worldPos = modelMatrix * vec4(position, 1.0);
+                    vLocalXZ = worldPos.xz;
+                    vShadowCoord = uShadowMatrix * worldPos;
+                    gl_Position = projectionMatrix * viewMatrix * worldPos;
+                }
+            `,
+            fragmentShader: `
+                uniform sampler2D uShadowMap;
+                uniform float uShadowsEnabled;
+                varying vec4 vShadowCoord;
+                varying vec2 vLocalXZ;
+                float DecodeDepth(vec4 rgba) {
+                    return dot(rgba, vec4(1.0, 1.0 / 255.0, 1.0 / 65025.0, 1.0 / 16581375.0));
+                }
+                void main() {
+                    if (uShadowsEnabled < 0.5) discard;
+                    vec3 sc = vShadowCoord.xyz / max(1e-5, vShadowCoord.w);
+                    vec2 suv = sc.xy * 0.5 + 0.5;
+                    float refZ = sc.z * 0.5 + 0.5;
+                    if (suv.x < 0.01 || suv.x > 0.99 || suv.y < 0.01 || suv.y > 0.99 || refZ > 0.995) discard;
+                    float texel = 1.65 / 2048.0;
+                    float occ = 0.0;
+                    for (int dy = -1; dy <= 1; dy++) {
+                        for (int dx = -1; dx <= 1; dx++) {
+                            float d = DecodeDepth(texture2D(uShadowMap, suv + vec2(float(dx), float(dy)) * texel));
+                            occ += (refZ - 0.0022 > d) ? 1.0 : 0.0;
+                        }
+                    }
+                    occ /= 9.0;
+                    float radial = 1.0 - smoothstep(4.5, 8.2, length(vLocalXZ));
+                    float alpha = occ * radial * 0.44;
+                    if (alpha < 0.01) discard;
+                    gl_FragColor = vec4(0.0, 0.0, 0.0, alpha);
+                }
+            `,
+            transparent: true,
+            depthWrite: false,
+            toneMapped: false
+        });
+        const GroundGeo = new THREE.PlaneGeometry(18, 18);
+        GroundGeo.rotateX(-Math.PI * 0.5);
+        this.groundShadowMesh = new THREE.Mesh(GroundGeo, this.groundShadowMat);
+        this.groundShadowMesh.position.y = -0.0035;
+        this.groundShadowMesh.renderOrder = 0;
+        this.scene.add(this.groundShadowMesh);
+
+        // GPU Face-Selection & Per-Face MatCap Slot Texture (256 x H: R=Selected, B=MatcapSlot*16 -> 0.02ms updates!)
         this.gpuSelTexW = 256;
         this.gpuSelTexH = 16;
         this.gpuSelectionTex = new THREE.DataTexture(
@@ -361,12 +456,401 @@ export class UVViewport3D
         this.gpuSelectionTex.generateMipmaps = false;
         this.gpuSelectionTex.needsUpdate = true;
 
+        // 1. Fast Simplified Studio Preview + Per-Face Multi-MatCap Shader
+        //    (3-Point Studio Hemisphere + Trowbridge-Reitz GGX Microfacet + Geometric Curvature Cavity + Soft 9-Tap PCF Shadows)
+        this.cavityStrength = 0.45;
+        this.fastLitMat = new THREE.ShaderMaterial({
+            derivatives: true,
+            uniforms: {
+                uFaceStateTex: { value: this.gpuSelectionTex },
+                uFaceTexSize: { value: new THREE.Vector2(this.gpuSelTexW, this.gpuSelTexH) },
+                uMatcapSheet: { value: this.matcapSheetTex },
+                uShadowMap: { value: this.shadowRT.texture },
+                uShadowMatrix: { value: this.shadowMatrix },
+                uKeyLightDir: { value: new THREE.Vector3(0.48, 0.76, 0.44).normalize() },
+                uMode: { value: 2.0 }, // 0 = Studio Preview Rig, 1 = Multi-MatCap Studio, 2 = Studio Preview + Multi-MatCap
+                uRoughness: { value: this.eonRoughness },
+                uShininess: { value: this.blinnShininess },
+                uSpecStrength: { value: this.specularStrength },
+                uMatcapBlend: { value: this.matcapCoatBlend },
+                uCavityStrength: { value: this.cavityStrength },
+                uShadowsEnabled: { value: 1.0 },
+                uEonEnergyComp: { value: 1.0 }
+            },
+            vertexShader: `
+                precision highp float;
+                attribute float aFaceId;
+                attribute float aMatcapSlot;
+                attribute vec3 aPbrColor;
+                attribute vec4 aPbrParams;
+                uniform mat4 uShadowMatrix;
+                varying float vFaceId;
+                varying float vMatcapSlot;
+                varying vec3 vPbrColor;
+                varying vec4 vPbrParams;
+                varying vec3 vWorldPos;
+                varying vec3 vWorldNormal;
+                varying vec3 vViewNormal;
+                varying vec3 vColor;
+                varying vec4 vShadowCoord;
+                void main() {
+                    vFaceId = aFaceId;
+                    vMatcapSlot = aMatcapSlot;
+                    vPbrColor = aPbrColor;
+                    vPbrParams = aPbrParams;
+                    vColor = color;
+                    vec4 worldPos = modelMatrix * vec4(position, 1.0);
+                    vWorldPos = worldPos.xyz;
+                    vWorldNormal = normalize(mat3(modelMatrix) * normal);
+                    vViewNormal = normalize(normalMatrix * normal);
+                    vShadowCoord = uShadowMatrix * vec4(worldPos.xyz + vWorldNormal * 0.012, 1.0);
+                    gl_Position = projectionMatrix * viewMatrix * worldPos;
+                }
+            `,
+            fragmentShader: `
+                precision highp float;
+                uniform sampler2D uFaceStateTex;
+                uniform vec2 uFaceTexSize;
+                uniform sampler2D uMatcapSheet;
+                uniform sampler2D uShadowMap;
+                uniform vec3 uKeyLightDir;
+                uniform float uMode;
+                uniform float uRoughness;
+                uniform float uShininess;
+                uniform float uSpecStrength;
+                uniform float uMatcapBlend;
+                uniform float uCavityStrength;
+                uniform float uShadowsEnabled;
+                uniform float uEonEnergyComp;
+                varying float vFaceId;
+                varying float vMatcapSlot;
+                varying vec3 vPbrColor;
+                varying vec4 vPbrParams;
+                varying vec3 vWorldPos;
+                varying vec3 vWorldNormal;
+                varying vec3 vViewNormal;
+                varying vec3 vColor;
+                varying vec4 vShadowCoord;
+
+                const float PI = 3.14159265359;
+
+                float DecodeShadowDepth(vec4 rgba) {
+                    return dot(rgba, vec4(1.0, 1.0 / 255.0, 1.0 / 65025.0, 1.0 / 16581375.0));
+                }
+
+                float SampleShadowPCF(vec4 shadowCoord, float ndl) {
+                    if (uShadowsEnabled < 0.5) return 1.0;
+                    vec3 sc = shadowCoord.xyz / max(1e-5, shadowCoord.w);
+                    vec2 suv = sc.xy * 0.5 + 0.5;
+                    float refZ = sc.z * 0.5 + 0.5;
+                    if (suv.x <= 0.005 || suv.x >= 0.995 || suv.y <= 0.005 || suv.y >= 0.995 || refZ >= 0.998) return 1.0;
+                    float bias = max(0.0014, 0.0036 * (1.0 - ndl));
+                    float texel = 1.4 / 2048.0;
+                    float lit = 0.0;
+                    for (int dy = -1; dy <= 1; dy++) {
+                        for (int dx = -1; dx <= 1; dx++) {
+                            float stored = DecodeShadowDepth(texture2D(uShadowMap, suv + vec2(float(dx), float(dy)) * texel));
+                            lit += (refZ - bias <= stored) ? 1.0 : 0.0;
+                        }
+                    }
+                    return mix(0.38, 1.0, lit / 9.0);
+                }
+
+                vec3 SamplePerFaceMatcap(float slot, vec3 viewN) {
+                    float col = mod(slot, 4.0);
+                    float row = floor(slot / 4.0);
+                    vec2 localUv = clamp(viewN.xy * 0.485 + 0.5, 0.012, 0.988);
+                    vec2 sheetUv = vec2((col + localUv.x) * 0.25, ((3.0 - row) + localUv.y) * 0.25);
+                    return texture2D(uMatcapSheet, sheetUv).rgb;
+                }
+
+                // Engineering neutral albedo per MatCap slot (used only when crossfading toward pure Studio Rig)
+                vec3 StudioSlotTint(float slot) {
+                    int s = int(slot + 0.5);
+                    if (s == 1) return vec3(0.66, 0.65, 0.63); // Grade-5 Titanium
+                    if (s == 2) return vec3(0.70, 0.68, 0.65); // CAD Clay
+                    if (s == 3) return vec3(0.78, 0.82, 0.88); // Class-A Chrome
+                    if (s == 4) return vec3(0.28, 0.32, 0.38); // Gunmetal Ano
+                    if (s == 5) return vec3(0.26, 0.44, 0.66); // Steel Blue
+                    if (s == 6) return vec3(0.74, 0.62, 0.38); // Turned Brass
+                    if (s == 7) return vec3(0.80, 0.83, 0.86); // Zebra CAD
+                    return vec3(0.72, 0.75, 0.80);             // CNC Aluminum
+                }
+
+                // Fast geometric screen-space curvature ridge & cavity accent (Workbench Studio style)
+                float EvaluateStudioCavity(vec3 viewN) {
+                    vec3 dnx = dFdx(viewN);
+                    vec3 dny = dFdy(viewN);
+                    float edgeMetric = clamp((length(dnx) + length(dny)) * 1.45, 0.0, 1.0);
+                    float signedCurv = clamp((dnx.x + dny.y) * 0.9, -0.35, 0.35);
+                    float factor = 1.0 + signedCurv * 0.55 - edgeMetric * 0.24;
+                    return mix(1.0, clamp(factor, 0.62, 1.24), uCavityStrength * uEonEnergyComp);
+                }
+
+                void main() {
+                    float matcapSlot = clamp(floor(vMatcapSlot + 0.5), 0.0, 15.0);
+
+                    vec3 N = normalize(gl_FrontFacing ? vWorldNormal : -vWorldNormal);
+                    vec3 Vn = normalize(gl_FrontFacing ? vViewNormal : -vViewNormal);
+                    vec3 V = normalize(cameraPosition - vWorldPos);
+                    vec3 L = normalize(uKeyLightDir);
+
+                    float cavity = EvaluateStudioCavity(Vn);
+                    vec3 matcapSrgb = SamplePerFaceMatcap(matcapSlot, Vn);
+
+                    // Pure Multi-MatCap Studio (crisp 1:1 Engineering MatCap spheres + geometric bevel cavity)
+                    if (abs(uMode - 1.0) < 0.25) {
+                        gl_FragColor = vec4(clamp(matcapSrgb * cavity, 0.0, 1.0), 1.0);
+                        return;
+                    }
+
+                    // Combined Per-Face Fast PBR Lit + Per-Face Multi-MatCap (NO GGX, NO pow!)
+                    vec3 baseSrgb = uMode > 1.5 ? vPbrColor : vec3(0.72, 0.74, 0.77);
+                    vec3 baseLin = baseSrgb * baseSrgb;
+                    float metallic = uMode > 1.5 ? clamp(vPbrParams.x, 0.0, 1.0) : 0.0;
+                    float roughness = uMode > 1.5 ? clamp(vPbrParams.y, 0.04, 1.0) : clamp(uRoughness, 0.05, 1.0);
+                    float specular = uMode > 1.5 ? clamp(vPbrParams.z, 0.0, 1.0) : 0.55;
+                    float faceMatcapMix = clamp(vPbrParams.w, 0.0, 1.0);
+
+                    float ndl = max(0.0, dot(N, L));
+                    float ndv = max(0.001, dot(N, V));
+                    vec3 H = normalize(L + V);
+                    vec3 R = reflect(-V, N);
+                    float ndh = max(0.0, dot(N, H));
+                    float shadowVis = SampleShadowPCF(vShadowCoord, ndl);
+
+                    vec3 diffuseAlbedo = baseLin * (1.0 - metallic);
+                    vec3 f0 = mix(vec3(0.08 * specular), baseLin, metallic);
+                    float omv = 1.0 - ndv;
+                    float omv2 = omv * omv;
+                    vec3 F = f0 + (max(vec3(1.0 - roughness), f0) - f0) * (omv2 * omv2 * omv);
+
+                    float wrapKey = clamp((dot(N, L) + 0.22) * 0.82, 0.0, 1.0);
+                    vec3 fillDir = normalize(vec3(-L.x, 0.28, -L.z));
+                    float wrapFill = clamp((dot(N, fillDir) + 0.35) * 0.74, 0.0, 1.0);
+                    vec3 hemi = mix(vec3(0.09, 0.095, 0.11), vec3(0.32, 0.35, 0.40), N.y * 0.5 + 0.5);
+                    vec3 diffuseLit = diffuseAlbedo * (hemi + wrapFill * vec3(0.18, 0.20, 0.24) + shadowVis * wrapKey * vec3(0.98, 0.96, 0.92));
+
+                    float ry = R.y;
+                    float softbox = smoothstep(0.36, 0.92, dot(R, L)) * (1.0 - roughness * 0.78);
+                    float horizon = smoothstep(-0.18, 0.08, ry);
+                    vec3 sharpEnv = mix(vec3(0.065, 0.07, 0.08), mix(vec3(0.35, 0.39, 0.45), vec3(0.84, 0.88, 0.94), clamp(ry, 0.0, 1.0)), horizon);
+                    sharpEnv += softbox * vec3(0.94, 0.92, 0.88);
+                    vec3 roughEnv = mix(vec3(0.10, 0.105, 0.12), vec3(0.42, 0.45, 0.50), ry * 0.5 + 0.5);
+                    float r2 = roughness * roughness;
+                    vec3 envRefl = mix(sharpEnv, roughEnv, r2);
+
+                    float invSharp = max(0.0035, r2 * r2 * 0.62);
+                    float sgSpec = exp2((ndh * ndh - 1.0) / invSharp) * mix(2.35, 0.16, roughness) * ndl * shadowVis;
+                    float specWeight = mix(specular * 1.85, 1.0, metallic);
+
+                    vec3 specLit = envRefl * F * mix(0.25 + specular * 0.95, 1.0, metallic) + F * sgSpec * specWeight * vec3(1.0, 0.98, 0.95);
+                    vec3 pbrLin = (diffuseLit * (1.0 - F * 0.65) + specLit) * cavity;
+                    vec3 pbrSrgb = sqrt(clamp(pbrLin / (1.0 + pbrLin * 0.52), 0.0, 1.0));
+
+                    if (uMode > 1.5) {
+                        float shadowEnv = mix(0.56, 1.02, shadowVis * (0.38 + 0.62 * wrapKey));
+                        vec3 matSrgb = clamp(matcapSrgb * shadowEnv * cavity, 0.0, 1.0);
+                        gl_FragColor = vec4(clamp(mix(pbrSrgb, matSrgb, faceMatcapMix), 0.0, 1.0), 1.0);
+                        return;
+                    }
+
+                    gl_FragColor = vec4(pbrSrgb, 1.0);
+                }
+            `,
+            vertexColors: true,
+            toneMapped: false,
+            side: THREE.DoubleSide
+        });
+
+        // 1B. Ultra-Fast Per-Face Simplified Analytic PBR Shader (MatCap-speed, ZERO texture fetches, ZERO GGX, ZERO pow!)
+        //     Uses ONLY per-face: Colour (aPbrColor), Metallic (aPbrParams.x), Roughness (aPbrParams.y), Specular (aPbrParams.z).
+        this.fastPbrMat = new THREE.ShaderMaterial({
+            uniforms: {
+                uPbrColor: { value: new THREE.Color(this.pbrColor) },
+                uPbrMetallic: { value: this.pbrMetallic },
+                uPbrRoughness: { value: this.pbrRoughness },
+                uPbrSpecular: { value: this.pbrSpecular },
+                uKeyLightDir: { value: new THREE.Vector3(0.48, 0.76, 0.44).normalize() }
+            },
+            vertexShader: `
+                precision highp float;
+                attribute vec3 aPbrColor;
+                attribute vec4 aPbrParams;
+                varying vec3 vPbrColor;
+                varying vec4 vPbrParams;
+                varying vec3 vWorldPos;
+                varying vec3 vWorldNormal;
+                void main() {
+                    vPbrColor = aPbrColor;
+                    vPbrParams = aPbrParams;
+                    vec4 worldPos = modelMatrix * vec4(position, 1.0);
+                    vWorldPos = worldPos.xyz;
+                    vWorldNormal = normalize(mat3(modelMatrix) * normal);
+                    gl_Position = projectionMatrix * viewMatrix * worldPos;
+                }
+            `,
+            fragmentShader: `
+                precision highp float;
+                uniform vec3 uKeyLightDir;
+                varying vec3 vPbrColor;
+                varying vec4 vPbrParams;
+                varying vec3 vWorldPos;
+                varying vec3 vWorldNormal;
+
+                void main() {
+                    vec3 N = normalize(gl_FrontFacing ? vWorldNormal : -vWorldNormal);
+                    vec3 V = normalize(cameraPosition - vWorldPos);
+                    vec3 L = normalize(uKeyLightDir);
+                    vec3 H = normalize(L + V);
+                    vec3 R = reflect(-V, N);
+
+                    float ndl = max(0.0, dot(N, L));
+                    float ndv = max(0.001, dot(N, V));
+                    float ndh = max(0.0, dot(N, H));
+
+                    // Per-face fast sRGB -> linear decode via single multiply (zero pow!)
+                    vec3 baseLin = vPbrColor * vPbrColor;
+
+                    float metallic = clamp(vPbrParams.x, 0.0, 1.0);
+                    float roughness = clamp(vPbrParams.y, 0.04, 1.0);
+                    float specular = clamp(vPbrParams.z, 0.0, 1.0);
+
+                    // Simplified PBR dielectric / metal split
+                    vec3 diffuseAlbedo = baseLin * (1.0 - metallic);
+                    vec3 f0 = mix(vec3(0.08 * specular), baseLin, metallic);
+
+                    // Fast Schlick Fresnel (3 multiplies, zero pow!)
+                    float omv = 1.0 - ndv;
+                    float omv2 = omv * omv;
+                    float schlick = omv2 * omv2 * omv;
+                    vec3 F = f0 + (max(vec3(1.0 - roughness), f0) - f0) * schlick;
+
+                    // Fast hemisphere + key/fill wrap irradiance
+                    float wrapKey = clamp((dot(N, L) + 0.22) * 0.82, 0.0, 1.0);
+                    vec3 fillDir = normalize(vec3(-L.x, 0.28, -L.z));
+                    float wrapFill = clamp((dot(N, fillDir) + 0.35) * 0.74, 0.0, 1.0);
+                    vec3 hemi = mix(vec3(0.085, 0.09, 0.105), vec3(0.30, 0.33, 0.38), N.y * 0.5 + 0.5);
+                    vec3 diffuseLit = diffuseAlbedo * (hemi + wrapFill * vec3(0.18, 0.20, 0.24) + wrapKey * vec3(0.98, 0.96, 0.92));
+
+                    // Analytic studio reflection along R blurred by roughness^2 (MatCap-speed, world-anchored!)
+                    float ry = R.y;
+                    float softbox = smoothstep(0.36, 0.92, dot(R, L)) * (1.0 - roughness * 0.78);
+                    float horizon = smoothstep(-0.18, 0.08, ry);
+                    vec3 sharpEnv = mix(vec3(0.065, 0.07, 0.08), mix(vec3(0.35, 0.39, 0.45), vec3(0.84, 0.88, 0.94), clamp(ry, 0.0, 1.0)), horizon);
+                    sharpEnv += softbox * vec3(0.94, 0.92, 0.88);
+                    vec3 roughEnv = mix(vec3(0.10, 0.105, 0.12), vec3(0.42, 0.45, 0.50), ry * 0.5 + 0.5);
+                    float r2 = roughness * roughness;
+                    vec3 envRefl = mix(sharpEnv, roughEnv, r2);
+
+                    // Fast Spherical-Gaussian key highlight (1 hardware exp2 op — NO GGX!)
+                    float invSharp = max(0.0035, r2 * r2 * 0.62);
+                    float sgSpec = exp2((ndh * ndh - 1.0) / invSharp) * mix(2.35, 0.16, roughness) * ndl;
+                    float specWeight = mix(specular * 1.85, 1.0, metallic);
+
+                    vec3 specLit = envRefl * F * mix(0.25 + specular * 0.95, 1.0, metallic) + F * sgSpec * specWeight * vec3(1.0, 0.98, 0.95);
+                    vec3 linCol = diffuseLit * (1.0 - F * 0.65) + specLit;
+
+                    // Fast tone map + hardware sqrt gamma encode
+                    vec3 mapped = linCol / (1.0 + linCol * 0.52);
+                    gl_FragColor = vec4(sqrt(clamp(mapped, 0.0, 1.0)), 1.0);
+                }
+            `,
+            toneMapped: false,
+            side: THREE.DoubleSide
+        });
+
+        // 2. True Unlit Flat Color / Debug Visualization Shader
+        //    (Zero shadows, zero lighting distortion — pure 1:1 color debug for Chart IDs, MatCap Slots, Checker, Stretch, Density & Overlaps!)
+        this.flatDebugMat = new THREE.ShaderMaterial({
+            derivatives: true,
+            uniforms: {
+                uFaceStateTex: { value: this.gpuSelectionTex },
+                uFaceTexSize: { value: new THREE.Vector2(this.gpuSelTexW, this.gpuSelTexH) },
+                uCheckerTex: { value: this.checkerTex },
+                uFlatMode: { value: 0.0 }, // 0 = Vertex Color (Charts / Stretch / Density / Priority / Overlaps), 1 = Per-Face MatCap Slot Swatch, 2 = Unlit UV Checker
+                uOutlineInk: { value: 0.16 }
+            },
+            vertexShader: `
+                precision highp float;
+                attribute float aFaceId;
+                attribute float aMatcapSlot;
+                varying float vFaceId;
+                varying float vMatcapSlot;
+                varying vec3 vColor;
+                varying vec2 vUv;
+                varying vec3 vViewNormal;
+                void main() {
+                    vFaceId = aFaceId;
+                    vMatcapSlot = aMatcapSlot;
+                    vColor = color;
+                    vUv = uv;
+                    vViewNormal = normalize(normalMatrix * normal);
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: `
+                precision highp float;
+                uniform sampler2D uFaceStateTex;
+                uniform vec2 uFaceTexSize;
+                uniform sampler2D uCheckerTex;
+                uniform float uFlatMode;
+                uniform float uOutlineInk;
+                varying float vFaceId;
+                varying float vMatcapSlot;
+                varying vec3 vColor;
+                varying vec2 vUv;
+                varying vec3 vViewNormal;
+
+                vec3 FlatSlotPalette(float slot) {
+                    int s = int(slot + 0.5);
+                    if (s == 1) return vec3(0.68, 0.67, 0.65);  // Grade-5 Titanium
+                    if (s == 2) return vec3(0.76, 0.74, 0.70);  // CAD Clay
+                    if (s == 3) return vec3(0.86, 0.91, 0.97);  // Class-A Chrome
+                    if (s == 4) return vec3(0.32, 0.36, 0.43);  // Gunmetal Ano
+                    if (s == 5) return vec3(0.30, 0.52, 0.78);  // Steel Blue
+                    if (s == 6) return vec3(0.80, 0.67, 0.40);  // Turned Brass
+                    if (s == 7) return vec3(0.55, 0.82, 0.76);  // Zebra CAD
+                    if (s == 8) return vec3(0.22, 0.24, 0.28);  // Vulcan Rubber
+                    if (s == 9) return vec3(0.54, 0.54, 0.96);  // Normal Map
+                    if (s == 10) return vec3(0.18, 0.52, 0.94); // Car Flake Blue
+                    if (s == 11) return vec3(0.86, 0.20, 0.30); // Car Flake Ruby
+                    if (s == 12) return vec3(0.26, 0.29, 0.34); // Carbon Fibre
+                    if (s == 13) return vec3(0.38, 0.46, 0.62); // Woven Fabric
+                    if (s == 14) return vec3(0.46, 0.36, 0.56); // Velvet Suede
+                    if (s == 15) return vec3(0.34, 0.44, 0.38); // Ripstop Nylon
+                    return vec3(0.74, 0.78, 0.84);              // CNC Aluminum
+                }
+
+                void main() {
+                    vec3 col = vColor;
+                    if (abs(uFlatMode - 1.0) < 0.25) {
+                        float slot = clamp(floor(vMatcapSlot + 0.5), 0.0, 15.0);
+                        col = FlatSlotPalette(slot);
+                    } else if (uFlatMode > 1.5) {
+                        vec3 chk = texture2D(uCheckerTex, vUv).rgb;
+                        col = chk * vColor;
+                    }
+                    // Subtle optional crease ink so 3D silhouette/creases stay readable without distorting flat debug colors
+                    vec3 Vn = normalize(gl_FrontFacing ? vViewNormal : -vViewNormal);
+                    float crease = clamp((length(dFdx(Vn)) + length(dFdy(Vn))) * 1.1, 0.0, 1.0);
+                    col *= (1.0 - crease * uOutlineInk);
+                    gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
+                }
+            `,
+            vertexColors: true,
+            toneMapped: false,
+            side: THREE.DoubleSide
+        });
+        this._SyncLightAndShadowFrustum();
+
         this.gpuSelOverlayMat = new THREE.ShaderMaterial({
             uniforms: {
                 uSelTex: { value: this.gpuSelectionTex },
                 uTexSize: { value: new THREE.Vector2(this.gpuSelTexW, this.gpuSelTexH) }
             },
             vertexShader: `
+                precision highp float;
                 attribute float aFaceId;
                 varying float vFaceId;
                 void main() {
@@ -375,6 +859,7 @@ export class UVViewport3D
                 }
             `,
             fragmentShader: `
+                precision highp float;
                 varying float vFaceId;
                 uniform sampler2D uSelTex;
                 uniform vec2 uTexSize;
@@ -420,7 +905,7 @@ export class UVViewport3D
                     vec3 a3 = smoothstep(vec3(0.0), d * 1.15, vBary + (1.0 - vEdgeMask) * 10.0);
                     float edgeFactor = 1.0 - min(min(a3.x, a3.y), a3.z);
                     if (edgeFactor < 0.02) discard;
-                    gl_FragColor = vec4(1.0, 1.0, 1.0, edgeFactor * 0.20);
+                    gl_FragColor = vec4(1.0, 1.0, 1.0, edgeFactor * 0.09);
                 }
             `,
             transparent: true,
@@ -925,9 +1410,95 @@ export class UVViewport3D
             requestAnimationFrame(Loop);
             if (!this.webglReady) return;
             this.controls.update();
+            const IsFastLitOrMatcap = this.shadingMode === 'lit-eon' || this.shadingMode === 'multi-matcap' || this.shadingMode === 'lit-matcap';
+            if (IsFastLitOrMatcap && this.shadowsEnabled && this.shadowDirty && this.triToFace.length > 0)
+            {
+                this._RenderShadowDepthMap();
+            }
+            if (this.groundShadowMesh)
+            {
+                this.groundShadowMesh.visible = IsFastLitOrMatcap && this.shadowsEnabled && this.shadingMode !== 'multi-matcap';
+            }
             this.renderer.render(this.scene, this.camera);
         };
         requestAnimationFrame(Loop);
+    }
+
+    _SyncLightAndShadowFrustum()
+    {
+        if (!this.fastLitMat) return;
+        const Az = (this.lightAzimuthDeg * Math.PI) / 180.0;
+        const El = (this.lightElevationDeg * Math.PI) / 180.0;
+        const Lx = Math.cos(El) * Math.sin(Az);
+        const Ly = Math.max(0.15, Math.sin(El));
+        const Lz = Math.cos(El) * Math.cos(Az);
+        const Dir = new THREE.Vector3(Lx, Ly, Lz).normalize();
+        this.fastLitMat.uniforms.uKeyLightDir.value.copy(Dir);
+        this.fastLitMat.uniforms.uRoughness.value = this.eonRoughness;
+        this.fastLitMat.uniforms.uShininess.value = this.blinnShininess;
+        this.fastLitMat.uniforms.uSpecStrength.value = this.specularStrength;
+        this.fastLitMat.uniforms.uMatcapBlend.value = this.matcapCoatBlend;
+        this.fastLitMat.uniforms.uShadowsEnabled.value = this.shadowsEnabled ? 1.0 : 0.0;
+        this.fastLitMat.uniforms.uEonEnergyComp.value = this.eonEnergyComp ? 1.0 : 0.0;
+        if (this.fastPbrMat)
+        {
+            this.fastPbrMat.uniforms.uKeyLightDir.value.copy(Dir);
+            this.fastPbrMat.uniforms.uPbrColor.value.set(this.pbrColor || '#7d93b2');
+            this.fastPbrMat.uniforms.uPbrMetallic.value = this.pbrMetallic;
+            this.fastPbrMat.uniforms.uPbrRoughness.value = this.pbrRoughness;
+            this.fastPbrMat.uniforms.uPbrSpecular.value = this.pbrSpecular;
+        }
+        if (this.groundShadowMat) this.groundShadowMat.uniforms.uShadowsEnabled.value = this.shadowsEnabled ? 1.0 : 0.0;
+        if (this.keyLight) this.keyLight.position.copy(Dir).multiplyScalar(10.0);
+
+        const Sphere = this.geometry?.boundingSphere;
+        const Center = Sphere ? Sphere.center : new THREE.Vector3(0, 0.85, 0);
+        const Radius = Math.max(1.4, Sphere ? Sphere.radius * 1.35 : 3.6);
+        this.shadowCam.left = -Radius;
+        this.shadowCam.right = Radius;
+        this.shadowCam.top = Radius;
+        this.shadowCam.bottom = -Radius;
+        this.shadowCam.near = 0.2;
+        this.shadowCam.far = Radius * 4.5 + 6.0;
+        this.shadowCam.position.copy(Center).addScaledVector(Dir, Radius * 2.2 + 2.0);
+        this.shadowCam.lookAt(Center);
+        this.shadowCam.updateProjectionMatrix();
+        this.shadowCam.updateMatrixWorld(true);
+        this.shadowMatrix.multiplyMatrices(this.shadowCam.projectionMatrix, this.shadowCam.matrixWorldInverse);
+        this.shadowDirty = true;
+    }
+
+    _RenderShadowDepthMap()
+    {
+        if (!this.webglReady || !this.shadowRT) return;
+        const PrevRT = this.renderer.getRenderTarget();
+        const PrevClear = this.renderer.getClearColor(new THREE.Color());
+        const PrevAlpha = this.renderer.getClearAlpha();
+        this.renderer.setRenderTarget(this.shadowRT);
+        this.renderer.setClearColor(0xffffff, 1.0);
+        this.renderer.clear(true, true, false);
+        this.renderer.render(this.shadowScene, this.shadowCam);
+        this.renderer.setRenderTarget(PrevRT);
+        this.renderer.setClearColor(PrevClear, PrevAlpha);
+        this.shadowDirty = false;
+    }
+
+    UpdateLightingConfig(Patch = {})
+    {
+        Object.assign(this, Patch);
+        this._SyncLightAndShadowFrustum();
+    }
+
+    UpdatePbrConfig(Patch = {})
+    {
+        Object.assign(this, Patch);
+        if (this.fastPbrMat)
+        {
+            if (Patch.pbrColor !== undefined) this.fastPbrMat.uniforms.uPbrColor.value.set(this.pbrColor);
+            if (Patch.pbrMetallic !== undefined) this.fastPbrMat.uniforms.uPbrMetallic.value = this.pbrMetallic;
+            if (Patch.pbrRoughness !== undefined) this.fastPbrMat.uniforms.uPbrRoughness.value = this.pbrRoughness;
+            if (Patch.pbrSpecular !== undefined) this.fastPbrMat.uniforms.uPbrSpecular.value = this.pbrSpecular;
+        }
     }
 
     SetActiveTool(Tool)
@@ -1021,9 +1592,24 @@ export class UVViewport3D
             this.gpuSelectionTex.generateMipmaps = false;
             this.gpuSelOverlayMat.uniforms.uSelTex.value = this.gpuSelectionTex;
             this.gpuSelOverlayMat.uniforms.uTexSize.value.set(W, NeedH);
+            if (this.fastLitMat)
+            {
+                this.fastLitMat.uniforms.uFaceStateTex.value = this.gpuSelectionTex;
+                this.fastLitMat.uniforms.uFaceTexSize.value.set(W, NeedH);
+            }
+            if (this.flatDebugMat)
+            {
+                this.flatDebugMat.uniforms.uFaceStateTex.value = this.gpuSelectionTex;
+                this.flatDebugMat.uniforms.uFaceTexSize.value.set(W, NeedH);
+            }
         }
         const Data = this.gpuSelectionTex.image.data;
         Data.fill(0);
+        for (let fi = 0; fi < FaceCount; fi++)
+        {
+            Data[fi * 4 + 2] = ((Surface.faces[fi].matcapSlot || 0) & 15) * 16;
+            Data[fi * 4 + 3] = 255;
+        }
         if (this.selectionMode === 'island' && UseIslands)
         {
             for (const Isl of UseIslands)
@@ -1068,7 +1654,57 @@ export class UVViewport3D
         }
         this.gpuSelectionTex.needsUpdate = true;
         this.selectedFaceOverlayMesh.visible = true;
+        if (this._lastMatVersion !== Surface._matVersion)
+        {
+            this.FastUpdateGpuFaceMaterials(Surface);
+        }
         this.FastUpdateGpuEdgeAndVertMasks(Surface, UseIslands);
+    }
+
+    FastUpdateGpuFaceMaterials(Surface)
+    {
+        if (!this.geometry || !Surface || !this.triToFace.length) return;
+        const SlotAttr = this.geometry.getAttribute('aMatcapSlot');
+        const PbrColAttr = this.geometry.getAttribute('aPbrColor');
+        const PbrParAttr = this.geometry.getAttribute('aPbrParams');
+        if (!SlotAttr || !PbrColAttr || !PbrParAttr) return;
+
+        const SArr = SlotAttr.array;
+        const CArr = PbrColAttr.array;
+        const PArr = PbrParAttr.array;
+        const HexCache = new Map();
+        const ParseHex = H =>
+        {
+            let Rgb = HexCache.get(H);
+            if (!Rgb) { Rgb = HexToRgb01(H || '#9fb2c8'); HexCache.set(H, Rgb); }
+            return Rgb;
+        };
+
+        for (let t = 0; t < this.triToFace.length; t++)
+        {
+            const F = Surface.faces[this.triToFace[t]];
+            if (!F) continue;
+            const s = (F.matcapSlot || 0) & 15;
+            const [cr, cg, cb] = ParseHex(F.pbrColor);
+            const pm = F.pbrMetallic ?? 0.55;
+            const pr = F.pbrRoughness ?? 0.28;
+            const ps = F.pbrSpecular ?? 0.55;
+            const mx = F.matcapMix ?? 0.62;
+
+            const v0 = t * 3;
+            SArr[v0] = s; SArr[v0 + 1] = s; SArr[v0 + 2] = s;
+            for (let k = 0; k < 3; k++)
+            {
+                const c3 = (v0 + k) * 3;
+                CArr[c3] = cr; CArr[c3 + 1] = cg; CArr[c3 + 2] = cb;
+                const p4 = (v0 + k) * 4;
+                PArr[p4] = pm; PArr[p4 + 1] = pr; PArr[p4 + 2] = ps; PArr[p4 + 3] = mx;
+            }
+        }
+        SlotAttr.needsUpdate = true;
+        PbrColAttr.needsUpdate = true;
+        PbrParAttr.needsUpdate = true;
+        this._lastMatVersion = Surface._matVersion;
     }
 
     FastUpdateUvsOnly(Surface)
@@ -1649,9 +2285,12 @@ export class UVViewport3D
         }
         const Scale = Radius / 1.85;
         this.controls.target.copy(Target);
-        if (Preset === 'Front') this.camera.position.set(Target.x + 5.2 * Scale, Target.y + 0.4 * Scale, Target.z + 0.01);
-        else if (Preset === 'Side') this.camera.position.set(Target.x, Target.y + 0.4 * Scale, Target.z + 5.2 * Scale);
+        if (Preset === 'Front') this.camera.position.set(Target.x + 5.2 * Scale, Target.y + 0.35 * Scale, Target.z + 0.01);
+        else if (Preset === 'Back') this.camera.position.set(Target.x - 5.2 * Scale, Target.y + 0.35 * Scale, Target.z - 0.01);
+        else if (Preset === 'Side' || Preset === 'Right') this.camera.position.set(Target.x, Target.y + 0.35 * Scale, Target.z + 5.2 * Scale);
+        else if (Preset === 'Left') this.camera.position.set(Target.x, Target.y + 0.35 * Scale, Target.z - 5.2 * Scale);
         else if (Preset === 'Top') this.camera.position.set(Target.x, Target.y + 5.4 * Scale, Target.z + 0.01);
+        else if (Preset === 'Bottom') this.camera.position.set(Target.x, Target.y - 5.4 * Scale, Target.z + 0.01);
         else this.camera.position.set(Target.x + 3.8 * Scale, Target.y + 1.8 * Scale, Target.z + 4.4 * Scale);
         this.controls.update();
     }
@@ -1669,18 +2308,52 @@ export class UVViewport3D
         this.surface = Surface;
         if (!this.webglReady || !Surface) return;
 
+        const IsFastPbr = this.shadingMode === 'fast-pbr';
+        const IsFastLit = this.shadingMode === 'lit-eon' || this.shadingMode === 'multi-matcap' || this.shadingMode === 'lit-matcap';
         const IsMatcap = this.shadingMode === 'matcap' || this.shadingMode === 'matcap-satin';
-        const IsFlat = this.shadingMode === 'flat';
-        if (IsMatcap)
+        const IsUnlitFlat = this.shadingMode === 'flat' || this.shadingMode === 'flat-charts' || this.shadingMode === 'flat-slots' ||
+            this.shadingMode === 'checker' || this.shadingMode === 'importance' || this.shadingMode === 'texel' ||
+            this.shadingMode === 'stretch' || this.shadingMode === 'overlap';
+
+        if (IsFastPbr && this.fastPbrMat)
         {
+            this.UpdatePbrConfig({});
+            this._SyncLightAndShadowFrustum();
+            this.mesh.material = this.fastPbrMat;
+        }
+        else if (IsFastLit)
+        {
+            if ((this.shadingMode === 'multi-matcap' || this.shadingMode === 'lit-matcap') && !this._matcapSheetBuilt)
+            {
+                this._matcapSheetBuilt = true;
+                this.matcapSheetTex.dispose();
+                this.matcapSheetTex = BuildMultiMatcapSheetTexture();
+                this.fastLitMat.uniforms.uMatcapSheet.value = this.matcapSheetTex;
+            }
+            this.fastLitMat.uniforms.uMode.value = this.shadingMode === 'lit-eon' ? 0.0 : this.shadingMode === 'multi-matcap' ? 1.0 : 2.0;
+            this._SyncLightAndShadowFrustum();
+            this.mesh.material = this.fastLitMat;
+        }
+        else if (IsMatcap)
+        {
+            if (!this.matcapClayTex) this.matcapClayTex = BuildMatcapTexture('clay');
+            if (!this.matcapSatinTex) this.matcapSatinTex = BuildMatcapTexture('matcap-satin');
             this.matcapMat.matcap = this.shadingMode === 'matcap-satin' ? this.matcapSatinTex : this.matcapClayTex;
             this.matcapMat.needsUpdate = true;
             this.mesh.material = this.matcapMat;
         }
+        else if (IsUnlitFlat && this.flatDebugMat)
+        {
+            this.flatDebugMat.uniforms.uFlatMode.value =
+                this.shadingMode === 'flat-slots' ? 1.0 :
+                this.shadingMode === 'checker' ? 2.0 : 0.0;
+            this.flatDebugMat.uniforms.uOutlineInk.value = this.eonEnergyComp ? 0.16 : 0.0;
+            this.mesh.material = this.flatDebugMat;
+        }
         else
         {
-            this.meshMat.map = this.shadingMode === 'checker' ? this.checkerTex : null;
-            this.meshMat.flatShading = IsFlat;
+            this.meshMat.map = null;
+            this.meshMat.flatShading = true;
             this.meshMat.needsUpdate = true;
             this.mesh.material = this.meshMat;
         }
@@ -1693,7 +2366,8 @@ export class UVViewport3D
             const P = Surface.uvCoords[i];
             UvHash = ((UvHash * 1.00013) + P[0] * 13.7 + P[1] * 29.3) % 1e9;
         }
-        const DataSig = `${Surface.faces.length}:${ULen}:${Surface.hiddenIslands.size}:${Surface.importanceByFace.size}:${this.shadingMode}:${TargetTexelDensity}:${ImportanceGroups.length}:${UvHash.toFixed(4)}`;
+        const GeomShadeKey = (IsFastPbr || IsFastLit || IsMatcap) ? 'smooth52' : this.shadingMode;
+        const DataSig = `${Surface.faces.length}:${ULen}:${Surface.hiddenIslands.size}:${Surface.importanceByFace.size}:${GeomShadeKey}:${TargetTexelDensity}:${ImportanceGroups.length}:${UvHash.toFixed(4)}`;
 
         // Fast path: topology, UVs, and shading didn't change -> ONLY upload compact GPU masks (0.02ms!)
         if (this._lastMeshTopoSig === DataSig && this.triToFace.length > 0)
@@ -1709,6 +2383,9 @@ export class UVViewport3D
         const UvArr = [];
         const ColArr = [];
         const FaceIdArr = [];
+        const SlotArr = [];
+        const PbrColArr = [];
+        const PbrParamArr = [];
         const BaryArr = [];
         const EdgeMaskArr = [];
         this.triToFace = [];
@@ -1730,7 +2407,7 @@ export class UVViewport3D
             [0.74, 0.94, 0.85]
         ];
 
-        const CreaseNormals = IsMatcap ? ComputeCreaseCornerNormals(Surface, 52) : null;
+        const CreaseNormals = (IsMatcap || IsFastLit || IsFastPbr) ? ComputeCreaseCornerNormals(Surface, 52) : null;
         const EdgeAccum = new Map();
 
         for (let fi = 0; fi < Surface.faces.length; fi++)
@@ -1750,9 +2427,24 @@ export class UVViewport3D
                 const TileIdx = Math.max(0, (Isl?.udimTile || 1001) - 1001) % UdimTints.length;
                 [R, G, B] = UdimTints[TileIdx];
             }
-            else if (this.shadingMode === 'flat')
+            else if (this.shadingMode === 'flat' || this.shadingMode === 'flat-charts')
             {
-                R = 0.76; G = 0.78; B = 0.80;
+                // Distinct golden-angle studio chart palette for crisp unlit UV island visualization
+                const Hue = (((Isl?.id ?? fi) * 0.61803398875) % 1 + 1) % 1;
+                const H6 = Hue * 6.0;
+                const C = 0.42, X = C * (1.0 - Math.abs((H6 % 2.0) - 1.0)), M = 0.36;
+                if (H6 < 1)      { R = C + M; G = X + M; B = M; }
+                else if (H6 < 2) { R = X + M; G = C + M; B = M; }
+                else if (H6 < 3) { R = M;     G = C + M; B = X + M; }
+                else if (H6 < 4) { R = M;     G = X + M; B = C + M; }
+                else if (H6 < 5) { R = X + M; G = M;     B = C + M; }
+                else             { R = C + M; G = M;     B = X + M; }
+            }
+            else if (this.shadingMode === 'overlap')
+            {
+                const Cached = typeof Surface.GetCachedAnalysis === 'function' ? Surface.GetCachedAnalysis() : null;
+                const Bad = Cached?.diagnostics?.OverlappingFaces?.has(fi) || Cached?.diagnostics?.FlippedFaces?.has(fi);
+                [R, G, B] = Bad ? [0.95, 0.24, 0.24] : [0.22, 0.72, 0.46];
             }
             else if (this.shadingMode === 'importance')
             {
@@ -1781,6 +2473,11 @@ export class UVViewport3D
 
                 const Idxs = [0, k, k + 1];
                 const Barys = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+                const [PbrR, PbrG, PbrB] = HexToRgb01(F.pbrColor || '#9fb2c8');
+                const PbrM = F.pbrMetallic ?? 0.55;
+                const PbrRo = F.pbrRoughness ?? 0.28;
+                const PbrSp = F.pbrSpecular ?? 0.55;
+                const MatMix = F.matcapMix ?? 0.62;
                 for (let b = 0; b < 3; b++)
                 {
                     const C = Corners[Idxs[b]];
@@ -1792,6 +2489,9 @@ export class UVViewport3D
                     UvArr.push(Uv[0], Uv[1]);
                     ColArr.push(R, G, B);
                     FaceIdArr.push(fi);
+                    SlotArr.push((F.matcapSlot || 0) & 15);
+                    PbrColArr.push(PbrR, PbrG, PbrB);
+                    PbrParamArr.push(PbrM, PbrRo, PbrSp, MatMix);
                     BaryArr.push(Barys[b][0], Barys[b][1], Barys[b][2]);
                     EdgeMaskArr.push(M0, M1, M2);
                 }
@@ -1820,9 +2520,14 @@ export class UVViewport3D
         this.geometry.setAttribute('uv', new THREE.Float32BufferAttribute(UvArr, 2));
         this.geometry.setAttribute('color', new THREE.Float32BufferAttribute(ColArr, 3));
         this.geometry.setAttribute('aFaceId', new THREE.Float32BufferAttribute(FaceIdArr, 1));
+        this.geometry.setAttribute('aMatcapSlot', new THREE.Float32BufferAttribute(SlotArr, 1));
+        this.geometry.setAttribute('aPbrColor', new THREE.Float32BufferAttribute(PbrColArr, 3));
+        this.geometry.setAttribute('aPbrParams', new THREE.Float32BufferAttribute(PbrParamArr, 4));
+        this._lastMatVersion = Surface._matVersion;
         this.geometry.setAttribute('aBary', new THREE.Float32BufferAttribute(BaryArr, 3));
         this.geometry.setAttribute('aEdgeMask', new THREE.Float32BufferAttribute(EdgeMaskArr, 3));
         this.geometry.computeBoundingSphere();
+        this._SyncLightAndShadowFrustum();
 
         const ModelRadius = this.geometry.boundingSphere?.radius || 2.0;
         const BaseR = Math.max(0.0038, Math.min(0.022, ModelRadius * 0.0042));

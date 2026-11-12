@@ -10,6 +10,7 @@
 //------------------------------------------------------------------------------------------------------------------------
 
 #include "Engine/Components/PixelSpace.h"
+#include "Engine/Configuration/EngineConfiguration.h"
 #include "Engine/Threading/Threads/Streaming/AssetStreamThread.h"
 
 #include <imgui.h>
@@ -31,11 +32,11 @@ namespace Frontier
 //                                                      ENUMERATIONS
 //------------------------------------------------------------------------------------------------------------------------
 
-enum class ContentCategoryKind : uint8_t
+enum class ContentCategory : uint8_t
 {
-    All         = 0,  // [-] - Every category permitted by active WorkspaceDomainKind
+    All         = 0,  // [-] - Every category permitted by active WorkspaceCategory
     Colours     = 1,  // [-] - Named ColourCodex swatches (.ColourSwatch / .ColourSpace)
-    Geometry    = 2,  // [-] - Analytic & polygonal 3D solids (.GeometrySpace / .Sketch / .Assembly)
+    Geometry    = 2,  // [-] - Analytic & polygonal 3D solids (.GeometrySpace / .Sketch)
     UVLayouts   = 3,  // [-] - UDIM & UVTile parameterization sets (.UVSpace)
     Materials   = 4,  // [-] - Physical BSDF shading definitions (.MaterialSpace)
     Textures    = 5,  // [-] - Multi-UDIM channel-packed textures (.TextureSpace / .Pigment)
@@ -58,20 +59,6 @@ enum class ContentOriginFilter : uint8_t
     Engine   = 3, // [-] - Read-only stock entries under EngineContent/
 };
 
-enum class WorkspaceDomainKind : uint8_t
-{
-    SceneWorld   = 0, // [-] - Full 3D world authoring workspace
-    UV           = 1, // [-] - UV unwrap & UDIM packing workspace (blocks Particles, Simulations, Audio, etc.)
-    GeometryCad  = 2, // [-] - Parametric solid, sketch, and polygonal modeling workspace
-    Material     = 3, // [-] - BSDF closure & shading studio workspace
-    TexturePaint = 4, // [-] - UDIM channel painting & procedural texture workspace
-    Image        = 5, // [-] - Radiometric image & HDRI grading workspace
-    Vector       = 6, // [-] - 2D Bézier vector & icon workspace
-    Simulation   = 7, // [-] - Physics, fluid, fracture & force-field workspace
-    Particle     = 8, // [-] - Particulate & fibre studio workspace
-    Audio        = 9, // [-] - Spatial acoustic studio workspace
-};
-
 enum class ImportDestinationMode : uint8_t
 {
     ProjectImportedFolder = 0, // [-] - Quarantine -> Projects/<Project>/Content/Imported/<Category>/ (Scratch fallback if unsaved)
@@ -90,13 +77,13 @@ struct alignas(64) ContentIndexEntry64
     uint64_t SheetSliceByteOffset       = 0ull; // [B]    - 64-byte-aligned tile slice offset inside ThumbnailSheet.ImageSpace
     uint32_t TitleStringOffset          = 0u;   // [B]    - UTF-8 byte offset inside string section
     uint32_t RelativePathStringOffset   = 0u;   // [B]    - UTF-8 path offset inside string section
-    uint32_t WorkspaceCompatibilityMask = 0u;   // [mask] - Bitmask of WorkspaceDomainKind bit positions allowed to view/use entry
+    uint32_t WorkspaceCompatibilityMask = 0u;   // [mask] - Bitmask of WorkspaceCategory bit positions allowed to view/use entry
     uint32_t SheetSliceByteLength       = 0u;   // [B]    - Byte length of pre-baked RGBA32 tile pixels
     uint16_t SheetPageOrdinal           = 0u;   // [idx]  - Pre-baked ThumbnailSheet page index
     uint16_t TileColumn                 = 0u;   // [idx]  - Tile X slot within sheet page
     uint16_t TileRow                    = 0u;   // [idx]  - Tile Y slot within sheet page
     uint16_t TilePixelExtent            = 128u; // [px]   - Square tile width/height in pixels
-    uint8_t  CategoryCode               = 0u;   // [-]    - ContentCategoryKind encoded ordinal
+    uint8_t  CategoryCode               = 0u;   // [-]    - ContentCategory encoded ordinal
     uint8_t  OriginCode                 = 0u;   // [-]    - ContentOriginFilter encoded ordinal
     uint8_t  TintRed                    = 180u; // [0-255]- Primary preview tint R
     uint8_t  TintGreen                  = 180u; // [0-255]- Primary preview tint G
@@ -136,7 +123,7 @@ struct ImportIntakeResult
 {
     bool                  Accepted          = false; // [-]   - True when validated, converted, and indexed
     std::size_t           RepositoryIndex   = 0u;    // [idx] - Index of newly registered ContentRepositoryEntry
-    ContentCategoryKind   DetectedCategory  = ContentCategoryKind::Geometry; // [-] - Inferred asset category
+    ContentCategory   DetectedCategory  = ContentCategory::Geometry; // [-] - Inferred asset category
     std::filesystem::path QuarantinePath    {};      // [-]   - Transient Saved/ImportIntake path used during step 1
     std::filesystem::path FinalSpacePath    {};      // [-]   - Final .Space or .ColourSwatch path written in step 2
     std::string           DiagnosticMessage {};      // [-]   - Rejection reason or conversion summary
@@ -160,24 +147,24 @@ public:
     ThumbnailSheetRepository(const ThumbnailSheetRepository&)            = delete;
     ThumbnailSheetRepository& operator=(const ThumbnailSheetRepository&) = delete;
 
-    [[nodiscard]] static uint32_t            QueryAllowedCategoryMask(WorkspaceDomainKind Workspace) noexcept;
-    [[nodiscard]] static bool                QueryCategoryPermitted(WorkspaceDomainKind Workspace, ContentCategoryKind Category) noexcept;
-    [[nodiscard]] static uint32_t            ComputeWorkspacesAllowingCategory(ContentCategoryKind Category) noexcept;
-    [[nodiscard]] static const char*         QueryCategoryTitle(ContentCategoryKind Category) noexcept;
-    [[nodiscard]] static const char*         QueryCanonicalExtension(ContentCategoryKind Category) noexcept;
-    [[nodiscard]] static const char*         QueryWorkspaceTitle(WorkspaceDomainKind Workspace) noexcept;
-    [[nodiscard]] static ContentCategoryKind ClassifyExternalExtension(const std::filesystem::path& SourceFile) noexcept;
+    [[nodiscard]] static uint32_t            QueryAllowedCategoryMask(WorkspaceCategory Workspace) noexcept;
+    [[nodiscard]] static bool                QueryCategoryPermitted(WorkspaceCategory Workspace, ContentCategory Category) noexcept;
+    [[nodiscard]] static uint32_t            ComputeWorkspacesAllowingCategory(ContentCategory Category) noexcept;
+    [[nodiscard]] static const char*         QueryCategoryTitle(ContentCategory Category) noexcept;
+    [[nodiscard]] static const char*         QueryCanonicalExtension(ContentCategory Category) noexcept;
+    [[nodiscard]] static const char*         QueryWorkspaceTitle(WorkspaceCategory Workspace) noexcept;
+    [[nodiscard]] static ContentCategory ClassifyExternalExtension(const std::filesystem::path& SourceFile) noexcept;
 
     void ConfigureImportPolicy(const ImportIntakeConfiguration& Policy);
     [[nodiscard]] const ImportIntakeConfiguration& QueryImportPolicy() const noexcept;
     [[nodiscard]] std::filesystem::path            ResolveQuarantineDirectory() const;
-    [[nodiscard]] std::filesystem::path            ResolveFinalImportDirectory(ContentCategoryKind Category) const;
+    [[nodiscard]] std::filesystem::path            ResolveFinalImportDirectory(ContentCategory Category) const;
 
     void PopulateDefaultEngineAndProjectEntries();
 
     std::size_t RegisterPrebakedEntry(
         std::string_view             DisplayTitle,
-        ContentCategoryKind          Category,
+        ContentCategory          Category,
         ContentOriginFilter          Origin,
         ColorRgba                    PreviewTint,
         const std::filesystem::path& DiskPath = {},
@@ -199,15 +186,15 @@ public:
 
     [[nodiscard]] ImportIntakeResult IntakeExternalAssetDrop(
         const std::filesystem::path& DroppedSourceFile,
-        WorkspaceDomainKind          ActiveWorkspace);
+        WorkspaceCategory          ActiveWorkspace);
 
     [[nodiscard]] uint32_t MigrateScratchImportsToProject(
         const std::filesystem::path& SavedProjectRoot,
         std::string&                 OutDiagnostic);
 
     [[nodiscard]] std::vector<std::size_t> QueryFilteredEntries(
-        WorkspaceDomainKind Workspace,
-        ContentCategoryKind Category,
+        WorkspaceCategory Workspace,
+        ContentCategory Category,
         ContentOriginFilter Origin,
         std::string_view    SearchQuery = {}) const;
 

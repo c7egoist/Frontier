@@ -21,6 +21,7 @@
 #include "Engine/Lifecycle/LifecycleSequence.h"
 #include "Engine/Lifecycle/WorkspaceLifecycle.h"
 #include "Engine/Windowing/PlatformWindow.h"
+#include "Engine/Workspaces/UV/UVWorkspaceHost.h"
 
 #include <cstdint>
 #include <filesystem>
@@ -73,11 +74,12 @@ public:
     template <LifecycleParticipant OverlayParticipantType>
     [[nodiscard]] uint32_t RegisterGpuViewportOverlay(std::string_view Identifier, OverlayParticipantType& OverlayParticipant)
     {
-        ++RegisteredOverlayHooks;
+        ++RegisteredGpuOverlays;
         return EditorSequence.RegisterParticipant(Identifier, OverlayParticipant);
     }
 
     [[nodiscard]] bool Initialize(const EditorStartupConfiguration& Configuration = {}) noexcept;
+    void               AttachUVWorkspaceHost(Workspaces::UVWorkspaceHost* TargetHost) noexcept { MountedUVHost = TargetHost; }
     [[nodiscard]] bool ExecuteAuthoringTick(double Δt);
     [[nodiscard]] bool Suspend() noexcept;
     [[nodiscard]] bool Resume() noexcept;
@@ -107,11 +109,12 @@ private:
     WorkspaceLifecycle                         Workspaces             {};     // [-]     - Multi-document workspace session loop
     Input::InputExtension                      InputCoordinator       {};     // [-]     - Hardware input & OS feedback coordinator
     LifecycleSequence                          EditorSequence         {};     // [-]     - Registered GPU .slang overlay & editor hooks
+    Workspaces::UVWorkspaceHost*               MountedUVHost          = nullptr; // [-]  - Optional live UVWorkspaceHost
     Components::WorkspaceDockPaneToken         OutlinerPaneToken      {};     // [idx]   - Registered left Outliner/LayerStack pane
     Components::WorkspaceDockPaneToken         ViewportPaneToken      {};     // [idx]   - Registered central Viewport pane
     Components::WorkspaceDockPaneToken         InspectorPaneToken     {};     // [idx]   - Registered right Inspector pane
     double                                     CurrentStepSeconds     = 0.016;// [s]     - Active authoring step passed to pane presenters
-    uint32_t                                   RegisteredOverlayHooks = 0u;   // [count] - Registered GPU .slang viewport overlay hooks
+    uint32_t                                   RegisteredGpuOverlays = 0u;   // [count] - Registered GPU .slang viewport overlay hooks
     bool                                       Initialized            = false;// [-]     - True between Initialize and Finalize
     bool                                       TerminationRequested   = false;// [-]     - Latch stopping authoring loop
 };
