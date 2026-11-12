@@ -1,0 +1,106 @@
+# Frontier Rendering & Deterministic Raytracing Architecture Plan
+
+**Status:** Approved Architecture Baseline (Post-GTX Benchmark Sign-Off)  
+**Coordinate Convention:** Strict Right-Hand Rule (`+X` Forward, `+Y` Left, `+Z` Up; `X × Y = +Z`), Reverse-Z `[1.0 → 0.0]`  
+**Native Graphics Target:** Vulkan `1.3` (`DynamicRendering`, `Synchronization2`, `Subgroup`, `VK_KHR_ray_query`)  
+**Quality Gate:** `Constants::MaximumOptimizationPixelDelta = 0.05f` (`<= 5.0%` pixel delta, **zero checkerboarding**, **zero blind Monte Carlo / Russian Roulette boiling**)
+
+---
+
+## 1. Empirical Sign-Off from `GtxReflectionBenchmark` (`Port 8096` — Frozen Reference)
+
+Measured across both offline C++20 reference verification (`1280×720`) and live hardware execution (`AMD Radeon RX 9060 XT`, `120 FPS` display lock):
+
+| Evaluated Subsystem | Global SDF (`Clip0 + Clip1` 3D Cascades) | Compute BVH (`TLAS + SAH BLAS` Triangle Raytrace) | Empirical Finding & Architectural Decision |
+| :--- | :---: | :---: | :--- |
+| **Diffuse GI & Color Bleeding (`1B–3B`)** | **`~0.48 – 0.58 ms`** (`4–12` directional cones + 3D surface-cache bounce propagation; `< 0.1 ms` per extra GI bounce) | **`~4.3 – 11.8 ms`** (`6–24` hemisphere rays × `1–3` bounces; blotchy at low SPP without temporal accumulation) | 🏆 **Adopt Directional Global SDF Cone GI (`+ Contact AO`)** for GTX & Hybrid presets — **`8.3×` faster**, `C¹`-smooth, zero noise, nearly free multi-bounce inside the 3D surface cache. |
+| **Soft Shadows & Area-Light Penumbra** | **`~0.08 ms`** (34-step analytical solar-cone march: `halfW = max(0.55 * vox, R_sun * t)`) | **`~0.9 – 2.2 ms`** (`4–12` Golden-Disk shadow rays + dilated Gaussian PCSS) | 🏆 **Adopt Global SDF Cone Penumbra + `0–0.4 m` Contact Ray/Hi-Z** on GTX — continuous physical penumbra without discrete disk-ray quantization. |
+| **Multi-Bounce Specular Reflections (`1B–3B`)** | **`~0.08 – 0.20 ms`** (voxel sphere-trace + 2-step `d = 0` polish + Hi-Z near assist) | **`~0.12 – 0.45 ms`** when tracing **coherent specular rays only** (`Roughness <= 0.30`) | 🏆 **Combine Both on GTX!** Coherent `CWBVH` reflections cost **only `~0.15–0.45 ms`** once random GI rays are removed — giving exact triangle mirror reflections alongside Global SDF GI + Cone Penumbra! |
+| **Full-Pipeline Parity Gate** | `66.09M` 3D TMU taps (`17.14×` fewer ops) | `1,133.05M` software BVH stack steps | **`4.67% – 4.91%` Mean Pixel Delta (`<= 5.0%` Gate Passed)** |
+
+---
+
+## 2. Locked Tier 1 Architecture: **GTX / Non-RT Hybrid Pipeline (`~1.1 ms` Total at 1080p)**
+
+Yes — for **GTX / Non-RT hardware**, Frontier locks in the exact winning **Hybrid Pipeline** proven in the benchmark:
+
+```text
+[Full-Res G-Buffer + Reverse-Z Hi-Z Pyramid]
+        │
+        ├──► 1. Dynamic Global SDF Surface Cache (Clip0..Clip2, ~0.12 ms)
+        │       • Stamps moving rigid/skeletal SDF bricks + 3-slice/tick amortized multi-bounce voxel radiosity
+        │       • Stores directional surface-normal emission (prevents isotropic 360° "emissive" underglow)
+        │
+        ├──► 2. Global SDF Analytical Cone Penumbra + 0.4 m Contact Ray (~0.15 ms)
+        │       • Short 0–0.4 m triangle/Hi-Z contact ray for millimeter-crisp tyre/trim grounding
+        │       • Hands off seamlessly at > 0.4 m to continuous Global SDF solar-cone penumbra
+        │
+        ├──► 3. Directional Global SDF 6-Cone Diffuse GI + Screen-Space Contact AO (~0.45 ms)
+        │       • Zero Monte Carlo grain, zero temporal lag trails, 2–3 GI bounces cached in 3D voxels
+        │
+        └──► 4. Coherent Multi-Bounce Reflections: CWBVH (Rough <= 0.30) + Global SDF (> 0.30) (~0.38 ms)
+                • Coherent deterministic clearcoat/mirror rays trace 4-Wide Compute CWBVH (exact triangle spokes/trim)
+                • Rougher glossy coats (> 0.30) march pre-filtered Global SDF radiosity (zero GGX fireflies)
+```
+
+---
+
+## 3. Browser (`WebGL2` / `WebGPU`) vs. Native (`Vulkan 1.3`): Do We Have Hardware RT Cores?
+
+| Platform / API | Hardware RT Cores Exposed? (`RT Cores` / `RDNA Ray Accelerators`) | Compute Shaders & Storage Buffers (`SSBO`)? | How Raytracing Must Execute |
+| :--- | :---: | :---: | :--- |
+| **`WebGL2`** *(Current Port `8096`)* | ❌ **NO** | ❌ **NO** *(Fragment GPGPU over `RGBA32F` 2D/3D textures)* | Software `TLAS + SAH BLAS` stack traversal inside Fragment Shaders. |
+| **Standard `WebGPU` (`W3C 1.0` in Chrome / Edge / Firefox)** | ❌ **NO** *(No standard `ray_query` / BLAS extension in shipping browsers)* | ✅ **YES** (`@compute`, `var<storage>`, `var<workgroup>`, `subgroups`) | **Software `4-Wide CWBVH` in `@compute` Shaders** (`2.5×–3.5×` faster than WebGL2 fragment BVH thanks to shared-memory stacks, byte-packed `64 B` nodes, and subgroup wave compaction). |
+| **Native C++20 `Vulkan 1.3` (GTX 10/16-Series)** | ❌ **NO** *(Hardware lacks RT silicon)* | ✅ **YES** (`VkBuffer` BDA + `SubgroupBallot`) | **Same `4-Wide CWBVH` Slang Compute Kernel** used in the WebGPU prototype. |
+| **Native C++20 `Vulkan 1.3` (NVIDIA RTX & AMD RDNA 2/3/4 incl. `RX 9060 XT`)** | ✅ **YES — FULL HARDWARE SILICON** (`VK_KHR_acceleration_structure` + `VK_KHR_ray_query`) | ✅ **YES** | **Hardware RT Cores / Ray Accelerators** (`rayQueryProceedEXT`) — `5×–10×` faster ray traversal with **1-line backend swap** behind the same `traceSceneRay()` interface! |
+
+> **Key Takeaway:** You were **100% right** — neither `WebGL2` nor standard browser `WebGPU` exposes hardware RT cores. Therefore, our next **Full Raytracing Browser Prototype** should use **`WebGPU` Compute Shaders + `4-Wide Compressed Wide BVH (CWBVH)`** (with optional WebGL2 fallback), structured behind a clean `traceRay()` abstraction that maps directly to `VK_KHR_ray_query` Hardware RT Cores in native C++20 Vulkan 1.3.
+
+---
+
+## 4. Full Deterministic Raytracing Architecture (Zero Blind Monte Carlo, Zero Russian Roulette)
+
+Traditional path tracers fire random hemisphere rays (`Monte Carlo`) and randomly kill paths (`Russian Roulette`), which produces severe boiling grain at `1–4 SPP` and forces aggressive temporal/spatial blurring (`ReSTIR` + `5×5` À-Trous) that smears moving vehicles.
+
+Frontier's **Full Raytracing Tier** replaces blind random sampling with **four deterministic, structured raytracing techniques**:
+
+### Pillar 1 — Ray-Differential Cone-Footprint Specular & Glass Raytracing (`0` Random BRDF Jitter)
+- Instead of firing random GGX-jittered rays per pixel, trace **1 deterministic primary reflection/refraction ray** (plus deterministic `2–3` bounce continuations weighted by exact Fresnel throughput — **deterministic energy cutoff `throughput < 0.02`, zero Russian Roulette RNG!**).
+- Each ray carries **Igehy Ray Differentials / Specular Cone Spread (`r_cone = t * tan(atan(2 * roughness²))`)**.
+- At the triangle hit point, `r_cone` analytically selects the **exact pre-filtered texture/irradiance MIP level** (and blends a deterministic 4-tap symmetric tangent stencil only on mid-roughness `[0.18..0.45]` surfaces).
+- **Result:** Crystal-clear mirrors, glass, and satin clearcoat in **1 coherent ray/bounce**, high GPU warp coherence, **`0` fireflies, `0` boiling**.
+
+### Pillar 2 — Raytraced World-Space Octahedral Irradiance Probes (`DDGI`) + Surface Cache (`0` Per-Pixel Random GI Rays)
+- **Why per-pixel Monte Carlo GI fails in real time:** `1920×1080 = 2,073,600` pixels each firing random rays wastes `99%` of GPU rays re-discovering slowly varying diffuse bounce.
+- **Deterministic Replacement:** Place a cascaded 3D grid of **World-Space Octahedral Irradiance + Chebyshev Depth Probes** (`e.g. 24×16×8 = 3,072` probes).
+- Every frame, probes trace a **deterministic Spherical Fibonacci Lattice (`64` evenly distributed directions on the unit sphere)** through the BVH:
+  - `3,072 probes × 64 rays = 196,608` structured rays total (`10×` fewer rays than 1-SPP screen-space GI, and `60×` fewer than 6-SPP!).
+  - **Infinite GI Bounces Without Russian Roulette:** Each probe ray hit evaluates direct sun + **samples the probe grid from frame `N-1` (or pass `b-1`)**, giving **converged multi-bounce Cornell color bleeding (`2B..∞`) at `0` extra rays**!
+  - Screen pixels evaluate diffuse GI in **`0` rays** via a fast trilinear + normal-biased Chebyshev visibility lookup (zero light leak through thin walls or car floors).
+
+### Pillar 3 — Analytic Area Lights (`LTC`) + Deterministic Frustum-Edge Soft Shadows (`0` Random Disk Noise)
+- **Direct Area Illumination:** Overhead light portals, studio strips, and rectangular emitters integrate **100% analytically in closed form** via **Linearly Transformed Cosines (`LTC`, Heitz et al.)** — zero random light rays, exact glossy & diffuse shapes.
+- **Deterministic Soft Shadows:** Instead of firing random disk rays that quantize or boil:
+  1. Trace **1 deterministic center-of-sun blocker search ray** (`t_blocker`) + **2 deterministic tangent-extremum penumbra rays** perpendicular to the shadow-caster edge (`sunT`, `sunB`).
+  2. Feed the exact analytical penumbra width `w = (t_receiver - t_blocker) * R_sun / t_blocker` into a single plane-aware Edge-Guided Gaussian filter.
+  - **Result:** True triangle-accurate contact hardening right down to `0.0 mm` (wheel spokes, wipers, panel gaps) fanning smoothly into wide penumbras with **zero random noise**.
+
+### Pillar 4 — Unified `SceneRayQuery` Shader Abstraction (`WebGPU CWBVH` ↔ `Vulkan 1.3 RT Cores`)
+
+| Layer | Browser Next-Step Lab (`Experimental/DeterministicRaytracingLab/`) | Frontier C++20 Engine (`Engine/Renderer/Vulkan13/`) |
+| :--- | :--- | :--- |
+| **Shader Language** | `WGSL` Compute (`@compute @workgroup_size(8, 8)`) | `Slang` → `SPIR-V 1.6` (Vulkan `1.3`) |
+| **Acceleration Structure** | **4-Wide Compressed `CWBVH`** (`64 B` quantized child AABBs in `storage` buffer + `workgroup` short-stack) | **`VkAccelerationStructureKHR` (`VK_KHR_ray_query`)** on RTX / `RX 9060 XT`; **`CWBVH`** fallback on GTX |
+| **Specular / Glass** | Deterministic Cone-Footprint `1–3` Bounce Raytrace | Identical Cone-Footprint `1–3` Bounce Raytrace |
+| **Global Illumination** | Deterministic Fibonacci-Lattice **Raytraced `DDGI` Octahedral Probes** (`Multi-Bounce`) | Identical **Raytraced `DDGI` Probes** (+ Global SDF far-cascade) |
+| **Area Lights & Shadows** | Analytic **`LTC`** Portals + Deterministic Blocker/Edge Frustum Raytrace | Identical **`LTC`** + Deterministic Raytraced Frustum Shadows |
+
+---
+
+## 5. Next Implementation Roadmap: `Experimental/DeterministicRaytracingLab/` (`WebGPU` Full Raytracing)
+
+Leaving **`Experimental/GtxReflectionBenchmark/` (`:8096`) untouched** as our permanent GTX Hybrid benchmark baseline, the next standalone lab (`Experimental/DeterministicRaytracingLab/`, e.g. `:8097`) will implement **100% Full Deterministic Raytracing in `WebGPU` Compute (`CWBVH`)**:
+1. **`4-Wide CWBVH` Builder & `@compute` Traversal Kernel** (`64 B` quantized 4-child nodes + Woop pre-transformed triangles + fast workgroup stack — `0` WebGL2 texture unpacking overhead).
+2. **Primary + Multi-Bounce Cone-Footprint Raytracer** (even primary visibility can be raytraced directly alongside raster comparison, plus `1–3` bounce reflections & refractive glass cabin windows!).
+3. **Live Raytraced `DDGI` Octahedral Probe Volume** (deterministic 64-ray Fibonacci spherical lattice per probe + Chebyshev visibility — smooth multi-bounce red/cyan color bleeding with **`0` per-pixel random GI rays and `0` Russian Roulette**).
+4. **Analytic `LTC` Showroom Area Lights + Deterministic Raytraced Contact-Hardening Shadows** with live FPS, pass-by-pass GPU timestamp queries (`timestamp-query`), and probe-sphere debug visualization toggles.

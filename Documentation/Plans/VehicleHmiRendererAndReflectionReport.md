@@ -184,4 +184,17 @@ All four root-cause fixes diagnosed in §8 — plus **Multi-Bounce Diffuse GI (`
 | **`R2 De-Blotch` *(Toggle)*** | `R2` low-discrepancy cone rotation | **Martin Roberts' 2D `R2` Cranley–Patterson Hemisphere Stratification + Pass-1 `3×3` Mean/StdDev Outlier Clamp** + sub-step rotated À-Trous | **Eliminates stationary cloudy 6-ray GI blotches & sill speckles** on Right (`~0.03 ms`). |
 | **`Full-Res 1.0×` / `A/B: Fixes ON`** | Switches trace FBOs between `0.5×` half-res and `1.0×` native resolution; `A/B: Fixes ON/OFF` flips all 4 fixes in one click | Same (`0.5×` vs `1.0×` native ray count = `4×` pixels) | Instant 1-click **Before (`Legacy OFF`) vs. After (`Fixes ON`)** visual & `FPS`/`ms` comparison. |
 
+---
+
+## 10. ✅ Final GTX Benchmark Sign-Off & Locked Architecture Decision
+
+`Experimental/GtxReflectionBenchmark/` (`port 8096`) is now **frozen as the permanent GTX Non-RT reference benchmark**. Based on live hardware measurements (`AMD Radeon RX 9060 XT` + C++20 reference parity):
+
+1. **Locked GTX (Non-RT) Hybrid Architecture (`~1.1 ms` total at 1080p)**:
+   - **Diffuse GI & Multi-Bounce Color Bleeding**: **Directional Global SDF Cone GI** (`Clip0..2` surface-cache radiosity + `Dir SDF GI` normal-weighted emission + `Contact AO`) — **`8.3×` faster** than per-pixel BVH ray GI, noise-free, and `< 0.1 ms` per extra GI bounce.
+   - **Soft Shadows & Penumbra**: **Global SDF Analytical Cone Penumbra** + short **`0–0.4 m` Contact Ray / Hi-Z** grounding.
+   - **Reflections**: **Coherent Deterministic Multi-Bounce Compute `CWBVH` Reflections** (`Roughness <= 0.30`, costing only **`~0.15–0.45 ms`** once random GI rays are removed!) handing off to **Polished Global SDF** above `0.30` roughness.
+2. **Next Milestone — Full Deterministic Raytracing (`WebGPU CWBVH` → `Vulkan 1.3 RT Cores`)**:
+   - Full specification — including why `WebGL2` / standard `WebGPU` require software `CWBVH` (no browser RT-core API) and how **Ray-Differential Cone Reflections + Fibonacci-Lattice `DDGI` Irradiance Probes + Analytic `LTC` Area Lights** replace blind Monte Carlo + Russian Roulette — is documented in **`Documentation/Plans/RenderingAndRaytracingArchitecturePlan.md`**.
+
 
