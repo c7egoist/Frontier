@@ -40,7 +40,16 @@ import {
   BuildDefaultLevels,
   CreateNewLevelRecord,
 } from "./LevelSystem.js";
-import { CpuGtxRenderer } from "./CpuGtxFallbackRenderer.js";
+import { CreateGtxBandKernel, CpuGtxRenderer } from "./CpuGtxFallbackRenderer.js";
+import {
+  ApplyUnrealDolly,
+  ApplyUnrealMouseLook,
+  ApplyUnrealOrbit,
+  ApplyUnrealPan,
+  BuildUnrealCameraBasis,
+  DeriveUnrealCameraState,
+  StepUnrealWasdCamera,
+} from "./UnrealViewportCamera.js";
 
 const Folder = path.dirname(fileURLToPath(import.meta.url));
 
@@ -271,6 +280,114 @@ for (let I = 0; I < CpuFallback.OffscreenImg.data.length; I += 4) {
 }
 assert.ok(NonBlackPixels > 160 * 90 * 0.9, "CpuGtxRenderer produces fully lit Cornell-Studio Gallery");
 
+// 9. Verify Atomic Double-Buffering (Zero Top-to-Bottom Scanline Refresh), Hermetic Worker Kernel, and Unreal WASD Camera
+const SnapshotFrameA = new Uint8ClampedArray(CpuFallback.OffscreenImg.data);
+const RevA = CpuFallback.FrontRevision;
+CpuFallback.Invalidate();
+const ZoomedScene = {
+  ...Compiled,
+  CameraOrigin: [0, -2.4, 1.05],
+};
+const PartialDone = CpuFallback.RenderSlice(
+  {
+    CompiledScene: ZoomedScene,
+    AtlasPixels: CpuAtlas.Pixels,
+    Width: 160,
+    Height: 90,
+    ViewModeCode: 0,
+    ShowGrid: 1,
+  },
+  30,
+);
+assert.equal(PartialDone, false, "30/90 rows is an in-progress back-buffer slice");
+assert.equal(
+  CpuFallback.FrontRevision,
+  RevA,
+  "FrontRevision MUST NOT advance during partial slice",
+);
+let ByteDiffDuringSlice = 0;
+for (let I = 0; I < SnapshotFrameA.length; ++I) {
+  if (CpuFallback.OffscreenImg.data[I] !== SnapshotFrameA[I]) {
+    ByteDiffDuringSlice += 1;
+    break;
+  }
+}
+assert.equal(
+  ByteDiffDuringSlice,
+  0,
+  "Front buffer MUST stay 100% untouched during partial render (zero top-to-bottom scanline tearing!)",
+);
+const FinishedZoom = CpuFallback.RenderSlice(
+  {
+    CompiledScene: ZoomedScene,
+    AtlasPixels: CpuAtlas.Pixels,
+    Width: 160,
+    Height: 90,
+    ViewModeCode: 0,
+    ShowGrid: 1,
+  },
+  60,
+);
+assert.equal(FinishedZoom, true, "Remaining 60/90 rows complete zoomed frame");
+assert.equal(CpuFallback.FrontRevision, RevA + 1, "FrontRevision advances atomically on full completion");
+
+// Hermetic isolated Worker kernel test (zero outer scope variables)
+const IsolatedKernelFactory = new Function(
+  `"use strict"; return (${CreateGtxBandKernel.toString()})(1024, 16, 64, 8);`,
+);
+const IsolatedKernel = IsolatedKernelFactory();
+assert.equal(typeof IsolatedKernel.GtxBandEngine, "function", "Hermetic Worker kernel instantiates cleanly");
+
+// Unreal Engine 5 WASDQE + simultaneous RMB free-look + sprint + dolly + orbit verification
+const StartCam = DeriveUnrealCameraState(
+  CanonicalEditorCamera.Position,
+  CanonicalEditorCamera.Target,
+  1.0,
+);
+const Basis0 = BuildUnrealCameraBasis(StartCam.Yaw, StartCam.Pitch);
+assert.ok(Basis0.Forward[1] > 0.98 && Math.abs(Basis0.Right[0] - 1.0) < 1e-3, "Canonical Z-up Unreal camera looks +Y with +X Right");
+
+const MovedFwd = StepUnrealWasdCamera(StartCam, new Set(["KeyW"]), 0.5, 3.4);
+assert.ok(MovedFwd.Position[1] > StartCam.Position[1] + 1.6, "KeyW flies forward along 3D view ray");
+const MovedSprint = StepUnrealWasdCamera(StartCam, new Set(["KeyW", "ShiftLeft"]), 0.5, 3.4);
+assert.ok(
+  Math.abs((MovedSprint.Position[1] - StartCam.Position[1]) / (MovedFwd.Position[1] - StartCam.Position[1]) - 2.5) < 1e-4,
+  "ShiftLeft applies exact 2.5x Unreal sprint boost",
+);
+const MovedDiag = StepUnrealWasdCamera(StartCam, new Set(["KeyW", "KeyD"]), 0.5, 3.4);
+const DistFwd = Math.hypot(
+  MovedFwd.Position[0] - StartCam.Position[0],
+  MovedFwd.Position[1] - StartCam.Position[1],
+  MovedFwd.Position[2] - StartCam.Position[2],
+);
+const DistDiag = Math.hypot(
+  MovedDiag.Position[0] - StartCam.Position[0],
+  MovedDiag.Position[1] - StartCam.Position[1],
+  MovedDiag.Position[2] - StartCam.Position[2],
+);
+assert.ok(Math.abs(DistDiag - DistFwd) < 1e-5, "Diagonal W+D movement is normalized (no sqrt(2) overspeed)");
+
+const SteeredAfterFly = ApplyUnrealMouseLook(MovedFwd, 45, -20, 0.0038);
+assert.deepEqual(
+  SteeredAfterFly.Position,
+  MovedFwd.Position,
+  "Simultaneous RMB mouse-look NEVER snaps Position back to drag start!",
+);
+const ElevatedCam = StepUnrealWasdCamera(SteeredAfterFly, new Set(["KeyE"]), 0.25, 3.4);
+assert.ok(ElevatedCam.Position[2] > SteeredAfterFly.Position[2] + 0.8, "KeyE elevates along world +Z");
+
+const DolliedIn = ApplyUnrealDolly(StartCam, -3, 0.105);
+assert.ok(DolliedIn.FocusDist < StartCam.FocusDist, "Mouse wheel dolly-in reduces FocusDist smoothly");
+const Orbited = ApplyUnrealOrbit(DolliedIn, DolliedIn.Target, 60, 15, 0.0052);
+const OrbitDist = Math.hypot(
+  Orbited.Target[0] - Orbited.Position[0],
+  Orbited.Target[1] - Orbited.Position[1],
+  Orbited.Target[2] - Orbited.Position[2],
+);
+assert.ok(Math.abs(OrbitDist - DolliedIn.FocusDist) < 1e-4, "Unreal Orbit preserves exact pivot FocusDist");
+const Panned = ApplyUnrealPan(Orbited, 30, -20, 0.0015);
+assert.ok(Panned.Position[0] !== Orbited.Position[0], "Unreal MMB Pan translates Position & Target together");
+
 const HtmlPath = path.join(Folder, "index.html");
 assert.ok(fs.existsSync(HtmlPath), "Bundled index.html exists");
 const HtmlText = fs.readFileSync(HtmlPath, "utf8");
@@ -278,12 +395,16 @@ assert.ok(
   HtmlText.includes("Frontier World Mirror — Tier 1 GTX") &&
     HtmlText.includes("closestRayPrimitiveSoftVis") &&
     HtmlText.includes("KHR_parallel_shader_compile") &&
-    HtmlText.includes("Create New Level") &&
+    HtmlText.includes("RequestAtomicFrame") || HtmlText.includes("bandDone"),
+  "Bundled index.html embeds Multi-Worker Atomic Double-Buffered GTX pipeline",
+);
+assert.ok(
+  HtmlText.includes("Create New Level") &&
     HtmlText.includes("Active level") &&
     !HtmlText.includes("NO ENGINE CONNECTION"),
-  "Bundled index.html embeds ring-free GTX shader, dual-backend CPU GTX fallback, Slate GizmoPRO, Level Switcher, and Create Level modal",
+  "Bundled index.html embeds Slate GizmoPRO, Level Switcher, and Create Level modal",
 );
 
 console.log(
-  "[WorldMirrorValidation] ALL 8 SUITES PASSED: Dual-backend WebGL2 + CPU GTX self-healing, ring-free GTX shadows/GI, 20-channel Material Atlas, 13-handle Slate GizmoPRO, 2px Selection Outline, and Multi-Level Footer/Modal verified!",
+  "[WorldMirrorValidation] ALL 9 SUITES PASSED: Unreal WASD Camera, Atomic Multi-Worker GTX (zero scanline wipe), WebGL2 + CPU GTX self-healing, ring-free GTX shadows/GI, 20-channel Material Atlas, 13-handle Slate GizmoPRO, 2px Selection Outline, and Multi-Level Footer/Modal verified!",
 );

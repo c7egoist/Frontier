@@ -39,6 +39,15 @@ import {
   SolveGizmoDrag,
 } from "./TransformGizmo3D.js";
 import { CpuGtxRenderer } from "./CpuGtxFallbackRenderer.js";
+import {
+  ApplyUnrealDolly,
+  ApplyUnrealMouseLook,
+  ApplyUnrealOrbit,
+  ApplyUnrealPan,
+  BuildUnrealCameraBasis,
+  DeriveUnrealCameraState,
+  StepUnrealWasdCamera,
+} from "./UnrealViewportCamera.js";
 
 export { RowEffectivelyVisible as PreviewVisible };
 
@@ -1333,20 +1342,35 @@ export default function GtxWorldViewport({
   const DragRef = useRef(null);
   const KeysRef = useRef(new Set());
   const AtlasSyncRef = useRef(null);
+  const AtlasVersionRef = useRef(1);
   const BuiltGizmoRef = useRef(null);
   const SceneDirtyRef = useRef(true);
   const EvictionCountRef = useRef(0);
+
+  // Live Unreal camera state decoupled from 60Hz full-Editor React re-renders
+  const LiveCamRef = useRef(null);
+  const LastCommittedCamRef = useRef(null);
+  const ViewportHoveredRef = useRef(false);
+  const IsWasdFlyingRef = useRef(false);
+  const InteractiveUntilRef = useRef(0);
+  const SettleTimerRef = useRef(0);
+  const CommitTimerRef = useRef(0);
+  const SpeedHudTimerRef = useRef(0);
+  const LastInspectorCommitMsRef = useRef(0);
+  const RequestRedrawRef = useRef(null);
+  const CompiledSceneRef = useRef(null);
+  const FpsTrackerRef = useRef({ LastRafTs: 0, LastReportTs: 0, SmoothedMs: 16.67 });
 
   const [RenderBackend, SetRenderBackend] = useState(() =>
     SessionWebGlBlocked ? "cpu-gtx" : "webgl2",
   );
   const [CanvasInstance, SetCanvasInstance] = useState(0);
-  const [CpuSettleTick, SetCpuSettleTick] = useState(0);
   const [ShaderError, SetShaderError] = useState(null);
   const [GlEpoch, SetGlEpoch] = useState(0);
   const [HoveredHandle, SetHoveredHandle] = useState(GizmoHandle.None);
   const [ActiveHandle, SetActiveHandle] = useState(GizmoHandle.None);
   const [GizmoReadout, SetGizmoReadout] = useState("");
+  const [CameraSpeedHud, SetCameraSpeedHud] = useState("");
   const [TextureEpoch, SetTextureEpoch] = useState(0);
 
   if (!AtlasSyncRef.current) {
@@ -1357,15 +1381,149 @@ export default function GtxWorldViewport({
     () => CompileLiveGtxScene(Rows, Values, Hidden, EffectiveProjection),
     [Rows, Values, Hidden, EffectiveProjection],
   );
+  CompiledSceneRef.current = CompiledScene;
+
+  // Initialize or sync LiveCamRef when external Editor actions (Reset Camera, Frame Selected, Level Switch) modify Values.camera
+  if (!LiveCamRef.current) {
+    LiveCamRef.current = DeriveUnrealCameraState(
+      CompiledScene.CameraOrigin,
+      CompiledScene.CameraTarget,
+      1.0,
+    );
+    LastCommittedCamRef.current = {
+      Origin: [...CompiledScene.CameraOrigin],
+      Target: [...CompiledScene.CameraTarget],
+    };
+  }
+
+  useEffect(() => {
+    if (EffectiveProjection !== "PERSP") return;
+    const IncomingOrigin = CompiledScene.CameraOrigin;
+    const IncomingTarget = CompiledScene.CameraTarget;
+    const Last = LastCommittedCamRef.current;
+    const MatchesLast =
+      Last &&
+      Math.abs(IncomingOrigin[0] - Last.Origin[0]) < 2e-3 &&
+      Math.abs(IncomingOrigin[1] - Last.Origin[1]) < 2e-3 &&
+      Math.abs(IncomingOrigin[2] - Last.Origin[2]) < 2e-3 &&
+      Math.abs(IncomingTarget[0] - Last.Target[0]) < 2e-3 &&
+      Math.abs(IncomingTarget[1] - Last.Target[1]) < 2e-3 &&
+      Math.abs(IncomingTarget[2] - Last.Target[2]) < 2e-3;
+    if (!MatchesLast && DragRef.current?.Kind !== "fly" && DragRef.current?.Kind !== "orbit" && DragRef.current?.Kind !== "pan") {
+      LiveCamRef.current = DeriveUnrealCameraState(
+        IncomingOrigin,
+        IncomingTarget,
+        LiveCamRef.current?.SpeedScalar || 1.0,
+      );
+      LastCommittedCamRef.current = {
+        Origin: [...IncomingOrigin],
+        Target: [...IncomingTarget],
+      };
+      SceneDirtyRef.current = true;
+      RequestRedrawRef.current?.(true);
+    }
+  }, [CompiledScene, EffectiveProjection]);
+
+  const GetActiveScene = useCallback(() => {
+    const Base = CompiledSceneRef.current || CompiledScene;
+    if (EffectiveProjection !== "PERSP" || !LiveCamRef.current) return Base;
+    return {
+      ...Base,
+      CameraOrigin: LiveCamRef.current.Position,
+      CameraTarget: LiveCamRef.current.Target,
+    };
+  }, [CompiledScene, EffectiveProjection]);
+
+  const SampleViewportFps = useCallback(() => {
+    if (!OnFpsSample) return;
+    const Now = performance.now();
+    const Tr = FpsTrackerRef.current;
+    if (Tr.LastRafTs > 0) {
+      const Dt = Now - Tr.LastRafTs;
+      if (Dt > 2 && Dt < 250) {
+        Tr.SmoothedMs = Tr.SmoothedMs * 0.82 + Dt * 0.18;
+      }
+    }
+    Tr.LastRafTs = Now;
+    if (Now - Tr.LastReportTs >= 450) {
+      Tr.LastReportTs = Now;
+      OnFpsSample(Math.min(120, Math.max(1, Math.round(1000 / Math.max(4, Tr.SmoothedMs)))));
+    }
+  }, [OnFpsSample]);
+
+  const CommitLiveCameraToEditor = useCallback(
+    (Immediate = false) => {
+      if (!CameraCallback || EffectiveProjection !== "PERSP" || !LiveCamRef.current) return;
+      const DoCommit = () => {
+        if (CommitTimerRef.current) {
+          window.clearTimeout(CommitTimerRef.current);
+          CommitTimerRef.current = 0;
+        }
+        const Cam = LiveCamRef.current;
+        if (!Cam) return;
+        const Pos = Cam.Position.map((C) => +C.toFixed(3));
+        const Tgt = Cam.Target.map((C) => +C.toFixed(3));
+        LastCommittedCamRef.current = { Origin: Pos, Target: Tgt };
+        LastInspectorCommitMsRef.current = performance.now();
+        CameraCallback({ Position: Pos, Target: Tgt });
+      };
+
+      if (Immediate) {
+        DoCommit();
+        return;
+      }
+
+      if (Selected === "camera" && performance.now() - LastInspectorCommitMsRef.current >= 125) {
+        DoCommit();
+        return;
+      }
+
+      if (CommitTimerRef.current) window.clearTimeout(CommitTimerRef.current);
+      CommitTimerRef.current = window.setTimeout(DoCommit, 140);
+    },
+    [CameraCallback, EffectiveProjection, Selected],
+  );
+
+  const BumpInteractiveSettle = useCallback((WindowMs = 170) => {
+    InteractiveUntilRef.current = performance.now() + WindowMs;
+    if (SettleTimerRef.current) window.clearTimeout(SettleTimerRef.current);
+    SettleTimerRef.current = window.setTimeout(() => {
+      SettleTimerRef.current = 0;
+      SceneDirtyRef.current = true;
+      RequestRedrawRef.current?.(true);
+    }, WindowMs + 12);
+  }, []);
+
+  const ApplyLiveCameraUpdate = useCallback(
+    (NextCam, CommitImmediate = false) => {
+      LiveCamRef.current = NextCam;
+      SceneDirtyRef.current = true;
+      BumpInteractiveSettle(170);
+      RequestRedrawRef.current?.(true);
+      CommitLiveCameraToEditor(CommitImmediate);
+    },
+    [BumpInteractiveSettle, CommitLiveCameraToEditor],
+  );
+
+  // Clean up timers and Web Worker pool on unmount
+  useEffect(() => {
+    return () => {
+      if (SettleTimerRef.current) window.clearTimeout(SettleTimerRef.current);
+      if (CommitTimerRef.current) window.clearTimeout(CommitTimerRef.current);
+      if (SpeedHudTimerRef.current) window.clearTimeout(SpeedHudTimerRef.current);
+      CpuRendererRef.current?.DisposeWorkers();
+    };
+  }, []);
 
   // Mark Pass 1 scene dirty when scene/selection/view/grid/textures change (NOT on 60Hz gizmo hover!)
   useEffect(() => {
     SceneDirtyRef.current = true;
-  }, [CompiledScene, Selected, ViewMode, Debug, EffectiveGrid, TextureEpoch, GlEpoch, RenderBackend, CpuSettleTick]);
+  }, [CompiledScene, Selected, ViewMode, Debug, EffectiveGrid, TextureEpoch, GlEpoch, RenderBackend]);
 
   useEffect(() => {
     EnsureMaterialTexturesDecoded(CompiledScene.Primitives, () => {
       AtlasSyncRef.current?.InvalidateAll();
+      AtlasVersionRef.current += 1;
       SceneDirtyRef.current = true;
       SetTextureEpoch((N) => N + 1);
     });
@@ -1616,14 +1774,16 @@ export default function GtxWorldViewport({
             };
             CurState.Linked = true;
             SceneDirtyRef.current = true;
-          } catch {
-            SessionWebGlBlocked = true;
+          } catch (Err) {
+            console.error("[Frontier GTX] WebGL2 shader link error:", Err);
+            SetShaderError(String(Err?.message || Err));
             GlStateRef.current = null;
             SetRenderBackend("cpu-gtx");
             return;
           }
         }
 
+        const ActiveScene = GetActiveScene();
         const U = CurState.SceneUniforms;
         const Rect = Canvas.getBoundingClientRect();
         const Dpr = Math.min(window.devicePixelRatio || 1, 1.25);
@@ -1668,7 +1828,7 @@ export default function GtxWorldViewport({
         }
 
         const AtlasSync = AtlasSyncRef.current;
-        if (AtlasSync.UpdatePrimitives(CompiledScene.Primitives)) {
+        if (AtlasSync.UpdatePrimitives(ActiveScene.Primitives)) {
           Gl.bindTexture(Gl.TEXTURE_2D, CurState.AtlasTex);
           Gl.texSubImage2D(
             Gl.TEXTURE_2D,
@@ -1682,10 +1842,11 @@ export default function GtxWorldViewport({
             AtlasSync.Pixels,
           );
           AtlasSync.Dirty = false;
+          AtlasVersionRef.current += 1;
           SceneDirtyRef.current = true;
         }
 
-        const { CameraOrigin, CameraTarget, WorldUp } = CompiledScene;
+        const { CameraOrigin, CameraTarget, WorldUp } = ActiveScene;
         const Fwd = NormalizeVec3([
           CameraTarget[0] - CameraOrigin[0],
           CameraTarget[1] - CameraOrigin[1],
@@ -1699,15 +1860,15 @@ export default function GtxWorldViewport({
         const Right = NormalizeVec3(Cross(Fwd, WorldUp), [1, 0, 0]);
         const Up = NormalizeVec3(Cross(Right, Fwd), [0, 0, 1]);
 
-        const PCount = Math.min(MAX_PRIMS, CompiledScene.Primitives.length);
+        const PCount = Math.min(MAX_PRIMS, ActiveScene.Primitives.length);
         let SelectedCode = 0;
-        const PrimIdx = CompiledScene.Primitives
+        const PrimIdx = ActiveScene.Primitives
           .slice(0, PCount)
           .findIndex((P) => P.Id === Selected);
         if (PrimIdx >= 0) {
           SelectedCode = 1 + PrimIdx;
         } else {
-          const LightIdx = CompiledScene.AreaLights
+          const LightIdx = ActiveScene.AreaLights
             .slice(0, MAX_LIGHTS)
             .findIndex((L) => L.Id === Selected);
           if (LightIdx >= 0) SelectedCode = 32 + LightIdx;
@@ -1731,9 +1892,9 @@ export default function GtxWorldViewport({
           Gl.uniform3fv(U.uCamForward, Fwd);
           Gl.uniform3fv(U.uCamRight, Right);
           Gl.uniform3fv(U.uCamUp, Up);
-          Gl.uniform1f(U.uTanHalfFov, Math.tan(CompiledScene.VerticalFovRad * 0.5));
-          Gl.uniform1f(U.uOrthoHalfHeight, CompiledScene.OrthoHalfHeight);
-          Gl.uniform1f(U.uExposureGain, CompiledScene.ExposureGain);
+          Gl.uniform1f(U.uTanHalfFov, Math.tan(ActiveScene.VerticalFovRad * 0.5));
+          Gl.uniform1f(U.uOrthoHalfHeight, ActiveScene.OrthoHalfHeight);
+          Gl.uniform1f(U.uExposureGain, ActiveScene.ExposureGain);
 
           const EffectiveViewMode =
             Debug > 0 && Debug <= 6 ? 10 + Debug : VIEW_MODE_CODES[ViewMode] ?? 0;
@@ -1741,16 +1902,16 @@ export default function GtxWorldViewport({
           Gl.uniform1i(U.uShowGrid, EffectiveGrid ? 1 : 0);
           Gl.uniform1i(U.uSelectedCode, SelectedCode);
 
-          Gl.uniform3fv(U.uSunDir, CompiledScene.SunDir);
-          Gl.uniform3fv(U.uSunIrradiance, CompiledScene.SunIrradiance);
-          Gl.uniform1f(U.uSunAngularRadius, CompiledScene.SunAngularRadiusRad);
-          Gl.uniform3fv(U.uSkyRadiance, CompiledScene.SkyRadiance);
+          Gl.uniform3fv(U.uSunDir, ActiveScene.SunDir);
+          Gl.uniform3fv(U.uSunIrradiance, ActiveScene.SunIrradiance);
+          Gl.uniform1f(U.uSunAngularRadius, ActiveScene.SunAngularRadiusRad);
+          Gl.uniform3fv(U.uSkyRadiance, ActiveScene.SkyRadiance);
 
-          const LCount = Math.min(MAX_LIGHTS, CompiledScene.AreaLights.length);
+          const LCount = Math.min(MAX_LIGHTS, ActiveScene.AreaLights.length);
           const LCenterHalfW = new Float32Array(MAX_LIGHTS * 4);
           const LHalfHRad = new Float32Array(MAX_LIGHTS * 4);
           for (let I = 0; I < LCount; ++I) {
-            const L = CompiledScene.AreaLights[I];
+            const L = ActiveScene.AreaLights[I];
             LCenterHalfW.set([L.Center[0], L.Center[1], L.Center[2], L.HalfWidth], I * 4);
             LHalfHRad.set([L.HalfHeight, L.Radiance[0], L.Radiance[1], L.Radiance[2]], I * 4);
           }
@@ -1767,7 +1928,7 @@ export default function GtxWorldViewport({
           const GiBounce = new Float32Array(MAX_PRIMS * 4);
 
           for (let I = 0; I < PCount; ++I) {
-            const P = CompiledScene.Primitives[I];
+            const P = ActiveScene.Primitives[I];
             const Flags =
               (P.CastShadows ? 1 : 0) |
               (P.GiContributor ? 2 : 0) |
@@ -1831,10 +1992,10 @@ export default function GtxWorldViewport({
         // ---------------- PASS 3: 3D SLATE 13-HANDLE TRANSFORM GIZMO ----------------
         if (EffectiveGizmo && SelectedGizmoTarget) {
           const CamState = {
-            Projection: CompiledScene.OrthoHalfHeight > 0 ? "Orthographic" : "Perspective",
+            Projection: ActiveScene.OrthoHalfHeight > 0 ? "Orthographic" : "Perspective",
             Position: CameraOrigin,
-            FovDegrees: (CompiledScene.VerticalFovRad * 180) / Math.PI,
-            OrthoHalfHeight: CompiledScene.OrthoHalfHeight,
+            FovDegrees: (ActiveScene.VerticalFovRad * 180) / Math.PI,
+            OrthoHalfHeight: ActiveScene.OrthoHalfHeight,
           };
           const WorldRadius =
             DragRef.current?.Kind === "gizmo" && DragRef.current.GizmoDrag?.ActiveWorldRadius
@@ -1884,18 +2045,24 @@ export default function GtxWorldViewport({
         } else {
           BuiltGizmoRef.current = null;
         }
+
+        SampleViewportFps();
       });
     };
 
+    RequestRedrawRef.current = ScheduleDraw;
     ScheduleDraw(false);
     const ResizeObs = new ResizeObserver(() => ScheduleDraw(true));
     ResizeObs.observe(Canvas);
     return () => {
+      if (RequestRedrawRef.current === ScheduleDraw) RequestRedrawRef.current = null;
       if (RafId) cancelAnimationFrame(RafId);
       ResizeObs.disconnect();
     };
   }, [
     CompiledScene,
+    GetActiveScene,
+    SampleViewportFps,
     Selected,
     SelectedGizmoTarget,
     ViewMode,
@@ -1909,7 +2076,7 @@ export default function GtxWorldViewport({
     RenderBackend,
   ]);
 
-  // Zero-WebGL Live Progressive Tier 1 GTX + 2px Silhouette Outline + 13-Handle Slate GizmoPRO Canvas2D Pipeline
+  // Multi-Worker Atomic Double-Buffered Tier 1 GTX + 2px Silhouette Outline + 13-Handle Slate GizmoPRO (ZERO partial scanlines!)
   useEffect(() => {
     if (RenderBackend !== "cpu-gtx") return;
     const Canvas = CanvasRef.current;
@@ -1922,148 +2089,164 @@ export default function GtxWorldViewport({
     }
     const Cpu = CpuRendererRef.current;
 
+    let Disposed = false;
     let RafId = 0;
+
+    const CompositePresent = () => {
+      if (Disposed || !CanvasRef.current || RenderBackend !== "cpu-gtx") return;
+      const ActiveScene = GetActiveScene();
+      const Rect = Canvas.getBoundingClientRect();
+      const Dpr = Math.min(window.devicePixelRatio || 1, 1.25);
+      const Width = Math.max(320, Math.min(1120, Math.round((Rect.width || 900) * Dpr)));
+      const Height = Math.max(200, Math.min(680, Math.round((Rect.height || 520) * Dpr)));
+      if (Canvas.width !== Width || Canvas.height !== Height) {
+        Canvas.width = Width;
+        Canvas.height = Height;
+        SceneDirtyRef.current = true;
+      }
+      const Aspect = Width / Math.max(1, Height);
+
+      const AtlasSync = AtlasSyncRef.current;
+      if (AtlasSync.UpdatePrimitives(ActiveScene.Primitives)) {
+        AtlasSync.Dirty = false;
+        AtlasVersionRef.current += 1;
+        SceneDirtyRef.current = true;
+      }
+
+      const PCount = Math.min(MAX_PRIMS, ActiveScene.Primitives.length);
+      let SelectedCode = 0;
+      const PrimIdx = ActiveScene.Primitives
+        .slice(0, PCount)
+        .findIndex((P) => P.Id === Selected);
+      if (PrimIdx >= 0) {
+        SelectedCode = 1 + PrimIdx;
+      } else {
+        const LightIdx = ActiveScene.AreaLights
+          .slice(0, MAX_LIGHTS)
+          .findIndex((L) => L.Id === Selected);
+        if (LightIdx >= 0) SelectedCode = 32 + LightIdx;
+      }
+
+      const EffectiveViewMode =
+        Debug > 0 && Debug <= 6 ? 10 + Debug : VIEW_MODE_CODES[ViewMode] ?? 0;
+
+      const IsInteractive =
+        DragRef.current !== null ||
+        IsWasdFlyingRef.current ||
+        performance.now() < InteractiveUntilRef.current;
+      const HwThreads =
+        (typeof navigator !== "undefined" && navigator.hardwareConcurrency) || 8;
+      const TargetRayW = IsInteractive
+        ? HwThreads >= 8
+          ? 248
+          : 208
+        : Math.min(600, Math.max(360, Math.round((Rect.width || 800) * 0.68)));
+      const TargetRayH = Math.max(117, Math.round(TargetRayW / Math.max(0.5, Aspect)));
+
+      if (
+        SceneDirtyRef.current ||
+        !Cpu.HasFrontFrame ||
+        (!IsInteractive && (Cpu.BufW !== TargetRayW || Cpu.BufH !== TargetRayH))
+      ) {
+        SceneDirtyRef.current = false;
+        Cpu.RequestAtomicFrame(
+          {
+            CompiledScene: ActiveScene,
+            AtlasPixels: AtlasSync.Pixels,
+            AtlasVersion: AtlasVersionRef.current,
+            Width: TargetRayW,
+            Height: TargetRayH,
+            ViewModeCode: EffectiveViewMode,
+            ShowGrid: EffectiveGrid ? 1 : 0,
+          },
+          () => {
+            if (!Disposed) StepDraw(false);
+          },
+        );
+      }
+
+      // Build 3D Slate 13-Handle GizmoPRO geometry + ViewProj at native 60Hz on top of the latest complete FrontBuffer!
+      let BuiltGizmo = null;
+      let ViewProj = null;
+      const Highlighted =
+        ActiveHandle !== GizmoHandle.None ? ActiveHandle : HoveredHandle;
+
+      if (EffectiveGizmo && SelectedGizmoTarget) {
+        const { CameraOrigin, CameraTarget, WorldUp } = ActiveScene;
+        const Fwd = NormalizeVec3([
+          CameraTarget[0] - CameraOrigin[0],
+          CameraTarget[1] - CameraOrigin[1],
+          CameraTarget[2] - CameraOrigin[2],
+        ]);
+        const Cross = (A, B) => [
+          A[1] * B[2] - A[2] * B[1],
+          A[2] * B[0] - A[0] * B[2],
+          A[0] * B[1] - A[1] * B[0],
+        ];
+        const Right = NormalizeVec3(Cross(Fwd, WorldUp), [1, 0, 0]);
+        const Up = NormalizeVec3(Cross(Right, Fwd), [0, 0, 1]);
+        const CamState = {
+          Projection: ActiveScene.OrthoHalfHeight > 0 ? "Orthographic" : "Perspective",
+          Position: CameraOrigin,
+          FovDegrees: (ActiveScene.VerticalFovRad * 180) / Math.PI,
+          OrthoHalfHeight: ActiveScene.OrthoHalfHeight,
+        };
+        const WorldRadius =
+          DragRef.current?.Kind === "gizmo" && DragRef.current.GizmoDrag?.ActiveWorldRadius
+            ? DragRef.current.GizmoDrag.ActiveWorldRadius
+            : ComputeGizmoWorldRadius(SelectedGizmoTarget.Position, CamState, Aspect);
+        BuiltGizmo = BuildSlateGizmoGeometry(
+          SelectedGizmoTarget.Position,
+          Fwd,
+          WorldRadius,
+        );
+        BuiltGizmoRef.current = BuiltGizmo;
+        ViewProj = BuildColumnMajorViewProj(
+          { Right, Up, Forward: Fwd },
+          CamState,
+          Aspect,
+        );
+      } else {
+        BuiltGizmoRef.current = null;
+      }
+
+      Cpu.CompositeToCanvas(
+        Ctx2d,
+        Width,
+        Height,
+        SelectedCode,
+        BuiltGizmo,
+        ViewProj,
+        Highlighted,
+      );
+
+      SampleViewportFps();
+    };
+
     const StepDraw = (ForceInvalidate = false) => {
       if (ForceInvalidate) SceneDirtyRef.current = true;
       if (RafId) return;
       RafId = requestAnimationFrame(() => {
         RafId = 0;
-        if (!CanvasRef.current || RenderBackend !== "cpu-gtx") return;
-
-        const T0 = performance.now();
-        const Rect = Canvas.getBoundingClientRect();
-        const Dpr = Math.min(window.devicePixelRatio || 1, 1.25);
-        const Width = Math.max(320, Math.min(1120, Math.round((Rect.width || 900) * Dpr)));
-        const Height = Math.max(200, Math.min(680, Math.round((Rect.height || 520) * Dpr)));
-        if (Canvas.width !== Width || Canvas.height !== Height) {
-          Canvas.width = Width;
-          Canvas.height = Height;
-          SceneDirtyRef.current = true;
-        }
-        const Aspect = Width / Math.max(1, Height);
-
-        const AtlasSync = AtlasSyncRef.current;
-        if (AtlasSync.UpdatePrimitives(CompiledScene.Primitives)) {
-          AtlasSync.Dirty = false;
-          SceneDirtyRef.current = true;
-        }
-
-        const PCount = Math.min(MAX_PRIMS, CompiledScene.Primitives.length);
-        let SelectedCode = 0;
-        const PrimIdx = CompiledScene.Primitives
-          .slice(0, PCount)
-          .findIndex((P) => P.Id === Selected);
-        if (PrimIdx >= 0) {
-          SelectedCode = 1 + PrimIdx;
-        } else {
-          const LightIdx = CompiledScene.AreaLights
-            .slice(0, MAX_LIGHTS)
-            .findIndex((L) => L.Id === Selected);
-          if (LightIdx >= 0) SelectedCode = 32 + LightIdx;
-        }
-
-        const EffectiveViewMode =
-          Debug > 0 && Debug <= 6 ? 10 + Debug : VIEW_MODE_CODES[ViewMode] ?? 0;
-
-        const IsDragging = DragRef.current !== null;
-        const TargetRayW = IsDragging ? 224 : Math.min(576, Math.max(320, Math.round((Rect.width || 800) * 0.68)));
-        const TargetRayH = Math.max(126, Math.round(TargetRayW / Math.max(0.5, Aspect)));
-
-        if (SceneDirtyRef.current || Cpu.BufW !== TargetRayW || Cpu.BufH !== TargetRayH) {
-          SceneDirtyRef.current = false;
-          Cpu.EnsureBuffers(TargetRayW, TargetRayH);
-          Cpu.Invalidate();
-        }
-
-        let Done = Cpu.Complete;
-        if (!Done) {
-          Done = Cpu.RenderSlice(
-            {
-              CompiledScene,
-              AtlasPixels: AtlasSync.Pixels,
-              Width: Cpu.BufW,
-              Height: Cpu.BufH,
-              ViewModeCode: EffectiveViewMode,
-              ShowGrid: EffectiveGrid ? 1 : 0,
-            },
-            IsDragging ? Cpu.BufH : 54,
-          );
-        }
-
-        // Build 3D Slate 13-Handle GizmoPRO geometry + ViewProj (exact parity with Pass 3!)
-        let BuiltGizmo = null;
-        let ViewProj = null;
-        const Highlighted =
-          ActiveHandle !== GizmoHandle.None ? ActiveHandle : HoveredHandle;
-
-        if (EffectiveGizmo && SelectedGizmoTarget) {
-          const { CameraOrigin, CameraTarget, WorldUp } = CompiledScene;
-          const Fwd = NormalizeVec3([
-            CameraTarget[0] - CameraOrigin[0],
-            CameraTarget[1] - CameraOrigin[1],
-            CameraTarget[2] - CameraOrigin[2],
-          ]);
-          const Cross = (A, B) => [
-            A[1] * B[2] - A[2] * B[1],
-            A[2] * B[0] - A[0] * B[2],
-            A[0] * B[1] - A[1] * B[0],
-          ];
-          const Right = NormalizeVec3(Cross(Fwd, WorldUp), [1, 0, 0]);
-          const Up = NormalizeVec3(Cross(Right, Fwd), [0, 0, 1]);
-          const CamState = {
-            Projection: CompiledScene.OrthoHalfHeight > 0 ? "Orthographic" : "Perspective",
-            Position: CameraOrigin,
-            FovDegrees: (CompiledScene.VerticalFovRad * 180) / Math.PI,
-            OrthoHalfHeight: CompiledScene.OrthoHalfHeight,
-          };
-          const WorldRadius =
-            DragRef.current?.Kind === "gizmo" && DragRef.current.GizmoDrag?.ActiveWorldRadius
-              ? DragRef.current.GizmoDrag.ActiveWorldRadius
-              : ComputeGizmoWorldRadius(SelectedGizmoTarget.Position, CamState, Aspect);
-          BuiltGizmo = BuildSlateGizmoGeometry(
-            SelectedGizmoTarget.Position,
-            Fwd,
-            WorldRadius,
-          );
-          BuiltGizmoRef.current = BuiltGizmo;
-          ViewProj = BuildColumnMajorViewProj(
-            { Right, Up, Forward: Fwd },
-            CamState,
-            Aspect,
-          );
-        } else {
-          BuiltGizmoRef.current = null;
-        }
-
-        Cpu.CompositeToCanvas(
-          Ctx2d,
-          Width,
-          Height,
-          SelectedCode,
-          BuiltGizmo,
-          ViewProj,
-          Highlighted,
-        );
-
-        const Elapsed = Math.max(1, performance.now() - T0);
-        OnFpsSample?.(Math.min(120, Math.round(1000 / Elapsed)));
-
-        if (!Done) {
-          StepDraw(false);
-        }
+        CompositePresent();
       });
     };
 
+    RequestRedrawRef.current = StepDraw;
     StepDraw(false);
     const ResizeObs = new ResizeObserver(() => StepDraw(true));
     ResizeObs.observe(Canvas);
     return () => {
+      Disposed = true;
+      if (RequestRedrawRef.current === StepDraw) RequestRedrawRef.current = null;
       if (RafId) cancelAnimationFrame(RafId);
       ResizeObs.disconnect();
     };
   }, [
     RenderBackend,
     CompiledScene,
+    GetActiveScene,
+    SampleViewportFps,
     Selected,
     SelectedGizmoTarget,
     ViewMode,
@@ -2073,64 +2256,125 @@ export default function GtxWorldViewport({
     HoveredHandle,
     ActiveHandle,
     TextureEpoch,
-    CpuSettleTick,
-    OnFpsSample,
   ]);
 
-  // RMB + WASDQE fly loop
+  // Authentic Unreal Engine 5 WASDQE + Sprint + F-Focus 60Hz Camera Loop
   useEffect(() => {
+    const MovementCodes = new Set([
+      "KeyW",
+      "KeyS",
+      "KeyA",
+      "KeyD",
+      "KeyE",
+      "KeyQ",
+      "ArrowUp",
+      "ArrowDown",
+      "ArrowLeft",
+      "ArrowRight",
+      "PageUp",
+      "PageDown",
+      "ShiftLeft",
+      "ShiftRight",
+    ]);
+
+    const IsTypingTarget = (Target) =>
+      !!Target?.closest?.(
+        'input, textarea, select, [contenteditable]:not([contenteditable="false"])',
+      );
+
     const Down = (Ev) => {
-      if (
-        Ev.target?.tagName === "INPUT" ||
-        Ev.target?.tagName === "TEXTAREA" ||
-        Ev.target?.isContentEditable
-      ) {
+      if (IsTypingTarget(Ev.target)) return;
+      if (Ev.ctrlKey || Ev.metaKey || Ev.altKey) return;
+
+      const IsRmbFly = DragRef.current?.Kind === "fly";
+      const IsOutlinerArrow =
+        (Ev.code === "ArrowLeft" || Ev.code === "ArrowRight" || Ev.code === "ArrowUp" || Ev.code === "ArrowDown") &&
+        !!Ev.target?.closest?.(".outliner-row");
+      if (IsOutlinerArrow && !IsRmbFly) return;
+
+      // Unreal Engine 'F' shortcut: Focus / Frame Selected Actor in Viewport
+      if (Ev.code === "KeyF" && !IsRmbFly && ViewportHoveredRef.current && EffectiveProjection === "PERSP") {
+        Ev.preventDefault();
+        if (SelectedGizmoTarget && Array.isArray(SelectedGizmoTarget.Position)) {
+          const Pos = SelectedGizmoTarget.Position;
+          const MaxExt = Array.isArray(SelectedGizmoTarget.Scale)
+            ? Math.max(...SelectedGizmoTarget.Scale.map((S) => Math.abs(Number(S) || 0.8)))
+            : 1.0;
+          const Dist = Math.max(1.35, Math.min(6.5, MaxExt * 1.8));
+          const Cur = LiveCamRef.current;
+          const { Forward } = BuildUnrealCameraBasis(Cur.Yaw, Cur.Pitch);
+          ApplyLiveCameraUpdate(
+            {
+              ...Cur,
+              FocusDist: Dist,
+              Position: [
+                Pos[0] - Forward[0] * Dist,
+                Pos[1] - Forward[1] * Dist,
+                Pos[2] - Forward[2] * Dist,
+              ],
+              Target: [Pos[0], Pos[1], Pos[2]],
+            },
+            true,
+          );
+        }
         return;
       }
-      KeysRef.current.add(Ev.key.toLowerCase());
+
+      if (!IsRmbFly && !ViewportHoveredRef.current) return;
+
+      if (MovementCodes.has(Ev.code)) {
+        if (Ev.code !== "ShiftLeft" && Ev.code !== "ShiftRight") {
+          Ev.preventDefault();
+        }
+        KeysRef.current.add(Ev.code);
+      }
     };
-    const Up = (Ev) => KeysRef.current.delete(Ev.key.toLowerCase());
+
+    const Up = (Ev) => {
+      KeysRef.current.delete(Ev.code);
+    };
+
+    const ClearKeys = () => {
+      if (KeysRef.current.size > 0) {
+        KeysRef.current.clear();
+        if (IsWasdFlyingRef.current) {
+          IsWasdFlyingRef.current = false;
+          CommitLiveCameraToEditor(true);
+        }
+      }
+    };
+
     window.addEventListener("keydown", Down);
     window.addEventListener("keyup", Up);
+    window.addEventListener("blur", ClearKeys);
+    document.addEventListener("visibilitychange", ClearKeys);
 
     let Raf = 0;
     let Last = performance.now();
     const Step = (Now) => {
-      const Dt = Math.min(0.05, (Now - Last) / 1000);
+      const Dt = Math.min(0.05, Math.max(0.001, (Now - Last) / 1000));
       Last = Now;
-      if (DragRef.current?.Kind === "fly" && KeysRef.current.size && CameraCallback) {
-        const { CameraOrigin, CameraTarget, WorldUp } = CompiledScene;
-        const Fwd = NormalizeVec3([
-          CameraTarget[0] - CameraOrigin[0],
-          CameraTarget[1] - CameraOrigin[1],
-          CameraTarget[2] - CameraOrigin[2],
-        ]);
-        const Right = NormalizeVec3(
-          [
-            Fwd[1] * WorldUp[2] - Fwd[2] * WorldUp[1],
-            Fwd[2] * WorldUp[0] - Fwd[0] * WorldUp[2],
-            Fwd[0] * WorldUp[1] - Fwd[1] * WorldUp[0],
-          ],
-          [1, 0, 0],
-        );
-        const Speed = (KeysRef.current.has("shift") ? 5.5 : 2.4) * Dt;
-        let Move = [0, 0, 0];
-        const Add = (V, S) => {
-          Move = [Move[0] + V[0] * S, Move[1] + V[1] * S, Move[2] + V[2] * S];
-        };
-        if (KeysRef.current.has("w")) Add(Fwd, Speed);
-        if (KeysRef.current.has("s")) Add(Fwd, -Speed);
-        if (KeysRef.current.has("d")) Add(Right, Speed);
-        if (KeysRef.current.has("a")) Add(Right, -Speed);
-        if (KeysRef.current.has("e")) Add([0, 0, 1], Speed);
-        if (KeysRef.current.has("q")) Add([0, 0, 1], -Speed);
-        if (Math.hypot(Move[0], Move[1], Move[2]) > 1e-5) {
-          CameraCallback({
-            Position: CameraOrigin.map((C, I) => +(C + Move[I]).toFixed(3)),
-            Target: CameraTarget.map((C, I) => +(C + Move[I]).toFixed(3)),
-          });
+
+      const CanFly =
+        EffectiveProjection === "PERSP" &&
+        LiveCamRef.current &&
+        KeysRef.current.size > 0 &&
+        (DragRef.current?.Kind === "fly" || ViewportHoveredRef.current);
+
+      if (CanFly) {
+        const NextCam = StepUnrealWasdCamera(LiveCamRef.current, KeysRef.current, Dt, 3.4);
+        if (NextCam) {
+          IsWasdFlyingRef.current = true;
+          ApplyLiveCameraUpdate(NextCam, false);
+        } else if (IsWasdFlyingRef.current) {
+          IsWasdFlyingRef.current = false;
+          CommitLiveCameraToEditor(true);
         }
+      } else if (IsWasdFlyingRef.current) {
+        IsWasdFlyingRef.current = false;
+        CommitLiveCameraToEditor(true);
       }
+
       Raf = requestAnimationFrame(Step);
     };
     Raf = requestAnimationFrame(Step);
@@ -2138,12 +2382,20 @@ export default function GtxWorldViewport({
       cancelAnimationFrame(Raf);
       window.removeEventListener("keydown", Down);
       window.removeEventListener("keyup", Up);
+      window.removeEventListener("blur", ClearKeys);
+      document.removeEventListener("visibilitychange", ClearKeys);
     };
-  }, [CompiledScene, CameraCallback]);
+  }, [
+    EffectiveProjection,
+    SelectedGizmoTarget,
+    ApplyLiveCameraUpdate,
+    CommitLiveCameraToEditor,
+  ]);
 
   const ComputePointerRay = (Event) => {
     const Rect = CanvasRef.current?.getBoundingClientRect();
     if (!Rect) return null;
+    const ActiveScene = GetActiveScene();
     const U = (Event.clientX - Rect.left) / Math.max(1, Rect.width);
     const V = (Event.clientY - Rect.top) / Math.max(1, Rect.height);
     const Aspect = Rect.width / Math.max(1, Rect.height);
@@ -2151,17 +2403,19 @@ export default function GtxWorldViewport({
       U,
       V,
       Aspect,
-      ...ComputeCameraRayAtUv(CompiledScene, U, V, Aspect),
+      ...ComputeCameraRayAtUv(ActiveScene, U, V, Aspect),
     };
   };
 
   const OnPointerDown = (Event) => {
     const Canvas = CanvasRef.current;
     if (!Canvas) return;
+    ViewportHoveredRef.current = true;
 
     if (
       Event.button === 0 &&
       !Event.altKey &&
+      !Event.shiftKey &&
       EffectiveGizmo &&
       SelectedGizmoTarget &&
       BuiltGizmoRef.current
@@ -2188,6 +2442,7 @@ export default function GtxWorldViewport({
           );
           DragRef.current = {
             Kind: "gizmo",
+            PointerId: Event.pointerId,
             TargetId: SelectedGizmoTarget.Id,
             TargetKind: SelectedGizmoTarget.Kind,
             GizmoDrag,
@@ -2200,19 +2455,25 @@ export default function GtxWorldViewport({
     }
 
     Canvas.setPointerCapture?.(Event.pointerId);
-    const Kind =
-      Event.button === 2
-        ? "fly"
-        : Event.button === 1 || (Event.button === 0 && Event.shiftKey)
-          ? "pan"
-          : "orbit";
+    let Kind = "orbit";
+    if (Event.button === 2 && Event.altKey) {
+      Kind = "dolly";
+    } else if (Event.button === 2) {
+      Kind = "fly";
+    } else if (Event.button === 1 || (Event.button === 0 && Event.shiftKey)) {
+      Kind = "pan";
+    }
+
+    const CurCam = LiveCamRef.current;
     DragRef.current = {
       Kind,
+      PointerId: Event.pointerId,
       StartX: Event.clientX,
       StartY: Event.clientY,
-      Moved: false,
-      OriginStart: [...CompiledScene.CameraOrigin],
-      TargetStart: [...CompiledScene.CameraTarget],
+      LastX: Event.clientX,
+      LastY: Event.clientY,
+      Moved: Kind === "fly", // Zero deadzone for Unreal RMB free-look!
+      OrbitPivot: CurCam ? [...CurCam.Target] : [...CompiledScene.CameraTarget],
     };
   };
 
@@ -2235,6 +2496,7 @@ export default function GtxWorldViewport({
     if (Drag.Kind === "gizmo") {
       const Ray = ComputePointerRay(Event);
       if (!Ray) return;
+      BumpInteractiveSettle(170);
       const Solved = SolveGizmoDrag(
         Drag.GizmoDrag,
         Ray.RayOrigin,
@@ -2246,89 +2508,48 @@ export default function GtxWorldViewport({
       return;
     }
 
-    const Dx = Event.clientX - Drag.StartX;
-    const Dy = Event.clientY - Drag.StartY;
-    if (Math.hypot(Dx, Dy) > 4) Drag.Moved = true;
-    if (!Drag.Moved || !CameraCallback || EffectiveProjection !== "PERSP") return;
+    const TotalDx = Event.clientX - Drag.StartX;
+    const TotalDy = Event.clientY - Drag.StartY;
+    if (!Drag.Moved && Math.sqrt(TotalDx * TotalDx + TotalDy * TotalDy) > 2.5) {
+      Drag.Moved = true;
+    }
+    const StepDx = Event.clientX - Drag.LastX;
+    const StepDy = Event.clientY - Drag.LastY;
+    Drag.LastX = Event.clientX;
+    Drag.LastY = Event.clientY;
 
-    const Rel = [
-      Drag.OriginStart[0] - Drag.TargetStart[0],
-      Drag.OriginStart[1] - Drag.TargetStart[1],
-      Drag.OriginStart[2] - Drag.TargetStart[2],
-    ];
-    const Dist = Math.max(0.4, Math.hypot(Rel[0], Rel[1], Rel[2]));
+    if (!Drag.Moved || EffectiveProjection !== "PERSP" || !LiveCamRef.current) return;
+    if (StepDx === 0 && StepDy === 0) return;
 
-    if (Drag.Kind === "orbit") {
-      const Az = Math.atan2(Rel[1], Rel[0]) - Dx * 0.0065;
-      const El = Math.max(
-        -1.38,
-        Math.min(1.38, Math.asin(Math.max(-1, Math.min(1, Rel[2] / Dist))) + Dy * 0.0055),
-      );
-      const CosEl = Math.cos(El);
-      CameraCallback({
-        Position: [
-          +(Drag.TargetStart[0] + Dist * CosEl * Math.cos(Az)).toFixed(3),
-          +(Drag.TargetStart[1] + Dist * CosEl * Math.sin(Az)).toFixed(3),
-          +(Drag.TargetStart[2] + Dist * Math.sin(El)).toFixed(3),
-        ],
-        Target: Drag.TargetStart,
-      });
-    } else if (Drag.Kind === "fly") {
-      const FwdStart = NormalizeVec3([
-        Drag.TargetStart[0] - Drag.OriginStart[0],
-        Drag.TargetStart[1] - Drag.OriginStart[1],
-        Drag.TargetStart[2] - Drag.OriginStart[2],
-      ]);
-      const Yaw = Math.atan2(FwdStart[1], FwdStart[0]) - Dx * 0.0045;
-      const Pitch = Math.max(
-        -1.42,
-        Math.min(1.42, Math.asin(Math.max(-1, Math.min(1, FwdStart[2]))) - Dy * 0.0045),
-      );
-      const CosP = Math.cos(Pitch);
-      const NextFwd = [CosP * Math.cos(Yaw), CosP * Math.sin(Yaw), Math.sin(Pitch)];
-      CameraCallback({
-        Position: Drag.OriginStart,
-        Target: [
-          +(Drag.OriginStart[0] + NextFwd[0] * Dist).toFixed(3),
-          +(Drag.OriginStart[1] + NextFwd[1] * Dist).toFixed(3),
-          +(Drag.OriginStart[2] + NextFwd[2] * Dist).toFixed(3),
-        ],
-      });
+    const Cur = LiveCamRef.current;
+    if (Drag.Kind === "fly") {
+      ApplyLiveCameraUpdate(ApplyUnrealMouseLook(Cur, StepDx, StepDy, 0.0038), false);
+    } else if (Drag.Kind === "orbit") {
+      ApplyLiveCameraUpdate(ApplyUnrealOrbit(Cur, Drag.OrbitPivot, StepDx, StepDy, 0.0052), false);
     } else if (Drag.Kind === "pan") {
-      const Fwd = NormalizeVec3([
-        Drag.TargetStart[0] - Drag.OriginStart[0],
-        Drag.TargetStart[1] - Drag.OriginStart[1],
-        Drag.TargetStart[2] - Drag.OriginStart[2],
-      ]);
-      const Right = NormalizeVec3([Fwd[1], -Fwd[0], 0], [1, 0, 0]);
-      const Up = NormalizeVec3([
-        Right[1] * Fwd[2] - Right[2] * Fwd[1],
-        Right[2] * Fwd[0] - Right[0] * Fwd[2],
-        Right[0] * Fwd[1] - Right[1] * Fwd[0],
-      ]);
-      const Scale = Dist * 0.0016;
-      const Shift = [
-        -Right[0] * Dx * Scale + Up[0] * Dy * Scale,
-        -Right[1] * Dx * Scale + Up[1] * Dy * Scale,
-        -Right[2] * Dx * Scale + Up[2] * Dy * Scale,
-      ];
-      CameraCallback({
-        Position: Drag.OriginStart.map((C, I) => +(C + Shift[I]).toFixed(3)),
-        Target: Drag.TargetStart.map((C, I) => +(C + Shift[I]).toFixed(3)),
-      });
+      const Next = ApplyUnrealPan(Cur, StepDx, StepDy, 0.0015);
+      Drag.OrbitPivot = [...Next.Target];
+      ApplyLiveCameraUpdate(Next, false);
+    } else if (Drag.Kind === "dolly") {
+      ApplyLiveCameraUpdate(ApplyUnrealDolly(Cur, (StepDy - StepDx) * 0.03, 0.105), false);
     }
   };
 
   const OnPointerUp = (Event) => {
     const Drag = DragRef.current;
     DragRef.current = null;
-    if (RenderBackend === "cpu-gtx" && Drag && (Drag.Moved || Drag.Kind === "gizmo")) {
-      SceneDirtyRef.current = true;
-      SetCpuSettleTick((T) => T + 1);
+    if (CanvasRef.current?.hasPointerCapture?.(Event.pointerId)) {
+      CanvasRef.current.releasePointerCapture?.(Event.pointerId);
     }
     if (Drag?.Kind === "gizmo") {
       SetActiveHandle(GizmoHandle.None);
       SetGizmoReadout("");
+      BumpInteractiveSettle(80);
+      return;
+    }
+    if (Drag && Drag.Moved) {
+      CommitLiveCameraToEditor(true);
+      BumpInteractiveSettle(80);
       return;
     }
     if (Drag && !Drag.Moved && Event.button === 0 && CanvasRef.current) {
@@ -2336,7 +2557,7 @@ export default function GtxWorldViewport({
       const U = (Event.clientX - Rect.left) / Math.max(1, Rect.width);
       const V = (Event.clientY - Rect.top) / Math.max(1, Rect.height);
       const HitId = PickSceneEntityAtUv(
-        CompiledScene,
+        GetActiveScene(),
         U,
         V,
         Rect.width / Math.max(1, Rect.height),
@@ -2346,29 +2567,34 @@ export default function GtxWorldViewport({
   };
 
   const OnWheel = (Event) => {
-    if (!CameraCallback || EffectiveProjection !== "PERSP") return;
-    const { CameraOrigin, CameraTarget } = CompiledScene;
-    const Fwd = NormalizeVec3([
-      CameraTarget[0] - CameraOrigin[0],
-      CameraTarget[1] - CameraOrigin[1],
-      CameraTarget[2] - CameraOrigin[2],
-    ]);
-    const Dist = Math.hypot(
-      CameraTarget[0] - CameraOrigin[0],
-      CameraTarget[1] - CameraOrigin[1],
-      CameraTarget[2] - CameraOrigin[2],
-    );
-    const Step = -Math.sign(Event.deltaY) * Math.max(0.18, Dist * 0.11);
-    const NextOrigin = CameraOrigin.map((C, I) => +(C + Fwd[I] * Step).toFixed(3));
-    if (
-      Math.hypot(
-        CameraTarget[0] - NextOrigin[0],
-        CameraTarget[1] - NextOrigin[1],
-        CameraTarget[2] - NextOrigin[2],
-      ) > 0.35
-    ) {
-      CameraCallback({ Position: NextOrigin, Target: CameraTarget });
+    if (EffectiveProjection !== "PERSP" || !LiveCamRef.current) return;
+    Event.preventDefault?.();
+
+    const Cur = LiveCamRef.current;
+    const IsRmbHeld = DragRef.current?.Kind === "fly" || (Event.buttons & 2) !== 0;
+
+    // Authentic Unreal Engine RMB + Scroll Wheel: Adjust WASD Camera Fly Speed Scalar!
+    if (IsRmbHeld) {
+      const Factor = Event.deltaY < 0 ? 1.22 : 1 / 1.22;
+      const NextScalar = Math.max(0.15, Math.min(16.0, (Cur.SpeedScalar || 1.0) * Factor));
+      LiveCamRef.current = { ...Cur, SpeedScalar: NextScalar };
+      SetCameraSpeedHud(`Camera Speed · ${(3.4 * NextScalar).toFixed(1)} m/s`);
+      if (SpeedHudTimerRef.current) window.clearTimeout(SpeedHudTimerRef.current);
+      SpeedHudTimerRef.current = window.setTimeout(() => SetCameraSpeedHud(""), 1300);
+      return;
     }
+
+    const WheelSteps = Math.max(-2.5, Math.min(2.5, Event.deltaY / 100));
+    if (Math.abs(WheelSteps) < 1e-3) return;
+    ApplyLiveCameraUpdate(ApplyUnrealDolly(Cur, WheelSteps, 0.105), false);
+  };
+
+  const HandleRetryWebGlGpu = () => {
+    SessionWebGlBlocked = false;
+    EvictionCountRef.current = 0;
+    SetShaderError(null);
+    SetCanvasInstance((K) => K + 1);
+    SetRenderBackend("webgl2");
   };
 
   const CursorStyle =
@@ -2382,6 +2608,12 @@ export default function GtxWorldViewport({
     <div
       className="gtx-world-stage"
       onContextMenu={(Ev) => Ev.preventDefault()}
+      onPointerEnter={() => {
+        ViewportHoveredRef.current = true;
+      }}
+      onPointerLeave={() => {
+        if (!DragRef.current) ViewportHoveredRef.current = false;
+      }}
     >
       <canvas
         key={`${RenderBackend}-${CanvasInstance}`}
@@ -2392,15 +2624,22 @@ export default function GtxWorldViewport({
         onPointerDown={OnPointerDown}
         onPointerMove={OnPointerMove}
         onPointerUp={OnPointerUp}
+        onPointerCancel={OnPointerUp}
         onWheel={OnWheel}
       />
-      {(ActiveHandle !== GizmoHandle.None || HoveredHandle !== GizmoHandle.None || GizmoReadout) && (
+      {(ActiveHandle !== GizmoHandle.None ||
+        HoveredHandle !== GizmoHandle.None ||
+        GizmoReadout ||
+        CameraSpeedHud) && (
         <div className="gtx-gizmo-readout" role="status" aria-live="polite">
           <span className="gtx-gizmo-dot" />
           <strong>
-            {GizmoReadout || GIZMO_HANDLE_LABELS[HoveredHandle] || "GizmoPRO"}
+            {CameraSpeedHud ||
+              GizmoReadout ||
+              GIZMO_HANDLE_LABELS[HoveredHandle] ||
+              "GizmoPRO"}
           </strong>
-          {ActiveHandle !== GizmoHandle.None && (
+          {ActiveHandle !== GizmoHandle.None && !CameraSpeedHud && (
             <small>Hold Ctrl to snap</small>
           )}
         </div>
@@ -2410,16 +2649,29 @@ export default function GtxWorldViewport({
           GTX Shader Error: {ShaderError}
         </div>
       )}
+      {RenderBackend === "cpu-gtx" && (
+        <button
+          type="button"
+          className="gtx-camera-home"
+          style={{ right: 122 }}
+          title="WebGL2 was blocked or evicted in this tab — click to retry hardware WebGL2 GPU"
+          onClick={HandleRetryWebGlGpu}
+        >
+          Retry WebGL2 GPU
+        </button>
+      )}
       <button
         type="button"
         className="gtx-camera-home"
-        title="Reset EditorCamera to C++ ShowcaseWorldSceneBundle Pose"
-        onClick={() =>
-          CameraCallback?.({
-            Position: [...CanonicalEditorCamera.Position],
-            Target: [...CanonicalEditorCamera.Target],
-          })
-        }
+        title="Reset EditorCamera to C++ ShowcaseWorldSceneBundle Pose (RMB + WASDQE to fly, RMB + Wheel for speed, F to focus)"
+        onClick={() => {
+          const Home = DeriveUnrealCameraState(
+            CanonicalEditorCamera.Position,
+            CanonicalEditorCamera.Target,
+            LiveCamRef.current?.SpeedScalar || 1.0,
+          );
+          ApplyLiveCameraUpdate(Home, true);
+        }}
       >
         Reset Camera
       </button>

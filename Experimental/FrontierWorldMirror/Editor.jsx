@@ -22,7 +22,7 @@ import ReferencePanel, {
 import FolderInspector from "./FolderInspector.jsx";
 import { FolderInventory } from "./FolderInventory.mjs";
 import DiagnosticsCard from "./DiagnosticsCard.jsx";
-import { BrowserFPS } from "./BrowserTiming.js";
+import { BrowserFPS, useBrowserTiming } from "./BrowserTiming.js";
 import {
   EnsureEditorCamera,
   IsEditorCamera,
@@ -412,12 +412,26 @@ if (SkyAlias && new URLSearchParams(location.search).get("inspect") === "sky") {
   Address.searchParams.set("inspect", "atmosphere");
   history.replaceState(null, "", Address);
 }
+function RealtimeFpsReadout({ FallbackFps = 60 }) {
+  const { Live } = useBrowserTiming();
+  const DisplayFps = Live
+    ? Math.min(240, Math.max(1, Math.round(Live.FPS)))
+    : FallbackFps;
+  return (
+    <b>
+      {DisplayFps} <em>fps</em>
+    </b>
+  );
+}
 function App() {
   const [Debug, SetDebug] = useState(0),
     [HiZ, ToggleHiZ] = useState(true),
     [Alias, ToggleAlias] = useState(true),
     [PatchError, SetPatchError] = useState(1);
   const [LiveFps, SetLiveFps] = useState(60);
+  const HandleFpsSample = React.useCallback((NextFps) => {
+    SetLiveFps((Prev) => (Math.abs(Prev - NextFps) >= 2 ? NextFps : Prev));
+  }, []);
   const [Rows, StoreRows] = useState(() =>
       EnsureEditorCamera(Saved.Rows || ShowcaseInitialRows),
     ),
@@ -884,41 +898,95 @@ function App() {
     setTimeout(() => Notify(""), 3200);
   };
 
-  // Sync active level snapshot into LevelsState + localStorage
-  useEffect(() => {
-    SetLevelsState((Prev) => {
-      const NextLevels = Prev.Levels.map((Lvl) =>
-        Lvl.Id === Prev.ActiveLevelId
-          ? {
-              ...Lvl,
-              Name: Name || Lvl.Name,
-              Rows,
-              Values,
-              Hidden,
-              Collapsed,
-              Selected,
-            }
-          : Lvl,
+  // Debounced level + project persistence (eliminates synchronous JSON.stringify + double-render stalls during 60Hz edits!)
+  const LatestProjectSnapshotRef = useRef(null);
+  LatestProjectSnapshotRef.current = {
+    Rows,
+    Selected,
+    Values,
+    Hidden,
+    Collapsed,
+    Settings,
+    Name,
+    AssetRecords,
+    LevelsState,
+  };
+
+  const FlushPersistenceNow = React.useCallback((SyncLevelsState = false) => {
+    const Snap = LatestProjectSnapshotRef.current;
+    if (!Snap) return null;
+    const NextLevels = Snap.LevelsState.Levels.map((Lvl) =>
+      Lvl.Id === Snap.LevelsState.ActiveLevelId
+        ? {
+            ...Lvl,
+            Name: Snap.Name || Lvl.Name,
+            Rows: Snap.Rows,
+            Values: Snap.Values,
+            Hidden: Snap.Hidden,
+            Collapsed: Snap.Collapsed,
+            Selected: Snap.Selected,
+          }
+        : Lvl,
+    );
+    const NextState = {
+      ActiveLevelId: Snap.LevelsState.ActiveLevelId,
+      Levels: NextLevels,
+    };
+    SaveLevelsState(NextState);
+    if (SyncLevelsState) {
+      SetLevelsState(NextState);
+    }
+    try {
+      localStorage.setItem(
+        StorageKey,
+        JSON.stringify({
+          Rows: Snap.Rows,
+          ReferenceDesignRevision: 1,
+          LightDesignRevision: 1,
+          Assets: Snap.AssetRecords,
+          Selected: Snap.Selected,
+          Values: Snap.Values,
+          Hidden: Snap.Hidden,
+          Collapsed: Snap.Collapsed,
+          Settings: Snap.Settings,
+          Name: Snap.Name,
+        }),
       );
-      const NextState = { ActiveLevelId: Prev.ActiveLevelId, Levels: NextLevels };
-      SaveLevelsState(NextState);
-      return NextState;
-    });
-  }, [Rows, Values, Hidden, Collapsed, Selected, Name]);
+    } catch {
+      Notify(
+        "Browser storage is full or unavailable. Export the scene to keep your material drafts.",
+      );
+    }
+    return NextState;
+  }, []);
+
+  useEffect(() => {
+    const Timer = window.setTimeout(() => {
+      FlushPersistenceNow(true);
+    }, 320);
+    return () => window.clearTimeout(Timer);
+  }, [Rows, Selected, Values, Hidden, Collapsed, Settings, Name, AssetRecords, FlushPersistenceNow]);
+
+  useEffect(() => {
+    const OnPageHide = () => {
+      FlushPersistenceNow(false);
+    };
+    window.addEventListener("pagehide", OnPageHide);
+    return () => window.removeEventListener("pagehide", OnPageHide);
+  }, [FlushPersistenceNow]);
 
   const SwitchToLevel = (LevelId) => {
     if (LevelId === "__create_new__") {
       SetCreateLevelOpen(true);
       return;
     }
-    const Target = LevelsState.Levels.find((Item) => Item.Id === LevelId);
+    const Synced = FlushPersistenceNow(false) || LevelsState;
+    const Target = Synced.Levels.find((Item) => Item.Id === LevelId);
     if (!Target) return;
     const PreparedRows = EnsureEditorCamera(PrepareLightRows(Target.Rows, 1));
-    SetLevelsState((Prev) => {
-      const NextState = { ...Prev, ActiveLevelId: Target.Id };
-      SaveLevelsState(NextState);
-      return NextState;
-    });
+    const NextState = { ...Synced, ActiveLevelId: Target.Id };
+    SaveLevelsState(NextState);
+    SetLevelsState(NextState);
     StoreRows(PreparedRows);
     AssignValues(Target.Values || {});
     AssignHidden({ ...(Target.Hidden || {}), camera: false });
@@ -929,10 +997,11 @@ function App() {
   };
 
   const HandleCreateLevel = ({ Name: NewName, TemplateId, Notes }) => {
-    const CurrentLevel = LevelsState.Levels.find(
-      (Item) => Item.Id === LevelsState.ActiveLevelId,
+    const Synced = FlushPersistenceNow(false) || LevelsState;
+    const CurrentLevel = Synced.Levels.find(
+      (Item) => Item.Id === Synced.ActiveLevelId,
     ) || {
-      Id: LevelsState.ActiveLevelId,
+      Id: Synced.ActiveLevelId,
       Name,
       Rows,
       Values,
@@ -948,14 +1017,12 @@ function App() {
     });
     const PreparedRows = EnsureEditorCamera(PrepareLightRows(Created.Rows, 1));
     Created.Rows = PreparedRows;
-    SetLevelsState((Prev) => {
-      const NextState = {
-        ActiveLevelId: Created.Id,
-        Levels: [...Prev.Levels, Created],
-      };
-      SaveLevelsState(NextState);
-      return NextState;
-    });
+    const NextState = {
+      ActiveLevelId: Created.Id,
+      Levels: [...Synced.Levels, Created],
+    };
+    SaveLevelsState(NextState);
+    SetLevelsState(NextState);
     StoreRows(PreparedRows);
     AssignValues(Created.Values || {});
     AssignHidden({ ...(Created.Hidden || {}), camera: false });
@@ -990,29 +1057,6 @@ function App() {
       return { ...Previous, [TargetId]: NextEntry };
     });
   };
-  useEffect(() => {
-    try {
-      localStorage.setItem(
-        StorageKey,
-        JSON.stringify({
-          Rows,
-          ReferenceDesignRevision: 1,
-          LightDesignRevision: 1,
-          Assets: AssetRecords,
-          Selected,
-          Values,
-          Hidden,
-          Collapsed,
-          Settings,
-          Name,
-        }),
-      );
-    } catch {
-      Notify(
-        "Browser storage is full or unavailable. Export the scene to keep your material drafts.",
-      );
-    }
-  }, [Rows, Selected, Values, Hidden, Collapsed, Settings, Name, AssetRecords]);
   useEffect(() => {
     const Key = (Event) => {
       if (
@@ -1604,9 +1648,7 @@ function App() {
       <footer className="outliner-footer">
         <span>
           <small>REALTIME</small>
-          <b>
-            {LiveFps} <em>fps</em>
-          </b>
+          <RealtimeFpsReadout FallbackFps={LiveFps} />
         </span>
         <span>
           <small>QUALITY</small>
@@ -1892,7 +1934,7 @@ function App() {
           ShowGizmo={ShowGizmo}
           UpdateEditorCamera={UpdateEditorCamera}
           OnTransformEntity={HandleGizmoTransformEntity}
-          OnFpsSample={SetLiveFps}
+          OnFpsSample={HandleFpsSample}
         />
         {SplitView && (
           <GtxWorldViewport
