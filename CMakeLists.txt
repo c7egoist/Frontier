@@ -193,7 +193,11 @@ endif()
 #                                      SLANG -> SPIR-V SHADER COMPILATION PIPELINE
 #------------------------------------------------------------------------------------------------------------------------
 
-set(FRONTIER_SLANGC_BIN "${CMAKE_SOURCE_DIR}/ExternalPackages/VulkanCompute/Slang/slangtorch/bin/slangc")
+if(WIN32)
+    set(FRONTIER_SLANGC_BIN "${CMAKE_SOURCE_DIR}/ExternalPackages/VulkanCompute/Slang/slangtorch/bin/slangc.exe")
+else()
+    set(FRONTIER_SLANGC_BIN "${CMAKE_SOURCE_DIR}/ExternalPackages/VulkanCompute/Slang/slangtorch/bin/slangc")
+endif()
 if(NOT EXISTS "${FRONTIER_SLANGC_BIN}")
     execute_process(
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/Automation/PrepareShaderToolchain.py"
@@ -417,6 +421,7 @@ if(BUILD_TESTING)
     frontier_register_exhibit(UVWorkspaceUIValidation           Exhibits/UVWorkspaceUIValidation.cpp)
     frontier_register_exhibit(UVParameterizationValidation      Exhibits/UVParameterizationValidation.cpp)
     frontier_register_exhibit(UVInteractiveAuthoringValidation  Exhibits/UVInteractiveAuthoringValidation.cpp)
+    frontier_register_exhibit(UVBoundaryValidation              Exhibits/UVBoundaryValidation.cpp)
     frontier_register_exhibit(NetworkingSpaceValidation         Exhibits/NetworkingSpaceValidation.cpp)
 
     if(NOT ANDROID AND NOT FRONTIER_PROFILE STREQUAL "Shipping")
