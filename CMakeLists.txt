@@ -259,8 +259,16 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/GeometrySpace/Network/GeometryInstance.cpp
     Engine/GeometrySpace/Network/FacePartitionRegister.cpp
     Engine/GeometrySpace/Primitives/AnalyticPrimitives.cpp
+    Engine/GeometrySpace/Primitives/RevolutionSweepPrimitives.cpp
+    Engine/GeometrySpace/Primitives/WatertightSewing.cpp
+    Engine/GeometrySpace/Analysis/CurvatureAnalysis.cpp
+    Engine/GeometrySpace/Analysis/StretchMeasurement.cpp
     Engine/GeometrySpace/Selection/ComponentSelectionMask.cpp
     Engine/GeometrySpace/Selection/GeometrySelection.cpp
+    Engine/GeometrySpace/Selection/IslandFloodSelection.cpp
+    Engine/SpatialAcceleration/ClusterPyramid.cpp
+    Engine/SpatialAcceleration/WideBoundingTree.cpp
+    Engine/DistanceFieldSpace/SignedDistanceVolume.cpp
     Engine/Interchange/GeometryInterchange.cpp
     Engine/Editor/Viewports/TransformGizmo.cpp
     Engine/Editor/Viewports/ViewportProjection.cpp
@@ -283,6 +291,7 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/Codecs/RevisionCodec.cpp
     Engine/Codecs/ProjectCodec.cpp
     Engine/Codecs/ColourCodec.cpp
+    Engine/Codecs/GeometryCodec.cpp
     Engine/Codecs/FontCodec.cpp
     Engine/Codecs/UVCodec.cpp
     Engine/Codecs/ImageCodec.cpp
@@ -417,6 +426,7 @@ if(BUILD_TESTING)
     frontier_register_exhibit(WorkspaceRevisionValidation    Exhibits/WorkspaceRevisionValidation.cpp)
     frontier_register_exhibit(ContentBrowserValidation       Exhibits/ContentBrowserValidation.cpp)
     frontier_register_exhibit(GeometryNetworkValidation      Exhibits/GeometryNetworkValidation.cpp)
+    frontier_register_exhibit(GeometryCompletionValidation   Exhibits/GeometryCompletionValidation.cpp)
     frontier_register_exhibit(UVRasterPickingGizmoValidation    Exhibits/UVRasterPickingGizmoValidation.cpp)
     frontier_register_exhibit(UVWorkspaceUIValidation           Exhibits/UVWorkspaceUIValidation.cpp)
     frontier_register_exhibit(UVParameterizationValidation      Exhibits/UVParameterizationValidation.cpp)

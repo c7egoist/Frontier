@@ -250,30 +250,32 @@ Frontier/
     │       ├── ProceduralChannelBaker.{h,cpp}     // Deterministic procedural normal/roughness/albedo pyramid baker
     │       └── MaterialSpecimenRasterizer.{h,cpp} // Shader-ball & draped-cloth preview thumbnail rasterizer
     │
-    ├── GeometrySpace/                             // Analytic primitives, geometric analysis, selection & UV
-    │   ├── Primitives/                            // Parametric solid primitives & watertight sewing
-    │   │   ├── AnalyticPrimitives.{h,cpp}         // Box, cylinder, cone, frustum, sphere, torus & capsule
-    │   │   ├── RevolutionSweepPrimitives.{h,cpp}  // Lathe revolution, linear extrusion & profile sweeps
-    │   │   └── WatertightSewing.{h,cpp}           // Boundary edge welding, facet orientation & solid closure
+    ├── GeometrySpace/                             // Half-edge polygon networks, analytic/sweep solids, curvature & selection
+    │   ├── Network/                               // Contiguous half-edge polygon representation & UDIM partition spans
+    │   │   ├── PolygonNetwork.{h,cpp}             // Contiguous Vertices, DirectedEdges, Faces, per-corner UVs & shading
+    │   │   ├── GeometryInstance.{h,cpp}           // Transformable world/viewport PolygonNetwork instance token
+    │   │   └── FacePartitionRegister.{h,cpp}      // PriorityAllocationLayer & UVRevision-stamped FacePartitionSpan
+    │   │
+    │   ├── Primitives/                            // Parametric solid primitives, revolution/sweeps & watertight sewing
+    │   │   ├── AnalyticPrimitives.{h,cpp}         // Box, cylinder, cone, frustum, sphere, torus, capsule & sample presets
+    │   │   ├── RevolutionSweepPrimitives.{h,cpp}  // Lathe revolution, linear extrusion & Bishop parallel-transport sweeps
+    │   │   └── WatertightSewing.{h,cpp}           // Spatial-hashed vertex welding, outward winding & hole closure
     │   │
     │   ├── Analysis/
-    │   │   ├── CurvatureAnalysis.{h,cpp}          // Discrete mean and Gaussian differential curvature
-    │   │   └── StretchMeasurement.{h,cpp}         // Per-facet and island angle/area distortion metrics
+    │   │   ├── CurvatureAnalysis.{h,cpp}          // Meyer discrete mean/Gaussian curvature & Mikkelsen/Duff corner tangents
+    │   │   └── StretchMeasurement.{h,cpp}         // Exact 2x2 UV-Jacobian SVD, Sander stretch & Symmetric Dirichlet metrics
     │   │
-    │   ├── Selection/
-    │   │   ├── GeometrySelection.{h,cpp}          // Component pick resolution (Point, Edge, Facet, Loop)
-    │   │   ├── ComponentSelectionMask.{h,cpp}     // Bitmask filters for multi-component picking & paint masks
-    │   │   └── IslandFloodSelection.{h,cpp}       // Seam-bounded island flood expansion & UVTile tagging
-    │   │
-    │   └── UV/                                    // Parameterization & UVTile layout solvers
-    │       ├── TileLayout.{h,cpp}                 // Integer [TileU, TileV] UVTile coordinate grid
-    │       ├── UDIMTileAddressing.{h,cpp}         // UDIM 1001-series addressing and coordinate conversion
-    │       ├── TexelLayout.{h,cpp}                // Target texel density [px/m] and pixel border padding
-    │       ├── TileSegmentation.{h,cpp}           // Seam-split UVTile island extraction & boundary loops
-    │       ├── SeamRouter.{h,cpp}                 // Dijkstra geodesic shortest-path & dihedral seam router
-    │       ├── ConformalFlattening.{h,cpp}        // LSCM and ABF++ linear parameterization solvers
-    │       ├── StretchRelaxer.{h,cpp}             // Iterative area-preserving mass-spring UV relaxer
-    │       └── IslandLayoutPacker.{h,cpp}         // Scanline bin-packer targeting active UDIM UVTiles
+    │   └── Selection/
+    │       ├── GeometrySelection.{h,cpp}          // Edge loop, edge ring, Dijkstra shortest path, boundary, seam & sharp
+    │       ├── ComponentSelectionMask.{h,cpp}     // Bitmask filters for multi-component picking & paint masks
+    │       └── IslandFloodSelection.{h,cpp}       // Seam-bounded UV island flood segmentation & UDIM tile reassignment
+    │
+    ├── SpatialAcceleration/                       // Unified 128-triangle cluster LOD pyramid & 128 B 4-wide ray acceleration
+    │   ├── ClusterPyramid.{h,cpp}                 // 128-triangle Morton LOD pyramid with seam/border-locked QEM collapse
+    │   └── WideBoundingTree.{h,cpp}               // Compressed 128 B 4-Wide SAH BVH4 for deterministic GTX + RTX ray queries
+    │
+    ├── DistanceFieldSpace/                        // Volumetric signed distance fields for Tier 1 GTX GI & solar penumbra
+    │   └── SignedDistanceVolume.{h,cpp}           // Sparse 8x8x8 narrow-band brick 3D SDF builder, gradient & cone trace
     │
     ├── Codecs/                                    // Native Frontier .Space container Encoders & Decoders
     │   ├── SpaceContainerCodec.{h,cpp}            // Hybrid TOML + 64B-aligned binary section Encoder/Decoder

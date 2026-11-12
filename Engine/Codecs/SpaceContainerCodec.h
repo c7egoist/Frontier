@@ -31,7 +31,7 @@ enum class SpaceExtensionCategory : uint8_t
 {
     ProjectSpace    = 0,  // [-] - .ProjectSpace root project configuration & dependency locks
     ColourSpace     = 1,  // [-] - .ColourSpace radiometric swatches, ramps, & spectral curves
-    GeometrySpace   = 2,  // [-] - .GeometrySpace 3D analytic & manifold topology (deferred domain)
+    GeometrySpace   = 2,  // [-] - .GeometrySpace 3D analytic, half-edge & spatial acceleration domain
     FontSpace       = 3,  // [-] - .FontSpace vector typography & kerning metrics
     TextureSpace    = 4,  // [-] - .TextureSpace GPU-ready tiled texel channels & mip chains
     MaterialSpace   = 5,  // [-] - .MaterialSpace physically based shading parameters

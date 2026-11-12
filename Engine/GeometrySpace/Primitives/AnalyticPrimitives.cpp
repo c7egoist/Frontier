@@ -287,6 +287,240 @@ void AppendTorusRingPrimitive(
     }
 }
 
+void AppendSpherePrimitive(
+    PolygonNetwork&              TargetNetwork,
+    Mathematics::Axis3D          Center,
+    float                        Radius,
+    uint32_t                     LongitudeSegments,
+    uint32_t                     LatitudeRings,
+    UVPatchBounds                UVRegion,
+    const FaceShadingAssignment& Shading,
+    uint16_t                     PriorityLayerOrdinal,
+    uint16_t                     PartGroupOrdinal)
+{
+    const float    ClampedRadius = std::max(1.0e-5f, Radius);
+    const uint32_t LonSegs       = std::max(8u, LongitudeSegments);
+    const uint32_t LatRings      = std::max(4u, LatitudeRings);
+
+    const float OrigU = UVRegion.Minimum.U + (UVRegion.Maximum.U - UVRegion.Minimum.U) * 0.03f;
+    const float OrigV = UVRegion.Minimum.V + (UVRegion.Maximum.V - UVRegion.Minimum.V) * 0.03f;
+    const float SpanU = (UVRegion.Maximum.U - UVRegion.Minimum.U) * 0.94f;
+    const float SpanV = (UVRegion.Maximum.V - UVRegion.Minimum.V) * 0.94f;
+
+    const uint32_t SouthPoleVertex = TargetNetwork.AppendVertex({ Center.X, Center.Y - ClampedRadius, Center.Z });
+    const uint32_t FirstRingVertex = static_cast<uint32_t>(TargetNetwork.Vertices.size());
+
+    for (uint32_t Ring = 1u; Ring < LatRings; ++Ring)
+    {
+        const float Theta = Constants::PiFloat * (static_cast<float>(Ring) / static_cast<float>(LatRings));
+        const float YOff  = -ClampedRadius * std::cos(Theta);
+        const float RingR = ClampedRadius * std::sin(Theta);
+        for (uint32_t Seg = 0u; Seg < LonSegs; ++Seg)
+        {
+            const float Phi = Constants::TauFloat * (static_cast<float>(Seg) / static_cast<float>(LonSegs));
+            (void)TargetNetwork.AppendVertex({
+                Center.X + RingR * std::cos(Phi),
+                Center.Y + YOff,
+                Center.Z - RingR * std::sin(Phi),
+            });
+        }
+    }
+
+    const uint32_t NorthPoleVertex = TargetNetwork.AppendVertex({ Center.X, Center.Y + ClampedRadius, Center.Z });
+
+    for (uint32_t Seg = 0u; Seg < LonSegs; ++Seg)
+    {
+        const uint32_t NextSeg = (Seg + 1u) % LonSegs;
+        const float    U0      = OrigU + SpanU * (static_cast<float>(Seg) / static_cast<float>(LonSegs));
+        const float    U1      = OrigU + SpanU * (static_cast<float>(Seg + 1u) / static_cast<float>(LonSegs));
+        const float    UMid    = 0.5f * (U0 + U1);
+        const float    VFirst  = OrigV + SpanV * (1.0f / static_cast<float>(LatRings));
+
+        const std::array<uint32_t, 3u> SouthTri {{
+            SouthPoleVertex,
+            FirstRingVertex + NextSeg,
+            FirstRingVertex + Seg,
+        }};
+        const std::array<Mathematics::UVAxes, 3u> SouthUV {{
+            { UMid, OrigV },
+            { U1,   VFirst },
+            { U0,   VFirst },
+        }};
+        (void)TargetNetwork.AppendFace(SouthTri, SouthUV, Shading, PriorityLayerOrdinal, PartGroupOrdinal);
+    }
+
+    for (uint32_t Ring = 0u; Ring + 2u < LatRings; ++Ring)
+    {
+        const uint32_t RowLower = FirstRingVertex + Ring * LonSegs;
+        const uint32_t RowUpper = FirstRingVertex + (Ring + 1u) * LonSegs;
+        const float    V0       = OrigV + SpanV * (static_cast<float>(Ring + 1u) / static_cast<float>(LatRings));
+        const float    V1       = OrigV + SpanV * (static_cast<float>(Ring + 2u) / static_cast<float>(LatRings));
+
+        for (uint32_t Seg = 0u; Seg < LonSegs; ++Seg)
+        {
+            const uint32_t NextSeg = (Seg + 1u) % LonSegs;
+            const float    U0      = OrigU + SpanU * (static_cast<float>(Seg) / static_cast<float>(LonSegs));
+            const float    U1      = OrigU + SpanU * (static_cast<float>(Seg + 1u) / static_cast<float>(LonSegs));
+
+            const std::array<uint32_t, 4u> QuadLoop {{
+                RowLower + Seg,
+                RowLower + NextSeg,
+                RowUpper + NextSeg,
+                RowUpper + Seg,
+            }};
+            const std::array<Mathematics::UVAxes, 4u> QuadUV {{
+                { U0, V0 },
+                { U1, V0 },
+                { U1, V1 },
+                { U0, V1 },
+            }};
+            (void)TargetNetwork.AppendFace(QuadLoop, QuadUV, Shading, PriorityLayerOrdinal, PartGroupOrdinal);
+        }
+    }
+
+    const uint32_t LastRow = FirstRingVertex + (LatRings - 2u) * LonSegs;
+    const float    VLast   = OrigV + SpanV * (static_cast<float>(LatRings - 1u) / static_cast<float>(LatRings));
+    const float    VTop    = OrigV + SpanV;
+    for (uint32_t Seg = 0u; Seg < LonSegs; ++Seg)
+    {
+        const uint32_t NextSeg = (Seg + 1u) % LonSegs;
+        const float    U0      = OrigU + SpanU * (static_cast<float>(Seg) / static_cast<float>(LonSegs));
+        const float    U1      = OrigU + SpanU * (static_cast<float>(Seg + 1u) / static_cast<float>(LonSegs));
+        const float    UMid    = 0.5f * (U0 + U1);
+
+        const std::array<uint32_t, 3u> NorthTri {{
+            LastRow + Seg,
+            LastRow + NextSeg,
+            NorthPoleVertex,
+        }};
+        const std::array<Mathematics::UVAxes, 3u> NorthUV {{
+            { U0,   VLast },
+            { U1,   VLast },
+            { UMid, VTop  },
+        }};
+        (void)TargetNetwork.AppendFace(NorthTri, NorthUV, Shading, PriorityLayerOrdinal, PartGroupOrdinal);
+    }
+}
+
+void AppendCapsulePrimitive(
+    PolygonNetwork&              TargetNetwork,
+    Mathematics::Axis3D          LowerPoleCenter,
+    Mathematics::Axis3D          UpperPoleCenter,
+    float                        Radius,
+    uint32_t                     RadialSegments,
+    uint32_t                     HemisphereRings,
+    UVPatchBounds                UVRegion,
+    const FaceShadingAssignment& Shading,
+    uint16_t                     PriorityLayerOrdinal,
+    uint16_t                     PartGroupOrdinal)
+{
+    const float    ClampedRadius = std::max(1.0e-5f, Radius);
+    const uint32_t LonSegs       = std::max(8u, RadialSegments);
+    const uint32_t CapRings      = std::max(2u, HemisphereRings);
+
+    const Mathematics::Axis3D SpineDelta  = UpperPoleCenter - LowerPoleCenter;
+    const float               SpineLength = Mathematics::EvaluateLength(SpineDelta);
+    const Mathematics::Axis3D UpAxis      = (SpineLength > 1.0e-6f)
+        ? (SpineDelta * (1.0f / SpineLength))
+        : Mathematics::Axis3D{ 0.0f, 1.0f, 0.0f };
+    const Mathematics::Axis3D ReferenceAxis = (std::fabs(UpAxis.Z) < 0.92f)
+        ? Mathematics::Axis3D{ 0.0f, 0.0f, 1.0f }
+        : Mathematics::Axis3D{ 1.0f, 0.0f, 0.0f };
+    const Mathematics::Axis3D RightAxis   = Mathematics::NormalizeAxis(Mathematics::EvaluateCross(UpAxis, ReferenceAxis), { 1.0f, 0.0f, 0.0f });
+    const Mathematics::Axis3D ForwardAxis = Mathematics::NormalizeAxis(Mathematics::EvaluateCross(RightAxis, UpAxis), { 0.0f, 0.0f, 1.0f });
+
+    const float OrigU = UVRegion.Minimum.U + (UVRegion.Maximum.U - UVRegion.Minimum.U) * 0.03f;
+    const float OrigV = UVRegion.Minimum.V + (UVRegion.Maximum.V - UVRegion.Minimum.V) * 0.03f;
+    const float SpanU = (UVRegion.Maximum.U - UVRegion.Minimum.U) * 0.94f;
+    const float SpanV = (UVRegion.Maximum.V - UVRegion.Minimum.V) * 0.94f;
+
+    const uint32_t SouthPole = TargetNetwork.AppendVertex(LowerPoleCenter - UpAxis * ClampedRadius);
+    const uint32_t FirstRing = static_cast<uint32_t>(TargetNetwork.Vertices.size());
+
+    // 📝 Lower hemisphere rings (1 .. CapRings) + upper hemisphere rings (0 .. CapRings - 1)
+    const uint32_t TotalInteriorRings = (SpineLength > 1.0e-5f) ? (2u * CapRings) : (2u * CapRings - 1u);
+    std::vector<float> RingNormalizedV;
+    RingNormalizedV.reserve(TotalInteriorRings);
+
+    const float TotalArcLength = Constants::PiFloat * ClampedRadius + SpineLength;
+    for (uint32_t Ring = 1u; Ring <= CapRings; ++Ring)
+    {
+        const float Angle = (0.5f * Constants::PiFloat * static_cast<float>(Ring)) / static_cast<float>(CapRings);
+        const float Axial = -ClampedRadius * std::cos(Angle);
+        const float RingR = ClampedRadius * std::sin(Angle);
+        RingNormalizedV.push_back((Angle * ClampedRadius) / std::max(1.0e-5f, TotalArcLength));
+        for (uint32_t Seg = 0u; Seg < LonSegs; ++Seg)
+        {
+            const float Phi    = Constants::TauFloat * (static_cast<float>(Seg) / static_cast<float>(LonSegs));
+            const auto  Radial = RightAxis * (RingR * std::cos(Phi)) - ForwardAxis * (RingR * std::sin(Phi));
+            (void)TargetNetwork.AppendVertex(LowerPoleCenter + UpAxis * Axial + Radial);
+        }
+    }
+
+    const uint32_t UpperStartStep = (SpineLength > 1.0e-5f) ? 0u : 1u;
+    for (uint32_t Step = UpperStartStep; Step < CapRings; ++Step)
+    {
+        const float Angle = (0.5f * Constants::PiFloat * static_cast<float>(Step)) / static_cast<float>(CapRings);
+        const float Axial = ClampedRadius * std::sin(Angle);
+        const float RingR = ClampedRadius * std::cos(Angle);
+        const float ArcS  = 0.5f * Constants::PiFloat * ClampedRadius + SpineLength + Angle * ClampedRadius;
+        RingNormalizedV.push_back(ArcS / std::max(1.0e-5f, TotalArcLength));
+        for (uint32_t Seg = 0u; Seg < LonSegs; ++Seg)
+        {
+            const float Phi    = Constants::TauFloat * (static_cast<float>(Seg) / static_cast<float>(LonSegs));
+            const auto  Radial = RightAxis * (RingR * std::cos(Phi)) - ForwardAxis * (RingR * std::sin(Phi));
+            (void)TargetNetwork.AppendVertex(UpperPoleCenter + UpAxis * Axial + Radial);
+        }
+    }
+
+    const uint32_t NorthPole = TargetNetwork.AppendVertex(UpperPoleCenter + UpAxis * ClampedRadius);
+
+    for (uint32_t Seg = 0u; Seg < LonSegs; ++Seg)
+    {
+        const uint32_t NextSeg = (Seg + 1u) % LonSegs;
+        const float    U0      = OrigU + SpanU * (static_cast<float>(Seg) / static_cast<float>(LonSegs));
+        const float    U1      = OrigU + SpanU * (static_cast<float>(Seg + 1u) / static_cast<float>(LonSegs));
+        const float    VFirst  = OrigV + SpanV * RingNormalizedV.front();
+
+        const std::array<uint32_t, 3u> SouthTri {{ SouthPole, FirstRing + NextSeg, FirstRing + Seg }};
+        const std::array<Mathematics::UVAxes, 3u> SouthUV {{ { 0.5f * (U0 + U1), OrigV }, { U1, VFirst }, { U0, VFirst } }};
+        (void)TargetNetwork.AppendFace(SouthTri, SouthUV, Shading, PriorityLayerOrdinal, PartGroupOrdinal);
+    }
+
+    for (uint32_t Ring = 0u; Ring + 1u < TotalInteriorRings; ++Ring)
+    {
+        const uint32_t RowLower = FirstRing + Ring * LonSegs;
+        const uint32_t RowUpper = FirstRing + (Ring + 1u) * LonSegs;
+        const float    V0       = OrigV + SpanV * RingNormalizedV[Ring];
+        const float    V1       = OrigV + SpanV * RingNormalizedV[Ring + 1u];
+
+        for (uint32_t Seg = 0u; Seg < LonSegs; ++Seg)
+        {
+            const uint32_t NextSeg = (Seg + 1u) % LonSegs;
+            const float    U0      = OrigU + SpanU * (static_cast<float>(Seg) / static_cast<float>(LonSegs));
+            const float    U1      = OrigU + SpanU * (static_cast<float>(Seg + 1u) / static_cast<float>(LonSegs));
+
+            const std::array<uint32_t, 4u> QuadLoop {{ RowLower + Seg, RowLower + NextSeg, RowUpper + NextSeg, RowUpper + Seg }};
+            const std::array<Mathematics::UVAxes, 4u> QuadUV {{ { U0, V0 }, { U1, V0 }, { U1, V1 }, { U0, V1 } }};
+            (void)TargetNetwork.AppendFace(QuadLoop, QuadUV, Shading, PriorityLayerOrdinal, PartGroupOrdinal);
+        }
+    }
+
+    const uint32_t LastRow = FirstRing + (TotalInteriorRings - 1u) * LonSegs;
+    const float    VLast   = OrigV + SpanV * RingNormalizedV.back();
+    const float    VTop    = OrigV + SpanV;
+    for (uint32_t Seg = 0u; Seg < LonSegs; ++Seg)
+    {
+        const uint32_t NextSeg = (Seg + 1u) % LonSegs;
+        const float    U0      = OrigU + SpanU * (static_cast<float>(Seg) / static_cast<float>(LonSegs));
+        const float    U1      = OrigU + SpanU * (static_cast<float>(Seg + 1u) / static_cast<float>(LonSegs));
+
+        const std::array<uint32_t, 3u> NorthTri {{ LastRow + Seg, LastRow + NextSeg, NorthPole }};
+        const std::array<Mathematics::UVAxes, 3u> NorthUV {{ { U0, VLast }, { U1, VLast }, { 0.5f * (U0 + U1), VTop } }};
+        (void)TargetNetwork.AppendFace(NorthTri, NorthUV, Shading, PriorityLayerOrdinal, PartGroupOrdinal);
+    }
+}
+
 //------------------------------------------------------------------------------------------------------------------------
 //                                              STUDIO SAMPLE ASSET BUILDERS
 //------------------------------------------------------------------------------------------------------------------------

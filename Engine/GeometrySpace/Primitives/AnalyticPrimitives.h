@@ -86,6 +86,29 @@ void AppendTorusRingPrimitive(
     uint16_t                     PriorityLayerOrdinal = 0u,
     uint16_t                     PartGroupOrdinal     = 0u);
 
+void AppendSpherePrimitive(
+    PolygonNetwork&              TargetNetwork,
+    Mathematics::Axis3D          Center,
+    float                        Radius,
+    uint32_t                     LongitudeSegments,
+    uint32_t                     LatitudeRings,
+    UVPatchBounds                UVRegion,
+    const FaceShadingAssignment& Shading,
+    uint16_t                     PriorityLayerOrdinal = 0u,
+    uint16_t                     PartGroupOrdinal     = 0u);
+
+void AppendCapsulePrimitive(
+    PolygonNetwork&              TargetNetwork,
+    Mathematics::Axis3D          LowerPoleCenter,
+    Mathematics::Axis3D          UpperPoleCenter,
+    float                        Radius,
+    uint32_t                     RadialSegments,
+    uint32_t                     HemisphereRings,
+    UVPatchBounds                UVRegion,
+    const FaceShadingAssignment& Shading,
+    uint16_t                     PriorityLayerOrdinal = 0u,
+    uint16_t                     PartGroupOrdinal     = 0u);
+
 [[nodiscard]] ConstructedSampleAsset ConstructSamplePolygonNetwork(SampleAssetPreset Preset);
 
 } // namespace Frontier::GeometrySpace
