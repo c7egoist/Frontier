@@ -58,6 +58,8 @@ Frontier/
 │   │   ├── UVWorkspaceArchitecturePlan.md         // Native C++20 & .slang UV Workspace architecture & completion ledger
 │   │   ├── UVWorkspaceSyncAndViewportReport.md    // Single-concept naming & reusable ViewportProjectionPane report
 │   │   ├── UVWorkspaceFullCompletionReport.md     // 6-pillar UV Workspace completion, desktop executables & verification report
+│   │   ├── RenderingAndRaytracingArchitecturePlan.md // Dual-tier GTX Hybrid & Deterministic RTX architecture plan
+│   │   ├── MaterialVisibilityAndRenderingBringupPlan.md // 10-lobe MaterialSpace, 64-bit VisBuffer & rendering bringup plan
 │   │   ├── SessionNotes.md                        // Live Markdown Studio workspace notepad
 │   │   └── MarkdownStudioViewer.html              // Standalone/live Frontier-styled Markdown Studio bundle
 │   ├── FolderStructure.md                         // Canonical repository folder and source layout
@@ -200,14 +202,17 @@ Frontier/
     │   ├── SpatialExtent.h                        // Axis-aligned and oriented bounding extents
     │   └── IntersectionSolver.{h,cpp}             // Ray-facet, ray-volume, plane-cut & volume-volume solvers
     │
-    ├── SpatialAcceleration/                       // Broad-phase spatial acceleration structures
+    ├── SpatialAcceleration/                       // Broad-phase, cluster LOD pyramid & 4-wide ray acceleration
     │   ├── BoundingVolumeTree.{h,cpp}             // Area-heuristic binary bounding volume split tree
+    │   ├── ClusterPyramid.{h,cpp}                 // 128-face PolygonNetwork LOD pyramid with locked seam/crease borders
+    │   ├── WideBoundingTree.{h,cpp}               // Compressed 128 B 4-Wide BVH4 + optional VK_KHR_acceleration_structure
     │   ├── LooseOctree.{h,cpp}                    // Expanded boundary volumetric spatial tree
     │   ├── DynamicAABBTree.{h,cpp}                // Self-balancing binary tree for dynamic colliders
     │   └── SpatialGridHash.{h,cpp}                // Sparse spatial hashing structure
     │
     ├── DistanceFieldSpace/                        // Volumetric SDFs, implicit geometry, and queries
     │   ├── SignedDistanceField.{h,cpp}            // Voxel-backed signed distance fields
+    │   ├── SignedDistanceVolume.{h,cpp}           // Sparse brick + clip-grid 3D SDF builder for GTX GI & penumbra
     │   ├── DistanceTransform.{h,cpp}              // Fast sweeping and Maurer distance transforms
     │   ├── VolumetricDistance.{h,cpp}             // Trilinear volume sampling and gradient reconstruction
     │   ├── DistanceQuery.{h,cpp}                  // Ray marching and closest-point queries
@@ -219,6 +224,31 @@ Frontier/
     │   ├── WhitePointAdaptation.{h,cpp}           // Bradford and CAT02 chromatic adaptation (D65, D60, D50)
     │   ├── SpectralDistribution.{h,cpp}           // Wavelength tristimulus integration and Planckian Kelvin
     │   └── GamutCompression.{h,cpp}               // Out-of-gamut perceptual chroma compression
+    │
+    ├── MaterialSpace/                             // Universal 10-lobe OpenPBR 1.1 + Glinty physical materials
+    │   ├── SurfaceMaterial.{h,cpp}                // Root: authored material definition & validation
+    │   ├── CompactMaterialRegister.{h,cpp}        // Root: 128 B bindless GPU register + ActiveLobeMask
+    │   ├── MaterialSurfaceLayer/                  // Ordered 8-layer stack layout & 32 B bounce summary
+    │   │   ├── MaterialSurfaceLayer.{h,cpp}       // Aligned physical surface layer parameters & blending
+    │   │   └── BounceLayerSummary.{h,cpp}         // Pre-integrated 32 B secondary-bounce summary compiler
+    │   ├── Scattering/                            // 10 physical optical lobes (shared C++20 & .slang)
+    │   │   ├── OpenPbrSurfaceScattering.h         // Master 10-lobe evaluation & mixture PDF
+    │   │   ├── EnergyPreservingOrenNayar.h        // Portsmouth 2025 EON rough diffuse + CLTC sampling
+    │   │   ├── MetallicFresnelTint.h              // Anisotropic VNDF GGX, F0/F82 metal tint & dielectric Fresnel
+    │   │   ├── ClearcoatAbsorption.h              // Coat roughening, TIR darkening & Beer-Lambert absorption
+    │   │   ├── ThinFilmInterference.h             // Belcour & Barla spectral/RGB Airy nanometer interference
+    │   │   ├── GlintMicroflakeScattering.h        // Kemppinen 2025 constant-time 4D multiscale glinty microflakes
+    │   │   ├── DielectricTransmission.h           // Thin-walled glazing & solid rough GGX BTDF + Abbe dispersion
+    │   │   ├── SubsurfaceDiffusion.h              // Burley normalized diffusion + deterministic QMC volumetric walk
+    │   │   ├── LinearlyTransformedSheen.h         // Zeltner 2022 LTC multiple-scattering cloth/velvet sheen
+    │   │   ├── FiberScattering.h                  // Chiang/Marschner R + TT + TRT hair and fiber BCSDF
+    │   │   └── PorosityAndBlackbody.h             // Relative-IOR wetness darkening & Planckian Kelvin luminous flux
+    │   ├── EnergyCompensation/                    // 4 KB & 8 KB pre-integrated hemispheres
+    │   │   ├── DirectionalAlbedoIntegral.{h,cpp}  // 32x32 RG16F (4 KB) Turquin multi-scatter energy preservation
+    │   │   └── SheenCosineIntegral.{h,cpp}        // 32x32 RGBA16F (8 KB) Zeltner LTC sheen fit coefficients
+    │   └── Baking/                                // Procedural outputs & shader-ball previews
+    │       ├── ProceduralChannelBaker.{h,cpp}     // Deterministic procedural normal/roughness/albedo pyramid baker
+    │       └── MaterialSpecimenRasterizer.{h,cpp} // Shader-ball & draped-cloth preview thumbnail rasterizer
     │
     ├── GeometrySpace/                             // Analytic primitives, geometric analysis, selection & UV
     │   ├── Primitives/                            // Parametric solid primitives & watertight sewing
@@ -310,6 +340,21 @@ Frontier/
     │   │   ├── GeometryVertexStreamUploader.{h,cpp}// UV vertex and per-island GPU stream upload
     │   │   └── GeometryRasterSequence.{h,cpp}     // Execution order: ShadowDepth → GroundPlane → Model → UVOverlay
     │   │
+    │   ├── Visibility/                            // Shared GTX/RTX 64-bit (8 B/px) primary visibility front-end
+    │   │   ├── DepthPyramidSequence.{h,cpp}       // Conservative min-depth Hi-Z mip chain sequence
+    │   │   ├── ClusterCullEncoder.{h,cpp}         // Two-phase Hi-Z cull splitting >=4 px HW draws vs <4 px SW compute
+    │   │   ├── VisibilityClusterRasterization.{h,cpp}// uint64 (Depth32 | VisibilityToken32) + 2-layer glass depth peel
+    │   │   └── VisibilityMaterialResolve.{h,cpp}  // Analytic ray-differential barycentrics & LobeMask tile resolve
+    │   │
+    │   ├── DirectLighting/                        // First-hit solar shadows, analytic area lights & chassis AO
+    │   │   ├── SolarShadowSequence.{h,cpp}        // RTX deterministic solar frustum + GTX 2-cascade contact clip + SDF
+    │   │   └── LinearCosineLightIntegration.{h,cpp}// Visibility-gated analytic polygonal lights + 2.2 m chassis AO
+    │   │
+    │   ├── GlobalIllumination/                    // Multi-bounce GI, octahedral irradiance lattice & RT reflections
+    │   │   ├── IrradianceLatticeSequence.{h,cpp}  // RTX 1/pi octahedral lattice (Chebyshev depth) + GTX SDF cone GI
+    │   │   ├── SpecularReflectionSequence.{h,cpp} // Coherent WideBoundingTree multi-bounce specular & glass refraction
+    │   │   └── TieredWorldRenderSequence.{h,cpp}  // Complete ordered GTX/RTX world sequence bound to viewports
+    │   │
     │   └── PostProcess/                           // Ordered image operations
     │       ├── PostProcessSequence.{h,cpp}        // Ordered image operation execution sequence
     │       ├── RadiometricToneStack.{h,cpp}       // Exposure, ACES gamut transform, and colour grading stack
@@ -321,6 +366,29 @@ Frontier/
     │   │   ├── ShaderCompiler.{h,cpp}             // Offline and runtime Slang (.slang) to SPIR-V compiler
     │   │   ├── ShaderReflection.{h,cpp}           // Vertex attribute and descriptor layout reflection
     │   │   └── ShaderPermutationIndex.{h,cpp}     // Precompiled variant permutation register
+    │   ├── MaterialSpace/                         // Dual C++20/SPIR-V 10-lobe OpenPBR 1.1 + Glinty shaders
+    │   │   ├── OpenPbrSurfaceScattering.slang     // Master 10-lobe BSDF (compiles in both SPIR-V and C++20 CTest)
+    │   │   ├── GlintMicroflakeScattering.slang    // Constant-time 4D multiscale glint NDF + ramp tinting
+    │   │   ├── ThinFilmInterference.slang         // Airy wave-optics iridescence
+    │   │   ├── LinearlyTransformedSheen.slang     // LTC cloth/microfiber sheen
+    │   │   ├── SubsurfaceAndTransmission.slang    // Thin/solid rough refraction, dispersion & SSS
+    │   │   ├── FiberScattering.slang              // Hair/fiber longitudinal & azimuthal BCSDF
+    │   │   └── BounceLayerSummary.slang           // Fast 5-ALU secondary-bounce surface shading
+    │   ├── Visibility/                            // Cluster cull, Hi-Z, HW raster, atomicMax64 micro-raster & resolve
+    │   │   ├── ClusterVisibilityCull.slang        // Two-phase frustum, normal-cone & DepthPyramid occlusion cull
+    │   │   ├── DepthPyramidDownsample.slang       // Conservative reversed-Z min reduction
+    │   │   ├── HardwareVisibilityRasterization.slang// >=4 px indirect cluster rasterization + 2-layer glass peel
+    │   │   ├── MicroFaceSoftwareRasterization.slang// <4 px compute atomicMax64 sub-pixel face rasterization
+    │   │   └── AnalyticBarycentricResolve.slang   // Ray-plane barycentrics, UV Jacobians & wave-uniform material shade
+    │   ├── DirectLighting/                        // WideTreeRayQuery, solar frustum, contact clip & shadow filter
+    │   │   ├── WideTreeRayQuery.slang             // Shared 4-Wide BVH4 & VK_KHR_ray_query intersection routines
+    │   │   ├── SolarFrustumShadow.slang           // Deterministic Vogel solar disc trace + chassis 2-scale AO
+    │   │   ├── ContactClipShadow.slang            // GTX 2-cascade tight contact shadow + SDF cone penumbra blend
+    │   │   └── PlaneAwareShadowFilter.slang       // Coplanar dilation + 3-step continuous-sigma edge-preserving filter
+    │   ├── GlobalIllumination/                    // OctahedralIrradianceLattice, SDF cones & specular/glass raytrace
+    │   │   ├── OctahedralIrradianceLattice.slang  // 64-ray Fibonacci update, 16x16 Chebyshev depth & 1/pi lookup
+    │   │   ├── SignedDistanceConeIllumination.slang// GTX 6-cone directional SDF diffuse irradiance
+    │   │   └── SpecularAndGlassRaytrace.slang     // Coherent cone-footprint multi-bounce specular & dielectric glass
     │   ├── UV/                                    // GPU UVTile, wireframe, ground plane & shadow shaders
     │   │   ├── UVTileRasterization.slang          // 2D UVTile coordinates, checker patterns & stretch heat
     │   │   ├── EdgeHighlightRasterization.slang   // Screen-space anti-aliased wireframes & seam lines

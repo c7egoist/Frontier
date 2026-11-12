@@ -93,11 +93,12 @@ Every folder and file name below is verified against [../BannedWordsVocabulary.m
 Frontier/
 ├── Engine/
 │   ├── MaterialSpace/                                 // NEW: Universal 10-lobe OpenPBR 1.1 + Glinty physical materials
-│   │   ├── SurfaceLayers/                             // Ordered physical layer stack, 128 B register & 32 B bounce summary
-│   │   │   ├── SurfaceLayerLayout.h                   // Aligned 8-layer physical parameter layout & validation
-│   │   │   ├── CompactMaterialRegister.{h,cpp}        // Bindless 128 B primary material register + ActiveLobeMask
+│   │   ├── SurfaceMaterial.{h,cpp}                    // Root: authored material definition & validation
+│   │   ├── CompactMaterialRegister.{h,cpp}            // Root: 128 B bindless GPU register + ActiveLobeMask
+│   │   ├── MaterialSurfaceLayer/                      // Ordered 8-layer stack layout & 32 B bounce summary
+│   │   │   ├── MaterialSurfaceLayer.{h,cpp}           // Aligned physical surface layer parameters & blending
 │   │   │   └── BounceLayerSummary.{h,cpp}             // Pre-integrated 32 B secondary-bounce summary compiler
-│   │   ├── Scattering/                                // Shared C++20/.slang 10-lobe physical optical equations
+│   │   ├── Scattering/                                // 10 physical optical lobes (shared C++20 & .slang)
 │   │   │   ├── OpenPbrSurfaceScattering.h             // Master 10-lobe evaluation & mixture PDF
 │   │   │   ├── EnergyPreservingOrenNayar.h            // Portsmouth 2025 EON rough diffuse + CLTC sampling
 │   │   │   ├── MetallicFresnelTint.h                  // Anisotropic VNDF GGX, F0/F82 metal tint & exact dielectric Fresnel
@@ -109,12 +110,12 @@ Frontier/
 │   │   │   ├── LinearlyTransformedSheen.h             // Zeltner 2022 LTC multiple-scattering cloth/velvet sheen
 │   │   │   ├── FiberScattering.h                      // Chiang/Marschner R + TT + TRT hair and fiber BCSDF
 │   │   │   └── PorosityAndBlackbody.h                 // Relative-IOR wetness darkening & Planckian Kelvin luminous flux
-│   │   ├── EnergyCompensation/                        // Precomputed directional hemisphere integrals (replaces LookUpSheets)
+│   │   ├── EnergyCompensation/                        // 4 KB & 8 KB pre-integrated hemispheres
 │   │   │   ├── DirectionalAlbedoIntegral.{h,cpp}      // 32x32 RG16F (4 KB) Turquin multi-scatter energy preservation
 │   │   │   └── SheenCosineIntegral.{h,cpp}            // 32x32 RGBA16F (8 KB) Zeltner LTC sheen fit coefficients
-│   │   └── TextureSynthesis/                          // Procedural channel pyramids & preview rendering (replaces Baking)
-│   │       ├── ProceduralChannelSynthesis.{h,cpp}     // Deterministic procedural normal/roughness/albedo pyramid generator
-│   │       └── MaterialSpecimenRasterization.{h,cpp}  // Shader-ball & draped-cloth preview thumbnail rasterizer
+│   │   └── Baking/                                    // Procedural outputs & shader-ball previews
+│   │       ├── ProceduralChannelBaker.{h,cpp}         // Deterministic procedural normal/roughness/albedo pyramid baker
+│   │       └── MaterialSpecimenRasterizer.{h,cpp}     // Shader-ball & draped-cloth preview thumbnail rasterizer
 │   │
 │   ├── SpatialAcceleration/                           // NEW: Unified cluster LOD pyramid & 4-wide ray acceleration
 │   │   ├── ClusterPyramid.{h,cpp}                     // 128-face PolygonNetwork LOD pyramid with locked seam/crease borders
