@@ -100,10 +100,38 @@ Built on the authentic Right-Handed **`ControlVehicle`** (`+X` Forward, `+Y` Lef
 
 You **can and should** adopt this clean coherent reflection pipeline in Frontier instead of `Frontier-OLD`'s noisy 1-SPP stochastic ReSTIR reflection soup:
 
-| Quality / Hardware Preset | Reflection Backend (Zero 1-SPP Noise, Zero Checkerboard) | Diffuse GI Backend | Target GPU Cost (1080p) |
+| Quality / Hardware Preset | Reflection Backend (Zero 1-SPP Noise, Zero Checkerboard) | Diffuse GI & Soft Penumbra Backend | Target GPU Cost (1080p) |
 | :--- | :--- | :--- | :---: |
-| 🥇 **GTX Fast / Default (Pascal / Turing Non-RT)** | **Left Side**: Hi-Z Near-Field + Polished Narrow-Band **Multi-Bounce Global SDF** (`Clip0..3`) | Multi-Cascade **Global SDF Voxel Cone / Probe GI** (smooth, `0` fireflies) | **`~1.9 ms` total** (`1.3 ms` Refl + `0.6 ms` GI) |
-| 🥈 **GTX Ultra-Mirror (Non-RT High Preset)** | **Right Side**: Coherent **Multi-Bounce Compute BVH** (`4-Wide CWBVH`, `Roughness <= 0.35`) + Global SDF fallback for rougher coats | Multi-Cascade **Global SDF Voxel Cone / Probe GI** | **`~3.2 ms` total** |
-| 🏆 **RTX / RDNA2+ Hardware RT (`VK_KHR_ray_query` / `RT Pipeline`)** | **Right Side in Hardware Silicon**: Coherent **Multi-Bounce Triangle Raytracing** on RT Cores (`VkAccelerationStructureKHR`) | Hardware-RT **ReSTIR GI** *(optional Ultra toggle, gated by `1–5%` pixel-delta denoiser)* or **SDF/Probe GI** | **`~1.5 – 2.4 ms` total** |
+| 🥇 **GTX Fast / Default (Pascal / Turing Non-RT)** | **Left Side**: Hi-Z Near-Field + Polished Narrow-Band **Multi-Bounce Global SDF** (`Clip0..3`) | **6-Cone Global SDF Voxel GI + Analytical Cone Penumbra** + 3-Pass Demodulated Plane-Aware Bilateral (`0` ghosting, `0` noise) | **`~1.9 ms` total** (`1.1 ms` Refl + `0.8 ms` GI+Penumbra) |
+| 🥈 **GTX Ultra-Mirror (Non-RT High Preset)** | **Right Side**: Coherent **Multi-Bounce Compute BVH** (`4-Wide CWBVH`, `Roughness <= 0.35`) + Global SDF fallback for rougher coats | **6-Cone Global SDF Voxel GI** + **Golden-Disk CWBVH Contact-Hardening Penumbra** | **`~3.4 ms` total** |
+| 🏆 **RTX / RDNA2+ Hardware RT (`VK_KHR_ray_query` / `RT Pipeline`)** | **Right Side in Hardware Silicon**: Coherent **Multi-Bounce Triangle Raytracing** on RT Cores (`VkAccelerationStructureKHR`) | **Hardware-RT Cosine-Hemisphere GI + Golden-Disk PCSS Penumbra** (or **ReSTIR GI** gated by `<= 5%` pixel-delta demodulated filter) | **`~1.6 – 2.4 ms` total** |
+
+---
+
+## 7. 🌈 Zero-Ghosting, Zero-Smearing, Zero-Jitter GI, Soft Shadows, Penumbra & Color Bleeding (`Port 8096`)
+
+Extended the live interactive **`GtxReflectionBenchmark`** (`Experimental/GtxReflectionBenchmark/`, port `8096`) and offline C++20 verification proof (`Exhibits/Images/ReflectionBenchmark/02-ControlVehicleGiPenumbraColorBleedSplit.png`) to benchmark **Global Illumination, Contact-Hardening Soft Shadows, Realistic Area-Light Penumbra, and Multi-Surface Color Bleeding** side-by-side alongside **Multi-Bounce Reflections** on the same `ControlVehicle` + Cornell-calibrated `ProvingGroundArena` (sunlit Vivid Crimson-Red wall `mat 18`, Vivid Cobalt-Cyan fin `mat 19`, Matte White Clay receiver plinth `mat 20`, and satin showroom concrete pad `mat 1`).
+
+### A. Measured Full-Pipeline Parity & Traversal Reduction (`1280×720`, 2-Bounce Refl + GI + Soft Penumbra)
+
+| Metric (`1280×720`, Pearl-White `ControlVehicle` + Color-Bleed Arena) | Global SDF Path (`GI_SDF` + `REFLECTION_SDF`) | Compute BVH Path (`GI_BVH` + `REFLECTION_BVH`) | Measured Ratio / Quality Gate |
+| :--- | :---: | :---: | :---: |
+| **Soft Shadows & Contact-Hardening Penumbra** | Analytical solar-cone march (`halfW = max(0.55 * vox, R_sun * t)`, `smoothstep(-0.35 * halfW, halfW, d)`) — razor-sharp at `t → 0`, wide penumbra far from blocker | 4-ray Golden-Disk area-sun BVH shadow trace + exact hit-distance (`avgBlocker`) PCSS bilateral kernel scaling | **`0.71%` Penumbra Pixel Delta** |
+| **Diffuse GI & Color Bleeding** | 6-cone self-plane-free sphere-marched `Clip0/Clip1` voxel cone trace (`coneR = max(0.75 * vox, 0.14 * t)`) over sun-shadowed narrow-band voxel radiosity | 6–8 ray cosine-weighted Golden-Spiral hemisphere BVH trace + raytraced NEE sun shadow at bounce hits | **`2.82%` GI + Color-Bleed Delta** |
+| **Multi-Bounce Specular Reflections** | 2-bounce `Clip0/Clip1` sphere-trace + 2-step `d = 0` root polish + dynamic car floor-shadow attenuation | 2-bounce `TLAS + SAH BLAS` triangle trace + NEE sun shadow | **`1.98%` Reflection Delta** |
+| **Combined Traversal Ops / Frame** | **`66,088,440`** hardware trilinear 3D TMU taps (`71.7` taps/px) | **`1,133,046,238`** software `stack[48]` BVH steps (`1,229.4` steps/px) | **`17.14×` Fewer Ops in Global SDF** |
+| **Combined Full-Pipeline Pixel Delta** | Single-frame demodulated composite (`ACES` + `sRGB`) | Single-frame demodulated composite (`ACES` + `sRGB`) | **`4.91%` Total (`<= 5.0%` Gate Passed)** |
+
+### B. How Ghosting, Smearing, and Jittering Noise Are Simultaneously Eliminated
+
+| Artifact Eliminated | Root Cause in `Frontier-OLD` (`VehicleHMI`) | Architectural Fix in `GtxReflectionBenchmark` & Frontier Target |
+| :--- | :--- | :--- |
+| **1. Zero Ghosting** | `ReservoirTemporal` (`M <= 20`) + `90%` TAA accumulated stale world/screen history across moving car silhouettes and lagging shadows. | **100% Single-Frame Evaluation (`0%` Temporal History Buffer)**: Every frame evaluates fresh dynamic `Clip0` Z-slices (`0..28`) and fresh `TLAS` transforms; shadows, penumbras, color bleed, and reflections move instantaneously with `ControlVehicle`. |
+| **2. Zero Smearing** | `SpatialAtrous` (`5×5` × multi-pass) blurred **modulated** color across surface detail and across contact-shadow boundaries. | **Demodulated Irradiance + Plane/Normal/Blocker Edge-Stopping**: `GI_BILATERAL_FRAG` filters only `(giIrr.rgb, sunVis)` weighted by `dot(nC, nQ)^32 × exp(-|dot(nC, pQ - pC)| * 45)` and shrinks the shadow filter radius to `0 px` at contact (`avgBlocker → 0`); full-res `albedo`, grid lines, and clearcoat BSDF multiply **after** joint-bilateral upsampling in `COMPOSITE_FRAG`. |
+| **3. Zero Jittering Noise** | Per-frame temporal RNG seed (`FrameIndex`) caused 1-SPP Monte Carlo rays to boil/fizz continuously on static and moving surfaces. | **Time-Invariant Spatial `IGN` Golden-Spiral + 3-Pass (`step = 1, 2, 4`) Cross-Bilateral Integration**: Fixed screen-space low-discrepancy hemisphere/disk stratification integrates deterministically within a single frame — completely rock-solid at rest and in motion, with **zero checkerboarding**. |
+
+### C. Interactive Controls Live on Port `8096`
+- **Sliders**: `Sun Penumbra` (`0.00` pinhole hard shadow → `3.50` wide area-light penumbra), `GI + Color Bleed` (`0.00×` → `3.00×` indirect bounce gain), and `Sun Azimuth / Elev` (`-80°` → `+110°` with live `< 0.5 ms` GPU static cascade re-shading).
+- **Modes & Toggles**: `Global SDF` | `Compute BVH` | `Split SDF | BVH` | `Clay GI + Penumbra` *(pure matte white clay override isolating Crimson/Cobalt color bleed & contact-hardening penumbra)* | `Pixel Delta`, plus toggles for `GI + Bleed`, `Sun Shadows`, `Soft Penumbra`, `Hi-Z Assist`, `BVH NEE`, `Off / 1B / 2B / 3B` reflections, `Auto-Glide / Static Pose / WASD`, `Chase Cam`, and 6 paint swatches.
 
 

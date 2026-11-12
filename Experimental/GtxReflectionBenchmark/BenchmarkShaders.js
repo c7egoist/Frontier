@@ -1,5 +1,6 @@
-// GLSL ES 3.00 Shaders for Frontier GTX Reflection Benchmark
+// GLSL ES 3.00 Shaders for Frontier GTX GI + Soft Penumbra + Color Bleed + Multi-Bounce Reflection Benchmark
 // Canonical Right-Handed Coordinate Basis: +X Forward, +Y Left, +Z Up (X x Y = +Z)
+// Zero Temporal History = Zero Ghosting | Demodulated Plane-Aware Bilateral = Zero Smearing | Deterministic IGN = Zero Jitter
 
 export const FULLSCREEN_VERT = `#version 300 es
 precision highp float;
@@ -23,54 +24,56 @@ struct SurfaceMat {
 
 SurfaceMat evalMaterial(int matId, vec3 worldPos, vec3 paintColor) {
   SurfaceMat m;
-  m.albedo = vec3(0.5);
-  m.roughness = 0.35;
+  m.albedo = vec3(0.14, 0.15, 0.17);
+  m.roughness = 0.42;
   m.emissive = vec3(0.0);
-  m.metalness = 0.0;
+  m.metalness = 0.20;
   m.coat = 0.0;
   m.coatRough = 0.04;
 
   if (matId == 1) {
-    // Proving-ground glossy satin tarmac with subtle lane lines & grid
+    // Architectural satin showroom concrete proving pad (shows crisp->soft penumbra & color bleed clearly)
     float gx = abs(fract(worldPos.x * 0.25 + 0.5) - 0.5);
     float gy = abs(fract(worldPos.y * 0.25 + 0.5) - 0.5);
-    float grid = 1.0 - smoothstep(0.008, 0.016, min(gx, gy));
-    float lane = (1.0 - smoothstep(0.04, 0.06, abs(abs(worldPos.y) - 3.65))) * step(abs(worldPos.x), 11.0);
-    vec3 baseAsphalt = mix(vec3(0.042, 0.046, 0.054), vec3(0.075, 0.082, 0.098), grid * 0.55);
-    m.albedo = mix(baseAsphalt, vec3(0.68, 0.54, 0.14), lane * 0.75);
-    m.roughness = mix(0.22, 0.38, lane);
-    m.metalness = 0.05;
-    m.coat = 0.45;
-    m.coatRough = 0.14;
+    float grid = 1.0 - smoothstep(0.006, 0.014, min(gx, gy));
+    float lane = (1.0 - smoothstep(0.04, 0.06, abs(abs(worldPos.y) - 4.15))) * step(abs(worldPos.x), 11.0);
+    vec3 basePad = mix(vec3(0.25, 0.26, 0.28), vec3(0.14, 0.15, 0.17), grid * 0.28);
+    m.albedo = mix(basePad, vec3(0.76, 0.58, 0.14), lane * 0.65);
+    m.roughness = mix(0.24, 0.36, lane);
+    m.metalness = 0.02;
+    m.coat = 0.36;
+    m.coatRough = 0.12;
   } else if (matId == 2) {
-    // Silver Chrome Mirror Inspection Wall / Bollard (multi-bounce showcase!)
+    // Silver Chrome Mirror Inspection Wall / Column
     m.albedo = vec3(0.90, 0.93, 0.97);
     m.roughness = 0.035;
     m.metalness = 0.98;
-    m.coat = 0.5;
+    m.coat = 0.50;
     m.coatRough = 0.03;
   } else if (matId == 3) {
-    // Warm Champagne-Gold Mirror Inspection Wall / Bollard (multi-bounce tint showcase!)
+    // Warm Champagne-Gold Mirror Inspection Wall
     m.albedo = vec3(0.94, 0.74, 0.44);
     m.roughness = 0.045;
     m.metalness = 0.96;
-    m.coat = 0.4;
+    m.coat = 0.40;
     m.coatRough = 0.04;
   } else if (matId == 4) {
-    // Architectural Dark Anodized Frame / Portal Pillar
-    m.albedo = vec3(0.11, 0.12, 0.15);
+    // Dark Anodized Architectural Frame
+    m.albedo = vec3(0.12, 0.13, 0.16);
     m.roughness = 0.28;
-    m.metalness = 0.65;
+    m.metalness = 0.55;
   } else if (matId == 5) {
     // Overhead High-Luminance LED Portal Strip
-    m.albedo = vec3(0.95, 0.98, 1.0);
+    m.albedo = vec3(0.95, 0.98, 1.00);
     m.roughness = 0.15;
-    m.emissive = vec3(7.5, 8.6, 10.5);
+    m.emissive = vec3(6.5, 7.5, 9.2);
+    m.metalness = 0.0;
   } else if (matId == 6) {
-    // ControlVehicle Metallic Clearcoat Bodywork
+    // ControlVehicle Clearcoat Bodywork (metallic/pearlescent adaptive)
+    float luma = dot(paintColor, vec3(0.299, 0.587, 0.114));
     m.albedo = paintColor;
-    m.roughness = 0.11;
-    m.metalness = 0.82;
+    m.roughness = 0.14;
+    m.metalness = (luma > 0.78) ? 0.28 : 0.74;
     m.coat = 1.0;
     m.coatRough = 0.032;
   } else if (matId == 7) {
@@ -82,22 +85,17 @@ SurfaceMat evalMaterial(int matId, vec3 worldPos, vec3 paintColor) {
     m.coatRough = 0.02;
   } else if (matId == 8 || matId == 15) {
     // Satin Carbon Aero Cladding & Grille
-    m.albedo = vec3(0.055, 0.058, 0.066);
-    m.roughness = 0.24;
-    m.metalness = 0.45;
+    m.albedo = vec3(0.08, 0.085, 0.095);
+    m.roughness = 0.26;
+    m.metalness = 0.35;
     m.coat = 0.35;
     m.coatRough = 0.12;
-  } else if (matId == 9 || matId == 16) {
-    // Interior Cabin Trim & Brake Hub
-    m.albedo = vec3(0.09, 0.095, 0.11);
-    m.roughness = 0.42;
-    m.metalness = 0.25;
   } else if (matId == 10) {
     // Brushed Machined Alloy Rim
     m.albedo = vec3(0.84, 0.87, 0.92);
     m.roughness = 0.08;
     m.metalness = 0.95;
-    m.coat = 0.6;
+    m.coat = 0.60;
     m.coatRough = 0.05;
   } else if (matId == 11) {
     // Vulcanized Tread Tyre Rubber
@@ -106,9 +104,10 @@ SurfaceMat evalMaterial(int matId, vec3 worldPos, vec3 paintColor) {
     m.metalness = 0.02;
   } else if (matId == 12 || matId == 13) {
     // LED Headlamp Lens & Core
-    m.albedo = vec3(0.9, 0.95, 1.0);
+    m.albedo = vec3(0.90, 0.95, 1.00);
     m.roughness = 0.05;
     m.emissive = (matId == 13) ? vec3(9.0, 9.6, 11.0) : vec3(2.4, 2.8, 3.6);
+    m.metalness = 0.0;
     m.coat = 1.0;
     m.coatRough = 0.03;
   } else if (matId == 14) {
@@ -116,72 +115,95 @@ SurfaceMat evalMaterial(int matId, vec3 worldPos, vec3 paintColor) {
     m.albedo = vec3(0.65, 0.03, 0.04);
     m.roughness = 0.06;
     m.emissive = vec3(8.5, 0.45, 0.35);
+    m.metalness = 0.0;
     m.coat = 1.0;
     m.coatRough = 0.03;
   } else if (matId == 17) {
     // Safety Orange Slalom Bollard
     m.albedo = vec3(0.92, 0.26, 0.04);
     m.roughness = 0.18;
-    m.metalness = 0.1;
+    m.metalness = 0.10;
     m.coat = 0.65;
     m.coatRough = 0.08;
+  } else if (matId == 18) {
+    // Sunlit Vivid Crimson-Red Cornell Color-Bleed Wall (100% Matte Diffuse Bounce Emitter)
+    m.albedo = vec3(0.94, 0.05, 0.07);
+    m.roughness = 0.85;
+    m.metalness = 0.0;
+    m.coat = 0.0;
+  } else if (matId == 19) {
+    // Sunlit Vivid Cobalt-Cyan Color-Bleed Fin (100% Matte Diffuse Bounce Emitter)
+    m.albedo = vec3(0.04, 0.68, 0.95);
+    m.roughness = 0.85;
+    m.metalness = 0.0;
+    m.coat = 0.0;
+  } else if (matId == 20) {
+    // Matte White Clay GI Calibration Plinth
+    m.albedo = vec3(0.88, 0.89, 0.91);
+    m.roughness = 0.85;
+    m.metalness = 0.0;
+    m.coat = 0.0;
   }
   return m;
+}
+
+vec3 evalPortalIrradiance(vec3 pos, vec3 nrm) {
+  vec3 portalIrr = vec3(0.0);
+  if (pos.z < 4.39) {
+    for (int i = -1; i <= 1; i += 2) {
+      vec3 lp = vec3(float(i) * 4.6, clamp(pos.y, -5.0, 5.0), 4.39);
+      vec3 d = lp - pos;
+      float d2 = dot(d, d);
+      vec3 ldir = d * inversesqrt(max(d2, 1e-4));
+      portalIrr += vec3(0.62, 0.72, 0.90) * (max(dot(nrm, ldir), 0.0) / (1.0 + 0.28 * d2));
+    }
+  }
+  return portalIrr;
 }
 
 vec3 evalSkyAndClouds(vec3 dir, vec3 sunDir) {
   float up = clamp(dir.z, -0.2, 1.0);
   vec3 horizon = vec3(0.52, 0.66, 0.86);
   vec3 zenith  = vec3(0.09, 0.21, 0.48);
-  vec3 ground  = vec3(0.035, 0.038, 0.045);
+  vec3 ground  = vec3(0.06, 0.065, 0.075);
   vec3 sky = (up >= 0.0)
     ? mix(horizon, zenith, pow(up, 0.58))
     : mix(horizon * 0.45, ground, clamp(-up * 6.0, 0.0, 1.0));
 
   float sunCos = max(dot(dir, sunDir), 0.0);
   sky += vec3(1.0, 0.82, 0.56) * pow(sunCos, 16.0) * 0.55;
-  sky += vec3(1.0, 0.93, 0.80) * smoothstep(0.99935, 0.99985, sunCos) * 14.0;
+  sky += vec3(1.0, 0.93, 0.80) * smoothstep(0.99935, 0.99985, sunCos) * 12.0;
 
-  // Lightweight procedural cumulus band (matches non-bottleneck sky/clouds backdrop)
   if (dir.z > 0.04) {
     vec2 cuv = dir.xy / (dir.z + 0.18) * 0.55;
     float n = sin(cuv.x * 2.3 + 0.7) * cos(cuv.y * 2.1 - 0.4)
             + 0.5 * sin(cuv.x * 5.1 - cuv.y * 3.7)
             + 0.25 * cos(cuv.x * 9.3 + cuv.y * 8.1);
-    float cloud = smoothstep(0.32, 1.15, n) * smoothstep(0.04, 0.24, dir.z);
-    vec3 cloudLit = mix(vec3(0.58, 0.65, 0.76), vec3(1.25, 1.18, 1.08), 0.5 + 0.5 * sunCos);
-    sky = mix(sky, cloudLit, cloud * 0.62);
+    float cloud = smoothstep(0.35, 1.18, n) * smoothstep(0.04, 0.24, dir.z);
+    vec3 cloudLit = mix(vec3(0.58, 0.65, 0.76), vec3(1.18, 1.12, 1.04), 0.5 + 0.5 * sunCos);
+    sky = mix(sky, cloudLit, cloud * 0.52);
   }
   return sky;
 }
 
-vec3 evalSurfaceDirectRadiance(vec3 pos, vec3 nrm, vec3 viewDir, SurfaceMat m, vec3 sunDir) {
-  float ndl = max(dot(nrm, sunDir), 0.0);
-  vec3 sunIrr = vec3(3.1, 2.85, 2.55) * ndl;
-  vec3 skyIrr = mix(vec3(0.10, 0.11, 0.14), vec3(0.36, 0.48, 0.68), nrm.z * 0.5 + 0.5);
+void buildOrthonormalBasis(vec3 n, out vec3 t, out vec3 b) {
+  vec3 up = (abs(n.z) < 0.92) ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+  t = normalize(cross(up, n));
+  b = cross(n, t);
+}
 
-  // Overhead proving-ground LED portals area-light approximation
-  vec3 portalIrr = vec3(0.0);
-  for (int i = -1; i <= 1; i++) {
-    vec3 lp = vec3(float(i) * 4.2, clamp(pos.y, -5.2, 5.2), 4.30);
-    vec3 d = lp - pos;
-    float d2 = dot(d, d);
-    vec3 ldir = d * inversesqrt(max(d2, 1e-4));
-    float att = 1.0 / (1.0 + 0.22 * d2);
-    portalIrr += vec3(1.15, 1.32, 1.65) * max(dot(nrm, ldir), 0.0) * att * step(pos.z, 4.30);
-  }
+float interleavedGradientNoise(vec2 px) {
+  return fract(52.9829189 * fract(0.06711056 * px.x + 0.00583715 * px.y));
+}
 
-  vec3 diffAlbedo = m.albedo * (1.0 - m.metalness);
-  vec3 f0 = mix(vec3(0.04), m.albedo, m.metalness);
-  vec3 h = normalize(sunDir + viewDir);
-  float ndh = max(dot(nrm, h), 0.0);
-  float r = max(m.coat > 0.0 ? mix(m.roughness, m.coatRough, m.coat * 0.65) : m.roughness, 0.035);
-  float a2 = r * r * r * r;
-  float denom = ndh * ndh * (a2 - 1.0) + 1.0;
-  float ggx = a2 / max(3.14159265 * denom * denom, 1e-4);
-  vec3 spec = f0 * min(ggx * 0.25, 18.0) * ndl * vec3(3.0, 2.75, 2.45);
-
-  return m.emissive + diffAlbedo * (sunIrr + skyIrr + portalIrr) / 3.14159265 + spec;
+// Secondary bounce radiosity (for voxel caches, GI hits, and multi-bounce reflection hits)
+vec3 evalSecondaryBounceRadiance(vec3 pos, vec3 nrm, int matId, SurfaceMat m, vec3 sunDir, float sunVis) {
+  float ndl = max(dot(nrm, sunDir), 0.0) * sunVis;
+  vec3 sunIrr = vec3(4.4, 3.95, 3.40) * ndl;
+  vec3 skyIrr = vec3(0.18, 0.24, 0.34);
+  // Clearcoat car paint (matId == 6) also bounces colored tint into surrounding GI!
+  vec3 diffTint = (matId == 6) ? mix(m.albedo * (1.0 - m.metalness), m.albedo * 0.68, 0.65) : m.albedo * (1.0 - m.metalness);
+  return m.emissive + diffTint * ((sunIrr + skyIrr + evalPortalIrradiance(pos, nrm)) * (1.0 / 3.14159265));
 }
 `;
 
@@ -226,19 +248,107 @@ ${COMMON_MATERIAL_GLSL}
 
 void main() {
   vec3 n = normalize(vWorldNorm);
-  vec3 v = normalize(uCamPos - vWorldPos);
   SurfaceMat m = evalMaterial(vMatId, vWorldPos, uPaintColor);
   float effRough = (m.coat > 0.0) ? mix(m.roughness, m.coatRough, m.coat * 0.78) : m.roughness;
-  vec3 direct = evalSurfaceDirectRadiance(vWorldPos, n, v, m, uSunDir);
+  vec3 secRad = evalSecondaryBounceRadiance(vWorldPos, n, vMatId, m, uSunDir, 1.0);
   outPosRough = vec4(vWorldPos, effRough);
   outNormMat  = vec4(n, float(vMatId));
-  outDirect   = vec4(direct, 1.0);
+  outDirect   = vec4(secRad, 1.0);
 }
 `;
 
-// Dynamic GPU Slice Union Pass: composes the SINGLE World Global SDF Clip0 3D texture
-// from baked static ProvingGround Clip0 + moving ControlVehicle (.sdfspace Body + 4x Rim + 4x Tyre).
-// Zero analytical shapes! Every input is a real voxelized 3D .sdfspace texture!
+//========================================================================================================================
+// GPU STATIC ARENA RADIOSITY SHADER: Populates Clip0 & Clip1 static voxel radiosity WITH 24-step SDF sun shadows!
+// Runs at startup and whenever the interactive Sun Angle slider changes (< 0.5 ms total!).
+//========================================================================================================================
+export const SDF_STATIC_SHADE_FRAG = `#version 300 es
+precision highp float;
+precision highp sampler3D;
+
+in vec2 vUv;
+uniform sampler3D uTargetRaw;       // RG16F NEAREST: .r = exact signed dist, .g = exact matId
+uniform sampler3D uClip0DistLinear; // R16F LINEAR
+uniform sampler3D uClip1DistLinear; // R16F LINEAR
+
+uniform vec3 uTargetMin;
+uniform vec3 uTargetMax;
+uniform float uTargetVoxel;
+uniform int uSliceIndex;
+uniform int uTargetDepth;
+
+uniform vec3 uClip0Min;
+uniform vec3 uClip0InvSpan;
+uniform vec3 uClip1Min;
+uniform vec3 uClip1InvSpan;
+
+uniform vec3 uSunDir;
+uniform vec3 uPaintColor;
+
+layout(location = 0) out vec4 outVoxel;
+layout(location = 1) out vec4 outRefl;
+
+${COMMON_MATERIAL_GLSL}
+
+float sampleStaticCascade(vec3 p) {
+  vec3 u0 = (p - uClip0Min) * uClip0InvSpan;
+  if (all(greaterThan(u0, vec3(0.02))) && all(lessThan(u0, vec3(0.98)))) {
+    return texture(uClip0DistLinear, u0).r;
+  }
+  vec3 u1 = (p - uClip1Min) * uClip1InvSpan;
+  if (all(greaterThan(u1, vec3(0.015))) && all(lessThan(u1, vec3(0.985)))) {
+    return texture(uClip1DistLinear, u1).r;
+  }
+  return 1e5;
+}
+
+void main() {
+  ivec2 ij = ivec2(gl_FragCoord.xy);
+  vec4 raw = texelFetch(uTargetRaw, ivec3(ij, uSliceIndex), 0);
+  float dist = raw.r;
+  int matId = int(raw.g + 0.5);
+
+  vec3 uvw = vec3(vUv, (float(uSliceIndex) + 0.5) / float(uTargetDepth));
+  vec3 wp = mix(uTargetMin, uTargetMax, uvw);
+  SurfaceMat sm = evalMaterial(matId, wp, uPaintColor);
+
+  float h = uTargetVoxel * 0.9;
+  vec3 nrm;
+  if (matId == 1) {
+    nrm = vec3(0.0, 0.0, 1.0);
+  } else {
+    nrm = normalize(vec3(
+      sampleStaticCascade(wp + vec3(h, 0.0, 0.0)) - sampleStaticCascade(wp - vec3(h, 0.0, 0.0)),
+      sampleStaticCascade(wp + vec3(0.0, h, 0.0)) - sampleStaticCascade(wp - vec3(0.0, h, 0.0)),
+      sampleStaticCascade(wp + vec3(0.0, 0.0, h)) - sampleStaticCascade(wp - vec3(0.0, 0.0, h))
+    ) + vec3(0.0, 0.0, 1e-6));
+  }
+
+  float sv = 0.0;
+  if (dot(nrm, uSunDir) > 0.02) {
+    sv = 1.0;
+    float t = 0.14;
+    for (int s = 0; s < 24; s++) {
+      vec3 sp = wp + nrm * 0.09 + uSunDir * t;
+      float sd = sampleStaticCascade(sp);
+      if (sd > 1e4) break;
+      sv = min(sv, smoothstep(0.0, 1.0, sd / 0.09));
+      if (sv < 0.01) { sv = 0.0; break; }
+      t += clamp(sd * 0.80, 0.08, 0.45);
+      if (t > 16.0) break;
+    }
+  }
+
+  vec3 rad = min(evalSecondaryBounceRadiance(wp, nrm, matId, sm, uSunDir, sv), vec3(24.0));
+  float refl = clamp((sm.metalness * 0.75 + sm.coat * 0.45) * (1.0 - sm.roughness), 0.0, 0.95);
+  outVoxel = vec4(rad, dist);
+  outRefl  = vec4(refl, 0.0, 0.0, 1.0);
+}
+`;
+
+//========================================================================================================================
+// DYNAMIC GPU SLICE UNION PASS: Unions moving ControlVehicle (.sdfspace Body + 4x Rim + 4x Tyre) into Global SDF Clip0
+// AND attenuates floor radiosity inside the car's dynamic sun shadow for accurate secondary GI & reflections!
+//========================================================================================================================
 export const SDF_UNION_FRAG = `#version 300 es
 precision highp float;
 precision highp sampler3D;
@@ -246,6 +356,7 @@ precision highp sampler3D;
 in vec2 vUv;
 uniform sampler3D uStaticClip0;
 uniform sampler3D uStaticClip0Refl;
+uniform sampler3D uClip0Raw;
 uniform sampler3D uBodySdf;
 uniform sampler3D uRimSdf;
 uniform sampler3D uTyreSdf;
@@ -253,6 +364,7 @@ uniform sampler3D uTyreSdf;
 uniform vec3 uClip0Min;
 uniform vec3 uClip0Max;
 uniform float uSliceZNorm;
+uniform int uSliceIndex;
 
 uniform vec3 uBodySdfMin;
 uniform vec3 uBodySdfInvSpan;
@@ -264,6 +376,7 @@ uniform vec3 uTyreSdfInvSpan;
 uniform mat4 uBodyLocalToWorld;
 uniform mat4 uBodyWorldToLocal;
 uniform mat4 uWheelWorldToLocal[4];
+uniform vec3 uCarCenter;
 uniform vec3 uSunDir;
 uniform vec3 uPaintColor;
 
@@ -284,6 +397,7 @@ void main() {
   vec3 uvw = vec3(vUv, uSliceZNorm);
   vec4 base = texture(uStaticClip0, uvw);
   float baseRefl = texture(uStaticClip0Refl, uvw).r;
+  int stMat = int(texelFetch(uClip0Raw, ivec3(ivec2(gl_FragCoord.xy), uSliceIndex), 0).g + 0.5);
   float stDist = base.a;
   vec3 finalRad = base.rgb;
   float finalRefl = baseRefl;
@@ -292,7 +406,6 @@ void main() {
   float carDist = 1e5;
   int hitMat = -1;
 
-  // 1. ControlVehicle Body .sdfspace (88 x 64 x 36)
   vec3 bl = (uBodyWorldToLocal * vec4(worldPos, 1.0)).xyz;
   if (abs(bl.x) < 3.5 && abs(bl.y) < 1.7 && bl.z > -0.7 && bl.z < 1.9) {
     float dBody = samplePartSdf(uBodySdf, bl, uBodySdfMin, uBodySdfInvSpan);
@@ -305,43 +418,48 @@ void main() {
     }
   }
 
-  // 2. 4x ControlVehicle Rim & Tyre .sdfspace
   for (int w = 0; w < 4; w++) {
     vec3 wl = (uWheelWorldToLocal[w] * vec4(worldPos, 1.0)).xyz;
     if (dot(wl, wl) < 0.85) {
       float dTyre = samplePartSdf(uTyreSdf, wl, uTyreSdfMin, uTyreSdfInvSpan);
-      if (dTyre < carDist) {
-        carDist = dTyre;
-        hitMat = 11;
-      }
+      if (dTyre < carDist) { carDist = dTyre; hitMat = 11; }
       float dRim = samplePartSdf(uRimSdf, wl, uRimSdfMin, uRimSdfInvSpan);
-      if (dRim < carDist) {
-        carDist = dRim;
-        hitMat = 10;
-      }
+      if (dRim < carDist) { carDist = dRim; hitMat = 10; }
     }
   }
 
   float finalDist = min(stDist, carDist);
-  if (hitMat > 0 && carDist < stDist + 0.08) {
+  if (hitMat > 0 && carDist < stDist) {
     float h = 0.07;
-    vec3 localN = (hitMat == 10 || hitMat == 11)
-      ? vec3(0.0, 1.0, 0.0)
-      : normalize(vec3(
-          samplePartSdf(uBodySdf, bl + vec3(h, 0.0, 0.0), uBodySdfMin, uBodySdfInvSpan) -
-          samplePartSdf(uBodySdf, bl - vec3(h, 0.0, 0.0), uBodySdfMin, uBodySdfInvSpan),
-          samplePartSdf(uBodySdf, bl + vec3(0.0, h, 0.0), uBodySdfMin, uBodySdfInvSpan) -
-          samplePartSdf(uBodySdf, bl - vec3(0.0, h, 0.0), uBodySdfMin, uBodySdfInvSpan),
-          samplePartSdf(uBodySdf, bl + vec3(0.0, 0.0, h), uBodySdfMin, uBodySdfInvSpan) -
-          samplePartSdf(uBodySdf, bl - vec3(0.0, 0.0, h), uBodySdfMin, uBodySdfInvSpan)
-        ));
-    vec3 worldN = normalize(mat3(uBodyLocalToWorld) * localN);
+    vec3 worldN;
+    if (hitMat == 10 || hitMat == 11) {
+      worldN = normalize(worldPos - uCarCenter + vec3(0.0, 0.0, 1e-4));
+    } else {
+      vec3 localN = normalize(vec3(
+        samplePartSdf(uBodySdf, bl + vec3(h, 0.0, 0.0), uBodySdfMin, uBodySdfInvSpan) -
+        samplePartSdf(uBodySdf, bl - vec3(h, 0.0, 0.0), uBodySdfMin, uBodySdfInvSpan),
+        samplePartSdf(uBodySdf, bl + vec3(0.0, h, 0.0), uBodySdfMin, uBodySdfInvSpan) -
+        samplePartSdf(uBodySdf, bl - vec3(0.0, h, 0.0), uBodySdfMin, uBodySdfInvSpan),
+        samplePartSdf(uBodySdf, bl + vec3(0.0, 0.0, h), uBodySdfMin, uBodySdfInvSpan) -
+        samplePartSdf(uBodySdf, bl - vec3(0.0, 0.0, h), uBodySdfMin, uBodySdfInvSpan)
+      ) + vec3(0.0, 0.0, 1e-6));
+      worldN = normalize(mat3(uBodyLocalToWorld) * localN);
+    }
     SurfaceMat m = evalMaterial(hitMat, worldPos, uPaintColor);
-    vec3 cRad = min(evalSurfaceDirectRadiance(worldPos, worldN, vec3(0.0, 0.0, 1.0), m, uSunDir), vec3(24.0));
-    float cRefl = clamp((m.metalness * 0.75 + m.coat * 0.45) * (1.0 - m.roughness), 0.0, 0.95);
-    float wBlend = 1.0 - smoothstep(-0.04, 0.08, carDist - stDist);
-    finalRad = mix(base.rgb, cRad, wBlend);
-    finalRefl = mix(baseRefl, cRefl, wBlend);
+    finalRad = min(evalSecondaryBounceRadiance(worldPos, worldN, hitMat, m, uSunDir, 1.0), vec3(24.0));
+    finalRefl = clamp((m.metalness * 0.75 + m.coat * 0.45) * (1.0 - m.roughness), 0.0, 0.95);
+  } else if (uSliceIndex <= 6 && stMat == 1) {
+    // Dynamic car sun-shadow attenuation on floor voxels so moving car darkens secondary GI & mirror reflections!
+    float sh = 1.0;
+    for (int s = 0; s < 4; s++) {
+      float st = (s == 0) ? 0.35 : ((s == 1) ? 0.75 : ((s == 2) ? 1.25 : 1.75));
+      vec3 sbl = (uBodyWorldToLocal * vec4(worldPos + uSunDir * st, 1.0)).xyz;
+      if (abs(sbl.x) < 3.3 && abs(sbl.y) < 1.5 && sbl.z > -0.6 && sbl.z < 1.6) {
+        float dCar = samplePartSdf(uBodySdf, sbl, uBodySdfMin, uBodySdfInvSpan);
+        sh = min(sh, clamp(dCar / 0.16, 0.05, 1.0));
+      }
+    }
+    finalRad *= sh;
   }
 
   outSdfVoxel = vec4(finalRad, finalDist);
@@ -350,18 +468,9 @@ void main() {
 `;
 
 //========================================================================================================================
-// PATH A: MULTI-BOUNCE GLOBAL DISTANCE FIELD REFLECTION PASS (2-Cascade 3D Clipmap + Optional Hi-Z Near Assist)
-// ZERO analytical primitives — marches ONLY uClip0 & uClip1 3D voxel textures with trilinear narrow-band radiosity!
+// SHARED GLOBAL SDF SAMPLING HELPERS (Used by GI_SDF_FRAG & REFLECTION_SDF_FRAG)
 //========================================================================================================================
-export const REFLECTION_SDF_FRAG = `#version 300 es
-precision highp float;
-precision highp sampler3D;
-
-in vec2 vUv;
-uniform sampler2D uGPosRough;
-uniform sampler2D uGNormMat;
-uniform sampler2D uGDirect;
-
+const GLOBAL_SDF_HELPERS_GLSL = `
 uniform sampler3D uClip0Linear;
 uniform sampler3D uClip0Refl;
 uniform sampler3D uClip1Linear;
@@ -373,17 +482,6 @@ uniform float uClip0Voxel;
 uniform vec3 uClip1Min;
 uniform vec3 uClip1InvSpan;
 uniform float uClip1Voxel;
-
-uniform mat4 uViewProj;
-uniform vec3 uCamPos;
-uniform vec3 uSunDir;
-uniform int uMaxBounces;
-uniform float uRoughnessCutoff;
-uniform int uUseHiZAssist;
-
-layout(location = 0) out vec4 outReflection;
-
-${COMMON_MATERIAL_GLSL}
 
 bool insideClip(vec3 p, vec3 bmin, vec3 invSpan, float margin) {
   vec3 u = (p - bmin) * invSpan;
@@ -403,20 +501,6 @@ float sampleGlobalSdfDistance(vec3 p, out int cascadeUsed) {
   return 1e5;
 }
 
-vec3 evalGlobalSdfNormal(vec3 p, int cascade) {
-  float h = (cascade == 0) ? uClip0Voxel * 0.95 : uClip1Voxel * 0.95;
-  int c;
-  const vec3 k0 = vec3( 1.0, -1.0, -1.0);
-  const vec3 k1 = vec3(-1.0, -1.0,  1.0);
-  const vec3 k2 = vec3(-1.0,  1.0, -1.0);
-  const vec3 k3 = vec3( 1.0,  1.0,  1.0);
-  vec3 g = k0 * sampleGlobalSdfDistance(p + k0 * h, c)
-         + k1 * sampleGlobalSdfDistance(p + k1 * h, c)
-         + k2 * sampleGlobalSdfDistance(p + k2 * h, c)
-         + k3 * sampleGlobalSdfDistance(p + k3 * h, c);
-  return normalize(g + vec3(0.0, 0.0, 1e-6));
-}
-
 void unpackSdfSurface(vec3 p, int cascade, out vec3 rad, out float refl) {
   if (cascade == 0) {
     vec3 u = clamp((p - uClip0Min) * uClip0InvSpan, vec3(0.004), vec3(0.996));
@@ -428,174 +512,124 @@ void unpackSdfSurface(vec3 p, int cascade, out vec3 rad, out float refl) {
     refl = texture(uClip1Refl, u).r;
   }
 }
+`;
+
+//========================================================================================================================
+// PATH A (GI + PENUMBRA): GLOBAL SDF 6-CONE VOXEL GI + COLOR BLEEDING + CONTACT-HARDENING CONE PENUMBRA
+// Deterministic single-frame evaluation: ZERO ghosting, ZERO smearing, ZERO jittering noise!
+//========================================================================================================================
+export const GI_SDF_FRAG = `#version 300 es
+precision highp float;
+precision highp sampler3D;
+
+in vec2 vUv;
+uniform sampler2D uGPosRough;
+uniform sampler2D uGNormMat;
+
+uniform vec3 uSunDir;
+uniform float uPenumbraScale;
+uniform int uEnableGi;
+uniform int uEnableShadows;
+uniform int uSoftPenumbra;
+
+layout(location = 0) out vec4 outGiAndShadow;  // .rgb = demodulated GI irradiance, .a = sun shadow visibility
+layout(location = 1) out vec4 outShadowMeta;   // .r = blocker distance (0 = analytical SDF)
+
+${COMMON_MATERIAL_GLSL}
+${GLOBAL_SDF_HELPERS_GLSL}
 
 void main() {
   vec4 posRough = texture(uGPosRough, vUv);
   vec4 normMat  = texture(uGNormMat, vUv);
   int matId = int(normMat.w + 0.5);
   if (matId <= 0) {
-    outReflection = vec4(0.0);
+    outGiAndShadow = vec4(0.0, 0.0, 0.0, 1.0);
+    outShadowMeta  = vec4(0.0);
     return;
   }
 
-  float roughness = posRough.w;
-  if (roughness > uRoughnessCutoff) {
-    outReflection = vec4(0.0);
-    return;
+  vec3 pos = posRough.xyz;
+  vec3 nrm = normalize(normMat.xyz);
+
+  // 1. Contact-Hardening Global SDF Analytical Cone Penumbra
+  float sunVis = 1.0;
+  if (uEnableShadows == 1) {
+    if (dot(nrm, uSunDir) <= 0.0) {
+      sunVis = 0.0;
+    } else {
+      float effPenumbra = (uSoftPenumbra == 1) ? max(uPenumbraScale, 0.08) : 0.04;
+      float t = 0.08;
+      for (int s = 0; s < 34; s++) {
+        vec3 sp = pos + nrm * (uClip0Voxel * 0.85) + uSunDir * t;
+        int casc = 0;
+        float d = sampleGlobalSdfDistance(sp, casc);
+        if (casc == 2) break;
+        float halfW = (uSoftPenumbra == 1)
+          ? max(uClip0Voxel * 0.55, effPenumbra * 0.056 * t)
+          : uClip0Voxel * 0.32;
+        sunVis = min(sunVis, smoothstep(-halfW * 0.35, halfW, d));
+        if (sunVis < 0.002) { sunVis = 0.0; break; }
+        t += clamp(d * 0.78, 0.055, 0.48);
+        if (t > 18.0) break;
+      }
+    }
   }
 
-  vec3 origin = posRough.xyz;
-  vec3 normal = normalize(normMat.xyz);
-  vec3 viewDir = normalize(uCamPos - origin);
-  vec3 rayDir = reflect(-viewDir, normal);
-  if (dot(rayDir, normal) <= 0.0) {
-    rayDir = normal;
-  }
+  // 2. Self-Plane-Free Sphere-Marched 6-Cone Voxel GI + Vivid Color Bleeding
+  vec3 giIrr = vec3(0.0);
+  if (uEnableGi == 1) {
+    vec3 tB, bB;
+    buildOrthonormalBasis(nrm, tB, bB);
+    float phi0 = interleavedGradientNoise(gl_FragCoord.xy) * 6.2831853;
 
-  vec3 totalRadiance = vec3(0.0);
-  vec3 throughput = vec3(1.0);
-  vec3 currOrigin = origin;
-  vec3 currNormal = normal;
-  float currRough = roughness;
-  float firstHitDist = 80.0;
+    for (int k = 0; k < 6; k++) {
+      float r = sqrt((float(k) + 0.5) / 6.0);
+      float a = phi0 + float(k) * 2.3999632;
+      vec3 cDir = normalize(tB * (r * cos(a)) + bB * (r * sin(a)) + nrm * sqrt(max(0.0, 1.0 - r * r)));
 
-  // Optional short-range (0..1.35m) screen-space Hi-Z ray assist on Bounce 1 for razor-sharp car self-detail
-  bool handledFirstBySsr = false;
-  if (uUseHiZAssist == 1) {
-    float stepLen = 0.075;
-    for (int s = 1; s <= 16; s++) {
-      float t = float(s) * stepLen;
-      vec3 sp = currOrigin + currNormal * 0.03 + rayDir * t;
-      vec4 clip = uViewProj * vec4(sp, 1.0);
-      if (clip.w <= 0.05) break;
-      vec2 suv = (clip.xy / clip.w) * 0.5 + 0.5;
-      if (suv.x < 0.01 || suv.x > 0.99 || suv.y < 0.01 || suv.y > 0.99) break;
-      vec4 gSample = texture(uGPosRough, suv);
-      vec4 nSample = texture(uGNormMat, suv);
-      if (nSample.w > 0.5) {
-        float distSurf = length(sp - gSample.xyz);
-        float viewDepthDiff = length(uCamPos - sp) - length(uCamPos - gSample.xyz);
-        if (viewDepthDiff > -0.02 && viewDepthDiff < 0.16 && distSurf < 0.18) {
-          vec3 hitRad = texture(uGDirect, suv).rgb;
-          vec3 hitN = normalize(nSample.xyz);
-          float hitRough = gSample.w;
-          float hitRefl = clamp((1.0 - hitRough) * 0.72, 0.0, 0.90);
-          firstHitDist = t;
-          if (uMaxBounces <= 1 || hitRefl < 0.05) {
-            totalRadiance += throughput * hitRad;
-            outReflection = vec4(min(totalRadiance, vec3(60.0)), firstHitDist);
-            return;
-          }
-          totalRadiance += throughput * hitRad * (1.0 - hitRefl * 0.65);
-          throughput *= hitRefl;
-          currOrigin = gSample.xyz;
-          currNormal = hitN;
-          rayDir = reflect(rayDir, hitN);
-          currRough = clamp(sqrt(currRough * currRough + hitRough * hitRough), 0.04, 1.0);
-          handledFirstBySsr = true;
-          break;
+      float ct = 0.18;
+      float cAlpha = 0.0;
+      vec3 cCol = vec3(0.0);
+      for (int st = 0; st < 14; st++) {
+        if (cAlpha >= 0.98 || ct > 11.0) break;
+        vec3 sp = pos + nrm * (uClip0Voxel * 1.05) + cDir * ct;
+        int cc = 0;
+        float cd = sampleGlobalSdfDistance(sp, cc);
+        if (cc == 2) break;
+        float vox = (cc == 0) ? uClip0Voxel : uClip1Voxel;
+        float coneR = max(vox * 0.75, ct * 0.14);
+        if (cd < coneR) {
+          float occ = smoothstep(coneR, -vox * 0.25, cd);
+          vec3 sRad; float sRefl;
+          unpackSdfSurface(sp, cc, sRad, sRefl);
+          float stepW = (1.0 - cAlpha) * occ;
+          cCol += sRad * stepW;
+          cAlpha += stepW;
         }
+        ct += max(cd * 0.88, vox * 0.85);
       }
+      float su = cDir.z * 0.5 + 0.5;
+      vec3 skyAmb = mix(vec3(0.08, 0.09, 0.12), vec3(0.22, 0.32, 0.48), su);
+      cCol += skyAmb * (1.0 - cAlpha);
+      giIrr += cCol * (1.0 / 6.0);
     }
+  } else {
+    float su = nrm.z * 0.5 + 0.5;
+    giIrr = mix(vec3(0.05, 0.055, 0.07), vec3(0.14, 0.19, 0.28), su);
   }
 
-  int startBounce = handledFirstBySsr ? 2 : 1;
-  for (int bounce = 1; bounce <= 3; bounce++) {
-    if (bounce < startBounce) continue;
-    if (bounce > uMaxBounces) break;
-
-    float bias = (bounce == 1) ? uClip0Voxel * 1.15 : uClip0Voxel * 1.35;
-    vec3 ro = currOrigin + currNormal * bias;
-    float t = 0.04;
-    bool hit = false;
-    int hitCascade = 0;
-    vec3 hitPos = ro;
-
-    // Sphere march the 2-Cascade 3D Global Distance Field (zero analytical shapes!)
-    for (int stepIdx = 0; stepIdx < 64; stepIdx++) {
-      vec3 p = ro + rayDir * t;
-      int casc = 0;
-      float d = sampleGlobalSdfDistance(p, casc);
-      if (casc == 2) {
-        break; // Escaped world Global SDF bounds -> Sky!
-      }
-      float vox = (casc == 0) ? uClip0Voxel : uClip1Voxel;
-      float coneThresh = max(vox * 0.28, t * currRough * 0.025);
-      if (d < coneThresh) {
-        // 2-step continuous iso-surface root polish onto exact d = 0 level-set!
-        p += rayDir * d;
-        d = sampleGlobalSdfDistance(p, hitCascade);
-        p += rayDir * d;
-        hit = true;
-        hitPos = p;
-        if (bounce == 1) firstHitDist = length(p - ro);
-        break;
-      }
-      t += max(d * 0.92, vox * 0.22);
-      if (t > 28.0) break;
-    }
-
-    if (!hit) {
-      totalRadiance += throughput * evalSkyAndClouds(rayDir, uSunDir);
-      break;
-    }
-
-    vec3 hitN = evalGlobalSdfNormal(hitPos, hitCascade);
-    if (dot(hitN, rayDir) > 0.0) hitN = -hitN;
-
-    vec3 hitRad;
-    float hitRefl;
-    unpackSdfSurface(hitPos, hitCascade, hitRad, hitRefl);
-
-    if (bounce == uMaxBounces || hitRefl < 0.04) {
-      totalRadiance += throughput * hitRad;
-      break;
-    }
-
-    float noV = max(dot(hitN, -rayDir), 0.02);
-    float fresnel = hitRefl + (1.0 - hitRefl) * pow(1.0 - noV, 5.0) * 0.45;
-    fresnel = clamp(fresnel, 0.0, 0.92);
-
-    totalRadiance += throughput * hitRad * (1.0 - fresnel * 0.55);
-    throughput *= fresnel;
-    if (max(throughput.r, max(throughput.g, throughput.b)) < 0.025) break;
-
-    currOrigin = hitPos;
-    currNormal = hitN;
-    rayDir = reflect(rayDir, hitN);
-    currRough = clamp(currRough + 0.08, 0.04, 1.0);
-  }
-
-  outReflection = vec4(min(totalRadiance, vec3(60.0)), firstHitDist);
+  outGiAndShadow = vec4(min(giIrr, vec3(16.0)), sunVis);
+  outShadowMeta  = vec4(0.8, 0.0, 0.0, 1.0);
 }
 `;
 
 //========================================================================================================================
-// PATH B: MULTI-BOUNCE TWO-LEVEL SAH COMPUTE BVH REFLECTION PASS (Exact RayIntersection.slang GTX Non-RT Port!)
-// Traverses TLAS + 6,018 Binned-SAH BLAS Nodes + 26,016 Instanced Triangles with Stack[48] + NEE Shadow Rays
+// SHARED COMPUTE BVH TRAVERSAL HELPERS (Exact RayIntersection.slang GTX Non-RT Port — Used by GI_BVH & REFLECTION_BVH)
 //========================================================================================================================
-export const REFLECTION_BVH_FRAG = `#version 300 es
-precision highp float;
-precision highp int;
-
-in vec2 vUv;
-uniform sampler2D uGPosRough;
-uniform sampler2D uGNormMat;
-
+const BVH_TRAVERSAL_HELPERS_GLSL = `
 uniform sampler2D uBvhNodes;   // RGBA32F width=2048: 2 texels per BoundingEntry
 uniform sampler2D uBvhTris;    // RGBA32F width=2048: 4 texels per Triangle
-uniform sampler2D uInstances;  // RGBA32F width=64:   9 texels per Instance (LocalToWorld[4], WorldToLocal[4], meta)
-
-uniform vec3 uCamPos;
-uniform vec3 uSunDir;
-uniform vec3 uPaintColor;
-uniform int uMaxBounces;
-uniform float uRoughnessCutoff;
-uniform int uTraceNeeShadows;
-
-layout(location = 0) out vec4 outReflection;
-
-${COMMON_MATERIAL_GLSL}
+uniform sampler2D uInstances;  // RGBA32F width=128:  9 texels per Instance
 
 const int BVH_TEX_MASK  = 2047;
 const int BVH_TEX_SHIFT = 11;
@@ -659,7 +693,6 @@ struct BvhHit {
   int matId;
 };
 
-// Exact Two-Level TLAS + BLAS closest-hit software traversal with stack[48] (RayIntersection.slang)
 BvhHit traceSceneBvh(vec3 origin, vec3 dir, float tMin, float tMax) {
   BvhHit res;
   res.hit = false;
@@ -792,7 +825,8 @@ BvhHit traceSceneBvh(vec3 origin, vec3 dir, float tMin, float tMax) {
   return res;
 }
 
-float traceSceneShadowBvh(vec3 origin, vec3 dir, float tMin, float tMax) {
+// Returns blocker distance (>= tMin) if occluded, or -1.0 if unoccluded!
+float traceSceneShadowBlockerBvh(vec3 origin, vec3 dir, float tMin, float tMax) {
   vec3 worldRcp = safeRecip(dir);
   int stack[48];
   int depth = 1;
@@ -801,6 +835,8 @@ float traceSceneShadowBvh(vec3 origin, vec3 dir, float tMin, float tMax) {
   vec3 localOrig = origin;
   vec3 localDir = dir;
   vec3 localRcp = worldRcp;
+  float closestBlocker = tMax;
+  bool blocked = false;
 
   for (int stepIdx = 0; stepIdx < 240; stepIdx++) {
     if (depth <= 0) break;
@@ -813,7 +849,7 @@ float traceSceneShadowBvh(vec3 origin, vec3 dir, float tMin, float tMax) {
     int count = int(round(n1.w));
 
     if (blasFloor == 999999) {
-      if (intersectAabb(origin, worldRcp, n0.xyz, n1.xyz, tMax) >= tMax) continue;
+      if (intersectAabb(origin, worldRcp, n0.xyz, n1.xyz, closestBlocker) >= closestBlocker) continue;
       if (count < 0) {
         int inst = (-count) - 1;
         mat4 w2l = fetchInstanceMat(inst, 4);
@@ -831,13 +867,13 @@ float traceSceneShadowBvh(vec3 origin, vec3 dir, float tMin, float tMax) {
         }
       }
     } else {
-      if (intersectAabb(localOrig, localRcp, n0.xyz, n1.xyz, tMax) >= tMax) continue;
+      if (intersectAabb(localOrig, localRcp, n0.xyz, n1.xyz, closestBlocker) >= closestBlocker) continue;
       if (count > 0) {
         for (int ti = 0; ti < count; ti++) {
           int base = (leftOrFirst + ti) * 4;
           vec4 t0 = fetchTriTexel(base);
           int rawMat = int(t0.w + 0.5);
-          if (rawMat == 7) continue; // Glass shadow skip (matches VehicleGlassFamily)
+          if (rawMat == 7) continue; // Glass shadow skip
           vec3 e1 = fetchTriTexel(base + 1).xyz;
           vec3 e2 = fetchTriTexel(base + 2).xyz;
           vec3 pvec = cross(localDir, e2);
@@ -851,7 +887,10 @@ float traceSceneShadowBvh(vec3 origin, vec3 dir, float tMin, float tMax) {
           float v = dot(localDir, qvec) * invDet;
           if (v < 0.0 || u + v > 1.0) continue;
           float travel = dot(e2, qvec) * invDet;
-          if (travel >= tMin && travel < tMax) return 0.0;
+          if (travel >= tMin && travel < closestBlocker) {
+            closestBlocker = travel;
+            blocked = true;
+          }
         }
       } else {
         if (depth < 46) {
@@ -861,20 +900,401 @@ float traceSceneShadowBvh(vec3 origin, vec3 dir, float tMin, float tMax) {
       }
     }
   }
-  return 1.0;
+  return blocked ? closestBlocker : -1.0;
 }
+`;
+
+//========================================================================================================================
+// PATH B (GI + PENUMBRA): RAYTRACED COMPUTE BVH COSINE-HEMISPHERE GI + GOLDEN-DISK CONTACT-HARDENING PENUMBRA
+// Time-invariant spatial IGN + blocker distance tracking -> Zero ghosting, Zero smearing, Zero jittering noise!
+//========================================================================================================================
+export const GI_BVH_FRAG = `#version 300 es
+precision highp float;
+precision highp int;
+
+in vec2 vUv;
+uniform sampler2D uGPosRough;
+uniform sampler2D uGNormMat;
+
+uniform vec3 uSunDir;
+uniform vec3 uPaintColor;
+uniform float uPenumbraScale;
+uniform int uEnableGi;
+uniform int uEnableShadows;
+uniform int uSoftPenumbra;
+uniform int uTraceNeeShadows;
+
+layout(location = 0) out vec4 outGiAndShadow;
+layout(location = 1) out vec4 outShadowMeta;
+
+${COMMON_MATERIAL_GLSL}
+${BVH_TRAVERSAL_HELPERS_GLSL}
 
 void main() {
   vec4 posRough = texture(uGPosRough, vUv);
   vec4 normMat  = texture(uGNormMat, vUv);
   int matId = int(normMat.w + 0.5);
   if (matId <= 0) {
+    outGiAndShadow = vec4(0.0, 0.0, 0.0, 1.0);
+    outShadowMeta  = vec4(0.0);
+    return;
+  }
+
+  vec3 pos = posRough.xyz;
+  vec3 nrm = normalize(normMat.xyz);
+  float phi0 = interleavedGradientNoise(gl_FragCoord.xy) * 6.2831853;
+
+  // 1. Golden-Disk Area-Light Raytraced Soft Shadow + Blocker Distance Contact-Hardening
+  float sunVis = 1.0;
+  float avgBlocker = 0.0;
+  if (uEnableShadows == 1) {
+    if (dot(nrm, uSunDir) <= 0.0) {
+      sunVis = 0.0;
+    } else if (uSoftPenumbra == 0 || uPenumbraScale <= 0.02) {
+      float blk = traceSceneShadowBlockerBvh(pos + nrm * 0.005, uSunDir, 0.004, 35.0);
+      sunVis = (blk < 0.0) ? 1.0 : 0.0;
+      avgBlocker = 0.0;
+    } else {
+      vec3 sunT, sunB;
+      buildOrthonormalBasis(uSunDir, sunT, sunB);
+      float diskRad = uPenumbraScale * 0.056;
+      float visAcc = 0.0;
+      float blkAcc = 0.0;
+      int blkCnt = 0;
+      for (int s = 0; s < 4; s++) {
+        float r = sqrt((float(s) + 0.5) / 4.0) * diskRad;
+        float a = phi0 + float(s) * 2.3999632;
+        vec3 sDir = normalize(uSunDir + sunT * (r * cos(a)) + sunB * (r * sin(a)));
+        float blk = traceSceneShadowBlockerBvh(pos + nrm * 0.005, sDir, 0.004, 35.0);
+        if (blk < 0.0) {
+          visAcc += 0.25;
+        } else {
+          blkAcc += blk;
+          blkCnt++;
+        }
+      }
+      sunVis = visAcc;
+      avgBlocker = (blkCnt > 0) ? (blkAcc / float(blkCnt)) * (uPenumbraScale * 0.5) : 0.0;
+    }
+  }
+
+  // 2. Cosine-Weighted Golden-Spiral Hemisphere BVH Global Illumination + Color Bleeding
+  vec3 giIrr = vec3(0.0);
+  if (uEnableGi == 1) {
+    vec3 tB, bB;
+    buildOrthonormalBasis(nrm, tB, bB);
+    const int GI_RAYS = 6;
+    for (int k = 0; k < GI_RAYS; k++) {
+      float r = sqrt((float(k) + 0.5) / float(GI_RAYS));
+      float a = phi0 + float(k) * 2.3999632;
+      vec3 hDir = normalize(tB * (r * cos(a)) + bB * (r * sin(a)) + nrm * sqrt(max(0.0, 1.0 - r * r)));
+      BvhHit gh = traceSceneBvh(pos + nrm * 0.006, hDir, 0.004, 11.0);
+      if (!gh.hit) {
+        float su = hDir.z * 0.5 + 0.5;
+        giIrr += mix(vec3(0.08, 0.09, 0.12), vec3(0.22, 0.32, 0.48), su) * (1.0 / float(GI_RAYS));
+      } else {
+        SurfaceMat gm = evalMaterial(gh.matId, gh.pos, uPaintColor);
+        float gsv = 0.0;
+        if (dot(gh.nrm, uSunDir) > 0.02) {
+          gsv = (uTraceNeeShadows == 1)
+            ? ((traceSceneShadowBlockerBvh(gh.pos + gh.nrm * 0.008, uSunDir, 0.006, 20.0) < 0.0) ? 1.0 : 0.0)
+            : 1.0;
+        }
+        vec3 gRad = evalSecondaryBounceRadiance(gh.pos, gh.nrm, gh.matId, gm, uSunDir, gsv);
+        giIrr += gRad * (1.0 / float(GI_RAYS));
+      }
+    }
+  } else {
+    float su = nrm.z * 0.5 + 0.5;
+    giIrr = mix(vec3(0.05, 0.055, 0.07), vec3(0.14, 0.19, 0.28), su);
+  }
+
+  outGiAndShadow = vec4(min(giIrr, vec3(16.0)), sunVis);
+  outShadowMeta  = vec4(avgBlocker, 0.0, 0.0, 1.0);
+}
+`;
+
+//========================================================================================================================
+// SINGLE-FRAME PLANE-AWARE DEMODULATED CROSS-BILATERAL FILTER (Step = 1, 2, 4)
+// Zero temporal feedback = Zero ghosting | Plane + Normal^32 + PCSS Blocker Kernel = Zero smearing & Zero noise!
+//========================================================================================================================
+export const GI_BILATERAL_FRAG = `#version 300 es
+precision highp float;
+
+in vec2 vUv;
+uniform sampler2D uGiShadowIn;
+uniform sampler2D uShadowMetaIn;
+uniform sampler2D uGPosRough;
+uniform sampler2D uGNormMat;
+
+uniform vec2 uTexelSize;
+uniform int uStepPx;
+uniform int uContactHardenShadows;
+
+layout(location = 0) out vec4 outGiShadowFiltered;
+
+void main() {
+  vec4 normMatC = texture(uGNormMat, vUv);
+  if (normMatC.w < 0.5) {
+    outGiShadowFiltered = vec4(0.0, 0.0, 0.0, 1.0);
+    return;
+  }
+
+  vec3 posC = texture(uGPosRough, vUv).xyz;
+  vec3 nrmC = normalize(normMatC.xyz);
+  vec4 centerVal = texture(uGiShadowIn, vUv);
+  float blockerDist = texture(uShadowMetaIn, vUv).r;
+
+  // Contact-hardening shadow kernel: 0 px blur right at contact (blockerDist -> 0), wider smooth blur in far penumbra!
+  int vRad = (uContactHardenShadows == 1)
+    ? clamp(int( floor(blockerDist * 1.8 + 0.5) ), 0, 2)
+    : 1;
+
+  vec3 sumGi = vec3(0.0);
+  float wGi = 0.0;
+  float sumVis = 0.0;
+  float wVis = 0.0;
+
+  for (int dy = -2; dy <= 2; dy++) {
+    for (int dx = -2; dx <= 2; dx++) {
+      vec2 qUv = clamp(vUv + vec2(float(dx * uStepPx), float(dy * uStepPx)) * uTexelSize, vec2(0.001), vec2(0.999));
+      vec4 normMatQ = texture(uGNormMat, qUv);
+      if (normMatQ.w < 0.5) continue;
+
+      vec3 posQ = texture(uGPosRough, qUv).xyz;
+      vec3 nrmQ = normalize(normMatQ.xyz);
+
+      float nDot = max(dot(nrmC, nrmQ), 0.0);
+      float wNorm = pow(nDot, 32.0);
+      float planeDist = abs(dot(nrmC, posQ - posC));
+      float wPlane = exp(-planeDist * 45.0);
+      float wGeo = wNorm * wPlane;
+      if (wGeo < 1e-4) continue;
+
+      float wSpatial = exp(-float(dx * dx + dy * dy) * 0.22);
+      float w = wGeo * wSpatial;
+
+      vec4 sampleVal = texture(uGiShadowIn, qUv);
+      sumGi += sampleVal.rgb * w;
+      wGi += w;
+
+      if (abs(dx) <= vRad && abs(dy) <= vRad) {
+        sumVis += sampleVal.a * w;
+        wVis += w;
+      }
+    }
+  }
+
+  vec3 outGi = (wGi > 0.0) ? (sumGi / wGi) : centerVal.rgb;
+  float outVis = (uContactHardenShadows == 1 && vRad == 0)
+    ? centerVal.a
+    : ((wVis > 0.0) ? (sumVis / wVis) : centerVal.a);
+
+  outGiShadowFiltered = vec4(outGi, outVis);
+}
+`;
+
+//========================================================================================================================
+// PATH A (REFLECTIONS): MULTI-BOUNCE GLOBAL DISTANCE FIELD REFLECTION PASS (2-Cascade 3D Clipmap + Hi-Z Near Assist)
+//========================================================================================================================
+export const REFLECTION_SDF_FRAG = `#version 300 es
+precision highp float;
+precision highp sampler3D;
+
+in vec2 vUv;
+uniform sampler2D uGPosRough;
+uniform sampler2D uGNormMat;
+uniform sampler2D uGDirect;
+
+uniform mat4 uViewProj;
+uniform vec3 uCamPos;
+uniform vec3 uSunDir;
+uniform int uMaxBounces;
+uniform float uRoughnessCutoff;
+uniform int uUseHiZAssist;
+
+layout(location = 0) out vec4 outReflection;
+
+${COMMON_MATERIAL_GLSL}
+${GLOBAL_SDF_HELPERS_GLSL}
+
+vec3 evalGlobalSdfNormal(vec3 p, int cascade) {
+  float h = (cascade == 0) ? uClip0Voxel * 0.95 : uClip1Voxel * 0.95;
+  int c;
+  const vec3 k0 = vec3( 1.0, -1.0, -1.0);
+  const vec3 k1 = vec3(-1.0, -1.0,  1.0);
+  const vec3 k2 = vec3(-1.0,  1.0, -1.0);
+  const vec3 k3 = vec3( 1.0,  1.0,  1.0);
+  vec3 g = k0 * sampleGlobalSdfDistance(p + k0 * h, c)
+         + k1 * sampleGlobalSdfDistance(p + k1 * h, c)
+         + k2 * sampleGlobalSdfDistance(p + k2 * h, c)
+         + k3 * sampleGlobalSdfDistance(p + k3 * h, c);
+  return normalize(g + vec3(0.0, 0.0, 1e-6));
+}
+
+void main() {
+  if (uMaxBounces <= 0) {
+    outReflection = vec4(0.0);
+    return;
+  }
+  vec4 posRough = texture(uGPosRough, vUv);
+  vec4 normMat  = texture(uGNormMat, vUv);
+  int matId = int(normMat.w + 0.5);
+  if (matId <= 0 || posRough.w > uRoughnessCutoff) {
     outReflection = vec4(0.0);
     return;
   }
 
-  float roughness = posRough.w;
-  if (roughness > uRoughnessCutoff) {
+  vec3 origin = posRough.xyz;
+  vec3 normal = normalize(normMat.xyz);
+  vec3 viewDir = normalize(uCamPos - origin);
+  vec3 rayDir = reflect(-viewDir, normal);
+  if (dot(rayDir, normal) <= 0.0) rayDir = normal;
+
+  vec3 totalRadiance = vec3(0.0);
+  vec3 throughput = vec3(1.0);
+  vec3 currOrigin = origin;
+  vec3 currNormal = normal;
+  float currRough = posRough.w;
+  float firstHitDist = 80.0;
+
+  bool handledFirstBySsr = false;
+  if (uUseHiZAssist == 1) {
+    float stepLen = 0.075;
+    for (int s = 1; s <= 16; s++) {
+      float t = float(s) * stepLen;
+      vec3 sp = currOrigin + currNormal * 0.03 + rayDir * t;
+      vec4 clip = uViewProj * vec4(sp, 1.0);
+      if (clip.w <= 0.05) break;
+      vec2 suv = (clip.xy / clip.w) * 0.5 + 0.5;
+      if (suv.x < 0.01 || suv.x > 0.99 || suv.y < 0.01 || suv.y > 0.99) break;
+      vec4 gSample = texture(uGPosRough, suv);
+      vec4 nSample = texture(uGNormMat, suv);
+      if (nSample.w > 0.5) {
+        float distSurf = length(sp - gSample.xyz);
+        float viewDepthDiff = length(uCamPos - sp) - length(uCamPos - gSample.xyz);
+        if (viewDepthDiff > -0.02 && viewDepthDiff < 0.16 && distSurf < 0.18) {
+          vec3 hitRad = texture(uGDirect, suv).rgb;
+          vec3 hitN = normalize(nSample.xyz);
+          float hitRough = gSample.w;
+          float hitRefl = clamp((1.0 - hitRough) * 0.72, 0.0, 0.90);
+          firstHitDist = t;
+          if (uMaxBounces <= 1 || hitRefl < 0.05) {
+            totalRadiance += throughput * hitRad;
+            outReflection = vec4(min(totalRadiance, vec3(60.0)), firstHitDist);
+            return;
+          }
+          totalRadiance += throughput * hitRad * (1.0 - hitRefl * 0.65);
+          throughput *= hitRefl;
+          currOrigin = gSample.xyz;
+          currNormal = hitN;
+          rayDir = reflect(rayDir, hitN);
+          currRough = clamp(sqrt(currRough * currRough + hitRough * hitRough), 0.04, 1.0);
+          handledFirstBySsr = true;
+          break;
+        }
+      }
+    }
+  }
+
+  int startBounce = handledFirstBySsr ? 2 : 1;
+  for (int bounce = 1; bounce <= 3; bounce++) {
+    if (bounce < startBounce) continue;
+    if (bounce > uMaxBounces) break;
+
+    float bias = (bounce == 1) ? uClip0Voxel * 1.15 : uClip0Voxel * 1.35;
+    vec3 ro = currOrigin + currNormal * bias;
+    float t = 0.04;
+    bool hit = false;
+    int hitCascade = 0;
+    vec3 hitPos = ro;
+
+    for (int stepIdx = 0; stepIdx < 64; stepIdx++) {
+      vec3 p = ro + rayDir * t;
+      int casc = 0;
+      float d = sampleGlobalSdfDistance(p, casc);
+      if (casc == 2) break;
+      float vox = (casc == 0) ? uClip0Voxel : uClip1Voxel;
+      float coneThresh = max(vox * 0.28, t * currRough * 0.025);
+      if (d < coneThresh) {
+        p += rayDir * d;
+        d = sampleGlobalSdfDistance(p, hitCascade);
+        p += rayDir * d;
+        hit = true;
+        hitPos = p;
+        if (bounce == 1) firstHitDist = length(p - ro);
+        break;
+      }
+      t += max(d * 0.92, vox * 0.22);
+      if (t > 28.0) break;
+    }
+
+    if (!hit) {
+      totalRadiance += throughput * evalSkyAndClouds(rayDir, uSunDir);
+      break;
+    }
+
+    vec3 hitN = evalGlobalSdfNormal(hitPos, hitCascade);
+    if (dot(hitN, rayDir) > 0.0) hitN = -hitN;
+
+    vec3 hitRad;
+    float hitRefl;
+    unpackSdfSurface(hitPos, hitCascade, hitRad, hitRefl);
+
+    if (bounce == uMaxBounces || hitRefl < 0.04) {
+      totalRadiance += throughput * hitRad;
+      break;
+    }
+
+    float noV = max(dot(hitN, -rayDir), 0.02);
+    float fresnel = clamp(hitRefl + (1.0 - hitRefl) * pow(1.0 - noV, 5.0) * 0.45, 0.0, 0.92);
+
+    totalRadiance += throughput * hitRad * (1.0 - fresnel * 0.55);
+    throughput *= fresnel;
+    if (max(throughput.r, max(throughput.g, throughput.b)) < 0.025) break;
+
+    currOrigin = hitPos;
+    currNormal = hitN;
+    rayDir = reflect(rayDir, hitN);
+    currRough = clamp(currRough + 0.08, 0.04, 1.0);
+  }
+
+  outReflection = vec4(min(totalRadiance, vec3(60.0)), firstHitDist);
+}
+`;
+
+//========================================================================================================================
+// PATH B (REFLECTIONS): MULTI-BOUNCE TWO-LEVEL SAH COMPUTE BVH REFLECTION PASS
+//========================================================================================================================
+export const REFLECTION_BVH_FRAG = `#version 300 es
+precision highp float;
+precision highp int;
+
+in vec2 vUv;
+uniform sampler2D uGPosRough;
+uniform sampler2D uGNormMat;
+
+uniform vec3 uCamPos;
+uniform vec3 uSunDir;
+uniform vec3 uPaintColor;
+uniform int uMaxBounces;
+uniform float uRoughnessCutoff;
+uniform int uTraceNeeShadows;
+
+layout(location = 0) out vec4 outReflection;
+
+${COMMON_MATERIAL_GLSL}
+${BVH_TRAVERSAL_HELPERS_GLSL}
+
+void main() {
+  if (uMaxBounces <= 0) {
+    outReflection = vec4(0.0);
+    return;
+  }
+  vec4 posRough = texture(uGPosRough, vUv);
+  vec4 normMat  = texture(uGNormMat, vUv);
+  int matId = int(normMat.w + 0.5);
+  if (matId <= 0 || posRough.w > uRoughnessCutoff) {
     outReflection = vec4(0.0);
     return;
   }
@@ -900,21 +1320,13 @@ void main() {
     if (bounce == 1) firstHitDist = hit.t;
 
     SurfaceMat m = evalMaterial(hit.matId, hit.pos, uPaintColor);
-    vec3 hitRad = evalSurfaceDirectRadiance(hit.pos, hit.nrm, -rayDir, m, uSunDir);
-
-    // Optional NEE Shadow Rays (Sun + Portal Light) matching Frontier-OLD TraceMultiBounceReflection
-    if (uTraceNeeShadows == 1 && bounce <= 2) {
-      float sunVis = (dot(hit.nrm, uSunDir) > 0.0)
-        ? traceSceneShadowBvh(hit.pos + hit.nrm * 0.005, uSunDir, 0.004, 40.0)
-        : 0.0;
-      vec3 portalTarget = vec3(0.0, clamp(hit.pos.y, -4.5, 4.5), 4.30);
-      vec3 toPortal = portalTarget - hit.pos;
-      float pDist = length(toPortal);
-      float portalVis = (pDist > 0.1 && hit.pos.z < 4.2)
-        ? traceSceneShadowBvh(hit.pos + hit.nrm * 0.005, toPortal / pDist, 0.004, pDist - 0.08)
-        : 1.0;
-      hitRad *= mix(0.28, 1.0, 0.65 * sunVis + 0.35 * portalVis);
+    float sunVis = 1.0;
+    if (dot(hit.nrm, uSunDir) <= 0.0) {
+      sunVis = 0.0;
+    } else if (uTraceNeeShadows == 1 && bounce <= 2) {
+      sunVis = (traceSceneShadowBlockerBvh(hit.pos + hit.nrm * 0.005, uSunDir, 0.004, 35.0) < 0.0) ? 1.0 : 0.0;
     }
+    vec3 hitRad = evalSecondaryBounceRadiance(hit.pos, hit.nrm, hit.matId, m, uSunDir, sunVis);
 
     float hitRefl = clamp((m.metalness * 0.75 + m.coat * 0.45) * (1.0 - m.roughness), 0.0, 0.95);
     if (bounce == uMaxBounces || hitRefl < 0.04) {
@@ -923,8 +1335,7 @@ void main() {
     }
 
     float noV = max(dot(hit.nrm, -rayDir), 0.02);
-    float fresnel = hitRefl + (1.0 - hitRefl) * pow(1.0 - noV, 5.0) * 0.45;
-    fresnel = clamp(fresnel, 0.0, 0.92);
+    float fresnel = clamp(hitRefl + (1.0 - hitRefl) * pow(1.0 - noV, 5.0) * 0.45, 0.0, 0.92);
 
     totalRadiance += throughput * hitRad * (1.0 - fresnel * 0.55);
     throughput *= fresnel;
@@ -939,13 +1350,17 @@ void main() {
 }
 `;
 
+//========================================================================================================================
+// FINAL DEMODULATED COMPOSITE PASS (Full-Res Albedo + Joint-Bilateral GI/Penumbra Upsample + Multi-Bounce Reflections)
+//========================================================================================================================
 export const COMPOSITE_FRAG = `#version 300 es
 precision highp float;
 in vec2 vUv;
 
 uniform sampler2D uGPosRough;
 uniform sampler2D uGNormMat;
-uniform sampler2D uGDirect;
+uniform sampler2D uGiVisSdf;
+uniform sampler2D uGiVisBvh;
 uniform sampler2D uReflSdf;
 uniform sampler2D uReflBvh;
 
@@ -953,8 +1368,12 @@ uniform mat4 uInvViewProj;
 uniform vec3 uCamPos;
 uniform vec3 uSunDir;
 uniform vec3 uPaintColor;
-uniform int uDisplayMode; // 0 = SDF, 1 = BVH, 2 = Split, 3 = Pixel Delta
+uniform vec2 uTraceTexelSize;
+
+uniform int uDisplayMode; // 0 = SDF, 1 = BVH, 2 = Split, 3 = Pixel Delta, 4 = Clay GI+Penumbra Split
 uniform float uSplitX;
+uniform float uGiIntensity;
+uniform int uMaxBounces;
 
 out vec4 outColor;
 
@@ -969,19 +1388,70 @@ vec3 acesFilm(vec3 x) {
   return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
 }
 
-vec3 shadeWithReflection(vec3 pos, vec3 nrm, int matId, vec3 direct, vec3 reflRad, vec3 viewDir) {
+// Joint-bilateral upsample of half-res demodulated (GI.rgb, sunVis) against full-res G-Buffer -> ZERO silhouette smearing!
+vec4 sampleJointBilateralGiVis(sampler2D giVisTex, vec2 uv, vec3 fullPos, vec3 fullNrm) {
+  vec2 baseUv = (floor(uv / uTraceTexelSize - 0.5) + 0.5) * uTraceTexelSize;
+  vec2 f = fract(uv / uTraceTexelSize - 0.5);
+  vec4 sum = vec4(0.0);
+  float wSum = 0.0;
+  for (int dy = 0; dy <= 1; dy++) {
+    for (int dx = 0; dx <= 1; dx++) {
+      vec2 qUv = clamp(baseUv + vec2(float(dx), float(dy)) * uTraceTexelSize, vec2(0.001), vec2(0.999));
+      float wBilin = ((dx == 0) ? (1.0 - f.x) : f.x) * ((dy == 0) ? (1.0 - f.y) : f.y);
+      vec4 nQ = texture(uGNormMat, qUv);
+      vec3 pQ = texture(uGPosRough, qUv).xyz;
+      float wGeo = (nQ.w > 0.5)
+        ? pow(max(dot(fullNrm, normalize(nQ.xyz)), 0.0), 24.0) * exp(-abs(dot(fullNrm, pQ - fullPos)) * 35.0)
+        : 0.0;
+      float w = max(wBilin * wGeo, 1e-5);
+      sum += texture(giVisTex, qUv) * w;
+      wSum += w;
+    }
+  }
+  return sum / wSum;
+}
+
+vec3 shadeFullPipeline(vec3 pos, vec3 nrm, int matId, vec4 giVis, vec3 reflRad, vec3 viewDir, bool clayMode) {
   SurfaceMat m = evalMaterial(matId, pos, uPaintColor);
-  float noV = max(dot(nrm, viewDir), 0.02);
+  if (clayMode && matId != 5 && matId != 18 && matId != 19) {
+    // Pure matte white architectural clay model to isolate GI + Color Bleeding + Contact-Hardening Penumbra!
+    m.albedo = vec3(0.84, 0.85, 0.87);
+    m.metalness = 0.0;
+    m.coat = 0.0;
+    m.roughness = 0.88;
+    m.emissive = vec3(0.0);
+  }
+
+  float sunVis = giVis.a;
+  vec3 giIrr = giVis.rgb * uGiIntensity;
+
+  float ndl = max(dot(nrm, uSunDir), 0.0);
+  vec3 sunIrr = vec3(4.4, 3.95, 3.40) * (ndl * sunVis);
+  vec3 diffAlbedo = m.albedo * (1.0 - m.metalness);
+
   vec3 f0 = mix(vec3(0.04), m.albedo, m.metalness);
+  vec3 h = normalize(uSunDir + viewDir);
+  float ndh = max(dot(nrm, h), 0.0);
+  float r = max(m.coat > 0.0 ? mix(m.roughness, m.coatRough, m.coat * 0.65) : m.roughness, 0.035);
+  float a2 = r * r * r * r;
+  float denom = ndh * ndh * (a2 - 1.0) + 1.0;
+  float ggx = a2 / max(3.14159265 * denom * denom, 1e-4);
+  vec3 spec = f0 * (min(ggx * 0.22, 16.0) * ndl * sunVis) * vec3(3.5, 3.15, 2.75);
+
+  vec3 lit = m.emissive + diffAlbedo * ((sunIrr + evalPortalIrradiance(pos, nrm)) * (1.0 / 3.14159265) + giIrr) + spec;
+  if (clayMode || uMaxBounces <= 0) {
+    return lit * 0.78;
+  }
+
+  float noV = max(dot(nrm, viewDir), 0.02);
   vec3 fresnel = f0 + (1.0 - f0) * pow(1.0 - noV, 5.0);
   float coatF = m.coat * (0.04 + 0.96 * pow(1.0 - noV, 5.0));
   float roughFade = 1.0 - smoothstep(0.32, 0.78, m.roughness * (1.0 - m.coat * 0.7));
   vec3 reflWeight = clamp((fresnel * (1.0 - coatF) + vec3(coatF)) * roughFade, vec3(0.0), vec3(0.95));
   if (matId == 7) {
-    // Cabin glass strong specular reflection over dark interior
     reflWeight = clamp(vec3(0.22 + 0.74 * pow(1.0 - noV, 3.2)), vec3(0.0), vec3(0.96));
   }
-  return direct * (1.0 - reflWeight * 0.55) + reflRad * reflWeight;
+  return (lit * (1.0 - reflWeight * 0.45) + reflRad * reflWeight) * 0.78;
 }
 
 void main() {
@@ -991,28 +1461,36 @@ void main() {
     vec4 farH = uInvViewProj * vec4(vUv * 2.0 - 1.0, 1.0, 1.0);
     vec3 rayDir = normalize(farH.xyz / farH.w - uCamPos);
     vec3 sky = evalSkyAndClouds(rayDir, uSunDir);
-    outColor = vec4(pow(acesFilm(sky * 0.95), vec3(1.0 / 2.2)), 1.0);
+    outColor = vec4(pow(acesFilm(sky * 0.82), vec3(1.0 / 2.2)), 1.0);
     return;
   }
 
   vec3 pos = texture(uGPosRough, vUv).xyz;
   vec3 nrm = normalize(normMat.xyz);
-  vec3 direct = texture(uGDirect, vUv).rgb;
   vec3 viewDir = normalize(uCamPos - pos);
 
   if (uDisplayMode == 0) {
-    vec3 hdr = shadeWithReflection(pos, nrm, matId, direct, texture(uReflSdf, vUv).rgb, viewDir);
-    outColor = vec4(pow(acesFilm(hdr * 0.95), vec3(1.0 / 2.2)), 1.0);
+    vec4 gv = sampleJointBilateralGiVis(uGiVisSdf, vUv, pos, nrm);
+    vec3 hdr = shadeFullPipeline(pos, nrm, matId, gv, texture(uReflSdf, vUv).rgb, viewDir, false);
+    outColor = vec4(pow(acesFilm(hdr), vec3(1.0 / 2.2)), 1.0);
   } else if (uDisplayMode == 1) {
-    vec3 hdr = shadeWithReflection(pos, nrm, matId, direct, texture(uReflBvh, vUv).rgb, viewDir);
-    outColor = vec4(pow(acesFilm(hdr * 0.95), vec3(1.0 / 2.2)), 1.0);
-  } else if (uDisplayMode == 2) {
-    vec3 refl = (vUv.x < uSplitX) ? texture(uReflSdf, vUv).rgb : texture(uReflBvh, vUv).rgb;
-    vec3 hdr = shadeWithReflection(pos, nrm, matId, direct, refl, viewDir);
-    outColor = vec4(pow(acesFilm(hdr * 0.95), vec3(1.0 / 2.2)), 1.0);
+    vec4 gv = sampleJointBilateralGiVis(uGiVisBvh, vUv, pos, nrm);
+    vec3 hdr = shadeFullPipeline(pos, nrm, matId, gv, texture(uReflBvh, vUv).rgb, viewDir, false);
+    outColor = vec4(pow(acesFilm(hdr), vec3(1.0 / 2.2)), 1.0);
+  } else if (uDisplayMode == 2 || uDisplayMode == 4) {
+    bool clay = (uDisplayMode == 4);
+    bool leftSide = (vUv.x < uSplitX);
+    vec4 gv = leftSide
+      ? sampleJointBilateralGiVis(uGiVisSdf, vUv, pos, nrm)
+      : sampleJointBilateralGiVis(uGiVisBvh, vUv, pos, nrm);
+    vec3 refl = leftSide ? texture(uReflSdf, vUv).rgb : texture(uReflBvh, vUv).rgb;
+    vec3 hdr = shadeFullPipeline(pos, nrm, matId, gv, refl, viewDir, clay);
+    outColor = vec4(pow(acesFilm(hdr), vec3(1.0 / 2.2)), 1.0);
   } else {
-    vec3 cSdf = acesFilm(shadeWithReflection(pos, nrm, matId, direct, texture(uReflSdf, vUv).rgb, viewDir) * 0.95);
-    vec3 cBvh = acesFilm(shadeWithReflection(pos, nrm, matId, direct, texture(uReflBvh, vUv).rgb, viewDir) * 0.95);
+    vec4 gvS = sampleJointBilateralGiVis(uGiVisSdf, vUv, pos, nrm);
+    vec4 gvB = sampleJointBilateralGiVis(uGiVisBvh, vUv, pos, nrm);
+    vec3 cSdf = acesFilm(shadeFullPipeline(pos, nrm, matId, gvS, texture(uReflSdf, vUv).rgb, viewDir, false));
+    vec3 cBvh = acesFilm(shadeFullPipeline(pos, nrm, matId, gvB, texture(uReflBvh, vUv).rgb, viewDir, false));
     vec3 diff = abs(cSdf - cBvh) * 4.0;
     outColor = vec4(pow(clamp(diff, 0.0, 1.0), vec3(1.0 / 2.2)), 1.0);
   }

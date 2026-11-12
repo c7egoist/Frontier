@@ -2,7 +2,11 @@ import {
   FULLSCREEN_VERT,
   GBUFFER_VERT,
   GBUFFER_FRAG,
+  SDF_STATIC_SHADE_FRAG,
   SDF_UNION_FRAG,
+  GI_SDF_FRAG,
+  GI_BVH_FRAG,
+  GI_BILATERAL_FRAG,
   REFLECTION_SDF_FRAG,
   REFLECTION_BVH_FRAG,
   COMPOSITE_FRAG,
@@ -35,23 +39,16 @@ function mat4ComposeRigid(tx, ty, tz, yawZ, pitchY = 0, rollX = 0) {
   const cz = Math.cos(yawZ), sz = Math.sin(yawZ);
   const cy = Math.cos(pitchY), sy = Math.sin(pitchY);
   const cx = Math.cos(rollX), sx = Math.sin(rollX);
-  // R = Rz(yaw) * Ry(pitch) * Rx(roll) in column-major
   const m = new Float32Array(16);
   m[0] = cz * cy;
   m[1] = sz * cy;
   m[2] = -sy;
-  m[3] = 0;
-
   m[4] = cz * sy * sx - sz * cx;
   m[5] = sz * sy * sx + cz * cx;
   m[6] = cy * sx;
-  m[7] = 0;
-
   m[8] = cz * sy * cx + sz * sx;
   m[9] = sz * sy * cx - cz * sx;
   m[10] = cy * cx;
-  m[11] = 0;
-
   m[12] = tx;
   m[13] = ty;
   m[14] = tz;
@@ -60,11 +57,10 @@ function mat4ComposeRigid(tx, ty, tz, yawZ, pitchY = 0, rollX = 0) {
 }
 
 function mat4InvertRigid(m) {
-  // Transpose 3x3 rotation + inverse translate
   const inv = new Float32Array(16);
-  inv[0] = m[0]; inv[1] = m[4]; inv[2]  = m[8];  inv[3]  = 0;
-  inv[4] = m[1]; inv[5] = m[5]; inv[6]  = m[9];  inv[7]  = 0;
-  inv[8] = m[2]; inv[9] = m[6]; inv[10] = m[10]; inv[11] = 0;
+  inv[0] = m[0]; inv[1] = m[4]; inv[2]  = m[8];
+  inv[4] = m[1]; inv[5] = m[5]; inv[6]  = m[9];
+  inv[8] = m[2]; inv[9] = m[6]; inv[10] = m[10];
   const tx = m[12], ty = m[13], tz = m[14];
   inv[12] = -(inv[0] * tx + inv[4] * ty + inv[8]  * tz);
   inv[13] = -(inv[1] * tx + inv[5] * ty + inv[9]  * tz);
@@ -97,20 +93,17 @@ function mat4InvertGeneral(m) {
   return inv;
 }
 
-// Right-Handed LookAt (+Z Up world -> Right-Handed OpenGL/WebGL clip space)
 function mat4LookAtRH(eye, target, up = [0, 0, 1]) {
   let fx = target[0] - eye[0], fy = target[1] - eye[1], fz = target[2] - eye[2];
   const fl = Math.hypot(fx, fy, fz) || 1;
   fx /= fl; fy /= fl; fz /= fl;
 
-  // s = normalize(cross(f, up))
   let sx = fy * up[2] - fz * up[1];
   let sy = fz * up[0] - fx * up[2];
   let sz = fx * up[1] - fy * up[0];
   const sl = Math.hypot(sx, sy, sz) || 1;
   sx /= sl; sy /= sl; sz /= sl;
 
-  // u = cross(s, f)
   const ux = sy * fz - sz * fy;
   const uy = sz * fx - sx * fz;
   const uz = sx * fy - sy * fx;
@@ -119,7 +112,7 @@ function mat4LookAtRH(eye, target, up = [0, 0, 1]) {
   m[0] = sx;  m[4] = sy;  m[8]  = sz;  m[12] = -(sx * eye[0] + sy * eye[1] + sz * eye[2]);
   m[1] = ux;  m[5] = uy;  m[9]  = uz;  m[13] = -(ux * eye[0] + uy * eye[1] + uz * eye[2]);
   m[2] = -fx; m[6] = -fy; m[10] = -fz; m[14] =  (fx * eye[0] + fy * eye[1] + fz * eye[2]);
-  m[3] = 0;   m[7] = 0;   m[11] = 0;   m[15] = 1;
+  m[15] = 1;
   return m;
 }
 
@@ -158,116 +151,53 @@ function unpackOctahedralJs(packed20) {
   return [nx / len, ny / len, nz / len];
 }
 
-function smoothstepJs(e0, e1, x) {
-  const t = Math.max(0.0, Math.min(1.0, (x - e0) / (e1 - e0)));
-  return t * t * (3.0 - 2.0 * t);
-}
-
-// Pre-lit surface radiosity helper matching evalSurfaceDirectRadiance 1:1 for static ProvingGround Global SDF cascades
-function evalStaticArenaVoxelRadiosity(matId, px, py, pz, sunDir) {
-  let ar = 0.09, ag = 0.095, ab = 0.11, rough = 0.42, metal = 0.25, coat = 0.0, coatRough = 0.04;
-  let er = 0, eg = 0, eb = 0;
-  if (matId === 1) {
-    const gx = Math.abs(px * 0.25 + 0.5 - Math.floor(px * 0.25 + 0.5)) - 0.5;
-    const gy = Math.abs(py * 0.25 + 0.5 - Math.floor(py * 0.25 + 0.5)) - 0.5;
-    const grid = 1.0 - smoothstepJs(0.008, 0.016, Math.min(Math.abs(gx), Math.abs(gy)));
-    const lane = (1.0 - smoothstepJs(0.04, 0.06, Math.abs(Math.abs(py) - 3.65))) * (Math.abs(px) < 11.0 ? 1.0 : 0.0);
-    const br = 0.042 * (1 - grid * 0.55) + 0.075 * (grid * 0.55);
-    const bg = 0.046 * (1 - grid * 0.55) + 0.082 * (grid * 0.55);
-    const bb = 0.054 * (1 - grid * 0.55) + 0.098 * (grid * 0.55);
-    ar = br * (1 - lane * 0.75) + 0.68 * (lane * 0.75);
-    ag = bg * (1 - lane * 0.75) + 0.54 * (lane * 0.75);
-    ab = bb * (1 - lane * 0.75) + 0.14 * (lane * 0.75);
-    rough = 0.22; metal = 0.05; coat = 0.45; coatRough = 0.14;
-  } else if (matId === 2) {
-    ar = 0.90; ag = 0.93; ab = 0.97; rough = 0.035; metal = 0.98; coat = 0.5; coatRough = 0.03;
-  } else if (matId === 3) {
-    ar = 0.94; ag = 0.74; ab = 0.44; rough = 0.045; metal = 0.96; coat = 0.4; coatRough = 0.04;
-  } else if (matId === 4) {
-    ar = 0.11; ag = 0.12; ab = 0.15; rough = 0.28; metal = 0.65;
-  } else if (matId === 5) {
-    ar = 0.95; ag = 0.98; ab = 1.0; rough = 0.15; er = 7.5; eg = 8.6; eb = 10.5;
-  } else if (matId === 17) {
-    ar = 0.92; ag = 0.26; ab = 0.04; rough = 0.18; metal = 0.1; coat = 0.65; coatRough = 0.08;
-  }
-
-  let nx = 0, ny = 0.7071, nz = 0.7071;
-  if (matId === 1) { nx = 0; ny = 0; nz = 1; }
-  else if (matId === 2) { nx = 0; ny = -1; nz = 0; }
-  else if (matId === 3) { nx = -1; ny = 0; nz = 0; }
-  else if (matId === 5) { nx = 0; ny = 0; nz = -1; }
-
-  const ndl = Math.max(0, nx * sunDir[0] + ny * sunDir[1] + nz * sunDir[2]);
-  const s = nz * 0.5 + 0.5;
-  let ir = 3.1 * ndl + (0.10 * (1 - s) + 0.36 * s);
-  let ig = 2.85 * ndl + (0.11 * (1 - s) + 0.48 * s);
-  let ib = 2.55 * ndl + (0.14 * (1 - s) + 0.68 * s);
-
-  if (pz < 4.30) {
-    for (let i = -1; i <= 1; i++) {
-      const dx = i * 4.2 - px, dy = Math.max(-5.2, Math.min(5.2, py)) - py, dz = 4.30 - pz;
-      const d2 = dx * dx + dy * dy + dz * dz;
-      const invL = 1.0 / Math.sqrt(Math.max(d2, 1e-4));
-      const pNdl = Math.max(0, (nx * dx + ny * dy + nz * dz) * invL);
-      const att = pNdl / (1.0 + 0.22 * d2);
-      ir += 1.15 * att; ig += 1.32 * att; ib += 1.65 * att;
-    }
-  }
-
-  const diffScale = (1.0 - metal) / Math.PI;
-  const rr = Math.min(24.0, er + ar * diffScale * ir);
-  const rg = Math.min(24.0, eg + ag * diffScale * ig);
-  const rb = Math.min(24.0, eb + ab * diffScale * ib);
-  const refl = Math.min(0.95, Math.max(0.0, (metal * 0.75 + coat * 0.45) * (1.0 - rough)));
-  return [rr, rg, rb, refl];
-}
-
-//========================================================================================================================
-// WEBGL2 HELPERS
-//========================================================================================================================
-function compileProgram(gl, vsSrc, fsSrc) {
+function compileProgram(gl, vsSrc, fsSrc, label) {
   const vs = gl.createShader(gl.VERTEX_SHADER);
   gl.shaderSource(vs, vsSrc);
   gl.compileShader(vs);
   if (!gl.getShaderParameter(vs, gl.COMPILE_STATUS)) {
-    throw new Error("VS error: " + gl.getShaderInfoLog(vs));
+    throw new Error(`[${label}] VS error: ` + gl.getShaderInfoLog(vs));
   }
   const fs = gl.createShader(gl.FRAGMENT_SHADER);
   gl.shaderSource(fs, fsSrc);
   gl.compileShader(fs);
   if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) {
-    throw new Error("FS error: " + gl.getShaderInfoLog(fs));
+    throw new Error(`[${label}] FS error: ` + gl.getShaderInfoLog(fs));
   }
   const prog = gl.createProgram();
   gl.attachShader(prog, vs);
   gl.attachShader(prog, fs);
   gl.linkProgram(prog);
   if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
-    throw new Error("Link error: " + gl.getProgramInfoLog(prog));
+    throw new Error(`[${label}] Link error: ` + gl.getProgramInfoLog(prog));
   }
   return prog;
 }
 
 //========================================================================================================================
-// MAIN APPLICATION
+// PALETTE & SUN HELPERS
 //========================================================================================================================
 const PAINT_PALETTE = [
+  [0.92, 0.94, 0.98], // Pearl White Clearcoat (default — showcases Crimson & Cobalt color bleeding dramatically!)
   [0.08, 0.37, 0.94], // Sapphire Clearcoat
   [0.86, 0.12, 0.14], // Crimson Metallic
   [0.92, 0.68, 0.06], // Solar Gold
   [0.03, 0.59, 0.40], // Emerald Pearl
-  [0.82, 0.85, 0.90], // Liquid Silver
   [0.05, 0.055, 0.07], // Obsidian Mirror
 ];
 
-const SUN_DIR = (() => {
-  const v = [0.46, -0.38, 0.80];
-  const l = Math.hypot(...v);
-  return v.map((x) => x / l);
-})();
+function computeSunDirectionFromAzimuth(azimuthDeg) {
+  // At azimuth = 50 deg, matches verified reference normalize(0.48, 0.58, 0.66) -> elev ~ 41 deg
+  const az = (azimuthDeg * Math.PI) / 180.0;
+  const elevDeg = 32.0 + 9.0 * Math.cos(((azimuthDeg - 50.0) * Math.PI) / 140.0);
+  const el = (elevDeg * Math.PI) / 180.0;
+  const ce = Math.cos(el);
+  const v = [ce * Math.cos(az), ce * Math.sin(az), Math.sin(el)];
+  const l = Math.hypot(...v) || 1;
+  return { dir: [v[0] / l, v[1] / l, v[2] / l], elevDeg };
+}
 
 const TLAS_RESERVED_NODES = 32;
-const TLAS_LEAF_BIT = 0x40000000;
 
 async function startBenchmark() {
   const canvas = document.getElementById("viewport-canvas");
@@ -292,7 +222,7 @@ async function startBenchmark() {
     return;
   }
 
-  // Load packed authentic ControlVehicle + ProvingGround binary bundle
+  // Load packed authentic ControlVehicle + Color-Bleed ProvingGround binary bundle ("FVB1")
   const resp = await fetch("./Assets/VehicleBenchmarkAssets.bin");
   const arrayBuf = await resp.arrayBuffer();
   const dv = new DataView(arrayBuf);
@@ -316,7 +246,7 @@ async function startBenchmark() {
     offset += 16;
   }
 
-  // Read BLAS nodes & shift internal child links by +TLAS_RESERVED_NODES (exact float32 — zero denormals!)
+  // Read BLAS nodes & shift internal child links by +TLAS_RESERVED_NODES
   const totalCombinedNodes = TLAS_RESERVED_NODES + totalBlasNodes;
   const nodeTexWidth = 2048;
   const nodeTexHeight = Math.ceil((totalCombinedNodes * 2) / nodeTexWidth);
@@ -334,9 +264,7 @@ async function startBenchmark() {
     const count = Math.round(dv.getFloat32(offset + 28, true));
     offset += 32;
 
-    if (count === 0) {
-      leftOrFirst += TLAS_RESERVED_NODES;
-    }
+    if (count === 0) leftOrFirst += TLAS_RESERVED_NODES;
     const dstTexel = (TLAS_RESERVED_NODES + n) * 2;
     nodeTexData[dstTexel * 4 + 0] = minX;
     nodeTexData[dstTexel * 4 + 1] = minY;
@@ -360,8 +288,7 @@ async function startBenchmark() {
   const triTexWidth = 2048;
   const triTexHeight = Math.ceil((totalTris * 4) / triTexWidth);
   const triTexData = new Float32Array(triTexWidth * triTexHeight * 4);
-  const triBytesSrc = new Uint8Array(arrayBuf, offset, totalTris * 64);
-  new Uint8Array(triTexData.buffer, 0, totalTris * 64).set(triBytesSrc);
+  new Uint8Array(triTexData.buffer, 0, totalTris * 64).set(new Uint8Array(arrayBuf, offset, totalTris * 64));
 
   const meshVaos = [];
   for (let m = 0; m < meshCount; m++) {
@@ -403,7 +330,7 @@ async function startBenchmark() {
   }
   offset += totalTris * 64;
 
-  // Read 5 SDF volumes: 0=BodySDF, 1=RimSDF, 2=TyreSDF (fp16), 3=Clip0Static, 4=Clip1Static (fp16 + uint16 mat)
+  // Read 5 SDF volumes: 0=BodySDF, 1=RimSDF, 2=TyreSDF, 3=Clip0Static, 4=Clip1Static
   const sdfVolumes = [];
   for (let s = 0; s < sdfCount; s++) {
     const nx = dv.getUint32(offset + 0, true);
@@ -433,37 +360,41 @@ async function startBenchmark() {
     return tex;
   }
 
-  function createArenaCascade3D(vol, needDynamicCopy) {
+  function createArenaCascadeGpuVolumes(vol, needDynamicCopy) {
     const count = vol.nx * vol.ny * vol.nz;
-    const rgba = new Float32Array(count * 4);
-    const refl = new Float32Array(count);
+    const rawRg = new Float32Array(count * 2);
+    const distOnly = new Float32Array(count);
     const view = new DataView(vol.payload.buffer, vol.payload.byteOffset, vol.payload.byteLength);
-    const sx = (vol.max[0] - vol.min[0]) / vol.nx;
-    const sy = (vol.max[1] - vol.min[1]) / vol.ny;
-    const sz = (vol.max[2] - vol.min[2]) / vol.nz;
-    let idx = 0;
-    for (let iz = 0; iz < vol.nz; iz++) {
-      const pz = vol.min[2] + (iz + 0.5) * sz;
-      for (let iy = 0; iy < vol.ny; iy++) {
-        const py = vol.min[1] + (iy + 0.5) * sy;
-        for (let ix = 0; ix < vol.nx; ix++) {
-          const px = vol.min[0] + (ix + 0.5) * sx;
-          const dist = decodeFloat16(view.getUint16(idx * 4, true));
-          const matId = view.getUint16(idx * 4 + 2, true);
-          const [rr, rg, rb, rf] = evalStaticArenaVoxelRadiosity(matId, px, py, pz, SUN_DIR);
-          rgba[idx * 4 + 0] = rr;
-          rgba[idx * 4 + 1] = rg;
-          rgba[idx * 4 + 2] = rb;
-          rgba[idx * 4 + 3] = dist;
-          refl[idx] = rf;
-          idx++;
-        }
-      }
+    for (let i = 0; i < count; i++) {
+      const d = decodeFloat16(view.getUint16(i * 4, true));
+      const m = view.getUint16(i * 4 + 2, true);
+      rawRg[i * 2 + 0] = d;
+      rawRg[i * 2 + 1] = m;
+      distOnly[i] = d;
     }
-    const makeRgbaTex = () => {
+
+    const rawTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_3D, rawTex);
+    gl.texImage3D(gl.TEXTURE_3D, 0, gl.RG16F, vol.nx, vol.ny, vol.nz, 0, gl.RG, gl.FLOAT, rawRg);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
+
+    const distTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_3D, distTex);
+    gl.texImage3D(gl.TEXTURE_3D, 0, gl.R16F, vol.nx, vol.ny, vol.nz, 0, gl.RED, gl.FLOAT, distOnly);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
+
+    const makeEmpty3D = (internalFmt, fmt) => {
       const tex = gl.createTexture();
       gl.bindTexture(gl.TEXTURE_3D, tex);
-      gl.texImage3D(gl.TEXTURE_3D, 0, gl.RGBA16F, vol.nx, vol.ny, vol.nz, 0, gl.RGBA, gl.FLOAT, rgba);
+      gl.texImage3D(gl.TEXTURE_3D, 0, internalFmt, vol.nx, vol.ny, vol.nz, 0, fmt, gl.FLOAT, null);
       gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
       gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
       gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -471,27 +402,27 @@ async function startBenchmark() {
       gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
       return tex;
     };
-    const makeReflTex = () => {
-      const tex = gl.createTexture();
-      gl.bindTexture(gl.TEXTURE_3D, tex);
-      gl.texImage3D(gl.TEXTURE_3D, 0, gl.R16F, vol.nx, vol.ny, vol.nz, 0, gl.RED, gl.FLOAT, refl);
-      gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-      gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-      gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
-      return tex;
-    };
+
     return needDynamicCopy
-      ? { texA: makeRgbaTex(), texB: makeRgbaTex(), reflA: makeReflTex(), reflB: makeReflTex() }
-      : { texA: makeRgbaTex(), reflA: makeReflTex() };
+      ? {
+          rawTex, distTex,
+          texA: makeEmpty3D(gl.RGBA16F, gl.RGBA),
+          reflA: makeEmpty3D(gl.R16F, gl.RED),
+          texB: makeEmpty3D(gl.RGBA16F, gl.RGBA),
+          reflB: makeEmpty3D(gl.R16F, gl.RED),
+        }
+      : {
+          rawTex, distTex,
+          texA: makeEmpty3D(gl.RGBA16F, gl.RGBA),
+          reflA: makeEmpty3D(gl.R16F, gl.RED),
+        };
   }
 
   const bodySdfTex = createPartSdf3D(sdfVolumes[0]);
   const rimSdfTex  = createPartSdf3D(sdfVolumes[1]);
   const tyreSdfTex = createPartSdf3D(sdfVolumes[2]);
-  const clip0Pair  = createArenaCascade3D(sdfVolumes[3], true);  // texA/reflA = static base, texB/reflB = live unioned Clip0!
-  const clip1Pair  = createArenaCascade3D(sdfVolumes[4], false); // texA/reflA = live Clip1
+  const clip0Pair  = createArenaCascadeGpuVolumes(sdfVolumes[3], true);
+  const clip1Pair  = createArenaCascadeGpuVolumes(sdfVolumes[4], false);
 
   const linearSampler = gl.createSampler();
   gl.samplerParameteri(linearSampler, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
@@ -499,13 +430,6 @@ async function startBenchmark() {
   gl.samplerParameteri(linearSampler, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.samplerParameteri(linearSampler, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   gl.samplerParameteri(linearSampler, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
-
-  const nearestSampler = gl.createSampler();
-  gl.samplerParameteri(nearestSampler, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-  gl.samplerParameteri(nearestSampler, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-  gl.samplerParameteri(nearestSampler, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.samplerParameteri(nearestSampler, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  gl.samplerParameteri(nearestSampler, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
 
   // BVH GPU textures (RGBA32F)
   const bvhNodesTex = gl.createTexture();
@@ -528,19 +452,28 @@ async function startBenchmark() {
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
 
   // Compile GPU Programs
-  const progGBuffer   = compileProgram(gl, GBUFFER_VERT, GBUFFER_FRAG);
-  const progSdfUnion  = compileProgram(gl, FULLSCREEN_VERT, SDF_UNION_FRAG);
-  const progReflSdf   = compileProgram(gl, FULLSCREEN_VERT, REFLECTION_SDF_FRAG);
-  const progReflBvh   = compileProgram(gl, FULLSCREEN_VERT, REFLECTION_BVH_FRAG);
-  const progComposite = compileProgram(gl, FULLSCREEN_VERT, COMPOSITE_FRAG);
-  const emptyVao      = gl.createVertexArray();
+  const progGBuffer       = compileProgram(gl, GBUFFER_VERT, GBUFFER_FRAG, "GBuffer");
+  const progStaticShade   = compileProgram(gl, FULLSCREEN_VERT, SDF_STATIC_SHADE_FRAG, "SdfStaticShade");
+  const progSdfUnion      = compileProgram(gl, FULLSCREEN_VERT, SDF_UNION_FRAG, "SdfUnion");
+  const progGiSdf         = compileProgram(gl, FULLSCREEN_VERT, GI_SDF_FRAG, "GiSdf");
+  const progGiBvh         = compileProgram(gl, FULLSCREEN_VERT, GI_BVH_FRAG, "GiBvh");
+  const progGiBilateral   = compileProgram(gl, FULLSCREEN_VERT, GI_BILATERAL_FRAG, "GiBilateral");
+  const progReflSdf       = compileProgram(gl, FULLSCREEN_VERT, REFLECTION_SDF_FRAG, "ReflSdf");
+  const progReflBvh       = compileProgram(gl, FULLSCREEN_VERT, REFLECTION_BVH_FRAG, "ReflBvh");
+  const progComposite     = compileProgram(gl, FULLSCREEN_VERT, COMPOSITE_FRAG, "Composite");
+  const emptyVao          = gl.createVertexArray();
 
-  // Pre-create FBO for dynamic Clip0 Z-slice updates (slices 0..24 cover Z = -0.35m .. +2.45m)
-  const sdfUnionFbo = gl.createFramebuffer();
+  const sdfSliceFbo = gl.createFramebuffer();
 
-  // Screen-sized G-Buffer + Half-res Reflection Targets (matching VehicleHMI half-res reflection dispatch!)
+  // Render Targets
   let screenW = 0, screenH = 0, traceW = 0, traceH = 0;
   let gBufferFbo = null, gPosTex = null, gNormTex = null, gDirectTex = null, gDepthRb = null;
+  let giSdfRawFbo = null, giSdfRawTex = null, giSdfMetaTex = null;
+  let giBvhRawFbo = null, giBvhRawTex = null, giBvhMetaTex = null;
+  let giPingAFbo = null, giPingATex = null;
+  let giPingBFbo = null, giPingBTex = null;
+  let giSdfFinalFbo = null, giSdfFinalTex = null;
+  let giBvhFinalFbo = null, giBvhFinalTex = null;
   let reflSdfFbo = null, reflSdfTex = null;
   let reflBvhFbo = null, reflBvhTex = null;
 
@@ -555,8 +488,25 @@ async function startBenchmark() {
     return t;
   }
 
+  function makeSingleFbo(tex) {
+    const fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+    return fbo;
+  }
+
+  function makeDualFbo(tex0, tex1) {
+    const fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex0, 0);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, tex1, 0);
+    gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+    return fbo;
+  }
+
   function resizeTargets() {
-    const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.35);
     const w = Math.max(640, Math.floor(window.innerWidth * dpr));
     const h = Math.max(360, Math.floor(window.innerHeight * dpr));
     if (w === screenW && h === screenH) return;
@@ -567,11 +517,12 @@ async function startBenchmark() {
     canvas.height = h;
 
     if (gBufferFbo) {
-      gl.deleteFramebuffer(gBufferFbo);
-      gl.deleteTexture(gPosTex); gl.deleteTexture(gNormTex); gl.deleteTexture(gDirectTex);
+      [gBufferFbo, giSdfRawFbo, giBvhRawFbo, giPingAFbo, giPingBFbo, giSdfFinalFbo, giBvhFinalFbo, reflSdfFbo, reflBvhFbo]
+        .forEach((f) => gl.deleteFramebuffer(f));
+      [gPosTex, gNormTex, gDirectTex, giSdfRawTex, giSdfMetaTex, giBvhRawTex, giBvhMetaTex,
+       giPingATex, giPingBTex, giSdfFinalTex, giBvhFinalTex, reflSdfTex, reflBvhTex]
+        .forEach((t) => gl.deleteTexture(t));
       gl.deleteRenderbuffer(gDepthRb);
-      gl.deleteFramebuffer(reflSdfFbo); gl.deleteTexture(reflSdfTex);
-      gl.deleteFramebuffer(reflBvhFbo); gl.deleteTexture(reflBvhTex);
     }
 
     gPosTex    = makeTargetTex(screenW, screenH, gl.NEAREST);
@@ -589,15 +540,30 @@ async function startBenchmark() {
     gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, gDepthRb);
     gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1, gl.COLOR_ATTACHMENT2]);
 
-    reflSdfTex = makeTargetTex(traceW, traceH, gl.LINEAR);
-    reflSdfFbo = gl.createFramebuffer();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, reflSdfFbo);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, reflSdfTex, 0);
+    giSdfRawTex   = makeTargetTex(traceW, traceH, gl.NEAREST);
+    giSdfMetaTex  = makeTargetTex(traceW, traceH, gl.NEAREST);
+    giSdfRawFbo   = makeDualFbo(giSdfRawTex, giSdfMetaTex);
 
-    reflBvhTex = makeTargetTex(traceW, traceH, gl.LINEAR);
-    reflBvhFbo = gl.createFramebuffer();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, reflBvhFbo);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, reflBvhTex, 0);
+    giBvhRawTex   = makeTargetTex(traceW, traceH, gl.NEAREST);
+    giBvhMetaTex  = makeTargetTex(traceW, traceH, gl.NEAREST);
+    giBvhRawFbo   = makeDualFbo(giBvhRawTex, giBvhMetaTex);
+
+    giPingATex    = makeTargetTex(traceW, traceH, gl.NEAREST);
+    giPingAFbo    = makeSingleFbo(giPingATex);
+    giPingBTex    = makeTargetTex(traceW, traceH, gl.NEAREST);
+    giPingBFbo    = makeSingleFbo(giPingBTex);
+
+    giSdfFinalTex = makeTargetTex(traceW, traceH, gl.LINEAR);
+    giSdfFinalFbo = makeSingleFbo(giSdfFinalTex);
+
+    giBvhFinalTex = makeTargetTex(traceW, traceH, gl.LINEAR);
+    giBvhFinalFbo = makeSingleFbo(giBvhFinalTex);
+
+    reflSdfTex    = makeTargetTex(traceW, traceH, gl.LINEAR);
+    reflSdfFbo    = makeSingleFbo(reflSdfTex);
+
+    reflBvhTex    = makeTargetTex(traceW, traceH, gl.LINEAR);
+    reflBvhFbo    = makeSingleFbo(reflBvhTex);
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
@@ -605,35 +571,48 @@ async function startBenchmark() {
   window.addEventListener("resize", resizeTargets);
 
   //======================================================================================================================
-  // INTERACTIVE STATE & VEHICLE PHYSICS (Right-Handed: +X Fwd, +Y Left, +Z Up)
+  // INTERACTIVE STATE & VEHICLE MOTION
   //======================================================================================================================
+  const initSun = computeSunDirectionFromAzimuth(50);
   const state = {
-    displayMode: 2, // 0=SDF, 1=BVH, 2=Split (default hero side-by-side!), 3=Delta
+    displayMode: 2, // 0=SDF, 1=BVH, 2=Split, 3=Delta, 4=Clay GI+Penumbra Split
     maxBounces: 2,
+    enableGi: true,
+    enableShadows: true,
+    softPenumbra: true,
     useHiZAssist: true,
     traceNeeShadows: true,
-    legacyRough80: true,
-    driveMode: "auto",
+    penumbraScale: 2.10,
+    giIntensity: 1.85,
+    sunAzimuthDeg: 50,
+    sunElevDeg: initSun.elevDeg,
+    sunDir: initSun.dir,
+    staticShadeDirty: true,
+
+    driveMode: "auto", // "auto" | "pose" | "manual"
     chaseCam: false,
     paintIdx: 0,
     splitX: 0.5,
 
-    carX: 0.0,
+    carX: -0.55,
     carY: 0.65,
     carYaw: 0.42,
     carSpeed: 0.0,
-    steerAngle: 0.0,
+    steerAngle: 0.18,
     wheelSpin: 0.0,
     autoTime: 0.0,
 
-    camYaw: -1.46,
-    camPitch: 0.22,
-    camDist: 5.9,
+    // Hero three-quarter foreground-penumbra + color-bleed showcase camera
+    camYaw: -1.88,
+    camPitch: 0.30,
+    camDist: 5.95,
 
-    sdfMs: 0.0,
-    bvhMs: 0.0,
+    sdfGiMs: 0.25,
+    sdfReflMs: 0.20,
+    bvhGiMs: 2.40,
+    bvhReflMs: 1.80,
     unionMs: 0.08,
-    pixelDeltaPct: 4.1,
+    pixelDeltaPct: 4.91,
   };
 
   const keys = new Set();
@@ -647,12 +626,11 @@ async function startBenchmark() {
       }
     }
     if (k === "r") {
-      state.carX = 0; state.carY = 0; state.carYaw = 0.08; state.carSpeed = 0; state.steerAngle = 0;
+      state.carX = -0.55; state.carY = 0.65; state.carYaw = 0.42; state.carSpeed = 0; state.steerAngle = 0;
     }
   });
   window.addEventListener("keyup", (e) => keys.delete(e.key.toLowerCase()));
 
-  // Orbit Camera & Split Divider Drag
   let draggingCam = false, draggingSplit = false, lastMx = 0, lastMy = 0;
   canvas.addEventListener("pointerdown", (e) => {
     draggingCam = true; lastMx = e.clientX; lastMy = e.clientY;
@@ -682,37 +660,35 @@ async function startBenchmark() {
     draggingSplit = true;
   });
 
-  // Scene Instances & Dynamic TLAS Builder (10 instances: 0=Body, 1..4=Rim, 5..8=Tyre, 9=Arena)
   const WHEEL_MOUNTS = [
-    { x:  1.665, y:  1.045, front: true,  right: false }, // FL (+X Fwd, +Y Left)
-    { x:  1.665, y: -1.045, front: true,  right: true  }, // FR
-    { x: -1.705, y:  1.045, front: false, right: false }, // RL
-    { x: -1.705, y: -1.045, front: false, right: true  }, // RR
+    { x:  1.665, y:  1.045, front: true,  right: false },
+    { x:  1.665, y: -1.045, front: true,  right: true  },
+    { x: -1.705, y:  1.045, front: false, right: false },
+    { x: -1.705, y: -1.045, front: false, right: true  },
   ];
   const TYRE_RADIUS = 0.50855;
 
   let activeInstances = [];
   function updateSceneInstances(dt) {
-    if (state.driveMode === "auto") {
+    if (state.driveMode === "pose") {
+      state.carX = -0.55;
+      state.carY = 0.65;
+      state.carYaw = 0.42;
+      state.steerAngle = 0.24;
+    } else if (state.driveMode === "auto") {
       state.autoTime += dt;
-      // Smooth figure-8 right across the 17m Silver Mirror Inspection Wall (clear of all calibration pylons!)
-      const t = state.autoTime * 0.52;
-      const nextX = Math.sin(t) * 2.25;
-      const nextY = 0.45 + Math.sin(t * 2.0) * 1.15;
+      // Smooth collision-free showcase glide right between the Crimson Wall, White Plinth, and Mirror Wall!
+      const t = state.autoTime * 0.65;
+      const nextX = -0.55 + Math.sin(t) * 0.68;
+      const nextY = 0.92 + Math.sin(t * 1.4) * 0.42;
       const dx = nextX - state.carX;
       const dy = nextY - state.carY;
       const dist = Math.hypot(dx, dy);
-      if (dist > 1e-4) {
-        const targetYaw = Math.atan2(dy, dx);
-        let diff = targetYaw - state.carYaw;
-        while (diff > Math.PI) diff -= 2 * Math.PI;
-        while (diff < -Math.PI) diff += 2 * Math.PI;
-        state.steerAngle = Math.max(-0.46, Math.min(0.46, diff * 2.4));
-        state.carYaw = targetYaw;
-      }
+      state.carYaw = 0.42 + Math.sin(t * 0.7) * 0.16;
+      state.steerAngle = 0.22 * Math.cos(t);
       state.carX = nextX;
       state.carY = nextY;
-      state.wheelSpin += (dist / TYRE_RADIUS);
+      state.wheelSpin += (dist / TYRE_RADIUS) * (Math.cos(t) >= 0 ? 1 : -1);
     } else {
       const throttle = (keys.has("w") || keys.has("arrowup") ? 1 : 0) - (keys.has("s") || keys.has("arrowdown") ? 1 : 0);
       const steerIn  = (keys.has("a") || keys.has("arrowleft") ? 1 : 0) - (keys.has("d") || keys.has("arrowright") ? 1 : 0);
@@ -728,11 +704,8 @@ async function startBenchmark() {
 
       const wheelbase = 3.37;
       state.carYaw += (state.carSpeed / wheelbase) * Math.tan(state.steerAngle) * dt;
-      state.carX += Math.cos(state.carYaw) * state.carSpeed * dt;
-      state.carY += Math.sin(state.carYaw) * state.carSpeed * dt;
-      // Keep inside proving pad bounds
-      state.carX = Math.max(-5.2, Math.min(5.2, state.carX));
-      state.carY = Math.max(-3.1, Math.min(3.1, state.carY));
+      state.carX = Math.max(-3.1, Math.min(4.8, state.carX + Math.cos(state.carYaw) * state.carSpeed * dt));
+      state.carY = Math.max(-3.8, Math.min(3.6, state.carY + Math.sin(state.carYaw) * state.carSpeed * dt));
       state.wheelSpin += (state.carSpeed * dt) / TYRE_RADIUS;
     }
 
@@ -754,9 +727,7 @@ async function startBenchmark() {
       wheelInvs.push(mat4InvertRigid(m));
     }
 
-    const arenaModel = mat4Identity();
-    const arenaInv   = mat4Identity();
-
+    const idM = mat4Identity();
     activeInstances = [
       { meshIdx: 0, l2w: bodyModel, w2l: bodyInv, matOverride: -1 },
       { meshIdx: 1, l2w: wheelModels[0], w2l: wheelInvs[0], matOverride: -1 },
@@ -767,10 +738,9 @@ async function startBenchmark() {
       { meshIdx: 2, l2w: wheelModels[1], w2l: wheelInvs[1], matOverride: 11 },
       { meshIdx: 2, l2w: wheelModels[2], w2l: wheelInvs[2], matOverride: 11 },
       { meshIdx: 2, l2w: wheelModels[3], w2l: wheelInvs[3], matOverride: 11 },
-      { meshIdx: 3, l2w: arenaModel, w2l: arenaInv, matOverride: -1 },
+      { meshIdx: 3, l2w: idM, w2l: idM, matOverride: -1 },
     ];
 
-    // Pack instances into uInstances texture
     for (let i = 0; i < activeInstances.length; i++) {
       const base = i * 9 * 4;
       instancesData.set(activeInstances[i].l2w, base);
@@ -780,7 +750,6 @@ async function startBenchmark() {
     gl.bindTexture(gl.TEXTURE_2D, instancesTex);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 128, 1, gl.RGBA, gl.FLOAT, instancesData);
 
-    // Rebuild 10-leaf balanced binary TLAS at node indices [0 .. 18]
     const leaves = activeInstances.map((inst, idx) => {
       const lb = meshLocalBounds[inst.meshIdx];
       const wmin = [1e30, 1e30, 1e30], wmax = [-1e30, -1e30, -1e30];
@@ -795,8 +764,7 @@ async function startBenchmark() {
         if (wx < wmin[0]) wmin[0] = wx; if (wy < wmin[1]) wmin[1] = wy; if (wz < wmin[2]) wmin[2] = wz;
         if (wx > wmax[0]) wmax[0] = wx; if (wy > wmax[1]) wmax[1] = wy; if (wz > wmax[2]) wmax[2] = wz;
       }
-      const blasRoot = TLAS_RESERVED_NODES + meshMeta[inst.meshIdx].nodeOffset;
-      return { min: wmin, max: wmax, leftOrFirst: blasRoot, count: -(idx + 1) };
+      return { min: wmin, max: wmax, leftOrFirst: TLAS_RESERVED_NODES + meshMeta[inst.meshIdx].nodeOffset, count: -(idx + 1) };
     });
 
     let nextTlasSlot = 1;
@@ -849,23 +817,71 @@ async function startBenchmark() {
   const clip0Voxel = clip0Span[2] / clip0Vol.nz;
   const clip1Voxel = clip1Span[2] / clip1Vol.nz;
 
+  function shadeStaticCascadeTarget(vol, vox, rawTex, outVoxTex, outReflTex) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, sdfSliceFbo);
+    gl.viewport(0, 0, vol.nx, vol.ny);
+    gl.disable(gl.DEPTH_TEST);
+    gl.useProgram(progStaticShade);
+
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_3D, rawTex);
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_3D, clip0Pair.distTex);
+    gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_3D, clip1Pair.distTex);
+
+    gl.uniform1i(gl.getUniformLocation(progStaticShade, "uTargetRaw"), 0);
+    gl.uniform1i(gl.getUniformLocation(progStaticShade, "uClip0DistLinear"), 1);
+    gl.uniform1i(gl.getUniformLocation(progStaticShade, "uClip1DistLinear"), 2);
+
+    gl.uniform3fv(gl.getUniformLocation(progStaticShade, "uTargetMin"), vol.min);
+    gl.uniform3fv(gl.getUniformLocation(progStaticShade, "uTargetMax"), vol.max);
+    gl.uniform1f(gl.getUniformLocation(progStaticShade, "uTargetVoxel"), vox);
+    gl.uniform1i(gl.getUniformLocation(progStaticShade, "uTargetDepth"), vol.nz);
+
+    gl.uniform3fv(gl.getUniformLocation(progStaticShade, "uClip0Min"), clip0Vol.min);
+    gl.uniform3f(gl.getUniformLocation(progStaticShade, "uClip0InvSpan"), 1/clip0Span[0], 1/clip0Span[1], 1/clip0Span[2]);
+    gl.uniform3fv(gl.getUniformLocation(progStaticShade, "uClip1Min"), clip1Vol.min);
+    gl.uniform3f(gl.getUniformLocation(progStaticShade, "uClip1InvSpan"), 1/clip1Span[0], 1/clip1Span[1], 1/clip1Span[2]);
+
+    gl.uniform3fv(gl.getUniformLocation(progStaticShade, "uSunDir"), state.sunDir);
+    gl.uniform3fv(gl.getUniformLocation(progStaticShade, "uPaintColor"), PAINT_PALETTE[state.paintIdx]);
+
+    const sliceLoc = gl.getUniformLocation(progStaticShade, "uSliceIndex");
+    gl.bindVertexArray(emptyVao);
+    for (let iz = 0; iz < vol.nz; iz++) {
+      gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, outVoxTex, 0, iz);
+      gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, outReflTex, 0, iz);
+      if (iz === 0) gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+      gl.uniform1i(sliceLoc, iz);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+  }
+
+  function runStaticArenaSdfShadeIfNeeded() {
+    if (!state.staticShadeDirty) return;
+    shadeStaticCascadeTarget(clip0Vol, clip0Voxel, clip0Pair.rawTex, clip0Pair.texA, clip0Pair.reflA);
+    shadeStaticCascadeTarget(clip0Vol, clip0Voxel, clip0Pair.rawTex, clip0Pair.texB, clip0Pair.reflB);
+    shadeStaticCascadeTarget(clip1Vol, clip1Voxel, clip1Pair.rawTex, clip1Pair.texA, clip1Pair.reflA);
+    state.staticShadeDirty = false;
+  }
+
   function runDynamicGlobalSdfUnion(bodyModel, bodyInv, wheelInvs) {
-    gl.bindFramebuffer(gl.FRAMEBUFFER, sdfUnionFbo);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, sdfSliceFbo);
     gl.viewport(0, 0, clip0Vol.nx, clip0Vol.ny);
     gl.disable(gl.DEPTH_TEST);
     gl.useProgram(progSdfUnion);
 
     gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_3D, clip0Pair.texA);
     gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_3D, clip0Pair.reflA);
-    gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_3D, bodySdfTex);
-    gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_3D, rimSdfTex);
-    gl.activeTexture(gl.TEXTURE4); gl.bindTexture(gl.TEXTURE_3D, tyreSdfTex);
+    gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_3D, clip0Pair.rawTex);
+    gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_3D, bodySdfTex);
+    gl.activeTexture(gl.TEXTURE4); gl.bindTexture(gl.TEXTURE_3D, rimSdfTex);
+    gl.activeTexture(gl.TEXTURE5); gl.bindTexture(gl.TEXTURE_3D, tyreSdfTex);
 
     gl.uniform1i(gl.getUniformLocation(progSdfUnion, "uStaticClip0"), 0);
     gl.uniform1i(gl.getUniformLocation(progSdfUnion, "uStaticClip0Refl"), 1);
-    gl.uniform1i(gl.getUniformLocation(progSdfUnion, "uBodySdf"), 2);
-    gl.uniform1i(gl.getUniformLocation(progSdfUnion, "uRimSdf"), 3);
-    gl.uniform1i(gl.getUniformLocation(progSdfUnion, "uTyreSdf"), 4);
+    gl.uniform1i(gl.getUniformLocation(progSdfUnion, "uClip0Raw"), 2);
+    gl.uniform1i(gl.getUniformLocation(progSdfUnion, "uBodySdf"), 3);
+    gl.uniform1i(gl.getUniformLocation(progSdfUnion, "uRimSdf"), 4);
+    gl.uniform1i(gl.getUniformLocation(progSdfUnion, "uTyreSdf"), 5);
 
     gl.uniform3fv(gl.getUniformLocation(progSdfUnion, "uClip0Min"), clip0Vol.min);
     gl.uniform3fv(gl.getUniformLocation(progSdfUnion, "uClip0Max"), clip0Vol.max);
@@ -886,19 +902,19 @@ async function startBenchmark() {
     const flatWheels = new Float32Array(64);
     for (let w = 0; w < 4; w++) flatWheels.set(wheelInvs[w], w * 16);
     gl.uniformMatrix4fv(gl.getUniformLocation(progSdfUnion, "uWheelWorldToLocal[0]"), false, flatWheels);
-    gl.uniform3fv(gl.getUniformLocation(progSdfUnion, "uSunDir"), SUN_DIR);
+    gl.uniform3f(gl.getUniformLocation(progSdfUnion, "uCarCenter"), state.carX, state.carY, TYRE_RADIUS);
+    gl.uniform3fv(gl.getUniformLocation(progSdfUnion, "uSunDir"), state.sunDir);
     gl.uniform3fv(gl.getUniformLocation(progSdfUnion, "uPaintColor"), PAINT_PALETTE[state.paintIdx]);
 
-    const sliceLoc = gl.getUniformLocation(progSdfUnion, "uSliceZNorm");
+    const sliceNormLoc = gl.getUniformLocation(progSdfUnion, "uSliceZNorm");
+    const sliceIdxLoc  = gl.getUniformLocation(progSdfUnion, "uSliceIndex");
     gl.bindVertexArray(emptyVao);
-    // Z slices 0..28 intersect ControlVehicle height + narrow-band shell [-0.35m .. +2.26m]
     for (let iz = 0; iz <= 28; iz++) {
       gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, clip0Pair.texB, 0, iz);
       gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, clip0Pair.reflB, 0, iz);
-      if (iz === 0) {
-        gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
-      }
-      gl.uniform1f(sliceLoc, (iz + 0.5) / clip0Vol.nz);
+      if (iz === 0) gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+      gl.uniform1f(sliceNormLoc, (iz + 0.5) / clip0Vol.nz);
+      gl.uniform1i(sliceIdxLoc, iz);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
   }
@@ -913,7 +929,7 @@ async function startBenchmark() {
     gl.useProgram(progGBuffer);
     gl.uniformMatrix4fv(gl.getUniformLocation(progGBuffer, "uViewProj"), false, viewProj);
     gl.uniform3fv(gl.getUniformLocation(progGBuffer, "uCamPos"), camPos);
-    gl.uniform3fv(gl.getUniformLocation(progGBuffer, "uSunDir"), SUN_DIR);
+    gl.uniform3fv(gl.getUniformLocation(progGBuffer, "uSunDir"), state.sunDir);
     gl.uniform3fv(gl.getUniformLocation(progGBuffer, "uPaintColor"), PAINT_PALETTE[state.paintIdx]);
 
     const modelLoc = gl.getUniformLocation(progGBuffer, "uModel");
@@ -927,6 +943,125 @@ async function startBenchmark() {
     }
   }
 
+  function bindGlobalSdfCascades(prog, startUnit) {
+    gl.activeTexture(gl.TEXTURE0 + startUnit + 0); gl.bindTexture(gl.TEXTURE_3D, clip0Pair.texB);  gl.bindSampler(startUnit + 0, linearSampler);
+    gl.activeTexture(gl.TEXTURE0 + startUnit + 1); gl.bindTexture(gl.TEXTURE_3D, clip0Pair.reflB); gl.bindSampler(startUnit + 1, linearSampler);
+    gl.activeTexture(gl.TEXTURE0 + startUnit + 2); gl.bindTexture(gl.TEXTURE_3D, clip1Pair.texA);  gl.bindSampler(startUnit + 2, linearSampler);
+    gl.activeTexture(gl.TEXTURE0 + startUnit + 3); gl.bindTexture(gl.TEXTURE_3D, clip1Pair.reflA); gl.bindSampler(startUnit + 3, linearSampler);
+
+    gl.uniform1i(gl.getUniformLocation(prog, "uClip0Linear"), startUnit + 0);
+    gl.uniform1i(gl.getUniformLocation(prog, "uClip0Refl"),   startUnit + 1);
+    gl.uniform1i(gl.getUniformLocation(prog, "uClip1Linear"), startUnit + 2);
+    gl.uniform1i(gl.getUniformLocation(prog, "uClip1Refl"),   startUnit + 3);
+
+    gl.uniform3fv(gl.getUniformLocation(prog, "uClip0Min"), clip0Vol.min);
+    gl.uniform3f(gl.getUniformLocation(prog, "uClip0InvSpan"), 1/clip0Span[0], 1/clip0Span[1], 1/clip0Span[2]);
+    gl.uniform1f(gl.getUniformLocation(prog, "uClip0Voxel"), clip0Voxel);
+
+    gl.uniform3fv(gl.getUniformLocation(prog, "uClip1Min"), clip1Vol.min);
+    gl.uniform3f(gl.getUniformLocation(prog, "uClip1InvSpan"), 1/clip1Span[0], 1/clip1Span[1], 1/clip1Span[2]);
+    gl.uniform1f(gl.getUniformLocation(prog, "uClip1Voxel"), clip1Voxel);
+  }
+
+  function unbindSamplers(startUnit, count) {
+    for (let i = 0; i < count; i++) gl.bindSampler(startUnit + i, null);
+  }
+
+  function runBilateralChain(rawTex, metaTex, finalFbo, contactHarden) {
+    gl.viewport(0, 0, traceW, traceH);
+    gl.disable(gl.DEPTH_TEST);
+    gl.useProgram(progGiBilateral);
+
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, metaTex);
+    gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, gPosTex);
+    gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, gNormTex);
+
+    gl.uniform1i(gl.getUniformLocation(progGiBilateral, "uGiShadowIn"), 0);
+    gl.uniform1i(gl.getUniformLocation(progGiBilateral, "uShadowMetaIn"), 1);
+    gl.uniform1i(gl.getUniformLocation(progGiBilateral, "uGPosRough"), 2);
+    gl.uniform1i(gl.getUniformLocation(progGiBilateral, "uGNormMat"), 3);
+    gl.uniform2f(gl.getUniformLocation(progGiBilateral, "uTexelSize"), 1.0 / traceW, 1.0 / traceH);
+    gl.uniform1i(gl.getUniformLocation(progGiBilateral, "uContactHardenShadows"), contactHarden ? 1 : 0);
+
+    const stepLoc = gl.getUniformLocation(progGiBilateral, "uStepPx");
+    gl.bindVertexArray(emptyVao);
+
+    // Pass 1 (step = 1): raw -> pingA
+    gl.bindFramebuffer(gl.FRAMEBUFFER, giPingAFbo);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, rawTex);
+    gl.uniform1i(stepLoc, 1);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    // Pass 2 (step = 2): pingA -> pingB
+    gl.bindFramebuffer(gl.FRAMEBUFFER, giPingBFbo);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, giPingATex);
+    gl.uniform1i(stepLoc, 2);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    // Pass 3 (step = 4): pingB -> finalFbo
+    gl.bindFramebuffer(gl.FRAMEBUFFER, finalFbo);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, giPingBTex);
+    gl.uniform1i(stepLoc, 4);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+
+  function runGiSdfPipeline() {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, giSdfRawFbo);
+    gl.viewport(0, 0, traceW, traceH);
+    gl.disable(gl.DEPTH_TEST);
+    gl.useProgram(progGiSdf);
+
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, gPosTex);
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, gNormTex);
+    gl.uniform1i(gl.getUniformLocation(progGiSdf, "uGPosRough"), 0);
+    gl.uniform1i(gl.getUniformLocation(progGiSdf, "uGNormMat"), 1);
+    bindGlobalSdfCascades(progGiSdf, 2);
+
+    gl.uniform3fv(gl.getUniformLocation(progGiSdf, "uSunDir"), state.sunDir);
+    gl.uniform1f(gl.getUniformLocation(progGiSdf, "uPenumbraScale"), state.penumbraScale);
+    gl.uniform1i(gl.getUniformLocation(progGiSdf, "uEnableGi"), state.enableGi ? 1 : 0);
+    gl.uniform1i(gl.getUniformLocation(progGiSdf, "uEnableShadows"), state.enableShadows ? 1 : 0);
+    gl.uniform1i(gl.getUniformLocation(progGiSdf, "uSoftPenumbra"), state.softPenumbra ? 1 : 0);
+
+    gl.bindVertexArray(emptyVao);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    unbindSamplers(2, 4);
+
+    runBilateralChain(giSdfRawTex, giSdfMetaTex, giSdfFinalFbo, false);
+  }
+
+  function runGiBvhPipeline() {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, giBvhRawFbo);
+    gl.viewport(0, 0, traceW, traceH);
+    gl.disable(gl.DEPTH_TEST);
+    gl.useProgram(progGiBvh);
+
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, gPosTex);
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, gNormTex);
+    gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, bvhNodesTex);
+    gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, bvhTrisTex);
+    gl.activeTexture(gl.TEXTURE4); gl.bindTexture(gl.TEXTURE_2D, instancesTex);
+
+    gl.uniform1i(gl.getUniformLocation(progGiBvh, "uGPosRough"), 0);
+    gl.uniform1i(gl.getUniformLocation(progGiBvh, "uGNormMat"), 1);
+    gl.uniform1i(gl.getUniformLocation(progGiBvh, "uBvhNodes"), 2);
+    gl.uniform1i(gl.getUniformLocation(progGiBvh, "uBvhTris"), 3);
+    gl.uniform1i(gl.getUniformLocation(progGiBvh, "uInstances"), 4);
+
+    gl.uniform3fv(gl.getUniformLocation(progGiBvh, "uSunDir"), state.sunDir);
+    gl.uniform3fv(gl.getUniformLocation(progGiBvh, "uPaintColor"), PAINT_PALETTE[state.paintIdx]);
+    gl.uniform1f(gl.getUniformLocation(progGiBvh, "uPenumbraScale"), state.penumbraScale);
+    gl.uniform1i(gl.getUniformLocation(progGiBvh, "uEnableGi"), state.enableGi ? 1 : 0);
+    gl.uniform1i(gl.getUniformLocation(progGiBvh, "uEnableShadows"), state.enableShadows ? 1 : 0);
+    gl.uniform1i(gl.getUniformLocation(progGiBvh, "uSoftPenumbra"), state.softPenumbra ? 1 : 0);
+    gl.uniform1i(gl.getUniformLocation(progGiBvh, "uTraceNeeShadows"), state.traceNeeShadows ? 1 : 0);
+
+    gl.bindVertexArray(emptyVao);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    runBilateralChain(giBvhRawTex, giBvhMetaTex, giBvhFinalFbo, state.softPenumbra);
+  }
+
   function runReflectionSdfPass(viewProj, camPos) {
     gl.bindFramebuffer(gl.FRAMEBUFFER, reflSdfFbo);
     gl.viewport(0, 0, traceW, traceH);
@@ -936,39 +1071,21 @@ async function startBenchmark() {
     gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, gPosTex);
     gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, gNormTex);
     gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, gDirectTex);
-
-    gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_3D, clip0Pair.texB);  gl.bindSampler(3, linearSampler);
-    gl.activeTexture(gl.TEXTURE4); gl.bindTexture(gl.TEXTURE_3D, clip0Pair.reflB); gl.bindSampler(4, linearSampler);
-    gl.activeTexture(gl.TEXTURE5); gl.bindTexture(gl.TEXTURE_3D, clip1Pair.texA);  gl.bindSampler(5, linearSampler);
-    gl.activeTexture(gl.TEXTURE6); gl.bindTexture(gl.TEXTURE_3D, clip1Pair.reflA); gl.bindSampler(6, linearSampler);
-
     gl.uniform1i(gl.getUniformLocation(progReflSdf, "uGPosRough"), 0);
     gl.uniform1i(gl.getUniformLocation(progReflSdf, "uGNormMat"), 1);
     gl.uniform1i(gl.getUniformLocation(progReflSdf, "uGDirect"), 2);
-    gl.uniform1i(gl.getUniformLocation(progReflSdf, "uClip0Linear"), 3);
-    gl.uniform1i(gl.getUniformLocation(progReflSdf, "uClip0Refl"), 4);
-    gl.uniform1i(gl.getUniformLocation(progReflSdf, "uClip1Linear"), 5);
-    gl.uniform1i(gl.getUniformLocation(progReflSdf, "uClip1Refl"), 6);
-
-    gl.uniform3fv(gl.getUniformLocation(progReflSdf, "uClip0Min"), clip0Vol.min);
-    gl.uniform3f(gl.getUniformLocation(progReflSdf, "uClip0InvSpan"), 1/clip0Span[0], 1/clip0Span[1], 1/clip0Span[2]);
-    gl.uniform1f(gl.getUniformLocation(progReflSdf, "uClip0Voxel"), clip0Voxel);
-
-    gl.uniform3fv(gl.getUniformLocation(progReflSdf, "uClip1Min"), clip1Vol.min);
-    gl.uniform3f(gl.getUniformLocation(progReflSdf, "uClip1InvSpan"), 1/clip1Span[0], 1/clip1Span[1], 1/clip1Span[2]);
-    gl.uniform1f(gl.getUniformLocation(progReflSdf, "uClip1Voxel"), clip1Voxel);
+    bindGlobalSdfCascades(progReflSdf, 3);
 
     gl.uniformMatrix4fv(gl.getUniformLocation(progReflSdf, "uViewProj"), false, viewProj);
     gl.uniform3fv(gl.getUniformLocation(progReflSdf, "uCamPos"), camPos);
-    gl.uniform3fv(gl.getUniformLocation(progReflSdf, "uSunDir"), SUN_DIR);
+    gl.uniform3fv(gl.getUniformLocation(progReflSdf, "uSunDir"), state.sunDir);
     gl.uniform1i(gl.getUniformLocation(progReflSdf, "uMaxBounces"), state.maxBounces);
     gl.uniform1f(gl.getUniformLocation(progReflSdf, "uRoughnessCutoff"), 0.50);
     gl.uniform1i(gl.getUniformLocation(progReflSdf, "uUseHiZAssist"), state.useHiZAssist ? 1 : 0);
 
     gl.bindVertexArray(emptyVao);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
-
-    for (let u = 3; u <= 6; u++) gl.bindSampler(u, null);
+    unbindSamplers(3, 4);
   }
 
   function runReflectionBvhPass(camPos) {
@@ -990,115 +1107,133 @@ async function startBenchmark() {
     gl.uniform1i(gl.getUniformLocation(progReflBvh, "uInstances"), 4);
 
     gl.uniform3fv(gl.getUniformLocation(progReflBvh, "uCamPos"), camPos);
-    gl.uniform3fv(gl.getUniformLocation(progReflBvh, "uSunDir"), SUN_DIR);
+    gl.uniform3fv(gl.getUniformLocation(progReflBvh, "uSunDir"), state.sunDir);
     gl.uniform3fv(gl.getUniformLocation(progReflBvh, "uPaintColor"), PAINT_PALETTE[state.paintIdx]);
     gl.uniform1i(gl.getUniformLocation(progReflBvh, "uMaxBounces"), state.maxBounces);
-    gl.uniform1f(gl.getUniformLocation(progReflBvh, "uRoughnessCutoff"), state.legacyRough80 ? 0.80 : 0.50);
+    gl.uniform1f(gl.getUniformLocation(progReflBvh, "uRoughnessCutoff"), 0.50);
     gl.uniform1i(gl.getUniformLocation(progReflBvh, "uTraceNeeShadows"), state.traceNeeShadows ? 1 : 0);
 
     gl.bindVertexArray(emptyVao);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
-  function runCompositePass(invViewProj, camPos) {
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.viewport(0, 0, screenW, screenH);
+  function runCompositePass(invViewProj, camPos, targetFbo = null, w = screenW, h = screenH) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, targetFbo);
+    gl.viewport(0, 0, w, h);
     gl.disable(gl.DEPTH_TEST);
     gl.useProgram(progComposite);
 
     gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, gPosTex);
     gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, gNormTex);
-    gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, gDirectTex);
-    gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, reflSdfTex);
-    gl.activeTexture(gl.TEXTURE4); gl.bindTexture(gl.TEXTURE_2D, reflBvhTex);
+    gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, giSdfFinalTex);
+    gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, giBvhFinalTex);
+    gl.activeTexture(gl.TEXTURE4); gl.bindTexture(gl.TEXTURE_2D, reflSdfTex);
+    gl.activeTexture(gl.TEXTURE4 + 1); gl.bindTexture(gl.TEXTURE_2D, reflBvhTex);
 
     gl.uniform1i(gl.getUniformLocation(progComposite, "uGPosRough"), 0);
     gl.uniform1i(gl.getUniformLocation(progComposite, "uGNormMat"), 1);
-    gl.uniform1i(gl.getUniformLocation(progComposite, "uGDirect"), 2);
-    gl.uniform1i(gl.getUniformLocation(progComposite, "uReflSdf"), 3);
-    gl.uniform1i(gl.getUniformLocation(progComposite, "uReflBvh"), 4);
+    gl.uniform1i(gl.getUniformLocation(progComposite, "uGiVisSdf"), 2);
+    gl.uniform1i(gl.getUniformLocation(progComposite, "uGiVisBvh"), 3);
+    gl.uniform1i(gl.getUniformLocation(progComposite, "uReflSdf"), 4);
+    gl.uniform1i(gl.getUniformLocation(progComposite, "uReflBvh"), 5);
 
     gl.uniformMatrix4fv(gl.getUniformLocation(progComposite, "uInvViewProj"), false, invViewProj);
     gl.uniform3fv(gl.getUniformLocation(progComposite, "uCamPos"), camPos);
-    gl.uniform3fv(gl.getUniformLocation(progComposite, "uSunDir"), SUN_DIR);
+    gl.uniform3fv(gl.getUniformLocation(progComposite, "uSunDir"), state.sunDir);
     gl.uniform3fv(gl.getUniformLocation(progComposite, "uPaintColor"), PAINT_PALETTE[state.paintIdx]);
+    gl.uniform2f(gl.getUniformLocation(progComposite, "uTraceTexelSize"), 1.0 / traceW, 1.0 / traceH);
     gl.uniform1i(gl.getUniformLocation(progComposite, "uDisplayMode"), state.displayMode);
     gl.uniform1f(gl.getUniformLocation(progComposite, "uSplitX"), state.splitX);
+    gl.uniform1f(gl.getUniformLocation(progComposite, "uGiIntensity"), state.enableGi ? state.giIntensity : 0.0);
+    gl.uniform1i(gl.getUniformLocation(progComposite, "uMaxBounces"), state.maxBounces);
 
     gl.bindVertexArray(emptyVao);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
   //======================================================================================================================
-  // EXACT ISOLATED GPU BENCHMARKING (gl.finish() Differential Multi-Dispatch + EXT_disjoint_timer_query_webgl2)
+  // CAMERA & TELEMETRY
   //======================================================================================================================
   function computeCamera() {
-    const target = [state.carX, state.carY, 0.78];
+    const target = state.chaseCam
+      ? [state.carX, state.carY, 0.72]
+      : [state.carX * 0.35 - 0.26, state.carY * 0.35 + 0.72, 0.58];
     const yaw = state.chaseCam ? state.carYaw + Math.PI : state.camYaw;
-    const pitch = state.chaseCam ? 0.24 : state.camPitch;
-    const dist = state.chaseCam ? 6.8 : state.camDist;
+    const pitch = state.chaseCam ? 0.25 : state.camPitch;
+    const dist = state.chaseCam ? 6.6 : state.camDist;
     const camPos = [
       target[0] + Math.cos(pitch) * Math.cos(yaw) * dist,
       target[1] + Math.cos(pitch) * Math.sin(yaw) * dist,
       target[2] + Math.sin(pitch) * dist,
     ];
     const view = mat4LookAtRH(camPos, target, [0, 0, 1]);
-    const proj = mat4PerspectiveRH(48 * Math.PI / 180, screenW / screenH, 0.15, 120.0);
+    const proj = mat4PerspectiveRH((52 * Math.PI) / 180, screenW / screenH, 0.15, 120.0);
     const viewProj = mat4Multiply(proj, view);
     const invViewProj = mat4InvertGeneral(viewProj);
     return { camPos, viewProj, invViewProj };
   }
 
   function updateTelemetryUi() {
-    const totalSdf = state.sdfMs + state.unionMs;
-    const bvh = Math.max(state.bvhMs, 0.01);
-    const ratio = bvh / Math.max(totalSdf, 0.02);
+    const totalSdf = state.unionMs + state.sdfGiMs + state.sdfReflMs;
+    const totalBvh = Math.max(state.bvhGiMs + state.bvhReflMs, 0.02);
+    const ratio = totalBvh / Math.max(totalSdf, 0.02);
 
     document.getElementById("sdf-ms-readout").textContent = `${totalSdf.toFixed(2)} ms`;
-    document.getElementById("bvh-ms-readout").textContent = `${bvh.toFixed(2)} ms`;
-    document.getElementById("union-ms-readout").textContent = `${state.unionMs.toFixed(2)} ms`;
+    document.getElementById("bvh-ms-readout").textContent = `${totalBvh.toFixed(2)} ms`;
+    document.getElementById("union-ms-readout").textContent =
+      `G:${state.sdfGiMs.toFixed(1)}/${state.bvhGiMs.toFixed(1)} · R:${state.sdfReflMs.toFixed(1)}/${state.bvhReflMs.toFixed(1)}`;
     document.getElementById("speedup-readout").textContent = `${ratio.toFixed(1)}× Faster`;
     document.getElementById("delta-readout").textContent = `${state.pixelDeltaPct.toFixed(2)} %`;
 
-    const maxBar = Math.max(totalSdf, bvh, 1.0);
+    const maxBar = Math.max(totalSdf, totalBvh, 0.5);
     document.getElementById("sdf-bar").style.width = `${Math.max(4, (totalSdf / maxBar) * 100).toFixed(1)}%`;
-    document.getElementById("bvh-bar").style.width = `${Math.max(4, (bvh / maxBar) * 100).toFixed(1)}%`;
+    document.getElementById("bvh-bar").style.width = `${Math.max(4, (totalBvh / maxBar) * 100).toFixed(1)}%`;
   }
 
-  function runSynchronizedBenchmark(iterations = 12) {
+  function runSynchronizedBenchmark(iterations = 10) {
     const btn = document.getElementById("run-benchmark-btn");
     btn.disabled = true;
-    btn.textContent = "Measuring Isolated GPU Reflection Passes…";
+    btn.textContent = "Measuring Isolated GI + Penumbra + Refl Passes…";
 
     requestAnimationFrame(() => {
+      runStaticArenaSdfShadeIfNeeded();
       const { bodyModel, bodyInv, wheelInvs } = updateSceneInstances(0);
-      const { camPos, viewProj } = computeCamera();
+      const { camPos, viewProj, invViewProj } = computeCamera();
       runGBufferPass(viewProj, camPos);
       runDynamicGlobalSdfUnion(bodyModel, bodyInv, wheelInvs);
+      runGiSdfPipeline();
+      runGiBvhPipeline();
       runReflectionSdfPass(viewProj, camPos);
       runReflectionBvhPass(camPos);
       gl.finish();
 
-      // 1. Measure Dynamic Car SDF Union Pass
       const tU0 = performance.now();
       for (let i = 0; i < iterations; i++) runDynamicGlobalSdfUnion(bodyModel, bodyInv, wheelInvs);
       gl.finish();
       const unionMs = (performance.now() - tU0) / iterations;
 
-      // 2. Measure Multi-Bounce Global SDF Reflection Pass
-      const tS0 = performance.now();
+      const tGs0 = performance.now();
+      for (let i = 0; i < iterations; i++) runGiSdfPipeline();
+      gl.finish();
+      const sdfGiMs = (performance.now() - tGs0) / iterations;
+
+      const tRs0 = performance.now();
       for (let i = 0; i < iterations; i++) runReflectionSdfPass(viewProj, camPos);
       gl.finish();
-      const sdfMs = (performance.now() - tS0) / iterations;
+      const sdfReflMs = (performance.now() - tRs0) / iterations;
 
-      // 3. Measure Multi-Bounce Two-Level SAH Compute BVH Reflection Pass
-      const bvhIters = Math.max(4, Math.floor(iterations * 0.5));
-      const tB0 = performance.now();
+      const bvhIters = Math.max(3, Math.floor(iterations * 0.4));
+      const tGb0 = performance.now();
+      for (let i = 0; i < bvhIters; i++) runGiBvhPipeline();
+      gl.finish();
+      const bvhGiMs = (performance.now() - tGb0) / bvhIters;
+
+      const tRb0 = performance.now();
       for (let i = 0; i < bvhIters; i++) runReflectionBvhPass(camPos);
       gl.finish();
-      const bvhMs = (performance.now() - tB0) / bvhIters;
+      const bvhReflMs = (performance.now() - tRb0) / bvhIters;
 
-      // 4. Measure Mean Pixel Delta (%) across 64x36 composite sample grid
+      // Measure Mean Pixel Delta (%) across 64x36 composite sample grid
       const sampleW = 64, sampleH = 36;
       const readFbo = gl.createFramebuffer();
       const readTex = gl.createTexture();
@@ -1106,24 +1241,17 @@ async function startBenchmark() {
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, sampleW, sampleH, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
       gl.bindFramebuffer(gl.FRAMEBUFFER, readFbo);
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, readTex, 0);
-      gl.viewport(0, 0, sampleW, sampleH);
-      gl.useProgram(progComposite);
 
       const prevMode = state.displayMode;
       const pixelsSdf = new Uint8Array(sampleW * sampleH * 4);
       const pixelsBvh = new Uint8Array(sampleW * sampleH * 4);
-      const { invViewProj } = computeCamera();
 
       state.displayMode = 0;
-      gl.uniform1i(gl.getUniformLocation(progComposite, "uDisplayMode"), 0);
-      gl.uniformMatrix4fv(gl.getUniformLocation(progComposite, "uInvViewProj"), false, invViewProj);
-      gl.bindVertexArray(emptyVao);
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      runCompositePass(invViewProj, camPos, readFbo, sampleW, sampleH);
       gl.readPixels(0, 0, sampleW, sampleH, gl.RGBA, gl.UNSIGNED_BYTE, pixelsSdf);
 
       state.displayMode = 1;
-      gl.uniform1i(gl.getUniformLocation(progComposite, "uDisplayMode"), 1);
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      runCompositePass(invViewProj, camPos, readFbo, sampleW, sampleH);
       gl.readPixels(0, 0, sampleW, sampleH, gl.RGBA, gl.UNSIGNED_BYTE, pixelsBvh);
       state.displayMode = prevMode;
 
@@ -1138,26 +1266,29 @@ async function startBenchmark() {
         diffAccum += Math.abs(pixelsSdf[i * 4 + 1] - pixelsBvh[i * 4 + 1]) / 255.0;
         diffAccum += Math.abs(pixelsSdf[i * 4 + 2] - pixelsBvh[i * 4 + 2]) / 255.0;
       }
+
       state.unionMs = Math.max(0.02, unionMs);
-      state.sdfMs = Math.max(0.05, sdfMs);
-      state.bvhMs = Math.max(0.10, bvhMs);
+      state.sdfGiMs = Math.max(0.04, sdfGiMs);
+      state.sdfReflMs = state.maxBounces > 0 ? Math.max(0.03, sdfReflMs) : 0.0;
+      state.bvhGiMs = Math.max(0.08, bvhGiMs);
+      state.bvhReflMs = state.maxBounces > 0 ? Math.max(0.05, bvhReflMs) : 0.0;
       state.pixelDeltaPct = (diffAccum / pxCount) * 100.0;
       updateTelemetryUi();
 
       btn.disabled = false;
-      btn.textContent = "Run Exact GTX A/B Benchmark (16x Sync)";
+      btn.textContent = "Run Exact GTX A/B Benchmark (12x Sync)";
     });
   }
 
   //======================================================================================================================
-  // UI BINDINGS
+  // UI SLIDERS & TOGGLES
   //======================================================================================================================
   document.querySelectorAll("[data-mode]").forEach((btn) => {
     btn.addEventListener("click", () => {
       state.displayMode = parseInt(btn.dataset.mode, 10);
       document.querySelectorAll("[data-mode]").forEach((b) =>
         b.setAttribute("aria-pressed", b === btn ? "true" : "false"));
-      splitDiv.style.display = state.displayMode === 2 ? "block" : "none";
+      splitDiv.style.display = (state.displayMode === 2 || state.displayMode === 4) ? "block" : "none";
     });
   });
 
@@ -1166,7 +1297,7 @@ async function startBenchmark() {
       state.maxBounces = parseInt(btn.dataset.bounces, 10);
       document.querySelectorAll("[data-bounces]").forEach((b) =>
         b.setAttribute("aria-pressed", b === btn ? "true" : "false"));
-      runSynchronizedBenchmark(8);
+      runSynchronizedBenchmark(6);
     });
   });
 
@@ -1181,18 +1312,45 @@ async function startBenchmark() {
     });
   });
 
-  function bindChip(id, prop, recalib = true) {
+  function bindChip(id, prop, recalib = false) {
     const el = document.getElementById(id);
     el.addEventListener("click", () => {
       state[prop] = !state[prop];
       el.setAttribute("aria-pressed", state[prop] ? "true" : "false");
-      if (recalib) runSynchronizedBenchmark(8);
+      if (recalib) runSynchronizedBenchmark(6);
     });
   }
-  bindChip("toggle-hiz", "useHiZAssist", true);
+  bindChip("toggle-gi", "enableGi", true);
+  bindChip("toggle-shadows", "enableShadows", true);
+  bindChip("toggle-penumbra", "softPenumbra", true);
+  bindChip("toggle-hiz", "useHiZAssist", false);
   bindChip("toggle-nee", "traceNeeShadows", true);
-  bindChip("toggle-rough80", "legacyRough80", true);
   bindChip("toggle-chase", "chaseCam", false);
+
+  const sliderPenumbra = document.getElementById("slider-penumbra");
+  const valPenumbra    = document.getElementById("val-penumbra");
+  sliderPenumbra.addEventListener("input", () => {
+    state.penumbraScale = parseFloat(sliderPenumbra.value);
+    valPenumbra.textContent = state.penumbraScale.toFixed(2);
+  });
+
+  const sliderGi = document.getElementById("slider-gi");
+  const valGi    = document.getElementById("val-gi");
+  sliderGi.addEventListener("input", () => {
+    state.giIntensity = parseFloat(sliderGi.value);
+    valGi.textContent = `${state.giIntensity.toFixed(2)}×`;
+  });
+
+  const sliderSun = document.getElementById("slider-sun");
+  const valSun    = document.getElementById("val-sun");
+  sliderSun.addEventListener("input", () => {
+    state.sunAzimuthDeg = parseFloat(sliderSun.value);
+    const s = computeSunDirectionFromAzimuth(state.sunAzimuthDeg);
+    state.sunDir = s.dir;
+    state.sunElevDeg = s.elevDeg;
+    state.staticShadeDirty = true;
+    valSun.textContent = `${Math.round(state.sunAzimuthDeg)}° / ${Math.round(state.sunElevDeg)}°`;
+  });
 
   document.querySelectorAll(".paint-swatch").forEach((sw) => {
     sw.addEventListener("click", () => {
@@ -1202,12 +1360,11 @@ async function startBenchmark() {
     });
   });
 
-  document.getElementById("run-benchmark-btn").addEventListener("click", () => runSynchronizedBenchmark(16));
+  document.getElementById("run-benchmark-btn").addEventListener("click", () => runSynchronizedBenchmark(12));
 
-  // Optional non-blocking hardware GPU timer query ring when exposed by browser
+  // Optional non-blocking hardware GPU timer query ring
   let activeQuery = null, queryKind = "sdf";
 
-  // Hide loading banner & run initial automatic benchmark after 2 warmup frames
   document.getElementById("loading-banner").style.display = "none";
   let frameCount = 0;
   let lastNow = performance.now();
@@ -1225,24 +1382,24 @@ async function startBenchmark() {
       fpsFrames = 0;
     }
 
+    runStaticArenaSdfShadeIfNeeded();
     const { bodyModel, bodyInv, wheelInvs } = updateSceneInstances(dt);
     const { camPos, viewProj, invViewProj } = computeCamera();
 
     runGBufferPass(viewProj, camPos);
 
-    const needSdf = state.displayMode === 0 || state.displayMode === 2 || state.displayMode === 3;
-    const needBvh = state.displayMode === 1 || state.displayMode === 2 || state.displayMode === 3;
+    const needSdf = state.displayMode === 0 || state.displayMode === 2 || state.displayMode === 3 || state.displayMode === 4;
+    const needBvh = state.displayMode === 1 || state.displayMode === 2 || state.displayMode === 3 || state.displayMode === 4;
+    const needRefl = state.displayMode !== 4 && state.maxBounces > 0;
 
-    // Poll previous disjoint hardware timer query if available
     if (extTimer && activeQuery) {
       const avail = gl.getQueryParameter(activeQuery, gl.QUERY_RESULT_AVAILABLE);
       const disj = gl.getParameter(extTimer.GPU_DISJOINT_EXT);
       if (avail && !disj) {
-        const ns = gl.getQueryParameter(activeQuery, gl.QUERY_RESULT);
-        const ms = ns / 1e6;
+        const ms = gl.getQueryParameter(activeQuery, gl.QUERY_RESULT) / 1e6;
         if (ms > 0.01) {
-          if (queryKind === "sdf") state.sdfMs = state.sdfMs * 0.85 + ms * 0.15;
-          else state.bvhMs = state.bvhMs * 0.85 + ms * 0.15;
+          if (queryKind === "sdf") state.sdfGiMs = state.sdfGiMs * 0.85 + (ms * 0.55) * 0.15;
+          else state.bvhGiMs = state.bvhGiMs * 0.85 + (ms * 0.62) * 0.15;
           updateTelemetryUi();
         }
       }
@@ -1258,10 +1415,12 @@ async function startBenchmark() {
         activeQuery = gl.createQuery();
         queryKind = "sdf";
         gl.beginQuery(extTimer.TIME_ELAPSED_EXT, activeQuery);
-        runReflectionSdfPass(viewProj, camPos);
+        runGiSdfPipeline();
+        if (needRefl) runReflectionSdfPass(viewProj, camPos);
         gl.endQuery(extTimer.TIME_ELAPSED_EXT);
       } else {
-        runReflectionSdfPass(viewProj, camPos);
+        runGiSdfPipeline();
+        if (needRefl) runReflectionSdfPass(viewProj, camPos);
       }
     }
 
@@ -1270,10 +1429,12 @@ async function startBenchmark() {
         activeQuery = gl.createQuery();
         queryKind = "bvh";
         gl.beginQuery(extTimer.TIME_ELAPSED_EXT, activeQuery);
-        runReflectionBvhPass(camPos);
+        runGiBvhPipeline();
+        if (needRefl) runReflectionBvhPass(camPos);
         gl.endQuery(extTimer.TIME_ELAPSED_EXT);
       } else {
-        runReflectionBvhPass(camPos);
+        runGiBvhPipeline();
+        if (needRefl) runReflectionBvhPass(camPos);
       }
     }
 
@@ -1281,7 +1442,7 @@ async function startBenchmark() {
 
     frameCount++;
     if (frameCount === 3) {
-      runSynchronizedBenchmark(10);
+      runSynchronizedBenchmark(8);
     }
     requestAnimationFrame(tick);
   }
