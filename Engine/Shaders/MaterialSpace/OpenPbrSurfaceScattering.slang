@@ -25,45 +25,45 @@ static const uint FlagThinWalledSlab         = 1u << 16u;
 // Exact 128-byte (32 x uint32) GPU bindless material register matching C++20 CompactMaterialEntry byte-for-byte
 public struct GpuCompactMaterialEntry
 {
-    uint  ActiveLobeMask;
-    uint  BaseColorRgHalf;
-    uint  BaseColorBAndWeightHalf;
-    uint  DiffuseAndSpecRoughnessHalf;
+    public uint  ActiveLobeMask;
+    public uint  BaseColorRgHalf;
+    public uint  BaseColorBAndWeightHalf;
+    public uint  DiffuseAndSpecRoughnessHalf;
 
-    uint  MetalnessAndSpecWeightHalf;
-    uint  AnisotropyAndRotationHalf;
-    uint  DielectricIorAndEdgeTintRHalf;
-    uint  EdgeTintGbHalf;
+    public uint  MetalnessAndSpecWeightHalf;
+    public uint  AnisotropyAndRotationHalf;
+    public uint  DielectricIorAndEdgeTintRHalf;
+    public uint  EdgeTintGbHalf;
 
-    uint  CoatWeightAndRoughnessHalf;
-    uint  CoatAnisoAndIorHalf;
-    uint  CoatTintRgHalf;
-    uint  CoatTintBAndThicknessHalf;
+    public uint  CoatWeightAndRoughnessHalf;
+    public uint  CoatAnisoAndIorHalf;
+    public uint  CoatTintRgHalf;
+    public uint  CoatTintBAndThicknessHalf;
 
-    float ThinFilmThicknessNanometers;
-    uint  ThinFilmWeightAndIorHalf;
-    uint  FlakeCovAndRoughHalf;
-    uint  FlakeSpreadAndLogDensityHalf;
+    public float ThinFilmThicknessNanometers;
+    public uint  ThinFilmWeightAndIorHalf;
+    public uint  FlakeCovAndRoughHalf;
+    public uint  FlakeSpreadAndLogDensityHalf;
 
-    uint  FlakePrimaryRgHalf;
-    uint  FlakePrimaryBAndBurialHalf;
-    uint  FlakeHorizonRgHalf;
-    uint  FlakeHorizonBAndTransWeightHalf;
+    public uint  FlakePrimaryRgHalf;
+    public uint  FlakePrimaryBAndBurialHalf;
+    public uint  FlakeHorizonRgHalf;
+    public uint  FlakeHorizonBAndTransWeightHalf;
 
-    uint  AbbeAndVolumeAnisoHalf;
-    uint  AttenuationRgHalf;
-    uint  AttenuationBAndDistHalf;
-    uint  SubsurfaceWeightAndAnisoHalf;
+    public uint  AbbeAndVolumeAnisoHalf;
+    public uint  AttenuationRgHalf;
+    public uint  AttenuationBAndDistHalf;
+    public uint  SubsurfaceWeightAndAnisoHalf;
 
-    uint  SubsurfaceColorRgHalf;
-    uint  SubsurfaceColorBAndMfpXHalf;
-    uint  SubsurfaceMfpYzHalf;
-    uint  SheenWeightRoughAndRgHalf;
+    public uint  SubsurfaceColorRgHalf;
+    public uint  SubsurfaceColorBAndMfpXHalf;
+    public uint  SubsurfaceMfpYzHalf;
+    public uint  SheenWeightRoughAndRgHalf;
 
-    uint  SheenBAndFiberParamsPacked;
-    uint  FiberPigmentAndPorosityPacked;
-    uint  PorosityAndKelvinHalf;
-    uint  EmissionNitsHalfAndChannelMask;
+    public uint  SheenBAndFiberParamsPacked;
+    public uint  FiberPigmentAndPorosityPacked;
+    public uint  PorosityAndKelvinHalf;
+    public uint  EmissionNitsHalfAndChannelMask;
 };
 
 float2 UnpackHalf2(uint Word)

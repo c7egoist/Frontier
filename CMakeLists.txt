@@ -254,15 +254,19 @@ set(FRONTIER_MODULAR_SHADER_DIR "${CMAKE_SOURCE_DIR}/Engine/Shaders")
 
 function(frontier_compile_modular_slang_shader DOMAIN_REL_PATH ENTRY_NAME SHADER_UNIT OUT_SPV_NAME)
     set(OUT_SPV "${FRONTIER_COMPILED_SHADER_DIR}/${OUT_SPV_NAME}")
-    file(GLOB DOMAIN_SLANG_DEPS "${FRONTIER_MODULAR_SHADER_DIR}/MaterialSpace/*.slang")
+    file(GLOB DOMAIN_SLANG_DEPS
+        "${FRONTIER_MODULAR_SHADER_DIR}/MaterialSpace/*.slang"
+        "${FRONTIER_MODULAR_SHADER_DIR}/Visibility/*.slang"
+    )
     add_custom_command(
         OUTPUT "${OUT_SPV}"
         COMMAND "${FRONTIER_SLANGC_BIN}"
             "${FRONTIER_MODULAR_SHADER_DIR}/${DOMAIN_REL_PATH}"
             -I "${FRONTIER_MODULAR_SHADER_DIR}/MaterialSpace"
+            -I "${FRONTIER_MODULAR_SHADER_DIR}/Visibility"
             -I "${FRONTIER_MODULAR_SHADER_DIR}"
             -target spirv
-            -profile spirv_1_3+spvGroupNonUniformArithmetic
+            -profile spirv_1_3+spvGroupNonUniformArithmetic+spvInt64Atomics
             -emit-spirv-directly
             -fvk-use-entrypoint-name
             -matrix-layout-row-major
@@ -279,8 +283,14 @@ function(frontier_compile_modular_slang_shader DOMAIN_REL_PATH ENTRY_NAME SHADER
     set(FRONTIER_SPV_OUTPUTS ${FRONTIER_SPV_OUTPUTS} "${OUT_SPV}" PARENT_SCOPE)
 endfunction()
 
-frontier_compile_modular_slang_shader(MaterialSpace/BounceLayerSummary.slang        BounceSummaryComputeEntry compute BounceLayerSummary.comp.spv)
-frontier_compile_modular_slang_shader(MaterialSpace/OpenPbrSurfaceScattering.slang  ComputeEntry              compute OpenPbrSurfaceScattering.comp.spv)
+frontier_compile_modular_slang_shader(MaterialSpace/BounceLayerSummary.slang              BounceSummaryComputeEntry   compute  BounceLayerSummary.comp.spv)
+frontier_compile_modular_slang_shader(MaterialSpace/OpenPbrSurfaceScattering.slang        ComputeEntry                compute  OpenPbrSurfaceScattering.comp.spv)
+frontier_compile_modular_slang_shader(Visibility/DepthPyramidDownsample.slang             DepthPyramidComputeEntry    compute  DepthPyramidDownsample.comp.spv)
+frontier_compile_modular_slang_shader(Visibility/ClusterVisibilityCull.slang              ClusterCullComputeEntry     compute  ClusterVisibilityCull.comp.spv)
+frontier_compile_modular_slang_shader(Visibility/HardwareVisibilityRasterization.slang    VisibilityVertexEntry       vertex   HardwareVisibilityRasterization.vert.spv)
+frontier_compile_modular_slang_shader(Visibility/HardwareVisibilityRasterization.slang    VisibilityFragmentEntry     fragment HardwareVisibilityRasterization.frag.spv)
+frontier_compile_modular_slang_shader(Visibility/MicroFaceSoftwareRasterization.slang     MicroFaceComputeEntry       compute  MicroFaceSoftwareRasterization.comp.spv)
+frontier_compile_modular_slang_shader(Visibility/AnalyticBarycentricResolve.slang         AnalyticResolveComputeEntry compute  AnalyticBarycentricResolve.comp.spv)
 
 add_custom_target(FrontierShaders DEPENDS ${FRONTIER_SPV_OUTPUTS})
 
@@ -295,6 +305,10 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/MaterialSpace/EnergyCompensation/SheenCosineIntegral.cpp
     Engine/MaterialSpace/Baking/ProceduralChannelBaker.cpp
     Engine/MaterialSpace/Baking/MaterialSpecimenRasterizer.cpp
+    Engine/GeometricRaster/Visibility/DepthPyramidSequence.cpp
+    Engine/GeometricRaster/Visibility/ClusterCullEncoder.cpp
+    Engine/GeometricRaster/Visibility/VisibilityClusterRasterization.cpp
+    Engine/GeometricRaster/Visibility/VisibilityMaterialResolve.cpp
     Engine/GeometrySpace/Network/PolygonNetwork.cpp
     Engine/GeometrySpace/Network/GeometryInstance.cpp
     Engine/GeometrySpace/Network/FacePartitionRegister.cpp
@@ -468,6 +482,7 @@ if(BUILD_TESTING)
     frontier_register_exhibit(GeometryNetworkValidation      Exhibits/GeometryNetworkValidation.cpp)
     frontier_register_exhibit(GeometryCompletionValidation   Exhibits/GeometryCompletionValidation.cpp)
     frontier_register_exhibit(MaterialScatteringValidation   Exhibits/MaterialScatteringValidation.cpp)
+    frontier_register_exhibit(VisibilityRasterValidation     Exhibits/VisibilityRasterValidation.cpp)
     frontier_register_exhibit(UVRasterPickingGizmoValidation    Exhibits/UVRasterPickingGizmoValidation.cpp)
     frontier_register_exhibit(UVWorkspaceUIValidation           Exhibits/UVWorkspaceUIValidation.cpp)
     frontier_register_exhibit(UVParameterizationValidation      Exhibits/UVParameterizationValidation.cpp)
