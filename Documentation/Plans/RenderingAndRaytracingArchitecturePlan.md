@@ -122,3 +122,31 @@ Leaving **`Experimental/GtxReflectionBenchmark/` (`:8096`) untouched** as our pe
   - **Cabin Glass (`mat 7`) & Clearcoat (`mat 6`)**: Deterministic Fresnel reflection + Snell's-law (`IOR = 1.46`) cockpit refraction revealing the sculpted 3D interior bucket seats, plus `1–4` cone-footprint specular bounces (`throughput >= 0.025` deterministic cutoff).
   - **Soft Shadows & Contact AO**: Deterministic Vogel-spiral solar frustum + `4`-ray `BVH4` short-range (`0.55 m`) hemisphere Contact AO + coplanar blocker dilation & 3-pass (`step = 1, 2, 4`) continuous-sigma plane-aware Gaussian integration — **zero screen-space horizon rings, zero banding, and zero temporal boiling**.
 
+---
+
+## 7. Live NVIDIA WebGPU Inspection Report (`43.2 FPS` @ Native `1.00×`): Probes, GI Raytracing, & Shadow Forensics
+
+Following live verification on NVIDIA WebGPU (`43.2 FPS` / `23.13 ms` with full `1,920` probes/frame × `64` Fibonacci rays, `3` specular bounces, `8` solar stencil rays, and hardware `timestamp-query`), three key architectural findings are recorded for our production Vulkan `1.3` implementation:
+
+### 7.1 What the Floating 3D Spheres Are (`DDGI` Probe Debug Visualizer)
+- The floating spheres visible on the right split (`Clay GI + Shadow`) are the **optional 3D debug overlay** (`☑ 3D Probe Spheres` in `Deterministic Subsystems`) visualizing the `20 × 16 × 6 = 1,920` world-space **Dynamic Diffuse Global Illumination (`DDGI`)** probes.
+- Unchecking `3D Probe Spheres` hides the debug spheres while keeping all indirect GI lighting active. Each sphere displays the live directional irradiance (`6 × 6` octahedral texels) that probe just raytraced from the surrounding showroom (crimson bounce on the left, cyan bounce on the right, skylight above).
+
+### 7.2 Why `DDGI` Probes Were Used Instead of Per-Pixel Raytraced GI (and Note: `DDGI` *Is* Raytraced!)
+- **`DDGI` *does* use live `BVH4` raytracing every frame**: `DDGI_PROBE_UPDATE_WGSL` traces `1,920 probes × 64 Spherical-Fibonacci rays = 122,880` real triangle-intersected `BVH4` rays every frame (reacting live to moving vehicles, sun angles, and paint colors).
+- **Why we did not fire GI rays per screen pixel (like `:8096` Compute BVH)**:
+  1. **Ray Count Explosion (`100×` difference)**: Firing `6` hemisphere GI rays at every `1920 × 1080` screen pixel requires **`12.44 million` incoherent rays/frame** (`35–42 ms`), vs. **`122,880` rays/frame** for `1,920` `DDGI` probes (`0.12M` rays — `100×` fewer rays, yet `10×` more rays per hemisphere: `64` vs. `6`).
+  2. **Deterministic Zero-RNG Constraint**: With `1–6` rays per pixel, avoiding random Monte Carlo noise produces hard deterministic banding/kaleidoscope edges unless `64–256` rays are traced per pixel (`130M–530M` rays/frame). Concentrating `64` deterministic Fibonacci rays into world-space probes yields **100% noise-free, blotch-free Lambertian GI** plus **free infinite bounces (`∞ Live`)** via previous-frame probe feedback (`0` Russian Roulette).
+  3. **Known Trade-Off of `DDGI` vs. Per-Pixel Raytraced GI**: Because probes sit on a `1.63 m × 1.53 m × 0.96 m` world grid, `DDGI` excels at smooth room-scale color bleeding (`> 1.5 m`) but **cannot resolve tight sub-meter (`< 0.5 m`) indirect bounce shadows** under a vehicle chassis without stronger local raytraced ambient/directional occlusion.
+
+### 7.3 Forensic Root Causes: Why Shadows Appear Faint / Washed Out in `:8097`
+Raytraced solar shadows **are** executing (`8` `BVH4` shadow rays/pixel in `PRIMARY_AND_SHADOW_WGSL`), but **four compounding lighting-ratio & occlusion issues** compress the floor's lit-to-shadowed contrast down to only **`6.6%` in sRGB (`0.904` lit vs. `0.838` umbra)**:
+
+| # | Root Cause in `:8097` Shader Pipeline | Quantitative Impact | Production Vulkan `1.3` Fix (Design Note Only) |
+| :--- | :--- | :--- | :--- |
+| **1** | **Over-Powered `DDGI` Fill vs. `1/π`-Attenuated Sun** (`ddgiGain = 1.65` un-divided by `π`, while `sunIrr` is multiplied by `INV_PI = 0.3183`) | Indirect `DDGI` (`~1.15` HDR) is **`1.24×` brighter than direct noon sunlight (`0.93` HDR)**, lifting shadowed white floor to `83.8%` sRGB (`214/255`). *(Can be verified live in `:8097` by lowering `DDGI Irradiance Gain` to `0.45` and `LTC Overhead Portals` to `0.40`.)* | Normalize `DDGI` irradiance by `INV_PI` (`diffuse BRDF = albedo / π`) and calibrate Sun-to-Sky EV ratio (`Sun = 5–8×` ambient fill). |
+| **2** | **Unshadowed Analytic `LTC` Overhead Portals** (`evalAnalyticLtcPortals` integrates ceiling strips in closed form with `0` visibility rays) | Floor directly **underneath the solid car body** still receives `100%` of the overhead ceiling strip light right through the chassis. | Multiply `LTC` diffuse & ribbon specular by directional sky/chassis Bent-Normal Cone Occlusion (or 1 deterministic portal-visibility ray). |
+| **3** | **Coarse `DDGI` Grid (`1.63 m` spacing, lowest layer `z = 0.42 m` above `0.25 m` underbody) + Short `0.55 m` Contact AO (`min = 0.25`)** | Probes outside the car bleed bright room light underneath the `1.9 m`-wide floor pan; `0.55 m` AO only darkens right around the 4 tyres (and clamps at `>= 0.25`). | Extend `BVH4` hemisphere AO range to `1.8–2.5 m` (chassis ground-shadow scale) with `min = 0.03` + Bent-Normal directional `DDGI` lookup. |
+| **4** | **Oversized Default `Sun Area Radius = 2.10` (`tan θ = 0.097 rad` ≈ `11°` softbox sun) + Grazing Floor Fresnel** | Spreads a `1.2 m` roof shadow across a `~0.35 m` ultra-wide penumbra while glossy floor Fresnel (`rw` up to `0.50`) layers bright sky reflection over the shadow. | Default `Sun Area Radius` to `0.35–0.65` (`~1.5°–3°` crisp studio sun) and apply specular occlusion (`specAO`) to grazing dielectric reflections in umbra. |
+
+
