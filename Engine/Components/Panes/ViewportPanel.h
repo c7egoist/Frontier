@@ -11,6 +11,8 @@
 
 #include "Engine/Components/Panes/OutlinerPanel.h"
 
+#include <imgui.h>
+
 #include <array>
 #include <cstdint>
 #include <string_view>
@@ -66,8 +68,14 @@ class ViewportPanel
 {
 public:
     ViewportPanel() noexcept;
+    ~ViewportPanel() noexcept;
+
+    ViewportPanel(const ViewportPanel&)            = delete;
+    ViewportPanel& operator=(const ViewportPanel&) = delete;
 
     void AttachOutliner(OutlinerPanel* SourceOutliner) noexcept;
+    void AssignCanvasRasterImage(const uint8_t* RgbaPixels, uint32_t WidthPx, uint32_t HeightPx);
+    void ClearCanvasRasterImage() noexcept;
     void ConfigureSceneTitle(std::string_view Title);
     void ConfigureExecutionMode(ViewportExecutionMode Mode, bool Paused = false) noexcept;
     void TogglePlayPause() noexcept;
@@ -147,6 +155,7 @@ private:
     uint32_t                   HistoryWriteCursor      = 0u;                                      // [idx] - Ring buffer write cursor
     ConstructCategoryRail      ConstructRail           = ConstructCategoryRail::All;              // [-]   - Active Construct category rail
     TextEditBuffer             ConstructSearchEditor   {};                                        // [-]   - Construct search filter buffer
+    ImTextureData              CanvasRasterTexture     {};                                        // [-]   - Optional live GTX/RTX viewport texture
 };
 
 //------------------------------------------------------------------------------------------------------------------------

@@ -17,6 +17,7 @@
 #include "Engine/Components/ControlCentre/ControlCentrePanel.h"
 #include "Engine/Components/Docking/WorkspaceDockContainer.h"
 #include "Engine/Editor/Explorer/ContentBrowser.h"
+#include "Engine/GeometricRaster/GlobalIllumination/ShowcaseGalleryScene.h"
 #include "Engine/Input/InputExtension.h"
 #include "Engine/Lifecycle/LifecycleSequence.h"
 #include "Engine/Lifecycle/WorkspaceLifecycle.h"
@@ -25,6 +26,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <string_view>
 
 namespace Frontier::Lifecycle
@@ -40,8 +42,9 @@ struct EditorStartupConfiguration
         Windowing::WindowConfigurationDescriptor::ConstructApplicationWindow("Frontier", 1600u, 980u); // [-] - Primary editor window
     std::filesystem::path FontRepositoryRoot {};                                                      // [-] - Optional EngineContent/FontsArchives path
     std::filesystem::path ProjectSpacePath {};                                                         // [-] - Optional .projectspace persistence path
-    OutlinerTitleVariant  OutlinerHeading  = OutlinerTitleVariant::Outliner;                           // [-] - Outliner vs LayerStack heading
-    double                MaximumStep      = 0.100;                                                    // [s] - Upper Δt clamp per authoring tick
+    OutlinerTitleVariant  OutlinerHeading       = OutlinerTitleVariant::Outliner;                      // [-] - Outliner vs LayerStack heading
+    double                MaximumStep           = 0.100;                                               // [s] - Upper Δt clamp per authoring tick
+    bool                  PopulateShowcaseScene = false;                                               // [-] - Populate Cornell-Studio Gallery in Outliner & GTX Viewport
 };
 
 struct EditorLifecycleReading
@@ -80,6 +83,9 @@ public:
 
     [[nodiscard]] bool Initialize(const EditorStartupConfiguration& Configuration = {}) noexcept;
     void               AttachUVWorkspaceHost(Workspaces::UVWorkspaceHost* TargetHost) noexcept { MountedUVHost = TargetHost; }
+    void               PopulateShowcaseGallerySession(uint32_t RenderWidthPx = 640u, uint32_t RenderHeightPx = 360u);
+    void               RefreshShowcaseViewportRaster();
+    [[nodiscard]] GeometricRaster::ShowcaseWorldSceneBundle* AccessShowcaseScene() noexcept { return ShowcaseBundle.get(); }
     [[nodiscard]] bool ExecuteAuthoringTick(double Δt);
     [[nodiscard]] bool Suspend() noexcept;
     [[nodiscard]] bool Resume() noexcept;
@@ -110,6 +116,8 @@ private:
     Input::InputExtension                      InputCoordinator       {};     // [-]     - Hardware input & OS feedback coordinator
     LifecycleSequence                          EditorSequence         {};     // [-]     - Registered GPU .slang overlay & editor hooks
     Workspaces::UVWorkspaceHost*               MountedUVHost          = nullptr; // [-]  - Optional live UVWorkspaceHost
+    std::unique_ptr<GeometricRaster::ShowcaseWorldSceneBundle>  ShowcaseBundle   {};     // [-]  - Mounted Cornell-Studio Gallery scene & Outliner tokens
+    std::unique_ptr<GeometricRaster::TieredWorldRenderSequence> ShowcaseRenderer {};     // [-]  - Calibrated Tier 1 GTX world renderer
     Components::WorkspaceDockPaneToken         OutlinerPaneToken      {};     // [idx]   - Registered left Outliner/LayerStack pane
     Components::WorkspaceDockPaneToken         ViewportPaneToken      {};     // [idx]   - Registered central Viewport pane
     Components::WorkspaceDockPaneToken         InspectorPaneToken     {};     // [idx]   - Registered right Inspector pane

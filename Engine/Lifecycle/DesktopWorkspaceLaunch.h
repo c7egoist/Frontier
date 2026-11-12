@@ -44,6 +44,7 @@ struct DesktopLaunchOptions
     std::filesystem::path         StartupImportPath    {};
     std::filesystem::path         CapturePngOutputPath {};
     bool                          OpenContentBrowser   = false;
+    bool                          OpenWorldEditor      = false;
 };
 
 [[nodiscard]] int LaunchDesktopWorkspace(

@@ -3,7 +3,12 @@
 ==========================================================================================================================================*/
 // 🧩 Milestone 5 Validation & 4-Panel Exhibit: 1/pi Octahedral Chebyshev GI, 6-Cone SDF GI, VNDF Specular/Glass & Live ViewportProjectionPane
 
+#include "Engine/Components/Appearance/TypographyRepository.h"
+#include "Engine/Components/Panes/InspectorPanel.h"
+#include "Engine/Components/Panes/OutlinerPanel.h"
+#include "Engine/Components/Panes/ViewportPanel.h"
 #include "Engine/Components/Panes/ViewportProjectionPane.h"
+#include "Engine/GeometricRaster/GlobalIllumination/ShowcaseGalleryScene.h"
 #include "Engine/GeometricRaster/GlobalIllumination/TieredWorldRenderSequence.h"
 #include "Engine/GeometrySpace/Primitives/AnalyticPrimitives.h"
 #include "Exhibits/SoftwareCanvasRasterizer.h"
@@ -479,6 +484,95 @@ int main()
     const std::filesystem::path OutputPath = OutputDir / "01-TieredGlobalIlluminationAndWorldRender.png";
     Score.Verify(Canvas.WritePngFile(OutputPath) && std::filesystem::exists(OutputPath),
                  "Exported 01-TieredGlobalIlluminationAndWorldRender.png");
+
+    //====================================================================================================================
+    // 6. VERIFY C++ OUTLINER REGISTRATION, EDITORCAMERA BINDING, & 3-PANE GTX WORLD EDITOR EXHIBIT
+    //====================================================================================================================
+    {
+        GeometricRaster::ShowcaseWorldSceneBundle ShowcaseBundle {};
+        GeometricRaster::BuildShowcaseGalleryScene(ShowcaseBundle, 880u, 560u);
+
+        GeometricRaster::TieredWorldRenderSequence EditorGtxRenderer {};
+        EditorGtxRenderer.PrepareWorldScene(ShowcaseBundle.Scene);
+
+        OutlinerPanel  EditorOutliner {};
+        ViewportPanel  EditorViewport {};
+        InspectorPanel EditorInspector {};
+        EditorViewport.AttachOutliner(&EditorOutliner);
+        EditorInspector.AttachOutliner(&EditorOutliner);
+        EditorViewport.ConfigureSceneTitle("Cornell-Studio Gallery");
+
+        GeometricRaster::RegisterShowcaseGalleryInOutliner(EditorOutliner, ShowcaseBundle);
+
+        Score.Verify(EditorOutliner.QueryTotalCount() == 17u &&
+                     EditorOutliner.CountDirectNested(ShowcaseBundle.ShowcaseFolderToken) == 10u &&
+                     EditorOutliner.FindEntry(ShowcaseBundle.EditorCameraToken) != nullptr &&
+                     EditorOutliner.FindEntry(ShowcaseBundle.SunEmitterToken) != nullptr &&
+                     EditorOutliner.FindEntry(ShowcaseBundle.CeilingSoftboxToken) != nullptr,
+                     "Registered all 17 Cornell-Studio Gallery objects (Showcase x10, Editor Camera, Sun, Ceiling Softbox) in C++ OutlinerPanel");
+
+        if (OutlinerRecordEntry* CamRecord = EditorOutliner.AccessEntry(ShowcaseBundle.EditorCameraToken))
+        {
+            const float OrigY = CamRecord->PositionY;
+            CamRecord->PositionY = -3.85f;
+            const bool SyncTriggered = GeometricRaster::SynchronizeShowcaseGalleryFromOutliner(EditorOutliner, ShowcaseBundle);
+            Score.Verify(SyncTriggered && std::fabs(ShowcaseBundle.EditorCamera.CameraOrigin.Y - (-3.85f)) < 1.0e-4f,
+                         "C++ OutlinerPanel <-> ShowcaseWorldSceneBundle live-synchronizes EditorCamera transforms");
+            CamRecord->PositionY = OrigY;
+            (void)GeometricRaster::SynchronizeShowcaseGalleryFromOutliner(EditorOutliner, ShowcaseBundle);
+        }
+
+        const auto EditorGtxFrame = EditorGtxRenderer.RenderWorldFrame(
+            GeometricRaster::WorldRenderTier::Tier1GtxCalibrated,
+            ShowcaseBundle.EditorCamera,
+            ShowcaseBundle.EditorCamera,
+            ShowcaseBundle.Scene);
+        EditorViewport.AssignCanvasRasterImage(
+            EditorGtxFrame.DisplayRgba8.data(),
+            EditorGtxFrame.WidthPx,
+            EditorGtxFrame.HeightPx);
+
+        TypographyRepository EditorFonts {};
+        const std::filesystem::path FontRoot =
+            std::filesystem::path(FRONTIER_REPO_ROOT_DIR) / "EngineContent" / "FontsArchives";
+        if (std::filesystem::exists(FontRoot / "FontRepository.FontSpace") &&
+            EditorFonts.LoadRepository(FontRoot) > 0u)
+        {
+            TypographyRepository::AssignCurrent(&EditorFonts);
+            if (ImFont* DefaultUiFont = EditorFonts.QueryTabStripFont())
+            {
+                Io.FontDefault = DefaultUiFont;
+            }
+            Io.Fonts->GetTexDataAsRGBA32(&FontPixels, &FontW, &FontH);
+        }
+
+        constexpr uint32_t EditorW = 1600u;
+        constexpr uint32_t EditorH = 940u;
+        Io.DisplaySize = ImVec2(static_cast<float>(EditorW), static_cast<float>(EditorH));
+
+        ImGui::NewFrame();
+        PixelSpace OutlinerSurface(ImGui::GetBackgroundDrawList(), { 0.0f, 0.0f }, 1.0f, Io.FontDefault);
+        PixelSpace OverlaySurface(ImGui::GetForegroundDrawList(), { 0.0f, 0.0f }, 1.0f, Io.FontDefault);
+        OutlinerSurface.FillRectangle({ 0.0f, 0.0f, static_cast<float>(EditorW), static_cast<float>(EditorH) }, WorkspaceSurfaceColors::RootGap);
+
+        PaneInputReading IdleInput {};
+        IdleInput.PrimaryPointer = { -1000.0f, -1000.0f, false, false, false, false };
+
+        EditorOutliner.Render(OutlinerSurface, { 0.0f, 0.0f, 336.0f, static_cast<float>(EditorH) }, IdleInput, 1.0 / 60.0, &OverlaySurface);
+        EditorViewport.Render(OutlinerSurface, { 338.0f, 0.0f, 924.0f, static_cast<float>(EditorH) }, IdleInput, 1.0 / 60.0, &OverlaySurface);
+        EditorInspector.Render(OutlinerSurface, { 1264.0f, 0.0f, 336.0f, static_cast<float>(EditorH) }, IdleInput, 1.0 / 60.0);
+        ImGui::Render();
+
+        Exhibits::SoftwareRasterCanvas EditorCanvas(EditorW, EditorH, { 18u, 18u, 18u, 255u });
+        EditorCanvas.RasterizeImGuiBatches(ImGui::GetDrawData());
+
+        const std::filesystem::path EditorExhibitPath = OutputDir / "02-CppWorldEditorOutlinerAndGtxViewport.png";
+        Score.Verify(EditorCanvas.WritePngFile(EditorExhibitPath) && std::filesystem::exists(EditorExhibitPath),
+                     "Exported 3-pane C++ World Editor exhibit 02-CppWorldEditorOutlinerAndGtxViewport.png");
+
+        TypographyRepository::AssignCurrent(nullptr);
+    }
+
     ImGui::DestroyContext(ImGuiCtx);
 
     std::printf("[TieredWorldRenderValidation] Completed: %u passed, %u failed -> %s\n",

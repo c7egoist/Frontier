@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 namespace Frontier::Lifecycle
 {
@@ -165,7 +166,65 @@ bool EditorLifecycle::Initialize(const EditorStartupConfiguration& Configuration
     }
 
     Initialized = true;
+    if (StartupConfig.PopulateShowcaseScene)
+    {
+        PopulateShowcaseGallerySession();
+    }
     return true;
+}
+
+void EditorLifecycle::PopulateShowcaseGallerySession(uint32_t RenderWidthPx, uint32_t RenderHeightPx)
+{
+    WorkspaceSessionPanes* Panes = Workspaces.AccessActivePanes();
+    if (Panes == nullptr)
+    {
+        return;
+    }
+
+    ShowcaseBundle   = std::make_unique<GeometricRaster::ShowcaseWorldSceneBundle>();
+    ShowcaseRenderer = std::make_unique<GeometricRaster::TieredWorldRenderSequence>();
+
+    GeometricRaster::BuildShowcaseGalleryScene(*ShowcaseBundle, RenderWidthPx, RenderHeightPx);
+    ShowcaseRenderer->PrepareWorldScene(ShowcaseBundle->Scene);
+    GeometricRaster::RegisterShowcaseGalleryInOutliner(Panes->Outliner, *ShowcaseBundle);
+    Panes->Viewport.ConfigureSceneTitle("Cornell-Studio Gallery");
+    RefreshShowcaseViewportRaster();
+}
+
+void EditorLifecycle::RefreshShowcaseViewportRaster()
+{
+    WorkspaceSessionPanes* Panes = Workspaces.AccessActivePanes();
+    if (Panes == nullptr || ShowcaseBundle == nullptr || ShowcaseRenderer == nullptr)
+    {
+        return;
+    }
+
+    const auto GtxFrame = ShowcaseRenderer->RenderWorldFrame(
+        GeometricRaster::WorldRenderTier::Tier1GtxCalibrated,
+        ShowcaseBundle->EditorCamera,
+        ShowcaseBundle->EditorCamera,
+        ShowcaseBundle->Scene);
+
+    Panes->Viewport.AssignCanvasRasterImage(
+        GtxFrame.DisplayRgba8.data(),
+        GtxFrame.WidthPx,
+        GtxFrame.HeightPx);
+
+    OutlinerFooterReadings Footer {};
+    Footer.RealtimeText  = "60 fps";
+    Footer.QualityText   = "GTX Tier 1";
+    Footer.PrimarySlot   = "Sun 46°";
+    Footer.SecondarySlot = "LTC 1";
+    char CamBuffer[48]{};
+    std::snprintf(
+        CamBuffer,
+        sizeof(CamBuffer),
+        "%.1f, %.1f, %.1f",
+        ShowcaseBundle->EditorCamera.CameraOrigin.X,
+        ShowcaseBundle->EditorCamera.CameraOrigin.Y,
+        ShowcaseBundle->EditorCamera.CameraOrigin.Z);
+    Footer.CameraText = CamBuffer;
+    Panes->Outliner.ConfigureFooterReadings(Footer);
 }
 
 bool EditorLifecycle::ExecuteAuthoringTick(double Δt)
@@ -198,6 +257,16 @@ bool EditorLifecycle::ExecuteAuthoringTick(double Δt)
     if (!TerminationRequested)
     {
         Workspaces.Tick(SafeStep);
+        if (ShowcaseBundle != nullptr)
+        {
+            if (WorkspaceSessionPanes* Panes = Workspaces.AccessActivePanes())
+            {
+                if (GeometricRaster::SynchronizeShowcaseGalleryFromOutliner(Panes->Outliner, *ShowcaseBundle))
+                {
+                    RefreshShowcaseViewportRaster();
+                }
+            }
+        }
         EditorSequence.Tick(SafeStep);
     }
 
@@ -280,6 +349,8 @@ void EditorLifecycle::Finalize() noexcept
 
     // 🔴 CRITICAL: Tear down GPU overlay hooks, then workspace sessions, then input, then dock windows.
     EditorSequence.Finalize();
+    ShowcaseRenderer.reset();
+    ShowcaseBundle.reset();
     Workspaces.Finalize();
 
     if (TypographyRepository::QueryCurrent() == &Typography)

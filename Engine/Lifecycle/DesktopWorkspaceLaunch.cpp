@@ -316,6 +316,10 @@ int LaunchDesktopWorkspace(
         {
             InitialOptions.OpenContentBrowser = true;
         }
+        else if (Arg == "--world" || Arg == "--world-editor")
+        {
+            InitialOptions.OpenWorldEditor = true;
+        }
     }
 
     GeometricRaster::VulkanInterchange DeviceInterchange {};
@@ -440,8 +444,12 @@ int LaunchDesktopWorkspace(
         Lifecycle::EditorStartupConfiguration EditorCfg {};
         EditorCfg.WindowDescriptor   = Windowing::WindowConfigurationDescriptor::ConstructApplicationWindow(
             InitialOptions.WindowTitle, InitialOptions.InitialWidthPx, InitialOptions.InitialHeightPx);
-        EditorCfg.FontRepositoryRoot = RepositoryRootPath / "EngineContent/FontsArchives";
-        EditorLoop.AttachUVWorkspaceHost(&UVHost);
+        EditorCfg.FontRepositoryRoot    = RepositoryRootPath / "EngineContent/FontsArchives";
+        EditorCfg.PopulateShowcaseScene = true;
+        if (!InitialOptions.OpenWorldEditor)
+        {
+            EditorLoop.AttachUVWorkspaceHost(&UVHost);
+        }
         if (!EditorLoop.Initialize(EditorCfg))
         {
             std::fprintf(stderr, "[FrontierHost] EditorLifecycle initialization failed.\n");
