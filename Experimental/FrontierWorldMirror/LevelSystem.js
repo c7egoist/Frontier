@@ -10,7 +10,7 @@ import {
   ShowcaseInitialValues,
 } from "./ShowcaseGalleryScene.js";
 
-export const LEVEL_STORAGE_KEY = "Frontier.WorldMirrorLevels.v1";
+export const LEVEL_STORAGE_KEY = "Frontier.WorldMirrorLevels.v2";
 
 const Clone = (Value) => JSON.parse(JSON.stringify(Value));
 

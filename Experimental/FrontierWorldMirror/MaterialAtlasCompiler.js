@@ -218,7 +218,15 @@ export class MaterialAtlasSynchronizer {
       const CoatRough = Clamp(SampleChannel(Mat, "coatRoughness", U, V), 0.02, 1);
       const SheenSrgb = SampleChannel(Mat, "sheen", U, V);
       const SheenRough = Clamp(SampleChannel(Mat, "sheenRoughness", U, V), 0.04, 1);
-      const SubsurfSrgb = SampleChannel(Mat, "subsurface", U, V);
+      const SubsurfCh = Mat.Channels.subsurface;
+      const SubsurfaceActive =
+        Mat.Type === "Subsurface" ||
+        (SubsurfCh &&
+          (SubsurfCh.Source !== "Fill" ||
+            String(SubsurfCh.Fill || "#cccccc").toLowerCase() !== "#cccccc"));
+      const SubsurfSrgb = SubsurfaceActive
+        ? SampleChannel(Mat, "subsurface", U, V)
+        : [0, 0, 0];
       const Thickness = Clamp(SampleChannel(Mat, "thickness", U, V), 0, 2);
       const CoatNormRgb = SampleChannel(Mat, "coatNormal", U, V);
       const Transmission =

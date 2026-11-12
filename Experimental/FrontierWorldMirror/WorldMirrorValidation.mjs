@@ -27,6 +27,7 @@ import {
   ATLAS_TILE_SIZE,
   ATLAS_WIDTH,
   MaterialAtlasSynchronizer,
+  TILES_PER_PRIM,
 } from "./MaterialAtlasCompiler.js";
 import {
   BeginGizmoDrag,
@@ -133,6 +134,42 @@ assert.ok(Math.abs(LeftRgbA[3] - Math.round(0.85 * 255)) <= 2, "Opacity channel 
 const SheenTexel = ReadTexel(4, 32, 32);
 assert.ok(SheenTexel[0] > 180 && SheenTexel[2] > 140, "Fabric Sheen channel baked into Slot 4 RGB");
 
+// Verify non-Subsurface materials do NOT bleed default #cccccc subsurface wrap lighting, while Subsurface materials DO!
+const StandardPlasterMat = ResolveMaterial({
+  Material: {
+    Name: "Matte Gallery Plaster",
+    Type: "Standard",
+    Channels: {
+      colour: { Source: "Fill", Fill: "#dfd9cf" },
+      roughness: { Source: "Fill", Fill: 0.65 },
+    },
+  },
+});
+const TrueSubsurfaceMat = ResolveMaterial({
+  Material: {
+    Name: "Alabaster Wax",
+    Type: "Subsurface",
+    Channels: {
+      colour: { Source: "Fill", Fill: "#ede6da" },
+      subsurface: { Source: "Fill", Fill: "#ffd2ad" },
+    },
+  },
+});
+CustomPrims[1] = { ...CustomPrims[1], ResolvedMaterial: StandardPlasterMat };
+CustomPrims[2] = { ...CustomPrims[2], ResolvedMaterial: TrueSubsurfaceMat };
+Atlas.UpdatePrimitives(CustomPrims);
+const PlasterSssTexel = ReadTexel(1 * TILES_PER_PRIM + 5, 32, 32);
+const AlabasterSssTexel = ReadTexel(2 * TILES_PER_PRIM + 5, 32, 32);
+assert.deepEqual(
+  PlasterSssTexel.slice(0, 3),
+  [0, 0, 0],
+  "Standard material zeroes unauthored default #cccccc subsurface channel (no plaster blowout)",
+);
+assert.ok(
+  AlabasterSssTexel[0] > 200 && AlabasterSssTexel[1] > 120,
+  "Subsurface material bakes warm subsurface scatter tint into Slot 5 RGB",
+);
+
 // 5. Verify 1:1 C++ Slate 13-Handle TransformGizmo3D (GizmoPRO)
 const Pivot = [0.0, 0.5, 0.25];
 const BuiltGizmo = BuildSlateGizmoGeometry(Pivot, [0, 1, 0], 1.0);
@@ -187,13 +224,16 @@ assert.equal(Duplicated.Rows.length, 17, "Duplicate Current Level clones all 17 
 // 7. Verify standalone index.html bundle integrity & ring-free shader / UI presence
 const ViewportSrc = fs.readFileSync(path.join(Folder, "GtxWorldViewport.jsx"), "utf8");
 assert.ok(
-  !ViewportSrc.includes("evalSceneSdfOpaque"),
-  "Legacy ring-inducing evalSceneSdfOpaque step march completely removed",
+  !ViewportSrc.includes("evalSceneSdfOpaque") &&
+    !ViewportSrc.includes("localDirs[6]"),
+  "Legacy SDF step march AND discrete 6-ray ghost GI projections completely removed",
 );
 assert.ok(
   ViewportSrc.includes("closestRayPrimitiveSoftVis") &&
+    ViewportSrc.includes("evaluateAreaLightSoftVis") &&
+    ViewportSrc.includes("uMetaTex") &&
     ViewportSrc.includes("OUTLINE_FRAGMENT_SHADER"),
-  "Ring-free analytical shadow penumbra and 2px silhouette outline shaders present",
+  "Smooth analytical GI/AO, softbox penumbra, and depth-aware 2px outer silhouette outline shaders present",
 );
 
 const HtmlPath = path.join(Folder, "index.html");

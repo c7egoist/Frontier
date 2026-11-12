@@ -61,7 +61,8 @@ export const GTX_FRAGMENT_SHADER = `#version 300 es
 precision highp float;
 
 in vec2 vUv;
-out vec4 fragColor;
+layout(location = 0) out vec4 fragColor;
+layout(location = 1) out vec4 fragMeta;
 
 uniform vec2  uResolution;
 uniform vec3  uCamOrigin;
@@ -527,10 +528,12 @@ float closestRayPrimitiveSoftVis(vec3 origin, vec3 dir, int idx, float tanSun) {
   if (shape >= 2) {
     float rad = max(h.x, h.y);
     float dRad = length(lp.xy) - rad;
-    float dCap = abs(lp.z) - (h.z + abs(ld.z) * coneR * 2.2);
+    float thinZ = max(h.z, coneR * 1.25);
+    float dCap = abs(lp.z) - thinZ;
     dSil = max(dRad, dCap);
   } else {
-    vec3 hSil = h + abs(ld) * (coneR * 2.2);
+    // Pad ONLY thin axes (< 1.25 * coneR) so thin slabs cast solid umbra without shifting wide X/Y edges!
+    vec3 hSil = max(h, vec3(coneR * 1.25));
     dSil = sdBox(lp, hSil);
   }
   return smoothstep(-coneR, coneR, dSil);
@@ -546,6 +549,24 @@ float evaluateGtxSolarShadow(vec3 pos, vec3 N, int selfPrimIdx) {
     if (i == selfPrimIdx || !PrimFlagShadow(i) || PrimFlagGlass(i)) continue;
     vis = min(vis, closestRayPrimitiveSoftVis(origin, uSunDir, i, tanSun));
     if (vis < 0.002) return 0.0;
+  }
+  return vis;
+}
+
+float evaluateAreaLightSoftVis(vec3 pos, vec3 N, vec3 lc, float hw, float hh, int selfPrimIdx) {
+  vec3 toL = lc - pos;
+  float distL = length(toL);
+  if (distL < 0.05) return 1.0;
+  vec3 dirL = toL / distL;
+  float tanArea = clamp(length(vec2(hw, hh)) * 0.65 / max(distL, 0.35), 0.18, 0.55);
+  vec3 origin = pos + N * 0.008;
+  float vis = 1.0;
+  for (int i = 0; i < ${MAX_PRIMS}; ++i) {
+    if (i >= uPrimCount) break;
+    if (i == selfPrimIdx || !PrimFlagShadow(i) || PrimFlagGlass(i)) continue;
+    float tProj = dot(uPrimPosShape[i].xyz - origin, dirL);
+    if (tProj <= 0.02 || tProj >= distL - 0.04) continue;
+    vis = min(vis, mix(0.38, 1.0, closestRayPrimitiveSoftVis(origin, dirL, i, tanArea)));
   }
   return vis;
 }
@@ -688,61 +709,110 @@ vec3 evaluateOpenPbrDirect(
 }
 
 //------------------------------------------------------------------------------------------------------------------------------------------
-// RING-FREE ANALYTICAL 6-CONE GI + AO (ZERO TEXTURE FETCHES IN CONES -> TINY FAST SHADER!)
+// C1-SMOOTH ANALYTICAL SOLID-ANGLE GI + AO (ZERO DISCRETE RAY GHOST CIRCLES, ZERO BANDS, ZERO SDF RINGS!)
 //------------------------------------------------------------------------------------------------------------------------------------------
 void evaluateGtxConeGiAndAo(vec3 pos, vec3 N, int selfPrimIdx, out vec3 indirectIrradiance, out float aoOut) {
-  vec3 T, B;
-  buildBasis(N, T, B);
+  float skyWeight = clamp(N.z * 0.5 + 0.5, 0.0, 1.0);
+  vec3 skyAmb = mix(vec3(0.055, 0.053, 0.052), evalSky(vec3(N.xy * 0.35, max(0.25, N.z))), skyWeight) * 0.78;
 
-  const vec3 localDirs[6] = vec3[6](
-    vec3( 0.0000,  0.0000, 1.0000),
-    vec3( 0.8660,  0.0000, 0.5000),
-    vec3( 0.2676,  0.8236, 0.5000),
-    vec3(-0.7006,  0.5090, 0.5000),
-    vec3(-0.7006, -0.5090, 0.5000),
-    vec3( 0.2676, -0.8236, 0.5000)
-  );
-
-  vec3 giSum = vec3(0.0);
-  float wSum = 0.0;
+  vec3 bounceAccum = vec3(0.0);
   float aoOcc = 0.0;
-  vec3 startPos = pos + N * 0.014;
 
-  for (int c = 0; c < 6; ++c) {
-    vec3 ld = localDirs[c];
-    vec3 dir = normalize(T * ld.x + B * ld.y + N * ld.z);
-    float cosW = max(0.2, ld.z);
-    wSum += cosW;
+  for (int i = 0; i < ${MAX_PRIMS}; ++i) {
+    if (i >= uPrimCount) break;
+    if (i == selfPrimIdx || PrimFlagGlass(i)) continue;
 
-    HitInfo ch = traceOpaqueSceneIgnoring(startPos, dir, 5.6, selfPrimIdx);
-    if (ch.hit) {
-      aoOcc += cosW * exp(-ch.t / 0.72) * 0.58;
-      if (PrimFlagGi(ch.primIdx)) {
-        vec3 bAlbedo = uPrimGiBounce[ch.primIdx].rgb;
-        float bEmit  = uPrimGiBounce[ch.primIdx].w;
-        vec3 bRad = bAlbedo * bEmit;
-        float nSun = max(0.0, dot(ch.normal, uSunDir));
-        if (nSun > 0.0) {
-          bRad += (bAlbedo / PI) * uSunIrradiance * (nSun * 0.82);
-        }
-        if (uLightCount > 0) {
-          vec3 lc = uLightCenterHalfW[0].xyz;
-          vec3 toL = lc - ch.pos;
-          float d2 = max(0.4, dot(toL, toL));
-          vec3 lDir = toL * inversesqrt(d2);
-          float area = 4.0 * uLightCenterHalfW[0].w * uLightHalfHRad[0].x;
-          bRad += (bAlbedo / PI) * uLightHalfHRad[0].yzw * (max(0.0, dot(ch.normal, lDir)) * max(0.0, -lDir.z) * area / (PI * d2)) * 0.65;
-        }
-        float distAtten = 1.0 / (1.0 + 0.09 * ch.t * ch.t);
-        giSum += bRad * cosW * distAtten * 1.45;
-      }
+    vec3 center = uPrimPosShape[i].xyz;
+    int  shape  = int(uPrimPosShape[i].w + 0.5);
+    vec3 h      = uPrimHalfFlags[i].xyz;
+    vec3 rot    = uPrimRotAbbe[i].xyz;
+
+    float occContribution = 0.0;
+    float giFormFactor    = 0.0;
+    vec3  emitterNormal   = -N;
+
+    if (shape == 1) {
+      // Smooth analytical spherical-cap solid angle (Snyder / Quilez sphere AO & diffuse transfer)
+      vec3 toSphere = center - pos;
+      float dist2 = max(1e-4, dot(toSphere, toSphere));
+      float dist  = sqrt(dist2);
+      vec3 dir    = toSphere / dist;
+      float rEff  = (h.x + h.y + h.z) * 0.3333333;
+      float cosN  = dot(N, dir);
+      float sinH  = clamp(rEff / max(dist, rEff + 1e-3), 0.0, 0.98);
+      float horizon = smoothstep(-sinH, sinH * 0.85 + 0.25, cosN);
+      float solidRatio = (rEff * rEff) / max(dist2, rEff * rEff * 1.05);
+      // Contact AO decays rapidly with distance so spheres never cast ovals onto distant walls!
+      float nearFade = exp(-max(0.0, dist - rEff) / 0.55);
+      occContribution = horizon * solidRatio * nearFade * 0.75;
+      giFormFactor    = horizon * solidRatio * 0.35;
+      emitterNormal   = -dir;
     } else {
-      giSum += evalSky(dir) * cosW * 0.88;
+      // Smooth OBB closest-patch subtended solid angle
+      vec3 lp = invRotateEuler(pos - center, rot);
+      vec3 ln = invRotateEuler(N, rot);
+      vec3 farCorner = mix(-h, h, greaterThanEqual(ln, vec3(0.0)));
+      float maxAboveHorizon = dot(ln, farCorner - lp);
+
+      if (maxAboveHorizon > 0.002) {
+        vec3 closestLocal = clamp(lp, -h, h);
+        vec3 diffLocal = closestLocal - lp;
+        float dist2 = dot(diffLocal, diffLocal);
+        float dist  = sqrt(max(1e-5, dist2));
+
+        vec3 relNorm = lp / max(h, vec3(0.02));
+        vec3 absR = abs(relNorm);
+        vec3 boxFaceLocal = (absR.x >= absR.y && absR.x >= absR.z)
+          ? vec3(relNorm.x >= 0.0 ? 1.0 : -1.0, 0.0, 0.0)
+          : ((absR.y >= absR.x && absR.y >= absR.z)
+              ? vec3(0.0, relNorm.y >= 0.0 ? 1.0 : -1.0, 0.0)
+              : vec3(0.0, 0.0, relNorm.z >= 0.0 ? 1.0 : -1.0));
+        emitterNormal = normalize(fwdRotateEuler(boxFaceLocal, rot));
+
+        float faceArea = abs(boxFaceLocal.x) > 0.5
+          ? (4.0 * h.y * h.z)
+          : (abs(boxFaceLocal.y) > 0.5 ? (4.0 * h.x * h.z) : (4.0 * h.x * h.y));
+
+        vec3 toPatchWorld = fwdRotateEuler(diffLocal, rot);
+        vec3 dirWorld = dist > 1e-3 ? (toPatchWorld / dist) : N;
+        float receiverCos = clamp(dot(N, dirWorld) * 0.5 + 0.5, 0.0, 1.0);
+        float horizonFade = clamp(maxAboveHorizon / (dist + 0.45), 0.0, 1.0);
+
+        float contact = exp(-dist / 0.38) * horizonFade * receiverCos;
+        float solidOmega = faceArea / (faceArea + PI * (dist2 + 0.28));
+        occContribution = contact * 0.38 + solidOmega * exp(-dist / 1.1) * horizonFade * 0.12;
+
+        float emitterCos = dist > 1e-3 ? max(0.0, dot(emitterNormal, -dirWorld)) : 0.7;
+        giFormFactor = solidOmega * horizonFade * (0.35 + 0.65 * receiverCos) * (0.35 + 0.65 * emitterCos);
+      }
+    }
+
+    aoOcc += occContribution;
+
+    if (giFormFactor > 1e-4 && PrimFlagGi(i)) {
+      vec3 bAlbedo = uPrimGiBounce[i].rgb;
+      float bEmit  = uPrimGiBounce[i].w;
+      vec3 patchRad = bAlbedo * bEmit;
+
+      float sunNdotL = max(0.0, dot(emitterNormal, uSunDir));
+      patchRad += (bAlbedo / PI) * uSunIrradiance * (sunNdotL * 0.62 + 0.10);
+
+      if (uLightCount > 0) {
+        vec3 lc = uLightCenterHalfW[0].xyz;
+        vec3 toL = lc - center;
+        float d2 = max(0.6, dot(toL, toL));
+        vec3 lDir = toL * inversesqrt(d2);
+        float area = 4.0 * uLightCenterHalfW[0].w * uLightHalfHRad[0].x;
+        patchRad += (bAlbedo / PI) * uLightHalfHRad[0].yzw
+                  * (max(0.15, dot(emitterNormal, lDir)) * max(0.1, -lDir.z) * area / (PI * d2));
+      }
+
+      bounceAccum += patchRad * giFormFactor * 1.35;
     }
   }
 
-  indirectIrradiance = giSum / max(1e-4, wSum);
-  aoOut = clamp(1.0 - aoOcc / max(1e-4, wSum), 0.18, 1.0);
+  aoOut = clamp(1.0 - aoOcc, 0.26, 1.0);
+  indirectIrradiance = skyAmb * mix(0.45, 1.0, aoOut) + bounceAccum;
 }
 
 void buildShadingFrame(HitInfo hit, SampledMaterial mat, out vec3 Nshade, out vec3 Ncoat, out vec3 Tshade, out vec3 Bshade) {
@@ -850,9 +920,7 @@ vec3 shadePrimaryOpaqueHit(HitInfo hit, vec3 V) {
 
     vec3 diffLight = evaluateAreaQuadDiffuse(hit.pos, N, lc, hw, hh, emit);
     if (dot(diffLight, vec3(1.0)) > 1e-5) {
-      vec3 toCenter = normalize(lc - hit.pos);
-      HitInfo lOcc = traceOpaqueSceneIgnoring(hit.pos + N * 0.01, toCenter, length(lc - hit.pos) - 0.03, idx);
-      float areaVis = lOcc.hit ? 0.25 : 1.0;
+      float areaVis = evaluateAreaLightSoftVis(hit.pos, N, lc, hw, hh, idx);
 
       vec3 kD = (1.0 - mat.metallic) * (1.0 - mat.transmission) * mat.baseColor;
       Lo += kD * diffLight * areaVis;
@@ -878,7 +946,7 @@ vec3 shadePrimaryOpaqueHit(HitInfo hit, vec3 V) {
     }
   }
 
-  // 3. Ring-free analytical 6-cone GI + AO
+  // 3. Smooth analytical solid-angle GI + AO
   vec3 giIrr;
   float sceneAo;
   evaluateGtxConeGiAndAo(hit.pos, N, idx, giIrr, sceneAo);
@@ -892,25 +960,34 @@ vec3 shadePrimaryOpaqueHit(HitInfo hit, vec3 V) {
     Lo += mat.sheenColor * giIrr * pow(1.0 - VdotN, 3.0) * 0.45 * totalAo;
   }
 
-  // 4. Specular reflection ray for metals / clear-coat / glossy surfaces
-  float specReflectivity = max(mat.metallic, mat.coat * 0.65);
-  if (uViewMode == 0 && (specReflectivity > 0.08 || mat.roughness < 0.36)) {
-    vec3 R = reflect(-V, mat.coat > 0.35 ? Nc : N);
+  // 4. Roughness-filtered specular reflection: crisp ray-trace ONLY on smooth mirrors/metals/clearcoat,
+  //    blending smoothly into prefiltered sky/room environment on rougher dielectrics (zero mirror-plaster artifact!)
+  vec3 R = reflect(-V, mat.coat > 0.35 ? Nc : N);
+  float baseMirror = smoothstep(0.28, 0.04, mat.roughness) * mix(0.35, 1.0, mat.metallic);
+  float coatMirror = mat.coat * smoothstep(0.26, 0.02, mat.coatRoughness);
+  float raySharpness = max(baseMirror, coatMirror);
+
+  vec3 roughEnv = mix(giIrr, evalSky(R), 0.55);
+  vec3 specEnvRad = roughEnv;
+
+  if (uViewMode == 0 && raySharpness > 0.02) {
     vec3 reflEmit;
     int reflLIdx;
     HitInfo rHit = traceOpaqueSceneIgnoring(hit.pos + N * 0.012, R, 22.0, idx);
     float tQuad = traceLightQuad(hit.pos + N * 0.012, R, rHit.t, reflEmit, reflLIdx);
-    vec3 reflRad = (tQuad < rHit.t)
+    vec3 sharpRad = (tQuad < rHit.t)
       ? reflEmit
       : (rHit.hit ? shadeSecondaryBounceHit(rHit, -R) : evalSky(R));
-    float gloss = 1.0 - mat.roughness * 0.82;
-    vec3 reflWeight = Fenv * gloss * gloss;
-    if (mat.coat > 0.005) {
-      float Fc = fresnelDielectric(max(0.0, dot(V, Nc)), 1.5) * mat.coat * (1.0 - mat.coatRoughness * 0.7);
-      reflWeight = max(reflWeight, vec3(Fc));
-    }
-    Lo += reflRad * reflWeight * mix(0.45, 1.0, totalAo);
+    specEnvRad = mix(roughEnv, sharpRad, raySharpness);
   }
+
+  float envEnergy = (1.0 - mat.roughness * 0.78);
+  vec3 reflWeight = Fenv * envEnergy * envEnergy * mix(0.28, 1.0, max(mat.metallic, raySharpness));
+  if (mat.coat > 0.005) {
+    float Fc = fresnelDielectric(max(0.0, dot(V, Nc)), 1.5) * mat.coat * (1.0 - mat.coatRoughness * 0.7);
+    reflWeight = max(reflWeight, vec3(Fc));
+  }
+  Lo += specEnvRad * reflWeight * mix(0.45, 1.0, totalAo);
 
   if (uViewMode == 3) {
     float rim = 1.0 - abs(dot(N, V));
@@ -1003,6 +1080,13 @@ vec3 acesFilm(vec3 x) {
   return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
 }
 
+vec4 encodeMeta(int entityCode, float hitDist) {
+  float normD = clamp(hitDist / 50.0, 0.0, 1.0);
+  float hi = floor(normD * 255.0);
+  float lo = fract(normD * 255.0);
+  return vec4(float(entityCode) / 255.0, hi / 255.0, lo, 1.0);
+}
+
 void main() {
   float aspect = uResolution.x / max(1.0, uResolution.y);
   vec2 ndc = vUv * 2.0 - 1.0;
@@ -1023,11 +1107,13 @@ void main() {
 
   vec3 linearColor;
   int entityCode = 0;
+  float hitDist = 50.0;
 
   if (uViewMode >= 10) {
     int dbg = uViewMode - 10;
     if (fullHit.hit) {
       entityCode = 1 + fullHit.primIdx;
+      hitDist = fullHit.t;
       SampledMaterial dm = fetchMaterial(fullHit.primIdx, fullHit.uv);
       vec3 N, Nc, T, B;
       buildShadingFrame(fullHit, dm, N, Nc, T, B);
@@ -1040,15 +1126,18 @@ void main() {
     } else {
       linearColor = vec3(0.06, 0.07, 0.09);
     }
-    fragColor = vec4(clamp(linearColor, 0.0, 1.0), float(entityCode) / 255.0);
+    fragColor = vec4(clamp(linearColor, 0.0, 1.0), 1.0);
+    fragMeta = encodeMeta(entityCode, hitDist);
     return;
   }
 
   if (tQuad < fullHit.t) {
     linearColor = quadEmit;
     entityCode = 32 + hitLightIdx;
+    hitDist = tQuad;
   } else if (fullHit.hit) {
     entityCode = 1 + fullHit.primIdx;
+    hitDist = fullHit.t;
     if (PrimFlagGlass(fullHit.primIdx) && uViewMode == 0) {
       linearColor = shadeTwoLayerGlass(fullHit, rd);
     } else {
@@ -1076,12 +1165,13 @@ void main() {
     srgb = pow(mapped, vec3(1.0 / 2.2));
   }
 
-  fragColor = vec4(srgb, float(entityCode) / 255.0);
+  fragColor = vec4(srgb, 1.0);
+  fragMeta = encodeMeta(entityCode, hitDist);
 }
 `;
 
 //==========================================================================================================================================
-// PASS 2: SCREEN-SPACE 2PX ANTI-ALIASED SILHOUETTE SELECTION OUTLINE SHADER
+// PASS 2: DEPTH-AWARE 2PX ANTI-ALIASED OUTER SILHOUETTE SELECTION OUTLINE SHADER
 //==========================================================================================================================================
 export const OUTLINE_FRAGMENT_SHADER = `#version 300 es
 precision highp float;
@@ -1090,10 +1180,15 @@ in vec2 vUv;
 out vec4 fragColor;
 
 uniform sampler2D uSceneTex;
+uniform sampler2D uMetaTex;
 uniform int       uSelectedCode;
 
-int decodeCode(float a) {
-  return int(floor(a * 255.0 + 0.5));
+int decodeCode(vec4 meta) {
+  return int(floor(meta.r * 255.0 + 0.5));
+}
+
+float decodeDepth(vec4 meta) {
+  return meta.g + meta.b / 255.0;
 }
 
 void main() {
@@ -1103,7 +1198,9 @@ void main() {
   vec3 color = center.rgb;
 
   if (uSelectedCode > 0) {
-    int c0 = decodeCode(center.a);
+    vec4 m0 = texelFetch(uMetaTex, p, 0);
+    int c0 = decodeCode(m0);
+    float d0 = decodeDepth(m0);
     bool centerSelected = (c0 == uSelectedCode);
 
     const ivec2 offsets[12] = ivec2[12](
@@ -1115,11 +1212,14 @@ void main() {
     float edgeStrength = 0.0;
     for (int k = 0; k < 12; ++k) {
       ivec2 q = clamp(p + offsets[k], ivec2(0), texSize - ivec2(1));
-      int cq = decodeCode(texelFetch(uSceneTex, q, 0).a);
+      vec4 mq = texelFetch(uMetaTex, q, 0);
+      int cq = decodeCode(mq);
+      float dq = decodeDepth(mq);
       bool neighborSelected = (cq == uSelectedCode);
-      if (!centerSelected && neighborSelected) {
+      // True outer silhouette test: outline ONLY where the selected surface is NOT occluded by a nearer object!
+      if (!centerSelected && neighborSelected && dq <= d0 + 0.006) {
         edgeStrength = max(edgeStrength, k < 4 ? 1.0 : (k < 8 ? 0.88 : 0.62));
-      } else if (centerSelected && !neighborSelected && k < 4) {
+      } else if (centerSelected && !neighborSelected && k < 4 && d0 <= dq + 0.006) {
         edgeStrength = max(edgeStrength, 0.35);
       }
     }
@@ -1339,6 +1439,13 @@ export default function GtxWorldViewport({
     Gl.texParameteri(Gl.TEXTURE_2D, Gl.TEXTURE_WRAP_S, Gl.CLAMP_TO_EDGE);
     Gl.texParameteri(Gl.TEXTURE_2D, Gl.TEXTURE_WRAP_T, Gl.CLAMP_TO_EDGE);
 
+    const MetaTex = Gl.createTexture();
+    Gl.bindTexture(Gl.TEXTURE_2D, MetaTex);
+    Gl.texParameteri(Gl.TEXTURE_2D, Gl.TEXTURE_MIN_FILTER, Gl.NEAREST);
+    Gl.texParameteri(Gl.TEXTURE_2D, Gl.TEXTURE_MAG_FILTER, Gl.NEAREST);
+    Gl.texParameteri(Gl.TEXTURE_2D, Gl.TEXTURE_WRAP_S, Gl.CLAMP_TO_EDGE);
+    Gl.texParameteri(Gl.TEXTURE_2D, Gl.TEXTURE_WRAP_T, Gl.CLAMP_TO_EDGE);
+
     const GizmoVao = Gl.createVertexArray();
     const GizmoVbo = Gl.createBuffer();
     Gl.bindVertexArray(GizmoVao);
@@ -1367,6 +1474,7 @@ export default function GtxWorldViewport({
       AtlasTex,
       SceneFbo,
       SceneTex,
+      MetaTex,
       FboWidth: 0,
       FboHeight: 0,
       GizmoVao,
@@ -1399,6 +1507,7 @@ export default function GtxWorldViewport({
       },
       OutlineUniforms: {
         uSceneTex: Gl.getUniformLocation(OutlineProg, "uSceneTex"),
+        uMetaTex: Gl.getUniformLocation(OutlineProg, "uMetaTex"),
         uSelectedCode: Gl.getUniformLocation(OutlineProg, "uSelectedCode"),
       },
       GizmoUniforms: {
@@ -1451,6 +1560,7 @@ export default function GtxWorldViewport({
         State.Gl.deleteVertexArray(State.EmptyVao);
         State.Gl.deleteTexture(State.AtlasTex);
         State.Gl.deleteTexture(State.SceneTex);
+        State.Gl.deleteTexture(State.MetaTex);
         State.Gl.deleteFramebuffer(State.SceneFbo);
         State.Gl.deleteProgram(State.SceneProg);
         State.Gl.deleteProgram(State.OutlineProg);
@@ -1504,6 +1614,18 @@ export default function GtxWorldViewport({
             Gl.UNSIGNED_BYTE,
             null,
           );
+          Gl.bindTexture(Gl.TEXTURE_2D, CurState.MetaTex);
+          Gl.texImage2D(
+            Gl.TEXTURE_2D,
+            0,
+            Gl.RGBA8,
+            Width,
+            Height,
+            0,
+            Gl.RGBA,
+            Gl.UNSIGNED_BYTE,
+            null,
+          );
           Gl.bindFramebuffer(Gl.FRAMEBUFFER, CurState.SceneFbo);
           Gl.framebufferTexture2D(
             Gl.FRAMEBUFFER,
@@ -1512,6 +1634,14 @@ export default function GtxWorldViewport({
             CurState.SceneTex,
             0,
           );
+          Gl.framebufferTexture2D(
+            Gl.FRAMEBUFFER,
+            Gl.COLOR_ATTACHMENT1,
+            Gl.TEXTURE_2D,
+            CurState.MetaTex,
+            0,
+          );
+          Gl.drawBuffers([Gl.COLOR_ATTACHMENT0, Gl.COLOR_ATTACHMENT1]);
           CurState.FboWidth = Width;
           CurState.FboHeight = Height;
           SceneDirtyRef.current = true;
@@ -1666,6 +1796,9 @@ export default function GtxWorldViewport({
         Gl.activeTexture(Gl.TEXTURE0);
         Gl.bindTexture(Gl.TEXTURE_2D, CurState.SceneTex);
         Gl.uniform1i(CurState.OutlineUniforms.uSceneTex, 0);
+        Gl.activeTexture(Gl.TEXTURE1);
+        Gl.bindTexture(Gl.TEXTURE_2D, CurState.MetaTex);
+        Gl.uniform1i(CurState.OutlineUniforms.uMetaTex, 1);
         Gl.uniform1i(CurState.OutlineUniforms.uSelectedCode, SelectedCode);
         Gl.bindVertexArray(CurState.EmptyVao);
         Gl.drawArrays(Gl.TRIANGLES, 0, 3);

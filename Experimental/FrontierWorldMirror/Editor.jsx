@@ -215,7 +215,7 @@ const DebugViews = [
   "Patch Tiles",
   "Tiles + Wireframe",
 ];
-const StorageKey = "Frontier.WorldMirrorGtx.v1";
+const StorageKey = "Frontier.WorldMirrorGtx.v2";
 function Restore() {
   try {
     return JSON.parse(localStorage.getItem(StorageKey)) || {};
