@@ -1,7 +1,7 @@
 /*============================================================================================================================================
                                                           FRONTIEREDITORLAUNCH.CPP
 ============================================================================================================================================*/
-// 🧩 Multi-workspace FrontierEditor desktop executable launching EditorLifecycle, UVWorkspaceHost, ControlCentre & ContentBrowser
+// 🧩 Multi-workspace FrontierEditor desktop executable launching EditorLifecycle, ControlCentre & ContentBrowser (standalone from FrontierUV)
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                                        INCLUDES
@@ -23,6 +23,7 @@ int main(int Argc, char** Argv)
     Options.WindowTitle       = "Frontier Editor";
     Options.InitialWidthPx    = 1840u;
     Options.InitialHeightPx   = 980u;
+    Options.OpenWorldEditor   = true;
 
     const std::span<const char* const> Args(
         const_cast<const char* const*>(Argv),

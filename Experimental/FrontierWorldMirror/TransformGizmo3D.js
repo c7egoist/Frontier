@@ -128,8 +128,8 @@ export function BuildSlateGizmoGeometry(Pivot, CameraForward, WorldRadius) {
       const B1 = Add3(P0, Mul3(RDir1, Radius));
       const T0 = Add3(P1, Mul3(RDir0, Radius));
       const T1 = Add3(P1, Mul3(RDir1, Radius));
-      PushTri(OpaqueVerts, B0, B1, T1, RDir0, RDir1, RDir1, Col, Handle, 0.65, false);
-      PushTri(OpaqueVerts, B0, T1, T0, RDir0, RDir1, RDir0, Col, Handle, 0.65, false);
+      PushTri(OpaqueVerts, B0, B1, T1, RDir0, RDir1, RDir1, Col, Handle, 0.65, true);
+      PushTri(OpaqueVerts, B0, T1, T0, RDir0, RDir1, RDir0, Col, Handle, 0.65, true);
     }
   };
 
@@ -355,27 +355,129 @@ export function EvaluatePlaneRayIntersection(PlaneOrigin, PlaneNormal, RayOrigin
   return Add3(RayOrigin, Mul3(RayDir, T));
 }
 
+function EvaluateRaySegmentClosest(RayOrigin, RayDir, SegA, SegB) {
+  const Seg = Sub3(SegB, SegA);
+  const SegLen = Len3(Seg);
+  if (SegLen < 1e-6) {
+    const T = Math.max(0.0, Dot3(Sub3(SegA, RayOrigin), RayDir));
+    const Pt = Add3(RayOrigin, Mul3(RayDir, T));
+    return { Dist: Len3(Sub3(Pt, SegA)), RayT: T, AxisParam: 0.0 };
+  }
+  const Axis = Mul3(Seg, 1.0 / SegLen);
+  const RawS = EvaluateAxisRayParameter(SegA, Axis, RayOrigin, RayDir);
+  const ClampedS = Math.max(0.0, Math.min(SegLen, RawS));
+  const AxisPt = Add3(SegA, Mul3(Axis, ClampedS));
+  const RayT = Math.max(0.0, Dot3(Sub3(AxisPt, RayOrigin), RayDir));
+  const RayPt = Add3(RayOrigin, Mul3(RayDir, RayT));
+  return { Dist: Len3(Sub3(RayPt, AxisPt)), RayT, AxisParam: ClampedS };
+}
+
 export function PickGizmoHandle(RayOrigin, RayDir, BuiltGizmo) {
   if (!BuiltGizmo) return GizmoHandle.None;
+  const Pivot = BuiltGizmo.Pivot;
+  const L = BuiltGizmo.WorldRadius;
   let BestT = Infinity;
   let BestHandle = GizmoHandle.None;
 
-  // Check CenterRing billboarded annulus with comfortable pick tolerance
+  const Consider = (CandidateT, Handle) => {
+    if (CandidateT > 1e-4 && CandidateT < BestT) {
+      BestT = CandidateT;
+      BestHandle = Handle;
+    }
+  };
+
+  // 1. CenterRing billboarded annulus with generous Slate pick tolerance
   const RingHit = EvaluatePlaneRayIntersection(
-    BuiltGizmo.Pivot,
+    Pivot,
     BuiltGizmo.ViewNormal,
     RayOrigin,
     RayDir,
   );
   if (RingHit) {
-    const Radial = Len3(Sub3(RingHit, BuiltGizmo.Pivot));
-    const BandTol = BuiltGizmo.WorldRadius * 0.032;
+    const Radial = Len3(Sub3(RingHit, Pivot));
+    const BandTol = L * 0.046;
     if (Math.abs(Radial - BuiltGizmo.CenterMajorR) <= BandTol) {
-      BestT = Len3(Sub3(RingHit, RayOrigin));
-      BestHandle = GizmoHandle.CenterRing;
+      Consider(Len3(Sub3(RingHit, RayOrigin)), GizmoHandle.CenterRing);
     }
   }
 
+  // 2. Plane Quads (YZ, XZ, XY) + 31° Rotation Arcs (RotateX, RotateY, RotateZ)
+  const TipDist = 0.95 * L;
+  const PlaneHalf = 0.08 * L;
+  const PlaneOff = TipDist - PlaneHalf;
+  const PlanePickHalf = PlaneHalf * 1.24;
+  const ArcRadius = TipDist * 0.62;
+  const ArcPickTol = 0.062 * L;
+  const ArcMinRad = (45.0 - 19.0) * DEG_TO_RAD;
+  const ArcMaxRad = (45.0 + 19.0) * DEG_TO_RAD;
+
+  const PlaneDefs = [
+    { N: [1, 0, 0], U: [0, 1, 0], V: [0, 0, 1], PlaneH: GizmoHandle.PlaneYZ, RotH: GizmoHandle.RotateX },
+    { N: [0, 1, 0], U: [0, 0, 1], V: [1, 0, 0], PlaneH: GizmoHandle.PlaneXZ, RotH: GizmoHandle.RotateY },
+    { N: [0, 0, 1], U: [1, 0, 0], V: [0, 1, 0], PlaneH: GizmoHandle.PlaneXY, RotH: GizmoHandle.RotateZ },
+  ];
+  for (const Def of PlaneDefs) {
+    const Hit = EvaluatePlaneRayIntersection(Pivot, Def.N, RayOrigin, RayDir);
+    if (!Hit) continue;
+    const Rel = Sub3(Hit, Pivot);
+    const Cu = Dot3(Rel, Def.U);
+    const Cv = Dot3(Rel, Def.V);
+    const HitT = Len3(Sub3(Hit, RayOrigin));
+
+    if (
+      Math.abs(Cu - PlaneOff) <= PlanePickHalf &&
+      Math.abs(Cv - PlaneOff) <= PlanePickHalf
+    ) {
+      Consider(HitT - 0.015 * L, Def.PlaneH);
+    }
+
+    if (Cu > 0.0 && Cv > 0.0) {
+      const Rad = Math.hypot(Cu, Cv);
+      const Ang = Math.atan2(Cv, Cu);
+      if (Math.abs(Rad - ArcRadius) <= ArcPickTol && Ang >= ArcMinRad && Ang <= ArcMaxRad) {
+        Consider(HitT - 0.012 * L, Def.RotH);
+      }
+    }
+  }
+
+  // 3. Scale Cylinders + Full Axis Stems & Translate Cones (wide ray-capsule tolerance so stems NEVER miss!)
+  const CylDist = 0.67 * L;
+  const CylHalfH = 0.095 * L;
+  const CylPickR = 0.082 * L;
+  const StemStart = BuiltGizmo.CenterMajorR * 0.96;
+  const ConeEnd = TipDist + 0.195 * L;
+  const StemPickR = 0.048 * L;
+  const ConePickR = 0.082 * L;
+
+  const AxisDefs = [
+    { Axis: [1, 0, 0], TransH: GizmoHandle.TranslateX, ScaleH: GizmoHandle.ScaleX },
+    { Axis: [0, 1, 0], TransH: GizmoHandle.TranslateY, ScaleH: GizmoHandle.ScaleY },
+    { Axis: [0, 0, 1], TransH: GizmoHandle.TranslateZ, ScaleH: GizmoHandle.ScaleZ },
+  ];
+  for (const Def of AxisDefs) {
+    const CylA = Add3(Pivot, Mul3(Def.Axis, CylDist - CylHalfH));
+    const CylB = Add3(Pivot, Mul3(Def.Axis, CylDist + CylHalfH));
+    const CylSeg = EvaluateRaySegmentClosest(RayOrigin, RayDir, CylA, CylB);
+    if (CylSeg.Dist <= CylPickR) {
+      Consider(CylSeg.RayT - 0.02 * L, Def.ScaleH);
+    }
+
+    const ConeA = Add3(Pivot, Mul3(Def.Axis, TipDist - 0.02 * L));
+    const ConeB = Add3(Pivot, Mul3(Def.Axis, ConeEnd));
+    const ConeSeg = EvaluateRaySegmentClosest(RayOrigin, RayDir, ConeA, ConeB);
+    if (ConeSeg.Dist <= ConePickR) {
+      Consider(ConeSeg.RayT - 0.018 * L, Def.TransH);
+    }
+
+    const StemA = Add3(Pivot, Mul3(Def.Axis, StemStart));
+    const StemB = Add3(Pivot, Mul3(Def.Axis, TipDist));
+    const StemSeg = EvaluateRaySegmentClosest(RayOrigin, RayDir, StemA, StemB);
+    if (StemSeg.Dist <= StemPickR) {
+      Consider(StemSeg.RayT, Def.TransH);
+    }
+  }
+
+  // 4. Exact triangle refinement on visual mesh
   for (const Tri of BuiltGizmo.PickTriangles) {
     const T = IntersectRayTriangle(RayOrigin, RayDir, Tri.A, Tri.B, Tri.C);
     if (T < BestT) {
@@ -653,6 +755,43 @@ export function BuildColumnMajorViewProj(Basis, CameraState, Aspect, Near = 0.02
     Proj[5] = 1.0 / HalfH;
     Proj[10] = -2.0 / (Far - Near);
     Proj[14] = -(Far + Near) / (Far - Near);
+    Proj[15] = 1.0;
+  }
+
+  return MultiplyMat4(Proj, View);
+}
+
+// WebGPU / Vulkan [0, 1] clip-space depth variant of BuildColumnMajorViewProj
+export function BuildColumnMajorViewProjZeroToOne(Basis, CameraState, Aspect, Near = 0.02, Far = 80.0) {
+  const R = Basis.Right;
+  const U = Basis.Up;
+  const F = Basis.Forward;
+  const P = CameraState.Position;
+
+  const View = new Float32Array([
+    R[0], U[0], -F[0], 0,
+    R[1], U[1], -F[1], 0,
+    R[2], U[2], -F[2], 0,
+    -Dot3(R, P), -Dot3(U, P), Dot3(F, P), 1,
+  ]);
+
+  const SafeAspect = Math.max(0.1, Aspect);
+  const Proj = new Float32Array(16);
+  if (CameraState.Projection === "Perspective") {
+    const FovRad = ((CameraState.FovDegrees || 52) * Math.PI) / 180.0;
+    const Focal = 1.0 / Math.tan(FovRad * 0.5);
+    Proj[0] = Focal / SafeAspect;
+    Proj[5] = Focal;
+    Proj[10] = Far / (Near - Far);
+    Proj[11] = -1.0;
+    Proj[14] = (Far * Near) / (Near - Far);
+  } else {
+    const HalfH = Math.max(0.15, CameraState.OrthoHalfHeight || 2.15);
+    const HalfW = HalfH * SafeAspect;
+    Proj[0] = 1.0 / HalfW;
+    Proj[5] = 1.0 / HalfH;
+    Proj[10] = -1.0 / (Far - Near);
+    Proj[14] = -Near / (Far - Near);
     Proj[15] = 1.0;
   }
 

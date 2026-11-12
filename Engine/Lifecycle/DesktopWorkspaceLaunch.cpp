@@ -330,8 +330,12 @@ int LaunchDesktopWorkspace(
         return 1;
     }
 
+    const bool StandaloneUVLaunch =
+        (EngineConfig.QueryLaunchMode() == Configuration::HostLaunchMode::StandaloneWorkspace) &&
+        !InitialOptions.OpenWorldEditor;
+
     GeometricRaster::UVWorkspaceRasterizer UVRasterizer {};
-    if (!UVRasterizer.InitializeRasterizer(&DeviceInterchange, CompiledShaderDir))
+    if (StandaloneUVLaunch && !UVRasterizer.InitializeRasterizer(&DeviceInterchange, CompiledShaderDir))
     {
         std::fprintf(stderr, "[FrontierHost] UVWorkspaceRasterizer initialization failed.\n");
         return 1;
@@ -414,21 +418,24 @@ int LaunchDesktopWorkspace(
     }
 
     Workspaces::UVWorkspaceHost UVHost {};
-    UVHost.ConfigureLaunchPolicy(EngineConfig);
-    (void)UVHost.AccessSession().InitializeGPUSolvers(&DeviceInterchange, CompiledShaderDir);
-    (void)UVHost.AttachVulkanRasterizer(&UVRasterizer);
-
-    if (!InitialOptions.StartupImportPath.empty())
+    if (StandaloneUVLaunch)
     {
-        std::string ImportDiag {};
-        if (!UVHost.IntakeExternalFileDrop(InitialOptions.StartupImportPath, ImportDiag))
+        UVHost.ConfigureLaunchPolicy(EngineConfig);
+        (void)UVHost.AccessSession().InitializeGPUSolvers(&DeviceInterchange, CompiledShaderDir);
+        (void)UVHost.AttachVulkanRasterizer(&UVRasterizer);
+
+        if (!InitialOptions.StartupImportPath.empty())
         {
-            std::fprintf(stderr, "[FrontierHost] Startup import failed: %s\n", ImportDiag.c_str());
+            std::string ImportDiag {};
+            if (!UVHost.IntakeExternalFileDrop(InitialOptions.StartupImportPath, ImportDiag))
+            {
+                std::fprintf(stderr, "[FrontierHost] Startup import failed: %s\n", ImportDiag.c_str());
+            }
         }
     }
 
 #if FRONTIER_EDITOR_ENABLED
-    const bool UseFullEditorLifecycle = (EngineConfig.QueryLaunchMode() == Configuration::HostLaunchMode::FeatureSet);
+    const bool UseFullEditorLifecycle = !StandaloneUVLaunch;
     Lifecycle::EditorLifecycle EditorLoop {};
     Editor::Explorer::ContentBrowser StandaloneBrowser {};
 #endif
@@ -446,10 +453,7 @@ int LaunchDesktopWorkspace(
             InitialOptions.WindowTitle, InitialOptions.InitialWidthPx, InitialOptions.InitialHeightPx);
         EditorCfg.FontRepositoryRoot    = RepositoryRootPath / "EngineContent/FontsArchives";
         EditorCfg.PopulateShowcaseScene = true;
-        if (!InitialOptions.OpenWorldEditor)
-        {
-            EditorLoop.AttachUVWorkspaceHost(&UVHost);
-        }
+        // UV Editor runs strictly standalone via FrontierUV executable — do not attach UVHost inside FrontierEditor.
         if (!EditorLoop.Initialize(EditorCfg))
         {
             std::fprintf(stderr, "[FrontierHost] EditorLifecycle initialization failed.\n");
@@ -554,10 +558,13 @@ int LaunchDesktopWorkspace(
             InputCoordinator.InspectPointerSnapshot().ScrollDeltaX,
             InputCoordinator.InspectPointerSnapshot().ScrollDeltaY);
 
-        for (const std::string& DropFile : SupplementalQueue.DroppedPaths)
+        if (StandaloneUVLaunch)
         {
-            std::string DropDiag {};
-            (void)UVHost.IntakeExternalFileDrop(DropFile, DropDiag);
+            for (const std::string& DropFile : SupplementalQueue.DroppedPaths)
+            {
+                std::string DropDiag {};
+                (void)UVHost.IntakeExternalFileDrop(DropFile, DropDiag);
+            }
         }
         SupplementalQueue.DroppedPaths.clear();
 #endif
@@ -625,8 +632,11 @@ int LaunchDesktopWorkspace(
     {
         StandaloneDock.Finalize();
     }
-    UVHost.AccessSession().TeardownGPUSolvers();
-    UVRasterizer.TeardownRasterizer();
+    if (StandaloneUVLaunch)
+    {
+        UVHost.AccessSession().TeardownGPUSolvers();
+        UVRasterizer.TeardownRasterizer();
+    }
     InputCoordinator.Finalize();
 #if !defined(__ANDROID__)
     ActiveSupplementalQueue = nullptr;
