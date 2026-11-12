@@ -605,7 +605,7 @@ async function startBenchmark() {
     // Hero three-quarter foreground-penumbra + color-bleed showcase camera
     camYaw: -1.88,
     camPitch: 0.30,
-    camDist: 5.95,
+    camDist: 7.40,
 
     sdfGiMs: 0.25,
     sdfReflMs: 0.20,
@@ -651,7 +651,7 @@ async function startBenchmark() {
   window.addEventListener("pointerup", () => { draggingCam = false; draggingSplit = false; });
   canvas.addEventListener("wheel", (e) => {
     e.preventDefault();
-    state.camDist = Math.min(16.5, Math.max(3.6, state.camDist + e.deltaY * 0.005));
+    state.camDist = Math.min(44.0, Math.max(3.4, state.camDist + e.deltaY * 0.008));
   }, { passive: false });
 
   const splitDiv = document.getElementById("split-divider");
@@ -695,17 +695,17 @@ async function startBenchmark() {
       const targetSteer = steerIn * 0.48;
       state.steerAngle += (targetSteer - state.steerAngle) * Math.min(1, dt * 8.5);
       if (throttle !== 0) {
-        state.carSpeed += throttle * 6.8 * dt;
+        state.carSpeed += throttle * 8.5 * dt;
       } else {
-        state.carSpeed *= Math.pow(0.22, dt);
+        state.carSpeed *= Math.pow(0.24, dt);
       }
       if (keys.has(" ")) state.carSpeed *= Math.pow(0.02, dt);
-      state.carSpeed = Math.max(-4.5, Math.min(6.5, state.carSpeed));
+      state.carSpeed = Math.max(-7.5, Math.min(12.0, state.carSpeed));
 
       const wheelbase = 3.37;
       state.carYaw += (state.carSpeed / wheelbase) * Math.tan(state.steerAngle) * dt;
-      state.carX = Math.max(-3.1, Math.min(4.8, state.carX + Math.cos(state.carYaw) * state.carSpeed * dt));
-      state.carY = Math.max(-3.8, Math.min(3.6, state.carY + Math.sin(state.carYaw) * state.carSpeed * dt));
+      state.carX = Math.max(-19.2, Math.min(18.0, state.carX + Math.cos(state.carYaw) * state.carSpeed * dt));
+      state.carY = Math.max(-12.4, Math.min(11.2, state.carY + Math.sin(state.carYaw) * state.carSpeed * dt));
       state.wheelSpin += (state.carSpeed * dt) / TYRE_RADIUS;
     }
 
@@ -1167,7 +1167,7 @@ async function startBenchmark() {
       target[2] + Math.sin(pitch) * dist,
     ];
     const view = mat4LookAtRH(camPos, target, [0, 0, 1]);
-    const proj = mat4PerspectiveRH((52 * Math.PI) / 180, screenW / screenH, 0.15, 120.0);
+    const proj = mat4PerspectiveRH((52 * Math.PI) / 180, screenW / screenH, 0.15, 220.0);
     const viewProj = mat4Multiply(proj, view);
     const invViewProj = mat4InvertGeneral(viewProj);
     return { camPos, viewProj, invViewProj };
@@ -1184,6 +1184,10 @@ async function startBenchmark() {
       `G:${state.sdfGiMs.toFixed(1)}/${state.bvhGiMs.toFixed(1)} · R:${state.sdfReflMs.toFixed(1)}/${state.bvhReflMs.toFixed(1)}`;
     document.getElementById("speedup-readout").textContent = `${ratio.toFixed(1)}× Faster`;
     document.getElementById("delta-readout").textContent = `${state.pixelDeltaPct.toFixed(2)} %`;
+    const sdfEqFps = Math.round(1000.0 / Math.max(totalSdf, 0.05));
+    const bvhEqFps = Math.round(1000.0 / Math.max(totalBvh, 0.05));
+    const uncappedEl = document.getElementById("uncapped-fps-readout");
+    if (uncappedEl) uncappedEl.textContent = `SDF ~${sdfEqFps} · BVH ~${bvhEqFps} FPS`;
 
     const maxBar = Math.max(totalSdf, totalBvh, 0.5);
     document.getElementById("sdf-bar").style.width = `${Math.max(4, (totalSdf / maxBar) * 100).toFixed(1)}%`;
@@ -1375,9 +1379,14 @@ async function startBenchmark() {
     lastNow = now;
     fpsAccum += dt;
     fpsFrames++;
-    if (fpsAccum >= 0.35) {
+    if (fpsAccum >= 0.25) {
       const fps = fpsFrames / fpsAccum;
-      document.getElementById("fps-readout").textContent = `${fps.toFixed(0)} FPS (${(1000 / fps).toFixed(1)} ms)`;
+      const msTxt = (1000 / Math.max(fps, 1)).toFixed(1);
+      document.getElementById("fps-readout").textContent = `${fps.toFixed(0)} FPS (${msTxt} ms)`;
+      const heroFps = document.getElementById("fps-hero-readout");
+      if (heroFps) heroFps.textContent = `${fps.toFixed(0)} FPS (${msTxt} ms)`;
+      const hudPill = document.getElementById("hud-fps-pill");
+      if (hudPill) hudPill.textContent = `${fps.toFixed(0)} FPS · ${msTxt} ms`;
       fpsAccum = 0;
       fpsFrames = 0;
     }

@@ -1226,7 +1226,7 @@ void main() {
         break;
       }
       t += max(d * 0.92, vox * 0.22);
-      if (t > 28.0) break;
+      if (t > 60.0) break;
     }
 
     if (!hit) {

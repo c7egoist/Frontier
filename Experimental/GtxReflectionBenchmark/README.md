@@ -10,8 +10,9 @@ python3 Experimental/GtxReflectionBenchmark/Serve.py 8096
 
 ## Architecture & Asset Bundle (`Assets/VehicleBenchmarkAssets.bin`, `"FVB1"`)
 
-- **Scene Geometry (`25,512` Instanced Triangles, `5,684` Binned-SAH BLAS Nodes)**:
-  - `ControlVehicleBody` (`2,960` triangles), `4x ControlVehicleRim` (`1,568` triangles each), `4x ControlVehicleTyre` (`3,968` triangles each), and `ProvingGroundArena` (`17 m` Silver Mirror Wall, East Gold Mirror Wall, Sunlit Vivid Crimson-Red Color-Bleed Wall `mat 18`, Sunlit Vivid Cobalt-Cyan Color-Bleed Fin `mat 19`, Matte White Clay GI Plinth `mat 20`, Overhead Showroom Portals, and Satin Showroom Concrete Pad).
+- **Expanded Spacious Proving-Ground Scene (`25,920` Instanced Triangles, `5,930` Binned-SAH BLAS Nodes)**:
+  - `ControlVehicleBody` (`2,960` triangles), `4x ControlVehicleRim` (`1,568` triangles each), `4x ControlVehicleTyre` (`3,968` triangles each), and an expanded **`44 m × 28 m` `ProvingGroundArena` hall on a `96 m × 96 m` showroom concrete pad** (`44 m` North Silver Mirror Wall, `28 m` East Gold Mirror Wall, `6.4 m` High-Bay Overhead Showroom Portals, Central + West/East Vivid Crimson-Red `mat 18` & Cobalt-Cyan `mat 19` Color-Bleed Bays, Matte White Clay GI Plinths `mat 20`, and Chrome/Cyan Slalom Pylons).
+  - Prominent **Live Display FPS (`#hud-fps-pill` & `#fps-hero-readout`) + Uncapped Pass-Equivalent FPS (`SDF` vs `BVH`)** HUD telemetry, unlocked `44 m` wide-angle orbit zoom, and `37 m × 23 m` `WASD` drivable proving-ground floor.
 - **Zero-Ghosting / Zero-Smearing / Zero-Jitter Lighting Pipeline**:
   - **Zero Ghosting**: 100% single-frame evaluation (`0%` temporal history buffer) across all GI, shadow, penumbra, and reflection passes.
   - **Zero Smearing**: Demodulated irradiance filtering (`GI_BILATERAL_FRAG` filters `(giIrr.rgb, sunVis)` only with `normal^32 × exp(-|planeDist| * 45)` edge-stopping + PCSS blocker-distance contact-hardening shadow kernel, re-multiplying full-res albedo/procedural grid + joint-bilateral upsampling in `COMPOSITE_FRAG`).
