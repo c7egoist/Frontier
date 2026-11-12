@@ -19,6 +19,9 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(FRONTIER_PROFILE "Development" CACHE STRING "Active Frontier build profile (Editor, Development, Shipping)")
 set_property(CACHE FRONTIER_PROFILE PROPERTY STRINGS Editor Development Shipping)
 
+option(FRONTIER_ENABLE_EOS_SDK    "Compile proprietary Epic Online Services transport adapter instead of open-source stub" OFF)
+option(FRONTIER_ENABLE_PHOTON_SDK "Compile proprietary Photon Realtime C++ transport adapter instead of open-source stub" OFF)
+
 if(FRONTIER_PROFILE STREQUAL "Editor")
     set(FRONTIER_PROFILE_EDITOR_DEF      1)
     set(FRONTIER_PROFILE_DEVELOPMENT_DEF 0)
@@ -282,6 +285,18 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/Codecs/TextureCodec.cpp
     Engine/Codecs/MaterialCodec.cpp
     Engine/Codecs/VectorCodec.cpp
+    Engine/Codecs/NetworkCodec.cpp
+    Engine/NetworkingSpace/PacketSerializer.cpp
+    Engine/NetworkingSpace/NetworkEndpointRegister.cpp
+    Engine/NetworkingSpace/DifferentialWorldEncoder.cpp
+    Engine/NetworkingSpace/RemoteDirectiveRouter.cpp
+    Engine/NetworkingSpace/NetworkingExtension.cpp
+    Engine/NetworkingSpace/Policies/AuthenticationScopePolicy.cpp
+    Engine/NetworkingSpace/Policies/TransportSelectionPolicy.cpp
+    Engine/NetworkingSpace/Policies/ReplicationPolicy.cpp
+    Engine/NetworkingSpace/Policies/SessionLifecyclePolicy.cpp
+    Engine/NetworkingSpace/Transports/LoopbackTransport.cpp
+    Engine/NetworkingSpace/Transports/SocketTransport.cpp
     Engine/Workspaces/Revision/ContentRegion.cpp
     Engine/Workspaces/Revision/NonLinearHistory.cpp
     Engine/Workspaces/Revision/OperationRecorder.cpp
@@ -304,6 +319,16 @@ set(FRONTIER_ENGINE_SOURCES
 )
 if(NOT ANDROID)
     list(APPEND FRONTIER_ENGINE_SOURCES Engine/Windowing/PlatformWindowDesktop.cpp)
+endif()
+if(FRONTIER_ENABLE_EOS_SDK)
+    list(APPEND FRONTIER_ENGINE_SOURCES Engine/NetworkingSpace/Transports/EpicOnlineTransport.cpp)
+else()
+    list(APPEND FRONTIER_ENGINE_SOURCES Engine/NetworkingSpace/Transports/EpicStubTransport.cpp)
+endif()
+if(FRONTIER_ENABLE_PHOTON_SDK)
+    list(APPEND FRONTIER_ENGINE_SOURCES Engine/NetworkingSpace/Transports/PhotonRealtimeTransport.cpp)
+else()
+    list(APPEND FRONTIER_ENGINE_SOURCES Engine/NetworkingSpace/Transports/PhotonStubTransport.cpp)
 endif()
 if(FRONTIER_PROFILE STREQUAL "Editor")
     list(APPEND FRONTIER_ENGINE_SOURCES
@@ -328,6 +353,9 @@ target_compile_definitions(FrontierEngine PUBLIC
     "FRONTIER_COMPILED_SHADER_DIR=\"${FRONTIER_COMPILED_SHADER_DIR}\""
 )
 target_link_libraries(FrontierEngine PUBLIC FrontierCompileSettings Threads::Threads ${CMAKE_DL_LIBS})
+if(WIN32)
+    target_link_libraries(FrontierEngine PUBLIC ws2_32)
+endif()
 if(NOT FRONTIER_PROFILE STREQUAL "Shipping")
     target_link_libraries(FrontierEngine PUBLIC FrontierImGui)
 endif()
@@ -389,6 +417,7 @@ if(BUILD_TESTING)
     frontier_register_exhibit(UVWorkspaceUIValidation           Exhibits/UVWorkspaceUIValidation.cpp)
     frontier_register_exhibit(UVParameterizationValidation      Exhibits/UVParameterizationValidation.cpp)
     frontier_register_exhibit(UVInteractiveAuthoringValidation  Exhibits/UVInteractiveAuthoringValidation.cpp)
+    frontier_register_exhibit(NetworkingSpaceValidation         Exhibits/NetworkingSpaceValidation.cpp)
 
     if(NOT ANDROID AND NOT FRONTIER_PROFILE STREQUAL "Shipping")
         add_test(

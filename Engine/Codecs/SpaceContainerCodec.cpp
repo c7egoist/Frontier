@@ -31,7 +31,7 @@ struct ExtensionMappingEntry
     std::string_view       LowercaseExtension;
 };
 
-constexpr std::array<ExtensionMappingEntry, 20u> ExtensionRegistry = {{
+constexpr std::array<ExtensionMappingEntry, 21u> ExtensionRegistry = {{
     { SpaceExtensionCategory::ProjectSpace,    ".ProjectSpace",    ".projectspace"    },
     { SpaceExtensionCategory::ColourSpace,     ".ColourSpace",     ".colourspace"     },
     { SpaceExtensionCategory::GeometrySpace,   ".GeometrySpace",   ".geometryspace"   },
@@ -52,6 +52,7 @@ constexpr std::array<ExtensionMappingEntry, 20u> ExtensionRegistry = {{
     { SpaceExtensionCategory::Photometry,      ".Photometry",      ".photometry"      },
     { SpaceExtensionCategory::Terrain,         ".Terrain",         ".terrain"         },
     { SpaceExtensionCategory::Acoustic,        ".Acoustic",        ".acoustic"        },
+    { SpaceExtensionCategory::NetworkSpace,    ".NetworkSpace",    ".networkspace"    },
 }};
 
 struct SubFormatMappingEntry
@@ -60,7 +61,7 @@ struct SubFormatMappingEntry
     std::string_view LowercaseTag;
 };
 
-constexpr std::array<SubFormatMappingEntry, 21u> SubFormatRegistry = {{
+constexpr std::array<SubFormatMappingEntry, 23u> SubFormatRegistry = {{
     { ".DocumentHeader",   ".documentheader"   },
     { ".SectionDirectory", ".sectiondirectory" },
     { ".Revision",         ".revision"         },
@@ -82,6 +83,8 @@ constexpr std::array<SubFormatMappingEntry, 21u> SubFormatRegistry = {{
     { ".StrokeAppearance", ".strokeappearance" },
     { ".ProjectSettings",  ".projectsettings"  },
     { ".DependencyLock",   ".dependencylock"   },
+    { ".SessionRouting",   ".sessionrouting"   },
+    { ".ReplicationPolicy",".replicationpolicy"},
 }};
 
 [[nodiscard]] std::string ToAsciiLower(std::string_view Text)

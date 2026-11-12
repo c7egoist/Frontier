@@ -289,7 +289,8 @@ Frontier/
     │   ├── VectorCodec.{h,cpp}                    // VectorEncoder / VectorDecoder (.VectorSpace)
     │   ├── SimulationCodec.{h,cpp}                // SimulationEncoder / SimulationDecoder (.SimulationSpace)
     │   ├── VolumetricCodec.{h,cpp}                // VolumetricEncoder / VolumetricDecoder (.VolumetricSpace)
-    │   └── ParticleCodec.{h,cpp}                  // ParticleEncoder / ParticleDecoder (.ParticleSpace)
+    │   ├── ParticleCodec.{h,cpp}                  // ParticleEncoder / ParticleDecoder (.ParticleSpace)
+    │   └── NetworkCodec.{h,cpp}                   // NetworkEncoder / NetworkDecoder (.NetworkSpace)
     │
     ├── Interchange/                               // External industry format import/export & OS clipboard exchange
     │   ├── GeometryInterchange.{h,cpp}            // OBJ, glTF 2.0, FBX & STEP external geometry import/export
@@ -603,13 +604,25 @@ Frontier/
     │       ├── ContextDirectiveList.{h,cpp}       // Cursor-anchored contextual directives
     │       └── CommandLauncher.{h,cpp}            // Fuzzy-search directive runner
     │
-    ├── NetworkingSpace/                           // Distributed simulation, differential encoding & remote directives
-    │   ├── NetworkingExtension.{h,cpp}            // Lifecycle coordinator: polls sockets, ticks sync, flushes buffers
-    │   ├── SocketTransport.{h,cpp}                // Non-blocking UDP datagram and TCP stream transport
-    │   ├── PacketSerializer.{h,cpp}               // Bit-packed wire encoding, fragmentation, and checksum verification
-    │   ├── DifferentialWorldEncoder.{h,cpp}       // Authoritative baseline-relative quantized world delta encoder
-    │   ├── RemoteDirectiveRouter.{h,cpp}          // Reliable ordered delivery and execution of remote directives
-    │   └── NetworkEndpointRegister.{h,cpp}        // Connected socket endpoints, round-trip latency, and clock alignment
+    ├── NetworkingSpace/                           // Distributed simulation, differential encoding & networking policies
+    │   ├── NetworkingExtension.{h,cpp}            // SuspendableParticipant coordinator: routing, framing & teardown
+    │   ├── PacketSerializer.{h,cpp}               // 'FP1' + 24B CRC32C wire framing & 'FCNK' 64-slot chunk reassembly
+    │   ├── DifferentialWorldEncoder.{h,cpp}       // Sector-16 + Local-24 sub-mm delta codec, smallest-three quat & slerp
+    │   ├── RemoteDirectiveRouter.{h,cpp}          // 5-byte 3-tick loss-healing input stream & reliable ordered directives
+    │   ├── NetworkEndpointRegister.{h,cpp}        // Peer telemetry, RFC 6298 EWMA RTT/jitter & synthetic slot isolation
+    │   ├── Policies/                              // Pure networking & session policy enforcement
+    │   │   ├── AuthenticationScopePolicy.{h,cpp}  // 4-scope mandate, 180 s consent gate, redaction & policy fallback
+    │   │   ├── TransportSelectionPolicy.{h,cpp}   // Deterministic transport failover & minimax global relay cluster
+    │   │   ├── ReplicationPolicy.{h,cpp}          // Authority modes, delivery channels & publish-rate contracts
+    │   │   └── SessionLifecyclePolicy.{h,cpp}     // Lobby vs. MatchSession separation & reverse-order teardown
+    │   └── Transports/                            // Zero-vtable PacketTransportChannel implementations & SDK stubs
+    │       ├── TransportInterface.h               // C++20 PacketTransportChannel concept & PacketDatagram carrier
+    │       ├── LoopbackTransport.{h,cpp}          // SplitMix64 deterministic latency/jitter/loss packet switch
+    │       ├── SocketTransport.{h,cpp}            // Non-blocking OS UDP, RFC 5389 STUN & ChaCha20-Poly1305 relay
+    │       ├── EpicOnlineTransport.{h,cpp}        // Epic Online Services P2P/Session adapter (when SDK enabled)
+    │       ├── EpicStubTransport.cpp              // Open-source zero-SDK EOS policy & simulated failover stub
+    │       ├── PhotonRealtimeTransport.{h,cpp}    // Photon Realtime cloud room + Epic JWT adapter (when SDK enabled)
+    │       └── PhotonStubTransport.cpp            // Open-source zero-SDK Photon JWT hygiene & failover stub
     │
     └── AudioSpace/                                // Spatial acoustics, waveform decoding, and bus accumulation
         ├── AudioExtension.{h,cpp}                 // Lifecycle coordinator: device output, bus ticks, and voice budgets
