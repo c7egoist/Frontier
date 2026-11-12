@@ -428,9 +428,9 @@ function App() {
     [HiZ, ToggleHiZ] = useState(true),
     [Alias, ToggleAlias] = useState(true),
     [PatchError, SetPatchError] = useState(1);
-  const [LiveFps, SetLiveFps] = useState(60);
+  const LiveFpsRef = useRef(120);
   const HandleFpsSample = React.useCallback((NextFps) => {
-    SetLiveFps((Prev) => (Math.abs(Prev - NextFps) >= 2 ? NextFps : Prev));
+    LiveFpsRef.current = NextFps;
   }, []);
   const [Rows, StoreRows] = useState(() =>
       EnsureEditorCamera(Saved.Rows || ShowcaseInitialRows),
@@ -562,14 +562,37 @@ function App() {
     }
   }, [Rows, Values]);
   const UpdateEditorCamera = React.useCallback((Patch) => {
-    AssignValues((Previous) => ({
-      ...Previous,
-      camera: {
-        ...ShowcaseInitialValues.camera,
-        ...(Previous.camera || {}),
-        ...Patch,
-      },
-    }));
+    const ApplyPatch = () => {
+      AssignValues((Previous) => {
+        const PrevCam = Previous.camera || ShowcaseInitialValues.camera;
+        const SamePos =
+          Array.isArray(Patch.Position) &&
+          Array.isArray(PrevCam.Position) &&
+          Math.abs(Patch.Position[0] - PrevCam.Position[0]) < 1e-3 &&
+          Math.abs(Patch.Position[1] - PrevCam.Position[1]) < 1e-3 &&
+          Math.abs(Patch.Position[2] - PrevCam.Position[2]) < 1e-3;
+        const SameTgt =
+          Array.isArray(Patch.Target) &&
+          Array.isArray(PrevCam.Target) &&
+          Math.abs(Patch.Target[0] - PrevCam.Target[0]) < 1e-3 &&
+          Math.abs(Patch.Target[1] - PrevCam.Target[1]) < 1e-3 &&
+          Math.abs(Patch.Target[2] - PrevCam.Target[2]) < 1e-3;
+        if (SamePos && SameTgt) return Previous;
+        return {
+          ...Previous,
+          camera: {
+            ...ShowcaseInitialValues.camera,
+            ...PrevCam,
+            ...Patch,
+          },
+        };
+      });
+    };
+    if (typeof React.startTransition === "function") {
+      React.startTransition(ApplyPatch);
+    } else {
+      ApplyPatch();
+    }
   }, []);
   const CamPosition = Array.isArray(Values.camera?.Position)
     ? Values.camera.Position
@@ -1648,7 +1671,7 @@ function App() {
       <footer className="outliner-footer">
         <span>
           <small>REALTIME</small>
-          <RealtimeFpsReadout FallbackFps={LiveFps} />
+          <RealtimeFpsReadout FallbackFps={LiveFpsRef.current} />
         </span>
         <span>
           <small>QUALITY</small>

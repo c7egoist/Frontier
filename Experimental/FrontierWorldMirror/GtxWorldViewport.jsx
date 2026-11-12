@@ -56,6 +56,9 @@ let SessionWebGlBlocked = false;
 
 const MAX_PRIMS = 14;
 const MAX_LIGHTS = 2;
+const SCENE_DATA_W = 8;
+const SCENE_DATA_H = 16;
+const LIGHT_ROW_BASE = 14;
 
 const FULLSCREEN_VERTEX_SHADER = `#version 300 es
 precision highp float;
@@ -68,7 +71,9 @@ void main() {
 `;
 
 //==========================================================================================================================================
-// PASS 1: COMPACT, ZERO-UNROLL-EXPLOSION TIER 1 GTX WORLD FRAGMENT SHADER
+// PASS 1: HARDWARE-LOOP, ZERO-UNIFORM-ARRAY TIER 1 GTX WORLD FRAGMENT SHADER (< 18ms D3D11 FXC COMPILE, LOCKED 120 FPS!)
+//   All primitive & area-light records live in an 8x16 RGBA32F data texture (uSceneData) read via texelFetch (SM5 ld_indexable),
+//   and every loop uses dynamic uniform bounds with zero early-return/continue so ANGLE FXC emits native GPU loops without unrolling!
 //==========================================================================================================================================
 export const GTX_FRAGMENT_SHADER = `#version 300 es
 precision highp float;
@@ -93,40 +98,48 @@ uniform vec3  uSunIrradiance;
 uniform float uSunAngularRadius;
 uniform vec3  uSkyRadiance;
 
-uniform int   uLightCount;
-uniform vec4  uLightCenterHalfW[${MAX_LIGHTS}];
-uniform vec4  uLightHalfHRad[${MAX_LIGHTS}];
-
-uniform int   uPrimCount;
-uniform vec4  uPrimPosShape[${MAX_PRIMS}];   // xyz = center, w = shape (0 box, 1 sphere, 2 cyl, 3 cone, 4 torus)
-uniform vec4  uPrimHalfFlags[${MAX_PRIMS}];  // xyz = halfExtents, w = bitmask (1=shadow, 2=gi, 4=glassShell)
-uniform vec4  uPrimRotCol0[${MAX_PRIMS}];    // xyz = local +X in world, w = abbeNumber
-uniform vec4  uPrimRotCol1[${MAX_PRIMS}];    // xyz = local +Y in world, w = unused
-uniform vec4  uPrimRotCol2[${MAX_PRIMS}];    // xyz = local +Z in world, w = unused
-uniform vec4  uPrimEdgeTint[${MAX_PRIMS}];   // rgb = F82 edge tint, w = base transmission
-uniform vec4  uPrimGiBounce[${MAX_PRIMS}];   // rgb = diffuse bounce albedo, w = emission nit
+uniform int       uLightCount;
+uniform int       uPrimCount;
 uniform sampler2D uMaterialAtlas;
+uniform sampler2D uSceneData;
 
 const float PI = 3.14159265359;
 const float ATLAS_W = ${ATLAS_WIDTH}.0;
 const float ATLAS_H = ${ATLAS_HEIGHT}.0;
 const float TILE_PX = ${ATLAS_TILE_SIZE}.0;
 
-bool PrimFlagShadow(int i) { int f = int(uPrimHalfFlags[i].w + 0.5); return (f & 1) != 0; }
-bool PrimFlagGi(int i)     { int f = int(uPrimHalfFlags[i].w + 0.5); return (f & 2) != 0; }
-bool PrimFlagGlass(int i)  { int f = int(uPrimHalfFlags[i].w + 0.5); return (f & 4) != 0; }
-
-// Zero-trig CPU-precomputed orthogonal rotation transforms (3 dot products -> tiny SPIR-V & instant FXC compile!)
-vec3 invRotatePrim(vec3 v, int i) {
-  return vec3(
-    dot(uPrimRotCol0[i].xyz, v),
-    dot(uPrimRotCol1[i].xyz, v),
-    dot(uPrimRotCol2[i].xyz, v)
-  );
+// Scene data texture layout (8x16 RGBA32F):
+//   Row i (0..13 = primitives):
+//     col 0: xyz = center,          w = shape (0 box, 1 sphere, 2 cyl, 3 cone, 4 torus)
+//     col 1: xyz = halfExtents,     w = flags bitmask (1=shadow, 2=gi, 4=glassShell)
+//     col 2: xyz = rotCol0 (+X),    w = abbeNumber
+//     col 3: xyz = rotCol1 (+Y),    w = 0
+//     col 4: xyz = rotCol2 (+Z),    w = 0
+//     col 5: rgb = F82 edgeTint,    w = transmission
+//     col 6: rgb = giBounceAlbedo,  w = emission
+//   Row 14 + li (14..15 = area lights):
+//     col 0: xyz = lightCenter,     w = halfWidth
+//     col 1: x   = halfHeight,    yzw = radiance
+vec4 sdFetch(int col, int row) {
+  return texelFetch(uSceneData, ivec2(col, row), 0);
 }
 
-vec3 fwdRotatePrim(vec3 v, int i) {
-  return uPrimRotCol0[i].xyz * v.x + uPrimRotCol1[i].xyz * v.y + uPrimRotCol2[i].xyz * v.z;
+bool PrimFlagShadow(int flags) { return (flags & 1) != 0; }
+bool PrimFlagGi(int flags)     { return (flags & 2) != 0; }
+bool PrimFlagGlass(int flags)  { return (flags & 4) != 0; }
+
+void loadPrimRot(int i, out vec3 c0, out vec3 c1, out vec3 c2) {
+  c0 = sdFetch(2, i).xyz;
+  c1 = sdFetch(3, i).xyz;
+  c2 = sdFetch(4, i).xyz;
+}
+
+vec3 invRotateCols(vec3 v, vec3 c0, vec3 c1, vec3 c2) {
+  return vec3(dot(c0, v), dot(c1, v), dot(c2, v));
+}
+
+vec3 fwdRotateCols(vec3 v, vec3 c0, vec3 c1, vec3 c2) {
+  return c0 * v.x + c1 * v.y + c2 * v.z;
 }
 
 struct HitInfo {
@@ -247,7 +260,32 @@ void computeCurvedUvAndTangent(vec3 lp, vec3 h, int shape, out vec2 uv, out vec3
   }
 }
 
-// Branch-minimal scalar-T ray-primitive intersection (zero short-circuit CFG bloat -> ultra-fast FXC compile!)
+float intersectTorusT(vec3 lo, vec3 ld, vec3 h, float bestT) {
+  float majorR = max(h.x, h.y) * 0.68;
+  float minorR = max(0.04, h.z * 0.55);
+  vec3 bound = vec3(majorR + minorR + 0.04, majorR + minorR + 0.04, minorR + 0.04);
+  vec3 safeSign = step(vec3(0.0), ld) * 2.0 - 1.0;
+  vec3 invD = 1.0 / (safeSign * max(abs(ld), vec3(1e-6)));
+  vec3 t0 = (-bound - lo) * invD;
+  vec3 t1 = ( bound - lo) * invD;
+  float tNear = max(0.002, max(max(min(t0.x, t1.x), min(t0.y, t1.y)), min(t0.z, t1.z)));
+  float tFar  = min(bestT, min(min(max(t0.x, t1.x), max(t0.y, t1.y)), max(t0.z, t1.z)));
+  if (tNear > tFar) return bestT;
+  float t = tNear;
+  float hitT = bestT;
+  int steps = clamp(uPrimCount + 10, 8, 12);
+  for (int s = 0; s < steps; ++s) {
+    float d = sdTorusZ(lo + ld * t, majorR, minorR);
+    if (d < 0.0018) {
+      hitT = t;
+      break;
+    }
+    t += max(0.006, d);
+    if (t > tFar) break;
+  }
+  return hitT;
+}
+
 float intersectPrimT(vec3 lo, vec3 ld, vec3 h, int shape, float tMax, float bf) {
   if (shape == 1) {
     vec3 o = lo / h;
@@ -311,10 +349,12 @@ HitInfo finalizeHit(vec3 ro, vec3 rd, int idx, float t, bool backface) {
   info.pos = ro + rd * t;
   info.primIdx = idx;
 
-  vec3 center = uPrimPosShape[idx].xyz;
-  int  shape  = int(uPrimPosShape[idx].w + 0.5);
-  vec3 h      = uPrimHalfFlags[idx].xyz;
-  vec3 lp     = invRotatePrim(info.pos - center, idx);
+  vec4 ps = sdFetch(0, idx);
+  int  shape = int(ps.w + 0.5);
+  vec3 h = sdFetch(1, idx).xyz;
+  vec3 c0, c1, c2;
+  loadPrimRot(idx, c0, c1, c2);
+  vec3 lp = invRotateCols(info.pos - ps.xyz, c0, c1, c2);
 
   vec3 ln;
   vec3 lt;
@@ -343,55 +383,35 @@ HitInfo finalizeHit(vec3 ro, vec3 rd, int idx, float t, bool backface) {
     computeBoxUvAndTangent(lp, h, ln, uv, lt);
   }
 
-  info.normal  = fwdRotatePrim(backface ? -ln : ln, idx);
-  info.tangent = fwdRotatePrim(lt, idx);
+  info.normal  = fwdRotateCols(backface ? -ln : ln, c0, c1, c2);
+  info.tangent = fwdRotateCols(lt, c0, c1, c2);
   info.uv      = uv;
   return info;
 }
 
-// Primary camera ray trace: evaluates only scalar t inside the loop, finalizing UV/normal ONCE for the winning primitive!
 HitInfo tracePrimaryScene(vec3 ro, vec3 rd, float tMax) {
   float bestT = tMax;
   int bestIdx = -1;
 
-  for (int i = 0; i < ${MAX_PRIMS}; ++i) {
-    if (i >= uPrimCount) break;
-    vec4 ps = uPrimPosShape[i];
-    int shape = int(ps.w + 0.5);
-    vec3 h = uPrimHalfFlags[i].xyz;
-    vec3 lo = invRotatePrim(ro - ps.xyz, i);
-    vec3 ld = invRotatePrim(rd, i);
-
-    if (shape == 4) {
-      float majorR = max(h.x, h.y) * 0.68;
-      float minorR = max(0.04, h.z * 0.55);
-      vec3 bound = vec3(majorR + minorR + 0.04, majorR + minorR + 0.04, minorR + 0.04);
-      vec3 safeSign = step(vec3(0.0), ld) * 2.0 - 1.0;
-      vec3 invD = 1.0 / (safeSign * max(abs(ld), vec3(1e-6)));
-      vec3 t0 = (-bound - lo) * invD;
-      vec3 t1 = ( bound - lo) * invD;
-      float tNear = max(0.002, max(max(min(t0.x, t1.x), min(t0.y, t1.y)), min(t0.z, t1.z)));
-      float tFar  = min(bestT, min(min(max(t0.x, t1.x), max(t0.y, t1.y)), max(t0.z, t1.z)));
-      if (tNear <= tFar) {
-        float t = tNear;
-        for (int s = 0; s < 14; ++s) {
-          float d = sdTorusZ(lo + ld * t, majorR, minorR);
-          if (d < 0.0018) {
-            bestT = t;
-            bestIdx = i;
-            break;
-          }
-          t += max(0.006, d);
-          if (t > tFar) break;
-        }
+  for (int i = 0; i < uPrimCount; ++i) {
+    vec4 ps = sdFetch(0, i);
+    vec3 h = sdFetch(1, i).xyz;
+    vec3 oc = ps.xyz - ro;
+    float proj = dot(oc, rd);
+    float perp2 = dot(oc, oc) - proj * proj;
+    if (perp2 <= dot(h, h) * 1.65) {
+      int shape = int(ps.w + 0.5);
+      vec3 c0, c1, c2;
+      loadPrimRot(i, c0, c1, c2);
+      vec3 lo = invRotateCols(-oc, c0, c1, c2);
+      vec3 ld = invRotateCols(rd, c0, c1, c2);
+      float tCand = (shape == 4)
+        ? intersectTorusT(lo, ld, h, bestT)
+        : intersectPrimT(lo, ld, h, shape, bestT, 0.0);
+      if (tCand < bestT) {
+        bestT = tCand;
+        bestIdx = i;
       }
-      continue;
-    }
-
-    float tCand = intersectPrimT(lo, ld, h, shape, bestT, 0.0);
-    if (tCand < bestT) {
-      bestT = tCand;
-      bestIdx = i;
     }
   }
 
@@ -408,21 +428,30 @@ HitInfo tracePrimaryScene(vec3 ro, vec3 rd, float tMax) {
 HitInfo traceOpaqueSceneIgnoring(vec3 ro, vec3 rd, float tMax, int ignoreIdx) {
   float bestT = tMax;
   int bestIdx = -1;
-  for (int i = 0; i < ${MAX_PRIMS}; ++i) {
-    if (i >= uPrimCount) break;
-    if (i == ignoreIdx || PrimFlagGlass(i)) continue;
-    vec4 ps = uPrimPosShape[i];
-    float tCand = intersectPrimT(
-      invRotatePrim(ro - ps.xyz, i),
-      invRotatePrim(rd, i),
-      uPrimHalfFlags[i].xyz,
-      int(ps.w + 0.5),
-      bestT,
-      0.0
-    );
-    if (tCand < bestT) {
-      bestT = tCand;
-      bestIdx = i;
+  for (int i = 0; i < uPrimCount; ++i) {
+    vec4 hf = sdFetch(1, i);
+    int flags = int(hf.w + 0.5);
+    if (i != ignoreIdx && !PrimFlagGlass(flags)) {
+      vec4 ps = sdFetch(0, i);
+      vec3 oc = ps.xyz - ro;
+      float proj = dot(oc, rd);
+      float perp2 = dot(oc, oc) - proj * proj;
+      if (perp2 <= dot(hf.xyz, hf.xyz) * 1.65) {
+        vec3 c0, c1, c2;
+        loadPrimRot(i, c0, c1, c2);
+        float tCand = intersectPrimT(
+          invRotateCols(-oc, c0, c1, c2),
+          invRotateCols(rd, c0, c1, c2),
+          hf.xyz,
+          int(ps.w + 0.5),
+          bestT,
+          0.0
+        );
+        if (tCand < bestT) {
+          bestT = tCand;
+          bestIdx = i;
+        }
+      }
     }
   }
   if (bestIdx >= 0) return finalizeHit(ro, rd, bestIdx, bestT, false);
@@ -440,18 +469,19 @@ float traceLightQuad(vec3 ro, vec3 rd, float tMax, out vec3 emitOut, out int hit
   emitOut = vec3(0.0);
   hitLightIdx = -1;
   if (abs(rd.z) < 1e-5) return best;
-  for (int i = 0; i < ${MAX_LIGHTS}; ++i) {
-    if (i >= uLightCount) break;
-    vec3 lc = uLightCenterHalfW[i].xyz;
-    float hw = uLightCenterHalfW[i].w;
-    float hh = uLightHalfHRad[i].x;
+  for (int li = 0; li < uLightCount; ++li) {
+    vec4 l0 = sdFetch(0, ${LIGHT_ROW_BASE} + li);
+    vec4 l1 = sdFetch(1, ${LIGHT_ROW_BASE} + li);
+    vec3 lc = l0.xyz;
+    float hw = l0.w;
+    float hh = l1.x;
     float t = (lc.z - ro.z) / rd.z;
     if (t > 0.01 && t < best) {
       vec3 hp = ro + rd * t;
       if (abs(hp.x - lc.x) <= hw && abs(hp.y - lc.y) <= hh) {
         best = t;
-        emitOut = (rd.z > 0.0) ? uLightHalfHRad[i].yzw : uLightHalfHRad[i].yzw * 0.14;
-        hitLightIdx = i;
+        emitOut = (rd.z > 0.0) ? l1.yzw : l1.yzw * 0.14;
+        hitLightIdx = li;
       }
     }
   }
@@ -473,13 +503,12 @@ vec3 evalSky(vec3 dir) {
 //------------------------------------------------------------------------------------------------------------------------------------------
 // ZERO-LOOP, RING-FREE ANALYTICAL CONTACT-HARDENING SOLAR SHADOWS (SKIPPING RECEIVER selfPrimIdx)
 //------------------------------------------------------------------------------------------------------------------------------------------
-float closestRayPrimitiveSoftVis(vec3 origin, vec3 dir, int idx, float tanSun) {
-  vec3 center = uPrimPosShape[idx].xyz;
-  int  shape  = int(uPrimPosShape[idx].w + 0.5);
-  vec3 h      = uPrimHalfFlags[idx].xyz;
-
-  vec3 lo = invRotatePrim(origin - center, idx);
-  vec3 ld = invRotatePrim(dir, idx);
+float closestRayPrimitiveSoftVis(vec3 origin, vec3 dir, int idx, vec4 ps, vec3 h, float tanSun) {
+  int shape = int(ps.w + 0.5);
+  vec3 c0, c1, c2;
+  loadPrimRot(idx, c0, c1, c2);
+  vec3 lo = invRotateCols(origin - ps.xyz, c0, c1, c2);
+  vec3 ld = invRotateCols(dir, c0, c1, c2);
 
   float boundR = length(h) * 1.35;
   float tCenter = -dot(lo, ld);
@@ -523,13 +552,17 @@ float closestRayPrimitiveSoftVis(vec3 origin, vec3 dir, int idx, float tanSun) {
 
 float evaluateSoftConeVis(vec3 origin, vec3 dir, float maxDist, float tanAngle, float minVis, int selfPrimIdx) {
   float vis = 1.0;
-  for (int i = 0; i < ${MAX_PRIMS}; ++i) {
-    if (i >= uPrimCount) break;
-    if (i == selfPrimIdx || !PrimFlagShadow(i) || PrimFlagGlass(i)) continue;
-    float tProj = dot(uPrimPosShape[i].xyz - origin, dir);
-    if (tProj <= -0.5 || tProj >= maxDist) continue;
-    vis = min(vis, mix(minVis, 1.0, closestRayPrimitiveSoftVis(origin, dir, i, tanAngle)));
-    if (vis <= minVis + 0.002) return minVis;
+  for (int i = 0; i < uPrimCount; ++i) {
+    vec4 hf = sdFetch(1, i);
+    int flags = int(hf.w + 0.5);
+    if (i != selfPrimIdx && PrimFlagShadow(flags) && !PrimFlagGlass(flags)) {
+      vec4 ps = sdFetch(0, i);
+      float tProj = dot(ps.xyz - origin, dir);
+      if (tProj > -0.5 && tProj < maxDist) {
+        vis = min(vis, mix(minVis, 1.0, closestRayPrimitiveSoftVis(origin, dir, i, ps, hf.xyz, tanAngle)));
+      }
+    }
+    if (vis <= minVis + 0.002) break;
   }
   return vis;
 }
@@ -553,7 +586,6 @@ void buildBasis(vec3 N, out vec3 T, out vec3 B) {
   B = cross(N, T);
 }
 
-// Fast Clipped 4-Subquad Solid-Angle Area Light Integration (zero horizon leak, tiny compiled code!)
 vec3 evaluateAreaQuadDiffuse(vec3 P, vec3 N, vec3 lCenter, float hw, float hh, vec3 emit) {
   vec3 sum = vec3(0.0);
   for (int sy = -1; sy <= 1; sy += 2) {
@@ -694,95 +726,103 @@ void evaluateGtxConeGiAndAo(vec3 pos, vec3 N, int selfPrimIdx, out vec3 indirect
   vec3 bounceAccum = vec3(0.0);
   float aoOcc = 0.0;
 
-  for (int i = 0; i < ${MAX_PRIMS}; ++i) {
-    if (i >= uPrimCount) break;
-    if (i == selfPrimIdx || PrimFlagGlass(i)) continue;
+  vec4 l0_0 = uLightCount > 0 ? sdFetch(0, ${LIGHT_ROW_BASE}) : vec4(0.0);
+  vec4 l1_0 = uLightCount > 0 ? sdFetch(1, ${LIGHT_ROW_BASE}) : vec4(0.0);
 
-    vec3 center = uPrimPosShape[i].xyz;
-    int  shape  = int(uPrimPosShape[i].w + 0.5);
-    vec3 h      = uPrimHalfFlags[i].xyz;
+  for (int i = 0; i < uPrimCount; ++i) {
+    vec4 hf = sdFetch(1, i);
+    int flags = int(hf.w + 0.5);
+    if (i != selfPrimIdx && !PrimFlagGlass(flags)) {
+      vec4 ps = sdFetch(0, i);
+      vec3 center = ps.xyz;
+      int  shape  = int(ps.w + 0.5);
+      vec3 h      = hf.xyz;
 
-    float occContribution = 0.0;
-    float giFormFactor    = 0.0;
-    vec3  emitterNormal   = -N;
+      float occContribution = 0.0;
+      float giFormFactor    = 0.0;
+      vec3  emitterNormal   = -N;
 
-    if (shape == 1) {
-      vec3 toSphere = center - pos;
-      float dist2 = max(1e-4, dot(toSphere, toSphere));
-      float dist  = sqrt(dist2);
-      vec3 dir    = toSphere / dist;
-      float rEff  = (h.x + h.y + h.z) * 0.3333333;
-      float cosN  = dot(N, dir);
-      float sinH  = clamp(rEff / max(dist, rEff + 1e-3), 0.0, 0.98);
-      float horizon = smoothstep(-sinH, sinH * 0.85 + 0.25, cosN);
-      float solidRatio = (rEff * rEff) / max(dist2, rEff * rEff * 1.05);
-      float nearFade = exp(-max(0.0, dist - rEff) / 0.55);
-      occContribution = horizon * solidRatio * nearFade * 0.75;
-      giFormFactor    = horizon * solidRatio * 0.35;
-      emitterNormal   = -dir;
-    } else {
-      vec3 lp = invRotatePrim(pos - center, i);
-      vec3 ln = invRotatePrim(N, i);
-      vec3 farCorner = (step(vec3(0.0), ln) * 2.0 - 1.0) * h;
-      float maxAboveHorizon = dot(ln, farCorner - lp);
+      if (shape == 1) {
+        vec3 toSphere = center - pos;
+        float dist2 = max(1e-4, dot(toSphere, toSphere));
+        float dist  = sqrt(dist2);
+        vec3 dir    = toSphere / dist;
+        float rEff  = (h.x + h.y + h.z) * 0.3333333;
+        float cosN  = dot(N, dir);
+        float sinH  = clamp(rEff / max(dist, rEff + 1e-3), 0.0, 0.98);
+        float horizon = smoothstep(-sinH, sinH * 0.85 + 0.25, cosN);
+        float solidRatio = (rEff * rEff) / max(dist2, rEff * rEff * 1.05);
+        float nearFade = exp(-max(0.0, dist - rEff) / 0.55);
+        occContribution = horizon * solidRatio * nearFade * 0.75;
+        giFormFactor    = horizon * solidRatio * 0.35;
+        emitterNormal   = -dir;
+      } else {
+        vec3 c0, c1, c2;
+        loadPrimRot(i, c0, c1, c2);
+        vec3 lp = invRotateCols(pos - center, c0, c1, c2);
+        vec3 ln = invRotateCols(N, c0, c1, c2);
+        vec3 farCorner = (step(vec3(0.0), ln) * 2.0 - 1.0) * h;
+        float maxAboveHorizon = dot(ln, farCorner - lp);
 
-      if (maxAboveHorizon > 0.002) {
-        vec3 closestLocal = clamp(lp, -h, h);
-        vec3 diffLocal = closestLocal - lp;
-        float dist2 = dot(diffLocal, diffLocal);
-        float dist  = sqrt(max(1e-5, dist2));
+        if (maxAboveHorizon > 0.002) {
+          vec3 closestLocal = clamp(lp, -h, h);
+          vec3 diffLocal = closestLocal - lp;
+          float dist2 = dot(diffLocal, diffLocal);
+          float dist  = sqrt(max(1e-5, dist2));
 
-        vec3 relNorm = lp / max(h, vec3(0.02));
-        vec3 absR = abs(relNorm);
-        vec3 sg = step(vec3(0.0), relNorm) * 2.0 - 1.0;
-        vec3 boxFaceLocal;
-        float faceArea;
-        if (absR.x >= absR.y && absR.x >= absR.z) {
-          boxFaceLocal = vec3(sg.x, 0.0, 0.0);
-          faceArea = 4.0 * h.y * h.z;
-        } else if (absR.y >= absR.x && absR.y >= absR.z) {
-          boxFaceLocal = vec3(0.0, sg.y, 0.0);
-          faceArea = 4.0 * h.x * h.z;
-        } else {
-          boxFaceLocal = vec3(0.0, 0.0, sg.z);
-          faceArea = 4.0 * h.x * h.y;
+          vec3 relNorm = lp / max(h, vec3(0.02));
+          vec3 absR = abs(relNorm);
+          vec3 sg = step(vec3(0.0), relNorm) * 2.0 - 1.0;
+          vec3 boxFaceLocal;
+          float faceArea;
+          if (absR.x >= absR.y && absR.x >= absR.z) {
+            boxFaceLocal = vec3(sg.x, 0.0, 0.0);
+            faceArea = 4.0 * h.y * h.z;
+          } else if (absR.y >= absR.x && absR.y >= absR.z) {
+            boxFaceLocal = vec3(0.0, sg.y, 0.0);
+            faceArea = 4.0 * h.x * h.z;
+          } else {
+            boxFaceLocal = vec3(0.0, 0.0, sg.z);
+            faceArea = 4.0 * h.x * h.y;
+          }
+          emitterNormal = fwdRotateCols(boxFaceLocal, c0, c1, c2);
+
+          vec3 invDistDiff = diffLocal * inversesqrt(max(1e-5, dist2));
+          float receiverCos = clamp(dot(ln, invDistDiff) * 0.5 + 0.5, 0.0, 1.0);
+          float horizonFade = clamp(maxAboveHorizon / (dist + 0.45), 0.0, 1.0);
+
+          float contact = exp(-dist / 0.38) * horizonFade * receiverCos;
+          float solidOmega = faceArea / (faceArea + PI * (dist2 + 0.28));
+          occContribution = contact * 0.38 + solidOmega * exp(-dist / 1.1) * horizonFade * 0.12;
+
+          float emitterCos = max(0.0, dot(boxFaceLocal, -invDistDiff));
+          giFormFactor = solidOmega * horizonFade * (0.35 + 0.65 * receiverCos) * (0.35 + 0.65 * emitterCos);
         }
-        emitterNormal = fwdRotatePrim(boxFaceLocal, i);
-
-        vec3 invDistDiff = diffLocal * inversesqrt(max(1e-5, dist2));
-        float receiverCos = clamp(dot(ln, invDistDiff) * 0.5 + 0.5, 0.0, 1.0);
-        float horizonFade = clamp(maxAboveHorizon / (dist + 0.45), 0.0, 1.0);
-
-        float contact = exp(-dist / 0.38) * horizonFade * receiverCos;
-        float solidOmega = faceArea / (faceArea + PI * (dist2 + 0.28));
-        occContribution = contact * 0.38 + solidOmega * exp(-dist / 1.1) * horizonFade * 0.12;
-
-        float emitterCos = max(0.0, dot(boxFaceLocal, -invDistDiff));
-        giFormFactor = solidOmega * horizonFade * (0.35 + 0.65 * receiverCos) * (0.35 + 0.65 * emitterCos);
-      }
-    }
-
-    aoOcc += occContribution;
-
-    if (giFormFactor > 1e-4 && PrimFlagGi(i)) {
-      vec3 bAlbedo = uPrimGiBounce[i].rgb;
-      float bEmit  = uPrimGiBounce[i].w;
-      vec3 patchRad = bAlbedo * bEmit;
-
-      float sunNdotL = max(0.0, dot(emitterNormal, uSunDir));
-      patchRad += (bAlbedo / PI) * uSunIrradiance * (sunNdotL * 0.62 + 0.10);
-
-      if (uLightCount > 0) {
-        vec3 lc = uLightCenterHalfW[0].xyz;
-        vec3 toL = lc - center;
-        float d2 = max(0.6, dot(toL, toL));
-        vec3 lDir = toL * inversesqrt(d2);
-        float area = 4.0 * uLightCenterHalfW[0].w * uLightHalfHRad[0].x;
-        patchRad += (bAlbedo / PI) * uLightHalfHRad[0].yzw
-                  * (max(0.15, dot(emitterNormal, lDir)) * max(0.1, -lDir.z) * area / (PI * d2));
       }
 
-      bounceAccum += patchRad * giFormFactor * 1.35;
+      aoOcc += occContribution;
+
+      if (giFormFactor > 1e-4 && PrimFlagGi(flags)) {
+        vec4 gb = sdFetch(6, i);
+        vec3 bAlbedo = gb.rgb;
+        float bEmit  = gb.w;
+        vec3 patchRad = bAlbedo * bEmit;
+
+        float sunNdotL = max(0.0, dot(emitterNormal, uSunDir));
+        patchRad += (bAlbedo / PI) * uSunIrradiance * (sunNdotL * 0.62 + 0.10);
+
+        if (uLightCount > 0) {
+          vec3 lc = l0_0.xyz;
+          vec3 toL = lc - center;
+          float d2 = max(0.6, dot(toL, toL));
+          vec3 lDir = toL * inversesqrt(d2);
+          float area = 4.0 * l0_0.w * l1_0.x;
+          patchRad += (bAlbedo / PI) * l1_0.yzw
+                    * (max(0.15, dot(emitterNormal, lDir)) * max(0.1, -lDir.z) * area / (PI * d2));
+        }
+
+        bounceAccum += patchRad * giFormFactor * 1.35;
+      }
     }
   }
 
@@ -815,40 +855,59 @@ void buildShadingFrame(HitInfo hit, SampledMaterial mat, out vec3 Nshade, out ve
   Bshade = -sa * Tbase + ca * Bbase;
 }
 
-// Ultra-compact zero-loop secondary hit shader (reflections & glass refraction -> eliminates 3x14 shadow unrolls!)
+// Compact 3-fetch secondary bounce evaluator + single unified secondary ray trace (cuts secondary IR by 65%!)
 vec3 shadeSecondaryBounceHit(HitInfo hit, vec3 V) {
   int idx = hit.primIdx;
-  SampledMaterial mat = fetchMaterial(idx, hit.uv);
-  if (mat.unlit) return mat.baseColor * (1.0 + mat.emission);
+  vec4 s0 = sampleAtlasSlot(idx, 0, hit.uv);
+  vec4 s1 = sampleAtlasSlot(idx, 1, hit.uv);
+  vec4 s7 = sampleAtlasSlot(idx, 7, hit.uv);
+
+  vec3 baseColor = s0.rgb;
+  float metallic = s1.r;
+  float roughness = max(0.025, s1.g);
+  float ao = s1.a;
+  float emission = s7.r * 20.0;
+  if (s7.g > 0.5) return baseColor * (1.0 + emission);
 
   vec3 N = hit.normal;
-  vec3 Lo = mat.baseColor * mat.emission;
+  vec3 Lo = baseColor * emission;
 
   float nSun = max(0.0, dot(N, uSunDir));
   if (nSun > 0.0) {
     vec3 H = normalize(V + uSunDir);
-    float spec = pow(max(0.0, dot(N, H)), mix(16.0, 256.0, 1.0 - mat.roughness));
-    vec3 F = mix(vec3(0.04), mat.baseColor, mat.metallic);
+    float spec = pow(max(0.0, dot(N, H)), mix(16.0, 256.0, 1.0 - roughness));
+    vec3 F = mix(vec3(0.04), baseColor, metallic);
     float roomOpen = smoothstep(-2.4, 0.2, -abs(hit.pos.x) + 1.1);
-    Lo += ((1.0 - mat.metallic) * (mat.baseColor / PI) * nSun + F * spec * 0.45) * uSunIrradiance * (0.45 + 0.55 * roomOpen);
+    Lo += ((1.0 - metallic) * (baseColor / PI) * nSun + F * spec * 0.45) * uSunIrradiance * (0.45 + 0.55 * roomOpen);
   }
 
   if (uLightCount > 0) {
-    vec3 lc = uLightCenterHalfW[0].xyz;
-    vec3 toL = lc - hit.pos;
+    vec4 l0 = sdFetch(0, ${LIGHT_ROW_BASE});
+    vec4 l1 = sdFetch(1, ${LIGHT_ROW_BASE});
+    vec3 toL = l0.xyz - hit.pos;
     float d2 = max(0.25, dot(toL, toL));
     vec3 lDir = toL * inversesqrt(d2);
-    float area = 4.0 * uLightCenterHalfW[0].w * uLightHalfHRad[0].x;
+    float area = 4.0 * l0.w * l1.x;
     float cSurf = max(0.0, dot(N, lDir));
     float cEmit = max(0.0, -lDir.z);
-    Lo += (1.0 - mat.metallic) * (mat.baseColor / PI) * uLightHalfHRad[0].yzw * (cSurf * cEmit * area / d2);
+    Lo += (1.0 - metallic) * (baseColor / PI) * l1.yzw * (cSurf * cEmit * area / d2);
   }
 
   vec3 amb = evalSky(N) * 0.50
            + vec3(0.15, 0.015, 0.012) * max(-N.x, 0.0)
            + vec3(0.015, 0.14, 0.025) * max(N.x, 0.0);
-  Lo += mat.baseColor * (1.0 - mat.metallic) * amb * mat.ao;
+  Lo += baseColor * (1.0 - metallic) * amb * ao;
   return Lo;
+}
+
+vec3 sampleSecondaryRay(vec3 ro, vec3 rd, float maxDist, int ignoreIdx) {
+  vec3 qEmit;
+  int qIdx;
+  HitInfo sHit = traceOpaqueSceneIgnoring(ro, rd, maxDist, ignoreIdx);
+  float tQ = traceLightQuad(ro, rd, sHit.t, qEmit, qIdx);
+  if (tQ < sHit.t) return qEmit;
+  if (sHit.hit) return shadeSecondaryBounceHit(sHit, -rd);
+  return evalSky(rd);
 }
 
 vec3 shadePrimaryOpaqueHit(HitInfo hit, vec3 V) {
@@ -879,7 +938,7 @@ vec3 shadePrimaryOpaqueHit(HitInfo hit, vec3 V) {
 
   vec3 N, Nc, T, B;
   buildShadingFrame(hit, mat, N, Nc, T, B);
-  vec3 edgeTint = uPrimEdgeTint[idx].rgb;
+  vec3 edgeTint = sdFetch(5, idx).rgb;
   vec3 Lo = mat.baseColor * mat.emission;
 
   // 1. Solar direct + ring-free analytical penumbra
@@ -888,17 +947,21 @@ vec3 shadePrimaryOpaqueHit(HitInfo hit, vec3 V) {
     Lo += evaluateOpenPbrDirect(N, Nc, T, B, V, uSunDir, mat, edgeTint) * uSunIrradiance * sunVis;
   }
 
-  // 2. Clipped quad area lights + hoisted softbox penumbra (only 1 soft-shadow loop total -> fast FXC compile!)
-  float areaVis0 = (uLightCount > 0)
-    ? evaluateAreaLightSoftVis(hit.pos, N, uLightCenterHalfW[0].xyz, uLightCenterHalfW[0].w, uLightHalfHRad[0].x, idx)
-    : 1.0;
+  // 2. Clipped quad area lights + hoisted softbox penumbra
+  float areaVis0 = 1.0;
+  if (uLightCount > 0) {
+    vec4 l0First = sdFetch(0, ${LIGHT_ROW_BASE});
+    vec4 l1First = sdFetch(1, ${LIGHT_ROW_BASE});
+    areaVis0 = evaluateAreaLightSoftVis(hit.pos, N, l0First.xyz, l0First.w, l1First.x, idx);
+  }
 
-  for (int li = 0; li < ${MAX_LIGHTS}; ++li) {
-    if (li >= uLightCount) break;
-    vec3 lc = uLightCenterHalfW[li].xyz;
-    float hw = uLightCenterHalfW[li].w;
-    float hh = uLightHalfHRad[li].x;
-    vec3 emit = uLightHalfHRad[li].yzw;
+  for (int li = 0; li < uLightCount; ++li) {
+    vec4 l0 = sdFetch(0, ${LIGHT_ROW_BASE} + li);
+    vec4 l1 = sdFetch(1, ${LIGHT_ROW_BASE} + li);
+    vec3 lc = l0.xyz;
+    float hw = l0.w;
+    float hh = l1.x;
+    vec3 emit = l1.yzw;
 
     vec3 diffLight = evaluateAreaQuadDiffuse(hit.pos, N, lc, hw, hh, emit);
     if (dot(diffLight, vec3(1.0)) > 1e-5) {
@@ -942,8 +1005,7 @@ vec3 shadePrimaryOpaqueHit(HitInfo hit, vec3 V) {
     Lo += mat.sheenColor * giIrr * pow(1.0 - VdotN, 3.0) * 0.45 * totalAo;
   }
 
-  // 4. Roughness-filtered specular reflection: crisp ray-trace ONLY on smooth mirrors/metals/clearcoat,
-  //    blending smoothly into prefiltered sky/room environment on rougher dielectrics (zero mirror-plaster artifact!)
+  // 4. Roughness-filtered specular reflection
   vec3 R = reflect(-V, mat.coat > 0.35 ? Nc : N);
   float baseMirror = smoothstep(0.28, 0.04, mat.roughness) * mix(0.35, 1.0, mat.metallic);
   float coatMirror = mat.coat * smoothstep(0.26, 0.02, mat.coatRoughness);
@@ -953,13 +1015,7 @@ vec3 shadePrimaryOpaqueHit(HitInfo hit, vec3 V) {
   vec3 specEnvRad = roughEnv;
 
   if (uViewMode == 0 && raySharpness > 0.02) {
-    vec3 reflEmit;
-    int reflLIdx;
-    HitInfo rHit = traceOpaqueSceneIgnoring(hit.pos + N * 0.012, R, 22.0, idx);
-    float tQuad = traceLightQuad(hit.pos + N * 0.012, R, rHit.t, reflEmit, reflLIdx);
-    vec3 sharpRad = (tQuad < rHit.t)
-      ? reflEmit
-      : (rHit.hit ? shadeSecondaryBounceHit(rHit, -R) : evalSky(R));
+    vec3 sharpRad = sampleSecondaryRay(hit.pos + N * 0.012, R, 22.0, idx);
     specEnvRad = mix(roughEnv, sharpRad, raySharpness);
   }
 
@@ -981,7 +1037,7 @@ vec3 shadePrimaryOpaqueHit(HitInfo hit, vec3 V) {
   return Lo;
 }
 
-// Streamlined 2-Layer Abbe Dispersive Glass / Opacity Shell (only 2 secondary traces -> < 45 KB total SPIR-V!)
+// Streamlined 2-Layer Abbe Dispersive Glass / Opacity Shell
 vec3 shadeTwoLayerGlass(HitInfo frontHit, vec3 rd) {
   int idx = frontHit.primIdx;
   SampledMaterial mat = fetchMaterial(idx, frontHit.uv);
@@ -990,18 +1046,13 @@ vec3 shadeTwoLayerGlass(HitInfo frontHit, vec3 rd) {
   vec3 V = -rd;
 
   float baseIor = max(1.03, mat.ior);
-  float abbe = max(14.0, uPrimRotCol0[idx].w > 1.0 ? uPrimRotCol0[idx].w : 26.0);
+  float rawAbbe = sdFetch(2, idx).w;
+  float abbe = max(14.0, rawAbbe > 1.0 ? rawAbbe : 26.0);
   float spread = (baseIor - 1.0) / abbe * 1.5;
 
   float F = fresnelDielectric(max(0.0, dot(V, N)), baseIor);
   vec3 R = reflect(rd, N);
-  vec3 reflEmit;
-  int reflL;
-  HitInfo reflHit = traceOpaqueSceneIgnoring(frontHit.pos + N * 0.012, R, 24.0, idx);
-  float tReflQuad = traceLightQuad(frontHit.pos + N * 0.012, R, reflHit.t, reflEmit, reflL);
-  vec3 reflRad = (tReflQuad < reflHit.t)
-    ? reflEmit
-    : (reflHit.hit ? shadeSecondaryBounceHit(reflHit, -R) : evalSky(R));
+  vec3 reflRad = sampleSecondaryRay(frontHit.pos + N * 0.012, R, 24.0, idx);
 
   bool isRefractive = mat.transmission >= 0.15;
   vec3 exitPos = frontHit.pos + rd * 0.015;
@@ -1013,11 +1064,15 @@ vec3 shadeTwoLayerGlass(HitInfo frontHit, vec3 rd) {
     if (dot(tIn, tIn) < 1e-5) return reflRad;
     tIn = normalize(tIn);
     vec3 backOrigin = frontHit.pos + tIn * 0.008;
+    vec4 ps = sdFetch(0, idx);
+    vec3 h  = sdFetch(1, idx).xyz;
+    vec3 c0, c1, c2;
+    loadPrimRot(idx, c0, c1, c2);
     float tBack = intersectPrimT(
-      invRotatePrim(backOrigin - uPrimPosShape[idx].xyz, idx),
-      invRotatePrim(tIn, idx),
-      uPrimHalfFlags[idx].xyz,
-      int(uPrimPosShape[idx].w + 0.5),
+      invRotateCols(backOrigin - ps.xyz, c0, c1, c2),
+      invRotateCols(tIn, c0, c1, c2),
+      h,
+      int(ps.w + 0.5),
       6.0,
       1.0
     );
@@ -1034,13 +1089,7 @@ vec3 shadeTwoLayerGlass(HitInfo frontHit, vec3 rd) {
     }
   }
 
-  vec3 bgEmit;
-  int bgL;
-  HitInfo bgHit = traceOpaqueSceneIgnoring(exitPos + exitDir * 0.012, exitDir, 32.0, idx);
-  float tBg = traceLightQuad(exitPos + exitDir * 0.012, exitDir, bgHit.t, bgEmit, bgL);
-  vec3 transRad = (tBg < bgHit.t)
-    ? bgEmit
-    : (bgHit.hit ? shadeSecondaryBounceHit(bgHit, -exitDir) : evalSky(exitDir));
+  vec3 transRad = sampleSecondaryRay(exitPos + exitDir * 0.012, exitDir, 32.0, idx);
 
   if (!isRefractive) {
     vec3 surfLit = mat.baseColor * (evalSky(N) * 0.55 + uSunIrradiance * max(0.0, dot(N, uSunDir)) * 0.65 + mat.emission);
@@ -1120,7 +1169,8 @@ void main() {
   } else if (fullHit.hit) {
     entityCode = 1 + fullHit.primIdx;
     hitDist = fullHit.t;
-    if (PrimFlagGlass(fullHit.primIdx) && uViewMode == 0) {
+    int hitFlags = int(sdFetch(1, fullHit.primIdx).w + 0.5);
+    if (PrimFlagGlass(hitFlags) && uViewMode == 0) {
       linearColor = shadeTwoLayerGlass(fullHit, rd);
     } else {
       linearColor = shadePrimaryOpaqueHit(fullHit, -rd);
@@ -1131,7 +1181,6 @@ void main() {
       float tFloor = (-0.80 - ro.z) / rd.z;
       if (tFloor > 0.0 && tFloor < 36.0) {
         vec3 gp = ro + rd * tFloor;
-        // 100% derivative-free analytical ray-cone footprint AA (zero fwidth inside divergent flow control!)
         float pxWorld = max(0.004, (uOrthoHalfHeight > 0.0 ? uOrthoHalfHeight * 2.0 : tFloor * 2.0 * uTanHalfFov) / max(uResolution.y, 1.0) * 1.6);
         vec2 g1 = abs(fract(gp.xy) - 0.5) / pxWorld;
         float line = 1.0 - min(min(g1.x, g1.y), 1.0);
@@ -1259,6 +1308,97 @@ const VIEW_MODE_CODES = {
   WIREFRAME: 3,
 };
 
+function PackSceneDataBuffer(ActiveScene, PCount, LCount, Out) {
+  Out.fill(0);
+  for (let I = 0; I < PCount; ++I) {
+    const P = ActiveScene.Primitives[I];
+    const Base = I * SCENE_DATA_W * 4;
+    const Flags =
+      (P.CastShadows ? 1 : 0) |
+      (P.GiContributor ? 2 : 0) |
+      (P.GlassShell ? 4 : 0);
+    Out[Base + 0] = P.Center[0];
+    Out[Base + 1] = P.Center[1];
+    Out[Base + 2] = P.Center[2];
+    Out[Base + 3] = P.Shape;
+
+    Out[Base + 4] = P.HalfExtents[0];
+    Out[Base + 5] = P.HalfExtents[1];
+    Out[Base + 6] = P.HalfExtents[2];
+    Out[Base + 7] = Flags;
+
+    const [Rx, Ry, Rz] = P.RotationRad;
+    const Cx = Math.cos(Rx), Sx = Math.sin(Rx);
+    const Cy = Math.cos(Ry), Sy = Math.sin(Ry);
+    const Cz = Math.cos(Rz), Sz = Math.sin(Rz);
+
+    Out[Base + 8] = Cz * Cy;
+    Out[Base + 9] = Sz * Cy;
+    Out[Base + 10] = -Sy;
+    Out[Base + 11] = P.Abbe;
+
+    Out[Base + 12] = Cz * Sy * Sx - Sz * Cx;
+    Out[Base + 13] = Sz * Sy * Sx + Cz * Cx;
+    Out[Base + 14] = Cy * Sx;
+    Out[Base + 15] = 0.0;
+
+    Out[Base + 16] = Cz * Sy * Cx + Sz * Sx;
+    Out[Base + 17] = Sz * Sy * Cx - Cz * Sx;
+    Out[Base + 18] = Cy * Cx;
+    Out[Base + 19] = 0.0;
+
+    Out[Base + 20] = P.EdgeTintF82[0];
+    Out[Base + 21] = P.EdgeTintF82[1];
+    Out[Base + 22] = P.EdgeTintF82[2];
+    Out[Base + 23] = P.Transmission;
+
+    const DiffWeight = 1.0 - P.Metallic * 0.75;
+    Out[Base + 24] = P.BaseColor[0] * DiffWeight;
+    Out[Base + 25] = P.BaseColor[1] * DiffWeight;
+    Out[Base + 26] = P.BaseColor[2] * DiffWeight;
+    Out[Base + 27] = P.Emission;
+  }
+
+  for (let Li = 0; Li < LCount; ++Li) {
+    const L = ActiveScene.AreaLights[Li];
+    const Base = (LIGHT_ROW_BASE + Li) * SCENE_DATA_W * 4;
+    Out[Base + 0] = L.Center[0];
+    Out[Base + 1] = L.Center[1];
+    Out[Base + 2] = L.Center[2];
+    Out[Base + 3] = L.HalfWidth;
+
+    Out[Base + 4] = L.HalfHeight;
+    Out[Base + 5] = L.Radiance[0];
+    Out[Base + 6] = L.Radiance[1];
+    Out[Base + 7] = L.Radiance[2];
+  }
+}
+
+function ComputeNonCameraSceneSignature(Scene) {
+  let Parts = `${Scene.OrthoHalfHeight.toFixed(3)}|${Scene.VerticalFovRad.toFixed(3)}|${Scene.ExposureGain.toFixed(3)}|`;
+  Parts += `${Scene.SunDir.map((V) => V.toFixed(3)).join(",")}|${Scene.SunIrradiance.map((V) => V.toFixed(2)).join(",")}|${Scene.SkyRadiance.map((V) => V.toFixed(3)).join(",")}|`;
+  for (let I = 0; I < Scene.Primitives.length; ++I) {
+    const P = Scene.Primitives[I];
+    Parts += `${P.Id}:${P.Shape}:${P.Center.join(",")}:${P.HalfExtents.join(",")}:${P.RotationRad.join(",")}:${P.BaseColor.join(",")}:${P.Metallic}:${P.Roughness}:${P.Ior}:${P.Coat}:${P.Transmission}:${P.Opacity}:${P.Emission}:${P.CastShadows ? 1 : 0}:${P.GiContributor ? 1 : 0}:${P.GlassShell ? 1 : 0}:${P.TextureUrls?.BaseColor || ""}:${P.TextureUrls?.Roughness || ""}:${P.TextureUrls?.Normal || ""}|`;
+  }
+  for (let Li = 0; Li < Scene.AreaLights.length; ++Li) {
+    const L = Scene.AreaLights[Li];
+    Parts += `L${L.Id}:${L.Center.join(",")}:${L.HalfWidth}:${L.HalfHeight}:${L.Radiance.join(",")}|`;
+  }
+  return Parts;
+}
+
+function SendViewportDiag(Fields) {
+  if (typeof fetch !== "function" || typeof URLSearchParams === "undefined") return;
+  try {
+    const Params = new URLSearchParams();
+    for (const [K, V] of Object.entries(Fields)) {
+      if (V !== undefined && V !== null) Params.set(K, String(V));
+    }
+    fetch(`/__diag?${Params.toString()}`, { method: "GET", keepalive: true }).catch(() => {});
+  } catch {}
+}
+
 function ResolveEntityTransformForGizmo(SelectedId, Rows, Values, CompiledScene) {
   if (!SelectedId) return null;
   const Row = Rows.find((Item) => Item.Id === SelectedId);
@@ -1345,9 +1485,12 @@ export default function GtxWorldViewport({
   const AtlasVersionRef = useRef(1);
   const BuiltGizmoRef = useRef(null);
   const SceneDirtyRef = useRef(true);
+  const SceneDataDirtyRef = useRef(true);
   const EvictionCountRef = useRef(0);
+  const FastCrashCountRef = useRef(0);
+  const PendingGpuRestoreRef = useRef(false);
 
-  // Live Unreal camera state decoupled from 60Hz full-Editor React re-renders
+  // Live Unreal camera state decoupled from 60/120Hz full-Editor React re-renders
   const LiveCamRef = useRef(null);
   const LastCommittedCamRef = useRef(null);
   const ViewportHoveredRef = useRef(false);
@@ -1359,11 +1502,15 @@ export default function GtxWorldViewport({
   const LastInspectorCommitMsRef = useRef(0);
   const RequestRedrawRef = useRef(null);
   const CompiledSceneRef = useRef(null);
-  const FpsTrackerRef = useRef({ LastRafTs: 0, LastReportTs: 0, SmoothedMs: 16.67 });
+  const RenderPropsRef = useRef(null);
+  const RenderBackendRef = useRef("webgl2");
+  const FpsTrackerRef = useRef({ LastRafTs: 0, LastReportTs: 0, SmoothedMs: 8.33 });
 
   const [RenderBackend, SetRenderBackend] = useState(() =>
     SessionWebGlBlocked ? "cpu-gtx" : "webgl2",
   );
+  RenderBackendRef.current = RenderBackend;
+
   const [CanvasInstance, SetCanvasInstance] = useState(0);
   const [ShaderError, SetShaderError] = useState(null);
   const [GlEpoch, SetGlEpoch] = useState(0);
@@ -1383,6 +1530,11 @@ export default function GtxWorldViewport({
   );
   CompiledSceneRef.current = CompiledScene;
 
+  const NonCameraSceneSignature = useMemo(
+    () => ComputeNonCameraSceneSignature(CompiledScene),
+    [CompiledScene],
+  );
+
   // Initialize or sync LiveCamRef when external Editor actions (Reset Camera, Frame Selected, Level Switch) modify Values.camera
   if (!LiveCamRef.current) {
     LiveCamRef.current = DeriveUnrealCameraState(
@@ -1397,7 +1549,11 @@ export default function GtxWorldViewport({
   }
 
   useEffect(() => {
-    if (EffectiveProjection !== "PERSP") return;
+    if (EffectiveProjection !== "PERSP") {
+      SceneDirtyRef.current = true;
+      RequestRedrawRef.current?.(true);
+      return;
+    }
     const IncomingOrigin = CompiledScene.CameraOrigin;
     const IncomingTarget = CompiledScene.CameraTarget;
     const Last = LastCommittedCamRef.current;
@@ -1409,7 +1565,14 @@ export default function GtxWorldViewport({
       Math.abs(IncomingTarget[0] - Last.Target[0]) < 2e-3 &&
       Math.abs(IncomingTarget[1] - Last.Target[1]) < 2e-3 &&
       Math.abs(IncomingTarget[2] - Last.Target[2]) < 2e-3;
-    if (!MatchesLast && DragRef.current?.Kind !== "fly" && DragRef.current?.Kind !== "orbit" && DragRef.current?.Kind !== "pan") {
+    if (
+      !MatchesLast &&
+      DragRef.current?.Kind !== "fly" &&
+      DragRef.current?.Kind !== "orbit" &&
+      DragRef.current?.Kind !== "pan" &&
+      DragRef.current?.Kind !== "dolly" &&
+      !IsWasdFlyingRef.current
+    ) {
       LiveCamRef.current = DeriveUnrealCameraState(
         IncomingOrigin,
         IncomingTarget,
@@ -1445,7 +1608,7 @@ export default function GtxWorldViewport({
       }
     }
     Tr.LastRafTs = Now;
-    if (Now - Tr.LastReportTs >= 450) {
+    if (Now - Tr.LastReportTs >= 900) {
       Tr.LastReportTs = Now;
       OnFpsSample(Math.min(120, Math.max(1, Math.round(1000 / Math.max(4, Tr.SmoothedMs)))));
     }
@@ -1473,32 +1636,41 @@ export default function GtxWorldViewport({
         return;
       }
 
-      if (Selected === "camera" && performance.now() - LastInspectorCommitMsRef.current >= 125) {
+      if (Selected === "camera" && performance.now() - LastInspectorCommitMsRef.current >= 280) {
         DoCommit();
         return;
       }
 
+      // Never trigger Editor React state commits mid-drag or mid-WASD flight; OnPointerUp & StepWasdLoop commit on release!
+      if (DragRef.current !== null || IsWasdFlyingRef.current) {
+        return;
+      }
+
       if (CommitTimerRef.current) window.clearTimeout(CommitTimerRef.current);
-      CommitTimerRef.current = window.setTimeout(DoCommit, 140);
+      CommitTimerRef.current = window.setTimeout(DoCommit, 420);
     },
     [CameraCallback, EffectiveProjection, Selected],
   );
 
-  const BumpInteractiveSettle = useCallback((WindowMs = 170) => {
+  const BumpInteractiveSettle = useCallback((WindowMs = 380) => {
+    // Hardware WebGL2 renders full native resolution on every single 120Hz frame — ZERO post-move settle redraw!
+    if (RenderBackendRef.current !== "cpu-gtx") return;
     InteractiveUntilRef.current = performance.now() + WindowMs;
     if (SettleTimerRef.current) window.clearTimeout(SettleTimerRef.current);
     SettleTimerRef.current = window.setTimeout(() => {
       SettleTimerRef.current = 0;
-      SceneDirtyRef.current = true;
-      RequestRedrawRef.current?.(true);
-    }, WindowMs + 12);
+      if (RenderBackendRef.current === "cpu-gtx") {
+        SceneDirtyRef.current = true;
+        RequestRedrawRef.current?.(true);
+      }
+    }, WindowMs + 16);
   }, []);
 
   const ApplyLiveCameraUpdate = useCallback(
     (NextCam, CommitImmediate = false) => {
       LiveCamRef.current = NextCam;
       SceneDirtyRef.current = true;
-      BumpInteractiveSettle(170);
+      BumpInteractiveSettle(380);
       RequestRedrawRef.current?.(true);
       CommitLiveCameraToEditor(CommitImmediate);
     },
@@ -1515,40 +1687,93 @@ export default function GtxWorldViewport({
     };
   }, []);
 
-  // Mark Pass 1 scene dirty when scene/selection/view/grid/textures change (NOT on 60Hz gizmo hover!)
+  // Automatically restore hardware WebGL2 GPU when tab returns to foreground after background context eviction!
   useEffect(() => {
-    SceneDirtyRef.current = true;
-  }, [CompiledScene, Selected, ViewMode, Debug, EffectiveGrid, TextureEpoch, GlEpoch, RenderBackend]);
-
-  useEffect(() => {
-    EnsureMaterialTexturesDecoded(CompiledScene.Primitives, () => {
-      AtlasSyncRef.current?.InvalidateAll();
-      AtlasVersionRef.current += 1;
-      SceneDirtyRef.current = true;
-      SetTextureEpoch((N) => N + 1);
-    });
-  }, [CompiledScene]);
+    const OnVisibility = () => {
+      if (document.visibilityState === "visible" && PendingGpuRestoreRef.current && !SessionWebGlBlocked) {
+        PendingGpuRestoreRef.current = false;
+        SetShaderError(null);
+        SetCanvasInstance((K) => K + 1);
+        SetRenderBackend("webgl2");
+      }
+    };
+    document.addEventListener("visibilitychange", OnVisibility);
+    return () => document.removeEventListener("visibilitychange", OnVisibility);
+  }, []);
 
   const SelectedGizmoTarget = useMemo(
     () => ResolveEntityTransformForGizmo(Selected, Rows, Values, CompiledScene),
     [Selected, Rows, Values, CompiledScene],
   );
 
+  RenderPropsRef.current = {
+    Selected,
+    SelectedGizmoTarget,
+    ViewMode,
+    Debug,
+    EffectiveGrid,
+    EffectiveGizmo,
+    HoveredHandle,
+    ActiveHandle,
+    EffectiveProjection,
+  };
+
+  // Mark scene data texture + Pass 1 dirty ONLY when non-camera scene content changes (NEVER on camera echo!)
+  useEffect(() => {
+    SceneDataDirtyRef.current = true;
+    SceneDirtyRef.current = true;
+    EnsureMaterialTexturesDecoded(CompiledSceneRef.current.Primitives, () => {
+      AtlasSyncRef.current?.InvalidateAll();
+      AtlasVersionRef.current += 1;
+      SceneDirtyRef.current = true;
+      SetTextureEpoch((N) => N + 1);
+      RequestRedrawRef.current?.(true);
+    });
+    RequestRedrawRef.current?.(true);
+  }, [NonCameraSceneSignature]);
+
+  // Mark Pass 1 dirty when selection outline target, view mode, grid, textures, or backend epoch change
+  useEffect(() => {
+    SceneDirtyRef.current = true;
+    RequestRedrawRef.current?.(true);
+  }, [Selected, ViewMode, Debug, EffectiveGrid, TextureEpoch, GlEpoch, RenderBackend]);
+
+  // Redraw Pass 2/3 gizmo overlay ONLY (keeping Pass 1 cached!) when gizmo handle hover/drag changes
+  useEffect(() => {
+    RequestRedrawRef.current?.(false);
+  }, [HoveredHandle, ActiveHandle, EffectiveGizmo, SelectedGizmoTarget]);
+
   const InitGlResources = useCallback((Canvas) => {
-    const Gl = Canvas.getContext("webgl2", {
+    const BaseAttribs = {
       antialias: false,
       alpha: false,
       depth: true,
       stencil: false,
-      powerPreference: "default",
       preserveDrawingBuffer: false,
+    };
+    let Gl = Canvas.getContext("webgl2", {
+      ...BaseAttribs,
+      powerPreference: "high-performance",
     });
+    if (!Gl) {
+      Gl = Canvas.getContext("webgl2", BaseAttribs);
+    }
     if (!Gl || Gl.isContextLost()) {
       SessionWebGlBlocked = true;
+      SendViewportDiag({ backend: "cpu-gtx", reason: "getContext-null-or-lost" });
       SetRenderBackend("cpu-gtx");
       return null;
     }
 
+    let GpuRenderer = "WebGL2";
+    try {
+      const DbgInfo = Gl.getExtension("WEBGL_debug_renderer_info");
+      if (DbgInfo) {
+        GpuRenderer = Gl.getParameter(DbgInfo.UNMASKED_RENDERER_WEBGL) || GpuRenderer;
+      }
+    } catch {}
+
+    const LinkStartMs = performance.now();
     const ParallelExt = Gl.getExtension("KHR_parallel_shader_compile");
     const SceneHandle = StartProgramLink(Gl, FULLSCREEN_VERTEX_SHADER, GTX_FRAGMENT_SHADER);
     const OutlineHandle = StartProgramLink(Gl, FULLSCREEN_VERTEX_SHADER, OUTLINE_FRAGMENT_SHADER);
@@ -1556,12 +1781,15 @@ export default function GtxWorldViewport({
 
     const EmptyVao = Gl.createVertexArray();
 
+    Gl.pixelStorei(Gl.UNPACK_FLIP_Y_WEBGL, false);
+    Gl.pixelStorei(Gl.UNPACK_ALIGNMENT, 4);
+
     const AtlasTex = Gl.createTexture();
     Gl.bindTexture(Gl.TEXTURE_2D, AtlasTex);
     Gl.texParameteri(Gl.TEXTURE_2D, Gl.TEXTURE_MIN_FILTER, Gl.LINEAR);
     Gl.texParameteri(Gl.TEXTURE_2D, Gl.TEXTURE_MAG_FILTER, Gl.LINEAR);
     Gl.texParameteri(Gl.TEXTURE_2D, Gl.TEXTURE_WRAP_S, Gl.CLAMP_TO_EDGE);
-    Gl.texParameteri(Gl.TEXTURE_2D, Gl.TEXTURE_WRAP_T, Gl.CLAMP_TO_EDGE);
+    Gl.texParameteri(Gl.TEXTURE_2D, Gl.TEXTURE_WRAP_T, Gl.TEXTURE_WRAP_T ? Gl.CLAMP_TO_EDGE : Gl.CLAMP_TO_EDGE);
     Gl.texImage2D(
       Gl.TEXTURE_2D,
       0,
@@ -1572,6 +1800,28 @@ export default function GtxWorldViewport({
       Gl.RGBA,
       Gl.UNSIGNED_BYTE,
       null,
+    );
+
+    // Core WebGL 2.0 RGBA32F Scene Data Texture (8x16, NEAREST, BASE/MAX_LEVEL=0 -> zero uniform arrays in shader!)
+    const SceneDataTex = Gl.createTexture();
+    Gl.bindTexture(Gl.TEXTURE_2D, SceneDataTex);
+    Gl.texParameteri(Gl.TEXTURE_2D, Gl.TEXTURE_MIN_FILTER, Gl.NEAREST);
+    Gl.texParameteri(Gl.TEXTURE_2D, Gl.TEXTURE_MAG_FILTER, Gl.NEAREST);
+    Gl.texParameteri(Gl.TEXTURE_2D, Gl.TEXTURE_WRAP_S, Gl.CLAMP_TO_EDGE);
+    Gl.texParameteri(Gl.TEXTURE_2D, Gl.TEXTURE_WRAP_T, Gl.CLAMP_TO_EDGE);
+    Gl.texParameteri(Gl.TEXTURE_2D, Gl.TEXTURE_BASE_LEVEL, 0);
+    Gl.texParameteri(Gl.TEXTURE_2D, Gl.TEXTURE_MAX_LEVEL, 0);
+    const SceneDataBuf = new Float32Array(SCENE_DATA_W * SCENE_DATA_H * 4);
+    Gl.texImage2D(
+      Gl.TEXTURE_2D,
+      0,
+      Gl.RGBA32F,
+      SCENE_DATA_W,
+      SCENE_DATA_H,
+      0,
+      Gl.RGBA,
+      Gl.FLOAT,
+      SceneDataBuf,
     );
 
     const SceneFbo = Gl.createFramebuffer();
@@ -1598,10 +1848,13 @@ export default function GtxWorldViewport({
     Gl.bindVertexArray(null);
 
     AtlasSyncRef.current?.InvalidateAll();
+    SceneDataDirtyRef.current = true;
     SceneDirtyRef.current = true;
 
     return {
       Gl,
+      GpuRenderer,
+      LinkStartMs,
       ParallelExt,
       Linked: false,
       SceneHandle,
@@ -1612,6 +1865,10 @@ export default function GtxWorldViewport({
       GizmoProg: null,
       EmptyVao,
       AtlasTex,
+      SceneDataTex,
+      SceneDataBuf,
+      LastPrimCount: 0,
+      LastLightCount: 0,
       SceneFbo,
       SceneTex,
       FboWidth: 0,
@@ -1624,7 +1881,7 @@ export default function GtxWorldViewport({
     };
   }, []);
 
-  // Initialize WebGL2 when RenderBackend === "webgl2"; fall back seamlessly to CPU GTX on domain-block or repeated eviction!
+  // Initialize WebGL2 when RenderBackend === "webgl2"; recover automatically from background tab eviction!
   useEffect(() => {
     if (RenderBackend !== "webgl2") return;
     const Canvas = CanvasRef.current;
@@ -1633,27 +1890,45 @@ export default function GtxWorldViewport({
     const MountedAt = performance.now();
     let RemountTimer = 0;
 
-    const SwitchToCpuGtx = (BlockSession) => {
+    const SwitchToCpuGtx = (BlockSession, Reason) => {
       if (BlockSession) SessionWebGlBlocked = true;
       GlStateRef.current = null;
       SetShaderError(null);
+      SendViewportDiag({ backend: "cpu-gtx", reason: Reason, blocked: BlockSession ? 1 : 0 });
       SetRenderBackend("cpu-gtx");
     };
 
     const HandleContextLost = (Ev) => {
       Ev.preventDefault();
       GlStateRef.current = null;
-      const AliveMs = performance.now() - MountedAt;
-      // Instant context loss (< 2.5s) means Chromium domain-blocked 3D APIs in this tab -> switch immediately to live CPU GTX!
-      if (AliveMs < 2500 || EvictionCountRef.current >= 1 || document.visibilityState !== "visible") {
-        SwitchToCpuGtx(AliveMs < 2500);
+      const AliveMs = Math.round(performance.now() - MountedAt);
+
+      // Background tab / multi-iframe LRU eviction: temporarily park on CPU and auto-restore WebGL2 on visibility!
+      if (document.visibilityState !== "visible") {
+        PendingGpuRestoreRef.current = true;
+        SwitchToCpuGtx(false, `hidden-evict-${AliveMs}ms`);
         return;
       }
-      // Single LRU context eviction (e.g., Monaco Diff tabs opened): remount a fresh <canvas> once!
+
+      if (AliveMs < 1800) {
+        FastCrashCountRef.current += 1;
+        if (FastCrashCountRef.current >= 2) {
+          SwitchToCpuGtx(true, `fast-context-loss-${AliveMs}ms`);
+          return;
+        }
+      } else {
+        FastCrashCountRef.current = 0;
+      }
+
+      if (EvictionCountRef.current >= 2) {
+        SwitchToCpuGtx(false, `repeated-evict-${AliveMs}ms`);
+        return;
+      }
+
       EvictionCountRef.current += 1;
       RemountTimer = window.setTimeout(() => {
         SetCanvasInstance((K) => K + 1);
-      }, 220);
+      }, 180);
     };
 
     Canvas.addEventListener("webglcontextlost", HandleContextLost, false);
@@ -1664,8 +1939,8 @@ export default function GtxWorldViewport({
         SetShaderError(null);
         SetGlEpoch((N) => N + 1);
       }
-    } catch {
-      SwitchToCpuGtx(true);
+    } catch (InitErr) {
+      SwitchToCpuGtx(true, `init-throw:${String(InitErr?.message || InitErr).slice(0, 80)}`);
     }
 
     return () => {
@@ -1677,6 +1952,7 @@ export default function GtxWorldViewport({
         State.Gl.deleteVertexArray(State.GizmoVao);
         State.Gl.deleteVertexArray(State.EmptyVao);
         State.Gl.deleteTexture(State.AtlasTex);
+        State.Gl.deleteTexture(State.SceneDataTex);
         State.Gl.deleteTexture(State.SceneTex);
         State.Gl.deleteFramebuffer(State.SceneFbo);
         if (State.SceneProg) State.Gl.deleteProgram(State.SceneProg);
@@ -1690,7 +1966,7 @@ export default function GtxWorldViewport({
     };
   }, [RenderBackend, CanvasInstance, InitGlResources]);
 
-  // WebGL2 Render pipeline: non-blocking KHR_parallel_shader_compile + Pass 1 FBO + Pass 2 Outline + Pass 3 Slate GizmoPRO
+  // Stable WebGL2 120Hz Render Pipeline (depends ONLY on [RenderBackend, GlEpoch] -> zero ResizeObserver/rAF churn!)
   useEffect(() => {
     if (RenderBackend !== "webgl2") return;
     const Canvas = CanvasRef.current;
@@ -1698,20 +1974,19 @@ export default function GtxWorldViewport({
     if (!Canvas || !State || State.Gl.isContextLost()) return;
 
     let RafId = 0;
+    let LastObsW = 0;
+    let LastObsH = 0;
+
     const ScheduleDraw = (ForceScene = false) => {
       if (ForceScene) SceneDirtyRef.current = true;
       if (RafId) return;
       RafId = requestAnimationFrame(() => {
         RafId = 0;
         const CurState = GlStateRef.current;
-        if (!CurState || !CanvasRef.current) return;
+        const CurCanvas = CanvasRef.current;
+        if (!CurState || !CurCanvas) return;
         const { Gl } = CurState;
-        if (Gl.isContextLost()) {
-          SessionWebGlBlocked = true;
-          GlStateRef.current = null;
-          SetRenderBackend("cpu-gtx");
-          return;
-        }
+        if (Gl.isContextLost()) return;
 
         // Poll KHR_parallel_shader_compile without blocking Chromium's GPU Watchdog thread!
         if (!CurState.Linked) {
@@ -1752,17 +2027,9 @@ export default function GtxWorldViewport({
               uSunAngularRadius: Loc("uSunAngularRadius"),
               uSkyRadiance: Loc("uSkyRadiance"),
               uLightCount: Loc("uLightCount"),
-              uLightCenterHalfW: Loc("uLightCenterHalfW[0]"),
-              uLightHalfHRad: Loc("uLightHalfHRad[0]"),
               uPrimCount: Loc("uPrimCount"),
-              uPrimPosShape: Loc("uPrimPosShape[0]"),
-              uPrimHalfFlags: Loc("uPrimHalfFlags[0]"),
-              uPrimRotCol0: Loc("uPrimRotCol0[0]"),
-              uPrimRotCol1: Loc("uPrimRotCol1[0]"),
-              uPrimRotCol2: Loc("uPrimRotCol2[0]"),
-              uPrimEdgeTint: Loc("uPrimEdgeTint[0]"),
-              uPrimGiBounce: Loc("uPrimGiBounce[0]"),
               uMaterialAtlas: Loc("uMaterialAtlas"),
+              uSceneData: Loc("uSceneData"),
             };
             CurState.OutlineUniforms = {
               uSceneTex: Gl.getUniformLocation(OutlineProg, "uSceneTex"),
@@ -1773,19 +2040,39 @@ export default function GtxWorldViewport({
               uHighlightedHandle: Gl.getUniformLocation(GizmoProg, "uHighlightedHandle"),
             };
             CurState.Linked = true;
+            FastCrashCountRef.current = 0;
+            SceneDataDirtyRef.current = true;
             SceneDirtyRef.current = true;
+            const LinkMs = Math.round(performance.now() - CurState.LinkStartMs);
+            SendViewportDiag({
+              backend: "webgl2",
+              linkMs: LinkMs,
+              gpu: CurState.GpuRenderer.slice(0, 96),
+            });
           } catch (Err) {
+            const Msg = String(Err?.message || Err);
             console.error("[Frontier GTX] WebGL2 shader link error:", Err);
-            SetShaderError(String(Err?.message || Err));
+            SetShaderError(Msg);
+            SendViewportDiag({ backend: "cpu-gtx", reason: `link-err:${Msg.slice(0, 120)}` });
             GlStateRef.current = null;
             SetRenderBackend("cpu-gtx");
             return;
           }
         }
 
-        const ActiveScene = GetActiveScene();
+        const Props = RenderPropsRef.current;
+        const BaseScene = CompiledSceneRef.current;
+        const ActiveScene =
+          Props.EffectiveProjection === "PERSP" && LiveCamRef.current
+            ? {
+                ...BaseScene,
+                CameraOrigin: LiveCamRef.current.Position,
+                CameraTarget: LiveCamRef.current.Target,
+              }
+            : BaseScene;
+
         const U = CurState.SceneUniforms;
-        const Rect = Canvas.getBoundingClientRect();
+        const Rect = CurCanvas.getBoundingClientRect();
         const Dpr = Math.min(window.devicePixelRatio || 1, 1.25);
         const RawW = Math.max(320, Math.round((Rect.width || 900) * Dpr));
         const RawH = Math.max(200, Math.round((Rect.height || 520) * Dpr));
@@ -1793,9 +2080,9 @@ export default function GtxWorldViewport({
         const Width = Math.max(320, Math.round(RawW * ScaleCap));
         const Height = Math.max(200, Math.round(RawH * ScaleCap));
 
-        if (Canvas.width !== Width || Canvas.height !== Height) {
-          Canvas.width = Width;
-          Canvas.height = Height;
+        if (CurCanvas.width !== Width || CurCanvas.height !== Height) {
+          CurCanvas.width = Width;
+          CurCanvas.height = Height;
           SceneDirtyRef.current = true;
         }
         const Aspect = Width / Math.max(1, Height);
@@ -1829,6 +2116,7 @@ export default function GtxWorldViewport({
 
         const AtlasSync = AtlasSyncRef.current;
         if (AtlasSync.UpdatePrimitives(ActiveScene.Primitives)) {
+          Gl.pixelStorei(Gl.UNPACK_FLIP_Y_WEBGL, false);
           Gl.bindTexture(Gl.TEXTURE_2D, CurState.AtlasTex);
           Gl.texSubImage2D(
             Gl.TEXTURE_2D,
@@ -1846,6 +2134,30 @@ export default function GtxWorldViewport({
           SceneDirtyRef.current = true;
         }
 
+        const PCount = Math.min(MAX_PRIMS, ActiveScene.Primitives.length);
+        const LCount = Math.min(MAX_LIGHTS, ActiveScene.AreaLights.length);
+
+        if (SceneDataDirtyRef.current) {
+          SceneDataDirtyRef.current = false;
+          PackSceneDataBuffer(ActiveScene, PCount, LCount, CurState.SceneDataBuf);
+          Gl.pixelStorei(Gl.UNPACK_FLIP_Y_WEBGL, false);
+          Gl.bindTexture(Gl.TEXTURE_2D, CurState.SceneDataTex);
+          Gl.texSubImage2D(
+            Gl.TEXTURE_2D,
+            0,
+            0,
+            0,
+            SCENE_DATA_W,
+            SCENE_DATA_H,
+            Gl.RGBA,
+            Gl.FLOAT,
+            CurState.SceneDataBuf,
+          );
+          CurState.LastPrimCount = PCount;
+          CurState.LastLightCount = LCount;
+          SceneDirtyRef.current = true;
+        }
+
         const { CameraOrigin, CameraTarget, WorldUp } = ActiveScene;
         const Fwd = NormalizeVec3([
           CameraTarget[0] - CameraOrigin[0],
@@ -1860,21 +2172,23 @@ export default function GtxWorldViewport({
         const Right = NormalizeVec3(Cross(Fwd, WorldUp), [1, 0, 0]);
         const Up = NormalizeVec3(Cross(Right, Fwd), [0, 0, 1]);
 
-        const PCount = Math.min(MAX_PRIMS, ActiveScene.Primitives.length);
         let SelectedCode = 0;
-        const PrimIdx = ActiveScene.Primitives
-          .slice(0, PCount)
-          .findIndex((P) => P.Id === Selected);
-        if (PrimIdx >= 0) {
-          SelectedCode = 1 + PrimIdx;
-        } else {
-          const LightIdx = ActiveScene.AreaLights
-            .slice(0, MAX_LIGHTS)
-            .findIndex((L) => L.Id === Selected);
-          if (LightIdx >= 0) SelectedCode = 32 + LightIdx;
+        for (let I = 0; I < PCount; ++I) {
+          if (ActiveScene.Primitives[I].Id === Props.Selected) {
+            SelectedCode = 1 + I;
+            break;
+          }
+        }
+        if (SelectedCode === 0) {
+          for (let Li = 0; Li < LCount; ++Li) {
+            if (ActiveScene.AreaLights[Li].Id === Props.Selected) {
+              SelectedCode = 32 + Li;
+              break;
+            }
+          }
         }
 
-        // ---------------- PASS 1: GTX WORLD RENDER (ONLY WHEN SCENE DIRTY) ----------------
+        // ---------------- PASS 1: GTX WORLD RENDER (ZERO ALLOCATIONS PER CAMERA FRAME!) ----------------
         if (SceneDirtyRef.current) {
           SceneDirtyRef.current = false;
           Gl.bindFramebuffer(Gl.FRAMEBUFFER, CurState.SceneFbo);
@@ -1887,6 +2201,10 @@ export default function GtxWorldViewport({
           Gl.bindTexture(Gl.TEXTURE_2D, CurState.AtlasTex);
           Gl.uniform1i(U.uMaterialAtlas, 0);
 
+          Gl.activeTexture(Gl.TEXTURE1);
+          Gl.bindTexture(Gl.TEXTURE_2D, CurState.SceneDataTex);
+          Gl.uniform1i(U.uSceneData, 1);
+
           Gl.uniform2f(U.uResolution, Width, Height);
           Gl.uniform3fv(U.uCamOrigin, CameraOrigin);
           Gl.uniform3fv(U.uCamForward, Fwd);
@@ -1897,9 +2215,11 @@ export default function GtxWorldViewport({
           Gl.uniform1f(U.uExposureGain, ActiveScene.ExposureGain);
 
           const EffectiveViewMode =
-            Debug > 0 && Debug <= 6 ? 10 + Debug : VIEW_MODE_CODES[ViewMode] ?? 0;
+            Props.Debug > 0 && Props.Debug <= 6
+              ? 10 + Props.Debug
+              : VIEW_MODE_CODES[Props.ViewMode] ?? 0;
           Gl.uniform1i(U.uViewMode, EffectiveViewMode);
-          Gl.uniform1i(U.uShowGrid, EffectiveGrid ? 1 : 0);
+          Gl.uniform1i(U.uShowGrid, Props.EffectiveGrid ? 1 : 0);
           Gl.uniform1i(U.uSelectedCode, SelectedCode);
 
           Gl.uniform3fv(U.uSunDir, ActiveScene.SunDir);
@@ -1907,68 +2227,8 @@ export default function GtxWorldViewport({
           Gl.uniform1f(U.uSunAngularRadius, ActiveScene.SunAngularRadiusRad);
           Gl.uniform3fv(U.uSkyRadiance, ActiveScene.SkyRadiance);
 
-          const LCount = Math.min(MAX_LIGHTS, ActiveScene.AreaLights.length);
-          const LCenterHalfW = new Float32Array(MAX_LIGHTS * 4);
-          const LHalfHRad = new Float32Array(MAX_LIGHTS * 4);
-          for (let I = 0; I < LCount; ++I) {
-            const L = ActiveScene.AreaLights[I];
-            LCenterHalfW.set([L.Center[0], L.Center[1], L.Center[2], L.HalfWidth], I * 4);
-            LHalfHRad.set([L.HalfHeight, L.Radiance[0], L.Radiance[1], L.Radiance[2]], I * 4);
-          }
-          Gl.uniform1i(U.uLightCount, LCount);
-          Gl.uniform4fv(U.uLightCenterHalfW, LCenterHalfW);
-          Gl.uniform4fv(U.uLightHalfHRad, LHalfHRad);
-
-          const PosShape = new Float32Array(MAX_PRIMS * 4);
-          const HalfFlags = new Float32Array(MAX_PRIMS * 4);
-          const RotCol0 = new Float32Array(MAX_PRIMS * 4);
-          const RotCol1 = new Float32Array(MAX_PRIMS * 4);
-          const RotCol2 = new Float32Array(MAX_PRIMS * 4);
-          const EdgeTint = new Float32Array(MAX_PRIMS * 4);
-          const GiBounce = new Float32Array(MAX_PRIMS * 4);
-
-          for (let I = 0; I < PCount; ++I) {
-            const P = ActiveScene.Primitives[I];
-            const Flags =
-              (P.CastShadows ? 1 : 0) |
-              (P.GiContributor ? 2 : 0) |
-              (P.GlassShell ? 4 : 0);
-            PosShape.set([P.Center[0], P.Center[1], P.Center[2], P.Shape], I * 4);
-            HalfFlags.set(
-              [P.HalfExtents[0], P.HalfExtents[1], P.HalfExtents[2], Flags],
-              I * 4,
-            );
-            const [Rx, Ry, Rz] = P.RotationRad;
-            const Cx = Math.cos(Rx), Sx = Math.sin(Rx);
-            const Cy = Math.cos(Ry), Sy = Math.sin(Ry);
-            const Cz = Math.cos(Rz), Sz = Math.sin(Rz);
-            RotCol0.set([Cz * Cy, Sz * Cy, -Sy, P.Abbe], I * 4);
-            RotCol1.set([Cz * Sy * Sx - Sz * Cx, Sz * Sy * Sx + Cz * Cx, Cy * Sx, 0.0], I * 4);
-            RotCol2.set([Cz * Sy * Cx + Sz * Sx, Sz * Sy * Cx - Cz * Sx, Cy * Cx, 0.0], I * 4);
-            EdgeTint.set(
-              [P.EdgeTintF82[0], P.EdgeTintF82[1], P.EdgeTintF82[2], P.Transmission],
-              I * 4,
-            );
-            const DiffWeight = 1.0 - P.Metallic * 0.75;
-            GiBounce.set(
-              [
-                P.BaseColor[0] * DiffWeight,
-                P.BaseColor[1] * DiffWeight,
-                P.BaseColor[2] * DiffWeight,
-                P.Emission,
-              ],
-              I * 4,
-            );
-          }
-
-          Gl.uniform1i(U.uPrimCount, PCount);
-          Gl.uniform4fv(U.uPrimPosShape, PosShape);
-          Gl.uniform4fv(U.uPrimHalfFlags, HalfFlags);
-          Gl.uniform4fv(U.uPrimRotCol0, RotCol0);
-          Gl.uniform4fv(U.uPrimRotCol1, RotCol1);
-          Gl.uniform4fv(U.uPrimRotCol2, RotCol2);
-          Gl.uniform4fv(U.uPrimEdgeTint, EdgeTint);
-          Gl.uniform4fv(U.uPrimGiBounce, GiBounce);
+          Gl.uniform1i(U.uLightCount, CurState.LastLightCount);
+          Gl.uniform1i(U.uPrimCount, CurState.LastPrimCount);
 
           Gl.bindVertexArray(CurState.EmptyVao);
           Gl.drawArrays(Gl.TRIANGLES, 0, 3);
@@ -1990,7 +2250,7 @@ export default function GtxWorldViewport({
         Gl.drawArrays(Gl.TRIANGLES, 0, 3);
 
         // ---------------- PASS 3: 3D SLATE 13-HANDLE TRANSFORM GIZMO ----------------
-        if (EffectiveGizmo && SelectedGizmoTarget) {
+        if (Props.EffectiveGizmo && Props.SelectedGizmoTarget) {
           const CamState = {
             Projection: ActiveScene.OrthoHalfHeight > 0 ? "Orthographic" : "Perspective",
             Position: CameraOrigin,
@@ -2000,10 +2260,10 @@ export default function GtxWorldViewport({
           const WorldRadius =
             DragRef.current?.Kind === "gizmo" && DragRef.current.GizmoDrag?.ActiveWorldRadius
               ? DragRef.current.GizmoDrag.ActiveWorldRadius
-              : ComputeGizmoWorldRadius(SelectedGizmoTarget.Position, CamState, Aspect);
+              : ComputeGizmoWorldRadius(Props.SelectedGizmoTarget.Position, CamState, Aspect);
 
           const Built = BuildSlateGizmoGeometry(
-            SelectedGizmoTarget.Position,
+            Props.SelectedGizmoTarget.Position,
             Fwd,
             WorldRadius,
           );
@@ -2015,7 +2275,7 @@ export default function GtxWorldViewport({
             Aspect,
           );
           const Highlighted =
-            ActiveHandle !== GizmoHandle.None ? ActiveHandle : HoveredHandle;
+            Props.ActiveHandle !== GizmoHandle.None ? Props.ActiveHandle : Props.HoveredHandle;
 
           Gl.useProgram(CurState.GizmoProg);
           Gl.uniformMatrix4fv(CurState.GizmoUniforms.uViewProj, false, ViewProj);
@@ -2052,31 +2312,24 @@ export default function GtxWorldViewport({
 
     RequestRedrawRef.current = ScheduleDraw;
     ScheduleDraw(false);
-    const ResizeObs = new ResizeObserver(() => ScheduleDraw(true));
+    const ResizeObs = new ResizeObserver((Entries) => {
+      const Cr = Entries?.[0]?.contentRect;
+      const W = Math.round(Cr?.width || 0);
+      const H = Math.round(Cr?.height || 0);
+      if (W === LastObsW && H === LastObsH) return;
+      LastObsW = W;
+      LastObsH = H;
+      ScheduleDraw(true);
+    });
     ResizeObs.observe(Canvas);
     return () => {
       if (RequestRedrawRef.current === ScheduleDraw) RequestRedrawRef.current = null;
       if (RafId) cancelAnimationFrame(RafId);
       ResizeObs.disconnect();
     };
-  }, [
-    CompiledScene,
-    GetActiveScene,
-    SampleViewportFps,
-    Selected,
-    SelectedGizmoTarget,
-    ViewMode,
-    Debug,
-    EffectiveGrid,
-    EffectiveGizmo,
-    HoveredHandle,
-    ActiveHandle,
-    TextureEpoch,
-    GlEpoch,
-    RenderBackend,
-  ]);
+  }, [RenderBackend, GlEpoch, SampleViewportFps]);
 
-  // Multi-Worker Atomic Double-Buffered Tier 1 GTX + 2px Silhouette Outline + 13-Handle Slate GizmoPRO (ZERO partial scanlines!)
+  // Multi-Worker Atomic Double-Buffered Tier 1 GTX Fallback (depends ONLY on [RenderBackend] -> zero ResizeObserver churn!)
   useEffect(() => {
     if (RenderBackend !== "cpu-gtx") return;
     const Canvas = CanvasRef.current;
@@ -2091,10 +2344,22 @@ export default function GtxWorldViewport({
 
     let Disposed = false;
     let RafId = 0;
+    let LastObsW = 0;
+    let LastObsH = 0;
 
     const CompositePresent = () => {
-      if (Disposed || !CanvasRef.current || RenderBackend !== "cpu-gtx") return;
-      const ActiveScene = GetActiveScene();
+      if (Disposed || !CanvasRef.current || RenderBackendRef.current !== "cpu-gtx") return;
+      const Props = RenderPropsRef.current;
+      const BaseScene = CompiledSceneRef.current;
+      const ActiveScene =
+        Props.EffectiveProjection === "PERSP" && LiveCamRef.current
+          ? {
+              ...BaseScene,
+              CameraOrigin: LiveCamRef.current.Position,
+              CameraTarget: LiveCamRef.current.Target,
+            }
+          : BaseScene;
+
       const Rect = Canvas.getBoundingClientRect();
       const Dpr = Math.min(window.devicePixelRatio || 1, 1.25);
       const Width = Math.max(320, Math.min(1120, Math.round((Rect.width || 900) * Dpr)));
@@ -2117,18 +2382,20 @@ export default function GtxWorldViewport({
       let SelectedCode = 0;
       const PrimIdx = ActiveScene.Primitives
         .slice(0, PCount)
-        .findIndex((P) => P.Id === Selected);
+        .findIndex((P) => P.Id === Props.Selected);
       if (PrimIdx >= 0) {
         SelectedCode = 1 + PrimIdx;
       } else {
         const LightIdx = ActiveScene.AreaLights
           .slice(0, MAX_LIGHTS)
-          .findIndex((L) => L.Id === Selected);
+          .findIndex((L) => L.Id === Props.Selected);
         if (LightIdx >= 0) SelectedCode = 32 + LightIdx;
       }
 
       const EffectiveViewMode =
-        Debug > 0 && Debug <= 6 ? 10 + Debug : VIEW_MODE_CODES[ViewMode] ?? 0;
+        Props.Debug > 0 && Props.Debug <= 6
+          ? 10 + Props.Debug
+          : VIEW_MODE_CODES[Props.ViewMode] ?? 0;
 
       const IsInteractive =
         DragRef.current !== null ||
@@ -2138,10 +2405,10 @@ export default function GtxWorldViewport({
         (typeof navigator !== "undefined" && navigator.hardwareConcurrency) || 8;
       const TargetRayW = IsInteractive
         ? HwThreads >= 8
-          ? 248
-          : 208
-        : Math.min(600, Math.max(360, Math.round((Rect.width || 800) * 0.68)));
-      const TargetRayH = Math.max(117, Math.round(TargetRayW / Math.max(0.5, Aspect)));
+          ? 304
+          : 216
+        : Math.min(480, Math.max(340, Math.round((Rect.width || 800) * 0.56)));
+      const TargetRayH = Math.max(122, Math.round(TargetRayW / Math.max(0.5, Aspect)));
 
       if (
         SceneDirtyRef.current ||
@@ -2157,7 +2424,7 @@ export default function GtxWorldViewport({
             Width: TargetRayW,
             Height: TargetRayH,
             ViewModeCode: EffectiveViewMode,
-            ShowGrid: EffectiveGrid ? 1 : 0,
+            ShowGrid: Props.EffectiveGrid ? 1 : 0,
           },
           () => {
             if (!Disposed) StepDraw(false);
@@ -2165,13 +2432,12 @@ export default function GtxWorldViewport({
         );
       }
 
-      // Build 3D Slate 13-Handle GizmoPRO geometry + ViewProj at native 60Hz on top of the latest complete FrontBuffer!
       let BuiltGizmo = null;
       let ViewProj = null;
       const Highlighted =
-        ActiveHandle !== GizmoHandle.None ? ActiveHandle : HoveredHandle;
+        Props.ActiveHandle !== GizmoHandle.None ? Props.ActiveHandle : Props.HoveredHandle;
 
-      if (EffectiveGizmo && SelectedGizmoTarget) {
+      if (Props.EffectiveGizmo && Props.SelectedGizmoTarget) {
         const { CameraOrigin, CameraTarget, WorldUp } = ActiveScene;
         const Fwd = NormalizeVec3([
           CameraTarget[0] - CameraOrigin[0],
@@ -2194,9 +2460,9 @@ export default function GtxWorldViewport({
         const WorldRadius =
           DragRef.current?.Kind === "gizmo" && DragRef.current.GizmoDrag?.ActiveWorldRadius
             ? DragRef.current.GizmoDrag.ActiveWorldRadius
-            : ComputeGizmoWorldRadius(SelectedGizmoTarget.Position, CamState, Aspect);
+            : ComputeGizmoWorldRadius(Props.SelectedGizmoTarget.Position, CamState, Aspect);
         BuiltGizmo = BuildSlateGizmoGeometry(
-          SelectedGizmoTarget.Position,
+          Props.SelectedGizmoTarget.Position,
           Fwd,
           WorldRadius,
         );
@@ -2234,7 +2500,15 @@ export default function GtxWorldViewport({
 
     RequestRedrawRef.current = StepDraw;
     StepDraw(false);
-    const ResizeObs = new ResizeObserver(() => StepDraw(true));
+    const ResizeObs = new ResizeObserver((Entries) => {
+      const Cr = Entries?.[0]?.contentRect;
+      const W = Math.round(Cr?.width || 0);
+      const H = Math.round(Cr?.height || 0);
+      if (W === LastObsW && H === LastObsH) return;
+      LastObsW = W;
+      LastObsH = H;
+      StepDraw(true);
+    });
     ResizeObs.observe(Canvas);
     return () => {
       Disposed = true;
@@ -2242,21 +2516,7 @@ export default function GtxWorldViewport({
       if (RafId) cancelAnimationFrame(RafId);
       ResizeObs.disconnect();
     };
-  }, [
-    RenderBackend,
-    CompiledScene,
-    GetActiveScene,
-    SampleViewportFps,
-    Selected,
-    SelectedGizmoTarget,
-    ViewMode,
-    Debug,
-    EffectiveGrid,
-    EffectiveGizmo,
-    HoveredHandle,
-    ActiveHandle,
-    TextureEpoch,
-  ]);
+  }, [RenderBackend, SampleViewportFps]);
 
   // Authentic Unreal Engine 5 WASDQE + Sprint + F-Focus 60Hz Camera Loop
   useEffect(() => {
@@ -2566,7 +2826,8 @@ export default function GtxWorldViewport({
     }
   };
 
-  const OnWheel = (Event) => {
+  const OnWheelRef = useRef(null);
+  OnWheelRef.current = (Event) => {
     if (EffectiveProjection !== "PERSP" || !LiveCamRef.current) return;
     Event.preventDefault?.();
 
@@ -2589,8 +2850,18 @@ export default function GtxWorldViewport({
     ApplyLiveCameraUpdate(ApplyUnrealDolly(Cur, WheelSteps, 0.105), false);
   };
 
+  useEffect(() => {
+    const Canvas = CanvasRef.current;
+    if (!Canvas) return;
+    const Handler = (Ev) => OnWheelRef.current?.(Ev);
+    Canvas.addEventListener("wheel", Handler, { passive: false });
+    return () => Canvas.removeEventListener("wheel", Handler);
+  }, [RenderBackend, CanvasInstance]);
+
   const HandleRetryWebGlGpu = () => {
     SessionWebGlBlocked = false;
+    PendingGpuRestoreRef.current = false;
+    FastCrashCountRef.current = 0;
     EvictionCountRef.current = 0;
     SetShaderError(null);
     SetCanvasInstance((K) => K + 1);
@@ -2625,7 +2896,6 @@ export default function GtxWorldViewport({
         onPointerMove={OnPointerMove}
         onPointerUp={OnPointerUp}
         onPointerCancel={OnPointerUp}
-        onWheel={OnWheel}
       />
       {(ActiveHandle !== GizmoHandle.None ||
         HoveredHandle !== GizmoHandle.None ||
@@ -2649,15 +2919,31 @@ export default function GtxWorldViewport({
           GTX Shader Error: {ShaderError}
         </div>
       )}
-      {RenderBackend === "cpu-gtx" && (
+      {RenderBackend === "webgl2" ? (
+        <span
+          className="gtx-camera-home"
+          style={{
+            right: 122,
+            pointerEvents: "none",
+            borderColor: "rgba(74, 222, 128, 0.35)",
+            color: "#86efac",
+          }}
+        >
+          GPU · WebGL2
+        </span>
+      ) : (
         <button
           type="button"
           className="gtx-camera-home"
-          style={{ right: 122 }}
+          style={{
+            right: 122,
+            borderColor: "rgba(251, 191, 36, 0.55)",
+            color: "#fcd34d",
+          }}
           title="WebGL2 was blocked or evicted in this tab — click to retry hardware WebGL2 GPU"
           onClick={HandleRetryWebGlGpu}
         >
-          Retry WebGL2 GPU
+          CPU Fallback · Retry WebGL2 GPU
         </button>
       )}
       <button

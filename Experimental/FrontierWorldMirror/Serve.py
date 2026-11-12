@@ -20,6 +20,13 @@ class FrontierWorldMirrorHandler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         path_only = self.path.split("?", 1)[0]
+        if path_only == "/__diag":
+            query = self.path.split("?", 1)[1] if "?" in self.path else ""
+            from urllib.parse import unquote_plus
+            print(f"[GTX-DIAG] {unquote_plus(query)}", flush=True)
+            self.send_response(204)
+            self.end_headers()
+            return
         if path_only in ("/", "/index.html"):
             index_file = EDITOR_DIR / "index.html"
             body = index_file.read_bytes()
