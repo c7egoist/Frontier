@@ -97,6 +97,24 @@ struct UVThemeColors
     };
 }
 
+inline void RecordControlTooltip(
+    Rectangle2D AnchorBounds,
+    std::string_view Label,
+    const OptionalTooltip& Tooltip,
+    std::string_view Fallback)
+{
+    std::string TitleStorage{};
+    std::string BodyStorage{};
+    OptionalTooltip Effective = Tooltip;
+    if (!Effective.Enabled)
+    {
+        TitleStorage.assign(Label);
+        BodyStorage.assign(Fallback);
+        Effective = OptionalTooltip::FromTitled(TitleStorage.c_str(), BodyStorage.c_str());
+    }
+    ControlAppearance::RecordHoveredTooltip(AnchorBounds, Effective);
+}
+
 [[nodiscard]] inline std::string FormatCountWithCommas(std::size_t Count)
 {
     const std::string Raw = std::to_string(Count);
@@ -177,9 +195,9 @@ inline bool ConstructCapsuleButton(
         Ink,
         Label);
 
-    if (Hovered && Tooltip.Enabled)
+    if (Hovered)
     {
-        ControlAppearance::RecordHoveredTooltip(Rect, Tooltip);
+        RecordControlTooltip(Rect, Label, Tooltip, "Activate this UV workspace control.");
     }
     return Hovered && Pressed;
 }
@@ -191,13 +209,23 @@ inline bool ConstructSectionHeading(
     float                Width,
     std::string_view     Title,
     const UVThemeColors& Theme,
-    std::string_view     RightTag = {})
+    std::string_view     RightTag = {},
+    ControlIcon         Icon = ControlIcon::Count)
 {
-    Surface.FillRectangle({ LeftX, TopY + 2.0f, 3.0f, 14.0f }, Theme.AccentFill, 1.5f);
+    const bool HasIcon = Icon != ControlIcon::Count;
+    if (HasIcon)
+    {
+        VectorIconRepository::ConstructControl(
+            Surface, Icon, VectorIconPlacement{ LeftX, TopY + 1.0f, 14.0f, Theme.CautionInk, 1.8f });
+    }
+    else
+    {
+        Surface.FillRectangle({ LeftX, TopY + 2.0f, 3.0f, 14.0f }, Theme.AccentFill, 1.5f);
+    }
     WorkspaceAppearance::ConstructWeightedText(
         Surface,
         FontWeightClass::Regular,
-        { LeftX + 10.0f, TopY },
+        { LeftX + (HasIcon ? 21.0f : 10.0f), TopY },
         12.0f,
         Theme.TextPrimary,
         Title);
@@ -232,55 +260,81 @@ inline bool ConstructSliderControl(
     ColorRgba            FillTintOverride = ColorRgba{ 0, 0, 0, 0 },
     const OptionalTooltip& Tooltip = {})
 {
+    // Match StudioControls.SliderRow: label above, 88x28 numeric/unit pill, and a 26px range track.
     WorkspaceAppearance::ConstructWeightedText(
-        Surface,
-        FontWeightClass::Regular,
-        { RowRect.X, RowRect.Y + 1.0f },
-        10.0f,
-        Theme.TextMuted,
-        Label);
+        Surface, FontWeightClass::Regular, { RowRect.X, RowRect.Y }, 11.5f, Theme.TextMuted, Label);
 
-    const float ValW = WorkspaceAppearance::MeasureWeightedTextWidth(Surface, FontWeightClass::Regular, 10.0f, FormattedReading);
-    WorkspaceAppearance::ConstructWeightedText(
-        Surface,
-        FontWeightClass::Regular,
-        { RowRect.Right() - ValW, RowRect.Y + 1.0f },
-        10.0f,
-        Theme.TextPrimary,
-        FormattedReading);
-
-    const Rectangle2D Track{ RowRect.X, RowRect.Y + 18.0f, RowRect.Width, 8.0f };
-    const Rectangle2D HitBox{ Track.X - 4.0f, Track.Y - 5.0f, Track.Width + 8.0f, 18.0f };
-    const bool        Hovered = HitBox.Contains(Cursor);
-    if (Hovered && Tooltip.Enabled)
+    std::string_view Number = FormattedReading;
+    std::string_view Unit{};
+    const std::size_t Space = FormattedReading.find(' ');
+    if (Space != std::string_view::npos)
     {
-        ControlAppearance::RecordHoveredTooltip(RowRect, Tooltip);
+        Number = FormattedReading.substr(0u, Space);
+        Unit = FormattedReading.substr(Space + 1u);
+    }
+    else if (!FormattedReading.empty() && FormattedReading.back() == '%')
+    {
+        Number = FormattedReading.substr(0u, FormattedReading.size() - 1u);
+        Unit = "%";
     }
 
-    Surface.FillRectangle(Track, Theme.WellBg, 4.0f);
-    Surface.StrokeRectangle(Track, Theme.BorderSubtle, 4.0f, 1.0f);
+    constexpr float ControlY = 18.0f;
+    constexpr float ValueW = 88.0f;
+    constexpr float ValueH = 28.0f;
+    const Rectangle2D ValuePill{ RowRect.X, RowRect.Y + ControlY, ValueW, ValueH };
+    Surface.FillRectangle(ValuePill, ColorRgba{ 17, 17, 17, 255 }, 14.0f);
+    Surface.StrokeRectangle(ValuePill, ColorRgba{ 255, 255, 255, 23 }, 14.0f, 1.0f);
+    Surface.FillRectangle(
+        { ValuePill.Right() - 32.0f, ValuePill.Y + 1.0f, 31.0f, ValuePill.Height - 2.0f },
+        ColorRgba{ 23, 23, 23, 255 }, 0.0f);
+    Surface.StrokeLine(
+        { ValuePill.Right() - 32.0f, ValuePill.Y + 4.0f },
+        { ValuePill.Right() - 32.0f, ValuePill.Bottom() - 4.0f },
+        ColorRgba{ 255, 255, 255, 20 }, 1.0f);
+    const float NumberW = WorkspaceAppearance::MeasureWeightedTextWidth(Surface, FontWeightClass::Regular, 11.5f, Number);
+    WorkspaceAppearance::ConstructWeightedText(
+        Surface, FontWeightClass::Regular,
+        { ValuePill.X + (ValueW - 32.0f - NumberW) * 0.5f, ValuePill.Y + 8.0f },
+        11.5f, Theme.TextPrimary, Number);
+    const float UnitW = WorkspaceAppearance::MeasureWeightedTextWidth(Surface, FontWeightClass::Regular, 9.5f, Unit);
+    WorkspaceAppearance::ConstructWeightedText(
+        Surface, FontWeightClass::Regular,
+        { ValuePill.Right() - 16.0f - UnitW * 0.5f, ValuePill.Y + 9.0f },
+        9.5f, Theme.TextMuted, Unit);
+
+    const float TrackX = ValuePill.Right() + 9.0f;
+    const float TrackW = std::max(36.0f, RowRect.Right() - TrackX);
+    const Rectangle2D Track{ TrackX, RowRect.Y + ControlY + 1.0f, TrackW, 26.0f };
+    const Rectangle2D HitBox{ Track.X, Track.Y - 4.0f, Track.Width, Track.Height + 8.0f };
+    const bool Hovered = HitBox.Contains(Cursor);
+    if (Hovered)
+    {
+        RecordControlTooltip({ RowRect.X, RowRect.Y, RowRect.Width, ControlY + ValueH }, Label, Tooltip,
+            "Drag the slider to adjust this UV workspace setting.");
+    }
+
+    constexpr float ThumbRadius = 12.0f;
+    const float InnerTrackW = std::max(1.0f, Track.Width - ThumbRadius * 2.0f);
+    const float Clamped = std::clamp(InOutNormalized, 0.0f, 1.0f);
+    const float ThumbX = Track.X + ThumbRadius + InnerTrackW * Clamped;
+    const float CenterY = Track.Y + Track.Height * 0.5f;
+    Surface.FillRectangle(Track, ColorRgba{ 35, 35, 35, 255 }, 13.0f);
+    const ColorRgba Fill = (FillTintOverride.Alpha > 0u) ? FillTintOverride : ColorRgba{ 78, 78, 78, 255 };
+    Surface.FillRectangle(
+        { Track.X, Track.Y, std::max(0.0f, ThumbX - Track.X), Track.Height }, Fill, 13.0f);
+    Surface.FillCircle({ ThumbX, CenterY }, ThumbRadius, ColorRgba{ 230, 230, 230, 255 });
+    Surface.StrokeCircle({ ThumbX, CenterY }, ThumbRadius, ColorRgba{ 0, 0, 0, 92 }, 1.0f);
 
     bool Changed = false;
     if (Hovered && (PointerPressed || PointerDown))
     {
-        const float NextNorm = std::clamp((Cursor.X - Track.X) / std::max(1.0f, Track.Width), 0.0f, 1.0f);
+        const float NextNorm = std::clamp((Cursor.X - (Track.X + ThumbRadius)) / InnerTrackW, 0.0f, 1.0f);
         if (std::abs(NextNorm - InOutNormalized) > 1.0e-4f)
         {
             InOutNormalized = NextNorm;
-            Changed         = true;
+            Changed = true;
         }
     }
-
-    const float     Clamped = std::clamp(InOutNormalized, 0.0f, 1.0f);
-    const ColorRgba BarFill = (FillTintOverride.Alpha > 0u) ? FillTintOverride : Theme.AccentFill;
-    if (Clamped > 0.005f)
-    {
-        Surface.FillRectangle({ Track.X, Track.Y, std::max(6.0f, Track.Width * Clamped), Track.Height }, BarFill, 4.0f);
-    }
-
-    const float KnobX = Track.X + Track.Width * Clamped;
-    Surface.FillCircle({ KnobX, Track.Y + 4.0f }, Hovered ? 5.8f : 5.0f, Theme.PrimaryFill);
-    Surface.StrokeCircle({ KnobX, Track.Y + 4.0f }, Hovered ? 5.8f : 5.0f, ColorRgba{ 0, 0, 0, 120 }, 1.0f);
     return Changed;
 }
 
@@ -292,27 +346,40 @@ inline bool ConstructToggleRow(
     const UVThemeColors& Theme,
     Point2D              Cursor,
     bool                 Pressed,
-    const OptionalTooltip& Tooltip = {})
+    const OptionalTooltip& Tooltip = {},
+    std::string_view     DetailFirstLine = {},
+    std::string_view     DetailSecondLine = {})
 {
     WorkspaceAppearance::ConstructWeightedText(
-        Surface,
-        FontWeightClass::Regular,
-        { RowRect.X, RowRect.Y + 4.0f },
-        10.5f,
-        Theme.TextPrimary,
-        Label);
-
-    const Rectangle2D TrackCapsule{ RowRect.Right() - 34.0f, RowRect.Y + 2.0f, 34.0f, 18.0f };
-    const bool        Hovered = RowRect.Contains(Cursor);
-    if (Hovered && Tooltip.Enabled)
+        Surface, FontWeightClass::Regular, { RowRect.X, RowRect.Y }, 11.5f, Theme.TextPrimary, Label);
+    if (!DetailFirstLine.empty())
     {
-        ControlAppearance::RecordHoveredTooltip(RowRect, Tooltip);
+        WorkspaceAppearance::ConstructTruncatedText(
+            Surface, FontWeightClass::Regular, { RowRect.X, RowRect.Y + 16.0f }, RowRect.Width - 54.0f,
+            9.5f, Theme.TextMuted, DetailFirstLine);
+        if (!DetailSecondLine.empty())
+        {
+            WorkspaceAppearance::ConstructTruncatedText(
+                Surface, FontWeightClass::Regular, { RowRect.X, RowRect.Y + 27.0f }, RowRect.Width - 54.0f,
+                9.5f, Theme.TextMuted, DetailSecondLine);
+        }
     }
 
-    Surface.FillRectangle(TrackCapsule, InOutEnabled ? Theme.AccentFill : Theme.WellBg, 9.0f);
-    Surface.StrokeRectangle(TrackCapsule, InOutEnabled ? Theme.AccentFill : Theme.BorderStrong, 9.0f, 1.0f);
-    const float KnobX = InOutEnabled ? (TrackCapsule.Right() - 9.0f) : (TrackCapsule.X + 9.0f);
-    Surface.FillCircle({ KnobX, TrackCapsule.Y + 9.0f }, 6.5f, InOutEnabled ? Theme.AccentInk : Theme.TextMuted);
+    const Rectangle2D TrackCapsule{ RowRect.Right() - 44.0f, RowRect.Y + 3.0f, 44.0f, 25.0f };
+    const bool Hovered = RowRect.Contains(Cursor);
+    if (Hovered)
+    {
+        RecordControlTooltip(RowRect, Label, Tooltip, "Toggle this UV workspace setting.");
+    }
+
+    Surface.FillRectangle(
+        TrackCapsule, InOutEnabled ? ColorRgba{ 255, 255, 255, 255 } : ColorRgba{ 35, 35, 35, 255 }, 13.0f);
+    Surface.StrokeRectangle(
+        TrackCapsule, InOutEnabled ? ColorRgba{ 255, 255, 255, 255 } : ColorRgba{ 255, 255, 255, 26 }, 13.0f, 1.0f);
+    const float KnobX = InOutEnabled ? (TrackCapsule.Right() - 13.0f) : (TrackCapsule.X + 13.0f);
+    Surface.FillCircle(
+        { KnobX, TrackCapsule.Y + 12.5f }, 9.5f,
+        InOutEnabled ? ColorRgba{ 17, 17, 17, 255 } : ColorRgba{ 188, 188, 188, 255 });
 
     if (Hovered && Pressed)
     {
@@ -325,39 +392,6 @@ inline bool ConstructToggleRow(
 //------------------------------------------------------------------------------------------------------------------------
 //                                  CRISP STUDIO VECTOR vector icons (MATCHING STUDIOCONTROLS.JS)
 //------------------------------------------------------------------------------------------------------------------------
-
-inline void ConstructSceneCubeIcon(PixelSpace& Surface, Point2D Origin, float Size, ColorRgba Ink)
-{
-    const float CX = Origin.X + Size * 0.5f;
-    const float CY = Origin.Y + Size * 0.5f;
-    const float R  = Size * 0.42f;
-    const Point2D Top  { CX, CY - R };
-    const Point2D TR   { CX + R * 0.86f, CY - R * 0.48f };
-    const Point2D BR   { CX + R * 0.86f, CY + R * 0.48f };
-    const Point2D Bot  { CX, CY + R };
-    const Point2D BL   { CX - R * 0.86f, CY + R * 0.48f };
-    const Point2D TL   { CX - R * 0.86f, CY - R * 0.48f };
-    const Point2D Mid  { CX, CY };
-
-    Surface.StrokeLine(Top, TR, Ink, 1.35f);
-    Surface.StrokeLine(TR,  BR, Ink, 1.35f);
-    Surface.StrokeLine(BR,  Bot, Ink, 1.35f);
-    Surface.StrokeLine(Bot, BL, Ink, 1.35f);
-    Surface.StrokeLine(BL,  TL, Ink, 1.35f);
-    Surface.StrokeLine(TL,  Top, Ink, 1.35f);
-    Surface.StrokeLine(TL,  Mid, Ink, 1.25f);
-    Surface.StrokeLine(TR,  Mid, Ink, 1.25f);
-    Surface.StrokeLine(Bot, Mid, Ink, 1.25f);
-}
-
-inline void ConstructPackGridIcon(PixelSpace& Surface, Point2D Origin, float Size, ColorRgba Ink)
-{
-    const float S = Size;
-    Surface.StrokeRectangle({ Origin.X + S * 0.08f, Origin.Y + S * 0.08f, S * 0.44f, S * 0.44f }, Ink, 1.5f, 1.3f);
-    Surface.StrokeRectangle({ Origin.X + S * 0.60f, Origin.Y + S * 0.08f, S * 0.32f, S * 0.32f }, Ink, 1.2f, 1.3f);
-    Surface.StrokeRectangle({ Origin.X + S * 0.08f, Origin.Y + S * 0.60f, S * 0.32f, S * 0.32f }, Ink, 1.2f, 1.3f);
-    Surface.StrokeRectangle({ Origin.X + S * 0.48f, Origin.Y + S * 0.48f, S * 0.44f, S * 0.44f }, Ink, 1.5f, 1.3f);
-}
 
 inline void ConstructComponentModeIcon(PixelSpace& Surface, Point2D Origin, float Size, uint32_t ModeIdx, ColorRgba Ink)
 {
@@ -452,39 +486,32 @@ inline void ConstructRailToolIcon(PixelSpace& Surface, Point2D Origin, float Siz
     }
 }
 
-inline void ConstructMatCapOrbPreview(PixelSpace& Surface, Point2D Center, float Radius, uint32_t SlotIdx, bool Selected, const UVThemeColors& Theme)
+inline void ConstructMatCapOrbPreview(
+    PixelSpace& Surface,
+    Point2D Center,
+    float Radius,
+    uint32_t SlotIdx,
+    bool Selected,
+    const UVThemeColors& Theme,
+    ImTextureData* MatCapAtlas = nullptr)
 {
-    struct OrbColors { ColorRgba Diffuse; ColorRgba Spec; };
-    constexpr std::array<OrbColors, 16u> OrbSwatches {{
-        { { 158, 160, 166, 255 }, { 242, 244, 248, 255 } }, // 0 Clay
-        { {  86,  90,  98, 255 }, { 196, 202, 214, 255 } }, // 1 Graphite
-        { { 174, 184, 198, 255 }, { 255, 255, 255, 255 } }, // 2 Chrome
-        { { 196, 152,  76, 255 }, { 255, 236, 178, 255 } }, // 3 Gold
-        { { 184,  64,  68, 255 }, { 255, 198, 198, 255 } }, // 4 Carmine Car Paint
-        { { 216, 212, 206, 255 }, { 255, 255, 252, 255 } }, // 5 Pearl Ceramic
-        { {  44,  62,  86, 255 }, { 184, 222, 255, 255 } }, // 6 Smoked Glass
-        { {  76, 138, 116, 255 }, { 196, 245, 224, 255 } }, // 7 Jade
-        { {  52,  54,  58, 255 }, { 132, 136, 144, 255 } }, // 8 Vulcanized Rubber
-        { { 166, 148, 128, 255 }, { 236, 224, 206, 255 } }, // 9 Warm Stone
-        { {  72, 112, 176, 255 }, { 206, 228, 255, 255 } }, // 10 Cobalt Clearcoat
-        { { 168, 102,  64, 255 }, { 248, 204, 172, 255 } }, // 11 Anodized Copper
-        { { 118,  88, 156, 255 }, { 226, 204, 255, 255 } }, // 12 Iridescent Violet
-        { { 126, 148,  88, 255 }, { 224, 242, 186, 255 } }, // 13 Olive Drab
-        { { 192, 118, 128, 255 }, { 255, 218, 224, 255 } }, // 14 Subsurface Skin
-        { {  94, 156, 176, 255 }, { 218, 248, 255, 255 } }, // 15 Arctic Ice
-    }};
-    const auto& C = OrbSwatches[SlotIdx % OrbSwatches.size()];
-    Surface.FillCircle(Center, Radius, ColorRgba{ 18, 18, 20, 255 });
-    Surface.FillCircle({ Center.X - Radius * 0.06f, Center.Y - Radius * 0.06f }, Radius * 0.90f, C.Diffuse);
-    Surface.FillCircle({ Center.X - Radius * 0.28f, Center.Y - Radius * 0.30f }, Radius * 0.36f, C.Spec);
-    if (Selected)
+    const uint32_t Slot = SlotIdx % 16u;
+    const uint32_t Col = Slot % 4u;
+    const uint32_t Row = Slot / 4u;
+    const Rectangle2D Bounds{ Center.X - Radius, Center.Y - Radius, Radius * 2.0f, Radius * 2.0f };
+    if (MatCapAtlas != nullptr)
     {
-        Surface.StrokeCircle(Center, Radius + 2.0f, Theme.AccentFill, 1.8f);
+        Surface.FillTexturedRectangle(
+            Bounds, MatCapAtlas,
+            { static_cast<float>(Col) * 0.25f, static_cast<float>(Row) * 0.25f },
+            { static_cast<float>(Col + 1u) * 0.25f, static_cast<float>(Row + 1u) * 0.25f },
+            Radius, { 255u, 255u, 255u, 255u });
     }
     else
     {
-        Surface.StrokeCircle(Center, Radius, Theme.BorderStrong, 1.0f);
+        Surface.FillCircle(Center, Radius, ColorRgba{ 34, 36, 42, 255 });
     }
+    Surface.StrokeCircle(Center, Radius, Selected ? Theme.AccentFill : Theme.BorderStrong, Selected ? 1.8f : 1.0f);
 }
 
 } // namespace Frontier::Workspaces::UVAppearance

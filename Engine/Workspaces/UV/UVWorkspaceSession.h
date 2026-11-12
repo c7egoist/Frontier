@@ -205,7 +205,7 @@ public:
     std::string                              OutlinerSearchQuery  {};
     bool                                     FillPocketsEnabled   = true;
     bool                                     SeamBrushActive      = false;
-    float                                    SharpAngleThreshold  = 52.0f;
+    float                                    SharpAngleThreshold  = 55.0f;
     uint32_t                                 RelaxIterations      = 12u;
     std::unordered_map<uint32_t, UDIMTileSetting> UDIMSettings    {};
 
@@ -225,6 +225,8 @@ public:
     uint32_t                                 Framebuffer2DWidth   = 0u;
     uint32_t                                 Framebuffer2DHeight  = 0u;
     bool                                     FramebuffersDirty    = true;
+    bool                                     SpatialNavigationActive = false;
+    bool                                     DeferredPlanarRefresh = false;
 
 private:
     void InitializeLoadedAssetLayout();
