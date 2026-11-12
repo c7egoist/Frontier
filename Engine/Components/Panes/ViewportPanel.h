@@ -10,12 +10,16 @@
 //------------------------------------------------------------------------------------------------------------------------
 
 #include "Engine/Components/Panes/OutlinerPanel.h"
+#include "Engine/SimulationSpace/ForceFields/ForceFieldDescriptors.h"
 
 #include <imgui.h>
 
 #include <array>
 #include <cstdint>
+#include <functional>
+#include <string>
 #include <string_view>
+#include <vector>
 
 namespace Frontier
 {
@@ -45,9 +49,28 @@ enum class ConstructCategoryRail : uint8_t
     Organization = 2, // [-] - Organizational folders
 };
 
+enum class ForceConstructCategory : uint8_t
+{
+    All             = 0, // [-] - All 19 ForceModel laws, presets, & scene entries
+    VectorLaws      = 1, // [-] - VectorField analytic spatial laws (Linear, Buoyancy, Radial, Attractor, Repulsor, Axis, Containment)
+    FlowLaws        = 2, // [-] - FlowField & transport laws (Rotation, Torque, Drag, Vorticity, Lorentz, Dipole, Stream, Spline, Adhesion)
+    TurbulenceLaws  = 3, // [-] - CurlNoise, AtmosphericGust, BrownianNoise
+    Presets         = 4, // [-] - Curated .ForceModel & Formula presets
+    SceneAndFolders = 5, // [-] - Static geometry, lights & folders
+};
+
 //------------------------------------------------------------------------------------------------------------------------
 //                                                       STRUCTURES
 //------------------------------------------------------------------------------------------------------------------------
+
+struct ViewportConstructPresetEntry
+{
+    std::string Title           {};          // [-] - Preset display title
+    std::string Subtitle        {};          // [-] - Short parameter caption
+    uint32_t    ForceLawOrdinal = 0u;          // [id]- ForceModel ordinal [0..18]
+    bool        FormulaOverride = false;       // [-] - Symbolic formula preset indicator
+    uint32_t    DomainOrdinal   = 0u;          // [id]- 0=VectorField, 1=FlowField, 2=TurbulenceField
+};
 
 struct ViewportDisplaySettings
 {
@@ -59,6 +82,29 @@ struct ViewportDisplaySettings
     bool     AntiAliasingEnabled = true;   // [-]   - Temporal anti-aliasing toggle
     bool     RaytracingEnabled   = true;   // [-]   - Hardware raytracing toggle
 };
+
+struct ViewportPaneSurfaceSpecification
+{
+    uint32_t                                        PaneIndex     = 0u;
+    uint32_t                                        WidthPx       = 0u;
+    uint32_t                                        HeightPx      = 0u;
+    ViewportProjectionPreset                        Projection    = ViewportProjectionPreset::Perspective;
+    ViewportExecutionMode                           ExecutionMode = ViewportExecutionMode::Edit;
+    bool                                            PlayPaused    = false;
+    ViewportDisplaySettings                         Display       {};
+    SimulationSpace::ForceFields::ForceOverlaySettings ForceOverlay{};
+    double                                          TimeSeconds   = 0.0;
+};
+
+struct ViewportRasterSurface
+{
+    const void* SoftwareTextureData = nullptr; // [-] - Optional ImTextureData* for headless / CPU readback display
+    uint64_t    NativeTextureHandle = 0ull;    // [-] - Optional GPU ImTextureID handle
+    uint32_t    ActiveForceCount    = 0u;      // [count] - Contributing active forces in scene
+};
+
+using ViewportPaneRasterCallback      = std::function<ViewportRasterSurface(const ViewportPaneSurfaceSpecification&)>;
+using ViewportPaneInteractionCallback = std::function<void(uint32_t PaneIndex, Rectangle2D PaneBounds, const PaneInputReading& Input)>;
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                                  FUNCTION PROTOTYPES
@@ -76,6 +122,16 @@ public:
     void AttachOutliner(OutlinerPanel* SourceOutliner) noexcept;
     void AssignCanvasRasterImage(const uint8_t* RgbaPixels, uint32_t WidthPx, uint32_t HeightPx);
     void ClearCanvasRasterImage() noexcept;
+    void ConfigureConstructPresets(std::vector<ViewportConstructPresetEntry> Presets);
+    void ConfigureConstructPresetCallback(std::function<void(uint32_t PresetIndex)> Callback);
+    void ConfigureOpenContentBrowserCallback(std::function<void()> Callback);
+    void ConfigureRasterCallback(ViewportPaneRasterCallback Callback);
+    void ConfigureInteractionCallback(ViewportPaneInteractionCallback Callback);
+    void ConfigureForceOverlayToolsVisible(bool Visible) noexcept;
+    void ConfigureForceOverlaySheetOpen(bool Open) noexcept;
+    void ConfigureForceOverlaySettings(const SimulationSpace::ForceFields::ForceOverlaySettings& Settings) noexcept;
+    void ConfigureSimulationTimeSeconds(double TimeSeconds) noexcept;
+    void ConfigureProbeReadoutText(std::string_view ReadoutText);
     void ConfigureSceneTitle(std::string_view Title);
     void ConfigureExecutionMode(ViewportExecutionMode Mode, bool Paused = false) noexcept;
     void TogglePlayPause() noexcept;
@@ -106,8 +162,14 @@ public:
     [[nodiscard]] ViewportProjectionPreset       QueryPrimaryProjection() const noexcept;
     [[nodiscard]] ViewportProjectionPreset       QuerySecondaryProjection() const noexcept;
     [[nodiscard]] uint32_t                       QueryActivePaneIndex() const noexcept;
-    [[nodiscard]] const ViewportDisplaySettings& QueryDisplaySettings() const noexcept;
-    [[nodiscard]] ViewportDisplaySettings&       AccessDisplaySettings() noexcept;
+    [[nodiscard]] const ViewportDisplaySettings&                           QueryDisplaySettings() const noexcept;
+    [[nodiscard]] ViewportDisplaySettings&                                 AccessDisplaySettings() noexcept;
+    [[nodiscard]] bool                                                     QueryForceOverlayToolsVisible() const noexcept;
+    [[nodiscard]] bool                                                     QueryForceOverlaySheetOpen() const noexcept;
+    [[nodiscard]] const SimulationSpace::ForceFields::ForceOverlaySettings& QueryForceOverlaySettings() const noexcept;
+    [[nodiscard]] SimulationSpace::ForceFields::ForceOverlaySettings&       AccessForceOverlaySettings() noexcept;
+    [[nodiscard]] double                                                   QuerySimulationTimeSeconds() const noexcept;
+    [[nodiscard]] bool                                                     ConsumeRewindRequested() noexcept;
 
 private:
     void PushDiagnosticsSample(double Δt) noexcept;
@@ -117,13 +179,21 @@ private:
         ViewportProjectionPreset Projection,
         uint32_t                 PaneIndex,
         uint32_t                 ConstructedCount,
-        const PaneInputReading&  Input);
+        const PaneInputReading&  Input,
+        bool                     OverlayCoversCanvas);
+    void RenderForceOverlaySheet(
+        PixelSpace&             Overlay,
+        Rectangle2D             Bounds,
+        Point2D                 ButtonBottomLeft,
+        const PaneInputReading& Input);
     void RenderDiagnosticsPanel(
         PixelSpace&             Surface,
         Rectangle2D             CanvasBounds,
         uint32_t                ConstructedCount,
         uint32_t                VisibleCount,
         const PaneInputReading& Input);
+    [[nodiscard]] bool        QueryForceConstructAvailable() const noexcept;
+    [[nodiscard]] Rectangle2D QueryConstructDialogBounds(Rectangle2D Bounds) const noexcept;
     void RenderConstructDialog(
         PixelSpace&             Overlay,
         Rectangle2D             Bounds,
@@ -154,8 +224,23 @@ private:
     std::array<float, 120>     IntervalHistoryMs      {};                                        // [ms]  - Rolling 120-step timing samples
     uint32_t                   HistoryWriteCursor      = 0u;                                      // [idx] - Ring buffer write cursor
     ConstructCategoryRail      ConstructRail           = ConstructCategoryRail::All;              // [-]   - Active Construct category rail
+    ForceConstructCategory     ForceConstructTab       = ForceConstructCategory::All;             // [-]   - Active Force Construct rail tab
+    float                      ConstructGridScrollY    = 0.0f;                                    // [px]  - Construct tile grid scroll offset
     TextEditBuffer             ConstructSearchEditor   {};                                        // [-]   - Construct search filter buffer
-    ImTextureData              CanvasRasterTexture     {};                                        // [-]   - Optional live GTX/RTX viewport texture
+    std::vector<ViewportConstructPresetEntry> ConstructPresets {};                                // [-]   - Optional Force presets shown in Construct dialog
+    std::function<void(uint32_t)>             ConstructPresetCallback {};                         // [-]   - Callback invoked when preset tile chosen
+    std::function<void()>                     OpenContentBrowserCallback {};                      // [-]   - Callback invoked by Content Browser button
+
+    ViewportPaneRasterCallback      RasterCallback          {};                                        // [-]   - Optional GPU / software surface feeder
+    ViewportPaneInteractionCallback InteractionCallback     {};                                        // [-]   - Optional canvas pointer router
+    bool                            ForceOverlayToolsVisible = false;                                  // [-]   - Show Force Viz pill & Rewind controls
+    bool                            ForceOverlaySheetOpen    = false;                                  // [-]   - Force Viz overlay sheet open
+    bool                            RewindRequested          = false;                                  // [-]   - Pulse triggered by Rewind button
+    double                          SimulationTimeSeconds    = 0.0;                                    // [s]   - Active simulation clock readout
+    uint32_t                        LastReportedForceCount   = 0u;                                     // [count]- Last force count from raster feed
+    std::string                     ProbeReadoutText         {};                                       // [-]   - Optional bottom anemometer strip
+    SimulationSpace::ForceFields::ForceOverlaySettings ForceOverlay{};                                 // [-]   - Editor Force Viz overlay parameters
+    ImTextureData                   CanvasRasterTexture      {};                                       // [-]   - Optional live GTX/RTX viewport texture
 };
 
 //------------------------------------------------------------------------------------------------------------------------

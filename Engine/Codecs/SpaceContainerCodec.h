@@ -49,7 +49,9 @@ enum class SpaceExtensionCategory : uint8_t
     Photometry      = 17, // [-] - .Photometry Option 1A natural IES luminaire profile
     Terrain         = 18, // [-] - .Terrain Option 1A natural heightfield tile
     Acoustic        = 19, // [-] - .Acoustic Option 1A natural impulse/propagation setup
-    NetworkSpace    = 20  // [-] - .NetworkSpace distributed session routing & replication policies
+    NetworkSpace    = 20, // [-] - .NetworkSpace distributed session routing & replication policies
+    VectorFieldSpace= 21, // [-] - .VectorFieldSpace multi-source vector field rig, curves, & formulas
+    ForceModel      = 22  // [-] - .ForceModel Option A single-force preset configuration
 };
 
 //------------------------------------------------------------------------------------------------------------------------

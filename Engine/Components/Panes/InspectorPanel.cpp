@@ -121,6 +121,16 @@ void FormatTransformSubtitle(OutlinerRecordEntry& Entry)
 //                                         NOTES SYNCHRONIZATION & CONFIGURATION
 //------------------------------------------------------------------------------------------------------------------------
 
+void InspectorPanel::ConfigureExtensionSectionCallback(InspectorExtensionRenderCallback Callback)
+{
+    ExtensionSectionCallback = std::move(Callback);
+}
+
+void InspectorPanel::ConfigureFullOverrideCallback(InspectorFullOverrideCallback Callback)
+{
+    FullOverrideCallback = std::move(Callback);
+}
+
 void InspectorPanel::ConfigureNotesBoxOpen(bool Open) noexcept
 {
     NotesBoxExpanded = Open;
@@ -1542,7 +1552,16 @@ float InspectorPanel::RenderStandardEntryInspector(
             ColorRgba{ 117, 117, 117, 255 },
             HintLine);
 
-        CurY += TransformCard.Height + 28.0f;
+        CurY += TransformCard.Height + 18.0f;
+    }
+
+    if (ExtensionSectionCallback)
+    {
+        CurY += ExtensionSectionCallback(Surface, ScrollViewport, LeftX, CurY, InnerW, Entry, Input);
+    }
+    else
+    {
+        CurY += 10.0f;
     }
 
     return CurY - OriginY;
@@ -1595,6 +1614,15 @@ void InspectorPanel::Render(
     const OutlinerSlotToken PrimaryToken = (Selected.size() == 1u) ? Selected.front() : OutlinerSlotToken{};
     OutlinerRecordEntry*    PrimaryEntry = (AttachedOutliner != nullptr) ? AttachedOutliner->AccessEntry(PrimaryToken) : nullptr;
     SyncNotesBufferWithSelection(PrimaryToken, PrimaryEntry);
+
+    if (FullOverrideCallback && Selected.size() <= 1u)
+    {
+        if (FullOverrideCallback(Surface, Bounds, AttachedOutliner, PrimaryEntry, Input, Δt))
+        {
+            Surface.PopClip();
+            return;
+        }
+    }
 
     Surface.PushClip(ScrollViewport);
 

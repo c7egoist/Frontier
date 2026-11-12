@@ -17,17 +17,23 @@
 #include "Engine/Components/ControlCentre/ControlCentrePanel.h"
 #include "Engine/Components/Docking/WorkspaceDockContainer.h"
 #include "Engine/Editor/Explorer/ContentBrowser.h"
+#include "Engine/Editor/Workspaces/Simulation/ForceInspectorView.h"
+#include "Engine/Editor/Workspaces/Simulation/ForcePresetBrowserPanel.h"
 #include "Engine/GeometricRaster/GlobalIllumination/ShowcaseGalleryScene.h"
 #include "Engine/Input/InputExtension.h"
 #include "Engine/Lifecycle/LifecycleSequence.h"
 #include "Engine/Lifecycle/WorkspaceLifecycle.h"
+#include "Engine/SimulationSpace/ForceFields/FieldLatticeCascade.h"
+#include "Engine/SimulationSpace/ForceFields/ForceFieldAccumulator.h"
 #include "Engine/Windowing/PlatformWindow.h"
 #include "Engine/Workspaces/UV/UVWorkspaceHost.h"
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <string_view>
+#include <vector>
 
 namespace Frontier::Lifecycle
 {
@@ -85,7 +91,9 @@ public:
     void               AttachUVWorkspaceHost(Workspaces::UVWorkspaceHost* TargetHost) noexcept { MountedUVHost = TargetHost; }
     void               PopulateShowcaseGallerySession(uint32_t RenderWidthPx = 640u, uint32_t RenderHeightPx = 360u);
     void               RefreshShowcaseViewportRaster();
+    [[nodiscard]] OutlinerSlotToken SpawnForceFieldEntry(const SimulationSpace::ForceFields::ForceSourceRecordEntry& SourcePreset);
     [[nodiscard]] GeometricRaster::ShowcaseWorldSceneBundle* AccessShowcaseScene() noexcept { return ShowcaseBundle.get(); }
+    [[nodiscard]] SimulationSpace::ForceFields::ForceFieldAccumulator& AccessForceAccumulator() noexcept { return ForceAccumulator; }
     [[nodiscard]] bool ExecuteAuthoringTick(double Δt);
     [[nodiscard]] bool Suspend() noexcept;
     [[nodiscard]] bool Resume() noexcept;
@@ -107,6 +115,15 @@ public:
     [[nodiscard]] Components::WorkspaceDockPaneToken         QueryInspectorPaneToken() const noexcept;
 
 private:
+    struct MappedEditorForceSource
+    {
+        OutlinerSlotToken                                  OutlinerSlot {};
+        SimulationSpace::ForceFields::ForceSourceRecordEntry Source       {};
+    };
+
+    void AttachForceFieldAuthoringToActivePanes();
+    void SynchronizeForceFieldsWithOutliner(double Δt);
+
     EditorStartupConfiguration                 StartupConfig          {};     // [-]     - Applied editor startup settings
     Components::HeadlessWorkspaceDockContainer DockContainer          {};     // [-]     - Intra-app trapezoidal docking container
     TypographyRepository                       Typography             {};     // [-]     - .FontSpace typeface & 13px tab-strip faces
@@ -118,6 +135,16 @@ private:
     Workspaces::UVWorkspaceHost*               MountedUVHost          = nullptr; // [-]  - Optional live UVWorkspaceHost
     std::unique_ptr<GeometricRaster::ShowcaseWorldSceneBundle>  ShowcaseBundle   {};     // [-]  - Mounted Cornell-Studio Gallery scene & Outliner tokens
     std::unique_ptr<GeometricRaster::TieredWorldRenderSequence> ShowcaseRenderer {};     // [-]  - Calibrated Tier 1 GTX world renderer
+    SimulationSpace::ForceFields::ForceFieldAccumulator ForceAccumulator    {};   // [-]  - Analytical ForceModel / VectorField evaluator (no physics)
+    SimulationSpace::ForceFields::FieldLatticeCascade   ForceLatticeCascade {};   // [-]  - 4-tier ForceField clipmap metrics
+    Editor::Simulation::ForceInspectorView              ForceInspector      {};   // [-]  - 4-tab ForceField Inspector (Field/Formula/Layers/Cache)
+    ForcePresetBrowserPanel                             ForcePresetCatalog  {};   // [-]  - Curated .ForceModel & Formula preset library
+    std::vector<MappedEditorForceSource>                AuthoredForces      {};   // [-]  - Scene-bound ForceField sources
+    std::array<float, 96>                               AnemometerHistory   {};   // [m/s]- Rolling Beaufort probe samples
+    OutlinerSlotToken                                   DefaultForcesFolder {};   // [idx]- Optional Forces folder in Outliner
+    int32_t                                             SelectedWaypointIdx = -1; // [idx]- Active ForceField motion waypoint
+    double                                              ForceClockSeconds   = 0.0;// [s]  - ForceField evaluation clock
+    uint32_t                                            NextForceToken      = 1u; // [id] - Monotonic ForceSourceRecordEntry token
     Components::WorkspaceDockPaneToken         OutlinerPaneToken      {};     // [idx]   - Registered left Outliner/LayerStack pane
     Components::WorkspaceDockPaneToken         ViewportPaneToken      {};     // [idx]   - Registered central Viewport pane
     Components::WorkspaceDockPaneToken         InspectorPaneToken     {};     // [idx]   - Registered right Inspector pane

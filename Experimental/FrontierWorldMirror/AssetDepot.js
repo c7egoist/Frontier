@@ -9,6 +9,13 @@ import {
   ResolveColourEntry,
   SerializeColourCodexToml,
 } from "./ColourCodex.js";
+import {
+  ENGINE_FORCE_PRESETS,
+  GetForceModelMeta,
+  ParseForceModelToml,
+  ResolveForceValues,
+  SerializeForceModelToml,
+} from "./ForceFieldCatalog.js";
 
 export async function AssetFile(Id, Value, Remove = false) {
   return new Promise((Resolve, Reject) => {
@@ -91,6 +98,18 @@ export function EngineAssets() {
       Data,
       Detail: "Shipped native icon artwork. See embedded icon notices.",
     })),
+    ...ENGINE_FORCE_PRESETS.map((Preset) => {
+      const Meta = GetForceModelMeta(Preset.Model);
+      return {
+        Id: Preset.Id,
+        Name: Preset.Name,
+        Kind: "Forces",
+        Origin: "Engine",
+        Format: Preset.Format,
+        Force: ResolveForceValues(Preset.Force, Preset.Model),
+        Detail: `${Preset.Format} · ${Meta.Domain} · ${Preset.Summary}`,
+      };
+    }),
     {
       Id: "engine-shaderball",
       Name: "Shader ball",
@@ -104,6 +123,7 @@ export function EngineAssets() {
 
 export const AssetKinds = [
   "All",
+  "Forces",
   "Materials",
   "Colours",
   "Images",
@@ -116,17 +136,19 @@ export const AssetKinds = [
 
 export function FileKind(Name) {
   const Extension = Name.split(".").at(-1).toLowerCase();
-  return ["png", "jpg", "jpeg", "webp", "gif"].includes(Extension)
-    ? "Images"
-    : Extension === "toml"
-      ? "Colours"
-      : ["ttf", "otf", "woff", "woff2"].includes(Extension)
-        ? "Fonts"
-        : ["obj", "gltf", "glb", "fbx", "mesh"].includes(Extension)
-          ? "Models"
-          : ["slang", "glsl", "hlsl", "cpp", "h", "wgsl"].includes(Extension)
-            ? "Code"
-            : "Other";
+  return ["forcemodel", "vectorfieldspace", "simulationspace"].includes(Extension)
+    ? "Forces"
+    : ["png", "jpg", "jpeg", "webp", "gif"].includes(Extension)
+      ? "Images"
+      : Extension === "toml"
+        ? "Colours"
+        : ["ttf", "otf", "woff", "woff2"].includes(Extension)
+          ? "Fonts"
+          : ["obj", "gltf", "glb", "fbx", "mesh"].includes(Extension)
+            ? "Models"
+            : ["slang", "glsl", "hlsl", "cpp", "h", "wgsl"].includes(Extension)
+              ? "Code"
+              : "Other";
 }
 
 export async function ImportColourCodexToml(File) {
@@ -152,7 +174,50 @@ export async function ImportColourCodexToml(File) {
 export async function ImportAsset(File) {
   if (File.size > 16 * 1024 * 1024)
     throw Error(File.name + ": maximum file size is 16 MB.");
+  if (
+    [".forcemodel", ".vectorfieldspace", ".simulationspace"].some((Ext) =>
+      File.name.toLowerCase().endsWith(Ext),
+    )
+  ) {
+    const RawText = await File.text();
+    const Parsed = ParseForceModelToml(
+      RawText,
+      File.name.replace(/\.[^.]+$/, ""),
+    );
+    const Meta = GetForceModelMeta(Parsed.Force.Model);
+    return {
+      Id: "asset-" + crypto.randomUUID(),
+      Name: Parsed.Name,
+      Kind: "Forces",
+      Origin: "Imported",
+      Size: File.size,
+      Format: File.name.toLowerCase().endsWith(".vectorfieldspace")
+        ? ".VectorFieldSpace"
+        : ".ForceModel",
+      Force: Parsed.Force,
+      Position: Parsed.Position,
+      Rotation: Parsed.Rotation,
+      Detail: `Imported ${Meta.Name} (${Meta.Domain}) · double-click to spawn in scene.`,
+    };
+  }
   if (File.name.toLowerCase().endsWith(".toml")) {
+    const RawToml = await File.text();
+    if (/\[ForceSource\]|SubFormat\s*=\s*"(ForceModel|VectorField)"/i.test(RawToml)) {
+      const Parsed = ParseForceModelToml(RawToml, File.name.replace(/\.toml$/i, ""));
+      const Meta = GetForceModelMeta(Parsed.Force.Model);
+      return {
+        Id: "asset-" + crypto.randomUUID(),
+        Name: Parsed.Name,
+        Kind: "Forces",
+        Origin: "Imported",
+        Size: File.size,
+        Format: ".ForceModel",
+        Force: Parsed.Force,
+        Position: Parsed.Position,
+        Rotation: Parsed.Rotation,
+        Detail: `Imported ${Meta.Name} (${Meta.Domain}) · double-click to spawn in scene.`,
+      };
+    }
     const ImportedColours = await ImportColourCodexToml(File);
     return ImportedColours[0];
   }
@@ -217,7 +282,13 @@ export function DownloadColourCodexToml(ColourAssets, Filename = "ColourCodex.to
 
 export async function DownloadAsset(Asset) {
   let BlobData;
-  if (Asset.Kind === "Colours") {
+  if (Asset.Kind === "Forces") {
+    const TomlText = SerializeForceModelToml(Asset.Name, Asset.Force, {
+      Position: Asset.Position || [0, 0, 1.4],
+      Rotation: Asset.Rotation || [0, 0, 0],
+    });
+    BlobData = new Blob([TomlText], { type: "text/plain;charset=utf-8" });
+  } else if (Asset.Kind === "Colours") {
     BlobData = new Blob([SerializeColourCodexToml([Asset])], {
       type: "application/toml;charset=utf-8",
     });
@@ -251,7 +322,10 @@ export async function DownloadAsset(Asset) {
     Url = URL.createObjectURL(BlobData);
   Link.href = Url;
   Link.download =
-    Asset.Kind === "Colours"
+    Asset.Kind === "Forces"
+      ? Asset.Name.replace(/\s+/g, "_") +
+        (Asset.Force?.FormulaEnabled ? ".VectorFieldSpace" : ".ForceModel")
+      : Asset.Kind === "Colours"
       ? Asset.Name.replace(/\s+/g, "") + ".toml"
       : Asset.Kind === "Materials"
         ? Asset.Name + ".material.json"
@@ -299,6 +373,12 @@ export function RestoreAssets(Records) {
         typeof Asset.Detail === "string"
           ? Asset.Detail
           : "Restored browser asset",
+      ...(Asset.Kind === "Forces"
+        ? {
+            Force: ResolveForceValues(Asset.Force),
+            Format: Asset.Format || ".ForceModel",
+          }
+        : {}),
       ...(Asset.Kind === "Materials"
         ? { Material: ResolveMaterial({ Material: Asset.Material }) }
         : {}),

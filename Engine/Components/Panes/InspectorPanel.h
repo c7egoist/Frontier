@@ -12,10 +12,28 @@
 #include "Engine/Components/Panes/OutlinerPanel.h"
 
 #include <cstdint>
+#include <functional>
 #include <string_view>
 
 namespace Frontier
 {
+
+using InspectorExtensionRenderCallback = std::function<float(
+    PixelSpace&             Surface,
+    Rectangle2D             ScrollViewport,
+    float                   LeftX,
+    float                   TopY,
+    float                   InnerWidth,
+    OutlinerRecordEntry&    Entry,
+    const PaneInputReading& Input)>;
+
+using InspectorFullOverrideCallback = std::function<bool(
+    PixelSpace&             Surface,
+    Rectangle2D             Bounds,
+    OutlinerPanel*          Outliner,
+    OutlinerRecordEntry*    PrimaryEntry,
+    const PaneInputReading& Input,
+    double                  Δt)>;
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                                      ENUMERATIONS
@@ -43,6 +61,8 @@ public:
     InspectorPanel() noexcept = default;
 
     void AttachOutliner(OutlinerPanel* SourceOutliner) noexcept;
+    void ConfigureExtensionSectionCallback(InspectorExtensionRenderCallback Callback);
+    void ConfigureFullOverrideCallback(InspectorFullOverrideCallback Callback);
     void ConfigureNotesBoxOpen(bool Open) noexcept;
     void AssignActiveNotes(std::string_view NotesText);
     void ConfigureScrollOffset(float OffsetY) noexcept;
@@ -104,8 +124,10 @@ private:
     float                    TransformDragStartVal  = 0.0f;                                  // [-]  - Value snapshot at drag start
     bool                     TransformDragMoved     = false;                                 // [-]  - Drag distance exceeded 4px threshold
     TextEditBuffer           TransformCellEditor    {};                                      // [-]  - Numeric text input for focused cell
-    float                    ScrollOffsetY          = 0.0f;                                  // [px] - Vertical inspector scroll offset
-    float                    LastContentHeight      = 0.0f;                                  // [px] - Measured scroll document height
+    float                          ScrollOffsetY            = 0.0f;                                  // [px] - Vertical inspector scroll offset
+    float                          LastContentHeight        = 0.0f;                                  // [px] - Measured scroll document height
+    InspectorExtensionRenderCallback ExtensionSectionCallback {};                                  // [-]  - Optional domain extension cards
+    InspectorFullOverrideCallback    FullOverrideCallback     {};                                  // [-]  - Complete domain inspector replacement
 };
 
 //------------------------------------------------------------------------------------------------------------------------

@@ -1395,9 +1395,6 @@ function ComputeNonCameraSceneSignature(Scene) {
     const L = Scene.AreaLights[Li];
     Parts += `L${L.Id}:${L.Center.join(",")}:${L.HalfWidth}:${L.HalfHeight}:${L.Radiance.join(",")}|`;
   }
-  if (Scene.ForceSignature) {
-    Parts += `F:${Scene.ForceSignature}|`;
-  }
   return Parts;
 }
 
@@ -1461,14 +1458,19 @@ function ResolveEntityTransformForGizmo(SelectedId, Rows, Values, CompiledScene)
     };
   }
 
-  if (Row.Panel === "force-field" || Row.Panel === "vector-field" || Row.Panel === "wind") {
+  if (
+    Row.Panel === "force" ||
+    Row.Panel === "force-field" ||
+    Row.Panel === "vector-field" ||
+    Row.Panel === "wind"
+  ) {
     const Pos = Array.isArray(Rec.Position)
       ? [...Rec.Position]
       : Array.isArray(Rec.Origin)
         ? [...Rec.Origin]
-        : [0, 0, 0.85];
+        : [0, 0, 1.4];
     const Rot = Array.isArray(Rec.Rotation) ? [...Rec.Rotation] : [0, 0, 0];
-    const Scl = Array.isArray(Rec.Scale) ? [...Rec.Scale] : [1.8, 1.8, 1.8];
+    const Scl = Array.isArray(Rec.Scale) ? [...Rec.Scale] : [1.0, 1.0, 1.0];
     return {
       Id: SelectedId,
       Kind: Row.Panel,
@@ -1495,6 +1497,7 @@ export default function GtxWorldViewport({
   View = 1,
   ShowGrid,
   ShowGizmo = true,
+  ForceOverlaySettings,
   UpdateEditorCamera,
   OnSelectEntity,
   OnUpdateCamera,
@@ -1556,8 +1559,12 @@ export default function GtxWorldViewport({
   }
 
   const CompiledScene = useMemo(
-    () => CompileLiveGtxScene(Rows, Values, Hidden, EffectiveProjection),
-    [Rows, Values, Hidden, EffectiveProjection],
+    () =>
+      CompileLiveGtxScene(Rows, Values, Hidden, EffectiveProjection, {
+        ForceOverlaySettings,
+        SelectedId: Selected,
+      }),
+    [Rows, Values, Hidden, EffectiveProjection, ForceOverlaySettings, Selected],
   );
   CompiledSceneRef.current = CompiledScene;
 
@@ -1769,10 +1776,10 @@ export default function GtxWorldViewport({
     RequestRedrawRef.current?.(true);
   }, [Selected, ViewMode, Debug, EffectiveGrid, TextureEpoch, GlEpoch, WgpuEpoch, RenderBackend]);
 
-  // Redraw Pass 2/3 gizmo overlay ONLY (keeping Pass 1 cached!) when gizmo handle hover/drag changes
+  // Redraw Pass 2/3 gizmo & ForceOverlay ONLY (keeping Pass 1 cached!) when gizmo or ForceOverlay changes
   useEffect(() => {
     RequestRedrawRef.current?.(false);
-  }, [HoveredHandle, ActiveHandle, EffectiveGizmo, SelectedGizmoTarget]);
+  }, [HoveredHandle, ActiveHandle, EffectiveGizmo, SelectedGizmoTarget, CompiledScene.ForceSignature]);
 
   // Tier-0 Hardware WebGPU (Dawn D3D12 / Vulkan / Metal — bypasses ANGLE WebGL context blocks completely!)
   useEffect(() => {

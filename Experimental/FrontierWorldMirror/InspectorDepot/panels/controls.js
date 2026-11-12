@@ -122,7 +122,7 @@ export function tape({
   });
   cv.addEventListener('pointermove', e => { if (cv.hasPointerCapture?.(e.pointerId)) fromEvent(e); });
   cv.addEventListener('pointerup', e => { cv.releasePointerCapture?.(e.pointerId); cv.classList.remove('drag'); });
-  cv.addEventListener('wheel', e => { e.preventDefault(); set(v - Math.sign(e.deltaY) * (max - min) / 100); }, { passive: false });
+  cv.addEventListener('wheel', e => { if (e.cancelable) e.preventDefault(); set(v - Math.sign(e.deltaY) * (max - min) / 100); }, { passive: false });
 
   wrap._set = nv => { v = clamp(nv, min, max); st._set(v); paint(); };
   wrap._paint = paint;

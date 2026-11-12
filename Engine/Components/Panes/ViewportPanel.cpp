@@ -143,6 +143,21 @@ void ViewportPanel::ConfigureSceneTitle(std::string_view Title)
     SceneTitle.assign(Title.begin(), Title.end());
 }
 
+void ViewportPanel::ConfigureConstructPresets(std::vector<ViewportConstructPresetEntry> Presets)
+{
+    ConstructPresets = std::move(Presets);
+}
+
+void ViewportPanel::ConfigureConstructPresetCallback(std::function<void(uint32_t PresetIndex)> Callback)
+{
+    ConstructPresetCallback = std::move(Callback);
+}
+
+void ViewportPanel::ConfigureOpenContentBrowserCallback(std::function<void()> Callback)
+{
+    OpenContentBrowserCallback = std::move(Callback);
+}
+
 void ViewportPanel::ConfigureExecutionMode(ViewportExecutionMode Mode, bool Paused) noexcept
 {
     ExecutionMode = Mode;
@@ -183,6 +198,7 @@ void ViewportPanel::ConfigureSettingsSheetOpen(bool Open) noexcept
     {
         ConstructSheetOpen     = false;
         ProjectionDropdownOpen = false;
+        ForceOverlaySheetOpen  = false;
     }
 }
 
@@ -193,7 +209,85 @@ void ViewportPanel::ConfigureConstructSheetOpen(bool Open) noexcept
     {
         SettingsSheetOpen      = false;
         ProjectionDropdownOpen = false;
+        ForceOverlaySheetOpen  = false;
     }
+}
+
+void ViewportPanel::ConfigureRasterCallback(ViewportPaneRasterCallback Callback)
+{
+    RasterCallback = std::move(Callback);
+}
+
+void ViewportPanel::ConfigureInteractionCallback(ViewportPaneInteractionCallback Callback)
+{
+    InteractionCallback = std::move(Callback);
+}
+
+void ViewportPanel::ConfigureForceOverlayToolsVisible(bool Visible) noexcept
+{
+    ForceOverlayToolsVisible = Visible;
+    if (!Visible)
+    {
+        ForceOverlaySheetOpen = false;
+    }
+}
+
+void ViewportPanel::ConfigureForceOverlaySheetOpen(bool Open) noexcept
+{
+    ForceOverlaySheetOpen = Open;
+    if (Open)
+    {
+        ConstructSheetOpen     = false;
+        SettingsSheetOpen      = false;
+        ProjectionDropdownOpen = false;
+    }
+}
+
+void ViewportPanel::ConfigureForceOverlaySettings(const SimulationSpace::ForceFields::ForceOverlaySettings& Settings) noexcept
+{
+    ForceOverlay = Settings;
+}
+
+void ViewportPanel::ConfigureSimulationTimeSeconds(double TimeSeconds) noexcept
+{
+    SimulationTimeSeconds = std::max(0.0, TimeSeconds);
+}
+
+void ViewportPanel::ConfigureProbeReadoutText(std::string_view ReadoutText)
+{
+    ProbeReadoutText.assign(ReadoutText.begin(), ReadoutText.end());
+}
+
+bool ViewportPanel::QueryForceOverlayToolsVisible() const noexcept
+{
+    return ForceOverlayToolsVisible;
+}
+
+bool ViewportPanel::QueryForceOverlaySheetOpen() const noexcept
+{
+    return ForceOverlaySheetOpen;
+}
+
+const SimulationSpace::ForceFields::ForceOverlaySettings& ViewportPanel::QueryForceOverlaySettings() const noexcept
+{
+    return ForceOverlay;
+}
+
+SimulationSpace::ForceFields::ForceOverlaySettings& ViewportPanel::AccessForceOverlaySettings() noexcept
+{
+    return ForceOverlay;
+}
+
+double ViewportPanel::QuerySimulationTimeSeconds() const noexcept
+{
+    return SimulationTimeSeconds;
+}
+
+bool ViewportPanel::ConsumeRewindRequested() noexcept
+{
+    const bool Pending = RewindRequested;
+    RewindRequested    = false;
+    return Pending;
 }
 
 void ViewportPanel::ConfigurePrimaryProjection(ViewportProjectionPreset Preset) noexcept
@@ -230,7 +324,8 @@ void ViewportPanel::RenderCanvasPane(
     ViewportProjectionPreset Projection,
     uint32_t                 PaneIndex,
     uint32_t                 ConstructedCount,
-    const PaneInputReading&  Input)
+    const PaneInputReading&  Input,
+    bool                     OverlayCoversCanvas)
 {
     if (PaneBounds.Width <= 4.0f || PaneBounds.Height <= 4.0f)
     {
@@ -240,10 +335,34 @@ void ViewportPanel::RenderCanvasPane(
     const Point2D Cursor{ Input.PrimaryPointer.X, Input.PrimaryPointer.Y };
     Surface.PushClip(PaneBounds);
 
-    const bool RasterTextureReady =
-        CanvasRasterTexture.Pixels != nullptr && CanvasRasterTexture.Width > 0 && CanvasRasterTexture.Height > 0;
+    bool RenderedLiveSurface = false;
+    if (RasterCallback)
+    {
+        ViewportPaneSurfaceSpecification Spec{};
+        Spec.PaneIndex     = PaneIndex;
+        Spec.WidthPx       = static_cast<uint32_t>(std::max(1.0f, std::round(PaneBounds.Width)));
+        Spec.HeightPx      = static_cast<uint32_t>(std::max(1.0f, std::round(PaneBounds.Height)));
+        Spec.Projection    = Projection;
+        Spec.ExecutionMode = ExecutionMode;
+        Spec.PlayPaused    = PlayPaused;
+        Spec.Display       = DisplaySettings;
+        Spec.ForceOverlay  = ForceOverlay;
+        Spec.TimeSeconds   = SimulationTimeSeconds;
 
-    if (RasterTextureReady)
+        const ViewportRasterSurface LiveSurface = RasterCallback(Spec);
+        LastReportedForceCount                  = LiveSurface.ActiveForceCount;
+        if (LiveSurface.SoftwareTextureData != nullptr || LiveSurface.NativeTextureHandle != 0ull)
+        {
+            Surface.FillTexturedRectangle(
+                PaneBounds,
+                LiveSurface.SoftwareTextureData,
+                LiveSurface.NativeTextureHandle,
+                ColorRgba{ 255u, 255u, 255u, 255u });
+            RenderedLiveSurface = true;
+        }
+    }
+
+    if (!RenderedLiveSurface && CanvasRasterTexture.Pixels != nullptr && CanvasRasterTexture.Width > 0 && CanvasRasterTexture.Height > 0)
     {
         Surface.FillRectangle(PaneBounds, ColorRgba{ 14, 15, 18, 255 });
         const float SourceAspect = static_cast<float>(CanvasRasterTexture.Width) / static_cast<float>(CanvasRasterTexture.Height);
@@ -263,13 +382,15 @@ void ViewportPanel::RenderCanvasPane(
             UvMax.X           = 1.0f - UvMin.X;
         }
         Surface.FillTexturedRectangle(PaneBounds, &CanvasRasterTexture, UvMin, UvMax);
+        RenderedLiveSurface = true;
     }
-    else
+
+    if (!RenderedLiveSurface)
     {
         // Subtle dark checker canvas matching reference layout (#161616 / #1B1B1B)
         Surface.FillRectangle(PaneBounds, ColorRgba{ 22, 22, 22, 255 });
         constexpr float CellSize = 24.0f;
-        const int       Cols     = static_cast<int>( std::ceil(PaneBounds.Width / CellSize)) + 1;
+        const int       Cols     = static_cast<int>(std::ceil(PaneBounds.Width / CellSize)) + 1;
         const int       Rows     = static_cast<int>(std::ceil(PaneBounds.Height / CellSize)) + 1;
         for (int Row = 0; Row < Rows; ++Row)
         {
@@ -284,21 +405,23 @@ void ViewportPanel::RenderCanvasPane(
         }
     }
 
-    if (SplitViewportEnabled)
+    bool ProjectionChipConsumed = false;
+    if (SplitViewportEnabled || RenderedLiveSurface)
     {
         // Active pane perimeter & top-left projection chip
-        if (ActivePaneIndex == PaneIndex)
+        if (SplitViewportEnabled && ActivePaneIndex == PaneIndex)
         {
             Surface.StrokeRectangle(PaneBounds.Inset(0.5f), ColorRgba{ 191, 162, 122, 115 }, 0.0f, 1.0f);
         }
 
         const char*       ProjName = WorkspaceAppearance::QueryProjectionPresetLabel(Projection);
-        const float       ChipW    = std::max(132.0f, WorkspaceAppearance::MeasureWeightedTextWidth(Surface, FontWeightClass::Regular, 11.5f, ProjName) + 56.0f);
-        const Rectangle2D ProjChip{ PaneBounds.X + 10.0f, PaneBounds.Y + 10.0f, ChipW, 30.0f };
+        const float       ChipW    = std::max(122.0f, WorkspaceAppearance::MeasureWeightedTextWidth(Surface, FontWeightClass::Regular, 11.0f, ProjName) + 52.0f);
+        const Rectangle2D ProjChip{ PaneBounds.X + 10.0f, PaneBounds.Y + 10.0f, ChipW, 28.0f };
 
         const ControlContact ChipHit = DropdownSelector::ConstructButton(Surface, ProjChip, ProjName, false, Input.PrimaryPointer);
         if (ChipHit.Pressed)
         {
+            ProjectionChipConsumed = true;
             const uint8_t NextOrd = static_cast<uint8_t>((static_cast<uint8_t>(Projection) + 1u) %
                                                          static_cast<uint8_t>(ViewportProjectionPreset::Count));
             if (PaneIndex == 0u)
@@ -310,65 +433,124 @@ void ViewportPanel::RenderCanvasPane(
                 SecondaryProjection = static_cast<ViewportProjectionPreset>(NextOrd);
             }
         }
-        else if (PaneBounds.Contains(Cursor) && Input.PrimaryPointer.Pressed && !ConstructSheetOpen && !SettingsSheetOpen)
+        else if (!OverlayCoversCanvas && PaneBounds.Contains(Cursor) && Input.PrimaryPointer.Pressed)
         {
             ActivePaneIndex = PaneIndex;
         }
     }
 
-    // Center quiet empty-scene prompt when 0 constructed (exact reference layout layout)
-    if (ConstructedCount == 0u)
+    if (ForceOverlayToolsVisible && RenderedLiveSurface)
     {
-        const char* LineOne = "No constructed entries";
-        const char* LineTwo = "Ctrl+A to construct";
-        const float W1      = WorkspaceAppearance::MeasureWeightedTextWidth(Surface, FontWeightClass::Regular, 12.5f, LineOne);
-        const float W2      = WorkspaceAppearance::MeasureWeightedTextWidth(Surface, FontWeightClass::Regular, 10.5f, LineTwo);
-        const float MidY    = PaneBounds.Center().Y;
+        const char* ModeBadge = ForceOverlay.Enabled ? "LIT + FORCE VIZ" : "LIT";
+        const float BadgeW    = WorkspaceAppearance::MeasureWeightedTextWidth(Surface, FontWeightClass::Medium, 9.5f, ModeBadge) + 20.0f;
+        const Rectangle2D BadgeRect{ PaneBounds.Right() - BadgeW - 10.0f, PaneBounds.Y + 10.0f, BadgeW, 24.0f };
+        Surface.FillRectangle(
+            BadgeRect,
+            ForceOverlay.Enabled ? ColorRgba{ 20, 34, 42, 224 } : ColorRgba{ 24, 24, 26, 208 },
+            6.0f);
+        Surface.StrokeRectangle(
+            BadgeRect,
+            ForceOverlay.Enabled ? ColorRgba{ 104, 220, 255, 130 } : ColorRgba{ 255, 255, 255, 32 },
+            6.0f,
+            1.0f);
+        WorkspaceAppearance::ConstructWeightedText(
+            Surface,
+            FontWeightClass::Medium,
+            { BadgeRect.X + 10.0f, BadgeRect.Y + 6.0f },
+            9.5f,
+            ForceOverlay.Enabled ? ColorRgba{ 104, 220, 255, 255 } : ColorRgba{ 192, 192, 198, 255 },
+            ModeBadge);
 
-        WorkspaceAppearance::ConstructWeightedText(
-            Surface,
-            FontWeightClass::Regular,
-            { PaneBounds.Center().X - W1 * 0.5f, MidY - 12.0f },
-            12.5f,
-            ColorRgba{ 118, 118, 118, 255 },
-            LineOne);
-        WorkspaceAppearance::ConstructWeightedText(
-            Surface,
-            FontWeightClass::Regular,
-            { PaneBounds.Center().X - W2 * 0.5f, MidY + 8.0f },
-            10.5f,
-            ColorRgba{ 86, 86, 86, 255 },
-            LineTwo);
-    }
-    else if (!RasterTextureReady)
-    {
-        char SummaryLine[96]{};
-        std::snprintf(
-            SummaryLine,
-            sizeof(SummaryLine),
-            "%u constructed %s in workspace",
-            ConstructedCount,
-            (ConstructedCount == 1u) ? "entry" : "entries");
-        const float SumW = WorkspaceAppearance::MeasureWeightedTextWidth(Surface, FontWeightClass::Regular, 11.5f, SummaryLine);
-        WorkspaceAppearance::ConstructWeightedText(
-            Surface,
-            FontWeightClass::Regular,
-            { PaneBounds.Center().X - SumW * 0.5f, PaneBounds.Center().Y - 6.0f },
-            11.5f,
-            ColorRgba{ 118, 118, 118, 255 },
-            SummaryLine);
+        if (PaneIndex == 0u && !ProbeReadoutText.empty() && ForceOverlay.CrossSectionAnemometerActive)
+        {
+            const float ReadW = std::min(
+                PaneBounds.Width - 110.0f,
+                WorkspaceAppearance::MeasureWeightedTextWidth(Surface, FontWeightClass::Regular, 10.0f, ProbeReadoutText) + 22.0f);
+            const Rectangle2D ProbePill{ PaneBounds.X + 12.0f, PaneBounds.Bottom() - 48.0f, ReadW, 22.0f };
+            Surface.FillRectangle(ProbePill, ColorRgba{ 18, 22, 28, 218 }, 6.0f);
+            Surface.StrokeRectangle(ProbePill, ColorRgba{ 104, 220, 255, 90 }, 6.0f, 1.0f);
+            WorkspaceAppearance::ConstructTruncatedText(
+                Surface,
+                FontWeightClass::Regular,
+                { ProbePill.X + 10.0f, ProbePill.Y + 5.0f },
+                std::max(12.0f, ProbePill.Width - 20.0f),
+                10.0f,
+                ColorRgba{ 210, 232, 244, 255 },
+                ProbeReadoutText);
+        }
     }
 
-    // Bottom-left analytical caption (matching reference layout)
-    if (PaneIndex == 0u)
+    if (InteractionCallback && !OverlayCoversCanvas && !ProjectionChipConsumed && PaneBounds.Contains(Cursor))
+    {
+        InteractionCallback(PaneIndex, PaneBounds, Input);
+    }
+
+    if (!RenderedLiveSurface)
+    {
+        // Center quiet empty-scene prompt when 0 constructed (exact reference layout)
+        if (ConstructedCount == 0u)
+        {
+            const char* LineOne = "No constructed entries";
+            const char* LineTwo = "Ctrl+A to construct";
+            const float W1      = WorkspaceAppearance::MeasureWeightedTextWidth(Surface, FontWeightClass::Regular, 12.5f, LineOne);
+            const float W2      = WorkspaceAppearance::MeasureWeightedTextWidth(Surface, FontWeightClass::Regular, 10.5f, LineTwo);
+            const float MidY    = PaneBounds.Center().Y;
+
+            WorkspaceAppearance::ConstructWeightedText(
+                Surface,
+                FontWeightClass::Regular,
+                { PaneBounds.Center().X - W1 * 0.5f, MidY - 12.0f },
+                12.5f,
+                ColorRgba{ 118, 118, 118, 255 },
+                LineOne);
+            WorkspaceAppearance::ConstructWeightedText(
+                Surface,
+                FontWeightClass::Regular,
+                { PaneBounds.Center().X - W2 * 0.5f, MidY + 8.0f },
+                10.5f,
+                ColorRgba{ 86, 86, 86, 255 },
+                LineTwo);
+        }
+        else
+        {
+            char SummaryLine[96]{};
+            std::snprintf(
+                SummaryLine,
+                sizeof(SummaryLine),
+                "%u constructed %s in workspace",
+                ConstructedCount,
+                (ConstructedCount == 1u) ? "entry" : "entries");
+            const float SumW = WorkspaceAppearance::MeasureWeightedTextWidth(Surface, FontWeightClass::Regular, 11.5f, SummaryLine);
+            WorkspaceAppearance::ConstructWeightedText(
+                Surface,
+                FontWeightClass::Regular,
+                { PaneBounds.Center().X - SumW * 0.5f, PaneBounds.Center().Y - 6.0f },
+                11.5f,
+                ColorRgba{ 118, 118, 118, 255 },
+                SummaryLine);
+        }
+
+        // Bottom-left analytical caption (matching reference layout)
+        if (PaneIndex == 0u)
+        {
+            WorkspaceAppearance::ConstructWeightedText(
+                Surface,
+                FontWeightClass::Regular,
+                { PaneBounds.X + 12.0f, PaneBounds.Bottom() - 20.0f },
+                8.5f,
+                ColorRgba{ 92, 92, 92, 255 },
+                "NATIVE VIEWPORT  -  ANALYTICAL MARKERS");
+        }
+    }
+    else if (PaneIndex == 0u)
     {
         WorkspaceAppearance::ConstructWeightedText(
             Surface,
             FontWeightClass::Regular,
             { PaneBounds.X + 12.0f, PaneBounds.Bottom() - 20.0f },
             8.5f,
-            RasterTextureReady ? ColorRgba{ 214, 214, 214, 200 } : ColorRgba{ 92, 92, 92, 255 },
-            RasterTextureReady ? "NATIVE VIEWPORT  -  TIER 1 GTX WORLD RASTER" : "NATIVE VIEWPORT  -  ANALYTICAL MARKERS");
+            ColorRgba{ 138, 148, 160, 210 },
+            "VULKAN 1.3 (+Z UP)  -  GPU ANALYTICAL RASTER");
     }
 
     // Bottom-right 3D X/Y/Z orientation triad sign
@@ -590,19 +772,45 @@ void ViewportPanel::RenderDiagnosticsPanel(
     Surface.PopClip();
 }
 
+bool ViewportPanel::QueryForceConstructAvailable() const noexcept
+{
+    if (!ConstructPresets.empty())
+    {
+        return true;
+    }
+    if (AttachedOutliner != nullptr)
+    {
+        for (const auto& Entry : AttachedOutliner->QueryConstructTemplates())
+        {
+            if (Entry.Category == ConstructSlotCategory::ForceField)
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+Rectangle2D ViewportPanel::QueryConstructDialogBounds(Rectangle2D Bounds) const noexcept
+{
+    if (QueryForceConstructAvailable())
+    {
+        const float DialogW = std::min(680.0f, std::max(360.0f, Bounds.Width - 28.0f));
+        const float DialogH = std::min(510.0f, std::max(280.0f, Bounds.Height - 56.0f));
+        return { Bounds.Center().X - DialogW * 0.5f, Bounds.Y + 94.0f, DialogW, DialogH };
+    }
+    const float DialogW = std::min(532.0f, std::max(300.0f, Bounds.Width - 36.0f));
+    const float DialogH = std::min(346.0f, std::max(240.0f, Bounds.Height - 70.0f));
+    return { Bounds.Center().X - DialogW * 0.5f, Bounds.Y + 94.0f, DialogW, DialogH };
+}
+
 void ViewportPanel::RenderConstructDialog(
     PixelSpace&             Overlay,
     Rectangle2D             Bounds,
     const PaneInputReading& Input)
 {
-    const float DialogW = std::min(532.0f, std::max(300.0f, Bounds.Width - 36.0f));
-    const float DialogH = std::min(346.0f, std::max(240.0f, Bounds.Height - 70.0f));
-    const Rectangle2D Dialog{
-        Bounds.Center().X - DialogW * 0.5f,
-        Bounds.Y + 94.0f,
-        DialogW,
-        DialogH
-    };
+    const bool        ForceMode = QueryForceConstructAvailable();
+    const Rectangle2D Dialog    = QueryConstructDialogBounds(Bounds);
 
     const Point2D Cursor{ Input.PrimaryPointer.X, Input.PrimaryPointer.Y };
     Overlay.FillRectangle(Dialog, ColorRgba{ 23, 23, 23, 254 }, 14.0f);
@@ -610,7 +818,7 @@ void ViewportPanel::RenderConstructDialog(
 
     Overlay.PushClip(Dialog);
 
-    // Header + Search
+    // Header
     WorkspaceAppearance::ConstructConstructIcon(Overlay, { Dialog.X + 18.0f, Dialog.Y + 16.0f }, 18.0f, WorkspaceSurfaceColors::PrimaryInk);
     WorkspaceAppearance::ConstructWeightedText(Overlay, FontWeightClass::Regular, { Dialog.X + 44.0f, Dialog.Y + 16.0f }, 14.0f, WorkspaceSurfaceColors::PrimaryInk, "Construct");
     WorkspaceAppearance::ConstructWeightedText(Overlay, FontWeightClass::Regular, { Dialog.X + 118.0f, Dialog.Y + 19.0f }, 9.5f, WorkspaceSurfaceColors::FaintInk, "Ctrl+A");
@@ -626,131 +834,411 @@ void ViewportPanel::RenderConstructDialog(
         ConstructSheetOpen = false;
     }
 
+    if (ForceMode && OpenContentBrowserCallback)
+    {
+        const Rectangle2D BrowserBtn{ CloseBtn.X - 134.0f, Dialog.Y + 12.0f, 124.0f, 26.0f };
+        const bool        BrowserHov = BrowserBtn.Contains(Cursor);
+        Overlay.FillRectangle(BrowserBtn, BrowserHov ? ColorRgba{ 46, 42, 34, 255 } : ColorRgba{ 32, 32, 34, 255 }, 13.0f);
+        Overlay.StrokeRectangle(BrowserBtn, BrowserHov ? WorkspaceSurfaceColors::SelectionAmber : ColorRgba{ 62, 62, 66, 255 }, 13.0f, 1.0f);
+        WorkspaceAppearance::ConstructWeightedText(
+            Overlay,
+            FontWeightClass::Medium,
+            { BrowserBtn.X + 14.0f, BrowserBtn.Y + 6.5f },
+            10.5f,
+            BrowserHov ? WorkspaceSurfaceColors::SelectionAmber : ColorRgba{ 214, 214, 218, 255 },
+            "Content Browser");
+        if (BrowserHov && Input.PrimaryPointer.Pressed)
+        {
+            ConstructSheetOpen = false;
+            OpenContentBrowserCallback();
+        }
+    }
+
     Overlay.StrokeLine({ Dialog.X, Dialog.Y + 48.0f }, { Dialog.Right(), Dialog.Y + 48.0f }, WorkspaceSurfaceColors::HairlineLight, 1.0f);
 
-    // Left category rail (124px) + Right constructable grid
-    const float RailW = 128.0f;
-    Overlay.StrokeLine({ Dialog.X + RailW, Dialog.Y + 48.0f }, { Dialog.X + RailW, Dialog.Bottom() }, WorkspaceSurfaceColors::HairlineLight, 1.0f);
-
-    const std::array<std::pair<const char*, ConstructCategoryRail>, 3> Rails = {{
-        { "All",          ConstructCategoryRail::All          },
-        { "Items",        ConstructCategoryRail::ConstructSet },
-        { "Organization", ConstructCategoryRail::Organization },
-    }};
-    for (std::size_t Idx = 0u; Idx < Rails.size(); ++Idx)
+    if (!ForceMode)
     {
-        const Rectangle2D RailRow{ Dialog.X + 10.0f, Dialog.Y + 60.0f + static_cast<float>(Idx) * 32.0f, RailW - 20.0f, 28.0f };
-        const bool        Active = (ConstructRail == Rails[Idx].second);
+        // Generic minimal layout preserved 1:1 for WorkspacePanesValidation
+        const float RailW = 128.0f;
+        Overlay.StrokeLine({ Dialog.X + RailW, Dialog.Y + 48.0f }, { Dialog.X + RailW, Dialog.Bottom() }, WorkspaceSurfaceColors::HairlineLight, 1.0f);
+
+        const std::array<std::pair<const char*, ConstructCategoryRail>, 3> Rails = {{
+            { "All",          ConstructCategoryRail::All          },
+            { "Items",        ConstructCategoryRail::ConstructSet },
+            { "Organization", ConstructCategoryRail::Organization },
+        }};
+        for (std::size_t Idx = 0u; Idx < Rails.size(); ++Idx)
+        {
+            const Rectangle2D RailRow{ Dialog.X + 10.0f, Dialog.Y + 60.0f + static_cast<float>(Idx) * 32.0f, RailW - 20.0f, 28.0f };
+            const bool        Active = (ConstructRail == Rails[Idx].second);
+            if (Active || RailRow.Contains(Cursor))
+            {
+                Overlay.FillRectangle(RailRow, Active ? ColorRgba{ 44, 44, 44, 255 } : ColorRgba{ 33, 33, 33, 255 }, 8.0f);
+            }
+            WorkspaceAppearance::ConstructWeightedText(
+                Overlay,
+                FontWeightClass::Regular,
+                { RailRow.X + 10.0f, RailRow.Y + 7.5f },
+                11.0f,
+                Active ? WorkspaceSurfaceColors::PrimaryInk : ColorRgba{ 158, 158, 158, 255 },
+                Rails[Idx].first);
+            if (RailRow.Contains(Cursor) && Input.PrimaryPointer.Pressed)
+            {
+                ConstructRail = Rails[Idx].second;
+            }
+        }
+
+        const float    GridX    = Dialog.X + RailW + 14.0f;
+        const float    GridW    = std::max(96.0f, Dialog.Right() - 14.0f - GridX);
+        const float    CellGap  = 10.0f;
+        const uint32_t Columns  = std::max(1u, static_cast<uint32_t>((GridW + CellGap) / (108.0f + CellGap)));
+        const float    TileSide = std::floor((GridW - static_cast<float>(Columns - 1u) * CellGap) / static_cast<float>(Columns));
+
+        struct ConstructEntryView
+        {
+            std::string_view      Label;
+            std::string_view      Caption;
+            ConstructSlotCategory Category;
+            int32_t               TemplateIndex;
+        };
+        std::vector<ConstructEntryView> Choices{};
+
+        if (ConstructRail != ConstructCategoryRail::Organization)
+        {
+            if (AttachedOutliner != nullptr)
+            {
+                const auto Templates = AttachedOutliner->QueryConstructTemplates();
+                for (std::size_t Idx = 0u; Idx < Templates.size(); ++Idx)
+                {
+                    if (CaseInsensitiveMatch(Templates[Idx].DropdownLabel, std::string_view(ConstructSearchEditor.Text, ConstructSearchEditor.Length)))
+                    {
+                        Choices.push_back({ Templates[Idx].DropdownLabel, Templates[Idx].CategoryTitle, Templates[Idx].Category, static_cast<int32_t>(Idx) });
+                    }
+                }
+            }
+            else
+            {
+                Choices.push_back({ "Add Item 1", "Type 1", ConstructSlotCategory::CategoryOne, 0 });
+                Choices.push_back({ "Add Item 2", "Type 2", ConstructSlotCategory::CategoryTwo, 1 });
+                Choices.push_back({ "Add Item 3", "Type 3", ConstructSlotCategory::CategoryThree, 2 });
+                Choices.push_back({ "Add Item 4", "Type 4", ConstructSlotCategory::CategoryFour, 3 });
+            }
+        }
+        if (ConstructRail != ConstructCategoryRail::ConstructSet)
+        {
+            Choices.push_back({ "+ Add Folder", "Collection", ConstructSlotCategory::Folder, -1 });
+        }
+
+        for (std::size_t Idx = 0u; Idx < Choices.size(); ++Idx)
+        {
+            const uint32_t Col   = static_cast<uint32_t>(Idx) % Columns;
+            const uint32_t Row   = static_cast<uint32_t>(Idx) / Columns;
+            const float    CellX = GridX + static_cast<float>(Col) * (TileSide + CellGap);
+            const float    CellY = Dialog.Y + 60.0f + static_cast<float>(Row) * (TileSide + CellGap);
+            if (CellY + TileSide > Dialog.Bottom() - 8.0f)
+            {
+                break;
+            }
+            const Rectangle2D Cell{ CellX, CellY, TileSide, TileSide };
+            const bool        Hovered = Cell.Contains(Cursor);
+
+            Overlay.FillRectangle(Cell, Hovered ? ColorRgba{ 43, 43, 43, 255 } : ColorRgba{ 32, 32, 32, 255 }, 12.0f);
+            Overlay.StrokeRectangle(Cell, Hovered ? WorkspaceSurfaceColors::SelectionAmber : ColorRgba{ 58, 58, 58, 255 }, 12.0f, 1.0f);
+
+            const float IconSide = std::clamp(TileSide * 0.38f, 28.0f, 46.0f);
+            WorkspaceAppearance::ConstructSlotCategoryIcon(
+                Overlay,
+                Choices[Idx].Category,
+                { Cell.Center().X - IconSide * 0.5f, Cell.Y + TileSide * 0.16f },
+                IconSide);
+
+            const float LabelMaxW = TileSide - 14.0f;
+            const float LabelW    = std::min(
+                LabelMaxW,
+                WorkspaceAppearance::MeasureWeightedTextWidth(Overlay, FontWeightClass::Regular, 11.5f, Choices[Idx].Label));
+            WorkspaceAppearance::ConstructTruncatedText(
+                Overlay,
+                FontWeightClass::Regular,
+                { Cell.Center().X - LabelW * 0.5f, Cell.Bottom() - 34.0f },
+                LabelMaxW,
+                11.5f,
+                WorkspaceSurfaceColors::PrimaryInk,
+                Choices[Idx].Label);
+
+            const float CapW = std::min(
+                LabelMaxW,
+                WorkspaceAppearance::MeasureWeightedTextWidth(Overlay, FontWeightClass::Regular, 9.0f, Choices[Idx].Caption));
+            WorkspaceAppearance::ConstructTruncatedText(
+                Overlay,
+                FontWeightClass::Regular,
+                { Cell.Center().X - CapW * 0.5f, Cell.Bottom() - 18.0f },
+                LabelMaxW,
+                9.0f,
+                WorkspaceSurfaceColors::MutedInk,
+                Choices[Idx].Caption);
+
+            if (Hovered && Input.PrimaryPointer.Pressed)
+            {
+                if (AttachedOutliner != nullptr)
+                {
+                    if (Choices[Idx].TemplateIndex >= 0)
+                    {
+                        AttachedOutliner->ConstructFromTemplate(static_cast<uint32_t>(Choices[Idx].TemplateIndex));
+                    }
+                    else
+                    {
+                        AttachedOutliner->ConstructFolder("Folder");
+                    }
+                }
+                ConstructSheetOpen = false;
+            }
+        }
+
+        Overlay.PopClip();
+        return;
+    }
+
+    // Expanded Force Construct Dialog: Search Strip + Domain/Preset Rail + Scrollable Bespoke Icon Grid
+    const Rectangle2D SearchBox{ Dialog.X + 14.0f, Dialog.Y + 56.0f, Dialog.Width - 28.0f, 32.0f };
+    Overlay.FillRectangle(SearchBox, ColorRgba{ 16, 16, 18, 255 }, 10.0f);
+    Overlay.StrokeRectangle(SearchBox, ConstructSearchEditor.Active ? WorkspaceSurfaceColors::SelectionAmber : ColorRgba{ 48, 48, 52, 255 }, 10.0f, 1.0f);
+    VectorIconRepository::ConstructControl(Overlay, ControlIcon::SearchGlass, VectorIconPlacement{ SearchBox.X + 10.0f, SearchBox.Y + 9.0f, 14.0f, ColorRgba{ 138, 138, 144, 255 }, 1.6f });
+    const std::string_view SearchText(ConstructSearchEditor.Text, ConstructSearchEditor.Length);
+    WorkspaceAppearance::ConstructTruncatedText(
+        Overlay,
+        FontWeightClass::Regular,
+        { SearchBox.X + 32.0f, SearchBox.Y + 9.0f },
+        SearchBox.Width - 44.0f,
+        10.5f,
+        SearchText.empty() ? ColorRgba{ 118, 118, 124, 255 } : WorkspaceSurfaceColors::PrimaryInk,
+        SearchText.empty() ? "Type to filter 19 ForceModel laws, presets & entries..." : SearchText);
+    if (SearchBox.Contains(Cursor) && Input.PrimaryPointer.Pressed)
+    {
+        ConstructSearchEditor.Active = true;
+    }
+
+    const float BodyTopY = SearchBox.Bottom() + 8.0f;
+    Overlay.StrokeLine({ Dialog.X, BodyTopY }, { Dialog.Right(), BodyTopY }, WorkspaceSurfaceColors::HairlineLight, 1.0f);
+
+    const float RailW = 138.0f;
+    Overlay.StrokeLine({ Dialog.X + RailW, BodyTopY }, { Dialog.X + RailW, Dialog.Bottom() }, WorkspaceSurfaceColors::HairlineLight, 1.0f);
+
+    const std::array<std::pair<const char*, ForceConstructCategory>, 6> ForceRails = {{
+        { "All",             ForceConstructCategory::All             },
+        { "VectorField",     ForceConstructCategory::VectorLaws      },
+        { "FlowField",       ForceConstructCategory::FlowLaws        },
+        { "Turbulence",      ForceConstructCategory::TurbulenceLaws  },
+        { "Force Presets",   ForceConstructCategory::Presets         },
+        { "Scene & Folders", ForceConstructCategory::SceneAndFolders },
+    }};
+    for (std::size_t Idx = 0u; Idx < ForceRails.size(); ++Idx)
+    {
+        const Rectangle2D RailRow{ Dialog.X + 10.0f, BodyTopY + 10.0f + static_cast<float>(Idx) * 32.0f, RailW - 20.0f, 28.0f };
+        const bool        Active = (ForceConstructTab == ForceRails[Idx].second);
         if (Active || RailRow.Contains(Cursor))
         {
-            Overlay.FillRectangle(RailRow, Active ? ColorRgba{ 44, 44, 44, 255 } : ColorRgba{ 33, 33, 33, 255 }, 8.0f);
+            Overlay.FillRectangle(RailRow, Active ? ColorRgba{ 44, 44, 46, 255 } : ColorRgba{ 33, 33, 35, 255 }, 8.0f);
         }
         WorkspaceAppearance::ConstructWeightedText(
             Overlay,
             FontWeightClass::Regular,
             { RailRow.X + 10.0f, RailRow.Y + 7.5f },
-            11.0f,
-            Active ? WorkspaceSurfaceColors::PrimaryInk : ColorRgba{ 158, 158, 158, 255 },
-            Rails[Idx].first);
+            10.5f,
+            Active ? WorkspaceSurfaceColors::PrimaryInk : ColorRgba{ 164, 164, 170, 255 },
+            ForceRails[Idx].first);
         if (RailRow.Contains(Cursor) && Input.PrimaryPointer.Pressed)
         {
-            ConstructRail = Rails[Idx].second;
+            ForceConstructTab    = ForceRails[Idx].second;
+            ConstructGridScrollY = 0.0f;
         }
     }
 
-    // Right matrix of 1:1 square constructable item boxes (Width == Height always, with rounded corners)
-    const float    GridX    = Dialog.X + RailW + 14.0f;
-    const float    GridW    = std::max(96.0f, Dialog.Right() - 14.0f - GridX);
-    const float    CellGap  = 10.0f;
-    const uint32_t Columns  = std::max(1u, static_cast<uint32_t>((GridW + CellGap) / (108.0f + CellGap)));
-    const float    TileSide = std::floor((GridW - static_cast<float>(Columns - 1u) * CellGap) / static_cast<float>(Columns));
+    auto DomainForLaw = [](uint32_t Ord) noexcept -> uint32_t
+    {
+        if (Ord >= static_cast<uint32_t>(SimulationSpace::ForceFields::ForceModel::Count))
+        {
+            return 0u;
+        }
+        return static_cast<uint32_t>(
+            SimulationSpace::ForceFields::QueryDomainForModel(
+                static_cast<SimulationSpace::ForceFields::ForceModel>(Ord)));
+    };
 
-    struct ConstructEntryView
+    struct ForceChoiceEntry
     {
         std::string_view      Label;
         std::string_view      Caption;
         ConstructSlotCategory Category;
+        uint32_t              ForceLawOrdinal;
+        bool                  FormulaOverride;
         int32_t               TemplateIndex;
+        int32_t               PresetIndex;
     };
-    std::vector<ConstructEntryView> Choices{};
+    std::vector<ForceChoiceEntry> Choices{};
 
-    if (ConstructRail != ConstructCategoryRail::Organization)
+    // Curated presets in All, Presets, or matching Domain rails
+    const bool ShowPresets = (ForceConstructTab == ForceConstructCategory::All) ||
+                             (ForceConstructTab == ForceConstructCategory::Presets) ||
+                             (ForceConstructTab == ForceConstructCategory::VectorLaws) ||
+                             (ForceConstructTab == ForceConstructCategory::FlowLaws) ||
+                             (ForceConstructTab == ForceConstructCategory::TurbulenceLaws);
+    if (ShowPresets)
     {
-        if (AttachedOutliner != nullptr)
+        for (std::size_t P = 0u; P < ConstructPresets.size(); ++P)
         {
-            const auto Templates = AttachedOutliner->QueryConstructTemplates();
-            for (std::size_t Idx = 0u; Idx < Templates.size(); ++Idx)
+            const uint32_t PD = ConstructPresets[P].DomainOrdinal;
+            if ((ForceConstructTab == ForceConstructCategory::VectorLaws && PD != 0u) ||
+                (ForceConstructTab == ForceConstructCategory::FlowLaws && PD != 1u) ||
+                (ForceConstructTab == ForceConstructCategory::TurbulenceLaws && PD != 2u))
             {
-                if (CaseInsensitiveMatch(Templates[Idx].DropdownLabel, std::string_view(ConstructSearchEditor.Text, ConstructSearchEditor.Length)))
-                {
-                    Choices.push_back({ Templates[Idx].DropdownLabel, Templates[Idx].CategoryTitle, Templates[Idx].Category, static_cast<int32_t>(Idx) });
-                }
+                continue;
+            }
+            if (CaseInsensitiveMatch(ConstructPresets[P].Title, SearchText) ||
+                CaseInsensitiveMatch(ConstructPresets[P].Subtitle, SearchText))
+            {
+                Choices.push_back({
+                    ConstructPresets[P].Title,
+                    ConstructPresets[P].Subtitle,
+                    ConstructSlotCategory::ForceField,
+                    ConstructPresets[P].ForceLawOrdinal,
+                    ConstructPresets[P].FormulaOverride,
+                    -1,
+                    static_cast<int32_t>(P)
+                });
             }
         }
-        else
-        {
-            Choices.push_back({ "Add Item 1", "Type 1", ConstructSlotCategory::CategoryOne, 0 });
-            Choices.push_back({ "Add Item 2", "Type 2", ConstructSlotCategory::CategoryTwo, 1 });
-            Choices.push_back({ "Add Item 3", "Type 3", ConstructSlotCategory::CategoryThree, 2 });
-            Choices.push_back({ "Add Item 4", "Type 4", ConstructSlotCategory::CategoryFour, 3 });
-        }
-    }
-    if (ConstructRail != ConstructCategoryRail::ConstructSet)
-    {
-        Choices.push_back({ "+ Add Folder", "Collection", ConstructSlotCategory::Folder, -1 });
     }
 
+    // Outliner templates (19 ForceModel laws + Mesh/Light)
+    if (AttachedOutliner != nullptr && ForceConstructTab != ForceConstructCategory::Presets)
+    {
+        const auto Templates = AttachedOutliner->QueryConstructTemplates();
+        for (std::size_t T = 0u; T < Templates.size(); ++T)
+        {
+            const bool LawMatch = (Templates[T].Category == ConstructSlotCategory::ForceField);
+            if (!CaseInsensitiveMatch(Templates[T].DropdownLabel, SearchText) &&
+                !CaseInsensitiveMatch(Templates[T].DefaultTitle, SearchText) &&
+                !CaseInsensitiveMatch(Templates[T].CategoryTitle, SearchText))
+            {
+                continue;
+            }
+            if (ForceConstructTab == ForceConstructCategory::VectorLaws && (!LawMatch || DomainForLaw(Templates[T].ForceLawOrdinal) != 0u))
+            {
+                continue;
+            }
+            if (ForceConstructTab == ForceConstructCategory::FlowLaws && (!LawMatch || DomainForLaw(Templates[T].ForceLawOrdinal) != 1u))
+            {
+                continue;
+            }
+            if (ForceConstructTab == ForceConstructCategory::TurbulenceLaws && (!LawMatch || DomainForLaw(Templates[T].ForceLawOrdinal) != 2u))
+            {
+                continue;
+            }
+            if (ForceConstructTab == ForceConstructCategory::SceneAndFolders && LawMatch)
+            {
+                continue;
+            }
+            Choices.push_back({
+                Templates[T].DefaultTitle.empty() ? std::string_view(Templates[T].DropdownLabel) : std::string_view(Templates[T].DefaultTitle),
+                Templates[T].CategoryTitle,
+                Templates[T].Category,
+                Templates[T].ForceLawOrdinal,
+                false,
+                static_cast<int32_t>(T),
+                -1
+            });
+        }
+    }
+
+    if (ForceConstructTab == ForceConstructCategory::All || ForceConstructTab == ForceConstructCategory::SceneAndFolders)
+    {
+        if (CaseInsensitiveMatch("Folder", SearchText))
+        {
+            Choices.push_back({ "+ Add Folder", "Collection", ConstructSlotCategory::Folder, 0xFFFFFFFFu, false, -1, -1 });
+        }
+    }
+
+    const Rectangle2D GridArea{ Dialog.X + RailW + 12.0f, BodyTopY + 10.0f, std::max(96.0f, Dialog.Right() - 18.0f - (Dialog.X + RailW + 12.0f)), Dialog.Bottom() - 10.0f - (BodyTopY + 10.0f) };
+    const float    CellGap  = 9.0f;
+    const uint32_t Columns  = std::max(1u, static_cast<uint32_t>((GridArea.Width + CellGap) / (112.0f + CellGap)));
+    const float    TileSide = std::floor((GridArea.Width - static_cast<float>(Columns - 1u) * CellGap) / static_cast<float>(Columns));
+    const uint32_t TotalRows = (static_cast<uint32_t>(Choices.size()) + Columns - 1u) / Columns;
+    const float    ContentH  = static_cast<float>(TotalRows) * (TileSide + CellGap);
+    const float    MaxScroll = std::max(0.0f, ContentH - GridArea.Height + 6.0f);
+    if (GridArea.Contains(Cursor) && std::fabs(Input.WheelDeltaY) > 0.001f)
+    {
+        ConstructGridScrollY -= Input.WheelDeltaY * 36.0f;
+    }
+    ConstructGridScrollY = std::clamp(ConstructGridScrollY, 0.0f, MaxScroll);
+
+    Overlay.PushClip(GridArea);
     for (std::size_t Idx = 0u; Idx < Choices.size(); ++Idx)
     {
         const uint32_t Col   = static_cast<uint32_t>(Idx) % Columns;
         const uint32_t Row   = static_cast<uint32_t>(Idx) / Columns;
-        const float    CellX = GridX + static_cast<float>(Col) * (TileSide + CellGap);
-        const float    CellY = Dialog.Y + 60.0f + static_cast<float>(Row) * (TileSide + CellGap);
-        if (CellY + TileSide > Dialog.Bottom() - 8.0f)
+        const float    CellX = GridArea.X + static_cast<float>(Col) * (TileSide + CellGap);
+        const float    CellY = GridArea.Y + static_cast<float>(Row) * (TileSide + CellGap) - ConstructGridScrollY;
+        if (CellY + TileSide < GridArea.Y || CellY > GridArea.Bottom())
         {
-            break;
+            continue;
         }
         const Rectangle2D Cell{ CellX, CellY, TileSide, TileSide };
-        const bool        Hovered = Cell.Contains(Cursor);
+        const bool        Hovered = GridArea.Contains(Cursor) && Cell.Contains(Cursor);
 
-        Overlay.FillRectangle(Cell, Hovered ? ColorRgba{ 43, 43, 43, 255 } : ColorRgba{ 32, 32, 32, 255 }, 12.0f);
-        Overlay.StrokeRectangle(Cell, Hovered ? WorkspaceSurfaceColors::SelectionAmber : ColorRgba{ 58, 58, 58, 255 }, 12.0f, 1.0f);
+        Overlay.FillRectangle(Cell, Hovered ? ColorRgba{ 44, 44, 48, 255 } : ColorRgba{ 30, 30, 33, 255 }, 12.0f);
+        Overlay.StrokeRectangle(
+            Cell,
+            Hovered ? WorkspaceSurfaceColors::SelectionAmber
+                    : (Choices[Idx].PresetIndex >= 0 ? ColorRgba{ 88, 72, 48, 255 } : ColorRgba{ 54, 54, 58, 255 }),
+            12.0f,
+            1.0f);
 
-        const float IconSide = std::clamp(TileSide * 0.38f, 28.0f, 46.0f);
-        WorkspaceAppearance::ConstructSlotCategoryIcon(
-            Overlay,
-            Choices[Idx].Category,
-            { Cell.Center().X - IconSide * 0.5f, Cell.Y + TileSide * 0.16f },
-            IconSide);
+        const float IconSide = std::clamp(TileSide * 0.36f, 28.0f, 40.0f);
+        const Point2D IconOrigin{ Cell.Center().X - IconSide * 0.5f, Cell.Y + TileSide * 0.16f };
+        if (Choices[Idx].Category == ConstructSlotCategory::ForceField && Choices[Idx].ForceLawOrdinal < 19u)
+        {
+            const ColorRgba Tint = Choices[Idx].FormulaOverride
+                ? WorkspaceSurfaceColors::SelectionAmber
+                : WorkspaceAppearance::QueryForceLawTint(Choices[Idx].ForceLawOrdinal);
+            WorkspaceAppearance::ConstructForceLawIcon(Overlay, Choices[Idx].ForceLawOrdinal, IconOrigin, IconSide, Tint, 1.0f);
+        }
+        else
+        {
+            WorkspaceAppearance::ConstructSlotCategoryIcon(Overlay, Choices[Idx].Category, IconOrigin, IconSide);
+        }
 
-        const float LabelMaxW = TileSide - 14.0f;
+        const float LabelMaxW = TileSide - 12.0f;
         const float LabelW    = std::min(
             LabelMaxW,
-            WorkspaceAppearance::MeasureWeightedTextWidth(Overlay, FontWeightClass::Regular, 11.5f, Choices[Idx].Label));
+            WorkspaceAppearance::MeasureWeightedTextWidth(Overlay, FontWeightClass::Regular, 10.5f, Choices[Idx].Label));
         WorkspaceAppearance::ConstructTruncatedText(
             Overlay,
             FontWeightClass::Regular,
-            { Cell.Center().X - LabelW * 0.5f, Cell.Bottom() - 34.0f },
+            { Cell.Center().X - LabelW * 0.5f, Cell.Bottom() - 33.0f },
             LabelMaxW,
-            11.5f,
+            10.5f,
             WorkspaceSurfaceColors::PrimaryInk,
             Choices[Idx].Label);
 
         const float CapW = std::min(
             LabelMaxW,
-            WorkspaceAppearance::MeasureWeightedTextWidth(Overlay, FontWeightClass::Regular, 9.0f, Choices[Idx].Caption));
+            WorkspaceAppearance::MeasureWeightedTextWidth(Overlay, FontWeightClass::Regular, 8.5f, Choices[Idx].Caption));
         WorkspaceAppearance::ConstructTruncatedText(
             Overlay,
             FontWeightClass::Regular,
-            { Cell.Center().X - CapW * 0.5f, Cell.Bottom() - 18.0f },
+            { Cell.Center().X - CapW * 0.5f, Cell.Bottom() - 17.0f },
             LabelMaxW,
-            9.0f,
-            WorkspaceSurfaceColors::MutedInk,
+            8.5f,
+            Choices[Idx].PresetIndex >= 0 ? WorkspaceSurfaceColors::SelectionAmber : ColorRgba{ 148, 150, 158, 255 },
             Choices[Idx].Caption);
 
         if (Hovered && Input.PrimaryPointer.Pressed)
         {
-            if (AttachedOutliner != nullptr)
+            if (Choices[Idx].PresetIndex >= 0 && ConstructPresetCallback)
+            {
+                ConstructPresetCallback(static_cast<uint32_t>(Choices[Idx].PresetIndex));
+            }
+            else if (AttachedOutliner != nullptr)
             {
                 if (Choices[Idx].TemplateIndex >= 0)
                 {
@@ -763,6 +1251,18 @@ void ViewportPanel::RenderConstructDialog(
             }
             ConstructSheetOpen = false;
         }
+    }
+    Overlay.PopClip();
+
+    if (MaxScroll > 0.5f)
+    {
+        const Rectangle2D TrackRect{ GridArea.Right() + 4.0f, GridArea.Y + 2.0f, 4.0f, GridArea.Height - 4.0f };
+        Overlay.FillRectangle(TrackRect, ColorRgba{ 36, 36, 40, 220 }, 2.0f);
+        const float Ratio   = std::clamp(GridArea.Height / std::max(GridArea.Height, ContentH), 0.14f, 0.9f);
+        const float ThumbH  = TrackRect.Height * Ratio;
+        const float ScrollT = std::clamp(ConstructGridScrollY / MaxScroll, 0.0f, 1.0f);
+        const float ThumbY  = TrackRect.Y + (TrackRect.Height - ThumbH) * ScrollT;
+        Overlay.FillRectangle({ TrackRect.X, ThumbY, TrackRect.Width, ThumbH }, ColorRgba{ 126, 128, 136, 255 }, 2.0f);
     }
 
     Overlay.PopClip();
@@ -910,6 +1410,146 @@ void ViewportPanel::RenderSettingsSheet(
     }
 }
 
+void ViewportPanel::RenderForceOverlaySheet(
+    PixelSpace&             Overlay,
+    Rectangle2D             Bounds,
+    Point2D                 ButtonBottomLeft,
+    const PaneInputReading& Input)
+{
+    constexpr float SheetW = 296.0f;
+    constexpr float SheetH = 398.0f;
+    const float     SheetX = std::clamp(
+        ButtonBottomLeft.X,
+        Bounds.X + 10.0f,
+        std::max(Bounds.X + 10.0f, Bounds.Right() - SheetW - 10.0f));
+    const float       SheetY = ButtonBottomLeft.Y + 6.0f;
+    const Rectangle2D Sheet{ SheetX, SheetY, SheetW, SheetH };
+    const Point2D     Cursor{ Input.PrimaryPointer.X, Input.PrimaryPointer.Y };
+
+    Overlay.FillRectangle(Sheet, ColorRgba{ 26, 26, 28, 248 }, 14.0f);
+    Overlay.StrokeRectangle(Sheet, ColorRgba{ 58, 62, 70, 255 }, 14.0f, 1.0f);
+
+    float RowY = Sheet.Y + 16.0f;
+    WorkspaceAppearance::ConstructWeightedText(
+        Overlay,
+        FontWeightClass::SemiBold,
+        { Sheet.X + 16.0f, RowY },
+        11.0f,
+        ColorRgba{ 104, 220, 255, 255 },
+        "FORCE VISUALIZATION OVERLAY");
+    RowY += 24.0f;
+
+    auto DrawToggle = [&](const char* Label, bool& Flag)
+    {
+        WorkspaceAppearance::ConstructWeightedText(
+            Overlay,
+            FontWeightClass::Regular,
+            { Sheet.X + 16.0f, RowY + 4.0f },
+            11.0f,
+            WorkspaceSurfaceColors::SecondaryInk,
+            Label);
+        const Rectangle2D SwitchRect{ Sheet.Right() - 16.0f - 42.0f, RowY, 42.0f, 20.0f };
+        if (ExclusiveSelector::ConstructCompact(Overlay, SwitchRect, Flag, Input.PrimaryPointer, 1.0f).Clicked)
+        {
+            Flag = !Flag;
+        }
+        RowY += 26.0f;
+    };
+
+    DrawToggle("Force Viz Master",    ForceOverlay.Enabled);
+    DrawToggle("Slice Heatmap",       ForceOverlay.ShowHeatmap);
+    DrawToggle("Vector Arrows",       ForceOverlay.ShowVectors);
+    DrawToggle("3D RK4 Streamlines",  ForceOverlay.ShowStreamlines);
+    DrawToggle("Reach Envelopes",     ForceOverlay.ShowBounds);
+    DrawToggle("Motion Path & Orbits",ForceOverlay.ShowMotionCurves);
+    DrawToggle("Cross-Section Probe", ForceOverlay.CrossSectionAnemometerActive);
+
+    RowY += 4.0f;
+    WorkspaceAppearance::ConstructWeightedText(
+        Overlay,
+        FontWeightClass::Regular,
+        { Sheet.X + 16.0f, RowY + 4.0f },
+        10.5f,
+        WorkspaceSurfaceColors::SecondaryInk,
+        "Slice Plane");
+
+    constexpr std::array<std::pair<const char*, SimulationSpace::ForceFields::CrossSectionPlaneAxis>, 4> Planes = {{
+        { "XY",   SimulationSpace::ForceFields::CrossSectionPlaneAxis::XYHorizontal },
+        { "XZ",   SimulationSpace::ForceFields::CrossSectionPlaneAxis::XZLateral    },
+        { "YZ",   SimulationSpace::ForceFields::CrossSectionPlaneAxis::YZFrontal    },
+        { "All3", SimulationSpace::ForceFields::CrossSectionPlaneAxis::AllThreeAxes },
+    }};
+    float PlaneX = Sheet.Right() - 16.0f - 154.0f;
+    for (const auto& Item : Planes)
+    {
+        const bool        Selected = (ForceOverlay.CrossSectionAxis == Item.second);
+        const Rectangle2D Seg{ PlaneX, RowY, 36.0f, 22.0f };
+        Overlay.FillRectangle(Seg, Selected ? ColorRgba{ 30, 68, 86, 255 } : ColorRgba{ 38, 38, 42, 255 }, 6.0f);
+        Overlay.StrokeRectangle(Seg, Selected ? ColorRgba{ 104, 220, 255, 180 } : ColorRgba{ 62, 62, 68, 255 }, 6.0f, 1.0f);
+        Overlay.TextCentered(Seg, 9.5f, Selected ? ColorRgba{ 226, 248, 255, 255 } : WorkspaceSurfaceColors::SecondaryInk, Item.first);
+        if (Seg.Contains(Cursor) && Input.PrimaryPointer.Pressed)
+        {
+            ForceOverlay.CrossSectionAxis = Item.second;
+        }
+        PlaneX += 39.0f;
+    }
+    RowY += 30.0f;
+
+    WorkspaceAppearance::ConstructWeightedText(
+        Overlay,
+        FontWeightClass::Regular,
+        { Sheet.X + 16.0f, RowY + 4.0f },
+        10.5f,
+        WorkspaceSurfaceColors::SecondaryInk,
+        "Stream Tint");
+    constexpr std::array<std::pair<const char*, SimulationSpace::ForceFields::StreamlineColorMode>, 4> Tints = {{
+        { "Speed", SimulationSpace::ForceFields::StreamlineColorMode::SpeedRamp    },
+        { "Cyan",  SimulationSpace::ForceFields::StreamlineColorMode::CyanSingle   },
+        { "Elev",  SimulationSpace::ForceFields::StreamlineColorMode::Elevation    },
+        { "Cust",  SimulationSpace::ForceFields::StreamlineColorMode::CustomSingle },
+    }};
+    float TintX = Sheet.Right() - 16.0f - 170.0f;
+    for (const auto& Item : Tints)
+    {
+        const bool        Selected = (ForceOverlay.StreamColorMode == Item.second);
+        const Rectangle2D Seg{ TintX, RowY, 40.0f, 22.0f };
+        Overlay.FillRectangle(Seg, Selected ? ColorRgba{ 30, 68, 86, 255 } : ColorRgba{ 38, 38, 42, 255 }, 6.0f);
+        Overlay.StrokeRectangle(Seg, Selected ? ColorRgba{ 104, 220, 255, 180 } : ColorRgba{ 62, 62, 68, 255 }, 6.0f, 1.0f);
+        Overlay.TextCentered(Seg, 9.5f, Selected ? ColorRgba{ 226, 248, 255, 255 } : WorkspaceSurfaceColors::SecondaryInk, Item.first);
+        if (Seg.Contains(Cursor) && Input.PrimaryPointer.Pressed)
+        {
+            ForceOverlay.StreamColorMode = Item.second;
+        }
+        TintX += 43.0f;
+    }
+    RowY += 32.0f;
+
+    auto DrawOverlaySlider = [&](const char* Label, float& Value, float MinV, float MaxV, const char* Format)
+    {
+        WorkspaceAppearance::ConstructWeightedText(Overlay, FontWeightClass::Regular, { Sheet.X + 16.0f, RowY }, 10.0f, WorkspaceSurfaceColors::SecondaryInk, Label);
+        char ValText[32]{};
+        std::snprintf(ValText, sizeof(ValText), Format, Value);
+        const float ValW = WorkspaceAppearance::MeasureWeightedTextWidth(Overlay, FontWeightClass::Regular, 10.0f, ValText);
+        WorkspaceAppearance::ConstructWeightedText(Overlay, FontWeightClass::Regular, { Sheet.Right() - 16.0f - ValW, RowY }, 10.0f, WorkspaceSurfaceColors::PrimaryInk, ValText);
+
+        const Rectangle2D Track{ Sheet.X + 16.0f, RowY + 15.0f, Sheet.Width - 32.0f, 12.0f };
+        const float       T = std::clamp((Value - MinV) / std::max(0.001f, MaxV - MinV), 0.0f, 1.0f);
+        Overlay.FillRectangle(Track, ColorRgba{ 38, 38, 42, 255 }, 6.0f);
+        Overlay.FillRectangle({ Track.X, Track.Y, std::max(8.0f, Track.Width * T), Track.Height }, ColorRgba{ 58, 134, 168, 255 }, 6.0f);
+        Overlay.FillCircle({ Track.X + 6.0f + (Track.Width - 12.0f) * T, Track.Center().Y }, 5.5f, ColorRgba{ 228, 246, 255, 255 });
+        if (Track.Contains(Cursor) && Input.PrimaryPointer.Down)
+        {
+            const float NextT = std::clamp((Cursor.X - Track.X) / Track.Width, 0.0f, 1.0f);
+            Value             = MinV + NextT * (MaxV - MinV);
+        }
+        RowY += 32.0f;
+    };
+
+    DrawOverlaySlider("Thickness", ForceOverlay.StreamRibbonThickness, 0.25f, 3.0f, "%.2fx");
+    DrawOverlaySlider("Emissive",  ForceOverlay.StreamEmissiveBoost,   0.0f,  3.0f, "%.2fx");
+    DrawOverlaySlider("Opacity",   ForceOverlay.StreamOpacity,         0.1f,  1.0f, "%.2f");
+}
+
 //------------------------------------------------------------------------------------------------------------------------
 //                                            TOP-LEVEL VIEWPORT PRESENTATION
 //------------------------------------------------------------------------------------------------------------------------
@@ -928,15 +1568,21 @@ void ViewportPanel::Render(
 
     PixelSpace&   ActiveOverlay     = (OverlaySurface != nullptr) ? *OverlaySurface : Surface;
     const Point2D Cursor            = { Input.PrimaryPointer.X, Input.PrimaryPointer.Y };
-    const bool    OverlayOpenBefore = ConstructSheetOpen || SettingsSheetOpen || ProjectionDropdownOpen;
+    const bool    OverlayOpenBefore = ConstructSheetOpen || SettingsSheetOpen || ProjectionDropdownOpen || ForceOverlaySheetOpen;
 
     PushDiagnosticsSample(Δt);
     WorkspaceAppearance::ForwardInputToTextBuffer(ConstructSearchEditor, Input, Δt);
+    if (Input.ShortcutAll)
+    {
+        ConfigureConstructSheetOpen(!ConstructSheetOpen);
+    }
     if (Input.EscapePressed)
     {
-        ConstructSheetOpen     = false;
-        SettingsSheetOpen      = false;
-        ProjectionDropdownOpen = false;
+        ConstructSheetOpen           = false;
+        SettingsSheetOpen            = false;
+        ProjectionDropdownOpen       = false;
+        ForceOverlaySheetOpen        = false;
+        ConstructSearchEditor.Active = false;
     }
 
     const uint32_t ConstructedCount = (AttachedOutliner != nullptr) ? AttachedOutliner->QueryTotalCount() : 0u;
@@ -1063,6 +1709,36 @@ void ViewportPanel::Render(
         {
             TogglePlayPause();
         }
+
+        if (ForceOverlayToolsVisible && ModeStrip.X - TagX > 124.0f)
+        {
+            const Rectangle2D RewindBtn{ ModeStrip.X - 42.0f, HeadingY + 10.0f, 34.0f, 31.0f };
+            const bool        RewindHover = !OverlayOpenBefore && RewindBtn.Contains(Cursor);
+            Surface.FillRectangle(RewindBtn, RewindHover ? ColorRgba{ 44, 44, 44, 255 } : ColorRgba{ 26, 26, 26, 255 }, 15.5f);
+            Surface.StrokeRectangle(RewindBtn, ColorRgba{ 255, 255, 255, 20 }, 15.5f, 1.0f);
+            const ColorRgba RewInk = RewindHover ? ColorRgba{ 236, 236, 236, 255 } : ColorRgba{ 165, 165, 170, 255 };
+            Surface.StrokeLine({ RewindBtn.X + 10.0f, RewindBtn.Y + 10.0f }, { RewindBtn.X + 10.0f, RewindBtn.Bottom() - 10.0f }, RewInk, 1.6f);
+            const std::array<Point2D, 3> Tri1 = {{ { RewindBtn.X + 11.5f, RewindBtn.Center().Y }, { RewindBtn.X + 18.0f, RewindBtn.Y + 10.0f }, { RewindBtn.X + 18.0f, RewindBtn.Bottom() - 10.0f } }};
+            const std::array<Point2D, 3> Tri2 = {{ { RewindBtn.X + 18.0f, RewindBtn.Center().Y }, { RewindBtn.X + 24.5f, RewindBtn.Y + 10.0f }, { RewindBtn.X + 24.5f, RewindBtn.Bottom() - 10.0f } }};
+            Surface.FillPolygon(Tri1, RewInk);
+            Surface.FillPolygon(Tri2, RewInk);
+            if (RewindHover && Input.PrimaryPointer.Pressed)
+            {
+                RewindRequested       = true;
+                SimulationTimeSeconds = 0.0;
+            }
+
+            char ClockText[24]{};
+            std::snprintf(ClockText, sizeof(ClockText), "t %.1fs", SimulationTimeSeconds);
+            const float ClockW = WorkspaceAppearance::MeasureWeightedTextWidth(Surface, FontWeightClass::Regular, 10.0f, ClockText);
+            WorkspaceAppearance::ConstructWeightedText(
+                Surface,
+                FontWeightClass::Regular,
+                { RewindBtn.X - ClockW - 10.0f, HeadingY + 19.0f },
+                10.0f,
+                ColorRgba{ 168, 174, 182, 255 },
+                ClockText);
+        }
     }
 
     // 1c. Secondary Toolbar Row (31px capsule controls below subtle separator)
@@ -1156,6 +1832,7 @@ void ViewportPanel::Render(
             ConstructSheetOpen     = false;
             SettingsSheetOpen      = false;
             DebugDropdownOpen      = false;
+            ForceOverlaySheetOpen  = false;
         }
     }
 
@@ -1163,6 +1840,57 @@ void ViewportPanel::Render(
     const Rectangle2D SettingsBtn{ ToolbarRight - 39.0f, ToolsRowY, 39.0f, 31.0f };
     const Rectangle2D DiagnosticsBtn{ SettingsBtn.X - 5.0f - 39.0f, ToolsRowY, 39.0f, 31.0f };
     const Rectangle2D SplitBtn{ DiagnosticsBtn.X - 5.0f - 39.0f, ToolsRowY, 39.0f, 31.0f };
+
+    Rectangle2D ForceVizBtn{ ProjectionBtn.Right() + 8.0f, ToolsRowY, 128.0f, 31.0f };
+    if (ForceOverlayToolsVisible && ForceVizBtn.Right() + 8.0f < SplitBtn.X)
+    {
+        const Rectangle2D ToggleZone{ ForceVizBtn.X, ForceVizBtn.Y, 96.0f, ForceVizBtn.Height };
+        const Rectangle2D DropZone{ ToggleZone.Right(), ForceVizBtn.Y, 32.0f, ForceVizBtn.Height };
+        const bool        VizActive  = ForceOverlay.Enabled;
+        const bool        HoverAll   = !OverlayOpenBefore && ForceVizBtn.Contains(Cursor);
+
+        Surface.FillRectangle(
+            ForceVizBtn,
+            VizActive ? ColorRgba{ 24, 48, 58, 255 } : (HoverAll ? ColorRgba{ 40, 40, 44, 255 } : ColorRgba{ 26, 26, 28, 255 }),
+            15.5f);
+        Surface.StrokeRectangle(
+            ForceVizBtn,
+            VizActive ? ColorRgba{ 104, 220, 255, 165 } : ColorRgba{ 255, 255, 255, 24 },
+            15.5f,
+            1.0f);
+        Surface.StrokeLine(
+            { ToggleZone.Right(), ForceVizBtn.Y + 6.0f },
+            { ToggleZone.Right(), ForceVizBtn.Bottom() - 6.0f },
+            VizActive ? ColorRgba{ 104, 220, 255, 72 } : ColorRgba{ 255, 255, 255, 22 },
+            1.0f);
+
+        const ColorRgba VizInk = VizActive ? ColorRgba{ 146, 232, 255, 255 } : ColorRgba{ 158, 162, 168, 255 };
+        Surface.FillCircle({ ForceVizBtn.X + 14.0f, ForceVizBtn.Center().Y }, 3.8f, VizActive ? ColorRgba{ 104, 220, 255, 255 } : ColorRgba{ 110, 114, 120, 255 });
+        WorkspaceAppearance::ConstructWeightedText(
+            Surface,
+            FontWeightClass::Medium,
+            { ForceVizBtn.X + 24.0f, ForceVizBtn.Y + 9.0f },
+            10.5f,
+            VizInk,
+            "Force Viz");
+
+        const Point2D CaretCenter{ DropZone.Center().X, DropZone.Center().Y };
+        const std::array<Point2D, 3> Caret = {{
+            { CaretCenter.X - 4.0f, CaretCenter.Y - 2.0f },
+            { CaretCenter.X + 4.0f, CaretCenter.Y - 2.0f },
+            { CaretCenter.X,        CaretCenter.Y + 3.0f },
+        }};
+        Surface.FillPolygon(Caret, VizInk);
+
+        if (ToggleZone.Contains(Cursor) && Input.PrimaryPointer.Pressed && !ConstructSheetOpen && !SettingsSheetOpen)
+        {
+            ForceOverlay.Enabled = !ForceOverlay.Enabled;
+        }
+        else if (DropZone.Contains(Cursor) && Input.PrimaryPointer.Pressed && !ConstructSheetOpen && !SettingsSheetOpen)
+        {
+            ConfigureForceOverlaySheetOpen(!ForceOverlaySheetOpen);
+        }
+    }
 
     auto ConstructSecondaryToolButton = [&](Rectangle2D Btn, bool ToggledOn, auto ConstructIconFn)
     {
@@ -1228,7 +1956,7 @@ void ViewportPanel::Render(
 
     if (!SplitViewportEnabled)
     {
-        RenderCanvasPane(Surface, CanvasBounds, PrimaryProjection, 0u, ConstructedCount, Input);
+        RenderCanvasPane(Surface, CanvasBounds, PrimaryProjection, 0u, ConstructedCount, Input, OverlayOpenBefore);
     }
     else
     {
@@ -1238,8 +1966,8 @@ void ViewportPanel::Render(
         const Rectangle2D RightPane{ LeftPane.Right() + PaneGap, CanvasBounds.Y, HalfW, CanvasBounds.Height };
 
         Surface.FillRectangle(CanvasBounds, ColorRgba{ 38, 38, 38, 255 });
-        RenderCanvasPane(Surface, LeftPane, PrimaryProjection, 0u, ConstructedCount, Input);
-        RenderCanvasPane(Surface, RightPane, SecondaryProjection, 1u, ConstructedCount, Input);
+        RenderCanvasPane(Surface, LeftPane, PrimaryProjection, 0u, ConstructedCount, Input, OverlayOpenBefore);
+        RenderCanvasPane(Surface, RightPane, SecondaryProjection, 1u, ConstructedCount, Input, OverlayOpenBefore);
     }
 
     if (DiagnosticsVisible)
@@ -1337,9 +2065,7 @@ void ViewportPanel::Render(
         RenderConstructDialog(ActiveOverlay, Bounds, Input);
         if (OverlayOpenBefore && Input.PrimaryPointer.Pressed && !ConstructBtn.Contains(Cursor))
         {
-            const float DialogW = std::min(532.0f, std::max(300.0f, Bounds.Width - 36.0f));
-            const float DialogH = std::min(346.0f, std::max(240.0f, Bounds.Height - 70.0f));
-            const Rectangle2D DialogRect{ Bounds.Center().X - DialogW * 0.5f, Bounds.Y + 94.0f, DialogW, DialogH };
+            const Rectangle2D DialogRect = QueryConstructDialogBounds(Bounds);
             if (!DialogRect.Contains(Cursor))
             {
                 ConstructSheetOpen = false;
@@ -1361,6 +2087,25 @@ void ViewportPanel::Render(
             {
                 SettingsSheetOpen = false;
                 DebugDropdownOpen = false;
+            }
+        }
+    }
+
+    if (ForceOverlayToolsVisible && ForceOverlaySheetOpen)
+    {
+        RenderForceOverlaySheet(ActiveOverlay, Bounds, { ForceVizBtn.X, ForceVizBtn.Bottom() }, Input);
+        if (OverlayOpenBefore && Input.PrimaryPointer.Pressed && !ForceVizBtn.Contains(Cursor))
+        {
+            constexpr float SheetW = 296.0f;
+            constexpr float SheetH = 398.0f;
+            const float     SheetX = std::clamp(
+                ForceVizBtn.X,
+                Bounds.X + 10.0f,
+                std::max(Bounds.X + 10.0f, Bounds.Right() - SheetW - 10.0f));
+            const Rectangle2D SheetRect{ SheetX, ForceVizBtn.Bottom() + 6.0f, SheetW, SheetH };
+            if (!SheetRect.Contains(Cursor))
+            {
+                ForceOverlaySheetOpen = false;
             }
         }
     }

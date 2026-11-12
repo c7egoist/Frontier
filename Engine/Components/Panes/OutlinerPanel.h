@@ -40,13 +40,14 @@ enum class OutlinerVisibilityFilter : uint8_t
 
 enum class OutlinerCategoryFilter : uint8_t
 {
-    All         = 0, // [-] - Show every slot category
-    FoldersOnly = 1, // [-] - Show only folder containers
-    FirstType   = 2, // [-] - Show ConstructableFirst entries
-    SecondType  = 3, // [-] - Show ConstructableSecond entries
-    ThirdType   = 4, // [-] - Show ConstructableThird entries
-    FourthType  = 5, // [-] - Show ConstructableFourth entries
-    WithNotes   = 6, // [-] - Show entries carrying authored notes
+    All            = 0, // [-] - Show every slot category
+    FoldersOnly    = 1, // [-] - Show only folder containers
+    FirstType      = 2, // [-] - Show ConstructableFirst entries
+    SecondType     = 3, // [-] - Show ConstructableSecond entries
+    ThirdType      = 4, // [-] - Show ConstructableThird entries
+    FourthType     = 5, // [-] - Show ConstructableFourth entries
+    WithNotes      = 6, // [-] - Show entries carrying authored notes
+    ForceFieldType = 7, // [-] - Show ConstructSlotCategory::ForceField entries
 };
 
 enum class DropRelativePlacement : uint8_t
@@ -86,6 +87,7 @@ struct OutlinerConstructTemplate
     std::string          CategoryTitle {};                                           // [-] - Inspector breadcrumb category label
     std::string          DefaultDetail {};                                           // [-] - Secondary row summary caption
     ConstructSlotCategory Category      = ConstructSlotCategory::CategoryOne;   // [-] - Visual icon and filter category
+    uint32_t             ForceLawOrdinal = 0xFFFFFFFFu;                              // [id]- Optional ForceModel icon ordinal [0..18]
 };
 
 struct OutlinerRecordEntry
@@ -112,6 +114,9 @@ struct OutlinerRecordEntry
     bool                 Locked            = false;                                    // [-]  - Transform edit lock switch
     bool                 DynamicMotion     = false;                                    // [-]  - Dynamic simulation switch
     bool                 CastShadows       = true;                                     // [-]  - Shadow caster capability switch
+    uint32_t             ForceLawOrdinal   = 0xFFFFFFFFu;                              // [id] - Bespoke ForceIcons SVG index [0..18]
+    bool                 ForceFormulaOverride = false;                                 // [-]  - Formula override tint/tag switch
+    std::string          MotionTagText     {};                                         // [-]  - Optional compact motion indicator
 };
 
 struct OutlinerVisibleRow

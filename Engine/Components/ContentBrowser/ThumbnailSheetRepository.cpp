@@ -603,7 +603,7 @@ ContentCategory ThumbnailSheetRepository::ClassifyExternalExtension(const std::f
     {
         return ContentCategory::Fonts;
     }
-    if (Ext == ".simulationspace")
+    if (Ext == ".simulationspace" || Ext == ".forcemodel" || Ext == ".vectorfieldspace")
     {
         return ContentCategory::Simulations;
     }
@@ -796,12 +796,13 @@ void ThumbnailSheetRepository::PopulateDefaultEngineAndProjectEntries()
     struct SeedEntry
     {
         const char*         Title;
-        ContentCategory Category;
+        ContentCategory     Category;
         ContentOriginFilter Origin;
         ColorRgba           Tint;
+        const char*         CustomExtension = nullptr;
     };
 
-    constexpr std::array<SeedEntry, 29> StockEntries = {{
+    constexpr std::array<SeedEntry, 37> StockEntries = {{
         // Materials (EngineContent/Materials/)
         { "Standard Preset",      ContentCategory::Materials,   ContentOriginFilter::Engine,  { 199u, 173u, 160u, 255u } },
         { "Dielectric Glass",     ContentCategory::Materials,   ContentOriginFilter::Engine,  { 176u, 222u, 242u, 255u } },
@@ -830,9 +831,18 @@ void ThumbnailSheetRepository::PopulateDefaultEngineAndProjectEntries()
         { "UI Contour Stencil",   ContentCategory::Vectors,     ContentOriginFilter::Engine,  { 226u, 198u, 146u, 255u } },
         { "Space Grotesk Face",   ContentCategory::Fonts,       ContentOriginFilter::Engine,  { 232u, 224u, 210u, 255u } },
         { "JetBrains Mono Face",  ContentCategory::Fonts,       ContentOriginFilter::Engine,  { 168u, 206u, 238u, 255u } },
-        // Simulations, Volumetrics, Particles, Photometry, Audio, Shaders
-        { "Turbulent Wind Field", ContentCategory::Simulations, ContentOriginFilter::Engine,  { 102u, 208u, 196u, 255u } },
+        // ForceFields, VectorFields & Simulations (.ForceModel / .VectorFieldSpace / .SimulationSpace)
+        { "Turbulent Wind Field", ContentCategory::Simulations, ContentOriginFilter::Engine,  { 102u, 208u, 196u, 255u }, ".VectorFieldSpace" },
+        { "Coastal Crosswind",    ContentCategory::Simulations, ContentOriginFilter::Engine,  { 110u, 174u, 240u, 255u }, ".ForceModel" },
+        { "Thermal Updraft",      ContentCategory::Simulations, ContentOriginFilter::Engine,  { 244u, 176u, 86u,  255u }, ".ForceModel" },
+        { "Cyclone Funnel",       ContentCategory::Simulations, ContentOriginFilter::Engine,  { 228u, 116u, 168u, 255u }, ".ForceModel" },
+        { "Magnetic Containment", ContentCategory::Simulations, ContentOriginFilter::Engine,  { 168u, 132u, 248u, 255u }, ".ForceModel" },
+        { "CurlNoise Wake",       ContentCategory::Simulations, ContentOriginFilter::Engine,  { 92u,  218u, 184u, 255u }, ".ForceModel" },
+        { "Orbital Attractor",    ContentCategory::Simulations, ContentOriginFilter::Engine,  { 238u, 138u, 108u, 255u }, ".ForceModel" },
+        { "Spline Jetstream",     ContentCategory::Simulations, ContentOriginFilter::Project, { 104u, 212u, 152u, 255u }, ".ForceModel" },
+        { "Lorentz Plasma Field", ContentCategory::Simulations, ContentOriginFilter::Project, { 188u, 124u, 244u, 255u }, ".VectorFieldSpace" },
         { "Voronoi Fracture Rig", ContentCategory::Simulations, ContentOriginFilter::Project, { 232u, 148u, 96u,  255u } },
+        // Volumetrics, Particles, Photometry, Audio, Shaders
         { "Cumulus Density SDF",  ContentCategory::Volumetrics, ContentOriginFilter::Engine,  { 198u, 214u, 232u, 255u } },
         { "Ember Fountain GPU",   ContentCategory::Particles,   ContentOriginFilter::Engine,  { 250u, 166u, 68u,  255u } },
         { "Downlight Narrow IES", ContentCategory::Photometry,  ContentOriginFilter::Engine,  { 248u, 224u, 134u, 255u } },
@@ -842,13 +852,18 @@ void ThumbnailSheetRepository::PopulateDefaultEngineAndProjectEntries()
 
     for (const SeedEntry& Seed : StockEntries)
     {
+        const char* Ext = Seed.CustomExtension != nullptr ? Seed.CustomExtension : QueryCanonicalExtension(Seed.Category);
         const std::filesystem::path RootDir =
             (Seed.Origin == ContentOriginFilter::Engine)
                 ? ImportPolicy.EngineContentRoot
                 : (ImportPolicy.ActiveProjectRoot.empty() ? std::filesystem::path("Projects/SampleProject/Content") : (ImportPolicy.ActiveProjectRoot / "Content"));
         const std::filesystem::path EntryPath =
-            RootDir / QueryCategoryTitle(Seed.Category) / (std::string(Seed.Title) + QueryCanonicalExtension(Seed.Category));
-        (void)RegisterPrebakedEntry(Seed.Title, Seed.Category, Seed.Origin, Seed.Tint, EntryPath, true);
+            RootDir / QueryCategoryTitle(Seed.Category) / (std::string(Seed.Title) + Ext);
+        const std::size_t Idx = RegisterPrebakedEntry(Seed.Title, Seed.Category, Seed.Origin, Seed.Tint, EntryPath, true);
+        if (Seed.CustomExtension != nullptr && Idx < Entries.size())
+        {
+            Entries[Idx].ContainerFormat = Seed.CustomExtension;
+        }
     }
 }
 

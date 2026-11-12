@@ -21,6 +21,7 @@ import TransformPanel from "./TransformPanel.jsx";
 import MaterialPanel from "./MaterialPanel.jsx";
 import { ColourSlotDropProps } from "./ColourCodex.js";
 import ActionIcon, { QuickSymbol } from "./ActionIcon.jsx";
+import ForceFieldPanel, { ForceModelSvg } from "./ForceFieldPanel.jsx";
 import React, { useState, useEffect, useRef } from "react";
 import { SunGizmo } from "../FrontierEditor/environment-graphics.jsx";
 import { DepthOfField } from "../FrontierEditor/camera-graphics.jsx";
@@ -34,7 +35,7 @@ import Native from "./NativePanels.json";
 import { Solar } from "./Solar.mjs";
 import { SensorField } from "./OpticalGraphic.jsx";
 
-export const Panels = Native.Panels;
+export const Panels = { ...Native.Panels, force: [] };
 export function Glyph({ Name, Size = 18 }) {
   if (Name === "celestial-orbit")
     return (
@@ -159,6 +160,18 @@ export function Glyph({ Name, Size = 18 }) {
   );
 }
 export function Icon({ Name, Size = 24 }) {
+  if (typeof Name === "string" && Name.startsWith("force-model:")) {
+    const ModelId = Name.slice("force-model:".length) || "LinearWind";
+    return (
+      <span
+        className="native-icon force-model-symbol"
+        data-native-icon={Name}
+        style={{ display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+      >
+        <ForceModelSvg ModelId={ModelId} Size={Math.max(14, Math.min(Size, 20))} />
+      </span>
+    );
+  }
   if (Name === "outliner-precipitation")
     return (
       <span
@@ -495,6 +508,9 @@ export function Inspector({
   ReferenceCards = null,
   CloudCoverageCards = null,
   ReferenceDetailCards = null,
+  ForceOverlaySettings = null,
+  OnChangeForceOverlay = null,
+  OnSaveForcePreset = null,
 }) {
   const Sheet = Panels[Subject.Panel] || Panels.geometry;
   const [MoonSlot, SelectMoon] = useState(0);
@@ -1729,6 +1745,17 @@ export function Inspector({
           {Fields("Wind source", "Owned wind component")}
         </Card>
       </>
+    );
+  } else if (Subject.Panel === "force") {
+    Content = (
+      <ForceFieldPanel
+        Subject={Subject}
+        Values={Values}
+        Change={Change}
+        OverlaySettings={ForceOverlaySettings}
+        OnChangeOverlay={OnChangeForceOverlay}
+        OnSavePreset={OnSaveForcePreset}
+      />
     );
   } else Content = Generic();
   return (

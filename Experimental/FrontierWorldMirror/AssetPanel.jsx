@@ -22,6 +22,8 @@ import {
   SortColourAssets,
   SplitCardHeading,
 } from "./ColourCodex.js";
+import { GetForceModelMeta } from "./ForceFieldCatalog.js";
+import { ForceModelSvg } from "./ForceFieldPanel.jsx";
 
 function FilePreview({ Asset }) {
   const [Source, Show] = useState(Asset.Data || ""),
@@ -132,6 +134,7 @@ export default function AssetPanel({
   ActiveColourTargetLabel,
   StageChange,
   OnColourDragChange,
+  SpawnForce,
   Appearance = {},
 }) {
   const BuiltIn = useMemo(() => EngineAssets(), []),
@@ -830,7 +833,10 @@ export default function AssetPanel({
                     }}
                     onDoubleClick={() => {
                       Select(Asset.Id);
-                      if (
+                      if (Asset.Kind === "Forces" && typeof SpawnForce === "function") {
+                        SpawnForce(Asset);
+                        Report("Spawned " + Asset.Name + " in scene Outliner");
+                      } else if (
                         Asset.Kind === "Materials" &&
                         Asset.Origin !== "Engine"
                       )
@@ -840,7 +846,23 @@ export default function AssetPanel({
                     }}
                   >
                     <span className="asset-thumbnail">
-                      {Asset.Kind === "Materials" ? (
+                      {Asset.Kind === "Forces" ? (
+                        <span
+                          className="asset-force-badge"
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            width: 44,
+                            height: 44,
+                            borderRadius: 10,
+                            background: "rgba(74, 168, 255, 0.12)",
+                            border: `1px solid ${GetForceModelMeta(Asset.Force?.Model).Color}55`,
+                          }}
+                        >
+                          <ForceModelSvg ModelId={Asset.Force?.Model} Size={24} />
+                        </span>
+                      ) : Asset.Kind === "Materials" ? (
                         <span
                           className="asset-material-orb"
                           style={{
@@ -876,7 +898,9 @@ export default function AssetPanel({
                       <small>
                         {Asset.Kind === "Colours"
                           ? `${Asset.Colour.Hex} · ${Asset.Origin}`
-                          : `${Asset.Kind} · ${Asset.Origin}`}
+                          : Asset.Kind === "Forces"
+                            ? `${Asset.Format || ".ForceModel"} · ${Asset.Origin}`
+                            : `${Asset.Kind} · ${Asset.Origin}`}
                       </small>
                     </span>
                   </button>
@@ -1045,7 +1069,28 @@ export default function AssetPanel({
                 ) : (
                   <>
                     <h2>{Current.Name}</h2>
-                    {Current.Kind === "Materials" ? (
+                    {Current.Kind === "Forces" ? (
+                      <div
+                        className="asset-file-preview"
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: 8,
+                          padding: "18px 12px",
+                        }}
+                      >
+                        <ForceModelSvg ModelId={Current.Force?.Model} Size={42} />
+                        <strong style={{ fontSize: 12.5 }}>
+                          {GetForceModelMeta(Current.Force?.Model).Name} ·{" "}
+                          {GetForceModelMeta(Current.Force?.Model).Domain}
+                        </strong>
+                        <code style={{ fontSize: 10.5, opacity: 0.78 }}>
+                          {GetForceModelMeta(Current.Force?.Model).Equation}
+                        </code>
+                      </div>
+                    ) : Current.Kind === "Materials" ? (
                       <ShaderballPanel
                         key={Current.Id}
                         Material={Current.Material}
@@ -1073,6 +1118,19 @@ export default function AssetPanel({
                         </>
                       )}
                     </dl>
+                    {Current.Kind === "Forces" && typeof SpawnForce === "function" && (
+                      <div className="asset-material-actions">
+                        <button
+                          className="primary"
+                          onClick={() => {
+                            SpawnForce(Current);
+                            Report("Spawned " + Current.Name + " in scene Outliner");
+                          }}
+                        >
+                          Spawn {Current.Name} in Scene
+                        </button>
+                      </div>
+                    )}
                     {Current.Kind === "Materials" && (
                       <div className="asset-material-actions">
                         <label className="asset-assign-target">

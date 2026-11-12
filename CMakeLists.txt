@@ -309,6 +309,61 @@ frontier_compile_modular_slang_shader(GlobalIllumination/OctahedralIrradianceLat
 frontier_compile_modular_slang_shader(GlobalIllumination/SignedDistanceConeIllumination.slang    SdfConeGiComputeEntry           compute  SignedDistanceConeIllumination.comp.spv)
 frontier_compile_modular_slang_shader(GlobalIllumination/SpecularAndGlassRaytrace.slang          SpecularRaytraceComputeEntry    compute  SpecularAndGlassRaytrace.comp.spv)
 
+function(frontier_compile_vectorfield_slang_stage SLANG_REL_PATH ENTRY_NAME STAGE_KIND OUT_SPV_NAME)
+    set(IN_SLANG "${CMAKE_SOURCE_DIR}/${SLANG_REL_PATH}")
+    set(OUT_SPV "${FRONTIER_COMPILED_SHADER_DIR}/${OUT_SPV_NAME}")
+    add_custom_command(
+        OUTPUT "${OUT_SPV}"
+        COMMAND "${FRONTIER_SLANGC_BIN}"
+            -profile spirv_1_3
+            -target spirv
+            -emit-spirv-directly
+            -O0
+            -I "${CMAKE_SOURCE_DIR}"
+            -entry "${ENTRY_NAME}"
+            -stage "${STAGE_KIND}"
+            "${IN_SLANG}"
+            -o "${OUT_SPV}"
+        DEPENDS
+            "${IN_SLANG}"
+            "${CMAKE_SOURCE_DIR}/Engine/Shaders/Compute/ForceFieldEvaluationShared.slang"
+            "${CMAKE_SOURCE_DIR}/Engine/Shaders/VectorField/VectorFieldRenderingShared.slang"
+        COMMENT "[Slang] Compiling ${SLANG_REL_PATH} (${STAGE_KIND}:${ENTRY_NAME}) -> ${OUT_SPV_NAME}"
+        VERBATIM
+    )
+    set(FRONTIER_SPV_OUTPUTS ${FRONTIER_SPV_OUTPUTS} "${OUT_SPV}" PARENT_SCOPE)
+endfunction()
+
+frontier_compile_vectorfield_slang_stage(
+    "Engine/Shaders/Compute/FieldLatticeCompute.slang"
+    "ComputeFieldLatticeVoxel"
+    "compute"
+    "FieldLatticeCompute.spv"
+)
+
+if(FRONTIER_PROFILE STREQUAL "Editor")
+    foreach(VF_SHADER_STEM
+        LitBackdropRasterization
+        CrossSectionHeatmapRasterization
+        InfluenceEnvelopeRasterization
+        VectorArrowRasterization
+        StreamlineRasterization
+        ForcePathAndBeaconRasterization)
+        frontier_compile_vectorfield_slang_stage(
+            "Engine/Shaders/VectorField/${VF_SHADER_STEM}.slang"
+            "VertexMain"
+            "vertex"
+            "${VF_SHADER_STEM}.vert.spv"
+        )
+        frontier_compile_vectorfield_slang_stage(
+            "Engine/Shaders/VectorField/${VF_SHADER_STEM}.slang"
+            "FragmentMain"
+            "fragment"
+            "${VF_SHADER_STEM}.frag.spv"
+        )
+    endforeach()
+endif()
+
 add_custom_target(FrontierShaders DEPENDS ${FRONTIER_SPV_OUTPUTS})
 
 set(FRONTIER_ENGINE_SOURCES
@@ -375,6 +430,16 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/Codecs/MaterialCodec.cpp
     Engine/Codecs/VectorCodec.cpp
     Engine/Codecs/NetworkCodec.cpp
+    Engine/Codecs/VectorFieldCodec.cpp
+    Engine/Codecs/ForceModelPresetCodec.cpp
+    Engine/SimulationSpace/ForceFields/ForceMotionPath.cpp
+    Engine/SimulationSpace/ForceFields/VectorField.cpp
+    Engine/SimulationSpace/ForceFields/FlowField.cpp
+    Engine/SimulationSpace/ForceFields/TurbulenceField.cpp
+    Engine/SimulationSpace/ForceFields/FieldFormulaCompiler.cpp
+    Engine/SimulationSpace/ForceFields/ForceFieldAccumulator.cpp
+    Engine/SimulationSpace/ForceFields/FieldLatticeCascade.cpp
+    Engine/SimulationSpace/ForceFields/FieldLatticeVulkanExecutor.cpp
     Engine/NetworkingSpace/PacketSerializer.cpp
     Engine/NetworkingSpace/NetworkEndpointRegister.cpp
     Engine/NetworkingSpace/DifferentialWorldEncoder.cpp
@@ -513,6 +578,7 @@ if(BUILD_TESTING)
     frontier_register_exhibit(UVInteractiveAuthoringValidation  Exhibits/UVInteractiveAuthoringValidation.cpp)
     frontier_register_exhibit(UVBoundaryValidation              Exhibits/UVBoundaryValidation.cpp)
     frontier_register_exhibit(NetworkingSpaceValidation         Exhibits/NetworkingSpaceValidation.cpp)
+    frontier_register_exhibit(VectorFieldValidation             Exhibits/VectorFieldValidation.cpp)
 
     if(NOT ANDROID AND NOT FRONTIER_PROFILE STREQUAL "Shipping")
         add_test(

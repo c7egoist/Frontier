@@ -115,6 +115,11 @@ public:
     void FillCircle(Point2D Center, float Radius, ColorRgba Fill) noexcept;
     void StrokeCircle(Point2D Center, float Radius, ColorRgba Stroke, float Thickness = 1.0f) noexcept;
     void FillPolygon(std::span<const Point2D> Vertices, ColorRgba Fill) noexcept;
+    void FillTexturedRectangle(
+        Rectangle2D Bounds,
+        const void* SoftwareTextureData = nullptr,
+        uint64_t    NativeTextureHandle = 0ull,
+        ColorRgba   Tint                = { 255u, 255u, 255u, 255u }) noexcept;
     void StrokeLine(Point2D From, Point2D To, ColorRgba Stroke, float Thickness = 1.0f) noexcept;
     void StrokePolyline(std::span<const Point2D> Vertices, ColorRgba Stroke, float Thickness = 1.0f, bool Closed = false) noexcept;
 

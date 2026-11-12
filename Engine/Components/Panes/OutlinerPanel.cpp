@@ -163,6 +163,7 @@ OutlinerSlotToken OutlinerPanel::ConstructFromTemplate(uint32_t TemplateIndex, O
     Created.Subtitle          = Preset.DefaultDetail;
     Created.VisibilityEnabled = true;
     Created.Expanded          = true;
+    Created.ForceLawOrdinal   = Preset.ForceLawOrdinal;
 
     if (OutlinerRecordEntry* EnclosureEntry = AccessEntry(Created.EnclosingToken))
     {
@@ -713,13 +714,14 @@ bool OutlinerPanel::MatchesActiveFilters(const OutlinerRecordEntry& Entry) const
 
     switch (CategoryFilter)
     {
-        case OutlinerCategoryFilter::All:         break;
-        case OutlinerCategoryFilter::FoldersOnly: if (Entry.Category != ConstructSlotCategory::Folder) return false; break;
-        case OutlinerCategoryFilter::FirstType:   if (Entry.Category != ConstructSlotCategory::CategoryOne) return false; break;
-        case OutlinerCategoryFilter::SecondType:  if (Entry.Category != ConstructSlotCategory::CategoryTwo) return false; break;
-        case OutlinerCategoryFilter::ThirdType:   if (Entry.Category != ConstructSlotCategory::CategoryThree) return false; break;
-        case OutlinerCategoryFilter::FourthType:  if (Entry.Category != ConstructSlotCategory::CategoryFour) return false; break;
-        case OutlinerCategoryFilter::WithNotes:   if (Entry.AuthorNotes.empty()) return false; break;
+        case OutlinerCategoryFilter::All:            break;
+        case OutlinerCategoryFilter::FoldersOnly:    if (Entry.Category != ConstructSlotCategory::Folder) return false; break;
+        case OutlinerCategoryFilter::FirstType:      if (Entry.Category != ConstructSlotCategory::CategoryOne) return false; break;
+        case OutlinerCategoryFilter::SecondType:     if (Entry.Category != ConstructSlotCategory::CategoryTwo) return false; break;
+        case OutlinerCategoryFilter::ThirdType:      if (Entry.Category != ConstructSlotCategory::CategoryThree) return false; break;
+        case OutlinerCategoryFilter::FourthType:     if (Entry.Category != ConstructSlotCategory::CategoryFour) return false; break;
+        case OutlinerCategoryFilter::WithNotes:      if (Entry.AuthorNotes.empty()) return false; break;
+        case OutlinerCategoryFilter::ForceFieldType: if (Entry.Category != ConstructSlotCategory::ForceField) return false; break;
     }
 
     const std::string_view Query(SearchEditor.Text, SearchEditor.Length);
@@ -1149,15 +1151,48 @@ void OutlinerPanel::Render(
             const char*            Label;
             OutlinerCategoryFilter Filter;
         };
-        constexpr std::array<FilterChipEntry, 7> Chips = {{
-            { "All",     OutlinerCategoryFilter::All         },
-            { "Folders", OutlinerCategoryFilter::FoldersOnly },
-            { "Type 1",  OutlinerCategoryFilter::FirstType   },
-            { "Type 2",  OutlinerCategoryFilter::SecondType  },
-            { "Type 3",  OutlinerCategoryFilter::ThirdType   },
-            { "Type 4",  OutlinerCategoryFilter::FourthType  },
-            { "Notes",   OutlinerCategoryFilter::WithNotes   },
+        constexpr std::array<FilterChipEntry, 8> AllChips = {{
+            { "All",     OutlinerCategoryFilter::All            },
+            { "Folders", OutlinerCategoryFilter::FoldersOnly    },
+            { "Forces",  OutlinerCategoryFilter::ForceFieldType },
+            { "Type 1",  OutlinerCategoryFilter::FirstType      },
+            { "Type 2",  OutlinerCategoryFilter::SecondType     },
+            { "Type 3",  OutlinerCategoryFilter::ThirdType      },
+            { "Type 4",  OutlinerCategoryFilter::FourthType     },
+            { "Notes",   OutlinerCategoryFilter::WithNotes      },
         }};
+
+        bool ForceSlotsPresent = false;
+        for (const auto& Existing : Entries)
+        {
+            if (Existing.Category == ConstructSlotCategory::ForceField)
+            {
+                ForceSlotsPresent = true;
+                break;
+            }
+        }
+        if (!ForceSlotsPresent)
+        {
+            for (const auto& Preset : ConstructTemplates)
+            {
+                if (Preset.Category == ConstructSlotCategory::ForceField)
+                {
+                    ForceSlotsPresent = true;
+                    break;
+                }
+            }
+        }
+
+        std::vector<FilterChipEntry> Chips;
+        Chips.reserve(AllChips.size());
+        for (const auto& Candidate : AllChips)
+        {
+            if (Candidate.Filter == OutlinerCategoryFilter::ForceFieldType && !ForceSlotsPresent)
+            {
+                continue;
+            }
+            Chips.push_back(Candidate);
+        }
 
         float ChipX = Bounds.X + 14.0f;
         float ChipY = ContentTopY + 2.0f;
@@ -1325,15 +1360,31 @@ void OutlinerPanel::Render(
                 }
             }
 
-            // 24px Showcase folder or category icon
+            // 24px Showcase folder or category icon (exact 19 bespoke ForceModel icons when ForceLawOrdinal < 19)
             const Point2D IconOrigin{ DisclosureRect.Right() + 4.0f, RowRect.Y + 7.5f };
-            WorkspaceAppearance::ConstructSlotCategoryIcon(
-                Surface,
-                Entry->Category,
-                IconOrigin,
-                24.0f,
-                Entry->FolderTint,
-                RowAlpha);
+            if (Entry->Category == ConstructSlotCategory::ForceField && Entry->ForceLawOrdinal < 19u)
+            {
+                const ColorRgba LawInk = Entry->ForceFormulaOverride
+                    ? WorkspaceSurfaceColors::SelectionAmber
+                    : WorkspaceAppearance::QueryForceLawTint(Entry->ForceLawOrdinal);
+                WorkspaceAppearance::ConstructForceLawIcon(
+                    Surface,
+                    Entry->ForceLawOrdinal,
+                    { IconOrigin.X + 2.0f, IconOrigin.Y + 2.0f },
+                    20.0f,
+                    LawInk,
+                    RowAlpha);
+            }
+            else
+            {
+                WorkspaceAppearance::ConstructSlotCategoryIcon(
+                    Surface,
+                    Entry->Category,
+                    IconOrigin,
+                    24.0f,
+                    Entry->FolderTint,
+                    RowAlpha);
+            }
 
             // Right-side visibility status indicator & eye toggle
             const Rectangle2D EyeHit{ RowRect.Right() - 24.0f, RowRect.Y + 9.5f, 18.0f, 20.0f };

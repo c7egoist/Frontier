@@ -55,7 +55,7 @@ export function slider({ min = 0, max = 1, value = 0, dec = 2, unit = '', hi = f
     sl.addEventListener('pointermove', mv); sl.addEventListener('pointerup', up);
   });
   /* wheel nudges by 1 % of the range — fine adjustment without leaving the pointer */
-  sl.addEventListener('wheel', e => { e.preventDefault(); set(v - Math.sign(e.deltaY) * (max - min) / 100); }, { passive: false });
+  sl.addEventListener('wheel', e => { if (e.cancelable) e.preventDefault(); set(v - Math.sign(e.deltaY) * (max - min) / 100); }, { passive: false });
 
   /* type-in editing on the pill */
   numCell.onclick = () => {

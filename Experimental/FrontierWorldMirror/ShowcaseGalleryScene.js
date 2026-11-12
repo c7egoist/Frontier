@@ -5,6 +5,25 @@
 // Defines the canonical Architectural Cornell-Studio Gallery scene, EditorCamera, OpenPBR materials, and live Outliner/Inspector compiler.
 
 import { ResolveMaterial } from "./MaterialSpecification.js";
+import {
+  BuildForceOverlayGeometry,
+  DEFAULT_FORCE_OVERLAY,
+  FORCE_MODELS,
+  GetForceModelMeta,
+  PickForceBeacon,
+  ResolveForceValues,
+} from "./ForceFieldCatalog.js";
+
+export const ConstructForceTemplates = FORCE_MODELS.map((Law) => ({
+  Id: `template-force-${Law.Id.toLowerCase()}`,
+  Name: Law.Name,
+  Panel: "force",
+  ForceModel: Law.Id,
+  Icon: `force-model:${Law.Id}`,
+  Parent: "forces",
+  Preview: true,
+  Description: `${Law.Domain} · ${Law.Summary}`,
+}));
 
 function LinearChannelToSrgbByte(Value) {
   const X = Math.max(0, Math.min(1, Number(Value) || 0));
@@ -475,7 +494,13 @@ function ShapeKindCode(Row) {
   return 0; // box
 }
 
-export function CompileLiveGtxScene(Rows, Values, Hidden, Projection = "PERSP") {
+export function CompileLiveGtxScene(
+  Rows,
+  Values,
+  Hidden,
+  Projection = "PERSP",
+  ExtraOptions = {},
+) {
   const CamRec = Values?.camera || {};
   const RawPos = Array.isArray(CamRec.Position)
     ? CamRec.Position
@@ -667,6 +692,39 @@ export function CompileLiveGtxScene(Rows, Values, Hidden, Projection = "PERSP") 
     if (Primitives.length >= 24) break;
   }
 
+  // Analytical ForceFields & VectorFields (Pass 3A ForceOverlay — zero rigid-body physics!)
+  const ForceNodes = [];
+  for (const Row of Rows) {
+    if (Row.Panel !== "force") continue;
+    if (!RowEffectivelyVisible(Row, Rows, Hidden)) continue;
+    const Rec = Values?.[Row.Id] || {};
+    const Pos = Array.isArray(Rec.Position) ? Rec.Position : [0, 0, 1.4];
+    const Rot = Array.isArray(Rec.Rotation) ? Rec.Rotation : [0, 0, 0];
+    const Force = ResolveForceValues(Rec.Force, Row.ForceModel || "LinearWind");
+    ForceNodes.push({
+      Id: Row.Id,
+      Name: Row.Name,
+      Position: [Number(Pos[0]) || 0, Number(Pos[1]) || 0, Number(Pos[2]) || 0],
+      Rotation: [Number(Rot[0]) || 0, Number(Rot[1]) || 0, Number(Rot[2]) || 0],
+      Force,
+    });
+  }
+
+  const OverlayCfg = ExtraOptions?.ForceOverlaySettings || DEFAULT_FORCE_OVERLAY;
+  const SelectedId = ExtraOptions?.SelectedId || null;
+  const ForceOverlay =
+    ForceNodes.length > 0 && OverlayCfg?.Enabled !== false
+      ? BuildForceOverlayGeometry(ForceNodes, OverlayCfg, SelectedId, ExtraOptions?.TimeSec || 0)
+      : null;
+  const ForceSignature =
+    ForceNodes.length === 0
+      ? ""
+      : `${OverlayCfg?.Enabled !== false ? 1 : 0}:${OverlayCfg?.ShowEnvelopes ? 1 : 0}:${OverlayCfg?.ShowVelocityArrows ? 1 : 0}:${OverlayCfg?.ShowStreamlines ? 1 : 0}:${OverlayCfg?.ArrowDensity || 3}:${OverlayCfg?.VectorScale || 0.24}:${OverlayCfg?.ColorRamp || "Beaufort"}:${SelectedId || ""}|` +
+        ForceNodes.map(
+          (N) =>
+            `${N.Id}:${N.Position.join(",")}:${N.Rotation.join(",")}:${N.Force.Model}:${N.Force.Enabled ? 1 : 0}:${N.Force.Strength}:${N.Force.Radius}:${N.Force.CoreRadius}:${N.Force.FalloffExponent}:${N.Force.Reach}:${N.Force.Attenuation}:${N.Force.SwirlRatio}:${N.Force.TurbulenceScale}:${N.Force.YawDeg}:${N.Force.FormulaEnabled ? 1 : 0}:${N.Force.FormulaCode?.length || 0}`,
+        ).join(";");
+
   return {
     CameraOrigin,
     CameraTarget,
@@ -680,6 +738,9 @@ export function CompileLiveGtxScene(Rows, Values, Hidden, Projection = "PERSP") 
     SkyRadiance,
     AreaLights,
     Primitives,
+    ForceNodes,
+    ForceOverlay,
+    ForceSignature,
   };
 }
 
@@ -731,9 +792,15 @@ export function ComputeCameraRayAtUv(CompiledScene, U, V, Aspect) {
   return { RayOrigin, RayDir, Basis: { Right, Up, Forward: Fwd } };
 }
 
-// Analytical 3D ray picking in Z-up world space so clicking any 3D object in the GTX viewport selects it in Outliner & Inspector!
+// Analytical 3D ray picking in Z-up world space so clicking any 3D object or ForceField beacon in the GTX viewport selects it in Outliner & Inspector!
 export function PickSceneEntityAtUv(CompiledScene, U, V, Aspect) {
   const { RayOrigin, RayDir } = ComputeCameraRayAtUv(CompiledScene, U, V, Aspect);
+
+  // ForceOverlay beacons render depth-cleared over scene surfaces in Pass 3A -> check beacon hit first
+  if (CompiledScene.ForceOverlay) {
+    const BeaconHit = PickForceBeacon(RayOrigin, RayDir, CompiledScene.ForceOverlay);
+    if (BeaconHit) return BeaconHit.Id;
+  }
 
   let BestT = Infinity;
   let BestId = null;

@@ -4,6 +4,7 @@ import { Glyph, Icon, Inspector } from "./Inspectors.jsx";
 
 export const ConstructGroups = [
   "All",
+  "Forces",
   "Environment",
   "Weather",
   "Cameras",
@@ -11,6 +12,7 @@ export const ConstructGroups = [
   "Lighting",
 ];
 export function ConstructGroup(Subject) {
+  if (Subject.Panel === "force") return "Forces";
   if (
     [
       "wind",

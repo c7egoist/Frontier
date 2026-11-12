@@ -55,10 +55,16 @@ import {
 } from "./LevelSystem.js";
 import {
   CanonicalEditorCamera,
+  ConstructForceTemplates,
   NormalizeVec3,
   ShowcaseInitialRows,
   ShowcaseInitialValues,
 } from "./ShowcaseGalleryScene.js";
+import {
+  DEFAULT_FORCE_OVERLAY,
+  GetForceModelMeta,
+  ResolveForceValues,
+} from "./ForceFieldCatalog.js";
 import "./Editor.css";
 const InitialRows = [
   ["showcase", "Showcase", "group", "folder-scene", null, "Scene collection"],
@@ -495,6 +501,7 @@ function App() {
     [LeftWidth, ResizeLeft] = useState(316),
     [RightWidth, ResizeRight] = useState(340),
     [ShowGizmo, SetShowGizmo] = useState(true),
+    [ForceOverlaySettings, SetForceOverlaySettings] = useState(DEFAULT_FORCE_OVERLAY),
     [CreateLevelOpen, SetCreateLevelOpen] = useState(false),
     [LevelsState, SetLevelsState] = useState(() => LoadSavedLevelsState());
   const PreviousFractureRows = useRef(Rows);
@@ -899,7 +906,7 @@ function App() {
       }),
     );
   };
-  const Change = (Key, Value) =>
+  const Change = (Key, Value) => {
     AssignValues((Previous) => ({
       ...Previous,
       [Selected]: {
@@ -907,6 +914,20 @@ function App() {
         [Key]: Key === "Fracture" ? { ...Value, EditedAt: Date.now() } : Value,
       },
     }));
+    if (Key === "Force" && Value?.Model) {
+      AssignRows((Previous) =>
+        Previous.map((Row) =>
+          Row.Id === Selected && Row.Panel === "force"
+            ? {
+                ...Row,
+                ForceModel: Value.Model,
+                Icon: `force-model:${Value.Model}`,
+              }
+            : Row,
+        ),
+      );
+    }
+  };
   useEffect(() => {
     document
       .querySelector(".outliner-row.selected")
@@ -1184,13 +1205,15 @@ function App() {
           Filters.some((Filter) =>
             Filter === "Camera"
               ? Row.Panel === "camera"
-              : Filter === "Lights"
-                ? ["sun", "light", "flare"].includes(Row.Panel)
-                : Filter === "Geometry"
-                  ? Row.Panel === "geometry"
-                  : Filter === "Bodies"
-                    ? Row.Panel === "moon"
-                    : [
+              : Filter === "Forces"
+                ? Row.Panel === "force"
+                : Filter === "Lights"
+                  ? ["sun", "light", "flare"].includes(Row.Panel)
+                  : Filter === "Geometry"
+                    ? Row.Panel === "geometry"
+                    : Filter === "Bodies"
+                      ? Row.Panel === "moon"
+                      : [
                         "atmosphere",
                         "clouds",
                         "local-cloud",
@@ -1319,22 +1342,66 @@ function App() {
     let Name = Stem,
       Suffix = 2;
     while (Names.has(Name)) Name = Stem + " " + Suffix++;
-    AssignRows((Previous) => [
-      ...Previous,
-      {
-        ...Template,
-        Id,
-        Name,
-        Preview: true,
-        Parent: Rows.some((Subject) => Subject.Id === Template.Parent)
-          ? Template.Parent
-          : null,
-      },
-    ]);
+
+    const IsForce = Template.Panel === "force";
+    const ResolvedForce = IsForce
+      ? ResolveForceValues(Properties.Force, Template.ForceModel || "LinearWind")
+      : null;
+
+    AssignRows((Previous) => {
+      let BaseRows = Previous;
+      let TargetParent = Previous.some((Subject) => Subject.Id === Template.Parent)
+        ? Template.Parent
+        : null;
+      if (IsForce && !TargetParent) {
+        if (!Previous.some((Subject) => Subject.Id === "forces")) {
+          BaseRows = [
+            ...Previous,
+            {
+              Id: "forces",
+              Name: "Forces & VectorFields",
+              Panel: "group",
+              Icon: "folder-generic",
+              Parent: null,
+              Description: "Analytical ForceModels & VectorFields (no physics coupling)",
+            },
+          ];
+        }
+        TargetParent = "forces";
+      }
+      return [
+        ...BaseRows,
+        {
+          ...Template,
+          ...(IsForce
+            ? {
+                ForceModel: ResolvedForce.Model,
+                Icon: `force-model:${ResolvedForce.Model}`,
+              }
+            : {}),
+          Id,
+          Name,
+          Preview: true,
+          Parent: TargetParent,
+        },
+      ];
+    });
     AssignValues((Previous) => ({
       ...Previous,
       [Id]: {
         ...Properties,
+        ...(IsForce
+          ? {
+              Position: Array.isArray(Properties.Position)
+                ? Properties.Position
+                : [0, 0, 1.4],
+              Rotation: Array.isArray(Properties.Rotation)
+                ? Properties.Rotation
+                : [0, 0, 0],
+              Scale: [1, 1, 1],
+              Force: ResolvedForce,
+            }
+          : {}),
         ...(Properties.Fracture
           ? { Fracture: { ...Properties.Fracture, Baked: undefined } }
           : {}),
@@ -1361,6 +1428,47 @@ function App() {
     Collapse({});
     Toast("Added " + Name + " · analytical HTML preview");
     return Id;
+  };
+  const SpawnForceFromAsset = (Asset) => {
+    if (!Asset || Asset.Kind !== "Forces") return;
+    const Resolved = ResolveForceValues(Asset.Force, Asset.Force?.Model || "LinearWind");
+    const Meta = GetForceModelMeta(Resolved.Model);
+    AddRow(
+      {
+        Id: `asset-template-${Asset.Id}`,
+        Name: Asset.Name || Meta.Name,
+        Panel: "force",
+        ForceModel: Resolved.Model,
+        Icon: `force-model:${Resolved.Model}`,
+        Parent: "forces",
+        Preview: true,
+        Description: `${Meta.Domain} · ${Meta.Summary}`,
+      },
+      {
+        Position: Array.isArray(Asset.Position) ? Asset.Position : [0, 0, 1.4],
+        Rotation: Array.isArray(Asset.Rotation) ? Asset.Rotation : [0, 0, 0],
+        Force: Resolved,
+      },
+      true,
+    );
+  };
+  const SaveForcePresetToAssetBrowser = (PresetTitle, ForceVals, Transform = {}) => {
+    const Resolved = ResolveForceValues(ForceVals);
+    const Meta = GetForceModelMeta(Resolved.Model);
+    const Format = Resolved.FormulaEnabled ? ".VectorFieldSpace" : ".ForceModel";
+    const Created = {
+      Id: "asset-" + crypto.randomUUID(),
+      Name: `${PresetTitle || Meta.Name} Preset`,
+      Kind: "Forces",
+      Origin: "Project",
+      Format,
+      Force: Resolved,
+      Position: Transform.Position || [0, 0, 1.4],
+      Rotation: Transform.Rotation || [0, 0, 0],
+      Detail: `${Format} · ${Meta.Domain} · Saved from scene ForceField Inspector.`,
+    };
+    StoreAssets((Previous) => [Created, ...Previous].slice(0, 256));
+    Toast(`Saved "${Created.Name}" (${Format}) to ContentBrowser`);
   };
   const TabStrip = (Side) => (
     <div
@@ -1838,6 +1946,24 @@ function App() {
               GIZMO
             </button>
             <button
+              className="viewport-icon-button gizmo-pill"
+              aria-label="Toggle 3D ForceField overlay"
+              aria-pressed={ForceOverlaySettings.Enabled !== false}
+              title={
+                ForceOverlaySettings.Enabled !== false
+                  ? "Hide 3D ForceField & VectorField viewport overlay"
+                  : "Show 3D ForceField & VectorField viewport overlay"
+              }
+              onClick={() =>
+                SetForceOverlaySettings((Prev) => ({
+                  ...Prev,
+                  Enabled: Prev.Enabled === false,
+                }))
+              }
+            >
+              FORCES
+            </button>
+            <button
               className="viewport-icon-button"
               aria-label="Split viewport"
               aria-pressed={SplitView}
@@ -1955,6 +2081,7 @@ function App() {
           Debug={Debug}
           Settings={Settings}
           ShowGizmo={ShowGizmo}
+          ForceOverlaySettings={ForceOverlaySettings}
           UpdateEditorCamera={UpdateEditorCamera}
           OnTransformEntity={HandleGizmoTransformEntity}
           OnFpsSample={HandleFpsSample}
@@ -1970,6 +2097,7 @@ function App() {
             Debug={Debug}
             Settings={Settings}
             ShowGizmo={ShowGizmo}
+            ForceOverlaySettings={ForceOverlaySettings}
             UpdateEditorCamera={UpdateEditorCamera}
             OnTransformEntity={HandleGizmoTransformEntity}
             View={2}
@@ -2144,6 +2272,9 @@ function App() {
               WindFields={WindFields}
               AllValues={Values}
               AllHidden={Hidden}
+              ForceOverlaySettings={ForceOverlaySettings}
+              OnChangeForceOverlay={SetForceOverlaySettings}
+              OnSaveForcePreset={SaveForcePresetToAssetBrowser}
               ReferenceDetailCards={
                 Subject.Panel === "light" && !Subject.ReferenceOnly
                   ? ReferenceCards("details")
@@ -2408,6 +2539,7 @@ function App() {
           ActiveColourTargetLabel={ActiveColourTargetLabel}
           StageChange={SetAssetsStage}
           OnColourDragChange={SetDraggingColour}
+          SpawnForce={SpawnForceFromAsset}
           Appearance={Settings}
         />
         {Wide && (
@@ -2491,7 +2623,7 @@ function App() {
             ) : Menu.Type === "Filter" ? (
               <>
                 <label>FILTER BY</label>
-                {["Lights", "Sky", "Bodies", "Geometry", "Camera"].map(
+                {["Forces", "Lights", "Sky", "Bodies", "Geometry", "Camera"].map(
                   (Label) => (
                     <button
                       key={Label}
@@ -2692,7 +2824,11 @@ function App() {
       )}
       {Construct && (
         <ConstructPanel
-          Catalogue={[...PrepareLightRows(InitialRows, 1), ...ReferenceLights]
+          Catalogue={[
+            ...ConstructForceTemplates,
+            ...PrepareLightRows(InitialRows, 1),
+            ...ReferenceLights,
+          ]
             .filter((Subject) => Subject.Panel !== "group")
             .map((Row) =>
               IsEditorCamera(Row)
