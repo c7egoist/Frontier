@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Frontier — GTX Multi-Bounce Global SDF vs Compute BVH Reflections (ControlVehicle)</title>
+  <link rel="stylesheet" href="./BenchmarkStyle.css" />
+</head>
+<body>
+  <canvas id="viewport-canvas"></canvas>
+
+  <div id="split-divider" class="split-divider" style="left: 50%;">
+    <span class="split-badge left">GLOBAL SDF (MULTI-BOUNCE)</span>
+    <span class="split-badge right">COMPUTE BVH (GTX RAYTRACE)</span>
+  </div>
+
+  <header class="top-bar">
+    <div class="brand-panel">
+      <div>
+        <div class="brand-kicker">Frontier GTX Non-RT Reflection Lab · ControlVehicle (25,512 Instanced Tris · 128×128×64 Clip0)</div>
+        <div class="brand-title">Multi-Bounce Global Distance Field vs. Two-Level SAH Compute BVH</div>
+      </div>
+      <span class="rh-pill">RH: +X Fwd · +Y Left · +Z Up</span>
+    </div>
+
+    <div class="segmented-track" role="group" aria-label="Reflection Backend">
+      <button data-mode="0" aria-pressed="false">Global SDF (Multi-Bounce)</button>
+      <button data-mode="1" aria-pressed="false">Compute BVH (GTX Raytrace)</button>
+      <button data-mode="2" aria-pressed="true">Split SDF | BVH</button>
+      <button data-mode="3" aria-pressed="false">Pixel Delta</button>
+    </div>
+  </header>
+
+  <aside class="telemetry-panel" aria-label="GPU Reflection Benchmark Telemetry">
+    <div class="telemetry-header">
+      <h2>Isolated Reflection GPU Cost</h2>
+      <span id="speedup-readout" class="speedup-pill">Calibrating…</span>
+    </div>
+
+    <div class="metric-bars">
+      <div class="metric-row">
+        <div class="metric-label-line">
+          <span class="metric-name">Global SDF (2-Cascade 3D Clipmap)</span>
+          <span id="sdf-ms-readout" class="metric-ms sdf">— ms</span>
+        </div>
+        <div class="bar-track"><div id="sdf-bar" class="bar-fill sdf" style="width: 12%;"></div></div>
+      </div>
+
+      <div class="metric-row">
+        <div class="metric-label-line">
+          <span class="metric-name">Compute BVH (TLAS + SAH BLAS)</span>
+          <span id="bvh-ms-readout" class="metric-ms bvh">— ms</span>
+        </div>
+        <div class="bar-track"><div id="bvh-bar" class="bar-fill bvh" style="width: 88%;"></div></div>
+      </div>
+    </div>
+
+    <div class="stats-grid">
+      <div class="stat-cell">
+        <div class="stat-k">Active Frame / FPS</div>
+        <div id="fps-readout" class="stat-v">— FPS</div>
+      </div>
+      <div class="stat-cell">
+        <div class="stat-k">SDF Update (Dynamic Car)</div>
+        <div id="union-ms-readout" class="stat-v">— ms</div>
+      </div>
+      <div class="stat-cell">
+        <div class="stat-k">Mean Pixel Delta</div>
+        <div id="delta-readout" class="stat-v">— %</div>
+      </div>
+      <div class="stat-cell">
+        <div class="stat-k">GPU Adapter / Timer</div>
+        <div id="gpu-readout" class="stat-v">Detecting…</div>
+      </div>
+    </div>
+
+    <button id="run-benchmark-btn" class="bench-btn">Run Exact GTX A/B Benchmark (16x Sync)</button>
+  </aside>
+
+  <footer class="controls-dock">
+    <div class="control-cluster">
+      <span class="cluster-label">Bounces</span>
+      <div class="segmented-track" role="group" aria-label="Reflection Bounces">
+        <button data-bounces="1" aria-pressed="false">1 Bounce</button>
+        <button data-bounces="2" aria-pressed="true">2 Bounces</button>
+        <button data-bounces="3" aria-pressed="false">3 Bounces</button>
+      </div>
+    </div>
+
+    <div class="control-cluster">
+      <span class="cluster-label">GTX Options</span>
+      <button id="toggle-hiz" class="toggle-chip" aria-pressed="true">Hi-Z Near Assist</button>
+      <button id="toggle-nee" class="toggle-chip" aria-pressed="true">BVH NEE Shadows</button>
+      <button id="toggle-rough80" class="toggle-chip" aria-pressed="true">BVH Rough≤0.80 (Legacy)</button>
+    </div>
+
+    <div class="control-cluster">
+      <span class="cluster-label">Drive &amp; Cam</span>
+      <div class="segmented-track" role="group" aria-label="Vehicle Drive Mode">
+        <button data-drive="auto" aria-pressed="true">Auto-Drive</button>
+        <button data-drive="manual" aria-pressed="false">WASD Control</button>
+      </div>
+      <button id="toggle-chase" class="toggle-chip" aria-pressed="false">Chase Cam</button>
+    </div>
+
+    <div class="control-cluster">
+      <span class="cluster-label">Paint</span>
+      <div class="swatch-row" id="swatch-row">
+        <button class="paint-swatch" data-paint="0" aria-pressed="true" style="background:#155eef;" title="Sapphire Clearcoat"></button>
+        <button class="paint-swatch" data-paint="1" aria-pressed="false" style="background:#dc2626;" title="Crimson Metallic"></button>
+        <button class="paint-swatch" data-paint="2" aria-pressed="false" style="background:#eab308;" title="Solar Gold"></button>
+        <button class="paint-swatch" data-paint="3" aria-pressed="false" style="background:#059669;" title="Emerald Pearl"></button>
+        <button class="paint-swatch" data-paint="4" aria-pressed="false" style="background:#d4d8e2;" title="Liquid Silver"></button>
+        <button class="paint-swatch" data-paint="5" aria-pressed="false" style="background:#18191e;" title="Obsidian Mirror"></button>
+      </div>
+      <span class="drive-hint">WASD / Arrows Drive · Drag Orbit · Wheel Zoom</span>
+    </div>
+  </footer>
+
+  <div id="loading-banner" class="loading-banner">
+    Loading authentic ControlVehicle (.facet + .sdfspace, 26,016 tris + 2-Cascade Global SDF)…
+  </div>
+
+  <script type="module" src="./BenchmarkApp.js"></script>
+</body>
+</html>
