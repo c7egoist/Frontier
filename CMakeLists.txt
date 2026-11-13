@@ -487,6 +487,10 @@ endif()
 if(FRONTIER_PROFILE STREQUAL "Editor")
     list(APPEND FRONTIER_ENGINE_SOURCES
         Engine/Editor/Explorer/ContentBrowser.cpp
+        Engine/Editor/Workspaces/Simulation/ForcePresetBrowserPanel.cpp
+        Engine/Editor/Workspaces/Simulation/ForceInspectorView.cpp
+        Engine/Editor/Workspaces/Simulation/VectorFieldOverlaySequence.cpp
+        Engine/Editor/Workspaces/Simulation/VectorFieldViewportCoordinator.cpp
         Engine/Lifecycle/EditorLifecycle.cpp
     )
 endif()
@@ -502,6 +506,7 @@ target_include_directories(FrontierEngine PUBLIC
     "${CMAKE_SOURCE_DIR}/ExternalPackages/vulkan-headers/include"
     "${CMAKE_SOURCE_DIR}/ExternalPackages/volk"
     "${CMAKE_SOURCE_DIR}/ExternalPackages/tomlpp/include"
+    "${CMAKE_SOURCE_DIR}/ExternalPackages/stb"
 )
 target_compile_definitions(FrontierEngine PUBLIC
     "FRONTIER_COMPILED_SHADER_DIR=\"${FRONTIER_COMPILED_SHADER_DIR}\""

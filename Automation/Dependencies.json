@@ -70,16 +70,6 @@
       "verified": true,
       "purpose": "PNG/JPEG image decoding and readback capture writing",
       "witness": "stb_image.h"
-    },
-    {
-      "name": "JoltPhysics",
-      "repository": "jrouwe/JoltPhysics",
-      "revision": "e77f175595e64cb44218cc9d9d56fc365ad0e36a",
-      "url": "https://codeload.github.com/jrouwe/JoltPhysics/tar.gz/e77f175595e64cb44218cc9d9d56fc365ad0e36a",
-      "sha256": "1f32328fb763135de10a244568d6ccb2ed9b1e6593fafe6dc6db5b2719d330bd",
-      "verified": true,
-      "purpose": "JoltPhysics v5.6.0 deterministic rigid-body mechanics across x86_64 and ARM64",
-      "witness": "Jolt/Jolt.cmake"
     }
   ]
 }

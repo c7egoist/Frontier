@@ -1,7 +1,7 @@
 /*============================================================================================================================================
                                                         VECTORFIELDVALIDATION.CPP
 ============================================================================================================================================*/
-// 🧩 End-to-end validation suite for 19 ForceModels, CurlNoise div=0, motion paths, Formula->SPIR-V, Codecs, Jolt & Vulkan 1.3 GPU UI
+// 🧩 End-to-end validation suite for 19 ForceModels, CurlNoise div=0, motion paths, Formula->SPIR-V, Codecs & Vulkan 1.3 GPU UI
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                                        INCLUDES
@@ -55,7 +55,9 @@ using namespace Frontier::SimulationSpace::ForceFields;
 
 [[nodiscard]] std::filesystem::path ResolveShaderDir()
 {
-#ifdef FRONTIER_SHADER_BINARY_DIR
+#if defined(FRONTIER_COMPILED_SHADER_DIR)
+    return std::filesystem::path(FRONTIER_COMPILED_SHADER_DIR);
+#elif defined(FRONTIER_SHADER_BINARY_DIR)
     return std::filesystem::path(FRONTIER_SHADER_BINARY_DIR);
 #else
     return std::filesystem::current_path() / "EngineContent/Shaders";
@@ -64,8 +66,10 @@ using namespace Frontier::SimulationSpace::ForceFields;
 
 [[nodiscard]] std::filesystem::path ResolveSwiftShaderDir()
 {
-#ifdef FRONTIER_SWIFTSHADER_ICD_DIR
+#if defined(FRONTIER_SWIFTSHADER_ICD_DIR)
     return std::filesystem::path(FRONTIER_SWIFTSHADER_ICD_DIR);
+#elif defined(FRONTIER_REPO_ROOT_DIR)
+    return std::filesystem::path(FRONTIER_REPO_ROOT_DIR) / "ExternalPackages/VulkanCompute/SwiftShader";
 #else
     return std::filesystem::current_path() / "ExternalPackages/VulkanCompute/SwiftShader";
 #endif
@@ -416,10 +420,6 @@ bool ValidateVectorFieldAndForceModelCodecs()
     std::filesystem::remove_all(ScratchDir);
     return true;
 }
-
-//------------------------------------------------------------------------------------------------------------------------
-//                                       5. JOLT RIGID-BODY AERODYNAMIC COUPLING
-//------------------------------------------------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                  5. EDITOR VULKAN 1.3 + 3-DOCK VISUAL EXHIBITS
