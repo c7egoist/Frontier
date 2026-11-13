@@ -92,7 +92,7 @@ const DisplayColour = Linear =>
 // Curated scene presets for the slanted Fluid document dock
 const SceneTabs = [
     { Id: 'default', Name: 'Studio Default', Presets: null, Scenario: 'lab' },
-    { Id: 'rigging_cloth', Name: 'Cloth, Cables & Vines', Presets: ['flag-banner', 'cables-chains', 'vines-ropes'], Scenario: 'lab' },
+    { Id: 'rigging_cloth', Name: 'Cloth, Sails, Cables & Vines', Presets: ['flag-banner', 'ship-sail', 'cables-chains', 'vines-ropes'], Scenario: 'lab' },
     { Id: 'foliage', Name: 'Grass, Reeds, Ferns & Tree', Presets: ['grass-wheat-field', 'tall-reeds', 'interactive-fern', 'interactive-tree'], Scenario: 'lab' },
     { Id: 'spiderwebs', Name: 'Spiderwebs · Orb & Cobwebs', Presets: ['spiderweb-orb', 'spiderweb-cobweb'], Scenario: 'lab' },
     { Id: 'tesla', Name: 'Lightning & Static Spheres', Presets: ['tesla-sphere-lightning', 'static-sphere-shock', 'strikeSparks'], Scenario: 'blank' },
@@ -266,6 +266,7 @@ function SeedBurstCountFor(PresetId, Params)
     if (Params.shape === 15 || Params.shape === 16 || Params.shape === 17) return Math.max(1, Params.burstCount || (Params.shape === 17 ? 6 : 1));
     if (Params.kind === 6) return Math.min(Params.capacity || 64, 36);
     if ((Params.webMode || 0) > 0) return Math.max(64, Params.capacity || 320);
+    if ((Params.dynMode || 0) > 0) return Math.max(64, Params.capacity || 64);
     if (Params.blackHole) return Math.min(Params.capacity || 2000, Math.round((Params.capacity || 2000) * 0.45));
     if ((Params.curlMode || 0) > 0) return Math.min(Params.capacity || 4000, Math.round((Params.capacity || 4000) * 0.45));
     if (PRECIP_IDS.includes(PresetId)) return Math.min(240, Math.round((Params.capacity || 1000) * 0.14));
@@ -278,7 +279,7 @@ function ConstructEffect(PresetId, Name)
     ApplyWindLink(Preset);
     const P = Preset.p;
     const IsArc = P?.arcMode === 0 || P?.arcMode === 1;
-    const IsPreseed = PRECIP_IDS.includes(PresetId) || (P?.curlMode || 0) > 0 || !!P?.blackHole;
+    const IsPreseed = PRECIP_IDS.includes(PresetId) || (P?.curlMode || 0) > 0 || (P?.webMode || 0) > 0 || (P?.dynMode || 0) > 0 || !!P?.blackHole;
     const SeedBurst = SeedBurstCountFor(PresetId, P);
     const HasImmediateBurst = !!(P?.transition || (P?.shape >= 15 && P?.burstEvery > 0));
     const Interval = Math.max(0.18, P?.arcInterval ?? (P?.arcMode === 1 ? 0.55 : 1.40));
@@ -311,7 +312,7 @@ function RebuildGpu(Effect)
     Effect.Gpu = Scene.Engine.createSystem(Effect.P);
     const P = Effect.P;
     const IsArc = P?.arcMode === 0 || P?.arcMode === 1;
-    const IsPreseed = PRECIP_IDS.includes(Effect.PresetId) || (P?.curlMode || 0) > 0 || !!P?.blackHole;
+    const IsPreseed = PRECIP_IDS.includes(Effect.PresetId) || (P?.curlMode || 0) > 0 || (P?.webMode || 0) > 0 || (P?.dynMode || 0) > 0 || !!P?.blackHole;
     const SeedBurst = SeedBurstCountFor(Effect.PresetId, P);
     const HasImmediateBurst = !!(P?.transition || (P?.shape >= 15 && P?.burstEvery > 0));
     Object.assign(Effect, {
@@ -471,7 +472,7 @@ function BurstAll()
     {
         const Cls = ClassifyEffect(Effect.P);
         if (Cls.IsArc) { TriggerArcStrike(Effect, Scene.Time); Triggered++; }
-        else if (Cls.IsTransition) { RebuildGpu(Effect); Triggered++; }
+        else if (Cls.IsTransition || Cls.IsDyn || Cls.IsWeb) { RebuildGpu(Effect); Triggered++; }
         else if (Cls.IsSteadyOverlay) continue;
         else if (Cls.IsExpandingWave) { Effect.PendingBurst += Math.max(1, Effect.P.burstCount || 1); Triggered++; }
         else { Effect.PendingBurst += Math.max(80, Math.round(Effect.Gpu.cap * 0.45)); Triggered++; }
@@ -1833,8 +1834,9 @@ function Advance(Now)
         if (!E.P.visible || !E.Gpu) continue;
         const P = E.P, Gpu = E.Gpu;
 
-        const Simulate = Scene.Playing && Delta > 0;
-        let Release = 0, Steps = 0, StepDelta = Delta, Head = E.Head, Origin = P.origin;
+        const SeedNow = E.PendingBurst > 0 && ((P.dynMode || 0) > 0 || (P.webMode || 0) > 0);
+        const Simulate = (Scene.Playing && Delta > 0) || SeedNow;
+        let Release = 0, Steps = 0, StepDelta = Delta > 0 ? Delta : (SeedNow ? 1 / 60 : 0), Head = E.Head, Origin = P.origin;
         if (Simulate)
         {
             if ((P.arcMode === 0 || P.arcMode === 1) && P.arcLoop)
@@ -1844,7 +1846,7 @@ function Advance(Now)
             }
             if (P.burstEvery > 0)
             {
-                E.BurstTimer = (E.BurstTimer ?? 0) - Delta;
+                E.BurstTimer = (E.BurstTimer ?? 0) - StepDelta;
                 if (E.BurstTimer <= 0)
                 {
                     E.BurstTimer = P.burstEvery * (0.7 + 0.6 * Math.random());
@@ -1853,7 +1855,7 @@ function Advance(Now)
                 }
             }
             if (E.OverrideOrigin) { Origin = E.OverrideOrigin; E.OverrideOrigin = null; }
-            E.Accumulated += P.rate * Delta;
+            E.Accumulated += P.rate * StepDelta;
             Release = Math.floor(E.Accumulated);
             E.Accumulated -= Release;
             Release = Math.min(Gpu.cap, Release + E.PendingBurst);
@@ -1868,7 +1870,7 @@ function Advance(Now)
         });
         Jobs.push({
             gpu: Gpu, cpu: Gpu.cpu, origin: Origin, simulate: Simulate, emitN: Release, preseedCurtain: PreseedCurtain,
-            kind: P.kind, readStats: Simulate && Scene.Step % 3 === 0, draw: true, alpha: P.blend === 'alpha', cube: P.shape === 4,
+            kind: P.kind, readStats: Simulate && (SeedNow || Scene.Step % 3 === 0), draw: true, alpha: P.blend === 'alpha', cube: P.shape === 4,
             shatter: !!(P.transition && P.transition.fragment), fly: !!(P.transition && P.transition.after === 'butterfly')
         });
     }

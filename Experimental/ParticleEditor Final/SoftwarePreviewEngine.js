@@ -641,7 +641,7 @@ export class SoftwarePreviewEngine
         const W = this.canvas.width, H = this.canvas.height;
         const VP = glob.subarray(0, 16);
         const CamX = glob[24], CamY = glob[25], CamZ = glob[26];
-        const Time = glob[40], Dt = glob[41];
+        const Time = glob[40], GlobalDt = glob[41];
         const WindScale = glob[43] || 1;
         const Solo = fieldScene?.Visualization?.Solo || null;
         const Prepared = preparedField || (fieldScene && PE.Forces?.Prepare ? PE.Forces.Prepare(fieldScene, Time) : null);
@@ -818,6 +818,7 @@ export class SoftwarePreviewEngine
         for (const Job of jobs)
         {
             const Sys = Job.gpu, P = Sys.P;
+            const Dt = GlobalDt > 0 ? GlobalDt : ((Job.simulate && Job.emitN > 0) ? (Job.cpu?.[28] || 1 / 60) : 0);
             const Tr = P.kind === 5 ? (P.transition || null) : null;
             const DynMode = !Tr && P.arcMode !== 0 && P.arcMode !== 1 && !(P.beamMode > 0) && P.kind !== 6 ? Math.max(0, Math.min(7, P.dynMode | 0)) : 0;
             const WebMode = !Tr && DynMode === 0 && P.arcMode !== 0 && P.arcMode !== 1 && !(P.beamMode > 0) && P.kind !== 6 ? Math.max(0, Math.min(2, P.webMode | 0)) : 0;
