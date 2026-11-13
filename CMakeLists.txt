@@ -192,6 +192,10 @@ set(FRONTIER_UI_COMPONENT_SOURCES
     Engine/Workspaces/Texturing/PatternStampInspectorPane.cpp
     Engine/Workspaces/Texturing/VectorViewportInteractor.cpp
     Engine/Workspaces/Texturing/PatternStampWorkspaceHost.cpp
+    Engine/Workspaces/Texturing/BakingTargetsPane.cpp
+    Engine/Workspaces/Texturing/BakingViewportPane.cpp
+    Engine/Workspaces/Texturing/BakingInspectorPane.cpp
+    Engine/Workspaces/Texturing/BakingWorkspaceHost.cpp
     Engine/GeometricRaster/Rasterization/ImGuiOverlayRasterization.cpp
     Engine/GeometricRaster/Gizmo/WorldGizmoOverlayRasterization.cpp
     Engine/GeometricRaster/GlobalIllumination/ShowcaseGalleryScene.cpp
@@ -391,6 +395,63 @@ frontier_compile_vector_slang_shader(VectorPbrSurfaceCompute.slang ComputeEntry 
 frontier_compile_vector_slang_shader(VectorGuideOverlay.slang      VertexEntry   vertex   VectorGuideOverlay.vert.spv)
 frontier_compile_vector_slang_shader(VectorGuideOverlay.slang      FragmentEntry fragment VectorGuideOverlay.frag.spv)
 
+function(frontier_compile_baking_slang_shader SLANG_REL_PATH ENTRY_NAME STAGE_KIND OUT_SPV_NAME USE_HW_RAYQUERY)
+    set(IN_SLANG "${FRONTIER_SHADER_SRC_DIR}/Baking/${SLANG_REL_PATH}")
+    set(OUT_SPV "${FRONTIER_COMPILED_SHADER_DIR}/${OUT_SPV_NAME}")
+    if(USE_HW_RAYQUERY)
+        set(BAKE_SLANG_FLAGS
+            -target spirv
+            -profile spirv_1_4
+            -capability spvRayQueryKHR
+            "-DFRONTIER_USE_HW_RAY_QUERY=1"
+            -emit-spirv-directly
+            -fvk-use-entrypoint-name
+            -matrix-layout-row-major
+            -O0)
+    else()
+        set(BAKE_SLANG_FLAGS
+            -target spirv
+            -profile spirv_1_3
+            "-DFRONTIER_USE_HW_RAY_QUERY=0"
+            -emit-spirv-directly
+            -fvk-use-entrypoint-name
+            -matrix-layout-row-major
+            -O0)
+    endif()
+    add_custom_command(
+        OUTPUT "${OUT_SPV}"
+        COMMAND "${FRONTIER_SLANGC_BIN}"
+            "${IN_SLANG}"
+            -I "${FRONTIER_SHADER_SRC_DIR}/Baking"
+            -I "${FRONTIER_SHADER_SRC_DIR}"
+            -I "${CMAKE_SOURCE_DIR}/Engine/Shaders/DirectLighting"
+            -I "${CMAKE_SOURCE_DIR}/Engine/Shaders"
+            ${BAKE_SLANG_FLAGS}
+            -entry "${ENTRY_NAME}"
+            -stage "${STAGE_KIND}"
+            -o "${OUT_SPV}"
+        DEPENDS
+            "${IN_SLANG}"
+            "${FRONTIER_SHADER_SRC_DIR}/Baking/BakeShaderLayouts.slang"
+            "${CMAKE_SOURCE_DIR}/Engine/Shaders/DirectLighting/WideTreeRayQuery.slang"
+        COMMENT "[Slang] Compiling Baking/${SLANG_REL_PATH} (${STAGE_KIND}:${ENTRY_NAME}) -> ${OUT_SPV_NAME}"
+        VERBATIM
+    )
+    set(FRONTIER_SPV_OUTPUTS ${FRONTIER_SPV_OUTPUTS} "${OUT_SPV}" PARENT_SCOPE)
+endfunction()
+
+frontier_compile_baking_slang_shader(BakeLowUvRasterization.slang    VertexEntry   vertex   BakeLowUvRasterization.vert.spv    FALSE)
+frontier_compile_baking_slang_shader(BakeLowUvRasterization.slang    FragmentEntry fragment BakeLowUvRasterization.frag.spv    FALSE)
+frontier_compile_baking_slang_shader(BakeSurfaceTransferCompute.slang ComputeEntry compute  BakeSurfaceTransferCompute_GTX.comp.spv FALSE)
+frontier_compile_baking_slang_shader(BakeSurfaceTransferCompute.slang ComputeEntry compute  BakeSurfaceTransferCompute_RTX.comp.spv TRUE)
+frontier_compile_baking_slang_shader(BakeChannelResolveCompute.slang ComputeEntry  compute  BakeChannelResolveCompute.comp.spv FALSE)
+frontier_compile_baking_slang_shader(BakeDilationCompute.slang       ComputeEntry  compute  BakeDilationCompute.comp.spv       FALSE)
+frontier_compile_baking_slang_shader(BakeVolumeSdfCompute.slang      ComputeEntry  compute  BakeVolumeSdfCompute_GTX.comp.spv  FALSE)
+frontier_compile_baking_slang_shader(BakeVolumeSdfCompute.slang      ComputeEntry  compute  BakeVolumeSdfCompute_RTX.comp.spv  TRUE)
+frontier_compile_baking_slang_shader(ExtractSdfSectionCompute.slang  ComputeEntry  compute  ExtractSdfSectionCompute.comp.spv  FALSE)
+frontier_compile_baking_slang_shader(BakeViewportPreview.slang       VertexEntry   vertex   BakeViewportPreview.vert.spv       FALSE)
+frontier_compile_baking_slang_shader(BakeViewportPreview.slang       FragmentEntry fragment BakeViewportPreview.frag.spv       FALSE)
+
 if(FRONTIER_PROFILE STREQUAL "Editor")
     foreach(VF_SHADER_STEM
         LitBackdropRasterization
@@ -463,7 +524,12 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/GeometricRaster/UV/UVWorkspaceRasterizer.cpp
     Engine/GeometricRaster/Vector/VulkanVectorRenderMethod.cpp
     Engine/GeometricRaster/Vector/VectorCanvasRasterizer.cpp
+    Engine/GeometricRaster/Baking/StudyGeometryBuilder.cpp
+    Engine/GeometricRaster/Baking/BakingAccelerationStructure.cpp
+    Engine/GeometricRaster/Baking/GpuTextureAndSdfBaker.cpp
+    Engine/GeometricRaster/Baking/TextureBakerRasterizer.cpp
     Engine/Workspaces/Texturing/PatternStampStackSession.cpp
+    Engine/Workspaces/Texturing/BakingWorkspaceSession.cpp
     Engine/Input/InputExchange.cpp
     Engine/Input/InputExtension.cpp
     Engine/Lifecycle/RuntimeLifecycle.cpp
@@ -716,6 +782,8 @@ if(BUILD_TESTING)
     frontier_register_exhibit(VectorFieldValidation             Exhibits/VectorFieldValidation.cpp)
     frontier_register_exhibit(ProjectBrowserValidation          Exhibits/ProjectBrowserValidation.cpp)
     frontier_register_exhibit(VectorGraphicsGPUValidation       Exhibits/VectorGraphicsGPUValidation.cpp)
+    frontier_register_exhibit(BakingGPUValidation               Exhibits/BakingGPUValidation.cpp)
+    frontier_register_exhibit(BakingWorkspaceUIValidation       Exhibits/BakingWorkspaceUIValidation.cpp)
 
     if(NOT ANDROID AND NOT FRONTIER_PROFILE STREQUAL "Shipping")
         add_test(
@@ -734,6 +802,10 @@ if(BUILD_TESTING)
             add_test(
                 NAME FrontierStampExecutableSmoke
                 COMMAND FrontierEditor --workspace=stamp --frames=3 --open-browser "--capture-png=${CMAKE_SOURCE_DIR}/Exhibits/Images/Texturing/FrontierStamp_DesktopExecutable.png"
+            )
+            add_test(
+                NAME FrontierBakingExecutableSmoke
+                COMMAND FrontierEditor --workspace=baking --frames=3 --open-browser "--capture-png=${CMAKE_SOURCE_DIR}/Exhibits/Images/Texturing/FrontierBaking_DesktopExecutable.png"
             )
         endif()
     endif()

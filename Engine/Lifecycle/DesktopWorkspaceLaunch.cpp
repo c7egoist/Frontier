@@ -23,6 +23,7 @@
 #include "Engine/Input/ImGuiInputAdapter.h"
 #include "Engine/Input/InputExtension.h"
 #include "Engine/Windowing/PlatformWindow.h"
+#include "Engine/Workspaces/Texturing/BakingWorkspaceHost.h"
 #include "Engine/Workspaces/Texturing/PatternStampWorkspaceHost.h"
 #include "Engine/Workspaces/UV/UVWorkspaceHost.h"
 
@@ -327,6 +328,12 @@ int LaunchDesktopWorkspace(
             InitialOptions.OpenProjectBrowser = false;
             InitialOptions.WindowTitle        = "Frontier Vector";
         }
+        else if (Arg == "--standalone-baking" || Arg == "--standalone=baking" || Arg == "--workspace=baking" || Arg == "--baking")
+        {
+            InitialOptions.OpenWorldEditor    = false;
+            InitialOptions.OpenProjectBrowser = false;
+            InitialOptions.WindowTitle        = "Frontier Baking";
+        }
         else if (Arg == "--project-browser")
         {
             InitialOptions.OpenProjectBrowser = true;
@@ -372,10 +379,15 @@ int LaunchDesktopWorkspace(
         UvWorkspaceSurface      = 2u,
         PatternWorkspaceSurface = 3u,
         StampWorkspaceSurface   = 4u,
+        BakingWorkspaceSurface  = 5u,
     };
 
     const bool StandaloneVectorLaunch =
         (EngineConfig.QueryWorkspaceCategory() == WorkspaceCategory::Vector) &&
+        !InitialOptions.OpenWorldEditor &&
+        !InitialOptions.OpenProjectBrowser;
+    const bool StandaloneBakingLaunch =
+        (EngineConfig.QueryWorkspaceCategory() == WorkspaceCategory::Baking) &&
         !InitialOptions.OpenWorldEditor &&
         !InitialOptions.OpenProjectBrowser;
     const bool StandaloneUVLaunch =
@@ -389,6 +401,10 @@ int LaunchDesktopWorkspace(
     {
         CurrentSurface = ActiveHostSurface::ProjectBrowserSurface;
     }
+    else if (StandaloneBakingLaunch)
+    {
+        CurrentSurface = ActiveHostSurface::BakingWorkspaceSurface;
+    }
     else if (StandaloneVectorLaunch)
     {
         CurrentSurface = (RequestedVectorMode == Workspaces::PatternStampWorkspaceMode::Stamp)
@@ -401,7 +417,8 @@ int LaunchDesktopWorkspace(
     }
 #else
     const bool StandaloneVectorLaunch = (EngineConfig.QueryWorkspaceCategory() == WorkspaceCategory::Vector);
-    const bool StandaloneUVLaunch     = !StandaloneVectorLaunch;
+    const bool StandaloneBakingLaunch = (EngineConfig.QueryWorkspaceCategory() == WorkspaceCategory::Baking);
+    const bool StandaloneUVLaunch     = !StandaloneVectorLaunch && !StandaloneBakingLaunch;
 #endif
 
     GeometricRaster::UVWorkspaceRasterizer UVRasterizer {};
@@ -501,10 +518,12 @@ int LaunchDesktopWorkspace(
     Workspaces::UVWorkspaceHost           UVHost {};
     Workspaces::PatternStampWorkspaceHost PatternHost(Workspaces::PatternStampWorkspaceMode::Pattern);
     Workspaces::PatternStampWorkspaceHost StampHost(Workspaces::PatternStampWorkspaceMode::Stamp);
+    Workspaces::BakingWorkspaceHost       BakingHost {};
 
     Components::HeadlessWorkspaceDockContainer StandaloneDock {};
     Components::HeadlessWorkspaceDockContainer PatternDock {};
     Components::HeadlessWorkspaceDockContainer StampDock {};
+    Components::HeadlessWorkspaceDockContainer BakingDock {};
     ControlCentrePanel                         StandaloneControlCentre {};
     Input::InputExtension                      InputCoordinator {};
     InputCoordinator.Initialize();
@@ -514,11 +533,13 @@ int LaunchDesktopWorkspace(
     Editor::Explorer::ContentBrowser StandaloneBrowser {};
     Editor::Explorer::ContentBrowser PatternBrowser {};
     Editor::Explorer::ContentBrowser StampBrowser {};
+    Editor::Explorer::ContentBrowser BakingBrowser {};
     Editor::Explorer::ProjectBrowser HostProjectBrowser {};
     bool                             EditorStackReady = false;
     bool                             UvHostReady      = false;
     bool                             PatternHostReady = false;
     bool                             StampHostReady   = false;
+    bool                             BakingHostReady  = false;
     bool                             ProjectBrowserInitialized = false;
     bool                             SharedThemeInitialized    = false;
 
@@ -720,10 +741,54 @@ int LaunchDesktopWorkspace(
         return true;
     };
 
+    auto EnsureBakingHostReady = [&](const std::filesystem::path& MeshPath) -> bool
+    {
+        EnsureSharedControlCentreReady();
+        if (!BakingHostReady)
+        {
+            BakingHost.ConfigureLaunchPolicy(EngineConfig);
+            BakingHost.AttachVulkanDevice(&DeviceInterchange, CompiledShaderDir);
+
+            ThemeRepository ThemeRepo {};
+            (void)BakingDock.Initialize(
+                Windowing::WindowConfigurationDescriptor::ConstructApplicationWindow(
+                    "Frontier Baking", InitialOptions.InitialWidthPx, InitialOptions.InitialHeightPx));
+            Components::ConfigureImGuiWorkspaceStyle(BakingDock.ActiveTabMetrics());
+            Components::ConfigureImGuiWorkspaceTheme(BakingDock.ActiveTabMetrics(), ThemeRepo);
+
+            BakingBrowser.AttachThemeRepository(&StandaloneControlCentre.QueryThemeRepository());
+            BakingHost.AttachContentBrowser(&BakingBrowser);
+            BakingBrowser.AccessPanel().ConfigureShelfExtent(
+                InitialOptions.OpenContentBrowser ? ContentShelfExtent::SplitHalf : ContentShelfExtent::Closed,
+                true);
+            (void)BakingBrowser.AccessPanel().ActivateCategory(ContentCategory::Colours);
+            BakingHost.RegisterDockPanes(BakingDock);
+            BakingHostReady = true;
+        }
+        const std::filesystem::path PathToLoad = MeshPath.empty() ? InitialOptions.StartupImportPath : MeshPath;
+        if (!PathToLoad.empty() && std::filesystem::exists(PathToLoad))
+        {
+            std::string ImportDiag {};
+            const std::string Ext = PathToLoad.extension().string();
+            if (Ext == ".obj" || Ext == ".OBJ" || Ext == ".stl" || Ext == ".STL")
+            {
+                (void)BakingHost.IntakeExternalFileDrop(PathToLoad.string(), false, ImportDiag);
+            }
+        }
+        return true;
+    };
+
     HostProjectBrowser.AssignLaunchWorkspaceCallback(
         [&](const Editor::Explorer::BrowserWorkspaceLaunchDirective& Directive)
         {
-            if (Directive.TargetWorkspace == Workspaces::HostWorkspaceTarget::PatternWorkspace)
+            if (Directive.TargetWorkspace == Workspaces::HostWorkspaceTarget::BakingWorkspace)
+            {
+                if (EnsureBakingHostReady(Directive.SelectedFilePath))
+                {
+                    CurrentSurface = ActiveHostSurface::BakingWorkspaceSurface;
+                }
+            }
+            else if (Directive.TargetWorkspace == Workspaces::HostWorkspaceTarget::PatternWorkspace)
             {
                 if (EnsurePatternHostReady(Directive.SelectedFilePath))
                 {
@@ -760,6 +825,14 @@ int LaunchDesktopWorkspace(
     else if (CurrentSurface == ActiveHostSurface::WorldEditorSurface)
     {
         if (!EnsureEditorLifecycleReady(InitialOptions.StartupProjectSpacePath, {}))
+        {
+            ImGui::DestroyContext(GuiCtx);
+            return 1;
+        }
+    }
+    else if (CurrentSurface == ActiveHostSurface::BakingWorkspaceSurface)
+    {
+        if (!EnsureBakingHostReady(InitialOptions.StartupImportPath))
         {
             ImGui::DestroyContext(GuiCtx);
             return 1;
@@ -805,7 +878,23 @@ int LaunchDesktopWorkspace(
 
     Workspaces::PatternStampWorkspaceHost& ActiveDevVectorHost =
         (RequestedVectorMode == Workspaces::PatternStampWorkspaceMode::Stamp) ? StampHost : PatternHost;
-    if (StandaloneVectorLaunch)
+    if (StandaloneBakingLaunch)
+    {
+        BakingHost.ConfigureLaunchPolicy(EngineConfig);
+        BakingHost.AttachVulkanDevice(&DeviceInterchange, CompiledShaderDir);
+        if (!InitialOptions.StartupImportPath.empty())
+        {
+            std::string ImportDiag {};
+            (void)BakingHost.IntakeExternalFileDrop(InitialOptions.StartupImportPath.string(), false, ImportDiag);
+        }
+        BakingHost.AttachContentBrowserPanel(&StandaloneBrowserPanel);
+        StandaloneBrowserPanel.ConfigureShelfExtent(
+            InitialOptions.OpenContentBrowser ? ContentShelfExtent::SplitHalf : ContentShelfExtent::Closed,
+            true);
+        (void)StandaloneBrowserPanel.ActivateCategory(ContentCategory::Colours);
+        BakingHost.RegisterDockPanes(StandaloneDock);
+    }
+    else if (StandaloneVectorLaunch)
     {
         ActiveDevVectorHost.ConfigureLaunchPolicy(EngineConfig);
         ActiveDevVectorHost.ConfigureRepositoryRoot(RepositoryRootPath);
@@ -926,6 +1015,13 @@ int LaunchDesktopWorkspace(
                 HostSurface->ResizeSurface(SurfaceW, SurfaceH, Extent.DpiScaleFactor);
             }
         }
+        if (BakingHostReady)
+        {
+            if (auto* HostSurface = BakingDock.AccessOperatingSurface(Components::HostWindowToken{ 0u }))
+            {
+                HostSurface->ResizeSurface(SurfaceW, SurfaceH, Extent.DpiScaleFactor);
+            }
+        }
 #else
         if (auto* HostSurface = StandaloneDock.AccessOperatingSurface(Components::HostWindowToken{ 0u }))
         {
@@ -942,6 +1038,15 @@ int LaunchDesktopWorkspace(
             for (const std::string& DropFile : DroppedPaths)
             {
                 (void)HostProjectBrowser.RegisterDiskPathInCollection(std::filesystem::path(DropFile), true);
+            }
+        }
+        else if (CurrentSurface == ActiveHostSurface::BakingWorkspaceSurface && BakingHostReady)
+        {
+            for (const std::string& DropFile : DroppedPaths)
+            {
+                std::string DropDiag {};
+                const bool HighTarget = Io.KeyShift;
+                (void)BakingHost.IntakeExternalFileDrop(DropFile, HighTarget, DropDiag);
             }
         }
         else if (CurrentSurface == ActiveHostSurface::UvWorkspaceSurface && UvHostReady)
@@ -972,7 +1077,11 @@ int LaunchDesktopWorkspace(
         for (const std::string& DropFile : DroppedPaths)
         {
             std::string DropDiag {};
-            if (StandaloneVectorLaunch)
+            if (StandaloneBakingLaunch)
+            {
+                (void)BakingHost.IntakeExternalFileDrop(DropFile, Io.KeyShift, DropDiag);
+            }
+            else if (StandaloneVectorLaunch)
             {
                 (void)ActiveDevVectorHost.IntakeExternalFileDrop(DropFile, DropDiag);
             }
@@ -1004,11 +1113,13 @@ int LaunchDesktopWorkspace(
         else
         {
             Components::HeadlessWorkspaceDockContainer& ActiveDock =
-                (CurrentSurface == ActiveHostSurface::PatternWorkspaceSurface) ? PatternDock :
-                ((CurrentSurface == ActiveHostSurface::StampWorkspaceSurface) ? StampDock : StandaloneDock);
+                (CurrentSurface == ActiveHostSurface::BakingWorkspaceSurface) ? BakingDock :
+                ((CurrentSurface == ActiveHostSurface::PatternWorkspaceSurface) ? PatternDock :
+                ((CurrentSurface == ActiveHostSurface::StampWorkspaceSurface) ? StampDock : StandaloneDock));
             Editor::Explorer::ContentBrowser& ActiveBrowser =
-                (CurrentSurface == ActiveHostSurface::PatternWorkspaceSurface) ? PatternBrowser :
-                ((CurrentSurface == ActiveHostSurface::StampWorkspaceSurface) ? StampBrowser : StandaloneBrowser);
+                (CurrentSurface == ActiveHostSurface::BakingWorkspaceSurface) ? BakingBrowser :
+                ((CurrentSurface == ActiveHostSurface::PatternWorkspaceSurface) ? PatternBrowser :
+                ((CurrentSurface == ActiveHostSurface::StampWorkspaceSurface) ? StampBrowser : StandaloneBrowser));
 
             const float HostUiScale = std::clamp(StandaloneControlCentre.QueryInterfaceScaleFactor(), 0.75f, 2.0f);
             Components::ConfigureImGuiWorkspaceTheme(
@@ -1037,7 +1148,18 @@ int LaunchDesktopWorkspace(
                 const Point2D MouseLogical = TopOverlay.QueryMousePosition();
                 ControlPointer Ptr { MouseLogical.X, MouseLogical.Y, TopOverlay.QueryMouseDown(0), TopOverlay.QueryMouseClicked(0), TopOverlay.QueryMouseReleased(0) };
                 const float LogicalW = FullBounds.Width / HostUiScale;
-                float PillX = std::max(320.0f, LogicalW * 0.5f + 76.0f);
+                float PillX = std::max(320.0f, LogicalW * 0.5f + 46.0f);
+
+                const ButtonTone BakeTone = (CurrentSurface == ActiveHostSurface::BakingWorkspaceSurface) ? ButtonTone::Primary : ButtonTone::Secondary;
+                if (CapsuleButton::Construct(TopOverlay, { PillX, 3.0f, 56.0f, 23.0f }, ButtonDescriptor{ "Bake", BakeTone, 10.2f, 11.5f }, Ptr).Pressed &&
+                    CurrentSurface != ActiveHostSurface::BakingWorkspaceSurface)
+                {
+                    if (EnsureBakingHostReady({}))
+                    {
+                        CurrentSurface = ActiveHostSurface::BakingWorkspaceSurface;
+                    }
+                }
+                PillX += 62.0f;
 
                 const ButtonTone PatTone = (CurrentSurface == ActiveHostSurface::PatternWorkspaceSurface) ? ButtonTone::Primary : ButtonTone::Secondary;
                 if (CapsuleButton::Construct(TopOverlay, { PillX, 3.0f, 68.0f, 23.0f }, ButtonDescriptor{ "Pattern", PatTone, 10.2f, 11.5f }, Ptr).Pressed &&
@@ -1149,8 +1271,17 @@ int LaunchDesktopWorkspace(
     {
         StampDock.Finalize();
     }
+    if (BakingHostReady)
+    {
+        BakingDock.Finalize();
+        BakingHost.AttachVulkanDevice(nullptr);
+    }
 #else
     StandaloneDock.Finalize();
+    if (StandaloneBakingLaunch)
+    {
+        BakingHost.AttachVulkanDevice(nullptr);
+    }
     if (StandaloneUVLaunch)
     {
         UVHost.AccessSession().TeardownGPUSolvers();

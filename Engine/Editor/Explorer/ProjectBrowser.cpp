@@ -1517,7 +1517,9 @@ void ProjectBrowser::RenderReaderMode(
         const auto& Cap = PermittedCaps[PermittedCaps.size() - 1u - CapIdx];
         const bool PrimaryAction = (CapIdx == PermittedCaps.size() - 1u);
         const float BtnW =
-            (Cap.Target == Workspaces::HostWorkspaceTarget::PatternWorkspace || Cap.Target == Workspaces::HostWorkspaceTarget::StampWorkspace)
+            (Cap.Target == Workspaces::HostWorkspaceTarget::PatternWorkspace ||
+             Cap.Target == Workspaces::HostWorkspaceTarget::StampWorkspace ||
+             Cap.Target == Workspaces::HostWorkspaceTarget::BakingWorkspace)
                 ? 172.0f
                 : ((Cap.Target == Workspaces::HostWorkspaceTarget::UVWorkspace) ? 156.0f : 138.0f);
         ActionRightX -= BtnW;

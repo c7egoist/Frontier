@@ -88,6 +88,12 @@ void EngineConfiguration::ConfigureFromCommandLine(std::span<const std::string_v
             Modified.ActiveWorkspace  = WorkspaceCategory::Vector;
             Modified.ApplicationTitle = "Frontier Vector";
         }
+        else if (Argument == "--standalone-baking" || Argument == "--standalone=baking" || Argument == "--workspace=baking" || Argument == "--baking")
+        {
+            Modified.LaunchMode       = HostLaunchMode::StandaloneWorkspace;
+            Modified.ActiveWorkspace  = WorkspaceCategory::Baking;
+            Modified.ApplicationTitle = "Frontier Baking";
+        }
         else if (Argument == "--feature-set" || Argument == "--workspace=all")
         {
             Modified.LaunchMode       = HostLaunchMode::FeatureSet;

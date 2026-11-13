@@ -64,6 +64,13 @@ WorkspaceCapabilityRegister::WorkspaceCapabilityRegister()
         "Stamp Studio · Alpha cutout vector contours, procedural masks, typography & OpenPBR relief",
         true,
     });
+    RegisteredEntries.push_back({
+        HostWorkspaceTarget::BakingWorkspace,
+        "BakingWorkspace",
+        "Open with Baking Studio",
+        "Baking Studio · Pure-GPU GTX BVH4 & RTX RayQuery 18-target PBR & 3D Volume SDF baker",
+        true,
+    });
 }
 
 std::span<const WorkspaceCapabilityEntry> WorkspaceCapabilityRegister::QueryAllCapabilities() const noexcept
@@ -75,6 +82,19 @@ std::vector<WorkspaceCapabilityEntry> WorkspaceCapabilityRegister::QueryPermitte
 {
     const std::string Ext = LowercaseAscii(FilePath.extension().string());
     std::vector<WorkspaceCapabilityEntry> Permitted {};
+
+    if (Ext == ".stl")
+    {
+        if (const auto* Bake = FindByTarget(HostWorkspaceTarget::BakingWorkspace))
+        {
+            Permitted.push_back(*Bake);
+        }
+        if (const auto* World = FindByTarget(HostWorkspaceTarget::FrontierWorld))
+        {
+            Permitted.push_back(*World);
+        }
+        return Permitted;
+    }
 
     if (Ext == ".vectorspace" || Ext == ".svg")
     {
@@ -95,10 +115,14 @@ std::vector<WorkspaceCapabilityEntry> WorkspaceCapabilityRegister::QueryPermitte
 
     if (Ext == ".uvspace" || Ext == ".obj" || Ext == ".geometryspace" || Ext == ".geometry")
     {
-        // Geometry & UV containers default to UVWorkspace first while still allowing Frontier World inspection
+        // Geometry & UV containers default to UVWorkspace and Baking Studio while allowing Frontier World inspection
         if (const auto* Uv = FindByTarget(HostWorkspaceTarget::UVWorkspace))
         {
             Permitted.push_back(*Uv);
+        }
+        if (const auto* Bake = FindByTarget(HostWorkspaceTarget::BakingWorkspace))
+        {
+            Permitted.push_back(*Bake);
         }
         if (const auto* World = FindByTarget(HostWorkspaceTarget::FrontierWorld))
         {

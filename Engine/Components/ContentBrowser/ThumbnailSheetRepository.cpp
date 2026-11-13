@@ -430,6 +430,7 @@ uint32_t ThumbnailSheetRepository::QueryAllowedCategoryMask(WorkspaceCategory Wo
                    CategoryBit(ContentCategory::Shaders);
 
         case WorkspaceCategory::TexturePaint:
+        case WorkspaceCategory::Baking:
             return CategoryBit(ContentCategory::All) |
                    CategoryBit(ContentCategory::Colours) |
                    CategoryBit(ContentCategory::Geometry) |
@@ -566,6 +567,7 @@ const char* ThumbnailSheetRepository::QueryWorkspaceTitle(WorkspaceCategory Work
         case WorkspaceCategory::Simulation:   return "Simulation";
         case WorkspaceCategory::Particle:     return "Particle";
         case WorkspaceCategory::Audio:        return "Audio";
+        case WorkspaceCategory::Baking:       return "Baking";
     }
     return "Scene";
 }
