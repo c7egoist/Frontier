@@ -1329,7 +1329,10 @@ export async function CreateWebgpuGtxRenderer(OnDeviceLost) {
 
   let Adapter = null;
   try {
-    Adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
+    const IsWindows = typeof navigator !== "undefined" && /Win/i.test(navigator.userAgent || "");
+    Adapter = IsWindows
+      ? await navigator.gpu.requestAdapter()
+      : await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
     if (!Adapter) {
       Adapter = await navigator.gpu.requestAdapter();
     }
@@ -1379,8 +1382,51 @@ export async function CreateWebgpuGtxRenderer(OnDeviceLost) {
     }
   }
 
+  // Explicit BindGroupLayouts & PipelineLayouts so shared BindGroups across Opaque + Translucent passes are 100% WebGPU-valid
+  const SceneBindGroupLayout = Device.createBindGroupLayout({
+    label: "GtxSceneBGL",
+    entries: [
+      { binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } },
+      { binding: 1, visibility: GPUShaderStage.FRAGMENT, buffer: { type: "read-only-storage" } },
+      { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float" } },
+      { binding: 3, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } },
+    ],
+  });
+  const ScenePipelineLayout = Device.createPipelineLayout({
+    label: "GtxScenePL",
+    bindGroupLayouts: [SceneBindGroupLayout],
+  });
+
+  const OutlineBindGroupLayout = Device.createBindGroupLayout({
+    label: "GtxOutlineBGL",
+    entries: [
+      { binding: 0, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float" } },
+      { binding: 1, visibility: GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } },
+    ],
+  });
+  const OutlinePipelineLayout = Device.createPipelineLayout({
+    label: "GtxOutlinePL",
+    bindGroupLayouts: [OutlineBindGroupLayout],
+  });
+
+  const GizmoBindGroupLayout = Device.createBindGroupLayout({
+    label: "GtxGizmoBGL",
+    entries: [
+      {
+        binding: 0,
+        visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+        buffer: { type: "uniform" },
+      },
+    ],
+  });
+  const GizmoPipelineLayout = Device.createPipelineLayout({
+    label: "GtxGizmoPL",
+    bindGroupLayouts: [GizmoBindGroupLayout],
+  });
+
   const ScenePipeline = Device.createRenderPipeline({
-    layout: "auto",
+    label: "GtxScenePipeline",
+    layout: ScenePipelineLayout,
     vertex: { module: SceneMod, entryPoint: "vsMain" },
     fragment: {
       module: SceneMod,
@@ -1391,7 +1437,8 @@ export async function CreateWebgpuGtxRenderer(OnDeviceLost) {
   });
 
   const OutlinePipeline = Device.createRenderPipeline({
-    layout: "auto",
+    label: "GtxOutlinePipeline",
+    layout: OutlinePipelineLayout,
     vertex: { module: OutlineMod, entryPoint: "vsMain" },
     fragment: {
       module: OutlineMod,
@@ -1414,7 +1461,8 @@ export async function CreateWebgpuGtxRenderer(OnDeviceLost) {
   ];
 
   const GizmoOpaquePipeline = Device.createRenderPipeline({
-    layout: "auto",
+    label: "GtxGizmoOpaquePipeline",
+    layout: GizmoPipelineLayout,
     vertex: { module: GizmoMod, entryPoint: "vsMain", buffers: GizmoVertexLayout },
     fragment: {
       module: GizmoMod,
@@ -1430,7 +1478,8 @@ export async function CreateWebgpuGtxRenderer(OnDeviceLost) {
   });
 
   const GizmoTransPipeline = Device.createRenderPipeline({
-    layout: "auto",
+    label: "GtxGizmoTransPipeline",
+    layout: GizmoPipelineLayout,
     vertex: { module: GizmoMod, entryPoint: "vsMain", buffers: GizmoVertexLayout },
     fragment: {
       module: GizmoMod,
@@ -1469,6 +1518,10 @@ export async function CreateWebgpuGtxRenderer(OnDeviceLost) {
     size: 80,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   });
+  const ForceUniformBuf = Device.createBuffer({
+    size: 80,
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+  });
 
   const AtlasTex = Device.createTexture({
     size: [ATLAS_WIDTH, ATLAS_HEIGHT, 1],
@@ -1483,7 +1536,8 @@ export async function CreateWebgpuGtxRenderer(OnDeviceLost) {
   });
 
   const SceneBindGroup = Device.createBindGroup({
-    layout: ScenePipeline.getBindGroupLayout(0),
+    label: "GtxSceneBG",
+    layout: SceneBindGroupLayout,
     entries: [
       { binding: 0, resource: { buffer: SceneUniformBuf } },
       { binding: 1, resource: { buffer: SceneDataStorageBuf } },
@@ -1493,8 +1547,15 @@ export async function CreateWebgpuGtxRenderer(OnDeviceLost) {
   });
 
   const GizmoBindGroup = Device.createBindGroup({
-    layout: GizmoOpaquePipeline.getBindGroupLayout(0),
+    label: "GtxGizmoBG",
+    layout: GizmoBindGroupLayout,
     entries: [{ binding: 0, resource: { buffer: GizmoUniformBuf } }],
+  });
+
+  const ForceBindGroup = Device.createBindGroup({
+    label: "GtxForceBG",
+    layout: GizmoBindGroupLayout,
+    entries: [{ binding: 0, resource: { buffer: ForceUniformBuf } }],
   });
 
   let ConfiguredCanvas = null;
@@ -1520,6 +1581,7 @@ export async function CreateWebgpuGtxRenderer(OnDeviceLost) {
   const SceneUniformI32 = new Int32Array(SceneUniformScratch);
   const OutlineUniformI32 = new Int32Array(4);
   const GizmoUniformF32 = new Float32Array(20);
+  const ForceUniformF32 = new Float32Array(20);
   const SceneDataCpuBuf = new Float32Array(SCENE_DATA_FLOATS);
 
   const EnsureVertexBuffer = (Existing, CurCap, ByteLen) => {
@@ -1608,7 +1670,8 @@ export async function CreateWebgpuGtxRenderer(OnDeviceLost) {
         DepthView = DepthTex.createView();
 
         OutlineBindGroup = Device.createBindGroup({
-          layout: OutlinePipeline.getBindGroupLayout(0),
+          label: "GtxOutlineBG",
+          layout: OutlineBindGroupLayout,
           entries: [
             { binding: 0, resource: OffscreenSceneView },
             { binding: 1, resource: { buffer: OutlineUniformBuf } },
@@ -1715,15 +1778,15 @@ export async function CreateWebgpuGtxRenderer(OnDeviceLost) {
       Pass2.end();
 
       if (ViewProjZeroToOne && (ForceOverlay || BuiltGizmo)) {
-        GizmoUniformF32.set(ViewProjZeroToOne, 0);
-        GizmoUniformF32[16] = HighlightedHandle || 0;
-        GizmoUniformF32[17] = 0;
-        GizmoUniformF32[18] = 0;
-        GizmoUniformF32[19] = 0;
-        Device.queue.writeBuffer(GizmoUniformBuf, 0, GizmoUniformF32);
-
         // Optional Pass 3A: 3D ForceField / VectorField Overlay (envelope + directional arrows)
         if (ForceOverlay && (ForceOverlay.OpaqueVertexCount > 0 || ForceOverlay.TranslucentVertexCount > 0)) {
+          ForceUniformF32.set(ViewProjZeroToOne, 0);
+          ForceUniformF32[16] = 0;
+          ForceUniformF32[17] = 0;
+          ForceUniformF32[18] = 0;
+          ForceUniformF32[19] = 0;
+          Device.queue.writeBuffer(ForceUniformBuf, 0, ForceUniformF32);
+
           const PassForce = Encoder.beginRenderPass({
             colorAttachments: [{ view: SwapView, loadOp: "load", storeOp: "store" }],
             depthStencilAttachment: {
@@ -1733,7 +1796,7 @@ export async function CreateWebgpuGtxRenderer(OnDeviceLost) {
               depthClearValue: 1.0,
             },
           });
-          PassForce.setBindGroup(0, GizmoBindGroup);
+          PassForce.setBindGroup(0, ForceBindGroup);
           if (ForceOverlay.OpaqueVertexCount > 0) {
             [ForceOpaqueBuf, ForceOpaqueCap] = EnsureVertexBuffer(
               ForceOpaqueBuf,
@@ -1761,6 +1824,13 @@ export async function CreateWebgpuGtxRenderer(OnDeviceLost) {
 
         // Pass 3B: Always-On-Top 3D Slate 13-Handle Transform Gizmo (freshly cleared depth -> NEVER occluded by scene or overlays!)
         if (BuiltGizmo && (BuiltGizmo.OpaqueVertexCount > 0 || BuiltGizmo.TranslucentVertexCount > 0)) {
+          GizmoUniformF32.set(ViewProjZeroToOne, 0);
+          GizmoUniformF32[16] = HighlightedHandle || 0;
+          GizmoUniformF32[17] = 0;
+          GizmoUniformF32[18] = 0;
+          GizmoUniformF32[19] = 0;
+          Device.queue.writeBuffer(GizmoUniformBuf, 0, GizmoUniformF32);
+
           const PassGizmo = Encoder.beginRenderPass({
             colorAttachments: [{ view: SwapView, loadOp: "load", storeOp: "store" }],
             depthStencilAttachment: {
@@ -1809,6 +1879,7 @@ export async function CreateWebgpuGtxRenderer(OnDeviceLost) {
       try { SceneDataStorageBuf?.destroy(); } catch {}
       try { OutlineUniformBuf?.destroy(); } catch {}
       try { GizmoUniformBuf?.destroy(); } catch {}
+      try { ForceUniformBuf?.destroy(); } catch {}
       try { GizmoOpaqueBuf?.destroy(); } catch {}
       try { GizmoTransBuf?.destroy(); } catch {}
       try { ForceOpaqueBuf?.destroy(); } catch {}

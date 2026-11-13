@@ -49,6 +49,7 @@ import {
   SerializeForceModelToml,
 } from "./ForceFieldCatalog.js";
 import { CompileFieldProgram, DEFAULT_FORMULA_CODE } from "./VectorFieldLang.js";
+import { CreateWebgpuGtxRenderer } from "./WebgpuGtxRenderer.js";
 import {
   BuildDefaultLevels,
   CreateNewLevelRecord,
@@ -519,6 +520,108 @@ assert.ok(
 const PickedForce = PickForceBeacon([0.0, -2.0, 0.8], [0, 1, 0], BuiltForceOverlay);
 assert.equal(PickedForce?.Id, "force-vortex-1", "PickForceBeacon selects Force source beacon in 3D");
 
+// 11. Strict WebGPU PipelineLayout / BindGroupLayout identity & Windows requestAdapter() validation
+assert.ok(
+  ViewportSrc.includes("const ComputeCurrentGizmo = () =>"),
+  "ComputeCurrentGizmo defined in GtxWorldViewport component scope for pointer hover & down",
+);
+{
+  globalThis.GPUBufferUsage = { UNIFORM: 1, STORAGE: 2, COPY_DST: 4, VERTEX: 8 };
+  globalThis.GPUTextureUsage = { TEXTURE_BINDING: 1, COPY_DST: 2, RENDER_ATTACHMENT: 4 };
+  globalThis.GPUShaderStage = { VERTEX: 1, FRAGMENT: 2 };
+  const ExecutedDraws = [];
+  const StrictMockDevice = {
+    lost: new Promise(() => {}),
+    createShaderModule: ({ code }) => ({ code, getCompilationInfo: async () => ({ messages: [] }) }),
+    createBindGroupLayout: (desc) => ({ __kind: "BGL", label: desc.label, entries: desc.entries }),
+    createPipelineLayout: (desc) => ({ __kind: "PL", label: desc.label, bgls: desc.bindGroupLayouts }),
+    createRenderPipeline: (desc) => {
+      assert.notEqual(desc.layout, "auto", `Pipeline ${desc.label} must use explicit PipelineLayout`);
+      assert.equal(desc.layout?.__kind, "PL");
+      return { __kind: "Pipeline", label: desc.label, layout: desc.layout };
+    },
+    createBuffer: (desc) => ({ __kind: "Buffer", size: desc.size, destroy() {} }),
+    createTexture: (desc) => ({ __kind: "Texture", desc, createView: () => ({ __kind: "TexView" }), destroy() {} }),
+    createSampler: () => ({ __kind: "Sampler" }),
+    createBindGroup: (desc) => {
+      assert.equal(desc.layout?.__kind, "BGL");
+      return { __kind: "BG", label: desc.label, layout: desc.layout };
+    },
+    createCommandEncoder: () => ({
+      beginRenderPass: () => {
+        let curPipe = null;
+        const curBgs = {};
+        return {
+          setPipeline(p) { curPipe = p; },
+          setBindGroup(i, bg) { curBgs[i] = bg; },
+          setVertexBuffer() {},
+          draw(vertCount) {
+            for (let i = 0; i < curPipe.layout.bgls.length; ++i) {
+              assert.strictEqual(
+                curBgs[i]?.layout,
+                curPipe.layout.bgls[i],
+                `BindGroupLayout mismatch on ${curPipe.label} Draw(${vertCount})`,
+              );
+            }
+            ExecutedDraws.push({ pipeline: curPipe.label, verts: vertCount });
+          },
+          end() {},
+        };
+      },
+      finish: () => ({ __kind: "CmdBuf" }),
+    }),
+    queue: { writeBuffer() {}, writeTexture() {}, submit() {} },
+    destroy() {},
+  };
+  Object.defineProperty(globalThis, "navigator", {
+    value: {
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+      gpu: {
+        requestAdapter: async (opts) => {
+          assert.equal(opts, undefined, "Windows requestAdapter() omits powerPreference");
+          return { requestDevice: async () => StrictMockDevice };
+        },
+        getPreferredCanvasFormat: () => "bgra8unorm",
+      },
+    },
+    configurable: true,
+  });
+  const GpuRenderer = await CreateWebgpuGtxRenderer(() => {});
+  assert.equal(GpuRenderer.Ok, true);
+  assert.equal(
+    GpuRenderer.AttachCanvas({
+      getContext: (k) =>
+        k === "webgpu"
+          ? { configure() {}, getCurrentTexture: () => ({ createView: () => ({}) }) }
+          : null,
+    }),
+    true,
+  );
+  assert.equal(
+    GpuRenderer.RenderFrame({
+      Width: 1280,
+      Height: 720,
+      NeedScenePass: true,
+      ActiveScene: Compiled,
+      CameraOrigin: Compiled.CameraOrigin,
+      Fwd: [0, 1, 0],
+      Right: [1, 0, 0],
+      Up: [0, 0, 1],
+      EffectiveViewMode: 0,
+      ShowGrid: true,
+      SelectedCode: 1,
+      PrimCount: Compiled.Primitives.length,
+      LightCount: Compiled.AreaLights.length,
+      BuiltGizmo,
+      ForceOverlay: BuiltForceOverlay,
+      ViewProjZeroToOne: new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]),
+      HighlightedHandle: 1,
+    }),
+    true,
+  );
+  assert.equal(ExecutedDraws.length, 6, "All 6 WebGPU passes (Scene, Outline, ForceOpaque, ForceTrans, GizmoOpaque, GizmoTrans) executed cleanly");
+}
+
 console.log(
-  "[WorldMirrorValidation] ALL 10 SUITES PASSED: WebGPU + WebGL2 + Atomic Multi-Worker CPU GTX, Always-On-Top 13-handle GizmoPRO, 19 ForceModels (CurlNoise div=0), VectorFieldLang, .ForceModel TOML, 20-channel Material Atlas, and Multi-Level World Editor verified!",
+  "[WorldMirrorValidation] ALL 11 SUITES PASSED: Strict WebGPU Explicit PipelineLayouts, WebGL2 + Atomic Multi-Worker CPU GTX, Always-On-Top 13-handle GizmoPRO, 19 ForceModels (CurlNoise div=0), VectorFieldLang, .ForceModel TOML, 20-channel Material Atlas, and Multi-Level World Editor verified!",
 );

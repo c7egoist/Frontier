@@ -2957,6 +2957,42 @@ export default function GtxWorldViewport({
     CommitLiveCameraToEditor,
   ]);
 
+  const ComputeCurrentGizmo = () => {
+    if (!EffectiveGizmo || !SelectedGizmoTarget) return null;
+    const Cur = BuiltGizmoRef.current;
+    const TargetPos = SelectedGizmoTarget.Position;
+    if (
+      Cur &&
+      Cur.Pivot &&
+      Math.hypot(
+        Cur.Pivot[0] - TargetPos[0],
+        Cur.Pivot[1] - TargetPos[1],
+        Cur.Pivot[2] - TargetPos[2],
+      ) < 1e-4
+    ) {
+      return Cur;
+    }
+    const Rect = CanvasRef.current?.getBoundingClientRect();
+    const Aspect = Rect ? Rect.width / Math.max(1, Rect.height) : 16 / 9;
+    const ActiveScene = GetActiveScene();
+    const { CameraOrigin, CameraTarget } = ActiveScene;
+    const Fwd = NormalizeVec3([
+      CameraTarget[0] - CameraOrigin[0],
+      CameraTarget[1] - CameraOrigin[1],
+      CameraTarget[2] - CameraOrigin[2],
+    ]);
+    const CamState = {
+      Projection: ActiveScene.OrthoHalfHeight > 0 ? "Orthographic" : "Perspective",
+      Position: CameraOrigin,
+      FovDegrees: (ActiveScene.VerticalFovRad * 180) / Math.PI,
+      OrthoHalfHeight: ActiveScene.OrthoHalfHeight,
+    };
+    const WorldRadius = ComputeGizmoWorldRadius(TargetPos, CamState, Aspect);
+    const Built = BuildSlateGizmoGeometry(TargetPos, Fwd, WorldRadius);
+    BuiltGizmoRef.current = Built;
+    return Built;
+  };
+
   const ComputePointerRay = (Event) => {
     const Rect = CanvasRef.current?.getBoundingClientRect();
     if (!Rect) return null;
@@ -2982,15 +3018,15 @@ export default function GtxWorldViewport({
       !Event.altKey &&
       !Event.shiftKey &&
       EffectiveGizmo &&
-      SelectedGizmoTarget &&
-      BuiltGizmoRef.current
+      SelectedGizmoTarget
     ) {
+      const ActiveGizmo = ComputeCurrentGizmo();
       const Ray = ComputePointerRay(Event);
-      if (Ray) {
+      if (ActiveGizmo && Ray) {
         const HitHandle = PickGizmoHandle(
           Ray.RayOrigin,
           Ray.RayDir,
-          BuiltGizmoRef.current,
+          ActiveGizmo,
         );
         if (HitHandle !== GizmoHandle.None) {
           if (SelectedGizmoTarget.Locked) {
@@ -3002,7 +3038,7 @@ export default function GtxWorldViewport({
             HitHandle,
             Ray.RayOrigin,
             Ray.RayDir,
-            BuiltGizmoRef.current,
+            ActiveGizmo,
             SelectedGizmoTarget,
           );
           DragRef.current = {
