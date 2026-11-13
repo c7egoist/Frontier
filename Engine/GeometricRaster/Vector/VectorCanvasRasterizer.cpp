@@ -18,18 +18,18 @@ namespace Frontier::GeometricRaster
 namespace
 {
 
-constexpr uint32_t MaxGpuLayersPerFrame     = 33u; // Up to 32 vector layers + 1 ground slot
+constexpr uint32_t MaxGpuLayersPerRaster     = 33u; // Up to 32 vector layers + 1 ground slot
 constexpr uint32_t MaxInstancesPerLayer     = 256u;
 constexpr uint32_t MaxModifiersPerLayer     = 8u;
 constexpr float    CanonicalDocExtentPx     = 512.0f;
 
-constexpr uint64_t AlignUpBytes(uint64_t Value, uint64_t Alignment) noexcept
+constexpr uint64_t AlignUpBytes(uint64_t ByteCount, uint64_t Alignment) noexcept
 {
-    return (Value + Alignment - 1ull) & ~(Alignment - 1ull);
+    return (ByteCount + Alignment - 1ull) & ~(Alignment - 1ull);
 }
 
 //------------------------------------------------------------------------------------------------------------------------
-//                             16-BYTE ALIGNED GPU STRUCTS MATCHING VECTORCOMMON.SLANG
+//                             16-BYTE ALIGNED GPU STRUCTS MATCHING VECTORSHAREDLAYOUTS.SLANG
 //------------------------------------------------------------------------------------------------------------------------
 
 struct alignas(16) GPUVectorShapeVertex
@@ -52,7 +52,7 @@ struct alignas(16) GPUVectorLayerUniforms
     float    PinCoords[12][4];
     float    PinColors[12][4];
     float    MaskParams[4];
-    float    MaskSeedAndFlags[4];
+    float    MaskSeedAndOptions[4];
     float    PbrScalars0[4];
     float    PbrScalars1[4];
     float    PbrScalars2[4];
@@ -116,7 +116,7 @@ struct alignas(16) GPUVectorOverlayUniforms
     float    TileRectPx[4];
     float    SelectedBoundsPx[4];
     float    SelectedRotAndSnap[4];
-    uint32_t OverlayFlags[4];
+    uint32_t OverlayOptionBits[4];
     uint32_t CountsAndActive[4];
     float    MarqueeRectPx[4];
     float    KnotPositions[64][4];
@@ -238,8 +238,8 @@ void EncodeImageBarrier(
     VkImageAspectFlags   AspectMask,
     VkImageLayout        OldLayout,
     VkImageLayout        NewLayout,
-    VkPipelineStageFlags SrcStage,
-    VkPipelineStageFlags DstStage,
+    VkPipelineStageFlags SrcStepMask,
+    VkPipelineStageFlags DstStepMask,
     VkAccessFlags        SrcAccess,
     VkAccessFlags        DstAccess) noexcept
 {
@@ -258,13 +258,13 @@ void EncodeImageBarrier(
     Barrier.subresourceRange.baseArrayLayer = 0u;
     Barrier.subresourceRange.layerCount     = 1u;
 
-    vkCmdPipelineBarrier(Cmd, SrcStage, DstStage, 0u, 0u, nullptr, 0u, nullptr, 1u, &Barrier);
+    vkCmdPipelineBarrier(Cmd, SrcStepMask, DstStepMask, 0u, 0u, nullptr, 0u, nullptr, 1u, &Barrier);
 }
 
 void EncodeMemoryBarrier(
     VkCommandBuffer      Cmd,
-    VkPipelineStageFlags SrcStage,
-    VkPipelineStageFlags DstStage,
+    VkPipelineStageFlags SrcStepMask,
+    VkPipelineStageFlags DstStepMask,
     VkAccessFlags        SrcAccess,
     VkAccessFlags        DstAccess) noexcept
 {
@@ -272,7 +272,7 @@ void EncodeMemoryBarrier(
     Barrier.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
     Barrier.srcAccessMask = SrcAccess;
     Barrier.dstAccessMask = DstAccess;
-    vkCmdPipelineBarrier(Cmd, SrcStage, DstStage, 0u, 1u, &Barrier, 0u, nullptr, 0u, nullptr);
+    vkCmdPipelineBarrier(Cmd, SrcStepMask, DstStepMask, 0u, 1u, &Barrier, 0u, nullptr, 0u, nullptr);
 }
 
 uint32_t EncodeWrapShiftBits(int32_t ShiftX, int32_t ShiftY) noexcept
@@ -285,14 +285,14 @@ uint32_t EncodeWrapShiftBits(int32_t ShiftX, int32_t ShiftY) noexcept
 void FillLayerUniformStruct(
     const Workspaces::PatternStampLayerSpec& Layer,
     bool                                     PatternMode,
-    bool                                     IsGroundSlot,
+    bool                                     GroundSlotEntry,
     bool                                     GroundEnabled,
     const Workspaces::PatternStampDocumentSnapshot& Doc,
     GPUVectorLayerUniforms&                  OutUniforms) noexcept
 {
     std::memset(&OutUniforms, 0, sizeof(OutUniforms));
 
-    if (IsGroundSlot)
+    if (GroundSlotEntry)
     {
         OutUniforms.FillHeader[0] = static_cast<uint32_t>(Doc.GroundFillSource);
         OutUniforms.FillAux[0]    = Doc.GroundAngleDeg * Constants::DegToRadFloat;
@@ -352,7 +352,7 @@ void FillLayerUniformStruct(
     OutUniforms.MaskParams[1]       = Layer.Mask.Frequency;
     OutUniforms.MaskParams[2]       = Layer.Mask.Threshold;
     OutUniforms.MaskParams[3]       = Layer.Mask.Softness;
-    OutUniforms.MaskSeedAndFlags[0] = static_cast<float>(Layer.Mask.Seed);
+    OutUniforms.MaskSeedAndOptions[0] = static_cast<float>(Layer.Mask.Seed);
 
     float BevelWearAmount = 0.0f;
     for (const auto& Mod : Layer.Modifiers)
@@ -362,8 +362,8 @@ void FillLayerUniformStruct(
             BevelWearAmount = std::max(BevelWearAmount, Mod.ChipWearAmount);
         }
     }
-    OutUniforms.MaskSeedAndFlags[1] = BevelWearAmount;
-    OutUniforms.MaskSeedAndFlags[2] = (Layer.Identity == Doc.SelectedLayerId) ? 1.0f : 0.0f;
+    OutUniforms.MaskSeedAndOptions[1] = BevelWearAmount;
+    OutUniforms.MaskSeedAndOptions[2] = (Layer.Identity == Doc.SelectedLayerId) ? 1.0f : 0.0f;
 
     // Default OpenPBR channels before scanning Layer.Channels
     float Roughness   = 0.55f;
@@ -587,23 +587,23 @@ bool VectorCanvasRasterizer::InitializeRasterizer(
         { VK_DESCRIPTOR_TYPE_SAMPLER,        128u },
         { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  256u },
     }};
-    VkDescriptorPoolCreateInfo PoolSpec {};
-    PoolSpec.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    PoolSpec.flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    PoolSpec.maxSets       = 512u;
-    PoolSpec.poolSizeCount = static_cast<uint32_t>(AllocSizes.size());
-    PoolSpec.pPoolSizes    = AllocSizes.data();
-    if (vkCreateDescriptorPool(DeviceHandle, &PoolSpec, nullptr, &GraphicsDescriptorAllocator) != VK_SUCCESS)
+    VkDescriptorPoolCreateInfo AllocatorSpec {};
+    AllocatorSpec.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    AllocatorSpec.flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+    AllocatorSpec.maxSets       = 512u;
+    AllocatorSpec.poolSizeCount = static_cast<uint32_t>(AllocSizes.size());
+    AllocatorSpec.pPoolSizes    = AllocSizes.data();
+    if (vkCreateDescriptorPool(DeviceHandle, &AllocatorSpec, nullptr, &GraphicsDescriptorAllocator) != VK_SUCCESS)
     {
         TeardownRasterizer();
         return false;
     }
 
     // Allocate persistent host-writable shader staging buffers
-    LayerUniformStaging     = ComputeEncoder.AllocateHostWritableBuffer(MaxGpuLayersPerFrame * LayerUniformSlotBytes,   VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
-    ModifierInputBuffer     = ComputeEncoder.AllocateHostWritableBuffer(MaxGpuLayersPerFrame * ModifierInputSlotBytes,  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
-    ModifierParamsBuffer    = ComputeEncoder.AllocateHostWritableBuffer(MaxGpuLayersPerFrame * ModifierParamsSlotBytes, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
-    InstanceOutputBuffer    = ComputeEncoder.AllocateHostWritableBuffer(MaxGpuLayersPerFrame * MaxInstancesPerLayer * sizeof(GPUVectorInstanceEntry), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    LayerUniformStaging     = ComputeEncoder.AllocateHostWritableBuffer(MaxGpuLayersPerRaster * LayerUniformSlotBytes,   VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+    ModifierInputBuffer     = ComputeEncoder.AllocateHostWritableBuffer(MaxGpuLayersPerRaster * ModifierInputSlotBytes,  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    ModifierParamsBuffer    = ComputeEncoder.AllocateHostWritableBuffer(MaxGpuLayersPerRaster * ModifierParamsSlotBytes, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+    InstanceOutputBuffer    = ComputeEncoder.AllocateHostWritableBuffer(MaxGpuLayersPerRaster * MaxInstancesPerLayer * sizeof(GPUVectorInstanceEntry), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
     SummaryMetricsBuffer    = ComputeEncoder.AllocateHostWritableBuffer(sizeof(GPUVectorSummaryMetrics),                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
     SurfaceEvalParamsBuffer = ComputeEncoder.AllocateHostWritableBuffer(sizeof(GPUVectorSurfaceEvalParams),             VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
     OverlayUniformsBuffer   = ComputeEncoder.AllocateHostWritableBuffer(sizeof(GPUVectorOverlayUniforms),               VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
@@ -1329,7 +1329,7 @@ void VectorCanvasRasterizer::RefreshLayerGeometryCache(const Workspaces::Pattern
         }
         else if (Layer.Category == Workspaces::PatternStampLayerCategory::Typographic)
         {
-            const std::filesystem::path FontPath = ResolveWorkspaceFontFile(Layer.FontAssetPath);
+            const std::filesystem::path FontPath = ResolveWorkspaceFontFile(Layer.FontFilePath);
             std::string Diag;
             (void)VectorFrontend.CompileTextToGpuShapes(
                 FontPath,
@@ -1349,30 +1349,30 @@ void VectorCanvasRasterizer::RefreshLayerGeometryCache(const Workspaces::Pattern
         }
         else
         {
-            Workspaces::PatternStampLayerSpec TempLayer = Layer;
-            Workspaces::PatternStampWorkspaceSession::SeedMotifCubicSubpathsIfEmpty(TempLayer);
+            Workspaces::PatternStampLayerSpec SeededLayer = Layer;
+            Workspaces::PatternStampWorkspaceSession::SeedMotifCubicSubpathsIfEmpty(SeededLayer);
 
-            float EffectiveStrokeW = TempLayer.StrokeWidthPx;
-            if (TempLayer.MotifShape == Workspaces::PatternStampMotifShape::LineStroke && EffectiveStrokeW < 2.0f)
+            float EffectiveStrokeW = SeededLayer.StrokeWidthPx;
+            if (SeededLayer.MotifShape == Workspaces::PatternStampMotifShape::LineStroke && EffectiveStrokeW < 2.0f)
             {
                 EffectiveStrokeW = 5.0f;
             }
             const bool StrokeOn = EffectiveStrokeW > 0.05f;
-            const bool FillOn   = TempLayer.FillEnabled && (TempLayer.MotifShape != Workspaces::PatternStampMotifShape::LineStroke);
+            const bool FillOn   = SeededLayer.FillEnabled && (SeededLayer.MotifShape != Workspaces::PatternStampMotifShape::LineStroke);
 
             ExtractedVectorShape Shape {};
             ThorVGVectorFrontend::CompileCubicSubpathsToGpuShape(
-                TempLayer.CubicSubpaths,
-                TempLayer.EvenOddFillRule,
+                SeededLayer.CubicSubpaths,
+                SeededLayer.EvenOddFillRule,
                 FillOn,
-                TempLayer.FillTint,
+                SeededLayer.FillTint,
                 StrokeOn,
                 EffectiveStrokeW,
-                (TempLayer.MotifShape == Workspaces::PatternStampMotifShape::LineStroke && TempLayer.StrokeWidthPx < 0.05f)
-                    ? TempLayer.FillTint
-                    : TempLayer.StrokeTint,
-                TempLayer.StrokeCap,
-                TempLayer.StrokeJoin,
+                (SeededLayer.MotifShape == Workspaces::PatternStampMotifShape::LineStroke && SeededLayer.StrokeWidthPx < 0.05f)
+                    ? SeededLayer.FillTint
+                    : SeededLayer.StrokeTint,
+                SeededLayer.StrokeCap,
+                SeededLayer.StrokeJoin,
                 Shape);
             CompiledShapes.push_back(std::move(Shape));
         }
@@ -1451,9 +1451,9 @@ VectorCanvasLayoutMetrics VectorCanvasRasterizer::ComputeTileLayoutMetrics(
 {
     const float W = std::max(1.0f, static_cast<float>(WidthPx));
     const float H = std::max(1.0f, static_cast<float>(HeightPx));
-    const float BaseSpan = std::min(W * 0.78f, H * 0.84f);
+    const float ReferenceSpan = std::min(W * 0.78f, H * 0.84f);
     const float Zoom     = std::clamp(Session.ZoomFraction, 0.25f, 4.0f);
-    const float TileSpan = std::max(32.0f, BaseSpan * Zoom);
+    const float TileSpan = std::max(32.0f, ReferenceSpan * Zoom);
 
     VectorCanvasLayoutMetrics Metrics {};
     Metrics.DocExtentPx = CanonicalDocExtentPx;
@@ -1508,7 +1508,7 @@ bool VectorCanvasRasterizer::RasterizeVectorCanvas(
     const uint32_t ScratchExtent = HardwareGpu ? std::clamp(std::max(SafeW, SafeH) * 2u, 512u, 1024u) : 512u;
 
     std::vector<uint8_t>* DestPtr = OptionalOutRGBA != nullptr ? OptionalOutRGBA : &CachedColorBytes;
-    const bool Ok = RasterizeInternal(SafeW, SafeH, ScratchExtent, true, Session, OptionalGizmo2D, DestPtr);
+    const bool Ok = ExecuteCanvasRasterization(SafeW, SafeH, ScratchExtent, true, Session, OptionalGizmo2D, DestPtr);
     if (Ok && OptionalOutRGBA != nullptr)
     {
         CachedColorBytes = *OptionalOutRGBA;
@@ -1528,10 +1528,10 @@ bool VectorCanvasRasterizer::RenderThumbnailRGBA(
     const uint32_t ScratchExtent = HardwareGpu
         ? std::clamp(std::max(SafeW, SafeH) * 2u, 256u, 1024u)
         : std::clamp(std::max(SafeW, SafeH), 256u, 512u);
-    return RasterizeInternal(SafeW, SafeH, ScratchExtent, false, Session, nullptr, &OutRGBA);
+    return ExecuteCanvasRasterization(SafeW, SafeH, ScratchExtent, false, Session, nullptr, &OutRGBA);
 }
 
-bool VectorCanvasRasterizer::RasterizeInternal(
+bool VectorCanvasRasterizer::ExecuteCanvasRasterization(
     uint32_t                                        WidthPx,
     uint32_t                                        HeightPx,
     uint32_t                                        ScratchExtentPx,
@@ -1591,20 +1591,20 @@ bool VectorCanvasRasterizer::RasterizeInternal(
         ActiveLayers.push_back(Plan);
     }
 
-    const bool IsPatternMode = (Session.Mode == Workspaces::PatternStampWorkspaceMode::Pattern);
+    const bool PatternModeActive = (Session.Mode == Workspaces::PatternStampWorkspaceMode::Pattern);
 
     // Upload ground uniform (slot 0) + all active layer uniforms & modifier specs
     {
         GPUVectorLayerUniforms GroundUniform {};
-        Workspaces::PatternStampLayerSpec DummyLayer {};
-        FillLayerUniformStruct(DummyLayer, IsPatternMode, true, Session.Document.GroundEnabled, Session.Document, GroundUniform);
+        Workspaces::PatternStampLayerSpec GroundUniformLayer {};
+        FillLayerUniformStruct(GroundUniformLayer, PatternModeActive, true, Session.Document.GroundEnabled, Session.Document, GroundUniform);
         std::memcpy(static_cast<uint8_t*>(LayerUniformStaging.HostAddress), &GroundUniform, sizeof(GroundUniform));
     }
 
     for (const auto& Plan : ActiveLayers)
     {
         GPUVectorLayerUniforms LayerUni {};
-        FillLayerUniformStruct(*Plan.Layer, IsPatternMode, false, Session.Document.GroundEnabled, Session.Document, LayerUni);
+        FillLayerUniformStruct(*Plan.Layer, PatternModeActive, false, Session.Document.GroundEnabled, Session.Document, LayerUni);
         float BMinX = 1.0e30f, BMinY = 1.0e30f, BMaxX = -1.0e30f, BMaxY = -1.0e30f;
         for (const auto& Seg : Plan.Geometry->Segments)
         {
@@ -1691,7 +1691,7 @@ bool VectorCanvasRasterizer::RasterizeInternal(
         DispParams.CountsAndDims[2]     = Plan.SlotIndex;
         DispParams.CountsAndDims[3]     = Plan.ExpectedInstances;
         DispParams.CanvasMetrics[0]     = CanonicalDocExtentPx;
-        DispParams.CanvasMetrics[1]     = IsPatternMode ? 1.0f : 0.0f;
+        DispParams.CanvasMetrics[1]     = PatternModeActive ? 1.0f : 0.0f;
         DispParams.CanvasMetrics[2]     = Plan.Layer->CenterX;
         DispParams.CanvasMetrics[3]     = Plan.Layer->CenterY;
         DispParams.LayerExtentAndRot[0] = Plan.Layer->WidthPx;
@@ -1747,41 +1747,44 @@ bool VectorCanvasRasterizer::RasterizeInternal(
 
         if (IncludeGuidesAndGizmo)
         {
-            const uint32_t OvFlags =
+            const uint32_t OvOptionBits =
                 (Session.ShowGrid ? 1u : 0u) |
                 (Session.ShowAxes ? 2u : 0u) |
-                ((IsPatternMode && Session.Document.ShowGhostTileBorders) ? 4u : 0u) |
+                ((PatternModeActive && Session.Document.ShowGhostTileBorders) ? 4u : 0u) |
                 (Session.ViewChannel == Workspaces::PatternStampViewChannel::Seamless2x2 ? 8u : 0u) |
                 (Session.Mode == Workspaces::PatternStampWorkspaceMode::Stamp ? 16u : 0u);
-            OvUni.OverlayFlags[0] = OvFlags;
-            OvUni.OverlayFlags[1] = Session.Document.SelectedLayerId;
-            OvUni.OverlayFlags[2] = static_cast<uint32_t>(Session.ActiveTool);
-            OvUni.OverlayFlags[3] = Session.HoveredLayerId;
+            OvUni.OverlayOptionBits[0] = OvOptionBits;
+            OvUni.OverlayOptionBits[1] = Session.Document.SelectedLayerId;
+            OvUni.OverlayOptionBits[2] = static_cast<uint32_t>(Session.ActiveTool);
+            OvUni.OverlayOptionBits[3] = Session.HoveredLayerId;
 
             OvUni.SelectedRotAndSnap[1] = static_cast<float>(Session.SnapStepPx);
             OvUni.SelectedRotAndSnap[2] = Session.ZoomFraction;
 
             if (const auto* Sel = Session.InspectSelectedLayer())
             {
+                const float RotRad = Sel->RotationDeg * Constants::DegToRadFloat;
+                const float CosR   = std::cos(RotRad);
+                const float SinR   = std::sin(RotRad);
                 OvUni.SelectedBoundsPx[0]   = Sel->CenterX;
                 OvUni.SelectedBoundsPx[1]   = Sel->CenterY;
                 OvUni.SelectedBoundsPx[2]   = Sel->WidthPx;
                 OvUni.SelectedBoundsPx[3]   = Sel->HeightPx;
-                OvUni.SelectedRotAndSnap[0] = Sel->RotationDeg * Constants::DegToRadFloat;
+                OvUni.SelectedRotAndSnap[0] = RotRad;
 
-                // Bezier knots for EditPoints / Curve / Pen modes
+                // Bezier knots rotated into document space for EditPoints / Curve / Pen modes
                 uint32_t KnotIdx = 0u;
                 for (const auto& Sub : Sel->CubicSubpaths)
                 {
                     for (const auto& K : Sub.Knots)
                     {
                         if (KnotIdx >= 64u) break;
-                        OvUni.KnotPositions[KnotIdx][0] = Sel->CenterX + K.AnchorX;
-                        OvUni.KnotPositions[KnotIdx][1] = Sel->CenterY + K.AnchorY;
-                        OvUni.KnotPositions[KnotIdx][2] = Sel->CenterX + K.OutHandleX;
-                        OvUni.KnotPositions[KnotIdx][3] = Sel->CenterY + K.OutHandleY;
-                        OvUni.KnotInHandles[KnotIdx][0] = Sel->CenterX + K.InHandleX;
-                        OvUni.KnotInHandles[KnotIdx][1] = Sel->CenterY + K.InHandleY;
+                        OvUni.KnotPositions[KnotIdx][0] = Sel->CenterX + (K.AnchorX * CosR - K.AnchorY * SinR);
+                        OvUni.KnotPositions[KnotIdx][1] = Sel->CenterY + (K.AnchorX * SinR + K.AnchorY * CosR);
+                        OvUni.KnotPositions[KnotIdx][2] = Sel->CenterX + (K.OutHandleX * CosR - K.OutHandleY * SinR);
+                        OvUni.KnotPositions[KnotIdx][3] = Sel->CenterY + (K.OutHandleX * SinR + K.OutHandleY * CosR);
+                        OvUni.KnotInHandles[KnotIdx][0] = Sel->CenterX + (K.InHandleX * CosR - K.InHandleY * SinR);
+                        OvUni.KnotInHandles[KnotIdx][1] = Sel->CenterY + (K.InHandleX * SinR + K.InHandleY * CosR);
                         OvUni.KnotInHandles[KnotIdx][2] = K.Smooth ? 1.0f : 0.0f;
                         ++KnotIdx;
                     }
@@ -1807,10 +1810,15 @@ bool VectorCanvasRasterizer::RasterizeInternal(
 
             if (Session.MarqueeActive)
             {
-                OvUni.MarqueeRectPx[0] = std::min(Session.MarqueeStartX, Session.MarqueeEndX);
-                OvUni.MarqueeRectPx[1] = std::min(Session.MarqueeStartY, Session.MarqueeEndY);
-                OvUni.MarqueeRectPx[2] = std::max(Session.MarqueeStartX, Session.MarqueeEndX);
-                OvUni.MarqueeRectPx[3] = std::max(Session.MarqueeStartY, Session.MarqueeEndY);
+                const float DocToScreenScale = TileLayout.TileSpanPx / std::max(1.0f, TileLayout.DocExtentPx);
+                const float MqMinDocX        = std::min(Session.MarqueeStartX, Session.MarqueeEndX);
+                const float MqMinDocY        = std::min(Session.MarqueeStartY, Session.MarqueeEndY);
+                const float MqMaxDocX        = std::max(Session.MarqueeStartX, Session.MarqueeEndX);
+                const float MqMaxDocY        = std::max(Session.MarqueeStartY, Session.MarqueeEndY);
+                OvUni.MarqueeRectPx[0]       = TileLayout.TileMinX + MqMinDocX * DocToScreenScale;
+                OvUni.MarqueeRectPx[1]       = TileLayout.TileMinY + MqMinDocY * DocToScreenScale;
+                OvUni.MarqueeRectPx[2]       = TileLayout.TileMinX + MqMaxDocX * DocToScreenScale;
+                OvUni.MarqueeRectPx[3]       = TileLayout.TileMinY + MqMaxDocY * DocToScreenScale;
             }
         }
         ComputeEncoder.UploadSpanToBuffer<GPUVectorOverlayUniforms>(
@@ -1999,7 +2007,7 @@ bool VectorCanvasRasterizer::RasterizeInternal(
 
         // Determine periodic tile wrap shifts needed when Pattern mode crosses tile edge
         std::vector<std::pair<int32_t, int32_t>> WrapOffsets { { 0, 0 } };
-        if (IsPatternMode && Plan.Layer->Category != Workspaces::PatternStampLayerCategory::GradientWash)
+        if (PatternModeActive && Plan.Layer->Category != Workspaces::PatternStampLayerCategory::GradientWash)
         {
             bool NeedCardinalWrap = !Plan.Layer->Modifiers.empty();
             if (!NeedCardinalWrap)
@@ -2024,51 +2032,9 @@ bool VectorCanvasRasterizer::RasterizeInternal(
             }
         }
 
-        const auto SyncAndReopenLayerTargets = [&]()
-        {
-            vkCmdEndRenderPass(Cmd);
-            EncodeImageBarrier(
-                Cmd,
-                ScratchTargets.LayerDepthStencil.ImageHandle,
-                VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT,
-                VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
-                VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
-                VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-                VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
-            EncodeImageBarrier(
-                Cmd,
-                ScratchTargets.LayerCoverColor.ImageHandle,
-                VK_IMAGE_ASPECT_COLOR_BIT,
-                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-                VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
-            EncodeImageBarrier(
-                Cmd,
-                ScratchTargets.LayerCoverPick.ImageHandle,
-                VK_IMAGE_ASPECT_COLOR_BIT,
-                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-                VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
-
-            VkRenderPassBeginInfo ContBegin {};
-            ContBegin.sType             = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-            ContBegin.renderPass        = LayerCoverContinueFormat;
-            ContBegin.framebuffer       = ScratchTargets.LayerFramebuffer;
-            ContBegin.renderArea.extent = { ScratchExtentPx, ScratchExtentPx };
-            vkCmdBeginRenderPass(Cmd, &ContBegin, VK_SUBPASS_CONTENTS_INLINE);
-            vkCmdSetViewport(Cmd, 0u, 1u, &ScratchVp);
-            vkCmdSetScissor(Cmd, 0u, 1u, &ScratchScissor);
-        };
-
-        const uint32_t BaseInstOffset = Plan.SlotIndex * MaxInstancesPerLayer;
+        // All stencil winding, stencil-cover (with passOp/failOp = ZERO), and stroke draws execute in strict
+        // Vulkan §26.2/§27.10/§28.1 primitive rasterization order inside a single inline subpass.
+        const uint32_t FirstInstOffset = Plan.SlotIndex * MaxInstancesPerLayer;
         for (const auto& Wrap : WrapOffsets)
         {
             const uint32_t WrapMask = EncodeWrapShiftBits(Wrap.first, Wrap.second);
@@ -2076,7 +2042,7 @@ bool VectorCanvasRasterizer::RasterizeInternal(
             {
                 for (uint32_t Inst = 0u; Inst < Plan.ExpectedInstances; ++Inst)
                 {
-                    const uint32_t AbsInst = BaseInstOffset + Inst;
+                    const uint32_t AbsInst = FirstInstOffset + Inst;
 
                     if (Seg.FillVertexCount >= 3u)
                     {
@@ -2088,15 +2054,11 @@ bool VectorCanvasRasterizer::RasterizeInternal(
                         vkCmdPushConstants(Cmd, StencilProg.ProgramLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0u, sizeof(StencilPush), &StencilPush);
                         vkCmdDraw(Cmd, Seg.FillVertexCount, 1u, 0u, 0u);
 
-                        SyncAndReopenLayerTargets();
-
                         vkCmdBindPipeline(Cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, ShapeFillCoverProgram.ProgramHandle);
                         vkCmdBindDescriptorSets(Cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, ShapeFillCoverProgram.ProgramLayout, 0u, 1u, &LayerGraphicsSet, 0u, nullptr);
                         VectorRasterPushConstants CoverPush {{ Plan.SlotIndex, AbsInst, WrapMask, 0u }};
                         vkCmdPushConstants(Cmd, ShapeFillCoverProgram.ProgramLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0u, sizeof(CoverPush), &CoverPush);
                         vkCmdDraw(Cmd, 3u, 1u, 0u, 0u);
-
-                        SyncAndReopenLayerTargets();
                     }
 
                     if (Seg.StrokeVertexCount >= 3u)
@@ -2106,8 +2068,6 @@ bool VectorCanvasRasterizer::RasterizeInternal(
                         VectorRasterPushConstants StrokePush {{ Plan.SlotIndex, AbsInst, 1u | WrapMask, Seg.StrokeFirstVertex }};
                         vkCmdPushConstants(Cmd, ShapeStrokeCoverProgram.ProgramLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0u, sizeof(StrokePush), &StrokePush);
                         vkCmdDraw(Cmd, Seg.StrokeVertexCount, 1u, 0u, 0u);
-
-                        SyncAndReopenLayerTargets();
                     }
                 }
             }
@@ -2216,11 +2176,11 @@ bool VectorCanvasRasterizer::RasterizeInternal(
             vkFreeCommandBuffers(DeviceHandle, DeviceInterchange->AccessCommandAllocator(), 1u, &Cmd);
             return false;
         }
-        const VkDescriptorBufferInfo GizUniInfo  { GizmoUniformsBuffer.BufferHandle, 0ull, sizeof(GPUGizmoUniforms) };
-        const VkDescriptorBufferInfo GizVertInfo { GizmoVertexBuffer.BufferHandle,   0ull, VK_WHOLE_SIZE };
+        const VkDescriptorBufferInfo GizUniSlot  { GizmoUniformsBuffer.BufferHandle, 0ull, sizeof(GPUGizmoUniforms) };
+        const VkDescriptorBufferInfo GizVertSlot { GizmoVertexBuffer.BufferHandle,   0ull, VK_WHOLE_SIZE };
         std::array<VkWriteDescriptorSet, 2u> Writes {};
-        Writes[0] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, GizmoSet, 0u, 0u, 1u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, nullptr, &GizUniInfo,  nullptr };
-        Writes[1] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, GizmoSet, 1u, 0u, 1u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, nullptr, &GizVertInfo, nullptr };
+        Writes[0] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, GizmoSet, 0u, 0u, 1u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, nullptr, &GizUniSlot,  nullptr };
+        Writes[1] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, GizmoSet, 1u, 0u, 1u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, nullptr, &GizVertSlot, nullptr };
         vkUpdateDescriptorSets(DeviceHandle, 2u, Writes.data(), 0u, nullptr);
     }
 

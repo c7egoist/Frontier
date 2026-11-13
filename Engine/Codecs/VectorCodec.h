@@ -126,8 +126,8 @@ struct VectorWorkspaceLayerEntry
     float                                   CurveSmoothness   = 0.5f;
     std::string                             TextContent       {};
     float                                   FontSizePx        = 54.0f;
-    std::string                             FontAssetPath     {};
-    std::string                             FontFamilyLabel   {};
+    std::string                             FontFilePath     {};
+    std::string                             TypefaceTitle   {};
     float                                   LetterSpacingEm   = 0.0f;
     std::string                             SvgPathSnippet    {};
     bool                                    FillEnabled       = true;

@@ -172,6 +172,7 @@ void PatternStampToolHeaderPane::AttachVulkanRasterizer(GeometricRaster::VectorC
 void PatternStampToolHeaderPane::CloseAllSheets() noexcept
 {
     MoreToolsSheetOpen  = false;
+    PresetsSheetOpen    = false;
     ResolutionSheetOpen = false;
     ViewSheetOpen       = false;
     SaveSheetOpen       = false;
@@ -241,9 +242,9 @@ void PatternStampToolHeaderPane::Render(
 
     const Point2D Cursor    { Input.PrimaryPointer.X, Input.PrimaryPointer.Y };
     const bool    Pressed   = Input.PrimaryPointer.Pressed;
-    const bool    SheetLock = MoreToolsSheetOpen || ResolutionSheetOpen || ViewSheetOpen || SaveSheetOpen || SnapSheetOpen;
+    const bool    SheetLock = MoreToolsSheetOpen || PresetsSheetOpen || ResolutionSheetOpen || ViewSheetOpen || SaveSheetOpen || SnapSheetOpen;
 
-    // 1. Top Band 1 (Document Title + Editable Resolution Combo)
+    // 1. Top Band 1 (Document Title + Starter Presets Selector + Editable Resolution Combo)
     const float Band1H = 54.0f;
     const float Band2H = 44.0f;
     const float PadX   = 18.0f;
@@ -254,9 +255,10 @@ void PatternStampToolHeaderPane::Render(
     Surface.FillRectangle(Band2Rect, Theme.PaneBackground);
     Surface.StrokeLine({ Band2Rect.X, Band2Rect.Bottom() }, { Band2Rect.Right(), Band2Rect.Bottom() }, Theme.BorderSubtle, 1.0f);
 
-    // Editable document name on left of Band 1
+    // Editable document name on left of Band 1 + Presets selector + Resolution combo on right
     const Rectangle2D ResComboRect{ Bounds.Right() - PadX - 186.0f, Band1Rect.Y + 11.0f, 186.0f, 32.0f };
-    const float NameMaxW = std::max(140.0f, ResComboRect.X - (Bounds.X + PadX) - 18.0f);
+    const Rectangle2D PresetsBtnRect{ ResComboRect.X - 116.0f, Band1Rect.Y + 11.0f, 106.0f, 32.0f };
+    const float NameMaxW = std::max(140.0f, PresetsBtnRect.X - (Bounds.X + PadX) - 18.0f);
     const Rectangle2D NameRect{ Bounds.X + PadX - 4.0f, Band1Rect.Y + 9.0f, NameMaxW, 36.0f };
 
     if (Pressed && !SheetLock)
@@ -298,6 +300,22 @@ void PatternStampToolHeaderPane::Render(
         24.0f,
         Theme.TextPrimary,
         Session->Document.DocumentName);
+
+    // Starter Presets selector pill on right of Band 1
+    Surface.FillRectangle(PresetsBtnRect, PresetsSheetOpen ? Theme.HoverSurface : Theme.SectionSurface, 16.0f);
+    Surface.StrokeRectangle(PresetsBtnRect, PresetsSheetOpen ? Theme.HighlightFill : Theme.BorderSubtle, 16.0f, 1.0f);
+    VectorIconRepository::ConstructControl(
+        Surface, ControlIcon::ModifierStar, VectorIconPlacement{ PresetsBtnRect.X + 12.0f, PresetsBtnRect.Y + 10.0f, 12.0f, Theme.HighlightFill, 1.6f });
+    WorkspaceAppearance::ConstructWeightedText(
+        Surface, FontWeightClass::SemiBold, { PresetsBtnRect.X + 30.0f, PresetsBtnRect.Y + 10.0f }, 10.0f, Theme.TextPrimary, "Presets");
+    VectorIconRepository::ConstructControl(
+        Surface, ControlIcon::ChevronDown, VectorIconPlacement{ PresetsBtnRect.Right() - 20.0f, PresetsBtnRect.Y + 11.0f, 11.0f, Theme.TextMuted, 1.6f });
+    if (Pressed && PresetsBtnRect.Contains(Cursor))
+    {
+        const bool NextOpen = !PresetsSheetOpen;
+        CloseAllSheets();
+        PresetsSheetOpen = NextOpen;
+    }
 
     // Resolution combo on right of Band 1
     Surface.FillRectangle(ResComboRect, Theme.SectionSurface, 16.0f);
@@ -353,10 +371,10 @@ void PatternStampToolHeaderPane::Render(
     }
 
     // Right-aligned toolbar tail
-    const bool  IsPattern    = (Session->Mode == PatternStampWorkspaceMode::Pattern);
-    const char* PrimaryLabel = IsPattern ? "Use in Paint" : "Use Stamp";
+    const bool  PatternModeActive    = (Session->Mode == PatternStampWorkspaceMode::Pattern);
+    const char* PrimaryLabel = PatternModeActive ? "Use in Paint" : "Use Stamp";
     const float PrimaryW     = WorkspaceAppearance::MeasureWeightedTextWidth(Surface, FontWeightClass::Medium, 9.8f, PrimaryLabel) + 34.0f;
-    const float MatBridgeW   = IsPattern ? (WorkspaceAppearance::MeasureWeightedTextWidth(Surface, FontWeightClass::Medium, 9.8f, "Tile on Material") + 34.0f) : 0.0f;
+    const float MatBridgeW   = PatternModeActive ? (WorkspaceAppearance::MeasureWeightedTextWidth(Surface, FontWeightClass::Medium, 9.8f, "Tile on Material") + 34.0f) : 0.0f;
     const float SaveW        = 76.0f;
     const float UndoRedoW    = 28.0f;
     const float ViewW        = 134.0f;
@@ -366,7 +384,7 @@ void PatternStampToolHeaderPane::Render(
     TailRightX = PrimaryRect.X - 6.0f;
 
     Rectangle2D MatBridgeRect {};
-    if (IsPattern)
+    if (PatternModeActive)
     {
         MatBridgeRect = { TailRightX - MatBridgeW, ToolY, MatBridgeW, 30.0f };
         TailRightX    = MatBridgeRect.X - 6.0f;
@@ -430,7 +448,7 @@ void PatternStampToolHeaderPane::Render(
         SaveSheetOpen = NextOpen;
     }
 
-    if (IsPattern && MatBridgeRect.Width > 0.0f)
+    if (PatternModeActive && MatBridgeRect.Width > 0.0f)
     {
         if (ConstructCapsuleButtonControl(
                 Surface, MatBridgeRect, "Tile on Material", Theme, Cursor, Pressed && !SheetLock, true, false, ControlIcon::MaterialSphere, 9.6f))
@@ -446,20 +464,23 @@ void PatternStampToolHeaderPane::Render(
     if (ConstructCapsuleButtonControl(
             Surface, PrimaryRect, PrimaryLabel, Theme, Cursor, Pressed && !SheetLock, false, true, ControlIcon::BrushTool, 9.6f))
     {
-        Session->StatusNotice = IsPattern
+        Session->StatusNotice = PatternModeActive
             ? ("Sent " + Session->Document.DocumentName + " to Texture Paint")
             : ("Selected stamp: " + Session->Document.DocumentName);
         if (BridgeCallback)
         {
-            BridgeCallback(IsPattern ? "bridge.paint_pattern" : "bridge.paint_stamp");
+            BridgeCallback(PatternModeActive ? "bridge.paint_pattern" : "bridge.paint_stamp");
         }
     }
 
-    // 3. Pixel Ruler Chrome + Clean Deferred Canvas Region
+    // 3. Pixel Ruler Chrome (zoom/pan-synchronized with VectorCanvasRasterizer::ComputeTileLayoutMetrics) + GPU Canvas Region
     const float TopRulerY = Band2Rect.Bottom();
     const float RulerSize = 24.0f;
     const Rectangle2D TopRulerR{ Bounds.X + RulerSize, TopRulerY, Bounds.Width - RulerSize, RulerSize };
     const Rectangle2D LeftRulerR{ Bounds.X, TopRulerY + RulerSize, RulerSize, std::max(0.0f, Bounds.Bottom() - (TopRulerY + RulerSize) - 34.0f) };
+
+    const Rectangle2D CanvasRegion{ LeftRulerR.Right(), TopRulerR.Bottom(), Bounds.Width - RulerSize, std::max(60.0f, Bounds.Bottom() - TopRulerR.Bottom() - 34.0f) };
+    LatestCanvasLogicalRect = CanvasRegion;
 
     const ColorRgba RulerBg = Theme.LightSurface ? Theme.NestedSurface : ColorRgba{ 14u, 15u, 18u, 255u };
     Surface.FillRectangle({ Bounds.X, TopRulerY, Bounds.Width, RulerSize }, RulerBg);
@@ -467,24 +488,43 @@ void PatternStampToolHeaderPane::Render(
     Surface.StrokeLine({ Bounds.X, TopRulerY + RulerSize }, { Bounds.Right(), TopRulerY + RulerSize }, Theme.BorderSubtle, 1.0f);
     Surface.StrokeLine({ Bounds.X + RulerSize, TopRulerY }, { Bounds.X + RulerSize, Bounds.Bottom() - 34.0f }, Theme.BorderSubtle, 1.0f);
 
-    static constexpr const char* RulerLabels[11] { "-64", "0", "64", "128", "192", "256", "320", "384", "448", "512", "576" };
-    for (int I = 0; I < 11; ++I)
+    const uint32_t RulerViewW = static_cast<uint32_t>(std::max(1.0f, std::round(CanvasRegion.Width)));
+    const uint32_t RulerViewH = static_cast<uint32_t>(std::max(1.0f, std::round(CanvasRegion.Height)));
+    const auto RulerMetrics   = GeometricRaster::VectorCanvasRasterizer::ComputeTileLayoutMetrics(RulerViewW, RulerViewH, *Session);
+    const float RulerScale    = RulerMetrics.TileSpanPx / std::max(1.0f, RulerMetrics.DocExtentPx);
+    const int32_t TickStepDoc = (RulerScale >= 1.35f) ? 64 : ((RulerScale >= 0.65f) ? 128 : 256);
+
+    Surface.PushClip(TopRulerR);
+    for (int32_t DocCoord = -1024; DocCoord <= 1536; DocCoord += TickStepDoc)
     {
-        const float Frac = (static_cast<float>(I) + 0.5f) / 11.0f;
-        const float Tx   = TopRulerR.X + TopRulerR.Width * Frac;
-        WorkspaceAppearance::ConstructWeightedText(
-            Surface, FontWeightClass::Regular, { Tx - 8.0f, TopRulerR.Y + 6.0f }, 8.4f, Theme.TextFaint, RulerLabels[I]);
-
-        const float Ly = LeftRulerR.Y + LeftRulerR.Height * Frac;
-        if (Ly + 12.0f < LeftRulerR.Bottom())
+        const float ScreenX = TopRulerR.X + RulerMetrics.TileMinX + static_cast<float>(DocCoord) * RulerScale;
+        if (ScreenX < TopRulerR.X + 4.0f || ScreenX > TopRulerR.Right() - 18.0f)
         {
-            WorkspaceAppearance::ConstructWeightedText(
-                Surface, FontWeightClass::Regular, { LeftRulerR.X + 3.0f, Ly }, 8.0f, Theme.TextFaint, RulerLabels[I]);
+            continue;
         }
+        Surface.StrokeLine({ ScreenX, TopRulerR.Bottom() - 5.0f }, { ScreenX, TopRulerR.Bottom() }, Theme.BorderSubtle, 1.0f);
+        char TickBuf[16];
+        std::snprintf(TickBuf, sizeof(TickBuf), "%d", DocCoord);
+        WorkspaceAppearance::ConstructWeightedText(
+            Surface, FontWeightClass::Regular, { ScreenX + 2.0f, TopRulerR.Y + 5.0f }, 8.2f, Theme.TextFaint, TickBuf);
     }
+    Surface.PopClip();
 
-    const Rectangle2D CanvasRegion{ LeftRulerR.Right(), TopRulerR.Bottom(), Bounds.Width - RulerSize, std::max(60.0f, Bounds.Bottom() - TopRulerR.Bottom() - 34.0f) };
-    LatestCanvasLogicalRect = CanvasRegion;
+    Surface.PushClip(LeftRulerR);
+    for (int32_t DocCoord = -1024; DocCoord <= 1536; DocCoord += TickStepDoc)
+    {
+        const float ScreenY = LeftRulerR.Y + RulerMetrics.TileMinY + static_cast<float>(DocCoord) * RulerScale;
+        if (ScreenY < LeftRulerR.Y + 4.0f || ScreenY > LeftRulerR.Bottom() - 12.0f)
+        {
+            continue;
+        }
+        Surface.StrokeLine({ LeftRulerR.Right() - 5.0f, ScreenY }, { LeftRulerR.Right(), ScreenY }, Theme.BorderSubtle, 1.0f);
+        char TickBuf[16];
+        std::snprintf(TickBuf, sizeof(TickBuf), "%d", DocCoord);
+        WorkspaceAppearance::ConstructWeightedText(
+            Surface, FontWeightClass::Regular, { LeftRulerR.X + 2.0f, ScreenY + 1.0f }, 7.8f, Theme.TextFaint, TickBuf);
+    }
+    Surface.PopClip();
 
     const float BottomBarY = Bounds.Bottom() - 34.0f;
     const Rectangle2D ZoomBox{ Bounds.Right() - PadX - 134.0f, BottomBarY - 38.0f, 134.0f, 28.0f };
@@ -493,7 +533,6 @@ void PatternStampToolHeaderPane::Render(
     {
         const bool AllowCanvasInput = !SheetLock && !NameEditBuffer.Active && !ZoomBox.Contains(Cursor);
         ProjectionPane.RenderViewportCanvas(Surface, CanvasRegion, Input, AllowCanvasInput, &LatestCanvasLogicalRect);
-        RenderVectorGuideOverlays(Surface, LatestCanvasLogicalRect);
     }
     else
     {
@@ -506,7 +545,7 @@ void PatternStampToolHeaderPane::Render(
         Surface.FillRectangle(TileBoundsR, Theme.LightSurface ? ColorRgba{ 242u, 244u, 247u, 255u } : ColorRgba{ 20u, 22u, 26u, 255u }, 0.0f);
         Surface.StrokeRectangle(TileBoundsR, ColorRgba{ 239u, 244u, 207u, static_cast<uint8_t>(Theme.LightSurface ? 90u : 70u) }, 0.0f, 1.0f);
 
-        const char* CanvasNote = IsPattern
+        const char* CanvasNote = PatternModeActive
             ? "Pattern 2D Vector & PBR Canvas Chrome (Viewport Deferred)"
             : "Stamp Alpha Cutout Vector Canvas Chrome (Viewport Deferred)";
         const float NoteW = WorkspaceAppearance::MeasureWeightedTextWidth(Surface, FontWeightClass::Regular, 10.5f, CanvasNote);
@@ -698,6 +737,37 @@ void PatternStampToolHeaderPane::Render(
         }
     }
 
+    if (PresetsSheetOpen)
+    {
+        const auto& Presets = Session->QueryPresetDirectory();
+        std::vector<const char*> PresetLabels {};
+        PresetLabels.reserve(Presets.size());
+        for (const auto& P : Presets)
+        {
+            PresetLabels.push_back(P.Title.c_str());
+        }
+        const uint32_t CurPresetIdx = static_cast<uint32_t>(Session->QueryActivePresetIndex());
+        if (!PresetLabels.empty())
+        {
+            RenderFittedDropdownSheet(
+                Surface,
+                PresetsBtnRect,
+                Bounds,
+                PresetLabels.data(),
+                static_cast<uint32_t>(PresetLabels.size()),
+                CurPresetIdx,
+                PresetsSheetOpen,
+                Input,
+                [this](uint32_t Picked)
+                {
+                    Session->LoadPresetByIndex(Picked);
+                    AssignEditText(NameEditBuffer, Session->Document.DocumentName);
+                    Interactor.SynchronizeGizmoAnchor();
+                },
+                &ViewSheetScrollY);
+        }
+    }
+
     if (ResolutionSheetOpen)
     {
         static constexpr const char* ResOpts[4] { "512 x 512", "1024 x 1024", "2048 x 2048", "4096 x 4096" };
@@ -751,7 +821,7 @@ void PatternStampToolHeaderPane::Render(
             "Save Vector Space (.VectorSpace)",
             "Export PNG (Current Res)",
             "Export Vector SVG (.svg)",
-            "Export PBR Maps",
+            "Export PBR Channels",
             "Open Vector Space / SVG...",
         };
         RenderFittedDropdownSheet(
@@ -769,7 +839,7 @@ void PatternStampToolHeaderPane::Render(
                     "Save Vector Space (.VectorSpace)",
                     "Export PNG (Current Res)",
                     "Export Vector SVG (.svg)",
-                    "Export PBR Maps",
+                    "Export PBR Channels",
                     "Open Vector Space / SVG...",
                 };
                 static constexpr const char* Tags[5] { "save.vectorspace", "save.png", "save.svg", "save.pbr", "save.open" };
@@ -780,100 +850,6 @@ void PatternStampToolHeaderPane::Render(
                 }
             },
             &ViewSheetScrollY);
-    }
-
-    Surface.PopClip();
-}
-
-void PatternStampToolHeaderPane::RenderVectorGuideOverlays(PixelSpace& Surface, Rectangle2D CanvasRect) const
-{
-    if (Session == nullptr || CanvasRect.Width < 16.0f || CanvasRect.Height < 16.0f)
-    {
-        return;
-    }
-
-    const uint32_t ViewW = static_cast<uint32_t>(std::max(1.0f, std::round(CanvasRect.Width)));
-    const uint32_t ViewH = static_cast<uint32_t>(std::max(1.0f, std::round(CanvasRect.Height)));
-    const auto Metrics = GeometricRaster::VectorCanvasRasterizer::ComputeTileLayoutMetrics(ViewW, ViewH, *Session);
-    const float Scale  = Metrics.TileSpanPx / 512.0f;
-
-    auto DocToCanvas = [&](float DocX, float DocY) -> Point2D
-    {
-        return {
-            CanvasRect.X + Metrics.TileMinX + DocX * Scale,
-            CanvasRect.Y + Metrics.TileMinY + DocY * Scale,
-        };
-    };
-
-    Surface.PushClip(CanvasRect);
-
-    // 1. Marquee Selection Box
-    if (Session->MarqueeActive)
-    {
-        const Point2D P0 = DocToCanvas(Session->MarqueeStartX, Session->MarqueeStartY);
-        const Point2D P1 = DocToCanvas(Session->MarqueeEndX, Session->MarqueeEndY);
-        const Rectangle2D Box {
-            std::min(P0.X, P1.X),
-            std::min(P0.Y, P1.Y),
-            std::fabs(P1.X - P0.X),
-            std::fabs(P1.Y - P0.Y),
-        };
-        Surface.FillRectangle(Box, ColorRgba{ 239u, 244u, 207u, 28u }, 0.0f);
-        Surface.StrokeRectangle(Box, ColorRgba{ 239u, 244u, 207u, 210u }, 0.0f, 1.2f);
-    }
-
-    const PatternStampLayerSpec* Sel = Session->InspectSelectedLayer();
-    if (Sel != nullptr)
-    {
-        // 2. EditPoints / Pen / Curve Anchor & Tangent Handles
-        const bool ShowBezierHandles =
-            (Session->ActiveTool == PatternStampToolCategory::EditPoints) ||
-            (Session->ActiveTool == PatternStampToolCategory::Pen) ||
-            (Session->ActiveTool == PatternStampToolCategory::Curve);
-        if (ShowBezierHandles && !Sel->CubicSubpaths.empty())
-        {
-            int32_t KnotCounter = 0;
-            for (const auto& Sub : Sel->CubicSubpaths)
-            {
-                for (const auto& Knot : Sub.Knots)
-                {
-                    const Point2D A = DocToCanvas(Sel->CenterX + Knot.AnchorX, Sel->CenterY + Knot.AnchorY);
-                    const Point2D I = DocToCanvas(Sel->CenterX + Knot.InHandleX, Sel->CenterY + Knot.InHandleY);
-                    const Point2D O = DocToCanvas(Sel->CenterX + Knot.OutHandleX, Sel->CenterY + Knot.OutHandleY);
-                    const bool SelectedKnot = (KnotCounter == Session->ActiveKnotIndex);
-
-                    if (std::hypot(I.X - A.X, I.Y - A.Y) > 1.5f)
-                    {
-                        Surface.StrokeLine(A, I, ColorRgba{ 130u, 196u, 248u, 190u }, 1.1f);
-                        Surface.FillCircle(I, 3.5f, ColorRgba{ 130u, 196u, 248u, 255u });
-                    }
-                    if (std::hypot(O.X - A.X, O.Y - A.Y) > 1.5f)
-                    {
-                        Surface.StrokeLine(A, O, ColorRgba{ 130u, 196u, 248u, 190u }, 1.1f);
-                        Surface.FillCircle(O, 3.5f, ColorRgba{ 130u, 196u, 248u, 255u });
-                    }
-                    const Rectangle2D AnchorBox { A.X - 4.0f, A.Y - 4.0f, 8.0f, 8.0f };
-                    Surface.FillRectangle(AnchorBox, SelectedKnot ? ColorRgba{ 239u, 244u, 207u, 255u } : ColorRgba{ 24u, 26u, 30u, 255u }, 1.0f);
-                    Surface.StrokeRectangle(AnchorBox, ColorRgba{ 239u, 244u, 207u, 240u }, 1.0f, 1.3f);
-                    ++KnotCounter;
-                }
-            }
-        }
-
-        // 3. PointGradient Control Pins
-        if (Session->ActiveTool == PatternStampToolCategory::PointGradient ||
-            Sel->FillSource == PatternStampFillSourceMode::PointField)
-        {
-            for (int32_t P = 0; P < 12; ++P)
-            {
-                const auto& Pin = Sel->PointFieldPins[static_cast<std::size_t>(P)];
-                if (!Pin.Active) continue;
-                const Point2D Pt = DocToCanvas(Pin.NormX * 512.0f, Pin.NormY * 512.0f);
-                const bool ActivePin = (P == Session->ActivePointPinIndex);
-                Surface.FillCircle(Pt, ActivePin ? 8.0f : 6.5f, Pin.Tint);
-                Surface.StrokeCircle(Pt, ActivePin ? 8.5f : 7.0f, ActivePin ? ColorRgba{ 239u, 244u, 207u, 255u } : ColorRgba{ 16u, 17u, 20u, 220u }, ActivePin ? 2.0f : 1.5f);
-            }
-        }
     }
 
     Surface.PopClip();

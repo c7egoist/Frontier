@@ -88,6 +88,7 @@ int main()
         PatternWorkspaceHost PatternHost {};
         auto& PatSess = PatternHost.AccessSession();
         if (!VerifyCondition(PatSess.Document.DocumentName == "Noise-Scaled Hex Matrix", "Default pattern preset is Noise-Scaled Hex Matrix") ||
+            !VerifyCondition(PatSess.QueryPresetDirectory().size() == 6u, "Pattern preset directory provides 6 starter presets") ||
             !VerifyCondition(PatSess.Document.Layers.size() == 2u, "Hex Matrix initializes 2 layers") ||
             !VerifyCondition(PatSess.CountEnabledModifiers() == 4u, "Hex Matrix initializes 4 active modifiers") ||
             !VerifyCondition(PatSess.InspectSelectedLayer() != nullptr && PatSess.InspectSelectedLayer()->Channels.size() == 4u, "Fine Accent Rings has 4 active PBR channels") ||
@@ -95,6 +96,16 @@ int main()
         {
             return 1;
         }
+
+        for (std::size_t P = 0u; P < 6u; ++P)
+        {
+            PatSess.LoadPresetByIndex(P);
+            if (!VerifyCondition(!PatSess.Document.Layers.empty(), "Pattern preset populates non-empty layer stack"))
+            {
+                return 1;
+            }
+        }
+        PatSess.LoadPresetByIndex(0u);
 
         PatSess.AddChannelToSelectedLayer(PatternStampSurfaceChannelKey::Clearcoat);
         if (!VerifyCondition(PatSess.InspectSelectedLayer()->Channels.size() == 5u, "Adding Clearcoat yields 5 active PBR channels"))
@@ -119,14 +130,24 @@ int main()
         }
 
         StampWorkspaceHost StampHost {};
-        const auto& StSess = StampHost.InspectSession();
+        auto& StSess = StampHost.AccessSession();
         if (!VerifyCondition(StSess.Document.DocumentName == "Solid Circle Disc", "Default stamp preset is Solid Circle Disc") ||
+            !VerifyCondition(StSess.QueryPresetDirectory().size() == 6u, "Stamp preset directory provides 6 starter presets") ||
             !VerifyCondition(StSess.Document.Layers.size() == 1u, "Solid Circle Disc initializes 1 layer") ||
             !VerifyCondition(!StSess.Document.GroundEnabled, "Stamp starts with transparent alpha cutout ground") ||
             !VerifyCondition(StSess.SurfaceFractionPct == 27, "Solid Circle Disc evaluates 27% cutout fill"))
         {
             return 1;
         }
+        for (std::size_t P = 0u; P < 6u; ++P)
+        {
+            StSess.LoadPresetByIndex(P);
+            if (!VerifyCondition(!StSess.Document.Layers.empty(), "Stamp preset populates non-empty layer stack"))
+            {
+                return 1;
+            }
+        }
+        StSess.LoadPresetByIndex(0u);
     }
 
     // Initialize Typography + ImGui runtime

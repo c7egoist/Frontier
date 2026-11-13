@@ -170,7 +170,7 @@ private:
         uint32_t                       TotalVerts   = 0u;
     };
 
-    [[nodiscard]] bool RasterizeInternal(
+    [[nodiscard]] bool ExecuteCanvasRasterization(
         uint32_t                                        WidthPx,
         uint32_t                                        HeightPx,
         uint32_t                                        ScratchExtentPx,

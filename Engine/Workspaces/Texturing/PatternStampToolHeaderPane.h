@@ -62,6 +62,7 @@ public:
 
 public:
     bool MoreToolsSheetOpen  = false;
+    bool PresetsSheetOpen    = false;
     bool ResolutionSheetOpen = false;
     bool ViewSheetOpen       = false;
     bool SaveSheetOpen       = false;
@@ -69,7 +70,6 @@ public:
 
 private:
     void CloseAllSheets() noexcept;
-    void RenderVectorGuideOverlays(PixelSpace& Surface, Rectangle2D CanvasRect) const;
 
     PatternStampWorkspaceSession*                          Session                       = nullptr;
     GeometricRaster::VectorCanvasRasterizer*               Rasterizer                    = nullptr;

@@ -1,9 +1,9 @@
 //============================================================================================================================================
 //                                                        VECTORSHAPECOVER.SLANG
 //============================================================================================================================================
-// Stencil-cover & stroke fragment evaluator writing RGBA16F LayerCoverColor + RGBA32UI LayerPickTarget (Solid/Linear/Radial/12-Pin PointField).
+// Stencil-cover & stroke fragment rasterizer writing RGBA16F LayerCoverColor + RGBA32UI LayerPickTarget (Solid/Linear/Radial/12-Pin PointField).
 
-#include "VectorCommon.slang"
+#include "VectorSharedLayouts.slang"
 
 [[vk::push_constant]] VectorRasterPushConstants PushArgs;
 [[vk::binding(0, 0)]] ConstantBuffer<VectorLayerUniforms> LayerUniforms;

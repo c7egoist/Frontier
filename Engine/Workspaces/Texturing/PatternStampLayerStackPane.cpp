@@ -112,12 +112,12 @@ void RenderSchematicLayerThumb(
     const float     Cx  = ThumbRect.X + ThumbRect.Width * 0.5f;
     const float     Cy  = ThumbRect.Y + ThumbRect.Height * 0.5f;
 
-    const bool HasArray = std::any_of(
+    const bool ArrayModifierActive = std::any_of(
         Layer.Modifiers.begin(),
         Layer.Modifiers.end(),
         [](const PatternStampModifierSpec& M) { return M.Enabled && (M.Category == PatternStampModifierCategory::GridArray || M.Category == PatternStampModifierCategory::RadialArray); });
 
-    if (HasArray)
+    if (ArrayModifierActive)
     {
         for (int Row = -1; Row <= 1; ++Row)
         {
@@ -562,22 +562,22 @@ void PatternStampLayerStackPane::Render(
             {
                 continue;
             }
-            const bool IsSelected = (Session->Document.SelectedLayerId == Layer->Identity);
-            const bool IsFolder   = (Layer->Category == PatternStampLayerCategory::Folder);
+            const bool SelectedRow = (Session->Document.SelectedLayerId == Layer->Identity);
+            const bool FolderEntry   = (Layer->Category == PatternStampLayerCategory::Folder);
             const float IndentPx  = static_cast<float>(Entry.Depth) * 14.0f;
             const Rectangle2D RowRect{ LeftX + IndentPx, RowCursorY, std::max(120.0f, InnerW - IndentPx), 48.0f };
             const bool RowHover   = RowRect.Contains(ListCursor);
 
-            ColorRgba RowFill   = IsSelected ? Theme.HoverSurface : (RowHover ? Theme.RaisedSurface : Theme.SectionSurface);
-            ColorRgba RowStroke = IsSelected ? Theme.HighlightFill : (RowHover ? Theme.BorderStrong : Theme.BorderSubtle);
+            ColorRgba RowFill   = SelectedRow ? Theme.HoverSurface : (RowHover ? Theme.RaisedSurface : Theme.SectionSurface);
+            ColorRgba RowStroke = SelectedRow ? Theme.HighlightFill : (RowHover ? Theme.BorderStrong : Theme.BorderSubtle);
             if (!Entry.EffVis)
             {
                 RowFill.Alpha = 145u;
             }
             Surface.FillRectangle(RowRect, RowFill, 8.0f);
-            Surface.StrokeRectangle(RowRect, RowStroke, 8.0f, IsSelected ? 1.2f : 1.0f);
+            Surface.StrokeRectangle(RowRect, RowStroke, 8.0f, SelectedRow ? 1.2f : 1.0f);
 
-            if (IsSelected)
+            if (SelectedRow)
             {
                 Surface.FillRectangle({ RowRect.X, RowRect.Y + 4.0f, 3.0f, RowRect.Height - 8.0f }, Theme.HighlightFill, 1.5f);
             }
@@ -608,7 +608,7 @@ void PatternStampLayerStackPane::Render(
 
             // Disclosure chevron
             const Rectangle2D ChevR{ GripR.Right() + 2.0f, RowRect.Y + 14.0f, 16.0f, 20.0f };
-            const bool ChevronExpanded = IsFolder ? !Layer->CollapsedFolder : Layer->ExpandedInStack;
+            const bool ChevronExpanded = FolderEntry ? !Layer->CollapsedFolder : Layer->ExpandedInStack;
             VectorIconRepository::ConstructControl(
                 Surface,
                 ChevronExpanded ? ControlIcon::ChevronDown : ControlIcon::ChevronForward,
@@ -617,7 +617,7 @@ void PatternStampLayerStackPane::Render(
             if (ListPress && ChevR.Contains(ListCursor))
             {
                 ConsumedSubClick = true;
-                if (IsFolder) Session->ToggleFolderCollapsed(Layer->Identity);
+                if (FolderEntry) Session->ToggleFolderCollapsed(Layer->Identity);
                 else Session->ToggleLayerExpandedDrawer(Layer->Identity);
             }
 
@@ -663,14 +663,14 @@ void PatternStampLayerStackPane::Render(
                     10.5f,
                     Entry.EffVis ? Theme.TextPrimary : Theme.TextMuted,
                     Layer->Name);
-                const std::string Sub = IsFolder
+                const std::string Sub = FolderEntry
                     ? ("Folder · " + std::to_string(Session->CountFolderImmediateMembers(Layer->Identity)) + " entries")
                     : PatternStampWorkspaceSession::DescribeLayerSubtitle(*Layer);
                 WorkspaceAppearance::ConstructTruncatedText(
                     Surface, FontWeightClass::Regular, { TextLeftX, RowRect.Y + 25.0f }, TextMaxW, 8.8f, Theme.TextFaint, Sub);
             }
 
-            if (!IsFolder)
+            if (!FolderEntry)
             {
                 Surface.FillRectangle(OpacityChipR, OpacityChipR.Contains(ListCursor) ? Theme.HoverSurface : Theme.WellSurface, 6.0f);
                 Surface.StrokeRectangle(OpacityChipR, Theme.BorderSubtle, 6.0f, 1.0f);
@@ -747,7 +747,7 @@ void PatternStampLayerStackPane::Render(
             RowCursorY += 52.0f;
 
             // Inline Layer Mask sub-row
-            if (!IsFolder)
+            if (!FolderEntry)
             {
                 const float MaskIndent = IndentPx + 14.0f;
                 const Rectangle2D MaskR{ LeftX + MaskIndent, RowCursorY, std::max(100.0f, InnerW - MaskIndent), 34.0f };
@@ -786,7 +786,7 @@ void PatternStampLayerStackPane::Render(
                 RowCursorY += 40.0f;
             }
 
-            if (!IsFolder && Layer->ExpandedInStack)
+            if (!FolderEntry && Layer->ExpandedInStack)
             {
                 const Rectangle2D ExpR{ LeftX + IndentPx + 14.0f, RowCursorY, std::max(100.0f, InnerW - IndentPx - 14.0f), 46.0f };
                 Surface.FillRectangle(ExpR, Theme.WellSurface, 6.0f);
@@ -837,26 +837,26 @@ void PatternStampLayerStackPane::Render(
     float ToolBarY = Bounds.Bottom() - FooterH - GroundTileH - ToolbarH - 6.0f;
     Surface.StrokeLine({ Bounds.X, ToolBarY - 3.0f }, { Bounds.Right(), ToolBarY - 3.0f }, Theme.BorderSubtle, 1.0f);
 
-    const bool CanModify = (Session->InspectSelectedLayer() != nullptr);
+    const bool ModifiableLayer = (Session->InspectSelectedLayer() != nullptr);
     const Rectangle2D ActUpR{ LeftX, ToolBarY + 3.0f, 28.0f, 26.0f };
     const Rectangle2D ActDnR{ LeftX + 32.0f, ToolBarY + 3.0f, 28.0f, 26.0f };
     const Rectangle2D ActDelR{ Bounds.Right() - PadX - 28.0f, ToolBarY + 3.0f, 28.0f, 26.0f };
     const Rectangle2D ActMaskR{ ActDelR.X - 32.0f, ToolBarY + 3.0f, 28.0f, 26.0f };
     const Rectangle2D ActDupR{ ActMaskR.X - 32.0f, ToolBarY + 3.0f, 28.0f, 26.0f };
 
-    if (RenderToolIconButton(Surface, ActUpR, ControlIcon::ChevronUp, CanModify, false, false, Theme, Cursor, Pressed && !AddLayerSheetOpen))
+    if (RenderToolIconButton(Surface, ActUpR, ControlIcon::ChevronUp, ModifiableLayer, false, false, Theme, Cursor, Pressed && !AddLayerSheetOpen))
     {
         Session->MoveLayerStep(Session->Document.SelectedLayerId, +1);
     }
-    if (RenderToolIconButton(Surface, ActDnR, ControlIcon::ChevronDown, CanModify, false, false, Theme, Cursor, Pressed && !AddLayerSheetOpen))
+    if (RenderToolIconButton(Surface, ActDnR, ControlIcon::ChevronDown, ModifiableLayer, false, false, Theme, Cursor, Pressed && !AddLayerSheetOpen))
     {
         Session->MoveLayerStep(Session->Document.SelectedLayerId, -1);
     }
-    if (RenderToolIconButton(Surface, ActDupR, ControlIcon::CopyDuplicate, CanModify, false, false, Theme, Cursor, Pressed && !AddLayerSheetOpen))
+    if (RenderToolIconButton(Surface, ActDupR, ControlIcon::CopyDuplicate, ModifiableLayer, false, false, Theme, Cursor, Pressed && !AddLayerSheetOpen))
     {
         Session->DuplicateSelectedLayer();
     }
-    if (RenderToolIconButton(Surface, ActMaskR, ControlIcon::MaskCutout, CanModify, false, false, Theme, Cursor, Pressed && !AddLayerSheetOpen))
+    if (RenderToolIconButton(Surface, ActMaskR, ControlIcon::MaskCutout, ModifiableLayer, false, false, Theme, Cursor, Pressed && !AddLayerSheetOpen))
     {
         Session->ToggleSelectedLayerMask();
     }

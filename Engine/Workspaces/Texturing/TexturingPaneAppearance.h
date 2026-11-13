@@ -210,11 +210,11 @@ inline float ConstructSubjectHeadingBlock(
     std::string_view            SubCaption,
     const TexturingThemeColors& Theme) noexcept
 {
-    const bool  HasIcon = (SymbolIcon != ControlIcon::Count);
-    const float TextX   = HasIcon ? (LeftX + 42.0f) : LeftX;
+    const bool  IconPresent = (SymbolIcon != ControlIcon::Count);
+    const float TextX   = IconPresent ? (LeftX + 42.0f) : LeftX;
     const float TextW   = std::max(40.0f, (LeftX + InnerW) - TextX);
 
-    if (HasIcon)
+    if (IconPresent)
     {
         const Rectangle2D IconTile{ LeftX, TopY, 32.0f, 32.0f };
         Surface.FillRectangle(IconTile, Theme.SectionSurface, 10.0f);
@@ -949,7 +949,7 @@ inline void RenderFittedDropdownSheet(
     uint32_t                             SelectedIndex,
     bool&                                InOutOpen,
     const PaneInputReading&              Input,
-    const std::function<void(uint32_t)>& OnSelect,
+    const std::function<void(uint32_t)>& SelectionCallback,
     float*                               InOutScrollY = nullptr)
 {
     if (!InOutOpen || OptionCount == 0u)
@@ -985,7 +985,7 @@ inline void RenderFittedDropdownSheet(
             Surface, SheetAnchor, Options, OptionCount, SelectedIndex, Input.PrimaryPointer, ChosenIndex);
         if (Contact.Clicked)
         {
-            OnSelect(ChosenIndex);
+            SelectionCallback(ChosenIndex);
             InOutOpen = false;
         }
         else if (Input.PrimaryPointer.Released && !ButtonBounds.Contains(Cursor) && !SheetBounds.Contains(Cursor))
@@ -1047,7 +1047,7 @@ inline void RenderFittedDropdownSheet(
             Options[Idx]);
         if (Hover && Input.PrimaryPointer.Released)
         {
-            OnSelect(Idx);
+            SelectionCallback(Idx);
             InOutOpen = false;
             Surface.PopClip();
             return;

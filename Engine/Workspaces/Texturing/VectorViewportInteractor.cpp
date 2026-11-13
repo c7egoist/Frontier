@@ -577,27 +577,27 @@ void VectorViewportInteractor::RouteKeyboardShortcuts(
         return;
     }
 
-    // Unmodified Single-Key Tool Shortcuts
+    // Unmodified Single-Key Tool Shortcuts (1:1 parity with InspectToolDescriptors & HTML Studio)
     if (!CmdOrCtrl && !Snapshot.AltHeld && !Snapshot.ShiftHeld)
     {
         struct ToolKeyPair { Input::InputLogicalKey Key; PatternStampToolCategory Tool; };
-        static constexpr ToolKeyPair KeyRegistry[] = {
+        static constexpr ToolKeyPair ToolShortcuts[] = {
             { Input::InputLogicalKey::V, PatternStampToolCategory::Select        },
+            { Input::InputLogicalKey::U, PatternStampToolCategory::Curve         },
             { Input::InputLogicalKey::P, PatternStampToolCategory::Pen           },
-            { Input::InputLogicalKey::C, PatternStampToolCategory::Curve         },
             { Input::InputLogicalKey::A, PatternStampToolCategory::EditPoints    },
-            { Input::InputLogicalKey::G, PatternStampToolCategory::PointGradient },
-            { Input::InputLogicalKey::T, PatternStampToolCategory::TextBlock     },
-            { Input::InputLogicalKey::H, PatternStampToolCategory::HandPan       },
+            { Input::InputLogicalKey::F, PatternStampToolCategory::PointGradient },
             { Input::InputLogicalKey::R, PatternStampToolCategory::Square        },
             { Input::InputLogicalKey::O, PatternStampToolCategory::Circle        },
             { Input::InputLogicalKey::D, PatternStampToolCategory::Diamond       },
-            { Input::InputLogicalKey::Y, PatternStampToolCategory::Triangle      },
+            { Input::InputLogicalKey::T, PatternStampToolCategory::Triangle      },
             { Input::InputLogicalKey::S, PatternStampToolCategory::Star          },
-            { Input::InputLogicalKey::X, PatternStampToolCategory::Hexagon       },
+            { Input::InputLogicalKey::G, PatternStampToolCategory::Hexagon       },
             { Input::InputLogicalKey::L, PatternStampToolCategory::Stripe        },
+            { Input::InputLogicalKey::X, PatternStampToolCategory::TextBlock     },
+            { Input::InputLogicalKey::H, PatternStampToolCategory::HandPan       },
         };
-        for (const auto& Entry : KeyRegistry)
+        for (const auto& Entry : ToolShortcuts)
         {
             if (Snapshot.QueryKeyPressed(Entry.Key, false))
             {
@@ -611,7 +611,7 @@ void VectorViewportInteractor::RouteKeyboardShortcuts(
             }
         }
 
-        if (Snapshot.QueryKeyPressed(Input::InputLogicalKey::F, false))
+        if (Snapshot.QueryKeyPressed(Input::InputLogicalKey::Z, false))
         {
             Session->ZoomFraction = 1.0f;
             Session->PanOffsetU   = 0.0f;
@@ -799,8 +799,8 @@ void VectorViewportInteractor::DispatchPointerInteraction(
         const float NextZoom = std::clamp(PrevZoom * (Reading.Input.WheelDeltaY > 0.0f ? 1.12f : 0.89f), 0.25f, 4.0f);
         if (std::fabs(NextZoom - PrevZoom) > 1.0e-5f)
         {
-            const float BaseSpan = std::min(static_cast<float>(ViewW) * 0.78f, static_cast<float>(ViewH) * 0.84f);
-            const float NextSpan = std::max(32.0f, BaseSpan * NextZoom);
+            const float ReferenceSpan = std::min(static_cast<float>(ViewW) * 0.78f, static_cast<float>(ViewH) * 0.84f);
+            const float NextSpan = std::max(32.0f, ReferenceSpan * NextZoom);
             const float RelDocX  = DocX / CanonicalDocExtent;
             const float RelDocY  = DocY / CanonicalDocExtent;
             const float NextMinX = LocalPxX - RelDocX * NextSpan;
@@ -915,8 +915,13 @@ void VectorViewportInteractor::DispatchPointerInteraction(
                 {
                     const float SnappedDocX = ApplyOptionalSnap(DocX, CtrlHeld);
                     const float SnappedDocY = ApplyOptionalSnap(DocY, CtrlHeld);
-                    const float LocalX = SnappedDocX - Sel->CenterX;
-                    const float LocalY = SnappedDocY - Sel->CenterY;
+                    const float RelDocX     = SnappedDocX - Sel->CenterX;
+                    const float RelDocY     = SnappedDocY - Sel->CenterY;
+                    const float RotRad      = Sel->RotationDeg * Constants::DegToRadFloat;
+                    const float CosR        = std::cos(RotRad);
+                    const float SinR        = std::sin(RotRad);
+                    const float LocalX      =  RelDocX * CosR + RelDocY * SinR;
+                    const float LocalY      = -RelDocX * SinR + RelDocY * CosR;
 
                     if (ActiveKnotTarget == KnotControlPart::AnchorPoint)
                     {

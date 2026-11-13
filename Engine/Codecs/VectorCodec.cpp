@@ -45,9 +45,9 @@ namespace
     return Out;
 }
 
-[[nodiscard]] float ReadTomlFloat(const toml::table& TableRef, std::string_view Key, float DefaultScalar) noexcept
+[[nodiscard]] float ReadTomlFloat(const toml::table& SectionRef, std::string_view Key, float DefaultScalar) noexcept
 {
-    if (const auto* Entry = TableRef.get(Key))
+    if (const auto* Entry = SectionRef.get(Key))
     {
         if (const auto FloatOpt = Entry->value<double>())
         {
@@ -61,19 +61,19 @@ namespace
     return DefaultScalar;
 }
 
-[[nodiscard]] uint32_t ReadTomlUint(const toml::table& TableRef, std::string_view Key, uint32_t DefaultUint) noexcept
+[[nodiscard]] uint32_t ReadTomlUint(const toml::table& SectionRef, std::string_view Key, uint32_t DefaultUint) noexcept
 {
-    return static_cast<uint32_t>(std::max<int64_t>(0, TableRef[Key].value_or(static_cast<int64_t>(DefaultUint))));
+    return static_cast<uint32_t>(std::max<int64_t>(0, SectionRef[Key].value_or(static_cast<int64_t>(DefaultUint))));
 }
 
-[[nodiscard]] int32_t ReadTomlInt(const toml::table& TableRef, std::string_view Key, int32_t DefaultInt) noexcept
+[[nodiscard]] int32_t ReadTomlInt(const toml::table& SectionRef, std::string_view Key, int32_t DefaultInt) noexcept
 {
-    return static_cast<int32_t>(TableRef[Key].value_or(static_cast<int64_t>(DefaultInt)));
+    return static_cast<int32_t>(SectionRef[Key].value_or(static_cast<int64_t>(DefaultInt)));
 }
 
-[[nodiscard]] uint8_t ReadTomlByte(const toml::table& TableRef, std::string_view Key, uint8_t DefaultByte) noexcept
+[[nodiscard]] uint8_t ReadTomlByte(const toml::table& SectionRef, std::string_view Key, uint8_t DefaultByte) noexcept
 {
-    return static_cast<uint8_t>(std::clamp<int64_t>(TableRef[Key].value_or(static_cast<int64_t>(DefaultByte)), 0, 255));
+    return static_cast<uint8_t>(std::clamp<int64_t>(SectionRef[Key].value_or(static_cast<int64_t>(DefaultByte)), 0, 255));
 }
 
 } // namespace
@@ -123,16 +123,16 @@ SpaceContainerPayload VectorEncoder::BuildPayload(
 
     if (Model.WorkspaceDocumentPresent || !Model.WorkspaceLayers.empty() || !Model.EmbeddedSvgXml.empty())
     {
-        toml::table WorkspaceTable;
-        WorkspaceTable.insert_or_assign("WorkspaceProfile", Model.WorkspaceProfile);
-        WorkspaceTable.insert_or_assign("ResolutionPx", static_cast<int64_t>(Model.ResolutionPx));
-        WorkspaceTable.insert_or_assign("GroundEnabled", Model.GroundEnabled);
-        WorkspaceTable.insert_or_assign("GroundFillSource", static_cast<int64_t>(Model.GroundFillSource));
-        WorkspaceTable.insert_or_assign("GroundTintA", PackRgbaArray(Model.GroundTintARgba));
-        WorkspaceTable.insert_or_assign("GroundTintB", PackRgbaArray(Model.GroundTintBRgba));
-        WorkspaceTable.insert_or_assign("GroundAngleDeg", static_cast<double>(Model.GroundAngleDeg));
-        WorkspaceTable.insert_or_assign("GhostTileBordersVisible", Model.GhostTileBordersVisible);
-        Payload.DomainManifest.insert_or_assign("VectorWorkspace", std::move(WorkspaceTable));
+        toml::table WorkspaceSection;
+        WorkspaceSection.insert_or_assign("WorkspaceProfile", Model.WorkspaceProfile);
+        WorkspaceSection.insert_or_assign("ResolutionPx", static_cast<int64_t>(Model.ResolutionPx));
+        WorkspaceSection.insert_or_assign("GroundEnabled", Model.GroundEnabled);
+        WorkspaceSection.insert_or_assign("GroundFillSource", static_cast<int64_t>(Model.GroundFillSource));
+        WorkspaceSection.insert_or_assign("GroundTintA", PackRgbaArray(Model.GroundTintARgba));
+        WorkspaceSection.insert_or_assign("GroundTintB", PackRgbaArray(Model.GroundTintBRgba));
+        WorkspaceSection.insert_or_assign("GroundAngleDeg", static_cast<double>(Model.GroundAngleDeg));
+        WorkspaceSection.insert_or_assign("GhostTileBordersVisible", Model.GhostTileBordersVisible);
+        Payload.DomainManifest.insert_or_assign("VectorWorkspace", std::move(WorkspaceSection));
 
         toml::array LayersArray;
         for (const VectorWorkspaceLayerEntry& Layer : Model.WorkspaceLayers)
@@ -153,8 +153,8 @@ SpaceContainerPayload VectorEncoder::BuildPayload(
             L.insert_or_assign("CurveSmoothness", static_cast<double>(Layer.CurveSmoothness));
             L.insert_or_assign("TextContent", Layer.TextContent);
             L.insert_or_assign("FontSizePx", static_cast<double>(Layer.FontSizePx));
-            L.insert_or_assign("FontAssetPath", Layer.FontAssetPath);
-            L.insert_or_assign("FontFamilyLabel", Layer.FontFamilyLabel);
+            L.insert_or_assign("FontFilePath", Layer.FontFilePath);
+            L.insert_or_assign("TypefaceTitle", Layer.TypefaceTitle);
             L.insert_or_assign("LetterSpacingEm", static_cast<double>(Layer.LetterSpacingEm));
             if (!Layer.SvgPathSnippet.empty())
             {
@@ -350,17 +350,17 @@ bool VectorDecoder::ExtractModel(
         }
     }
 
-    if (const toml::table* WorkspaceTable = Payload.DomainManifest["VectorWorkspace"].as_table())
+    if (const toml::table* WorkspaceSection = Payload.DomainManifest["VectorWorkspace"].as_table())
     {
         OutModel.WorkspaceDocumentPresent = true;
-        OutModel.WorkspaceProfile         = (*WorkspaceTable)["WorkspaceProfile"].value_or(std::string{ "Pattern" });
-        OutModel.ResolutionPx             = ReadTomlUint(*WorkspaceTable, "ResolutionPx", 1024u);
-        OutModel.GroundEnabled            = (*WorkspaceTable)["GroundEnabled"].value_or(true);
-        OutModel.GroundFillSource         = ReadTomlByte(*WorkspaceTable, "GroundFillSource", 0u);
-        OutModel.GroundTintARgba          = UnpackRgbaArray((*WorkspaceTable)["GroundTintA"].as_array(), { 23u, 26u, 31u, 255u });
-        OutModel.GroundTintBRgba          = UnpackRgbaArray((*WorkspaceTable)["GroundTintB"].as_array(), { 11u, 11u, 11u, 255u });
-        OutModel.GroundAngleDeg           = ReadTomlFloat(*WorkspaceTable, "GroundAngleDeg", 45.0f);
-        OutModel.GhostTileBordersVisible  = (*WorkspaceTable)["GhostTileBordersVisible"].value_or(true);
+        OutModel.WorkspaceProfile         = (*WorkspaceSection)["WorkspaceProfile"].value_or(std::string{ "Pattern" });
+        OutModel.ResolutionPx             = ReadTomlUint(*WorkspaceSection, "ResolutionPx", 1024u);
+        OutModel.GroundEnabled            = (*WorkspaceSection)["GroundEnabled"].value_or(true);
+        OutModel.GroundFillSource         = ReadTomlByte(*WorkspaceSection, "GroundFillSource", 0u);
+        OutModel.GroundTintARgba          = UnpackRgbaArray((*WorkspaceSection)["GroundTintA"].as_array(), { 23u, 26u, 31u, 255u });
+        OutModel.GroundTintBRgba          = UnpackRgbaArray((*WorkspaceSection)["GroundTintB"].as_array(), { 11u, 11u, 11u, 255u });
+        OutModel.GroundAngleDeg           = ReadTomlFloat(*WorkspaceSection, "GroundAngleDeg", 45.0f);
+        OutModel.GhostTileBordersVisible  = (*WorkspaceSection)["GhostTileBordersVisible"].value_or(true);
     }
 
     if (const toml::array* LayersArr = Payload.DomainManifest["VectorLayers"].as_array())
@@ -389,8 +389,8 @@ bool VectorDecoder::ExtractModel(
             Layer.CurveSmoothness   = ReadTomlFloat(*L, "CurveSmoothness", 0.5f);
             Layer.TextContent       = (*L)["TextContent"].value_or(std::string{});
             Layer.FontSizePx        = ReadTomlFloat(*L, "FontSizePx", 54.0f);
-            Layer.FontAssetPath     = (*L)["FontAssetPath"].value_or(std::string{});
-            Layer.FontFamilyLabel   = (*L)["FontFamilyLabel"].value_or(std::string{});
+            Layer.FontFilePath     = (*L)["FontFilePath"].value_or(std::string{});
+            Layer.TypefaceTitle   = (*L)["TypefaceTitle"].value_or(std::string{});
             Layer.LetterSpacingEm   = ReadTomlFloat(*L, "LetterSpacingEm", 0.0f);
             Layer.SvgPathSnippet    = (*L)["SvgPathSnippet"].value_or(std::string{});
             Layer.FillEnabled       = (*L)["FillEnabled"].value_or(true);

@@ -4,7 +4,7 @@
 // GPU Compute expansion of all 8 non-destructive layer modifiers into VectorInstanceEntry[] + atomic summary KPI metrics.
 // Uses OutInstances[0..255] as scratch ping-pong (layer slots start at 1) to keep shader stack footprint near zero.
 
-#include "VectorCommon.slang"
+#include "VectorSharedLayouts.slang"
 
 [[vk::binding(0, 0)]] ConstantBuffer<VectorModifierDispatchParams> DispatchParams;
 [[vk::binding(1, 0)]] StructuredBuffer<VectorModifierEntry>          Modifiers;
@@ -21,23 +21,23 @@ void ComputeEntry(uint3 DispatchID : SV_DispatchThreadID)
     }
 
     uint MaxOut     = clamp(DispatchParams.CountsAndDims.w, 1u, 256u);
-    uint BaseOffset = max(256u, uint(max(0.0, DispatchParams.LayerExtentAndRot.w) + 0.5));
+    uint FirstSlotOffset = max(256u, uint(max(0.0, DispatchParams.LayerExtentAndRot.w) + 0.5));
     uint ModCount   = min(DispatchParams.CountsAndDims.x, 8u);
     uint LayerId    = DispatchParams.CountsAndDims.y;
     float DocExtent = max(1.0, DispatchParams.CanvasMetrics.x);
-    float BaseCx    = DispatchParams.CanvasMetrics.z;
-    float BaseCy    = DispatchParams.CanvasMetrics.w;
-    float BaseRot   = DispatchParams.LayerExtentAndRot.z;
+    float OriginCx    = DispatchParams.CanvasMetrics.z;
+    float OriginCy    = DispatchParams.CanvasMetrics.w;
+    float OriginRot   = DispatchParams.LayerExtentAndRot.z;
 
-    float Cr0 = cos(BaseRot);
-    float Sr0 = sin(BaseRot);
+    float Cr0 = cos(OriginRot);
+    float Sr0 = sin(OriginRot);
     VectorInstanceEntry InitEntry;
-    InitEntry.TransformRow0   = float4(Cr0, -Sr0, BaseCx, 1.0);
-    InitEntry.TransformRow1   = float4(Sr0,  Cr0, BaseCy, 1.0);
+    InitEntry.TransformRow0   = float4(Cr0, -Sr0, OriginCx, 1.0);
+    InitEntry.TransformRow1   = float4(Sr0,  Cr0, OriginCy, 1.0);
     InitEntry.ColorAndOpacity = float4(1.0, 1.0, 1.0, 0.0);
     InitEntry.ModParams       = float4(1.0, 1.0, 0.0, 0.0);
     InitEntry.PickMeta        = uint4(LayerId, 0u, 0u, 0u);
-    OutInstances[BaseOffset]  = InitEntry;
+    OutInstances[FirstSlotOffset]  = InitEntry;
     uint Count                = 1u;
 
     for (uint MIdx = 0u; MIdx < ModCount; ++MIdx)
@@ -57,7 +57,7 @@ void ComputeEntry(uint3 DispatchID : SV_DispatchThreadID)
             float StepX     = DocExtent / float(Cols);
             float StepY     = DocExtent / float(Rows);
 
-            for (uint I = 0u; I < Count; ++I) OutInstances[I] = OutInstances[BaseOffset + I];
+            for (uint I = 0u; I < Count; ++I) OutInstances[I] = OutInstances[FirstSlotOffset + I];
 
             uint NextCount = 0u;
             for (uint I = 0u; I < Count; ++I)
@@ -73,10 +73,10 @@ void ComputeEntry(uint3 DispatchID : SV_DispatchThreadID)
                         if (Tx > DocExtent) Tx -= DocExtent;
                         float Ty = (float(R) + 0.5) * StepY;
                         VectorInstanceEntry Copy = Src;
-                        Copy.TransformRow0.z = Tx + (Src.TransformRow0.z - BaseCx);
-                        Copy.TransformRow1.z = Ty + (Src.TransformRow1.z - BaseCy);
+                        Copy.TransformRow0.z = Tx + (Src.TransformRow0.z - OriginCx);
+                        Copy.TransformRow1.z = Ty + (Src.TransformRow1.z - OriginCy);
                         Copy.PickMeta.y      = NextCount;
-                        OutInstances[BaseOffset + NextCount] = Copy;
+                        OutInstances[FirstSlotOffset + NextCount] = Copy;
                         NextCount++;
                     }
                     if (NextCount >= 256u || NextCount >= MaxOut) break;
@@ -90,7 +90,7 @@ void ComputeEntry(uint3 DispatchID : SV_DispatchThreadID)
             float RadPx = max(4.0, Mod.ScalarBlockB.x);
             uint  Rings = uint(clamp(int(Mod.ScalarBlockC.x + 0.5), 1, 8));
 
-            for (uint I = 0u; I < Count; ++I) OutInstances[I] = OutInstances[BaseOffset + I];
+            for (uint I = 0u; I < Count; ++I) OutInstances[I] = OutInstances[FirstSlotOffset + I];
 
             uint NextCount = 0u;
             for (uint I = 0u; I < Count; ++I)
@@ -104,13 +104,13 @@ void ComputeEntry(uint3 DispatchID : SV_DispatchThreadID)
                     {
                         if (NextCount >= 256u || NextCount >= MaxOut) break;
                         float Theta = (float(Arm) / float(Arms)) * 6.28318530718;
-                        float Cr    = cos(BaseRot + Theta);
-                        float Sr    = sin(BaseRot + Theta);
+                        float Cr    = cos(OriginRot + Theta);
+                        float Sr    = sin(OriginRot + Theta);
                         VectorInstanceEntry Copy = Src;
                         Copy.TransformRow0 = float4(Cr * Sx, -Sr * Sx, Src.TransformRow0.z + cos(Theta) * RDist, Sx);
                         Copy.TransformRow1 = float4(Sr * Sx,  Cr * Sx, Src.TransformRow1.z + sin(Theta) * RDist, Sx);
                         Copy.PickMeta.y    = NextCount;
-                        OutInstances[BaseOffset + NextCount] = Copy;
+                        OutInstances[FirstSlotOffset + NextCount] = Copy;
                         NextCount++;
                     }
                     if (NextCount >= 256u || NextCount >= MaxOut) break;
@@ -121,7 +121,7 @@ void ComputeEntry(uint3 DispatchID : SV_DispatchThreadID)
         else if (Cat == 3u) // MirrorSymmetry
         {
             uint AxisMode = Mod.Header.z; // 0:X, 1:Y, 2:BothXY
-            for (uint I = 0u; I < Count; ++I) OutInstances[I] = OutInstances[BaseOffset + I];
+            for (uint I = 0u; I < Count; ++I) OutInstances[I] = OutInstances[FirstSlotOffset + I];
 
             uint NextCount = 0u;
             for (uint I = 0u; I < Count; ++I)
@@ -140,7 +140,7 @@ void ComputeEntry(uint3 DispatchID : SV_DispatchThreadID)
                     Copy.TransformRow0 = float4(Src.TransformRow0.x * Mx, Src.TransformRow0.y * Mx, DocExtent * 0.5 + (Src.TransformRow0.z - DocExtent * 0.5) * Mx, Src.TransformRow0.w);
                     Copy.TransformRow1 = float4(Src.TransformRow1.x * My, Src.TransformRow1.y * My, DocExtent * 0.5 + (Src.TransformRow1.z - DocExtent * 0.5) * My, Src.TransformRow1.w);
                     Copy.PickMeta.y    = NextCount;
-                    OutInstances[BaseOffset + NextCount] = Copy;
+                    OutInstances[FirstSlotOffset + NextCount] = Copy;
                     NextCount++;
                 }
             }
@@ -151,7 +151,7 @@ void ComputeEntry(uint3 DispatchID : SV_DispatchThreadID)
             uint  Echoes  = uint(clamp(int(Mod.ScalarBlockA.x + 0.5), 1, 16));
             float InsetPx = Mod.ScalarBlockB.x;
             float RefDim  = max(16.0, max(DispatchParams.LayerExtentAndRot.x, DispatchParams.LayerExtentAndRot.y));
-            for (uint I = 0u; I < Count; ++I) OutInstances[I] = OutInstances[BaseOffset + I];
+            for (uint I = 0u; I < Count; ++I) OutInstances[I] = OutInstances[FirstSlotOffset + I];
 
             uint NextCount = 0u;
             for (uint I = 0u; I < Count; ++I)
@@ -170,7 +170,7 @@ void ComputeEntry(uint3 DispatchID : SV_DispatchThreadID)
                         Copy.PickMeta.w      = 1u;
                     }
                     Copy.PickMeta.y = NextCount;
-                    OutInstances[BaseOffset + NextCount] = Copy;
+                    OutInstances[FirstSlotOffset + NextCount] = Copy;
                     NextCount++;
                 }
             }
@@ -185,7 +185,7 @@ void ComputeEntry(uint3 DispatchID : SV_DispatchThreadID)
             float Freq  = max(0.1,  Mod.ScalarBlockB.y);
             for (uint I = 0u; I < Count; ++I)
             {
-                VectorInstanceEntry Entry = OutInstances[BaseOffset + I];
+                VectorInstanceEntry Entry = OutInstances[FirstSlotOffset + I];
                 float2 NormP = float2(Entry.TransformRow0.z, Entry.TransformRow1.z) / DocExtent;
                 float N      = saturate(EvaluateNoiseAlgorithm(Alg, NormP, Freq, LayerId * 97u + 31u));
                 float S      = lerp(MinS, MaxS, N);
@@ -213,7 +213,7 @@ void ComputeEntry(uint3 DispatchID : SV_DispatchThreadID)
                     Entry.TransformRow1.y = A10 * Sd + A11 * Cd;
                 }
                 Entry.ModParams.z = N;
-                OutInstances[BaseOffset + I] = Entry;
+                OutInstances[FirstSlotOffset + I] = Entry;
             }
         }
         else if (Cat == 5u) // ScatterDropout
@@ -234,7 +234,7 @@ void ComputeEntry(uint3 DispatchID : SV_DispatchThreadID)
                 float Jr = (float(VectorHashU32(I * 2798796415u ^ 0x789u) & 0xFFFFu) / 32767.5 - 1.0) * RotJitter;
                 float Cj = cos(Jr);
                 float Sj = sin(Jr);
-                VectorInstanceEntry Entry = OutInstances[BaseOffset + I];
+                VectorInstanceEntry Entry = OutInstances[FirstSlotOffset + I];
                 float A00 = Entry.TransformRow0.x, A01 = Entry.TransformRow0.y;
                 float A10 = Entry.TransformRow1.x, A11 = Entry.TransformRow1.y;
                 Entry.TransformRow0.x = A00 * Cj - A01 * Sj;
@@ -247,7 +247,7 @@ void ComputeEntry(uint3 DispatchID : SV_DispatchThreadID)
                 OutInstances[Kept]     = Entry;
                 Kept++;
             }
-            for (uint K = 0u; K < Kept; ++K) OutInstances[BaseOffset + K] = OutInstances[K];
+            for (uint K = 0u; K < Kept; ++K) OutInstances[FirstSlotOffset + K] = OutInstances[K];
             Count = Kept;
         }
         else if (Cat == 6u) // DomainWarp
@@ -256,10 +256,10 @@ void ComputeEntry(uint3 DispatchID : SV_DispatchThreadID)
             float WAmp  = Mod.ScalarBlockA.x;
             for (uint I = 0u; I < Count; ++I)
             {
-                VectorInstanceEntry Entry = OutInstances[BaseOffset + I];
+                VectorInstanceEntry Entry = OutInstances[FirstSlotOffset + I];
                 Entry.ModParams.y = float(WMode);
                 Entry.ModParams.w = WAmp;
-                OutInstances[BaseOffset + I] = Entry;
+                OutInstances[FirstSlotOffset + I] = Entry;
             }
         }
     }
@@ -268,7 +268,7 @@ void ComputeEntry(uint3 DispatchID : SV_DispatchThreadID)
     uint KeptCount = 0u;
     for (uint I = 0u; I < RawCount; ++I)
     {
-        VectorInstanceEntry Entry = OutInstances[BaseOffset + I];
+        VectorInstanceEntry Entry = OutInstances[FirstSlotOffset + I];
         if (Entry.ModParams.x > 0.0)
         {
             uint ScaleFixed = uint(clamp(Entry.TransformRow0.w * 10000.0, 100.0, 1000000.0));
@@ -285,7 +285,7 @@ void ComputeEntry(uint3 DispatchID : SV_DispatchThreadID)
         Culled.ColorAndOpacity = float4(0.0, 0.0, 0.0, 0.0);
         Culled.ModParams       = float4(0.0, 0.0, 0.0, 0.0);
         Culled.PickMeta        = uint4(0u, 0u, 0u, 0u);
-        OutInstances[BaseOffset + Pad] = Culled;
+        OutInstances[FirstSlotOffset + Pad] = Culled;
     }
     InterlockedAdd(SummaryBuffer[0].InstanceCount, KeptCount);
 }

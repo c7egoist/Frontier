@@ -24,11 +24,11 @@ import {
 import { HasActiveFaceColors, NormalizeFaceSpec } from "./WorldPropLibrary.js";
 
 export const ATLAS_TILE_SIZE = 64;
-export const ATLAS_COLS = 16; // 2 primitives per row (8 tiles each)
-export const MAX_ATLAS_PRIMS = 96;
-export const ATLAS_ROWS = 48; // 48 rows * 2 = 96 primitives
-export const ATLAS_WIDTH = ATLAS_COLS * ATLAS_TILE_SIZE;  // 1024
-export const ATLAS_HEIGHT = ATLAS_ROWS * ATLAS_TILE_SIZE; // 3072
+export const ATLAS_COLS = 32; // 4 primitives per row (8 tiles each)
+export const MAX_ATLAS_PRIMS = 384;
+export const ATLAS_ROWS = 96; // 96 rows * 4 = 384 primitives (2048 x 6144 <= 8192 WebGPU limit!)
+export const ATLAS_WIDTH = ATLAS_COLS * ATLAS_TILE_SIZE;  // 2048
+export const ATLAS_HEIGHT = ATLAS_ROWS * ATLAS_TILE_SIZE; // 6144
 export const TILES_PER_PRIM = 8;
 
 const FIELD_MAP = Object.fromEntries(

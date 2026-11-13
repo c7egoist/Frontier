@@ -11,6 +11,13 @@ EDITOR_DIR = Path(__file__).resolve().parent
 
 
 class FrontierWorldMirrorHandler(SimpleHTTPRequestHandler):
+    def translate_path(self, path):
+        clean = path.split("?", 1)[0].split("#", 1)[0]
+        rel = clean.lstrip("/")
+        if clean.startswith("/ProjectBrowser") or clean.startswith("/FrontierWorldMirror"):
+            return str(REPO_ROOT / "Experimental" / rel)
+        return super().translate_path(path)
+
     def log_message(self, fmt, *args):
         return
 
@@ -51,7 +58,9 @@ class FrontierWorldMirrorHandler(SimpleHTTPRequestHandler):
         super().do_GET()
 
     def end_headers(self):
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Expires", "0")
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")

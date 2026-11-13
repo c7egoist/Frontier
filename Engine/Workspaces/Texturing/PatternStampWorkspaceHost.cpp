@@ -22,7 +22,7 @@ namespace Frontier::Workspaces
 namespace
 {
 
-[[nodiscard]] std::string NormalizeLowerExtension(const std::filesystem::path& FilePath)
+[[nodiscard]] std::string NormalizeLowerFileSuffix(const std::filesystem::path& FilePath)
 {
     std::string Ext = FilePath.extension().string();
     for (char& Ch : Ext)
@@ -211,6 +211,40 @@ void PatternStampWorkspaceHost::AttachVulkanRasterizer(GeometricRaster::VectorCa
 {
     BoundRasterizer = TargetRasterizer;
     ToolHeaderPane.AttachVulkanRasterizer(TargetRasterizer);
+    if (BoundBrowserPanel != nullptr && BoundRasterizer != nullptr)
+    {
+        PopulateBrowserStarterPresets();
+    }
+}
+
+void PatternStampWorkspaceHost::PopulateBrowserStarterPresets()
+{
+    if (BoundBrowserPanel == nullptr)
+    {
+        return;
+    }
+
+    const auto& Presets = Session.QueryPresetDirectory();
+    for (std::size_t Idx = 0u; Idx < Presets.size(); ++Idx)
+    {
+        const auto& Preset = Presets[Idx];
+        std::vector<uint8_t> ThumbRgba {};
+        if (BoundRasterizer != nullptr)
+        {
+            PatternStampWorkspaceSession PresetPreviewSession(Session.Mode);
+            PresetPreviewSession.LoadPresetByIndex(Idx);
+            (void)BoundRasterizer->RenderThumbnailRGBA(128u, 128u, PresetPreviewSession, ThumbRgba);
+        }
+        const std::filesystem::path VirtualPresetPath =
+            std::filesystem::path((Session.Mode == PatternStampWorkspaceMode::Pattern) ? "preset://pattern" : "preset://stamp") /
+            std::to_string(Idx);
+        (void)BoundBrowserPanel->AccessThumbnailRepository().RegisterOrUpdateProjectEntry(
+            "Preset · " + Preset.Title,
+            ContentCategory::Vectors,
+            Preset.SwatchA,
+            VirtualPresetPath,
+            ThumbRgba);
+    }
 }
 
 void PatternStampWorkspaceHost::AttachContentBrowserPanel(ContentBrowserPanel* TargetPanel)
@@ -266,6 +300,8 @@ void PatternStampWorkspaceHost::AttachContentBrowserPanel(ContentBrowserPanel* T
         {
             ActivateBrowserEntry(Entry);
         });
+
+    PopulateBrowserStarterPresets();
 }
 
 #if FRONTIER_EDITOR_ENABLED
@@ -288,7 +324,7 @@ void PatternStampWorkspaceHost::SynchronizeDropTargetBounds(Rectangle2D CanvasWi
     BoundBrowserPanel->UpdateContentDropZoneBounds(DropZoneId, CanvasWindowLogicalBounds);
 }
 
-void PatternStampWorkspaceHost::MapDropLogicalToDocumentAndPick(
+void PatternStampWorkspaceHost::ResolveCanvasDropDocumentAndPick(
     Point2D   DropLogicalPos,
     float&    OutDocX,
     float&    OutDocY,
@@ -335,7 +371,7 @@ void PatternStampWorkspaceHost::AssignBrowserColourDrop(
     {
         float DocX = 256.0f;
         float DocY = 256.0f;
-        MapDropLogicalToDocumentAndPick(DropLogicalPos, DocX, DocY, TargetLayerId);
+        ResolveCanvasDropDocumentAndPick(DropLogicalPos, DocX, DocY, TargetLayerId);
         if (TargetLayerId == 0u)
         {
             // Dropped on empty canvas background: assign ground fill tint
@@ -362,7 +398,7 @@ void PatternStampWorkspaceHost::ApplyBrowserContentDrop(
     float    DocX          = 256.0f;
     float    DocY          = 256.0f;
     uint32_t PickedLayerId = 0u;
-    MapDropLogicalToDocumentAndPick(DropLogicalPos, DocX, DocY, PickedLayerId);
+    ResolveCanvasDropDocumentAndPick(DropLogicalPos, DocX, DocY, PickedLayerId);
 
     const auto Cat = static_cast<ContentCategory>(Entry.IndexHeader.CategoryCode);
     if (Cat == ContentCategory::Fonts)
@@ -374,7 +410,7 @@ void PatternStampWorkspaceHost::ApplyBrowserContentDrop(
         }
         if (BoundRasterizer != nullptr && std::filesystem::exists(ResolvedFont))
         {
-            const std::string Ext = NormalizeLowerExtension(ResolvedFont);
+            const std::string Ext = NormalizeLowerFileSuffix(ResolvedFont);
             if (Ext == ".fontspace")
             {
                 Codecs::FontSpaceDocumentModel FontDoc {};
@@ -384,7 +420,7 @@ void PatternStampWorkspaceHost::ApplyBrowserContentDrop(
                     std::error_code FontEc {};
                     for (const auto& FontCandidate : std::filesystem::directory_iterator(ResolvedFont.parent_path(), FontEc))
                     {
-                        const std::string CandidateExt = NormalizeLowerExtension(FontCandidate.path());
+                        const std::string CandidateExt = NormalizeLowerFileSuffix(FontCandidate.path());
                         if (FontCandidate.is_regular_file(FontEc) && (CandidateExt == ".ttf" || CandidateExt == ".otf"))
                         {
                             ResolvedFont = FontCandidate.path();
@@ -404,7 +440,20 @@ void PatternStampWorkspaceHost::ApplyBrowserContentDrop(
 
     if (Cat == ContentCategory::Vectors)
     {
-        const std::string Ext = NormalizeLowerExtension(Entry.DiskPath);
+        const std::string PathStr = Entry.DiskPath.generic_string();
+        if (PathStr.starts_with("preset://"))
+        {
+            const std::size_t SlashPos = PathStr.find_last_of('/');
+            if (SlashPos != std::string::npos && SlashPos + 1u < PathStr.size())
+            {
+                const std::size_t PresetIdx = static_cast<std::size_t>(std::strtoull(PathStr.c_str() + SlashPos + 1u, nullptr, 10));
+                Session.LoadPresetByIndex(PresetIdx);
+                ToolHeaderPane.AccessInteractor().SynchronizeGizmoAnchor();
+                Session.StatusNotice = "Loaded starter preset: " + Session.Document.DocumentName;
+                return;
+            }
+        }
+        const std::string Ext = NormalizeLowerFileSuffix(Entry.DiskPath);
         if (Ext == ".vectorspace" && std::filesystem::exists(Entry.DiskPath))
         {
             std::string LoadDiag {};
@@ -527,7 +576,42 @@ void PatternStampWorkspaceHost::ExecuteCanvasCommandBridge(std::string_view Comm
         {
             (void)BoundBrowserPanel->ActivateCategory(ContentCategory::Vectors);
             BoundBrowserPanel->ConfigureShelfExtent(ContentShelfExtent::SplitHalf, false);
-            Session.StatusNotice = "Select or drag any .VectorSpace or .svg asset from ContentBrowser";
+            Session.StatusNotice = "Select or drag any .VectorSpace, .svg, or starter preset from ContentBrowser";
+        }
+    }
+    else if (CommandTag == "bridge.material" || CommandTag == "bridge.paint_pattern" || CommandTag == "bridge.paint_stamp")
+    {
+        const std::filesystem::path PngOut = ResolveWorkspaceVectorDirectory() / (BuildSanitizedDocumentStem() + ".png");
+        const bool OkVec = SaveVectorSpaceToBrowser({}, &Diag);
+        const bool OkPng = ExportDocumentToPngFile(PngOut, &Diag);
+        if (OkPng && BoundBrowserPanel != nullptr)
+        {
+            std::vector<uint8_t> ThumbRgba {};
+            if (BoundRasterizer != nullptr)
+            {
+                (void)BoundRasterizer->RenderThumbnailRGBA(128u, 128u, Session, ThumbRgba);
+            }
+            ColorRgba PreviewTint = Session.Document.GroundEnabled
+                ? Session.Document.GroundTintA
+                : ColorRgba{ 239u, 244u, 207u, 255u };
+            if (const auto* Sel = Session.InspectSelectedLayer())
+            {
+                PreviewTint = Sel->FillTint;
+            }
+            (void)BoundBrowserPanel->AccessThumbnailRepository().RegisterOrUpdateProjectEntry(
+                Session.Document.DocumentName,
+                ContentCategory::Textures,
+                PreviewTint,
+                PngOut,
+                ThumbRgba);
+        }
+        if (OkVec && OkPng)
+        {
+            Session.StatusNotice = "Published " + Session.Document.DocumentName + " (.VectorSpace + RGBA Texture) to ContentBrowser";
+        }
+        else if (OkVec)
+        {
+            Session.StatusNotice = "Saved " + Session.Document.DocumentName + " (.VectorSpace) to ContentBrowser";
         }
     }
 }
@@ -545,7 +629,7 @@ bool PatternStampWorkspaceHost::IntakeExternalFileDrop(
         return false;
     }
 
-    const std::string Ext = NormalizeLowerExtension(DroppedPath);
+    const std::string Ext = NormalizeLowerFileSuffix(DroppedPath);
     if (Ext == ".vectorspace")
     {
         if (BoundBrowserPanel != nullptr)
@@ -586,7 +670,7 @@ bool PatternStampWorkspaceHost::IntakeExternalFileDrop(
             {
                 for (const auto& FontCandidate : std::filesystem::directory_iterator(DroppedPath.parent_path(), Ec))
                 {
-                    const std::string CandidateExt = NormalizeLowerExtension(FontCandidate.path());
+                    const std::string CandidateExt = NormalizeLowerFileSuffix(FontCandidate.path());
                     if (FontCandidate.is_regular_file(Ec) && (CandidateExt == ".ttf" || CandidateExt == ".otf"))
                     {
                         TypefaceFile = FontCandidate.path();

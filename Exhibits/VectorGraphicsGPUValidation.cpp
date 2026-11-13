@@ -164,7 +164,7 @@ int main()
     if (auto* TextLayer = Session.InspectSelectedLayer())
     {
         TextLayer->TextContent   = "VECTOR";
-        TextLayer->FontAssetPath = "EngineContent/FontsArchives/Inter/Inter-Bold.otf";
+        TextLayer->FontFilePath = "EngineContent/FontsArchives/Inter/Inter-Bold.otf";
         TextLayer->CenterY       = 410.0f;
         TextLayer->FontSizePx    = 44.0f;
         TextLayer->FillTint      = { 246u, 248u, 252u, 255u };
@@ -197,8 +197,8 @@ int main()
         return 1;
     }
 
-    const VectorGpuEvaluationMetrics FrameMetrics = Rasterizer.QueryLastMetrics();
-    if (!VerifyCheck(FrameMetrics.TotalInstancesEvaluated >= 1u, "GPU VectorModifierExpand evaluated active layer instances"))
+    const VectorGpuEvaluationMetrics EvaluatedMetrics = Rasterizer.QueryLastMetrics();
+    if (!VerifyCheck(EvaluatedMetrics.TotalInstancesEvaluated >= 1u, "GPU VectorModifierExpand evaluated active layer instances"))
     {
         return 1;
     }
@@ -210,12 +210,12 @@ int main()
     {
         for (int32_t Dx = -36; Dx <= 36; Dx += 4)
         {
-            const ViewportPickHit Probe = Rasterizer.Pick2DPixel(
+            const ViewportPickHit CandidateHit = Rasterizer.Pick2DPixel(
                 static_cast<int32_t>(ViewW / 2u) + Dx,
                 static_cast<int32_t>(ViewH / 2u) + Dy);
-            if (Probe.InstanceSlot != 0u || Probe.GizmoHandleOrdinal != 0u)
+            if (CandidateHit.InstanceSlot != 0u || CandidateHit.GizmoHandleOrdinal != 0u)
             {
-                CenterPick        = Probe;
+                CenterPick        = CandidateHit;
                 FoundAnyLayerPick = true;
                 break;
             }
@@ -309,9 +309,9 @@ int main()
         (void)Rasterizer.RasterizeVectorCanvas(ViewW, ViewH, EditSession, &Interactor.InspectGizmo2D(), nullptr);
 
         const Rectangle2D CanvasBox { 0.0f, 0.0f, static_cast<float>(ViewW), static_cast<float>(ViewH) };
-        const auto BaseMetrics = VectorCanvasRasterizer::ComputeTileLayoutMetrics(ViewW, ViewH, EditSession);
-        const float ScreenCx   = BaseMetrics.TileMinX + BaseMetrics.TileSpanPx * 0.5f;
-        const float ScreenCy   = BaseMetrics.TileMinY + BaseMetrics.TileSpanPx * 0.5f;
+        const auto InitialTileMetrics = VectorCanvasRasterizer::ComputeTileLayoutMetrics(ViewW, ViewH, EditSession);
+        const float ScreenCx   = InitialTileMetrics.TileMinX + InitialTileMetrics.TileSpanPx * 0.5f;
+        const float ScreenCy   = InitialTileMetrics.TileMinY + InitialTileMetrics.TileSpanPx * 0.5f;
 
         // 8a. Cursor-anchored wheel zoom preserves document point under cursor
         PaneInputReading ZoomIn {};
@@ -450,10 +450,10 @@ int main()
 
     std::printf(
         "[VectorGraphicsGPUValidation] PASSED (Instances=%u, CenterPickLayer=%u, CenterPickGizmo=%u, ScaleRange=[%.2f, %.2f])\n",
-        FrameMetrics.TotalInstancesEvaluated,
+        EvaluatedMetrics.TotalInstancesEvaluated,
         CenterPick.InstanceSlot,
         CenterPick.GizmoHandleOrdinal,
-        FrameMetrics.MinNoiseScale,
-        FrameMetrics.MaxNoiseScale);
+        EvaluatedMetrics.MinNoiseScale,
+        EvaluatedMetrics.MaxNoiseScale);
     return 0;
 }

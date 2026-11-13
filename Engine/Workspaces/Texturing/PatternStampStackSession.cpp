@@ -69,13 +69,13 @@ const std::vector<PatternStampSurfaceChannelDescriptor>& PatternStampWorkspaceSe
     static const std::vector<PatternStampSurfaceChannelDescriptor> Descs {
         { PatternStampSurfaceChannelKey::Albedo,       "Albedo",       "Albedo",   "Base Colour",      true,  false, 0.0f,  1.0f, 0.01f, 0.50f, { 239u, 244u, 207u, 255u } },
         { PatternStampSurfaceChannelKey::Roughness,    "Roughness",    "Rough",    "Surface Gloss",    false, false, 0.02f, 1.0f, 0.01f, 0.26f, { 158u, 162u, 170u, 255u } },
-        { PatternStampSurfaceChannelKey::Metalness,    "Metalness",    "Metal",    "Conductor Mask",   false, false, 0.0f,  1.0f, 0.01f, 0.92f, { 158u, 162u, 170u, 255u } },
+        { PatternStampSurfaceChannelKey::Metalness,    "Metalness",    "Metal",    "Metallic Reflectance",   false, false, 0.0f,  1.0f, 0.01f, 0.92f, { 158u, 162u, 170u, 255u } },
         { PatternStampSurfaceChannelKey::Height,       "Height",       "Height",   "Relief / Bump",    false, false, -1.0f, 1.0f, 0.02f, 0.45f, { 158u, 162u, 170u, 255u } },
         { PatternStampSurfaceChannelKey::NormalStr,    "Normal Str",   "Normal",   "Bump Intensity",   false, true,  0.0f,  2.0f, 0.05f, 0.85f, { 158u, 162u, 170u, 255u } },
         { PatternStampSurfaceChannelKey::Occlusion,    "Occlusion",    "AO",       "Ambient Cavity",   false, true,  0.0f,  1.0f, 0.01f, 1.00f, { 158u, 162u, 170u, 255u } },
         { PatternStampSurfaceChannelKey::Opacity,      "Opacity",      "Opacity",  "Cutout / Alpha",   false, true,  0.0f,  1.0f, 0.01f, 1.00f, { 158u, 162u, 170u, 255u } },
         { PatternStampSurfaceChannelKey::Emissive,     "Emissive",     "Emissive", "Glow Colour",      true,  true,  0.0f,  1.0f, 0.01f, 0.50f, { 255u, 122u, 59u, 255u } },
-        { PatternStampSurfaceChannelKey::GlowPower,    "Glow Power",   "Glow",     "Emission Gain",    false, true,  0.0f,  4.0f, 0.05f, 1.00f, { 158u, 162u, 170u, 255u } },
+        { PatternStampSurfaceChannelKey::GlowPower,    "Glow Power",   "Glow",     "Luminance Gain",    false, true,  0.0f,  4.0f, 0.05f, 1.00f, { 158u, 162u, 170u, 255u } },
         { PatternStampSurfaceChannelKey::Clearcoat,    "Clearcoat",    "Coat",     "Varnish Coat",     false, true,  0.0f,  1.0f, 0.01f, 0.80f, { 158u, 162u, 170u, 255u } },
         { PatternStampSurfaceChannelKey::CoatRough,    "Coat Rough",   "CoatRgh",  "Varnish Gloss",    false, true,  0.01f, 1.0f, 0.01f, 0.08f, { 158u, 162u, 170u, 255u } },
         { PatternStampSurfaceChannelKey::Sheen,        "Sheen",        "Sheen",    "Fabric Velour",    false, true,  0.0f,  1.0f, 0.01f, 0.65f, { 158u, 162u, 170u, 255u } },
@@ -293,15 +293,21 @@ void PatternStampWorkspaceSession::BuildPresetDirectory() noexcept
     PresetDirectory.clear();
     if (Mode == PatternStampWorkspaceMode::Pattern)
     {
-        PresetDirectory.push_back({ "hex-matrix",     "Noise-Scaled Hex Matrix", "8x8 hex lattice · dual FBM scale", { 239u, 244u, 207u, 255u }, { 118u, 178u, 216u, 255u } });
-        PresetDirectory.push_back({ "kente-weave",    "Gold Foil Kente Weave",   "Interlocking stripe bars · metallic", { 232u, 194u, 122u, 255u }, { 29u, 33u, 42u, 255u } });
-        PresetDirectory.push_back({ "radial-mandala", "Radial Ceramic Mandala",  "12-fold concentric star lattice",    { 118u, 178u, 216u, 255u }, { 239u, 244u, 207u, 255u } });
+        PresetDirectory.push_back({ "hex-lattice",      "Noise-Scaled Hex Matrix",       "8x8 hex lattice · dual FBM scale",        { 239u, 244u, 207u, 255u }, { 118u, 178u, 216u, 255u } });
+        PresetDirectory.push_back({ "kente-weave",      "Gold Foil Kente Weave",         "Interlocking stripe bars · metallic",     { 232u, 194u, 122u, 255u }, { 29u, 33u, 42u, 255u } });
+        PresetDirectory.push_back({ "radial-mandala",   "Radial Ceramic Mandala",        "12-fold concentric teardrop lattice",     { 118u, 178u, 216u, 255u }, { 239u, 244u, 207u, 255u } });
+        PresetDirectory.push_back({ "perlin-polka",     "Perlin Polka Wave",             "14x14 ceramic dots · Perlin scale-tint",  { 240u, 211u, 140u, 255u }, { 125u, 199u, 176u, 255u } });
+        PresetDirectory.push_back({ "ridged-diamonds",  "Ridged Diamond Acoustic Grille","12x12 brick foil diamonds · Ridged FBM",  { 213u, 220u, 230u, 255u }, { 232u, 194u, 122u, 255u } });
+        PresetDirectory.push_back({ "voronoi-pebbles",  "Voronoi Organic Pebbles",       "9x9 hex pebbles · scatter + Worley",      { 151u, 143u, 132u, 255u }, { 210u, 195u, 170u, 255u } });
     }
     else
     {
-        PresetDirectory.push_back({ "solid-disc",     "Solid Circle Disc",        "Clean cutout sphere decal",       { 234u, 236u, 239u, 255u }, { 22u, 24u, 28u, 255u } });
-        PresetDirectory.push_back({ "botanical-seal", "Botanical Foil Seal",      "Engraved crest with embossed rim", { 232u, 194u, 122u, 255u }, { 24u, 27u, 31u, 255u } });
-        PresetDirectory.push_back({ "precision-mark", "Precision Cross Reticle",  "Technical stencil registration",  { 239u, 244u, 207u, 255u }, { 90u, 118u, 146u, 255u } });
+        PresetDirectory.push_back({ "solid-disc",       "Solid Circle Disc",             "Clean cutout circular stamp",             { 234u, 236u, 239u, 255u }, { 22u, 24u, 28u, 255u } });
+        PresetDirectory.push_back({ "botanical-seal",   "Botanical Foil Seal",           "Engraved rosette with embossed rim",      { 232u, 194u, 122u, 255u }, { 24u, 27u, 31u, 255u } });
+        PresetDirectory.push_back({ "precision-mark",   "Precision Cross Reticle",       "Technical stencil registration crosshair",{ 239u, 244u, 207u, 255u }, { 90u, 118u, 146u, 255u } });
+        PresetDirectory.push_back({ "hex-fastener",     "Hexagonal Fastener Head",       "Chamfered metallic bolt & socket ring",   { 196u, 204u, 214u, 255u }, { 64u, 72u, 82u, 255u } });
+        PresetDirectory.push_back({ "stencil-serial",   "Industrial Stencil Mark",       "Archivo-Bold typographic serial cutout",  { 240u, 198u, 96u, 255u },  { 28u, 30u, 34u, 255u } });
+        PresetDirectory.push_back({ "radial-cog",       "Radial Cog Medallion",          "Precision gear contour + concentric echo",{ 143u, 184u, 222u, 255u }, { 239u, 244u, 207u, 255u } });
     }
 }
 
@@ -587,6 +593,262 @@ void PatternStampWorkspaceSession::PopulateStampPrecisionReticlePreset(PatternSt
     Out.SelectedLayerId = Reticle.Identity;
 }
 
+void PatternStampWorkspaceSession::PopulatePatternPerlinPolkaPreset(PatternStampDocumentSnapshot& Out) noexcept
+{
+    Out = {};
+    Out.DocumentName         = "Perlin Polka Wave";
+    Out.GroundEnabled        = true;
+    Out.GroundTintA          = { 19u, 23u, 29u, 255u };
+    Out.ShowGhostTileBorders = true;
+    Out.NextIdentitySeed     = 20u;
+
+    PatternStampLayerSpec Dots {};
+    Dots.Identity     = 1u;
+    Dots.Name         = "Perlin Dots";
+    Dots.MotifShape   = PatternStampMotifShape::Circle;
+    Dots.FillTint     = { 240u, 211u, 140u, 255u };
+    Dots.FillTintB    = { 125u, 199u, 176u, 255u };
+    Dots.WidthPx      = 34.0f;
+    Dots.HeightPx     = 34.0f;
+    Dots.FinishPreset = PatternStampFinishPreset::GlazedCeramic;
+    Dots.Channels     = {
+        ConstructChannelEntry(PatternStampSurfaceChannelKey::Albedo,    1.0f,  { 240u, 211u, 140u, 255u }),
+        ConstructChannelEntry(PatternStampSurfaceChannelKey::Roughness, 0.22f, { 158u, 162u, 170u, 255u }),
+        ConstructChannelEntry(PatternStampSurfaceChannelKey::Metalness, 0.10f, { 158u, 162u, 170u, 255u }),
+        ConstructChannelEntry(PatternStampSurfaceChannelKey::Height,    0.32f, { 158u, 162u, 170u, 255u }),
+    };
+
+    PatternStampModifierSpec Grid {};
+    Grid.Category   = PatternStampModifierCategory::GridArray;
+    Grid.GridLayout = 0u;
+    Grid.Columns    = 14;
+    Grid.Rows       = 14;
+
+    PatternStampModifierSpec Noise {};
+    Noise.Category       = PatternStampModifierCategory::NoiseScale;
+    Noise.NoiseAlgorithm = 1u; // Perlin
+    Noise.ModulateTarget = 0u; // Scale + Color
+    Noise.MinScale       = 0.18f;
+    Noise.MaxScale       = 1.72f;
+    Noise.Frequency      = 4.0f;
+    Noise.TargetTintB    = { 228u, 123u, 100u, 255u };
+
+    Dots.Modifiers      = { Grid, Noise };
+    Out.Layers          = { Dots };
+    Out.SelectedLayerId = Dots.Identity;
+}
+
+void PatternStampWorkspaceSession::PopulatePatternRidgedDiamondsPreset(PatternStampDocumentSnapshot& Out) noexcept
+{
+    Out = {};
+    Out.DocumentName         = "Ridged Diamond Acoustic Grille";
+    Out.GroundEnabled        = true;
+    Out.GroundTintA          = { 16u, 18u, 21u, 255u };
+    Out.ShowGhostTileBorders = true;
+    Out.NextIdentitySeed     = 20u;
+
+    PatternStampLayerSpec Diamonds {};
+    Diamonds.Identity     = 1u;
+    Diamonds.Name         = "Diamond Perforation";
+    Diamonds.MotifShape   = PatternStampMotifShape::Diamond;
+    Diamonds.FillTint     = { 213u, 220u, 230u, 255u };
+    Diamonds.FillTintB    = { 232u, 194u, 122u, 255u };
+    Diamonds.WidthPx      = 38.0f;
+    Diamonds.HeightPx     = 38.0f;
+    Diamonds.FinishPreset = PatternStampFinishPreset::MetalInlay;
+    Diamonds.Channels     = {
+        ConstructChannelEntry(PatternStampSurfaceChannelKey::Albedo,    1.0f,  { 213u, 220u, 230u, 255u }),
+        ConstructChannelEntry(PatternStampSurfaceChannelKey::Roughness, 0.28f, { 158u, 162u, 170u, 255u }),
+        ConstructChannelEntry(PatternStampSurfaceChannelKey::Metalness, 0.92f, { 158u, 162u, 170u, 255u }),
+        ConstructChannelEntry(PatternStampSurfaceChannelKey::Height,    0.45f, { 158u, 162u, 170u, 255u }),
+    };
+
+    PatternStampModifierSpec Brick {};
+    Brick.Category   = PatternStampModifierCategory::GridArray;
+    Brick.GridLayout = 1u; // Brick
+    Brick.Columns    = 12;
+    Brick.Rows       = 12;
+
+    PatternStampModifierSpec Ridged {};
+    Ridged.Category       = PatternStampModifierCategory::NoiseScale;
+    Ridged.NoiseAlgorithm = 3u; // Ridged
+    Ridged.ModulateTarget = 0u;
+    Ridged.MinScale       = 0.25f;
+    Ridged.MaxScale       = 1.65f;
+    Ridged.Frequency      = 3.0f;
+    Ridged.TargetTintB    = { 232u, 194u, 122u, 255u };
+
+    Diamonds.Modifiers  = { Brick, Ridged };
+    Out.Layers          = { Diamonds };
+    Out.SelectedLayerId = Diamonds.Identity;
+}
+
+void PatternStampWorkspaceSession::PopulatePatternVoronoiPebblesPreset(PatternStampDocumentSnapshot& Out) noexcept
+{
+    Out = {};
+    Out.DocumentName         = "Voronoi Organic Pebbles";
+    Out.GroundEnabled        = true;
+    Out.GroundTintA          = { 35u, 33u, 30u, 255u };
+    Out.ShowGhostTileBorders = true;
+    Out.NextIdentitySeed     = 20u;
+
+    PatternStampLayerSpec Pebbles {};
+    Pebbles.Identity     = 1u;
+    Pebbles.Name         = "Rounded Pebbles";
+    Pebbles.MotifShape   = PatternStampMotifShape::RoundedBox;
+    Pebbles.FillTint     = { 151u, 143u, 132u, 255u };
+    Pebbles.FillTintB    = { 210u, 195u, 170u, 255u };
+    Pebbles.WidthPx      = 46.0f;
+    Pebbles.HeightPx     = 40.0f;
+    Pebbles.RotationDeg  = 15.0f;
+    Pebbles.FinishPreset = PatternStampFinishPreset::GlazedCeramic;
+    Pebbles.Channels     = {
+        ConstructChannelEntry(PatternStampSurfaceChannelKey::Albedo,    1.0f,  { 151u, 143u, 132u, 255u }),
+        ConstructChannelEntry(PatternStampSurfaceChannelKey::Roughness, 0.65f, { 158u, 162u, 170u, 255u }),
+        ConstructChannelEntry(PatternStampSurfaceChannelKey::Height,    0.55f, { 158u, 162u, 170u, 255u }),
+    };
+
+    PatternStampModifierSpec HexGrid {};
+    HexGrid.Category   = PatternStampModifierCategory::GridArray;
+    HexGrid.GridLayout = 2u; // Hex
+    HexGrid.Columns    = 9;
+    HexGrid.Rows       = 9;
+
+    PatternStampModifierSpec Scatter {};
+    Scatter.Category     = PatternStampModifierCategory::ScatterDropout;
+    Scatter.PosJitterPx  = 12.0f;
+    Scatter.RotJitterDeg = 35.0f;
+    Scatter.Dropout      = 0.06f;
+
+    PatternStampModifierSpec Worley {};
+    Worley.Category       = PatternStampModifierCategory::NoiseScale;
+    Worley.NoiseAlgorithm = 2u; // Worley
+    Worley.ModulateTarget = 0u;
+    Worley.MinScale       = 0.45f;
+    Worley.MaxScale       = 1.45f;
+    Worley.Frequency      = 3.0f;
+    Worley.TargetTintB    = { 223u, 211u, 191u, 255u };
+
+    Pebbles.Modifiers   = { HexGrid, Scatter, Worley };
+    Out.Layers          = { Pebbles };
+    Out.SelectedLayerId = Pebbles.Identity;
+}
+
+void PatternStampWorkspaceSession::PopulateStampHexFastenerPreset(PatternStampDocumentSnapshot& Out) noexcept
+{
+    Out = {};
+    Out.DocumentName         = "Hexagonal Fastener Head";
+    Out.GroundEnabled        = false;
+    Out.ShowGhostTileBorders = false;
+    Out.NextIdentitySeed     = 20u;
+
+    PatternStampLayerSpec HexHead {};
+    HexHead.Identity     = 1u;
+    HexHead.Name         = "Chamfered Hex Flange";
+    HexHead.MotifShape   = PatternStampMotifShape::Hexagon;
+    HexHead.FillTint     = { 196u, 204u, 214u, 255u };
+    HexHead.WidthPx      = 330.0f;
+    HexHead.HeightPx     = 330.0f;
+    HexHead.FinishPreset = PatternStampFinishPreset::MetalInlay;
+    HexHead.Channels     = {
+        ConstructChannelEntry(PatternStampSurfaceChannelKey::Albedo,    1.0f,  { 196u, 204u, 214u, 255u }),
+        ConstructChannelEntry(PatternStampSurfaceChannelKey::Roughness, 0.28f, { 158u, 162u, 170u, 255u }),
+        ConstructChannelEntry(PatternStampSurfaceChannelKey::Metalness, 0.96f, { 158u, 162u, 170u, 255u }),
+        ConstructChannelEntry(PatternStampSurfaceChannelKey::Height,    0.58f, { 158u, 162u, 170u, 255u }),
+    };
+
+    PatternStampLayerSpec Socket {};
+    Socket.Identity     = 2u;
+    Socket.Name         = "Recessed Socket Ring";
+    Socket.MotifShape   = PatternStampMotifShape::Ring;
+    Socket.FillTint     = { 68u, 76u, 88u, 255u };
+    Socket.WidthPx      = 176.0f;
+    Socket.HeightPx     = 176.0f;
+    Socket.FinishPreset = PatternStampFinishPreset::MetalInlay;
+    Socket.Channels     = {
+        ConstructChannelEntry(PatternStampSurfaceChannelKey::Albedo,    1.0f,  { 68u, 76u, 88u, 255u }),
+        ConstructChannelEntry(PatternStampSurfaceChannelKey::Roughness, 0.44f, { 158u, 162u, 170u, 255u }),
+        ConstructChannelEntry(PatternStampSurfaceChannelKey::Metalness, 0.88f, { 158u, 162u, 170u, 255u }),
+        ConstructChannelEntry(PatternStampSurfaceChannelKey::Height,   -0.35f, { 158u, 162u, 170u, 255u }),
+    };
+
+    Out.Layers          = { HexHead, Socket };
+    Out.SelectedLayerId = Socket.Identity;
+}
+
+void PatternStampWorkspaceSession::PopulateStampIndustrialStencilPreset(PatternStampDocumentSnapshot& Out) noexcept
+{
+    Out = {};
+    Out.DocumentName         = "Industrial Stencil Mark";
+    Out.GroundEnabled        = false;
+    Out.ShowGhostTileBorders = false;
+    Out.NextIdentitySeed     = 20u;
+
+    PatternStampLayerSpec BorderBar {};
+    BorderBar.Identity      = 1u;
+    BorderBar.Name          = "Caution Frame Box";
+    BorderBar.MotifShape    = PatternStampMotifShape::RoundedBox;
+    BorderBar.FillEnabled   = false;
+    BorderBar.StrokeWidthPx = 14.0f;
+    BorderBar.StrokeTint    = { 240u, 198u, 96u, 255u };
+    BorderBar.WidthPx       = 390.0f;
+    BorderBar.HeightPx      = 186.0f;
+    BorderBar.FinishPreset  = PatternStampFinishPreset::PrintedDye;
+    BorderBar.Channels      = {
+        ConstructChannelEntry(PatternStampSurfaceChannelKey::Albedo,    1.0f,  { 240u, 198u, 96u, 255u }),
+        ConstructChannelEntry(PatternStampSurfaceChannelKey::Roughness, 0.58f, { 158u, 162u, 170u, 255u }),
+    };
+
+    PatternStampLayerSpec SerialText {};
+    SerialText.Identity     = 2u;
+    SerialText.Name         = "Serial Stencil Text";
+    SerialText.Category     = PatternStampLayerCategory::Typographic;
+    SerialText.TextContent  = "FR-04";
+    SerialText.FontSizePx   = 92.0f;
+    SerialText.FillTint     = { 240u, 198u, 96u, 255u };
+    SerialText.WidthPx      = 320.0f;
+    SerialText.HeightPx     = 110.0f;
+    SerialText.FinishPreset = PatternStampFinishPreset::PrintedDye;
+    SerialText.Channels     = BorderBar.Channels;
+
+    Out.Layers          = { BorderBar, SerialText };
+    Out.SelectedLayerId = SerialText.Identity;
+}
+
+void PatternStampWorkspaceSession::PopulateStampRadialCogPreset(PatternStampDocumentSnapshot& Out) noexcept
+{
+    Out = {};
+    Out.DocumentName         = "Radial Cog Medallion";
+    Out.GroundEnabled        = false;
+    Out.ShowGhostTileBorders = false;
+    Out.NextIdentitySeed     = 20u;
+
+    PatternStampLayerSpec Gear {};
+    Gear.Identity     = 1u;
+    Gear.Name         = "Precision Gear Contour";
+    Gear.MotifShape   = PatternStampMotifShape::CogGear;
+    Gear.FillTint     = { 143u, 184u, 222u, 255u };
+    Gear.WidthPx      = 336.0f;
+    Gear.HeightPx     = 336.0f;
+    Gear.FinishPreset = PatternStampFinishPreset::MetalInlay;
+    Gear.Channels     = {
+        ConstructChannelEntry(PatternStampSurfaceChannelKey::Albedo,    1.0f,  { 143u, 184u, 222u, 255u }),
+        ConstructChannelEntry(PatternStampSurfaceChannelKey::Roughness, 0.25f, { 158u, 162u, 170u, 255u }),
+        ConstructChannelEntry(PatternStampSurfaceChannelKey::Metalness, 0.92f, { 158u, 162u, 170u, 255u }),
+        ConstructChannelEntry(PatternStampSurfaceChannelKey::Height,    0.48f, { 158u, 162u, 170u, 255u }),
+    };
+
+    PatternStampModifierSpec Echo {};
+    Echo.Category    = PatternStampModifierCategory::InsetEcho;
+    Echo.EchoCopies  = 3;
+    Echo.InsetStepPx = 32.0f;
+    Echo.AltTint     = { 239u, 244u, 207u, 255u };
+    Gear.Modifiers   = { Echo };
+
+    Out.Layers          = { Gear };
+    Out.SelectedLayerId = Gear.Identity;
+}
+
 void PatternStampWorkspaceSession::LoadPresetByIndex(std::size_t Index) noexcept
 {
     if (PresetDirectory.empty())
@@ -599,16 +861,28 @@ void PatternStampWorkspaceSession::LoadPresetByIndex(std::size_t Index) noexcept
 
     if (Mode == PatternStampWorkspaceMode::Pattern)
     {
-        if (ActivePresetIndex == 0u) PopulatePatternHexArrayPreset(Document);
-        else if (ActivePresetIndex == 1u) PopulatePatternKenteWeavePreset(Document);
-        else PopulatePatternRadialMandalaPreset(Document);
+        switch (ActivePresetIndex)
+        {
+            case 0u: PopulatePatternHexArrayPreset(Document);        break;
+            case 1u: PopulatePatternKenteWeavePreset(Document);      break;
+            case 2u: PopulatePatternRadialMandalaPreset(Document);   break;
+            case 3u: PopulatePatternPerlinPolkaPreset(Document);     break;
+            case 4u: PopulatePatternRidgedDiamondsPreset(Document);  break;
+            default: PopulatePatternVoronoiPebblesPreset(Document);  break;
+        }
         StatusNotice = "Non-destructive Modifier Stack";
     }
     else
     {
-        if (ActivePresetIndex == 0u) PopulateStampSolidCirclePreset(Document);
-        else if (ActivePresetIndex == 1u) PopulateStampBotanicalCrestPreset(Document);
-        else PopulateStampPrecisionReticlePreset(Document);
+        switch (ActivePresetIndex)
+        {
+            case 0u: PopulateStampSolidCirclePreset(Document);       break;
+            case 1u: PopulateStampBotanicalCrestPreset(Document);    break;
+            case 2u: PopulateStampPrecisionReticlePreset(Document);  break;
+            case 3u: PopulateStampHexFastenerPreset(Document);       break;
+            case 4u: PopulateStampIndustrialStencilPreset(Document); break;
+            default: PopulateStampRadialCogPreset(Document);         break;
+        }
         StatusNotice = "Non-destructive Modifier Stack";
     }
     for (auto& L : Document.Layers)
@@ -1595,7 +1869,7 @@ bool PatternStampWorkspaceSession::ApplyFontDrop(
     }
 
     PushUndoSnapshot();
-    const std::string DisplayFamily = TypefaceTitle.empty() ? Resolved.stem().string() : std::string(TypefaceTitle);
+    const std::string ResolvedTypefaceTitle = TypefaceTitle.empty() ? Resolved.stem().string() : std::string(TypefaceTitle);
 
     if (TargetLayerId != 0u)
     {
@@ -1603,9 +1877,9 @@ bool PatternStampWorkspaceSession::ApplyFontDrop(
         {
             if (Target->Category == PatternStampLayerCategory::Typographic)
             {
-                Target->FontAssetPath   = Resolved.string();
-                Target->FontFamilyLabel = DisplayFamily;
-                StatusNotice            = "Applied font " + DisplayFamily + " to " + Target->Name;
+                Target->FontFilePath = Resolved.string();
+                Target->TypefaceTitle = ResolvedTypefaceTitle;
+                StatusNotice          = "Applied font " + ResolvedTypefaceTitle + " to " + Target->Name;
                 BumpRevision();
                 RecomputeSummaryMetrics();
                 return true;
@@ -1619,15 +1893,15 @@ bool PatternStampWorkspaceSession::ApplyFontDrop(
     }
 
     PatternStampLayerSpec Next {};
-    Next.Identity        = Document.NextIdentitySeed++;
-    Next.Name            = DisplayFamily + " Type";
-    Next.Category        = PatternStampLayerCategory::Typographic;
-    Next.Visible         = true;
-    Next.Opacity         = 1.0f;
-    Next.TextContent     = "FRONTIER";
-    Next.FontSizePx      = 64.0f;
-    Next.FontAssetPath   = Resolved.string();
-    Next.FontFamilyLabel = DisplayFamily;
+    Next.Identity      = Document.NextIdentitySeed++;
+    Next.Name          = ResolvedTypefaceTitle + " Type";
+    Next.Category      = PatternStampLayerCategory::Typographic;
+    Next.Visible       = true;
+    Next.Opacity       = 1.0f;
+    Next.TextContent   = "FRONTIER";
+    Next.FontSizePx    = 64.0f;
+    Next.FontFilePath = Resolved.string();
+    Next.TypefaceTitle = ResolvedTypefaceTitle;
     Next.FillEnabled     = true;
     Next.FillTint        = { 239u, 244u, 207u, 255u };
     Next.FillTintB       = { 90u, 118u, 146u, 255u };
@@ -1644,7 +1918,7 @@ bool PatternStampWorkspaceSession::ApplyFontDrop(
 
     Document.Layers.push_back(std::move(Next));
     Document.SelectedLayerId = Document.Layers.back().Identity;
-    StatusNotice = "Created typographic layer with " + DisplayFamily;
+    StatusNotice = "Created typographic layer with " + ResolvedTypefaceTitle;
     BumpRevision();
     RecomputeSummaryMetrics();
     return true;
@@ -1792,8 +2066,8 @@ Codecs::VectorSpaceDocumentModel PatternStampWorkspaceSession::BuildVectorSpaceM
         Dst.CurveSmoothness   = Src.CurveSmoothness;
         Dst.TextContent       = Src.TextContent;
         Dst.FontSizePx        = Src.FontSizePx;
-        Dst.FontAssetPath     = Src.FontAssetPath;
-        Dst.FontFamilyLabel   = Src.FontFamilyLabel;
+        Dst.FontFilePath     = Src.FontFilePath;
+        Dst.TypefaceTitle   = Src.TypefaceTitle;
         Dst.LetterSpacingEm   = Src.LetterSpacingEm;
         Dst.SvgPathSnippet    = Src.SvgPathPayload;
         Dst.FillEnabled       = Src.FillEnabled;
@@ -1951,8 +2225,8 @@ bool PatternStampWorkspaceSession::LoadFromVectorSpaceModel(const Codecs::Vector
         Dst.CurveSmoothness   = Src.CurveSmoothness;
         Dst.TextContent       = Src.TextContent;
         Dst.FontSizePx        = Src.FontSizePx;
-        Dst.FontAssetPath     = Src.FontAssetPath;
-        Dst.FontFamilyLabel   = Src.FontFamilyLabel;
+        Dst.FontFilePath     = Src.FontFilePath;
+        Dst.TypefaceTitle   = Src.TypefaceTitle;
         Dst.LetterSpacingEm   = Src.LetterSpacingEm;
         Dst.SvgPathPayload    = Src.SvgPathSnippet;
         Dst.FillEnabled       = Src.FillEnabled;

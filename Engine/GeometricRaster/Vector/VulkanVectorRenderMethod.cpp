@@ -331,7 +331,7 @@ void BuildStrokeTrianglesForPolygons(
             }
             else if (CapStyle == VectorStrokeCapStyle::Square)
             {
-                auto EmitCap = [&](VectorVertex2D Tip, VectorVertex2D OutDir)
+                auto AppendStrokeCap = [&](VectorVertex2D Tip, VectorVertex2D OutDir)
                 {
                     const VectorVertex2D Nrm { -OutDir.Y, OutDir.X };
                     const VectorVertex2D P0 { Tip.X + Nrm.X * HalfW, Tip.Y + Nrm.Y * HalfW };
@@ -341,8 +341,8 @@ void BuildStrokeTrianglesForPolygons(
                     OutTriangles.push_back(P0); OutTriangles.push_back(Q0); OutTriangles.push_back(Q1);
                     OutTriangles.push_back(P0); OutTriangles.push_back(Q1); OutTriangles.push_back(P1);
                 };
-                EmitCap(Pts.front(), { -StartDir.X, -StartDir.Y });
-                EmitCap(Pts.back(), EndDir);
+                AppendStrokeCap(Pts.front(), { -StartDir.X, -StartDir.Y });
+                AppendStrokeCap(Pts.back(), EndDir);
             }
         }
     }
@@ -356,7 +356,7 @@ void BuildStrokeTrianglesForPolygons(
     }
 }
 
-[[nodiscard]] uint8_t MapThorVGBlendMode(tvg::BlendMethod Method) noexcept
+[[nodiscard]] uint8_t ResolveThorVGBlendMode(tvg::BlendMethod Method) noexcept
 {
     switch (Method)
     {
@@ -589,8 +589,8 @@ public:
         const float ScaleFactor = std::max(1.0e-4f, tvg::scaling(transform));
         const float WidthPx     = rshape.strokeWidth() * ScaleFactor;
         uint8_t Sr = 0u, Sg = 0u, Sb = 0u, Sa = 0u;
-        const bool HasStrokeTint = rshape.strokeFill(&Sr, &Sg, &Sb, &Sa) && (Sa > 0u || rshape.strokeFill() != nullptr);
-        if (WidthPx > 1.0e-4f && HasStrokeTint)
+        const bool StrokeTintActive = rshape.strokeFill(&Sr, &Sg, &Sb, &Sa) && (Sa > 0u || rshape.strokeFill() != nullptr);
+        if (WidthPx > 1.0e-4f && StrokeTintActive)
         {
             Out.StrokeEnabled = true;
             Out.StrokeWidthPx = WidthPx;
@@ -720,7 +720,7 @@ public:
 
     bool blend(tvg::BlendMethod method) override
     {
-        CurrentBlendOrdinal = MapThorVGBlendMode(method);
+        CurrentBlendOrdinal = ResolveThorVGBlendMode(method);
         return true;
     }
 

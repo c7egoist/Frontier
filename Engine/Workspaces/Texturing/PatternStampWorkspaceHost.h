@@ -88,7 +88,8 @@ private:
     void ActivateBrowserEntry(const ContentRepositoryEntry& Entry);
     void ApplyBrowserContentDrop(const ContentRepositoryEntry& Entry, Point2D DropLogicalPos);
     void AssignBrowserColourDrop(ColorRgba AssignedRgba, const ColourCodexEntry& Entry, Point2D DropLogicalPos);
-    void MapDropLogicalToDocumentAndPick(Point2D DropLogicalPos, float& OutDocX, float& OutDocY, uint32_t& OutPickedLayerId) const;
+    void ResolveCanvasDropDocumentAndPick(Point2D DropLogicalPos, float& OutDocX, float& OutDocY, uint32_t& OutPickedLayerId) const;
+    void PopulateBrowserStarterPresets();
     [[nodiscard]] std::filesystem::path ResolveWorkspaceVectorDirectory() const;
     [[nodiscard]] std::string           BuildSanitizedDocumentStem() const;
 

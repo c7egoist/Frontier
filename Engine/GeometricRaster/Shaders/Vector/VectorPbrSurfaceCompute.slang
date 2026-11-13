@@ -3,7 +3,7 @@
 //============================================================================================================================================
 // Evaluates VectorSVG, Seamless2x2, StackedPbrTile (OpenPBR direct+IBL+height normals), or any of 22 diagnostic PBR channels into SurfacePreviewImage.
 
-#include "VectorCommon.slang"
+#include "VectorSharedLayouts.slang"
 
 struct VectorSurfaceEvalParams
 {
@@ -39,14 +39,14 @@ float3 SampleFiniteNormal(int2 Coord, int WidthPx, int HeightPx, float NormalStr
 
 float3 EvaluateOpenPbrLit(int2 SampleCoord, int WidthPx, int HeightPx)
 {
-    float4 BaseRGBA = StackedColor[SampleCoord];
+    float4 PrimaryRGBA = StackedColor[SampleCoord];
     float4 PackA    = StackedPbrPackA[SampleCoord]; // Roughness, Metalness, Height, NormalStr
     float4 PackB    = StackedPbrPackB[SampleCoord]; // Occlusion, Emissive, GlowPower, Clearcoat
     float4 PackC    = StackedPbrPackC[SampleCoord]; // CoatRough, Sheen, SheenRough, Specular
     float4 PackD    = StackedPbrPackD[SampleCoord]; // Anisotropy, Iridescence, IridFilm, Subsurface
     float4 PackE    = StackedPbrExtra[SampleCoord]; // SpecColorTint.rgb, Transmission
 
-    float3 Albedo    = BaseRGBA.rgb;
+    float3 Albedo    = PrimaryRGBA.rgb;
     float  Rough     = clamp(PackA.x, 0.04, 1.0);
     float  Metal     = saturate(PackA.y);
     float  AO        = saturate(PackB.x);

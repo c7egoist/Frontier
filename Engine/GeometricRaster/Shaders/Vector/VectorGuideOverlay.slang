@@ -9,12 +9,12 @@ struct VectorOverlayUniforms
     float4 TileRectPx;          // x = TileMinX, y = TileMinY, z = TileSpanPx, w = DocExtentPx
     float4 SelectedBoundsPx;    // x = CenterX, y = CenterY, z = WidthPx, w = HeightPx
     float4 SelectedRotAndSnap;  // x = RotationRad, y = SnapStepPx, z = ZoomFraction, w = Reserved
-    uint4  OverlayFlags;        // x = ShowGrid|(ShowAxes<<1)|(GhostBorders<<2)|(Seamless2x2<<3)|(StampMode<<4), y = SelectedLayerId, z = ActiveToolOrd, w = HoveredLayerId
+    uint4  OverlayOptionBits;        // x = ShowGrid|(ShowAxes<<1)|(GhostBorders<<2)|(Seamless2x2<<3)|(StampMode<<4), y = SelectedLayerId, z = ActiveToolOrd, w = HoveredLayerId
     uint4  CountsAndActive;     // x = KnotCount, y = PinCount, z = ActiveKnotIdx, w = ActivePinIdx
     float4 MarqueeRectPx;       // xy = MinCorner, zw = MaxCorner (active when w > y && z > x)
     float4 KnotPositions[64];   // xy = DocPx anchor, zw = DocPx outgoing tangent handle (or incoming if mirrored)
     float4 KnotInHandles[64];   // xy = DocPx incoming tangent handle, z = SelectedOrSmooth, w = SubpathBreak
-    float4 PinPoints[12];       // xy = NormDocPos [0..1], z = ActiveFlag, w = HoverFlag
+    float4 PinPoints[12];       // xy = NormDocPos [0..1], z = ActiveMask, w = HoverMask
     float4 PinColors[12];       // rgb = Pin tint
 };
 
@@ -73,12 +73,12 @@ OverlayFSOutput FragmentEntry(OverlayVSOutput In)
     float2 TileOrigin = OverlayUniforms.TileRectPx.xy;
     float  TileSpan   = max(1.0, OverlayUniforms.TileRectPx.z);
     float  DocExtent  = max(1.0, OverlayUniforms.TileRectPx.w);
-    uint   Flags      = OverlayUniforms.OverlayFlags.x;
+    uint OptionBits   = OverlayUniforms.OverlayOptionBits.x;
 
-    bool ShowGrid     = (Flags & 1u) != 0u;
-    bool ShowAxes     = (Flags & 2u) != 0u;
-    bool GhostBorders = (Flags & 4u) != 0u;
-    bool Seamless2x2  = (Flags & 8u) != 0u;
+    bool ShowGrid     = (OptionBits & 1u) != 0u;
+    bool ShowAxes     = (OptionBits & 2u) != 0u;
+    bool GhostBorders = (OptionBits & 4u) != 0u;
+    bool Seamless2x2  = (OptionBits & 8u) != 0u;
 
     float2 TileUV = (ScreenP - TileOrigin) / TileSpan;
     bool InsideTile = (TileUV.x >= 0.0 && TileUV.x <= 1.0 && TileUV.y >= 0.0 && TileUV.y <= 1.0);
@@ -132,8 +132,8 @@ OverlayFSOutput FragmentEntry(OverlayVSOutput In)
         }
 
         // Hover & selected layer silhouette boundary highlight
-        uint SelLayer = OverlayUniforms.OverlayFlags.y;
-        uint HovLayer = OverlayUniforms.OverlayFlags.w;
+        uint SelLayer = OverlayUniforms.OverlayOptionBits.y;
+        uint HovLayer = OverlayUniforms.OverlayOptionBits.w;
         int2 PxR = int2(min(int(PickW) - 1, PickCoord.x + 1), PickCoord.y);
         int2 PxU = int2(PickCoord.x, min(int(PickH) - 1, PickCoord.y + 1));
         uint RightId = StackedPickTexture.Load(int3(PxR, 0)).x;
@@ -179,7 +179,7 @@ OverlayFSOutput FragmentEntry(OverlayVSOutput In)
     }
 
     // Selected layer bounding frame
-    if (OverlayUniforms.OverlayFlags.y != 0u && OverlayUniforms.SelectedBoundsPx.z > 2.0)
+    if (OverlayUniforms.OverlayOptionBits.y != 0u && OverlayUniforms.SelectedBoundsPx.z > 2.0)
     {
         float2 BCenter = DocToScreen(OverlayUniforms.SelectedBoundsPx.xy);
         float2 BHalf   = 0.5 * (OverlayUniforms.SelectedBoundsPx.zw / DocExtent) * TileSpan;
@@ -187,8 +187,8 @@ OverlayFSOutput FragmentEntry(OverlayVSOutput In)
         float  SinR    = sin(-OverlayUniforms.SelectedRotAndSnap.x);
         float2 RelS    = ScreenP - BCenter;
         float2 LocalB  = float2(RelS.x * CosR - RelS.y * SinR, RelS.x * SinR + RelS.y * CosR);
-        float  OnBox   = max(abs(LocalB.x) - BHalf.x, abs(LocalB.y) - BHalf.y);
-        if (abs(OnBox) < 1.25 && abs(LocalB.x) <= BHalf.x + 2.0 && abs(LocalB.y) <= BHalf.y + 2.0)
+        float  BoxEdgeDist = max(abs(LocalB.x) - BHalf.x, abs(LocalB.y) - BHalf.y);
+        if (abs(BoxEdgeDist) < 1.25 && abs(LocalB.x) <= BHalf.x + 2.0 && abs(LocalB.y) <= BHalf.y + 2.0)
         {
             ColorRGB = lerp(ColorRGB, float3(0.937, 0.957, 0.812), 0.72);
         }
@@ -196,7 +196,7 @@ OverlayFSOutput FragmentEntry(OverlayVSOutput In)
 
     // Bezier curve knots & tangent arms (EditPoints / Curve / Pen tools)
     uint KnotCount = min(OverlayUniforms.CountsAndActive.x, 64u);
-    uint ToolOrd   = OverlayUniforms.OverlayFlags.z;
+    uint ToolOrd   = OverlayUniforms.OverlayOptionBits.z;
     if (KnotCount > 0u && (ToolOrd == 1u || ToolOrd == 2u || ToolOrd == 3u))
     {
         for (uint K = 0u; K < KnotCount; ++K)
@@ -211,18 +211,18 @@ OverlayFSOutput FragmentEntry(OverlayVSOutput In)
                 ColorRGB = lerp(ColorRGB, float3(0.463, 0.698, 0.847), 0.85);
             }
             float AnchorD = length(ScreenP - AnchorS);
-            bool IsActiveK = (K == OverlayUniforms.CountsAndActive.z);
+            bool ActiveKnotMatch = (K == OverlayUniforms.CountsAndActive.z);
             if (AnchorD <= 5.5)
             {
-                float3 KCol = IsActiveK ? float3(0.937, 0.957, 0.812) : float3(0.14, 0.16, 0.20);
+                float3 KCol = ActiveKnotMatch ? float3(0.937, 0.957, 0.812) : float3(0.14, 0.16, 0.20);
                 float3 Rim  = float3(0.937, 0.957, 0.812);
                 ColorRGB = (AnchorD > 3.6) ? Rim : KCol;
-                OutPick  = uint4(OverlayUniforms.OverlayFlags.y, K, 1u, 0u);
+                OutPick  = uint4(OverlayUniforms.OverlayOptionBits.y, K, 1u, 0u);
             }
             else if (min(length(ScreenP - OutS), length(ScreenP - InS)) <= 4.0)
             {
                 ColorRGB = float3(0.463, 0.698, 0.847);
-                OutPick  = uint4(OverlayUniforms.OverlayFlags.y, K, 1u, 0u);
+                OutPick  = uint4(OverlayUniforms.OverlayOptionBits.y, K, 1u, 0u);
             }
         }
     }
@@ -234,18 +234,18 @@ OverlayFSOutput FragmentEntry(OverlayVSOutput In)
         if (OverlayUniforms.PinPoints[P].z < 0.5) continue;
         float2 PinS = TileOrigin + OverlayUniforms.PinPoints[P].xy * TileSpan;
         float  Dist = length(ScreenP - PinS);
-        bool IsActiveP = (P == OverlayUniforms.CountsAndActive.w);
+        bool ActivePinMatch = (P == OverlayUniforms.CountsAndActive.w);
         if (Dist <= 8.5)
         {
             if (Dist > 6.0)
             {
-                ColorRGB = IsActiveP ? float3(0.937, 0.957, 0.812) : float3(0.95, 0.96, 0.98);
+                ColorRGB = ActivePinMatch ? float3(0.937, 0.957, 0.812) : float3(0.95, 0.96, 0.98);
             }
             else
             {
                 ColorRGB = OverlayUniforms.PinColors[P].rgb;
             }
-            OutPick = uint4(OverlayUniforms.OverlayFlags.y, P, 2u, 0u);
+            OutPick = uint4(OverlayUniforms.OverlayOptionBits.y, P, 2u, 0u);
         }
     }
 

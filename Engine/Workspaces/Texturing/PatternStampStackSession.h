@@ -316,8 +316,8 @@ struct PatternStampLayerSpec
     GeometricRaster::VectorStrokeJoinStyle StrokeJoin = GeometricRaster::VectorStrokeJoinStyle::Round;
     bool                  EvenOddFillRule   = false;
 
-    std::string           FontAssetPath     { "EngineContent/FontsArchives/Archivo/Archivo-Bold.ttf" };
-    std::string           FontFamilyLabel   { "Archivo Bold" };
+    std::string           FontFilePath     { "EngineContent/FontsArchives/Archivo/Archivo-Bold.ttf" };
+    std::string           TypefaceTitle   { "Archivo Bold" };
     float                 LetterSpacingEm   = 0.0f;
     std::string           SvgPathPayload    {};
     std::vector<GeometricRaster::VectorCubicSubpath> CubicSubpaths {};
@@ -506,9 +506,15 @@ private:
     void PopulatePatternHexArrayPreset(PatternStampDocumentSnapshot& Out) noexcept;
     void PopulatePatternKenteWeavePreset(PatternStampDocumentSnapshot& Out) noexcept;
     void PopulatePatternRadialMandalaPreset(PatternStampDocumentSnapshot& Out) noexcept;
+    void PopulatePatternPerlinPolkaPreset(PatternStampDocumentSnapshot& Out) noexcept;
+    void PopulatePatternRidgedDiamondsPreset(PatternStampDocumentSnapshot& Out) noexcept;
+    void PopulatePatternVoronoiPebblesPreset(PatternStampDocumentSnapshot& Out) noexcept;
     void PopulateStampSolidCirclePreset(PatternStampDocumentSnapshot& Out) noexcept;
     void PopulateStampBotanicalCrestPreset(PatternStampDocumentSnapshot& Out) noexcept;
     void PopulateStampPrecisionReticlePreset(PatternStampDocumentSnapshot& Out) noexcept;
+    void PopulateStampHexFastenerPreset(PatternStampDocumentSnapshot& Out) noexcept;
+    void PopulateStampIndustrialStencilPreset(PatternStampDocumentSnapshot& Out) noexcept;
+    void PopulateStampRadialCogPreset(PatternStampDocumentSnapshot& Out) noexcept;
 
     std::size_t                          ActivePresetIndex = 0u;
     std::vector<PatternStampPresetDescriptor> PresetDirectory   {};

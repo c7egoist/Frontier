@@ -3,7 +3,7 @@
 //============================================================================================================================================
 // Stencil winding/even-odd triangle fan rasterizer supporting per-instance transform, domain warp, and seamless tile wrapping.
 
-#include "VectorCommon.slang"
+#include "VectorSharedLayouts.slang"
 
 [[vk::push_constant]] VectorRasterPushConstants PushArgs;
 [[vk::binding(0, 0)]] ConstantBuffer<VectorLayerUniforms> LayerUniforms;
@@ -35,9 +35,9 @@ StencilVSOutput VertexEntry(uint VertexID : SV_VulkanVertexID)
     else
     {
         // Document-space offset when SVG / extracted paths undergo array offsets
-        float BaseCx = LayerUniforms.GeometryBounds.x;
-        float BaseCy = LayerUniforms.GeometryBounds.y;
-        float2 Rel   = LocalP - float2(BaseCx, BaseCy);
+        float OriginCx = LayerUniforms.GeometryBounds.x;
+        float OriginCy = LayerUniforms.GeometryBounds.y;
+        float2 Rel   = LocalP - float2(OriginCx, OriginCy);
         WorldP = float2(
             Inst.TransformRow0.x * Rel.x + Inst.TransformRow0.y * Rel.y + Inst.TransformRow0.z,
             Inst.TransformRow1.x * Rel.x + Inst.TransformRow1.y * Rel.y + Inst.TransformRow1.z);

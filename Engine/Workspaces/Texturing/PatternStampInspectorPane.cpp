@@ -158,10 +158,10 @@ void PatternStampInspectorPane::Render(
     const float LeftX  = Bounds.X + PadX;
     float       TopY   = Bounds.Y + 12.0f;
 
-    const bool IsPattern = (Session->Mode == PatternStampWorkspaceMode::Pattern);
+    const bool PatternModeActive = (Session->Mode == PatternStampWorkspaceMode::Pattern);
 
     // 1. Header
-    TopY += ConstructPaneHeadingBar(Surface, LeftX, TopY, InnerW, "Layer & Modifiers", IsPattern ? "VECTOR + PBR" : "DECAL + PBR", Theme);
+    TopY += ConstructPaneHeadingBar(Surface, LeftX, TopY, InnerW, "Layer & Modifiers", PatternModeActive ? "VECTOR + PBR" : "DECAL + PBR", Theme);
     TopY += 6.0f;
 
     // 2. Document Title + Active Layer Eyebrow
@@ -937,16 +937,16 @@ void PatternStampInspectorPane::Render(
 
         float ModChipH = 26.0f;
         {
-            float TempX = 0.0f;
+            float RowCursorX = 0.0f;
             for (const auto& Lbl : AddModBufs)
             {
                 const float CW = std::min(Iw, WorkspaceAppearance::MeasureWeightedTextWidth(Surface, FontWeightClass::Regular, 8.8f, Lbl) + 26.0f);
-                if (TempX > 0.0f && TempX + CW > Iw + 0.5f)
+                if (RowCursorX > 0.0f && RowCursorX + CW > Iw + 0.5f)
                 {
-                    TempX = 0.0f;
+                    RowCursorX = 0.0f;
                     ModChipH += 29.0f;
                 }
-                TempX += CW + 6.0f;
+                RowCursorX += CW + 6.0f;
             }
         }
 
@@ -1310,7 +1310,7 @@ void PatternStampInspectorPane::Render(
     {
         GroundBodyH = 38.0f;
         if (Session->Document.GroundEnabled) GroundBodyH += 38.0f;
-        if (IsPattern) GroundBodyH += 34.0f;
+        if (PatternModeActive) GroundBodyH += 34.0f;
     }
     const Rectangle2D GroundSecR{ LeftX, CursorY, InnerW, 38.0f + GroundBodyH };
     BeginSectionContainer(Surface, GroundSecR, Theme, 18.0f);
@@ -1350,7 +1350,7 @@ void PatternStampInspectorPane::Render(
             }
             Gy += 38.0f;
         }
-        if (IsPattern)
+        if (PatternModeActive)
         {
             bool BordersOn = Session->Document.ShowGhostTileBorders;
             if (ConstructSwitchControlRow(Surface, LeftX + 12.0f, Gy, InnerW - 24.0f, "Show Ghost Repeat Borders", BordersOn, Theme, BodyInput.PrimaryPointer))

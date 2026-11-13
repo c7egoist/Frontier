@@ -3,7 +3,7 @@
 //============================================================================================================================================
 // Compute blending of per-layer RGBA16F + Pick + procedural Mask + BevelEdgeWear into StackedColor & 4x RGBA16F OpenPBR surface packs.
 
-#include "VectorCommon.slang"
+#include "VectorSharedLayouts.slang"
 
 [[vk::binding(0, 0)]] ConstantBuffer<VectorLayerUniforms> LayerUniforms;
 [[vk::binding(1, 0)]] [format("rgba16f")] RWTexture2D<float4> LayerCoverColor;
@@ -18,18 +18,18 @@
 
 float EvaluateLayerMask(float2 UV)
 {
-    uint Flags = uint(LayerUniforms.FillAux.w + 0.5);
-    bool Enabled = (Flags & 1u) != 0u;
+    uint OptionBits = uint(LayerUniforms.FillAux.w + 0.5);
+    bool Enabled = (OptionBits & 1u) != 0u;
     if (!Enabled)
     {
         return 1.0;
     }
-    bool  Invert    = (Flags & 2u) != 0u;
+    bool  Invert    = (OptionBits & 2u) != 0u;
     uint  Mode      = uint(LayerUniforms.MaskParams.x + 0.5);
     float Freq      = max(0.25, LayerUniforms.MaskParams.y);
     float Threshold = LayerUniforms.MaskParams.z;
     float Softness  = max(0.01, LayerUniforms.MaskParams.w);
-    uint  Seed      = uint(max(0.0, LayerUniforms.MaskSeedAndFlags.x) + 0.5);
+    uint  Seed      = uint(max(0.0, LayerUniforms.MaskSeedAndOptions.x) + 0.5);
 
     float Signal = 1.0;
     if (Mode == 1u) // Radial mask
@@ -98,10 +98,10 @@ void ComputeEntry(uint3 DispatchID : SV_DispatchThreadID)
     float4 SrcRGBA = LayerCoverColor[Coord];
     uint4  SrcPick = LayerCoverPick[Coord];
 
-    uint LayerFlags = uint(LayerUniforms.FillAux.w + 0.5);
-    bool IsGround   = (LayerFlags & 8u) != 0u;
+    uint LayerOptionBits = uint(LayerUniforms.FillAux.w + 0.5);
+    bool GroundLayerEntry = (LayerOptionBits & 8u) != 0u;
 
-    if (IsGround)
+    if (GroundLayerEntry)
     {
         float4 GroundRGBA = LayerUniforms.FillTintA;
         uint FillMode = LayerUniforms.FillHeader.x;
@@ -141,10 +141,10 @@ void ComputeEntry(uint3 DispatchID : SV_DispatchThreadID)
     }
 
     // Bevel & Edge Wear modulation from neighboring silhouette alpha gradient
-    float BevelWear = saturate(LayerUniforms.MaskSeedAndFlags.y);
+    float BevelWear = saturate(LayerUniforms.MaskSeedAndOptions.y);
     float HeightMod = LayerUniforms.PbrScalars0.z;
     float RoughMod  = LayerUniforms.PbrScalars0.x;
-    float3 BaseSrcRGB = SrcRGBA.rgb;
+    float3 RawSrcRGB = SrcRGBA.rgb;
 
     if (BevelWear > 1.0e-4)
     {
@@ -161,12 +161,12 @@ void ComputeEntry(uint3 DispatchID : SV_DispatchThreadID)
 
         HeightMod  = saturate(HeightMod * (1.0 - EdgeSlope * 0.35 * BevelWear));
         RoughMod   = saturate(RoughMod + EdgeFactor * 0.38);
-        BaseSrcRGB = lerp(BaseSrcRGB, BaseSrcRGB * 0.72 + float3(0.16, 0.14, 0.12), EdgeFactor * 0.55);
+        RawSrcRGB = lerp(RawSrcRGB, RawSrcRGB * 0.72 + float3(0.16, 0.14, 0.12), EdgeFactor * 0.55);
     }
 
     float4 DstRGBA = StackedColor[Coord];
     uint   BlendMode = uint(LayerUniforms.StyleParams.z + 0.5);
-    float3 BlendedRGB = BlendVectorRGB(DstRGBA.rgb, BaseSrcRGB, BlendMode);
+    float3 BlendedRGB = BlendVectorRGB(DstRGBA.rgb, RawSrcRGB, BlendMode);
     float3 FinalRGB   = lerp(DstRGBA.rgb, BlendedRGB, Alpha);
     float  FinalA     = saturate(DstRGBA.a + Alpha * (1.0 - DstRGBA.a));
 

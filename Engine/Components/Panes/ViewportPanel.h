@@ -233,6 +233,9 @@ private:
     ForceConstructCategory     ForceConstructTab       = ForceConstructCategory::All;             // [-]   - Active Force Construct rail tab
     float                      ConstructGridScrollY    = 0.0f;                                    // [px]  - Construct tile grid scroll offset
     TextEditBuffer             ConstructSearchEditor   {};                                        // [-]   - Construct search filter buffer
+    float                      ViewportZoomScale       = 1.0f;                                    // [x]   - Interactive canvas zoom multiplier
+    Rectangle2D                LastCanvasPaneBounds    {};                                        // [px]  - Last rendered active sub-viewport rect
+    NavigationCallback         OnNavigationDirective   {};                                        // [-]   - Optional callback when + / - / Fit triggers
     std::vector<ViewportConstructPresetEntry> ConstructPresets {};                                // [-]   - Optional Force presets shown in Construct dialog
     std::function<void(uint32_t)>             ConstructPresetCallback {};                         // [-]   - Callback invoked when preset tile chosen
     std::function<void()>                     OpenContentBrowserCallback {};                      // [-]   - Callback invoked by Content Browser button
@@ -247,9 +250,6 @@ private:
     std::string                     ProbeReadoutText         {};                                       // [-]   - Optional bottom anemometer strip
     SimulationSpace::ForceFields::ForceOverlaySettings ForceOverlay{};                                 // [-]   - Editor Force Viz overlay parameters
     ImTextureData                   CanvasRasterTexture      {};                                       // [-]   - Optional live GTX/RTX viewport texture
-    float                      ViewportZoomScale       = 1.0f;                                    // [x]   - Interactive canvas zoom multiplier
-    Rectangle2D                LastCanvasPaneBounds    {};                                        // [px]  - Last rendered active sub-viewport rect
-    NavigationCallback         OnNavigationDirective   {};                                        // [-]   - Optional callback when + / - / Fit triggers
 };
 
 //------------------------------------------------------------------------------------------------------------------------

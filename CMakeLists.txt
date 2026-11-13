@@ -15,8 +15,9 @@ include(CTest)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-set(FRONTIER_PROFILE "Development" CACHE STRING "Active Frontier build profile (Editor, Development, Shipping)")
+set(FRONTIER_PROFILE "Editor" CACHE STRING "Active Frontier build profile (Editor, Development, Shipping)")
 set_property(CACHE FRONTIER_PROFILE PROPERTY STRINGS Editor Development Shipping)
 
 option(FRONTIER_ENABLE_EOS_SDK    "Compile proprietary Epic Online Services transport adapter instead of open-source stub" OFF)
@@ -69,16 +70,16 @@ target_compile_definitions(FrontierCompileSettings INTERFACE
 if(MSVC)
     target_compile_options(FrontierCompileSettings INTERFACE /utf-8 /W4 /permissive-)
     if(FRONTIER_PROFILE STREQUAL "Shipping")
-        target_compile_options(FrontierCompileSettings INTERFACE /O2 /DNDEBUG)
+        target_compile_options(FrontierCompileSettings INTERFACE $<$<NOT:$<CONFIG:Debug>>:/O2> /DNDEBUG)
     else()
-        target_compile_options(FrontierCompileSettings INTERFACE /Zi)
+        target_compile_options(FrontierCompileSettings INTERFACE $<$<NOT:$<CONFIG:Debug>>:/O2> /Zi)
     endif()
 else()
     target_compile_options(FrontierCompileSettings INTERFACE -Wall -Wextra -Wpedantic)
     if(FRONTIER_PROFILE STREQUAL "Shipping")
         target_compile_options(FrontierCompileSettings INTERFACE -O3 -DNDEBUG)
     else()
-        target_compile_options(FrontierCompileSettings INTERFACE -O1 -g)
+        target_compile_options(FrontierCompileSettings INTERFACE -O2 -g)
     endif()
 endif()
 
@@ -186,30 +187,18 @@ set(FRONTIER_UI_COMPONENT_SOURCES
     Engine/Workspaces/UV/UVViewportInteractor.cpp
     Engine/Workspaces/UV/UVViewportHost.cpp
     Engine/Workspaces/UV/UVWorkspaceHost.cpp
-    Engine/Workspaces/Texturing/MaterialWorkspaceSession.cpp
-    Engine/Workspaces/Texturing/MaterialSurfacePane.cpp
-    Engine/Workspaces/Texturing/MaterialInspectorPane.cpp
-    Engine/Workspaces/Texturing/MaterialWorkspaceHost.cpp
     Engine/Workspaces/Texturing/PatternStampLayerStackPane.cpp
     Engine/Workspaces/Texturing/PatternStampToolHeaderPane.cpp
     Engine/Workspaces/Texturing/PatternStampInspectorPane.cpp
     Engine/Workspaces/Texturing/VectorViewportInteractor.cpp
     Engine/Workspaces/Texturing/PatternStampWorkspaceHost.cpp
-    Engine/Workspaces/Texturing/BakingWorkspaceSession.cpp
-    Engine/Workspaces/Texturing/BakingTargetsPane.cpp
-    Engine/Workspaces/Texturing/BakingViewportPane.cpp
-    Engine/Workspaces/Texturing/BakingInspectorPane.cpp
-    Engine/Workspaces/Texturing/BakingWorkspaceHost.cpp
-    Engine/Workspaces/Texturing/TexturePaintSession.cpp
-    Engine/Workspaces/Texturing/TexturePaintLayerStackPane.cpp
-    Engine/Workspaces/Texturing/TexturePaintViewportPane.cpp
-    Engine/Workspaces/Texturing/TexturePaintInspectorPane.cpp
-    Engine/Workspaces/Texturing/TexturePaintWorkspaceHost.cpp
     Engine/GeometricRaster/Rasterization/ImGuiOverlayRasterization.cpp
+    Engine/GeometricRaster/Gizmo/WorldGizmoOverlayRasterization.cpp
     Engine/GeometricRaster/GlobalIllumination/ShowcaseGalleryScene.cpp
     Engine/Input/ImGuiInputAdapter.cpp
     Engine/Configuration/InputSettings.cpp
     Engine/Configuration/ProjectSpaceRepository.cpp
+    Engine/Configuration/ProjectGenerator.cpp
     Engine/Lifecycle/WorkspaceLifecycle.cpp
 )
 if(NOT ANDROID)
@@ -274,9 +263,10 @@ frontier_compile_slang_shader(ImGuiOverlayRasterization.slang FragmentEntry frag
 frontier_compile_slang_shader(SelectionMaskCompute.slang     ComputeEntry  compute  SelectionMaskCompute.comp.spv)
 frontier_compile_slang_shader(ViewportPickReduction.slang    ComputeEntry  compute  ViewportPickReduction.comp.spv)
 frontier_compile_slang_shader(UVDistortionInspection.slang   ComputeEntry  compute  UVDistortionInspection.comp.spv)
-frontier_compile_slang_shader(StretchRelaxCompute.slang      ComputeEntry  compute  StretchRelaxCompute.comp.spv)
-frontier_compile_slang_shader(ConcaveSkylineCompute.slang    ComputeEntry  compute  ConcaveSkylineCompute.comp.spv)
-frontier_compile_slang_shader(CameraVisualEffects.slang      ComputeEntry  compute  CameraVisualEffects.comp.spv)
+frontier_compile_slang_shader(StretchRelaxCompute.slang               ComputeEntry  compute  StretchRelaxCompute.comp.spv)
+frontier_compile_slang_shader(ConcaveSkylineCompute.slang             ComputeEntry  compute  ConcaveSkylineCompute.comp.spv)
+frontier_compile_slang_shader(CameraVisualEffects.slang               ComputeEntry  compute  CameraVisualEffects.comp.spv)
+frontier_compile_slang_shader(WorldViewportRadiometricCompute.slang   ComputeEntry  compute  WorldViewportRadiometricCompute.comp.spv)
 
 set(FRONTIER_MODULAR_SHADER_DIR "${CMAKE_SOURCE_DIR}/Engine/Shaders")
 
@@ -382,7 +372,7 @@ function(frontier_compile_vector_slang_shader SLANG_REL_PATH ENTRY_NAME STAGE_KI
             -o "${OUT_SPV}"
         DEPENDS
             "${IN_SLANG}"
-            "${FRONTIER_SHADER_SRC_DIR}/Vector/VectorCommon.slang"
+            "${FRONTIER_SHADER_SRC_DIR}/Vector/VectorSharedLayouts.slang"
         COMMENT "[Slang] Compiling Vector/${SLANG_REL_PATH} (${STAGE_KIND}:${ENTRY_NAME}) -> ${OUT_SPV_NAME}"
         VERBATIM
     )
@@ -446,6 +436,7 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/GeometricRaster/GlobalIllumination/IrradianceLatticeSequence.cpp
     Engine/GeometricRaster/GlobalIllumination/SpecularReflectionSequence.cpp
     Engine/GeometricRaster/GlobalIllumination/TieredWorldRenderSequence.cpp
+    Engine/GeometricRaster/GlobalIllumination/VulkanWorldRenderSequence.cpp
     Engine/Components/Camera/CameraComponent.cpp
     Engine/Components/Camera/VisualEffects/CameraOpticsEncoder.cpp
     Engine/GeometrySpace/Network/PolygonNetwork.cpp
@@ -476,6 +467,8 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/Input/InputExchange.cpp
     Engine/Input/InputExtension.cpp
     Engine/Lifecycle/RuntimeLifecycle.cpp
+    Engine/Lifecycle/ProjectExecutionRunner.cpp
+    Engine/Workspaces/WorkspaceCapabilityRegister.cpp
     Engine/Windowing/PlatformWindowStub.cpp
     Engine/Threading/Sync/ThreadProgressionTracker.cpp
     Engine/Threading/Tasks/TaskChannel.cpp
@@ -553,6 +546,7 @@ endif()
 if(FRONTIER_PROFILE STREQUAL "Editor")
     list(APPEND FRONTIER_ENGINE_SOURCES
         Engine/Editor/Explorer/ContentBrowser.cpp
+        Engine/Editor/Explorer/ProjectBrowser.cpp
         Engine/Editor/Workspaces/Simulation/ForcePresetBrowserPanel.cpp
         Engine/Editor/Workspaces/Simulation/ForceInspectorView.cpp
         Engine/Editor/Workspaces/Simulation/VectorFieldOverlaySequence.cpp
@@ -596,10 +590,71 @@ if(NOT ANDROID)
 endif()
 
 #------------------------------------------------------------------------------------------------------------------------
-#                                    DESKTOP APPLICATION EXECUTABLES (FRONTIERUV & FRONTIEREDITOR)
+#                         SHARED ENGINE & WORKSPACE UI BINARIES FOR GENERATED PROJECTS (Binaries/Win64)
+#------------------------------------------------------------------------------------------------------------------------
+
+set(FRONTIER_SHARED_BIN_DIR "${CMAKE_BINARY_DIR}/Binaries/Win64")
+
+add_library(FrontierEngineRuntimeDll SHARED Engine/Lifecycle/ProjectExecutionRunner.cpp)
+set_target_properties(FrontierEngineRuntimeDll PROPERTIES
+    OUTPUT_NAME                "FrontierEngine"
+    CXX_VISIBILITY_PRESET      "hidden"
+    VISIBILITY_INLINES_HIDDEN  ON
+    RUNTIME_OUTPUT_DIRECTORY   "${FRONTIER_SHARED_BIN_DIR}"
+    LIBRARY_OUTPUT_DIRECTORY   "${FRONTIER_SHARED_BIN_DIR}"
+    ARCHIVE_OUTPUT_DIRECTORY   "${FRONTIER_SHARED_BIN_DIR}"
+)
+target_compile_definitions(FrontierEngineRuntimeDll PRIVATE FRONTIER_BUILDING_ENGINE_DLL=1)
+target_link_libraries(FrontierEngineRuntimeDll PRIVATE FrontierEngine)
+if(UNIX AND NOT APPLE)
+    target_link_options(FrontierEngineRuntimeDll PRIVATE "-Wl,--exclude-libs,ALL")
+endif()
+
+if(NOT ANDROID AND NOT FRONTIER_PROFILE STREQUAL "Shipping")
+    add_library(FrontierWorkspaceUiDll SHARED Engine/Lifecycle/ProjectExecutionRunner.cpp)
+    set_target_properties(FrontierWorkspaceUiDll PROPERTIES
+        OUTPUT_NAME                "FrontierWorkspaceUi"
+        CXX_VISIBILITY_PRESET      "hidden"
+        VISIBILITY_INLINES_HIDDEN  ON
+        RUNTIME_OUTPUT_DIRECTORY   "${FRONTIER_SHARED_BIN_DIR}"
+        LIBRARY_OUTPUT_DIRECTORY   "${FRONTIER_SHARED_BIN_DIR}"
+        ARCHIVE_OUTPUT_DIRECTORY   "${FRONTIER_SHARED_BIN_DIR}"
+    )
+    target_compile_definitions(FrontierWorkspaceUiDll PRIVATE
+        FRONTIER_BUILDING_WORKSPACE_UI_DLL=1
+        FRONTIER_COMPILE_WORKSPACE_UI_RUNNER=1
+        "FRONTIER_REPO_ROOT_DIR=\"${CMAKE_SOURCE_DIR}\""
+    )
+    target_link_libraries(FrontierWorkspaceUiDll PRIVATE FrontierEngine FrontierImGui)
+    if(UNIX AND NOT APPLE)
+        target_link_options(FrontierWorkspaceUiDll PRIVATE "-Wl,--exclude-libs,ALL")
+    endif()
+endif()
+
+foreach(CFG_TYPE DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
+    set_target_properties(FrontierEngineRuntimeDll PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY_${CFG_TYPE} "${FRONTIER_SHARED_BIN_DIR}"
+        LIBRARY_OUTPUT_DIRECTORY_${CFG_TYPE} "${FRONTIER_SHARED_BIN_DIR}"
+        ARCHIVE_OUTPUT_DIRECTORY_${CFG_TYPE} "${FRONTIER_SHARED_BIN_DIR}"
+    )
+    if(TARGET FrontierWorkspaceUiDll)
+        set_target_properties(FrontierWorkspaceUiDll PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY_${CFG_TYPE} "${FRONTIER_SHARED_BIN_DIR}"
+            LIBRARY_OUTPUT_DIRECTORY_${CFG_TYPE} "${FRONTIER_SHARED_BIN_DIR}"
+            ARCHIVE_OUTPUT_DIRECTORY_${CFG_TYPE} "${FRONTIER_SHARED_BIN_DIR}"
+        )
+    endif()
+endforeach()
+
+#------------------------------------------------------------------------------------------------------------------------
+#                              DESKTOP APPLICATION EXECUTABLES (FRONTIER, FRONTIERUV & FRONTIEREDITOR)
 #------------------------------------------------------------------------------------------------------------------------
 
 if(NOT ANDROID AND NOT FRONTIER_PROFILE STREQUAL "Shipping")
+    add_executable(Frontier Engine/Lifecycle/FrontierHostLaunch.cpp)
+    target_compile_definitions(Frontier PRIVATE "FRONTIER_REPO_ROOT_DIR=\"${CMAKE_SOURCE_DIR}\"")
+    target_link_libraries(Frontier PRIVATE FrontierEngine FrontierImGui)
+
     add_executable(FrontierUV Engine/Lifecycle/FrontierUVLaunch.cpp)
     target_compile_definitions(FrontierUV PRIVATE "FRONTIER_REPO_ROOT_DIR=\"${CMAKE_SOURCE_DIR}\"")
     target_link_libraries(FrontierUV PRIVATE FrontierEngine FrontierImGui)
@@ -652,16 +707,14 @@ if(BUILD_TESTING)
     frontier_register_exhibit(TieredWorldRenderValidation    Exhibits/TieredWorldRenderValidation.cpp)
     frontier_register_exhibit(UVRasterPickingGizmoValidation    Exhibits/UVRasterPickingGizmoValidation.cpp)
     frontier_register_exhibit(UVWorkspaceUIValidation           Exhibits/UVWorkspaceUIValidation.cpp)
-    frontier_register_exhibit(MaterialWorkspaceUIValidation     Exhibits/MaterialWorkspaceUIValidation.cpp)
     frontier_register_exhibit(PatternStampWorkspaceUIValidation Exhibits/PatternStampWorkspaceUIValidation.cpp)
-    frontier_register_exhibit(BakingWorkspaceUIValidation       Exhibits/BakingWorkspaceUIValidation.cpp)
-    frontier_register_exhibit(TexturePaintWorkspaceUIValidation Exhibits/TexturePaintWorkspaceUIValidation.cpp)
     frontier_register_exhibit(UVParameterizationValidation      Exhibits/UVParameterizationValidation.cpp)
     frontier_register_exhibit(UVInteractiveAuthoringValidation  Exhibits/UVInteractiveAuthoringValidation.cpp)
     frontier_register_exhibit(UVBoundaryValidation              Exhibits/UVBoundaryValidation.cpp)
     frontier_register_exhibit(UVAuthoringChaosValidation        Exhibits/UVAuthoringChaosValidation.cpp)
     frontier_register_exhibit(NetworkingSpaceValidation         Exhibits/NetworkingSpaceValidation.cpp)
     frontier_register_exhibit(VectorFieldValidation             Exhibits/VectorFieldValidation.cpp)
+    frontier_register_exhibit(ProjectBrowserValidation          Exhibits/ProjectBrowserValidation.cpp)
     frontier_register_exhibit(VectorGraphicsGPUValidation       Exhibits/VectorGraphicsGPUValidation.cpp)
 
     if(NOT ANDROID AND NOT FRONTIER_PROFILE STREQUAL "Shipping")
