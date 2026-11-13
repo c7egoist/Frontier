@@ -689,7 +689,16 @@ fn emitParticles(@builtin(global_invocation_id) gid: vec3u) {
   }
   var initAge = 0.0;
   let curlMode = u32(S.mol.x + 0.5);
-  if (curlMode == 1u) {
+  if (curlMode >= 4u) {
+    life = 1.0e9;
+    initAge = 0.0;
+    pos = S.origin.xyz;
+    vel = vec3f(0.0);
+    eZ = f32(idx);
+    for (var k = 0u; k < 20u; k++) {
+      trailBuf[idx * 20u + k] = vec4f(pos, 0.0);
+    }
+  } else if (curlMode == 1u) {
     let drift = vec3f(S.phys.y * S.mol.w, -S.phys.y * S.mol.w * 0.6, S.phys.y * S.mol.w * 0.8);
     let cq = pos * S.mol.y + drift;
     vel = (simCurl(cq) + 0.45 * simCurl(cq * 2.15 - drift)) * S.mol.z * 0.65;
@@ -900,16 +909,7 @@ fn updateParticles(@builtin(global_invocation_id) gid: vec3u) {
   var pos = q.p.xyz;
   var v = q.v.xyz;
   let curlMode = u32(S.mol.x + 0.5);
-  if (curlMode >= 4u) {
-    life = 1.0e9;
-    initAge = 0.0;
-    pos = S.origin.xyz;
-    vel = vec3f(0.0);
-    eZ = f32(idx);
-    for (var k = 0u; k < 20u; k++) {
-      trailBuf[idx * 20u + k] = vec4f(pos, 0.0);
-    }
-  } else if (curlMode > 0u) {
+  if (curlMode > 0u) {
     let freq = max(0.05, S.mol.y);
     let cSpd = S.mol.z;
     let tC = S.phys.y * S.mol.w;
@@ -1038,12 +1038,12 @@ fn updateParticles(@builtin(global_invocation_id) gid: vec3u) {
       return;
     } else {
       // curlMode == 4u (Orb-Weave Spiderweb) | 5u (Messy Attic Cobwebs)
-      let cap = max(16u, u32(S.phys3.x + 0.5));
-      let slotIdx = min(cap - 1u, u32(q.e.z + 0.5));
+      let webCap = max(16u, cap);
+      let slotIdx = min(webCap - 1u, u32(q.e.z + 0.5));
       let webMode = curlMode - 3u;
       let spinRate = max(0.05, S.mol.w);
       let tWeb = max(0.0, age) * spinRate;
-      let stWeb = evalSpiderwebStrand(slotIdx, cap, webMode, tWeb, S.phys.y);
+      let stWeb = evalSpiderwebStrand(slotIdx, webCap, webMode, tWeb, S.phys.y);
       if (stWeb.visible < 0.5) {
         parts[i] = Part(vec4f(S.origin.xyz, age), vec4f(0.0, 0.0, 0.0, life), vec4f(S.colA.rgb, 0.0), vec4f(0.0, q.m.y, q.m.z, seed), vec4f(0.0, q.e.y, f32(slotIdx), 0.0));
         return;
@@ -1053,10 +1053,10 @@ fn updateParticles(@builtin(global_invocation_id) gid: vec3u) {
       let flexDisp = mix(v, targetDisp, min(7.5 * dt, 1.0)) * exp(-extraDamp * dt);
       let base = i * 20u;
       for (var k = 0u; k < 20u; k++) {
-        let u = f32(k) / 19.0;
-        let belly = 4.0 * u * (1.0 - u);
-        let tipMix = select(belly, belly * 0.5 + pow(u, 1.45) * stWeb.tipWhip, stWeb.tipWhip > 0.01);
-        let pt = mix(stWeb.pA, stWeb.pB, u) - vec3f(0.0, 4.0 * stWeb.sag * u * (1.0 - u), 0.0) + flexDisp * tipMix;
+        let uu = f32(k) / 19.0;
+        let belly = 4.0 * uu * (1.0 - uu);
+        let tipMix = select(belly, belly * 0.5 + pow(uu, 1.45) * stWeb.tipWhip, stWeb.tipWhip > 0.01);
+        let pt = mix(stWeb.pA, stWeb.pB, uu) - vec3f(0.0, 4.0 * stWeb.sag * uu * (1.0 - uu), 0.0) + flexDisp * tipMix;
         trailBuf[base + k] = vec4f(pt, clamp(0.65 + 0.35 * stWeb.grow, 0.0, 1.0));
       }
       var wc = mix(S.colA, S.colC, smoothstep(0.10, 0.58, stWeb.roleCol));

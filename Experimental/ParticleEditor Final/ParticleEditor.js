@@ -2595,10 +2595,10 @@ function ClassifyEffect(P)
     const IsAssembly = IsTransition && AsmMode > 0;
     const CurlMode = IsTransition ? 0 : (P.curlMode || 0);
     const IsCurl = CurlMode > 0;
+    const IsBoids = P.kind === 6;
     const WebMode = !IsTransition && !IsArc && !IsBeam && !IsBoids ? Math.max(0, Math.min(2, P.webMode | 0)) : 0;
     const IsWeb = WebMode > 0;
     const IsObjectPour = CurlMode === 3 && (P.pulseMode || 0) > 0;
-    const IsBoids = P.kind === 6;
     const Shape = P.shape ?? 3;
     const IsDiscPlane = Shape === 10 || Shape === 15;
     const IsSteadyOverlay = IsCurl || IsWeb || Shape === 16 || (Shape === 15 && (P.leafMode || 0) === 0);
