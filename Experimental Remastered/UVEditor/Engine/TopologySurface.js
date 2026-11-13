@@ -120,6 +120,8 @@ export class TopologySurface
         this.activeEdge3D = null;
         this.activeEdgeUV = null;
         this.importanceByFace = new Map(); // faceIndex -> groupId | null
+        this.matcapSlotByFace = new Map(); // faceIndex -> uint8 matcap slot (0..7)
+        this.matcapRevision = 1;
         this.lockedIslands = new Set();    // key = canonical face signature or lowest face index
         this.hiddenIslands = new Set();
         this.undoStack = [];
@@ -130,6 +132,60 @@ export class TopologySurface
         this._spatialGridCache = null;
         this._adjCache = null;
         this.RecomputeNormals();
+        this.SeedDefaultMatCapSlots();
+    }
+
+    SeedDefaultMatCapSlots(Force = false)
+    {
+        if (Force) this.matcapSlotByFace.clear();
+        for (let fi = 0; fi < this.faces.length; fi++)
+        {
+            if (!Force && this.matcapSlotByFace.has(fi)) continue;
+            const Key = `${this.faces[fi].partId || ''} ${this.faces[fi].materialName || ''}`.toLowerCase();
+            let Slot = 0;
+            if (/gold|brass|bronze|alloy|rim|trim|caliper|badge/.test(Key)) Slot = 2;
+            else if (/steel|metal|chrome|aluminum|chassis|door|hood|fender|roof|body/.test(Key)) Slot = 1;
+            else if (/blue|glass|cobalt|ceramic|visor|headlight|light|window/.test(Key)) Slot = 3;
+            else if (/rubber|tyre|tire|carbon|obsidian|black|grill|vent|sole|under/.test(Key)) Slot = 4;
+            else if (/terracotta|red|copper|rust|brick|warm|tail|accent|seat/.test(Key)) Slot = 5;
+            else
+            {
+                // Deterministic subtle variation by part name so even generic parts have distinct per-face MatCaps
+                let H = 0;
+                for (let c = 0; c < Key.length; c++) H = (H * 31 + Key.charCodeAt(c)) >>> 0;
+                Slot = H % 6;
+            }
+            this.matcapSlotByFace.set(fi, Slot);
+        }
+        if (Force) this.matcapRevision++;
+    }
+
+    AssignMatCapSlotToFaces(FaceIndices, SlotIndex)
+    {
+        const Slot = Math.max(0, Math.min(7, SlotIndex | 0));
+        let Count = 0;
+        for (const Fi of FaceIndices)
+        {
+            if (Fi >= 0 && Fi < this.faces.length)
+            {
+                this.matcapSlotByFace.set(Fi, Slot);
+                Count++;
+            }
+        }
+        this.matcapRevision++;
+        return Count;
+    }
+
+    GetFaceMatCapSlot(FaceIndex)
+    {
+        return this.matcapSlotByFace.get(FaceIndex) ?? 0;
+    }
+
+    GetDistinctMatCapSlots()
+    {
+        const Used = new Set();
+        for (let fi = 0; fi < this.faces.length; fi++) Used.add(this.matcapSlotByFace.get(fi) ?? 0);
+        return [...Used].sort((A, B) => A - B);
     }
 
     ComputeDataSignature(ExtraSalt = '')
@@ -154,7 +210,7 @@ export class TopologySurface
                 if (++Cnt >= 16) break;
             }
         }
-        return `${N}:${ULen}:${this.seams.size}:${this.pinned.size}:${this.hiddenIslands.size}:${this.lockedIslands.size}:${ImpHash}:${ImpSum}:${UvHash.toFixed(4)}:${ExtraSalt}`;
+        return `${N}:${ULen}:${this.seams.size}:${this.pinned.size}:${this.hiddenIslands.size}:${this.lockedIslands.size}:${ImpHash}:${ImpSum}:${this.matcapRevision}:${UvHash.toFixed(4)}:${ExtraSalt}`;
     }
 
     GetFaceDistortionFast(FaceIndex)
@@ -393,6 +449,7 @@ export class TopologySurface
             activeEdge3D: this.activeEdge3D,
             activeEdgeUV: this.activeEdgeUV,
             importanceByFace: [...this.importanceByFace.entries()],
+            matcapSlotByFace: [...this.matcapSlotByFace.entries()],
             lockedIslands: [...this.lockedIslands],
             hiddenIslands: [...this.hiddenIslands]
         };
@@ -415,6 +472,8 @@ export class TopologySurface
         this.activeEdge3D = Snap.activeEdge3D ?? null;
         this.activeEdgeUV = Snap.activeEdgeUV ?? null;
         this.importanceByFace = new Map(Snap.importanceByFace);
+        this.matcapSlotByFace = new Map(Snap.matcapSlotByFace || []);
+        this.matcapRevision++;
         this.lockedIslands = new Set(Snap.lockedIslands || []);
         this.hiddenIslands = new Set(Snap.hiddenIslands || []);
     }

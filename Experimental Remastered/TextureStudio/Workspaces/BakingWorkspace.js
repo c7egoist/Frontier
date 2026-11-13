@@ -976,6 +976,9 @@ export function mountBakingWorkspace(root, appBridge) {
   function applyAsset(payload) {
     if (!payload) return false;
     if (payload.assetKind === "mesh") {
+      if (payload.raw?.transfer) {
+        return applyImportedMesh(payload.raw.transfer);
+      }
       const mId = payload.raw?.bakeId || payload.id;
       if (BAKE_STUDY_SHAPES.some((s) => s.id === mId)) {
         state.studyId = mId;

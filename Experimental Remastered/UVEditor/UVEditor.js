@@ -20,7 +20,7 @@ import {
 import { SolveImportancePack } from './Engine/ImportancePackingSolver.js';
 import { SampleAssetCatalog } from './Engine/SampleAssets.js';
 import { UVCanvas2D } from './Engine/UVCanvas2D.js';
-import { UVViewport3D } from './Engine/UVViewport3D.js';
+import { UVViewport3D, DEFAULT_MATCAP_SLOTS } from './Engine/UVViewport3D.js';
 import { SerializeTopologySurfaceForBridge, SaveUvBridgeTransfer } from '../Shared/UvTextureBridge.js';
 import {
     Construct,
@@ -47,7 +47,7 @@ const StudioState = {
     documents: [],
     activeDocId: null,
     stageMode: 'mesh', // 'split' | 'uv' | 'mesh'
-    inspectorTab: 'packing', // 'packing' | 'unwrap' | 'udim' | 'check'
+    inspectorTab: 'packing', // 'packing' | 'shading' | 'unwrap' | 'udim' | 'check'
     outlinerFilter: 'all',
     searchQuery: '',
     compactOutliner: false,
@@ -65,6 +65,17 @@ const StudioState = {
     showBoundaries: true,
     showPins: true,
     showIslandBadges: true,
+    activeMatCapSlot: 0,
+    shadingSettings: {
+        matcapBlend: 0.58,
+        eonRoughness: 0.46,
+        specularWeight: 0.58,
+        blinnExponent: 48,
+        shadowsEnabled: true,
+        shadowStrength: 0.72,
+        checkerOverlay: false,
+        customUploadSlot: 6
+    },
     proportional: { enabled: false, radius: 0.22 },
     cursorUV: [0.5, 0.5],
     liveUnwrap: false,
@@ -1240,6 +1251,7 @@ function RebuildInspector()
 
     const Crumb = {
         packing: 'UV Studio / Importance Packing',
+        shading: 'UV Studio / Shading & Multi-MatCap',
         unwrap: 'UV Studio / Unwrap & Topology',
         udim: 'UV Studio / UDIM Atlas Manager',
         check: 'UV Studio / Diagnostics & Export'
@@ -1247,6 +1259,7 @@ function RebuildInspector()
     document.getElementById('inspector-crumb').textContent = Crumb;
 
     if (StudioState.inspectorTab === 'packing') RenderPackingTab(Body, Doc);
+    else if (StudioState.inspectorTab === 'shading') RenderShadingTab(Body, Doc);
     else if (StudioState.inspectorTab === 'unwrap') RenderUnwrapTab(Body, Doc);
     else if (StudioState.inspectorTab === 'udim') RenderUdimTab(Body, Doc);
     else RenderDiagnosticsTab(Body, Doc);
@@ -1985,6 +1998,347 @@ function RenderDiagnosticsTab(Body, Doc)
                 });
                 Toast('Relaxed & repacked atlas with 0 overlaps');
                 SyncAllViews(true);
+            }
+        }
+    ]);
+}
+
+function AssignMatCapSlotToSelection(SlotIndex)
+{
+    const Doc = ActiveDoc();
+    if (!Doc) return;
+    const SafeSlot = Math.max(0, Math.min(7, SlotIndex | 0));
+    StudioState.activeMatCapSlot = SafeSlot;
+    const Catalog = Viewport3D?.matcapCatalog || DEFAULT_MATCAP_SLOTS;
+    const SlotInfo = Catalog[SafeSlot] || { name: `Slot ${SafeSlot + 1}` };
+
+    const TargetFaces = new Set(Doc.surface.selectedFaces);
+    if (!TargetFaces.size && Doc.surface.selectedIslands.size)
+    {
+        for (const Isl of Doc.islands)
+        {
+            if (Doc.surface.selectedIslands.has(Isl.id))
+            {
+                for (const Fi of Isl.faceIndices) TargetFaces.add(Fi);
+            }
+        }
+    }
+    if (!TargetFaces.size && Doc.surface.selectedUVs.size)
+    {
+        for (let fi = 0; fi < Doc.surface.faces.length; fi++)
+        {
+            if (Doc.surface.faces[fi].corners.some(C => Doc.surface.selectedUVs.has(C.uv))) TargetFaces.add(fi);
+        }
+    }
+
+    const ApplyWholeAsset = TargetFaces.size === 0;
+    const FaceList = ApplyWholeAsset
+        ? Doc.surface.faces.map((_, Fi) => Fi)
+        : [...TargetFaces];
+
+    RunWithUndo(`MatCap -> ${SlotInfo.name}`, () =>
+    {
+        const Assigned = Doc.surface.AssignMatCapSlotToFaces(FaceList, SafeSlot);
+        if (Viewport3D && Viewport3D.shadingMode !== 'hybrid-eon' && Viewport3D.shadingMode !== 'multi-matcap')
+        {
+            Viewport3D.shadingMode = 'hybrid-eon';
+            const Sel = document.getElementById('mesh-shade-select');
+            if (Sel) Sel.value = 'hybrid-eon';
+            document.querySelectorAll('.mesh-camera-bar button[data-shade3d]').forEach(B =>
+            {
+                B.classList.toggle('active', B.dataset.shade3d === 'hybrid-eon');
+            });
+        }
+        LogEvent('SHADE', `Assigned MatCap "${SlotInfo.name}" to ${Assigned} face(s)${ApplyWholeAsset ? ' (whole mesh)' : ''}`, 'live');
+        Toast(`Assigned "${SlotInfo.name}" to ${Assigned} face(s)`);
+    });
+}
+
+function SelectFacesByMatCapSlot(SlotIndex, Additive = false)
+{
+    const Doc = ActiveDoc();
+    if (!Doc) return;
+    if (!Additive) Doc.surface.ClearSelection();
+    let Count = 0;
+    for (let fi = 0; fi < Doc.surface.faces.length; fi++)
+    {
+        if (Doc.surface.GetFaceMatCapSlot(fi) === SlotIndex)
+        {
+            Doc.surface.selectedFaces.add(fi);
+            Count++;
+        }
+    }
+    Doc.surface.SyncSelectionsFromMode('face', Doc.islands);
+    SetSelectionMode('face');
+    StudioState.activeMatCapSlot = SlotIndex;
+    SyncAllViews(true);
+    const Catalog = Viewport3D?.matcapCatalog || DEFAULT_MATCAP_SLOTS;
+    Toast(`Selected ${Count} face(s) using "${Catalog[SlotIndex]?.name || `Slot ${SlotIndex + 1}`}"`);
+}
+
+function RenderShadingTab(Body, Doc)
+{
+    const Catalog = Viewport3D?.matcapCatalog || DEFAULT_MATCAP_SLOTS;
+    const DistinctSlots = Doc.surface.GetDistinctMatCapSlots ? Doc.surface.GetDistinctMatCapSlots() : [0];
+    const ModeLabels = {
+        'hybrid-eon': 'Hybrid EON',
+        'multi-matcap': 'Multi-MC',
+        'lit-eon': 'EON Lit',
+        checker: 'UV Checker',
+        flat: 'Flat',
+        matcap: 'Clay MC',
+        'matcap-satin': 'Satin MC',
+        importance: 'Budgets',
+        texel: 'Texel',
+        stretch: 'Stretch'
+    };
+
+    MetricTrio(Body, [
+        {
+            Label: 'Shading Pipeline',
+            Highlight: true,
+            Read: () => ({ value: ModeLabels[Viewport3D?.shadingMode || 'hybrid-eon'] || 'Hybrid EON', sub: '3D WebGL2 pass' })
+        },
+        {
+            Label: 'MatCap Slots Used',
+            Read: () => ({ value: `${DistinctSlots.length} / 8`, sub: `${Doc.surface.faces.length} faces mapped` })
+        },
+        {
+            Label: 'Directional Shadows',
+            Read: () => ({ value: StudioState.shadingSettings.shadowsEnabled ? '2K PCF' : 'Off', sub: `${Math.round(StudioState.shadingSettings.shadowStrength * 100)}% density` })
+        }
+    ]);
+
+    const PipelineSec = SectionCard(Body, {
+        Id: 'shading-pipeline',
+        Title: 'Viewport Shading Pipeline',
+        Glyph: 'Sparkles',
+        Badge: '3D MESH'
+    });
+    SegmentedRow(PipelineSec.Inner, {
+        Label: 'Surface Shading Mode',
+        Options: [
+            { Label: 'Hybrid EON', Value: 'hybrid-eon' },
+            { Label: 'Multi-MC', Value: 'multi-matcap' },
+            { Label: 'EON Lit', Value: 'lit-eon' },
+            { Label: 'Checker', Value: 'checker' },
+            { Label: 'Flat', Value: 'flat' }
+        ],
+        Read: () => Viewport3D?.shadingMode || 'hybrid-eon',
+        Write: V => Set3DShadingMode(V)
+    });
+    SwitchRow(PipelineSec.Inner, {
+        Label: 'Directional Shadows (2048px PCFSoft)',
+        Read: () => StudioState.shadingSettings.shadowsEnabled,
+        Write: V =>
+        {
+            StudioState.shadingSettings.shadowsEnabled = V;
+            const ShBtn = document.getElementById('toggle-shadows-btn');
+            if (ShBtn) ShBtn.classList.toggle('active', V);
+            if (Viewport3D) Viewport3D.SetRenderSettings({ shadowsEnabled: V });
+        }
+    });
+    SwitchRow(PipelineSec.Inner, {
+        Label: '3D UV Checker Overlay',
+        Read: () => StudioState.shadingSettings.checkerOverlay,
+        Write: V =>
+        {
+            StudioState.shadingSettings.checkerOverlay = V;
+            if (Viewport3D) Viewport3D.showCheckerOverlay = V;
+            SyncAllViews();
+        }
+    });
+    SwitchRow(PipelineSec.Inner, {
+        Label: 'Quad / N-Gon Wireframe',
+        Read: () => Viewport3D ? Viewport3D.showWireframe : true,
+        Write: V =>
+        {
+            if (Viewport3D)
+            {
+                Viewport3D.showWireframe = V;
+                Viewport3D.SyncOverlayStates();
+            }
+            const WireBtn = document.getElementById('toggle-wire3d-btn');
+            if (WireBtn) WireBtn.classList.toggle('active', V);
+        }
+    });
+
+    const SlotCounts = new Array(8).fill(0);
+    for (let fi = 0; fi < Doc.surface.faces.length; fi++)
+    {
+        const s = Doc.surface.GetFaceMatCapSlot ? Doc.surface.GetFaceMatCapSlot(fi) : 0;
+        SlotCounts[Math.max(0, Math.min(7, s))]++;
+    }
+
+    const MatCapSec = SectionCard(Body, {
+        Id: 'shading-matcap-slots',
+        Title: 'Per-Face MatCap Slot Bank',
+        Glyph: 'Layers',
+        Badge: `${DistinctSlots.length} ACTIVE`,
+        Hint: 'Click a MatCap chip to assign to selected faces/islands (or entire mesh if empty). Shift+Click selects faces using that slot.'
+    });
+    const Grid = Construct('div', 'matcap-grid');
+    for (const Slot of Catalog)
+    {
+        const Chip = Construct('button', `matcap-chip${StudioState.activeMatCapSlot === Slot.id ? ' active' : ''}`);
+        Chip.type = 'button';
+        Chip.title = `${Slot.name} (${SlotCounts[Slot.id]} faces) — Click: Assign · Shift+Click: Select Faces`;
+        const Dot = Construct('span', 'matcap-swatch-dot');
+        if (Slot.thumbUrl)
+        {
+            Dot.style.backgroundImage = `url("${Slot.thumbUrl}")`;
+            Dot.style.backgroundSize = 'cover';
+            Dot.style.backgroundPosition = 'center';
+        }
+        else
+        {
+            Dot.style.background = `radial-gradient(circle at 34% 28%, #ffffffb0 0%, ${Slot.swatch} 48%, #0d0e10 100%)`;
+        }
+        Chip.append(
+            Dot,
+            Construct('span', 'mc-label', Slot.name),
+            Construct('small', 'mc-tag', `${SlotCounts[Slot.id]}f`)
+        );
+        Chip.addEventListener('click', E =>
+        {
+            if (E.shiftKey) SelectFacesByMatCapSlot(Slot.id, false);
+            else AssignMatCapSlotToSelection(Slot.id);
+        });
+        Grid.append(Chip);
+    }
+    MatCapSec.Inner.append(Grid);
+
+    SegmentedRow(MatCapSec.Inner, {
+        Label: 'Custom MatCap Upload Target',
+        Options: [
+            { Label: 'Slot 7 (Custom A)', Value: 6 },
+            { Label: 'Slot 8 (Custom B)', Value: 7 }
+        ],
+        Read: () => StudioState.shadingSettings.customUploadSlot,
+        Write: V => { StudioState.shadingSettings.customUploadSlot = Number(V); }
+    });
+    ActionRow(MatCapSec.Inner, [
+        { Label: 'Upload MatCap (.png/.jpg)…', Glyph: 'Upload', Tone: 'accent', Act: () => document.getElementById('matcap-file-input').click() },
+        {
+            Label: 'Auto-Seed Part MatCaps',
+            Glyph: 'Reset',
+            Act: () => RunWithUndo('Auto-Seed MatCaps', () =>
+            {
+                Doc.surface.SeedDefaultMatCapSlots(true);
+                Toast('Seeded default per-part MatCap slots');
+            })
+        }
+    ]);
+
+    const LitSec = SectionCard(Body, {
+        Id: 'shading-eon-lit',
+        Title: 'Fast Lit EON + Blinn-Phong + Shadows',
+        Glyph: 'Sliders',
+        Badge: 'BRDF',
+        Hint: 'Energy-preserving Oren-Nayar (EON) diffuse + normalized Blinn-Phong specular blended with per-face MatCap spherical shading.'
+    });
+    SliderRow(LitSec.Inner, {
+        Label: 'MatCap Blend',
+        Minimum: 0,
+        Maximum: 100,
+        Step: 1,
+        Digits: 0,
+        Unit: '%',
+        Read: () => Math.round(StudioState.shadingSettings.matcapBlend * 100),
+        Write: V =>
+        {
+            StudioState.shadingSettings.matcapBlend = V / 100;
+            if (Viewport3D) Viewport3D.SetRenderSettings({ matcapBlend: StudioState.shadingSettings.matcapBlend });
+        }
+    });
+    SliderRow(LitSec.Inner, {
+        Label: 'EON Diffuse Roughness',
+        Minimum: 0.05,
+        Maximum: 1.00,
+        Step: 0.01,
+        Digits: 2,
+        Unit: '—',
+        Read: () => StudioState.shadingSettings.eonRoughness,
+        Write: V =>
+        {
+            StudioState.shadingSettings.eonRoughness = V;
+            if (Viewport3D) Viewport3D.SetRenderSettings({ eonRoughness: V });
+        }
+    });
+    SliderRow(LitSec.Inner, {
+        Label: 'Blinn-Phong Specular',
+        Minimum: 0.00,
+        Maximum: 1.50,
+        Step: 0.02,
+        Digits: 2,
+        Unit: '×',
+        Read: () => StudioState.shadingSettings.specularWeight,
+        Write: V =>
+        {
+            StudioState.shadingSettings.specularWeight = V;
+            if (Viewport3D) Viewport3D.SetRenderSettings({ specularWeight: V });
+        }
+    });
+    SliderRow(LitSec.Inner, {
+        Label: 'Blinn-Phong Exponent',
+        Minimum: 8,
+        Maximum: 128,
+        Step: 2,
+        Digits: 0,
+        Unit: 'exp',
+        Read: () => StudioState.shadingSettings.blinnExponent,
+        Write: V =>
+        {
+            StudioState.shadingSettings.blinnExponent = V;
+            if (Viewport3D) Viewport3D.SetRenderSettings({ blinnExponent: V });
+        }
+    });
+    SliderRow(LitSec.Inner, {
+        Label: 'Shadow PCF Strength',
+        Minimum: 0,
+        Maximum: 100,
+        Step: 1,
+        Digits: 0,
+        Unit: '%',
+        Read: () => Math.round(StudioState.shadingSettings.shadowStrength * 100),
+        Write: V =>
+        {
+            StudioState.shadingSettings.shadowStrength = V / 100;
+            if (Viewport3D) Viewport3D.SetRenderSettings({ shadowStrength: StudioState.shadingSettings.shadowStrength });
+        }
+    });
+    ActionRow(LitSec.Inner, [
+        {
+            Label: 'Reset Lighting & BRDF Defaults',
+            Glyph: 'Reset',
+            Act: () =>
+            {
+                Object.assign(StudioState.shadingSettings, {
+                    matcapBlend: 0.58,
+                    eonRoughness: 0.46,
+                    specularWeight: 0.58,
+                    blinnExponent: 48,
+                    shadowsEnabled: true,
+                    shadowStrength: 0.72,
+                    checkerOverlay: false
+                });
+                if (Viewport3D)
+                {
+                    Viewport3D.showCheckerOverlay = false;
+                    Viewport3D.SetRenderSettings({
+                        matcapBlend: 0.58,
+                        eonRoughness: 0.46,
+                        specularWeight: 0.58,
+                        blinnExponent: 48,
+                        shadowsEnabled: true,
+                        shadowStrength: 0.72
+                    });
+                }
+                const ShBtn = document.getElementById('toggle-shadows-btn');
+                if (ShBtn) ShBtn.classList.add('active');
+                RebuildInspector();
+                SyncAllViews();
+                Toast('Restored default EON + Blinn-Phong + MatCap settings');
             }
         }
     ]);
@@ -3019,10 +3373,16 @@ function SetupKeyboardShortcuts()
         if (!Mod && K === 'z')
         {
             E.preventDefault();
-            const Order = ['checker', 'flat', 'matcap', 'matcap-satin'];
+            const Order = ['hybrid-eon', 'multi-matcap', 'lit-eon', 'checker', 'flat'];
             const Next = Order[(Order.indexOf(Viewport3D.shadingMode) + 1) % Order.length];
             Set3DShadingMode(Next);
-            const Names = { checker: 'UV Checker', flat: 'Flat Shaded', matcap: 'Matcap Clay', 'matcap-satin': 'Matcap Satin' };
+            const Names = {
+                'hybrid-eon': 'Hybrid MatCap + EON',
+                'multi-matcap': 'Multi-MatCap',
+                'lit-eon': 'EON Blinn-Phong',
+                checker: 'UV Checker',
+                flat: 'Flat Shaded'
+            };
             Toast(`3D Shading: ${Names[Next] || Next}`);
             return;
         }
@@ -3267,7 +3627,15 @@ function InitStudioIconsAndBindings()
     document.getElementById('toggle-checker-btn').addEventListener('click', E => { StudioState.showChecker = !StudioState.showChecker; E.currentTarget.classList.toggle('active', StudioState.showChecker); ScheduleFast2DRender(ActiveDoc()); });
     document.getElementById('toggle-seams-btn').addEventListener('click', E => { StudioState.showSeams = !StudioState.showSeams; Viewport3D.showSeams = StudioState.showSeams; E.currentTarget.classList.toggle('active', StudioState.showSeams); Viewport3D.SyncOverlayStates(); ScheduleFast2DRender(ActiveDoc()); });
     document.getElementById('toggle-boundaries-btn').addEventListener('click', E => { StudioState.showBoundaries = !StudioState.showBoundaries; Viewport3D.showBoundaries = StudioState.showBoundaries; E.currentTarget.classList.toggle('active', StudioState.showBoundaries); Viewport3D.SyncOverlayStates(); ScheduleFast2DRender(ActiveDoc()); });
-    document.getElementById('toggle-wire3d-btn').addEventListener('click', E => { Viewport3D.showWireframe = !Viewport3D.showWireframe; E.currentTarget.classList.toggle('active', Viewport3D.showWireframe); Viewport3D.SyncOverlayStates(); });
+    document.getElementById('toggle-wire3d-btn').addEventListener('click', E => { Viewport3D.showWireframe = !Viewport3D.showWireframe; E.currentTarget.classList.toggle('active', Viewport3D.showWireframe); Viewport3D.SyncOverlayStates(); if (StudioState.inspectorTab === 'shading') Broadcast(); });
+    document.getElementById('toggle-shadows-btn').addEventListener('click', E =>
+    {
+        StudioState.shadingSettings.shadowsEnabled = !StudioState.shadingSettings.shadowsEnabled;
+        E.currentTarget.classList.toggle('active', StudioState.shadingSettings.shadowsEnabled);
+        if (Viewport3D) Viewport3D.SetRenderSettings({ shadowsEnabled: StudioState.shadingSettings.shadowsEnabled });
+        if (StudioState.inspectorTab === 'shading') RebuildInspector();
+        Toast(`Directional Shadows: ${StudioState.shadingSettings.shadowsEnabled ? 'ON' : 'OFF'}`);
+    });
 
     document.querySelectorAll('.mesh-camera-bar button[data-cam]').forEach(B => B.addEventListener('click', () => Viewport3D.CameraPreset(B.dataset.cam)));
 
@@ -3548,6 +3916,29 @@ function InitStudioIconsAndBindings()
             Toast(`Loaded custom backdrop on UDIM ${ActiveDoc().activeUdim}`);
         };
         Img.src = URL.createObjectURL(File);
+        E.target.value = '';
+    });
+
+    document.getElementById('matcap-file-input').addEventListener('change', E =>
+    {
+        const File = E.target.files?.[0];
+        if (!File) return;
+        const Img = new Image();
+        const Url = URL.createObjectURL(File);
+        Img.onload = () =>
+        {
+            const SlotIdx = StudioState.shadingSettings.customUploadSlot ?? 6;
+            const BaseName = File.name.replace(/\.[^.]+$/, '').slice(0, 22) || `Custom ${SlotIdx + 1}`;
+            if (Viewport3D)
+            {
+                const Entry = Viewport3D.RegisterCustomMatCapImage(Img, SlotIdx, BaseName);
+                if (Entry) Entry.thumbUrl = Url;
+            }
+            AssignMatCapSlotToSelection(SlotIdx);
+            SyncAllViews(true);
+            Toast(`Loaded custom MatCap "${BaseName}" into Slot ${SlotIdx + 1}`);
+        };
+        Img.src = Url;
         E.target.value = '';
     });
 

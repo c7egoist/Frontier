@@ -239,6 +239,99 @@ function HeatRgb(T)
     return [(242 - K * 10) / 255, (194 - K * 99) / 255, (96 - K * 14) / 255];
 }
 
+export const DEFAULT_MATCAP_SLOTS = [
+    { id: 0, name: 'Atelier Clay',    swatch: '#bfa696', diffuse: [0.54, 0.36, 0.28], rim: [0.16, 0.09, 0.07], hi: [1.00, 0.90, 0.82], rimHi: [0.76, 0.56, 0.46], specPow: 20, specGain: 0.38, brushed: false, custom: false },
+    { id: 1, name: 'Brushed Steel',   swatch: '#b8c3ce', diffuse: [0.34, 0.38, 0.42], rim: [0.10, 0.12, 0.15], hi: [0.95, 0.98, 1.00], rimHi: [0.64, 0.78, 0.94], specPow: 64, specGain: 0.95, brushed: true,  custom: false },
+    { id: 2, name: 'Satin Gold',      swatch: '#e8c27a', diffuse: [0.66, 0.48, 0.16], rim: [0.24, 0.15, 0.03], hi: [1.00, 0.93, 0.72], rimHi: [0.96, 0.76, 0.34], specPow: 46, specGain: 0.88, brushed: true,  custom: false },
+    { id: 3, name: 'Cobalt Ceramic',  swatch: '#4886ee', diffuse: [0.11, 0.28, 0.62], rim: [0.05, 0.10, 0.26], hi: [0.92, 0.96, 1.00], rimHi: [0.44, 0.72, 1.00], specPow: 84, specGain: 1.05, brushed: false, custom: false },
+    { id: 4, name: 'Obsidian Carbon', swatch: '#4e545e', diffuse: [0.07, 0.08, 0.09], rim: [0.03, 0.03, 0.04], hi: [0.64, 0.68, 0.74], rimHi: [0.42, 0.46, 0.52], specPow: 32, specGain: 0.58, brushed: false, custom: false },
+    { id: 5, name: 'Terracotta',      swatch: '#d67256', diffuse: [0.58, 0.22, 0.14], rim: [0.22, 0.08, 0.06], hi: [0.98, 0.86, 0.80], rimHi: [0.90, 0.52, 0.42], specPow: 56, specGain: 0.65, brushed: false, custom: false },
+    { id: 6, name: 'Custom Slot A',   swatch: '#9bdac5', diffuse: [0.28, 0.52, 0.44], rim: [0.08, 0.18, 0.15], hi: [0.94, 1.00, 0.96], rimHi: [0.60, 0.86, 0.76], specPow: 42, specGain: 0.72, brushed: false, custom: true  },
+    { id: 7, name: 'Custom Slot B',   swatch: '#d5a3f0', diffuse: [0.48, 0.30, 0.60], rim: [0.14, 0.08, 0.20], hi: [0.98, 0.92, 1.00], rimHi: [0.80, 0.64, 0.96], specPow: 48, specGain: 0.78, brushed: false, custom: true  }
+];
+
+function PaintProceduralMatCapSlot(Ctx, SlotOffsetX, TileSize, Preset)
+{
+    const Img = Ctx.createImageData(TileSize, TileSize);
+    const Data = Img.data;
+    const LLen = Math.hypot(-0.45, 0.65, 0.61);
+    const Kx = -0.45 / LLen, Ky = 0.65 / LLen, Kz = 0.61 / LLen;
+    const FLen = Math.hypot(0.62, 0.25, 0.45);
+    const Fx = 0.62 / FLen, Fy = 0.25 / FLen, Fz = 0.45 / FLen;
+    const HLen = Math.hypot(Kx, Ky, Kz + 1.0);
+    const Hx = Kx / HLen, Hy = Ky / HLen, Hz = (Kz + 1.0) / HLen;
+
+    const ToSrgbByte = V =>
+    {
+        const C = Math.max(0, Math.min(1, V));
+        const G = C <= 0.0031308 ? 12.92 * C : 1.055 * Math.pow(C, 1 / 2.2) - 0.055;
+        return Math.max(0, Math.min(255, Math.round(G * 255)));
+    };
+
+    for (let y = 0; y < TileSize; y++)
+    {
+        const Ny0 = 1 - ((y + 0.5) / TileSize) * 2;
+        for (let x = 0; x < TileSize; x++)
+        {
+            let Nx = ((x + 0.5) / TileSize) * 2 - 1;
+            let Ny = Ny0;
+            const R2 = Nx * Nx + Ny * Ny;
+            if (R2 > 1.0)
+            {
+                const InvR = 1.0 / Math.sqrt(R2);
+                Nx *= InvR;
+                Ny *= InvR;
+            }
+            const Nz = Math.sqrt(Math.max(0, 1.0 - Math.min(1.0, Nx * Nx + Ny * Ny)));
+
+            const Hem = Math.max(0, Math.min(1, Ny * 0.5 + 0.5));
+            const NdK = Math.max(0, Nx * Kx + Ny * Ky + Nz * Kz);
+            const NdF = Math.max(0, Nx * Fx + Ny * Fy + Nz * Fz);
+            const Fresnel = Math.pow(1 - Math.max(0, Nz), 3.4);
+
+            let NdH = Math.max(0, Nx * Hx + Ny * Hy + Nz * Hz);
+            if (Preset.brushed)
+            {
+                const Band = Math.max(0, Math.min(1, 1.0 - Math.abs(Ny - 0.14) * 3.2));
+                NdH = Math.max(NdH, Band * 0.85);
+            }
+            const Spec = Math.pow(NdH, Preset.specPow) * Preset.specGain;
+
+            const ColR = Preset.diffuse[0] * (0.28 + 0.68 * NdK) + Preset.rim[0] * (0.34 * (1 - Hem)) + Preset.diffuse[0] * 0.22 * NdF + Preset.hi[0] * Spec + Preset.rimHi[0] * Fresnel * 0.42;
+            const ColG = Preset.diffuse[1] * (0.28 + 0.68 * NdK) + Preset.rim[1] * (0.34 * (1 - Hem)) + Preset.diffuse[1] * 0.22 * NdF + Preset.hi[1] * Spec + Preset.rimHi[1] * Fresnel * 0.42;
+            const ColB = Preset.diffuse[2] * (0.28 + 0.68 * NdK) + Preset.rim[2] * (0.34 * (1 - Hem)) + Preset.diffuse[2] * 0.22 * NdF + Preset.hi[2] * Spec + Preset.rimHi[2] * Fresnel * 0.42;
+
+            const Idx = (y * TileSize + x) * 4;
+            Data[Idx] = ToSrgbByte(ColR);
+            Data[Idx + 1] = ToSrgbByte(ColG);
+            Data[Idx + 2] = ToSrgbByte(ColB);
+            Data[Idx + 3] = 255;
+        }
+    }
+    Ctx.putImageData(Img, SlotOffsetX, 0);
+}
+
+function BuildMatcapAtlasStrip(Slots)
+{
+    const TileSize = 256;
+    const Canvas = document.createElement('canvas');
+    Canvas.width = TileSize * Slots.length;
+    Canvas.height = TileSize;
+    const Ctx = Canvas.getContext('2d');
+    for (let s = 0; s < Slots.length; s++)
+    {
+        PaintProceduralMatCapSlot(Ctx, s * TileSize, TileSize, Slots[s]);
+    }
+    const Tex = new THREE.CanvasTexture(Canvas);
+    Tex.colorSpace = THREE.SRGBColorSpace;
+    Tex.minFilter = THREE.LinearFilter;
+    Tex.magFilter = THREE.LinearFilter;
+    Tex.wrapS = THREE.ClampToEdgeWrapping;
+    Tex.wrapT = THREE.ClampToEdgeWrapping;
+    Tex.generateMipmaps = false;
+    return { tex: Tex, canvas: Canvas, ctx: Ctx, tileSize: TileSize };
+}
+
 function HexToRgb01(Hex)
 {
     const Clean = (Hex || '#eff4cf').replace('#', '');
@@ -258,13 +351,23 @@ export class UVViewport3D
         this.onContextMenu = onContextMenu;
         this.onBoxSelect3D = onBoxSelect3D;
         this.onPaintSelect3D = onPaintSelect3D;
-        this.shadingMode = 'checker'; // 'checker' | 'flat' | 'matcap' | 'matcap-satin' | 'importance' | 'texel' | 'stretch'
+        this.shadingMode = 'hybrid-eon'; // 'hybrid-eon' | 'multi-matcap' | 'lit-eon' | 'checker' | 'flat' | 'matcap' | 'matcap-satin' | 'importance' | 'texel' | 'stretch'
         this.selectionMode = 'island';
         this.activeTool = 'select';
         this.paintRadiusPx = 36;
         this.showWireframe = true;
         this.showSeams = true;
         this.showBoundaries = true;
+        this.showCheckerOverlay = false;
+        this.matcapCatalog = DEFAULT_MATCAP_SLOTS.map(S => ({ ...S }));
+        this.renderSettings = {
+            matcapBlend: 0.58,
+            eonRoughness: 0.46,
+            specularWeight: 0.58,
+            blinnExponent: 48.0,
+            shadowsEnabled: true,
+            shadowStrength: 0.72
+        };
         this.webglReady = false;
         this.triToFace = [];
         this.surface = null;
@@ -295,7 +398,9 @@ export class UVViewport3D
             this.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
             this.renderer.outputColorSpace = THREE.SRGBColorSpace;
             this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-            this.renderer.toneMappingExposure = 1.08;
+            this.renderer.toneMappingExposure = 1.06;
+            this.renderer.shadowMap.enabled = true;
+            this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
             this.webglReady = true;
         }
         catch
@@ -309,42 +414,205 @@ export class UVViewport3D
         this.controls.dampingFactor = 0.08;
         this.controls.target.set(0, 0.85, 0);
 
-        this.scene.add(new THREE.HemisphereLight('#dce6ec', '#2e2b25', 1.45));
-        const Key = new THREE.DirectionalLight('#fff2dd', 2.4);
-        Key.position.set(5, 8, 5);
+        this.scene.add(new THREE.HemisphereLight('#dce6ec', '#2e2b25', 1.35));
+        const Key = new THREE.DirectionalLight('#fff2dd', 2.45);
+        Key.position.set(5.2, 7.6, 4.4);
+        Key.castShadow = true;
+        Key.shadow.mapSize.set(2048, 2048);
+        Key.shadow.bias = -0.0004;
+        Key.shadow.normalBias = 0.015;
+        Key.shadow.camera.near = 0.5;
+        Key.shadow.camera.far = 36.0;
+        Key.shadow.camera.left = -4.5;
+        Key.shadow.camera.right = 4.5;
+        Key.shadow.camera.top = 4.5;
+        Key.shadow.camera.bottom = -4.5;
+        this.keyLight = Key;
         this.scene.add(Key);
-        const Fill = new THREE.DirectionalLight('#9ecfff', 1.2);
+        this.scene.add(Key.target);
+
+        const Fill = new THREE.DirectionalLight('#9ecfff', 1.05);
         Fill.position.set(-5, 4, -4);
         this.scene.add(Fill);
-        const Rim = new THREE.DirectionalLight('#9bdac5', 0.9);
+        const Rim = new THREE.DirectionalLight('#9bdac5', 0.85);
         Rim.position.set(0, 3, -6);
         this.scene.add(Rim);
 
-        const Grid = new THREE.GridHelper(16, 32, '#3d4346', '#212527');
-        Grid.position.y = -0.002;
-        this.scene.add(Grid);
+        this.gridHelper = new THREE.GridHelper(16, 32, '#3d4346', '#212527');
+        this.gridHelper.position.y = -0.005;
+        this.scene.add(this.gridHelper);
+
+        this.shadowFloorMat = new THREE.ShadowMaterial({ opacity: 0.48 });
+        this.shadowFloor = new THREE.Mesh(new THREE.PlaneGeometry(24, 24), this.shadowFloorMat);
+        this.shadowFloor.rotation.x = -Math.PI * 0.5;
+        this.shadowFloor.position.y = -0.003;
+        this.shadowFloor.receiveShadow = true;
+        this.scene.add(this.shadowFloor);
 
         this.checkerTex = BuildCheckerTexture();
         this.matcapClayTex = BuildMatcapTexture('clay');
         this.matcapSatinTex = BuildMatcapTexture('matcap-satin');
+        this.matcapAtlas = BuildMatcapAtlasStrip(this.matcapCatalog);
         this.vertexDotTex = BuildVertexDotTexture();
 
-        this.meshMat = new THREE.MeshStandardMaterial({
+        this.shaderUniforms = {
+            uMatCapAtlas: { value: this.matcapAtlas.tex },
+            uShadingPipelineMode: { value: 3.0 }, // 0=Data/Checker+EON, 1=PureMultiMatCap, 2=LitEonOnly, 3=HybridMatCap+EON
+            uForcedSingleSlot: { value: -1.0 },
+            uMatCapBlend: { value: this.renderSettings.matcapBlend },
+            uEonRoughness: { value: this.renderSettings.eonRoughness },
+            uSpecularWeight: { value: this.renderSettings.specularWeight },
+            uBlinnExponent: { value: this.renderSettings.blinnExponent },
+            uShadowsEnabled: { value: 1.0 },
+            uShadowStrength: { value: this.renderSettings.shadowStrength },
+            uCheckerOverlay: { value: 0.0 },
+            uKeyLightDirView: { value: new THREE.Vector3(0.45, 0.72, 0.52).normalize() }
+        };
+
+        this.meshMat = new THREE.MeshPhongMaterial({
             map: this.checkerTex,
             vertexColors: true,
-            roughness: 0.48,
-            metalness: 0.08,
             flatShading: false,
             side: THREE.DoubleSide
         });
-        this.matcapMat = new THREE.MeshMatcapMaterial({
-            matcap: this.matcapClayTex,
-            vertexColors: false,
-            side: THREE.DoubleSide
-        });
+        this.meshMat.onBeforeCompile = Shader =>
+        {
+            Object.assign(Shader.uniforms, this.shaderUniforms);
+            Shader.vertexShader = Shader.vertexShader
+                .replace(
+                    '#include <common>',
+                    `#include <common>
+                    attribute float aMatCapSlot;
+                    varying float vMatCapSlot;
+                    varying vec3 vEonViewNorm;
+                    varying vec3 vEonViewPos;
+                    varying vec2 vEonUv;`
+                )
+                .replace(
+                    '#include <begin_vertex>',
+                    `#include <begin_vertex>
+                    vMatCapSlot = aMatCapSlot;
+                    vEonViewNorm = normalize(normalMatrix * objectNormal);
+                    vEonViewPos = -(modelViewMatrix * vec4(transformed, 1.0)).xyz;
+                    vEonUv = uv;`
+                );
+
+            Shader.fragmentShader = Shader.fragmentShader
+                .replace(
+                    '#include <common>',
+                    `#include <common>
+                    uniform sampler2D uMatCapAtlas;
+                    uniform float uShadingPipelineMode;
+                    uniform float uForcedSingleSlot;
+                    uniform float uMatCapBlend;
+                    uniform float uEonRoughness;
+                    uniform float uSpecularWeight;
+                    uniform float uBlinnExponent;
+                    uniform float uShadowsEnabled;
+                    uniform float uShadowStrength;
+                    uniform float uCheckerOverlay;
+                    uniform vec3 uKeyLightDirView;
+                    varying float vMatCapSlot;
+                    varying vec3 vEonViewNorm;
+                    varying vec3 vEonViewPos;
+                    varying vec2 vEonUv;
+
+                    // Energy-Preserving Oren-Nayar (EON) diffuse BRDF matching UVSurfaceMaterial.slang
+                    float EvaluateEonDiffuse(float NdotL, float NdotV, float CosAzimuth, float Roughness, float AlbedoLuma)
+                    {
+                        float R2 = clamp(Roughness, 0.02, 1.0);
+                        float Sigma = R2 * R2;
+                        float A = 1.0 / (1.0 + (0.5 - 2.0 / (3.0 * PI)) * Sigma);
+                        float B = (2.0 / 3.0 - 28.0 / (15.0 * PI)) * Sigma;
+                        float SinThetaI = sqrt(max(0.0, 1.0 - NdotL * NdotL));
+                        float SinThetaR = sqrt(max(0.0, 1.0 - NdotV * NdotV));
+                        float S = max(0.0, CosAzimuth) * SinThetaI * SinThetaR / max(max(NdotL, NdotV), 1e-4);
+                        float MultiScatter = clamp(0.18 * Sigma * AlbedoLuma, 0.0, 0.25);
+                        return max(0.0, NdotL * (A + B * S + MultiScatter)) * (1.0 / PI);
+                    }
+
+                    // Energy-normalized Blinn-Phong specular with Schlick Fresnel
+                    float EvaluateBlinnPhongSpec(float NdotL, float NdotH, float VdotH, float Exp, float F0)
+                    {
+                        if (NdotL <= 0.0 || NdotH <= 0.0) return 0.0;
+                        float Norm = (Exp + 2.0) / (8.0 * PI);
+                        float Fresnel = F0 + (1.0 - F0) * pow(clamp(1.0 - VdotH, 0.0, 1.0), 5.0);
+                        return Norm * pow(NdotH, Exp) * Fresnel * NdotL;
+                    }`
+                )
+                .replace(
+                    '#include <opaque_fragment>',
+                    `
+                    vec3 eonN = normalize(normal);
+                    vec3 eonV = normalize(vEonViewPos);
+                    vec3 eonL = normalize(uKeyLightDirView);
+                    vec3 eonH = normalize(eonL + eonV);
+
+                    float eNdotL = clamp(dot(eonN, eonL), 0.0, 1.0);
+                    float eNdotV = clamp(dot(eonN, eonV), 0.0, 1.0);
+                    float eNdotH = clamp(dot(eonN, eonH), 0.0, 1.0);
+                    float eVdotH = clamp(dot(eonV, eonH), 0.0, 1.0);
+
+                    vec3 tanV = eonV - eonN * eNdotV;
+                    vec3 tanL = eonL - eonN * eNdotL;
+                    float cosAz = dot(tanV, tanL);
+
+                    vec3 primaryAlbedo = diffuseColor.rgb;
+                    if (uCheckerOverlay > 0.01)
+                    {
+                        float chk = mod(floor(vEonUv.x * 14.0) + floor(vEonUv.y * 14.0), 2.0);
+                        vec3 chkRgb = chk < 0.5 ? vec3(0.76, 0.78, 0.73) : vec3(0.14, 0.16, 0.18);
+                        primaryAlbedo = mix(primaryAlbedo, chkRgb, uCheckerOverlay);
+                    }
+
+                    float luma = dot(primaryAlbedo, vec3(0.2126, 0.7152, 0.0722));
+                    float eonDiff = EvaluateEonDiffuse(eNdotL, eNdotV, cosAz, uEonRoughness, luma);
+                    float blinnSpec = EvaluateBlinnPhongSpec(eNdotL, eNdotH, eVdotH, uBlinnExponent, 0.048);
+
+                    float rawShadow = 1.0;
+                    #ifdef USE_SHADOWMAP
+                    rawShadow = getShadowMask();
+                    #endif
+                    float shadowMul = mix(1.0, rawShadow, uShadowsEnabled * uShadowStrength);
+
+                    float hem = clamp(eonN.y * 0.5 + 0.5, 0.0, 1.0);
+                    vec3 skyFill = mix(vec3(0.08, 0.085, 0.095), vec3(0.20, 0.22, 0.25), hem);
+                    vec3 litEon = primaryAlbedo * skyFill + (primaryAlbedo * eonDiff * 2.55 + vec3(blinnSpec * uSpecularWeight * 1.55)) * shadowMul;
+
+                    float slotIdx = uForcedSingleSlot >= -0.5 ? uForcedSingleSlot : floor(vMatCapSlot + 0.5);
+                    slotIdx = clamp(slotIdx, 0.0, 7.0);
+                    float mcU = (slotIdx + clamp(eonN.x * 0.495 + 0.5, 0.004, 0.996)) / 8.0;
+                    float mcV = clamp(eonN.y * 0.495 + 0.5, 0.004, 0.996);
+                    vec3 matcapRgb = texture2D(uMatCapAtlas, vec2(mcU, mcV)).rgb;
+                    if (uCheckerOverlay > 0.01)
+                    {
+                        float chk = mod(floor(vEonUv.x * 14.0) + floor(vEonUv.y * 14.0), 2.0);
+                        vec3 chkMod = chk < 0.5 ? vec3(1.06, 1.07, 1.03) : vec3(0.62, 0.65, 0.68);
+                        matcapRgb *= mix(vec3(1.0), chkMod, uCheckerOverlay);
+                    }
+                    vec3 matcapShadowed = matcapRgb * mix(0.54, 1.0, shadowMul);
+
+                    vec3 finalRgb = litEon;
+                    if (uShadingPipelineMode > 0.5 && uShadingPipelineMode < 1.5)
+                    {
+                        finalRgb = matcapShadowed;
+                    }
+                    else if (uShadingPipelineMode >= 2.5)
+                    {
+                        vec3 matcapTintLit = mix(litEon, matcapShadowed, uMatCapBlend);
+                        finalRgb = matcapTintLit + vec3(0.26, 0.25, 0.23) * (blinnSpec * uSpecularWeight * shadowMul);
+                    }
+
+                    gl_FragColor = vec4(finalRgb, diffuseColor.a);
+                    `
+                );
+        };
+        this.meshMat.customProgramCacheKey = () => 'frontier-multi-matcap-eon-v1';
 
         this.geometry = new THREE.BufferGeometry();
         this.mesh = new THREE.Mesh(this.geometry, this.meshMat);
+        this.mesh.castShadow = true;
+        this.mesh.receiveShadow = true;
         this.scene.add(this.mesh);
 
         // GPU Face-Selection Mask Texture (256 x H, 1 texel per mesh face -> 0.02ms instant live updates!)
@@ -925,9 +1193,41 @@ export class UVViewport3D
             requestAnimationFrame(Loop);
             if (!this.webglReady) return;
             this.controls.update();
+            if (this.keyLight && this.shaderUniforms)
+            {
+                const LightWorld = this.keyLight.position.clone().sub(this.keyLight.target.position).normalize();
+                const ViewMat3 = new THREE.Matrix3().getNormalMatrix(this.camera.matrixWorldInverse);
+                this.shaderUniforms.uKeyLightDirView.value.copy(LightWorld).applyMatrix3(ViewMat3).normalize();
+            }
             this.renderer.render(this.scene, this.camera);
         };
         requestAnimationFrame(Loop);
+    }
+
+    SetRenderSettings(Patch = {})
+    {
+        Object.assign(this.renderSettings, Patch);
+        if (!this.shaderUniforms) return;
+        this.shaderUniforms.uMatCapBlend.value = this.renderSettings.matcapBlend;
+        this.shaderUniforms.uEonRoughness.value = this.renderSettings.eonRoughness;
+        this.shaderUniforms.uSpecularWeight.value = this.renderSettings.specularWeight;
+        this.shaderUniforms.uBlinnExponent.value = this.renderSettings.blinnExponent;
+        this.shaderUniforms.uShadowsEnabled.value = this.renderSettings.shadowsEnabled ? 1.0 : 0.0;
+        this.shaderUniforms.uShadowStrength.value = this.renderSettings.shadowStrength;
+        if (this.keyLight) this.keyLight.castShadow = !!this.renderSettings.shadowsEnabled;
+        if (this.shadowFloorMat) this.shadowFloorMat.opacity = this.renderSettings.shadowsEnabled ? (0.48 * this.renderSettings.shadowStrength) : 0.0;
+    }
+
+    RegisterCustomMatCapImage(ImageOrCanvas, SlotIndex = 6, DisplayName = null)
+    {
+        if (!this.matcapAtlas) return null;
+        const SafeSlot = Math.max(6, Math.min(7, SlotIndex | 0));
+        const Tile = this.matcapAtlas.tileSize;
+        this.matcapAtlas.ctx.drawImage(ImageOrCanvas, SafeSlot * Tile, 0, Tile, Tile);
+        this.matcapAtlas.tex.needsUpdate = true;
+        if (DisplayName) this.matcapCatalog[SafeSlot].name = DisplayName;
+        this.matcapCatalog[SafeSlot].loaded = true;
+        return this.matcapCatalog[SafeSlot];
     }
 
     SetActiveTool(Tool)
@@ -1669,21 +1969,55 @@ export class UVViewport3D
         this.surface = Surface;
         if (!this.webglReady || !Surface) return;
 
-        const IsMatcap = this.shadingMode === 'matcap' || this.shadingMode === 'matcap-satin';
+        const IsMatcap = this.shadingMode === 'matcap' || this.shadingMode === 'matcap-satin' || this.shadingMode === 'multi-matcap';
+        const IsHybrid = this.shadingMode === 'hybrid-eon';
+        const IsLitEon = this.shadingMode === 'lit-eon';
         const IsFlat = this.shadingMode === 'flat';
-        if (IsMatcap)
+        const SmoothNormals = IsMatcap || IsHybrid || IsLitEon;
+
+        if (this.shaderUniforms)
         {
-            this.matcapMat.matcap = this.shadingMode === 'matcap-satin' ? this.matcapSatinTex : this.matcapClayTex;
-            this.matcapMat.needsUpdate = true;
-            this.mesh.material = this.matcapMat;
+            if (this.shadingMode === 'multi-matcap')
+            {
+                this.shaderUniforms.uShadingPipelineMode.value = 1.0;
+                this.shaderUniforms.uForcedSingleSlot.value = -1.0;
+            }
+            else if (this.shadingMode === 'matcap')
+            {
+                this.shaderUniforms.uShadingPipelineMode.value = 1.0;
+                this.shaderUniforms.uForcedSingleSlot.value = 0.0;
+            }
+            else if (this.shadingMode === 'matcap-satin')
+            {
+                this.shaderUniforms.uShadingPipelineMode.value = 1.0;
+                this.shaderUniforms.uForcedSingleSlot.value = 1.0;
+            }
+            else if (IsHybrid)
+            {
+                this.shaderUniforms.uShadingPipelineMode.value = 3.0;
+                this.shaderUniforms.uForcedSingleSlot.value = -1.0;
+            }
+            else if (IsLitEon)
+            {
+                this.shaderUniforms.uShadingPipelineMode.value = 2.0;
+                this.shaderUniforms.uForcedSingleSlot.value = -1.0;
+            }
+            else
+            {
+                this.shaderUniforms.uShadingPipelineMode.value = 0.0;
+                this.shaderUniforms.uForcedSingleSlot.value = -1.0;
+            }
+            this.shaderUniforms.uCheckerOverlay.value = (this.showCheckerOverlay && this.shadingMode !== 'checker') ? 0.42 : 0.0;
         }
-        else
+
+        const WantCheckerMap = this.shadingMode === 'checker';
+        if (this.meshMat.map !== (WantCheckerMap ? this.checkerTex : null) || this.meshMat.flatShading !== IsFlat)
         {
-            this.meshMat.map = this.shadingMode === 'checker' ? this.checkerTex : null;
+            this.meshMat.map = WantCheckerMap ? this.checkerTex : null;
             this.meshMat.flatShading = IsFlat;
             this.meshMat.needsUpdate = true;
-            this.mesh.material = this.meshMat;
         }
+        this.mesh.material = this.meshMat;
 
         let UvHash = 0;
         const ULen = Surface.uvCoords.length;
@@ -1693,7 +2027,7 @@ export class UVViewport3D
             const P = Surface.uvCoords[i];
             UvHash = ((UvHash * 1.00013) + P[0] * 13.7 + P[1] * 29.3) % 1e9;
         }
-        const DataSig = `${Surface.faces.length}:${ULen}:${Surface.hiddenIslands.size}:${Surface.importanceByFace.size}:${this.shadingMode}:${TargetTexelDensity}:${ImportanceGroups.length}:${UvHash.toFixed(4)}`;
+        const DataSig = `${Surface.faces.length}:${ULen}:${Surface.hiddenIslands.size}:${Surface.importanceByFace.size}:${Surface.matcapRevision || 0}:${this.shadingMode}:${TargetTexelDensity}:${ImportanceGroups.length}:${UvHash.toFixed(4)}`;
 
         // Fast path: topology, UVs, and shading didn't change -> ONLY upload compact GPU masks (0.02ms!)
         if (this._lastMeshTopoSig === DataSig && this.triToFace.length > 0)
@@ -1709,6 +2043,7 @@ export class UVViewport3D
         const UvArr = [];
         const ColArr = [];
         const FaceIdArr = [];
+        const MatCapSlotArr = [];
         const BaryArr = [];
         const EdgeMaskArr = [];
         this.triToFace = [];
@@ -1730,8 +2065,10 @@ export class UVViewport3D
             [0.74, 0.94, 0.85]
         ];
 
-        const CreaseNormals = IsMatcap ? ComputeCreaseCornerNormals(Surface, 52) : null;
+        const CreaseNormals = SmoothNormals ? ComputeCreaseCornerNormals(Surface, 52) : null;
         const EdgeAccum = new Map();
+
+        let MinX = Infinity, MaxX = -Infinity, MinY = Infinity, MaxY = -Infinity, MinZ = Infinity, MaxZ = -Infinity;
 
         for (let fi = 0; fi < Surface.faces.length; fi++)
         {
@@ -1742,6 +2079,7 @@ export class UVViewport3D
             const Corners = F.corners;
             const FaceN = Surface.faceNormals[fi] || [0, 1, 0];
             const SmoothN = CreaseNormals ? CreaseNormals[fi] : null;
+            const FaceMatCapSlot = Surface.GetFaceMatCapSlot ? Surface.GetFaceMatCapSlot(fi) : 0;
 
             // Pure surface color without selection tint (gpuSelectionTex renders selection overlay on GPU)
             let R = 0.85, G = 0.86, B = 0.85;
@@ -1753,6 +2091,14 @@ export class UVViewport3D
             else if (this.shadingMode === 'flat')
             {
                 R = 0.76; G = 0.78; B = 0.80;
+            }
+            else if (this.shadingMode === 'hybrid-eon' || this.shadingMode === 'lit-eon')
+            {
+                const Sw = this.matcapCatalog[FaceMatCapSlot]?.swatch || '#d2d4d8';
+                const Rgb = HexToRgb01(Sw);
+                R = Rgb[0] * 0.82 + 0.16;
+                G = Rgb[1] * 0.82 + 0.16;
+                B = Rgb[2] * 0.82 + 0.16;
             }
             else if (this.shadingMode === 'importance')
             {
@@ -1785,6 +2131,9 @@ export class UVViewport3D
                 {
                     const C = Corners[Idxs[b]];
                     const Pt = Surface.positions[C.v];
+                    if (Pt[0] < MinX) MinX = Pt[0]; if (Pt[0] > MaxX) MaxX = Pt[0];
+                    if (Pt[1] < MinY) MinY = Pt[1]; if (Pt[1] > MaxY) MaxY = Pt[1];
+                    if (Pt[2] < MinZ) MinZ = Pt[2]; if (Pt[2] > MaxZ) MaxZ = Pt[2];
                     const Uv = Surface.uvCoords[C.uv];
                     const Nrm = SmoothN ? SmoothN[Idxs[b]] : FaceN;
                     PosArr.push(Pt[0], Pt[1], Pt[2]);
@@ -1792,6 +2141,7 @@ export class UVViewport3D
                     UvArr.push(Uv[0], Uv[1]);
                     ColArr.push(R, G, B);
                     FaceIdArr.push(fi);
+                    MatCapSlotArr.push(FaceMatCapSlot);
                     BaryArr.push(Barys[b][0], Barys[b][1], Barys[b][2]);
                     EdgeMaskArr.push(M0, M1, M2);
                 }
@@ -1815,11 +2165,30 @@ export class UVViewport3D
             }
         }
 
+        if (Number.isFinite(MinY) && this.keyLight && this.shadowFloor)
+        {
+            const Cx = 0.5 * (MinX + MaxX), Cy = 0.5 * (MinY + MaxY), Cz = 0.5 * (MinZ + MaxZ);
+            const HalfSpan = Math.max(1.2, 0.72 * Math.hypot(MaxX - MinX, MaxY - MinY, MaxZ - MinZ));
+            this.keyLight.target.position.set(Cx, Cy, Cz);
+            this.keyLight.position.set(Cx + HalfSpan * 1.45, Cy + HalfSpan * 2.15, Cz + HalfSpan * 1.25);
+            this.keyLight.target.updateMatrixWorld();
+            this.keyLight.shadow.camera.left = -HalfSpan;
+            this.keyLight.shadow.camera.right = HalfSpan;
+            this.keyLight.shadow.camera.top = HalfSpan;
+            this.keyLight.shadow.camera.bottom = -HalfSpan;
+            this.keyLight.shadow.camera.near = Math.max(0.1, HalfSpan * 0.25);
+            this.keyLight.shadow.camera.far = HalfSpan * 8.0;
+            this.keyLight.shadow.camera.updateProjectionMatrix();
+            this.shadowFloor.position.set(Cx, MinY - 0.004, Cz);
+            if (this.gridHelper) this.gridHelper.position.set(Cx, MinY - 0.006, Cz);
+        }
+
         this.geometry.setAttribute('position', new THREE.Float32BufferAttribute(PosArr, 3));
         this.geometry.setAttribute('normal', new THREE.Float32BufferAttribute(NormArr, 3));
         this.geometry.setAttribute('uv', new THREE.Float32BufferAttribute(UvArr, 2));
         this.geometry.setAttribute('color', new THREE.Float32BufferAttribute(ColArr, 3));
         this.geometry.setAttribute('aFaceId', new THREE.Float32BufferAttribute(FaceIdArr, 1));
+        this.geometry.setAttribute('aMatCapSlot', new THREE.Float32BufferAttribute(MatCapSlotArr, 1));
         this.geometry.setAttribute('aBary', new THREE.Float32BufferAttribute(BaryArr, 3));
         this.geometry.setAttribute('aEdgeMask', new THREE.Float32BufferAttribute(EdgeMaskArr, 3));
         this.geometry.computeBoundingSphere();

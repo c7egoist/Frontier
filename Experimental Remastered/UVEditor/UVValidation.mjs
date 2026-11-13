@@ -478,5 +478,55 @@ console.log('10. Testing GPU Wireframe/Edge/Vertex Shaders, Spatial Grid, Adjace
     console.log('   OK: GPU wireframe/edge/vertex shaders, spatial grid, adjacency & caching verified.');
 }
 
+// 11. Multi-MatCap Per-Face Slots, Fast Lit EON Blinn-Phong, Shadows & Project-Zero Studio UI Redesign
+console.log('11. Testing Multi-MatCap Slots, EON Blinn-Phong Shader, Shadows & Project-Zero UI Redesign...');
+{
+    const { surface: Vehicle } = SampleAssetCatalog[1].create();
+    const { surface: Coupe } = SampleAssetCatalog[0].create();
+
+    assert.ok(Vehicle.GetDistinctMatCapSlots().length >= 3, 'Vehicle must auto-seed >= 3 distinct part MatCap slots');
+    assert.ok(Coupe.GetDistinctMatCapSlots().length >= 3, 'Aero Coupe GT must auto-seed >= 3 distinct part MatCap slots');
+
+    const PrevSlot0 = Coupe.GetFaceMatCapSlot(0);
+    const PrevRev = Coupe.matcapRevision;
+    Coupe.PushUndo('Test MatCap Assign');
+    const Assigned = Coupe.AssignMatCapSlotToFaces([0, 1], 5);
+    assert.equal(Assigned, 2, 'AssignMatCapSlotToFaces must return valid face count');
+    assert.equal(Coupe.GetFaceMatCapSlot(0), 5);
+    assert.equal(Coupe.GetFaceMatCapSlot(1), 5);
+    assert.ok(Coupe.matcapRevision > PrevRev, 'AssignMatCapSlotToFaces must increment matcapRevision');
+
+    assert.ok(Coupe.Undo(), 'Undo should revert MatCap slot assignment');
+    assert.equal(Coupe.GetFaceMatCapSlot(0), PrevSlot0, 'Undo must restore prior face MatCap slot');
+    assert.ok(Coupe.Redo(), 'Redo should reapply MatCap slot assignment');
+    assert.equal(Coupe.GetFaceMatCapSlot(0), 5, 'Redo must restore reassigned MatCap slot');
+
+    Coupe.SeedDefaultMatCapSlots(true);
+    assert.equal(Coupe.GetFaceMatCapSlot(0), PrevSlot0, 'SeedDefaultMatCapSlots(true) must restore semantic part slots');
+
+    const Html = ReadText('index.html');
+    const Css = ReadText('UVEditor.css');
+    const EditorJs = ReadText('UVEditor.js');
+    const Vp3dJs = ReadText('Engine/UVViewport3D.js');
+
+    assert.ok(Vp3dJs.includes('DEFAULT_MATCAP_SLOTS') && Vp3dJs.includes('RegisterCustomMatCapImage(') && Vp3dJs.includes('SetRenderSettings('),
+        'UVViewport3D.js must export 8-slot MatCap catalog, custom image upload, and render settings');
+    assert.ok(Vp3dJs.includes('EvaluateEonDiffuse(') && Vp3dJs.includes('EvaluateBlinnPhongSpec(') && Vp3dJs.includes('getShadowMask()') && Vp3dJs.includes('PCFSoftShadowMap') && Vp3dJs.includes('ShadowMaterial'),
+        'UVViewport3D.js must implement EON diffuse, normalized Blinn-Phong, and PCFSoftShadowMap shadow floor');
+    assert.ok(Vp3dJs.includes('vEonUv') && !Vp3dJs.includes('vMapUv'),
+        'UVViewport3D.js must declare unconditional vEonUv varying instead of guarded vMapUv');
+    assert.ok(Vp3dJs.includes("this.shadingMode = 'hybrid-eon'"),
+        'UVViewport3D.js must default to hybrid-eon multi-MatCap + EON shading');
+
+    assert.ok(Html.includes('data-tab="shading"') && Html.includes('id="matcap-file-input"') && Html.includes('id="toggle-shadows-btn"') && Html.includes('value="hybrid-eon"'),
+        'index.html must expose Shading tab, custom MatCap upload input, shadow toggle, and hybrid-eon shading mode');
+    assert.ok(Css.includes('gap: 2px') && Css.includes('background: #262626') && Css.includes('.matcap-grid') && Css.includes('.matcap-chip') && Css.includes('#ffb454'),
+        'UVEditor.css must implement Project-Zero 2px matte workspace grid, MatCap swatch grid, and #ffb454 outliner indicator');
+    assert.ok(EditorJs.includes('DEFAULT_MATCAP_SLOTS') && EditorJs.includes('RenderShadingTab(') && EditorJs.includes('AssignMatCapSlotToSelection(') && EditorJs.includes('matcap-file-input') && EditorJs.includes('toggle-shadows-btn'),
+        'UVEditor.js must wire Shading inspector tab, MatCap slot painting, custom upload, and shadow toggle');
+
+    console.log('   OK: Multi-MatCap slots, EON Blinn-Phong shader, shadows & Project-Zero UI verified.');
+}
+
 console.log('\nALL UV STUDIO VALIDATIONS PASSED SUCCESSFULLY.');
 

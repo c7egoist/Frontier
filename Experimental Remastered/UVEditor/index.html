@@ -21,7 +21,6 @@
       <a href="../index.html" class="brand-link" title="Back to Experimental Remastered Studio Suite">
         <span class="brand-mark">Frontier<span class="brand-dot">.</span></span>
       </a>
-      <span class="experimental">EXPERIMENTAL</span>
       <span class="studio-pill">UV Studio</span>
     </div>
 
@@ -160,6 +159,9 @@
         </div>
         <div class="select-pill-wrap vp-compact-select">
           <select id="mesh-shade-select" title="3D Mesh Shading">
+            <option value="hybrid-eon" selected>3D: Hybrid MatCap + EON</option>
+            <option value="multi-matcap">3D: Multi-MatCap</option>
+            <option value="lit-eon">3D: EON Blinn-Phong</option>
             <option value="checker">3D: UV Checker</option>
             <option value="flat">3D: Flat Shaded</option>
             <option value="matcap">3D: Matcap Clay</option>
@@ -234,15 +236,18 @@
             <span id="mesh-object-pill" class="udim-caption-pill">Aero Coupe GT</span>
           </div>
           <div class="mesh-camera-bar">
-            <button class="pill-btn active" data-shade3d="checker" type="button" title="UV Checker 3D Shading">Check</button>
+            <button class="pill-btn active" data-shade3d="hybrid-eon" type="button" title="Multi-MatCap + Fast EON Blinn-Phong + PCF Shadows">Hybrid</button>
+            <button class="pill-btn" data-shade3d="multi-matcap" type="button" title="Per-Face Multi-MatCap Shading">Multi-MC</button>
+            <button class="pill-btn" data-shade3d="lit-eon" type="button" title="Fast Lit EON + Normalized Blinn-Phong">EON Lit</button>
+            <button class="pill-btn" data-shade3d="checker" type="button" title="UV Checker 3D Shading">Check</button>
             <button class="pill-btn" data-shade3d="flat" type="button" title="Flat Faceted 3D Shading">Flat</button>
-            <button class="pill-btn" data-shade3d="matcap" type="button" title="Matcap Studio Clay 3D Shading">Matcap</button>
             <span class="bar-divider"></span>
             <button class="pill-btn" data-cam="Persp" type="button">Persp</button>
             <button class="pill-btn" data-cam="Front" type="button">Front</button>
             <button class="pill-btn" data-cam="Side" type="button">Side</button>
             <button class="pill-btn" data-cam="Top" type="button">Top</button>
             <button class="pill-btn active" id="toggle-wire3d-btn" type="button">Wire</button>
+            <button class="pill-btn active" id="toggle-shadows-btn" type="button" title="Toggle Directional 3x3 PCF Shadows">Shadow</button>
           </div>
           <div class="mesh-hint-pill" id="mesh-hint-pill">Edge Mode: Click Edge · Alt Loop · Ctrl+Alt Ring · Ctrl Path · K Seam Brush</div>
         </div>
@@ -297,7 +302,8 @@
 
       <div class="inspector-tabs" id="inspector-tabs">
         <button class="active" data-tab="packing" type="button">Packing</button>
-        <button data-tab="unwrap" type="button">Unwrap &amp; Edit</button>
+        <button data-tab="shading" type="button">Shading</button>
+        <button data-tab="unwrap" type="button">Unwrap</button>
         <button data-tab="udim" type="button">UDIMs</button>
         <button data-tab="check" type="button">Diagnostics</button>
       </div>
@@ -331,6 +337,7 @@
 <!-- HIDDEN FILE INPUTS -->
 <input type="file" id="obj-file-input" accept=".obj,text/plain" hidden>
 <input type="file" id="tex-file-input" accept="image/*" hidden>
+<input type="file" id="matcap-file-input" accept="image/*" hidden>
 
 <!-- POPOVER: NEW ASSET / SAMPLE PICKER -->
 <div class="popover add-menu" id="spawn-menu" hidden>
@@ -511,7 +518,7 @@
     <span>Select Similar Menu (Island, Perim, Area…) <kbd>Shift+G</kbd></span>
     <span>Select Linked Island / Flat Faces <kbd>L / Ctrl+Shift+F</kbd></span>
     <span>Seam Brush Tool (Single / Alt+Click Loop) <kbd>K</kbd></span>
-    <span>Cycle 3D Shading (Checker / Flat / Matcap) <kbd>Z</kbd></span>
+    <span>Cycle 3D Shading (Hybrid / Multi-MC / EON / Checker) <kbd>Z</kbd></span>
     <span>Edges, Boundaries &amp; Seams Menu <kbd>Ctrl+E / RMB</kbd></span>
     <span>Select All / Deselect / Invert <kbd>A / Alt+A / Ctrl+I</kbd></span>
     <span>Grow / Shrink / Checker / Random <kbd>^++ / ^+- / Select▾</kbd></span>
