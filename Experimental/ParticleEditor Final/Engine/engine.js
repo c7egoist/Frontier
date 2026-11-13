@@ -531,7 +531,8 @@ import { PE } from "./pe.js";
           rp.setPipeline(this.pipe.cube);
           rp.setBindGroup(1, job.gpu.renderBG);
           rp.draw(36, job.gpu.cap);
-        } else {
+        }
+        if (!job.cube || job.dualPrim) {
           rp.setPipeline(job.alpha ? this.pipe.partAlpha : this.pipe.partAdd);
           rp.setBindGroup(1, job.gpu.renderBG);
           rp.draw(6, job.gpu.cap);
@@ -675,10 +676,11 @@ import { PE } from "./pe.js";
     const isTrans = p.kind === 5 && !!p.transition;
     const webMode = !isTrans && !hasArc && !hasBeam && !isBoid ? Math.max(0, Math.min(2, p.webMode | 0)) : 0;
     const dynMode = !isTrans && !hasArc && !hasBeam && !isBoid && !webMode ? Math.max(0, Math.min(7, p.dynMode | 0)) : 0;
-    const isRibbon = !webMode && !dynMode && (p.curlMode || 0) === 3;
+    const gridMode = !isTrans && !hasArc && !hasBeam && !isBoid && !webMode && !dynMode ? Math.max(0, Math.min(2, p.gridMode | 0)) : 0;
+    const isRibbon = !webMode && !dynMode && !gridMode && (p.curlMode || 0) === 3;
     const tp = p.targetPos || [o.origin[0] + 4, o.origin[1], o.origin[2]];
-    const packedCurlMode = webMode > 0 ? (3 + webMode) : (dynMode > 0 ? (5 + dynMode) : (p.curlMode || 0));
-    const packedRate = webMode > 0 ? (p.webSpinRate ?? 1.0) : (dynMode > 0 ? (p.dynStiff ?? 1.0) : (p.curlRate ?? 0.24));
+    const packedCurlMode = webMode > 0 ? (3 + webMode) : (dynMode > 0 ? (5 + dynMode) : (gridMode > 0 ? 13 : (p.curlMode || 0)));
+    const packedRate = webMode > 0 ? (p.webSpinRate ?? 1.0) : (dynMode > 0 ? (p.dynStiff ?? 1.0) : (gridMode > 0 ? (p.gridContrast ?? 1.85) : (p.curlRate ?? 0.24)));
     set("mol", packedCurlMode, p.curlFreq ?? 0.85, p.curlAmp ?? 2.2, packedRate);
     if (isTrans) {
       const tr = p.transition;
@@ -691,6 +693,9 @@ import { PE } from "./pe.js";
     } else if (dynMode > 0) {
       set("mol2", p.dynRows ?? 28, p.dynHeight ?? 2.4, p.dynSag ?? 0.35, p.dynSub ?? 0);
       set("mol3", p.dynTearThresh ?? 0, p.dynWaveSpeed ?? 2.2, p.leafMode || 0, o.preseedCurtain ? 1 : 0);
+    } else if (gridMode > 0) {
+      set("mol2", p.gridSurface ?? 0, p.gridShape ?? 2, p.gridCols ?? 24, p.gridRows ?? 24);
+      set("mol3", p.gridEffector ?? 0, p.gridMinScale ?? 0.10, p.gridMaxHeight ?? 0.95, o.preseedCurtain ? 1 : 0);
     } else if (isRibbon) {
       set("mol2", p.shellRadius ?? 1.75, p.streakThin ?? 1.0, p.objectShape ?? 0, p.pulseMode ?? 0);
       set("mol3", p.pulseAxis ?? 0, p.pulseSpeed ?? 0.34, p.pulseWidth ?? 0.22, o.preseedCurtain ? 1 : 0);
@@ -701,9 +706,9 @@ import { PE } from "./pe.js";
       set("mol2", p.boidsSeparate ?? 2.85, p.trailMode || 0, p.boidsCohere ?? 1.15, p.boidsAlign ?? 1.65);
       set("mol3", p.swarmRadius ?? 1.4, p.boidsSpeed ?? 3.4, p.pulseHz ?? 0, p.pulseDepth ?? 0);
     } else {
-      set("mol2", p.shellRadius ?? 1.75, p.trailMode || 0, 0, 0);
-      set("mol3", 0, 0, p.glitchRate ?? 14, o.preseedCurtain ? 1 : 0);
+      set("mol2", p.shellRadius ?? 1.75, p.trailMode || 0, p.shieldForm ?? 0, 0);
+      set("mol3", p.shieldMask ?? 1, p.shieldSpin ?? 0.20, p.glitchRate ?? 14, o.preseedCurtain ? 1 : 0);
     }
     set("emit", o.head, o.seed, p.shape, p.leafMode);
-    set("misc", p.sizeScale, p.streakThin ?? 1.0, hasArc ? (p.arcMode + 1) : 0, isTrans ? (p.transition.shell ?? 3.0) : (hasBeam ? (p.beamMode || 1) : 0));
+    set("misc", p.sizeScale, gridMode > 0 ? (p.gridBillboard ? 1.0 : 0.0) : (p.streakThin ?? 1.0), hasArc ? (p.arcMode + 1) : 0, isTrans ? (p.transition.shell ?? 3.0) : (hasBeam ? (p.beamMode || 1) : 0));
   };

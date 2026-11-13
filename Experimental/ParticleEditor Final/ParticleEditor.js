@@ -57,7 +57,7 @@ function ConstructPerspective(Fov, Aspect, Near, Far)
 
 const CategoryLabels = { 0: 'Streak', 1: 'Wind-driven', 5: 'VFX' };
 const GroupGlyphs = {
-    'Cloth & Rigging': 'Cloth', 'Foliage & Flora': 'Leaf',
+    'Cloth & Rigging': 'Cloth', 'Foliage & Flora': 'Leaf', 'Motion & Grids': 'Boxes',
     'Silk & Curl': 'Sparkles', 'Ballistics & Sparks': 'Flame', 'Pyro & Water': 'Drop',
     'Wind-Blown': 'Leaf', 'Storms & Weather': 'CloudRain',
     'Transitions': 'Boxes', 'Space & Distortion': 'Singularity',
@@ -69,6 +69,7 @@ const GlyphForPreset = Preset => Preset?.id === 'snow' ? 'Snowflake'
     : Preset?.id === 'rain' ? 'CloudRain'
     : Preset?.id === 'hail' ? 'CloudHail'
     : Preset?.id?.startsWith('spiderweb-') ? 'Lattice'
+    : (Preset?.p?.gridMode || 0) > 0 ? 'Boxes'
     : (Preset?.p?.dynMode >= 1 && Preset?.p?.dynMode <= 3) ? 'Cloth'
     : (Preset?.p?.dynMode >= 4) ? 'Leaf'
     : Preset?.id === 'heat-shimmer' ? 'Heat'
@@ -92,6 +93,7 @@ const DisplayColour = Linear =>
 // Curated scene presets for the slanted Fluid document dock
 const SceneTabs = [
     { Id: 'default', Name: 'Studio Default', Presets: null, Scenario: 'lab' },
+    { Id: 'effector_grids', Name: 'Effector Grids & Halftones', Presets: ['effector-grid-cubes', 'effector-sphere-dots', 'effector-hand-halftone'], Scenario: 'lab' },
     { Id: 'rigging_cloth', Name: 'Cloth, Sails, Cables & Vines', Presets: ['flag-banner', 'ship-sail', 'cables-chains', 'vines-ropes'], Scenario: 'lab' },
     { Id: 'foliage', Name: 'Grass, Reeds, Ferns & Tree', Presets: ['grass-wheat-field', 'tall-reeds', 'interactive-fern', 'interactive-tree'], Scenario: 'lab' },
     { Id: 'spiderwebs', Name: 'Spiderwebs · Orb & Cobwebs', Presets: ['spiderweb-orb', 'spiderweb-cobweb'], Scenario: 'lab' },
@@ -99,7 +101,7 @@ const SceneTabs = [
     { Id: 'curl', Name: 'Object Pulse & Bokeh Ribbons', Presets: ['bokeh-object-pulse', 'bokeh-stream-ribbons', 'curl-fur-field', 'curl-sphere-plasma'], Scenario: 'blank' },
     { Id: 'transitions', Name: 'Mesh Derez & Transitions', Presets: ['derez-cube', 'cube-coins', 'dissolve-butterflies', 'reverse-derez'], Scenario: 'blank' },
     { Id: 'distortion', Name: 'Black Hole & Heat Shimmer', Presets: ['black-hole', 'heat-shimmer'], Scenario: 'blank' },
-    { Id: 'shields_aurora', Name: 'Hex Shield & Aurora Sky', Presets: ['energy-shield-hex', 'aurora-borealis', 'radar-sweep', 'sonar-ping'], Scenario: 'blank' },
+    { Id: 'shields_aurora', Name: 'Energy Shields & Aurora Sky', Presets: ['energy-shield-hex', 'energy-shield-prism', 'aurora-borealis', 'radar-sweep', 'sonar-ping'], Scenario: 'blank' },
     { Id: 'pyro', Name: 'Pyro & Sparks', Presets: ['sparks', 'fire', 'smoke', 'embers'], Scenario: 'lab' },
     { Id: 'weather', Name: 'Weather · Snow / Rain / Hail', Presets: ['rain', 'snow', 'hail'], Scenario: 'storm' },
     { Id: 'wind', Name: 'Wind-Blown & Foliage', Presets: ['leaves', 'petals', 'pollen', 'seeds'], Scenario: 'lab' },
@@ -265,6 +267,7 @@ function SeedBurstCountFor(PresetId, Params)
     if (Params.transition) return Math.max(1, Params.burstCount || Params.capacity || 384);
     if (Params.shape === 15 || Params.shape === 16 || Params.shape === 17) return Math.max(1, Params.burstCount || (Params.shape === 17 ? 6 : 1));
     if (Params.kind === 6) return Math.min(Params.capacity || 64, 36);
+    if ((Params.gridMode || 0) > 0) return Math.max(64, Params.capacity || 576);
     if ((Params.webMode || 0) > 0) return Math.max(64, Params.capacity || 320);
     if ((Params.dynMode || 0) > 0) return Math.max(64, Params.capacity || 64);
     if (Params.blackHole) return Math.min(Params.capacity || 2000, Math.round((Params.capacity || 2000) * 0.45));
@@ -279,7 +282,7 @@ function ConstructEffect(PresetId, Name)
     ApplyWindLink(Preset);
     const P = Preset.p;
     const IsArc = P?.arcMode === 0 || P?.arcMode === 1;
-    const IsPreseed = PRECIP_IDS.includes(PresetId) || (P?.curlMode || 0) > 0 || (P?.webMode || 0) > 0 || (P?.dynMode || 0) > 0 || !!P?.blackHole;
+    const IsPreseed = PRECIP_IDS.includes(PresetId) || (P?.curlMode || 0) > 0 || (P?.webMode || 0) > 0 || (P?.dynMode || 0) > 0 || (P?.gridMode || 0) > 0 || !!P?.blackHole;
     const SeedBurst = SeedBurstCountFor(PresetId, P);
     const HasImmediateBurst = !!(P?.transition || (P?.shape >= 15 && P?.burstEvery > 0));
     const Interval = Math.max(0.18, P?.arcInterval ?? (P?.arcMode === 1 ? 0.55 : 1.40));
@@ -312,7 +315,7 @@ function RebuildGpu(Effect)
     Effect.Gpu = Scene.Engine.createSystem(Effect.P);
     const P = Effect.P;
     const IsArc = P?.arcMode === 0 || P?.arcMode === 1;
-    const IsPreseed = PRECIP_IDS.includes(Effect.PresetId) || (P?.curlMode || 0) > 0 || (P?.webMode || 0) > 0 || (P?.dynMode || 0) > 0 || !!P?.blackHole;
+    const IsPreseed = PRECIP_IDS.includes(Effect.PresetId) || (P?.curlMode || 0) > 0 || (P?.webMode || 0) > 0 || (P?.dynMode || 0) > 0 || (P?.gridMode || 0) > 0 || !!P?.blackHole;
     const SeedBurst = SeedBurstCountFor(Effect.PresetId, P);
     const HasImmediateBurst = !!(P?.transition || (P?.shape >= 15 && P?.burstEvery > 0));
     Object.assign(Effect, {
@@ -472,7 +475,7 @@ function BurstAll()
     {
         const Cls = ClassifyEffect(Effect.P);
         if (Cls.IsArc) { TriggerArcStrike(Effect, Scene.Time); Triggered++; }
-        else if (Cls.IsTransition || Cls.IsDyn || Cls.IsWeb) { RebuildGpu(Effect); Triggered++; }
+        else if (Cls.IsTransition || Cls.IsDyn || Cls.IsWeb || Cls.IsGrid) { RebuildGpu(Effect); Triggered++; }
         else if (Cls.IsSteadyOverlay) continue;
         else if (Cls.IsExpandingWave) { Effect.PendingBurst += Math.max(1, Effect.P.burstCount || 1); Triggered++; }
         else { Effect.PendingBurst += Math.max(80, Math.round(Effect.Gpu.cap * 0.45)); Triggered++; }
@@ -1397,6 +1400,111 @@ function ConstructGeometry()
                 Line([P.origin[0] + Sx * Ex * 1.04, Py * 0.96, P.origin[2] - Ez], [P.origin[0] + Sx * Ex * 1.04, Py * 0.96, P.origin[2] + Ez], [0.46, 0.52, 0.58, 0.86]);
             }
         }
+        if ((P.gridMode || 0) > 0 && P.showObject !== false)
+        {
+            const Surf = Math.max(0, Math.min(5, Math.round(P.gridSurface ?? 0)));
+            const O = P.origin;
+            const Ex = Math.max(0.35, P.boxHalf?.[0] || 1.7), Ey = Math.max(0.35, P.boxHalf?.[1] || 1.7), Ez = Math.max(0.35, P.boxHalf?.[2] || 1.7);
+            const Sc = Math.max(0.5, P.radius || Ex);
+            if (Surf === 2)
+            {
+                DrawElectrodeSphere(O, Sc * 0.985, [0.04, 0.045, 0.055, 0.99], [0.22, 0.24, 0.28, 0.35], false);
+            }
+            else if (Surf === 3)
+            {
+                // Sculpted obsidian forearm + palm + 5 curved fingers matching shaders.js evalHandTube (0.975x inner skin) + glossy chrome sphere
+                const HandSegs = [
+                    { p0: [0, 1.15, -0.14], p1: [0, 0.72, -0.06], p2: [0, 0.28, -0.01], rx0: 0.273, rx1: 0.234, rz0: 0.205, rz1: 0.136, palm: false, cap: false },
+                    { p0: [0, 0.30, -0.01], p1: [-0.01, 0, 0.03], p2: [-0.01, -0.34, 0.05], rx0: 0.263, rx1: 0.332, rz0: 0.136, rz1: 0.112, palm: true, cap: false },
+                    { p0: [-0.22, 0.04, 0.04], p1: [-0.44, -0.36, 0.14], p2: [-0.33, -0.82, 0.25], rx0: 0.112, rx1: 0.063, rz0: 0.102, rz1: 0.058, palm: false, cap: true },
+                    { p0: [-0.21, -0.30, 0.04], p1: [-0.26, -0.66, 0.17], p2: [-0.18, -0.94, 0.26], rx0: 0.078, rx1: 0.052, rz0: 0.073, rz1: 0.049, palm: false, cap: true },
+                    { p0: [-0.05, -0.33, 0.04], p1: [-0.06, -0.72, 0.16], p2: [-0.02, -0.95, 0.23], rx0: 0.080, rx1: 0.054, rz0: 0.075, rz1: 0.051, palm: false, cap: true },
+                    { p0: [0.11, -0.32, 0.03], p1: [0.12, -0.68, 0.13], p2: [0.12, -0.87, 0.17], rx0: 0.074, rx1: 0.050, rz0: 0.069, rz1: 0.047, palm: false, cap: true },
+                    { p0: [0.25, -0.28, 0.01], p1: [0.28, -0.56, 0.08], p2: [0.25, -0.74, 0.12], rx0: 0.064, rx1: 0.044, rz0: 0.060, rz1: 0.041, palm: false, cap: true }
+                ];
+                const SkinCol = [0.042, 0.045, 0.054, 0.99];
+                for (const Hs of HandSegs)
+                {
+                    const Rings = 8, Sides = 14;
+                    const RingPts = [];
+                    for (let R = 0; R <= Rings; R++)
+                    {
+                        const T = R / Rings, IT = 1 - T;
+                        const C = [0, 1, 2].map(K => Hs.p0[K] * IT * IT + Hs.p1[K] * 2 * IT * T + Hs.p2[K] * T * T);
+                        const Dc = [0, 1, 2].map(K => (Hs.p1[K] - Hs.p0[K]) * 2 * IT + (Hs.p2[K] - Hs.p1[K]) * 2 * T);
+                        const Tang = Normalize3([Dc[0], Dc[1] - 0.001, Dc[2]]);
+                        const UAx = Normalize3(Cross3(Tang, [0, 0, 1]));
+                        const WAx = Normalize3(Cross3(UAx, Tang));
+                        let Rx = Hs.palm ? (0.254 + (0.342 - 0.254) * Math.sin(Math.min(Math.PI, T * 2.2))) : (Hs.rx0 + (Hs.rx1 - Hs.rx0) * T);
+                        let Rz = Hs.rz0 + (Hs.rz1 - Hs.rz0) * T;
+                        let CapLift = 0;
+                        if (Hs.cap && T > 0.88)
+                        {
+                            const AngC = ((T - 0.88) / 0.12) * 1.38;
+                            Rx *= Math.cos(AngC); Rz *= Math.cos(AngC); CapLift = Math.sin(AngC) * Hs.rx1;
+                        }
+                        const Row = [];
+                        for (let S = 0; S < Sides; S++)
+                        {
+                            const Phi = (S / Sides) * Math.PI * 2;
+                            const Cp = Math.cos(Phi), Sp = Math.sin(Phi);
+                            Row.push([
+                                O[0] + (C[0] + Tang[0] * CapLift + UAx[0] * (Rx * Cp) + WAx[0] * (Rz * Sp)) * Sc,
+                                O[1] + (C[1] + Tang[1] * CapLift + UAx[1] * (Rx * Cp) + WAx[1] * (Rz * Sp)) * Sc,
+                                O[2] + (C[2] + Tang[2] * CapLift + UAx[2] * (Rx * Cp) + WAx[2] * (Rz * Sp)) * Sc
+                            ]);
+                        }
+                        RingPts.push(Row);
+                    }
+                    for (let R = 0; R < Rings; R++)
+                    {
+                        for (let S = 0; S < Sides; S++)
+                        {
+                            const Sn = (S + 1) % Sides;
+                            Face(RingPts[R][S], RingPts[R][Sn], RingPts[R + 1][Sn], SkinCol);
+                            Face(RingPts[R][S], RingPts[R + 1][Sn], RingPts[R + 1][S], SkinCol);
+                        }
+                    }
+                }
+                // Glossy chrome sphere cradled by the downward-cupped obsidian fingers
+                DrawElectrodeSphere([O[0] - 0.04 * Sc, O[1] - 0.64 * Sc, O[2] - 0.02 * Sc], 0.31 * Sc, [0.36, 0.41, 0.48, 0.99], [0.88, 0.94, 1.0, 0.72], true);
+            }
+            else if (Surf === 4)
+            {
+                const Rmaj = Sc, rmin = Rmaj * 0.365, SegU = 28, SegV = 14;
+                const TCol = [0.045, 0.05, 0.06, 0.98];
+                for (let Iu = 0; Iu < SegU; Iu++)
+                {
+                    const P0 = (Iu / SegU) * Math.PI * 2, P1 = ((Iu + 1) / SegU) * Math.PI * 2;
+                    for (let Iv = 0; Iv < SegV; Iv++)
+                    {
+                        const T0 = (Iv / SegV) * Math.PI * 2, T1 = ((Iv + 1) / SegV) * Math.PI * 2;
+                        const Pt = (Ph, Th) => {
+                            const Rad = Rmaj + rmin * Math.cos(Th);
+                            return [O[0] + Math.cos(Ph) * Rad, O[1] + Math.sin(Th) * rmin, O[2] + Math.sin(Ph) * Rad];
+                        };
+                        const A = Pt(P0, T0), B = Pt(P1, T0), C = Pt(P1, T1), D = Pt(P0, T1);
+                        Face(A, B, C, TCol); Face(A, C, D, TCol);
+                    }
+                }
+            }
+            else if (Surf === 0 || Surf === 1)
+            {
+                const Slate = [0.038, 0.042, 0.050, 0.88];
+                if (Surf === 0)
+                {
+                    const Y0 = O[1] - 0.012;
+                    const A = [O[0] - Ex, Y0, O[2] - Ez], B = [O[0] + Ex, Y0, O[2] - Ez], C = [O[0] + Ex, Y0, O[2] + Ez], D = [O[0] - Ex, Y0, O[2] + Ez];
+                    Face(A, B, C, Slate); Face(A, C, D, Slate);
+                }
+                else
+                {
+                    const Z0 = O[2] - 0.015;
+                    const A = [O[0] - Ex, O[1] - Ey, Z0], B = [O[0] + Ex, O[1] - Ey, Z0], C = [O[0] + Ex, O[1] + Ey, Z0], D = [O[0] - Ex, O[1] + Ey, Z0];
+                    Face(A, B, C, Slate); Face(A, C, D, Slate);
+                }
+            }
+        }
     }
     if (Scene.Ball.Active)
     {
@@ -1534,6 +1642,48 @@ function StepBallPhysics(Dt)
     const ArenaBound = 7.4;
     if (Math.abs(B.Pos[0]) > ArenaBound) { B.Pos[0] = Clamp(B.Pos[0], -ArenaBound, ArenaBound); B.Vel[0] = -B.Vel[0] * 0.72; }
     if (Math.abs(B.Pos[2]) > ArenaBound) { B.Pos[2] = Clamp(B.Pos[2], -ArenaBound, ArenaBound); B.Vel[2] = -B.Vel[2] * 0.72; }
+    for (const E of Scene.Effects)
+    {
+        if (!E.P.visible || (E.P.shape ?? 3) !== 16) continue;
+        const P = E.P, O = P.origin;
+        const SForm = Math.round(P.shieldForm ?? 0);
+        const ShR = (P.sizeStart || 3.1) * (P.sizeScale || 1) * 0.5;
+        const Dx = B.Pos[0] - O[0], Dy = B.Pos[1] - O[1], Dz = B.Pos[2] - O[2];
+        if (SForm === 0)
+        {
+            const Dist = Math.hypot(Dx, Dy, Dz) || 1e-4;
+            const MinD = ShR + B.Radius;
+            if (Dist < MinD)
+            {
+                const Nx = Dx / Dist, Ny = Dy / Dist, Nz = Dz / Dist;
+                B.Pos[0] = O[0] + Nx * MinD; B.Pos[1] = O[1] + Ny * MinD; B.Pos[2] = O[2] + Nz * MinD;
+                const Vn = B.Vel[0] * Nx + B.Vel[1] * Ny + B.Vel[2] * Nz;
+                if (Vn < 0)
+                {
+                    const Rest = 1 + Math.max(0.45, B.Bounce);
+                    B.Vel[0] -= Rest * Vn * Nx; B.Vel[1] -= Rest * Vn * Ny; B.Vel[2] -= Rest * Vn * Nz;
+                }
+            }
+        }
+        else
+        {
+            const [Nx, Ny, Nz] = Normalize3(P.dir || [0, 0, 1]);
+            const Dn = Dx * Nx + Dy * Ny + Dz * Nz;
+            const Tx = Dx - Dn * Nx, Ty = Dy - Dn * Ny, Tz = Dz - Dn * Nz;
+            if (Math.abs(Dn) < B.Radius + 0.10 && Math.hypot(Tx, Ty, Tz) <= ShR * 1.02)
+            {
+                const Sign = Dn >= 0 ? 1 : -1;
+                const Push = (B.Radius + 0.10) - Math.abs(Dn);
+                B.Pos[0] += Nx * Sign * Push; B.Pos[1] += Ny * Sign * Push; B.Pos[2] += Nz * Sign * Push;
+                const Vn = B.Vel[0] * Nx + B.Vel[1] * Ny + B.Vel[2] * Nz;
+                if (Vn * Sign < 0)
+                {
+                    const Rest = 1 + Math.max(0.45, B.Bounce);
+                    B.Vel[0] -= Rest * Vn * Nx; B.Vel[1] -= Rest * Vn * Ny; B.Vel[2] -= Rest * Vn * Nz;
+                }
+            }
+        }
+    }
 }
 
 function SyncBallToolState()
@@ -1834,7 +1984,7 @@ function Advance(Now)
         if (!E.P.visible || !E.Gpu) continue;
         const P = E.P, Gpu = E.Gpu;
 
-        const SeedNow = E.PendingBurst > 0 && ((P.dynMode || 0) > 0 || (P.webMode || 0) > 0);
+        const SeedNow = E.PendingBurst > 0 && ((P.dynMode || 0) > 0 || (P.webMode || 0) > 0 || (P.gridMode || 0) > 0);
         const Simulate = (Scene.Playing && Delta > 0) || SeedNow;
         let Release = 0, Steps = 0, StepDelta = Delta > 0 ? Delta : (SeedNow ? 1 / 60 : 0), Head = E.Head, Origin = P.origin;
         if (Simulate)
@@ -1868,9 +2018,11 @@ function Advance(Now)
             origin: Origin, dt: StepDelta, time: Scene.Time, frame: Scene.Step, cap: Gpu.cap, emitN: Release, head: Head,
             seed: (Scene.Step * 7919 + E.Number * 104729) >>> 0, preseedCurtain: PreseedCurtain
         });
+        const GShape = (P.gridMode || 0) > 0 ? Math.round(P.gridShape ?? 0) : -1;
         Jobs.push({
             gpu: Gpu, cpu: Gpu.cpu, origin: Origin, simulate: Simulate, emitN: Release, preseedCurtain: PreseedCurtain,
-            kind: P.kind, readStats: Simulate && (SeedNow || Scene.Step % 3 === 0), draw: true, alpha: P.blend === 'alpha', cube: P.shape === 4,
+            kind: P.kind, readStats: Simulate && (SeedNow || Scene.Step % 3 === 0), draw: true, alpha: P.blend === 'alpha',
+            cube: P.shape === 4 || GShape === 1 || GShape === 2, dualPrim: GShape === 6,
             shatter: !!(P.transition && P.transition.fragment), fly: !!(P.transition && P.transition.after === 'butterfly')
         });
     }
@@ -2792,35 +2944,38 @@ function ClassifyEffect(P)
     const CurlMode = IsTransition ? 0 : (P.curlMode || 0);
     const IsCurl = CurlMode > 0;
     const IsBoids = P.kind === 6;
-    const DynMode = !IsTransition && !IsArc && !IsBeam && !IsBoids ? Math.max(0, Math.min(7, P.dynMode | 0)) : 0;
+    const GridMode = !IsTransition && !IsArc && !IsBeam && !IsBoids ? Math.max(0, Math.min(2, P.gridMode | 0)) : 0;
+    const IsGrid = GridMode > 0;
+    const DynMode = !IsTransition && !IsArc && !IsBeam && !IsBoids && !IsGrid ? Math.max(0, Math.min(7, P.dynMode | 0)) : 0;
     const IsDyn = DynMode > 0;
-    const WebMode = !IsTransition && !IsArc && !IsBeam && !IsBoids && !IsDyn ? Math.max(0, Math.min(2, P.webMode | 0)) : 0;
+    const WebMode = !IsTransition && !IsArc && !IsBeam && !IsBoids && !IsGrid && !IsDyn ? Math.max(0, Math.min(2, P.webMode | 0)) : 0;
     const IsWeb = WebMode > 0;
     const IsObjectPour = CurlMode === 3 && (P.pulseMode || 0) > 0;
     const Shape = P.shape ?? 3;
     const IsDiscPlane = Shape === 10 || Shape === 15;
-    const IsSteadyOverlay = IsCurl || IsWeb || IsDyn || Shape === 16 || (Shape === 15 && (P.leafMode || 0) === 0);
+    const IsSteadyOverlay = IsCurl || IsWeb || IsDyn || IsGrid || Shape === 16 || (Shape === 15 && (P.leafMode || 0) === 0);
     const IsExpandingWave = Shape === 10 || Shape === 11 || (Shape === 15 && (P.leafMode || 0) >= 1);
-    const UsesEmitVolume = !IsArc && !IsBeam && !IsWeb && !IsDyn && CurlMode !== 2 && !IsObjectPour && !IsAssembly;
+    const UsesEmitVolume = !IsArc && !IsBeam && !IsWeb && !IsDyn && !IsGrid && CurlMode !== 2 && !IsObjectPour && !IsAssembly;
     const EmitSh = P.emitShape ?? 0;
-    const UsesRate = !IsTransition && !IsWeb && !IsDyn;
-    const UsesRadius = IsArc || (IsBeam && P.showElectrodes !== false) || WebMode === 1 || (UsesEmitVolume && (EmitSh === 1 || EmitSh === 2));
-    const UsesBoxHalf = IsObjectPour || CurlMode === 1 || WebMode === 2 || IsDyn || (IsTransition && AsmMode === 1) || (UsesEmitVolume && (EmitSh === 3 || EmitSh === 4));
-    const UsesDirVector = !IsTransition && !IsCurl && !IsArc && !IsBeam && !IsBoids && !IsDyn && Shape !== 11 && Shape !== 16;
-    const UsesSpread = UsesDirVector && !IsDiscPlane && !IsWeb && !IsDyn;
-    const UsesSpeed = !IsCurl && !IsWeb && !IsDyn && !IsAssembly && !IsBoids && !IsSteadyOverlay;
-    const UsesLife = !IsAssembly && !IsWeb && !IsDyn;
-    const UsesSizeEnd = !IsAssembly && !IsWeb && !IsDyn;
+    const UsesRate = !IsTransition && !IsWeb && !IsDyn && !IsGrid;
+    const UsesRadius = IsArc || (IsBeam && P.showElectrodes !== false) || WebMode === 1 || (IsGrid && (P.gridSurface ?? 0) >= 2 && (P.gridSurface ?? 0) <= 4) || (UsesEmitVolume && (EmitSh === 1 || EmitSh === 2));
+    const UsesBoxHalf = IsObjectPour || CurlMode === 1 || WebMode === 2 || IsDyn || (IsGrid && ((P.gridSurface ?? 0) <= 1 || (P.gridSurface ?? 0) === 5)) || (IsTransition && AsmMode === 1) || (UsesEmitVolume && (EmitSh === 3 || EmitSh === 4));
+    const UsesDirVector = !IsTransition && !IsCurl && !IsArc && !IsBeam && !IsBoids && !IsDyn && !IsGrid && Shape !== 11 && (Shape !== 16 || (P.shieldForm ?? 0) >= 1);
+    const UsesSpread = UsesDirVector && !IsDiscPlane && !IsWeb && !IsDyn && Shape !== 16;
+    const UsesSpeed = !IsCurl && !IsWeb && !IsDyn && !IsGrid && !IsAssembly && !IsBoids && !IsSteadyOverlay;
+    const UsesLife = !IsAssembly && !IsWeb && !IsDyn && !IsGrid;
+    const UsesSizeEnd = !IsAssembly && !IsWeb && !IsDyn && !IsGrid;
     const UsesColB = !IsAssembly;
-    const UsesColC = IsCurl || IsWeb || IsDyn || (P.trailMode || 0) > 0 || IsBoids || IsBeam || Shape === 0 || Shape >= 10;
-    const UsesTrailMode = !IsCurl && !IsWeb && !IsDyn && !IsTransition && !IsBoids && !IsArc && !IsBeam && (Shape < 10 || Shape === 14);
-    const UsesWind = !IsAssembly && !(Shape === 16 || (Shape === 15 && (P.leafMode || 0) === 0));
-    const UsesDynamics = !IsAssembly && !(Shape === 16 || (Shape === 15 && (P.leafMode || 0) === 0));
-    const UsesLaunchCone = !IsTransition && !IsCurl && !IsWeb && !IsDyn && !IsArc && !IsBeam && !IsBoids && Shape !== 10 && Shape !== 11 && Shape !== 15 && Shape !== 16 && Shape !== 17;
+    const UsesColC = IsCurl || IsWeb || IsDyn || IsGrid || (P.trailMode || 0) > 0 || IsBoids || IsBeam || Shape === 0 || Shape >= 10;
+    const UsesTrailMode = !IsCurl && !IsWeb && !IsDyn && !IsGrid && !IsTransition && !IsBoids && !IsArc && !IsBeam && (Shape < 10 || Shape === 14);
+    const UsesWind = !IsAssembly && !IsGrid && !(Shape === 16 || (Shape === 15 && (P.leafMode || 0) === 0));
+    const UsesDynamics = !IsAssembly && !IsGrid && !(Shape === 16 || (Shape === 15 && (P.leafMode || 0) === 0));
+    const UsesLaunchCone = !IsTransition && !IsCurl && !IsWeb && !IsDyn && !IsGrid && !IsArc && !IsBeam && !IsBoids && Shape !== 10 && Shape !== 11 && Shape !== 15 && Shape !== 16 && Shape !== 17;
 
     let BounceBlockReason = null;
     if (IsAssembly) BounceBlockReason = 'Analytic assembly ignores floor collision';
     else if (IsTransition && P.transition.fragment) BounceBlockReason = 'Shatter cubes break into 8 pieces on floor contact';
+    else if (IsGrid) BounceBlockReason = 'Effector lattice is anchored to its surface geometry';
     else if (IsDyn) BounceBlockReason = 'Dynamic rigging & flora respond directly to wind & 3D ball collisions';
     else if (IsWeb) BounceBlockReason = 'Anchored spiderweb strands flex in wind instead of floor bouncing';
     else if (IsCurl) BounceBlockReason = 'Curl flow field does not bounce on floor';
@@ -2830,7 +2985,7 @@ function ClassifyEffect(P)
 
     return {
         IsArc, IsBeam, IsTransition, AsmMode, IsAssembly,
-        CurlMode, IsCurl, DynMode, IsDyn, WebMode, IsWeb, IsObjectPour, IsBoids, Shape,
+        CurlMode, IsCurl, GridMode, IsGrid, DynMode, IsDyn, WebMode, IsWeb, IsObjectPour, IsBoids, Shape,
         IsDiscPlane, IsSteadyOverlay, IsExpandingWave,
         UsesRate, UsesEmitVolume, UsesRadius, UsesBoxHalf,
         UsesDirVector, UsesSpread, UsesSpeed, UsesLife,
@@ -2892,7 +3047,7 @@ function ConstructEffectInspector(Page, Effect)
 
     const AddBallInteractionCard = (HostPage, Badge = '03 / INTERACTIVE BALL') =>
     {
-        const BallSec = C.SectionCard(HostPage, { Title: 'Interactive 3D ball & impacts', Glyph: 'Ball', Badge, Hint: 'Press T (or Alt+Click in viewport) to throw spheres through cloth, spiderwebs, vines, ferns, grass, or trees.' }).Inner;
+        const BallSec = C.SectionCard(HostPage, { Title: 'Interactive 3D ball & impacts', Glyph: 'Ball', Badge, Hint: 'Press T (or Alt+Click in viewport) to throw spheres through cloth, spiderwebs, shields, effector grids, or trees.' }).Inner;
         C.ActionRow(BallSec, [
             {
                 Label: 'Throw Ball at Effect', Glyph: 'Ball', Tone: 'accent',
@@ -2915,7 +3070,96 @@ function ConstructEffectInspector(Page, Effect)
         ]);
         Range(BallSec, { Label: 'Ball radius', Read: () => Scene.Ball.Radius, Write: V => { Scene.Ball.Radius = Number(V); } }, 0.15, 1.2, 0.02, 2, 'm');
         Range(BallSec, { Label: 'Throw velocity', Read: () => Scene.Ball.ThrowSpeed, Write: V => { Scene.Ball.ThrowSpeed = Number(V); } }, 3.0, 22.0, 0.25, 1, 'm/s');
-        Range(BallSec, BindEffect(Effect, P, 'dynTearThresh', { Label: 'Strand / cloth tear speed (0 = tough)' }), 0.0, 18.0, 0.2, 1, 'm/s');
+        if (Cls.IsDyn || Cls.IsWeb)
+            Range(BallSec, BindEffect(Effect, P, 'dynTearThresh', { Label: 'Strand / cloth tear speed (0 = tough)' }), 0.0, 18.0, 0.2, 1, 'm/s');
+    };
+
+    const GridSurfLabels = ['XZ Floor Matrix', 'XY Wall Matrix', '3D Obsidian Sphere', '3D Obsidian Hand + Chrome Ball', '3D Torus Ring', '3D Cubic Volume'];
+    const GridShapeLabels = ['Halftone Circles', '3D Uniform Boxes', '3D Height Cubes (Up/Down)', 'Flat Square Tiles', 'Triangles', 'Hexagons', 'Auto Mixed (Dots + Cubes)'];
+    const AddGridSection = (HostPage, Badge = '02 / EFFECTOR GRID') =>
+    {
+        const Sec = C.SectionCard(HostPage, {
+            Title: 'Effector halftone & cube grid', Glyph: 'Boxes', Badge,
+            Hint: 'Active effector zones & ForceFields drive brighter/larger tiles or extrude 3D cubes strictly up & down.'
+        }).Inner;
+        const SurfB = BindEffect(Effect, P, 'gridSurface', {
+            Label: 'Surface topology',
+            Options: GridSurfLabels.map((L, K) => [L, K])
+        });
+        const OrigSW = SurfB.Write;
+        SurfB.Write = V => { OrigSW(Number(V)); ConstructInspectorPage(); };
+        C.SelectRow(Sec, SurfB);
+        const ShapeB = BindEffect(Effect, P, 'gridShape', {
+            Label: 'Particle shape',
+            Options: GridShapeLabels.map((L, K) => [L, K])
+        });
+        const OrigGSW = ShapeB.Write;
+        ShapeB.Write = V => { OrigGSW(Number(V)); ConstructInspectorPage(); };
+        C.SelectRow(Sec, ShapeB);
+        C.SelectRow(Sec, BindEffect(Effect, P, 'gridEffector', {
+            Label: 'Effector driver',
+            Options: [['Fluid Simplex Wave', 0], ['Orbiting Dual Effectors', 1], ['Animated Curl Islands', 2], ['Expanding Pulse Ring', 3], ['Ball & ForceFields Only', 4]]
+        }));
+        Range(Sec, BindEffect(Effect, P, 'gridCols', { Label: 'Grid columns (planar/torus)' }), 4, 64, 1, 0, '');
+        Range(Sec, BindEffect(Effect, P, 'gridRows', { Label: 'Grid rows (planar)' }), 4, 64, 1, 0, '');
+        Range(Sec, BindEffect(Effect, P, 'curlFreq', { Label: 'Effector wave frequency' }), 0.2, 3.5, 0.05, 2, '1/m');
+        Range(Sec, BindEffect(Effect, P, 'curlAmp', { Label: 'Effector motion speed' }), 0.0, 2.5, 0.05, 2, '×');
+        Range(Sec, BindEffect(Effect, P, 'gridMinScale', { Label: 'Inactive scale / base height' }), 0.0, 0.90, 0.02, 2, '×');
+        Range(Sec, BindEffect(Effect, P, 'gridMaxHeight', { Label: 'Active height extrusion (cubes)' }), 0.05, 2.8, 0.02, 2, 'm');
+        Range(Sec, BindEffect(Effect, P, 'gridContrast', { Label: 'Mask contrast sharpness' }), 0.5, 3.5, 0.05, 2, '');
+        const GridSw = C.Construct('div', 'property-switches');
+        Sec.append(GridSw);
+        C.ToggleTile(GridSw, BindEffect(Effect, P, 'showObject', { Label: 'Dark obsidian backing', Glyph: 'Layers' }));
+        C.ToggleTile(GridSw, {
+            Label: 'Billboard dots to camera', Glyph: 'Target',
+            Read: () => (P.gridBillboard || 0) > 0,
+            Write: PE.Edits.Through('Billboard dots', On => { P.gridBillboard = On ? 1 : 0; })
+        });
+    };
+
+    const ShieldFormLabels = ['Sphere Dome', 'Circle Disc', 'Triangle Aegis', 'Square Pane', 'Hexagon Wall', 'Diamond Barrier'];
+    const AddShieldSection = (HostPage, Badge = '02 / SHIELD BARRIER') =>
+    {
+        const Sec = C.SectionCard(HostPage, {
+            Title: 'Shield silhouette & pattern layers', Glyph: 'Orbit', Badge,
+            Hint: 'Pick the outer barrier form and toggle any combination of geometric lattice shapes inside the shield.'
+        }).Inner;
+        const FormB = BindEffect(Effect, P, 'shieldForm', {
+            Label: 'Barrier silhouette',
+            Options: ShieldFormLabels.map((L, K) => [L, K])
+        });
+        const OrigFW = FormB.Write;
+        FormB.Write = V => { OrigFW(Number(V)); ConstructInspectorPage(); };
+        C.SelectRow(Sec, FormB);
+        if ((P.shieldForm ?? 0) >= 1)
+            C.VectorRow(Sec, BindEffect(Effect, P, 'dir', { Label: 'Barrier facing normal', Step: 0.01, Digits: 2, Minimum: -1, Maximum: 1 }));
+        Sec.append(C.Construct('div', 'section-subhead', [C.Construct('span', null, 'Layered pattern shapes'), C.Construct('span', null, 'Stackable')]));
+        const MaskGrid = C.Construct('div', 'property-switches');
+        Sec.append(MaskGrid);
+        for (const [Label, Bit, Glyph] of [
+            ['Hexagons', 1, 'Lattice'],
+            ['Circles & Dots', 2, 'Orbit'],
+            ['Triangles', 4, 'Rays'],
+            ['Squares', 8, 'Boxes'],
+            ['Diamonds', 16, 'Sparkles'],
+            ['Voronoi Cracks', 32, 'Zap'],
+            ['Stars', 64, 'Target']
+        ])
+        {
+            C.ToggleTile(MaskGrid, {
+                Label, Glyph,
+                Read: () => (((P.shieldMask ?? 1) & Bit) !== 0),
+                Write: PE.Edits.Through(`Shield ${Label}`, On =>
+                {
+                    let Next = P.shieldMask ?? 1;
+                    Next = On ? (Next | Bit) : (Next & ~Bit);
+                    P.shieldMask = Next === 0 ? Bit : Next;
+                })
+            });
+        }
+        Range(Sec, BindEffect(Effect, P, 'curlFreq', { Label: 'Pattern lattice density' }), 0.5, 5.0, 0.05, 2, '×');
+        Range(Sec, BindEffect(Effect, P, 'shieldSpin', { Label: 'Pattern rotation speed' }), -2.0, 2.0, 0.05, 2, 'rad/s');
+        Range(Sec, BindEffect(Effect, P, 'curlRate', { Label: 'Impact ripple cadence' }), 0.05, 2.0, 0.05, 2, 'Hz');
     };
 
     if (InspectorTab === 'overview')
@@ -2945,9 +3189,9 @@ function ConstructEffectInspector(Page, Effect)
         {
             const Alive = Effect.Gpu?.stats_?.alive ?? 0;
             Metric.textContent = FormatInteger(Alive);
-            if (Cls.IsTransition || Cls.IsWeb || Cls.IsDyn)
+            if (Cls.IsTransition || Cls.IsWeb || Cls.IsDyn || Cls.IsGrid)
             {
-                Rate.textContent = Cls.IsDyn ? DynModeLabels[Cls.DynMode] : (Cls.IsWeb ? 'Silk strands' : 'Batch cycle');
+                Rate.textContent = Cls.IsGrid ? GridShapeLabels[Math.round(P.gridShape ?? 0)] : (Cls.IsDyn ? DynModeLabels[Cls.DynMode] : (Cls.IsWeb ? 'Silk strands' : 'Batch cycle'));
             }
             else
             {
@@ -2964,18 +3208,20 @@ function ConstructEffectInspector(Page, Effect)
 
         const SecondTrio = Cls.IsAssembly
             ? { Label: 'Assembly', Resolve: () => [Cls.AsmMode === 1 ? 'Shell rebuild' : 'Column stack', `${(P.transition.holdSpread ?? 0).toFixed(1)} s wave`] }
-            : Cls.IsDyn
-                ? { Label: 'Rigging / Flora', Resolve: () => [DynModeLabels[Cls.DynMode] || 'Dynamic', `stiff ${(P.dynStiff ?? 1.0).toFixed(2)}× · tear ${(P.dynTearThresh || 0).toFixed(1)} m/s`] }
-                : Cls.IsCurl
-                    ? { Label: 'Manifold', Resolve: () => [['Planar wave', 'Sphere shell', 'Bokeh ribbon'][Cls.CurlMode - 1] || 'Curl field', `${(P.curlAmp ?? 2.2).toFixed(1)} m/s flow`] }
-                    : Cls.IsBoids
-                        ? { Label: 'Cruise speed', Resolve: () => [`${(P.boidsSpeed ?? 3.6).toFixed(1)} m/s`, `radius ${(P.swarmRadius ?? 1.5).toFixed(1)} m`] }
-                        : { Label: 'Gravity', Resolve: () => [`${P.gravity.toFixed(2)} g`, `${P.drag.toFixed(2)} drag`] };
+            : Cls.IsGrid
+                ? { Label: 'Effector Grid', Resolve: () => [GridSurfLabels[Math.round(P.gridSurface ?? 0)] || 'Grid', `extrude ${(P.gridMaxHeight ?? 0.42).toFixed(2)} m`] }
+                : Cls.IsDyn
+                    ? { Label: 'Rigging / Flora', Resolve: () => [DynModeLabels[Cls.DynMode] || 'Dynamic', `stiff ${(P.dynStiff ?? 1.0).toFixed(2)}× · tear ${(P.dynTearThresh || 0).toFixed(1)} m/s`] }
+                    : Cls.IsCurl
+                        ? { Label: 'Manifold', Resolve: () => [['Planar wave', 'Sphere shell', 'Bokeh ribbon'][Cls.CurlMode - 1] || 'Curl field', `${(P.curlAmp ?? 2.2).toFixed(1)} m/s flow`] }
+                        : Cls.IsBoids
+                            ? { Label: 'Cruise speed', Resolve: () => [`${(P.boidsSpeed ?? 3.6).toFixed(1)} m/s`, `radius ${(P.swarmRadius ?? 1.5).toFixed(1)} m`] }
+                            : { Label: 'Gravity', Resolve: () => [`${P.gravity.toFixed(2)} g`, `${P.drag.toFixed(2)} drag`] };
 
         C.MetricTrio(Page, [
-            { Label: 'Shape', Resolve: () => [['Streak', 'Sphere', 'Leaf', 'Glow', 'Cube', 'Coin', 'Bubble', 'Snowflake', 'Hailstone', 'Bokeh Bead', 'Shockwave Ring', 'EMP Pulse Dome', 'Holo Glitch', 'Winged Boid', 'Viscous Drop', 'Radar / Sonar Sweep', 'Energy Shield Hex', 'Aurora Curtain'][P.shape] || 'Strand', P.blend === 'alpha' ? 'alpha blend' : 'additive glow'] },
+            { Label: 'Shape', Resolve: () => [Cls.IsGrid ? (GridShapeLabels[Math.round(P.gridShape ?? 0)] || 'Grid Lattice') : (['Streak', 'Sphere', 'Leaf', 'Glow', 'Cube', 'Coin', 'Bubble', 'Snowflake', 'Hailstone', 'Bokeh Bead', 'Shockwave Ring', 'EMP Pulse Dome', 'Holo Glitch', 'Winged Boid', 'Viscous Drop', 'Radar / Sonar Sweep', 'Energy Shield Multi', 'Aurora Curtain'][P.shape] || 'Strand'), P.blend === 'alpha' ? 'alpha blend' : 'additive glow'] },
             SecondTrio,
-            { Label: 'Wind coupling', Highlight: true, Resolve: () => Cls.UsesWind ? [`${P.windCoupling.toFixed(2)} /s`, 'lattice coupling'] : ['Locked', Cls.IsAssembly ? 'analytic assembly' : 'static HUD overlay'] }
+            { Label: 'Wind coupling', Highlight: true, Resolve: () => Cls.UsesWind ? [`${P.windCoupling.toFixed(2)} /s`, 'lattice coupling'] : ['Locked', Cls.IsAssembly ? 'analytic assembly' : Cls.IsGrid ? 'effector-driven' : 'static HUD overlay'] }
         ]);
 
         Page.append(C.Construct('div', 'section-subhead', [C.Construct('span', null, 'Quick controls'), C.Construct('span', null, Preset?.group || 'Particles')]));
@@ -3002,7 +3248,7 @@ function ConstructEffectInspector(Page, Effect)
 
         const BurstAction = Cls.IsArc
             ? { Label: 'Trigger Spark', Glyph: 'Zap', Tone: 'accent', Act: () => { TriggerArcStrike(Effect, Scene.Time); AppendLog('PARTICLES', `${Effect.Name}: fired spark arc`, `t=${Scene.Time.toFixed(2)}s`, 'live'); } }
-            : (Cls.IsDyn || Cls.IsWeb)
+            : (Cls.IsDyn || Cls.IsWeb || Cls.IsGrid || Cls.Shape === 16)
                 ? { Label: 'Throw Ball', Glyph: 'Ball', Tone: 'accent', Act: () => { ThrowBallAtTarget(P.origin, Scene.Ball.ThrowSpeed); C.Toast('Ball thrown!'); } }
                 : Cls.IsTransition
                     ? { Label: 'Replay Cycle', Glyph: 'Sparkles', Tone: 'accent', Act: () => { RebuildGpu(Effect); AppendLog('PARTICLES', `${Effect.Name}: replayed transition cycle`, `${Effect.Gpu.cap} pieces`, 'live'); } }
@@ -3019,7 +3265,9 @@ function ConstructEffectInspector(Page, Effect)
             { Label: 'Delete', Glyph: 'Trash', Tone: 'danger', Act: () => RemoveEffect(Effect) }
         ]);
 
-        if (Cls.IsDyn || Cls.IsWeb) AddBallInteractionCard(Page, '02 / INTERACTIVE BALL');
+        if (Cls.IsGrid) AddGridSection(Page, '02 / EFFECTOR GRID');
+        if (Cls.Shape === 16) AddShieldSection(Page, '02 / SHIELD PATTERNS');
+        if (Cls.IsDyn || Cls.IsWeb || Cls.IsGrid || Cls.Shape === 16) AddBallInteractionCard(Page, '03 / INTERACTIVE BALL');
 
         if (Cls.UsesLaunchCone)
         {
@@ -3043,15 +3291,17 @@ function ConstructEffectInspector(Page, Effect)
     {
         const SrcHint = Cls.IsTransition
             ? 'Transition batches spawn full pool capacity together at each cycle.'
-            : Cls.IsDyn
-                ? 'Dynamic strand, cloth & botanical systems initialize all structural nodes immediately and deform continuously under wind and ball impacts.'
-                : Cls.IsObjectPour
-                    ? 'Particles pour directly over the 3D object surface whose dimensions come from boxHalf.'
-                    : Cls.CurlMode === 2
-                        ? 'Particles spawn directly onto the spherical plasma shell around the origin.'
-                        : 'Birth rate, emitter volume geometry and spawn origin.';
+            : Cls.IsGrid
+                ? 'Effector grids anchor surface lattices or 3D obsidian meshes whose scale, glow, and up/down cube height respond live to spatial waves, Force Fields, and thrown balls.'
+                : Cls.IsDyn
+                    ? 'Dynamic strand, cloth & botanical systems initialize all structural nodes immediately and deform continuously under wind and ball impacts.'
+                    : Cls.IsObjectPour
+                        ? 'Particles pour directly over the 3D object surface whose dimensions come from boxHalf.'
+                        : Cls.CurlMode === 2
+                            ? 'Particles spawn directly onto the spherical plasma shell around the origin.'
+                            : 'Birth rate, emitter volume geometry and spawn origin.';
         const Src = C.SectionCard(Page, { Title: 'Emission source', Glyph: 'Target', Badge: '01 / SOURCE', Hint: SrcHint }).Inner;
-        const Capacities = [...new Set([64, 96, 128, 220, 384, 512, 1024, 1536, 2048, 4096, 8192, P.capacity])].sort((A, B) => A - B);
+        const Capacities = [...new Set([64, 96, 128, 220, 384, 512, 576, 720, 1024, 1200, 1536, 2048, 4096, 8192, P.capacity])].sort((A, B) => A - B);
         C.SelectRow(Src, BindEffect(Effect, P, 'capacity', { Label: 'Pool capacity', Options: Capacities.map(K => [FormatInteger(K), K]), Rebuild: true }));
         if (Cls.UsesRate)
             Range(Src, BindEffect(Effect, P, 'rate', { Label: 'Spawn rate' }), 0, 2000, 1, 0, '/s');
@@ -3062,13 +3312,13 @@ function ConstructEffectInspector(Page, Effect)
             EmitShapeB.Write = V => { OrigEmitWrite(V); ConstructInspectorPage(); };
             C.SelectRow(Src, EmitShapeB);
         }
-        const OriginLabel = Cls.IsArc ? 'Sphere A position' : Cls.IsBeam ? 'Beam muzzle position' : Cls.IsObjectPour ? '3D object centre' : Cls.IsWeb ? 'Web anchor centre' : Cls.IsDyn ? 'Structure / root origin' : 'Emitter origin';
+        const OriginLabel = Cls.IsArc ? 'Sphere A position' : Cls.IsBeam ? 'Beam muzzle position' : Cls.IsObjectPour ? '3D object centre' : Cls.IsGrid ? 'Surface / grid centre' : Cls.IsWeb ? 'Web anchor centre' : Cls.IsDyn ? 'Structure / root origin' : 'Emitter origin';
         C.VectorRow(Src, BindEffect(Effect, P, 'origin', { Label: OriginLabel, Unit: 'm', Step: 0.05, Digits: 2, Minimum: -20, Maximum: 20 }));
         if (Cls.CurlMode === 2)
             Range(Src, BindEffect(Effect, P, 'shellRadius', { Label: 'Sphere shell radius' }), 0.4, 5.0, 0.05, 2, 'm');
         if (Cls.UsesRadius)
         {
-            const RadLabel = Cls.IsArc ? 'Sphere A radius' : Cls.IsBeam ? 'Muzzle ring radius' : Cls.IsWeb ? 'Orb web frame radius' : 'Emitter radius';
+            const RadLabel = Cls.IsArc ? 'Sphere A radius' : Cls.IsBeam ? 'Muzzle ring radius' : Cls.IsGrid ? 'Surface / hand scale radius' : Cls.IsWeb ? 'Orb web frame radius' : 'Emitter radius';
             Range(Src, BindEffect(Effect, P, 'radius', { Label: RadLabel }), 0.04, 5, 0.01, 2, 'm');
         }
         if (Cls.UsesBoxHalf)
@@ -3077,14 +3327,21 @@ function ConstructEffectInspector(Page, Effect)
                 ? ((P.objectShape ?? 0) === 1 ? 'Object half extents (X = sphere radius)' : 'Object half extents')
                 : Cls.CurlMode === 1
                     ? 'Wave field extents'
-                    : Cls.IsWeb
-                        ? 'Corner cobweb volume'
-                        : Cls.IsDyn
-                            ? (Cls.DynMode === 3 ? 'Cloth span extents' : 'Rigging / patch half extents')
-                            : Cls.IsAssembly
-                                ? 'Target cube half extents'
-                                : 'Box half extents';
+                    : Cls.IsGrid
+                        ? 'Planar / cube grid half extents'
+                        : Cls.IsWeb
+                            ? 'Corner cobweb volume'
+                            : Cls.IsDyn
+                                ? (Cls.DynMode === 3 ? 'Cloth span extents' : 'Rigging / patch half extents')
+                                : Cls.IsAssembly
+                                    ? 'Target cube half extents'
+                                    : 'Box half extents';
             C.VectorRow(Src, BindEffect(Effect, P, 'boxHalf', { Label: BoxLabel, Unit: 'm', Step: 0.05, Digits: 2, Minimum: 0, Maximum: 10 }));
+        }
+        if (Cls.IsGrid)
+        {
+            AddGridSection(Page, '02 / EFFECTOR GRID');
+            AddBallInteractionCard(Page, '03 / INTERACTIVE BALL');
         }
         if (Cls.IsDyn)
         {
@@ -3247,8 +3504,8 @@ function ConstructEffectInspector(Page, Effect)
         }
         if (P.shape === 16)
         {
-            Range(Look, BindEffect(Effect, P, 'curlRate', { Label: 'Impact ripple cadence' }), 0.1, 2.0, 0.05, 2, 'Hz');
-            Range(Look, BindEffect(Effect, P, 'curlFreq', { Label: 'Hex lattice density' }), 0.6, 4.5, 0.05, 2, '×');
+            AddShieldSection(Page, '02 / SHIELD BARRIER');
+            AddBallInteractionCard(Page, '03 / INTERACTIVE BALL');
         }
         if (P.shape === 17)
         {
@@ -3301,6 +3558,11 @@ function ConstructEffectInspector(Page, Effect)
             Range(WebMot, BindEffect(Effect, P, 'webDew', { Label: Cls.WebMode === 1 ? 'Morning dew glints' : 'Dust & gossamer shimmer' }), 0.0, 1.0, 0.02, 2, '');
             Range(WebMot, BindEffect(Effect, P, 'streakThin', { Label: 'Silk strand thickness' }), 0.1, 2.0, 0.02, 2, '×');
             Range(WebMot, BindEffect(Effect, P, 'curlAmp', { Label: 'Gust flutter strength' }), 0.05, 3.0, 0.05, 2, 'm/s');
+            AddBallInteractionCard(Page, '03 / INTERACTIVE BALL');
+        }
+        if (Cls.IsGrid)
+        {
+            AddGridSection(Page, '02 / EFFECTOR GRID');
             AddBallInteractionCard(Page, '03 / INTERACTIVE BALL');
         }
         if (Cls.IsDyn)

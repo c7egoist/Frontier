@@ -758,6 +758,218 @@ fn evalDynStrand(slot: u32, cap: u32, dynMode: u32, windTime: f32) -> DynStrandO
   return DynStrandOut(org, org, 0.0, 0.0, 0.78, 0.0, max(0.16, baseW * 1.1), 1.35, 0.9, 1.0);
 }
 
+struct HandPtOut {
+  pos: vec3f,
+  norm: vec3f,
+  localY: f32,
+};
+
+fn evalHandTube(slot: u32, cap: u32, org: vec3f, sc: f32) -> HandPtOut {
+  let uSlot = (f32(slot) + 0.5) / max(1.0, f32(cap));
+  var seg = 6u;
+  var s0 = 0.94;
+  var s1 = 1.00;
+  if (uSlot < 0.30) { seg = 0u; s0 = 0.0; s1 = 0.30; }
+  else if (uSlot < 0.58) { seg = 1u; s0 = 0.30; s1 = 0.58; }
+  else if (uSlot < 0.69) { seg = 2u; s0 = 0.58; s1 = 0.69; }
+  else if (uSlot < 0.78) { seg = 3u; s0 = 0.69; s1 = 0.78; }
+  else if (uSlot < 0.87) { seg = 4u; s0 = 0.78; s1 = 0.87; }
+  else if (uSlot < 0.94) { seg = 5u; s0 = 0.87; s1 = 0.94; }
+  let tRaw = clamp((uSlot - s0) / max(0.01, s1 - s0), 0.0, 1.0);
+  var p0 = vec3f(0.0, 1.15, -0.14);
+  var p1 = vec3f(0.0, 0.72, -0.06);
+  var p2 = vec3f(0.0, 0.28, -0.01);
+  var rx0 = 0.28; var rx1 = 0.24; var rz0 = 0.21; var rz1 = 0.14;
+  if (seg == 1u) {
+    p0 = vec3f(0.0, 0.30, -0.01); p1 = vec3f(-0.01, 0.0, 0.03); p2 = vec3f(-0.01, -0.34, 0.05);
+    rx0 = 0.27; rx1 = 0.34; rz0 = 0.14; rz1 = 0.115;
+  } else if (seg == 2u) {
+    p0 = vec3f(-0.22, 0.04, 0.04); p1 = vec3f(-0.44, -0.36, 0.14); p2 = vec3f(-0.33, -0.82, 0.25);
+    rx0 = 0.115; rx1 = 0.065; rz0 = 0.105; rz1 = 0.060;
+  } else if (seg == 3u) {
+    p0 = vec3f(-0.21, -0.30, 0.04); p1 = vec3f(-0.26, -0.66, 0.17); p2 = vec3f(-0.18, -0.94, 0.26);
+    rx0 = 0.080; rx1 = 0.054; rz0 = 0.075; rz1 = 0.051;
+  } else if (seg == 4u) {
+    p0 = vec3f(-0.05, -0.33, 0.04); p1 = vec3f(-0.06, -0.72, 0.16); p2 = vec3f(-0.02, -0.95, 0.23);
+    rx0 = 0.082; rx1 = 0.056; rz0 = 0.077; rz1 = 0.053;
+  } else if (seg == 5u) {
+    p0 = vec3f(0.11, -0.32, 0.03); p1 = vec3f(0.12, -0.68, 0.13); p2 = vec3f(0.12, -0.87, 0.17);
+    rx0 = 0.076; rx1 = 0.052; rz0 = 0.071; rz1 = 0.049;
+  } else if (seg == 6u) {
+    p0 = vec3f(0.25, -0.28, 0.01); p1 = vec3f(0.28, -0.56, 0.08); p2 = vec3f(0.25, -0.74, 0.12);
+    rx0 = 0.066; rx1 = 0.046; rz0 = 0.062; rz1 = 0.043;
+  }
+  let it = 1.0 - tRaw;
+  let c = p0 * (it * it) + p1 * (2.0 * it * tRaw) + p2 * (tRaw * tRaw);
+  let dc = (p1 - p0) * (2.0 * it) + (p2 - p1) * (2.0 * tRaw);
+  let tang = normalize(dc + vec3f(0.0, -0.001, 0.0));
+  let uAxis = normalize(cross(tang, vec3f(0.0, 0.0, 1.0)) + vec3f(1e-4, 0.0, 0.0));
+  let wAxis = normalize(cross(uAxis, tang));
+  let phi = f32(slot) * 2.3999632;
+  var rx = mix(rx0, rx1, tRaw);
+  var rz = mix(rz0, rz1, tRaw);
+  if (seg == 1u) { rx = mix(0.26, 0.35, sin(clamp(tRaw * 2.2, 0.0, 3.14159))); }
+  var capLift = 0.0;
+  if (seg >= 2u && tRaw > 0.88) {
+    let capT = clamp((tRaw - 0.88) / 0.12, 0.0, 1.0);
+    let angCap = capT * 1.38;
+    rx *= cos(angCap);
+    rz *= cos(angCap);
+    capLift = sin(angCap) * rx1;
+  }
+  let lPos = c + tang * capLift + uAxis * (rx * cos(phi)) + wAxis * (rz * sin(phi));
+  let lNorm = normalize(uAxis * (cos(phi) / max(rx, 0.02)) + wAxis * (sin(phi) / max(rz, 0.02)) + tang * select(0.0, 0.55, capLift > 0.001));
+  return HandPtOut(org + lPos * sc, lNorm, lPos.y);
+}
+
+struct GridPtOut {
+  pos: vec3f,
+  norm: vec3f,
+  localY: f32,
+  pitch: f32,
+};
+
+fn evalGridAnchor(idx: u32, cap: u32, surf: u32, colsIn: u32, rowsIn: u32) -> GridPtOut {
+  let org = S.origin.xyz;
+  let ext = max(S.phys4.xyz, vec3f(0.35, 0.35, 0.35));
+  let cols = max(2u, colsIn);
+  let rows = max(2u, rowsIn);
+  if (surf == 2u) {
+    let nF = f32(max(1u, cap));
+    let k = f32(idx) + 0.5;
+    let y01 = 1.0 - (2.0 * k) / nF;
+    let rXZ = sqrt(max(0.0, 1.0 - y01 * y01));
+    let phi = f32(idx) * 2.3999632;
+    let n = normalize(vec3f(cos(phi) * rXZ, y01, sin(phi) * rXZ));
+    let R = max(0.35, S.origin.w);
+    let pitch = 3.55 * R / sqrt(nF);
+    return GridPtOut(org + n * (R + 0.008), n, n.y, pitch);
+  }
+  if (surf == 3u) {
+    let sc = max(0.5, S.origin.w);
+    let h = evalHandTube(idx, cap, org, sc);
+    return GridPtOut(h.pos + h.norm * 0.008, h.norm, h.localY, 0.056 * sc);
+  }
+  if (surf == 4u) {
+    let nF = f32(max(1u, cap));
+    let uCols = max(8u, cols);
+    let vRows = max(6u, (cap + uCols - 1u) / uCols);
+    let iu = idx % uCols;
+    let iv = (idx / uCols) % vRows;
+    let phi = (f32(iu) / f32(uCols)) * 6.2831853 + f32(iv % 2u) * (3.1415926 / f32(uCols));
+    let theta = (f32(iv) / f32(vRows)) * 6.2831853;
+    let Rmaj = max(0.5, S.origin.w);
+    let rmin = Rmaj * 0.38;
+    let rad = Rmaj + rmin * cos(theta);
+    let pLocal = vec3f(cos(phi) * rad, sin(theta) * rmin, sin(phi) * rad);
+    let n = normalize(vec3f(cos(phi) * cos(theta), sin(theta), sin(phi) * cos(theta)));
+    return GridPtOut(org + pLocal + n * 0.008, n, sin(theta), 4.2 * Rmaj / sqrt(nF));
+  }
+  if (surf == 5u) {
+    let side = max(3u, u32(round(pow(f32(cap), 1.0 / 3.0))));
+    let gx = idx % side;
+    let gy = (idx / side) % side;
+    let gz = (idx / (side * side)) % side;
+    let fu = (f32(gx) + 0.5) / f32(side) * 2.0 - 1.0;
+    let fv = (f32(gy) + 0.5) / f32(side) * 2.0 - 1.0;
+    let fw = (f32(gz) + 0.5) / f32(side) * 2.0 - 1.0;
+    let wp = org + vec3f(fu * ext.x, fv * ext.y, fw * ext.z);
+    let pitch = min(ext.x, min(ext.y, ext.z)) * 1.45 / f32(side);
+    return GridPtOut(wp, vec3f(0.0, 1.0, 0.0), fv, pitch);
+  }
+  let total = cols * rows;
+  let cIdx = idx % cols;
+  let rIdx = (idx / cols) % rows;
+  let u01 = (f32(cIdx) + 0.5) / f32(cols) * 2.0 - 1.0;
+  let v01 = (f32(rIdx) + 0.5) / f32(rows) * 2.0 - 1.0;
+  if (surf == 1u) {
+    let wp = org + vec3f(u01 * ext.x, v01 * ext.y, 0.0);
+    let pitch = min((2.0 * ext.x) / f32(cols), (2.0 * ext.y) / f32(rows));
+    return GridPtOut(wp, vec3f(0.0, 0.0, 1.0), v01, pitch);
+  }
+  let wp = org + vec3f(u01 * ext.x, 0.0, v01 * ext.z);
+  let pitch = min((2.0 * ext.x) / f32(cols), (2.0 * ext.z) / f32(rows));
+  return GridPtOut(wp, vec3f(0.0, 1.0, 0.0), 0.0, pitch);
+}
+
+fn evalGridEffector(pos: vec3f, effMode: u32, freq: f32, speed: f32, contrast: f32, time: f32) -> f32 {
+  let org = S.origin.xyz;
+  let extSpan = max(max(S.origin.w, S.phys4.x), 1.0);
+  let dVec = (pos - org) * freq;
+  var w = 0.0;
+  if (effMode == 0u) {
+    let tShift = time * speed;
+    let warp = simVNoise(dVec * 0.78 + vec3f(0.0, -tShift * 0.35, tShift * 0.25)) * 2.4;
+    let waveA = 0.5 + 0.5 * sin(dVec.x * 1.35 + dVec.y * 1.55 - tShift * 1.55 + warp);
+    let blot = simVNoise(dVec * 1.18 + vec3f(tShift * 0.42, -tShift * 0.28, 2.3));
+    w = clamp(waveA * 0.62 + blot * 0.58 - 0.14, 0.0, 1.0);
+  } else if (effMode == 1u) {
+    let ph0 = time * speed * 1.35;
+    let ph1 = time * speed * 1.05 + 2.4;
+    let orbR = extSpan * 0.68;
+    let e0 = org + vec3f(cos(ph0) * orbR, sin(ph0 * 1.3) * orbR * 0.55, sin(ph0) * orbR);
+    let e1 = org + vec3f(cos(ph1) * orbR * 0.85, cos(ph1 * 0.9) * orbR * 0.5, sin(ph1 * 1.2) * orbR * 0.85);
+    let radEff = max(0.55, 1.15 / max(0.35, freq));
+    let g0 = 1.0 - smoothstep(radEff * 0.18, radEff, length(pos - e0));
+    let g1 = 1.0 - smoothstep(radEff * 0.18, radEff, length(pos - e1));
+    w = max(g0, g1);
+  } else if (effMode == 2u) {
+    let tS = time * speed * 0.45;
+    let n0 = simVNoise(dVec * 1.15 + vec3f(tS, -tS * 0.7, tS * 0.5));
+    let n1 = simVNoise(dVec * 2.25 - vec3f(tS * 1.3, tS * 0.4, -tS * 0.8));
+    w = clamp((n0 * 0.68 + n1 * 0.32 - 0.26) * 1.65, 0.0, 1.0);
+  } else if (effMode == 3u) {
+    let dist = length(pos - org);
+    let ph = dist * freq * 3.6 - time * speed * 3.2;
+    w = clamp(pow(max(0.0, 0.5 + 0.5 * sin(ph)), 1.4), 0.0, 1.0);
+  } else {
+    w = 0.02;
+  }
+  if (fields[0].x > 0.0) {
+    let fRes = evalFields(pos, vec3f(0.0));
+    let fBoost = clamp(length(fRes.xyz) * 0.14 + fRes.w * 0.35, 0.0, 1.0);
+    w = max(w, fBoost);
+  }
+  if (G.ballPos.w > 0.04) {
+    let bR = G.ballPos.w + 0.85 / max(0.4, freq);
+    let bBoost = 1.0 - smoothstep(G.ballPos.w * 0.35, bR, length(pos - G.ballPos.xyz));
+    w = max(w, bBoost);
+  }
+  return pow(clamp(w, 0.0, 1.0), max(0.45, contrast));
+}
+
+fn evalGridParticle(idx: u32, cap: u32, age: f32) -> Part {
+  let surf = u32(S.mol2.x + 0.5);
+  let gShape = u32(S.mol2.y + 0.5);
+  let cols = max(2u, u32(S.mol2.z + 0.5));
+  let rows = max(2u, u32(S.mol2.w + 0.5));
+  let gp = evalGridAnchor(idx, cap, surf, cols, rows);
+  let w = evalGridEffector(gp.pos, u32(S.mol3.x + 0.5), max(0.15, S.mol.y), max(0.0, S.mol.z), max(0.4, S.mol.w), S.phys.y);
+  let cellW = max(0.008, S.life.z * S.misc.x);
+  let minFrac = clamp(S.mol3.y, 0.0, 0.95);
+  let maxH = max(0.02, S.mol3.z);
+  var latSize = cellW * mix(minFrac, 1.0 + maxH * 0.45, w);
+  var cubeH = 0.0;
+  if (gShape == 2u) {
+    latSize = cellW;
+    cubeH = mix(cellW * minFrac, maxH, w);
+  } else if (gShape == 1u) {
+    cubeH = latSize;
+  } else if (gShape == 6u) {
+    if (gp.localY > 0.28) {
+      latSize = cellW * mix(max(0.25, minFrac * 1.6), 1.15, w);
+      cubeH = mix(cellW * 0.25, maxH * 0.58 + cellW * 0.45, w);
+    } else {
+      latSize = cellW * mix(minFrac, 1.38, w);
+      cubeH = 0.0;
+    }
+  }
+  var gc = mix(S.colA, S.colC, smoothstep(0.06, 0.56, w));
+  gc = mix(gc, S.colB, smoothstep(0.56, 1.0, w));
+  gc.a = S.colA.a * mix(0.45, 1.0, smoothstep(0.0, 0.22, w));
+  return Part(vec4f(gp.pos, age), vec4f(0.0, 0.0, 0.0, 1.0e9), gc, vec4f(latSize, f32(gShape), w, f32(idx)), vec4f(gp.norm, cubeH));
+}
+
 @compute @workgroup_size(64)
 fn emitParticles(@builtin(global_invocation_id) gid: vec3u) {
   let i = gid.x;
@@ -803,8 +1015,9 @@ fn emitParticles(@builtin(global_invocation_id) gid: vec3u) {
     vel = (basis * local) * mix(S.speed.x, S.speed.y, r6);
   }
   // 📝 Transitions (kind 5). Modes: 0 = hold, then burst or fall; 1 = rebuild from a shell; 2 = stack in a column.
+  let shapeIdEmit = u32(S.emit.z + 0.5);
   let amode = u32(S.mol2.z);
-  let trans = u32(S.mol.x + 0.5) == 0u && kind == 5u && (S.mol3.x + S.mol3.y) > 0.0;
+  let trans = u32(S.mol.x + 0.5) == 0u && kind == 5u && (shapeIdEmit == 4u || shapeIdEmit == 5u) && (S.mol3.x + S.mol3.y) > 0.0;
   var hold = 0.0;
   var eZ = 0.0;
   var eW = 0.0;
@@ -839,6 +1052,10 @@ fn emitParticles(@builtin(global_invocation_id) gid: vec3u) {
   }
   var initAge = 0.0;
   let curlMode = u32(S.mol.x + 0.5);
+  if (curlMode >= 13u) {
+    parts[idx] = evalGridParticle(idx, cap, 0.0);
+    return;
+  }
   if (curlMode >= 4u) {
     life = 1.0e9;
     initAge = 0.0;
@@ -1039,8 +1256,14 @@ fn updateParticles(@builtin(global_invocation_id) gid: vec3u) {
   let t01 = age / life;
   let seed = q.m.w;
   // 📝 Assembly (kind 5, modes 1 and 2): analytic flight to a fixed slot, then hold. No physics after release.
+  let curlModeUpd = u32(S.mol.x + 0.5);
+  if (curlModeUpd >= 13u) {
+    parts[i] = evalGridParticle(i, cap, age);
+    return;
+  }
+  let shapeIdUpd = u32(S.emit.z + 0.5);
   let amode = u32(S.mol2.z);
-  if (kind == 5u && amode > 0u) {
+  if (curlModeUpd == 0u && kind == 5u && (shapeIdUpd == 4u || shapeIdUpd == 5u) && amode > 0u) {
     let s0 = q.v.xyz;
     var p2 = assembleTarget(u32(q.e.z), amode);
     if (amode == 1u) {
@@ -1991,6 +2214,7 @@ struct VO {
   @location(0) uv: vec2f,
   @location(1) col: vec4f,
   @location(2) ex: vec4f,
+  @location(3) wp: vec3f,
 };
 
 struct QO {
@@ -2059,6 +2283,90 @@ fn hexGrid(pIn: vec2f) -> vec2f {
   return vec2f(0.5 - ed, h21(floor(id * 2.0 + 0.5)));
 }
 
+fn circleGrid(pIn: vec2f) -> vec2f {
+  let g = fract(pIn) - 0.5;
+  let id = floor(pIn);
+  let r = length(g);
+  let ring = abs(r - 0.36);
+  let dotD = max(0.0, r - 0.08);
+  return vec2f(min(ring, dotD), h21(id));
+}
+
+fn triGrid(pIn: vec2f) -> vec2f {
+  let k = sqrt(3.0);
+  let p = vec2f(pIn.x - pIn.y / k, pIn.y * (2.0 / k));
+  let i = floor(p);
+  let f = fract(p);
+  let flip = f.x + f.y > 1.0;
+  let u = select(f, 1.0 - f.yx, flip);
+  let d = min(min(u.x, u.y), 1.0 - u.x - u.y) * 0.866;
+  let cellId = i * 2.0 + select(vec2f(0.0), vec2f(1.0), flip);
+  return vec2f(d, h21(cellId));
+}
+
+fn squareGrid(pIn: vec2f) -> vec2f {
+  let g = abs(fract(pIn) - 0.5);
+  let id = floor(pIn);
+  return vec2f(0.5 - max(g.x, g.y), h21(id));
+}
+
+fn diamondGrid(pIn: vec2f) -> vec2f {
+  let rp = vec2f((pIn.x + pIn.y) * 0.7071068, (pIn.y - pIn.x) * 0.7071068);
+  return squareGrid(rp * 1.15);
+}
+
+fn voronoiGrid(pIn: vec2f) -> vec2f {
+  let n = floor(pIn);
+  let f = fract(pIn);
+  var md1 = 8.0;
+  var md2 = 8.0;
+  var bestId = 0.0;
+  for (var j = -1; j <= 1; j++) {
+    for (var i = -1; i <= 1; i++) {
+      let g = vec2f(f32(i), f32(j));
+      let o1 = h21(n + g);
+      let o2 = h21(n + g + vec2f(31.7, 17.3));
+      let pt = g + vec2f(o1, o2) * 0.78 + 0.11 - f;
+      let d = length(pt);
+      if (d < md1) {
+        md2 = md1;
+        md1 = d;
+        bestId = o1;
+      } else if (d < md2) {
+        md2 = d;
+      }
+    }
+  }
+  return vec2f((md2 - md1) * 0.7, bestId);
+}
+
+fn starGrid(pIn: vec2f) -> vec2f {
+  let g = abs(fract(pIn) - 0.5);
+  let id = floor(pIn);
+  let arm = min(abs(g.x), abs(g.y));
+  let rad = length(g);
+  let d = max(arm, rad - 0.38);
+  return vec2f(d, h21(id));
+}
+
+fn sdEquilateralTri(pIn: vec2f) -> f32 {
+  let k = 1.7320508;
+  var p = vec2f(abs(pIn.x), pIn.y + 0.25);
+  p.x -= 0.92;
+  p.y += 0.92 / k;
+  if (p.x + k * p.y > 0.0) { p = vec2f(p.x - k * p.y, -k * p.x - p.y) * 0.5; }
+  p.x -= clamp(p.x, -1.84, 0.0);
+  return -length(p) * sign(p.y);
+}
+
+fn sdHex(pIn: vec2f) -> f32 {
+  let k = vec3f(-0.8660254, 0.5, 0.57735027);
+  var p = abs(pIn);
+  p -= 2.0 * min(dot(k.xy, p), 0.0) * k.xy;
+  p -= vec2f(clamp(p.x, -k.z * 0.88, k.z * 0.88), 0.88);
+  return length(p) * sign(p.y);
+}
+
 @vertex
 fn vsPart(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> VO {
   var o: VO;
@@ -2066,9 +2374,11 @@ fn vsPart(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> V
   let q = parts[ii];
   if (!(q.p.w < q.v.w && q.c.a > 0.002 && q.m.x > 0.0)) { return o; }
   let isWebOnly = S.mol.x > 3.5 && S.mol.x < 5.5;
-  let isDyn = S.mol.x >= 5.5;
+  let isDyn = S.mol.x >= 5.5 && S.mol.x < 12.5;
+  let isGrid = S.mol.x >= 12.5;
   let dynMode = u32(max(0.0, S.mol.x - 5.0) + 0.5);
   if ((isWebOnly || isDyn) && q.e.x < 0.05) { return o; }
+  if (isGrid && u32(q.m.y + 0.5) == 6u && q.e.w > 0.001) { return o; }
   let cs = array<vec2f, 6>(vec2f(-1.0, -1.0), vec2f(1.0, -1.0), vec2f(-1.0, 1.0),
                            vec2f(1.0, -1.0), vec2f(1.0, 1.0), vec2f(-1.0, 1.0));
   let c = cs[vi];
@@ -2081,7 +2391,18 @@ fn vsPart(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> V
   let shape = u32(S.emit.z);
   var wp: vec3f;
   var exW = 0.0;
-  if (isDyn && (dynMode == 4u || dynMode == 5u)) {
+  if (isGrid) {
+    if (S.misc.y > 0.5) {
+      wp = q.p.xyz + G.camRight.xyz * (c.x * sz * 0.5) + G.camUp.xyz * (c.y * sz * 0.5);
+    } else {
+      let gN = normalize(q.e.xyz + vec3f(0.0, 1e-4, 0.0));
+      let gRef = select(vec3f(0.0, 1.0, 0.0), vec3f(1.0, 0.0, 0.0), abs(gN.y) > 0.92);
+      let gT = normalize(cross(gRef, gN));
+      let gB = cross(gN, gT);
+      wp = q.p.xyz + gT * (c.x * sz * 0.54) + gB * (c.y * sz * 0.54);
+    }
+    exW = 20.0 + f32(u32(q.m.y + 0.5));
+  } else if (isDyn && (dynMode == 4u || dynMode == 5u)) {
     let base = ii * 20u;
     let tipK = select(19u, 16u, dynMode == 5u);
     let ax = normalize(segs[base + tipK].xyz - segs[base + tipK - 2u].xyz + vec3f(0.0, 0.05, 0.0));
@@ -2172,6 +2493,7 @@ fn vsPart(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> V
       o.uv = c;
       o.col = q.c;
       o.ex = vec4f(q.p.w / q.v.w, q.m.w, sz, 1.0);
+      o.wp = wp;
       return o;
     }
     let ax = normalize(q.v.xyz + vec3f(0.0, -0.001, 0.0));
@@ -2181,8 +2503,17 @@ fn vsPart(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> V
     let stretch = sz * (0.72 + min(length(q.v.xyz) * 0.09, 0.85));
     wp = q.p.xyz + ax * (c.y * stretch) + side * (c.x * sz * 0.54);
   } else if (shape == 16u) {
-    // Energy Shield / Hex Barrier Shell
-    wp = q.p.xyz + G.camRight.xyz * (c.x * sz * 0.5) + G.camUp.xyz * (c.y * sz * 0.5);
+    // Multi-Shape Energy Shield Barrier (0: Spherical Dome camera-billboarded, >=1: 3D directional shield pane)
+    let sForm = u32(S.mol2.z + 0.5);
+    if (sForm >= 1u) {
+      let sN = normalize(S.dir.xyz + vec3f(0.0, 0.0, 1e-4));
+      let sRef = select(vec3f(0.0, 1.0, 0.0), vec3f(1.0, 0.0, 0.0), abs(sN.y) > 0.92);
+      let sT = normalize(cross(sRef, sN));
+      let sB = cross(sN, sT);
+      wp = q.p.xyz + sT * (c.x * sz * 0.5) + sB * (c.y * sz * 0.5);
+    } else {
+      wp = q.p.xyz + G.camRight.xyz * (c.x * sz * 0.5) + G.camUp.xyz * (c.y * sz * 0.5);
+    }
   } else if (shape == 17u) {
     // Aurora Borealis Volumetric Curtain Sheet: wide horizontal band, tall undulating vertical rays
     let aurRate = max(0.02, S.mol.w);
@@ -2198,7 +2529,8 @@ fn vsPart(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> V
   o.pos = G.viewProj * vec4f(wp, 1.0);
   o.uv = c;
   o.col = q.c;
-  o.ex = vec4f(q.p.w / q.v.w, q.m.w, sz, exW);
+  o.ex = vec4f(q.p.w / q.v.w, q.m.w, select(sz, q.m.z, isGrid), exW);
+  o.wp = wp;
   return o;
 }
 
@@ -2207,7 +2539,38 @@ fn fsPart(i: VO) -> @location(0) vec4f {
   let shape = u32(S.emit.z);
   var rgb = i.col.rgb;
   var a = 1.0;
-  if (S.mol.x >= 5.5 && i.ex.w > 3.5) {
+  if (S.mol.x >= 12.5 && i.ex.w >= 19.5) {
+    let gPrim = u32(i.ex.w - 20.0 + 0.5);
+    let wGlow = clamp(i.ex.z, 0.0, 1.0);
+    var edgeMask = 0.0;
+    var shade = 1.0;
+    if (gPrim == 3u) {
+      let sq = max(abs(i.uv.x), abs(i.uv.y));
+      if (sq > 0.94) { discard; }
+      edgeMask = smoothstep(0.94, 0.72, sq);
+      shade = 0.85 + 0.28 * (1.0 - sq);
+    } else if (gPrim == 4u) {
+      let td = sdEquilateralTri(i.uv * 1.12);
+      if (td > 0.0) { discard; }
+      edgeMask = smoothstep(0.0, -0.16, td);
+      shade = 0.88 + 0.25 * clamp(-td * 2.0, 0.0, 1.0);
+    } else if (gPrim == 5u) {
+      let hd = sdHex(i.uv * 1.06);
+      if (hd > 0.0) { discard; }
+      edgeMask = smoothstep(0.0, -0.15, hd);
+      shade = 0.86 + 0.28 * clamp(-hd * 2.0, 0.0, 1.0);
+    } else {
+      let r2 = dot(i.uv, i.uv);
+      if (r2 > 1.0) { discard; }
+      let r = sqrt(r2);
+      edgeMask = smoothstep(1.0, 0.74, r);
+      shade = 0.82 + 0.34 * sqrt(max(0.0, 1.0 - r2));
+    }
+    let outRgb = rgb * shade + mix(vec3f(0.0), vec3f(0.18, 0.06, 0.08), wGlow);
+    let outA = clamp(edgeMask * i.col.a, 0.0, 1.0);
+    return vec4f(outRgb * outA, outA);
+  }
+  if (S.mol.x >= 5.5 && S.mol.x < 12.5 && i.ex.w > 3.5) {
     if (i.ex.w < 4.5) {
       // Golden plumed wheat ear head
       let y01 = clamp(i.uv.y * 0.5 + 0.5, 0.0, 1.0);
@@ -2430,42 +2793,121 @@ fn fsPart(i: VO) -> @location(0) vec4f {
     }
     if (a < 0.008) { discard; }
   } else if (shape == 16u) {
-    // Energy Shield / Hex Barrier Impact Ripples
-    let r2 = dot(i.uv, i.uv);
-    if (r2 > 1.0) { discard; }
-    let r = sqrt(r2);
-    let z = sqrt(1.0 - r2);
-    let n = vec3f(i.uv, z);
-    let fres = pow(1.0 - z, 2.55);
-    let rimGlow = exp(-pow((r - 0.96) * 20.0, 2.0));
+    // Multi-Shape Energy Shield (Barrier forms 0..5 + Stackable Motif Bitmask + Live Ball Impact Shockwave)
+    let sForm = u32(S.mol2.z + 0.5);
+    var distEdge = 0.0;
+    var fres = 0.0;
+    var n = vec3f(0.0, 0.0, 1.0);
+    if (sForm == 0u) {
+      let r2 = dot(i.uv, i.uv);
+      if (r2 > 1.0) { discard; }
+      let r = sqrt(r2);
+      let z = sqrt(1.0 - r2);
+      n = vec3f(i.uv, z);
+      fres = pow(1.0 - z, 2.55);
+      distEdge = 1.0 - r;
+    } else if (sForm == 1u) {
+      let r = length(i.uv);
+      if (r > 1.0) { discard; }
+      distEdge = 1.0 - r;
+      fres = pow(clamp(r, 0.0, 1.0), 2.1);
+    } else if (sForm == 2u) {
+      let td = sdEquilateralTri(i.uv * 1.08);
+      if (td > 0.0) { discard; }
+      distEdge = -td;
+      fres = pow(clamp(1.0 - distEdge * 1.8, 0.0, 1.0), 1.9);
+    } else if (sForm == 3u) {
+      let sq = max(abs(i.uv.x), abs(i.uv.y));
+      if (sq > 0.96) { discard; }
+      distEdge = 0.96 - sq;
+      fres = pow(clamp(sq / 0.96, 0.0, 1.0), 2.2);
+    } else if (sForm == 4u) {
+      let hd = sdHex(i.uv * 1.04);
+      if (hd > 0.0) { discard; }
+      distEdge = -hd;
+      fres = pow(clamp(1.0 - distEdge * 1.65, 0.0, 1.0), 2.0);
+    } else {
+      let dd = (abs(i.uv.x) + abs(i.uv.y)) * 0.72;
+      if (dd > 0.96) { discard; }
+      distEdge = 0.96 - dd;
+      fres = pow(clamp(dd / 0.96, 0.0, 1.0), 2.1);
+    }
+    let rimGlow = exp(-pow(distEdge * 16.0, 2.0));
     let t = G.timing.x;
-    // Spherical hex tiling over surface coordinates
-    let hexDensity = clamp(S.mol.y, 0.3, 8.0);
+    let density = clamp(S.mol.y, 0.3, 8.0);
     let rippleRate = max(0.05, S.mol.w);
-    let sp = vec2f(atan2(n.x, n.z) * 3.2, asin(clamp(n.y, -0.98, 0.98)) * 3.6);
-    let hg = hexGrid(sp * hexDensity + vec2f(t * 0.08, 0.0));
-    let hexWire = 1.0 - smoothstep(0.02, 0.085, hg.x);
-    let cellShimmer = 0.72 + 0.28 * sin(t * (rippleRate * 4.3636) + hg.y * 6.2831853);
-    // Two geodesic impact ripple shockwaves expanding across the curved barrier
+    let spinAng = t * S.mol3.y;
+    let csS = cos(spinAng);
+    let snS = sin(spinAng);
+    let spBase = select(
+      vec2f(i.uv.x * csS - i.uv.y * snS, i.uv.x * snS + i.uv.y * csS) * 3.0,
+      vec2f(atan2(n.x, n.z) * 3.2, asin(clamp(n.y, -0.98, 0.98)) * 3.6),
+      sForm == 0u
+    );
+    let spScaled = spBase * density + vec2f(t * 0.08, 0.0);
+    let maskRaw = u32(S.mol3.x + 0.5);
+    let mask = select(maskRaw, 1u, maskRaw == 0u);
+    var patWire = 0.0;
+    var patSeed = 0.0;
+    if ((mask & 1u) != 0u) {
+      let hg = hexGrid(spScaled);
+      patWire = max(patWire, 1.0 - smoothstep(0.02, 0.085, hg.x));
+      patSeed = hg.y;
+    }
+    if ((mask & 2u) != 0u) {
+      let cg = circleGrid(spScaled * 0.78);
+      patWire = max(patWire, (1.0 - smoothstep(0.015, 0.075, cg.x)) * 0.96);
+      patSeed = mix(patSeed, cg.y, 0.45);
+    }
+    if ((mask & 4u) != 0u) {
+      let tg = triGrid(spScaled * 0.88);
+      patWire = max(patWire, (1.0 - smoothstep(0.015, 0.07, tg.x)) * 0.95);
+      patSeed = mix(patSeed, tg.y, 0.45);
+    }
+    if ((mask & 8u) != 0u) {
+      let sg = squareGrid(spScaled * 0.85);
+      patWire = max(patWire, (1.0 - smoothstep(0.015, 0.068, sg.x)) * 0.92);
+      patSeed = mix(patSeed, sg.y, 0.45);
+    }
+    if ((mask & 16u) != 0u) {
+      let dg = diamondGrid(spScaled * 0.82);
+      patWire = max(patWire, (1.0 - smoothstep(0.015, 0.068, dg.x)) * 0.94);
+      patSeed = mix(patSeed, dg.y, 0.45);
+    }
+    if ((mask & 32u) != 0u) {
+      let vg = voronoiGrid(spScaled * 0.65);
+      patWire = max(patWire, (1.0 - smoothstep(0.01, 0.055, vg.x)) * 1.10);
+      patSeed = mix(patSeed, vg.y, 0.5);
+    }
+    if ((mask & 64u) != 0u) {
+      let xg = starGrid(spScaled * 0.72);
+      patWire = max(patWire, (1.0 - smoothstep(0.012, 0.06, xg.x)) * 0.95);
+    }
+    let cellShimmer = 0.72 + 0.28 * sin(t * (rippleRate * 4.3636) + patSeed * 6.2831853);
     let phase0 = t * rippleRate;
     let cyc0 = fract(phase0);
     let imp0 = normalize(vec3f(0.45 * cos(floor(phase0) * 2.3), 0.35 * sin(floor(phase0) * 1.7), 0.85));
     let gd0 = acos(clamp(dot(n, imp0), -1.0, 1.0));
-    let waveR0 = cyc0 * 2.1;
-    let rip0 = exp(-pow((gd0 - waveR0) * 9.5, 2.0)) * (1.0 - smoothstep(0.55, 1.0, cyc0));
+    let rip0 = exp(-pow((gd0 - cyc0 * 2.1) * 9.5, 2.0)) * (1.0 - smoothstep(0.55, 1.0, cyc0));
     let flash0 = exp(-gd0 * gd0 * 24.0) * exp(-cyc0 * 6.0);
     let phase1 = t * rippleRate + 0.5;
     let cyc1 = fract(phase1);
     let imp1 = normalize(vec3f(-0.55 * sin(floor(phase1) * 2.9), 0.42, 0.78));
     let gd1 = acos(clamp(dot(n, imp1), -1.0, 1.0));
-    let waveR1 = cyc1 * 2.1;
-    let rip1 = exp(-pow((gd1 - waveR1) * 9.5, 2.0)) * (1.0 - smoothstep(0.55, 1.0, cyc1));
+    let rip1 = exp(-pow((gd1 - cyc1 * 2.1) * 9.5, 2.0)) * (1.0 - smoothstep(0.55, 1.0, cyc1));
     let flash1 = exp(-gd1 * gd1 * 24.0) * exp(-cyc1 * 6.0);
-    let impact = rip0 + rip1;
-    let cellBoost = hexWire * (0.28 + 0.52 * fres + 1.15 * impact) * cellShimmer;
-    a = clamp(fres * 0.42 + rimGlow * 0.75 + cellBoost + impact * 0.55 + (flash0 + flash1) * 0.95, 0.0, 1.0);
-    rgb = mix(rgb, S.colC.rgb, clamp(impact * 0.75, 0.0, 0.85));
-    rgb = mix(rgb, vec3f(0.95, 1.0, 1.0), clamp(rimGlow * 0.65 + (flash0 + flash1) * 0.9 + impact * hexWire * 0.85, 0.0, 0.95));
+    var ballImpact = 0.0;
+    if (G.ballPos.w > 0.04) {
+      let ballD = length(i.wp - G.ballPos.xyz);
+      let hitR = G.ballPos.w + 0.45;
+      ballImpact = exp(-ballD * ballD * 2.2) * 1.35 + exp(-pow((ballD - hitR) * 3.8, 2.0)) * 0.95;
+    }
+    let impact = rip0 + rip1 + ballImpact;
+    let cellBoost = patWire * (0.30 + 0.52 * fres + 1.15 * impact) * cellShimmer;
+    a = clamp(fres * 0.42 + rimGlow * 0.78 + cellBoost + impact * 0.55 + (flash0 + flash1) * 0.95, 0.0, 1.0);
+    rgb = mix(rgb, S.colC.rgb, clamp(impact * 0.72, 0.0, 0.85));
+    rgb = mix(rgb, S.colB.rgb, clamp(patWire * 0.35 + fres * 0.25, 0.0, 0.75));
+    rgb = mix(rgb, vec3f(0.95, 1.0, 1.0), clamp(rimGlow * 0.65 + (flash0 + flash1 + ballImpact) * 0.9 + impact * patWire * 0.85, 0.0, 0.95));
   } else if (shape == 17u) {
     // Aurora Borealis Volumetric Ribbon Curtain
     let u01 = clamp(i.uv.x * 0.5 + 0.5, 0.0, 1.0);
@@ -2539,7 +2981,7 @@ fn vsRibbon(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) ->
   let p1 = s1.xyz;
   let segLen = length(p1 - p0);
   let isWebOnly = S.mol.x > 3.5 && S.mol.x < 5.5;
-  let isDyn = S.mol.x >= 5.5;
+  let isDyn = S.mol.x >= 5.5 && S.mol.x < 12.5;
   let dynMode = u32(max(0.0, S.mol.x - 5.0) + 0.5);
   let maxSeg = select(2.5, 6.5, isWebOnly || isDyn);
   if (segLen < 1e-4 || segLen > maxSeg) { return o; }
@@ -2764,14 +3206,30 @@ fn vsCube(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> C
   o.pos = vec4f(0.0, 0.0, 2.0, 1.0);
   let q = parts[ii];
   if (!(q.p.w < q.v.w && q.c.a > 0.002 && q.m.x > 0.0)) { return o; }
-  // 📝 Morphing transitions: a piece is a cube only until its release time, then it becomes a butterfly.
-  if (S.mol2.y > 0.5 && q.p.w >= q.e.x) { return o; }
+  let isGrid = S.mol.x >= 12.5;
   let cv = cubeVert(vi);
+  if (isGrid) {
+    if (q.e.w <= 0.0005) { return o; }
+    let gN = normalize(q.e.xyz + vec3f(0.0, 1e-4, 0.0));
+    let gRef = select(vec3f(0.0, 1.0, 0.0), vec3f(1.0, 0.0, 0.0), abs(gN.y) > 0.92);
+    let gT = normalize(cross(gRef, gN));
+    let gB = cross(gN, gT);
+    let gShape = u32(S.mol2.y + 0.5);
+    let hCube = select(q.m.x, q.e.w, gShape == 2u || gShape == 6u);
+    let localP = gT * (cv.p.x * q.m.x) + gN * ((cv.p.y + 0.5) * hCube) + gB * (cv.p.z * q.m.x);
+    let worldN = normalize(gT * cv.n.x + gN * cv.n.y + gB * cv.n.z);
+    o.pos = G.viewProj * vec4f(q.p.xyz + localP, 1.0);
+    o.col = q.c;
+    o.shade = cubeShade(worldN);
+    return o;
+  }
+  // 📝 Morphing transitions: a piece is a cube only until its release time, then it becomes a butterfly.
+  if (S.mol.x < 0.5 && S.mol2.y > 0.5 && q.p.w >= q.e.x) { return o; }
   let ax = normalize(vec3f(hashF(q.m.w, 1u) - 0.5, hashF(q.m.w, 2u) - 0.5, hashF(q.m.w, 3u) - 0.5)
                      + vec3f(0.0, 0.0001, 0.0));
   // 📝 Glitch: after release, each cube jumps in blocky steps (it moves 12 times a second).
   var jit = vec3f(0.0);
-  if (S.mol2.x > 1.5 && q.p.w >= q.e.x) {
+  if (S.mol.x < 0.5 && S.mol2.x > 1.5 && q.p.w >= q.e.x) {
     let stepI = floor(q.p.w * 12.0);
     jit = (vec3f(hashF(q.m.w + stepI, 5u), hashF(q.m.w + stepI, 6u), hashF(q.m.w + stepI, 7u)) - vec3f(0.5)) * 0.12;
   }

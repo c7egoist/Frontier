@@ -528,6 +528,189 @@ function EvalDynStrandCPU(P, Slot, Cap, DynMode, Time, WindT, FieldScene, Prepar
     };
 }
 
+function EvalHandTubeCPU(Slot, Cap, Org, Sc)
+{
+    const USlot = (Slot + 0.5) / Math.max(1, Cap);
+    let Seg = 6, S0 = 0.94, S1 = 1.00;
+    if (USlot < 0.30) { Seg = 0; S0 = 0.0; S1 = 0.30; }
+    else if (USlot < 0.58) { Seg = 1; S0 = 0.30; S1 = 0.58; }
+    else if (USlot < 0.69) { Seg = 2; S0 = 0.58; S1 = 0.69; }
+    else if (USlot < 0.78) { Seg = 3; S0 = 0.69; S1 = 0.78; }
+    else if (USlot < 0.87) { Seg = 4; S0 = 0.78; S1 = 0.87; }
+    else if (USlot < 0.94) { Seg = 5; S0 = 0.87; S1 = 0.94; }
+    const T = Math.min(1, Math.max(0, (USlot - S0) / Math.max(0.01, S1 - S0)));
+    let P0 = [0, 1.15, -0.14], P1 = [0, 0.72, -0.06], P2 = [0, 0.28, -0.01], Rx0 = 0.28, Rx1 = 0.24, Rz0 = 0.21, Rz1 = 0.14;
+    if (Seg === 1) { P0 = [0, 0.30, -0.01]; P1 = [-0.01, 0, 0.03]; P2 = [-0.01, -0.34, 0.05]; Rx0 = 0.27; Rx1 = 0.34; Rz0 = 0.14; Rz1 = 0.115; }
+    else if (Seg === 2) { P0 = [-0.22, 0.04, 0.04]; P1 = [-0.44, -0.36, 0.14]; P2 = [-0.33, -0.82, 0.25]; Rx0 = 0.115; Rx1 = 0.065; Rz0 = 0.105; Rz1 = 0.060; }
+    else if (Seg === 3) { P0 = [-0.21, -0.30, 0.04]; P1 = [-0.26, -0.66, 0.17]; P2 = [-0.18, -0.94, 0.26]; Rx0 = 0.080; Rx1 = 0.054; Rz0 = 0.075; Rz1 = 0.051; }
+    else if (Seg === 4) { P0 = [-0.05, -0.33, 0.04]; P1 = [-0.06, -0.72, 0.16]; P2 = [-0.02, -0.95, 0.23]; Rx0 = 0.082; Rx1 = 0.056; Rz0 = 0.077; Rz1 = 0.053; }
+    else if (Seg === 5) { P0 = [0.11, -0.32, 0.03]; P1 = [0.12, -0.68, 0.13]; P2 = [0.12, -0.87, 0.17]; Rx0 = 0.076; Rx1 = 0.052; Rz0 = 0.071; Rz1 = 0.049; }
+    else if (Seg === 6) { P0 = [0.25, -0.28, 0.01]; P1 = [0.28, -0.56, 0.08]; P2 = [0.25, -0.74, 0.12]; Rx0 = 0.066; Rx1 = 0.046; Rz0 = 0.062; Rz1 = 0.043; }
+
+    const IT = 1 - T;
+    const C = [0, 1, 2].map(K => P0[K] * IT * IT + P1[K] * 2 * IT * T + P2[K] * T * T);
+    const Dc = [0, 1, 2].map(K => (P1[K] - P0[K]) * 2 * IT + (P2[K] - P1[K]) * 2 * T);
+    const DL = Math.hypot(Dc[0], Dc[1] - 0.001, Dc[2]) || 1;
+    const Tang = [Dc[0] / DL, (Dc[1] - 0.001) / DL, Dc[2] / DL];
+    let UAx = [Tang[1], -Tang[0], 0];
+    const UL = Math.hypot(UAx[0], UAx[1], UAx[2]) || 1;
+    UAx = [UAx[0] / UL, UAx[1] / UL, UAx[2] / UL];
+    const WAx = [UAx[1] * Tang[2] - UAx[2] * Tang[1], UAx[2] * Tang[0] - UAx[0] * Tang[2], UAx[0] * Tang[1] - UAx[1] * Tang[0]];
+    const Phi = Slot * 2.3999632;
+    let Rx = Seg === 1 ? Rx0 + (0.35 - Rx0) * Math.sin(Math.min(Math.PI, T * 2.2)) : Rx0 + (Rx1 - Rx0) * T;
+    let Rz = Rz0 + (Rz1 - Rz0) * T;
+    let CapLift = 0;
+    if (Seg >= 2 && T > 0.88)
+    {
+        const CapT = Math.min(1, Math.max(0, (T - 0.88) / 0.12));
+        const AngC = CapT * 1.38;
+        Rx *= Math.cos(AngC); Rz *= Math.cos(AngC); CapLift = Math.sin(AngC) * Rx1;
+    }
+    const Cp = Math.cos(Phi), Sp = Math.sin(Phi);
+    const LPos = [0, 1, 2].map(K => C[K] + Tang[K] * CapLift + UAx[K] * (Rx * Cp) + WAx[K] * (Rz * Sp));
+    const RawN = [0, 1, 2].map(K => UAx[K] * (Cp / Math.max(Rx, 0.02)) + WAx[K] * (Sp / Math.max(Rz, 0.02)) + Tang[K] * (CapLift > 0.001 ? 0.55 : 0));
+    const NL = Math.hypot(RawN[0], RawN[1], RawN[2]) || 1;
+    const Norm = [RawN[0] / NL, RawN[1] / NL, RawN[2] / NL];
+    return {
+        pos: [Org[0] + (LPos[0] + Norm[0] * 0.008) * Sc, Org[1] + (LPos[1] + Norm[1] * 0.008) * Sc, Org[2] + (LPos[2] + Norm[2] * 0.008) * Sc],
+        norm: Norm,
+        localY: LPos[1]
+    };
+}
+
+function EvalGridAnchorCPU(P, Slot, Cap)
+{
+    const Surf = Math.max(0, Math.min(5, Math.round(P.gridSurface ?? 0)));
+    const Org = P.origin || [0, 2, 0];
+    const Bx = Math.max(0.35, P.boxHalf?.[0] || 1.7), By = Math.max(0.35, P.boxHalf?.[1] || 1.7), Bz = Math.max(0.35, P.boxHalf?.[2] || 1.7);
+    const Cols = Math.max(2, Math.round(P.gridCols ?? 24));
+    const Rows = Math.max(2, Math.round(P.gridRows ?? 24));
+    const RadR = Math.max(0.5, P.radius || Bx);
+
+    if (Surf === 2)
+    {
+        const FibY = 1 - (2 * (Slot + 0.5)) / Math.max(1, Cap);
+        const RXZ = Math.sqrt(Math.max(0, 1 - FibY * FibY));
+        const Phi = Slot * 2.3999632;
+        const N = [Math.cos(Phi) * RXZ, FibY, Math.sin(Phi) * RXZ];
+        return { pos: [Org[0] + N[0] * (RadR + 0.008), Org[1] + N[1] * (RadR + 0.008), Org[2] + N[2] * (RadR + 0.008)], norm: N, localY: N[1] };
+    }
+    if (Surf === 3) return EvalHandTubeCPU(Slot, Cap, Org, RadR);
+    if (Surf === 4)
+    {
+        const UC = Math.max(8, Cols), VR = Math.max(6, Math.ceil(Cap / UC));
+        const Iu = Slot % UC, Iv = Math.floor(Slot / UC) % VR;
+        const Phi = (Iu / UC) * Math.PI * 2 + (Iv % 2) * (Math.PI / UC);
+        const Th = (Iv / VR) * Math.PI * 2;
+        const Rmin = RadR * 0.38, Rad = RadR + Rmin * Math.cos(Th);
+        const N = [Math.cos(Phi) * Math.cos(Th), Math.sin(Th), Math.sin(Phi) * Math.cos(Th)];
+        return { pos: [Org[0] + Math.cos(Phi) * Rad + N[0] * 0.008, Org[1] + Math.sin(Th) * Rmin + N[1] * 0.008, Org[2] + Math.sin(Phi) * Rad + N[2] * 0.008], norm: N, localY: Math.sin(Th) };
+    }
+    if (Surf === 5)
+    {
+        const Side = Math.max(3, Math.round(Math.cbrt(Cap)));
+        const Gx = Slot % Side, Gy = Math.floor(Slot / Side) % Side, Gz = Math.floor(Slot / (Side * Side)) % Side;
+        const Fu = ((Gx + 0.5) / Side) * 2 - 1, Fv = ((Gy + 0.5) / Side) * 2 - 1, Fw = ((Gz + 0.5) / Side) * 2 - 1;
+        return { pos: [Org[0] + Fu * Bx, Org[1] + Fv * By, Org[2] + Fw * Bz], norm: [0, 1, 0], localY: Fv };
+    }
+    const Cx = Slot % Cols, Rx = Math.floor(Slot / Cols) % Rows;
+    const U = ((Cx + 0.5) / Cols) * 2 - 1, V = ((Rx + 0.5) / Rows) * 2 - 1;
+    if (Surf === 1) return { pos: [Org[0] + U * Bx, Org[1] + V * By, Org[2]], norm: [0, 0, 1], localY: V };
+    return { pos: [Org[0] + U * Bx, Org[1], Org[2] + V * Bz], norm: [0, 1, 0], localY: 0 };
+}
+
+function EvalGridParticleCPU(P, Slot, Cap, T, BallX, BallY, BallZ, BallR, FieldScene, Prepared, Solo)
+{
+    const Gp = EvalGridAnchorCPU(P, Slot, Cap);
+    const Eff = Math.max(0, Math.min(4, Math.round(P.gridEffector ?? 0)));
+    const Freq = Math.max(0.15, P.curlFreq ?? 1.25);
+    const Speed = Math.max(0, P.curlAmp ?? 0.65);
+    const Org = P.origin || [0, 2, 0];
+    const ExtSpan = Math.max(P.radius || 0, P.boxHalf?.[0] || 0, 1.0);
+    const Dx = (Gp.pos[0] - Org[0]) * Freq, Dy = (Gp.pos[1] - Org[1]) * Freq, Dz = (Gp.pos[2] - Org[2]) * Freq;
+    let W = 0;
+
+    if (Eff === 0)
+    {
+        const Ts = T * Speed;
+        const Warp = Math.sin(Dx * 1.4 - Dz * 1.1 + Ts * 0.7) * Math.cos(Dy * 1.3 + Ts * 0.5) * 1.45;
+        const WaveA = 0.5 + 0.5 * Math.sin(Dx * 1.35 + Dy * 1.55 - Ts * 1.55 + Warp);
+        const Blot = 0.5 + 0.5 * Math.sin(Dx * 1.9 + Dz * 1.5 + Ts * 0.65) * Math.cos(Dy * 1.7 - Ts * 0.45);
+        W = Math.min(1, Math.max(0, WaveA * 0.62 + Blot * 0.54 - 0.14));
+    }
+    else if (Eff === 1)
+    {
+        const Ph0 = T * Speed * 1.35, Ph1 = T * Speed * 1.05 + 2.4, OrbR = ExtSpan * 0.68;
+        const E0 = [Org[0] + Math.cos(Ph0) * OrbR, Org[1] + Math.sin(Ph0 * 1.3) * OrbR * 0.55, Org[2] + Math.sin(Ph0) * OrbR];
+        const E1 = [Org[0] + Math.cos(Ph1) * OrbR * 0.85, Org[1] + Math.cos(Ph1 * 0.9) * OrbR * 0.5, Org[2] + Math.sin(Ph1 * 1.2) * OrbR * 0.85];
+        const R = Math.max(0.55, 1.15 / Math.max(0.35, Freq));
+        W = Math.max(1 - Smooth(R * 0.18, R, Math.hypot(Gp.pos[0] - E0[0], Gp.pos[1] - E0[1], Gp.pos[2] - E0[2])),
+                     1 - Smooth(R * 0.18, R, Math.hypot(Gp.pos[0] - E1[0], Gp.pos[1] - E1[1], Gp.pos[2] - E1[2])));
+    }
+    else if (Eff === 2)
+    {
+        const Ts = T * Speed * 0.45;
+        const N0 = 0.5 + 0.5 * Math.sin(Dx * 1.8 + Ts * 1.4) * Math.cos(Dy * 1.7 - Ts * 1.1) * Math.sin(Dz * 1.6 + Ts * 0.9);
+        const N1 = 0.5 + 0.5 * Math.cos(Dx * 3.1 - Ts * 1.9 + Dy * 2.2);
+        W = Math.min(1, Math.max(0, (N0 * 0.68 + N1 * 0.32 - 0.24) * 1.55));
+    }
+    else if (Eff === 3)
+    {
+        const Dist = Math.hypot(Gp.pos[0] - Org[0], Gp.pos[1] - Org[1], Gp.pos[2] - Org[2]);
+        const Ph = Dist * Freq * 3.6 - T * Speed * 3.2;
+        W = Math.pow(Math.max(0, 0.5 + 0.5 * Math.sin(Ph)), 1.4);
+    }
+    else W = 0.02;
+
+    if (FieldScene && Prepared?.length)
+    {
+        const F = PE.evalSceneForceFields(FieldScene, Gp.pos[0], Gp.pos[1], Gp.pos[2], 0, 0, 0, T, Prepared, Solo);
+        const FMag = Math.hypot(F[0], F[1], F[2]);
+        W = Math.max(W, Math.min(1, FMag * 0.14));
+    }
+    if (BallR > 0.04)
+    {
+        const BR = BallR + 0.85 / Math.max(0.4, Freq);
+        const BD = Math.hypot(Gp.pos[0] - BallX, Gp.pos[1] - BallY, Gp.pos[2] - BallZ);
+        W = Math.max(W, 1 - Smooth(BallR * 0.35, BR, BD));
+    }
+
+    const Contrast = Math.max(0.45, Math.min(3.5, P.gridContrast ?? 1.75));
+    W = Math.pow(Math.min(1, Math.max(0, W)), Contrast);
+    const MinS = Math.max(0.0, Math.min(0.95, P.gridMinScale ?? 0.12));
+    const MaxH = Math.max(0.02, P.gridMaxHeight ?? 0.42);
+    const CellW = Math.max(0.008, (P.sizeStart || 0.085) * (P.sizeScale || 1));
+    const GShape = Math.max(0, Math.min(6, Math.round(P.gridShape ?? 0)));
+    let LatSize = CellW * (MinS + (1 + MaxH * 0.45 - MinS) * W);
+    let CubeH = 0;
+    if (GShape === 2) { LatSize = CellW; CubeH = CellW * MinS + (MaxH - CellW * MinS) * W; }
+    else if (GShape === 1) { CubeH = LatSize; }
+    else if (GShape === 6)
+    {
+        if (Gp.localY > 0.28)
+        {
+            LatSize = CellW * (Math.max(0.25, MinS * 1.6) + (1.15 - Math.max(0.25, MinS * 1.6)) * W);
+            CubeH = CellW * 0.25 + (MaxH * 0.58 + CellW * 0.45 - CellW * 0.25) * W;
+        }
+        else { LatSize = CellW * (MinS + (1.38 - MinS) * W); CubeH = 0; }
+    }
+
+    const CA = P.colA || [0.06, 0.06, 0.07, 1], CC = P.colC || P.colB || [1, 0.22, 0.16, 1], CB = P.colB || [1, 0.45, 0.28, 1];
+    const T1 = Smooth(0.06, 0.56, W), T2 = Smooth(0.56, 1.0, W);
+    const Col = [0, 1, 2, 3].map(I => {
+        const M1 = CA[I] * (1 - T1) + CC[I] * T1;
+        return M1 * (1 - T2) + CB[I] * T2;
+    });
+    Col[3] = (CA[3] ?? 1) * (0.45 + 0.55 * Smooth(0.0, 0.22, W));
+
+    return {
+        x: Gp.pos[0], y: Gp.pos[1], z: Gp.pos[2],
+        nx: Gp.norm[0], ny: Gp.norm[1], nz: Gp.norm[2],
+        size: LatSize, cubeH: CubeH, gShape: GShape, w: W, col: Col,
+        visibleStrand: true, slotIdx: Slot, age: 0.1, life: 1e9, seed: Slot * 13.7
+    };
+}
+
 export class SoftwarePreviewEngine
 {
     constructor(Canvas)
@@ -820,13 +1003,29 @@ export class SoftwarePreviewEngine
             const Sys = Job.gpu, P = Sys.P;
             const Dt = GlobalDt > 0 ? GlobalDt : ((Job.simulate && Job.emitN > 0) ? (Job.cpu?.[28] || 1 / 60) : 0);
             const Tr = P.kind === 5 ? (P.transition || null) : null;
-            const DynMode = !Tr && P.arcMode !== 0 && P.arcMode !== 1 && !(P.beamMode > 0) && P.kind !== 6 ? Math.max(0, Math.min(7, P.dynMode | 0)) : 0;
-            const WebMode = !Tr && DynMode === 0 && P.arcMode !== 0 && P.arcMode !== 1 && !(P.beamMode > 0) && P.kind !== 6 ? Math.max(0, Math.min(2, P.webMode | 0)) : 0;
-            const CurlMode = DynMode > 0 ? (5 + DynMode) : (WebMode > 0 ? (3 + WebMode) : (P.curlMode || 0));
+            const GridMode = !Tr && P.arcMode !== 0 && P.arcMode !== 1 && !(P.beamMode > 0) && P.kind !== 6 ? Math.max(0, Math.min(2, P.gridMode | 0)) : 0;
+            const DynMode = !Tr && GridMode === 0 && P.arcMode !== 0 && P.arcMode !== 1 && !(P.beamMode > 0) && P.kind !== 6 ? Math.max(0, Math.min(7, P.dynMode | 0)) : 0;
+            const WebMode = !Tr && GridMode === 0 && DynMode === 0 && P.arcMode !== 0 && P.arcMode !== 1 && !(P.beamMode > 0) && P.kind !== 6 ? Math.max(0, Math.min(2, P.webMode | 0)) : 0;
+            const CurlMode = GridMode > 0 ? 13 : (DynMode > 0 ? (5 + DynMode) : (WebMode > 0 ? (3 + WebMode) : (P.curlMode || 0)));
             if (Job.simulate && Dt > 0)
             {
-                const MaxSoft = (WebMode > 0 || DynMode > 0) ? Sys.cap : (Tr ? Math.min(Sys.cap, 384) : (CurlMode === 3 ? Math.min(Sys.cap, 520) : (CurlMode > 0 ? Math.min(Sys.cap, 1250) : Math.min(Sys.cap, 360))));
+                const MaxSoft = GridMode > 0 ? Math.min(Sys.cap, 1600) : ((WebMode > 0 || DynMode > 0) ? Sys.cap : (Tr ? Math.min(Sys.cap, 384) : (CurlMode === 3 ? Math.min(Sys.cap, 520) : (CurlMode > 0 ? Math.min(Sys.cap, 1250) : Math.min(Sys.cap, 360)))));
                 const BHx = P.boxHalf?.[0] || 0.8, BHy = P.boxHalf?.[1] || BHx, BHz = P.boxHalf?.[2] || BHx;
+                if (GridMode > 0)
+                {
+                    if (Job.emitN > 0 || Sys.particles.length > 0)
+                    {
+                        const GCount = MaxSoft;
+                        if (Sys.particles.length !== GCount) Sys.particles.length = GCount;
+                        for (let I = 0; I < GCount; I++)
+                        {
+                            Sys.particles[I] = EvalGridParticleCPU(P, I, GCount, Time, BallX, BallY, BallZ, BallR, fieldScene, Prepared, Solo);
+                        }
+                    }
+                    Sys.stats_ = { alive: Sys.particles.length, energy: 0, A: 0, B: 0, C: 0 };
+                    Sys.readbackCount++;
+                }
+                else
                 {
                     if (Job.emitN > 0)
                     {
@@ -1967,19 +2166,22 @@ export class SoftwarePreviewEngine
                         }
                     }
                 }
-                if (WebMode > 0 || DynMode > 0)
+                if (GridMode === 0)
                 {
-                    let VisCount = 0;
-                    for (const Pt of Sys.particles) if (Pt.visibleStrand) VisCount++;
-                    Sys.stats_ = { alive: VisCount, energy: 0, A: 0, B: 0, C: 0 };
+                    if (WebMode > 0 || DynMode > 0)
+                    {
+                        let VisCount = 0;
+                        for (const Pt of Sys.particles) if (Pt.visibleStrand) VisCount++;
+                        Sys.stats_ = { alive: VisCount, energy: 0, A: 0, B: 0, C: 0 };
+                    }
+                    else
+                    {
+                        const Ratio = Math.min(1, Sys.particles.length / 360);
+                        const EstAlive = Math.round(Ratio * Math.min(Sys.cap, (P.rate || 120) * ((P.lifeMin + P.lifeMax) * 0.5) + Sys.particles.length));
+                        Sys.stats_ = { alive: Math.max(Sys.particles.length, Math.min(Sys.cap, EstAlive)), energy: 0, A: 0, B: 0, C: 0 };
+                    }
+                    Sys.readbackCount++;
                 }
-                else
-                {
-                    const Ratio = Math.min(1, Sys.particles.length / 360);
-                    const EstAlive = Math.round(Ratio * Math.min(Sys.cap, (P.rate || 120) * ((P.lifeMin + P.lifeMax) * 0.5) + Sys.particles.length));
-                    Sys.stats_ = { alive: Math.max(Sys.particles.length, Math.min(Sys.cap, EstAlive)), energy: 0, A: 0, B: 0, C: 0 };
-                }
-                Sys.readbackCount++;
             }
 
             if (Job.draw)
@@ -2006,6 +2208,134 @@ export class SoftwarePreviewEngine
                         Ctx.restore();
                         if (Additive) Ctx.globalCompositeOperation = 'lighter';
                     }
+                }
+
+                if (GridMode > 0)
+                {
+                    const Surf = Math.max(0, Math.min(5, Math.round(P.gridSurface ?? 0)));
+                    const OccludeBack = (P.showObject !== false) && (Surf === 2 || Surf === 3 || Surf === 4);
+                    const ProjGrid = [];
+                    for (const Pt of Sys.particles)
+                    {
+                        if (!Pt) continue;
+                        if (OccludeBack)
+                        {
+                            const Vx = CamX - Pt.x, Vy = CamY - Pt.y, Vz = CamZ - Pt.z;
+                            if (Vx * Pt.nx + Vy * Pt.ny + Vz * Pt.nz < -0.15) continue;
+                        }
+                        const Pr = ProjectPoint(VP, Pt.x, Pt.y, Pt.z, W, H);
+                        if (Pr) ProjGrid.push({ pt: Pt, sc: Pr });
+                    }
+                    ProjGrid.sort((A, B) => B.sc[2] - A.sc[2]);
+                    for (const Item of ProjGrid)
+                    {
+                        const Pt = Item.pt, Sc = Item.sc;
+                        const Col = Pt.col || P.colA;
+                        const Alpha = Math.min(1, Math.max(0, Col[3] ?? 1));
+                        if (Alpha <= 0.005) continue;
+                        const GShape = Pt.gShape;
+                        const Sz = Pt.size;
+                        const Is3DCube = GShape === 1 || GShape === 2 || (GShape === 6 && Pt.cubeH > 0.001);
+                        const N = [Pt.nx, Pt.ny, Pt.nz];
+                        const [T, B] = BasisFrom(N);
+
+                        if (Is3DCube)
+                        {
+                            const CubeExt = (GShape === 2 || GShape === 6) ? Pt.cubeH : Sz;
+                            const Hs = Sz * 0.5;
+                            const C3 = [];
+                            for (const Sy of [0, CubeExt])
+                            {
+                                for (const Sb of [-Hs, Hs])
+                                {
+                                    for (const St of [-Hs, Hs])
+                                    {
+                                        C3.push(ProjectPoint(VP,
+                                            Pt.x + T[0] * St + N[0] * Sy + B[0] * Sb,
+                                            Pt.y + T[1] * St + N[1] * Sy + B[1] * Sb,
+                                            Pt.z + T[2] * St + N[2] * Sy + B[2] * Sb, W, H));
+                                    }
+                                }
+                            }
+                            if (C3.some(Q => !Q)) continue;
+                            const Faces = [
+                                { idx: [4, 5, 7, 6], n: N, lit: 1.05 },
+                                { idx: [0, 1, 5, 4], n: [-B[0], -B[1], -B[2]], lit: 0.78 },
+                                { idx: [2, 3, 7, 6], n: B, lit: 0.74 },
+                                { idx: [1, 3, 7, 5], n: T, lit: 0.90 },
+                                { idx: [0, 2, 6, 4], n: [-T[0], -T[1], -T[2]], lit: 0.62 }
+                            ].map(F => ({
+                                ...F,
+                                d: (C3[F.idx[0]][2] + C3[F.idx[1]][2] + C3[F.idx[2]][2] + C3[F.idx[3]][2]) * 0.25
+                            })).sort((A, B2) => B2.d - A.d);
+
+                            for (const F of Faces)
+                            {
+                                const FC = [Col[0] * F.lit, Col[1] * F.lit, Col[2] * F.lit, Alpha];
+                                Ctx.fillStyle = LinearToCss(FC, Alpha);
+                                Ctx.beginPath();
+                                Ctx.moveTo(C3[F.idx[0]][0], C3[F.idx[0]][1]);
+                                Ctx.lineTo(C3[F.idx[1]][0], C3[F.idx[1]][1]);
+                                Ctx.lineTo(C3[F.idx[2]][0], C3[F.idx[2]][1]);
+                                Ctx.lineTo(C3[F.idx[3]][0], C3[F.idx[3]][1]);
+                                Ctx.closePath();
+                                Ctx.fill();
+                                Ctx.strokeStyle = `rgba(255,255,255,${(Alpha * (0.06 + Pt.w * 0.14)).toFixed(3)})`;
+                                Ctx.lineWidth = 0.55;
+                                Ctx.stroke();
+                            }
+                        }
+                        else if (GShape === 3 || GShape === 4 || GShape === 5)
+                        {
+                            const Verts = GShape === 3 ? [[-1, -1], [1, -1], [1, 1], [-1, 1]] : (GShape === 4 ? [[0, 1.1], [-0.95, -0.75], [0.95, -0.75]] : [0, 1, 2, 3, 4, 5].map(K => [Math.cos((K * Math.PI) / 3), Math.sin((K * Math.PI) / 3)]));
+                            const ProjV = [];
+                            for (const V2 of Verts)
+                            {
+                                const Pr = ProjectPoint(VP,
+                                    Pt.x + (T[0] * V2[0] + B[0] * V2[1]) * Sz * 0.52,
+                                    Pt.y + (T[1] * V2[0] + B[1] * V2[1]) * Sz * 0.52,
+                                    Pt.z + (T[2] * V2[0] + B[2] * V2[1]) * Sz * 0.52, W, H);
+                                if (Pr) ProjV.push(Pr);
+                            }
+                            if (ProjV.length >= 3)
+                            {
+                                Ctx.fillStyle = LinearToCss(Col, Alpha);
+                                Ctx.beginPath();
+                                ProjV.forEach((Q, K) => K === 0 ? Ctx.moveTo(Q[0], Q[1]) : Ctx.lineTo(Q[0], Q[1]));
+                                Ctx.closePath();
+                                Ctx.fill();
+                            }
+                        }
+                        else
+                        {
+                            const PxR = Math.max(1.2, Math.min(28, (Sz * 180) / Sc[2]));
+                            Ctx.fillStyle = LinearToCss(Col, Alpha);
+                            Ctx.beginPath();
+                            if (P.gridBillboard)
+                            {
+                                Ctx.arc(Sc[0], Sc[1], PxR * 0.52, 0, Math.PI * 2);
+                            }
+                            else
+                            {
+                                const Pe1 = ProjectPoint(VP, Pt.x + T[0] * Sz * 0.52, Pt.y + T[1] * Sz * 0.52, Pt.z + T[2] * Sz * 0.52, W, H);
+                                const Pe2 = ProjectPoint(VP, Pt.x + B[0] * Sz * 0.52, Pt.y + B[1] * Sz * 0.52, Pt.z + B[2] * Sz * 0.52, W, H);
+                                const RxE = Pe1 ? Math.max(1.0, Math.hypot(Pe1[0] - Sc[0], Pe1[1] - Sc[1])) : PxR * 0.5;
+                                const RyE = Pe2 ? Math.max(1.0, Math.hypot(Pe2[0] - Sc[0], Pe2[1] - Sc[1])) : PxR * 0.5;
+                                const RotE = Pe1 ? Math.atan2(Pe1[1] - Sc[1], Pe1[0] - Sc[0]) : 0;
+                                if (Ctx.ellipse) Ctx.ellipse(Sc[0], Sc[1], RxE, RyE, RotE, 0, Math.PI * 2);
+                                else Ctx.arc(Sc[0], Sc[1], PxR * 0.5, 0, Math.PI * 2);
+                            }
+                            Ctx.fill();
+                            if (Pt.w > 0.35)
+                            {
+                                Ctx.fillStyle = `rgba(255,210,195,${(Alpha * Pt.w * 0.35).toFixed(3)})`;
+                                Ctx.beginPath();
+                                Ctx.arc(Sc[0], Sc[1], Math.max(0.8, PxR * 0.22), 0, Math.PI * 2);
+                                Ctx.fill();
+                            }
+                        }
+                    }
+                    continue;
                 }
 
                 if (DynMode > 0)
@@ -2866,43 +3196,184 @@ export class SoftwarePreviewEngine
                     else if (Shape === 16)
                     {
                         const RadS = Math.max(14, R * 0.52);
+                        const ShieldForm = Math.max(0, Math.min(5, Math.round(P.shieldForm ?? 0)));
+                        const ShieldMask = (P.shieldMask ?? 1) || 1;
+                        const SpinAng = Time * (P.shieldSpin ?? 0.20);
+                        const [SB, SU] = BasisFrom(P.dir || [0, 0, 1]);
+                        const SWorld = (Ux, Uy) => {
+                            if (ShieldForm === 0) return [Sc[0] + Ux * RadS, Sc[1] + Uy * RadS];
+                            const Sw = (P.sizeStart || 3.4) * (P.sizeScale || 1) * 0.5;
+                            const Pr = ProjectPoint(VP,
+                                Pt.x + SB[0] * Ux * Sw + SU[0] * Uy * Sw,
+                                Pt.y + SB[1] * Ux * Sw + SU[1] * Uy * Sw,
+                                Pt.z + SB[2] * Ux * Sw + SU[2] * Uy * Sw, W, H);
+                            return Pr ? [Pr[0], Pr[1]] : [Sc[0] + Ux * RadS, Sc[1] + Uy * RadS];
+                        };
+                        const OutlineVerts = ShieldForm === 2
+                            ? [[0, 1.0], [-0.95, -0.78], [0.95, -0.78]]
+                            : (ShieldForm === 3
+                                ? [[-0.92, -0.92], [0.92, -0.92], [0.92, 0.92], [-0.92, 0.92]]
+                                : (ShieldForm === 4
+                                    ? [0, 1, 2, 3, 4, 5].map(K => [Math.cos((K * Math.PI) / 3), Math.sin((K * Math.PI) / 3)])
+                                    : (ShieldForm === 5 ? [[0, 1.0], [0.96, 0], [0, -1.0], [-0.96, 0]] : null)));
+
                         Ctx.save();
+                        Ctx.beginPath();
+                        if (OutlineVerts)
+                        {
+                            OutlineVerts.forEach((V2, K) => {
+                                const P2 = SWorld(V2[0], V2[1]);
+                                if (K === 0) Ctx.moveTo(P2[0], P2[1]); else Ctx.lineTo(P2[0], P2[1]);
+                            });
+                            Ctx.closePath();
+                        }
+                        else if (ShieldForm === 1)
+                        {
+                            for (let K = 0; K <= 28; K++)
+                            {
+                                const A = (K / 28) * Math.PI * 2;
+                                const P2 = SWorld(Math.cos(A), Math.sin(A));
+                                if (K === 0) Ctx.moveTo(P2[0], P2[1]); else Ctx.lineTo(P2[0], P2[1]);
+                            }
+                            Ctx.closePath();
+                        }
+                        else
+                        {
+                            Ctx.arc(Sc[0], Sc[1], RadS, 0, Math.PI * 2);
+                        }
+
                         if (Ctx.createRadialGradient)
                         {
                             const SG = Ctx.createRadialGradient(Sc[0], Sc[1], RadS * 0.12, Sc[0], Sc[1], RadS);
-                            SG.addColorStop(0.0, LinearToCss(Col, Alpha * 0.08));
-                            SG.addColorStop(0.72, LinearToCss(Col, Alpha * 0.28));
+                            SG.addColorStop(0.0, LinearToCss(Col, Alpha * 0.10));
+                            SG.addColorStop(0.72, LinearToCss(Col, Alpha * 0.30));
                             SG.addColorStop(0.95, LinearToCss(P.colC || Col, Alpha * 0.85));
                             SG.addColorStop(1.0, LinearToCss(Col, 0));
                             Ctx.fillStyle = SG;
-                            Ctx.beginPath(); Ctx.arc(Sc[0], Sc[1], RadS, 0, Math.PI * 2); Ctx.fill();
                         }
-                        // Honeycomb hex lattice nodes projected inside the barrier disc + geodesic impact ripples
-                        Ctx.strokeStyle = LinearToCss(P.colC || Col, Alpha * 0.42);
-                        Ctx.lineWidth = 1.0;
-                        const HexScale = 2.1 / Math.max(0.3, P.curlFreq ?? 2.1);
-                        const HexR = Math.max(5, RadS * 0.24 * HexScale);
-                        const HexSpan = Math.min(8, Math.ceil((RadS * 0.86) / Math.max(2, HexR * 1.45)));
-                        for (let Hy = -HexSpan; Hy <= HexSpan; Hy++)
+                        else Ctx.fillStyle = LinearToCss(Col, Alpha * 0.32);
+                        Ctx.fill();
+                        Ctx.save();
+                        Ctx.clip();
+
+                        const Dens = Math.max(0.4, Math.min(5, P.curlFreq ?? 2.1));
+                        const StepPx = Math.max(8, RadS * 0.25 * (2.1 / Dens));
+                        const Span = Math.min(8, Math.ceil(RadS / StepPx));
+                        const Cs = Math.cos(SpinAng), Sn = Math.sin(SpinAng);
+                        const Rot = (X, Y) => [Sc[0] + X * Cs - Y * Sn, Sc[1] + X * Sn + Y * Cs];
+
+                        if (ShieldMask & 1)
                         {
-                            for (let Hx = -HexSpan; Hx <= HexSpan; Hx++)
+                            Ctx.strokeStyle = LinearToCss(P.colC || Col, Alpha * 0.44);
+                            Ctx.lineWidth = 1.0;
+                            for (let Hy = -Span; Hy <= Span; Hy++)
                             {
-                                const Cx0 = (Hx + (Hy & 1) * 0.5) * HexR * 1.68;
-                                const Cy0 = Hy * HexR * 1.45;
-                                if (Math.hypot(Cx0, Cy0) > RadS * 0.86) continue;
-                                Ctx.beginPath();
-                                for (let S = 0; S < 6; S++)
+                                for (let Hx = -Span; Hx <= Span; Hx++)
                                 {
-                                    const Ha = (S * Math.PI) / 3;
-                                    const Px2 = Sc[0] + Cx0 + Math.cos(Ha) * (HexR * 0.82);
-                                    const Py2 = Sc[1] + Cy0 + Math.sin(Ha) * (HexR * 0.82);
-                                    if (S === 0) Ctx.moveTo(Px2, Py2); else Ctx.lineTo(Px2, Py2);
+                                    const Cx0 = (Hx + (Hy & 1) * 0.5) * StepPx * 1.65, Cy0 = Hy * StepPx * 1.42;
+                                    if (Math.hypot(Cx0, Cy0) > RadS * 1.02) continue;
+                                    Ctx.beginPath();
+                                    for (let S = 0; S < 6; S++)
+                                    {
+                                        const Ha = (S * Math.PI) / 3;
+                                        const P2 = Rot(Cx0 + Math.cos(Ha) * (StepPx * 0.82), Cy0 + Math.sin(Ha) * (StepPx * 0.82));
+                                        if (S === 0) Ctx.moveTo(P2[0], P2[1]); else Ctx.lineTo(P2[0], P2[1]);
+                                    }
+                                    Ctx.closePath();
+                                    Ctx.stroke();
                                 }
-                                Ctx.closePath();
-                                Ctx.stroke();
                             }
                         }
-                        // Expanding geodesic impact ripple arcs
+                        if (ShieldMask & 2)
+                        {
+                            Ctx.strokeStyle = LinearToCss(P.colB || Col, Alpha * 0.46);
+                            Ctx.lineWidth = 1.0;
+                            for (let Iy = -Span; Iy <= Span; Iy++)
+                            {
+                                for (let Ix = -Span; Ix <= Span; Ix++)
+                                {
+                                    const P2 = Rot(Ix * StepPx * 1.3, Iy * StepPx * 1.3);
+                                    Ctx.beginPath();
+                                    Ctx.arc(P2[0], P2[1], StepPx * 0.42, 0, Math.PI * 2);
+                                    Ctx.stroke();
+                                }
+                            }
+                        }
+                        if (ShieldMask & 4)
+                        {
+                            Ctx.strokeStyle = LinearToCss(P.colC || Col, Alpha * 0.44);
+                            Ctx.lineWidth = 0.95;
+                            for (let Iy = -Span; Iy <= Span; Iy++)
+                            {
+                                for (let Ix = -Span; Ix <= Span; Ix++)
+                                {
+                                    const Fl = ((Ix + Iy) & 1) ? -1 : 1;
+                                    const Cx0 = Ix * StepPx * 1.1, Cy0 = Iy * StepPx * 1.1;
+                                    const R0 = StepPx * 0.55 * Fl;
+                                    const A0 = Rot(Cx0, Cy0 - R0), B0 = Rot(Cx0 - R0 * 0.86, Cy0 + R0 * 0.6), C0 = Rot(Cx0 + R0 * 0.86, Cy0 + R0 * 0.6);
+                                    Ctx.beginPath(); Ctx.moveTo(A0[0], A0[1]); Ctx.lineTo(B0[0], B0[1]); Ctx.lineTo(C0[0], C0[1]); Ctx.closePath(); Ctx.stroke();
+                                }
+                            }
+                        }
+                        if (ShieldMask & 8)
+                        {
+                            Ctx.strokeStyle = LinearToCss(P.colA || Col, Alpha * 0.42);
+                            Ctx.lineWidth = 0.95;
+                            for (let Iy = -Span; Iy <= Span; Iy++)
+                            {
+                                for (let Ix = -Span; Ix <= Span; Ix++)
+                                {
+                                    const Cx0 = Ix * StepPx * 1.25, Cy0 = Iy * StepPx * 1.25, Hr = StepPx * 0.46;
+                                    const Q0 = Rot(Cx0 - Hr, Cy0 - Hr), Q1 = Rot(Cx0 + Hr, Cy0 - Hr), Q2 = Rot(Cx0 + Hr, Cy0 + Hr), Q3 = Rot(Cx0 - Hr, Cy0 + Hr);
+                                    Ctx.beginPath(); Ctx.moveTo(Q0[0], Q0[1]); Ctx.lineTo(Q1[0], Q1[1]); Ctx.lineTo(Q2[0], Q2[1]); Ctx.lineTo(Q3[0], Q3[1]); Ctx.closePath(); Ctx.stroke();
+                                }
+                            }
+                        }
+                        if (ShieldMask & 16)
+                        {
+                            Ctx.strokeStyle = LinearToCss(P.colB || Col, Alpha * 0.44);
+                            Ctx.lineWidth = 0.95;
+                            for (let Iy = -Span; Iy <= Span; Iy++)
+                            {
+                                for (let Ix = -Span; Ix <= Span; Ix++)
+                                {
+                                    const Cx0 = Ix * StepPx * 1.35, Cy0 = Iy * StepPx * 1.35, Hr = StepPx * 0.52;
+                                    const D0 = Rot(Cx0, Cy0 - Hr), D1 = Rot(Cx0 + Hr, Cy0), D2 = Rot(Cx0, Cy0 + Hr), D3 = Rot(Cx0 - Hr, Cy0);
+                                    Ctx.beginPath(); Ctx.moveTo(D0[0], D0[1]); Ctx.lineTo(D1[0], D1[1]); Ctx.lineTo(D2[0], D2[1]); Ctx.lineTo(D3[0], D3[1]); Ctx.closePath(); Ctx.stroke();
+                                }
+                            }
+                        }
+                        if (ShieldMask & 32)
+                        {
+                            Ctx.strokeStyle = `rgba(215, 252, 255, ${(Alpha * 0.58).toFixed(3)})`;
+                            Ctx.lineWidth = 1.1;
+                            for (let K = 0; K < 14; K++)
+                            {
+                                const A1 = K * 0.449 + SpinAng, A2 = A1 + 0.38;
+                                const P1 = [Sc[0] + Math.cos(A1) * RadS * 0.25, Sc[1] + Math.sin(A1) * RadS * 0.25];
+                                const P2 = [Sc[0] + Math.cos(A2) * RadS * 0.92, Sc[1] + Math.sin(A2) * RadS * 0.92];
+                                Ctx.beginPath(); Ctx.moveTo(P1[0], P1[1]); Ctx.lineTo(P2[0], P2[1]); Ctx.stroke();
+                            }
+                        }
+                        if (ShieldMask & 64)
+                        {
+                            Ctx.strokeStyle = `rgba(235, 252, 255, ${(Alpha * 0.50).toFixed(3)})`;
+                            Ctx.lineWidth = 0.9;
+                            for (let Iy = -Span; Iy <= Span; Iy += 2)
+                            {
+                                for (let Ix = -Span; Ix <= Span; Ix += 2)
+                                {
+                                    const P2 = Rot(Ix * StepPx * 1.3, Iy * StepPx * 1.3);
+                                    const R0 = StepPx * 0.35;
+                                    Ctx.beginPath();
+                                    Ctx.moveTo(P2[0] - R0, P2[1]); Ctx.lineTo(P2[0] + R0, P2[1]);
+                                    Ctx.moveTo(P2[0], P2[1] - R0); Ctx.lineTo(P2[0], P2[1] + R0);
+                                    Ctx.stroke();
+                                }
+                            }
+                        }
+
+                        // Expanding geodesic impact ripple arcs + live Ball impact flash
                         const RippleRate = Math.max(0.05, P.curlRate ?? 0.55);
                         for (let K = 0; K < 2; K++)
                         {
@@ -2919,9 +3390,50 @@ export class SoftwarePreviewEngine
                                 Ctx.beginPath(); Ctx.arc(ImpX, ImpY, RipR, 0, Math.PI * 2); Ctx.stroke();
                             }
                         }
-                        Ctx.strokeStyle = `rgba(215, 252, 255, ${(Alpha * 0.78).toFixed(3)})`;
-                        Ctx.lineWidth = 1.6;
-                        Ctx.beginPath(); Ctx.arc(Sc[0], Sc[1], RadS * 0.96, 0, Math.PI * 2); Ctx.stroke();
+                        if (BallR > 0.04)
+                        {
+                            const ShD = Math.hypot(BallX - Pt.x, BallY - Pt.y, BallZ - Pt.z);
+                            const ShR = (P.sizeStart || 3.4) * (P.sizeScale || 1) * 0.5;
+                            if (ShD < ShR + BallR + 0.55)
+                            {
+                                const BSc = ProjectPoint(VP, BallX, BallY, BallZ, W, H);
+                                if (BSc)
+                                {
+                                    Ctx.strokeStyle = `rgba(255, 255, 255, 0.95)`;
+                                    Ctx.lineWidth = 2.4;
+                                    Ctx.beginPath(); Ctx.arc(BSc[0], BSc[1], Math.max(8, RadS * 0.28), 0, Math.PI * 2); Ctx.stroke();
+                                }
+                            }
+                        }
+                        Ctx.restore();
+
+                        // Bright glowing outer barrier border matching the selected ShieldForm
+                        Ctx.strokeStyle = `rgba(215, 252, 255, ${(Alpha * 0.86).toFixed(3)})`;
+                        Ctx.lineWidth = 2.0;
+                        Ctx.beginPath();
+                        if (OutlineVerts)
+                        {
+                            OutlineVerts.forEach((V2, K) => {
+                                const P2 = SWorld(V2[0], V2[1]);
+                                if (K === 0) Ctx.moveTo(P2[0], P2[1]); else Ctx.lineTo(P2[0], P2[1]);
+                            });
+                            Ctx.closePath();
+                        }
+                        else if (ShieldForm === 1)
+                        {
+                            for (let K = 0; K <= 28; K++)
+                            {
+                                const A = (K / 28) * Math.PI * 2;
+                                const P2 = SWorld(Math.cos(A), Math.sin(A));
+                                if (K === 0) Ctx.moveTo(P2[0], P2[1]); else Ctx.lineTo(P2[0], P2[1]);
+                            }
+                            Ctx.closePath();
+                        }
+                        else
+                        {
+                            Ctx.arc(Sc[0], Sc[1], RadS * 0.96, 0, Math.PI * 2);
+                        }
+                        Ctx.stroke();
                         Ctx.restore();
                         continue;
                     }

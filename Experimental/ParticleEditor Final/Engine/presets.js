@@ -76,6 +76,19 @@ import { PE } from "./pe.js";
       beamWidth: 0.048,     // laser / plasma core radius (m)
       beamPulse: 6.0,       // plasma wave pulse speed along beam
       glitchRate: 14,       // hologram matrix / scanline glitch tick rate (Hz)
+      shieldForm: 0,        // 0 Sphere Dome, 1 Circle Disc, 2 Triangle Aegis, 3 Square Pane, 4 Hexagon Wall, 5 Diamond Barrier
+      shieldMask: 1,        // Bitmask of layered shield patterns: 1 Hex, 2 Circles, 4 Triangles, 8 Squares, 16 Diamonds, 32 Voronoi Cracks, 64 Stars
+      shieldSpin: 0.20,     // Pattern rotation / drift rate
+      gridMode: 0,          // 0 off, 1 motion-graphics effector particle grid / halftone lattice
+      gridSurface: 0,       // 0 Plane XZ, 1 Wall XY, 2 Sphere Shell, 3 Sculpted Hand & Orb, 4 Torus Ring, 5 3D Volume Matrix
+      gridShape: 2,         // 0 Circles, 1 Boxes (Uniform Scale), 2 Cubes (Height Up/Down), 3 Flat Tiles, 4 Triangles, 5 Hexagons, 6 Auto (Dots + Upper Cubes)
+      gridCols: 24,         // lattice columns / angular divisions
+      gridRows: 24,         // lattice rows
+      gridEffector: 0,      // 0 Organic Sweep Patches, 1 Twin Orbiting Effectors, 2 Curl Islands, 3 Radial Ripple, 4 Force Fields & Ball Only
+      gridMinScale: 0.10,   // idle scale / height fraction outside effector zone
+      gridMaxHeight: 0.95,  // max height (m) for height-extruded cubes or max scale boost
+      gridContrast: 1.85,   // falloff contrast exponent
+      gridBillboard: 0,     // 0 surface-normal aligned, 1 camera-billboarded
       burstEvery: 0,        // timed bursts in seconds (fireworks); 0 = off
       burstCount: 120,      // particles per timed burst
       burstAtOrigin: false, // true: timed bursts fire from the emitter origin, not random sky points
@@ -835,13 +848,27 @@ import { PE } from "./pe.js";
     },
     {
       id: "energy-shield-hex", name: "Energy Shield & Hex Ripples", group: "Effects",
-      blurb: "Volumetric spherical force-field barrier with honeycomb hex lattice and expanding geodesic impact ripple waves.",
+      blurb: "Volumetric spherical force-field barrier with stackable hex, circle, triangle, square, diamond, Voronoi shatter, and star pattern layers plus geodesic ball impact ripples.",
       p: P({
         kind: 5, shape: 16, leafMode: 0, blend: "add", capacity: 24, rate: 0.28,
-        emitShape: 0, origin: [0, 1.85, 0], dir: [0, 1, 0], spread: 0.0,
+        emitShape: 0, origin: [-2.25, 1.9, 0.3], dir: [0, 0, 1], spread: 0.0,
         speedMin: 0, speedMax: 0, drag: 0, gravity: 0, buoyancy: 0,
-        lifeMin: 6.5, lifeMax: 7.5, sizeStart: 3.5, sizeEnd: 3.5, sizeScale: 1.0, curlFreq: 2.1, curlRate: 0.55,
+        lifeMin: 6.5, lifeMax: 7.5, sizeStart: 3.1, sizeEnd: 3.1, sizeScale: 1.0, curlFreq: 2.1, curlAmp: 1.15, curlRate: 0.55,
+        shieldForm: 0, shieldMask: 1, shieldSpin: 0.18,
         colA: hex("#22b8ff"), colC: hex("#8cf5ff"), colB: hex("#3d6bff"),
+        windCoupling: 0, bounce: 0, burstEvery: 0, burstCount: 1, burstAtOrigin: true,
+      }),
+    },
+    {
+      id: "energy-shield-prism", name: "Multi-Shape Prism Barrier", group: "Effects",
+      blurb: "Layered geometric energy shield combining Triangles + Circles + Diamonds + Voronoi crack lines with directional face orientation and projectile impact ripples.",
+      p: P({
+        kind: 5, shape: 16, leafMode: 0, blend: "add", capacity: 24, rate: 0.28,
+        emitShape: 0, origin: [2.25, 1.9, -0.3], dir: [-0.28, 0.05, 0.96], spread: 0.0,
+        speedMin: 0, speedMax: 0, drag: 0, gravity: 0, buoyancy: 0,
+        lifeMin: 6.5, lifeMax: 7.5, sizeStart: 3.1, sizeEnd: 3.1, sizeScale: 1.0, curlFreq: 2.2, curlAmp: 1.25, curlRate: 0.62,
+        shieldForm: 4, shieldMask: 1 | 2 | 4 | 16 | 32, shieldSpin: 0.24,
+        colA: hex("#7c4dff"), colC: hex("#38f9d7"), colB: hex("#ff4ecd"),
         windCoupling: 0, bounce: 0, burstEvery: 0, burstCount: 1, burstAtOrigin: true,
       }),
     },
@@ -987,15 +1014,58 @@ import { PE } from "./pe.js";
         colA: hex("#4e3622"), colC: hex("#3b8732"), colB: hex("#82cf4e"),
       }),
     },
+    {
+      id: "effector-grid-cubes", name: "Effector Cube Matrix · Height Up/Down", group: "Motion & Grids",
+      blurb: "Motion-graphics 3D cube matrix with fixed footprint where effector waves, Force Fields, and thrown balls drive column heights cleanly up and down.",
+      p: P({
+        kind: 5, shape: 4, blend: "alpha", capacity: 576, rate: 0,
+        emitShape: 3, boxHalf: [1.7, 0.25, 1.7], origin: [3.55, 0.04, 0.2], dir: [0, 1, 0], spread: 0.0,
+        speedMin: 0, speedMax: 0, drag: 0, gravity: 0, buoyancy: 0,
+        lifeMin: 9999, lifeMax: 9999, sizeStart: 0.125, sizeEnd: 0.125, sizeScale: 1.0,
+        gridMode: 1, gridSurface: 0, gridShape: 2, gridCols: 24, gridRows: 24,
+        gridEffector: 0, gridMinScale: 0.05, gridMaxHeight: 1.15, gridContrast: 1.9, gridBillboard: 0,
+        curlFreq: 1.15, curlAmp: 0.65, windCoupling: 0, bounce: 0, showObject: true,
+        colA: hex("#1a1e26"), colC: hex("#ff2236"), colB: hex("#ff8844"),
+      }),
+    },
+    {
+      id: "effector-sphere-dots", name: "Halftone Effector Sphere · Circles", group: "Motion & Grids",
+      blurb: "Dark obsidian 3D sphere wrapped in surface-conforming halftone dots and tiles scaled by orbiting effectors, Force Fields, and thrown balls.",
+      p: P({
+        kind: 5, shape: 1, blend: "alpha", capacity: 720, rate: 0,
+        emitShape: 1, radius: 1.32, boxHalf: [1.32, 1.32, 1.32], origin: [-3.35, 2.05, 0.0], dir: [0, 1, 0], spread: 0.0,
+        speedMin: 0, speedMax: 0, drag: 0, gravity: 0, buoyancy: 0,
+        lifeMin: 9999, lifeMax: 9999, sizeStart: 0.12, sizeEnd: 0.12, sizeScale: 1.0,
+        gridMode: 1, gridSurface: 2, gridShape: 0, gridCols: 28, gridRows: 26,
+        gridEffector: 1, gridMinScale: 0.12, gridMaxHeight: 1.15, gridContrast: 1.85, gridBillboard: 0,
+        curlFreq: 1.35, curlAmp: 0.75, windCoupling: 0, bounce: 0, showObject: true,
+        colA: hex("#1a1d24"), colC: hex("#ff1c30"), colB: hex("#ff6078"),
+      }),
+    },
+    {
+      id: "effector-hand-halftone", name: "Obsidian Hand · Halftone & Tiles", group: "Motion & Grids",
+      blurb: "Sculpted obsidian hand holding a chrome sphere, wrapped in wave-modulated halftone dots on palm/thumb and raised square tiles up the forearm.",
+      p: P({
+        kind: 5, shape: 1, blend: "alpha", capacity: 1200, rate: 0,
+        emitShape: 1, radius: 1.35, boxHalf: [1.35, 1.35, 1.35], origin: [0.0, 2.05, 0.1], dir: [0, 1, 0], spread: 0.0,
+        speedMin: 0, speedMax: 0, drag: 0, gravity: 0, buoyancy: 0,
+        lifeMin: 9999, lifeMax: 9999, sizeStart: 0.068, sizeEnd: 0.068, sizeScale: 1.0,
+        gridMode: 1, gridSurface: 3, gridShape: 6, gridCols: 34, gridRows: 35,
+        gridEffector: 0, gridMinScale: 0.10, gridMaxHeight: 0.16, gridContrast: 1.75, gridBillboard: 0,
+        curlFreq: 1.45, curlAmp: 0.58, windCoupling: 0, bounce: 0, showObject: true,
+        colA: hex("#1c1d22"), colC: hex("#ff1b2d"), colB: hex("#ff4a6e"),
+      }),
+    },
   ];
 
   PE.VFX_CATEGORIES = [
     { id: "Cloth & Rigging", label: "Cloth & Rigging", badge: "CLOTH", blurb: "Ball-interactive wind flags, ship sails, swinging bridge cables, industrial chains, and leafy hanging vines" },
     { id: "Foliage & Flora", label: "Foliage & Flora", badge: "FLORA", blurb: "Interactive grass & golden wheat fields, tall lakeside reeds, broad pinnate ferns, and swaying canopy trees" },
+    { id: "Motion & Grids", label: "Motion & Grids", badge: "MOGRAPH", blurb: "Effector-driven halftone dot/box/triangle grids, height-extruded cube matrices, and obsidian surface lattices" },
     { id: "Silk & Curl", label: "Silk & Curl", badge: "CURL", blurb: "Dense 3D curl-noise wave fur fields, plasma spheres, bokeh ribbons, dual-sphere lightning & spinning spiderwebs" },
     { id: "Transitions", label: "Transitions & Derez", badge: "DEREZ", blurb: "Solid surface lattice derez, 8-fragment floor shatter, coin stacks, glitch & butterfly dissolves" },
     { id: "Space & Distortion", label: "Space & Distortion", badge: "LENS", blurb: "Black hole accretion spiral with relativistic gravitational lensing & rising heat shimmer refraction" },
-    { id: "Shields & Tech", label: "Shields & Tech", badge: "TECH", blurb: "Energy shield hex barriers with impact ripples, radar sweeps, sonar pings, EMP domes & holo glitches" },
+    { id: "Shields & Tech", label: "Shields & Tech", badge: "TECH", blurb: "Multi-shape energy shield barriers with hex/circle/triangle/diamond/Voronoi cracks, radar sweeps, sonar & EMP domes" },
     { id: "Atmosphere & Sky", label: "Atmosphere & Sky", badge: "SKY", blurb: "Volumetric aurora borealis curtains, fireworks bursts, flares & floating atmospheric dust motes" },
     { id: "Ballistics & Sparks", label: "Ballistics & Sparks", badge: "BALLISTIC", blurb: "Shockwaves, beams, tracers, strike sparks, welding spray & high-velocity impact ballistics" },
     { id: "Pyro & Water", label: "Pyro & Water", badge: "VFX", blurb: "Fire, smoke, embers, steam, mist, bubbles, splash rings & viscous liquid splatters" },
@@ -1009,6 +1079,7 @@ import { PE } from "./pe.js";
     if (!p) return "Ballistics & Sparks";
     const g = preset?.group || "";
     const id = preset?.id || "";
+    if ((p.gridMode || 0) > 0 || g === "Motion & Grids") return "Motion & Grids";
     if ((p.dynMode || 0) >= 1 && (p.dynMode || 0) <= 3 || g === "Cloth & Rigging") return "Cloth & Rigging";
     if ((p.dynMode || 0) >= 4 || g === "Foliage & Flora") return "Foliage & Flora";
     if (p.transition || g === "Transitions") return "Transitions";
@@ -1039,6 +1110,9 @@ import { PE } from "./pe.js";
       if (p.transition.fragment) return "Shatter Derez";
       return "Mesh Transition";
     }
+    if ((p.gridMode || 0) > 0) {
+      return ["Halftone Circles", "Scaling Boxes", "Height Cubes", "Surface Tiles", "Triangle Grid", "Hex Grid", "Halftone & Tiles"][p.gridShape | 0] || "Effector Grid";
+    }
     if ((p.webMode || 0) === 1) return "Orb-Weave Web";
     if ((p.webMode || 0) === 2) return "Messy Cobwebs";
     if ((p.dynMode || 0) === 1) return p.dynSub ? "Chain Links" : "Swinging Cables";
@@ -1055,7 +1129,7 @@ import { PE } from "./pe.js";
     if ((p.trailMode || 0) > 0) return p.shape === 14 ? "Viscous Drip" : "Projectile Trail";
     if (p.magneticField) return "Dipole Guided";
     if (p.kind === 1) return "Wind-driven";
-    return ["Streak", "Sphere", "Leaf", "Pyro / Glow", "Cube", "Coin", "Bubble", "Snowflake", "Ice Hail", "Bokeh Bead", (p.leafMode ? "Dust Shockwave" : "Mach Shockwave"), "EMP Pulse Dome", "Holo Glitch", "Winged Boid", "Viscous Drop", (p.leafMode ? "Sonar Ping" : "Radar Sweep"), "Hex Energy Shield", "Aurora Curtain"][p.shape] || "Ballistic";
+    return ["Streak", "Sphere", "Leaf", "Pyro / Glow", "Cube", "Coin", "Bubble", "Snowflake", "Ice Hail", "Bokeh Bead", (p.leafMode ? "Dust Shockwave" : "Mach Shockwave"), "EMP Pulse Dome", "Holo Glitch", "Winged Boid", "Viscous Drop", (p.leafMode ? "Sonar Ping" : "Radar Sweep"), ((p.shieldMask ?? 1) !== 1 || (p.shieldForm ?? 0) > 0 ? "Multi-Shape Shield" : "Hex Energy Shield"), "Aurora Curtain"][p.shape] || "Ballistic";
   };
 
   for (const preset of PE.Presets) {
