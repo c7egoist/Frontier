@@ -30,7 +30,11 @@ import {
     GPU_ARROWS_VERT,
     GPU_ARROWS_FRAG,
     STREAMLINE_VERT,
-    STREAMLINE_FRAG
+    STREAMLINE_FRAG,
+    BOKEH_RIBBON_VERT,
+    BOKEH_RIBBON_FRAG,
+    BOKEH_BEAD_VERT,
+    BOKEH_BEAD_FRAG
 } from './VectorFieldShaders.js';
 
 const WORLD_SCALE = 1 / 12;
@@ -556,6 +560,513 @@ export function ComputeFallbackSliceFrame(Px, Py, Pw, Ph, IsIso, FallbackZoom, F
     return ComputeFallbackPlaneFrame(Px, Py, Pw, Ph, IsIso, 'XZ', FallbackZoom, FallbackCenter, FallbackYaw, FallbackPitch, SliceY);
 }
 
+//------------------------------------------------------------------------------------------------------------------------
+//                           BOKEH STREAM RIBBONS DEBUG VISUALIZER (LIVE FIELD ADVECTION + DOF BEADS)
+//------------------------------------------------------------------------------------------------------------------------
+
+export const BOKEH_TRAIL_SEGS = 20;
+export const BOKEH_MAX_TRACERS = 1200;
+
+const BOKEH_DEFAULT_COL_A = [0x3b / 255, 0x5a / 255, 0x5b / 255]; // Deep mist teal tail (#3b5a5b)
+const BOKEH_DEFAULT_COL_C = [0x8e / 255, 0xc7 / 255, 0xc7 / 255]; // Mist teal body (#8ec7c7)
+const BOKEH_DEFAULT_COL_B = [0xef / 255, 0xff / 255, 0xff / 255]; // Luminous ice-white head (#efffff)
+
+export function ResolveBokehColors(Viz, Share, YMetres)
+{
+    const PaletteMode = Viz?.BokehPalette || 'BokehTeal';
+    if (PaletteMode === 'FollowStreams')
+    {
+        const Base = ResolveStreamlinePointColor(
+            Viz?.Colormap || 'Engineering',
+            Viz?.StreamColorMode || 'FieldPalette',
+            Viz?.StreamSingleColor || '#68dcff',
+            Share,
+            YMetres
+        );
+        const HeadRgb = [
+            Clamp(Base[0] * 0.45 + 0.55, 0, 1),
+            Clamp(Base[1] * 0.45 + 0.55, 0, 1),
+            Clamp(Base[2] * 0.45 + 0.55, 0, 1)
+        ];
+        const TailRgb = [Base[0] * 0.44, Base[1] * 0.44, Base[2] * 0.44];
+        return { HeadRgb, MidRgb: Base, TailRgb };
+    }
+    const Lift = 0.08 * Clamp(Share, 0, 1);
+    return {
+        HeadRgb: [
+            Clamp(BOKEH_DEFAULT_COL_B[0] + Lift, 0, 1),
+            Clamp(BOKEH_DEFAULT_COL_B[1] + Lift, 0, 1),
+            Clamp(BOKEH_DEFAULT_COL_B[2] + Lift, 0, 1)
+        ],
+        MidRgb: [
+            Clamp(BOKEH_DEFAULT_COL_C[0] + Lift * 0.7, 0, 1),
+            Clamp(BOKEH_DEFAULT_COL_C[1] + Lift * 0.8, 0, 1),
+            Clamp(BOKEH_DEFAULT_COL_C[2] + Lift * 0.8, 0, 1)
+        ],
+        TailRgb: BOKEH_DEFAULT_COL_A
+    };
+}
+
+function CreateMulberry32(Seed = 133742)
+{
+    let S = Seed >>> 0;
+    return () => {
+        S = (S + 0x6d2b79f5) | 0;
+        let T = Math.imul(S ^ (S >>> 15), 1 | S);
+        T = (T + Math.imul(T ^ (T >>> 7), 61 | T)) ^ T;
+        return ((T ^ (T >>> 14)) >>> 0) / 4294967296;
+    };
+}
+
+function SmoothStep01(E0, E1, X)
+{
+    const T = Clamp((X - E0) / Math.max(1e-6, E1 - E0), 0, 1);
+    return T * T * (3 - 2 * T);
+}
+
+export class BokehStreamRibbonSim
+{
+    constructor(Seed = 20261111)
+    {
+        this.Rand = CreateMulberry32(Seed);
+        this.Tracers = Array.from({ length: BOKEH_MAX_TRACERS }, (_, Idx) => ({
+            Idx,
+            X: 0,
+            Y: 16,
+            Z: 0,
+            Phase: (Idx * 0.371) % 1,
+            Age: 0,
+            Life: 14.0,
+            Dof: 0.3,
+            SizeSeed: 1.0,
+            SpeedShare: 0.25,
+            CurveIdx: 0,
+            ValidLen: 0,
+            Trail: new Float32Array(BOKEH_TRAIL_SEGS * 4)
+        }));
+        this.Curves = [];
+        this.ActiveCount = 0;
+        this.SceneKey = '';
+        this.LastCurveRefreshMs = 0;
+        this.LastSimTime = -999;
+        this.LastBounds = null;
+    }
+
+    SampleCurveAtFrac(Curve, Frac)
+    {
+        const Pts = Curve.Pts;
+        const Arc = Curve.Arc;
+        const N = Pts.length;
+        const F = Clamp(Frac, 0, 1);
+        if (F <= 0) return [Pts[0].X, Pts[0].Y, Pts[0].Z, Pts[0].Mag];
+        if (F >= 1)
+        {
+            const P = Pts[N - 1];
+            return [P.X, P.Y, P.Z, P.Mag];
+        }
+        // Binary search cumulative normalized arc length Arc[0..N-1]
+        let Lo = 0, Hi = N - 1;
+        while (Lo + 1 < Hi)
+        {
+            const Mid = (Lo + Hi) >> 1;
+            if (Arc[Mid] <= F) Lo = Mid;
+            else Hi = Mid;
+        }
+        const A0 = Arc[Lo], A1 = Arc[Hi];
+        const T = A1 > A0 + 1e-6 ? (F - A0) / (A1 - A0) : 0;
+        const P0 = Pts[Lo], P1 = Pts[Hi];
+        return [
+            P0.X + (P1.X - P0.X) * T,
+            P0.Y + (P1.Y - P0.Y) * T,
+            P0.Z + (P1.Z - P0.Z) * T,
+            P0.Mag + (P1.Mag - P0.Mag) * T
+        ];
+    }
+
+    BuildStructuredCurves(Scene, Bounds, SimTime, TargetTracers)
+    {
+        const Solo = Scene?.Viz?.SoloToken || null;
+        const FixedMax = Math.max(6, Scene?.Viz?.FixedMax || 34);
+        const Is3D = Bounds.Is3D !== false;
+        const ActiveAxes = Bounds.ActiveAxes || ['XZ'];
+        const HalfM = Math.max(45, Bounds.HalfM || DEFAULT_HALF_M);
+        const Center = Bounds.Center || [0, 0, 48];
+        const Fx = Center[0] || 0;
+        const Fz = Center[1] || 0;
+        const Fy = Center[2] ?? 48;
+
+        const TargetCurveCount = Clamp(Math.round(TargetTracers * 0.52), 48, 240);
+        const ZoomRatio = HalfM / DEFAULT_HALF_M;
+        const SeedStep = Clamp((Scene?.Viz?.StreamlineSpacing || 84) * ZoomRatio, 18, 150);
+        const StepM = Clamp(13.0 * ZoomRatio, 2.2, 26);
+        const Span = HalfM * 0.90;
+        const BoundsByAxis = {
+            XZ: { MinU: Fx - Span, MaxU: Fx + Span, MinV: Fz - Span, MaxV: Fz + Span },
+            XY: { MinU: Fx - Span, MaxU: Fx + Span, MinV: Fy - Span, MaxV: Fy + Span },
+            YZ: { MinU: Fz - Span, MaxU: Fz + Span, MinV: Fy - Span, MaxV: Fy + Span }
+        };
+        const Seeds = CollectMultiAxisStreamlineSeeds(Scene, BoundsByAxis, Bounds.SliceHeight ?? 16, SeedStep, {
+            ActiveAxes,
+            Is3D,
+            Volumetric: Is3D,
+            TargetCount: TargetCurveCount
+        });
+
+        const Built = [];
+        for (const [Sx, Sy, Sz] of Seeds)
+        {
+            const Pts = IntegrateStreamlineBidirectional(Scene, Sx, Sy, Sz, SimTime, 18, StepM, { Solo });
+            if (Pts.length < 6) continue;
+            const N = Pts.length;
+            const Arc = new Float32Array(N);
+            let SumArc = 0;
+            let SumMag = Pts[0].Mag;
+            for (let K = 1; K < N; ++K)
+            {
+                const Dx = Pts[K].X - Pts[K - 1].X;
+                const Dy = Pts[K].Y - Pts[K - 1].Y;
+                const Dz = Pts[K].Z - Pts[K - 1].Z;
+                SumArc += Math.hypot(Dx, Dy, Dz);
+                Arc[K] = SumArc;
+                SumMag += Pts[K].Mag;
+            }
+            if (SumArc < 8.0) continue;
+            for (let K = 1; K < N; ++K) Arc[K] /= SumArc;
+            const MidMagShare = Clamp((SumMag / N) / FixedMax, 0, 1);
+            Built.push({ Pts, Arc, TotalArc: SumArc, MidMagShare });
+        }
+        return Built;
+    }
+
+    UpdateTracerFromCurve(Tracer, Scene)
+    {
+        if (!this.Curves.length)
+        {
+            Tracer.ValidLen = 0;
+            return;
+        }
+        const Curve = this.Curves[Tracer.CurveIdx % this.Curves.length];
+        const FixedMax = Math.max(6, Scene?.Viz?.FixedMax || 34);
+        const HeadFrac = Clamp(Tracer.Phase, 0.01, 0.995);
+        // Long graceful curved ribbon (42% of full streamline curve) gliding behind bokeh bead
+        const TailFrac = Math.max(0.0, HeadFrac - 0.42);
+        const SpanFrac = Math.max(0.02, HeadFrac - TailFrac);
+        const Tr = Tracer.Trail;
+
+        for (let K = 0; K < BOKEH_TRAIL_SEGS; ++K)
+        {
+            const U = K / (BOKEH_TRAIL_SEGS - 1);
+            const F = HeadFrac - U * SpanFrac;
+            const [Px, Py, Pz, Mag] = this.SampleCurveAtFrac(Curve, F);
+            const K4 = K * 4;
+            Tr[K4] = Px;
+            Tr[K4 + 1] = Py;
+            Tr[K4 + 2] = Pz;
+            Tr[K4 + 3] = Clamp(Mag / FixedMax, 0, 1);
+        }
+
+        Tracer.X = Tr[0];
+        Tracer.Y = Tr[1];
+        Tracer.Z = Tr[2];
+        Tracer.SpeedShare = Math.max(Tr[3], Curve.MidMagShare * 0.72);
+        Tracer.ValidLen = BOKEH_TRAIL_SEGS;
+    }
+
+    ComputeTopologySignature(Scene, Bounds)
+    {
+        const SrcSig = (Scene?.Sources || [])
+            .map((S) => `${S.Token}:${S.Enabled}:${S.Model}:${S.Strength}:${S.Swirl}:${S.Radius}:${S.UseFormula}:${S.FormulaCode}`)
+            .join('|');
+        const AxSig = (Bounds.ActiveAxes || ['XZ']).join(',');
+        return `${SrcSig}::${Bounds.Is3D !== false}::${AxSig}::${Bounds.SliceAxis || 'XZ'}::${Math.round(Bounds.SliceHeight ?? 16)}::${Scene?.Viz?.SoloToken || ''}`;
+    }
+
+    ComputeSceneSignature(Scene, Bounds)
+    {
+        const SrcSig = (Scene?.Sources || [])
+            .map((S) => `${S.Token}:${S.Enabled}:${S.Model}:${S.Strength}:${S.Swirl}:${S.Centre.map((V) => Number(V).toFixed(1)).join(',')}:${S.Radius}:${S.UseFormula}:${S.FormulaCode}`)
+            .join('|');
+        const AxSig = (Bounds.ActiveAxes || ['XZ']).join(',');
+        return `${SrcSig}::${Bounds.Is3D !== false}::${AxSig}::${Bounds.SliceAxis || 'XZ'}::${Math.round(Bounds.SliceHeight ?? 16)}::${Scene?.Viz?.SoloToken || ''}`;
+    }
+
+    EnsureSynced(Scene, Bounds, SimTime, ForceReseed = false)
+    {
+        const TargetCount = Clamp(Math.round(Scene?.Viz?.BokehCount ?? 320), 60, BOKEH_MAX_TRACERS);
+        const TopoSig = this.ComputeTopologySignature(Scene, Bounds);
+        const Sig = this.ComputeSceneSignature(Scene, Bounds);
+        this.LastBounds = Bounds;
+
+        if (!ForceReseed && this.SceneKey === Sig && this.ActiveCount === TargetCount && this.Curves.length > 0) return false;
+
+        // When only animated source centres move (e.g. Vortex along spline), throttle curve refreshes smoothly for 60 FPS playback
+        const NowMs = typeof performance !== 'undefined' ? performance.now() : 0;
+        const OnlyPositionMoved = !ForceReseed && this.TopologyKey === TopoSig && this.ActiveCount === TargetCount && this.Curves.length > 0;
+        if (OnlyPositionMoved && NowMs && NowMs - this.LastCurveRefreshMs < 240) return false;
+
+        const RebuiltCurves = this.BuildStructuredCurves(Scene, Bounds, SimTime, TargetCount);
+        const KeepExistingOrder = !ForceReseed && this.ActiveCount === TargetCount && this.Curves.length > 0;
+        this.Curves = RebuiltCurves;
+        this.TopologyKey = TopoSig;
+        this.SceneKey = Sig;
+        this.ActiveCount = TargetCount;
+        this.LastCurveRefreshMs = NowMs;
+
+        if (this.Curves.length === 0)
+        {
+            for (let I = 0; I < TargetCount; ++I) this.Tracers[I].ValidLen = 0;
+            return true;
+        }
+
+        const NumCurves = this.Curves.length;
+        for (let I = 0; I < TargetCount; ++I)
+        {
+            const Tracer = this.Tracers[I];
+            Tracer.CurveIdx = I % NumCurves;
+            if (!KeepExistingOrder)
+            {
+                const WaveSlot = Math.floor(I / NumCurves);
+                const SlotsPerCurve = Math.max(1, Math.ceil(TargetCount / NumCurves));
+                const Stagger = (WaveSlot + this.Rand() * 0.35) / SlotsPerCurve;
+                Tracer.Phase = (Stagger + 0.12) % 1.0;
+                Tracer.Life = 1.0;
+                Tracer.Age = Tracer.Phase;
+                Tracer.Dof = this.Rand();
+                Tracer.SizeSeed = 0.78 + this.Rand() * 0.44;
+            }
+            this.UpdateTracerFromCurve(Tracer, Scene);
+        }
+        return true;
+    }
+
+    RefreshCurvesKeepTracers(Scene, Bounds, SimTime)
+    {
+        if (!this.ActiveCount) return;
+        const NowMs = typeof performance !== 'undefined' ? performance.now() : 0;
+        if (NowMs && NowMs - this.LastCurveRefreshMs < 240) return;
+        this.LastCurveRefreshMs = NowMs;
+
+        const TargetCount = Clamp(Math.round(Scene?.Viz?.BokehCount ?? 320), 60, BOKEH_MAX_TRACERS);
+        this.Curves = this.BuildStructuredCurves(Scene, Bounds, SimTime, TargetCount);
+        this.TopologyKey = this.ComputeTopologySignature(Scene, Bounds);
+        this.SceneKey = this.ComputeSceneSignature(Scene, Bounds);
+        this.ActiveCount = TargetCount;
+        if (this.Curves.length === 0) return;
+
+        for (let I = 0; I < this.ActiveCount; ++I)
+        {
+            const Tracer = this.Tracers[I];
+            Tracer.CurveIdx = I % this.Curves.length;
+            this.UpdateTracerFromCurve(Tracer, Scene);
+        }
+    }
+
+    Step(Scene, Bounds, SimTime, Dt)
+    {
+        this.EnsureSynced(Scene, Bounds, SimTime, false);
+        const ClampedDt = Clamp(Dt || 0, 0, 0.05);
+        if (ClampedDt <= 1e-5 || !this.Curves.length) return;
+
+        const SpeedMul = Clamp(Scene?.Viz?.BokehSpeed ?? 0.45, 0.08, 2.5);
+        const NumCurves = this.Curves.length;
+
+        for (let I = 0; I < this.ActiveCount; ++I)
+        {
+            const Tracer = this.Tracers[I];
+            const Curve = this.Curves[Tracer.CurveIdx % NumCurves];
+            const ArcFactor = 220 / Math.max(85, Curve.TotalArc);
+            // Calm, graceful progression along structured RK4 curves (~10-16 px/s at default 0.45x speed)
+            const PhaseRate = (0.040 + 0.036 * Curve.MidMagShare) * SpeedMul * Clamp(ArcFactor, 0.55, 1.45);
+            Tracer.Phase = (Tracer.Phase + PhaseRate * ClampedDt) % 1.0;
+            Tracer.Age = Tracer.Phase;
+            Tracer.Life = 1.0;
+            this.UpdateTracerFromCurve(Tracer, Scene);
+        }
+    }
+
+    FillWebGLBuffers(Scene, RibbonGeo, BeadGeo)
+    {
+        const Viz = Scene?.Viz || {};
+        const RibPos = RibbonGeo.getAttribute('position').array;
+        const RibTan = RibbonGeo.getAttribute('aTangent').array;
+        const RibCol = RibbonGeo.getAttribute('aColor').array;
+        const RibUv = RibbonGeo.getAttribute('aUv').array;
+        const RibAlpha = RibbonGeo.getAttribute('aAlpha').array;
+        const MaxRVerts = Math.floor(RibPos.length / 3);
+
+        const BeadPos = BeadGeo.getAttribute('position').array;
+        const BeadCorner = BeadGeo.getAttribute('aCorner').array;
+        const BeadCol = BeadGeo.getAttribute('aColor').array;
+        const BeadDof = BeadGeo.getAttribute('aDof').array;
+        const BeadRad = BeadGeo.getAttribute('aRadiusPx').array;
+        const BeadAlpha = BeadGeo.getAttribute('aAlpha').array;
+        const MaxBVerts = Math.floor(BeadPos.length / 3);
+
+        let RVert = 0;
+        let BVert = 0;
+
+        const WriteRibbonSegmentQuad = (P0x, P0y, P0z, P1x, P1y, P1z, T0x, T0y, T0z, T1x, T1y, T1z, C0, C1, U0, U1, AlphaVal) => {
+            if (RVert + 6 > MaxRVerts) return;
+            const WriteVert = (Px, Py, Pz, Tx, Ty, Tz, C, Sx, U) => {
+                const I3 = RVert * 3;
+                const I2 = RVert * 2;
+                RibPos[I3] = Px; RibPos[I3 + 1] = Py; RibPos[I3 + 2] = Pz;
+                RibTan[I3] = Tx; RibTan[I3 + 1] = Ty; RibTan[I3 + 2] = Tz;
+                RibCol[I3] = C[0]; RibCol[I3 + 1] = C[1]; RibCol[I3 + 2] = C[2];
+                RibUv[I2] = Sx; RibUv[I2 + 1] = U;
+                RibAlpha[RVert] = AlphaVal;
+                RVert++;
+            };
+            WriteVert(P0x, P0y, P0z, T0x, T0y, T0z, C0, -1, U0);
+            WriteVert(P0x, P0y, P0z, T0x, T0y, T0z, C0, 1, U0);
+            WriteVert(P1x, P1y, P1z, T1x, T1y, T1z, C1, -1, U1);
+
+            WriteVert(P0x, P0y, P0z, T0x, T0y, T0z, C0, 1, U0);
+            WriteVert(P1x, P1y, P1z, T1x, T1y, T1z, C1, 1, U1);
+            WriteVert(P1x, P1y, P1z, T1x, T1y, T1z, C1, -1, U1);
+        };
+
+        // 1. Subtle structured streamline guide spines so full vector-field curves read cleanly everywhere
+        for (const Curve of this.Curves)
+        {
+            const Pts = Curve.Pts;
+            const N = Pts.length;
+            if (N < 4) continue;
+            const { MidRgb, TailRgb } = ResolveBokehColors(Viz, Curve.MidMagShare, Pts[Math.floor(N * 0.5)].Y);
+            const GuideCol = [
+                TailRgb[0] * 0.60 + MidRgb[0] * 0.40,
+                TailRgb[1] * 0.60 + MidRgb[1] * 0.40,
+                TailRgb[2] * 0.60 + MidRgb[2] * 0.40
+            ];
+            const GuideAlpha = 0.16 + 0.14 * Curve.MidMagShare;
+            for (let S = 0; S < N - 1; ++S)
+            {
+                if (RVert + 6 > MaxRVerts) break;
+                const A = Pts[S], B = Pts[S + 1];
+                const P0x = A.X * WORLD_SCALE, P0y = A.Y * WORLD_SCALE, P0z = A.Z * WORLD_SCALE;
+                const P1x = B.X * WORLD_SCALE, P1y = B.Y * WORLD_SCALE, P1z = B.Z * WORLD_SCALE;
+                let Tx = P1x - P0x, Ty = P1y - P0y, Tz = P1z - P0z;
+                const TL = Math.hypot(Tx, Ty, Tz);
+                if (TL < 1e-4) continue;
+                Tx /= TL; Ty /= TL; Tz /= TL;
+                const EndsFade = Math.sin(Math.PI * ((S + 0.5) / (N - 1)));
+                WriteRibbonSegmentQuad(P0x, P0y, P0z, P1x, P1y, P1z, Tx, Ty, Tz, Tx, Ty, Tz, GuideCol, GuideCol, 0.58, 0.60, GuideAlpha * Math.max(0.25, EndsFade));
+            }
+        }
+
+        // 2. Smooth tapered bokeh wake ribbons + optical focal/aperture heads gliding along curves
+        for (let I = 0; I < this.ActiveCount; ++I)
+        {
+            const Tracer = this.Tracers[I];
+            const VLen = Tracer.ValidLen;
+            if (VLen < 2) continue;
+
+            const ULife = Clamp(Tracer.Phase, 0, 1);
+            const LifeEnv = SmoothStep01(0, 0.11, ULife) * (1 - SmoothStep01(0.84, 1, ULife));
+            if (LifeEnv <= 0.01) continue;
+
+            const SpdGain = 0.52 + 0.48 * Clamp(Tracer.SpeedShare, 0, 1);
+            const TracerAlpha = LifeEnv * SpdGain;
+            const Tr = Tracer.Trail;
+            const { HeadRgb, MidRgb, TailRgb } = ResolveBokehColors(Viz, Tracer.SpeedShare, Tracer.Y);
+
+            const SegCount = VLen - 1;
+            const DenomSegs = Math.max(1, BOKEH_TRAIL_SEGS - 1);
+            for (let S = 0; S < SegCount; ++S)
+            {
+                if (RVert + 6 > MaxRVerts) break;
+                const K0 = S * 4;
+                const K1 = (S + 1) * 4;
+                const P0x = Tr[K0] * WORLD_SCALE, P0y = Tr[K0 + 1] * WORLD_SCALE, P0z = Tr[K0 + 2] * WORLD_SCALE;
+                const P1x = Tr[K1] * WORLD_SCALE, P1y = Tr[K1 + 1] * WORLD_SCALE, P1z = Tr[K1 + 2] * WORLD_SCALE;
+
+                const SegDx = P1x - P0x, SegDy = P1y - P0y, SegDz = P1z - P0z;
+                const SegLen = Math.hypot(SegDx, SegDy, SegDz);
+                if (SegLen < 1e-4 || SegLen > 6.5) continue;
+
+                const KPrev = Math.max(0, S - 1) * 4;
+                const KNext = Math.min(VLen - 1, S + 2) * 4;
+                const PPrevX = Tr[KPrev] * WORLD_SCALE, PPrevY = Tr[KPrev + 1] * WORLD_SCALE, PPrevZ = Tr[KPrev + 2] * WORLD_SCALE;
+                const PNextX = Tr[KNext] * WORLD_SCALE, PNextY = Tr[KNext + 1] * WORLD_SCALE, PNextZ = Tr[KNext + 2] * WORLD_SCALE;
+
+                let T0x = S === 0 ? SegDx : (P1x - PPrevX);
+                let T0y = S === 0 ? SegDy : (P1y - PPrevY);
+                let T0z = S === 0 ? SegDz : (P1z - PPrevZ);
+                const T0L = Math.hypot(T0x, T0y, T0z) || 1;
+                T0x /= T0L; T0y /= T0L; T0z /= T0L;
+
+                let T1x = S >= SegCount - 1 ? SegDx : (PNextX - P0x);
+                let T1y = S >= SegCount - 1 ? SegDy : (PNextY - P0y);
+                let T1z = S >= SegCount - 1 ? SegDz : (PNextZ - P0z);
+                const T1L = Math.hypot(T1x, T1y, T1z) || 1;
+                T1x /= T1L; T1y /= T1L; T1z /= T1L;
+
+                const U0 = S / DenomSegs;
+                const U1 = (S + 1) / DenomSegs;
+
+                const ColorAtU = (U) => {
+                    if (U < 0.48)
+                    {
+                        const T = SmoothStep01(0, 0.48, U);
+                        return [
+                            HeadRgb[0] + (MidRgb[0] - HeadRgb[0]) * T,
+                            HeadRgb[1] + (MidRgb[1] - HeadRgb[1]) * T,
+                            HeadRgb[2] + (MidRgb[2] - HeadRgb[2]) * T
+                        ];
+                    }
+                    const T = SmoothStep01(0.45, 1, U);
+                    return [
+                        MidRgb[0] + (TailRgb[0] - MidRgb[0]) * T,
+                        MidRgb[1] + (TailRgb[1] - MidRgb[1]) * T,
+                        MidRgb[2] + (TailRgb[2] - MidRgb[2]) * T
+                    ];
+                };
+                WriteRibbonSegmentQuad(P0x, P0y, P0z, P1x, P1y, P1z, T0x, T0y, T0z, T1x, T1y, T1z, ColorAtU(U0), ColorAtU(U1), U0, U1, TracerAlpha);
+            }
+
+            if (BVert + 6 > MaxBVerts) continue;
+            const Bx = Tr[0] * WORLD_SCALE;
+            const By = Tr[1] * WORLD_SCALE;
+            const Bz = Tr[2] * WORLD_SCALE;
+            const Dof = Tracer.Dof;
+            // Refined lens optics sizing: ~82% crisp bright pinpoint stars, ~18% subtle soft bokeh aperture orbs
+            const Aperture = Math.pow(Dof, 4.2);
+            const RadPx = (1.8 + Aperture * 6.4) * (0.86 + 0.28 * Tracer.SizeSeed);
+            const BeadAlphaVal = LifeEnv * (0.64 + 0.36 * Tracer.SpeedShare);
+            const QuadCorners = [[-1, -1], [1, -1], [-1, 1], [1, -1], [1, 1], [-1, 1]];
+            for (const [Cx, Cy] of QuadCorners)
+            {
+                const I3 = BVert * 3;
+                const I2 = BVert * 2;
+                BeadPos[I3] = Bx; BeadPos[I3 + 1] = By; BeadPos[I3 + 2] = Bz;
+                BeadCorner[I2] = Cx; BeadCorner[I2 + 1] = Cy;
+                BeadCol[I3] = HeadRgb[0]; BeadCol[I3 + 1] = HeadRgb[1]; BeadCol[I3 + 2] = HeadRgb[2];
+                BeadDof[BVert] = Dof;
+                BeadRad[BVert] = RadPx;
+                BeadAlpha[BVert] = BeadAlphaVal;
+                BVert++;
+            }
+        }
+
+        RibbonGeo.getAttribute('position').needsUpdate = true;
+        RibbonGeo.getAttribute('aTangent').needsUpdate = true;
+        RibbonGeo.getAttribute('aColor').needsUpdate = true;
+        RibbonGeo.getAttribute('aUv').needsUpdate = true;
+        RibbonGeo.getAttribute('aAlpha').needsUpdate = true;
+        RibbonGeo.setDrawRange(0, RVert);
+
+        BeadGeo.getAttribute('position').needsUpdate = true;
+        BeadGeo.getAttribute('aCorner').needsUpdate = true;
+        BeadGeo.getAttribute('aColor').needsUpdate = true;
+        BeadGeo.getAttribute('aDof').needsUpdate = true;
+        BeadGeo.getAttribute('aRadiusPx').needsUpdate = true;
+        BeadGeo.getAttribute('aAlpha').needsUpdate = true;
+        BeadGeo.setDrawRange(0, BVert);
+
+        return { RibbonVerts: RVert, BeadVerts: BVert };
+    }
+}
+
 export class VectorFieldGPUViewport
 {
     constructor(ContainerEl, Callbacks = {})
@@ -599,7 +1110,9 @@ export class VectorFieldGPUViewport
         this.ContextLost = false;
         this.FallbackMode = false;
         this.FallbackReason = '';
-        this.GpuInfo = { Renderer: 'WebGL2', BakeMode: 'Float16', StreamMode: 'Optical Ribbon Trails', Stages: [] };
+        this.BokehSim = new BokehStreamRibbonSim();
+        this.BokehDirty = true;
+        this.GpuInfo = { Renderer: 'WebGL2', BakeMode: 'Float16', StreamMode: 'Bokeh Stream Ribbons', Stages: [] };
 
         this.InitRendererWithFallback();
     }
@@ -694,7 +1207,9 @@ export class VectorFieldGPUViewport
             uViewportHeightPx: { value: 600 },
             uStreamThickness: { value: 0.62 },
             uStreamEmissive: { value: 1.0 },
-            uStreamOpacity: { value: 0.92 }
+            uStreamOpacity: { value: 0.92 },
+            uBokehThickness: { value: 1.0 },
+            uBokehEmissive: { value: 1.0 }
         };
 
         this.ProbeGpuCapabilities();
@@ -702,6 +1217,7 @@ export class VectorFieldGPUViewport
         this.BuildGpuSliceBakeAndDisplay();
         this.BuildGpuArrows();
         this.BuildGpuStreamlines();
+        this.BuildGpuBokehRibbons();
         this.BuildBeaconsAndProbe();
         this.BindPointerEvents(this.Renderer.domElement, false);
         this.Resize();
@@ -1198,7 +1714,7 @@ export class VectorFieldGPUViewport
                 // 2. Per-strand travelling directional comet tail + glowing colored head spark
                 const HRaw = Math.sin(Sx * 12.9898 + Sz * 78.233) * 43758.5453;
                 const StrandSeed = HRaw - Math.floor(HRaw);
-                const Speed = 0.28 + 0.22 * ((StrandSeed * 7.13) % 1) + 0.14 * Share;
+                const Speed = 0.14 + 0.12 * ((StrandSeed * 7.13) % 1) + 0.08 * Share;
                 const Cyc = ((SimTime * Speed + StrandSeed) % 1 + 1) % 1;
                 const HeadF = Cyc * 1.28;
                 const TailF = Math.max(0, HeadF - 0.28);
@@ -1228,6 +1744,153 @@ export class VectorFieldGPUViewport
                     Ctx.fillStyle = '#f8fdff';
                     Ctx.beginPath();
                     Ctx.arc(PP[0], PP[1], Math.max(0.8, 1.4 * ThickScale), 0, Math.PI * 2);
+                    Ctx.fill();
+                }
+            }
+            Ctx.restore();
+        }
+
+        // 3b. Bokeh Stream Ribbons Debug Visualizer (Software 2D/Iso Additive Canvas Mirror)
+        if (Viz.BokehRibbons && this.BokehSim?.ActiveCount > 0)
+        {
+            const ThickScale = Clamp(Viz.BokehThickness ?? 1.0, 0.25, 2.5);
+            const EmissiveScale = Clamp(Viz.BokehEmissive ?? 1.0, 0.25, 2.5);
+            const CosY = Math.cos(this.FallbackYaw), SinY = Math.sin(this.FallbackYaw);
+            const CosP = Math.cos(this.FallbackPitch), SinP = Math.sin(this.FallbackPitch);
+            const ToCss = (Rgb, A) => `rgba(${Math.round(Rgb[0] * 255)},${Math.round(Rgb[1] * 255)},${Math.round(Rgb[2] * 255)},${Clamp(A, 0, 1).toFixed(3)})`;
+
+            Ctx.save();
+            Ctx.globalCompositeOperation = 'lighter';
+            Ctx.lineCap = 'round';
+            Ctx.lineJoin = 'round';
+
+            // Subtle base streamline guide curves so vector-field architecture stays crisp everywhere
+            for (const Curve of this.BokehSim.Curves || [])
+            {
+                const Pts = Curve.Pts;
+                if (!Pts || Pts.length < 4) continue;
+                const { MidRgb, TailRgb } = ResolveBokehColors(Viz, Curve.MidMagShare, Pts[Math.floor(Pts.length * 0.5)].Y);
+                const GuideRgb = [
+                    TailRgb[0] * 0.6 + MidRgb[0] * 0.4,
+                    TailRgb[1] * 0.6 + MidRgb[1] * 0.4,
+                    TailRgb[2] * 0.6 + MidRgb[2] * 0.4
+                ];
+                Ctx.strokeStyle = ToCss(GuideRgb, Clamp((0.14 + 0.12 * Curve.MidMagShare) * EmissiveScale, 0.04, 0.36));
+                Ctx.lineWidth = Math.max(0.75, 1.35 * ThickScale);
+                Ctx.beginPath();
+                const S0 = MapPt(Pts[0].X, Pts[0].Y, Pts[0].Z);
+                Ctx.moveTo(S0[0], S0[1]);
+                for (let K = 1; K < Pts.length; ++K)
+                {
+                    const Sk = MapPt(Pts[K].X, Pts[K].Y, Pts[K].Z);
+                    Ctx.lineTo(Sk[0], Sk[1]);
+                }
+                Ctx.stroke();
+            }
+
+            const ActiveTracers = [];
+            for (let I = 0; I < this.BokehSim.ActiveCount; ++I)
+            {
+                const TrObj = this.BokehSim.Tracers[I];
+                if (TrObj.ValidLen < 2) continue;
+                const Depth = IsIso
+                    ? (TrObj.Y - PivotY) * SinP + ((TrObj.X - BaseFrame.PanX) * SinY + (TrObj.Z - BaseFrame.PanZ) * CosY) * CosP
+                    : 0;
+                ActiveTracers.push({ TrObj, Depth });
+            }
+            if (IsIso) ActiveTracers.sort((A, B) => A.Depth - B.Depth);
+
+            for (const { TrObj } of ActiveTracers)
+            {
+                const ULife = Clamp(TrObj.Phase ?? (TrObj.Age / Math.max(0.5, TrObj.Life)), 0, 1);
+                const LifeEnv = SmoothStep01(0, 0.11, ULife) * (1 - SmoothStep01(0.84, 1, ULife));
+                if (LifeEnv <= 0.015) continue;
+
+                const Alpha = Clamp(LifeEnv * (0.52 + 0.48 * TrObj.SpeedShare) * 0.68 * EmissiveScale, 0, 0.94);
+                const { HeadRgb, MidRgb, TailRgb } = ResolveBokehColors(Viz, TrObj.SpeedShare, TrObj.Y);
+                const ScrPts = [];
+                for (let K = 0; K < TrObj.ValidLen; ++K)
+                {
+                    const B4 = K * 4;
+                    ScrPts.push(MapPt(TrObj.Trail[B4], TrObj.Trail[B4 + 1], TrObj.Trail[B4 + 2]));
+                }
+
+                // Draw smooth curved tapered ribbon from head (idx 0) -> tail (idx ValidLen-1)
+                if (ScrPts.length >= 2)
+                {
+                    const TailIdx = ScrPts.length - 1;
+                    const LeadEnd = Math.min(TailIdx, Math.max(1, Math.floor(ScrPts.length * 0.48)));
+                    const BaseW = Math.max(1.0, 3.6 * ThickScale);
+
+                    // Outer mist teal curve
+                    Ctx.strokeStyle = ToCss(MidRgb, Alpha * 0.66);
+                    Ctx.lineWidth = BaseW;
+                    Ctx.beginPath();
+                    Ctx.moveTo(ScrPts[0][0], ScrPts[0][1]);
+                    for (let K = 1; K < TailIdx; ++K)
+                    {
+                        const Mx = 0.5 * (ScrPts[K][0] + ScrPts[K + 1][0]);
+                        const My = 0.5 * (ScrPts[K][1] + ScrPts[K + 1][1]);
+                        Ctx.quadraticCurveTo(ScrPts[K][0], ScrPts[K][1], Mx, My);
+                    }
+                    Ctx.lineTo(ScrPts[TailIdx][0], ScrPts[TailIdx][1]);
+                    Ctx.stroke();
+
+                    // Tail tint fade overlay
+                    const MidStart = Math.max(1, Math.floor(ScrPts.length * 0.52));
+                    if (TailIdx > MidStart)
+                    {
+                        Ctx.strokeStyle = ToCss(TailRgb, Alpha * 0.36);
+                        Ctx.lineWidth = Math.max(0.65, BaseW * 0.42);
+                        Ctx.beginPath();
+                        Ctx.moveTo(ScrPts[MidStart][0], ScrPts[MidStart][1]);
+                        for (let K = MidStart + 1; K <= TailIdx; ++K) Ctx.lineTo(ScrPts[K][0], ScrPts[K][1]);
+                        Ctx.stroke();
+                    }
+
+                    // Bright leading ribbon spine behind bokeh bead
+                    Ctx.strokeStyle = ToCss(HeadRgb, Alpha * 0.80);
+                    Ctx.lineWidth = Math.max(0.6, BaseW * 0.48);
+                    Ctx.beginPath();
+                    Ctx.moveTo(ScrPts[0][0], ScrPts[0][1]);
+                    for (let K = 1; K <= LeadEnd; ++K) Ctx.lineTo(ScrPts[K][0], ScrPts[K][1]);
+                    Ctx.stroke();
+                }
+
+                // Luminous bokeh glow bead at head (sharp focal pinpoint OR delicate aperture disc)
+                const H = ScrPts[0];
+                const Dof = TrObj.Dof;
+                const Aperture = Math.pow(Dof, 4.2);
+                const Rad = (1.8 + Aperture * 6.4) * (0.86 + 0.28 * TrObj.SizeSeed) * ThickScale;
+                const BeadA = Clamp(LifeEnv * (0.64 + 0.36 * TrObj.SpeedShare) * EmissiveScale, 0, 1);
+
+                if (Aperture > 0.32 && Ctx.createRadialGradient)
+                {
+                    const Grad = Ctx.createRadialGradient(H[0], H[1], 0, H[0], H[1], Rad);
+                    Grad.addColorStop(0.0, ToCss(HeadRgb, BeadA * 0.52));
+                    Grad.addColorStop(0.72, ToCss(HeadRgb, BeadA * 0.24));
+                    Grad.addColorStop(0.90, ToCss(HeadRgb, BeadA * 0.30));
+                    Grad.addColorStop(1.0, ToCss(HeadRgb, 0));
+                    Ctx.fillStyle = Grad;
+                    Ctx.beginPath();
+                    Ctx.arc(H[0], H[1], Rad, 0, Math.PI * 2);
+                    Ctx.fill();
+                }
+                else
+                {
+                    if (Rad > 1.6 && Ctx.createRadialGradient)
+                    {
+                        const Halo = Ctx.createRadialGradient(H[0], H[1], 0, H[0], H[1], Rad * 2.2);
+                        Halo.addColorStop(0.0, ToCss(HeadRgb, BeadA * 0.62));
+                        Halo.addColorStop(1.0, ToCss(HeadRgb, 0));
+                        Ctx.fillStyle = Halo;
+                        Ctx.beginPath();
+                        Ctx.arc(H[0], H[1], Rad * 2.2, 0, Math.PI * 2);
+                        Ctx.fill();
+                    }
+                    Ctx.fillStyle = `rgba(255,255,255,${Math.min(1, BeadA * 0.96).toFixed(3)})`;
+                    Ctx.beginPath();
+                    Ctx.arc(H[0], H[1], Math.max(0.9, Rad * 0.56), 0, Math.PI * 2);
                     Ctx.fill();
                 }
             }
@@ -1648,6 +2311,68 @@ export class VectorFieldGPUViewport
         this.ThreeScene.add(this.StreamMesh);
     }
 
+    BuildGpuBokehRibbons()
+    {
+        const MaxRibVerts = BOKEH_MAX_TRACERS * (BOKEH_TRAIL_SEGS - 1) * 6 + 64000;
+        const RibGeo = new THREE.BufferGeometry();
+        RibGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(MaxRibVerts * 3), 3));
+        RibGeo.setAttribute('aTangent', new THREE.BufferAttribute(new Float32Array(MaxRibVerts * 3), 3));
+        RibGeo.setAttribute('aColor', new THREE.BufferAttribute(new Float32Array(MaxRibVerts * 3), 3));
+        RibGeo.setAttribute('aUv', new THREE.BufferAttribute(new Float32Array(MaxRibVerts * 2), 2));
+        RibGeo.setAttribute('aAlpha', new THREE.BufferAttribute(new Float32Array(MaxRibVerts), 1));
+        RibGeo.setDrawRange(0, 0);
+
+        this.BokehRibbonMat = new THREE.ShaderMaterial({
+            glslVersion: THREE.GLSL3,
+            vertexShader: BOKEH_RIBBON_VERT,
+            fragmentShader: BOKEH_RIBBON_FRAG,
+            uniforms: {
+                uViewportHeightPx: this.SharedUniforms.uViewportHeightPx,
+                uBokehThickness: this.SharedUniforms.uBokehThickness,
+                uBokehEmissive: this.SharedUniforms.uBokehEmissive
+            },
+            transparent: true,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            side: THREE.DoubleSide
+        });
+        this.BokehRibbonGeo = RibGeo;
+        this.BokehRibbonMesh = new THREE.Mesh(RibGeo, this.BokehRibbonMat);
+        this.BokehRibbonMesh.frustumCulled = false;
+        this.BokehRibbonMesh.renderOrder = 5;
+        this.ThreeScene.add(this.BokehRibbonMesh);
+
+        const MaxBeadVerts = BOKEH_MAX_TRACERS * 6;
+        const BeadGeo = new THREE.BufferGeometry();
+        BeadGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(MaxBeadVerts * 3), 3));
+        BeadGeo.setAttribute('aCorner', new THREE.BufferAttribute(new Float32Array(MaxBeadVerts * 2), 2));
+        BeadGeo.setAttribute('aColor', new THREE.BufferAttribute(new Float32Array(MaxBeadVerts * 3), 3));
+        BeadGeo.setAttribute('aDof', new THREE.BufferAttribute(new Float32Array(MaxBeadVerts), 1));
+        BeadGeo.setAttribute('aRadiusPx', new THREE.BufferAttribute(new Float32Array(MaxBeadVerts), 1));
+        BeadGeo.setAttribute('aAlpha', new THREE.BufferAttribute(new Float32Array(MaxBeadVerts), 1));
+        BeadGeo.setDrawRange(0, 0);
+
+        this.BokehBeadMat = new THREE.ShaderMaterial({
+            glslVersion: THREE.GLSL3,
+            vertexShader: BOKEH_BEAD_VERT,
+            fragmentShader: BOKEH_BEAD_FRAG,
+            uniforms: {
+                uViewportHeightPx: this.SharedUniforms.uViewportHeightPx,
+                uBokehThickness: this.SharedUniforms.uBokehThickness,
+                uBokehEmissive: this.SharedUniforms.uBokehEmissive
+            },
+            transparent: true,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            side: THREE.DoubleSide
+        });
+        this.BokehBeadGeo = BeadGeo;
+        this.BokehBeadMesh = new THREE.Mesh(BeadGeo, this.BokehBeadMat);
+        this.BokehBeadMesh.frustumCulled = false;
+        this.BokehBeadMesh.renderOrder = 6;
+        this.ThreeScene.add(this.BokehBeadMesh);
+    }
+
     BuildBeaconsAndProbe()
     {
         this.BoundsGroup = new THREE.Group();
@@ -1865,7 +2590,7 @@ export class VectorFieldGPUViewport
         this.UniformsDirty = true;
         this.BakeDirty = true;
         this.FallbackHeatDirty = true;
-        this.MarkStreamlinesDirty();
+        this.MarkStreamlinesDirty(false);
 
         if (!this.FallbackMode)
         {
@@ -1897,7 +2622,7 @@ export class VectorFieldGPUViewport
         this.UniformsDirty = true;
         this.BakeDirty = true;
         this.FallbackHeatDirty = true;
-        this.MarkStreamlinesDirty();
+        this.MarkStreamlinesDirty(false);
 
         if (!this.FallbackMode)
         {
@@ -2065,6 +2790,8 @@ export class VectorFieldGPUViewport
             else if (Kind === 'stream')
             {
                 TempScene.add(new THREE.Mesh(this.StreamMesh.geometry, this.StreamMat));
+                TempScene.add(new THREE.Mesh(this.BokehRibbonMesh.geometry, this.BokehRibbonMat));
+                TempScene.add(new THREE.Mesh(this.BokehBeadMesh.geometry, this.BokehBeadMat));
                 this.Renderer.compile(TempScene, this.PerspCamera);
             }
             else if (MeshOrMat.isScene)
@@ -2195,9 +2922,11 @@ export class VectorFieldGPUViewport
         this.NotifyZoomMayHaveChanged();
     }
 
-    MarkStreamlinesDirty()
+    MarkStreamlinesDirty(ForceBokehReseed = true)
     {
         this.StreamDirty = true;
+        if (ForceBokehReseed) this.BokehDirty = true;
+        else this.BokehCurveRefreshNeeded = true;
         if (this.FallbackStreamPanes)
         {
             this.FallbackStreamPanes[0].Key = '';
@@ -2229,6 +2958,7 @@ export class VectorFieldGPUViewport
         if (this.FallbackMode || !this.SceneState) return;
         if (!Force && !this.UniformsDirty && Math.abs(SimTime - this.LastSyncTime) < 1e-4) return;
         this.LastSyncTime = SimTime;
+        if (Force || this.UniformsDirty) this.BokehColorsDirty = true;
         this.UniformsDirty = false;
 
         const Pack = PackForcesForGPU(this.SceneState);
@@ -2257,9 +2987,13 @@ export class VectorFieldGPUViewport
         this.SharedUniforms.uStreamThickness.value = Clamp(Viz.StreamThickness ?? 0.62, 0.2, 2.5);
         this.SharedUniforms.uStreamEmissive.value = Clamp(Viz.StreamEmissive ?? 1.0, 0.15, 3.0);
         this.SharedUniforms.uStreamOpacity.value = Clamp(Viz.StreamOpacity ?? 0.92, 0.05, 1.0);
+        this.SharedUniforms.uBokehThickness.value = Clamp(Viz.BokehThickness ?? 1.0, 0.25, 2.5);
+        this.SharedUniforms.uBokehEmissive.value = Clamp(Viz.BokehEmissive ?? 1.0, 0.25, 2.5);
 
         this.ApplySliceVisibilityForPane(this.ViewMode !== '2d');
         if (this.StreamMesh) this.StreamMesh.visible = Boolean(Viz.Streamlines);
+        if (this.BokehRibbonMesh) this.BokehRibbonMesh.visible = Boolean(Viz.BokehRibbons);
+        if (this.BokehBeadMesh) this.BokehBeadMesh.visible = Boolean(Viz.BokehRibbons);
         this.BoundsGroup.visible = Boolean(Viz.Bounds);
         this.BakeDirty = true;
     }
@@ -2549,6 +3283,40 @@ export class VectorFieldGPUViewport
         this.StreamMesh.geometry = NextGeo;
     }
 
+    UpdateBokehRibbons(SimTime, Dt, StepPhysics = true)
+    {
+        if (!this.SceneState?.Viz?.BokehRibbons) return;
+        const Viz = this.SceneState.Viz;
+        const Is3D = this.ViewMode !== '2d';
+        const ActiveAxes = Is3D ? GetActiveSliceAxes(Viz) : [Viz.SliceAxis || GetActiveSliceAxes(Viz)[0]];
+        const Bounds = {
+            Is3D,
+            ActiveAxes,
+            SliceAxis: Viz.SliceAxis || ActiveAxes[0] || 'XZ',
+            SliceHeight: Viz.SliceHeight ?? 16,
+            HalfM: this.FallbackMode ? Math.max(85, DEFAULT_HALF_M / Math.max(0.25, this.FallbackZoom || 1)) : this.ActiveBakeHalfM,
+            Center: this.FallbackMode ? (this.FallbackCenter || [0, 0, 48]) : (this.ActiveBakeCenter || [0, 0, 48])
+        };
+
+        const ForceReseed = Boolean(this.BokehDirty);
+        this.BokehDirty = false;
+        const Reseeded = this.BokehSim.EnsureSynced(this.SceneState, Bounds, SimTime, ForceReseed);
+        let CurvesRefreshed = false;
+        if (this.BokehCurveRefreshNeeded && !Reseeded)
+        {
+            this.BokehCurveRefreshNeeded = false;
+            CurvesRefreshed = true;
+            this.BokehSim.RefreshCurvesKeepTracers(this.SceneState, Bounds, SimTime);
+        }
+        if (StepPhysics) this.BokehSim.Step(this.SceneState, Bounds, SimTime, Dt);
+
+        if (!this.FallbackMode && this.BokehRibbonGeo && this.BokehBeadGeo && (StepPhysics || Reseeded || ForceReseed || CurvesRefreshed || this.BokehColorsDirty || this.BokehRibbonGeo.drawRange.count === 0))
+        {
+            this.BokehColorsDirty = false;
+            this.BokehSim.FillWebGLBuffers(this.SceneState, this.BokehRibbonGeo, this.BokehBeadGeo);
+        }
+    }
+
     UpdateWaveRings(SimTime)
     {
         if (!this.WaveRings) return;
@@ -2629,7 +3397,7 @@ export class VectorFieldGPUViewport
         this.OrthoCamera.updateProjectionMatrix();
     }
 
-    RenderFrame(SimTime, Dt)
+    RenderFrame(SimTime, Dt, StepPhysics = true)
     {
         this.LastSimTime = SimTime;
         const Now = performance.now();
@@ -2639,6 +3407,7 @@ export class VectorFieldGPUViewport
 
         if (this.FallbackMode)
         {
+            this.UpdateBokehRibbons(SimTime, Dt, StepPhysics);
             const Ctx = this.FallbackCtx;
             const W = this.Width || 800, H = this.Height || 500;
             const DPR = Math.min(window.devicePixelRatio || 1, 2);
@@ -2664,6 +3433,7 @@ export class VectorFieldGPUViewport
         this.SyncUniforms(SimTime, false);
         this.BakeSliceFieldGPU(SimTime);
         this.RebuildStreamlinesIfDirty(SimTime);
+        this.UpdateBokehRibbons(SimTime, Dt, StepPhysics);
         this.UpdateWaveRings(SimTime);
         this.Controls.update();
 

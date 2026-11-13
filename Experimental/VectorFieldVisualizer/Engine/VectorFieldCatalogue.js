@@ -1688,7 +1688,8 @@ export function ConstructScenario(Key = 'lab')
 {
     const BaseViz = {
         Vectors: true,
-        Streamlines: true,
+        Streamlines: false,
+        BokehRibbons: true,
         Heatmap: true,
         Bounds: true,
         SliceAxis: 'XZ',
@@ -1706,6 +1707,11 @@ export function ConstructScenario(Key = 'lab')
         StreamOpacity: 0.92,
         StreamResolution: 28,
         StreamLineCount: 220,
+        BokehCount: 320,
+        BokehSpeed: 0.45,
+        BokehThickness: 1.0,
+        BokehEmissive: 1.0,
+        BokehPalette: 'BokehTeal',
         QuietCutoff: 0.25,
         Opacity: 0.58,
         FixedMax: 34,

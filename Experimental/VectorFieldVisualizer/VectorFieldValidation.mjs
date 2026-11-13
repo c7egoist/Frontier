@@ -39,15 +39,23 @@ import {
     SLICE_BAKE_FRAG,
     SLICE_DISPLAY_FRAG,
     STREAMLINE_FRAG,
-    STREAMLINE_VERT
+    STREAMLINE_VERT,
+    BOKEH_RIBBON_VERT,
+    BOKEH_RIBBON_FRAG,
+    BOKEH_BEAD_VERT,
+    BOKEH_BEAD_FRAG
 } from './Engine/VectorFieldShaders.js';
 import {
+    BOKEH_MAX_TRACERS,
+    BOKEH_TRAIL_SEGS,
+    BokehStreamRibbonSim,
     BuildStreamlineRibbonGeometry,
     CollectAdaptiveStreamlineSeedsRect,
     CollectMultiAxisStreamlineSeeds,
     ComputeFallbackPlaneFrame,
     ComputeFallbackSliceFrame,
     ProjectRayToAxisParam,
+    ResolveBokehColors,
     ResolveStreamlinePointColor
 } from './Engine/VectorFieldGPUViewport.js';
 import { GetForceModelSvgIcon } from './Engine/ForceIcons.js';
@@ -585,4 +593,66 @@ Suite('Play / Curve / Motion Path Animation (Line A->B, 3D Spline, Orbit, Loop m
     for (const Tok of ['RebuildMotionPaths', 'SyncAnimatedSourcesFrame', 'SelectedWaypointIdx', 'WaypointHandles']) assert.ok(VpSrc.includes(Tok), `Viewport missing ${Tok}`);
 });
 
-console.log(`\nAll ${Passed}/17 suites PASSED.`);
+Suite('Bokeh Stream Ribbons debug visualizer (tapered wakes + DOF aperture bokeh beads across 3D/2D GPU & fallback)', () => {
+    // 1. Shaders expose BOKEH_RIBBON_* and BOKEH_BEAD_* GLSL3 kernels with aperture DOF & smooth ribbon fade
+    assert.ok(BOKEH_RIBBON_VERT.includes('uBokehThickness') && BOKEH_RIBBON_VERT.includes('aTangent'));
+    assert.ok(BOKEH_RIBBON_FRAG.includes('tailFade') && BOKEH_RIBBON_FRAG.includes('uBokehEmissive'));
+    assert.ok(BOKEH_BEAD_VERT.includes('aDof') && BOKEH_BEAD_VERT.includes('aRadiusPx'));
+    assert.ok(BOKEH_BEAD_FRAG.includes('sharpCore') && BOKEH_BEAD_FRAG.includes('bokehDisc') && BOKEH_BEAD_FRAG.includes('rimRing'));
+
+    // 2. Default scenarios enable BokehRibbons debug visualizer at calm speed while keeping RK4 Streamlines toggleable
+    const Lab = ConstructScenario('lab');
+    assert.equal(Lab.Viz.BokehRibbons, true);
+    assert.equal(Lab.Viz.BokehPalette, 'BokehTeal');
+    assert.ok(Lab.Viz.BokehSpeed > 0 && Lab.Viz.BokehSpeed <= 0.6, `Default BokehSpeed stays calm for particle tracking (${Lab.Viz.BokehSpeed})`);
+    assert.ok(Lab.Viz.BokehCount >= 200 && Lab.Viz.BokehCount <= BOKEH_MAX_TRACERS);
+
+    // 3. Sim spawns pre-warmed curved trails with heterogeneous sharp+bokeh DOF values and advances cleanly
+    const Sim = new BokehStreamRibbonSim(4242);
+    const Bounds = { Is3D: true, ActiveAxes: ['XZ'], SliceAxis: 'XZ', SliceHeight: 16, HalfM: 460, Center: [0, 0, 48] };
+    Sim.EnsureSynced(Lab, Bounds, 1.0, true);
+    assert.equal(Sim.ActiveCount, Lab.Viz.BokehCount);
+
+    let CurvedCount = 0;
+    let SharpCount = 0;
+    let BokehDiscCount = 0;
+    let FiniteTrails = 0;
+    for (let I = 0; I < Sim.ActiveCount; ++I)
+    {
+        const Tr = Sim.Tracers[I];
+        assert.ok(Tr.ValidLen >= 10 && Tr.ValidLen <= BOKEH_TRAIL_SEGS, `Prewarmed ribbon must have multi-segment trail (${Tr.ValidLen})`);
+        if (Tr.Dof <= 0.62) SharpCount++; else BokehDiscCount++;
+        const Dx = Tr.Trail[0] - Tr.Trail[(Tr.ValidLen - 1) * 4];
+        const Dz = Tr.Trail[2] - Tr.Trail[(Tr.ValidLen - 1) * 4 + 2];
+        if (Math.hypot(Dx, Dz) > 1.0) CurvedCount++;
+        if (Number.isFinite(Tr.X) && Number.isFinite(Tr.Y) && Number.isFinite(Tr.Z)) FiniteTrails++;
+    }
+    assert.equal(FiniteTrails, Sim.ActiveCount);
+    assert.ok(CurvedCount > Sim.ActiveCount * 0.65, `Pre-warm produces extended ribbons on active forces (${CurvedCount}/${Sim.ActiveCount})`);
+    assert.ok(SharpCount > 50 && BokehDiscCount > 50, `Mixed sharp (${SharpCount}) and creamy bokeh (${BokehDiscCount}) beads`);
+
+    // 4. Live stepping advects ribbons along Composite field continuously without NaNs
+    const SampleBefore = [Sim.Tracers[0].X, Sim.Tracers[0].Y, Sim.Tracers[0].Z];
+    for (let Step = 0; Step < 20; ++Step) Sim.Step(Lab, Bounds, 1.0 + Step * 0.03, 0.03);
+    const Moved = Math.hypot(Sim.Tracers[0].X - SampleBefore[0], Sim.Tracers[0].Y - SampleBefore[1], Sim.Tracers[0].Z - SampleBefore[2]);
+    assert.ok(Moved > 0.5 || Sim.Tracers[0].Age < 0.8, 'Stepping advances tracer particles along the composite force field');
+
+    // 5. Bokeh palette modes resolve distinct Mist Teal vs FollowStreams hues
+    const TealCols = ResolveBokehColors({ BokehPalette: 'BokehTeal' }, 0.7, 20);
+    assert.ok(TealCols.HeadRgb[2] >= TealCols.HeadRgb[0] && TealCols.MidRgb[1] > TealCols.MidRgb[0]);
+    const StreamCols = ResolveBokehColors({ BokehPalette: 'FollowStreams', StreamColorMode: 'CustomSingle', StreamSingleColor: '#ff5533', Colormap: 'Engineering' }, 0.7, 20);
+    assert.ok(StreamCols.MidRgb[0] > StreamCols.MidRgb[2] * 2.0, 'FollowStreams honors custom streamline palette');
+
+    // 6. UI HTML & JS wire the Bokeh debug visualizer layer & style controls
+    const HtmlSrc = fs.readFileSync('Experimental/VectorFieldVisualizer/index.html', 'utf8');
+    const VizSrc = fs.readFileSync('Experimental/VectorFieldVisualizer/VectorFieldVisualizer.js', 'utf8');
+    const VpSrc = fs.readFileSync('Experimental/VectorFieldVisualizer/Engine/VectorFieldGPUViewport.js', 'utf8');
+    assert.ok(HtmlSrc.includes('data-layer="BokehRibbons"') && HtmlSrc.includes('FooterStreamMode'));
+    for (const Tok of ['BokehRibbons', 'BokehPalette', 'BokehSpeed', 'BokehCount', 'BokehThickness', 'BokehEmissive'])
+    {
+        assert.ok(VizSrc.includes(Tok), `Visualizer missing bokeh control ${Tok}`);
+    }
+    assert.ok(VpSrc.includes('BuildGpuBokehRibbons') && VpSrc.includes('UpdateBokehRibbons') && VpSrc.includes('Bokeh Stream Ribbons Debug Visualizer'));
+});
+
+console.log(`\nAll ${Passed}/18 suites PASSED.`);
