@@ -498,6 +498,46 @@ function EvalDynStrandCPU(P, Slot, Cap, DynMode, Time, WindT, FieldScene, Prepar
         const PB = [PA[0] + Math.cos(Az) * RadR + WindG[0] * 0.55, Math.max(0.18, PA[1] + TopY - Sag * FLen * 0.18), PA[2] + Math.sin(Az) * RadR + WindG[2] * 0.55];
         return { visible: true, kind: 6, pA: PA, pB: PB, sag: -Sag * FLen * 0.32, windScale: 0.48 / Stiff, radius: (P.sizeStart || 0.16) * (0.85 + 0.3 * WebHash(Slot * 29, 4)) };
     }
+    if (DynMode === 8)
+    {
+        const NStalks = Math.max(10, Math.min(Rows, Math.floor(Cap / 2)));
+        const StalkIdx = Slot % NStalks;
+        const IsSide = Slot >= NStalks;
+        const Sdx = StalkIdx * 41 + 19;
+        const Gx = (WebHash(Sdx, 1) * 2 - 1) * Ext[0];
+        const Gz = (WebHash(Sdx, 2) * 2 - 1) * Ext[2];
+        const KelpH = Hgt * (0.62 + 0.46 * WebHash(Sdx, 3));
+        if (!IsSide)
+        {
+            const LeanX = (WebHash(Sdx, 4) - 0.5) * 0.25;
+            const LeanZ = (WebHash(Sdx, 5) - 0.5) * 0.25;
+            const PA = [Org[0] + Gx, Math.max(0.02, Org[1]), Org[2] + Gz];
+            const Wg = SwayFn([PA[0], PA[1] + KelpH, PA[2]], 0.85 / Stiff, Amp, Freq);
+            const PB = [PA[0] + LeanX + Wg[0] * 0.55, KelpH, PA[2] + LeanZ + Wg[2] * 0.55];
+            return { visible: true, kind: 8, role: 'kelpStalk', pA: PA, pB: PB, sag: -Sag * 0.22, windScale: 0.9 / Stiff, radius: (P.sizeStart || 0.16) * 0.65, hasBladder: true };
+        }
+        const HU = 0.24 + 0.70 * WebHash(Slot * 23, 7);
+        const FAz = WebHash(Slot * 23, 8) * Math.PI * 2;
+        const FLen = 0.34 + 0.36 * WebHash(Slot * 23, 9);
+        const PA = [Org[0] + Gx, Math.max(0.08, Org[1] + KelpH * HU), Org[2] + Gz];
+        const PB = [PA[0] + Math.cos(FAz) * FLen, PA[1] + FLen * 0.4, PA[2] + Math.sin(FAz) * FLen];
+        return { visible: true, kind: 8, role: 'kelpFrond', pA: PA, pB: PB, sag: -0.06, windScale: 1.05 / Stiff, radius: (P.sizeStart || 0.16) * 0.95 };
+    }
+    if (DynMode === 9)
+    {
+        const Cluster = Slot % 3;
+        const CPhi = Cluster * 2.0943951 + 0.4;
+        const CRad = Cluster === 0 ? 0 : 0.55 * Math.max(0.4, P.radius || 1.4);
+        const MX = Org[0] + Math.cos(CPhi) * CRad, MY = Org[1] + 0.08, MZ = Org[2] + Math.sin(CPhi) * CRad;
+        const RingR = 0.05 + Math.sqrt(WebHash(Slot * 31, 1)) * (Cluster === 0 ? 0.34 : 0.24) * Math.max(0.6, (P.radius || 1.4) * 0.65);
+        const Az = Slot * 2.3999632 + WebHash(Slot * 31, 2) * 0.4;
+        const TLen = Hgt * (0.65 + 0.48 * WebHash(Slot * 31, 3));
+        const Flare = RingR * 1.45 + 0.42 * TLen;
+        const PA = [MX + Math.cos(Az) * RingR, MY + 0.06 + (0.28 - Math.min(RingR, 0.25)) * 0.5, MZ + Math.sin(Az) * RingR];
+        const Wg = SwayFn([MX + Math.cos(Az) * Flare, MY + TLen, MZ + Math.sin(Az) * Flare], 0.95 / Stiff, Amp, Freq);
+        const PB = [MX + Math.cos(Az) * Flare + Wg[0] * 0.45, MY + TLen, MZ + Math.sin(Az) * Flare + Wg[2] * 0.45];
+        return { visible: true, kind: 9, pA: PA, pB: PB, sag: -Math.max(0.14, Sag * 0.65), windScale: 1.0 / Stiff, radius: (P.sizeStart || 0.07) * 0.92, hasBioTip: true };
+    }
     const NLimbs = Math.max(8, Math.min(28, Rows));
     const TrunkBase = [Org[0], Math.max(0, Org[1]), Org[2]];
     const TrunkTop = [Org[0] + 0.08, TrunkBase[1] + Hgt * 0.62, Org[2] - 0.05];
@@ -709,6 +749,197 @@ function EvalGridParticleCPU(P, Slot, Cap, T, BallX, BallY, BallZ, BallR, FieldS
         size: LatSize, cubeH: CubeH, gShape: GShape, w: W, col: Col,
         visibleStrand: true, slotIdx: Slot, age: 0.1, life: 1e9, seed: Slot * 13.7
     };
+}
+
+export function EvalCarPoseCPU(Time, Org, TrackR, CarSpd)
+{
+    const R = Math.max(1.1, TrackR || 3.15);
+    const Spd = Math.max(0.2, CarSpd || 4.2);
+    const Ph = Time * (Spd / Math.max(1.0, R));
+    const Eps = 0.012;
+    const X0 = Math.sin(Ph) * R * 1.18, Z0 = Math.sin(Ph * 2.0) * R * 0.56;
+    const X1 = Math.sin(Ph + Eps) * R * 1.18, Z1 = Math.sin((Ph + Eps) * 2.0) * R * 0.56;
+    const Dx = X1 - X0, Dz = Z1 - Z0;
+    const L = Math.hypot(Dx, Dz) || 1;
+    const Fwd = [Dx / L, 0, Dz / L];
+    const Right = [-Fwd[2], 0, Fwd[0]];
+    const Pos = [Org[0] + X0, Org[1] + 0.02, Org[2] + Z0];
+    const Wheels = [];
+    for (let W = 0; W < 4; W++)
+    {
+        const Xs = (W & 1) ? 0.92 : -0.92;
+        const Zs = W >= 2 ? 0.58 : -0.58;
+        Wheels.push([Pos[0] + Fwd[0] * Xs + Right[0] * Zs, Pos[1], Pos[2] + Fwd[2] * Xs + Right[2] * Zs]);
+    }
+    return { pos: Pos, fwd: Fwd, right: Right, yaw: Math.atan2(Fwd[0], Fwd[2]), wheels: Wheels };
+}
+
+export function EvalFerroMagnetCPU(Time, Org, PoolR, MagSpd, FerroMode)
+{
+    const Ph = Time * (MagSpd || 1.35);
+    const ROrb = (PoolR || 2.0) * (FerroMode === 2 ? 1.08 : 0.62);
+    const HBase = FerroMode === 2 ? 0.35 * Math.sin(Ph * 1.4) : 0.55 + 0.18 * Math.sin(Ph * 1.7);
+    return [Org[0] + Math.cos(Ph) * ROrb, Org[1] + HBase, Org[2] + Math.sin(Ph * 1.25) * ROrb * 0.85];
+}
+
+function EvalFerroFluidCPU(P, Count, Time, BallX, BallY, BallZ, BallR, FieldScene, Prepared, Solo)
+{
+    const FerroMode = Math.max(1, Math.min(2, P.ferroMode | 0));
+    const PoolR = Math.max(0.45, P.radius || 2.0);
+    const BodyY = Math.max(0.25, P.boxHalf?.[1] || 1.0);
+    const MagSpd = P.ferroMagnetSpeed ?? 1.35;
+    const Freq = Math.max(0.2, P.curlFreq ?? 1.25);
+    const Amp = Math.max(0.1, P.curlAmp ?? 1.15);
+    const Org = P.origin || [0, 0, 0];
+    const MPos = EvalFerroMagnetCPU(Time, Org, PoolR, MagSpd, FerroMode);
+    const Out = [];
+    for (let I = 0; I < Count; I++)
+    {
+        let Ax, Ay, Az, Nx, Ny, Nz;
+        if (FerroMode === 2)
+        {
+            const K = I + 0.5;
+            const Y01 = 1 - (2 * K) / Count;
+            const Rxz = Math.sqrt(Math.max(0, 1 - Y01 * Y01));
+            const Phi = I * 2.3999632;
+            Nx = Math.cos(Phi) * Rxz; Ny = Y01; Nz = Math.sin(Phi) * Rxz;
+            const Rb = Math.max(0.32, PoolR * 0.58);
+            Ax = Org[0] + Nx * Rb; Ay = Org[1] + Ny * Math.max(0.30, BodyY * 0.58); Az = Org[2] + Nz * Rb;
+        }
+        else
+        {
+            const U = Math.sqrt((I + 0.5) / Count);
+            const Phi = I * 2.3999632;
+            const Rad = U * PoolR;
+            Ax = Org[0] + Math.cos(Phi) * Rad;
+            Ay = Org[1] + 0.03 + 0.02 * (1 - U * U);
+            Az = Org[2] + Math.sin(Phi) * Rad;
+            Nx = 0; Ny = 1; Nz = 0;
+        }
+        let Bx = MPos[0] - Ax, By = MPos[1] - Ay, Bz = MPos[2] - Az;
+        const Dm = Math.max(0.22, Math.hypot(Bx, By, Bz));
+        let Str = 1.45 / (0.28 + Dm * Dm * 0.85);
+        let Px = Bx / Dm, Py = By / Dm, Pz = Bz / Dm;
+        if (BallR > 0.04)
+        {
+            const Vx = BallX - Ax, Vy = BallY - Ay, Vz = BallZ - Az;
+            const Db = Math.max(0.20, Math.hypot(Vx, Vy, Vz));
+            const Bp = (BallR * 2.8) / (0.18 + Db * Db * 0.65);
+            const Dx = Px * Str + (Vx / Db) * Bp, Dy = Py * Str + (Vy / Db) * Bp, Dz = Pz * Str + (Vz / Db) * Bp;
+            const Dl = Math.hypot(Dx, Dy, Dz) || 1;
+            Px = Dx / Dl; Py = Dy / Dl; Pz = Dz / Dl;
+            Str = Math.max(Str, Bp);
+        }
+        if (FieldScene && Prepared)
+        {
+            const Fv = EvaluateForceFields(FieldScene, Prepared, [Ax, Ay, Az], [0, 0, 0], { time: Time, solo: Solo });
+            const Fm = Math.hypot(Fv.accel[0], Fv.accel[1], Fv.accel[2]);
+            if (Fm > 0.05)
+            {
+                const Dx = Px * Str + (Fv.accel[0] / Fm) * (Fm * 0.25);
+                const Dy = Py * Str + (Fv.accel[1] / Fm) * (Fm * 0.25);
+                const Dz = Pz * Str + (Fv.accel[2] / Fm) * (Fm * 0.25);
+                const Dl = Math.hypot(Dx, Dy, Dz) || 1;
+                Px = Dx / Dl; Py = Dy / Dl; Pz = Dz / Dl;
+                Str = Math.min(2.4, Str + Fm * 0.14);
+            }
+        }
+        const HexA = Math.sin(Ax * (6.2 * Freq) + Time * 0.4) * Math.sin(Az * (6.2 * Freq) - Time * 0.35);
+        const HexB = Math.cos((Ax * 0.5 + Az * 0.866) * (6.8 * Freq));
+        const Crest = Math.pow(Math.max(0, Math.min(1, 0.48 + 0.36 * HexA + 0.28 * HexB)), 1.35);
+        const HSpike = Math.max(0.04, Math.min(0.95, (0.12 + 0.88 * Str * Amp * 0.42) * Crest));
+        const Lean = Math.min(0.78, Math.max(0, Str * 0.58));
+        let Lx = Nx * (1 - Lean) + Px * Lean, Ly = Ny * (1 - Lean) + Py * Lean, Lz = Nz * (1 - Lean) + Pz * Lean;
+        const Ll = Math.hypot(Lx, Ly, Lz) || 1;
+        Lx /= Ll; Ly /= Ll; Lz /= Ll;
+        Out.push({
+            x: Ax, y: Ay, z: Az,
+            tx: Ax + Lx * HSpike, ty: Ay + Ly * HSpike, tz: Az + Lz * HSpike,
+            mx: Ax + Lx * HSpike * 0.52 + Nx * HSpike * 0.12, my: Ay + Ly * HSpike * 0.52 + Ny * HSpike * 0.12, mz: Az + Lz * HSpike * 0.52 + Nz * HSpike * 0.12,
+            wBase: Math.max(0.015, (P.sizeStart || 0.08) * (P.sizeScale || 1) * (0.48 + 0.68 * Crest)),
+            str: Str, crest: Crest, visibleStrand: true
+        });
+    }
+    return Out;
+}
+
+function EvalCrackSlabsCPU(P, Cap, Time, HitX, HitZ, HitT)
+{
+    const Org = P.origin || [0, 0, 0];
+    const Ex = Math.max(0.65, P.boxHalf?.[0] || 2.0), Ey = Math.max(0.06, P.boxHalf?.[1] || 0.14), Ez = Math.max(0.65, P.boxHalf?.[2] || 2.0);
+    const CrackMode = Math.max(1, Math.min(2, P.crackMode | 0));
+    const Side = Math.max(6, Math.round(Math.sqrt(Math.max(64, Cap * 0.72))));
+    const SlabCap = Math.min(Cap, Side * Side);
+    const CSpd = Math.max(0.05, P.crackSpeed ?? 2.6);
+    const CDepth = Math.max(0.05, P.crackDepth ?? 0.44);
+    const Freq = Math.max(0.3, P.curlFreq ?? 1.15);
+    const HasHit = HitT !== undefined && HitT >= 0;
+    const TSince = HasHit ? Math.max(0, Time - HitT) : ((Time % 5.2) + 5.2) % 5.2;
+    const Hx = HasHit ? HitX : Org[0], Hz = HasHit ? HitZ : Org[2];
+    const WaveR = TSince * CSpd;
+    const Slabs = [];
+    const Debris = [];
+    const CellW = (Ex * 2) / Side, CellD = (Ez * 2) / Side;
+
+    for (let I = 0; I < SlabCap; I++)
+    {
+        const Gx = I % Side, Gz = Math.floor(I / Side);
+        const Sd = I * 37 + 11;
+        const Jx = (WebHash(Sd, 1) - 0.5) * 0.62 * CellW;
+        const Jz = (WebHash(Sd, 2) - 0.5) * 0.62 * CellD;
+        const Wx = Org[0] - Ex + (Gx + 0.5) * CellW + Jx;
+        const Wz = Org[2] - Ez + (Gz + 0.5) * CellD + Jz;
+        const Rx = Wx - Hx, Rz = Wz - Hz;
+        const RDist = Math.hypot(Rx, Rz);
+        const Ang = Math.atan2(Rz, Rx);
+        const Meander = Math.sin(RDist * (3.2 * Freq) + (I % 5)) * 0.24;
+        const ArmSec = (((Ang + Meander) / (Math.PI * 2)) * 7.0 % 1 + 1) % 1;
+        const FaultLineD = Math.abs(ArmSec - 0.5) * RDist * 0.88;
+        const RingD = Math.min(Math.abs(RDist - Math.max(0.45, Ex * 0.42)), Math.abs(RDist - Ex * 0.78));
+        const FaultD = Math.min(FaultLineD, RingD * 1.15);
+        const FaultProx = Math.exp(-FaultD * 3.8);
+        const OpenF = Smooth(WaveR + 0.12, Math.max(0, WaveR - 0.78), RDist);
+        const Shock = Math.exp(-Math.pow((RDist - WaveR + 0.18) * 2.6, 2)) * 0.65;
+        const CrackAmt = Math.min(1, Math.max(0, OpenF * (0.35 + 0.85 * FaultProx)));
+        const Asym = ArmSec >= 0.5 ? 1 : -1;
+        const HeaveY = CrackAmt * CDepth * (0.45 * FaultProx - 0.18 * (1 - FaultProx) + Shock * 0.55) + 0.02;
+        const TiltAng = CrackAmt * (0.28 + 0.48 * FaultProx + Shock * 0.35) * Asym;
+        const SlabY = Math.max(0.015, Org[1] + Ey * 0.38 + HeaveY);
+        const SlabW = Math.max(CellW, CellD) * 0.54;
+        const StressGlow = Math.min(1, Math.max(0, CrackAmt * (0.35 + 0.75 * FaultProx + Shock * 0.8)));
+        const SpDirX = -Rz * Asym + Rx * 0.35, SpDirZ = Rx * Asym + Rz * 0.35;
+        const SpLen = Math.hypot(SpDirX, SpDirZ) || 1;
+        const Sep = CrackAmt * CDepth * 0.24 * FaultProx;
+        Slabs.push({
+            isSlab: true, crackMode: CrackMode, x: Wx + (SpDirX / SpLen) * Sep, y: SlabY, z: Wz + (SpDirZ / SpLen) * Sep,
+            w: SlabW, h: Ey, tilt: TiltAng, rx: Rx, rz: Rz, stress: StressGlow, faultProx: FaultProx, shock: Shock, seed: Sd, visibleStrand: true
+        });
+    }
+    const DebTotal = Math.max(0, Cap - SlabCap);
+    for (let DIdx = 0; DIdx < DebTotal; DIdx++)
+    {
+        const SdD = (SlabCap + DIdx) * 53 + 7;
+        const CycleD = 1.05 + 0.75 * WebHash(SdD, 1);
+        const Ph = (Time + WebHash(SdD, 2) * 4.0) / CycleD;
+        const LocAge = (Ph - Math.floor(Ph)) * CycleD;
+        const T01 = LocAge / CycleD;
+        const ArmIdx = Math.floor(WebHash(SdD + Math.floor(Ph), 3) * 7.0);
+        const ArmAng = (ArmIdx / 7.0) * Math.PI * 2 + (WebHash(SdD, 4) - 0.5) * 0.28;
+        const RFront = Math.max(0.12, Math.min(Math.hypot(Ex, Ez) * 0.96, WaveR * (0.68 + 0.36 * WebHash(SdD, 5))));
+        const Sx = Hx + Math.cos(ArmAng) * RFront, Sz = Hz + Math.sin(ArmAng) * RFront;
+        if (Math.abs(Sx - Org[0]) > Ex * 1.04 || Math.abs(Sz - Org[2]) > Ez * 1.04 || WaveR < 0.08) continue;
+        const UpSpd = (1.4 + 2.2 * WebHash(SdD, 6)) * (0.65 + 0.55 * CDepth * 2);
+        const OutSpd = 0.4 + WebHash(SdD, 7);
+        const Grav = CrackMode === 2 ? 6.8 : 5.2;
+        const Dy = Math.max(Org[1] + 0.04, Org[1] + 0.14 + UpSpd * LocAge - 0.5 * Grav * LocAge * LocAge);
+        Debris.push({
+            isSlab: false, crackMode: CrackMode,
+            x: Sx + Math.cos(ArmAng) * OutSpd * LocAge, y: Dy, z: Sz + Math.sin(ArmAng) * OutSpd * LocAge,
+            size: Math.max(0.035, (P.sizeStart || 0.22) * (0.28 + 0.37 * WebHash(SdD, 10))) * (1 - 0.45 * T01),
+            alpha: Smooth(0, 0.12, T01) * (1 - Smooth(0.55, 1.0, T01)) * 0.95, seed: SdD
+        });
+    }
+    return { slabs: Slabs, debris: Debris };
 }
 
 export class SoftwarePreviewEngine
@@ -1003,15 +1234,42 @@ export class SoftwarePreviewEngine
             const Sys = Job.gpu, P = Sys.P;
             const Dt = GlobalDt > 0 ? GlobalDt : ((Job.simulate && Job.emitN > 0) ? (Job.cpu?.[28] || 1 / 60) : 0);
             const Tr = P.kind === 5 ? (P.transition || null) : null;
-            const GridMode = !Tr && P.arcMode !== 0 && P.arcMode !== 1 && !(P.beamMode > 0) && P.kind !== 6 ? Math.max(0, Math.min(2, P.gridMode | 0)) : 0;
-            const DynMode = !Tr && GridMode === 0 && P.arcMode !== 0 && P.arcMode !== 1 && !(P.beamMode > 0) && P.kind !== 6 ? Math.max(0, Math.min(7, P.dynMode | 0)) : 0;
-            const WebMode = !Tr && GridMode === 0 && DynMode === 0 && P.arcMode !== 0 && P.arcMode !== 1 && !(P.beamMode > 0) && P.kind !== 6 ? Math.max(0, Math.min(2, P.webMode | 0)) : 0;
-            const CurlMode = GridMode > 0 ? 13 : (DynMode > 0 ? (5 + DynMode) : (WebMode > 0 ? (3 + WebMode) : (P.curlMode || 0)));
+            const HasArc = P.arcMode === 0 || P.arcMode === 1 || P.arcMode === 2 || P.arcMode === 3;
+            const CrackMode = !Tr && !HasArc && !(P.beamMode > 0) && P.kind !== 6 ? Math.max(0, Math.min(2, P.crackMode | 0)) : 0;
+            const FerroMode = !Tr && !HasArc && !(P.beamMode > 0) && P.kind !== 6 && CrackMode === 0 ? Math.max(0, Math.min(2, P.ferroMode | 0)) : 0;
+            const MudMode = !Tr && !HasArc && !(P.beamMode > 0) && P.kind !== 6 && CrackMode === 0 && FerroMode === 0 ? Math.max(0, Math.min(3, P.mudSplashMode | 0)) : 0;
+            const GridMode = !Tr && !HasArc && !(P.beamMode > 0) && P.kind !== 6 && CrackMode === 0 && FerroMode === 0 && MudMode === 0 ? Math.max(0, Math.min(2, P.gridMode | 0)) : 0;
+            const DynMode = !Tr && !HasArc && !(P.beamMode > 0) && P.kind !== 6 && CrackMode === 0 && FerroMode === 0 && MudMode === 0 && GridMode === 0 ? Math.max(0, Math.min(9, P.dynMode | 0)) : 0;
+            const WebMode = !Tr && !HasArc && !(P.beamMode > 0) && P.kind !== 6 && CrackMode === 0 && FerroMode === 0 && MudMode === 0 && GridMode === 0 && DynMode === 0 ? Math.max(0, Math.min(2, P.webMode | 0)) : 0;
+            const CurlMode = CrackMode > 0 ? 18 : (FerroMode > 0 ? 17 : (MudMode > 0 ? 16 : (GridMode > 0 ? 13 : (DynMode > 0 ? (DynMode <= 7 ? 5 + DynMode : 6 + DynMode) : (WebMode > 0 ? (3 + WebMode) : (P.curlMode || 0))))));
             if (Job.simulate && Dt > 0)
             {
-                const MaxSoft = GridMode > 0 ? Math.min(Sys.cap, 1600) : ((WebMode > 0 || DynMode > 0) ? Sys.cap : (Tr ? Math.min(Sys.cap, 384) : (CurlMode === 3 ? Math.min(Sys.cap, 520) : (CurlMode > 0 ? Math.min(Sys.cap, 1250) : Math.min(Sys.cap, 360)))));
+                const MaxSoft = CrackMode > 0 ? Math.min(Sys.cap, 580) : (FerroMode > 0 ? Math.min(Sys.cap, 560) : (GridMode > 0 ? Math.min(Sys.cap, 1600) : ((WebMode > 0 || DynMode > 0) ? Sys.cap : (MudMode > 0 ? Math.min(Sys.cap, 760) : (Tr ? Math.min(Sys.cap, 384) : (CurlMode === 3 ? Math.min(Sys.cap, 520) : (CurlMode > 0 ? Math.min(Sys.cap, 1250) : Math.min(Sys.cap, 360))))))));
                 const BHx = P.boxHalf?.[0] || 0.8, BHy = P.boxHalf?.[1] || BHx, BHz = P.boxHalf?.[2] || BHx;
-                if (GridMode > 0)
+                if (CrackMode > 0)
+                {
+                    if (Job.emitN > 0 || Sys.particles.length > 0)
+                    {
+                        const HitX = Job.cpu ? Job.cpu[50] : P.origin[0];
+                        const HitZ = Job.cpu ? Job.cpu[51] : P.origin[2];
+                        const HitT = Job.cpu ? Job.cpu[52] : -1;
+                        const Frac = EvalCrackSlabsCPU(P, MaxSoft, Time, HitX, HitZ, HitT);
+                        Sys.particles = Frac.slabs;
+                        Sys.crackDebris = Frac.debris;
+                    }
+                    Sys.stats_ = { alive: (Sys.particles?.length || 0) + (Sys.crackDebris?.length || 0), energy: 0, A: 0, B: 0, C: 0 };
+                    Sys.readbackCount++;
+                }
+                else if (FerroMode > 0)
+                {
+                    if (Job.emitN > 0 || Sys.particles.length > 0)
+                    {
+                        Sys.particles = EvalFerroFluidCPU(P, MaxSoft, Time, BallX, BallY, BallZ, BallR, fieldScene, Prepared, Solo);
+                    }
+                    Sys.stats_ = { alive: Sys.particles.length, energy: 0, A: 0, B: 0, C: 0 };
+                    Sys.readbackCount++;
+                }
+                else if (GridMode > 0)
                 {
                     if (Job.emitN > 0 || Sys.particles.length > 0)
                     {
@@ -1032,7 +1290,7 @@ export class SoftwarePreviewEngine
                         if (Job.preseedCurtain || (CurlMode > 0 && WebMode === 0 && DynMode === 0 && Sys.particles.length < 24)) Sys.preseedCurtain = true;
                         const Basis = BasisFrom(P.dir || [0, 1, 0]);
                         const [Bu, Bv, Bw] = Basis;
-                        const PerStepMax = (WebMode > 0 || DynMode > 0) ? MaxSoft : (Tr ? MaxSoft : (CurlMode > 0 ? (Sys.preseedCurtain ? (CurlMode === 3 ? 520 : 1100) : 120) : (P.arcMode === 0 || P.arcMode === 1 ? 80 : (Sys.preseedCurtain ? 260 : 28))));
+                        const PerStepMax = (WebMode > 0 || DynMode > 0) ? MaxSoft : (Tr ? MaxSoft : (MudMode > 0 ? 140 : (CurlMode > 0 ? (Sys.preseedCurtain ? (CurlMode === 3 ? 520 : 1100) : 120) : (HasArc ? 80 : (Sys.preseedCurtain ? 260 : 28)))));
                         const SpawnCap = (WebMode > 0 || DynMode > 0)
                             ? Math.max(0, MaxSoft - Sys.particles.length)
                             : Math.min(PerStepMax, Sys.preseedCurtain && CurlMode > 0 ? MaxSoft : Job.emitN, Math.max(0, MaxSoft - Sys.particles.length));
@@ -1255,41 +1513,63 @@ export class SoftwarePreviewEngine
                                 SpawnY = 0.65 + Math.random() * Math.max(1, P.origin[1] - 0.65);
                                 SpawnAge = Math.random() * Life * 0.42;
                             }
-                            if (P.arcMode === 0 || P.arcMode === 1)
+                            if (HasArc)
                             {
                                 const Tp = P.targetPos || [P.origin[0] + 4, P.origin[1], P.origin[2]];
                                 const RadA = Math.max(0.08, P.radius || 0.45);
                                 const RadB = Math.max(0.08, P.targetRadius || 0.45);
-                                let Dx = Tp[0] - P.origin[0], Dy = Tp[1] - P.origin[1], Dz = Tp[2] - P.origin[2];
-                                const DL = Math.hypot(Dx, Dy, Dz) || 1;
-                                Dx /= DL; Dy /= DL; Dz /= DL;
                                 const Uu = Math.random() * 2 - 1, Aa = Math.random() * Math.PI * 2;
                                 const Sr = Math.sqrt(Math.max(0, 1 - Uu * Uu));
                                 const Jx = Sr * Math.cos(Aa), Jy = Uu, Jz = Sr * Math.sin(Aa);
                                 const Sp = (P.speedMin || 1) + Math.random() * Math.max(0.1, (P.speedMax || 3) - (P.speedMin || 1));
-                                if (Math.random() < 0.64)
+                                if ((P.arcMode | 0) >= 2)
                                 {
-                                    let Sx = -Dx * 0.94 + Jx * 0.34, Sy = -Dy * 0.94 + Jy * 0.34, Sz = -Dz * 0.94 + Jz * 0.34;
-                                    const SL = Math.hypot(Sx, Sy, Sz) || 1;
-                                    Sx /= SL; Sy /= SL; Sz /= SL;
-                                    const DotJ = Jx * Sx + Jy * Sy + Jz * Sz;
-                                    let Tx = Jx - Sx * DotJ, Ty = Jy - Sy * DotJ, Tz = Jz - Sz * DotJ;
-                                    const TL = Math.hypot(Tx, Ty, Tz) || 1;
-                                    Tx /= TL; Ty /= TL; Tz /= TL;
-                                    Px = Tp[0] + Sx * (RadB * 1.01); SpawnY = Tp[1] + Sy * (RadB * 1.01); Pz = Tp[2] + Sz * (RadB * 1.01);
-                                    Vx = (Tx * 0.72 + Sx * 0.46) * Sp; Vy = (Ty * 0.72 + Sy * 0.46) * Sp; Vz = (Tz * 0.72 + Sz * 0.46) * Sp;
+                                    const Capt = BallR > 0.04 && Math.hypot(BallX - P.origin[0], BallY - P.origin[1], BallZ - P.origin[2]) < RadA + 2.6;
+                                    if (Capt && Math.random() < 0.42)
+                                    {
+                                        Px = BallX + Jx * (BallR * 1.04); SpawnY = BallY + Jy * (BallR * 1.04); Pz = BallZ + Jz * (BallR * 1.04);
+                                        Vx = Jx * Sp * 1.1; Vy = (Jy + 0.35) * Sp * 1.1; Vz = Jz * Sp * 1.1;
+                                    }
+                                    else
+                                    {
+                                        const AngN = Math.floor(Math.random() * 8) * 0.785398 + Time * 0.18;
+                                        const YB = P.arcMode === 3 ? (Math.random() - 0.5) * RadA * 0.9 : 0;
+                                        const RingP = Math.random() < 0.75;
+                                        Px = P.origin[0] + (RingP ? Math.cos(AngN) * RadA * 0.85 : 0) + Jx * 0.08;
+                                        SpawnY = P.origin[1] + (RingP ? YB : 0) + Jy * 0.08;
+                                        Pz = P.origin[2] + (RingP ? Math.sin(AngN) * RadA * 0.85 : 0) + Jz * 0.08;
+                                        Vx = Jx * Sp * 0.85; Vy = Jy * Sp * 0.85; Vz = Jz * Sp * 0.85;
+                                    }
                                 }
                                 else
                                 {
-                                    let Sx = Dx * 0.94 + Jx * 0.34, Sy = Dy * 0.94 + Jy * 0.34, Sz = Dz * 0.94 + Jz * 0.34;
-                                    const SL = Math.hypot(Sx, Sy, Sz) || 1;
-                                    Sx /= SL; Sy /= SL; Sz /= SL;
-                                    const DotJ = Jx * Sx + Jy * Sy + Jz * Sz;
-                                    let Tx = Jx - Sx * DotJ, Ty = Jy - Sy * DotJ, Tz = Jz - Sz * DotJ;
-                                    const TL = Math.hypot(Tx, Ty, Tz) || 1;
-                                    Tx /= TL; Ty /= TL; Tz /= TL;
-                                    Px = P.origin[0] + Sx * (RadA * 1.01); SpawnY = P.origin[1] + Sy * (RadA * 1.01); Pz = P.origin[2] + Sz * (RadA * 1.01);
-                                    Vx = (Tx * 0.72 + Sx * 0.46) * Sp; Vy = (Ty * 0.72 + Sy * 0.46) * Sp; Vz = (Tz * 0.72 + Sz * 0.46) * Sp;
+                                    let Dx = Tp[0] - P.origin[0], Dy = Tp[1] - P.origin[1], Dz = Tp[2] - P.origin[2];
+                                    const DL = Math.hypot(Dx, Dy, Dz) || 1;
+                                    Dx /= DL; Dy /= DL; Dz /= DL;
+                                    if (Math.random() < 0.64)
+                                    {
+                                        let Sx = -Dx * 0.94 + Jx * 0.34, Sy = -Dy * 0.94 + Jy * 0.34, Sz = -Dz * 0.94 + Jz * 0.34;
+                                        const SL = Math.hypot(Sx, Sy, Sz) || 1;
+                                        Sx /= SL; Sy /= SL; Sz /= SL;
+                                        const DotJ = Jx * Sx + Jy * Sy + Jz * Sz;
+                                        let Tx = Jx - Sx * DotJ, Ty = Jy - Sy * DotJ, Tz = Jz - Sz * DotJ;
+                                        const TL = Math.hypot(Tx, Ty, Tz) || 1;
+                                        Tx /= TL; Ty /= TL; Tz /= TL;
+                                        Px = Tp[0] + Sx * (RadB * 1.01); SpawnY = Tp[1] + Sy * (RadB * 1.01); Pz = Tp[2] + Sz * (RadB * 1.01);
+                                        Vx = (Tx * 0.72 + Sx * 0.46) * Sp; Vy = (Ty * 0.72 + Sy * 0.46) * Sp; Vz = (Tz * 0.72 + Sz * 0.46) * Sp;
+                                    }
+                                    else
+                                    {
+                                        let Sx = Dx * 0.94 + Jx * 0.34, Sy = Dy * 0.94 + Jy * 0.34, Sz = Dz * 0.94 + Jz * 0.34;
+                                        const SL = Math.hypot(Sx, Sy, Sz) || 1;
+                                        Sx /= SL; Sy /= SL; Sz /= SL;
+                                        const DotJ = Jx * Sx + Jy * Sy + Jz * Sz;
+                                        let Tx = Jx - Sx * DotJ, Ty = Jy - Sy * DotJ, Tz = Jz - Sz * DotJ;
+                                        const TL = Math.hypot(Tx, Ty, Tz) || 1;
+                                        Tx /= TL; Ty /= TL; Tz /= TL;
+                                        Px = P.origin[0] + Sx * (RadA * 1.01); SpawnY = P.origin[1] + Sy * (RadA * 1.01); Pz = P.origin[2] + Sz * (RadA * 1.01);
+                                        Vx = (Tx * 0.72 + Sx * 0.46) * Sp; Vy = (Ty * 0.72 + Sy * 0.46) * Sp; Vz = (Tz * 0.72 + Sz * 0.46) * Sp;
+                                    }
                                 }
                             }
                             if ((P.beamMode || 0) > 0)
@@ -1333,7 +1613,80 @@ export class SoftwarePreviewEngine
                                 Trail = [];
                                 for (let K = 0; K < 16; K++) Trail.push([Px, SpawnY, Pz]);
                             }
-                            let Hold = 0, AsmMode = 0, TargetPos = null, FlatCoin = false;
+                            let Hold = 0, AsmMode = 0, TargetPos = null, FlatCoin = false, IsRipple = false, RippleRadius = 0.25;
+                            if (MudMode > 0)
+                            {
+                                const OrgM = P.origin || [0, 0, 0];
+                                const PoolR = Math.max(0.5, P.radius || 1.6);
+                                const SSpd = (P.speedMin || 2.0) + Math.random() * Math.max(0.2, (P.speedMax || 7.0) - (P.speedMin || 2.0));
+                                const BLow = BallR > 0.04 && BallY < BallR + 0.55;
+                                if (MudMode === 2)
+                                {
+                                    const Pose = EvalCarPoseCPU(Time, OrgM, P.carTrackRadius || 3.15, P.carSpeed || 4.2);
+                                    const BallSplash = BLow && (I % 6 === 0);
+                                    const Wp = BallSplash ? [BallX, 0.024, BallZ] : Pose.wheels[(Sys.particles.length + I) & 3];
+                                    const RPick = Math.random();
+                                    if (RPick < 0.24)
+                                    {
+                                        Px = Wp[0] + (Math.random() - 0.5) * 0.25; SpawnY = 0.022; Pz = Wp[2] + (Math.random() - 0.5) * 0.25;
+                                        Vx = 0; Vy = 0; Vz = 0;
+                                        Life = 0.85 + Math.random() * 0.55;
+                                        IsRipple = true; RippleRadius = 0.24 + Math.random() * 0.14;
+                                    }
+                                    else if (RPick < 0.68 || BallSplash)
+                                    {
+                                        const Side = (I & 2) ? 1 : -1;
+                                        const Ang = Math.random() * Math.PI * 2;
+                                        const Lx = BallSplash ? Math.cos(Ang) : (Pose.right[0] * Side - Pose.fwd[0] * 0.35);
+                                        const Lz = BallSplash ? Math.sin(Ang) : (Pose.right[2] * Side - Pose.fwd[2] * 0.35);
+                                        const Ly = 0.72 + Math.random() * 0.45;
+                                        const L = Math.hypot(Lx, Ly, Lz) || 1;
+                                        Px = Wp[0]; SpawnY = 0.08; Pz = Wp[2];
+                                        Vx = (Lx / L) * SSpd * 0.88; Vy = (Ly / L) * SSpd * 0.88; Vz = (Lz / L) * SSpd * 0.88;
+                                    }
+                                    else
+                                    {
+                                        const Side = (Math.random() - 0.5) * 0.55;
+                                        const Lx = -Pose.fwd[0] * 1.1 + Pose.right[0] * Side;
+                                        const Lz = -Pose.fwd[2] * 1.1 + Pose.right[2] * Side;
+                                        const Ly = 0.88 + Math.random() * 0.45;
+                                        const L = Math.hypot(Lx, Ly, Lz) || 1;
+                                        Px = Wp[0]; SpawnY = 0.12; Pz = Wp[2];
+                                        Vx = (Lx / L) * SSpd * 1.1; Vy = (Ly / L) * SSpd * 1.1; Vz = (Lz / L) * SSpd * 1.1;
+                                    }
+                                }
+                                else if (MudMode === 1)
+                                {
+                                    const Ang = Math.random() * Math.PI * 2, Rr = PoolR * Math.sqrt(Math.random());
+                                    const PHit = (BLow && (I % 3 === 0)) ? [BallX, 0.024, BallZ] : [OrgM[0] + Math.cos(Ang) * Rr, 0.022, OrgM[2] + Math.sin(Ang) * Rr];
+                                    if (Math.random() < 0.38)
+                                    {
+                                        Px = PHit[0]; SpawnY = 0.022; Pz = PHit[2];
+                                        Vx = 0; Vy = 0; Vz = 0;
+                                        Life = 0.95 + Math.random() * 0.55;
+                                        IsRipple = true; RippleRadius = 0.25 + Math.random() * 0.2;
+                                    }
+                                    else
+                                    {
+                                        const Oa = Math.random() * Math.PI * 2;
+                                        Px = PHit[0]; SpawnY = 0.05; Pz = PHit[2];
+                                        Vx = Math.cos(Oa) * SSpd * 0.28; Vy = (0.75 + Math.random() * 0.5) * SSpd * 0.65; Vz = Math.sin(Oa) * SSpd * 0.28;
+                                    }
+                                }
+                                else
+                                {
+                                    const Oa = Math.random() * Math.PI * 2, Rr = PoolR * Math.sqrt(Math.random());
+                                    Px = OrgM[0] + Math.cos(Oa) * Rr; SpawnY = 0.04; Pz = OrgM[2] + Math.sin(Oa) * Rr;
+                                    const Ly = 0.72 + Math.random() * 0.55;
+                                    const L = Math.hypot(Math.cos(Oa) * 0.6, Ly, Math.sin(Oa) * 0.6) || 1;
+                                    Vx = (Math.cos(Oa) * 0.6 / L) * SSpd; Vy = (Ly / L) * SSpd; Vz = (Math.sin(Oa) * 0.6 / L) * SSpd;
+                                }
+                                if (!IsRipple)
+                                {
+                                    Trail = [];
+                                    for (let K = 0; K < 10; K++) Trail.push([Px, SpawnY, Pz]);
+                                }
+                            }
                             if (Tr && (Tr.holdBase || 0) + (Tr.holdSpread || 0) > 0)
                             {
                                 AsmMode = Tr.assemble | 0;
@@ -1391,6 +1744,7 @@ export class SoftwarePreviewEngine
                                 trail: Trail, bokeh: Math.random(),
                                 slotIdx: SlotIdx, visibleStrand: WebMode === 0 && (DynMode === 0 || !!DynMeta?.visible), grow: 1, bead: 0, role: 0, wx: 0, wy: 0, wz: 0,
                                 snapU: 1.0, tearPt: -1, detachAge: -1, dynMeta: DynMeta, velTrail: null,
+                                isRipple: IsRipple, rippleRadius: RippleRadius,
                                 hold: Hold, asm: AsmMode, startPos: TargetPos ? [Px, SpawnY, Pz] : null, targetPos: TargetPos, flatCoin: FlatCoin, shatHit: false,
                                 vx: Vx, vy: Vy, vz: Vz, crest: Crest, splatted: false,
                                 age: SpawnAge, life: Life, ang: Tr ? 0 : Math.random() * Math.PI * 2,
@@ -1554,11 +1908,11 @@ export class SoftwarePreviewEngine
                                     Tz += Math.sin(WPhase) * FlapAmp + Math.cos(WPhase * 1.9 + Time) * FlapAmp * 0.28;
                                     Ty += Math.sin(WPhase * 0.8 + 0.5) * FlapAmp * 0.22;
                                 }
-                                else if (DynMode === 1 || DynMode === 2 || DynMode === 4 || DynMode === 5 || DynMode === 6 || DynMode === 7)
+                                else if (DynMode === 1 || DynMode === 2 || DynMode === 4 || DynMode === 5 || DynMode === 6 || DynMode === 7 || DynMode === 8 || DynMode === 9)
                                 {
                                     const WindS = WebSwayAt(Tx, Ty, Tz, Time, St.windScale || 0.4, CurlAmp, CurlFreq, P.windCoupling ?? 1.0, fieldScene, Prepared, Solo, WindScale);
                                     const FlexW = (DynMode === 1 || (DynMode === 3 && St.pinnedEnd)) ? 4 * U * (1 - U) : Math.pow(U, 1.35);
-                                    const WaveGust = (DynMode === 4 || DynMode === 5) ? (0.35 + 0.65 * Math.sin(Tx * 0.85 * CurlFreq + Tz * 0.52 * CurlFreq - Time * (P.dynWaveSpeed || 2.2))) * 0.14 : 0;
+                                    const WaveGust = (DynMode === 4 || DynMode === 5 || DynMode >= 8) ? (0.35 + 0.65 * Math.sin(Tx * 0.85 * CurlFreq + Tz * 0.52 * CurlFreq - Time * (P.dynWaveSpeed || 2.2))) * (DynMode >= 8 ? 0.22 : 0.14) : 0;
                                     Tx += (WindS[0] + WaveGust) * FlexW;
                                     Ty += WindS[1] * FlexW * 0.45;
                                     Tz += (WindS[2] + WaveGust * 0.45) * FlexW;
@@ -1623,7 +1977,7 @@ export class SoftwarePreviewEngine
                                 if (DynMode >= 4) Cur[1] = Math.max(0.02, Cur[1]);
                             }
 
-                            if (DynMode >= 1 && DynMode <= 7)
+                            if (DynMode >= 1 && DynMode <= 9)
                             {
                                 const MaxSegLen = RestStep * 1.08;
                                 for (let Pass = 0; Pass < 5; Pass++)
@@ -1682,6 +2036,7 @@ export class SoftwarePreviewEngine
                         const Pt = Sys.particles[I];
                         Pt.age += Dt;
                         if (Pt.age >= Pt.life) { Sys.particles.splice(I, 1); continue; }
+                        if (Pt.isRipple || Pt.splatted) continue;
 
                         if (Tr && Pt.asm > 0 && Pt.targetPos && Pt.startPos)
                         {
@@ -2210,6 +2565,108 @@ export class SoftwarePreviewEngine
                     }
                 }
 
+                if (CrackMode > 0)
+                {
+                    const Slabs = Sys.particles || [];
+                    const Debris = Sys.crackDebris || [];
+                    const CM = Math.max(1, Math.min(2, P.crackMode | 0));
+                    const ColC = P.colC || P.colB;
+                    const MixRgb = (A, B, U) => [A[0] + (B[0] - A[0]) * U, A[1] + (B[1] - A[1]) * U, A[2] + (B[2] - A[2]) * U];
+                    const SortS = [];
+                    for (const Sb of Slabs)
+                    {
+                        const Pr = ProjectPoint(VP, Sb.x, Sb.y, Sb.z, W, H);
+                        if (Pr) SortS.push({ sb: Sb, sc: Pr });
+                    }
+                    SortS.sort((A, B) => B.sc[2] - A.sc[2]);
+                    for (const It of SortS)
+                    {
+                        const Sb = It.sb;
+                        const Hw = Sb.w, Hh = Sb.h;
+                        const Tl = Math.hypot(Sb.rx, Sb.rz) || 1;
+                        const Tax = -Sb.rz / Tl, Taz = Sb.rx / Tl;
+                        const CosT = Math.cos(Sb.tilt), SinT = Math.sin(Sb.tilt);
+                        const RotTilt = (V) => {
+                            const KDot = Tax * V[0] + Taz * V[2];
+                            return [
+                                V[0] * CosT + (0 - Taz * V[1]) * SinT + Tax * KDot * (1 - CosT),
+                                V[1] * CosT + (Taz * V[0] - Tax * V[2]) * SinT,
+                                V[2] * CosT + (Tax * V[1] - 0) * SinT + Taz * KDot * (1 - CosT)
+                            ];
+                        };
+                        const TopPts = [];
+                        for (let C = 0; C < 5; C++)
+                        {
+                            const Ang = (C / 5) * Math.PI * 2 + (Sb.seed % 6.28);
+                            const RJ = 0.86 + 0.26 * Math.sin(Ang * 3 + Sb.seed * 0.7);
+                            const Lp = RotTilt([Math.cos(Ang) * Hw * RJ, Hh * 0.5, Math.sin(Ang) * Hw * RJ]);
+                            const Pr = ProjectPoint(VP, Sb.x + Lp[0], Sb.y + Lp[1], Sb.z + Lp[2], W, H);
+                            if (Pr) TopPts.push(Pr);
+                        }
+                        if (TopPts.length >= 3)
+                        {
+                            let CTop = MixRgb(P.colA, ColC, Math.min(1, Sb.faultProx * 0.75 + Sb.shock * 0.55));
+                            if (Sb.stress > 0.12) CTop = MixRgb(CTop, P.colB, Math.min(0.85, Sb.stress * 0.65));
+                            Ctx.fillStyle = LinearToCss(CTop, 0.96);
+                            Ctx.beginPath();
+                            TopPts.forEach((Q, K) => K === 0 ? Ctx.moveTo(Q[0], Q[1]) : Ctx.lineTo(Q[0], Q[1]));
+                            Ctx.closePath();
+                            Ctx.fill();
+                            if (Sb.stress > 0.04)
+                            {
+                                const EdgeCol = CM === 2 ? [1.0, 0.42, 0.12] : [0.55, 0.95, 1.0];
+                                Ctx.strokeStyle = LinearToCss(EdgeCol, Math.min(0.95, 0.25 + Sb.stress * 0.85));
+                                Ctx.lineWidth = 1.0 + Sb.stress * 1.4;
+                                Ctx.stroke();
+                            }
+                        }
+                    }
+                    for (const D of Debris)
+                    {
+                        const Pr = ProjectPoint(VP, D.x, D.y, D.z, W, H);
+                        if (!Pr) continue;
+                        const Pr2 = Math.max(1.8, (D.size * 240) / Math.max(1.5, Pr[2]));
+                        Ctx.fillStyle = LinearToCss(CM === 2 ? P.colB : P.colC, D.alpha);
+                        Ctx.beginPath();
+                        Ctx.arc(Pr[0], Pr[1], Pr2, 0, Math.PI * 2);
+                        Ctx.fill();
+                    }
+                    continue;
+                }
+
+                if (FerroMode > 0)
+                {
+                    const Spikes = (Sys.particles || []).map(Sp => {
+                        const P0 = ProjectPoint(VP, Sp.x, Sp.y, Sp.z, W, H);
+                        return P0 ? { sp: Sp, p0: P0 } : null;
+                    }).filter(Boolean).sort((A, B) => B.p0[2] - A.p0[2]);
+                    for (const It of Spikes)
+                    {
+                        const Sp = It.sp, P0 = It.p0;
+                        const Pm = ProjectPoint(VP, Sp.mx, Sp.my, Sp.mz, W, H);
+                        const Pt = ProjectPoint(VP, Sp.tx, Sp.ty, Sp.tz, W, H);
+                        if (!Pm || !Pt) continue;
+                        const BasePx = Math.max(2.2, (Sp.wBase * 290) / Math.max(1.5, P0[2]));
+                        const Dx = Pt[0] - P0[0], Dy = Pt[1] - P0[1];
+                        const Dl = Math.hypot(Dx, Dy) || 1;
+                        const Nx = -Dy / Dl, Ny = Dx / Dl;
+                        Ctx.fillStyle = LinearToCss([0.03, 0.04, 0.06], 0.97);
+                        Ctx.beginPath();
+                        Ctx.moveTo(P0[0] + Nx * BasePx, P0[1] + Ny * BasePx);
+                        Ctx.quadraticCurveTo(Pm[0] + Nx * BasePx * 0.25, Pm[1] + Ny * BasePx * 0.25, Pt[0], Pt[1]);
+                        Ctx.quadraticCurveTo(Pm[0] - Nx * BasePx * 0.25, Pm[1] - Ny * BasePx * 0.25, P0[0] - Nx * BasePx, P0[1] - Ny * BasePx);
+                        Ctx.closePath();
+                        Ctx.fill();
+                        Ctx.strokeStyle = LinearToCss(P.colB, 0.42 + 0.42 * Math.min(1, Sp.str));
+                        Ctx.lineWidth = Math.max(0.8, BasePx * 0.24);
+                        Ctx.beginPath();
+                        Ctx.moveTo(P0[0] + Nx * BasePx * 0.72, P0[1] + Ny * BasePx * 0.72);
+                        Ctx.quadraticCurveTo(Pm[0] + Nx * BasePx * 0.2, Pm[1] + Ny * BasePx * 0.2, Pt[0], Pt[1]);
+                        Ctx.stroke();
+                    }
+                    continue;
+                }
+
                 if (GridMode > 0)
                 {
                     const Surf = Math.max(0, Math.min(5, Math.round(P.gridSurface ?? 0)));
@@ -2501,16 +2958,33 @@ export class SoftwarePreviewEngine
                             for (let K = 0; K < Pts2.length - 1; K++)
                             {
                                 const U = Pts2[K].u;
-                                const WFrac = (DynMode === 4 || DynMode === 5) ? (1 - U * 0.86) : (DynMode === 7 ? (1 - U * 0.65) : 1.0);
+                                const WFrac = (DynMode === 4 || DynMode === 5 || DynMode === 9) ? (1 - U * 0.86) : (DynMode === 7 ? (1 - U * 0.65) : 1.0);
                                 const SegCol = DynMode === 7
                                     ? MixRgb(P.colA, ColC, U * 0.45)
-                                    : MixRgb(P.colA, ColC, Math.min(1, U * 1.15));
+                                    : (DynMode === 9 ? MixRgb(MixRgb(P.colA, ColC, U), P.colB, Math.max(0, (U - 0.55) / 0.45)) : MixRgb(P.colA, ColC, Math.min(1, U * 1.15)));
                                 Ctx.strokeStyle = LinearToCss(SegCol, 0.95);
                                 Ctx.lineWidth = Math.max(1.0, BasePx * WFrac);
                                 Ctx.beginPath();
                                 Ctx.moveTo(Pts2[K].p[0], Pts2[K].p[1]);
                                 Ctx.lineTo(Pts2[K + 1].p[0], Pts2[K + 1].p[1]);
                                 Ctx.stroke();
+                            }
+
+                            if (DynMode === 8 && St.hasBladder && Pts2.length >= 15)
+                            {
+                                const PBlad = Pts2[14].p;
+                                Ctx.fillStyle = LinearToCss(P.colB, 0.96);
+                                Ctx.beginPath();
+                                Ctx.arc(PBlad[0], PBlad[1], Math.max(2.2, BasePx * 0.72), 0, Math.PI * 2);
+                                Ctx.fill();
+                            }
+                            if (DynMode === 9 && St.hasBioTip && Pts2.length >= 16)
+                            {
+                                const PTp = Pts2[Pts2.length - 1].p;
+                                Ctx.fillStyle = LinearToCss(P.colB, 0.92);
+                                Ctx.beginPath();
+                                Ctx.arc(PTp[0], PTp[1], Math.max(2.0, BasePx * 0.55), 0, Math.PI * 2);
+                                Ctx.fill();
                             }
 
                             if ((DynMode === 4 || DynMode === 5) && St.hasTip && Pts2.length >= 4)
@@ -2615,6 +3089,32 @@ export class SoftwarePreviewEngine
                     const Sc = ProjectPoint(VP, Pt.x, Pt.y, Pt.z, W, H);
                     if (!Sc) continue;
                     const T = Math.min(1, Pt.age / Math.max(0.01, Pt.life));
+
+                    if (MudMode > 0 && Pt.isRipple)
+                    {
+                        const RadW = Math.max(0.18, Pt.rippleRadius || 0.25) * (0.75 + T * 5.2) * (P.sizeScale || 1) * 0.5;
+                        const RipA = SmoothT(0, 0.12, T) * (1 - SmoothT(0.45, 1, T)) * 0.88;
+                        if (RipA <= 0.005) continue;
+                        for (const WaveF of [0.88, 0.56, 0.28])
+                        {
+                            const PtsW = [];
+                            for (let S = 0; S <= 24; S++)
+                            {
+                                const A = (S / 24) * Math.PI * 2;
+                                const Pr = ProjectPoint(VP, Pt.x + Math.cos(A) * RadW * WaveF, 0.025, Pt.z + Math.sin(A) * RadW * WaveF, W, H);
+                                if (Pr) PtsW.push(Pr);
+                            }
+                            if (PtsW.length >= 12)
+                            {
+                                Ctx.strokeStyle = LinearToCss(WaveF > 0.7 ? P.colB : (P.colC || P.colB), RipA * WaveF);
+                                Ctx.lineWidth = Math.max(1.0, WaveF * 2.2);
+                                Ctx.beginPath();
+                                PtsW.forEach((Q, K) => K === 0 ? Ctx.moveTo(Q[0], Q[1]) : Ctx.lineTo(Q[0], Q[1]));
+                                Ctx.stroke();
+                            }
+                        }
+                        continue;
+                    }
 
                     if (CurlMode === 3)
                     {

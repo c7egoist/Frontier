@@ -47,7 +47,7 @@ import { PE } from "./pe.js";
       webSpinRate: 1.0,     // real-time silk extrusion / weaving speed multiplier
       webSag: 0.16,         // catenary silk gravity droop (m)
       webDew: 0.85,         // morning dew / cobweb dust highlight intensity
-      dynMode: 0,           // 0 off, 1 cables/chains, 2 vines/ropes, 3 flag/sail, 4 grass/wheat, 5 tall reeds, 6 broad fern, 7 canopy tree
+      dynMode: 0,           // 0 off, 1 cables/chains, 2 vines/ropes, 3 flag/sail, 4 grass/wheat, 5 tall reeds, 6 broad fern, 7 canopy tree, 8 underwater kelp, 9 sea anemone tentacles
       dynSub: 0,            // mode variant (e.g. flag vs sail, cable vs chain, meadow vs wheat, summer vs autumn tree)
       dynStiff: 1.25,       // elastic spring recovery rate (1/s multiplier)
       dynTearThresh: 0.0,   // projectile speed threshold for strand tearing or leaf detachment (m/s, 0 = unbreakable)
@@ -55,6 +55,15 @@ import { PE } from "./pe.js";
       dynHeight: 2.4,       // vertical elevation / mast / stalk / canopy height (m)
       dynSag: 0.35,         // gravity catenary droop or frond arch curvature (m)
       dynWaveSpeed: 2.2,    // travelling flutter / stadium wind wave speed (Hz/rad)
+      mudSplashMode: 0,     // 0 off, 1 puddle ripple rings + crown splash, 2 car tire puddle & mud splash, 3 heavy mud splatter
+      carSpeed: 4.2,        // vehicle loop tangential speed (m/s)
+      carTrackRadius: 3.15, // figure-8 vehicle driving loop radius (m)
+      ferroMode: 0,         // 0 off, 1 Rosensweig petri-dish pool + magnet, 2 3D levitated ferrofluid crown
+      ferroSpikes: 520,     // magnetic Rosensweig spike count across fluid meniscus
+      ferroMagnetSpeed: 1.35, // orbiting neodymium magnet angular velocity (rad/s)
+      crackMode: 0,         // 0 off, 1 movie cracked glacial ice, 2 earthquake stone ground fracture
+      crackSpeed: 2.6,      // fracture front propagation speed (m/s)
+      crackDepth: 0.44,     // fissure heave / abyss tilt amplitude (m)
       temperature: 0.6,     // molecular: kT in reduced units (m = 1)
       epsilon: 0.15,        // molecular: Lennard-Jones well depth
       sigma: 0.08,          // molecular: particle diameter
@@ -1056,19 +1065,170 @@ import { PE } from "./pe.js";
         colA: hex("#1c1d22"), colC: hex("#ff1b2d"), colB: hex("#ff4a6e"),
       }),
     },
+    // Priority 1A: Mud, Car Puddle Splashes & Concentric Ripple Rings
+    {
+      id: "car-puddle-splash", name: "Car Puddle & Mud Splash", group: "Pyro & Water",
+      blurb: "3D rally car cutting a continuous figure-8 through a muddy puddle, kicking up lateral water sheets, sticky rooster-tail mud clods, and expanding ripple rings.",
+      p: P({
+        kind: 0, shape: 14, blend: "alpha", capacity: 2200, rate: 420,
+        emitShape: 2, origin: [0, 0.02, 0], radius: 1.65, dir: [0, 1, 0], spread: 0.52,
+        speedMin: 2.2, speedMax: 7.2, drag: 1.35, gravity: 1.18, lifeMin: 0.65, lifeMax: 1.35,
+        sizeStart: 0.095, sizeEnd: 0.16, sizeScale: 1.0,
+        mudSplashMode: 2, carSpeed: 4.2, carTrackRadius: 3.15, curlFreq: 1.15, curlAmp: 1.1,
+        colA: hex("#4d341c"), colC: hex("#856845"), colB: hex("#cce8f8"),
+        windCoupling: 0.25, bounce: 0.05, flutter: 0.04, showObject: true,
+      }),
+    },
+    {
+      id: "puddle-ripple-splash", name: "Puddle Ripple Rings & Splash", group: "Pyro & Water",
+      blurb: "Expanding concentric water puddle ripple rings triggered by raindrop crowns and ball splashes across an interactive wet pool.",
+      p: P({
+        kind: 0, shape: 14, blend: "alpha", capacity: 1400, rate: 165,
+        emitShape: 2, origin: [-3.8, 0.02, -3.2], radius: 2.0, dir: [0, 1, 0], spread: 0.42,
+        speedMin: 1.6, speedMax: 4.8, drag: 1.4, gravity: 1.0, lifeMin: 0.75, lifeMax: 1.45,
+        sizeStart: 0.08, sizeEnd: 0.18, sizeScale: 1.0,
+        mudSplashMode: 1, curlFreq: 1.0, curlAmp: 0.9,
+        colA: hex("#1a6fa8"), colC: hex("#66d6ff"), colB: hex("#e8fbff"),
+        windCoupling: 0.2, bounce: 0.04, flutter: 0.02, showObject: true,
+      }),
+    },
+    {
+      id: "mud-splatter-heavy", name: "Mud Splash & Sticky Clods", group: "Pyro & Water",
+      blurb: "Thick viscous mud clods and dark liquid arcs bursting upward and splatting flat across the ground.",
+      p: P({
+        kind: 0, shape: 14, blend: "alpha", capacity: 1600, rate: 0,
+        emitShape: 2, origin: [3.8, 0.04, 3.0], radius: 1.15, dir: [0, 1, 0], spread: 0.72,
+        speedMin: 2.4, speedMax: 6.8, drag: 1.15, gravity: 1.24, lifeMin: 0.95, lifeMax: 1.9,
+        sizeStart: 0.11, sizeEnd: 0.20, sizeScale: 1.05,
+        mudSplashMode: 3, curlFreq: 1.2, curlAmp: 1.15,
+        burstEvery: 1.9, burstCount: 220, burstAtOrigin: true,
+        colA: hex("#3b2312"), colC: hex("#6e4926"), colB: hex("#9c7040"),
+        windCoupling: 0.15, bounce: 0.02, flutter: 0.02, showObject: true,
+      }),
+    },
+    // Priority 1B: Magnetic Ferrofluid Spikes (Rosensweig Instability)
+    {
+      id: "ferrofluid-spikes", name: "Magnetic Ferrofluid Dish", group: "Ferrofluid & Fields",
+      blurb: "Black liquid-chrome ferrofluid pool erupting into sharp hexagonal Rosensweig spikes drawn toward an orbiting magnet, thrown ball, and active Force Fields.",
+      p: P({
+        kind: 5, shape: 1, blend: "alpha", capacity: 560, rate: 0,
+        emitShape: 2, radius: 2.05, boxHalf: [2.05, 1.05, 2.05], origin: [-1.95, 0.04, 0.25], dir: [0, 1, 0], spread: 0.0,
+        speedMin: 0, speedMax: 0, drag: 0, gravity: 0, buoyancy: 0,
+        lifeMin: 9999, lifeMax: 9999, sizeStart: 0.088, sizeEnd: 0.015, sizeScale: 1.0,
+        ferroMode: 1, ferroSpikes: 560, ferroMagnetSpeed: 1.35, curlFreq: 1.25, curlAmp: 1.2, streakThin: 1.0,
+        windCoupling: 0.15, bounce: 0, showObject: true,
+        colA: hex("#06080d"), colC: hex("#1d2b44"), colB: hex("#a8d4ff"),
+      }),
+    },
+    {
+      id: "ferrofluid-orb", name: "Levitated Ferrofluid Crown", group: "Ferrofluid & Fields",
+      blurb: "Free-floating 3D sphere of liquid ferrofluid bristling with metallic Rosensweig spikes following magnetic poles in zero gravity.",
+      p: P({
+        kind: 5, shape: 1, blend: "alpha", capacity: 560, rate: 0,
+        emitShape: 1, radius: 1.15, boxHalf: [1.15, 0.92, 1.15], origin: [2.45, 2.05, -0.2], dir: [0, 1, 0], spread: 0.0,
+        speedMin: 0, speedMax: 0, drag: 0, gravity: 0, buoyancy: 0,
+        lifeMin: 9999, lifeMax: 9999, sizeStart: 0.072, sizeEnd: 0.012, sizeScale: 1.0,
+        ferroMode: 2, ferroSpikes: 560, ferroMagnetSpeed: 1.55, curlFreq: 1.35, curlAmp: 1.05, streakThin: 0.95,
+        windCoupling: 0.15, bounce: 0, showObject: true,
+        colA: hex("#05060b"), colC: hex("#263252"), colB: hex("#72e5ff"),
+      }),
+    },
+    // Priority 1C: Movie-Style Cracked Ice & Ground Fracture Propagation
+    {
+      id: "cracked-ice-sheet", name: "Movie Cracked Glacial Ice", group: "Fracture & Cracks",
+      blurb: "Branching lightning-fast glacial crack propagation splitting a thick frozen sheet into tilting Voronoi ice plates, frost vapor, and deep arctic water.",
+      p: P({
+        kind: 5, shape: 4, blend: "alpha", capacity: 580, rate: 0,
+        emitShape: 3, boxHalf: [2.1, 0.14, 2.1], origin: [-2.35, 0.02, 0.2], dir: [0, 1, 0], spread: 0.45,
+        speedMin: 1.2, speedMax: 3.4, drag: 1.2, gravity: 0.85, lifeMin: 0.65, lifeMax: 1.45,
+        sizeStart: 0.23, sizeEnd: 0.12, sizeScale: 1.0,
+        crackMode: 1, crackSpeed: 2.6, crackDepth: 0.44, curlFreq: 1.15, curlAmp: 1.0,
+        windCoupling: 0.35, bounce: 0.2, showObject: true,
+        colA: hex("#8be4ff"), colC: hex("#c9f4ff"), colB: hex("#ffffff"),
+      }),
+    },
+    {
+      id: "ground-crack-quake", name: "Seismic Ground Crack Fissure", group: "Fracture & Cracks",
+      blurb: "Rippling tectonic ground fracture throwing tilted basalt slabs apart over an incandescent fault chasm as ball impacts or seismic waves travel outward.",
+      p: P({
+        kind: 5, shape: 4, blend: "alpha", capacity: 580, rate: 0,
+        emitShape: 3, boxHalf: [2.1, 0.16, 2.1], origin: [2.35, 0.02, -0.2], dir: [0, 1, 0], spread: 0.55,
+        speedMin: 1.5, speedMax: 4.2, drag: 1.0, gravity: 1.05, lifeMin: 0.7, lifeMax: 1.55,
+        sizeStart: 0.23, sizeEnd: 0.10, sizeScale: 1.0,
+        crackMode: 2, crackSpeed: 2.8, crackDepth: 0.48, curlFreq: 1.25, curlAmp: 1.15,
+        windCoupling: 0.25, bounce: 0.25, showObject: true,
+        colA: hex("#2b2623"), colC: hex("#ff5a1f"), colB: hex("#ffd166"),
+      }),
+    },
+    // Priority 2: #9 Dynamic Lightning Webs / Plasma Cage Arcs
+    {
+      id: "plasma-cage-arcs", name: "Plasma Cage & Arc Collector", group: "Silk & Curl",
+      blurb: "Perimeter conductor ring and central plasma orb trapping crackling branching arcs that violently snap onto thrown balls passing near the cage.",
+      p: P({
+        kind: 5, shape: 3, blend: "add", capacity: 640, rate: 45,
+        emitShape: 1, radius: 1.75, boxHalf: [1.75, 1.45, 1.75], origin: [-2.4, 2.15, 0.2], dir: [0, 1, 0], spread: 3.14159,
+        speedMin: 1.4, speedMax: 4.8, drag: 3.0, buoyancy: 0.08, gravity: 0.1,
+        lifeMin: 0.14, lifeMax: 0.36, sizeStart: 0.095, sizeEnd: 0.014,
+        colA: hex("#72e2ff"), colC: hex("#ffffff"), colB: hex("#5270ff"),
+        arcMode: 2, arcCount: 6, arcJitter: 0.62, arcBow: 0.22, arcHold: 0.34, arcInterval: 0.55, arcLoop: true,
+        windCoupling: 0.2,
+      }),
+    },
+    {
+      id: "lightning-web-mesh", name: "Dynamic Lightning Web & Storm Grid", group: "Silk & Curl",
+      blurb: "Floating 3D matrix of high-voltage storm nodes woven together by multi-node zigzag lightning webs that redirect through passing balls.",
+      p: P({
+        kind: 5, shape: 3, blend: "add", capacity: 680, rate: 52,
+        emitShape: 3, radius: 2.05, boxHalf: [2.1, 1.5, 2.1], origin: [2.4, 2.15, -0.2], dir: [0, 1, 0], spread: 3.14159,
+        speedMin: 1.6, speedMax: 5.4, drag: 2.8, buoyancy: 0.12, gravity: 0.06,
+        lifeMin: 0.12, lifeMax: 0.34, sizeStart: 0.09, sizeEnd: 0.012,
+        colA: hex("#99e8ff"), colC: hex("#e8f7ff"), colB: hex("#8a66ff"),
+        arcMode: 3, arcCount: 8, arcJitter: 0.72, arcBow: 0.26, arcHold: 0.30, arcInterval: 0.42, arcLoop: true,
+        windCoupling: 0.25,
+      }),
+    },
+    // Priority 3: #6 Underwater Kelp Forests & Sea Anemone Tentacles
+    {
+      id: "kelp-forest", name: "Underwater Giant Kelp Forest", group: "Foliage & Flora",
+      blurb: "Buoyant giant kelp stipes, ruffled side blades, and golden gas bladders drifting in gentle underwater currents and parting around swimming balls.",
+      p: P({
+        kind: 5, shape: 1, blend: "alpha", capacity: 240, rate: 0,
+        emitShape: 3, boxHalf: [2.25, 2.2, 2.25], origin: [-1.55, 0.0, 0.35], dir: [0, 1, 0], spread: 0.0,
+        speedMin: 0, speedMax: 0, drag: 0, gravity: 0, buoyancy: 0.45,
+        lifeMin: 9999, lifeMax: 9999, sizeStart: 0.16, sizeEnd: 0.04, sizeScale: 1.0,
+        dynMode: 8, dynSub: 0, dynRows: 42, dynHeight: 4.15, dynSag: 0.36, dynStiff: 0.85, dynWaveSpeed: 1.25, dynTearThresh: 0.0,
+        curlFreq: 0.85, curlAmp: 1.2, windCoupling: 1.25, bounce: 0.2,
+        colA: hex("#1a421e"), colC: hex("#4d8a2d"), colB: hex("#e0a630"),
+      }),
+    },
+    {
+      id: "sea-anemone", name: "Bioluminescent Sea Anemone Colony", group: "Foliage & Flora",
+      blurb: "Clusters of glowing violet-and-cyan reef anemone tentacles waving hypnotically in water flow and curling inward defensively when touched.",
+      p: P({
+        kind: 5, shape: 1, blend: "alpha", capacity: 220, rate: 0,
+        emitShape: 2, radius: 1.55, boxHalf: [1.55, 1.0, 1.55], origin: [2.35, 0.0, -0.4], dir: [0, 1, 0], spread: 0.0,
+        speedMin: 0, speedMax: 0, drag: 0, gravity: 0, buoyancy: 0.25,
+        lifeMin: 9999, lifeMax: 9999, sizeStart: 0.072, sizeEnd: 0.015, sizeScale: 1.0,
+        dynMode: 9, dynSub: 0, dynRows: 48, dynHeight: 1.55, dynSag: 0.45, dynStiff: 1.45, dynWaveSpeed: 1.55, dynTearThresh: 0.0,
+        curlFreq: 1.1, curlAmp: 0.95, windCoupling: 1.0, bounce: 0.2, showObject: true,
+        colA: hex("#541c6b"), colC: hex("#ff3e8a"), colB: hex("#32ffe6"),
+      }),
+    },
   ];
 
   PE.VFX_CATEGORIES = [
     { id: "Cloth & Rigging", label: "Cloth & Rigging", badge: "CLOTH", blurb: "Ball-interactive wind flags, ship sails, swinging bridge cables, industrial chains, and leafy hanging vines" },
-    { id: "Foliage & Flora", label: "Foliage & Flora", badge: "FLORA", blurb: "Interactive grass & golden wheat fields, tall lakeside reeds, broad pinnate ferns, and swaying canopy trees" },
+    { id: "Foliage & Flora", label: "Foliage & Flora", badge: "FLORA", blurb: "Interactive grass & golden wheat, reeds, ferns, trees, underwater giant kelp & bioluminescent sea anemones" },
+    { id: "Ferrofluid & Fields", label: "Ferrofluid & Fields", badge: "FERRO", blurb: "Black liquid-chrome Rosensweig ferrofluid spike pools and 3D levitated crowns tracking magnets & Force Fields" },
+    { id: "Fracture & Cracks", label: "Fracture & Cracks", badge: "CRACK", blurb: "Movie-style glacial ice cracking & earthquake Voronoi basalt ground fracture propagation with fissure debris" },
     { id: "Motion & Grids", label: "Motion & Grids", badge: "MOGRAPH", blurb: "Effector-driven halftone dot/box/triangle grids, height-extruded cube matrices, and obsidian surface lattices" },
-    { id: "Silk & Curl", label: "Silk & Curl", badge: "CURL", blurb: "Dense 3D curl-noise wave fur fields, plasma spheres, bokeh ribbons, dual-sphere lightning & spinning spiderwebs" },
+    { id: "Silk & Curl", label: "Silk & Curl", badge: "CURL", blurb: "Dense 3D curl-noise wave fur, plasma spheres, bokeh ribbons, lightning webs, plasma cages & spinning spiderwebs" },
     { id: "Transitions", label: "Transitions & Derez", badge: "DEREZ", blurb: "Solid surface lattice derez, 8-fragment floor shatter, coin stacks, glitch & butterfly dissolves" },
     { id: "Space & Distortion", label: "Space & Distortion", badge: "LENS", blurb: "Black hole accretion spiral with relativistic gravitational lensing & rising heat shimmer refraction" },
     { id: "Shields & Tech", label: "Shields & Tech", badge: "TECH", blurb: "Multi-shape energy shield barriers with hex/circle/triangle/diamond/Voronoi cracks, radar sweeps, sonar & EMP domes" },
     { id: "Atmosphere & Sky", label: "Atmosphere & Sky", badge: "SKY", blurb: "Volumetric aurora borealis curtains, fireworks bursts, flares & floating atmospheric dust motes" },
     { id: "Ballistics & Sparks", label: "Ballistics & Sparks", badge: "BALLISTIC", blurb: "Shockwaves, beams, tracers, strike sparks, welding spray & high-velocity impact ballistics" },
-    { id: "Pyro & Water", label: "Pyro & Water", badge: "VFX", blurb: "Fire, smoke, embers, steam, mist, bubbles, splash rings & viscous liquid splatters" },
+    { id: "Pyro & Water", label: "Pyro & Water", badge: "VFX", blurb: "Fire, smoke, embers, car mud & puddle splashes, concentric ripple rings, bubbles & viscous liquid splatters" },
     { id: "Wind-Blown", label: "Wind-Blown", badge: "WIND", blurb: "Leaves, petals, seeds, feathers & boid/butterfly flocks driven by Force Fields" },
     { id: "Storms & Weather", label: "Storms & Weather", badge: "WEATHER", blurb: "Rain, snow, hail, sandstorms, tornado debris, ash & sand" },
   ];
@@ -1079,17 +1239,20 @@ import { PE } from "./pe.js";
     if (!p) return "Ballistics & Sparks";
     const g = preset?.group || "";
     const id = preset?.id || "";
+    if ((p.ferroMode || 0) > 0 || g === "Ferrofluid & Fields") return "Ferrofluid & Fields";
+    if ((p.crackMode || 0) > 0 || g === "Fracture & Cracks") return "Fracture & Cracks";
     if ((p.gridMode || 0) > 0 || g === "Motion & Grids") return "Motion & Grids";
     if ((p.dynMode || 0) >= 1 && (p.dynMode || 0) <= 3 || g === "Cloth & Rigging") return "Cloth & Rigging";
     if ((p.dynMode || 0) >= 4 || g === "Foliage & Flora") return "Foliage & Flora";
+    if ((p.mudSplashMode || 0) > 0) return "Pyro & Water";
     if (p.transition || g === "Transitions") return "Transitions";
     if (p.blackHole || p.heatShimmer || g === "Space") return "Space & Distortion";
     if (p.shape === 11 || p.shape === 12 || p.shape === 15 || p.shape === 16) return "Shields & Tech";
     if (p.shape === 17 || id === "fireworks" || id === "flares" || id === "pollen") return "Atmosphere & Sky";
-    if (p.curlMode > 0 || p.webMode > 0 || g === "Silk & Curl") return "Silk & Curl";
+    if (p.curlMode > 0 || p.webMode > 0 || (p.arcMode ?? -1) >= 2 || g === "Silk & Curl") return "Silk & Curl";
     if (g === "Weather" || g === "Storms" || g === "Ground" || id === "ash") return "Storms & Weather";
     if (g === "Wind-blown" || g === "Ambient" || p.kind === 1 || p.kind === 6) return "Wind-Blown";
-    if (g === "Water" || p.shape === 14 || (g === "VFX" && p.shape !== 0 && p.shape !== 5)) return "Pyro & Water";
+    if (g === "Water" || g === "Pyro & Water" || p.shape === 14 || (g === "VFX" && p.shape !== 0 && p.shape !== 5)) return "Pyro & Water";
     return "Ballistics & Sparks";
   };
 
@@ -1098,6 +1261,15 @@ import { PE } from "./pe.js";
     if (!p) return "Particles";
     if (p.arcMode === 0) return "Tesla Lightning";
     if (p.arcMode === 1) return "Static Shock";
+    if (p.arcMode === 2) return "Plasma Cage";
+    if (p.arcMode === 3) return "Lightning Web";
+    if ((p.ferroMode || 0) === 1) return "Ferrofluid Pool";
+    if ((p.ferroMode || 0) === 2) return "Levitated Ferrofluid";
+    if ((p.crackMode || 0) === 1) return "Cracked Ice";
+    if ((p.crackMode || 0) === 2) return "Ground Fracture";
+    if ((p.mudSplashMode || 0) === 1) return "Puddle Ripples";
+    if ((p.mudSplashMode || 0) === 2) return "Car Mud Splash";
+    if ((p.mudSplashMode || 0) === 3) return "Mud Splatter";
     if ((p.beamMode || 0) > 0) return "Laser / Plasma Beam";
     if (p.blackHole) return "Black Hole Lens";
     if (p.heatShimmer) return "Heat Shimmer";
@@ -1122,6 +1294,8 @@ import { PE } from "./pe.js";
     if ((p.dynMode || 0) === 5) return "Tall Reeds";
     if ((p.dynMode || 0) === 6) return "Pinnate Fern";
     if ((p.dynMode || 0) === 7) return "Swaying Tree";
+    if ((p.dynMode || 0) === 8) return "Kelp Forest";
+    if ((p.dynMode || 0) === 9) return "Sea Anemone";
     if (p.curlMode === 1) return "Curl Wave";
     if (p.curlMode === 2) return "Curl Sphere";
     if (p.curlMode === 3) return (p.pulseMode || 0) > 0 ? "Surface Pour" : "Ribbon Stream";
