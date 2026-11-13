@@ -81,7 +81,7 @@
 
         <footer class="outliner-footer">
           <span><small>RENDERER</small><b id="FooterFps">REALTIME · 60 FPS</b></span>
-          <span><small>STREAMLINES</small><b>RIBBON TRAILS</b></span>
+          <span><small>STREAMLINES</small><b id="FooterStreamMode">BOKEH RIBBONS</b></span>
           <span><small>CASCADES</small><b id="FooterBudget">4 × 4.0 MB</b></span>
         </footer>
       </aside>
@@ -126,7 +126,8 @@
             <div class="viewport-chip-group" id="VizLayerToggles">
               <button type="button" class="active" data-layer="Heatmap">Heatmap</button>
               <button type="button" class="active" data-layer="Vectors">Vectors</button>
-              <button type="button" class="active" data-layer="Streamlines">Streams</button>
+              <button type="button" class="active" data-layer="BokehRibbons" title="Toggle Bokeh Stream Ribbons Debug Visualizer">Bokeh</button>
+              <button type="button" data-layer="Streamlines" title="Toggle Static Bidirectional RK4 Streamlines">Streams</button>
               <button type="button" class="active" data-layer="Bounds">Bounds</button>
             </div>
 

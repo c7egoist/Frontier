@@ -779,7 +779,7 @@ void main()
     float halo = 0.42 * exp(-0.5 * (vAcrossPx * vAcrossPx) / max(0.25, vHaloPx * vHaloPx));
 
     // Per-strand travelling directional comet streak along flow direction (0 -> 1)
-    float speed = 0.28 + 0.22 * fract(vStrandSeed * 7.13) + 0.14 * clamp(vMagShare, 0.0, 1.0);
+    float speed = 0.14 + 0.12 * fract(vStrandSeed * 7.13) + 0.08 * clamp(vMagShare, 0.0, 1.0);
     float win = 0.30;
     float cyc = fract(vStrandSeed + uTime * speed);
     float head = cyc * (1.0 + win);
@@ -806,3 +806,152 @@ void main()
     FragColor = vec4(clamp(sparkCol, 0.0, 1.0), alpha);
 }
 `;
+
+//------------------------------------------------------------------------------------------------------------------------
+//                      4. GPU BOKEH STREAM RIBBONS (TAPERED FADING WAKES + CREAMY / SHARP BOKEH BEADS)
+//------------------------------------------------------------------------------------------------------------------------
+
+export const BOKEH_RIBBON_VERT = /* glsl */ `
+in vec3 aTangent;
+in vec3 aColor;
+in vec2 aUv;
+in float aAlpha;
+
+uniform float uViewportHeightPx;
+uniform float uBokehThickness;
+
+out vec3 vColor;
+out vec2 vUv;
+out float vAlpha;
+
+void main()
+{
+    float isOrtho = step(0.5, projectionMatrix[3][3]);
+    vec3 perspViewDir = cameraPosition - position;
+    float pLen = length(perspViewDir);
+    perspViewDir = pLen > 1e-4 ? perspViewDir / pLen : vec3(0.0, 1.0, 0.0);
+    vec3 orthoViewDir = normalize(vec3(viewMatrix[0][2], viewMatrix[1][2], viewMatrix[2][2]));
+    vec3 viewDir = mix(perspViewDir, orthoViewDir, isOrtho);
+
+    vec3 tangent = normalize(aTangent);
+    vec3 lateral = cross(tangent, viewDir);
+    float latLen = length(lateral);
+    if (latLen < 1e-4)
+    {
+        vec3 camUp = vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]);
+        lateral = cross(tangent, camUp);
+        latLen = length(lateral);
+    }
+    lateral = latLen > 1e-4 ? lateral / latLen : vec3(1.0, 0.0, 0.0);
+
+    vec4 clipCenter = projectionMatrix * viewMatrix * vec4(position, 1.0);
+    float denom = mix(max(abs(clipCenter.w), 0.05), 1.0, isOrtho);
+    float pxPerWorld = max((0.5 * max(uViewportHeightPx, 64.0) * abs(projectionMatrix[1][1])) / denom, 0.25);
+
+    // Taper from sleek luminous head behind bead down to hairline tail
+    float uLen = clamp(aUv.y, 0.0, 1.0);
+    float thick = clamp(uBokehThickness, 0.25, 2.5);
+    float halfPx = mix(3.8, 0.42, pow(max(uLen, 1e-4), 0.72)) * thick;
+    float worldHalfW = max(halfPx / pxPerWorld, 0.006 * thick);
+
+    vec3 worldPos = position + lateral * (aUv.x * worldHalfW);
+
+    vColor = aColor;
+    vUv = aUv;
+    vAlpha = aAlpha;
+
+    gl_Position = projectionMatrix * viewMatrix * vec4(worldPos, 1.0);
+}
+`;
+
+export const BOKEH_RIBBON_FRAG = /* glsl */ `
+in vec3 vColor;
+in vec2 vUv;
+in float vAlpha;
+
+uniform float uBokehEmissive;
+
+out vec4 FragColor;
+
+void main()
+{
+    float edge = exp(-vUv.x * vUv.x * 4.2);
+    float tailFade = pow(clamp(1.0 - vUv.y, 0.0, 1.0), 1.42);
+    float headGlow = smoothstep(0.0, 0.035, vUv.y);
+    float glow = clamp(uBokehEmissive, 0.25, 2.5);
+    float a = clamp(edge * tailFade * (0.48 + 0.52 * headGlow) * vAlpha * 0.78 * glow, 0.0, 1.0);
+    if (a <= 0.003) discard;
+
+    FragColor = vec4(vColor * a, a);
+}
+`;
+
+export const BOKEH_BEAD_VERT = /* glsl */ `
+in vec2 aCorner;
+in vec3 aColor;
+in float aDof;
+in float aRadiusPx;
+in float aAlpha;
+
+uniform float uViewportHeightPx;
+uniform float uBokehThickness;
+
+out vec2 vLocal;
+out vec3 vColor;
+out float vDof;
+out float vAlpha;
+
+void main()
+{
+    float isOrtho = step(0.5, projectionMatrix[3][3]);
+    vec3 camRight = normalize(vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]));
+    vec3 camUp = normalize(vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]));
+
+    vec4 clipCenter = projectionMatrix * viewMatrix * vec4(position, 1.0);
+    float denom = mix(max(abs(clipCenter.w), 0.05), 1.0, isOrtho);
+    float pxPerWorld = max((0.5 * max(uViewportHeightPx, 64.0) * abs(projectionMatrix[1][1])) / denom, 0.25);
+
+    float thick = clamp(uBokehThickness, 0.25, 2.5);
+    float worldR = (aRadiusPx * thick) / pxPerWorld;
+    vec3 worldPos = position + (camRight * aCorner.x + camUp * aCorner.y) * worldR;
+
+    vLocal = aCorner;
+    vColor = aColor;
+    vDof = aDof;
+    vAlpha = aAlpha;
+
+    gl_Position = projectionMatrix * viewMatrix * vec4(worldPos, 1.0);
+}
+`;
+
+export const BOKEH_BEAD_FRAG = /* glsl */ `
+in vec2 vLocal;
+in vec3 vColor;
+in float vDof;
+in float vAlpha;
+
+uniform float uBokehEmissive;
+
+out vec4 FragColor;
+
+void main()
+{
+    float r = length(vLocal);
+    if (r > 1.0) discard;
+
+    float dof = clamp(vDof, 0.0, 1.0);
+    float dof2 = dof * dof;
+    float sharpCore = exp(-r * r * mix(28.0, 6.2, dof2));
+    float bokehDisc = smoothstep(1.0, 0.72, r) * (0.09 + 0.14 * dof) * mix(0.14, 0.68, dof2);
+    float rimRing = exp(-pow((r - 0.76) * 5.6, 2.0)) * 0.18 * dof2 * dof;
+
+    float glow = clamp(uBokehEmissive, 0.25, 2.5);
+    float shapeAlpha = clamp(sharpCore * mix(1.0, 0.55, dof2) + bokehDisc + rimRing, 0.0, 1.0);
+    float a = clamp(shapeAlpha * vAlpha * glow, 0.0, 1.0);
+    if (a <= 0.004) discard;
+
+    vec3 rgb = mix(vColor, vec3(1.0), clamp(sharpCore * 0.90, 0.0, 0.95));
+    FragColor = vec4(rgb * a, a);
+}
+`;
+

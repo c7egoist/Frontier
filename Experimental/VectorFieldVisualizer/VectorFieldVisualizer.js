@@ -1088,6 +1088,7 @@ function RenderGpuLayersCard()
             ${[
                 ['Heatmap', 'GPU Heatmap'],
                 ['Vectors', '3D GPU Arrows'],
+                ['BokehRibbons', 'Bokeh Stream Ribbons'],
                 ['Streamlines', 'RK4 Streamlines'],
                 ['Bounds', 'Reach Bounds']
             ].map(([Key, Label]) => `
@@ -1146,6 +1147,11 @@ const STREAM_COLOR_PRESETS = [
 
 function BuildStreamlineControlsHtml(Viz, IsPopover = false)
 {
+    const BokehPal = Viz.BokehPalette || 'BokehTeal';
+    const BokehCount = Viz.BokehCount ?? 320;
+    const BokehSpeed = Viz.BokehSpeed ?? 0.45;
+    const BokehThick = Viz.BokehThickness ?? 1.0;
+    const BokehGlow = Viz.BokehEmissive ?? 1.0;
     const Mode = Viz.StreamColorMode || 'FieldPalette';
     const Col = Viz.StreamSingleColor || '#68dcff';
     const Thick = Viz.StreamThickness ?? 0.62;
@@ -1156,8 +1162,44 @@ function BuildStreamlineControlsHtml(Viz, IsPopover = false)
 
     return `
         <div class="property-card-head">
-            <h3>${IsPopover ? 'Streamline Style & Density' : 'RK4 Streamlines'}</h3>
-            <small>${Count} lines · ${Res} steps</small>
+            <h3>${IsPopover ? 'Bokeh &amp; Streamline Visualizers' : 'Bokeh &amp; RK4 Streamlines'}</h3>
+            <small>${BokehCount} bokeh · ${BokehSpeed.toFixed(2)}×</small>
+        </div>
+
+        <div class="prop-row">
+            <div class="prop-row-head"><span>Bokeh Ribbon Palette</span><small>DOF + Wake</small></div>
+            <select data-stream-select="BokehPalette">
+                <option value="BokehTeal" ${BokehPal === 'BokehTeal' ? 'selected' : ''}>Bokeh Mist Teal &amp; White</option>
+                <option value="FollowStreams" ${BokehPal === 'FollowStreams' ? 'selected' : ''}>Follow Streamline Palette</option>
+            </select>
+        </div>
+
+        <div class="prop-row">
+            <div class="prop-row-head"><span>Bokeh Flow Speed</span><small>${BokehSpeed.toFixed(2)}×</small></div>
+            <div class="slider-row">
+                <input type="range" data-stream-range="BokehSpeed" min="0.10" max="2.00" step="0.05" value="${BokehSpeed}" />
+                <div class="split-value"><input type="number" data-stream-num="BokehSpeed" min="0.10" max="2.00" step="0.05" value="${BokehSpeed.toFixed(2)}" /><span>×</span></div>
+            </div>
+        </div>
+
+        <div class="prop-row">
+            <div class="prop-row-head"><span>Bokeh Ribbon Count</span><small>${BokehCount} trails</small></div>
+            <div class="slider-row">
+                <input type="range" data-stream-range="BokehCount" min="80" max="1100" step="20" value="${BokehCount}" />
+                <div class="split-value"><input type="number" data-stream-num="BokehCount" min="80" max="1100" step="20" value="${BokehCount}" /><span>tr</span></div>
+            </div>
+        </div>
+
+        <div class="prop-row">
+            <div class="prop-row-head"><span>Bokeh Width &amp; Glow</span><small>${BokehThick.toFixed(2)}× · ${Math.round(BokehGlow * 100)}%</small></div>
+            <div class="slider-row">
+                <input type="range" data-stream-range="BokehThickness" min="0.35" max="2.20" step="0.05" value="${BokehThick}" />
+                <div class="split-value"><input type="number" data-stream-num="BokehThickness" min="0.35" max="2.20" step="0.05" value="${BokehThick.toFixed(2)}" /><span>×</span></div>
+            </div>
+            <div class="slider-row" style="margin-top:4px;">
+                <input type="range" data-stream-range="BokehEmissive" min="0.35" max="2.20" step="0.05" value="${BokehGlow}" />
+                <div class="split-value"><input type="number" data-stream-num="BokehEmissive" min="0.35" max="2.20" step="0.05" value="${BokehGlow.toFixed(2)}" /><span>em</span></div>
+            </div>
         </div>
 
         <div class="prop-row">
@@ -1251,8 +1293,15 @@ function RenderStreamlineHost(Host, IsPopover = false)
 
     const UpdateHeaderMeta = () => {
         const Sm = Host.querySelector('.property-card-head small');
-        if (Sm) Sm.textContent = `${Viz.StreamLineCount ?? 220} lines · ${Viz.StreamResolution ?? 28} steps`;
+        if (Sm) Sm.textContent = `${Viz.BokehCount ?? 320} bokeh · ${(Viz.BokehSpeed ?? 0.45).toFixed(2)}×`;
     };
+
+    Host.querySelector('[data-stream-select="BokehPalette"]')?.addEventListener('change', (E) => {
+        Viz.BokehPalette = E.target.value;
+        SyncVizUi();
+        RenderStreamlineHost(Host, IsPopover);
+        SyncAllStreamlineContainers(Host);
+    });
 
     Host.querySelector('[data-stream-select="StreamColorMode"]')?.addEventListener('change', (E) => {
         Viz.StreamColorMode = E.target.value;
@@ -1282,13 +1331,20 @@ function RenderStreamlineHost(Host, IsPopover = false)
         });
     });
 
-    const UniformKeys = new Set(['StreamThickness', 'StreamEmissive', 'StreamOpacity']);
+    const UniformKeys = new Set(['StreamThickness', 'StreamEmissive', 'StreamOpacity', 'BokehThickness', 'BokehEmissive', 'BokehSpeed']);
     Host.querySelectorAll('[data-stream-range]').forEach((Rng) => {
         const Key = Rng.dataset.streamRange;
         const Num = Host.querySelector(`[data-stream-num="${Key}"]`);
         const Small = Rng.closest('.prop-row')?.querySelector('.prop-row-head small');
         const FormatNum = (V) => Key === 'StreamOpacity' ? Math.round(V * 100) : (UniformKeys.has(Key) ? V.toFixed(2) : Math.round(V));
-        const FormatTag = (V) => Key === 'StreamThickness' ? `${V.toFixed(2)}×` : Key === 'StreamEmissive' || Key === 'StreamOpacity' ? `${Math.round(V * 100)}%` : Small?.textContent;
+        const FormatTag = (V) => {
+            if (Key === 'BokehThickness' || Key === 'BokehEmissive') return `${(Viz.BokehThickness ?? 1).toFixed(2)}× · ${Math.round((Viz.BokehEmissive ?? 1) * 100)}%`;
+            if (Key === 'BokehSpeed') return `${V.toFixed(2)}×`;
+            if (Key === 'BokehCount') return `${Math.round(V)} trails`;
+            if (Key === 'StreamThickness') return `${V.toFixed(2)}×`;
+            if (Key === 'StreamEmissive' || Key === 'StreamOpacity') return `${Math.round(V * 100)}%`;
+            return Small?.textContent;
+        };
 
         Rng.addEventListener('input', () => {
             const V = Number(Rng.value);
@@ -1380,6 +1436,13 @@ function SyncVizUi()
     });
     const SelStream = El('SelectStreamVis');
     if (SelStream) SelStream.value = Viz.StreamColorMode || 'FieldPalette';
+    const FooterStream = El('FooterStreamMode');
+    if (FooterStream)
+    {
+        FooterStream.textContent = (Viz.BokehRibbons && Viz.Streamlines)
+            ? 'BOKEH + RK4'
+            : (Viz.BokehRibbons ? 'BOKEH RIBBONS' : (Viz.Streamlines ? 'RK4 RIBBONS' : 'HIDDEN'));
+    }
 
     const ProjMode = Viewport.ViewMode || '3d';
     const AxisTag = All3 ? 'XZ+XY+YZ · Vol' : ActiveAxes.join('+');
@@ -1767,10 +1830,11 @@ function Tick(NowMs)
     const Dt = Math.min(0.05, Math.max(0.001, (NowMs - State.LastAnimMs) * 0.001));
     State.LastAnimMs = NowMs;
 
+    const StepMult = State.RunMode === 'play' ? 1.35 : 1.0;
     const IsRunning = State.RunMode !== 'edit' && !State.PlayPaused;
     if (IsRunning)
     {
-        State.SimTime += Dt * (State.RunMode === 'play' ? 1.35 : 1.0);
+        State.SimTime += Dt * StepMult;
         const ChangedTokens = StepAnimatedSources(State.Scene, State.SimTime, true);
         if (ChangedTokens.length > 0)
         {
@@ -1779,7 +1843,7 @@ function Tick(NowMs)
         }
     }
 
-    Viewport.RenderFrame(State.SimTime, Dt);
+    Viewport.RenderFrame(State.SimTime, Dt * StepMult, IsRunning);
 
     if (NowMs - State.LastTelemetryMs >= 140)
     {
