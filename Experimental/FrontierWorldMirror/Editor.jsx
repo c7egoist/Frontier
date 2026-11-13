@@ -73,6 +73,7 @@ import {
   SubscribeWorldDrag,
   WORLD_PLACEABLE_MODELS,
 } from "./WorldDragDrop.js";
+import { AnalyticalShapeThumbnail } from "./AnalyticalShapeThumbnail.jsx";
 import "./Editor.css";
 
 const ConstructExtraCones = [
@@ -2059,21 +2060,11 @@ function App() {
                     ])
                   }
                 >
-                  {Spec.PrimitiveShape === "cone" ? (
-                    <svg viewBox="0 0 18 18" width="13" height="13" fill="none" aria-hidden="true">
-                      <path d="M2.5 15.2h13" stroke="#7d828e" strokeWidth="1.6" strokeLinecap="round" />
-                      <path d="M5.2 14.6L8.1 3h1.8l2.9 11.6H5.2Z" fill="#ff5414" />
-                      <path d="M6.4 9.6l.65-2.6h3.9l.65 2.6H6.4Z" fill="#f5f7fc" />
-                    </svg>
-                  ) : Spec.PrimitiveShape === "cylinder-cone" ? (
-                    <svg viewBox="0 0 18 18" width="13" height="13" fill="none" aria-hidden="true">
-                      <ellipse cx="9" cy="15.2" rx="5.2" ry="1.3" fill="#6f7480" />
-                      <path d="M6.6 14.8L7.3 2.6h3.4l.7 12.2H6.6Z" fill="#f03e18" />
-                      <path d="M7.1 6.8l.15-2h3.5l.15 2H7.1ZM6.9 10.6l.15-2h3.9l.15 2H6.9Z" fill="#f5f7fc" />
-                    </svg>
-                  ) : (
-                    <Icon Name={Spec.Icon} Size={13} />
-                  )}
+                  <AnalyticalShapeThumbnail
+                    Shape={Spec.PrimitiveShape}
+                    Size={19}
+                    Style={{ borderRadius: 999, border: "1px solid rgba(255,255,255,0.14)" }}
+                  />
                   <span>{Spec.ShortLabel}</span>
                 </button>
               );

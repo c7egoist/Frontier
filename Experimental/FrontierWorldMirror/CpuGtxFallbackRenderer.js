@@ -1371,6 +1371,8 @@ export class CpuGtxRenderer {
       }
       this.OffscreenCanvas.width = W;
       this.OffscreenCanvas.height = H;
+    }
+    if (this.OffscreenCtx) {
       this.OffscreenImg = this.OffscreenCtx.createImageData(W, H);
       this.OutlineImg = this.OffscreenCtx.createImageData(W, H);
     } else {

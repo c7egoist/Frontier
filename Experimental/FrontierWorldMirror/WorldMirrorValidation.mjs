@@ -26,6 +26,7 @@ import {
   BuildActorPayloadFromModelSpec,
   WORLD_PLACEABLE_MODELS,
 } from "./WorldDragDrop.js";
+import { RenderAnalyticalThumbnailRgba } from "./ModelThumbnailRenderer.js";
 import { ResolveMaterial } from "./MaterialSpecification.js";
 import {
   ATLAS_COLS,
@@ -698,6 +699,23 @@ assert.ok(
       SlalomLvl.Rows.some((R) => R.PrimitiveShape === "cylinder-cone"),
     "Automotive Cone Slalom template provisions both Traffic Cones & Cylinder Cones",
   );
+
+  // Verify 3D Analytical OpenPBR Thumbnail Raytracer across Traffic Cone, Cylinder Cone & Analytical Shapes
+  for (const Shape of ["cone", "cylinder-cone", "box", "sphere", "cylinder", "torus"]) {
+    const Thumb = RenderAnalyticalThumbnailRgba({ Shape, Width: 64, Height: 64 });
+    assert.equal(Thumb.Pixels.length, 64 * 64 * 4, `Thumbnail RGBA buffer sized 64x64 for ${Shape}`);
+    let LitPixels = 0;
+    let OrangePixels = 0;
+    for (let P = 0; P < Thumb.Pixels.length; P += 4) {
+      const R = Thumb.Pixels[P], G = Thumb.Pixels[P + 1], B = Thumb.Pixels[P + 2];
+      if (R + G + B > 45) LitPixels += 1;
+      if (R > 165 && R > G * 1.45 && G > B * 1.15) OrangePixels += 1;
+    }
+    assert.ok(LitPixels > 64 * 64 * 0.25, `3D raytraced thumbnail for ${Shape} has lit studio surfaces`);
+    if (Shape === "cone" || Shape === "cylinder-cone") {
+      assert.ok(OrangePixels > 35, `3D raytraced thumbnail for ${Shape} renders safety-orange OpenPBR body (got ${OrangePixels} px)`);
+    }
+  }
 }
 
 console.log(

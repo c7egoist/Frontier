@@ -29,6 +29,7 @@ import {
   BuildActorPayloadFromAsset,
   EndWorldActorDrag,
 } from "./WorldDragDrop.js";
+import { AnalyticalShapeThumbnail } from "./AnalyticalShapeThumbnail.jsx";
 
 function FilePreview({ Asset }) {
   const [Source, Show] = useState(Asset.Data || ""),
@@ -111,61 +112,6 @@ const BrowserThemes = {
   Nord: { Panel: "#242933", Section: "#2e3440", Inset: "#1f242d", Raised: "#3b4252", Selected: "#3b4b5e", Border: "rgba(216,222,233,0.11)", Text: "#eceff4", Muted: "#9aa5b8" },
   GitHub: { Panel: "#0d1117", Section: "#161b22", Inset: "#090d12", Raised: "#21262d", Selected: "#1f2d42", Border: "rgba(240,246,252,0.10)", Text: "#e6edf3", Muted: "#8b949e" },
 };
-
-function ModelThumbSvg({ Shape }) {
-  if (Shape === "cone") {
-    return (
-      <svg viewBox="0 0 36 36" width="30" height="30" fill="none" aria-hidden="true">
-        <path d="M7 29.5L13 26.5H23L29 29.5L24.5 32.5H11.5L7 29.5Z" fill="#252830" stroke="#454a56" strokeWidth="1" />
-        <path d="M11.6 28L16.3 6.5H19.7L24.4 28C21 29.4 15 29.4 11.6 28Z" fill="#ff5414" />
-        <path d="M13.9 17.5L15.1 12H20.9L22.1 17.5C19.6 18.4 16.4 18.4 13.9 17.5Z" fill="#f4f6fb" />
-        <ellipse cx="18" cy="6.5" rx="1.7" ry="0.65" fill="#ff7c46" />
-      </svg>
-    );
-  }
-  if (Shape === "cylinder-cone") {
-    return (
-      <svg viewBox="0 0 36 36" width="30" height="30" fill="none" aria-hidden="true">
-        <ellipse cx="18" cy="29.5" rx="9.5" ry="2.8" fill="#23262e" stroke="#454a56" strokeWidth="1" />
-        <path d="M13.6 28.5L14.8 5.5H21.2L22.4 28.5C20 29.5 16 29.5 13.6 28.5Z" fill="#f03e18" />
-        <path d="M14.4 13.2L14.6 9.5H21.4L21.6 13.2C19.4 13.8 16.6 13.8 14.4 13.2Z" fill="#f5f7fc" />
-        <path d="M14.0 20.4L14.2 16.7H21.8L22.0 20.4C19.5 21.1 16.5 21.1 14.0 20.4Z" fill="#f5f7fc" />
-        <ellipse cx="18" cy="5.5" rx="3.2" ry="0.95" fill="#ff734e" />
-      </svg>
-    );
-  }
-  if (Shape === "sphere") {
-    return (
-      <svg viewBox="0 0 36 36" width="28" height="28" fill="none" aria-hidden="true">
-        <circle cx="18" cy="18" r="10.5" fill="rgba(220,226,234,0.22)" stroke="#d8dfe9" strokeWidth="1.4" />
-        <ellipse cx="18" cy="18" rx="10.5" ry="4" stroke="rgba(216,223,233,0.45)" strokeWidth="1" />
-        <circle cx="14.5" cy="13.5" r="2.2" fill="rgba(255,255,255,0.65)" />
-      </svg>
-    );
-  }
-  if (Shape === "cylinder") {
-    return (
-      <svg viewBox="0 0 36 36" width="28" height="28" fill="none" aria-hidden="true">
-        <path d="M10.5 10V26C10.5 27.9 13.8 29.5 18 29.5C22.2 29.5 25.5 27.9 25.5 26V10" fill="rgba(210,207,202,0.2)" stroke="#d4d0c8" strokeWidth="1.4" />
-        <ellipse cx="18" cy="10" rx="7.5" ry="3.2" fill="rgba(232,230,225,0.28)" stroke="#d4d0c8" strokeWidth="1.4" />
-      </svg>
-    );
-  }
-  if (Shape === "torus") {
-    return (
-      <svg viewBox="0 0 36 36" width="28" height="28" fill="none" aria-hidden="true">
-        <ellipse cx="18" cy="18.5" rx="11.5" ry="7.2" fill="rgba(200,137,84,0.22)" stroke="#dfa26d" strokeWidth="1.5" />
-        <ellipse cx="18" cy="18.5" rx="4.8" ry="2.6" fill="#181818" stroke="#dfa26d" strokeWidth="1.3" />
-      </svg>
-    );
-  }
-  return (
-    <svg viewBox="0 0 36 36" width="28" height="28" fill="none" aria-hidden="true">
-      <path d="M18 7.5L28 13V23.5L18 29L8 23.5V13L18 7.5Z" fill="rgba(212,208,200,0.2)" stroke="#d8d4cc" strokeWidth="1.4" />
-      <path d="M8 13L18 18.5L28 13M18 18.5V29" stroke="rgba(216,212,204,0.65)" strokeWidth="1.2" />
-    </svg>
-  );
-}
 
 function BrowserSvgIcon({ Name }) {
   return (
@@ -943,14 +889,18 @@ export default function AssetPanel({
                             display: "inline-flex",
                             alignItems: "center",
                             justifyContent: "center",
-                            width: 44,
-                            height: 44,
+                            width: 46,
+                            height: 46,
                             borderRadius: 10,
-                            background: "rgba(255, 255, 255, 0.04)",
-                            border: "1px solid rgba(255, 255, 255, 0.1)",
+                            overflow: "hidden",
+                            background: "#13151a",
+                            border: "1px solid rgba(255, 255, 255, 0.12)",
                           }}
                         >
-                          <ModelThumbSvg Shape={Asset.PrimitiveShape} />
+                          <AnalyticalShapeThumbnail
+                            Shape={Asset.PrimitiveShape || "sphere"}
+                            Size={44}
+                          />
                         </span>
                       ) : Asset.Kind === "Forces" ? (
                         <span
@@ -1204,6 +1154,28 @@ export default function AssetPanel({
                       />
                     ) : Current.Id === "engine-shaderball" ? (
                       <ShaderballPanel Material={ResolveMaterial({})} Compact />
+                    ) : Current.Kind === "Models" && Current.PrimitiveShape ? (
+                      <div
+                        className="asset-file-preview"
+                        draggable
+                        onDragStart={(Ev) => BeginAssetWorldDrag(Ev, Current)}
+                        onDragEnd={EndAssetWorldDrag}
+                        title="Drag into the 3D scene to place"
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          padding: "10px",
+                          cursor: "grab",
+                        }}
+                      >
+                        <AnalyticalShapeThumbnail
+                          Shape={Current.PrimitiveShape}
+                          Size={180}
+                          Style={{ border: "1px solid rgba(255,255,255,0.1)" }}
+                        />
+                      </div>
                     ) : (
                       <FilePreview key={Current.Id} Asset={Current} />
                     )}
