@@ -40,7 +40,7 @@ import { PE } from "./pe.js";
       const U = GPUBufferUsage;
       this.engine = engine;
       this.cap = Math.max(64, Math.floor(params.capacity));
-      this.isRibbon = !params.transition && ((params.curlMode || 0) === 3 || (params.trailMode || 0) > 0);
+      this.isRibbon = !params.transition && ((params.curlMode || 0) === 3 || (params.trailMode || 0) > 0 || (params.webMode || 0) > 0);
       this.parts = d.createBuffer({ size: this.cap * PART_BYTES, usage: U.STORAGE | U.COPY_SRC | U.COPY_DST });
       this.snap = d.createBuffer({ size: this.cap * PART_BYTES, usage: U.STORAGE | U.COPY_DST });
       this.trail = this.isRibbon ? d.createBuffer({ size: this.cap * TRAIL_SEGS * 16, usage: U.STORAGE | U.COPY_DST }) : null;
@@ -671,16 +671,20 @@ import { PE } from "./pe.js";
     set("phys4", p.boxHalf[0], p.boxHalf[1], p.boxHalf[2], o.head);
     const hasArc = p.arcMode === 0 || p.arcMode === 1;
     const hasBeam = (p.beamMode || 0) > 0;
-    const isRibbon = (p.curlMode || 0) === 3;
     const isBoid = p.kind === 6;
     const isTrans = p.kind === 5 && !!p.transition;
+    const webMode = !isTrans && !hasArc && !hasBeam && !isBoid ? Math.max(0, Math.min(2, p.webMode | 0)) : 0;
+    const isRibbon = !webMode && (p.curlMode || 0) === 3;
     const tp = p.targetPos || [o.origin[0] + 4, o.origin[1], o.origin[2]];
-    set("mol", p.curlMode || 0, p.curlFreq ?? 0.85, p.curlAmp ?? 2.2, p.curlRate ?? 0.24);
+    set("mol", webMode > 0 ? (3 + webMode) : (p.curlMode || 0), p.curlFreq ?? 0.85, p.curlAmp ?? 2.2, webMode > 0 ? (p.webSpinRate ?? 1.0) : (p.curlRate ?? 0.24));
     if (isTrans) {
       const tr = p.transition;
       const waveId = tr.wave === "melt" ? 1 : tr.wave === "glitch" ? 2 : 0;
       set("mol2", waveId, tr.after === "butterfly" ? 1 : 0, tr.assemble | 0, tr.fragment ? 1 : 0);
       set("mol3", tr.holdBase ?? 0.5, tr.holdSpread ?? 1.5, tr.burstShare ?? 0.5, tr.childLife ?? 1.2);
+    } else if (webMode > 0) {
+      set("mol2", p.webSpokes ?? 18, p.webRings ?? 14, p.webSag ?? 0.16, p.webDew ?? 0.85);
+      set("mol3", 0, 0, 0, o.preseedCurtain ? 1 : 0);
     } else if (isRibbon) {
       set("mol2", p.shellRadius ?? 1.75, p.streakThin ?? 1.0, p.objectShape ?? 0, p.pulseMode ?? 0);
       set("mol3", p.pulseAxis ?? 0, p.pulseSpeed ?? 0.34, p.pulseWidth ?? 0.22, o.preseedCurtain ? 1 : 0);

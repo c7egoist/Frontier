@@ -145,6 +145,257 @@ function SurfacePourVel(Px, Py, Pz, Ox, Oy, Oz, Ex, Ey, Ez, ObjSh, AxIdx, T, Fre
     return [Dx - N[0] * DotDN, Dy - N[1] * DotDN, Dz - N[2] * DotDN];
 }
 
+// Deterministic 1:1 CPU parity helpers for Spiderweb (webMode 1 = Orb-Weave, 2 = Messy Cobwebs)
+function WebHash(Seed, K)
+{
+    const S = Math.sin(Seed * 12.9898 + K * 78.233) * 43758.5453123;
+    return S - Math.floor(S);
+}
+
+function WebSwayAt(Px, Py, Pz, WindT, WindScale, Amp, Freq, WindCoupling, FieldScene, Prepared, Solo, WindFactor)
+{
+    let Wx = 0, Wy = 0, Wz = 0;
+    if (FieldScene && Prepared && PE.Forces?.EvaluateAllPrepared)
+    {
+        const F = PE.Forces.EvaluateAllPrepared(FieldScene, Prepared, Px, Py, Pz, 0.5, Solo, 'Particles');
+        Wx = F.Velocity[0] * WindFactor * WindCoupling * WindScale * 0.045 + F.Acceleration[0] * 0.025 * 0.42;
+        Wy = F.Velocity[1] * WindFactor * WindCoupling * WindScale * 0.045 + F.Acceleration[1] * 0.025 * 0.42;
+        Wz = F.Velocity[2] * WindFactor * WindCoupling * WindScale * 0.045 + F.Acceleration[2] * 0.025 * 0.42;
+    }
+    const C = AnalyticCurl3(Px * Freq * 0.45 + WindT * 0.58, Py * Freq * 0.45 - WindT * 0.36, Pz * Freq * 0.45 + WindT * 0.46);
+    const GScale = Amp * 0.16 * WindScale;
+    let Ox = Wx + C[0] * GScale, Oy = Wy + C[1] * GScale, Oz = Wz + C[2] * GScale;
+    const M = Math.hypot(Ox, Oy, Oz);
+    if (M > 0.38) { const S = 0.38 / M; Ox *= S; Oy *= S; Oz *= S; }
+    return [Ox, Oy, Oz];
+}
+
+const ORB_ANCHOR_ANGS = [0.14, 1.12, 2.28, 3.32, 4.34, 5.42];
+const ORB_ANCHOR_RADS = [1.28, 1.14, 1.32, 1.16, 1.26, 1.18];
+
+function OrbFrameEdgeLocal(Theta, R)
+{
+    const Dx = Math.cos(Theta), Dy = Math.sin(Theta);
+    let BestT = R * 1.15;
+    for (let G = 0; G < 6; G++)
+    {
+        const G1 = (G + 1) % 6;
+        const Ax = Math.cos(ORB_ANCHOR_ANGS[G]) * R * ORB_ANCHOR_RADS[G];
+        const Ay = Math.sin(ORB_ANCHOR_ANGS[G]) * R * ORB_ANCHOR_RADS[G];
+        const Bx = Math.cos(ORB_ANCHOR_ANGS[G1]) * R * ORB_ANCHOR_RADS[G1];
+        const By = Math.sin(ORB_ANCHOR_ANGS[G1]) * R * ORB_ANCHOR_RADS[G1];
+        const Ex = Bx - Ax, Ey = By - Ay;
+        const Den = Dx * Ey - Dy * Ex;
+        if (Math.abs(Den) > 1e-4)
+        {
+            const TRay = (Ax * Ey - Ay * Ex) / Den;
+            const UEdge = (Ax * Dy - Ay * Dx) / Den;
+            if (TRay > 0 && UEdge >= -0.02 && UEdge <= 1.02 && TRay < BestT) BestT = TRay;
+        }
+    }
+    return [Dx * BestT, Dy * BestT, 0];
+}
+
+function CobwebPocketPoint(SeedVal, Pocket, Role, Org, BR, BU, BF, Ext)
+{
+    let Px = 0, Py = 0, Pz = 0;
+    if (Pocket === 0) { Px = -Ext[0] * 0.52; Py = Ext[1] * 0.36; Pz = -Ext[2] * 0.28; }
+    else if (Pocket === 1) { Px = Ext[0] * 0.08; Py = Ext[1] * 0.46; Pz = 0.08 * Ext[2]; }
+    else { Px = Ext[0] * 0.56; Py = Ext[1] * 0.22; Pz = -Ext[2] * 0.20; }
+    const U0 = WebHash(SeedVal, 1), U1 = WebHash(SeedVal, 2), U2 = WebHash(SeedVal, 3);
+    let Lx, Ly, Lz;
+    if (Role === 0)
+    {
+        Lx = Px + (U0 - 0.5) * Ext[0] * 0.88;
+        Ly = Py + Ext[1] * (0.42 + 0.28 * U1);
+        Lz = Pz + (U2 - 0.5) * Ext[2] * 0.65;
+    }
+    else if (Role === 1)
+    {
+        Lx = Px - Ext[0] * (0.38 + 0.38 * U0);
+        Ly = Py + (U1 * 1.15 - 0.68) * Ext[1];
+        Lz = Pz + (U2 - 0.5) * Ext[2] * 0.72;
+    }
+    else
+    {
+        Lx = Px + Ext[0] * (0.28 + 0.44 * U0);
+        Ly = Py + (U1 * 1.05 - 0.58) * Ext[1];
+        Lz = Pz + (U2 - 0.5) * Ext[2] * 0.72;
+    }
+    return [
+        Org[0] + BR[0] * Lx + BU[0] * Ly + BF[0] * Lz,
+        Org[1] + BR[1] * Lx + BU[1] * Ly + BF[1] * Lz,
+        Org[2] + BR[2] * Lx + BU[2] * Ly + BF[2] * Lz
+    ];
+}
+
+function EvalCobwebChord(CIdx, Org, BR, BU, BF, Ext, SagBase)
+{
+    const Sd = CIdx * 37 + 13;
+    const Pocket = CIdx % 3;
+    const RA = Math.floor(WebHash(Sd, 5) * 3) % 3;
+    const RB = (RA + 1 + Math.floor(WebHash(Sd, 6) * 2)) % 3;
+    const A = CobwebPocketPoint(Sd + 1.1, Pocket, RA, Org, BR, BU, BF, Ext);
+    const B = CobwebPocketPoint(Sd + 7.9, Pocket, RB, Org, BR, BU, BF, Ext);
+    const Len = Math.hypot(B[0] - A[0], B[1] - A[1], B[2] - A[2]);
+    const Sag = SagBase * (0.55 + 1.25 * WebHash(Sd, 8)) * Math.min(1.55, Math.max(0.45, Len / 2.2));
+    return { a: A, b: B, sag: Sag };
+}
+
+function EvalSpiderwebStrandCPU(P, Slot, Cap, WebMode, TWeb, WindT, FieldScene, Prepared, Solo, WindFactor)
+{
+    const Org = P.origin || [0, 2, 0];
+    const [BR, BU, BF] = BasisFrom(P.dir || [0, 0, 1]);
+    const Amp = P.curlAmp ?? 0.36;
+    const Freq = Math.max(0.2, P.curlFreq ?? 1.1);
+    const WindC = P.windCoupling ?? 1.0;
+    const Spokes = Math.min(32, Math.max(8, Math.round(P.webSpokes ?? 18)));
+    const RingsT = Math.min(22, Math.max(6, P.webRings ?? 14));
+    const SagBase = Math.max(0, P.webSag ?? 0.14);
+    const SwayFn = (Q, Ws, A = Amp, F = Freq) => WebSwayAt(Q[0], Q[1], Q[2], WindT, Ws, A, F, WindC, FieldScene, Prepared, Solo, WindFactor);
+
+    if (WebMode === 1)
+    {
+        const R = Math.max(0.45, P.radius || 2.05);
+        const HubBase = [Org[0] + BU[0] * (-0.05 * R), Org[1] + BU[1] * (-0.05 * R), Org[2] + BU[2] * (-0.05 * R)];
+        const HS = SwayFn(HubBase, 0.24);
+        const Hub = [HubBase[0] + HS[0], HubBase[1] + HS[1], HubBase[2] + HS[2]];
+        if (Slot < 6)
+        {
+            const T0 = 0.03 + Slot * 0.06, Dur = 0.24;
+            if (TWeb < T0) return { visible: false };
+            const S1 = (Slot + 1) % 6;
+            const Ax = Math.cos(ORB_ANCHOR_ANGS[Slot]) * R * ORB_ANCHOR_RADS[Slot], Ay = Math.sin(ORB_ANCHOR_ANGS[Slot]) * R * ORB_ANCHOR_RADS[Slot];
+            const Bx = Math.cos(ORB_ANCHOR_ANGS[S1]) * R * ORB_ANCHOR_RADS[S1], By = Math.sin(ORB_ANCHOR_ANGS[S1]) * R * ORB_ANCHOR_RADS[S1];
+            const RawA = [Org[0] + BR[0] * Ax + BU[0] * Ay, Org[1] + BR[1] * Ax + BU[1] * Ay, Org[2] + BR[2] * Ax + BU[2] * Ay];
+            const RawB = [Org[0] + BR[0] * Bx + BU[0] * By, Org[1] + BR[1] * Bx + BU[1] * By, Org[2] + BR[2] * Bx + BU[2] * By];
+            const SA = SwayFn(RawA, 0.08), SB = SwayFn(RawB, 0.08);
+            const PA = [RawA[0] + SA[0], RawA[1] + SA[1], RawA[2] + SA[2]], PB = [RawB[0] + SB[0], RawB[1] + SB[1], RawB[2] + SB[2]];
+            const Grow = Math.min(1, Math.max(0, (TWeb - T0) / Dur));
+            const Tip = [PA[0] + (PB[0] - PA[0]) * Grow, PA[1] + (PB[1] - PA[1]) * Grow, PA[2] + (PB[2] - PA[2]) * Grow];
+            const Len = Math.hypot(PB[0] - PA[0], PB[1] - PA[1], PB[2] - PA[2]);
+            const HFrac = Math.min(1, Math.max(0.15, Math.hypot(PB[0] - PA[0], PB[2] - PA[2]) / Math.max(Len, 1e-4)));
+            return { visible: true, pA: PA, pB: Tip, tip: Tip, sag: SagBase * 0.42 * HFrac * Grow, windScale: 0.12, tipWhip: 0, grow: Grow, bead: Grow < 0.99 ? 1 : 0, role: 0.12 };
+        }
+        if (Slot < 12)
+        {
+            const G = Slot - 6;
+            const T0 = 0.25 + G * 0.04, Dur = 0.18;
+            if (TWeb < T0) return { visible: false };
+            const Ax = Math.cos(ORB_ANCHOR_ANGS[G]) * R * ORB_ANCHOR_RADS[G], Ay = Math.sin(ORB_ANCHOR_ANGS[G]) * R * ORB_ANCHOR_RADS[G];
+            const RawA = [Org[0] + BR[0] * Ax + BU[0] * Ay, Org[1] + BR[1] * Ax + BU[1] * Ay, Org[2] + BR[2] * Ax + BU[2] * Ay];
+            const SA = SwayFn(RawA, 0.08);
+            const PA = [RawA[0] + SA[0], RawA[1] + SA[1], RawA[2] + SA[2]];
+            const PB = [Org[0] + BR[0] * Ax * 1.18 + BU[0] * Ay * 1.18, Org[1] + BR[1] * Ax * 1.18 + BU[1] * Ay * 1.18, Org[2] + BR[2] * Ax * 1.18 + BU[2] * Ay * 1.18];
+            const Grow = Math.min(1, Math.max(0, (TWeb - T0) / Dur));
+            const Tip = [PA[0] + (PB[0] - PA[0]) * Grow, PA[1] + (PB[1] - PA[1]) * Grow, PA[2] + (PB[2] - PA[2]) * Grow];
+            return { visible: true, pA: PA, pB: Tip, tip: Tip, sag: SagBase * 0.15 * Grow, windScale: 0.08, tipWhip: 0, grow: Grow, bead: Grow < 0.99 ? 1 : 0, role: 0.08 };
+        }
+        if (Slot < 12 + Spokes)
+        {
+            const SIdx = Slot - 12;
+            const T0 = 0.42 + SIdx * 0.030, Dur = 0.22;
+            if (TWeb < T0) return { visible: false };
+            const Jit = (WebHash(SIdx * 19 + 3, 1) - 0.5) * 0.032;
+            const Theta = (SIdx / Spokes) * Math.PI * 2 + Jit;
+            const Loc = OrbFrameEdgeLocal(Theta, R);
+            const RawB = [Org[0] + BR[0] * Loc[0] + BU[0] * Loc[1], Org[1] + BR[1] * Loc[0] + BU[1] * Loc[1], Org[2] + BR[2] * Loc[0] + BU[2] * Loc[1]];
+            const SB = SwayFn(RawB, 0.08);
+            const PB = [RawB[0] + SB[0], RawB[1] + SB[1], RawB[2] + SB[2]];
+            const Grow = Math.min(1, Math.max(0, (TWeb - T0) / Dur));
+            const Tip = [Hub[0] + (PB[0] - Hub[0]) * Grow, Hub[1] + (PB[1] - Hub[1]) * Grow, Hub[2] + (PB[2] - Hub[2]) * Grow];
+            const Len = Math.hypot(PB[0] - Hub[0], PB[1] - Hub[1], PB[2] - Hub[2]);
+            const HFrac = Math.min(1, Math.max(0.12, Math.hypot(PB[0] - Hub[0], PB[2] - Hub[2]) / Math.max(Len, 1e-4)));
+            return { visible: true, pA: Hub, pB: Tip, tip: Tip, sag: SagBase * 0.20 * HFrac * Grow, windScale: 0.16, tipWhip: 0, grow: Grow, bead: Grow < 0.99 ? 1 : 0, role: 0.22 };
+        }
+        const SpiralIdx = Slot - 12 - Spokes;
+        const MaxAvail = Math.max(1, Cap - 12 - Spokes);
+        const TargetSegs = Math.min(MaxAvail, Spokes * Math.round(RingsT));
+        if (SpiralIdx >= TargetSegs) return { visible: false };
+        const T0 = 1.05 + SpiralIdx * (6.2 / Math.max(1, TargetSegs)), Dur = 0.028;
+        if (TWeb < T0) return { visible: false };
+        const S0 = SpiralIdx % Spokes, S1 = (SpiralIdx + 1) % Spokes;
+        const HubSegs = Spokes * 2;
+        const UTotal0 = Math.min(1, SpiralIdx / TargetSegs);
+        const RF0 = SpiralIdx < HubSegs ? (0.035 + 0.07 * (SpiralIdx / Math.max(1, HubSegs))) : (0.20 + 0.72 * Math.pow(Math.max(0, (SpiralIdx - HubSegs) / Math.max(1, TargetSegs - HubSegs)), 0.92));
+        const RF1 = (SpiralIdx + 1) < HubSegs ? (0.035 + 0.07 * ((SpiralIdx + 1) / Math.max(1, HubSegs))) : (0.20 + 0.72 * Math.pow(Math.max(0, (SpiralIdx + 1 - HubSegs) / Math.max(1, TargetSegs - HubSegs)), 0.92));
+        const Th0 = (S0 / Spokes) * Math.PI * 2 + (WebHash(S0 * 19 + 3, 1) - 0.5) * 0.032;
+        const Th1 = (S1 / Spokes) * Math.PI * 2 + (WebHash(S1 * 19 + 3, 1) - 0.5) * 0.032;
+        const L0 = OrbFrameEdgeLocal(Th0, R), L1 = OrbFrameEdgeLocal(Th1, R);
+        const R0 = [Org[0] + BR[0] * L0[0] + BU[0] * L0[1], Org[1] + BR[1] * L0[0] + BU[1] * L0[1], Org[2] + BR[2] * L0[0] + BU[2] * L0[1]];
+        const R1 = [Org[0] + BR[0] * L1[0] + BU[0] * L1[1], Org[1] + BR[1] * L1[0] + BU[1] * L1[1], Org[2] + BR[2] * L1[0] + BU[2] * L1[1]];
+        const SW0 = SwayFn(R0, 0.08), SW1 = SwayFn(R1, 0.08);
+        const E0 = [R0[0] + SW0[0], R0[1] + SW0[1], R0[2] + SW0[2]];
+        const E1 = [R1[0] + SW1[0], R1[1] + SW1[1], R1[2] + SW1[2]];
+        const SpLen0 = Math.hypot(E0[0] - Hub[0], E0[1] - Hub[1], E0[2] - Hub[2]);
+        const SpLen1 = Math.hypot(E1[0] - Hub[0], E1[1] - Hub[1], E1[2] - Hub[2]);
+        const SpH0 = Math.min(1, Math.max(0.12, Math.hypot(E0[0] - Hub[0], E0[2] - Hub[2]) / Math.max(SpLen0, 1e-4)));
+        const SpH1 = Math.min(1, Math.max(0.12, Math.hypot(E1[0] - Hub[0], E1[2] - Hub[2]) / Math.max(SpLen1, 1e-4)));
+        const PA = [Hub[0] + (E0[0] - Hub[0]) * RF0, Hub[1] + (E0[1] - Hub[1]) * RF0 - 4 * SagBase * 0.20 * SpH0 * RF0 * (1 - RF0), Hub[2] + (E0[2] - Hub[2]) * RF0];
+        const PB = [Hub[0] + (E1[0] - Hub[0]) * RF1, Hub[1] + (E1[1] - Hub[1]) * RF1 - 4 * SagBase * 0.20 * SpH1 * RF1 * (1 - RF1), Hub[2] + (E1[2] - Hub[2]) * RF1];
+        const Grow = Math.min(1, Math.max(0, (TWeb - T0) / Dur));
+        const Tip = [PA[0] + (PB[0] - PA[0]) * Grow, PA[1] + (PB[1] - PA[1]) * Grow, PA[2] + (PB[2] - PA[2]) * Grow];
+        const LenSeg = Math.hypot(PB[0] - PA[0], PB[1] - PA[1], PB[2] - PA[2]);
+        const HSeg = Math.min(1, Math.max(0.12, Math.hypot(PB[0] - PA[0], PB[2] - PA[2]) / Math.max(LenSeg, 1e-4)));
+        const SagSeg = SagBase * (0.22 + 0.55 * UTotal0) * HSeg * Math.min(1.25, Math.max(0.35, LenSeg / Math.max(0.28, R * 0.36))) * Grow;
+        const Bead = Grow < 0.99 ? 1.0 : ((SpiralIdx % 3) === 0 ? 0.42 : 0.0);
+        return { visible: true, pA: PA, pB: Tip, tip: Tip, sag: SagSeg, windScale: 0.07, tipWhip: 0, grow: Grow, bead: Bead, role: 0.45 + 0.50 * UTotal0 };
+    }
+
+    const Ext = [Math.max(0.65, P.boxHalf?.[0] || 2.05), Math.max(0.65, P.boxHalf?.[1] || 1.55), Math.max(0.65, P.boxHalf?.[2] || 1.65)];
+    const NChords = Math.min(Math.floor(Cap / 2), Math.max(16, Math.floor(Cap * Math.min(0.38, Math.max(0.24, Spokes * 0.020)))));
+    const NTangle = Math.min(Cap - 16, Math.max(NChords + 1, NChords + Math.floor(Cap * Math.min(0.42, Math.max(0.28, RingsT * 0.032)))));
+    if (Slot < NChords)
+    {
+        const T0 = 0.04 + (Slot / NChords) * 1.45, Dur = 0.28;
+        if (TWeb < T0) return { visible: false };
+        const Ch = EvalCobwebChord(Slot, Org, BR, BU, BF, Ext, SagBase);
+        const Grow = Math.min(1, Math.max(0, (TWeb - T0) / Dur));
+        const Tip = [Ch.a[0] + (Ch.b[0] - Ch.a[0]) * Grow, Ch.a[1] + (Ch.b[1] - Ch.a[1]) * Grow, Ch.a[2] + (Ch.b[2] - Ch.a[2]) * Grow];
+        return { visible: true, pA: Ch.a, pB: Tip, tip: Tip, sag: Ch.sag * Grow, windScale: 0.22, tipWhip: 0, grow: Grow, bead: Grow < 0.99 ? 0.85 : 0, role: 0.2 };
+    }
+    if (Slot < NTangle)
+    {
+        const IdxT = Slot - NChords, SpanT = Math.max(1, NTangle - NChords);
+        const T0 = 1.25 + (IdxT / SpanT) * 2.85, Dur = 0.16;
+        if (TWeb < T0) return { visible: false };
+        const Sd = Slot * 53 + 19;
+        const CA = Math.floor(WebHash(Sd, 1) * NChords) % NChords;
+        const Pocket = CA % 3;
+        const Step3 = 1 + Math.floor(WebHash(Sd, 2) * Math.max(2, NChords / 4));
+        const CB = (Pocket + (Math.floor((CA - Pocket) / 3) + Step3) * 3) % NChords;
+        const UA = 0.10 + 0.80 * WebHash(Sd, 3), UB = 0.10 + 0.80 * WebHash(Sd, 4);
+        const ChA = EvalCobwebChord(CA, Org, BR, BU, BF, Ext, SagBase);
+        const ChB = EvalCobwebChord(CB, Org, BR, BU, BF, Ext, SagBase);
+        const RawA = [ChA.a[0] + (ChA.b[0] - ChA.a[0]) * UA, ChA.a[1] + (ChA.b[1] - ChA.a[1]) * UA - 4 * ChA.sag * UA * (1 - UA), ChA.a[2] + (ChA.b[2] - ChA.a[2]) * UA];
+        const RawB = [ChB.a[0] + (ChB.b[0] - ChB.a[0]) * UB, ChB.a[1] + (ChB.b[1] - ChB.a[1]) * UB - 4 * ChB.sag * UB * (1 - UB), ChB.a[2] + (ChB.b[2] - ChB.a[2]) * UB];
+        const SA = SwayFn(RawA, 0.24 * 4 * UA * (1 - UA)), SB = SwayFn(RawB, 0.24 * 4 * UB * (1 - UB));
+        const PA = [RawA[0] + SA[0], RawA[1] + SA[1], RawA[2] + SA[2]], PB = [RawB[0] + SB[0], RawB[1] + SB[1], RawB[2] + SB[2]];
+        const Grow = Math.min(1, Math.max(0, (TWeb - T0) / Dur));
+        const Tip = [PA[0] + (PB[0] - PA[0]) * Grow, PA[1] + (PB[1] - PA[1]) * Grow, PA[2] + (PB[2] - PA[2]) * Grow];
+        const Len = Math.hypot(PB[0] - PA[0], PB[1] - PA[1], PB[2] - PA[2]);
+        const Sag = SagBase * (0.45 + 0.95 * WebHash(Sd, 5)) * Math.min(1.4, Math.max(0.3, Len / 1.8)) * Grow;
+        return { visible: true, pA: PA, pB: Tip, tip: Tip, sag: Sag, windScale: 0.38, tipWhip: 0, grow: Grow, bead: Grow < 0.99 ? 0.85 : ((IdxT % 4) === 0 ? 0.3 : 0), role: 0.55 };
+    }
+    const IdxD = Slot - NTangle, SpanD = Math.max(1, Cap - NTangle);
+    const T0 = 3.15 + (IdxD / SpanD) * 1.95, Dur = 0.22;
+    if (TWeb < T0) return { visible: false };
+    const Sd = Slot * 71 + 41;
+    const CP = Math.floor(WebHash(Sd, 1) * NChords) % NChords;
+    const UP = 0.16 + 0.68 * WebHash(Sd, 2);
+    const ChP = EvalCobwebChord(CP, Org, BR, BU, BF, Ext, SagBase);
+    const RawP = [ChP.a[0] + (ChP.b[0] - ChP.a[0]) * UP, ChP.a[1] + (ChP.b[1] - ChP.a[1]) * UP - 4 * ChP.sag * UP * (1 - UP), ChP.a[2] + (ChP.b[2] - ChP.a[2]) * UP];
+    const SP = SwayFn(RawP, 0.24 * 4 * UP * (1 - UP));
+    const PA = [RawP[0] + SP[0], RawP[1] + SP[1], RawP[2] + SP[2]];
+    const DLen = 0.55 + 0.90 * WebHash(Sd, 3);
+    const Dr = [(WebHash(Sd, 4) - 0.5) * 0.26, -DLen, (WebHash(Sd, 5) - 0.5) * 0.26];
+    const SD = SwayFn([PA[0] + Dr[0], PA[1] + Dr[1], PA[2] + Dr[2]], 0.85, Amp * 1.25, Freq * 1.2);
+    const PB = [PA[0] + Dr[0] + SD[0], PA[1] + Dr[1] + SD[1], PA[2] + Dr[2] + SD[2]];
+    const Grow = Math.min(1, Math.max(0, (TWeb - T0) / Dur));
+    const Tip = [PA[0] + (PB[0] - PA[0]) * Grow, PA[1] + (PB[1] - PA[1]) * Grow, PA[2] + (PB[2] - PA[2]) * Grow];
+    return { visible: true, pA: PA, pB: Tip, tip: Tip, sag: 0.05 * DLen * Grow, windScale: 0.22, tipWhip: 1.15, grow: Grow, bead: Grow < 0.99 ? 0.85 : 0.24, role: 0.85 };
+}
+
 export class SoftwarePreviewEngine
 {
     constructor(Canvas)
@@ -431,20 +682,21 @@ export class SoftwarePreviewEngine
         for (const Job of jobs)
         {
             const Sys = Job.gpu, P = Sys.P;
-            const CurlMode = P.curlMode || 0;
+            const Tr = P.kind === 5 ? (P.transition || null) : null;
+            const WebMode = !Tr && P.arcMode !== 0 && P.arcMode !== 1 && !(P.beamMode > 0) && P.kind !== 6 ? Math.max(0, Math.min(2, P.webMode | 0)) : 0;
+            const CurlMode = WebMode > 0 ? (3 + WebMode) : (P.curlMode || 0);
             if (Job.simulate && Dt > 0)
             {
-                const Tr = P.kind === 5 ? (P.transition || null) : null;
-                const MaxSoft = Tr ? Math.min(Sys.cap, 384) : (CurlMode === 3 ? Math.min(Sys.cap, 520) : (CurlMode > 0 ? Math.min(Sys.cap, 1250) : Math.min(Sys.cap, 360)));
+                const MaxSoft = WebMode > 0 ? Sys.cap : (Tr ? Math.min(Sys.cap, 384) : (CurlMode === 3 ? Math.min(Sys.cap, 520) : (CurlMode > 0 ? Math.min(Sys.cap, 1250) : Math.min(Sys.cap, 360))));
                 const BHx = P.boxHalf?.[0] || 0.8, BHy = P.boxHalf?.[1] || BHx, BHz = P.boxHalf?.[2] || BHx;
                 {
                     if (Job.emitN > 0)
                     {
-                        if (Job.preseedCurtain || (CurlMode > 0 && Sys.particles.length < 24)) Sys.preseedCurtain = true;
+                        if (Job.preseedCurtain || (CurlMode > 0 && WebMode === 0 && Sys.particles.length < 24)) Sys.preseedCurtain = true;
                         const Basis = BasisFrom(P.dir || [0, 1, 0]);
                         const [Bu, Bv, Bw] = Basis;
-                        const PerStepMax = Tr ? MaxSoft : (CurlMode > 0 ? (Sys.preseedCurtain ? (CurlMode === 3 ? 520 : 1100) : 120) : (P.arcMode === 0 || P.arcMode === 1 ? 80 : (Sys.preseedCurtain ? 260 : 28)));
-                        const SpawnCap = Math.min(PerStepMax, Sys.preseedCurtain && CurlMode > 0 ? MaxSoft : Job.emitN, Math.max(0, MaxSoft - Sys.particles.length));
+                        const PerStepMax = WebMode > 0 ? MaxSoft : (Tr ? MaxSoft : (CurlMode > 0 ? (Sys.preseedCurtain ? (CurlMode === 3 ? 520 : 1100) : 120) : (P.arcMode === 0 || P.arcMode === 1 ? 80 : (Sys.preseedCurtain ? 260 : 28))));
+                        const SpawnCap = Math.min(PerStepMax, Sys.preseedCurtain && CurlMode > 0 && WebMode === 0 ? MaxSoft : Job.emitN, Math.max(0, MaxSoft - Sys.particles.length));
                         const CosMax = Math.cos(P.spread ?? 0.6);
                         const EmitSh = P.emitShape ?? 0;
                         const Rad = P.radius || 0.25;
@@ -509,7 +761,16 @@ export class SoftwarePreviewEngine
                             let SpawnAge = 0;
                             let Crest = 0.4;
                             let Trail = null;
-                            if (CurlMode === 3)
+                            let SlotIdx = Sys.particles.length;
+                            if (WebMode > 0)
+                            {
+                                Px = EOrig[0]; SpawnY = EOrig[1]; Pz = EOrig[2];
+                                Vx = 0; Vy = 0; Vz = 0;
+                                Life = 1e9;
+                                Trail = [];
+                                for (let K = 0; K < 20; K++) Trail.push([Px, SpawnY, Pz]);
+                            }
+                            else if (CurlMode === 3)
                             {
                                 const FR = Time * CurlRate;
                                 const PMode = P.pulseMode || 0;
@@ -762,6 +1023,7 @@ export class SoftwarePreviewEngine
                                 x1: Px - Vx * 0.032, y1: SpawnY - Vy * 0.032, z1: Pz - Vz * 0.032,
                                 x2: Px - Vx * 0.068, y2: SpawnY - Vy * 0.068, z2: Pz - Vz * 0.068,
                                 trail: Trail, bokeh: Math.random(),
+                                slotIdx: SlotIdx, visibleStrand: WebMode === 0, grow: 1, bead: 0, role: 0, wx: 0, wy: 0, wz: 0,
                                 hold: Hold, asm: AsmMode, startPos: TargetPos ? [Px, SpawnY, Pz] : null, targetPos: TargetPos, flatCoin: FlatCoin, shatHit: false,
                                 vx: Vx, vy: Vy, vz: Vz, crest: Crest, splatted: false,
                                 age: SpawnAge, life: Life, ang: Tr ? 0 : Math.random() * Math.PI * 2,
@@ -840,6 +1102,48 @@ export class SoftwarePreviewEngine
                             const GTick = Math.floor(Pt.age * 12);
                             const GH = Math.sin(Pt.seed + GTick * 19.7) * 43758.5453;
                             if ((GH - Math.floor(GH)) > 0.72) Pt.x += (Math.sin(Pt.seed + GTick * 5) * 0.025);
+                        }
+
+                        if (WebMode > 0)
+                        {
+                            const TWeb = Math.max(0, Pt.age) * Math.max(0.05, P.webSpinRate ?? 1.0);
+                            const StWeb = EvalSpiderwebStrandCPU(P, Pt.slotIdx ?? I, Math.max(16, Sys.cap), WebMode, TWeb, Time, fieldScene, Prepared, Solo, WindScale);
+                            if (!StWeb.visible)
+                            {
+                                Pt.visibleStrand = false;
+                                Pt.grow = 0;
+                                Pt.bead = 0;
+                                continue;
+                            }
+                            Pt.visibleStrand = true;
+                            Pt.grow = StWeb.grow;
+                            Pt.bead = StWeb.bead;
+                            Pt.role = StWeb.role;
+                            const Mid = [0.5 * (StWeb.pA[0] + StWeb.pB[0]), 0.5 * (StWeb.pA[1] + StWeb.pB[1]), 0.5 * (StWeb.pA[2] + StWeb.pB[2])];
+                            const TgtD = WebSwayAt(Mid[0], Mid[1], Mid[2], Time, StWeb.windScale, CurlAmp, CurlFreq, P.windCoupling ?? 1.0, fieldScene, Prepared, Solo, WindScale);
+                            const KBlend = Math.min(1, 7.5 * Dt);
+                            Pt.wx = (Pt.wx || 0) + (TgtD[0] - (Pt.wx || 0)) * KBlend;
+                            Pt.wy = (Pt.wy || 0) + (TgtD[1] - (Pt.wy || 0)) * KBlend;
+                            Pt.wz = (Pt.wz || 0) + (TgtD[2] - (Pt.wz || 0)) * KBlend;
+                            if (!Pt.trail || Pt.trail.length !== 20) Pt.trail = Array.from({ length: 20 }, () => [0, 0, 0]);
+                            for (let K = 0; K < 20; K++)
+                            {
+                                const U = K / 19;
+                                const Belly = 4 * U * (1 - U);
+                                const TipMix = StWeb.tipWhip > 0.01 ? (Belly * 0.5 + Math.pow(U, 1.45) * StWeb.tipWhip) : Belly;
+                                Pt.trail[K][0] = StWeb.pA[0] + (StWeb.pB[0] - StWeb.pA[0]) * U + Pt.wx * TipMix;
+                                Pt.trail[K][1] = StWeb.pA[1] + (StWeb.pB[1] - StWeb.pA[1]) * U - 4 * StWeb.sag * U * (1 - U) + Pt.wy * TipMix;
+                                Pt.trail[K][2] = StWeb.pA[2] + (StWeb.pB[2] - StWeb.pA[2]) * U + Pt.wz * TipMix;
+                            }
+                            if (StWeb.grow < 0.99)
+                            {
+                                Pt.x = StWeb.tip[0]; Pt.y = StWeb.tip[1]; Pt.z = StWeb.tip[2];
+                            }
+                            else
+                            {
+                                Pt.x = Mid[0] + Pt.wx; Pt.y = Mid[1] - StWeb.sag + Pt.wy; Pt.z = Mid[2] + Pt.wz;
+                            }
+                            continue;
                         }
 
                         if (CurlMode === 3)
@@ -1199,9 +1503,18 @@ export class SoftwarePreviewEngine
                         }
                     }
                 }
-                const Ratio = Math.min(1, Sys.particles.length / 360);
-                const EstAlive = Math.round(Ratio * Math.min(Sys.cap, (P.rate || 120) * ((P.lifeMin + P.lifeMax) * 0.5) + Sys.particles.length));
-                Sys.stats_ = { alive: Math.max(Sys.particles.length, Math.min(Sys.cap, EstAlive)), energy: 0, A: 0, B: 0, C: 0 };
+                if (WebMode > 0)
+                {
+                    let VisCount = 0;
+                    for (const Pt of Sys.particles) if (Pt.visibleStrand) VisCount++;
+                    Sys.stats_ = { alive: VisCount, energy: 0, A: 0, B: 0, C: 0 };
+                }
+                else
+                {
+                    const Ratio = Math.min(1, Sys.particles.length / 360);
+                    const EstAlive = Math.round(Ratio * Math.min(Sys.cap, (P.rate || 120) * ((P.lifeMin + P.lifeMax) * 0.5) + Sys.particles.length));
+                    Sys.stats_ = { alive: Math.max(Sys.particles.length, Math.min(Sys.cap, EstAlive)), energy: 0, A: 0, B: 0, C: 0 };
+                }
                 Sys.readbackCount++;
             }
 
@@ -1234,6 +1547,53 @@ export class SoftwarePreviewEngine
 
                 for (const Pt of Sys.particles)
                 {
+                    if (WebMode > 0)
+                    {
+                        if (!Pt.visibleStrand || !Pt.trail || Pt.trail.length < 2) continue;
+                        const Pts2 = [];
+                        for (let K = 0; K < Pt.trail.length; K++)
+                        {
+                            const Wp = Pt.trail[K];
+                            const Pr = ProjectPoint(VP, Wp[0], Wp[1], Wp[2], W, H);
+                            if (Pr) Pts2.push(Pr);
+                        }
+                        if (Pts2.length < 2) continue;
+                        const MidSc = Pts2[Math.floor(Pts2.length * 0.5)];
+                        const ColC = P.colC || P.colB;
+                        const RRole = Pt.role ?? 0.5;
+                        const SCol = RRole < 0.55
+                            ? [0, 1, 2, 3].map(K => P.colA[K] * (1 - RRole / 0.55) + ColC[K] * (RRole / 0.55))
+                            : [0, 1, 2, 3].map(K => ColC[K] * (1 - (RRole - 0.55) / 0.45) + P.colB[K] * ((RRole - 0.55) / 0.45));
+                        const Alpha = 0.72 * (0.72 + 0.28 * (Pt.grow ?? 1));
+                        const SilkW = Math.max(0.55, (P.sizeStart || 0.018) * (P.sizeScale || 1) * (P.streakThin || 0.5) * 195 / Math.max(2.2, MidSc[2]));
+                        Ctx.strokeStyle = LinearToCss(SCol, Alpha);
+                        Ctx.lineWidth = SilkW;
+                        Ctx.lineCap = 'round';
+                        Ctx.lineJoin = 'round';
+                        Ctx.beginPath();
+                        Ctx.moveTo(Pts2[0][0], Pts2[0][1]);
+                        for (let K = 1; K < Pts2.length; K++) Ctx.lineTo(Pts2[K][0], Pts2[K][1]);
+                        Ctx.stroke();
+
+                        const ScTip = ProjectPoint(VP, Pt.x, Pt.y, Pt.z, W, H);
+                        if (ScTip && (Pt.bead || 0) > 0.05)
+                        {
+                            if ((Pt.grow ?? 1) < 0.99)
+                            {
+                                const SpinR = Math.max(2.4, SilkW * 3.1);
+                                Ctx.fillStyle = `rgba(235,248,255,0.92)`;
+                                Ctx.beginPath(); Ctx.arc(ScTip[0], ScTip[1], SpinR, 0, Math.PI * 2); Ctx.fill();
+                            }
+                            else if ((P.webDew ?? 0.8) > 0.05)
+                            {
+                                const DewR = Math.max(0.85, SilkW * 1.15);
+                                Ctx.fillStyle = LinearToCss([0.92, 0.97, 1.0], Math.min(0.85, (Pt.bead || 0) * (P.webDew ?? 0.8)));
+                                Ctx.beginPath(); Ctx.arc(ScTip[0], ScTip[1], DewR, 0, Math.PI * 2); Ctx.fill();
+                            }
+                        }
+                        continue;
+                    }
+
                     const Sc = ProjectPoint(VP, Pt.x, Pt.y, Pt.z, W, H);
                     if (!Sc) continue;
                     const T = Math.min(1, Pt.age / Math.max(0.01, Pt.life));

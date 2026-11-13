@@ -41,6 +41,12 @@ import { PE } from "./pe.js";
       curlRate: 0.24,       // temporal evolution rate of curl field
       shellRadius: 1.75,    // target manifold radius for curlMode 2 (m)
       streakThin: 1.0,      // cross-section thinness multiplier for Streak shape (<1 = ultra-fine silk hairs)
+      webMode: 0,           // 0 off, 1 real-time spinning Orb-Weave spiderweb, 2 tangled Messy Cobwebs
+      webSpokes: 18,        // radial spokes (orb-weave) or structural anchor chords factor (cobweb)
+      webRings: 14,         // capture spiral turns (orb-weave) or tangle mesh depth (cobweb)
+      webSpinRate: 1.0,     // real-time silk extrusion / weaving speed multiplier
+      webSag: 0.16,         // catenary silk gravity droop (m)
+      webDew: 0.85,         // morning dew / cobweb dust highlight intensity
       temperature: 0.6,     // molecular: kT in reduced units (m = 1)
       epsilon: 0.15,        // molecular: Lennard-Jones well depth
       sigma: 0.08,          // molecular: particle diameter
@@ -843,10 +849,36 @@ import { PE } from "./pe.js";
         windCoupling: 0.18, flutter: 0.16, bounce: 0,
       }),
     },
+    {
+      id: "spiderweb-orb", name: "Orb-Weave Spiderweb", group: "Silk & Curl",
+      blurb: "Real-time spinning orb-weaver web: 6-anchor silken bridge frame, outer guy lines, radial spokes, open hub zone, and a glowing spinneret extruding concentric Archimedean capture spirals with dewdrops and live wind-flex catenary sag.",
+      p: P({
+        kind: 5, shape: 3, blend: "alpha", capacity: 320, rate: 0,
+        emitShape: 2, radius: 2.0, origin: [1.65, 2.05, 0.25], dir: [0.18, 0.18, 0.97], spread: 0.0,
+        speedMin: 0, speedMax: 0, drag: 0.6, gravity: 0.45, buoyancy: 0, flutter: 0.14,
+        lifeMin: 9999, lifeMax: 9999, sizeStart: 0.015, sizeEnd: 0.015, sizeScale: 1.0, streakThin: 0.44,
+        webMode: 1, webSpokes: 18, webRings: 14, webSpinRate: 1.0, webSag: 0.13, webDew: 0.85,
+        curlFreq: 1.1, curlAmp: 0.34, windCoupling: 1.15, bounce: 0,
+        colA: hex("#f2f7ff"), colC: hex("#b8d9f8"), colB: hex("#6e94ba"),
+      }),
+    },
+    {
+      id: "spiderweb-cobweb", name: "Messy Attic Cobwebs", group: "Silk & Curl",
+      blurb: "Real-time tangled 3D corner cobwebs: multi-pocket attic drapes, ragged overlapping gossamer hammock pockets, dangling broken tendrils fluttering in the wind, and drifting dust specks.",
+      p: P({
+        kind: 5, shape: 3, blend: "alpha", capacity: 300, rate: 0,
+        emitShape: 3, boxHalf: [2.25, 1.55, 1.55], origin: [-3.55, 2.35, -0.25], dir: [0.18, 0.08, 0.98], spread: 0.0,
+        speedMin: 0, speedMax: 0, drag: 0.45, gravity: 0.75, buoyancy: 0, flutter: 0.55,
+        lifeMin: 9999, lifeMax: 9999, sizeStart: 0.016, sizeEnd: 0.016, sizeScale: 1.0, streakThin: 0.46,
+        webMode: 2, webSpokes: 16, webRings: 12, webSpinRate: 1.0, webSag: 0.44, webDew: 0.65,
+        curlFreq: 1.35, curlAmp: 0.50, windCoupling: 1.45, bounce: 0,
+        colA: hex("#e4e9ee"), colC: hex("#b7c0ca"), colB: hex("#727d8a"),
+      }),
+    },
   ];
 
   PE.VFX_CATEGORIES = [
-    { id: "Silk & Curl", label: "Silk & Curl", badge: "CURL", blurb: "Dense 3D curl-noise wave fur fields, plasma spheres, bokeh ribbons & dual-sphere lightning" },
+    { id: "Silk & Curl", label: "Silk & Curl", badge: "CURL", blurb: "Dense 3D curl-noise wave fur fields, plasma spheres, bokeh ribbons, dual-sphere lightning & spinning spiderwebs" },
     { id: "Transitions", label: "Transitions & Derez", badge: "DEREZ", blurb: "Solid surface lattice derez, 8-fragment floor shatter, coin stacks, glitch & butterfly dissolves" },
     { id: "Space & Distortion", label: "Space & Distortion", badge: "LENS", blurb: "Black hole accretion spiral with relativistic gravitational lensing & rising heat shimmer refraction" },
     { id: "Shields & Tech", label: "Shields & Tech", badge: "TECH", blurb: "Energy shield hex barriers with impact ripples, radar sweeps, sonar pings, EMP domes & holo glitches" },
@@ -891,6 +923,8 @@ import { PE } from "./pe.js";
       if (p.transition.fragment) return "Shatter Derez";
       return "Mesh Transition";
     }
+    if ((p.webMode || 0) === 1) return "Orb-Weave Web";
+    if ((p.webMode || 0) === 2) return "Messy Cobwebs";
     if (p.curlMode === 1) return "Curl Wave";
     if (p.curlMode === 2) return "Curl Sphere";
     if (p.curlMode === 3) return (p.pulseMode || 0) > 0 ? "Surface Pour" : "Ribbon Stream";

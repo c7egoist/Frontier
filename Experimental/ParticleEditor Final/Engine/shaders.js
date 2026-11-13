@@ -357,6 +357,258 @@ fn streamRibbonVel(p: vec3f, t: f32, freq: f32, cSpd: f32, org: vec3f, ext: vec3
   return v;
 }
 
+// 🕸️ Shared real-time Spiderweb geometry & coherent wind/force-field sway (curlMode 4 = Orb-Weave, 5 = Messy Cobwebs).
+struct WebStrandOut {
+  pA: vec3f,
+  pB: vec3f,
+  tip: vec3f,
+  sag: f32,
+  windScale: f32,
+  tipWhip: f32,
+  grow: f32,
+  visible: f32,
+  bead: f32,
+  roleCol: f32,
+};
+
+fn webSwayAt(p: vec3f, t: f32, windScale: f32, amp: f32, freq: f32) -> vec3f {
+  let w = sampleWind(p) * (S.phys2.x * windScale);
+  var fPush = vec3f(0.0);
+  if (fields[0].x > 0.0) {
+    let fr = evalFields(p, vec3f(0.0));
+    fPush = fr.xyz * 0.025;
+  }
+  let gust = simCurl(p * (freq * 0.45) + vec3f(t * 0.58, -t * 0.36, t * 0.46)) * (amp * 0.16 * windScale);
+  let total = (w * 0.045 + fPush * 0.42 + gust);
+  let m = length(total);
+  let lim = 0.38;
+  return select(total, total * (lim / max(m, 1e-4)), m > lim);
+}
+
+fn orbAnchorLocal(g: u32, R: f32) -> vec3f {
+  let angs = array<f32, 6>(0.14, 1.12, 2.28, 3.32, 4.34, 5.42);
+  let rads = array<f32, 6>(1.28, 1.14, 1.32, 1.16, 1.26, 1.18);
+  let a = angs[g % 6u];
+  let rr = R * rads[g % 6u];
+  return vec3f(cos(a) * rr, sin(a) * rr, 0.0);
+}
+
+fn orbFrameEdgePoint(theta: f32, R: f32, sagBase: f32) -> vec3f {
+  let d = vec2f(cos(theta), sin(theta));
+  var bestT = R * 1.15;
+  for (var g = 0u; g < 6u; g++) {
+    let a = orbAnchorLocal(g, R).xy;
+    let b = orbAnchorLocal((g + 1u) % 6u, R).xy;
+    let e = b - a;
+    let den = d.x * e.y - d.y * e.x;
+    if (abs(den) > 1e-4) {
+      let tRay = (a.x * e.y - a.y * e.x) / den;
+      let uEdge = (a.x * d.y - a.y * d.x) / den;
+      if (tRay > 0.0 && uEdge >= -0.02 && uEdge <= 1.02) {
+        if (tRay < bestT) {
+          bestT = tRay;
+        }
+      }
+    }
+  }
+  return vec3f(d.x * bestT, d.y * bestT, 0.0);
+}
+
+fn cobwebPocketPt(seedVal: f32, pocket: u32, role: u32, org: vec3f, bR: vec3f, bU: vec3f, bF: vec3f, ext: vec3f) -> vec3f {
+  // 3 distinct swept corner/rafter cobweb drapes with airy arched gaps between them
+  var pOff = vec3f(0.0);
+  if (pocket == 0u) { pOff = vec3f(-ext.x * 0.52, ext.y * 0.36, -ext.z * 0.28); }
+  else if (pocket == 1u) { pOff = vec3f(ext.x * 0.08, ext.y * 0.46, 0.08 * ext.z); }
+  else { pOff = vec3f(ext.x * 0.56, ext.y * 0.22, -ext.z * 0.20); }
+  let u0 = hashF(seedVal, 1u);
+  let u1 = hashF(seedVal, 2u);
+  let u2 = hashF(seedVal, 3u);
+  var l = vec3f(0.0);
+  if (role == 0u) {
+    // High ceiling beam / rafter anchor
+    l = pOff + vec3f((u0 - 0.5) * ext.x * 0.88, ext.y * (0.42 + 0.28 * u1), (u2 - 0.5) * ext.z * 0.65);
+  } else if (role == 1u) {
+    // Far side wall / vertical beam anchor spanning lower
+    l = pOff + vec3f(-ext.x * (0.38 + 0.38 * u0), (u1 * 1.15 - 0.68) * ext.y, (u2 - 0.5) * ext.z * 0.72);
+  } else {
+    // Opposite corner arch sweep
+    l = pOff + vec3f(ext.x * (0.28 + 0.44 * u0), (u1 * 1.05 - 0.58) * ext.y, (u2 - 0.5) * ext.z * 0.72);
+  }
+  return org + bR * l.x + bU * l.y + bF * l.z;
+}
+
+struct CobChord {
+  a: vec3f,
+  b: vec3f,
+  sag: f32,
+};
+
+fn evalCobwebChord(cIdx: u32, nChords: u32, org: vec3f, bR: vec3f, bU: vec3f, bF: vec3f, ext: vec3f, sagBase: f32) -> CobChord {
+  let sd = f32(cIdx) * 37.0 + 13.0;
+  let pocket = cIdx % 3u;
+  let rA = u32(hashF(sd, 5u) * 3.0) % 3u;
+  let rB = (rA + 1u + u32(hashF(sd, 6u) * 2.0)) % 3u;
+  let a = cobwebPocketPt(sd + 1.1, pocket, rA, org, bR, bU, bF, ext);
+  let b = cobwebPocketPt(sd + 7.9, pocket, rB, org, bR, bU, bF, ext);
+  let sag = sagBase * (0.55 + 1.25 * hashF(sd, 8u)) * clamp(length(b - a) / 2.2, 0.45, 1.55);
+  return CobChord(a, b, sag);
+}
+
+fn evalSpiderwebStrand(slot: u32, cap: u32, webMode: u32, tWeb: f32, windTime: f32) -> WebStrandOut {
+  let org = S.origin.xyz;
+  let b = basisFrom(S.dir.xyz);
+  let bR = b[0];
+  let bU = b[1];
+  let bF = b[2];
+  let amp = S.mol.z;
+  let freq = max(0.2, S.mol.y);
+  let spokes = clamp(u32(S.mol2.x + 0.5), 8u, 32u);
+  let ringsT = clamp(S.mol2.y, 6.0, 22.0);
+  let sagBase = max(0.0, S.mol2.z);
+
+  if (webMode == 1u) {
+    // 1. Orb-Weave Web: 6 bridge frame cables + 6 anchor guy lines + spokes + hub/free-zone/capture Archimedean spiral
+    let R = max(0.45, S.origin.w);
+    let hubBase = org + bU * (-0.05 * R);
+    let hubPos = hubBase + webSwayAt(hubBase, windTime, 0.24, amp, freq);
+    if (slot < 6u) {
+      let t0 = 0.03 + f32(slot) * 0.06;
+      let dur = 0.24;
+      if (tWeb < t0) { return WebStrandOut(hubPos, hubPos, hubPos, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0); }
+      let la = orbAnchorLocal(slot, R);
+      let lb = orbAnchorLocal((slot + 1u) % 6u, R);
+      let rawA = org + bR * la.x + bU * la.y;
+      let rawB = org + bR * lb.x + bU * lb.y;
+      let pA = rawA + webSwayAt(rawA, windTime, 0.08, amp, freq);
+      let pB = rawB + webSwayAt(rawB, windTime, 0.08, amp, freq);
+      let grow = clamp((tWeb - t0) / dur, 0.0, 1.0);
+      let tip = mix(pA, pB, grow);
+      let hFrac = clamp(length(vec2f(pB.x - pA.x, pB.z - pA.z)) / max(length(pB - pA), 1e-4), 0.15, 1.0);
+      return WebStrandOut(pA, tip, tip, sagBase * 0.42 * hFrac * grow, 0.12, 0.0, grow, 1.0, select(0.0, 1.0, grow < 0.99), 0.12);
+    }
+    if (slot < 12u) {
+      let g = slot - 6u;
+      let t0 = 0.25 + f32(g) * 0.04;
+      let dur = 0.18;
+      if (tWeb < t0) { return WebStrandOut(hubPos, hubPos, hubPos, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0); }
+      let la = orbAnchorLocal(g, R);
+      let pA = org + bR * la.x + bU * la.y + webSwayAt(org + bR * la.x + bU * la.y, windTime, 0.08, amp, freq);
+      let pB = org + bR * (la.x * 1.18) + bU * (la.y * 1.18);
+      let grow = clamp((tWeb - t0) / dur, 0.0, 1.0);
+      let tip = mix(pA, pB, grow);
+      return WebStrandOut(pA, tip, tip, sagBase * 0.15 * grow, 0.08, 0.0, grow, 1.0, select(0.0, 1.0, grow < 0.99), 0.08);
+    }
+    if (slot < 12u + spokes) {
+      let sIdx = slot - 12u;
+      let t0 = 0.42 + f32(sIdx) * 0.030;
+      let dur = 0.22;
+      if (tWeb < t0) { return WebStrandOut(hubPos, hubPos, hubPos, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0); }
+      let jit = (hashF(f32(sIdx) * 19.0 + 3.0, 1u) - 0.5) * 0.032;
+      let theta = (f32(sIdx) / f32(spokes)) * 6.2831853 + jit;
+      let loc = orbFrameEdgePoint(theta, R, sagBase);
+      let rawB = org + bR * loc.x + bU * loc.y;
+      let pB = rawB + webSwayAt(rawB, windTime, 0.08, amp, freq);
+      let grow = clamp((tWeb - t0) / dur, 0.0, 1.0);
+      let tip = mix(hubPos, pB, grow);
+      let hFrac = clamp(length(vec2f(pB.x - hubPos.x, pB.z - hubPos.z)) / max(length(pB - hubPos), 1e-4), 0.12, 1.0);
+      return WebStrandOut(hubPos, tip, tip, sagBase * 0.20 * hFrac * grow, 0.16, 0.0, grow, 1.0, select(0.0, 1.0, grow < 0.99), 0.22);
+    }
+    let spiralIdx = slot - 12u - spokes;
+    let maxAvail = max(1u, cap - 12u - spokes);
+    let targetSegs = min(maxAvail, spokes * u32(ringsT + 0.5));
+    if (spiralIdx >= targetSegs) { return WebStrandOut(hubPos, hubPos, hubPos, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0); }
+    let t0 = 1.05 + f32(spiralIdx) * (6.2 / max(1.0, f32(targetSegs)));
+    let dur = 0.028;
+    if (tWeb < t0) { return WebStrandOut(hubPos, hubPos, hubPos, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0); }
+    let s0 = spiralIdx % spokes;
+    let s1 = (spiralIdx + 1u) % spokes;
+    let hubSegs = f32(spokes) * 2.0;
+    let uTotal0 = clamp(f32(spiralIdx) / f32(targetSegs), 0.0, 1.0);
+    let uTotal1 = clamp(f32(spiralIdx + 1u) / f32(targetSegs), 0.0, 1.0);
+    // Tight hub mesh (turns 0..2), open free zone, then smooth capture spiral (0.20..0.92 * R)
+    let rFrac0 = select(mix(0.20, 0.92, pow(clamp((f32(spiralIdx) - hubSegs) / max(1.0, f32(targetSegs) - hubSegs), 0.0, 1.0), 0.92)), mix(0.035, 0.105, f32(spiralIdx) / max(1.0, hubSegs)), f32(spiralIdx) < hubSegs);
+    let rFrac1 = select(mix(0.20, 0.92, pow(clamp((f32(spiralIdx + 1u) - hubSegs) / max(1.0, f32(targetSegs) - hubSegs), 0.0, 1.0), 0.92)), mix(0.035, 0.105, f32(spiralIdx + 1u) / max(1.0, hubSegs)), f32(spiralIdx + 1u) < hubSegs);
+    let jit0 = (hashF(f32(s0) * 19.0 + 3.0, 1u) - 0.5) * 0.032;
+    let jit1 = (hashF(f32(s1) * 19.0 + 3.0, 1u) - 0.5) * 0.032;
+    let th0 = (f32(s0) / f32(spokes)) * 6.2831853 + jit0;
+    let th1 = (f32(s1) / f32(spokes)) * 6.2831853 + jit1;
+    let l0 = orbFrameEdgePoint(th0, R, sagBase);
+    let l1 = orbFrameEdgePoint(th1, R, sagBase);
+    let r0 = org + bR * l0.x + bU * l0.y;
+    let r1 = org + bR * l1.x + bU * l1.y;
+    let e0 = r0 + webSwayAt(r0, windTime, 0.08, amp, freq);
+    let e1 = r1 + webSwayAt(r1, windTime, 0.08, amp, freq);
+    let spokeH0 = clamp(length(vec2f(e0.x - hubPos.x, e0.z - hubPos.z)) / max(length(e0 - hubPos), 1e-4), 0.12, 1.0);
+    let spokeH1 = clamp(length(vec2f(e1.x - hubPos.x, e1.z - hubPos.z)) / max(length(e1 - hubPos), 1e-4), 0.12, 1.0);
+    let pA = mix(hubPos, e0, rFrac0) - vec3f(0.0, 4.0 * sagBase * 0.20 * spokeH0 * rFrac0 * (1.0 - rFrac0), 0.0);
+    let pB = mix(hubPos, e1, rFrac1) - vec3f(0.0, 4.0 * sagBase * 0.20 * spokeH1 * rFrac1 * (1.0 - rFrac1), 0.0);
+    let grow = clamp((tWeb - t0) / dur, 0.0, 1.0);
+    let tip = mix(pA, pB, grow);
+    let lenSeg = length(pB - pA);
+    let hSeg = clamp(length(vec2f(pB.x - pA.x, pB.z - pA.z)) / max(lenSeg, 1e-4), 0.12, 1.0);
+    let sagSeg = sagBase * (0.22 + 0.55 * uTotal0) * hSeg * clamp(lenSeg / max(0.28, R * 0.36), 0.35, 1.25) * grow;
+    let isDew = select(0.0, 0.42, (spiralIdx % 3u) == 0u);
+    let bead = select(isDew, 1.0, grow < 0.99);
+    return WebStrandOut(pA, tip, tip, sagSeg, 0.07, 0.0, grow, 1.0, bead, mix(0.45, 0.95, uTotal0));
+  }
+
+  // 2. Messy Attic Cobwebs: 3-pocket structural corner chords + intra-pocket lacy tangle mesh + dangling wisps
+  let ext = max(S.phys4.xyz, vec3f(0.65));
+  let nChords = clamp(u32(f32(cap) * clamp(f32(spokes) * 0.020, 0.24, 0.38)), 16u, cap / 2u);
+  let nTangle = clamp(nChords + u32(f32(cap) * clamp(ringsT * 0.032, 0.28, 0.42)), nChords + 1u, cap - 16u);
+  if (slot < nChords) {
+    let t0 = 0.04 + (f32(slot) / f32(nChords)) * 1.45;
+    let dur = 0.28;
+    if (tWeb < t0) { return WebStrandOut(org, org, org, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0); }
+    let ch = evalCobwebChord(slot, nChords, org, bR, bU, bF, ext, sagBase);
+    let grow = clamp((tWeb - t0) / dur, 0.0, 1.0);
+    let tip = mix(ch.a, ch.b, grow);
+    return WebStrandOut(ch.a, tip, tip, ch.sag * grow, 0.22, 0.0, grow, 1.0, select(0.0, 0.85, grow < 0.99), 0.2);
+  }
+  if (slot < nTangle) {
+    let idxT = slot - nChords;
+    let spanT = max(1u, nTangle - nChords);
+    let t0 = 1.25 + (f32(idxT) / f32(spanT)) * 2.85;
+    let dur = 0.16;
+    if (tWeb < t0) { return WebStrandOut(org, org, org, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0); }
+    let sd = f32(slot) * 53.0 + 19.0;
+    let cA = u32(hashF(sd, 1u) * f32(nChords)) % nChords;
+    let pocket = cA % 3u;
+    let step3 = 1u + u32(hashF(sd, 2u) * max(2.0, f32(nChords / 4u)));
+    let cB = (pocket + ((cA - pocket) / 3u + step3) * 3u) % nChords;
+    let uA = mix(0.10, 0.90, hashF(sd, 3u));
+    let uB = mix(0.10, 0.90, hashF(sd, 4u));
+    let chA = evalCobwebChord(cA, nChords, org, bR, bU, bF, ext, sagBase);
+    let chB = evalCobwebChord(cB, nChords, org, bR, bU, bF, ext, sagBase);
+    let rawA = mix(chA.a, chA.b, uA) - vec3f(0.0, 4.0 * chA.sag * uA * (1.0 - uA), 0.0);
+    let rawB = mix(chB.a, chB.b, uB) - vec3f(0.0, 4.0 * chB.sag * uB * (1.0 - uB), 0.0);
+    let pA = rawA + webSwayAt(rawA, windTime, 0.24 * 4.0 * uA * (1.0 - uA), amp, freq);
+    let pB = rawB + webSwayAt(rawB, windTime, 0.24 * 4.0 * uB * (1.0 - uB), amp, freq);
+    let grow = clamp((tWeb - t0) / dur, 0.0, 1.0);
+    let tip = mix(pA, pB, grow);
+    let sag = sagBase * (0.45 + 0.95 * hashF(sd, 5u)) * clamp(length(pB - pA) / 1.8, 0.3, 1.4) * grow;
+    let dust = select(0.0, 0.30, (idxT % 4u) == 0u);
+    return WebStrandOut(pA, tip, tip, sag, 0.38, 0.0, grow, 1.0, select(dust, 0.85, grow < 0.99), 0.55);
+  }
+  let idxD = slot - nTangle;
+  let spanD = max(1u, cap - nTangle);
+  let t0 = 3.15 + (f32(idxD) / f32(spanD)) * 1.95;
+  let dur = 0.22;
+  if (tWeb < t0) { return WebStrandOut(org, org, org, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0); }
+  let sd = f32(slot) * 71.0 + 41.0;
+  let cP = u32(hashF(sd, 1u) * f32(nChords)) % nChords;
+  let uP = mix(0.16, 0.84, hashF(sd, 2u));
+  let chP = evalCobwebChord(cP, nChords, org, bR, bU, bF, ext, sagBase);
+  let rawP = mix(chP.a, chP.b, uP) - vec3f(0.0, 4.0 * chP.sag * uP * (1.0 - uP), 0.0);
+  let pA = rawP + webSwayAt(rawP, windTime, 0.24 * 4.0 * uP * (1.0 - uP), amp, freq);
+  let dLen = mix(0.55, 1.45, hashF(sd, 3u));
+  let drift = vec3f((hashF(sd, 4u) - 0.5) * 0.26, -dLen, (hashF(sd, 5u) - 0.5) * 0.26);
+  let pB = pA + drift + webSwayAt(pA + drift, windTime, 0.85, amp * 1.25, freq * 1.2);
+  let grow = clamp((tWeb - t0) / dur, 0.0, 1.0);
+  let tip = mix(pA, pB, grow);
+  return WebStrandOut(pA, tip, tip, 0.05 * dLen * grow, 0.22, 1.15, grow, 1.0, select(0.24, 0.85, grow < 0.99), 0.85);
+}
+
 @compute @workgroup_size(64)
 fn emitParticles(@builtin(global_invocation_id) gid: vec3u) {
   let i = gid.x;
@@ -648,7 +900,16 @@ fn updateParticles(@builtin(global_invocation_id) gid: vec3u) {
   var pos = q.p.xyz;
   var v = q.v.xyz;
   let curlMode = u32(S.mol.x + 0.5);
-  if (curlMode > 0u) {
+  if (curlMode >= 4u) {
+    life = 1.0e9;
+    initAge = 0.0;
+    pos = S.origin.xyz;
+    vel = vec3f(0.0);
+    eZ = f32(idx);
+    for (var k = 0u; k < 20u; k++) {
+      trailBuf[idx * 20u + k] = vec4f(pos, 0.0);
+    }
+  } else if (curlMode > 0u) {
     let freq = max(0.05, S.mol.y);
     let cSpd = S.mol.z;
     let tC = S.phys.y * S.mol.w;
@@ -679,7 +940,7 @@ fn updateParticles(@builtin(global_invocation_id) gid: vec3u) {
       let sz = mix(S.life.z, S.life.w, t01) * S.misc.x * (0.75 + 0.55 * crest);
       parts[i] = Part(vec4f(pos, age), vec4f(v, life), cc, vec4f(sz, q.m.y, q.m.z, seed), q.e);
       return;
-    } else {
+    } else if (curlMode == 2u) {
       let shellR = max(0.25, S.mol2.x);
       let rVec = pos - S.origin.xyz;
       let rLen = max(length(rVec), 1e-3);
@@ -700,7 +961,7 @@ fn updateParticles(@builtin(global_invocation_id) gid: vec3u) {
       let sz = mix(S.life.z, S.life.w, t01) * S.misc.x * (0.72 + 0.55 * speedN);
       parts[i] = Part(vec4f(pos, age), vec4f(v, life), cc, vec4f(sz, q.m.y, q.m.z, seed), q.e);
       return;
-    } else {
+    } else if (curlMode == 3u) {
       // curlMode == 3u: Bokeh Stream Ribbons (or Object Surface Pour/Transition)
       let ext = max(S.phys4.xyz, vec3f(0.45));
       let pMode = u32(S.mol2.w + 0.5);
@@ -774,6 +1035,36 @@ fn updateParticles(@builtin(global_invocation_id) gid: vec3u) {
       }
       trailBuf[base] = vec4f(pos, crest);
       parts[i] = Part(vec4f(pos, age), vec4f(v, life), cc, vec4f(sz, q.m.y, q.m.z, seed), q.e);
+      return;
+    } else {
+      // curlMode == 4u (Orb-Weave Spiderweb) | 5u (Messy Attic Cobwebs)
+      let cap = max(16u, u32(S.phys3.x + 0.5));
+      let slotIdx = min(cap - 1u, u32(q.e.z + 0.5));
+      let webMode = curlMode - 3u;
+      let spinRate = max(0.05, S.mol.w);
+      let tWeb = max(0.0, age) * spinRate;
+      let stWeb = evalSpiderwebStrand(slotIdx, cap, webMode, tWeb, S.phys.y);
+      if (stWeb.visible < 0.5) {
+        parts[i] = Part(vec4f(S.origin.xyz, age), vec4f(0.0, 0.0, 0.0, life), vec4f(S.colA.rgb, 0.0), vec4f(0.0, q.m.y, q.m.z, seed), vec4f(0.0, q.e.y, f32(slotIdx), 0.0));
+        return;
+      }
+      let mid = (stWeb.pA + stWeb.pB) * 0.5;
+      let targetDisp = webSwayAt(mid, S.phys.y, stWeb.windScale, cSpd, freq);
+      let flexDisp = mix(v, targetDisp, min(7.5 * dt, 1.0)) * exp(-extraDamp * dt);
+      let base = i * 20u;
+      for (var k = 0u; k < 20u; k++) {
+        let u = f32(k) / 19.0;
+        let belly = 4.0 * u * (1.0 - u);
+        let tipMix = select(belly, belly * 0.5 + pow(u, 1.45) * stWeb.tipWhip, stWeb.tipWhip > 0.01);
+        let pt = mix(stWeb.pA, stWeb.pB, u) - vec3f(0.0, 4.0 * stWeb.sag * u * (1.0 - u), 0.0) + flexDisp * tipMix;
+        trailBuf[base + k] = vec4f(pt, clamp(0.65 + 0.35 * stWeb.grow, 0.0, 1.0));
+      }
+      var wc = mix(S.colA, S.colC, smoothstep(0.10, 0.58, stWeb.roleCol));
+      wc = mix(wc, S.colB, smoothstep(0.55, 0.98, stWeb.roleCol));
+      wc.a *= clamp(0.72 + 0.28 * stWeb.grow, 0.0, 1.0);
+      let sz = max(0.004, S.life.z * S.misc.x);
+      let beadPt = select(mid - vec3f(0.0, stWeb.sag, 0.0) + flexDisp, stWeb.tip, stWeb.grow < 0.99);
+      parts[i] = Part(vec4f(beadPt, age), vec4f(flexDisp, life), wc, vec4f(sz, q.m.y, q.m.z, seed), vec4f(stWeb.bead, S.mol2.w, f32(slotIdx), stWeb.grow));
       return;
     }
   }
@@ -1329,10 +1620,12 @@ fn vsPart(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> V
   o.pos = vec4f(0.0, 0.0, 2.0, 1.0);
   let q = parts[ii];
   if (!(q.p.w < q.v.w && q.c.a > 0.002 && q.m.x > 0.0)) { return o; }
+  let isWeb = S.mol.x >= 3.5;
+  if (isWeb && q.e.x < 0.05) { return o; }
   let cs = array<vec2f, 6>(vec2f(-1.0, -1.0), vec2f(1.0, -1.0), vec2f(-1.0, 1.0),
                            vec2f(1.0, -1.0), vec2f(1.0, 1.0), vec2f(-1.0, 1.0));
   let c = cs[vi];
-  let sz = q.m.x;
+  let sz = select(q.m.x, q.m.x * select(1.45 * S.mol2.w, 3.2, q.e.w < 0.99) * q.e.x, isWeb);
   let shape = u32(S.emit.z);
   var wp: vec3f;
   if (shape == 0u) {
@@ -1758,7 +2051,9 @@ fn vsRibbon(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) ->
   let p0 = segs[base + seg].xyz;
   let p1 = segs[base + seg + 1u].xyz;
   let segLen = length(p1 - p0);
-  if (segLen < 1e-4 || segLen > 2.5) { return o; }
+  let isWeb = S.mol.x >= 3.5;
+  let maxSeg = select(2.5, 6.5, isWeb);
+  if (segLen < 1e-4 || segLen > maxSeg) { return o; }
   let pPrev = segs[base + select(seg - 1u, 0u, seg == 0u)].xyz;
   let pNext = segs[base + min(seg + 2u, 19u)].xyz;
   let d0 = normalize(select(p1 - pPrev, p1 - p0, seg == 0u) + vec3f(1e-5));
@@ -1768,9 +2063,9 @@ fn vsRibbon(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) ->
   let u0 = f32(seg) / 19.0;
   let u1 = f32(seg + 1u) / 19.0;
   let thin = max(0.08, select(0.34, S.misc.y, S.misc.y > 0.01));
-  let baseW = max(0.004, q.m.x * 0.42 * thin);
-  let w0 = baseW * mix(1.0, 0.08, pow(max(u0, 1e-4), 0.72));
-  let w1 = baseW * mix(1.0, 0.08, pow(max(u1, 1e-4), 0.72));
+  let baseW = select(max(0.004, q.m.x * 0.42 * thin), max(0.0028, q.m.x * 0.56 * thin), isWeb);
+  let w0 = select(baseW * mix(1.0, 0.08, pow(max(u0, 1e-4), 0.72)), baseW * (0.88 + 0.16 * (1.0 - 4.0 * u0 * (1.0 - u0))), isWeb);
+  let w1 = select(baseW * mix(1.0, 0.08, pow(max(u1, 1e-4), 0.72)), baseW * (0.88 + 0.16 * (1.0 - 4.0 * u1 * (1.0 - u1))), isWeb);
   let endTag = array<f32, 6>(0.0, 0.0, 1.0, 0.0, 1.0, 1.0);
   let sideS = array<f32, 6>(-1.0, 1.0, -1.0, 1.0, 1.0, -1.0);
   let isEnd = endTag[k];
@@ -1780,7 +2075,7 @@ fn vsRibbon(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) ->
   let spd = mix(segs[base + seg].w, segs[base + seg + 1u].w, isEnd);
   o.pos = G.viewProj * vec4f(wp, 1.0);
   o.uv = vec2f(sx, uLen);
-  let isCurlRib = S.flags.w > 2.5;
+  let isCurlRib = S.mol.x > 2.5 && S.mol.x < 3.5;
   var rc = select(
     mix(q.c.rgb, S.colC.rgb, smoothstep(0.0, 0.42, uLen)),
     mix(S.colB.rgb, S.colC.rgb, smoothstep(0.0, 0.48, uLen)),
@@ -1791,14 +2086,25 @@ fn vsRibbon(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) ->
     mix(rc, S.colA.rgb, smoothstep(0.45, 1.0, uLen)),
     isCurlRib
   );
+  if (isWeb) {
+    rc = mix(q.c.rgb, S.colA.rgb, 0.25 + 0.45 * (1.0 - 4.0 * uLen * (1.0 - uLen)));
+  }
   let headEnv = q.c.a;
-  o.col = vec4f(rc, headEnv * (0.48 + 0.52 * spd));
-  o.ex = vec4f(uLen, q.m.w, 0.0, 0.0);
+  o.col = vec4f(rc, select(headEnv * (0.48 + 0.52 * spd), headEnv * (0.78 + 0.22 * spd), isWeb));
+  o.ex = vec4f(uLen, q.m.w, select(0.0, 1.0, isWeb), S.mol2.w);
   return o;
 }
 
 @fragment
 fn fsRibbon(i: VO) -> @location(0) vec4f {
+  if (i.ex.z > 0.5) {
+    let edge = exp(-i.uv.x * i.uv.x * 2.85);
+    let dew = pow(max(0.0, sin(i.uv.y * 21.99 + i.ex.y * 0.43)), 14.0) * clamp(i.ex.w, 0.0, 1.2);
+    let silkRgb = mix(i.col.rgb, vec3f(0.96, 0.99, 1.0), clamp(dew * 0.72 + 0.14 * (1.0 - i.uv.x * i.uv.x), 0.0, 0.95));
+    let a = clamp(edge * i.col.a * (0.72 + 0.38 * dew), 0.0, 1.0);
+    if (a < 0.002) { discard; }
+    return vec4f(silkRgb * a, a);
+  }
   let edge = exp(-i.uv.x * i.uv.x * 4.0);
   let tailFade = pow(clamp(1.0 - i.uv.y, 0.0, 1.0), 2.15);
   let headGlow = smoothstep(0.0, 0.04, i.uv.y);

@@ -67,6 +67,7 @@ const PRECIP_IDS = ['snow', 'rain', 'hail'];
 const GlyphForPreset = Preset => Preset?.id === 'snow' ? 'Snowflake'
     : Preset?.id === 'rain' ? 'CloudRain'
     : Preset?.id === 'hail' ? 'CloudHail'
+    : Preset?.id?.startsWith('spiderweb-') ? 'Lattice'
     : Preset?.id === 'heat-shimmer' ? 'Heat'
     : Preset?.id === 'black-hole' ? 'Singularity'
     : (GroupGlyphs[Preset?.group] || GroupGlyphs[PE.vfxCategoryOf?.(Preset)] || 'Sparkles');
@@ -90,6 +91,7 @@ const SceneTabs = [
     { Id: 'default', Name: 'Studio Default', Presets: null, Scenario: 'lab' },
     { Id: 'tesla', Name: 'Lightning & Static Spheres', Presets: ['tesla-sphere-lightning', 'static-sphere-shock', 'strikeSparks'], Scenario: 'blank' },
     { Id: 'curl', Name: 'Object Pulse & Bokeh Ribbons', Presets: ['bokeh-object-pulse', 'bokeh-stream-ribbons', 'curl-fur-field', 'curl-sphere-plasma'], Scenario: 'blank' },
+    { Id: 'spiderwebs', Name: 'Spiderwebs · Orb & Cobwebs', Presets: ['spiderweb-orb', 'spiderweb-cobweb'], Scenario: 'lab' },
     { Id: 'transitions', Name: 'Mesh Derez & Transitions', Presets: ['derez-cube', 'cube-coins', 'dissolve-butterflies', 'reverse-derez'], Scenario: 'blank' },
     { Id: 'distortion', Name: 'Black Hole & Heat Shimmer', Presets: ['black-hole', 'heat-shimmer'], Scenario: 'blank' },
     { Id: 'shields_aurora', Name: 'Hex Shield & Aurora Sky', Presets: ['energy-shield-hex', 'aurora-borealis', 'radar-sweep', 'sonar-ping'], Scenario: 'blank' },
@@ -247,6 +249,7 @@ function SeedBurstCountFor(PresetId, Params)
     if (Params.transition) return Math.max(1, Params.burstCount || Params.capacity || 384);
     if (Params.shape === 15 || Params.shape === 16 || Params.shape === 17) return Math.max(1, Params.burstCount || (Params.shape === 17 ? 6 : 1));
     if (Params.kind === 6) return Math.min(Params.capacity || 64, 36);
+    if ((Params.webMode || 0) > 0) return Math.max(64, Params.capacity || 320);
     if (Params.blackHole) return Math.min(Params.capacity || 2000, Math.round((Params.capacity || 2000) * 0.45));
     if ((Params.curlMode || 0) > 0) return Math.min(Params.capacity || 4000, Math.round((Params.capacity || 4000) * 0.45));
     if (PRECIP_IDS.includes(PresetId)) return Math.min(240, Math.round((Params.capacity || 1000) * 0.14));
@@ -2592,32 +2595,35 @@ function ClassifyEffect(P)
     const IsAssembly = IsTransition && AsmMode > 0;
     const CurlMode = IsTransition ? 0 : (P.curlMode || 0);
     const IsCurl = CurlMode > 0;
+    const WebMode = !IsTransition && !IsArc && !IsBeam && !IsBoids ? Math.max(0, Math.min(2, P.webMode | 0)) : 0;
+    const IsWeb = WebMode > 0;
     const IsObjectPour = CurlMode === 3 && (P.pulseMode || 0) > 0;
     const IsBoids = P.kind === 6;
     const Shape = P.shape ?? 3;
     const IsDiscPlane = Shape === 10 || Shape === 15;
-    const IsSteadyOverlay = IsCurl || Shape === 16 || (Shape === 15 && (P.leafMode || 0) === 0);
+    const IsSteadyOverlay = IsCurl || IsWeb || Shape === 16 || (Shape === 15 && (P.leafMode || 0) === 0);
     const IsExpandingWave = Shape === 10 || Shape === 11 || (Shape === 15 && (P.leafMode || 0) >= 1);
-    const UsesEmitVolume = !IsArc && !IsBeam && CurlMode !== 2 && !IsObjectPour && !IsAssembly;
+    const UsesEmitVolume = !IsArc && !IsBeam && !IsWeb && CurlMode !== 2 && !IsObjectPour && !IsAssembly;
     const EmitSh = P.emitShape ?? 0;
-    const UsesRate = !IsTransition;
-    const UsesRadius = IsArc || (IsBeam && P.showElectrodes !== false) || (UsesEmitVolume && (EmitSh === 1 || EmitSh === 2));
-    const UsesBoxHalf = IsObjectPour || CurlMode === 1 || (IsTransition && AsmMode === 1) || (UsesEmitVolume && (EmitSh === 3 || EmitSh === 4));
+    const UsesRate = !IsTransition && !IsWeb;
+    const UsesRadius = IsArc || (IsBeam && P.showElectrodes !== false) || WebMode === 1 || (UsesEmitVolume && (EmitSh === 1 || EmitSh === 2));
+    const UsesBoxHalf = IsObjectPour || CurlMode === 1 || WebMode === 2 || (IsTransition && AsmMode === 1) || (UsesEmitVolume && (EmitSh === 3 || EmitSh === 4));
     const UsesDirVector = !IsTransition && !IsCurl && !IsArc && !IsBeam && !IsBoids && Shape !== 11 && Shape !== 16;
-    const UsesSpread = UsesDirVector && !IsDiscPlane;
-    const UsesSpeed = !IsCurl && !IsAssembly && !IsBoids && !IsSteadyOverlay;
-    const UsesLife = !IsAssembly;
-    const UsesSizeEnd = !IsAssembly;
+    const UsesSpread = UsesDirVector && !IsDiscPlane && !IsWeb;
+    const UsesSpeed = !IsCurl && !IsWeb && !IsAssembly && !IsBoids && !IsSteadyOverlay;
+    const UsesLife = !IsAssembly && !IsWeb;
+    const UsesSizeEnd = !IsAssembly && !IsWeb;
     const UsesColB = !IsAssembly;
-    const UsesColC = IsCurl || (P.trailMode || 0) > 0 || IsBoids || IsBeam || Shape === 0 || Shape >= 10;
-    const UsesTrailMode = !IsCurl && !IsTransition && !IsBoids && !IsArc && !IsBeam && (Shape < 10 || Shape === 14);
+    const UsesColC = IsCurl || IsWeb || (P.trailMode || 0) > 0 || IsBoids || IsBeam || Shape === 0 || Shape >= 10;
+    const UsesTrailMode = !IsCurl && !IsWeb && !IsTransition && !IsBoids && !IsArc && !IsBeam && (Shape < 10 || Shape === 14);
     const UsesWind = !IsAssembly && !(Shape === 16 || (Shape === 15 && (P.leafMode || 0) === 0));
     const UsesDynamics = !IsAssembly && !(Shape === 16 || (Shape === 15 && (P.leafMode || 0) === 0));
-    const UsesLaunchCone = !IsTransition && !IsCurl && !IsArc && !IsBeam && !IsBoids && Shape !== 10 && Shape !== 11 && Shape !== 15 && Shape !== 16 && Shape !== 17;
+    const UsesLaunchCone = !IsTransition && !IsCurl && !IsWeb && !IsArc && !IsBeam && !IsBoids && Shape !== 10 && Shape !== 11 && Shape !== 15 && Shape !== 16 && Shape !== 17;
 
     let BounceBlockReason = null;
     if (IsAssembly) BounceBlockReason = 'Analytic assembly ignores floor collision';
     else if (IsTransition && P.transition.fragment) BounceBlockReason = 'Shatter cubes break into 8 pieces on floor contact';
+    else if (IsWeb) BounceBlockReason = 'Anchored spiderweb strands flex in wind instead of floor bouncing';
     else if (IsCurl) BounceBlockReason = 'Curl flow field does not bounce on floor';
     else if (P.kind === 1) BounceBlockReason = 'Wind-driven particles settle cleanly on floor';
     else if (IsBoids) BounceBlockReason = 'Boids steer smoothly above the floor';
@@ -2625,7 +2631,7 @@ function ClassifyEffect(P)
 
     return {
         IsArc, IsBeam, IsTransition, AsmMode, IsAssembly,
-        CurlMode, IsCurl, IsObjectPour, IsBoids, Shape,
+        CurlMode, IsCurl, WebMode, IsWeb, IsObjectPour, IsBoids, Shape,
         IsDiscPlane, IsSteadyOverlay, IsExpandingWave,
         UsesRate, UsesEmitVolume, UsesRadius, UsesBoxHalf,
         UsesDirVector, UsesSpread, UsesSpeed, UsesLife,
@@ -2793,14 +2799,14 @@ function ConstructEffectInspector(Page, Effect)
             EmitShapeB.Write = V => { OrigEmitWrite(V); ConstructInspectorPage(); };
             C.SelectRow(Src, EmitShapeB);
         }
-        const OriginLabel = Cls.IsArc ? 'Sphere A position' : Cls.IsBeam ? 'Beam muzzle position' : Cls.IsObjectPour ? '3D object centre' : 'Emitter origin';
+        const OriginLabel = Cls.IsArc ? 'Sphere A position' : Cls.IsBeam ? 'Beam muzzle position' : Cls.IsObjectPour ? '3D object centre' : Cls.IsWeb ? 'Web anchor centre' : 'Emitter origin';
         C.VectorRow(Src, BindEffect(Effect, P, 'origin', { Label: OriginLabel, Unit: 'm', Step: 0.05, Digits: 2, Minimum: -20, Maximum: 20 }));
         if (Cls.CurlMode === 2)
             Range(Src, BindEffect(Effect, P, 'shellRadius', { Label: 'Sphere shell radius' }), 0.4, 5.0, 0.05, 2, 'm');
         if (Cls.UsesRadius)
         {
-            const RadLabel = Cls.IsArc ? 'Sphere A radius' : Cls.IsBeam ? 'Muzzle ring radius' : 'Emitter radius';
-            Range(Src, BindEffect(Effect, P, 'radius', { Label: RadLabel }), 0.04, 4, 0.01, 2, 'm');
+            const RadLabel = Cls.IsArc ? 'Sphere A radius' : Cls.IsBeam ? 'Muzzle ring radius' : Cls.IsWeb ? 'Orb web frame radius' : 'Emitter radius';
+            Range(Src, BindEffect(Effect, P, 'radius', { Label: RadLabel }), 0.04, 5, 0.01, 2, 'm');
         }
         if (Cls.UsesBoxHalf)
         {
@@ -2808,10 +2814,29 @@ function ConstructEffectInspector(Page, Effect)
                 ? ((P.objectShape ?? 0) === 1 ? 'Object half extents (X = sphere radius)' : 'Object half extents')
                 : Cls.CurlMode === 1
                     ? 'Wave field extents'
-                    : Cls.IsAssembly
-                        ? 'Target cube half extents'
-                        : 'Box half extents';
+                    : Cls.IsWeb
+                        ? 'Corner cobweb volume'
+                        : Cls.IsAssembly
+                            ? 'Target cube half extents'
+                            : 'Box half extents';
             C.VectorRow(Src, BindEffect(Effect, P, 'boxHalf', { Label: BoxLabel, Unit: 'm', Step: 0.05, Digits: 2, Minimum: 0, Maximum: 10 }));
+        }
+        if (Cls.IsWeb)
+        {
+            const WebSecSrc = C.SectionCard(Page, { Title: 'Real-time particle web spinning', Glyph: 'Lattice', Badge: Cls.WebMode === 1 ? 'ORB-WEAVE' : 'COBWEBS' }).Inner;
+            const WebModeB = BindEffect(Effect, P, 'webMode', { Label: 'Web architecture', Rebuild: true, Options: [['Orb-Weave Spiral Web', 1], ['Messy Attic Cobwebs', 2]] });
+            const OrigWebW = WebModeB.Write;
+            WebModeB.Write = V => { OrigWebW(Number(V)); ConstructInspectorPage(); };
+            C.SelectRow(WebSecSrc, WebModeB);
+            C.ActionRow(WebSecSrc, [{
+                Label: 'Re-Spin Web From Scratch', Glyph: 'Reset', Tone: 'accent',
+                Act: () => { RebuildGpu(Effect); AppendLog('PARTICLES', `${Effect.Name}: restarted real-time web spinning`, `mode=${P.webMode}`, 'live'); C.Toast('Spinning spiderweb...'); }
+            }]);
+            Range(WebSecSrc, BindEffect(Effect, P, 'webSpinRate', { Label: 'Spinning speed' }), 0.15, 4.0, 0.05, 2, '×');
+            Range(WebSecSrc, BindEffect(Effect, P, 'webSpokes', { Label: Cls.WebMode === 1 ? 'Radial spokes' : 'Anchor chord density' }), 8, 28, 1, 0, '');
+            Range(WebSecSrc, BindEffect(Effect, P, 'webRings', { Label: Cls.WebMode === 1 ? 'Capture spiral turns' : 'Tangle mesh depth' }), 6, 22, 1, 0, '');
+            Range(WebSecSrc, BindEffect(Effect, P, 'webSag', { Label: 'Silk gravity catenary sag' }), 0.0, 0.65, 0.01, 2, 'm');
+            Range(WebSecSrc, BindEffect(Effect, P, 'webDew', { Label: Cls.WebMode === 1 ? 'Morning dew glints' : 'Dust & gossamer shimmer' }), 0.0, 1.0, 0.02, 2, '');
         }
         if (Cls.IsArc)
         {
@@ -2882,9 +2907,9 @@ function ConstructEffectInspector(Page, Effect)
         }
         if (Cls.UsesDirVector || Cls.UsesSpread || Cls.UsesSpeed || Cls.UsesLife)
         {
-            const Vel = C.SectionCard(Page, { Title: Cls.IsDiscPlane && !Cls.UsesSpeed ? 'Orientation & lifetime' : 'Launch velocity & lifetime', Glyph: 'Rays', Badge: '03 / KINEMATICS' }).Inner;
+            const Vel = C.SectionCard(Page, { Title: Cls.IsWeb ? 'Web facing orientation' : (Cls.IsDiscPlane && !Cls.UsesSpeed ? 'Orientation & lifetime' : 'Launch velocity & lifetime'), Glyph: 'Rays', Badge: '03 / KINEMATICS' }).Inner;
             if (Cls.UsesDirVector)
-                C.VectorRow(Vel, BindEffect(Effect, P, 'dir', { Label: Cls.IsDiscPlane ? 'Disc / plane normal' : 'Launch direction', Step: 0.01, Digits: 2, Minimum: -1, Maximum: 1 }));
+                C.VectorRow(Vel, BindEffect(Effect, P, 'dir', { Label: Cls.IsWeb ? 'Web plane normal' : (Cls.IsDiscPlane ? 'Disc / plane normal' : 'Launch direction'), Step: 0.01, Digits: 2, Minimum: -1, Maximum: 1 }));
             if (Cls.UsesSpread)
                 Range(Vel, BindEffect(Effect, P, 'spread', { Label: 'Cone spread' }), 0, 3.1416, 0.01, 2, 'rad');
             if (Cls.UsesSpeed)
@@ -2987,6 +3012,25 @@ function ConstructEffectInspector(Page, Effect)
             Range(BoidsSec, BindEffect(Effect, P, 'pulseHz', { Label: 'Bioluminescent pulse rate' }), 0.0, 6.0, 0.05, 2, 'Hz');
             Range(BoidsSec, BindEffect(Effect, P, 'pulseDepth', { Label: 'Pulse glow depth' }), 0.0, 1.0, 0.02, 2, '');
         }
+        if (Cls.IsWeb)
+        {
+            const WebMot = C.SectionCard(Page, { Title: 'Silk weaving & aerodynamics', Glyph: 'Lattice', Badge: '02 / SPIDERWEB' }).Inner;
+            const WebModeB = BindEffect(Effect, P, 'webMode', { Label: 'Web architecture', Rebuild: true, Options: [['Orb-Weave Spiral Web', 1], ['Messy Attic Cobwebs', 2]] });
+            const OrigWebW = WebModeB.Write;
+            WebModeB.Write = V => { OrigWebW(Number(V)); ConstructInspectorPage(); };
+            C.SelectRow(WebMot, WebModeB);
+            C.ActionRow(WebMot, [{
+                Label: 'Re-Spin Web From Scratch', Glyph: 'Reset', Tone: 'accent',
+                Act: () => { RebuildGpu(Effect); C.Toast('Spinning spiderweb...'); }
+            }]);
+            Range(WebMot, BindEffect(Effect, P, 'webSpinRate', { Label: 'Spinning speed' }), 0.15, 4.0, 0.05, 2, '×');
+            Range(WebMot, BindEffect(Effect, P, 'webSpokes', { Label: Cls.WebMode === 1 ? 'Radial spokes' : 'Anchor chord density' }), 8, 28, 1, 0, '');
+            Range(WebMot, BindEffect(Effect, P, 'webRings', { Label: Cls.WebMode === 1 ? 'Capture spiral turns' : 'Tangle mesh depth' }), 6, 22, 1, 0, '');
+            Range(WebMot, BindEffect(Effect, P, 'webSag', { Label: 'Silk gravity sag' }), 0.0, 0.65, 0.01, 2, 'm');
+            Range(WebMot, BindEffect(Effect, P, 'webDew', { Label: Cls.WebMode === 1 ? 'Morning dew glints' : 'Dust & gossamer shimmer' }), 0.0, 1.0, 0.02, 2, '');
+            Range(WebMot, BindEffect(Effect, P, 'streakThin', { Label: 'Silk strand thickness' }), 0.1, 2.0, 0.02, 2, '×');
+            Range(WebMot, BindEffect(Effect, P, 'curlAmp', { Label: 'Gust flutter strength' }), 0.05, 3.0, 0.05, 2, 'm/s');
+        }
         if (Cls.IsCurl)
         {
             const CurlSec = C.SectionCard(Page, { Title: 'Curl noise & manifold', Glyph: 'Wind', Badge: '02 / CURL FLOW' }).Inner;
@@ -3022,9 +3066,9 @@ function ConstructEffectInspector(Page, Effect)
         }
         if (Cls.UsesDynamics)
         {
-            const Mot = C.SectionCard(Page, { Title: 'Forces & motion response', Glyph: 'Wind', Badge: Cls.IsCurl || Cls.IsBoids ? '03 / DYNAMICS' : '02 / DYNAMICS' }).Inner;
+            const Mot = C.SectionCard(Page, { Title: 'Forces & motion response', Glyph: 'Wind', Badge: Cls.IsCurl || Cls.IsWeb || Cls.IsBoids ? '03 / DYNAMICS' : '02 / DYNAMICS' }).Inner;
             Range(Mot, BindEffect(Effect, P, 'windCoupling', { Label: 'Wind lattice coupling' }), 0, 5, 0.02, 2, '1/s');
-            if (!Cls.IsCurl)
+            if (!Cls.IsCurl && !Cls.IsWeb)
             {
                 if (!Cls.IsBoids)
                     Range(Mot, BindEffect(Effect, P, 'drag', { Label: 'Aerodynamic drag' }), 0, 5, 0.02, 2, '1/s');
