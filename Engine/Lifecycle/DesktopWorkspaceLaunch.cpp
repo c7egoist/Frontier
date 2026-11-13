@@ -18,9 +18,12 @@
 #include "Engine/GeometricRaster/VulkanInterchange.h"
 #include "Engine/GeometricRaster/Rasterization/ImGuiOverlayRasterization.h"
 #include "Engine/GeometricRaster/UV/UVWorkspaceRasterizer.h"
+#include "Engine/GeometricRaster/Vector/VectorCanvasRasterizer.h"
+#include "Engine/GeometricRaster/Vector/VulkanVectorRenderMethod.h"
 #include "Engine/Input/ImGuiInputAdapter.h"
 #include "Engine/Input/InputExtension.h"
 #include "Engine/Windowing/PlatformWindow.h"
+#include "Engine/Workspaces/Texturing/PatternStampWorkspaceHost.h"
 #include "Engine/Workspaces/UV/UVWorkspaceHost.h"
 
 #if FRONTIER_EDITOR_ENABLED
@@ -261,6 +264,8 @@ int LaunchDesktopWorkspace(
     }
     EngineConfig.ConfigureFromCommandLine(ArgViews);
 
+    Workspaces::PatternStampWorkspaceMode RequestedVectorMode = Workspaces::PatternStampWorkspaceMode::Pattern;
+
     for (const char* RawArg : CommandLineArgs)
     {
         if (RawArg == nullptr)
@@ -295,11 +300,32 @@ int LaunchDesktopWorkspace(
             InitialOptions.OpenWorldEditor    = true;
             InitialOptions.OpenProjectBrowser = false;
         }
-        else if (Arg == "--uv" || Arg == "--uv-workspace")
+        else if (Arg == "--uv" || Arg == "--uv-workspace" || Arg == "--standalone-uv" || Arg == "--standalone=uv" || Arg == "--workspace=uv")
         {
             InitialOptions.OpenWorldEditor    = false;
             InitialOptions.OpenProjectBrowser = false;
             InitialOptions.DefaultLaunchMode  = Configuration::HostLaunchMode::StandaloneWorkspace;
+            InitialOptions.WindowTitle        = "Frontier UV";
+        }
+        else if (Arg == "--standalone-pattern" || Arg == "--standalone=pattern" || Arg == "--workspace=pattern" || Arg == "--mode=pattern")
+        {
+            RequestedVectorMode               = Workspaces::PatternStampWorkspaceMode::Pattern;
+            InitialOptions.OpenWorldEditor    = false;
+            InitialOptions.OpenProjectBrowser = false;
+            InitialOptions.WindowTitle        = "Frontier Pattern";
+        }
+        else if (Arg == "--standalone-stamp" || Arg == "--standalone=stamp" || Arg == "--workspace=stamp" || Arg == "--mode=stamp")
+        {
+            RequestedVectorMode               = Workspaces::PatternStampWorkspaceMode::Stamp;
+            InitialOptions.OpenWorldEditor    = false;
+            InitialOptions.OpenProjectBrowser = false;
+            InitialOptions.WindowTitle        = "Frontier Stamp";
+        }
+        else if (Arg == "--standalone-vector" || Arg == "--standalone=vector" || Arg == "--workspace=vector")
+        {
+            InitialOptions.OpenWorldEditor    = false;
+            InitialOptions.OpenProjectBrowser = false;
+            InitialOptions.WindowTitle        = "Frontier Vector";
         }
         else if (Arg == "--project-browser")
         {
@@ -341,21 +367,41 @@ int LaunchDesktopWorkspace(
 #if FRONTIER_EDITOR_ENABLED
     enum class ActiveHostSurface : uint8_t
     {
-        ProjectBrowserSurface = 0u,
-        WorldEditorSurface    = 1u,
-        UvWorkspaceSurface    = 2u,
+        ProjectBrowserSurface   = 0u,
+        WorldEditorSurface      = 1u,
+        UvWorkspaceSurface      = 2u,
+        PatternWorkspaceSurface = 3u,
+        StampWorkspaceSurface   = 4u,
     };
 
+    const bool StandaloneVectorLaunch =
+        (EngineConfig.QueryWorkspaceCategory() == WorkspaceCategory::Vector) &&
+        !InitialOptions.OpenWorldEditor &&
+        !InitialOptions.OpenProjectBrowser;
     const bool StandaloneUVLaunch =
         (EngineConfig.QueryLaunchMode() == Configuration::HostLaunchMode::StandaloneWorkspace) &&
+        (EngineConfig.QueryWorkspaceCategory() == WorkspaceCategory::UV) &&
         !InitialOptions.OpenWorldEditor &&
         !InitialOptions.OpenProjectBrowser;
 
-    ActiveHostSurface CurrentSurface = InitialOptions.OpenProjectBrowser
-                                           ? ActiveHostSurface::ProjectBrowserSurface
-                                           : (StandaloneUVLaunch ? ActiveHostSurface::UvWorkspaceSurface : ActiveHostSurface::WorldEditorSurface);
+    ActiveHostSurface CurrentSurface = ActiveHostSurface::WorldEditorSurface;
+    if (InitialOptions.OpenProjectBrowser)
+    {
+        CurrentSurface = ActiveHostSurface::ProjectBrowserSurface;
+    }
+    else if (StandaloneVectorLaunch)
+    {
+        CurrentSurface = (RequestedVectorMode == Workspaces::PatternStampWorkspaceMode::Stamp)
+                             ? ActiveHostSurface::StampWorkspaceSurface
+                             : ActiveHostSurface::PatternWorkspaceSurface;
+    }
+    else if (StandaloneUVLaunch)
+    {
+        CurrentSurface = ActiveHostSurface::UvWorkspaceSurface;
+    }
 #else
-    const bool StandaloneUVLaunch = true;
+    const bool StandaloneVectorLaunch = (EngineConfig.QueryWorkspaceCategory() == WorkspaceCategory::Vector);
+    const bool StandaloneUVLaunch     = !StandaloneVectorLaunch;
 #endif
 
     GeometricRaster::UVWorkspaceRasterizer UVRasterizer {};
@@ -375,6 +421,41 @@ int LaunchDesktopWorkspace(
         return true;
     };
     if (StandaloneUVLaunch && !EnsureUvStackReady())
+    {
+        return 1;
+    }
+
+    GeometricRaster::VectorCanvasRasterizer VectorRasterizer {};
+    bool VectorStackInitialized = false;
+    auto EnsureVectorStackReady = [&]() -> bool
+    {
+        if (VectorStackInitialized)
+        {
+            return true;
+        }
+        if (!VectorRasterizer.InitializeRasterizer(&DeviceInterchange, CompiledShaderDir))
+        {
+            std::fprintf(stderr, "[FrontierHost] VectorCanvasRasterizer initialization failed.\n");
+            return false;
+        }
+        std::error_code FontEc {};
+        const std::filesystem::path FontArchiveRoot = RepositoryRootPath / "EngineContent/FontsArchives";
+        if (std::filesystem::exists(FontArchiveRoot, FontEc))
+        {
+            for (const auto& Entry : std::filesystem::recursive_directory_iterator(FontArchiveRoot, FontEc))
+            {
+                if (!Entry.is_regular_file(FontEc)) continue;
+                const std::string Ext = Entry.path().extension().string();
+                if (Ext == ".ttf" || Ext == ".TTF" || Ext == ".otf" || Ext == ".OTF")
+                {
+                    (void)GeometricRaster::ThorVGVectorFrontend::RegisterTypefaceFile(Entry.path());
+                }
+            }
+        }
+        VectorStackInitialized = true;
+        return true;
+    };
+    if (StandaloneVectorLaunch && !EnsureVectorStackReady())
     {
         return 1;
     }
@@ -417,8 +498,13 @@ int LaunchDesktopWorkspace(
         }
     }
 
-    Workspaces::UVWorkspaceHost UVHost {};
+    Workspaces::UVWorkspaceHost           UVHost {};
+    Workspaces::PatternStampWorkspaceHost PatternHost(Workspaces::PatternStampWorkspaceMode::Pattern);
+    Workspaces::PatternStampWorkspaceHost StampHost(Workspaces::PatternStampWorkspaceMode::Stamp);
+
     Components::HeadlessWorkspaceDockContainer StandaloneDock {};
+    Components::HeadlessWorkspaceDockContainer PatternDock {};
+    Components::HeadlessWorkspaceDockContainer StampDock {};
     ControlCentrePanel                         StandaloneControlCentre {};
     Input::InputExtension                      InputCoordinator {};
     InputCoordinator.Initialize();
@@ -426,10 +512,28 @@ int LaunchDesktopWorkspace(
 #if FRONTIER_EDITOR_ENABLED
     Lifecycle::EditorLifecycle       EditorLoop {};
     Editor::Explorer::ContentBrowser StandaloneBrowser {};
+    Editor::Explorer::ContentBrowser PatternBrowser {};
+    Editor::Explorer::ContentBrowser StampBrowser {};
     Editor::Explorer::ProjectBrowser HostProjectBrowser {};
     bool                             EditorStackReady = false;
     bool                             UvHostReady      = false;
+    bool                             PatternHostReady = false;
+    bool                             StampHostReady   = false;
     bool                             ProjectBrowserInitialized = false;
+    bool                             SharedThemeInitialized    = false;
+
+    auto EnsureSharedControlCentreReady = [&]()
+    {
+        if (SharedThemeInitialized)
+        {
+            return;
+        }
+        StandaloneControlCentre.AttachTypefaces(&Typography);
+        StandaloneControlCentre.AccessDraftAppearance().Theme = ThemePreset::Dark;
+        StandaloneControlCentre.ApplyDraftAppearanceImmediate();
+        StandaloneControlCentre.AccessNotificationStream().ClearPending();
+        SharedThemeInitialized = true;
+    };
 
     auto EnsureProjectBrowserReady = [&]()
     {
@@ -496,6 +600,7 @@ int LaunchDesktopWorkspace(
         {
             return false;
         }
+        EnsureSharedControlCentreReady();
         if (!UvHostReady)
         {
             UVHost.ConfigureLaunchPolicy(EngineConfig);
@@ -505,13 +610,9 @@ int LaunchDesktopWorkspace(
             ThemeRepository ThemeRepo {};
             (void)StandaloneDock.Initialize(
                 Windowing::WindowConfigurationDescriptor::ConstructApplicationWindow(
-                    InitialOptions.WindowTitle, InitialOptions.InitialWidthPx, InitialOptions.InitialHeightPx));
+                    "Frontier UV", InitialOptions.InitialWidthPx, InitialOptions.InitialHeightPx));
             Components::ConfigureImGuiWorkspaceStyle(StandaloneDock.ActiveTabMetrics());
             Components::ConfigureImGuiWorkspaceTheme(StandaloneDock.ActiveTabMetrics(), ThemeRepo);
-            StandaloneControlCentre.AttachTypefaces(&Typography);
-            StandaloneControlCentre.AccessDraftAppearance().Theme = ThemePreset::Dark;
-            StandaloneControlCentre.ApplyDraftAppearanceImmediate();
-            StandaloneControlCentre.AccessNotificationStream().ClearPending();
 
             StandaloneBrowser.AttachThemeRepository(&StandaloneControlCentre.QueryThemeRepository());
             UVHost.AttachContentBrowser(&StandaloneBrowser);
@@ -535,10 +636,108 @@ int LaunchDesktopWorkspace(
         return true;
     };
 
+    auto EnsurePatternHostReady = [&](const std::filesystem::path& VectorPath) -> bool
+    {
+        if (!EnsureVectorStackReady())
+        {
+            return false;
+        }
+        EnsureSharedControlCentreReady();
+        if (!PatternHostReady)
+        {
+            PatternHost.ConfigureLaunchPolicy(EngineConfig);
+            PatternHost.ConfigureRepositoryRoot(RepositoryRootPath);
+            PatternHost.AttachVulkanRasterizer(&VectorRasterizer);
+
+            ThemeRepository ThemeRepo {};
+            (void)PatternDock.Initialize(
+                Windowing::WindowConfigurationDescriptor::ConstructApplicationWindow(
+                    "Frontier Pattern", InitialOptions.InitialWidthPx, InitialOptions.InitialHeightPx));
+            Components::ConfigureImGuiWorkspaceStyle(PatternDock.ActiveTabMetrics());
+            Components::ConfigureImGuiWorkspaceTheme(PatternDock.ActiveTabMetrics(), ThemeRepo);
+
+            PatternBrowser.AttachThemeRepository(&StandaloneControlCentre.QueryThemeRepository());
+            PatternHost.AttachContentBrowser(&PatternBrowser);
+            PatternBrowser.AccessPanel().ConfigureShelfExtent(
+                InitialOptions.OpenContentBrowser ? ContentShelfExtent::SplitHalf : ContentShelfExtent::Closed,
+                true);
+            (void)PatternBrowser.AccessPanel().ActivateCategory(ContentCategory::Vectors);
+            PatternHost.RegisterDockPanes(PatternDock);
+            PatternHostReady = true;
+        }
+        const std::filesystem::path PathToLoad = VectorPath.empty() ? InitialOptions.StartupImportPath : VectorPath;
+        if (!PathToLoad.empty() && std::filesystem::exists(PathToLoad))
+        {
+            std::string ImportDiag {};
+            const std::string Ext = PathToLoad.extension().string();
+            if (Ext == ".VectorSpace" || Ext == ".vectorspace" || Ext == ".svg" || Ext == ".SVG")
+            {
+                (void)PatternHost.IntakeExternalFileDrop(PathToLoad, ImportDiag);
+            }
+        }
+        return true;
+    };
+
+    auto EnsureStampHostReady = [&](const std::filesystem::path& VectorPath) -> bool
+    {
+        if (!EnsureVectorStackReady())
+        {
+            return false;
+        }
+        EnsureSharedControlCentreReady();
+        if (!StampHostReady)
+        {
+            StampHost.ConfigureLaunchPolicy(EngineConfig);
+            StampHost.ConfigureRepositoryRoot(RepositoryRootPath);
+            StampHost.AttachVulkanRasterizer(&VectorRasterizer);
+
+            ThemeRepository ThemeRepo {};
+            (void)StampDock.Initialize(
+                Windowing::WindowConfigurationDescriptor::ConstructApplicationWindow(
+                    "Frontier Stamp", InitialOptions.InitialWidthPx, InitialOptions.InitialHeightPx));
+            Components::ConfigureImGuiWorkspaceStyle(StampDock.ActiveTabMetrics());
+            Components::ConfigureImGuiWorkspaceTheme(StampDock.ActiveTabMetrics(), ThemeRepo);
+
+            StampBrowser.AttachThemeRepository(&StandaloneControlCentre.QueryThemeRepository());
+            StampHost.AttachContentBrowser(&StampBrowser);
+            StampBrowser.AccessPanel().ConfigureShelfExtent(
+                InitialOptions.OpenContentBrowser ? ContentShelfExtent::SplitHalf : ContentShelfExtent::Closed,
+                true);
+            (void)StampBrowser.AccessPanel().ActivateCategory(ContentCategory::Vectors);
+            StampHost.RegisterDockPanes(StampDock);
+            StampHostReady = true;
+        }
+        const std::filesystem::path PathToLoad = VectorPath.empty() ? InitialOptions.StartupImportPath : VectorPath;
+        if (!PathToLoad.empty() && std::filesystem::exists(PathToLoad))
+        {
+            std::string ImportDiag {};
+            const std::string Ext = PathToLoad.extension().string();
+            if (Ext == ".VectorSpace" || Ext == ".vectorspace" || Ext == ".svg" || Ext == ".SVG")
+            {
+                (void)StampHost.IntakeExternalFileDrop(PathToLoad, ImportDiag);
+            }
+        }
+        return true;
+    };
+
     HostProjectBrowser.AssignLaunchWorkspaceCallback(
         [&](const Editor::Explorer::BrowserWorkspaceLaunchDirective& Directive)
         {
-            if (Directive.TargetWorkspace == Workspaces::HostWorkspaceTarget::UVWorkspace)
+            if (Directive.TargetWorkspace == Workspaces::HostWorkspaceTarget::PatternWorkspace)
+            {
+                if (EnsurePatternHostReady(Directive.SelectedFilePath))
+                {
+                    CurrentSurface = ActiveHostSurface::PatternWorkspaceSurface;
+                }
+            }
+            else if (Directive.TargetWorkspace == Workspaces::HostWorkspaceTarget::StampWorkspace)
+            {
+                if (EnsureStampHostReady(Directive.SelectedFilePath))
+                {
+                    CurrentSurface = ActiveHostSurface::StampWorkspaceSurface;
+                }
+            }
+            else if (Directive.TargetWorkspace == Workspaces::HostWorkspaceTarget::UVWorkspace)
             {
                 if (EnsureUvHostReady(Directive.SelectedFilePath))
                 {
@@ -566,6 +765,22 @@ int LaunchDesktopWorkspace(
             return 1;
         }
     }
+    else if (CurrentSurface == ActiveHostSurface::PatternWorkspaceSurface)
+    {
+        if (!EnsurePatternHostReady(InitialOptions.StartupImportPath))
+        {
+            ImGui::DestroyContext(GuiCtx);
+            return 1;
+        }
+    }
+    else if (CurrentSurface == ActiveHostSurface::StampWorkspaceSurface)
+    {
+        if (!EnsureStampHostReady(InitialOptions.StartupImportPath))
+        {
+            ImGui::DestroyContext(GuiCtx);
+            return 1;
+        }
+    }
     else
     {
         if (!EnsureUvHostReady(InitialOptions.StartupImportPath))
@@ -576,14 +791,6 @@ int LaunchDesktopWorkspace(
     }
 #else
     ContentBrowserPanel StandaloneBrowserPanel {};
-    UVHost.ConfigureLaunchPolicy(EngineConfig);
-    (void)UVHost.AccessSession().InitializeGPUSolvers(&DeviceInterchange, CompiledShaderDir);
-    (void)UVHost.AttachVulkanRasterizer(&UVRasterizer);
-    if (!InitialOptions.StartupImportPath.empty())
-    {
-        std::string ImportDiag {};
-        (void)UVHost.IntakeExternalFileDrop(InitialOptions.StartupImportPath, ImportDiag);
-    }
     ThemeRepository ThemeRepo {};
     (void)StandaloneDock.Initialize(
         Windowing::WindowConfigurationDescriptor::ConstructApplicationWindow(
@@ -595,12 +802,43 @@ int LaunchDesktopWorkspace(
     StandaloneControlCentre.ApplyDraftAppearanceImmediate();
     StandaloneControlCentre.AccessNotificationStream().ClearPending();
     StandaloneBrowserPanel.AttachThemeRepository(&StandaloneControlCentre.QueryThemeRepository());
-    UVHost.AttachContentBrowserPanel(&StandaloneBrowserPanel);
-    StandaloneBrowserPanel.ConfigureShelfExtent(
-        InitialOptions.OpenContentBrowser ? ContentShelfExtent::SplitHalf : ContentShelfExtent::Closed,
-        true);
-    (void)StandaloneBrowserPanel.ActivateCategory(ContentCategory::Colours);
-    UVHost.RegisterDockPanes(StandaloneDock);
+
+    Workspaces::PatternStampWorkspaceHost& ActiveDevVectorHost =
+        (RequestedVectorMode == Workspaces::PatternStampWorkspaceMode::Stamp) ? StampHost : PatternHost;
+    if (StandaloneVectorLaunch)
+    {
+        ActiveDevVectorHost.ConfigureLaunchPolicy(EngineConfig);
+        ActiveDevVectorHost.ConfigureRepositoryRoot(RepositoryRootPath);
+        ActiveDevVectorHost.AttachVulkanRasterizer(&VectorRasterizer);
+        if (!InitialOptions.StartupImportPath.empty())
+        {
+            std::string ImportDiag {};
+            (void)ActiveDevVectorHost.IntakeExternalFileDrop(InitialOptions.StartupImportPath, ImportDiag);
+        }
+        ActiveDevVectorHost.AttachContentBrowserPanel(&StandaloneBrowserPanel);
+        StandaloneBrowserPanel.ConfigureShelfExtent(
+            InitialOptions.OpenContentBrowser ? ContentShelfExtent::SplitHalf : ContentShelfExtent::Closed,
+            true);
+        (void)StandaloneBrowserPanel.ActivateCategory(ContentCategory::Vectors);
+        ActiveDevVectorHost.RegisterDockPanes(StandaloneDock);
+    }
+    else
+    {
+        UVHost.ConfigureLaunchPolicy(EngineConfig);
+        (void)UVHost.AccessSession().InitializeGPUSolvers(&DeviceInterchange, CompiledShaderDir);
+        (void)UVHost.AttachVulkanRasterizer(&UVRasterizer);
+        if (!InitialOptions.StartupImportPath.empty())
+        {
+            std::string ImportDiag {};
+            (void)UVHost.IntakeExternalFileDrop(InitialOptions.StartupImportPath, ImportDiag);
+        }
+        UVHost.AttachContentBrowserPanel(&StandaloneBrowserPanel);
+        StandaloneBrowserPanel.ConfigureShelfExtent(
+            InitialOptions.OpenContentBrowser ? ContentShelfExtent::SplitHalf : ContentShelfExtent::Closed,
+            true);
+        (void)StandaloneBrowserPanel.ActivateCategory(ContentCategory::Colours);
+        UVHost.RegisterDockPanes(StandaloneDock);
+    }
 #endif
 
     GeometricRaster::ImGuiOverlayRasterization SwapchainPresenter {};
@@ -674,6 +912,20 @@ int LaunchDesktopWorkspace(
                 HostSurface->ResizeSurface(SurfaceW, SurfaceH, Extent.DpiScaleFactor);
             }
         }
+        if (PatternHostReady)
+        {
+            if (auto* HostSurface = PatternDock.AccessOperatingSurface(Components::HostWindowToken{ 0u }))
+            {
+                HostSurface->ResizeSurface(SurfaceW, SurfaceH, Extent.DpiScaleFactor);
+            }
+        }
+        if (StampHostReady)
+        {
+            if (auto* HostSurface = StampDock.AccessOperatingSurface(Components::HostWindowToken{ 0u }))
+            {
+                HostSurface->ResizeSurface(SurfaceW, SurfaceH, Extent.DpiScaleFactor);
+            }
+        }
 #else
         if (auto* HostSurface = StandaloneDock.AccessOperatingSurface(Components::HostWindowToken{ 0u }))
         {
@@ -700,11 +952,34 @@ int LaunchDesktopWorkspace(
                 (void)UVHost.IntakeExternalFileDrop(DropFile, DropDiag);
             }
         }
+        else if (CurrentSurface == ActiveHostSurface::PatternWorkspaceSurface && PatternHostReady)
+        {
+            for (const std::string& DropFile : DroppedPaths)
+            {
+                std::string DropDiag {};
+                (void)PatternHost.IntakeExternalFileDrop(DropFile, DropDiag);
+            }
+        }
+        else if (CurrentSurface == ActiveHostSurface::StampWorkspaceSurface && StampHostReady)
+        {
+            for (const std::string& DropFile : DroppedPaths)
+            {
+                std::string DropDiag {};
+                (void)StampHost.IntakeExternalFileDrop(DropFile, DropDiag);
+            }
+        }
 #else
         for (const std::string& DropFile : DroppedPaths)
         {
             std::string DropDiag {};
-            (void)UVHost.IntakeExternalFileDrop(DropFile, DropDiag);
+            if (StandaloneVectorLaunch)
+            {
+                (void)ActiveDevVectorHost.IntakeExternalFileDrop(DropFile, DropDiag);
+            }
+            else
+            {
+                (void)UVHost.IntakeExternalFileDrop(DropFile, DropDiag);
+            }
         }
 #endif
 #endif
@@ -728,12 +1003,19 @@ int LaunchDesktopWorkspace(
         }
         else
         {
-            const float UvUiScale = std::clamp(StandaloneControlCentre.QueryInterfaceScaleFactor(), 0.75f, 2.0f);
+            Components::HeadlessWorkspaceDockContainer& ActiveDock =
+                (CurrentSurface == ActiveHostSurface::PatternWorkspaceSurface) ? PatternDock :
+                ((CurrentSurface == ActiveHostSurface::StampWorkspaceSurface) ? StampDock : StandaloneDock);
+            Editor::Explorer::ContentBrowser& ActiveBrowser =
+                (CurrentSurface == ActiveHostSurface::PatternWorkspaceSurface) ? PatternBrowser :
+                ((CurrentSurface == ActiveHostSurface::StampWorkspaceSurface) ? StampBrowser : StandaloneBrowser);
+
+            const float HostUiScale = std::clamp(StandaloneControlCentre.QueryInterfaceScaleFactor(), 0.75f, 2.0f);
             Components::ConfigureImGuiWorkspaceTheme(
-                StandaloneDock.ActiveTabMetrics(),
+                ActiveDock.ActiveTabMetrics(),
                 StandaloneControlCentre.QueryThemeRepository());
-            auto& UvBrowserPanel = StandaloneBrowser.AccessPanel();
-            UvBrowserPanel.SynchronizeHostBounds(FullBounds, UvUiScale);
+            auto& ActiveBrowserPanel = ActiveBrowser.AccessPanel();
+            ActiveBrowserPanel.SynchronizeHostBounds(FullBounds, HostUiScale);
             if (StandaloneControlCentre.QueryOpen())
             {
                 WorkspaceAppearance::AssignOverlayPointerShield(FullBounds);
@@ -741,22 +1023,56 @@ int LaunchDesktopWorkspace(
             else
             {
                 WorkspaceAppearance::AssignOverlayPointerShield(
-                    UvBrowserPanel.QueryDrawerPhysicalBounds(),
-                    UvBrowserPanel.QueryNotchPhysicalBounds());
+                    ActiveBrowserPanel.QueryDrawerPhysicalBounds(),
+                    ActiveBrowserPanel.QueryNotchPhysicalBounds());
             }
-            StandaloneDock.PresentWindowImGuiPanes(Components::HostWindowToken{ 0u });
+            ActiveDock.PresentWindowImGuiPanes(Components::HostWindowToken{ 0u });
             WorkspaceAppearance::ClearOverlayPointerShield();
-            StandaloneBrowser.Render(FullBounds, Dt, UvUiScale);
+            ActiveBrowser.Render(FullBounds, Dt, HostUiScale);
             StandaloneControlCentre.Render(FullBounds, Dt, static_cast<float>(1.0 / Dt));
 
             if (!StandaloneControlCentre.QueryOpen())
             {
-                PixelSpace TopOverlay(ImGui::GetForegroundDrawList(), Point2D{ 0.0f, 0.0f }, UvUiScale);
+                PixelSpace TopOverlay(ImGui::GetForegroundDrawList(), Point2D{ 0.0f, 0.0f }, HostUiScale);
                 const Point2D MouseLogical = TopOverlay.QueryMousePosition();
                 ControlPointer Ptr { MouseLogical.X, MouseLogical.Y, TopOverlay.QueryMouseDown(0), TopOverlay.QueryMouseClicked(0), TopOverlay.QueryMouseReleased(0) };
-                ButtonDescriptor Desc { "Projects", ButtonTone::Secondary, 10.5f, 12.0f };
-                const float LogicalW = FullBounds.Width / UvUiScale;
-                if (CapsuleButton::Construct(TopOverlay, { std::max(320.0f, LogicalW * 0.5f + 98.0f), 3.0f, 82.0f, 23.0f }, Desc, Ptr).Pressed)
+                const float LogicalW = FullBounds.Width / HostUiScale;
+                float PillX = std::max(320.0f, LogicalW * 0.5f + 76.0f);
+
+                const ButtonTone PatTone = (CurrentSurface == ActiveHostSurface::PatternWorkspaceSurface) ? ButtonTone::Primary : ButtonTone::Secondary;
+                if (CapsuleButton::Construct(TopOverlay, { PillX, 3.0f, 68.0f, 23.0f }, ButtonDescriptor{ "Pattern", PatTone, 10.2f, 11.5f }, Ptr).Pressed &&
+                    CurrentSurface != ActiveHostSurface::PatternWorkspaceSurface)
+                {
+                    if (EnsurePatternHostReady({}))
+                    {
+                        CurrentSurface = ActiveHostSurface::PatternWorkspaceSurface;
+                    }
+                }
+                PillX += 74.0f;
+
+                const ButtonTone StTone = (CurrentSurface == ActiveHostSurface::StampWorkspaceSurface) ? ButtonTone::Primary : ButtonTone::Secondary;
+                if (CapsuleButton::Construct(TopOverlay, { PillX, 3.0f, 62.0f, 23.0f }, ButtonDescriptor{ "Stamp", StTone, 10.2f, 11.5f }, Ptr).Pressed &&
+                    CurrentSurface != ActiveHostSurface::StampWorkspaceSurface)
+                {
+                    if (EnsureStampHostReady({}))
+                    {
+                        CurrentSurface = ActiveHostSurface::StampWorkspaceSurface;
+                    }
+                }
+                PillX += 68.0f;
+
+                const ButtonTone UvTone = (CurrentSurface == ActiveHostSurface::UvWorkspaceSurface) ? ButtonTone::Primary : ButtonTone::Secondary;
+                if (CapsuleButton::Construct(TopOverlay, { PillX, 3.0f, 46.0f, 23.0f }, ButtonDescriptor{ "UV", UvTone, 10.2f, 11.5f }, Ptr).Pressed &&
+                    CurrentSurface != ActiveHostSurface::UvWorkspaceSurface)
+                {
+                    if (EnsureUvHostReady({}))
+                    {
+                        CurrentSurface = ActiveHostSurface::UvWorkspaceSurface;
+                    }
+                }
+                PillX += 52.0f;
+
+                if (CapsuleButton::Construct(TopOverlay, { PillX, 3.0f, 76.0f, 23.0f }, ButtonDescriptor{ "Projects", ButtonTone::Secondary, 10.2f, 11.5f }, Ptr).Pressed)
                 {
                     EnsureProjectBrowserReady();
                     CurrentSurface = ActiveHostSurface::ProjectBrowserSurface;
@@ -764,11 +1080,11 @@ int LaunchDesktopWorkspace(
             }
         }
 #else
-        const float UvUiScale = std::clamp(StandaloneControlCentre.QueryInterfaceScaleFactor(), 0.75f, 2.0f);
+        const float HostUiScale = std::clamp(StandaloneControlCentre.QueryInterfaceScaleFactor(), 0.75f, 2.0f);
         Components::ConfigureImGuiWorkspaceTheme(
             StandaloneDock.ActiveTabMetrics(),
             StandaloneControlCentre.QueryThemeRepository());
-        StandaloneBrowserPanel.SynchronizeHostBounds(FullBounds, UvUiScale);
+        StandaloneBrowserPanel.SynchronizeHostBounds(FullBounds, HostUiScale);
         if (StandaloneControlCentre.QueryOpen())
         {
             WorkspaceAppearance::AssignOverlayPointerShield(FullBounds);
@@ -781,7 +1097,7 @@ int LaunchDesktopWorkspace(
         }
         StandaloneDock.PresentWindowImGuiPanes(Components::HostWindowToken{ 0u });
         WorkspaceAppearance::ClearOverlayPointerShield();
-        StandaloneBrowserPanel.Render(FullBounds, Dt, UvUiScale);
+        StandaloneBrowserPanel.Render(FullBounds, Dt, HostUiScale);
         StandaloneControlCentre.Render(FullBounds, Dt, static_cast<float>(1.0 / Dt));
 #endif
         ImGui::Render();
@@ -815,6 +1131,7 @@ int LaunchDesktopWorkspace(
     SwapchainPresenter.TeardownOverlay();
 #if FRONTIER_EDITOR_ENABLED
     HostProjectBrowser.ReleaseGpuTextures();
+    HostProjectBrowser.AttachVulkanWorldRenderer(nullptr, {});
     if (EditorStackReady)
     {
         EditorLoop.Finalize();
@@ -824,13 +1141,28 @@ int LaunchDesktopWorkspace(
         StandaloneDock.Finalize();
         UVHost.AccessSession().TeardownGPUSolvers();
     }
+    if (PatternHostReady)
+    {
+        PatternDock.Finalize();
+    }
+    if (StampHostReady)
+    {
+        StampDock.Finalize();
+    }
 #else
     StandaloneDock.Finalize();
-    UVHost.AccessSession().TeardownGPUSolvers();
+    if (StandaloneUVLaunch)
+    {
+        UVHost.AccessSession().TeardownGPUSolvers();
+    }
 #endif
     if (UvStackInitialized)
     {
         UVRasterizer.TeardownRasterizer();
+    }
+    if (VectorStackInitialized)
+    {
+        VectorRasterizer.TeardownRasterizer();
     }
     InputCoordinator.Finalize();
 #if !defined(__ANDROID__)

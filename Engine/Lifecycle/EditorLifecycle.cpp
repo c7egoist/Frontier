@@ -1434,6 +1434,11 @@ void EditorLifecycle::PresentPrimaryEditorImGui(double Δt)
         }
     }
 
+    if (WorkspaceSessionPanes* ActivePanes = Workspaces.AccessActivePanes())
+    {
+        ContentBrowserDrawer.SynchronizeWorkspaceTargets(&ActivePanes->Outliner, &ActivePanes->Inspector);
+    }
+
     DockContainer.PresentWindowImGuiPanes(Components::HostWindowToken{ 0u });
     WorkspaceAppearance::ClearOverlayPointerShield();
 

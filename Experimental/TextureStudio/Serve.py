@@ -12,7 +12,7 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         if self.path in ('/', '/index.html'):
             self.send_response(302)
-            self.send_header('Location', '/Experimental/TextureStudio/')
+            self.send_header('Location', '/Experimental%20Remastered/TextureStudio/')
             self.end_headers()
             return
         super().do_GET()

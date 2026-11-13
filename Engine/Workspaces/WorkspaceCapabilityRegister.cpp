@@ -50,6 +50,20 @@ WorkspaceCapabilityRegister::WorkspaceCapabilityRegister()
         "UV Authoring · Dual 2D UDIM & 3D Surface GPU viewports, conformal unwrap & concave packing",
         true,
     });
+    RegisteredEntries.push_back({
+        HostWorkspaceTarget::PatternWorkspace,
+        "PatternWorkspace",
+        "Open with Pattern Studio",
+        "Pattern Studio · Seamless 2D ThorVG/Vulkan vector stack, 8 GPU modifiers & 22 OpenPBR channels",
+        true,
+    });
+    RegisteredEntries.push_back({
+        HostWorkspaceTarget::StampWorkspace,
+        "StampWorkspace",
+        "Open with Stamp Studio",
+        "Stamp Studio · Alpha cutout vector contours, procedural masks, typography & OpenPBR relief",
+        true,
+    });
 }
 
 std::span<const WorkspaceCapabilityEntry> WorkspaceCapabilityRegister::QueryAllCapabilities() const noexcept
@@ -61,6 +75,23 @@ std::vector<WorkspaceCapabilityEntry> WorkspaceCapabilityRegister::QueryPermitte
 {
     const std::string Ext = LowercaseAscii(FilePath.extension().string());
     std::vector<WorkspaceCapabilityEntry> Permitted {};
+
+    if (Ext == ".vectorspace" || Ext == ".svg")
+    {
+        if (const auto* Pat = FindByTarget(HostWorkspaceTarget::PatternWorkspace))
+        {
+            Permitted.push_back(*Pat);
+        }
+        if (const auto* St = FindByTarget(HostWorkspaceTarget::StampWorkspace))
+        {
+            Permitted.push_back(*St);
+        }
+        if (const auto* World = FindByTarget(HostWorkspaceTarget::FrontierWorld))
+        {
+            Permitted.push_back(*World);
+        }
+        return Permitted;
+    }
 
     if (Ext == ".uvspace" || Ext == ".obj" || Ext == ".geometryspace" || Ext == ".geometry")
     {
