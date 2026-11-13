@@ -624,7 +624,8 @@ svg.glyph.rich-icon { stroke: none; fill: none; stroke-width: initial; stroke-li
     color: #bcbcbc;
 }
 .viewport-bar-end { margin-left: auto; display: flex; align-items: center; gap: 4px; }
-.pill-btn { height: 26px; padding: 0 11px; font-size: 11px; background: #1e1e1e; border-color: var(--line); }
+.pill-btn { height: 26px; padding: 0 11px; font-size: 11px; background: #1e1e1e; border-color: var(--line); display: inline-flex; align-items: center; gap: 5px; }
+.pill-btn svg { width: 13px; height: 13px; flex-shrink: 0; }
 .pill-btn.active { background: rgba(62, 196, 109, 0.14); border-color: rgba(62, 196, 109, 0.35); color: #9de5b7; }
 .pill-btn.spark-pill { background: rgba(84, 152, 255, 0.16); border-color: rgba(124, 188, 255, 0.42); color: #cbe8ff; }
 .pill-btn.spark-pill:hover { background: rgba(102, 172, 255, 0.28); border-color: rgba(164, 218, 255, 0.65); color: #ffffff; }
@@ -1699,7 +1700,8 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(6px); }
     color: #78828c;
     margin-bottom: 2px;
 }
-#ViewportSurface.is-placing-probe #ViewportCanvas { cursor: crosshair !important; }
+#ViewportSurface.is-placing-probe #ViewportCanvas,
+#ViewportSurface.is-throwing-ball #ViewportCanvas { cursor: crosshair !important; }
 #ViewportSurface.is-hover-probe #ViewportCanvas { cursor: grab !important; }
 #ViewportSurface.is-drag-probe #ViewportCanvas { cursor: grabbing !important; }
 .viewport-place-banner {

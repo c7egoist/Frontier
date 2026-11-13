@@ -88,7 +88,9 @@ export const GlyphPaths = {
     Lock:       '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7.5a4 4 0 0 1 8 0V11"/>',
     Heat:       '<path d="M7 19c1.5-2.5-1.5-4.5 0-7s-1.5-4.5 0-7M12 19c1.5-2.5-1.5-4.5 0-7s-1.5-4.5 0-7M17 19c1.5-2.5-1.5-4.5 0-7s-1.5-4.5 0-7"/>',
     Singularity:'<circle cx="12" cy="12" r="3.2"/><ellipse cx="12" cy="12" rx="9.5" ry="3.4" transform="rotate(-18 12 12)"/><circle cx="12" cy="12" r="6.8" stroke-dasharray="2.5 3"/>',
-    Car:        '<path d="M5 15.5h14l1.2-3.3-2.6-1.2-2.4-3.5H8.8L6.4 11l-2.6 1.2z"/><circle cx="7.5" cy="16.5" r="2"/><circle cx="16.5" cy="16.5" r="2"/><path d="M9.5 16.5h5"/>'
+    Car:        '<path d="M5 15.5h14l1.2-3.3-2.6-1.2-2.4-3.5H8.8L6.4 11l-2.6 1.2z"/><circle cx="7.5" cy="16.5" r="2"/><circle cx="16.5" cy="16.5" r="2"/><path d="M9.5 16.5h5"/>',
+    Ball:       '<circle cx="12" cy="12" r="8"/><path d="M5.5 8.5c4 2.5 9 2.5 13 0M12 4a11 11 0 0 1 0 16"/>',
+    Cloth:      '<path d="M5 3v18"/><path d="M5 4.5c4-1.5 7 1.5 13 0v8c-6 1.5-9-1.5-13 0"/>'
 };
 
 let RichUid = 0;

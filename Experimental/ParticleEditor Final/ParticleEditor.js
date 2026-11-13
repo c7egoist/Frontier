@@ -57,6 +57,7 @@ function ConstructPerspective(Fov, Aspect, Near, Far)
 
 const CategoryLabels = { 0: 'Streak', 1: 'Wind-driven', 5: 'VFX' };
 const GroupGlyphs = {
+    'Cloth & Rigging': 'Cloth', 'Foliage & Flora': 'Leaf',
     'Silk & Curl': 'Sparkles', 'Ballistics & Sparks': 'Flame', 'Pyro & Water': 'Drop',
     'Wind-Blown': 'Leaf', 'Storms & Weather': 'CloudRain',
     'Transitions': 'Boxes', 'Space & Distortion': 'Singularity',
@@ -68,6 +69,8 @@ const GlyphForPreset = Preset => Preset?.id === 'snow' ? 'Snowflake'
     : Preset?.id === 'rain' ? 'CloudRain'
     : Preset?.id === 'hail' ? 'CloudHail'
     : Preset?.id?.startsWith('spiderweb-') ? 'Lattice'
+    : (Preset?.p?.dynMode >= 1 && Preset?.p?.dynMode <= 3) ? 'Cloth'
+    : (Preset?.p?.dynMode >= 4) ? 'Leaf'
     : Preset?.id === 'heat-shimmer' ? 'Heat'
     : Preset?.id === 'black-hole' ? 'Singularity'
     : (GroupGlyphs[Preset?.group] || GroupGlyphs[PE.vfxCategoryOf?.(Preset)] || 'Sparkles');
@@ -89,9 +92,11 @@ const DisplayColour = Linear =>
 // Curated scene presets for the slanted Fluid document dock
 const SceneTabs = [
     { Id: 'default', Name: 'Studio Default', Presets: null, Scenario: 'lab' },
+    { Id: 'rigging_cloth', Name: 'Cloth, Cables & Vines', Presets: ['flag-banner', 'cables-chains', 'vines-ropes'], Scenario: 'lab' },
+    { Id: 'foliage', Name: 'Grass, Reeds, Ferns & Tree', Presets: ['grass-wheat-field', 'tall-reeds', 'interactive-fern', 'interactive-tree'], Scenario: 'lab' },
+    { Id: 'spiderwebs', Name: 'Spiderwebs · Orb & Cobwebs', Presets: ['spiderweb-orb', 'spiderweb-cobweb'], Scenario: 'lab' },
     { Id: 'tesla', Name: 'Lightning & Static Spheres', Presets: ['tesla-sphere-lightning', 'static-sphere-shock', 'strikeSparks'], Scenario: 'blank' },
     { Id: 'curl', Name: 'Object Pulse & Bokeh Ribbons', Presets: ['bokeh-object-pulse', 'bokeh-stream-ribbons', 'curl-fur-field', 'curl-sphere-plasma'], Scenario: 'blank' },
-    { Id: 'spiderwebs', Name: 'Spiderwebs · Orb & Cobwebs', Presets: ['spiderweb-orb', 'spiderweb-cobweb'], Scenario: 'lab' },
     { Id: 'transitions', Name: 'Mesh Derez & Transitions', Presets: ['derez-cube', 'cube-coins', 'dissolve-butterflies', 'reverse-derez'], Scenario: 'blank' },
     { Id: 'distortion', Name: 'Black Hole & Heat Shimmer', Presets: ['black-hole', 'heat-shimmer'], Scenario: 'blank' },
     { Id: 'shields_aurora', Name: 'Hex Shield & Aurora Sky', Presets: ['energy-shield-hex', 'aurora-borealis', 'radar-sweep', 'sonar-ping'], Scenario: 'blank' },
@@ -122,6 +127,17 @@ const Scene = {
     AnemometerPlacing: false,
     AnemometerDragging: false,
     AnemometerHover: false,
+    BallPlacing: false,
+    Ball: {
+        Active: false,
+        Pos: [-4.5, 2.2, 2.4],
+        Vel: [0, 0, 0],
+        Radius: 0.42,
+        Impulse: 1.4,
+        ThrowSpeed: 10.5,
+        Gravity: 9.81,
+        Bounce: 0.62
+    },
     ArcHover: null,
     ArcDragging: null,
     LastCamera: null,
@@ -417,6 +433,7 @@ function RemoveForceSource(Source)
 function LoadSceneTab(TabDef)
 {
     Scene.ActiveTab = TabDef.Id;
+    Scene.Ball.Active = false;
     for (const E of Scene.Effects) Scene.Engine.destroySystem(E.Gpu);
     Scene.Effects = [];
     Scene.FieldScene = FC().ConstructChamberScenario(TabDef.Scenario || 'lab');
@@ -440,6 +457,7 @@ function ResetAll()
 {
     Scene.Time = 0;
     Scene.Step = 0;
+    Scene.Ball.Active = false;
     for (const Effect of Scene.Effects) RebuildGpu(Effect);
     for (const Src of Scene.FieldScene.Sources)
         if (Src.Activation === 'Trigger') Src.TriggeredAt = Src.Type === 'Blast' ? 0 : null;
@@ -1309,6 +1327,87 @@ function ConstructGeometry()
         Face(F0, F1, F2, AccentCol);
         Face(F0, F2, F3, AccentCol);
     }
+
+    // 5. Physical Rigging Supports (Flagpole, Ship Mast & Spars, Cable Stanchions) + Interactive 3D Projectile Ball
+    const DrawCylinderPillar = (Bx, By, Bz, Tx, Ty, Tz, Rad, Col) =>
+    {
+        const Sides = 10;
+        for (let K = 0; K < Sides; K++)
+        {
+            const A0 = (K / Sides) * Math.PI * 2, A1 = ((K + 1) / Sides) * Math.PI * 2;
+            const B0 = [Bx + Math.cos(A0) * Rad, By, Bz + Math.sin(A0) * Rad];
+            const B1 = [Bx + Math.cos(A1) * Rad, By, Bz + Math.sin(A1) * Rad];
+            const T0 = [Tx + Math.cos(A0) * Rad * 0.78, Ty, Tz + Math.sin(A0) * Rad * 0.78];
+            const T1 = [Tx + Math.cos(A1) * Rad * 0.78, Ty, Tz + Math.sin(A1) * Rad * 0.78];
+            const Lit = 0.78 + 0.22 * Math.cos(A0 - 0.8);
+            const C = [Col[0] * Lit, Col[1] * Lit, Col[2] * Lit, Col[3]];
+            Face(B0, B1, T1, C); Face(B0, T1, T0, C);
+        }
+    };
+    for (const E of Scene.Effects)
+    {
+        if (!E.P.visible) continue;
+        const P = E.P;
+        const Dyn = Math.max(0, Math.min(7, P.dynMode | 0));
+        if (Dyn === 3)
+        {
+            const Ex = Math.max(0.5, P.boxHalf?.[0] || 1.8);
+            const Ey = Math.max(0.5, P.boxHalf?.[1] || 1.2);
+            const DynH = Math.max(0.5, P.dynHeight ?? 3.6);
+            const YTop = P.origin[1] + DynH;
+            if ((P.dynSub || 0) > 0.5)
+            {
+                // Square-rigged Ship Mast + Yardarm + Boom matching WGSL evalDynStrand
+                const SH = Math.max(0.8, Ey * 1.85);
+                const YBot = Math.max(0.45, YTop - SH);
+                const Mx = P.origin[0], Mz = P.origin[2] - 0.14;
+                const TopY = YTop + 0.25;
+                DrawCylinderPillar(Mx, 0.0, Mz, Mx, TopY, Mz, 0.068, [0.46, 0.32, 0.20, 0.96]);
+                RingXZ(Mx, 0.02, Mz, 0.22, 20, [0.56, 0.42, 0.28, 0.65]);
+                Line([P.origin[0] - Ex * 0.96, YTop, P.origin[2]], [P.origin[0] + Ex * 0.96, YTop, P.origin[2]], [0.56, 0.40, 0.26, 0.95]);
+                Line([P.origin[0] - Ex * 1.12, YBot, P.origin[2]], [P.origin[0] + Ex * 1.12, YBot, P.origin[2]], [0.56, 0.40, 0.26, 0.88]);
+                Line([Mx, TopY - 0.05, Mz], [P.origin[0] - Ex * 0.90, YTop, P.origin[2]], [0.70, 0.64, 0.52, 0.72]);
+                Line([Mx, TopY - 0.05, Mz], [P.origin[0] + Ex * 0.90, YTop, P.origin[2]], [0.70, 0.64, 0.52, 0.72]);
+            }
+            else
+            {
+                // Flagpole at x = origin.x - ext.x matching WGSL evalDynStrand
+                const Mx = P.origin[0] - Ex, Mz = P.origin[2];
+                const TopY = YTop + 0.16;
+                DrawCylinderPillar(Mx, 0.0, Mz, Mx, TopY, Mz, 0.048, [0.58, 0.62, 0.68, 0.96]);
+                DrawElectrodeSphere([Mx, TopY + 0.05, Mz], 0.075, [0.92, 0.74, 0.28, 0.98], [0.98, 0.86, 0.45, 0.9], false);
+                RingXZ(Mx, 0.02, Mz, 0.16, 20, [0.65, 0.70, 0.76, 0.65]);
+            }
+        }
+        else if (Dyn === 1)
+        {
+            const Ex = Math.max(0.5, P.boxHalf?.[0] || 2.4);
+            const Ez = Math.max(0.5, P.boxHalf?.[2] || 1.4);
+            const DynH = Math.max(0.8, P.dynHeight ?? 3.1);
+            const Py = P.origin[1] + DynH * 1.02;
+            for (const Sx of [-1, 1])
+            {
+                for (const Sz of [-1, 1])
+                {
+                    const Px = P.origin[0] + Sx * Ex * 1.04;
+                    const Pz = P.origin[2] + Sz * Ez;
+                    DrawCylinderPillar(Px, 0.0, Pz, Px, Py, Pz, 0.05, [0.34, 0.37, 0.42, 0.94]);
+                }
+                Line([P.origin[0] + Sx * Ex * 1.04, Py * 0.96, P.origin[2] - Ez], [P.origin[0] + Sx * Ex * 1.04, Py * 0.96, P.origin[2] + Ez], [0.46, 0.52, 0.58, 0.86]);
+            }
+        }
+    }
+    if (Scene.Ball.Active)
+    {
+        const B = Scene.Ball;
+        DrawElectrodeSphere(B.Pos, B.Radius, [0.88, 0.38, 0.12, 0.98], [1.0, 0.84, 0.42, 0.98], true);
+        if (B.Pos[1] > 0.02 && B.Pos[1] < 5.5)
+        {
+            const ShR = Math.max(0.16, B.Radius * (0.85 + B.Pos[1] * 0.08));
+            RingXZ(B.Pos[0], 0.02, B.Pos[2], ShR, 24, [0.95, 0.62, 0.26, Math.max(0.18, 0.65 - B.Pos[1] * 0.1)]);
+        }
+    }
+
     return { Lines: new Float32Array(Out), Meshes: new Float32Array(Mesh), ArcSegs, ArcFlashes };
 }
 
@@ -1346,7 +1445,7 @@ function ProjectWorldToCss(VP, X, Y, Z, W, H)
     return { X: ((Cx / Cw) * 0.5 + 0.5) * W, Y: (0.5 - (Cy / Cw) * 0.5) * H };
 }
 
-function ScreenToWorldPlane(Cam, ClientX, ClientY, Canvas, PlaneY)
+function ScreenToRay(Cam, ClientX, ClientY, Canvas)
 {
     if (!Cam || !Canvas) return null;
     const Inv = InvertMatrix4(Cam.ViewProjection);
@@ -1364,11 +1463,99 @@ function ScreenToWorldPlane(Cam, ClientX, ClientY, Canvas, PlaneY)
         return [Ox / Ow, Oy / Ow, Oz / Ow];
     };
     const Near = Unproj(-1), Far = Unproj(1);
-    const Dir = [Far[0] - Near[0], Far[1] - Near[1], Far[2] - Near[2]];
-    if (Math.abs(Dir[1]) < 1e-4) return null;
-    const T = (PlaneY - Near[1]) / Dir[1];
+    const Dir = Normalize3([Far[0] - Near[0], Far[1] - Near[1], Far[2] - Near[2]]);
+    return { Origin: Near, Dir };
+}
+
+function ScreenToWorldPlane(Cam, ClientX, ClientY, Canvas, PlaneY)
+{
+    const Ray = ScreenToRay(Cam, ClientX, ClientY, Canvas);
+    if (!Ray || Math.abs(Ray.Dir[1]) < 1e-4) return null;
+    const T = (PlaneY - Ray.Origin[1]) / Ray.Dir[1];
     if (T <= 0 || T > 400) return null;
-    return [Near[0] + Dir[0] * T, PlaneY, Near[2] + Dir[2] * T];
+    return [Ray.Origin[0] + Ray.Dir[0] * T, PlaneY, Ray.Origin[2] + Ray.Dir[2] * T];
+}
+
+function ThrowBallAtTarget(TargetPos, Speed = null, Loft = 1.6)
+{
+    const B = Scene.Ball;
+    const Cam = Scene.LastCamera || ResolveCamera(1.6);
+    const Aim = TargetPos || [0, 1.8, 0];
+    const Eye = Cam?.Eye || [4.5, 4.0, 9.5];
+    const ToTgt = Subtract3(Aim, Eye);
+    const Dist = Math.hypot(ToTgt[0], ToTgt[1], ToTgt[2]) || 1;
+    const Dir = [ToTgt[0] / Dist, ToTgt[1] / Dist, ToTgt[2] / Dist];
+    const Spd = Speed ?? B.ThrowSpeed ?? 10.5;
+    B.Pos = [Eye[0] + Dir[0] * 1.4, Math.max(B.Radius + 0.25, Eye[1] + Dir[1] * 1.4), Eye[2] + Dir[2] * 1.4];
+    const FlightT = Math.max(0.12, (Dist - 1.4) / Math.max(2.0, Spd));
+    B.Vel = [
+        Dir[0] * Spd,
+        Dir[1] * Spd + 0.5 * B.Gravity * FlightT * 0.48 + Loft * 0.25,
+        Dir[2] * Spd
+    ];
+    B.Active = true;
+    AppendLog('PARTICLES', 'Thrown interactive 3D ball', `v=${Spd.toFixed(1)} m/s -> (${Aim.map(v => v.toFixed(1)).join(', ')})`, 'live');
+}
+
+function ThrowBallFromScreen(ClientX, ClientY, Canvas, SpeedScale = 1.0)
+{
+    const Cam = Scene.LastCamera || ResolveCamera(Canvas.width / Math.max(1, Canvas.height));
+    const Ray = ScreenToRay(Cam, ClientX, ClientY, Canvas);
+    if (!Ray) return;
+    const B = Scene.Ball;
+    const Spd = (B.ThrowSpeed ?? 10.5) * SpeedScale;
+    const Eye = Cam.Eye || Ray.Origin;
+    B.Pos = [Eye[0] + Ray.Dir[0] * 1.35, Math.max(B.Radius + 0.2, Eye[1] + Ray.Dir[1] * 1.35), Eye[2] + Ray.Dir[2] * 1.35];
+    B.Vel = [Ray.Dir[0] * Spd, Ray.Dir[1] * Spd + 1.25, Ray.Dir[2] * Spd];
+    B.Active = true;
+    AppendLog('PARTICLES', 'Thrown interactive 3D ball from cursor', `v=${Spd.toFixed(1)} m/s`, 'live');
+}
+
+function StepBallPhysics(Dt)
+{
+    const B = Scene.Ball;
+    if (!B.Active || Dt <= 0) return;
+    const Keep = Math.exp(-0.14 * Dt);
+    B.Vel[0] *= Keep;
+    B.Vel[1] = B.Vel[1] * Keep - B.Gravity * Dt;
+    B.Vel[2] *= Keep;
+    B.Pos[0] += B.Vel[0] * Dt;
+    B.Pos[1] += B.Vel[1] * Dt;
+    B.Pos[2] += B.Vel[2] * Dt;
+    if (B.Pos[1] < B.Radius)
+    {
+        B.Pos[1] = B.Radius;
+        if (Math.abs(B.Vel[1]) > 0.35) B.Vel[1] = Math.abs(B.Vel[1]) * B.Bounce;
+        else B.Vel[1] = 0;
+        B.Vel[0] *= 0.92;
+        B.Vel[2] *= 0.92;
+    }
+    const ArenaBound = 7.4;
+    if (Math.abs(B.Pos[0]) > ArenaBound) { B.Pos[0] = Clamp(B.Pos[0], -ArenaBound, ArenaBound); B.Vel[0] = -B.Vel[0] * 0.72; }
+    if (Math.abs(B.Pos[2]) > ArenaBound) { B.Pos[2] = Clamp(B.Pos[2], -ArenaBound, ArenaBound); B.Vel[2] = -B.Vel[2] * 0.72; }
+}
+
+function SyncBallToolState()
+{
+    const BallTool = document.querySelector('#ViewportTools [data-vtool="ball"]');
+    if (BallTool) BallTool.classList.toggle('active', !!Scene.BallPlacing);
+    const TopBtn = document.getElementById('throw-ball-btn');
+    if (TopBtn) TopBtn.classList.toggle('active', !!Scene.BallPlacing);
+    const Surface = document.getElementById('ViewportSurface');
+    if (Surface) Surface.classList.toggle('is-throwing-ball', !!Scene.BallPlacing);
+    const OrbitTool = document.querySelector('#ViewportTools [data-vtool="orbit"]');
+    if (OrbitTool) OrbitTool.classList.toggle('active', !Scene.AnemometerPlacing && !Scene.BallPlacing);
+    const Banner = document.getElementById('ViewportPlaceBanner');
+    const BannerText = document.getElementById('ViewportPlaceText');
+    if (Scene.BallPlacing)
+    {
+        if (Banner) Banner.classList.add('shown');
+        if (BannerText) BannerText.textContent = 'THROW BALL TOOL · Click anywhere in viewport to launch 3D sphere into Cloth, Webs, Ferns & Trees · Esc cancel';
+    }
+    else if (!Scene.AnemometerPlacing && !Scene.AnemometerDragging)
+    {
+        if (Banner) Banner.classList.remove('shown');
+    }
 }
 
 function HitTestArcSphere(Cam, ClientX, ClientY, Canvas)
@@ -1426,18 +1613,21 @@ function SyncAnemometerToolState()
         Surface.classList.toggle('is-hover-probe', !Scene.AnemometerPlacing && !Scene.AnemometerDragging && !!Scene.AnemometerHover);
     }
     const Banner = document.getElementById('ViewportPlaceBanner');
-    if (Banner) Banner.classList.toggle('shown', !!Scene.AnemometerPlacing || !!Scene.AnemometerDragging);
+    if (Banner) Banner.classList.toggle('shown', !!Scene.AnemometerPlacing || !!Scene.AnemometerDragging || !!Scene.BallPlacing);
     const BannerText = document.getElementById('ViewportPlaceText');
     if (BannerText)
     {
-        BannerText.textContent = Scene.AnemometerDragging
-            ? `Moving Anemometer (${Scene.Probe.map(V => V.toFixed(1)).join(', ')}) m · Hold Shift to adjust altitude Y`
-            : 'Click anywhere in the viewport to place the Anemometer · Drag pin anytime · Esc cancel';
+        if (Scene.AnemometerDragging)
+            BannerText.textContent = `Moving Anemometer (${Scene.Probe.map(V => V.toFixed(1)).join(', ')}) m · Hold Shift to adjust altitude Y`;
+        else if (Scene.AnemometerPlacing)
+            BannerText.textContent = 'Click anywhere in the viewport to place the Anemometer · Drag pin anytime · Esc cancel';
+        else if (Scene.BallPlacing)
+            BannerText.textContent = 'THROW BALL TOOL · Click anywhere in viewport to launch 3D sphere into Cloth, Webs, Ferns & Trees · Esc cancel';
     }
     const ProbeTool = document.querySelector('#ViewportTools [data-vtool="probe"]');
     if (ProbeTool) ProbeTool.classList.toggle('active', !!Scene.AnemometerPlacing || !!Scene.ProbeEnabled);
     const OrbitTool = document.querySelector('#ViewportTools [data-vtool="orbit"]');
-    if (OrbitTool) OrbitTool.classList.toggle('active', !Scene.AnemometerPlacing);
+    if (OrbitTool) OrbitTool.classList.toggle('active', !Scene.AnemometerPlacing && !Scene.BallPlacing);
     const PlaceBtn = document.getElementById('btn-place-anemometer');
     if (PlaceBtn)
     {
@@ -1603,6 +1793,7 @@ function Advance(Now)
     Scene.Time += Delta;
     Scene.Step++;
     if (Scene.Turntable && Scene.Playing) Scene.Camera.Yaw += RealDelta * 0.28;
+    if (Scene.Playing && Delta > 0) StepBallPhysics(Delta);
 
 
     const Engine = Scene.Engine;
@@ -1618,7 +1809,7 @@ function Advance(Now)
         ? null
         : FC().SampleWindTexData(Scene.FieldScene, Scene.PreparedField, PE.WIND, Scene.Wind.windScale, Solo);
 
-    const Global = new Float32Array(52);
+    const Global = new Float32Array(PE.GLOB_OFF.sizeFloats || 60);
     const Off = PE.GLOB_OFF;
     Global.set(Camera.ViewProjection, Off.viewProj);
     Global.set([Camera.Right[0], Camera.Right[1], Camera.Right[2], 0], Off.camRight);
@@ -1630,6 +1821,9 @@ function Advance(Now)
     Global.set([Scene.Time, Delta, Scene.Step, Scene.Wind.windScale], Off.timing);
     Global.set([Scene.Wind.arrowRef, Scene.Wind.arrowStyle ?? 0, 0, Scene.Wind.turbulence], Off.viz);
     Global.set([Scene.Wind.swirl, 0.45, 0.22, Scene.Wind.arrowStride ?? 2], Off.swirl);
+    const B = Scene.Ball;
+    Global.set(B.Active ? [B.Pos[0], B.Pos[1], B.Pos[2], B.Radius] : [0, 0, 0, -1], Off.ballPos);
+    Global.set(B.Active ? [B.Vel[0], B.Vel[1], B.Vel[2], B.Impulse] : [0, 0, 0, 0], Off.ballVel);
 
     const Components = new Float32Array(PE.WIND.maxComps * 8);
 
@@ -2596,33 +2790,36 @@ function ClassifyEffect(P)
     const CurlMode = IsTransition ? 0 : (P.curlMode || 0);
     const IsCurl = CurlMode > 0;
     const IsBoids = P.kind === 6;
-    const WebMode = !IsTransition && !IsArc && !IsBeam && !IsBoids ? Math.max(0, Math.min(2, P.webMode | 0)) : 0;
+    const DynMode = !IsTransition && !IsArc && !IsBeam && !IsBoids ? Math.max(0, Math.min(7, P.dynMode | 0)) : 0;
+    const IsDyn = DynMode > 0;
+    const WebMode = !IsTransition && !IsArc && !IsBeam && !IsBoids && !IsDyn ? Math.max(0, Math.min(2, P.webMode | 0)) : 0;
     const IsWeb = WebMode > 0;
     const IsObjectPour = CurlMode === 3 && (P.pulseMode || 0) > 0;
     const Shape = P.shape ?? 3;
     const IsDiscPlane = Shape === 10 || Shape === 15;
-    const IsSteadyOverlay = IsCurl || IsWeb || Shape === 16 || (Shape === 15 && (P.leafMode || 0) === 0);
+    const IsSteadyOverlay = IsCurl || IsWeb || IsDyn || Shape === 16 || (Shape === 15 && (P.leafMode || 0) === 0);
     const IsExpandingWave = Shape === 10 || Shape === 11 || (Shape === 15 && (P.leafMode || 0) >= 1);
-    const UsesEmitVolume = !IsArc && !IsBeam && !IsWeb && CurlMode !== 2 && !IsObjectPour && !IsAssembly;
+    const UsesEmitVolume = !IsArc && !IsBeam && !IsWeb && !IsDyn && CurlMode !== 2 && !IsObjectPour && !IsAssembly;
     const EmitSh = P.emitShape ?? 0;
-    const UsesRate = !IsTransition && !IsWeb;
+    const UsesRate = !IsTransition && !IsWeb && !IsDyn;
     const UsesRadius = IsArc || (IsBeam && P.showElectrodes !== false) || WebMode === 1 || (UsesEmitVolume && (EmitSh === 1 || EmitSh === 2));
-    const UsesBoxHalf = IsObjectPour || CurlMode === 1 || WebMode === 2 || (IsTransition && AsmMode === 1) || (UsesEmitVolume && (EmitSh === 3 || EmitSh === 4));
-    const UsesDirVector = !IsTransition && !IsCurl && !IsArc && !IsBeam && !IsBoids && Shape !== 11 && Shape !== 16;
-    const UsesSpread = UsesDirVector && !IsDiscPlane && !IsWeb;
-    const UsesSpeed = !IsCurl && !IsWeb && !IsAssembly && !IsBoids && !IsSteadyOverlay;
-    const UsesLife = !IsAssembly && !IsWeb;
-    const UsesSizeEnd = !IsAssembly && !IsWeb;
+    const UsesBoxHalf = IsObjectPour || CurlMode === 1 || WebMode === 2 || IsDyn || (IsTransition && AsmMode === 1) || (UsesEmitVolume && (EmitSh === 3 || EmitSh === 4));
+    const UsesDirVector = !IsTransition && !IsCurl && !IsArc && !IsBeam && !IsBoids && !IsDyn && Shape !== 11 && Shape !== 16;
+    const UsesSpread = UsesDirVector && !IsDiscPlane && !IsWeb && !IsDyn;
+    const UsesSpeed = !IsCurl && !IsWeb && !IsDyn && !IsAssembly && !IsBoids && !IsSteadyOverlay;
+    const UsesLife = !IsAssembly && !IsWeb && !IsDyn;
+    const UsesSizeEnd = !IsAssembly && !IsWeb && !IsDyn;
     const UsesColB = !IsAssembly;
-    const UsesColC = IsCurl || IsWeb || (P.trailMode || 0) > 0 || IsBoids || IsBeam || Shape === 0 || Shape >= 10;
-    const UsesTrailMode = !IsCurl && !IsWeb && !IsTransition && !IsBoids && !IsArc && !IsBeam && (Shape < 10 || Shape === 14);
+    const UsesColC = IsCurl || IsWeb || IsDyn || (P.trailMode || 0) > 0 || IsBoids || IsBeam || Shape === 0 || Shape >= 10;
+    const UsesTrailMode = !IsCurl && !IsWeb && !IsDyn && !IsTransition && !IsBoids && !IsArc && !IsBeam && (Shape < 10 || Shape === 14);
     const UsesWind = !IsAssembly && !(Shape === 16 || (Shape === 15 && (P.leafMode || 0) === 0));
     const UsesDynamics = !IsAssembly && !(Shape === 16 || (Shape === 15 && (P.leafMode || 0) === 0));
-    const UsesLaunchCone = !IsTransition && !IsCurl && !IsWeb && !IsArc && !IsBeam && !IsBoids && Shape !== 10 && Shape !== 11 && Shape !== 15 && Shape !== 16 && Shape !== 17;
+    const UsesLaunchCone = !IsTransition && !IsCurl && !IsWeb && !IsDyn && !IsArc && !IsBeam && !IsBoids && Shape !== 10 && Shape !== 11 && Shape !== 15 && Shape !== 16 && Shape !== 17;
 
     let BounceBlockReason = null;
     if (IsAssembly) BounceBlockReason = 'Analytic assembly ignores floor collision';
     else if (IsTransition && P.transition.fragment) BounceBlockReason = 'Shatter cubes break into 8 pieces on floor contact';
+    else if (IsDyn) BounceBlockReason = 'Dynamic rigging & flora respond directly to wind & 3D ball collisions';
     else if (IsWeb) BounceBlockReason = 'Anchored spiderweb strands flex in wind instead of floor bouncing';
     else if (IsCurl) BounceBlockReason = 'Curl flow field does not bounce on floor';
     else if (P.kind === 1) BounceBlockReason = 'Wind-driven particles settle cleanly on floor';
@@ -2631,7 +2828,7 @@ function ClassifyEffect(P)
 
     return {
         IsArc, IsBeam, IsTransition, AsmMode, IsAssembly,
-        CurlMode, IsCurl, WebMode, IsWeb, IsObjectPour, IsBoids, Shape,
+        CurlMode, IsCurl, DynMode, IsDyn, WebMode, IsWeb, IsObjectPour, IsBoids, Shape,
         IsDiscPlane, IsSteadyOverlay, IsExpandingWave,
         UsesRate, UsesEmitVolume, UsesRadius, UsesBoxHalf,
         UsesDirVector, UsesSpread, UsesSpeed, UsesLife,
@@ -2663,6 +2860,62 @@ function ConstructEffectInspector(Page, Effect)
     ];
     RenderInspectorTabs(TabDefs);
 
+    const DynModeLabels = ['Off', 'Cables & Chains', 'Hanging Vines & Ivy', 'Cloth Flag / Sail', 'Grass & Wheat', 'Reeds & Cattails', 'Broad Ferns', 'Canopy Tree'];
+    const AddDynSection = (HostPage, Badge = '02 / RIGGING & FLORA') =>
+    {
+        const Sec = C.SectionCard(HostPage, { Title: 'Dynamic rigging & flora', Glyph: Cls.DynMode <= 3 ? 'Cloth' : 'Leaf', Badge }).Inner;
+        const ModeB = BindEffect(Effect, P, 'dynMode', {
+            Label: 'Dynamic architecture', Rebuild: true,
+            Options: [[DynModeLabels[1], 1], [DynModeLabels[2], 2], [DynModeLabels[3], 3], [DynModeLabels[4], 4], [DynModeLabels[5], 5], [DynModeLabels[6], 6], [DynModeLabels[7], 7]]
+        });
+        const OrigDM = ModeB.Write;
+        ModeB.Write = V => { OrigDM(Number(V)); ConstructInspectorPage(); };
+        C.SelectRow(Sec, ModeB);
+        if (Cls.DynMode === 1 || Cls.DynMode === 3 || Cls.DynMode === 4)
+        {
+            const SubLabels = Cls.DynMode === 1
+                ? [['Braided Steel Cables', 0], ['Metallic Iron Chains', 1]]
+                : Cls.DynMode === 3
+                    ? [['Striped Banner Flag', 0], ['Pinned Ship Sail', 1]]
+                    : [['Emerald Grass Meadow', 0], ['Golden Plumed Wheat', 1]];
+            C.SelectRow(Sec, BindEffect(Effect, P, 'dynSub', { Label: 'Style variant', Options: SubLabels }));
+        }
+        Range(Sec, BindEffect(Effect, P, 'dynRows', { Label: Cls.DynMode === 3 ? 'Cloth vertical strips' : (Cls.DynMode === 7 ? 'Woody canopy limbs' : 'Strands / fronds count') }), 4, 48, 1, 0, '');
+        Range(Sec, BindEffect(Effect, P, 'dynHeight', { Label: Cls.DynMode <= 3 ? 'Cloth height / drop span' : 'Foliage / trunk height' }), 0.4, 5.5, 0.05, 2, 'm');
+        Range(Sec, BindEffect(Effect, P, 'dynSag', { Label: Cls.DynMode === 6 ? 'Frond tip arch sag' : 'Gravity catenary sag' }), 0.0, 1.4, 0.02, 2, 'm');
+        Range(Sec, BindEffect(Effect, P, 'dynStiff', { Label: 'Elastic stiffness' }), 0.2, 3.0, 0.05, 2, '×');
+        Range(Sec, BindEffect(Effect, P, 'dynWaveSpeed', { Label: 'Wind wave / flutter speed' }), 0.2, 6.0, 0.05, 2, 'Hz');
+        Range(Sec, BindEffect(Effect, P, 'dynTearThresh', { Label: 'Impact tear speed (0 = unbreakable)' }), 0.0, 18.0, 0.2, 1, 'm/s');
+    };
+
+    const AddBallInteractionCard = (HostPage, Badge = '03 / INTERACTIVE BALL') =>
+    {
+        const BallSec = C.SectionCard(HostPage, { Title: 'Interactive 3D ball & impacts', Glyph: 'Ball', Badge, Hint: 'Press T (or Alt+Click in viewport) to throw spheres through cloth, spiderwebs, vines, ferns, grass, or trees.' }).Inner;
+        C.ActionRow(BallSec, [
+            {
+                Label: 'Throw Ball at Effect', Glyph: 'Ball', Tone: 'accent',
+                Act: () => { ThrowBallAtTarget(P.origin, Scene.Ball.ThrowSpeed); C.Toast('Ball thrown!'); }
+            },
+            {
+                Label: 'Drop From Above', Glyph: 'Gravity',
+                Act: () =>
+                {
+                    Scene.Ball.Pos = [P.origin[0], P.origin[1] + 3.2, P.origin[2]];
+                    Scene.Ball.Vel = [0, -5.5, 0];
+                    Scene.Ball.Active = true;
+                    C.Toast('Dropped ball onto effect');
+                }
+            },
+            {
+                Label: 'Clear Ball', Glyph: 'Close',
+                Act: () => { Scene.Ball.Active = false; }
+            }
+        ]);
+        Range(BallSec, { Label: 'Ball radius', Read: () => Scene.Ball.Radius, Write: V => { Scene.Ball.Radius = Number(V); } }, 0.15, 1.2, 0.02, 2, 'm');
+        Range(BallSec, { Label: 'Throw velocity', Read: () => Scene.Ball.ThrowSpeed, Write: V => { Scene.Ball.ThrowSpeed = Number(V); } }, 3.0, 22.0, 0.25, 1, 'm/s');
+        Range(BallSec, BindEffect(Effect, P, 'dynTearThresh', { Label: 'Strand / cloth tear speed (0 = tough)' }), 0.0, 18.0, 0.2, 1, 'm/s');
+    };
+
     if (InspectorTab === 'overview')
     {
         const Mark = C.Construct('div', 'mark live', C.ConstructGlyph('Check'));
@@ -2690,9 +2943,9 @@ function ConstructEffectInspector(Page, Effect)
         {
             const Alive = Effect.Gpu?.stats_?.alive ?? 0;
             Metric.textContent = FormatInteger(Alive);
-            if (Cls.IsTransition)
+            if (Cls.IsTransition || Cls.IsWeb || Cls.IsDyn)
             {
-                Rate.textContent = 'Batch cycle';
+                Rate.textContent = Cls.IsDyn ? DynModeLabels[Cls.DynMode] : (Cls.IsWeb ? 'Silk strands' : 'Batch cycle');
             }
             else
             {
@@ -2709,11 +2962,13 @@ function ConstructEffectInspector(Page, Effect)
 
         const SecondTrio = Cls.IsAssembly
             ? { Label: 'Assembly', Resolve: () => [Cls.AsmMode === 1 ? 'Shell rebuild' : 'Column stack', `${(P.transition.holdSpread ?? 0).toFixed(1)} s wave`] }
-            : Cls.IsCurl
-                ? { Label: 'Manifold', Resolve: () => [['Planar wave', 'Sphere shell', 'Bokeh ribbon'][Cls.CurlMode - 1] || 'Curl field', `${(P.curlAmp ?? 2.2).toFixed(1)} m/s flow`] }
-                : Cls.IsBoids
-                    ? { Label: 'Cruise speed', Resolve: () => [`${(P.boidsSpeed ?? 3.6).toFixed(1)} m/s`, `radius ${(P.swarmRadius ?? 1.5).toFixed(1)} m`] }
-                    : { Label: 'Gravity', Resolve: () => [`${P.gravity.toFixed(2)} g`, `${P.drag.toFixed(2)} drag`] };
+            : Cls.IsDyn
+                ? { Label: 'Rigging / Flora', Resolve: () => [DynModeLabels[Cls.DynMode] || 'Dynamic', `stiff ${(P.dynStiff ?? 1.0).toFixed(2)}× · tear ${(P.dynTearThresh || 0).toFixed(1)} m/s`] }
+                : Cls.IsCurl
+                    ? { Label: 'Manifold', Resolve: () => [['Planar wave', 'Sphere shell', 'Bokeh ribbon'][Cls.CurlMode - 1] || 'Curl field', `${(P.curlAmp ?? 2.2).toFixed(1)} m/s flow`] }
+                    : Cls.IsBoids
+                        ? { Label: 'Cruise speed', Resolve: () => [`${(P.boidsSpeed ?? 3.6).toFixed(1)} m/s`, `radius ${(P.swarmRadius ?? 1.5).toFixed(1)} m`] }
+                        : { Label: 'Gravity', Resolve: () => [`${P.gravity.toFixed(2)} g`, `${P.drag.toFixed(2)} drag`] };
 
         C.MetricTrio(Page, [
             { Label: 'Shape', Resolve: () => [['Streak', 'Sphere', 'Leaf', 'Glow', 'Cube', 'Coin', 'Bubble', 'Snowflake', 'Hailstone', 'Bokeh Bead', 'Shockwave Ring', 'EMP Pulse Dome', 'Holo Glitch', 'Winged Boid', 'Viscous Drop', 'Radar / Sonar Sweep', 'Energy Shield Hex', 'Aurora Curtain'][P.shape] || 'Strand', P.blend === 'alpha' ? 'alpha blend' : 'additive glow'] },
@@ -2745,13 +3000,15 @@ function ConstructEffectInspector(Page, Effect)
 
         const BurstAction = Cls.IsArc
             ? { Label: 'Trigger Spark', Glyph: 'Zap', Tone: 'accent', Act: () => { TriggerArcStrike(Effect, Scene.Time); AppendLog('PARTICLES', `${Effect.Name}: fired spark arc`, `t=${Scene.Time.toFixed(2)}s`, 'live'); } }
-            : Cls.IsTransition
-                ? { Label: 'Replay Cycle', Glyph: 'Sparkles', Tone: 'accent', Act: () => { RebuildGpu(Effect); AppendLog('PARTICLES', `${Effect.Name}: replayed transition cycle`, `${Effect.Gpu.cap} pieces`, 'live'); } }
-                : Cls.IsSteadyOverlay
-                    ? { Label: 'Burst', Glyph: 'Sparkles', Tone: 'accent', Act: () => {}, Availability: () => ({ Enabled: false, Reason: Cls.IsCurl ? 'Continuous curl stream pre-populates smoothly' : 'Steady-state HUD / shield overlay runs continuously' }) }
-                    : Cls.IsExpandingWave
-                        ? { Label: 'Emit Pulse', Glyph: 'Sparkles', Tone: 'accent', Act: () => { Effect.PendingBurst += Math.max(1, P.burstCount || 1); } }
-                        : { Label: 'Burst', Glyph: 'Sparkles', Tone: 'accent', Act: () => { Effect.PendingBurst += Math.max(60, Math.round(Effect.Gpu.cap * 0.4)); } };
+            : (Cls.IsDyn || Cls.IsWeb)
+                ? { Label: 'Throw Ball', Glyph: 'Ball', Tone: 'accent', Act: () => { ThrowBallAtTarget(P.origin, Scene.Ball.ThrowSpeed); C.Toast('Ball thrown!'); } }
+                : Cls.IsTransition
+                    ? { Label: 'Replay Cycle', Glyph: 'Sparkles', Tone: 'accent', Act: () => { RebuildGpu(Effect); AppendLog('PARTICLES', `${Effect.Name}: replayed transition cycle`, `${Effect.Gpu.cap} pieces`, 'live'); } }
+                    : Cls.IsSteadyOverlay
+                        ? { Label: 'Burst', Glyph: 'Sparkles', Tone: 'accent', Act: () => {}, Availability: () => ({ Enabled: false, Reason: Cls.IsCurl ? 'Continuous curl stream pre-populates smoothly' : 'Steady-state HUD / shield overlay runs continuously' }) }
+                        : Cls.IsExpandingWave
+                            ? { Label: 'Emit Pulse', Glyph: 'Sparkles', Tone: 'accent', Act: () => { Effect.PendingBurst += Math.max(1, P.burstCount || 1); } }
+                            : { Label: 'Burst', Glyph: 'Sparkles', Tone: 'accent', Act: () => { Effect.PendingBurst += Math.max(60, Math.round(Effect.Gpu.cap * 0.4)); } };
 
         C.ActionRow(Page, [
             BurstAction,
@@ -2759,6 +3016,8 @@ function ConstructEffectInspector(Page, Effect)
             { Label: 'Duplicate', Glyph: 'Copy', Act: () => DuplicateEffect(Effect) },
             { Label: 'Delete', Glyph: 'Trash', Tone: 'danger', Act: () => RemoveEffect(Effect) }
         ]);
+
+        if (Cls.IsDyn || Cls.IsWeb) AddBallInteractionCard(Page, '02 / INTERACTIVE BALL');
 
         if (Cls.UsesLaunchCone)
         {
@@ -2770,7 +3029,7 @@ function ConstructEffectInspector(Page, Effect)
         }
         else
         {
-            const Spec = C.SectionCard(Page, { Title: 'Colour spectrum', Glyph: 'Palette', Badge: '02 / SPECTRUM', Hint: Cls.IsAssembly ? 'Base surface tint used during analytic assembly.' : 'Active colour ramp rendered by this effect.' });
+            const Spec = C.SectionCard(Page, { Title: 'Colour spectrum', Glyph: 'Palette', Badge: (Cls.IsDyn || Cls.IsWeb) ? '03 / SPECTRUM' : '02 / SPECTRUM', Hint: Cls.IsAssembly ? 'Base surface tint used during analytic assembly.' : 'Active colour ramp rendered by this effect.' });
             const Ribbon = C.Construct('div', 'gradient-ribbon');
             Spec.Inner.append(Ribbon);
             C.Register(() => { Ribbon.style.background = SpectrumGradient(P); });
@@ -2782,13 +3041,15 @@ function ConstructEffectInspector(Page, Effect)
     {
         const SrcHint = Cls.IsTransition
             ? 'Transition batches spawn full pool capacity together at each cycle.'
-            : Cls.IsObjectPour
-                ? 'Particles pour directly over the 3D object surface whose dimensions come from boxHalf.'
-                : Cls.CurlMode === 2
-                    ? 'Particles spawn directly onto the spherical plasma shell around the origin.'
-                    : 'Birth rate, emitter volume geometry and spawn origin.';
+            : Cls.IsDyn
+                ? 'Dynamic strand, cloth & botanical systems initialize all structural nodes immediately and deform continuously under wind and ball impacts.'
+                : Cls.IsObjectPour
+                    ? 'Particles pour directly over the 3D object surface whose dimensions come from boxHalf.'
+                    : Cls.CurlMode === 2
+                        ? 'Particles spawn directly onto the spherical plasma shell around the origin.'
+                        : 'Birth rate, emitter volume geometry and spawn origin.';
         const Src = C.SectionCard(Page, { Title: 'Emission source', Glyph: 'Target', Badge: '01 / SOURCE', Hint: SrcHint }).Inner;
-        const Capacities = [...new Set([64, 384, 512, 1024, 1536, 2048, 4096, 8192, P.capacity])].sort((A, B) => A - B);
+        const Capacities = [...new Set([64, 96, 128, 220, 384, 512, 1024, 1536, 2048, 4096, 8192, P.capacity])].sort((A, B) => A - B);
         C.SelectRow(Src, BindEffect(Effect, P, 'capacity', { Label: 'Pool capacity', Options: Capacities.map(K => [FormatInteger(K), K]), Rebuild: true }));
         if (Cls.UsesRate)
             Range(Src, BindEffect(Effect, P, 'rate', { Label: 'Spawn rate' }), 0, 2000, 1, 0, '/s');
@@ -2799,7 +3060,7 @@ function ConstructEffectInspector(Page, Effect)
             EmitShapeB.Write = V => { OrigEmitWrite(V); ConstructInspectorPage(); };
             C.SelectRow(Src, EmitShapeB);
         }
-        const OriginLabel = Cls.IsArc ? 'Sphere A position' : Cls.IsBeam ? 'Beam muzzle position' : Cls.IsObjectPour ? '3D object centre' : Cls.IsWeb ? 'Web anchor centre' : 'Emitter origin';
+        const OriginLabel = Cls.IsArc ? 'Sphere A position' : Cls.IsBeam ? 'Beam muzzle position' : Cls.IsObjectPour ? '3D object centre' : Cls.IsWeb ? 'Web anchor centre' : Cls.IsDyn ? 'Structure / root origin' : 'Emitter origin';
         C.VectorRow(Src, BindEffect(Effect, P, 'origin', { Label: OriginLabel, Unit: 'm', Step: 0.05, Digits: 2, Minimum: -20, Maximum: 20 }));
         if (Cls.CurlMode === 2)
             Range(Src, BindEffect(Effect, P, 'shellRadius', { Label: 'Sphere shell radius' }), 0.4, 5.0, 0.05, 2, 'm');
@@ -2816,10 +3077,17 @@ function ConstructEffectInspector(Page, Effect)
                     ? 'Wave field extents'
                     : Cls.IsWeb
                         ? 'Corner cobweb volume'
-                        : Cls.IsAssembly
-                            ? 'Target cube half extents'
-                            : 'Box half extents';
+                        : Cls.IsDyn
+                            ? (Cls.DynMode === 3 ? 'Cloth span extents' : 'Rigging / patch half extents')
+                            : Cls.IsAssembly
+                                ? 'Target cube half extents'
+                                : 'Box half extents';
             C.VectorRow(Src, BindEffect(Effect, P, 'boxHalf', { Label: BoxLabel, Unit: 'm', Step: 0.05, Digits: 2, Minimum: 0, Maximum: 10 }));
+        }
+        if (Cls.IsDyn)
+        {
+            AddDynSection(Page, '02 / RIGGING & FLORA');
+            AddBallInteractionCard(Page, '03 / INTERACTIVE BALL');
         }
         if (Cls.IsWeb)
         {
@@ -2835,6 +3103,8 @@ function ConstructEffectInspector(Page, Effect)
             Range(WebSecSrc, BindEffect(Effect, P, 'webSpinRate', { Label: 'Spinning speed' }), 0.15, 4.0, 0.05, 2, '×');
             Range(WebSecSrc, BindEffect(Effect, P, 'webSpokes', { Label: Cls.WebMode === 1 ? 'Radial spokes' : 'Anchor chord density' }), 8, 28, 1, 0, '');
             Range(WebSecSrc, BindEffect(Effect, P, 'webRings', { Label: Cls.WebMode === 1 ? 'Capture spiral turns' : 'Tangle mesh depth' }), 6, 22, 1, 0, '');
+            AddBallInteractionCard(Page, '03 / INTERACTIVE BALL');
+        }
             Range(WebSecSrc, BindEffect(Effect, P, 'webSag', { Label: 'Silk gravity catenary sag' }), 0.0, 0.65, 0.01, 2, 'm');
             Range(WebSecSrc, BindEffect(Effect, P, 'webDew', { Label: Cls.WebMode === 1 ? 'Morning dew glints' : 'Dust & gossamer shimmer' }), 0.0, 1.0, 0.02, 2, '');
         }
@@ -3030,6 +3300,12 @@ function ConstructEffectInspector(Page, Effect)
             Range(WebMot, BindEffect(Effect, P, 'webDew', { Label: Cls.WebMode === 1 ? 'Morning dew glints' : 'Dust & gossamer shimmer' }), 0.0, 1.0, 0.02, 2, '');
             Range(WebMot, BindEffect(Effect, P, 'streakThin', { Label: 'Silk strand thickness' }), 0.1, 2.0, 0.02, 2, '×');
             Range(WebMot, BindEffect(Effect, P, 'curlAmp', { Label: 'Gust flutter strength' }), 0.05, 3.0, 0.05, 2, 'm/s');
+            AddBallInteractionCard(Page, '03 / INTERACTIVE BALL');
+        }
+        if (Cls.IsDyn)
+        {
+            AddDynSection(Page, '02 / RIGGING & FLORA');
+            AddBallInteractionCard(Page, '03 / INTERACTIVE BALL');
         }
         if (Cls.IsCurl)
         {
@@ -3066,9 +3342,9 @@ function ConstructEffectInspector(Page, Effect)
         }
         if (Cls.UsesDynamics)
         {
-            const Mot = C.SectionCard(Page, { Title: 'Forces & motion response', Glyph: 'Wind', Badge: Cls.IsCurl || Cls.IsWeb || Cls.IsBoids ? '03 / DYNAMICS' : '02 / DYNAMICS' }).Inner;
+            const Mot = C.SectionCard(Page, { Title: 'Forces & motion response', Glyph: 'Wind', Badge: Cls.IsCurl || Cls.IsWeb || Cls.IsDyn || Cls.IsBoids ? '04 / DYNAMICS' : '02 / DYNAMICS' }).Inner;
             Range(Mot, BindEffect(Effect, P, 'windCoupling', { Label: 'Wind lattice coupling' }), 0, 5, 0.02, 2, '1/s');
-            if (!Cls.IsCurl && !Cls.IsWeb)
+            if (!Cls.IsCurl && !Cls.IsWeb && !Cls.IsDyn)
             {
                 if (!Cls.IsBoids)
                     Range(Mot, BindEffect(Effect, P, 'drag', { Label: 'Aerodynamic drag' }), 0, 5, 0.02, 2, '1/s');
@@ -4091,7 +4367,7 @@ function WireStaticIconsAndControls()
     SetGlyph('close-help', 'Close');
 
     const VTools = document.querySelectorAll('#ViewportTools [data-vtool]');
-    const VToolIcons = { orbit: 'Orbit', probe: 'Crosshair', turntable: 'Reset' };
+    const VToolIcons = { orbit: 'Orbit', probe: 'Crosshair', ball: 'Ball', turntable: 'Reset' };
     VTools.forEach(Btn =>
     {
         Btn.append(C.ConstructGlyph(VToolIcons[Btn.dataset.vtool]));
@@ -4100,16 +4376,29 @@ function WireStaticIconsAndControls()
             const T = Btn.dataset.vtool;
             if (T === 'probe')
             {
+                Scene.BallPlacing = false;
                 Scene.ProbeEnabled = true;
                 Scene.AnemometerPlacing = !Scene.AnemometerPlacing;
                 SyncAnemometerToolState();
+                SyncBallToolState();
+                C.Broadcast();
+                return;
+            }
+            if (T === 'ball')
+            {
+                Scene.AnemometerPlacing = false;
+                Scene.BallPlacing = !Scene.BallPlacing;
+                SyncAnemometerToolState();
+                SyncBallToolState();
                 C.Broadcast();
                 return;
             }
             if (T === 'orbit')
             {
                 Scene.AnemometerPlacing = false;
+                Scene.BallPlacing = false;
                 SyncAnemometerToolState();
+                SyncBallToolState();
                 return;
             }
             if (T === 'turntable') { Scene.Turntable = !Scene.Turntable; Btn.classList.toggle('active', Scene.Turntable); return; }
@@ -4153,6 +4442,28 @@ function WireStaticIconsAndControls()
     });
 
     document.getElementById('trigger-spark-btn')?.addEventListener('click', () => TriggerAllArcs());
+    const ThrowBtn = document.getElementById('throw-ball-btn');
+    if (ThrowBtn)
+    {
+        ThrowBtn.prepend(C.ConstructGlyph('Ball'));
+        ThrowBtn.addEventListener('click', Ev =>
+        {
+            if (Ev.shiftKey)
+            {
+                Scene.AnemometerPlacing = false;
+                Scene.BallPlacing = !Scene.BallPlacing;
+                SyncAnemometerToolState();
+                SyncBallToolState();
+                return;
+            }
+            const Sel = EffectByToken(Selected);
+            const Target = Sel ? Sel.P.origin : [0, 1.8, 0];
+            ThrowBallAtTarget(Target, Scene.Ball.ThrowSpeed);
+            C.Toast('Ball launched at ' + (Sel ? Sel.Name : 'scene center'));
+            RefreshLive();
+            C.Broadcast();
+        });
+    }
     document.getElementById('toggle-overlay-btn').classList.toggle('active', !!Scene.Overlay.Enabled);
     document.getElementById('toggle-overlay-btn').addEventListener('click', () =>
     {
@@ -4316,6 +4627,14 @@ function AttachOrbit()
     Canvas.addEventListener('pointerdown', E =>
     {
         const Cam = Scene.LastCamera;
+        if (E.button === 0 && Cam && (Scene.BallPlacing || (E.altKey && !Scene.AnemometerPlacing)))
+        {
+            ThrowBallFromScreen(Cam, E.clientX, E.clientY, Canvas, Scene.Ball.ThrowSpeed);
+            C.Toast('Ball thrown!');
+            RefreshLive();
+            C.Broadcast();
+            return;
+        }
         if (E.button === 0 && Cam && Scene.AnemometerPlacing)
         {
             const Pt = ScreenToWorldPlane(Cam, E.clientX, E.clientY, Canvas, Scene.Probe[1]);
@@ -4560,13 +4879,32 @@ async function Boot()
         else if (Ev.key === 'b' || Ev.key === 'B') BurstAll();
         else if (Ev.key === 'r' || Ev.key === 'R') ResetAll();
         else if (Ev.key === 's' || Ev.key === 'S') { document.getElementById('step-button').click(); }
-        else if (Ev.key === 'p' || Ev.key === 'P') { Scene.ProbeEnabled = true; Scene.AnemometerPlacing = !Scene.AnemometerPlacing; SyncAnemometerToolState(); C.Broadcast(); }
+        else if (Ev.key === 'p' || Ev.key === 'P') { Scene.BallPlacing = false; Scene.ProbeEnabled = true; Scene.AnemometerPlacing = !Scene.AnemometerPlacing; SyncAnemometerToolState(); SyncBallToolState(); C.Broadcast(); }
+        else if (Ev.key === 't' || Ev.key === 'T')
+        {
+            if (Ev.shiftKey)
+            {
+                Scene.AnemometerPlacing = false;
+                Scene.BallPlacing = !Scene.BallPlacing;
+                SyncAnemometerToolState();
+                SyncBallToolState();
+            }
+            else
+            {
+                const Sel = EffectByToken(Selected);
+                ThrowBallAtTarget(Sel ? Sel.P.origin : [0, 1.8, 0], Scene.Ball.ThrowSpeed);
+                C.Toast('Ball thrown!');
+            }
+            RefreshLive();
+            C.Broadcast();
+        }
         else if (Ev.key === 'v' || Ev.key === 'V') { document.getElementById('toggle-overlay-btn').click(); }
         else if (Ev.key === '/') { Ev.preventDefault(); const M = document.getElementById('add-menu'); if (M?.hidden) document.getElementById('add-button')?.click(); else document.getElementById('add-menu-preset-search')?.focus(); }
-        else if (Ev.key === 'Escape') { Scene.AnemometerPlacing = false; SyncAnemometerToolState(); document.getElementById('add-menu').hidden = true; document.getElementById('LibraryVeil').classList.remove('shown'); SyncTopNav(); }
+        else if (Ev.key === 'Escape') { Scene.AnemometerPlacing = false; Scene.BallPlacing = false; SyncAnemometerToolState(); SyncBallToolState(); document.getElementById('add-menu').hidden = true; document.getElementById('LibraryVeil').classList.remove('shown'); SyncTopNav(); }
     });
 
     SyncAnemometerToolState();
+    SyncBallToolState();
     RefreshLive();
     AppendLog('PARTICLES', `Engine ready · ${Scene.AdapterName}`, `${Scene.Effects.length} effects · ${PE.Presets.length} presets`, 'live');
     AppendLog('FORCES', 'ForceFieldVisualization active', `${Scene.FieldScene.Sources.length} bounded sources + Ambient Wind`, 'live');

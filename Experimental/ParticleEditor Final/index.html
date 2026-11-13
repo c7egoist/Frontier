@@ -30,7 +30,7 @@
 
             <nav class="top-nav" aria-label="Workspace views">
                 <button class="nav-button active" id="nav-workspace" type="button">Workspace</button>
-                <button class="nav-button" id="nav-library" type="button">Assets <small id="nav-preset-total">37</small></button>
+                <button class="nav-button" id="nav-library" type="button">Assets <small id="nav-preset-total">75</small></button>
                 <button class="nav-button" id="nav-log" type="button">Log Stream <small id="nav-log-count">0</small></button>
             </nav>
 
@@ -79,6 +79,8 @@
                 <div class="scene-filters" id="scene-filters" aria-label="Outliner category filters">
                     <button data-filter="all" class="active" type="button">All</button>
                     <button data-filter="effects" type="button">Effects</button>
+                    <button data-filter="vfx:Cloth &amp; Rigging" type="button">Cloth</button>
+                    <button data-filter="vfx:Foliage &amp; Flora" type="button">Flora</button>
                     <button data-filter="vfx:Silk &amp; Curl" type="button">Curl</button>
                     <button data-filter="vfx:Ballistics &amp; Sparks" type="button">Sparks</button>
                     <button data-filter="vfx:Pyro &amp; Water" type="button">Pyro</button>
@@ -120,6 +122,7 @@
                         <option value="off" selected>Clean viewport (no overlay)</option>
                     </select>
                     <div class="viewport-bar-end">
+                        <button id="throw-ball-btn" class="button pill-btn" type="button" title="Toggle Throw Ball Tool (T) or throw sphere at selection (Alt+Click)">Throw Ball · T</button>
                         <button id="trigger-spark-btn" class="button pill-btn spark-pill" type="button" title="Fire instantaneous spark arc between spheres (B)" hidden>⚡ Strike Spark</button>
                         <button id="toggle-overlay-btn" class="button pill-btn" type="button" title="Toggle field overlay (V)">Field · V</button>
                         <button id="toggle-arrows-btn" class="icon-button" type="button" title="Toggle 3D vector field arrows"></button>
@@ -142,6 +145,7 @@
 
                     <div class="viewport-tools" id="ViewportTools" aria-label="Viewport tools">
                         <button class="active icon-button" data-vtool="orbit" type="button" title="Orbit camera (Drag)"></button>
+                        <button class="icon-button" data-vtool="ball" type="button" title="Throw Interactive 3D Ball at Cloth, Webs, Grass &amp; Trees (T / Alt+Click)"></button>
                         <button class="icon-button" data-vtool="probe" type="button" title="Place or move Wind Anemometer in viewport (P)"></button>
                         <button class="icon-button" data-vtool="turntable" type="button" title="Auto turntable camera"></button>
                     </div>
@@ -167,7 +171,7 @@
                     </div>
 
                     <div class="viewport-help">
-                        <span>Drag to orbit</span><i>·</i><span>Right-drag pan</span><i>·</i><span>Scroll zoom</span><i>·</i><span>Space pause</span><i>·</i><span>B burst</span><i>·</i><span>V field</span>
+                        <span>Drag to orbit</span><i>·</i><span>T throw ball</span><i>·</i><span>Alt+Click toss sphere</span><i>·</i><span>Right-drag pan</span><i>·</i><span>Space pause</span><i>·</i><span>V field</span>
                     </div>
                 </div>
 
@@ -275,6 +279,16 @@
         <div class="add-menu-assets" id="add-menu-assets"></div>
         <button data-action="open-library" type="button">Browse Full Asset Gallery… <small>Visual cards by category (Curl Silk, Ballistics, Pyro, Wind, Weather)</small></button>
         <div class="menu-divider"></div>
+        <div class="popover-label">CLOTH, CABLES, VINES &amp; BALL-INTERACTIVE RIGGING</div>
+        <button data-add-effect="flag-banner" type="button">Cloth Flag &amp; Banner <small>Seamless woven flag strips · deflects &amp; tears under projectile ball</small></button>
+        <button data-add-effect="ship-sail" type="button">Bilged Ship Sail <small>Pinned canvas ship sail billowing in wind &amp; tearing on hard impact</small></button>
+        <button data-add-effect="cables-chains" type="button">Hanging Cables &amp; Chains <small>Double-pinned heavy cables &amp; iron chain spans · snap on overload</small></button>
+        <button data-add-effect="vines-ropes" type="button">Suspended Vines &amp; Ivy <small>Swaying forest vines with foliage leaves that detach on impact</small></button>
+        <div class="popover-label">INTERACTIVE FOLIAGE, GRASS, FERNS &amp; TREE</div>
+        <button data-add-effect="grass-wheat-field" type="button">Grass &amp; Golden Wheat <small>Plumed grass/wheat meadow parting dynamically around the ball</small></button>
+        <button data-add-effect="tall-reeds" type="button">Tall Reeds &amp; Cattails <small>Marsh reed stalks crowned with velvet cattails swaying in gusts</small></button>
+        <button data-add-effect="interactive-fern" type="button">Broad Pinnate Ferns <small>Compound arched fern fronds parting cleanly around ball wakes</small></button>
+        <button data-add-effect="interactive-tree" type="button">Swaying Canopy Tree <small>Trunk + limbs + leaf canopy that flexes &amp; sheds leaves when struck</small></button>
         <div class="popover-label">DUAL-SPHERE ELECTRIC DISCHARGE</div>
         <button data-add-effect="tesla-sphere-lightning" type="button">Tesla Sphere Lightning <small>Instantaneous dielectric spark arc &amp; forked leaders between 2 spheres</small></button>
         <button data-add-effect="static-sphere-shock" type="button">Static Shock Arcs <small>Delicate high-voltage corona filaments crackling between 2 spheres</small></button>
@@ -372,6 +386,7 @@
         <p class="dialog-sub">eos WebGPU compute particles &amp; 3D force fields wrapped in the Sun Inspector + Fluid Editor UI.</p>
         <div class="shortcut-list">
             <span>Play / pause<kbd>Space</kbd></span>
+            <span>Throw ball tool<kbd>T</kbd></span>
             <span>Place anemometer<kbd>P</kbd></span>
             <span>Toggle field overlay<kbd>V</kbd></span>
             <span>Reset simulation<kbd>R</kbd></span>

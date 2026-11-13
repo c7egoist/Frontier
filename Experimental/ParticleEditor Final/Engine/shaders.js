@@ -19,6 +19,8 @@ struct Glob {
   timing: vec4f,
   viz: vec4f,
   swirl: vec4f,    // x swirl strength (m/s), y spatial frequency (1/m), z animation rate
+  ballPos: vec4f,  // xyz physics ball centre, w radius (<=0 inactive)
+  ballVel: vec4f,  // xyz physics ball velocity (m/s), w impact impulse scale
 };
 
 struct Sys {
@@ -609,13 +611,161 @@ fn evalSpiderwebStrand(slot: u32, cap: u32, webMode: u32, tWeb: f32, windTime: f
   return WebStrandOut(pA, tip, tip, 0.05 * dLen * grow, 0.22, 1.15, grow, 1.0, select(0.24, 0.85, grow < 0.99), 0.85);
 }
 
+struct DynStrandOut {
+  pA: vec3f,
+  pB: vec3f,
+  sag: f32,
+  width: f32,
+  colMix: f32,
+  pinB: f32,
+  leafSz: f32,
+  swayScale: f32,
+  leafOnU: f32,
+  visible: f32,
+};
+
+fn evalDynStrand(slot: u32, cap: u32, dynMode: u32, windTime: f32) -> DynStrandOut {
+  let org = S.origin.xyz;
+  let ext = max(S.phys4.xyz, vec3f(0.35, 0.25, 0.35));
+  let b = basisFrom(normalize(S.dir.xyz + vec3f(1e-5, 0.0, 0.0)));
+  let amp = S.mol.z;
+  let freq = max(0.15, S.mol.y);
+  let rows = clamp(u32(S.mol2.x + 0.5), 8u, max(8u, cap));
+  let dynH = max(0.35, S.mol2.y);
+  let dynSag = S.mol2.z;
+  let dynSub = u32(S.mol2.w + 0.5);
+  let waveSpd = max(0.2, S.mol3.y);
+  let sd = f32(slot) * 41.0 + 19.0;
+  let baseW = max(0.005, S.life.z * S.misc.x);
+
+  if (dynMode == 1u) {
+    // Cables & Industrial Chains suspended between tiered pylon spans
+    let nCables = min(cap, max(12u, rows * 2u));
+    if (slot >= nCables) { return DynStrandOut(org, org, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.8, 0.0); }
+    let tier = slot % 3u;
+    let lane = f32(slot / 3u) / max(1.0, f32(nCables / 3u) - 1.0);
+    let yTier = dynH * (0.56 + 0.19 * f32(tier));
+    let zOff = mix(-ext.z, ext.z, lane) + (hashF(sd, 1u) - 0.5) * 0.22;
+    let xJit = (hashF(sd, 2u) - 0.5) * 0.18;
+    let pA = org + vec3f(-ext.x + xJit, yTier, zOff);
+    let pB = org + vec3f(ext.x - xJit, yTier + (hashF(sd, 3u) - 0.5) * 0.18, zOff + (hashF(sd, 4u) - 0.5) * 0.16);
+    let sag = dynSag * (0.65 + 0.72 * hashF(sd, 5u));
+    return DynStrandOut(pA, pB, sag, baseW * 1.35, f32(tier) * 0.45, 1.0, 0.0, 0.72, 0.85, 1.0);
+  }
+  if (dynMode == 2u) {
+    // Hanging Vines & Braided Overhead Ropes: slots 0..nVines-1 are strands, rest are vine ivy leaves!
+    let nVines = min(cap, max(8u, rows));
+    if (slot < nVines) {
+      let uX = hashF(sd, 1u) * 2.0 - 1.0;
+      let uZ = hashF(sd, 2u) * 2.0 - 1.0;
+      let yTop = org.y + dynH * (0.86 + 0.18 * hashF(sd, 3u));
+      let len = clamp(dynSag * mix(0.62, 1.15, hashF(sd, 4u)), 0.75, max(0.95, yTop - 0.25));
+      let pA = vec3f(org.x + uX * ext.x, yTop, org.z + uZ * ext.z);
+      let pB = pA + vec3f((hashF(sd, 5u) - 0.5) * 0.28, -len, (hashF(sd, 6u) - 0.5) * 0.28);
+      return DynStrandOut(pA, pB, 0.04, baseW * 1.25, hashF(sd, 7u) * 0.5, 0.0, 0.0, 1.15, 0.85, 1.0);
+    }
+    return DynStrandOut(org, org, 0.0, 0.0, 0.85, 0.0, 0.16, 1.25, 0.5, 1.0);
+  }
+  if (dynMode == 3u) {
+    // Wind Flag (dynSub == 0) & Ship Sail (dynSub == 1)
+    let nRows = clamp(rows, 10u, min(cap, 44u));
+    if (slot >= nRows) { return DynStrandOut(org, org, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.8, 0.0); }
+    let v = (f32(slot) + 0.5) / f32(nRows);
+    if (dynSub == 0u) {
+      let mastX = org.x - ext.x;
+      let fH = max(0.65, ext.y * 1.75);
+      let yTop = org.y + dynH;
+      let yRow = mix(max(0.35, yTop - fH), yTop, v);
+      let fDir = normalize(vec3f(S.dir.x, 0.0, S.dir.z) + vec3f(1e-4, 0.0, 0.0));
+      let fLen = max(0.8, ext.x * 2.0);
+      let pA = vec3f(mastX, yRow, org.z);
+      let pB = pA + fDir * fLen;
+      let stripW = (fH / f32(nRows)) * 0.64;
+      return DynStrandOut(pA, pB, 0.04, stripW, v, 0.0, 0.0, 1.15, 0.85, 1.0);
+    }
+    let sH = max(0.8, ext.y * 1.85);
+    let yTop = org.y + dynH;
+    let yRow = mix(max(0.45, yTop - sH), yTop, v);
+    let halfW = ext.x * mix(1.06, 0.90, v);
+    let pA = vec3f(org.x - halfW, yRow, org.z);
+    let pB = vec3f(org.x + halfW, yRow, org.z);
+    let stripW = (sH / f32(nRows)) * 0.64;
+    let bellySag = -dynSag * sin(v * 3.14159);
+    return DynStrandOut(pA, pB, bellySag, stripW, v, 1.0, 0.0, 1.05, 0.85, 1.0);
+  }
+  if (dynMode == 4u) {
+    // Grass & Golden Wheat Field
+    let rx = (hashF(sd, 1u) * 2.0 - 1.0) * ext.x;
+    let rz = (hashF(sd, 2u) * 2.0 - 1.0) * ext.z;
+    let pA = vec3f(org.x + rx, 0.0, org.z + rz);
+    let hStalk = dynH * mix(0.64, 1.24, hashF(sd, 3u));
+    let leanA = hashF(sd, 4u) * 6.2831853;
+    let pB = pA + vec3f(cos(leanA) * 0.14 * hStalk, hStalk, sin(leanA) * 0.14 * hStalk);
+    let hasWheat = select(0.0, 0.125, dynSub > 0u && (slot % 3u) == 0u);
+    return DynStrandOut(pA, pB, -0.06 * hStalk, baseW, hashF(sd, 5u), 0.0, hasWheat, 1.20, 0.96, 1.0);
+  }
+  if (dynMode == 5u) {
+    // Tall Lakeside Reeds with brown velvet cattail spikes
+    let clumpId = slot % 6u;
+    let cSeed = f32(clumpId) * 23.0 + 7.0;
+    let cx = (hashF(cSeed, 1u) * 2.0 - 1.0) * ext.x * 0.72;
+    let cz = (hashF(cSeed, 2u) * 2.0 - 1.0) * ext.z * 0.72;
+    let ang = hashF(sd, 1u) * 6.2831853;
+    let rOff = sqrt(hashF(sd, 2u)) * min(ext.x, ext.z) * 0.38;
+    let pA = vec3f(org.x + cx + cos(ang) * rOff, 0.0, org.z + cz + sin(ang) * rOff);
+    let hReed = dynH * mix(0.72, 1.18, hashF(sd, 3u));
+    let archDir = vec2f(cos(ang), sin(ang)) * (0.28 + 0.25 * hashF(sd, 4u));
+    let pB = pA + vec3f(archDir.x * hReed, hReed * 0.92, archDir.y * hReed);
+    let hasCattail = select(0.0, 0.095, (slot % 3u) == 0u);
+    return DynStrandOut(pA, pB, -0.14 * hReed, baseW, hashF(sd, 5u), 0.0, hasCattail, 1.10, 0.84, 1.0);
+  }
+  if (dynMode == 6u) {
+    // Lush Woodland Broad Fern Plant (compound feathered arching fronds!)
+    let nFronds = clamp(rows, 10u, cap);
+    if (slot >= nFronds) { return DynStrandOut(org, org, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.8, 0.0); }
+    let tier = slot % 3u;
+    let az = f32(slot) * 2.3999632 + (hashF(sd, 1u) - 0.5) * 0.16;
+    let tierFrac = f32(tier) / 2.0;
+    let fLen = max(0.55, max(ext.x, 0.9)) * mix(0.54, 1.06, tierFrac) * mix(0.88, 1.14, hashF(sd, 2u));
+    let tipY = dynH * mix(0.95, 0.36, tierFrac) * mix(0.88, 1.14, hashF(sd, 3u));
+    let pA = vec3f(org.x + cos(az) * 0.06, 0.07, org.z + sin(az) * 0.06);
+    let pB = pA + vec3f(cos(az) * fLen, tipY, sin(az) * fLen);
+    let arch = -max(0.18, dynSag) * mix(0.72, 1.18, tierFrac);
+    let frondW = max(0.16, baseW * mix(0.78, 1.15, tierFrac));
+    return DynStrandOut(pA, pB, arch, frondW, tierFrac, 0.0, 0.0, 1.0, 0.8, 1.0);
+  }
+  // dynMode == 7u: Articulated Swaying Canopy Tree (0: trunk, 1..nLimbs: boughs, nLimbs+1..cap-1: canopy leaves!)
+  let nLimbs = clamp(rows, 12u, 28u);
+  if (slot == 0u) {
+    let pA = vec3f(org.x, 0.0, org.z);
+    let pB = vec3f(org.x, dynH * 0.64, org.z);
+    return DynStrandOut(pA, pB, 0.0, max(0.10, dynH * 0.065), 0.0, 0.0, 0.0, 0.32, 0.8, 1.0);
+  }
+  if (slot <= nLimbs) {
+    let lIdx = slot - 1u;
+    let uTr = mix(0.42, 0.96, f32(lIdx) / max(1.0, f32(nLimbs - 1u)));
+    let attachK = clamp(u32(uTr * 19.0 + 0.5), 6u, 18u);
+    let trunkEntry = trailBuf[attachK];
+    let trunkPt = trunkEntry.xyz;
+    let pA = select(mix(vec3f(org.x, 0.0, org.z), vec3f(org.x, dynH * 0.64, org.z), uTr), trunkPt, trunkEntry.w > 0.5 && length(trunkPt - org) > 0.05 && S.phys.y > 0.05);
+    let az = f32(lIdx) * 2.3999632 + (hashF(sd, 1u) - 0.5) * 0.25;
+    let reach = dynH * mix(0.50, 0.24, uTr) * mix(0.85, 1.20, hashF(sd, 2u));
+    let lift = dynH * mix(0.32, 0.42, uTr) * mix(0.82, 1.18, hashF(sd, 3u));
+    let pB = pA + vec3f(cos(az) * reach, lift, sin(az) * reach);
+    let bWidth = max(0.025, dynH * mix(0.036, 0.015, uTr));
+    return DynStrandOut(pA, pB, -0.08 * reach, bWidth, 0.12, 0.0, 0.0, 0.72, 0.8, 1.0);
+  }
+  return DynStrandOut(org, org, 0.0, 0.0, 0.78, 0.0, max(0.16, baseW * 1.1), 1.35, 0.9, 1.0);
+}
+
 @compute @workgroup_size(64)
 fn emitParticles(@builtin(global_invocation_id) gid: vec3u) {
   let i = gid.x;
   let n = u32(S.phys3.w);
   if (i >= n) { return; }
   let cap = u32(S.phys3.x);
-  let idx = (u32(S.emit.x) + i) % cap;
+  let emitCurlMode = u32(S.mol.x + 0.5);
+  let idx = select((u32(S.emit.x) + i) % cap, i, emitCurlMode >= 4u);
   var st = hash(idx * 2654435761u + u32(S.emit.y) * 40503u + 12345u);
   let r0 = rnd(&st); let r1 = rnd(&st); let r2 = rnd(&st); let r3 = rnd(&st);
   let r4 = rnd(&st); let r5 = rnd(&st); let r6 = rnd(&st);
@@ -695,8 +845,19 @@ fn emitParticles(@builtin(global_invocation_id) gid: vec3u) {
     pos = S.origin.xyz;
     vel = vec3f(0.0);
     eZ = f32(idx);
-    for (var k = 0u; k < 20u; k++) {
-      trailBuf[idx * 20u + k] = vec4f(pos, 0.0);
+    if (curlMode >= 6u) {
+      let stD = evalDynStrand(idx, cap, curlMode - 5u, S.phys.y);
+      pos = stD.pA;
+      eW = 1.0;
+      for (var k = 0u; k < 20u; k++) {
+        let uu = f32(k) / 19.0;
+        let ptD = mix(stD.pA, stD.pB, uu) - vec3f(0.0, 4.0 * stD.sag * uu * (1.0 - uu), 0.0);
+        trailBuf[idx * 20u + k] = vec4f(ptD, stD.visible);
+      }
+    } else {
+      for (var k = 0u; k < 20u; k++) {
+        trailBuf[idx * 20u + k] = vec4f(pos, 0.0);
+      }
     }
   } else if (curlMode == 1u) {
     let drift = vec3f(S.phys.y * S.mol.w, -S.phys.y * S.mol.w * 0.6, S.phys.y * S.mol.w * 0.8);
@@ -1036,8 +1197,8 @@ fn updateParticles(@builtin(global_invocation_id) gid: vec3u) {
       trailBuf[base] = vec4f(pos, crest);
       parts[i] = Part(vec4f(pos, age), vec4f(v, life), cc, vec4f(sz, q.m.y, q.m.z, seed), q.e);
       return;
-    } else {
-      // curlMode == 4u (Orb-Weave Spiderweb) | 5u (Messy Attic Cobwebs)
+    } else if (curlMode <= 5u) {
+      // curlMode == 4u (Orb-Weave Spiderweb) | 5u (Messy Attic Cobwebs) with real-time elastic ball collision & tearing
       let webCap = max(16u, cap);
       let slotIdx = min(webCap - 1u, u32(q.e.z + 0.5));
       let webMode = curlMode - 3u;
@@ -1045,26 +1206,310 @@ fn updateParticles(@builtin(global_invocation_id) gid: vec3u) {
       let tWeb = max(0.0, age) * spinRate;
       let stWeb = evalSpiderwebStrand(slotIdx, webCap, webMode, tWeb, S.phys.y);
       if (stWeb.visible < 0.5) {
-        parts[i] = Part(vec4f(S.origin.xyz, age), vec4f(0.0, 0.0, 0.0, life), vec4f(S.colA.rgb, 0.0), vec4f(0.0, q.m.y, q.m.z, seed), vec4f(0.0, q.e.y, f32(slotIdx), 0.0));
+        parts[i] = Part(vec4f(S.origin.xyz, age), vec4f(0.0, 0.0, 0.0, life), vec4f(S.colA.rgb, 0.0), vec4f(0.0, q.m.y, q.m.z, seed), vec4f(0.0, 0.0, f32(slotIdx), 0.0));
         return;
       }
       let mid = (stWeb.pA + stWeb.pB) * 0.5;
       let targetDisp = webSwayAt(mid, S.phys.y, stWeb.windScale, cSpd, freq);
       let flexDisp = mix(v, targetDisp, min(7.5 * dt, 1.0)) * exp(-extraDamp * dt);
       let base = i * 20u;
+      var restN: array<vec3f, 20>;
+      var curN: array<vec3f, 20>;
       for (var k = 0u; k < 20u; k++) {
         let uu = f32(k) / 19.0;
         let belly = 4.0 * uu * (1.0 - uu);
         let tipMix = select(belly, belly * 0.5 + pow(uu, 1.45) * stWeb.tipWhip, stWeb.tipWhip > 0.01);
-        let pt = mix(stWeb.pA, stWeb.pB, uu) - vec3f(0.0, 4.0 * stWeb.sag * uu * (1.0 - uu), 0.0) + flexDisp * tipMix;
-        trailBuf[base + k] = vec4f(pt, clamp(0.65 + 0.35 * stWeb.grow, 0.0, 1.0));
+        restN[k] = mix(stWeb.pA, stWeb.pB, uu) - vec3f(0.0, 4.0 * stWeb.sag * uu * (1.0 - uu), 0.0) + flexDisp * tipMix;
+      }
+      let prevVisible = q.e.w > 0.05;
+      var snapU = q.e.y;
+      if (!prevVisible || stWeb.grow < 0.96) {
+        for (var k = 0u; k < 20u; k++) { curN[k] = restN[k]; }
+      } else {
+        for (var k = 0u; k < 20u; k++) { curN[k] = trailBuf[base + k].xyz; }
+        if (snapU > 0.05) {
+          let breakK = clamp(u32(snapU * 19.0 + 0.5), 2u, 17u);
+          let segRest = max(0.012, length(restN[19] - restN[0]) / 19.0);
+          curN[0] = restN[0];
+          for (var k = 1u; k <= breakK; k++) {
+            let flutter = simCurl(curN[k] * 1.4 + vec3f(S.phys.y * 1.8)) * (0.28 + 0.35 * cSpd);
+            let tgt = curN[k - 1u] + vec3f(0.0, -segRest * 0.92, 0.0) + (wind * 0.08 + flutter * 0.04);
+            curN[k] = mix(curN[k], tgt, min(1.0, dt * 8.5));
+          }
+          if (stWeb.tipWhip < 0.05) {
+            curN[19] = restN[19];
+            for (var kr = 19u; kr > breakK + 1u; kr--) {
+              let k = kr - 1u;
+              let flutterB = simCurl(curN[k] * 1.4 + vec3f(-S.phys.y * 1.6)) * (0.28 + 0.35 * cSpd);
+              let tgtB = curN[k + 1u] + vec3f(0.0, -segRest * 0.92, 0.0) + (wind * 0.08 + flutterB * 0.04);
+              curN[k] = mix(curN[k], tgtB, min(1.0, dt * 8.5));
+            }
+          }
+        } else {
+          let bPos = G.ballPos.xyz;
+          let bRad = G.ballPos.w;
+          let bVel = G.ballVel.xyz;
+          let bSpd = length(bVel);
+          let tearLim = select(8.2, S.mol3.x, S.mol3.x > 0.1);
+          let recRate = clamp(dt * 6.2, 0.03, 0.42);
+          let pinEnd = stWeb.tipWhip < 0.05;
+          curN[0] = restN[0];
+          if (pinEnd) { curN[19] = restN[19]; }
+          for (var k = 1u; k < 20u; k++) {
+            if (k == 19u && pinEnd) { continue; }
+            var pt = mix(curN[k], restN[k], recRate);
+            if (bRad > 0.04) {
+              let dVec = pt - bPos;
+              let dLen = length(dVec);
+              let padR = bRad + 0.035;
+              if (dLen < padR) {
+                let pDir = normalize(dVec + vec3f(0.0, 0.04, 0.0));
+                pt = bPos + pDir * padR + bVel * min(dt * 0.48, 0.035);
+                if (bSpd > tearLim && snapU == 0.0 && k >= 2u && k <= 17u) {
+                  snapU = f32(k) / 19.0;
+                }
+              } else if (dLen < padR * 2.15 && bSpd > 0.6) {
+                let wf = pow(1.0 - dLen / (padR * 2.15), 1.5);
+                pt += (normalize(dVec + vec3f(0.0, 0.03, 0.0)) * 0.55 + normalize(bVel) * 0.45) * (wf * min(bSpd, 10.0) * dt * 0.35);
+              }
+            }
+            curN[k] = pt;
+          }
+          let maxSeg = max(0.015, length(restN[19] - restN[0]) / 19.0) * 1.28;
+          for (var pIdx = 0u; pIdx < 2u; pIdx++) {
+            curN[0] = restN[0];
+            for (var k = 0u; k < 19u; k++) {
+              let df = curN[k + 1u] - curN[k];
+              let dl = length(df);
+              if (dl > maxSeg && !(k == 18u && pinEnd)) {
+                curN[k + 1u] = curN[k] + df * (maxSeg / max(dl, 1e-4));
+              }
+            }
+            if (pinEnd) {
+              curN[19] = restN[19];
+              for (var kr = 19u; kr > 1u; kr--) {
+                let k = kr - 1u;
+                let db = curN[k] - curN[k + 1u];
+                let dl = length(db);
+                if (dl > maxSeg) {
+                  curN[k] = curN[k + 1u] + db * (maxSeg / max(dl, 1e-4));
+                }
+              }
+            }
+          }
+        }
+      }
+      let breakKOut = clamp(u32(snapU * 19.0 + 0.5), 2u, 17u);
+      for (var k = 0u; k < 20u; k++) {
+        var wMeta = clamp(0.65 + 0.35 * stWeb.grow, 0.0, 1.0);
+        if (snapU > 0.05 && (k == breakKOut || (stWeb.tipWhip > 0.05 && k > breakKOut))) {
+          wMeta = -1.0;
+        }
+        trailBuf[base + k] = vec4f(curN[k], wMeta);
       }
       var wc = mix(S.colA, S.colC, smoothstep(0.10, 0.58, stWeb.roleCol));
       wc = mix(wc, S.colB, smoothstep(0.55, 0.98, stWeb.roleCol));
       wc.a *= clamp(0.72 + 0.28 * stWeb.grow, 0.0, 1.0);
       let sz = max(0.004, S.life.z * S.misc.x);
-      let beadPt = select(mid - vec3f(0.0, stWeb.sag, 0.0) + flexDisp, stWeb.tip, stWeb.grow < 0.99);
-      parts[i] = Part(vec4f(beadPt, age), vec4f(flexDisp, life), wc, vec4f(sz, q.m.y, q.m.z, seed), vec4f(stWeb.bead, S.mol2.w, f32(slotIdx), stWeb.grow));
+      let beadPt = select(curN[9], stWeb.tip, stWeb.grow < 0.99);
+      let showBead = select(stWeb.bead, 0.0, snapU > 0.05 && stWeb.grow >= 0.99);
+      parts[i] = Part(vec4f(beadPt, age), vec4f(flexDisp, life), wc, vec4f(sz, q.m.y, q.m.z, seed), vec4f(showBead, snapU, f32(slotIdx), stWeb.grow));
+      return;
+    } else {
+      // curlMode == 6u..12u -> Dynamic Ball-Interactive Systems (dynMode = curlMode - 5u)
+      let dynMode = curlMode - 5u;
+      let slotIdx = min(cap - 1u, u32(q.e.z + 0.5));
+      let base = i * 20u;
+      let nRows = clamp(u32(S.mol2.x + 0.5), 8u, cap);
+      let isVineLeaf = dynMode == 2u && slotIdx >= nRows;
+      let isTreeLeaf = dynMode == 7u && slotIdx > clamp(u32(S.mol2.x + 0.5), 12u, 28u);
+      let bPos = G.ballPos.xyz;
+      let bRad = G.ballPos.w;
+      let bVel = G.ballVel.xyz;
+      let bSpd = length(bVel);
+      let tearLim = S.mol3.x;
+      let waveSpd = max(0.2, S.mol3.y);
+      let stiff = clamp(S.mol.w, 0.3, 4.0);
+
+      if (isVineLeaf || isTreeLeaf) {
+        for (var k = 0u; k < 20u; k++) { trailBuf[base + k] = vec4f(pos, -1.0); }
+        let pCount = select(nRows, clamp(u32(S.mol2.x + 0.5), 12u, 28u), isTreeLeaf);
+        let lNum = select(slotIdx - nRows, slotIdx - 1u - pCount, isTreeLeaf);
+        let pSlot = select(lNum % pCount, 1u + (lNum % pCount), isTreeLeaf);
+        let pNode = select(
+          clamp(4u + ((lNum / pCount) * 5u + u32(hashF(seed, 9u) * 5.0)) % 14u, 4u, 18u),
+          clamp(7u + u32(hashF(seed, 8u) * 12.9), 7u, 19u),
+          isTreeLeaf
+        );
+        let anchorW = trailBuf[pSlot * 20u + pNode].xyz;
+        var leafCol = mix(S.colC, S.colB, hashF(seed, 5u));
+        let leafSz = max(0.08, S.life.z * S.misc.x * mix(0.68, 1.28, hashF(seed, 6u)));
+        var fallen = q.e.y;
+        var lPos = pos;
+        var lVel = v;
+        var lAng = q.m.y;
+        if (fallen > 0.05) {
+          lVel += (wind - lVel) * min(S.phys2.x * dt, 1.0);
+          lVel.y -= max(0.15, S.speed.w) * 4.5 * dt;
+          if (fields[0].x > 0.0) { lVel += evalFields(lPos, lVel).xyz * dt; }
+          let flPh = age * 4.2 + seed * 0.03;
+          lVel += vec3f(sin(flPh), 0.35 * cos(flPh * 1.4), cos(flPh * 0.9)) * (0.9 * dt);
+          lVel *= exp(-1.35 * dt);
+          lPos += lVel * dt;
+          if (lPos.y <= 0.025) {
+            lPos.y = 0.025;
+            lVel = vec3f(lVel.x * 0.72, 0.0, lVel.z * 0.72);
+            if (bRad > 0.04 && length(lPos - bPos) < bRad + 0.25 && bSpd > 0.5) {
+              lVel += normalize(lPos - bPos + vec3f(0.0, 0.35, 0.0)) * min(bSpd * 0.45, 4.0);
+            }
+          } else {
+            lAng += q.m.z * dt;
+          }
+          if (age - fallen > 14.0) { fallen = 0.0; lVel = vec3f(0.0); }
+        } else {
+          let radOff = select(0.10, mix(0.14, 0.52, hashF(seed, 1u)), isTreeLeaf);
+          let offDir = randSphere(hashF(seed, 2u), hashF(seed, 3u));
+          let flutter = vec3f(sin(S.phys.y * 4.2 + seed), cos(S.phys.y * 3.6 + seed * 0.7) * 0.6, cos(S.phys.y * 4.5 + seed)) * (0.04 + 0.03 * cSpd);
+          lPos = anchorW + offDir * radOff + flutter;
+          lAng += sin(S.phys.y * 3.4 + seed) * 1.8 * dt;
+          if (bRad > 0.04) {
+            let dB = length(lPos - bPos);
+            if (dB < bRad + 0.36 && bSpd > max(1.8, tearLim * 0.55)) {
+              fallen = age + 0.01;
+              lVel = normalize(lPos - bPos + vec3f(0.0, 0.3, 0.0)) * 1.8 + bVel * 0.36;
+            }
+          }
+        }
+        parts[i] = Part(vec4f(lPos, age), vec4f(lVel, life), leafCol, vec4f(leafSz, lAng, q.m.z, seed), vec4f(1.0, fallen, f32(slotIdx), 1.0));
+        return;
+      }
+
+      let stD = evalDynStrand(slotIdx, cap, dynMode, S.phys.y);
+      if (stD.visible < 0.5) {
+        for (var k = 0u; k < 20u; k++) { trailBuf[base + k] = vec4f(S.origin.xyz, -1.0); }
+        parts[i] = Part(vec4f(S.origin.xyz, age), vec4f(0.0, 0.0, 0.0, life), vec4f(S.colA.rgb, 0.0), vec4f(0.0, q.m.y, q.m.z, seed), vec4f(0.0, 0.0, f32(slotIdx), 0.0));
+        return;
+      }
+
+      var restN: array<vec3f, 20>;
+      var curN: array<vec3f, 20>;
+      let midRest = (stD.pA + stD.pB) * 0.5;
+      let wSample = sampleWind(midRest) * S.phys2.x;
+      var fSample = vec3f(0.0);
+      if (fields[0].x > 0.0) { fSample = evalFields(midRest, vec3f(0.0)).xyz; }
+      let lenSpan = max(0.2, length(stD.pB - stD.pA));
+      for (var k = 0u; k < 20u; k++) {
+        let uu = f32(k) / 19.0;
+        let belly = 4.0 * uu * (1.0 - uu);
+        let tipWeight = select(pow(uu, 1.35), belly, stD.pinB > 0.5);
+        var ptR = mix(stD.pA, stD.pB, uu) - vec3f(0.0, 4.0 * stD.sag * uu * (1.0 - uu), 0.0);
+        if (dynMode == 3u) {
+          // Flag / Ship Sail billowing travelling sine pleats along span
+          let nDir = normalize(cross(stD.pB - stD.pA, vec3f(0.0, 1.0, 0.0)) + vec3f(0.0, 0.0, 1e-4));
+          let ph = uu * (5.2 * freq) - S.phys.y * waveSpd + stD.colMix * 0.9;
+          let waveOff = sin(ph) * (0.14 + 0.10 * uu) * cSpd + sin(ph * 1.9 + 1.1) * 0.05 * cSpd;
+          let gustBell = (wSample + fSample * 0.16) * (0.18 * tipWeight * stD.swayScale);
+          ptR += nDir * (waveOff * tipWeight) + gustBell;
+        } else {
+          // Travelling stadium wind gusts + field push on grass, wheat, reeds, fern, cables, tree trunk/boughs
+          let gustPh = dot(ptR.xz, vec2f(0.85, 0.52)) * freq - S.phys.y * waveSpd;
+          let gustV = (0.38 + 0.62 * sin(gustPh) + 0.25 * cos(gustPh * 1.8 + seed * 0.01)) * cSpd * 0.16;
+          let cDisp = simCurl(ptR * freq * 0.6 + vec3f(S.phys.y * 0.65, 0.0, S.phys.y * 0.45)) * (cSpd * 0.18);
+          let totalW = (wSample * 0.14 + fSample * 0.06 + vec3f(gustV, 0.0, gustV * 0.45) + cDisp) * (tipWeight * stD.swayScale);
+          let clampedW = select(totalW, normalize(totalW) * (lenSpan * 0.72), length(totalW) > lenSpan * 0.72);
+          ptR += clampedW;
+        }
+        restN[k] = ptR;
+      }
+
+      var snapU = q.e.y;
+      if (q.e.w < 0.5 || age <= dt * 1.6) {
+        for (var k = 0u; k < 20u; k++) { curN[k] = restN[k]; }
+      } else {
+        for (var k = 0u; k < 20u; k++) { curN[k] = trailBuf[base + k].xyz; }
+        if (snapU > 0.05) {
+          let breakK = clamp(u32(snapU * 19.0 + 0.5), 2u, 17u);
+          let segRest = max(0.015, lenSpan / 19.0);
+          curN[0] = restN[0];
+          for (var k = 1u; k <= breakK; k++) {
+            let tgt = curN[k - 1u] + vec3f(0.0, -segRest * 0.94, 0.0) + wSample * 0.03;
+            curN[k] = mix(curN[k], tgt, min(1.0, dt * 8.5));
+          }
+          if (stD.pinB > 0.5) {
+            curN[19] = restN[19];
+            for (var kr = 19u; kr > breakK + 1u; kr--) {
+              let k = kr - 1u;
+              let tgtB = curN[k + 1u] + vec3f(0.0, -segRest * 0.94, 0.0) + wSample * 0.03;
+              curN[k] = mix(curN[k], tgtB, min(1.0, dt * 8.5));
+            }
+          }
+        } else {
+          let isTreeTrunk = dynMode == 7u && slotIdx == 0u;
+          let recRate = clamp(dt * 4.8 * stiff * select(1.0, 2.6, isTreeTrunk), 0.03, 0.72);
+          let pinEnd = stD.pinB > 0.5;
+          curN[0] = restN[0];
+          if (pinEnd) { curN[19] = restN[19]; }
+          for (var k = 1u; k < 20u; k++) {
+            if (k == 19u && pinEnd) { continue; }
+            var pt = mix(curN[k], restN[k], recRate);
+            if (bRad > 0.04) {
+              let dVec = pt - bPos;
+              let dLen = length(dVec);
+              let padR = bRad + select(0.04, 0.14, dynMode >= 6u);
+              if (dLen < padR) {
+                let pDir = normalize(dVec + vec3f(0.0, 0.05, 0.0));
+                pt = bPos + pDir * padR + bVel * min(dt * 0.42, 0.030);
+                if (tearLim > 0.0 && bSpd > tearLim && snapU == 0.0 && dynMode <= 3u && k >= 2u && k <= 17u) {
+                  snapU = f32(k) / 19.0;
+                }
+              } else if (dLen < padR * 2.35 && bSpd > 0.5) {
+                let wf = pow(1.0 - dLen / (padR * 2.35), 1.5);
+                pt += (normalize(dVec + vec3f(0.0, 0.04, 0.0)) * 0.65 + normalize(bVel) * 0.35) * (wf * min(bSpd, 10.0) * dt * 0.42);
+              }
+            }
+            pt.y = max(0.015, pt.y);
+            curN[k] = pt;
+          }
+          let maxSeg = max(0.018, lenSpan / 19.0) * 1.08;
+          for (var pIdx = 0u; pIdx < 5u; pIdx++) {
+            curN[0] = restN[0];
+            for (var k = 0u; k < 19u; k++) {
+              let df = curN[k + 1u] - curN[k];
+              let dl = length(df);
+              if (dl > maxSeg && !(k == 18u && pinEnd)) {
+                curN[k + 1u] = curN[k] + df * (maxSeg / max(dl, 1e-4));
+              }
+            }
+            if (pinEnd) {
+              curN[19] = restN[19];
+              for (var kr = 19u; kr > 1u; kr--) {
+                let k = kr - 1u;
+                let db = curN[k] - curN[k + 1u];
+                let dl = length(db);
+                if (dl > maxSeg) {
+                  curN[k] = curN[k + 1u] + db * (maxSeg / max(dl, 1e-4));
+                }
+              }
+            }
+          }
+        }
+      }
+
+      let breakKOut = clamp(u32(snapU * 19.0 + 0.5), 2u, 17u);
+      for (var k = 0u; k < 20u; k++) {
+        var wMeta = clamp(0.65 + 0.35 * stD.colMix, 0.0, 1.0);
+        if (snapU > 0.05 && (k == breakKOut || (stD.pinB < 0.5 && k > breakKOut))) {
+          wMeta = -1.0;
+        }
+        trailBuf[base + k] = vec4f(curN[k], wMeta);
+      }
+
+      var dc = mix(S.colA, S.colC, smoothstep(0.05, 0.55, stD.colMix));
+      dc = mix(dc, S.colB, smoothstep(0.55, 1.0, stD.colMix));
+      let tipK = clamp(u32(stD.leafOnU * 19.0 + 0.5), 1u, 19u);
+      let headPt = curN[tipK];
+      let headTan = normalize(curN[tipK] - curN[tipK - 1u] + vec3f(0.0, 0.01, 0.0));
+      parts[i] = Part(vec4f(headPt, age), vec4f(headTan, life), dc, vec4f(stD.width, q.m.y, q.m.z, seed), vec4f(stD.leafSz, snapU, f32(slotIdx), 1.0));
       return;
     }
   }
@@ -1620,15 +2065,33 @@ fn vsPart(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> V
   o.pos = vec4f(0.0, 0.0, 2.0, 1.0);
   let q = parts[ii];
   if (!(q.p.w < q.v.w && q.c.a > 0.002 && q.m.x > 0.0)) { return o; }
-  let isWeb = S.mol.x >= 3.5;
-  if (isWeb && q.e.x < 0.05) { return o; }
+  let isWebOnly = S.mol.x > 3.5 && S.mol.x < 5.5;
+  let isDyn = S.mol.x >= 5.5;
+  let dynMode = u32(max(0.0, S.mol.x - 5.0) + 0.5);
+  if ((isWebOnly || isDyn) && q.e.x < 0.05) { return o; }
   let cs = array<vec2f, 6>(vec2f(-1.0, -1.0), vec2f(1.0, -1.0), vec2f(-1.0, 1.0),
                            vec2f(1.0, -1.0), vec2f(1.0, 1.0), vec2f(-1.0, 1.0));
   let c = cs[vi];
-  let sz = select(q.m.x, q.m.x * select(1.45 * S.mol2.w, 3.2, q.e.w < 0.99) * q.e.x, isWeb);
+  var sz = q.m.x;
+  if (isWebOnly) {
+    sz = q.m.x * select(1.45 * S.mol2.w, 3.2, q.e.w < 0.99) * q.e.x;
+  } else if (isDyn && (dynMode == 4u || dynMode == 5u)) {
+    sz = q.e.x * S.misc.x;
+  }
   let shape = u32(S.emit.z);
   var wp: vec3f;
-  if (shape == 0u) {
+  var exW = 0.0;
+  if (isDyn && (dynMode == 4u || dynMode == 5u)) {
+    let base = ii * 20u;
+    let tipK = select(19u, 16u, dynMode == 5u);
+    let ax = normalize(segs[base + tipK].xyz - segs[base + tipK - 2u].xyz + vec3f(0.0, 0.05, 0.0));
+    let toCam = normalize(G.camPos.xyz - q.p.xyz + vec3f(0.0, 0.01, 0.0));
+    let side = normalize(cross(ax, toCam) + vec3f(1e-4, 0.0, 0.0));
+    let L = sz * select(1.45, 2.15, dynMode == 4u);
+    let W = sz * select(0.32, 0.44, dynMode == 4u);
+    wp = q.p.xyz + ax * (c.y * L * 0.5) + side * (c.x * W);
+    exW = f32(dynMode);
+  } else if (shape == 0u) {
     let ax = normalize(q.v.xyz + vec3f(0.0, 0.0001, 0.0));
     let toCam = normalize(G.camPos.xyz - q.p.xyz);
     var side = cross(ax, toCam);
@@ -1735,7 +2198,7 @@ fn vsPart(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> V
   o.pos = G.viewProj * vec4f(wp, 1.0);
   o.uv = c;
   o.col = q.c;
-  o.ex = vec4f(q.p.w / q.v.w, q.m.w, sz, 0.0);
+  o.ex = vec4f(q.p.w / q.v.w, q.m.w, sz, exW);
   return o;
 }
 
@@ -1744,6 +2207,27 @@ fn fsPart(i: VO) -> @location(0) vec4f {
   let shape = u32(S.emit.z);
   var rgb = i.col.rgb;
   var a = 1.0;
+  if (S.mol.x >= 5.5 && i.ex.w > 3.5) {
+    if (i.ex.w < 4.5) {
+      // Golden plumed wheat ear head
+      let y01 = clamp(i.uv.y * 0.5 + 0.5, 0.0, 1.0);
+      let taper = sin(y01 * 3.14159) * (1.08 - 0.35 * y01);
+      let spikeW = abs(i.uv.x) / max(0.14, taper);
+      if (spikeW > 0.92) { discard; }
+      let chaff = 0.65 + 0.35 * sin(i.uv.y * 28.0 + abs(i.uv.x) * 8.0);
+      let warmGold = mix(S.colC.rgb, S.colB.rgb, clamp(0.45 + 0.55 * chaff, 0.0, 1.0));
+      let aa = clamp((1.0 - smoothstep(0.65, 0.92, spikeW)) * i.col.a, 0.0, 1.0);
+      return vec4f(warmGold * aa, aa);
+    }
+    // Brown velvet cattail spike cylinder
+    let capY = max(0.0, abs(i.uv.y) - 0.66) * 2.94;
+    let dCyl = length(vec2f(i.uv.x * 1.15, capY));
+    if (dCyl > 1.0) { discard; }
+    let nd = sqrt(max(0.0, 1.0 - min(1.0, i.uv.x * i.uv.x)));
+    let cattail = mix(vec3f(0.18, 0.09, 0.04), S.colB.rgb, 0.35 + 0.65 * nd);
+    let aa = clamp(smoothstep(1.0, 0.80, dCyl) * i.col.a, 0.0, 1.0);
+    return vec4f(cattail * aa, aa);
+  }
   if (shape == 0u) {
     let x = abs(i.uv.x);
     a = pow(max(0.0, 1.0 - x), 2.0) * (1.0 - pow(abs(i.uv.y), 3.0) * 0.5);
@@ -2048,31 +2532,58 @@ fn vsRibbon(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) ->
   if (seg >= 19u) { return o; }
   let k = vi % 6u;
   let base = ii * 20u;
-  let p0 = segs[base + seg].xyz;
-  let p1 = segs[base + seg + 1u].xyz;
+  let s0 = segs[base + seg];
+  let s1 = segs[base + seg + 1u];
+  if (s0.w < -0.5 || s1.w < -0.5) { return o; }
+  let p0 = s0.xyz;
+  let p1 = s1.xyz;
   let segLen = length(p1 - p0);
-  let isWeb = S.mol.x >= 3.5;
-  let maxSeg = select(2.5, 6.5, isWeb);
+  let isWebOnly = S.mol.x > 3.5 && S.mol.x < 5.5;
+  let isDyn = S.mol.x >= 5.5;
+  let dynMode = u32(max(0.0, S.mol.x - 5.0) + 0.5);
+  let maxSeg = select(2.5, 6.5, isWebOnly || isDyn);
   if (segLen < 1e-4 || segLen > maxSeg) { return o; }
   let pPrev = segs[base + select(seg - 1u, 0u, seg == 0u)].xyz;
   let pNext = segs[base + min(seg + 2u, 19u)].xyz;
   let d0 = normalize(select(p1 - pPrev, p1 - p0, seg == 0u) + vec3f(1e-5));
   let d1 = normalize(select(pNext - p0, p1 - p0, seg >= 18u) + vec3f(1e-5));
-  let side0 = normalize(cross(d0, normalize(G.camPos.xyz - p0 + vec3f(1e-5))) + vec3f(1e-5));
-  let side1 = normalize(cross(d1, normalize(G.camPos.xyz - p1 + vec3f(1e-5))) + vec3f(1e-5));
+  var side0 = normalize(cross(d0, normalize(G.camPos.xyz - p0 + vec3f(1e-5))) + vec3f(1e-5));
+  var side1 = normalize(cross(d1, normalize(G.camPos.xyz - p1 + vec3f(1e-5))) + vec3f(1e-5));
+  if (isDyn && dynMode == 3u) {
+    side0 = vec3f(0.0, 1.0, 0.0);
+    side1 = vec3f(0.0, 1.0, 0.0);
+  } else if (isDyn && dynMode == 6u) {
+    side0 = normalize(cross(d0, vec3f(0.0, 1.0, 0.0)) + vec3f(1e-4, 0.0, 0.0));
+    side1 = normalize(cross(d1, vec3f(0.0, 1.0, 0.0)) + vec3f(1e-4, 0.0, 0.0));
+  }
   let u0 = f32(seg) / 19.0;
   let u1 = f32(seg + 1u) / 19.0;
   let thin = max(0.08, select(0.34, S.misc.y, S.misc.y > 0.01));
-  let baseW = select(max(0.004, q.m.x * 0.42 * thin), max(0.0028, q.m.x * 0.56 * thin), isWeb);
-  let w0 = select(baseW * mix(1.0, 0.08, pow(max(u0, 1e-4), 0.72)), baseW * (0.88 + 0.16 * (1.0 - 4.0 * u0 * (1.0 - u0))), isWeb);
-  let w1 = select(baseW * mix(1.0, 0.08, pow(max(u1, 1e-4), 0.72)), baseW * (0.88 + 0.16 * (1.0 - 4.0 * u1 * (1.0 - u1))), isWeb);
+  let baseW = select(max(0.004, q.m.x * 0.42 * thin), max(0.0028, q.m.x * 0.56 * thin), isWebOnly);
+  var w0 = select(baseW * mix(1.0, 0.08, pow(max(u0, 1e-4), 0.72)), baseW * (0.88 + 0.16 * (1.0 - 4.0 * u0 * (1.0 - u0))), isWebOnly);
+  var w1 = select(baseW * mix(1.0, 0.08, pow(max(u1, 1e-4), 0.72)), baseW * (0.88 + 0.16 * (1.0 - 4.0 * u1 * (1.0 - u1))), isWebOnly);
+  if (isDyn) {
+    let dw = max(0.004, q.m.x * S.misc.x * thin);
+    if (dynMode == 1u || dynMode == 2u || dynMode == 3u) {
+      w0 = dw; w1 = dw;
+    } else if (dynMode == 4u || dynMode == 5u) {
+      w0 = dw * mix(1.0, 0.05, pow(max(u0, 1e-4), 1.15));
+      w1 = dw * mix(1.0, 0.05, pow(max(u1, 1e-4), 1.15));
+    } else if (dynMode == 6u) {
+      w0 = dw * clamp(sin(clamp(u0, 0.04, 0.99) * 3.14159) * (1.16 - 0.36 * u0), 0.12, 1.18);
+      w1 = dw * clamp(sin(clamp(u1, 0.04, 0.99) * 3.14159) * (1.16 - 0.36 * u1), 0.12, 1.18);
+    } else {
+      w0 = dw * mix(1.0, 0.30, u0);
+      w1 = dw * mix(1.0, 0.30, u1);
+    }
+  }
   let endTag = array<f32, 6>(0.0, 0.0, 1.0, 0.0, 1.0, 1.0);
   let sideS = array<f32, 6>(-1.0, 1.0, -1.0, 1.0, 1.0, -1.0);
   let isEnd = endTag[k];
   let sx = sideS[k];
   let wp = select(p0 + side0 * (sx * w0), p1 + side1 * (sx * w1), isEnd > 0.5);
   let uLen = mix(u0, u1, isEnd);
-  let spd = mix(segs[base + seg].w, segs[base + seg + 1u].w, isEnd);
+  let spd = mix(s0.w, s1.w, isEnd);
   o.pos = G.viewProj * vec4f(wp, 1.0);
   o.uv = vec2f(sx, uLen);
   let isCurlRib = S.mol.x > 2.5 && S.mol.x < 3.5;
@@ -2086,17 +2597,115 @@ fn vsRibbon(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) ->
     mix(rc, S.colA.rgb, smoothstep(0.45, 1.0, uLen)),
     isCurlRib
   );
-  if (isWeb) {
+  var styleTag = 0.0;
+  var exParam = S.mol2.w;
+  if (isWebOnly) {
     rc = mix(q.c.rgb, S.colA.rgb, 0.25 + 0.45 * (1.0 - 4.0 * uLen * (1.0 - uLen)));
+    styleTag = 1.0;
+  } else if (isDyn) {
+    let dTan = normalize(mix(d0, d1, isEnd));
+    let foldLit = 0.72 + 0.42 * dot(dTan, normalize(vec3f(0.45, 0.55, 0.70)));
+    if (dynMode == 1u || dynMode == 2u) {
+      rc = q.c.rgb;
+      styleTag = 2.0;
+      exParam = select(0.0, 1.0, dynMode == 1u && S.mol2.w > 0.5);
+    } else if (dynMode == 3u) {
+      let rowV = clamp((spd - 0.65) / 0.35, 0.0, 1.0);
+      rc = mix(S.colA.rgb, S.colC.rgb, smoothstep(0.08, 0.65, uLen)) * foldLit;
+      if (S.mol2.w < 0.5) {
+        let stripe = 0.5 + 0.5 * cos(rowV * 12.566);
+        rc = mix(rc, S.colC.rgb * foldLit, 0.35 * stripe);
+      }
+      styleTag = 3.0;
+      exParam = foldLit;
+    } else if (dynMode == 4u || dynMode == 5u) {
+      rc = mix(S.colA.rgb, S.colC.rgb, smoothstep(0.05, 0.65, uLen));
+      if (dynMode == 4u && S.mol2.w < 0.5) {
+        rc = mix(rc, S.colB.rgb * 0.85, smoothstep(0.65, 1.0, uLen));
+      } else if (dynMode == 4u) {
+        rc = mix(rc, S.colB.rgb, smoothstep(0.72, 1.0, uLen));
+      }
+      styleTag = 4.0;
+      exParam = foldLit;
+    } else if (dynMode == 6u) {
+      rc = mix(S.colA.rgb, S.colC.rgb, smoothstep(0.0, 0.48, uLen));
+      rc = mix(rc, S.colB.rgb, smoothstep(0.55, 1.0, uLen));
+      styleTag = 5.0;
+      exParam = foldLit;
+    } else {
+      rc = S.colA.rgb;
+      styleTag = 6.0;
+      exParam = foldLit;
+    }
   }
   let headEnv = q.c.a;
-  o.col = vec4f(rc, select(headEnv * (0.48 + 0.52 * spd), headEnv * (0.78 + 0.22 * spd), isWeb));
-  o.ex = vec4f(uLen, q.m.w, select(0.0, 1.0, isWeb), S.mol2.w);
+  o.col = vec4f(rc, select(headEnv * (0.48 + 0.52 * spd), headEnv * (0.78 + 0.22 * spd), isWebOnly || isDyn));
+  if (isDyn) { o.col.a = headEnv; }
+  o.ex = vec4f(uLen, q.m.w, styleTag, exParam);
   return o;
 }
 
 @fragment
 fn fsRibbon(i: VO) -> @location(0) vec4f {
+  if (i.ex.z > 5.5) {
+    // Tree Trunk & Branches: tubular bark normal + longitudinal bark ridge texture
+    let nx = clamp(i.uv.x, -1.0, 1.0);
+    let nz = sqrt(max(0.0, 1.0 - nx * nx));
+    let bark = 0.72 + 0.28 * sin(i.uv.x * 16.0 + i.uv.y * 14.0 + i.ex.y * 0.1);
+    let shade = (0.42 + 0.58 * (0.55 * nz + 0.45 * max(0.0, nx * 0.5 + 0.5))) * bark;
+    let rgb = i.col.rgb * shade;
+    let a = clamp(smoothstep(1.0, 0.82, abs(nx)) * i.col.a, 0.0, 1.0);
+    if (a < 0.002) { discard; }
+    return vec4f(rgb * a, a);
+  }
+  if (i.ex.z > 4.5) {
+    // Broad Compound Pinnate Fern Frond: 17-pair angled feathered leaflets + bright central rachis vein!
+    let side = abs(i.uv.x);
+    let rachis = exp(-side * side * 95.0);
+    let uTip = clamp(i.uv.y, 0.0, 1.0);
+    let pinPhase = uTip * 17.0 - side * 1.15;
+    let fPin = abs(fract(pinPhase) - 0.5) * 2.0;
+    let leafReach = clamp(sin(clamp(uTip, 0.02, 0.99) * 3.14159) * (1.08 - 0.28 * uTip), 0.14, 1.0);
+    let notch = smoothstep(0.42, 0.98, fPin) * 0.62;
+    let margin = max(0.065, leafReach * (1.0 - notch));
+    if (side > margin) { discard; }
+    let edgeSoft = smoothstep(margin, max(0.0, margin - 0.09), side);
+    let subLight = (0.78 + 0.26 * (1.0 - fPin) + 0.18 * (1.0 - uTip)) * max(0.65, i.ex.w);
+    let fernCol = mix(i.col.rgb * subLight, mix(i.col.rgb, S.colB.rgb, 0.65) * 1.15, clamp(rachis * 0.85, 0.0, 1.0));
+    let a = clamp(edgeSoft * i.col.a * (0.90 + 0.10 * rachis), 0.0, 1.0);
+    if (a < 0.004) { discard; }
+    return vec4f(fernCol * a, a);
+  }
+  if (i.ex.z > 3.5) {
+    // Pointed Grass / Wheat / Reed Blade
+    let side = abs(i.uv.x);
+    if (side > 0.96) { discard; }
+    let midRib = exp(-side * side * 16.0);
+    let lit = (0.76 + 0.28 * midRib) * clamp(i.ex.w, 0.65, 1.25);
+    let rgb = i.col.rgb * lit;
+    let a = clamp(smoothstep(0.98, 0.65, side) * i.col.a, 0.0, 1.0);
+    if (a < 0.004) { discard; }
+    return vec4f(rgb * a, a);
+  }
+  if (i.ex.z > 2.5) {
+    // Solid Shaded Woven Cloth Flag & Ship Sail (zero gaps!)
+    let weave = 0.92 + 0.08 * sin(i.uv.y * 84.0) * sin(i.uv.x * 16.0);
+    let rgb = i.col.rgb * clamp(i.ex.w, 0.55, 1.35) * weave;
+    let a = clamp(smoothstep(1.0, 0.88, abs(i.uv.x)) * i.col.a * 0.97, 0.0, 1.0);
+    if (a < 0.004) { discard; }
+    return vec4f(rgb * a, a);
+  }
+  if (i.ex.z > 1.5) {
+    // Heavy Cables, Industrial Chain Links & Leafy Vines
+    let nx = clamp(i.uv.x, -1.0, 1.0);
+    let nz = sqrt(max(0.0, 1.0 - nx * nx));
+    let linkMod = select(1.0, 0.55 + 0.75 * pow(abs(sin(i.uv.y * 42.0)), 3.0), i.ex.w > 0.5);
+    let spec = pow(max(0.0, nz * 0.82 + nx * 0.35), 14.0) * select(0.18, 0.55, i.ex.w > 0.5);
+    let rgb = i.col.rgb * (0.48 + 0.52 * nz) * linkMod + vec3f(0.95, 0.98, 1.0) * spec;
+    let a = clamp(smoothstep(1.0, 0.72, abs(nx)) * i.col.a, 0.0, 1.0);
+    if (a < 0.004) { discard; }
+    return vec4f(rgb * a, a);
+  }
   if (i.ex.z > 0.5) {
     let edge = exp(-i.uv.x * i.uv.x * 2.85);
     let dew = pow(max(0.0, sin(i.uv.y * 21.99 + i.ex.y * 0.43)), 14.0) * clamp(i.ex.w, 0.0, 1.2);

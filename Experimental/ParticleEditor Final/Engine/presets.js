@@ -47,6 +47,14 @@ import { PE } from "./pe.js";
       webSpinRate: 1.0,     // real-time silk extrusion / weaving speed multiplier
       webSag: 0.16,         // catenary silk gravity droop (m)
       webDew: 0.85,         // morning dew / cobweb dust highlight intensity
+      dynMode: 0,           // 0 off, 1 cables/chains, 2 vines/ropes, 3 flag/sail, 4 grass/wheat, 5 tall reeds, 6 broad fern, 7 canopy tree
+      dynSub: 0,            // mode variant (e.g. flag vs sail, cable vs chain, meadow vs wheat, summer vs autumn tree)
+      dynStiff: 1.25,       // elastic spring recovery rate (1/s multiplier)
+      dynTearThresh: 0.0,   // projectile speed threshold for strand tearing or leaf detachment (m/s, 0 = unbreakable)
+      dynRows: 28,          // cloth strip rows / cable spans / fern fronds / canopy branches
+      dynHeight: 2.4,       // vertical elevation / mast / stalk / canopy height (m)
+      dynSag: 0.35,         // gravity catenary droop or frond arch curvature (m)
+      dynWaveSpeed: 2.2,    // travelling flutter / stadium wind wave speed (Hz/rad)
       temperature: 0.6,     // molecular: kT in reduced units (m = 1)
       epsilon: 0.15,        // molecular: Lennard-Jones well depth
       sigma: 0.08,          // molecular: particle diameter
@@ -857,7 +865,7 @@ import { PE } from "./pe.js";
         emitShape: 2, radius: 2.0, origin: [1.65, 2.05, 0.25], dir: [0.18, 0.18, 0.97], spread: 0.0,
         speedMin: 0, speedMax: 0, drag: 0.6, gravity: 0.45, buoyancy: 0, flutter: 0.14,
         lifeMin: 9999, lifeMax: 9999, sizeStart: 0.015, sizeEnd: 0.015, sizeScale: 1.0, streakThin: 0.44,
-        webMode: 1, webSpokes: 18, webRings: 14, webSpinRate: 1.0, webSag: 0.13, webDew: 0.85,
+        webMode: 1, webSpokes: 18, webRings: 14, webSpinRate: 1.0, webSag: 0.13, webDew: 0.85, dynTearThresh: 8.2,
         curlFreq: 1.1, curlAmp: 0.34, windCoupling: 1.15, bounce: 0,
         colA: hex("#f2f7ff"), colC: hex("#b8d9f8"), colB: hex("#6e94ba"),
       }),
@@ -870,14 +878,120 @@ import { PE } from "./pe.js";
         emitShape: 3, boxHalf: [2.25, 1.55, 1.55], origin: [-3.55, 2.35, -0.25], dir: [0.18, 0.08, 0.98], spread: 0.0,
         speedMin: 0, speedMax: 0, drag: 0.45, gravity: 0.75, buoyancy: 0, flutter: 0.55,
         lifeMin: 9999, lifeMax: 9999, sizeStart: 0.016, sizeEnd: 0.016, sizeScale: 1.0, streakThin: 0.46,
-        webMode: 2, webSpokes: 16, webRings: 12, webSpinRate: 1.0, webSag: 0.44, webDew: 0.65,
+        webMode: 2, webSpokes: 16, webRings: 12, webSpinRate: 1.0, webSag: 0.44, webDew: 0.65, dynTearThresh: 7.4,
         curlFreq: 1.35, curlAmp: 0.50, windCoupling: 1.45, bounce: 0,
         colA: hex("#e4e9ee"), colC: hex("#b7c0ca"), colB: hex("#727d8a"),
+      }),
+    },
+    {
+      id: "cables-chains", name: "Swinging Cables & Chains", group: "Cloth & Rigging",
+      blurb: "Multi-span catenary steel cables and heavy industrial chains suspended between 3D rigging pylons, swinging dynamically in gusts and rebounding or snapping when struck by thrown balls.",
+      p: P({
+        kind: 5, shape: 3, blend: "alpha", capacity: 64, rate: 0,
+        emitShape: 3, boxHalf: [2.15, 2.0, 1.25], origin: [-1.15, 0.0, 1.45], dir: [1, 0, 0], spread: 0.0,
+        speedMin: 0, speedMax: 0, drag: 0.35, gravity: 1.0, buoyancy: 0, flutter: 0.3,
+        lifeMin: 9999, lifeMax: 9999, sizeStart: 0.045, sizeEnd: 0.045, sizeScale: 1.0, streakThin: 1.0,
+        dynMode: 1, dynSub: 1, dynStiff: 1.75, dynTearThresh: 11.2, dynRows: 18, dynHeight: 3.1, dynSag: 0.54, dynWaveSpeed: 1.8,
+        curlFreq: 0.75, curlAmp: 0.55, windCoupling: 1.25, bounce: 0,
+        colA: hex("#586776"), colC: hex("#99a8b8"), colB: hex("#d2dce6"),
+      }),
+    },
+    {
+      id: "vines-ropes", name: "Hanging Vines & Ropes", group: "Cloth & Rigging",
+      blurb: "Braided overhead ropes and leafy jungle ivy vines dangling in tiered canopy spans, whipping cleanly away from thrown balls and responding to Force Field gusts.",
+      p: P({
+        kind: 5, shape: 2, leafMode: 0, blend: "alpha", capacity: 96, rate: 0,
+        emitShape: 3, boxHalf: [1.65, 1.8, 1.25], origin: [4.05, 0.0, 1.35], dir: [0, 1, 0], spread: 0.0,
+        speedMin: 0, speedMax: 0, drag: 0.4, gravity: 1.0, buoyancy: 0, flutter: 0.5,
+        lifeMin: 9999, lifeMax: 9999, sizeStart: 0.036, sizeEnd: 0.032, sizeScale: 1.0, streakThin: 0.9,
+        dynMode: 2, dynSub: 0, dynStiff: 1.10, dynTearThresh: 8.6, dynRows: 28, dynHeight: 3.7, dynSag: 2.35, dynWaveSpeed: 1.9,
+        curlFreq: 0.95, curlAmp: 0.65, windCoupling: 1.45, bounce: 0,
+        colA: hex("#3b5a2d"), colC: hex("#568c39"), colB: hex("#8fd158"),
+      }),
+    },
+    {
+      id: "flag-banner", name: "Wind Flag & Tearing Banner", group: "Cloth & Rigging",
+      blurb: "Continuous 3D shaded fabric banner pinned to a flagpole mast, rippling with travelling wind waves, wrapping elastically around thrown balls, and tearing cleanly on high-speed impacts.",
+      p: P({
+        kind: 5, shape: 3, blend: "alpha", capacity: 64, rate: 0,
+        emitShape: 3, boxHalf: [1.75, 1.15, 0.2], origin: [-3.95, 0.0, -0.75], dir: [1, 0, 0], spread: 0.0,
+        speedMin: 0, speedMax: 0, drag: 0.35, gravity: 0.4, buoyancy: 0, flutter: 0.55,
+        lifeMin: 9999, lifeMax: 9999, sizeStart: 0.065, sizeEnd: 0.065, sizeScale: 1.0, streakThin: 1.0,
+        dynMode: 3, dynSub: 0, dynStiff: 1.45, dynTearThresh: 9.0, dynRows: 30, dynHeight: 3.65, dynSag: 0.22, dynWaveSpeed: 2.9,
+        curlFreq: 1.15, curlAmp: 0.85, windCoupling: 1.65, bounce: 0,
+        colA: hex("#d62b2b"), colC: hex("#f2b636"), colB: hex("#8a1822"),
+      }),
+    },
+    {
+      id: "ship-sail", name: "Full-Rigged Ship Sail", group: "Cloth & Rigging",
+      blurb: "Wide billowing square-rigged canvas sail stretched between an upper yardarm spar and lower boom, catching prevailing Force Field wind bellies and tearing or flexing when struck.",
+      p: P({
+        kind: 5, shape: 3, blend: "alpha", capacity: 64, rate: 0,
+        emitShape: 3, boxHalf: [1.75, 1.45, 0.4], origin: [1.65, 0.0, -1.25], dir: [0, 0, 1], spread: 0.0,
+        speedMin: 0, speedMax: 0, drag: 0.35, gravity: 0.2, buoyancy: 0, flutter: 0.35,
+        lifeMin: 9999, lifeMax: 9999, sizeStart: 0.075, sizeEnd: 0.075, sizeScale: 1.0, streakThin: 1.0,
+        dynMode: 3, dynSub: 1, dynStiff: 1.30, dynTearThresh: 9.8, dynRows: 30, dynHeight: 3.9, dynSag: 0.55, dynWaveSpeed: 2.1,
+        curlFreq: 0.85, curlAmp: 0.72, windCoupling: 1.75, bounce: 0,
+        colA: hex("#f3ead7"), colC: hex("#dcd0b6"), colB: hex("#9e8f76"),
+      }),
+    },
+    {
+      id: "grass-wheat-field", name: "Grass & Golden Wheat Field", group: "Foliage & Flora",
+      blurb: "Dense interactive meadow of pointed grass blades and plumed golden wheat stalks driven by travelling stadium wind gusts, Force Field vortices, and parted cleanly by rolling or thrown balls.",
+      p: P({
+        kind: 5, shape: 2, leafMode: 0, blend: "alpha", capacity: 520, rate: 0,
+        emitShape: 3, boxHalf: [3.2, 0.0, 2.4], origin: [-0.2, 0.0, 0.4], dir: [0, 1, 0], spread: 0.0,
+        speedMin: 0, speedMax: 0, drag: 0.4, gravity: 0.0, buoyancy: 0, flutter: 0.4,
+        lifeMin: 9999, lifeMax: 9999, sizeStart: 0.048, sizeEnd: 0.015, sizeScale: 1.0, streakThin: 1.0,
+        dynMode: 4, dynSub: 1, dynStiff: 1.35, dynTearThresh: 0.0, dynRows: 1, dynHeight: 1.08, dynSag: 0.24, dynWaveSpeed: 2.35,
+        curlFreq: 0.9, curlAmp: 0.65, windCoupling: 1.55, bounce: 0,
+        colA: hex("#265924"), colC: hex("#6e9f34"), colB: hex("#e8bc4a"),
+      }),
+    },
+    {
+      id: "tall-reeds", name: "Tall Lakeside Reeds", group: "Foliage & Flora",
+      blurb: "Clustered wetland reeds topped with brown velvet cattail spikes arching gracefully in breezes and bowing aside elastically when hit by thrown projectiles.",
+      p: P({
+        kind: 5, shape: 3, blend: "alpha", capacity: 220, rate: 0,
+        emitShape: 3, boxHalf: [1.55, 0.0, 1.35], origin: [-3.35, 0.0, 0.85], dir: [0, 1, 0], spread: 0.0,
+        speedMin: 0, speedMax: 0, drag: 0.4, gravity: 0.0, buoyancy: 0, flutter: 0.35,
+        lifeMin: 9999, lifeMax: 9999, sizeStart: 0.056, sizeEnd: 0.018, sizeScale: 1.0, streakThin: 1.0,
+        dynMode: 5, dynSub: 0, dynStiff: 1.10, dynTearThresh: 0.0, dynRows: 1, dynHeight: 2.20, dynSag: 0.38, dynWaveSpeed: 1.80,
+        curlFreq: 0.8, curlAmp: 0.60, windCoupling: 1.45, bounce: 0,
+        colA: hex("#1f4d28"), colC: hex("#558237"), colB: hex("#72472a"),
+      }),
+    },
+    {
+      id: "interactive-fern", name: "Lush Interactive Fern", group: "Foliage & Flora",
+      blurb: "Broad woodland fern built from tiered arched compound fronds with feathered pinnate leaflets and glowing central veins; individual fronds flex, twist, and rebound when hit.",
+      p: P({
+        kind: 5, shape: 2, blend: "alpha", capacity: 128, rate: 0,
+        emitShape: 3, boxHalf: [1.85, 0.85, 1.85], origin: [-0.95, 0.0, 2.15], dir: [0, 1, 0], spread: 0.0,
+        speedMin: 0, speedMax: 0, drag: 0.35, gravity: 0.0, buoyancy: 0, flutter: 0.35,
+        lifeMin: 9999, lifeMax: 9999, sizeStart: 0.34, sizeEnd: 0.06, sizeScale: 1.0, streakThin: 1.0,
+        dynMode: 6, dynSub: 0, dynStiff: 1.35, dynTearThresh: 0.0, dynRows: 38, dynHeight: 1.55, dynSag: 0.48, dynWaveSpeed: 1.65,
+        curlFreq: 1.05, curlAmp: 0.52, windCoupling: 1.45, bounce: 0,
+        colA: hex("#1a5224"), colC: hex("#429836"), colB: hex("#8ed952"),
+      }),
+    },
+    {
+      id: "interactive-tree", name: "Swaying Interactive Canopy Tree", group: "Foliage & Flora",
+      blurb: "Articulated swaying tree with flexing trunk, 24 wind-responsive canopy boughs, and 490 trembling foliage sprigs; thrown balls shake the branches and knock loose falling leaves.",
+      p: P({
+        kind: 5, shape: 2, leafMode: 0, blend: "alpha", capacity: 520, rate: 0,
+        emitShape: 3, boxHalf: [2.25, 2.2, 2.25], origin: [2.45, 0.0, -0.75], dir: [0, 1, 0], spread: 0.0,
+        speedMin: 0, speedMax: 0, drag: 0.4, gravity: 0.55, buoyancy: 0, flutter: 0.65,
+        lifeMin: 9999, lifeMax: 9999, sizeStart: 0.28, sizeEnd: 0.24, sizeScale: 1.0, streakThin: 1.0,
+        dynMode: 7, dynSub: 0, dynStiff: 1.25, dynTearThresh: 4.5, dynRows: 24, dynHeight: 4.15, dynSag: 0.30, dynWaveSpeed: 1.55,
+        curlFreq: 0.85, curlAmp: 0.62, windCoupling: 1.50, bounce: 0,
+        colA: hex("#4e3622"), colC: hex("#3b8732"), colB: hex("#82cf4e"),
       }),
     },
   ];
 
   PE.VFX_CATEGORIES = [
+    { id: "Cloth & Rigging", label: "Cloth & Rigging", badge: "CLOTH", blurb: "Ball-interactive wind flags, ship sails, swinging bridge cables, industrial chains, and leafy hanging vines" },
+    { id: "Foliage & Flora", label: "Foliage & Flora", badge: "FLORA", blurb: "Interactive grass & golden wheat fields, tall lakeside reeds, broad pinnate ferns, and swaying canopy trees" },
     { id: "Silk & Curl", label: "Silk & Curl", badge: "CURL", blurb: "Dense 3D curl-noise wave fur fields, plasma spheres, bokeh ribbons, dual-sphere lightning & spinning spiderwebs" },
     { id: "Transitions", label: "Transitions & Derez", badge: "DEREZ", blurb: "Solid surface lattice derez, 8-fragment floor shatter, coin stacks, glitch & butterfly dissolves" },
     { id: "Space & Distortion", label: "Space & Distortion", badge: "LENS", blurb: "Black hole accretion spiral with relativistic gravitational lensing & rising heat shimmer refraction" },
@@ -895,11 +1009,13 @@ import { PE } from "./pe.js";
     if (!p) return "Ballistics & Sparks";
     const g = preset?.group || "";
     const id = preset?.id || "";
+    if ((p.dynMode || 0) >= 1 && (p.dynMode || 0) <= 3 || g === "Cloth & Rigging") return "Cloth & Rigging";
+    if ((p.dynMode || 0) >= 4 || g === "Foliage & Flora") return "Foliage & Flora";
     if (p.transition || g === "Transitions") return "Transitions";
     if (p.blackHole || p.heatShimmer || g === "Space") return "Space & Distortion";
     if (p.shape === 11 || p.shape === 12 || p.shape === 15 || p.shape === 16) return "Shields & Tech";
     if (p.shape === 17 || id === "fireworks" || id === "flares" || id === "pollen") return "Atmosphere & Sky";
-    if (p.curlMode > 0 || g === "Silk & Curl") return "Silk & Curl";
+    if (p.curlMode > 0 || p.webMode > 0 || g === "Silk & Curl") return "Silk & Curl";
     if (g === "Weather" || g === "Storms" || g === "Ground" || id === "ash") return "Storms & Weather";
     if (g === "Wind-blown" || g === "Ambient" || p.kind === 1 || p.kind === 6) return "Wind-Blown";
     if (g === "Water" || p.shape === 14 || (g === "VFX" && p.shape !== 0 && p.shape !== 5)) return "Pyro & Water";
@@ -925,6 +1041,13 @@ import { PE } from "./pe.js";
     }
     if ((p.webMode || 0) === 1) return "Orb-Weave Web";
     if ((p.webMode || 0) === 2) return "Messy Cobwebs";
+    if ((p.dynMode || 0) === 1) return p.dynSub ? "Chain Links" : "Swinging Cables";
+    if ((p.dynMode || 0) === 2) return p.dynSub ? "Hanging Ropes" : "Leafy Vines";
+    if ((p.dynMode || 0) === 3) return p.dynSub ? "Ship Sail" : "Wind Flag";
+    if ((p.dynMode || 0) === 4) return p.dynSub ? "Wheat & Grass" : "Meadow Grass";
+    if ((p.dynMode || 0) === 5) return "Tall Reeds";
+    if ((p.dynMode || 0) === 6) return "Pinnate Fern";
+    if ((p.dynMode || 0) === 7) return "Swaying Tree";
     if (p.curlMode === 1) return "Curl Wave";
     if (p.curlMode === 2) return "Curl Sphere";
     if (p.curlMode === 3) return (p.pulseMode || 0) > 0 ? "Surface Pour" : "Ribbon Stream";

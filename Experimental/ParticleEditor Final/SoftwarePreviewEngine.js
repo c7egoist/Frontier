@@ -396,6 +396,138 @@ function EvalSpiderwebStrandCPU(P, Slot, Cap, WebMode, TWeb, WindT, FieldScene, 
     return { visible: true, pA: PA, pB: Tip, tip: Tip, sag: 0.05 * DLen * Grow, windScale: 0.22, tipWhip: 1.15, grow: Grow, bead: Grow < 0.99 ? 0.85 : 0.24, role: 0.85 };
 }
 
+function EvalDynStrandCPU(P, Slot, Cap, DynMode, Time, WindT, FieldScene, Prepared, Solo, WindFactor)
+{
+    const Org = P.origin || [0, 2, 0];
+    const [BR, BU, BF] = BasisFrom(P.dir || [0, 0, 1]);
+    const Amp = P.curlAmp ?? 1.6;
+    const Freq = Math.max(0.2, P.curlFreq ?? 0.95);
+    const Stiff = Math.max(0.15, P.dynStiff ?? 1.0);
+    const Rows = Math.max(4, Math.round(P.dynRows ?? 28));
+    const Hgt = Math.max(0.35, P.dynHeight ?? 2.4);
+    const Sag = P.dynSag ?? 0.35;
+    const Sub = P.dynSub ?? 0;
+    const WaveSpd = P.dynWaveSpeed ?? 2.2;
+    const Ext = [Math.max(0.5, P.boxHalf?.[0] || 2.4), Math.max(0.5, P.boxHalf?.[1] || 2.0), Math.max(0.5, P.boxHalf?.[2] || 2.4)];
+    const SwayFn = (Q, Ws, A = Amp, F = Freq) => WebSwayAt(Q[0], Q[1], Q[2], WindT, Ws, A, F, P.windCoupling ?? 1.0, FieldScene, Prepared, Solo, WindFactor);
+
+    if (DynMode === 1)
+    {
+        const NStrands = Math.min(Cap, Math.max(12, Rows * 2));
+        if (Slot >= NStrands) return { visible: false };
+        const Tier = Slot % 3;
+        const Lane = Math.floor(Slot / 3) / Math.max(1, Math.floor(NStrands / 3) - 1);
+        const YTier = Org[1] + Hgt * (0.56 + 0.19 * Tier);
+        const ZOff = (-Ext[2] + 2 * Ext[2] * Lane) + (WebHash(Slot * 41 + 19, 1) - 0.5) * 0.22;
+        const XJit = (WebHash(Slot * 41 + 19, 2) - 0.5) * 0.18;
+        const PA = [Org[0] - Ext[0] + XJit, YTier, Org[2] + ZOff];
+        const PB = [Org[0] + Ext[0] - XJit, YTier + (WebHash(Slot * 41 + 19, 3) - 0.5) * 0.18, Org[2] + ZOff + (WebHash(Slot * 41 + 19, 4) - 0.5) * 0.16];
+        return { visible: true, kind: 1, pA: PA, pB: PB, sag: Sag * (0.65 + 0.72 * WebHash(Slot * 41 + 19, 5)), windScale: 0.35 / Stiff, pinnedEnd: true, radius: (P.sizeStart || 0.045) * (Sub > 0.5 ? 1.3 : 1.0) };
+    }
+    if (DynMode === 2)
+    {
+        const NVines = Math.min(Math.floor(Cap / 2), Math.max(8, Rows));
+        if (Slot < NVines)
+        {
+            const Sd = Slot * 41 + 19;
+            const UX = WebHash(Sd, 1) * 2 - 1;
+            const UZ = WebHash(Sd, 2) * 2 - 1;
+            const YTop = Org[1] + Hgt * (0.86 + 0.18 * WebHash(Sd, 3));
+            const Len = Math.max(0.75, Math.min(Math.max(0.95, YTop - 0.25), Sag * (0.62 + 0.53 * WebHash(Sd, 4))));
+            const PA = [Org[0] + UX * Ext[0], YTop, Org[2] + UZ * Ext[2]];
+            const PB = [PA[0] + (WebHash(Sd, 5) - 0.5) * 0.28, Math.max(0.25, PA[1] - Len), PA[2] + (WebHash(Sd, 6) - 0.5) * 0.28];
+            return { visible: true, kind: 2, isLeaf: false, pA: PA, pB: PB, sag: Sag * 0.04, windScale: 0.65 / Stiff, pinnedEnd: false, radius: P.sizeStart || 0.036 };
+        }
+        const LIdx = Slot - NVines;
+        const VIdx = LIdx % NVines;
+        const UPin = 0.14 + 0.80 * WebHash(Slot * 31 + 3, 2);
+        return { visible: true, kind: 2, isLeaf: true, parentSlot: VIdx, uPin: UPin, offAngle: WebHash(Slot * 31, 4) * Math.PI * 2, radius: (P.sizeStart || 0.036) * 2.6 };
+    }
+    if (DynMode === 3)
+    {
+        const NRows = Math.min(Cap, Math.max(10, Math.min(44, Rows)));
+        if (Slot >= NRows) return { visible: false };
+        const RowV = NRows > 1 ? Slot / (NRows - 1) : 0.5;
+        const YTop = Org[1] + Hgt;
+        if (Sub < 0.5)
+        {
+            const MastX = Org[0] - Ext[0];
+            const FH = Math.max(0.65, Ext[1] * 1.75);
+            const YRow = Math.max(0.35, YTop - FH) + (YTop - Math.max(0.35, YTop - FH)) * RowV;
+            const FDirX = BR[0] !== undefined ? ((P.dir?.[0] ?? 1) / (Math.hypot(P.dir?.[0] ?? 1, P.dir?.[2] ?? 0) || 1)) : 1;
+            const FDirZ = (P.dir?.[2] ?? 0) / (Math.hypot(P.dir?.[0] ?? 1, P.dir?.[2] ?? 0) || 1);
+            const FLen = Math.max(0.8, Ext[0] * 2.0);
+            const PA = [MastX, YRow, Org[2]];
+            const PB = [MastX + FDirX * FLen, YRow, Org[2] + FDirZ * FLen];
+            return { visible: true, kind: 3, rowV: RowV, nRows: NRows, waveSpd: WaveSpd, pA: PA, pB: PB, sag: 0.04, windScale: 0.65 / Stiff, pinnedEnd: false, radius: (FH / Math.max(1, NRows - 1)) * 0.60 };
+        }
+        const SH = Math.max(0.8, Ext[1] * 1.85);
+        const YRow = Math.max(0.45, YTop - SH) + (YTop - Math.max(0.45, YTop - SH)) * RowV;
+        const HalfW = Ext[0] * (1.06 - 0.16 * RowV);
+        const PA = [Org[0] - HalfW, YRow, Org[2]];
+        const PB = [Org[0] + HalfW, YRow, Org[2]];
+        const BellySag = -Sag * Math.sin(RowV * Math.PI);
+        return { visible: true, kind: 3, rowV: RowV, nRows: NRows, waveSpd: WaveSpd, pA: PA, pB: PB, sag: BellySag, windScale: 0.55 / Stiff, pinnedEnd: true, radius: (SH / Math.max(1, NRows - 1)) * 0.60 };
+    }
+    if (DynMode === 4 || DynMode === 5)
+    {
+        const Sd = Slot * 41 + 17;
+        const Ax = (WebHash(Sd, 1) * 2 - 1) * Ext[0];
+        const Az = (WebHash(Sd, 2) * 2 - 1) * Ext[2];
+        const PA = [Org[0] + Ax, Math.max(0, Org[1]), Org[2] + Az];
+        const BladeH = Hgt * (0.62 + 0.58 * WebHash(Sd, 3));
+        const Lean = (WebHash(Sd, 4) - 0.5) * (DynMode === 5 ? 0.28 : 0.45) * BladeH;
+        const LeanZ = (WebHash(Sd, 5) - 0.5) * (DynMode === 5 ? 0.28 : 0.45) * BladeH;
+        const Bend = DynMode === 4 ? (0.18 + 0.14 * WebHash(Sd, 6)) : 0.05;
+        const WindG = SwayFn([PA[0], PA[1] + BladeH * 0.7, PA[2]], 0.9 / Stiff, Amp, Freq);
+        const PB = [PA[0] + Lean + WindG[0] * 0.72, PA[1] + BladeH * (1 - Bend * 0.35), PA[2] + LeanZ + WindG[2] * 0.72];
+        return { visible: true, kind: DynMode, sub: Sub, hasTip: DynMode === 5 ? (Slot % 3 !== 0) : (Sub > 0.5 && (Slot % 2 === 0)), pA: PA, pB: PB, sag: -BladeH * Bend * 0.45, windScale: (DynMode === 5 ? 0.45 : 0.75) / Stiff, radius: (P.sizeStart || 0.025) * (0.75 + 0.55 * WebHash(Sd, 7)) };
+    }
+    if (DynMode === 6)
+    {
+        const NFronds = Math.min(Cap, Math.max(10, Rows));
+        if (Slot >= NFronds) return { visible: false };
+        const Ring = Slot < Math.floor(NFronds * 0.35) ? 0 : (Slot < Math.floor(NFronds * 0.72) ? 1 : 2);
+        const Az = (Slot / NFronds) * Math.PI * 2 + WebHash(Slot * 29, 1) * 0.22;
+        const Elev = Ring === 0 ? 1.05 : (Ring === 1 ? 0.62 : 0.28);
+        const FLen = Hgt * (Ring === 0 ? 0.78 : (Ring === 1 ? 1.05 : 1.18)) * (0.85 + 0.28 * WebHash(Slot * 29, 2));
+        const ClumpJit = ((Slot % 3) - 1) * 0.12;
+        const PA = [Org[0] + ClumpJit, Math.max(0.05, Org[1]), Org[2] + (WebHash(Slot * 29, 3) - 0.5) * 0.14];
+        const RadR = Math.cos(Elev) * FLen, TopY = Math.sin(Elev) * FLen;
+        const WindG = SwayFn([PA[0] + Math.cos(Az) * RadR, PA[1] + TopY, PA[2] + Math.sin(Az) * RadR], 0.55 / Stiff, Amp, Freq);
+        const PB = [PA[0] + Math.cos(Az) * RadR + WindG[0] * 0.55, Math.max(0.18, PA[1] + TopY - Sag * FLen * 0.18), PA[2] + Math.sin(Az) * RadR + WindG[2] * 0.55];
+        return { visible: true, kind: 6, pA: PA, pB: PB, sag: -Sag * FLen * 0.32, windScale: 0.48 / Stiff, radius: (P.sizeStart || 0.16) * (0.85 + 0.3 * WebHash(Slot * 29, 4)) };
+    }
+    const NLimbs = Math.max(8, Math.min(28, Rows));
+    const TrunkBase = [Org[0], Math.max(0, Org[1]), Org[2]];
+    const TrunkTop = [Org[0] + 0.08, TrunkBase[1] + Hgt * 0.62, Org[2] - 0.05];
+    if (Slot === 0)
+        return { visible: true, kind: 7, role: 'trunk', pA: TrunkBase, pB: TrunkTop, sag: 0.04, windScale: 0.06 / Stiff, radius: Math.max(0.14, (P.sizeStart || 0.22) * 1.4) };
+    if (Slot <= NLimbs)
+    {
+        const LIdx = Slot - 1;
+        const Tier = LIdx / Math.max(1, NLimbs - 1);
+        const Az = LIdx * 2.39996 + WebHash(Slot * 37, 1) * 0.35;
+        const AnchU = 0.42 + 0.56 * Tier;
+        const PA = [TrunkBase[0] + (TrunkTop[0] - TrunkBase[0]) * AnchU, TrunkBase[1] + (TrunkTop[1] - TrunkBase[1]) * AnchU, TrunkBase[2] + (TrunkTop[2] - TrunkBase[2]) * AnchU];
+        const Reach = Hgt * (0.58 - 0.24 * Tier) * (0.82 + 0.35 * WebHash(Slot * 37, 2));
+        const Lift = Hgt * (0.18 + 0.34 * Tier);
+        const PB = [PA[0] + Math.cos(Az) * Reach, PA[1] + Lift, PA[2] + Math.sin(Az) * Reach];
+        return { visible: true, kind: 7, role: 'limb', anchU: AnchU, pA: PA, pB: PB, sag: -Reach * 0.14, windScale: 0.22 / Stiff, radius: Math.max(0.032, (P.sizeStart || 0.22) * (0.55 - 0.28 * Tier)) };
+    }
+    const LeafIdx = Slot - 1 - NLimbs;
+    const ParentLimb = 1 + (LeafIdx % NLimbs);
+    const UBranch = 0.38 + 0.62 * WebHash(Slot * 43, 1);
+    const OffA = WebHash(Slot * 43, 2) * Math.PI * 2;
+    const OffR = 0.18 + 0.55 * WebHash(Slot * 43, 3);
+    const OffY = (WebHash(Slot * 43, 4) - 0.32) * 0.52;
+    return {
+        visible: true, kind: 7, role: 'leaf', parentSlot: ParentLimb, uBranch: UBranch,
+        off: [Math.cos(OffA) * OffR, OffY, Math.sin(OffA) * OffR],
+        radius: Math.max(0.055, (P.sizeStart || 0.22) * (0.34 + 0.22 * WebHash(Slot * 43, 5)))
+    };
+}
+
 export class SoftwarePreviewEngine
 {
     constructor(Canvas)
@@ -678,25 +810,32 @@ export class SoftwarePreviewEngine
             this.probeResult = { at: [probe.ix, probe.iy, probe.iz], value: V, mag: Math.hypot(V[0], V[1], V[2]), ms: 0.08, bytes: 8 };
         }
 
+        const BallX = glob[52] || 0, BallY = glob[53] || 0, BallZ = glob[54] || 0, BallR = glob[55] || 0;
+        const BallVx = glob[56] || 0, BallVy = glob[57] || 0, BallVz = glob[58] || 0;
+        const BallSpd = Math.hypot(BallVx, BallVy, BallVz);
+
         // Advance and draw software preview particles
         for (const Job of jobs)
         {
             const Sys = Job.gpu, P = Sys.P;
             const Tr = P.kind === 5 ? (P.transition || null) : null;
-            const WebMode = !Tr && P.arcMode !== 0 && P.arcMode !== 1 && !(P.beamMode > 0) && P.kind !== 6 ? Math.max(0, Math.min(2, P.webMode | 0)) : 0;
-            const CurlMode = WebMode > 0 ? (3 + WebMode) : (P.curlMode || 0);
+            const DynMode = !Tr && P.arcMode !== 0 && P.arcMode !== 1 && !(P.beamMode > 0) && P.kind !== 6 ? Math.max(0, Math.min(7, P.dynMode | 0)) : 0;
+            const WebMode = !Tr && DynMode === 0 && P.arcMode !== 0 && P.arcMode !== 1 && !(P.beamMode > 0) && P.kind !== 6 ? Math.max(0, Math.min(2, P.webMode | 0)) : 0;
+            const CurlMode = DynMode > 0 ? (5 + DynMode) : (WebMode > 0 ? (3 + WebMode) : (P.curlMode || 0));
             if (Job.simulate && Dt > 0)
             {
-                const MaxSoft = WebMode > 0 ? Sys.cap : (Tr ? Math.min(Sys.cap, 384) : (CurlMode === 3 ? Math.min(Sys.cap, 520) : (CurlMode > 0 ? Math.min(Sys.cap, 1250) : Math.min(Sys.cap, 360))));
+                const MaxSoft = (WebMode > 0 || DynMode > 0) ? Sys.cap : (Tr ? Math.min(Sys.cap, 384) : (CurlMode === 3 ? Math.min(Sys.cap, 520) : (CurlMode > 0 ? Math.min(Sys.cap, 1250) : Math.min(Sys.cap, 360))));
                 const BHx = P.boxHalf?.[0] || 0.8, BHy = P.boxHalf?.[1] || BHx, BHz = P.boxHalf?.[2] || BHx;
                 {
                     if (Job.emitN > 0)
                     {
-                        if (Job.preseedCurtain || (CurlMode > 0 && WebMode === 0 && Sys.particles.length < 24)) Sys.preseedCurtain = true;
+                        if (Job.preseedCurtain || (CurlMode > 0 && WebMode === 0 && DynMode === 0 && Sys.particles.length < 24)) Sys.preseedCurtain = true;
                         const Basis = BasisFrom(P.dir || [0, 1, 0]);
                         const [Bu, Bv, Bw] = Basis;
-                        const PerStepMax = WebMode > 0 ? MaxSoft : (Tr ? MaxSoft : (CurlMode > 0 ? (Sys.preseedCurtain ? (CurlMode === 3 ? 520 : 1100) : 120) : (P.arcMode === 0 || P.arcMode === 1 ? 80 : (Sys.preseedCurtain ? 260 : 28))));
-                        const SpawnCap = Math.min(PerStepMax, Sys.preseedCurtain && CurlMode > 0 && WebMode === 0 ? MaxSoft : Job.emitN, Math.max(0, MaxSoft - Sys.particles.length));
+                        const PerStepMax = (WebMode > 0 || DynMode > 0) ? MaxSoft : (Tr ? MaxSoft : (CurlMode > 0 ? (Sys.preseedCurtain ? (CurlMode === 3 ? 520 : 1100) : 120) : (P.arcMode === 0 || P.arcMode === 1 ? 80 : (Sys.preseedCurtain ? 260 : 28))));
+                        const SpawnCap = (WebMode > 0 || DynMode > 0)
+                            ? Math.max(0, MaxSoft - Sys.particles.length)
+                            : Math.min(PerStepMax, Sys.preseedCurtain && CurlMode > 0 ? MaxSoft : Job.emitN, Math.max(0, MaxSoft - Sys.particles.length));
                         const CosMax = Math.cos(P.spread ?? 0.6);
                         const EmitSh = P.emitShape ?? 0;
                         const Rad = P.radius || 0.25;
@@ -762,7 +901,34 @@ export class SoftwarePreviewEngine
                             let Crest = 0.4;
                             let Trail = null;
                             let SlotIdx = Sys.particles.length;
-                            if (WebMode > 0)
+                            let DynMeta = null;
+                            if (DynMode > 0)
+                            {
+                                const StDyn = EvalDynStrandCPU(P, SlotIdx, Math.max(16, Sys.cap), DynMode, Time, Time, fieldScene, Prepared, Solo, WindScale);
+                                DynMeta = StDyn;
+                                Life = 1e9;
+                                Vx = 0; Vy = 0; Vz = 0;
+                                Trail = [];
+                                if (StDyn.visible && StDyn.pA && StDyn.pB)
+                                {
+                                    for (let K = 0; K < 20; K++)
+                                    {
+                                        const U = K / 19;
+                                        Trail.push([
+                                            StDyn.pA[0] + (StDyn.pB[0] - StDyn.pA[0]) * U,
+                                            StDyn.pA[1] + (StDyn.pB[1] - StDyn.pA[1]) * U - 4 * (StDyn.sag || 0) * U * (1 - U),
+                                            StDyn.pA[2] + (StDyn.pB[2] - StDyn.pA[2]) * U
+                                        ]);
+                                    }
+                                    Px = Trail[19][0]; SpawnY = Trail[19][1]; Pz = Trail[19][2];
+                                }
+                                else
+                                {
+                                    Px = EOrig[0]; SpawnY = EOrig[1]; Pz = EOrig[2];
+                                    for (let K = 0; K < 20; K++) Trail.push([Px, SpawnY, Pz]);
+                                }
+                            }
+                            else if (WebMode > 0)
                             {
                                 Px = EOrig[0]; SpawnY = EOrig[1]; Pz = EOrig[2];
                                 Vx = 0; Vy = 0; Vz = 0;
@@ -1023,7 +1189,8 @@ export class SoftwarePreviewEngine
                                 x1: Px - Vx * 0.032, y1: SpawnY - Vy * 0.032, z1: Pz - Vz * 0.032,
                                 x2: Px - Vx * 0.068, y2: SpawnY - Vy * 0.068, z2: Pz - Vz * 0.068,
                                 trail: Trail, bokeh: Math.random(),
-                                slotIdx: SlotIdx, visibleStrand: WebMode === 0, grow: 1, bead: 0, role: 0, wx: 0, wy: 0, wz: 0,
+                                slotIdx: SlotIdx, visibleStrand: WebMode === 0 && (DynMode === 0 || !!DynMeta?.visible), grow: 1, bead: 0, role: 0, wx: 0, wy: 0, wz: 0,
+                                snapU: 1.0, tearPt: -1, detachAge: -1, dynMeta: DynMeta, velTrail: null,
                                 hold: Hold, asm: AsmMode, startPos: TargetPos ? [Px, SpawnY, Pz] : null, targetPos: TargetPos, flatCoin: FlatCoin, shatHit: false,
                                 vx: Vx, vy: Vy, vz: Vz, crest: Crest, splatted: false,
                                 age: SpawnAge, life: Life, ang: Tr ? 0 : Math.random() * Math.PI * 2,
@@ -1059,7 +1226,258 @@ export class SoftwarePreviewEngine
                     const DriftX = Time * CurlRate, DriftY = -Time * CurlRate * 0.65, DriftZ = Time * CurlRate * 0.8;
                     const ShellR = Math.max(0.25, P.shellRadius || P.radius || 1.65);
 
-                    for (let I = NSoft - 1; I >= 0; I--)
+                    if (DynMode > 0)
+                    {
+                        const TearThresh = Math.max(0, P.dynTearThresh || 0);
+                        const Stiff = Math.max(0.15, P.dynStiff ?? 1.0);
+                        const Sub = P.dynSub ?? 0;
+                        const CapN = Math.max(16, Sys.cap);
+                        let TrunkShake = 0;
+                        for (let I = 0; I < NSoft; I++)
+                        {
+                            const Pt = Sys.particles[I];
+                            Pt.age += Dt;
+                            const St = EvalDynStrandCPU(P, Pt.slotIdx ?? I, CapN, DynMode, Time, Time, fieldScene, Prepared, Solo, WindScale);
+                            Pt.dynMeta = St;
+                            if (!St.visible) { Pt.visibleStrand = false; continue; }
+                            Pt.visibleStrand = true;
+                            if (!Pt.trail || Pt.trail.length !== 20) Pt.trail = Array.from({ length: 20 }, () => [St.pA ? St.pA[0] : 0, St.pA ? St.pA[1] : 0, St.pA ? St.pA[2] : 0]);
+                            if (!Pt.velTrail || Pt.velTrail.length !== 20) Pt.velTrail = Array.from({ length: 20 }, () => [0, 0, 0]);
+
+                            if (DynMode === 2 && St.isLeaf)
+                            {
+                                const Par = Sys.particles[St.parentSlot];
+                                const KNode = Math.min(19, Math.max(0, Math.round(St.uPin * 19)));
+                                const ParentTorn = Par && Par.tearPt >= 0 && KNode >= Par.tearPt;
+                                if (Pt.detachAge >= 0)
+                                {
+                                    Pt.detachAge += Dt;
+                                    Pt.vy -= 4.2 * Dt;
+                                    Pt.vx += (Math.sin(Time * 4.5 + Pt.seed) * 1.4 - Pt.vx * 1.6) * Dt;
+                                    Pt.vz += (Math.cos(Time * 3.8 + Pt.seed * 1.3) * 1.4 - Pt.vz * 1.6) * Dt;
+                                    Pt.x += Pt.vx * Dt;
+                                    Pt.y = Math.max(0.04, Pt.y + Pt.vy * Dt);
+                                    Pt.z += Pt.vz * Dt;
+                                    if (Pt.y <= 0.045) { Pt.vy = 0; Pt.vx *= 0.4; Pt.vz *= 0.4; }
+                                    if (Pt.detachAge > 4.5 && !ParentTorn) Pt.detachAge = -1;
+                                }
+                                else if (Par && Par.trail)
+                                {
+                                    const Np = Par.trail[KNode];
+                                    const Ang = St.offAngle;
+                                    Pt.x = Np[0] + Math.cos(Ang) * 0.14;
+                                    Pt.y = Np[1] - 0.04;
+                                    Pt.z = Np[2] + Math.sin(Ang) * 0.14;
+                                    if (ParentTorn || (BallR > 0 && Math.hypot(Pt.x - BallX, Pt.y - BallY, Pt.z - BallZ) < BallR + 0.18))
+                                    {
+                                        Pt.detachAge = 0;
+                                        Pt.vx = BallVx * 0.45 + (Math.random() - 0.5) * 1.4;
+                                        Pt.vy = Math.max(0.4, BallVy * 0.3 + 0.9);
+                                        Pt.vz = BallVz * 0.45 + (Math.random() - 0.5) * 1.4;
+                                    }
+                                }
+                                continue;
+                            }
+
+                            if (DynMode === 7 && St.role === 'leaf')
+                            {
+                                const Limb = Sys.particles[St.parentSlot];
+                                const KNode = Math.min(19, Math.max(0, Math.round(St.uBranch * 19)));
+                                if (Pt.detachAge >= 0)
+                                {
+                                    Pt.detachAge += Dt;
+                                    Pt.vy -= 3.6 * Dt;
+                                    Pt.vx += (Math.sin(Time * 4.8 + Pt.seed) * 1.6 - Pt.vx * 1.45) * Dt;
+                                    Pt.vz += (Math.cos(Time * 4.1 + Pt.seed * 1.2) * 1.6 - Pt.vz * 1.45) * Dt;
+                                    Pt.x += Pt.vx * Dt;
+                                    Pt.y = Math.max(0.04, Pt.y + Pt.vy * Dt);
+                                    Pt.z += Pt.vz * Dt;
+                                    if (Pt.y <= 0.045) { Pt.vy = 0; Pt.vx *= 0.35; Pt.vz *= 0.35; }
+                                    if (Pt.detachAge > 5.0) Pt.detachAge = -1;
+                                }
+                                else if (Limb && Limb.trail)
+                                {
+                                    const Np = Limb.trail[KNode];
+                                    const Rustle = Math.sin(Time * 2.8 + Pt.seed) * 0.035;
+                                    Pt.x = Np[0] + St.off[0] + Rustle;
+                                    Pt.y = Np[1] + St.off[1];
+                                    Pt.z = Np[2] + St.off[2] - Rustle * 0.5;
+                                    const DistB = BallR > 0 ? Math.hypot(Pt.x - BallX, Pt.y - BallY, Pt.z - BallZ) : 99;
+                                    const TrunkShed = TrunkShake > 0.14 && WebHash(Pt.slotIdx * 7 + Math.floor(Time * 4), 1) < Math.min(0.45, TrunkShake * 1.4);
+                                    if ((DistB < BallR + 0.30 && BallSpd > Math.max(1.8, TearThresh * 0.55)) || TrunkShed)
+                                    {
+                                        Pt.detachAge = 0;
+                                        Pt.vx = BallVx * 0.4 + (Math.random() - 0.5) * 1.8;
+                                        Pt.vy = Math.max(0.35, BallVy * 0.25 + 0.6);
+                                        Pt.vz = BallVz * 0.4 + (Math.random() - 0.5) * 1.8;
+                                    }
+                                }
+                                continue;
+                            }
+
+                            let AnchorA = St.pA, AnchorB = St.pB;
+                            if (DynMode === 7 && St.role === 'limb')
+                            {
+                                const Trunk = Sys.particles[0];
+                                if (Trunk && Trunk.trail)
+                                {
+                                    const KT = Math.min(19, Math.max(0, Math.round(St.anchU * 19)));
+                                    const TrNode = Trunk.trail[KT];
+                                    const Dx = TrNode[0] - St.pA[0], Dy = TrNode[1] - St.pA[1], Dz = TrNode[2] - St.pA[2];
+                                    AnchorA = [TrNode[0], TrNode[1], TrNode[2]];
+                                    AnchorB = [St.pB[0] + Dx * 1.35, St.pB[1] + Dy * 1.35, St.pB[2] + Dz * 1.35];
+                                    TrunkShake = Math.max(TrunkShake, Math.hypot(Dx, Dy, Dz));
+                                }
+                            }
+
+                            const NodeStiff = Stiff * (DynMode === 7 && St.role === 'trunk' ? 2.8 : 1.0);
+                            const SpringK = Math.min(1, (DynMode === 7 ? 11.0 : (DynMode === 3 ? 9.5 : 7.5)) * NodeStiff * Dt);
+                            const DampK = Math.exp(-(DynMode === 3 ? 4.8 : 3.6) * Dt);
+                            const TotalLen = Math.hypot(AnchorB[0] - AnchorA[0], AnchorB[1] - AnchorA[1], AnchorB[2] - AnchorA[2]) || 0.2;
+                            const RestStep = TotalLen / 19;
+
+                            for (let K = 0; K < 20; K++)
+                            {
+                                const U = K / 19;
+                                const Cur = Pt.trail[K];
+                                const Vel = Pt.velTrail[K];
+                                const TornSide = Pt.tearPt >= 0 && K >= Pt.tearPt;
+
+                                let Tx = AnchorA[0] + (AnchorB[0] - AnchorA[0]) * U;
+                                let Ty = AnchorA[1] + (AnchorB[1] - AnchorA[1]) * U - 4 * (St.sag || 0) * U * (1 - U);
+                                let Tz = AnchorA[2] + (AnchorB[2] - AnchorA[2]) * U;
+
+                                if (DynMode === 3)
+                                {
+                                    const WPhase = U * 6.5 - Time * (St.waveSpd || 2.2) + St.rowV * 1.5;
+                                    const FlapAmp = (0.14 + 0.34 * U) * (Sub > 0.5 ? 0.85 : 1.0);
+                                    Tz += Math.sin(WPhase) * FlapAmp + Math.cos(WPhase * 1.9 + Time) * FlapAmp * 0.28;
+                                    Ty += Math.sin(WPhase * 0.8 + 0.5) * FlapAmp * 0.22;
+                                }
+                                else if (DynMode === 1 || DynMode === 2 || DynMode === 4 || DynMode === 5 || DynMode === 6 || DynMode === 7)
+                                {
+                                    const WindS = WebSwayAt(Tx, Ty, Tz, Time, St.windScale || 0.4, CurlAmp, CurlFreq, P.windCoupling ?? 1.0, fieldScene, Prepared, Solo, WindScale);
+                                    const FlexW = (DynMode === 1 || (DynMode === 3 && St.pinnedEnd)) ? 4 * U * (1 - U) : Math.pow(U, 1.35);
+                                    const WaveGust = (DynMode === 4 || DynMode === 5) ? (0.35 + 0.65 * Math.sin(Tx * 0.85 * CurlFreq + Tz * 0.52 * CurlFreq - Time * (P.dynWaveSpeed || 2.2))) * 0.14 : 0;
+                                    Tx += (WindS[0] + WaveGust) * FlexW;
+                                    Ty += WindS[1] * FlexW * 0.45;
+                                    Tz += (WindS[2] + WaveGust * 0.45) * FlexW;
+                                }
+
+                                if (TornSide)
+                                {
+                                    if (St.pinnedEnd && K === 19)
+                                    {
+                                        Cur[0] = AnchorB[0]; Cur[1] = AnchorB[1]; Cur[2] = AnchorB[2]; Vel[0] = Vel[1] = Vel[2] = 0;
+                                    }
+                                    else
+                                    {
+                                        Vel[1] -= 8.5 * Dt;
+                                        Cur[0] += Vel[0] * Dt;
+                                        Cur[1] = Math.max(0.03, Cur[1] + Vel[1] * Dt);
+                                        Cur[2] += Vel[2] * Dt;
+                                        Vel[0] *= 0.96; Vel[1] *= 0.96; Vel[2] *= 0.96;
+                                    }
+                                }
+                                else
+                                {
+                                    const PinStart = K === 0;
+                                    const PinEnd = K === 19 && St.pinnedEnd && Pt.tearPt < 0;
+                                    if (PinStart) { Cur[0] = AnchorA[0]; Cur[1] = AnchorA[1]; Cur[2] = AnchorA[2]; Vel[0] = Vel[1] = Vel[2] = 0; }
+                                    else if (PinEnd) { Cur[0] = AnchorB[0]; Cur[1] = AnchorB[1]; Cur[2] = AnchorB[2]; Vel[0] = Vel[1] = Vel[2] = 0; }
+                                    else
+                                    {
+                                        Vel[0] = (Vel[0] + (Tx - Cur[0]) * SpringK * 24.0 * Dt) * DampK;
+                                        Vel[1] = (Vel[1] + (Ty - Cur[1]) * SpringK * 24.0 * Dt) * DampK;
+                                        Vel[2] = (Vel[2] + (Tz - Cur[2]) * SpringK * 24.0 * Dt) * DampK;
+                                        Cur[0] += Vel[0] * Dt + (Tx - Cur[0]) * SpringK;
+                                        Cur[1] += Vel[1] * Dt + (Ty - Cur[1]) * SpringK;
+                                        Cur[2] += Vel[2] * Dt + (Tz - Cur[2]) * SpringK;
+                                    }
+                                }
+
+                                if (BallR > 0 && !(K === 0) && !(K === 19 && St.pinnedEnd))
+                                {
+                                    const RadMargin = BallR + (St.radius || 0.05) + (DynMode >= 4 ? 0.14 : 0.05);
+                                    const Dx = Cur[0] - BallX, Dy = Cur[1] - BallY, Dz = Cur[2] - BallZ;
+                                    const D = Math.hypot(Dx, Dy, Dz);
+                                    if (D < RadMargin)
+                                    {
+                                        const Nx = D > 1e-4 ? Dx / D : 0, Ny = D > 1e-4 ? Dy / D : 1, Nz = D > 1e-4 ? Dz / D : 0;
+                                        const Push = Math.min(RadMargin, RadMargin - D);
+                                        const BScale = Math.min(4.0, BallSpd * 0.45) / Math.max(0.01, BallSpd);
+                                        Cur[0] += Nx * Push + BallVx * BScale * Dt * 0.45;
+                                        Cur[1] += Ny * Push + BallVy * BScale * Dt * 0.45;
+                                        Cur[2] += Nz * Push + BallVz * BScale * Dt * 0.45;
+                                        const Imp = Math.min(5.0, BallSpd * 0.55);
+                                        Vel[0] = Vel[0] * 0.5 + Nx * Imp + BallVx * BScale * 0.35;
+                                        Vel[1] = Vel[1] * 0.5 + Ny * Imp + BallVy * BScale * 0.35;
+                                        Vel[2] = Vel[2] * 0.5 + Nz * Imp + BallVz * BScale * 0.35;
+                                        if (TearThresh > 0 && Pt.tearPt < 0 && BallSpd >= TearThresh && (DynMode === 1 || DynMode === 2 || DynMode === 3))
+                                        {
+                                            Pt.tearPt = Math.max(2, Math.min(18, K));
+                                            Pt.snapU = Pt.tearPt / 19;
+                                        }
+                                    }
+                                }
+                                if (DynMode >= 4) Cur[1] = Math.max(0.02, Cur[1]);
+                            }
+
+                            if (DynMode >= 1 && DynMode <= 7)
+                            {
+                                const MaxSegLen = RestStep * 1.08;
+                                for (let Pass = 0; Pass < 5; Pass++)
+                                {
+                                    Pt.trail[0][0] = AnchorA[0]; Pt.trail[0][1] = AnchorA[1]; Pt.trail[0][2] = AnchorA[2];
+                                    for (let K = 0; K < 19; K++)
+                                    {
+                                        if (Pt.tearPt >= 0 && K === Pt.tearPt - 1) continue;
+                                        const A = Pt.trail[K], B = Pt.trail[K + 1];
+                                        const Dx = B[0] - A[0], Dy = B[1] - A[1], Dz = B[2] - A[2];
+                                        const D = Math.hypot(Dx, Dy, Dz) || 1e-4;
+                                        if (D > MaxSegLen || (!St.pinnedEnd && Pt.tearPt < 0))
+                                        {
+                                            const TargetD = D > MaxSegLen ? MaxSegLen : (D + (RestStep - D) * 0.72);
+                                            const Scale = TargetD / D;
+                                            if (!((K + 1 === 19) && St.pinnedEnd))
+                                            {
+                                                B[0] = A[0] + Dx * Scale;
+                                                B[1] = Math.max(DynMode >= 4 ? 0.02 : 0.01, A[1] + Dy * Scale);
+                                                B[2] = A[2] + Dz * Scale;
+                                            }
+                                        }
+                                    }
+                                    if (St.pinnedEnd)
+                                    {
+                                        Pt.trail[19][0] = AnchorB[0]; Pt.trail[19][1] = AnchorB[1]; Pt.trail[19][2] = AnchorB[2];
+                                        for (let K = 18; K >= 0; K--)
+                                        {
+                                            if (Pt.tearPt >= 0 && K === Pt.tearPt - 1) continue;
+                                            const A = Pt.trail[K], B = Pt.trail[K + 1];
+                                            const Dx = A[0] - B[0], Dy = A[1] - B[1], Dz = A[2] - B[2];
+                                            const D = Math.hypot(Dx, Dy, Dz) || 1e-4;
+                                            if (D > MaxSegLen && K > 0)
+                                            {
+                                                const Scale = MaxSegLen / D;
+                                                A[0] = B[0] + Dx * Scale;
+                                                A[1] = Math.max(0.01, B[1] + Dy * Scale);
+                                                A[2] = B[2] + Dz * Scale;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            if (DynMode === 7 && St.role === 'trunk')
+                                TrunkShake = Math.max(TrunkShake, Math.hypot(Pt.trail[19][0] - AnchorB[0], Pt.trail[19][1] - AnchorB[1], Pt.trail[19][2] - AnchorB[2]));
+
+                            Pt.x = Pt.trail[19][0]; Pt.y = Pt.trail[19][1]; Pt.z = Pt.trail[19][2];
+                            Pt.vx = Pt.trail[19][0] - Pt.trail[17][0];
+                            Pt.vy = Pt.trail[19][1] - Pt.trail[17][1];
+                            Pt.vz = Pt.trail[19][2] - Pt.trail[17][2];
+                        }
+                    }
+
+                    for (let I = DynMode > 0 ? -1 : NSoft - 1; I >= 0; I--)
                     {
                         const Pt = Sys.particles[I];
                         Pt.age += Dt;
@@ -1125,15 +1543,60 @@ export class SoftwarePreviewEngine
                             Pt.wx = (Pt.wx || 0) + (TgtD[0] - (Pt.wx || 0)) * KBlend;
                             Pt.wy = (Pt.wy || 0) + (TgtD[1] - (Pt.wy || 0)) * KBlend;
                             Pt.wz = (Pt.wz || 0) + (TgtD[2] - (Pt.wz || 0)) * KBlend;
-                            if (!Pt.trail || Pt.trail.length !== 20) Pt.trail = Array.from({ length: 20 }, () => [0, 0, 0]);
+                            if (!Pt.trail || Pt.trail.length !== 20) Pt.trail = Array.from({ length: 20 }, () => [StWeb.pA[0], StWeb.pA[1], StWeb.pA[2]]);
+                            if (!Pt.velTrail || Pt.velTrail.length !== 20) Pt.velTrail = Array.from({ length: 20 }, () => [0, 0, 0]);
+                            const TearThresh = Math.max(0, P.dynTearThresh || 8.2);
+                            const WebK = Math.min(1, 10.5 * Dt);
                             for (let K = 0; K < 20; K++)
                             {
                                 const U = K / 19;
                                 const Belly = 4 * U * (1 - U);
                                 const TipMix = StWeb.tipWhip > 0.01 ? (Belly * 0.5 + Math.pow(U, 1.45) * StWeb.tipWhip) : Belly;
-                                Pt.trail[K][0] = StWeb.pA[0] + (StWeb.pB[0] - StWeb.pA[0]) * U + Pt.wx * TipMix;
-                                Pt.trail[K][1] = StWeb.pA[1] + (StWeb.pB[1] - StWeb.pA[1]) * U - 4 * StWeb.sag * U * (1 - U) + Pt.wy * TipMix;
-                                Pt.trail[K][2] = StWeb.pA[2] + (StWeb.pB[2] - StWeb.pA[2]) * U + Pt.wz * TipMix;
+                                const Rx = StWeb.pA[0] + (StWeb.pB[0] - StWeb.pA[0]) * U + Pt.wx * TipMix;
+                                const Ry = StWeb.pA[1] + (StWeb.pB[1] - StWeb.pA[1]) * U - 4 * StWeb.sag * U * (1 - U) + Pt.wy * TipMix;
+                                const Rz = StWeb.pA[2] + (StWeb.pB[2] - StWeb.pA[2]) * U + Pt.wz * TipMix;
+                                const Cur = Pt.trail[K];
+                                const Vel = Pt.velTrail[K];
+                                if (Pt.tearPt >= 0 && K >= Pt.tearPt)
+                                {
+                                    Vel[1] -= 4.8 * Dt;
+                                    Cur[0] += Vel[0] * Dt;
+                                    Cur[1] = Math.max(0.03, Cur[1] + Vel[1] * Dt);
+                                    Cur[2] += Vel[2] * Dt;
+                                    Vel[0] *= 0.94; Vel[1] *= 0.94; Vel[2] *= 0.94;
+                                }
+                                else if (BallR > 0 || (Cur[0] === 0 && Cur[1] === 0 && Cur[2] === 0))
+                                {
+                                    Cur[0] += (Rx - Cur[0]) * WebK;
+                                    Cur[1] += (Ry - Cur[1]) * WebK;
+                                    Cur[2] += (Rz - Cur[2]) * WebK;
+                                }
+                                else
+                                {
+                                    Cur[0] = Rx; Cur[1] = Ry; Cur[2] = Rz;
+                                }
+                                if (BallR > 0 && K > 0 && (K < 19 || StWeb.tipWhip > 0.01))
+                                {
+                                    const Dx = Cur[0] - BallX, Dy = Cur[1] - BallY, Dz = Cur[2] - BallZ;
+                                    const D = Math.hypot(Dx, Dy, Dz);
+                                    const Marg = BallR + 0.045;
+                                    if (D < Marg)
+                                    {
+                                        const Nx = D > 1e-4 ? Dx / D : 0, Ny = D > 1e-4 ? Dy / D : 1, Nz = D > 1e-4 ? Dz / D : 0;
+                                        const Push = Marg - D;
+                                        Cur[0] += Nx * Push + BallVx * Dt * 0.55;
+                                        Cur[1] += Ny * Push + BallVy * Dt * 0.55;
+                                        Cur[2] += Nz * Push + BallVz * Dt * 0.55;
+                                        Vel[0] += BallVx * 0.75 + Nx * Push * 8.0;
+                                        Vel[1] += BallVy * 0.75 + Ny * Push * 8.0;
+                                        Vel[2] += BallVz * 0.75 + Nz * Push * 8.0;
+                                        if (TearThresh > 0 && Pt.tearPt < 0 && BallSpd >= TearThresh)
+                                        {
+                                            Pt.tearPt = Math.max(2, Math.min(18, K));
+                                            Pt.snapU = Pt.tearPt / 19;
+                                        }
+                                    }
+                                }
                             }
                             if (StWeb.grow < 0.99)
                             {
@@ -1503,7 +1966,7 @@ export class SoftwarePreviewEngine
                         }
                     }
                 }
-                if (WebMode > 0)
+                if (WebMode > 0 || DynMode > 0)
                 {
                     let VisCount = 0;
                     for (const Pt of Sys.particles) if (Pt.visibleStrand) VisCount++;
@@ -1525,24 +1988,238 @@ export class SoftwarePreviewEngine
                 const Shape = P.shape ?? 3;
                 const SmoothT = (A, B, X) => { const U = Math.min(1, Math.max(0, (X - A) / Math.max(1e-5, B - A))); return U * U * (3 - 2 * U); };
 
-                if (CurlMode === 2)
+                if (BallR > 0 && BallY > 0 && BallY < 5.0)
                 {
-                    const Ctr = ProjectPoint(VP, P.origin[0], P.origin[1], P.origin[2], W, H);
-                    const EdgePt = ProjectPoint(VP, P.origin[0] + (P.shellRadius || 1.65), P.origin[1], P.origin[2], W, H);
-                    if (Ctr && EdgePt && Ctx.createRadialGradient)
+                    const ShSc = ProjectPoint(VP, BallX, 0.015, BallZ, W, H);
+                    const ShEd = ProjectPoint(VP, BallX + BallR * (1 + BallY * 0.14), 0.015, BallZ, W, H);
+                    if (ShSc && ShEd)
                     {
-                        const RadPx = Math.max(20, Math.hypot(EdgePt[0] - Ctr[0], EdgePt[1] - Ctr[1]));
+                        const SR = Math.max(4, Math.hypot(ShEd[0] - ShSc[0], ShEd[1] - ShSc[1]));
+                        const SA = Math.max(0.08, 0.42 - BallY * 0.07);
                         Ctx.save();
                         Ctx.globalCompositeOperation = 'source-over';
-                        const SphG = Ctx.createRadialGradient(Ctr[0], Ctr[1], RadPx * 0.15, Ctr[0], Ctr[1], RadPx * 1.08);
-                        SphG.addColorStop(0, 'rgba(6, 18, 52, 0.35)');
-                        SphG.addColorStop(0.85, 'rgba(10, 42, 118, 0.22)');
-                        SphG.addColorStop(1, 'rgba(16, 95, 225, 0)');
-                        Ctx.fillStyle = SphG;
-                        Ctx.beginPath(); Ctx.arc(Ctr[0], Ctr[1], RadPx * 1.08, 0, Math.PI * 2); Ctx.fill();
+                        Ctx.fillStyle = `rgba(0,0,0,${SA.toFixed(3)})`;
+                        Ctx.beginPath();
+                        Ctx.ellipse(ShSc[0], ShSc[1], SR, SR * 0.48, 0, 0, Math.PI * 2);
+                        Ctx.fill();
                         Ctx.restore();
                         if (Additive) Ctx.globalCompositeOperation = 'lighter';
                     }
+                }
+
+                if (DynMode > 0)
+                {
+                    const ColC = P.colC || P.colB;
+                    const MixRgb = (A, B, U) => [A[0] + (B[0] - A[0]) * U, A[1] + (B[1] - A[1]) * U, A[2] + (B[2] - A[2]) * U];
+                    const Sub = P.dynSub ?? 0;
+
+                    if (DynMode === 3)
+                    {
+                        const Quads = [];
+                        for (let R = 0; R < Sys.particles.length - 1; R++)
+                        {
+                            const R0 = Sys.particles[R], R1 = Sys.particles[R + 1];
+                            if (!R0.visibleStrand || !R1.visibleStrand || !R0.trail || !R1.trail) continue;
+                            if (R0.dynMeta?.kind !== 3 || R1.dynMeta?.kind !== 3) continue;
+                            const RowU = R0.dynMeta.rowV ?? (R / Math.max(1, Sys.particles.length - 1));
+                            for (let K = 0; K < 19; K++)
+                            {
+                                if (Sub > 0.5) { if ((R0.tearPt >= 0 && K === R0.tearPt - 1) || (R1.tearPt >= 0 && K === R1.tearPt - 1)) continue; }
+                                else { if ((R0.tearPt >= 0 && K >= R0.tearPt - 1) || (R1.tearPt >= 0 && K >= R1.tearPt - 1)) continue; }
+                                const A3 = R0.trail[K], B3 = R0.trail[K + 1], C3 = R1.trail[K + 1], D3 = R1.trail[K];
+                                const A = ProjectPoint(VP, A3[0], A3[1], A3[2], W, H);
+                                const B = ProjectPoint(VP, B3[0], B3[1], B3[2], W, H);
+                                const C = ProjectPoint(VP, C3[0], C3[1], C3[2], W, H);
+                                const D = ProjectPoint(VP, D3[0], D3[1], D3[2], W, H);
+                                if (!A || !B || !C || !D) continue;
+                                const Ux = B3[0] - A3[0], Uy = B3[1] - A3[1], Uz = B3[2] - A3[2];
+                                const Vx = D3[0] - A3[0], Vy = D3[1] - A3[1], Vz = D3[2] - A3[2];
+                                let Nx = Uy * Vz - Uz * Vy, Ny = Uz * Vx - Ux * Vz, Nz = Ux * Vy - Uy * Vx;
+                                const Nl = Math.hypot(Nx, Ny, Nz) || 1;
+                                Nx /= Nl; Ny /= Nl; Nz /= Nl;
+                                const Sun = Math.abs(Nx * 0.42 + Ny * 0.58 + Nz * 0.69);
+                                const Lit = 0.48 + 0.58 * Sun;
+                                const UFrac = K / 19;
+                                let BaseRgb = MixRgb(P.colA, ColC, Math.min(1, UFrac * 1.15));
+                                if (Sub < 0.5 && Math.cos(RowU * Math.PI * 4) > 0) BaseRgb = MixRgb(BaseRgb, P.colB, 0.32);
+                                Quads.push({ D: (A[2] + B[2] + C[2] + D[2]) * 0.25, A, B, C, Dp: D, Fill: LinearToCss([BaseRgb[0] * Lit, BaseRgb[1] * Lit, BaseRgb[2] * Lit], 0.96) });
+                            }
+                        }
+                        Quads.sort((Q1, Q2) => Q2.D - Q1.D);
+                        for (const Q of Quads)
+                        {
+                            Ctx.fillStyle = Q.Fill;
+                            Ctx.strokeStyle = Q.Fill;
+                            Ctx.lineWidth = 0.6;
+                            Ctx.beginPath();
+                            Ctx.moveTo(Q.A[0], Q.A[1]); Ctx.lineTo(Q.B[0], Q.B[1]); Ctx.lineTo(Q.C[0], Q.C[1]); Ctx.lineTo(Q.Dp[0], Q.Dp[1]);
+                            Ctx.closePath();
+                            Ctx.fill(); Ctx.stroke();
+                        }
+                        continue;
+                    }
+
+                    const DrawList = [];
+                    for (let I = 0; I < Sys.particles.length; I++)
+                    {
+                        const Pt = Sys.particles[I];
+                        if (!Pt.visibleStrand) continue;
+                        const St = Pt.dynMeta;
+                        const Sc = ProjectPoint(VP, Pt.x, Pt.y, Pt.z, W, H);
+                        const MidW = Pt.trail && Pt.trail.length >= 10 ? Pt.trail[9] : [Pt.x, Pt.y, Pt.z];
+                        const MidSc = ProjectPoint(VP, MidW[0], MidW[1], MidW[2], W, H);
+                        const Depth = (MidSc || Sc)?.[2] || 99;
+                        DrawList.push({ Pt, St, Depth });
+                    }
+                    DrawList.sort((A, B) => B.Depth - A.Depth);
+
+                    for (const Item of DrawList)
+                    {
+                        const Pt = Item.Pt, St = Item.St || {};
+                        if ((DynMode === 2 && St.isLeaf) || (DynMode === 7 && St.role === 'leaf'))
+                        {
+                            const Sc = ProjectPoint(VP, Pt.x, Pt.y, Pt.z, W, H);
+                            if (!Sc) continue;
+                            const LRad = Math.max(3.2, (St.radius || 0.08) * 195 / Math.max(1.8, Sc[2]));
+                            const LeafCol = MixRgb(ColC, P.colB, 0.25 + 0.55 * WebHash(Pt.slotIdx + 3, 2));
+                            const Ang = (Pt.detachAge >= 0 ? Time * 4.5 + Pt.seed : Pt.seed * 0.01);
+                            Ctx.save();
+                            Ctx.translate(Sc[0], Sc[1]);
+                            Ctx.rotate(Math.sin(Ang) * 0.85);
+                            Ctx.fillStyle = LinearToCss(LeafCol, 0.92);
+                            Ctx.beginPath();
+                            Ctx.moveTo(0, -LRad);
+                            Ctx.quadraticCurveTo(LRad * 0.85, 0, 0, LRad);
+                            Ctx.quadraticCurveTo(-LRad * 0.85, 0, 0, -LRad);
+                            Ctx.fill();
+                            Ctx.restore();
+                            continue;
+                        }
+
+                        if (!Pt.trail || Pt.trail.length < 2) continue;
+                        const DrawChainRange = (FromK, ToK) => {
+                            const Pts2 = [];
+                            for (let K = FromK; K <= ToK; K++)
+                            {
+                                const Wp = Pt.trail[K];
+                                const Pr = ProjectPoint(VP, Wp[0], Wp[1], Wp[2], W, H);
+                                if (Pr) Pts2.push({ p: Pr, u: K / 19 });
+                            }
+                            if (Pts2.length < 2) return;
+                            const ZAvg = Pts2[Math.floor(Pts2.length * 0.5)].p[2];
+                            const BasePx = Math.max(1.0, (St.radius || 0.04) * (P.sizeScale || 1) * 260 / Math.max(1.8, ZAvg));
+
+                            if (DynMode === 1 && Sub > 0.5)
+                            {
+                                Ctx.lineCap = 'round';
+                                for (let K = 0; K < Pts2.length - 1; K++)
+                                {
+                                    const A = Pts2[K].p, B = Pts2[K + 1].p;
+                                    const Mx = 0.5 * (A[0] + B[0]), My = 0.5 * (A[1] + B[1]);
+                                    const Ang = Math.atan2(B[1] - A[1], B[0] - A[0]);
+                                    const Len = Math.max(3.0, Math.hypot(B[0] - A[0], B[1] - A[1]) * 0.62);
+                                    Ctx.save();
+                                    Ctx.translate(Mx, My);
+                                    Ctx.rotate(Ang);
+                                    Ctx.strokeStyle = LinearToCss(K % 2 === 0 ? P.colB : ColC, 0.95);
+                                    Ctx.lineWidth = Math.max(1.6, BasePx * 0.42);
+                                    Ctx.beginPath();
+                                    Ctx.ellipse(0, 0, Len, Math.max(1.8, BasePx * 0.55), 0, 0, Math.PI * 2);
+                                    Ctx.stroke();
+                                    Ctx.restore();
+                                }
+                                return;
+                            }
+
+                            if (DynMode === 6)
+                            {
+                                Ctx.lineCap = 'round';
+                                Ctx.strokeStyle = LinearToCss(P.colA, 0.94);
+                                Ctx.lineWidth = Math.max(1.4, BasePx * 0.14);
+                                Ctx.beginPath();
+                                Ctx.moveTo(Pts2[0].p[0], Pts2[0].p[1]);
+                                for (let K = 1; K < Pts2.length; K++) Ctx.lineTo(Pts2[K].p[0], Pts2[K].p[1]);
+                                Ctx.stroke();
+                                for (let K = 1; K < Pts2.length - 1; K++)
+                                {
+                                    const Prev = Pts2[K - 1].p, Cur = Pts2[K].p, Next = Pts2[K + 1].p;
+                                    const Tx = Next[0] - Prev[0], Ty = Next[1] - Prev[1];
+                                    const Tl = Math.hypot(Tx, Ty) || 1;
+                                    const Nx = -Ty / Tl, Ny = Tx / Tl;
+                                    const U = Pts2[K].u;
+                                    const PinLen = BasePx * Math.sin(Math.min(1, U) * Math.PI) * (1.15 - 0.35 * U);
+                                    const PinCol = MixRgb(ColC, P.colB, U);
+                                    Ctx.fillStyle = LinearToCss(PinCol, 0.92);
+                                    for (const Sgn of [-1, 1])
+                                    {
+                                        const TipX = Cur[0] + Nx * Sgn * PinLen + (Tx / Tl) * PinLen * 0.35;
+                                        const TipY = Cur[1] + Ny * Sgn * PinLen + (Ty / Tl) * PinLen * 0.35;
+                                        const WPin = Math.max(1.8, PinLen * 0.24);
+                                        Ctx.beginPath();
+                                        Ctx.moveTo(Cur[0], Cur[1]);
+                                        Ctx.quadraticCurveTo(Cur[0] + Nx * Sgn * PinLen * 0.55 + (Tx / Tl) * WPin, Cur[1] + Ny * Sgn * PinLen * 0.55 + (Ty / Tl) * WPin, TipX, TipY);
+                                        Ctx.quadraticCurveTo(Cur[0] + Nx * Sgn * PinLen * 0.55 - (Tx / Tl) * WPin, Cur[1] + Ny * Sgn * PinLen * 0.55 - (Ty / Tl) * WPin, Cur[0], Cur[1]);
+                                        Ctx.fill();
+                                    }
+                                }
+                                return;
+                            }
+
+                            Ctx.lineCap = 'round';
+                            Ctx.lineJoin = 'round';
+                            for (let K = 0; K < Pts2.length - 1; K++)
+                            {
+                                const U = Pts2[K].u;
+                                const WFrac = (DynMode === 4 || DynMode === 5) ? (1 - U * 0.86) : (DynMode === 7 ? (1 - U * 0.65) : 1.0);
+                                const SegCol = DynMode === 7
+                                    ? MixRgb(P.colA, ColC, U * 0.45)
+                                    : MixRgb(P.colA, ColC, Math.min(1, U * 1.15));
+                                Ctx.strokeStyle = LinearToCss(SegCol, 0.95);
+                                Ctx.lineWidth = Math.max(1.0, BasePx * WFrac);
+                                Ctx.beginPath();
+                                Ctx.moveTo(Pts2[K].p[0], Pts2[K].p[1]);
+                                Ctx.lineTo(Pts2[K + 1].p[0], Pts2[K + 1].p[1]);
+                                Ctx.stroke();
+                            }
+
+                            if ((DynMode === 4 || DynMode === 5) && St.hasTip && Pts2.length >= 4)
+                            {
+                                const PTop = Pts2[Pts2.length - 1].p;
+                                const PPrev = Pts2[Pts2.length - 3].p;
+                                const Ang = Math.atan2(PTop[1] - PPrev[1], PTop[0] - PPrev[0]);
+                                Ctx.save();
+                                Ctx.translate(PTop[0], PTop[1]);
+                                Ctx.rotate(Ang + Math.PI * 0.5);
+                                if (DynMode === 4)
+                                {
+                                    const EarH = Math.max(5, BasePx * 4.8);
+                                    const EarW = Math.max(2.2, BasePx * 1.35);
+                                    Ctx.fillStyle = LinearToCss(P.colB, 0.96);
+                                    Ctx.beginPath();
+                                    Ctx.ellipse(0, EarH * 0.25, EarW, EarH * 0.55, 0, 0, Math.PI * 2);
+                                    Ctx.fill();
+                                }
+                                else
+                                {
+                                    const CatH = Math.max(7, BasePx * 4.2);
+                                    const CatW = Math.max(3.2, BasePx * 1.45);
+                                    Ctx.fillStyle = LinearToCss(P.colB, 0.98);
+                                    Ctx.beginPath();
+                                    Ctx.roundRect(-CatW * 0.5, -CatH * 0.15, CatW, CatH, CatW * 0.45);
+                                    Ctx.fill();
+                                }
+                                Ctx.restore();
+                            }
+                        };
+
+                        if (Pt.tearPt >= 1 && Pt.tearPt <= 18)
+                        {
+                            DrawChainRange(0, Pt.tearPt - 1);
+                            DrawChainRange(Pt.tearPt, 19);
+                        }
+                        else DrawChainRange(0, 19);
+                    }
+                    continue;
                 }
 
                 for (const Pt of Sys.particles)
@@ -1550,30 +2227,40 @@ export class SoftwarePreviewEngine
                     if (WebMode > 0)
                     {
                         if (!Pt.visibleStrand || !Pt.trail || Pt.trail.length < 2) continue;
-                        const Pts2 = [];
-                        for (let K = 0; K < Pt.trail.length; K++)
+                        const DrawWebSpan = (FromK, ToK) => {
+                            const Pts2 = [];
+                            for (let K = FromK; K <= ToK; K++)
+                            {
+                                const Wp = Pt.trail[K];
+                                const Pr = ProjectPoint(VP, Wp[0], Wp[1], Wp[2], W, H);
+                                if (Pr) Pts2.push(Pr);
+                            }
+                            if (Pts2.length < 2) return;
+                            const MidSc = Pts2[Math.floor(Pts2.length * 0.5)];
+                            const ColC = P.colC || P.colB;
+                            const RRole = Pt.role ?? 0.5;
+                            const SCol = RRole < 0.55
+                                ? [0, 1, 2, 3].map(K => P.colA[K] * (1 - RRole / 0.55) + ColC[K] * (RRole / 0.55))
+                                : [0, 1, 2, 3].map(K => ColC[K] * (1 - (RRole - 0.55) / 0.45) + P.colB[K] * ((RRole - 0.55) / 0.45));
+                            const Alpha = 0.72 * (0.72 + 0.28 * (Pt.grow ?? 1));
+                            const SilkW = Math.max(0.55, (P.sizeStart || 0.018) * (P.sizeScale || 1) * (P.streakThin || 0.5) * 195 / Math.max(2.2, MidSc[2]));
+                            Ctx.strokeStyle = LinearToCss(SCol, Alpha);
+                            Ctx.lineWidth = SilkW;
+                            Ctx.lineCap = 'round';
+                            Ctx.lineJoin = 'round';
+                            Ctx.beginPath();
+                            Ctx.moveTo(Pts2[0][0], Pts2[0][1]);
+                            for (let K = 1; K < Pts2.length; K++) Ctx.lineTo(Pts2[K][0], Pts2[K][1]);
+                            Ctx.stroke();
+                            return SilkW;
+                        };
+                        let SilkW = 0.8;
+                        if (Pt.tearPt >= 1 && Pt.tearPt <= 18)
                         {
-                            const Wp = Pt.trail[K];
-                            const Pr = ProjectPoint(VP, Wp[0], Wp[1], Wp[2], W, H);
-                            if (Pr) Pts2.push(Pr);
+                            SilkW = DrawWebSpan(0, Pt.tearPt - 1) || SilkW;
+                            DrawWebSpan(Pt.tearPt, 19);
                         }
-                        if (Pts2.length < 2) continue;
-                        const MidSc = Pts2[Math.floor(Pts2.length * 0.5)];
-                        const ColC = P.colC || P.colB;
-                        const RRole = Pt.role ?? 0.5;
-                        const SCol = RRole < 0.55
-                            ? [0, 1, 2, 3].map(K => P.colA[K] * (1 - RRole / 0.55) + ColC[K] * (RRole / 0.55))
-                            : [0, 1, 2, 3].map(K => ColC[K] * (1 - (RRole - 0.55) / 0.45) + P.colB[K] * ((RRole - 0.55) / 0.45));
-                        const Alpha = 0.72 * (0.72 + 0.28 * (Pt.grow ?? 1));
-                        const SilkW = Math.max(0.55, (P.sizeStart || 0.018) * (P.sizeScale || 1) * (P.streakThin || 0.5) * 195 / Math.max(2.2, MidSc[2]));
-                        Ctx.strokeStyle = LinearToCss(SCol, Alpha);
-                        Ctx.lineWidth = SilkW;
-                        Ctx.lineCap = 'round';
-                        Ctx.lineJoin = 'round';
-                        Ctx.beginPath();
-                        Ctx.moveTo(Pts2[0][0], Pts2[0][1]);
-                        for (let K = 1; K < Pts2.length; K++) Ctx.lineTo(Pts2[K][0], Pts2[K][1]);
-                        Ctx.stroke();
+                        else SilkW = DrawWebSpan(0, 19) || SilkW;
 
                         const ScTip = ProjectPoint(VP, Pt.x, Pt.y, Pt.z, W, H);
                         if (ScTip && (Pt.bead || 0) > 0.05)
