@@ -790,6 +790,129 @@ export function EvalCarPoseCPU(Time, Org, TrackR, CarSpd)
     return { pos: Pos, fwd: Fwd, right: Right, yaw: Math.atan2(Fwd[0], Fwd[2]), wheels: Wheels };
 }
 
+function EnsureShallowWaterCPU(Sys, Org, PoolR)
+{
+    const N = 28;
+    const Rad = Math.max(0.8, PoolR);
+    if (!Sys.swe || Sys.swe.N !== N)
+    {
+        Sys.swe = {
+            N,
+            h: new Float32Array(N * N),
+            v: new Float32Array(N * N),
+            ox: Org[0],
+            oz: Org[2],
+            rad: Rad,
+            lastRainBucket: -1,
+        };
+    }
+    Sys.swe.ox = Org[0];
+    Sys.swe.oz = Org[2];
+    Sys.swe.rad = Rad;
+    return Sys.swe;
+}
+
+function ImpulseShallowWaterCPU(Swe, Wx, Wz, Amp, SpotR)
+{
+    if (!Swe) return;
+    const { N, h, v, ox, oz, rad } = Swe;
+    const Span = rad * 2.15;
+    const CellW = Span / (N - 1);
+    const Gx = ((Wx - ox) / Span + 0.5) * (N - 1);
+    const Gz = ((Wz - oz) / Span + 0.5) * (N - 1);
+    const Cr = Math.max(1.2, (SpotR || 0.28) / Math.max(0.04, CellW));
+    const I0 = Math.max(1, Math.floor(Gx - Cr)), I1 = Math.min(N - 2, Math.ceil(Gx + Cr));
+    const J0 = Math.max(1, Math.floor(Gz - Cr)), J1 = Math.min(N - 2, Math.ceil(Gz + Cr));
+    for (let J = J0; J <= J1; J++)
+    {
+        for (let I = I0; I <= I1; I++)
+        {
+            const Dx = I - Gx, Dz = J - Gz;
+            const D2 = (Dx * Dx + Dz * Dz) / (Cr * Cr);
+            if (D2 < 1.35)
+            {
+                const Ring = (1 - D2 * 1.15) * Math.exp(-D2 * 2.2);
+                v[J * N + I] = Math.max(-0.52, Math.min(0.52, v[J * N + I] + Amp * Ring));
+                h[J * N + I] = Math.max(-0.14, Math.min(0.14, h[J * N + I] + Amp * Ring * 0.03));
+            }
+        }
+    }
+}
+
+function StepShallowWaterCPU(Swe, Dt)
+{
+    if (!Swe || Dt <= 0) return;
+    const { N, h, v } = Swe;
+    const Sub = 2;
+    const Sdt = Math.min(0.020, Dt / Sub);
+    const C2 = 14.0;
+    const Damp = Math.exp(-5.4 * Sdt);
+    for (let S = 0; S < Sub; S++)
+    {
+        for (let J = 1; J < N - 1; J++)
+        {
+            const Uy = (J / (N - 1) - 0.5) * 2.15;
+            for (let I = 1; I < N - 1; I++)
+            {
+                const Ux = (I / (N - 1) - 0.5) * 2.15;
+                const Idx = J * N + I;
+                if (Ux * Ux + Uy * Uy > 0.96) { h[Idx] *= 0.80; v[Idx] *= 0.80; continue; }
+                const Lap = h[Idx - 1] + h[Idx + 1] + h[Idx - N] + h[Idx + N] - 4 * h[Idx];
+                v[Idx] = (v[Idx] + (C2 * Lap - 5.0 * h[Idx]) * Sdt) * Damp;
+            }
+        }
+        for (let J = 1; J < N - 1; J++)
+        {
+            for (let I = 1; I < N - 1; I++)
+            {
+                const Idx = J * N + I;
+                h[Idx] = Math.max(-0.18, Math.min(0.18, (h[Idx] + v[Idx] * Sdt) * 0.992));
+            }
+        }
+    }
+}
+
+function DrawShallowWaterCPU(Ctx, VP, W, H, Swe, P, Additive)
+{
+    if (!Swe) return;
+    const { N, h, ox, oz, rad } = Swe;
+    const Span = rad * 2.15;
+    const Step = Span / (N - 1);
+    const ColRim = P.colB || [0.85, 0.92, 0.98, 1];
+    Ctx.save();
+    if (Additive) Ctx.globalCompositeOperation = 'source-over';
+    Ctx.lineCap = 'round';
+    for (let J = 1; J < N - 1; J++)
+    {
+        const Wz = oz + (J / (N - 1) - 0.5) * Span;
+        for (let I = 1; I < N - 1; I++)
+        {
+            const Idx = J * N + I;
+            const Hv = h[Idx];
+            const Gx = h[Idx + 1] - h[Idx - 1];
+            const Gz = h[Idx + N] - h[Idx - N];
+            const Slope = Math.hypot(Gx, Gz);
+            if (Slope < 0.012 && Math.abs(Hv) < 0.010) continue;
+            const Wx = ox + (I / (N - 1) - 0.5) * Span;
+            if (Math.hypot(Wx - ox, (Wz - oz) / 0.78) > rad * 0.96) continue;
+            const Tx = -Gz / Math.max(1e-4, Slope), Tz = Gx / Math.max(1e-4, Slope);
+            const Half = Step * 0.42;
+            const P0 = ProjectPoint(VP, Wx - Tx * Half, 0.018 + Math.max(0, Hv) * 0.22, Wz - Tz * Half, W, H);
+            const P1 = ProjectPoint(VP, Wx + Tx * Half, 0.018 + Math.max(0, Hv) * 0.22, Wz + Tz * Half, W, H);
+            if (!P0 || !P1) continue;
+            const Alpha = Math.min(0.32, Slope * 3.8 + Math.abs(Hv) * 1.4);
+            Ctx.strokeStyle = LinearToCss(ColRim, Alpha);
+            Ctx.lineWidth = Math.min(1.4, 0.65 + Slope * 5.2);
+            Ctx.beginPath();
+            Ctx.moveTo(P0[0], P0[1]);
+            Ctx.lineTo(P1[0], P1[1]);
+            Ctx.stroke();
+        }
+    }
+    Ctx.restore();
+    if (Additive) Ctx.globalCompositeOperation = 'lighter';
+}
+
 export function EvalFerroMagnetCPU(Time, Org, PoolR, MagSpd, FerroMode)
 {
     const Ph = Time * (MagSpd || 1.35);
@@ -1613,8 +1736,37 @@ export class SoftwarePreviewEngine
             const CurlMode = JellyMode > 0 ? 21 : (SeedHeadMode > 0 ? 20 : (BeadsMode > 0 ? 19 : (CrackMode > 0 ? 18 : (FerroMode > 0 ? 17 : (MudMode > 0 ? 16 : (GridMode > 0 ? 13 : (DynMode > 0 ? (DynMode <= 7 ? 5 + DynMode : 6 + DynMode) : (WebMode > 0 ? (3 + WebMode) : (P.curlMode || 0)))))))));
             if (Job.simulate && Dt > 0)
             {
-                const MaxSoft = CrackMode > 0 ? Math.min(Sys.cap, 580) : (FerroMode > 0 ? Math.min(Sys.cap, 560) : (BeadsMode > 0 ? Math.min(Sys.cap, 280) : (SeedHeadMode > 0 ? Math.min(Sys.cap, 480) : (JellyMode > 0 ? Math.min(Sys.cap, 440) : (GridMode > 0 ? Math.min(Sys.cap, 1600) : ((WebMode > 0 || DynMode > 0) ? Sys.cap : (MudMode > 0 ? Math.min(Sys.cap, 760) : (Tr ? Math.min(Sys.cap, 384) : (CurlMode === 3 ? Math.min(Sys.cap, 520) : (CurlMode > 0 ? Math.min(Sys.cap, 1250) : Math.min(Sys.cap, 360)))))))))));
+                const MaxSoft = CrackMode > 0 ? Math.min(Sys.cap, 580) : (FerroMode > 0 ? Math.min(Sys.cap, 560) : (BeadsMode > 0 ? Math.min(Sys.cap, 280) : (SeedHeadMode > 0 ? Math.min(Sys.cap, 480) : (JellyMode > 0 ? Math.min(Sys.cap, 440) : (GridMode > 0 ? Math.min(Sys.cap, 1600) : ((WebMode > 0 || DynMode > 0) ? Sys.cap : (MudMode > 0 ? Math.min(Sys.cap, 260) : (Tr ? Math.min(Sys.cap, 384) : (CurlMode === 3 ? Math.min(Sys.cap, 520) : (CurlMode > 0 ? Math.min(Sys.cap, 1250) : Math.min(Sys.cap, 360)))))))))));
                 const BHx = P.boxHalf?.[0] || 0.8, BHy = P.boxHalf?.[1] || BHx, BHz = P.boxHalf?.[2] || BHx;
+                if (MudMode > 0)
+                {
+                    const PoolR = MudMode === 2 ? Math.max(1.8, (P.carTrackRadius || 3.15) * 1.15) : Math.max(1.0, P.radius || 2.0);
+                    const Swe = EnsureShallowWaterCPU(Sys, P.origin || [0, 0, 0], PoolR);
+                    if (MudMode === 2)
+                    {
+                        const Pose = EvalCarPoseCPU(Time, P.origin || [0, 0, 0], P.carTrackRadius || 3.15, P.carSpeed || 4.2);
+                        for (const Wh of Pose.wheels) ImpulseShallowWaterCPU(Swe, Wh[0], Wh[2], -0.055, 0.32);
+                    }
+                    else if (MudMode === 1)
+                    {
+                        const RBucket = Math.floor(Time * 6.5);
+                        if (RBucket !== Swe.lastRainBucket)
+                        {
+                            Swe.lastRainBucket = RBucket;
+                            for (let K = 0; K < 2; K++)
+                            {
+                                const Ha = WebHash(RBucket * 13 + K * 7, 1) * Math.PI * 2;
+                                const Hr = PoolR * 0.78 * Math.sqrt(WebHash(RBucket * 13 + K * 7, 2));
+                                ImpulseShallowWaterCPU(Swe, Swe.ox + Math.cos(Ha) * Hr, Swe.oz + Math.sin(Ha) * Hr, -0.105, 0.24);
+                            }
+                        }
+                    }
+                    if (BallR > 0.04 && BallY < BallR + 0.55 && BallSpd > 0.25)
+                    {
+                        ImpulseShallowWaterCPU(Swe, BallX, BallZ, -0.10 * Math.min(1.6, BallSpd * 0.22), BallR + 0.20);
+                    }
+                    StepShallowWaterCPU(Swe, Dt);
+                }
                 if (BeadsMode > 0)
                 {
                     if (Job.emitN > 0 || Sys.particles.length > 0)
@@ -1680,7 +1832,7 @@ export class SoftwarePreviewEngine
                         if (Job.preseedCurtain || (CurlMode > 0 && WebMode === 0 && DynMode === 0 && Sys.particles.length < 24)) Sys.preseedCurtain = true;
                         const Basis = BasisFrom(P.dir || [0, 1, 0]);
                         const [Bu, Bv, Bw] = Basis;
-                        const PerStepMax = (WebMode > 0 || DynMode > 0) ? MaxSoft : (Tr ? MaxSoft : (MudMode > 0 ? 140 : (CurlMode > 0 ? (Sys.preseedCurtain ? (CurlMode === 3 ? 520 : 1100) : 120) : (HasArc ? 80 : (Sys.preseedCurtain ? 260 : 28)))));
+                        const PerStepMax = (WebMode > 0 || DynMode > 0) ? MaxSoft : (Tr ? MaxSoft : (MudMode > 0 ? 48 : (CurlMode > 0 ? (Sys.preseedCurtain ? (CurlMode === 3 ? 520 : 1100) : 120) : (HasArc ? 80 : (Sys.preseedCurtain ? 260 : 28)))));
                         const SpawnCap = (WebMode > 0 || DynMode > 0)
                             ? Math.max(0, MaxSoft - Sys.particles.length)
                             : Math.min(PerStepMax, Sys.preseedCurtain && CurlMode > 0 ? MaxSoft : Job.emitN, Math.max(0, MaxSoft - Sys.particles.length));
@@ -2003,78 +2155,121 @@ export class SoftwarePreviewEngine
                                 Trail = [];
                                 for (let K = 0; K < 16; K++) Trail.push([Px, SpawnY, Pz]);
                             }
-                            let Hold = 0, AsmMode = 0, TargetPos = null, FlatCoin = false, IsRipple = false, RippleRadius = 0.25;
+                            let Hold = 0, AsmMode = 0, TargetPos = null, FlatCoin = false, IsRipple = false, RippleRadius = 0.25, MudRole = 0;
                             if (MudMode > 0)
                             {
                                 const OrgM = P.origin || [0, 0, 0];
                                 const PoolR = Math.max(0.5, P.radius || 1.6);
-                                const SSpd = (P.speedMin || 2.0) + Math.random() * Math.max(0.2, (P.speedMax || 7.0) - (P.speedMin || 2.0));
+                                const SSpd = (P.speedMin || 1.8) + Math.random() * Math.max(0.2, (P.speedMax || 6.0) - (P.speedMin || 1.8));
                                 const BLow = BallR > 0.04 && BallY < BallR + 0.55;
                                 if (MudMode === 2)
                                 {
                                     const Pose = EvalCarPoseCPU(Time, OrgM, P.carTrackRadius || 3.15, P.carSpeed || 4.2);
-                                    const BallSplash = BLow && (I % 6 === 0);
-                                    const Wp = BallSplash ? [BallX, 0.024, BallZ] : Pose.wheels[(Sys.particles.length + I) & 3];
+                                    const BallSplash = BLow && (I % 5 === 0);
+                                    const WIdx = (Sys.particles.length + I) & 3;
+                                    const Wp = BallSplash ? [BallX, 0.022, BallZ] : Pose.wheels[WIdx];
+                                    const LugPulse = 0.72 + 0.28 * Math.sin(Time * 34.0 + WIdx * 1.57);
                                     const RPick = Math.random();
-                                    if (RPick < 0.24)
+                                    if (RPick < 0.14 && !BallSplash)
                                     {
-                                        Px = Wp[0] + (Math.random() - 0.5) * 0.25; SpawnY = 0.022; Pz = Wp[2] + (Math.random() - 0.5) * 0.25;
+                                        Px = Wp[0] + (Math.random() - 0.5) * 0.18; SpawnY = 0.020; Pz = Wp[2] + (Math.random() - 0.5) * 0.18;
                                         Vx = 0; Vy = 0; Vz = 0;
-                                        Life = 0.85 + Math.random() * 0.55;
-                                        IsRipple = true; RippleRadius = 0.24 + Math.random() * 0.14;
+                                        Life = 0.45 + Math.random() * 0.30;
+                                        IsRipple = true; RippleRadius = 0.14 + Math.random() * 0.10;
                                     }
-                                    else if (RPick < 0.68 || BallSplash)
+                                    else if (RPick < 0.62 && !BallSplash)
+                                    {
+                                        const SideJit = (Math.random() - 0.5) * 0.22;
+                                        const Lx = -Pose.fwd[0] * (0.98 + Math.random() * 0.32) + Pose.right[0] * SideJit;
+                                        const Lz = -Pose.fwd[2] * (0.98 + Math.random() * 0.32) + Pose.right[2] * SideJit;
+                                        const Ly = 0.40 + Math.random() * 0.52;
+                                        const L = Math.hypot(Lx, Ly, Lz) || 1;
+                                        Px = Wp[0] - Pose.fwd[0] * 0.16 + Pose.right[0] * SideJit * 0.4;
+                                        SpawnY = 0.06;
+                                        Pz = Wp[2] - Pose.fwd[2] * 0.16 + Pose.right[2] * SideJit * 0.4;
+                                        Vx = (Lx / L) * SSpd * LugPulse * 1.08; Vy = (Ly / L) * SSpd * LugPulse * 1.08; Vz = (Lz / L) * SSpd * LugPulse * 1.08;
+                                        MudRole = Math.random() > 0.60 ? 1 : 0;
+                                    }
+                                    else if (RPick < 0.86 || BallSplash)
                                     {
                                         const Side = (I & 2) ? 1 : -1;
-                                        const Ang = Math.random() * Math.PI * 2;
-                                        const Lx = BallSplash ? Math.cos(Ang) : (Pose.right[0] * Side - Pose.fwd[0] * 0.35);
-                                        const Lz = BallSplash ? Math.sin(Ang) : (Pose.right[2] * Side - Pose.fwd[2] * 0.35);
-                                        const Ly = 0.72 + Math.random() * 0.45;
+                                        const Cusp = Math.floor(Math.random() * 8) * (Math.PI / 4) + (Math.random() - 0.5) * 0.22;
+                                        const Lx = BallSplash ? Math.cos(Cusp) : (Pose.right[0] * Side * (0.92 + Math.random() * 0.2) + Pose.fwd[0] * 0.20);
+                                        const Lz = BallSplash ? Math.sin(Cusp) : (Pose.right[2] * Side * (0.92 + Math.random() * 0.2) + Pose.fwd[2] * 0.20);
+                                        const Ly = BallSplash ? (0.55 + Math.random() * 0.45) : (0.18 + Math.random() * 0.24);
                                         const L = Math.hypot(Lx, Ly, Lz) || 1;
-                                        Px = Wp[0]; SpawnY = 0.08; Pz = Wp[2];
-                                        Vx = (Lx / L) * SSpd * 0.88; Vy = (Ly / L) * SSpd * 0.88; Vz = (Lz / L) * SSpd * 0.88;
+                                        Px = Wp[0] + (BallSplash ? 0 : Pose.right[0] * Side * 0.12);
+                                        SpawnY = 0.04;
+                                        Pz = Wp[2] + (BallSplash ? 0 : Pose.right[2] * Side * 0.12);
+                                        Vx = (Lx / L) * SSpd * 0.74; Vy = (Ly / L) * SSpd * 0.74; Vz = (Lz / L) * SSpd * 0.74;
+                                        MudRole = Math.random() > 0.72 ? 1 : 0;
                                     }
                                     else
                                     {
-                                        const Side = (Math.random() - 0.5) * 0.55;
-                                        const Lx = -Pose.fwd[0] * 1.1 + Pose.right[0] * Side;
-                                        const Lz = -Pose.fwd[2] * 1.1 + Pose.right[2] * Side;
-                                        const Ly = 0.88 + Math.random() * 0.45;
+                                        const SideJit = (Math.random() - 0.5) * 0.55;
+                                        const Lx = -Pose.fwd[0] * 0.75 + Pose.right[0] * SideJit;
+                                        const Lz = -Pose.fwd[2] * 0.75 + Pose.right[2] * SideJit;
+                                        const Ly = 0.35 + Math.random() * 0.35;
                                         const L = Math.hypot(Lx, Ly, Lz) || 1;
-                                        Px = Wp[0]; SpawnY = 0.12; Pz = Wp[2];
-                                        Vx = (Lx / L) * SSpd * 1.1; Vy = (Ly / L) * SSpd * 1.1; Vz = (Lz / L) * SSpd * 1.1;
+                                        Px = Wp[0] - Pose.fwd[0] * 0.12 + (Math.random() - 0.5) * 0.16;
+                                        SpawnY = 0.10;
+                                        Pz = Wp[2] - Pose.fwd[2] * 0.12 + (Math.random() - 0.5) * 0.16;
+                                        Vx = (Lx / L) * SSpd * 0.44; Vy = (Ly / L) * SSpd * 0.44; Vz = (Lz / L) * SSpd * 0.44;
+                                        MudRole = 2;
                                     }
                                 }
                                 else if (MudMode === 1)
                                 {
-                                    const Ang = Math.random() * Math.PI * 2, Rr = PoolR * Math.sqrt(Math.random());
-                                    const PHit = (BLow && (I % 3 === 0)) ? [BallX, 0.024, BallZ] : [OrgM[0] + Math.cos(Ang) * Rr, 0.022, OrgM[2] + Math.sin(Ang) * Rr];
-                                    if (Math.random() < 0.38)
+                                    const Bucket = Math.floor(Time * 6.5) * 3 + (I % 3);
+                                    const Ang = WebHash(Bucket * 13 + 7, 1) * Math.PI * 2;
+                                    const Rr = PoolR * 0.88 * Math.sqrt(WebHash(Bucket * 13 + 7, 2));
+                                    const PHit = (BLow && (I % 3 === 0)) ? [BallX, 0.022, BallZ] : [OrgM[0] + Math.cos(Ang) * Rr, 0.020, OrgM[2] + Math.sin(Ang) * Rr];
+                                    if (Math.random() < 0.18)
                                     {
-                                        Px = PHit[0]; SpawnY = 0.022; Pz = PHit[2];
+                                        Px = PHit[0]; SpawnY = 0.020; Pz = PHit[2];
                                         Vx = 0; Vy = 0; Vz = 0;
-                                        Life = 0.95 + Math.random() * 0.55;
-                                        IsRipple = true; RippleRadius = 0.25 + Math.random() * 0.2;
+                                        Life = 0.55 + Math.random() * 0.35;
+                                        IsRipple = true; RippleRadius = 0.14 + Math.random() * 0.10;
+                                    }
+                                    else if (I % 12 === 0)
+                                    {
+                                        Px = PHit[0] + (Math.random() - 0.5) * 0.04; SpawnY = 0.04; Pz = PHit[2] + (Math.random() - 0.5) * 0.04;
+                                        Vx = (Math.random() - 0.5) * 0.18; Vy = SSpd * (0.95 + Math.random() * 0.35); Vz = (Math.random() - 0.5) * 0.18;
+                                        MudRole = 0;
                                     }
                                     else
                                     {
-                                        const Oa = Math.random() * Math.PI * 2;
-                                        Px = PHit[0]; SpawnY = 0.05; Pz = PHit[2];
-                                        Vx = Math.cos(Oa) * SSpd * 0.28; Vy = (0.75 + Math.random() * 0.5) * SSpd * 0.65; Vz = Math.sin(Oa) * SSpd * 0.28;
+                                        const CuspAng = Math.floor(Math.random() * 10) * (Math.PI * 2 / 10) + (Math.random() - 0.5) * 0.16;
+                                        const RingR = 0.08 + Math.random() * 0.05;
+                                        const RadM = 0.48 + Math.random() * 0.22;
+                                        const UpM = 0.72 + Math.random() * 0.52;
+                                        const L = Math.hypot(RadM, UpM) || 1;
+                                        Px = PHit[0] + Math.cos(CuspAng) * RingR; SpawnY = 0.035; Pz = PHit[2] + Math.sin(CuspAng) * RingR;
+                                        Vx = (Math.cos(CuspAng) * RadM / L) * SSpd * (0.58 + Math.random() * 0.28);
+                                        Vy = (UpM / L) * SSpd * (0.58 + Math.random() * 0.28);
+                                        Vz = (Math.sin(CuspAng) * RadM / L) * SSpd * (0.58 + Math.random() * 0.28);
+                                        MudRole = Math.random() > 0.84 ? 2 : 0;
                                     }
                                 }
                                 else
                                 {
-                                    const Oa = Math.random() * Math.PI * 2, Rr = PoolR * Math.sqrt(Math.random());
-                                    Px = OrgM[0] + Math.cos(Oa) * Rr; SpawnY = 0.04; Pz = OrgM[2] + Math.sin(Oa) * Rr;
-                                    const Ly = 0.72 + Math.random() * 0.55;
-                                    const L = Math.hypot(Math.cos(Oa) * 0.6, Ly, Math.sin(Oa) * 0.6) || 1;
-                                    Vx = (Math.cos(Oa) * 0.6 / L) * SSpd; Vy = (Ly / L) * SSpd; Vz = (Math.sin(Oa) * 0.6 / L) * SSpd;
+                                    const BurstTick = Math.floor(Time * 0.55);
+                                    const FIdx = I % 6;
+                                    const FAng = FIdx * 1.0471975 + BurstTick * 1.71 + (Math.random() - 0.5) * 0.28;
+                                    const FElev = Math.max(0.28, 0.38 + 0.58 * (((FIdx * 0.381966 + 0.19) % 1)) + (Math.random() - 0.5) * 0.18);
+                                    const Rr = PoolR * 0.38 * Math.sqrt(Math.random());
+                                    const RadM = 0.68 + Math.random() * 0.32;
+                                    const L = Math.hypot(RadM, FElev) || 1;
+                                    Px = OrgM[0] + Math.cos(FAng) * Rr; SpawnY = 0.035; Pz = OrgM[2] + Math.sin(FAng) * Rr;
+                                    Vx = (Math.cos(FAng) * RadM / L) * SSpd * (0.72 + Math.random() * 0.42);
+                                    Vy = (FElev / L) * SSpd * (0.72 + Math.random() * 0.42);
+                                    Vz = (Math.sin(FAng) * RadM / L) * SSpd * (0.72 + Math.random() * 0.42);
+                                    MudRole = Math.random() > 0.82 ? 2 : (Math.random() > 0.45 ? 1 : 0);
                                 }
                                 if (!IsRipple)
                                 {
                                     Trail = [];
-                                    for (let K = 0; K < 10; K++) Trail.push([Px, SpawnY, Pz]);
+                                    for (let K = 0; K < 8; K++) Trail.push([Px, SpawnY, Pz]);
                                 }
                             }
                             if (Tr && (Tr.holdBase || 0) + (Tr.holdSpread || 0) > 0)
@@ -2134,7 +2329,7 @@ export class SoftwarePreviewEngine
                                 trail: Trail, bokeh: Math.random(),
                                 slotIdx: SlotIdx, visibleStrand: WebMode === 0 && (DynMode === 0 || !!DynMeta?.visible), grow: 1, bead: 0, role: 0, wx: 0, wy: 0, wz: 0,
                                 snapU: 1.0, tearPt: -1, detachAge: -1, dynMeta: DynMeta, velTrail: null,
-                                isRipple: IsRipple, rippleRadius: RippleRadius,
+                                isRipple: IsRipple, rippleRadius: RippleRadius, mudRole: MudRole,
                                 hold: Hold, asm: AsmMode, startPos: TargetPos ? [Px, SpawnY, Pz] : null, targetPos: TargetPos, flatCoin: FlatCoin, shatHit: false,
                                 vx: Vx, vy: Vy, vz: Vz, crest: Crest, splatted: false,
                                 age: SpawnAge, life: Life, ang: Tr ? 0 : Math.random() * Math.PI * 2,
@@ -2730,13 +2925,17 @@ export class SoftwarePreviewEngine
                             ForceMag = FlowMag + AccMag;
                             ForceUp = F.Velocity[1] * WindScale + F.Acceleration[1];
                             const CGain = PShape === 7 ? 1.35 : 1.0;
-                            const Coup = Math.min(1, (P.windCoupling || 0) * CGain * Dt);
+                            const MudMist = MudMode > 0 && Pt.mudRole === 2;
+                            const MudClod = MudMode > 0 && Pt.mudRole === 1;
+                            const GravMul = MudMist ? 0.38 : (MudClod ? 1.24 : 1.0);
+                            const DragMul = MudMist ? 2.35 : 1.0;
+                            const Coup = Math.min(1, (P.windCoupling || 0) * CGain * (MudMist ? 1.8 : 1.0) * Dt);
                             const CoupEff = (FlowMag > 0.05 || P.kind !== 0) ? Coup : Coup * 0.12;
                             const AccelGain = PShape === 7 ? 2.4 : (PShape === 0 && (P.gravity || 0) > 0.4 ? 1.35 : 1.0);
                             Pt.vx += (F.Velocity[0] * WindScale - Pt.vx) * CoupEff + F.Acceleration[0] * AccelGain * Dt;
-                            Pt.vy += (F.Velocity[1] * WindScale - Pt.vy) * CoupEff + (F.Acceleration[1] * AccelGain + (P.buoyancy || 0) - (P.gravity || 0) * 9.81) * Dt;
+                            Pt.vy += (F.Velocity[1] * WindScale - Pt.vy) * CoupEff + (F.Acceleration[1] * AccelGain + (P.buoyancy || 0) - (P.gravity || 0) * 9.81 * GravMul) * Dt;
                             Pt.vz += (F.Velocity[2] * WindScale - Pt.vz) * CoupEff + F.Acceleration[2] * AccelGain * Dt;
-                            const Keep = Math.exp(-(P.drag || 0) * Dt) * Math.exp(-(F.Damping || 0) * Dt);
+                            const Keep = Math.exp(-(P.drag || 0) * DragMul * Dt) * Math.exp(-(F.Damping || 0) * Dt);
                             Pt.vx *= Keep; Pt.vy *= Keep; Pt.vz *= Keep;
                         }
                         else
@@ -2745,11 +2944,15 @@ export class SoftwarePreviewEngine
                             ForceMag = Math.hypot(Wind[0], Wind[1], Wind[2]);
                             ForceUp = Wind[1];
                             const CGain = PShape === 7 ? 1.35 : 1.0;
-                            const Coup = Math.min(1, (P.windCoupling || 0) * CGain * Dt);
+                            const MudMist = MudMode > 0 && Pt.mudRole === 2;
+                            const MudClod = MudMode > 0 && Pt.mudRole === 1;
+                            const GravMul = MudMist ? 0.38 : (MudClod ? 1.24 : 1.0);
+                            const DragMul = MudMist ? 2.35 : 1.0;
+                            const Coup = Math.min(1, (P.windCoupling || 0) * CGain * (MudMist ? 1.8 : 1.0) * Dt);
                             Pt.vx += (Wind[0] - Pt.vx) * Coup;
-                            Pt.vy += (Wind[1] - Pt.vy) * Coup + ((P.buoyancy || 0) - (P.gravity || 0) * 9.81) * Dt;
+                            Pt.vy += (Wind[1] - Pt.vy) * Coup + ((P.buoyancy || 0) - (P.gravity || 0) * 9.81 * GravMul) * Dt;
                             Pt.vz += (Wind[2] - Pt.vz) * Coup;
-                            const Damp = Math.exp(-(P.drag || 0) * Dt);
+                            const Damp = Math.exp(-(P.drag || 0) * DragMul * Dt);
                             Pt.vx *= Damp; Pt.vy *= Damp; Pt.vz *= Damp;
                         }
 
@@ -2886,12 +3089,20 @@ export class SoftwarePreviewEngine
                             }
                             if (PShape === 14 && (P.bounce || 0) < 0.08)
                             {
-                                Pt.y = 0.018;
+                                if (MudMode > 0 && Sys.swe && Pt.vy < -0.6 && Pt.mudRole !== 2)
+                                {
+                                    ImpulseShallowWaterCPU(Sys.swe, Pt.x, Pt.z, -0.055 * Math.min(2.0, Math.abs(Pt.vy) * 0.25), 0.16);
+                                }
+                                Pt.y = 0.017;
                                 Pt.vx = 0; Pt.vy = 0; Pt.vz = 0;
                                 Pt.splatted = true;
                                 continue;
                             }
                             Pt.y = 0.02;
+                            if (MudMode > 0 && Sys.swe && Pt.vy < -0.6 && Pt.mudRole !== 2)
+                            {
+                                ImpulseShallowWaterCPU(Sys.swe, Pt.x, Pt.z, -0.045 * Math.min(2.0, Math.abs(Pt.vy) * 0.25), 0.15);
+                            }
                             if (PShape === 0 && (P.gravity || 0) > 0.4 && Pt.vy < -2.4 && Splashes.length < 96 && Math.random() < 0.35)
                                 Splashes.push({ x: Pt.x, y: 0.014, z: Pt.z, age: 0, life: 0.28, r: 0.18 });
                             if (PShape === 7)
@@ -2915,10 +3126,10 @@ export class SoftwarePreviewEngine
                                 if (P.bounce >= 0.55) { Pt.vx += (Math.random() - 0.5) * 2.8; Pt.vz += (Math.random() - 0.5) * 2.8; }
                             }
                         }
-                        if (Pt.splatted) { Pt.y = 0.018; Pt.vx = 0; Pt.vy = 0; Pt.vz = 0; }
-                        if (CurlMode === 0 && (P.trailMode || 0) > 0 && Pt.trail)
+                        if (Pt.splatted) { Pt.y = 0.017; Pt.vx = 0; Pt.vy = 0; Pt.vz = 0; }
+                        if ((CurlMode === 0 && (P.trailMode || 0) > 0 || MudMode > 0) && Pt.trail)
                         {
-                            const KLerp = Math.min(1, 28 * Dt);
+                            const KLerp = Math.min(1, (MudMode > 0 ? 44 : 28) * Dt);
                             for (let K = Pt.trail.length - 1; K >= 1; K--)
                             {
                                 Pt.trail[K][0] += (Pt.trail[K - 1][0] - Pt.trail[K][0]) * KLerp;
@@ -3631,6 +3842,8 @@ export class SoftwarePreviewEngine
                     continue;
                 }
 
+                if (MudMode > 0 && Sys.swe) DrawShallowWaterCPU(Ctx, VP, W, H, Sys.swe, P, Additive);
+
                 for (const Pt of Sys.particles)
                 {
                     if (WebMode > 0)
@@ -3696,26 +3909,23 @@ export class SoftwarePreviewEngine
 
                     if (MudMode > 0 && Pt.isRipple)
                     {
-                        const RadW = Math.max(0.18, Pt.rippleRadius || 0.25) * (0.75 + T * 5.2) * (P.sizeScale || 1) * 0.5;
-                        const RipA = SmoothT(0, 0.12, T) * (1 - SmoothT(0.45, 1, T)) * 0.88;
+                        const RadW = Math.max(0.12, Pt.rippleRadius || 0.16) * (0.65 + T * 2.4) * (P.sizeScale || 1) * 0.48;
+                        const RipA = SmoothT(0, 0.10, T) * (1 - SmoothT(0.36, 1, T)) * 0.42;
                         if (RipA <= 0.005) continue;
-                        for (const WaveF of [0.88, 0.56, 0.28])
+                        const PtsW = [];
+                        for (let S = 0; S <= 20; S++)
                         {
-                            const PtsW = [];
-                            for (let S = 0; S <= 24; S++)
-                            {
-                                const A = (S / 24) * Math.PI * 2;
-                                const Pr = ProjectPoint(VP, Pt.x + Math.cos(A) * RadW * WaveF, 0.025, Pt.z + Math.sin(A) * RadW * WaveF, W, H);
-                                if (Pr) PtsW.push(Pr);
-                            }
-                            if (PtsW.length >= 12)
-                            {
-                                Ctx.strokeStyle = LinearToCss(WaveF > 0.7 ? P.colB : (P.colC || P.colB), RipA * WaveF);
-                                Ctx.lineWidth = Math.max(1.0, WaveF * 2.2);
-                                Ctx.beginPath();
-                                PtsW.forEach((Q, K) => K === 0 ? Ctx.moveTo(Q[0], Q[1]) : Ctx.lineTo(Q[0], Q[1]));
-                                Ctx.stroke();
-                            }
+                            const A = (S / 20) * Math.PI * 2;
+                            const Pr = ProjectPoint(VP, Pt.x + Math.cos(A) * RadW, 0.020, Pt.z + Math.sin(A) * RadW, W, H);
+                            if (Pr) PtsW.push(Pr);
+                        }
+                        if (PtsW.length >= 10)
+                        {
+                            Ctx.strokeStyle = LinearToCss(P.colB || P.colC, RipA);
+                            Ctx.lineWidth = Math.max(0.75, 1.35 * (1 - T * 0.6));
+                            Ctx.beginPath();
+                            PtsW.forEach((Q, K) => K === 0 ? Ctx.moveTo(Q[0], Q[1]) : Ctx.lineTo(Q[0], Q[1]));
+                            Ctx.stroke();
                         }
                         continue;
                     }
@@ -3850,7 +4060,7 @@ export class SoftwarePreviewEngine
                             : [0, 1, 2, 3].map(I => ColC[I] * (1 - (T - 0.38) / 0.62) + P.colB[I] * ((T - 0.38) / 0.62)))
                         : [0, 1, 2, 3].map(I => P.colA[I] * (1 - T) + P.colB[I] * T);
                     const BaseWorldSize = (P.sizeStart * (1 - T) + P.sizeEnd * T) * (P.sizeScale || 1);
-                    const R = Math.max(1.8, Math.min(Shape === 10 || Shape === 11 || Shape === 15 || Shape === 16 || Shape === 17 ? 340 : 22, (BaseWorldSize * 180) / Sc[2]));
+                    const R = Math.max(MudMode > 0 ? 0.65 : 1.8, Math.min(Shape === 10 || Shape === 11 || Shape === 15 || Shape === 16 || Shape === 17 ? 340 : 22, (BaseWorldSize * 180) / Sc[2]));
                     const PulseMul = (P.kind === 6 && (P.pulseDepth || 0) > 0)
                         ? (1 - P.pulseDepth + P.pulseDepth * (0.5 + 0.5 * Math.sin(Time * (P.pulseHz || 1) * Math.PI * 2 + (Pt.seed || 0))))
                         : 1;
@@ -4171,28 +4381,111 @@ export class SoftwarePreviewEngine
                     else if (Shape === 14)
                     {
                         Ctx.save();
-                        if (Pt.splatted)
+                        if (MudMode > 0)
                         {
-                            const Rx = Math.max(3, R * 1.55), Ry = Math.max(1.4, R * 0.62);
-                            Ctx.fillStyle = LinearToCss(Col, Alpha * 0.88);
+                            const Sd = Pt.seed || 1;
+                            if (Pt.splatted)
+                            {
+                                const FleckR = Math.max(0.85, Math.min(2.2, R * 0.72));
+                                Ctx.fillStyle = LinearToCss(P.colA, Alpha * 0.74);
+                                Ctx.beginPath();
+                                for (let K = 0; K < 5; K++)
+                                {
+                                    const Ang = (K / 5) * Math.PI * 2 + (Sd % 6.28);
+                                    const J = FleckR * (0.68 + 0.38 * WebHash(Sd, K + 1));
+                                    const Vx = Sc[0] + Math.cos(Ang) * J * 1.15, Vy = Sc[1] + Math.sin(Ang) * J * 0.52;
+                                    if (K === 0) Ctx.moveTo(Vx, Vy); else Ctx.lineTo(Vx, Vy);
+                                }
+                                Ctx.closePath();
+                                Ctx.fill();
+                            }
+                            else if (Pt.mudRole === 2)
+                            {
+                                const MistR = Math.max(1.8, Math.min(4.8, R * 1.55));
+                                const MG = Ctx.createRadialGradient(Sc[0], Sc[1], 0, Sc[0], Sc[1], MistR);
+                                MG.addColorStop(0, LinearToCss(P.colB || Col, Alpha * 0.24));
+                                MG.addColorStop(1, LinearToCss(P.colB || Col, 0));
+                                Ctx.fillStyle = MG;
+                                Ctx.beginPath();
+                                Ctx.arc(Sc[0], Sc[1], MistR, 0, Math.PI * 2);
+                                Ctx.fill();
+                            }
+                            else
+                            {
+                                const Spd = Math.hypot(Pt.vx, Pt.vy, Pt.vz);
+                                const Tail3 = (Pt.trail && Pt.trail.length >= 4 && Spd > 1.2) ? Pt.trail[3] : [Pt.x - Pt.vx * 0.028, Pt.y - Pt.vy * 0.028, Pt.z - Pt.vz * 0.028];
+                                const ScTail = ProjectPoint(VP, Tail3[0], Tail3[1], Tail3[2], W, H);
+                                const DropR = Math.max(0.75, Math.min(2.4, R * (Pt.mudRole === 1 ? 0.96 : 0.78)));
+                                if (ScTail && Math.hypot(Sc[0] - ScTail[0], Sc[1] - ScTail[1]) > 1.35)
+                                {
+                                    const GradL = Ctx.createLinearGradient(ScTail[0], ScTail[1], Sc[0], Sc[1]);
+                                    GradL.addColorStop(0, LinearToCss(P.colA, Alpha * 0.14));
+                                    GradL.addColorStop(0.55, LinearToCss(ColC, Alpha * 0.78));
+                                    GradL.addColorStop(1, LinearToCss(Col, Alpha * 0.94));
+                                    Ctx.strokeStyle = GradL;
+                                    Ctx.lineWidth = Math.max(0.75, DropR * (Pt.mudRole === 1 ? 1.15 : 0.88));
+                                    Ctx.lineCap = 'round';
+                                    Ctx.beginPath();
+                                    Ctx.moveTo(ScTail[0], ScTail[1]);
+                                    Ctx.lineTo(Sc[0], Sc[1]);
+                                    Ctx.stroke();
+                                    if (Pt.mudRole === 0 && Spd > 1.9)
+                                    {
+                                        for (const F of [0.35, 0.72])
+                                        {
+                                            const Bx = ScTail[0] + (Sc[0] - ScTail[0]) * F;
+                                            const By = ScTail[1] + (Sc[1] - ScTail[1]) * F;
+                                            const Br = Math.max(0.55, DropR * (0.45 + 0.28 * F));
+                                            Ctx.fillStyle = LinearToCss(Col, Alpha * 0.88);
+                                            Ctx.beginPath(); Ctx.arc(Bx, By, Br, 0, Math.PI * 2); Ctx.fill();
+                                        }
+                                    }
+                                }
+                                if (Pt.mudRole === 1)
+                                {
+                                    Ctx.fillStyle = LinearToCss(Col, Alpha * 0.96);
+                                    Ctx.beginPath();
+                                    for (let K = 0; K < 5; K++)
+                                    {
+                                        const Ang = (K / 5) * Math.PI * 2 + (Sd % 6.28) + (Pt.ang || 0) * 0.4;
+                                        const J = DropR * (0.68 + 0.42 * WebHash(Sd, K + 3));
+                                        const Vx = Sc[0] + Math.cos(Ang) * J, Vy = Sc[1] + Math.sin(Ang) * J;
+                                        if (K === 0) Ctx.moveTo(Vx, Vy); else Ctx.lineTo(Vx, Vy);
+                                    }
+                                    Ctx.closePath();
+                                    Ctx.fill();
+                                }
+                                else
+                                {
+                                    Ctx.fillStyle = LinearToCss(Col, Alpha * 0.95);
+                                    Ctx.beginPath();
+                                    Ctx.arc(Sc[0], Sc[1], DropR, 0, Math.PI * 2);
+                                    Ctx.fill();
+                                }
+                            }
+                        }
+                        else if (Pt.splatted)
+                        {
+                            const Rx = Math.max(2.0, R * 1.15), Ry = Math.max(1.0, R * 0.48);
+                            Ctx.fillStyle = LinearToCss(Col, Alpha * 0.86);
                             Ctx.beginPath();
                             if (Ctx.ellipse) Ctx.ellipse(Sc[0], Sc[1], Rx, Ry, 0, 0, Math.PI * 2);
                             else Ctx.arc(Sc[0], Sc[1], Rx, 0, Math.PI * 2);
                             Ctx.fill();
-                            Ctx.fillStyle = `rgba(255,255,255,${(Alpha * 0.55).toFixed(3)})`;
-                            Ctx.beginPath(); Ctx.arc(Sc[0] - Rx * 0.25, Sc[1] - Ry * 0.25, Math.max(0.8, Rx * 0.18), 0, Math.PI * 2); Ctx.fill();
                         }
                         else
                         {
-                            const DropR = Math.max(2.2, R * 0.86);
+                            const DropR = Math.max(1.4, R * 0.72);
+                            const ScTail = ProjectPoint(VP, Pt.x - Pt.vx * 0.032, Pt.y - Pt.vy * 0.032, Pt.z - Pt.vz * 0.032, W, H);
+                            const Ang = ScTail ? Math.atan2(Sc[1] - ScTail[1], Sc[0] - ScTail[0]) : Math.PI * 0.5;
+                            const Stretch = Math.min(2.6, 1.0 + Math.hypot(Pt.vx, Pt.vy, Pt.vz) * 0.24);
+                            Ctx.translate(Sc[0], Sc[1]);
+                            Ctx.rotate(Ang);
                             Ctx.fillStyle = LinearToCss(Col, Alpha * 0.94);
                             Ctx.beginPath();
-                            Ctx.moveTo(Sc[0], Sc[1] - DropR * 1.55);
-                            Ctx.bezierCurveTo(Sc[0] + DropR * 0.95, Sc[1] - DropR * 0.3, Sc[0] + DropR, Sc[1] + DropR * 0.95, Sc[0], Sc[1] + DropR);
-                            Ctx.bezierCurveTo(Sc[0] - DropR, Sc[1] + DropR * 0.95, Sc[0] - DropR * 0.95, Sc[1] - DropR * 0.3, Sc[0], Sc[1] - DropR * 1.55);
+                            if (Ctx.ellipse) Ctx.ellipse(0, 0, DropR * Stretch, DropR * 0.72, 0, 0, Math.PI * 2);
+                            else Ctx.arc(0, 0, DropR, 0, Math.PI * 2);
                             Ctx.fill();
-                            Ctx.fillStyle = `rgba(255,255,255,${(Alpha * 0.68).toFixed(3)})`;
-                            Ctx.beginPath(); Ctx.arc(Sc[0] - DropR * 0.26, Sc[1] + DropR * 0.22, Math.max(0.75, DropR * 0.24), 0, Math.PI * 2); Ctx.fill();
                         }
                         Ctx.restore();
                         continue;

@@ -289,7 +289,7 @@ function SeedBurstCountFor(PresetId, Params)
     if ((Params.beadsMode || 0) > 0) return Math.max(48, Params.capacity || 220);
     if ((Params.seedHeadMode || 0) > 0) return Math.max(120, Params.capacity || 460);
     if ((Params.jellyMode || 0) > 0) return Math.max(120, Params.capacity || 440);
-    if ((Params.mudSplashMode || 0) > 0) return Math.min(Params.capacity || 600, 140);
+    if ((Params.mudSplashMode || 0) > 0) return Math.min(Params.capacity || 220, 72);
     if ((Params.gridMode || 0) > 0) return Math.max(64, Params.capacity || 576);
     if ((Params.webMode || 0) > 0) return Math.max(64, Params.capacity || 320);
     if ((Params.dynMode || 0) > 0) return Math.max(64, Params.capacity || 64);
@@ -1483,14 +1483,17 @@ function ConstructGeometry()
             const O = P.origin;
             const MM = Math.max(1, Math.min(3, P.mudSplashMode | 0));
             const PoolR = MM === 2 ? Math.max(1.8, (P.carTrackRadius || 3.2) * 1.15) : Math.max(1.0, P.radius || 2.8);
-            const PuddleCol = MM === 1 ? [0.06, 0.14, 0.22, 0.86] : [0.10, 0.07, 0.045, 0.90];
-            const Segs = 28;
+            const PuddleCol = MM === 1 ? [0.05, 0.08, 0.12, 0.82] : [0.075, 0.052, 0.032, 0.86];
+            const RimCol = MM === 1 ? [0.16, 0.24, 0.30, 0.28] : [0.22, 0.16, 0.10, 0.30];
+            const Segs = 32;
             for (let S = 0; S < Segs; S++)
             {
                 const A0 = (S / Segs) * Math.PI * 2, A1 = ((S + 1) / Segs) * Math.PI * 2;
-                Face([O[0], 0.011, O[2]], [O[0] + Math.cos(A0) * PoolR, 0.011, O[2] + Math.sin(A0) * PoolR * 0.78], [O[0] + Math.cos(A1) * PoolR, 0.011, O[2] + Math.sin(A1) * PoolR * 0.78], PuddleCol);
+                const P0 = [O[0] + Math.cos(A0) * PoolR, 0.011, O[2] + Math.sin(A0) * PoolR * 0.78];
+                const P1 = [O[0] + Math.cos(A1) * PoolR, 0.011, O[2] + Math.sin(A1) * PoolR * 0.78];
+                Face([O[0], 0.011, O[2]], P0, P1, PuddleCol);
+                Line([P0[0], 0.013, P0[2]], [P1[0], 0.013, P1[2]], RimCol);
             }
-            RingXZ(O[0], 0.014, O[2], PoolR, 28, MM === 1 ? [0.24, 0.65, 0.92, 0.48] : [0.36, 0.25, 0.14, 0.52]);
             if (MM === 2)
             {
                 const CP = EvalCarPoseCPU(Scene.Time, O, P.carTrackRadius || 3.2, P.carSpeed || 2.8);
@@ -3312,8 +3315,8 @@ function ConstructEffectInspector(Page, Effect)
     const AddMudSection = (HostPage, Badge = '02 / PUDDLE & SPLASH') =>
     {
         const Sec = C.SectionCard(HostPage, {
-            Title: 'Car rooster-tails, mud splatters & puddle ripples', Glyph: Cls.MudMode === 2 ? 'Car' : 'Drop', Badge,
-            Hint: 'Wheels, thrown balls, and splashing mud trigger live expanding puddle ripples & glossy airborne mud arcs.'
+            Title: 'Fluid-coupled mud rooster-tails, crowns & puddle waves', Glyph: Cls.MudMode === 2 ? 'Car' : 'Drop', Badge,
+            Hint: 'Shallow-water puddle waves + compact fine fluid ligaments, ragged mud micro-clods & mist spray (zero oversized cartoon drops).'
         }).Inner;
         const MMB = BindEffect(Effect, P, 'mudSplashMode', {
             Label: 'Splash system mode', Rebuild: true,
@@ -4282,6 +4285,12 @@ function ConstructForcesFieldTab(Page, FocusMode, Src)
         AnemNum.id = 'AnemSpeedDisplay';
         const AnemDirPill = C.Construct('div', 'mp-dir-pill', 'N · 0°');
         AnemDirPill.id = 'AnemDirPill';
+        const SvgNode = (Tag, Attrs, Kids) =>
+        {
+            const El = C.ConstructSvg(Tag, Attrs);
+            if (Array.isArray(Kids)) for (const K of Kids) if (K) El.append(K);
+            return El;
+        };
         const AnemDialSvg = SvgNode('svg', { viewBox: '0 0 42 42', width: 38, height: 38, style: 'flex-shrink:0' });
         const DialRing = SvgNode('circle', { cx: 21, cy: 21, r: 18, fill: 'rgba(13,18,24,0.85)', stroke: 'rgba(146,216,194,0.34)', 'stroke-width': 1.2 });
         const DialVane = SvgNode('g', { transform: 'translate(21 21)' }, [
