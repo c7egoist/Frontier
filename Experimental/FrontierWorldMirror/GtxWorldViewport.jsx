@@ -72,11 +72,11 @@ function PreferInitialBackend() {
   return SessionWebGlBlocked ? "cpu-gtx" : "webgl2";
 }
 
-const MAX_PRIMS = 96;
-const MAX_LIGHTS = 6;
+const MAX_PRIMS = 384;
+const MAX_LIGHTS = 12;
 const SCENE_DATA_W = 8;
-const SCENE_DATA_H = 104;
-const LIGHT_ROW_BASE = 96;
+const SCENE_DATA_H = 396;
+const LIGHT_ROW_BASE = 384;
 
 const FULLSCREEN_VERTEX_SHADER = `#version 300 es
 precision highp float;
@@ -595,22 +595,27 @@ float traceLightQuad(vec3 ro, vec3 rd, float tMax, out vec3 emitOut, out int hit
   float best = tMax;
   emitOut = vec3(0.0);
   hitLightIdx = -1;
-  if (abs(rd.z) < 1e-5) return best;
   for (int li = 0; li < uLightCount; ++li) {
     vec4 l0 = sdFetch(0, ${LIGHT_ROW_BASE} + li);
     vec4 l1 = sdFetch(1, ${LIGHT_ROW_BASE} + li);
     vec4 l2 = sdFetch(2, ${LIGHT_ROW_BASE} + li);
     if (l2.x > 0.5) {
-      vec3 lc = l0.xyz;
-      float hw = l0.w;
-      float hh = l1.x;
-      float t = (lc.z - ro.z) / rd.z;
-      if (t > 0.01 && t < best) {
-        vec3 hp = ro + rd * t;
-        if (abs(hp.x - lc.x) <= hw && abs(hp.y - lc.y) <= hh) {
-          best = t;
-          emitOut = (rd.z > 0.0) ? l1.yzw : l1.yzw * 0.14;
-          hitLightIdx = li;
+      vec3 lRight  = sdFetch(3, ${LIGHT_ROW_BASE} + li).xyz;
+      vec3 lUp     = sdFetch(4, ${LIGHT_ROW_BASE} + li).xyz;
+      vec3 lNormal = sdFetch(5, ${LIGHT_ROW_BASE} + li).xyz;
+      float denom = dot(rd, lNormal);
+      if (abs(denom) > 1e-5) {
+        vec3 lc = l0.xyz;
+        float hw = l0.w;
+        float hh = l1.x;
+        float t = dot(lc - ro, lNormal) / denom;
+        if (t > 0.01 && t < best) {
+          vec3 rel = (ro + rd * t) - lc;
+          if (abs(dot(rel, lRight)) <= hw && abs(dot(rel, lUp)) <= hh) {
+            best = t;
+            emitOut = (denom < 0.0) ? l1.yzw : l1.yzw * 0.14;
+            hitLightIdx = li;
+          }
         }
       }
     }
@@ -633,6 +638,40 @@ vec3 evalSky(vec3 dir) {
 //------------------------------------------------------------------------------------------------------------------------------------------
 // ZERO-LOOP, RING-FREE ANALYTICAL CONTACT-HARDENING SOLAR SHADOWS (SKIPPING RECEIVER selfPrimIdx)
 //------------------------------------------------------------------------------------------------------------------------------------------
+float evalLocalPrimSdf(vec3 lp, int shape, vec3 h) {
+  if (shape == 4) {
+    float majorR = max(h.x, h.y) * 0.68;
+    float minorR = max(0.04, h.z * 0.55);
+    return sdTorusZ(lp, majorR, minorR);
+  }
+  if (shape == 3) {
+    float rad = max(h.x, h.y);
+    float zBase = -0.78 * h.z;
+    float dPlinth = sdBox(lp - vec3(0.0, 0.0, 0.5 * (-h.z + zBase)), vec3(rad, rad, 0.5 * (zBase + h.z)));
+    float tAlpha = clamp((lp.z - zBase) / max(1e-4, h.z - zBase), 0.0, 1.0);
+    float rAtZ = mix(0.72 * rad, 0.13 * rad, tAlpha);
+    vec2 dc = vec2(length(lp.xy) - rAtZ, abs(lp.z - 0.5 * (zBase + h.z)) - 0.5 * (h.z - zBase));
+    float dCone = min(max(dc.x, dc.y), 0.0) + length(max(dc, vec2(0.0)));
+    return min(dPlinth, dCone);
+  }
+  if (shape == 5) {
+    float rad = max(h.x, h.y);
+    float zBase = -0.84 * h.z;
+    vec2 db = vec2(length(lp.xy) - 0.97 * rad, abs(lp.z - 0.5 * (-h.z + zBase)) - 0.5 * (zBase + h.z));
+    float dBot = min(max(db.x, db.y), 0.0) + length(max(db, vec2(0.0)));
+    float tAlpha = clamp((lp.z - zBase) / max(1e-4, h.z - zBase), 0.0, 1.0);
+    float rAtZ = mix(0.50 * rad, 0.37 * rad, tAlpha);
+    vec2 dt = vec2(length(lp.xy) - rAtZ, abs(lp.z - 0.5 * (zBase + h.z)) - 0.5 * (h.z - zBase));
+    float dTop = min(max(dt.x, dt.y), 0.0) + length(max(dt, vec2(0.0)));
+    return min(dBot, dTop);
+  }
+  if (shape >= 2) {
+    vec2 dc = abs(vec2(length(lp.xy), lp.z)) - vec2(max(h.x, h.y), h.z);
+    return min(max(dc.x, dc.y), 0.0) + length(max(dc, vec2(0.0)));
+  }
+  return sdBox(lp, h);
+}
+
 float closestRayPrimitiveSoftVis(vec3 origin, vec3 dir, int idx, vec4 ps, vec3 h, float tanSun) {
   int shape = int(ps.w + 0.5);
   vec3 c0, c1, c2;
@@ -643,7 +682,7 @@ float closestRayPrimitiveSoftVis(vec3 origin, vec3 dir, int idx, vec4 ps, vec3 h
   float boundR = length(h) * 1.35;
   float tCenter = -dot(lo, ld);
   if (tCenter < -boundR) return 1.0;
-  float maxPenumbra = 0.005 + max(0.05, tCenter) * tanSun;
+  float maxPenumbra = 0.004 + max(0.04, tCenter) * tanSun;
   vec3 perp = lo + ld * max(0.0, tCenter);
   if (length(perp) > boundR + maxPenumbra) return 1.0;
 
@@ -657,8 +696,8 @@ float closestRayPrimitiveSoftVis(vec3 origin, vec3 dir, int idx, vec4 ps, vec3 h
     float rMean = (h.x + h.y + h.z) * 0.3333333;
     float worldT = tUnit / dLen;
     float signedClearance = (length(o + dn * tUnit) - 1.0) * rMean;
-    float coneR = 0.004 + worldT * tanSun;
-    return smoothstep(-coneR * 0.35, coneR, signedClearance);
+    float coneR = 0.0025 + worldT * tanSun;
+    return smoothstep(-coneR * 0.45, coneR, signedClearance);
   }
 
   vec3 hPen = h + vec3(maxPenumbra);
@@ -666,39 +705,80 @@ float closestRayPrimitiveSoftVis(vec3 origin, vec3 dir, int idx, vec4 ps, vec3 h
   vec3 invD = 1.0 / (safeSign * max(abs(ld), vec3(1e-6)));
   vec3 t0 = (-hPen - lo) * invD;
   vec3 t1 = ( hPen - lo) * invD;
-  float tNearPen = max(0.004, max(max(min(t0.x, t1.x), min(t0.y, t1.y)), min(t0.z, t1.z)));
-  float tFarPen  = min(18.0,  min(min(max(t0.x, t1.x), max(t0.y, t1.y)), max(t0.z, t1.z)));
+  float tNearPen = max(0.003, max(max(min(t0.x, t1.x), min(t0.y, t1.y)), min(t0.z, t1.z)));
+  float tFarPen  = min(24.0,  min(min(max(t0.x, t1.x), max(t0.y, t1.y)), max(t0.z, t1.z)));
   if (tNearPen > tFarPen) return 1.0;
 
-  float tMid = 0.5 * (tNearPen + tFarPen);
-  float coneR = 0.004 + tMid * tanSun;
-  vec3 lp = lo + ld * tMid;
-
-  float dSil;
-  if (shape == 3) {
-    float rad = max(h.x, h.y);
-    float tAlpha = clamp((lp.z + 0.78 * h.z) / max(1e-4, 1.78 * h.z), 0.0, 1.0);
-    float rAtZ = lp.z < -0.78 * h.z ? rad : mix(0.72 * rad, 0.13 * rad, tAlpha);
-    dSil = max(length(lp.xy) - rAtZ, abs(lp.z) - max(h.z, coneR * 1.25));
-  } else if (shape == 5) {
-    float rad = max(h.x, h.y);
-    float tAlpha = clamp((lp.z + 0.84 * h.z) / max(1e-4, 1.84 * h.z), 0.0, 1.0);
-    float rAtZ = lp.z < -0.84 * h.z ? rad : mix(0.50 * rad, 0.37 * rad, tAlpha);
-    dSil = max(length(lp.xy) - rAtZ, abs(lp.z) - max(h.z, coneR * 1.25));
-  } else if (shape >= 2) {
-    dSil = max(length(lp.xy) - max(h.x, h.y), abs(lp.z) - max(h.z, coneR * 1.25));
+  float bestVis = 1.0;
+  if (shape == 0) {
+    vec3 tb0 = (-h - lo) * invD;
+    vec3 tb1 = ( h - lo) * invD;
+    float tbNear = max(max(min(tb0.x, tb1.x), min(tb0.y, tb1.y)), min(tb0.z, tb1.z));
+    float tbFar  = min(min(max(tb0.x, tb1.x), max(tb0.y, tb1.y)), max(tb0.z, tb1.z));
+    if (tbNear <= tbFar && tbFar > 0.003) {
+      float tSeed = clamp(0.5 * (max(0.003, tbNear) + tbFar), tNearPen, tFarPen);
+      float dSeed = sdBox(lo + ld * tSeed, h);
+      float cSeed = 0.002 + tSeed * tanSun;
+      bestVis = min(bestVis, smoothstep(-cSeed, cSeed, dSeed));
+    }
+  } else if (shape == 4) {
+    float majorR = max(h.x, h.y) * 0.68;
+    float minorR = max(0.04, h.z * 0.55);
+    float aRing = dot(ld.xy, ld.xy);
+    if (aRing > 1e-6) {
+      float bRing = dot(lo.xy, ld.xy);
+      float cRing = dot(lo.xy, lo.xy) - majorR * majorR;
+      float discR = bRing * bRing - aRing * cRing;
+      if (discR >= 0.0) {
+        float sqR = sqrt(discR);
+        float tr0 = clamp((-bRing - sqR) / aRing, tNearPen, tFarPen);
+        float tr1 = clamp((-bRing + sqR) / aRing, tNearPen, tFarPen);
+        float c0R = 0.002 + tr0 * tanSun;
+        float c1R = 0.002 + tr1 * tanSun;
+        bestVis = min(bestVis, smoothstep(-c0R, c0R, sdTorusZ(lo + ld * tr0, majorR, minorR)));
+        bestVis = min(bestVis, smoothstep(-c1R, c1R, sdTorusZ(lo + ld * tr1, majorR, minorR)));
+      } else {
+        float tCl = clamp(-bRing / aRing, tNearPen, tFarPen);
+        float cCl = 0.002 + tCl * tanSun;
+        bestVis = min(bestVis, smoothstep(-cCl, cCl, sdTorusZ(lo + ld * tCl, majorR, minorR)));
+      }
+    }
+    if (abs(ld.z) > 1e-5) {
+      float tz0 = clamp(-lo.z / ld.z, tNearPen, tFarPen);
+      float cz0 = 0.002 + tz0 * tanSun;
+      bestVis = min(bestVis, smoothstep(-cz0, cz0, sdTorusZ(lo + ld * tz0, majorR, minorR)));
+    }
   } else {
-    dSil = sdBox(lp, max(h, vec3(coneR * 1.25)));
+    float xyLen2 = dot(ld.xy, ld.xy);
+    if (xyLen2 > 1e-6) {
+      float tAxis = clamp(-dot(lo.xy, ld.xy) / xyLen2, tNearPen, tFarPen);
+      float dAxis = evalLocalPrimSdf(lo + ld * tAxis, shape, h);
+      float cAxis = 0.002 + tAxis * tanSun;
+      bestVis = min(bestVis, smoothstep(-cAxis, cAxis, dAxis));
+    }
   }
-  return smoothstep(-coneR, coneR, dSil);
+
+  float span = max(0.004, tFarPen - tNearPen);
+  float stepU = span / 16.0;
+  int maxSteps = min(17, uPrimCount + 17);
+  for (int s = 0; s < maxSteps; ++s) {
+    float t = tNearPen + stepU * float(s);
+    vec3 lp = lo + ld * t;
+    float d = evalLocalPrimSdf(lp, shape, h);
+    float coneR = 0.002 + t * tanSun;
+    bestVis = min(bestVis, smoothstep(-coneR, coneR, d));
+    if (bestVis <= 0.002) break;
+  }
+  return bestVis;
 }
 
-float evaluateSoftConeVis(vec3 origin, vec3 dir, float maxDist, float tanAngle, float minVis, int selfPrimIdx) {
+float evaluateSoftConeVis(vec3 origin, vec3 dir, float maxDist, float tanAngle, float minVis, int selfPrimIdx, int skipPickCode) {
   float vis = 1.0;
   for (int i = 0; i < uPrimCount; ++i) {
     vec4 hf = sdFetch(1, i);
     int flags = int(hf.w + 0.5);
-    if (i != selfPrimIdx && PrimFlagShadow(flags) && !PrimFlagGlass(flags)) {
+    int pCode = int(sdFetch(3, i).w + 0.5);
+    if (i != selfPrimIdx && (skipPickCode < 0 || pCode != skipPickCode) && PrimFlagShadow(flags) && !PrimFlagGlass(flags)) {
       vec4 ps = sdFetch(0, i);
       float tProj = dot(ps.xyz - origin, dir);
       if (tProj > -0.5 && tProj < maxDist) {
@@ -712,15 +792,15 @@ float evaluateSoftConeVis(vec3 origin, vec3 dir, float maxDist, float tanAngle, 
 
 float evaluateGtxSolarShadow(vec3 pos, vec3 N, int selfPrimIdx) {
   if (dot(N, uSunDir) <= 0.0) return 0.0;
-  return evaluateSoftConeVis(pos + N * 0.006, uSunDir, 28.0, tan(uSunAngularRadius * 2.1), 0.0, selfPrimIdx);
+  return evaluateSoftConeVis(pos + N * 0.005, uSunDir, 28.0, tan(uSunAngularRadius * 1.15), 0.0, selfPrimIdx, -1);
 }
 
-float evaluateAreaLightSoftVis(vec3 pos, vec3 N, vec3 lc, float hw, float hh, int selfPrimIdx) {
+float evaluateAreaLightSoftVis(vec3 pos, vec3 N, vec3 lc, float hw, float hh, int selfPrimIdx, int lightPickCode) {
   vec3 toL = lc - pos;
   float distL = length(toL);
   if (distL < 0.05) return 1.0;
-  float tanArea = clamp(length(vec2(hw, hh)) * 0.65 / max(distL, 0.35), 0.18, 0.55);
-  return evaluateSoftConeVis(pos + N * 0.008, toL / distL, distL - 0.04, tanArea, 0.38, selfPrimIdx);
+  float tanArea = clamp(length(vec2(hw, hh)) * 0.48 / max(distL, 0.35), 0.10, 0.38);
+  return evaluateSoftConeVis(pos + N * 0.007, toL / distL, distL - 0.05, tanArea, 0.18, selfPrimIdx, lightPickCode);
 }
 
 void buildBasis(vec3 N, out vec3 T, out vec3 B) {
@@ -729,16 +809,16 @@ void buildBasis(vec3 N, out vec3 T, out vec3 B) {
   B = cross(N, T);
 }
 
-vec3 evaluateAreaQuadDiffuse(vec3 P, vec3 N, vec3 lCenter, float hw, float hh, vec3 emit) {
+vec3 evaluateAreaQuadDiffuse(vec3 P, vec3 N, vec3 lCenter, vec3 lRight, vec3 lUp, vec3 lNormal, bool isOmni, float hw, float hh, vec3 emit) {
   vec3 sum = vec3(0.0);
   for (int sy = -1; sy <= 1; sy += 2) {
     for (int sx = -1; sx <= 1; sx += 2) {
-      vec3 sp = lCenter + vec3(float(sx) * hw * 0.5, float(sy) * hh * 0.5, 0.0);
+      vec3 sp = lCenter + lRight * (float(sx) * hw * 0.5) + lUp * (float(sy) * hh * 0.5);
       vec3 dv = sp - P;
       float d2 = max(dot(dv, dv), 0.08);
       vec3 wi = dv * inversesqrt(d2);
       float cSurf = max(0.0, dot(N, wi));
-      float cEmit = max(0.0, -wi.z);
+      float cEmit = isOmni ? 0.65 : max(0.0, -dot(wi, lNormal));
       if (cSurf > 0.0 && cEmit > 0.0) {
         float dOmega = min((hw * hh * cEmit) / d2, 0.85);
         sum += emit * (cSurf * dOmega / PI);
@@ -1027,12 +1107,14 @@ vec3 shadeSecondaryBounceHit(HitInfo hit, vec3 V) {
   if (uLightCount > 0) {
     vec4 l0 = sdFetch(0, ${LIGHT_ROW_BASE});
     vec4 l1 = sdFetch(1, ${LIGHT_ROW_BASE});
+    vec4 l2 = sdFetch(2, ${LIGHT_ROW_BASE});
+    vec3 lNormal = sdFetch(5, ${LIGHT_ROW_BASE}).xyz;
     vec3 toL = l0.xyz - hit.pos;
     float d2 = max(0.25, dot(toL, toL));
     vec3 lDir = toL * inversesqrt(d2);
     float area = 4.0 * l0.w * l1.x;
     float cSurf = max(0.0, dot(N, lDir));
-    float cEmit = max(0.0, -lDir.z);
+    float cEmit = (l2.z > 0.5) ? 0.65 : max(0.0, -dot(lDir, lNormal));
     Lo += (1.0 - metallic) * (baseColor / PI) * l1.yzw * (cSurf * cEmit * area / d2);
   }
 
@@ -1090,39 +1172,37 @@ vec3 shadePrimaryOpaqueHit(HitInfo hit, vec3 V) {
     Lo += evaluateOpenPbrDirect(N, Nc, T, B, V, uSunDir, mat, edgeTint) * uSunIrradiance * sunVis;
   }
 
-  // 2. Clipped quad area lights + hoisted softbox penumbra
-  float areaVis0 = 1.0;
-  if (uLightCount > 0) {
-    vec4 l0First = sdFetch(0, ${LIGHT_ROW_BASE});
-    vec4 l1First = sdFetch(1, ${LIGHT_ROW_BASE});
-    areaVis0 = evaluateAreaLightSoftVis(hit.pos, N, l0First.xyz, l0First.w, l1First.x, idx);
-  }
-
+  // 2. Clipped quad area lights + directed studio light soft shadows
   for (int li = 0; li < uLightCount; ++li) {
     vec4 l0 = sdFetch(0, ${LIGHT_ROW_BASE} + li);
     vec4 l1 = sdFetch(1, ${LIGHT_ROW_BASE} + li);
+    vec4 l2 = sdFetch(2, ${LIGHT_ROW_BASE} + li);
+    vec3 lRight  = sdFetch(3, ${LIGHT_ROW_BASE} + li).xyz;
+    vec3 lUp     = sdFetch(4, ${LIGHT_ROW_BASE} + li).xyz;
+    vec3 lNormal = sdFetch(5, ${LIGHT_ROW_BASE} + li).xyz;
     vec3 lc = l0.xyz;
     float hw = l0.w;
     float hh = l1.x;
     vec3 emit = l1.yzw;
+    int lightPickCode = int(l2.y + 0.5);
+    bool isOmni = l2.z > 0.5;
 
-    vec3 diffLight = evaluateAreaQuadDiffuse(hit.pos, N, lc, hw, hh, emit);
+    vec3 diffLight = evaluateAreaQuadDiffuse(hit.pos, N, lc, lRight, lUp, lNormal, isOmni, hw, hh, emit);
     if (dot(diffLight, vec3(1.0)) > 1e-5) {
-      float areaVis = (li == 0) ? areaVis0 : 1.0;
+      float areaVis = evaluateAreaLightSoftVis(hit.pos, N, lc, hw, hh, idx, lightPickCode);
 
       vec3 kD = (1.0 - mat.metallic) * (1.0 - mat.transmission) * mat.baseColor;
       Lo += kD * diffLight * areaVis;
 
       vec3 R = reflect(-V, N);
-      if (abs(R.z) > 1e-4) {
-        float tPlane = (lc.z - hit.pos.z) / R.z;
-        if (tPlane > 0.01) {
-          vec3 pPlane = hit.pos + R * tPlane;
-          vec3 clamped = vec3(
-            clamp(pPlane.x, lc.x - hw, lc.x + hw),
-            clamp(pPlane.y, lc.y - hh, lc.y + hh),
-            lc.z
-          );
+      float rDenom = dot(R, lNormal);
+      if (abs(rDenom) > 1e-4) {
+        float tPlane = dot(lc - hit.pos, lNormal) / rDenom;
+        if (tPlane > 0.01 && (isOmni || rDenom < 0.0)) {
+          vec3 relPlane = (hit.pos + R * tPlane) - lc;
+          float uClamp = clamp(dot(relPlane, lRight), -hw, hw);
+          float vClamp = clamp(dot(relPlane, lUp), -hh, hh);
+          vec3 clamped = lc + lRight * uClamp + lUp * vClamp;
           vec3 Lspec = normalize(clamped - hit.pos);
           float specSpread = max(0.04, mat.roughness * mat.roughness);
           float solid = clamp((hw * hh) / max(0.15, tPlane * tPlane * specSpread * 6.0), 0.0, 1.2);
@@ -1524,6 +1604,9 @@ function PackSceneDataBuffer(ActiveScene, PCount, LCount, Out) {
   for (let Li = 0; Li < LCount; ++Li) {
     const L = ActiveScene.AreaLights[Li];
     const Base = (LIGHT_ROW_BASE + Li) * SCENE_DATA_W * 4;
+    const Right = L.Right || [1, 0, 0];
+    const Up = L.Up || [0, 1, 0];
+    const Normal = L.Normal || [0, 0, -1];
     Out[Base + 0] = L.Center[0];
     Out[Base + 1] = L.Center[1];
     Out[Base + 2] = L.Center[2];
@@ -1535,6 +1618,24 @@ function PackSceneDataBuffer(ActiveScene, PCount, LCount, Out) {
     Out[Base + 7] = L.Radiance[2];
 
     Out[Base + 8] = L.QuadVisible === false ? 0.0 : 1.0;
+    Out[Base + 9] = L.PickCode || (400 + Li);
+    Out[Base + 10] = L.Omni ? 1.0 : 0.0;
+    Out[Base + 11] = 0.0;
+
+    Out[Base + 12] = Right[0];
+    Out[Base + 13] = Right[1];
+    Out[Base + 14] = Right[2];
+    Out[Base + 15] = 0.0;
+
+    Out[Base + 16] = Up[0];
+    Out[Base + 17] = Up[1];
+    Out[Base + 18] = Up[2];
+    Out[Base + 19] = 0.0;
+
+    Out[Base + 20] = Normal[0];
+    Out[Base + 21] = Normal[1];
+    Out[Base + 22] = Normal[2];
+    Out[Base + 23] = 0.0;
   }
 }
 
@@ -1547,7 +1648,7 @@ function ComputeNonCameraSceneSignature(Scene) {
   }
   for (let Li = 0; Li < Scene.AreaLights.length; ++Li) {
     const L = Scene.AreaLights[Li];
-    Parts += `L${L.Id}:${L.QuadVisible === false ? 0 : 1}:${L.Center.join(",")}:${L.HalfWidth}:${L.HalfHeight}:${L.Radiance.join(",")}|`;
+    Parts += `L${L.Id}:${L.PickCode || 0}:${L.QuadVisible === false ? 0 : 1}:${L.Omni ? 1 : 0}:${L.Center.join(",")}:${(L.Normal || [0, 0, -1]).join(",")}:${L.HalfWidth}:${L.HalfHeight}:${L.Radiance.join(",")}|`;
   }
   return Parts;
 }
@@ -1732,16 +1833,34 @@ export default function GtxWorldViewport({
     [Values, LiveDragPreview],
   );
   const EffectiveSelected = LiveDragPreview?.HighlightId || Selected;
+  const [FanSpinDeg, SetFanSpinDeg] = useState(0);
 
   const CompiledScene = useMemo(
     () =>
       CompileLiveGtxScene(EffectiveRows, EffectiveValues, Hidden, EffectiveProjection, {
         ForceOverlaySettings,
         SelectedId: EffectiveSelected,
+        FanSpinDeg,
       }),
-    [EffectiveRows, EffectiveValues, Hidden, EffectiveProjection, ForceOverlaySettings, EffectiveSelected],
+    [EffectiveRows, EffectiveValues, Hidden, EffectiveProjection, ForceOverlaySettings, EffectiveSelected, FanSpinDeg],
   );
   CompiledSceneRef.current = CompiledScene;
+
+  useEffect(() => {
+    if (!CompiledScene.HasSpinningFans || RenderBackend === "cpu-gtx") return undefined;
+    let RafId = 0;
+    let LastMs = typeof performance !== "undefined" ? performance.now() : 0;
+    const Tick = (NowMs) => {
+      const Dt = Math.min(0.05, Math.max(0, (NowMs - LastMs) * 0.001));
+      if (NowMs - LastMs >= 22) {
+        LastMs = NowMs;
+        SetFanSpinDeg((Prev) => (Prev + Dt * 540) % 360);
+      }
+      RafId = requestAnimationFrame(Tick);
+    };
+    RafId = requestAnimationFrame(Tick);
+    return () => cancelAnimationFrame(RafId);
+  }, [CompiledScene.HasSpinningFans, RenderBackend]);
 
   const NonCameraSceneSignature = useMemo(
     () => ComputeNonCameraSceneSignature(CompiledScene),

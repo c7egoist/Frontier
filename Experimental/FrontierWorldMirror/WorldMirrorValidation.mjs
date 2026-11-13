@@ -739,10 +739,11 @@ assert.ok(
 // 13. 24-Prop Studio Camera/Light/Track Library, Transparent Thumbnails, Per-Face Colours, 15 Debug Views & ProjectBrowser
 // ---------------------------------------------------------------------------------------------------------------------------------------
 {
-  assert.equal(WORLD_PROP_CATALOG.length, 24, "WORLD_PROP_CATALOG exposes 24 studio cameras, lights, and track/workshop props");
-  assert.equal(WORLD_PROP_CATALOG.filter((P) => P.Panel === "camera").length, 6, "6 3D camera models registered");
+  assert.equal(WORLD_PROP_CATALOG.length, 28, "WORLD_PROP_CATALOG exposes 28 bespoke cinema cameras, studio lights, fans, ControlVehicle tyres, and barriers");
+  assert.equal(WORLD_PROP_CATALOG.filter((P) => P.Panel === "camera").length, 6, "6 bespoke 3D cinema camera models registered");
   assert.equal(WORLD_PROP_CATALOG.filter((P) => P.Panel === "light").length, 6, "6 3D studio light models registered");
-  assert.equal(WORLD_PROP_CATALOG.filter((P) => P.Panel === "geometry").length, 12, "12 track/workshop props registered");
+  assert.equal(WORLD_PROP_CATALOG.filter((P) => P.Category === "Fans & Wind").length, 3, "3 motorsport & studio fan models registered");
+  assert.equal(WORLD_PROP_CATALOG.filter((P) => P.Panel === "geometry").length, 16, "16 fans, ControlVehicle tyre stack, barriers, sawtooth kerb & paddock props registered");
 
   // Verify every single prop renders a transparent, unclipped, tightly-framed 3D thumbnail
   for (const Prop of WORLD_PROP_CATALOG) {
@@ -801,7 +802,38 @@ assert.ok(
   const CamPrims = CompiledExt.Primitives.filter((P) => P.OwnerId === "placed-cam-1");
   assert.ok(CamPrims.length >= 6, "Placed Tripod Camera expands multi-part 3D rig in scene");
   const TirePrims = CompiledExt.Primitives.filter((P) => P.OwnerId === "placed-prop-1");
-  assert.ok(TirePrims.length >= 4, "Placed FIA Tire Stack expands multi-part torus/rim assembly");
+  assert.ok(TirePrims.length >= 4, "Placed ControlVehicle Tyre Stack expands multi-part torus/rim assembly");
+
+  // Verify Fan & Light Outliner Power Toggles (Powered=false keeps 3D geometry visible while disabling light emission / fan spin)
+  const FanPayload = BuildActorPayloadFromModelSpec(WORLD_PLACEABLE_MODELS.find((M) => M.PropId === "wind_drum_fan"));
+  const ToggleRows = [...ExtendedRows, { ...FanPayload.Template, Id: "placed-fan-1" }];
+  const ToggleValuesOn = {
+    ...ExtendedValues,
+    "placed-fan-1": { ...FanPayload.Properties, Position: [0.2, -1.2, 0.45], Powered: true },
+    "placed-light-1": { ...ExtendedValues["placed-light-1"], Powered: true },
+  };
+  const ToggleValuesOff = {
+    ...ExtendedValues,
+    "placed-fan-1": { ...FanPayload.Properties, Position: [0.2, -1.2, 0.45], Powered: false },
+    "placed-light-1": { ...ExtendedValues["placed-light-1"], Powered: false },
+  };
+  const CompiledOn0 = CompileLiveGtxScene(ToggleRows, ToggleValuesOn, {}, "PERSP", { FanSpinDeg: 0 });
+  const CompiledOn45 = CompileLiveGtxScene(ToggleRows, ToggleValuesOn, {}, "PERSP", { FanSpinDeg: 45 });
+  const CompiledOff = CompileLiveGtxScene(ToggleRows, ToggleValuesOff, {}, "PERSP", { FanSpinDeg: 45 });
+  assert.equal(CompiledOn0.HasSpinningFans, true, "Powered Fan activates HasSpinningFans");
+  assert.equal(CompiledOff.HasSpinningFans, false, "Unpowered Fan stops HasSpinningFans");
+  assert.ok(
+    CompiledOff.Primitives.some((P) => P.OwnerId === "placed-fan-1"),
+    "Unpowered Fan remains visible in 3D scene",
+  );
+  assert.ok(
+    CompiledOff.Primitives.some((P) => P.OwnerId === "placed-light-1") &&
+      !CompiledOff.AreaLights.some((L) => L.Id === "placed-light-1"),
+    "Unpowered Studio Light keeps 3D stand visible while turning LTC AreaLight OFF",
+  );
+  const FanBlade0 = CompiledOn0.Primitives.filter((P) => P.OwnerId === "placed-fan-1")[15];
+  const FanBlade45 = CompiledOn45.Primitives.filter((P) => P.OwnerId === "placed-fan-1")[15];
+  assert.notDeepEqual(FanBlade0.Center, FanBlade45.Center, "Spinning Fan updates 3D rotor blade positions");
   const ProjectUv = (WorldPos, Scene, Aspect) => {
     const Norm3 = (V) => {
       const L = Math.hypot(V[0], V[1], V[2]) || 1;

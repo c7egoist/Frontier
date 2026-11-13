@@ -19,6 +19,7 @@
 #include "Exhibits/SoftwareCanvasRasterizer.h"
 
 #include <imgui.h>
+#include <imgui_internal.h>
 
 #include <algorithm>
 #include <cmath>
@@ -140,12 +141,30 @@ int main()
         StandaloneHost.AttachContentBrowser(&Browser);
         const auto BrowserReading = Browser.QueryPanel().InspectReading();
         if (!VerifyCondition(BrowserReading.ActiveWorkspace == WorkspaceCategory::UV, "AttachContentBrowser configures WorkspaceCategory::UV") ||
-            !VerifyCondition(BrowserReading.PermittedCategoryCount == 6u, "WorkspaceCategory::UV exposes strictly 6 permitted UV asset categories") ||
+            !VerifyCondition(BrowserReading.PermittedCategoryCount == 2u, "UV ContentBrowser locks strictly to Colours & MatCap Materials") ||
             !VerifyCondition(Browser.AccessPanel().ApplyColourIndexToSlot(0u, "uv.priority_layer.tint"), "ColourCodex swatch tints UV Priority Layer"))
         {
             return 1;
         }
         const auto BrowserEntries = Browser.QueryPanel().QueryThumbnailRepository().QueryAllEntries();
+        uint32_t StudioMatCapCount = 0u;
+        std::size_t FirstMatCapEntryIdx = SIZE_MAX;
+        for (std::size_t Idx = 0u; Idx < BrowserEntries.size(); ++Idx)
+        {
+            if (BrowserEntries[Idx].IndexHeader.MatCapPresetMarker != 0u)
+            {
+                if (FirstMatCapEntryIdx == SIZE_MAX)
+                {
+                    FirstMatCapEntryIdx = Idx;
+                }
+                ++StudioMatCapCount;
+            }
+        }
+        if (!VerifyCondition(StudioMatCapCount == 16u && FirstMatCapEntryIdx != SIZE_MAX, "UV ContentBrowser exposes all 16 Studio MatCap spheres") ||
+            !VerifyCondition(Browser.AccessPanel().ApplyMatCapEntryToSlot(FirstMatCapEntryIdx, "uv.viewport3d.surface"), "Applying a ContentBrowser MatCap updates active UV faces"))
+        {
+            return 1;
+        }
         const auto AeroEntry = std::find_if(BrowserEntries.begin(), BrowserEntries.end(), [](const ContentRepositoryEntry& Entry)
         {
             return Entry.DisplayTitle == "Aero Coupe GT";
@@ -193,7 +212,7 @@ int main()
         StandaloneHost.RegisterDockPanes(StandaloneDock);
         if constexpr (BuildConfiguration::EditorIncluded)
         {
-            if (!VerifyCondition(StandaloneHost.QueryRegisteredTabCount() == 1u, "StandaloneWorkspace registers exactly 1 central UV tab"))
+            if (!VerifyCondition(StandaloneHost.QueryRegisteredTabCount() == 2u, "StandaloneWorkspace registers separate 2D UV and 3D Surface viewports"))
             {
                 return 1;
             }
@@ -212,6 +231,44 @@ int main()
         if (!CaptureDockedWorkspacePng(Io, StandaloneDock, ControlCentre, ImageDir / "02-StandaloneUVWorkspaceUI.png"))
         {
             return 1;
+        }
+
+        // Verify 2D UV and 3D Surface live in separate non-overlapping docked panes with dedicated projection policies
+        {
+            ImGuiWindow* Win2D = nullptr;
+            ImGuiWindow* Win3D = nullptr;
+            if (ImGuiContext* Ctx = ImGui::GetCurrentContext())
+            {
+                for (ImGuiWindow* Win : Ctx->Windows)
+                {
+                    if (Win != nullptr && Win->Active)
+                    {
+                        const std::string_view Name(Win->Name);
+                        if (Name.starts_with("2D UV##"))
+                        {
+                            Win2D = Win;
+                        }
+                        else if (Name.starts_with("3D Surface##"))
+                        {
+                            Win3D = Win;
+                        }
+                    }
+                }
+            }
+            if (!VerifyCondition(Win2D != nullptr && Win3D != nullptr, "Both '2D UV' and '3D Surface' ImGui windows exist in StandaloneDock") ||
+                !VerifyCondition(
+                    Win2D->Size.x >= 400.0f && Win3D->Size.x >= 400.0f &&
+                        (Win2D->Pos.x + Win2D->Size.x <= Win3D->Pos.x + 2.0f),
+                    "2D UV sits left of 3D Surface in distinct non-overlapping docked panes") ||
+                !VerifyCondition(
+                    StandaloneHost.Access2DViewportHost().QueryHostRole() == UVViewportHostRole::Dedicated2D &&
+                        StandaloneHost.Access3DViewportHost().QueryHostRole() == UVViewportHostRole::Dedicated3D &&
+                        StandaloneHost.Access2DViewportHost().InspectProjectionPane().QueryEffectiveSplitMode() == Editor::ViewportSplitMode::Planar2DOnly &&
+                        StandaloneHost.Access3DViewportHost().InspectProjectionPane().QueryEffectiveSplitMode() == Editor::ViewportSplitMode::Spatial3DOnly,
+                    "2D UV and 3D Surface enforce Dedicated2D / Dedicated3D split projection isolation"))
+            {
+                return 1;
+            }
         }
 
         // Verify live window resize updates root dock container dimensions without requiring layout rebuild
@@ -262,7 +319,7 @@ int main()
         SuiteHost.RegisterDockPanes(SuiteDock);
         if constexpr (BuildConfiguration::EditorIncluded)
         {
-            if (!VerifyCondition(SuiteHost.QueryRegisteredTabCount() == 5u, "FeatureSet registers UV Viewport alongside 4 peer domain tabs"))
+            if (!VerifyCondition(SuiteHost.QueryRegisteredTabCount() == 6u, "FeatureSet registers separate 2D UV and 3D Surface viewports alongside 4 peer domain tabs"))
             {
                 return 1;
             }

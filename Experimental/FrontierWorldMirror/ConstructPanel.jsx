@@ -14,6 +14,7 @@ export const ConstructGroups = [
   "Environment",
   "Weather",
   "Cameras",
+  "Fans",
   "Geometry",
   "Lighting",
 ];
@@ -32,6 +33,8 @@ export function ConstructGroup(Subject) {
   )
     return "Weather";
   if (Subject.Panel === "camera") return "Cameras";
+  if (Subject.Category === "Fans & Wind" || String(Subject.PropId || "").includes("_fan"))
+    return "Fans";
   if (Subject.Panel === "geometry") return "Geometry";
   if (Subject.Panel === "light") return "Lighting";
   return "Environment";
@@ -39,7 +42,12 @@ export function ConstructGroup(Subject) {
 
 // Same dimensions, category rail and entity matrix as NativeConstructPanel.
 // Placement is intentionally browser-local; native construction is deferred.
-export default function ConstructPanel({ Catalogue, Add, Close }) {
+export default function ConstructPanel({
+  Catalogue,
+  Add,
+  Close,
+  ResolveSpawnPosition,
+}) {
   const [Query, Search] = useState("");
   const [Group, ChooseGroup] = useState("All");
   const [Picked, Choose] = useState(null);
@@ -72,19 +80,41 @@ export default function ConstructPanel({ Catalogue, Add, Close }) {
         ?.focus();
   }, [Picked]);
 
+  const BuildPickedState = (Subject) => {
+    const PresetPayload = BuildActorPayloadFromConstructItem(Subject);
+    const HalfHeightZ = PresetPayload?.HalfHeightZ ?? 0.39;
+    const SpawnPos = ResolveSpawnPosition
+      ? ResolveSpawnPosition(HalfHeightZ)
+      : [0, 0, +(-0.64 + HalfHeightZ).toFixed(3)];
+    const MergedSubject = PresetPayload?.Template
+      ? { ...Subject, ...PresetPayload.Template, Id: Subject.Id, Name: Subject.Name }
+      : Subject;
+    const MergedProps = PresetPayload?.Properties
+      ? {
+          ...PresetPayload.Properties,
+          Position: SpawnPos,
+          ...(PresetPayload.Properties.ReferenceInspector
+            ? {
+                ReferenceInspector: {
+                  ...PresetPayload.Properties.ReferenceInspector,
+                  Properties: {
+                    ...(PresetPayload.Properties.ReferenceInspector.Properties || {}),
+                    pos: SpawnPos,
+                  },
+                },
+              }
+            : {}),
+        }
+      : {};
+    return { MergedSubject, MergedProps };
+  };
+
   const Pick = (Subject) => {
     LastChoice.current = Subject.Id;
-    Choose(Subject);
+    const { MergedSubject, MergedProps } = BuildPickedState(Subject);
+    Choose(MergedSubject);
     Rename(Subject.Name);
-    const PresetPayload = BuildActorPayloadFromConstructItem(Subject);
-    AssignProperties(
-      PresetPayload?.Properties
-        ? {
-            ...PresetPayload.Properties,
-            Position: [0, 0, +(-0.64 + (PresetPayload.HalfHeightZ || 0.39)).toFixed(3)],
-          }
-        : {},
-    );
+    AssignProperties(MergedProps);
     Show(true);
   };
   const Keyboard = (Event) => {
@@ -202,6 +232,12 @@ export default function ConstructPanel({ Catalogue, Add, Close }) {
                         }
                         onDragEnd={DragPayload ? EndWorldActorDrag : undefined}
                         onClick={() => Pick(Subject)}
+                        onDoubleClick={() => {
+                          if (Adding.current) return;
+                          Adding.current = true;
+                          const { MergedSubject, MergedProps } = BuildPickedState(Subject);
+                          Add(MergedSubject, MergedProps, true);
+                        }}
                       >
                         {DragPayload?.Template?.PropId ||
                         (Subject.Panel === "geometry" && DragPayload?.Template?.PrimitiveShape) ? (

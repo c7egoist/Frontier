@@ -14,8 +14,8 @@ import {
   TILES_PER_PRIM,
 } from "./MaterialAtlasCompiler.js";
 
-const SCENE_DATA_FLOATS = 8 * 104 * 4; // 3328 floats = 13312 bytes (96 primitives + 6 area lights)
-const LIGHT_ROW_BASE = 96;
+const SCENE_DATA_FLOATS = 8 * 396 * 4; // 12672 floats = 50688 bytes (384 primitives + 12 area lights)
+const LIGHT_ROW_BASE = 384;
 const GIZMO_STRIDE_BYTES = 12 * 4; // 48 bytes per vertex
 
 export const GTX_WGSL_SCENE_SHADER = /* wgsl */ `
@@ -33,7 +33,7 @@ struct SceneUniforms {
 };
 
 @group(0) @binding(0) var<uniform> U : SceneUniforms;
-@group(0) @binding(1) var<storage, read> uSceneData : array<vec4f, 832>;
+@group(0) @binding(1) var<storage, read> uSceneData : array<vec4f, 3168>;
 @group(0) @binding(2) var uMaterialAtlas : texture_2d<f32>;
 @group(0) @binding(3) var uAtlasSampler  : sampler;
 
@@ -542,23 +542,28 @@ fn traceLightQuad(ro : vec3f, rd : vec3f, tMax : f32) -> LightHit {
   res.t = tMax;
   res.emit = vec3f(0.0);
   res.idx = -1;
-  if (abs(rd.z) < 1e-5) { return res; }
   let lightCount = U.uCountsAndModes.y;
   for (var li : i32 = 0; li < lightCount; li = li + 1) {
     let l0 = sdFetch(0, ${LIGHT_ROW_BASE} + li);
     let l1 = sdFetch(1, ${LIGHT_ROW_BASE} + li);
     let l2 = sdFetch(2, ${LIGHT_ROW_BASE} + li);
     if (l2.x > 0.5) {
-      let lc = l0.xyz;
-      let hw = l0.w;
-      let hh = l1.x;
-      let t = (lc.z - ro.z) / rd.z;
-      if (t > 0.01 && t < res.t) {
-        let hp = ro + rd * t;
-        if (abs(hp.x - lc.x) <= hw && abs(hp.y - lc.y) <= hh) {
-          res.t = t;
-          res.emit = select(l1.yzw * 0.14, l1.yzw, rd.z > 0.0);
-          res.idx = li;
+      let lRight  = sdFetch(3, ${LIGHT_ROW_BASE} + li).xyz;
+      let lUp     = sdFetch(4, ${LIGHT_ROW_BASE} + li).xyz;
+      let lNormal = sdFetch(5, ${LIGHT_ROW_BASE} + li).xyz;
+      let denom = dot(rd, lNormal);
+      if (abs(denom) > 1e-5) {
+        let lc = l0.xyz;
+        let hw = l0.w;
+        let hh = l1.x;
+        let t = dot(lc - ro, lNormal) / denom;
+        if (t > 0.01 && t < res.t) {
+          let rel = (ro + rd * t) - lc;
+          if (abs(dot(rel, lRight)) <= hw && abs(dot(rel, lUp)) <= hh) {
+            res.t = t;
+            res.emit = select(l1.yzw * 0.14, l1.yzw, denom < 0.0);
+            res.idx = li;
+          }
         }
       }
     }
@@ -586,6 +591,40 @@ fn evalSky(dir : vec3f) -> vec3f {
   return sky + sunIrr * (sunDisc * 3.0 + sunGlow);
 }
 
+fn evalLocalPrimSdf(lp : vec3f, shape : i32, h : vec3f) -> f32 {
+  if (shape == 4) {
+    let majorR = max(h.x, h.y) * 0.68;
+    let minorR = max(0.04, h.z * 0.55);
+    return sdTorusZ(lp, majorR, minorR);
+  }
+  if (shape == 3) {
+    let rad = max(h.x, h.y);
+    let zBase = -0.78 * h.z;
+    let dPlinth = sdBox(lp - vec3f(0.0, 0.0, 0.5 * (-h.z + zBase)), vec3f(rad, rad, 0.5 * (zBase + h.z)));
+    let tAlpha = clamp((lp.z - zBase) / max(1e-4, h.z - zBase), 0.0, 1.0);
+    let rAtZ = mix(0.72 * rad, 0.13 * rad, tAlpha);
+    let dc = vec2f(length(lp.xy) - rAtZ, abs(lp.z - 0.5 * (zBase + h.z)) - 0.5 * (h.z - zBase));
+    let dCone = min(max(dc.x, dc.y), 0.0) + length(max(dc, vec2f(0.0)));
+    return min(dPlinth, dCone);
+  }
+  if (shape == 5) {
+    let rad = max(h.x, h.y);
+    let zBase = -0.84 * h.z;
+    let db = vec2f(length(lp.xy) - 0.97 * rad, abs(lp.z - 0.5 * (-h.z + zBase)) - 0.5 * (zBase + h.z));
+    let dBot = min(max(db.x, db.y), 0.0) + length(max(db, vec2f(0.0)));
+    let tAlpha = clamp((lp.z - zBase) / max(1e-4, h.z - zBase), 0.0, 1.0);
+    let rAtZ = mix(0.50 * rad, 0.37 * rad, tAlpha);
+    let dt = vec2f(length(lp.xy) - rAtZ, abs(lp.z - 0.5 * (zBase + h.z)) - 0.5 * (h.z - zBase));
+    let dTop = min(max(dt.x, dt.y), 0.0) + length(max(dt, vec2f(0.0)));
+    return min(dBot, dTop);
+  }
+  if (shape >= 2) {
+    let dc = abs(vec2f(length(lp.xy), lp.z)) - vec2f(max(h.x, h.y), h.z);
+    return min(max(dc.x, dc.y), 0.0) + length(max(dc, vec2f(0.0)));
+  }
+  return sdBox(lp, h);
+}
+
 fn closestRayPrimitiveSoftVis(origin : vec3f, dir : vec3f, idx : i32, ps : vec4f, h : vec3f, tanSun : f32) -> f32 {
   let shape = i32(ps.w + 0.5);
   let rot = loadPrimRot(idx);
@@ -595,7 +634,7 @@ fn closestRayPrimitiveSoftVis(origin : vec3f, dir : vec3f, idx : i32, ps : vec4f
   let boundR = length(h) * 1.35;
   let tCenter = -dot(lo, ld);
   if (tCenter < -boundR) { return 1.0; }
-  let maxPenumbra = 0.005 + max(0.05, tCenter) * tanSun;
+  let maxPenumbra = 0.004 + max(0.04, tCenter) * tanSun;
   let perp = lo + ld * max(0.0, tCenter);
   if (length(perp) > boundR + maxPenumbra) { return 1.0; }
 
@@ -609,8 +648,8 @@ fn closestRayPrimitiveSoftVis(origin : vec3f, dir : vec3f, idx : i32, ps : vec4f
     let rMean = (h.x + h.y + h.z) * 0.3333333;
     let worldT = tUnit / dLen;
     let signedClearance = (length(o + dn * tUnit) - 1.0) * rMean;
-    let coneR = 0.004 + worldT * tanSun;
-    return smoothstep(-coneR * 0.35, coneR, signedClearance);
+    let coneR = 0.0025 + worldT * tanSun;
+    return smoothstep(-coneR * 0.45, coneR, signedClearance);
   }
 
   let hPen = h + vec3f(maxPenumbra);
@@ -618,40 +657,82 @@ fn closestRayPrimitiveSoftVis(origin : vec3f, dir : vec3f, idx : i32, ps : vec4f
   let invD = 1.0 / (safeSign * max(abs(ld), vec3f(1e-6)));
   let t0 = (-hPen - lo) * invD;
   let t1 = ( hPen - lo) * invD;
-  let tNearPen = max(0.004, max(max(min(t0.x, t1.x), min(t0.y, t1.y)), min(t0.z, t1.z)));
-  let tFarPen  = min(18.0,  min(min(max(t0.x, t1.x), max(t0.y, t1.y)), max(t0.z, t1.z)));
+  let tNearPen = max(0.003, max(max(min(t0.x, t1.x), min(t0.y, t1.y)), min(t0.z, t1.z)));
+  let tFarPen  = min(24.0,  min(min(max(t0.x, t1.x), max(t0.y, t1.y)), max(t0.z, t1.z)));
   if (tNearPen > tFarPen) { return 1.0; }
 
-  let tMid = 0.5 * (tNearPen + tFarPen);
-  let coneR = 0.004 + tMid * tanSun;
-  let lp = lo + ld * tMid;
-
-  var dSil : f32;
-  if (shape == 3) {
-    let rad = max(h.x, h.y);
-    let tAlpha = clamp((lp.z + 0.78 * h.z) / max(1e-4, 1.78 * h.z), 0.0, 1.0);
-    let rAtZ = select(mix(0.72 * rad, 0.13 * rad, tAlpha), rad, lp.z < -0.78 * h.z);
-    dSil = max(length(lp.xy) - rAtZ, abs(lp.z) - max(h.z, coneR * 1.25));
-  } else if (shape == 5) {
-    let rad = max(h.x, h.y);
-    let tAlpha = clamp((lp.z + 0.84 * h.z) / max(1e-4, 1.84 * h.z), 0.0, 1.0);
-    let rAtZ = select(mix(0.50 * rad, 0.37 * rad, tAlpha), rad, lp.z < -0.84 * h.z);
-    dSil = max(length(lp.xy) - rAtZ, abs(lp.z) - max(h.z, coneR * 1.25));
-  } else if (shape >= 2) {
-    dSil = max(length(lp.xy) - max(h.x, h.y), abs(lp.z) - max(h.z, coneR * 1.25));
+  var bestVis = 1.0;
+  // Analytical exact closest-chord / axis seed so razor-thin barn doors & 12mm tripod legs NEVER miss or bead!
+  if (shape == 0) {
+    let tb0 = (-h - lo) * invD;
+    let tb1 = ( h - lo) * invD;
+    let tbNear = max(max(min(tb0.x, tb1.x), min(tb0.y, tb1.y)), min(tb0.z, tb1.z));
+    let tbFar  = min(min(max(tb0.x, tb1.x), max(tb0.y, tb1.y)), max(tb0.z, tb1.z));
+    if (tbNear <= tbFar && tbFar > 0.003) {
+      let tSeed = clamp(0.5 * (max(0.003, tbNear) + tbFar), tNearPen, tFarPen);
+      let dSeed = sdBox(lo + ld * tSeed, h);
+      let cSeed = 0.002 + tSeed * tanSun;
+      bestVis = min(bestVis, smoothstep(-cSeed, cSeed, dSeed));
+    }
+  } else if (shape == 4) {
+    let majorR = max(h.x, h.y) * 0.68;
+    let minorR = max(0.04, h.z * 0.55);
+    let aRing = dot(ld.xy, ld.xy);
+    if (aRing > 1e-6) {
+      let bRing = dot(lo.xy, ld.xy);
+      let cRing = dot(lo.xy, lo.xy) - majorR * majorR;
+      let discR = bRing * bRing - aRing * cRing;
+      if (discR >= 0.0) {
+        let sqR = sqrt(discR);
+        let tr0 = clamp((-bRing - sqR) / aRing, tNearPen, tFarPen);
+        let tr1 = clamp((-bRing + sqR) / aRing, tNearPen, tFarPen);
+        let c0R = 0.002 + tr0 * tanSun;
+        let c1R = 0.002 + tr1 * tanSun;
+        bestVis = min(bestVis, smoothstep(-c0R, c0R, sdTorusZ(lo + ld * tr0, majorR, minorR)));
+        bestVis = min(bestVis, smoothstep(-c1R, c1R, sdTorusZ(lo + ld * tr1, majorR, minorR)));
+      } else {
+        let tCl = clamp(-bRing / aRing, tNearPen, tFarPen);
+        let cCl = 0.002 + tCl * tanSun;
+        bestVis = min(bestVis, smoothstep(-cCl, cCl, sdTorusZ(lo + ld * tCl, majorR, minorR)));
+      }
+    }
+    if (abs(ld.z) > 1e-5) {
+      let tz0 = clamp(-lo.z / ld.z, tNearPen, tFarPen);
+      let cz0 = 0.002 + tz0 * tanSun;
+      bestVis = min(bestVis, smoothstep(-cz0, cz0, sdTorusZ(lo + ld * tz0, majorR, minorR)));
+    }
   } else {
-    dSil = sdBox(lp, max(h, vec3f(coneR * 1.25)));
+    let xyLen2 = dot(ld.xy, ld.xy);
+    if (xyLen2 > 1e-6) {
+      let tAxis = clamp(-dot(lo.xy, ld.xy) / xyLen2, tNearPen, tFarPen);
+      let dAxis = evalLocalPrimSdf(lo + ld * tAxis, shape, h);
+      let cAxis = 0.002 + tAxis * tanSun;
+      bestVis = min(bestVis, smoothstep(-cAxis, cAxis, dAxis));
+    }
   }
-  return smoothstep(-coneR, coneR, dSil);
+
+  // 16-step uniform+adaptive SDF soft-shadow sweep across [tNearPen, tFarPen]
+  let span = max(0.004, tFarPen - tNearPen);
+  let stepU = span / 16.0;
+  for (var s : i32 = 0; s <= 16; s = s + 1) {
+    let t = tNearPen + stepU * f32(s);
+    let lp = lo + ld * t;
+    let d = evalLocalPrimSdf(lp, shape, h);
+    let coneR = 0.002 + t * tanSun;
+    bestVis = min(bestVis, smoothstep(-coneR, coneR, d));
+    if (bestVis <= 0.002) { return 0.0; }
+  }
+  return bestVis;
 }
 
-fn evaluateSoftConeVis(origin : vec3f, dir : vec3f, maxDist : f32, tanAngle : f32, minVis : f32, selfPrimIdx : i32) -> f32 {
+fn evaluateSoftConeVis(origin : vec3f, dir : vec3f, maxDist : f32, tanAngle : f32, minVis : f32, selfPrimIdx : i32, skipPickCode : i32) -> f32 {
   var vis = 1.0;
   let primCount = U.uCountsAndModes.x;
   for (var i : i32 = 0; i < primCount; i = i + 1) {
     let hf = sdFetch(1, i);
     let flags = i32(hf.w + 0.5);
-    if (i != selfPrimIdx && PrimFlagShadow(flags) && !PrimFlagGlass(flags)) {
+    let pCode = i32(sdFetch(3, i).w + 0.5);
+    if (i != selfPrimIdx && (skipPickCode < 0 || pCode != skipPickCode) && PrimFlagShadow(flags) && !PrimFlagGlass(flags)) {
       let ps = sdFetch(0, i);
       let tProj = dot(ps.xyz - origin, dir);
       if (tProj > -0.5 && tProj < maxDist) {
@@ -666,15 +747,15 @@ fn evaluateSoftConeVis(origin : vec3f, dir : vec3f, maxDist : f32, tanAngle : f3
 fn evaluateGtxSolarShadow(pos : vec3f, N : vec3f, selfPrimIdx : i32) -> f32 {
   let sunDir = U.uSunDir.xyz;
   if (dot(N, sunDir) <= 0.0) { return 0.0; }
-  return evaluateSoftConeVis(pos + N * 0.006, sunDir, 28.0, tan(U.uCamForward.w * 2.1), 0.0, selfPrimIdx);
+  return evaluateSoftConeVis(pos + N * 0.005, sunDir, 28.0, tan(U.uCamForward.w * 1.15), 0.0, selfPrimIdx, -1);
 }
 
-fn evaluateAreaLightSoftVis(pos : vec3f, N : vec3f, lc : vec3f, hw : f32, hh : f32, selfPrimIdx : i32) -> f32 {
+fn evaluateAreaLightSoftVis(pos : vec3f, N : vec3f, lc : vec3f, hw : f32, hh : f32, selfPrimIdx : i32, lightPickCode : i32) -> f32 {
   let toL = lc - pos;
   let distL = length(toL);
   if (distL < 0.05) { return 1.0; }
-  let tanArea = clamp(length(vec2f(hw, hh)) * 0.65 / max(distL, 0.35), 0.18, 0.55);
-  return evaluateSoftConeVis(pos + N * 0.008, toL / distL, distL - 0.04, tanArea, 0.38, selfPrimIdx);
+  let tanArea = clamp(length(vec2f(hw, hh)) * 0.48 / max(distL, 0.35), 0.10, 0.38);
+  return evaluateSoftConeVis(pos + N * 0.007, toL / distL, distL - 0.05, tanArea, 0.18, selfPrimIdx, lightPickCode);
 }
 
 struct TangentPair {
@@ -690,16 +771,16 @@ fn buildBasis(N : vec3f) -> TangentPair {
   return res;
 }
 
-fn evaluateAreaQuadDiffuse(P : vec3f, N : vec3f, lCenter : vec3f, hw : f32, hh : f32, emit : vec3f) -> vec3f {
+fn evaluateAreaQuadDiffuse(P : vec3f, N : vec3f, lCenter : vec3f, lRight : vec3f, lUp : vec3f, lNormal : vec3f, isOmni : bool, hw : f32, hh : f32, emit : vec3f) -> vec3f {
   var sum = vec3f(0.0);
   for (var sy : i32 = -1; sy <= 1; sy = sy + 2) {
     for (var sx : i32 = -1; sx <= 1; sx = sx + 2) {
-      let sp = lCenter + vec3f(f32(sx) * hw * 0.5, f32(sy) * hh * 0.5, 0.0);
+      let sp = lCenter + lRight * (f32(sx) * hw * 0.5) + lUp * (f32(sy) * hh * 0.5);
       let dv = sp - P;
       let d2 = max(dot(dv, dv), 0.08);
       let wi = dv * inverseSqrt(d2);
       let cSurf = max(0.0, dot(N, wi));
-      let cEmit = max(0.0, -wi.z);
+      let cEmit = select(max(0.0, -dot(wi, lNormal)), 0.65, isOmni);
       if (cSurf > 0.0 && cEmit > 0.0) {
         let dOmega = min((hw * hh * cEmit) / d2, 0.85);
         sum = sum + emit * (cSurf * dOmega / PI);
@@ -1002,12 +1083,14 @@ fn shadeSecondaryBounceHit(hit : HitInfo, V : vec3f) -> vec3f {
   if (U.uCountsAndModes.y > 0) {
     let l0 = sdFetch(0, ${LIGHT_ROW_BASE});
     let l1 = sdFetch(1, ${LIGHT_ROW_BASE});
+    let l2 = sdFetch(2, ${LIGHT_ROW_BASE});
+    let lNormal = sdFetch(5, ${LIGHT_ROW_BASE}).xyz;
     let toL = l0.xyz - hit.pos;
     let d2 = max(0.25, dot(toL, toL));
     let lDir = toL * inverseSqrt(d2);
     let area = 4.0 * l0.w * l1.x;
     let cSurf = max(0.0, dot(N, lDir));
-    let cEmit = max(0.0, -lDir.z);
+    let cEmit = select(max(0.0, -dot(lDir, lNormal)), 0.65, l2.z > 0.5);
     Lo = Lo + (1.0 - metallic) * (baseColor / PI) * l1.yzw * (cSurf * cEmit * area / d2);
   }
 
@@ -1066,37 +1149,35 @@ fn shadePrimaryOpaqueHit(hit : HitInfo, V : vec3f) -> vec3f {
   }
 
   let lightCount = U.uCountsAndModes.y;
-  var areaVis0 = 1.0;
-  if (lightCount > 0) {
-    let l0First = sdFetch(0, ${LIGHT_ROW_BASE});
-    let l1First = sdFetch(1, ${LIGHT_ROW_BASE});
-    areaVis0 = evaluateAreaLightSoftVis(hit.pos, N, l0First.xyz, l0First.w, l1First.x, idx);
-  }
-
   for (var li : i32 = 0; li < lightCount; li = li + 1) {
     let l0 = sdFetch(0, ${LIGHT_ROW_BASE} + li);
     let l1 = sdFetch(1, ${LIGHT_ROW_BASE} + li);
+    let l2 = sdFetch(2, ${LIGHT_ROW_BASE} + li);
+    let lRight  = sdFetch(3, ${LIGHT_ROW_BASE} + li).xyz;
+    let lUp     = sdFetch(4, ${LIGHT_ROW_BASE} + li).xyz;
+    let lNormal = sdFetch(5, ${LIGHT_ROW_BASE} + li).xyz;
     let lc = l0.xyz;
     let hw = l0.w;
     let hh = l1.x;
     let emit = l1.yzw;
+    let lightPickCode = i32(l2.y + 0.5);
+    let isOmni = l2.z > 0.5;
 
-    let diffLight = evaluateAreaQuadDiffuse(hit.pos, N, lc, hw, hh, emit);
+    let diffLight = evaluateAreaQuadDiffuse(hit.pos, N, lc, lRight, lUp, lNormal, isOmni, hw, hh, emit);
     if (dot(diffLight, vec3f(1.0)) > 1e-5) {
-      let areaVis = select(1.0, areaVis0, li == 0);
+      let areaVis = evaluateAreaLightSoftVis(hit.pos, N, lc, hw, hh, idx, lightPickCode);
       let kD = (1.0 - mat.metallic) * (1.0 - mat.transmission) * mat.baseColor;
       Lo = Lo + kD * diffLight * areaVis;
 
       let R = reflect(-V, N);
-      if (abs(R.z) > 1e-4) {
-        let tPlane = (lc.z - hit.pos.z) / R.z;
-        if (tPlane > 0.01) {
-          let pPlane = hit.pos + R * tPlane;
-          let clamped = vec3f(
-            clamp(pPlane.x, lc.x - hw, lc.x + hw),
-            clamp(pPlane.y, lc.y - hh, lc.y + hh),
-            lc.z
-          );
+      let rDenom = dot(R, lNormal);
+      if (abs(rDenom) > 1e-4) {
+        let tPlane = dot(lc - hit.pos, lNormal) / rDenom;
+        if (tPlane > 0.01 && (isOmni || rDenom < 0.0)) {
+          let relPlane = (hit.pos + R * tPlane) - lc;
+          let uClamp = clamp(dot(relPlane, lRight), -hw, hw);
+          let vClamp = clamp(dot(relPlane, lUp), -hh, hh);
+          let clamped = lc + lRight * uClamp + lUp * vClamp;
           let Lspec = normalize(clamped - hit.pos);
           let specSpread = max(0.04, mat.roughness * mat.roughness);
           let solid = clamp((hw * hh) / max(0.15, tPlane * tPlane * specSpread * 6.0), 0.0, 1.2);

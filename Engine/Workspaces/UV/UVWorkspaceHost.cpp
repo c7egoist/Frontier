@@ -32,7 +32,10 @@ namespace
 UVWorkspaceHost::UVWorkspaceHost()
 {
     Outliner.AttachSession(&Session);
-    ViewportHost.AttachSession(&Session);
+    ViewportHost2D.ConfigureHostRole(UVViewportHostRole::Dedicated2D);
+    ViewportHost2D.AttachSession(&Session);
+    ViewportHost3D.ConfigureHostRole(UVViewportHostRole::Dedicated3D);
+    ViewportHost3D.AttachSession(&Session);
     Inspector.AttachSession(&Session);
 }
 
@@ -46,21 +49,28 @@ bool UVWorkspaceHost::AttachVulkanRasterizer(GeometricRaster::UVWorkspaceRasteri
     return Session.AttachVulkanRasterizer(BoundRasterizer);
 }
 
-#if FRONTIER_EDITOR_ENABLED
-void UVWorkspaceHost::AttachContentBrowser(Editor::Explorer::ContentBrowser* TargetBrowser)
+void UVWorkspaceHost::AttachContentBrowserPanel(ContentBrowserPanel* TargetPanel)
 {
-    BoundBrowser = TargetBrowser;
-    if (BoundBrowser == nullptr)
+    BoundBrowserPanel = TargetPanel;
+    Session.AttachContentBrowserPanel(TargetPanel);
+    if (TargetPanel == nullptr)
     {
         return;
     }
 
-    // Enforce WorkspaceCategory::UV filter (exposes Geometries, Materials, Textures, Images, Colours; hides Simulations/Particles/Audio)
-    BoundBrowser->ConfigureWorkspaceDomain(WorkspaceCategory::UV);
-    BoundBrowser->AccessPanel().AssignContentActivationCallback(
+    // UV workspace locks the drawer down to Colours + Studio MatCap Materials
+    TargetPanel->ConfigureWorkspaceDomain(WorkspaceCategory::UV);
+    TargetPanel->ConfigureColourAndMatCapLock(true);
+    (void)TargetPanel->ActivateCategory(ContentCategory::Colours);
+    TargetPanel->AssignContentActivationCallback(
         [this](const ContentRepositoryEntry& Entry)
         {
             using GeometrySpace::SampleAssetPreset;
+            if (Entry.IndexHeader.MatCapPresetMarker != 0u)
+            {
+                Session.ApplyMatCapToActiveSelection(Entry.IndexHeader.MatCapSlotOrdinal, true);
+                return;
+            }
             if (Entry.DisplayTitle == "Controlled Integrator")
             {
                 Session.LoadSamplePreset(SampleAssetPreset::ControlledIntegrator);
@@ -83,21 +93,50 @@ void UVWorkspaceHost::AttachContentBrowser(Editor::Explorer::ContentBrowser* Tar
             }
         });
 
-    BoundBrowser->AccessPanel().RegisterColourSlot(ColourSlotRegistration{
+    TargetPanel->ClearColourSlots();
+    TargetPanel->ClearMatCapSlots();
+    TargetPanel->RegisterColourSlot(ColourSlotRegistration{
         "uv.priority_layer.tint",
         "Active UV Priority Layer Tint",
         Rectangle2D{ 16.0f, 96.0f, 260.0f, 44.0f },
         nullptr,
         [this](ColorRgba AssignedRgba, const ColourCodexEntry&)
         {
-            Session.AssignSelectedLayerTint({
-                static_cast<float>(AssignedRgba.Red) / 255.0f,
-                static_cast<float>(AssignedRgba.Green) / 255.0f,
-                static_cast<float>(AssignedRgba.Blue) / 255.0f,
-            });
+            Session.AssignSelectedLayerTint(
+                {
+                    static_cast<float>(AssignedRgba.Red) / 255.0f,
+                    static_cast<float>(AssignedRgba.Green) / 255.0f,
+                    static_cast<float>(AssignedRgba.Blue) / 255.0f,
+                },
+                true);
         },
     });
-    BoundBrowser->AccessPanel().FocusColourSlot("uv.priority_layer.tint");
+    TargetPanel->RegisterMatCapSlot(MatCapSlotRegistration{
+        "uv.shading.matcap_grid",
+        "Inspector MatCap Material",
+        Rectangle2D{ 1500.0f, 340.0f, 260.0f, 88.0f },
+        [this](uint8_t SlotOrdinal, const ContentRepositoryEntry&)
+        {
+            Session.ApplyMatCapToActiveSelection(SlotOrdinal, true);
+        },
+    });
+    TargetPanel->RegisterMatCapSlot(MatCapSlotRegistration{
+        "uv.viewport3d.surface",
+        "3D Viewport Surface MatCap",
+        Rectangle2D{ 380.0f, 96.0f, 520.0f, 420.0f },
+        [this](uint8_t SlotOrdinal, const ContentRepositoryEntry&)
+        {
+            Session.ApplyMatCapToActiveSelection(SlotOrdinal, true);
+        },
+    });
+    TargetPanel->FocusColourSlot("uv.priority_layer.tint");
+}
+
+#if FRONTIER_EDITOR_ENABLED
+void UVWorkspaceHost::AttachContentBrowser(Editor::Explorer::ContentBrowser* TargetBrowser)
+{
+    BoundBrowser = TargetBrowser;
+    AttachContentBrowserPanel(TargetBrowser != nullptr ? &TargetBrowser->AccessPanel() : nullptr);
 }
 #endif
 
@@ -113,7 +152,12 @@ bool UVWorkspaceHost::IntakeExternalFileDrop(
         {
             (void)BoundBrowser->IntakeExternalAssetDrop(DroppedPath);
         }
+        else
 #endif
+        if (BoundBrowserPanel != nullptr)
+        {
+            (void)BoundBrowserPanel->IntakeExternalAssetDrop(DroppedPath);
+        }
         return Session.ImportExternalGeometry(DroppedPath, OutDiagnostic);
     }
 
@@ -129,7 +173,12 @@ bool UVWorkspaceHost::IntakeExternalFileDrop(
         {
             (void)BoundBrowser->IntakeExternalAssetDrop(DroppedPath);
         }
+        else
 #endif
+        if (BoundBrowserPanel != nullptr)
+        {
+            (void)BoundBrowserPanel->IntakeExternalAssetDrop(DroppedPath);
+        }
         auto& TileCfg          = Session.AccessUDIMTileSetting(Session.ActiveUDIMNumber);
         TileCfg.BackdropPreset = GeometricRaster::UVBackdropPreset::TrimSheetAtlas;
         Session.FramebuffersDirty = true;
@@ -159,15 +208,24 @@ void UVWorkspaceHost::RegisterDockPanes(Components::HeadlessWorkspaceDockContain
         [this]() { Outliner.PresentInImGuiPane(1.0 / 60.0, 1.0f); },
     });
 
-    // Center Pane: Viewport (Standalone) or UV (FeatureSet multi-workspace group)
-    const char* CentralTitle =
-        (ActiveEngineConfig.QueryLaunchMode() == Configuration::HostLaunchMode::FeatureSet) ? "UV" : "Viewport";
+    // Separate Central Viewports: dedicated 2D UV Canvas & dedicated 3D Surface Viewport
     (void)DockContainer.RegisterPane(WorkspaceDockPaneDescriptor{
-        CentralTitle,
+        "2D UV",
         DockPlacementDirection::CenterTabGroup,
-        0.57f,
+        0.50f,
         PaneDirectiveMask::CentralViewportDirectives,
-        [this]() { ViewportHost.PresentInImGuiPane(1.0 / 60.0, 1.0f); },
+        [this]() { ViewportHost2D.PresentInImGuiPane(1.0 / 60.0, 1.0f); },
+    });
+    ++RegisteredTabCount;
+
+    const float RightSplitRatio =
+        (ActiveEngineConfig.QueryLaunchMode() == Configuration::HostLaunchMode::FeatureSet) ? 0.42f : 0.50f;
+    (void)DockContainer.RegisterPane(WorkspaceDockPaneDescriptor{
+        "3D Surface",
+        DockPlacementDirection::CenterSplitRight,
+        RightSplitRatio,
+        PaneDirectiveMask::CentralViewportDirectives,
+        [this]() { ViewportHost3D.PresentInImGuiPane(1.0 / 60.0, 1.0f); },
     });
     ++RegisteredTabCount;
 
@@ -185,7 +243,7 @@ void UVWorkspaceHost::RegisterDockPanes(Components::HeadlessWorkspaceDockContain
             (void)DockContainer.RegisterPane(WorkspaceDockPaneDescriptor{
                 PeerTitle,
                 DockPlacementDirection::CenterTabGroup,
-                0.57f,
+                0.50f,
                 PaneDirectiveMask::CentralViewportDirectives,
                 [PeerTitle]()
                 {

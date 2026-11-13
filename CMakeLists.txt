@@ -588,6 +588,7 @@ if(BUILD_TESTING)
     frontier_register_exhibit(UVParameterizationValidation      Exhibits/UVParameterizationValidation.cpp)
     frontier_register_exhibit(UVInteractiveAuthoringValidation  Exhibits/UVInteractiveAuthoringValidation.cpp)
     frontier_register_exhibit(UVBoundaryValidation              Exhibits/UVBoundaryValidation.cpp)
+    frontier_register_exhibit(UVAuthoringChaosValidation        Exhibits/UVAuthoringChaosValidation.cpp)
     frontier_register_exhibit(NetworkingSpaceValidation         Exhibits/NetworkingSpaceValidation.cpp)
     frontier_register_exhibit(VectorFieldValidation             Exhibits/VectorFieldValidation.cpp)
 

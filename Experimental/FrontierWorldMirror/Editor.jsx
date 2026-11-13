@@ -51,12 +51,15 @@ import LevelDialogModal from "./LevelDialogModal.jsx";
 import {
   CreateNewLevelRecord,
   LoadSavedLevelsState,
+  ResetSavedLevelsState,
   SaveLevelsState,
 } from "./LevelSystem.js";
 import {
   CanonicalEditorCamera,
+  CompileLiveGtxScene,
   ConstructForceTemplates,
   NormalizeVec3,
+  RaycastWorldPlacementAtUv,
   ShowcaseInitialRows,
   ShowcaseInitialValues,
 } from "./ShowcaseGalleryScene.js";
@@ -70,7 +73,7 @@ import {
   SubscribeWorldDrag,
 } from "./WorldDragDrop.js";
 import { AnalyticalShapeThumbnail } from "./AnalyticalShapeThumbnail.jsx";
-import { WORLD_PROP_CATALOG } from "./WorldPropLibrary.js";
+import { GetWorldPropById, IsFanProp, WORLD_PROP_CATALOG } from "./WorldPropLibrary.js";
 import "./Editor.css";
 
 const ConstructExtraCones = [
@@ -97,6 +100,7 @@ const ConstructExtraCones = [
 const ConstructExtraProps = WORLD_PROP_CATALOG.map((Prop) => ({
   Id: `construct-prop-${Prop.PropId}`,
   PropId: Prop.PropId,
+  Category: Prop.Category,
   Name: Prop.Name,
   Panel: Prop.Panel,
   Icon: Prop.Icon || "editor-cube",
@@ -301,13 +305,25 @@ const DebugViews = [
   "Patch Tiles",
   "Tiles + Wireframe",
 ];
-const StorageKey = "Frontier.WorldMirrorGtx.v2";
+const StorageKey = "Frontier.WorldMirrorGtx.v3";
 function Restore() {
   try {
+    localStorage.removeItem("Frontier.WorldMirrorGtx.v1");
+    localStorage.removeItem("Frontier.WorldMirrorGtx.v2");
     return JSON.parse(localStorage.getItem(StorageKey)) || {};
   } catch {
     return {};
   }
+}
+
+function RowSupportsPowerToggle(Row, Record = {}) {
+  if (!Row) return false;
+  if (Row.Panel === "light" || Row.Panel === "sun" || Row.Panel === "force") return true;
+  return IsFanProp(Row, Record);
+}
+
+function IsRowPowered(Record = {}) {
+  return Record?.Powered !== false;
 }
 function OutlinerValue(Row, Record, Label) {
   const Stored = Record?.[Label];
@@ -338,8 +354,15 @@ function OutlinerMetadata(Row, Record = {}, Rows = []) {
     const Count = Rows.filter((Item) => Item.Parent === Row.Id).length;
     return Count + (Count === 1 ? " item" : " items");
   }
-  if (Row.Panel === "geometry")
+  if (Row.Panel === "geometry") {
+    if (IsFanProp(Row, Record)) {
+      const PropDef = GetWorldPropById(Row.PropId || Record?.PropId);
+      const Rpm = PropDef?.DefaultRpm || 2400;
+      const StateTag = IsRowPowered(Record) ? `ON · ${Rpm.toLocaleString("en-US")} RPM` : "OFF · Standby";
+      return `${StateTag} · ${CompactPosition(Position)} m`;
+    }
     return "Position " + CompactPosition(Position) + " m";
+  }
   if (Row.Panel === "camera")
     return (
       CompactNumber(V("Focal Length"), 0) +
@@ -361,6 +384,7 @@ function OutlinerMetadata(Row, Record = {}, Rows = []) {
     );
   if (Row.Panel === "sun")
     return (
+      (IsRowPowered(Record) ? "ON · " : "OFF · ") +
       CompactNumber(V("Intensity")) +
       "× · " +
       CompactNumber(V("Angular Diameter"), 2) +
@@ -470,6 +494,7 @@ function OutlinerMetadata(Row, Record = {}, Rows = []) {
               ] ?? 32);
     }
     return (
+      (IsRowPowered(Record) ? "ON · " : "OFF · ") +
       CompactNumber(Output, 0) +
       " " +
       Unit +
@@ -1029,6 +1054,38 @@ function App() {
   const ToggleHidden = (Id) => {
     if (Id === "camera") return;
     AssignHidden((Previous) => ({ ...Previous, [Id]: !Previous[Id] }));
+  };
+  const ToggleRowPower = (Row) => {
+    if (!Row) return;
+    const CurOn = IsRowPowered(Values[Row.Id]);
+    const NextOn = !CurOn;
+    AssignValues((Previous) => ({
+      ...Previous,
+      [Row.Id]: {
+        ...(Previous[Row.Id] || {}),
+        Powered: NextOn,
+      },
+    }));
+    Toast(`${Row.Name}: ${NextOn ? "ON" : "OFF"}`);
+  };
+  const HandleResetSceneCache = () => {
+    try {
+      localStorage.removeItem(StorageKey);
+    } catch {}
+    const Fresh = ResetSavedLevelsState();
+    const First = Fresh.Levels[0];
+    const PreparedRows = EnsureEditorCamera(PrepareLightRows(First.Rows, 1));
+    SetLevelsState(Fresh);
+    StoreRows(PreparedRows);
+    AssignValues(First.Values || {});
+    AssignHidden({ camera: false });
+    Collapse({});
+    Filter([]);
+    Search("");
+    RenameProject(First.Name);
+    Select(First.Selected || "chrome-sphere");
+    ShowMenu(null);
+    Toast("Cleared cached state and restarted fresh scene");
   };
   const Toast = (Text) => {
     Notify(Text);
@@ -1792,6 +1849,14 @@ function App() {
         <h1>Outliner</h1>
         <small>Showcase · {Rows.length} nodes</small>
         <button
+          className="outliner-reset-btn"
+          aria-label="Clear cache and reset scene"
+          title="Clear cached scene state and restart clean default level"
+          onClick={HandleResetSceneCache}
+        >
+          Reset
+        </button>
+        <button
           aria-label="Outliner menu"
           onClick={(Event) => {
             const Rect = Event.currentTarget.getBoundingClientRect();
@@ -1941,10 +2006,42 @@ function App() {
                 </small>
               </div>
             )}
-            {Row.Panel !== "group" && (
-              <span className="row-status">
-                <Glyph Name="check" Size={11} />
-              </span>
+            {RowSupportsPowerToggle(Row, Values[Row.Id]) ? (
+              <button
+                type="button"
+                className={
+                  "outliner-power-toggle " +
+                  (IsRowPowered(Values[Row.Id]) ? "is-on " : "is-off ") +
+                  (IsFanProp(Row, Values[Row.Id]) ? "is-fan" : "is-light")
+                }
+                aria-pressed={IsRowPowered(Values[Row.Id])}
+                aria-label={
+                  (IsRowPowered(Values[Row.Id]) ? "Turn off " : "Turn on ") +
+                  Row.Name
+                }
+                title={
+                  IsFanProp(Row, Values[Row.Id])
+                    ? IsRowPowered(Values[Row.Id])
+                      ? "Fan Power: ON (click to stop fan)"
+                      : "Fan Power: OFF (click to start fan)"
+                    : IsRowPowered(Values[Row.Id])
+                      ? "Light Power: ON (click to switch off)"
+                      : "Light Power: OFF (click to switch on)"
+                }
+                onClick={(Event) => {
+                  Event.stopPropagation();
+                  ToggleRowPower(Row);
+                }}
+              >
+                <span className="power-dot" />
+                <span>{IsRowPowered(Values[Row.Id]) ? "ON" : "OFF"}</span>
+              </button>
+            ) : (
+              Row.Panel !== "group" && (
+                <span className="row-status">
+                  <Glyph Name="check" Size={11} />
+                </span>
+              )
             )}
             <button
               className="visibility"
@@ -2889,37 +2986,8 @@ function App() {
                   Import HTML UI state…
                 </button>
                 <hr />
-                <button
-                  onClick={() => {
-                    AssignRows(
-                      PrepareLightRows(EnsureReferenceLights(InitialRows), 1),
-                    );
-                    AssignValues(
-                      Object.fromEntries(
-                        InitialRows.filter(
-                          (Row) => Row.Panel === "geometry",
-                        ).map((Row) => [
-                          Row.Id,
-                          {
-                            Fracture: NormalizeFracture({
-                              EditedAt: Date.now(),
-                            }),
-                          },
-                        ]),
-                      ),
-                    );
-                    AssignHidden({});
-                    Collapse({});
-                    Filter([]);
-                    Search("");
-                    Select("sun");
-                    ResizeLeft(316);
-                    ResizeRight(340);
-                    ChangeSettings(DefaultSettings);
-                    ShowMenu(null);
-                  }}
-                >
-                  Restore native baseline
+                <button onClick={HandleResetSceneCache}>
+                  Clear cache &amp; restart baseline
                 </button>
                 <button
                   onClick={() => {
@@ -2933,6 +3001,16 @@ function App() {
             ) : (
               <>
                 <label>{Subject.Name}</label>
+                {RowSupportsPowerToggle(Subject, Values[Selected]) && (
+                  <button
+                    onClick={() => {
+                      ToggleRowPower(Subject);
+                      ShowMenu(null);
+                    }}
+                  >
+                    {IsRowPowered(Values[Selected]) ? "Switch OFF" : "Switch ON"}
+                  </button>
+                )}
                 <button
                   disabled={IsEditorCamera(Subject)}
                   onClick={() => {
@@ -3062,6 +3140,32 @@ function App() {
                 : Row,
             )}
           Add={AddRow}
+          ResolveSpawnPosition={(HalfHeightZ = 0.39) => {
+            const LiveScene = CompileLiveGtxScene(Rows, Values, Hidden, "PERSP", 16 / 9);
+            const Base = RaycastWorldPlacementAtUv(
+              LiveScene,
+              0.5,
+              0.58,
+              16 / 9,
+              HalfHeightZ,
+            ).Position;
+            const ExistingXY = Rows.filter(
+              (R) => R.Panel === "geometry" || R.Panel === "light" || R.Panel === "camera",
+            )
+              .map((R) => Values[R.Id]?.Position || Values[R.Id]?.ReferenceInspector?.Properties?.pos)
+              .filter((P) => Array.isArray(P) && P.length >= 2);
+            const IsFree = (X, Y) =>
+              ExistingXY.every((P) => Math.hypot(P[0] - X, P[1] - Y) >= 0.68);
+            if (IsFree(Base[0], Base[1])) return Base;
+            for (let Step = 1; Step <= 18; ++Step) {
+              const Radius = 0.82 * Math.ceil(Step / 6);
+              const Angle = ((Step - 1) % 6) * (Math.PI / 3);
+              const CandX = +(Base[0] + Math.cos(Angle) * Radius).toFixed(3);
+              const CandY = +(Base[1] + Math.sin(Angle) * Radius).toFixed(3);
+              if (IsFree(CandX, CandY)) return [CandX, CandY, Base[2]];
+            }
+            return Base;
+          }}
           Close={() => OpenConstruct(false)}
         />
       )}

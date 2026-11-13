@@ -14,7 +14,7 @@ import {
   BuildTrafficConeMaterial,
 } from "./WorldDragDrop.js";
 
-export const LEVEL_STORAGE_KEY = "Frontier.WorldMirrorLevels.v2";
+export const LEVEL_STORAGE_KEY = "Frontier.WorldMirrorLevels.v3";
 
 const Clone = (Value) => JSON.parse(JSON.stringify(Value));
 
@@ -590,6 +590,8 @@ export function LoadSavedLevelsState() {
     return { ActiveLevelId: Defaults[0].Id, Levels: Defaults };
   }
   try {
+    window.localStorage.removeItem("Frontier.WorldMirrorLevels.v1");
+    window.localStorage.removeItem("Frontier.WorldMirrorLevels.v2");
     const Raw = window.localStorage.getItem(LEVEL_STORAGE_KEY);
     if (!Raw) return { ActiveLevelId: Defaults[0].Id, Levels: Defaults };
     const Parsed = JSON.parse(Raw);
@@ -603,6 +605,19 @@ export function LoadSavedLevelsState() {
   } catch {
     return { ActiveLevelId: Defaults[0].Id, Levels: Defaults };
   }
+}
+
+export function ResetSavedLevelsState() {
+  const Defaults = BuildDefaultLevels();
+  const Fresh = { ActiveLevelId: Defaults[0].Id, Levels: Defaults };
+  if (typeof window !== "undefined") {
+    try {
+      window.localStorage.removeItem("Frontier.WorldMirrorLevels.v1");
+      window.localStorage.removeItem("Frontier.WorldMirrorLevels.v2");
+      window.localStorage.removeItem(LEVEL_STORAGE_KEY);
+    } catch {}
+  }
+  return Fresh;
 }
 
 export function SaveLevelsState(State) {

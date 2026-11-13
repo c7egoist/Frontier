@@ -1,7 +1,7 @@
 //==========================================================================================================================================
 // FILE: WorldPropLibrary.js
-// PURPOSE: Procedural Multi-Part 3D Cameras, Studio Lights, and Track/Workshop Props ported from eosclient0001-rgb/Props into
-//          Frontier Z-Up meters (+X Right, +Y Forward, +Z Up), with Individual Per-Face Colour & Pattern support (FaceColors).
+// PURPOSE: Procedural Multi-Part 3D Cinema Cameras, Studio Lights, Motorsport/Studio Fans, ControlVehicle Tyre Stack, and Bespoke
+//          Proving-Ground Barriers & Kerbs in Frontier Z-Up meters (+X Right, +Y Forward, +Z Up), using clean flat OpenPBR materials.
 //==========================================================================================================================================
 
 import { ResolveMaterial } from "./MaterialSpecification.js";
@@ -61,7 +61,7 @@ export function NormalizeFaceSpec(FaceColors, FaceIdx, FallbackHex = "#c8c6c2", 
   };
 }
 
-// Helper material constructor matching Frontier MaterialSpecification
+// Helper material constructor matching Frontier MaterialSpecification (clean flat OpenPBR materials by default)
 function Mat(Fill, Roughness = 0.42, Metallic = 0.0, Extra = {}) {
   const Type = Extra.Type || (Metallic > 0.65 ? "Metal" : "Standard");
   const Channels = {
@@ -98,29 +98,54 @@ function Mat(Fill, Roughness = 0.42, Metallic = 0.0, Extra = {}) {
 }
 
 const PAL = {
-  matteSlate: Mat("#1f242c", 0.56, 0.25),
-  anodizedBlack: Mat("#17191e", 0.36, 0.78),
-  gunmetal: Mat("#3b424d", 0.30, 0.86),
-  chrome: Mat("#dce3ec", 0.10, 0.96),
-  galvanized: Mat("#9aa3ad", 0.34, 0.82),
-  carbon: Mat("#20242b", 0.28, 0.42, { Type: "Clear coat", Coat: 0.72, CoatRoughness: 0.09 }),
-  rubberDark: Mat("#191b1f", 0.86, 0.02),
-  tireBlack: Mat("#1c1e22", 0.80, 0.04),
+  // Precision cinema & studio metals / polymers
+  cinemaBody: Mat("#21252d", 0.44, 0.38),
+  matteSlate: Mat("#1c2027", 0.54, 0.24),
+  anodizedBlack: Mat("#14161b", 0.34, 0.78),
+  gunmetal: Mat("#3b424e", 0.28, 0.86),
+  titaniumIvory: Mat("#e5e7eb", 0.30, 0.18),
+  machinedSilver: Mat("#cbd5e1", 0.20, 0.92),
+  chrome: Mat("#dfe6ef", 0.09, 0.97),
+  galvanized: Mat("#aeb6c0", 0.34, 0.82),
+  steelPost: Mat("#3f4650", 0.42, 0.78),
+  carbon: Mat("#1f232a", 0.26, 0.42, { Type: "Clear coat", Coat: 0.70, CoatRoughness: 0.09 }),
+  rubberDark: Mat("#181a1e", 0.86, 0.02),
+  unlitDiffuser: Mat("#2d333f", 0.52, 0.05),
   copper: Mat("#c87538", 0.24, 0.92),
-  fiaRed: Mat("#dc2626", 0.32, 0.08, { Type: "Clear coat", Coat: 0.55, CoatRoughness: 0.1 }),
+
+  // Exact ControlVehicle (VehicleProvingGrounds CourseMaterial) wheel & tyre palette
+  cvTyreRubber: Mat("#25262a", 0.761, 0.02), // CourseMaterial.Tyre: Dielectric(0.03741, 0.76087)
+  cvRimGunmetal: Mat("#2d3036", 0.38, 0.76), // Forged dark gunmetal ControlVehicle rim
+  cvHubCobalt: Mat("#3b78d8", 0.22, 1.0),    // CourseMaterial.Hub: anodized cobalt-blue center-lock hub
+  cvBrakeBronze: Mat("#8c5230", 0.29, 0.82), // CourseMaterial.Brake: warm bronze-iron rotor disc
+
+  // Clean flat motorsport & highway barrier colours (no noisy texture maps)
+  fiaRed: Mat("#cf2222", 0.36, 0.05),
+  kerbRed: Mat("#c82222", 0.58, 0.02),       // CourseMaterial.KerbRed
+  kerbWhite: Mat("#edefe9", 0.54, 0.02),     // CourseMaterial.PaintWhite
+  tecproWhite: Mat("#f1f3f5", 0.38, 0.02),
+  apronAsphalt: Mat("#464b52", 0.86, 0.0),
+  concreteBase: Mat("#a4a9a6", 0.86, 0.0),
+  concreteWall: Mat("#bcbFBd", 0.82, 0.0),
+  concreteCap: Mat("#cfd3d0", 0.78, 0.0),
+  fitchYellow: Mat("#eab308", 0.42, 0.02),   // Flat highway Fitch sand-barrel yellow
+  fitchRibYellow: Mat("#d99b06", 0.44, 0.02),
+
   fiaBlue: Mat("#1d4ed8", 0.32, 0.12, { Type: "Clear coat", Coat: 0.55, CoatRoughness: 0.1 }),
-  safetyOrange: Mat("#ff5500", 0.38, 0.02),
+  safetyOrange: Mat("#ea580c", 0.38, 0.02),
   safetyYellow: Mat("#eab308", 0.36, 0.06),
-  limeAutocross: Mat("#84cc16", 0.36, 0.02),
   skyBlueArri: Mat("#2563eb", 0.34, 0.45),
-  concrete: Mat("#9ca3af", 0.84, 0.0),
   whiteCoat: Mat("#f3f4f6", 0.34, 0.04),
-  lensGlass: Mat("#38bdf8", 0.04, 0.15, { Type: "Clear coat", Coat: 1.0, CoatRoughness: 0.02 }),
+
+  // Multi-coated convex optical glass & clean emissive indicators
+  sapphireOptic: Mat("#075985", 0.02, 0.18, { Type: "Clear coat", Coat: 1.0, CoatRoughness: 0.015 }),
+  emeraldOptic: Mat("#0f766e", 0.03, 0.16, { Type: "Clear coat", Coat: 1.0, CoatRoughness: 0.02 }),
+  monitorSlate: Mat("#0f172a", 0.12, 0.15, { Type: "Clear coat", Coat: 0.9, CoatRoughness: 0.04 }),
   warmGlow: Mat("#fff4d6", 0.18, 0.0, { Type: "Unlit", Emission: 4.8 }),
   coolGlow: Mat("#e0f2fe", 0.18, 0.0, { Type: "Unlit", Emission: 5.2 }),
   amberBeacon: Mat("#f59e0b", 0.16, 0.0, { Type: "Unlit", Emission: 4.5 }),
-  tallyGreen: Mat("#22c55e", 0.15, 0.0, { Type: "Unlit", Emission: 4.0 }),
-  tallyRed: Mat("#ef4444", 0.15, 0.0, { Type: "Unlit", Emission: 4.2 }),
+  tallyGreen: Mat("#22c55e", 0.15, 0.0, { Type: "Unlit", Emission: 4.2 }),
+  tallyRed: Mat("#ef4444", 0.15, 0.0, { Type: "Unlit", Emission: 4.4 }),
 };
 
 // 3x3 rotation matrix helpers matching Shader Euler convention: R = Rz * Ry * Rx
@@ -131,7 +156,6 @@ export function EulerDegToMat3(RotDeg = [0, 0, 0]) {
   const Cx = Math.cos(Rx), Sx = Math.sin(Rx);
   const Cy = Math.cos(Ry), Sy = Math.sin(Ry);
   const Cz = Math.cos(Rz), Sz = Math.sin(Rz);
-  // Column 0 (+X), Column 1 (+Y), Column 2 (+Z)
   return [
     [Cz * Cy, Sz * Cy, -Sy],
     [Cz * Sy * Sx - Sz * Cx, Sz * Sy * Sx + Cz * Cx, Cy * Sx],
@@ -140,7 +164,6 @@ export function EulerDegToMat3(RotDeg = [0, 0, 0]) {
 }
 
 export function MulMat3(A, B) {
-  // Column-major 3x3: C_col[j] = A * B_col[j]
   const Out = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
   for (let Col = 0; Col < 3; ++Col) {
     const Bx = B[Col][0], By = B[Col][1], Bz = B[Col][2];
@@ -152,7 +175,6 @@ export function MulMat3(A, B) {
 }
 
 export function Mat3ToEulerRad(M) {
-  // Extract Rx, Ry, Rz from R = Rz * Ry * Rx where M[0][2] = -sin(Ry)
   const Sy = Math.max(-1, Math.min(1, -M[0][2]));
   const Ry = Math.asin(Sy);
   const Cy = Math.cos(Ry);
@@ -217,62 +239,203 @@ function StrutPart(P0, P1, Radius, MaterialRec) {
   );
 }
 
-// Common 3-leg broadcast/studio tripod base spanning Z = [-HalfH .. TopZ]
+// Helper: 3-leg studio / cinema tripod spanning Z = [BottomZ .. TopZ]
 function BuildTripodLegs(BottomZ, TopZ, SpreadRadius, LegMat = PAL.carbon, ClampMat = PAL.fiaRed) {
   const Parts = [];
   for (let I = 0; I < 3; ++I) {
     const Ang = (I * 2 * Math.PI) / 3 + Math.PI / 6;
     const Foot = [Math.cos(Ang) * SpreadRadius, Math.sin(Ang) * SpreadRadius, BottomZ + 0.02];
-    const Crown = [Math.cos(Ang) * 0.055, Math.sin(Ang) * 0.055, TopZ];
+    const Crown = [Math.cos(Ang) * 0.058, Math.sin(Ang) * 0.058, TopZ];
     Parts.push(StrutPart(Foot, Crown, 0.018, LegMat));
-    // Rubber foot pad + anodized mid-lock collar
-    Parts.push(Part(2, [Foot[0], Foot[1], BottomZ + 0.015], [0.036, 0.036, 0.014], [0, 0, 0], PAL.rubberDark));
+    Parts.push(Part(2, [Foot[0], Foot[1], BottomZ + 0.014], [0.038, 0.038, 0.014], [0, 0, 0], PAL.rubberDark));
     const Mid = [(Foot[0] + Crown[0]) * 0.52, (Foot[1] + Crown[1]) * 0.52, (Foot[2] + Crown[2]) * 0.52];
-    Parts.push(Part(1, Mid, [0.026, 0.026, 0.022], [0, 0, 0], ClampMat));
+    Parts.push(Part(2, Mid, [0.024, 0.024, 0.018], [0, 0, 0], ClampMat));
   }
-  // Center column + spreader spider
-  Parts.push(Part(2, [0, 0, (BottomZ + TopZ) * 0.55], [0.022, 0.022, (TopZ - BottomZ) * 0.36], [0, 0, 0], PAL.anodizedBlack));
-  Parts.push(Part(2, [0, 0, TopZ + 0.025], [0.075, 0.075, 0.028], [0, 0, 0], PAL.gunmetal));
+  Parts.push(Part(2, [0, 0, (BottomZ + TopZ) * 0.56], [0.022, 0.022, (TopZ - BottomZ) * 0.35], [0, 0, 0], PAL.anodizedBlack));
+  Parts.push(Part(2, [0, 0, TopZ + 0.024], [0.078, 0.078, 0.026], [0, 0, 0], PAL.gunmetal));
+  return Parts;
+}
+
+// Helper: Bespoke Cinema Prime Lens + Machined Follow-Focus Torus Rings + Convex Sapphire Element + Open 4-Vane Matte Box
+function BuildCinemaOptics({
+  MountY = -0.14,
+  CenterZ = 0.0,
+  BarrelR = 0.068,
+  BarrelHalfLen = 0.085,
+  MatteBoxW = 0.138,
+  MatteBoxH = 0.104,
+  WithFrenchFlag = true,
+  TallyMat = null,
+}) {
+  const BarrelMidY = MountY - BarrelHalfLen;
+  const FrontGlassY = BarrelMidY - BarrelHalfLen + 0.012;
+  const HoodY = FrontGlassY - 0.036;
+  const Parts = [
+    // Stainless steel PL-mount bayonet flange
+    Part(2, [0, MountY + 0.008, CenterZ], [BarrelR + 0.008, BarrelR + 0.008, 0.014], [90, 0, 0], PAL.machinedSilver),
+    // Stepped anodized prime lens barrel
+    Part(2, [0, BarrelMidY, CenterZ], [BarrelR, BarrelR, BarrelHalfLen], [90, 0, 0], PAL.anodizedBlack),
+    // Two 3D machined knurled follow-focus & iris gear rings (upright torus around Y optical axis)
+    Part(4, [0, BarrelMidY + BarrelHalfLen * 0.30, CenterZ], [BarrelR + 0.012, BarrelR + 0.012, 0.010], [90, 0, 0], PAL.gunmetal),
+    Part(4, [0, BarrelMidY - BarrelHalfLen * 0.24, CenterZ], [BarrelR + 0.011, BarrelR + 0.011, 0.009], [90, 0, 0], PAL.fiaRed),
+    // Convex multi-coated front sapphire optical glass dome nestled inside front lens bezel
+    Part(4, [0, FrontGlassY - 0.006, CenterZ], [BarrelR + 0.004, BarrelR + 0.004, 0.008], [90, 0, 0], PAL.machinedSilver),
+    Part(1, [0, FrontGlassY + 0.022, CenterZ], [BarrelR * 0.88, BarrelR * 0.88, BarrelR * 0.88], [0, 0, 0], PAL.sapphireOptic),
+    // Open 4-vane flared carbon-fiber matte box hood (top, bottom, left, right angled vanes — open optical center!)
+    Part(0, [0, HoodY, CenterZ + MatteBoxH * 0.90], [MatteBoxW, 0.042, 0.009], [-14, 0, 0], PAL.carbon),
+    Part(0, [0, HoodY, CenterZ - MatteBoxH * 0.90], [MatteBoxW, 0.042, 0.009], [14, 0, 0], PAL.carbon),
+    Part(0, [-MatteBoxW * 0.92, HoodY, CenterZ], [0.009, 0.042, MatteBoxH * 0.88], [0, 0, 14], PAL.carbon),
+    Part(0, [MatteBoxW * 0.92, HoodY, CenterZ], [0.009, 0.042, MatteBoxH * 0.88], [0, 0, -14], PAL.carbon),
+  ];
+  if (WithFrenchFlag) {
+    // Hinged top carbon eyebrow flag tilted down over the front of the matte box
+    Parts.push(
+      Part(0, [0, HoodY - 0.048, CenterZ + MatteBoxH * 1.06], [MatteBoxW * 1.04, 0.046, 0.006], [24, 0, 0], PAL.anodizedBlack),
+    );
+  }
+  if (TallyMat) {
+    Parts.push(Part(0, [0, HoodY - 0.012, CenterZ + MatteBoxH * 0.98], [0.028, 0.010, 0.009], [0, 0, 0], TallyMat));
+  }
+  return Parts;
+}
+
+// Helper: Sculpted NATO Top Carry Handle + Dual 15mm LWS Carbon/Titanium Support Rods
+function BuildRigHardware({ BodyTopZ, RodZ, FrontY, RearY }) {
+  const Span = (RearY - FrontY) * 0.5;
+  const MidY = (FrontY + RearY) * 0.5;
+  return [
+    // Front & rear NATO handle CNC risers + cylindrical grip bar + rear safety stop
+    Part(0, [0, MidY - 0.07, BodyTopZ + 0.026], [0.016, 0.018, 0.026], [0, 0, 0], PAL.gunmetal),
+    Part(0, [0, MidY + 0.07, BodyTopZ + 0.026], [0.016, 0.018, 0.026], [0, 0, 0], PAL.gunmetal),
+    Part(2, [0, MidY - 0.005, BodyTopZ + 0.054], [0.015, 0.015, 0.115], [90, 0, 0], PAL.anodizedBlack),
+    Part(2, [0, MidY + 0.108, BodyTopZ + 0.062], [0.018, 0.018, 0.012], [0, 0, 0], PAL.fiaRed),
+    // Dual 15mm LWS support rods + baseplate bridge
+    Part(0, [0, MidY + 0.01, RodZ - 0.012], [0.072, 0.095, 0.016], [0, 0, 0], PAL.gunmetal),
+    Part(2, [-0.048, MidY - 0.05, RodZ], [0.009, 0.009, Span], [90, 0, 0], PAL.machinedSilver),
+    Part(2, [0.048, MidY - 0.05, RodZ], [0.009, 0.009, Span], [90, 0, 0], PAL.machinedSilver),
+  ];
+}
+
+// Helper: Pitched aerodynamic fan rotor blades arranged radially around the Y-axis (supports live SpinDeg rotation!)
+function BuildRadialFanBlades({ CenterY, CenterZ, HubRadius, OuterRadius, BladeCount, BladeChord, PitchDeg = 28, SpinDeg = 0, BladeMat = PAL.machinedSilver }) {
+  const Parts = [];
+  const BladeHalfSpan = Math.max(0.02, (OuterRadius - HubRadius * 0.85) * 0.5);
+  const MidR = HubRadius * 0.85 + BladeHalfSpan;
+  for (let I = 0; I < BladeCount; ++I) {
+    const ThetaDeg = (I * 360) / BladeCount + (Number(SpinDeg) || 0);
+    const ThetaRad = (ThetaDeg * Math.PI) / 180;
+    const Bx = Math.cos(ThetaRad) * MidR;
+    const Bz = CenterZ + Math.sin(ThetaRad) * MidR;
+    // Rotate blade radially around Y-axis (Ry = -ThetaDeg) with aerodynamic blade pitch around local X (Rx = PitchDeg)
+    const MRadial = EulerDegToMat3([0, -ThetaDeg, 0]);
+    const MPitch = EulerDegToMat3([PitchDeg, 0, 0]);
+    const MCombined = MulMat3(MRadial, MPitch);
+    const RotDeg = Mat3ToEulerRad(MCombined).map((R) => (R * 180) / Math.PI);
+    Parts.push(Part(0, [Bx, CenterY, Bz], [BladeHalfSpan, 0.006, BladeChord], RotDeg, BladeMat));
+  }
+  return Parts;
+}
+
+// Rotate & translate an array of Parts rigidly around Origin into a new pose (e.g. leaning a ControlVehicle wheel against a stack!)
+function TransformPartGroup(Parts, GroupRotDeg = [0, 0, 0], GroupTranslate = [0, 0, 0]) {
+  const MGroup = EulerDegToMat3(GroupRotDeg);
+  return Parts.map((P) => {
+    const Off = TransformVec3ByMat3(MGroup, P.LocalOffset);
+    const MLocal = EulerDegToMat3(P.LocalRotDeg);
+    const MCombined = MulMat3(MGroup, MLocal);
+    const RotDeg = Mat3ToEulerRad(MCombined).map((R) => (R * 180) / Math.PI);
+    return {
+      ...P,
+      LocalOffset: [
+        GroupTranslate[0] + Off[0],
+        GroupTranslate[1] + Off[1],
+        GroupTranslate[2] + Off[2],
+      ],
+      LocalRotDeg: RotDeg,
+    };
+  });
+}
+// Uses 3 overlapping torus rings so the central wheel bore is 100% hollow (never blocked by a solid cylinder endcap!)
+function BuildControlVehicleTyre({ Pos = [0, 0, 0], ScaleFactor = 0.78, WithRimAndHub = false }) {
+  const OuterR = 0.5086 * ScaleFactor;   // 0.397 m at 0.78x
+  const HalfW = 0.1979 * ScaleFactor;    // 0.154 m at 0.78x
+  const TubeR = 0.096 * ScaleFactor;     // Plump overlapping sidewall shoulder radius -> seamless smooth GT slick sidewall!
+  const ShoulderZ = HalfW - TubeR;
+  const RimR = 0.3446 * ScaleFactor;     // 0.269 m ControlVehicle rim flange radius
+  const [Cx, Cy, Cz] = Pos;
+
+  const Parts = [
+    // Seamless plump GT racing slick carcass with true open inner wheel bore (zero cylinder endcap blocking the spokes!)
+    Part(4, [Cx, Cy, Cz - ShoulderZ], [OuterR * 0.996, OuterR * 0.996, TubeR], [0, 0, 0], PAL.cvTyreRubber),
+    Part(4, [Cx, Cy, Cz], [OuterR, OuterR, TubeR * 1.05], [0, 0, 0], PAL.cvTyreRubber),
+    Part(4, [Cx, Cy, Cz + ShoulderZ], [OuterR * 0.996, OuterR * 0.996, TubeR], [0, 0, 0], PAL.cvTyreRubber),
+  ];
+
+  if (WithRimAndHub) {
+    // Forged dark gunmetal outer rim lip + deep recessed brake rotor disc
+    Parts.push(
+      Part(4, [Cx, Cy, Cz + HalfW * 0.72], [RimR + 0.012, RimR + 0.012, 0.016], [0, 0, 0], PAL.cvRimGunmetal),
+      Part(2, [Cx, Cy, Cz - HalfW * 0.18], [RimR * 0.96, RimR * 0.96, 0.022], [0, 0, 0], PAL.anodizedBlack),
+      Part(2, [Cx, Cy, Cz + HalfW * 0.08], [RimR * 0.74, RimR * 0.74, 0.016], [0, 0, 0], PAL.cvBrakeBronze),
+    );
+    // 5 concave forged gunmetal spokes angling from outer rim flange down into the ControlVehicle center-lock hub
+    for (let S = 0; S < 5; ++S) {
+      const Ang = (S * 2 * Math.PI) / 5 + 0.25;
+      const POuter = [Cx + Math.cos(Ang) * (RimR * 0.92), Cy + Math.sin(Ang) * (RimR * 0.92), Cz + HalfW * 0.68];
+      const PInner = [Cx + Math.cos(Ang) * (RimR * 0.26), Cy + Math.sin(Ang) * (RimR * 0.26), Cz + HalfW * 0.36];
+      Parts.push(StrutPart(PInner, POuter, 0.020 * ScaleFactor, PAL.cvRimGunmetal));
+    }
+    // Signature ControlVehicle anodized cobalt-blue metallic center-lock hub & machined center nut (CourseMaterial.Hub)
+    Parts.push(
+      Part(2, [Cx, Cy, Cz + HalfW * 0.42], [0.118 * ScaleFactor, 0.118 * ScaleFactor, 0.026], [0, 0, 0], PAL.cvHubCobalt),
+      Part(2, [Cx, Cy, Cz + HalfW * 0.56], [0.054 * ScaleFactor, 0.054 * ScaleFactor, 0.022], [0, 0, 0], PAL.machinedSilver),
+    );
+  }
   return Parts;
 }
 
 //==========================================================================================================================================
-// CATALOG OF CAMERAS, STUDIO LIGHTS, AND PROPS (eosclient0001-rgb/Props + Frontier Engine/Editor Cameras)
-//   Note: Local coordinates are centered so Z ∈ [-HalfHeightZ, +HalfHeightZ], placing bottom flush at Z_world - HalfHeightZ!
+// CATALOG OF BESPOKE 3D CAMERAS, STUDIO LIGHTS, FANS, CONTROLVEHICLE TYRES & PROVING-GROUND BARRIERS (28 ITEMS)
+//   Local coordinates are centered so Z ∈ [-HalfHeightZ, +HalfHeightZ], placing bottom flush at Z_world - HalfHeightZ!
 //==========================================================================================================================================
 export const WORLD_PROP_CATALOG = [
-  // ===================================================== CAMERAS =====================================================
+  // ===================================================== 1. CAMERAS (6) =====================================================
   {
     PropId: "editor_camera",
     Name: "Editor Camera Rig",
     Category: "Cameras",
     Panel: "camera",
     Icon: "camera",
-    HalfHeightZ: 0.22,
+    HalfHeightZ: 0.20,
     NominalScale: [1, 1, 1],
     DefaultFocalMm: 35,
-    Description: "Placeable Frontier Editor viewport camera rig · optical lens + tally + OLED telemetry face",
+    Description: "Digital cinema camera package (ARRI/RED style) · PL prime lens, knurled focus rings, open carbon matte box, EVF & V-mount",
     BuildParts: () => [
-      // Sleek compact cinema/viewport body with OLED operator face (-X) & green live tally (+Z)
-      Part(0, [0, 0.02, -0.02], [0.11, 0.16, 0.10], [0, 0, 0], PAL.matteSlate, {
-        "-X": { Fill: "#0f172a", Roughness: 0.14, Metallic: 0.2, Emission: 1.6, Pattern: "oled_telemetry", Accent: "#38bdf8" },
-        "+X": { Fill: "#262c36", Roughness: 0.42, Metallic: 0.55 },
-        "+Y": { Fill: "#1e293b", Roughness: 0.38, Metallic: 0.45 },
-        "-Y": { Fill: "#111318", Roughness: 0.3, Metallic: 0.7 },
-        "+Z": { Fill: "#1f242d", Roughness: 0.45, Metallic: 0.35 },
-        "-Z": { Fill: "#15181e", Roughness: 0.55, Metallic: 0.5 },
+      // Sculpted chamfered sensor body + vertical side heatsink ribcage + crimson sensor-plane badge + rosette boss
+      Part(0, [0, 0.04, -0.02], [0.082, 0.125, 0.088], [0, 0, 0], PAL.cinemaBody),
+      Part(0, [0, 0.04, -0.02], [0.088, 0.085, 0.072], [0, 0, 0], PAL.anodizedBlack),
+      Part(0, [0.089, 0.01, -0.01], [0.005, 0.036, 0.036], [0, 0, 0], PAL.fiaRed),
+      Part(2, [0.090, -0.05, -0.05], [0.022, 0.022, 0.008], [0, 90, 0], PAL.machinedSilver),
+      // Side OLED Electronic Viewfinder (EVF) barrel + flared rubber eyecup + ocular optic on -X
+      Part(0, [-0.105, -0.04, 0.04], [0.026, 0.014, 0.014], [0, 0, 0], PAL.gunmetal),
+      Part(2, [-0.135, 0.02, 0.05], [0.026, 0.026, 0.075], [90, 0, 0], PAL.anodizedBlack),
+      Part(4, [-0.135, 0.098, 0.05], [0.032, 0.032, 0.009], [90, 0, 0], PAL.rubberDark),
+      // Tilted rear V-Mount Li-Ion battery + emerald power tally bar
+      Part(0, [0, 0.195, -0.01], [0.064, 0.034, 0.078], [6, 0, 0], PAL.gunmetal),
+      Part(0, [-0.048, 0.232, 0.035], [0.008, 0.005, 0.024], [6, 0, 0], PAL.tallyGreen),
+      // Multi-stage prime lens + focus gear rings + sapphire glass dome + open 4-vane carbon matte box + French flag
+      ...BuildCinemaOptics({
+        MountY: -0.09,
+        CenterZ: -0.02,
+        BarrelR: 0.062,
+        BarrelHalfLen: 0.082,
+        MatteBoxW: 0.122,
+        MatteBoxH: 0.092,
+        WithFrenchFlag: true,
+        TallyMat: PAL.tallyGreen,
       }),
-      // Prime cinema lens barrel pointing along -Y (towards subject/viewer by default) + multi-coated front glass
-      Part(2, [0, -0.20, -0.02], [0.078, 0.078, 0.09], [90, 0, 0], PAL.anodizedBlack, {
-        Side: { Fill: "#181b22", Roughness: 0.28, Metallic: 0.82, Pattern: "stripes", Accent: "#dc2626" },
-        "+Z": { Fill: "#0ea5e9", Roughness: 0.05, Metallic: 0.35, Emission: 0.45 },
-        "-Z": { Fill: "#0ea5e9", Roughness: 0.05, Metallic: 0.35, Emission: 0.45 },
-      }),
-      // Wide matte box hood + top cheeseplate handle + green active viewport tally
-      Part(0, [0, -0.30, -0.02], [0.125, 0.032, 0.095], [0, 0, 0], PAL.rubberDark),
-      Part(0, [0, 0.02, 0.135], [0.024, 0.12, 0.022], [0, 0, 0], PAL.gunmetal),
-      Part(0, [0, -0.25, 0.092], [0.035, 0.012, 0.012], [0, 0, 0], PAL.tallyGreen),
-      Part(0, [0, 0.20, -0.01], [0.082, 0.038, 0.085], [0, 0, 0], PAL.gunmetal),
+      // NATO top carry handle + 15mm LWS dual support rods
+      ...BuildRigHardware({ BodyTopZ: 0.068, RodZ: -0.132, FrontY: -0.24, RearY: 0.16 }),
     ],
   },
   {
@@ -284,34 +447,35 @@ export const WORLD_PROP_CATALOG = [
     HalfHeightZ: 0.28,
     NominalScale: [1, 1, 1],
     DefaultFocalMm: 28,
-    Description: "Frontier runtime game/cinematic Engine Camera · dual top CineMag reels, matte box & red tally",
+    Description: "35mm Panavision/Arriflex-style Director Engine Camera · twin coaxial film magazines, reflex viewfinder & anamorphic matte box",
     BuildParts: () => [
-      // Anodized gunmetal body with FIA red accents & operator telemetry panel
-      Part(0, [0, 0.03, -0.05], [0.12, 0.18, 0.11], [0, 0, 0], PAL.gunmetal, {
-        "-X": { Fill: "#111827", Roughness: 0.16, Metallic: 0.25, Emission: 1.8, Pattern: "oled_telemetry", Accent: "#f97316" },
-        "+X": { Fill: "#dc2626", Roughness: 0.28, Metallic: 0.35 },
-        "+Y": { Fill: "#1f2937", Roughness: 0.35, Metallic: 0.7 },
-        "-Y": { Fill: "#0f172a", Roughness: 0.25, Metallic: 0.8 },
-        "+Z": { Fill: "#334155", Roughness: 0.35, Metallic: 0.75 },
-        "-Z": { Fill: "#1e293b", Roughness: 0.5, Metallic: 0.6 },
+      // Sculpted 35mm movement body + machined silver side gear housing
+      Part(0, [0, 0.03, -0.07], [0.085, 0.135, 0.092], [0, 0, 0], PAL.cinemaBody),
+      Part(0, [-0.086, 0.02, -0.07], [0.008, 0.095, 0.068], [0, 0, 0], PAL.machinedSilver),
+      // Iconic Twin Coaxial 400ft 35mm Film Magazines perched on top with brushed aluminum hub bosses
+      Part(2, [0, -0.035, 0.125], [0.096, 0.096, 0.042], [0, 90, 0], PAL.anodizedBlack),
+      Part(2, [0, -0.035, 0.125], [0.036, 0.036, 0.048], [0, 90, 0], PAL.machinedSilver),
+      Part(2, [0, 0.155, 0.145], [0.096, 0.096, 0.042], [0, 90, 0], PAL.anodizedBlack),
+      Part(2, [0, 0.155, 0.145], [0.036, 0.036, 0.048], [0, 90, 0], PAL.machinedSilver),
+      Part(0, [0, 0.06, 0.055], [0.048, 0.095, 0.038], [10, 0, 0], PAL.gunmetal),
+      // Long articulated optical reflex viewfinder along operator left (-X)
+      Part(2, [-0.125, 0.06, -0.04], [0.022, 0.022, 0.135], [90, 0, 0], PAL.anodizedBlack),
+      Part(4, [-0.125, 0.20, -0.04], [0.030, 0.030, 0.010], [90, 0, 0], PAL.rubberDark),
+      // Anamorphic prime lens + focus gear rings + sapphire front element + open 4-vane matte box + red on-air tally
+      ...BuildCinemaOptics({
+        MountY: -0.11,
+        CenterZ: -0.07,
+        BarrelR: 0.066,
+        BarrelHalfLen: 0.088,
+        MatteBoxW: 0.132,
+        MatteBoxH: 0.098,
+        WithFrenchFlag: true,
+        TallyMat: PAL.tallyRed,
       }),
-      // Dual top cinema coaxial magazines (classic iconic game-engine camera silhouette!)
-      Part(2, [0, -0.04, 0.155], [0.095, 0.095, 0.038], [0, 90, 0], PAL.anodizedBlack, {
-        Side: { Fill: "#1f242c", Roughness: 0.32, Metallic: 0.8 },
-        "+Z": { Fill: "#94a3b8", Roughness: 0.22, Metallic: 0.9 },
-        "-Z": { Fill: "#94a3b8", Roughness: 0.22, Metallic: 0.9 },
-      }),
-      Part(2, [0, 0.15, 0.155], [0.095, 0.095, 0.038], [0, 90, 0], PAL.anodizedBlack, {
-        Side: { Fill: "#1f242c", Roughness: 0.32, Metallic: 0.8 },
-        "+Z": { Fill: "#94a3b8", Roughness: 0.22, Metallic: 0.9 },
-        "-Z": { Fill: "#94a3b8", Roughness: 0.22, Metallic: 0.9 },
-      }),
-      // Telephoto anamorphic lens + matte box + red on-air tally
-      Part(2, [0, -0.23, -0.05], [0.082, 0.082, 0.10], [90, 0, 0], PAL.anodizedBlack),
-      Part(0, [0, -0.35, -0.05], [0.14, 0.036, 0.105], [0, 0, 0], PAL.carbon),
-      Part(0, [0, -0.35, 0.072], [0.042, 0.014, 0.014], [0, 0, 0], PAL.tallyRed),
-      // Base dovetail rail
-      Part(0, [0, -0.04, -0.19], [0.075, 0.24, 0.025], [0, 0, 0], PAL.chrome),
+      // Studio dovetail sled + dual 15mm support rods
+      Part(0, [0, 0.02, -0.185], [0.076, 0.165, 0.018], [0, 0, 0], PAL.gunmetal),
+      Part(2, [-0.052, -0.04, -0.168], [0.009, 0.009, 0.22], [90, 0, 0], PAL.machinedSilver),
+      Part(2, [0.052, -0.04, -0.168], [0.009, 0.009, 0.22], [90, 0, 0], PAL.machinedSilver),
     ],
   },
   {
@@ -320,29 +484,35 @@ export const WORLD_PROP_CATALOG = [
     Category: "Cameras",
     Panel: "camera",
     Icon: "camera",
-    HalfHeightZ: 0.82,
+    HalfHeightZ: 0.84,
     NominalScale: [1, 1, 1],
     DefaultFocalMm: 50,
-    Description: "Broadcast cinema camera on 3-leg carbon spreader tripod with fluid head, matte box & V-mount battery",
+    Description: "Studio cinema camera on 3-leg carbon tripod with OConnor fluid head, dual pan bars, sun-hooded monitor & open matte box",
     BuildParts: () => [
-      ...BuildTripodLegs(-0.82, 0.36, 0.44, PAL.carbon, PAL.fiaRed),
-      // Fluid head + pan bar
-      Part(0, [0, 0, 0.44], [0.085, 0.11, 0.055], [0, 0, 0], PAL.anodizedBlack),
-      StrutPart([0.07, 0.06, 0.44], [0.22, 0.34, 0.26], 0.012, PAL.chrome),
-      // Camera body + OLED side + V-mount battery + telephoto lens + matte box + top monitor
-      Part(0, [0, -0.01, 0.58], [0.095, 0.16, 0.095], [0, 0, 0], PAL.matteSlate, {
-        "-X": { Fill: "#0f172a", Roughness: 0.15, Metallic: 0.2, Emission: 1.5, Pattern: "oled_telemetry", Accent: "#22d3ee" },
-        "+X": { Fill: "#27272a", Roughness: 0.4, Metallic: 0.6 },
-        "+Y": { Fill: "#18181b", Roughness: 0.4, Metallic: 0.5 },
-        "-Y": { Fill: "#09090b", Roughness: 0.3, Metallic: 0.8 },
-        "+Z": { Fill: "#27272a", Roughness: 0.45, Metallic: 0.5 },
-        "-Z": { Fill: "#18181b", Roughness: 0.5, Metallic: 0.6 },
-      }),
-      Part(0, [0, 0.18, 0.58], [0.075, 0.042, 0.085], [0, 0, 0], PAL.gunmetal),
-      Part(2, [0, -0.24, 0.57], [0.068, 0.068, 0.09], [90, 0, 0], PAL.anodizedBlack),
-      Part(0, [0, -0.35, 0.57], [0.125, 0.032, 0.092], [0, 0, 0], PAL.rubberDark),
-      Part(0, [0, -0.02, 0.75], [0.085, 0.016, 0.052], [-18, 0, 0], PAL.anodizedBlack, {
-        "-Y": { Fill: "#0ea5e9", Roughness: 0.1, Metallic: 0.1, Emission: 1.9, Pattern: "oled_telemetry", Accent: "#fde047" },
+      ...BuildTripodLegs(-0.84, 0.34, 0.44, PAL.carbon, PAL.fiaRed),
+      // OConnor-style cylindrical fluid head + side drag knob + twin rear telescopic pan bars
+      Part(2, [0, 0, 0.41], [0.074, 0.074, 0.048], [0, 0, 0], PAL.anodizedBlack),
+      Part(4, [-0.082, 0, 0.41], [0.032, 0.032, 0.009], [0, 90, 0], PAL.fiaRed),
+      StrutPart([0.065, 0.04, 0.42], [0.20, 0.32, 0.24], 0.011, PAL.machinedSilver),
+      StrutPart([-0.065, 0.04, 0.42], [-0.18, 0.30, 0.25], 0.011, PAL.machinedSilver),
+      Part(2, [0.20, 0.32, 0.24], [0.017, 0.017, 0.045], [52, -22, 0], PAL.rubberDark),
+      // Cinema camera body + V-Mount battery + NATO top handle
+      Part(0, [0, 0.02, 0.56], [0.084, 0.135, 0.086], [0, 0, 0], PAL.cinemaBody),
+      Part(0, [0, 0.19, 0.57], [0.066, 0.034, 0.076], [5, 0, 0], PAL.gunmetal),
+      Part(2, [0, 0.01, 0.68], [0.014, 0.014, 0.095], [90, 0, 0], PAL.anodizedBlack),
+      // Tilted 7-inch director monitor with 3D sun-hood visor
+      Part(0, [0, -0.02, 0.755], [0.082, 0.010, 0.048], [-16, 0, 0], PAL.monitorSlate),
+      Part(0, [0, -0.045, 0.802], [0.085, 0.026, 0.005], [-16, 0, 0], PAL.anodizedBlack),
+      // Open matte box + multi-ring prime lens + convex sapphire glass
+      ...BuildCinemaOptics({
+        MountY: -0.12,
+        CenterZ: 0.555,
+        BarrelR: 0.060,
+        BarrelHalfLen: 0.080,
+        MatteBoxW: 0.120,
+        MatteBoxH: 0.088,
+        WithFrenchFlag: true,
+        TallyMat: PAL.tallyRed,
       }),
     ],
   },
@@ -355,24 +525,36 @@ export const WORLD_PROP_CATALOG = [
     HalfHeightZ: 0.36,
     NominalScale: [1, 1, 1],
     DefaultFocalMm: 24,
-    Description: "Handheld carbon-fiber 3-axis motorized ring stabilizer with cinema camera & wireless field monitor",
+    Description: "Ronin-style carbon-fiber 3-axis motorized ring stabilizer with brushless gimbal yoke & cinema prime payload",
     BuildParts: () => [
-      // Kickstand feet
-      StrutPart([-0.18, 0.10, -0.35], [-0.06, 0, -0.26], 0.014, PAL.rubberDark),
-      StrutPart([0.18, 0.10, -0.35], [0.06, 0, -0.26], 0.014, PAL.rubberDark),
-      // Outer carbon ring (torus rotated upright in XZ plane!)
-      Part(4, [0, 0, 0.0], [0.30, 0.30, 0.024], [90, 0, 0], PAL.carbon),
-      // Foam side grips + brushless copper gimbal motors
-      Part(2, [-0.29, 0, 0.0], [0.028, 0.028, 0.09], [0, 0, 0], PAL.fiaRed),
-      Part(2, [0.29, 0, 0.0], [0.028, 0.028, 0.09], [0, 0, 0], PAL.fiaRed),
-      Part(2, [0, 0, 0.28], [0.036, 0.036, 0.022], [0, 0, 0], PAL.copper),
-      // Stabilized cinema payload + wide prime lens + top field monitor
-      Part(0, [0, 0.02, -0.02], [0.075, 0.09, 0.068], [0, 0, 0], PAL.anodizedBlack),
-      Part(2, [0, -0.11, -0.02], [0.048, 0.048, 0.055], [90, 0, 0], PAL.gunmetal),
-      Part(0, [0, -0.17, -0.02], [0.082, 0.022, 0.062], [0, 0, 0], PAL.rubberDark),
-      Part(0, [0, -0.03, 0.33], [0.09, 0.014, 0.054], [-15, 0, 0], PAL.anodizedBlack, {
-        "-Y": { Fill: "#0284c7", Roughness: 0.12, Emission: 2.0, Pattern: "oled_telemetry", Accent: "#4ade80" },
+      // Fold-out dual kickstand feet at base
+      StrutPart([-0.18, 0.11, -0.35], [-0.07, 0.0, -0.28], 0.013, PAL.rubberDark),
+      StrutPart([0.18, 0.11, -0.35], [0.07, 0.0, -0.28], 0.013, PAL.rubberDark),
+      StrutPart([-0.18, -0.11, -0.35], [-0.07, 0.0, -0.28], 0.013, PAL.rubberDark),
+      StrutPart([0.18, -0.11, -0.35], [0.07, 0.0, -0.28], 0.013, PAL.rubberDark),
+      // Upright circular carbon-fiber ring + sculpted side rubberized grips + top brushless pan motor
+      Part(4, [0, 0, 0.01], [0.295, 0.295, 0.020], [90, 0, 0], PAL.carbon),
+      Part(2, [-0.282, 0, 0.01], [0.026, 0.026, 0.085], [0, 0, 0], PAL.fiaRed),
+      Part(2, [0.282, 0, 0.01], [0.026, 0.026, 0.085], [0, 0, 0], PAL.fiaRed),
+      Part(2, [0, 0, 0.285], [0.036, 0.036, 0.022], [0, 0, 0], PAL.anodizedBlack),
+      Part(4, [0, 0, 0.285], [0.038, 0.038, 0.007], [0, 0, 0], PAL.copper),
+      // Inner 3-axis CNC cradle yoke arms + roll motor
+      Part(0, [0, 0.125, 0.02], [0.115, 0.014, 0.014], [0, 0, 0], PAL.anodizedBlack),
+      Part(2, [0, 0.138, 0.02], [0.030, 0.030, 0.016], [90, 0, 0], PAL.copper),
+      Part(0, [-0.105, 0.04, -0.02], [0.012, 0.095, 0.014], [0, 0, 0], PAL.anodizedBlack),
+      Part(0, [0.105, 0.04, -0.02], [0.012, 0.095, 0.014], [0, 0, 0], PAL.anodizedBlack),
+      // Suspended compact cinema body + prime lens + focus gear torus + sapphire front optic + top wireless monitor
+      Part(0, [0, 0.02, -0.02], [0.068, 0.082, 0.064], [0, 0, 0], PAL.cinemaBody),
+      ...BuildCinemaOptics({
+        MountY: -0.065,
+        CenterZ: -0.02,
+        BarrelR: 0.048,
+        BarrelHalfLen: 0.058,
+        MatteBoxW: 0.092,
+        MatteBoxH: 0.068,
+        WithFrenchFlag: false,
       }),
+      Part(0, [0, -0.02, 0.335], [0.078, 0.010, 0.044], [-18, 0, 0], PAL.monitorSlate),
     ],
   },
   {
@@ -381,22 +563,32 @@ export const WORLD_PROP_CATALOG = [
     Category: "Cameras",
     Panel: "camera",
     Icon: "camera",
-    HalfHeightZ: 0.28,
+    HalfHeightZ: 0.27,
     NominalScale: [1, 1, 1],
     DefaultFocalMm: 85,
-    Description: "Proving-ground 1000 fps high-speed camera on low-boy CNC spider with CineMag SSD & twin IR strobes",
+    Description: "Phantom-style 1000 fps proving-ground high-speed camera · titanium-white armored body, white telephoto lens & CNC spider",
     BuildParts: () => [
-      // 3-arm CNC spider base
-      Part(2, [0, 0, -0.22], [0.11, 0.11, 0.032], [0, 0, 0], PAL.anodizedBlack),
-      Part(0, [-0.14, -0.10, -0.255], [0.09, 0.032, 0.018], [0, 0, 32], PAL.gunmetal),
-      Part(0, [0.14, -0.10, -0.255], [0.09, 0.032, 0.018], [0, 0, -32], PAL.gunmetal),
-      Part(0, [0, 0.16, -0.255], [0.032, 0.09, 0.018], [0, 0, 0], PAL.gunmetal),
-      // Rugged Phantom body + red CineMag flash module + long telephoto lens + twin IR strobe rings
-      Part(0, [0, 0.03, -0.02], [0.10, 0.17, 0.105], [0, 0, 0], PAL.matteSlate),
-      Part(0, [0, 0.05, 0.11], [0.084, 0.12, 0.03], [0, 0, 0], PAL.fiaRed),
-      Part(2, [0, -0.23, -0.02], [0.064, 0.064, 0.105], [90, 0, 0], PAL.anodizedBlack),
-      Part(2, [-0.115, -0.18, 0.05], [0.032, 0.032, 0.025], [90, 0, 0], PAL.coolGlow),
-      Part(2, [0.115, -0.18, 0.05], [0.032, 0.032, 0.025], [90, 0, 0], PAL.coolGlow),
+      // Heavy CNC 3-leg billet leveling spider base
+      Part(2, [0, 0.02, -0.205], [0.092, 0.092, 0.028], [0, 0, 0], PAL.anodizedBlack),
+      Part(0, [-0.135, -0.085, -0.245], [0.092, 0.028, 0.016], [0, 0, 32], PAL.gunmetal),
+      Part(0, [0.135, -0.085, -0.245], [0.092, 0.028, 0.016], [0, 0, -32], PAL.gunmetal),
+      Part(0, [0, 0.165, -0.245], [0.028, 0.092, 0.016], [0, 0, 0], PAL.gunmetal),
+      // Armored titanium-ivory high-speed chassis + dark recessed heatsink core + crimson CineMag SSD module + top handle
+      Part(0, [0, 0.05, -0.03], [0.092, 0.145, 0.098], [0, 0, 0], PAL.titaniumIvory),
+      Part(0, [0, 0.05, -0.03], [0.098, 0.095, 0.068], [0, 0, 0], PAL.anodizedBlack),
+      Part(0, [0, 0.08, 0.088], [0.072, 0.095, 0.024], [0, 0, 0], PAL.fiaRed),
+      Part(2, [0, 0.04, 0.145], [0.014, 0.014, 0.115], [90, 0, 0], PAL.anodizedBlack),
+      // Long white-barrel f/2.8 proving-ground telephoto lens + black focus rings + deep hood + sapphire optic
+      Part(2, [0, -0.18, -0.03], [0.060, 0.060, 0.095], [90, 0, 0], PAL.titaniumIvory),
+      Part(4, [0, -0.15, -0.03], [0.068, 0.068, 0.011], [90, 0, 0], PAL.anodizedBlack),
+      Part(4, [0, -0.22, -0.03], [0.068, 0.068, 0.010], [90, 0, 0], PAL.anodizedBlack),
+      Part(2, [0, -0.31, -0.03], [0.066, 0.066, 0.045], [90, 0, 0], PAL.anodizedBlack),
+      Part(1, [0, -0.325, -0.03], [0.054, 0.054, 0.054], [0, 0, 0], PAL.emeraldOptic),
+      // Twin side high-speed LED tracking strobe pods
+      Part(2, [-0.125, -0.12, 0.03], [0.030, 0.030, 0.022], [90, 0, 0], PAL.anodizedBlack),
+      Part(1, [-0.125, -0.142, 0.03], [0.022, 0.022, 0.022], [0, 0, 0], PAL.coolGlow),
+      Part(2, [0.125, -0.12, 0.03], [0.030, 0.030, 0.022], [90, 0, 0], PAL.anodizedBlack),
+      Part(1, [0.125, -0.142, 0.03], [0.022, 0.022, 0.022], [0, 0, 0], PAL.coolGlow),
     ],
   },
   {
@@ -408,25 +600,29 @@ export const WORLD_PROP_CATALOG = [
     HalfHeightZ: 0.34,
     NominalScale: [1, 1, 1],
     DefaultFocalMm: 32,
-    Description: "Broadcast ENG shoulder camera perched atop a ribbed safety-orange Pelican flight case",
+    Description: "Broadcast ENG shoulder camera with B4 servo zoom lens & shotgun mic perched on a molded Pelican flight case",
     BuildParts: () => [
-      // Safety-orange Pelican case plinth
-      Part(0, [0, 0, -0.17], [0.29, 0.21, 0.165], [0, 0, 0], PAL.safetyOrange, {
-        "-Y": { Fill: "#ea580c", Roughness: 0.42, Pattern: "stripes", Accent: "#18181b" },
-        "+Y": { Fill: "#ea580c", Roughness: 0.42 },
-        "-X": { Fill: "#c2410c", Roughness: 0.48 },
-        "+X": { Fill: "#c2410c", Roughness: 0.48 },
-        "+Z": { Fill: "#f97316", Roughness: 0.38 },
-        "-Z": { Fill: "#18181b", Roughness: 0.8 },
-      }),
-      // ENG camera body + servo B4 zoom lens + shotgun mic
-      Part(0, [0, 0.03, 0.12], [0.08, 0.17, 0.105], [0, 0, 8], PAL.matteSlate),
-      Part(2, [0.02, -0.21, 0.11], [0.052, 0.052, 0.10], [90, 0, 8], PAL.anodizedBlack),
-      Part(2, [0.06, -0.16, 0.25], [0.016, 0.016, 0.12], [90, 0, 8], PAL.rubberDark),
+      // Clean flat molded flight case + black corner bumpers + twin silver butterfly latches + front handle (zero bitmap stripes!)
+      Part(0, [0, 0, -0.18], [0.285, 0.205, 0.155], [0, 0, 0], PAL.safetyOrange),
+      Part(0, [0, 0, -0.065], [0.294, 0.214, 0.016], [0, 0, 0], PAL.rubberDark),
+      Part(0, [-0.14, -0.212, -0.09], [0.026, 0.010, 0.036], [0, 0, 0], PAL.machinedSilver),
+      Part(0, [0.14, -0.212, -0.09], [0.026, 0.010, 0.036], [0, 0, 0], PAL.machinedSilver),
+      Part(2, [0, -0.224, -0.16], [0.012, 0.012, 0.075], [0, 90, 0], PAL.rubberDark),
+      // Broadcast ENG shoulder camera angled at 10 deg on top of case
+      Part(0, [0.01, 0.04, 0.105], [0.072, 0.155, 0.092], [0, 0, 10], PAL.cinemaBody),
+      Part(0, [0.01, 0.04, 0.005], [0.068, 0.095, 0.018], [0, 0, 10], PAL.rubberDark),
+      Part(0, [-0.02, 0.215, 0.11], [0.062, 0.032, 0.078], [0, 0, 10], PAL.gunmetal),
+      // B4 servo zoom lens + side ergonomic servo rocker pod + sapphire front glass + top shotgun mic
+      Part(2, [0.042, -0.175, 0.095], [0.050, 0.050, 0.088], [90, 0, 10], PAL.anodizedBlack),
+      Part(4, [0.040, -0.165, 0.095], [0.058, 0.058, 0.009], [90, 0, 10], PAL.gunmetal),
+      Part(0, [0.098, -0.155, 0.082], [0.020, 0.048, 0.026], [0, 0, 10], PAL.rubberDark),
+      Part(1, [0.055, -0.252, 0.095], [0.042, 0.042, 0.042], [0, 0, 0], PAL.sapphireOptic),
+      Part(2, [0.065, -0.135, 0.228], [0.014, 0.014, 0.115], [90, 0, 10], PAL.rubberDark),
+      Part(2, [0.005, 0.02, 0.222], [0.013, 0.013, 0.095], [90, 0, 10], PAL.anodizedBlack),
     ],
   },
 
-  // ================================================= STUDIO & STAGE LIGHTS =================================================
+  // ================================================= 2. STUDIO & STAGE LIGHTS (6) =================================================
   {
     PropId: "led_panel_stand",
     Name: "Bi-Color Studio LED Panel",
@@ -436,7 +632,8 @@ export const WORLD_PROP_CATALOG = [
     HalfHeightZ: 0.90,
     NominalScale: [1, 1, 1],
     LightEmitter: {
-      Offset: [0, -0.12, 0.58],
+      Offset: [0, -0.18, 0.58],
+      AimDir: [0, -0.94, -0.34],
       Width: 0.68,
       Height: 0.46,
       Radiance: [8.8, 7.8, 6.2],
@@ -444,25 +641,20 @@ export const WORLD_PROP_CATALOG = [
       Lumens: 3200,
     },
     Description: "1x1 Bi-Color LED studio panel on chrome C-stand with 4 barndoors & live LTC area light emission",
-    BuildParts: () => [
-      ...BuildTripodLegs(-0.90, 0.22, 0.40, PAL.chrome, PAL.anodizedBlack),
-      Part(2, [0, 0, 0.38], [0.018, 0.018, 0.20], [0, 0, 0], PAL.chrome),
-      // Yoke + 1x1 LED panel housing with glowing bi-color LED front (-Y) and blue DMX rear (+Y)
-      Part(0, [0, 0, 0.58], [0.34, 0.042, 0.23], [0, 0, 0], PAL.anodizedBlack, {
-        "-Y": { Fill: "#fff4d2", Roughness: 0.12, Metallic: 0.0, Emission: 6.2, Pattern: "led_grid", Accent: "#fef08a" },
-        "+Y": { Fill: "#1e293b", Roughness: 0.36, Metallic: 0.65, Pattern: "oled_telemetry", Accent: "#38bdf8" },
-        "-X": { Fill: "#18181b", Roughness: 0.35, Metallic: 0.78 },
-        "+X": { Fill: "#18181b", Roughness: 0.35, Metallic: 0.78 },
-        "+Z": { Fill: "#2563eb", Roughness: 0.32, Metallic: 0.55 },
-        "-Z": { Fill: "#18181b", Roughness: 0.4, Metallic: 0.75 },
-      }),
-      // Top & bottom angled barndoors + rear V-mount battery
-      Part(0, [0, -0.11, 0.83], [0.34, 0.08, 0.012], [32, 0, 0], PAL.matteSlate),
-      Part(0, [0, -0.11, 0.33], [0.34, 0.08, 0.012], [-32, 0, 0], PAL.matteSlate),
-      Part(0, [-0.38, -0.10, 0.58], [0.012, 0.08, 0.22], [0, 0, -28], PAL.matteSlate),
-      Part(0, [0.38, -0.10, 0.58], [0.012, 0.08, 0.22], [0, 0, 28], PAL.matteSlate),
-      Part(0, [0.10, 0.075, 0.55], [0.06, 0.032, 0.085], [0, 0, 0], PAL.gunmetal),
-    ],
+    BuildParts: (Rec = {}) => {
+      const IsOn = Rec?.Powered !== false;
+      return [
+        ...BuildTripodLegs(-0.90, 0.22, 0.40, PAL.chrome, PAL.anodizedBlack),
+        Part(2, [0, 0, 0.38], [0.018, 0.018, 0.20], [0, 0, 0], PAL.chrome),
+        Part(0, [0, 0, 0.58], [0.34, 0.042, 0.23], [0, 0, 0], PAL.anodizedBlack),
+        Part(0, [0, -0.044, 0.58], [0.31, 0.006, 0.20], [0, 0, 0], IsOn ? PAL.warmGlow : PAL.unlitDiffuser),
+        Part(0, [0, -0.11, 0.83], [0.34, 0.08, 0.010], [32, 0, 0], PAL.matteSlate),
+        Part(0, [0, -0.11, 0.33], [0.34, 0.08, 0.010], [-32, 0, 0], PAL.matteSlate),
+        Part(0, [-0.38, -0.10, 0.58], [0.010, 0.08, 0.22], [0, 0, -28], PAL.matteSlate),
+        Part(0, [0.38, -0.10, 0.58], [0.010, 0.08, 0.22], [0, 0, 28], PAL.matteSlate),
+        Part(0, [0.10, 0.075, 0.55], [0.06, 0.032, 0.085], [0, 0, 0], PAL.gunmetal),
+      ];
+    },
   },
   {
     PropId: "softbox_cinema_light",
@@ -473,7 +665,8 @@ export const WORLD_PROP_CATALOG = [
     HalfHeightZ: 0.95,
     NominalScale: [1, 1, 1],
     LightEmitter: {
-      Offset: [0, -0.22, 0.56],
+      Offset: [0, -0.28, 0.56],
+      AimDir: [0, -0.95, -0.31],
       Width: 0.85,
       Height: 0.85,
       Radiance: [9.4, 8.9, 8.2],
@@ -481,17 +674,21 @@ export const WORLD_PROP_CATALOG = [
       Lumens: 3800,
     },
     Description: "Parabolic key-light softbox dome on studio stand with COB lamp head & glowing front silk diffuser",
-    BuildParts: () => [
-      ...BuildTripodLegs(-0.95, 0.25, 0.44, PAL.anodizedBlack, PAL.safetyYellow),
-      Part(2, [0, 0, 0.42], [0.020, 0.020, 0.20], [0, 0, 0], PAL.chrome),
-      // Rear COB lamp head + parabolic softbox frustum with glowing front diffuser cap
-      Part(2, [0, 0.14, 0.58], [0.095, 0.095, 0.12], [90, 0, 0], PAL.gunmetal),
-      Part(5, [0, -0.08, 0.58], [0.42, 0.42, 0.18], [-90, 0, 0], PAL.rubberDark, {
-        Side: { Fill: "#18191e", Roughness: 0.82, Metallic: 0.05 },
-        "+Z": { Fill: "#fffaf0", Roughness: 0.18, Metallic: 0.0, Emission: 5.8 },
-        "-Z": { Fill: "#27272a", Roughness: 0.6, Metallic: 0.4 },
-      }),
-    ],
+    BuildParts: (Rec = {}) => {
+      const IsOn = Rec?.Powered !== false;
+      return [
+        ...BuildTripodLegs(-0.95, 0.25, 0.44, PAL.anodizedBlack, PAL.safetyYellow),
+        Part(2, [0, 0, 0.42], [0.020, 0.020, 0.20], [0, 0, 0], PAL.chrome),
+        Part(2, [0, 0.14, 0.58], [0.095, 0.095, 0.12], [90, 0, 0], PAL.gunmetal),
+        Part(5, [0, -0.08, 0.58], [0.42, 0.42, 0.18], [-90, 0, 0], PAL.rubberDark, {
+          Side: { Fill: "#18191e", Roughness: 0.82, Metallic: 0.05 },
+          "+Z": IsOn
+            ? { Fill: "#fffaf0", Roughness: 0.18, Metallic: 0.0, Emission: 5.8 }
+            : { Fill: "#2e3440", Roughness: 0.55, Metallic: 0.04, Emission: 0.0 },
+          "-Z": { Fill: "#27272a", Roughness: 0.6, Metallic: 0.4 },
+        }),
+      ];
+    },
   },
   {
     PropId: "floodlight_tower",
@@ -502,7 +699,8 @@ export const WORLD_PROP_CATALOG = [
     HalfHeightZ: 1.25,
     NominalScale: [1, 1, 1],
     LightEmitter: {
-      Offset: [0, -0.10, 1.02],
+      Offset: [0, -0.18, 1.00],
+      AimDir: [0, -0.90, -0.44],
       Width: 1.15,
       Height: 0.55,
       Radiance: [11.5, 11.2, 10.6],
@@ -510,29 +708,22 @@ export const WORLD_PROP_CATALOG = [
       Lumens: 5200,
     },
     Description: "Mobile safety-yellow paddock generator mast with 4 high-output stadium LED flood pods",
-    BuildParts: () => [
-      // Wheeled yellow generator base + black outriggers
-      Part(0, [0, 0, -1.04], [0.34, 0.44, 0.17], [0, 0, 0], PAL.safetyYellow, {
-        "-X": { Fill: "#eab308", Roughness: 0.36, Pattern: "chevrons", Accent: "#18181b" },
-        "+X": { Fill: "#eab308", Roughness: 0.36, Pattern: "chevrons", Accent: "#18181b" },
-        "-Y": { Fill: "#facc15", Roughness: 0.34 },
-        "+Y": { Fill: "#ca8a04", Roughness: 0.42 },
-        "+Z": { Fill: "#eab308", Roughness: 0.38 },
-        "-Z": { Fill: "#18181b", Roughness: 0.8 },
-      }),
-      Part(2, [-0.36, 0.22, -1.16], [0.09, 0.09, 0.04], [0, 90, 0], PAL.tireBlack),
-      Part(2, [0.36, 0.22, -1.16], [0.09, 0.09, 0.04], [0, 90, 0], PAL.tireBlack),
-      // Telescoping galvanized mast + crossarm + amber safety strobe
-      Part(2, [0, 0, -0.02], [0.042, 0.042, 0.92], [0, 0, 0], PAL.galvanized),
-      Part(0, [0, 0, 0.94], [0.56, 0.04, 0.035], [0, 0, 0], PAL.gunmetal),
-      Part(2, [0, 0, 1.20], [0.042, 0.042, 0.05], [0, 0, 0], PAL.amberBeacon),
-      // 4 angled floodlight LED heads
-      ...[-0.40, -0.14, 0.14, 0.40].map((X) =>
-        Part(0, [X, -0.05, 1.05], [0.11, 0.055, 0.085], [16, 0, 0], PAL.anodizedBlack, {
-          "-Y": { Fill: "#f0f9ff", Roughness: 0.10, Emission: 7.2, Pattern: "led_grid", Accent: "#bae6fd" },
-        }),
-      ),
-    ],
+    BuildParts: (Rec = {}) => {
+      const IsOn = Rec?.Powered !== false;
+      return [
+        Part(0, [0, 0, -1.04], [0.34, 0.44, 0.17], [0, 0, 0], PAL.safetyYellow),
+        Part(0, [0, 0, -1.19], [0.36, 0.46, 0.025], [0, 0, 0], PAL.anodizedBlack),
+        Part(2, [-0.36, 0.22, -1.15], [0.09, 0.09, 0.04], [0, 90, 0], PAL.cvTyreRubber),
+        Part(2, [0.36, 0.22, -1.15], [0.09, 0.09, 0.04], [0, 90, 0], PAL.cvTyreRubber),
+        Part(2, [0, 0, -0.02], [0.042, 0.042, 0.92], [0, 0, 0], PAL.galvanized),
+        Part(0, [0, 0, 0.94], [0.56, 0.04, 0.035], [0, 0, 0], PAL.gunmetal),
+        Part(2, [0, 0, 1.20], [0.042, 0.042, 0.05], [0, 0, 0], IsOn ? PAL.amberBeacon : PAL.unlitDiffuser),
+        ...[-0.40, -0.14, 0.14, 0.40].flatMap((X) => [
+          Part(0, [X, -0.05, 1.05], [0.11, 0.050, 0.085], [16, 0, 0], PAL.anodizedBlack),
+          Part(0, [X, -0.102, 1.035], [0.095, 0.006, 0.070], [16, 0, 0], IsOn ? PAL.coolGlow : PAL.unlitDiffuser),
+        ]),
+      ];
+    },
   },
   {
     PropId: "sky_panel_truss_bar",
@@ -543,7 +734,8 @@ export const WORLD_PROP_CATALOG = [
     HalfHeightZ: 1.02,
     NominalScale: [1, 1, 1],
     LightEmitter: {
-      Offset: [0, -0.08, 0.78],
+      Offset: [0, -0.16, 0.72],
+      AimDir: [0, -0.92, -0.39],
       Width: 1.25,
       Height: 0.42,
       Radiance: [8.5, 9.6, 11.2],
@@ -551,19 +743,18 @@ export const WORLD_PROP_CATALOG = [
       Lumens: 4400,
     },
     Description: "Heavy T-bar truss stand carrying twin wide ARRI-style RGBWW SkyPanel cinema soft lights",
-    BuildParts: () => [
-      Part(0, [0, 0, -0.98], [0.42, 0.42, 0.035], [0, 0, 0], PAL.anodizedBlack),
-      Part(2, [0, 0, -0.06], [0.032, 0.032, 0.88], [0, 0, 0], PAL.chrome),
-      Part(0, [0, 0, 0.86], [0.68, 0.035, 0.035], [0, 0, 0], PAL.chrome),
-      ...[-0.36, 0.36].map((X) =>
-        Part(0, [X, -0.04, 0.72], [0.27, 0.06, 0.14], [14, 0, 0], PAL.skyBlueArri, {
-          "-Y": { Fill: "#e0f2fe", Roughness: 0.14, Emission: 6.5 },
-          "+Y": { Fill: "#1d4ed8", Roughness: 0.32, Metallic: 0.5 },
-          "+Z": { Fill: "#2563eb", Roughness: 0.32, Metallic: 0.5 },
-          "-Z": { Fill: "#1e3a8a", Roughness: 0.4, Metallic: 0.5 },
-        }),
-      ),
-    ],
+    BuildParts: (Rec = {}) => {
+      const IsOn = Rec?.Powered !== false;
+      return [
+        Part(0, [0, 0, -0.98], [0.42, 0.42, 0.035], [0, 0, 0], PAL.anodizedBlack),
+        Part(2, [0, 0, -0.06], [0.032, 0.032, 0.88], [0, 0, 0], PAL.chrome),
+        Part(0, [0, 0, 0.86], [0.68, 0.035, 0.035], [0, 0, 0], PAL.chrome),
+        ...[-0.36, 0.36].flatMap((X) => [
+          Part(0, [X, -0.04, 0.72], [0.27, 0.058, 0.14], [14, 0, 0], PAL.skyBlueArri),
+          Part(0, [X, -0.10, 0.705], [0.245, 0.006, 0.118], [14, 0, 0], IsOn ? PAL.coolGlow : PAL.unlitDiffuser),
+        ]),
+      ];
+    },
   },
   {
     PropId: "pit_worklight_tripod",
@@ -574,7 +765,8 @@ export const WORLD_PROP_CATALOG = [
     HalfHeightZ: 0.86,
     NominalScale: [1, 1, 1],
     LightEmitter: {
-      Offset: [0, -0.06, 0.68],
+      Offset: [0, -0.14, 0.70],
+      AimDir: [0, -0.94, -0.34],
       Width: 0.62,
       Height: 0.30,
       Radiance: [8.4, 7.6, 5.8],
@@ -582,17 +774,18 @@ export const WORLD_PROP_CATALOG = [
       Lumens: 2800,
     },
     Description: "Safety-yellow mechanic tripod with twin IP65 die-cast COB floodlight heads",
-    BuildParts: () => [
-      ...BuildTripodLegs(-0.86, 0.20, 0.38, PAL.safetyYellow, PAL.anodizedBlack),
-      Part(2, [0, 0, 0.38], [0.02, 0.02, 0.24], [0, 0, 0], PAL.safetyYellow),
-      Part(0, [0, 0, 0.62], [0.30, 0.025, 0.022], [0, 0, 0], PAL.safetyYellow),
-      ...[-0.18, 0.18].map((X) =>
-        Part(0, [X, -0.03, 0.72], [0.12, 0.042, 0.09], [10, 0, 0], PAL.safetyYellow, {
-          "-Y": { Fill: "#fef08a", Roughness: 0.12, Emission: 6.8, Pattern: "led_grid", Accent: "#ffffff" },
-          "+Y": { Fill: "#18181b", Roughness: 0.5, Metallic: 0.6 },
-        }),
-      ),
-    ],
+    BuildParts: (Rec = {}) => {
+      const IsOn = Rec?.Powered !== false;
+      return [
+        ...BuildTripodLegs(-0.86, 0.20, 0.38, PAL.safetyYellow, PAL.anodizedBlack),
+        Part(2, [0, 0, 0.38], [0.02, 0.02, 0.24], [0, 0, 0], PAL.safetyYellow),
+        Part(0, [0, 0, 0.62], [0.30, 0.025, 0.022], [0, 0, 0], PAL.safetyYellow),
+        ...[-0.18, 0.18].flatMap((X) => [
+          Part(0, [X, -0.03, 0.72], [0.12, 0.042, 0.09], [10, 0, 0], PAL.safetyYellow),
+          Part(0, [X, -0.074, 0.712], [0.102, 0.006, 0.072], [10, 0, 0], IsOn ? PAL.warmGlow : PAL.unlitDiffuser),
+        ]),
+      ];
+    },
   },
   {
     PropId: "cine_tube_stand",
@@ -603,7 +796,9 @@ export const WORLD_PROP_CATALOG = [
     HalfHeightZ: 0.88,
     NominalScale: [1, 1, 1],
     LightEmitter: {
-      Offset: [0, -0.05, 0.25],
+      Offset: [0, -0.10, 0.25],
+      AimDir: [0, -1.0, 0.0],
+      Omni: true,
       Width: 0.48,
       Height: 0.95,
       Radiance: [6.5, 8.8, 10.5],
@@ -611,22 +806,177 @@ export const WORLD_PROP_CATALOG = [
       Lumens: 2600,
     },
     Description: "4-bank vertical RGBWW pixel LED cinema tubes on low-profile C-stand",
-    BuildParts: () => [
-      ...BuildTripodLegs(-0.88, -0.38, 0.34, PAL.anodizedBlack, PAL.chrome),
-      Part(2, [0, 0, -0.05], [0.018, 0.018, 0.36], [0, 0, 0], PAL.chrome),
-      Part(0, [0, 0.02, 0.24], [0.22, 0.022, 0.028], [0, 0, 0], PAL.gunmetal),
-      ...[
-        [-0.15, "#38bdf8"],
-        [-0.05, "#f8fafc"],
-        [0.05, "#fbbf24"],
-        [0.15, "#f43f5e"],
-      ].map(([X, Hex]) =>
-        Part(2, [X, -0.02, 0.26], [0.022, 0.022, 0.56], [0, 0, 0], Mat(Hex, 0.14, 0.0, { Type: "Unlit", Emission: 5.5 })),
-      ),
-    ],
+    BuildParts: (Rec = {}) => {
+      const IsOn = Rec?.Powered !== false;
+      return [
+        ...BuildTripodLegs(-0.88, -0.38, 0.34, PAL.anodizedBlack, PAL.chrome),
+        Part(2, [0, 0, -0.05], [0.018, 0.018, 0.36], [0, 0, 0], PAL.chrome),
+        Part(0, [0, 0.02, 0.24], [0.22, 0.022, 0.028], [0, 0, 0], PAL.gunmetal),
+        ...[
+          [-0.15, "#38bdf8"],
+          [-0.05, "#f8fafc"],
+          [0.05, "#fbbf24"],
+          [0.15, "#f43f5e"],
+        ].map(([X, Hex]) =>
+          Part(
+            2,
+            [X, -0.02, 0.26],
+            [0.022, 0.022, 0.56],
+            [0, 0, 0],
+            IsOn ? Mat(Hex, 0.14, 0.0, { Type: "Unlit", Emission: 5.5 }) : PAL.unlitDiffuser,
+          ),
+        ),
+      ];
+    },
   },
 
-  // ============================================ TRACK, CONES & WORKSHOP PROPS ============================================
+  // ============================================ 3. MOTORSPORT & STUDIO FANS (3) ============================================
+  {
+    PropId: "wind_drum_fan",
+    Name: "Brake-Cooling Drum Fan",
+    Category: "Fans & Wind",
+    IsFan: true,
+    DefaultRpm: 1850,
+    Panel: "geometry",
+    Icon: "editor-cylinder",
+    HalfHeightZ: 0.45,
+    NominalScale: [1, 1, 1],
+    Description: "88cm wheeled paddock steel drum fan · rolled yellow Venturi shroud, 7 pitched aero blades, chrome guard & tilt cradle",
+    BuildParts: (Rec = {}) => {
+      const IsOn = Rec?.Powered !== false;
+      const SpinDeg = IsOn ? Number(Rec?.__FanSpinDeg || 0) : 0;
+      return [
+        // Tubular steel A-frame floor cradle + rear transport wheels + front rubber feet
+        Part(0, [0, 0, -0.425], [0.36, 0.22, 0.018], [0, 0, 0], PAL.anodizedBlack),
+        Part(0, [-0.385, 0, -0.18], [0.016, 0.028, 0.25], [0, 0, 0], PAL.anodizedBlack),
+        Part(0, [0.385, 0, -0.18], [0.016, 0.028, 0.25], [0, 0, 0], PAL.anodizedBlack),
+        Part(2, [-0.39, 0.18, -0.39], [0.058, 0.058, 0.024], [0, 90, 0], PAL.cvTyreRubber),
+        Part(2, [0.39, 0.18, -0.39], [0.058, 0.058, 0.024], [0, 90, 0], PAL.cvTyreRubber),
+        // Heavy rolled-steel yellow cylindrical drum shroud (overlapping Venturi rings -> 100% solid seamless drum wall!)
+        Part(4, [0, -0.132, 0.03], [0.366, 0.366, 0.068], [90, 0, 0], PAL.safetyYellow),
+        Part(4, [0, 0.132, 0.03], [0.366, 0.366, 0.068], [90, 0, 0], PAL.safetyYellow),
+        Part(4, [0, 0.0, 0.03], [0.368, 0.368, 0.092], [90, 0, 0], PAL.safetyYellow),
+        Part(4, [0, -0.066, 0.03], [0.367, 0.367, 0.090], [90, 0, 0], PAL.safetyYellow),
+        Part(4, [0, 0.066, 0.03], [0.367, 0.367, 0.090], [90, 0, 0], PAL.safetyYellow),
+        Part(2, [0, 0, 0.425], [0.013, 0.013, 0.10], [0, 90, 0], PAL.anodizedBlack),
+        Part(1, [0.16, -0.145, 0.355], [0.014, 0.014, 0.014], [0, 0, 0], IsOn ? PAL.tallyGreen : PAL.rubberDark),
+        // Central electric drive motor pod + machined aluminum nosecone spinner + 7 pitched impeller blades
+        Part(2, [0, 0.04, 0.03], [0.072, 0.072, 0.085], [90, 0, 0], PAL.anodizedBlack),
+        Part(1, [0, -0.048, 0.03], [0.068, 0.068, 0.068], [0, 0, 0], PAL.machinedSilver),
+        ...BuildRadialFanBlades({
+          CenterY: -0.02,
+          CenterZ: 0.03,
+          HubRadius: 0.065,
+          OuterRadius: 0.325,
+          BladeCount: 7,
+          BladeChord: 0.046,
+          PitchDeg: 28,
+          SpinDeg,
+          BladeMat: PAL.machinedSilver,
+        }),
+        // Front concentric chrome wire guard ring + cross-stator bars
+        Part(4, [0, -0.145, 0.03], [0.22, 0.22, 0.006], [90, 0, 0], PAL.chrome),
+        Part(0, [0, -0.148, 0.03], [0.34, 0.005, 0.005], [0, 0, 0], PAL.chrome),
+        Part(0, [0, -0.148, 0.03], [0.005, 0.005, 0.34], [0, 0, 0], PAL.chrome),
+      ];
+    },
+  },
+  {
+    PropId: "pit_turbine_fan",
+    Name: "Pit-Lane Pedestal Turbine Fan",
+    Category: "Fans & Wind",
+    IsFan: true,
+    DefaultRpm: 2400,
+    Panel: "geometry",
+    Icon: "editor-cylinder",
+    HalfHeightZ: 0.62,
+    NominalScale: [1, 1, 1],
+    Description: "Directional motorsport radiator & studio wind-machine turbine on telescoping pedestal with cobalt Venturi lip",
+    BuildParts: (Rec = {}) => {
+      const IsOn = Rec?.Powered !== false;
+      const SpinDeg = IsOn ? Number(Rec?.__FanSpinDeg || 0) * 1.25 : 0;
+      return [
+        // Heavy weighted circular studio base + telescoping column + anodized lock collar
+        Part(2, [0, 0, -0.59], [0.28, 0.28, 0.028], [0, 0, 0], PAL.anodizedBlack),
+        Part(2, [0, 0, -0.54], [0.09, 0.09, 0.028], [0, 0, 0], PAL.gunmetal),
+        Part(2, [0, 0, -0.22], [0.026, 0.026, 0.32], [0, 0, 0], PAL.chrome),
+        Part(2, [0, 0, -0.02], [0.036, 0.036, 0.024], [0, 0, 0], PAL.fiaRed),
+        // Yoke cradle + deep jet-cowling Venturi duct with anodized cobalt-blue intake lip + power tally
+        Part(0, [0, 0, 0.06], [0.285, 0.022, 0.018], [0, 0, 0], PAL.gunmetal),
+        Part(0, [-0.28, 0, 0.20], [0.014, 0.024, 0.15], [0, 0, 0], PAL.gunmetal),
+        Part(0, [0.28, 0, 0.20], [0.014, 0.024, 0.15], [0, 0, 0], PAL.gunmetal),
+        Part(4, [0, -0.125, 0.28], [0.268, 0.268, 0.065], [90, 0, 0], PAL.cvHubCobalt),
+        Part(4, [0, -0.055, 0.28], [0.262, 0.262, 0.088], [90, 0, 0], PAL.anodizedBlack),
+        Part(4, [0, 0.020, 0.28], [0.262, 0.262, 0.088], [90, 0, 0], PAL.anodizedBlack),
+        Part(4, [0, 0.095, 0.28], [0.264, 0.264, 0.075], [90, 0, 0], PAL.anodizedBlack),
+        Part(1, [0, -0.145, 0.545], [0.013, 0.013, 0.013], [0, 0, 0], IsOn ? PAL.tallyGreen : PAL.rubberDark),
+        // Rear finned motor pod + pointed aluminum nosecone + 6 high-pitch aero turbine blades
+        Part(2, [0, 0.08, 0.28], [0.064, 0.064, 0.095], [90, 0, 0], PAL.gunmetal),
+        Part(1, [0, -0.035, 0.28], [0.058, 0.058, 0.058], [0, 0, 0], PAL.machinedSilver),
+        ...BuildRadialFanBlades({
+          CenterY: -0.015,
+          CenterZ: 0.28,
+          HubRadius: 0.055,
+          OuterRadius: 0.232,
+          BladeCount: 6,
+          BladeChord: 0.040,
+          PitchDeg: 32,
+          SpinDeg,
+          BladeMat: PAL.machinedSilver,
+        }),
+      ];
+    },
+  },
+  {
+    PropId: "exhaust_blower_fan",
+    Name: "Dyno Floor Air-Mover Blower",
+    Category: "Fans & Wind",
+    IsFan: true,
+    DefaultRpm: 3200,
+    Panel: "geometry",
+    Icon: "editor-cylinder",
+    HalfHeightZ: 0.35,
+    NominalScale: [1, 1, 1],
+    Description: "Proving-ground chassis-dyno axial floor wind-tunnel blower · 20° pitched crimson Venturi bellmouth, copper spinner & 7 aero blades",
+    BuildParts: (Rec = {}) => {
+      const IsOn = Rec?.Powered !== false;
+      const SpinDeg = IsOn ? Number(Rec?.__FanSpinDeg || 0) * 1.5 : 0;
+      // Heavy tubular steel skid frame + anti-vibration rubber pads + rear control box
+      const Parts = [
+        Part(0, [-0.24, 0.0, -0.325], [0.020, 0.24, 0.018], [0, 0, 0], PAL.anodizedBlack),
+        Part(0, [0.24, 0.0, -0.325], [0.020, 0.24, 0.018], [0, 0, 0], PAL.anodizedBlack),
+        Part(0, [0, -0.20, -0.325], [0.25, 0.020, 0.018], [0, 0, 0], PAL.anodizedBlack),
+        Part(0, [0, 0.20, -0.325], [0.25, 0.020, 0.018], [0, 0, 0], PAL.anodizedBlack),
+        Part(0, [-0.24, 0.02, -0.14], [0.016, 0.026, 0.18], [0, 0, 0], PAL.gunmetal),
+        Part(0, [0.24, 0.02, -0.14], [0.016, 0.026, 0.18], [0, 0, 0], PAL.gunmetal),
+        // Crimson axial Venturi bellmouth duct pitched 18° upward for underbody/radiator airflow
+        Part(4, [0, -0.120, 0.044], [0.248, 0.248, 0.068], [108, 0, 0], PAL.fiaRed),
+        Part(4, [0, -0.052, 0.022], [0.240, 0.240, 0.086], [108, 0, 0], PAL.fiaRed),
+        Part(4, [0, 0.018, -0.002], [0.240, 0.240, 0.086], [108, 0, 0], PAL.anodizedBlack),
+        Part(4, [0, 0.088, -0.024], [0.244, 0.244, 0.072], [108, 0, 0], PAL.fiaRed),
+        Part(2, [0, 0.02, 0.305], [0.014, 0.014, 0.11], [0, 90, 0], PAL.anodizedBlack),
+        Part(1, [0.13, -0.125, 0.265], [0.013, 0.013, 0.013], [0, 0, 0], IsOn ? PAL.tallyGreen : PAL.rubberDark),
+        // Central copper/gunmetal high-RPM motor hub + spinner cone + concentric chrome safety grille
+        Part(2, [0, 0.03, 0.00], [0.062, 0.062, 0.085], [108, 0, 0], PAL.anodizedBlack),
+        Part(1, [0, -0.052, 0.026], [0.056, 0.056, 0.056], [0, 0, 0], PAL.copper),
+        Part(4, [0, -0.135, 0.048], [0.155, 0.155, 0.005], [108, 0, 0], PAL.chrome),
+        ...BuildRadialFanBlades({
+          CenterY: -0.035,
+          CenterZ: 0.020,
+          HubRadius: 0.052,
+          OuterRadius: 0.208,
+          BladeCount: 7,
+          BladeChord: 0.038,
+          PitchDeg: 30,
+          SpinDeg,
+          BladeMat: PAL.machinedSilver,
+        }),
+      ];
+      return Parts;
+    },
+  },
+
+  // ============================================ 4. CONES, BARRIERS, KERB & PADDOCK (13) ============================================
   {
     PropId: "apex_cone",
     Name: "FIA Apex Marker Cone",
@@ -758,93 +1108,127 @@ export const WORLD_PROP_CATALOG = [
   },
   {
     PropId: "tire_stack",
-    Name: "FIA Tire Barrier Stack",
+    Name: "ControlVehicle GT Tyre Stack",
     Category: "Barriers & Paddock",
     Panel: "geometry",
     Icon: "editor-cylinder",
     HalfHeightZ: 0.44,
     NominalScale: [1, 1, 1],
-    Description: "3-high staggered motorsport slick tire stack with sidewall markings & FIA red ratchet strap",
+    Description: "4-corner ControlVehicle 396mm GT slick wheel set · 3 stacked flat + 1 leaning upright with 5-spoke rim & cobalt center-lock hub",
     BuildParts: () => [
-      Part(2, [0, 0, -0.29], [0.35, 0.35, 0.145], [0, 0, 0], PAL.tireBlack, {
-        Side: { Fill: "#1c1e22", Roughness: 0.82, Pattern: "stripes", Accent: "#272a30" },
-        "+Z": { Fill: "#181a1f", Roughness: 0.72, Pattern: "tire_sidewall", Accent: "#ef4444" },
-        "-Z": { Fill: "#181a1f", Roughness: 0.72, Pattern: "tire_sidewall", Accent: "#ef4444" },
-      }),
-      Part(2, [0.025, -0.015, 0.0], [0.35, 0.35, 0.145], [0, 0, 24], PAL.tireBlack, {
-        Side: { Fill: "#1c1e22", Roughness: 0.82, Pattern: "stripes", Accent: "#272a30" },
-        "+Z": { Fill: "#181a1f", Roughness: 0.72, Pattern: "tire_sidewall", Accent: "#facc15" },
-        "-Z": { Fill: "#181a1f", Roughness: 0.72, Pattern: "tire_sidewall", Accent: "#facc15" },
-      }),
-      Part(2, [-0.015, 0.02, 0.29], [0.35, 0.35, 0.145], [0, 0, -18], PAL.tireBlack, {
-        Side: { Fill: "#1c1e22", Roughness: 0.82, Pattern: "stripes", Accent: "#272a30" },
-        "+Z": { Fill: "#181a1f", Roughness: 0.72, Pattern: "tire_sidewall", Accent: "#ef4444" },
-        "-Z": { Fill: "#181a1f", Roughness: 0.72, Pattern: "tire_sidewall", Accent: "#ef4444" },
-      }),
-      // Vertical tie-down strap
-      Part(0, [0, -0.355, 0.0], [0.032, 0.012, 0.43], [0, 0, 0], PAL.fiaRed),
-      Part(0, [0, 0.355, 0.0], [0.032, 0.012, 0.43], [0, 0, 0], PAL.fiaRed),
+      // 3 stacked ControlVehicle 396mm GT slicks (ScaleFactor = 0.72 -> OuterR = 0.366, HalfW = 0.142, total stack Z ∈ [-0.43 .. +0.43])
+      ...BuildControlVehicleTyre({ Pos: [-0.08, 0.08, -0.290], ScaleFactor: 0.72, WithRimAndHub: false }),
+      ...BuildControlVehicleTyre({ Pos: [-0.06, 0.09, -0.005], ScaleFactor: 0.72, WithRimAndHub: false }),
+      ...BuildControlVehicleTyre({ Pos: [-0.09, 0.07, 0.280], ScaleFactor: 0.72, WithRimAndHub: true }),
+      // 4th ControlVehicle wheel leaning upright (74° pitch, 18° yaw) against the stack, showcasing the 5-spoke rim & cobalt-blue hub!
+      ...TransformPartGroup(
+        BuildControlVehicleTyre({ Pos: [0, 0, 0], ScaleFactor: 0.72, WithRimAndHub: true }),
+        [74, 0, -18],
+        [0.24, -0.26, -0.075],
+      ),
     ],
   },
   {
     PropId: "jersey_barrier",
-    Name: "Chicane Jersey Barrier",
+    Name: "New Jersey Concrete Barrier",
     Category: "Barriers & Paddock",
     Panel: "geometry",
     Icon: "editor-cube",
     HalfHeightZ: 0.44,
     NominalScale: [1, 1, 1],
-    Description: "Interlocking F-profile concrete track barrier with FIA red/white chevron faces",
+    Description: "Authentic sloped F-profile New Jersey precast concrete barrier with scupper slots, steel interlock loops & top reflector",
     BuildParts: () => [
-      // Wide lower concrete foot
-      Part(0, [0, 0, -0.30], [0.92, 0.28, 0.14], [0, 0, 0], PAL.concrete),
-      // Upper tapered wall with individual per-face red/white hazard chevrons on Front & Back!
-      Part(0, [0, 0, 0.10], [0.92, 0.15, 0.30], [0, 0, 0], PAL.concrete, {
-        "-Y": { Fill: "#f8fafc", Roughness: 0.55, Pattern: "chevrons", Accent: "#dc2626" },
-        "+Y": { Fill: "#f8fafc", Roughness: 0.55, Pattern: "chevrons", Accent: "#dc2626" },
-        "-X": { Fill: "#9ca3af", Roughness: 0.85 },
-        "+X": { Fill: "#9ca3af", Roughness: 0.85 },
-        "+Z": { Fill: "#d1d5db", Roughness: 0.78 },
-        "-Z": { Fill: "#6b7280", Roughness: 0.88 },
-      }),
-      // Steel interlock pins
-      Part(2, [-0.95, 0, 0.05], [0.03, 0.03, 0.12], [0, 0, 0], PAL.galvanized),
-      Part(2, [0.95, 0, 0.05], [0.03, 0.03, 0.12], [0, 0, 0], PAL.galvanized),
+      // Planted 62cm-wide lower concrete base foot + 2 dark recessed forklift/drainage scupper channels
+      Part(0, [0, 0, -0.385], [0.94, 0.30, 0.055], [0, 0, 0], PAL.concreteBase),
+      Part(0, [-0.46, 0, -0.422], [0.11, 0.308, 0.018], [0, 0, 0], PAL.rubberDark),
+      Part(0, [0.46, 0, -0.422], [0.11, 0.308, 0.018], [0, 0, 0], PAL.rubberDark),
+      // Authentic ±28° sloped lower vehicle-redirection flare skirts transitioning smoothly from 60cm foot to 22cm upper stem!
+      Part(0, [0, -0.155, -0.225], [0.94, 0.095, 0.145], [-28, 0, 0], PAL.concreteWall),
+      Part(0, [0, 0.155, -0.225], [0.94, 0.095, 0.145], [28, 0, 0], PAL.concreteWall),
+      Part(0, [0, 0, -0.215], [0.938, 0.135, 0.135], [0, 0, 0], PAL.concreteWall),
+      // Tapered upper concrete stem wall + chamfered top cap ridge
+      Part(0, [0, 0, 0.11], [0.94, 0.108, 0.265], [0, 0, 0], PAL.concreteWall),
+      Part(0, [0, 0, 0.395], [0.94, 0.088, 0.030], [0, 0, 0], PAL.concreteCap),
+      // Galvanized steel interlocking male/female end loops + top safety retro-reflector tab
+      Part(4, [-0.955, 0, 0.04], [0.052, 0.052, 0.012], [90, 0, 0], PAL.galvanized),
+      Part(2, [0.965, 0, 0.04], [0.022, 0.022, 0.11], [0, 0, 0], PAL.galvanized),
+      Part(0, [0, 0, 0.432], [0.055, 0.014, 0.018], [0, 0, 0], PAL.safetyOrange),
     ],
   },
   {
     PropId: "tecpro_block",
-    Name: "Tecpro Impact Barrier Block",
+    Name: "Tecpro Impact Barrier Pair",
     Category: "Barriers & Paddock",
     Panel: "geometry",
     Icon: "editor-cube",
-    HalfHeightZ: 0.48,
+    HalfHeightZ: 0.46,
     NominalScale: [1, 1, 1],
-    Description: "High-speed FIA red polyethylene energy-absorbing Tecpro crash block with white waist band",
+    Description: "Interlocking FIA crimson & white polyethylene high-speed Tecpro crash barrier cells with cylindrical hinge knuckles & straps",
     BuildParts: () => [
-      Part(0, [0, 0, -0.30], [0.72, 0.34, 0.18], [0, 0, 0], PAL.fiaRed),
-      Part(0, [0, 0, 0.0], [0.69, 0.31, 0.13], [0, 0, 0], PAL.whiteCoat),
-      Part(0, [0, 0, 0.30], [0.72, 0.34, 0.18], [0, 0, 0], PAL.fiaRed),
-      Part(0, [0, 0, 0.0], [0.735, 0.355, 0.035], [0, 0, 0], PAL.rubberDark),
+      // Left Cell (-X): FIA Crimson molded energy-absorbing polyethylene module + rounded vertical end hinge knuckle
+      Part(0, [-0.41, 0, 0.0], [0.38, 0.26, 0.44], [0, 0, 0], PAL.fiaRed),
+      Part(0, [-0.41, 0, -0.38], [0.395, 0.28, 0.06], [0, 0, 0], PAL.fiaRed),
+      Part(0, [-0.41, 0, 0.38], [0.395, 0.28, 0.06], [0, 0, 0], PAL.fiaRed),
+      Part(2, [-0.79, 0, 0.0], [0.24, 0.24, 0.435], [0, 0, 0], PAL.fiaRed),
+      // Right Cell (+X): Pure White interlocking polyethylene module + rounded vertical end hinge knuckle
+      Part(0, [0.41, 0, 0.0], [0.38, 0.26, 0.44], [0, 0, 0], PAL.tecproWhite),
+      Part(0, [0.41, 0, -0.38], [0.395, 0.28, 0.06], [0, 0, 0], PAL.tecproWhite),
+      Part(0, [0.41, 0, 0.38], [0.395, 0.28, 0.06], [0, 0, 0], PAL.tecproWhite),
+      Part(2, [0.79, 0, 0.0], [0.24, 0.24, 0.435], [0, 0, 0], PAL.tecproWhite),
+      // Central interlocking cylindrical knuckle joint + steel drop pin
+      Part(2, [0.0, 0, 0.0], [0.16, 0.16, 0.445], [0, 0, 0], PAL.fiaRed),
+      Part(2, [0.0, 0, 0.0], [0.032, 0.032, 0.46], [0, 0, 0], PAL.galvanized),
+      // Twin recessed matte-black heavy nylon retention straps wrapping horizontally across both cells
+      Part(0, [0, 0, 0.14], [0.84, 0.272, 0.036], [0, 0, 0], PAL.rubberDark),
+      Part(0, [0, 0, -0.14], [0.84, 0.272, 0.036], [0, 0, 0], PAL.rubberDark),
+    ],
+  },
+  {
+    PropId: "armco_barrier",
+    Name: "Armco W-Beam Guardrail",
+    Category: "Barriers & Paddock",
+    Panel: "geometry",
+    Icon: "editor-cube",
+    HalfHeightZ: 0.44,
+    NominalScale: [1, 1, 1],
+    Description: "Proving-ground double-corrugated galvanized steel W-Beam Armco circuit guardrail on 3 heavy steel I-posts",
+    BuildParts: () => [
+      // 3 heavy steel I-posts + bolted floor baseplates + stand-off blockouts
+      ...[-0.82, 0.0, 0.82].flatMap((X) => [
+        Part(0, [X, 0.09, -0.422], [0.095, 0.095, 0.018], [0, 0, 0], PAL.steelPost),
+        Part(0, [X, 0.09, 0.0], [0.038, 0.052, 0.43], [0, 0, 0], PAL.steelPost),
+        Part(0, [X, -0.005, 0.12], [0.042, 0.050, 0.22], [0, 0, 0], PAL.steelPost),
+      ]),
+      // Upper corrugated W-Beam rail (upper wave crest + recessed bolt valley + lower wave crest)
+      Part(0, [0, -0.072, 0.305], [1.02, 0.022, 0.042], [-10, 0, 0], PAL.galvanized),
+      Part(0, [0, -0.052, 0.240], [1.02, 0.016, 0.034], [0, 0, 0], PAL.machinedSilver),
+      Part(0, [0, -0.072, 0.175], [1.02, 0.022, 0.042], [10, 0, 0], PAL.galvanized),
+      // Lower corrugated W-Beam motorsport anti-underride rail
+      Part(0, [0, -0.072, 0.045], [1.02, 0.022, 0.040], [-10, 0, 0], PAL.galvanized),
+      Part(0, [0, -0.052, -0.018], [1.02, 0.016, 0.032], [0, 0, 0], PAL.machinedSilver),
+      Part(0, [0, -0.072, -0.080], [1.02, 0.022, 0.040], [10, 0, 0], PAL.galvanized),
     ],
   },
   {
     PropId: "rumble_curb",
-    Name: "Apex Rumble Kerb Strip",
+    Name: "FIA Sawtooth Apex Kerb",
     Category: "Track & Cones",
     Panel: "geometry",
     Icon: "editor-cube",
-    HalfHeightZ: 0.07,
+    HalfHeightZ: 0.095,
     NominalScale: [1, 1, 1],
-    Description: "FIA red & white alternating serrated motorsport cornering kerb strip",
+    Description: "6-stone physical 3D bevelled FIA red & white sawtooth cornering rumble kerb with rear asphalt run-off apron",
     BuildParts: () => [
-      Part(0, [0, 0, 0], [0.98, 0.34, 0.07], [5, 0, 0], PAL.fiaRed, {
-        "+Z": { Fill: "#f8fafc", Roughness: 0.62, Pattern: "stripes", Accent: "#dc2626" },
-        "-Y": { Fill: "#f8fafc", Roughness: 0.62, Pattern: "stripes", Accent: "#dc2626" },
-        "+Y": { Fill: "#9ca3af", Roughness: 0.85 },
-        "-X": { Fill: "#dc2626", Roughness: 0.65 },
-        "+X": { Fill: "#f8fafc", Roughness: 0.65 },
-        "-Z": { Fill: "#4b5563", Roughness: 0.9 },
+      // Rear dark asphalt run-off apron behind the kerb stones
+      Part(0, [0, 0.25, -0.045], [1.02, 0.13, 0.048], [0, 0, 0], PAL.apronAsphalt),
+      // 6 alternating FIA Red & White physical 3D sawtooth kerb stones (flat nose plinth + pitched sawtooth ramp in matching colour!)
+      ...[0, 1, 2, 3, 4, 5].flatMap((Idx) => {
+        const X = -0.845 + Idx * 0.338;
+        const MatCol = Idx % 2 === 0 ? PAL.kerbRed : PAL.kerbWhite;
+        return [
+          Part(0, [X, -0.05, -0.064], [0.168, 0.27, 0.028], [0, 0, 0], MatCol),
+          Part(0, [X, -0.04, 0.002], [0.166, 0.265, 0.046], [-13, 6.2, 0], MatCol),
+        ];
       }),
     ],
   },
@@ -858,13 +1242,11 @@ export const WORLD_PROP_CATALOG = [
     NominalScale: [1, 1, 1],
     Description: "Trackside A-frame 100m brake marker board with high-contrast face graphic & sandbag ballast",
     BuildParts: () => [
-      // Galvanized A-frame legs + bottom ballast bar
       StrutPart([-0.38, -0.22, -0.55], [-0.36, -0.02, 0.48], 0.018, PAL.galvanized),
       StrutPart([0.38, -0.22, -0.55], [0.36, -0.02, 0.48], 0.018, PAL.galvanized),
       StrutPart([-0.38, 0.24, -0.55], [-0.36, -0.02, 0.48], 0.018, PAL.galvanized),
       StrutPart([0.38, 0.24, -0.55], [0.36, -0.02, 0.48], 0.018, PAL.galvanized),
       Part(0, [0, 0.16, -0.50], [0.34, 0.09, 0.055], [0, 0, 0], PAL.safetyOrange),
-      // 100m Marker Signboard with per-face graphic on Front (-Y) and dark metal back (+Y)
       Part(0, [0, -0.08, 0.12], [0.42, 0.022, 0.32], [-10, 0, 0], PAL.whiteCoat, {
         "-Y": { Fill: "#f8fafc", Roughness: 0.28, Pattern: "brake_100m", Accent: "#dc2626" },
         "+Y": { Fill: "#334155", Roughness: 0.48, Metallic: 0.65 },
@@ -877,20 +1259,29 @@ export const WORLD_PROP_CATALOG = [
   },
   {
     PropId: "sand_barrel",
-    Name: "Crash Attenuator Sand Barrel",
+    Name: "Fitch Inertial Sand Barrel",
     Category: "Barriers & Paddock",
     Panel: "geometry",
     Icon: "editor-cylinder",
     HalfHeightZ: 0.46,
     NominalScale: [1, 1, 1],
-    Description: "Pit-entry safety-yellow impact attenuator drum with black/yellow chevron hazard band",
+    Description: "Highway & pit-entry Fitch crash attenuator sand barrel · flat safety-yellow molded poly drum, 4 hoop ribs & black snap lid",
     BuildParts: () => [
-      Part(2, [0, 0, -0.03], [0.34, 0.34, 0.43], [0, 0, 0], PAL.safetyYellow, {
-        Side: { Fill: "#facc15", Roughness: 0.42, Pattern: "chevrons", Accent: "#18181b" },
-        "+Z": { Fill: "#18181b", Roughness: 0.72 },
-        "-Z": { Fill: "#ca8a04", Roughness: 0.65 },
-      }),
-      Part(2, [0, 0, 0.42], [0.355, 0.355, 0.038], [0, 0, 0], PAL.rubberDark),
+      // Molded black recycled-rubber base plinth
+      Part(2, [0, 0, -0.425], [0.355, 0.355, 0.035], [0, 0, 0], PAL.rubberDark),
+      // Clean flat safety-yellow HDPE barrel body (stepped lower + upper sections, zero noisy texture maps!)
+      Part(2, [0, 0, -0.12], [0.335, 0.335, 0.275], [0, 0, 0], PAL.fitchYellow),
+      Part(2, [0, 0, 0.24], [0.318, 0.318, 0.145], [0, 0, 0], PAL.fitchYellow),
+      // 4 real 3D molded circumferential stiffening hoop ribs around the drum
+      Part(4, [0, 0, -0.27], [0.352, 0.352, 0.018], [0, 0, 0], PAL.fitchRibYellow),
+      Part(4, [0, 0, -0.09], [0.352, 0.352, 0.018], [0, 0, 0], PAL.fitchRibYellow),
+      Part(4, [0, 0, 0.09], [0.348, 0.348, 0.018], [0, 0, 0], PAL.fitchRibYellow),
+      Part(4, [0, 0, 0.26], [0.335, 0.335, 0.016], [0, 0, 0], PAL.fitchRibYellow),
+      // Recessed flat matte-black snap-on weather lid + central fill bung + side lift handles
+      Part(2, [0, 0, 0.405], [0.336, 0.336, 0.032], [0, 0, 0], PAL.rubberDark),
+      Part(2, [0, 0, 0.444], [0.075, 0.075, 0.015], [0, 0, 0], PAL.anodizedBlack),
+      Part(0, [-0.345, 0, 0.20], [0.018, 0.055, 0.016], [0, 0, 0], PAL.rubberDark),
+      Part(0, [0.345, 0, 0.20], [0.018, 0.055, 0.016], [0, 0, 0], PAL.rubberDark),
     ],
   },
   {
@@ -901,23 +1292,18 @@ export const WORLD_PROP_CATALOG = [
     Icon: "editor-cube",
     HalfHeightZ: 0.48,
     NominalScale: [1, 1, 1],
-    Description: "FIA red 6-drawer mechanic rolling cabinet with chrome drawer pulls, rubber workmat & casters",
+    Description: "FIA red mechanic rolling cabinet with 3D chrome drawer pulls, rubber top workmat & swivel casters",
     BuildParts: () => [
-      // 4 casters
       Part(2, [-0.36, -0.18, -0.42], [0.055, 0.055, 0.03], [0, 90, 0], PAL.rubberDark),
       Part(2, [0.36, -0.18, -0.42], [0.055, 0.055, 0.03], [0, 90, 0], PAL.rubberDark),
       Part(2, [-0.36, 0.18, -0.42], [0.055, 0.055, 0.03], [0, 90, 0], PAL.rubberDark),
       Part(2, [0.36, 0.18, -0.42], [0.055, 0.055, 0.03], [0, 90, 0], PAL.rubberDark),
-      // Red steel cabinet with chrome-pull 6-drawer front (-Y) and dark anti-slip top mat (+Z)
-      Part(0, [0, 0, 0.04], [0.44, 0.25, 0.41], [0, 0, 0], PAL.fiaRed, {
-        "-Y": { Fill: "#dc2626", Roughness: 0.28, Metallic: 0.32, Pattern: "drawer_front", Accent: "#e2e8f0" },
-        "+Y": { Fill: "#b91c1c", Roughness: 0.34, Metallic: 0.35 },
-        "-X": { Fill: "#dc2626", Roughness: 0.30, Metallic: 0.32 },
-        "+X": { Fill: "#dc2626", Roughness: 0.30, Metallic: 0.32 },
-        "+Z": { Fill: "#18181b", Roughness: 0.85, Metallic: 0.05 },
-        "-Z": { Fill: "#1f2937", Roughness: 0.6, Metallic: 0.5 },
-      }),
-      // Chrome side push handle
+      Part(0, [0, 0, 0.03], [0.44, 0.25, 0.40], [0, 0, 0], PAL.fiaRed),
+      Part(0, [0, 0, 0.442], [0.445, 0.255, 0.014], [0, 0, 0], PAL.rubberDark),
+      // 5 real 3D brushed-chrome horizontal drawer pull bars on -Y front
+      ...[-0.26, -0.12, 0.02, 0.16, 0.30].map((Z) =>
+        Part(0, [0, -0.258, Z], [0.36, 0.010, 0.012], [0, 0, 0], PAL.chrome),
+      ),
       Part(2, [0.48, 0, 0.34], [0.014, 0.014, 0.19], [90, 0, 0], PAL.chrome),
     ],
   },
@@ -958,6 +1344,11 @@ export const WORLD_PROP_CATALOG = [
 export function GetWorldPropById(PropId) {
   if (!PropId) return null;
   return WORLD_PROP_CATALOG.find((Item) => Item.PropId === PropId) || null;
+}
+
+export function IsFanProp(Row, Rec = {}) {
+  const Def = GetWorldPropById(Row?.PropId || Rec?.PropId);
+  return Boolean(Def?.IsFan || Def?.Category === "Fans & Wind");
 }
 
 // Expand a World Prop into world-space analytical primitives sharing OwnerId = Row.Id
@@ -1004,14 +1395,14 @@ export function ExpandPropPrimitives(Row, Rec = {}, PickCode = 1) {
     const HalfExtents =
       P.Shape === 1 || P.Shape === 4
         ? [
-            Math.max(0.008, P.HalfExtents[0] * UniformS),
-            Math.max(0.008, P.HalfExtents[1] * UniformS),
-            Math.max(0.008, P.HalfExtents[2] * UniformS),
+            Math.max(0.005, P.HalfExtents[0] * UniformS),
+            Math.max(0.005, P.HalfExtents[1] * UniformS),
+            Math.max(0.005, P.HalfExtents[2] * UniformS),
           ]
         : [
-            Math.max(0.008, P.HalfExtents[0] * Sx),
-            Math.max(0.008, P.HalfExtents[1] * Sy),
-            Math.max(0.008, P.HalfExtents[2] * Sz),
+            Math.max(0.005, P.HalfExtents[0] * Sx),
+            Math.max(0.005, P.HalfExtents[1] * Sy),
+            Math.max(0.005, P.HalfExtents[2] * Sz),
           ];
 
     const ResolvedMat =
