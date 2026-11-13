@@ -31,7 +31,7 @@ struct ExtensionMappingEntry
     std::string_view       LowercaseExtension;
 };
 
-constexpr std::array<ExtensionMappingEntry, 23u> ExtensionRegistry = {{
+constexpr std::array<ExtensionMappingEntry, 24u> ExtensionRegistry = {{
     { SpaceExtensionCategory::ProjectSpace,     ".ProjectSpace",     ".projectspace"     },
     { SpaceExtensionCategory::ColourSpace,      ".ColourSpace",      ".colourspace"      },
     { SpaceExtensionCategory::GeometrySpace,    ".GeometrySpace",    ".geometryspace"    },
@@ -55,6 +55,7 @@ constexpr std::array<ExtensionMappingEntry, 23u> ExtensionRegistry = {{
     { SpaceExtensionCategory::NetworkSpace,     ".NetworkSpace",     ".networkspace"     },
     { SpaceExtensionCategory::VectorFieldSpace, ".VectorFieldSpace", ".vectorfieldspace" },
     { SpaceExtensionCategory::ForceModel,       ".ForceModel",       ".forcemodel"       },
+    { SpaceExtensionCategory::InputSpace,       ".InputSpace",       ".inputspace"       },
 }};
 
 struct SubFormatMappingEntry
@@ -63,7 +64,7 @@ struct SubFormatMappingEntry
     std::string_view LowercaseTag;
 };
 
-constexpr std::array<SubFormatMappingEntry, 34u> SubFormatRegistry = {{
+constexpr std::array<SubFormatMappingEntry, 37u> SubFormatRegistry = {{
     { ".DocumentHeader",        ".documentheader"        },
     { ".SectionDirectory",      ".sectiondirectory"      },
     { ".Revision",              ".revision"              },
@@ -98,6 +99,9 @@ constexpr std::array<SubFormatMappingEntry, 34u> SubFormatRegistry = {{
     { ".FormulaKernel",         ".formulakernel"         },
     { ".LatticeSnapshot",       ".latticesnapshot"       },
     { ".EditorOverlaySettings", ".editoroverlaysettings" },
+    { ".ChordRegister",         ".chordregister"         },
+    { ".AxisCalibration",       ".axiscalibration"       },
+    { ".DeviceProfile",         ".deviceprofile"         },
 }};
 
 [[nodiscard]] std::string ToAsciiLower(std::string_view Text)

@@ -51,7 +51,8 @@ enum class SpaceExtensionCategory : uint8_t
     Acoustic        = 19, // [-] - .Acoustic Option 1A natural impulse/propagation setup
     NetworkSpace    = 20, // [-] - .NetworkSpace distributed session routing & replication policies
     VectorFieldSpace= 21, // [-] - .VectorFieldSpace multi-source vector field rig, curves, & formulas
-    ForceModel      = 22  // [-] - .ForceModel Option A single-force preset configuration
+    ForceModel      = 22, // [-] - .ForceModel Option A single-force preset configuration
+    InputSpace      = 23  // [-] - .InputSpace hardware chord registers, navigation presets & axis calibration
 };
 
 //------------------------------------------------------------------------------------------------------------------------

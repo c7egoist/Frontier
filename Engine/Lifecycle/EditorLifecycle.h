@@ -26,7 +26,6 @@
 #include "Engine/SimulationSpace/ForceFields/FieldLatticeCascade.h"
 #include "Engine/SimulationSpace/ForceFields/ForceFieldAccumulator.h"
 #include "Engine/Windowing/PlatformWindow.h"
-#include "Engine/Workspaces/UV/UVWorkspaceHost.h"
 
 #include <array>
 #include <cstdint>
@@ -88,7 +87,6 @@ public:
     }
 
     [[nodiscard]] bool Initialize(const EditorStartupConfiguration& Configuration = {}) noexcept;
-    void               AttachUVWorkspaceHost(Workspaces::UVWorkspaceHost* TargetHost) noexcept { MountedUVHost = TargetHost; }
     void               PopulateShowcaseGallerySession(uint32_t RenderWidthPx = 640u, uint32_t RenderHeightPx = 360u);
     void               RefreshShowcaseViewportRaster();
     [[nodiscard]] OutlinerSlotToken SpawnForceFieldEntry(const SimulationSpace::ForceFields::ForceSourceRecordEntry& SourcePreset);
@@ -132,7 +130,6 @@ private:
     WorkspaceLifecycle                         Workspaces             {};     // [-]     - Multi-document workspace session loop
     Input::InputExtension                      InputCoordinator       {};     // [-]     - Hardware input & OS feedback coordinator
     LifecycleSequence                          EditorSequence         {};     // [-]     - Registered GPU .slang overlay & editor hooks
-    Workspaces::UVWorkspaceHost*               MountedUVHost          = nullptr; // [-]  - Optional live UVWorkspaceHost
     std::unique_ptr<GeometricRaster::ShowcaseWorldSceneBundle>  ShowcaseBundle   {};     // [-]  - Mounted Cornell-Studio Gallery scene & Outliner tokens
     std::unique_ptr<GeometricRaster::TieredWorldRenderSequence> ShowcaseRenderer {};     // [-]  - Calibrated Tier 1 GTX world renderer
     SimulationSpace::ForceFields::ForceFieldAccumulator ForceAccumulator    {};   // [-]  - Analytical ForceModel / VectorField evaluator (no physics)

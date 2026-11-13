@@ -152,16 +152,11 @@ void ViewportProjection::FitPlanarExtents(Mathematics::UVAxes MinBounds, Mathema
 
 Mathematics::Axis3D ViewportProjection::EvaluateCameraEyePosition() const noexcept
 {
-    const float CosPitch = std::cos(SpatialCamera.PitchRadians);
-    const float SinPitch = std::sin(SpatialCamera.PitchRadians);
-    const float CosYaw   = std::cos(SpatialCamera.YawRadians);
-    const float SinYaw   = std::sin(SpatialCamera.YawRadians);
-
-    return {
-        SpatialCamera.TargetPivot.X + SpatialCamera.DistanceMeters * CosPitch * SinYaw,
-        SpatialCamera.TargetPivot.Y + SpatialCamera.DistanceMeters * SinPitch,
-        SpatialCamera.TargetPivot.Z + SpatialCamera.DistanceMeters * CosPitch * CosYaw,
-    };
+    return SpatialCamera.TargetPivot + Mathematics::EvaluateOrbitOffsetFromAngles(
+                                           SpatialCamera.DistanceMeters,
+                                           SpatialCamera.YawRadians,
+                                           SpatialCamera.PitchRadians,
+                                           SpatialCamera.Basis);
 }
 
 void ViewportProjection::EvaluateCameraBasis(
@@ -170,16 +165,13 @@ void ViewportProjection::EvaluateCameraBasis(
     Mathematics::Axis3D& OutForward) const noexcept
 {
     const auto Eye = EvaluateCameraEyePosition();
-    OutForward     = Mathematics::NormalizeAxis({
-        SpatialCamera.TargetPivot.X - Eye.X,
-        SpatialCamera.TargetPivot.Y - Eye.Y,
-        SpatialCamera.TargetPivot.Z - Eye.Z,
-    });
-    const Mathematics::Axis3D WorldUp = (std::abs(OutForward.Y) < 0.96f)
-        ? Mathematics::Axis3D{ 0.0f, 1.0f, 0.0f }
-        : Mathematics::Axis3D{ 0.0f, 0.0f, -1.0f };
-    OutRight = Mathematics::NormalizeAxis(Mathematics::EvaluateCross(OutForward, WorldUp));
-    OutUp    = Mathematics::NormalizeAxis(Mathematics::EvaluateCross(OutRight, OutForward));
+    Mathematics::EvaluateOrthonormalCameraBasis(
+        Eye,
+        SpatialCamera.TargetPivot,
+        SpatialCamera.Basis,
+        OutRight,
+        OutUp,
+        OutForward);
 }
 
 ViewportRay3D ViewportProjection::BuildSpatialRay(
@@ -199,6 +191,19 @@ ViewportRay3D ViewportProjection::BuildSpatialRay(
     const float NdcX    = (LocalPixelX / SafeW) * 2.0f - 1.0f;
     const float NdcY    = 1.0f - (LocalPixelY / SafeH) * 2.0f;
     const float TanHalf = std::tan(0.5f * SpatialCamera.VerticalFovDeg * Constants::DegToRadFloat);
+
+    if (SpatialCamera.Preset == SpatialProjectionPreset::Orthographic)
+    {
+        const float HalfSpanH = std::max(0.05f, SpatialCamera.DistanceMeters * TanHalf);
+        const float HalfSpanW = HalfSpanH * Aspect;
+        const Mathematics::Axis3D Eye = EvaluateCameraEyePosition();
+        const Mathematics::Axis3D Origin = {
+            Eye.X + Right.X * (NdcX * HalfSpanW) + Up.X * (NdcY * HalfSpanH),
+            Eye.Y + Right.Y * (NdcX * HalfSpanW) + Up.Y * (NdcY * HalfSpanH),
+            Eye.Z + Right.Z * (NdcX * HalfSpanW) + Up.Z * (NdcY * HalfSpanH),
+        };
+        return { Origin, Forward };
+    }
 
     const Mathematics::Axis3D Dir = Mathematics::NormalizeAxis({
         Forward.X + Right.X * (NdcX * Aspect * TanHalf) + Up.X * (NdcY * TanHalf),

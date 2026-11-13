@@ -188,6 +188,7 @@ set(FRONTIER_UI_COMPONENT_SOURCES
     Engine/Workspaces/UV/UVWorkspaceHost.cpp
     Engine/GeometricRaster/Rasterization/ImGuiOverlayRasterization.cpp
     Engine/GeometricRaster/GlobalIllumination/ShowcaseGalleryScene.cpp
+    Engine/Input/ImGuiInputAdapter.cpp
     Engine/Configuration/InputSettings.cpp
     Engine/Configuration/ProjectSpaceRepository.cpp
     Engine/Lifecycle/WorkspaceLifecycle.cpp
@@ -256,6 +257,7 @@ frontier_compile_slang_shader(ViewportPickReduction.slang    ComputeEntry  compu
 frontier_compile_slang_shader(UVDistortionInspection.slang   ComputeEntry  compute  UVDistortionInspection.comp.spv)
 frontier_compile_slang_shader(StretchRelaxCompute.slang      ComputeEntry  compute  StretchRelaxCompute.comp.spv)
 frontier_compile_slang_shader(ConcaveSkylineCompute.slang    ComputeEntry  compute  ConcaveSkylineCompute.comp.spv)
+frontier_compile_slang_shader(CameraVisualEffects.slang      ComputeEntry  compute  CameraVisualEffects.comp.spv)
 
 set(FRONTIER_MODULAR_SHADER_DIR "${CMAKE_SOURCE_DIR}/Engine/Shaders")
 
@@ -386,6 +388,8 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/GeometricRaster/GlobalIllumination/IrradianceLatticeSequence.cpp
     Engine/GeometricRaster/GlobalIllumination/SpecularReflectionSequence.cpp
     Engine/GeometricRaster/GlobalIllumination/TieredWorldRenderSequence.cpp
+    Engine/Components/Camera/CameraComponent.cpp
+    Engine/Components/Camera/VisualEffects/CameraOpticsEncoder.cpp
     Engine/GeometrySpace/Network/PolygonNetwork.cpp
     Engine/GeometrySpace/Network/GeometryInstance.cpp
     Engine/GeometrySpace/Network/FacePartitionRegister.cpp
@@ -421,6 +425,7 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/Codecs/SpaceContainerCodec.cpp
     Engine/Codecs/RevisionCodec.cpp
     Engine/Codecs/ProjectCodec.cpp
+    Engine/Codecs/InputCodec.cpp
     Engine/Codecs/ColourCodec.cpp
     Engine/Codecs/GeometryCodec.cpp
     Engine/Codecs/FontCodec.cpp
@@ -564,6 +569,7 @@ if(BUILD_TESTING)
     endfunction()
 
     frontier_register_exhibit(InputValidation             Exhibits/InputValidation.cpp)
+    frontier_register_exhibit(CameraComponentValidation   Exhibits/CameraComponentValidation.cpp)
     frontier_register_exhibit(WindowValidation            Exhibits/WindowValidation.cpp)
     frontier_register_exhibit(DockingValidation           Exhibits/DockingValidation.cpp)
     frontier_register_exhibit(ControlCentreValidation     Exhibits/ControlCentreValidation.cpp)
@@ -590,9 +596,11 @@ if(BUILD_TESTING)
             NAME FrontierUVExecutableSmoke
             COMMAND FrontierUV --frames=3 "--capture-png=${CMAKE_SOURCE_DIR}/Exhibits/Images/UV/FrontierUV_DesktopExecutable.png"
         )
-        add_test(
-            NAME FrontierEditorExecutableSmoke
-            COMMAND FrontierEditor --frames=3 --open-browser "--capture-png=${CMAKE_SOURCE_DIR}/Exhibits/Images/UV/FrontierEditor_DesktopExecutable.png"
-        )
+        if(FRONTIER_PROFILE STREQUAL "Editor")
+            add_test(
+                NAME FrontierEditorExecutableSmoke
+                COMMAND FrontierEditor --frames=3 --open-browser "--capture-png=${CMAKE_SOURCE_DIR}/Exhibits/Images/UV/FrontierEditor_DesktopExecutable.png"
+            )
+        endif()
     endif()
 endif()
