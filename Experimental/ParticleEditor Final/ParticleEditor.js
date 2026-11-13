@@ -445,12 +445,18 @@ function ResetAll()
 
 function BurstAll()
 {
+    let Triggered = 0;
     for (const Effect of Scene.Effects)
     {
-        if (Effect.P.arcMode === 0 || Effect.P.arcMode === 1) TriggerArcStrike(Effect, Scene.Time);
-        else Effect.PendingBurst += Math.max(80, Math.round(Effect.Gpu.cap * 0.45));
+        const Cls = ClassifyEffect(Effect.P);
+        if (Cls.IsArc) { TriggerArcStrike(Effect, Scene.Time); Triggered++; }
+        else if (Cls.IsTransition) { RebuildGpu(Effect); Triggered++; }
+        else if (Cls.IsSteadyOverlay) continue;
+        else if (Cls.IsExpandingWave) { Effect.PendingBurst += Math.max(1, Effect.P.burstCount || 1); Triggered++; }
+        else { Effect.PendingBurst += Math.max(80, Math.round(Effect.Gpu.cap * 0.45)); Triggered++; }
     }
-    AppendLog('PARTICLES', 'Triggered burst & instantaneous spark strike', null, 'live');
+    if (Triggered) AppendLog('PARTICLES', 'Triggered burst, cycle, or spark strike', `${Triggered} active effect(s)`, 'live');
+    else AppendLog('PARTICLES', 'Burst skipped (steady-state HUD / stream effects active)', null, 'warm');
 }
 
 const FORCE_TABS = new Set(['field', 'formula', 'layers', 'cache']);
@@ -629,12 +635,15 @@ function ConstructGeometry()
         if (!Chosen) continue;
         {
             RingXZ(O[0], O[1], O[2], 0.22, 24, [0.95, 0.78, 0.35, 0.75]);
-            const RawDir = P.velDir || [0, 1, 0];
-            const DirMag = Math.hypot(RawDir[0], RawDir[1], RawDir[2]);
-            if (DirMag > 1e-4)
+            if (ClassifyEffect(P).UsesDirVector)
             {
-                const Dir = [RawDir[0] / DirMag, RawDir[1] / DirMag, RawDir[2] / DirMag];
-                Line(O, [O[0] + Dir[0] * 0.45, O[1] + Dir[1] * 0.45, O[2] + Dir[2] * 0.45], [0.95, 0.78, 0.35, 0.85]);
+                const RawDir = P.dir || [0, 1, 0];
+                const DirMag = Math.hypot(RawDir[0], RawDir[1], RawDir[2]);
+                if (DirMag > 1e-4)
+                {
+                    const Dir = [RawDir[0] / DirMag, RawDir[1] / DirMag, RawDir[2] / DirMag];
+                    Line(O, [O[0] + Dir[0] * 0.45, O[1] + Dir[1] * 0.45, O[2] + Dir[2] * 0.45], [0.95, 0.78, 0.35, 0.85]);
+                }
             }
         }
     }
@@ -2574,10 +2583,70 @@ function MountInspectorVectorPreview(Parent, FocusSource = null)
 //                                              EFFECT INSPECTOR
 //------------------------------------------------------------------------------------------------------------------------
 
+function ClassifyEffect(P)
+{
+    const IsArc = P.arcMode === 0 || P.arcMode === 1;
+    const IsBeam = (P.beamMode || 0) > 0;
+    const IsTransition = !!P.transition;
+    const AsmMode = IsTransition ? (P.transition.assemble | 0) : 0;
+    const IsAssembly = IsTransition && AsmMode > 0;
+    const CurlMode = IsTransition ? 0 : (P.curlMode || 0);
+    const IsCurl = CurlMode > 0;
+    const IsObjectPour = CurlMode === 3 && (P.pulseMode || 0) > 0;
+    const IsBoids = P.kind === 6;
+    const Shape = P.shape ?? 3;
+    const IsDiscPlane = Shape === 10 || Shape === 15;
+    const IsSteadyOverlay = IsCurl || Shape === 16 || (Shape === 15 && (P.leafMode || 0) === 0);
+    const IsExpandingWave = Shape === 10 || Shape === 11 || (Shape === 15 && (P.leafMode || 0) >= 1);
+    const UsesEmitVolume = !IsArc && !IsBeam && CurlMode !== 2 && !IsObjectPour && !IsAssembly;
+    const EmitSh = P.emitShape ?? 0;
+    const UsesRate = !IsTransition;
+    const UsesRadius = IsArc || (IsBeam && P.showElectrodes !== false) || (UsesEmitVolume && (EmitSh === 1 || EmitSh === 2));
+    const UsesBoxHalf = IsObjectPour || CurlMode === 1 || (IsTransition && AsmMode === 1) || (UsesEmitVolume && (EmitSh === 3 || EmitSh === 4));
+    const UsesDirVector = !IsTransition && !IsCurl && !IsArc && !IsBeam && !IsBoids && Shape !== 11 && Shape !== 16;
+    const UsesSpread = UsesDirVector && !IsDiscPlane;
+    const UsesSpeed = !IsCurl && !IsAssembly && !IsBoids && !IsSteadyOverlay;
+    const UsesLife = !IsAssembly;
+    const UsesSizeEnd = !IsAssembly;
+    const UsesColB = !IsAssembly;
+    const UsesColC = IsCurl || (P.trailMode || 0) > 0 || IsBoids || IsBeam || Shape === 0 || Shape >= 10;
+    const UsesTrailMode = !IsCurl && !IsTransition && !IsBoids && !IsArc && !IsBeam && (Shape < 10 || Shape === 14);
+    const UsesWind = !IsAssembly && !(Shape === 16 || (Shape === 15 && (P.leafMode || 0) === 0));
+    const UsesDynamics = !IsAssembly && !(Shape === 16 || (Shape === 15 && (P.leafMode || 0) === 0));
+    const UsesLaunchCone = !IsTransition && !IsCurl && !IsArc && !IsBeam && !IsBoids && Shape !== 10 && Shape !== 11 && Shape !== 15 && Shape !== 16 && Shape !== 17;
+
+    let BounceBlockReason = null;
+    if (IsAssembly) BounceBlockReason = 'Analytic assembly ignores floor collision';
+    else if (IsTransition && P.transition.fragment) BounceBlockReason = 'Shatter cubes break into 8 pieces on floor contact';
+    else if (IsCurl) BounceBlockReason = 'Curl flow field does not bounce on floor';
+    else if (P.kind === 1) BounceBlockReason = 'Wind-driven particles settle cleanly on floor';
+    else if (IsBoids) BounceBlockReason = 'Boids steer smoothly above the floor';
+    else if (Shape === 15 || Shape === 16) BounceBlockReason = 'Holographic HUD disc / shield ignores floor bounce';
+
+    return {
+        IsArc, IsBeam, IsTransition, AsmMode, IsAssembly,
+        CurlMode, IsCurl, IsObjectPour, IsBoids, Shape,
+        IsDiscPlane, IsSteadyOverlay, IsExpandingWave,
+        UsesRate, UsesEmitVolume, UsesRadius, UsesBoxHalf,
+        UsesDirVector, UsesSpread, UsesSpeed, UsesLife,
+        UsesSizeEnd, UsesColB, UsesColC, UsesTrailMode,
+        UsesWind, UsesDynamics, UsesLaunchCone, BounceBlockReason
+    };
+}
+
+function SpectrumGradient(P, Cls)
+{
+    const C = Cls || ClassifyEffect(P);
+    if (!C.UsesColB) return DisplayColour(P.colA);
+    if (C.UsesColC) return `linear-gradient(90deg, ${DisplayColour(P.colA)}, ${DisplayColour(P.colC || P.colB)}, ${DisplayColour(P.colB)})`;
+    return `linear-gradient(90deg, ${DisplayColour(P.colA)}, ${DisplayColour(P.colB)})`;
+}
+
 function ConstructEffectInspector(Page, Effect)
 {
     const P = Effect.P;
     const Preset = PE.presetById(Effect.PresetId);
+    const Cls = ClassifyEffect(P);
     PE.Edits.For(Effect);
 
     const TabDefs = [
@@ -2615,8 +2684,15 @@ function ConstructEffectInspector(Page, Effect)
         {
             const Alive = Effect.Gpu?.stats_?.alive ?? 0;
             Metric.textContent = FormatInteger(Alive);
-            Rate.textContent = FormatInteger(P.rate);
-            Rate.append(C.Construct('small', null, '/s'));
+            if (Cls.IsTransition)
+            {
+                Rate.textContent = 'Batch cycle';
+            }
+            else
+            {
+                Rate.textContent = FormatInteger(P.rate);
+                Rate.append(C.Construct('small', null, '/s'));
+            }
             Low.textContent = `of ${FormatInteger(Effect.Gpu?.cap || P.capacity)} cap`;
             const Full = (Alive / Math.max(1, Effect.Gpu?.cap || 1)) >= 0.98;
             Mark.className = 'mark ' + (!P.visible ? 'warm' : Full ? 'warm' : 'live');
@@ -2625,10 +2701,18 @@ function ConstructEffectInspector(Page, Effect)
             MarkText.textContent = !P.visible ? 'Hidden' : !Scene.Playing ? 'Paused' : Full ? 'At capacity' : 'Within capacity';
         });
 
+        const SecondTrio = Cls.IsAssembly
+            ? { Label: 'Assembly', Resolve: () => [Cls.AsmMode === 1 ? 'Shell rebuild' : 'Column stack', `${(P.transition.holdSpread ?? 0).toFixed(1)} s wave`] }
+            : Cls.IsCurl
+                ? { Label: 'Manifold', Resolve: () => [['Planar wave', 'Sphere shell', 'Bokeh ribbon'][Cls.CurlMode - 1] || 'Curl field', `${(P.curlAmp ?? 2.2).toFixed(1)} m/s flow`] }
+                : Cls.IsBoids
+                    ? { Label: 'Cruise speed', Resolve: () => [`${(P.boidsSpeed ?? 3.6).toFixed(1)} m/s`, `radius ${(P.swarmRadius ?? 1.5).toFixed(1)} m`] }
+                    : { Label: 'Gravity', Resolve: () => [`${P.gravity.toFixed(2)} g`, `${P.drag.toFixed(2)} drag`] };
+
         C.MetricTrio(Page, [
             { Label: 'Shape', Resolve: () => [['Streak', 'Sphere', 'Leaf', 'Glow', 'Cube', 'Coin', 'Bubble', 'Snowflake', 'Hailstone', 'Bokeh Bead', 'Shockwave Ring', 'EMP Pulse Dome', 'Holo Glitch', 'Winged Boid', 'Viscous Drop', 'Radar / Sonar Sweep', 'Energy Shield Hex', 'Aurora Curtain'][P.shape] || 'Strand', P.blend === 'alpha' ? 'alpha blend' : 'additive glow'] },
-            { Label: 'Gravity', Resolve: () => [`${P.gravity.toFixed(2)} g`, `${P.drag.toFixed(2)} drag`] },
-            { Label: 'Wind coupling', Highlight: true, Resolve: () => [`${P.windCoupling.toFixed(2)} /s`, 'lattice coupling'] }
+            SecondTrio,
+            { Label: 'Wind coupling', Highlight: true, Resolve: () => Cls.UsesWind ? [`${P.windCoupling.toFixed(2)} /s`, 'lattice coupling'] : ['Locked', Cls.IsAssembly ? 'analytic assembly' : 'static HUD overlay'] }
         ]);
 
         Page.append(C.Construct('div', 'section-subhead', [C.Construct('span', null, 'Quick controls'), C.Construct('span', null, Preset?.group || 'Particles')]));
@@ -2636,8 +2720,9 @@ function ConstructEffectInspector(Page, Effect)
         C.ToggleTile(Grid, BindEffect(Effect, P, 'visible', { Label: 'Visible', Glyph: 'Eye' }));
         C.ToggleTile(Grid, {
             Label: 'Wind-driven', Glyph: 'Wind',
-            Read: () => P.windCoupling > 0,
-            Write: PE.Edits.Through('Wind coupling', On => { P.windCoupling = On ? (Effect.StoredCoupling || 1) : (Effect.StoredCoupling = P.windCoupling, 0); })
+            Read: () => Cls.UsesWind && P.windCoupling > 0,
+            Write: PE.Edits.Through('Wind coupling', On => { P.windCoupling = On ? (Effect.StoredCoupling || 1) : (Effect.StoredCoupling = P.windCoupling, 0); }),
+            Availability: () => Cls.UsesWind ? { Enabled: true } : { Enabled: false, Reason: Cls.IsAssembly ? 'Analytic assembly ignores wind' : 'Stationary HUD / shield overlay ignores wind' }
         });
         C.ToggleTile(Grid, {
             Label: 'Additive glow', Glyph: 'Sparkles',
@@ -2646,75 +2731,119 @@ function ConstructEffectInspector(Page, Effect)
         });
         C.ToggleTile(Grid, {
             Label: 'Floor bounce', Glyph: 'Activity',
-            Read: () => P.bounce > 0,
-            Write: PE.Edits.Through('Bounce', On => { P.bounce = On ? (Effect.StoredBounce || 0.4) : (Effect.StoredBounce = P.bounce, 0); })
+            Read: () => !Cls.BounceBlockReason && P.bounce > 0,
+            Write: PE.Edits.Through('Bounce', On => { P.bounce = On ? (Effect.StoredBounce || (Cls.Shape === 14 ? 0.28 : 0.4)) : (Effect.StoredBounce = P.bounce, 0); }),
+            Availability: () => Cls.BounceBlockReason ? { Enabled: false, Reason: Cls.BounceBlockReason } : { Enabled: true }
         });
         Page.append(Grid);
 
+        const BurstAction = Cls.IsArc
+            ? { Label: 'Trigger Spark', Glyph: 'Zap', Tone: 'accent', Act: () => { TriggerArcStrike(Effect, Scene.Time); AppendLog('PARTICLES', `${Effect.Name}: fired spark arc`, `t=${Scene.Time.toFixed(2)}s`, 'live'); } }
+            : Cls.IsTransition
+                ? { Label: 'Replay Cycle', Glyph: 'Sparkles', Tone: 'accent', Act: () => { RebuildGpu(Effect); AppendLog('PARTICLES', `${Effect.Name}: replayed transition cycle`, `${Effect.Gpu.cap} pieces`, 'live'); } }
+                : Cls.IsSteadyOverlay
+                    ? { Label: 'Burst', Glyph: 'Sparkles', Tone: 'accent', Act: () => {}, Availability: () => ({ Enabled: false, Reason: Cls.IsCurl ? 'Continuous curl stream pre-populates smoothly' : 'Steady-state HUD / shield overlay runs continuously' }) }
+                    : Cls.IsExpandingWave
+                        ? { Label: 'Emit Pulse', Glyph: 'Sparkles', Tone: 'accent', Act: () => { Effect.PendingBurst += Math.max(1, P.burstCount || 1); } }
+                        : { Label: 'Burst', Glyph: 'Sparkles', Tone: 'accent', Act: () => { Effect.PendingBurst += Math.max(60, Math.round(Effect.Gpu.cap * 0.4)); } };
+
         C.ActionRow(Page, [
-            { Label: 'Burst', Glyph: 'Sparkles', Tone: 'accent', Act: () => { Effect.PendingBurst += Math.max(60, Math.round(Effect.Gpu.cap * 0.4)); } },
+            BurstAction,
             { Label: 'Clear', Glyph: 'Reset', Act: () => RebuildGpu(Effect) },
             { Label: 'Duplicate', Glyph: 'Copy', Act: () => DuplicateEffect(Effect) },
             { Label: 'Delete', Glyph: 'Trash', Tone: 'danger', Act: () => RemoveEffect(Effect) }
         ]);
 
+        if (Cls.UsesLaunchCone)
         {
             const Opt = C.SectionCard(Page, { Title: 'Emitter cone & spectrum', Glyph: 'Aperture', Badge: '02 / OPTICS', Hint: 'Live launch direction, spread cone angle, speed band and colour ramp.' });
             C.EmitterInstrument(Opt.Inner, Effect, DisplayColour);
             const Ribbon = C.Construct('div', 'gradient-ribbon');
             Opt.Inner.append(Ribbon);
-            C.Register(() => { Ribbon.style.background = `linear-gradient(90deg, ${DisplayColour(P.colA)}, ${DisplayColour(P.colC || P.colB)}, ${DisplayColour(P.colB)})`; });
+            C.Register(() => { Ribbon.style.background = SpectrumGradient(P); });
+        }
+        else
+        {
+            const Spec = C.SectionCard(Page, { Title: 'Colour spectrum', Glyph: 'Palette', Badge: '02 / SPECTRUM', Hint: Cls.IsAssembly ? 'Base surface tint used during analytic assembly.' : 'Active colour ramp rendered by this effect.' });
+            const Ribbon = C.Construct('div', 'gradient-ribbon');
+            Spec.Inner.append(Ribbon);
+            C.Register(() => { Ribbon.style.background = SpectrumGradient(P); });
         }
         return;
     }
 
     if (InspectorTab === 'source')
     {
-        const Src = C.SectionCard(Page, { Title: 'Emission source', Glyph: 'Target', Badge: '01 / SOURCE', Hint: 'Birth rate, emitter volume geometry and spawn origin.' }).Inner;
-        const Capacities = [...new Set([384, 512, 1024, 1536, 2048, 4096, 8192, P.capacity])].sort((A, B) => A - B);
+        const SrcHint = Cls.IsTransition
+            ? 'Transition batches spawn full pool capacity together at each cycle.'
+            : Cls.IsObjectPour
+                ? 'Particles pour directly over the 3D object surface whose dimensions come from boxHalf.'
+                : Cls.CurlMode === 2
+                    ? 'Particles spawn directly onto the spherical plasma shell around the origin.'
+                    : 'Birth rate, emitter volume geometry and spawn origin.';
+        const Src = C.SectionCard(Page, { Title: 'Emission source', Glyph: 'Target', Badge: '01 / SOURCE', Hint: SrcHint }).Inner;
+        const Capacities = [...new Set([64, 384, 512, 1024, 1536, 2048, 4096, 8192, P.capacity])].sort((A, B) => A - B);
         C.SelectRow(Src, BindEffect(Effect, P, 'capacity', { Label: 'Pool capacity', Options: Capacities.map(K => [FormatInteger(K), K]), Rebuild: true }));
-        Range(Src, BindEffect(Effect, P, 'rate', { Label: 'Spawn rate' }), 0, 2000, 1, 0, '/s');
-        const EmitShapeB = BindEffect(Effect, P, 'emitShape', { Label: 'Volume shape', Options: [['Point', 0], ['Sphere volume', 1], ['Disc', 2], ['Box', 3], ['Box surface lattice', 4]] });
-        const OrigEmitWrite = EmitShapeB.Write;
-        EmitShapeB.Write = V => { OrigEmitWrite(V); ConstructInspectorPage(); };
-        C.SelectRow(Src, EmitShapeB);
-        C.VectorRow(Src, BindEffect(Effect, P, 'origin', { Label: P.arcMode !== undefined ? 'Sphere A position' : 'Emitter origin', Unit: 'm', Step: 0.05, Digits: 2, Minimum: -20, Maximum: 20 }));
-        const EmitSh = P.emitShape ?? 0;
-        if (EmitSh === 1 || EmitSh === 2 || P.arcMode !== undefined)
-            Range(Src, BindEffect(Effect, P, 'radius', { Label: P.arcMode !== undefined ? 'Sphere A radius' : 'Emitter radius' }), 0.08, 4, 0.01, 2, 'm');
-        if (EmitSh === 3 || EmitSh === 4)
-            C.VectorRow(Src, BindEffect(Effect, P, 'boxHalf', { Label: 'Box half extents', Unit: 'm', Step: 0.05, Digits: 2, Minimum: 0, Maximum: 10 }));
-        const ArcSrc = C.SectionCard(Page, { Title: 'Dual-sphere lightning & static arc', Glyph: 'Zap', Badge: '02 / ELECTRODES' }).Inner;
-        const ArcEnableB = {
-            Label: 'Arc discharge mode',
-            Options: [['Off (standard emitter)', -1], ['Dielectric Spark Lightning', 0], ['Static Corona Filaments', 1]],
-            Read: () => (P.arcMode === 0 || P.arcMode === 1) ? P.arcMode : -1,
-            Write: V =>
-            {
-                const Mode = Number(V);
-                if (Mode < 0) delete P.arcMode;
-                else
-                {
-                    P.arcMode = Mode;
-                    if (!P.targetPos) P.targetPos = [P.origin[0] + 4.0, P.origin[1], P.origin[2]];
-                    if (P.targetRadius === undefined) P.targetRadius = Math.max(0.25, P.radius || 0.45);
-                    if (P.arcLoop === undefined) P.arcLoop = Mode === 1;
-                    if (P.arcHold === undefined) P.arcHold = Mode === 1 ? 0.24 : 0.30;
-                    if (P.arcInterval === undefined) P.arcInterval = Mode === 1 ? 0.55 : 1.40;
-                    if (P.arcBow === undefined) P.arcBow = Mode === 1 ? 0.32 : 0.14;
-                    if (P.arcCount === undefined) P.arcCount = Mode === 1 ? 3 : 1;
-                    if (P.arcJitter === undefined) P.arcJitter = Mode === 1 ? 0.42 : 0.62;
-                    if (P.arcRate === undefined) P.arcRate = Mode === 1 ? 28 : 14;
-                    if (P.showElectrodes === undefined) P.showElectrodes = true;
-                    TriggerArcStrike(Effect, Scene.Time);
-                }
-                PE.Edits.Announce('Arc mode', Mode);
-                ConstructInspectorPage();
-            }
-        };
-        C.SelectRow(ArcSrc, ArcEnableB);
-        if (P.arcMode === 0 || P.arcMode === 1)
+        if (Cls.UsesRate)
+            Range(Src, BindEffect(Effect, P, 'rate', { Label: 'Spawn rate' }), 0, 2000, 1, 0, '/s');
+        if (Cls.UsesEmitVolume)
         {
+            const EmitShapeB = BindEffect(Effect, P, 'emitShape', { Label: 'Volume shape', Options: [['Point', 0], ['Sphere volume', 1], ['Disc', 2], ['Box', 3], ['Box surface lattice', 4]] });
+            const OrigEmitWrite = EmitShapeB.Write;
+            EmitShapeB.Write = V => { OrigEmitWrite(V); ConstructInspectorPage(); };
+            C.SelectRow(Src, EmitShapeB);
+        }
+        const OriginLabel = Cls.IsArc ? 'Sphere A position' : Cls.IsBeam ? 'Beam muzzle position' : Cls.IsObjectPour ? '3D object centre' : 'Emitter origin';
+        C.VectorRow(Src, BindEffect(Effect, P, 'origin', { Label: OriginLabel, Unit: 'm', Step: 0.05, Digits: 2, Minimum: -20, Maximum: 20 }));
+        if (Cls.CurlMode === 2)
+            Range(Src, BindEffect(Effect, P, 'shellRadius', { Label: 'Sphere shell radius' }), 0.4, 5.0, 0.05, 2, 'm');
+        if (Cls.UsesRadius)
+        {
+            const RadLabel = Cls.IsArc ? 'Sphere A radius' : Cls.IsBeam ? 'Muzzle ring radius' : 'Emitter radius';
+            Range(Src, BindEffect(Effect, P, 'radius', { Label: RadLabel }), 0.04, 4, 0.01, 2, 'm');
+        }
+        if (Cls.UsesBoxHalf)
+        {
+            const BoxLabel = Cls.IsObjectPour
+                ? ((P.objectShape ?? 0) === 1 ? 'Object half extents (X = sphere radius)' : 'Object half extents')
+                : Cls.CurlMode === 1
+                    ? 'Wave field extents'
+                    : Cls.IsAssembly
+                        ? 'Target cube half extents'
+                        : 'Box half extents';
+            C.VectorRow(Src, BindEffect(Effect, P, 'boxHalf', { Label: BoxLabel, Unit: 'm', Step: 0.05, Digits: 2, Minimum: 0, Maximum: 10 }));
+        }
+        if (Cls.IsArc)
+        {
+            const ArcSrc = C.SectionCard(Page, { Title: 'Dual-sphere lightning & static arc', Glyph: 'Zap', Badge: '02 / ELECTRODES' }).Inner;
+            const ArcEnableB = {
+                Label: 'Arc discharge mode',
+                Options: [['Dielectric Spark Lightning', 0], ['Static Corona Filaments', 1], ['Off (standard emitter)', -1]],
+                Read: () => (P.arcMode === 0 || P.arcMode === 1) ? P.arcMode : -1,
+                Write: V =>
+                {
+                    const Mode = Number(V);
+                    if (Mode < 0) delete P.arcMode;
+                    else
+                    {
+                        P.arcMode = Mode;
+                        if (!P.targetPos) P.targetPos = [P.origin[0] + 4.0, P.origin[1], P.origin[2]];
+                        if (P.targetRadius === undefined) P.targetRadius = Math.max(0.25, P.radius || 0.45);
+                        if (P.arcLoop === undefined) P.arcLoop = Mode === 1;
+                        if (P.arcHold === undefined) P.arcHold = Mode === 1 ? 0.24 : 0.30;
+                        if (P.arcInterval === undefined) P.arcInterval = Mode === 1 ? 0.55 : 1.40;
+                        if (P.arcBow === undefined) P.arcBow = Mode === 1 ? 0.32 : 0.14;
+                        if (P.arcCount === undefined) P.arcCount = Mode === 1 ? 3 : 1;
+                        if (P.arcJitter === undefined) P.arcJitter = Mode === 1 ? 0.42 : 0.62;
+                        if (P.arcRate === undefined) P.arcRate = Mode === 1 ? 28 : 14;
+                        if (P.showElectrodes === undefined) P.showElectrodes = true;
+                        TriggerArcStrike(Effect, Scene.Time);
+                    }
+                    PE.Edits.Announce('Arc mode', Mode);
+                    ConstructInspectorPage();
+                }
+            };
+            C.SelectRow(ArcSrc, ArcEnableB);
             if (!P.targetPos) P.targetPos = [P.origin[0] + 4.0, P.origin[1], P.origin[2]];
             C.ActionRow(ArcSrc, [{
                 Label: '⚡ Trigger Instantaneous Spark', Glyph: 'Zap', Tone: 'accent',
@@ -2735,24 +2864,44 @@ function ConstructEffectInspector(Page, Effect)
             ArcSrc.append(ElecGrid);
             C.ToggleTile(ElecGrid, BindEffect(Effect, P, 'showElectrodes', { Label: 'Show 3D spheres', Glyph: 'Target' }));
         }
-        if ((P.beamMode || 0) > 0)
+        if (Cls.IsBeam)
         {
             const BeamSec = C.SectionCard(Page, { Title: 'Coherent beam & impact target', Glyph: 'Rays', Badge: '02B / BEAM' }).Inner;
             if (!P.targetPos) P.targetPos = [P.origin[0] + 4.8, P.origin[1] - 0.8, P.origin[2]];
             C.VectorRow(BeamSec, BindEffect(Effect, P, 'targetPos', { Label: 'Target impact position (drag in 3D)', Unit: 'm', Step: 0.05, Digits: 2, Minimum: -20, Maximum: 20 }));
+            if (P.showElectrodes !== false)
+                Range(BeamSec, BindEffect(Effect, P, 'targetRadius', { Label: 'Target ring radius' }), 0.08, 2.0, 0.01, 2, 'm');
             Range(BeamSec, BindEffect(Effect, P, 'beamWidth', { Label: 'Beam plasma core radius' }), 0.01, 0.25, 0.004, 3, 'm');
             Range(BeamSec, BindEffect(Effect, P, 'beamPulse', { Label: 'Plasma wave pulse speed' }), 0.5, 20, 0.25, 2, 'Hz');
             const BGrid = C.Construct('div', 'property-switches');
             BeamSec.append(BGrid);
-            C.ToggleTile(BGrid, BindEffect(Effect, P, 'showElectrodes', { Label: 'Show muzzle/target rings', Glyph: 'Target' }));
+            const ShowElecB = BindEffect(Effect, P, 'showElectrodes', { Label: 'Show muzzle/target rings', Glyph: 'Target' });
+            const OrigElecW = ShowElecB.Write;
+            ShowElecB.Write = V => { OrigElecW(!!V); ConstructInspectorPage(); };
+            C.ToggleTile(BGrid, ShowElecB);
         }
-        const Vel = C.SectionCard(Page, { Title: 'Launch velocity & lifetime', Glyph: 'Rays', Badge: '03 / KINEMATICS' }).Inner;
-        C.VectorRow(Vel, BindEffect(Effect, P, 'dir', { Label: 'Launch direction', Step: 0.01, Digits: 2, Minimum: -1, Maximum: 1 }));
-        Range(Vel, BindEffect(Effect, P, 'spread', { Label: 'Cone spread' }), 0, 3.1416, 0.01, 2, 'rad');
-        Range(Vel, Object.assign(BindEffect(Effect, P, 'speedMin', { Label: 'Speed minimum' }), { Write: PE.Edits.Through('Speed min', V => { P.speedMin = Math.min(V, P.speedMax); }) }), 0, 20, 0.05, 2, 'm/s');
-        Range(Vel, Object.assign(BindEffect(Effect, P, 'speedMax', { Label: 'Speed maximum' }), { Write: PE.Edits.Through('Speed max', V => { P.speedMax = Math.max(V, P.speedMin); }) }), 0, 20, 0.05, 2, 'm/s');
-        Range(Vel, Object.assign(BindEffect(Effect, P, 'lifeMin', { Label: 'Life minimum' }), { Write: PE.Edits.Through('Life min', V => { P.lifeMin = Math.min(V, P.lifeMax); }) }), 0.05, 20, 0.05, 2, 's');
-        Range(Vel, Object.assign(BindEffect(Effect, P, 'lifeMax', { Label: 'Life maximum' }), { Write: PE.Edits.Through('Life max', V => { P.lifeMax = Math.max(V, P.lifeMin); }) }), 0.05, 20, 0.05, 2, 's');
+        if (Cls.UsesDirVector || Cls.UsesSpread || Cls.UsesSpeed || Cls.UsesLife)
+        {
+            const Vel = C.SectionCard(Page, { Title: Cls.IsDiscPlane && !Cls.UsesSpeed ? 'Orientation & lifetime' : 'Launch velocity & lifetime', Glyph: 'Rays', Badge: '03 / KINEMATICS' }).Inner;
+            if (Cls.UsesDirVector)
+                C.VectorRow(Vel, BindEffect(Effect, P, 'dir', { Label: Cls.IsDiscPlane ? 'Disc / plane normal' : 'Launch direction', Step: 0.01, Digits: 2, Minimum: -1, Maximum: 1 }));
+            if (Cls.UsesSpread)
+                Range(Vel, BindEffect(Effect, P, 'spread', { Label: 'Cone spread' }), 0, 3.1416, 0.01, 2, 'rad');
+            if (Cls.UsesSpeed)
+            {
+                const SpdMinLbl = Cls.IsTransition ? 'Burst speed minimum' : Cls.IsArc || Cls.IsBeam ? 'Spark speed minimum' : 'Speed minimum';
+                const SpdMaxLbl = Cls.IsTransition ? 'Burst speed maximum' : Cls.IsArc || Cls.IsBeam ? 'Spark speed maximum' : 'Speed maximum';
+                Range(Vel, Object.assign(BindEffect(Effect, P, 'speedMin', { Label: SpdMinLbl }), { Write: PE.Edits.Through('Speed min', V => { P.speedMin = Math.min(V, P.speedMax); }) }), 0, 20, 0.05, 2, 'm/s');
+                Range(Vel, Object.assign(BindEffect(Effect, P, 'speedMax', { Label: SpdMaxLbl }), { Write: PE.Edits.Through('Speed max', V => { P.speedMax = Math.max(V, P.speedMin); }) }), 0, 20, 0.05, 2, 'm/s');
+            }
+            if (Cls.UsesLife)
+            {
+                const LifeMinLbl = Cls.IsTransition ? 'Post-hold lifetime minimum' : 'Life minimum';
+                const LifeMaxLbl = Cls.IsTransition ? 'Post-hold lifetime maximum' : 'Life maximum';
+                Range(Vel, Object.assign(BindEffect(Effect, P, 'lifeMin', { Label: LifeMinLbl }), { Write: PE.Edits.Through('Life min', V => { P.lifeMin = Math.min(V, P.lifeMax); }) }), 0.05, 20, 0.05, 2, 's');
+                Range(Vel, Object.assign(BindEffect(Effect, P, 'lifeMax', { Label: LifeMaxLbl }), { Write: PE.Edits.Through('Life max', V => { P.lifeMax = Math.max(V, P.lifeMin); }) }), 0.05, 20, 0.05, 2, 's');
+            }
+        }
         return;
     }
 
@@ -2761,7 +2910,7 @@ function ConstructEffectInspector(Page, Effect)
         const Look = C.SectionCard(Page, { Title: 'Particle appearance', Glyph: 'Palette', Badge: '01 / SHADING' }).Inner;
         const Ribbon = C.Construct('div', 'gradient-ribbon');
         Look.append(Ribbon);
-        C.Register(() => { Ribbon.style.background = `linear-gradient(90deg, ${DisplayColour(P.colA)}, ${DisplayColour(P.colC || P.colB)}, ${DisplayColour(P.colB)})`; });
+        C.Register(() => { Ribbon.style.background = SpectrumGradient(P); });
         const ShapeB = BindEffect(Effect, P, 'shape', {
             Label: 'Billboard / mesh shape',
             Options: [
@@ -2776,25 +2925,34 @@ function ConstructEffectInspector(Page, Effect)
         ShapeB.Write = V => { OrigShapeW(Number(V)); ConstructInspectorPage(); };
         C.SelectRow(Look, ShapeB);
         C.SegmentedRow(Look, BindEffect(Effect, P, 'blend', { Label: 'Compositing blend', Options: [['Additive glow', 'add'], ['Alpha · premultiplied', 'alpha']] }));
-        Range(Look, BindEffect(Effect, P, 'sizeStart', { Label: 'Size at birth' }), 0.002, 16, 0.004, 3, 'm');
-        Range(Look, BindEffect(Effect, P, 'sizeEnd', { Label: 'Size at death' }), 0.002, 18, 0.01, 3, 'm');
+        Range(Look, BindEffect(Effect, P, 'sizeStart', { Label: Cls.IsAssembly ? 'Piece size' : 'Size at birth' }), 0.002, 16, 0.004, 3, 'm');
+        if (Cls.UsesSizeEnd)
+            Range(Look, BindEffect(Effect, P, 'sizeEnd', { Label: 'Size at death' }), 0.002, 18, 0.01, 3, 'm');
         Range(Look, BindEffect(Effect, P, 'sizeScale', { Label: 'Size multiplier' }), 0.1, 4, 0.02, 2, '×');
-        C.ColourRow(Look, BindEffect(Effect, P, 'colA', { Label: 'Trough / base colour', Alpha: true }));
-        if ((P.curlMode || 0) > 0 || (P.trailMode || 0) > 0 || P.kind === 6 || P.shape >= 10)
+        C.ColourRow(Look, BindEffect(Effect, P, 'colA', { Label: Cls.IsAssembly ? 'Base surface colour' : 'Trough / base colour', Alpha: true }));
+        if (Cls.UsesColC)
             C.ColourRow(Look, BindEffect(Effect, P, 'colC', { Label: 'Mid-stream / accent colour', Alpha: true }));
-        C.ColourRow(Look, BindEffect(Effect, P, 'colB', { Label: 'Crest / death colour', Alpha: true }));
+        if (Cls.UsesColB)
+            C.ColourRow(Look, BindEffect(Effect, P, 'colB', { Label: 'Crest / death colour', Alpha: true }));
+        if (P.shape === 0 && !Cls.IsCurl && !(P.trailMode > 0))
+            Range(Look, BindEffect(Effect, P, 'streakThin', { Label: 'Streak thinness' }), 0.1, 2.0, 0.02, 2, '×');
+        if (P.shape === 2)
+            C.SelectRow(Look, BindEffect(Effect, P, 'leafMode', { Label: 'Leaf / paper silhouette', Options: [['Botanical leaf', 0], ['Paper / confetti sheet', 1]] }));
         if (P.shape === 10)
-        {
             C.SelectRow(Look, BindEffect(Effect, P, 'leafMode', { Label: 'Shockwave style', Options: [['Supersonic Mach ring', 0], ['Ground-hugging impact dust ring', 1]] }));
-        }
         if (P.shape === 15)
         {
-            C.SelectRow(Look, BindEffect(Effect, P, 'leafMode', { Label: 'Radar / sonar style', Options: [['Tactical Radar Sweep & Blips', 0], ['Acoustic Sonar Pulse Ping', 1]] }));
+            const RadStyleB = BindEffect(Effect, P, 'leafMode', { Label: 'Radar / sonar style', Options: [['Tactical Radar Sweep & Blips', 0], ['Acoustic Sonar Pulse Ping', 1]] });
+            const OrigRadW = RadStyleB.Write;
+            RadStyleB.Write = V => { OrigRadW(Number(V)); ConstructInspectorPage(); };
+            C.SelectRow(Look, RadStyleB);
+            if ((P.leafMode || 0) === 0)
+                Range(Look, BindEffect(Effect, P, 'curlRate', { Label: 'Sweep angular speed' }), 0.2, 6.0, 0.05, 2, 'rad/s');
         }
         if (P.shape === 16)
         {
             Range(Look, BindEffect(Effect, P, 'curlRate', { Label: 'Impact ripple cadence' }), 0.1, 2.0, 0.05, 2, 'Hz');
-            Range(Look, BindEffect(Effect, P, 'curlFreq', { Label: 'Hex lattice density' }), 0.4, 2.5, 0.05, 2, '×');
+            Range(Look, BindEffect(Effect, P, 'curlFreq', { Label: 'Hex lattice density' }), 0.6, 4.5, 0.05, 2, '×');
         }
         if (P.shape === 17)
         {
@@ -2806,7 +2964,7 @@ function ConstructEffectInspector(Page, Effect)
             C.SelectRow(Look, BindEffect(Effect, P, 'leafMode', { Label: 'Hologram glyph mode', Options: [['Matrix glyphs + scanline slices', 0], ['Horizontal scanline slices only', 1]] }));
             Range(Look, BindEffect(Effect, P, 'glitchRate', { Label: 'Data glitch tick rate' }), 2, 40, 1, 0, 'Hz');
         }
-        if ((P.curlMode || 0) === 0)
+        if (Cls.UsesTrailMode)
         {
             const TrailB = {
                 Label: 'Tapered 3D ribbon trails',
@@ -2817,7 +2975,7 @@ function ConstructEffectInspector(Page, Effect)
             C.SelectRow(Look, TrailB);
             if ((P.trailMode || 0) > 0) Range(Look, BindEffect(Effect, P, 'streakThin', { Label: 'Trail ribbon thinness' }), 0.12, 1.5, 0.02, 2, '×');
         }
-        if (P.kind === 6 || P.shape === 13)
+        if (Cls.IsBoids)
         {
             const BoidsSec = C.SectionCard(Page, { Title: 'Boids flocking & wing animation', Glyph: 'Wind', Badge: '02 / FLOCK' }).Inner;
             C.SelectRow(BoidsSec, BindEffect(Effect, P, 'leafMode', { Label: 'Creature silhouette', Options: [['Birds / Bats (flexing V-wings)', 0], ['Butterflies / Wisps (dual wings)', 1], ['Fish school (undulating fin)', 2]] }));
@@ -2829,16 +2987,19 @@ function ConstructEffectInspector(Page, Effect)
             Range(BoidsSec, BindEffect(Effect, P, 'pulseHz', { Label: 'Bioluminescent pulse rate' }), 0.0, 6.0, 0.05, 2, 'Hz');
             Range(BoidsSec, BindEffect(Effect, P, 'pulseDepth', { Label: 'Pulse glow depth' }), 0.0, 1.0, 0.02, 2, '');
         }
-        if ((P.curlMode || 0) > 0)
+        if (Cls.IsCurl)
         {
             const CurlSec = C.SectionCard(Page, { Title: 'Curl noise & manifold', Glyph: 'Wind', Badge: '02 / CURL FLOW' }).Inner;
-            C.SelectRow(CurlSec, BindEffect(Effect, P, 'curlMode', { Label: 'Manifold mode', Rebuild: true, Options: [['Off (ballistic)', 0], ['Planar Wave Field', 1], ['Spherical Plasma Shell', 2], ['Bokeh Stream Ribbons', 3]] }));
+            const CurlModeB = BindEffect(Effect, P, 'curlMode', { Label: 'Manifold mode', Rebuild: true, Options: [['Off (ballistic)', 0], ['Planar Wave Field', 1], ['Spherical Plasma Shell', 2], ['Bokeh Stream Ribbons', 3]] });
+            const OrigCurlW = CurlModeB.Write;
+            CurlModeB.Write = V => { OrigCurlW(Number(V)); ConstructInspectorPage(); };
+            C.SelectRow(CurlSec, CurlModeB);
             Range(CurlSec, BindEffect(Effect, P, 'curlFreq', { Label: 'Curl noise frequency' }), 0.1, 3.0, 0.02, 2, '1/m');
             Range(CurlSec, BindEffect(Effect, P, 'curlAmp', { Label: 'Curl advection speed' }), 0.1, 8.0, 0.05, 2, 'm/s');
             Range(CurlSec, BindEffect(Effect, P, 'curlRate', { Label: 'Temporal evolution' }), 0.0, 1.5, 0.02, 2, 'Hz');
-            if (P.curlMode === 2) Range(CurlSec, BindEffect(Effect, P, 'shellRadius', { Label: 'Sphere shell radius' }), 0.4, 5.0, 0.05, 2, 'm');
+            if (Cls.CurlMode === 2) Range(CurlSec, BindEffect(Effect, P, 'shellRadius', { Label: 'Sphere shell radius' }), 0.4, 5.0, 0.05, 2, 'm');
             Range(CurlSec, BindEffect(Effect, P, 'streakThin', { Label: 'Filament thinness' }), 0.1, 2.0, 0.02, 2, '×');
-            if (P.curlMode === 3)
+            if (Cls.CurlMode === 3)
             {
                 const PulseB = BindEffect(Effect, P, 'pulseMode', { Label: 'Object surface pour flow', Options: [['Off (free eddies)', 0], ['Continuous Surface Pour', 1], ['Pour + Pulse Wave', 2]] });
                 const OrigPW = PulseB.Write;
@@ -2848,34 +3009,70 @@ function ConstructEffectInspector(Page, Effect)
                 {
                     C.SelectRow(CurlSec, BindEffect(Effect, P, 'objectShape', { Label: 'Object surface shape', Options: [['3D Sphere (Pour Over Ball)', 1], ['Cylinder Column', 2], ['Box / Slab', 0]] }));
                     C.SelectRow(CurlSec, BindEffect(Effect, P, 'pulseAxis', { Label: 'Pour direction axis', Options: [['Top → Bottom (Pour)', 1], ['Left → Right (X)', 0], ['Back → Front (Z)', 2]] }));
-                    Range(CurlSec, BindEffect(Effect, P, 'pulseSpeed', { Label: 'Pour pulse speed' }), 0.08, 1.5, 0.02, 2, 'Hz');
-                    Range(CurlSec, BindEffect(Effect, P, 'pulseWidth', { Label: 'Wave band thickness' }), 0.08, 0.65, 0.02, 2, '');
+                    if ((P.pulseMode || 0) === 2)
+                    {
+                        Range(CurlSec, BindEffect(Effect, P, 'pulseSpeed', { Label: 'Pour pulse speed' }), 0.08, 1.5, 0.02, 2, 'Hz');
+                        Range(CurlSec, BindEffect(Effect, P, 'pulseWidth', { Label: 'Wave band thickness' }), 0.08, 0.65, 0.02, 2, '');
+                    }
                     const ObjGrid = C.Construct('div', 'property-switches');
                     CurlSec.append(ObjGrid);
                     C.ToggleTile(ObjGrid, BindEffect(Effect, P, 'showObject', { Label: 'Show inner 3D object', Glyph: 'Layers' }));
                 }
             }
         }
-        const Mot = C.SectionCard(Page, { Title: 'Forces & motion response', Glyph: 'Wind', Badge: '02 / DYNAMICS' }).Inner;
-        Range(Mot, BindEffect(Effect, P, 'windCoupling', { Label: 'Wind lattice coupling' }), 0, 5, 0.02, 2, '1/s');
-        Range(Mot, BindEffect(Effect, P, 'drag', { Label: 'Aerodynamic drag' }), 0, 5, 0.02, 2, '1/s');
-        Range(Mot, BindEffect(Effect, P, 'gravity', { Label: 'Gravity factor' }), -1, 2, 0.02, 2, 'g');
-        Range(Mot, BindEffect(Effect, P, 'buoyancy', { Label: 'Thermal buoyancy' }), -4, 6, 0.05, 2, 'm/s²');
-        Range(Mot, BindEffect(Effect, P, 'bounce', { Label: 'Floor restitution', Availability: () => P.kind === 1 ? { Enabled: false, Reason: 'Wind-driven particles settle cleanly on floor' } : { Enabled: true } }), 0, 1, 0.01, 2, '');
-        Range(Mot, BindEffect(Effect, P, 'flutter', { Label: 'Flutter turbulence' }), 0, 5, 0.05, 2, 'm/s²');
+        if (Cls.UsesDynamics)
+        {
+            const Mot = C.SectionCard(Page, { Title: 'Forces & motion response', Glyph: 'Wind', Badge: Cls.IsCurl || Cls.IsBoids ? '03 / DYNAMICS' : '02 / DYNAMICS' }).Inner;
+            Range(Mot, BindEffect(Effect, P, 'windCoupling', { Label: 'Wind lattice coupling' }), 0, 5, 0.02, 2, '1/s');
+            if (!Cls.IsCurl)
+            {
+                if (!Cls.IsBoids)
+                    Range(Mot, BindEffect(Effect, P, 'drag', { Label: 'Aerodynamic drag' }), 0, 5, 0.02, 2, '1/s');
+                Range(Mot, BindEffect(Effect, P, 'gravity', { Label: 'Gravity factor' }), -1, 2, 0.02, 2, 'g');
+                Range(Mot, BindEffect(Effect, P, 'buoyancy', { Label: 'Thermal buoyancy' }), -4, 6, 0.05, 2, 'm/s²');
+                if (!Cls.IsBoids)
+                {
+                    const BounceLbl = P.shape === 14 ? 'Floor restitution (<0.08 splats)' : 'Floor restitution';
+                    Range(Mot, BindEffect(Effect, P, 'bounce', { Label: BounceLbl, Availability: () => Cls.BounceBlockReason ? { Enabled: false, Reason: Cls.BounceBlockReason } : { Enabled: true } }), 0, 1, 0.01, 2, '');
+                }
+                Range(Mot, BindEffect(Effect, P, 'flutter', { Label: 'Flutter turbulence' }), 0, 5, 0.05, 2, 'm/s²');
+            }
+        }
         return;
     }
 
     if (P.transition)
     {
         const Tr = P.transition;
+        const Asm = Tr.assemble | 0;
         const Sec = C.SectionCard(Page, { Title: 'Derez / assembly wave', Glyph: 'Boxes', Badge: 'TRANSITION' }).Inner;
-        C.SelectRow(Sec, BindEffect(Effect, Tr, 'wave', { Label: 'Release wave pattern', Options: [['Corner (derez)', 'corner'], ['Melt (patchy)', 'melt'], ['Glitch (blocky)', 'glitch']] }));
-        C.SelectRow(Sec, BindEffect(Effect, Tr, 'assemble', { Label: 'Flight mode', Options: [['Burst or fall', 0], ['Rebuild from outside', 1], ['Stack in column', 2]] }));
-        C.SelectRow(Sec, BindEffect(Effect, Tr, 'after', { Label: 'Post-hold outcome', Options: [['Standard fall / burst', 'none'], ['Morph to butterflies', 'butterfly']] }));
+        const AsmB = BindEffect(Effect, Tr, 'assemble', { Label: 'Flight mode', Options: [['Burst or fall', 0], ['Rebuild from outside', 1], ['Stack in column', 2]] });
+        const OrigAsmW = AsmB.Write;
+        AsmB.Write = V => { OrigAsmW(Number(V)); RebuildGpu(Effect); ConstructInspectorPage(); };
+        C.SelectRow(Sec, AsmB);
+        if (Asm !== 2)
+            C.SelectRow(Sec, BindEffect(Effect, Tr, 'wave', { Label: 'Release wave pattern', Options: [['Corner (derez)', 'corner'], ['Melt (patchy)', 'melt'], ['Glitch (blocky)', 'glitch']] }));
+        if (Asm === 0)
+            C.SelectRow(Sec, BindEffect(Effect, Tr, 'after', { Label: 'Post-hold outcome', Options: [['Standard fall / burst', 'none'], ['Morph to butterflies', 'butterfly']] }));
         Range(Sec, BindEffect(Effect, Tr, 'holdBase', { Label: 'Hold duration' }), 0, 10, 0.05, 2, 's');
         Range(Sec, BindEffect(Effect, Tr, 'holdSpread', { Label: 'Wave spread' }), 0, 10, 0.05, 2, 's');
-        Range(Sec, BindEffect(Effect, Tr, 'burstShare', { Label: 'Outward burst fraction' }), 0, 1, 0.02, 2, '');
+        if (Asm === 0)
+        {
+            Range(Sec, BindEffect(Effect, Tr, 'burstShare', { Label: 'Outward burst fraction' }), 0, 1, 0.02, 2, '');
+            if (P.shape === 4)
+            {
+                const FragB = BindEffect(Effect, Tr, 'fragment', { Label: 'Shatter into 8 cubes on floor impact' });
+                const OrigFragW = FragB.Write;
+                FragB.Write = V => { OrigFragW(!!V); ConstructInspectorPage(); };
+                C.SwitchRow(Sec, FragB);
+                if (Tr.fragment)
+                    Range(Sec, BindEffect(Effect, Tr, 'childLife', { Label: 'Shatter fragment lifetime' }), 0.2, 4.0, 0.05, 2, 's');
+            }
+        }
+        else
+        {
+            Range(Sec, BindEffect(Effect, Tr, 'shell', { Label: Asm === 1 ? 'Outer rebuild shell radius' : 'Column drop height' }), 0.5, 8.0, 0.1, 1, 'm');
+        }
     }
     if (P.blackHole && P.attractor)
     {

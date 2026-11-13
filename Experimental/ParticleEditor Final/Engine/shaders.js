@@ -1429,9 +1429,11 @@ fn vsPart(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> V
     wp = q.p.xyz + G.camRight.xyz * (c.x * sz * 0.5) + G.camUp.xyz * (c.y * sz * 0.5);
   } else if (shape == 17u) {
     // Aurora Borealis Volumetric Curtain Sheet: wide horizontal band, tall undulating vertical rays
-    let yaw = 0.25 * sin(q.m.w * 0.17 + G.timing.x * 0.14) + q.m.y * 0.18;
+    let aurRate = max(0.02, S.mol.w);
+    let aurFreq = clamp(S.mol.y, 0.25, 4.0);
+    let yaw = 0.25 * sin(q.m.w * 0.17 + G.timing.x * (aurRate * 0.2692)) + q.m.y * 0.18;
     let rightH = normalize(vec3f(cos(yaw), 0.0, sin(yaw)));
-    let sway = sin(c.x * 3.14159 + G.timing.x * 0.55 + q.m.w * 0.37) * (sz * 0.18);
+    let sway = sin(c.x * (3.14159 * aurFreq) + G.timing.x * (aurRate * 1.0577) + q.m.w * 0.37) * (sz * 0.18);
     let perpH = vec3f(-rightH.z, 0.0, rightH.x);
     wp = q.p.xyz + rightH * (c.x * sz * 1.85) + perpH * sway + vec3f(0.0, c.y * sz * 0.95, 0.0);
   } else {
@@ -1627,7 +1629,8 @@ fn fsPart(i: VO) -> @location(0) vec4f {
       let rings = (r1 + r2 + r3 + r4 * 1.2) * 0.52;
       let axis = (exp(-abs(i.uv.x) * 65.0) + exp(-abs(i.uv.y) * 65.0)) * 0.28 * mask;
       let ticks = smoothstep(0.89, 0.94, r) * (1.0 - smoothstep(0.96, 0.99, r)) * pow(abs(sin(ang * 18.0)), 8.0) * 0.65;
-      let sweepAng = t * 2.2;
+      let sweepSpeed = max(0.0, S.mol.w);
+      let sweepAng = t * sweepSpeed;
       let lag = fract((sweepAng - ang) / 6.2831853);
       let beamEdge = exp(-lag * 95.0) * mask;
       let wedge = exp(-lag * 4.8) * 0.58 * mask;
@@ -1660,19 +1663,23 @@ fn fsPart(i: VO) -> @location(0) vec4f {
     let rimGlow = exp(-pow((r - 0.96) * 20.0, 2.0));
     let t = G.timing.x;
     // Spherical hex tiling over surface coordinates
+    let hexDensity = clamp(S.mol.y, 0.3, 8.0);
+    let rippleRate = max(0.05, S.mol.w);
     let sp = vec2f(atan2(n.x, n.z) * 3.2, asin(clamp(n.y, -0.98, 0.98)) * 3.6);
-    let hg = hexGrid(sp * 2.1 + vec2f(t * 0.08, 0.0));
+    let hg = hexGrid(sp * hexDensity + vec2f(t * 0.08, 0.0));
     let hexWire = 1.0 - smoothstep(0.02, 0.085, hg.x);
-    let cellShimmer = 0.72 + 0.28 * sin(t * 2.4 + hg.y * 6.2831853);
+    let cellShimmer = 0.72 + 0.28 * sin(t * (rippleRate * 4.3636) + hg.y * 6.2831853);
     // Two geodesic impact ripple shockwaves expanding across the curved barrier
-    let cyc0 = fract(t * 0.55);
-    let imp0 = normalize(vec3f(0.45 * cos(floor(t * 0.55) * 2.3), 0.35 * sin(floor(t * 0.55) * 1.7), 0.85));
+    let phase0 = t * rippleRate;
+    let cyc0 = fract(phase0);
+    let imp0 = normalize(vec3f(0.45 * cos(floor(phase0) * 2.3), 0.35 * sin(floor(phase0) * 1.7), 0.85));
     let gd0 = acos(clamp(dot(n, imp0), -1.0, 1.0));
     let waveR0 = cyc0 * 2.1;
     let rip0 = exp(-pow((gd0 - waveR0) * 9.5, 2.0)) * (1.0 - smoothstep(0.55, 1.0, cyc0));
     let flash0 = exp(-gd0 * gd0 * 24.0) * exp(-cyc0 * 6.0);
-    let cyc1 = fract(t * 0.55 + 0.5);
-    let imp1 = normalize(vec3f(-0.55 * sin(floor(t * 0.55 + 0.5) * 2.9), 0.42, 0.78));
+    let phase1 = t * rippleRate + 0.5;
+    let cyc1 = fract(phase1);
+    let imp1 = normalize(vec3f(-0.55 * sin(floor(phase1) * 2.9), 0.42, 0.78));
     let gd1 = acos(clamp(dot(n, imp1), -1.0, 1.0));
     let waveR1 = cyc1 * 2.1;
     let rip1 = exp(-pow((gd1 - waveR1) * 9.5, 2.0)) * (1.0 - smoothstep(0.55, 1.0, cyc1));
@@ -1688,14 +1695,16 @@ fn fsPart(i: VO) -> @location(0) vec4f {
     let v01 = clamp(i.uv.y * 0.5 + 0.5, 0.0, 1.0);
     let t = G.timing.x;
     let sd = i.ex.y;
-    let fold = sin(i.uv.x * 4.2 + t * 0.52 + sd * 0.13) * 0.14;
+    let aurFreq = clamp(S.mol.y, 0.25, 4.0);
+    let aurRate = max(0.02, S.mol.w);
+    let fold = sin(i.uv.x * (4.2 * aurFreq) + t * aurRate + sd * 0.13) * 0.14;
     let vWave = v01 + fold * (1.0 - v01 * 0.4);
     let botEdge = smoothstep(0.02, 0.22, vWave);
     let topFade = exp(-max(0.0, vWave - 0.18) * 3.1);
     let sideFade = pow(sin(u01 * 3.14159265), 1.35);
-    let rayA = 0.55 + 0.45 * sin(i.uv.x * 16.0 + sin(t * 0.75 + sd * 0.07) * 2.4 + vWave * 2.2);
-    let rayB = 0.62 + 0.38 * sin(i.uv.x * 31.0 - t * 1.15 + sd * 0.19);
-    let nTex = 0.65 + 0.55 * vnoise2(vec2f(i.uv.x * 3.8 + t * 0.14 + sd * 0.01, v01 * 1.8 - t * 0.22));
+    let rayA = 0.55 + 0.45 * sin(i.uv.x * (16.0 * aurFreq) + sin(t * (aurRate * 1.4423) + sd * 0.07) * 2.4 + vWave * 2.2);
+    let rayB = 0.62 + 0.38 * sin(i.uv.x * (31.0 * aurFreq) - t * (aurRate * 2.2115) + sd * 0.19);
+    let nTex = 0.65 + 0.55 * vnoise2(vec2f(i.uv.x * (3.8 * aurFreq) + t * (aurRate * 0.2692) + sd * 0.01, v01 * 1.8 - t * (aurRate * 0.4231)));
     a = clamp(botEdge * topFade * sideFade * rayA * rayB * nTex * 0.92, 0.0, 1.0);
     var aurCol = mix(S.colA.rgb, S.colC.rgb, smoothstep(0.12, 0.52, vWave));
     aurCol = mix(aurCol, S.colB.rgb, smoothstep(0.46, 0.90, vWave));

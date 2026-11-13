@@ -1425,13 +1425,14 @@ export class SoftwarePreviewEngine
                         const ScTail = ProjectPoint(VP, Pt.x - Pt.vx * 0.055, Pt.y - Pt.vy * 0.055, Pt.z - Pt.vz * 0.055, W, H);
                         if (ScTail && Math.hypot(Sc[0] - ScTail[0], Sc[1] - ScTail[1]) > 1.2)
                         {
+                            const Thin = Math.max(0.15, P.streakThin ?? 1.0);
                             Ctx.save();
                             Ctx.strokeStyle = LinearToCss(Col, Alpha * 0.85);
-                            Ctx.lineWidth = Math.max(1.1, R * 0.52);
+                            Ctx.lineWidth = Math.max(0.85, R * 0.52 * Thin);
                             Ctx.lineCap = 'round';
                             Ctx.beginPath(); Ctx.moveTo(ScTail[0], ScTail[1]); Ctx.lineTo(Sc[0], Sc[1]); Ctx.stroke();
                             Ctx.strokeStyle = `rgba(255,255,255,${(Alpha * 0.45).toFixed(3)})`;
-                            Ctx.lineWidth = Math.max(0.55, R * 0.22);
+                            Ctx.lineWidth = Math.max(0.45, R * 0.22 * Thin);
                             Ctx.beginPath(); Ctx.moveTo(ScTail[0], ScTail[1]); Ctx.lineTo(Sc[0], Sc[1]); Ctx.stroke();
                             Ctx.restore();
                             continue;
@@ -1765,7 +1766,7 @@ export class SoftwarePreviewEngine
                             Ctx.stroke();
 
                             // Rotating phosphor sweep wedge & leading beam arm
-                            const SweepAng = Time * 2.2;
+                            const SweepAng = Time * Math.max(0, P.curlRate ?? 2.2);
                             const Ctr2 = PtOnPlane(0, 0);
                             if (Ctr2)
                             {
@@ -1831,10 +1832,12 @@ export class SoftwarePreviewEngine
                         // Honeycomb hex lattice nodes projected inside the barrier disc + geodesic impact ripples
                         Ctx.strokeStyle = LinearToCss(P.colC || Col, Alpha * 0.42);
                         Ctx.lineWidth = 1.0;
-                        const HexR = Math.max(8, RadS * 0.24);
-                        for (let Hy = -2; Hy <= 2; Hy++)
+                        const HexScale = 2.1 / Math.max(0.3, P.curlFreq ?? 2.1);
+                        const HexR = Math.max(5, RadS * 0.24 * HexScale);
+                        const HexSpan = Math.min(8, Math.ceil((RadS * 0.86) / Math.max(2, HexR * 1.45)));
+                        for (let Hy = -HexSpan; Hy <= HexSpan; Hy++)
                         {
-                            for (let Hx = -2; Hx <= 2; Hx++)
+                            for (let Hx = -HexSpan; Hx <= HexSpan; Hx++)
                             {
                                 const Cx0 = (Hx + (Hy & 1) * 0.5) * HexR * 1.68;
                                 const Cy0 = Hy * HexR * 1.45;
@@ -1852,11 +1855,13 @@ export class SoftwarePreviewEngine
                             }
                         }
                         // Expanding geodesic impact ripple arcs
+                        const RippleRate = Math.max(0.05, P.curlRate ?? 0.55);
                         for (let K = 0; K < 2; K++)
                         {
-                            const Cyc = (Time * 0.55 + K * 0.5) % 1;
-                            const ImpX = Sc[0] + Math.cos(K * 2.4 + Math.floor(Time * 0.55) * 1.9) * RadS * 0.36;
-                            const ImpY = Sc[1] - Math.sin(K * 1.7 + Math.floor(Time * 0.55) * 1.3) * RadS * 0.28;
+                            const Phase = Time * RippleRate + K * 0.5;
+                            const Cyc = Phase % 1;
+                            const ImpX = Sc[0] + Math.cos(K * 2.4 + Math.floor(Phase) * 1.9) * RadS * 0.36;
+                            const ImpY = Sc[1] - Math.sin(K * 1.7 + Math.floor(Phase) * 1.3) * RadS * 0.28;
                             const RipR = Cyc * RadS * 1.15;
                             const FadeR = (1 - SmoothT(0.5, 1.0, Cyc)) * Alpha;
                             if (FadeR > 0.02)
@@ -1875,6 +1880,8 @@ export class SoftwarePreviewEngine
                     else if (Shape === 17)
                     {
                         const Cw = Math.max(24, R * 1.85), Ch = Math.max(22, R * 0.98);
+                        const AurRate = Math.max(0.02, P.curlRate ?? 0.52);
+                        const AurFreq = Math.max(0.25, Math.min(4.0, P.curlFreq ?? 1.0));
                         Ctx.save();
                         Ctx.translate(Sc[0], Sc[1]);
                         if (Ctx.createLinearGradient)
@@ -1888,7 +1895,7 @@ export class SoftwarePreviewEngine
                         }
                         else Ctx.fillStyle = LinearToCss(Col, Alpha * 0.65);
                         Ctx.beginPath();
-                        const Fold = Math.sin(Time * 0.75 + (Pt.seed || 0) * 0.01) * Ch * 0.14;
+                        const Fold = Math.sin(Time * (AurRate * 1.4423) + (Pt.seed || 0) * 0.01) * Ch * 0.14;
                         Ctx.moveTo(-Cw * 0.5, Ch * 0.48);
                         Ctx.quadraticCurveTo(0, Ch * 0.48 + Fold, Cw * 0.5, Ch * 0.48);
                         Ctx.lineTo(Cw * 0.44, -Ch * 0.52);
@@ -1898,9 +1905,10 @@ export class SoftwarePreviewEngine
                         // Shimmering vertical geomagnetic rays inside curtain
                         Ctx.strokeStyle = LinearToCss(P.colA, Alpha * 0.42);
                         Ctx.lineWidth = 1.6;
-                        for (let Rk = -3; Rk <= 3; Rk++)
+                        const RayCount = Math.max(2, Math.round(3 * AurFreq));
+                        for (let Rk = -RayCount; Rk <= RayCount; Rk++)
                         {
-                            const Rx = Rk * (Cw * 0.12) + Math.sin(Time * 1.4 + Rk + (Pt.seed || 0)) * 4;
+                            const Rx = (Rk / Math.max(1, RayCount)) * (Cw * 0.36) + Math.sin(Time * (AurRate * 2.6923) + Rk + (Pt.seed || 0)) * 4;
                             Ctx.beginPath(); Ctx.moveTo(Rx, Ch * 0.42); Ctx.lineTo(Rx + 3, -Ch * 0.36); Ctx.stroke();
                         }
                         Ctx.restore();
