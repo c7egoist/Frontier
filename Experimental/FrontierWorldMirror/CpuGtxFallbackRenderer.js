@@ -290,56 +290,71 @@ export function CreateGtxBandKernel(AtlasWidth, AtlasCols, AtlasTileSize, TilesP
         return TMax;
       }
 
-      let BestT = TMax;
-      if (Shape === 3) {
-        const K = Math.max(Hx, Hy) / (2.0 * Hz);
-        const K2 = K * K;
-        const Oz = Loz - Hz;
-        const A = Ldx * Ldx + Ldy * Ldy - K2 * Ldz * Ldz;
-        const B = Lox * Ldx + Loy * Ldy - K2 * Oz * Ldz;
-        const C = Lox * Lox + Loy * Loy - K2 * Oz * Oz;
+      const SolveFrustum = (Z0, Z1, R0, R1, CurBest) => {
+        let Out = CurBest;
+        const Zc = 0.5 * (Z0 + Z1);
+        const Hc = 0.5 * (Z1 - Z0);
+        const Rm = 0.5 * (R0 + R1);
+        const K = Hc > 1e-5 ? (R1 - R0) / (2.0 * Hc) : 0.0;
+        const Oz = Loz - Zc;
+        const RAtOz = Rm + K * Oz;
+        const A = Ldx * Ldx + Ldy * Ldy - K * K * Ldz * Ldz;
+        const B = Lox * Ldx + Loy * Ldy - K * RAtOz * Ldz;
+        const C = Lox * Lox + Loy * Loy - RAtOz * RAtOz;
         const Disc = B * B - A * C;
         if (Math.abs(A) > 1e-6 && Disc >= 0.0) {
           const Sq = Math.sqrt(Disc);
-          const T0 = (-B - Sq) / A, T1 = (-B + Sq) / A;
-          const TSide = Backface ? T1 : (T0 >= 0.0015 ? T0 : T1);
-          const ZHit = Loz + Ldz * TSide;
-          if (TSide > 0.0015 && TSide < BestT && ZHit >= -Hz && ZHit <= Hz) BestT = TSide;
-        }
-        if (Math.abs(Ldz) > 1e-6) {
-          const TCap = (-Hz - Loz) / Ldz;
-          if (TCap > 0.0015 && TCap < BestT) {
-            const Cx2 = Lox + Ldx * TCap, Cy2 = Loy + Ldy * TCap;
-            const RMax = Math.max(Hx, Hy);
-            if (Cx2 * Cx2 + Cy2 * Cy2 <= RMax * RMax) BestT = TCap;
+          const Ra = (-B - Sq) / A, Rb = (-B + Sq) / A;
+          const TMinR = Math.min(Ra, Rb), TFarR = Math.max(Ra, Rb);
+          if (Backface) {
+            if (TFarR > 0.0015 && TFarR < Out && Math.abs(Oz + Ldz * TFarR) <= Hc) Out = TFarR;
+            else if (TMinR > 0.0015 && TMinR < Out && Math.abs(Oz + Ldz * TMinR) <= Hc) Out = TMinR;
+          } else {
+            if (TMinR > 0.0015 && TMinR < Out && Math.abs(Oz + Ldz * TMinR) <= Hc) Out = TMinR;
+            else if (TFarR > 0.0015 && TFarR < Out && Math.abs(Oz + Ldz * TFarR) <= Hc) Out = TFarR;
           }
         }
-        return BestT;
-      }
+        if (!Backface && Math.abs(Ldz) > 1e-6) {
+          const TC0 = (Z0 - Loz) / Ldz;
+          if (TC0 > 0.0015 && TC0 < Out) {
+            const X0 = Lox + Ldx * TC0, Y0 = Loy + Ldy * TC0;
+            if (X0 * X0 + Y0 * Y0 <= R0 * R0) Out = TC0;
+          }
+          const TC1 = (Z1 - Loz) / Ldz;
+          if (TC1 > 0.0015 && TC1 < Out) {
+            const X1 = Lox + Ldx * TC1, Y1 = Loy + Ldy * TC1;
+            if (X1 * X1 + Y1 * Y1 <= R1 * R1) Out = TC1;
+          }
+        }
+        return Out;
+      };
 
       const Rad = Math.max(Hx, Hy);
-      const A = Ldx * Ldx + Ldy * Ldy;
-      const B = Lox * Ldx + Loy * Ldy;
-      const Disc = B * B - A * (Lox * Lox + Loy * Loy - Rad * Rad);
-      if (A > 1e-6 && Disc >= 0.0) {
-        const Sq = Math.sqrt(Disc);
-        const T0 = (-B - Sq) / A, T1 = (-B + Sq) / A;
-        const TSide = Backface ? T1 : (T0 >= 0.0015 ? T0 : T1);
-        if (TSide > 0.0015 && TSide < BestT && Math.abs(Loz + Ldz * TSide) <= Hz) BestT = TSide;
-      }
-      if (Math.abs(Ldz) > 1e-6) {
-        const TC0 = (-Hz - Loz) / Ldz;
-        if (TC0 > 0.0015 && TC0 < BestT) {
-          const X0 = Lox + Ldx * TC0, Y0 = Loy + Ldy * TC0;
-          if (X0 * X0 + Y0 * Y0 <= Rad * Rad) BestT = TC0;
+      if (Shape === 3) {
+        const ZBase = -0.78 * Hz;
+        let BestT = TMax;
+        const InvX = Math.abs(Ldx) > 1e-6 ? 1.0 / Ldx : 1e6;
+        const InvY = Math.abs(Ldy) > 1e-6 ? 1.0 / Ldy : 1e6;
+        const InvZ = Math.abs(Ldz) > 1e-6 ? 1.0 / Ldz : 1e6;
+        const Tx0 = (-Rad - Lox) * InvX, Tx1 = (Rad - Lox) * InvX;
+        const Ty0 = (-Rad - Loy) * InvY, Ty1 = (Rad - Loy) * InvY;
+        const Tz0 = (-Hz - Loz) * InvZ, Tz1 = (ZBase - Loz) * InvZ;
+        const BNear = Math.max(Math.min(Tx0, Tx1), Math.min(Ty0, Ty1), Math.min(Tz0, Tz1));
+        const BFar = Math.min(Math.max(Tx0, Tx1), Math.max(Ty0, Ty1), Math.max(Tz0, Tz1));
+        if (BNear <= BFar && BFar > 0.0015) {
+          const TCand = Backface ? BFar : (BNear >= 0.0015 ? BNear : BFar);
+          if (TCand > 0.0015 && TCand < BestT) BestT = TCand;
         }
-        const TC1 = (Hz - Loz) / Ldz;
-        if (TC1 > 0.0015 && TC1 < BestT) {
-          const X1 = Lox + Ldx * TC1, Y1 = Loy + Ldy * TC1;
-          if (X1 * X1 + Y1 * Y1 <= Rad * Rad) BestT = TC1;
-        }
+        return SolveFrustum(ZBase, Hz, 0.72 * Rad, 0.13 * Rad, BestT);
       }
-      return BestT;
+
+      if (Shape === 5) {
+        const ZBase = -0.84 * Hz;
+        const BestBase = SolveFrustum(-Hz, ZBase, Rad, 0.94 * Rad, TMax);
+        return SolveFrustum(ZBase, Hz, 0.50 * Rad, 0.37 * Rad, BestBase);
+      }
+
+      return SolveFrustum(-Hz, Hz, Rad, Rad, TMax);
     }
 
     FinalizeHit(Prims, Idx, Rox, Roy, Roz, Rdx, Rdy, Rdz, T, Backface, OutHit) {
@@ -383,13 +398,44 @@ export function CreateGtxBandKernel(AtlasWidth, AtlasCols, AtlasTileSize, TilesP
         Ltx = -Math.sin(Phi); Lty = Math.cos(Phi); Ltz = 0;
       } else if (Shape >= 2) {
         const Phi = Math.atan2(Lpy, Lpx);
-        if (Math.abs(Math.abs(Lpz) - Hz) < 0.004 && !(Shape === 3 && Lpz > 0)) {
-          Lnx = 0; Lny = 0; Lnz = Lpz >= 0 ? 1 : -1;
-        } else if (Shape === 3) {
-          const Slope = Math.max(Hx, Hy) / (2.0 * Hz);
-          const Rxy = Math.max(1e-5, Len2(Lpx, Lpy));
-          Lnx = Lpx / Rxy; Lny = Lpy / Rxy; Lnz = Slope;
+        const Rad = Math.max(Hx, Hy);
+        const Rxy = Math.max(1e-5, Len2(Lpx, Lpy));
+        if (Shape === 3) {
+          const ZBase = -0.78 * Hz;
+          if (Lpz <= ZBase + 0.0035) {
+            if (Lpz >= ZBase - 0.004 && Math.max(Math.abs(Lpx), Math.abs(Lpy)) > 0.70 * Rad) {
+              Lnx = 0; Lny = 0; Lnz = 1;
+            } else if (Lpz <= -Hz + 0.004) {
+              Lnx = 0; Lny = 0; Lnz = -1;
+            } else if (Math.abs(Lpx) >= Math.abs(Lpy)) {
+              Lnx = Lpx >= 0 ? 1 : -1; Lny = 0; Lnz = 0;
+            } else {
+              Lnx = 0; Lny = Lpy >= 0 ? 1 : -1; Lnz = 0;
+            }
+          } else if (Math.abs(Lpz - Hz) < 0.004) {
+            Lnx = 0; Lny = 0; Lnz = 1;
+          } else {
+            const Slope = (0.72 * Rad - 0.13 * Rad) / Math.max(1e-4, Hz - ZBase);
+            Lnx = Lpx / Rxy; Lny = Lpy / Rxy; Lnz = Slope;
+          }
           Ltx = -Math.sin(Phi); Lty = Math.cos(Phi);
+        } else if (Shape === 5) {
+          const ZBase = -0.84 * Hz;
+          if (Math.abs(Lpz - Hz) < 0.004) {
+            Lnx = 0; Lny = 0; Lnz = 1;
+          } else if (Math.abs(Lpz + Hz) < 0.004) {
+            Lnx = 0; Lny = 0; Lnz = -1;
+          } else if (Math.abs(Lpz - ZBase) < 0.0045 && Rxy > 0.49 * Rad) {
+            Lnx = 0; Lny = 0; Lnz = 1;
+          } else if (Lpz < ZBase) {
+            Lnx = Lpx / Rxy; Lny = Lpy / Rxy; Lnz = 0.28;
+          } else {
+            const Slope = (0.50 * Rad - 0.37 * Rad) / Math.max(1e-4, Hz - ZBase);
+            Lnx = Lpx / Rxy; Lny = Lpy / Rxy; Lnz = Slope;
+          }
+          Ltx = -Math.sin(Phi); Lty = Math.cos(Phi);
+        } else if (Math.abs(Math.abs(Lpz) - Hz) < 0.004) {
+          Lnx = 0; Lny = 0; Lnz = Lpz >= 0 ? 1 : -1;
         } else {
           Lnx = Lpx; Lny = Lpy; Lnz = 0;
           Ltx = -Math.sin(Phi); Lty = Math.cos(Phi);

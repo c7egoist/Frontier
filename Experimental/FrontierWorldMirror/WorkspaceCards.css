@@ -4,7 +4,10 @@
 .viewport-action-row button,
 .viewport-action-row .viewport-construct,
 .viewport-action-row .viewport-icon-button,
-.viewport-projection {
+.viewport-projection,
+.viewport-level-switcher,
+.viewport-create-level-btn,
+.viewport-place-chip {
   border-radius: 999px !important;
 }
 .viewport-toolbar .viewport-action-row .viewport-icon-button {

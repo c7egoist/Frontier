@@ -1,6 +1,11 @@
 import React, { useEffect, useRef, useState } from "react";
 import ReferencePanel from "./ReferencePanel.jsx";
 import { Glyph, Icon, Inspector } from "./Inspectors.jsx";
+import {
+  BeginWorldActorDrag,
+  BuildActorPayloadFromConstructItem,
+  EndWorldActorDrag,
+} from "./WorldDragDrop.js";
 
 export const ConstructGroups = [
   "All",
@@ -70,7 +75,15 @@ export default function ConstructPanel({ Catalogue, Add, Close }) {
     LastChoice.current = Subject.Id;
     Choose(Subject);
     Rename(Subject.Name);
-    AssignProperties({});
+    const PresetPayload = BuildActorPayloadFromConstructItem(Subject);
+    AssignProperties(
+      PresetPayload?.Properties
+        ? {
+            ...PresetPayload.Properties,
+            Position: [0, 0, +(-0.64 + (PresetPayload.HalfHeightZ || 0.39)).toFixed(3)],
+          }
+        : {},
+    );
     Show(true);
   };
   const Keyboard = (Event) => {
@@ -171,18 +184,29 @@ export default function ConstructPanel({ Catalogue, Add, Close }) {
                   className="construct-matrix"
                   aria-label="Construct entities"
                 >
-                  {Candidates.map((Subject) => (
-                    <button
-                      key={Subject.Id}
-                      data-construct-id={Subject.Id}
-                      className="construct-entity"
-                      aria-label={Subject.Name}
-                      onClick={() => Pick(Subject)}
-                    >
-                      <Icon Name={Subject.Icon} Size={52} />
-                      <span>{Subject.Name}</span>
-                    </button>
-                  ))}
+                  {Candidates.map((Subject) => {
+                    const DragPayload = BuildActorPayloadFromConstructItem(Subject);
+                    return (
+                      <button
+                        key={Subject.Id}
+                        data-construct-id={Subject.Id}
+                        className="construct-entity"
+                        aria-label={Subject.Name}
+                        title={DragPayload ? `${Subject.Name} · Click to configure or drag directly into the 3D scene` : Subject.Name}
+                        draggable={Boolean(DragPayload)}
+                        onDragStart={
+                          DragPayload
+                            ? (Event) => BeginWorldActorDrag(Event, DragPayload)
+                            : undefined
+                        }
+                        onDragEnd={DragPayload ? EndWorldActorDrag : undefined}
+                        onClick={() => Pick(Subject)}
+                      >
+                        <Icon Name={Subject.Icon} Size={52} />
+                        <span>{Subject.Name}</span>
+                      </button>
+                    );
+                  })}
                 </div>
                 {!Candidates.length && (
                   <p className="construct-empty" role="status">
@@ -256,8 +280,8 @@ export default function ConstructPanel({ Catalogue, Add, Close }) {
         <footer>
           <small>
             {Picked
-              ? "Analytical preview only · no native object is created"
-              : `${Candidates.length} entities · HTML preview`}
+              ? "Configure properties or add directly to the active level"
+              : `${Candidates.length} entities · Click to inspect or drag into 3D viewport`}
           </small>
           <button onClick={Close}>Cancel</button>
           {Picked && (

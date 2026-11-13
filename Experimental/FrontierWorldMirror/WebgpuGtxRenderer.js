@@ -14,8 +14,8 @@ import {
   TILES_PER_PRIM,
 } from "./MaterialAtlasCompiler.js";
 
-const SCENE_DATA_FLOATS = 8 * 16 * 4; // 512 floats = 2048 bytes
-const LIGHT_ROW_BASE = 14;
+const SCENE_DATA_FLOATS = 8 * 36 * 4; // 1152 floats = 4608 bytes (32 primitives + 4 area lights)
+const LIGHT_ROW_BASE = 32;
 const GIZMO_STRIDE_BYTES = 12 * 4; // 48 bytes per vertex
 
 export const GTX_WGSL_SCENE_SHADER = /* wgsl */ `
@@ -33,7 +33,7 @@ struct SceneUniforms {
 };
 
 @group(0) @binding(0) var<uniform> U : SceneUniforms;
-@group(0) @binding(1) var<storage, read> uSceneData : array<vec4f, 128>;
+@group(0) @binding(1) var<storage, read> uSceneData : array<vec4f, 288>;
 @group(0) @binding(2) var uMaterialAtlas : texture_2d<f32>;
 @group(0) @binding(3) var uAtlasSampler  : sampler;
 
@@ -239,6 +239,60 @@ fn intersectTorusT(lo : vec3f, ld : vec3f, h : vec3f, bestT : f32) -> f32 {
   return hitT;
 }
 
+fn intersectFrustumZ(lo : vec3f, ld : vec3f, z0 : f32, z1 : f32, r0 : f32, r1 : f32, tMax : f32, bf : f32) -> f32 {
+  var bestT = tMax;
+  let zc = 0.5 * (z0 + z1);
+  let hc = 0.5 * (z1 - z0);
+  let rm = 0.5 * (r0 + r1);
+  let k  = select(0.0, (r1 - r0) / (2.0 * hc), hc > 1e-5);
+  let oz = lo.z - zc;
+  let rAtOz = rm + k * oz;
+  let a = dot(ld.xy, ld.xy) - k * k * ld.z * ld.z;
+  let b = dot(lo.xy, ld.xy) - k * rAtOz * ld.z;
+  let c = dot(lo.xy, lo.xy) - rAtOz * rAtOz;
+  let disc = b * b - a * c;
+  if (abs(a) > 1e-6 && disc >= 0.0) {
+    let sq = sqrt(disc);
+    let ra = (-b - sq) / a;
+    let rb = (-b + sq) / a;
+    let tMin = min(ra, rb);
+    let tFarR = max(ra, rb);
+    let vMin = step(0.0015, tMin) * step(tMin, bestT) * step(abs(oz + ld.z * tMin), hc);
+    let vFar = step(0.0015, tFarR) * step(tFarR, bestT) * step(abs(oz + ld.z * tFarR), hc);
+    if (bf > 0.5) {
+      bestT = mix(bestT, tMin, vMin);
+      bestT = mix(bestT, tFarR, vFar * step(bestT, tFarR));
+    } else {
+      bestT = mix(bestT, tFarR, vFar);
+      bestT = mix(bestT, tMin, vMin * step(tMin, bestT));
+    }
+  }
+  if (abs(ld.z) > 1e-6) {
+    let invZ = 1.0 / ld.z;
+    let tc0 = (z0 - lo.z) * invZ;
+    let xy0 = lo.xy + ld.xy * tc0;
+    let v0 = step(0.0015, tc0) * step(tc0, bestT) * step(dot(xy0, xy0), r0 * r0);
+    bestT = mix(bestT, tc0, v0 * (1.0 - bf));
+    let tc1 = (z1 - lo.z) * invZ;
+    let xy1 = lo.xy + ld.xy * tc1;
+    let v1 = step(0.0015, tc1) * step(tc1, bestT) * step(dot(xy1, xy1), r1 * r1);
+    bestT = mix(bestT, tc1, v1 * (1.0 - bf));
+  }
+  return bestT;
+}
+
+fn intersectBoxBounds(lo : vec3f, ld : vec3f, bMin : vec3f, bMax : vec3f, tMax : f32, bf : f32) -> f32 {
+  let safeSign = step(vec3f(0.0), ld) * 2.0 - 1.0;
+  let invD = 1.0 / (safeSign * max(abs(ld), vec3f(1e-6)));
+  let t0 = (bMin - lo) * invD;
+  let t1 = (bMax - lo) * invD;
+  let tNear = max(max(min(t0.x, t1.x), min(t0.y, t1.y)), min(t0.z, t1.z));
+  let tFar  = min(min(max(t0.x, t1.x), max(t0.y, t1.y)), max(t0.z, t1.z));
+  if (tNear > tFar || tFar < 0.0015) { return tMax; }
+  let tCand = mix(mix(tFar, tNear, step(0.0015, tNear)), tFar, bf);
+  return mix(tMax, tCand, step(0.0015, tCand) * step(tCand, tMax));
+}
+
 fn intersectPrimT(lo : vec3f, ld : vec3f, h : vec3f, shape : i32, tMax : f32, bf : f32) -> f32 {
   if (shape == 1) {
     let o = lo / h;
@@ -255,44 +309,34 @@ fn intersectPrimT(lo : vec3f, ld : vec3f, h : vec3f, shape : i32, tMax : f32, bf
     return mix(tMax, tCand, step(0.0015, tCand) * step(tCand, tMax));
   }
 
-  if (shape >= 2) {
-    let rad = max(h.x, h.y) * select(1.0, 0.65, shape == 3);
-    let hz  = h.z;
-    var bestT = tMax;
-    let a = dot(ld.xy, ld.xy);
-    let b = dot(lo.xy, ld.xy);
-    let disc = b * b - a * (dot(lo.xy, lo.xy) - rad * rad);
-    if (a > 1e-6 && disc >= 0.0) {
-      let sq = sqrt(disc);
-      let t0 = (-b - sq) / a;
-      let t1 = (-b + sq) / a;
-      let tSide = mix(mix(t1, t0, step(0.0015, t0)), t1, bf);
-      let validS = step(0.0015, tSide) * step(tSide, bestT) * step(abs(lo.z + ld.z * tSide), hz);
-      bestT = mix(bestT, tSide, validS);
-    }
-    if (abs(ld.z) > 1e-6) {
-      let invZ = 1.0 / ld.z;
-      let c0 = (-hz - lo.z) * invZ;
-      let c1 = ( hz - lo.z) * invZ;
-      let tcMin = min(c0, c1);
-      let tcMax = max(c0, c1);
-      let tCap = mix(mix(tcMax, tcMin, step(0.0015, tcMin)), tcMax, bf);
-      let xy = lo.xy + ld.xy * tCap;
-      let validC = step(0.0015, tCap) * step(tCap, bestT) * step(dot(xy, xy), rad * rad);
-      bestT = mix(bestT, tCap, validC);
-    }
+  if (shape == 4) {
+    return intersectTorusT(lo, ld, h, tMax);
+  }
+
+  if (shape == 3) {
+    // Automotive Traffic Cone: square weighted rubber plinth + tapered car safety cone frustum
+    let rad = max(h.x, h.y);
+    let zBase = -0.78 * h.z;
+    var bestT = intersectBoxBounds(lo, ld, vec3f(-rad, -rad, -h.z), vec3f(rad, rad, zBase), tMax, bf);
+    bestT = intersectFrustumZ(lo, ld, zBase, h.z, 0.72 * rad, 0.13 * rad, bestT, bf);
     return bestT;
   }
 
-  let safeSign = step(vec3f(0.0), ld) * 2.0 - 1.0;
-  let invD = 1.0 / (safeSign * max(abs(ld), vec3f(1e-6)));
-  let t0 = (-h - lo) * invD;
-  let t1 = ( h - lo) * invD;
-  let tNear = max(max(min(t0.x, t1.x), min(t0.y, t1.y)), min(t0.z, t1.z));
-  let tFar  = min(min(max(t0.x, t1.x), max(t0.y, t1.y)), max(t0.z, t1.z));
-  if (tNear > tFar || tFar < 0.0015) { return tMax; }
-  let tCand = mix(mix(tFar, tNear, step(0.0015, tNear)), tFar, bf);
-  return mix(tMax, tCand, step(0.0015, tCand) * step(tCand, tMax));
+  if (shape == 5) {
+    // Automotive Cylinder Cone: round weighted rubber flange + steep cylinder-like car delineator cone post
+    let rad = max(h.x, h.y);
+    let zBase = -0.84 * h.z;
+    var bestT = intersectFrustumZ(lo, ld, -h.z, zBase, rad, 0.94 * rad, tMax, bf);
+    bestT = intersectFrustumZ(lo, ld, zBase, h.z, 0.50 * rad, 0.37 * rad, bestT, bf);
+    return bestT;
+  }
+
+  if (shape >= 2) {
+    let rad = max(h.x, h.y);
+    return intersectFrustumZ(lo, ld, -h.z, h.z, rad, rad, tMax, bf);
+  }
+
+  return intersectBoxBounds(lo, ld, -h, h, tMax, bf);
 }
 
 fn finalizeHit(ro : vec3f, rd : vec3f, idx : i32, t : f32, backface : bool) -> HitInfo {
@@ -318,6 +362,44 @@ fn finalizeHit(ro : vec3f, rd : vec3f, idx : i32, t : f32, backface : bool) -> H
     let radDir = select(vec2f(1.0, 0.0), normalize(lp.xy), length(lp.xy) > 1e-5);
     ln = normalize(lp - vec3f(radDir * majorR, 0.0));
     ut = computeCurvedUvAndTangent(lp, h, 4);
+  } else if (shape == 3) {
+    let rad = max(h.x, h.y);
+    let zBase = -0.78 * h.z;
+    let xyDir = select(vec2f(1.0, 0.0), normalize(lp.xy), length(lp.xy) > 1e-5);
+    if (lp.z <= zBase + 0.0035) {
+      if (lp.z >= zBase - 0.004 && max(abs(lp.x), abs(lp.y)) > 0.70 * rad) {
+        ln = vec3f(0.0, 0.0, 1.0);
+      } else if (lp.z <= -h.z + 0.004) {
+        ln = vec3f(0.0, 0.0, -1.0);
+      } else if (abs(lp.x) >= abs(lp.y)) {
+        ln = vec3f(select(-1.0, 1.0, lp.x >= 0.0), 0.0, 0.0);
+      } else {
+        ln = vec3f(0.0, select(-1.0, 1.0, lp.y >= 0.0), 0.0);
+      }
+    } else if (abs(lp.z - h.z) < 0.004) {
+      ln = vec3f(0.0, 0.0, 1.0);
+    } else {
+      let slope = (0.72 * rad - 0.13 * rad) / max(1e-4, h.z - zBase);
+      ln = normalize(vec3f(xyDir, slope));
+    }
+    ut = computeCurvedUvAndTangent(lp, h, 3);
+  } else if (shape == 5) {
+    let rad = max(h.x, h.y);
+    let zBase = -0.84 * h.z;
+    let xyDir = select(vec2f(1.0, 0.0), normalize(lp.xy), length(lp.xy) > 1e-5);
+    if (abs(lp.z - h.z) < 0.004) {
+      ln = vec3f(0.0, 0.0, 1.0);
+    } else if (abs(lp.z + h.z) < 0.004) {
+      ln = vec3f(0.0, 0.0, -1.0);
+    } else if (abs(lp.z - zBase) < 0.0045 && length(lp.xy) > 0.49 * rad) {
+      ln = vec3f(0.0, 0.0, 1.0);
+    } else if (lp.z < zBase) {
+      ln = normalize(vec3f(xyDir, 0.28));
+    } else {
+      let slope = (0.50 * rad - 0.37 * rad) / max(1e-4, h.z - zBase);
+      ln = normalize(vec3f(xyDir, slope));
+    }
+    ut = computeCurvedUvAndTangent(lp, h, 5);
   } else if (shape >= 2) {
     if (abs(abs(lp.z) - h.z) < 0.003) {
       ln = vec3f(0.0, 0.0, step(0.0, lp.z) * 2.0 - 1.0);
@@ -512,7 +594,17 @@ fn closestRayPrimitiveSoftVis(origin : vec3f, dir : vec3f, idx : i32, ps : vec4f
   let lp = lo + ld * tMid;
 
   var dSil : f32;
-  if (shape >= 2) {
+  if (shape == 3) {
+    let rad = max(h.x, h.y);
+    let tAlpha = clamp((lp.z + 0.78 * h.z) / max(1e-4, 1.78 * h.z), 0.0, 1.0);
+    let rAtZ = select(mix(0.72 * rad, 0.13 * rad, tAlpha), rad, lp.z < -0.78 * h.z);
+    dSil = max(length(lp.xy) - rAtZ, abs(lp.z) - max(h.z, coneR * 1.25));
+  } else if (shape == 5) {
+    let rad = max(h.x, h.y);
+    let tAlpha = clamp((lp.z + 0.84 * h.z) / max(1e-4, 1.84 * h.z), 0.0, 1.0);
+    let rAtZ = select(mix(0.50 * rad, 0.37 * rad, tAlpha), rad, lp.z < -0.84 * h.z);
+    dSil = max(length(lp.xy) - rAtZ, abs(lp.z) - max(h.z, coneR * 1.25));
+  } else if (shape >= 2) {
     dSil = max(length(lp.xy) - max(h.x, h.y), abs(lp.z) - max(h.z, coneR * 1.25));
   } else {
     dSil = sdBox(lp, max(h, vec3f(coneR * 1.25)));

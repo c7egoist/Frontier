@@ -15,8 +15,16 @@ import {
   ComputeCameraRayAtUv,
   NormalizeVec3,
   PickSceneEntityAtUv,
+  RaycastWorldPlacementAtUv,
   RowEffectivelyVisible,
 } from "./ShowcaseGalleryScene.js";
+import {
+  EndWorldActorDrag,
+  GetActiveWorldDrag,
+  ReadWorldActorDropData,
+  WORLD_ACTOR_DRAG_MIME,
+} from "./WorldDragDrop.js";
+import { HasColourDragData, ReadColourDragData } from "./ColourCodex.js";
 import {
   ATLAS_COLS,
   ATLAS_HEIGHT,
@@ -64,11 +72,11 @@ function PreferInitialBackend() {
   return SessionWebGlBlocked ? "cpu-gtx" : "webgl2";
 }
 
-const MAX_PRIMS = 14;
+const MAX_PRIMS = 32;
 const MAX_LIGHTS = 2;
 const SCENE_DATA_W = 8;
-const SCENE_DATA_H = 16;
-const LIGHT_ROW_BASE = 14;
+const SCENE_DATA_H = 36;
+const LIGHT_ROW_BASE = 32;
 
 const FULLSCREEN_VERTEX_SHADER = `#version 300 es
 precision highp float;
@@ -296,6 +304,60 @@ float intersectTorusT(vec3 lo, vec3 ld, vec3 h, float bestT) {
   return hitT;
 }
 
+float intersectFrustumZ(vec3 lo, vec3 ld, float z0, float z1, float r0, float r1, float tMax, float bf) {
+  float bestT = tMax;
+  float zc = 0.5 * (z0 + z1);
+  float hc = 0.5 * (z1 - z0);
+  float rm = 0.5 * (r0 + r1);
+  float k  = hc > 1e-5 ? (r1 - r0) / (2.0 * hc) : 0.0;
+  float oz = lo.z - zc;
+  float rAtOz = rm + k * oz;
+  float a = dot(ld.xy, ld.xy) - k * k * ld.z * ld.z;
+  float b = dot(lo.xy, ld.xy) - k * rAtOz * ld.z;
+  float c = dot(lo.xy, lo.xy) - rAtOz * rAtOz;
+  float disc = b * b - a * c;
+  if (abs(a) > 1e-6 && disc >= 0.0) {
+    float sq = sqrt(disc);
+    float ra = (-b - sq) / a;
+    float rb = (-b + sq) / a;
+    float tMin = min(ra, rb);
+    float tFarR = max(ra, rb);
+    float vMin = step(0.0015, tMin) * step(tMin, bestT) * step(abs(oz + ld.z * tMin), hc);
+    float vFar = step(0.0015, tFarR) * step(tFarR, bestT) * step(abs(oz + ld.z * tFarR), hc);
+    if (bf > 0.5) {
+      bestT = mix(bestT, tMin, vMin);
+      bestT = mix(bestT, tFarR, vFar * step(bestT, tFarR));
+    } else {
+      bestT = mix(bestT, tFarR, vFar);
+      bestT = mix(bestT, tMin, vMin * step(tMin, bestT));
+    }
+  }
+  if (abs(ld.z) > 1e-6) {
+    float invZ = 1.0 / ld.z;
+    float tc0 = (z0 - lo.z) * invZ;
+    vec2 xy0 = lo.xy + ld.xy * tc0;
+    float v0 = step(0.0015, tc0) * step(tc0, bestT) * step(dot(xy0, xy0), r0 * r0);
+    bestT = mix(bestT, tc0, v0 * (1.0 - bf));
+    float tc1 = (z1 - lo.z) * invZ;
+    vec2 xy1 = lo.xy + ld.xy * tc1;
+    float v1 = step(0.0015, tc1) * step(tc1, bestT) * step(dot(xy1, xy1), r1 * r1);
+    bestT = mix(bestT, tc1, v1 * (1.0 - bf));
+  }
+  return bestT;
+}
+
+float intersectBoxBounds(vec3 lo, vec3 ld, vec3 bMin, vec3 bMax, float tMax, float bf) {
+  vec3 safeSign = step(vec3(0.0), ld) * 2.0 - 1.0;
+  vec3 invD = 1.0 / (safeSign * max(abs(ld), vec3(1e-6)));
+  vec3 t0 = (bMin - lo) * invD;
+  vec3 t1 = (bMax - lo) * invD;
+  float tNear = max(max(min(t0.x, t1.x), min(t0.y, t1.y)), min(t0.z, t1.z));
+  float tFar  = min(min(max(t0.x, t1.x), max(t0.y, t1.y)), max(t0.z, t1.z));
+  if (tNear > tFar || tFar < 0.0015) return tMax;
+  float tCand = mix(mix(tFar, tNear, step(0.0015, tNear)), tFar, bf);
+  return mix(tMax, tCand, step(0.0015, tCand) * step(tCand, tMax));
+}
+
 float intersectPrimT(vec3 lo, vec3 ld, vec3 h, int shape, float tMax, float bf) {
   if (shape == 1) {
     vec3 o = lo / h;
@@ -312,44 +374,32 @@ float intersectPrimT(vec3 lo, vec3 ld, vec3 h, int shape, float tMax, float bf) 
     return mix(tMax, tCand, step(0.0015, tCand) * step(tCand, tMax));
   }
 
-  if (shape >= 2) {
-    float rad = max(h.x, h.y) * (shape == 3 ? 0.65 : 1.0);
-    float hz  = h.z;
-    float bestT = tMax;
-    float a = dot(ld.xy, ld.xy);
-    float b = dot(lo.xy, ld.xy);
-    float disc = b * b - a * (dot(lo.xy, lo.xy) - rad * rad);
-    if (a > 1e-6 && disc >= 0.0) {
-      float sq = sqrt(disc);
-      float t0 = (-b - sq) / a;
-      float t1 = (-b + sq) / a;
-      float tSide = mix(mix(t1, t0, step(0.0015, t0)), t1, bf);
-      float validS = step(0.0015, tSide) * step(tSide, bestT) * step(abs(lo.z + ld.z * tSide), hz);
-      bestT = mix(bestT, tSide, validS);
-    }
-    if (abs(ld.z) > 1e-6) {
-      float invZ = 1.0 / ld.z;
-      float c0 = (-hz - lo.z) * invZ;
-      float c1 = ( hz - lo.z) * invZ;
-      float tcMin = min(c0, c1);
-      float tcMax = max(c0, c1);
-      float tCap = mix(mix(tcMax, tcMin, step(0.0015, tcMin)), tcMax, bf);
-      vec2 xy = lo.xy + ld.xy * tCap;
-      float validC = step(0.0015, tCap) * step(tCap, bestT) * step(dot(xy, xy), rad * rad);
-      bestT = mix(bestT, tCap, validC);
-    }
+  if (shape == 4) {
+    return intersectTorusT(lo, ld, h, tMax);
+  }
+
+  if (shape == 3) {
+    float rad = max(h.x, h.y);
+    float zBase = -0.78 * h.z;
+    float bestT = intersectBoxBounds(lo, ld, vec3(-rad, -rad, -h.z), vec3(rad, rad, zBase), tMax, bf);
+    bestT = intersectFrustumZ(lo, ld, zBase, h.z, 0.72 * rad, 0.13 * rad, bestT, bf);
     return bestT;
   }
 
-  vec3 safeSign = step(vec3(0.0), ld) * 2.0 - 1.0;
-  vec3 invD = 1.0 / (safeSign * max(abs(ld), vec3(1e-6)));
-  vec3 t0 = (-h - lo) * invD;
-  vec3 t1 = ( h - lo) * invD;
-  float tNear = max(max(min(t0.x, t1.x), min(t0.y, t1.y)), min(t0.z, t1.z));
-  float tFar  = min(min(max(t0.x, t1.x), max(t0.y, t1.y)), max(t0.z, t1.z));
-  if (tNear > tFar || tFar < 0.0015) return tMax;
-  float tCand = mix(mix(tFar, tNear, step(0.0015, tNear)), tFar, bf);
-  return mix(tMax, tCand, step(0.0015, tCand) * step(tCand, tMax));
+  if (shape == 5) {
+    float rad = max(h.x, h.y);
+    float zBase = -0.84 * h.z;
+    float bestT = intersectFrustumZ(lo, ld, -h.z, zBase, rad, 0.94 * rad, tMax, bf);
+    bestT = intersectFrustumZ(lo, ld, zBase, h.z, 0.50 * rad, 0.37 * rad, bestT, bf);
+    return bestT;
+  }
+
+  if (shape >= 2) {
+    float rad = max(h.x, h.y);
+    return intersectFrustumZ(lo, ld, -h.z, h.z, rad, rad, tMax, bf);
+  }
+
+  return intersectBoxBounds(lo, ld, -h, h, tMax, bf);
 }
 
 HitInfo finalizeHit(vec3 ro, vec3 rd, int idx, float t, bool backface) {
@@ -377,6 +427,44 @@ HitInfo finalizeHit(vec3 ro, vec3 rd, int idx, float t, bool backface) {
     vec2 radDir = length(lp.xy) > 1e-5 ? normalize(lp.xy) : vec2(1.0, 0.0);
     ln = normalize(lp - vec3(radDir * majorR, 0.0));
     computeCurvedUvAndTangent(lp, h, 4, uv, lt);
+  } else if (shape == 3) {
+    float rad = max(h.x, h.y);
+    float zBase = -0.78 * h.z;
+    vec2 xyDir = length(lp.xy) > 1e-5 ? normalize(lp.xy) : vec2(1.0, 0.0);
+    if (lp.z <= zBase + 0.0035) {
+      if (lp.z >= zBase - 0.004 && max(abs(lp.x), abs(lp.y)) > 0.70 * rad) {
+        ln = vec3(0.0, 0.0, 1.0);
+      } else if (lp.z <= -h.z + 0.004) {
+        ln = vec3(0.0, 0.0, -1.0);
+      } else if (abs(lp.x) >= abs(lp.y)) {
+        ln = vec3(lp.x >= 0.0 ? 1.0 : -1.0, 0.0, 0.0);
+      } else {
+        ln = vec3(0.0, lp.y >= 0.0 ? 1.0 : -1.0, 0.0);
+      }
+    } else if (abs(lp.z - h.z) < 0.004) {
+      ln = vec3(0.0, 0.0, 1.0);
+    } else {
+      float slope = (0.72 * rad - 0.13 * rad) / max(1e-4, h.z - zBase);
+      ln = normalize(vec3(xyDir, slope));
+    }
+    computeCurvedUvAndTangent(lp, h, 3, uv, lt);
+  } else if (shape == 5) {
+    float rad = max(h.x, h.y);
+    float zBase = -0.84 * h.z;
+    vec2 xyDir = length(lp.xy) > 1e-5 ? normalize(lp.xy) : vec2(1.0, 0.0);
+    if (abs(lp.z - h.z) < 0.004) {
+      ln = vec3(0.0, 0.0, 1.0);
+    } else if (abs(lp.z + h.z) < 0.004) {
+      ln = vec3(0.0, 0.0, -1.0);
+    } else if (abs(lp.z - zBase) < 0.0045 && length(lp.xy) > 0.49 * rad) {
+      ln = vec3(0.0, 0.0, 1.0);
+    } else if (lp.z < zBase) {
+      ln = normalize(vec3(xyDir, 0.28));
+    } else {
+      float slope = (0.50 * rad - 0.37 * rad) / max(1e-4, h.z - zBase);
+      ln = normalize(vec3(xyDir, slope));
+    }
+    computeCurvedUvAndTangent(lp, h, 5, uv, lt);
   } else if (shape >= 2) {
     if (abs(abs(lp.z) - h.z) < 0.003) {
       ln = vec3(0.0, 0.0, step(0.0, lp.z) * 2.0 - 1.0);
@@ -554,9 +642,22 @@ float closestRayPrimitiveSoftVis(vec3 origin, vec3 dir, int idx, vec4 ps, vec3 h
   float coneR = 0.004 + tMid * tanSun;
   vec3 lp = lo + ld * tMid;
 
-  float dSil = (shape >= 2)
-    ? max(length(lp.xy) - max(h.x, h.y), abs(lp.z) - max(h.z, coneR * 1.25))
-    : sdBox(lp, max(h, vec3(coneR * 1.25)));
+  float dSil;
+  if (shape == 3) {
+    float rad = max(h.x, h.y);
+    float tAlpha = clamp((lp.z + 0.78 * h.z) / max(1e-4, 1.78 * h.z), 0.0, 1.0);
+    float rAtZ = lp.z < -0.78 * h.z ? rad : mix(0.72 * rad, 0.13 * rad, tAlpha);
+    dSil = max(length(lp.xy) - rAtZ, abs(lp.z) - max(h.z, coneR * 1.25));
+  } else if (shape == 5) {
+    float rad = max(h.x, h.y);
+    float tAlpha = clamp((lp.z + 0.84 * h.z) / max(1e-4, 1.84 * h.z), 0.0, 1.0);
+    float rAtZ = lp.z < -0.84 * h.z ? rad : mix(0.50 * rad, 0.37 * rad, tAlpha);
+    dSil = max(length(lp.xy) - rAtZ, abs(lp.z) - max(h.z, coneR * 1.25));
+  } else if (shape >= 2) {
+    dSil = max(length(lp.xy) - max(h.x, h.y), abs(lp.z) - max(h.z, coneR * 1.25));
+  } else {
+    dSil = sdBox(lp, max(h, vec3(coneR * 1.25)));
+  }
   return smoothstep(-coneR, coneR, dSil);
 }
 
@@ -1502,6 +1603,9 @@ export default function GtxWorldViewport({
   OnSelectEntity,
   OnUpdateCamera,
   OnTransformEntity,
+  OnDropWorldActor,
+  OnApplyMaterialDrop,
+  OnApplyColourDrop,
   OnFpsSample,
 }) {
   const SelectCallback = OnSelectEntity || Select;
@@ -1553,18 +1657,32 @@ export default function GtxWorldViewport({
   const [GizmoReadout, SetGizmoReadout] = useState("");
   const [CameraSpeedHud, SetCameraSpeedHud] = useState("");
   const [TextureEpoch, SetTextureEpoch] = useState(0);
+  const [LiveDragPreview, SetLiveDragPreview] = useState(null);
 
   if (!AtlasSyncRef.current) {
     AtlasSyncRef.current = new MaterialAtlasSynchronizer();
   }
 
+  const EffectiveRows = useMemo(
+    () => (LiveDragPreview?.Row ? [...Rows, LiveDragPreview.Row] : Rows),
+    [Rows, LiveDragPreview],
+  );
+  const EffectiveValues = useMemo(
+    () =>
+      LiveDragPreview?.Row
+        ? { ...Values, __drag_preview__: LiveDragPreview.Value }
+        : Values,
+    [Values, LiveDragPreview],
+  );
+  const EffectiveSelected = LiveDragPreview?.HighlightId || Selected;
+
   const CompiledScene = useMemo(
     () =>
-      CompileLiveGtxScene(Rows, Values, Hidden, EffectiveProjection, {
+      CompileLiveGtxScene(EffectiveRows, EffectiveValues, Hidden, EffectiveProjection, {
         ForceOverlaySettings,
-        SelectedId: Selected,
+        SelectedId: EffectiveSelected,
       }),
-    [Rows, Values, Hidden, EffectiveProjection, ForceOverlaySettings, Selected],
+    [EffectiveRows, EffectiveValues, Hidden, EffectiveProjection, ForceOverlaySettings, EffectiveSelected],
   );
   CompiledSceneRef.current = CompiledScene;
 
@@ -1740,12 +1858,15 @@ export default function GtxWorldViewport({
   }, []);
 
   const SelectedGizmoTarget = useMemo(
-    () => ResolveEntityTransformForGizmo(Selected, Rows, Values, CompiledScene),
-    [Selected, Rows, Values, CompiledScene],
+    () =>
+      LiveDragPreview
+        ? null
+        : ResolveEntityTransformForGizmo(Selected, Rows, Values, CompiledScene),
+    [LiveDragPreview, Selected, Rows, Values, CompiledScene],
   );
 
   RenderPropsRef.current = {
-    Selected,
+    Selected: EffectiveSelected,
     SelectedGizmoTarget,
     ViewMode,
     Debug,
@@ -1774,7 +1895,7 @@ export default function GtxWorldViewport({
   useEffect(() => {
     SceneDirtyRef.current = true;
     RequestRedrawRef.current?.(true);
-  }, [Selected, ViewMode, Debug, EffectiveGrid, TextureEpoch, GlEpoch, WgpuEpoch, RenderBackend]);
+  }, [EffectiveSelected, ViewMode, Debug, EffectiveGrid, TextureEpoch, GlEpoch, WgpuEpoch, RenderBackend]);
 
   // Redraw Pass 2/3 gizmo & ForceOverlay ONLY (keeping Pass 1 cached!) when gizmo or ForceOverlay changes
   useEffect(() => {
@@ -3212,6 +3333,134 @@ export default function GtxWorldViewport({
     SetRenderBackend(typeof navigator !== "undefined" && navigator.gpu ? "webgpu" : "webgl2");
   };
 
+  const ComputeViewportUvAndLiveScene = (Ev) => {
+    const Canvas = CanvasRef.current;
+    const Rect = Canvas?.getBoundingClientRect?.() || { left: 0, top: 0, width: 960, height: 540 };
+    const W = Math.max(1, Rect.width || 960);
+    const H = Math.max(1, Rect.height || 540);
+    const U = Math.max(0, Math.min(1, (Ev.clientX - Rect.left) / W));
+    const V = Math.max(0, Math.min(1, (Ev.clientY - Rect.top) / H));
+    const Aspect = W / H;
+    const SceneForRay = GetActiveScene();
+    return { U, V, Aspect, SceneForRay };
+  };
+
+  const HandleStageDragOver = (Ev) => {
+    const ActorDrag = GetActiveWorldDrag();
+    const HasActorMime =
+      Boolean(ActorDrag) ||
+      Boolean(Ev.dataTransfer?.types && Array.from(Ev.dataTransfer.types).includes(WORLD_ACTOR_DRAG_MIME));
+    const HasColour = HasColourDragData(Ev);
+    if (!HasActorMime && !HasColour) return;
+
+    Ev.preventDefault();
+    if (Ev.dataTransfer) Ev.dataTransfer.dropEffect = "copy";
+
+    const { U, V, Aspect, SceneForRay } = ComputeViewportUvAndLiveScene(Ev);
+
+    if (HasColour || ActorDrag?.ActorKind === "material") {
+      const HitEntityId = PickSceneEntityAtUv(SceneForRay, U, V, Aspect);
+      const Label = ActorDrag?.ActorKind === "material" ? ActorDrag.Label : "Colour Swatch";
+      SetLiveDragPreview((Prev) =>
+        Prev?.HighlightId === HitEntityId && Prev?.Hud === (HitEntityId ? `Apply ${Label} → ${HitEntityId}` : `Drop ${Label} onto a 3D mesh`)
+          ? Prev
+          : {
+              Row: null,
+              Value: null,
+              HighlightId: HitEntityId || null,
+              Hud: HitEntityId ? `Drop to Apply ${Label}` : `Hover a 3D object to apply ${Label}`,
+            },
+      );
+      return;
+    }
+
+    if (ActorDrag?.Template) {
+      const Placement = RaycastWorldPlacementAtUv(
+        SceneForRay,
+        U,
+        V,
+        Aspect,
+        ActorDrag.HalfHeightZ ?? 0.39,
+        "__drag_preview__",
+      );
+      const Pos = Placement.Position;
+      const PosKey = `${Pos[0]},${Pos[1]},${Pos[2]}`;
+      SetLiveDragPreview((Prev) => {
+        if (Prev?.PosKey === PosKey && Prev?.SourceLabel === ActorDrag.Label) return Prev;
+        return {
+          PosKey,
+          SourceLabel: ActorDrag.Label,
+          Position: Pos,
+          HighlightId: "__drag_preview__",
+          Row: {
+            ...ActorDrag.Template,
+            Id: "__drag_preview__",
+            Name: ActorDrag.Label || ActorDrag.Template.Name,
+            Parent: null,
+            Preview: true,
+          },
+          Value: {
+            ...ActorDrag.Properties,
+            Position: Pos,
+          },
+          Hud: `Drop to Place ${ActorDrag.Label || ActorDrag.Template.Name} · (${Pos[0].toFixed(2)}, ${Pos[1].toFixed(2)}, ${Pos[2].toFixed(2)})`,
+        };
+      });
+    }
+  };
+
+  const HandleStageDragLeave = (Ev) => {
+    if (Ev.currentTarget && Ev.relatedTarget && Ev.currentTarget.contains(Ev.relatedTarget)) {
+      return;
+    }
+    SetLiveDragPreview(null);
+  };
+
+  const HandleStageDrop = (Ev) => {
+    const ActorPayload = ReadWorldActorDropData(Ev);
+    const ColourPayload = !ActorPayload && HasColourDragData(Ev) ? ReadColourDragData(Ev) : null;
+    if (!ActorPayload && !ColourPayload) return;
+
+    Ev.preventDefault();
+    Ev.stopPropagation();
+    const { U, V, Aspect, SceneForRay } = ComputeViewportUvAndLiveScene(Ev);
+
+    if (ColourPayload) {
+      const HitEntityId = PickSceneEntityAtUv(SceneForRay, U, V, Aspect);
+      SetLiveDragPreview(null);
+      if (typeof OnApplyColourDrop === "function") {
+        OnApplyColourDrop(ColourPayload, HitEntityId);
+      }
+      return;
+    }
+
+    if (ActorPayload?.ActorKind === "material" && ActorPayload.Material) {
+      const HitEntityId = PickSceneEntityAtUv(SceneForRay, U, V, Aspect);
+      SetLiveDragPreview(null);
+      EndWorldActorDrag();
+      if (typeof OnApplyMaterialDrop === "function") {
+        OnApplyMaterialDrop(ActorPayload, HitEntityId);
+      }
+      return;
+    }
+
+    if (ActorPayload?.Template) {
+      const Placement = RaycastWorldPlacementAtUv(
+        SceneForRay,
+        U,
+        V,
+        Aspect,
+        ActorPayload.HalfHeightZ ?? 0.39,
+        "__drag_preview__",
+      );
+      SetLiveDragPreview(null);
+      EndWorldActorDrag();
+      if (typeof OnDropWorldActor === "function") {
+        OnDropWorldActor(ActorPayload, Placement.Position, Placement.HitId);
+      }
+    }
+  };
+
   const CursorStyle =
     ActiveHandle !== GizmoHandle.None
       ? "grabbing"
@@ -3221,8 +3470,12 @@ export default function GtxWorldViewport({
 
   return (
     <div
-      className="gtx-world-stage"
+      className={"gtx-world-stage" + (LiveDragPreview ? " world-drag-active" : "")}
       onContextMenu={(Ev) => Ev.preventDefault()}
+      onDragEnter={HandleStageDragOver}
+      onDragOver={HandleStageDragOver}
+      onDragLeave={HandleStageDragLeave}
+      onDrop={HandleStageDrop}
       onPointerEnter={() => {
         ViewportHoveredRef.current = true;
       }}
@@ -3241,20 +3494,26 @@ export default function GtxWorldViewport({
         onPointerUp={OnPointerUp}
         onPointerCancel={OnPointerUp}
       />
-      {(ActiveHandle !== GizmoHandle.None ||
+      {(LiveDragPreview?.Hud ||
+        ActiveHandle !== GizmoHandle.None ||
         HoveredHandle !== GizmoHandle.None ||
         GizmoReadout ||
         CameraSpeedHud) && (
         <div className="gtx-gizmo-readout" role="status" aria-live="polite">
           <span className="gtx-gizmo-dot" />
           <strong>
-            {CameraSpeedHud ||
+            {LiveDragPreview?.Hud ||
+              CameraSpeedHud ||
               GizmoReadout ||
               GIZMO_HANDLE_LABELS[HoveredHandle] ||
               "GizmoPRO"}
           </strong>
-          {ActiveHandle !== GizmoHandle.None && !CameraSpeedHud && (
-            <small>Hold Ctrl to snap</small>
+          {LiveDragPreview?.Position ? (
+            <small>Surface-Snapped</small>
+          ) : (
+            ActiveHandle !== GizmoHandle.None && !CameraSpeedHud && (
+              <small>Hold Ctrl to snap</small>
+            )
           )}
         </div>
       )}

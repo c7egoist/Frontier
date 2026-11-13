@@ -16,6 +16,7 @@ import {
   ResolveForceValues,
   SerializeForceModelToml,
 } from "./ForceFieldCatalog.js";
+import { WORLD_PLACEABLE_MODELS } from "./WorldDragDrop.js";
 
 export async function AssetFile(Id, Value, Remove = false) {
   return new Promise((Resolve, Reject) => {
@@ -110,25 +111,37 @@ export function EngineAssets() {
         Detail: `${Preset.Format} · ${Meta.Domain} · ${Preset.Summary}`,
       };
     }),
+    ...WORLD_PLACEABLE_MODELS.map((Model) => ({
+      Id: Model.Id,
+      Name: Model.Name,
+      Kind: "Models",
+      Origin: "Engine",
+      Format: Model.Format,
+      PrimitiveShape: Model.PrimitiveShape,
+      Scale: Model.Scale,
+      Detail: Model.Detail,
+    })),
     {
       Id: "engine-shaderball",
       Name: "Shader ball",
       Kind: "Models",
       Origin: "Engine",
+      PrimitiveShape: "sphere",
+      Scale: [0.78, 0.78, 0.78],
       Detail:
-        "Existing shader-ball mesh · 35,897 vertices · 67,832 triangles. Native SBM1 container.",
+        "Existing shader-ball mesh · 35,897 vertices · 67,832 triangles. Native SBM1 container · drag into scene to place.",
     },
   ];
 }
 
 export const AssetKinds = [
   "All",
+  "Models",
   "Forces",
   "Materials",
   "Colours",
   "Images",
   "Fonts",
-  "Models",
   "Icons",
   "Code",
   "Other",

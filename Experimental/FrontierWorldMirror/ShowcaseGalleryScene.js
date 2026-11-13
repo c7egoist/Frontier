@@ -488,6 +488,7 @@ export function RowEffectivelyVisible(Row, Rows, Hidden) {
 function ShapeKindCode(Row) {
   const Explicit = Row.PrimitiveShape;
   if (Explicit === "sphere" || Row.Icon === "editor-sphere") return 1;
+  if (Explicit === "cylinder-cone") return 5;
   if (Explicit === "cylinder" || Row.Icon === "editor-cylinder") return 2;
   if (Explicit === "cone" || Row.Icon === "editor-cone") return 3;
   if (Explicit === "torus" || Row.Icon === "editor-torus") return 4;
@@ -689,7 +690,7 @@ export function CompileLiveGtxScene(
       Abbe,
       Attenuation,
     });
-    if (Primitives.length >= 24) break;
+    if (Primitives.length >= 32) break;
   }
 
   // Analytical ForceFields & VectorFields (Pass 3A ForceOverlay — zero rigid-body physics!)
@@ -792,6 +793,160 @@ export function ComputeCameraRayAtUv(CompiledScene, U, V, Aspect) {
   return { RayOrigin, RayDir, Basis: { Right, Up, Forward: Fwd } };
 }
 
+function FwdRotateEulerXYZ(V, R) {
+  const Cx = Math.cos(R[0] || 0), Sx = Math.sin(R[0] || 0);
+  const Cy = Math.cos(R[1] || 0), Sy = Math.sin(R[1] || 0);
+  const Cz = Math.cos(R[2] || 0), Sz = Math.sin(R[2] || 0);
+  const X = [V[0], Cx * V[1] - Sx * V[2], Sx * V[1] + Cx * V[2]];
+  const Y = [Cy * X[0] + Sy * X[2], X[1], -Sy * X[0] + Cy * X[2]];
+  return [Cz * Y[0] - Sz * Y[1], Sz * Y[0] + Cz * Y[1], Y[2]];
+}
+
+function IntersectLocalFrustumZ(Lo, Ld, Z0, Z1, R0, R1, BestT) {
+  let OutT = BestT;
+  const Zc = 0.5 * (Z0 + Z1);
+  const Hc = 0.5 * (Z1 - Z0);
+  const Rm = 0.5 * (R0 + R1);
+  const K = Hc > 1e-6 ? (R1 - R0) / (2.0 * Hc) : 0.0;
+  const Oz = Lo[2] - Zc;
+  const RAtOz = Rm + K * Oz;
+  const A = Ld[0] * Ld[0] + Ld[1] * Ld[1] - K * K * Ld[2] * Ld[2];
+  const B = Lo[0] * Ld[0] + Lo[1] * Ld[1] - K * RAtOz * Ld[2];
+  const C = Lo[0] * Lo[0] + Lo[1] * Lo[1] - RAtOz * RAtOz;
+  const Disc = B * B - A * C;
+  if (Math.abs(A) > 1e-6 && Disc >= 0.0) {
+    const Sq = Math.sqrt(Disc);
+    const Ra = (-B - Sq) / A;
+    const Rb = (-B + Sq) / A;
+    const TMin = Math.min(Ra, Rb);
+    const TMax = Math.max(Ra, Rb);
+    const ZMin = Oz + Ld[2] * TMin;
+    if (TMin > 0.04 && TMin < OutT && Math.abs(ZMin) <= Hc) OutT = TMin;
+    const ZMax = Oz + Ld[2] * TMax;
+    if (TMax > 0.04 && TMax < OutT && Math.abs(ZMax) <= Hc) OutT = TMax;
+  }
+  if (Math.abs(Ld[2]) > 1e-6) {
+    const Tc0 = (Z0 - Lo[2]) / Ld[2];
+    if (Tc0 > 0.04 && Tc0 < OutT) {
+      const X0 = Lo[0] + Ld[0] * Tc0, Y0 = Lo[1] + Ld[1] * Tc0;
+      if (X0 * X0 + Y0 * Y0 <= R0 * R0) OutT = Tc0;
+    }
+    const Tc1 = (Z1 - Lo[2]) / Ld[2];
+    if (Tc1 > 0.04 && Tc1 < OutT) {
+      const X1 = Lo[0] + Ld[0] * Tc1, Y1 = Lo[1] + Ld[1] * Tc1;
+      if (X1 * X1 + Y1 * Y1 <= R1 * R1) OutT = Tc1;
+    }
+  }
+  return OutT;
+}
+
+function IntersectLocalBox(Lo, Ld, BMin, BMax, BestT) {
+  let TMin = 0.04;
+  let TMax = BestT;
+  let AxisHit = 2;
+  let AxisSign = 1;
+  for (let Axis = 0; Axis < 3; ++Axis) {
+    const InvD = Math.abs(Ld[Axis]) > 1e-7 ? 1 / Ld[Axis] : 1e7;
+    let T0 = (BMin[Axis] - Lo[Axis]) * InvD;
+    let T1 = (BMax[Axis] - Lo[Axis]) * InvD;
+    let Sign = -1;
+    if (T0 > T1) {
+      [T0, T1] = [T1, T0];
+      Sign = 1;
+    }
+    if (T0 > TMin) {
+      TMin = T0;
+      AxisHit = Axis;
+      AxisSign = Sign;
+    }
+    TMax = Math.min(TMax, T1);
+    if (TMin > TMax) return { Hit: false, T: BestT, Normal: [0, 0, 1] };
+  }
+  const Normal = [0, 0, 0];
+  Normal[AxisHit] = AxisSign;
+  return { Hit: true, T: TMin, Normal };
+}
+
+function IntersectScenePrimLocal(Prim, Rel, LocalDir, CurrentBestT) {
+  const Hx = Prim.HalfExtents[0];
+  const Hy = Prim.HalfExtents[1];
+  const Hz = Prim.HalfExtents[2];
+  if (Prim.Shape === 1) {
+    const O = [Rel[0] / Hx, Rel[1] / Hy, Rel[2] / Hz];
+    const D = [LocalDir[0] / Hx, LocalDir[1] / Hy, LocalDir[2] / Hz];
+    const A = D[0] * D[0] + D[1] * D[1] + D[2] * D[2];
+    const B = O[0] * D[0] + O[1] * D[1] + O[2] * D[2];
+    const C = O[0] * O[0] + O[1] * O[1] + O[2] * O[2] - 1;
+    const Disc = B * B - A * C;
+    if (Disc >= 0) {
+      const Sq = Math.sqrt(Disc);
+      const T0 = (-B - Sq) / A;
+      const T1 = (-B + Sq) / A;
+      const T = T0 > 0.04 ? T0 : T1 > 0.04 ? T1 : Infinity;
+      if (T < CurrentBestT) {
+        const Lp = [Rel[0] + LocalDir[0] * T, Rel[1] + LocalDir[1] * T, Rel[2] + LocalDir[2] * T];
+        return { T, LocalNormal: NormalizeVec3([Lp[0] / (Hx * Hx), Lp[1] / (Hy * Hy), Lp[2] / (Hz * Hz)], [0, 0, 1]) };
+      }
+    }
+    return null;
+  }
+  if (Prim.Shape === 2) {
+    const Rad = Math.max(Hx, Hy);
+    const T = IntersectLocalFrustumZ(Rel, LocalDir, -Hz, Hz, Rad, Rad, CurrentBestT);
+    if (T < CurrentBestT) {
+      const Lp = [Rel[0] + LocalDir[0] * T, Rel[1] + LocalDir[1] * T, Rel[2] + LocalDir[2] * T];
+      const OnCap = Math.abs(Math.abs(Lp[2]) - Hz) < 0.004;
+      const Ln = OnCap ? [0, 0, Lp[2] >= 0 ? 1 : -1] : NormalizeVec3([Lp[0], Lp[1], 0], [1, 0, 0]);
+      return { T, LocalNormal: Ln };
+    }
+    return null;
+  }
+  if (Prim.Shape === 3) {
+    // Traffic Cone: square weighted base + tapered car safety cone frustum
+    const Rad = Math.max(Hx, Hy);
+    const ZBase = -0.78 * Hz;
+    let Best = CurrentBestT;
+    let BestN = [0, 0, 1];
+    const BaseHit = IntersectLocalBox(Rel, LocalDir, [-Rad, -Rad, -Hz], [Rad, Rad, ZBase], Best);
+    if (BaseHit.Hit && BaseHit.T < Best) {
+      Best = BaseHit.T;
+      BestN = BaseHit.Normal;
+    }
+    const ConeT = IntersectLocalFrustumZ(Rel, LocalDir, ZBase, Hz, 0.72 * Rad, 0.13 * Rad, Best);
+    if (ConeT < Best) {
+      Best = ConeT;
+      const Lp = [Rel[0] + LocalDir[0] * ConeT, Rel[1] + LocalDir[1] * ConeT, Rel[2] + LocalDir[2] * ConeT];
+      BestN = Math.abs(Lp[2] - Hz) < 0.004
+        ? [0, 0, 1]
+        : NormalizeVec3([Lp[0], Lp[1], 0.33 * Math.hypot(Lp[0], Lp[1])], [0, 0, 1]);
+    }
+    return Best < CurrentBestT ? { T: Best, LocalNormal: BestN } : null;
+  }
+  if (Prim.Shape === 5) {
+    // Cylinder Cone: round weighted base flange + steep cylinder-like car delineator cone post
+    const Rad = Math.max(Hx, Hy);
+    const ZBase = -0.84 * Hz;
+    let Best = CurrentBestT;
+    let BestN = [0, 0, 1];
+    const BaseT = IntersectLocalFrustumZ(Rel, LocalDir, -Hz, ZBase, Rad, 0.94 * Rad, Best);
+    if (BaseT < Best) {
+      Best = BaseT;
+      BestN = [0, 0, 1];
+    }
+    const PostT = IntersectLocalFrustumZ(Rel, LocalDir, ZBase, Hz, 0.50 * Rad, 0.37 * Rad, Best);
+    if (PostT < Best) {
+      Best = PostT;
+      const Lp = [Rel[0] + LocalDir[0] * PostT, Rel[1] + LocalDir[1] * PostT, Rel[2] + LocalDir[2] * PostT];
+      BestN = Math.abs(Lp[2] - Hz) < 0.004
+        ? [0, 0, 1]
+        : NormalizeVec3([Lp[0], Lp[1], 0.08 * Math.hypot(Lp[0], Lp[1])], [0, 0, 1]);
+    }
+    return Best < CurrentBestT ? { T: Best, LocalNormal: BestN } : null;
+  }
+  const BoxHit = IntersectLocalBox(Rel, LocalDir, [-Hx, -Hy, -Hz], [Hx, Hy, Hz], CurrentBestT);
+  return BoxHit.Hit ? { T: BoxHit.T, LocalNormal: BoxHit.Normal } : null;
+}
+
 // Analytical 3D ray picking in Z-up world space so clicking any 3D object or ForceField beacon in the GTX viewport selects it in Outliner & Inspector!
 export function PickSceneEntityAtUv(CompiledScene, U, V, Aspect) {
   const { RayOrigin, RayDir } = ComputeCameraRayAtUv(CompiledScene, U, V, Aspect);
@@ -806,6 +961,7 @@ export function PickSceneEntityAtUv(CompiledScene, U, V, Aspect) {
   let BestId = null;
 
   for (const Prim of CompiledScene.Primitives) {
+    if (Prim.Id === "__drag_preview__") continue;
     const WorldRel = [
       RayOrigin[0] - Prim.Center[0],
       RayOrigin[1] - Prim.Center[1],
@@ -813,48 +969,10 @@ export function PickSceneEntityAtUv(CompiledScene, U, V, Aspect) {
     ];
     const Rel = InvRotateEulerXYZ(WorldRel, Prim.RotationRad || [0, 0, 0]);
     const LocalDir = InvRotateEulerXYZ(RayDir, Prim.RotationRad || [0, 0, 0]);
-    if (Prim.Shape === 1) {
-      // Ellipsoid / sphere
-      const Rx = Prim.HalfExtents[0];
-      const Ry = Prim.HalfExtents[1];
-      const Rz = Prim.HalfExtents[2];
-      const O = [Rel[0] / Rx, Rel[1] / Ry, Rel[2] / Rz];
-      const D = [LocalDir[0] / Rx, LocalDir[1] / Ry, LocalDir[2] / Rz];
-      const A = D[0] * D[0] + D[1] * D[1] + D[2] * D[2];
-      const B = O[0] * D[0] + O[1] * D[1] + O[2] * D[2];
-      const C = O[0] * O[0] + O[1] * O[1] + O[2] * O[2] - 1;
-      const Disc = B * B - A * C;
-      if (Disc >= 0) {
-        const Sq = Math.sqrt(Disc);
-        const T0 = (-B - Sq) / A;
-        const T1 = (-B + Sq) / A;
-        const T = T0 > 0.05 ? T0 : T1 > 0.05 ? T1 : Infinity;
-        if (T < BestT) {
-          BestT = T;
-          BestId = Prim.Id;
-        }
-      }
-    } else {
-      // Local oriented box slab
-      let TMin = 0.05;
-      let TMax = BestT;
-      let Hit = true;
-      for (let Axis = 0; Axis < 3; ++Axis) {
-        const InvD = Math.abs(LocalDir[Axis]) > 1e-7 ? 1 / LocalDir[Axis] : 1e7;
-        let T0 = (-Prim.HalfExtents[Axis] - Rel[Axis]) * InvD;
-        let T1 = (Prim.HalfExtents[Axis] - Rel[Axis]) * InvD;
-        if (T0 > T1) [T0, T1] = [T1, T0];
-        TMin = Math.max(TMin, T0);
-        TMax = Math.min(TMax, T1);
-        if (TMin > TMax) {
-          Hit = false;
-          break;
-        }
-      }
-      if (Hit && TMin < BestT) {
-        BestT = TMin;
-        BestId = Prim.Id;
-      }
+    const Hit = IntersectScenePrimLocal(Prim, Rel, LocalDir, BestT);
+    if (Hit && Hit.T < BestT) {
+      BestT = Hit.T;
+      BestId = Prim.Id;
     }
   }
 
@@ -876,4 +994,77 @@ export function PickSceneEntityAtUv(CompiledScene, U, V, Aspect) {
   }
 
   return BestId;
+}
+
+// Unreal Engine-style viewport surface placement raycast:
+// Rays into upward-facing horizontal surfaces (floors, plinths, pedestals, cubes — ignoring ceiling baffles & vertical enclosure walls)
+// and offsets Z by HalfHeightZ so Traffic Cones, Cylinder Cones, and meshes sit flush on the surface!
+export function RaycastWorldPlacementAtUv(
+  CompiledScene,
+  U,
+  V,
+  Aspect = 16 / 9,
+  HalfHeightZ = 0.39,
+  IgnoreId = "__drag_preview__",
+) {
+  const { RayOrigin, RayDir } = ComputeCameraRayAtUv(CompiledScene, U, V, Aspect);
+  let BestT = Infinity;
+  let BestSurface = null;
+  let BestHitId = null;
+
+  for (const Prim of CompiledScene.Primitives) {
+    if (Prim.Id === IgnoreId || Prim.GlassShell) continue;
+    // Skip overhead ceiling baffles so top-down or angled rays never snap actors onto the roof!
+    if (Prim.Center[2] > 1.35 && Prim.HalfExtents[2] < 0.25) continue;
+
+    const WorldRel = [
+      RayOrigin[0] - Prim.Center[0],
+      RayOrigin[1] - Prim.Center[1],
+      RayOrigin[2] - Prim.Center[2],
+    ];
+    const Rot = Prim.RotationRad || [0, 0, 0];
+    const Rel = InvRotateEulerXYZ(WorldRel, Rot);
+    const LocalDir = InvRotateEulerXYZ(RayDir, Rot);
+    const Hit = IntersectScenePrimLocal(Prim, Rel, LocalDir, BestT);
+    if (!Hit) continue;
+    const WorldNormal = FwdRotateEulerXYZ(Hit.LocalNormal, Rot);
+    // Only snap onto upward-facing support surfaces (floors, pedestals, boxes) — ray passes through side/back walls to hit the floor in front!
+    if (WorldNormal[2] >= 0.45 && Hit.T < BestT) {
+      BestT = Hit.T;
+      BestHitId = Prim.Id;
+      BestSurface = [
+        RayOrigin[0] + RayDir[0] * Hit.T,
+        RayOrigin[1] + RayDir[1] * Hit.T,
+        RayOrigin[2] + RayDir[2] * Hit.T,
+      ];
+    }
+  }
+
+  // Fallback to ground plane (z = -0.64 canonical gallery floor & shader ground grid level)
+  if (!BestSurface) {
+    const GroundZ = -0.64;
+    if (RayDir[2] < -0.02) {
+      const TGround = Math.min(18.0, Math.max(0.4, (GroundZ - RayOrigin[2]) / RayDir[2]));
+      BestSurface = [
+        RayOrigin[0] + RayDir[0] * TGround,
+        RayOrigin[1] + RayDir[1] * TGround,
+        GroundZ,
+      ];
+    } else {
+      BestSurface = [
+        RayOrigin[0] + RayDir[0] * 3.0,
+        RayOrigin[1] + RayDir[1] * 3.0,
+        GroundZ,
+      ];
+    }
+  }
+
+  const ClampedX = +Math.max(-8.0, Math.min(8.0, BestSurface[0])).toFixed(3);
+  const ClampedY = +Math.max(-8.0, Math.min(8.0, BestSurface[1])).toFixed(3);
+  const PlacedZ = +(BestSurface[2] + Math.max(0, Number(HalfHeightZ) || 0)).toFixed(3);
+  return {
+    Position: [ClampedX, ClampedY, PlacedZ],
+    SurfacePoint: BestSurface.map((C) => +C.toFixed(3)),
+    HitId: BestHitId,
+  };
 }

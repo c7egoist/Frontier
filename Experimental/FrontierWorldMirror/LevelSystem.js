@@ -9,6 +9,10 @@ import {
   ShowcaseInitialRows,
   ShowcaseInitialValues,
 } from "./ShowcaseGalleryScene.js";
+import {
+  BuildCylinderConeMaterial,
+  BuildTrafficConeMaterial,
+} from "./WorldDragDrop.js";
 
 export const LEVEL_STORAGE_KEY = "Frontier.WorldMirrorLevels.v2";
 
@@ -305,26 +309,232 @@ export function BuildDefaultLevels() {
   ];
 }
 
+function BuildAutomotiveConeSlalomLevel(
+  CustomId = "level-cone-slalom",
+  CustomName = "Automotive Cone Slalom",
+  CustomNotes = "",
+) {
+  const Rows = [
+    { Id: "scene", Name: CustomName, Panel: "group", Icon: "folder-scene", Parent: null, Description: "Automotive proving ground" },
+    {
+      Id: "asphalt-pad",
+      Name: "Proving Ground Asphalt",
+      PrimitiveShape: "box",
+      Panel: "geometry",
+      Icon: "editor-cube",
+      Parent: "scene",
+      Preview: true,
+      Description: "Dark tarmac proving pad · 8.40 × 8.40 m",
+    },
+    {
+      Id: "traffic-cone-1",
+      Name: "Traffic Cone · Gate A1",
+      PrimitiveShape: "cone",
+      Panel: "geometry",
+      Icon: "editor-cone",
+      Parent: "scene",
+      Preview: true,
+      Description: "Tapered car traffic cone · reflective collar",
+    },
+    {
+      Id: "traffic-cone-2",
+      Name: "Traffic Cone · Apex B",
+      PrimitiveShape: "cone",
+      Panel: "geometry",
+      Icon: "editor-cone",
+      Parent: "scene",
+      Preview: true,
+      Description: "Tapered car traffic cone · reflective collar",
+    },
+    {
+      Id: "traffic-cone-3",
+      Name: "Traffic Cone · Exit C1",
+      PrimitiveShape: "cone",
+      Panel: "geometry",
+      Icon: "editor-cone",
+      Parent: "scene",
+      Preview: true,
+      Description: "Tapered car traffic cone · reflective collar",
+    },
+    {
+      Id: "cylinder-cone-1",
+      Name: "Cylinder Cone · Lane West",
+      PrimitiveShape: "cylinder-cone",
+      Panel: "geometry",
+      Icon: "editor-cylinder",
+      Parent: "scene",
+      Preview: true,
+      Description: "Cylinder-like car lane delineator post",
+    },
+    {
+      Id: "cylinder-cone-2",
+      Name: "Cylinder Cone · Lane East",
+      PrimitiveShape: "cylinder-cone",
+      Panel: "geometry",
+      Icon: "editor-cylinder",
+      Parent: "scene",
+      Preview: true,
+      Description: "Cylinder-like car lane delineator post",
+    },
+    {
+      Id: "cylinder-cone-3",
+      Name: "Cylinder Cone · Finish Post",
+      PrimitiveShape: "cylinder-cone",
+      Panel: "geometry",
+      Icon: "editor-cylinder",
+      Parent: "scene",
+      Preview: true,
+      Description: "Cylinder-like car lane delineator post",
+    },
+    { Id: "cameras", Name: "Cameras", Panel: "group", Icon: "camera", Parent: null, Description: "Editor cameras" },
+    { Id: "camera", Name: "Editor Camera", Panel: "camera", Icon: "camera", Parent: "cameras", Description: "Permanent editor navigation camera" },
+    { Id: "post", Name: "ACES Post-Process", Panel: "post", Icon: "environment-exposure", Parent: "cameras", Description: "Exposure & tonemapping" },
+    { Id: "world", Name: "World", Panel: "group", Icon: "folder-world", Parent: null, Description: "Solar & sky environment" },
+    { Id: "sun", Name: "Track Sun", Panel: "sun", Icon: "sun", Parent: "world", Preview: true, Description: "Directional · 4.6 W/m²" },
+    { Id: "lighting", Name: "Lighting", Panel: "group", Icon: "folder-generic", Parent: null, Description: "Track area lights" },
+    {
+      Id: "pit-rig",
+      Name: "Pit Lane Overhead Rig",
+      Panel: "light",
+      Icon: "editor-area-light",
+      Parent: "lighting",
+      Preview: true,
+      Description: "LTC Quad · 2.60 × 1.60 m",
+    },
+  ];
+
+  const Values = {
+    "asphalt-pad": {
+      Position: [0, 0.5, -0.68],
+      Rotation: [0, 0, 0],
+      Scale: [8.4, 8.4, 0.16],
+      "Cast shadows": true,
+      GI: true,
+      ...BuildMaterialRecord({ Type: "Standard", BaseLinear: [0.09, 0.095, 0.105], Roughness: 0.68 }),
+    },
+    "traffic-cone-1": {
+      Position: [-0.95, -0.85, -0.21],
+      Rotation: [0, 0, 0],
+      Scale: [0.48, 0.48, 0.78],
+      "Cast shadows": true,
+      GI: true,
+      Material: BuildTrafficConeMaterial(),
+    },
+    "traffic-cone-2": {
+      Position: [0.15, 0.25, -0.21],
+      Rotation: [0, 0, 0],
+      Scale: [0.48, 0.48, 0.78],
+      "Cast shadows": true,
+      GI: true,
+      Material: BuildTrafficConeMaterial(),
+    },
+    "traffic-cone-3": {
+      Position: [-0.82, 1.45, -0.21],
+      Rotation: [0, 0, 0],
+      Scale: [0.48, 0.48, 0.78],
+      "Cast shadows": true,
+      GI: true,
+      Material: BuildTrafficConeMaterial(),
+    },
+    "cylinder-cone-1": {
+      Position: [-1.75, -0.15, -0.16],
+      Rotation: [0, 0, 0],
+      Scale: [0.40, 0.40, 0.88],
+      "Cast shadows": true,
+      GI: true,
+      Material: BuildCylinderConeMaterial(),
+    },
+    "cylinder-cone-2": {
+      Position: [1.35, -0.35, -0.16],
+      Rotation: [0, 0, 0],
+      Scale: [0.40, 0.40, 0.88],
+      "Cast shadows": true,
+      GI: true,
+      Material: BuildCylinderConeMaterial(),
+    },
+    "cylinder-cone-3": {
+      Position: [1.18, 1.35, -0.16],
+      Rotation: [0, 0, 0],
+      Scale: [0.40, 0.40, 0.88],
+      "Cast shadows": true,
+      GI: true,
+      Material: BuildCylinderConeMaterial(),
+    },
+    camera: {
+      Position: [0.0, -4.35, 1.42],
+      Target: [0.0, 0.35, -0.08],
+      "Focal Length": CanonicalEditorCamera.FocalLengthMm,
+      "Sensor Width": CanonicalEditorCamera.SensorWidthMm,
+      Speed: 1.0,
+    },
+    post: { Exposure: 0.1 },
+    sun: {
+      Direction: [-0.46, -0.52, 0.72],
+      Irradiance: [4.5, 4.15, 3.65],
+      "Angular Radius": 0.0093,
+      "Sky Radiance": [0.22, 0.30, 0.44],
+    },
+    "pit-rig": {
+      Position: [0, 0.3, 2.35],
+      Intensity: 7.2,
+      Width: 2.6,
+      Height: 1.6,
+      EmittedRadiance: [7.2, 7.0, 6.6],
+    },
+  };
+
+  return {
+    Id: CustomId,
+    Name: CustomName,
+    Notes: CustomNotes || "Automotive chicane stage with Traffic Cones & Cylinder Cones.",
+    Rows,
+    Values,
+    Hidden: {},
+    Collapsed: {},
+    Selected: "traffic-cone-2",
+  };
+}
+
 export const LEVEL_TEMPLATES = Object.freeze([
   {
-    Id: "empty",
-    Title: "Empty Proving Ground",
-    Subtitle: "Ground slab, calibration cube, Sun & Editor Camera",
+    Id: "gallery",
+    Category: "Architectural",
+    Badge: "GI SHOWCASE",
+    Spec: "17 entities · Softbox + Abbe Glass",
+    Title: "Cornell-Studio Gallery",
+    Subtitle: "Canonical colour-bleed enclosure with chrome, gold plinth & crown glass",
   },
   {
-    Id: "gallery",
-    Title: "Cornell-Studio Gallery",
-    Subtitle: "Full 17-entity architectural GI & glass showcase",
+    Id: "slalom",
+    Category: "Automotive",
+    Badge: "CAR CHICANE",
+    Spec: "6 cones · Traffic + Cylinder Cones",
+    Title: "Automotive Cone Slalom",
+    Subtitle: "Tarmac proving ground pre-staged with Traffic Cones & Cylinder Cones",
   },
   {
     Id: "lookdev",
+    Category: "Look-Dev",
+    Badge: "MATERIAL LAB",
+    Spec: "12 entities · Cyclorama + Plinth",
     Title: "Look-Dev Plinth Studio",
-    Subtitle: "Cyclorama stage with Clear-Coat, Fabric & Subsurface spheres",
+    Subtitle: "Infinite cyclorama stage with Clear-Coat, Fabric & Subsurface spheres",
+  },
+  {
+    Id: "empty",
+    Category: "Blank",
+    Badge: "CLEAN SLATE",
+    Spec: "7 entities · Ground + Sun",
+    Title: "Empty Proving Ground",
+    Subtitle: "Minimal ground slab, calibration cube, directional Sun & Editor Camera",
   },
   {
     Id: "duplicate",
+    Category: "Architectural",
+    Badge: "CLONE ACTIVE",
+    Spec: "1:1 snapshot · Active level",
     Title: "Duplicate Current Level",
-    Subtitle: "Clone all entities, transforms & 20-channel materials from active level",
+    Subtitle: "Clone all entities, transforms, forces & 20-channel materials from active level",
   },
 ]);
 
@@ -356,6 +566,10 @@ export function CreateNewLevelRecord({ Name, TemplateId, Notes = "", CurrentLeve
       Collapsed: {},
       Selected: "chrome-sphere",
     };
+  }
+
+  if (TemplateId === "slalom") {
+    return BuildAutomotiveConeSlalomLevel(NewId, CleanName, Notes);
   }
 
   if (TemplateId === "lookdev") {

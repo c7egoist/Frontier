@@ -24,9 +24,9 @@ import {
 
 export const ATLAS_TILE_SIZE = 64;
 export const ATLAS_COLS = 16; // 2 primitives per row (8 tiles each)
-export const ATLAS_ROWS = 12; // 12 rows * 2 = 24 primitives
+export const ATLAS_ROWS = 16; // 16 rows * 2 = 32 primitives
 export const ATLAS_WIDTH = ATLAS_COLS * ATLAS_TILE_SIZE;  // 1024
-export const ATLAS_HEIGHT = ATLAS_ROWS * ATLAS_TILE_SIZE; // 768
+export const ATLAS_HEIGHT = ATLAS_ROWS * ATLAS_TILE_SIZE; // 1024
 export const TILES_PER_PRIM = 8;
 
 const FIELD_MAP = Object.fromEntries(

@@ -65,7 +65,36 @@ import {
   GetForceModelMeta,
   ResolveForceValues,
 } from "./ForceFieldCatalog.js";
+import {
+  BeginWorldActorDrag,
+  BuildActorPayloadFromAsset,
+  BuildActorPayloadFromModelSpec,
+  EndWorldActorDrag,
+  SubscribeWorldDrag,
+  WORLD_PLACEABLE_MODELS,
+} from "./WorldDragDrop.js";
 import "./Editor.css";
+
+const ConstructExtraCones = [
+  {
+    Id: "traffic-cone",
+    Name: "Traffic Cone",
+    Panel: "geometry",
+    Icon: "editor-cone",
+    PrimitiveShape: "cone",
+    Parent: "showcase",
+    Description: "Automotive tapered safety cone · reflective collar & rubber base",
+  },
+  {
+    Id: "cylinder-cone",
+    Name: "Cylinder Cone",
+    Panel: "geometry",
+    Icon: "editor-cylinder",
+    PrimitiveShape: "cylinder-cone",
+    Parent: "showcase",
+    Description: "Automotive cylinder-like lane delineator post · dual reflective bands",
+  },
+];
 const InitialRows = [
   ["showcase", "Showcase", "group", "folder-scene", null, "Scene collection"],
   ["cube", "Cube", "geometry", "editor-cube", "showcase", "Geometry"],
@@ -626,8 +655,15 @@ function App() {
     [AssetsOpen, OpenAssets] = useState(false),
     [AssetsStage, SetAssetsStage] = useState("closed"),
     [DraggingColour, SetDraggingColour] = useState(false),
+    [DraggingWorldActor, SetDraggingWorldActor] = useState(false),
     [FocusedColourLabel, SetFocusedColourLabel] = useState(""),
     [ViewportSettings, ShowViewportSettings] = useState(false);
+  useEffect(() => SubscribeWorldDrag((Active) => SetDraggingWorldActor(Boolean(Active))), []);
+  useEffect(() => {
+    const ClearStaleDrag = () => EndWorldActorDrag();
+    window.addEventListener("dragend", ClearStaleDrag);
+    return () => window.removeEventListener("dragend", ClearStaleDrag);
+  }, []);
   useEffect(() => {
     const OnSlotChange = (Event) => {
       if (Event.detail?.Label) SetFocusedColourLabel(Event.detail.Label);
@@ -1352,7 +1388,11 @@ function App() {
       let BaseRows = Previous;
       let TargetParent = Previous.some((Subject) => Subject.Id === Template.Parent)
         ? Template.Parent
-        : null;
+        : Template.Panel === "geometry" && Previous.some((Subject) => Subject.Id === "scene")
+          ? "scene"
+          : Template.Panel === "geometry" && Previous.some((Subject) => Subject.Id === "showcase")
+            ? "showcase"
+            : null;
       if (IsForce && !TargetParent) {
         if (!Previous.some((Subject) => Subject.Id === "forces")) {
           BaseRows = [
@@ -1451,6 +1491,68 @@ function App() {
       },
       true,
     );
+  };
+  const SpawnModelFromAsset = (Asset) => {
+    const Payload = BuildActorPayloadFromAsset(Asset);
+    if (!Payload?.Template) return;
+    const DefaultPos = [0, 0, +(-0.64 + (Payload.HalfHeightZ || 0.39)).toFixed(3)];
+    AddRow(
+      Payload.Template,
+      { ...Payload.Properties, Position: DefaultPos },
+      true,
+    );
+  };
+  const HandleDropWorldActor = (Payload, WorldPos) => {
+    if (!Payload?.Template) return;
+    const FinalPos = Array.isArray(WorldPos) ? WorldPos : [0, 0, -0.21];
+    AddRow(
+      Payload.Template,
+      {
+        ...Payload.Properties,
+        Position: FinalPos,
+      },
+      true,
+    );
+    Toast(
+      `Placed ${Payload.Label || Payload.Template.Name} at (${FinalPos[0].toFixed(2)}, ${FinalPos[1].toFixed(2)}, ${FinalPos[2].toFixed(2)})`,
+    );
+  };
+  const HandleApplyMaterialDrop = (Payload, TargetEntityId) => {
+    const DestId =
+      TargetEntityId && Rows.some((R) => R.Id === TargetEntityId && R.Panel === "geometry")
+        ? TargetEntityId
+        : Rows.some((R) => R.Id === Selected && R.Panel === "geometry")
+          ? Selected
+          : null;
+    if (!DestId || !Payload?.Material) {
+      Toast("Drop a material onto a 3D geometry mesh in the scene");
+      return;
+    }
+    const DestName = Rows.find((R) => R.Id === DestId)?.Name || DestId;
+    AssignValues((Prev) => ({
+      ...Prev,
+      [DestId]: { ...Prev[DestId], Material: structuredClone(Payload.Material) },
+    }));
+    Select(DestId);
+    Toast(`Applied "${Payload.Label}" → ${DestName}`);
+  };
+  const HandleApplyColourDrop = (ColourEntry, TargetEntityId) => {
+    const DestId =
+      TargetEntityId && Rows.some((R) => R.Id === TargetEntityId && R.Panel === "geometry")
+        ? TargetEntityId
+        : null;
+    if (DestId && ColourEntry?.Hex) {
+      const DestName = Rows.find((R) => R.Id === DestId)?.Name || DestId;
+      AssignValues((Prev) => {
+        const CurMat = ResolveMaterial(Prev[DestId] || {});
+        const NextMat = ChangeChannel(CurMat, "colour", { Source: "Fill", Fill: ColourEntry.Hex });
+        return { ...Prev, [DestId]: { ...Prev[DestId], Material: NextMat } };
+      });
+      Select(DestId);
+      Toast(`Applied ${ColourEntry.Name || ColourEntry.Hex} → ${DestName}`);
+      return;
+    }
+    ApplyToActiveColourSlot(ColourEntry, ResolveFallbackColourSlot());
   };
   const SaveForcePresetToAssetBrowser = (PresetTitle, ForceVals, Transform = {}) => {
     const Resolved = ResolveForceValues(ForceVals);
@@ -1910,7 +2012,7 @@ function App() {
           <span className="viewport-tool-divider" />
           <label
             className="viewport-projection"
-            title="Projection preference only; the analytical preview stays 2D"
+            title="Projection preference"
           >
             <Icon Name="camera" Size={16} />
             <select
@@ -1931,6 +2033,52 @@ function App() {
               ))}
             </select>
           </label>
+          <span className="viewport-tool-divider" />
+          <div
+            className="viewport-place-strip"
+            role="group"
+            aria-label="Drag actors into 3D scene"
+          >
+            {WORLD_PLACEABLE_MODELS.slice(0, 4).map((Spec) => {
+              const Payload = BuildActorPayloadFromModelSpec(Spec);
+              return (
+                <button
+                  key={Spec.Id}
+                  type="button"
+                  className="viewport-place-chip"
+                  draggable
+                  aria-label={`Place or drag ${Spec.Name} into scene`}
+                  title={`Drag ${Spec.Name} into the 3D scene (Unreal-style surface snap) or click to spawn`}
+                  onDragStart={(Ev) => BeginWorldActorDrag(Ev, Payload)}
+                  onDragEnd={EndWorldActorDrag}
+                  onClick={() =>
+                    HandleDropWorldActor(Payload, [
+                      +(Math.random() * 0.6 - 0.3).toFixed(2),
+                      +(-0.8 + Math.random() * 0.5).toFixed(2),
+                      +(-0.64 + Payload.HalfHeightZ).toFixed(3),
+                    ])
+                  }
+                >
+                  {Spec.PrimitiveShape === "cone" ? (
+                    <svg viewBox="0 0 18 18" width="13" height="13" fill="none" aria-hidden="true">
+                      <path d="M2.5 15.2h13" stroke="#7d828e" strokeWidth="1.6" strokeLinecap="round" />
+                      <path d="M5.2 14.6L8.1 3h1.8l2.9 11.6H5.2Z" fill="#ff5414" />
+                      <path d="M6.4 9.6l.65-2.6h3.9l.65 2.6H6.4Z" fill="#f5f7fc" />
+                    </svg>
+                  ) : Spec.PrimitiveShape === "cylinder-cone" ? (
+                    <svg viewBox="0 0 18 18" width="13" height="13" fill="none" aria-hidden="true">
+                      <ellipse cx="9" cy="15.2" rx="5.2" ry="1.3" fill="#6f7480" />
+                      <path d="M6.6 14.8L7.3 2.6h3.4l.7 12.2H6.6Z" fill="#f03e18" />
+                      <path d="M7.1 6.8l.15-2h3.5l.15 2H7.1ZM6.9 10.6l.15-2h3.9l.15 2H6.9Z" fill="#f5f7fc" />
+                    </svg>
+                  ) : (
+                    <Icon Name={Spec.Icon} Size={13} />
+                  )}
+                  <span>{Spec.ShortLabel}</span>
+                </button>
+              );
+            })}
+          </div>
           <div className="viewport-secondary-tools">
             <button
               className="viewport-icon-button gizmo-pill"
@@ -2084,6 +2232,9 @@ function App() {
           ForceOverlaySettings={ForceOverlaySettings}
           UpdateEditorCamera={UpdateEditorCamera}
           OnTransformEntity={HandleGizmoTransformEntity}
+          OnDropWorldActor={HandleDropWorldActor}
+          OnApplyMaterialDrop={HandleApplyMaterialDrop}
+          OnApplyColourDrop={HandleApplyColourDrop}
           OnFpsSample={HandleFpsSample}
         />
         {SplitView && (
@@ -2100,6 +2251,9 @@ function App() {
             ForceOverlaySettings={ForceOverlaySettings}
             UpdateEditorCamera={UpdateEditorCamera}
             OnTransformEntity={HandleGizmoTransformEntity}
+            OnDropWorldActor={HandleDropWorldActor}
+            OnApplyMaterialDrop={HandleApplyMaterialDrop}
+            OnApplyColourDrop={HandleApplyColourDrop}
             View={2}
           />
         )}
@@ -2143,12 +2297,14 @@ function App() {
       </div>
       <footer
         className="viewport-footer"
-        title="Live Tier 1 GTX WebGL2 World Viewport · Level Switcher & Authoring"
+        title="Live GTX World Viewport · Level Switcher & Authoring"
       >
         <div className="viewport-footer-levels">
-          <span className="viewport-footer-badge">GTX TIER 1</span>
-          <label className="viewport-level-switcher">
-            <span className="viewport-level-label">LEVEL</span>
+          <label
+            className="viewport-projection viewport-level-switcher"
+            title="Switch active world level"
+          >
+            <Icon Name="folder-world" Size={16} />
             <select
               aria-label="Active level"
               value={LevelsState.ActiveLevelId}
@@ -2164,12 +2320,13 @@ function App() {
           </label>
           <button
             type="button"
-            className="viewport-create-level-btn"
+            className="viewport-construct viewport-create-level-btn"
             aria-label="Create new level"
             title="Open Create Level dialogue"
             onClick={() => SetCreateLevelOpen(true)}
           >
-            + Create Level
+            <ActionIcon Name="construct" Size={16} />
+            <span>Create Level</span>
           </button>
         </div>
         <div className="viewport-footer-telemetry">
@@ -2318,7 +2475,7 @@ function App() {
       <div className="empty-dock">Choose a panel from the + tab menu</div>
     );
   const AssetsBlocking =
-    AssetsOpen && AssetsStage === "full" && !DraggingColour;
+    AssetsOpen && AssetsStage === "full" && !DraggingColour && !DraggingWorldActor;
   const ResolveFallbackColourSlot = () => {
     if (ShaderAsset) {
       return {
@@ -2454,7 +2611,7 @@ function App() {
       <main
         className={"workspace " + (Wide ? "inspector-workspace" : "")}
         inert={
-          Construct || Shade || AssetsBlocking || WindSubject ? "" : undefined
+          (Construct && !DraggingWorldActor) || Shade || AssetsBlocking || WindSubject ? "" : undefined
         }
         style={{
           "--left": LeftWidth + "px",
@@ -2540,6 +2697,7 @@ function App() {
           StageChange={SetAssetsStage}
           OnColourDragChange={SetDraggingColour}
           SpawnForce={SpawnForceFromAsset}
+          SpawnModel={SpawnModelFromAsset}
           Appearance={Settings}
         />
         {Wide && (
@@ -2825,8 +2983,9 @@ function App() {
       {Construct && (
         <ConstructPanel
           Catalogue={[
+            ...ConstructExtraCones,
             ...ConstructForceTemplates,
-            ...PrepareLightRows(InitialRows, 1),
+            ...PrepareLightRows(InitialRows, 1).filter((R) => R.Id !== "cone"),
             ...ReferenceLights,
           ]
             .filter((Subject) => Subject.Panel !== "group")

@@ -18,9 +18,14 @@ import {
   CanonicalEditorCamera,
   CompileLiveGtxScene,
   PickSceneEntityAtUv,
+  RaycastWorldPlacementAtUv,
   ShowcaseInitialRows,
   ShowcaseInitialValues,
 } from "./ShowcaseGalleryScene.js";
+import {
+  BuildActorPayloadFromModelSpec,
+  WORLD_PLACEABLE_MODELS,
+} from "./WorldDragDrop.js";
 import { ResolveMaterial } from "./MaterialSpecification.js";
 import {
   ATLAS_COLS,
@@ -49,7 +54,7 @@ import {
   SerializeForceModelToml,
 } from "./ForceFieldCatalog.js";
 import { CompileFieldProgram, DEFAULT_FORMULA_CODE } from "./VectorFieldLang.js";
-import { CreateWebgpuGtxRenderer } from "./WebgpuGtxRenderer.js";
+import { CreateWebgpuGtxRenderer, GTX_WGSL_SCENE_SHADER } from "./WebgpuGtxRenderer.js";
 import {
   BuildDefaultLevels,
   CreateNewLevelRecord,
@@ -622,6 +627,79 @@ assert.ok(
   assert.equal(ExecutedDraws.length, 6, "All 6 WebGPU passes (Scene, Outline, ForceOpaque, ForceTrans, GizmoOpaque, GizmoTrans) executed cleanly");
 }
 
+// 12. Verify Automotive Traffic Cone (cone-like) & Cylinder Cone (cylinder-like), Unreal-Style Surface Raycast Placement, and Cone Slalom Level
+{
+  const TrafficSpec = WORLD_PLACEABLE_MODELS.find((M) => M.Id === "model-traffic-cone");
+  const CylConeSpec = WORLD_PLACEABLE_MODELS.find((M) => M.Id === "model-cylinder-cone");
+  assert.ok(TrafficSpec && TrafficSpec.PrimitiveShape === "cone", "Traffic Cone model spec registered");
+  assert.ok(CylConeSpec && CylConeSpec.PrimitiveShape === "cylinder-cone", "Cylinder Cone model spec registered");
+
+  const TrafficPayload = BuildActorPayloadFromModelSpec(TrafficSpec);
+  const CylConePayload = BuildActorPayloadFromModelSpec(CylConeSpec);
+
+  // Unreal-style surface placement onto Cornell-Studio Gallery floor (z = -0.60)
+  const FloorDrop = RaycastWorldPlacementAtUv(Compiled, 0.25, 0.85, 16 / 9, TrafficPayload.HalfHeightZ, "__drag_preview__");
+  assert.equal(FloorDrop.HitId, "gallery-floor", "Lower viewport ray hits gallery-floor support surface");
+  assert.ok(
+    Math.abs(FloorDrop.Position[2] - (-0.64 + TrafficPayload.HalfHeightZ)) < 0.01,
+    `Traffic Cone sits flush on gallery floor (z=${FloorDrop.Position[2]})`,
+  );
+
+  // Ensure transient __drag_preview__ is ignored during dragover raycasts (zero self-climbing!)
+  const PreviewRows = [
+    ...ShowcaseInitialRows,
+    { ...TrafficPayload.Template, Id: "__drag_preview__", Parent: null, Preview: true },
+    { ...TrafficPayload.Template, Id: "placed-traffic-cone", Parent: "showcase", Preview: true },
+    { ...CylConePayload.Template, Id: "placed-cylinder-cone", Parent: "showcase", Preview: true },
+  ];
+  const PreviewValues = {
+    ...ShowcaseInitialValues,
+    __drag_preview__: { ...TrafficPayload.Properties, Position: FloorDrop.Position },
+    "placed-traffic-cone": { ...TrafficPayload.Properties, Position: [-0.85, -1.15, -0.21] },
+    "placed-cylinder-cone": { ...CylConePayload.Properties, Position: [0.85, -1.15, -0.16] },
+  };
+  const ConeScene = CompileLiveGtxScene(PreviewRows, PreviewValues, {}, "PERSP");
+  const TrafficPrim = ConeScene.Primitives.find((P) => P.Id === "placed-traffic-cone");
+  const CylConePrim = ConeScene.Primitives.find((P) => P.Id === "placed-cylinder-cone");
+  assert.equal(TrafficPrim?.Shape, 3, "Traffic Cone compiles to analytical Shape 3");
+  assert.equal(CylConePrim?.Shape, 5, "Cylinder Cone compiles to analytical Shape 5");
+
+  const RepeatDrop = RaycastWorldPlacementAtUv(ConeScene, 0.25, 0.85, 16 / 9, TrafficPayload.HalfHeightZ, "__drag_preview__");
+  assert.ok(
+    Math.abs(RepeatDrop.Position[2] - FloorDrop.Position[2]) < 1e-4,
+    "__drag_preview__ never causes self-climbing feedback during dragover",
+  );
+
+  // Bake both cones into 32-primitive MaterialAtlas and render through CPU GTX raytracer
+  const ConeAtlas = new MaterialAtlasSynchronizer();
+  ConeAtlas.UpdatePrimitives(ConeScene.Primitives);
+  const ConeCpu = new CpuGtxRenderer();
+  assert.equal(
+    ConeCpu.RenderSlice(
+      {
+        CompiledScene: ConeScene,
+        AtlasPixels: ConeAtlas.Pixels,
+        Width: 120,
+        Height: 68,
+        ViewModeCode: 0,
+        ShowGrid: 1,
+      },
+      68,
+    ),
+    true,
+    "CPU GTX raytraces Traffic Cone (Shape 3) & Cylinder Cone (Shape 5) cleanly",
+  );
+
+  // Verify WGSL & Automotive Cone Slalom level template
+  assert.ok(GTX_WGSL_SCENE_SHADER.includes("fn intersectFrustumZ") && GTX_WGSL_SCENE_SHADER.includes("shape == 5"), "WGSL shader includes analytical cone & cylinder-cone");
+  const SlalomLvl = CreateNewLevelRecord({ Name: "Test Chicane", TemplateId: "slalom" });
+  assert.ok(
+    SlalomLvl.Rows.some((R) => R.PrimitiveShape === "cone") &&
+      SlalomLvl.Rows.some((R) => R.PrimitiveShape === "cylinder-cone"),
+    "Automotive Cone Slalom template provisions both Traffic Cones & Cylinder Cones",
+  );
+}
+
 console.log(
-  "[WorldMirrorValidation] ALL 11 SUITES PASSED: Strict WebGPU Explicit PipelineLayouts, WebGL2 + Atomic Multi-Worker CPU GTX, Always-On-Top 13-handle GizmoPRO, 19 ForceModels (CurlNoise div=0), VectorFieldLang, .ForceModel TOML, 20-channel Material Atlas, and Multi-Level World Editor verified!",
+  "[WorldMirrorValidation] ALL 12 SUITES PASSED: Strict WebGPU Explicit PipelineLayouts, Analytical Traffic Cone & Cylinder Cone, Unreal-Style 3D Drag-and-Drop Surface Placement, Always-On-Top 13-handle GizmoPRO, 19 ForceModels, and Construct-Style Multi-Level World Editor verified!",
 );
