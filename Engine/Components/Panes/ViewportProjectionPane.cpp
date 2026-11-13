@@ -21,6 +21,7 @@ ViewportProjectionPane::ViewportProjectionPane() = default;
 
 ViewportProjectionPane::~ViewportProjectionPane()
 {
+    WorkspaceAppearance::ReleasePanePointerOwnership(this);
     PlanarTexture.DestroyPixels();
     SpatialTexture.DestroyPixels();
 }
@@ -74,6 +75,11 @@ Editor::ViewportProjection& ViewportProjectionPane::AccessProjection() noexcept
 const Editor::ViewportProjection& ViewportProjectionPane::InspectProjection() const noexcept
 {
     return BoundDocument != nullptr ? BoundDocument->InspectViewportProjection() : FallbackProjection;
+}
+
+Editor::ViewportSplitMode ViewportProjectionPane::QueryEffectiveSplitMode() const noexcept
+{
+    return LockedSplitMode.has_value() ? *LockedSplitMode : InspectProjection().QuerySplitMode();
 }
 
 void ViewportProjectionPane::UploadTexturePixels(ImTextureData& TargetTex, const ViewportRasterBuffer& Source)
@@ -140,7 +146,7 @@ void ViewportProjectionPane::Render(
     {
         const Rectangle2D LRect  { CursorX, ChipY, 84.0f, 26.0f };
         const auto        Mode   = static_cast<Editor::ViewportSplitMode>(Idx);
-        const bool        Active = (Projection.QuerySplitMode() == Mode);
+        const bool        Active = (QueryEffectiveSplitMode() == Mode);
         Surface.FillRectangle(LRect, Active ? ChipActive : ChipBg, 5.0f);
         Surface.StrokeRectangle(LRect, Active ? IvoryText : BorderCol, 5.0f, 1.0f);
         Surface.TextCentered(LRect, 11.0f, Active ? IvoryText : CrispText, SplitLabels[Idx]);
@@ -189,7 +195,7 @@ void ViewportProjectionPane::Render(
 
     auto RecomputeSplitRects = [&]() noexcept
     {
-        switch (Projection.QuerySplitMode())
+        switch (QueryEffectiveSplitMode())
         {
             case Editor::ViewportSplitMode::SplitPlanarAndSpatial:
             {
@@ -210,7 +216,7 @@ void ViewportProjectionPane::Render(
     };
     RecomputeSplitRects();
 
-    if (Projection.QuerySplitMode() == Editor::ViewportSplitMode::SplitPlanarAndSpatial)
+    if (QueryEffectiveSplitMode() == Editor::ViewportSplitMode::SplitPlanarAndSpatial)
     {
         const Rectangle2D SplitterZone { Rect2D.Right(), ContentTop, 8.0f, ContentH };
         SplitterHovered = !ToolbarCaught && SplitterZone.Contains(Cursor);
@@ -313,7 +319,7 @@ void ViewportProjectionPane::RenderViewportCanvas(
 
     auto RecomputeCanvasSplitRects = [&]() noexcept
     {
-        switch (Projection.QuerySplitMode())
+        switch (QueryEffectiveSplitMode())
         {
             case Editor::ViewportSplitMode::SplitPlanarAndSpatial:
             {
@@ -335,7 +341,7 @@ void ViewportProjectionPane::RenderViewportCanvas(
     };
     RecomputeCanvasSplitRects();
 
-    if (Projection.QuerySplitMode() == Editor::ViewportSplitMode::SplitPlanarAndSpatial)
+    if (QueryEffectiveSplitMode() == Editor::ViewportSplitMode::SplitPlanarAndSpatial)
     {
         const Rectangle2D SplitterZone { Rect2D.Right() - 2.0f, CanvasBounds.Y, 8.0f, CanvasBounds.Height };
         SplitterHovered = AllowInteraction && SplitterZone.Contains(Cursor);
@@ -394,7 +400,7 @@ void ViewportProjectionPane::RenderViewportCanvas(
             static_cast<uint32_t>(std::max(0.0f, Rect2D.Height)));
     }
 
-    const bool SplitActive = (Projection.QuerySplitMode() == Editor::ViewportSplitMode::SplitPlanarAndSpatial);
+    const bool SplitActive = (QueryEffectiveSplitMode() == Editor::ViewportSplitMode::SplitPlanarAndSpatial);
 
     if (Rect2D.Width >= 16.0f && Rect2D.Height >= 16.0f && Slices.Planar2D.RgbaPixels != nullptr)
     {
@@ -452,8 +458,10 @@ void ViewportProjectionPane::PresentInImGuiPane(double Δt, float ScaleFactor)
     const Rectangle2D LogicalBounds{ 0.0f, 0.0f, WinSize.x / SafeScale, PaneH / SafeScale };
 
     PixelSpace             WindowSurface(ImGui::GetWindowDrawList(), { ScreenBounds.X, ScreenBounds.Y }, SafeScale);
-    const PaneInputReading Input = WorkspaceAppearance::CaptureImGuiPaneInput(ScreenBounds, SafeScale);
+    PaneInputReading       Input = WorkspaceAppearance::CaptureImGuiPaneInput(ScreenBounds, SafeScale);
+    WorkspaceAppearance::EnforcePanePointerOwnership(this, Input);
     Render(WindowSurface, LogicalBounds, Input, Δt);
+    WorkspaceAppearance::UpdatePanePointerOwnership(this, ScreenBounds, SafeScale, Input, SplitterDragActive);
 }
 
 } // namespace Frontier

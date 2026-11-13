@@ -9,6 +9,7 @@
 //                                                        INCLUDES
 //------------------------------------------------------------------------------------------------------------------------
 
+#include "Engine/Components/ContentBrowser/ContentBrowserPanel.h"
 #include "Engine/Components/Docking/WorkspaceDockContainer.h"
 #include "Engine/Configuration/BuildConfiguration.h"
 #include "Engine/Configuration/EngineConfiguration.h"
@@ -35,6 +36,7 @@ public:
     void ConfigureLaunchPolicy(const Configuration::EngineConfiguration& Config) noexcept;
     [[nodiscard]] bool AttachVulkanRasterizer(GeometricRaster::UVWorkspaceRasterizer* BoundRasterizer);
 
+    void AttachContentBrowserPanel(ContentBrowserPanel* TargetPanel);
 #if FRONTIER_EDITOR_ENABLED
     void AttachContentBrowser(Editor::Explorer::ContentBrowser* TargetBrowser);
 #endif
@@ -48,7 +50,9 @@ public:
     [[nodiscard]] UVWorkspaceSession&       AccessSession() noexcept       { return Session; }
     [[nodiscard]] const UVWorkspaceSession& InspectSession() const noexcept { return Session; }
     [[nodiscard]] UVOutlinerPanel&          AccessOutliner() noexcept      { return Outliner; }
-    [[nodiscard]] UVViewportHost&           AccessViewportHost() noexcept  { return ViewportHost; }
+    [[nodiscard]] UVViewportHost&           AccessViewportHost() noexcept  { return ViewportHost2D; }
+    [[nodiscard]] UVViewportHost&           Access2DViewportHost() noexcept { return ViewportHost2D; }
+    [[nodiscard]] UVViewportHost&           Access3DViewportHost() noexcept { return ViewportHost3D; }
     [[nodiscard]] UVInspectorPanel&         AccessInspector() noexcept     { return Inspector; }
     [[nodiscard]] uint32_t                  QueryRegisteredTabCount() const noexcept { return RegisteredTabCount; }
 
@@ -56,9 +60,11 @@ private:
     Configuration::EngineConfiguration ActiveEngineConfig {};
     UVWorkspaceSession                 Session            {};
     UVOutlinerPanel                    Outliner           {};
-    UVViewportHost                     ViewportHost       {};
+    UVViewportHost                     ViewportHost2D     {};
+    UVViewportHost                     ViewportHost3D     {};
     UVInspectorPanel                   Inspector          {};
     uint32_t                           RegisteredTabCount = 0u;
+    ContentBrowserPanel*               BoundBrowserPanel  = nullptr;
 #if FRONTIER_EDITOR_ENABLED
     Editor::Explorer::ContentBrowser*  BoundBrowser       = nullptr;
 #endif

@@ -149,9 +149,13 @@ struct PaneInputReading
     bool           ShortcutFind      = false;// [-] - Ctrl+F shortcut pulse
     bool           ShortcutGroup     = false;// [-] - Ctrl+G shortcut pulse
     bool           ShortcutDuplicate = false;// [-] - Ctrl+D shortcut pulse
+    bool           ShortcutLinked    = false;// [-] - Ctrl+L linked selection shortcut pulse
+    bool           ShortcutInvert    = false;// [-] - Ctrl+I invert selection shortcut pulse
+    bool           ShortcutUnwrap    = false;// [-] - Ctrl+U immediate unwrap shortcut pulse
     bool           ShortcutUndo      = false;// [-] - Ctrl+Z undo shortcut pulse
     bool           ShortcutRedo      = false;// [-] - Ctrl+Shift+Z or Ctrl+Y redo shortcut pulse
     bool           ToggleDiagnostics = false;// [-] - F3 diagnostics shortcut pulse
+    bool           KeyboardFocused   = false;// [-] - Owning pane/window has keyboard focus
     std::string    TypedUtf8         {};    // [-]  - UTF-8 characters typed this step
 };
 
@@ -163,6 +167,20 @@ namespace WorkspaceAppearance
 {
 
 [[nodiscard]] PaneInputReading CaptureImGuiPaneInput(Rectangle2D ScreenBounds, float ScaleFactor) noexcept;
+
+void SuppressPanePointerInput(PaneInputReading& InOutInput) noexcept;
+[[nodiscard]] const void* QueryActivePointerOwner() noexcept;
+[[nodiscard]] bool        QueryPointerBlockedForPane(const void* PaneIdentity) noexcept;
+void AssignExternalDragSuppression(bool ExternalDragActive) noexcept;
+void EnforcePanePointerOwnership(const void* PaneIdentity, PaneInputReading& InOutInput) noexcept;
+void UpdatePanePointerOwnership(
+    const void*             PaneIdentity,
+    Rectangle2D             ScreenBounds,
+    float                   ScaleFactor,
+    const PaneInputReading& Input,
+    bool                    ActiveDragCaptured) noexcept;
+void ReleasePanePointerOwnership(const void* PaneIdentity) noexcept;
+void ResetAllPanePointerOwnership() noexcept;
 
 void ForwardInputToTextBuffer(TextEditBuffer& Buffer, const PaneInputReading& Input, double Δt) noexcept;
 
@@ -280,6 +298,7 @@ void ConstructPlayIcon(PixelSpace& Surface, Point2D TopLeft, float Extent, Color
 void ConstructPauseIcon(PixelSpace& Surface, Point2D TopLeft, float Extent, ColorRgba Ink) noexcept;
 void ConstructConstructIcon(PixelSpace& Surface, Point2D TopLeft, float Extent, ColorRgba Ink) noexcept;
 void ConstructFocusIcon(PixelSpace& Surface, Point2D TopLeft, float Extent, ColorRgba Ink) noexcept;
+void ConstructComponentModeIcon(PixelSpace& Surface, Point2D Origin, float Extent, uint32_t ModeIdx, ColorRgba Ink) noexcept;
 void ConstructSplitViewportIcon(PixelSpace& Surface, Point2D TopLeft, float Extent, ColorRgba Ink, ColorRgba InteriorCutout) noexcept;
 void ConstructDiagnosticsIcon(PixelSpace& Surface, Point2D TopLeft, float Extent, ColorRgba Ink) noexcept;
 void ConstructViewportSettingsIcon(PixelSpace& Surface, Point2D TopLeft, float Extent, ColorRgba Ink, ColorRgba InteriorCutout) noexcept;
@@ -336,6 +355,27 @@ void ConstructResetSymbol(
     float       Extent,
     ColorRgba   Ink,
     float       Thickness = 1.35f) noexcept;
+
+void ConstructSectionHeading(
+    PixelSpace&      Surface,
+    float            LeftX,
+    float            TopY,
+    float            Width,
+    std::string_view Title,
+    std::string_view RightTag = {},
+    ControlIcon      Icon     = ControlIcon::Count,
+    ColorRgba        IconTint = { 219u, 171u, 92u, 255u }) noexcept;
+
+[[nodiscard]] bool ConstructCapsuleToggleRow(
+    PixelSpace&            Surface,
+    Rectangle2D            RowRect,
+    std::string_view       Label,
+    bool&                  InOutEnabled,
+    Point2D                Cursor,
+    bool                   Pressed,
+    const OptionalTooltip& Tooltip          = {},
+    std::string_view       DetailFirstLine  = {},
+    std::string_view       DetailSecondLine = {}) noexcept;
 
 } // namespace WorkspaceAppearance
 
