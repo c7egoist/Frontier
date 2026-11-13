@@ -16,7 +16,7 @@ For identifier, file, folder, and comment naming rules enforced across the repos
 | `EngineDocs/` | Authoritative architectural guides and deep domain references. |
 | `Documentation/` | Repository governance, `AgenticInstructions/`, `Plans/`, `FolderStructure.md`, `BannedWordsVocabulary.md`, `CodingStandards.md`, `ImportantNotes.md`, `Backlog.md`, and `Tracker.md`. |
 | `Exhibits/` | Validation executables (`*Validation`), `Images/` CPU-rendered `.png` visual snapshots, and `EditorMirror` verification targets. |
-| `Experimental/` | HTML/JS-only reference editor UIs (`ProjectZeroEditor`, `FrontierEditor`) and domain studios (`FluidEditor`, `FractureEditor`, `ParticleEditor`, `PhotometricEditor`, `ForceFieldEditor`, `VectorFieldVisualizer`, `VehicleLab`, `UVEditor`, `TextureStudio`) staged for native C++20 + `.slang` conversion. |
+| `Experimental/` | HTML/JS-only reference editor UIs (`ProjectZeroEditor`, `FrontierEditor`) and domain studios (`FluidEditor`, `FractureEditor`, `ParticleEditor`, `PhotometricEditor`, `ForceFieldEditor`, `VehicleLab`, `UVEditor`, `TextureStudio`) staged for native C++20 + `.slang` conversion. |
 | `Automation/` | Dependency pinning (`Dependencies.json`), ImGui 8-patch stack (`Patches/`), `.slang` toolchain setup, Markdown Studio tooling, CMake modules, and binary packaging. |
 | `ExternalPackages/` | Checksum-verified third-party packages (`imgui`, `thorvg`, `tomlpp`, `glfw`, `vulkan-headers`, `volk`, `stb`, `JoltPhysics`, `VulkanCompute/`). Git-ignored; populated by `Automation/`. |
 | `_ClaudeScratch/` | Ignored local scratchpad and transient planning notes (excluded from version control). |
@@ -35,6 +35,7 @@ Frontier/
 ├── README.md                                      // Repository overview and architecture index
 │
 ├── EngineContent/                                 // Engine default assets and stock repositories
+│   ├── Geometry/                                  // Default .GeometrySpace assets (ControlledIntegrator.GeometrySpace)
 │   ├── Icons/                                     // Vector SVGs and compiled icon repositories
 │   ├── FontsArchives/                             // Primary UI and monospace typefaces (FontRepository.FontSpace)
 │   ├── Materials/                                 // Microfacet PBR material definitions (.MaterialSpace)
@@ -52,8 +53,13 @@ Frontier/
 │   ├── Plans/                                     // Architectural & domain implementation plans + Markdown Studio
 │   │   ├── DocumentFormatsAndInstancePlan.md      // Two-Tier Hybrid .Space format registry & Instance concepts
 │   │   ├── DocumentSpacesAndRevisionPlan.md       // Confirmed .Space codecs, 215/750 MiB revision & workspace tree
-│   │   ├── ThreadingArchitecturePlan.md           // Priority-budgeted ExecutionCluster, domain threads & DebugThread watchdog
-│   │   ├── VectorFieldArchitecturePlan.md         // 19 force laws, ChannelField/TurbulenceField, .slang shaders & 3D visualizer UI
+│   │   ├── ThreadingArchitecturePlan.md           // Priority-budgeted ExecutionChannels, domain threads & DebugThread watchdog
+│   │   ├── ContentBrowserArchitecturePlan.md      // Pre-baked ThumbnailSheet, SSD/HDD streaming, quarantine import & UV masks
+│   │   ├── UVWorkspaceArchitecturePlan.md         // Native C++20 & .slang UV Workspace architecture & completion ledger
+│   │   ├── UVWorkspaceSyncAndViewportReport.md    // Single-concept naming & reusable ViewportProjectionPane report
+│   │   ├── UVWorkspaceFullCompletionReport.md     // 6-pillar UV Workspace completion, desktop executables & verification report
+│   │   ├── RenderingAndRaytracingArchitecturePlan.md // Dual-tier GTX Hybrid & Deterministic RTX architecture plan
+│   │   ├── MaterialVisibilityAndRenderingBringupPlan.md // 10-lobe MaterialSpace, 64-bit VisBuffer & rendering bringup plan
 │   │   ├── SessionNotes.md                        // Live Markdown Studio workspace notepad
 │   │   └── MarkdownStudioViewer.html              // Standalone/live Frontier-styled Markdown Studio bundle
 │   ├── FolderStructure.md                         // Canonical repository folder and source layout
@@ -72,8 +78,13 @@ Frontier/
 │   ├── ControlCentreValidation.cpp                // Control Centre, Controls, Tooltips & .ProjectSpace verification
 │   ├── WorkspacePanesValidation.cpp               // Outliner/LayerStack, Showcase Folder/Entry Inspector & Viewport
 │   ├── LifecycleValidation.cpp                    // LifecycleSequence, RuntimeLifecycle, WorkspaceLifecycle & EditorLifecycle
-│   ├── WorkspaceRevisionValidation.cpp            // .Space codecs, 215/750 MiB revision & WorkspaceThread verification
-│   └── VectorFieldValidation.cpp                  // 19 force laws, finite bounds, impulse conservation & streamline PNGs
+│   ├── WorkspaceRevisionValidation.cpp            // .Space codecs, 215/750 MiB revision & priority ExecutionChannels
+│   ├── ContentBrowserValidation.cpp               // ContentBrowser, ColourCodex, Colour Filters & Vertical/Horizontal strips
+│   ├── GeometryNetworkValidation.cpp              // Half-edge PolygonNetwork, FacePartitionRegister & studio sample presets
+│   ├── UVRasterPickingGizmoValidation.cpp         // Vulkan 1.2 .slang 3D/2D UV rasterizer, GPU pick & TransformGizmo
+│   ├── UVWorkspaceUIValidation.cpp                // UVOutlinerPanel, 5-tab UVInspectorPanel, ControlCentre & docking
+│   ├── UVParameterizationValidation.cpp           // SeamCut, LSCM, GPU StretchRelax, ConcaveSkyline, .UVSpace & Revision
+│   └── UVInteractiveAuthoringValidation.cpp       // Interactive 2D/3D authoring, ABF++/Projections, OBJ/glTF & Vulkan swapchain
 │
 ├── Experimental/                                  // HTML/JS reference UIs & studios for C++20 conversion
 │   ├── FrontierEditor/                            // Initial HTML/Vite scene inspector, CAD & icon lab UI
@@ -83,7 +94,6 @@ Frontier/
 │   ├── ParticleEditor/                            // GPU compute particle, fibre, and lightning studio
 │   ├── PhotometricEditor/                         // LM-63 .ies luminaire, sky, and isolux metering studio
 │   ├── ForceFieldEditor/                          // Wind generator and 16 spatial force-field studio
-│   ├── VectorFieldVisualizer/                     // Project-Zero 3-dock 3D engineering VectorFieldVisualizer + Anemometer telemetry
 │   ├── VehicleLab/                                // ControlVehicle FCT1, powertrain, and MF6.1 tyre lab
 │   ├── UVEditor/                                  // LSCM unwrap, UDIM layout, and importance packer studio
 │   └── TextureStudio/                             // 5-workspace material, pattern, stamp, paint & SDF baker
@@ -127,7 +137,7 @@ Frontier/
     │   ├── BuildConfiguration.h                   // Compile-time Editor / Development / Shipping policy
     │   ├── InputSettings.{h,cpp}                  // Shortcut chords, conflict validator & pointer sensitivity
     │   ├── ProjectSpaceRepository.{h,cpp}         // Atomic PascalCase .ProjectSpace / .projectspace serializer
-    │   ├── EngineConfiguration.{h,cpp}            // Startup and hardware ExecutionCluster allocation
+    │   ├── EngineConfiguration.{h,cpp}            // Startup and hardware ExecutionChannels allocation
     │   ├── RenderConfiguration.{h,cpp}            // Resolution, swapchain, and multi-sample targets
     │   ├── ProjectConfiguration.{h,cpp}           // Project root, dependency manifests, and toggles
     │   └── WorkspaceConfiguration.{h,cpp}         // Document session preferences and layout defaults
@@ -145,13 +155,13 @@ Frontier/
     │   │   ├── TaskScheduler.{h,cpp}              // 4-tier priority & remaining-slice tick budget scheduler
     │   │   ├── TaskQueue.h                        // Cache-aligned lock-free work-stealing task deque
     │   │   ├── TaskChannel.{h,cpp}                // Typed priority intake & continuation routing channel
-    │   │   └── ExecutionCluster.{h,cpp}           // Hardware-pinned parallel task execution cluster
+    │   │   └── ExecutionChannels.{h,cpp}           // Hardware-pinned parallel task execution cluster
     │   ├── Sync/                                  // Lock-free and leaf synchronization primitives
     │   │   ├── SpinLock.h                         // Leaf-only exponential-backoff atomic spin lock
     │   │   ├── AtomicQueue.h                      // Bounded lock-free MPMC / SPSC ring queue
     │   │   ├── CriticalSection.h                  // OS adaptive sleep-capable mutual exclusion primitive
     │   │   ├── CompletionCounter.h                // Wait-free atomic countdown & continuation trigger
-    │   │   └── HeartbeatMonitor.{h,cpp}           // Cache-line-isolated thread liveness & stall detector
+    │   │   └── ThreadProgressionTracker.{h,cpp}           // Cache-line-isolated thread liveness & stall detector
     │   └── Threads/                               // Dedicated domain & diagnostic thread loops
     │       ├── Game/
     │       │   └── GameThread.{h,cpp}             // Deterministic world ticks, instance logic & gameplay rules
@@ -188,18 +198,21 @@ Frontier/
     │   ├── MetricTolerance.h                      // Linear, angular, UV-weld & watertight sewing tolerances
     │   ├── CoordinateSpace.h                      // Right-handed world, local & parameter-tile basis transforms
     │   ├── CoordinateProjection.h                 // Orthographic, perspective & 2D viewport tile projections
-    │   ├── PointDistance.h                        // Point separation evaluation (Euclidean, Manhattan, Chebyshev, geodesic)
-    │   ├── PointBounds.h                          // Axis-aligned and oriented point bounding extents
+    │   ├── DistanceMetric.h                       // Metric evaluation (Euclidean, Manhattan, Chebyshev, geodesic)
+    │   ├── SpatialExtent.h                        // Axis-aligned and oriented bounding extents
     │   └── IntersectionSolver.{h,cpp}             // Ray-facet, ray-volume, plane-cut & volume-volume solvers
     │
-    ├── SpatialAcceleration/                       // Broad-phase spatial acceleration structures
+    ├── SpatialAcceleration/                       // Broad-phase, cluster LOD pyramid & 4-wide ray acceleration
     │   ├── BoundingVolumeTree.{h,cpp}             // Area-heuristic binary bounding volume split tree
+    │   ├── ClusterPyramid.{h,cpp}                 // 128-face PolygonNetwork LOD pyramid with locked seam/crease borders
+    │   ├── WideBoundingTree.{h,cpp}               // Compressed 128 B 4-Wide BVH4 + optional VK_KHR_acceleration_structure
     │   ├── LooseOctree.{h,cpp}                    // Expanded boundary volumetric spatial tree
     │   ├── DynamicAABBTree.{h,cpp}                // Self-balancing binary tree for dynamic colliders
     │   └── SpatialGridHash.{h,cpp}                // Sparse spatial hashing structure
     │
     ├── DistanceFieldSpace/                        // Volumetric SDFs, implicit geometry, and queries
     │   ├── SignedDistanceField.{h,cpp}            // Voxel-backed signed distance fields
+    │   ├── SignedDistanceVolume.{h,cpp}           // Sparse brick + clip-grid 3D SDF builder for GTX GI & penumbra
     │   ├── DistanceTransform.{h,cpp}              // Fast sweeping and Maurer distance transforms
     │   ├── VolumetricDistance.{h,cpp}             // Trilinear volume sampling and gradient reconstruction
     │   ├── DistanceQuery.{h,cpp}                  // Ray marching and closest-point queries
@@ -212,30 +225,57 @@ Frontier/
     │   ├── SpectralDistribution.{h,cpp}           // Wavelength tristimulus integration and Planckian Kelvin
     │   └── GamutCompression.{h,cpp}               // Out-of-gamut perceptual chroma compression
     │
-    ├── GeometrySpace/                             // Analytic primitives, geometric analysis, selection & UV
-    │   ├── Primitives/                            // Parametric solid primitives & watertight sewing
-    │   │   ├── AnalyticPrimitives.{h,cpp}         // Box, cylinder, cone, frustum, sphere, torus & capsule
-    │   │   ├── RevolutionSweepPrimitives.{h,cpp}  // Lathe revolution, linear extrusion & profile sweeps
-    │   │   └── WatertightSewing.{h,cpp}           // Boundary edge welding, facet orientation & solid closure
+    ├── MaterialSpace/                             // Universal 10-lobe OpenPBR 1.1 + Glinty physical materials
+    │   ├── SurfaceMaterial.{h,cpp}                // Root: authored material definition & validation
+    │   ├── CompactMaterialRegister.{h,cpp}        // Root: 128 B bindless GPU register + ActiveLobeMask
+    │   ├── MaterialSurfaceLayer/                  // Ordered 8-layer stack layout & 32 B bounce summary
+    │   │   ├── MaterialSurfaceLayer.{h,cpp}       // Aligned physical surface layer parameters & blending
+    │   │   └── BounceLayerSummary.{h,cpp}         // Pre-integrated 32 B secondary-bounce summary compiler
+    │   ├── Scattering/                            // 10 physical optical lobes (shared C++20 & .slang)
+    │   │   ├── OpenPbrSurfaceScattering.h         // Master 10-lobe evaluation & mixture PDF
+    │   │   ├── EnergyPreservingOrenNayar.h        // Portsmouth 2025 EON rough diffuse + CLTC sampling
+    │   │   ├── MetallicFresnelTint.h              // Anisotropic VNDF GGX, F0/F82 metal tint & dielectric Fresnel
+    │   │   ├── ClearcoatAbsorption.h              // Coat roughening, TIR darkening & Beer-Lambert absorption
+    │   │   ├── ThinFilmInterference.h             // Belcour & Barla spectral/RGB Airy nanometer interference
+    │   │   ├── GlintMicroflakeScattering.h        // Kemppinen 2025 constant-time 4D multiscale glinty microflakes
+    │   │   ├── DielectricTransmission.h           // Thin-walled glazing & solid rough GGX BTDF + Abbe dispersion
+    │   │   ├── SubsurfaceDiffusion.h              // Burley normalized diffusion + deterministic QMC volumetric walk
+    │   │   ├── LinearlyTransformedSheen.h         // Zeltner 2022 LTC multiple-scattering cloth/velvet sheen
+    │   │   ├── FiberScattering.h                  // Chiang/Marschner R + TT + TRT hair and fiber BCSDF
+    │   │   └── PorosityAndBlackbody.h             // Relative-IOR wetness darkening & Planckian Kelvin luminous flux
+    │   ├── EnergyCompensation/                    // 4 KB & 8 KB pre-integrated hemispheres
+    │   │   ├── DirectionalAlbedoIntegral.{h,cpp}  // 32x32 RG16F (4 KB) Turquin multi-scatter energy preservation
+    │   │   └── SheenCosineIntegral.{h,cpp}        // 32x32 RGBA16F (8 KB) Zeltner LTC sheen fit coefficients
+    │   └── Baking/                                // Procedural outputs & shader-ball previews
+    │       ├── ProceduralChannelBaker.{h,cpp}     // Deterministic procedural normal/roughness/albedo pyramid baker
+    │       └── MaterialSpecimenRasterizer.{h,cpp} // Shader-ball & draped-cloth preview thumbnail rasterizer
+    │
+    ├── GeometrySpace/                             // Half-edge polygon networks, analytic/sweep solids, curvature & selection
+    │   ├── Network/                               // Contiguous half-edge polygon representation & UDIM partition spans
+    │   │   ├── PolygonNetwork.{h,cpp}             // Contiguous Vertices, DirectedEdges, Faces, per-corner UVs & shading
+    │   │   ├── GeometryInstance.{h,cpp}           // Transformable world/viewport PolygonNetwork instance token
+    │   │   └── FacePartitionRegister.{h,cpp}      // PriorityAllocationLayer & UVRevision-stamped FacePartitionSpan
+    │   │
+    │   ├── Primitives/                            // Parametric solid primitives, revolution/sweeps & watertight sewing
+    │   │   ├── AnalyticPrimitives.{h,cpp}         // Box, cylinder, cone, frustum, sphere, torus, capsule & sample presets
+    │   │   ├── RevolutionSweepPrimitives.{h,cpp}  // Lathe revolution, linear extrusion & Bishop parallel-transport sweeps
+    │   │   └── WatertightSewing.{h,cpp}           // Spatial-hashed vertex welding, outward winding & hole closure
     │   │
     │   ├── Analysis/
-    │   │   ├── CurvatureAnalysis.{h,cpp}          // Discrete mean and Gaussian differential curvature
-    │   │   └── StretchMeasurement.{h,cpp}         // Per-facet and island angle/area distortion metrics
+    │   │   ├── CurvatureAnalysis.{h,cpp}          // Meyer discrete mean/Gaussian curvature & Mikkelsen/Duff corner tangents
+    │   │   └── StretchMeasurement.{h,cpp}         // Exact 2x2 UV-Jacobian SVD, Sander stretch & Symmetric Dirichlet metrics
     │   │
-    │   ├── Selection/
-    │   │   ├── GeometrySelection.{h,cpp}          // Component pick resolution (Point, Edge, Facet, Loop)
-    │   │   ├── ComponentSelectionMask.{h,cpp}     // Bitmask filters for multi-component picking & paint masks
-    │   │   └── IslandFloodSelection.{h,cpp}       // Seam-bounded island flood expansion & UVTile tagging
-    │   │
-    │   └── UV/                                    // Parameterization & UVTile layout solvers
-    │       ├── TileLayout.{h,cpp}                 // Integer [TileU, TileV] UVTile coordinate grid
-    │       ├── UDIMTileAddressing.{h,cpp}         // UDIM 1001-series addressing and coordinate conversion
-    │       ├── TexelLayout.{h,cpp}                // Target texel density [px/m] and pixel border padding
-    │       ├── TileSegmentation.{h,cpp}           // Seam-split UVTile island extraction & boundary loops
-    │       ├── SeamRouter.{h,cpp}                 // Dijkstra geodesic shortest-path & dihedral seam router
-    │       ├── ConformalFlattening.{h,cpp}        // LSCM and ABF++ linear parameterization solvers
-    │       ├── StretchRelaxer.{h,cpp}             // Iterative area-preserving mass-spring UV relaxer
-    │       └── IslandLayoutPacker.{h,cpp}         // Scanline bin-packer targeting active UDIM UVTiles
+    │   └── Selection/
+    │       ├── GeometrySelection.{h,cpp}          // Edge loop, edge ring, Dijkstra shortest path, boundary, seam & sharp
+    │       ├── ComponentSelectionMask.{h,cpp}     // Bitmask filters for multi-component picking & paint masks
+    │       └── IslandFloodSelection.{h,cpp}       // Seam-bounded UV island flood segmentation & UDIM tile reassignment
+    │
+    ├── SpatialAcceleration/                       // Unified 128-triangle cluster LOD pyramid & 128 B 4-wide ray acceleration
+    │   ├── ClusterPyramid.{h,cpp}                 // 128-triangle Morton LOD pyramid with seam/border-locked QEM collapse
+    │   └── WideBoundingTree.{h,cpp}               // Compressed 128 B 4-Wide SAH BVH4 for deterministic GTX + RTX ray queries
+    │
+    ├── DistanceFieldSpace/                        // Volumetric signed distance fields for Tier 1 GTX GI & solar penumbra
+    │   └── SignedDistanceVolume.{h,cpp}           // Sparse 8x8x8 narrow-band brick 3D SDF builder, gradient & cone trace
     │
     ├── Codecs/                                    // Native Frontier .Space container Encoders & Decoders
     │   ├── SpaceContainerCodec.{h,cpp}            // Hybrid TOML + 64B-aligned binary section Encoder/Decoder
@@ -251,7 +291,8 @@ Frontier/
     │   ├── VectorCodec.{h,cpp}                    // VectorEncoder / VectorDecoder (.VectorSpace)
     │   ├── SimulationCodec.{h,cpp}                // SimulationEncoder / SimulationDecoder (.SimulationSpace)
     │   ├── VolumetricCodec.{h,cpp}                // VolumetricEncoder / VolumetricDecoder (.VolumetricSpace)
-    │   └── ParticleCodec.{h,cpp}                  // ParticleEncoder / ParticleDecoder (.ParticleSpace)
+    │   ├── ParticleCodec.{h,cpp}                  // ParticleEncoder / ParticleDecoder (.ParticleSpace)
+    │   └── NetworkCodec.{h,cpp}                   // NetworkEncoder / NetworkDecoder (.NetworkSpace)
     │
     ├── Interchange/                               // External industry format import/export & OS clipboard exchange
     │   ├── GeometryInterchange.{h,cpp}            // OBJ, glTF 2.0, FBX & STEP external geometry import/export
@@ -264,14 +305,33 @@ Frontier/
     │   └── ClipboardExchange.{h,cpp}              // Bi-directional OS ↔ Workspace clipboard exchange
     │
     ├── GeometricRaster/                           // Vulkan interchange, GPU rasterization units & command encoding
+    │   ├── Compute/
+    │   │   ├── ComputeDispatchEncoder.{h,cpp}     // Generic .slang compute dispatch & storage-buffer encoder
+    │   │   └── TimelineTransferRegister.{h,cpp}   // Triple-buffered Vulkan timeline semaphore readback ring
+    │   ├── Picking/
+    │   │   └── ViewportPickQuery.{h,cpp}          // R32G32B32A32_UINT 1x1 hover/click & GPU marquee/brush reduction
+    │   ├── UV/
+    │   │   └── UVWorkspaceRasterizer.{h,cpp}      // 3D PBR/MatCap + 2D UDIM grid, backdrops, seams, pins & heatmaps
+    │   ├── Shaders/                               // Active Vulkan 1.2 SPIR-V .slang graphics & compute units
+    │   │   ├── SurfaceShading.slang               // 3D Cook-Torrance PBR + 16 procedural MatCaps + selection tint
+    │   │   ├── MatCapEvaluation.slang             // Procedural 16-sphere MatCap shading & ACES Filmic compression
+    │   │   ├── UVTileRasterization.slang          // 2D UDIM grid, procedural backdrops, coral seams & pin beacons
+    │   │   ├── GizmoRasterization.slang           // 3D/2D Slate TransformGizmo cones, cylinders, quads & arcs
+    │   │   ├── ImGuiOverlayRasterization.slang    // Premultiplied-alpha ImDrawData swapchain/offscreen rasterization
+    │   │   ├── SelectionMaskCompute.slang         // GPU face/edge selection bitmask updates
+    │   │   ├── ViewportPickReduction.slang        // GPU box-marquee & circle-brush pick reduction
+    │   │   ├── UVDistortionInspection.slang       // Parallel stretch, texel density, flip & UDIM overlap reduction
+    │   │   ├── StretchRelaxCompute.slang          // Area-preserving GPU spring relaxation (honours EnablePinLock)
+    │   │   └── ConcaveSkylineCompute.slang        // Multi-angle island upper/lower skyline evaluation
     │   ├── RenderExtension.{h,cpp}                // Render lifecycle coordinator and device attachment
     │   ├── RenderDeviceInterface.h                // GPU hardware device interface and capability limits
-    │   ├── VulkanInterchange.{h,cpp}              // Vulkan volk device, swapchain, SPIR-V & semaphore interchange
+    │   ├── VulkanInterchange.{h,cpp}              // Vulkan 1.2 timeline semaphore device, swapchain & SPIR-V interchange
     │   ├── RenderScheduler.{h,cpp}                // Transient dependency-sorted GPU workload coordinator
     │   ├── IndirectCommandEncoder.{h,cpp}         // Instanced and indirect GPU command encoding
     │   ├── DescriptorSlotRegister.{h,cpp}         // Descriptor layout and push-constant slot register
     │   │
     │   ├── Rasterization/                         // Dedicated GPU rasterization & projection units
+    │   │   ├── ImGuiOverlayRasterization.{h,cpp}  // Native .slang ImDrawData swapchain & offscreen RGBA rasterizer
     │   │   ├── DirectionalLitRasterization.{h,cpp}// Fast directional key/hemisphere lit viewport rasterization
     │   │   ├── UVTileRasterization.{h,cpp}        // 2D UVTile grid, boundary lines, UDIM indices & tile fills
     │   │   ├── EdgeHighlightRasterization.{h,cpp} // Seam lines, sharp creases & active wireframe borders
@@ -282,6 +342,21 @@ Frontier/
     │   ├── ExecutionSequence/                     // Stream uploaders & ordered GPU raster sequences
     │   │   ├── GeometryVertexStreamUploader.{h,cpp}// UV vertex and per-island GPU stream upload
     │   │   └── GeometryRasterSequence.{h,cpp}     // Execution order: ShadowDepth → GroundPlane → Model → UVOverlay
+    │   │
+    │   ├── Visibility/                            // Shared GTX/RTX 64-bit (8 B/px) primary visibility front-end
+    │   │   ├── DepthPyramidSequence.{h,cpp}       // Conservative min-depth Hi-Z mip chain sequence
+    │   │   ├── ClusterCullEncoder.{h,cpp}         // Two-phase Hi-Z cull splitting >=4 px HW draws vs <4 px SW compute
+    │   │   ├── VisibilityClusterRasterization.{h,cpp}// uint64 (Depth32 | VisibilityToken32) + 2-layer glass depth peel
+    │   │   └── VisibilityMaterialResolve.{h,cpp}  // Analytic ray-differential barycentrics & LobeMask tile resolve
+    │   │
+    │   ├── DirectLighting/                        // First-hit solar shadows, analytic area lights & chassis AO
+    │   │   ├── SolarShadowSequence.{h,cpp}        // RTX deterministic solar frustum + GTX 2-cascade contact clip + SDF
+    │   │   └── LinearCosineLightIntegration.{h,cpp}// Visibility-gated analytic polygonal lights + 2.2 m chassis AO
+    │   │
+    │   ├── GlobalIllumination/                    // Multi-bounce GI, octahedral irradiance lattice & RT reflections
+    │   │   ├── IrradianceLatticeSequence.{h,cpp}  // RTX 1/pi octahedral lattice (Chebyshev depth) + GTX SDF cone GI
+    │   │   ├── SpecularReflectionSequence.{h,cpp} // Coherent WideBoundingTree multi-bounce specular & glass refraction
+    │   │   └── TieredWorldRenderSequence.{h,cpp}  // Complete ordered GTX/RTX world sequence bound to viewports
     │   │
     │   └── PostProcess/                           // Ordered image operations
     │       ├── PostProcessSequence.{h,cpp}        // Ordered image operation execution sequence
@@ -294,6 +369,29 @@ Frontier/
     │   │   ├── ShaderCompiler.{h,cpp}             // Offline and runtime Slang (.slang) to SPIR-V compiler
     │   │   ├── ShaderReflection.{h,cpp}           // Vertex attribute and descriptor layout reflection
     │   │   └── ShaderPermutationIndex.{h,cpp}     // Precompiled variant permutation register
+    │   ├── MaterialSpace/                         // Dual C++20/SPIR-V 10-lobe OpenPBR 1.1 + Glinty shaders
+    │   │   ├── OpenPbrSurfaceScattering.slang     // Master 10-lobe BSDF (compiles in both SPIR-V and C++20 CTest)
+    │   │   ├── GlintMicroflakeScattering.slang    // Constant-time 4D multiscale glint NDF + ramp tinting
+    │   │   ├── ThinFilmInterference.slang         // Airy wave-optics iridescence
+    │   │   ├── LinearlyTransformedSheen.slang     // LTC cloth/microfiber sheen
+    │   │   ├── SubsurfaceAndTransmission.slang    // Thin/solid rough refraction, dispersion & SSS
+    │   │   ├── FiberScattering.slang              // Hair/fiber longitudinal & azimuthal BCSDF
+    │   │   └── BounceLayerSummary.slang           // Fast 5-ALU secondary-bounce surface shading
+    │   ├── Visibility/                            // Cluster cull, Hi-Z, HW raster, atomicMax64 micro-raster & resolve
+    │   │   ├── ClusterVisibilityCull.slang        // Two-phase frustum, normal-cone & DepthPyramid occlusion cull
+    │   │   ├── DepthPyramidDownsample.slang       // Conservative reversed-Z min reduction
+    │   │   ├── HardwareVisibilityRasterization.slang// >=4 px indirect cluster rasterization + 2-layer glass peel
+    │   │   ├── MicroFaceSoftwareRasterization.slang// <4 px compute atomicMax64 sub-pixel face rasterization
+    │   │   └── AnalyticBarycentricResolve.slang   // Ray-plane barycentrics, UV Jacobians & wave-uniform material shade
+    │   ├── DirectLighting/                        // WideTreeRayQuery, solar frustum, contact clip & shadow filter
+    │   │   ├── WideTreeRayQuery.slang             // Shared 4-Wide BVH4 & VK_KHR_ray_query intersection routines
+    │   │   ├── SolarFrustumShadow.slang           // Deterministic Vogel solar disc trace + chassis 2-scale AO
+    │   │   ├── ContactClipShadow.slang            // GTX 2-cascade tight contact shadow + SDF cone penumbra blend
+    │   │   └── PlaneAwareShadowFilter.slang       // Coplanar dilation + 3-step continuous-sigma edge-preserving filter
+    │   ├── GlobalIllumination/                    // OctahedralIrradianceLattice, SDF cones & specular/glass raytrace
+    │   │   ├── OctahedralIrradianceLattice.slang  // 64-ray Fibonacci update, 16x16 Chebyshev depth & 1/pi lookup
+    │   │   ├── SignedDistanceConeIllumination.slang// GTX 6-cone directional SDF diffuse irradiance
+    │   │   └── SpecularAndGlassRaytrace.slang     // Coherent cone-footprint multi-bounce specular & dielectric glass
     │   ├── UV/                                    // GPU UVTile, wireframe, ground plane & shadow shaders
     │   │   ├── UVTileRasterization.slang          // 2D UVTile coordinates, checker patterns & stretch heat
     │   │   ├── EdgeHighlightRasterization.slang   // Screen-space anti-aliased wireframes & seam lines
@@ -306,26 +404,12 @@ Frontier/
     │   ├── Compute/                               // General GPU compute shaders
     │   │   ├── ParticleIntegration.slang
     │   │   ├── FluidAdvection.slang
-    │   │   ├── VoxelDistanceSweep.slang
-    │   │   ├── FieldLatticeCompute.slang          // Cascaded 3D vector/channel lattice velocity & curl compute bake
-    │   │   └── MoteAdvectionCompute.slang         // GPU Lagrangian tracer mote RK2/RK4 trajectory step
-    │   ├── VectorField/                           // 100% GPU vector field, streamline, envelope & heatmap shaders
-    │   │   ├── VectorArrowRasterization.slang     // Instanced 3D directional arrows colored by magnitude/curl/divergence
-    │   │   ├── StreamlineRasterization.slang      // RK4 3D advection ribbons with phase-animated pulse streaks
-    │   │   ├── SliceHeatmapRasterization.slang    // XZ/XY/YZ cross-section scalar field LUT + isoline contours
-    │   │   └── InfluenceEnvelopeRasterization.slang // Finite sphere, column, box, spline tube & expanding wavefront bounds
+    │   │   └── VoxelDistanceSweep.slang
     │   └── ImageOperations/                       // Post-process image filter shaders
     │       ├── DisplayToneTransfer.slang
     │       └── LuminanceGlareDownsample.slang
     │
-    ├── SimulationSpace/                           // Physics, dynamics, force fields, particles, fluids & motion
-    │   ├── ForceFields/                           // Bounded analytical, directed-channel & stochastic vector fields
-    │   │   ├── ForceFieldDescriptors.h            // EForceDuration, ForceAttenuation, ForceDomain & 19 EForceLaw profiles
-    │   │   ├── VectorField.{h,cpp}                // Linear wind, radial shockwaves (1/r, 1/r²), attractors, repulsors & drag
-    │   │   ├── ChannelField.{h,cpp}               // Directed currents, thermals, Venturi jets, navigation steering & wakes
-    │   │   ├── TurbulenceField.{h,cpp}            // Divergence-free curl noise, gust sources, vorticity confinement & Brownian drift
-    │   │   ├── ForceFieldAccumulator.{h,cpp}      // Broad-phase finite-bound culling & multi-law SIMD superposition solver
-    │   │   └── FieldLatticeCascade.{h,cpp}        // 4-tier cascaded 3D velocity & acceleration lattice baker
+    ├── SimulationSpace/                           // Physics, dynamics, particles, fluids & motion
     │   ├── PhysicsSpace/                          // Rigid mechanics and constraints
     │   │   ├── PhysicsExtension.{h,cpp}           // Simulation loop coordinator and broad-phase attachment
     │   │   ├── RigidBodyDynamics.{h,cpp}          // Velocity Verlet integration and inertia tensors
@@ -396,25 +480,31 @@ Frontier/
     │   │   ├── CursorResolution.{h,cpp}           // Active revision cursor & arbitrary-resolution reconstruction
     │   │   └── NonLinearHistory.{h,cpp}           // Directed acyclic revision history tree
     │   │
-    │   ├── UV/                                    // Headless UV workspace runtime (Non-UI)
-    │   │   ├── UVWorkspaceLifecycle.{h,cpp}       // Headless lifecycle: Initialize → Tick → Finalize
-    │   │   ├── UVWorkspaceDocument.{h,cpp}        // Editable UV layers, UDIM sets & UVTiles
-    │   │   ├── RevisionTracker.{h,cpp}            // Selected revision tracker: cursor tracking & parametric replay
-    │   │   └── Operations/                        // Procedural non-UI execution logic
-    │   │       ├── UVUnwrapOperations.{h,cpp}     // Conformal unwrap, planar, box & spherical projections
-    │   │       ├── UVPackOperations.{h,cpp}       // Island packing, rotation alignment & border margins
-    │   │       ├── UVSeamOperations.{h,cpp}       // Mark, clear, loop-cut, and shortest-path seams
-    │   │       ├── UVTransformOperations.{h,cpp}  // 2D scale, rotate, translate, mirror & normalize
-    │   │       └── UVWeldAlignOperations.{h,cpp}  // Island stitch, edge weld & UVTile coordinate alignment
+    │   ├── UV/                                    // UV workspace session, interactive viewport, panels & solvers
+    │   │   ├── UVPaneAppearance.h                 // ControlAppearance theme binder, studio controls & vector icons
+    │   │   ├── UVWorkspaceSession.{h,cpp}         // Editable UV layers, UDIM settings, selection, Interchange & Revision
+    │   │   ├── UVViewportInteractor.{h,cpp}       // 2D/3D camera orbit/pan/zoom, GPU picking, gizmo drag & G/R/S modal
+    │   │   ├── UVViewportHost.{h,cpp}             // Dual/single 2D+3D ViewportProjectionPane host, tool rail & drawer
+    │   │   ├── UVOutlinerPanel.{h,cpp}            // UV Space outliner, utilization/stretch gauges, layers & budget bar
+    │   │   ├── UVInspectorPanel.{h,cpp}           // 5-tab Inspector (Pack, Unwrap, UDIM, Shading, Check)
+    │   │   ├── UVWorkspaceHost.{h,cpp}            // Standalone & FeatureSet UV host, ControlCentre & OS file-drop intake
+    │   │   ├── Operations/                        // Direct authoring & connectivity operations
+    │   │   │   └── UVAuthoringOperations.{h,cpp}  // Seam mark/weld/brush, EnablePinLock, stitch, split, mirror & rectify
+    │   │   └── Solvers/                           // Parallel & GPU UV parameterization and packing solvers
+    │   │       ├── SeamCutGenerator.{h,cpp}       // Dihedral sharp-edge, shortest-path & manifold seam cutting
+    │   │       ├── ConformalUnwrapSolver.{h,cpp}  // Pin-aware parallel LSCM conformal flattening
+    │   │       ├── UVProjectionSolvers.{h,cpp}    // ABF++, Smart UV, Box, Cylindrical, Spherical, CameraView & ActiveQuads
+    │   │       ├── ProgressiveStretchRelaxer.{h,cpp}// Pin-aware CPU + GPU (.slang) area-preserving stretch relaxer
+    │   │       ├── ConcaveSkylinePacker.{h,cpp}   // Multi-UDIM importance-weighted concave skyline packer
+    │   │       ├── UVIslandLayoutOperations.{h,cpp}// Stack similar islands, unstack overlaps & fill empty pockets
+    │   │       └── TexelDensityEqualizer.{h,cpp}  // Target texel density [px/m] & UDIM spillover equalizer
     │   │
     │   ├── Geometry/                              // Headless GeometrySpace authoring runtime & operations
     │   ├── Texture/                               // Headless TextureSpace authoring runtime & operations
     │   ├── Material/                              // Headless MaterialSpace authoring runtime & operations
     │   ├── Image/                                 // Headless ImageSpace authoring runtime & operations
     │   ├── Vector/                                // Headless VectorSpace authoring runtime & operations
-    │   ├── Simulation/                            // Headless SimulationSpace & ForceField authoring runtime
-    │   │   ├── ForceFieldDocument.{h,cpp}         // Parametric force source registry, EForceDuration triggers & cascade budgets
-    │   │   └── ForceFieldOperations.{h,cpp}       // Parametric place, attenuate, burst-trigger, solo & revision operations
+    │   ├── Simulation/                            // Headless SimulationSpace authoring runtime & operations
     │   ├── Volumetric/                            // Headless VolumetricSpace authoring runtime & operations
     │   └── Particle/                              // Headless ParticleSpace authoring runtime & operations
     │
@@ -447,12 +537,7 @@ Frontier/
     │   │   ├── Material/                          // Modular Material Editor UI (panels, toolbars, interactions)
     │   │   ├── Image/                             // Modular Image Editor UI (panels, toolbars, interactions)
     │   │   ├── Vector/                            // Modular Vector Editor UI (panels, toolbars, interactions)
-    │   │   ├── Simulation/                        // Modular Simulation & VectorField Editor UI
-    │   │   │   ├── VectorFieldEditor.{h,cpp}      // Workspace registration & parametric force authoring host
-    │   │   │   ├── VectorFieldVisualizer.{h,cpp}  // 3D viewport arrows, slice heatmaps, envelopes & tracer coordinator
-    │   │   │   ├── StreamlineVisualizer.{h,cpp}   // GPU RK4 3D streamline bake & animated pulse ribbon coordinator
-    │   │   │   ├── ForceOutlinerPanel.{h,cpp}     // Force-domain outliner tree, active counts & impulse triggers
-    │   │   │   └── AnemometerTelemetryPanel.{h,cpp} // Inspector rolling 60s anemometer, Beaufort bands & live infographics
+    │   │   ├── Simulation/                        // Modular Simulation Editor UI (panels, toolbars, interactions)
     │   │   ├── Volumetric/                        // Modular Volumetric Editor UI (panels, toolbars, interactions)
     │   │   └── Particle/                          // Modular Particle Editor UI (panels, toolbars, interactions)
     │   │
@@ -468,11 +553,14 @@ Frontier/
     │       ├── MemoryDebugger.{h,cpp}             // Allocation leak tracker and region visualizer
     │       └── GPUCaptureRecorder.{h,cpp}         // RenderDoc / PIX programmatic capture recorder
     │
-    ├── Lifecycle/                                 // Deterministic sequence, game runtime, workspace & editor loops
+    ├── Lifecycle/                                 // Deterministic sequence, game runtime, workspace & desktop launch
     │   ├── LifecycleSequence.h                    // C++20 concept & reverse-order teardown sequence (Editor/Dev/Shipping)
-    │   ├── RuntimeLifecycle.{h,cpp}               // Standalone game/runtime main loop (Development/Shipping Game)
+    │   ├── RuntimeLifecycle.{h,cpp}               // Standalone game/runtime loop (Development/Shipping Game)
     │   ├── WorkspaceLifecycle.{h,cpp}             // Multi-document session & revision loop (Editor/Development)
-    │   └── EditorLifecycle.{h,cpp}                // Authoring main loop & GPU overlay entry (FRONTIER_PROFILE_EDITOR only)
+    │   ├── EditorLifecycle.{h,cpp}                // Authoring loop & GPU overlay entry (FRONTIER_PROFILE_EDITOR only)
+    │   ├── DesktopWorkspaceLaunch.{h,cpp}         // GLFW + Vulkan 1.2 swapchain/offscreen launch & CLI smoke capture
+    │   ├── FrontierUVLaunch.cpp                   // Standalone FrontierUV desktop application entry
+    │   └── FrontierEditorLaunch.cpp               // Full FeatureSet FrontierEditor desktop application entry
     │
     ├── Components/                                // Reusable UI controls, themes, typography, motion & panels
     │   ├── PixelSpace.{h,cpp}                     // Logical-to-physical 2D drawing canvas & group transforms
@@ -490,9 +578,14 @@ Frontier/
     │   │   ├── WorkspaceAppearance.{h,cpp}        // Shared studio colours, VisualToken, VectorGraphic, icons, signs & symbols
     │   │   ├── OutlinerPanel.{h,cpp}              // Generic Outliner/LayerStack tree, folders, filters & drag-reorder
     │   │   ├── InspectorPanel.{h,cpp}             // Showcase Folder Inspector, Add Notes editor & capability tiles
-    │   │   └── ViewportPanel.{h,cpp}              // Edit/Simulate/Play-Pause strip, Construct, Split, Diagnostics & Settings
+    │   │   ├── ViewportPanel.{h,cpp}              // Edit/Simulate/Play-Pause strip, Construct, Split, Diagnostics & Settings
+    │   │   └── ViewportProjectionPane.{h,cpp}     // Reusable single/split 2D+3D GPU viewport pane bound to WorkspaceDocument
     │   ├── ControlCentre/                         // Pull-down Control Centre & settings pages
     │   │   └── ControlCentrePanel.{h,cpp}         // Quick Controls, Appearance, Input, Notifications & Workspace
+    │   ├── ContentBrowser/                        // Pull-up ContentBrowser drawer & ColourCodex repository
+    │   │   ├── ColourCodex.{h,cpp}                // Named colour aliases, .ColourSwatch, Colour Filters & TOML persistence
+    │   │   ├── ThumbnailSheetRepository.{h,cpp}   // Pre-baked 1024x1024 ThumbnailSheet, 64B index, quarantine & workspace masks
+    │   │   └── ContentBrowserPanel.{h,cpp}        // Bottom-edge ContentBrowser, Grid/Vertical/Horizontal views & colour slots
     │   ├── Controls/                              // Reusable studio UI control primitives
     │   │   ├── ControlAppearance.{h,cpp}          // Shared colour set, OptionalTooltip, smoothstep & section containers
     │   │   ├── ControlTooltip.{h,cpp}             // Light/dark, 4-direction speech tails & diagnostic SplitHeader tooltips
@@ -513,13 +606,25 @@ Frontier/
     │       ├── ContextDirectiveList.{h,cpp}       // Cursor-anchored contextual directives
     │       └── CommandLauncher.{h,cpp}            // Fuzzy-search directive runner
     │
-    ├── NetworkingSpace/                           // Distributed simulation, differential encoding & remote directives
-    │   ├── NetworkingExtension.{h,cpp}            // Lifecycle coordinator: polls sockets, ticks sync, flushes buffers
-    │   ├── SocketTransport.{h,cpp}                // Non-blocking UDP datagram and TCP stream transport
-    │   ├── PacketSerializer.{h,cpp}               // Bit-packed wire encoding, fragmentation, and checksum verification
-    │   ├── DifferentialWorldEncoder.{h,cpp}       // Authoritative baseline-relative quantized world delta encoder
-    │   ├── RemoteDirectiveRouter.{h,cpp}          // Reliable ordered delivery and execution of remote directives
-    │   └── NetworkEndpointRegister.{h,cpp}        // Connected socket endpoints, round-trip latency, and clock alignment
+    ├── NetworkingSpace/                           // Distributed simulation, differential encoding & networking policies
+    │   ├── NetworkingExtension.{h,cpp}            // SuspendableParticipant coordinator: routing, framing & teardown
+    │   ├── PacketSerializer.{h,cpp}               // 'FP1' + 24B CRC32C wire framing & 'FCNK' 64-slot chunk reassembly
+    │   ├── DifferentialWorldEncoder.{h,cpp}       // Sector-16 + Local-24 sub-mm delta codec, smallest-three quat & slerp
+    │   ├── RemoteDirectiveRouter.{h,cpp}          // 5-byte 3-tick loss-healing input stream & reliable ordered directives
+    │   ├── NetworkEndpointRegister.{h,cpp}        // Peer telemetry, RFC 6298 EWMA RTT/jitter & synthetic slot isolation
+    │   ├── Policies/                              // Pure networking & session policy enforcement
+    │   │   ├── AuthenticationScopePolicy.{h,cpp}  // 4-scope mandate, 180 s consent gate, redaction & policy fallback
+    │   │   ├── TransportSelectionPolicy.{h,cpp}   // Deterministic transport failover & minimax global relay cluster
+    │   │   ├── ReplicationPolicy.{h,cpp}          // Authority modes, delivery channels & publish-rate contracts
+    │   │   └── SessionLifecyclePolicy.{h,cpp}     // Lobby vs. MatchSession separation & reverse-order teardown
+    │   └── Transports/                            // Zero-vtable PacketTransportChannel implementations & SDK stubs
+    │       ├── TransportInterface.h               // C++20 PacketTransportChannel concept & PacketDatagram carrier
+    │       ├── LoopbackTransport.{h,cpp}          // SplitMix64 deterministic latency/jitter/loss packet switch
+    │       ├── SocketTransport.{h,cpp}            // Non-blocking OS UDP, RFC 5389 STUN & ChaCha20-Poly1305 relay
+    │       ├── EpicOnlineTransport.{h,cpp}        // Epic Online Services P2P/Session adapter (when SDK enabled)
+    │       ├── EpicStubTransport.cpp              // Open-source zero-SDK EOS policy & simulated failover stub
+    │       ├── PhotonRealtimeTransport.{h,cpp}    // Photon Realtime cloud room + Epic JWT adapter (when SDK enabled)
+    │       └── PhotonStubTransport.cpp            // Open-source zero-SDK Photon JWT hygiene & failover stub
     │
     └── AudioSpace/                                // Spatial acoustics, waveform decoding, and bus accumulation
         ├── AudioExtension.{h,cpp}                 // Lifecycle coordinator: device output, bus ticks, and voice budgets

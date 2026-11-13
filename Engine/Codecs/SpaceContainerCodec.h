@@ -31,7 +31,7 @@ enum class SpaceExtensionCategory : uint8_t
 {
     ProjectSpace    = 0,  // [-] - .ProjectSpace root project configuration & dependency locks
     ColourSpace     = 1,  // [-] - .ColourSpace radiometric swatches, ramps, & spectral curves
-    GeometrySpace   = 2,  // [-] - .GeometrySpace 3D analytic & manifold topology (deferred domain)
+    GeometrySpace   = 2,  // [-] - .GeometrySpace 3D analytic, half-edge & spatial acceleration domain
     FontSpace       = 3,  // [-] - .FontSpace vector typography & kerning metrics
     TextureSpace    = 4,  // [-] - .TextureSpace GPU-ready tiled texel channels & mip chains
     MaterialSpace   = 5,  // [-] - .MaterialSpace physically based shading parameters
@@ -49,8 +49,10 @@ enum class SpaceExtensionCategory : uint8_t
     Photometry      = 17, // [-] - .Photometry Option 1A natural IES luminaire profile
     Terrain         = 18, // [-] - .Terrain Option 1A natural heightfield tile
     Acoustic        = 19, // [-] - .Acoustic Option 1A natural impulse/propagation setup
-    VectorFieldSpace= 20, // [-] - .VectorFieldSpace multi-source vector field rig, curves, & formulas
-    ForceModel      = 21  // [-] - .ForceModel Option A single-force preset configuration
+    NetworkSpace    = 20, // [-] - .NetworkSpace distributed session routing & replication policies
+    VectorFieldSpace= 21, // [-] - .VectorFieldSpace multi-source vector field rig, curves, & formulas
+    ForceModel      = 22, // [-] - .ForceModel Option A single-force preset configuration
+    InputSpace      = 23  // [-] - .InputSpace hardware chord registers, navigation presets & axis calibration
 };
 
 //------------------------------------------------------------------------------------------------------------------------

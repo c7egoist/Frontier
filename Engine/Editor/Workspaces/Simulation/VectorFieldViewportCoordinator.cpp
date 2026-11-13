@@ -736,7 +736,7 @@ SimulationSpace::ForceFields::FieldLatticeCascade& VectorFieldViewportCoordinato
 SimulationSpace::ForceFields::FieldLatticeVulkanExecutor& VectorFieldViewportCoordinator::AccessVulkanExecutor() noexcept { return VulkanExecutor; }
 VectorFieldOverlaySequence& VectorFieldViewportCoordinator::AccessOverlaySequence() noexcept { return OverlaySequence; }
 ForceInspectorView& VectorFieldViewportCoordinator::AccessForceInspectorView() noexcept { return InspectorView; }
-ContentBrowserPanel& VectorFieldViewportCoordinator::AccessContentBrowser() noexcept { return ContentBrowser; }
+ForcePresetBrowserPanel& VectorFieldViewportCoordinator::AccessContentBrowser() noexcept { return ContentBrowser; }
 OverlayCameraState& VectorFieldViewportCoordinator::AccessCamera(uint32_t PaneIndex) noexcept { return Cameras[PaneIndex < 2u ? PaneIndex : 0u]; }
 int32_t VectorFieldViewportCoordinator::QuerySelectedWaypointIndex() const noexcept { return SelectedWaypointIdx; }
 void VectorFieldViewportCoordinator::ConfigureSelectedWaypointIndex(int32_t WaypointIdx) noexcept { SelectedWaypointIdx = WaypointIdx; }

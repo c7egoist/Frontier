@@ -135,7 +135,7 @@ const ForceFieldVisualization = (() =>
         const Options = {
             Quantity: 'Speed', Contribution: 'Flow', ScaleMode: 'Automatic', FixedScale: 20,
             Heatmap: true, HeatmapStyle: 'Smooth', Opacity: 1, Arrows: true, ArrowSpacing: 40, ArrowWeight: 1,
-            FlowLines: false, FlowLineSpacing: 46, FlowLineLength: 22, FlowLinePulse: false, QuietCutoff: 0.025,
+            FlowLines: false, FlowLineSpacing: 46, FlowLineLength: 22, FlowLinePulse: true, QuietCutoff: 0.025,
             Tracers: true, TracerCount: 360, SliceHeight: 10, CellPixels: 6, CameraCells: 48,
             ShowScaleBar: true, ShowLegend: true, ShowSources: true, ShowLabels: true, MinimalLabels: false, ShowCascades: false, ShowGroundGrid: true,
             AllowOblique: true,
@@ -480,9 +480,6 @@ const ForceFieldVisualization = (() =>
                 }
             }
             const Pixels = Lattice.Image.data;
-            const Quantity = Lattice.Quantity;
-            const InvScale = 1 / (ScaleReading || 1);
-            const ContourMode = Options.HeatmapStyle === 'Contour';
             for (let Row = 0; Row < Rows; ++Row)
             {
                 for (let Column = 0; Column < Columns; ++Column)
@@ -491,14 +488,10 @@ const ForceFieldVisualization = (() =>
                     if (!Pixels[Index * 4 + 3]) continue;
                     const C0 = Row * (Columns + 1) + Column, C1 = C0 + 1, C2 = C0 + Columns + 2, C3 = C0 + Columns + 1;
                     if (!(Visible[C0] && Visible[C1] && Visible[C2] && Visible[C3])) continue;
-                    const Signal = Math.min(1, Math.abs(Quantity[Index]) * InvScale);
-                    const Alpha = ContourMode
-                        ? Math.min(0.45, 0.08 + 0.37 * Math.pow(Signal, 0.8))
-                        : Math.min(1, 0.16 + 0.84 * Math.pow(Signal, 0.65));
                     const CentreX = (Corners[C0 * 2] + Corners[C1 * 2] + Corners[C2 * 2] + Corners[C3 * 2]) / 4;
                     const CentreY = (Corners[C0 * 2 + 1] + Corners[C1 * 2 + 1] + Corners[C2 * 2 + 1] + Corners[C3 * 2 + 1]) / 4;
                     const Grow = (Corner, Axis) => { const Reading = Corners[Corner * 2 + Axis], Centre = Axis ? CentreY : CentreX; return Reading + Math.sign(Reading - Centre) * 0.6; };
-                    Pen.fillStyle = `rgba(${Pixels[Index * 4]},${Pixels[Index * 4 + 1]},${Pixels[Index * 4 + 2]},${Alpha.toFixed(3)})`;
+                    Pen.fillStyle = `rgb(${Pixels[Index * 4]},${Pixels[Index * 4 + 1]},${Pixels[Index * 4 + 2]})`;
                     Pen.beginPath();
                     Pen.moveTo(Grow(C0, 0), Grow(C0, 1));
                     Pen.lineTo(Grow(C1, 0), Grow(C1, 1));
@@ -507,50 +500,9 @@ const ForceFieldVisualization = (() =>
                     Pen.fill();
                 }
             }
-            if (ContourMode && Columns >= 2 && Rows >= 2)
-            {
-                const Signed = Options.Contribution !== 'Damp' && Quantities[Options.Quantity]?.Signed;
-                const Levels = Signed ? [-0.75, -0.5, -0.25, 0.25, 0.5, 0.75] : [0.15, 0.30, 0.45, 0.60, 0.75, 0.90];
-                const SliceY = Options.SliceHeight;
-                Pen.lineWidth = 1.4;
-                Pen.lineCap = 'round';
-                for (const L of Levels)
-                {
-                    const Thr = L / InvScale;
-                    const Share = Signed ? 0.5 + 0.5 * L : L;
-                    const Lut = Math.max(0, Math.min(255, Math.round(Share * 255))) * 3;
-                    Pen.strokeStyle = `rgba(${Math.min(255, ColourLut[Lut] + 45)},${Math.min(255, ColourLut[Lut + 1] + 45)},${Math.min(255, ColourLut[Lut + 2] + 45)},0.92)`;
-                    Pen.beginPath();
-                    const Interp = (V0, V1, X0, Z0, X1, Z1) => {
-                        const Den = V1 - V0;
-                        const T = Math.abs(Den) < 1e-9 ? 0.5 : (Thr - V0) / Den;
-                        return Project(X0 + (X1 - X0) * T, SliceY, Z0 + (Z1 - Z0) * T);
-                    };
-                    for (let R = 0; R < Rows - 1; ++R)
-                    {
-                        const Z0 = OriginZ + R * CellSpan, Z1 = Z0 + CellSpan;
-                        for (let C = 0; C < Columns - 1; ++C)
-                        {
-                            const I0 = R * Columns + C, I1 = I0 + 1, I2 = I0 + Columns + 1, I3 = I0 + Columns;
-                            const V0 = Quantity[I0], V1 = Quantity[I1], V2 = Quantity[I2], V3 = Quantity[I3];
-                            const Mask = (V0 >= Thr ? 1 : 0) | (V1 >= Thr ? 2 : 0) | (V2 >= Thr ? 4 : 0) | (V3 >= Thr ? 8 : 0);
-                            if (Mask === 0 || Mask === 15) continue;
-                            const X0 = OriginX + C * CellSpan, X1 = X0 + CellSpan;
-                            const Pts = [];
-                            if ((Mask & 1) !== ((Mask >> 1) & 1)) Pts.push(Interp(V0, V1, X0, Z0, X1, Z0));
-                            if (((Mask >> 1) & 1) !== ((Mask >> 2) & 1)) Pts.push(Interp(V1, V2, X1, Z0, X1, Z1));
-                            if (((Mask >> 2) & 1) !== ((Mask >> 3) & 1)) Pts.push(Interp(V2, V3, X1, Z1, X0, Z1));
-                            if (((Mask >> 3) & 1) !== (Mask & 1)) Pts.push(Interp(V3, V0, X0, Z1, X0, Z0));
-                            for (let K = 0; K + 1 < Pts.length; K += 2)
-                                if (Pts[K] && Pts[K + 1]) { Pen.moveTo(Pts[K][0], Pts[K][1]); Pen.lineTo(Pts[K + 1][0], Pts[K + 1][1]); }
-                        }
-                    }
-                    Pen.stroke();
-                }
-            }
             Context.save();
             Context.setTransform(1, 0, 0, 1, 0, 0);
-            Context.globalAlpha = ContourMode ? Math.min(0.95, Options.Opacity + 0.32) : Options.Opacity;
+            Context.globalAlpha = Options.Opacity;
             Context.drawImage(Offscreen, 0, 0);
             Context.restore();
         }
@@ -577,9 +529,9 @@ const ForceFieldVisualization = (() =>
         function RenderGroundGrid()
         {
             if (!Options.ShowGroundGrid || View.Mode === 'Camera') return;
-            const SliceY = Options.SliceHeight;
             const Coverage = ResolveCoverage();
             const Step = NiceLength(View.Span / 6);
+            const SliceY = Options.SliceHeight;
             Context.save();
             Context.strokeStyle = 'rgba(255,255,255,0.05)';
             Context.lineWidth = 1;
@@ -828,23 +780,11 @@ const ForceFieldVisualization = (() =>
         }
 
         //--------------------------------------------------------------------------------------------------------------------
-        //                                    BIDIRECTIONAL RK4 STREAMLINES (VECTORFIELD STYLE)
+        //                                          RK2 FLOW LINES (STREAMLINES)
         //--------------------------------------------------------------------------------------------------------------------
 
-        const EngineeringStops = [[15, 28, 38], [46, 110, 125], [89, 166, 110], [212, 181, 102], [232, 107, 79]];
-        function EngineeringRgb(Share, Alpha)
-        {
-            const T = Math.max(0, Math.min(1, Share)) * (EngineeringStops.length - 1);
-            const I = Math.min(EngineeringStops.length - 2, Math.floor(T));
-            const F = T - I;
-            const A = EngineeringStops[I], B = EngineeringStops[I + 1];
-            const R = Math.round(A[0] + (B[0] - A[0]) * F);
-            const G = Math.round(A[1] + (B[1] - A[1]) * F);
-            const Bl = Math.round(A[2] + (B[2] - A[2]) * F);
-            return `rgba(${R},${G},${Bl},${Alpha.toFixed(3)})`;
-        }
-
-        // 📝 Bidirectional RK4 streamlines matching VectorFieldVisualizer: speed-colored matte quadratic curves + subtle directional chevrons, zero glow.
+        // 📝 Anti-clutter smooth RK2 streamlines: seeded on a world-snapped sparse grid only inside active field regions,
+        //    prevented from piling up by screen-space occupancy bins, and animated with subtle downstream phase pulses.
         function BuildFlowLines()
         {
             Streamlines.length = 0;
@@ -857,7 +797,7 @@ const ForceFieldVisualization = (() =>
             const SeedSpan = View.Mode === 'Camera'
                 ? Math.max(Coverage.MaximumX - Coverage.MinimumX, Coverage.MaximumZ - Coverage.MinimumZ) / 11
                 : Math.max(Lattice.CellSpan * 2, (View.Span / Math.max(1, Width)) * CellPx);
-            const BinPx = View.Mode === 'Camera' ? Math.max(11, CellPx * 0.42) : Math.max(12, CellPx * 0.48);
+            const BinPx = Math.max(14, CellPx * 0.56);
             const BinCols = Math.max(4, Math.ceil(Width / BinPx) + 2);
             const BinRows = Math.max(4, Math.ceil(Height / BinPx) + 2);
             const Occupied = new Uint8Array(BinCols * BinRows);
@@ -880,45 +820,29 @@ const ForceFieldVisualization = (() =>
                 return !Occupied[R * BinCols + C];
             };
 
-            const VBuf = new Float64Array(3);
-            const SampleUnit = (Px, Pz) =>
-            {
-                if (!Interpolate(Px, Pz, VBuf)) return null;
-                const H = Math.hypot(VBuf[0], VBuf[2]);
-                return H >= MinMag ? [VBuf[0] / H, VBuf[2] / H, H] : null;
-            };
-            const MaxHalfSteps = View.Mode === 'Camera'
-                ? Math.max(12, Math.round((Options.FlowLineLength || 24) * 1.0))
-                : Math.max(8, Math.round((Options.FlowLineLength || 22) * 0.72));
+            const V1 = new Float64Array(3), V2 = new Float64Array(3);
+            const MaxHalfSteps = Math.max(6, Math.round((Options.FlowLineLength || 22) * 0.55));
             const WorldStep = View.Mode === 'Camera'
-                ? Math.max(Coverage.MaximumX - Coverage.MinimumX, Coverage.MaximumZ - Coverage.MinimumZ) / 56
+                ? Math.max(Coverage.MaximumX - Coverage.MinimumX, Coverage.MaximumZ - Coverage.MinimumZ) / 72
                 : Math.max(Lattice.CellSpan * 0.65, (View.Span / Math.max(1, Width)) * 8);
 
             const TraceDir = (StartX, StartZ, Sign, OwnBins) =>
             {
                 const Pts = [];
                 let X = StartX, Z = StartZ;
-                let MagSum = 0, PrevDx = 0, PrevDz = 0;
+                let MagSum = 0;
                 for (let Step = 0; Step < MaxHalfSteps; ++Step)
                 {
-                    const K1 = SampleUnit(X, Z);
-                    if (!K1) break;
-                    const Ds = Sign * WorldStep, Half = Ds * 0.5;
-                    const K2 = SampleUnit(X + K1[0] * Half, Z + K1[1] * Half);
-                    if (!K2) break;
-                    const K3 = SampleUnit(X + K2[0] * Half, Z + K2[1] * Half);
-                    if (!K3) break;
-                    const K4 = SampleUnit(X + K3[0] * Ds, Z + K3[1] * Ds);
-                    if (!K4) break;
-
-                    const Dx = (K1[0] + 2 * K2[0] + 2 * K3[0] + K4[0]) / 6;
-                    const Dz = (K1[1] + 2 * K2[1] + 2 * K3[1] + K4[1]) / 6;
-                    const DLen = Math.hypot(Dx, Dz);
-                    if (DLen < 0.25) break;
-                    if (Step > 2 && (Dx * PrevDx + Dz * PrevDz) < -0.35) break;
-                    PrevDx = Dx; PrevDz = Dz;
-
-                    const NX = X + Dx * Ds, NZ = Z + Dz * Ds;
+                    if (!Interpolate(X, Z, V1)) break;
+                    const H1 = Math.hypot(V1[0], V1[2]);
+                    if (H1 < MinMag) break;
+                    const DX1 = (V1[0] / H1) * Sign, DZ1 = (V1[2] / H1) * Sign;
+                    const MX = X + DX1 * WorldStep * 0.5, MZ = Z + DZ1 * WorldStep * 0.5;
+                    if (!Interpolate(MX, MZ, V2)) break;
+                    const H2 = Math.hypot(V2[0], V2[2]);
+                    if (H2 < MinMag) break;
+                    const NX = X + (V2[0] / H2) * Sign * WorldStep;
+                    const NZ = Z + (V2[2] / H2) * Sign * WorldStep;
                     if (NX < Coverage.MinimumX || NX > Coverage.MaximumX || NZ < Coverage.MinimumZ || NZ > Coverage.MaximumZ) break;
                     const P = Project(NX, Options.SliceHeight, NZ);
                     if (!P || P[0] < -20 || P[1] < -20 || P[0] > Width + 20 || P[1] > Height + 20) break;
@@ -930,9 +854,8 @@ const ForceFieldVisualization = (() =>
                         OwnBins.add(Key);
                     }
                     X = NX; Z = NZ;
-                    MagSum += K2[2];
+                    MagSum += H2;
                     Pts.push([X, Z]);
-                    if (Step > 5 && Math.hypot(X - StartX, Z - StartZ) < WorldStep * 0.85) break;
                 }
                 return { Pts, AvgMag: Pts.length ? MagSum / Pts.length : 0 };
             };
@@ -940,37 +863,59 @@ const ForceFieldVisualization = (() =>
             const StartX = Math.floor(Coverage.MinimumX / SeedSpan) * SeedSpan + SeedSpan * 0.5;
             const StartZ = Math.floor(Coverage.MinimumZ / SeedSpan) * SeedSpan + SeedSpan * 0.5;
             let RowIdx = 0;
-            for (let Z = StartZ; Z <= Coverage.MaximumZ && Streamlines.length < 300; Z += SeedSpan, ++RowIdx)
+            for (let Z = StartZ; Z <= Coverage.MaximumZ && Streamlines.length < 360; Z += SeedSpan, ++RowIdx)
             {
                 const Stagger = (RowIdx & 1) ? SeedSpan * 0.5 : 0;
-                for (let X = StartX + Stagger; X <= Coverage.MaximumX && Streamlines.length < 300; X += SeedSpan)
+                for (let X = StartX + Stagger; X <= Coverage.MaximumX && Streamlines.length < 360; X += SeedSpan)
                 {
-                    if (!Interpolate(X, Z, VBuf)) continue;
-                    const H0 = Math.hypot(VBuf[0], VBuf[2]);
+                    if (!Interpolate(X, Z, V1)) continue;
+                    const H0 = Math.hypot(V1[0], V1[2]);
                     if (H0 < MinMag) continue;
                     if (!IsFreeScreen(X, Z)) continue;
                     const Own = new Set();
                     const Back = TraceDir(X, Z, -1, Own);
                     const Fwd = TraceDir(X, Z, +1, Own);
                     const Combined = [...Back.Pts.reverse(), [X, Z], ...Fwd.Pts];
-                    if (Combined.length < 4) continue;
+                    if (Combined.length < 3) continue;
                     for (const [PX, PZ] of Combined) MarkScreen(PX, PZ);
                     const AvgMag = (H0 + Back.AvgMag + Fwd.AvgMag) / (1 + (Back.Pts.length ? 1 : 0) + (Fwd.Pts.length ? 1 : 0));
-                    Streamlines.push({ Points: Combined, NormMag: Math.min(1, AvgMag / Scale) });
+                    Streamlines.push({ Points: Combined, NormMag: Math.min(1.4, AvgMag / Scale), Phase: (Math.abs(Math.sin(X * 0.13 + Z * 0.29))) });
                 }
             }
             Statistics.Streamlines = Streamlines.length;
+        }
+
+        function HexToRgba(Hex, Alpha)
+        {
+            const Clean = (Hex || '#8fd3c4').replace('#', '');
+            if (Clean.length !== 6) return `rgba(143,211,196,${Alpha})`;
+            const Num = parseInt(Clean, 16);
+            return `rgba(${(Num >> 16) & 255},${(Num >> 8) & 255},${Num & 255},${Alpha})`;
+        }
+
+        function DominantSourceColour(WX, WZ)
+        {
+            const Default = Options.Contribution === 'Accelerate' ? '#e8c27a' : '#8fd3c4';
+            let Best = null, BestScore = 0;
+            for (const Src of Options.Sources)
+            {
+                if (Src.Dim && Options.Contribution !== 'Flow' && Src.Contribution !== Options.Contribution) continue;
+                if ((Src.Active ?? 1) <= 0.01) continue;
+                const R = Math.max(20, Src.Radius || Math.max(Src.HalfX || 120, Src.HalfZ || 120));
+                const D = Math.hypot(WX - (Src.OutlineX ?? Src.X), WZ - (Src.OutlineZ ?? Src.Z));
+                if (D > R * 1.05) continue;
+                const Score = (1 - D / (R * 1.05)) * (Src.Contribution === Options.Contribution ? 1.4 : 0.7);
+                if (Score > BestScore) { BestScore = Score; Best = Src.Colour || null; }
+            }
+            return Best || Default;
         }
 
         function RenderFlowLines()
         {
             if (!Options.FlowLines || Options.Contribution === 'Damp' || !Streamlines.length) return;
             const SliceY = Options.SliceHeight;
-
-            Context.save();
-            Context.lineCap = 'round';
-            Context.lineJoin = 'round';
-            Context.shadowBlur = 0;
+            const Buckets = new Map();
+            const PulseBuckets = new Map();
 
             for (const Line of Streamlines)
             {
@@ -980,39 +925,59 @@ const ForceFieldVisualization = (() =>
                     const P = Project(WX, SliceY, WZ);
                     if (P) Projected.push(P);
                 }
-                if (Projected.length < 4) continue;
+                if (Projected.length < 3) continue;
 
-                const Share = Math.max(0.22, Math.min(1, Line.NormMag));
-                Context.strokeStyle = EngineeringRgb(Share, Options.Heatmap ? 0.68 : 0.62);
-                Context.lineWidth = 1.65;
-                Context.beginPath();
-                Context.moveTo(Projected[0][0], Projected[0][1]);
+                const Mid = Line.Points[Math.floor(Line.Points.length * 0.5)];
+                const Tint = DominantSourceColour(Mid[0], Mid[1]);
+                let BasePath = Buckets.get(Tint);
+                if (!BasePath) { BasePath = new Path2D(); Buckets.set(Tint, BasePath); }
+
+                BasePath.moveTo(Projected[0][0], Projected[0][1]);
                 for (let I = 1; I < Projected.length - 1; ++I)
                 {
                     const MX = (Projected[I][0] + Projected[I + 1][0]) * 0.5;
                     const MY = (Projected[I][1] + Projected[I + 1][1]) * 0.5;
-                    Context.quadraticCurveTo(Projected[I][0], Projected[I][1], MX, MY);
+                    BasePath.quadraticCurveTo(Projected[I][0], Projected[I][1], MX, MY);
                 }
                 const Last = Projected[Projected.length - 1];
-                Context.lineTo(Last[0], Last[1]);
-                Context.stroke();
+                BasePath.lineTo(Last[0], Last[1]);
 
-                // Clean matte directional chevrons every ~8 steps (VectorFieldVisualizer style, no glow)
-                Context.strokeStyle = EngineeringRgb(Math.min(1, Share + 0.16), 0.86);
-                Context.lineWidth = 1.4;
-                Context.beginPath();
-                for (let I = 4; I < Projected.length - 2; I += 8)
+                if (Options.FlowLinePulse)
                 {
-                    const A = Projected[I - 1], B = Projected[I + 1];
-                    const SegLen = Math.hypot(B[0] - A[0], B[1] - A[1]);
-                    if (SegLen < 2.5) continue;
-                    const Ang = Math.atan2(B[1] - A[1], B[0] - A[0]);
-                    Context.moveTo(Projected[I][0], Projected[I][1]);
-                    Context.lineTo(Projected[I][0] - Math.cos(Ang - 0.55) * 5.5, Projected[I][1] - Math.sin(Ang - 0.55) * 5.5);
-                    Context.moveTo(Projected[I][0], Projected[I][1]);
-                    Context.lineTo(Projected[I][0] - Math.cos(Ang + 0.55) * 5.5, Projected[I][1] - Math.sin(Ang + 0.55) * 5.5);
+                    let PulsePath = PulseBuckets.get(Tint);
+                    if (!PulsePath) { PulsePath = new Path2D(); PulseBuckets.set(Tint, PulsePath); }
+                    const Head = ((Line.Phase + ElapsedDisplay * (0.42 + Line.NormMag * 0.72)) % 1.0);
+                    const Span = 0.28;
+                    const Count = Projected.length - 1;
+                    const StartIdx = Math.max(0, Math.floor((Head - Span) * Count));
+                    const EndIdx = Math.min(Count, Math.ceil(Head * Count));
+                    if (EndIdx > StartIdx)
+                    {
+                        PulsePath.moveTo(Projected[StartIdx][0], Projected[StartIdx][1]);
+                        for (let I = StartIdx + 1; I <= EndIdx; ++I) PulsePath.lineTo(Projected[I][0], Projected[I][1]);
+                    }
                 }
-                Context.stroke();
+            }
+
+            Context.save();
+            Context.lineCap = 'round';
+            Context.lineJoin = 'round';
+            for (const [Tint, BasePath] of Buckets)
+            {
+                Context.strokeStyle = HexToRgba(Tint, Options.Heatmap ? 0.34 : 0.28);
+                Context.lineWidth = 1.3;
+                Context.stroke(BasePath);
+            }
+            if (Options.FlowLinePulse)
+            {
+                for (const [Tint, PulsePath] of PulseBuckets)
+                {
+                    Context.shadowColor = Tint;
+                    Context.shadowBlur = 7;
+                    Context.strokeStyle = HexToRgba(Tint, 0.92);
+                    Context.lineWidth = 2.05;
+                    Context.stroke(PulsePath);
+                }
             }
             Context.restore();
         }
@@ -1056,19 +1021,56 @@ const ForceFieldVisualization = (() =>
             const PixelsPerMetre = View.Mode === 'Camera' ? 0 : ResolveAffine().PixelsPerMetre;
             const Labels = [];
             Context.save();
-            Context.shadowBlur = 0;
             for (const Source of Options.Sources)
             {
                 const Colour = Source.Colour || ContributionColours[Source.Contribution] || '#dfe7f3';
                 const Active = Source.Active ?? 1;
-                const BaseAlpha = (Source.Selected ? 0.78 : (View.Mode === 'Camera' ? 0.22 : 0.32 + 0.36 * Math.min(1, Active))) * (Source.Dim && !Source.Selected ? 0.45 : 1);
-                const Centre = Project(Source.X, (View.Mode === 'Camera' && Source.Point3D && Number.isFinite(Source.Y)) ? Source.Y : SliceY, Source.Z);
-                const RingY = (View.Mode === 'Camera' && Source.Point3D && Number.isFinite(Source.Y)) ? Source.Y : SliceY;
+                const BaseAlpha = (Source.Selected ? 0.98 : 0.42 + 0.44 * Math.min(1, Active)) * (Source.Dim && !Source.Selected ? 0.48 : 1);
+                const Centre = Project(Source.X, SliceY, Source.Z);
+
+                // Soft glowing area wash inside finite influence bounds
+                if (Centre && Source.Shape !== 'Everywhere' && Active > 0.01)
+                {
+                    Context.save();
+                    Context.globalAlpha = Source.Dim && !Source.Selected ? 0.45 : 1;
+                    if (Source.Shape === 'Box')
+                    {
+                        const Corners = BoxOutline(Source, SliceY).map(([X, Y, Z]) => Project(X, Y, Z)).filter(Boolean);
+                        if (Corners.length === 4)
+                        {
+                            Context.fillStyle = HexToRgba(Colour, Source.Selected ? 0.14 : 0.08);
+                            Context.beginPath();
+                            Context.moveTo(Corners[0][0], Corners[0][1]);
+                            for (let I = 1; I < 4; ++I) Context.lineTo(Corners[I][0], Corners[I][1]);
+                            Context.closePath();
+                            Context.fill();
+                        }
+                    }
+                    else if (Source.Radius > 0)
+                    {
+                        const RimPt = Project(Source.X + Source.Radius, SliceY, Source.Z);
+                        const ScreenR = RimPt ? Math.hypot(RimPt[0] - Centre[0], RimPt[1] - Centre[1]) : 0;
+                        if (ScreenR >= 4 && typeof Context.createRadialGradient === 'function')
+                        {
+                            const Grad = Context.createRadialGradient(Centre[0], Centre[1], Math.min(4, ScreenR * 0.1), Centre[0], Centre[1], ScreenR);
+                            Grad.addColorStop(0, HexToRgba(Colour, Source.Selected ? 0.24 : 0.15));
+                            Grad.addColorStop(0.55, HexToRgba(Colour, Source.Selected ? 0.09 : 0.05));
+                            Grad.addColorStop(1, HexToRgba(Colour, 0));
+                            Context.fillStyle = Grad;
+                            Context.beginPath();
+                            Context.arc(Centre[0], Centre[1], ScreenR, 0, Math.PI * 2);
+                            Context.fill();
+                        }
+                    }
+                    Context.restore();
+                }
 
                 Context.globalAlpha = BaseAlpha;
+                Context.shadowColor = Colour;
+                Context.shadowBlur = Source.Selected ? 20 : 10;
                 Context.strokeStyle = Colour;
-                Context.lineWidth = Source.Selected ? 1.5 : 1.0;
-                Context.setLineDash(Source.Selected ? [] : [4, 4]);
+                Context.lineWidth = Source.Selected ? 2.1 : 1.25;
+                Context.setLineDash(Source.Selected ? [] : [5, 5]);
                 if (Source.Track && Source.Track.length > 1)
                 {
                     Context.save();
@@ -1077,41 +1079,38 @@ const ForceFieldVisualization = (() =>
                     StrokeWorldPolygon(Source.Track.map(([X, Z]) => [X, SliceY, Z]), false);
                     Context.restore();
                 }
-                if (View.Mode !== 'Camera' || Source.Selected)
+                if (Source.Shape === 'Box') StrokeWorldPolygon(BoxOutline(Source, SliceY), true);
+                else if (Source.Shape !== 'Everywhere')
                 {
-                    if (Source.Shape === 'Box') StrokeWorldPolygon(BoxOutline(Source, RingY), true);
-                    else if (Source.Shape !== 'Everywhere')
+                    const OnScreen = PixelsPerMetre ? Source.Radius * PixelsPerMetre : 99;
+                    if (OnScreen >= 3) StrokeWorldPolygon(CircleOutline(Source.X, SliceY, Source.Z, Source.Radius, 72), true);
+                    if (Source.InnerRadius && (!PixelsPerMetre || Source.InnerRadius * PixelsPerMetre >= 3))
                     {
-                        const OnScreen = PixelsPerMetre ? Source.Radius * PixelsPerMetre : 99;
-                        if (OnScreen >= 3) StrokeWorldPolygon(CircleOutline(Source.X, RingY, Source.Z, Source.Radius, 64), true);
-                        if (Source.InnerRadius && (!PixelsPerMetre || Source.InnerRadius * PixelsPerMetre >= 3))
-                        {
-                            Context.save();
-                            Context.globalAlpha *= 0.6;
-                            Context.setLineDash([2, 3]);
-                            StrokeWorldPolygon(CircleOutline(Source.X, RingY, Source.Z, Source.InnerRadius, 48), true);
-                            Context.restore();
-                        }
+                        Context.save();
+                        Context.globalAlpha *= 0.65;
+                        Context.setLineDash([2, 3]);
+                        StrokeWorldPolygon(CircleOutline(Source.X, SliceY, Source.Z, Source.InnerRadius, 48), true);
+                        Context.restore();
                     }
                 }
                 if (!Centre) continue;
-                if (Source.Bearing !== undefined && Source.Bearing !== null && (View.Mode !== 'Camera' || Source.Selected))
+                if (Source.Bearing !== undefined && Source.Bearing !== null)
                 {
                     const Turn = Source.Bearing * Math.PI / 180;
-                    const Reach = PixelsPerMetre ? Math.min(Source.Radius * 0.85 || 56 / PixelsPerMetre, 48 / PixelsPerMetre) : Math.max(0.55, Math.min(1.5, (Source.Radius || 1) * 0.42));
-                    const Tip = Project(Source.X + Math.sin(Turn) * Reach, RingY, Source.Z - Math.cos(Turn) * Reach);
+                    const Reach = PixelsPerMetre ? Math.min(Source.Radius * 0.85 || 56 / PixelsPerMetre, 48 / PixelsPerMetre) : Math.max(0.6, (Source.Radius || 1) * 0.5);
+                    const Tip = Project(Source.X + Math.sin(Turn) * Reach, SliceY, Source.Z - Math.cos(Turn) * Reach);
                     if (Tip)
                     {
                         const Angle = Math.atan2(Tip[1] - Centre[1], Tip[0] - Centre[0]);
                         Context.save();
                         Context.setLineDash([]);
-                        Context.lineWidth = 1.4;
+                        Context.lineWidth = 1.8;
                         Context.beginPath();
                         Context.moveTo(Centre[0], Centre[1]);
                         Context.lineTo(Tip[0], Tip[1]);
-                        Context.moveTo(Tip[0] - Math.cos(Angle - 0.5) * 6, Tip[1] - Math.sin(Angle - 0.5) * 6);
+                        Context.moveTo(Tip[0] - Math.cos(Angle - 0.5) * 8, Tip[1] - Math.sin(Angle - 0.5) * 8);
                         Context.lineTo(Tip[0], Tip[1]);
-                        Context.lineTo(Tip[0] - Math.cos(Angle + 0.5) * 6, Tip[1] - Math.sin(Angle + 0.5) * 6);
+                        Context.lineTo(Tip[0] - Math.cos(Angle + 0.5) * 8, Tip[1] - Math.sin(Angle + 0.5) * 8);
                         Context.stroke();
                         if (Source.Selected && View.Mode !== 'Camera')
                         {
@@ -1140,24 +1139,22 @@ const ForceFieldVisualization = (() =>
                         Context.restore();
                     }
                 }
-                if (View.Mode !== 'Camera' || Source.Selected)
+                Context.setLineDash([]);
+                Context.fillStyle = Colour;
+                Context.beginPath();
+                Context.arc(Centre[0], Centre[1], Source.Selected ? 5.5 : 4.2, 0, Math.PI * 2);
+                Context.fill();
+                if (Source.Selected)
                 {
-                    Context.setLineDash([]);
-                    Context.fillStyle = Colour;
+                    Context.strokeStyle = '#ffffff';
+                    Context.lineWidth = 1.6;
                     Context.beginPath();
-                    Context.arc(Centre[0], Centre[1], Source.Selected ? 4.5 : 3.5, 0, Math.PI * 2);
-                    Context.fill();
-                    if (Source.Selected)
-                    {
-                        Context.strokeStyle = '#ffb454';
-                        Context.lineWidth = 1.4;
-                        Context.beginPath();
-                        Context.arc(Centre[0], Centre[1], 8.5, 0, Math.PI * 2);
-                        Context.stroke();
-                    }
+                    Context.arc(Centre[0], Centre[1], 9, 0, Math.PI * 2);
+                    Context.stroke();
                 }
+                // 📝 At large spans or when MinimalLabels is enabled, keep clutter away by showing labels only on selected/active major sources.
                 const Tiny = PixelsPerMetre && Source.Shape !== 'Everywhere' && Math.max(Source.Radius || 0, Source.HalfX || 0, Source.HalfZ || 0) * PixelsPerMetre < 6;
-                const AllowLabel = Options.MinimalLabels ? Source.Selected : (View.Mode === 'Camera' ? Source.Selected : (!Tiny || Source.Selected));
+                const AllowLabel = Options.MinimalLabels ? Source.Selected : (!Tiny || Source.Selected);
                 if (Options.ShowLabels && Source.Label && AllowLabel && (!Source.Dim || Source.Selected)) Labels.push([Source, Centre, Colour]);
             }
             Context.globalAlpha = 1;
@@ -1173,10 +1170,7 @@ const ForceFieldVisualization = (() =>
                 for (let Attempt = 0; Attempt < 6 && Placed.some(([A, B, C, D]) => X < C && X + Measure + 18 > A && Y - 12 < D && Y + 5 > B); ++Attempt) Y += 17;
                 Placed.push([X - 5, Y - 12, X + Measure + 16, Y + 5]);
                 Context.fillStyle = Source.Selected ? 'rgba(22,24,28,0.94)' : 'rgba(10,12,16,0.78)';
-                const PillBorder = /^#[0-9a-f]{6}$/i.test(Colour)
-                    ? `rgba(${parseInt(Colour.slice(1, 3), 16)},${parseInt(Colour.slice(3, 5), 16)},${parseInt(Colour.slice(5, 7), 16)},0.35)`
-                    : 'rgba(255,255,255,0.18)';
-                Context.strokeStyle = Source.Selected ? Colour : PillBorder;
+                Context.strokeStyle = Source.Selected ? Colour : HexToRgba(Colour, 0.35);
                 Context.lineWidth = 1;
                 Context.beginPath();
                 Context.roundRect(X - 6, Y - 12, Measure + 22, 18, 9);
@@ -1486,10 +1480,7 @@ const ForceFieldVisualization = (() =>
                 Lattice.RefreshedAt = Now;
                 RefreshedLattice = true;
             }
-            const CamSig = View.Mode === 'Camera' && View.ViewProjection
-                ? [0, 4, 8, 12, 1, 5].map(I => Math.round(View.ViewProjection[I] * 12)).join(',')
-                : '';
-            const LineStamp = [Options.FlowLines, Options.FlowLineSpacing, Options.FlowLineLength, Options.QuietCutoff, Options.Contribution, CamSig].join('|');
+            const LineStamp = [Options.FlowLines, Options.FlowLineSpacing, Options.FlowLineLength, Options.QuietCutoff, Options.Contribution].join('|');
             if (Options.FlowLines && (RefreshedLattice || LineStamp !== StreamlinesStamp))
             {
                 BuildFlowLines();
@@ -1515,7 +1506,6 @@ const ForceFieldVisualization = (() =>
             RenderLegend();
             RenderScaleBar();
             RenderMinimap(Time, Now);
-            Context.setTransform(1, 0, 0, 1, 0, 0);
             Dirty = false;
         }
 

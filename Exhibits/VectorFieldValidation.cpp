@@ -1,7 +1,7 @@
 /*============================================================================================================================================
                                                         VECTORFIELDVALIDATION.CPP
 ============================================================================================================================================*/
-// 🧩 End-to-end validation suite for 19 ForceModels, CurlNoise div=0, motion paths, Formula->SPIR-V, Codecs, Jolt & Vulkan 1.3 GPU UI
+// 🧩 End-to-end validation suite for 19 ForceModels, CurlNoise div=0, motion paths, Formula->SPIR-V, Codecs & Vulkan 1.3 GPU UI
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                                        INCLUDES
@@ -31,19 +31,6 @@
     #include <imgui_internal.h>
 #endif
 
-#include <Jolt/Jolt.h>
-#include <Jolt/Core/Factory.h>
-#include <Jolt/Core/JobSystemThreadPool.h>
-#include <Jolt/Core/TempAllocator.h>
-#include <Jolt/Physics/Body/BodyCreationSettings.h>
-#include <Jolt/Physics/Body/BodyInterface.h>
-#include <Jolt/Physics/Collision/BroadPhase/BroadPhaseLayer.h>
-#include <Jolt/Physics/Collision/ObjectLayer.h>
-#include <Jolt/Physics/Collision/Shape/SphereShape.h>
-#include <Jolt/Physics/PhysicsSettings.h>
-#include <Jolt/Physics/PhysicsSystem.h>
-#include <Jolt/RegisterTypes.h>
-
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
@@ -68,7 +55,9 @@ using namespace Frontier::SimulationSpace::ForceFields;
 
 [[nodiscard]] std::filesystem::path ResolveShaderDir()
 {
-#ifdef FRONTIER_SHADER_BINARY_DIR
+#if defined(FRONTIER_COMPILED_SHADER_DIR)
+    return std::filesystem::path(FRONTIER_COMPILED_SHADER_DIR);
+#elif defined(FRONTIER_SHADER_BINARY_DIR)
     return std::filesystem::path(FRONTIER_SHADER_BINARY_DIR);
 #else
     return std::filesystem::current_path() / "EngineContent/Shaders";
@@ -77,8 +66,10 @@ using namespace Frontier::SimulationSpace::ForceFields;
 
 [[nodiscard]] std::filesystem::path ResolveSwiftShaderDir()
 {
-#ifdef FRONTIER_SWIFTSHADER_ICD_DIR
+#if defined(FRONTIER_SWIFTSHADER_ICD_DIR)
     return std::filesystem::path(FRONTIER_SWIFTSHADER_ICD_DIR);
+#elif defined(FRONTIER_REPO_ROOT_DIR)
+    return std::filesystem::path(FRONTIER_REPO_ROOT_DIR) / "ExternalPackages/VulkanCompute/SwiftShader";
 #else
     return std::filesystem::current_path() / "ExternalPackages/VulkanCompute/SwiftShader";
 #endif
@@ -431,105 +422,7 @@ bool ValidateVectorFieldAndForceModelCodecs()
 }
 
 //------------------------------------------------------------------------------------------------------------------------
-//                                       5. JOLT RIGID-BODY AERODYNAMIC COUPLING
-//------------------------------------------------------------------------------------------------------------------------
-
-namespace JoltValidationLayers
-{
-static constexpr JPH::ObjectLayer NonMoving = 0u;
-static constexpr JPH::ObjectLayer Moving    = 1u;
-
-class BpLayerInterface final : public JPH::BroadPhaseLayerInterface
-{
-public:
-    JPH::uint GetNumBroadPhaseLayers() const override { return 2u; }
-    JPH::BroadPhaseLayer GetBroadPhaseLayer(JPH::ObjectLayer Layer) const override
-    {
-        return JPH::BroadPhaseLayer(static_cast<JPH::uint8>(Layer));
-    }
-};
-
-class ObjVsBpFilter final : public JPH::ObjectVsBroadPhaseLayerFilter
-{
-public:
-    bool ShouldCollide(JPH::ObjectLayer L1, JPH::BroadPhaseLayer L2) const override { return L1 == Moving || L2.GetValue() == Moving; }
-};
-
-class ObjVsObjFilter final : public JPH::ObjectLayerPairFilter
-{
-public:
-    bool ShouldCollide(JPH::ObjectLayer A, JPH::ObjectLayer B) const override { return A == Moving || B == Moving; }
-};
-} // namespace JoltValidationLayers
-
-bool ValidateJoltRigidBodyForceCoupling()
-{
-    JPH::RegisterDefaultAllocator();
-    JPH::Factory::sInstance = new JPH::Factory();
-    JPH::RegisterTypes();
-
-    JPH::TempAllocatorImpl   TempAlloc(2u * 1024u * 1024u);
-    JPH::JobSystemThreadPool JobSys(JPH::cMaxPhysicsJobs, JPH::cMaxPhysicsBarriers, 1);
-
-    JoltValidationLayers::BpLayerInterface BpIf;
-    JoltValidationLayers::ObjVsBpFilter    ObjBp;
-    JoltValidationLayers::ObjVsObjFilter   ObjObj;
-
-    JPH::PhysicsSystem Physics;
-    Physics.Init(64u, 0u, 64u, 64u, BpIf, ObjBp, ObjObj);
-    Physics.SetGravity(JPH::Vec3(0.0f, 0.0f, 0.0f)); // Zero gravity isolates ForceField aerodynamic impulse
-
-    auto& BodyIf = Physics.GetBodyInterface();
-    JPH::BodyCreationSettings SphereSettings(
-        new JPH::SphereShape(0.8f),
-        JPH::RVec3(0.0, 0.0, 5.0),
-        JPH::Quat::sIdentity(),
-        JPH::EMotionType::Dynamic,
-        JoltValidationLayers::Moving);
-    SphereSettings.mOverrideMassProperties       = JPH::EOverrideMassProperties::CalculateInertia;
-    SphereSettings.mMassPropertiesOverride.mMass = 2.0f;
-
-    const JPH::BodyID BodyId = BodyIf.CreateAndAddBody(SphereSettings, JPH::EActivation::Activate);
-    if (!VerifyCondition(!BodyId.IsInvalid(), "Jolt test sphere body created"))
-    {
-        JPH::UnregisterTypes();
-        delete JPH::Factory::sInstance;
-        JPH::Factory::sInstance = nullptr;
-        return false;
-    }
-
-    ForceSourceRecordEntry Wind{};
-    Wind.UniqueToken  = 1u;
-    Wind.Model        = ForceModel::LinearWind;
-    Wind.CentreMeters = { 0.0f, 0.0f, 5.0f };
-    Wind.EulerDegrees = { 0.0f, -15.0f, 0.0f }; // Tilted slightly upward (+Z Up) along +X Forward
-    Wind.RadiusMeters = 50.0f;
-    Wind.Strength     = 20.0f;
-
-    ForceFieldAccumulator Acc{};
-    Acc.AssignSources(std::span<const ForceSourceRecordEntry>(&Wind, 1u));
-
-    for (int Step = 0; Step < 40; ++Step)
-    {
-        Acc.ApplyForcesToJoltBody(BodyIf, BodyId, 1.2f, 0.8f, Step * (1.0 / 60.0));
-        Physics.Update(1.0f / 60.0f, 1, &TempAlloc, &JobSys);
-    }
-
-    const JPH::RVec3 FinalPos = BodyIf.GetCenterOfMassPosition(BodyId);
-    const JPH::Vec3  FinalVel = BodyIf.GetLinearVelocity(BodyId);
-    const bool MovedCleanly = (FinalPos.GetX() > 2.0) && (FinalPos.GetZ() > 5.4) && (FinalVel.GetX() > 4.0f);
-
-    BodyIf.RemoveBody(BodyId);
-    BodyIf.DestroyBody(BodyId);
-    JPH::UnregisterTypes();
-    delete JPH::Factory::sInstance;
-    JPH::Factory::sInstance = nullptr;
-
-    return VerifyCondition(MovedCleanly, "Jolt body accelerates smoothly along +X/+Z wind vector");
-}
-
-//------------------------------------------------------------------------------------------------------------------------
-//                                  6. EDITOR VULKAN 1.3 + 3-DOCK VISUAL EXHIBITS
+//                                  5. EDITOR VULKAN 1.3 + 3-DOCK VISUAL EXHIBITS
 //------------------------------------------------------------------------------------------------------------------------
 
 #if FRONTIER_EDITOR_ENABLED
@@ -981,10 +874,6 @@ int main()
     {
         return 1;
     }
-    if (!ValidateJoltRigidBodyForceCoupling())
-    {
-        return 1;
-    }
 #if FRONTIER_EDITOR_ENABLED
     if (!ValidateEditorVulkanOverlayAndCaptureExhibits())
     {
@@ -992,6 +881,6 @@ int main()
     }
 #endif
 
-    std::printf("[VectorFieldValidation] All 19 ForceModels, CurlNoise div=0, Codecs, Jolt coupling, and Vulkan 1.3 GPU UI checks PASSED.\n");
+    std::printf("[VectorFieldValidation] All 19 ForceModels, CurlNoise div=0, Codecs, and Vulkan 1.3 GPU UI checks PASSED.\n");
     return 0;
 }

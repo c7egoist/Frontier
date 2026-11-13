@@ -19,6 +19,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <numeric>
 #include <vector>
 
@@ -89,6 +90,52 @@ ViewportPanel::ViewportPanel() noexcept
         const float Phase         = static_cast<float>(Index) * 0.19f;
         IntervalHistoryMs[Index] = 16.67f + 0.75f * std::sin(Phase) + 0.28f * std::cos(Phase * 2.3f);
     }
+}
+
+ViewportPanel::~ViewportPanel() noexcept
+{
+    CanvasRasterTexture.DestroyPixels();
+}
+
+void ViewportPanel::AssignCanvasRasterImage(const uint8_t* RgbaPixels, uint32_t WidthPx, uint32_t HeightPx)
+{
+    if (RgbaPixels == nullptr || WidthPx == 0u || HeightPx == 0u)
+    {
+        return;
+    }
+
+    const bool NeedsCreate =
+        CanvasRasterTexture.Width != static_cast<int>(WidthPx) ||
+        CanvasRasterTexture.Height != static_cast<int>(HeightPx) ||
+        CanvasRasterTexture.Pixels == nullptr;
+    if (NeedsCreate)
+    {
+        CanvasRasterTexture.DestroyPixels();
+        CanvasRasterTexture.SetStatus(ImTextureStatus_Destroyed);
+        CanvasRasterTexture.Create(ImTextureFormat_RGBA32, static_cast<int>(WidthPx), static_cast<int>(HeightPx));
+    }
+
+    std::memcpy(
+        CanvasRasterTexture.Pixels,
+        RgbaPixels,
+        static_cast<std::size_t>(WidthPx) * static_cast<std::size_t>(HeightPx) * 4u);
+
+    if (!NeedsCreate && CanvasRasterTexture.Status == ImTextureStatus_OK)
+    {
+        CanvasRasterTexture.UpdateRect = {
+            0u,
+            0u,
+            static_cast<unsigned short>(WidthPx),
+            static_cast<unsigned short>(HeightPx),
+        };
+        CanvasRasterTexture.SetStatus(ImTextureStatus_WantUpdates);
+    }
+}
+
+void ViewportPanel::ClearCanvasRasterImage() noexcept
+{
+    CanvasRasterTexture.DestroyPixels();
+    CanvasRasterTexture.SetStatus(ImTextureStatus_Destroyed);
 }
 
 void ViewportPanel::ConfigureSceneTitle(std::string_view Title)
@@ -313,6 +360,29 @@ void ViewportPanel::RenderCanvasPane(
                 ColorRgba{ 255u, 255u, 255u, 255u });
             RenderedLiveSurface = true;
         }
+    }
+
+    if (!RenderedLiveSurface && CanvasRasterTexture.Pixels != nullptr && CanvasRasterTexture.Width > 0 && CanvasRasterTexture.Height > 0)
+    {
+        Surface.FillRectangle(PaneBounds, ColorRgba{ 14, 15, 18, 255 });
+        const float SourceAspect = static_cast<float>(CanvasRasterTexture.Width) / static_cast<float>(CanvasRasterTexture.Height);
+        const float TargetAspect = PaneBounds.Width / std::max(1.0f, PaneBounds.Height);
+        Point2D     UvMin{ 0.0f, 0.0f };
+        Point2D     UvMax{ 1.0f, 1.0f };
+        if (TargetAspect > SourceAspect)
+        {
+            const float CropH = SourceAspect / TargetAspect;
+            UvMin.Y           = 0.5f * (1.0f - CropH);
+            UvMax.Y           = 1.0f - UvMin.Y;
+        }
+        else if (SourceAspect > TargetAspect)
+        {
+            const float CropW = TargetAspect / SourceAspect;
+            UvMin.X           = 0.5f * (1.0f - CropW);
+            UvMax.X           = 1.0f - UvMin.X;
+        }
+        Surface.FillTexturedRectangle(PaneBounds, &CanvasRasterTexture, UvMin, UvMax);
+        RenderedLiveSurface = true;
     }
 
     if (!RenderedLiveSurface)

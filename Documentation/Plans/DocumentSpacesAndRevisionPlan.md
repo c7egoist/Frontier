@@ -67,8 +67,8 @@ Engine/
 │   ├── MetricTolerance.h                          // Linear, angular, UV-weld & watertight sewing tolerances
 │   ├── CoordinateSpace.h                          // Right-handed world, local & parameter-tile basis transforms
 │   ├── CoordinateProjection.h                     // Orthographic, perspective & 2D viewport tile projections
-│   ├── PointDistance.h                            // Point separation evaluation (Euclidean, Manhattan, Chebyshev, geodesic)
-│   ├── PointBounds.h                              // Axis-aligned and oriented point bounding extents
+│   ├── DistanceMetric.h                           // Euclidean, Manhattan, Chebyshev & geodesic metrics
+│   ├── SpatialExtent.h                            // Axis-aligned and oriented bounding extents
 │   └── IntersectionSolver.{h,cpp}                 // Ray-facet, ray-volume, plane-cut & volume intersections
 │
 ├── ColourSpace/                                   // Tristimulus spaces, chromaticity & transfer curves

@@ -19,6 +19,9 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(FRONTIER_PROFILE "Development" CACHE STRING "Active Frontier build profile (Editor, Development, Shipping)")
 set_property(CACHE FRONTIER_PROFILE PROPERTY STRINGS Editor Development Shipping)
 
+option(FRONTIER_ENABLE_EOS_SDK    "Compile proprietary Epic Online Services transport adapter instead of open-source stub" OFF)
+option(FRONTIER_ENABLE_PHOTON_SDK "Compile proprietary Photon Realtime C++ transport adapter instead of open-source stub" OFF)
+
 if(FRONTIER_PROFILE STREQUAL "Editor")
     set(FRONTIER_PROFILE_EDITOR_DEF      1)
     set(FRONTIER_PROFILE_DEVELOPMENT_DEF 0)
@@ -91,6 +94,7 @@ if(NOT FRONTIER_PROFILE STREQUAL "Shipping" OR BUILD_TESTING)
             "${IMGUI_ROOT}/imgui_draw.cpp"
             "${IMGUI_ROOT}/imgui_tables.cpp"
             "${IMGUI_ROOT}/imgui_widgets.cpp"
+            "${IMGUI_ROOT}/backends/imgui_impl_vulkan.cpp"
         )
     else()
         add_library(FrontierImGui STATIC
@@ -98,9 +102,14 @@ if(NOT FRONTIER_PROFILE STREQUAL "Shipping" OR BUILD_TESTING)
             "${IMGUI_ROOT}/imgui_draw.cpp"
             "${IMGUI_ROOT}/imgui_tables.cpp"
             "${IMGUI_ROOT}/imgui_widgets.cpp"
+            "${IMGUI_ROOT}/backends/imgui_impl_vulkan.cpp"
         )
     endif()
-    target_include_directories(FrontierImGui PUBLIC "${IMGUI_ROOT}")
+    target_include_directories(FrontierImGui PUBLIC
+        "${IMGUI_ROOT}"
+        "${CMAKE_SOURCE_DIR}/ExternalPackages/vulkan-headers/include"
+        "${CMAKE_SOURCE_DIR}/ExternalPackages/volk")
+    target_compile_definitions(FrontierImGui PRIVATE IMGUI_IMPL_VULKAN_USE_VOLK)
     target_compile_definitions(FrontierImGui PUBLIC "ImDrawIdx=unsigned int")
     if(NOT MSVC)
         target_compile_options(FrontierImGui PRIVATE -w)
@@ -108,7 +117,7 @@ if(NOT FRONTIER_PROFILE STREQUAL "Shipping" OR BUILD_TESTING)
 endif()
 
 #------------------------------------------------------------------------------------------------------------------------
-#                                         DESKTOP GLFW 3.4 BACKEND (NON-ANDROID)
+#                                         DESKTOP GLFW 3.4 WINDOWING (NON-ANDROID)
 #------------------------------------------------------------------------------------------------------------------------
 
 if(NOT ANDROID)
@@ -141,94 +150,6 @@ if(NOT ANDROID)
 endif()
 
 #------------------------------------------------------------------------------------------------------------------------
-#                                         VOLK LOADER, JOLT PHYSICS & SLANG SPIR-V
-#------------------------------------------------------------------------------------------------------------------------
-
-add_library(FrontierVolk STATIC "${CMAKE_SOURCE_DIR}/ExternalPackages/volk/volk.c")
-target_include_directories(FrontierVolk PUBLIC
-    "${CMAKE_SOURCE_DIR}/ExternalPackages/vulkan-headers/include"
-    "${CMAKE_SOURCE_DIR}/ExternalPackages/volk"
-)
-if(UNIX AND NOT APPLE)
-    target_link_libraries(FrontierVolk PRIVATE ${CMAKE_DL_LIBS})
-endif()
-if(NOT MSVC)
-    target_compile_options(FrontierVolk PRIVATE -w)
-endif()
-
-include("${CMAKE_SOURCE_DIR}/Automation/JoltPhysics.cmake")
-frontier_add_jolt()
-
-set(FRONTIER_SLANGC_CANDIDATE "${CMAKE_SOURCE_DIR}/ExternalPackages/VulkanCompute/Slang/slangtorch/bin/slangc${CMAKE_EXECUTABLE_SUFFIX}")
-if(EXISTS "${FRONTIER_SLANGC_CANDIDATE}")
-    set(FRONTIER_SLANGC "${FRONTIER_SLANGC_CANDIDATE}")
-else()
-    find_program(FRONTIER_SLANGC NAMES slangc REQUIRED)
-endif()
-
-set(FRONTIER_SHADER_BINARY_DIR "${CMAKE_BINARY_DIR}/EngineContent/Shaders")
-file(MAKE_DIRECTORY "${FRONTIER_SHADER_BINARY_DIR}")
-set(FRONTIER_COMPILED_SPV_OUTPUTS "")
-
-function(frontier_compile_slang_stage SLANG_REL_PATH ENTRY_NAME STAGE_KIND OUT_SPV_NAME)
-    set(IN_SLANG "${CMAKE_SOURCE_DIR}/${SLANG_REL_PATH}")
-    set(OUT_SPV "${FRONTIER_SHADER_BINARY_DIR}/${OUT_SPV_NAME}")
-    add_custom_command(
-        OUTPUT "${OUT_SPV}"
-        COMMAND "${FRONTIER_SLANGC}"
-            -profile spirv_1_5
-            -target spirv
-            -emit-spirv-directly
-            -O0
-            -I "${CMAKE_SOURCE_DIR}"
-            -entry "${ENTRY_NAME}"
-            -stage "${STAGE_KIND}"
-            "${IN_SLANG}"
-            -o "${OUT_SPV}"
-        DEPENDS
-            "${IN_SLANG}"
-            "${CMAKE_SOURCE_DIR}/Engine/Shaders/Compute/ForceFieldEvaluationShared.slang"
-            "${CMAKE_SOURCE_DIR}/Engine/Shaders/VectorField/VectorFieldRenderingShared.slang"
-        COMMENT "Compiling Slang (${STAGE_KIND}:${ENTRY_NAME}) -> ${OUT_SPV_NAME}"
-        VERBATIM
-    )
-    list(APPEND FRONTIER_COMPILED_SPV_OUTPUTS "${OUT_SPV}")
-    set(FRONTIER_COMPILED_SPV_OUTPUTS "${FRONTIER_COMPILED_SPV_OUTPUTS}" PARENT_SCOPE)
-endfunction()
-
-frontier_compile_slang_stage(
-    "Engine/Shaders/Compute/FieldLatticeCompute.slang"
-    "ComputeFieldLatticeVoxel"
-    "compute"
-    "FieldLatticeCompute.spv"
-)
-
-if(FRONTIER_PROFILE STREQUAL "Editor")
-    foreach(VF_SHADER_STEM
-        LitBackdropRasterization
-        CrossSectionHeatmapRasterization
-        InfluenceEnvelopeRasterization
-        VectorArrowRasterization
-        StreamlineRasterization
-        ForcePathAndBeaconRasterization)
-        frontier_compile_slang_stage(
-            "Engine/Shaders/VectorField/${VF_SHADER_STEM}.slang"
-            "VertexMain"
-            "vertex"
-            "${VF_SHADER_STEM}.vert.spv"
-        )
-        frontier_compile_slang_stage(
-            "Engine/Shaders/VectorField/${VF_SHADER_STEM}.slang"
-            "FragmentMain"
-            "fragment"
-            "${VF_SHADER_STEM}.frag.spv"
-        )
-    endforeach()
-endif()
-
-add_custom_target(FrontierShaders DEPENDS ${FRONTIER_COMPILED_SPV_OUTPUTS})
-
-#------------------------------------------------------------------------------------------------------------------------
 #                                               ENGINE RUNTIME LIBRARY
 #------------------------------------------------------------------------------------------------------------------------
 
@@ -255,33 +176,265 @@ set(FRONTIER_UI_COMPONENT_SOURCES
     Engine/Components/Panes/OutlinerPanel.cpp
     Engine/Components/Panes/InspectorPanel.cpp
     Engine/Components/Panes/ViewportPanel.cpp
-    Engine/Components/Panes/ContentBrowserPanel.cpp
+    Engine/Components/Panes/ViewportProjectionPane.cpp
     Engine/Components/ControlCentre/ControlCentrePanel.cpp
+    Engine/Components/ContentBrowser/ColourCodex.cpp
+    Engine/Components/ContentBrowser/ThumbnailSheetRepository.cpp
+    Engine/Components/ContentBrowser/ContentBrowserPanel.cpp
+    Engine/Workspaces/UV/UVOutlinerPanel.cpp
+    Engine/Workspaces/UV/UVInspectorPanel.cpp
+    Engine/Workspaces/UV/UVViewportInteractor.cpp
+    Engine/Workspaces/UV/UVViewportHost.cpp
+    Engine/Workspaces/UV/UVWorkspaceHost.cpp
+    Engine/GeometricRaster/Rasterization/ImGuiOverlayRasterization.cpp
+    Engine/GeometricRaster/GlobalIllumination/ShowcaseGalleryScene.cpp
+    Engine/Input/ImGuiInputAdapter.cpp
     Engine/Configuration/InputSettings.cpp
     Engine/Configuration/ProjectSpaceRepository.cpp
     Engine/Lifecycle/WorkspaceLifecycle.cpp
 )
+if(NOT ANDROID)
+    list(APPEND FRONTIER_UI_COMPONENT_SOURCES Engine/Lifecycle/DesktopWorkspaceLaunch.cpp)
+endif()
+
+#------------------------------------------------------------------------------------------------------------------------
+#                                      SLANG -> SPIR-V SHADER COMPILATION PIPELINE
+#------------------------------------------------------------------------------------------------------------------------
+
+if(WIN32)
+    set(FRONTIER_SLANGC_BIN "${CMAKE_SOURCE_DIR}/ExternalPackages/VulkanCompute/Slang/slangtorch/bin/slangc.exe")
+else()
+    set(FRONTIER_SLANGC_BIN "${CMAKE_SOURCE_DIR}/ExternalPackages/VulkanCompute/Slang/slangtorch/bin/slangc")
+endif()
+if(NOT EXISTS "${FRONTIER_SLANGC_BIN}")
+    execute_process(
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/Automation/PrepareShaderToolchain.py"
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        RESULT_VARIABLE FRONTIER_SHADER_TOOLCHAIN_STATUS
+    )
+endif()
+
+set(FRONTIER_COMPILED_SHADER_DIR "${CMAKE_BINARY_DIR}/CompiledShaders")
+file(MAKE_DIRECTORY "${FRONTIER_COMPILED_SHADER_DIR}")
+set(FRONTIER_SHADER_SRC_DIR "${CMAKE_SOURCE_DIR}/Engine/GeometricRaster/Shaders")
+set(FRONTIER_SPV_OUTPUTS "")
+
+function(frontier_compile_slang_shader SLANG_FILE ENTRY_NAME SHADER_UNIT OUT_SPV_NAME)
+    set(OUT_SPV "${FRONTIER_COMPILED_SHADER_DIR}/${OUT_SPV_NAME}")
+    add_custom_command(
+        OUTPUT "${OUT_SPV}"
+        COMMAND "${FRONTIER_SLANGC_BIN}"
+            "${FRONTIER_SHADER_SRC_DIR}/${SLANG_FILE}"
+            -I "${FRONTIER_SHADER_SRC_DIR}"
+            -target spirv
+            -profile spirv_1_3
+            -emit-spirv-directly
+            -fvk-use-entrypoint-name
+            -matrix-layout-row-major
+            -O0
+            -entry "${ENTRY_NAME}"
+            -stage "${SHADER_UNIT}"
+            -o "${OUT_SPV}"
+        DEPENDS
+            "${FRONTIER_SHADER_SRC_DIR}/${SLANG_FILE}"
+            "${FRONTIER_SHADER_SRC_DIR}/MatCapEvaluation.slang"
+        COMMENT "[Slang] Compiling ${SLANG_FILE} (${SHADER_UNIT}) -> ${OUT_SPV_NAME}"
+        VERBATIM
+    )
+    set(FRONTIER_SPV_OUTPUTS ${FRONTIER_SPV_OUTPUTS} "${OUT_SPV}" PARENT_SCOPE)
+endfunction()
+
+frontier_compile_slang_shader(SurfaceShading.slang           VertexEntry   vertex   SurfaceShading.vert.spv)
+frontier_compile_slang_shader(SurfaceShading.slang           FragmentEntry fragment SurfaceShading.frag.spv)
+frontier_compile_slang_shader(UVTileRasterization.slang      VertexEntry   vertex   UVTileRasterization.vert.spv)
+frontier_compile_slang_shader(UVTileRasterization.slang      FragmentEntry fragment UVTileRasterization.frag.spv)
+frontier_compile_slang_shader(GizmoRasterization.slang        VertexEntry   vertex   GizmoRasterization.vert.spv)
+frontier_compile_slang_shader(GizmoRasterization.slang        FragmentEntry fragment GizmoRasterization.frag.spv)
+frontier_compile_slang_shader(ImGuiOverlayRasterization.slang VertexEntry   vertex   ImGuiOverlayRasterization.vert.spv)
+frontier_compile_slang_shader(ImGuiOverlayRasterization.slang FragmentEntry fragment ImGuiOverlayRasterization.frag.spv)
+frontier_compile_slang_shader(SelectionMaskCompute.slang     ComputeEntry  compute  SelectionMaskCompute.comp.spv)
+frontier_compile_slang_shader(ViewportPickReduction.slang    ComputeEntry  compute  ViewportPickReduction.comp.spv)
+frontier_compile_slang_shader(UVDistortionInspection.slang   ComputeEntry  compute  UVDistortionInspection.comp.spv)
+frontier_compile_slang_shader(StretchRelaxCompute.slang      ComputeEntry  compute  StretchRelaxCompute.comp.spv)
+frontier_compile_slang_shader(ConcaveSkylineCompute.slang    ComputeEntry  compute  ConcaveSkylineCompute.comp.spv)
+frontier_compile_slang_shader(CameraVisualEffects.slang      ComputeEntry  compute  CameraVisualEffects.comp.spv)
+
+set(FRONTIER_MODULAR_SHADER_DIR "${CMAKE_SOURCE_DIR}/Engine/Shaders")
+
+function(frontier_compile_modular_slang_shader DOMAIN_REL_PATH ENTRY_NAME SHADER_UNIT OUT_SPV_NAME)
+    set(OUT_SPV "${FRONTIER_COMPILED_SHADER_DIR}/${OUT_SPV_NAME}")
+    file(GLOB DOMAIN_SLANG_DEPS
+        "${FRONTIER_MODULAR_SHADER_DIR}/MaterialSpace/*.slang"
+        "${FRONTIER_MODULAR_SHADER_DIR}/Visibility/*.slang"
+        "${FRONTIER_MODULAR_SHADER_DIR}/DirectLighting/*.slang"
+        "${FRONTIER_MODULAR_SHADER_DIR}/GlobalIllumination/*.slang"
+    )
+    add_custom_command(
+        OUTPUT "${OUT_SPV}"
+        COMMAND "${FRONTIER_SLANGC_BIN}"
+            "${FRONTIER_MODULAR_SHADER_DIR}/${DOMAIN_REL_PATH}"
+            -I "${FRONTIER_MODULAR_SHADER_DIR}/MaterialSpace"
+            -I "${FRONTIER_MODULAR_SHADER_DIR}/Visibility"
+            -I "${FRONTIER_MODULAR_SHADER_DIR}/DirectLighting"
+            -I "${FRONTIER_MODULAR_SHADER_DIR}/GlobalIllumination"
+            -I "${FRONTIER_MODULAR_SHADER_DIR}"
+            -target spirv
+            -profile spirv_1_3+spvGroupNonUniformArithmetic+spvInt64Atomics
+            -emit-spirv-directly
+            -fvk-use-entrypoint-name
+            -matrix-layout-row-major
+            -O0
+            -entry "${ENTRY_NAME}"
+            -stage "${SHADER_UNIT}"
+            -o "${OUT_SPV}"
+        DEPENDS
+            "${FRONTIER_MODULAR_SHADER_DIR}/${DOMAIN_REL_PATH}"
+            ${DOMAIN_SLANG_DEPS}
+        COMMENT "[Slang] Compiling ${DOMAIN_REL_PATH} (${SHADER_UNIT}) -> ${OUT_SPV_NAME}"
+        VERBATIM
+    )
+    set(FRONTIER_SPV_OUTPUTS ${FRONTIER_SPV_OUTPUTS} "${OUT_SPV}" PARENT_SCOPE)
+endfunction()
+
+frontier_compile_modular_slang_shader(MaterialSpace/BounceLayerSummary.slang                     BounceSummaryComputeEntry       compute  BounceLayerSummary.comp.spv)
+frontier_compile_modular_slang_shader(MaterialSpace/OpenPbrSurfaceScattering.slang               ComputeEntry                    compute  OpenPbrSurfaceScattering.comp.spv)
+frontier_compile_modular_slang_shader(Visibility/DepthPyramidDownsample.slang                    DepthPyramidComputeEntry        compute  DepthPyramidDownsample.comp.spv)
+frontier_compile_modular_slang_shader(Visibility/ClusterVisibilityCull.slang                     ClusterCullComputeEntry         compute  ClusterVisibilityCull.comp.spv)
+frontier_compile_modular_slang_shader(Visibility/HardwareVisibilityRasterization.slang           VisibilityVertexEntry           vertex   HardwareVisibilityRasterization.vert.spv)
+frontier_compile_modular_slang_shader(Visibility/HardwareVisibilityRasterization.slang           VisibilityFragmentEntry         fragment HardwareVisibilityRasterization.frag.spv)
+frontier_compile_modular_slang_shader(Visibility/MicroFaceSoftwareRasterization.slang            MicroFaceComputeEntry           compute  MicroFaceSoftwareRasterization.comp.spv)
+frontier_compile_modular_slang_shader(Visibility/AnalyticBarycentricResolve.slang                AnalyticResolveComputeEntry     compute  AnalyticBarycentricResolve.comp.spv)
+frontier_compile_modular_slang_shader(DirectLighting/SolarFrustumShadow.slang                    SolarShadowComputeEntry         compute  SolarFrustumShadow.comp.spv)
+frontier_compile_modular_slang_shader(DirectLighting/ContactClipShadow.slang                     ContactClipComputeEntry         compute  ContactClipShadow.comp.spv)
+frontier_compile_modular_slang_shader(DirectLighting/PlaneAwareShadowFilter.slang                PlaneFilterComputeEntry         compute  PlaneAwareShadowFilter.comp.spv)
+frontier_compile_modular_slang_shader(GlobalIllumination/OctahedralIrradianceLattice.slang       IrradianceLatticeComputeEntry   compute  OctahedralIrradianceLattice.comp.spv)
+frontier_compile_modular_slang_shader(GlobalIllumination/SignedDistanceConeIllumination.slang    SdfConeGiComputeEntry           compute  SignedDistanceConeIllumination.comp.spv)
+frontier_compile_modular_slang_shader(GlobalIllumination/SpecularAndGlassRaytrace.slang          SpecularRaytraceComputeEntry    compute  SpecularAndGlassRaytrace.comp.spv)
+
+function(frontier_compile_vectorfield_slang_stage SLANG_REL_PATH ENTRY_NAME STAGE_KIND OUT_SPV_NAME)
+    set(IN_SLANG "${CMAKE_SOURCE_DIR}/${SLANG_REL_PATH}")
+    set(OUT_SPV "${FRONTIER_COMPILED_SHADER_DIR}/${OUT_SPV_NAME}")
+    add_custom_command(
+        OUTPUT "${OUT_SPV}"
+        COMMAND "${FRONTIER_SLANGC_BIN}"
+            -profile spirv_1_3
+            -target spirv
+            -emit-spirv-directly
+            -O0
+            -I "${CMAKE_SOURCE_DIR}"
+            -entry "${ENTRY_NAME}"
+            -stage "${STAGE_KIND}"
+            "${IN_SLANG}"
+            -o "${OUT_SPV}"
+        DEPENDS
+            "${IN_SLANG}"
+            "${CMAKE_SOURCE_DIR}/Engine/Shaders/Compute/ForceFieldEvaluationShared.slang"
+            "${CMAKE_SOURCE_DIR}/Engine/Shaders/VectorField/VectorFieldRenderingShared.slang"
+        COMMENT "[Slang] Compiling ${SLANG_REL_PATH} (${STAGE_KIND}:${ENTRY_NAME}) -> ${OUT_SPV_NAME}"
+        VERBATIM
+    )
+    set(FRONTIER_SPV_OUTPUTS ${FRONTIER_SPV_OUTPUTS} "${OUT_SPV}" PARENT_SCOPE)
+endfunction()
+
+frontier_compile_vectorfield_slang_stage(
+    "Engine/Shaders/Compute/FieldLatticeCompute.slang"
+    "ComputeFieldLatticeVoxel"
+    "compute"
+    "FieldLatticeCompute.spv"
+)
+
+if(FRONTIER_PROFILE STREQUAL "Editor")
+    foreach(VF_SHADER_STEM
+        LitBackdropRasterization
+        CrossSectionHeatmapRasterization
+        InfluenceEnvelopeRasterization
+        VectorArrowRasterization
+        StreamlineRasterization
+        ForcePathAndBeaconRasterization)
+        frontier_compile_vectorfield_slang_stage(
+            "Engine/Shaders/VectorField/${VF_SHADER_STEM}.slang"
+            "VertexMain"
+            "vertex"
+            "${VF_SHADER_STEM}.vert.spv"
+        )
+        frontier_compile_vectorfield_slang_stage(
+            "Engine/Shaders/VectorField/${VF_SHADER_STEM}.slang"
+            "FragmentMain"
+            "fragment"
+            "${VF_SHADER_STEM}.frag.spv"
+        )
+    endforeach()
+endif()
+
+add_custom_target(FrontierShaders DEPENDS ${FRONTIER_SPV_OUTPUTS})
 
 set(FRONTIER_ENGINE_SOURCES
+    Engine/Configuration/EngineConfiguration.cpp
+    Engine/Configuration/WorkspaceConfiguration.cpp
+    Engine/MaterialSpace/SurfaceMaterial.cpp
+    Engine/MaterialSpace/CompactMaterialRegister.cpp
+    Engine/MaterialSpace/MaterialSurfaceLayer/MaterialSurfaceLayer.cpp
+    Engine/MaterialSpace/MaterialSurfaceLayer/BounceLayerSummary.cpp
+    Engine/MaterialSpace/EnergyCompensation/DirectionalAlbedoIntegral.cpp
+    Engine/MaterialSpace/EnergyCompensation/SheenCosineIntegral.cpp
+    Engine/MaterialSpace/Baking/ProceduralChannelBaker.cpp
+    Engine/MaterialSpace/Baking/MaterialSpecimenRasterizer.cpp
+    Engine/GeometricRaster/Visibility/DepthPyramidSequence.cpp
+    Engine/GeometricRaster/Visibility/ClusterCullEncoder.cpp
+    Engine/GeometricRaster/Visibility/VisibilityClusterRasterization.cpp
+    Engine/GeometricRaster/Visibility/VisibilityMaterialResolve.cpp
+    Engine/GeometricRaster/DirectLighting/SolarShadowSequence.cpp
+    Engine/GeometricRaster/DirectLighting/LinearCosineLightIntegration.cpp
+    Engine/GeometricRaster/GlobalIllumination/IrradianceLatticeSequence.cpp
+    Engine/GeometricRaster/GlobalIllumination/SpecularReflectionSequence.cpp
+    Engine/GeometricRaster/GlobalIllumination/TieredWorldRenderSequence.cpp
+    Engine/Components/Camera/CameraComponent.cpp
+    Engine/Components/Camera/VisualEffects/CameraOpticsEncoder.cpp
+    Engine/GeometrySpace/Network/PolygonNetwork.cpp
+    Engine/GeometrySpace/Network/GeometryInstance.cpp
+    Engine/GeometrySpace/Network/FacePartitionRegister.cpp
+    Engine/GeometrySpace/Primitives/AnalyticPrimitives.cpp
+    Engine/GeometrySpace/Primitives/RevolutionSweepPrimitives.cpp
+    Engine/GeometrySpace/Primitives/WatertightSewing.cpp
+    Engine/GeometrySpace/Analysis/CurvatureAnalysis.cpp
+    Engine/GeometrySpace/Analysis/StretchMeasurement.cpp
+    Engine/GeometrySpace/Selection/ComponentSelectionMask.cpp
+    Engine/GeometrySpace/Selection/GeometrySelection.cpp
+    Engine/GeometrySpace/Selection/IslandFloodSelection.cpp
+    Engine/SpatialAcceleration/ClusterPyramid.cpp
+    Engine/SpatialAcceleration/WideBoundingTree.cpp
+    Engine/DistanceFieldSpace/SignedDistanceVolume.cpp
+    Engine/Interchange/GeometryInterchange.cpp
+    Engine/Editor/Viewports/TransformGizmo.cpp
+    Engine/Editor/Viewports/ViewportProjection.cpp
+    Engine/GeometricRaster/VulkanInterchange.cpp
+    Engine/GeometricRaster/Compute/TimelineTransferRegister.cpp
+    Engine/GeometricRaster/Compute/ComputeDispatchEncoder.cpp
+    Engine/GeometricRaster/Picking/ViewportPickQuery.cpp
+    Engine/GeometricRaster/UV/UVWorkspaceRasterizer.cpp
     Engine/Input/InputExchange.cpp
     Engine/Input/InputExtension.cpp
     Engine/Lifecycle/RuntimeLifecycle.cpp
     Engine/Windowing/PlatformWindowStub.cpp
-    Engine/Threading/Sync/HeartbeatMonitor.cpp
+    Engine/Threading/Sync/ThreadProgressionTracker.cpp
     Engine/Threading/Tasks/TaskChannel.cpp
-    Engine/Threading/Tasks/ExecutionCluster.cpp
+    Engine/Threading/Tasks/ExecutionChannels.cpp
     Engine/Threading/Tasks/TaskScheduler.cpp
     Engine/Threading/Threads/Workspace/WorkspaceThread.cpp
+    Engine/Threading/Threads/Streaming/AssetStreamThread.cpp
     Engine/Codecs/SpaceContainerCodec.cpp
     Engine/Codecs/RevisionCodec.cpp
     Engine/Codecs/ProjectCodec.cpp
+    Engine/Codecs/InputCodec.cpp
     Engine/Codecs/ColourCodec.cpp
+    Engine/Codecs/GeometryCodec.cpp
     Engine/Codecs/FontCodec.cpp
     Engine/Codecs/UVCodec.cpp
     Engine/Codecs/ImageCodec.cpp
     Engine/Codecs/TextureCodec.cpp
     Engine/Codecs/MaterialCodec.cpp
     Engine/Codecs/VectorCodec.cpp
+    Engine/Codecs/NetworkCodec.cpp
     Engine/Codecs/VectorFieldCodec.cpp
     Engine/Codecs/ForceModelPresetCodec.cpp
     Engine/SimulationSpace/ForceFields/ForceMotionPath.cpp
@@ -292,6 +445,17 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/SimulationSpace/ForceFields/ForceFieldAccumulator.cpp
     Engine/SimulationSpace/ForceFields/FieldLatticeCascade.cpp
     Engine/SimulationSpace/ForceFields/FieldLatticeVulkanExecutor.cpp
+    Engine/NetworkingSpace/PacketSerializer.cpp
+    Engine/NetworkingSpace/NetworkEndpointRegister.cpp
+    Engine/NetworkingSpace/DifferentialWorldEncoder.cpp
+    Engine/NetworkingSpace/RemoteDirectiveRouter.cpp
+    Engine/NetworkingSpace/NetworkingExtension.cpp
+    Engine/NetworkingSpace/Policies/AuthenticationScopePolicy.cpp
+    Engine/NetworkingSpace/Policies/TransportSelectionPolicy.cpp
+    Engine/NetworkingSpace/Policies/ReplicationPolicy.cpp
+    Engine/NetworkingSpace/Policies/SessionLifecyclePolicy.cpp
+    Engine/NetworkingSpace/Transports/LoopbackTransport.cpp
+    Engine/NetworkingSpace/Transports/SocketTransport.cpp
     Engine/Workspaces/Revision/ContentRegion.cpp
     Engine/Workspaces/Revision/NonLinearHistory.cpp
     Engine/Workspaces/Revision/OperationRecorder.cpp
@@ -302,16 +466,37 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/Workspaces/WorkspaceRegistry.cpp
     Engine/Workspaces/WorkspaceExchange.cpp
     Engine/Workspaces/WorkspaceExtension.cpp
+    Engine/Workspaces/UV/Operations/UVAuthoringOperations.cpp
+    Engine/Workspaces/UV/Solvers/SeamCutGenerator.cpp
+    Engine/Workspaces/UV/Solvers/ConformalUnwrapSolver.cpp
+    Engine/Workspaces/UV/Solvers/ProgressiveStretchRelaxer.cpp
+    Engine/Workspaces/UV/Solvers/ConcaveSkylinePacker.cpp
+    Engine/Workspaces/UV/Solvers/TexelDensityEqualizer.cpp
+    Engine/Workspaces/UV/Solvers/UVProjectionSolvers.cpp
+    Engine/Workspaces/UV/Solvers/UVIslandLayoutOperations.cpp
+    Engine/Workspaces/UV/UVWorkspaceSession.cpp
 )
 if(NOT ANDROID)
     list(APPEND FRONTIER_ENGINE_SOURCES Engine/Windowing/PlatformWindowDesktop.cpp)
 endif()
+if(FRONTIER_ENABLE_EOS_SDK)
+    list(APPEND FRONTIER_ENGINE_SOURCES Engine/NetworkingSpace/Transports/EpicOnlineTransport.cpp)
+else()
+    list(APPEND FRONTIER_ENGINE_SOURCES Engine/NetworkingSpace/Transports/EpicStubTransport.cpp)
+endif()
+if(FRONTIER_ENABLE_PHOTON_SDK)
+    list(APPEND FRONTIER_ENGINE_SOURCES Engine/NetworkingSpace/Transports/PhotonRealtimeTransport.cpp)
+else()
+    list(APPEND FRONTIER_ENGINE_SOURCES Engine/NetworkingSpace/Transports/PhotonStubTransport.cpp)
+endif()
 if(FRONTIER_PROFILE STREQUAL "Editor")
     list(APPEND FRONTIER_ENGINE_SOURCES
-        Engine/Lifecycle/EditorLifecycle.cpp
+        Engine/Editor/Explorer/ContentBrowser.cpp
+        Engine/Editor/Workspaces/Simulation/ForcePresetBrowserPanel.cpp
         Engine/Editor/Workspaces/Simulation/ForceInspectorView.cpp
         Engine/Editor/Workspaces/Simulation/VectorFieldOverlaySequence.cpp
         Engine/Editor/Workspaces/Simulation/VectorFieldViewportCoordinator.cpp
+        Engine/Lifecycle/EditorLifecycle.cpp
     )
 endif()
 if(NOT FRONTIER_PROFILE STREQUAL "Shipping")
@@ -326,19 +511,35 @@ target_include_directories(FrontierEngine PUBLIC
     "${CMAKE_SOURCE_DIR}/ExternalPackages/vulkan-headers/include"
     "${CMAKE_SOURCE_DIR}/ExternalPackages/volk"
     "${CMAKE_SOURCE_DIR}/ExternalPackages/tomlpp/include"
-    "${CMAKE_SOURCE_DIR}/ExternalPackages/JoltPhysics"
+    "${CMAKE_SOURCE_DIR}/ExternalPackages/stb"
 )
-if(FRONTIER_PROFILE STREQUAL "Editor")
-    target_include_directories(FrontierEngine PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
+target_compile_definitions(FrontierEngine PUBLIC
+    "FRONTIER_COMPILED_SHADER_DIR=\"${FRONTIER_COMPILED_SHADER_DIR}\""
+)
+target_link_libraries(FrontierEngine PUBLIC FrontierCompileSettings Threads::Threads ${CMAKE_DL_LIBS})
+if(WIN32)
+    target_link_libraries(FrontierEngine PUBLIC ws2_32)
 endif()
-target_link_libraries(FrontierEngine PUBLIC FrontierCompileSettings FrontierVolk Jolt Threads::Threads)
-target_compile_definitions(FrontierEngine PUBLIC FRONTIER_HAS_JOLT_PHYSICS=1)
 if(NOT FRONTIER_PROFILE STREQUAL "Shipping")
     target_link_libraries(FrontierEngine PUBLIC FrontierImGui)
 endif()
 if(NOT ANDROID)
     target_include_directories(FrontierEngine PUBLIC "${CMAKE_SOURCE_DIR}/ExternalPackages/glfw/include")
     target_link_libraries(FrontierEngine PRIVATE glfw)
+endif()
+
+#------------------------------------------------------------------------------------------------------------------------
+#                                    DESKTOP APPLICATION EXECUTABLES (FRONTIERUV & FRONTIEREDITOR)
+#------------------------------------------------------------------------------------------------------------------------
+
+if(NOT ANDROID AND NOT FRONTIER_PROFILE STREQUAL "Shipping")
+    add_executable(FrontierUV Engine/Lifecycle/FrontierUVLaunch.cpp)
+    target_compile_definitions(FrontierUV PRIVATE "FRONTIER_REPO_ROOT_DIR=\"${CMAKE_SOURCE_DIR}\"")
+    target_link_libraries(FrontierUV PRIVATE FrontierEngine FrontierImGui)
+
+    add_executable(FrontierEditor Engine/Lifecycle/FrontierEditorLaunch.cpp)
+    target_compile_definitions(FrontierEditor PRIVATE "FRONTIER_REPO_ROOT_DIR=\"${CMAKE_SOURCE_DIR}\"")
+    target_link_libraries(FrontierEditor PRIVATE FrontierEngine FrontierImGui)
 endif()
 
 #------------------------------------------------------------------------------------------------------------------------
@@ -350,16 +551,15 @@ if(BUILD_TESTING)
         add_library(FrontierShippingExhibitUi STATIC EXCLUDE_FROM_ALL ${FRONTIER_UI_COMPONENT_SOURCES})
         target_include_directories(FrontierShippingExhibitUi PUBLIC "${CMAKE_SOURCE_DIR}")
         target_link_libraries(FrontierShippingExhibitUi PUBLIC FrontierEngine FrontierImGui)
+        if(NOT ANDROID)
+            target_link_libraries(FrontierShippingExhibitUi PRIVATE glfw)
+        endif()
     endif()
 
     function(frontier_register_exhibit EXHIBIT_NAME EXHIBIT_SOURCE)
         add_executable(${EXHIBIT_NAME} ${EXHIBIT_SOURCE} ${ARGN})
         target_include_directories(${EXHIBIT_NAME} PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
-        target_compile_definitions(${EXHIBIT_NAME} PRIVATE
-            "FRONTIER_REPO_ROOT_DIR=\"${CMAKE_SOURCE_DIR}\""
-            "FRONTIER_SHADER_BINARY_DIR=\"${FRONTIER_SHADER_BINARY_DIR}\""
-            "FRONTIER_SWIFTSHADER_ICD_DIR=\"${CMAKE_SOURCE_DIR}/ExternalPackages/VulkanCompute/SwiftShader\""
-        )
+        target_compile_definitions(${EXHIBIT_NAME} PRIVATE "FRONTIER_REPO_ROOT_DIR=\"${CMAKE_SOURCE_DIR}\"")
         if(FRONTIER_PROFILE STREQUAL "Shipping")
             target_link_libraries(${EXHIBIT_NAME} PRIVATE FrontierShippingExhibitUi FrontierEngine FrontierImGui)
         else()
@@ -369,11 +569,38 @@ if(BUILD_TESTING)
     endfunction()
 
     frontier_register_exhibit(InputValidation             Exhibits/InputValidation.cpp)
+    frontier_register_exhibit(CameraComponentValidation   Exhibits/CameraComponentValidation.cpp)
     frontier_register_exhibit(WindowValidation            Exhibits/WindowValidation.cpp)
     frontier_register_exhibit(DockingValidation           Exhibits/DockingValidation.cpp)
     frontier_register_exhibit(ControlCentreValidation     Exhibits/ControlCentreValidation.cpp)
     frontier_register_exhibit(WorkspacePanesValidation    Exhibits/WorkspacePanesValidation.cpp)
-    frontier_register_exhibit(LifecycleValidation         Exhibits/LifecycleValidation.cpp)
-    frontier_register_exhibit(WorkspaceRevisionValidation Exhibits/WorkspaceRevisionValidation.cpp)
-    frontier_register_exhibit(VectorFieldValidation       Exhibits/VectorFieldValidation.cpp)
+    frontier_register_exhibit(LifecycleValidation            Exhibits/LifecycleValidation.cpp)
+    frontier_register_exhibit(WorkspaceRevisionValidation    Exhibits/WorkspaceRevisionValidation.cpp)
+    frontier_register_exhibit(ContentBrowserValidation       Exhibits/ContentBrowserValidation.cpp)
+    frontier_register_exhibit(GeometryNetworkValidation      Exhibits/GeometryNetworkValidation.cpp)
+    frontier_register_exhibit(GeometryCompletionValidation   Exhibits/GeometryCompletionValidation.cpp)
+    frontier_register_exhibit(MaterialScatteringValidation   Exhibits/MaterialScatteringValidation.cpp)
+    frontier_register_exhibit(VisibilityRasterValidation     Exhibits/VisibilityRasterValidation.cpp)
+    frontier_register_exhibit(SolarShadowValidation          Exhibits/SolarShadowValidation.cpp)
+    frontier_register_exhibit(TieredWorldRenderValidation    Exhibits/TieredWorldRenderValidation.cpp)
+    frontier_register_exhibit(UVRasterPickingGizmoValidation    Exhibits/UVRasterPickingGizmoValidation.cpp)
+    frontier_register_exhibit(UVWorkspaceUIValidation           Exhibits/UVWorkspaceUIValidation.cpp)
+    frontier_register_exhibit(UVParameterizationValidation      Exhibits/UVParameterizationValidation.cpp)
+    frontier_register_exhibit(UVInteractiveAuthoringValidation  Exhibits/UVInteractiveAuthoringValidation.cpp)
+    frontier_register_exhibit(UVBoundaryValidation              Exhibits/UVBoundaryValidation.cpp)
+    frontier_register_exhibit(NetworkingSpaceValidation         Exhibits/NetworkingSpaceValidation.cpp)
+    frontier_register_exhibit(VectorFieldValidation             Exhibits/VectorFieldValidation.cpp)
+
+    if(NOT ANDROID AND NOT FRONTIER_PROFILE STREQUAL "Shipping")
+        add_test(
+            NAME FrontierUVExecutableSmoke
+            COMMAND FrontierUV --frames=3 "--capture-png=${CMAKE_SOURCE_DIR}/Exhibits/Images/UV/FrontierUV_DesktopExecutable.png"
+        )
+        if(FRONTIER_PROFILE STREQUAL "Editor")
+            add_test(
+                NAME FrontierEditorExecutableSmoke
+                COMMAND FrontierEditor --frames=3 --open-browser "--capture-png=${CMAKE_SOURCE_DIR}/Exhibits/Images/UV/FrontierEditor_DesktopExecutable.png"
+            )
+        endif()
+    endif()
 endif()

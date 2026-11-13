@@ -1,7 +1,7 @@
 /*============================================================================================================================================
                                                            FORCEFIELDACCUMULATOR.H
 ============================================================================================================================================*/
-// 🧩 Fixed-step ForceFieldAccumulator evaluating active ForceSources, curl/divergence telemetry, and JoltPhysics rigid-body coupling
+// 🧩 Fixed-step ForceFieldAccumulator evaluating active ForceSources & curl/divergence telemetry (no rigid-body physics coupling yet)
 
 #pragma once
 
@@ -15,12 +15,6 @@
 #include <cstdint>
 #include <span>
 #include <vector>
-
-namespace JPH
-{
-class BodyInterface;
-class BodyID;
-} // namespace JPH
 
 namespace Frontier::SimulationSpace::ForceFields
 {
@@ -50,14 +44,6 @@ public:
     [[nodiscard]] std::span<const ForceSourceRecordEntry> QuerySources() const noexcept;
     [[nodiscard]] std::span<ForceSourceRecordEntry>       AccessSources() noexcept;
     [[nodiscard]] uint32_t                                QueryActiveSourceCount() const noexcept;
-
-    // Coupled JoltPhysics v5.6.0 aerodynamic force & torque submission (zero custom collision — Jolt owns collision)
-    void ApplyForcesToJoltBody(
-        JPH::BodyInterface& BodyAccess,
-        JPH::BodyID         TargetBody,
-        float               EffectiveAreaSqM,
-        float               AerodynamicDragFactor,
-        double              TimeSeconds) const noexcept;
 
 private:
     struct CompiledSlotEntry

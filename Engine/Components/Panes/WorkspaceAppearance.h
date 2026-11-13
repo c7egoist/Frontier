@@ -123,13 +123,19 @@ struct WorkspaceSurfaceColors
 struct PaneInputReading
 {
     ControlPointer PrimaryPointer    {};    // [-]  - Left mouse pointer reading
+    float          PointerDeltaX     = 0.0f;// [px] - Pointer horizontal delta since previous frame
+    float          PointerDeltaY     = 0.0f;// [px] - Pointer vertical delta since previous frame
     bool           SecondaryPressed  = false;// [-] - Right mouse button pressed this step
     bool           SecondaryDown     = false;// [-] - Right mouse button held
     bool           SecondaryReleased = false;// [-] - Right mouse button released this step
+    bool           MiddlePressed     = false;// [-] - Middle mouse button pressed this step
+    bool           MiddleDown        = false;// [-] - Middle mouse button held
+    bool           MiddleReleased    = false;// [-] - Middle mouse button released this step
     bool           DoubleClicked     = false;// [-] - Primary double-click pulse
     float          WheelDeltaY       = 0.0f; // [ln] - Vertical mouse wheel notches (+up / -down)
     bool           ShiftHeld         = false;// [-] - Shift modifier held (range multi-select)
     bool           ControlHeld       = false;// [-] - Ctrl modifier held (toggle multi-select / shortcuts)
+    bool           AltHeld           = false;// [-] - Alt modifier held (edge loop / orbit)
     bool           EnterPressed      = false;// [-] - Return/Enter key pressed
     bool           EscapePressed     = false;// [-] - Escape key pressed
     bool           DeletePressed     = false;// [-] - Delete key pressed
@@ -143,6 +149,8 @@ struct PaneInputReading
     bool           ShortcutFind      = false;// [-] - Ctrl+F shortcut pulse
     bool           ShortcutGroup     = false;// [-] - Ctrl+G shortcut pulse
     bool           ShortcutDuplicate = false;// [-] - Ctrl+D shortcut pulse
+    bool           ShortcutUndo      = false;// [-] - Ctrl+Z undo shortcut pulse
+    bool           ShortcutRedo      = false;// [-] - Ctrl+Shift+Z or Ctrl+Y redo shortcut pulse
     bool           ToggleDiagnostics = false;// [-] - F3 diagnostics shortcut pulse
     std::string    TypedUtf8         {};    // [-]  - UTF-8 characters typed this step
 };

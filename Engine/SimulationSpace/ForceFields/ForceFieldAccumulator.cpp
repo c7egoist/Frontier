@@ -1,7 +1,7 @@
 /*============================================================================================================================================
                                                           FORCEFIELDACCUMULATOR.CPP
 ============================================================================================================================================*/
-// 🧩 Fixed-step ForceFieldAccumulator evaluating active ForceSources, curl/divergence telemetry, and JoltPhysics rigid-body coupling
+// 🧩 Fixed-step ForceFieldAccumulator evaluating active ForceSources & curl/divergence telemetry (no rigid-body physics coupling yet)
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                                        INCLUDES
@@ -13,12 +13,6 @@
 #include "Engine/SimulationSpace/ForceFields/ForceMotionPath.h"
 #include "Engine/SimulationSpace/ForceFields/TurbulenceField.h"
 #include "Engine/SimulationSpace/ForceFields/VectorField.h"
-
-#if defined(FRONTIER_HAS_JOLT_PHYSICS)
-    #include <Jolt/Jolt.h>
-    #include <Jolt/Physics/Body/BodyID.h>
-    #include <Jolt/Physics/Body/BodyInterface.h>
-#endif
 
 #include <algorithm>
 #include <cmath>
@@ -254,46 +248,6 @@ ForceDiagnosticsReading ForceFieldAccumulator::QueryAnemometerDiagnostics(
     }
     Reading.CompassAzimuthDeg = Azimuth;
     return Reading;
-}
-
-void ForceFieldAccumulator::ApplyForcesToJoltBody(
-    JPH::BodyInterface& BodyAccess,
-    JPH::BodyID         TargetBody,
-    float               EffectiveAreaSqM,
-    float               AerodynamicDragFactor,
-    double              TimeSeconds) const noexcept
-{
-#if defined(FRONTIER_HAS_JOLT_PHYSICS)
-    const JPH::RVec3 Pos = BodyAccess.GetCenterOfMassPosition(TargetBody);
-    const JPH::Vec3  Vel = BodyAccess.GetLinearVelocity(TargetBody);
-
-    const SpatialVector3 QueryPos{ static_cast<float>(Pos.GetX()), static_cast<float>(Pos.GetY()), static_cast<float>(Pos.GetZ()), 0.0f };
-    const SpatialVector3 QueryVel{ Vel.GetX(), Vel.GetY(), Vel.GetZ(), 0.0f };
-    const SpatialForceSample Sample = QueryForceFieldSample(QueryPos, QueryVel, TimeSeconds);
-
-    // Aerodynamic relative flow drag: F_aero = 0.5 * rho_air * Cd * A * |v_rel| * v_rel
-    const SpatialVector3 RelWind = Sample.AdvectionVelocity - QueryVel;
-    const float          RelSpd  = VectorLength(RelWind);
-    const float          AeroK   = 0.5f * static_cast<float>(Constants::DryAirDensity) *
-                                   std::max(0.05f, AerodynamicDragFactor) * std::max(0.01f, EffectiveAreaSqM) * RelSpd;
-
-    const float MassPropsApprox = 1.0f / std::max(1.0e-5f, BodyAccess.GetMotionQuality(TargetBody) == JPH::EMotionQuality::Discrete ? 1.0f : 1.0f);
-    (void)MassPropsApprox;
-
-    const SpatialVector3 DirectForce = Sample.LinearAcceleration * std::max(1.0f, EffectiveAreaSqM * 10.0f) + RelWind * AeroK;
-    BodyAccess.AddForce(TargetBody, JPH::Vec3(DirectForce.X, DirectForce.Y, DirectForce.Z));
-
-    if (VectorLengthSquared(Sample.AngularTorque) > 1.0e-6f)
-    {
-        BodyAccess.AddTorque(TargetBody, JPH::Vec3(Sample.AngularTorque.X, Sample.AngularTorque.Y, Sample.AngularTorque.Z));
-    }
-#else
-    (void)BodyAccess;
-    (void)TargetBody;
-    (void)EffectiveAreaSqM;
-    (void)AerodynamicDragFactor;
-    (void)TimeSeconds;
-#endif
 }
 
 } // namespace Frontier::SimulationSpace::ForceFields

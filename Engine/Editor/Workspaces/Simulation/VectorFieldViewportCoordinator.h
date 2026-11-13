@@ -9,7 +9,7 @@
 //                                                        INCLUDES
 //------------------------------------------------------------------------------------------------------------------------
 
-#include "Engine/Components/Panes/ContentBrowserPanel.h"
+#include "Engine/Editor/Workspaces/Simulation/ForcePresetBrowserPanel.h"
 #include "Engine/Components/Panes/InspectorPanel.h"
 #include "Engine/Components/Panes/OutlinerPanel.h"
 #include "Engine/Components/Panes/ViewportPanel.h"
@@ -58,7 +58,7 @@ public:
     [[nodiscard]] SimulationSpace::ForceFields::FieldLatticeVulkanExecutor&  AccessVulkanExecutor() noexcept;
     [[nodiscard]] VectorFieldOverlaySequence&                                AccessOverlaySequence() noexcept;
     [[nodiscard]] ForceInspectorView&                                        AccessForceInspectorView() noexcept;
-    [[nodiscard]] ContentBrowserPanel&                                       AccessContentBrowser() noexcept;
+    [[nodiscard]] ForcePresetBrowserPanel&                                       AccessContentBrowser() noexcept;
     [[nodiscard]] OverlayCameraState&                                        AccessCamera(uint32_t PaneIndex) noexcept;
 
     [[nodiscard]] int32_t QuerySelectedWaypointIndex() const noexcept;
@@ -88,7 +88,7 @@ private:
     SimulationSpace::ForceFields::FieldLatticeVulkanExecutor VulkanExecutor {};
     VectorFieldOverlaySequence                               OverlaySequence{};
     ForceInspectorView                                       InspectorView  {};
-    ContentBrowserPanel                                      ContentBrowser {};
+    ForcePresetBrowserPanel                                      ContentBrowser {};
 
     std::vector<SimulationSpace::ForceFields::ForceSourceRecordEntry> AuthoredSources{};
     OutlinerSlotToken                                                 DefaultForceFolderToken{};

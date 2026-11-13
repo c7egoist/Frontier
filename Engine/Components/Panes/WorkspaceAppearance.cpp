@@ -8,6 +8,7 @@
 //------------------------------------------------------------------------------------------------------------------------
 
 #include "Engine/Components/Panes/WorkspaceAppearance.h"
+#include "Engine/Input/InputExtension.h"
 
 #include "imgui.h"
 
@@ -25,7 +26,7 @@ namespace
 //                                                    INTERNAL CONSTANTS
 //------------------------------------------------------------------------------------------------------------------------
 
-[[nodiscard]] constexpr ColorRgba ScaleAlpha(ColorRgba BaseColor, float Opacity) noexcept
+[[nodiscard]] ColorRgba ScaleAlpha(ColorRgba BaseColor, float Opacity) noexcept
 {
     const float Clamped = std::clamp(Opacity, 0.0f, 1.0f);
     return {
@@ -118,51 +119,63 @@ PaneInputReading CaptureImGuiPaneInput(Rectangle2D ScreenBounds, float ScaleFact
         return Reading;
     }
 
-    const ImGuiIO& Io        = ImGui::GetIO();
-    const float    SafeScale = std::max(0.25f, ScaleFactor);
+    const auto& Snapshot  = Input::InputExtension::InspectActiveEditorSnapshot();
+    const float SafeScale = std::max(0.25f, ScaleFactor);
 
-    if (Io.MousePos.x > -1.0e8f && Io.MousePos.y > -1.0e8f)
+    if (Snapshot.PointerSeeded && Snapshot.PositionX > -1.0e8f && Snapshot.PositionY > -1.0e8f)
     {
-        Reading.PrimaryPointer.X = (Io.MousePos.x - ScreenBounds.X) / SafeScale;
-        Reading.PrimaryPointer.Y = (Io.MousePos.y - ScreenBounds.Y) / SafeScale;
+        Reading.PrimaryPointer.X = (Snapshot.PositionX - ScreenBounds.X) / SafeScale;
+        Reading.PrimaryPointer.Y = (Snapshot.PositionY - ScreenBounds.Y) / SafeScale;
+        Reading.PointerDeltaX    = Snapshot.TickDeltaX / SafeScale;
+        Reading.PointerDeltaY    = Snapshot.TickDeltaY / SafeScale;
     }
 
-    const bool HoveredWindow = ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
-    const Point2D ScreenCursor{ Io.MousePos.x, Io.MousePos.y };
-    const bool InsideBounds  = ScreenBounds.Contains(ScreenCursor);
+    const Point2D ScreenCursor{ Snapshot.PositionX, Snapshot.PositionY };
+    const bool    InsideBounds  = Snapshot.PointerSeeded && ScreenBounds.Contains(ScreenCursor);
+    const bool    HoveredWindow = InsideBounds && ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
 
     Reading.PrimaryPointer.Enabled  = HoveredWindow || InsideBounds;
-    Reading.PrimaryPointer.Down     = ImGui::IsMouseDown(ImGuiMouseButton_Left);
-    Reading.PrimaryPointer.Pressed  = ImGui::IsMouseClicked(ImGuiMouseButton_Left);
-    Reading.PrimaryPointer.Released = ImGui::IsMouseReleased(ImGuiMouseButton_Left);
+    Reading.PrimaryPointer.Down     = Snapshot.QueryButtonDown(0u);
+    Reading.PrimaryPointer.Pressed  = Snapshot.QueryButtonPressed(0u);
+    Reading.PrimaryPointer.Released = Snapshot.QueryButtonReleased(0u);
 
-    Reading.SecondaryDown     = ImGui::IsMouseDown(ImGuiMouseButton_Right);
-    Reading.SecondaryPressed  = ImGui::IsMouseClicked(ImGuiMouseButton_Right);
-    Reading.SecondaryReleased = ImGui::IsMouseReleased(ImGuiMouseButton_Right);
-    Reading.DoubleClicked     = ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
-    Reading.WheelDeltaY       = (HoveredWindow || InsideBounds) ? Io.MouseWheel : 0.0f;
+    Reading.SecondaryDown     = Snapshot.QueryButtonDown(1u);
+    Reading.SecondaryPressed  = Snapshot.QueryButtonPressed(1u);
+    Reading.SecondaryReleased = Snapshot.QueryButtonReleased(1u);
+    Reading.MiddleDown        = Snapshot.QueryButtonDown(2u);
+    Reading.MiddlePressed     = Snapshot.QueryButtonPressed(2u);
+    Reading.MiddleReleased    = Snapshot.QueryButtonReleased(2u);
+    Reading.DoubleClicked     = Snapshot.QueryButtonDoubleClicked(0u);
+    Reading.WheelDeltaY       = (HoveredWindow || InsideBounds) ? Snapshot.ScrollDeltaY : 0.0f;
 
-    Reading.ShiftHeld         = Io.KeyShift;
-    Reading.ControlHeld       = Io.KeyCtrl;
-    Reading.EnterPressed      = ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false);
-    Reading.EscapePressed     = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
-    Reading.DeletePressed     = ImGui::IsKeyPressed(ImGuiKey_Delete, false);
-    Reading.BackspacePressed  = ImGui::IsKeyPressed(ImGuiKey_Backspace, true);
-    Reading.TabPressed        = ImGui::IsKeyPressed(ImGuiKey_Tab, false);
-    Reading.ArrowLeftPressed  = ImGui::IsKeyPressed(ImGuiKey_LeftArrow, true);
-    Reading.ArrowRightPressed = ImGui::IsKeyPressed(ImGuiKey_RightArrow, true);
-    Reading.HomePressed       = ImGui::IsKeyPressed(ImGuiKey_Home, false);
-    Reading.EndPressed        = ImGui::IsKeyPressed(ImGuiKey_End, false);
+    Reading.ShiftHeld         = Snapshot.ShiftHeld;
+    Reading.ControlHeld       = Snapshot.ControlHeld;
+    Reading.AltHeld           = Snapshot.AltHeld;
+    Reading.EnterPressed      = Snapshot.QueryKeyPressed(Input::InputLogicalKey::Enter, false) ||
+                                Snapshot.QueryKeyPressed(Input::InputLogicalKey::KeypadEnter, false);
+    Reading.EscapePressed     = Snapshot.QueryKeyPressed(Input::InputLogicalKey::Escape, false);
+    Reading.DeletePressed     = Snapshot.QueryKeyPressed(Input::InputLogicalKey::Delete, false);
+    Reading.BackspacePressed  = Snapshot.QueryKeyPressed(Input::InputLogicalKey::Backspace, true);
+    Reading.TabPressed        = Snapshot.QueryKeyPressed(Input::InputLogicalKey::Tab, false);
+    Reading.ArrowLeftPressed  = Snapshot.QueryKeyPressed(Input::InputLogicalKey::LeftArrow, true);
+    Reading.ArrowRightPressed = Snapshot.QueryKeyPressed(Input::InputLogicalKey::RightArrow, true);
+    Reading.HomePressed       = Snapshot.QueryKeyPressed(Input::InputLogicalKey::Home, false);
+    Reading.EndPressed        = Snapshot.QueryKeyPressed(Input::InputLogicalKey::End, false);
 
-    Reading.ShortcutAll       = Io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_A, false);
-    Reading.ShortcutFind      = Io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_F, false);
-    Reading.ShortcutGroup     = Io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_G, false);
-    Reading.ShortcutDuplicate = Io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_D, false);
-    Reading.ToggleDiagnostics = ImGui::IsKeyPressed(ImGuiKey_F3, false);
+    Reading.ShortcutAll       = Snapshot.ControlHeld && Snapshot.QueryKeyPressed(Input::InputLogicalKey::A, false);
+    Reading.ShortcutFind      = Snapshot.ControlHeld && Snapshot.QueryKeyPressed(Input::InputLogicalKey::F, false);
+    Reading.ShortcutGroup     = Snapshot.ControlHeld && Snapshot.QueryKeyPressed(Input::InputLogicalKey::G, false);
+    Reading.ShortcutDuplicate = Snapshot.ControlHeld && Snapshot.QueryKeyPressed(Input::InputLogicalKey::D, false);
+    Reading.ShortcutUndo      = Snapshot.ControlHeld && !Snapshot.ShiftHeld && !Snapshot.AltHeld &&
+                                Snapshot.QueryKeyPressed(Input::InputLogicalKey::Z, false);
+    Reading.ShortcutRedo      = Snapshot.ControlHeld && !Snapshot.AltHeld &&
+                                ((Snapshot.ShiftHeld && Snapshot.QueryKeyPressed(Input::InputLogicalKey::Z, false)) ||
+                                 (!Snapshot.ShiftHeld && Snapshot.QueryKeyPressed(Input::InputLogicalKey::Y, false)));
+    Reading.ToggleDiagnostics = Snapshot.QueryKeyPressed(Input::InputLogicalKey::F3, false);
 
-    for (int Index = 0; Index < Io.InputQueueCharacters.Size; ++Index)
+    for (const uint32_t Codepoint : Snapshot.QueryTypedCodepoints())
     {
-        EncodeUtf8Codepoint(static_cast<uint32_t>(Io.InputQueueCharacters[Index]), Reading.TypedUtf8);
+        EncodeUtf8Codepoint(Codepoint, Reading.TypedUtf8);
     }
 
     return Reading;
@@ -796,7 +809,6 @@ void ConstructSlotCategoryIcon(
 
         case ConstructSlotCategory::ForceField:
         {
-            // Aerodynamic triple-stream vector wave + directional arrow in #68DCFF cyan
             const ColorRgba StreamInk = ScaleAlpha({ 104, 220, 255, 255 }, Opacity);
             const ColorRgba CrestInk  = ScaleAlpha({ 255, 180, 84, 255 }, Opacity);
             const float     StrokeW   = std::max(1.4f, (13.0f / 256.0f) * Extent);
@@ -1313,25 +1325,25 @@ void ConstructResetSymbol(
 ColorRgba QueryForceLawTint(uint32_t LawOrdinal) noexcept
 {
     static constexpr std::array<ColorRgba, 19> LawTints = {{
-        { 137, 224, 196, 255 }, // 0 LinearWind           #89e0c4
-        { 112, 207, 151, 255 }, // 1 Buoyancy             #70cf97
-        { 224, 131, 104, 255 }, // 2 RadialBurst          #e08368
-        { 142, 182, 224, 255 }, // 3 Attractor            #8eb6e0
-        { 217, 158, 108, 255 }, // 4 Repulsor             #d99e6c
-        { 123, 198, 219, 255 }, // 5 AxisAttractor        #7bc6db
-        { 129, 199, 132, 255 }, // 6 Containment          #81c784
-        { 185, 169, 105, 255 }, // 7 RotationalColumn     #b9a969
-        { 200, 176, 116, 255 }, // 8 Torque               #c8b074
-        { 161, 152, 204, 255 }, // 9 Drag                 #a198cc
-        { 217, 181, 108, 255 }, // 10 CurlNoise           #d9b56c
-        { 116, 198, 184, 255 }, // 11 AtmosphericGust     #74c6b8
-        { 112, 207, 190, 255 }, // 12 VorticityConfinement#70cfbe
-        { 209, 194, 122, 255 }, // 13 BrownianNoise       #d1c27a
-        { 116, 200, 224, 255 }, // 14 LorentzField        #74c8e0
-        { 198, 139, 217, 255 }, // 15 MagneticDipole      #c68bd9
-        { 100, 181, 246, 255 }, // 16 Stream (Directed)   #64b5f6
-        { 157, 180, 226, 255 }, // 17 SplineForce         #9db4e2
-        { 142, 199, 158, 255 }, // 18 BoundaryAdhesion    #8ec79e
+        { 137, 224, 196, 255 }, // 0 LinearWind
+        { 112, 207, 151, 255 }, // 1 Buoyancy
+        { 224, 131, 104, 255 }, // 2 RadialBurst
+        { 142, 182, 224, 255 }, // 3 Attractor
+        { 217, 158, 108, 255 }, // 4 Repulsor
+        { 123, 198, 219, 255 }, // 5 AxisAttractor
+        { 129, 199, 132, 255 }, // 6 Containment
+        { 185, 169, 105, 255 }, // 7 RotationalColumn
+        { 200, 176, 116, 255 }, // 8 Torque
+        { 161, 152, 204, 255 }, // 9 Drag
+        { 217, 181, 108, 255 }, // 10 CurlNoise
+        { 116, 198, 184, 255 }, // 11 AtmosphericGust
+        { 112, 207, 190, 255 }, // 12 VorticityConfinement
+        { 209, 194, 122, 255 }, // 13 BrownianNoise
+        { 116, 200, 224, 255 }, // 14 LorentzField
+        { 198, 139, 217, 255 }, // 15 MagneticDipole
+        { 100, 181, 246, 255 }, // 16 Stream
+        { 157, 180, 226, 255 }, // 17 SplineForce
+        { 142, 199, 158, 255 }, // 18 BoundaryAdhesion
     }};
     return (LawOrdinal < LawTints.size()) ? LawTints[LawOrdinal] : LawTints[0];
 }

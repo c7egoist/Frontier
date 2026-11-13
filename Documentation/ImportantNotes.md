@@ -5,8 +5,14 @@ Durable engineering rules, non-negotiable architectural invariants, and referenc
 
 ---
 
-## 🔴 1. GPU-ONLY VIEWPORT OVERLAYS & `.slang` SHADER MANDATE (2026-11-10)
+## 🔴 1. GPU-ONLY VIEWPORT OVERLAYS, VULKAN 1.3, RIGHT-HAND RULE & `1–5%` PIXEL-DELTA QUALITY GATE (2026-11-10)
 
+- **Vulkan 1.3 & Right-Hand Coordinate Rule (`Engine/Constants/EngineConstants.h`)**:
+  - Frontier targets **Vulkan 1.3** (`VulkanTargetMajorVersion = 1`, `VulkanTargetMinorVersion = 3`) with **Reverse-Z `[1.0 -> 0.0]`** clip-space depth and the **Right-Hand Rule** (`RightHandedCoordinateRule = true`: `+X` Forward, `+Y` Left, `+Z` Up; $\hat{\mathbf{X}} \times \hat{\mathbf{Y}} = +\hat{\mathbf{Z}}$).
+  - Ray dispatch follows a 3-tier hardware capability policy: **RTX dedicated `VK_KHR_ray_tracing_pipeline` (+ SER)** for divergent ReSTIR/reflections, **inline `VK_KHR_ray_query`** for coherent shadow/visibility rays & RDNA2+/Arc hardware, and **Vulkan 1.3 Subgroup 4-Wide `CWBVH` + Hi-Z/Global SDF** on GTX cards where `VK_KHR_ray_query` is unavailable.
+- **Non-Degrading Speedup Quality Gate (`<= 1–5%` Pixel Delta · Zero Checkerboard)**:
+  - 🔴 **NEVER** introduce checkerboard rendering, interleaved half-pixel skipping, or spatial subsampling shortcuts that degrade image quality.
+  - Every BVH, ReSTIR, reflection, or shader optimization **MUST** verify via before/after `.png` `Exhibits/` comparison that pixel difference stays within **`1%–5%` (`Constants::MaximumOptimizationPixelDelta = 0.05f`)** or strictly improves converged SNR against a high-SPP reference.
 - **100% GPU Rasterization for Visual Overlays**: All debug visuals, viewport reference grids (`NavigationOverlay`), 3D/2D transform manipulators (`TransformGizmo`), wireframe diagnostic shapes/lines/rays (`DiagnosticPrimitives`, `SpatialAnnotation`, `VectorAnnotation`), and world/screen callouts (`TextAnnotation`) **MUST be drawn directly on the GPU** via dedicated `.slang` `…Rasterization` units.
 - **Never Draw Viewport Overlays on CPU or ImGui**:
   - 🔴 **NEVER** rasterize grids, gizmos, or debug lines on the CPU.

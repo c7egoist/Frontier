@@ -16,14 +16,23 @@
 #include "Engine/Components/Appearance/TypographyRepository.h"
 #include "Engine/Components/ControlCentre/ControlCentrePanel.h"
 #include "Engine/Components/Docking/WorkspaceDockContainer.h"
+#include "Engine/Editor/Explorer/ContentBrowser.h"
+#include "Engine/Editor/Workspaces/Simulation/ForceInspectorView.h"
+#include "Engine/Editor/Workspaces/Simulation/ForcePresetBrowserPanel.h"
+#include "Engine/GeometricRaster/GlobalIllumination/ShowcaseGalleryScene.h"
 #include "Engine/Input/InputExtension.h"
 #include "Engine/Lifecycle/LifecycleSequence.h"
 #include "Engine/Lifecycle/WorkspaceLifecycle.h"
+#include "Engine/SimulationSpace/ForceFields/FieldLatticeCascade.h"
+#include "Engine/SimulationSpace/ForceFields/ForceFieldAccumulator.h"
 #include "Engine/Windowing/PlatformWindow.h"
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <string_view>
+#include <vector>
 
 namespace Frontier::Lifecycle
 {
@@ -38,8 +47,9 @@ struct EditorStartupConfiguration
         Windowing::WindowConfigurationDescriptor::ConstructApplicationWindow("Frontier", 1600u, 980u); // [-] - Primary editor window
     std::filesystem::path FontRepositoryRoot {};                                                      // [-] - Optional EngineContent/FontsArchives path
     std::filesystem::path ProjectSpacePath {};                                                         // [-] - Optional .projectspace persistence path
-    OutlinerTitleVariant  OutlinerHeading  = OutlinerTitleVariant::Outliner;                           // [-] - Outliner vs LayerStack heading
-    double                MaximumStep      = 0.100;                                                    // [s] - Upper Δt clamp per authoring tick
+    OutlinerTitleVariant  OutlinerHeading       = OutlinerTitleVariant::Outliner;                      // [-] - Outliner vs LayerStack heading
+    double                MaximumStep           = 0.100;                                               // [s] - Upper Δt clamp per authoring tick
+    bool                  PopulateShowcaseScene = false;                                               // [-] - Populate Cornell-Studio Gallery in Outliner & GTX Viewport
 };
 
 struct EditorLifecycleReading
@@ -51,6 +61,7 @@ struct EditorLifecycleReading
     uint32_t                       OpenWorkspaceCount  = 0u;                      // [count] - Open multi-document sessions
     uint32_t                       GpuOverlayCount     = 0u;                      // [count] - Registered GPU .slang overlay hooks
     bool                           ControlCentreOpen   = false;                   // [-]     - True while top Control Centre shade is open
+    bool                           ContentBrowserOpen  = false;                   // [-]     - True while bottom ContentBrowser drawer is open
     bool                           AuthoringActive     = false;                   // [-]     - True between Initialize and Finalize
 };
 
@@ -71,11 +82,16 @@ public:
     template <LifecycleParticipant OverlayParticipantType>
     [[nodiscard]] uint32_t RegisterGpuViewportOverlay(std::string_view Identifier, OverlayParticipantType& OverlayParticipant)
     {
-        ++RegisteredOverlayHooks;
+        ++RegisteredGpuOverlays;
         return EditorSequence.RegisterParticipant(Identifier, OverlayParticipant);
     }
 
     [[nodiscard]] bool Initialize(const EditorStartupConfiguration& Configuration = {}) noexcept;
+    void               PopulateShowcaseGallerySession(uint32_t RenderWidthPx = 640u, uint32_t RenderHeightPx = 360u);
+    void               RefreshShowcaseViewportRaster();
+    [[nodiscard]] OutlinerSlotToken SpawnForceFieldEntry(const SimulationSpace::ForceFields::ForceSourceRecordEntry& SourcePreset);
+    [[nodiscard]] GeometricRaster::ShowcaseWorldSceneBundle* AccessShowcaseScene() noexcept { return ShowcaseBundle.get(); }
+    [[nodiscard]] SimulationSpace::ForceFields::ForceFieldAccumulator& AccessForceAccumulator() noexcept { return ForceAccumulator; }
     [[nodiscard]] bool ExecuteAuthoringTick(double Δt);
     [[nodiscard]] bool Suspend() noexcept;
     [[nodiscard]] bool Resume() noexcept;
@@ -88,6 +104,7 @@ public:
     [[nodiscard]] EditorLifecycleReading                     InspectReading() const noexcept;
     [[nodiscard]] Components::HeadlessWorkspaceDockContainer& AccessDockContainer() noexcept;
     [[nodiscard]] ControlCentrePanel&                        AccessControlCentre() noexcept;
+    [[nodiscard]] Editor::Explorer::ContentBrowser&          AccessContentBrowser() noexcept;
     [[nodiscard]] WorkspaceLifecycle&                        AccessWorkspaces() noexcept;
     [[nodiscard]] Input::InputExtension&                     AccessInput() noexcept;
     [[nodiscard]] TypographyRepository&                      AccessTypography() noexcept;
@@ -96,18 +113,40 @@ public:
     [[nodiscard]] Components::WorkspaceDockPaneToken         QueryInspectorPaneToken() const noexcept;
 
 private:
+    struct MappedEditorForceSource
+    {
+        OutlinerSlotToken                                  OutlinerSlot {};
+        SimulationSpace::ForceFields::ForceSourceRecordEntry Source       {};
+    };
+
+    void AttachForceFieldAuthoringToActivePanes();
+    void SynchronizeForceFieldsWithOutliner(double Δt);
+
     EditorStartupConfiguration                 StartupConfig          {};     // [-]     - Applied editor startup settings
     Components::HeadlessWorkspaceDockContainer DockContainer          {};     // [-]     - Intra-app trapezoidal docking container
     TypographyRepository                       Typography             {};     // [-]     - .FontSpace typeface & 13px tab-strip faces
     ControlCentrePanel                         ControlCentre          {};     // [-]     - Pull-down Control Centre & settings shade
+    Editor::Explorer::ContentBrowser           ContentBrowserDrawer   {};     // [-]     - Pull-up ContentBrowser & ColourCodex drawer
     WorkspaceLifecycle                         Workspaces             {};     // [-]     - Multi-document workspace session loop
     Input::InputExtension                      InputCoordinator       {};     // [-]     - Hardware input & OS feedback coordinator
     LifecycleSequence                          EditorSequence         {};     // [-]     - Registered GPU .slang overlay & editor hooks
+    std::unique_ptr<GeometricRaster::ShowcaseWorldSceneBundle>  ShowcaseBundle   {};     // [-]  - Mounted Cornell-Studio Gallery scene & Outliner tokens
+    std::unique_ptr<GeometricRaster::TieredWorldRenderSequence> ShowcaseRenderer {};     // [-]  - Calibrated Tier 1 GTX world renderer
+    SimulationSpace::ForceFields::ForceFieldAccumulator ForceAccumulator    {};   // [-]  - Analytical ForceModel / VectorField evaluator (no physics)
+    SimulationSpace::ForceFields::FieldLatticeCascade   ForceLatticeCascade {};   // [-]  - 4-tier ForceField clipmap metrics
+    Editor::Simulation::ForceInspectorView              ForceInspector      {};   // [-]  - 4-tab ForceField Inspector (Field/Formula/Layers/Cache)
+    ForcePresetBrowserPanel                             ForcePresetCatalog  {};   // [-]  - Curated .ForceModel & Formula preset library
+    std::vector<MappedEditorForceSource>                AuthoredForces      {};   // [-]  - Scene-bound ForceField sources
+    std::array<float, 96>                               AnemometerHistory   {};   // [m/s]- Rolling Beaufort probe samples
+    OutlinerSlotToken                                   DefaultForcesFolder {};   // [idx]- Optional Forces folder in Outliner
+    int32_t                                             SelectedWaypointIdx = -1; // [idx]- Active ForceField motion waypoint
+    double                                              ForceClockSeconds   = 0.0;// [s]  - ForceField evaluation clock
+    uint32_t                                            NextForceToken      = 1u; // [id] - Monotonic ForceSourceRecordEntry token
     Components::WorkspaceDockPaneToken         OutlinerPaneToken      {};     // [idx]   - Registered left Outliner/LayerStack pane
     Components::WorkspaceDockPaneToken         ViewportPaneToken      {};     // [idx]   - Registered central Viewport pane
     Components::WorkspaceDockPaneToken         InspectorPaneToken     {};     // [idx]   - Registered right Inspector pane
     double                                     CurrentStepSeconds     = 0.016;// [s]     - Active authoring step passed to pane presenters
-    uint32_t                                   RegisteredOverlayHooks = 0u;   // [count] - Registered GPU .slang viewport overlay hooks
+    uint32_t                                   RegisteredGpuOverlays = 0u;   // [count] - Registered GPU .slang viewport overlay hooks
     bool                                       Initialized            = false;// [-]     - True between Initialize and Finalize
     bool                                       TerminationRequested   = false;// [-]     - Latch stopping authoring loop
 };
@@ -129,6 +168,11 @@ inline Components::HeadlessWorkspaceDockContainer& EditorLifecycle::AccessDockCo
 inline ControlCentrePanel& EditorLifecycle::AccessControlCentre() noexcept
 {
     return ControlCentre;
+}
+
+inline Editor::Explorer::ContentBrowser& EditorLifecycle::AccessContentBrowser() noexcept
+{
+    return ContentBrowserDrawer;
 }
 
 inline WorkspaceLifecycle& EditorLifecycle::AccessWorkspaces() noexcept

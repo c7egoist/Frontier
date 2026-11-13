@@ -12,6 +12,8 @@
 #include "Engine/Components/Panes/OutlinerPanel.h"
 #include "Engine/SimulationSpace/ForceFields/ForceFieldDescriptors.h"
 
+#include <imgui.h>
+
 #include <array>
 #include <cstdint>
 #include <functional>
@@ -112,8 +114,14 @@ class ViewportPanel
 {
 public:
     ViewportPanel() noexcept;
+    ~ViewportPanel() noexcept;
+
+    ViewportPanel(const ViewportPanel&)            = delete;
+    ViewportPanel& operator=(const ViewportPanel&) = delete;
 
     void AttachOutliner(OutlinerPanel* SourceOutliner) noexcept;
+    void AssignCanvasRasterImage(const uint8_t* RgbaPixels, uint32_t WidthPx, uint32_t HeightPx);
+    void ClearCanvasRasterImage() noexcept;
     void ConfigureConstructPresets(std::vector<ViewportConstructPresetEntry> Presets);
     void ConfigureConstructPresetCallback(std::function<void(uint32_t PresetIndex)> Callback);
     void ConfigureOpenContentBrowserCallback(std::function<void()> Callback);
@@ -232,6 +240,7 @@ private:
     uint32_t                        LastReportedForceCount   = 0u;                                     // [count]- Last force count from raster feed
     std::string                     ProbeReadoutText         {};                                       // [-]   - Optional bottom anemometer strip
     SimulationSpace::ForceFields::ForceOverlaySettings ForceOverlay{};                                 // [-]   - Editor Force Viz overlay parameters
+    ImTextureData                   CanvasRasterTexture      {};                                       // [-]   - Optional live GTX/RTX viewport texture
 };
 
 //------------------------------------------------------------------------------------------------------------------------

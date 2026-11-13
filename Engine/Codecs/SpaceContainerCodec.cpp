@@ -31,7 +31,7 @@ struct ExtensionMappingEntry
     std::string_view       LowercaseExtension;
 };
 
-constexpr std::array<ExtensionMappingEntry, 22u> ExtensionRegistry = {{
+constexpr std::array<ExtensionMappingEntry, 24u> ExtensionRegistry = {{
     { SpaceExtensionCategory::ProjectSpace,     ".ProjectSpace",     ".projectspace"     },
     { SpaceExtensionCategory::ColourSpace,      ".ColourSpace",      ".colourspace"      },
     { SpaceExtensionCategory::GeometrySpace,    ".GeometrySpace",    ".geometryspace"    },
@@ -52,8 +52,10 @@ constexpr std::array<ExtensionMappingEntry, 22u> ExtensionRegistry = {{
     { SpaceExtensionCategory::Photometry,       ".Photometry",       ".photometry"       },
     { SpaceExtensionCategory::Terrain,          ".Terrain",          ".terrain"          },
     { SpaceExtensionCategory::Acoustic,         ".Acoustic",         ".acoustic"         },
+    { SpaceExtensionCategory::NetworkSpace,     ".NetworkSpace",     ".networkspace"     },
     { SpaceExtensionCategory::VectorFieldSpace, ".VectorFieldSpace", ".vectorfieldspace" },
     { SpaceExtensionCategory::ForceModel,       ".ForceModel",       ".forcemodel"       },
+    { SpaceExtensionCategory::InputSpace,       ".InputSpace",       ".inputspace"       },
 }};
 
 struct SubFormatMappingEntry
@@ -62,7 +64,7 @@ struct SubFormatMappingEntry
     std::string_view LowercaseTag;
 };
 
-constexpr std::array<SubFormatMappingEntry, 27u> SubFormatRegistry = {{
+constexpr std::array<SubFormatMappingEntry, 37u> SubFormatRegistry = {{
     { ".DocumentHeader",        ".documentheader"        },
     { ".SectionDirectory",      ".sectiondirectory"      },
     { ".Revision",              ".revision"              },
@@ -84,12 +86,22 @@ constexpr std::array<SubFormatMappingEntry, 27u> SubFormatRegistry = {{
     { ".StrokeAppearance",      ".strokeappearance"      },
     { ".ProjectSettings",       ".projectsettings"       },
     { ".DependencyLock",        ".dependencylock"        },
+    { ".SessionRouting",        ".sessionrouting"        },
+    { ".ReplicationPolicy",     ".replicationpolicy"     },
+    { ".PolygonNetwork",        ".polygonnetwork"        },
+    { ".ClusterHierarchy",      ".clusterhierarchy"      },
+    { ".WideBoundingTree",      ".wideboundingtree"      },
+    { ".MaterialRegister",      ".materialregister"      },
+    { ".BounceSummary",         ".bouncesummary"         },
     { ".VectorFieldHeader",     ".vectorfieldheader"     },
     { ".ForceSource",           ".forcesource"           },
     { ".MotionPath",            ".motionpath"            },
     { ".FormulaKernel",         ".formulakernel"         },
     { ".LatticeSnapshot",       ".latticesnapshot"       },
     { ".EditorOverlaySettings", ".editoroverlaysettings" },
+    { ".ChordRegister",         ".chordregister"         },
+    { ".AxisCalibration",       ".axiscalibration"       },
+    { ".DeviceProfile",         ".deviceprofile"         },
 }};
 
 [[nodiscard]] std::string ToAsciiLower(std::string_view Text)
