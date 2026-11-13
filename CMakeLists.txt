@@ -190,10 +190,10 @@ set(FRONTIER_UI_COMPONENT_SOURCES
     Engine/Workspaces/Texturing/MaterialSurfacePane.cpp
     Engine/Workspaces/Texturing/MaterialInspectorPane.cpp
     Engine/Workspaces/Texturing/MaterialWorkspaceHost.cpp
-    Engine/Workspaces/Texturing/PatternStampStackSession.cpp
     Engine/Workspaces/Texturing/PatternStampLayerStackPane.cpp
     Engine/Workspaces/Texturing/PatternStampToolHeaderPane.cpp
     Engine/Workspaces/Texturing/PatternStampInspectorPane.cpp
+    Engine/Workspaces/Texturing/VectorViewportInteractor.cpp
     Engine/Workspaces/Texturing/PatternStampWorkspaceHost.cpp
     Engine/Workspaces/Texturing/BakingWorkspaceSession.cpp
     Engine/Workspaces/Texturing/BakingTargetsPane.cpp
@@ -362,6 +362,45 @@ frontier_compile_vectorfield_slang_stage(
     "FieldLatticeCompute.spv"
 )
 
+function(frontier_compile_vector_slang_shader SLANG_REL_PATH ENTRY_NAME STAGE_KIND OUT_SPV_NAME)
+    set(IN_SLANG "${FRONTIER_SHADER_SRC_DIR}/Vector/${SLANG_REL_PATH}")
+    set(OUT_SPV "${FRONTIER_COMPILED_SHADER_DIR}/${OUT_SPV_NAME}")
+    add_custom_command(
+        OUTPUT "${OUT_SPV}"
+        COMMAND "${FRONTIER_SLANGC_BIN}"
+            "${IN_SLANG}"
+            -I "${FRONTIER_SHADER_SRC_DIR}/Vector"
+            -I "${FRONTIER_SHADER_SRC_DIR}"
+            -target spirv
+            -profile spirv_1_3
+            -emit-spirv-directly
+            -fvk-use-entrypoint-name
+            -matrix-layout-row-major
+            -O0
+            -entry "${ENTRY_NAME}"
+            -stage "${STAGE_KIND}"
+            -o "${OUT_SPV}"
+        DEPENDS
+            "${IN_SLANG}"
+            "${FRONTIER_SHADER_SRC_DIR}/Vector/VectorCommon.slang"
+        COMMENT "[Slang] Compiling Vector/${SLANG_REL_PATH} (${STAGE_KIND}:${ENTRY_NAME}) -> ${OUT_SPV_NAME}"
+        VERBATIM
+    )
+    set(FRONTIER_SPV_OUTPUTS ${FRONTIER_SPV_OUTPUTS} "${OUT_SPV}" PARENT_SCOPE)
+endfunction()
+
+frontier_compile_vector_slang_shader(VectorModifierExpand.slang    ComputeEntry  compute  VectorModifierExpand.comp.spv)
+frontier_compile_vector_slang_shader(VectorStencilFill.slang       VertexEntry   vertex   VectorStencilFill.vert.spv)
+frontier_compile_vector_slang_shader(VectorStencilFill.slang       FragmentEntry fragment VectorStencilFill.frag.spv)
+frontier_compile_vector_slang_shader(VectorShapeCover.slang        VertexEntry       vertex   VectorShapeCover.vert.spv)
+frontier_compile_vector_slang_shader(VectorShapeCover.slang        FragmentEntry     fragment VectorShapeCover.frag.spv)
+frontier_compile_vector_slang_shader(VectorShapeCover.slang        StrokeVertexEntry   vertex   VectorStrokeCover.vert.spv)
+frontier_compile_vector_slang_shader(VectorShapeCover.slang        StrokeFragmentEntry fragment VectorStrokeCover.frag.spv)
+frontier_compile_vector_slang_shader(VectorLayerStackCompute.slang ComputeEntry  compute  VectorLayerStackCompute.comp.spv)
+frontier_compile_vector_slang_shader(VectorPbrSurfaceCompute.slang ComputeEntry  compute  VectorPbrSurfaceCompute.comp.spv)
+frontier_compile_vector_slang_shader(VectorGuideOverlay.slang      VertexEntry   vertex   VectorGuideOverlay.vert.spv)
+frontier_compile_vector_slang_shader(VectorGuideOverlay.slang      FragmentEntry fragment VectorGuideOverlay.frag.spv)
+
 if(FRONTIER_PROFILE STREQUAL "Editor")
     foreach(VF_SHADER_STEM
         LitBackdropRasterization
@@ -431,6 +470,9 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/GeometricRaster/Compute/ComputeDispatchEncoder.cpp
     Engine/GeometricRaster/Picking/ViewportPickQuery.cpp
     Engine/GeometricRaster/UV/UVWorkspaceRasterizer.cpp
+    Engine/GeometricRaster/Vector/VulkanVectorRenderMethod.cpp
+    Engine/GeometricRaster/Vector/VectorCanvasRasterizer.cpp
+    Engine/Workspaces/Texturing/PatternStampStackSession.cpp
     Engine/Input/InputExchange.cpp
     Engine/Input/InputExtension.cpp
     Engine/Lifecycle/RuntimeLifecycle.cpp
@@ -522,8 +564,13 @@ if(NOT FRONTIER_PROFILE STREQUAL "Shipping")
     list(APPEND FRONTIER_ENGINE_SOURCES ${FRONTIER_UI_COMPONENT_SOURCES})
 endif()
 
+include(Automation/ThorVGVector.cmake)
+
+set_source_files_properties(Engine/GeometricRaster/Vector/VulkanVectorRenderMethod.cpp
+    PROPERTIES INCLUDE_DIRECTORIES "${THORVG_VECTOR_SPI_INCLUDES}")
+
 add_library(FrontierEngine STATIC ${FRONTIER_ENGINE_SOURCES})
-add_dependencies(FrontierEngine FrontierShaders)
+add_dependencies(FrontierEngine FrontierShaders thorvg_static)
 
 target_include_directories(FrontierEngine PUBLIC
     "${CMAKE_SOURCE_DIR}"
@@ -534,8 +581,9 @@ target_include_directories(FrontierEngine PUBLIC
 )
 target_compile_definitions(FrontierEngine PUBLIC
     "FRONTIER_COMPILED_SHADER_DIR=\"${FRONTIER_COMPILED_SHADER_DIR}\""
+    "FRONTIER_REPO_ROOT_DIR=\"${CMAKE_SOURCE_DIR}\""
 )
-target_link_libraries(FrontierEngine PUBLIC FrontierCompileSettings Threads::Threads ${CMAKE_DL_LIBS})
+target_link_libraries(FrontierEngine PUBLIC FrontierCompileSettings thorvg_static Threads::Threads ${CMAKE_DL_LIBS})
 if(WIN32)
     target_link_libraries(FrontierEngine PUBLIC ws2_32)
 endif()
@@ -614,6 +662,7 @@ if(BUILD_TESTING)
     frontier_register_exhibit(UVAuthoringChaosValidation        Exhibits/UVAuthoringChaosValidation.cpp)
     frontier_register_exhibit(NetworkingSpaceValidation         Exhibits/NetworkingSpaceValidation.cpp)
     frontier_register_exhibit(VectorFieldValidation             Exhibits/VectorFieldValidation.cpp)
+    frontier_register_exhibit(VectorGraphicsGPUValidation       Exhibits/VectorGraphicsGPUValidation.cpp)
 
     if(NOT ANDROID AND NOT FRONTIER_PROFILE STREQUAL "Shipping")
         add_test(
@@ -624,6 +673,14 @@ if(BUILD_TESTING)
             add_test(
                 NAME FrontierEditorExecutableSmoke
                 COMMAND FrontierEditor --frames=3 --open-browser "--capture-png=${CMAKE_SOURCE_DIR}/Exhibits/Images/UV/FrontierEditor_DesktopExecutable.png"
+            )
+            add_test(
+                NAME FrontierPatternExecutableSmoke
+                COMMAND FrontierEditor --workspace=pattern --frames=3 --open-browser "--capture-png=${CMAKE_SOURCE_DIR}/Exhibits/Images/Texturing/FrontierPattern_DesktopExecutable.png"
+            )
+            add_test(
+                NAME FrontierStampExecutableSmoke
+                COMMAND FrontierEditor --workspace=stamp --frames=3 --open-browser "--capture-png=${CMAKE_SOURCE_DIR}/Exhibits/Images/Texturing/FrontierStamp_DesktopExecutable.png"
             )
         endif()
     endif()

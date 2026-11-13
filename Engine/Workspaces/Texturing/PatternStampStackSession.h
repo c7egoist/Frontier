@@ -9,9 +9,13 @@
 //                                                        INCLUDES
 //------------------------------------------------------------------------------------------------------------------------
 
+#include "Engine/Codecs/VectorCodec.h"
 #include "Engine/Components/PixelSpace.h"
+#include "Engine/GeometricRaster/Vector/VulkanVectorRenderMethod.h"
 
+#include <array>
 #include <cstdint>
+#include <filesystem>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -227,6 +231,15 @@ struct PatternStampLayerMaskSpec
     int32_t         Seed      = 211;
 };
 
+struct PointFieldPinSpec
+{
+    float     NormX  = 0.5f;
+    float     NormY  = 0.5f;
+    float     Weight = 1.0f;
+    ColorRgba Tint   { 239u, 244u, 207u, 255u };
+    bool      Active = false;
+};
+
 struct PatternStampModifierSpec
 {
     PatternStampModifierCategory Category = PatternStampModifierCategory::NoiseScale;
@@ -299,12 +312,22 @@ struct PatternStampLayerSpec
     float                 StrokeWidthPx     = 0.0f;
     PatternStampFillSourceMode StrokeSource      = PatternStampFillSourceMode::Solid;
     ColorRgba             StrokeTint        = { 22u, 24u, 28u, 255u };
+    GeometricRaster::VectorStrokeCapStyle  StrokeCap  = GeometricRaster::VectorStrokeCapStyle::Round;
+    GeometricRaster::VectorStrokeJoinStyle StrokeJoin = GeometricRaster::VectorStrokeJoinStyle::Round;
+    bool                  EvenOddFillRule   = false;
 
-    float CenterX     = 256.0f;
-    float CenterY     = 256.0f;
-    float WidthPx     = 128.0f;
-    float HeightPx    = 128.0f;
-    float RotationDeg = 0.0f;
+    std::string           FontAssetPath     { "EngineContent/FontsArchives/Archivo/Archivo-Bold.ttf" };
+    std::string           FontFamilyLabel   { "Archivo Bold" };
+    float                 LetterSpacingEm   = 0.0f;
+    std::string           SvgPathPayload    {};
+    std::vector<GeometricRaster::VectorCubicSubpath> CubicSubpaths {};
+    std::array<PointFieldPinSpec, 12u>               PointFieldPins {};
+
+    float                 CenterX           = 256.0f;
+    float                 CenterY           = 256.0f;
+    float                 WidthPx           = 128.0f;
+    float                 HeightPx          = 128.0f;
+    float                 RotationDeg       = 0.0f;
 
     PatternStampFinishPreset                       FinishPreset = PatternStampFinishPreset::PrintedDye;
     std::vector<PatternStampSurfaceChannelEntry> Channels     {};
@@ -400,6 +423,33 @@ public:
     [[nodiscard]] bool QueryCanUndo() const noexcept { return !UndoSnapshots.empty(); }
     [[nodiscard]] bool QueryCanRedo() const noexcept { return !RedoSnapshots.empty(); }
 
+    void BumpRevision() noexcept { ++GeometryRevision; }
+    [[nodiscard]] static uint64_t AllocateSessionSerial() noexcept;
+    static void InitializeDefaultPointFieldPins(PatternStampLayerSpec& Layer) noexcept;
+    static void SeedMotifCubicSubpathsIfEmpty(PatternStampLayerSpec& Layer) noexcept;
+    [[nodiscard]] bool ImportSvgIntoSession(
+        std::string_view            SvgSourceOrPath,
+        bool                        SourceIsFilePath,
+        float                       DropDocX,
+        float                       DropDocY,
+        std::string_view            DisplayTitle,
+        uint32_t                    TargetFolderOrLayerId = 0u,
+        std::string*                OptionalDiagnostic = nullptr);
+    [[nodiscard]] bool ApplyFontDrop(
+        const std::filesystem::path& FontPath,
+        std::string_view             TypefaceTitle,
+        float                        DropDocX,
+        float                        DropDocY,
+        uint32_t                     TargetLayerId = 0u);
+    [[nodiscard]] bool ApplyColourDrop(
+        ColorRgba                    Tint,
+        uint32_t                     TargetLayerId,
+        int32_t                      PinIndex = -1,
+        bool                         StrokeTarget = false);
+    [[nodiscard]] std::string ExportDocumentToSvgString() const;
+    [[nodiscard]] Codecs::VectorSpaceDocumentModel BuildVectorSpaceModel() const;
+    [[nodiscard]] bool                           LoadFromVectorSpaceModel(const Codecs::VectorSpaceDocumentModel& Model);
+
     void RecomputeSummaryMetrics() noexcept;
 
     [[nodiscard]] static const std::vector<PatternStampSurfaceChannelDescriptor>& InspectChannelDescriptors() noexcept;
@@ -423,6 +473,20 @@ public:
     bool                   ShowAxes      = true;
     int32_t                SnapStepPx    = 16;
     float                  ZoomFraction  = 1.0f;
+    float                  PanOffsetU    = 0.0f;
+    float                  PanOffsetV    = 0.0f;
+
+    // Interactive vector editing & GPU picking highlight
+    uint32_t               HoveredLayerId      = 0u;
+    int32_t                ActiveKnotIndex     = -1;
+    int32_t                ActivePointPinIndex = -1;
+    bool                   MarqueeActive       = false;
+    float                  MarqueeStartX       = 0.0f;
+    float                  MarqueeStartY       = 0.0f;
+    float                  MarqueeEndX         = 0.0f;
+    float                  MarqueeEndY         = 0.0f;
+    uint64_t               SessionInstanceSerial = AllocateSessionSerial();
+    uint64_t               GeometryRevision      = 1ull;
 
     // Layer stack filter/search UI settings
     PatternStampLayerFilterMode LayerFilter   = PatternStampLayerFilterMode::AllLayers;

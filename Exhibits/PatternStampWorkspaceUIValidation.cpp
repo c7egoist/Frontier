@@ -1,7 +1,7 @@
 /*==========================================================================================================================================
                                                  PATTERNSTAMPWORKSPACEUIVALIDATION.CPP
 ==========================================================================================================================================*/
-// 🧪 Domain & ImGui UI exhibit for Step 2 (Pattern Studio) + Step 3 (Stamp Studio) + ControlIcon 0..77 contour verification (zero 2D/PBR viewport).
+// 🧪 Domain & ImGui UI exhibit for Step 2 (Pattern Studio) + Step 3 (Stamp Studio) + ControlIcon 0..77 contour verification (live GPU Vulkan + ThorVG 2D/PBR viewport).
 
 #include "Engine/Components/Appearance/ThemeRepository.h"
 #include "Engine/Components/Appearance/TypographyRepository.h"
@@ -10,6 +10,8 @@
 #include "Engine/Components/Panes/WorkspaceAppearance.h"
 #include "Engine/Components/VectorIcons/VectorIconRepository.h"
 #include "Engine/Configuration/EngineConfiguration.h"
+#include "Engine/GeometricRaster/VulkanInterchange.h"
+#include "Engine/GeometricRaster/Vector/VectorCanvasRasterizer.h"
 #include "Engine/Workspaces/Texturing/PatternWorkspaceHost.h"
 #include "Engine/Workspaces/Texturing/StampWorkspaceHost.h"
 #include "Exhibits/SoftwareCanvasRasterizer.h"
@@ -149,9 +151,21 @@ int main()
     int            AtlasH      = 0;
     Io.Fonts->GetTexDataAsRGBA32(&AtlasPixels, &AtlasW, &AtlasH);
 
+    // Initialize Vulkan 1.3 + VectorCanvasRasterizer for real GPU VectorGraphics rendering inside Exhibits 05..08
+    GeometricRaster::VulkanInterchange      VulkanDevice {};
+    GeometricRaster::VectorCanvasRasterizer VectorRasterizer {};
+    std::string                             VkDiag {};
+    if (!VerifyCondition(VulkanDevice.InitializeInterchange(RepoRoot, &VkDiag), VkDiag.c_str()) ||
+        !VerifyCondition(VectorRasterizer.InitializeRasterizer(&VulkanDevice, std::filesystem::path(FRONTIER_COMPILED_SHADER_DIR)), "Initialized VectorCanvasRasterizer (.slang GPU pipelines)"))
+    {
+        return 1;
+    }
+
     // 3. Render Pattern Workspace (Main + OverlaySheets/Modifiers + Light Theme)
     {
         PatternWorkspaceHost PatternHost {};
+        PatternHost.ConfigureRepositoryRoot(RepoRoot);
+        PatternHost.AttachVulkanRasterizer(&VectorRasterizer);
         PatternHost.ConfigureLaunchPolicy(EngineConfiguration(EngineConfiguration::ConstructFeatureSetDefault()));
 
         Components::HeadlessWorkspaceDockContainer Dock {};
@@ -232,6 +246,8 @@ int main()
     // 4. Render Stamp Workspace Main (matches 01-HTML-stamp.png)
     {
         StampWorkspaceHost StampHost {};
+        StampHost.ConfigureRepositoryRoot(RepoRoot);
+        StampHost.AttachVulkanRasterizer(&VectorRasterizer);
         StampHost.ConfigureLaunchPolicy(EngineConfiguration(EngineConfiguration::ConstructFeatureSetDefault()));
 
         Components::HeadlessWorkspaceDockContainer Dock {};

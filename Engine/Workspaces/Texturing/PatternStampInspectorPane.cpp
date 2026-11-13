@@ -376,7 +376,12 @@ void PatternStampInspectorPane::Render(
                 if (TypographicBuffer.Active)
                 {
                     WorkspaceAppearance::ForwardInputToTextBuffer(TypographicBuffer, BodyInput, DeltaSeconds);
-                    Sel->TextContent = std::string(TypographicBuffer.Text);
+                    const std::string UpdatedText(TypographicBuffer.Text);
+                    if (UpdatedText != Sel->TextContent)
+                    {
+                        Sel->TextContent = UpdatedText;
+                        Session->BumpRevision();
+                    }
                 }
                 WorkspaceAppearance::ConstructTruncatedText(
                     Surface, FontWeightClass::Regular, { TextBoxR.X + 12.0f, TextBoxR.Y + 7.0f }, TextBoxR.Width - 24.0f, 10.5f, Theme.TextPrimary, TypographicBuffer.Text);
@@ -390,6 +395,7 @@ void PatternStampInspectorPane::Render(
                 {
                     ActiveSliderId  = FsSid;
                     Sel->FontSizePx = std::round((14.0f + FsNorm * 146.0f) * 0.5f) * 2.0f;
+                    Session->BumpRevision();
                 }
                 if (DragFs) ActiveSliderId = FsSid;
                 Py += 52.0f;
@@ -404,6 +410,7 @@ void PatternStampInspectorPane::Render(
                     {
                         Session->PushUndoSnapshot();
                         Sel->FillEnabled = FillOn;
+                        Session->BumpRevision();
                         Session->RecomputeSummaryMetrics();
                     }
                     Py += 34.0f;
@@ -417,6 +424,11 @@ void PatternStampInspectorPane::Render(
                             Surface, Ix, Py, Iw, "Fill Source", SourceOpts, 4u, static_cast<uint32_t>(Sel->FillSource), ChosenSrc, Theme, BodyInput.PrimaryPointer))
                     {
                         Sel->FillSource = static_cast<PatternStampFillSourceMode>(ChosenSrc);
+                        if (Sel->FillSource == PatternStampFillSourceMode::PointField)
+                        {
+                            PatternStampWorkspaceSession::InitializeDefaultPointFieldPins(*Sel);
+                        }
+                        Session->BumpRevision();
                     }
                     Py += 50.0f;
 
@@ -462,6 +474,7 @@ void PatternStampInspectorPane::Render(
                     {
                         ActiveSliderId     = SwSid;
                         Sel->StrokeWidthPx = std::round(SwNorm * 18.0f * 2.0f) * 0.5f;
+                        Session->BumpRevision();
                     }
                     if (DragSw) ActiveSliderId = SwSid;
                     Py += 52.0f;
@@ -538,8 +551,21 @@ void PatternStampInspectorPane::Render(
                     if (ConstructSliderReadoutRow(
                             Surface, Ix, Py, Iw, "Width", FormatFixedDecimals(Sel->WidthPx, 0), "px", WNorm, Theme, BodyInput.PrimaryPointer, DragW))
                     {
-                        ActiveSliderId = WSid;
-                        Sel->WidthPx   = std::round((6.0f + WNorm * 506.0f) * 0.5f) * 2.0f;
+                        ActiveSliderId    = WSid;
+                        const float PrevW = std::max(6.0f, Sel->WidthPx);
+                        const float NextW = std::round((6.0f + WNorm * 506.0f) * 0.5f) * 2.0f;
+                        const float Ratio = NextW / PrevW;
+                        Sel->WidthPx      = NextW;
+                        for (auto& Sub : Sel->CubicSubpaths)
+                        {
+                            for (auto& Knot : Sub.Knots)
+                            {
+                                Knot.AnchorX    *= Ratio;
+                                Knot.InHandleX  *= Ratio;
+                                Knot.OutHandleX *= Ratio;
+                            }
+                        }
+                        Session->BumpRevision();
                         Session->RecomputeSummaryMetrics();
                     }
                     if (DragW) ActiveSliderId = WSid;
@@ -552,8 +578,21 @@ void PatternStampInspectorPane::Render(
                     if (ConstructSliderReadoutRow(
                             Surface, Ix, Py, Iw, "Height", FormatFixedDecimals(Sel->HeightPx, 0), "px", HNorm, Theme, BodyInput.PrimaryPointer, DragH))
                     {
-                        ActiveSliderId = HSid;
-                        Sel->HeightPx  = std::round((6.0f + HNorm * 506.0f) * 0.5f) * 2.0f;
+                        ActiveSliderId    = HSid;
+                        const float PrevH = std::max(6.0f, Sel->HeightPx);
+                        const float NextH = std::round((6.0f + HNorm * 506.0f) * 0.5f) * 2.0f;
+                        const float Ratio = NextH / PrevH;
+                        Sel->HeightPx     = NextH;
+                        for (auto& Sub : Sel->CubicSubpaths)
+                        {
+                            for (auto& Knot : Sub.Knots)
+                            {
+                                Knot.AnchorY    *= Ratio;
+                                Knot.InHandleY  *= Ratio;
+                                Knot.OutHandleY *= Ratio;
+                            }
+                        }
+                        Session->BumpRevision();
                         Session->RecomputeSummaryMetrics();
                     }
                     if (DragH) ActiveSliderId = HSid;
@@ -1352,6 +1391,9 @@ void PatternStampInspectorPane::Render(
                 if (Picked < Labels.size())
                 {
                     Sel->MotifShape = static_cast<PatternStampMotifShape>(Picked);
+                    Sel->CubicSubpaths.clear();
+                    PatternStampWorkspaceSession::SeedMotifCubicSubpathsIfEmpty(*Sel);
+                    Session->BumpRevision();
                     Session->RecomputeSummaryMetrics();
                 }
             },

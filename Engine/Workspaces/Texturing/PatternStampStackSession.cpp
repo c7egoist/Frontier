@@ -7,13 +7,47 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
+#include <cstdio>
+#include <sstream>
 
 namespace Frontier::Workspaces
 {
 
 namespace
 {
+
+constexpr float KappaBezierCircle = 0.55228475f;
+constexpr float TwoPiScalar       = 6.28318530718f;
+
+std::filesystem::path ResolveWorkspaceFontPath(std::string_view CandidateOrRelative) noexcept
+{
+    if (CandidateOrRelative.empty())
+    {
+        CandidateOrRelative = "EngineContent/FontsArchives/Archivo/Archivo-Bold.ttf";
+    }
+    std::filesystem::path P(CandidateOrRelative);
+    if (std::filesystem::exists(P))
+    {
+        return P;
+    }
+#ifdef FRONTIER_REPO_ROOT_DIR
+    const std::filesystem::path FromRoot = std::filesystem::path(FRONTIER_REPO_ROOT_DIR) / P;
+    if (std::filesystem::exists(FromRoot))
+    {
+        return FromRoot;
+    }
+#endif
+    return P;
+}
+
+std::string FormatSvgHexRgb(ColorRgba Tint) noexcept
+{
+    char Buf[16];
+    std::snprintf(Buf, sizeof(Buf), "#%02x%02x%02x", Tint.Red, Tint.Green, Tint.Blue);
+    return std::string(Buf);
+}
 
 constexpr PatternStampSurfaceChannelEntry ConstructChannelEntry(PatternStampSurfaceChannelKey Key, float Scalar, ColorRgba Tint) noexcept
 {
@@ -577,6 +611,11 @@ void PatternStampWorkspaceSession::LoadPresetByIndex(std::size_t Index) noexcept
         else PopulateStampPrecisionReticlePreset(Document);
         StatusNotice = "Non-destructive Modifier Stack";
     }
+    for (auto& L : Document.Layers)
+    {
+        InitializeDefaultPointFieldPins(L);
+    }
+    BumpRevision();
     RecomputeSummaryMetrics();
 }
 
@@ -729,6 +768,12 @@ std::size_t PatternStampWorkspaceSession::CountFolderImmediateMembers(uint32_t F
     return Count;
 }
 
+uint64_t PatternStampWorkspaceSession::AllocateSessionSerial() noexcept
+{
+    static std::atomic<uint64_t> GlobalSerialCounter { 1ull };
+    return GlobalSerialCounter.fetch_add(1ull, std::memory_order_relaxed);
+}
+
 void PatternStampWorkspaceSession::SelectLayer(uint32_t Identity) noexcept
 {
     if (FindLayerById(Identity) != nullptr)
@@ -793,10 +838,13 @@ void PatternStampWorkspaceSession::AddLayer(PatternStampLayerCategory Category) 
             ConstructChannelEntry(PatternStampSurfaceChannelKey::Height,    0.25f, { 158u, 162u, 170u, 255u }),
         };
         Next.Mask = { false, false, PatternStampMaskMode::Noise, 4.0f, 0.45f, 0.25f, 211 };
+        InitializeDefaultPointFieldPins(Next);
+        SeedMotifCubicSubpathsIfEmpty(Next);
     }
 
     Document.Layers.push_back(std::move(Next));
     Document.SelectedLayerId = Document.Layers.back().Identity;
+    BumpRevision();
     RecomputeSummaryMetrics();
 }
 
@@ -826,6 +874,7 @@ bool PatternStampWorkspaceSession::DuplicateSelectedLayer() noexcept
     }
     Document.Layers.insert(It, Copy);
     Document.SelectedLayerId = Copy.Identity;
+    BumpRevision();
     RecomputeSummaryMetrics();
     return true;
 }
@@ -855,6 +904,7 @@ bool PatternStampWorkspaceSession::DeleteSelectedLayer() noexcept
         std::remove_if(Document.Layers.begin(), Document.Layers.end(), [DelId](const PatternStampLayerSpec& L) { return L.Identity == DelId; }),
         Document.Layers.end());
     Document.SelectedLayerId = Document.Layers.empty() ? 0u : Document.Layers.back().Identity;
+    BumpRevision();
     RecomputeSummaryMetrics();
     return true;
 }
@@ -874,6 +924,7 @@ bool PatternStampWorkspaceSession::MoveLayerStep(uint32_t Identity, int32_t Delt
     }
     PushUndoSnapshot();
     std::swap(Document.Layers[static_cast<std::size_t>(Idx)], Document.Layers[static_cast<std::size_t>(Next)]);
+    BumpRevision();
     RecomputeSummaryMetrics();
     return true;
 }
@@ -911,6 +962,7 @@ bool PatternStampWorkspaceSession::ReorderLayerRelative(uint32_t SourceId, uint3
         }
         Document.Layers.insert(TgtIt, std::move(Moved));
     }
+    BumpRevision();
     RecomputeSummaryMetrics();
     return true;
 }
@@ -921,6 +973,7 @@ void PatternStampWorkspaceSession::ToggleLayerVisible(uint32_t Identity) noexcep
     {
         PushUndoSnapshot();
         L->Visible = !L->Visible;
+        BumpRevision();
         RecomputeSummaryMetrics();
     }
 }
@@ -948,6 +1001,7 @@ void PatternStampWorkspaceSession::ToggleFolderCollapsed(uint32_t Identity) noex
         if (L->Category == PatternStampLayerCategory::Folder)
         {
             L->CollapsedFolder = !L->CollapsedFolder;
+            BumpRevision();
         }
     }
 }
@@ -960,6 +1014,7 @@ void PatternStampWorkspaceSession::ToggleSelectedLayerMask() noexcept
         {
             PushUndoSnapshot();
             Sel->Mask.Enabled = !Sel->Mask.Enabled;
+            BumpRevision();
             RecomputeSummaryMetrics();
         }
     }
@@ -999,6 +1054,7 @@ bool PatternStampWorkspaceSession::AddChannelToSelectedLayer(PatternStampSurface
     PushUndoSnapshot();
     const auto& Desc = QueryChannelDescriptor(ChannelKey);
     Sel->Channels.push_back(ConstructChannelEntry(ChannelKey, Desc.DefaultScalar, Desc.DefaultTint));
+    BumpRevision();
     return true;
 }
 
@@ -1014,7 +1070,12 @@ bool PatternStampWorkspaceSession::RemoveChannelFromSelectedLayer(PatternStampSu
     Sel->Channels.erase(
         std::remove_if(Sel->Channels.begin(), Sel->Channels.end(), [ChannelKey](const PatternStampSurfaceChannelEntry& B) { return B.Key == ChannelKey; }),
         Sel->Channels.end());
-    return Sel->Channels.size() != Before;
+    if (Sel->Channels.size() != Before)
+    {
+        BumpRevision();
+        return true;
+    }
+    return false;
 }
 
 PatternStampSurfaceChannelEntry* PatternStampWorkspaceSession::FindChannelEntry(PatternStampLayerSpec& Layer, PatternStampSurfaceChannelKey ChannelKey) noexcept
@@ -1054,6 +1115,7 @@ void PatternStampWorkspaceSession::ApplyFinishPresetToSelectedLayer(PatternStamp
         if (auto* M = FindChannelEntry(*Sel, PatternStampSurfaceChannelKey::Metalness)) M->ScalarReading = Presets[Idx].M;
         if (auto* H = FindChannelEntry(*Sel, PatternStampSurfaceChannelKey::Height))    H->ScalarReading = Presets[Idx].H;
     }
+    BumpRevision();
 }
 
 bool PatternStampWorkspaceSession::AddModifierToSelectedLayer(PatternStampModifierCategory Category) noexcept
@@ -1067,6 +1129,7 @@ bool PatternStampWorkspaceSession::AddModifierToSelectedLayer(PatternStampModifi
     PatternStampModifierSpec Spec {};
     Spec.Category = Category;
     Sel->Modifiers.push_back(Spec);
+    BumpRevision();
     RecomputeSummaryMetrics();
     return true;
 }
@@ -1080,6 +1143,7 @@ bool PatternStampWorkspaceSession::RemoveModifierFromSelectedLayer(std::size_t M
     }
     PushUndoSnapshot();
     Sel->Modifiers.erase(Sel->Modifiers.begin() + static_cast<std::ptrdiff_t>(ModifierIndex));
+    BumpRevision();
     RecomputeSummaryMetrics();
     return true;
 }
@@ -1088,6 +1152,7 @@ void PatternStampWorkspaceSession::AssignResolution(uint32_t TargetResolutionPx)
 {
     ResolutionPx = std::clamp(TargetResolutionPx, 64u, 4096u);
     StatusNotice = "Resolution set to " + std::to_string(ResolutionPx) + " x " + std::to_string(ResolutionPx) + "px";
+    BumpRevision();
 }
 
 void PatternStampWorkspaceSession::PushUndoSnapshot() noexcept
@@ -1109,6 +1174,7 @@ bool PatternStampWorkspaceSession::ApplyUndo() noexcept
     RedoSnapshots.push_back(Document);
     Document = std::move(UndoSnapshots.back());
     UndoSnapshots.pop_back();
+    BumpRevision();
     RecomputeSummaryMetrics();
     return true;
 }
@@ -1122,8 +1188,872 @@ bool PatternStampWorkspaceSession::ApplyRedo() noexcept
     UndoSnapshots.push_back(Document);
     Document = std::move(RedoSnapshots.back());
     RedoSnapshots.pop_back();
+    BumpRevision();
     RecomputeSummaryMetrics();
     return true;
+}
+
+void PatternStampWorkspaceSession::InitializeDefaultPointFieldPins(PatternStampLayerSpec& Layer) noexcept
+{
+    bool AnyActive = false;
+    for (const auto& P : Layer.PointFieldPins)
+    {
+        if (P.Active)
+        {
+            AnyActive = true;
+            break;
+        }
+    }
+    if (AnyActive)
+    {
+        return;
+    }
+    Layer.PointFieldPins[0] = { 0.28f, 0.28f, 1.2f, Layer.FillTint, true };
+    Layer.PointFieldPins[1] = { 0.72f, 0.28f, 1.0f, Layer.FillTintB, true };
+    Layer.PointFieldPins[2] = { 0.72f, 0.72f, 1.1f, ColorRgba{ 232u, 194u, 122u, 255u }, true };
+    Layer.PointFieldPins[3] = { 0.28f, 0.72f, 1.0f, ColorRgba{ 44u, 58u, 74u, 255u }, true };
+}
+
+void PatternStampWorkspaceSession::SeedMotifCubicSubpathsIfEmpty(PatternStampLayerSpec& Layer) noexcept
+{
+    InitializeDefaultPointFieldPins(Layer);
+    if (!Layer.CubicSubpaths.empty() || Layer.Category == PatternStampLayerCategory::Folder ||
+        Layer.Category == PatternStampLayerCategory::GradientWash)
+    {
+        return;
+    }
+
+    const float HalfW = std::max(4.0f, Layer.WidthPx * 0.5f);
+    const float HalfH = std::max(4.0f, Layer.HeightPx * 0.5f);
+    const float Smooth = std::clamp(Layer.CurveSmoothness, 0.0f, 1.0f);
+
+    GeometricRaster::VectorCubicSubpath MainSubpath {};
+    MainSubpath.ClosedLoop = Layer.ClosedCurveLoop;
+
+    auto AppendSharpPoly = [&](const std::vector<GeometricRaster::VectorVertex2D>& Pts, bool Closed)
+    {
+        MainSubpath.ClosedLoop = Closed;
+        MainSubpath.Knots.reserve(Pts.size());
+        for (const auto& Pt : Pts)
+        {
+            MainSubpath.Knots.push_back({ Pt.X, Pt.Y, Pt.X, Pt.Y, Pt.X, Pt.Y, false });
+        }
+    };
+
+    switch (Layer.MotifShape)
+    {
+        case PatternStampMotifShape::Circle:
+        case PatternStampMotifShape::Ring:
+        {
+            const float Kx = HalfW * KappaBezierCircle;
+            const float Ky = HalfH * KappaBezierCircle;
+            MainSubpath.ClosedLoop = true;
+            MainSubpath.Knots = {
+                {  0.0f,  -HalfH, -Kx,    -HalfH,  Kx,    -HalfH, true },
+                {  HalfW,  0.0f,   HalfW, -Ky,     HalfW,  Ky,    true },
+                {  0.0f,   HalfH,  Kx,     HalfH, -Kx,     HalfH, true },
+                { -HalfW,  0.0f,  -HalfW,  Ky,    -HalfW, -Ky,    true },
+            };
+            Layer.CubicSubpaths.push_back(std::move(MainSubpath));
+            if (Layer.MotifShape == PatternStampMotifShape::Ring)
+            {
+                const float InnerScale = 0.58f;
+                const float Iw = HalfW * InnerScale;
+                const float Ih = HalfH * InnerScale;
+                const float Ikx = Iw * KappaBezierCircle;
+                const float Iky = Ih * KappaBezierCircle;
+                GeometricRaster::VectorCubicSubpath Hole {};
+                Hole.ClosedLoop = true;
+                Hole.Knots = {
+                    {  0.0f, -Ih,  Ikx, -Ih, -Ikx, -Ih, true },
+                    { -Iw,    0.0f, -Iw, -Iky, -Iw,  Iky, true },
+                    {  0.0f,  Ih,  -Ikx,  Ih,  Ikx,  Ih, true },
+                    {  Iw,    0.0f,  Iw,  Iky,  Iw, -Iky, true },
+                };
+                Layer.CubicSubpaths.push_back(std::move(Hole));
+                Layer.EvenOddFillRule = true;
+            }
+            return;
+        }
+        case PatternStampMotifShape::RoundedBox:
+        {
+            const float Rad = std::min(HalfW, HalfH) * (0.18f + 0.30f * Smooth);
+            const float C = Rad * KappaBezierCircle;
+            MainSubpath.ClosedLoop = true;
+            MainSubpath.Knots = {
+                { -HalfW + Rad, -HalfH, -HalfW + Rad - C, -HalfH, HalfW - Rad, -HalfH, false },
+                {  HalfW - Rad, -HalfH,  HalfW - Rad, -HalfH, HalfW - Rad + C, -HalfH, true },
+                {  HalfW, -HalfH + Rad,  HalfW, -HalfH + Rad - C, HalfW, HalfH - Rad, false },
+                {  HalfW,  HalfH - Rad,  HalfW,  HalfH - Rad, HalfW, HalfH - Rad + C, true },
+                {  HalfW - Rad,  HalfH,  HalfW - Rad + C, HalfH, -HalfW + Rad, HalfH, false },
+                { -HalfW + Rad,  HalfH, -HalfW + Rad, HalfH, -HalfW + Rad - C, HalfH, true },
+                { -HalfW,  HalfH - Rad, -HalfW,  HalfH - Rad + C, -HalfW, -HalfH + Rad, false },
+                { -HalfW, -HalfH + Rad, -HalfW, -HalfH + Rad, -HalfW, -HalfH + Rad - C, true },
+            };
+            Layer.CubicSubpaths.push_back(std::move(MainSubpath));
+            return;
+        }
+        case PatternStampMotifShape::Diamond:
+        {
+            AppendSharpPoly({ { 0.0f, -HalfH }, { HalfW, 0.0f }, { 0.0f, HalfH }, { -HalfW, 0.0f } }, true);
+            break;
+        }
+        case PatternStampMotifShape::Hexagon:
+        {
+            std::vector<GeometricRaster::VectorVertex2D> Pts;
+            for (int I = 0; I < 6; ++I)
+            {
+                const float A = TwoPiScalar * (static_cast<float>(I) / 6.0f) - 1.5707963f;
+                Pts.push_back({ std::cos(A) * HalfW, std::sin(A) * HalfH });
+            }
+            AppendSharpPoly(Pts, true);
+            break;
+        }
+        case PatternStampMotifShape::Triangle:
+        {
+            AppendSharpPoly({ { 0.0f, -HalfH }, { HalfW * 0.866f, HalfH * 0.75f }, { -HalfW * 0.866f, HalfH * 0.75f } }, true);
+            break;
+        }
+        case PatternStampMotifShape::Star:
+        {
+            std::vector<GeometricRaster::VectorVertex2D> Pts;
+            for (int I = 0; I < 10; ++I)
+            {
+                const float A = TwoPiScalar * (static_cast<float>(I) / 10.0f) - 1.5707963f;
+                const float S = ((I & 1) == 0) ? 1.0f : 0.44f;
+                Pts.push_back({ std::cos(A) * HalfW * S, std::sin(A) * HalfH * S });
+            }
+            AppendSharpPoly(Pts, true);
+            break;
+        }
+        case PatternStampMotifShape::Cross:
+        {
+            const float ArmW = HalfW * 0.34f;
+            const float ArmH = HalfH * 0.34f;
+            AppendSharpPoly({
+                { -ArmW, -HalfH }, {  ArmW, -HalfH }, {  ArmW, -ArmH }, {  HalfW, -ArmH },
+                {  HalfW,  ArmH }, {  ArmW,  ArmH }, {  ArmW,  HalfH }, { -ArmW,  HalfH },
+                { -ArmW,  ArmH }, { -HalfW,  ArmH }, { -HalfW, -ArmH }, { -ArmW, -ArmH },
+            }, true);
+            break;
+        }
+        case PatternStampMotifShape::Chevron:
+        {
+            const float Thick = HalfH * 0.42f;
+            AppendSharpPoly({
+                { -HalfW,  HalfH * 0.2f }, { 0.0f, -HalfH }, { HalfW, HalfH * 0.2f },
+                {  HalfW,  HalfH * 0.2f + Thick }, { 0.0f, -HalfH + Thick }, { -HalfW, HalfH * 0.2f + Thick },
+            }, true);
+            break;
+        }
+        case PatternStampMotifShape::StripeBar:
+        {
+            const float BarH = HalfH * 0.28f;
+            AppendSharpPoly({ { -HalfW, -BarH }, { HalfW, -BarH }, { HalfW, BarH }, { -HalfW, BarH } }, true);
+            break;
+        }
+        case PatternStampMotifShape::Arc:
+        {
+            std::vector<GeometricRaster::VectorVertex2D> Pts;
+            for (int I = 0; I <= 14; ++I)
+            {
+                const float A = 3.14159265f * (static_cast<float>(I) / 14.0f) - 3.14159265f;
+                Pts.push_back({ std::cos(A) * HalfW, std::sin(A) * HalfH });
+            }
+            for (int I = 14; I >= 0; --I)
+            {
+                const float A = 3.14159265f * (static_cast<float>(I) / 14.0f) - 3.14159265f;
+                Pts.push_back({ std::cos(A) * HalfW * 0.62f, std::sin(A) * HalfH * 0.62f });
+            }
+            AppendSharpPoly(Pts, true);
+            break;
+        }
+        case PatternStampMotifShape::Teardrop:
+        {
+            MainSubpath.ClosedLoop = true;
+            MainSubpath.Knots = {
+                {  0.0f,        -HalfH,         -HalfW * 0.12f, -HalfH * 0.55f,  HalfW * 0.12f, -HalfH * 0.55f, false },
+                {  HalfW * 0.72f, HalfH * 0.25f, HalfW * 0.72f, -HalfH * 0.10f,  HalfW * 0.72f,  HalfH * 0.70f, true },
+                {  0.0f,         HalfH,          HalfW * 0.42f,  HalfH,         -HalfW * 0.42f,  HalfH,         true },
+                { -HalfW * 0.72f, HalfH * 0.25f,-HalfW * 0.72f,  HalfH * 0.70f, -HalfW * 0.72f, -HalfH * 0.10f, true },
+            };
+            Layer.CubicSubpaths.push_back(std::move(MainSubpath));
+            return;
+        }
+        case PatternStampMotifShape::Leaf:
+        {
+            MainSubpath.ClosedLoop = true;
+            MainSubpath.Knots = {
+                { 0.0f, -HalfH, -HalfW * 0.95f, -HalfH * 0.20f,  HalfW * 0.95f, -HalfH * 0.20f, false },
+                { 0.0f,  HalfH,  HalfW * 0.95f,  HalfH * 0.35f, -HalfW * 0.95f,  HalfH * 0.35f, false },
+            };
+            Layer.CubicSubpaths.push_back(std::move(MainSubpath));
+            return;
+        }
+        case PatternStampMotifShape::FivePetalRosette:
+        {
+            std::vector<GeometricRaster::VectorVertex2D> Pts;
+            for (int I = 0; I < 40; ++I)
+            {
+                const float A = TwoPiScalar * (static_cast<float>(I) / 40.0f);
+                const float R = 0.52f + 0.48f * std::fabs(std::cos(2.5f * A));
+                Pts.push_back({ std::cos(A) * HalfW * R, std::sin(A) * HalfH * R });
+            }
+            AppendSharpPoly(Pts, true);
+            break;
+        }
+        case PatternStampMotifShape::CogGear:
+        {
+            std::vector<GeometricRaster::VectorVertex2D> Pts;
+            const int Teeth = 10;
+            for (int I = 0; I < Teeth * 4; ++I)
+            {
+                const float A = TwoPiScalar * (static_cast<float>(I) / static_cast<float>(Teeth * 4));
+                const float R = ((I % 4) < 2) ? 1.0f : 0.72f;
+                Pts.push_back({ std::cos(A) * HalfW * R, std::sin(A) * HalfH * R });
+            }
+            AppendSharpPoly(Pts, true);
+            break;
+        }
+        case PatternStampMotifShape::LineStroke:
+        {
+            AppendSharpPoly({ { -HalfW, 0.0f }, { HalfW, 0.0f } }, false);
+            break;
+        }
+        case PatternStampMotifShape::Square:
+        case PatternStampMotifShape::VectorPath:
+        default:
+        {
+            AppendSharpPoly({ { -HalfW, -HalfH }, { HalfW, -HalfH }, { HalfW, HalfH }, { -HalfW, HalfH } }, true);
+            break;
+        }
+    }
+
+    Layer.CubicSubpaths.push_back(std::move(MainSubpath));
+}
+
+bool PatternStampWorkspaceSession::ImportSvgIntoSession(
+    std::string_view SvgSourceOrPath,
+    bool             SourceIsFilePath,
+    float            DropDocX,
+    float            DropDocY,
+    std::string_view DisplayTitle,
+    uint32_t         TargetFolderOrLayerId,
+    std::string*     OptionalDiagnostic)
+{
+    std::string NormalizedSvgStorage;
+    std::string_view EffectiveSource = SvgSourceOrPath;
+    if (!SourceIsFilePath && !SvgSourceOrPath.empty())
+    {
+        std::string_view Trimmed = SvgSourceOrPath;
+        while (!Trimmed.empty() && (Trimmed.front() == ' ' || Trimmed.front() == '\t' || Trimmed.front() == '\n' || Trimmed.front() == '\r'))
+        {
+            Trimmed.remove_prefix(1u);
+        }
+        if (Trimmed.find("<svg") == std::string_view::npos)
+        {
+            if (Trimmed.find('<') != std::string_view::npos)
+            {
+                NormalizedSvgStorage =
+                    "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 512 512\">" +
+                    std::string(Trimmed) +
+                    "</svg>";
+            }
+            else
+            {
+                NormalizedSvgStorage =
+                    "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 512 512\"><path d=\"" +
+                    std::string(Trimmed) +
+                    "\" fill=\"#EFF4CF\"/></svg>";
+            }
+            EffectiveSource = NormalizedSvgStorage;
+        }
+    }
+
+    GeometricRaster::ThorVGVectorFrontend Frontend;
+    std::vector<GeometricRaster::ExtractedSvgLayer> Extracted;
+    if (!Frontend.ExtractSvgToEditableLayers(EffectiveSource, SourceIsFilePath, 220.0f, DropDocX, DropDocY, Extracted, OptionalDiagnostic))
+    {
+        return false;
+    }
+    if (Document.Layers.size() >= MaxLayerLimit)
+    {
+        return false;
+    }
+
+    PushUndoSnapshot();
+
+    uint32_t EnclosingFolderId = 0u;
+    if (TargetFolderOrLayerId != 0u)
+    {
+        if (const auto* TargetL = FindLayerById(TargetFolderOrLayerId))
+        {
+            EnclosingFolderId = (TargetL->Category == PatternStampLayerCategory::Folder) ? TargetL->Identity : TargetL->EnclosingFolderId;
+        }
+    }
+
+    if (Extracted.size() > 1u && EnclosingFolderId == 0u && Document.Layers.size() + Extracted.size() + 1u <= MaxLayerLimit)
+    {
+        PatternStampLayerSpec Folder {};
+        Folder.Identity    = Document.NextIdentitySeed++;
+        Folder.Name        = DisplayTitle.empty() ? std::string("Imported SVG Group") : std::string(DisplayTitle);
+        Folder.Category    = PatternStampLayerCategory::Folder;
+        Folder.Visible     = true;
+        Folder.FillEnabled = false;
+        EnclosingFolderId  = Folder.Identity;
+        Document.Layers.push_back(std::move(Folder));
+    }
+
+    uint32_t LastCreatedId = 0u;
+    const std::size_t RemainingSlots = MaxLayerLimit - Document.Layers.size();
+    const std::size_t ImportCount    = std::min(Extracted.size(), RemainingSlots);
+
+    for (std::size_t I = 0u; I < ImportCount; ++I)
+    {
+        const auto& Src = Extracted[I];
+        PatternStampLayerSpec Next {};
+        Next.Identity          = Document.NextIdentitySeed++;
+        Next.EnclosingFolderId = EnclosingFolderId;
+        Next.Name              = (Extracted.size() == 1u && !DisplayTitle.empty()) ? std::string(DisplayTitle) : Src.Title;
+        Next.Category          = PatternStampLayerCategory::Motif;
+        Next.MotifShape        = PatternStampMotifShape::VectorPath;
+        Next.Visible           = true;
+        Next.BlendMode         = Src.BlendOrdinal;
+        Next.Opacity           = std::clamp(Src.Opacity, 0.0f, 1.0f);
+        Next.EvenOddFillRule   = Src.EvenOddFillRule;
+        Next.FillEnabled       = Src.FillEnabled;
+        Next.FillSource        = (Src.GradientPreset == GeometricRaster::VectorGradientPreset::Linear)
+            ? PatternStampFillSourceMode::LinearGradient
+            : (Src.GradientPreset == GeometricRaster::VectorGradientPreset::Radial
+                ? PatternStampFillSourceMode::RadialGradient
+                : PatternStampFillSourceMode::Solid);
+        Next.FillTint          = Src.FillTint;
+        Next.FillTintB         = Src.FillTintB;
+        Next.GradientAngleDeg  = Src.GradientAngleDeg;
+        for (const auto& Stop : Src.Stops)
+        {
+            Next.FillStops.push_back({ Stop.Tint, Stop.Offset });
+        }
+        Next.StrokeWidthPx     = Src.StrokeEnabled ? Src.StrokeWidthPx : 0.0f;
+        Next.StrokeTint        = Src.StrokeTint;
+        Next.CenterX           = Src.CenterX;
+        Next.CenterY           = Src.CenterY;
+        Next.WidthPx           = std::max(8.0f, Src.WidthPx);
+        Next.HeightPx          = std::max(8.0f, Src.HeightPx);
+
+        // Convert extracted subpaths into layer-local centered coordinates so Gizmo & modifiers work identically
+        Next.CubicSubpaths = Src.Subpaths;
+        for (auto& Sub : Next.CubicSubpaths)
+        {
+            for (auto& Knot : Sub.Knots)
+            {
+                Knot.AnchorX    -= Next.CenterX;
+                Knot.AnchorY    -= Next.CenterY;
+                Knot.InHandleX  -= Next.CenterX;
+                Knot.InHandleY  -= Next.CenterY;
+                Knot.OutHandleX -= Next.CenterX;
+                Knot.OutHandleY -= Next.CenterY;
+            }
+        }
+        if (!SourceIsFilePath && I == 0u)
+        {
+            Next.SvgPathPayload = std::string(SvgSourceOrPath);
+        }
+        Next.Channels = {
+            ConstructChannelEntry(PatternStampSurfaceChannelKey::Albedo,    1.0f,  Next.FillTint),
+            ConstructChannelEntry(PatternStampSurfaceChannelKey::Roughness, 0.34f, { 158u, 162u, 170u, 255u }),
+            ConstructChannelEntry(PatternStampSurfaceChannelKey::Metalness, 0.05f, { 158u, 162u, 170u, 255u }),
+            ConstructChannelEntry(PatternStampSurfaceChannelKey::Height,    0.25f, { 158u, 162u, 170u, 255u }),
+        };
+        InitializeDefaultPointFieldPins(Next);
+        LastCreatedId = Next.Identity;
+        Document.Layers.push_back(std::move(Next));
+    }
+
+    if (LastCreatedId != 0u)
+    {
+        Document.SelectedLayerId = LastCreatedId;
+        StatusNotice = "Imported SVG vector layer" + std::string(ImportCount > 1u ? "s (" + std::to_string(ImportCount) + ")" : "");
+        BumpRevision();
+        RecomputeSummaryMetrics();
+        return true;
+    }
+    return false;
+}
+
+bool PatternStampWorkspaceSession::ApplyFontDrop(
+    const std::filesystem::path& FontPath,
+    std::string_view             TypefaceTitle,
+    float                        DropDocX,
+    float                        DropDocY,
+    uint32_t                     TargetLayerId)
+{
+    const std::filesystem::path Resolved = ResolveWorkspaceFontPath(FontPath.string());
+    if (!GeometricRaster::ThorVGVectorFrontend::RegisterTypefaceFile(Resolved))
+    {
+        return false;
+    }
+
+    PushUndoSnapshot();
+    const std::string DisplayFamily = TypefaceTitle.empty() ? Resolved.stem().string() : std::string(TypefaceTitle);
+
+    if (TargetLayerId != 0u)
+    {
+        if (PatternStampLayerSpec* Target = FindLayerById(TargetLayerId))
+        {
+            if (Target->Category == PatternStampLayerCategory::Typographic)
+            {
+                Target->FontAssetPath   = Resolved.string();
+                Target->FontFamilyLabel = DisplayFamily;
+                StatusNotice            = "Applied font " + DisplayFamily + " to " + Target->Name;
+                BumpRevision();
+                RecomputeSummaryMetrics();
+                return true;
+            }
+        }
+    }
+
+    if (Document.Layers.size() >= MaxLayerLimit)
+    {
+        return false;
+    }
+
+    PatternStampLayerSpec Next {};
+    Next.Identity        = Document.NextIdentitySeed++;
+    Next.Name            = DisplayFamily + " Type";
+    Next.Category        = PatternStampLayerCategory::Typographic;
+    Next.Visible         = true;
+    Next.Opacity         = 1.0f;
+    Next.TextContent     = "FRONTIER";
+    Next.FontSizePx      = 64.0f;
+    Next.FontAssetPath   = Resolved.string();
+    Next.FontFamilyLabel = DisplayFamily;
+    Next.FillEnabled     = true;
+    Next.FillTint        = { 239u, 244u, 207u, 255u };
+    Next.FillTintB       = { 90u, 118u, 146u, 255u };
+    Next.CenterX         = std::clamp(DropDocX, 24.0f, 488.0f);
+    Next.CenterY         = std::clamp(DropDocY, 24.0f, 488.0f);
+    Next.WidthPx         = 220.0f;
+    Next.HeightPx        = 76.0f;
+    Next.Channels = {
+        ConstructChannelEntry(PatternStampSurfaceChannelKey::Albedo,    1.0f,  Next.FillTint),
+        ConstructChannelEntry(PatternStampSurfaceChannelKey::Roughness, 0.34f, { 158u, 162u, 170u, 255u }),
+        ConstructChannelEntry(PatternStampSurfaceChannelKey::Height,    0.30f, { 158u, 162u, 170u, 255u }),
+    };
+    InitializeDefaultPointFieldPins(Next);
+
+    Document.Layers.push_back(std::move(Next));
+    Document.SelectedLayerId = Document.Layers.back().Identity;
+    StatusNotice = "Created typographic layer with " + DisplayFamily;
+    BumpRevision();
+    RecomputeSummaryMetrics();
+    return true;
+}
+
+bool PatternStampWorkspaceSession::ApplyColourDrop(
+    ColorRgba Tint,
+    uint32_t  TargetLayerId,
+    int32_t   PinIndex,
+    bool      StrokeTarget)
+{
+    PushUndoSnapshot();
+    if (TargetLayerId == 0u)
+    {
+        Document.GroundEnabled = true;
+        Document.GroundTintA   = Tint;
+        StatusNotice           = "Applied dropped colour to ground fill";
+        BumpRevision();
+        return true;
+    }
+
+    PatternStampLayerSpec* Target = FindLayerById(TargetLayerId);
+    if (Target == nullptr)
+    {
+        return false;
+    }
+    Document.SelectedLayerId = Target->Identity;
+    if (PinIndex >= 0 && static_cast<std::size_t>(PinIndex) < Target->PointFieldPins.size())
+    {
+        Target->FillSource = PatternStampFillSourceMode::PointField;
+        InitializeDefaultPointFieldPins(*Target);
+        Target->PointFieldPins[static_cast<std::size_t>(PinIndex)].Active = true;
+        Target->PointFieldPins[static_cast<std::size_t>(PinIndex)].Tint   = Tint;
+        StatusNotice = "Applied colour to gradient pin #" + std::to_string(PinIndex + 1);
+    }
+    else if (StrokeTarget)
+    {
+        Target->StrokeTint = Tint;
+        if (Target->StrokeWidthPx <= 0.1f)
+        {
+            Target->StrokeWidthPx = 4.0f;
+        }
+        StatusNotice = "Applied colour to " + Target->Name + " stroke";
+    }
+    else
+    {
+        Target->FillEnabled = true;
+        Target->FillTint    = Tint;
+        if (auto* Albedo = FindChannelEntry(*Target, PatternStampSurfaceChannelKey::Albedo))
+        {
+            Albedo->Tint = Tint;
+        }
+        StatusNotice = "Applied colour to " + Target->Name;
+    }
+    BumpRevision();
+    return true;
+}
+
+std::string PatternStampWorkspaceSession::ExportDocumentToSvgString() const
+{
+    std::ostringstream Out;
+    Out << "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 512 512\" width=\""
+        << ResolutionPx << "\" height=\"" << ResolutionPx << "\">\n";
+    if (Document.GroundEnabled)
+    {
+        Out << "  <rect x=\"0\" y=\"0\" width=\"512\" height=\"512\" fill=\""
+            << FormatSvgHexRgb(Document.GroundTintA) << "\"/>\n";
+    }
+    for (const auto& L : Document.Layers)
+    {
+        if (!QueryEffectiveVisible(L.Identity) || L.Category == PatternStampLayerCategory::Folder)
+        {
+            continue;
+        }
+        PatternStampLayerSpec Copy = L;
+        SeedMotifCubicSubpathsIfEmpty(Copy);
+        if (Copy.CubicSubpaths.empty())
+        {
+            continue;
+        }
+        Out << "  <path d=\"";
+        for (const auto& Sub : Copy.CubicSubpaths)
+        {
+            if (Sub.Knots.empty()) continue;
+            Out << "M " << (Sub.Knots[0].AnchorX + Copy.CenterX) << " " << (Sub.Knots[0].AnchorY + Copy.CenterY) << " ";
+            const std::size_t SegCount = Sub.ClosedLoop ? Sub.Knots.size() : (Sub.Knots.size() - 1u);
+            for (std::size_t I = 0u; I < SegCount; ++I)
+            {
+                const auto& K0 = Sub.Knots[I];
+                const auto& K1 = Sub.Knots[(I + 1u) % Sub.Knots.size()];
+                Out << "C " << (K0.OutHandleX + Copy.CenterX) << " " << (K0.OutHandleY + Copy.CenterY) << " "
+                    << (K1.InHandleX + Copy.CenterX) << " " << (K1.InHandleY + Copy.CenterY) << " "
+                    << (K1.AnchorX + Copy.CenterX) << " " << (K1.AnchorY + Copy.CenterY) << " ";
+            }
+            if (Sub.ClosedLoop) Out << "Z ";
+        }
+        Out << "\" fill=\"" << (Copy.FillEnabled ? FormatSvgHexRgb(Copy.FillTint) : std::string("none")) << "\"";
+        if (Copy.EvenOddFillRule) Out << " fill-rule=\"evenodd\"";
+        if (Copy.StrokeWidthPx > 0.1f)
+        {
+            Out << " stroke=\"" << FormatSvgHexRgb(Copy.StrokeTint) << "\" stroke-width=\"" << Copy.StrokeWidthPx << "\"";
+        }
+        if (Copy.Opacity < 0.999f)
+        {
+            Out << " opacity=\"" << Copy.Opacity << "\"";
+        }
+        Out << "/>\n";
+    }
+    Out << "</svg>\n";
+    return Out.str();
+}
+
+Codecs::VectorSpaceDocumentModel PatternStampWorkspaceSession::BuildVectorSpaceModel() const
+{
+    Codecs::VectorSpaceDocumentModel Model {};
+    Model.DocumentTitle            = Document.DocumentName.empty() ? std::string("UntitledVector") : Document.DocumentName;
+    Model.DefaultStrokeWidthMm     = 0.35;
+    Model.ViewBoxAspectRatio       = 1.0;
+    Model.WorkspaceDocumentPresent = true;
+    Model.WorkspaceProfile         = (Mode == PatternStampWorkspaceMode::Stamp) ? std::string("Stamp") : std::string("Pattern");
+    Model.ResolutionPx             = ResolutionPx;
+    Model.GroundEnabled            = Document.GroundEnabled;
+    Model.GroundFillSource         = static_cast<uint8_t>(Document.GroundFillSource);
+    Model.GroundTintARgba          = { Document.GroundTintA.Red, Document.GroundTintA.Green, Document.GroundTintA.Blue, Document.GroundTintA.Alpha };
+    Model.GroundTintBRgba          = { Document.GroundTintB.Red, Document.GroundTintB.Green, Document.GroundTintB.Blue, Document.GroundTintB.Alpha };
+    Model.GroundAngleDeg           = Document.GroundAngleDeg;
+    Model.GhostTileBordersVisible  = Document.ShowGhostTileBorders;
+    Model.EmbeddedSvgXml           = ExportDocumentToSvgString();
+
+    for (const PatternStampLayerSpec& Src : Document.Layers)
+    {
+        Codecs::VectorWorkspaceLayerEntry Dst {};
+        Dst.Identity          = Src.Identity;
+        Dst.EnclosingFolderId = Src.EnclosingFolderId;
+        Dst.Title             = Src.Name;
+        Dst.Category          = static_cast<uint8_t>(Src.Category);
+        Dst.Visible           = Src.Visible;
+        Dst.Locked            = Src.Locked;
+        Dst.ExpandedDrawer    = Src.ExpandedInStack;
+        Dst.CollapsedFolder   = Src.CollapsedFolder;
+        Dst.BlendMode         = Src.BlendMode;
+        Dst.Opacity           = Src.Opacity;
+        Dst.MotifShape        = static_cast<uint8_t>(Src.MotifShape);
+        Dst.ClosedCurveLoop   = Src.ClosedCurveLoop;
+        Dst.CurveSmoothness   = Src.CurveSmoothness;
+        Dst.TextContent       = Src.TextContent;
+        Dst.FontSizePx        = Src.FontSizePx;
+        Dst.FontAssetPath     = Src.FontAssetPath;
+        Dst.FontFamilyLabel   = Src.FontFamilyLabel;
+        Dst.LetterSpacingEm   = Src.LetterSpacingEm;
+        Dst.SvgPathSnippet    = Src.SvgPathPayload;
+        Dst.FillEnabled       = Src.FillEnabled;
+        Dst.FillSource        = static_cast<uint8_t>(Src.FillSource);
+        Dst.FillTintRgba      = { Src.FillTint.Red, Src.FillTint.Green, Src.FillTint.Blue, Src.FillTint.Alpha };
+        Dst.FillTintBRgba     = { Src.FillTintB.Red, Src.FillTintB.Green, Src.FillTintB.Blue, Src.FillTintB.Alpha };
+        Dst.GradientAngleDeg  = Src.GradientAngleDeg;
+        for (const auto& Stop : Src.FillStops)
+        {
+            Dst.FillStops.push_back({ { Stop.Tint.Red, Stop.Tint.Green, Stop.Tint.Blue, Stop.Tint.Alpha }, Stop.Offset });
+        }
+        Dst.StrokeWidthPx   = Src.StrokeWidthPx;
+        Dst.StrokeSource    = static_cast<uint8_t>(Src.StrokeSource);
+        Dst.StrokeTintRgba  = { Src.StrokeTint.Red, Src.StrokeTint.Green, Src.StrokeTint.Blue, Src.StrokeTint.Alpha };
+        Dst.StrokeCap       = static_cast<uint8_t>(Src.StrokeCap);
+        Dst.StrokeJoin      = static_cast<uint8_t>(Src.StrokeJoin);
+        Dst.EvenOddFillRule = Src.EvenOddFillRule;
+        Dst.CenterX         = Src.CenterX;
+        Dst.CenterY         = Src.CenterY;
+        Dst.WidthPx         = Src.WidthPx;
+        Dst.HeightPx        = Src.HeightPx;
+        Dst.RotationDeg     = Src.RotationDeg;
+        Dst.FinishPreset    = static_cast<uint8_t>(Src.FinishPreset);
+
+        for (std::size_t P = 0u; P < 12u; ++P)
+        {
+            const auto& Pin = Src.PointFieldPins[P];
+            Dst.PointPins[P] = {
+                Pin.Active,
+                Pin.NormX,
+                Pin.NormY,
+                { Pin.Tint.Red, Pin.Tint.Green, Pin.Tint.Blue, Pin.Tint.Alpha },
+            };
+        }
+
+        for (const auto& Sub : Src.CubicSubpaths)
+        {
+            Codecs::VectorWorkspaceSubpathEntry SubOut {};
+            SubOut.ClosedLoop = Sub.ClosedLoop;
+            for (const auto& K : Sub.Knots)
+            {
+                SubOut.Knots.push_back({ K.AnchorX, K.AnchorY, K.InHandleX, K.InHandleY, K.OutHandleX, K.OutHandleY, K.Smooth });
+                Model.ControlPointKnots.push_back(static_cast<double>(Src.CenterX + K.AnchorX) / 512.0);
+                Model.ControlPointKnots.push_back(static_cast<double>(Src.CenterY + K.AnchorY) / 512.0);
+                Model.ControlPointKnots.push_back(static_cast<double>(K.OutHandleX - K.AnchorX) / 512.0);
+                Model.ControlPointKnots.push_back(static_cast<double>(K.OutHandleY - K.AnchorY) / 512.0);
+            }
+            if (!Sub.Knots.empty())
+            {
+                Model.Curves.push_back({ Src.Name, Sub.ClosedLoop, static_cast<uint32_t>(Sub.Knots.size()) });
+            }
+            Dst.Subpaths.push_back(std::move(SubOut));
+        }
+
+        for (const auto& Ch : Src.Channels)
+        {
+            Dst.Channels.push_back({
+                static_cast<uint32_t>(Ch.Key),
+                Ch.ScalarReading,
+                { Ch.Tint.Red, Ch.Tint.Green, Ch.Tint.Blue, Ch.Tint.Alpha },
+            });
+        }
+
+        Dst.Mask = {
+            Src.Mask.Enabled,
+            Src.Mask.Invert,
+            static_cast<uint8_t>(Src.Mask.Mode),
+            Src.Mask.Frequency,
+            Src.Mask.Threshold,
+            Src.Mask.Softness,
+            Src.Mask.Seed,
+        };
+
+        for (const auto& M : Src.Modifiers)
+        {
+            Dst.Modifiers.push_back({
+                static_cast<uint8_t>(M.Category),
+                M.Enabled,
+                M.NoiseAlgorithm,
+                M.ModulateTarget,
+                M.MinScale,
+                M.MaxScale,
+                M.Frequency,
+                { M.TargetTintB.Red, M.TargetTintB.Green, M.TargetTintB.Blue, M.TargetTintB.Alpha },
+                M.GridLayout,
+                M.Columns,
+                M.Rows,
+                M.RadialCount,
+                M.RadiusPx,
+                M.Rings,
+                M.MirrorAxis,
+                M.EchoCopies,
+                M.InsetStepPx,
+                { M.AltTint.Red, M.AltTint.Green, M.AltTint.Blue, M.AltTint.Alpha },
+                M.PosJitterPx,
+                M.RotJitterDeg,
+                M.Dropout,
+                M.WarpMode,
+                M.WarpAmplitude,
+                M.ChipWearAmount,
+            });
+        }
+
+        Model.WorkspaceLayers.push_back(std::move(Dst));
+    }
+    return Model;
+}
+
+bool PatternStampWorkspaceSession::LoadFromVectorSpaceModel(const Codecs::VectorSpaceDocumentModel& Model)
+{
+    if (!Model.WorkspaceDocumentPresent && Model.WorkspaceLayers.empty())
+    {
+        if (!Model.EmbeddedSvgXml.empty())
+        {
+            return ImportSvgIntoSession(Model.EmbeddedSvgXml, false, 256.0f, 256.0f, Model.DocumentTitle);
+        }
+        return false;
+    }
+
+    PushUndoSnapshot();
+    Mode = (Model.WorkspaceProfile == "Stamp")
+        ? PatternStampWorkspaceMode::Stamp
+        : PatternStampWorkspaceMode::Pattern;
+    ResolutionPx                    = std::clamp(Model.ResolutionPx, 64u, 4096u);
+    Document.DocumentName           = Model.DocumentTitle.empty() ? std::string("Imported Vector") : Model.DocumentTitle;
+    Document.GroundEnabled          = Model.GroundEnabled;
+    Document.GroundFillSource       = static_cast<PatternStampFillSourceMode>(Model.GroundFillSource);
+    Document.GroundTintA            = { Model.GroundTintARgba[0], Model.GroundTintARgba[1], Model.GroundTintARgba[2], Model.GroundTintARgba[3] };
+    Document.GroundTintB            = { Model.GroundTintBRgba[0], Model.GroundTintBRgba[1], Model.GroundTintBRgba[2], Model.GroundTintBRgba[3] };
+    Document.GroundAngleDeg         = Model.GroundAngleDeg;
+    Document.ShowGhostTileBorders   = Model.GhostTileBordersVisible;
+    Document.Layers.clear();
+
+    uint32_t MaxId = 1u;
+    for (const auto& Src : Model.WorkspaceLayers)
+    {
+        if (Document.Layers.size() >= MaxLayerLimit)
+        {
+            break;
+        }
+        PatternStampLayerSpec Dst {};
+        Dst.Identity          = std::max(1u, Src.Identity);
+        MaxId                 = std::max(MaxId, Dst.Identity);
+        Dst.EnclosingFolderId = Src.EnclosingFolderId;
+        Dst.Name              = Src.Title;
+        Dst.Category          = static_cast<PatternStampLayerCategory>(Src.Category);
+        Dst.Visible           = Src.Visible;
+        Dst.Locked            = Src.Locked;
+        Dst.ExpandedInStack   = Src.ExpandedDrawer;
+        Dst.CollapsedFolder   = Src.CollapsedFolder;
+        Dst.BlendMode         = Src.BlendMode;
+        Dst.Opacity           = Src.Opacity;
+        Dst.MotifShape        = static_cast<PatternStampMotifShape>(Src.MotifShape);
+        Dst.ClosedCurveLoop   = Src.ClosedCurveLoop;
+        Dst.CurveSmoothness   = Src.CurveSmoothness;
+        Dst.TextContent       = Src.TextContent;
+        Dst.FontSizePx        = Src.FontSizePx;
+        Dst.FontAssetPath     = Src.FontAssetPath;
+        Dst.FontFamilyLabel   = Src.FontFamilyLabel;
+        Dst.LetterSpacingEm   = Src.LetterSpacingEm;
+        Dst.SvgPathPayload    = Src.SvgPathSnippet;
+        Dst.FillEnabled       = Src.FillEnabled;
+        Dst.FillSource        = static_cast<PatternStampFillSourceMode>(Src.FillSource);
+        Dst.FillTint          = { Src.FillTintRgba[0], Src.FillTintRgba[1], Src.FillTintRgba[2], Src.FillTintRgba[3] };
+        Dst.FillTintB         = { Src.FillTintBRgba[0], Src.FillTintBRgba[1], Src.FillTintBRgba[2], Src.FillTintBRgba[3] };
+        Dst.GradientAngleDeg  = Src.GradientAngleDeg;
+        for (const auto& S : Src.FillStops)
+        {
+            Dst.FillStops.push_back({ { S.TintRgba[0], S.TintRgba[1], S.TintRgba[2], S.TintRgba[3] }, S.Position });
+        }
+        Dst.StrokeWidthPx   = Src.StrokeWidthPx;
+        Dst.StrokeSource    = static_cast<PatternStampFillSourceMode>(Src.StrokeSource);
+        Dst.StrokeTint      = { Src.StrokeTintRgba[0], Src.StrokeTintRgba[1], Src.StrokeTintRgba[2], Src.StrokeTintRgba[3] };
+        Dst.StrokeCap       = static_cast<GeometricRaster::VectorStrokeCapStyle>(Src.StrokeCap);
+        Dst.StrokeJoin      = static_cast<GeometricRaster::VectorStrokeJoinStyle>(Src.StrokeJoin);
+        Dst.EvenOddFillRule = Src.EvenOddFillRule;
+        Dst.CenterX         = Src.CenterX;
+        Dst.CenterY         = Src.CenterY;
+        Dst.WidthPx         = Src.WidthPx;
+        Dst.HeightPx        = Src.HeightPx;
+        Dst.RotationDeg     = Src.RotationDeg;
+        Dst.FinishPreset    = static_cast<PatternStampFinishPreset>(Src.FinishPreset);
+
+        for (std::size_t P = 0u; P < 12u; ++P)
+        {
+            const auto& Pin = Src.PointPins[P];
+            Dst.PointFieldPins[P] = {
+                Pin.NormX,
+                Pin.NormY,
+                1.0f,
+                { Pin.TintRgba[0], Pin.TintRgba[1], Pin.TintRgba[2], Pin.TintRgba[3] },
+                Pin.Active,
+            };
+        }
+        for (const auto& Sub : Src.Subpaths)
+        {
+            GeometricRaster::VectorCubicSubpath SubOut {};
+            SubOut.ClosedLoop = Sub.ClosedLoop;
+            for (const auto& K : Sub.Knots)
+            {
+                SubOut.Knots.push_back({ K.AnchorX, K.AnchorY, K.InHandleX, K.InHandleY, K.OutHandleX, K.OutHandleY, K.Smooth });
+            }
+            Dst.CubicSubpaths.push_back(std::move(SubOut));
+        }
+        for (const auto& Ch : Src.Channels)
+        {
+            Dst.Channels.push_back({
+                static_cast<PatternStampSurfaceChannelKey>(Ch.ChannelKey),
+                Ch.ScalarWeight,
+                { Ch.TintRgba[0], Ch.TintRgba[1], Ch.TintRgba[2], Ch.TintRgba[3] },
+            });
+        }
+        Dst.Mask = {
+            Src.Mask.Enabled,
+            Src.Mask.Invert,
+            static_cast<PatternStampMaskMode>(Src.Mask.Mode),
+            Src.Mask.Frequency,
+            Src.Mask.Threshold,
+            Src.Mask.Softness,
+            Src.Mask.Seed,
+        };
+        for (const auto& M : Src.Modifiers)
+        {
+            PatternStampModifierSpec ModOut {};
+            ModOut.Category       = static_cast<PatternStampModifierCategory>(M.Category);
+            ModOut.Enabled        = M.Enabled;
+            ModOut.NoiseAlgorithm = M.NoiseAlgorithm;
+            ModOut.ModulateTarget = M.ModulateTarget;
+            ModOut.MinScale       = M.MinScale;
+            ModOut.MaxScale       = M.MaxScale;
+            ModOut.Frequency      = M.Frequency;
+            ModOut.TargetTintB    = { M.TargetTintBRgba[0], M.TargetTintBRgba[1], M.TargetTintBRgba[2], M.TargetTintBRgba[3] };
+            ModOut.GridLayout     = M.GridLayout;
+            ModOut.Columns        = M.Columns;
+            ModOut.Rows           = M.Rows;
+            ModOut.RadialCount    = M.RadialCount;
+            ModOut.RadiusPx       = M.RadiusPx;
+            ModOut.Rings          = M.Rings;
+            ModOut.MirrorAxis     = M.MirrorAxis;
+            ModOut.EchoCopies     = M.EchoCopies;
+            ModOut.InsetStepPx    = M.InsetStepPx;
+            ModOut.AltTint        = { M.AltTintRgba[0], M.AltTintRgba[1], M.AltTintRgba[2], M.AltTintRgba[3] };
+            ModOut.PosJitterPx    = M.PosJitterPx;
+            ModOut.RotJitterDeg   = M.RotJitterDeg;
+            ModOut.Dropout        = M.Dropout;
+            ModOut.WarpMode       = M.WarpMode;
+            ModOut.WarpAmplitude  = M.WarpAmplitude;
+            ModOut.ChipWearAmount = M.ChipWearAmount;
+            Dst.Modifiers.push_back(ModOut);
+        }
+        SeedMotifCubicSubpathsIfEmpty(Dst);
+        Document.Layers.push_back(std::move(Dst));
+    }
+
+    Document.NextIdentitySeed = MaxId + 1u;
+    Document.SelectedLayerId  = Document.Layers.empty() ? 0u : Document.Layers.back().Identity;
+    StatusNotice = "Loaded .VectorSpace document: " + Document.DocumentName;
+    BumpRevision();
+    RecomputeSummaryMetrics();
+    return !Document.Layers.empty();
 }
 
 void PatternStampWorkspaceSession::RecomputeSummaryMetrics() noexcept
