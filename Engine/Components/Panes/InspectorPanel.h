@@ -59,6 +59,7 @@ class InspectorPanel
 {
 public:
     InspectorPanel() noexcept = default;
+    ~InspectorPanel() noexcept;
 
     void AttachOutliner(OutlinerPanel* SourceOutliner) noexcept;
     void ConfigureExtensionSectionCallback(InspectorExtensionRenderCallback Callback);

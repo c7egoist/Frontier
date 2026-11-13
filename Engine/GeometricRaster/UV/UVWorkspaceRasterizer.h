@@ -14,6 +14,7 @@
 #include "Engine/GeometricRaster/Compute/TimelineTransferRegister.h"
 #include "Engine/GeometricRaster/Compute/ComputeDispatchEncoder.h"
 #include "Engine/GeometricRaster/Picking/ViewportPickQuery.h"
+#include "Engine/GeometrySpace/Network/FacePartitionRegister.h"
 #include "Engine/GeometrySpace/Network/PolygonNetwork.h"
 #include "Engine/Mathematics/AxisCoordinates.h"
 #include "Engine/Mathematics/CoordinateSpace.h"
@@ -75,14 +76,18 @@ struct CameraOrbitRig3D
 
 struct Viewport3DRenderOptions
 {
-    CameraOrbitRig3D  Camera              {};
-    SurfaceDisplayMode  DisplayMode         = SurfaceDisplayMode::SurfaceMaterial;
-    bool                WireframeEnabled    = true;
-    bool                SeamOverlayEnabled  = false; // Default OFF per workspace policy!
-    bool                GroundGridEnabled   = true;
-    bool                RenderGizmo         = true;
-    uint16_t            ActiveLayerOrdinal  = 0u;
-    uint32_t            HoveredFaceIndex    = GeometrySpace::InvalidNetworkIndex;
+    CameraOrbitRig3D  Camera                 {};
+    SurfaceDisplayMode  DisplayMode            = SurfaceDisplayMode::SurfaceMaterial;
+    bool                WireframeEnabled       = true;
+    bool                SeamOverlayEnabled     = false; // Default OFF per workspace policy!
+    bool                GroundGridEnabled      = true;
+    bool                RenderGizmo            = true;
+    uint16_t            ActiveLayerOrdinal     = 0u;
+    uint32_t            HoveredFaceIndex       = GeometrySpace::InvalidNetworkIndex;
+    uint32_t            HoveredEdgeIndex       = GeometrySpace::InvalidNetworkIndex;
+    uint32_t            HoveredOppositeEdgeIdx = GeometrySpace::InvalidNetworkIndex;
+    uint32_t            HoveredVertexIndex     = GeometrySpace::InvalidNetworkIndex;
+    uint32_t            SelectionModeOrdinal   = 4u; // Matches UVSelectionMode::Layers default
 };
 
 enum class UVBackdropPreset : uint8_t
@@ -98,16 +103,20 @@ enum class UVBackdropPreset : uint8_t
 
 struct Canvas2DRenderOptions
 {
-    Mathematics::UVAxes VisibleMinUV        { -0.06f, -0.06f };
-    Mathematics::UVAxes VisibleMaxUV        { 2.06f, 1.06f };
-    UVCanvasDisplayMode DisplayMode         = UVCanvasDisplayMode::PriorityLayerFill;
-    UVBackdropPreset    BackdropPreset      = UVBackdropPreset::None;
-    bool                CheckerEnabled      = true;
-    bool                SeamOverlayEnabled  = false; // Default OFF per workspace policy!
-    bool                PinOverlayEnabled   = true;  // GPU pin beacons for EnablePinLock corners
-    bool                RenderGizmo         = true;
-    uint16_t            ActiveLayerOrdinal  = 0u;
-    uint32_t            HoveredFaceIndex    = GeometrySpace::InvalidNetworkIndex;
+    Mathematics::UVAxes VisibleMinUV           { -0.06f, -0.06f };
+    Mathematics::UVAxes VisibleMaxUV           { 2.06f, 1.06f };
+    UVCanvasDisplayMode DisplayMode            = UVCanvasDisplayMode::PriorityLayerFill;
+    UVBackdropPreset    BackdropPreset         = UVBackdropPreset::None;
+    bool                CheckerEnabled         = true;
+    bool                SeamOverlayEnabled     = false; // Default OFF per workspace policy!
+    bool                PinOverlayEnabled      = true;  // GPU pin beacons for EnablePinLock corners
+    bool                RenderGizmo            = true;
+    uint16_t            ActiveLayerOrdinal     = 0u;
+    uint32_t            HoveredFaceIndex       = GeometrySpace::InvalidNetworkIndex;
+    uint32_t            HoveredEdgeIndex       = GeometrySpace::InvalidNetworkIndex;
+    uint32_t            HoveredOppositeEdgeIdx = GeometrySpace::InvalidNetworkIndex;
+    uint32_t            HoveredVertexIndex     = GeometrySpace::InvalidNetworkIndex;
+    uint32_t            SelectionModeOrdinal   = 4u;
 };
 
 struct GPUUVDistortionSummary
@@ -137,12 +146,20 @@ public:
         const GeometrySpace::PolygonNetwork& Network,
         uint32_t                             InstanceSlot = 1u);
 
+    void ConfigureLayerSwatches(std::span<const GeometrySpace::PriorityAllocationLayer> Layers) noexcept;
+    [[nodiscard]] uint32_t Query3DWidthPx() const noexcept { return Target3D.WidthPx; }
+    [[nodiscard]] uint32_t Query3DHeightPx() const noexcept { return Target3D.HeightPx; }
+    [[nodiscard]] uint32_t Query2DWidthPx() const noexcept { return Target2D.WidthPx; }
+    [[nodiscard]] uint32_t Query2DHeightPx() const noexcept { return Target2D.HeightPx; }
+
     [[nodiscard]] bool DispatchGPUSelection(
         GPUSelectionOperation Operation,
         uint32_t              TargetMask  = 0u,
         bool                  AdditiveMask = false);
 
     void UploadSelectionBitmaskWords(std::span<const uint32_t> PackedWords);
+    void UploadEdgeSelectionBitmaskWords(std::span<const uint32_t> PackedWords);
+    void UploadVertexSelectionBitmaskWords(std::span<const uint32_t> PackedWords);
     [[nodiscard]] std::vector<uint32_t> ReadbackSelectionBitmaskWords();
 
     [[nodiscard]] GPUUVDistortionSummary EvaluateUVDistortionInspection(
@@ -242,9 +259,11 @@ private:
     VkSampler              MatCapAtlasSampler               = VK_NULL_HANDLE;
     DeviceBufferResource    Gizmo3DVertexBuffer     {};
     DeviceBufferResource    Gizmo2DVertexBuffer     {};
-    DeviceBufferResource    FacePackedAttrBuffer    {};
-    DeviceBufferResource    SelectionBitmaskBuffer  {};
-    DeviceBufferResource    Viewport3DUniformBuffer {};
+    DeviceBufferResource    FacePackedAttrBuffer         {};
+    DeviceBufferResource    SelectionBitmaskBuffer       {};
+    DeviceBufferResource    EdgeSelectionBitmaskBuffer   {};
+    DeviceBufferResource    VertexSelectionBitmaskBuffer {};
+    DeviceBufferResource    Viewport3DUniformBuffer      {};
     DeviceBufferResource    Canvas2DUniformBuffer   {};
     DeviceBufferResource    Gizmo3DUniformBuffer    {};
     DeviceBufferResource    Gizmo2DUniformBuffer    {};
@@ -255,10 +274,30 @@ private:
     DeviceBufferResource    StretchCountersBuffer   {};
 
     uint32_t                UploadedFaceCount       = 0u;
+    uint32_t                UploadedEdgeCount       = 0u;
+    uint32_t                UploadedVertexCount     = 0u;
     uint32_t                SurfaceVertexCount      = 0u;
     uint32_t                GroundGridVertexCount   = 6u;
     uint32_t                UVCanvasVertexCount     = 0u;
     std::vector<float>      CachedFaceStretch       {};
+    std::array<std::array<float, 4u>, 16u> LayerSwatches {{
+        { 0.420f, 0.450f, 0.510f, 1.0f },
+        { 0.937f, 0.957f, 0.812f, 1.0f }, // #EFF4CF Ivory
+        { 0.620f, 0.812f, 1.000f, 1.0f }, // #9ECFFF Sky
+        { 0.608f, 0.855f, 0.773f, 1.0f }, // #9BDAC5 Mint
+        { 0.910f, 0.760f, 0.478f, 1.0f }, // #E8C27A Amber
+        { 0.420f, 0.450f, 0.510f, 1.0f },
+        { 0.420f, 0.450f, 0.510f, 1.0f },
+        { 0.420f, 0.450f, 0.510f, 1.0f },
+        { 0.420f, 0.450f, 0.510f, 1.0f },
+        { 0.420f, 0.450f, 0.510f, 1.0f },
+        { 0.420f, 0.450f, 0.510f, 1.0f },
+        { 0.420f, 0.450f, 0.510f, 1.0f },
+        { 0.420f, 0.450f, 0.510f, 1.0f },
+        { 0.420f, 0.450f, 0.510f, 1.0f },
+        { 0.420f, 0.450f, 0.510f, 1.0f },
+        { 0.420f, 0.450f, 0.510f, 1.0f },
+    }};
 };
 
 } // namespace Frontier::GeometricRaster

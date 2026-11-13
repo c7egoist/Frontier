@@ -9,6 +9,7 @@
 //                                                        INCLUDES
 //------------------------------------------------------------------------------------------------------------------------
 
+#include "Engine/Components/Controls/CapsuleButton.h"
 #include "Engine/Components/Panes/OutlinerPanel.h"
 #include "Engine/SimulationSpace/ForceFields/ForceFieldDescriptors.h"
 
@@ -113,6 +114,8 @@ using ViewportPaneInteractionCallback = std::function<void(uint32_t PaneIndex, R
 class ViewportPanel
 {
 public:
+    using NavigationCallback = std::function<void(ViewportNavigationDirective)>;
+
     ViewportPanel() noexcept;
     ~ViewportPanel() noexcept;
 
@@ -120,6 +123,7 @@ public:
     ViewportPanel& operator=(const ViewportPanel&) = delete;
 
     void AttachOutliner(OutlinerPanel* SourceOutliner) noexcept;
+    void AssignNavigationCallback(NavigationCallback Callback);
     void AssignCanvasRasterImage(const uint8_t* RgbaPixels, uint32_t WidthPx, uint32_t HeightPx);
     void ClearCanvasRasterImage() noexcept;
     void ConfigureConstructPresets(std::vector<ViewportConstructPresetEntry> Presets);
@@ -162,6 +166,8 @@ public:
     [[nodiscard]] ViewportProjectionPreset       QueryPrimaryProjection() const noexcept;
     [[nodiscard]] ViewportProjectionPreset       QuerySecondaryProjection() const noexcept;
     [[nodiscard]] uint32_t                       QueryActivePaneIndex() const noexcept;
+    [[nodiscard]] float                          QueryViewportZoomScale() const noexcept;
+    [[nodiscard]] Rectangle2D                    QueryLastCanvasPaneBounds() const noexcept;
     [[nodiscard]] const ViewportDisplaySettings&                           QueryDisplaySettings() const noexcept;
     [[nodiscard]] ViewportDisplaySettings&                                 AccessDisplaySettings() noexcept;
     [[nodiscard]] bool                                                     QueryForceOverlayToolsVisible() const noexcept;
@@ -241,6 +247,9 @@ private:
     std::string                     ProbeReadoutText         {};                                       // [-]   - Optional bottom anemometer strip
     SimulationSpace::ForceFields::ForceOverlaySettings ForceOverlay{};                                 // [-]   - Editor Force Viz overlay parameters
     ImTextureData                   CanvasRasterTexture      {};                                       // [-]   - Optional live GTX/RTX viewport texture
+    float                      ViewportZoomScale       = 1.0f;                                    // [x]   - Interactive canvas zoom multiplier
+    Rectangle2D                LastCanvasPaneBounds    {};                                        // [px]  - Last rendered active sub-viewport rect
+    NavigationCallback         OnNavigationDirective   {};                                        // [-]   - Optional callback when + / - / Fit triggers
 };
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -250,6 +259,21 @@ private:
 inline void ViewportPanel::AttachOutliner(OutlinerPanel* SourceOutliner) noexcept
 {
     AttachedOutliner = SourceOutliner;
+}
+
+inline void ViewportPanel::AssignNavigationCallback(NavigationCallback Callback)
+{
+    OnNavigationDirective = std::move(Callback);
+}
+
+inline float ViewportPanel::QueryViewportZoomScale() const noexcept
+{
+    return ViewportZoomScale;
+}
+
+inline Rectangle2D ViewportPanel::QueryLastCanvasPaneBounds() const noexcept
+{
+    return LastCanvasPaneBounds;
 }
 
 inline ViewportExecutionMode ViewportPanel::QueryExecutionMode() const noexcept
