@@ -651,12 +651,9 @@ void EditorLifecycle::PresentPrimaryEditorImGui(double Δt)
     ContentBrowserDrawer.AttachThemeRepository(&ControlCentre.QueryThemeRepository());
     DockContainer.PresentWindowImGuiPanes(Components::HostWindowToken{ 0u });
 
-    if (MountedUVHost == nullptr)
+    if (WorkspaceSessionPanes* ActivePanes = Workspaces.AccessActivePanes())
     {
-        if (WorkspaceSessionPanes* ActivePanes = Workspaces.AccessActivePanes())
-        {
-            ContentBrowserDrawer.SynchronizeWorkspaceTargets(&ActivePanes->Outliner, &ActivePanes->Inspector);
-        }
+        ContentBrowserDrawer.SynchronizeWorkspaceTargets(&ActivePanes->Outliner, &ActivePanes->Inspector);
     }
 
     const Components::HostWindowReading HostReading = DockContainer.InspectHostWindow(Components::HostWindowToken{ 0u });
